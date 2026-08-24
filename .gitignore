@@ -1,0 +1,15 @@
+.env
+.tokens/
+__pycache__/
+*.pyc
+
+# lark-cli config + event bus logs (chua access_key, ticket, message_id)
+.lark-cli/
+.lark-cli-bot/
+*.log
+*.log.[0-9]
+*.pid
+*.lock
+
+# state cua agent (history chat, ten nhan su, reminders)
+.tokens/
