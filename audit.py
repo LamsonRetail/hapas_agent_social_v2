@@ -74,60 +74,6 @@ def _cat(s, n: int) -> str:
     return s if len(s) <= n else s[:n] + f"…(+{len(s) - n})"
 
 
-# Đuôi file KẾT QUẢ mà tool có thể xuất ra đĩa. Cố ý hẹp: không bắt .py/.log
-# cho khỏi lẫn đường dẫn code vào bản ghi sản phẩm.
-_DUOI = r"(?:xlsx|xls|csv|json|md|pdf|docx|zip)"
-_DAU = r"(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|/)"
-# Bản KHÔNG dấu cách: quét trong văn bản tự do, nên không được ăn lan sang chữ
-# xung quanh.
-_TEP = re.compile(_DAU + r"[^\s\"'<>|*?]{2,240}?\." + _DUOI + r"\b", re.I)
-# Bản CÓ dấu cách: chỉ nhận khi đường dẫn nằm trong dấu nháy — lúc đó biên rõ
-# ràng nên cho phép khoảng trắng. Cần vì tên file tiếng Việt và thư mục Windows
-# rất hay có dấu cách ("ket qua thang 9.xlsx"), mà bản trên thì trượt hết.
-_TEP_NHAY = re.compile(r"[\"'](" + _DAU + r"[^\"'<>|*?]{2,240}?\." + _DUOI + r")[\"']", re.I)
-
-
-def _tep_ra(*phan) -> list[str]:
-    """Bắt ĐƯỜNG DẪN FILE kết quả, không chỉ URL.
-
-    Vì sao cần: `_links()` chỉ nhận `http(s)://`. Tool xuất ra Excel trên đĩa
-    (`D:\\Count_view\\exports\\ket_qua.xlsx`) thì bản ghi audit hiện ra **0 link**
-    — mắt xích cuối của cả luồng biến mất đúng chỗ có sản phẩm. Đo thật
-    08/09/2026 với kết quả `{"file": "D:\\...\\ket_qua.xlsx"}`: `_links()` trả [].
-
-    Đây là bộ dò BEST-EFFORT cho tool mà ta không sửa được. Tool của mình thì
-    nên gọi thẳng `ghi_tep()` — khai báo tường minh luôn đáng tin hơn dò regex.
-    """
-    ra: list[str] = []
-    for x in phan:
-        s = str(x or "").replace("\\\\", "\\")      # JSON đã escape dấu \
-        ra += _TEP_NHAY.findall(s)
-        ra += _TEP.findall(s)
-    # bỏ những mục là hậu tố của mục khác (bản không-dấu-cách hay cắt mất ổ đĩa)
-    ra = list(dict.fromkeys(ra))
-    return [p for p in ra if not any(p != q and q.endswith(p) for q in ra)][:10]
-
-
-def ghi_tep(*duong_dan: str) -> None:
-    """Tool tự KHAI BÁO file kết quả nó vừa tạo.
-
-    Dùng cái này thay vì trông vào `_tep_ra()` khi bạn viết/ sửa được tool: khai
-    báo tường minh thì không phụ thuộc việc đường dẫn có xuất hiện trong chuỗi
-    kết quả hay không, và không sợ dấu cách/ký tự lạ trong tên file.
-    """
-    if not _BAT:
-        return
-    tid = getattr(_cuc_bo, "turn_id", "")
-    with _khoa_luot:
-        luot = _dang_chay.get(tid)
-        if luot is None:
-            return
-        luot.setdefault("tep_khai_bao", [])
-        for p in duong_dan:
-            if p and str(p) not in luot["tep_khai_bao"]:
-                luot["tep_khai_bao"].append(str(p))
-
-
 def _links(*phan) -> list[str]:
     ra: list[str] = []
     for x in phan:
@@ -163,7 +109,6 @@ _COT = [
     ("Token vào", 2), ("Token ra", 2), ("Token tổng", 2),
     ("Lượt gọi API", 2), ("Chi phí USD", 2),
     ("Thời gian (giây)", 2), ("Trạng thái", 1), ("Lỗi", 1), ("Turn ID", 1),
-    ("Tệp xuất ra", 1), ("Tệp trên Lark", 1),
 ]
 
 
@@ -270,16 +215,16 @@ def _dam_bao_cot(cfg: dict) -> None:
     """Bổ sung cột còn thiếu vào bảng đã tồn tại.
 
     Vì sao cần: bảng được tạo MỘT LẦN ở lượt đầu. Sau này thêm cột vào `_COT`
-    (như "Tệp xuất ra" thêm ngày 08/09) thì bảng cũ vẫn thiếu, và đẩy dữ liệu
-    vào field không tồn tại là LỖI — cả dòng audit mất. Chạy một lần mỗi tiến
-    trình, so tên cột rồi thêm cái nào chưa có.
+    thì bảng cũ vẫn thiếu cột đó, và đẩy dữ liệu vào field không tồn tại là LỖI
+    — cả dòng audit mất. Chạy một lần mỗi tiến trình, so tên cột rồi thêm cái
+    nào chưa có.
     """
     global _da_kiem_cot
     # KHOÁ, và chỉ đánh dấu "đã kiểm" khi THÊM XONG. Bản đầu đặt cờ ngay lúc vào
     # hàm nên hai luồng `_day()` chạy song song (một từ thread nền của lượt vừa
     # xong, một từ `dong_bo_lai()`) thì luồng thứ hai bỏ qua kiểm cột rồi POST
     # trước khi cột kịp tạo -> `FieldNameNotFound`, MẤT NGUYÊN dòng audit. Đã
-    # gặp thật 08/09/2026 lúc thêm hai cột "Tệp".
+    # gặp thật 08/09/2026 lúc thêm cột mới vào bảng đã có.
     with _khoa_cot:
         if _da_kiem_cot:
             return
@@ -298,46 +243,6 @@ def _dam_bao_cot(cfg: dict) -> None:
             _da_kiem_cot = True
         except Exception as e:  # noqa: BLE001
             print(f"[audit] kiem cot Base loi (bo qua): {type(e).__name__}: {e}")
-
-
-def _link_tep(file_token: str) -> str:
-    """Link mở được của file trên Drive.
-
-    Đo thật 08/09/2026: `drive/v1/metas/batch_query` trả `"url": ""` cho FILE
-    THÔ (chỉ doc/sheet mới có url). Nên phải tự ghép — nhưng ghép từ đâu mới
-    đúng là điểm quan trọng: `config.base_url` là endpoint API
-    (`open.larksuite.com`), bỏ chữ "open." đi thì ra `larksuite.com` THIẾU
-    subdomain tenant và link chết.
-
-    Nguồn tin cậy duy nhất đang có: URL của Base audit — chính người dùng mở
-    được nó, nên host trong đó chắc chắn đúng tenant. Lấy host từ đấy.
-    Không có Base thì trả rỗng, KHÔNG ghép bừa: link sai trong bản ghi audit
-    tệ hơn không có link, vì nhìn như thật mà bấm vào 404.
-    """
-    if not file_token:
-        return ""
-    goc = (_doc_cau_hinh() or {}).get("url") or ""
-    m = re.match(r"(https?://[^/]+)", goc)
-    return f"{m.group(1)}/file/{file_token}" if m else ""
-
-
-def _tai_tep_len(tep: list[str]) -> list[str]:
-    """Đưa file kết quả lên Lark Drive, trả danh sách link.
-
-    Chạy trong thread nền của `_day()` nên không làm chậm câu trả lời. File
-    không còn trên đĩa (đã bị xoá/di chuyển) thì bỏ qua và ghi nhật ký — bản
-    ghi vẫn giữ ĐƯỜNG DẪN gốc ở cột "Tệp xuất ra" để còn dấu vết.
-    """
-    ra: list[str] = []
-    for p in tep[:3]:                      # nhiều hơn 3 file/lượt là bất thường
-        try:
-            kq = lark.upload_file(p)
-            u = kq.get("url") or _link_tep(kq.get("file_token") or "")
-            if u:
-                ra.append(u)
-        except Exception as e:  # noqa: BLE001
-            print(f"[audit] tai tep len Lark that bai ({p}): {type(e).__name__}: {e}")
-    return ra
 
 
 def _day(rec: dict) -> None:
@@ -365,8 +270,6 @@ def _day(rec: dict) -> None:
             "Trạng thái": rec.get("trang_thai") or "",
             "Lỗi": rec.get("loi") or "",
             "Turn ID": rec.get("turn_id") or "",
-            "Tệp xuất ra": "\n".join(rec.get("tep") or []),
-            "Tệp trên Lark": "\n".join(_tai_tep_len(rec.get("tep") or [])),
         }
         lark.call("POST", f"/open-apis/bitable/v1/apps/{cfg['app_token']}"
                           f"/tables/{cfg['table_id']}/records", body={"fields": f})
@@ -413,7 +316,6 @@ def ghi_tool(ten: str, args, ket_qua, giay: float, loi: str = "") -> None:
             "args": _cat(json.dumps(args, ensure_ascii=False, default=str)
                          if not isinstance(args, str) else args, _TOI_DA_ARG),
             "link": _links(ket_qua),
-            "tep": _tep_ra(ket_qua),
             "co_ket_qua": bool(ket_qua),
         })
 
@@ -435,12 +337,6 @@ def ket_thuc(turn_id: str, tra_loi: str, agent=None, loi: str = "",
     for t in tools:
         link += t.get("link") or []
     link += _links(tra_loi)
-    # Ưu tiên file do tool KHAI BÁO, rồi mới tới file dò được bằng regex.
-    tep: list[str] = list(luot.get("tep_khai_bao") or [])
-    for t in tools:
-        tep += t.get("tep") or []
-    tep += _tep_ra(tra_loi)
-    tep = list(dict.fromkeys(tep))[:10]
 
     rec = {
         "loai": "turn", "turn_id": luot["turn_id"], "ts": luot["ts"],
@@ -451,7 +347,6 @@ def ket_thuc(turn_id: str, tra_loi: str, agent=None, loi: str = "",
         "tool_tom_tat": "; ".join(
             f"{t['ten']}({t['giay']}s{'' if not t['loi'] else ' LỖI'})" for t in tools),
         "link": list(dict.fromkeys(link))[:20],
-        "tep": tep,
         "token_vao": g("session_prompt_tokens"),
         "token_ra": g("session_completion_tokens"),
         "token_tong": g("session_total_tokens"),
