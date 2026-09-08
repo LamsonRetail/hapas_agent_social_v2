@@ -50,6 +50,12 @@ import web_tool  # noqa: E402,F401  (registers `web_scrape`: website công khai 
 import crawl_tool  # noqa: E402,F401  (registers `web_crawl`: cào sản phẩm -> Lark Sheet)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
+import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian)
+
+# Bọc handler của MỌI tool để tự ghi audit. Phải gọi SAU khi tất cả tool đã
+# import xong (các import ở trên), và TRƯỚC khi AIAgent đầu tiên được dựng —
+# agent chụp lại registry lúc khởi tạo.
+audit.boc_registry()
 
 
 # ───────────────────────── persona (character card) ─────────────────────────
@@ -267,10 +273,25 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
         if m.get("role") in ("user", "assistant") and m.get("text")
     ]
 
+    # AUDIT: mở một lượt trước khi gọi model. Mọi tool được gọi trong lượt này
+    # tự ghi vào đó (audit.boc_registry đã bọc handler của cả 10 tool).
+    turn_id = audit.bat_dau(chat_id, sender_open_id, user_text)
+
     agent = _resolve_agent(sender_open_id)
-    out = agent.run_conversation(user_text, conversation_history=history_msgs)
+    try:
+        out = agent.run_conversation(user_text, conversation_history=history_msgs)
+    except Exception as e:
+        # Đóng lượt audit TRƯỚC khi ném tiếp, không thì lượt lỗi biến mất khỏi
+        # bản ghi — mà đó đúng là lượt cần soi nhất.
+        audit.ket_thuc(turn_id, "", agent, loi=f"{type(e).__name__}: {e}",
+                       trang_thai="lỗi")
+        raise
     text = (out.get("final_response") if isinstance(out, dict) else str(out)) or ""
     text = _strip_markdown(text) or "(Bot chưa tạo được câu trả lời)"
+
+    d = out if isinstance(out, dict) else {}
+    audit.ket_thuc(turn_id, text, agent, loi=str(d.get("error") or ""),
+                   trang_thai="ok" if not d.get("failed") else "lỗi")
 
     memory_store.append_turns(
         chat_id,

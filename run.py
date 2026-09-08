@@ -192,6 +192,20 @@ def main() -> None:
     else:
         print("  Badge:      ⛔ tắt (đặt AGENT_TYPING_BADGE=1 trong .env để bật)")
 
+    # Audit: in link Base + đẩy bù những dòng mất khi lần trước tắt giữa lượt.
+    # Đẩy bù ở đây (lúc khởi động) chứ không ở luồng trả lời — không được để
+    # việc dọn dẹp làm chậm câu trả lời cho người dùng.
+    try:
+        import audit
+
+        bu = audit.dong_bo_lai()
+        link = audit.link_base()
+        print(f"  Audit:      ✅ .audit/*.jsonl"
+              + (f" · Base: {link}" if link else " · Base sẽ tạo ở lượt đầu")
+              + (f" · đã đẩy bù {bu} dòng" if bu else ""))
+    except Exception as e:  # noqa: BLE001
+        print(f"  Audit:      ⚠ {type(e).__name__}: {e}")
+
     # background reminder ticker (fires scheduled reminders as the bot)
     try:
         import scheduler

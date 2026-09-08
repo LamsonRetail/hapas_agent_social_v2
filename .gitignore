@@ -23,3 +23,6 @@ exports/
 .probe/
 # anh QR dang nhap (artefact xac thuc, khong commit)
 lark-doc-auth-qr.png
+
+# ban ghi audit (du lieu noi bo, khong commit)
+.audit/

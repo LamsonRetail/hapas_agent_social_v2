@@ -762,3 +762,74 @@ Facebook.**
 hỏng, **và** đo lại thấy rẻ hơn Apify ở nguồn cụ thể nào đó. Chưa đủ ba thứ đó
 thì đừng lắp lại.
 
+---
+
+## 13. Audit toàn luồng (`audit.py`) — thêm 08/09/2026
+
+Suốt đợt sửa 06–08/09, mọi lỗi nặng đều **không crash, không báo lỗi, chỉ trả
+sai số liệu** — và cách duy nhất tìm ra là đọc log rồi chạy lại tay từng bước.
+Không có bản ghi nào cho biết một câu hỏi đã đi qua tool nào, tốn bao nhiêu
+token, trả về link gì. `audit.py` tạo ra bản ghi đó.
+
+**Một dòng = một câu hỏi**, đọc là thấy cả luồng: ai hỏi gì → gọi tool nào, mỗi
+tool mất bao lâu, ok hay lỗi → trả về link nào → bao nhiêu token → hết bao lâu.
+
+### Hai nơi lưu, cố ý
+
+| | Nơi | Cách ghi | Vai trò |
+|---|---|---|---|
+| 1 | `.audit/audit-YYYY-MM.jsonl` | ĐỒNG BỘ | **Nguồn sự thật.** Không phụ thuộc mạng/Lark, luôn thành công |
+| 2 | Lark Base | thread NỀN, fail-open | Để xem/lọc/thống kê. Lark hỏng chỉ mất phần xem |
+
+Base tự tạo ở lượt đầu (bảng "Luồng hỏi–đáp", 17 cột) và tự cấp quyền cho người
+hỏi đầu tiên — bot là chủ file nên không cấp thì người dùng mở không được.
+Token/table_id lưu ở `.tokens/audit_base.json`. Link in ở banner khởi động.
+
+### Token lấy ở đâu
+
+`brain._resolve_agent()` tạo AIAgent **mới cho từng tin nhắn**, nên
+`agent.session_prompt_tokens` / `session_completion_tokens` /
+`session_total_tokens` (khởi tạo 0 ở `agent_init.py:2632`, cộng ở
+`codex_runtime.py:134` cho provider `openai-codex`) chính là số của **đúng lượt
+đó** — không cần trừ mốc trước/sau.
+
+> `Chi phí USD` luôn = 0 và **đó là đúng**: Codex tính theo hạn mức thuê bao
+> ChatGPT chứ không theo token. Con số cần theo dõi là **token**, không phải tiền.
+
+Đo thật một lượt (`"đọc nhanh trang hapas.vn xem họ bán gì"`):
+`32.443 token vào / 233 ra / 32.676 tổng`, 2 lượt gọi API, 1 tool
+`web_scrape(0.55s)`, 17,62s, link `https://hapas.vn`.
+
+### Móc vào đâu
+
+`audit.boc_registry()` bọc `registry._tools[*].handler` — **một chỗ duy nhất bắt
+được cả 10 tool**, không phải đi thêm code vào từng file tool (và nhớ thêm cho
+tool mới). Gọi ở cuối `brain.py`, SAU khi mọi tool đã import và TRƯỚC khi AIAgent
+đầu tiên dựng (agent chụp registry lúc khởi tạo). Đã bọc 84 tool, **bỏ qua 14
+tool async** — bọc đồng bộ một coroutine sẽ ghi thời gian 0 và không có kết quả,
+tức audit sai; thà không audit còn hơn audit sai.
+
+Chữ ký handler là **cố định** `handler(args, **kwargs)` — xem
+`tools/registry.py:753`. Đoán sai chữ ký ở đây là vỡ cả 10 tool.
+
+### Ba nguyên tắc, đừng bỏ khi sửa
+
+1. **Không bao giờ làm chết lượt trả lời.** Mọi thứ bọc try/except. Audit phục
+   vụ việc chính, không được thành rủi ro cho nó. Lượt LỖI cũng phải được đóng
+   sổ trước khi ném tiếp — đó đúng là lượt cần soi nhất.
+2. **Không làm chậm lượt trả lời.** JSONL vài trăm byte thì không đáng kể; gọi
+   Lark thì đẩy sang thread nền. Trần trả lời 180s đã sát.
+3. **Không ghi bí mật.** Tham số tool cắt ngắn và lọc qua `_che_bi_mat()`
+   (token/secret/password/api_key/authorization/bearer → `[da_che]`).
+
+### `dong_bo_lai()` — vá lỗ hổng của thread nền
+
+Thread đẩy Base là `daemon=True`, nên tiến trình thoát ngay sau một lượt (bot
+restart, kill) thì dòng đó **không lên Base** — JSONL vẫn có, Base thiếu. Bản
+ghi mà thiếu lỗ thì mất giá trị đối chiếu. `run.py` gọi `dong_bo_lai()` **lúc
+khởi động** (không phải trong luồng trả lời) để đẩy bù từ mốc `da_day_den`. Đã
+kiểm không đẩy trùng: lần 2 trả 0 dòng.
+
+### Tắt/bật
+
+`AUDIT_ENABLED=0` tắt hẳn; `AUDIT_TO_BASE=0` chỉ ghi JSONL, không đẩy Lark.
