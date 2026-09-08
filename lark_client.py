@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.parse
+from pathlib import Path
 from typing import Any, Optional
 
 import requests
@@ -99,6 +100,74 @@ def call(method: str, api_path: str, *, query: dict | None = None, body: Any = N
     if data.get("code") not in (None, 0):
         raise RuntimeError(f"Lark {method} {api_path} failed: {data}")
     return data
+
+
+# ───────────────────────── file upload ─────────────────────────
+# Trần của `upload_all` là 20MB; file to hơn phải dùng upload theo khối. Ở đây
+# chỉ dùng cho file kết quả (Excel/CSV) nên 20MB là quá đủ.
+UPLOAD_TOI_DA = 20 * 1024 * 1024
+
+
+def root_folder_token() -> str:
+    d = call("GET", "/open-apis/drive/explorer/v2/root_folder/meta")
+    return ((d.get("data") or {}).get("token")) or ""
+
+
+def upload_file(path: str, folder_token: str = "") -> dict:
+    """Tải một file cục bộ lên Lark Drive. Trả {file_token, url, size}.
+
+    Vì sao cần: tool xuất ra Excel trên ĐĨA thì bản ghi audit chỉ có đường dẫn
+    kiểu `D:\\...\\ket_qua.xlsx` — người đọc audit trên Lark (hoặc trên máy khác)
+    không mở được, tức mắt xích cuối của cả luồng thành ngõ cụt. Đưa file lên
+    Drive rồi ghi LINK mới truy vết được thật.
+
+    Dùng multipart nên KHÔNG đi qua `call()` (hàm đó gửi JSON).
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(path)
+    size = p.stat().st_size
+    if size > UPLOAD_TOI_DA:
+        raise ValueError(f"file {size} byte > tran {UPLOAD_TOI_DA} byte")
+    parent = folder_token or root_folder_token()
+    token = get_tenant_token()
+    with open(p, "rb") as fh:
+        r = requests.post(
+            f"{config.base_url}/open-apis/drive/v1/files/upload_all",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"file_name": p.name, "parent_type": "explorer",
+                  "parent_node": parent, "size": str(size)},
+            files={"file": (p.name, fh)},
+            timeout=180,
+        )
+    if not r.ok:
+        raise RuntimeError(f"upload_all HTTP {r.status_code}: {r.text[:300]}")
+    d = r.json()
+    if d.get("code") not in (None, 0):
+        raise RuntimeError(f"upload_all failed: {d}")
+    ft = ((d.get("data") or {}).get("file_token")) or ""
+    return {"file_token": ft, "size": size, "url": file_url(ft)}
+
+
+def file_url(file_token: str) -> str:
+    """URL mở được của một file trên Drive.
+
+    KHÔNG tự ghép URL: `upload_all` chỉ trả `file_token`, và ghép tay kiểu
+    `base_url.replace("open.","") + "/file/" + token` ra
+    `https://larksuite.com/file/...` — THIẾU subdomain tenant nên bấm vào 404.
+    Link sai trong bản ghi audit tệ hơn không có link: nhìn như thật mà chết.
+    Nên hỏi API lấy URL thật, không lấy được thì trả rỗng.
+    """
+    if not file_token:
+        return ""
+    try:
+        d = call("POST", "/open-apis/drive/v1/metas/batch_query",
+                 body={"request_docs": [{"doc_token": file_token, "doc_type": "file"}]})
+        metas = ((d.get("data") or {}).get("metas") or [])
+        return (metas[0].get("url") or "") if metas else ""
+    except Exception as e:  # noqa: BLE001
+        print(f"[lark] lay URL file that bai: {type(e).__name__}: {e}")
+        return ""
 
 
 # ───────────────────────── binary download ─────────────────────────
