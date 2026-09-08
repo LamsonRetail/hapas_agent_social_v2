@@ -2,7 +2,7 @@
 
 Receives messages pushed to the app bot over lark-cli's event bus
 (`im.message.receive_v1`), sends each new message to the Hermes brain
-(gpt-5.4 via openai-codex), and replies AS the bot.
+(model from AGENT_MODEL via openai-codex), and replies AS the bot.
 
     python run.py
 
@@ -101,9 +101,22 @@ def _do_reply(msg: dict) -> None:
     if not text:
         text = "(Đồng nghiệp vừa tag bot nhưng chưa nói gì. Hãy chào và hỏi cần hỗ trợ gì.)"
 
-    # 1) ack with a "Typing" reaction on the user's message (removed on success;
-    #    a "CrossMark" is added on failure).
-    reaction_id = lark.add_reaction(message_id, "Typing") if message_id else None
+    # 1) Badge "đang xử lý": thả reaction Typing lên tin nhắn của người dùng, gỡ
+    # ra khi đã trả lời xong. Đây đúng là cơ chế meeting agent dùng (xem
+    # `_FEISHU_REACTION_IN_PROGRESS` trong plugins/platforms/feishu/adapter.py) —
+    # Lark render reaction của bot thành một badge nhỏ ngay dưới tin nhắn.
+    #
+    # Mặc định TẮT vì lý do vẫn còn giá trị: nếu quyền gửi tin hỏng, người dùng
+    # chỉ thấy mỗi badge mà không thấy trả lời nào, tưởng bot đang nghĩ mãi. Bật
+    # bằng AGENT_TYPING_BADGE=1 (đã bật trong .env ngày 07/09/2026) SAU KHI xác
+    # minh đủ hai điều kiện: app có `im:message.reactions:write_only`, và bot đã
+    # gửi tin thành công thật.
+    show_typing_badge = _typing_badge_on()
+    reaction_id = (
+        lark.add_reaction(message_id, "Typing")
+        if show_typing_badge and message_id
+        else None
+    )
 
     # 2) brain, under a hard timeout so one bad message can't freeze the chat.
     failed = False
@@ -123,28 +136,38 @@ def _do_reply(msg: dict) -> None:
         reply = f"Xin lỗi, em gặp lỗi khi xử lý: {e}"
         failed = True
 
-    # 3) clear the typing badge (mark failure if the brain errored)
-    if reaction_id:
-        lark.remove_reaction(message_id, reaction_id)
-    if failed and message_id:
-        lark.add_reaction(message_id, "CrossMark")
-
-    # 4) reply, as the bot. If the message came from inside a thread, answer
+    # 3) Reply as the bot. If the message came from inside a thread, answer
     #    INSIDE that thread; otherwise a normal message to the chat.
     in_thread = bool(msg.get("in_thread"))
+    delivered = False
     try:
         if in_thread and message_id:
-            lark.reply_text(message_id, reply, as_user=False, in_thread=True)
+            lark.reply_text(message_id, reply, in_thread=True)
             print(f"[out] chat={chat_id} (thread): {reply[:100]}")
         else:
-            lark.send_text("chat_id", chat_id, reply, as_user=False)
+            lark.send_text("chat_id", chat_id, reply)
             print(f"[out] chat={chat_id}: {reply[:120]}")
+        delivered = True
     except Exception as e:
         print(f"[out] error ({e}); fallback to chat send")
         try:
-            lark.send_text("chat_id", chat_id, reply, as_user=False)
+            lark.send_text("chat_id", chat_id, reply)
+            delivered = True
+            print(f"[out] chat={chat_id} (fallback): {reply[:120]}")
         except Exception as e2:
             print(f"[out] fallback error: {e2}")
+
+    # 4) Remove the progress indicator only after the outbound message has
+    # actually been accepted by Lark.  On a delivery error retain a visible
+    # failure marker for operators without showing an empty "typing" state.
+    if reaction_id:
+        lark.remove_reaction(message_id, reaction_id)
+    if (failed or not delivered) and message_id:
+        lark.add_reaction(message_id, "CrossMark")
+
+
+def _typing_badge_on() -> bool:
+    return os.environ.get("AGENT_TYPING_BADGE", "0").strip() == "1"
 
 
 def main() -> None:
@@ -160,6 +183,14 @@ def main() -> None:
     except Exception as e:
         print(f"  Bot creds:  ❌ {e}")
         return
+
+    # Trạng thái badge phải HIỆN RA lúc khởi động: nó là thứ người dùng nhìn vào
+    # để biết bot còn sống, mà lại bật/tắt bằng một biến .env — không in ra thì
+    # lúc badge biến mất không ai biết là do tắt cờ hay do bot chết.
+    if _typing_badge_on():
+        print("  Badge:      ✅ reaction 'Typing' lên tin người dùng khi đang xử lý")
+    else:
+        print("  Badge:      ⛔ tắt (đặt AGENT_TYPING_BADGE=1 trong .env để bật)")
 
     # background reminder ticker (fires scheduled reminders as the bot)
     try:

@@ -1,6 +1,6 @@
 # Social Agent — Lark BOT agent (Hermes brain + lark-cli)
 
-Con **bot Lark** trả lời tin nhắn bằng **Hermes** (model `gpt-5.4` qua
+Con **bot Lark** trả lời tin nhắn bằng **Hermes** (model `gpt-5.6-terra` qua
 `openai-codex`) và thao tác trên Lark qua **lark-cli** — tất cả dưới **danh tính
 BOT** (`tenant_access_token` mint từ `app_id`/`app_secret`). Không dùng seat
 user / OAuth as-user nữa.
@@ -19,7 +19,7 @@ Cơ chế:
 | File | Vai trò |
 |------|---------|
 | `config.py` | Đọc `.env`; app/token/event/brain config; `brand`, `cli_config_dir`. |
-| `lark_client.py` | `get_tenant_token()` (cache + auto-refresh), `get_bot_open_id()`, `call(as_="tenant")`, `send_text/reply_text(as_user=False)`, reactions. |
+| `lark_client.py` | `get_tenant_token()` (cache + auto-refresh), `get_bot_open_id()`, REST `call()`, `send_text/reply_text()`, reactions — tất cả dùng tenant token. |
 | `listener.py` | Supervisor: (re)spawn `event consume … --as bot`, parse NDJSON, lọc (bot/echo, group không @mention), respawn trước khi token 2h hết hạn. |
 | `lark_cli_tool.py` | Tool `lark_cli` cho brain — chạy lark-cli với tenant token inject qua env (`LARKSUITE_CLI_TENANT_ACCESS_TOKEN` + `DEFAULT_AS=bot`). |
 | `brain.py` | Hermes brain: `resolve_runtime_provider("openai-codex")` → `AIAgent` → `run_conversation` → `final_response`. Nhớ ngữ cảnh theo từng chat + trí nhớ per-user. |
@@ -46,6 +46,9 @@ Cơ chế:
    (hoặc đặt `LARK_CLI_PATH` trỏ tới `lark-cli.exe`).
 4. Trỏ Hermes: đặt `HERMES_HOME` và `HERMES_AGENT_DIR` trong `.env` về
    `hermes-home` thật (mặc định resolve cạnh folder này, thường KHÔNG đúng).
+5. Nếu dùng `social_listen` trên YouTube: bật **YouTube Data API v3** trong
+   Google Cloud và điền `YOUTUBE_DATA_API_KEY`. YouTube dùng API chính thức,
+   không fallback sang Apify trả phí.
 
 ## Chạy
 
@@ -64,5 +67,6 @@ Việt theo persona trong `persona.md`.
   để token 2h không bao giờ hết hạn giữa chừng; dừng bằng đóng stdin (không
   `kill -9` — tránh rò subscription trên server).
 - Sửa tính cách bot ở `persona.md`, KHÔNG cần sửa code.
-- File cũ của kiến trúc as-user (`poller.py`, `authorize.py`, `lark_tool.py`,
-  `seed_p2p.py`) không còn dùng trong chế độ bot.
+- Kiến trúc as-user cũ (`poller.py`, `authorize.py`, `lark_tool.py`,
+  `seed_p2p.py`) đã bị **xoá hẳn** ngày 28/08/2026 — bot chỉ còn một danh tính
+  duy nhất là tenant token. Cần tra cứu thì xem commit trước đó trong git.

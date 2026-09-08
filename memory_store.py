@@ -1,4 +1,4 @@
-"""Persistent memory for Steven — per-chat history + per-USER long-term notes.
+"""Persistent memory for Mark — per-chat history + per-USER long-term notes.
 
 Two stores, both on disk under .tokens/ so they survive restarts:
 
@@ -47,6 +47,11 @@ _current_sender: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 
 def set_current_sender(open_id: str | None) -> None:
     _current_sender.set(open_id)
+
+
+def get_current_sender() -> str | None:
+    """open_id của người đang nhắn, cho tool khác dùng (vd cấp quyền file vừa tạo)."""
+    return _current_sender.get()
 
 
 def _safe(name: str) -> str:

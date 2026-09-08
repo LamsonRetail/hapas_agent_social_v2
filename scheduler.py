@@ -1,15 +1,15 @@
-"""Self-contained reminder / scheduler for Steven.
+"""Self-contained reminder / scheduler for Mark.
 
 Hermes' own cron is tightly coupled to its gateway (delivery, sessions, platform
-adapters), so for our standalone user-seat runner we keep a tiny, robust
-scheduler of our own:
+adapters) — and that gateway belongs to the meeting agent — so this standalone
+runner keeps a tiny, robust scheduler of its own:
 
   .tokens/reminders.json  — list of reminders, persisted (survive restarts)
 
 The brain calls the `schedule_reminder` tool to create one (targeting the CURRENT
 chat by default). run.py runs a background ticker that, when a reminder is due,
-sends its message AS Steven to the target chat, then marks it done (or reschedules
-if it recurs daily).
+sends its message to the target chat as the bot, then marks it done (or
+reschedules if it recurs daily).
 
 Times are interpreted in Vietnam local time (UTC+7) and stored as epoch seconds.
 """
@@ -145,7 +145,7 @@ def cancel_reminder(reminder_id: str) -> bool:
 
 
 def _fire_due(now: float | None = None) -> int:
-    """Send any due reminders as Steven. Returns how many fired."""
+    """Send any due reminders as the bot. Returns how many fired."""
     now = now or time.time()
     fired = 0
     with _lock:
@@ -155,7 +155,7 @@ def _fire_due(now: float | None = None) -> int:
             if r.get("done") or r["due_ts"] > now:
                 continue
             try:
-                lark.send_text("chat_id", r["chat_id"], r["message"], as_user=False)
+                lark.send_text("chat_id", r["chat_id"], r["message"])
                 fired += 1
                 print(f"[reminder] fired {r['id']} → {r['chat_id']}: {r['message'][:60]}")
             except Exception as e:
@@ -191,7 +191,7 @@ def start_ticker(interval: int = 20) -> None:
 SCHEDULE_SCHEMA = {
     "name": "schedule_reminder",
     "description": (
-        "Đặt một lời nhắc/hẹn giờ. Đến giờ, Steven sẽ TỰ gửi `message` vào cuộc trò "
+        "Đặt một lời nhắc/hẹn giờ. Đến giờ, bot sẽ TỰ gửi `message` vào cuộc trò "
         "chuyện hiện tại (hoặc `chat_id` chỉ định). Dùng khi người dùng nhờ 'nhắc...', "
         "'đến 13h30 gửi nhóm...', 'mai nhắc tôi...'. `when` nhận: 'HH:MM' (hôm nay giờ VN, "
         "nếu đã qua thì mai), '+30m'/'+2h', hoặc 'YYYY-MM-DD HH:MM'. `recurrence`='daily' để "

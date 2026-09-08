@@ -1,9 +1,11 @@
-"""Hermes brain for the Steven user seat.
+"""Hermes brain for the Mark bot.
 
-Replaces steven-source's Claude-SDK agent.ts. Instead of the Claude Agent SDK,
-we drive Hermes with the openai-codex provider ("as user" ChatGPT/Codex quota,
-model gpt-5.4). Hermes generates Steven's reply; the poller sends it out AS the
-Steven user seat (user_access_token + im:message.send_as_user).
+Drives Hermes with the openai-codex provider (ChatGPT/Codex quota, model from
+AGENT_MODEL — currently gpt-5.6-terra). Hermes writes the reply; run.py sends it
+out with the bot's tenant token.
+
+Heads-up: this Codex quota is SHARED with the meeting agent, which is the
+higher-priority production bot. That is why AGENT_MAX_WORKERS is held at 2.
 
 Design (validated end-to-end):
     rt    = resolve_runtime_provider(requested="openai-codex")   # reads config.yaml + auth.json
@@ -42,6 +44,10 @@ from run_agent import AIAgent  # noqa: E402
 # used in bot mode — a bot has no user_access_token.)
 import lark_cli_tool  # noqa: E402,F401  (registers `lark_cli` as bot)
 import fb_ads_tool  # noqa: E402,F401  (registers `fb_ads_library`: Meta Ad Library via browser)
+import apify_tool  # noqa: E402,F401  (registers `social_listen`: 5 nền tảng -> Lark Sheet)
+import deep_dive_tool  # noqa: E402,F401  (registers `social_deep_dive`: bình luận -> Lark Sheet)
+import web_tool  # noqa: E402,F401  (registers `web_scrape`: website công khai qua Scrapling)
+import crawl_tool  # noqa: E402,F401  (registers `web_crawl`: cào sản phẩm -> Lark Sheet)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
 
@@ -53,7 +59,7 @@ _PERSONA_FILE = Path(os.environ.get("AGENT_PERSONA_FILE", "").strip() or Path(__
 
 # Đội ngũ team Chuyển đổi số — dùng để phân loại vai trò người đang nhắn, khớp
 # theo TÊN (không dấu, thường hoá). Nếu biết chắc open_id của sếp, đặt biến môi
-# trường STEVEN_BOSS_OPEN_ID để nhận diện sếp chính xác 100% (không phụ thuộc tên).
+# trường AGENT_BOSS_OPEN_ID để nhận diện sếp chính xác 100% (không phụ thuộc tên).
 _BOSS_NAME = "Lê Quý Thiện"
 _BOD_NAME = "Nguyễn Trần Thi"
 _TEAM_MEMBERS = [
@@ -66,7 +72,7 @@ _TEAM_MEMBERS = [
 ]
 
 # Hermes công cụ — phần này KHÔNG nằm trong persona.md (đó là "con người" của
-# Steven), mà là hướng dẫn kỹ thuật cách dùng tool. Ghép vào cuối system prompt.
+# Mark), mà là hướng dẫn kỹ thuật cách dùng tool. Ghép vào cuối system prompt.
 _TOOLING_NOTE = "\n".join(
     [
         "\n---\n## HƯỚNG DẪN DÙNG CÔNG CỤ (kỹ thuật — người dùng không thấy phần này)",
@@ -116,7 +122,11 @@ def _norm(s: str) -> str:
 def _classify_sender(sender_open_id: str | None) -> tuple[str, str, bool]:
     """Trả về (tên hiển thị, mô tả vai trò, is_boss) của người đang nhắn."""
     name = lark.resolve_user_name(sender_open_id) if sender_open_id else None
-    boss_id = os.environ.get("STEVEN_BOSS_OPEN_ID", "").strip()
+    # Giữ tên biến cũ làm fallback để deployment hiện tại không mất cấu hình.
+    boss_id = (
+        os.environ.get("AGENT_BOSS_OPEN_ID", "").strip()
+        or os.environ.get("STEVEN_BOSS_OPEN_ID", "").strip()
+    )
     is_boss = bool(boss_id and sender_open_id == boss_id)
 
     if not name:
@@ -188,17 +198,18 @@ def _resolve_agent(sender_open_id: str | None = None) -> AIAgent:
         api_key=rt.get("api_key"),
         max_iterations=config.agent_max_iterations,
         quiet_mode=True,
-        # Curated capability set (Cách A). "lark_api" toolset holds both
-        # lark_cli + lark_api (see lark_cli_tool.py / lark_tool.py). vision/
+        # Curated capability set (Cách A). "lark_api" chứa lark_cli (xem
+        # lark_cli_tool.py). vision/
         # file/code_execution/delegation are key-free and available out of the
         # box. "browser" = agent-browser (tự truy cập web/trang công khai, không
         # cần key). "fb_ads" = fb_ads_library (tra Meta Ad Library qua browser).
-        # Bỏ "web" (Tavily) và "social" (Apify) theo yêu cầu — thay bằng browser.
+        # "social" là các nguồn nghiệp vụ trong apify_tool/deep_dive_tool.
         # "terminal"/"computer_use" vẫn tắt cho an toàn.
         enabled_toolsets=[
             "lark_api",
             "browser",
             "fb_ads",
+            "social",
             "vision",
             "file",
             "code_execution",
@@ -241,7 +252,7 @@ def _strip_markdown(text: str) -> str:
 
 
 def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) -> str:
-    """Generate Steven's reply, with persistent per-chat context + per-user memory."""
+    """Generate Mark's reply, with persistent per-chat context + per-user memory."""
     # tell the remember/reminder tools the current context
     memory_store.set_current_sender(sender_open_id)
     scheduler.set_current_chat(chat_id)

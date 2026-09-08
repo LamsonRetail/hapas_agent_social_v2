@@ -6,6 +6,7 @@ __pycache__/
 # lark-cli config + event bus logs (chua access_key, ticket, message_id)
 .lark-cli/
 .lark-cli-bot/
+.lark-cli-bot.old-*/
 *.log
 *.log.[0-9]
 *.pid
@@ -13,3 +14,12 @@ __pycache__/
 
 # state cua agent (history chat, ten nhan su, reminders)
 .tokens/
+
+# venv rieng cho Scrapling (khong dung chung voi Hermes)
+.venv-scrapling/
+exports/
+
+# thu muc tam khi do luong/chan doan
+.probe/
+# anh QR dang nhap (artefact xac thuc, khong commit)
+lark-doc-auth-qr.png
