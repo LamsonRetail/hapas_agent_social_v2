@@ -1,0 +1,231 @@
+"""Fail-closed migration guard for Mark's legacy Hermes runtime.
+
+The long-term enforcement point is ``lsr_hive.tool_executor`` (ADR 0002).  This
+module is the temporary EXTC draft adapter: it wraps Hermes' single
+``ToolRegistry.dispatch`` convergence point without editing vendored Hermes.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import types
+from dataclasses import dataclass
+from typing import Any, Callable
+
+
+@dataclass(frozen=True)
+class PolicyDecision:
+    allowed: bool
+    reason: str
+
+
+_SAFE_EXACT = {
+    "fb_ads_library",
+    "web_scrape",
+    "list_reminders",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_get_images",
+    "browser_get_text",
+}
+# Tool có tác dụng phụ, kèm QUYỀN PHÁT mà nó đòi. Tên quyền lấy đúng từ
+# `connections.out` của manifest (SPEC §2.1), nên hợp đồng khai gì thì ở đây cho
+# nấy — không có bảng luật thứ hai chạy song song rồi rộng hoặc hẹp hơn hợp đồng.
+#
+# Ba tool nghiên cứu ở đầu danh sách đòi `write_data` KHÔNG phải vì việc cào nguy
+# hiểm, mà vì chúng gộp kết quả vào một Lark Sheet rồi trả link. Đó là ghi dữ liệu
+# ra ngoài hệ thống, nên phải xin đúng quyền đó.
+_MUTATING_EXACT = {
+    "social_listen": "write_data",       # cào 5 nền tảng → tạo Lark Sheet
+    "social_deep_dive": "write_data",    # bóc bình luận → tạo Lark Sheet
+    "web_crawl": "write_data",           # cào nhiều trang → tạo Lark Sheet
+    "schedule_reminder": "write_data",
+    "cancel_reminder": "write_data",
+    "remember_about_user": "write_data",
+}
+_MUTATING_WORDS = {
+    "create", "update", "delete", "remove", "send", "write", "edit",
+    "patch", "post", "put", "upload", "move", "copy", "grant", "revoke",
+    "approve", "reject", "schedule", "cancel", "invite", "add",
+}
+_READ_WORDS = {
+    "get", "list", "search", "find", "read", "query", "info", "schema",
+    "help", "agenda", "status", "download", "export",
+}
+
+
+def _lark_cli_decision(args: dict[str, Any]) -> PolicyDecision:
+    argv = args.get("args")
+    if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+        return PolicyDecision(False, "lark_cli thiếu danh sách args hợp lệ")
+    low = [x.strip().lower() for x in argv]
+    if "--dry-run" in low:
+        return PolicyDecision(True, "lark_cli dry-run không tạo side effect")
+    if "--yes" in low:
+        # CỐ Ý hẹp hơn hợp đồng. Từ 17/09 Mark là `executive` và có `write_data`,
+        # nên `base +record-create --yes` đã nằm trong hợp đồng — nhưng việc ghi mà
+        # Mark thật sự cần nằm TRONG `social_listen` (xuất Sheet kết quả), không đi
+        # qua `lark_cli`. Chặn ở đây để một lệnh ghi Lark tuỳ ý không lọt qua chỉ
+        # nhờ một cờ dòng lệnh. Nới dòng này là mở ghi Base thật, không qua duyệt.
+        return PolicyDecision(False, "lark_cli --yes bị chặn ở runtime, hẹp hơn hợp đồng")
+    if low[0] in {"schema", "skills", "help", "--help", "-h"} or "--help" in low:
+        return PolicyDecision(True, "lệnh discovery chỉ đọc")
+    if low[0] == "api":
+        method = low[1] if len(low) > 1 else ""
+        return PolicyDecision(
+            method in {"get", "head"},
+            "raw Lark API chỉ cho phép GET/HEAD" if method not in {"get", "head"}
+            else "raw Lark API read-only",
+        )
+    words = {
+        part
+        for token in low
+        for part in token.replace("+", " ").replace("_", " ").replace("-", " ").split()
+    }
+    if words & _MUTATING_WORDS:
+        return PolicyDecision(False, "lark_cli có động từ ghi/gửi")
+    if words & _READ_WORDS:
+        return PolicyDecision(True, "lark_cli khớp thao tác đọc")
+    return PolicyDecision(False, "lark_cli mơ hồ nên fail-closed")
+
+
+# ─────────────────────── quyền phát: hỏi platform, có đường lùi ───────────────
+#
+# Trước đây file này tự giữ danh sách cấm. Hệ quả: đổi hợp đồng trên platform mà
+# runtime không biết, và ngược lại. Giờ nguồn sự thật là `connections.out` —
+# platform tính sẵn và phát trong `/v1/self/stamp`.
+#
+# BA TẦNG, theo thứ tự tin cậy:
+#   1. stamp của platform   — mới nhất, có TTL
+#   2. manifest cục bộ      — khi không gọi được platform
+#   3. rỗng                 — không khai gì thì không phát gì (fail-closed)
+#
+# Nhớ tạm theo TTL để không gọi mạng ở mỗi lời gọi tool. Gọi hỏng thì DÙNG LẠI bản
+# nhớ cuối chứ không tụt về rỗng: mất mạng một nhịp không nên làm agent câm giữa
+# câu trả lời. Hết hạn mà vẫn không gọi được thì mới hạ xuống manifest cục bộ.
+
+_TTL_QUYEN = 300          # giây; stamp của platform TTL 10' nên 5' là đủ mới
+_nho: dict[str, Any] = {"quyen": None, "luc": 0.0, "nguon": "chưa hỏi"}
+
+
+def _quyen_tu_stamp() -> set[str] | None:
+    import json as _json
+    import os as _os
+    import urllib.request as _u
+    key = (_os.environ.get("LSR_TELEMETRY_API_KEY") or "").strip()
+    base = (_os.environ.get("LSR_PLATFORM_URL")
+            or (_os.environ.get("LSR_COLLECTOR") or "").replace("collector.", "platform."))
+    if not (key and base):
+        return None
+    try:
+        r = _u.Request(base.rstrip("/") + "/v1/self/stamp",
+                       headers={"Authorization": f"Bearer {key}"})
+        with _u.urlopen(r, timeout=5) as x:
+            d = _json.loads(x.read().decode())
+        # Platform bảo dừng phát thì dừng hẳn, bất kể hợp đồng khai gì —
+        # đây là kill-switch, không phải gợi ý.
+        if d.get("out_allowed") is False:
+            return set()
+        out = ((d.get("policy") or {}).get("out_allowed")) or []
+        return {str(x) for x in out}
+    except Exception:
+        return None
+
+
+def _quyen_tu_manifest() -> set[str]:
+    import json as _json
+    import pathlib as _p
+    for ten in ("lsr-agent.yaml", "manifest.json"):
+        f = _p.Path(__file__).with_name(ten)
+        if not f.is_file():
+            continue
+        try:
+            m = _json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        return {v for c in (m.get("connections") or []) for v in (c.get("out") or [])}
+    return set()
+
+
+def quyen_phat() -> set[str]:
+    """Quyền phát hiện hành. Không ném — hỏng thì trả bản nhớ cuối, cùng lắm là rỗng."""
+    import time as _t
+    gio = _t.time()
+    if _nho["quyen"] is not None and (gio - _nho["luc"]) < _TTL_QUYEN:
+        return _nho["quyen"]
+    q = _quyen_tu_stamp()
+    if q is not None:
+        _nho.update(quyen=q, luc=gio, nguon="stamp")
+        return q
+    if _nho["quyen"] is not None:
+        return _nho["quyen"]          # giữ bản cũ, đừng câm vì một nhịp mất mạng
+    q = _quyen_tu_manifest()
+    _nho.update(quyen=q, luc=gio, nguon="manifest cục bộ")
+    return q
+
+
+def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision:
+    """Return the planner decision before a tool handler can run."""
+    name = (tool_name or "").strip()
+    payload = args if isinstance(args, dict) else {}
+    if name == "lark_cli":
+        return _lark_cli_decision(payload)
+    if name in _MUTATING_EXACT:
+        can = _MUTATING_EXACT[name]
+        if can in quyen_phat():
+            return PolicyDecision(True, f"{name}: hợp đồng có '{can}'")
+        return PolicyDecision(
+            False,
+            f"{name} cần quyền '{can}' — hợp đồng khai "
+            f"{sorted(quyen_phat()) or 'chưa khai gì'}")
+    if name in _SAFE_EXACT:
+        return PolicyDecision(True, "tool đọc đã được allowlist")
+    if name.startswith("browser_"):
+        unsafe = ("click", "type", "fill", "submit", "upload", "download")
+        if any(x in name for x in unsafe):
+            return PolicyDecision(False, "browser action có thể tạo side effect")
+        return PolicyDecision(True, "browser read-only")
+    if any(word in name.lower() for word in _MUTATING_WORDS):
+        return PolicyDecision(False, "tên tool biểu thị thao tác ghi")
+    return PolicyDecision(False, "tool chưa có trong policy bundle nên fail-closed")
+
+
+def install_registry_guard(audit_callback: Callable[..., None] | None = None) -> bool:
+    """Wrap Hermes ``registry.dispatch`` once; return True when installed."""
+    try:
+        from tools.registry import registry  # type: ignore
+    except Exception:
+        return False
+    if getattr(registry, "_lsr_guard_installed", False):
+        return True
+
+    original = registry.dispatch
+    mode = os.environ.get("LSR_POLICY_MODE", "enforce").strip().lower()
+    if mode not in {"off", "observe", "enforce"}:
+        mode = "enforce"
+
+    def guarded(self, name: str, args: dict, **kwargs):
+        if mode == "off":
+            return original(name, args, **kwargs)
+        verdict = decide(name, args)
+        if verdict.allowed:
+            return original(name, args, **kwargs)
+        if audit_callback:
+            audit_callback(name, args, None, 0.0, loi=f"policy: {verdict.reason}")
+        if mode == "observe":
+            return original(name, args, **kwargs)
+        return json.dumps(
+            {
+                "error": "policy_denied",
+                "tool": name,
+                "reason": verdict.reason,
+                "allowed_actions": ["read", "analyze", "reply", "call_agent"],
+            },
+            ensure_ascii=False,
+        )
+
+    registry.dispatch = types.MethodType(guarded, registry)
+    registry._lsr_guard_installed = True
+    registry._lsr_guard_mode = mode
+    return True
