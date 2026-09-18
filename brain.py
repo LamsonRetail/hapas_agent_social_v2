@@ -172,7 +172,21 @@ def _classify_sender(sender_open_id: str | None) -> tuple[str, str, bool]:
 def _platform_context_block(ctx: dict | None) -> str:
     if not isinstance(ctx, dict) or not ctx:
         return ""
-    lines = ["\n---\n## NGỮ CẢNH TỪ LSR PLATFORM (ưu tiên sau luật an toàn)"]
+    # Thứ tự ưu tiên phải nói rõ, không để model tự đoán. Khối này do platform biên
+    # dịch bằng KHUÔN CHUNG cho mọi agent, nên nó mang theo vài câu mẫu — ví dụ
+    # "Luôn trả lời bằng tiếng Việt" — chọi với luật riêng ở persona.md ("đổi theo
+    # ngôn ngữ người dùng nếu họ đổi"). Quy tắc: câu RIÊNG thắng câu CHUNG.
+    #
+    # Cố ý KHÔNG hạ cả khối xuống: phần có giá trị thật của nó — vai trò, kỹ năng
+    # đang bật, kho kiến thức, evidence — chính là thứ platform dùng để điều khiển
+    # agent. Chỉ gỡ đúng chỗ va nhau.
+    lines = [
+        "\n---\n## NGỮ CẢNH TỪ LSR PLATFORM (ưu tiên sau luật an toàn)",
+        "Khối này do platform cấu hình — vai trò, kỹ năng, kiến thức ở đây là nguồn "
+        "chính thức, hãy theo. Nhưng nếu một câu ở đây nói CHUNG CHUNG mà mâu thuẫn "
+        "với một luật CỤ THỂ đã nêu ở trên (xưng hô, ngôn ngữ, định dạng, giọng "
+        "điệu), thì theo luật cụ thể ở trên.",
+    ]
     if ctx.get("version") is not None:
         lines.append(f"- Agent version: v{ctx['version']}")
     if (ctx.get("instruction_block") or "").strip():
