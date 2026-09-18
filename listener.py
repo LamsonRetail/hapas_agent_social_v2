@@ -37,6 +37,9 @@ _READY_MARKER = "[event] ready"
 # (The CLI mints & auto-refreshes its own token from file-based config, so this
 # is resilience, not a token-lifetime requirement.)
 _RESPAWN_SECONDS = float(os.environ.get("LARK_EVENT_RESPAWN_SECONDS", str(90 * 60)))
+#: Lùi bao lâu khi bus bị nơi khác giữ. Vẫn kiểm lại — gateway có thể tắt, lúc đó
+#: listener local phải giành lại được — nhưng thưa đủ để không rác log.
+_LUI_KHI_BI_GIU = float(os.environ.get("LARK_EVENT_HELD_BACKOFF_SECONDS", str(10 * 60)))
 
 # Message dict handed to the callback.
 Handler = Callable[[dict], None]
@@ -95,19 +98,33 @@ def _parse_event(line: str) -> dict | None:
     }
 
 
-def _drain_stderr(proc: subprocess.Popen, ready: threading.Event) -> None:
+#: lark-cli báo chuỗi này khi MỘT bus khác đã giữ app — Lark chỉ cho một bus toàn cục.
+#: Từ khi platform bật gateway Lark động, chính gateway đó giữ kết nối, nên listener
+#: local KHÔNG BAO GIỜ nối được nữa. Đó là trạng thái ĐÚNG, không phải sự cố: tin Lark
+#: đi qua gateway rồi thành job, agent vẫn trả lời như thường.
+_BUS_BI_GIU = "another event bus is already connected"
+
+
+def _drain_stderr(proc: subprocess.Popen, ready: threading.Event,
+                  bi_giu: threading.Event | None = None) -> None:
     for raw in iter(proc.stderr.readline, ""):
         line = raw.rstrip("\n")
         if not line:
             continue
         if _READY_MARKER in line and not ready.is_set():
             ready.set()
-        # surface diagnostics but don't spam
+        if _BUS_BI_GIU in line and bi_giu is not None:
+            bi_giu.set()
+            continue          # đã có câu giải thích gọn ở supervisor; đừng lặp lại
         print(f"[event/stderr] {line}")
 
 
-def _consume_once(cli: str, handler: Handler) -> None:
-    """Run one `event consume` process until it exits (respawn/token refresh)."""
+def _consume_once(cli: str, handler: Handler) -> bool:
+    """Chạy một lượt `event consume` tới khi nó thoát.
+
+    Trả True nếu lượt này thất bại vì MỘT BUS KHÁC đang giữ app — supervisor dùng
+    tin đó để lùi lâu thay vì thử lại mỗi vài giây suốt ngày.
+    """
     proc = subprocess.Popen(
         [cli, "event", "consume", _EVENT_KEY, "--as", "bot"],
         env=_cli_env(),
@@ -121,10 +138,13 @@ def _consume_once(cli: str, handler: Handler) -> None:
         cwd=str(config.here),
     )
     ready = threading.Event()
-    threading.Thread(target=_drain_stderr, args=(proc, ready), daemon=True).start()
+    bi_giu = threading.Event()
+    threading.Thread(target=_drain_stderr, args=(proc, ready, bi_giu), daemon=True).start()
 
     if ready.wait(timeout=30):
         print(f"  Intake: ✅ event bus ready — consuming {_EVENT_KEY} as bot")
+    elif bi_giu.is_set():
+        pass          # supervisor giải thích, chỗ này im để khỏi nói hai lần
     else:
         print(f"  Intake: ⚠ no ready marker after 30s (still trying to consume {_EVENT_KEY})")
 
@@ -154,6 +174,7 @@ def _consume_once(cli: str, handler: Handler) -> None:
             proc.wait(timeout=10)
         except Exception:
             pass
+    return bi_giu.is_set()
 
 
 def start_listener(handler: Handler) -> None:
@@ -166,9 +187,23 @@ def start_listener(handler: Handler) -> None:
         )
     ensure_config()  # create file-based config.json once (the daemon needs it)
     backoff = 2.0
+    da_bao_bi_giu = False
     while True:
         try:
-            _consume_once(cli, handler)
+            if _consume_once(cli, handler):
+                # Bus bị nơi khác giữ. Từ khi platform bật gateway Lark động thì đây là
+                # trạng thái ỔN ĐỊNH, không phải sự cố — và nó không tự hết. Thử lại mỗi
+                # vài giây chỉ tổ đổ log, rồi người sau đọc log tưởng bot hỏng. (Đã xảy
+                # ra: mất nửa tiếng đi tìm "kết nối ma" mà hoá ra là gateway.)
+                if not da_bao_bi_giu:
+                    print("[event] app Lark đang do MỘT BUS KHÁC giữ — gần như chắc chắn là "
+                          "gateway của platform. Tin Lark vẫn tới qua job, agent vẫn trả lời "
+                          "bình thường; listener local chỉ là đường CŨ. Lùi kiểm lại mỗi "
+                          f"{_LUI_KHI_BI_GIU // 60} phút, không báo lại.")
+                    da_bao_bi_giu = True
+                time.sleep(_LUI_KHI_BI_GIU)
+                continue
+            da_bao_bi_giu = False
             backoff = 2.0  # clean exit → reset backoff
         except Exception as e:
             print(f"[event] consumer crashed: {e}; retry in {backoff:.0f}s")
