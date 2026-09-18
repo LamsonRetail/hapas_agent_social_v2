@@ -400,6 +400,14 @@ def phan_E() -> None:
         ca("E15", "không ctx → không ghép gì",
            brain._build_system_prompt(None, {}) == sp)
         ca("E16", "prompt không phình bất thường", 8000 < len(sp) < 30000, f"{len(sp)} ký tự")
+        # persona.md KHÔNG được hứa thứ không có tool. Mục 3 từng ghi "Automate Ad
+        # Setting — dựng cấu trúc campaign", trong khi cả sáu năng lực đều là cào/đọc.
+        ca("E17", "không hứa tự dựng campaign", "Automate Ad Setting" not in sp,
+           "không có tool nào làm việc đó")
+        ca("E18", "nói rõ chỉ tư vấn ads bằng lời",
+           "KHÔNG có công cụ nào dựng" in sp)
+        ca("E19", "nói rõ chưa ghi được vào kho tri thức chung",
+           "CHƯA có quyền" in sp)
     finally:
         P._nho.clear(); P._nho.update(cu_q)
         P._nho_nl.clear(); P._nho_nl.update(cu_n)
@@ -466,6 +474,24 @@ def phan_G() -> None:
     if au:
         tuoi = (time.time() - au[-1].stat().st_mtime) / 3600
         ca("G5", "audit được ghi gần đây", tuoi < 24, f"{tuoi:.1f} giờ trước")
+
+    import lsr_platform as LP
+    ca("G8", "vòng job có trần thời gian", LP._HAN_TRA_LOI >= 300,
+       f"{LP._HAN_TRA_LOI:.0f}s — một lượt treo không được đứng cả hàng đợi")
+
+    # Kiến thức phải có đường nạp lại, nếu không nó đứng yên ở ảnh chụp lúc nạp.
+    ca("G9", "có script nạp lại kiến thức",
+       (GOC / "scripts" / "nap_kien_thuc.py").is_file())
+    import json as _j
+    dm = _j.loads((GOC / "knowledge" / "catalog.json").read_text(encoding="utf-8"))
+    duyet = [m for m in dm["items"] if m.get("status") == "approved_for_dev"]
+    thieu = [m["path"] for m in duyet
+             if not (GOC / m["path"]).is_file() and not (GOC / "knowledge" / m["path"]).is_file()]
+    ca("G10", "mọi tài liệu đã duyệt đều có file trên máy", not thieu,
+       f"{len(duyet)} tài liệu" + (f" · thiếu {thieu}" if thieu else ""))
+    ws = _j.loads((GOC / "knowledge" / "wiki-source.json").read_text(encoding="utf-8"))
+    ca("G11", "nguồn Wiki vẫn TẮT khi ADR chưa sign-off", ws.get("enabled") is False,
+       "bật sớm là kéo cả bảng nhân sự vào kho kiến thức")
 
     t_env = _env_file(pathlib.Path(r"D:\mark_tran_test\.env"))
     if t_env:
