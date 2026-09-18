@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "root_url": null,
+  "mode": "dedicated_agent_wiki",
+  "selection_granularity": "h1",
+  "new_nodes_default": "disabled",
+  "required_scope": "read_only",
+  "note": "Chỉ bật sau khi ADR WIKI được thint sign-off và owner cung cấp Wiki root riêng cho Mark."
+}

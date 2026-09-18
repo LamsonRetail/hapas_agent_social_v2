@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "default_status": "pending_owner_review",
+  "items": [
+    {
+      "path": "research_vn_consumer_signals_ss27.md",
+      "domain": "consumer-signals",
+      "status": "approved_for_dev",
+      "source_type": "public_research"
+    },
+    {
+      "path": "ss2027_jewelry_fragrance_gifting_research.md",
+      "domain": "category-trends",
+      "status": "approved_for_dev",
+      "source_type": "public_research"
+    },
+    {
+      "path": "SS27_global_trend_consumer_sources_VN.md",
+      "domain": "global-trends",
+      "status": "approved_for_dev",
+      "source_type": "public_research"
+    },
+    {
+      "path": "SS27_product-system_evidence.md",
+      "domain": "product-system",
+      "status": "approved_for_dev",
+      "source_type": "public_research"
+    },
+    {
+      "path": "SS27_Vietnam_accessible_handbag_competitor_scan.md",
+      "domain": "competitor-scan",
+      "status": "approved_for_dev",
+      "source_type": "public_research"
+    },
+    {
+      "path": "tong_hop_nghien_cuu_SS27_HAPAS_MATE_MADE.md",
+      "domain": "research-synthesis",
+      "status": "approved_for_dev",
+      "source_type": "derived_research"
+    },
+    {
+      "path": "ss27_chat_transcript.md",
+      "status": "excluded",
+      "reason": "internal_chat_transcript"
+    },
+    {
+      "path": "ss27_chat_transcript_2026-09-07.md",
+      "status": "excluded",
+      "reason": "internal_chat_transcript"
+    },
+    {
+      "path": "xuat-toan-bo-chat-ss27.md",
+      "status": "excluded",
+      "reason": "internal_chat_transcript"
+    },
+    {
+      "path": "_xuat_toan_bo_chat_SS27.md",
+      "status": "excluded",
+      "reason": "internal_chat_transcript"
+    }
+  ]
+}
