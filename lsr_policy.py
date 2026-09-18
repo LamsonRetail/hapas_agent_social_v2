@@ -165,8 +165,116 @@ def quyen_phat() -> set[str]:
     return q
 
 
+# ──────────────── công tắc Năng lực trên console: lớp THU HẸP thêm ────────────
+#
+# Chủ agent bật/tắt từng tool ở khối "Năng lực" trên console. Lựa chọn đó lưu vào
+# `agents.capabilities`, và agent tự đọc được của chính mình qua `/v1/self/directory`.
+#
+# ĐÂY LÀ LỚP THU HẸP, KHÔNG PHẢI RANH GIỚI AN TOÀN. Ranh giới thật vẫn là hợp đồng
+# (`out_allowed` ở trên): tool nào hợp đồng không cho thì bật công tắc cũng không chạy.
+# Công tắc chỉ có thể làm HẸP thêm, không bao giờ nới ra.
+#
+# Vì thế chỗ này cố ý KHÔNG fail-closed như `quyen_phat()`:
+#   • chưa khai `capabilities`  → không thu hẹp gì (mọi agent khác đang ở trạng thái này;
+#                                 coi "trống = tắt hết" là làm chết sạch)
+#   • đọc hỏng                  → dùng bản nhớ cuối; chưa đọc được lần nào thì để hợp
+#                                 đồng quyết
+# Fail-closed ở đây không đổi lại được an toàn nào — hợp đồng vẫn đang giữ — mà chỉ
+# khiến một nhịp mất mạng làm Mark câm.
+
+#: Tool mà console cho bật/tắt. Phải khớp `NANG_LUC_THEO_AGENT["AG-SOCIAL-LISTENING"]`
+#: trong `apps/platform-web/lib/agentToolCapabilities.ts` của repo Platform —
+#: `tests/test_cong_tac_nang_luc.py` đối chiếu khi tìm thấy repo đó.
+#:
+#: Cần danh sách này vì `capabilities` chỉ chứa tool ĐANG BẬT: không có nó thì runtime
+#: không phân biệt được "tool bị tắt" với "tool không nằm trong hệ thống công tắc" —
+#: và sẽ tắt nhầm cả `schedule_reminder`, `remember_about_user`…
+_TOOL_CO_CONG_TAC = frozenset({
+    "social_listen", "social_deep_dive", "fb_ads_library",
+    "web_crawl", "web_scrape", "lark_cli",
+})
+
+#: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.
+KHONG_THU_HEP = object()
+
+_TTL_NANG_LUC = 300
+_nho_nl: dict[str, Any] = {"bat": None, "luc": 0.0, "nguon": "chưa hỏi"}
+
+
+def _nang_luc_tu_danh_ba():
+    """Đọc `capabilities` của CHÍNH agent này từ danh bạ.
+
+    Trả `None` khi không đọc được, `KHONG_THU_HEP` khi chưa khai, hoặc tập tool bật.
+    """
+    import json as _json
+    import os as _os
+    import urllib.request as _u
+    key = (_os.environ.get("LSR_TELEMETRY_API_KEY") or "").strip()
+    base = (_os.environ.get("LSR_PLATFORM_URL")
+            or (_os.environ.get("LSR_COLLECTOR") or "").replace("collector.", "platform."))
+    if not (key and base):
+        return None
+    try:
+        r = _u.Request(base.rstrip("/") + "/v1/self/directory",
+                       headers={"Authorization": f"Bearer {key}"})
+        with _u.urlopen(r, timeout=5) as x:
+            d = _json.loads(x.read().decode())
+        toi = str(d.get("caller") or "").upper()
+        hang = next((a for a in (d.get("agents") or [])
+                     if str(a.get("agent_id", "")).upper() == toi), None)
+        if hang is None:
+            return None
+        caps = hang.get("capabilities")
+        if not isinstance(caps, list):
+            return KHONG_THU_HEP          # null / chưa khai
+        bat = {str(c["tool"]) for c in caps
+               if isinstance(c, dict) and isinstance(c.get("tool"), str)}
+        # Có `capabilities` nhưng không mục nào mang khoá `tool` → dữ liệu do nơi khác
+        # ghi, không phải bảng công tắc của console. Không diễn giải bừa thành "tắt hết".
+        return bat if bat else KHONG_THU_HEP
+    except Exception:
+        return None
+
+
+def nang_luc_bat():
+    """Tập tool đang bật, hoặc `KHONG_THU_HEP`. Không bao giờ ném."""
+    import time as _t
+    gio = _t.time()
+    if _nho_nl["bat"] is not None and (gio - _nho_nl["luc"]) < _TTL_NANG_LUC:
+        return _nho_nl["bat"]
+    b = _nang_luc_tu_danh_ba()
+    if b is not None:
+        _nho_nl.update(bat=b, luc=gio, nguon="danh bạ")
+        return b
+    if _nho_nl["bat"] is not None:
+        return _nho_nl["bat"]             # giữ bản cũ qua một nhịp mất mạng
+    return KHONG_THU_HEP
+
+
 def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision:
-    """Return the planner decision before a tool handler can run."""
+    """Hợp đồng xét trước, rồi mới tới công tắc Năng lực.
+
+    Thứ tự này quan trọng: công tắc chỉ thu hẹp thêm trên thứ hợp đồng đã cho. Đảo lại
+    thì một công tắc bật lên có thể nới quá hợp đồng — đúng kiểu lỗi mà cả hệ thống này
+    đang cố tránh.
+    """
+    d = _quyet_dinh_theo_hop_dong(tool_name, args)
+    if not d.allowed:
+        return d
+    name = (tool_name or "").strip()
+    if name in _TOOL_CO_CONG_TAC:
+        bat = nang_luc_bat()
+        if bat is not KHONG_THU_HEP and name not in bat:
+            return PolicyDecision(
+                False,
+                f"'{name}' đang TẮT ở khối Năng lực trên console — chủ agent đã tắt, "
+                f"không phải thiếu quyền")
+    return d
+
+
+def _quyet_dinh_theo_hop_dong(tool_name: str, args: dict[str, Any] | None = None
+                              ) -> PolicyDecision:
+    """Quyết định theo hợp đồng. Giữ nguyên như trước khi có công tắc."""
     name = (tool_name or "").strip()
     payload = args if isinstance(args, dict) else {}
     if name == "lark_cli":

@@ -121,16 +121,28 @@ _TOOLING_NOTE = "\n".join(
     ]
 )
 
-#: Tool có tác dụng phụ, kèm câu mô tả cho người đọc. CỐ Ý không tự phán tool nào
-#: được phép — chỉ liệt kê tool cần xét, rồi hỏi `lsr_policy` từng cái một.
+#: Tool cần kể rõ trong lời dặn, kèm mô tả cho người đọc và bộ tham số để THỬ hỏi
+#: policy. CỐ Ý không tự phán tool nào được phép — chỉ liệt kê tool cần xét, rồi hỏi
+#: `lsr_policy` từng cái một.
+#:
+#: Gồm cả tool CHỈ ĐỌC (`fb_ads_library`, `web_scrape`, `lark_cli`) vì chủ agent tắt
+#: được chúng ở khối Năng lực trên console. Thiếu chúng ở đây thì tắt xong Mark vẫn
+#: tưởng mình dùng được, rồi gọi và ăn từ chối giữa câu trả lời.
+#:
+#: `lark_cli` phải có args thật: hỏi policy với args rỗng thì luôn bị từ chối vì
+#: "thiếu danh sách args hợp lệ" — hoá ra lúc nào cũng báo là bị cấm.
 _TOOL_CAN_XET = {
-    "social_listen": "quét mạng xã hội theo từ khoá/hashtag rồi gộp kết quả vào MỘT "
-                     "Lark Sheet và trả link",
-    "social_deep_dive": "bóc bình luận của một bài rồi xuất Lark Sheet",
-    "web_crawl": "cào nhiều trang web rồi xuất Lark Sheet",
-    "schedule_reminder": "đặt nhắc lịch",
-    "cancel_reminder": "huỷ nhắc lịch",
-    "remember_about_user": "ghi nhớ dài hạn về người đang nói chuyện",
+    "social_listen": ("quét mạng xã hội theo từ khoá/hashtag rồi gộp kết quả vào MỘT "
+                      "Lark Sheet và trả link", {}),
+    "social_deep_dive": ("bóc bình luận của một bài rồi xuất Lark Sheet", {}),
+    "web_crawl": ("cào nhiều trang web rồi xuất Lark Sheet", {}),
+    "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
+    "web_scrape": ("đọc nội dung một trang web công khai", {}),
+    "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",
+                 {"args": ["wiki", "+search", "x"]}),
+    "schedule_reminder": ("đặt nhắc lịch", {}),
+    "cancel_reminder": ("huỷ nhắc lịch", {}),
+    "remember_about_user": ("ghi nhớ dài hạn về người đang nói chuyện", {}),
 }
 
 
@@ -153,9 +165,9 @@ def _luat_vai_note() -> str:
     không có quyền gì, và lời dặn tự thu về đúng bản chỉ-đọc như cũ.
     """
     duoc, cam = [], []
-    for ten, mo_ta in _TOOL_CAN_XET.items():
+    for ten, (mo_ta, args) in _TOOL_CAN_XET.items():
         try:
-            cho = lsr_policy.decide(ten, {}).allowed
+            cho = lsr_policy.decide(ten, args).allowed
         except Exception:
             cho = False
         (duoc if cho else cam).append(mo_ta)

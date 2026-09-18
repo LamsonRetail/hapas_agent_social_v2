@@ -56,8 +56,8 @@ def test_moi_tool_nam_dung_ben(bo_doi):
         lech = [
             f"quyền={sorted(quyen) or 'rỗng'} · {ten}: "
             f"policy {'cho' if cho else 'chặn'} nhưng lời dặn nói {'được' if trong else 'cấm'}"
-            for ten, mo_ta in brain._TOOL_CAN_XET.items()
-            for cho in [lsr_policy.decide(ten, {}).allowed]
+            for ten, (mo_ta, args) in brain._TOOL_CAN_XET.items()
+            for cho in [lsr_policy.decide(ten, args).allowed]
             for trong in [mo_ta in duoc]
             if cho != trong
         ]
