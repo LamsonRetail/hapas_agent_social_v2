@@ -26,6 +26,15 @@ import sys
 import urllib.error
 import urllib.request
 
+# PowerShell 5.1 chạy console ở cp1252, mà script này in tiếng Việt — không ép UTF-8
+# thì `print` ném UnicodeEncodeError. Nguy ở chỗ nó ném GIỮA CHỪNG: version đã tạo
+# xong rồi mới chết ở dòng in, để lại một draft treo không ai publish.
+for _luong in (sys.stdout, sys.stderr):
+    try:
+        _luong.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 AID = "AG-SOCIAL-LISTENING"
 WEB = "https://app.34-124-212-76.sslip.io"
 GOC = pathlib.Path(__file__).resolve().parent.parent
