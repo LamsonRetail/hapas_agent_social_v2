@@ -200,14 +200,30 @@ def main() -> int:
     v = r["version"]
     print(f"    đạt  version v{v} · {r.get('publication')}")
 
+    cho_duyet = None
     for env in (["dev", "prod"] if args.prod else ["dev"]):
         c, r = _goi(f"/v1/agents/{AID}/versions/{v}/publish", {"env": env})
-        ok = c == 200
-        print(f"    {'đạt ' if ok else 'TRƯỢT'} publish {env:<5} HTTP {c}"
-              + ("" if ok else f" · {json.dumps(r, ensure_ascii=False)[:180]}"))
+        # HTTP 200 KHÔNG có nghĩa là đã publish. Publish prod bằng vai moderator chỉ
+        # TẠO YÊU CẦU chờ admin duyệt, mà vẫn trả 200 kèm
+        # `publication: "pending_approval"`. Kiểm mỗi mã HTTP là script báo "đạt"
+        # trong khi prod không đổi gì — đã sai đúng một lần như thế.
+        pub = (r or {}).get("publication")
+        ok = c == 200 and pub == env
+        if c == 200 and pub == "pending_approval":
+            cho_duyet = r.get("action_id")
+            print(f"    CHỜ  publish {env:<5} đã gửi admin duyệt — prod CHƯA đổi "
+                  f"(việc #{cho_duyet})")
+            continue
+        print(f"    {'đạt ' if ok else 'TRƯỢT'} publish {env:<5} HTTP {c} · pub={pub}"
+              + ("" if ok else f" · {json.dumps(r, ensure_ascii=False)[:160]}"))
         if not ok:
             return 1
 
+    if cho_duyet:
+        print(f"\n  CHƯA XONG. Việc #{cho_duyet} đang chờ admin duyệt ở")
+        print("  https://app.34-124-212-76.sslip.io/admin/approvals")
+        print("  Người duyệt phải KHÁC người đề xuất. Duyệt xong prod mới đổi.\n")
+        return 2
     if not args.prod:
         print("\n  Mới lên dev — bot Lark CHƯA đổi gì (runtime chỉ đọc prod).")
         print("  Xem trên console, ưng thì chạy lại với --prod.\n")
