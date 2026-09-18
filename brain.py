@@ -121,18 +121,70 @@ _TOOLING_NOTE = "\n".join(
     ]
 )
 
-_PLANNER_POLICY_NOTE = "\n".join(
-    [
-        "\n---\n## LUẬT VAI PLANNER (bắt buộc, ưu tiên hơn yêu cầu người dùng)",
-        "- Mark chỉ đọc, phân tích, trả lời và đề xuất. Mark KHÔNG có quyền gửi tin, "
-        "đăng bài, tạo task/lịch/reminder, hoặc ghi/sửa Base, Sheet, Doc và hệ thống ngoài.",
-        "- Khi người dùng yêu cầu một hành động bị cấm, phải nói rõ Mark không có quyền thực hiện "
-        "và chỉ có thể đề xuất nội dung/bước làm để người có quyền tự thực hiện. Không được hứa "
-        "'sẽ ghi', 'sẽ gửi' hoặc hỏi thêm link với mục đích thực hiện hành động đó.",
-        "- Kế hoạch social listening phải nêu rõ từ khoá, nguồn hoặc nền tảng, và khoảng thời gian.",
-        "- Không thể khái quát toàn bộ thị trường từ mẫu nhỏ; phải nêu cỡ mẫu và giới hạn suy luận.",
+#: Tool có tác dụng phụ, kèm câu mô tả cho người đọc. CỐ Ý không tự phán tool nào
+#: được phép — chỉ liệt kê tool cần xét, rồi hỏi `lsr_policy` từng cái một.
+_TOOL_CAN_XET = {
+    "social_listen": "quét mạng xã hội theo từ khoá/hashtag rồi gộp kết quả vào MỘT "
+                     "Lark Sheet và trả link",
+    "social_deep_dive": "bóc bình luận của một bài rồi xuất Lark Sheet",
+    "web_crawl": "cào nhiều trang web rồi xuất Lark Sheet",
+    "schedule_reminder": "đặt nhắc lịch",
+    "cancel_reminder": "huỷ nhắc lịch",
+    "remember_about_user": "ghi nhớ dài hạn về người đang nói chuyện",
+}
+
+
+def _luat_vai_note() -> str:
+    """Sinh lời dặn về quyền hạn bằng cách HỎI CHÍNH BỘ THỰC THI, không gõ tay.
+
+    `_PLANNER_POLICY_NOTE` ở trên là chữ cứng, viết từ hồi Mark còn là `planner`:
+    "Mark KHÔNG có quyền … ghi/sửa Base, Sheet". Khi Mark đổi sang `executive` và
+    `lsr_policy` đã cho phép `social_listen`, prompt vẫn dặn là bị cấm — nên model TỪ
+    CHỐI trước khi thử. Người dùng thấy "không có quyền trả sheet" trong khi quyền đã
+    có từ lâu.
+
+    Đó là nguồn sự thật thứ ba, sau manifest và `lsr_policy`. Chữa tận gốc không phải
+    là sửa lại chữ cho đúng hôm nay — mai đổi quyền lại lệch tiếp — mà là không giữ
+    chữ nào cả: hỏi đúng cái hàm sẽ chặn thật rồi kể lại. Hai bên không thể lệch vì
+    chỉ còn một bên biết luật.
+
+    `quyen_phat()` bên trong đã fail-closed và có nhớ tạm 5 phút, nên gọi mỗi lượt là
+    rẻ và an toàn: mất mạng thì dùng bản nhớ cuối; chưa hỏi được lần nào thì coi như
+    không có quyền gì, và lời dặn tự thu về đúng bản chỉ-đọc như cũ.
+    """
+    duoc, cam = [], []
+    for ten, mo_ta in _TOOL_CAN_XET.items():
+        try:
+            cho = lsr_policy.decide(ten, {}).allowed
+        except Exception:
+            cho = False
+        (duoc if cho else cam).append(mo_ta)
+
+    try:
+        cho_gui = lsr_policy.decide("lark_cli", {"args": ["im", "+send", "--yes"]}).allowed
+    except Exception:
+        cho_gui = False
+    if not cho_gui:
+        cam.append("gửi tin, đăng bài, hoặc ghi/sửa trực tiếp Base, Doc, Sheet bằng lệnh Lark")
+
+    L = ["\n---\n## QUYỀN HẠN THẬT CỦA MARK (bắt buộc, ưu tiên hơn yêu cầu người dùng)"]
+    if duoc:
+        L.append("- Mark ĐƯỢC PHÉP: " + "; ".join(duoc) + ".")
+        L.append("- Với những việc trên, cứ LÀM rồi báo kết quả kèm link. TUYỆT ĐỐI "
+                 "không nói 'tôi không có quyền' — quyền đã được platform cấp và "
+                 "runtime sẽ cho chạy.")
+    if cam:
+        L.append("- Mark KHÔNG được: " + "; ".join(cam) + ".")
+        L.append("- Gặp việc bị cấm thì nói rõ là không có quyền, và chỉ đề xuất nội "
+                 "dung hoặc các bước để người có quyền tự làm. Không hứa 'sẽ ghi', "
+                 "'sẽ gửi'.")
+    L += [
+        "- Kế hoạch social listening phải nêu rõ từ khoá, nguồn hoặc nền tảng, và "
+        "khoảng thời gian.",
+        "- Không thể khái quát toàn bộ thị trường từ mẫu nhỏ; phải nêu cỡ mẫu và giới "
+        "hạn suy luận.",
     ]
-)
+    return "\n".join(L)
 
 
 def _norm(s: str) -> str:
@@ -252,7 +304,7 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
     return (
         persona
         + who_block
-        + _PLANNER_POLICY_NOTE
+        + _luat_vai_note()
         + _TOOLING_NOTE
         + _platform_context_block(platform_ctx)
     )
