@@ -18,7 +18,21 @@ HERE = Path(__file__).resolve().parent
 
 
 def _load_dotenv(path: Path) -> None:
-    """Minimal .env loader (KEY=VALUE lines; ignores # comments / blanks)."""
+    """Minimal .env loader (KEY=VALUE lines; ignores # comments / blanks).
+
+    `.env` THẮNG biến môi trường sẵn có — cố ý, và ngược với `setdefault` trước đây.
+
+    Vì sao đổi: máy này có một biến `APIFY_TOKEN` cấp User còn sót từ lần cài cũ,
+    trỏ về một tài khoản Apify đã hết hạn mức. Với `setdefault`, biến cũ đó ÂM THẦM
+    che khoá mới trong `.env` — đổi khoá rồi khởi động lại mà bot vẫn chạy bằng tài
+    khoản cạn tiền, không một dòng nào báo. Mất cả buổi mới tìm ra.
+
+    `.env` nằm cạnh mã, đi theo repo, sửa là thấy. Biến cấp User thì vô hình. Nguồn
+    sự thật phải là cái nhìn thấy được.
+
+    Đè thì BÁO RA — chỉ tên khoá, không bao giờ in giá trị. Xung đột im lặng chính
+    là thứ vừa cắn mình.
+    """
     if not path.exists():
         return
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -28,7 +42,11 @@ def _load_dotenv(path: Path) -> None:
         key, val = line.split("=", 1)
         key = key.strip()
         val = val.strip().strip('"').strip("'")
-        os.environ.setdefault(key, val)
+        cu = os.environ.get(key)
+        if cu is not None and cu != val:
+            print(f"[config] .env đè biến môi trường sẵn có: {key} "
+                  f"(biến cũ {len(cu)} ký tự → .env {len(val)} ký tự)")
+        os.environ[key] = val
 
 
 _load_dotenv(HERE / ".env")
