@@ -197,7 +197,15 @@ _TOOL_CO_CONG_TAC = frozenset({
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.
 KHONG_THU_HEP = object()
 
-_TTL_NANG_LUC = 300
+#: 60 giây, CỐ Ý ngắn hơn TTL của hợp đồng (300s). Hai thứ này đổi vì lý do khác nhau:
+#: hợp đồng đổi hiếm và đi qua quy trình platform, còn công tắc là cái NÚT người ta bấm
+#: rồi thử ngay. Đo thật ở bản 300s: bấm tắt xong hỏi liền thì Mark vẫn hứa "tôi sẽ
+#: quét…" và tool vẫn chạy — tức trong suốt cửa sổ đó cái nút không có tác dụng gì.
+#: Ai tắt một năng lực vì nó đang chạy sai thì không chờ được 5 phút.
+#:
+#: Giá phải trả: nhiều nhất một lời gọi mạng mỗi 60 giây, và gọi hỏng thì đã có bản nhớ
+#: cuối đỡ.
+_TTL_NANG_LUC = float(os.environ.get("LSR_TTL_NANG_LUC_SECONDS", "60"))
 _nho_nl: dict[str, Any] = {"bat": None, "luc": 0.0, "nguon": "chưa hỏi"}
 
 
