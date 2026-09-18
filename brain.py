@@ -26,6 +26,8 @@ import unicodedata
 from pathlib import Path
 
 import lark_client as lark
+import lsr_platform
+import lsr_policy
 from config import config
 
 # Make Hermes importable and point it at its home (config.yaml, auth.json, toolsets).
@@ -52,9 +54,11 @@ import memory_store  # noqa: E402  (persistent history + per-user memory + remem
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
 import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian)
 
-# Bọc handler của MỌI tool để tự ghi audit. Phải gọi SAU khi tất cả tool đã
+# Cưỡng chế policy tại điểm hội tụ dispatch, rồi bọc handler của MỌI tool để tự ghi audit.
+# Phải gọi SAU khi tất cả tool đã
 # import xong (các import ở trên), và TRƯỚC khi AIAgent đầu tiên được dựng —
 # agent chụp lại registry lúc khởi tạo.
+lsr_policy.install_registry_guard(audit.ghi_tool)
 audit.boc_registry()
 
 
@@ -117,6 +121,19 @@ _TOOLING_NOTE = "\n".join(
     ]
 )
 
+_PLANNER_POLICY_NOTE = "\n".join(
+    [
+        "\n---\n## LUẬT VAI PLANNER (bắt buộc, ưu tiên hơn yêu cầu người dùng)",
+        "- Mark chỉ đọc, phân tích, trả lời và đề xuất. Mark KHÔNG có quyền gửi tin, "
+        "đăng bài, tạo task/lịch/reminder, hoặc ghi/sửa Base, Sheet, Doc và hệ thống ngoài.",
+        "- Khi người dùng yêu cầu một hành động bị cấm, phải nói rõ Mark không có quyền thực hiện "
+        "và chỉ có thể đề xuất nội dung/bước làm để người có quyền tự thực hiện. Không được hứa "
+        "'sẽ ghi', 'sẽ gửi' hoặc hỏi thêm link với mục đích thực hiện hành động đó.",
+        "- Kế hoạch social listening phải nêu rõ từ khoá, nguồn hoặc nền tảng, và khoảng thời gian.",
+        "- Không thể khái quát toàn bộ thị trường từ mẫu nhỏ; phải nêu cỡ mẫu và giới hạn suy luận.",
+    ]
+)
+
 
 def _norm(s: str) -> str:
     """Bỏ dấu + thường hoá + gộp khoảng trắng để khớp tên bền vững."""
@@ -152,14 +169,41 @@ def _classify_sender(sender_open_id: str | None) -> tuple[str, str, bool]:
                   "KHÔNG tiết lộ thông tin nội bộ.", is_boss)
 
 
-def _build_system_prompt(sender_open_id: str | None) -> str:
+def _platform_context_block(ctx: dict | None) -> str:
+    if not isinstance(ctx, dict) or not ctx:
+        return ""
+    lines = ["\n---\n## NGỮ CẢNH TỪ LSR PLATFORM (ưu tiên sau luật an toàn)"]
+    if ctx.get("version") is not None:
+        lines.append(f"- Agent version: v{ctx['version']}")
+    if (ctx.get("instruction_block") or "").strip():
+        lines += ["", "### Instruction đã publish", ctx["instruction_block"].strip()]
+    if (ctx.get("rolling_summary") or "").strip():
+        lines += ["", "### Tóm tắt hội thoại", ctx["rolling_summary"].strip()]
+    facts = [str(x).strip() for x in (ctx.get("user_facts") or []) if str(x).strip()]
+    if facts:
+        lines += ["", "### Fact đã duyệt về người dùng"] + [f"- {x}" for x in facts[:30]]
+    hits = [x for x in (ctx.get("knowledge") or []) if isinstance(x, dict)]
+    if hits:
+        lines += ["", "### Evidence từ kho kiến thức"]
+        for hit in hits[:8]:
+            title = (hit.get("title") or hit.get("item_id") or "Nguồn").strip()
+            source = (hit.get("source_url") or hit.get("source_ref") or "").strip()
+            content = (hit.get("content") or "").strip()[:1200]
+            lines.append(f"- Nguồn: {title}" + (f" — {source}" if source else ""))
+            if content:
+                lines.append(f"  Nội dung: {content}")
+        lines.append("Khi dùng evidence trên, phải nêu tên nguồn/URL; không suy diễn ngoài nội dung.")
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None = None) -> str:
     """Nạp persona.md, thay biến động, ghép trí nhớ về người này + hướng dẫn tool."""
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     try:
         persona = _PERSONA_FILE.read_text(encoding="utf-8")
     except Exception as e:
         print(f"[brain] không đọc được persona.md ({e}) — dùng fallback tối thiểu")
-        persona = "Bạn là Mark Nguyễn — Social Assistant của công ty Lamson Retail, do team AI - Digital Transformation phát triển (mảng Branding Ads & Booking KOL/KOC). Giọng tinh nghịch, sáng tạo, tự nhiên như người thật."
+        persona = "Bạn là Mark Trần — Social Assistant của công ty Lamson Retail, do team AI - Digital Transformation phát triển (mảng Branding Ads & Booking KOL/KOC). Giọng tinh nghịch, sáng tạo, tự nhiên như người thật."
 
     name, role, _is_boss = _classify_sender(sender_open_id)
     user_mem = memory_store.load_user_memory(sender_open_id) or "(chưa có ghi chú nào)"
@@ -172,12 +216,13 @@ def _build_system_prompt(sender_open_id: str | None) -> str:
 
     # Shared-frame identity override: when this process runs a created agent on
     # Mark's persona, force its OWN display name so it doesn't introduce itself
-    # as "Mark Nguyễn". Skipped when a dedicated persona file is provided.
+    # as the name written in persona.md. Skipped when a dedicated persona file is
+    # provided.
     if config.agent_name and not os.environ.get("AGENT_PERSONA_FILE", "").strip():
         persona = (
             f"# GHI ĐÈ DANH TÍNH (ưu tiên cao nhất)\n"
             f"Tên hiển thị của bạn là **{config.agent_name}**. Khi tự giới thiệu hãy xưng đúng "
-            f"tên này, TUYỆT ĐỐI không tự nhận là 'Mark Nguyễn'. Mọi tính cách/cách làm việc/công cụ "
+            f"tên này, TUYỆT ĐỐI không tự nhận bằng tên nào khác. Mọi tính cách/cách làm việc/công cụ "
             f"bên dưới vẫn giữ nguyên.\n\n---\n" + persona
         )
 
@@ -190,10 +235,17 @@ def _build_system_prompt(sender_open_id: str | None) -> str:
             f"- Hôm nay: {today} (giờ VN, UTC+7).",
         ]
     )
-    return persona + who_block + _TOOLING_NOTE
+    return (
+        persona
+        + who_block
+        + _PLANNER_POLICY_NOTE
+        + _TOOLING_NOTE
+        + _platform_context_block(platform_ctx)
+    )
 
 
-def _resolve_agent(sender_open_id: str | None = None) -> AIAgent:
+def _resolve_agent(sender_open_id: str | None = None,
+                   platform_ctx: dict | None = None) -> AIAgent:
     """Resolve Codex credentials fresh and build an AIAgent bound to them."""
     rt = resolve_runtime_provider(requested=config.agent_provider)
     return AIAgent(
@@ -224,7 +276,7 @@ def _resolve_agent(sender_open_id: str | None = None) -> AIAgent:
             "steven_reminders",
         ],
         disabled_toolsets=["terminal"],
-        ephemeral_system_prompt=_build_system_prompt(sender_open_id),
+        ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx),
     )
 
 
@@ -272,12 +324,21 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
         for m in hist
         if m.get("role") in ("user", "assistant") and m.get("text")
     ]
+    platform_ctx = lsr_platform.lay_ngu_canh(chat_id, user_text, sender_open_id or "")
+    if not history_msgs and isinstance(platform_ctx.get("recent_turns"), list):
+        history_msgs = [
+            {"role": m.get("role"), "content": m.get("text")}
+            for m in platform_ctx["recent_turns"]
+            if isinstance(m, dict)
+            and m.get("role") in ("user", "assistant")
+            and m.get("text")
+        ]
 
     # AUDIT: mở một lượt trước khi gọi model. Mọi tool được gọi trong lượt này
     # tự ghi vào đó (audit.boc_registry đã bọc handler của cả 10 tool).
     turn_id = audit.bat_dau(chat_id, sender_open_id, user_text)
 
-    agent = _resolve_agent(sender_open_id)
+    agent = _resolve_agent(sender_open_id, platform_ctx)
     try:
         out = agent.run_conversation(user_text, conversation_history=history_msgs)
     except Exception as e:
@@ -299,5 +360,18 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
             {"role": "user", "text": user_text, "sender": sender_open_id},
             {"role": "assistant", "text": text},
         ],
+    )
+    lsr_platform.ghi_luot_ngu_canh(
+        chat_id,
+        user_text,
+        text,
+        sender_open_id or "",
+        channel=(
+            "web"
+            if sender_open_id == "console"
+            or chat_id.startswith("web:")
+            or chat_id.startswith("job:")
+            else "lark"
+        ),
     )
     return text
