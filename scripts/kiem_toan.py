@@ -444,8 +444,13 @@ def phan_F(env: dict, pat: str) -> None:
         return _goi(f"{PLATFORM}/v1/self/context?{s}", K)[1] or {}
     dv, pv = ctx("dev"), ctx("prod")
     ca("F7", "dev có version", dv.get("version") is not None, f"v{dv.get('version')}")
-    ca("F8", "prod chưa có version (đúng như đang biết)", pv.get("version") is None,
-       "chặn bởi eval gate — không phải lỗi")
+    # 19/09: prod ĐÃ có version, qua đúng cổng — chạy golden set thật rồi nộp điểm,
+    # không dùng `force`. Trước đó mục này khẳng định điều ngược lại.
+    ca("F8", "prod đã có version", pv.get("version") is not None, f"v{pv.get('version')}")
+    ca("F8b", "instruction đã tới prod", len(pv.get("instruction_block") or "") > 3000,
+       f"{len(pv.get('instruction_block') or '')} ký tự")
+    ca("F8c", "dev và prod cùng một version", dv.get("version") == pv.get("version"),
+       f"dev v{dv.get('version')} · prod v{pv.get('version')}")
     ca("F9", "kiến thức tới được agent qua RAG",
        bool((pv.get("knowledge") or []) or (dv.get("knowledge") or [])))
 
@@ -489,6 +494,9 @@ def phan_G() -> None:
              if not (GOC / m["path"]).is_file() and not (GOC / "knowledge" / m["path"]).is_file()]
     ca("G10", "mọi tài liệu đã duyệt đều có file trên máy", not thieu,
        f"{len(duyet)} tài liệu" + (f" · thiếu {thieu}" if thieu else ""))
+    ca("G12", "có bộ chạy hồi quy", (GOC / "scripts" / "chay_hoi_quy.py").is_file(),
+       "không có thì cổng go-live chỉ qua được bằng force")
+    ca("G13", "có bộ quét Wiki", (GOC / "scripts" / "nap_wiki.py").is_file())
     ws = _j.loads((GOC / "knowledge" / "wiki-source.json").read_text(encoding="utf-8"))
     ca("G11", "nguồn Wiki vẫn TẮT khi ADR chưa sign-off", ws.get("enabled") is False,
        "bật sớm là kéo cả bảng nhân sự vào kho kiến thức")
