@@ -103,11 +103,25 @@ def token_tu_link(url: str) -> str:
     return url.rsplit("/wiki/", 1)[1].split("?")[0].split("#")[0].strip()
 
 
+#: Lỗi gần nhất khi gọi Lark — để phân biệt "bot không có quyền" với "code sai".
+_LOI_CUOI = {"gi": ""}
+
+
 def lay_node(token: str) -> dict | None:
+    """None = không lấy được. Lý do THẬT nằm ở `_LOI_CUOI`, đừng đoán.
+
+    Bản đầu nuốt mọi exception rồi báo "bot chưa được cấp quyền đọc". Hoá ra là tôi
+    gõ `params=` trong khi `lark.call` nhận `query=` — một TypeError bị đọc thành
+    thiếu quyền, và tôi đi nhầm hướng nửa ngày, còn viết cả vào mô tả PR.
+    """
     try:
         d = lark.call("GET", "/open-apis/wiki/v2/spaces/get_node",
-                      params={"token": token, "obj_type": "wiki"})
-    except Exception:
+                      query={"token": token, "obj_type": "wiki"})
+    except Exception as e:
+        _LOI_CUOI["gi"] = f"{type(e).__name__}: {e}"
+        return None
+    if d and d.get("code") not in (0, None):
+        _LOI_CUOI["gi"] = f"Lark code={d.get('code')} · {d.get('msg')}"
         return None
     return (((d or {}).get("data") or {}).get("node")) or None
 
@@ -127,7 +141,7 @@ def liet_ke_con(space_id: str, cha: str) -> list[dict] | None:
         if trang:
             p["page_token"] = trang
         try:
-            d = lark.call("GET", f"/open-apis/wiki/v2/spaces/{space_id}/nodes", params=p)
+            d = lark.call("GET", f"/open-apis/wiki/v2/spaces/{space_id}/nodes", query=p)
         except Exception:
             return None
         if not d or d.get("code") not in (0, None):
@@ -159,7 +173,7 @@ def lay_block(doc_id: str) -> list[dict] | None:
         if trang:
             p["page_token"] = trang
         try:
-            d = lark.call("GET", f"/open-apis/docx/v1/documents/{doc_id}/blocks", params=p)
+            d = lark.call("GET", f"/open-apis/docx/v1/documents/{doc_id}/blocks", query=p)
         except Exception:
             return None
         if not d or d.get("code") not in (0, None):
@@ -219,8 +233,8 @@ def quet(url: str) -> dict:
         return {"loi": f"link không có /wiki/<node>: {url[:70]}"}
     goc = lay_node(tok)
     if not goc:
-        return {"loi": "không phân giải được node gốc — bot chưa được cấp quyền đọc, "
-                       "hoặc link sai"}
+        return {"loi": "không phân giải được node gốc — "
+                       + (_LOI_CUOI["gi"] or "Lark không trả node nào")}
     space = goc.get("space_id") or ""
     tham: list[dict] = []
     khong_doc = 0
