@@ -267,7 +267,14 @@ def _platform_context_block(ctx: dict | None) -> str:
             title = (hit.get("title") or hit.get("item_id") or "Nguồn").strip()
             source = (hit.get("source_url") or hit.get("source_ref") or "").strip()
             content = (hit.get("content") or "").strip()[:1200]
-            lines.append(f"- Nguồn: {title}" + (f" — {source}" if source else ""))
+            # Ngày cập nhật của CHÍNH mẩu này. Thiếu nó thì kho và web trông ngang
+            # nhau về độ tươi, và model trả lời câu hỏi về hiện tại bằng dữ liệu nạp
+            # từ lâu mà vẫn nghe có căn cứ. Cắt còn `YYYY-MM-DD` — giờ phút không
+            # giúp gì cho việc quyết định còn dùng được hay không.
+            ngay = str(hit.get("updated_at") or "")[:10]
+            lines.append(f"- Nguồn: {title}"
+                         + (f" — {source}" if source else "")
+                         + (f" · cập nhật {ngay}" if ngay else ""))
             if content:
                 lines.append(f"  Nội dung: {content}")
         lines.append("Khi dùng evidence trên, phải nêu tên nguồn/URL; không suy diễn ngoài nội dung.")
@@ -302,6 +309,9 @@ _LUAT_NGUON = [
     "lúc này, tin mới) mà bạn chỉ dựa vào kho, phải nói thêm một câu rằng đây là "
     "theo tài liệu nội bộ và chưa đối chiếu web, rồi hỏi có cần tra thêm không.",
     "6. Luôn nói rõ con số nào lấy từ đâu.",
+    "7. Mỗi mẩu trên có ghi `cập nhật <ngày>`. Dùng nó để biết tài liệu còn mới "
+    "không: dẫn số liệu từ mẩu cũ thì nói kèm ngày của nó, đừng trình bày như thể "
+    "đó là tình hình hôm nay.",
 ]
 
 
