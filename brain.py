@@ -271,7 +271,32 @@ def _platform_context_block(ctx: dict | None) -> str:
             if content:
                 lines.append(f"  Nội dung: {content}")
         lines.append("Khi dùng evidence trên, phải nêu tên nguồn/URL; không suy diễn ngoài nội dung.")
+        lines += _LUAT_NGUON
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+#: Khi nào tin kho tài liệu, khi nào phải ra web — và làm gì khi hai bên lệch nhau.
+#:
+#: Vì sao phải nói rõ: kho tài liệu KHÔNG phải một tool. RAG tự chạy mỗi lượt rồi dán
+#: 4 mẩu thẳng vào prompt, còn web search thì model phải chủ động gọi. Mất cân bằng đó
+#: khiến model gần như luôn chọn tài liệu — không phải vì tài liệu đúng hơn, mà vì nó
+#: đã nằm sẵn trước mắt, khỏi tốn một lượt gọi.
+#:
+#: Với agent social listening thì đó là thiên vị SAI CHIỀU: xu hướng, động thái đối
+#: thủ, giá — những thứ đổi theo tuần — mà trả lời bằng ảnh chụp lúc nạp tài liệu thì
+#: sai một cách rất khó phát hiện, vì câu trả lời nghe vẫn có căn cứ.
+_LUAT_NGUON = [
+    "",
+    "### Chọn nguồn: kho tài liệu hay web",
+    "- Kho tài liệu là ẢNH CHỤP tại lúc nạp, KHÔNG tự cập nhật. Web là hiện tại.",
+    "- Hỏi về nội bộ (quy trình, kiến trúc, quyết định, sự cố, số liệu công ty đã "
+    "chốt): tin kho tài liệu. Web không có và không nên có những thứ này.",
+    "- Hỏi thứ ĐỔI THEO THỜI GIAN (xu hướng, đối thủ đang chạy gì, giá, tin tức, số "
+    "liệu thị trường): phải ra web, KỂ CẢ khi kho tài liệu có nói về nó.",
+    "- Cả hai cùng có: lấy kho tài liệu làm gốc, rồi kiểm lại bằng web. LỆCH NHAU thì "
+    "NÓI CẢ HAI kèm ngày của mỗi bên, đừng tự chọn một bên rồi im.",
+    "- Luôn nói rõ con số nào lấy từ đâu. Người đọc phải biết cái nào tra lại được.",
+]
 
 
 def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None = None) -> str:

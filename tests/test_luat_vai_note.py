@@ -101,3 +101,55 @@ def test_khong_con_chu_cung_trong_prompt(bo_doi):
         "khối chữ cứng còn sống — xoá hẳn, đừng để ai dùng lại"
     )
     assert "LUẬT VAI PLANNER" not in brain._build_system_prompt(None, None)
+
+
+# ───────────────────── luật chọn nguồn: kho tài liệu hay web ──────────────────
+#
+# Kho tài liệu KHÔNG phải một tool: RAG tự chạy mỗi lượt rồi dán mẩu thẳng vào prompt,
+# còn web search thì model phải chủ động gọi. Mất cân bằng đó khiến model gần như luôn
+# chọn tài liệu — không phải vì tài liệu đúng hơn, mà vì nó đã nằm sẵn trước mắt.
+#
+# Với agent social listening thì đó là thiên vị SAI CHIỀU: xu hướng và động thái đối
+# thủ mà trả lời bằng ảnh chụp lúc nạp thì sai một cách rất khó phát hiện, vì câu trả
+# lời nghe vẫn có căn cứ.
+
+_CO_EVIDENCE = {"version": 1,
+                "knowledge": [{"title": "x.md", "content": "abc", "source_url": "u"}]}
+
+
+def test_co_evidence_thi_co_luat_chon_nguon(bo_doi):
+    brain, _ = bo_doi
+    sp = brain._build_system_prompt(None, _CO_EVIDENCE)
+    assert "### Chọn nguồn: kho tài liệu hay web" in sp
+
+
+def test_khong_co_evidence_thi_khong_dan_luat(bo_doi):
+    """Không có mẩu nào thì luật vô nghĩa — đừng làm phình prompt."""
+    brain, _ = bo_doi
+    sp = brain._build_system_prompt(None, {"version": 1, "instruction_block": "x"})
+    assert "Chọn nguồn" not in sp
+
+
+def test_noi_ro_kho_tai_lieu_la_anh_chup(bo_doi):
+    brain, _ = bo_doi
+    sp = brain._build_system_prompt(None, _CO_EVIDENCE)
+    assert "ẢNH CHỤP tại lúc nạp" in sp, (
+        "không nói thì model coi tài liệu ngang với hiện tại, và trả lời câu về xu "
+        "hướng bằng dữ liệu cũ mà vẫn nghe có căn cứ"
+    )
+
+
+def test_viec_doi_theo_thoi_gian_phai_ra_web(bo_doi):
+    brain, _ = bo_doi
+    sp = brain._build_system_prompt(None, _CO_EVIDENCE)
+    assert "phải ra web, KỂ CẢ khi" in sp, (
+        "phải nói RÕ là kể cả khi kho có nói tới — không thì model thấy kho có rồi là "
+        "dừng, đúng cái thiên vị đang cần chữa"
+    )
+
+
+def test_lech_nhau_thi_phai_noi_ca_hai(bo_doi):
+    """Phần giá trị nhất: tự chọn một bên rồi im là giấu mất mâu thuẫn."""
+    brain, _ = bo_doi
+    sp = brain._build_system_prompt(None, _CO_EVIDENCE)
+    assert "NÓI CẢ HAI kèm ngày" in sp
