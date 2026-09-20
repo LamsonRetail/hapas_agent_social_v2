@@ -419,8 +419,17 @@ def phan_F(env: dict, pat: str) -> None:
     K = env["LSR_TELEMETRY_API_KEY"]
     c, kn = _goi(f"{WEB}/api/agents/{AID}/knowledge", pat, cookie=True)
     docs = (kn or {}).get("documents") or []
-    ca("F1", "kiến thức còn nguyên", len(docs) == 6 and (kn or {}).get("total_chunks") == 52,
-       f"{len(docs)} tài liệu · {(kn or {}).get('total_chunks')} mẩu")
+    # Mốc cũ là "đúng 6 tài liệu / 52 mẩu" — đúng tới 20/09, trước khi nạp Wiki.
+    # Bất biến THẬT không phải tổng số, mà là: nạp Wiki KHÔNG được làm hỏng sáu tài
+    # liệu nghiên cứu gốc. Hai nguồn phân biệt được nhờ tiền tố `wiki_`.
+    goc = [d for d in docs if not str(d["name"]).startswith("wiki_")]
+    wiki_d = [d for d in docs if str(d["name"]).startswith("wiki_")]
+    ca("F1", "6 tài liệu nghiên cứu gốc còn nguyên",
+       len(goc) == 6 and sum(d["chunks"] for d in goc) == 52,
+       f"{len(goc)} tài liệu · {sum(d['chunks'] for d in goc)} mẩu")
+    ca("F1b", "tài liệu Wiki nằm riêng, không đè lên bản gốc",
+       len(docs) == len(goc) + len(wiki_d),
+       f"{len(wiki_d)} tài liệu Wiki · tổng {len(docs)}")
     c, sk = _goi(f"{WEB}/api/agents/{AID}/skills", pat, cookie=True)
     ca("F2", "6 kỹ năng đang bật", len((sk or {}).get("selected") or []) == 6,
        f"{len((sk or {}).get('selected') or [])} bật / {len((sk or {}).get('custom') or [])} riêng")
@@ -437,7 +446,7 @@ def phan_F(env: dict, pat: str) -> None:
     ca("F6", "Agent Card quảng cáo đúng năng lực đang bật",
        all(x["name"] in ten for x in caps), f"{len(ten)} skill")
 
-    def ctx(e, q="xu huong tui xach SS27 HAPAS"):
+    def ctx(e, q="kiến trúc v4 nguyên tắc kiến trúc"):
         # Truy vấn PHẢI có nghĩa: RAG không khớp gì với "x", và bài test cũ dùng "x"
         # rồi báo đỏ oan — lỗi của bài test, không phải của sản phẩm.
         s = urllib.parse.urlencode({"session_id": "kiemtoan", "q": q, "user_ref": "", "env": e})
@@ -453,6 +462,15 @@ def phan_F(env: dict, pat: str) -> None:
        f"dev v{dv.get('version')} · prod v{pv.get('version')}")
     ca("F9", "kiến thức tới được agent qua RAG",
        bool((pv.get("knowledge") or []) or (dv.get("knowledge") or [])))
+    h = (pv.get("knowledge") or []) or (dv.get("knowledge") or [])
+    ca("F10", "mỗi mẩu kèm ngày cập nhật", bool(h) and all(x.get("updated_at") for x in h),
+       "thiếu ngày thì kho và web trông ngang nhau về độ tươi")
+    wk = [x for x in h if str(x.get("title", "")).startswith("wiki_")]
+    ca("F11", "mẩu từ Wiki có link bấm được", not wk or all(
+        str(x.get("source_url") or "").startswith("http") for x in wk),
+       f"{len(wk)} mẩu wiki" if wk else "(lượt này không trúng mẩu wiki)")
+    ca("F12", "link Wiki có neo tới mục H1", not wk or all(
+        "#" in str(x.get("source_url") or "") for x in wk))
 
 
 # ══════════════════════════════════ G · VẬN HÀNH ══════════════════════════════
