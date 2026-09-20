@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 
 import lark_client as lark
+import lsr_platform            # nối platform — chỉ báo cáo, không đổi hành vi
 from config import config
 from listener import start_listener
 
@@ -133,7 +134,7 @@ def _do_reply(msg: dict) -> None:
         failed = True
     except Exception as e:
         print(f"[brain] error: {e}")
-        reply = f"Xin lỗi, em gặp lỗi khi xử lý: {e}"
+        reply = "Xin lỗi, Mark gặp lỗi khi xử lý. Anh/chị thử lại giúp em nhé."
         failed = True
 
     # 3) Reply as the bot. If the message came from inside a thread, answer
@@ -165,6 +166,22 @@ def _do_reply(msg: dict) -> None:
     if (failed or not delivered) and message_id:
         lark.add_reaction(message_id, "CrossMark")
 
+    # 5) Báo lượt cho platform. Đặt CUỐI CÙNG, sau khi tin đã ra và badge đã gỡ:
+    # hàm này không ném, không đợi, và tự tắt nếu chưa cấu hình — nên không có
+    # đường nào nó làm hỏng một câu trả lời.
+    try:
+        import audit
+        audit_record = audit.lay_luot_vua_xong(chat_id)
+    except Exception:
+        audit_record = {}
+    lsr_platform.bao_luot(
+        message_id or chat_id,
+        text,
+        reply,
+        ok=(delivered and not failed),
+        audit_record=audit_record,
+    )
+
 
 def _typing_badge_on() -> bool:
     return os.environ.get("AGENT_TYPING_BADGE", "0").strip() == "1"
@@ -175,6 +192,17 @@ def main() -> None:
     print(f"  Base URL:   {config.base_url}")
     print(f"  Model:      {config.agent_model} (provider={config.agent_provider})")
     print(f"  App ID:     {config.app_id}")
+    print(f"  {lsr_platform.bat()}")
+
+    # Cửa vào thứ hai: người quản trị nhắn thử trên console thì platform tạo job.
+    # Vòng này đi lấy và đưa vào ĐÚNG brain.reply mà listener Lark vẫn gọi — không
+    # có bộ não thứ hai, không có nhánh xử lý riêng.
+    def _tra_loi_job(text, chat_id=None, sender_open_id=None):
+        import brain
+        return brain.reply(text, chat_id=chat_id, sender_open_id=sender_open_id)
+
+    if lsr_platform.chay_vong_job(_tra_loi_job):
+        print("  Job console: đang lắng nghe (/v1/self/jobs)")
 
     try:
         lark.get_tenant_token()
@@ -213,6 +241,20 @@ def main() -> None:
         scheduler.start_ticker()
     except Exception as e:
         print(f"  Reminders:  ❌ {e}")
+
+    # Nhịp nền theo dõi nguồn Wiki: quét định kỳ và BÁO, chỉ nhập khi chủ agent bấm
+    # "Nhập ngay" trên console. Trước đây giao diện hứa "agent sẽ quét ở lượt kiểm
+    # nguồn kế tiếp" mà không có lượt nào — dán link xong ngồi đợi mãi.
+    try:
+        import wiki_tu_dong
+
+        if wiki_tu_dong.start_ticker():
+            print(f"  Wiki:       ✅ quét mỗi {wiki_tu_dong.NHIP_QUET / 60:.0f}′ · "
+                  f"kiểm lệnh nhập mỗi {wiki_tu_dong.NHIP_NHAP:.0f}s")
+        else:
+            print("  Wiki:       ⛔ tắt (thiếu khoá agent hoặc ~/.lsr/token)")
+    except Exception as e:
+        print(f"  Wiki:       ❌ {type(e).__name__}: {e}")
 
     start_listener(handle_incoming)  # blocking
 
