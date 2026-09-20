@@ -25,6 +25,7 @@ CHỈ ĐỌC WIKI. Không ghi Wiki, không sửa node nào.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
@@ -188,20 +189,22 @@ def lay_block(doc_id: str) -> list[dict] | None:
     return ra
 
 
-def cat_theo_h1(blocks: list[dict]) -> list[tuple[str, list[str]]]:
+def cat_theo_h1(blocks: list[dict]) -> list[tuple[str, list[str], str]]:
     """Cắt tài liệu theo mục H1 — đúng độ mịn ADR `WIKI` chốt.
 
     Bỏ phần đầu tài liệu TRƯỚC H1 đầu tiên: đó thường là mục lục hoặc lời dẫn, đưa vào
     kho làm nhiễu phần trích dẫn.
     """
-    muc: list[tuple[str, list[str]]] = []
+    muc: list[tuple[str, list[str], str]] = []
     tieu_de: str | None = None
     dong: list[str] = []
+    neo = ""          # block_id của chính dòng H1 — dùng làm neo trong link
     for b in blocks:
         if b.get("block_type") == B_H1:
             if tieu_de is not None:
-                muc.append((tieu_de, dong))
+                muc.append((tieu_de, dong, neo))
             tieu_de = re.sub(r"\*\*", "", _chu(b)).strip() or "(không tiêu đề)"
+            neo = str(b.get("block_id") or "")
             dong = []
             continue
         if tieu_de is None:
@@ -210,8 +213,23 @@ def cat_theo_h1(blocks: list[dict]) -> list[tuple[str, list[str]]]:
         if t:
             dong.append(t)
     if tieu_de is not None:
-        muc.append((tieu_de, dong))
+        muc.append((tieu_de, dong, neo))
     return muc
+
+
+def _link_muc(node_token: str, neo: str) -> str:
+    """Link về đúng mục H1 trong Wiki.
+
+    Phần NODE luôn đúng — đó là link người dùng vẫn mở hằng ngày. Phần neo `#block_id`
+    là cố gắng thêm: Lark xử lý neo ở phía trình duyệt nên không kiểm được từ server.
+    Neo sai thì trang vẫn mở đúng tài liệu, chỉ là không nhảy tới mục — hỏng nhẹ, nên
+    đáng để thêm.
+    """
+    import os as _os
+    goc = (_os.environ.get("LARK_WIKI_BASE_URL")
+           or "https://o4pvcegwn6b.sg.larksuite.com").rstrip("/")
+    u = f"{goc}/wiki/{node_token}"
+    return f"{u}#{neo}" if neo else u
 
 
 _BI_MAT = re.compile(
@@ -274,16 +292,25 @@ def boc(nodes: list[dict]) -> tuple[list[dict], int]:
         blocks = lay_block(n["obj_token"])
         if blocks is None:
             continue
-        for tieu_de, dong in cat_theo_h1(blocks):
+        for i, (tieu_de, dong, neo) in enumerate(cat_theo_h1(blocks)):
             than = "\n".join(dong).strip()
             if not than:
                 continue
             than, k = che_bi_mat(than)
             che += k
+            # Tên phải DUY NHẤT. API kiến thức thay thế theo tên, nên hai mục trùng
+            # tên là mục sau đè mục trước — mất im lặng, không lỗi, không ai biết.
+            # Xảy ra thật ở nhánh này: hai mục "Daily Standup / 15092026" trong cùng
+            # một cây. Gắn thêm vân tay của node + số thứ tự mục.
             an_toan = re.sub(r"[^\w\s\-.]", "", f"{n['title']}-{tieu_de}").strip()
-            an_toan = re.sub(r"\s+", "_", an_toan)[:80]
-            ra.append({"name": f"wiki_{an_toan}.md",
-                       "content": f"# {tieu_de}\n\n_Nguồn Wiki: {n['title']}_\n\n{than}\n"})
+            an_toan = re.sub(r"\s+", "_", an_toan)[:72]
+            van_tay = hashlib.sha256(
+                f"{n.get('token')}|{i}|{tieu_de}".encode("utf-8")).hexdigest()[:6]
+            link = _link_muc(str(n.get("token") or ""), neo)
+            ra.append({"name": f"wiki_{an_toan}-{van_tay}.md",
+                       "source_url": link,
+                       "content": (f"# {tieu_de}\n\n_Nguồn Wiki: {n['title']}"
+                                   f" — {link}_\n\n{than}\n")})
     return ra, che
 
 
