@@ -275,27 +275,33 @@ def _platform_context_block(ctx: dict | None) -> str:
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
-#: Khi nào tin kho tài liệu, khi nào phải ra web — và làm gì khi hai bên lệch nhau.
+#: Thứ tự dùng nguồn: KHO TRƯỚC, web là đường lùi.
 #:
-#: Vì sao phải nói rõ: kho tài liệu KHÔNG phải một tool. RAG tự chạy mỗi lượt rồi dán
-#: 4 mẩu thẳng vào prompt, còn web search thì model phải chủ động gọi. Mất cân bằng đó
-#: khiến model gần như luôn chọn tài liệu — không phải vì tài liệu đúng hơn, mà vì nó
-#: đã nằm sẵn trước mắt, khỏi tốn một lượt gọi.
+#: Theo quyết định của chủ agent 20/09, và lý do đứng vững: wiki được đội tự soạn và
+#: cập nhật thường xuyên thì nó CÓ THẨM QUYỀN — ra web hỏi thứ đội đã tự chốt là đổi
+#: một câu trả lời đúng lấy một câu trả lời chung chung.
 #:
-#: Với agent social listening thì đó là thiên vị SAI CHIỀU: xu hướng, động thái đối
-#: thủ, giá — những thứ đổi theo tuần — mà trả lời bằng ảnh chụp lúc nạp tài liệu thì
-#: sai một cách rất khó phát hiện, vì câu trả lời nghe vẫn có căn cứ.
+#: Bản trước làm ngược: bắt ra web cho mọi thứ đổi theo thời gian, kể cả khi kho có.
+#: Sai ở giả định — nó coi kho là ảnh chụp tĩnh, trong khi kho ở đây là wiki sống.
+#:
+#: Giữ đúng MỘT chốt an toàn: câu hỏi về hiện tại mà chỉ dựa vào kho thì phải nói ra
+#: là chưa đối chiếu web. Không phải để cãi luật trên, mà để người đọc biết câu trả
+#: lời dựa trên cái gì — wiki dù cập nhật tốt tới đâu cũng không biết đối thủ vừa đổi
+#: giá sáng nay.
 _LUAT_NGUON = [
     "",
-    "### Chọn nguồn: kho tài liệu hay web",
-    "- Kho tài liệu là ẢNH CHỤP tại lúc nạp, KHÔNG tự cập nhật. Web là hiện tại.",
-    "- Hỏi về nội bộ (quy trình, kiến trúc, quyết định, sự cố, số liệu công ty đã "
-    "chốt): tin kho tài liệu. Web không có và không nên có những thứ này.",
-    "- Hỏi thứ ĐỔI THEO THỜI GIAN (xu hướng, đối thủ đang chạy gì, giá, tin tức, số "
-    "liệu thị trường): phải ra web, KỂ CẢ khi kho tài liệu có nói về nó.",
-    "- Cả hai cùng có: lấy kho tài liệu làm gốc, rồi kiểm lại bằng web. LỆCH NHAU thì "
-    "NÓI CẢ HAI kèm ngày của mỗi bên, đừng tự chọn một bên rồi im.",
-    "- Luôn nói rõ con số nào lấy từ đâu. Người đọc phải biết cái nào tra lại được.",
+    "### Thứ tự dùng nguồn",
+    "1. KHO TÀI LIỆU TRƯỚC. Kho là wiki do đội soạn riêng và cập nhật thường xuyên — "
+    "với việc nội bộ thì nó có thẩm quyền cao hơn bất cứ nguồn nào trên web.",
+    "2. Trả lời được bằng kho thì DỪNG Ở ĐÓ, không cần ra web.",
+    "3. Kho KHÔNG có mới ra web. Lúc đó nói rõ đây là thông tin ngoài, không phải "
+    "quan điểm nội bộ của đội.",
+    "4. Hỏi nghiệp vụ — quy trình, cách làm, quyết định, phân công, số liệu đội đã "
+    "chốt — thì LUÔN theo kho. Web không có thẩm quyền về những thứ này.",
+    "5. Chốt an toàn: nếu câu hỏi về TÌNH HÌNH HIỆN TẠI (đối thủ đang chạy gì, giá "
+    "lúc này, tin mới) mà bạn chỉ dựa vào kho, phải nói thêm một câu rằng đây là "
+    "theo tài liệu nội bộ và chưa đối chiếu web, rồi hỏi có cần tra thêm không.",
+    "6. Luôn nói rõ con số nào lấy từ đâu.",
 ]
 
 

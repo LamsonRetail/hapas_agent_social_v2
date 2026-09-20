@@ -103,15 +103,16 @@ def test_khong_con_chu_cung_trong_prompt(bo_doi):
     assert "LUẬT VAI PLANNER" not in brain._build_system_prompt(None, None)
 
 
-# ───────────────────── luật chọn nguồn: kho tài liệu hay web ──────────────────
+
+# ───────────────── thứ tự dùng nguồn: kho trước, web là đường lùi ─────────────
 #
-# Kho tài liệu KHÔNG phải một tool: RAG tự chạy mỗi lượt rồi dán mẩu thẳng vào prompt,
-# còn web search thì model phải chủ động gọi. Mất cân bằng đó khiến model gần như luôn
-# chọn tài liệu — không phải vì tài liệu đúng hơn, mà vì nó đã nằm sẵn trước mắt.
+# Quyết định của chủ agent 20/09: wiki do đội soạn riêng và cập nhật thường xuyên thì
+# nó CÓ THẨM QUYỀN, nên kho đi trước và web chỉ là đường lùi. Bản trước bắt ra web cho
+# mọi thứ đổi theo thời gian — sai ở giả định, vì nó coi kho là ảnh chụp tĩnh.
 #
-# Với agent social listening thì đó là thiên vị SAI CHIỀU: xu hướng và động thái đối
-# thủ mà trả lời bằng ảnh chụp lúc nạp thì sai một cách rất khó phát hiện, vì câu trả
-# lời nghe vẫn có căn cứ.
+# Chốt an toàn duy nhất giữ lại: hỏi về hiện tại mà chỉ dựa vào kho thì phải nói ra là
+# chưa đối chiếu web. Wiki dù cập nhật tốt tới đâu cũng không biết đối thủ vừa đổi giá
+# sáng nay.
 
 _CO_EVIDENCE = {"version": 1,
                 "knowledge": [{"title": "x.md", "content": "abc", "source_url": "u"}]}
@@ -119,37 +120,42 @@ _CO_EVIDENCE = {"version": 1,
 
 def test_co_evidence_thi_co_luat_chon_nguon(bo_doi):
     brain, _ = bo_doi
-    sp = brain._build_system_prompt(None, _CO_EVIDENCE)
-    assert "### Chọn nguồn: kho tài liệu hay web" in sp
+    assert "### Thứ tự dùng nguồn" in brain._build_system_prompt(None, _CO_EVIDENCE)
 
 
 def test_khong_co_evidence_thi_khong_dan_luat(bo_doi):
     """Không có mẩu nào thì luật vô nghĩa — đừng làm phình prompt."""
     brain, _ = bo_doi
     sp = brain._build_system_prompt(None, {"version": 1, "instruction_block": "x"})
-    assert "Chọn nguồn" not in sp
+    assert "Thứ tự dùng nguồn" not in sp
 
 
-def test_noi_ro_kho_tai_lieu_la_anh_chup(bo_doi):
+def test_kho_di_truoc(bo_doi):
     brain, _ = bo_doi
     sp = brain._build_system_prompt(None, _CO_EVIDENCE)
-    assert "ẢNH CHỤP tại lúc nạp" in sp, (
-        "không nói thì model coi tài liệu ngang với hiện tại, và trả lời câu về xu "
-        "hướng bằng dữ liệu cũ mà vẫn nghe có căn cứ"
+    assert "KHO TÀI LIỆU TRƯỚC" in sp
+    assert "DỪNG Ở ĐÓ" in sp, "trả lời được bằng kho thì phải dừng, không ra web nữa"
+
+
+def test_kho_khong_co_moi_ra_web(bo_doi):
+    brain, _ = bo_doi
+    sp = brain._build_system_prompt(None, _CO_EVIDENCE)
+    assert "Kho KHÔNG có mới ra web" in sp
+    assert "không phải quan điểm nội bộ" in sp, (
+        "lấy từ web thì phải nói rõ, kẻo người đọc tưởng đó là chốt của đội"
     )
 
 
-def test_viec_doi_theo_thoi_gian_phai_ra_web(bo_doi):
+def test_nghiep_vu_luon_theo_kho(bo_doi):
+    brain, _ = bo_doi
+    assert "LUÔN theo kho" in brain._build_system_prompt(None, _CO_EVIDENCE)
+
+
+def test_van_giu_chot_an_toan_ve_tinh_hinh_hien_tai(bo_doi):
+    """Chốt này là thứ duy nhất còn lại của bản trước — không được mất."""
     brain, _ = bo_doi
     sp = brain._build_system_prompt(None, _CO_EVIDENCE)
-    assert "phải ra web, KỂ CẢ khi" in sp, (
-        "phải nói RÕ là kể cả khi kho có nói tới — không thì model thấy kho có rồi là "
-        "dừng, đúng cái thiên vị đang cần chữa"
+    assert "chưa đối chiếu web" in sp, (
+        "hỏi về hiện tại mà chỉ dựa vào kho thì phải nói ra — wiki dù cập nhật tốt "
+        "tới đâu cũng không biết đối thủ vừa đổi giá sáng nay"
     )
-
-
-def test_lech_nhau_thi_phai_noi_ca_hai(bo_doi):
-    """Phần giá trị nhất: tự chọn một bên rồi im là giấu mất mâu thuẫn."""
-    brain, _ = bo_doi
-    sp = brain._build_system_prompt(None, _CO_EVIDENCE)
-    assert "NÓI CẢ HAI kèm ngày" in sp
