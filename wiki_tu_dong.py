@@ -87,6 +87,43 @@ def _bao_len_console(kb: dict, moi: dict) -> bool:
     return c == 200
 
 
+def _van_tay(nodes: list[dict]) -> dict:
+    """Bản đồ {node → mốc sửa cuối}. Đây là thứ phát hiện được nội dung ĐÃ ĐỔI.
+
+    Đếm số mục H1 không đủ: ai sửa nội dung một tài liệu mà không thêm/bớt mục thì con
+    số y nguyên, và người dùng không có tín hiệu nào. Lark cho sẵn `obj_edit_time` trên
+    mỗi node — cách agent HR dùng trong `watch_wiki.py`, và đây là bản y như thế.
+    """
+    return {str(n.get("token")): int(n.get("sua_luc") or 0)
+            for n in nodes if n.get("token")}
+
+
+def _so_van_tay(cu: dict, moi: dict) -> dict:
+    """So hai bản đồ → đếm node mới / đã sửa / đã mất."""
+    cu = cu or {}
+    return {
+        "moi": sum(1 for k in moi if k not in cu),
+        "sua": sum(1 for k, v in moi.items() if k in cu and v > cu[k]),
+        "mat": sum(1 for k in cu if k not in moi),
+    }
+
+
+def _can_quet_lai(kb: dict, lan_quet: float) -> str:
+    """Có lý do nào để quét lại ngay không? Trả lý do, hoặc chuỗi rỗng.
+
+    ĐỔI LINK phải quét lại NGAY, không đợi hết 30 phút. Người vừa dán link mới đang
+    ngồi nhìn màn hình; bắt họ chờ nửa tiếng đã tệ, nhưng tệ hơn là trong nửa tiếng đó
+    console vẫn hiện số liệu của LINK CŨ — tức nói sai, không chỉ chậm.
+    """
+    da_quet = str((kb.get("last_scan") or {}).get("root_url") or "")
+    hien = str(kb.get("root_url") or "")
+    if hien and hien != da_quet:
+        return "link đổi"
+    if time.time() - lan_quet >= NHIP_QUET:
+        return "tới hạn"
+    return ""
+
+
 def _can_nhap(kb: dict) -> bool:
     """Chủ agent đã bấm 'Nhập ngay' SAU lần quét/nhập gần nhất chưa?"""
     xin = str(kb.get("xin_nhap_luc") or "")
@@ -115,12 +152,20 @@ def mot_luot(nhap: bool) -> dict:
     if kq.get("loi"):
         _bao_len_console(kb, {"last_scan": {
             "at": _bay_gio(), "nodes": 0, "sections": 0, "imported": 0,
-            "unreadable": 0, "note": f"Quét lỗi: {kq['loi']}"[:200]}})
+            "unreadable": 0, "root_url": str(kb["root_url"]),
+            # Ghi link cả khi lỗi: không ghi thì `_can_quet_lai` thấy "link đổi" mãi
+            # và quét lại mỗi 60 giây — một link hỏng thành vòng lặp nện API Lark.
+            "note": f"Quét lỗi: {kq['loi']}"[:200]}})
         return {"loi": kq["loi"]}
 
+    vt = _van_tay(kq["nodes"])
+    doi = _so_van_tay((kb.get("last_scan") or {}).get("van_tay") or {}, vt)
     tai_lieu, che = W.boc(kq["nodes"])
     bc = {"at": _bay_gio(), "nodes": len(kq["nodes"]), "sections": len(tai_lieu),
+          "van_tay": vt, "doi": doi,
           "unreadable": kq["khong_doc"], "imported": 0,
+          # Link của CHÍNH lượt quét này — để lần sau biết link có đổi không.
+          "root_url": str(kb["root_url"]),
           "note": ("Đã chạm trần số node — cây còn nhánh chưa quét."
                    if kq.get("cham_tran") else "")}
 
@@ -131,7 +176,7 @@ def mot_luot(nhap: bool) -> dict:
         if che:
             bc["note"] = (bc["note"] + f" Đã che {che} chuỗi giống bí mật.").strip()
         _bao_len_console(kb, {"last_scan": bc})
-        return {"quet": len(tai_lieu)}
+        return {"quet": len(tai_lieu), **({"đổi": doi} if any(doi.values()) else {})}
 
     da = 0
     for i in range(0, len(tai_lieu), 20):       # API trần 20 tệp mỗi lượt
@@ -160,9 +205,9 @@ def _vong(dung: threading.Event) -> None:
                     r = mot_luot(nhap=True)
                     print(f"[wiki] chủ agent bấm Nhập ngay → {r}", flush=True)
                     lan_quet = time.time()
-                elif time.time() - lan_quet >= NHIP_QUET:
+                elif (ly_do := _can_quet_lai(kb, lan_quet)):
                     r = mot_luot(nhap=False)
-                    print(f"[wiki] quét định kỳ → {r}", flush=True)
+                    print(f"[wiki] quét ({ly_do}) → {r}", flush=True)
                     lan_quet = time.time()
         except Exception as e:
             # Nuốt: nhịp nền hỏng không được làm bot chết hay chậm câu trả lời.
