@@ -33,7 +33,11 @@ GOC = pathlib.Path(__file__).resolve().parent
 AID = os.environ.get("LSR_AGENT_ID", "AG-SOCIAL-LISTENING")
 
 NHIP_QUET = float(os.environ.get("LSR_WIKI_NHIP_QUET_SECONDS", str(30 * 60)))
-NHIP_NHAP = float(os.environ.get("LSR_WIKI_NHIP_NHAP_SECONDS", "60"))
+#: 20 giây — chặng chờ này chiếm gần hết thời gian từ lúc bấm nút tới lúc kiến
+#: thức vào. Rẻ được vì `khai_bao()` hỏi `/v1/self` (0.5 KB) chứ không hỏi danh
+#: bạ (28 KB). Xuống dưới 10 giây thì vô nghĩa: lúc đó chặng chờ đã nhỏ hơn
+#: chính việc quét (~15 giây).
+NHIP_NHAP = float(os.environ.get("LSR_WIKI_NHIP_NHAP_SECONDS", "20"))
 
 _PLATFORM = "https://platform.34-124-212-76.sslip.io"
 _WEB = "https://app.34-124-212-76.sslip.io"
@@ -71,7 +75,18 @@ def _goi(url: str, *, cookie: str = "", bearer: str = "", body=None, timeout: in
 
 
 def khai_bao() -> dict:
-    """Khai báo Wiki của CHÍNH agent này, đọc qua danh bạ."""
+    """Khai báo Wiki của CHÍNH agent này.
+
+    Hỏi `/v1/self` chứ KHÔNG hỏi `/v1/self/directory`. Đo thật: danh bạ 28 KB và join
+    cả 81 agent mỗi lần; `/v1/self` 0.5 KB, đọc một dòng. Nhịp này chạy mỗi 20 giây nên
+    chênh lệch đó là 116 MB/ngày so với 2 MB/ngày.
+
+    Danh bạ vẫn là đường dự phòng: platform cũ chưa trả `wiki_source` ở `/v1/self` thì
+    rơi về đó, để bản agent mới không chết trên platform chưa deploy.
+    """
+    c, d = _goi(f"{_PLATFORM}/v1/self", bearer=_khoa_agent(), timeout=20)
+    if c == 200 and isinstance((d.get("agent") or {}).get("wiki_source", "…"), (dict, type(None))):
+        return ((d.get("agent") or {}).get("wiki_source")) or {}
     c, d = _goi(f"{_PLATFORM}/v1/self/directory", bearer=_khoa_agent(), timeout=30)
     if c != 200:
         return {}
