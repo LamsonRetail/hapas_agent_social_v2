@@ -1,0 +1,87 @@
+apiVersion: lsr/v2
+agent:
+  id: AG-SOCIAL-LISTENING
+  name: Mark Trần
+  type: planner
+  owner: thamnt@hapas.vn
+  backup_owner: thienlq@hapas.vn
+  squad: Chức năng dùng chung
+  description: >-
+    Theo dõi tín hiệu công khai về thương hiệu và đối thủ cho Marketing; phân tích,
+    dẫn nguồn và đề xuất, không tự gửi tin hoặc ghi vào hệ thống nghiệp vụ.
+  runtime:
+    kind: self_hosted
+    auth_mode: own
+    model: openai-codex
+data_sources:
+  - kind: mcp
+    ref: social-public
+    scope: meta,tiktok,youtube,instagram,threads:read
+  - kind: mcp
+    ref: public-web
+    scope: web:read
+  - kind: index
+    ref: mark-approved-knowledge
+    scope: agent:AG-SOCIAL-LISTENING:approved
+memory:
+  initial:
+    instruction_ref: repo:persona.md
+    skills:
+      - social-query-planning
+      - crisis-sentiment-sov
+      - comment-deep-dive
+      - competitor-ad-library
+      - evidence-reporting
+      - public-web-product-research
+    thresholds: {}
+  belief:
+    shared_brain: false
+    tags:
+      - social-listening
+      - marketing
+  retention:
+    interactions_days: 90
+    behaviors_days: 365
+connections:
+  - side: external
+    channel: web
+    in: [question]
+    out: [reply]
+  - side: external
+    channel: lark_app
+    in: [question, event]
+    out: [reply]
+  - side: internal
+    channel: a2a
+    in: [a2a_task]
+    out: [reply, call_agent]
+permissions:
+  access:
+    users:
+      - email: thamnt@hapas.vn
+        via: [web]
+    agents: []
+  data:
+    forbidden:
+      - internal_chat_transcripts
+      - hr_payroll
+      - credentials_and_tokens
+      - raw_social_pii
+    audiences:
+      - name: production-pending
+        viewers: []
+        covers:
+          - all_mark_reports
+kpis:
+  - name: Độ trễ tín hiệu rủi ro
+    metric: phút từ lúc evidence xuất hiện đến lúc Mark nêu tín hiệu
+    target: "<= 60 phút"
+  - name: Tỷ lệ cảnh báo sai
+    metric: cảnh báo bị reviewer bác / tổng cảnh báo
+    target: "<= 20%"
+  - name: Bỏ sót sự kiện trọng yếu
+    metric: sự kiện phát hiện qua kênh khác nhưng Mark không nêu
+    target: "= 0"
+  - name: Tỷ lệ báo cáo có nguồn
+    metric: báo cáo có source URL hợp lệ / tổng báo cáo dùng dữ liệu ngoài
+    target: ">= 95%"

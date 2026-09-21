@@ -1,6 +1,11 @@
 # Social Agent (Mark Trần) — Tài liệu bàn giao kỹ thuật
 
-Cập nhật: 30/08/2026 · Trạng thái: **đang chạy production**
+Cập nhật: 17/09/2026 · Trạng thái: **Lark legacy đang chạy; Platform mới ở dev/TEST**
+
+> **Bản bàn giao migration mới nhất:**
+> [`HANDOVER_PLATFORM_2026-09-17.md`](HANDOVER_PLATFORM_2026-09-17.md). Đọc tài liệu đó trước để
+> nắm ba identity Platform, worker TEST, backup, kết quả kiểm thử và các blocker hiện tại. Phần bên
+> dưới chủ yếu là runbook của hệ thống Lark/Hermes legacy.
 
 Bot Lark trả lời bằng Hermes brain, phục vụ mảng Branding Ads & Booking KOL/KOC
 của Lamson Retail. Tài liệu này dành cho người tiếp quản vận hành/phát triển.

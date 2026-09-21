@@ -1,0 +1,108 @@
+{
+  "agent": {
+    "id": "AG-SOCIAL-LISTENING",
+    "name": "Mark Trần",
+    "type": "executive",
+    "owner": "thamnt@hapas.vn",
+    "backup_owner": "thienlq@hapas.vn",
+    "squad": "Chức năng dùng chung",
+    "description": "Theo dõi mạng xã hội về brand và đối thủ, cảnh báo khủng hoảng, tổng hợp định kỳ. Cào dữ liệu năm nền tảng và xuất kết quả ra Lark Sheet — vì có sản phẩm đầu ra nên là executive, không phải planner.",
+    "runtime": {
+      "kind": "self_hosted",
+      "auth_mode": "own",
+      "model": "openai-codex"
+    }
+  },
+  "data_sources": [
+    {
+      "kind": "mcp",
+      "ref": "web_search"
+    },
+    {
+      "kind": "mcp",
+      "ref": "social"
+    },
+    {
+      "kind": "mcp",
+      "ref": "lark_wiki:public"
+    }
+  ],
+  "memory": {
+    "initial": {
+      "instruction_ref": "repo:hapas_agent_social/brain.py"
+    },
+    "belief": {},
+    "retention": {
+      "interactions_days": 90,
+      "behaviors_days": 365
+    }
+  },
+  "connections": [
+    {
+      "side": "internal",
+      "channel": "queue",
+      "in": [
+        "question",
+        "a2a_task",
+        "event"
+      ],
+      "out": [
+        "call_agent",
+        "reply",
+        "write_data"
+      ]
+    }
+  ],
+  "kpis": [
+    {
+      "name": "Độ trễ cảnh báo khủng hoảng",
+      "metric": "thời gian từ lúc bài viết xuất hiện tới lúc Mark Trần nêu cảnh báo",
+      "target": "≤ 60 phút"
+    },
+    {
+      "name": "Tỉ lệ cảnh báo sai",
+      "metric": "số cảnh báo bị người duyệt bác / tổng số cảnh báo nêu ra",
+      "target": "≤ 20%"
+    },
+    {
+      "name": "Bỏ sót khủng hoảng",
+      "metric": "số vụ khủng hoảng được phát hiện bằng đường khác mà Mark Trần không nêu",
+      "target": "= 0 vụ"
+    },
+    {
+      "name": "Ghi ngoài phạm vi",
+      "metric": "số lần ghi dữ liệu không phải Sheet kết quả nghiên cứu",
+      "target": "= 0 lần"
+    }
+  ],
+  "permissions": {
+    "access": {
+      "users": [
+        "Marketing",
+        "BOM"
+      ],
+      "agents": []
+    },
+    "data": {
+      "forbidden": [
+        "thông tin cá nhân của người dùng mạng xã hội — chỉ tổng hợp, không hồ sơ hoá từng người",
+        "nội dung nhóm chat nội bộ",
+        "dữ liệu nhân sự và lương"
+      ],
+      "audiences": [
+        {
+          "name": "Marketing",
+          "viewers": [
+            "*"
+          ]
+        },
+        {
+          "name": "BOM",
+          "viewers": [
+            "*"
+          ]
+        }
+      ]
+    }
+  }
+}

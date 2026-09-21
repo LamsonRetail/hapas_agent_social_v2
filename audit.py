@@ -284,6 +284,7 @@ def link_base() -> str:
 
 # ───────────────────────── vòng đời một lượt ─────────────────────────
 _dang_chay: dict[str, dict] = {}
+_vua_xong: dict[str, dict] = {}
 _khoa_luot = threading.Lock()
 # Mark chạy nhiều chat song song (AGENT_MAX_WORKERS). Mỗi thread giữ turn_id
 # riêng để `ghi_tool()` biết mình thuộc lượt nào — không truyền tay qua 10 tool.
@@ -355,10 +356,21 @@ def ket_thuc(turn_id: str, tra_loi: str, agent=None, loi: str = "",
         "giay": round(time.monotonic() - luot["t0"], 2),
         "trang_thai": trang_thai, "loi": _cat(loi, 500),
     }
+    with _khoa_luot:
+        _vua_xong[luot["chat"]] = rec
+        # Chỉ là cầu nối ngắn giữa brain worker và run worker; không phải kho audit.
+        while len(_vua_xong) > 500:
+            _vua_xong.pop(next(iter(_vua_xong)))
     _ghi(rec)
     if _DAY_LEN_BASE:
         threading.Thread(target=_day, args=(rec,), daemon=True).start()
     return rec
+
+
+def lay_luot_vua_xong(chat_id: str) -> dict:
+    """Lấy-và-xoá telemetry lượt cuối của chat để gửi sang Platform đúng một lần."""
+    with _khoa_luot:
+        return _vua_xong.pop(chat_id or "", {})
 
 
 # ───────────────────── bọc toàn bộ tool trong registry ─────────────────────
@@ -398,19 +410,31 @@ def boc_registry() -> int:
         da_boc.__doc__ = getattr(goc, "__doc__", None)
         return da_boc
 
+    def boc_async(ten: str, goc):
+        async def da_boc(args, **kw):
+            t0 = time.monotonic()
+            try:
+                kq = await goc(args, **kw)
+                ghi_tool(ten, args, kq, time.monotonic() - t0)
+                return kq
+            except Exception as e:
+                ghi_tool(ten, args, None, time.monotonic() - t0,
+                         loi=f"{type(e).__name__}: {e}")
+                raise
+        da_boc.__name__ = getattr(goc, "__name__", ten)
+        da_boc.__doc__ = getattr(goc, "__doc__", None)
+        return da_boc
+
     dem = bo_qua = 0
     try:
         for ten, entry in list(getattr(registry, "_tools", {}).items()):
             h = getattr(entry, "handler", None)
             if h is None or getattr(h, "_audit", False):
                 continue
-            # Tool async trả về coroutine — bọc đồng bộ sẽ ghi audit cho một
-            # coroutine CHƯA chạy (thời gian 0, không có kết quả), tức số liệu
-            # sai. Thà không audit tool đó còn hơn audit sai.
             if getattr(entry, "is_async", False):
-                bo_qua += 1
-                continue
-            moi = boc(ten, h)
+                moi = boc_async(ten, h)
+            else:
+                moi = boc(ten, h)
             moi._audit = True
             entry.handler = moi
             dem += 1

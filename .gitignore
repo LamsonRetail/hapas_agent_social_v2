@@ -26,3 +26,14 @@ lark-doc-auth-qr.png
 
 # ban ghi audit (du lieu noi bo, khong commit)
 .audit/
+.artifacts/
+
+# ban sao luu .env (chua LARK_APP_SECRET, APIFY_TOKEN, LSR_TELEMETRY_API_KEY)
+.env.*
+!.env.example
+
+# export hoi thoai noi bo — dac ta vai cam dua vao kho kien thuc,
+# va cung khong dua len repo
+ss27_chat_transcript*.md
+_xuat_toan_bo_chat_SS27.md
+xuat-toan-bo-chat-ss27.md
