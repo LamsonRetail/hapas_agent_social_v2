@@ -95,18 +95,29 @@ def tach(text: str) -> tuple[str, str]:
     return m.group(1).lower(), m.group(2).strip()
 
 
-def _doi_so_tham_do(tool: str) -> dict:
-    """Đối số tối thiểu để `decide()` trả lời đúng về tool này.
+def _muc_tool(tool: str) -> tuple[str, dict]:
+    """(mô tả, đối số thăm dò) của một tool, lấy từ `brain._TOOL_CAN_XET`.
 
-    Lấy từ `brain._TOOL_CAN_XET` chứ không gõ lại: `lark_cli` với args rỗng LUÔN bị
-    từ chối vì "thiếu danh sách args hợp lệ", nên bảng thăm dò gõ tay sẽ báo `/wiki`
-    bị cấm trong mọi hoàn cảnh. Nạp muộn để tránh vòng import với `brain`.
+    KHÔNG gõ lại ở đây, vì hai lý do khác nhau:
+
+    - Đối số: `lark_cli` với args rỗng LUÔN bị từ chối vì "thiếu danh sách args hợp
+      lệ", nên bảng thăm dò gõ tay sẽ báo `/wiki` bị cấm trong mọi hoàn cảnh.
+    - Mô tả: `_TOOL_CAN_XET` đã là nơi mô tả từng tool cho lời dặn gửi model. Chép
+      sang đây một bản nữa là tạo hai câu trả lời cho cùng câu hỏi "tool này làm gì",
+      rồi một hôm sửa một bên — `/help` nói một đằng, Mark hiểu một nẻo.
+
+    Nạp muộn để tránh vòng import với `brain`.
     """
     try:
         import brain
-        return dict(brain._TOOL_CAN_XET.get(tool, ("", {}))[1] or {})
+        mo_ta, args = brain._TOOL_CAN_XET.get(tool, ("", {}))
+        return str(mo_ta or ""), dict(args or {})
     except Exception:
-        return {}
+        return "", {}
+
+
+def _doi_so_tham_do(tool: str) -> dict:
+    return _muc_tool(tool)[1]
 
 
 def _duoc_khong(tool: str) -> tuple[bool, str]:
@@ -134,23 +145,44 @@ def _van_help() -> str:
     Gõ tay danh sách này là tạo nguồn sự thật thứ tư, và nó sẽ lệch đúng vào hôm ai
     đó tắt một năng lực — lúc người dùng cần nó đúng nhất.
     """
-    d = ["Các lệnh Mark nhận:", "", "NĂNG LỰC (ép dùng đúng công cụ đó)"]
-    for lenh, _tool, cho, _ly_do in _bang_trang_thai():
+    d = [
+        "Các lệnh Mark nhận.",
+        "",
+        "Lệnh đặt ở ĐẦU câu, phần sau cứ viết tiếng Việt bình thường. Không gõ lệnh "
+        "thì Mark tự chọn công cụ theo câu hỏi — gõ lệnh là bạn chỉ định thay nó.",
+        "",
+        "NĂNG LỰC — ép dùng đúng công cụ đó",
+    ]
+    co_tat = False
+    for lenh, tool, cho, _ly_do in _bang_trang_thai():
+        co_tat = co_tat or not cho
         d.append(f"  {lenh:<9} {'· đang bật' if cho else '· ĐANG TẮT'}")
+        mo_ta = _muc_tool(tool)[0]
+        if mo_ta:
+            d.append(f"      {mo_ta[0].upper() + mo_ta[1:]}.")
     d += [
         "",
-        "NGUỒN TRẢ LỜI",
-        "  /kho      chỉ dùng kho tài liệu, không ra web",
-        "  /web      bỏ qua kho, tra web",
+        "NGUỒN TRẢ LỜI — quyết định Mark lấy thông tin ở đâu",
+        "  /kho",
+        "      Chỉ trả lời bằng kho tài liệu nội bộ. Kho không có thì nói thẳng là "
+        "không có, không tự ra web.",
+        "  /web",
+        "      Bỏ qua kho, tra thẳng trên web. Dùng khi bạn biết tài liệu nội bộ đã cũ.",
+        "      (Không gõ gì thì mặc định là kho trước, web là đường lùi.)",
         "",
         "KHÁC",
-        "  /nho      ghi nhớ dài hạn một điều về bạn",
-        "  /nhac     đặt một lời nhắc",
-        "  /nangluc  xem quyền hạn và công tắc chi tiết",
+        "  /nho",
+        "      Ghi nhớ dài hạn một điều về bạn, để lần sau không phải nói lại.",
+        "  /nhac",
+        "      Đặt một lời nhắc theo thời gian, đến giờ Mark tự nhắn vào đây.",
+        "  /nangluc",
+        "      Xem quyền hạn platform cấp và từng công tắc đang bật hay tắt.",
         "",
-        "Gõ lệnh rồi viết tiếp bằng tiếng Việt bình thường, "
-        "ví dụ: /search áo thun nam 7 ngày tiktok",
+        "Ví dụ: /search áo thun nam 7 ngày tiktok",
     ]
+    if co_tat:
+        d.append("Lệnh ĐANG TẮT vẫn gõ được nhưng sẽ bị từ chối — bật lại ở khối "
+                 "Năng lực trên console.")
     return "\n".join(d)
 
 
@@ -176,6 +208,33 @@ def _van_nangluc() -> str:
     d += ["", "Hợp đồng đổi trên platform · công tắc đổi ở khối Năng lực trên console. "
           "Không sửa được từ chat."]
     return "\n".join(d)
+
+
+def _lam_luot_nguoi_dung(lenh: str, tool: str, doi_so: str) -> str:
+    """Dựng lại lượt người dùng cho lệnh ép tool.
+
+    VÌ SAO KHÔNG CHỈ TRẢ VỀ `doi_so`
+    Bản đầu bóc lệnh ra rồi ném hết ý định vào system prompt, để lại cho model đúng
+    phần đối số. Với `/ad hapas` thì lượt người dùng chỉ còn một từ `hapas` — model
+    cân lượt hiện tại nặng hơn nhiều so với một ghi chú nằm ở ký tự 11.926 của
+    system prompt, nên nó thấy một từ mơ hồ và hỏi lại thay vì gọi tool. Đo thật,
+    không suy đoán.
+
+    Nên mệnh lệnh phải nằm NGAY TRONG lượt người dùng, cạnh đối số. System prompt
+    vẫn giữ bản của nó — hai chỗ cùng nói một điều thì model khó lách hơn một.
+
+    Đối số rỗng thì hỏi lại là ĐÚNG, không phải lỗi: `/ad` trơ trọi không có gì để
+    tra. Chỉ cấm hỏi lại khi người dùng ĐÃ đưa đối số.
+    """
+    if not doi_so:
+        return (f"[LỆNH {lenh}] Tôi muốn dùng `{tool}` nhưng chưa nói tra gì. "
+                f"Hỏi lại tôi một câu ngắn.")
+    return (
+        f"{doi_so}\n\n"
+        f"[LỆNH {lenh}] Dòng trên là đối số. Lượt này BẮT BUỘC gọi tool `{tool}` — "
+        f"đừng hỏi lại, đừng trả lời chay. Tham số phụ nào thiếu thì lấy mặc định "
+        f"hợp lý rồi chạy, và nói rõ đã lấy mặc định gì."
+    )
 
 
 def xu_ly(text: str) -> KetQua:
@@ -213,12 +272,13 @@ def xu_ly(text: str) -> KetQua:
                 ),
             )
         return KetQua(
-            van_ban=con_lai or text, lenh=lenh, tool=tool,
+            van_ban=_lam_luot_nguoi_dung(lenh, tool, con_lai),
+            lenh=lenh, tool=tool,
             chi_thi=(
-                f"LỆNH CỨNG {lenh} — người dùng đã chỉ định công cụ, KHÔNG tự chọn "
-                f"cái khác. Lượt này PHẢI gọi tool `{tool}`. Phần còn lại của câu là "
-                f"đối số, tự bóc ra. Thiếu thông tin thì HỎI LẠI, đừng đoán bừa rồi "
-                f"chạy — công cụ này tốn tiền và thời gian thật."
+                f"LỆNH CỨNG {lenh} — người dùng đã chỉ định công cụ. Lượt này gọi "
+                f"`{tool}`, không đổi sang tool khác và không trả lời chay."
+                + ("" if con_lai else
+                   " Họ chưa đưa đối số: hỏi lại ngắn gọn cần tra gì, rồi dừng.")
             ),
         )
 

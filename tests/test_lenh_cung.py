@@ -151,6 +151,87 @@ def test_help_ke_du_moi_lenh_nang_luc(monkeypatch):
     assert not thieu, f"/help bỏ sót: {thieu}"
 
 
+def test_luot_nguoi_dung_giu_ca_menh_lenh_lan_doi_so(monkeypatch):
+    """Hồi quy cho đúng lỗi đã xảy ra thật với `/ad hapas`.
+
+    Bản đầu bóc lệnh ra rồi ném ý định vào system prompt, để lại lượt người dùng đúng
+    một từ `hapas`. Model cân lượt hiện tại nặng hơn một ghi chú ở ký tự 11.926 của
+    system prompt, nên nó hỏi lại thay vì gọi tool. Mệnh lệnh phải nằm NGAY TRONG
+    lượt người dùng.
+    """
+    monkeypatch.setattr(
+        lenh_cung.lsr_policy, "decide",
+        lambda t, a=None: lenh_cung.lsr_policy.PolicyDecision(True, ""),
+    )
+    kq = lenh_cung.xu_ly("/ad hapas")
+    assert "hapas" in kq.van_ban, "mất đối số"
+    assert "fb_ads_library" in kq.van_ban, (
+        "lượt người dùng không nhắc tool — ý định bị đẩy hết sang system prompt, "
+        "đúng cái đã làm Mark hỏi lại thay vì chạy"
+    )
+    assert kq.van_ban.strip() != "hapas", "lượt người dùng trơ trọi một từ"
+
+
+def test_co_doi_so_thi_CAM_hoi_lai(monkeypatch):
+    """Câu 'thiếu thông tin thì hỏi lại' từng là cửa thoát model dùng ngay lần đầu."""
+    monkeypatch.setattr(
+        lenh_cung.lsr_policy, "decide",
+        lambda t, a=None: lenh_cung.lsr_policy.PolicyDecision(True, ""),
+    )
+    kq = lenh_cung.xu_ly("/ad hapas")
+    het = (kq.van_ban + " " + kq.chi_thi).lower()
+    assert "đừng hỏi lại" in het, "không có lệnh cấm hỏi lại"
+    assert "thiếu thông tin thì hỏi lại" not in het, "cửa thoát cũ còn nguyên"
+
+
+def test_khong_co_doi_so_thi_VAN_duoc_hoi_lai(monkeypatch):
+    """`/ad` trơ trọi thì không có gì để tra — hỏi lại là đúng, không phải lỗi."""
+    monkeypatch.setattr(
+        lenh_cung.lsr_policy, "decide",
+        lambda t, a=None: lenh_cung.lsr_policy.PolicyDecision(True, ""),
+    )
+    kq = lenh_cung.xu_ly("/ad")
+    assert "hỏi lại" in (kq.van_ban + kq.chi_thi).lower()
+
+
+def test_help_moi_lenh_deu_co_mo_ta(monkeypatch):
+    """Tên lệnh trần không nói được nó làm gì.
+
+    Khối NĂNG LỰC từng chỉ in `/search · đang bật` trong khi hai khối dưới có mô tả
+    — người đọc phải đoán. Chốt này bắt luôn ca thêm năng lực thứ bảy mà quên mô tả.
+    """
+    monkeypatch.setattr(
+        lenh_cung.lsr_policy, "decide",
+        lambda t, a=None: lenh_cung.lsr_policy.PolicyDecision(True, ""),
+    )
+    dong = (lenh_cung.xu_ly("/help").tra_loi_thang or "").splitlines()
+    het = list(lenh_cung.BANG_LENH) + list(lenh_cung.LENH_NGUON) + list(lenh_cung.LENH_TOOL_TU_DO)
+    thieu = []
+    for lenh in het:
+        i = next((k for k, d in enumerate(dong) if d.strip().startswith(lenh + " ")
+                  or d.strip() == lenh), None)
+        assert i is not None, f"/help không kể {lenh}"
+        sau = [d for d in dong[i + 1:i + 3] if d.startswith("      ")]
+        if not sau or len(sau[0].strip()) < 15:
+            thieu.append(lenh)
+    assert not thieu, f"lệnh không có mô tả trong /help: {thieu}"
+
+
+def test_mo_ta_lay_tu_bang_cua_brain():
+    """Mô tả phải đến từ `_TOOL_CAN_XET`, không phải chuỗi gõ riêng trong module này.
+
+    Hai bản mô tả cho cùng một tool thì một hôm ai đó sửa một bên: `/help` nói một
+    đằng, lời dặn gửi model nói một nẻo.
+    """
+    import brain
+    for tool in lenh_cung.BANG_LENH.values():
+        assert _mo_ta(tool) == brain._TOOL_CAN_XET[tool][0], f"{tool} lệch mô tả"
+
+
+def _mo_ta(tool: str) -> str:
+    return lenh_cung._muc_tool(tool)[0]
+
+
 def test_policy_nem_thi_dong_chu_khong_mo():
     """Hỏng thì ĐÓNG. Mở khi không biết là cách nhanh nhất để lỗi thành vượt quyền."""
     cho, vi_sao = lenh_cung._duoc_khong("khong_co_tool_nay_dau")

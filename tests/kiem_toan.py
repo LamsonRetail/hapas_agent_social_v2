@@ -474,7 +474,7 @@ def phan_F(env: dict, pat: str) -> None:
 
 
 # ══════════════════════════════════ G · VẬN HÀNH ══════════════════════════════
-def phan_G() -> None:
+def phan_G(pat: str = "", mang: bool = True) -> None:
     muc("G · VẬN HÀNH — tiến trình, tác vụ, log")
     r = subprocess.run(["powershell", "-NoProfile", "-Command",
                         "@(Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
@@ -515,10 +515,41 @@ def phan_G() -> None:
     ca("G12", "có bộ chạy hồi quy", (GOC / "tests" / "chay_hoi_quy.py").is_file(),
        "không có thì cổng go-live chỉ qua được bằng force")
     ca("G13", "có bộ quét Wiki", (GOC / "scripts" / "nap_wiki.py").is_file())
-    ws = _j.loads((GOC / "knowledge" / "wiki-source.json").read_text(encoding="utf-8"))
-    ca("G11", "nguồn Wiki vẫn TẮT khi ADR chưa sign-off", ws.get("enabled") is False,
-       "bật sớm là kéo cả bảng nhân sự vào kho kiến thức")
+    # Trạng thái THẬT nằm ở `agents.wiki_source` trên platform — đó là thứ nhịp nền
+    # của agent đọc để quyết định có quét/nhập không.
+    #
+    # Bản trước đọc `knowledge/wiki-source.json` trên máy. File đó là TỜ KHAI, không ai
+    # cập nhật khi bật/tắt trên console, nên mục này xanh cả lúc nguồn đã bật thật —
+    # canh một tờ giấy chứ không canh thứ đang chạy. Đúng lớp lỗi mà chính bộ này
+    # sinh ra để bắt.
+    ws_file = _j.loads((GOC / "knowledge" / "wiki-source.json").read_text(encoding="utf-8"))
+    if not mang:
+        # Chế độ --nhanh không gọi mạng, mà trạng thái thật CHỈ có trên platform.
+        # Nói rõ là chưa kiểm, đừng đọc tạm file cục bộ rồi báo xanh — bỏ sót thì
+        # còn biết mà chạy lại, xanh giả thì không.
+        ca("G11", "nguồn Wiki vẫn TẮT khi ADR chưa sign-off", True,
+           "BỎ QUA ở chế độ --nhanh — trạng thái thật nằm trên platform")
+    else:
+        _g11(ws_file, pat)
 
+
+def _g11(ws_file: dict, pat: str) -> None:
+    c, spec = _goi(f"{PLATFORM}/v1/agents/{AID}/spec", pat)
+    ws_that = ((spec or {}).get("wiki_source") or {}) if c == 200 else None
+    if ws_that is None:
+        ca("G11", "nguồn Wiki vẫn TẮT khi ADR chưa sign-off", False,
+           f"không đọc được trạng thái trên platform (HTTP {c}) — không kết luận được")
+    else:
+        bat = ws_that.get("enabled") is True
+        ca("G11", "nguồn Wiki vẫn TẮT khi ADR chưa sign-off", not bat,
+           ("ĐANG BẬT trên platform — bật sớm là kéo cả bảng nhân sự vào kho kiến thức"
+            if bat else "tắt trên platform"))
+        ca("G11b", "tờ khai cục bộ khớp trạng thái trên platform",
+           bool(ws_file.get("enabled")) == bat,
+           f"file={ws_file.get('enabled')} · platform={ws_that.get('enabled')}")
+
+
+def phan_G2() -> None:
     t_env = _env_file(pathlib.Path(r"D:\mark_tran_test\.env"))
     if t_env:
         ca("G6", "bản test KHÔNG dùng app Lark của production",
@@ -648,7 +679,8 @@ def main() -> int:
     phan_E()
     if mang:
         phan_F(env, pat)
-    phan_G()
+    phan_G(pat, mang)
+    phan_G2()
     phan_H()
     if mang and args.dau_cuoi:
         phan_I(env, pat)
