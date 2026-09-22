@@ -27,6 +27,7 @@ from pathlib import Path
 
 import lark_client as lark
 import lsr_platform
+import lenh_cung
 import lsr_policy
 from config import config
 
@@ -315,7 +316,8 @@ _LUAT_NGUON = [
 ]
 
 
-def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None = None) -> str:
+def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None = None,
+                         chi_thi_lenh: str = "") -> str:
     """Nạp persona.md, thay biến động, ghép trí nhớ về người này + hướng dẫn tool."""
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     try:
@@ -354,17 +356,26 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
             f"- Hôm nay: {today} (giờ VN, UTC+7).",
         ]
     )
+    # Chỉ thị lệnh đặt CUỐI CÙNG, sau cả luật quyền và ngữ cảnh platform: nó là mệnh
+    # lệnh cho đúng một lượt, còn phần trên là luật thường trực. Đặt trên đầu thì
+    # persona và luật nguồn viết sau sẽ nói ngược lại nó ngay trong cùng prompt.
+    #
+    # Nó KHÔNG nới quyền: `lenh_cung.xu_ly` đã hỏi `lsr_policy.decide()` trước, lệnh
+    # nào bị chặn thì chặn ngay từ đó và không bao giờ tới được đây.
+    lenh_block = f"\n\n### Lệnh cho lượt này\n{chi_thi_lenh}\n" if chi_thi_lenh else ""
     return (
         persona
         + who_block
         + _luat_vai_note()
         + _TOOLING_NOTE
         + _platform_context_block(platform_ctx)
+        + lenh_block
     )
 
 
 def _resolve_agent(sender_open_id: str | None = None,
-                   platform_ctx: dict | None = None) -> AIAgent:
+                   platform_ctx: dict | None = None,
+                   chi_thi_lenh: str = "") -> AIAgent:
     """Resolve Codex credentials fresh and build an AIAgent bound to them."""
     rt = resolve_runtime_provider(requested=config.agent_provider)
     return AIAgent(
@@ -395,7 +406,7 @@ def _resolve_agent(sender_open_id: str | None = None,
             "steven_reminders",
         ],
         disabled_toolsets=["terminal"],
-        ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx),
+        ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx, chi_thi_lenh),
     )
 
 
@@ -434,6 +445,22 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
     memory_store.set_current_sender(sender_open_id)
     scheduler.set_current_chat(chat_id)
 
+    # Lệnh cứng: bóc `/search`, `/help`… ra khỏi câu hỏi. Câu KHÔNG bắt đầu bằng `/`
+    # thì `xu_ly` trả về nguyên văn và mọi thứ dưới đây chạy y như trước.
+    kq = lenh_cung.xu_ly(user_text)
+    if kq.tra_loi_thang is not None:
+        # `/help`, `/nangluc`, và ca bị từ chối — trả lời thẳng, KHÔNG gọi model.
+        # Nấu một lượt model để nói một câu đã biết trước là đốt tiền, và tệ hơn:
+        # model có thể diễn đạt lại thành thứ khác với sự thật về quyền hạn.
+        tid = audit.bat_dau(chat_id, sender_open_id, user_text)
+        audit.ket_thuc(tid, kq.tra_loi_thang, None, trang_thai="lệnh")
+        memory_store.append_turns(chat_id, [
+            {"role": "user", "text": user_text, "sender": sender_open_id},
+            {"role": "assistant", "text": kq.tra_loi_thang},
+        ])
+        return kq.tra_loi_thang
+    user_text = kq.van_ban or user_text
+
     # Lịch sử hội thoại đưa vào ĐÚNG kênh conversation_history của Hermes
     # ([{"role","content"}]) thay vì nhồi thành 1 khối text — model hiểu ngữ cảnh
     # chuẩn hơn và biết "ok/đồng ý" là xác nhận việc vừa đề xuất.
@@ -457,7 +484,7 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
     # tự ghi vào đó (audit.boc_registry đã bọc handler của cả 10 tool).
     turn_id = audit.bat_dau(chat_id, sender_open_id, user_text)
 
-    agent = _resolve_agent(sender_open_id, platform_ctx)
+    agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi)
     try:
         out = agent.run_conversation(user_text, conversation_history=history_msgs)
     except Exception as e:
