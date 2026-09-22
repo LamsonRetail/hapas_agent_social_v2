@@ -51,6 +51,7 @@ import apify_tool  # noqa: E402,F401  (registers `social_listen`: 5 nền tảng
 import deep_dive_tool  # noqa: E402,F401  (registers `social_deep_dive`: bình luận -> Lark Sheet)
 import web_tool  # noqa: E402,F401  (registers `web_scrape`: website công khai qua Scrapling)
 import crawl_tool  # noqa: E402,F401  (registers `web_crawl`: cào sản phẩm -> Lark Sheet)
+import ky_nang_tool  # noqa: E402,F401  (registers `dung_ky_nang`: nạp thân kỹ năng khi cần)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
 import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian)

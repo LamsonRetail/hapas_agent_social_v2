@@ -24,6 +24,12 @@ _SAFE_EXACT = {
     "fb_ads_library",
     "web_scrape",
     "list_reminders",
+    # Nạp thân hướng dẫn của chính kỹ năng agent đang bật. Chỉ đọc, và platform đã
+    # chặn ở đầu kia: `/v1/self/skills/{id}` chỉ nhận token của chính agent và chỉ trả
+    # kỹ năng có trong version sống. CỐ Ý không đưa vào `_TOOL_CO_CONG_TAC`: tắt đường
+    # nạp thì agent vẫn thấy mục lục trong prompt rồi gọi và ăn từ chối giữa câu trả
+    # lời. Muốn bỏ một kỹ năng thì tắt chính nó ở version, nó rụng khỏi mục lục luôn.
+    "dung_ky_nang",
     "browser_navigate",
     "browser_snapshot",
     "browser_get_images",
