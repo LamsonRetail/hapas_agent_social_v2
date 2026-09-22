@@ -1,8 +1,8 @@
 """Kiểm toán toàn diện Mark Trần — từ cấu hình tới đầu cuối.
 
-    python scripts/kiem_toan.py              # bỏ qua phần đầu-cuối (không gửi tin)
-    python scripts/kiem_toan.py --dau-cuoi   # gửi tin thật qua ingress, chờ Mark trả lời
-    python scripts/kiem_toan.py --nhanh      # bỏ qua mọi thứ gọi mạng
+    python tests/kiem_toan.py              # bỏ qua phần đầu-cuối (không gửi tin)
+    python tests/kiem_toan.py --dau-cuoi   # gửi tin thật qua ingress, chờ Mark trả lời
+    python tests/kiem_toan.py --nhanh      # bỏ qua mọi thứ gọi mạng
 
 Nguyên tắc:
   • Mọi thay đổi trạng thái đều KHÔI PHỤC trong `finally`, kể cả khi nửa chừng lỗi.
@@ -512,7 +512,7 @@ def phan_G() -> None:
              if not (GOC / m["path"]).is_file() and not (GOC / "knowledge" / m["path"]).is_file()]
     ca("G10", "mọi tài liệu đã duyệt đều có file trên máy", not thieu,
        f"{len(duyet)} tài liệu" + (f" · thiếu {thieu}" if thieu else ""))
-    ca("G12", "có bộ chạy hồi quy", (GOC / "scripts" / "chay_hoi_quy.py").is_file(),
+    ca("G12", "có bộ chạy hồi quy", (GOC / "tests" / "chay_hoi_quy.py").is_file(),
        "không có thì cổng go-live chỉ qua được bằng force")
     ca("G13", "có bộ quét Wiki", (GOC / "scripts" / "nap_wiki.py").is_file())
     ws = _j.loads((GOC / "knowledge" / "wiki-source.json").read_text(encoding="utf-8"))

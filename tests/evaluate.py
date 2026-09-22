@@ -103,7 +103,7 @@ def run() -> dict:
         "tests_pass": len(cases) - len(failures),
         "failures": failures,
         "results": results,
-        "runner": "scripts/evaluate.py",
+        "runner": "tests/evaluate.py",
         "completed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)

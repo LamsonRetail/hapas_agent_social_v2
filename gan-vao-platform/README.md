@@ -43,7 +43,7 @@ Chỗ nào chưa đo thì ghi rõ là chưa đo.
 
 ## Trạng thái Mark Trần khi viết tài liệu này
 
-Số liệu dưới đây lấy từ lần chạy `scripts/kiem_toan.py` ngày 21/09/2026, không phải ước
+Số liệu dưới đây lấy từ lần chạy `tests/kiem_toan.py` ngày 21/09/2026, không phải ước
 lượng.
 
 ```
@@ -75,5 +75,5 @@ Tệp đáng đọc nhất khi bắt tay vào việc:
 | [`lsr_policy.py`](../lsr_policy.py) | chốt chặn quyền tại điểm hội tụ tool |
 | [`lsr_platform.py`](../lsr_platform.py) | vòng job · ngữ cảnh · telemetry |
 | [`wiki_tu_dong.py`](../wiki_tu_dong.py) | nhịp nền theo dõi nguồn Wiki |
-| [`scripts/kiem_toan.py`](../scripts/kiem_toan.py) | 130 mục kiểm, chạy lại được |
+| [`tests/kiem_toan.py`](../tests/kiem_toan.py) | 130 mục kiểm, chạy lại được |
 | [`manifest.json`](../manifest.json) | hợp đồng khai với platform |

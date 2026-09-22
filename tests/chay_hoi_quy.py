@@ -1,7 +1,7 @@
 """Chạy hồi quy golden set qua agent THẬT rồi nộp kết quả cho platform.
 
-    python scripts/chay_hoi_quy.py                 # chạy, chấm, KHÔNG publish
-    python scripts/chay_hoi_quy.py --publish-prod  # đạt thì publish version lên prod
+    python tests/chay_hoi_quy.py                 # chạy, chấm, KHÔNG publish
+    python tests/chay_hoi_quy.py --publish-prod  # đạt thì publish version lên prod
 
 VÌ SAO CẦN
 `_eval_gate` của platform đòi một regression PASS gắn ĐÚNG version trước khi cho

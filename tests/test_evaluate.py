@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("evaluate", ROOT / "scripts" / "evaluate.py")
+SPEC = importlib.util.spec_from_file_location("evaluate", ROOT / "tests" / "evaluate.py")
 assert SPEC and SPEC.loader
 evaluate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(evaluate)

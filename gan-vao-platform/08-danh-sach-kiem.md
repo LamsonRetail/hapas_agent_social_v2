@@ -3,9 +3,9 @@
 ## Bộ kiểm toán chạy lại được
 
 ```bash
-python scripts/kiem_toan.py              # 130 mục, không gửi tin
-python scripts/kiem_toan.py --nhanh      # bỏ mọi thứ gọi mạng
-python scripts/kiem_toan.py --dau-cuoi   # gửi tin thật qua ingress
+python tests/kiem_toan.py              # 130 mục, không gửi tin
+python tests/kiem_toan.py --nhanh      # bỏ mọi thứ gọi mạng
+python tests/kiem_toan.py --dau-cuoi   # gửi tin thật qua ingress
 ```
 
 Chín khối:

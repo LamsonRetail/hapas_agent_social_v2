@@ -270,7 +270,7 @@ vẫn hoạt động.
 Trong `D:\hapas_agent_social`:
 
 - `USECASE.md`: người dùng, kênh, dữ liệu cấm, phạm vi và cổng go-live.
-- `TESTCASES.md`: ma trận test và kết quả migration.
+- `tests/TESTCASES.md`: ma trận test và kết quả migration.
 - `lsr-agent.yaml`: manifest Mark Trần.
 - `skills/`: sáu skill nguồn.
 - `knowledge/catalog.json`: allowlist 6 tài liệu và denylist transcript.
@@ -279,7 +279,7 @@ Trong `D:\hapas_agent_social`:
 - `lsr_platform.py`: context/job bridge, WAL, redaction và auth bridge.
 - `audit.py`, `brain.py`, `run.py`: tích hợp bridge vào runtime cũ.
 - `scripts/sync_platform.py`: đồng bộ profile/version/skills.
-- `scripts/evaluate.py`: behavior evaluation.
+- `tests/evaluate.py`: behavior evaluation.
 - `scripts/register_test_agent.py`: self-service enroll TEST.
 - `scripts/run_platform_worker.py`: entrypoint TEST-only.
 - `tests/`: unit tests cho migration.

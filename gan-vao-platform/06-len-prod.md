@@ -44,7 +44,7 @@ gọi agent. Phải có một bộ ở giữa:
 lấy golden case  →  đưa qua ingress THẬT  →  gom câu trả lời  →  nộp chấm
 ```
 
-`scripts/chay_hoi_quy.py` làm việc đó. Hai quyết định trong nó đáng mang sang agent khác:
+`tests/chay_hoi_quy.py` làm việc đó. Hai quyết định trong nó đáng mang sang agent khác:
 
 **Đi qua đúng ingress thật** (`/v1/chat/{id}/messages`), không gọi model trực tiếp. Hồi
 quy phải đo thứ người dùng thật sự gặp — gồm cả policy, công tắc năng lực và prompt. Gọi
