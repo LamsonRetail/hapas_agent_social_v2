@@ -234,7 +234,7 @@ def _classify_sender(sender_open_id: str | None) -> tuple[str, str, bool]:
                   "KHÔNG tiết lộ thông tin nội bộ.", is_boss)
 
 
-def _platform_context_block(ctx: dict | None) -> str:
+def _platform_context_block(ctx: dict | None, nguon: str = "") -> str:
     if not isinstance(ctx, dict) or not ctx:
         return ""
     # Thứ tự ưu tiên phải nói rõ, không để model tự đoán. Khối này do platform biên
@@ -261,7 +261,22 @@ def _platform_context_block(ctx: dict | None) -> str:
     facts = [str(x).strip() for x in (ctx.get("user_facts") or []) if str(x).strip()]
     if facts:
         lines += ["", "### Fact đã duyệt về người dùng"] + [f"- {x}" for x in facts[:30]]
-    hits = [x for x in (ctx.get("knowledge") or []) if isinstance(x, dict)]
+    # `/web` = BỎ HẲN kho khỏi prompt, không phải dặn model đừng dùng.
+    #
+    # Bản đầu chỉ thêm một câu "bỏ qua kho, tra web" vào cuối prompt, trong khi nội
+    # dung kho vẫn nằm nguyên ở trên kèm luật thường trực "trả lời được bằng kho thì
+    # DỪNG Ở ĐÓ". Hai mệnh lệnh ngược nhau, và cái nằm sát nội dung thắng — hỏi
+    # `/web Lark Base là gì?` thì Mark vẫn trả lời bằng wiki rồi dẫn link wiki.
+    #
+    # Model không bướng: nó làm đúng luật thường trực. Lỗi ở chỗ ship hai luật chỏi
+    # nhau. Không có evidence trong prompt thì không còn gì để lấy — đó mới là ép.
+    hits = ([] if nguon == "/web"
+            else [x for x in (ctx.get("knowledge") or []) if isinstance(x, dict)])
+    if nguon == "/web":
+        lines += ["", "### Nguồn cho lượt này",
+                  "Người dùng gõ `/web`: kho tài liệu ĐÃ BỊ GỠ khỏi ngữ cảnh này, "
+                  "không phải kho rỗng. Tra web rồi trả lời, và nói rõ đây là thông "
+                  "tin ngoài chứ không phải quan điểm nội bộ của đội."]
     if hits:
         lines += ["", "### Evidence từ kho kiến thức"]
         for hit in hits[:8]:
@@ -279,7 +294,20 @@ def _platform_context_block(ctx: dict | None) -> str:
             if content:
                 lines.append(f"  Nội dung: {content}")
         lines.append("Khi dùng evidence trên, phải nêu tên nguồn/URL; không suy diễn ngoài nội dung.")
-        lines += _LUAT_NGUON
+        # Luật thường trực CHỈ áp khi người dùng không tự chỉ định nguồn. Gõ `/kho`
+        # rồi mà vẫn kèm luật "kho không có thì ra web" là lại ship hai luật chỏi
+        # nhau — đúng cái vừa làm `/web` hỏng, chỉ ngược chiều.
+        if nguon == "/kho":
+            lines += [
+                "",
+                "### Thứ tự dùng nguồn — người dùng đã gõ /kho",
+                "1. CHỈ dùng evidence ở trên. Không ra web trong lượt này.",
+                "2. Kho không đủ để trả lời thì NÓI THẲNG là kho không có, rồi hỏi "
+                "người dùng có muốn tra web không. Đừng lấp bằng kiến thức chung.",
+                "3. Luôn nói rõ con số nào lấy từ mẩu nào, kèm ngày cập nhật của mẩu đó.",
+            ]
+        else:
+            lines += _LUAT_NGUON
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
@@ -317,7 +345,7 @@ _LUAT_NGUON = [
 
 
 def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None = None,
-                         chi_thi_lenh: str = "") -> str:
+                         chi_thi_lenh: str = "", nguon: str = "") -> str:
     """Nạp persona.md, thay biến động, ghép trí nhớ về người này + hướng dẫn tool."""
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     try:
@@ -368,14 +396,14 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
         + who_block
         + _luat_vai_note()
         + _TOOLING_NOTE
-        + _platform_context_block(platform_ctx)
+        + _platform_context_block(platform_ctx, nguon)
         + lenh_block
     )
 
 
 def _resolve_agent(sender_open_id: str | None = None,
                    platform_ctx: dict | None = None,
-                   chi_thi_lenh: str = "") -> AIAgent:
+                   chi_thi_lenh: str = "", nguon: str = "") -> AIAgent:
     """Resolve Codex credentials fresh and build an AIAgent bound to them."""
     rt = resolve_runtime_provider(requested=config.agent_provider)
     return AIAgent(
@@ -406,7 +434,7 @@ def _resolve_agent(sender_open_id: str | None = None,
             "steven_reminders",
         ],
         disabled_toolsets=["terminal"],
-        ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx, chi_thi_lenh),
+        ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx, chi_thi_lenh, nguon),
     )
 
 
@@ -484,7 +512,8 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
     # tự ghi vào đó (audit.boc_registry đã bọc handler của cả 10 tool).
     turn_id = audit.bat_dau(chat_id, sender_open_id, user_text)
 
-    agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi)
+    agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi,
+                           kq.lenh if kq.lenh in lenh_cung.LENH_NGUON else "")
     try:
         out = agent.run_conversation(user_text, conversation_history=history_msgs)
     except Exception as e:
