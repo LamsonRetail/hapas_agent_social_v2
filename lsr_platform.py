@@ -385,6 +385,10 @@ def lay_ngu_canh(session_id: str, q: str, user_ref: str = "") -> dict:
         "q": q or "",
         "user_ref": user_ref or "",
         "env": _context_env(c),
+        # Runtime này có tool `dung_ky_nang` (ky_nang_tool.py), nên xin bản MỤC LỤC kỹ
+        # năng: tên + khi nào dùng + mã, thân nạp khi model thấy khớp. Platform chỉ trả
+        # bản đó cho runtime nào tự báo — runtime không có tool vẫn nhận bản đầy đủ.
+        "skills": "lazy",
     })
     try:
         result = _goi(c, f"/v1/self/context?{query}", timeout=12)

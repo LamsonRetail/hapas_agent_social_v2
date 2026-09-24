@@ -1,0 +1,41 @@
+{
+  "_ghi_chu": [
+    "Câu 'khi nào dùng' của từng kỹ năng — thứ model đọc để TỰ QUYẾT có nạp hướng dẫn",
+    "chi tiết hay không (chế độ skill_mode='lazy').",
+    "",
+    "Trước đây cột `description` là 280 ký tự ĐẦU của `instructions` cắt ra, tức trùng",
+    "nội dung với thân. Model không có gì để dựa vào mà chọn — nó phải đọc một đoạn văn",
+    "mô tả CÁCH LÀM rồi tự suy ra KHI NÀO DÙNG. Đó là hai câu hỏi khác nhau.",
+    "",
+    "Nguyên tắc viết:",
+    "  • Nói ĐIỀU KIỆN KÍCH HOẠT, không nói cách làm. 'Khi được hỏi X' chứ không 'Dùng Y để'.",
+    "  • Nêu vài từ khoá người dùng hay gõ — model khớp theo đó.",
+    "  • Nói rõ KHI NÀO KHÔNG dùng, nếu có ranh giới dễ nhầm với kỹ năng khác.",
+    "  • Một câu, dưới 200 ký tự. Dài thì mục lục lại phình thành thứ vừa bỏ đi."
+  ],
+
+  "sk_7c28d5f2bb": {
+    "ten": "Báo cáo dựa trên evidence",
+    "khi_nao_dung": "Khi phải đưa ra kết luận, nhận định hay con số cho người khác đọc — báo cáo, tổng hợp, so sánh, đề xuất. Không cần cho hỏi đáp ngắn hay trò chuyện thường."
+  },
+  "sk_9d02c5de94": {
+    "ten": "Deep-dive bình luận",
+    "khi_nao_dung": "Khi được hỏi người ta bình luận gì dưới một bài cụ thể, hoặc cần phân tích cảm xúc/chủ đề của bình luận. Dấu hiệu: có link bài đăng kèm theo."
+  },
+  "sk_41fc43d6b7": {
+    "ten": "Lập kế hoạch truy vấn social",
+    "khi_nao_dung": "TRƯỚC khi chạy bất kỳ lần quét mạng xã hội nào tốn tiền. Dấu hiệu: quét, theo dõi, keyword, hashtag, hoặc người dùng nêu brand mà chưa nói nền tảng và khoảng thời gian."
+  },
+  "sk_a99f515e13": {
+    "ten": "Nghiên cứu web và sản phẩm công khai",
+    "khi_nao_dung": "Khi cần lấy thông tin từ website công khai — giá, dòng sản phẩm, nội dung trang đối thủ. Không dùng cho mạng xã hội (dùng kỹ năng quét social) hay quảng cáo (dùng Ad Library)."
+  },
+  "sk_2d37e7d0e7": {
+    "ten": "Phân tích crisis, sentiment và share of voice",
+    "khi_nao_dung": "Khi có dấu hiệu tiêu cực cần đánh giá, hoặc được hỏi về sentiment, khủng hoảng, so sánh độ phủ thương hiệu. Cả khi người dùng chỉ hỏi 'có sao không' về một làn sóng bình luận."
+  },
+  "sk_8776392ea3": {
+    "ten": "Phân tích quảng cáo đối thủ",
+    "khi_nao_dung": "Khi được hỏi đối thủ đang chạy quảng cáo gì, nội dung/creative quảng cáo, hoặc so sánh ads giữa các brand. Dấu hiệu: ads, quảng cáo, Ad Library, chạy ads."
+  }
+}

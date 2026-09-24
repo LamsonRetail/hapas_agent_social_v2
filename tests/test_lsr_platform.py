@@ -73,3 +73,20 @@ def test_wal_retries_with_same_run_id(monkeypatch, tmp_path: Path):
     assert second["sent"] == 1
     assert second["pending"] == 0
     assert seen == ["r-123"]
+
+
+def test_ngu_canh_tu_bao_runtime_goi_duoc_tool_ky_nang(monkeypatch):
+    """Runtime Mark có tool `dung_ky_nang`, nên phải xin bản MỤC LỤC kỹ năng.
+
+    Platform chỉ trả mục lục cho runtime nào tự báo `skills=lazy`. Quên gửi thì Mark
+    nhận lại bản đầy đủ — không hỏng gì, nhưng cũng không bao giờ dùng kỹ năng theo nhu
+    cầu, và không có chỗ nào báo ra điều đó.
+    """
+    import lsr_platform as P
+    bat = {}
+    monkeypatch.setattr(P, "_cau_hinh", lambda: {
+        "url": "https://collector.x", "platform": "https://platform.x",
+        "agent_id": "AG-SOCIAL-LISTENING", "key": "k"})
+    monkeypatch.setattr(P, "_goi", lambda c, duong, *a, **kw: bat.setdefault("duong", duong) and {})
+    P.lay_ngu_canh("s1", "hỏi gì đó")
+    assert "skills=lazy" in bat.get("duong", ""), f"không xin mục lục: {bat.get('duong')}"
