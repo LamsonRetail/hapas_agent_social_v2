@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import sys
 import unicodedata
 from pathlib import Path
@@ -114,8 +115,11 @@ _TOOLING_NOTE = "\n".join(
         "Library thì công khai — nhưng để tra ad hãy dùng `fb_ads_library` (đã gói sẵn), đừng tự "
         "dựng URL Ad Library bằng browser_navigate. TUYỆT ĐỐI không gắn browser vào profile Chrome "
         "cá nhân của người dùng.",
-        "- Còn có: đọc ẢNH (vision), đọc/ghi/sửa/tìm FILE, chạy CODE Python, giao việc cho subagent "
-        "(delegation) khi việc lớn nhiều bước.",
+        "- ẢNH người dùng gửi: câu hỏi sẽ có dòng `[Ảnh đính kèm: <đường dẫn>]` → gọi "
+        "`vision_analyze` với ĐÚNG đường dẫn đó rồi trả lời theo nội dung ảnh. Không có dòng "
+        "đó nghĩa là không có ảnh — đừng đoán nội dung ảnh.",
+        "- KHÔNG có quyền đọc/ghi file trên máy, chạy code Python hay giao việc cho subagent — "
+        "đừng thử gọi. Cần tính toán thì tự tính và ghi rõ phép tính.",
         "- ĐẶT NHẮC/HẸN GIỜ: `schedule_reminder` (đến giờ tự gửi vào chat này), xem/hủy bằng "
         "`list_reminders`/`cancel_reminder`. Ai nhờ 'nhắc…' thì XÁC NHẬN thời điểm+nội dung rồi đặt nhắc THẬT.",
         "- `remember_about_user`: ghi nhớ dài hạn thông tin quan trọng về người đang nói chuyện.",
@@ -142,6 +146,8 @@ _TOOL_CAN_XET = {
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",
                  {"args": ["wiki", "+search", "x"]}),
+    "vision_analyze": ("đọc ẢNH người dùng gửi kèm tin nhắn",
+                       {"image_url": str(lsr_policy.THU_MUC_DINH_KEM / "anh.jpg")}),
     "schedule_reminder": ("đặt nhắc lịch", {}),
     "cancel_reminder": ("huỷ nhắc lịch", {}),
     "remember_about_user": ("ghi nhớ dài hạn về người đang nói chuyện", {}),
@@ -222,7 +228,10 @@ def _classify_sender(sender_open_id: str | None) -> tuple[str, str, bool]:
         role = "Chưa xác định được danh tính — coi như đồng nghiệp mới/ngoài team, giữ chừng mực."
         return ("(chưa rõ tên)", role, is_boss)
 
-    n = _norm(name)
+    # Tên Lark mang kèm chức danh: "Nguyễn Tiến Thẩm - AI Automation Intern", "Đinh Công
+    # Tài - CMO". So nguyên văn với danh sách team thì KHÔNG AI khớp, và cả chủ agent lẫn
+    # CMO công ty đều bị xếp vào "ngoài team". Chỉ so phần tên, bỏ chức danh phía sau.
+    n = _norm(_ten_goc(name))
     if n == _norm(_BOSS_NAME):
         return (name, "SẾP TRỰC TIẾP — Leader của team; lễ độ, rõ ràng, xác nhận trước khi làm việc lớn.", True)
     if n == _norm(_BOD_NAME):
@@ -231,8 +240,31 @@ def _classify_sender(sender_open_id: str | None) -> tuple[str, str, bool]:
         if n == _norm(mem):
             return (name, "Thành viên team Chuyển đổi số (đồng nghiệp trong team) — thoải mái, đùa nhẹ được.",
                     is_boss)
-    return (name, "Đồng nghiệp NGOÀI team (hoặc người mới) — thân thiện nhưng giữ khoảng cách, "
-                  "KHÔNG tiết lộ thông tin nội bộ.", is_boss)
+    # Lãnh đạo nhận ra được từ CHÍNH chức danh Lark gắn sau tên — không cần giữ thêm một
+    # danh sách tay phải nhớ cập nhật khi có người mới lên chức.
+    if _LANH_DAO.search(name[len(_ten_goc(name)):]):
+        return (name, "Lãnh đạo công ty — lễ độ, đi thẳng vào kết luận và con số, nói rõ "
+                      "mức chắc chắn; hỗ trợ đầy đủ.", is_boss)
+    # Người ngoài team Chuyển đổi số vẫn là ĐỒNG NGHIỆP TRONG CÔNG TY — bot chỉ chạy
+    # trong Lark nội bộ. Và họ chính là người dùng chính của Mark: team Booking KOL/KOC,
+    # marketing, ngành hàng. Bản cũ dặn "KHÔNG tiết lộ thông tin nội bộ" với nhóm này,
+    # tức giấu nghiên cứu thị trường với đúng người cần nó. Chỉ giữ kín thứ thật sự
+    # thuộc riêng team Chuyển đổi số.
+    return (name, "Đồng nghiệp trong công ty, ngoài team Chuyển đổi số — đây là người dùng "
+                  "chính của bạn (marketing, booking KOL/KOC, ngành hàng). Thân thiện, chuyên "
+                  "nghiệp, hỗ trợ đầy đủ. Chỉ không chia sẻ tài liệu vận hành nội bộ của team "
+                  "Chuyển đổi số (runbook, sự cố, quyết định kỹ thuật) và thông tin nhân sự.",
+            is_boss)
+
+
+#: Chức danh lãnh đạo trong phần sau tên Lark ("Đinh Công Tài - CMO").
+_LANH_DAO = re.compile(r"\b(CEO|CMO|CFO|COO|CTO|CPO|CHRO|Giám đốc|Director|Head of|BOD)\b",
+                       re.IGNORECASE)
+
+
+def _ten_goc(name: str) -> str:
+    """Tên người, bỏ chức danh Lark gắn phía sau: 'A - CMO' → 'A'."""
+    return re.split(r"\s+[-–—|]\s+", (name or "").strip(), maxsplit=1)[0].strip()
 
 
 def _platform_context_block(ctx: dict | None, nguon: str = "") -> str:
@@ -345,8 +377,43 @@ _LUAT_NGUON = [
 ]
 
 
+def _khoi_kenh(kenh: dict | None, sender_open_id: str | None, name: str) -> str:
+    """Nhóm hay chat riêng — hai kiểu trả lời khác hẳn nhau.
+
+    Trước đây Mark không biết mình đang ở đâu: job Lark mang `chat_type` nhưng runtime
+    bỏ đi. Trong nhóm, câu trả lời không tag ai nên khi vài người cùng hỏi thì không rõ
+    đang trả lời ai; báo cáo dài dán thẳng vào nhóm; và ghi chú riêng về người hỏi có thể
+    bị nói ra trước cả nhóm.
+
+    Tag bằng `{{@ou_…}}` chứ không bằng tên: platform nhận mã người dùng và tag THẲNG,
+    còn tag bằng tên phải khớp gần đúng với danh sách thành viên và có thể trượt.
+    """
+    ct = (kenh or {}).get("chat_type")
+    if ct == "group":
+        dong = ["\n---\n## KÊNH CỦA LƯỢT NÀY: NHÓM CHAT",
+                "- Nhiều người cùng đọc câu trả lời này."]
+        if sender_open_id and sender_open_id.startswith("ou_"):
+            dong.append(f"- Người vừa hỏi: {name}. MỞ ĐẦU câu trả lời bằng "
+                        f"{{{{@{sender_open_id}}}}} để tag đúng người đó (hệ thống tự đổi "
+                        "thành @nhắc thật). Chỉ tag người hỏi; không tag người khác trừ khi "
+                        "được nhờ.")
+        dong += [
+            "- Trả lời GỌN. Số liệu dài để trong Sheet và đưa link, đừng dán cả bảng vào nhóm.",
+            "- KHÔNG nhắc lại 'Ghi chú dài hạn' về người hỏi trước cả nhóm — đó là thông tin "
+            "riêng của họ.",
+            "- Trong lịch sử, lượt của người dùng có ghi [Tên] ở đầu: đó là NGƯỜI NÓI lượt đó. "
+            "Đừng nhầm yêu cầu của người này với người khác.",
+        ]
+        return "\n".join(dong)
+    if ct == "p2p":
+        return (f"\n---\n## KÊNH CỦA LƯỢT NÀY: CHAT RIÊNG 1-1 với {name}\n"
+                "- Chỉ người này đọc. Trả lời đầy đủ được, không cần tag.")
+    return ""
+
+
 def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None = None,
-                         chi_thi_lenh: str = "", nguon: str = "") -> str:
+                         chi_thi_lenh: str = "", nguon: str = "",
+                         kenh: dict | None = None) -> str:
     """Nạp persona.md, thay biến động, ghép trí nhớ về người này + hướng dẫn tool."""
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     try:
@@ -395,6 +462,7 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
     return (
         persona
         + who_block
+        + _khoi_kenh(kenh, sender_open_id, name)
         + _luat_vai_note()
         + _TOOLING_NOTE
         + _platform_context_block(platform_ctx, nguon)
@@ -404,7 +472,8 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
 
 def _resolve_agent(sender_open_id: str | None = None,
                    platform_ctx: dict | None = None,
-                   chi_thi_lenh: str = "", nguon: str = "") -> AIAgent:
+                   chi_thi_lenh: str = "", nguon: str = "",
+                   kenh: dict | None = None) -> AIAgent:
     """Resolve Codex credentials fresh and build an AIAgent bound to them."""
     rt = resolve_runtime_provider(requested=config.agent_provider)
     return AIAgent(
@@ -428,14 +497,16 @@ def _resolve_agent(sender_open_id: str | None = None,
             "fb_ads",
             "social",
             "vision",
-            "file",
-            "code_execution",
-            "delegation",
+            # "file", "code_execution", "delegation" đã gỡ: lsr_policy chặn toàn bộ tool
+            # của ba nhóm này, mà để chúng hiện trong danh sách thì model vẫn thử gọi rồi
+            # ăn từ chối — sổ audit 23/09 có execute_code và read_file LỖI giữa lượt trả
+            # lời. Model chỉ nên thấy thứ nó thật sự dùng được.
             "steven_memory",
             "steven_reminders",
         ],
         disabled_toolsets=["terminal"],
-        ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx, chi_thi_lenh, nguon),
+        ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx, chi_thi_lenh,
+                                                     nguon, kenh),
     )
 
 
@@ -468,8 +539,68 @@ def _strip_markdown(text: str) -> str:
     return text.strip()
 
 
-def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) -> str:
-    """Generate Mark's reply, with persistent per-chat context + per-user memory."""
+#: Tên người gửi đã tra, theo open_id. Lịch sử nhóm cần gắn tên cho từng lượt; tra lại
+#: Contact API cho mỗi lượt mỗi câu hỏi là vài chục lời gọi thừa.
+_TEN_DA_TRA: dict[str, str] = {}
+
+
+def _ten_nguoi(open_id: str | None) -> str:
+    if not open_id or not open_id.startswith("ou_"):
+        return ""
+    if open_id not in _TEN_DA_TRA:
+        try:
+            _TEN_DA_TRA[open_id] = _ten_goc(lark.resolve_user_name(open_id) or "")
+        except Exception:
+            _TEN_DA_TRA[open_id] = ""
+    return _TEN_DA_TRA[open_id]
+
+
+def _lich_su(hist: list[dict], nhom: bool) -> list[dict]:
+    """Lịch sử cho model. Trong NHÓM, mỗi lượt người dùng mang [Tên] người nói.
+
+    Bản cũ bỏ trường `sender` khi đưa lịch sử cho model, nên trong nhóm mọi câu hỏi
+    trông như của cùng một người — hỏi "còn cái anh ấy nhờ lúc nãy?" là model không có
+    cách nào biết "anh ấy" là ai.
+    """
+    ra = []
+    for m in hist:
+        if m.get("role") not in ("user", "assistant") or not m.get("text"):
+            continue
+        noi_dung = m["text"]
+        if nhom and m["role"] == "user":
+            ten = _ten_nguoi(m.get("sender"))
+            if ten:
+                noi_dung = f"[{ten}] {noi_dung}"
+        ra.append({"role": m["role"], "content": noi_dung})
+    return ra
+
+
+def _loi_mo_hinh(text: str, d: dict) -> str | None:
+    """Nhận ra lượt model HỎNG. Trả câu cho người dùng, hoặc None nếu lượt bình thường.
+
+    Hermes không ném lỗi khi gọi model thất bại — nó trả `final_response` là chính chuỗi
+    lỗi. Ngày 24/09 người dùng nhận nguyên văn "API call failed after 3 retries: HTTP
+    429: The usage limit has been reached" làm câu trả lời, và câu đó còn bị ghi vào lịch
+    sử như lời Mark nói — lượt sau model đọc thấy chính mình "đã nói" câu lỗi.
+    """
+    t = (text or "").strip()
+    if not (d.get("failed") or t.startswith("API call failed") or "HTTP 429" in t[:200]):
+        return None
+    if "429" in t or "usage limit" in t.lower():
+        return ("Mark đang tạm hết lượt của tài khoản AI nên chưa xử lý được câu này. "
+                "Bạn thử lại sau ít phút nhé — câu hỏi chưa được thực hiện.")
+    return ("Mark gặp lỗi khi gọi mô hình AI nên chưa trả lời được câu này. "
+            "Bạn thử lại sau ít phút nhé — câu hỏi chưa được thực hiện.")
+
+
+def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
+          kenh: dict | None = None) -> str:
+    """Generate Mark's reply, with persistent per-chat context + per-user memory.
+
+    `kenh` = {"chat_type": "group" | "p2p"} khi tin tới từ Lark qua platform. None = như
+    trước (console, bộ thử) — không đổi hành vi của đường nào đang chạy.
+    """
+    nhom = (kenh or {}).get("chat_type") == "group"
     # tell the remember/reminder tools the current context
     memory_store.set_current_sender(sender_open_id)
     scheduler.set_current_chat(chat_id)
@@ -494,11 +625,7 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
     # ([{"role","content"}]) thay vì nhồi thành 1 khối text — model hiểu ngữ cảnh
     # chuẩn hơn và biết "ok/đồng ý" là xác nhận việc vừa đề xuất.
     hist = memory_store.load_history(chat_id)
-    history_msgs = [
-        {"role": m["role"], "content": m["text"]}
-        for m in hist
-        if m.get("role") in ("user", "assistant") and m.get("text")
-    ]
+    history_msgs = _lich_su(hist, nhom)
     platform_ctx = lsr_platform.lay_ngu_canh(chat_id, user_text, sender_open_id or "")
     if not history_msgs and isinstance(platform_ctx.get("recent_turns"), list):
         history_msgs = [
@@ -514,7 +641,7 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
     turn_id = audit.bat_dau(chat_id, sender_open_id, user_text)
 
     agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi,
-                           kq.lenh if kq.lenh in lenh_cung.LENH_NGUON else "")
+                           kq.lenh if kq.lenh in lenh_cung.LENH_NGUON else "", kenh)
     try:
         out = agent.run_conversation(user_text, conversation_history=history_msgs)
     except Exception as e:
@@ -527,6 +654,14 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None) ->
     text = _strip_markdown(text) or "(Bot chưa tạo được câu trả lời)"
 
     d = out if isinstance(out, dict) else {}
+    cau_loi = _loi_mo_hinh(text, d)
+    if cau_loi:
+        # Ghi lỗi THẬT vào audit để còn soi, nhưng trả người dùng câu dễ hiểu, và KHÔNG
+        # ghi lượt này vào lịch sử — không có gì đã được làm để mà nhớ.
+        audit.ket_thuc(turn_id, cau_loi, agent, loi=(str(d.get("error") or "") or text)[:300],
+                       trang_thai="lỗi")
+        print(f"[brain] model không chạy: {text[:120]}", flush=True)
+        return cau_loi
     audit.ket_thuc(turn_id, text, agent, loi=str(d.get("error") or ""),
                    trang_thai="ok" if not d.get("failed") else "lỗi")
 

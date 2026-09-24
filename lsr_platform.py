@@ -371,8 +371,106 @@ def _lark_sender_ref(payload: dict) -> str | None:
     ``sender_open_id`` khiến brain gọi Contact API như thể đó là ``ou_...`` và
     sinh một lỗi 400 vô ích cho mỗi web job.
     """
-    ref = str((payload or {}).get("user_ref") or "").strip()
-    return ref if ref.startswith("ou_") else None
+    # Job Lark mang người gửi ở `sender_open_id`; chỉ job console mới có `user_ref`.
+    # Bản trước chỉ đọc `user_ref`, nên MỌI tin Lark tới qua gateway đều mất người gửi —
+    # đếm 25/09: 54/70 lượt Lark trong sổ audit có `nguoi` trống. Hệ quả là Mark không
+    # biết ai đang nói: không nhận ra sếp, không có trí nhớ theo người, ai cũng bị đối
+    # xử như "chưa rõ danh tính, giữ chừng mực".
+    for k in ("user_ref", "sender_open_id"):
+        ref = str((payload or {}).get(k) or "").strip()
+        if ref.startswith("ou_"):
+            return ref
+    return None
+
+
+def _kenh_cua_job(j: dict) -> dict | None:
+    """Nhóm hay chat riêng — Mark cần biết để trả lời đúng kiểu.
+
+    None khi job không mang `chat_type` (job console, job thử): khi đó `tra_loi` được
+    gọi y như trước, nên các bộ thử có `tra_loi` giả không phải sửa gì.
+    """
+    rt = j.get("reply_to") or {}
+    ct = str(rt.get("chat_type") or "").strip().lower()
+    if not ct:
+        return None
+    return {"chat_type": "p2p" if ct == "p2p" else "group"}
+
+
+#: Trần mỗi ảnh tải về. Ảnh chụp màn hình quảng cáo/bài đăng hiếm khi quá vài MB; ảnh
+#: lớn hơn thường là file gửi nhầm và chỉ tốn thời gian tải lẫn lượt đọc của model.
+_TRAN_ANH = 10 * 1024 * 1024
+_GIU_ANH_GIAY = 24 * 3600
+
+
+def _tai_anh(c: dict, j: dict) -> list[str]:
+    """Tải ảnh người dùng gửi kèm tin Lark về thư mục đính kèm. Trả danh sách đường dẫn.
+
+    Gateway đẩy `image_key` (tin ảnh) hoặc `image_keys` (ảnh nhúng trong tin có chữ).
+    Tải qua `/v1/lark/resource/...` bằng token của CHÍNH agent — không cầm app secret.
+    Hỏng ảnh nào thì bỏ ảnh đó và in ra, không làm hỏng cả lượt trả lời.
+    """
+    from lsr_policy import THU_MUC_DINH_KEM
+    p = j.get("payload") or {}
+    mid = str(p.get("message_id") or "").strip()
+    keys = ([p["image_key"]] if p.get("image_key") else []) + list(p.get("image_keys") or [])
+    if not (mid and keys):
+        return []
+    app_id = str((j.get("reply_to") or {}).get("app_id") or "")
+    THU_MUC_DINH_KEM.mkdir(exist_ok=True)
+    # Dọn ảnh cũ — thư mục này chỉ để model đọc trong lượt, không phải kho lưu trữ.
+    han = time.time() - _GIU_ANH_GIAY
+    for cu in THU_MUC_DINH_KEM.glob("*"):
+        try:
+            if cu.is_file() and cu.stat().st_mtime < han:
+                cu.unlink()
+        except OSError:
+            pass
+    ra = []
+    for k in keys[:4]:
+        k = str(k).strip()
+        if not k:
+            continue
+        q = urllib.parse.urlencode({"type": "image", "app_id": app_id})
+        req = urllib.request.Request(
+            f"{_platform_base(c)}/v1/lark/resource/{urllib.parse.quote(mid)}/"
+            f"{urllib.parse.quote(k)}?{q}",
+            headers={"Authorization": f"Bearer {c['key']}"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                du_lieu = r.read(_TRAN_ANH + 1)
+                kieu = (r.headers.get("Content-Type") or "").lower()
+        except Exception as e:
+            print(f"[anh] không tải được {k[:24]}: {type(e).__name__}: {e}", flush=True)
+            continue
+        if len(du_lieu) > _TRAN_ANH:
+            print(f"[anh] bỏ {k[:24]}: quá {_TRAN_ANH // 1024 // 1024} MB", flush=True)
+            continue
+        duoi = ".png" if "png" in kieu else ".webp" if "webp" in kieu else \
+               ".gif" if "gif" in kieu else ".jpg"
+        # Tên file chỉ gồm ký tự an toàn: message_id/file_key do Lark cấp nhưng vẫn là
+        # dữ liệu từ ngoài, không ghép thẳng vào đường dẫn.
+        ten = re.sub(r"[^A-Za-z0-9_-]", "_", f"{mid}_{k}")[:120] + duoi
+        f = THU_MUC_DINH_KEM / ten
+        f.write_bytes(du_lieu)
+        ra.append(str(f))
+    return ra
+
+
+def _cau_hoi_kem_anh(hoi: str, j: dict, anh: list[str]) -> str:
+    """Ghép câu hỏi với dòng `[Ảnh đính kèm: …]` mà prompt dặn model đọc bằng vision.
+
+    Tin CHỈ có ảnh thì gateway đưa nguyên nội dung thô `{"image_key": "img_v3_…"}` làm
+    text — model thấy một chuỗi JSON khó hiểu. Thay bằng một câu nói rõ là có ảnh.
+    """
+    p = j.get("payload") or {}
+    if str(p.get("message_type") or "") == "image" or hoi.lstrip().startswith('{"image_key"'):
+        hoi = "(Người dùng gửi một ảnh, không kèm chữ.)"
+    if not anh:
+        if p.get("image_key") or p.get("image_keys"):
+            # Có ảnh mà không tải được: nói THẬT với model, để nó không đoán nội dung ảnh.
+            hoi += "\n[Có ảnh đính kèm nhưng Mark không tải được — nói thẳng với người dùng.]"
+        return hoi
+    return hoi + "".join(f"\n[Ảnh đính kèm: {a}]" for a in anh)
 
 
 def lay_ngu_canh(session_id: str, q: str, user_ref: str = "") -> dict:
@@ -424,7 +522,8 @@ def ghi_luot_ngu_canh(session_id: str, user_text: str, assistant_text: str,
 _HAN_TRA_LOI = float(os.environ.get("LSR_HAN_TRA_LOI_SECONDS", "480"))
 
 
-def _chay_co_han(tra_loi, hoi: str, phien: str, sender) -> tuple[str, bool, bool]:
+def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
+                 kenh: dict | None = None) -> tuple[str, bool, bool]:
     """Chạy `tra_loi` với trần thời gian. Trả `(đáp, ok, quá_hạn)`.
 
     Vì sao cần: vòng job gọi `tra_loi` đồng bộ và KHÔNG có trần. Một lượt gọi model
@@ -441,7 +540,9 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender) -> tuple[str, bool, bool
 
     def chay():
         try:
-            hop["dap"] = tra_loi(hoi, chat_id=phien, sender_open_id=sender) or ""
+            # `kenh` chỉ truyền khi có — `tra_loi` giả của các bộ thử không nhận nó.
+            them = {"kenh": kenh} if kenh else {}
+            hop["dap"] = tra_loi(hoi, chat_id=phien, sender_open_id=sender, **them) or ""
             hop["ok"] = True
         except Exception as e:
             hop["dap"] = ("Xin lỗi, Mark gặp lỗi khi xử lý. Mã job đã được ghi để "
@@ -483,7 +584,14 @@ def _mot_vong(c: dict, tra_loi) -> int:
     # log. Đúng chuyện đã xảy ra 18/09: job #1985 nằm im, không dòng nào báo.
     print(f"[job] #{jid} nhận · {hoi[:56]!r}", flush=True)
 
-    dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p))
+    anh = []
+    try:
+        anh = _tai_anh(c, j)
+    except Exception as e:
+        print(f"[anh] lỗi tải ảnh job #{jid}: {type(e).__name__}: {e}", flush=True)
+    hoi = _cau_hoi_kem_anh(hoi, j, anh)
+
+    dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p), _kenh_cua_job(j))
     if treo:
         print(f"[job] #{jid} QUÁ HẠN {_HAN_TRA_LOI:.0f}s — bỏ lượt, đi tiếp. "
               f"Luồng cũ vẫn chạy nền và sẽ tự tắt khi xong.", flush=True)

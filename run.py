@@ -197,9 +197,9 @@ def main() -> None:
     # Cửa vào thứ hai: người quản trị nhắn thử trên console thì platform tạo job.
     # Vòng này đi lấy và đưa vào ĐÚNG brain.reply mà listener Lark vẫn gọi — không
     # có bộ não thứ hai, không có nhánh xử lý riêng.
-    def _tra_loi_job(text, chat_id=None, sender_open_id=None):
+    def _tra_loi_job(text, chat_id=None, sender_open_id=None, kenh=None):
         import brain
-        return brain.reply(text, chat_id=chat_id, sender_open_id=sender_open_id)
+        return brain.reply(text, chat_id=chat_id, sender_open_id=sender_open_id, kenh=kenh)
 
     if lsr_platform.chay_vong_job(_tra_loi_job):
         print("  Job console: đang lắng nghe (/v1/self/jobs)")

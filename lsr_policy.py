@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import types
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -286,6 +287,35 @@ def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision
     return d
 
 
+#: Nơi runtime lưu ảnh người dùng gửi qua Lark. `vision_analyze` chỉ được đọc ảnh ở đây
+#: (hoặc ảnh trên web) — không được trỏ tới file bất kỳ trên máy của đội.
+THU_MUC_DINH_KEM = Path(__file__).resolve().with_name(".dinh_kem")
+
+
+def _vision_decision(payload: dict[str, Any]) -> PolicyDecision:
+    """Đọc ảnh: CHỈ ảnh người dùng vừa gửi, hoặc ảnh công khai trên web.
+
+    Trước đây tool này bị chặn hoàn toàn (fail-closed vì chưa khai), trong khi prompt
+    lại quảng cáo "đọc ẢNH (vision)". Người gửi ảnh ngày 23/09 nhận câu "chưa đọc được
+    ảnh từ hệ thống" — nghe như lỗi hệ thống, thật ra là bị chặn quyền.
+
+    Không mở trắng: `image_url` nhận cả đường dẫn file cục bộ, nên mở hết là cho model
+    đọc được mọi file ảnh trên máy cá nhân của chủ agent. Chỉ nhận ảnh trong thư mục
+    đính kèm mà runtime tự tải về, hoặc URL http(s).
+    """
+    url = str(payload.get("image_url") or "").strip()
+    if url.lower().startswith(("http://", "https://")):
+        return PolicyDecision(True, "vision: ảnh công khai trên web")
+    if not url:
+        return PolicyDecision(False, "vision: thiếu image_url")
+    try:
+        p = Path(url).expanduser().resolve()
+        p.relative_to(THU_MUC_DINH_KEM)
+    except (ValueError, OSError):
+        return PolicyDecision(False, "vision: chỉ được đọc ảnh người dùng gửi kèm tin nhắn")
+    return PolicyDecision(True, "vision: ảnh người dùng gửi kèm")
+
+
 def _quyet_dinh_theo_hop_dong(tool_name: str, args: dict[str, Any] | None = None
                               ) -> PolicyDecision:
     """Quyết định theo hợp đồng. Giữ nguyên như trước khi có công tắc."""
@@ -293,6 +323,8 @@ def _quyet_dinh_theo_hop_dong(tool_name: str, args: dict[str, Any] | None = None
     payload = args if isinstance(args, dict) else {}
     if name == "lark_cli":
         return _lark_cli_decision(payload)
+    if name == "vision_analyze":
+        return _vision_decision(payload)
     if name in _MUTATING_EXACT:
         can = _MUTATING_EXACT[name]
         if can in quyen_phat():
