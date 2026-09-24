@@ -13,7 +13,6 @@
     "  • Nói rõ KHI NÀO KHÔNG dùng, nếu có ranh giới dễ nhầm với kỹ năng khác.",
     "  • Một câu, dưới 200 ký tự. Dài thì mục lục lại phình thành thứ vừa bỏ đi."
   ],
-
   "sk_7c28d5f2bb": {
     "ten": "Báo cáo dựa trên evidence",
     "khi_nao_dung": "Khi phải đưa ra kết luận, nhận định hay con số cho người khác đọc — báo cáo, tổng hợp, so sánh, đề xuất. Không cần cho hỏi đáp ngắn hay trò chuyện thường."
@@ -37,5 +36,21 @@
   "sk_8776392ea3": {
     "ten": "Phân tích quảng cáo đối thủ",
     "khi_nao_dung": "Khi được hỏi đối thủ đang chạy quảng cáo gì, nội dung/creative quảng cáo, hoặc so sánh ads giữa các brand. Dấu hiệu: ads, quảng cáo, Ad Library, chạy ads."
+  },
+  "sk_f2de0ac573": {
+    "ten": "Lập kế hoạch chiến dịch quảng cáo",
+    "khi_nao_dung": "Khi được nhờ lên kế hoạch, brief hay đề xuất setup cho một chiến dịch quảng cáo, đợt booking KOL/KOC hoặc ra mắt bộ sưu tập. Không dùng khi chỉ cần lên truy vấn trước một lần quét social."
+  },
+  "sk_ac6ecb19f4": {
+    "ten": "Phân tích định vị đối thủ",
+    "khi_nao_dung": "Khi cần so cách đối thủ tự định vị — tagline, thông điệp, giá, tệp khách — với HAPAS, tìm khoảng trống hoặc làm battlecard. Chỉ hỏi đối thủ chạy ads gì thì dùng kỹ năng quảng cáo đối thủ."
+  },
+  "sk_e9b50ab8b9": {
+    "ten": "Audit hiệu quả quảng cáo",
+    "khi_nao_dung": "Khi người dùng đưa số liệu quảng cáo của CHÍNH MÌNH (file, Sheet, số dán vào) và hỏi có hiệu quả không, nên tăng, giảm hay tắt gì. Không dùng để tra quảng cáo của đối thủ."
+  },
+  "sk_f4cc01322b": {
+    "ten": "Duyệt nội dung KOL/KOC và quảng cáo",
+    "khi_nao_dung": "Khi được nhờ xem lại kịch bản, caption, bài đăng của KOL/KOC hay nội dung quảng cáo trước khi đăng: giọng thương hiệu, câu cam kết quá đà, so sánh đối thủ, thiếu gắn nhãn quảng cáo."
   }
 }

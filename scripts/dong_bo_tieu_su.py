@@ -19,6 +19,7 @@ Chạy lại bất cứ lúc nào ai sửa `persona.md`.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
@@ -40,17 +41,49 @@ WEB = "https://app.34-124-212-76.sslip.io"
 GOC = pathlib.Path(__file__).resolve().parent.parent
 PERSONA = GOC / "persona.md"
 
-#: Kỹ năng riêng của Mark. Lấy từ `GET /api/agents/<id>/skills` → `custom`.
-#: Sau khi xoá-dựng-lại, bản thân kỹ năng còn (brain_items sống sót) nhưng danh
-#: sách ĐANG BẬT thì mất theo `agent_versions` — nên phải bật lại tường minh.
-KY_NANG = [
-    "sk_7c28d5f2bb",   # Báo cáo dựa trên evidence
-    "sk_9d02c5de94",   # Deep-dive bình luận
-    "sk_41fc43d6b7",   # Lập kế hoạch truy vấn social
-    "sk_a99f515e13",   # Nghiên cứu web và sản phẩm công khai
-    "sk_2d37e7d0e7",   # Phân tích crisis, sentiment và share of voice
-    "sk_8776392ea3",   # Phân tích quảng cáo đối thủ
-]
+SKILLS = GOC / "skills"
+KHI_NAO_DUNG = SKILLS / "khi-nao-dung.json"
+
+
+def ma_ky_nang(ten: str) -> str:
+    """Mã platform sinh cho kỹ năng tự viết — cùng công thức `_upsert_custom_skills`.
+
+    Xác định theo tên, nên đẩy lại cùng một kỹ năng là CẬP NHẬT đúng chỗ chứ không sinh
+    bản trùng. Đổi tên là thành kỹ năng khác.
+    """
+    return "sk_" + hashlib.sha1(f"{AID}|{ten}".encode()).hexdigest()[:10]
+
+
+def doc_ky_nang() -> list[dict]:
+    """Kỹ năng của Mark, đọc từ `skills/` — nguồn DUY NHẤT.
+
+    Bản trước chỉ gửi danh sách mã kỹ năng, không gửi nội dung. Nên nội dung trên
+    platform và trong repo không có gì giữ cho khớp: sửa file thì platform không biết,
+    sửa trên console thì repo không biết. Giờ mỗi lần tạo version là đẩy nguyên nội
+    dung + câu "khi nào dùng" từ repo lên.
+
+    Thiếu câu "khi nào dùng" thì DỪNG, không lặng lẽ để platform tự cắt từ thân: với
+    chế độ nạp-theo-nhu-cầu, mục lục sống bằng đúng câu đó.
+    """
+    kn = json.loads(KHI_NAO_DUNG.read_text(encoding="utf-8"))
+    ra, thay = [], set()
+    for f in sorted(SKILLS.glob("*.md")):
+        than = f.read_text(encoding="utf-8").strip()
+        dong = next((l for l in than.splitlines() if l.startswith("# ")), "")
+        ten = dong[2:].strip()
+        if not ten:
+            sys.exit(f"{f.name}: thiếu tiêu đề '# Tên kỹ năng' ở dòng đầu")
+        sid = ma_ky_nang(ten)
+        khi = ((kn.get(sid) or {}).get("khi_nao_dung") or "").strip()
+        if not khi:
+            sys.exit(f"{f.name} ({sid}): thiếu 'khi_nao_dung' trong {KHI_NAO_DUNG.name}")
+        ra.append({"name": ten, "instructions": than, "description": khi})
+        thay.add(sid)
+    mo_coi = sorted(k for k in kn if not k.startswith("_") and k not in thay)
+    if mo_coi:
+        # Mục trong JSON mà không file nào cung cấp — thường là đổi tên file quên sửa JSON.
+        sys.exit(f"{KHI_NAO_DUNG.name} có mục không ứng với file nào: {mo_coi}")
+    return ra
 
 
 def _phien() -> str:
@@ -189,11 +222,16 @@ def main() -> int:
     for k in ("bio", "vibe", "description"):
         print(f"    {k:<12} {p[k]}")
 
-    print(f"\n  TẠO VERSION ({len(KY_NANG)} kỹ năng)")
+    ky_nang = doc_ky_nang()
+    print(f"\n  TẠO VERSION ({len(ky_nang)} kỹ năng từ skills/)")
     print("  " + "─" * 74)
+    for k in ky_nang:
+        print(f"    {ma_ky_nang(k['name'])}  {k['name']}")
+    # `skills` rỗng, mọi kỹ năng đi qua `custom_skills`: platform upsert theo tên rồi tự
+    # bật. Gửi cả hai là mỗi kỹ năng xuất hiện hai lần trong mục lục.
     c, r = _goi(f"/v1/agents/{AID}/versions", {
-        "persona": p, "skills": KY_NANG,
-        "note": "đồng bộ tiểu sử từ persona.md + bật lại kỹ năng sau khi dựng lại"})
+        "persona": p, "skills": [], "custom_skills": ky_nang,
+        "note": "đồng bộ tiểu sử từ persona.md + kỹ năng từ skills/"})
     if c != 200 or not r.get("version"):
         print(f"    HTTP {c} · {json.dumps(r, ensure_ascii=False)[:250]}")
         return 1
