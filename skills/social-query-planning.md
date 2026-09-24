@@ -3,12 +3,15 @@
 Một lần quét cần đủ ba thứ: **từ khoá hoặc brand**, **nền tảng**, **khoảng thời gian**.
 Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị trường.
 
-- **Đủ ba thứ** — người dùng nói rõ, hoặc vừa chốt ở lượt trước → CHẠY LUÔN. Mở đầu câu
-  trả lời bằng một dòng phạm vi đã hiểu. Đừng hỏi lại để xác nhận điều người dùng vừa
-  nói: mỗi câu "ok / có / chốt" là một lượt người dùng phải chờ mà không được gì thêm
+**Luôn chờ người dùng đồng ý trước khi chạy một lần quét tốn tiền.**
+
+- **Đủ ba thứ** → nêu phạm vi đã hiểu trong MỘT câu ngắn (từ khoá · nền tảng · khoảng
+  ngày · giới hạn số kết quả) rồi hỏi "chạy nhé?". Không hỏi lại những gì người dùng đã
+  nói rõ
 - **Thiếu một trong ba**, hoặc câu hỏi mơ hồ tới mức hai cách hiểu cho kết quả khác hẳn →
-  hỏi lại MỘT lần, gộp mọi câu hỏi vào đó
-- Nền tảng không nói gì thì quét cả năm nền tảng, và nói rõ là đã quét cả năm
+  hỏi MỘT lần, gộp mọi câu hỏi vào đó
+- Nền tảng không nói gì thì đề xuất quét cả năm nền tảng
+- Người dùng đã đồng ý ở lượt trước ("ok", "có", "chốt") → chạy luôn, không hỏi lại
 
 Khoảng thời gian tính tới HÔM NAY, không bao giờ gồm ngày chưa tới:
 
@@ -18,5 +21,4 @@ Khoảng thời gian tính tới HÔM NAY, không bao giờ gồm ngày chưa t�
 
 Báo kết quả theo đúng khoảng đã quét, không theo khoảng người dùng gọi tên.
 
-Nêu giới hạn số kết quả mỗi lần quét. Không tự mở rộng sang dữ liệu riêng tư hoặc nguồn cần
-đăng nhập.
+Không tự mở rộng sang dữ liệu riêng tư hoặc nguồn cần đăng nhập.
