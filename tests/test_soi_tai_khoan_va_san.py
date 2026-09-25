@@ -284,7 +284,7 @@ def test_shopee_thieu_tu_khoa():
 
 # ───────────────────────────── quản trị ─────────────────────────────
 
-@pytest.mark.parametrize("tool, lenh", [("soi_tai_khoan", "/profile"), ("soi_san", "/shopee")])
+@pytest.mark.parametrize("tool, lenh", [("soi_tai_khoan", "/profile"), ("soi_san", "/shop")])
 def test_hai_tool_moi_di_dung_luong_quan_tri(tool, lenh):
     assert lsr_policy._MUTATING_EXACT[tool] == "write_data", "xuất Sheet là ghi ra ngoài"
     assert tool in lsr_policy._TOOL_CO_CONG_TAC, "phải tắt được trên console"

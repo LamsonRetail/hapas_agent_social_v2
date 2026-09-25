@@ -147,8 +147,8 @@ _TOOL_CAN_XET = {
     "web_crawl": ("cào nhiều trang web rồi xuất Lark Sheet", {}),
     "soi_tai_khoan": ("soi tài khoản brand đối thủ hoặc KOC trên TikTok/Facebook/Instagram "
                       "rồi xuất Lark Sheet", {}),
-    "soi_san": ("xem giá, sản phẩm bán chạy và shop nổi bật trên Shopee rồi xuất Lark "
-                "Sheet", {}),
+    "soi_san": ("xem thị trường Shopee theo từ khoá, hoặc dán link sản phẩm Shopee / TikTok "
+                "Shop để đọc đánh giá của khách, rồi xuất Lark Sheet", {}),
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",

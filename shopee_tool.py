@@ -1,4 +1,4 @@
-"""Tool `soi_san`: giá, sản phẩm bán chạy và shop nổi bật trên Shopee theo từ khoá.
+"""Tool `soi_san`: thị trường Shopee theo từ khoá, hoặc soi sản phẩm cụ thể từ link Shopee/TikTok Shop.
 
 Vì sao cần — câu hỏi thật trong sổ audit mà Mark chưa làm được: "scout thị trường quà
 tặng 20.10 năm nay", "đối thủ bán gì chạy". Mạng xã hội cho biết người ta NÓI gì; sàn cho
@@ -18,6 +18,9 @@ Nguồn — đo thật 25/09/2026:
   • Lạc đề NẶNG và không ổn định: cùng "quà tặng 20/10" xếp theo bán chạy, lần đầu ra
     đúng set quà, lần sau ra toàn khăn tắm. Nên mặc định xếp theo LIÊN QUAN, đánh dấu từng
     sản phẩm có khớp từ khoá không (`_khop`), và chỉ tổng hợp trên hàng khớp.
+
+Soi SẢN PHẨM CỤ THỂ từ link (Shopee, TikTok Shop): xem `san_link.py` — nguồn nào dùng được,
+nguồn nào hỏng, và vì sao TikTok Shop chỉ soi theo link chứ không tìm theo từ khoá.
 """
 from __future__ import annotations
 
@@ -31,6 +34,7 @@ import unicodedata
 import apify_tool as A
 import chi_phi_tool
 import memory_store
+import san_link
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
@@ -129,10 +133,20 @@ SCHEMA = {
         "giá. Dùng cho: 'quà 20/10 đang bán giá bao nhiêu', 'túi xách nữ trên sàn giá thế "
         "nào', 'đối thủ bán gì chạy', 'nên định giá set quà bao nhiêu'.\n"
         "KHÁC `social_listen` (người ta NÓI gì trên mạng xã hội) — tool này là người ta MUA "
-        "gì, giá bao nhiêu. Chỉ có Shopee, CHƯA có Lazada/TikTok Shop: hỏi sàn khác thì nói "
-        "thẳng là chưa hỗ trợ.\n"
+        "gì, giá bao nhiêu. Tìm theo từ khoá chỉ có Shopee; TikTok Shop chỉ soi theo link; "
+        "CHƯA có Lazada: hỏi sàn khác thì nói thẳng là chưa hỗ trợ.\n"
         "`tu_khoa`: cụm từ người mua hay gõ trên Shopee, cụ thể là tốt ('túi xách nữ công "
         "sở', 'quà tặng 20/10 cho mẹ'), tối đa 3 cụm.\n"
+        "CÓ LINK SẢN PHẨM (Shopee hoặc TikTok Shop, kể cả link rút gọn) → truyền vào `link` "
+        "để soi ĐÚNG sản phẩm đó: khách khen/chê gì, số sao, phân loại hay mua, và với "
+        "TikTok Shop có cả số đã bán CHÍNH XÁC, follower và tổng số bán của shop. Shopee "
+        "theo link KHÔNG có số đã bán, và giá chỉ lấy được khi tìm ra sản phẩm theo tên hoặc "
+        "trong các sản phẩm bán chạy của shop — `chua_lay_duoc_gia` có nội dung thì nói ra. "
+        "`chi_doc_duoc` có nội dung thì nói rõ mẫu đánh giá không phải toàn bộ. Hai nguồn "
+        "này đôi khi tạm chặn: `loi` có nội dung thì nói NGUYÊN câu đó và KHÔNG tự chạy lại "
+        "liên tục. TikTok Shop CHỈ soi được theo link, "
+        "KHÔNG tìm theo từ khoá (nguồn trả toàn shop nhỏ, sai lệch). Giá TikTok Shop là giá "
+        "động theo khuyến mãi: nói kèm 'tại thời điểm soi'.\n"
         "KHI TRẢ LỜI: nguồn này KHÔNG có số đã bán — đừng bịa. `luot_danh_gia` là chỉ báo "
         "gián tiếp cho lượng bán; `dau_bang` chỉ là thứ hạng bán chạy khi `xep_theo`="
         "'ban_chay'. Nói rõ khi nhắc tới 'bán chạy'. `chinh_hang`=true là Shopee Mall. "
@@ -143,8 +157,13 @@ SCHEMA = {
     "parameters": {
         "type": "object",
         "properties": {
+            "link": {"type": "array", "items": {"type": "string"},
+                     "description": ("Link SẢN PHẨM Shopee hoặc TikTok Shop (kể cả link chia sẻ "
+                                     "rút gọn), tối đa 5. Có link thì soi đúng sản phẩm đó.")},
+            "so_danh_gia": {"type": "integer",
+                            "description": "Chỉ khi có `link`: số đánh giá đọc mỗi sản phẩm (mặc định 50)."},
             "tu_khoa": {"type": "array", "items": {"type": "string"},
-                        "description": "Cụm từ tìm trên Shopee, tối đa 3."},
+                        "description": "Cụm từ tìm trên Shopee, tối đa 3 (khi không có link)."},
             "xep_theo": {"type": "string", "enum": list(_XEP),
                          "description": ("Mặc định 'lien_quan'. Chỉ đặt 'ban_chay' khi người "
                                          "dùng hỏi đúng 'bán chạy nhất' — cách xếp này lạc đề "
@@ -153,7 +172,9 @@ SCHEMA = {
                             "description": "Tổng số sản phẩm (mặc định 30; tự co theo trần chi phí)."},
             "title": {"type": "string", "description": "Tên file sheet. Bỏ trống sẽ tự đặt."},
         },
-        "required": ["tu_khoa"],
+        # Rỗng vì hai đường vào: `link` (soi sản phẩm) hoặc `tu_khoa` (xem thị trường).
+        # `_handle` tự báo lỗi rõ khi thiếu cả hai.
+        "required": [],
     },
 }
 
@@ -162,11 +183,51 @@ _HEADER = ["Hạng", "Sản phẩm", "Khớp từ khoá", "Giá (VND)", "Giá g�
            "Nơi gửi", "Link"]
 
 
+def _handle_link(args: dict) -> str:
+    links = args.get("link") or []
+    links = [links] if isinstance(links, str) else [str(x) for x in links if str(x).strip()]
+    try:
+        n = max(5, int(args.get("so_danh_gia") or san_link._DG_MAC_DINH))
+    except (TypeError, ValueError):
+        n = san_link._DG_MAC_DINH
+    bat_dau = datetime.datetime.now(A._VN_TZ) - datetime.timedelta(seconds=5)
+    t0 = time.monotonic()
+    kq = san_link.soi(links, n)
+    if not kq["san_pham"]:
+        return tool_error("Không nhận ra link sản phẩm nào. Dán link sản phẩm Shopee "
+                          "(shopee.vn/…-i.<shop>.<item>) hoặc TikTok Shop (shop.tiktok.com/…/pdp/…).")
+    thuc = A._chi_phi_thuc(kq["actors"], bat_dau, kq["est"]) if kq["actors"] else None
+    chi_phi_tool.ghi(queries=links[:5], platforms=kq["nen"], date_range="hiện tại",
+                     thuc=thuc, est=kq["est"])
+    url, granted, loi = None, False, kq["loi"]
+    if kq["dong_sheet"]:
+        title = (args.get("title") or "").strip() or \
+            f"Đánh giá sản phẩm · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y %H:%M}"
+        try:
+            tok, url = A._create_sheet(title)
+            A._write_values(tok, A._first_sheet_id(tok), [list(san_link.HEADER)] + kq["dong_sheet"])
+            sender = memory_store.get_current_sender()
+            granted = A._grant(tok, sender) if sender else False
+        except Exception as e:  # noqa: BLE001
+            loi = {**(loi or {}), "sheet": f"{type(e).__name__}: {e}"[:250]}
+    return tool_result(
+        success=not loi, che_do="soi_theo_link", san_pham=kq["san_pham"],
+        so_danh_gia_moi_sp=kq["so_danh_gia_moi_sp"], bi_co_theo_tran=kq["bi_co_theo_tran"],
+        khong_nhan_ra=kq["khong_nhan_ra"], loi=loi, sheet_url=url, granted=granted,
+        thoi_diem_soi=f"{datetime.datetime.now(A._VN_TZ):%H:%M %d/%m/%Y}",
+        uoc_tinh_chi_phi_usd=round(kq["est"], 3),
+        chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,
+        chi_phi=A._dong_chi_phi(thuc, kq["est"]), giay=round(time.monotonic() - t0, 1),
+    )
+
+
 def _handle(args: dict, **_kwargs) -> str:
+    if args.get("link"):
+        return _handle_link(args)
     kw = args.get("tu_khoa") or []
     kw = [kw] if isinstance(kw, str) else [str(k).strip() for k in kw if str(k).strip()][:3]
     if not kw:
-        return tool_error("Thiếu `tu_khoa` (cụm từ sản phẩm cần tìm trên Shopee).")
+        return tool_error("Thiếu `tu_khoa` (cụm từ cần tìm trên Shopee) hoặc `link` sản phẩm.")
     tran_bai, tran_usd = A._tran()
     xep = str(args.get("xep_theo") or "lien_quan")
     xep = xep if xep in _XEP else "lien_quan"

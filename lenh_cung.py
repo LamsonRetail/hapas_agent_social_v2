@@ -43,7 +43,7 @@ BANG_LENH: dict[str, str] = {
     "/read": "web_scrape",
     "/wiki": "lark_cli",
     "/profile": "soi_tai_khoan",
-    "/shopee": "soi_san",
+    "/shop": "soi_san",
 }
 
 #: Lệnh ghi đè THỨ TỰ DÙNG NGUỒN (mặc định: kho trước, web là đường lùi).

@@ -7,7 +7,8 @@
 | Mọi người NÓI gì về một brand, chủ đề, từ khoá | `social_listen` |
 | Trend chung đang nổi, không có brand | `social_listen` với `che_do`="trend" |
 | Một TÀI KHOẢN cụ thể đăng gì — đối thủ, KOC định book | `soi_tai_khoan` |
-| Giá, sản phẩm đang bán trên sàn | `soi_san` (chỉ Shopee) |
+| Giá, sản phẩm đang bán trên sàn | `soi_san` với `tu_khoa` (chỉ Shopee) |
+| Soi MỘT sản phẩm cụ thể — người dùng dán link Shopee hoặc TikTok Shop | `soi_san` với `link` |
 | Đối thủ đang CHẠY QUẢNG CÁO gì | `fb_ads_library` |
 | Người ta bình luận gì dưới một bài cụ thể | `social_deep_dive` |
 
@@ -55,6 +56,8 @@ khi người dùng HỎI thì mới trả lời:
 - Soi một tài khoản, 30 bài: TikTok ~0,09 USD, Facebook ~0,15 USD, Instagram ~0,003 USD
   (Instagram chỉ có 12 bài mới nhất)
 - Shopee, 30 sản phẩm: ~0,15 USD
+- Soi một sản phẩm từ link: TikTok Shop ~0,004 USD; Shopee ~0,17 USD (phần lớn là bước
+  tìm giá trong shop)
 - Mỗi lượt chạy bị chặn ở trần chi phí (mặc định 1 USD). Chạm trần thì actor dừng giữa
   chừng và kết quả thiếu
 - Trần số bài và trần chi phí do chủ agent đặt trên console (Năng lực → Quét mạng xã
