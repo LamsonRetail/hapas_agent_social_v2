@@ -53,6 +53,8 @@ import deep_dive_tool  # noqa: E402,F401  (registers `social_deep_dive`: bình l
 import web_tool  # noqa: E402,F401  (registers `web_scrape`: website công khai qua Scrapling)
 import crawl_tool  # noqa: E402,F401  (registers `web_crawl`: cào sản phẩm -> Lark Sheet)
 import ky_nang_tool  # noqa: E402,F401  (registers `dung_ky_nang`: nạp thân kỹ năng khi cần)
+import account_tool  # noqa: E402,F401  (registers `soi_tai_khoan`: soi tài khoản brand/KOC)
+import shopee_tool  # noqa: E402,F401  (registers `soi_san`: giá và sản phẩm trên Shopee)
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
@@ -143,6 +145,10 @@ _TOOL_CAN_XET = {
                       "Lark Sheet và trả link", {}),
     "social_deep_dive": ("bóc bình luận của một bài rồi xuất Lark Sheet", {}),
     "web_crawl": ("cào nhiều trang web rồi xuất Lark Sheet", {}),
+    "soi_tai_khoan": ("soi tài khoản brand đối thủ hoặc KOC trên TikTok/Facebook/Instagram "
+                      "rồi xuất Lark Sheet", {}),
+    "soi_san": ("xem giá, sản phẩm bán chạy và shop nổi bật trên Shopee rồi xuất Lark "
+                "Sheet", {}),
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",

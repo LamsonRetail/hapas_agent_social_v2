@@ -1,5 +1,16 @@
 # Lập kế hoạch truy vấn social
 
+**Chọn đúng công cụ theo việc người dùng cần:**
+
+| Người dùng muốn | Công cụ |
+|---|---|
+| Mọi người NÓI gì về một brand, chủ đề, từ khoá | `social_listen` |
+| Trend chung đang nổi, không có brand | `social_listen` với `che_do`="trend" |
+| Một TÀI KHOẢN cụ thể đăng gì — đối thủ, KOC định book | `soi_tai_khoan` |
+| Giá, sản phẩm đang bán trên sàn | `soi_san` (chỉ Shopee) |
+| Đối thủ đang CHẠY QUẢNG CÁO gì | `fb_ads_library` |
+| Người ta bình luận gì dưới một bài cụ thể | `social_deep_dive` |
+
 Một lần quét cần đủ ba thứ: **từ khoá hoặc brand**, **nền tảng**, **khoảng thời gian**.
 Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị trường.
 
@@ -41,6 +52,9 @@ khi người dùng HỎI thì mới trả lời:
 | YouTube | miễn phí |
 
 - Quét cả năm nền tảng với một từ khoá: khoảng **0,5–0,7 USD**
+- Soi một tài khoản, 30 bài: TikTok ~0,09 USD, Facebook ~0,15 USD, Instagram ~0,003 USD
+  (Instagram chỉ có 12 bài mới nhất)
+- Shopee, 30 sản phẩm: ~0,15 USD
 - Mỗi lượt chạy bị chặn ở trần chi phí (mặc định 1 USD). Chạm trần thì actor dừng giữa
   chừng và kết quả thiếu
 - Trần số bài và trần chi phí do chủ agent đặt trên console (Năng lực → Quét mạng xã

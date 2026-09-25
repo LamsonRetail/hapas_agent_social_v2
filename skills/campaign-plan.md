@@ -20,6 +20,8 @@ Thiếu thứ phụ thì giả định hợp lý và NÓI RÕ đã giả định
 
 - Kho tài liệu nội bộ trước: nghiên cứu thị trường, tệp khách, bài học chiến dịch cũ
 - `fb_ads_library` xem đối thủ đang chạy thông điệp gì — tránh lặp lại góc đã quá đông
+- `soi_tai_khoan` xem đối thủ hoặc KOC định book đăng gì, view và tương tác thật ra sao
+- `soi_san` xem dải giá và sản phẩm đang bán trên Shopee khi cần chốt mức giá, set quà
 - Muốn quét mạng xã hội bằng `social_listen` thì báo phạm vi và chi phí, chờ đồng ý rồi
   mới chạy. Chỉ được nhờ lên kế hoạch thì không tự quét
 

@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 
 import lsr_policy
 
-#: Lệnh → tool. Sáu dòng này ứng 1-1 với sáu công tắc ở khối Năng lực trên console.
+#: Lệnh → tool. Mỗi dòng ứng 1-1 với một công tắc ở khối Năng lực trên console.
 BANG_LENH: dict[str, str] = {
     "/search": "social_listen",
     "/comment": "social_deep_dive",
@@ -42,6 +42,8 @@ BANG_LENH: dict[str, str] = {
     "/scrape": "web_crawl",
     "/read": "web_scrape",
     "/wiki": "lark_cli",
+    "/profile": "soi_tai_khoan",
+    "/shopee": "soi_san",
 }
 
 #: Lệnh ghi đè THỨ TỰ DÙNG NGUỒN (mặc định: kho trước, web là đường lùi).

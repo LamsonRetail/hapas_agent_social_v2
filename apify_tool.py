@@ -274,7 +274,8 @@ def _call(actor: str, payload: dict, limit: int, mem: int | None = None) -> list
     return data if isinstance(data, list) else []
 
 
-def _chi_phi_thuc(actors: list[str], tu: datetime.datetime) -> dict | None:
+def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
+                  uoc_tinh: float = 0.0) -> dict | None:
     """Cộng `usageTotalUsd` các run của `actors` bắt đầu từ `tu` — tiền Apify THẬT tính.
 
     Endpoint run-sync không trả phí, nên hỏi lại lịch sử run sau khi quét. Trước
@@ -292,25 +293,39 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime) -> dict | None:
         r.raise_for_status()
         return (r.json().get("data") or {}).get("items") or []
 
-    tong, so_run, cham_tran, dang_chay = 0.0, 0, 0, 0
     tran_usd = _tran()[1]
-    try:
-        with ThreadPoolExecutor(max_workers=len(actors)) as ex:
-            ds = list(ex.map(_mot, actors, timeout=15))
-    except Exception:  # noqa: BLE001 — không để token lọt vào lỗi
-        return None
-    for items in ds:
-        for it in items:
-            st = _to_vn(it.get("startedAt"))
-            if not st or st < tu:
-                continue
-            u = float(it.get("usageTotalUsd") or 0)
-            tong += u
-            so_run += 1
-            cham_tran += u >= 0.95 * tran_usd
-            dang_chay += it.get("status") in ("READY", "RUNNING")
-    return {"usd": round(tong, 3), "so_run": so_run,
-            "cham_tran": cham_tran, "dang_chay": dang_chay}
+
+    def _mot_luot() -> dict | None:
+        tong, so_run, cham_tran, dang_chay = 0.0, 0, 0, 0
+        try:
+            with ThreadPoolExecutor(max_workers=len(actors)) as ex:
+                ds = list(ex.map(_mot, actors, timeout=15))
+        except Exception:  # noqa: BLE001 — không để token lọt vào lỗi
+            return None
+        for items in ds:
+            for it in items:
+                st = _to_vn(it.get("startedAt"))
+                if not st or st < tu:
+                    continue
+                u = float(it.get("usageTotalUsd") or 0)
+                tong += u
+                so_run += 1
+                cham_tran += u >= 0.95 * tran_usd
+                dang_chay += it.get("status") in ("READY", "RUNNING")
+        return {"usd": round(tong, 3), "so_run": so_run,
+                "cham_tran": cham_tran, "dang_chay": dang_chay}
+
+    kq = _mot_luot()
+    # run-sync đã trả dữ liệu nhưng Apify ghi tiền CHẬM vài giây, kể cả khi run đã báo
+    # SUCCEEDED. Đo 25/09: lượt soi tài khoản vừa xong vẫn "đang chạy"; lượt Shopee báo
+    # 0,01 USD trong khi thật là 0,105. Hỏi lại khi còn "đang chạy" hoặc số thật thấp hơn
+    # nửa ước tính — tối đa hai lần, mỗi lần 3 giây.
+    for _ in range(2):
+        if not kq or not (kq["dang_chay"] or (uoc_tinh and kq["usd"] < 0.5 * uoc_tinh)):
+            break
+        time.sleep(3)
+        kq = _mot_luot() or kq
+    return kq
 
 
 def _dong_chi_phi(thuc: dict | None, est: float) -> str:
@@ -965,12 +980,24 @@ def _first_sheet_id(token: str) -> str:
     return sheets[0].get("sheet_id") or ""
 
 
+def _cot(n: int) -> str:
+    """Số cột (1-based) → chữ cột Excel: 1→A, 12→L, 27→AA."""
+    s = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
 def _write_values(token: str, sheet_id: str, values: list[list]) -> None:
+    # Vùng ghi theo đúng số cột của dữ liệu. Cố định "A:L" (12 cột của social_listen) làm
+    # tool Shopee 13 cột hỏng: "columns of value:13 > range" (đo thật 25/09/2026).
+    rong = _cot(max((len(r) for r in values), default=1))
     for i in range(0, len(values), 1000):
         chunk = values[i:i + 1000]
         lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/values_batch_update",
                   body={"valueRanges": [{
-                      "range": f"{sheet_id}!A{i + 1}:L{i + len(chunk)}",
+                      "range": f"{sheet_id}!A{i + 1}:{rong}{i + len(chunk)}",
                       "values": chunk}]})
 
 
@@ -1328,7 +1355,7 @@ def _handle(args: dict, **kwargs) -> str:
     actors = [_ACTORS[p] for p in plats if p in _ACTORS]
     if "tiktok" in plats:
         actors.append(_ACTORS["tiktok_fallback"])
-    thuc = _chi_phi_thuc(actors, _bat_dau) if actors else {
+    thuc = _chi_phi_thuc(actors, _bat_dau, est) if actors else {
         "usd": 0.0, "so_run": 0, "cham_tran": 0, "dang_chay": 0}
     # "Tiêu ≥95% trần" chỉ là dấu hiệu, không phải bằng chứng bị cắt: đặt trần 2,4 USD
     # cho 800 bài TikTok (800 × 0,003) thì lấy ĐỦ 800 bài cũng tiêu đúng 2,4 USD. Đo thật

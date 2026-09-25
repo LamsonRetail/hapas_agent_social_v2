@@ -49,6 +49,8 @@ _MUTATING_EXACT = {
     "social_listen": "write_data",       # cào 5 nền tảng → tạo Lark Sheet
     "social_deep_dive": "write_data",    # bóc bình luận → tạo Lark Sheet
     "web_crawl": "write_data",           # cào nhiều trang → tạo Lark Sheet
+    "soi_tai_khoan": "write_data",       # soi tài khoản brand/KOC → tạo Lark Sheet
+    "soi_san": "write_data",             # giá và sản phẩm Shopee → tạo Lark Sheet
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
     "remember_about_user": "write_data",
@@ -200,7 +202,7 @@ def quyen_phat() -> set[str]:
 #: và sẽ tắt nhầm cả `schedule_reminder`, `remember_about_user`…
 _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
-    "web_crawl", "web_scrape", "lark_cli",
+    "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san",
 })
 
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.

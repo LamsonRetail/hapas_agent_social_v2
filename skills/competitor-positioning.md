@@ -11,8 +11,12 @@ Chạy song song cho từng đối thủ, rồi lấy mốc của chính HAPAS �
   nhiều trang. Lấy tagline, câu hero, nút kêu gọi (CTA), dải giá
 - **Quảng cáo** — `fb_ads_library`: thông điệp họ đang trả tiền để nói. Thứ họ quảng cáo
   mạnh là thứ họ tin là bán được
-- **Mạng xã hội** — tên kênh, chủ đề lặp lại, kiểu KOL/KOC họ dùng. Chỉ `social_listen` khi
-  người dùng đồng ý chi phí
+- **Tài khoản của chính họ** — `soi_tai_khoan` với link TikTok / trang Facebook / Instagram
+  của đối thủ (lấy ở chân trang website, đừng đoán tên). Ra tần suất đăng, bài nổi nhất,
+  chiến dịch và người nổi tiếng họ hợp tác, hashtag họ đẩy
+- **Người khác nói gì về họ** — `social_listen` theo tên brand
+- **Giá trên sàn** — `soi_san` (Shopee) khi cần so dải giá với thị trường đại trà
+- Mọi bước tốn tiền ở trên đều hỏi "chạy nhé?" trước, như quét thường
 - **HAPAS** — lấy từ kho tài liệu nội bộ trước, rồi mới tới website
 
 **Giữ nguyên văn** tagline, CTA và câu giá trị, kèm link nguồn. Diễn giải lại là mất đúng
