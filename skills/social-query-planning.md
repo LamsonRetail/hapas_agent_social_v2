@@ -13,6 +13,20 @@ Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị tr�
 - Nền tảng không nói gì thì đề xuất quét cả năm nền tảng
 - Người dùng đã đồng ý ở lượt trước ("ok", "có", "chốt") → chạy luôn, không hỏi lại
 
+Câu xác nhận nêu luôn **chi phí dự kiến** theo bảng giá đo thật trên Apify (09/2026):
+
+| Nền tảng | Giá mỗi lần quét 100 bài |
+|---|---|
+| TikTok | ~0,30 USD (gần như lúc nào cũng phải dùng actor dự phòng) |
+| Threads | ~0,12–0,33 USD |
+| Facebook | ~0,05 USD mỗi từ khoá |
+| Instagram | ~0,02–0,06 USD |
+| YouTube | miễn phí |
+
+- Quét cả năm nền tảng với một từ khoá: khoảng **0,5–0,7 USD**
+- Mỗi lượt chạy bị chặn ở trần 1 USD. Chạm trần thì actor dừng giữa chừng và kết quả thiếu
+- Đây chỉ là dự kiến. Sau khi quét, báo số thật trong `chi_phi` của tool
+
 Khoảng thời gian tính tới HÔM NAY, không bao giờ gồm ngày chưa tới:
 
 - "tuần này" = từ Thứ 2 tuần này tới hôm nay

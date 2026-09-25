@@ -246,6 +246,63 @@ def _call(actor: str, payload: dict, limit: int, mem: int | None = None) -> list
     return data if isinstance(data, list) else []
 
 
+def _chi_phi_thuc(actors: list[str], tu: datetime.datetime) -> dict | None:
+    """Cộng `usageTotalUsd` các run của `actors` bắt đầu từ `tu` — tiền Apify THẬT tính.
+
+    Endpoint run-sync không trả phí, nên hỏi lại lịch sử run sau khi quét. Trước
+    đây chỉ có ước tính trước khi chạy: 23/09/2026 Mark báo "khoảng 0,30 USD"
+    trong khi thực tế là 0,83 USD. Trả None nếu không hỏi được (không đoán số).
+    """
+    token = os.environ.get("APIFY_TOKEN", "").strip()
+    if not token or not actors:
+        return None
+
+    def _mot(actor: str) -> list[dict]:
+        r = requests.get(f"{_APIFY_BASE}/acts/{actor}/runs",
+                         params={"desc": 1, "limit": 20},
+                         headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        r.raise_for_status()
+        return (r.json().get("data") or {}).get("items") or []
+
+    tong, so_run, cham_tran, dang_chay = 0.0, 0, 0, 0
+    try:
+        with ThreadPoolExecutor(max_workers=len(actors)) as ex:
+            ds = list(ex.map(_mot, actors, timeout=15))
+    except Exception:  # noqa: BLE001 — không để token lọt vào lỗi
+        return None
+    for items in ds:
+        for it in items:
+            st = _to_vn(it.get("startedAt"))
+            if not st or st < tu:
+                continue
+            u = float(it.get("usageTotalUsd") or 0)
+            tong += u
+            so_run += 1
+            cham_tran += u >= 0.95 * _MAX_CHARGE
+            dang_chay += it.get("status") in ("READY", "RUNNING")
+    return {"usd": round(tong, 3), "so_run": so_run,
+            "cham_tran": cham_tran, "dang_chay": dang_chay}
+
+
+def _dong_chi_phi(thuc: dict | None, est: float) -> str:
+    """Một dòng chi phí dựng sẵn để model chép nguyên văn, khỏi tự tính."""
+    def usd(x: float) -> str:
+        return f"{x:.2f}".replace(".", ",")
+
+    if thuc and not thuc["so_run"] and est <= 0:
+        return "Chi phí lượt quét: 0 USD (nguồn đã quét không tính phí)."
+    if not thuc or not thuc["so_run"]:
+        return (f"Chi phí lượt quét: chưa lấy được số thực từ Apify, ước tính trước "
+                f"khi chạy khoảng {usd(est)} USD.")
+    s = f"Chi phí lượt quét: {usd(thuc['usd'])} USD (số thực từ Apify, {thuc['so_run']} lượt chạy)."
+    if thuc["cham_tran"]:
+        s += (f" {thuc['cham_tran']} lượt chạm trần {_MAX_CHARGE:g} USD/lượt nên bị dừng "
+              f"giữa chừng — kết quả có thể thiếu.")
+    if thuc["dang_chay"]:
+        s += " Một số lượt vẫn đang chạy trên Apify nên số có thể còn tăng."
+    return s
+
+
 # ───────────────────────── YouTube Data API v3 ─────────────────────────
 def _youtube_get(resource: str, params: dict) -> dict:
     """GET một endpoint YouTube, không bao giờ để API key lọt vào lỗi/log."""
@@ -586,10 +643,15 @@ def _fetch_tiktok_fallback(q: list[str], limit: int) -> list[dict]:
     lại có `authorMeta.fans` (followers) và chạy ổn định. Đắt hơn ~10 lần
     ($0.003 vs $0.0003 mỗi video) nên chỉ gọi khi actor chính trả rỗng.
     """
+    # `resultsPerPage` tính cho TỪNG hashtag, và actor bỏ qua `maxItems` trên URL.
+    # Đo thật 25/09/2026: 5 hashtag × 100 = đòi 500 video, cào 333 thì chạm trần
+    # $1 và bị cắt ngang. Chia `limit` cho số hashtag như Instagram/Facebook để
+    # `limit` đúng nghĩa "tối đa MỖI nền tảng".
+    tags = [x.lstrip("#") for x in q]
+    per = max(1, limit // max(1, len(tags)))
     try:
         raw = _call(_ACTORS["tiktok_fallback"],
-                    {"hashtags": [x.lstrip("#") for x in q], "resultsPerPage": limit},
-                    limit)
+                    {"hashtags": tags, "resultsPerPage": per}, limit)
     except Exception as e:  # noqa: BLE001
         print(f"[social_listen] tiktok fallback lỗi: {e}")
         return []
@@ -940,7 +1002,11 @@ SCHEMA = {
         "- Nguồn nào có `chua_phu_het` thì BẮT BUỘC nói ra: khoảng ngày rộng mà chạm trần "
         "`limit` nghĩa là phần CŨ của khoảng CHƯA hề được quét. Đừng để người dùng tưởng "
         "đã phủ trọn khoảng — đề xuất tăng limit hoặc chia nhỏ khoảng ngày.\n"
-        "- `uoc_tinh_chi_phi_usd` và `che_do`: hỏi về chi phí thì đọc ra, đừng đoán.\n"
+        "- LUÔN kết thúc câu trả lời bằng MỘT dòng chép NGUYÊN VĂN `chi_phi`. Đó là "
+        "số tiền Apify THỰC tính, dòng này cũng giúp lượt sau trả lời được câu hỏi về "
+        "chi phí. Không tự tính, không lấy `uoc_tinh_chi_phi_usd` thay cho số thực.\n"
+        "- `cham_tran_chi_phi`=true: có lượt chạy bị dừng vì chạm trần chi phí, nên nói "
+        "rõ kết quả có thể thiếu và đề xuất giảm số từ khoá hoặc giảm `limit`.\n"
         "- Chất lượng nguồn KHÔNG bằng nhau, phải nhắc khi liên quan: Instagram và "
         "Facebook KHÔNG có followers; Instagram không lọc được quốc gia nên nhiễu quốc "
         "tế; Facebook khớp từ khoá lỏng và gói free chỉ 20 kết quả + 1 lần chạy/24h.\n"
@@ -1028,7 +1094,12 @@ def _handle(args: dict, **kwargs) -> str:
     # rất dễ vượt trần trả lời. Nền tảng nào không kịp hạn thì báo LỖI rõ ràng
     # chứ không âm thầm biến mất khỏi kết quả.
     lims = {p: (limit if explicit else min(limit, _SHALLOW.get(p, limit))) for p in plats}
-    est = sum(_START_COST.get(p, 0.0) + _UNIT_COST.get(p, 0.0) * lims[p] for p in plats)
+    # Instagram/Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ khoá.
+    so_run = {p: (len(queries) if p in ("instagram", "facebook") else 1) for p in plats}
+    est = sum(_START_COST.get(p, 0.0) * so_run[p] + _UNIT_COST.get(p, 0.0) * lims[p]
+              for p in plats)
+    # Lùi vài giây để đồng hồ máy lệch với Apify không làm sót run đầu tiên.
+    _bat_dau = datetime.datetime.now(_VN_TZ) - datetime.timedelta(seconds=5)
     _t0 = time.monotonic()
     with ThreadPoolExecutor(max_workers=len(plats)) as ex:
         futs = {p: ex.submit(_FETCH[p], queries, lims[p], country, d_from, d_to)
@@ -1185,10 +1256,19 @@ def _handle(args: dict, **kwargs) -> str:
                  f"post trong sheet thì đặt limit ≈ N/{ty_le:.2f} (vd muốn 50 post → "
                  f"limit ≈ {min(500, max(1, int(50 / ty_le)))}). Trần limit là 500.")
 
+    actors = [_ACTORS[p] for p in plats if p in _ACTORS]
+    if "tiktok" in plats:
+        actors.append(_ACTORS["tiktok_fallback"])
+    thuc = _chi_phi_thuc(actors, _bat_dau) if actors else {
+        "usd": 0.0, "so_run": 0, "cham_tran": 0, "dang_chay": 0}
+
     base = dict(queries=queries, date_range=rng, platforms=plats,
                 ty_le_trong_khoang=round(ty_le, 3), goi_y_limit=goi_y,
                 che_do="đào sâu (gọi đích danh)" if explicit else "quét rộng-nông (mặc định)",
                 uoc_tinh_chi_phi_usd=round(est, 3),
+                chi_phi_thuc_usd=thuc["usd"] if thuc else None,
+                cham_tran_chi_phi=bool(thuc and thuc["cham_tran"]),
+                chi_phi=_dong_chi_phi(thuc, est),
                 per_platform=per_platform, platforms_failed=failed,
                 platforms_not_supported=not_yet, scraped=scraped, in_range=len(hits))
 
