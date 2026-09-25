@@ -29,7 +29,10 @@ khi người dùng HỎI thì mới trả lời:
 | YouTube | miễn phí |
 
 - Quét cả năm nền tảng với một từ khoá: khoảng **0,5–0,7 USD**
-- Mỗi lượt chạy bị chặn ở trần 1 USD. Chạm trần thì actor dừng giữa chừng và kết quả thiếu
+- Mỗi lượt chạy bị chặn ở trần chi phí (mặc định 1 USD). Chạm trần thì actor dừng giữa
+  chừng và kết quả thiếu
+- Trần số bài và trần chi phí do chủ agent đặt trên console (Năng lực → Quét mạng xã
+  hội). Người dùng muốn quét nhiều hơn trần thì chỉ họ tới đó, đừng hứa vượt trần
 - Đây chỉ là dự kiến. Số thật chỉ có sau khi quét
 
 Khoảng thời gian tính tới HÔM NAY, không bao giờ gồm ngày chưa tới:

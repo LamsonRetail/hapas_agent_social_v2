@@ -87,8 +87,35 @@ _REPLY_BUDGET = float(os.environ.get("AGENT_REPLY_TIMEOUT", "180"))
 _TOOL_DEADLINE = max(45.0, _REPLY_BUDGET - 45.0)   # chừa 45s cho model viết trả lời
 _RUN_TIMEOUT = min(120, int(_TOOL_DEADLINE))
 _VN_TZ = datetime.timezone(datetime.timedelta(hours=7))
+# MẶC ĐỊNH khi chủ agent chưa đặt trần trên console. Giá trị thật đọc qua `_tran()`.
 _MAX_CHARGE = float(os.environ.get("APIFY_MAX_CHARGE_USD", "1.0"))
 _MAX_LIMIT = 500
+# Khoảng AN TOÀN cứng cho hai trần chủ agent chỉnh trên console (Năng lực → Quét mạng
+# xã hội). Console gõ gì thì ở đây cũng kẹp lại: gõ nhầm 1000 USD thành 1000 không được
+# biến thành một lượt quét nghìn đô. 1000 bài TikTok ≈ 3 USD, nên 5 USD đủ chỗ.
+_TRAN_BAI_KHOANG = (10, 1000)
+_TRAN_USD_KHOANG = (0.1, 5.0)
+
+
+def _kep(v, lo: float, hi: float, mac_dinh: float) -> float:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return mac_dinh
+    if v != v:                            # NaN
+        return mac_dinh
+    return min(hi, max(lo, v))
+
+
+def _tran() -> tuple[int, float]:
+    """(trần bài mỗi nền tảng, trần USD mỗi lượt chạy actor) đang có hiệu lực."""
+    try:
+        import lsr_policy
+        c = lsr_policy.cau_hinh_tool("social_listen")
+    except Exception:  # noqa: BLE001 — đọc hỏng thì dùng mặc định, không chặn quét
+        c = {}
+    return (int(_kep(c.get("tran_bai"), *_TRAN_BAI_KHOANG, _MAX_LIMIT)),
+            round(_kep(c.get("tran_usd"), *_TRAN_USD_KHOANG, _MAX_CHARGE), 2))
 
 _ALL = ("tiktok", "facebook", "instagram", "youtube", "threads")
 
@@ -238,7 +265,7 @@ def _call(actor: str, payload: dict, limit: int, mem: int | None = None) -> list
     url = (f"{_APIFY_BASE}/acts/{actor}/run-sync-get-dataset-items"
            f"?token={urllib.parse.quote(token)}"
            # Đây là TRẦN cho phép, không phải phí thực — phí vẫn tính theo item.
-           f"&maxItems={limit}&maxTotalChargeUsd={_MAX_CHARGE}"
+           f"&maxItems={limit}&maxTotalChargeUsd={_tran()[1]}"
            + (f"&memory={mem}" if mem else ""))
     r = requests.post(url, json=payload, timeout=_RUN_TIMEOUT)
     if r.status_code >= 400:
@@ -266,6 +293,7 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime) -> dict | None:
         return (r.json().get("data") or {}).get("items") or []
 
     tong, so_run, cham_tran, dang_chay = 0.0, 0, 0, 0
+    tran_usd = _tran()[1]
     try:
         with ThreadPoolExecutor(max_workers=len(actors)) as ex:
             ds = list(ex.map(_mot, actors, timeout=15))
@@ -279,7 +307,7 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime) -> dict | None:
             u = float(it.get("usageTotalUsd") or 0)
             tong += u
             so_run += 1
-            cham_tran += u >= 0.95 * _MAX_CHARGE
+            cham_tran += u >= 0.95 * tran_usd
             dang_chay += it.get("status") in ("READY", "RUNNING")
     return {"usd": round(tong, 3), "so_run": so_run,
             "cham_tran": cham_tran, "dang_chay": dang_chay}
@@ -297,7 +325,7 @@ def _dong_chi_phi(thuc: dict | None, est: float) -> str:
                 f"khi chạy khoảng {usd(est)} USD.")
     s = f"Chi phí lượt quét: {usd(thuc['usd'])} USD (số thực từ Apify, {thuc['so_run']} lượt chạy)."
     if thuc["cham_tran"]:
-        s += (f" {thuc['cham_tran']} lượt chạm trần {_MAX_CHARGE:g} USD/lượt nên bị dừng "
+        s += (f" {thuc['cham_tran']} lượt chạm trần {_tran()[1]:g} USD/lượt nên bị dừng "
               f"giữa chừng — kết quả có thể thiếu.")
     if thuc["dang_chay"]:
         s += " Một số lượt vẫn đang chạy trên Apify nên số có thể còn tăng."
@@ -998,7 +1026,7 @@ SCHEMA = {
         "sheet thiếu. Sheet luôn chứa ĐỦ toàn bộ post trong khoảng (`ghi_du_khong`=true). "
         "TUYỆT ĐỐI không chạy lại tool để 'ghi cho đủ' — chỉ tốn tiền, kết quả y hệt.\n"
         "- Người dùng muốn NHIỀU POST HƠN trong sheet: đọc `goi_y_limit` rồi gọi lại với "
-        "`limit` lớn hơn (trần 500), hoặc nới khoảng ngày. Đừng hứa số post mà nguồn "
+        "`limit` lớn hơn (tối đa `tran_bai`), hoặc nới khoảng ngày. Đừng hứa số post mà nguồn "
         "không có.\n"
         "- Nguồn nào có `chua_phu_het` thì BẮT BUỘC nói ra: khoảng ngày rộng mà chạm trần "
         "`limit` nghĩa là phần CŨ của khoảng CHƯA hề được quét. Đừng để người dùng tưởng "
@@ -1007,6 +1035,7 @@ SCHEMA = {
         "audit. Chỉ khi người dùng HỎI thì đọc NGUYÊN VĂN `chi_phi` (số Apify THỰC "
         "tính); lượt sau mới hỏi thì gọi `tra_chi_phi_quet`. Không tự tính, không lấy "
         "`uoc_tinh_chi_phi_usd` thay cho số thực.\n"
+        "- `limit_bi_cat` có nội dung thì BẮT BUỘC nói ra: người dùng xin nhiều hơn trần.\n"
         "- `cham_tran_chi_phi`=true: có lượt chạy bị dừng giữa chừng, nên nói rõ kết "
         "quả có thể THIẾU và đề xuất giảm số từ khoá hoặc giảm `limit` (không cần nêu "
         "số tiền).\n"
@@ -1029,7 +1058,7 @@ SCHEMA = {
                 "description": ("Nền tảng. BỎ TRỐNG = cào cả ba. Nhận viết tắt: fb, face, "
                                 "ig, insta, tt. Truyền nguyên văn chữ người dùng dùng."),
             },
-            "limit": {"type": "integer", "description": "Số post CÀO tối đa MỖI nền tảng (mặc định 100, trần 500)."},
+            "limit": {"type": "integer", "description": "Số post CÀO tối đa MỖI nền tảng (mặc định 100, tối đa theo trần chủ agent đặt — mặc định 500)."},
             "country": {"type": "string", "description": "Mã ISO, mặc định VN. TikTok và YouTube dùng được."},
             "boi_canh": {
                 "type": "string",
@@ -1082,7 +1111,9 @@ def _handle(args: dict, **kwargs) -> str:
         limit = int(args.get("limit") or 100)
     except (TypeError, ValueError):
         limit = 100
-    limit = max(1, min(limit, _MAX_LIMIT))
+    tran_bai, tran_usd = _tran()
+    limit_xin = limit
+    limit = max(1, min(limit, tran_bai))
     country = (str(args.get("country") or "VN").strip() or "VN").upper()
     ex = args.get("exclude") or []
     loai_tru = [str(x).strip() for x in (ex if isinstance(ex, list) else [ex]) if str(x).strip()]
@@ -1257,7 +1288,7 @@ def _handle(args: dict, **kwargs) -> str:
     if 0 < ty_le < 0.9:
         goi_y = (f"Chỉ {ty_le:.0%} post cào được nằm trong khoảng ngày. Muốn khoảng N "
                  f"post trong sheet thì đặt limit ≈ N/{ty_le:.2f} (vd muốn 50 post → "
-                 f"limit ≈ {min(500, max(1, int(50 / ty_le)))}). Trần limit là 500.")
+                 f"limit ≈ {min(tran_bai, max(1, int(50 / ty_le)))}). Trần limit là {tran_bai}.")
 
     actors = [_ACTORS[p] for p in plats if p in _ACTORS]
     if "tiktok" in plats:
@@ -1270,6 +1301,10 @@ def _handle(args: dict, **kwargs) -> str:
                 ty_le_trong_khoang=round(ty_le, 3), goi_y_limit=goi_y,
                 che_do="đào sâu (gọi đích danh)" if explicit else "quét rộng-nông (mặc định)",
                 uoc_tinh_chi_phi_usd=round(est, 3),
+                tran_bai=tran_bai, tran_chi_phi_usd_moi_luot=tran_usd,
+                limit_bi_cat=(f"Người dùng xin {limit_xin} bài, trần hiện tại là {tran_bai} "
+                              f"bài mỗi nền tảng. Chủ agent nâng được ở console: Năng lực → "
+                              f"Quét mạng xã hội.") if limit_xin > tran_bai else None,
                 chi_phi_thuc_usd=thuc["usd"] if thuc else None,
                 cham_tran_chi_phi=bool(thuc and thuc["cham_tran"]),
                 chi_phi=_dong_chi_phi(thuc, est),

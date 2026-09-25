@@ -243,9 +243,16 @@ def _nang_luc_tu_danh_ba():
             return None
         caps = hang.get("capabilities")
         if not isinstance(caps, list):
+            _nho_nl["cau_hinh"] = {}
             return KHONG_THU_HEP          # null / chưa khai
         bat = {str(c["tool"]) for c in caps
                if isinstance(c, dict) and isinstance(c.get("tool"), str)}
+        # Ô cấu hình console gắn vào CÙNG mục năng lực (vd trần quét của social_listen).
+        # Đọc chung một lượt với công tắc để khỏi thêm lời gọi mạng.
+        _nho_nl["cau_hinh"] = {
+            str(c["tool"]): dict(c["cau_hinh"]) for c in caps
+            if isinstance(c, dict) and isinstance(c.get("tool"), str)
+            and isinstance(c.get("cau_hinh"), dict)}
         # Có `capabilities` nhưng không mục nào mang khoá `tool` → dữ liệu do nơi khác
         # ghi, không phải bảng công tắc của console. Không diễn giải bừa thành "tắt hết".
         return bat if bat else KHONG_THU_HEP
@@ -266,6 +273,16 @@ def nang_luc_bat():
     if _nho_nl["bat"] is not None:
         return _nho_nl["bat"]             # giữ bản cũ qua một nhịp mất mạng
     return KHONG_THU_HEP
+
+
+def cau_hinh_tool(tool: str) -> dict:
+    """Ô cấu hình chủ agent đặt cho `tool` trên console, `{}` nếu chưa đặt.
+
+    Giá trị THÔ từ console — nơi dùng phải tự kẹp trong khoảng an toàn của mình.
+    Làm mới cùng nhịp TTL với công tắc; đọc hỏng thì giữ bản nhớ cuối.
+    """
+    nang_luc_bat()
+    return dict((_nho_nl.get("cau_hinh") or {}).get(tool) or {})
 
 
 def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision:
