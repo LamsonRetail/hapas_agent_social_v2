@@ -158,12 +158,34 @@ def _gia_shopee(x: dict) -> dict | None:
         it = next((i for i in raw if str(i.get("itemId")) == x["item_id"]), None)
     if not it:
         return None
-    return {"ten": it.get("name"), "gia": int(_so(it.get("price"), float)),
-            "gia_goc": int(_so(it.get("priceBeforeDiscount"), float)) or None,
+    # Sản phẩm nhiều phân loại thì `price` chỉ là giá phân loại RẺ NHẤT. Đo 25/09: tai nghe
+    # Pro4 báo 18.800đ trong khi phân loại người dùng xem là 36.000đ sau voucher — phải
+    # báo KHOẢNG giá theo phân loại, không một con số.
+    tu, den = int(_so(it.get("priceMin") or it.get("price"), float)), int(_so(it.get("priceMax"), float))
+    pl = [o for t in it.get("tierVariations") or [] if isinstance(t, dict)
+          for o in t.get("options") or []]
+    # `ratingBreakdown` = [tổng, 1★, 2★, 3★, 4★, 5★] của TOÀN BỘ đánh giá — vẫn có khi Shopee
+    # chặn đọc nội dung đánh giá.
+    rb = it.get("ratingBreakdown")
+    sao = ({f"{i} sao": _so(rb[i]) for i in range(5, 0, -1)}
+           if isinstance(rb, list) and len(rb) >= 6 else None)
+    return {"ten": it.get("name"),
+            "gia_tu": tu, "gia_den": den if den > tu else None,
+            "gia_goc_tu": int(_so(it.get("priceMinBeforeDiscount") or it.get("priceBeforeDiscount"), float)) or None,
+            "gia_goc_den": int(_so(it.get("priceMaxBeforeDiscount"), float)) or None,
             "giam_pct": _so(it.get("discountPercent")) or None,
+            "dang_flash_sale": bool(it.get("isOnFlashSale")),
             "diem": round(_so(it.get("rating"), float), 2),
-            "tong_danh_gia": _so(it.get("ratingCount")), "luot_thich": _so(it.get("likedCount")),
-            "shop": it.get("shopName"), "shopee_mall": bool(it.get("isOfficialShop"))}
+            "tong_danh_gia": _so(it.get("ratingCount")), "phan_bo_sao_toan_bo": sao,
+            "so_binh_luan": _so(it.get("commentCount")) or None,
+            "luot_thich": _so(it.get("likedCount")),
+            "so_phan_loai": len(pl) or None, "phan_loai": pl[:25] or None,
+            "ngay_bat_dau_ban": str(it.get("createdAt") or "")[:10] or None,
+            "shop": it.get("shopName"), "shopee_mall": bool(it.get("isOfficialShop")),
+            "shop_da_xac_minh": bool(it.get("isVerifiedSeller")),
+            "noi_gui": it.get("shopLocation"),
+            "khong_co": ("số đã bán, giá sau voucher, phí ship, voucher shop, tồn kho — chỉ có "
+                         "trên trang chi tiết, nguồn đó đang hỏng")}
 
 
 def _tiktok_shop(links: list[dict], n: int) -> list[dict]:

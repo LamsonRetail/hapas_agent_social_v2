@@ -96,7 +96,7 @@ def test_soi_hai_san_cung_luc(gia):
     goi, dong = gia
     kq = json.loads(S._handle({"link": [SP_URL, TT_URL]}))
     sp, tt = kq["san_pham"]
-    assert sp["san"] == "Shopee" and sp["thong_tin"]["gia"] == 19900, "giá lấy qua tìm theo tên"
+    assert sp["san"] == "Shopee" and sp["thong_tin"]["gia_tu"] == 19900, "giá lấy qua tìm theo tên"
     assert sp["khong_co_so_da_ban"] is True and sp["chua_lay_duoc_gia"] is None
     d = sp["danh_gia"]
     assert d["so_danh_gia_da_doc"] == 2, "dòng _warning không được tính là đánh giá"
@@ -114,7 +114,7 @@ def test_link_khong_ten_van_lay_duoc_gia_qua_danh_sach_shop(gia):
     """Link rút gọn không có tên → bỏ bước tìm theo tên, tìm thẳng trong shop."""
     goi, _ = gia
     kq = json.loads(S._handle({"link": ["https://shopee.vn/product/59009982/25022958529"]}))
-    assert kq["san_pham"][0]["thong_tin"]["gia"] == 19900
+    assert kq["san_pham"][0]["thong_tin"]["gia_tu"] == 19900
     tim = [p for a, p in goi if a == L.ACTOR_TIM_SHOPEE]
     assert len(tim) == 1 and tim[0]["shopId"] == 59009982 and tim[0]["sort"] == "best_selling"
 
@@ -126,7 +126,7 @@ def test_ten_trong_link_truot_thi_tim_trong_shop(gia, monkeypatch):
         goi.append(payload)
         return TIM_SHOPEE if "shopId" in payload else [{"itemId": 999, "name": "khác"}]
     monkeypatch.setattr(A, "_call", call)
-    assert L._gia_shopee(L.nhan_dien(SP_URL))["gia"] == 19900
+    assert L._gia_shopee(L.nhan_dien(SP_URL))["gia_tu"] == 19900
     assert "searchTerms" in goi[0] and "shopId" in goi[1], "tên trước, shop sau"
 
 
@@ -167,10 +167,27 @@ def test_tiktok_shop_lay_danh_gia_moi_nhat_khong_lay_de_xuat(gia):
     assert [p for a, p in goi if a == L.ACTOR_TTS][0]["reviewsSortBy"] == "recent"
 
 
+def test_nhieu_phan_loai_thi_bao_khoang_gia_va_phan_bo_sao(gia, monkeypatch):
+    """Tai nghe Pro4 (~20 phân loại): `price` chỉ là phân loại rẻ nhất (18.800đ) trong khi
+    người dùng xem phân loại 36.000đ — phải ra KHOẢNG giá, kèm tên phân loại."""
+    it = dict(TIM_SHOPEE[0], priceMin=18800, priceMax=54000, priceMinBeforeDiscount=60000,
+              priceMaxBeforeDiscount=90000, isOnFlashSale=True,
+              ratingBreakdown=[20, 1, 0, 2, 3, 14], isVerifiedSeller=True,
+              tierVariations=[{"name": "Dòng Tai Nghe", "options": ["Pro 4", "M10", "B3"]}],
+              createdAt="2025-10-06T03:46:41+00:00", shopLocation="Hà Nội")
+    monkeypatch.setattr(A, "_call", lambda actor, p, n, mem=None:
+                        [it] if actor == L.ACTOR_TIM_SHOPEE else DG_SHOPEE)
+    t = json.loads(S._handle({"link": [SP_URL]}))["san_pham"][0]["thong_tin"]
+    assert (t["gia_tu"], t["gia_den"]) == (18800, 54000) and t["dang_flash_sale"] is True
+    assert t["phan_loai"] == ["Pro 4", "M10", "B3"] and t["so_phan_loai"] == 3
+    assert t["phan_bo_sao_toan_bo"] == {"5 sao": 14, "4 sao": 3, "3 sao": 2, "2 sao": 0, "1 sao": 1}
+    assert t["ngay_bat_dau_ban"] == "2025-10-06" and "số đã bán" in t["khong_co"]
+
+
 def test_tim_theo_ten_khong_khop_itemid_thi_khong_bia_gia(gia, monkeypatch):
     monkeypatch.setattr(L, "_gia_shopee", lambda x: None)
     sp = json.loads(S._handle({"link": [SP_URL]}))["san_pham"][0]
-    assert sp["chua_lay_duoc_gia"] and "gia" not in sp["thong_tin"]
+    assert sp["chua_lay_duoc_gia"] and "gia_tu" not in sp["thong_tin"]
 
 
 def test_tiktok_shop_khong_tra_san_pham_thi_bao_ro(gia, monkeypatch):
