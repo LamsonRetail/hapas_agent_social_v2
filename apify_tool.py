@@ -1011,6 +1011,16 @@ SCHEMA = {
         "NGÀY trên TikTok + Facebook + Instagram + YouTube + Threads, gộp vào MỘT Lark Sheet, cấp quyền cho "
         "người hỏi và trả LINK SHEET. Dùng khi ai nhờ 'soi hashtag X từ ngày… tới ngày…', "
         "'quét từ khoá Y trên fb', 'tìm KOC đang nói về brand Z'.\n"
+        "TREND CHUNG (không có brand/từ khoá cụ thể — 'trend TikTok đang nổi', 'âm thanh "
+        "đang hot', 'format nào đang viral'): gọi với `che_do`='trend', KHÔNG cần "
+        "`queries` hay ngày. Đừng cào hashtag chung chung kiểu #trend/#viral/#xuhuong: đo "
+        "thật chỉ ra mẫu ngẫu nhiên, lẫn video cũ và nước ngoài. Kết quả trend: `hashtag` "
+        "là bảng CHÍNH THỨC của TikTok (ưu tiên nêu hashtag `huong`='lên'); `video` là top "
+        "video của vùng; `am_thanh`/`hieu_ung` SUY từ mẫu nên phải nói rõ cỡ mẫu "
+        "(`mau_am_thanh`) và chỉ gọi là tín hiệu. `am_thanh` rỗng thì nói thẳng là mẫu "
+        "chưa thấy âm thanh nào nhiều kênh dùng lại, đừng bịa tên. Hashtag hoặc hiệu ứng "
+        "gắn tên brand (vd #larocheposaysuperbrandday, #hoptaccung…, xem `di_kem_hashtag`) "
+        "là CHIẾN DỊCH TRẢ TIỀN của brand, nói rõ như vậy, đừng gọi là trend tự nhiên.\n"
         "NỀN TẢNG: không nói gì thì cào CẢ NĂM (tiktok, facebook, instagram, youtube, "
         "threads) ở chế độ QUÉT RỘNG-NÔNG — YouTube 50 post (quota 100 search/ngày), "
         "Threads 30 post (chi phí cao). Gọi đích danh nền tảng nào thì nền tảng đó "
@@ -1081,13 +1091,38 @@ SCHEMA = {
                     "người dùng kêu nhiễu, HÃY GỢI Ý họ dùng tham số này."),
             },
             "title": {"type": "string", "description": "Tên file sheet. Bỏ trống sẽ tự đặt."},
+            "che_do": {
+                "type": "string", "enum": ["trend"],
+                "description": ("'trend' = trend TikTok đang nổi theo vùng (bảng chính thức "
+                                "Creative Center), không cần từ khoá. Bỏ trống = quét "
+                                "theo từ khoá như thường (khi đó BẮT BUỘC có `queries`, "
+                                "`date_from`, `date_to`)."),
+            },
+            "ky_ngay": {"type": "string", "enum": ["7", "30"],
+                        "description": "Chỉ cho che_do='trend': kỳ xếp hạng, mặc định 7 ngày."},
+            "so_hashtag": {"type": "integer",
+                           "description": "Chỉ cho che_do='trend': số hashtag (mặc định 20, tối đa 100)."},
+            "so_video": {"type": "integer",
+                         "description": "Chỉ cho che_do='trend': số top video (mặc định 20, tối đa 100)."},
+            "so_video_mau": {"type": "integer",
+                             "description": ("Chỉ cho che_do='trend': số video lấy mẫu để "
+                                             "tìm âm thanh/hiệu ứng (mặc định 100, tối đa "
+                                             "theo trần bài). Người dùng xin 'đủ N bài' thì "
+                                             "đặt N ở đây.")},
+            "chi_tu_nhien": {"type": "boolean",
+                             "description": "Chỉ cho che_do='trend': bỏ video quảng cáo trả tiền (mặc định true)."},
         },
-        "required": ["queries", "date_from", "date_to"],
+        # Rỗng vì chế độ trend không cần từ khoá/ngày. Chế độ thường vẫn tự kiểm và báo
+        # lỗi rõ ràng trong `_handle` khi thiếu.
+        "required": [],
     },
 }
 
 
 def _handle(args: dict, **kwargs) -> str:
+    if str(args.get("che_do") or "").strip().lower() == "trend":
+        import tiktok_trend
+        return tiktok_trend.chay(args)
     queries = [str(q).strip().lstrip("#") for q in (args.get("queries") or []) if str(q).strip()]
     if not queries:
         return tool_error("Thiếu `queries` (từ khoá/hashtag).")

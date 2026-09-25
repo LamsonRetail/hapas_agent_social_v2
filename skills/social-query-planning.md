@@ -3,6 +3,18 @@
 Một lần quét cần đủ ba thứ: **từ khoá hoặc brand**, **nền tảng**, **khoảng thời gian**.
 Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị trường.
 
+**Ngoại lệ — hỏi trend chung** (không có brand: "trend TikTok đang nổi", "âm thanh đang
+hot", "format nào đang viral"): gọi `social_listen` với `che_do`="trend". Không cần từ
+khoá hay ngày; kỳ là 7 ngày gần nhất (hoặc 30). Không cào hashtag chung chung như
+#trend, #viral, #xuhuong: cách đó chỉ ra mẫu ngẫu nhiên, lẫn video cũ và video nước
+ngoài. Người dùng xin "đủ N bài" thì đặt `so_video_mau`=N. Chi phí thường khoảng 0,4 USD.
+Khi báo kết quả:
+
+- Hashtag và top video là bảng xếp hạng chính thức của TikTok. Ưu tiên nêu hashtag đang lên
+- Âm thanh và hiệu ứng là tín hiệu SUY từ mẫu: nói rõ cỡ mẫu, không gọi là bảng xếp hạng
+- Top video có thể là quảng cáo của brand. Mặc định đã bỏ video trả tiền; nếu vẫn thấy
+  video của brand lớn thì nói rõ đó là nội dung brand chứ không phải trend tự nhiên
+
 **Luôn chờ người dùng đồng ý trước khi chạy một lần quét tốn tiền.**
 
 - **Đủ ba thứ** → nêu phạm vi đã hiểu trong MỘT câu ngắn (từ khoá · nền tảng · khoảng

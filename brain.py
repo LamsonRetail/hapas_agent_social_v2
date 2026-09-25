@@ -407,8 +407,14 @@ def _khoi_kenh(kenh: dict | None, sender_open_id: str | None, name: str) -> str:
         ]
         return "\n".join(dong)
     if ct == "p2p":
+        # Dòng thứ hai vì đo thật 25/09/2026: được nhờ "gửi về DM cho tôi" ngay trong DM,
+        # Mark đáp "tôi không có quyền gửi DM thay bạn" — không hiểu rằng câu trả lời của
+        # nó ĐÃ LÀ tin DM.
         return (f"\n---\n## KÊNH CỦA LƯỢT NÀY: CHAT RIÊNG 1-1 với {name}\n"
-                "- Chỉ người này đọc. Trả lời đầy đủ được, không cần tag.")
+                "- Chỉ người này đọc. Trả lời đầy đủ được, không cần tag.\n"
+                "- Đây CHÍNH LÀ DM của họ: câu trả lời của bạn là tin nhắn riêng gửi thẳng cho "
+                "họ. Được nhờ 'gửi về DM/inbox cho tôi' thì cứ trả lời ở đây là xong, đừng "
+                "nói mình không gửi DM được.")
     return ""
 
 
