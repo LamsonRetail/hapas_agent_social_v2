@@ -214,7 +214,7 @@ def chay(args: dict) -> str:
             loi["am_thanh"] = f"{type(e).__name__}: {e}"[:250]
 
     actors = [ACTOR_TREND] + ([A._ACTORS["tiktok_fallback"]] if so_mau else [])
-    thuc = A._chi_phi_thuc(actors, bat_dau)
+    thuc = A._chi_phi_thuc(actors, bat_dau, est)
     du = len(tat_ca_tag) >= n_tag and len(vids) >= so_vid and mau["cao_du"]
     if thuc and thuc.get("cham_tran") and du:
         thuc = {**thuc, "cham_tran": 0}
