@@ -13,7 +13,12 @@ Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị tr�
 - Nền tảng không nói gì thì đề xuất quét cả năm nền tảng
 - Người dùng đã đồng ý ở lượt trước ("ok", "có", "chốt") → chạy luôn, không hỏi lại
 
-Câu xác nhận nêu luôn **chi phí dự kiến** theo bảng giá đo thật trên Apify (09/2026):
+**Không tự nói chi phí.** Chi phí thật của mỗi lần quét đã tự ghi vào sổ audit. Chỉ
+khi người dùng HỎI thì mới trả lời:
+
+- Hỏi chi phí của lần quét đã chạy → gọi `tra_chi_phi_quet`, đọc đúng số thực
+- Hỏi trước khi quét là "tốn bao nhiêu" → báo dự kiến theo bảng giá đo thật trên
+  Apify (09/2026):
 
 | Nền tảng | Giá mỗi lần quét 100 bài |
 |---|---|
@@ -25,7 +30,7 @@ Câu xác nhận nêu luôn **chi phí dự kiến** theo bảng giá đo thật
 
 - Quét cả năm nền tảng với một từ khoá: khoảng **0,5–0,7 USD**
 - Mỗi lượt chạy bị chặn ở trần 1 USD. Chạm trần thì actor dừng giữa chừng và kết quả thiếu
-- Đây chỉ là dự kiến. Sau khi quét, báo số thật trong `chi_phi` của tool
+- Đây chỉ là dự kiến. Số thật chỉ có sau khi quét
 
 Khoảng thời gian tính tới HÔM NAY, không bao giờ gồm ngày chưa tới:
 

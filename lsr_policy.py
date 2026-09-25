@@ -31,6 +31,8 @@ _SAFE_EXACT = {
     # nạp thì agent vẫn thấy mục lục trong prompt rồi gọi và ăn từ chối giữa câu trả
     # lời. Muốn bỏ một kỹ năng thì tắt chính nó ở version, nó rụng khỏi mục lục luôn.
     "dung_ky_nang",
+    # Chỉ đọc sổ chi phí quét cục bộ của chính chat đang hỏi (chi_phi_tool.py).
+    "tra_chi_phi_quet",
     "browser_navigate",
     "browser_snapshot",
     "browser_get_images",

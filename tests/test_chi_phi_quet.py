@@ -11,6 +11,7 @@ Lỗi thật đọc ra từ lịch sử run Apify:
 from __future__ import annotations
 
 import datetime
+import json
 
 import pytest
 
@@ -100,5 +101,72 @@ def test_du_phong_tiktok_chia_limit_theo_hashtag(monkeypatch):
         "resultsPerPage tính cho TỪNG hashtag: để 100 thì 5 hashtag đòi 500 video")
 
 
-def test_mo_ta_tool_bat_buoc_dong_chi_phi():
-    assert "chép NGUYÊN VĂN `chi_phi`" in A.SCHEMA["description"]
+def test_khong_tu_noi_chi_phi_chi_tra_loi_khi_hoi():
+    """Chủ agent 25/09: chi phí ghi vào Base audit, ai hỏi mới trả lời."""
+    mo_ta = A.SCHEMA["description"]
+    assert "KHÔNG tự nói ra" in mo_ta and "tra_chi_phi_quet" in mo_ta
+    assert "LUÔN kết thúc" not in mo_ta
+
+
+# ─────────────────────────── sổ chi phí (chi_phi_tool) ───────────────────────────
+
+@pytest.fixture
+def so(monkeypatch, tmp_path):
+    import audit
+    import chi_phi_tool as C
+    monkeypatch.setattr(C, "_SO", tmp_path / "chi-phi-quet.jsonl")
+    monkeypatch.setattr(audit, "_DAY_LEN_BASE", False)
+    monkeypatch.setattr(audit, "_BAT", True)
+
+    def vao_luot(chat):
+        tid = audit.bat_dau(chat, "ou_1", "quét hapas")
+        return tid
+
+    return C, audit, vao_luot
+
+
+def test_ghi_so_gan_dung_chat_va_turn_cua_luot_dang_chay(so):
+    C, audit, vao_luot = so
+    tid = vao_luot("oc_nhom")
+    rec = C.ghi(queries=["hapas"], platforms=["tiktok"], date_range="21→25",
+                thuc={"usd": 1.002, "so_run": 2, "cham_tran": 1, "dang_chay": 0}, est=0.3)
+    audit._dang_chay.pop(tid, None)
+    assert rec["chat"] == "oc_nhom" and rec["turn_id"] == tid and rec["nguoi"] == "ou_1"
+    assert rec["chi_phi_thuc_usd"] == 1.002 and rec["cham_tran"] is True
+    f = C._fields({**rec, "nguoi": ""})
+    assert f["Chi phí thực USD"] == 1.002 and f["Chạm trần"] == "có"
+    assert f["Nguồn số"] == "Apify (thực)" and f["Turn ID"] == tid
+    assert set(f) == {ten for ten, _ in C._COT}, "field lệch cột là mất nguyên dòng Base"
+
+
+def test_khong_co_so_thuc_thi_ghi_la_uoc_tinh(so):
+    C, _, _ = so
+    rec = C.ghi(queries=["x"], platforms=["tiktok"], date_range="", thuc=None, est=0.3,
+                chat="oc_a")
+    assert rec["chi_phi_thuc_usd"] is None
+    assert C._fields(rec)["Nguồn số"].startswith("ước tính")
+
+
+def test_tra_chi_phi_chi_thay_chat_cua_minh(so):
+    C, audit, vao_luot = so
+    for chat, usd in (("oc_a", 0.3), ("oc_b", 0.9), ("oc_a", 1.0)):
+        C.ghi(queries=["q"], platforms=["tiktok"], date_range="", est=0.3, chat=chat,
+              thuc={"usd": usd, "so_run": 1, "cham_tran": 0, "dang_chay": 0})
+    tid = vao_luot("oc_a")
+    kq = json.loads(C._handle({"so_luot": 5}))
+    audit._dang_chay.pop(tid, None)
+    assert kq["so_lan_quet"] == 2
+    assert [x["chi_phi_thuc_usd"] for x in kq["cac_lan_quet"]] == [1.0, 0.3], "mới nhất trước"
+    assert kq["tong_chi_phi_thuc_usd"] == 1.3
+
+
+def test_so_khong_nam_ngang_hang_so_audit():
+    """Hồi quy/kiểm toán lấy `sorted(.audit/*.jsonl)[-1]` làm sổ audit."""
+    import audit
+    import chi_phi_tool as C
+    assert C._SO.parent != audit._THU_MUC and C._SO.parent.parent == audit._THU_MUC
+
+
+def test_tool_tra_cuu_duoc_policy_cho_phep():
+    import lsr_policy
+    assert "tra_chi_phi_quet" in lsr_policy._SAFE_EXACT

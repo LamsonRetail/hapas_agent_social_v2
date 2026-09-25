@@ -68,6 +68,7 @@ import urllib.parse
 import requests
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
 
+import chi_phi_tool
 import lark_client as lark
 import memory_store
 from config import config
@@ -1002,11 +1003,13 @@ SCHEMA = {
         "- Nguồn nào có `chua_phu_het` thì BẮT BUỘC nói ra: khoảng ngày rộng mà chạm trần "
         "`limit` nghĩa là phần CŨ của khoảng CHƯA hề được quét. Đừng để người dùng tưởng "
         "đã phủ trọn khoảng — đề xuất tăng limit hoặc chia nhỏ khoảng ngày.\n"
-        "- LUÔN kết thúc câu trả lời bằng MỘT dòng chép NGUYÊN VĂN `chi_phi`. Đó là "
-        "số tiền Apify THỰC tính, dòng này cũng giúp lượt sau trả lời được câu hỏi về "
-        "chi phí. Không tự tính, không lấy `uoc_tinh_chi_phi_usd` thay cho số thực.\n"
-        "- `cham_tran_chi_phi`=true: có lượt chạy bị dừng vì chạm trần chi phí, nên nói "
-        "rõ kết quả có thể thiếu và đề xuất giảm số từ khoá hoặc giảm `limit`.\n"
+        "- Chi phí: KHÔNG tự nói ra trong câu trả lời — hệ thống đã tự ghi vào sổ "
+        "audit. Chỉ khi người dùng HỎI thì đọc NGUYÊN VĂN `chi_phi` (số Apify THỰC "
+        "tính); lượt sau mới hỏi thì gọi `tra_chi_phi_quet`. Không tự tính, không lấy "
+        "`uoc_tinh_chi_phi_usd` thay cho số thực.\n"
+        "- `cham_tran_chi_phi`=true: có lượt chạy bị dừng giữa chừng, nên nói rõ kết "
+        "quả có thể THIẾU và đề xuất giảm số từ khoá hoặc giảm `limit` (không cần nêu "
+        "số tiền).\n"
         "- Chất lượng nguồn KHÔNG bằng nhau, phải nhắc khi liên quan: Instagram và "
         "Facebook KHÔNG có followers; Instagram không lọc được quốc gia nên nhiễu quốc "
         "tế; Facebook khớp từ khoá lỏng và gói free chỉ 20 kết quả + 1 lần chạy/24h.\n"
@@ -1261,6 +1264,7 @@ def _handle(args: dict, **kwargs) -> str:
         actors.append(_ACTORS["tiktok_fallback"])
     thuc = _chi_phi_thuc(actors, _bat_dau) if actors else {
         "usd": 0.0, "so_run": 0, "cham_tran": 0, "dang_chay": 0}
+    chi_phi_tool.ghi(queries=queries, platforms=plats, date_range=rng, thuc=thuc, est=est)
 
     base = dict(queries=queries, date_range=rng, platforms=plats,
                 ty_le_trong_khoang=round(ty_le, 3), goi_y_limit=goi_y,
