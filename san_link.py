@@ -13,8 +13,13 @@ Shop có soi được không". Đo thật 25/09/2026, từng nguồn một:
       detail-scraper` hỏng 3/3 lần ("temporarily unavailable", 502 sau 126 giây, quá 200
       giây); `gio21~shopee-product-detail` ở gói FREE chỉ trả bộ nhớ đệm, sản phẩm lạ thì rỗng.
       Nên lấy giá bằng đường vòng: tìm theo TÊN trong link rồi khớp itemId, trượt thì tìm
-      trong 30 sản phẩm bán chạy nhất của shop (mã shop luôn có trong link). Vẫn KHÔNG có
-      số đã bán.
+      trong 30 sản phẩm bán chạy nhất của shop (mã shop luôn có trong link).
+    • SỐ ĐÃ BÁN + shop theo link — `xtracto~shopee-product-detail`: chạy, 14 giây, 0,04 USD.
+      Giá của nó không khớp giá thật nên chỉ lấy số đã bán và thông tin shop.
+    • 25/09 lúc 16:00, đọc ĐÁNH GIÁ Shopee bị chặn ở MỌI đường đã thử: zen-studio (chặn
+      hơn 40 phút), `dami_studio~shopee-shop-reviews-scraper` ("upstream_route_blocked"),
+      gọi thẳng API công khai của Shopee từ máy này (403, đòi chữ ký chống bot). Nên phần
+      đánh giá coi là "có thì dùng", phân bổ sao toàn bộ (từ tìm kiếm) là chỗ dựa chính.
   TikTok Shop
     • SẢN PHẨM + ĐÁNH GIÁ theo link — `pro100chok~tiktok-shop-scraper-usage`: chạy 4/5 lần,
       18–20 giây, ~0,0035 USD/sản phẩm (có 1 lần treo quá 120 giây). Có giá, số đã bán CHÍNH
@@ -42,6 +47,13 @@ import apify_tool as A
 
 ACTOR_DG_SHOPEE = "zen-studio~shopee-product-reviews-scraper"
 ACTOR_TIM_SHOPEE = "zen-studio~shopee-product-scraper"
+# SỐ ĐÃ BÁN + thông tin shop theo link. Đo 25/09: tai nghe Pro4 ra `sold`=92 (trang hiện
+# 87 lúc trước — số mới hơn), shop 7 follower / 17 sản phẩm / 4,48 sao; 14 giây, 0,04 USD.
+# `price` của nó (99.000đ) KHÔNG khớp khoảng giá thật 18.800–100.000đ → không lấy giá ở đây.
+# Đã loại `meanusarcanus~shopee-scraper-ai`: trả DỮ LIỆU GIẢ (hỏi tai nghe VN ra "loa
+# Bluetooth 450 baht, AudioTech Official Store, Bangkok" — đúng mẫu trong tài liệu của nó).
+ACTOR_CT_SHOPEE = "xtracto~shopee-product-detail"
+GIA_CT_SHOPEE = 0.04
 ACTOR_TTS = "pro100chok~tiktok-shop-scraper-usage"
 # Giá NIÊM YẾT — chỉ dùng để co số lượng cho an toàn dưới trần, phòng khi actor bắt đầu
 # tính đúng như niêm yết.
@@ -71,7 +83,7 @@ def _loi_de_hieu(san: str, e: Exception) -> str:
     return f"{san}: {type(e).__name__}: {s}"[:250]
 
 
-_RUT_GON =("vt.tiktok.com", "vm.tiktok.com", "s.shopee.vn", "shp.ee", "shope.ee")
+_RUT_GON = ("vt.tiktok.com", "vm.tiktok.com", "s.shopee.vn", "shp.ee", "shope.ee")
 _TOI_DA_LINK = 5
 
 
@@ -186,9 +198,24 @@ def _gia_shopee(x: dict) -> dict | None:
             "ngay_bat_dau_ban": str(it.get("createdAt") or "")[:10] or None,
             "shop": it.get("shopName"), "shopee_mall": bool(it.get("isOfficialShop")),
             "shop_da_xac_minh": bool(it.get("isVerifiedSeller")),
-            "noi_gui": it.get("shopLocation"),
-            "khong_co": ("số đã bán, giá sau voucher, phí ship, voucher shop, tồn kho — chỉ có "
-                         "trên trang chi tiết, nguồn đó đang hỏng")}
+            "noi_gui": it.get("shopLocation")}
+
+
+def _chi_tiet_shopee(x: dict) -> dict | None:
+    """Số đã bán và thông tin shop (xtracto). Không có số thì None — đừng coi là 0."""
+    raw = A._call(ACTOR_CT_SHOPEE, {"country": "vn", "shopId": x["shop_id"],
+                                    "itemId": x["item_id"]}, 1)
+    it = next((i for i in raw if isinstance(i, dict) and str(i.get("item_id")) == x["item_id"]),
+              None)
+    if not it:
+        return None
+    sh = it.get("shop") if isinstance(it.get("shop"), dict) else {}
+    ra = {"da_ban": _so(it.get("sold") or it.get("historical_sold")) or None,
+          "shop_follower": _so(sh.get("follower_count")) if sh.get("follower_count") is not None else None,
+          "shop_so_san_pham": _so(sh.get("item_count")) or None,
+          "shop_diem": round(_so(sh.get("rating_star"), float), 2) or None,
+          "shop_xac_minh_shopee": bool(sh.get("is_shopee_verified"))}
+    return {k: v for k, v in ra.items() if v is not None}
 
 
 def _tiktok_shop(links: list[dict], n: int) -> list[dict]:
@@ -287,13 +314,14 @@ def soi(links_vao: list[str], so_danh_gia: int) -> dict:
     est = (THAT_DG_SHOPEE if shopee else 0) \
         + sum((KHOI_DONG_TIM + GIA_TIM_SHOPEE * 20 if x["ten_trong_link"] else 0)
               + KHOI_DONG_TIM + GIA_TIM_SHOPEE * _SHOP_TOI_DA for x in shopee) \
-        + THAT_TTS * len(tts)
+        + GIA_CT_SHOPEE * len(shopee) + THAT_TTS * len(tts)
 
     from concurrent.futures import ThreadPoolExecutor
     loi: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=2 + len(shopee)) as ex:
         f_dg = ex.submit(_danh_gia_shopee, shopee, n_sp) if shopee else None
         f_gia = {x["item_id"]: ex.submit(_gia_shopee, x) for x in shopee}
+        f_ct = {x["item_id"]: ex.submit(_chi_tiet_shopee, x) for x in shopee}
         f_tts = ex.submit(_tiktok_shop, tts, n_tt) if tts else None
         dg_sp: dict[str, list[dict]] = {}
         if f_dg:
@@ -307,6 +335,12 @@ def soi(links_vao: list[str], so_danh_gia: int) -> dict:
                 gia[k] = f.result(timeout=A._TOOL_DEADLINE)
             except Exception:  # noqa: BLE001 — giá là phụ, hỏng thì báo "chưa lấy được giá"
                 gia[k] = None
+        ct = {}
+        for k, f in f_ct.items():
+            try:
+                ct[k] = f.result(timeout=A._TOOL_DEADLINE)
+            except Exception:  # noqa: BLE001 — số đã bán là phụ, hỏng thì để trống và nói ra
+                ct[k] = None
         sp_tts = []
         if f_tts:
             try:
@@ -318,13 +352,20 @@ def soi(links_vao: list[str], so_danh_gia: int) -> dict:
     for x in shopee:
         dg = dg_sp.get(x["item_id"], [])
         tt = gia.get(x["item_id"])
+        thong_tin = dict(tt or {"ten": x["ten_trong_link"] or None})
+        c = ct.get(x["item_id"])
+        if c:
+            thong_tin.update(c)
+        thieu = [m for m, co in (("số đã bán", "da_ban" in thong_tin), ("giá sau voucher", False),
+                                 ("phí ship", False), ("voucher shop", False), ("tồn kho", False))
+                 if not co]
+        thong_tin["khong_co"] = ", ".join(thieu) + " — nguồn không trả"
         san_pham.append({
             "san": "Shopee", "link": x["url"],
-            "thong_tin": tt or {"ten": x["ten_trong_link"] or None},
+            "thong_tin": thong_tin,
             "chua_lay_duoc_gia": None if tt else (
                 "Chưa lấy được giá: nguồn chi tiết sản phẩm Shopee đang hỏng, và sản phẩm này "
                 f"không nằm trong {_SHOP_TOI_DA} sản phẩm bán chạy nhất của shop."),
-            "khong_co_so_da_ban": True,
             "danh_gia": tong_hop_danh_gia(dg, "shopee"),
         })
         ten = (tt or {}).get("ten") or x["ten_trong_link"]
@@ -358,7 +399,7 @@ def soi(links_vao: list[str], so_danh_gia: int) -> dict:
                  for d in p["danh_gia"]]
 
     actors = ([ACTOR_DG_SHOPEE] if shopee else []) + \
-        ([ACTOR_TIM_SHOPEE] if shopee else []) + \
+        ([ACTOR_TIM_SHOPEE, ACTOR_CT_SHOPEE] if shopee else []) + \
         ([ACTOR_TTS] if tts else [])
     return {"san_pham": san_pham, "dong_sheet": dong, "loi": loi or None,
             "khong_nhan_ra": khong_nhan or None, "actors": actors, "est": est,

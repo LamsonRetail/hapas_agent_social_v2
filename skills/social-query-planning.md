@@ -56,8 +56,8 @@ khi người dùng HỎI thì mới trả lời:
 - Soi một tài khoản, 30 bài: TikTok ~0,09 USD, Facebook ~0,15 USD, Instagram ~0,003 USD
   (Instagram chỉ có 12 bài mới nhất)
 - Shopee, 30 sản phẩm: ~0,15 USD
-- Soi một sản phẩm từ link: TikTok Shop ~0,004 USD; Shopee ~0,17 USD (phần lớn là bước
-  tìm giá trong shop)
+- Soi một sản phẩm từ link: TikTok Shop ~0,004 USD; Shopee ~0,1–0,2 USD (tìm giá theo tên
+  rẻ, phải tìm trong shop thì đắt hơn; cộng ~0,04 USD lấy số đã bán)
 - Mỗi lượt chạy bị chặn ở trần chi phí (mặc định 1 USD). Chạm trần thì actor dừng giữa
   chừng và kết quả thiếu
 - Trần số bài và trần chi phí do chủ agent đặt trên console (Năng lực → Quét mạng xã

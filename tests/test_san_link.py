@@ -31,6 +31,10 @@ TIM_SHOPEE = [{"itemId": 25022958529, "name": "Hộp Quà Tặng Kẹp Tóc Nữ
                "ratingCount": 5947, "likedCount": 2782, "shopName": "Nhà Cú",
                "isOfficialShop": False},
               {"itemId": 1, "name": "Sản phẩm khác", "price": 1}]
+# Hình dữ liệu thật của xtracto~shopee-product-detail cho VN: có `sold`, `shop`; `price` sai.
+CT_SHOPEE = [{"item_id": 25022958529, "title": "Hộp Quà", "price": 99000, "sold": 92,
+              "shop": {"name": "Nhà Cú", "rating_star": 4.484663, "item_count": 17,
+                       "follower_count": 7, "is_shopee_verified": False}}]
 TTS = [{"productId": "1731382848795347431", "title": "Túi xách nữ đeo chéo", "currentPrice": "93911",
         "maxPrice": "112931", "originalPrice": "101044", "discountPercent": "7%",
         "exactSoldCount": "128", "salesVolume": "128", "rating": "3.7", "totalReviews": "7",
@@ -49,7 +53,7 @@ def gia(monkeypatch):
     def call(actor, payload, limit, mem=None):
         goi.append((actor, payload))
         return {L.ACTOR_DG_SHOPEE: DG_SHOPEE, L.ACTOR_TIM_SHOPEE: TIM_SHOPEE,
-                L.ACTOR_TTS: TTS}[actor]
+                L.ACTOR_CT_SHOPEE: CT_SHOPEE, L.ACTOR_TTS: TTS}[actor]
 
     monkeypatch.setattr(A, "_call", call)
     monkeypatch.setattr(A, "_tran", lambda: (100, 0.3))
@@ -97,7 +101,11 @@ def test_soi_hai_san_cung_luc(gia):
     kq = json.loads(S._handle({"link": [SP_URL, TT_URL]}))
     sp, tt = kq["san_pham"]
     assert sp["san"] == "Shopee" and sp["thong_tin"]["gia_tu"] == 19900, "giá lấy qua tìm theo tên"
-    assert sp["khong_co_so_da_ban"] is True and sp["chua_lay_duoc_gia"] is None
+    assert sp["chua_lay_duoc_gia"] is None
+    t = sp["thong_tin"]
+    assert t["da_ban"] == 92 and t["shop_follower"] == 7 and t["shop_so_san_pham"] == 17
+    assert t["gia_tu"] == 19900, "giá lấy từ tìm kiếm, KHÔNG lấy price 99.000 sai của xtracto"
+    assert "số đã bán" not in t["khong_co"] and "giá sau voucher" in t["khong_co"]
     d = sp["danh_gia"]
     assert d["so_danh_gia_da_doc"] == 2, "dòng _warning không được tính là đánh giá"
     assert d["ti_le_mua_lai"] == 0.5 and d["ti_le_shop_tra_loi"] == 0.5
@@ -212,3 +220,14 @@ def test_khong_co_link_thi_van_tim_tu_khoa_nhu_cu(gia, monkeypatch):
     monkeypatch.setattr(A, "_call", lambda *a, **k: [])
     kq = json.loads(S._handle({"tu_khoa": ["túi"]}))
     assert kq.get("che_do") != "soi_theo_link" and kq["so_san_pham"] == 0
+
+
+def test_khong_lay_duoc_so_da_ban_thi_noi_ro_chu_khong_ghi_0(gia, monkeypatch):
+    monkeypatch.setattr(L, "_chi_tiet_shopee", lambda x: None)
+    t = json.loads(S._handle({"link": [SP_URL]}))["san_pham"][0]["thong_tin"]
+    assert "da_ban" not in t and t["khong_co"].startswith("số đã bán")
+
+
+def test_chi_tiet_shopee_khong_khop_item_thi_bo_qua(monkeypatch):
+    monkeypatch.setattr(A, "_call", lambda *a, **k: [dict(CT_SHOPEE[0], item_id=1)])
+    assert L._chi_tiet_shopee(L.nhan_dien(SP_URL)) is None
