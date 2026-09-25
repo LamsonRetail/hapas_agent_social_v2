@@ -51,6 +51,8 @@ def lich_su(monkeypatch):
 
     monkeypatch.setenv("APIFY_TOKEN", "tok")
     monkeypatch.setattr(A.requests, "get", get)
+    # Ghim trần 1 USD: không ghim thì test đọc trần THẬT trên console qua mạng.
+    monkeypatch.setattr(A, "_tran", lambda: (500, 1.0))
     return goi
 
 
@@ -170,3 +172,33 @@ def test_so_khong_nam_ngang_hang_so_audit():
 def test_tool_tra_cuu_duoc_policy_cho_phep():
     import lsr_policy
     assert "tra_chi_phi_quet" in lsr_policy._SAFE_EXACT
+
+
+def _quet_gia(monkeypatch, so_bai: int, limit: int):
+    """Chạy `_handle` với nguồn TikTok giả trả `so_bai` bài và lịch sử run chạm trần."""
+    import apify_tool
+    now = datetime.datetime.now(A._VN_TZ)
+    bai = [({"kenh": "k", "followers": 0, "views": 0, "likes": 0, "comments": 0,
+             "shares": 0, "hashtags": "", "text": "", "link": f"https://t/{i}"},
+            now - datetime.timedelta(days=30)) for i in range(so_bai)]
+    monkeypatch.setitem(apify_tool._FETCH, "tiktok", lambda *a: bai)
+    monkeypatch.setattr(apify_tool, "_tran", lambda: (1000, 2.4))
+    monkeypatch.setattr(apify_tool, "_chi_phi_thuc", lambda *a, **k: {
+        "usd": 2.403, "so_run": 2, "cham_tran": 1, "dang_chay": 0})
+    ghi = []
+    monkeypatch.setattr(apify_tool.chi_phi_tool, "ghi", lambda **k: ghi.append(k) or {})
+    kq = json.loads(apify_tool._handle({
+        "queries": ["trend"], "platforms": ["tiktok"], "limit": limit,
+        "date_from": f"{now:%Y-%m-%d}", "date_to": f"{now:%Y-%m-%d}"}))
+    return kq, ghi[0]["thuc"]
+
+
+def test_lay_du_limit_thi_khong_bao_cham_tran(monkeypatch):
+    """Trần 2,4 USD cho 800 bài: lấy đủ 800 cũng tiêu đúng 2,4 USD, không bị cắt gì."""
+    kq, thuc = _quet_gia(monkeypatch, 800, 800)
+    assert kq["cham_tran_chi_phi"] is False and thuc["cham_tran"] == 0
+
+
+def test_thieu_bai_va_tieu_sat_tran_thi_van_bao(monkeypatch):
+    kq, thuc = _quet_gia(monkeypatch, 333, 800)
+    assert kq["cham_tran_chi_phi"] is True and thuc["cham_tran"] == 1

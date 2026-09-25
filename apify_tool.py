@@ -1295,6 +1295,14 @@ def _handle(args: dict, **kwargs) -> str:
         actors.append(_ACTORS["tiktok_fallback"])
     thuc = _chi_phi_thuc(actors, _bat_dau) if actors else {
         "usd": 0.0, "so_run": 0, "cham_tran": 0, "dang_chay": 0}
+    # "Tiêu ≥95% trần" chỉ là dấu hiệu, không phải bằng chứng bị cắt: đặt trần 2,4 USD
+    # cho 800 bài TikTok (800 × 0,003) thì lấy ĐỦ 800 bài cũng tiêu đúng 2,4 USD. Đo thật
+    # 25/09/2026: Mark báo "chạm trần, có thể thiếu" cho một lượt đã lấy đủ 800/800.
+    # Nguồn Apify nào cũng đã cào đủ `limit` thì không có gì bị cắt.
+    if thuc and thuc.get("cham_tran") and all(
+            (per_platform.get(p) or {}).get("scraped", 0) >= lims[p]
+            for p in plats if p in _ACTORS):
+        thuc = {**thuc, "cham_tran": 0}
     chi_phi_tool.ghi(queries=queries, platforms=plats, date_range=rng, thuc=thuc, est=est)
 
     base = dict(queries=queries, date_range=rng, platforms=plats,
