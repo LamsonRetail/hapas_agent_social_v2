@@ -18,8 +18,11 @@ Shop có soi được không". Đo thật 25/09/2026, từng nguồn một:
   TikTok Shop
     • SẢN PHẨM + ĐÁNH GIÁ theo link — `pro100chok~tiktok-shop-scraper-usage`: chạy 4/5 lần,
       18–20 giây, ~0,0035 USD/sản phẩm (có 1 lần treo quá 120 giây). Có giá, số đã bán CHÍNH
-      XÁC, điểm, phân bổ sao, phân loại, follower và tổng số bán của shop. Chỉ trả đánh giá
-      CÓ NỘI DUNG: sản phẩm 7 đánh giá chỉ đọc được 3.
+      XÁC, điểm, phân bổ sao, phân loại, follower và tổng số bán của shop. Chỉ đọc được
+      khoảng 3 ĐÁNH GIÁ mỗi sản phẩm, bất kể sản phẩm có bao nhiêu: áo len 2.502 đánh giá
+      cũng chỉ ra 3, kể cả dùng chế độ đọc đánh giá riêng; lọc theo 1/2/3 sao trả dòng rỗng.
+      Đó là giới hạn khi xem không đăng nhập, KHÔNG phải "chỉ đánh giá có nội dung" (kết
+      luận sai ban đầu từ sản phẩm 7 đánh giá). Phân bổ sao TOÀN BỘ thì luôn đủ.
     • Tìm theo TỪ KHOÁ — KHÔNG làm: "túi xách nữ" ra toàn shop nhỏ 0–2 lượt bán, kể cả khi
       xếp theo bán chạy. Trình bày như "thị trường TikTok Shop" là sai lệch nặng.
     • Giá TikTok Shop nhảy giữa hai lần chạy (cùng sản phẩm 299.606đ rồi 274.109đ): giá động
@@ -341,11 +344,12 @@ def soi(links_vao: list[str], so_danh_gia: int) -> dict:
         tong = p["thong_tin"].get("tong_danh_gia") or 0
         if tong > dg["so_danh_gia_da_doc"]:
             # Đo 25/09: 7 đánh giá (2 cái 1 sao) mà chỉ đọc được 3, kể cả xếp theo mới nhất —
-            # TikTok Shop chỉ hiện đánh giá có nội dung. Nói ra để khỏi tưởng mẫu là toàn bộ;
-            # `phan_bo_sao_toan_bo` vẫn đủ mọi đánh giá.
+            # TikTok Shop chỉ cho đọc vài đánh giá khi không đăng nhập (đo: 2.502 đánh giá vẫn
+            # ra 3). Nói ra để khỏi tưởng mẫu là toàn bộ; `phan_bo_sao_toan_bo` vẫn đủ.
             dg["chi_doc_duoc"] = (
-                f"Chỉ đọc được {dg['so_danh_gia_da_doc']}/{tong} đánh giá — TikTok Shop chỉ "
-                "hiện đánh giá có nội dung. Số sao toàn bộ xem ở `phan_bo_sao_toan_bo`.")
+                f"Chỉ đọc được {dg['so_danh_gia_da_doc']}/{tong} đánh giá — TikTok Shop chỉ cho "
+                "xem vài đánh giá mỗi sản phẩm, nên đây KHÔNG phải mẫu đại diện. Nhận xét về "
+                "chất lượng dựa vào `phan_bo_sao_toan_bo` (đủ mọi đánh giá).")
         san_pham.append({"san": "TikTok Shop", "link": x["url"], "thong_tin": p["thong_tin"],
                          "danh_gia": dg})
         dong += [["TikTok Shop", p["thong_tin"]["ten"], f"{d['ngay']:%Y-%m-%d}" if d["ngay"] else "",

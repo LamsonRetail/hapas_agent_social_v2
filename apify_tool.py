@@ -320,8 +320,11 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
     # SUCCEEDED. Đo 25/09: lượt soi tài khoản vừa xong vẫn "đang chạy"; lượt Shopee báo
     # 0,01 USD trong khi thật là 0,105. Hỏi lại khi còn "đang chạy" hoặc số thật thấp hơn
     # nửa ước tính — tối đa hai lần, mỗi lần 3 giây.
+    # Hỏi hỏng (None) cũng hỏi lại: đo 25/09, lượt soi TikTok Shop chạy xong trong khoảng
+    # thời gian đối chiếu mà sổ vẫn ghi "chưa lấy được số thực" — một lần gọi Apify lỗi
+    # thoáng qua là bỏ cuộc luôn.
     for _ in range(2):
-        if not kq or not (kq["dang_chay"] or (uoc_tinh and kq["usd"] < 0.5 * uoc_tinh)):
+        if kq and not (kq["dang_chay"] or (uoc_tinh and kq["usd"] < 0.5 * uoc_tinh)):
             break
         time.sleep(3)
         kq = _mot_luot() or kq

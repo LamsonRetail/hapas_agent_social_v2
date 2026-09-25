@@ -77,6 +77,7 @@ def test_khong_hoi_duoc_thi_noi_ro_la_uoc_tinh(monkeypatch):
 
     monkeypatch.setenv("APIFY_TOKEN", "tok")
     monkeypatch.setattr(A.requests, "get", hong)
+    monkeypatch.setattr(A.time, "sleep", lambda s: None)   # hỏi lại 2 lần, khỏi chờ thật
     assert A._chi_phi_thuc(["apidojo~tiktok-scraper"], TU) is None
     dong = A._dong_chi_phi(None, 0.3)
     assert "chưa lấy được số thực" in dong and "0,30" in dong
@@ -202,3 +203,22 @@ def test_lay_du_limit_thi_khong_bao_cham_tran(monkeypatch):
 def test_thieu_bai_va_tieu_sat_tran_thi_van_bao(monkeypatch):
     kq, thuc = _quet_gia(monkeypatch, 333, 800)
     assert kq["cham_tran_chi_phi"] is True and thuc["cham_tran"] == 1
+
+
+def test_hoi_chi_phi_loi_thoang_qua_thi_hoi_lai(monkeypatch):
+    """Đo 25/09: một lần gọi Apify lỗi là sổ ghi 'chưa lấy được số thực' dù run đã xong."""
+    lan = []
+
+    def get(url, **kw):
+        lan.append(1)
+        if len(lan) == 1:
+            raise A.requests.ConnectionError("lỗi thoáng qua")
+        return _Resp([{"startedAt": "2026-09-25T02:27:39Z", "usageTotalUsd": 0.0035,
+                       "status": "SUCCEEDED"}])
+
+    monkeypatch.setenv("APIFY_TOKEN", "tok")
+    monkeypatch.setattr(A, "_tran", lambda: (100, 0.3))
+    monkeypatch.setattr(A.time, "sleep", lambda s: None)
+    monkeypatch.setattr(A.requests, "get", get)
+    thuc = A._chi_phi_thuc(["pro100chok~tiktok-shop-scraper-usage"], TU, 0.0035)
+    assert thuc and thuc["usd"] == 0.004 and thuc["so_run"] == 1
