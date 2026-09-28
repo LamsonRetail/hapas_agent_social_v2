@@ -181,6 +181,8 @@ def _van_help() -> str:
         "      Xem quyền hạn platform cấp và từng công tắc đang bật hay tắt.",
         "",
         "Ví dụ: /search áo thun nam 7 ngày tiktok",
+        "Muốn biết kỹ một việc làm gì, ra kết quả gì thì hỏi bằng lời thường, không gõ "
+        "lệnh ở đầu. Vd: \"soi sàn dùng thế nào?\", \"soi KOC ra những gì?\"",
     ]
     if co_tat:
         d.append("Lệnh ĐANG TẮT vẫn gõ được nhưng sẽ bị từ chối — bật lại ở khối "

@@ -49,6 +49,10 @@
     "ten": "Audit hiệu quả quảng cáo",
     "khi_nao_dung": "Khi người dùng đưa số liệu quảng cáo của CHÍNH MÌNH (file, Sheet, số dán vào) và hỏi có hiệu quả không, nên tăng, giảm hay tắt gì. Không dùng để tra quảng cáo của đối thủ."
   },
+  "sk_4c167bc456": {
+    "ten": "Giới thiệu công cụ của Mark",
+    "khi_nao_dung": "Khi được hỏi Mark làm được gì, có công cụ gì, một lệnh hay công cụ (/shop, /profile, soi sàn, soi KOC…) dùng thế nào, ra kết quả gì. Không dùng khi đã nhờ chạy thật."
+  },
   "sk_f4cc01322b": {
     "ten": "Duyệt nội dung KOL/KOC và quảng cáo",
     "khi_nao_dung": "Khi được nhờ xem lại kịch bản, caption, bài đăng của KOL/KOC hay nội dung quảng cáo trước khi đăng: giọng thương hiệu, câu cam kết quá đà, so sánh đối thủ, thiếu gắn nhãn quảng cáo."
