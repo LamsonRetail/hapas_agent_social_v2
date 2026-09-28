@@ -369,7 +369,19 @@ def _dong_binh_luan(san: str, ten, d: dict, link: str, *, mua_lai=False, tra_loi
             "có" if mua_lai else "", "có" if tra_loi else "", "có" if d["co_anh"] else "", link]
 
 
-def soi(links_vao: list[str], so_danh_gia: int) -> dict:
+# Số của CẢ SHOP (không phải của sản phẩm). Chủ agent 28/09: "đây là 1 link sản phẩm nhưng
+# lại đánh giá toàn bộ cả shop?" — soi một link thì chỉ đánh giá SẢN PHẨM; thông tin shop
+# chỉ đưa vào khi người dùng hỏi về shop (`gom_shop`). Tên shop vẫn giữ để biết ai bán.
+_KHOA_SHOP = ("shop_follower", "shop_tong_da_ban", "shop_diem", "shop_so_san_pham",
+              "shop_da_xac_minh", "shop_xac_minh_shopee")
+_COT_SHOP = ("Shop follower", "Shop đã bán", "Shop điểm", "Shop số sản phẩm")
+
+
+def _bo_shop(thong_tin: dict) -> dict:
+    return {k: v for k, v in thong_tin.items() if k not in _KHOA_SHOP}
+
+
+def soi(links_vao: list[str], so_danh_gia: int, gom_shop: bool = False) -> dict:
     """Chạy phần soi theo link. Trả dict để `soi_san` đóng gói thành kết quả tool."""
     nhan, khong_nhan = [], []
     for u in links_vao[:_TOI_DA_LINK]:
@@ -495,7 +507,15 @@ def soi(links_vao: list[str], so_danh_gia: int) -> dict:
     actors = ([ACTOR_DG_SHOPEE] if shopee else []) + \
         ([ACTOR_TIM_SHOPEE, ACTOR_CT_SHOPEE] if shopee else []) + \
         ([ACTOR_TTS] if tts else [])
-    tabs = [("Tổng quan", [TAB_TONG_QUAN] + tq),
+    tieu_de_tq = list(TAB_TONG_QUAN)
+    if not gom_shop:
+        bo = [tieu_de_tq.index(c) for c in _COT_SHOP]
+        tieu_de_tq = [c for i, c in enumerate(tieu_de_tq) if i not in bo]
+        tq = [[v for i, v in enumerate(r) if i not in bo] for r in tq]
+        for sp in san_pham:
+            if sp.get("thong_tin"):
+                sp["thong_tin"] = _bo_shop(sp["thong_tin"])
+    tabs = [("Tổng quan", [tieu_de_tq] + tq),
             ("Phân loại", [TAB_PHAN_LOAI] + pl_rows),
             ("Mô tả", [TAB_MO_TA] + mt_rows),
             ("Bình luận", [HEADER] + bl_rows)]

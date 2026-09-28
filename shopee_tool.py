@@ -138,9 +138,10 @@ SCHEMA = {
         "`tu_khoa`: cụm từ người mua hay gõ trên Shopee, cụ thể là tốt ('túi xách nữ công "
         "sở', 'quà tặng 20/10 cho mẹ'), tối đa 3 cụm.\n"
         "CÓ LINK SẢN PHẨM (Shopee hoặc TikTok Shop, kể cả link rút gọn) → truyền vào `link` "
-        "để soi ĐÚNG sản phẩm đó: khách khen/chê gì, số sao, phân loại hay mua, và với "
-        "TikTok Shop có cả số đã bán CHÍNH XÁC, follower và tổng số bán của shop. Shopee "
-        "theo link có số đã bán (`da_ban`) và follower/số sản phẩm của shop khi nguồn trả; giá "
+        "để soi ĐÚNG sản phẩm đó: khách khen/chê gì, số sao, phân loại hay mua, số đã bán. "
+        "CHỈ ĐÁNH GIÁ SẢN PHẨM — đừng nhận xét về shop (follower, tổng đã bán, điểm shop) trừ "
+        "khi người dùng hỏi về shop; khi đó đặt `gom_shop`=true. Shopee theo link có số đã "
+        "bán (`da_ban`) khi nguồn trả; giá "
         "chỉ lấy được khi tìm ra sản phẩm theo tên hoặc trong các sản phẩm bán chạy của shop "
         "— `chua_lay_duoc_gia` có nội dung thì nói ra. Đọc NỘI DUNG đánh giá Shopee hay bị "
         "chặn: khi đó nhận xét chất lượng dựa vào `phan_bo_sao_toan_bo`. "
@@ -148,9 +149,9 @@ SCHEMA = {
         "sau voucher/flash sale — nói rõ, đừng báo một con số như thể là giá đang bán. "
         "`phan_bo_sao_toan_bo` là số sao của MỌI đánh giá, vẫn có khi không đọc được nội "
         "dung. `khong_co` liệt kê thứ nguồn không trả — người dùng hỏi thì nói thẳng. "
-        "Kết quả soi theo link PHỦ MỌI KHÍA CẠNH: `thong_tin` (giá, đã bán, sao, giao hàng, "
-        "shop), `phan_loai` (giá + tồn kho từng phân loại), `mo_ta` (mô tả của shop — chỉ "
-        "TikTok Shop có), `binh_luan` (đã lọc trùng/rỗng; `loc` cho biết đọc được bao nhiêu, "
+        "Kết quả soi theo link PHỦ MỌI KHÍA CẠNH CỦA SẢN PHẨM: `thong_tin` (giá, đã bán, sao, "
+        "giao hàng, tên shop bán), `phan_loai` (giá + tồn kho từng phân loại), `mo_ta` (mô tả "
+        "sản phẩm — chỉ TikTok Shop có), `binh_luan` (đã lọc trùng/rỗng; `loc` cho biết đọc được bao nhiêu, "
         "giữ lại bao nhiêu). Sheet có 4 tab: Tổng quan, Phân loại, Mô tả, Bình luận. Trả lời "
         "đủ các mặt đó chứ đừng chỉ nói số sao. "
         "`chi_doc_duoc` có nội dung thì nói rõ mẫu bình luận không phải toàn bộ. Hai nguồn "
@@ -171,6 +172,10 @@ SCHEMA = {
             "link": {"type": "array", "items": {"type": "string"},
                      "description": ("Link SẢN PHẨM Shopee hoặc TikTok Shop (kể cả link chia sẻ "
                                      "rút gọn), tối đa 5. Có link thì soi đúng sản phẩm đó.")},
+            "gom_shop": {"type": "boolean",
+                         "description": ("Chỉ khi có `link` VÀ người dùng hỏi về SHOP: thêm "
+                                         "follower, tổng đã bán, điểm, số sản phẩm của shop. "
+                                         "Mặc định false — chỉ đánh giá sản phẩm.")},
             "so_danh_gia": {"type": "integer",
                             "description": "Chỉ khi có `link`: số đánh giá đọc mỗi sản phẩm (mặc định 50)."},
             "tu_khoa": {"type": "array", "items": {"type": "string"},
@@ -203,7 +208,7 @@ def _handle_link(args: dict) -> str:
         n = san_link._DG_MAC_DINH
     bat_dau = datetime.datetime.now(A._VN_TZ) - datetime.timedelta(seconds=5)
     t0 = time.monotonic()
-    kq = san_link.soi(links, n)
+    kq = san_link.soi(links, n, gom_shop=bool(args.get("gom_shop")))
     if not kq["san_pham"]:
         return tool_error("Không nhận ra link sản phẩm nào. Dán link sản phẩm Shopee "
                           "(shopee.vn/…-i.<shop>.<item>) hoặc TikTok Shop (shop.tiktok.com/…/pdp/…).")

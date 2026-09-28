@@ -107,14 +107,15 @@ def test_soi_hai_san_cung_luc(gia):
     assert sp["san"] == "Shopee" and sp["thong_tin"]["gia_tu"] == 19900, "giá lấy qua tìm theo tên"
     assert sp["chua_lay_duoc_gia"] is None
     t = sp["thong_tin"]
-    assert t["da_ban"] == 92 and t["shop_follower"] == 7 and t["shop_so_san_pham"] == 17
+    assert t["da_ban"] == 92 and t["shop"] == "Nhà Cú" and "shop_follower" not in t, (
+        "soi một link thì chỉ đánh giá SẢN PHẨM, không kéo số của cả shop vào")
     assert t["gia_tu"] == 19900, "giá lấy từ tìm kiếm, KHÔNG lấy price 99.000 sai của xtracto"
     assert "số đã bán" not in t["khong_co"] and "giá sau voucher" in t["khong_co"]
     d = sp["binh_luan"]
     assert d["so_danh_gia_da_doc"] == 2, "dòng _warning không được tính là đánh giá"
     assert d["ti_le_mua_lai"] == 0.5 and d["ti_le_shop_tra_loi"] == 0.5
     assert d["danh_gia_xau"] == ["2★ Kẹp gãy sau 2 ngày"]
-    assert tt["thong_tin"]["da_ban"] == 128 and tt["thong_tin"]["shop_tong_da_ban"] == 2470
+    assert tt["thong_tin"]["da_ban"] == 128 and "shop_tong_da_ban" not in tt["thong_tin"]
     assert tt["thong_tin"]["phan_bo_sao_toan_bo"] == {"1": 2, "4": 1, "5": 4}
     assert tt["binh_luan"]["den_ngay"].endswith("2026"), "date mili-giây phải đổi đúng"
     assert kq["sheet_url"] == "https://sheet"
@@ -269,3 +270,22 @@ def test_shopee_bi_chan_binh_luan_van_tao_sheet(gia, monkeypatch):
     kq = json.loads(S._handle({"link": [SP_URL]}))
     assert kq["sheet_url"] == "https://sheet"
     assert "mô tả" in kq["san_pham"][0]["thong_tin"]["khong_co"]
+
+
+def test_hoi_ve_shop_moi_them_so_lieu_shop(gia):
+    """Chủ agent 28/09: link sản phẩm thì chỉ đánh giá sản phẩm; hỏi về shop mới đánh giá shop."""
+    goi, dong = gia
+    t = json.loads(S._handle({"link": [TT_URL], "gom_shop": True}))["san_pham"][0]["thong_tin"]
+    assert t["shop_tong_da_ban"] == 2470 and t["shop_diem"] == 3.4
+    tq = next(r for r in dong if r and r[0] == "Sàn" and r[2] == "Danh mục")
+    assert "Shop đã bán" in tq and "Shop follower" in tq
+
+
+def test_mac_dinh_tab_tong_quan_khong_co_cot_shop(gia):
+    _, dong = gia
+    S._handle({"link": [TT_URL]})
+    tq = next(r for r in dong if r and r[0] == "Sàn" and r[2] == "Danh mục")
+    assert "Shop" in tq, "vẫn giữ tên shop để biết ai bán"
+    assert not {"Shop follower", "Shop đã bán", "Shop điểm", "Shop số sản phẩm"} & set(tq)
+    hang = dong[dong.index(tq) + 1]
+    assert len(hang) == len(tq), "bỏ cột ở tiêu đề thì phải bỏ đúng cột đó ở từng dòng"
