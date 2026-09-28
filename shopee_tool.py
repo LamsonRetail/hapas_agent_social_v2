@@ -148,7 +148,12 @@ SCHEMA = {
         "sau voucher/flash sale — nói rõ, đừng báo một con số như thể là giá đang bán. "
         "`phan_bo_sao_toan_bo` là số sao của MỌI đánh giá, vẫn có khi không đọc được nội "
         "dung. `khong_co` liệt kê thứ nguồn không trả — người dùng hỏi thì nói thẳng. "
-        "`chi_doc_duoc` có nội dung thì nói rõ mẫu đánh giá không phải toàn bộ. Hai nguồn "
+        "Kết quả soi theo link PHỦ MỌI KHÍA CẠNH: `thong_tin` (giá, đã bán, sao, giao hàng, "
+        "shop), `phan_loai` (giá + tồn kho từng phân loại), `mo_ta` (mô tả của shop — chỉ "
+        "TikTok Shop có), `binh_luan` (đã lọc trùng/rỗng; `loc` cho biết đọc được bao nhiêu, "
+        "giữ lại bao nhiêu). Sheet có 4 tab: Tổng quan, Phân loại, Mô tả, Bình luận. Trả lời "
+        "đủ các mặt đó chứ đừng chỉ nói số sao. "
+        "`chi_doc_duoc` có nội dung thì nói rõ mẫu bình luận không phải toàn bộ. Hai nguồn "
         "này đôi khi tạm chặn: `loi` có nội dung thì nói NGUYÊN câu đó và KHÔNG tự chạy lại "
         "liên tục. TikTok Shop CHỈ soi được theo link, "
         "KHÔNG tìm theo từ khoá (nguồn trả toàn shop nhỏ, sai lệch). Giá TikTok Shop là giá "
@@ -206,12 +211,13 @@ def _handle_link(args: dict) -> str:
     chi_phi_tool.ghi(queries=links[:5], platforms=kq["nen"], date_range="hiện tại",
                      thuc=thuc, est=kq["est"])
     url, granted, loi = None, False, kq["loi"]
-    if kq["dong_sheet"]:
+    # Tạo Sheet khi có ÍT NHẤT một sản phẩm đọc được — kể cả khi không có bình luận nào (bản
+    # cũ chỉ tạo khi có bình luận, nên Shopee bị chặn đọc bình luận là mất luôn cả Sheet).
+    if len(kq["tabs"][0][1]) > 1:
         title = (args.get("title") or "").strip() or \
-            f"Đánh giá sản phẩm · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y %H:%M}"
+            f"Soi sản phẩm · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y %H:%M}"
         try:
-            tok, url = A._create_sheet(title)
-            A._write_values(tok, A._first_sheet_id(tok), [list(san_link.HEADER)] + kq["dong_sheet"])
+            tok, url = san_link.ghi_nhieu_tab(title, kq["tabs"])
             sender = memory_store.get_current_sender()
             granted = A._grant(tok, sender) if sender else False
         except Exception as e:  # noqa: BLE001

@@ -65,6 +65,10 @@ def gia(monkeypatch):
     monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
     monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
     monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows: dong.extend(rows))
+    # Sheet nhiều tab: tab 2–4 thêm bằng sheets_batch_update — giả luôn, đừng gọi Lark thật.
+    import lark_client
+    monkeypatch.setattr(lark_client, "call", lambda m, path, **k: {"data": {"replies": [{}] + [
+        {"addSheet": {"properties": {"sheetId": f"s{i}"}}} for i in range(2, 5)]}})
     return goi, dong
 
 
@@ -106,14 +110,17 @@ def test_soi_hai_san_cung_luc(gia):
     assert t["da_ban"] == 92 and t["shop_follower"] == 7 and t["shop_so_san_pham"] == 17
     assert t["gia_tu"] == 19900, "giá lấy từ tìm kiếm, KHÔNG lấy price 99.000 sai của xtracto"
     assert "số đã bán" not in t["khong_co"] and "giá sau voucher" in t["khong_co"]
-    d = sp["danh_gia"]
+    d = sp["binh_luan"]
     assert d["so_danh_gia_da_doc"] == 2, "dòng _warning không được tính là đánh giá"
     assert d["ti_le_mua_lai"] == 0.5 and d["ti_le_shop_tra_loi"] == 0.5
     assert d["danh_gia_xau"] == ["2★ Kẹp gãy sau 2 ngày"]
     assert tt["thong_tin"]["da_ban"] == 128 and tt["thong_tin"]["shop_tong_da_ban"] == 2470
     assert tt["thong_tin"]["phan_bo_sao_toan_bo"] == {"1": 2, "4": 1, "5": 4}
-    assert tt["danh_gia"]["den_ngay"].endswith("2026"), "date mili-giây phải đổi đúng"
-    assert len(dong) == 1 + 2 + 2 and kq["sheet_url"] == "https://sheet"
+    assert tt["binh_luan"]["den_ngay"].endswith("2026"), "date mili-giây phải đổi đúng"
+    assert kq["sheet_url"] == "https://sheet"
+    tieu_de = [r for r in dong if r and r[0] == "Sàn"]
+    assert [r[2] for r in tieu_de] == ["Danh mục", "Phân loại", "Mô tả", "Ngày"], "đủ 4 tab"
+    assert "Bình luận" in dong[dong.index(tieu_de[-1])], "cột gọi là Bình luận, không phải Nội dung"
     p = [p for a, p in goi if a == L.ACTOR_TTS][0]
     assert p["scrapeType"] == "product" and p["region"] == "vn" and p["includeReviews"] is True
 
@@ -165,7 +172,7 @@ def test_loi_nguon_thanh_cau_de_hieu(gia, monkeypatch, loi, chu):
 
 def test_tiktok_shop_doc_thieu_danh_gia_thi_noi_ro(gia):
     tt = json.loads(S._handle({"link": [TT_URL]}))["san_pham"][0]
-    assert "2/7" in tt["danh_gia"]["chi_doc_duoc"]
+    assert "2/7" in tt["binh_luan"]["chi_doc_duoc"]
 
 
 def test_tiktok_shop_lay_danh_gia_moi_nhat_khong_lay_de_xuat(gia):
@@ -231,3 +238,34 @@ def test_khong_lay_duoc_so_da_ban_thi_noi_ro_chu_khong_ghi_0(gia, monkeypatch):
 def test_chi_tiet_shopee_khong_khop_item_thi_bo_qua(monkeypatch):
     monkeypatch.setattr(A, "_call", lambda *a, **k: [dict(CT_SHOPEE[0], item_id=1)])
     assert L._chi_tiet_shopee(L.nhan_dien(SP_URL)) is None
+
+
+def test_tiktok_shop_co_mo_ta_phan_loai_va_giao_hang(gia, monkeypatch):
+    """Chủ agent 28/09: phủ MỌI khía cạnh — mô tả, giá/tồn kho từng phân loại, giao hàng."""
+    sp = dict(TTS[0], description="THÔNG TIN CHI TIẾT:\nChất liệu: Da tổng hợp",
+              variants=[{"name": "163 - XANH BƠ", "price": "112931", "originalPrice": "142650",
+                         "discountPercent": "21%", "stockStatus": "in_stock", "stockQuantity": 979}],
+              shippingInfo={"freeShipping": False, "shippingFee": "From 30.200₫", "minDays": 2,
+                            "maxDays": 6, "leadTime": "Sep 27 - Oct 1"})
+    monkeypatch.setattr(A, "_call", lambda *a, **k: [sp])
+    tt = json.loads(S._handle({"link": [TT_URL]}))["san_pham"][0]
+    assert tt["mo_ta"].startswith("THÔNG TIN CHI TIẾT")
+    assert tt["phan_loai"] == [{"ten": "163 - XANH BƠ", "gia": 112931, "gia_goc": 142650,
+                                "giam": "21%", "con_hang": "còn", "ton_kho": 979}]
+    assert tt["thong_tin"]["giao_hang"] == "From 30.200₫ · giao 2–6 ngày · dự kiến Sep 27 - Oct 1"
+
+
+def test_loc_binh_luan_bo_trung_va_rong():
+    dg = [{"noi_dung": "Vải chất lượng, nên mua!"}, {"noi_dung": "vải chất lượng nên mua"},
+          {"noi_dung": ""}, {"noi_dung": "Áo đẹp"}]
+    giu, loc = L.loc_binh_luan(dg)
+    assert [d["noi_dung"] for d in giu] == ["Vải chất lượng, nên mua!", "Áo đẹp"]
+    assert loc == {"doc_duoc": 4, "bo_rong": 1, "bo_trung": 1, "giu_lai": 2}
+
+
+def test_shopee_bi_chan_binh_luan_van_tao_sheet(gia, monkeypatch):
+    """Bản cũ chỉ tạo Sheet khi có bình luận: Shopee chặn đọc bình luận là mất cả Sheet."""
+    monkeypatch.setattr(L, "_danh_gia_shopee", lambda *a, **k: {})
+    kq = json.loads(S._handle({"link": [SP_URL]}))
+    assert kq["sheet_url"] == "https://sheet"
+    assert "mô tả" in kq["san_pham"][0]["thong_tin"]["khong_co"]
