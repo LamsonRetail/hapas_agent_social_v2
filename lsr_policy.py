@@ -33,6 +33,12 @@ _SAFE_EXACT = {
     "dung_ky_nang",
     # Chỉ đọc sổ chi phí quét cục bộ của chính chat đang hỏi (chi_phi_tool.py).
     "tra_chi_phi_quet",
+    # Đọc nguyên một Base/Sheet (bang_tool.py). Chỉ đọc; tự kiểm NGƯỜI HỎI có quyền xem
+    # (bot đọc bằng token của nó, nên không kiểm là lộ Base nội bộ). Có công tắc bên dưới.
+    "doc_bang",
+    # Tra lại kho của CHÍNH agent bằng nhiều bộ từ khoá (kho_tool.py). Không công tắc —
+    # cùng lý do với `dung_ky_nang`: tắt đi là quay về lỗi "kho có mà không thấy".
+    "tra_kho",
     "browser_navigate",
     "browser_snapshot",
     "browser_get_images",
@@ -202,7 +208,7 @@ def quyen_phat() -> set[str]:
 #: và sẽ tắt nhầm cả `schedule_reminder`, `remember_about_user`…
 _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
-    "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san",
+    "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
 })
 
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.

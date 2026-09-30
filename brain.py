@@ -56,6 +56,8 @@ import ky_nang_tool  # noqa: E402,F401  (registers `dung_ky_nang`: nạp thân k
 import account_tool  # noqa: E402,F401  (registers `soi_tai_khoan`: soi tài khoản brand/KOC)
 import shopee_tool  # noqa: E402,F401  (registers `soi_san`: giá và sản phẩm trên Shopee)
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
+import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
+import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
 import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian)
@@ -150,6 +152,8 @@ _TOOL_CAN_XET = {
     "soi_san": ("xem thị trường Shopee theo từ khoá, hoặc dán link sản phẩm Shopee / TikTok "
                 "Shop để đọc đánh giá của khách, rồi xuất Lark Sheet", {}),
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
+    "doc_bang": ("đọc nguyên một Base hoặc Sheet của Lark khi người hỏi cũng có quyền xem",
+                 {"nguon": "https://example.larksuite.com/base/x"}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",
                  {"args": ["wiki", "+search", "x"]}),
@@ -348,7 +352,22 @@ def _platform_context_block(ctx: dict | None, nguon: str = "") -> str:
             ]
         else:
             lines += _LUAT_NGUON
+    if nguon != "/web":
+        # Kho tìm theo CHỮ: evidence rỗng hay lệch không có nghĩa là kho không có. Luật này
+        # phải có cả khi KHÔNG có mẩu nào — đó đúng là lúc model dễ kết luận sai nhất.
+        lines += _LUAT_TRA_KHO
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+_LUAT_TRA_KHO = [
+    "",
+    "### Kho tìm theo chữ — tra lại trước khi nói 'không có'",
+    "- Evidence ở trên (nếu có) do platform tự tìm bằng CHỮ trong câu hỏi, không theo "
+    "nghĩa, và chỉ 4 mẩu. Thiếu, lệch, hoặc trống thì gọi `tra_kho` với 2–6 bộ từ khoá "
+    "khác (tiếng Anh, đồng nghĩa, viết tắt, tên riêng) TRƯỚC khi kết luận kho không có.",
+    "- Mẩu nào là thẻ mục lục của Base/Sheet thì dữ liệu nằm trong bảng, không nằm trong "
+    "kho: gọi `doc_bang` theo cách gọi ghi trong thẻ để đọc nguyên.",
+]
 
 
 #: Thứ tự dùng nguồn: KHO TRƯỚC, web là đường lùi.

@@ -62,9 +62,25 @@ CA_NODE, THEO_H1, BO_QUA = "ca_node", "h1", "bo_qua"
 CHE_DO = (CA_NODE, THEO_H1, BO_QUA)
 #: API kiến thức nhận tối đa 400 KB mỗi tệp; để dư cho phần đầu và ký tự nhiều byte.
 MAX_KY_TU_NODE = 300_000
-#: Khối NHÚNG trong tài liệu docx mà bộ đọc chưa bóc được nội dung: 18 = Base, 30 = Sheet.
-#: "Scope" (30/09) chỉ có tiêu đề + một Sheet nhúng — báo "tài liệu trống" là sai lý do.
-_KHOI_NHUNG = {18: "Base", 30: "Sheet"}
+#: Khối NHÚNG trong tài liệu docx: 18 = Base, 30 = Sheet. Nội dung bảng không nằm trong
+#: tài liệu — tài liệu chỉ giữ mã. "Scope" (30/09) chỉ có tiêu đề + một Sheet nhúng.
+#: Nhập thành một dòng chỉ cách đọc bằng `doc_bang`, không bỏ đi.
+_KHOI_NHUNG = {18: ("Base", "bitable", "base"), 30: ("Sheet", "sheet", "sheet")}
+
+
+def ma_nhung(b: dict) -> str:
+    """Mã gọi `doc_bang` của một khối nhúng (`sheet:<token>_<tab>` / `base:<app>_<bảng>`)."""
+    k = _KHOI_NHUNG.get(b.get("block_type"))
+    tok = str(((b.get(k[1]) or {}).get("token")) or "") if k else ""
+    return f"{k[2]}:{tok}" if tok else ""
+
+
+def _dong_nhung(b: dict) -> str:
+    ma = ma_nhung(b)
+    if not ma:
+        return ""
+    return (f"[{_KHOI_NHUNG[b['block_type']][0]} nhúng — dữ liệu không nằm trong tài liệu; "
+            f"đọc nguyên bằng tool `doc_bang` với `{ma}`]")
 #: Node không phải tài liệu thì chưa nhập được — nói rõ loại gì, đừng để "đã nhập 0".
 _LY_DO_LOAI = {"bitable": "Base — chưa nhập được, chỉ nhập tài liệu",
                "sheet": "Sheet — chưa nhập được, chỉ nhập tài liệu",
@@ -230,7 +246,7 @@ def cat_theo_h1(blocks: list[dict]) -> list[tuple[str, list[str], str]]:
             continue
         if tieu_de is None:
             continue
-        t = _chu(b).strip()
+        t = _chu(b).strip() or _dong_nhung(b)
         if t:
             dong.append(t)
     if tieu_de is not None:
@@ -249,6 +265,9 @@ def van_ban_ca_node(blocks: list[dict]) -> str:
     for b in blocks:
         t = _chu(b).strip()
         if not t:
+            t = _dong_nhung(b)
+            if t:
+                dong.append(t)
             continue
         cap = _CAP_TIEU_DE.get(b.get("block_type"))
         dong.append(f"{'#' * min(cap + 1, 6)} {re.sub(r'[*][*]', '', t)}" if cap else t)
@@ -340,14 +359,26 @@ def boc(nodes: list[dict], che_do: dict | None = None
         tok = str(n.get("token") or "")
         ten_node = n.get("title") or ""
         muon = che_do.get(tok) if che_do.get(tok) in CHE_DO else CA_NODE
+        # `obj_token` + `nhung`: để `doc_bang` biết Base/Sheet nào nằm trong cây Wiki chủ
+        # agent đã khai báo — đó là một trong các căn cứ cho phép người hỏi đọc.
         ct = {"token": tok, "title": ten_node, "loai": n.get("obj_type") or "",
+              "obj_token": n.get("obj_token") or "", "nhung": [],
               "sau": n.get("sau", 0), "h1": 0, "che_do": muon, "muc": 0, "ly_do": ""}
         chi_tiet.append(ct)
-        if n.get("obj_type") != "docx" or not n.get("obj_token"):
-            ct["ly_do"] = _LY_DO_LOAI.get(n.get("obj_type"), "không phải tài liệu")
-            continue
         if muon == BO_QUA:
             ct["ly_do"] = "chủ agent chọn bỏ qua"
+            continue
+        if n.get("obj_type") in ("bitable", "sheet") and n.get("obj_token"):
+            the = the_bang(n)
+            if the is None:
+                ct["ly_do"] = "bot không đọc được bảng này"
+            else:
+                ra.append(the)
+                ct["muc"] = 1
+                ct["ly_do"] = "chỉ nhập mục lục; dữ liệu đọc nguyên bằng doc_bang khi được hỏi"
+            continue
+        if n.get("obj_type") != "docx" or not n.get("obj_token"):
+            ct["ly_do"] = _LY_DO_LOAI.get(n.get("obj_type"), "không phải tài liệu")
             continue
         blocks = lay_block(n["obj_token"])
         if blocks is None:
@@ -355,10 +386,9 @@ def boc(nodes: list[dict], che_do: dict | None = None
             continue
         muc = cat_theo_h1(blocks)
         ct["h1"] = len(muc)
-        nhung = [_KHOI_NHUNG[b["block_type"]] for b in blocks
-                 if b.get("block_type") in _KHOI_NHUNG]
-        bang = (f"{len(nhung)} bảng nhúng ({', '.join(sorted(set(nhung)))}) chưa đọc được"
-                if nhung else "")
+        ct["nhung"] = [m for m in (ma_nhung(b) for b in blocks) if m]
+        bang = (f"{len(ct['nhung'])} bảng nhúng — đọc nguyên bằng doc_bang khi được hỏi"
+                if ct["nhung"] else "")
 
         if muon == THEO_H1 and muc:
             for i, (tieu_de, dong, neo) in enumerate(muc):
@@ -385,13 +415,15 @@ def boc(nodes: list[dict], che_do: dict | None = None
         if muon == THEO_H1:
             ct["ly_do"] = "không có tiêu đề H1 — đã nhập cả node"
         than = van_ban_ca_node(blocks)
-        # Dòng tiêu đề trang (block 1) trùng tên node — không tính là có nội dung.
-        co_chu = any(_chu(b).strip() for b in blocks if b.get("block_type") != 1)
+        # Dòng tiêu đề trang (block 1) trùng tên node — không tính là có nội dung. Bảng nhúng
+        # thì CÓ tính: tài liệu như "Scope" chỉ có một Sheet nhúng vẫn phải vào kho để RAG
+        # tìm thấy rồi đọc bảng qua `doc_bang`.
+        co_chu = ct["nhung"] or any(_chu(b).strip() for b in blocks if b.get("block_type") != 1)
         if not co_chu:
-            ct["ly_do"] = (f"chỉ có {bang} — chưa nhập được" if bang else "tài liệu trống")
+            ct["ly_do"] = "tài liệu trống"
             continue
         if bang:
-            ct["ly_do"] = "; ".join(x for x in (ct["ly_do"], f"bỏ qua {bang}") if x)
+            ct["ly_do"] = "; ".join(x for x in (ct["ly_do"], bang) if x)
         if len(than) > MAX_KY_TU_NODE:
             than = than[:MAX_KY_TU_NODE]
             ct["ly_do"] = "; ".join(x for x in (
@@ -406,6 +438,27 @@ def boc(nodes: list[dict], che_do: dict | None = None
                    "content": f"# {ten_node}\n\n_Nguồn Wiki: {ten_node} — {link}_\n\n{than}\n"})
         ct["muc"] = 1
     return ra, che, chi_tiet
+
+
+def the_bang(n: dict) -> dict | None:
+    """Node Base/Sheet → một tài liệu THẺ MỤC LỤC (bảng, cột, số dòng, cách gọi doc_bang).
+
+    Không nhập dòng: RAG chỉ đưa 4 mẩu mỗi câu hỏi nên câu hỏi về bảng phải đọc NGUYÊN
+    bảng lúc hỏi. Thẻ này chỉ để RAG tìm thấy bảng. None = bot không đọc được.
+    """
+    import lark_bang
+    try:
+        kq = lark_bang.doc(n["obj_type"], n["obj_token"], ca_dong=False)
+    except Exception:
+        return None
+    tok = str(n.get("token") or "")
+    link = _link_muc(tok, "")
+    van_tay = hashlib.sha256(f"{tok}|the_bang".encode("utf-8")).hexdigest()[:6]
+    ten_node = n.get("title") or kq["ten"]
+    return {"name": f"wiki_{_ten_an_toan(ten_node) or 'bang'}-{van_tay}.md",
+            "source_url": link,
+            "content": (f"# {ten_node}\n\n_Nguồn Wiki: {ten_node} — {link}_\n\n"
+                        + lark_bang.the_muc_luc(kq, link) + "\n")}
 
 
 def ten_can_don(da_co: list[dict], ten_moi: set[str], chi_tiet: list[dict]) -> list[str]:

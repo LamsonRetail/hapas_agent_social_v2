@@ -33,9 +33,22 @@ TAI_LIEU = {
 }
 
 
+MUC_LUC_BASE = {"ten": "Backlog", "loai": "Base", "bi_cat": False, "noi_dung": "",
+                "bang": [{"ten": "Việc", "cot": ["Tên", "Trạng thái"], "tong_dong": 42,
+                          "da_doc": 0}]}
+
+
 @pytest.fixture(autouse=True)
 def _lark_gia(monkeypatch):
+    import lark_bang
+
+    def doc_gia(loai, tok, phu="", *, ca_dong=True):
+        if tok != "bas_1":
+            raise RuntimeError("bot không có quyền")
+        return MUC_LUC_BASE
+
     monkeypatch.setattr(W, "lay_block", lambda tok: TAI_LIEU.get(tok))
+    monkeypatch.setattr(lark_bang, "doc", doc_gia)
 
 
 def _node(tok, ten, loai="docx", obj=None, sau=1):
@@ -96,28 +109,43 @@ def test_bo_qua_va_lua_chon_la_thi_ve_mac_dinh():
     assert _ct(ct, "wk_scope")["che_do"] == W.CA_NODE
 
 
-def test_base_va_tai_lieu_trong_co_ly_do_khong_im_lang():
-    ra, _, ct = W.boc([BACKLOG, _node("wk_rong", "Trống", obj="doc_rong")])
-    assert ra == []
-    assert _ct(ct, "wk_backlog")["ly_do"].startswith("Base")
-    assert _ct(ct, "wk_rong")["ly_do"] == "tài liệu trống"
+def test_base_nhap_the_muc_luc_khong_nhap_dong():
+    """RAG chỉ đưa 4 mẩu — dòng của bảng không vào kho; kho giữ mục lục để TÌM thấy."""
+    ra, _, ct = W.boc([BACKLOG])
+    assert len(ra) == 1 and _ct(ct, "wk_backlog")["muc"] == 1
+    c = ra[0]["content"]
+    assert "Việc (42 dòng): cột Tên, Trạng thái" in c
+    assert "doc_bang" in c and "/wiki/wk_backlog" in c
+    assert _ct(ct, "wk_backlog")["obj_token"] == "bas_1"
 
 
-def test_tai_lieu_chi_nhung_sheet_thi_noi_dung_ly_do(monkeypatch):
-    """Đúng ca "Scope" (30/09): tiêu đề trang + một Sheet nhúng, không có chữ nào."""
+def test_base_bot_khong_doc_duoc_thi_noi_ro():
+    ra, _, ct = W.boc([_node("wk_b2", "Base khác", loai="bitable", obj="bas_khong")])
+    assert ra == [] and _ct(ct, "wk_b2")["ly_do"] == "bot không đọc được bảng này"
+
+
+def test_tai_lieu_trong_co_ly_do():
+    ra, _, ct = W.boc([_node("wk_rong", "Trống", obj="doc_rong")])
+    assert ra == [] and _ct(ct, "wk_rong")["ly_do"] == "tài liệu trống"
+
+
+def test_tai_lieu_chi_nhung_sheet_van_vao_kho_de_tim_thay(monkeypatch):
+    """Đúng ca "Scope" (30/09): tiêu đề trang + một Sheet nhúng, không có chữ nào. Phải
+    vào kho (để RAG tìm thấy "Scope") kèm mã đọc bảng qua doc_bang."""
     monkeypatch.setitem(TAI_LIEU, "doc_sheet", [
         {"block_type": 1, "page": {"elements": [{"text_run": {"content": "Scope"}}]}},
-        {"block_type": 30, "sheet": {"token": "sht_x"}}, _b(2, "")])
+        {"block_type": 30, "sheet": {"token": "shtAbc_6KqK"}}, _b(2, "")])
     ra, _, ct = W.boc([_node("wk_sheet", "Scope", obj="doc_sheet")])
-    assert ra == []
-    assert _ct(ct, "wk_sheet")["ly_do"] == "chỉ có 1 bảng nhúng (Sheet) chưa đọc được — chưa nhập được"
+    assert len(ra) == 1 and "`sheet:shtAbc_6KqK`" in ra[0]["content"]
+    assert _ct(ct, "wk_sheet")["nhung"] == ["sheet:shtAbc_6KqK"]
+    assert "1 bảng nhúng" in _ct(ct, "wk_sheet")["ly_do"]
 
 
-def test_tai_lieu_co_chu_kem_bang_nhung_van_nhap_va_ghi_chu(monkeypatch):
-    monkeypatch.setitem(TAI_LIEU, "doc_kem", [_b(2, "Mô tả dự án"), {"block_type": 18}])
-    ra, _, ct = W.boc([_node("wk_kem", "Kèm Base", obj="doc_kem")])
-    assert len(ra) == 1 and "Mô tả dự án" in ra[0]["content"]
-    assert "bỏ qua 1 bảng nhúng (Base)" in _ct(ct, "wk_kem")["ly_do"]
+def test_bang_nhung_trong_muc_h1_cung_giu_ma(monkeypatch):
+    monkeypatch.setitem(TAI_LIEU, "doc_kem", [_b(3, "Kế hoạch"), _b(2, "Mô tả dự án"),
+                                             {"block_type": 18, "bitable": {"token": "app1_tbl1"}}])
+    ra, _, _ = W.boc([_node("wk_kem", "Kèm Base", obj="doc_kem")], {"wk_kem": W.THEO_H1})
+    assert len(ra) == 1 and "`base:app1_tbl1`" in ra[0]["content"]
 
 
 def test_node_dai_qua_thi_cat_va_bao(monkeypatch):
@@ -204,7 +232,7 @@ def test_nhap_du_thi_don_va_gui_chi_tiet(wt, monkeypatch):
     monkeypatch.setattr(W, "don_tai_lieu_cu", lambda ten, ct, goi: 4)
     monkeypatch.setattr(wt, "_goi", lambda url, **kw: (200, {}))
     r = wt.mot_luot(nhap=True)
-    assert r == {"nhap": 3, "tong": 3}, "tách H1 theo lựa chọn trên console"
+    assert r == {"nhap": 4, "tong": 4}, "3 mục H1 theo lựa chọn + 1 thẻ mục lục Base"
     bc = gui["last_scan"]
     assert bc["da_don"] == 4
     assert [c["token"] for c in bc["chi_tiet"]] == ["wk_standup", "wk_backlog"]
