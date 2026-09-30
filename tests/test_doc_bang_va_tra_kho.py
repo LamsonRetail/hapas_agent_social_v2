@@ -166,6 +166,25 @@ def test_trong_nguon_wiki_doc_duoc(quyen, monkeypatch):
     assert BT.quyen_nguoi_hoi("bitable", "tok", "")[0]
 
 
+def test_base_noi_bo_cua_mark_chan_ca_khi_nam_trong_nguon_wiki(quyen, monkeypatch):
+    """01/10: Nguồn Wiki trỏ đúng vào Base audit → mọi người đọc được nhật ký của nhau."""
+    quyen(public="tenant_readable")
+    monkeypatch.setattr(BT, "base_noi_bo", lambda: {"tok"})
+    monkeypatch.setattr(BT, "_trong_cay_wiki", lambda *t: True)
+    ok, vi_sao = BT.quyen_nguoi_hoi("bitable", "tok", "ou_hoi")
+    assert not ok and "Base nội bộ" in vi_sao
+    monkeypatch.setenv("AGENT_BOSS_OPEN_ID", "ou_chu")
+    assert BT.quyen_nguoi_hoi("bitable", "tok", "ou_chu")[0], "chủ agent vẫn xem được"
+
+
+def test_base_noi_bo_doc_tu_tokens():
+    """Base audit thật của Mark phải nằm trong danh sách chặn (đọc từ .tokens/)."""
+    import pathlib
+    if not (pathlib.Path(__file__).resolve().parents[1] / ".tokens" / "audit_base.json").is_file():
+        pytest.skip("không có .tokens trên máy này")
+    assert BT.base_noi_bo(), "không đọc ra Base nội bộ nào — cửa audit đang mở"
+
+
 def test_chu_agent_doc_duoc(quyen, monkeypatch):
     quyen()
     monkeypatch.setenv("AGENT_BOSS_OPEN_ID", "ou_chu")

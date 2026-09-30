@@ -90,12 +90,40 @@ def _trong_chat(chat_id: str, nguoi: str) -> bool:
     return False
 
 
+def base_noi_bo() -> set[str]:
+    """Base nội bộ của CHÍNH Mark (audit, sổ chi phí…) — lấy từ `.tokens/*.json`.
+
+    Đây là chỗ giữ câu hỏi và câu trả lời của MỌI người. 01/10: chủ agent đặt Nguồn Wiki
+    trỏ đúng vào Base audit, và luật "nằm trong Nguồn Wiki thì ai hỏi cũng đọc được" biến
+    nó thành cửa cho mọi người đọc nhật ký của nhau. Nên các Base này bị chặn TRƯỚC mọi
+    căn cứ khác, trừ chủ agent.
+    """
+    import json
+    import pathlib
+    ra: set[str] = set()
+    try:
+        from config import config
+        thu_muc = pathlib.Path(config.token_file).parent
+    except Exception:
+        thu_muc = pathlib.Path(__file__).resolve().parent / ".tokens"
+    for f in thu_muc.glob("*.json"):
+        try:
+            j = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(j, dict):
+            ra.update(str(j[k]) for k in ("app_token", "base_token") if j.get(k))
+    return ra
+
+
 def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str) -> tuple[bool, str]:
     """(được đọc?, vì sao). Chỉ trả True khi CHỨNG MINH được người hỏi có quyền."""
     boss = {x for x in (os.environ.get("AGENT_BOSS_OPEN_ID", "").strip(),
                         os.environ.get("STEVEN_BOSS_OPEN_ID", "").strip()) if x}
     if nguoi and nguoi in boss:
         return True, "chủ agent"
+    if token in base_noi_bo():
+        return False, "đây là Base nội bộ của Mark (nhật ký hỏi–đáp, chi phí) — chỉ chủ agent xem được"
     if _trong_cay_wiki(token, *wiki_tokens):
         return True, "nằm trong Nguồn Wiki chủ agent đã khai báo"
     try:
