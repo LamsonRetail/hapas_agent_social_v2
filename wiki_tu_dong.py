@@ -97,9 +97,20 @@ def khai_bao() -> dict:
 
 
 def _bao_len_console(kb: dict, moi: dict) -> bool:
+    """Gửi CHỈ phần agent sở hữu (`last_scan`). Server gộp `wiki_source` theo từng khoá.
+
+    Bản trước gửi `{**kb, **moi}` — tức cả khai báo đọc lúc BẮT ĐẦU lượt quét. Lượt quét
+    mất vài chục giây; người dùng đổi lựa chọn từng node trong lúc đó thì bị bản cũ đè
+    mất, và không có gì báo. `kb` giữ lại trong chữ ký cho nơi gọi khỏi phải đổi.
+    """
     c, _ = _goi(f"{_WEB}/api/agents/{AID}/profile", cookie=_khoa_nguoi(),
-                body={"wiki_source": {**kb, **moi}})
+                body={"wiki_source": dict(moi)})
     return c == 200
+
+
+def _goi_web(duong: str, body=None):
+    """Hình `goi` mà `nap_wiki.don_tai_lieu_cu` cần: đường tương đối, phiên người dùng."""
+    return _goi(f"{_WEB}{duong}", cookie=_khoa_nguoi(), body=body)
 
 
 def _van_tay(nodes: list[dict]) -> dict:
@@ -175,9 +186,12 @@ def mot_luot(nhap: bool) -> dict:
 
     vt = _van_tay(kq["nodes"])
     doi = _so_van_tay((kb.get("last_scan") or {}).get("van_tay") or {}, vt)
-    tai_lieu, che = W.boc(kq["nodes"])
+    tai_lieu, che, chi_tiet = W.boc(kq["nodes"], kb.get("che_do_node") or {})
     bc = {"at": _bay_gio(), "nodes": len(kq["nodes"]), "sections": len(tai_lieu),
           "van_tay": vt, "doi": doi,
+          # Mỗi node một dòng (loại, số H1, cách nhập, lý do) — console hiện thành danh
+          # sách có ô chọn. Trần = trần số node của lượt quét, nên không phình vô hạn.
+          "chi_tiet": chi_tiet[:W.MAX_NODE],
           "unreadable": kq["khong_doc"], "imported": 0,
           # Link của CHÍNH lượt quét này — để lần sau biết link có đổi không.
           "root_url": str(kb["root_url"]),
@@ -194,15 +208,21 @@ def mot_luot(nhap: bool) -> dict:
         return {"quet": len(tai_lieu), **({"đổi": doi} if any(doi.values()) else {})}
 
     da = 0
+    du = True
     for i in range(0, len(tai_lieu), 20):       # API trần 20 tệp mỗi lượt
         lo = tai_lieu[i:i + 20]
         c, _ = _goi(f"{_WEB}/api/agents/{AID}/knowledge", cookie=_khoa_nguoi(),
                     body={"files": lo})
         if c != 200:
             bc["note"] = f"Nhập dở ở lô {i // 20 + 1}: HTTP {c}"
+            du = False
             break
         da += len(lo)
     bc["imported"] = da
+    # Dọn tài liệu Wiki cũ CHỈ khi đã nhập đủ: nhập dở mà vẫn dọn là xoá bản cũ trong
+    # khi bản mới chưa vào — kho trống đúng những node vừa hỏng.
+    bc["da_don"] = (W.don_tai_lieu_cu({d["name"] for d in tai_lieu}, chi_tiet, _goi_web)
+                    if du else 0)
     bc["nhap_luc"] = _bay_gio()
     if che:
         bc["note"] = (bc["note"] + f" Đã che {che} chuỗi giống bí mật.").strip()

@@ -51,6 +51,26 @@ AID = "AG-SOCIAL-LISTENING"
 
 B_H1 = 3
 B_TEXT = 2
+#: block_type 3..11 = tiêu đề H1..H9 của Lark docx.
+_CAP_TIEU_DE = {3 + i: i + 1 for i in range(9)}
+
+#: Ba cách nhập MỘT node — chủ agent chọn cho từng node trên console (`che_do_node`).
+#: Mặc định nhập cả node: một node là một tài liệu, tên là tiêu đề node, không mất gì.
+#: Bản cũ chỉ cắt theo H1 nên tài liệu không dùng H1 (vd "Scope") bị bỏ CẢ tài liệu,
+#: còn "Daily Standup" 64 H1 theo ngày thì chiếm trọn kho.
+CA_NODE, THEO_H1, BO_QUA = "ca_node", "h1", "bo_qua"
+CHE_DO = (CA_NODE, THEO_H1, BO_QUA)
+#: API kiến thức nhận tối đa 400 KB mỗi tệp; để dư cho phần đầu và ký tự nhiều byte.
+MAX_KY_TU_NODE = 300_000
+#: Khối NHÚNG trong tài liệu docx mà bộ đọc chưa bóc được nội dung: 18 = Base, 30 = Sheet.
+#: "Scope" (30/09) chỉ có tiêu đề + một Sheet nhúng — báo "tài liệu trống" là sai lý do.
+_KHOI_NHUNG = {18: "Base", 30: "Sheet"}
+#: Node không phải tài liệu thì chưa nhập được — nói rõ loại gì, đừng để "đã nhập 0".
+_LY_DO_LOAI = {"bitable": "Base — chưa nhập được, chỉ nhập tài liệu",
+               "sheet": "Sheet — chưa nhập được, chỉ nhập tài liệu",
+               "mindnote": "Mindnote — chưa nhập được, chỉ nhập tài liệu",
+               "file": "Tệp đính kèm — chưa nhập được, chỉ nhập tài liệu",
+               "slides": "Slides — chưa nhập được, chỉ nhập tài liệu"}
 #: Trần an toàn: cây Wiki có thể rất rộng, và mỗi node là một lời gọi API.
 MAX_NODE = int(__import__("os").environ.get("LSR_WIKI_MAX_NODE", "200"))
 MAX_SAU = int(__import__("os").environ.get("LSR_WIKI_MAX_DEPTH", "6"))
@@ -159,7 +179,8 @@ def liet_ke_con(space_id: str, cha: str) -> list[dict] | None:
 
 def _chu(block: dict) -> str:
     """Gộp các đoạn chữ trong một block thành một dòng."""
-    for k in ("text", "heading1", "heading2", "heading3", "bullet", "ordered", "code"):
+    for k in ("text", *(f"heading{i}" for i in range(1, 10)), "bullet", "ordered",
+              "code", "quote", "todo"):
         el = (block.get(k) or {}).get("elements")
         if el:
             return "".join((e.get("text_run") or {}).get("content", "") for e in el)
@@ -215,6 +236,27 @@ def cat_theo_h1(blocks: list[dict]) -> list[tuple[str, list[str], str]]:
     if tieu_de is not None:
         muc.append((tieu_de, dong, neo))
     return muc
+
+
+def van_ban_ca_node(blocks: list[dict]) -> str:
+    """Cả tài liệu thành markdown, GIỮ tiêu đề (##, ###…) ngay trong nội dung.
+
+    Platform tự cắt tài liệu thành mẩu ~1.200 ký tự để tra. Bỏ tiêu đề thì một mẩu giữa
+    "Daily Standup" chỉ còn "đã xong X" mà không biết của ngày nào. H1 của tài liệu thành
+    `##` vì `#` đã là tiêu đề node ở đầu tệp.
+    """
+    dong: list[str] = []
+    for b in blocks:
+        t = _chu(b).strip()
+        if not t:
+            continue
+        cap = _CAP_TIEU_DE.get(b.get("block_type"))
+        dong.append(f"{'#' * min(cap + 1, 6)} {re.sub(r'[*][*]', '', t)}" if cap else t)
+    return "\n\n".join(dong)
+
+
+def _ten_an_toan(s: str) -> str:
+    return re.sub(r"\s+", "_", re.sub(r"[^\w\s\-.]", "", s).strip())[:72]
 
 
 def _link_muc(node_token: str, neo: str) -> str:
@@ -282,36 +324,126 @@ def quet(url: str) -> dict:
             "cham_tran": len(tham) >= MAX_NODE}
 
 
-def boc(nodes: list[dict]) -> tuple[list[dict], int]:
-    """Mỗi mục H1 thành một tài liệu. Trả (tài liệu, số bí mật đã che)."""
+def boc(nodes: list[dict], che_do: dict | None = None
+        ) -> tuple[list[dict], int, list[dict]]:
+    """Mỗi node thành tài liệu theo lựa chọn của chủ agent (`che_do`: token → cách nhập).
+
+    Trả (tài liệu, số bí mật đã che, chi tiết từng node). Chi tiết là thứ console hiện
+    thành danh sách node có ô chọn — nên node bị bỏ qua cũng phải có dòng kèm LÝ DO,
+    không thì người dùng lại thấy "đã nhập 0" mà không biết vì sao.
+    """
+    che_do = che_do or {}
     ra: list[dict] = []
+    chi_tiet: list[dict] = []
     che = 0
     for n in nodes:
+        tok = str(n.get("token") or "")
+        ten_node = n.get("title") or ""
+        muon = che_do.get(tok) if che_do.get(tok) in CHE_DO else CA_NODE
+        ct = {"token": tok, "title": ten_node, "loai": n.get("obj_type") or "",
+              "sau": n.get("sau", 0), "h1": 0, "che_do": muon, "muc": 0, "ly_do": ""}
+        chi_tiet.append(ct)
         if n.get("obj_type") != "docx" or not n.get("obj_token"):
+            ct["ly_do"] = _LY_DO_LOAI.get(n.get("obj_type"), "không phải tài liệu")
+            continue
+        if muon == BO_QUA:
+            ct["ly_do"] = "chủ agent chọn bỏ qua"
             continue
         blocks = lay_block(n["obj_token"])
         if blocks is None:
+            ct["ly_do"] = "bot không đọc được tài liệu này"
             continue
-        for i, (tieu_de, dong, neo) in enumerate(cat_theo_h1(blocks)):
-            than = "\n".join(dong).strip()
-            if not than:
-                continue
-            than, k = che_bi_mat(than)
-            che += k
-            # Tên phải DUY NHẤT. API kiến thức thay thế theo tên, nên hai mục trùng
-            # tên là mục sau đè mục trước — mất im lặng, không lỗi, không ai biết.
-            # Xảy ra thật ở nhánh này: hai mục "Daily Standup / 15092026" trong cùng
-            # một cây. Gắn thêm vân tay của node + số thứ tự mục.
-            an_toan = re.sub(r"[^\w\s\-.]", "", f"{n['title']}-{tieu_de}").strip()
-            an_toan = re.sub(r"\s+", "_", an_toan)[:72]
-            van_tay = hashlib.sha256(
-                f"{n.get('token')}|{i}|{tieu_de}".encode("utf-8")).hexdigest()[:6]
-            link = _link_muc(str(n.get("token") or ""), neo)
-            ra.append({"name": f"wiki_{an_toan}-{van_tay}.md",
-                       "source_url": link,
-                       "content": (f"# {tieu_de}\n\n_Nguồn Wiki: {n['title']}"
-                                   f" — {link}_\n\n{than}\n")})
-    return ra, che
+        muc = cat_theo_h1(blocks)
+        ct["h1"] = len(muc)
+        nhung = [_KHOI_NHUNG[b["block_type"]] for b in blocks
+                 if b.get("block_type") in _KHOI_NHUNG]
+        bang = (f"{len(nhung)} bảng nhúng ({', '.join(sorted(set(nhung)))}) chưa đọc được"
+                if nhung else "")
+
+        if muon == THEO_H1 and muc:
+            for i, (tieu_de, dong, neo) in enumerate(muc):
+                than = "\n".join(dong).strip()
+                if not than:
+                    continue
+                than, k = che_bi_mat(than)
+                che += k
+                # Tên phải DUY NHẤT. API kiến thức thay thế theo tên, nên hai mục trùng
+                # tên là mục sau đè mục trước — mất im lặng, không lỗi, không ai biết.
+                # Xảy ra thật ở nhánh này: hai mục "Daily Standup / 15092026" trong cùng
+                # một cây. Gắn thêm vân tay của node + số thứ tự mục.
+                van_tay = hashlib.sha256(
+                    f"{tok}|{i}|{tieu_de}".encode("utf-8")).hexdigest()[:6]
+                link = _link_muc(tok, neo)
+                ra.append({"name": f"wiki_{_ten_an_toan(f'{ten_node}-{tieu_de}')}-{van_tay}.md",
+                           "source_url": link,
+                           "content": (f"# {tieu_de}\n\n_Nguồn Wiki: {ten_node}"
+                                       f" — {link}_\n\n{than}\n")})
+                ct["muc"] += 1
+            continue
+
+        # Cả node — mặc định, và là đường lùi khi chọn tách H1 mà tài liệu không có H1.
+        if muon == THEO_H1:
+            ct["ly_do"] = "không có tiêu đề H1 — đã nhập cả node"
+        than = van_ban_ca_node(blocks)
+        # Dòng tiêu đề trang (block 1) trùng tên node — không tính là có nội dung.
+        co_chu = any(_chu(b).strip() for b in blocks if b.get("block_type") != 1)
+        if not co_chu:
+            ct["ly_do"] = (f"chỉ có {bang} — chưa nhập được" if bang else "tài liệu trống")
+            continue
+        if bang:
+            ct["ly_do"] = "; ".join(x for x in (ct["ly_do"], f"bỏ qua {bang}") if x)
+        if len(than) > MAX_KY_TU_NODE:
+            than = than[:MAX_KY_TU_NODE]
+            ct["ly_do"] = "; ".join(x for x in (
+                ct["ly_do"], "dài quá, chỉ nhập 300.000 ký tự đầu — nên chọn Tách theo H1") if x)
+        than, k = che_bi_mat(than)
+        che += k
+        link = _link_muc(tok, "")
+        # Vân tay theo node: nhập lại cùng node là THAY đúng tài liệu cũ, không sinh bản mới.
+        van_tay = hashlib.sha256(f"{tok}|{CA_NODE}".encode("utf-8")).hexdigest()[:6]
+        ra.append({"name": f"wiki_{_ten_an_toan(ten_node) or 'node'}-{van_tay}.md",
+                   "source_url": link,
+                   "content": f"# {ten_node}\n\n_Nguồn Wiki: {ten_node} — {link}_\n\n{than}\n"})
+        ct["muc"] = 1
+    return ra, che, chi_tiet
+
+
+def ten_can_don(da_co: list[dict], ten_moi: set[str], chi_tiet: list[dict]) -> list[str]:
+    """Tài liệu Wiki cũ phải dọn sau một lần nhập ĐỦ.
+
+    Chỉ đụng tài liệu `wiki_…` có link về một node mà lượt này ĐỌC ĐƯỢC, và lần này không
+    còn tên đó — tức node đổi cách nhập (64 mục H1 → một tài liệu), bị chọn bỏ qua, hoặc
+    mục H1 đã bị xoá khỏi tài liệu. Node bot không đọc được, hay đã rời khỏi cây, thì KHÔNG
+    xoá: có thể bot chỉ tạm mất quyền, và xoá nhầm kiến thức là thứ không ai thấy để kêu.
+    Tài liệu .md nạp tay không có tiền tố `wiki_` nên không bao giờ nằm trong danh sách.
+    """
+    doc_duoc = {c["token"] for c in chi_tiet
+                if c.get("token") and c.get("ly_do") != "bot không đọc được tài liệu này"}
+    ra: list[str] = []
+    for d in da_co or []:
+        ten = str(d.get("name") or "")
+        if not ten.startswith("wiki_") or ten in ten_moi:
+            continue
+        tok = token_tu_link(str(d.get("source_url") or ""))
+        if tok and tok in doc_duoc:
+            ra.append(ten)
+    return ra
+
+
+def don_tai_lieu_cu(ten_moi: set[str], chi_tiet: list[dict], goi) -> int:
+    """Đọc kho, xoá tài liệu Wiki cũ theo `ten_can_don`. Trả số đã xoá (0 nếu lỗi).
+
+    `goi(duong, body=None) -> (status, dict)` — truyền vào để hai nơi gọi (chạy tay và
+    nhịp nền) dùng chung một luật dọn, mỗi nơi một cách xác thực.
+    """
+    c, d = goi(f"/api/agents/{AID}/knowledge")
+    if c != 200:
+        return 0
+    xoa = ten_can_don(d.get("documents") or [], ten_moi, chi_tiet)
+    if not xoa:
+        return 0
+    c, r = goi(f"/api/agents/{AID}/knowledge", {"delete": xoa[:500]})
+    return int(r.get("n_files") or len(xoa[:500])) if c == 200 else 0
 
 
 def main() -> int:
@@ -348,16 +480,19 @@ def main() -> int:
     if len(nodes) > 12:
         print(f"      … còn {len(nodes) - 12} node")
 
-    tai_lieu, che = boc(nodes)
-    print(f"\n  BÓC TỚI MỤC H1 → {len(tai_lieu)} tài liệu"
+    tai_lieu, che, chi_tiet = boc(nodes, kb.get("che_do_node") or {})
+    print(f"\n  BÓC THEO TỪNG NODE → {len(tai_lieu)} tài liệu"
           + (f" · đã che {che} chuỗi giống bí mật" if che else ""))
+    for c in chi_tiet[:20]:
+        print(f"      {c['title'][:40]:<40} [{c['loai']}] {c['che_do']:<7} "
+              f"H1={c['h1']:<3} → {c['muc']} tài liệu {c['ly_do']}")
     for d in tai_lieu[:12]:
         print(f"      {d['name'][:56]:<56} {len(d['content']):>6} ký tự")
     if len(tai_lieu) > 12:
         print(f"      … còn {len(tai_lieu) - 12} tài liệu")
 
     if not tai_lieu:
-        print("\n  Không có mục H1 nào để nhập.\n")
+        print("\n  Không có tài liệu nào để nhập (xem lý do từng node ở trên).\n")
         return 0
     if not args.day:
         print(f"\n  {len(tai_lieu)} tài liệu sẽ được nhập. Chạy lại với --day để làm thật.\n")
@@ -375,12 +510,17 @@ def main() -> int:
         da += len(lo)
         print(f"    đạt  lô {i // 20 + 1}: {len(lo)} tệp")
 
-    # Báo ngược lên console để người dùng thấy lần quét gần nhất.
+    don = don_tai_lieu_cu({d["name"] for d in tai_lieu}, chi_tiet, _goi_web)
+    print(f"    đạt  dọn {don} tài liệu Wiki cũ không còn dùng")
+
+    # Báo ngược lên console để người dùng thấy lần quét gần nhất. CHỈ gửi `last_scan`:
+    # server gộp theo khoá, gửi cả khai báo đọc lúc đầu là đè mất lựa chọn người dùng
+    # vừa đổi trong lúc đang quét.
     from datetime import datetime, timezone
-    moi = {**kb, "last_scan": {
+    moi = {"last_scan": {
         "at": datetime.now(timezone.utc).isoformat(),
-        "nodes": len(nodes), "sections": len(tai_lieu), "imported": da,
-        "unreadable": kq["khong_doc"],
+        "nodes": len(nodes), "sections": len(tai_lieu), "imported": da, "da_don": don,
+        "unreadable": kq["khong_doc"], "chi_tiet": chi_tiet[:MAX_NODE],
         "note": ("Đã chạm trần số node — cây còn nhánh chưa quét."
                  if kq["cham_tran"] else ""),
     }}
