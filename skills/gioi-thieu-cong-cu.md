@@ -49,9 +49,12 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
   video quảng cáo trả tiền và hashtag chiến dịch của brand
 
 **Bình luận dưới bài — `/comment`**
-- Dán link bài (tối đa 20 bài), Mark kéo bình luận về và đọc cảm xúc, chủ đề
-- Ví dụ: "/comment <link>"; "khách nói gì dưới video này?"
-- Ra Lark Sheet bình luận, mặc định 50 bình luận mỗi bài
+- Dán link bài (tối đa 50 bài), Mark kéo bình luận về, gán nhãn từng bình luận (sắc
+  thái + chủ đề) và thống kê
+- Ví dụ: "/comment <link>"; "khách nói gì dưới video này?"; "gán nhãn và thống kê
+  bình luận mấy bài này"
+- Ra Lark Sheet bình luận có cột Sắc thái, Chủ đề và tab Thống kê, mặc định 50 bình
+  luận mỗi bài. Nhiều quá ngân sách thì Mark báo chi phí dự kiến và hỏi trước
 - Được TikTok, YouTube, Facebook. Chưa được Instagram và Threads
 
 **Soi tài khoản đối thủ hoặc KOC — `/profile`**

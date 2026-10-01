@@ -1949,7 +1949,11 @@ SCHEMA = {
         "(`mau_am_thanh`) và chỉ gọi là tín hiệu. `am_thanh` rỗng thì nói thẳng là mẫu "
         "chưa thấy âm thanh nào nhiều kênh dùng lại, đừng bịa tên. Hashtag hoặc hiệu ứng "
         "gắn tên brand (vd #larocheposaysuperbrandday, #hoptaccung…, xem `di_kem_hashtag`) "
-        "là CHIẾN DỊCH TRẢ TIỀN của brand, nói rõ như vậy, đừng gọi là trend tự nhiên.\n"
+        "là CHIẾN DỊCH TRẢ TIỀN của brand, nói rõ như vậy, đừng gọi là trend tự nhiên. "
+        "`nhac` là bảng nhạc đang lên CHÍNH THỨC; `nhac_trong_vn`=true thì nói thẳng "
+        "Creative Center không trả bảng nhạc cho VN, chỉ có âm thanh suy từ mẫu — không "
+        "lấy nước khác thay vào. Tách `nhac_dung_lai` (bài hát) với `am_thanh_goc`. Hashtag "
+        "có `nhay_cam` (`hashtag_nhay_cam`) thì KHÔNG đề xuất brand bám trend đó.\n"
         "NỀN TẢNG: không nói gì thì cào CẢ NĂM (tiktok, facebook, instagram, youtube, "
         "threads) ở chế độ QUÉT RỘNG-NÔNG — YouTube 50 post (quota 100 search/ngày), "
         "Threads 30 post (chi phí cao). Gọi đích danh nền tảng nào thì nền tảng đó "
@@ -2081,6 +2085,10 @@ SCHEMA = {
                                              "đặt N ở đây.")},
             "chi_tu_nhien": {"type": "boolean",
                              "description": "Chỉ cho che_do='trend': bỏ video quảng cáo trả tiền (mặc định true)."},
+            "so_nhac": {"type": "integer",
+                        "description": ("Chỉ cho che_do='trend': số bài trong bảng nhạc đang "
+                                        "lên của Creative Center (mặc định 10, 0 = bỏ; tự "
+                                        "cắt theo trần chi phí).")},
         },
         # Rỗng vì chế độ trend không cần từ khoá/ngày. Chế độ thường vẫn tự kiểm và báo
         # lỗi rõ ràng trong `_handle` khi thiếu.
