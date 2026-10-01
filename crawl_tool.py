@@ -38,7 +38,7 @@ from pathlib import Path
 
 import lark_client as lark
 import memory_store
-from apify_tool import _create_sheet, _first_sheet_id, _grant
+from apify_tool import _bang_an_toan, _create_sheet, _first_sheet_id, _grant
 from config import config
 from web_tool import _DA_BIET_CHAN, _PY
 
@@ -214,6 +214,7 @@ def _handle(args: dict, **kwargs) -> str:
         tok, sheet_url = _create_sheet(title)
         sid = _first_sheet_id(tok)
         col = chr(ord("A") + len(_COT) - 1)
+        rows = _bang_an_toan(rows)            # tên/mô tả sản phẩm từ web: chặn chèn công thức
         for i in range(0, len(rows), 1000):
             ch = rows[i:i + 1000]
             lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{tok}/values_batch_update",

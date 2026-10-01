@@ -51,6 +51,21 @@ def get_current_chat() -> str | None:
     return _current_chat.get()
 
 
+# "p2p" | "group" | None (không biết — vd tin Lark trực tiếp qua run.py). Việc nền dùng để
+# chỉ cho "người yêu cầu" xem/huỷ việc của mình khi đang ở chat RIÊNG (review 02/10/2026).
+_current_chat_type: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "steven_current_chat_type", default=None
+)
+
+
+def set_current_chat_type(chat_type: str | None) -> None:
+    _current_chat_type.set(chat_type)
+
+
+def get_current_chat_type() -> str | None:
+    return _current_chat_type.get()
+
+
 # ───────────────────────── storage ─────────────────────────
 def _load() -> list[dict]:
     try:

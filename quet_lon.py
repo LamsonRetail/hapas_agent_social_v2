@@ -429,15 +429,20 @@ def tran_usd_nen() -> float:
 
 
 def ngan_sach(tran_usd: float) -> tuple[float, dict | None, str]:
-    """(ngân sách việc, hạn mức tháng, ghi chú) = min(trần console, còn lại tháng − 0,30)."""
+    """(ngân sách việc, hạn mức tháng, ghi chú) = min(trần console, còn lại tháng − 0,30 −
+    phần các việc nền KHÁC đang giữ). Review 02/10/2026: hai việc tạo gần nhau cùng thấy
+    nguyên phần còn lại của tháng. `viec_nen.tao_viec` kiểm lại dưới khoá chung."""
+    import viec_nen
     hm = A._han_muc_thang()
+    cam = viec_nen.da_cam_ket()
     if not hm:
         return round(tran_usd, 2), None, ("không kiểm được ngân sách tháng Apify (bỏ qua bước "
                                           "hỏi trước) — chỉ chặn theo trần console")
-    con = max(0.0, hm["con_lai"] - _DU_TRU_THANG)
+    con = max(0.0, hm["con_lai"] - _DU_TRU_THANG - cam)
     return round(min(tran_usd, con), 2), hm, (
         f"tháng này Apify đã dùng ${hm['dung']:.2f}/${hm['tran']:g}, còn ${hm['con_lai']:.2f} "
-        f"(chừa {_DU_TRU_THANG:.2f} dự trữ)")
+        f"(chừa {_DU_TRU_THANG:.2f} dự trữ"
+        + (f", các việc nền khác đang giữ ${cam:.2f}" if cam else "") + ")")
 
 
 def _ctx_nguon(plats: list[str]) -> dict:
@@ -503,7 +508,14 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
                   "+ ước tính cho người dùng rồi KẾT THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi "
                   "lại KHÔNG có `chi_uoc_tinh`.")), lims, ""
     hp = viec_nen.han_phut()
-    kh = ke_hoach(queries, plats, lims, ts, hp, _ctx_nguon(plats))
+    ctx = _ctx_nguon(plats)
+    ma = None
+    if "youtube" in plats and not chi_uoc:
+        # Giữ chỗ NGUYÊN TỬ số trang search cần, theo mã việc định trước (review 02/10/2026:
+        # hai việc cùng lập kế hoạch thấy chung phần quota rồi cùng dùng hết).
+        ma = viec_nen.ma_moi("social_listen")
+        ctx["yt_con"] = A._youtube_giu(ma, math.ceil(lims["youtube"] / 50))
+    kh = ke_hoach(queries, plats, lims, ts, hp, ctx)
     ns, hm, cau_ns = ngan_sach(tran_nen)
     tra_tien = sum(x["uoc_usd"] for p, x in kh["nen_tang"].items() if p != "youtube")
     thieu = round(max(0.0, tra_tien - ns), 2)
@@ -534,6 +546,8 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
                   "phí). KẾT THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi lại y tham số, bỏ "
                   "`chi_uoc_tinh`.")), lims, ""
     if thieu:
+        if ma:
+            A._youtube_tra(ma)
         return tool_result(
             success=False, chua_chay=True, vuot_ngan_sach=True, **base,
             note=(f"CHƯA CHẠY, chưa tốn tiền: ước tính phần trả tiền {tra_tien:.2f} USD vượt "
@@ -541,13 +555,18 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
                   "`cat_theo_ngan_sach`=true (cắt số bài cho vừa), bớt nền tảng/bài, hoặc chỉ "
                   "YouTube (miễn phí).")), lims, ""
     if not any(x["phan"] for x in kh["nen_tang"].values()):
+        if ma:
+            A._youtube_tra(ma)
         return tool_result(success=False, chua_chay=True, **base,
                            note="Không còn lượt nào chạy được (xem `chua_phu` từng nguồn). "
                                 "Nói rõ từng nguồn vì sao."), lims, ""
     tom = viec_nen.tao_viec(
         "social_listen", ts, kh["nen_tang"],
         {"usd": kh["uoc_usd"], "phut": kh["uoc_phut"], "giay": kh["uoc_giay"]}, ns,
-        ghi_chu=[cau_ns] + (["không chỉ định nền tảng"] if not explicit else []))
+        ghi_chu=[cau_ns] + (["không chỉ định nền tảng"] if not explicit else []),
+        ma=ma, con_lai_thang=hm["con_lai"] if hm else None)
+    if ma and tom.get("ma_viec") != ma:
+        A._youtube_tra(ma)               # trùng việc cũ / bị từ chối: trả chỗ đã giữ
     return tool_result(**{**base, **tom, "success": not tom.get("tu_choi")}), lims, ""
 
 
@@ -563,7 +582,10 @@ def _so_ngan_sach(v):
             continue
         st = ph.get("trang_thai")
         if st in _KET_PHAN:
-            da += float(ph.get("usd") or 0)
+            # `usd_so` = đúng số đã trừ vào sổ lúc lượt con kết thúc (max(tiền Apify báo,
+            # giá × item)); `usd` của run có thể None/cũ vì Apify ghi tiền chậm (review
+            # 02/10/2026) -> dựng lại sổ sau khởi động thấp hơn thật, tiêu quá ngân sách.
+            da += float(ph["usd_so"] if ph.get("usd_so") is not None else ph.get("usd") or 0)
         elif st in ("dang_gui", "dang_chay") and ph.get("tran_usd"):
             giu += float(ph["tran_usd"])
         else:
@@ -595,21 +617,40 @@ def _chuan_hoa(p: str, ph: dict, items: list) -> list[tuple]:
             "threads": A._chuan_threads}[p](items)
 
 
-def _ket_phan(v, ph: dict, meta: dict, n: int, loi: Exception | None = None) -> None:
+def _ket_phan(v, ph: dict, meta: dict, n: int, loi: Exception | None = None,
+              usd_so: float | None = None) -> None:
     ma = (getattr(loi, "ma", None) or "LOI") if loi else (meta.get("ma") or "OK")
     st = ("da_huy" if ma == "DA_HUY" else "loi" if loi and not n else
           "xong" if ma == "OK" else "mot_phan")
-    v.cap_nhat_phan(ph, trang_thai=st, so_item=n, ma=ma,
-                    ly_do=A._che_token(str(loi) if loi else meta.get("ly_do") or "")[:300],
-                    usd=meta.get("usd"), giay=meta.get("giay"),
-                    run_id=meta.get("run_id") or ph.get("run_id"))
+    kw = dict(trang_thai=st, so_item=n, ma=ma,
+              ly_do=A._che_token(str(loi) if loi else meta.get("ly_do") or "")[:300],
+              usd=meta.get("usd"), giay=meta.get("giay"),
+              run_id=meta.get("run_id") or ph.get("run_id"))
+    if usd_so is not None:
+        kw["usd_so"] = usd_so
+    v.cap_nhat_phan(ph, **kw)
+
+
+def _h() -> dict:
+    return {"Authorization": f"Bearer {os.environ.get('APIFY_TOKEN', '').strip()}"}
+
+
+_CAU_KHONG_KIEM = ("không kiểm được run cũ trên Apify — KHÔNG chạy lại để khỏi trả tiền hai "
+                   "lần; phần này coi như thiếu")
+
+
+def _so_tien(p: str, ph: dict, items: list, meta: dict) -> float:
+    gia = ph.get("gia") or (_GIA_DO if ph.get("kieu") == "do" else _GIA.get(p, 0.0))
+    uoc = len(items or []) * float(gia) + (A._START_COST.get(p, 0.0) if items else 0.0)
+    return round(max(float(meta.get("usd") or 0), uoc), 4)
 
 
 def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
     """Chạy / đọc tiếp MỘT lượt con trong luồng riêng. -> số item lấy được."""
     A._NEN.set(True)
-    A._HUY.set(v.huy)
+    A._HUY.set(v.co_dung)
     if ph["actor"] == "youtube":
+        A._YT_MA.set(v.ma)
         return _mot_phan_youtube(v, ph, ts)
     actor, payload = ph["actor"], ph["payload"]
     han = v.han_mono(_chua_nen_giay(60.0 * v.d.get("han_phut", 45)))
@@ -624,7 +665,7 @@ def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
     if not cap:
         cap = ns.xin(_can(ph), _tran_lo(ph))
         if not cap:
-            v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0,
+            v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0, usd_so=0.0,
                             ly_do="hết ngân sách của việc — lượt này chưa chạy")
             return 0
     try:
@@ -633,11 +674,17 @@ def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
         else:
             run = None
             if ph.get("trang_thai") == "dang_gui" and ph.get("moc_gui"):
-                # Khởi động lại khi POST đang dở: run có thể ĐÃ được tạo. Chỉ nhận khi đọc
-                # được INPUT và trùng payload (`_tim_run_vua_tao`) — không thì chạy mới.
-                tok = os.environ.get("APIFY_TOKEN", "").strip()
-                run = A._tim_run_vua_tao(actor, payload, {"Authorization": f"Bearer {tok}"},
-                                         datetime.datetime.fromisoformat(ph["moc_gui"]))
+                # Khởi động lại khi POST đang dở: run có thể ĐÃ được tạo. Nhận khi đọc được
+                # INPUT và trùng payload. KHÔNG kiểm được (danh sách run / INPUT hỏng) thì
+                # KHÔNG POST lại (review 02/10/2026) — đánh dấu lỗi, giữ phần trần đã giữ.
+                run, kiem = A._tim_run_vua_tao_ex(
+                    actor, payload, _h(), datetime.datetime.fromisoformat(ph["moc_gui"]),
+                    nghiem=True)
+                if not run and not kiem:
+                    ns.tra(cap, cap)
+                    v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
+                                    usd_so=cap, ly_do=_CAU_KHONG_KIEM)
+                    return 0
             if run:
                 v.cap_nhat_phan(ph, run_id=run["id"], trang_thai="dang_chay",
                                 dataset_id=run.get("defaultDatasetId"), nhan_lai=True)
@@ -651,24 +698,83 @@ def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
     except A.LoiApify as e:
         loi, meta = e, e.meta
     except Exception as e:  # noqa: BLE001
+        if type(e).__name__ == "MatQuyen":
+            raise
         loi = A.LoiApify("LOI", A._che_token(f"{type(e).__name__}: {e}")[:250])
         meta = loi.meta
-    finally:
-        thuc = float(meta.get("usd") or 0)
-        gia = ph.get("gia") or (_GIA_DO if ph.get("kieu") == "do" else _GIA.get(p, 0.0))
-        uoc = len(items) * float(gia)
-        ns.tra(cap, max(thuc, uoc + (A._START_COST.get(p, 0.0) if items else 0.0)))
+    tien = _so_tien(p, ph, items, meta)
+    if loi is not None and meta.get("khong_kiem_duoc"):
+        tien = cap                       # POST mơ hồ, không kiểm được: coi như đã tiêu trần
+    ns.tra(cap, tien)
     rows = (chuan or _chuan_hoa)(p, ph, items or [])
     if rows:
         v.ghi_dong(p, rows, ph["id"])
-    _ket_phan(v, ph, meta, len(items or []), loi)
+    _ket_phan(v, ph, meta, len(items or []), loi, usd_so=tien)
     if ph["trang_thai"] == "xong" and not meta.get("doc_tiep"):
         cap_nhat_toc(actor, len(items), float(meta.get("giay") or 0))
     return len(items or [])
 
 
+def _thu_don(v, p: str, ph: dict, chuan=None) -> None:
+    """Đóng MỘT lượt con chưa kết thúc khi việc dừng (huỷ / tới hạn / khởi động lại muộn /
+    lô treo). Review 02/10/2026: trước đây chỉ ĐÁNH DẤU QUA_GIO/da_huy, run trên Apify vẫn
+    chạy và tính tiền. Nay: có run id -> huỷ-và-lấy (`_doc_tiep_run` hạn = bây giờ); đang
+    gửi dở -> tìm run vừa tạo trước (không kiểm được thì báo lỗi, KHÔNG POST); chưa gửi ->
+    đánh dấu chưa chạy. Giữ phần item và số tiền thật."""
+    st = ph.get("trang_thai")
+    if st in _KET_PHAN:
+        return
+    ma_dung = "DA_HUY" if v.da_huy() else "QUA_GIO"
+    if ph["actor"] == "youtube":
+        v.cap_nhat_phan(ph, trang_thai="da_huy" if ma_dung == "DA_HUY" else "loi",
+                        ma=ma_dung, so_item=0, usd_so=0.0,
+                        ly_do="việc dừng trước khi chạy lượt này")
+        return
+    rid = ph.get("run_id")
+    if not rid and st == "dang_gui" and ph.get("moc_gui"):
+        run, kiem = A._tim_run_vua_tao_ex(
+            ph["actor"], ph["payload"], _h(), datetime.datetime.fromisoformat(ph["moc_gui"]),
+            nghiem=True)
+        if run:
+            rid = run["id"]
+            v.cap_nhat_phan(ph, run_id=rid, nhan_lai=True)
+        elif not kiem:
+            v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
+                            usd_so=float(ph.get("tran_usd") or 0), ly_do=_CAU_KHONG_KIEM)
+            return
+    if not rid:
+        v.cap_nhat_phan(ph, trang_thai="da_huy" if ma_dung == "DA_HUY" else "loi",
+                        ma=ma_dung, so_item=0, usd_so=0.0,
+                        ly_do=("huỷ trước khi chạy lượt này" if ma_dung == "DA_HUY"
+                               else "không kịp hạn chót — lượt này chưa chạy"))
+        return
+    try:
+        items, meta = A._doc_tiep_run(rid, int(ph["limit"]), A._dong_ho(), True, ph["actor"])
+        loi = None
+    except A.LoiApify as e:
+        items, meta, loi = [], e.meta, e
+    rows = (chuan or _chuan_hoa)(p, ph, items)
+    if rows:
+        v.ghi_dong(p, rows, ph["id"])
+    _ket_phan(v, ph, meta, len(items), loi, usd_so=_so_tien(p, ph, items, meta))
+    if ph["trang_thai"] == "xong" and meta.get("da_huy"):
+        v.cap_nhat_phan(ph, trang_thai="mot_phan")
+
+
+def _thu_don_het(v, chuan=None) -> None:
+    """Đóng MỌI lượt con chưa kết thúc (ngữ cảnh riêng: `_NEN` + cờ dừng của việc)."""
+    def chay():
+        A._NEN.set(True)
+        A._HUY.set(v.co_dung)
+        for p, ph in list(v.cac_phan()):
+            if ph.get("trang_thai") not in _KET_PHAN:
+                _thu_don(v, p, ph, chuan)
+    contextvars.copy_context().run(chay)
+
+
 def _mot_phan_youtube(v, ph: dict, ts: dict) -> int:
-    con = A._youtube_con_trang(nen=True)
+    # Trang đã GIỮ CHỖ cho việc này lúc lập kế hoạch (`_youtube_giu`) + phần chung còn lại.
+    con = A._youtube_con_trang(nen=True, ma=v.ma)
     k = min(int(ph["so_trang"]), con)
     if v.da_huy():
         v.cap_nhat_phan(ph, trang_thai="da_huy", ma="DA_HUY", so_item=0)
@@ -689,7 +795,7 @@ def _mot_phan_youtube(v, ph: dict, ts: dict) -> int:
     if rows:
         v.ghi_dong("youtube", rows, ph["id"])
     v.cap_nhat_phan(ph, trang_thai="mot_phan" if k < ph["so_trang"] else "xong",
-                    so_item=len(rows), ma="OK", trang_dung=so_trang,
+                    so_item=len(rows), ma="OK", trang_dung=so_trang, usd_so=0.0,
                     ly_do=(f"chỉ được {k}/{ph['so_trang']} trang (quota)"
                            if k < ph["so_trang"] else ""))
     return len(rows)
@@ -735,9 +841,10 @@ def _chay_cac_phan(v, ns, ts: dict, so_bo, chuan=None) -> None:
                 break
             xong, _ = wait(dang, timeout=max(5.0, v.con_giay() + 60), return_when=FIRST_COMPLETED)
             if not xong:
-                for f, (p, ph) in dang.items():
-                    v.cap_nhat_phan(ph, trang_thai="loi", ma="QUA_GIO",
-                                    ly_do="lượt con treo quá hạn chót")
+                # Lô treo quá hạn: bật cờ dừng (vòng hỏi trạng thái của nó tự huỷ run trong
+                # ~15s), chờ thêm chút rồi tự đóng những lượt còn dở (`_thu_don_het` dưới).
+                v.dung.set()
+                wait(dang, timeout=30)
                 break
             for f in xong:
                 p, ph = dang.pop(f)
@@ -752,44 +859,15 @@ def _chay_cac_phan(v, ns, ts: dict, so_bo, chuan=None) -> None:
                     so_bo(p)
     finally:
         ex.shutdown(wait=False, cancel_futures=True)
-    for p, ph in viec:
-        if v.da_huy():
-            v.cap_nhat_phan(ph, trang_thai="da_huy", ma="DA_HUY", so_item=0,
-                            ly_do="huỷ trước khi chạy lượt này")
-        else:
-            v.cap_nhat_phan(ph, trang_thai="loi", ma="QUA_GIO", so_item=0,
-                            ly_do="không kịp hạn chót — lượt này chưa chạy")
+    # Lượt chưa chạy / đang chạy dở (huỷ, gần hạn, lô treo): HUỶ run trên Apify và giữ phần
+    # đã có — không chỉ đánh dấu (review 02/10/2026).
+    _thu_don_het(v, chuan)
 
 
 def _dong_phan_dang_chay(v, ts: dict, chuan=None) -> None:
     """Khởi động lại SAU hạn chót: huỷ run còn sống, giữ phần đã có, không chạy gì mới."""
-    # Ngữ cảnh RIÊNG: đặt `_NEN` thẳng vào luồng điều phối là mọi lượt sau trên luồng đó
-    # (kể cả việc khác) đều bị coi là việc nền.
-    contextvars.copy_context().run(_dong_phan_dang_chay_, v, ts, chuan)
-
-
-def _dong_phan_dang_chay_(v, ts: dict, chuan=None) -> None:
-    A._NEN.set(True)
-    for p, ph in list(v.cac_phan()):
-        st = ph.get("trang_thai")
-        if st in _KET_PHAN:
-            continue
-        if ph["actor"] != "youtube" and ph.get("run_id"):
-            try:
-                items, meta = A._doc_tiep_run(ph["run_id"], int(ph["limit"]), A._dong_ho(),
-                                              True, ph["actor"])
-                loi = None
-            except A.LoiApify as e:
-                items, meta, loi = [], e.meta, e
-            rows = (chuan or _chuan_hoa)(p, ph, items)
-            if rows:
-                v.ghi_dong(p, rows, ph["id"])
-            _ket_phan(v, ph, meta, len(items), loi)
-            if ph["trang_thai"] == "xong":
-                v.cap_nhat_phan(ph, trang_thai="mot_phan")
-        else:
-            v.cap_nhat_phan(ph, trang_thai="loi", ma="QUA_GIO", so_item=0,
-                            ly_do="bot khởi động lại sau hạn chót — lượt này không chạy")
+    v.dung.set()
+    _thu_don_het(v, chuan)
 
 
 # ───────────────────────────── lọc + phân xử theo tầng ─────────────────────────────
@@ -979,15 +1057,19 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
     thu = {p: i for i, p in enumerate(plats)}
     cho_xet.sort(key=lambda x: (thu[x[0]["platform"]], -int(x[0].get("views") or 0),
                                 str(x[0].get("link") or "")))
-    phan_xu, tt = ({}, {"trang_thai": "bỏ qua: " + ("đã huỷ" if v.da_huy() else
-                                                     "quá hạn chót"), "luot_ai": 0})
-    if cho_ai:
-        cache = _cache_doc(v)
-        # Hạn AI tính bằng time.monotonic (đồng hồ `_phan_xu_ai` dùng), chừa 4 phút sau hạn
-        # chót của việc cho AI + ghi sheet — vượt một chút còn hơn bỏ AI cả việc.
-        han_ai = time.monotonic() + max(0.0, v.con_giay()) + 240
-        phan_xu, tt = _phan_xu_tang(cho_xet, ts, han_ai, log, cache=cache, ma=v.ma)
-        _cache_ghi(v, tt.pop("_moi", {}))
+    # Phán đã lưu (`phan_xu.jsonl`) LUÔN được áp, kể cả khi lần này không được gọi AI
+    # (huỷ / quá hạn / khởi động lại): review 02/10/2026 — bỏ cache thì danh sách kết quả
+    # khác lần trước, sheet ghi tiếp thành nửa cũ nửa mới.
+    cache = _cache_doc(v)
+    # Hạn AI tính bằng time.monotonic (đồng hồ `_phan_xu_ai` dùng), chừa 4 phút sau hạn
+    # chót của việc cho AI + ghi sheet — vượt một chút còn hơn bỏ AI cả việc.
+    han_ai = time.monotonic() + max(0.0, v.con_giay()) + 240
+    phan_xu, tt = _phan_xu_tang(cho_xet, ts, han_ai, log, cache=cache, ma=v.ma,
+                                toi_da_luot=None if cho_ai else 0)
+    _cache_ghi(v, tt.pop("_moi", {}))
+    if not cho_ai:
+        tt["trang_thai"] = ("chỉ dùng phán AI đã lưu (" + ("đã huỷ" if v.da_huy() else
+                                                           "quá hạn chót") + ")")
     hits: list = []
     dem = {"Luật": [0, 0], "AI": [0, 0], "AI (theo kênh)": [0, 0]}
     chuyen: dict = {}
@@ -1085,10 +1167,12 @@ def _ghi_so_bo(v, p: str, ts: dict, d_from, d_to) -> None:
                 continue
             da.add(k)
             d["platform"] = p
-            rows.append(_dong(d, dt, kw, 500) + ["", "chưa lọc", "sơ bộ"])
+            rows.append(_dong(d, dt, kw, 500) + ["chưa lọc", "sơ bộ"])
         rows.sort(key=lambda r: -int(r[4] or 0))
         s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows, tu_dau=True)
     except Exception as e:  # noqa: BLE001
+        if type(e).__name__ == "MatQuyen":
+            raise
         with v._khoa:
             v.d.setdefault("ghi_chu", []).append(
                 f"ghi sheet sơ bộ {p} lỗi: {A._che_token(e)[:150]}")
@@ -1157,6 +1241,11 @@ def _cau_phan_xu(px: dict) -> str:
     mk = px.get("mau_kiem")
     if mk and mk.get("xet"):
         s += f"; mẫu kiểm {mk['xet']} bài luật đã giữ: AI đồng ý {mk['ai_giu']}, loại {mk['ai_loai']}"
+    if px.get("loai_tru"):
+        s += f", từ loại trừ {px['loai_tru']}"
+    ch = sum((px.get("chuyen_thi_truong") or {}).values())
+    if ch:
+        s += f", chuyển sang Bị loại vì thị trường {ch}"
     st = str(px.get("trang_thai") or "")
     if st and st != "đã chạy":
         s += f" — AI {st}"
@@ -1214,6 +1303,9 @@ def chay_viec(v) -> tuple[str, str]:
             ns = _so_ngan_sach(v)
             _chay_cac_phan(v, ns, ts, lambda p: _ghi_so_bo(v, p, ts, d_from, d_to))
         v.dat("dang_loc")
+    # Trước khi lọc + chốt tiền: không lượt con nào còn sống trên Apify (review 02/10/2026).
+    v.dung.set()
+    _thu_don_het(v)
     cho_ai = not v.da_huy() and v.con_giay() > -120
     ket = _loc(v, ts, d_from, d_to, cho_ai, log)
     with v._khoa:
@@ -1232,6 +1324,8 @@ def chay_viec(v) -> tuple[str, str]:
         try:
             url = _ghi_cuoi(v, ts, ket, cp, trang_thai)
         except Exception as e:  # noqa: BLE001
+            if type(e).__name__ == "MatQuyen":
+                raise
             ly_do.append(f"ghi sheet lỗi: {A._che_token(e)[:150]}")
             url = (v.d.get("sheet") or {}).get("url") or ""
     if log:

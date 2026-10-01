@@ -768,6 +768,7 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     # tell the remember/reminder tools the current context
     memory_store.set_current_sender(sender_open_id)
     scheduler.set_current_chat(chat_id)
+    scheduler.set_current_chat_type((kenh or {}).get("chat_type"))
 
     # Lệnh cứng: bóc `/search`, `/help`… ra khỏi câu hỏi. Câu KHÔNG bắt đầu bằng `/`
     # thì `xu_ly` trả về nguyên văn và mọi thứ dưới đây chạy y như trước.

@@ -9,6 +9,8 @@ sau MỖI khối — khởi động lại thì ghi tiếp từ đó, không nhâ
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import time
 
@@ -38,12 +40,16 @@ def _goi(method: str, path: str, **kw) -> dict:
 
 class SoSheet:
     """Trạng thái sheet trong sổ việc: v.d["sheet"] = {token, url, granted, giai_doan,
-    tabs: {tên: {sheet_id, da_ghi, so_dong_cu, luoi}}}."""
+    tabs: {tên: {sheet_id, da_ghi, so_dong_cu, luoi, hash, rong}}}.
+
+    MỌI thay đổi `v.d` đi dưới `v._khoa` (review 02/10/2026: luồng khác đang json.dumps sổ
+    việc mà dict đổi cỡ giữa chừng là RuntimeError, mất lần lưu)."""
 
     def __init__(self, v):
         self.v = v
-        self.s = v.d.setdefault("sheet", {})
-        self.s.setdefault("tabs", {})
+        with v._khoa:
+            self.s = v.d.setdefault("sheet", {})
+            self.s.setdefault("tabs", {})
 
     @property
     def co(self) -> bool:
@@ -83,7 +89,8 @@ class SoSheet:
             print(f"[sheet_lon] đổi tên tab đầu lỗi: {A._che_token(e)[:120]}")
         luoi = self._luoi()
         if sid in luoi:
-            self.s["tabs"][tab_dau]["luoi"] = luoi[sid]
+            with self.v._khoa:
+                self.s["tabs"][tab_dau]["luoi"] = luoi[sid]
         granted = A._grant(tok, nguoi) if str(nguoi or "").startswith("ou_") else False
         with self.v._khoa:
             self.s["granted"] = granted
@@ -107,10 +114,15 @@ class SoSheet:
             _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{self.s['token']}/dimension_range",
                  body={"dimension": {"sheetId": t["sheet_id"], "majorDimension": "ROWS",
                                      "length": n}})
-            t["luoi"] += n
-            self._luu()
+            with self.v._khoa:
+                t["luoi"] += n
+                self._luu()
 
     def _ghi_khoi(self, t: dict, dong_dau: int, khoi: list[list]) -> None:
+        kiem = getattr(self.v, "kiem_quyen", None)
+        if kiem:
+            kiem()                          # tiến trình đã mất quyền chủ thì không ghi sheet
+        khoi = A._bang_an_toan(khoi)        # chữ người lạ viết: chặn chèn công thức
         rong = A._cot(max((len(r) for r in khoi), default=1))
         cuoi = dong_dau + len(khoi) - 1
         self._them_dong(t, cuoi)
@@ -129,10 +141,23 @@ class SoSheet:
             self._luu()
 
     def ghi_tab(self, ten: str, bang: list[list], tu_dau: bool = False) -> int:
-        """Ghi `bang` (dòng 0 = tiêu đề) vào tab, tiếp từ `da_ghi`. -> số dòng đã có."""
+        """Ghi `bang` (dòng 0 = tiêu đề) vào tab, tiếp từ `da_ghi`. -> số dòng đã có.
+
+        Ghi tiếp chỉ khi bảng Y HỆT lần ghi dở trước (băm `hash`): khởi động lại mà danh sách
+        kết quả đã khác (vd lần trước có AI, lần này không) thì nửa trên của tab thuộc danh
+        sách cũ, nửa dưới thuộc danh sách mới — review 02/10/2026. Bảng khác -> ghi lại từ
+        dòng 1. Mọi dòng đệm tới cột RỘNG NHẤT từng ghi (`rong`) để cột thừa của bản cũ
+        (bản sơ bộ) bị xoá chứ không nằm lại."""
         t = self.dam_bao_tab(ten)
-        if tu_dau:
-            t["da_ghi"] = 0
+        rong = max(max((len(r) for r in bang), default=1), int(t.get("rong") or 0))
+        bang = [list(r) + [""] * (rong - len(r)) for r in bang]
+        h = hashlib.sha1(json.dumps(bang, ensure_ascii=False, default=str)
+                         .encode("utf-8")).hexdigest()
+        with self.v._khoa:
+            if tu_dau or t.get("hash") != h:
+                t["da_ghi"] = 0
+            t["hash"], t["rong"] = h, rong
+            self._luu()
         i = int(t.get("da_ghi") or 0)
         while i < len(bang):
             khoi = bang[i:i + KHOI]
@@ -147,7 +172,6 @@ class SoSheet:
         # Giai đoạn trước (bản sơ bộ) ghi NHIỀU dòng hơn thì xoá phần thừa, kẻo bài đã bị
         # AI loại vẫn nằm dưới đáy tab như bài được giữ.
         thua = int(t.get("so_dong_cu") or 0) - len(bang)
-        rong = max((len(r) for r in bang[:1]), default=1)
         j = len(bang)
         while thua > 0:
             n = min(KHOI, thua)

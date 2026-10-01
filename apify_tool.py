@@ -482,21 +482,32 @@ _TRUONG_ACTOR = {
 }
 
 
+def _rong(it) -> bool:
+    return it is None or (isinstance(it, dict) and not it)
+
+
 def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None:
     """Đọc dataset theo TRANG (offset/limit=1000) tới đủ `limit`.
 
     Một GET `limit=10000` trả về cả chục MB trong một phản hồi, hỏng giữa chừng là mất cả.
     Trang nào đọc hỏng (2 lần) thì dừng: có trang trước thì trả phần đã đọc, chưa có gì
-    thì None như cũ."""
+    thì None như cũ.
+
+    KHÔNG dùng `clean=1` (review 02/10/2026): `clean` = skipHidden + skipEmpty, mà
+    skipEmpty làm trang trả ÍT item hơn số xin dù dataset còn — "trang ngắn = hết" thì cắt
+    cụt im lặng, còn lùi offset theo số item nhận được thì đọc trùng. Nay chỉ skipHidden:
+    offset đi đúng theo cỡ trang đã xin (mỗi vị trí là một item), item rỗng bỏ tại chỗ,
+    trang ngắn hơn số xin mới là hết dataset."""
     ds = run.get("defaultDatasetId")
     if not ds:
         return None
     out: list = []
+    vi_tri = 0
     while not limit or len(out) < limit:
         n = min(_TRANG_ITEM, limit - len(out)) if limit else _TRANG_ITEM
-        q = {"clean": 1, "limit": n, "format": "json"}
-        if out:
-            q["offset"] = len(out)
+        q = {"skipHidden": 1, "limit": n, "format": "json"}
+        if vi_tri:
+            q["offset"] = vi_tri
         if fields:
             q["fields"] = ",".join(fields)
         trang = None
@@ -512,10 +523,11 @@ def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None
                 pass
         if trang is None:
             return out if out else None
-        out.extend(trang)
+        vi_tri += n
+        out.extend(it for it in trang if not _rong(it))
         if len(trang) < n:
             break
-    return out
+    return out[:limit] if limit else out
 
 
 def _huy_run(run_id: str, headers: dict) -> bool:
@@ -568,7 +580,7 @@ def _run_actor(actor: str, payload: dict, limit: int, mem: int | None = None,
 
     huy = _HUY.get()
     if huy is not None and huy.is_set():
-        raise LoiApify("DA_HUY", "Việc đã bị huỷ trước khi khởi chạy lượt này.", meta)
+        raise LoiApify(_ma_dung(huy), "Việc đã dừng trước khi khởi chạy lượt này.", meta)
     hm = _han_muc_thang()
     if hm and hm["con_lai"] <= 0.01:
         raise LoiApify("HET_TIEN_THANG", _cau_het_tien(hm), meta)
@@ -585,14 +597,21 @@ class _giu_cho:
     chỉ lấy `_CHO_APIFY`. Không chờ tới lúc chẳng còn giờ chạy: thà báo nghẽn ngay còn hơn
     khởi chạy một run sắp bị huỷ (vẫn mất phí start)."""
 
-    def __init__(self, con, meta: dict):
+    def __init__(self, con, meta: dict, bat_buoc: bool = True):
         self.con, self.meta, self.giu = con, meta, []
+        # bat_buoc=False (đọc tiếp / huỷ một run ĐÃ có): chỉ giữ chỗ nếu có sẵn, không chờ,
+        # không báo nghẽn — run đó đang tính tiền, phải huỷ/đọc được ngay (review 02/10).
+        self.bat_buoc = bat_buoc
 
     def __enter__(self):
         cac = ([(_CHO_NEN, f"Việc nền đang dùng đủ {_NEN_SLOT} chỗ Apify dành cho nền")]
                if _NEN.get() else []) + [
             (_CHO_APIFY, f"Bot đang chạy đủ {_DONG_THOI_TOI_DA} lượt Apify cùng lúc")]
         for sem, cau in cac:
+            if not self.bat_buoc:
+                if sem.acquire(timeout=0):
+                    self.giu.append(sem)
+                continue
             if not sem.acquire(timeout=max(0.0, self.con() - 15)):
                 self.__exit__()
                 raise LoiApify("NGHEN_DONG_THOI", f"{cau}, chờ không kịp chỗ trước hạn.",
@@ -620,23 +639,49 @@ def _ghi_run_cua_minh(run_id: str) -> None:
             _RUN_CUA_MINH.pop(next(iter(_RUN_CUA_MINH)))
 
 
+_TIM_TOI_DA = 50          # run mới nhất của actor được xét khi tìm run vừa tạo
+_TIM_TRANG = 25
+
+
 def _tim_run_vua_tao(actor: str, payload: dict, h: dict,
                      moc_gui: datetime.datetime) -> dict | None:
     """Sau một POST mơ hồ (5xx, đứt kết nối, hết giờ đọc): run có được tạo không?
 
     Rà 01/10/2026: bản trước POST lại ngay khi gặp 5xx/ConnectionError — nếu Apify đã
-    tạo run trước khi lỗi thì chạy TRÙNG, trả tiền hai lần. Nay hỏi miễn phí 3 run mới
-    nhất của actor; run bắt đầu từ lúc gửi (trừ `_LECH_GIO_RUN` giây lệch đồng hồ), chưa
-    luồng nào nhận, và INPUT trùng payload (đọc được thì so) là của mình. Hỏi hỏng thì
-    trả None — bên gọi thử lại MỘT lần như cũ."""
-    try:
-        r = requests.get(f"{_APIFY_BASE}/acts/{actor}/runs",
-                         params={"desc": 1, "limit": 3}, headers=h, timeout=8)
-        ds = ((r.json() or {}).get("data") or {}).get("items") or [] \
-            if r.status_code < 400 else []
-    except (requests.RequestException, ValueError, AttributeError):
-        return None
+    tạo run trước khi lỗi thì chạy TRÙNG, trả tiền hai lần. Hỏi miễn phí các run mới
+    nhất của actor (`_tim_run_vua_tao_ex`). Không thấy / hỏi hỏng thì trả None — lượt TẠI
+    CHỖ thử lại MỘT lần như cũ; việc nền dùng thẳng `_ex` để không POST khi hỏi hỏng."""
+    return _tim_run_vua_tao_ex(actor, payload, h, moc_gui)[0]
+
+
+def _tim_run_vua_tao_ex(actor: str, payload: dict, h: dict, moc_gui: datetime.datetime,
+                        nghiem: bool = False) -> tuple[dict | None, bool]:
+    """-> (run của mình | None, đã KIỂM ĐƯỢC hết chưa).
+
+    Xét tới `_TIM_TOI_DA` (50) run mới nhất, phân trang desc tới khi gặp run cũ hơn mốc gửi
+    (review 02/10/2026: chỉ xét 3 run mới nhất thì việc nền chạy song song + fan-out đẩy run
+    mồ côi ra khỏi cửa sổ -> POST mới, trả tiền hai lần). Run bắt đầu từ lúc gửi (trừ
+    `_LECH_GIO_RUN` giây lệch đồng hồ), chưa luồng nào nhận, INPUT trùng payload là của mình.
+    `kiem_duoc`=False khi danh sách run hỏi hỏng, hoặc (`nghiem`) có run ứng viên mà không
+    đọc được INPUT — bên gọi của việc nền khi đó KHÔNG được POST lại."""
     moc = moc_gui - datetime.timedelta(seconds=_LECH_GIO_RUN)
+    ds: list = []
+    for off in range(0, _TIM_TOI_DA, _TIM_TRANG):
+        try:
+            r = requests.get(f"{_APIFY_BASE}/acts/{actor}/runs",
+                             params={"desc": 1, "limit": _TIM_TRANG, "offset": off},
+                             headers=h, timeout=8)
+            if r.status_code >= 400:
+                return None, False
+            trang = ((r.json() or {}).get("data") or {}).get("items") or []
+        except (requests.RequestException, ValueError, AttributeError):
+            return None, False
+        trang = [x for x in trang if isinstance(x, dict)]
+        ds.extend(trang)
+        bd = [_to_vn(x.get("startedAt")) for x in trang]
+        if len(trang) < _TIM_TRANG or any(t and t < moc for t in bd):
+            break
+    kiem_duoc = True
     for run in ds:
         if not isinstance(run, dict) or not run.get("id"):
             continue
@@ -652,20 +697,25 @@ def _tim_run_vua_tao(actor: str, payload: dict, h: dict,
         # 01/10/2026).
         kv = run.get("defaultKeyValueStoreId")
         if not kv:
+            kiem_duoc = kiem_duoc and not nghiem
             continue
         try:
             ri = requests.get(f"{_APIFY_BASE}/key-value-stores/{kv}/records/INPUT",
                               headers=h, timeout=8)
-            if ri.status_code >= 400 or ri.json() != payload:
-                continue                          # của lượt khác, hoặc không kiểm được
+            if ri.status_code >= 400:
+                kiem_duoc = kiem_duoc and not nghiem      # không kiểm được run này
+                continue
+            if ri.json() != payload:
+                continue                          # của lượt khác
         except (requests.RequestException, ValueError, AttributeError):
+            kiem_duoc = kiem_duoc and not nghiem
             continue
         with _RUN_KHOA:                           # nhận NGUYÊN TỬ: hai luồng không cùng nhận
             if run["id"] in _RUN_CUA_MINH:
                 continue
             _RUN_CUA_MINH[run["id"]] = _dong_ho()
-        return run
-    return None
+        return run, True
+    return None, kiem_duoc
 
 
 def _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan):
@@ -675,7 +725,12 @@ def _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan):
     if mem:
         q["memory"] = mem
     data, loi = None, None
+    huy = _HUY.get()
     for lan in (1, 2):
+        # Kiểm lệnh huỷ NGAY TRƯỚC mỗi POST (review 02/10/2026): huỷ trong lúc chờ chỗ chạy
+        # hoặc lúc ngủ thử lại thì không được khởi chạy run mới nữa.
+        if huy is not None and huy.is_set():
+            raise LoiApify(_ma_dung(huy), "Việc đã dừng trước khi khởi chạy lượt này.", meta)
         # Trần thời gian PHÍA APIFY: lệnh huỷ của mình mà hỏng (mất mạng) thì run vẫn tự
         # chết ngay sau hạn, không chạy tới 3600s mặc định (đo 01/10/2026:
         # options.timeoutSecs=3600). Tính lại MỖI lần POST: sau giấc ngủ thử lại thì hạn
@@ -715,11 +770,15 @@ def _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan):
             # thể run đã tạo xong rồi máy chủ mới lỗi.
             mo_ho = r.status_code >= 500
         if mo_ho:
-            run = _tim_run_vua_tao(actor, payload, h, moc_gui)
+            run, kiem_duoc = _tim_run_vua_tao_ex(actor, payload, h, moc_gui, nghiem=_NEN.get())
             if run:
                 data = {"data": run}
                 meta["nhan_lai_run"] = True
                 break
+            if not kiem_duoc and _NEN.get():
+                # Việc nền: không kiểm được run cũ thì KHÔNG POST lại (trả tiền hai lần).
+                loi.meta["khong_kiem_duoc"] = True
+                raise loi
         if not thu_lai or lan == 2 or con() < 25:
             raise loi
         _ngu(8 if loi.ma == "NGHEN_DONG_THOI" else 3)
@@ -739,23 +798,46 @@ def _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan):
     return _cho_run(run, h, token, limit, meta, t0, con, mot_phan)
 
 
-def _bao_co_run(run: dict, meta: dict) -> None:
+def _ma_dung(co) -> str:
+    """Mã của lệnh dừng: "DA_HUY" (người dùng huỷ) hoặc mã cờ tự khai (vd QUA_GIO khi việc
+    nền tự đóng lượt con ở hạn chót)."""
+    try:
+        return str(co.ma()) if hasattr(co, "ma") else "DA_HUY"
+    except Exception:  # noqa: BLE001
+        return "DA_HUY"
+
+
+def _bao_co_run(run: dict, meta: dict) -> bool:
+    """Báo run id cho bên gọi (việc nền ghi xuống sổ). -> False nếu ghi KHÔNG được sau 3
+    lần — khi đó bên gọi phải HUỶ run: run không ai biết id là run mồ côi tính tiền."""
     fn = _KHI_CO_RUN.get()
     if fn is None:
-        return
+        return True
     meta["dataset_id"] = run.get("defaultDatasetId")
-    try:
-        fn(run, meta)
-    except Exception as e:  # noqa: BLE001 — ghi sổ hỏng không được giết run đang chạy
-        print(f"[apify] ghi run id hỏng (bỏ qua): {type(e).__name__}: {_che_token(e)}")
+    for lan in range(3):
+        try:
+            fn(run, meta)
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"[apify] LỖI ghi run id {run.get('id')} (lần {lan + 1}/3): "
+                  f"{type(e).__name__}: {_che_token(e)}", flush=True)
+            if type(e).__name__ == "MatQuyen":
+                break
+            _ngu(0.5)
+    return False
 
 
 def _cho_run(run, h, token, limit, meta, t0, con, mot_phan):
     """Chờ run tới khi kết thúc / quá hạn / bị huỷ, rồi lấy item. Dùng chung cho run vừa
     POST (`_chay_run`) và run đọc tiếp sau khi khởi động lại (`_doc_tiep_run`)."""
-    _bao_co_run(run, meta)
     huy = _HUY.get()
     da_huy_viec = False
+    if not _bao_co_run(run, meta):
+        if run.get("status") not in _KET_THUC:
+            meta["da_huy"] = _huy_run(run["id"], h)
+        meta["run_id_chua_luu"] = run["id"]
+        raise LoiApify("LOI", f"Không ghi được run id {run['id']} vào sổ việc — đã huỷ run "
+                              f"để khỏi chạy mồ côi.", meta)
     while run.get("status") not in _KET_THUC:
         if huy is not None and huy.is_set():
             da_huy_viec = True
@@ -789,12 +871,14 @@ def _cho_run(run, h, token, limit, meta, t0, con, mot_phan):
                 usd=run.get("usageTotalUsd"))
     if da_huy_viec:
         n = len(items or [])
-        ly_do = ("Người dùng huỷ việc — đã dừng run trên Apify"
+        ma = _ma_dung(huy)
+        ly_do = (("Người dùng huỷ việc" if ma == "DA_HUY" else "Việc nền tới hạn chót")
+                 + " — đã dừng run trên Apify"
                  + (f", giữ {n} bài lấy được tới lúc đó." if n else ", chưa có bài nào."))
-        meta.update(ma="DA_HUY", ly_do=ly_do)
+        meta.update(ma=ma, ly_do=ly_do)
         if mot_phan:
             return items or [], meta
-        raise LoiApify("DA_HUY", ly_do, meta)
+        raise LoiApify(ma, ly_do, meta)
     if qua_gio or st == "TIMED-OUT":
         n = len(items or [])
         ly_do = (f"Quá giờ sau {meta['giay']:.0f}s — đã dừng run trên Apify"
@@ -899,7 +983,7 @@ def _doc_tiep_run(run_id: str, limit: int, deadline: float | None = None,
     if not isinstance(run, dict) or not run.get("id"):
         raise LoiApify("LOI", f"Không đọc lại được run {run_id} trên Apify.", meta)
     _ghi_run_cua_minh(run_id)
-    with _giu_cho(lambda: max(30.0, con()), meta):
+    with _giu_cho(con, meta, bat_buoc=False):
         try:
             return _cho_run(run, h, token, limit, meta, t0, con, mot_phan)
         except LoiApify as e:
@@ -914,23 +998,26 @@ def _chi_phi_cac_run(run_ids: list[str]) -> dict:
     song song với câu hỏi của người khác, cộng theo mốc giờ là tính nhầm tiền của họ vào
     việc này."""
     token = os.environ.get("APIFY_TOKEN", "").strip()
-    tong, so, chua = 0.0, 0, 0
+    tong, so, chua, song = 0.0, 0, 0, []
     for rid in dict.fromkeys(x for x in run_ids if x):
-        u = None
+        u = d = None
         if token:
             try:
                 r = requests.get(f"{_APIFY_BASE}/actor-runs/{rid}", timeout=10,
                                  headers={"Authorization": f"Bearer {token}"})
                 if r.status_code < 400:
-                    u = ((r.json() or {}).get("data") or {}).get("usageTotalUsd")
+                    d = (r.json() or {}).get("data") or {}
+                    u = d.get("usageTotalUsd")
             except (requests.RequestException, ValueError, AttributeError):
                 u = None
+        if d and d.get("status") not in _KET_THUC:
+            song.append(rid)
         if u is None:
             chua += 1
             continue
         tong += float(u or 0)
         so += 1
-    return {"usd": round(tong, 4), "so_run": so, "chua_doc": chua}
+    return {"usd": round(tong, 4), "so_run": so, "chua_doc": chua, "con_song": song}
 
 
 def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
@@ -1038,36 +1125,88 @@ def _youtube_so():
     return _thu_muc_nen() / f"youtube-{_ngay_pt()}-PT.json"
 
 
+def _youtube_doc() -> dict:
+    """{"trang": đã dùng, "giu": {mã việc: trang đã giữ chỗ}} của hôm nay (giờ PT)."""
+    try:
+        d = json.loads(_youtube_so().read_text(encoding="utf-8"))
+        return {"trang": int(d.get("trang") or 0),
+                "giu": {str(k): int(v) for k, v in (d.get("giu") or {}).items() if int(v) > 0}}
+    except Exception:  # noqa: BLE001
+        return {"trang": 0, "giu": {}}
+
+
+def _youtube_ghi(d: dict) -> None:
+    f = _youtube_so()
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d), encoding="utf-8")
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
 def _youtube_da_dung() -> int:
     """Số trang `search.list` bot đã dùng hôm nay (giờ PT) — cả lượt tại chỗ lẫn nền."""
-    try:
-        return int(json.loads(_youtube_so().read_text(encoding="utf-8")).get("trang") or 0)
-    except Exception:  # noqa: BLE001
-        return 0
+    return _youtube_doc()["trang"]
+
+
+# Mã việc nền đang dùng YouTube trong ngữ cảnh hiện tại: trang search của nó trừ vào phần
+# đã giữ chỗ (`_youtube_giu`), không trừ phần chung.
+_YT_MA: contextvars.ContextVar = contextvars.ContextVar("apify_yt_ma", default=None)
 
 
 def _youtube_dem(n: int = 1) -> int:
     with _YT_KHOA:
-        f = _youtube_so()
-        da = _youtube_da_dung() + n
-        try:
-            f.parent.mkdir(parents=True, exist_ok=True)
-            tmp = f.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"trang": da}), encoding="utf-8")
-            os.replace(tmp, f)
-        except OSError:
-            pass
-        return da
+        d = _youtube_doc()
+        d["trang"] += n
+        ma = _YT_MA.get()
+        if ma and d["giu"].get(ma):
+            d["giu"][ma] = max(0, d["giu"][ma] - n)
+        _youtube_ghi(d)
+        return d["trang"]
 
 
-def _youtube_con_trang(nen: bool = True) -> int:
-    """Trang search còn dùng được hôm nay. Quota mặc định 100 lượt search/ngày
-    (YOUTUBE_SEARCH_NGAY); việc nền chỉ được tới YOUTUBE_SEARCH_NGAY−20 (mặc định 80) để
-    câu hỏi tại chỗ trong ngày vẫn còn quota. Bộ đếm dùng chung cho cả hai đường."""
+def _youtube_tran(nen: bool) -> int:
     tran = _so_env("YOUTUBE_SEARCH_NGAY", 100, 1, 100000)
     if nen:
         tran = _so_env("YOUTUBE_SEARCH_NEN", max(0, tran - 20), 0, tran)
-    return max(0, tran - _youtube_da_dung())
+    return tran
+
+
+def _youtube_con_trang(nen: bool = True, ma: str | None = None) -> int:
+    """Trang search còn dùng được hôm nay. Quota mặc định 100 lượt search/ngày
+    (YOUTUBE_SEARCH_NGAY); việc nền chỉ được tới YOUTUBE_SEARCH_NGAY−20 (mặc định 80) để
+    câu hỏi tại chỗ trong ngày vẫn còn quota. Bộ đếm dùng chung cho cả hai đường; trang các
+    việc nền KHÁC đã giữ chỗ bị trừ ra, trang của chính việc `ma` thì cộng lại."""
+    d = _youtube_doc()
+    khac = sum(v for k, v in d["giu"].items() if k != ma)
+    return max(0, _youtube_tran(nen) - d["trang"] - khac)
+
+
+def _youtube_giu(ma: str, n: int) -> int:
+    """Giữ chỗ NGUYÊN TỬ tới `n` trang cho việc `ma` (review 02/10/2026: hai việc cùng lập
+    kế hoạch thấy chung một phần quota rồi cùng dùng hết). -> số trang giữ được."""
+    with _YT_KHOA:
+        d = _youtube_doc()
+        khac = sum(v for k, v in d["giu"].items() if k != ma)
+        duoc = max(0, min(int(n), _youtube_tran(True) - d["trang"] - khac))
+        if duoc:
+            d["giu"][ma] = duoc
+        else:
+            d["giu"].pop(ma, None)
+        _youtube_ghi(d)
+        return duoc
+
+
+def _youtube_tra(ma: str) -> int:
+    """Trả phần giữ chỗ chưa dùng của việc `ma` (khi việc kết thúc / không tạo được)."""
+    with _YT_KHOA:
+        d = _youtube_doc()
+        con = d["giu"].pop(ma, 0)
+        if con:
+            _youtube_ghi(d)
+        return con
 
 
 def _youtube_get(resource: str, params: dict) -> dict:
@@ -2228,10 +2367,38 @@ def _cot(n: int) -> str:
     return s
 
 
+# ── Chặn chèn công thức vào Lark Sheet (review bảo mật 02/10/2026) ──
+# Nội dung bài/bình luận/tên kênh/hashtag do NGƯỜI LẠ viết đi thẳng vào ô sheet. Chưa có
+# bằng chứng `values_batch_update` của Lark luôn ghi chuỗi "=…" thành chữ (kỹ năng
+# lark-sheets ghi rõ đường csv-put TÍNH chuỗi "=…" thành công thức), nên coi như nguy hiểm:
+# ô chữ mở đầu bằng = + @ (sau khoảng trắng), hoặc bằng tab/CR, được thêm "'" phía trước.
+# "-" chỉ chặn khi đi với "=", dạng hàm ("-SUM(", "-cmd|") hoặc số rồi phép tính ("-2+3+cmd|…",
+# kiểu DDE) — "- gạch đầu dòng", "-15% hôm nay" giữ nguyên.
+_RE_TRU_NGUY = re.compile(r"^-\s*(?:=|[A-Za-z_][\w.]*\s*[(|!]|[\d.,]+\s*[-+*/^&])")
+
+
+def _o_an_toan(v):
+    """Một ô sheet -> giá trị an toàn (chỉ đụng tới chuỗi)."""
+    if not isinstance(v, str) or not v:
+        return v
+    if v[0] in "\t\r":
+        return "'" + v
+    t = v.lstrip(" \n\u00a0\u3000")
+    if t and (t[0] in "=+@\uff1d\uff0b\uff20" or _RE_TRU_NGUY.match(t)):
+        return "'" + v
+    return v
+
+
+def _bang_an_toan(values: list[list]) -> list[list]:
+    """MỌI bộ ghi sheet đi qua đây: apify_tool._write_values, sheet_lon, deep_dive, crawl."""
+    return [[_o_an_toan(c) for c in (r or [])] for r in values]
+
+
 def _write_values(token: str, sheet_id: str, values: list[list], dong_dau: int = 1) -> None:
     # Vùng ghi theo đúng số cột của dữ liệu. Cố định "A:L" (12 cột của social_listen) làm
     # tool Shopee 13 cột hỏng: "columns of value:13 > range" (đo thật 25/09/2026).
     # `dong_dau`: dòng bắt đầu (1-based) — để ghi NỐI dưới dữ liệu sẵn có mà không đè.
+    values = _bang_an_toan(values)
     rong = _cot(max((len(r) for r in values), default=1))
     for i in range(0, len(values), 1000):
         chunk = values[i:i + 1000]

@@ -523,7 +523,7 @@ _HAN_TRA_LOI = float(os.environ.get("LSR_HAN_TRA_LOI_SECONDS", "480"))
 
 
 def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
-                 kenh: dict | None = None) -> tuple[str, bool, bool]:
+                 kenh: dict | None = None, job_id=None) -> tuple[str, bool, bool]:
     """Chạy `tra_loi` với trần thời gian. Trả `(đáp, ok, quá_hạn)`.
 
     Vì sao cần: vòng job gọi `tra_loi` đồng bộ và KHÔNG có trần. Một lượt gọi model
@@ -539,6 +539,13 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
     hop: dict = {}
 
     def chay():
+        # Job id gắn vào CHÍNH luồng trả lời (contextvar + sổ theo phiên), gỡ trong finally
+        # của luồng này — review 02/10/2026: gỡ ở `_mot_vong` khi `_chay_co_han` trả về vì
+        # quá hạn thì lượt chậm (đang tạo việc nền) mất job id, kết quả web không về được.
+        if job_id is not None:
+            _JOB_HIEN_TAI.set(job_id)
+            with _JOB_PHIEN_KHOA:
+                _JOB_PHIEN[phien] = job_id
         try:
             # `kenh` chỉ truyền khi có — `tra_loi` giả của các bộ thử không nhận nó.
             them = {"kenh": kenh} if kenh else {}
@@ -549,6 +556,11 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
                           "quản trị viên kiểm tra.")
             hop["ok"] = False
             hop["loi"] = f"{type(e).__name__}: {e}"
+        finally:
+            if job_id is not None:
+                with _JOB_PHIEN_KHOA:
+                    if _JOB_PHIEN.get(phien) == job_id:
+                        _JOB_PHIEN.pop(phien, None)
 
     t = threading.Thread(target=chay, name=f"tra-loi-{phien[:16]}", daemon=True)
     t.start()
@@ -566,33 +578,47 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
 # gọi để sau này đẩy kết quả về đúng job gốc (web console).
 _JOB_PHIEN: dict[str, object] = {}
 _JOB_PHIEN_KHOA = threading.Lock()
+import contextvars as _cv  # noqa: E402
+_JOB_HIEN_TAI: _cv.ContextVar = _cv.ContextVar("lsr_job_hien_tai", default=None)
 
 
 def job_cua_phien(phien: str):
-    """Job id platform đang xử lý cho `phien`, None nếu không có (tin Lark trực tiếp)."""
+    """Job id platform đang xử lý cho `phien`, None nếu không có (tin Lark trực tiếp).
+    Ưu tiên job của CHÍNH luồng đang chạy (phiên có job mới chen vào thì không lẫn)."""
+    j = _JOB_HIEN_TAI.get()
+    if j is not None:
+        return j
     with _JOB_PHIEN_KHOA:
         return _JOB_PHIEN.get(phien or "")
 
 
-def gui_lark(chat_id: str, text: str, app_id: str = "") -> dict:
+def gui_lark(chat_id: str, text: str, app_id: str = "", uuid: str | None = None) -> dict:
     """Gửi tin vào chat Lark qua platform (`/v1/lark/send`) bằng token của CHÍNH agent —
-    đường cho chat tới qua gateway (`lark:<app>:<oc>`), runtime không cầm secret app đó."""
+    đường cho chat tới qua gateway (`lark:<app>:<oc>`), runtime không cầm secret app đó.
+    `uuid` gửi kèm để khử trùng, NHƯNG platform (02/10/2026) chưa chuyển trường này xuống
+    Lark — xem viec_nen.gui."""
     c = _cau_hinh()
     if not c:
         raise RuntimeError("chưa cấu hình LSR_* nên không gửi được qua platform")
-    return _goi(c, "/v1/lark/send", {"to": chat_id, "to_type": "chat_id",
-                                     "app_id": app_id or None, "text": text[:15000]},
-                timeout=20)
+    than = {"to": chat_id, "to_type": "chat_id", "app_id": app_id or None,
+            "text": text[:15000]}
+    if uuid:
+        than["uuid"] = str(uuid)[:50]
+    return _goi(c, "/v1/lark/send", than, timeout=20)
 
 
-def bao_su_kien_job(job_id, text: str) -> dict:
+def bao_su_kien_job(job_id, text: str, ma_su_kien: str | None = None) -> dict:
     """Gắn một sự kiện "message" vào job gốc trên console (đường TẠM cho web, 02/10/2026:
-    console chưa có kênh đẩy tin chủ động cho agent)."""
+    console chưa có kênh đẩy tin chủ động cho agent). `ma_su_kien` nằm trong `data.id` để
+    console bỏ trùng khi agent gửi lại sau khởi động."""
     c = _cau_hinh()
     if not c or not job_id:
         raise RuntimeError("không có job gốc / chưa cấu hình LSR_*")
-    return _goi(c, f"/v1/self/jobs/{job_id}/event",
-                {"kind": "message", "data": {"text": text[:15000]}}, timeout=20)
+    data = {"text": text[:15000]}
+    if ma_su_kien:
+        data["id"] = ma_su_kien
+    return _goi(c, f"/v1/self/jobs/{job_id}/event", {"kind": "message", "data": data},
+                timeout=20)
 
 
 def _mot_vong(c: dict, tra_loi) -> int:
@@ -624,15 +650,8 @@ def _mot_vong(c: dict, tra_loi) -> int:
         print(f"[anh] lỗi tải ảnh job #{jid}: {type(e).__name__}: {e}", flush=True)
     hoi = _cau_hoi_kem_anh(hoi, j, anh)
 
-    with _JOB_PHIEN_KHOA:
-        _JOB_PHIEN[phien] = jid
-    try:
-        dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p),
-                                     _kenh_cua_job(j))
-    finally:
-        with _JOB_PHIEN_KHOA:
-            if _JOB_PHIEN.get(phien) == jid:
-                _JOB_PHIEN.pop(phien, None)
+    dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p),
+                                 _kenh_cua_job(j), job_id=jid)
     if treo:
         print(f"[job] #{jid} QUÁ HẠN {_HAN_TRA_LOI:.0f}s — bỏ lượt, đi tiếp. "
               f"Luồng cũ vẫn chạy nền và sẽ tự tắt khi xong.", flush=True)

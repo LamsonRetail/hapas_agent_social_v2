@@ -486,6 +486,7 @@ def _vua_tran(bai: list[tuple[str, str]], per: int, tran_bl: int, tran_usd: floa
 
 # ───────────────────────── sheet ─────────────────────────
 def _write(token: str, sheet_id: str, values: list[list]) -> None:
+    values = A._bang_an_toan(values)          # bình luận người lạ viết: chặn chèn công thức
     col = chr(ord("A") + len(_HEADER) - 1)
     for i in range(0, len(values), 1000):
         ch = values[i:i + 1000]
@@ -949,7 +950,7 @@ def _thu_chay_nen(args, urls, nhom, per, cat_per, ke_tai_cho, per_url):
     vuot = _ly_do_vuot(ke_n, tran_bl_n, tran_usd_n)
     if vuot:
         return _tra_vuot(urls, nhom, per, cat_per, ke_n, tran_bl_n, tran_usd_n, vuot), ""
-    ns, _hm, cau_ns = quet_lon.ngan_sach(tran_usd_n)
+    ns, hm, cau_ns = quet_lon.ngan_sach(tran_usd_n)
     phut = min(viec_nen.han_phut(), math.ceil((_giay_ke(ke_n, 2) + 180) / 60))
     base = dict(so_bai=len(urls), max_comments=per, max_comments_bi_cat=cat_per,
                 ly_do_chay_nen=vi_sao, uoc_tinh_binh_luan=bl_n, uoc_tinh_usd=est_n,
@@ -973,7 +974,7 @@ def _thu_chay_nen(args, urls, nhom, per, cat_per, ke_tai_cho, per_url):
           "title": str(args.get("title") or "").strip()}
     tom = viec_nen.tao_viec("social_deep_dive", ts, _ke_hoach_nen(ke_n, tran_usd_n),
                             {"usd": est_n, "phut": phut, "binh_luan": bl_n}, ns,
-                            ghi_chu=[cau_ns])
+                            ghi_chu=[cau_ns], con_lai_thang=hm["con_lai"] if hm else None)
     return tool_result(**{**base, **tom, "success": not tom.get("tu_choi")}), ""
 
 
@@ -1053,6 +1054,9 @@ def chay_viec_nen(v) -> tuple[str, str]:
             quet_lon._chay_cac_phan(v, quet_lon._so_ngan_sach(v), ts, lambda p: None,
                                     chuan=_chuan_nen)
         v.dat("dang_loc")
+    # Không lô nào còn sống trên Apify trước khi chốt tiền (review 02/10/2026).
+    v.dung.set()
+    quet_lon._thu_don_het(v, chuan=_chuan_nen)
     rows: list[dict] = []
     da = set()
     for p in v.d["nen_tang"]:
@@ -1097,6 +1101,8 @@ def chay_viec_nen(v) -> tuple[str, str]:
             s.ghi_tab(_TAB_THONG_KE, _dong_thong_ke(tk))
             url = s.s.get("url") or ""
         except Exception as e:  # noqa: BLE001
+            if type(e).__name__ == "MatQuyen":
+                raise
             ly_do.append(f"ghi sheet lỗi: {_che_token(e)[:150]}")
     dau = {"xong": "XONG", "xong_mot_phan": "XONG MỘT PHẦN", "da_huy": "ĐÃ HUỶ"}[trang_thai]
     d = [f"[{dau}] Bóc bình luận nền {v.ma}: {len(ts['post_urls'])} bài, lấy được "
