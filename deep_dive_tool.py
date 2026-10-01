@@ -101,10 +101,9 @@ _CHUA_XONG_GIU = "CHƯA XONG — giữ phần đã lấy"
 
 # Trần USD MỖI LÔ = ước tính lô × 1,5 (kẹp [mức actor đòi hoặc 0,1; trần tool]). Rà
 # 01/10/2026: lô nào cũng được cả `tran_usd_goi` nên N lô có thể tiêu tới N × ngân sách
-# đã duyệt nếu giá actor lệch. Cả lượt gọi tool thì giữ sổ: tiền lô đã xong + phần giữ
-# chỗ (= ước tính) của lô đang chạy không được vượt `tran_usd_goi` — vượt thì lô sau
-# không khởi chạy. Giữ chỗ theo ƯỚC TÍNH chứ không × 1,5: lượt đã được duyệt vì ước tính
-# ≤ trần, giữ × 1,5 thì lượt sát trần bị chặn oan lô cuối.
+# đã duyệt nếu giá actor lệch. Cả lượt gọi tool thì giữ sổ (`_SoNganSach`): trần Apify
+# gửi cho mỗi lô CHÍNH LÀ phần nó giữ chỗ, cắt cho vừa phần còn lại sau khi để dành phần
+# cần của các lô chưa chạy — tổng tiền có thể bị tính luôn ≤ `tran_usd_goi`.
 _HE_SO_TRAN_LO = 1.5
 # Còn ít hơn chừng này giây tới hạn run thì không khởi chạy lô (vẫn mất phí start mà
 # run bị huỷ ngay).
@@ -279,10 +278,16 @@ def _suc_chua(p: str, tran_usd: float) -> int:
 
 def _chia_lo(p: str, us: list[str], per: int,
              tran_usd: float) -> tuple[int, list[list[str]]]:
-    """(số bình luận/bài thực dùng, các lô link) sao cho mỗi lượt nằm gọn trong trần."""
+    """(số bình luận/bài thực dùng, các lô link) sao cho mỗi lượt nằm gọn trong trần.
+
+    Chia ĐỀU số bài giữa các lô (8 bài -> 4 + 4, không 7 + 1): mỗi lô phải giữ ít nhất
+    mức trần tối thiểu `_san` (0,1 USD; YouTube/Facebook 0,5), lô vụn cuối cũng tốn
+    nguyên mức đó trong trần cứng của lượt."""
     suc = _suc_chua(p, tran_usd)
     per_thuc = min(per, suc)
     co = max(1, suc // per_thuc)
+    so_lo = max(1, math.ceil(len(us) / co))
+    co = max(1, math.ceil(len(us) / so_lo))
     return per_thuc, [us[i:i + co] for i in range(0, len(us), co)]
 
 
@@ -300,30 +305,65 @@ def _uoc_lo(p: str, lo: list[str], per: int) -> float:
     return len(lo) * per * _GIA[p] + _GIA_KHOI_DONG.get(p, 0.0)
 
 
+def _san(p: str) -> float:
+    """maxTotalChargeUsd thấp nhất một lô được gửi: mức actor đòi, và 0,1 của `_call`."""
+    return max(_MIN_CHARGE.get(p, 0.0), _TRAN_USD[1])
+
+
+def _can_lo(p: str, uoc: float) -> float:
+    """Phần trần một lô CẦN giữ để được khởi chạy: max(sàn, ước tính làm tròn xuống cent)."""
+    return max(_san(p), math.floor(uoc * 100 + 1e-9) / 100)
+
+
+def _can_giu(ke_hoach: dict) -> float:
+    """Tổng phần trần các lô cần giữ — phải ≤ `tran_usd_goi` thì mọi lô mới chạy được."""
+    return round(sum(_can_lo(p, _uoc_lo(p, lo, per))
+                     for p, (per, cac_lo) in ke_hoach.items() for lo in cac_lo), 4)
+
+
 def _tran_lo(p: str, uoc: float, tran_usd: float) -> float:
-    """maxTotalChargeUsd của MỘT lô: ước tính × 1,5, làm tròn LÊN tới cent (kẻo `_call`
-    làm tròn xuống dưới ước tính), không thấp hơn mức actor đòi, không quá trần tool."""
-    san = max(_MIN_CHARGE.get(p, 0.0), _TRAN_USD[1])
-    return min(tran_usd, max(san, math.ceil(uoc * _HE_SO_TRAN_LO * 100 - 1e-9) / 100))
+    """maxTotalChargeUsd TỐI ĐA của MỘT lô: ước tính × 1,5, làm tròn LÊN tới cent (kẻo
+    `_call` làm tròn xuống dưới ước tính), không thấp hơn mức actor đòi, không quá trần
+    tool. Trần thật gửi đi còn bị `_SoNganSach.xin` cắt theo phần trần còn lại."""
+    return min(tran_usd, max(_san(p), math.ceil(uoc * _HE_SO_TRAN_LO * 100 - 1e-9) / 100))
 
 
 class _SoNganSach:
-    """Sổ tiền của MỘT lượt gọi tool, dùng chung giữa các lô chạy song song."""
+    """Sổ tiền của MỘT lượt gọi tool, dùng chung giữa các lô chạy song song.
 
-    def __init__(self, tran: float):
+    Bất biến (review 02/10/2026): tiền đã tiêu + trần Apify của các lô đang chạy + phần
+    cần giữ của các lô chưa khởi chạy ≤ `tran`. Bản trước chỉ giữ chỗ theo ước tính trong
+    khi mỗi lô được gửi maxTotalChargeUsd tới ước tính × 1,5 — ba lô song song có thể tiêu
+    tới ~1,5 × trần nếu giá actor lệch. Nay trần gửi Apify CHÍNH LÀ phần giữ chỗ, nên tổng
+    tiền có thể bị tính không bao giờ vượt `tran`."""
+
+    def __init__(self, tran: float, can_cho: float = 0.0):
         self.tran, self.da, self.giu = tran, 0.0, 0.0
+        self.cho = can_cho            # phần cần giữ của các lô CHƯA khởi chạy
         self.dung = False
         self._khoa = threading.Lock()
 
-    def xin(self, so_tien: float) -> bool:
-        """Giữ chỗ cho một lô. Từ chối một lần là dừng hẳn: giá đang lệch, lô nhỏ phía sau
-        có lọt qua cũng chỉ làm kết quả lỗ chỗ."""
+    def bo(self, can: float) -> None:
+        """Lô không khởi chạy (vd hết giờ): trả phần nó đang được để dành."""
         with self._khoa:
-            if self.dung or self.da + self.giu + so_tien > self.tran + 1e-9:
+            self.cho = max(0.0, self.cho - can)
+
+    def xin(self, can: float, tran_lo: float) -> float:
+        """Trần Apify (USD, làm tròn xuống cent) cấp cho một lô, 0 nếu không được chạy.
+        = min(`tran_lo`, phần còn lại sau khi để dành cho các lô chưa chạy); dưới `can`
+        thì không chạy. Từ chối một lần là dừng hẳn: giá đang lệch, lô nhỏ phía sau có lọt
+        qua cũng chỉ làm kết quả lỗ chỗ."""
+        with self._khoa:
+            self.cho = max(0.0, self.cho - can)
+            if self.dung:
+                return 0.0
+            con = self.tran - self.da - self.giu - self.cho
+            cap = math.floor(min(tran_lo, con) * 100 + 1e-9) / 100
+            if cap + 1e-9 < can:
                 self.dung = True
-                return False
-            self.giu += so_tien
-            return True
+                return 0.0
+            self.giu += cap
+            return cap
 
     def tra(self, giu: float, thuc: float) -> None:
         with self._khoa:
@@ -331,27 +371,31 @@ class _SoNganSach:
             self.da += thuc
 
 
-def _keo_lo(p: str, lo: list[str], per: int, tran_lo: float, giu: float,
+def _keo_lo(p: str, lo: list[str], per: int, can: float, tran_lo: float,
             so_ns: _SoNganSach, han_run: float) -> dict:
     """Kéo MỘT lô — chạy trong `contextvars.copy_context()` của riêng nó.
 
     Đặt `_SO_RUN`/`_HAN_CHOT` của apify_tool (đợt 2) cho lô: tới hạn thì `_run_actor` HUỶ
     run trên Apify và trả phần đã lấy (`mot_phan`), thay vì ném QUA_GIO làm mất trắng
     cả lô như khi submit thẳng `_FETCH[p]` (rà 01/10/2026: không luồng nào đặt hai biến
-    này, nên lô quá giờ không bao giờ được giữ phần dở)."""
+    này, nên lô quá giờ không bao giờ được giữ phần dở). Trần Apify của lô do sổ cấp
+    ngay lúc khởi chạy (`_SoNganSach.xin`)."""
     kq = {"p": p, "lo": lo, "per": per, "binh_luan": [], "n_raw": 0, "loi": "",
-          "trang_thai": "OK", "ma": "OK", "tran_lo": tran_lo}
+          "trang_thai": "OK", "ma": "OK", "tran_lo": 0.0}
     if han_run - time.monotonic() < _GIAY_TOI_THIEU_LO:
+        so_ns.bo(can)
         kq["trang_thai"] = _CHUA_CHAY_GIO
         return kq
-    if not so_ns.xin(giu):
+    cap = so_ns.xin(can, tran_lo)
+    if not cap:
         kq["trang_thai"] = _CHUA_CHAY_NS
         return kq
+    kq["tran_lo"] = cap
     so: list = []
     A._SO_RUN.set(so)
     A._HAN_CHOT.set(han_run)
     try:
-        kq["binh_luan"], kq["n_raw"] = _FETCH[p](lo, per, tran_lo)
+        kq["binh_luan"], kq["n_raw"] = _FETCH[p](lo, per, cap)
     except A.LoiApify as e:
         if e.ma == "QUA_GIO":
             kq["trang_thai"] = "CHƯA XONG — hết thời gian, đã dừng run, chưa lấy được bình luận"
@@ -364,7 +408,7 @@ def _keo_lo(p: str, lo: list[str], per: int, tran_lo: float, giu: float,
         usd = sum(float(m.get("usd") or 0) for m in so if isinstance(m, dict))
         # Apify ghi tiền chậm vài giây: lấy số lớn hơn giữa tiền run báo và giá × số item.
         theo_item = (kq["n_raw"] * _GIA[p] + _GIA_KHOI_DONG.get(p, 0.0)) if kq["n_raw"] else 0
-        so_ns.tra(giu, max(usd, theo_item))
+        so_ns.tra(cap, max(usd, theo_item))
     ma = {m.get("ma") for m in so if isinstance(m, dict)}
     if "QUA_GIO" in ma and kq["binh_luan"]:
         kq["ma"], kq["trang_thai"] = "OK_MOT_PHAN", _CHUA_XONG_GIU
@@ -373,14 +417,26 @@ def _keo_lo(p: str, lo: list[str], per: int, tran_lo: float, giu: float,
     return kq
 
 
+def _ly_do_vuot(ke_hoach: dict, tran_bl: int, tran_usd: float) -> list[str]:
+    """Trần nào kế hoạch vượt ([] = trong trần): số bình luận, chi phí ước tính, và phần
+    trần các lô cần giữ (mỗi lượt YouTube/Facebook đòi giữ tối thiểu 0,5 USD)."""
+    bl, usd = _uoc_tinh(ke_hoach)
+    can = _can_giu(ke_hoach)
+    return (([f"bình luận {bl} > {tran_bl}"] if bl > tran_bl else [])
+            + ([f"chi phí {_usd(usd)} > {_usd(tran_usd)} USD"] if usd > tran_usd + 1e-9 else [])
+            + ([f"phần trần cần giữ cho {sum(len(c) for _, c in ke_hoach.values())} lượt "
+                f"chạy {_usd(can)} > {_usd(tran_usd)} USD"]
+               if usd <= tran_usd + 1e-9 and can > tran_usd + 1e-9 else []))
+
+
 def _trong_tran(bai: list[tuple[str, str]], per: int, tran_bl: int, tran_usd: float) -> bool:
-    """Kế hoạch (chia lô thật, kể cả phí khởi động mỗi lô) cho `bai` = [(nền tảng, link)]
-    với `per` bình luận/bài có nằm trong CẢ hai trần không."""
+    """Kế hoạch (chia lô thật, kể cả phí khởi động và sàn trần mỗi lô) cho `bai` =
+    [(nền tảng, link)] với `per` bình luận/bài có nằm trong trần không."""
     nhom: dict[str, list[str]] = {}
     for p, u in bai:
         nhom.setdefault(p, []).append(u)
-    bl, usd = _uoc_tinh({p: _chia_lo(p, us, per, tran_usd) for p, us in nhom.items()})
-    return bl <= tran_bl and usd <= tran_usd + 1e-9
+    return not _ly_do_vuot({p: _chia_lo(p, us, per, tran_usd) for p, us in nhom.items()},
+                           tran_bl, tran_usd)
 
 
 def _lon_nhat(hi: int, duoc) -> int:
@@ -469,10 +525,11 @@ SCHEMA = {
         "hai nền tảng đó phải NÓI THẲNG là chưa nối nguồn, TUYỆT ĐỐI không thay bằng "
         "nền tảng khác rồi để người dùng tưởng là của nền tảng họ hỏi.\n"
         "BẮT BUỘC KHI TRẢ LỜI:\n"
-        "- TRẦN: chủ agent đặt trần bình luận + trần USD cho MỖI lần gọi (`tran`). Trong "
-        "trần người dùng xin bao nhiêu bình luận/bài cũng được (tới 1000). `vuot_tran`=true: "
-        "tool CHƯA CHẠY, chưa tốn tiền — nói rõ yêu cầu vượt trần (`uoc_tinh_binh_luan`, "
-        "`uoc_tinh_chi_phi_usd` so với `tran`), chép câu `goi_y` (mức vừa trần), đề xuất giảm "
+        "- TRẦN CỨNG: chủ agent đặt trần bình luận + trần USD cho MỖI lần gọi (`tran`); "
+        "tổng tiền Apify có thể tính của cả lần gọi không bao giờ vượt trần USD (mỗi lượt "
+        "YouTube/Facebook phải giữ tối thiểu 0,5 USD trong trần đó). Trong trần người dùng "
+        "xin bao nhiêu bình luận/bài cũng được (tới 1000). `vuot_tran`=true: tool CHƯA CHẠY, "
+        "chưa tốn tiền — nói rõ trần nào bị vượt (`vuot`), chép câu `goi_y` (mức vừa trần), đề xuất giảm "
         "số bình luận/bài hoặc bớt bài, hoặc nhờ chủ agent nâng 'Trần bình luận' / 'Trần chi "
         "phí bóc bình luận' ở Console → Năng lực. Không có cách nào chạy vượt trần.\n"
         "- Đọc `per_url`. `status`='" + _CAT + "' nghĩa là lượt chạy chạm trần nên bài đó "
@@ -558,15 +615,14 @@ def _handle(args: dict, **kwargs) -> str:
                f"đã dùng {_MAX_PER_POST}. Nói rõ." if per_xin > _MAX_PER_POST else None)
     # Trần chủ agent là trần CỨNG (chốt 01/10/2026): vượt thì không chạy, không có cờ bỏ
     # qua. Trước đây `xac_nhan_chi_phi`=true cho chạy vượt trần sau một câu "ok".
-    if nhom and (uoc_bl > tran_bl or est > tran_usd + 1e-9):
+    vuot = _ly_do_vuot(ke_hoach, tran_bl, tran_usd) if nhom else []
+    if vuot:
         bai = [(_platform_of(u), u) for u in urls if _platform_of(u) in nhom]
         vua = _vua_tran(bai, per, tran_bl, tran_usd)
         n, k, m = len(bai), vua["max_comments_cho_du_bai"], vua["so_bai_voi_max_comments_hien_tai"]
         goi_y = ((f"Trong trần này bóc được tối đa {k} bình luận/bài cho {n} bài" if k else
                   f"Trần này không đủ cho {n} bài, kể cả 1 bình luận/bài")
                  + (f", hoặc {m} bài nếu giữ {per} bình luận/bài" if 0 < m < n else "") + ".")
-        vuot = ([f"bình luận {uoc_bl} > {tran_bl}"] if uoc_bl > tran_bl else []) + (
-            [f"chi phí {_usd(est)} > {_usd(tran_usd)} USD"] if est > tran_usd + 1e-9 else [])
         return tool_result(
             success=False, vuot_tran=True, chua_chay=True, so_bai=len(urls),
             max_comments=per, max_comments_bi_cat=cat_per,
@@ -588,16 +644,15 @@ def _handle(args: dict, **kwargs) -> str:
         han_keo = time.monotonic() + han
         # Run dừng TRƯỚC hạn chờ `_DU_PHONG_HUY` giây: đủ để huỷ run + lấy item dở dang.
         han_run = han_keo - A._DU_PHONG_HUY
-        so_ns = _SoNganSach(tran_usd)
+        # Sổ để dành ngay từ đầu phần trần mọi lô cần (`_can_giu` ≤ trần, đã kiểm ở trên):
+        # lô khởi chạy trước không được ăn mất chỗ của lô sau.
+        so_ns = _SoNganSach(tran_usd, _can_giu(ke_hoach))
         ex = ThreadPoolExecutor(max_workers=min(_SONG_SONG, len(viec)))
         futs = {}
         for p, lo, pc in viec:
             uoc = _uoc_lo(p, lo, pc)
-            tl = _tran_lo(p, uoc, tran_usd)
-            # Giữ chỗ trong sổ theo ước tính (không theo sàn 0,5 USD của YouTube/Facebook):
-            # sàn là điều kiện actor đòi để chạy, tiền vẫn tính theo bình luận.
-            giu = min(tl, uoc)
-            futs[ex.submit(contextvars.copy_context().run, _keo_lo, p, lo, pc, tl, giu,
+            futs[ex.submit(contextvars.copy_context().run, _keo_lo, p, lo, pc,
+                           _can_lo(p, uoc), _tran_lo(p, uoc, tran_usd),
                            so_ns, han_run)] = (p, lo, pc)
         xong, chua = wait(futs, timeout=max(0.05, han_keo - time.monotonic()))
         dang_chay = {f for f in chua if f.running()}

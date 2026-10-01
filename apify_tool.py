@@ -1082,7 +1082,14 @@ _MA_AI = {
 }
 _MA_GIU = {"brand", "ad", "product", "ugc", "other_market"}
 _MA_LOAI = {"lac_de", "trung_ten", "nguoi_noi_tieng_khac", "spam"}
-_THE_P_RE = re.compile(r"<\s*/?\s*p\b[^<>]{0,40}>?", re.I)
+
+
+def _khong_the(s) -> str:
+    """Chữ người lạ viết -> không thể giả thẻ: NFKC (＜ -> <) rồi đổi MỌI '<' '>' thành
+    '‹' '›'. Review 02/10/2026: lọc theo mẫu `<p …>` lọt chữ đồng dạng ("<р i=…>" với р
+    Cyrillic); đổi hết dấu ngoặc thì chữ gì cũng không mở/đóng được thẻ."""
+    s = unicodedata.normalize("NFKC", " ".join(str(s or "").split()))
+    return s.replace("<", "‹").replace(">", "›")
 
 _NHAC_PHAN_XU = """Bạn phân xử bài mạng xã hội cho việc theo dõi một brand.
 Brand / từ khoá đang theo dõi: {queries}
@@ -1108,7 +1115,7 @@ LOẠI ("l") khi:
   đâu", "Đt gập thì a k có…")
 - lac_de: chuyện khác hẳn brand và ngành hàng
 - spam: rác, chuỗi hashtag vô nghĩa, quảng cáo bừa không liên quan
-KHÔNG CHẮC thì dùng mã khong_ro (hệ thống tự giữ bài có khớp từ khoá, loại bài không khớp).
+KHÔNG CHẮC thì dùng mã khong_ro (hệ thống tự xét bài đó bằng luật từ khoá + thị trường).
 
 Mã: brand, ad, product, ugc, other_market (đi với "k") | lac_de, trung_ten,
 nguoi_noi_tieng_khac, spam (đi với "l") | khong_ro (với "k" hoặc "l").
@@ -1121,10 +1128,10 @@ Không giải thích.
 
 
 def _boc_bai(i: int, d: dict) -> str:
-    """Một bài trong thẻ <p>. Chữ do người lạ viết: bỏ mọi chuỗi giống thẻ <p …>/</p>,
-    kẻo nó tự đóng thẻ rồi chèn "lệnh" ra ngoài (cùng cách phan_loai._boc, rà 01/10/2026)."""
+    """Một bài trong thẻ <p>. Chữ do người lạ viết đi qua `_khong_the`, kẻo nó tự đóng thẻ
+    rồi chèn "lệnh" ra ngoài (cùng cách phan_loai._boc)."""
     def sach(s, n: int) -> str:
-        return _THE_P_RE.sub("[thẻ]", " ".join(str(s or "").split())[:n])
+        return _khong_the(s)[:n]
     kenh = sach(d.get("kenh"), 40) + (f"/{sach(d.get('username'), 30)}"
                                        if d.get("username") else "")
     return (f'<p i="{i}">[{d.get("platform") or "?"}] {kenh} | '
@@ -1156,7 +1163,7 @@ def _doc_phan_xu(tra_loi: str, n: int) -> dict[int, tuple[bool, str, str]]:
             continue
         if (kl == "k" and ma in _MA_LOAI) or (kl == "l" and ma in _MA_GIU):
             continue
-        ghi = _THE_P_RE.sub("", " ".join(str(v[2]).split()))[:60] if len(v) > 2 else ""
+        ghi = _khong_the(v[2])[:60] if len(v) > 2 else ""
         ra[i] = (kl == "k", ma, ghi)
     return ra
 
@@ -2489,10 +2496,13 @@ def _handle(args: dict, **kwargs) -> str:
     for i, (d, dt) in enumerate(cho_xet):
         p = d["platform"]
         v = phan_xu.get(i)
+        if v and v[1] == "khong_ro":
+            # AI không chắc -> luật dự phòng đầy đủ (từ khoá + hệ chữ + thị trường). Review
+            # 02/10/2026: "giữ nếu khớp chữ" cho lọt tin tiếng Hindi về địa danh Hapas.
+            d["_ai_khong_ro"] = True
+            v = None
         if v:
             giu, ma, ghi = v
-            if ma == "khong_ro":            # không chắc: khớp từ khoá thì giữ, không thì bỏ
-                giu = bool(d["_khop"]) or khop_long   # truy vấn khám phá không đòi khớp chữ
             d["_ai"], d["_ma_ai"] = True, ma
             if ma == "other_market" and re.fullmatch(r"[A-Za-z]{2}", ghi):
                 # Mã nước của model chỉ lấp chỗ hệ thống chưa đoán được; đoán được rồi thì
@@ -2506,7 +2516,8 @@ def _handle(args: dict, **kwargs) -> str:
                 bi_loai.append((d, dt, f"AI: {d['_nhan_dinh']}"))
                 continue
         else:
-            d["_nhan_dinh"] = "chưa qua AI (lọc theo luật)"
+            d["_nhan_dinh"] = ("AI không chắc — lọc theo luật" if d.get("_ai_khong_ro")
+                               else "chưa qua AI (lọc theo luật)")
             nhom, ly_do = _ly_do_loai(d, p, queries, [], country, boi_canh,
                                       khop_long, giu_nuoc_ngoai)
             if nhom:
@@ -2596,7 +2607,8 @@ def _handle(args: dict, **kwargs) -> str:
     thuc = None
     if f_cp is not None:
         try:
-            thuc = f_cp.result(timeout=max(3.0, han_chot + 15 - time.monotonic()))
+            # Không chờ quá hạn tool (review 02/10/2026): hết giờ thì báo ước tính.
+            thuc = f_cp.result(timeout=max(0.05, han_chot - time.monotonic()))
         except Exception:  # noqa: BLE001 — không có số thật thì nói là ước tính
             thuc = None
     ex_cp.shutdown(wait=False)
@@ -2642,6 +2654,19 @@ def _handle(args: dict, **kwargs) -> str:
                     dem[_MA_AI[d["_ma_ai"]]] = dem.get(_MA_AI[d["_ma_ai"]], 0) + 1
                 s += " (" + ", ".join(f"{k} {n}" for k, n in
                                       sorted(dem.items(), key=lambda x: -x[1])) + ")"
+            # Review 02/10/2026: bài AI giữ rồi bị chuyển vì `chi_thi_truong_nay` và bài AI
+            # không chắc phải được đếm ngay trong câu này — giữ + loại + chuyển + không chắc
+            # luôn bằng số AI đọc.
+            ai_chuyen: dict[str, int] = {}
+            for d, _, _ in bi_loai:
+                if d.get("_ai") and d.get("_chuyen"):
+                    ai_chuyen[d["_thi_truong"]] = ai_chuyen.get(d["_thi_truong"], 0) + 1
+            if ai_chuyen:
+                s += (f", {sum(ai_chuyen.values())} bài thị trường {_dem_nuoc(ai_chuyen)} "
+                      f"chuyển sang Bị loại vì chỉ hỏi {country}")
+            k_ro = sum(1 for d, _ in cho_xet if d.get("_ai_khong_ro"))
+            if k_ro:
+                s += f", {k_ro} bài AI không chắc nên lọc theo luật"
             phan.append(s)
         luat = [x for x in cho_xet if not x[0].get("_ai")]
         if luat:
@@ -2649,16 +2674,22 @@ def _handle(args: dict, **kwargs) -> str:
                   and not d.get("_chuyen")]
             n_tk = sum(1 for d in bo if d["_nhom"] == "tu_khoa")
             n_tt = len(bo) - n_tk
-            s = f"Lọc theo luật {len(luat)} bài (AI {ai_tt['trang_thai']}): loại {len(bo)}"
+            nhan = (f"AI {ai_tt['trang_thai']}" if any(not d.get("_ai_khong_ro")
+                                                      for d, _ in luat) else "AI không chắc")
+            s = f"Lọc theo luật {len(luat)} bài ({nhan}): loại {len(bo)}"
             chi = ([f"{n_tk} không nhắc từ khoá"] if n_tk else []) + (
                 [f"{n_tt} ngoài thị trường {country}"] if n_tt else [])
             phan.append(s + (f" ({', '.join(chi)})" if chi else ""))
         n_lt = sum(1 for d, _, _ in bi_loai if d.get("_nhom") == "loai_tru")
         if n_lt:
             phan.append(f"{n_lt} bài chứa từ loại trừ")
-        if chuyen_thi_truong:
-            phan.append(f"{sum(chuyen_thi_truong.values())} bài thị trường khác "
-                        f"({_dem_nuoc(chuyen_thi_truong)}) chuyển sang tab Bị loại vì chỉ "
+        luat_chuyen: dict[str, int] = {}
+        for d, _, _ in bi_loai:
+            if d.get("_chuyen") and not d.get("_ai"):
+                luat_chuyen[d["_thi_truong"]] = luat_chuyen.get(d["_thi_truong"], 0) + 1
+        if luat_chuyen:
+            phan.append(f"{sum(luat_chuyen.values())} bài thị trường khác "
+                        f"({_dem_nuoc(luat_chuyen)}) chuyển sang tab Bị loại vì chỉ "
                         f"hỏi {country}")
         if not bi_loai and not loc_bang_ai:
             return (f"Không bài nào bị loại ({trong_khoang} bài trong khoảng ngày đều giữ; "

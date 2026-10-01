@@ -207,14 +207,13 @@ def _doc(tra_loi: str, n: int) -> dict[int, tuple[str, str]]:
     return ra
 
 
-_THE_RE = re.compile(r"<\s*/?\s*c\b[^<>]{0,40}>?", re.I)
-
-
 def _boc(i: int, text: str) -> str:
-    """Một bình luận trong thẻ <c>. Bình luận là chữ người lạ viết: bỏ mọi chuỗi giống
-    thẻ <c …>/</c> trong đó, kẻo nó tự đóng thẻ rồi chèn "lệnh" ra ngoài (rà 01/10/2026)."""
-    t = _THE_RE.sub("[thẻ]", " ".join(str(text).split())[:_TOI_DA_CHU])
-    return f'<c i="{i}">{t}</c>'
+    """Một bình luận trong thẻ <c>. Bình luận là chữ người lạ viết, kẻo nó tự đóng thẻ rồi
+    chèn "lệnh" ra ngoài (rà 01/10/2026): NFKC (＜ -> <) rồi đổi MỌI '<' '>' thành '‹' '›'.
+    Review 02/10/2026: lọc theo mẫu `<c …>` lọt chữ đồng dạng (Cyrillic "с" trong "<с i=…>");
+    không còn dấu ngoặc thì chữ gì cũng không giả được thẻ. "<3" thành "‹3", vẫn đọc được."""
+    t = unicodedata.normalize("NFKC", " ".join(str(text).split()))[:_TOI_DA_CHU]
+    return f'<c i="{i}">{t.replace("<", "‹").replace(">", "›")}</c>'
 
 
 def _mot_lo(texts: list[str]) -> dict[int, tuple[str, str]]:
