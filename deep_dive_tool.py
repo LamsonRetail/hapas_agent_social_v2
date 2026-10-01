@@ -42,8 +42,11 @@ Giá gói FREE: TikTok 0,00125 USD/bình luận, YouTube 0,002, Facebook 0,0025 
 
 from __future__ import annotations
 
+import contextvars
 import datetime
+import math
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 
@@ -84,6 +87,20 @@ _HEADER = ["Nền tảng", "Người bình luận", "Nội dung bình luận", "
            "Likes", "Trả lời", "Thời gian", "Tác giả đã thích", "Link bài"]
 _TAB_THONG_KE = "Thống kê"
 _CAT = "CÓ THỂ BỊ CẮT DO TRẦN CHI PHÍ"
+_CHUA_CHAY_GIO = "CHƯA CHẠY — hết thời gian"
+_CHUA_CHAY_NS = "CHƯA CHẠY — chạm ngân sách lượt"
+_CHUA_XONG_GIU = "CHƯA XONG — giữ phần đã lấy"
+
+# Trần USD MỖI LÔ = ước tính lô × 1,5 (kẹp [mức actor đòi hoặc 0,1; trần tool]). Rà
+# 01/10/2026: lô nào cũng được cả `tran_usd_goi` nên N lô có thể tiêu tới N × ngân sách
+# đã duyệt nếu giá actor lệch. Cả lượt gọi tool thì giữ sổ: tiền lô đã xong + phần giữ
+# chỗ của lô đang chạy không được vượt max(ước tính × 1,3; trần tool) — vượt thì lô sau
+# không khởi chạy.
+_HE_SO_TRAN_LO = 1.5
+_HE_SO_NGAN_SACH = 1.3
+# Còn ít hơn chừng này giây tới hạn run thì không khởi chạy lô (vẫn mất phí start mà
+# run bị huỷ ngay).
+_GIAY_TOI_THIEU_LO = 20
 
 
 def _kep(v, md: float, lo: float, hi: float) -> float:
@@ -271,6 +288,83 @@ def _uoc_tinh(ke_hoach: dict) -> tuple[int, float]:
     return int(bl), round(usd, 4)
 
 
+def _uoc_lo(p: str, lo: list[str], per: int) -> float:
+    return len(lo) * per * _GIA[p] + _GIA_KHOI_DONG.get(p, 0.0)
+
+
+def _tran_lo(p: str, uoc: float, tran_usd: float) -> float:
+    """maxTotalChargeUsd của MỘT lô: ước tính × 1,5, làm tròn LÊN tới cent (kẻo `_call`
+    làm tròn xuống dưới ước tính), không thấp hơn mức actor đòi, không quá trần tool."""
+    san = max(_MIN_CHARGE.get(p, 0.0), _TRAN_USD[1])
+    return min(tran_usd, max(san, math.ceil(uoc * _HE_SO_TRAN_LO * 100 - 1e-9) / 100))
+
+
+class _SoNganSach:
+    """Sổ tiền của MỘT lượt gọi tool, dùng chung giữa các lô chạy song song."""
+
+    def __init__(self, tran: float):
+        self.tran, self.da, self.giu = tran, 0.0, 0.0
+        self.dung = False
+        self._khoa = threading.Lock()
+
+    def xin(self, so_tien: float) -> bool:
+        """Giữ chỗ cho một lô. Từ chối một lần là dừng hẳn: giá đang lệch, lô nhỏ phía sau
+        có lọt qua cũng chỉ làm kết quả lỗ chỗ."""
+        with self._khoa:
+            if self.dung or self.da + self.giu + so_tien > self.tran + 1e-9:
+                self.dung = True
+                return False
+            self.giu += so_tien
+            return True
+
+    def tra(self, giu: float, thuc: float) -> None:
+        with self._khoa:
+            self.giu -= giu
+            self.da += thuc
+
+
+def _keo_lo(p: str, lo: list[str], per: int, tran_lo: float, giu: float,
+            so_ns: _SoNganSach, han_run: float) -> dict:
+    """Kéo MỘT lô — chạy trong `contextvars.copy_context()` của riêng nó.
+
+    Đặt `_SO_RUN`/`_HAN_CHOT` của apify_tool (đợt 2) cho lô: tới hạn thì `_run_actor` HUỶ
+    run trên Apify và trả phần đã lấy (`mot_phan`), thay vì ném QUA_GIO làm mất trắng
+    cả lô như khi submit thẳng `_FETCH[p]` (rà 01/10/2026: không luồng nào đặt hai biến
+    này, nên lô quá giờ không bao giờ được giữ phần dở)."""
+    kq = {"p": p, "lo": lo, "per": per, "binh_luan": [], "n_raw": 0, "loi": "",
+          "trang_thai": "OK", "ma": "OK", "tran_lo": tran_lo}
+    if han_run - time.monotonic() < _GIAY_TOI_THIEU_LO:
+        kq["trang_thai"] = _CHUA_CHAY_GIO
+        return kq
+    if not so_ns.xin(giu):
+        kq["trang_thai"] = _CHUA_CHAY_NS
+        return kq
+    so: list = []
+    A._SO_RUN.set(so)
+    A._HAN_CHOT.set(han_run)
+    try:
+        kq["binh_luan"], kq["n_raw"] = _FETCH[p](lo, per, tran_lo)
+    except A.LoiApify as e:
+        if e.ma == "QUA_GIO":
+            kq["trang_thai"] = "CHƯA XONG — hết thời gian, đã dừng run, chưa lấy được bình luận"
+        else:
+            kq["loi"] = _che_token(f"{type(e).__name__}: {e}")[:220]
+    except Exception as e:  # noqa: BLE001
+        # Che token: chuỗi lỗi đi thẳng vào câu trả lời của model và sổ audit.
+        kq["loi"] = _che_token(f"{type(e).__name__}: {e}")[:220]
+    finally:
+        usd = sum(float(m.get("usd") or 0) for m in so if isinstance(m, dict))
+        # Apify ghi tiền chậm vài giây: lấy số lớn hơn giữa tiền run báo và giá × số item.
+        theo_item = (kq["n_raw"] * _GIA[p] + _GIA_KHOI_DONG.get(p, 0.0)) if kq["n_raw"] else 0
+        so_ns.tra(giu, max(usd, theo_item))
+    ma = {m.get("ma") for m in so if isinstance(m, dict)}
+    if "QUA_GIO" in ma and kq["binh_luan"]:
+        kq["ma"], kq["trang_thai"] = "OK_MOT_PHAN", _CHUA_XONG_GIU
+    elif "OK_MOT_PHAN" in ma:        # run FAILED/ABORTED giữa chừng (vd chạm trần lô)
+        kq["ma"] = "OK_MOT_PHAN"
+    return kq
+
+
 def _vua_ngan_sach(nhom: dict, per: int, tran_bl: int, tran_usd: float) -> dict:
     """Mức vừa ngân sách không cần hỏi: max_comments cho đủ số bài, hoặc số bài với per hiện tại."""
     n = sum(len(us) for us in nhom.values())
@@ -354,7 +448,9 @@ SCHEMA = {
         "- Đọc `per_url`. `status`='" + _CAT + "' nghĩa là lượt chạy chạm trần nên bài đó "
         "CHƯA lấy hết — nói rõ như vậy, TUYỆT ĐỐI không nói bài đó không có bình luận. Chỉ "
         "bài `status`='OK' với 0 comment mới là bài thật sự chưa có bình luận. 'CHƯA CHẠY'/"
-        "'CHƯA XONG' = hết thời gian, nói rõ và đề xuất soi lại ít bài hơn.\n"
+        "'CHƯA XONG' = hết thời gian, nói rõ và đề xuất soi lại ít bài hơn. '"
+        + _CHUA_XONG_GIU + "' = chỉ có PHẦN bình luận lấy được trước khi hết giờ, chưa đủ. '"
+        + _CHUA_CHAY_NS + "' = dừng vì các lô trước đã tiêu gần hết ngân sách đã duyệt.\n"
         "- SỐ SENTIMENT CHỈ LẤY TỪ `thong_ke` / chép `dong_thong_ke`. Luôn nói đã phân loại "
         "`da_phan_loai`/`tong`. TUYỆT ĐỐI không tự ước lượng tỉ lệ, không làm tròn khác đi. "
         "Dẫn bình luận thật từ `trich_dan`. `phan_loai.trang_thai` khác 'đã chạy' thì nói "
@@ -452,25 +548,35 @@ def _handle(args: dict, **kwargs) -> str:
     viec = [(p, lo, ke_hoach[p][0]) for p in ke_hoach for lo in ke_hoach[p][1]]
     lo_kq: list[dict] = []
     if viec:
-        ex = ThreadPoolExecutor(max_workers=min(_SONG_SONG, len(viec)))
-        futs = {ex.submit(_FETCH[p], lo, pc, tran_usd): (p, lo, pc) for p, lo, pc in viec}
         han = max(10.0, A._TOOL_DEADLINE - _DANH_CHO_SAU - (time.monotonic() - t0))
-        xong, chua = wait(futs, timeout=han)
+        han_keo = time.monotonic() + han
+        # Run dừng TRƯỚC hạn chờ `_DU_PHONG_HUY` giây: đủ để huỷ run + lấy item dở dang.
+        han_run = han_keo - A._DU_PHONG_HUY
+        so_ns = _SoNganSach(max(est * _HE_SO_NGAN_SACH, tran_usd))
+        ex = ThreadPoolExecutor(max_workers=min(_SONG_SONG, len(viec)))
+        futs = {}
+        for p, lo, pc in viec:
+            uoc = _uoc_lo(p, lo, pc)
+            tl = _tran_lo(p, uoc, tran_usd)
+            # Giữ chỗ trong sổ theo ước tính × 1,5 (không theo sàn 0,5 USD của YouTube/
+            # Facebook): sàn là điều kiện actor đòi để chạy, tiền vẫn tính theo bình luận.
+            giu = min(tl, uoc * _HE_SO_TRAN_LO)
+            futs[ex.submit(contextvars.copy_context().run, _keo_lo, p, lo, pc, tl, giu,
+                           so_ns, han_run)] = (p, lo, pc)
+        xong, chua = wait(futs, timeout=max(0.05, han_keo - time.monotonic()))
         dang_chay = {f for f in chua if f.running()}
         ex.shutdown(wait=False, cancel_futures=True)
         for f, (p, lo, pc) in futs.items():
             kq = {"p": p, "lo": lo, "per": pc, "binh_luan": [], "n_raw": 0, "loi": "",
-                  "trang_thai": "OK"}
+                  "trang_thai": "OK", "ma": "OK"}
             if f in xong:
                 try:
-                    kq["binh_luan"], kq["n_raw"] = f.result()
-                except Exception as e:  # noqa: BLE001
-                    # Che token: chuỗi lỗi đi thẳng vào câu trả lời của model và sổ audit.
+                    kq = f.result()
+                except Exception as e:  # noqa: BLE001 — `_keo_lo` tự bắt; phòng hờ
                     kq["loi"] = _che_token(f"{type(e).__name__}: {e}")[:220]
             else:
-                kq["trang_thai"] = ("CHƯA XONG — hết thời gian chờ (lượt vẫn có thể đang "
-                                    "chạy trên Apify)" if f in dang_chay else
-                                    "CHƯA CHẠY — hết thời gian")
+                kq["trang_thai"] = ("CHƯA XONG — hết thời gian chờ (run tự bị huỷ khi tới "
+                                    "hạn)" if f in dang_chay else _CHUA_CHAY_GIO)
             lo_kq.append(kq)
 
     rows: list[dict] = []
@@ -483,7 +589,7 @@ def _handle(args: dict, **kwargs) -> str:
             rows.append(c)
 
     # ── chi phí thật (hỏi song song với gán nhãn: Apify ghi tiền chậm vài giây) ──
-    da_chay = [kq for kq in lo_kq if kq["trang_thai"] != "CHƯA CHẠY — hết thời gian"]
+    da_chay = [kq for kq in lo_kq if not kq["trang_thai"].startswith("CHƯA CHẠY")]
     actors = sorted({_ACTORS[kq["p"]] for kq in da_chay})
     ex_cp = ThreadPoolExecutor(max_workers=1)
     f_cp = ex_cp.submit(A._chi_phi_thuc, actors, bat_dau, est) if actors else None
@@ -516,16 +622,23 @@ def _handle(args: dict, **kwargs) -> str:
         p, lo = kq["p"], kq["lo"]
         # Lượt trả gần đủ maxItems = các bài đầu đã ăn hết hạn mức, bài rỗng phía sau có
         # thể chỉ là bị cắt (đúng ca 01/10: 13/25 bài hiện 0).
+        # Run dừng giữa chừng phía Apify (FAILED/ABORTED, vd chạm trần lô) cũng là bị cắt.
         cat = bool(kq["n_raw"]) and (kq["n_raw"] >= 0.95 * kq["per"] * len(lo)
-                                     or cham_tran_thuc)
+                                     or cham_tran_thuc or kq.get("ma") == "OK_MOT_PHAN")
         for u in lo:
             if kq["loi"]:
                 per_url[u] = {"platform": p, "status": "LỖI", "error": kq["loi"]}
                 continue
+            n = sum(1 for c in kq["binh_luan"] if c["bai"] == u)
+            if kq["trang_thai"] == _CHUA_XONG_GIU:
+                per_url[u] = {"platform": p, "status": _CHUA_XONG_GIU, "ma": "OK_MOT_PHAN",
+                              "comments": n,
+                              "ghi_chu": "hết thời gian, run đã dừng — chỉ là phần lấy được "
+                                         "tới lúc đó, CHƯA đủ bình luận của bài"}
+                continue
             if kq["trang_thai"] != "OK":
                 per_url[u] = {"platform": p, "status": kq["trang_thai"], "comments": 0}
                 continue
-            n = sum(1 for c in kq["binh_luan"] if c["bai"] == u)
             if n == 0 and cat:
                 per_url[u] = {"platform": p, "status": _CAT, "comments": 0,
                               "ghi_chu": "lượt chạy chạm trần nên bài này chưa được lấy — "
@@ -539,8 +652,9 @@ def _handle(args: dict, **kwargs) -> str:
             per_url[u] = {"platform": p, "status": "CHƯA HỖ TRỢ",
                           "error": f"Chưa nối nguồn bình luận cho {p}. Phải nói thẳng."}
     so_cat = sum(1 for v in per_url.values() if v["status"] == _CAT)
+    so_ns_cham = sum(1 for v in per_url.values() if v["status"] == _CHUA_CHAY_NS)
     so_chua = sum(1 for v in per_url.values() if v["status"].startswith("CHƯA X")
-                  or v["status"].startswith("CHƯA CHẠY"))
+                  or v["status"] == _CHUA_CHAY_GIO)
 
     base = dict(so_bai=len(urls), max_comments=per,
                 max_comments_thuc={p: k[0] for p, k in ke_hoach.items()},
@@ -548,19 +662,23 @@ def _handle(args: dict, **kwargs) -> str:
                 platforms_failed=failed, chua_ho_tro=list(chua_ho_tro),
                 tong_comment=len(rows), khong_quy_ve_bai=khong_quy,
                 so_luot_chay=len(da_chay), so_bai_co_the_bi_cat=so_cat,
+                so_bai_cham_ngan_sach=so_ns_cham,
                 uoc_tinh_chi_phi_usd=est,
                 chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,
                 cham_tran_chi_phi=cham_tran_thuc or bool(so_cat),
                 chi_phi=A._dong_chi_phi(thuc, est))
     canh_bao = ((f" {so_cat} bài {_CAT} — nói rõ, đừng gọi là 0 bình luận." if so_cat else "")
                 + (f" {so_chua} bài chưa kéo xong vì hết thời gian." if so_chua else "")
+                + (f" {so_ns_cham} bài {_CHUA_CHAY_NS}: các lô trước đã tiêu gần hết ngân "
+                   f"sách đã duyệt — nói rõ, đề xuất soi riêng các bài đó." if so_ns_cham else "")
                 + (f" CẢNH BÁO: nguồn HỎNG: {', '.join(failed)}." if failed else "")
                 + (f" CHƯA HỖ TRỢ: {', '.join(chua_ho_tro)} — phải nói rõ."
                    if chua_ho_tro else ""))
 
     if not rows:
         return tool_result(
-            success=not failed and not so_cat and not so_chua, sheet_url=None, **base,
+            success=not failed and not so_cat and not so_chua and not so_ns_cham,
+            sheet_url=None, **base,
             note=("Không lấy được bình luận nào. Chỉ bài `status`='OK' với 0 comment mới là "
                   "bài chưa có bình luận — nói đúng từng bài theo `per_url`. Không tạo sheet."
                   + canh_bao))

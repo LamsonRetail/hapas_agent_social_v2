@@ -36,10 +36,13 @@ Shop có soi được không". Đo thật 25/09/2026, từng nguồn một:
 from __future__ import annotations
 
 import collections
+import contextvars
 import datetime
 import re
 import statistics
+import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -407,37 +410,50 @@ def soi(links_vao: list[str], so_danh_gia: int, gom_shop: bool = False) -> dict:
               + KHOI_DONG_TIM + GIA_TIM_SHOPEE * _SHOP_TOI_DA for x in shopee) \
         + GIA_CT_SHOPEE * len(shopee) + THAT_TTS * len(tts)
 
-    from concurrent.futures import ThreadPoolExecutor
     loi: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=2 + len(shopee)) as ex:
-        f_dg = ex.submit(_danh_gia_shopee, shopee, n_sp) if shopee else None
-        f_gia = {x["item_id"]: ex.submit(_gia_shopee, x) for x in shopee}
-        f_ct = {x["item_id"]: ex.submit(_chi_tiet_shopee, x) for x in shopee}
-        f_tts = ex.submit(_tiktok_shop, tts, n_tt) if tts else None
+    # KHÔNG `with ThreadPoolExecutor`: `with` chờ luồng chậm nhất nên `timeout` vô hiệu (rà
+    # 01/10/2026). Một hạn chung; luồng còn treo bỏ lại, run Apify tự hết hạn.
+    han = time.monotonic() + A._TOOL_DEADLINE
+
+    def cho() -> float:
+        return max(0.05, han - time.monotonic())
+
+    ex = ThreadPoolExecutor(max_workers=2 + len(shopee))
+
+    def gui(fn, *a):
+        return ex.submit(contextvars.copy_context().run, fn, *a)
+
+    try:
+        f_dg = gui(_danh_gia_shopee, shopee, n_sp) if shopee else None
+        f_gia = {x["item_id"]: gui(_gia_shopee, x) for x in shopee}
+        f_ct = {x["item_id"]: gui(_chi_tiet_shopee, x) for x in shopee}
+        f_tts = gui(_tiktok_shop, tts, n_tt) if tts else None
         dg_sp: dict[str, list[dict]] = {}
         if f_dg:
             try:
-                dg_sp = f_dg.result(timeout=A._TOOL_DEADLINE)
+                dg_sp = f_dg.result(timeout=cho())
             except Exception as e:  # noqa: BLE001
                 loi["shopee"] = _loi_de_hieu("Shopee", e)
         gia = {}
         for k, f in f_gia.items():
             try:
-                gia[k] = f.result(timeout=A._TOOL_DEADLINE)
+                gia[k] = f.result(timeout=cho())
             except Exception:  # noqa: BLE001 — giá là phụ, hỏng thì báo "chưa lấy được giá"
                 gia[k] = None
         ct = {}
         for k, f in f_ct.items():
             try:
-                ct[k] = f.result(timeout=A._TOOL_DEADLINE)
+                ct[k] = f.result(timeout=cho())
             except Exception:  # noqa: BLE001 — số đã bán là phụ, hỏng thì để trống và nói ra
                 ct[k] = None
         sp_tts = []
         if f_tts:
             try:
-                sp_tts = f_tts.result(timeout=A._TOOL_DEADLINE)
+                sp_tts = f_tts.result(timeout=cho())
             except Exception as e:  # noqa: BLE001
                 loi["tiktok_shop"] = _loi_de_hieu("TikTok Shop", e)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
     san_pham = []
     tq, pl_rows, mt_rows, bl_rows = [], [], [], []

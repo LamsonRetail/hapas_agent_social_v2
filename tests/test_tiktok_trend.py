@@ -301,3 +301,74 @@ def test_mau_thieu_thi_cao_them_duoi_hashtag_chua_soi(gia, monkeypatch):
     assert len(luot) == 2 and not set(luot[0][0]) & set(luot[1][0]), "lượt 2 soi hashtag mới"
     m = kq["mau_am_thanh"]
     assert m["so_luot_cao"] == 2 and m["da_cao"] == 30 and m["giu_lai_trong_ky_dung_ngon_ngu"] == 25
+
+
+# ───────────────────────── rà độc lập 01/10/2026 ─────────────────────────
+@pytest.mark.parametrize("tag", [
+    "crochet", "crochetbag", "#CrochetBag", "tainan", "tainanhopdong", "tainan2026",
+    "quàđôi", "thientai", "thiêntài", "baucua", "batmanmanga", "chếtcười", "đẹpchếtmất",
+    "giếtthờigian", "machete", "ricochet", "trungthu2026", "samdealruocden"])
+def test_nhay_cam_khong_bao_nham(tag):
+    """Gốc ngắn trên chữ bỏ dấu từng gắn cờ #crochetbag (túi móc len — đúng ngành!) là
+    'chết chóc' và #tainan (Đài Nam) là 'tai nạn'."""
+    assert T._nhay_cam(tag) == "", tag
+
+
+@pytest.mark.parametrize("tag, nhan", [
+    ("traibuonnguoi", "buôn người"), ("tainangiaothong", "tai nạn / thiên tai"),
+    ("vutainan", "tai nạn / thiên tai"), ("tainạn", "tai nạn / thiên tai"),
+    ("thiêntai", "tai nạn / thiên tai"), ("chetchoc", "chết chóc"),
+    ("quađời", "chết chóc"), ("gietnguoi", "chết chóc"), ("bầucử", "chính trị"),
+    ("baucu2026", "chính trị"), ("khungbo", "bạo lực"), ("bocphot", "scandal")])
+def test_nhay_cam_van_bat_dung(tag, nhan):
+    assert T._nhay_cam(tag) == nhan
+
+
+def _hai_luot(monkeypatch, goi, raw1: int, giu1: int):
+    """Lượt 1 trả `raw1` video, chỉ `giu1` video trong kỳ; lượt 2 trả 20 video mới."""
+    monkeypatch.setattr(T, "_bang_hashtag", lambda vung, ky, n: [
+        {"hang": i, "hashtag": f"t{i}", "huong": "lên", "so_bai": 0, "luot_xem": 0,
+         "nganh": "", "link": ""} for i in range(40)])
+    luot = []
+
+    def call(actor, payload, limit, mem=None, tran_usd=None, **kw):
+        goi.append((actor, payload))
+        if actor != A._ACTORS["tiktok_fallback"]:
+            return [] if actor == T.ACTOR_NHAC else VIDEO
+        luot.append({"limit": limit, "tran_usd": tran_usd})
+        if len(luot) == 1:
+            return [dict(_vid(f"k{i}", f"a{i}", ngay=1 if i < giu1 else 40), id=f"v{i}")
+                    for i in range(raw1)]
+        return [dict(_vid(f"k{i}", f"a{i}"), id=f"w{i}") for i in range(20)]
+    monkeypatch.setattr(A, "_call", call)
+    return luot
+
+
+def test_luot_hai_chi_dung_phan_con_lai_cua_tran(gia, monkeypatch):
+    """Rà 01/10: lượt hai từng được xin lại CẢ trần mỗi lượt → tiêu gần gấp đôi."""
+    goi, _ = gia
+    luot = _hai_luot(monkeypatch, goi, raw1=500, giu1=10)
+    json.loads(T.chay({"so_video_mau": 200}))
+    suc = int(0.9 * 2.4 / 0.003)                   # 720 video mỗi lượt
+    assert luot[0]["limit"] == 500 and luot[0]["tran_usd"] is None
+    assert len(luot) == 2 and luot[1]["limit"] == suc - 500, "chỉ phần còn lại của trần"
+    assert luot[1]["tran_usd"] == pytest.approx(2.4 - 500 * 0.003)
+    tong = (500 + luot[1]["limit"]) * 0.003
+    assert tong <= 0.9 * 2.4 + 1e-9, "hai lượt cộng lại vẫn trong một trần"
+
+
+def test_luot_dau_an_gan_het_tran_thi_khong_cao_them(gia, monkeypatch):
+    goi, _ = gia
+    luot = _hai_luot(monkeypatch, goi, raw1=710, giu1=10)
+    kq = json.loads(T.chay({"so_video_mau": 300}))
+    assert len(luot) == 1, "còn 10 video trong trần — không đáng một lượt"
+    assert kq["mau_am_thanh"]["so_luot_cao"] == 1
+
+
+def test_uoc_tinh_truoc_tinh_ca_luot_hai_te_nhat(gia):
+    kq = json.loads(T.chay({"so_nhac": 0, "so_video": 5, "so_hashtag": 5}))
+    # so_video_mau mặc định 100: lượt 1 xin 250, lượt 2 tệ nhất tới hết trần 720 video.
+    assert T._so_mau_toi_da(100, 800, 2.4) == 720
+    mau = 720 * 0.003
+    assert kq["uoc_tinh_chi_phi_usd"] >= round(mau, 3)
+    assert T._so_mau_toi_da(20, 800, 10.0) == 50 + 121, "mẫu nhỏ: 2,5×20 + 6×20+1"

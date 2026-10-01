@@ -23,6 +23,7 @@ thật được ghi vào sổ audit (`chi_phi_tool`).
 from __future__ import annotations
 
 import collections
+import contextvars
 import datetime
 import re
 import statistics
@@ -314,14 +315,22 @@ def _handle(args: dict, **_kwargs) -> str:
     t0 = time.monotonic()
 
     ket_qua, loi = [], {}
-    with ThreadPoolExecutor(max_workers=len(nhom)) as ex:
-        futs = {p: ex.submit(_LAY[p], v, n) for p, v in nhom.items()}
+    # KHÔNG `with ThreadPoolExecutor`: `with` gọi shutdown(wait=True), ngồi chờ luồng chậm
+    # nhất nên `timeout` vô hiệu (rà 01/10/2026, cùng lỗi audit 340s/508s của social_listen).
+    # Một hạn chung cho mọi nguồn; luồng còn treo bỏ lại, run Apify tự hết hạn.
+    han = t0 + A._TOOL_DEADLINE
+    ex = ThreadPoolExecutor(max_workers=len(nhom))
+    try:
+        futs = {p: ex.submit(contextvars.copy_context().run, _LAY[p], v, n)
+                for p, v in nhom.items()}
         for p, f in futs.items():
             try:
-                for tk in f.result(timeout=A._TOOL_DEADLINE).values():
+                for tk in f.result(timeout=max(0.05, han - time.monotonic())).values():
                     ket_qua.append((p, tk))
             except Exception as e:  # noqa: BLE001
                 loi[p] = f"{type(e).__name__}: {e}"[:250]
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
     thuc = A._chi_phi_thuc([_ACTOR[p] for p in nhom], bat_dau, est)
     rng = f"{tu:%Y-%m-%d} → {den:%Y-%m-%d}"

@@ -70,6 +70,10 @@ _SO_HASHTAG_SOI_TOI_DA = 25
 # hashtag CHƯA soi (vẫn trong trần mỗi lượt).
 _HE_SO_XIN = 2.5
 _CON_GIAY_DE_CAO_THEM = 60
+# Lượt cào thêm dùng PHẦN CÒN LẠI của trần mỗi lượt sau lượt đầu, không phải cả trần lần
+# nữa (rà 01/10/2026: hai lượt mỗi lượt 90% trần = tiêu gần gấp đôi). Còn ít hơn chừng
+# này video thì thôi, không đáng một lượt khởi chạy.
+_MAU_THEM_TOI_THIEU = 20
 # Hashtag chiến dịch trả tiền của brand (vd #larocheposaysuperbrandday,
 # #hợptáccùnglarocheposay): lên bảng vì brand mua, không phải trend tự nhiên. Không đem
 # đi lấy mẫu, kẻo âm thanh/hiệu ứng của chiến dịch bị đếm thành trend (đo thật 25/09: hai
@@ -77,19 +81,39 @@ _CON_GIAY_DE_CAO_THEM = 60
 _CHIEN_DICH = re.compile(unicodedata.normalize(
     "NFC", r"hoptac|hợptác|brandday|superbrand|collab|taitro|tàitrợ"))
 # Hashtag chủ đề NHẠY CẢM: brand không nên bám. 01/10/2026 Mark gợi ý móc nội dung vào
-# #traibuonnguoi chỉ vì nó đang lên bảng. So trên chữ đã bỏ dấu, viết liền.
+# #traibuonnguoi chỉ vì nó đang lên bảng.
+# Hai cách so, vì bản đầu so GỐC NGẮN trên chữ bỏ dấu và báo nhầm (rà 01/10/2026):
+# "crochet"/"crochetbag" chứa "chet" (túi móc len — trend ĐÚNG ngành của brand túi!),
+# "tainan" là thành phố Đài Nam, "thientai" vừa là "thiên tai" vừa là "thiên tài".
+#   1. Regex trên chữ đã BỎ DẤU, viết liền: chỉ cụm DÀI, đặc thù tiếng Việt, đã soát
+#      không trùng tiếng Anh/địa danh. Gốc ngắn mơ hồ ("tainan", "chet", "giet") chỉ tính
+#      khi đi kèm hậu tố tiếng Việt rõ nghĩa.
+#   2. Chuỗi CÓ DẤU (chữ thường, NFC, viết liền): có dấu thì không còn trùng tiếng Anh.
+#      Không có "chết"/"giết" trơn: "chếtcười", "đẹpchếtmất" là tiếng lóng khen,
+#      "giếtthờigian" là giết thời gian.
 _NHAY_CAM = (
-    ("buôn người", ("buonnguoi",)),
-    ("lừa đảo / bắt cóc", ("luadao", "batcoc", "mattich")),
-    ("tai nạn / thiên tai", ("tainan", "thientai", "lulut", "dongdat", "chayno", "hoahoan")),
+    ("buôn người", r"buonnguoi|buonban(?:noitang|treem|phunu)", ("buônngười",)),
+    ("lừa đảo / bắt cóc", r"luadao|batcoc|mattich", ("lừađảo", "bắtcóc", "mấttích")),
+    ("tai nạn / thiên tai",
+     r"(?:vu|gay|bi)tainan|tainan(?:giaothong|xe|lienhoan|thamkhoc|kinhhoang|nghiemtrong"
+     r"|chetnguoi|laodong|maybay|hamtau)|lulut|ngaplut|satlodat|dongdat|chayno|hoahoan",
+     ("tainạn", "thiêntai", "lũlụt", "độngđất", "cháynổ", "hỏahoạn", "hoảhoạn")),
     # Không có "quadoi": bỏ dấu thì "qua đời" trùng "quà đôi" — hashtag quà tặng của brand.
-    ("chết chóc", ("tuvong", "anmang", "giet", "chet")),
-    ("bạo lực", ("baoluc", "danhnhau", "hiepdam", "xamhai", "khungbo", "chientranh")),
-    ("ma tuý", ("matuy",)),
-    ("chính trị", ("chinhtri", "bieutinh", "baucu")),
-    ("tôn giáo", ("tongiao", "phatgiao", "congiao", "thienchua")),
-    ("scandal", ("scandal", "bocphot")),
+    ("chết chóc",
+     r"tuvong|nguoichet|chetnguoi|chetchoc|xacchet|caichet|gietnguoi|giethai|satnhan"
+     r"|vuanmang|anmang(?!a)",                       # "batmanmanga" chứa "anmang"
+     ("tửvong", "quađời", "ánmạng", "giếtngười", "giếthại", "bịgiết", "xácchết",
+      "cáichết", "chếtchóc")),
+    ("bạo lực", r"baoluc|danhnhau|hiepdam|xamhai|khungbo|chientranh",
+     ("bạolực", "đánhnhau", "hiếpdâm", "xâmhại", "khủngbố", "chiếntranh")),
+    ("ma tuý", r"matuy", ("matúy", "matuý")),
+    # "baucua" (bầu cua — trò chơi Tết) chứa "baucu".
+    ("chính trị", r"chinhtri|bieutinh|baucu(?!a)", ("chínhtrị", "biểutình", "bầucử")),
+    ("tôn giáo", r"tongiao|phatgiao|congiao|thienchua",
+     ("tôngiáo", "phậtgiáo", "côngiáo", "thiênchúa")),
+    ("scandal", r"scandal|bocphot", ("bócphốt",)),
 )
+_NHAY_CAM_RE = tuple((nhan, re.compile(rx), co_dau) for nhan, rx, co_dau in _NHAY_CAM)
 _AM_GOC_RE = re.compile(r"^\s*(original sound|âm thanh gốc|nhạc nền|son original|"
                         r"sonido original|suara asli|som original)", re.I)
 
@@ -99,11 +123,16 @@ def _khong_dau(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", "".join(c for c in s if unicodedata.category(c) != "Mn"))
 
 
+def _co_dau(s: str) -> str:
+    """Chữ thường NFC, viết liền, GIỮ dấu."""
+    return re.sub(r"[\W_]", "", unicodedata.normalize("NFC", str(s or "").lower()))
+
+
 def _nhay_cam(tag: str) -> str:
     """Chủ đề nhạy cảm của hashtag, "" nếu không."""
-    k = _khong_dau(tag)
-    for nhan, goc in _NHAY_CAM:
-        if any(g in k for g in goc):
+    k, d = _khong_dau(tag), _co_dau(tag)
+    for nhan, rx, co_dau in _NHAY_CAM_RE:
+        if rx.search(k) or any(g in d for g in co_dau):
             return nhan
     return ""
 
@@ -216,9 +245,19 @@ def _so_xin(so_mau: int, tran_bai: int, tran_usd: float) -> int:
     return max(1, min(tran_bai, suc, math.ceil(so_mau * _HE_SO_XIN)))
 
 
-def _cao_mau(tags: list[str], n: int) -> list[dict]:
+def _so_mau_toi_da(so_mau: int, tran_bai: int, tran_usd: float) -> int:
+    """Số video mẫu TỆ NHẤT của cả hai lượt cào — để ước tính trước khi chạy cho thật.
+
+    Lượt hai xin tối đa 6 lần số còn thiếu (+1), và cả hai lượt cộng lại không quá
+    `_BIEN` × trần (xem `_mau_am_thanh`)."""
+    suc = max(1, int(_BIEN * tran_usd / _GIA_VIDEO_MAU))
+    return min(suc, _so_xin(so_mau, tran_bai, tran_usd) + min(tran_bai, 6 * so_mau + 1))
+
+
+def _cao_mau(tags: list[str], n: int, tran_usd: float | None = None) -> list[dict]:
     per = max(1, -(-n // max(1, len(tags))))
-    return A._call(A._ACTORS["tiktok_fallback"], {"hashtags": tags, "resultsPerPage": per}, n)
+    return A._call(A._ACTORS["tiktok_fallback"], {"hashtags": tags, "resultsPerPage": per}, n,
+                   tran_usd=tran_usd)
 
 
 def _khoa_video(it: dict) -> str:
@@ -265,14 +304,20 @@ def _mau_am_thanh(thu_tu: list[str], so_mau: int, vung: str, ky: int,
     giu = loc(raw)
     cao, da_xin, so_luot = len(raw), n1, 1
     con_lai = thu_tu[k1:]
-    if (len(giu) < so_mau and con_lai and raw
+    # Ngân sách lượt hai = trần mỗi lượt − tiền lượt đầu THẬT tiêu (actor tính theo video
+    # trả về). Lượt đầu cào ít — đúng lúc cần lượt hai — thì còn nhiều; cào gần đủ thì
+    # còn ít và lượt hai bị bỏ.
+    suc2 = suc - len(raw)
+    if (len(giu) < so_mau and con_lai and raw and suc2 >= _MAU_THEM_TOI_THIEU
             and con_giay - (time.monotonic() - t0) > _CON_GIAY_DE_CAO_THEM):
         # Tỉ lệ cào/giữ của lượt đầu cho biết phải xin thêm bao nhiêu (kẹp 1,5–6 lần).
         ti_le = min(6.0, max(1.5, len(raw) / max(1, len(giu))))
-        n2 = max(1, min(tran_bai, suc, int((so_mau - len(giu)) * ti_le) + 1))
+        n2 = max(1, min(tran_bai, suc2, int((so_mau - len(giu)) * ti_le) + 1))
         them = con_lai[:max(1, min(_SO_HASHTAG_SOI_TOI_DA, -(-n2 // _VIDEO_MOI_HASHTAG)))]
+        # Trần USD của lượt hai cũng chỉ là phần còn lại — Apify tự chặn nếu giá lệch.
+        tran2 = round(max(0.1, tran_usd - len(raw) * _GIA_VIDEO_MAU), 2)
         try:
-            moi = [it for it in _cao_mau(them, n2) if _khoa_video(it) not in da_thay]
+            moi = [it for it in _cao_mau(them, n2, tran2) if _khoa_video(it) not in da_thay]
             da_soi, cao, da_xin, so_luot = da_soi + them, cao + len(moi), da_xin + n2, 2
             giu += loc(moi)
         except Exception as e:  # noqa: BLE001 — lượt đầu vẫn dùng được
@@ -339,7 +384,8 @@ def chay(args: dict) -> str:
     # `_chon_hashtag_soi`, và lượt cào thêm), mà mỗi dòng chỉ 0,0015 USD.
     k = -(-so_mau // _VIDEO_MOI_HASHTAG) if so_mau else 0
     n_tag = max(so_tag, min(100, 2 * k + 10)) if so_mau else so_tag
-    n_mau = _so_xin(so_mau, tran_bai, tran_usd) if so_mau else 0
+    # Ước tính tính cả lượt cào thêm TỆ NHẤT, không chỉ lượt đầu.
+    n_mau = _so_mau_toi_da(so_mau, tran_bai, tran_usd) if so_mau else 0
     est = (_GIA_KHOI_DONG * (1 + bool(so_vid)) + _GIA_DONG * (n_tag + so_vid)
            + _GIA_VIDEO_MAU * n_mau
            + ((_GIA_NHAC_KHOI_DONG + _GIA_NHAC * n_nhac) if n_nhac else 0))

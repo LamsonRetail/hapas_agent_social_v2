@@ -450,8 +450,10 @@ def _run_actor(actor: str, payload: dict, limit: int, mem: int | None = None,
     meta = {run_id, status, statusMessage, giay, ma, ly_do?, so_item, ...}. Lỗi đã phân
     loại thì ném `LoiApify`. Quá hạn: HUỶ run trên Apify (ngừng tính tiền, trả chỗ chạy
     đồng thời), rồi lấy item đã có — trả về nếu `mot_phan` (bên gọi đọc được meta),
-    không thì ném QUA_GIO như run-sync cũ. Chỉ thử lại MỘT lần, cho lỗi thoáng qua
-    (5xx, mất kết nối, nghẽn đồng thời 402/429); KHÔNG BAO GIỜ thử lại sau khi quá giờ.
+    không thì ném QUA_GIO như run-sync cũ. Chỉ POST lại MỘT lần: ngay nếu chắc chắn run
+    chưa tạo (ConnectTimeout, nghẽn đồng thời 402/429); 5xx / đứt kết nối thì hỏi trước
+    xem run đã tạo chưa (`_tim_run_vua_tao`) — có thì đọc tiếp run đó. KHÔNG BAO GIỜ thử
+    lại sau khi quá giờ.
     """
     token = os.environ.get("APIFY_TOKEN", "").strip()
     if not token:
@@ -498,32 +500,96 @@ def _run_actor(actor: str, payload: dict, limit: int, mem: int | None = None,
         _CHO_APIFY.release()
 
 
+# Run id mà tiến trình này đã nhận là của mình — `_tim_run_vua_tao` không được nhận lại
+# run của một luồng khác (deep_dive chạy 3 lô cùng actor song song).
+_RUN_CUA_MINH: dict[str, float] = {}
+_RUN_KHOA = threading.Lock()
+_LECH_GIO_RUN = 30        # giây: chấp nhận đồng hồ máy lệch với Apify
+
+
+def _ghi_run_cua_minh(run_id: str) -> None:
+    with _RUN_KHOA:
+        _RUN_CUA_MINH[run_id] = _dong_ho()
+        while len(_RUN_CUA_MINH) > 500:
+            _RUN_CUA_MINH.pop(next(iter(_RUN_CUA_MINH)))
+
+
+def _tim_run_vua_tao(actor: str, payload: dict, h: dict,
+                     moc_gui: datetime.datetime) -> dict | None:
+    """Sau một POST mơ hồ (5xx, đứt kết nối, hết giờ đọc): run có được tạo không?
+
+    Rà 01/10/2026: bản trước POST lại ngay khi gặp 5xx/ConnectionError — nếu Apify đã
+    tạo run trước khi lỗi thì chạy TRÙNG, trả tiền hai lần. Nay hỏi miễn phí 3 run mới
+    nhất của actor; run bắt đầu từ lúc gửi (trừ `_LECH_GIO_RUN` giây lệch đồng hồ), chưa
+    luồng nào nhận, và INPUT trùng payload (đọc được thì so) là của mình. Hỏi hỏng thì
+    trả None — bên gọi thử lại MỘT lần như cũ."""
+    try:
+        r = requests.get(f"{_APIFY_BASE}/acts/{actor}/runs",
+                         params={"desc": 1, "limit": 3}, headers=h, timeout=8)
+        ds = ((r.json() or {}).get("data") or {}).get("items") or [] \
+            if r.status_code < 400 else []
+    except (requests.RequestException, ValueError, AttributeError):
+        return None
+    moc = moc_gui - datetime.timedelta(seconds=_LECH_GIO_RUN)
+    for run in ds:
+        if not isinstance(run, dict) or not run.get("id"):
+            continue
+        with _RUN_KHOA:
+            if run["id"] in _RUN_CUA_MINH:
+                continue
+        bd = _to_vn(run.get("startedAt"))
+        if not bd or bd < moc:
+            continue
+        kv = run.get("defaultKeyValueStoreId")
+        if kv:
+            try:
+                ri = requests.get(f"{_APIFY_BASE}/key-value-stores/{kv}/records/INPUT",
+                                  headers=h, timeout=8)
+                if ri.status_code < 400 and ri.json() != payload:
+                    continue                      # run của lượt khác cùng actor
+            except (requests.RequestException, ValueError, AttributeError):
+                pass
+        with _RUN_KHOA:                           # nhận NGUYÊN TỬ: hai luồng không cùng nhận
+            if run["id"] in _RUN_CUA_MINH:
+                continue
+            _RUN_CUA_MINH[run["id"]] = _dong_ho()
+        return run
+    return None
+
+
 def _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan):
     h = {"Authorization": f"Bearer {token}"}      # token KHÔNG nằm trên URL (`_che_token`)
     # maxTotalChargeUsd là TRẦN cho phép, không phải phí thực — phí vẫn tính theo item.
     q: dict = {"maxItems": limit, "maxTotalChargeUsd": tran}
     if mem:
         q["memory"] = mem
-    # Trần thời gian PHÍA APIFY: lệnh huỷ của mình mà hỏng (mất mạng) thì run vẫn tự chết
-    # ngay sau hạn, không chạy tới 3600s mặc định (đo 01/10/2026: options.timeoutSecs=3600).
-    q["timeout"] = max(30, int(con()) + 30)
     data, loi = None, None
     for lan in (1, 2):
+        # Trần thời gian PHÍA APIFY: lệnh huỷ của mình mà hỏng (mất mạng) thì run vẫn tự
+        # chết ngay sau hạn, không chạy tới 3600s mặc định (đo 01/10/2026:
+        # options.timeoutSecs=3600). Tính lại MỖI lần POST: sau giấc ngủ thử lại thì hạn
+        # đã gần hơn.
+        q["timeout"] = max(30, int(con()) + 30)
         cho = int(max(0, min(60, con() - 10)))
         url = (f"{_APIFY_BASE}/acts/{actor}/runs?"
                + urllib.parse.urlencode({**q, "waitForFinish": cho}))
-        thu_lai = False
+        thu_lai = mo_ho = False
+        moc_gui = datetime.datetime.now(_VN_TZ)
         try:
             r = requests.post(url, json=payload, timeout=cho + 8, headers=h)
-        except requests.ConnectionError as e:     # chưa tới được Apify -> thử lại an toàn
+        except requests.ConnectTimeout as e:      # chưa gửi được gì -> thử lại an toàn
             loi = LoiApify("LOI", f"Không kết nối được Apify ({type(e).__name__}): "
                                   f"{_che_token(e, token)}"[:300], meta)
             thu_lai = True
         except requests.RequestException as e:
-            # ReadTimeout: KHÔNG biết run đã tạo chưa -> không thử lại (chạy trùng = trả
-            # tiền hai lần). Trần `timeout` phía Apify vẫn chặn run mồ côi.
-            raise LoiApify("LOI", f"Không kết nối được Apify ({type(e).__name__}): "
-                                  f"{_che_token(e, token)}"[:300], meta) from None
+            # ConnectionError khác (đứt giữa chừng) / ReadTimeout: KHÔNG biết run đã tạo
+            # chưa — POST lại mù quáng là có thể chạy trùng, trả tiền hai lần.
+            loi = LoiApify("LOI", f"Không kết nối được Apify ({type(e).__name__}): "
+                                  f"{_che_token(e, token)}"[:300], meta)
+            mo_ho = True
+            # ReadTimeout: Apify đã nhận và đang chờ run -> gần như chắc chắn đã tạo; không
+            # thấy run thì cũng KHÔNG thử lại. Trần `timeout` phía Apify chặn run mồ côi.
+            thu_lai = isinstance(e, requests.ConnectionError)
         else:
             if r.status_code < 400:
                 try:
@@ -533,6 +599,15 @@ def _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan):
                 break
             ma, ly_do, thu_lai = _phan_loai_http(r.status_code, r.text or "")
             loi = LoiApify(ma, _che_token(ly_do, token), meta)
+            # 402/429 nghẽn đồng thời: Apify TỪ CHỐI tạo run -> thử lại an toàn. 5xx: có
+            # thể run đã tạo xong rồi máy chủ mới lỗi.
+            mo_ho = r.status_code >= 500
+        if mo_ho:
+            run = _tim_run_vua_tao(actor, payload, h, moc_gui)
+            if run:
+                data = {"data": run}
+                meta["nhan_lai_run"] = True
+                break
         if not thu_lai or lan == 2 or con() < 25:
             raise loi
         _ngu(8 if loi.ma == "NGHEN_DONG_THOI" else 3)
@@ -548,6 +623,7 @@ def _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan):
         raise LoiApify("LOI", "Apify trả phản hồi lạ khi khởi chạy actor (không có run id).",
                        meta)
     meta["run_id"] = run["id"]
+    _ghi_run_cua_minh(run["id"])
 
     while run.get("status") not in _KET_THUC:
         c = con()
@@ -2449,6 +2525,8 @@ def _handle(args: dict, **kwargs) -> str:
     ai_tt: dict = {"trang_thai": "bỏ qua vì quá ít bài", "da_xet": 0}
     # AI CỨU bài loại chỉ vì không nhắc tên (xem `_cuu_bang_ai`) — luồng riêng, song song
     # với bộ lọc chính để không ăn thêm thời gian; cùng hạn chót của tool.
+    # Biết và chấp nhận (rà 01/10/2026): đây là lượt model THỨ HAI, tốn thêm quota dùng
+    # chung — đã kẹp 60 bài và chỉ chạy khi có bài cần xét, tắt bằng SOCIAL_AI_CUU=0.
     cuu_log: list[str] = []
     cuu_tt: dict = {"trang_thai": "không có bài cần xét", "da_xet": 0}
     ds_cuu = [bi_loai[i][:2] for i in ung_vien_cuu]

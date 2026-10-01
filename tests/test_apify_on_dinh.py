@@ -548,3 +548,100 @@ def test_ai_cuu_gioi_han_60_bai_nhieu_view_nhat_va_ton_trong_han(monkeypatch):
     tt = {}
     assert A._cuu_bang_ai(rows, ["hapas"], "túi", [], con_lai=5, trang_thai=tt) == set()
     assert tt["trang_thai"] == "bỏ qua vì hết thời gian" and len(hoi) == 1
+
+
+# ──────── rà độc lập 01/10/2026: POST lại sau lỗi mơ hồ = có thể trả tiền hai lần ────────
+def _iso_gio(giay_truoc: float = 0) -> str:
+    t = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=giay_truoc)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+@pytest.fixture
+def ds_run(api):
+    """GET /acts/{actor}/runs và INPUT của run trả theo `api.ds_run` / `api.input`."""
+    api.ds_run, api.input = [], {}
+
+    def khac(url, params):
+        if url.endswith("/runs"):
+            return R(200, {"data": {"items": list(api.ds_run)}})
+        if "/key-value-stores/" in url and url.endswith("/records/INPUT"):
+            kv = url.split("/key-value-stores/")[1].split("/")[0]
+            return R(200, api.input[kv]) if kv in api.input else R(404, {})
+        return R(404, {})
+    api.khac = khac
+    A._RUN_CUA_MINH.clear()
+    yield api
+    A._RUN_CUA_MINH.clear()
+
+
+def _run_moi(rid="runX", giay_truoc=2, kv="kvX"):
+    return {"id": rid, "status": "RUNNING", "startedAt": _iso_gio(giay_truoc),
+            "defaultDatasetId": "ds1", "defaultKeyValueStoreId": kv}
+
+
+def _so_lan_hoi_runs(api):
+    return sum(1 for u, _ in api.get_urls if u.endswith("/runs"))
+
+
+def test_5xx_ma_run_da_tao_thi_nhan_run_khong_post_lai(ds_run):
+    ds_run.start = [R(502, text="Bad Gateway")]
+    ds_run.ds_run = [_run_moi()]
+    ds_run.input = {"kvX": {"q": 1}}
+    items, meta = A._run_actor("a~b", {"q": 1}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 1, "POST lại = chạy trùng, trả tiền hai lần"
+    assert items and meta["run_id"] == "runX" and meta["nhan_lai_run"] is True
+
+
+def test_dut_ket_noi_ma_run_da_tao_thi_khong_post_lai(ds_run):
+    ds_run.start = [A.requests.ConnectionError("Connection aborted.")]
+    ds_run.ds_run = [_run_moi()]
+    items, meta = A._run_actor("a~b", {"q": 1}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 1 and meta["run_id"] == "runX"
+
+
+def test_read_timeout_ma_run_da_tao_thi_doc_tiep_run_do(ds_run):
+    ds_run.start = [A.requests.ReadTimeout("read timed out")]
+    ds_run.ds_run = [_run_moi(giay_truoc=0)]
+    items, meta = A._run_actor("a~b", {}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 1 and items and meta["run_id"] == "runX"
+
+
+def test_5xx_khong_thay_run_thi_thu_lai_mot_lan(ds_run):
+    ds_run.start = [R(503, text="Service Unavailable")]
+    items, meta = A._run_actor("a~b", {}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 2 and _so_lan_hoi_runs(ds_run) == 1
+
+
+@pytest.mark.parametrize("run, input_", [
+    (_run_moi(giay_truoc=120), {"kvX": {"q": 1}}),          # run cũ — không phải của lượt này
+    (_run_moi(), {"kvX": {"q": "khac"}}),                   # INPUT của lượt khác cùng actor
+])
+def test_run_khong_khop_thi_khong_nhan(ds_run, run, input_):
+    ds_run.start = [R(500, text="Internal")]
+    ds_run.ds_run, ds_run.input = [run], input_
+    items, meta = A._run_actor("a~b", {"q": 1}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 2 and meta["run_id"] == "run1"
+
+
+def test_khong_nhan_run_luong_khac_da_nhan(ds_run):
+    A._ghi_run_cua_minh("runX")
+    ds_run.start = [R(500, text="Internal")]
+    ds_run.ds_run = [_run_moi()]
+    items, meta = A._run_actor("a~b", {}, 10, deadline=1000 + 120)
+    assert meta["run_id"] == "run1" and len(ds_run.post_urls) == 2
+
+
+def test_connect_timeout_chua_gui_thi_thu_lai_khong_can_hoi(ds_run):
+    ds_run.start = [A.requests.ConnectTimeout("connect timed out")]
+    items, meta = A._run_actor("a~b", {}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 2 and _so_lan_hoi_runs(ds_run) == 0
+
+
+def test_nghen_dong_thoi_thu_lai_khong_can_hoi_va_tinh_lai_timeout(ds_run):
+    import re
+    ds_run.start = [R(429, text="too many runs")]
+    A._run_actor("a~b", {}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 2 and _so_lan_hoi_runs(ds_run) == 0
+    t1, t2 = (int(re.search(r"[?&]timeout=(\d+)", u).group(1)) for u in ds_run.post_urls)
+    assert t1 - t2 >= 8, "sau 8s ngủ thử lại, trần timeout phía Apify phải co theo hạn"
+
