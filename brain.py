@@ -62,11 +62,15 @@ import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng n
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
 import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian)
+import chot_pham_vi  # noqa: E402  (tool cào tốn tiền chỉ chạy khi đã chốt phạm vi)
 
 # Cưỡng chế policy tại điểm hội tụ dispatch, rồi bọc handler của MỌI tool để tự ghi audit.
 # Phải gọi SAU khi tất cả tool đã
 # import xong (các import ở trên), và TRƯỚC khi AIAgent đầu tiên được dựng —
 # agent chụp lại registry lúc khởi tạo.
+# Cổng chốt phạm vi cài TRƯỚC policy để nằm TRONG: policy xét trước, tool đang tắt thì
+# báo "tắt" chứ không hỏi "Chạy nhé?".
+chot_pham_vi.cai_vao_registry(audit.ghi_tool)
 lsr_policy.install_registry_guard(audit.ghi_tool)
 audit.boc_registry()
 
@@ -624,6 +628,15 @@ def _lich_su(hist: list[dict], nhom: bool) -> list[dict]:
     return ra
 
 
+def _cau_mark_truoc(history_msgs: list) -> str:
+    """Câu Mark nói gần nhất trong cuộc chat — để cổng chốt phạm vi biết Mark đã hỏi
+    "Chạy nhé?" chưa. Lịch sử chỉ có user/assistant (xem `_lich_su`)."""
+    for m in reversed(history_msgs or []):
+        if isinstance(m, dict) and m.get("role") == "assistant":
+            return str(m.get("content") or "")
+    return ""
+
+
 def _loi_mo_hinh(text: str, d: dict) -> str | None:
     """Nhận ra lượt model HỎNG. Trả câu cho người dùng, hoặc None nếu lượt bình thường.
 
@@ -760,11 +773,16 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     turn_id = audit.bat_dau(chat_id, sender_open_id, user_text)
 
     nguon_lenh = kq.lenh if kq.lenh in lenh_cung.LENH_NGUON else ""
-    agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi, nguon_lenh, kenh)
-    agent, out, loi_nem, so_lan = _chay_co_doi_tai_khoan(
-        agent, user_text, history_msgs,
-        lambda chon: _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi,
-                                    nguon_lenh, kenh, chon=chon))
+    moc_chot = chot_pham_vi.dat(lenh_cung.BANG_LENH.get(kq.lenh or "", ""), user_text,
+                                _cau_mark_truoc(history_msgs))
+    try:
+        agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi, nguon_lenh, kenh)
+        agent, out, loi_nem, so_lan = _chay_co_doi_tai_khoan(
+            agent, user_text, history_msgs,
+            lambda chon: _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi,
+                                        nguon_lenh, kenh, chon=chon))
+    finally:
+        chot_pham_vi.bo(moc_chot)
     tk = getattr(agent, "_tai_khoan_nguon", None)
     if loi_nem is not None:
         e = loi_nem
