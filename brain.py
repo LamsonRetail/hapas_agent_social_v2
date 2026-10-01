@@ -515,8 +515,9 @@ def _resolve_agent(sender_open_id: str | None = None,
     """
     rt, model, tk = chon or tai_khoan_ai.chon_runtime()
     if tai_khoan_ai.bat():
-        print(f"[tai_khoan] {tk.get('label')} ({tk.get('provider')}, {tk.get('tu')})"
-              + (f" — {tk['ly_do']}" if tk.get("ly_do") else ""), flush=True)
+        print(f"[tai_khoan] {tk.get('provider')}/{tk.get('credential_id') or '-'} "
+              f"({tk.get('tu')})" + (f" — {tk['ly_do']}" if tk.get("ly_do") else ""),
+              flush=True)
     agent = _dung_agent(rt, model, sender_open_id, platform_ctx, chi_thi_lenh, nguon, kenh)
     tai_khoan_ai.gan_vao_agent(agent, tk)
     return agent
@@ -641,16 +642,18 @@ def _loi_mo_hinh(text: str, d: dict) -> str | None:
             "Bạn thử lại sau ít phút nhé — câu hỏi chưa được thực hiện.")
 
 
-def _loi_cua_luot(out, exc: BaseException | None) -> str | None:
-    """Chuỗi lỗi nếu lượt model HỎNG (ném lỗi, hoặc Hermes trả chuỗi lỗi), None nếu ổn.
-    Cùng tiêu chí với `_loi_mo_hinh`."""
-    if exc is not None:
-        return f"{type(exc).__name__}: {exc}"
-    d = out if isinstance(out, dict) else {}
-    t = str((d.get("final_response") if d else out) or "").strip()
-    if d.get("failed") or t.startswith("API call failed") or "HTTP 429" in t[:200]:
-        return f"{d.get('error') or ''} {t}".strip()
-    return None
+def _che(loi: str) -> str:
+    """Che bí mật/email/số điện thoại trong chuỗi lỗi trước khi đưa vào audit — audit có
+    thể đẩy lên Lark Base. Lỗi SDK đôi khi trích header hoặc token."""
+    try:
+        if not loi:
+            return loi
+        # _redact chỉ bắt "token=…"/"Bearer …"; token trần (sk-…, JWT) thì che thêm ở đây.
+        loi = re.sub(r"\b(?:sk-[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_.-]{20,})", "[đã_che_bí_mật]",
+                     loi)
+        return lsr_platform._redact(loi)
+    except Exception:
+        return "[không che được — bỏ chi tiết lỗi]"
 
 
 def _da_chay_tool(out) -> bool:
@@ -666,6 +669,10 @@ def _chay_co_doi_tai_khoan(agent, user_text: str, history_msgs: list, dung_lai):
     xin lease mới chạy lại MỘT lần; vẫn hỏng thì chạy MỘT lần bằng tài khoản máy.
     Tối đa 3 lần, không bao giờ lặp. Lượt chạy bằng máy hỏng thì trả nguyên như cũ.
 
+    Hỏng hay không, vì sao hỏng: CHỈ theo dữ liệu có cấu trúc (exception thật, `failed`/
+    `failure_reason`, lỗi API Hermes đã phân loại) — xem tai_khoan_ai.phan_loai_that_bai.
+    Chữ trong câu trả lời không bao giờ làm báo platform hay chạy lại.
+
     → (agent đã chạy lần cuối, out, exception hoặc None, số lần chạy)
     """
     da_hong: list = []
@@ -678,26 +685,30 @@ def _chay_co_doi_tai_khoan(agent, user_text: str, history_msgs: list, dung_lai):
         except Exception as e:
             exc = e
         tk = getattr(agent, "_tai_khoan_nguon", None)
-        loi = _loi_cua_luot(out, exc)
-        if loi is None or not tk or tk.get("tu") != "console" or so_lan >= 3:
+        if not tk or tk.get("tu") != "console" or so_lan >= 3:
             return agent, out, exc, so_lan
-        ly_do = tai_khoan_ai.bao_loi(tk, loi)
-        if not ly_do or _da_chay_tool(out):
+        ly_do, doi = tai_khoan_ai.phan_loai_that_bai(agent, out, exc)
+        if ly_do:
+            tai_khoan_ai.bao_loi(tk, ly_do)
+        if not doi or _da_chay_tool(out):
             return agent, out, exc, so_lan
         da_hong.append(tk.get("credential_id"))
         try:
-            chon = tai_khoan_ai.chon_runtime() if so_lan == 1 else None
+            # Đã báo platform thì lease mới sẽ khác; không báo (vd 403) thì platform vẫn
+            # phát đúng tài khoản đó → xuống máy luôn.
+            chon = tai_khoan_ai.chon_runtime() if (so_lan == 1 and ly_do) else None
             if chon is None or (chon[2].get("tu") == "console"
                                 and chon[2].get("credential_id") in da_hong):
                 chon = tai_khoan_ai.chon_runtime_may(
-                    f"tài khoản console lỗi {ly_do} — chạy lại bằng máy")
+                    f"tài khoản console lỗi {ly_do or 'quyền truy cập'} — chạy lại bằng máy")
             agent_moi = dung_lai(chon)
         except Exception as e2:
             print(f"[tai_khoan] không dựng được tài khoản thay thế: {type(e2).__name__}",
                   flush=True)
             return agent, out, exc, so_lan
-        print(f"[tai_khoan] {tk.get('label')} lỗi {ly_do} → chạy lại lượt bằng "
-              f"{chon[2].get('label')} ({chon[2].get('tu')})", flush=True)
+        print(f"[tai_khoan] {tk.get('provider')}/{tk.get('credential_id')} lỗi "
+              f"{ly_do or 'quyền truy cập'} → chạy lại lượt bằng {chon[2].get('provider')}/"
+              f"{chon[2].get('credential_id') or '-'} ({chon[2].get('tu')})", flush=True)
         agent = agent_moi
 
 
@@ -759,7 +770,7 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
         e = loi_nem
         # Đóng lượt audit TRƯỚC khi ném tiếp, không thì lượt lỗi biến mất khỏi
         # bản ghi — mà đó đúng là lượt cần soi nhất.
-        audit.ket_thuc(turn_id, "", agent, loi=f"{type(e).__name__}: {e}",
+        audit.ket_thuc(turn_id, "", agent, loi=_che(f"{type(e).__name__}: {e}"),
                        trang_thai="lỗi")
         tai_khoan_ai.ghi_luot(tk, getattr(agent, "model", ""), chat_id, "loi", so_lan)
         raise e
@@ -773,11 +784,11 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     if cau_loi:
         # Ghi lỗi THẬT vào audit để còn soi, nhưng trả người dùng câu dễ hiểu, và KHÔNG
         # ghi lượt này vào lịch sử — không có gì đã được làm để mà nhớ.
-        audit.ket_thuc(turn_id, cau_loi, agent, loi=(str(d.get("error") or "") or text)[:300],
-                       trang_thai="lỗi")
+        audit.ket_thuc(turn_id, cau_loi, agent,
+                       loi=_che((str(d.get("error") or "") or text)[:300]), trang_thai="lỗi")
         print(f"[brain] model không chạy: {text[:120]}", flush=True)
         return cau_loi
-    audit.ket_thuc(turn_id, text, agent, loi=str(d.get("error") or ""),
+    audit.ket_thuc(turn_id, text, agent, loi=_che(str(d.get("error") or "")),
                    trang_thai="ok" if not d.get("failed") else "lỗi")
 
     memory_store.append_turns(
