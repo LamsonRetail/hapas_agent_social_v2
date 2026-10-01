@@ -464,8 +464,17 @@ def chay_ngay(ma: str) -> dict | None:
         loi = _che(f"{type(e).__name__}: {e}")
         print(f"[viec_nen] {ma} LỖI: {loi}", flush=True)
         v.d["ly_do_ket_thuc"] = loi
-        trang_thai, van_ban = "loi", (f"Việc quét nền {ma} gặp lỗi và dừng: {loi}. Phần đã "
-                                       f"lấy (nếu có) vẫn nằm trong sổ; báo người vận hành.")
+        van_ban = (f"Việc quét nền {ma} gặp lỗi và dừng: {loi}. Phần đã lấy (nếu có) vẫn "
+                   f"nằm trong sổ; báo người vận hành.")
+        # Lỗi giữa chừng vẫn có thể đã tiêu tiền: ghi sổ chi phí theo đúng run id đã có.
+        try:
+            ts = d.get("tham_so") or {}
+            cp = v.chot_chi_phi(ts.get("queries") or [f"việc {ma}"], list(d.get("nen_tang")
+                                                                          or {}), "")
+            van_ban += f" Chi phí thật tới lúc lỗi: {cp.get('usd', 0):.2f} USD.".replace(".", ",", 1)
+        except Exception:  # noqa: BLE001
+            pass
+        trang_thai = "loi"
     finally:
         with _KHOA:
             _DANG_CHAY.pop(ma, None)

@@ -835,3 +835,16 @@ def test_facebook_free_lon_khong_day_sang_nen_vo_ich(nen, monkeypatch):
     monkeypatch.setattr(A, "_goi_apify", lambda: "FREE")
     kq = _quet(platforms=["facebook"], limit=700)
     assert "dang_chay_nen" not in kq and nhan == [700] and not V.tat_ca()
+
+
+def test_runner_loi_van_ghi_chi_phi_va_bao_khong_lo_token(nen, monkeypatch):
+    kq = _quet()
+
+    def hong(v):
+        raise RuntimeError(f"mất mạng token={BI_MAT}")
+    monkeypatch.setattr(Q, "chay_viec", hong)
+    d = V.chay_ngay(kq["ma_viec"])
+    assert d["trang_thai"] == "loi" and nen.so_chi_phi[-1]["ma_viec"] == kq["ma_viec"]
+    assert BI_MAT not in d["thong_bao"]["ket_qua"] and "Chi phí thật" in d["thong_bao"]["ket_qua"]
+    assert BI_MAT not in V._duong(kq["ma_viec"]).read_text(encoding="utf-8")
+    assert len(nen.lark.tin()) == 1
