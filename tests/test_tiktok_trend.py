@@ -41,6 +41,8 @@ VIDEO = [{"Video Rank": 1, "Views": 20223601, "Author Handle": "@kenh", "Title":
           "Content Tags": ["Food & Beverage"], "Video TikTok URL": "https://t/v/1",
           "Metrics": [{"metric": "Views", "value": 20223601},
                       {"metric": "Organic Views", "value": 338825}]}]
+NHAC = [{"rank": i + 1, "title": f"bài {i}", "author": "ca sĩ", "rank_diff": 3,
+         "link": f"https://t/music/{i}"} for i in range(12)]
 MAU = [
     _vid("a", "m1", hieu_ung="kikay", view=500), _vid("b", "m1", hieu_ung="kikay", view=700),
     _vid("c", "m1"),                                   # m1: 3 kênh → tín hiệu
@@ -52,15 +54,25 @@ MAU = [
 ]
 
 
+class _Goi(list):
+    gioi_han: list
+
+
 @pytest.fixture
 def gia(monkeypatch):
-    goi = []
+    goi = _Goi()
 
-    def call(actor, payload, limit, mem=None):
+    def call(actor, payload, limit, mem=None, **kw):
         goi.append((actor, payload))
+        gioi_han.append((actor, limit))
         if actor == T.ACTOR_TREND:
             return HASHTAG if payload["trendType"] == "hashtags" else VIDEO
+        if actor == T.ACTOR_NHAC:
+            return NHAC[:payload["maxResults"]]
         return MAU
+
+    gioi_han = []
+    goi.gioi_han = gioi_han
 
     monkeypatch.setattr(A, "_call", call)
     monkeypatch.setattr(A, "_tran", lambda: (800, 2.4))
@@ -101,10 +113,13 @@ def test_lay_mau_duoi_hashtag_dang_len(gia):
 
 
 def test_so_video_mau_bi_kep_theo_tran_bai(gia):
+    """Mẫu xin dư 2,5 lần nhưng vẫn gọn trong trần bài (800) VÀ trần USD mỗi lượt (2,4)."""
     goi, _ = gia
     T.chay({"so_video_mau": 5000})
     mau = [p for a, p in goi if a == A._ACTORS["tiktok_fallback"]][0]
-    assert mau["resultsPerPage"] == 800 // 3, "trần 800 bài chia cho 3 hashtag có được"
+    xin = [n for a, n in goi.gioi_han if a == A._ACTORS["tiktok_fallback"]][0]
+    assert xin == int(0.9 * 2.4 / 0.003) == 720, "trần USD chặn trước trần 800 bài"
+    assert mau["resultsPerPage"] * 3 >= xin, "chia đều cho 3 hashtag có được"
 
 
 def _tag(ten, huong="lên"):
@@ -156,7 +171,8 @@ def test_sheet_co_du_bon_loai_dong(gia):
     _, dong = gia
     kq = json.loads(T.chay({}))
     loai = {r[0] for r in dong[1:]}
-    assert loai == {"Hashtag", "Video", "Âm thanh (suy từ mẫu)", "Hiệu ứng (suy từ mẫu)"}
+    assert loai == {"Hashtag", "Video", "Nhạc dùng lại (suy từ mẫu)", "Hiệu ứng (suy từ mẫu)",
+                    "Nhạc đang lên (bảng Creative Center)"}
     assert kq["sheet_url"] == "https://sheet"
 
 
@@ -173,6 +189,9 @@ def test_lay_du_thi_khong_bao_cham_tran(gia, monkeypatch):
          "tieu_de": "", "chu_de": "", "link": ""} for i in range(5)])
     monkeypatch.setattr(T, "_mau_am_thanh", lambda *a: {
         "cao": 20, "giu": 20, "am_thanh": [], "hieu_ung": [], "cao_du": True})
+    monkeypatch.setattr(T, "_bang_nhac", lambda vung, ky, n: [
+        {"hang": i, "ten": "", "tac_gia": "", "thay_doi_hang": "", "moi_vao_bang": False,
+         "link": ""} for i in range(n)])
     kq = json.loads(T.chay({"so_hashtag": 5, "so_video": 5, "so_video_mau": 20}))
     assert kq["cham_tran_chi_phi"] is False
 
@@ -189,3 +208,96 @@ def test_bang_trend_hong_thi_bao_loi_ro(monkeypatch, gia):
         raise RuntimeError("HTTP 500")
     monkeypatch.setattr(A, "_call", hong)
     assert "Không lấy được bảng trend" in T.chay({})
+
+
+# ───────────────────────── đợt 3 (01/10/2026) ─────────────────────────
+def _goi_actor(goi, actor):
+    return [p for a, p in goi if a == actor]
+
+
+def test_bang_nhac_creative_center_la_nguon_thu_ba(gia):
+    goi, _ = gia
+    kq = json.loads(T.chay({}))
+    p = _goi_actor(goi, T.ACTOR_NHAC)[0]
+    assert p["country_code"] == "VN" and p["rank_type"] == "surging" and p["maxResults"] == 10
+    assert [n["ten"] for n in kq["nhac"]][:2] == ["bài 0", "bài 1"] and len(kq["nhac"]) == 10
+    assert kq["nhac_trong_vn"] is False
+
+
+def test_vn_rong_thi_noi_thang_khong_lay_nuoc_khac(gia, monkeypatch):
+    """Actor trả dòng của nước khác (hoặc rỗng) cho VN → không bao giờ trình bày là của VN."""
+    monkeypatch.setitem(globals(), "NHAC", [{"title": "US hit", "country_code": "US"}])
+    kq = json.loads(T.chay({}))
+    assert kq["nhac"] == [] and kq["nhac_trong_vn"] is True
+    assert "Creative Center không trả bảng nhạc cho VN" in kq["ghi_chu_nhac"]
+    assert "Creative Center không trả bảng nhạc cho VN" in kq["note"]
+
+
+def test_so_nhac_bi_kep_theo_tran_usd(gia, monkeypatch):
+    goi, _ = gia
+    monkeypatch.setattr(A, "_tran", lambda: (800, 0.1))
+    T.chay({"so_nhac": 50})
+    assert _goi_actor(goi, T.ACTOR_NHAC)[0]["maxResults"] == int((0.09 - 0.02) / 0.02) == 3
+
+
+def test_so_nhac_0_thi_khong_goi_va_uoc_tinh_co_tinh_nhac(gia):
+    goi, _ = gia
+    khong = json.loads(T.chay({"so_nhac": 0}))
+    assert not _goi_actor(goi, T.ACTOR_NHAC)
+    co = json.loads(T.chay({"so_nhac": 5}))
+    assert co["uoc_tinh_chi_phi_usd"] - khong["uoc_tinh_chi_phi_usd"] == pytest.approx(0.12)
+
+
+def test_tach_nhac_dung_lai_va_am_thanh_goc(gia, monkeypatch):
+    mau = [dict(v, musicMeta=dict(v["musicMeta"])) for v in MAU]
+    for v in mau:
+        if v["musicMeta"]["musicId"] == "m6":
+            v["musicMeta"]["musicOriginal"] = True
+    # Thiếu trường musicOriginal: nhận ra âm gốc theo tên "original sound - …".
+    mau += [_vid("x", "m7"), _vid("y", "m7")]
+    for v in mau[-2:]:
+        v["musicMeta"] = {"musicId": "m7", "musicName": "original sound - x"}
+    monkeypatch.setitem(globals(), "MAU", mau)
+    kq = json.loads(T.chay({}))
+    assert [a["ten"] for a in kq["nhac_dung_lai"]] == ["nhạc m1"]
+    assert {a["ten"] for a in kq["am_thanh_goc"]} == {"nhạc m6", "original sound - x"}
+    assert {a["loai"] for a in kq["am_thanh"]} == {"Nhạc (bài hát) dùng lại", "Âm thanh gốc"}
+
+
+def test_hashtag_nhay_cam_bi_gan_co_va_khong_dem_lay_mau(gia, monkeypatch):
+    """01/10: Mark gợi ý móc nội dung vào #traibuonnguoi chỉ vì nó đang lên bảng."""
+    goi, _ = gia
+    monkeypatch.setitem(globals(), "HASHTAG", HASHTAG + [
+        {"Rank": 4, "Hashtag": "#traibuonnguoi", "Trend Direction": "up", "Posts": 1,
+         "Video Views": 1, "Industries": [], "TikTok URL": "https://t/tag/4"}])
+    kq = json.loads(T.chay({}))
+    the = [t for t in kq["hashtag"] if t["hashtag"] == "traibuonnguoi"][0]
+    assert "không nên bám trend" in the["nhay_cam"] and "buôn người" in the["nhay_cam"]
+    assert kq["hashtag_nhay_cam"] and "KHÔNG đề xuất" in kq["note"]
+    assert "traibuonnguoi" not in _goi_actor(goi, A._ACTORS["tiktok_fallback"])[0]["hashtags"]
+    assert T._nhay_cam("quàđôi") == "" and T._nhay_cam("tainangiaothong") != ""
+
+
+def test_mau_thieu_thi_cao_them_duoi_hashtag_chua_soi(gia, monkeypatch):
+    """01/10: xin 100 → cào 40, giữ 21. Nay xin dư, thiếu thì cào thêm một lượt."""
+    goi, _ = gia
+    monkeypatch.setattr(T, "_bang_hashtag", lambda vung, ky, n: [
+        {"hang": i, "hashtag": f"t{i}", "huong": "lên", "so_bai": 0, "luot_xem": 0,
+         "nganh": "", "link": ""} for i in range(12)])
+    luot = []
+
+    def call(actor, payload, limit, mem=None, **kw):
+        goi.append((actor, payload))
+        if actor != A._ACTORS["tiktok_fallback"]:
+            return [] if actor == T.ACTOR_NHAC else VIDEO
+        luot.append((payload["hashtags"], limit))
+        if len(luot) == 1:   # 10 video, 5 cũ
+            return [dict(_vid(f"k{i}", f"a{i}", ngay=1 if i < 5 else 40), id=f"v{i}")
+                    for i in range(10)]
+        return [dict(_vid(f"k{i}", f"a{i}"), id=f"w{i}") for i in range(20)]
+    monkeypatch.setattr(A, "_call", call)
+    kq = json.loads(T.chay({"so_video_mau": 100}))
+    assert luot[0][1] == 250, "xin dư 2,5 lần"
+    assert len(luot) == 2 and not set(luot[0][0]) & set(luot[1][0]), "lượt 2 soi hashtag mới"
+    m = kq["mau_am_thanh"]
+    assert m["so_luot_cao"] == 2 and m["da_cao"] == 30 and m["giu_lai_trong_ky_dung_ngon_ngu"] == 25

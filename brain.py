@@ -145,6 +145,20 @@ _TOOLING_NOTE = "\n".join(
         "(kiểu 'Câu này là … → gọi <tool> với …', 'Tôi sẽ chốt phạm vi rồi hỏi…'), KHÔNG nêu "
         "tên tool hay tham số kỹ thuật — nói bằng lời thường ('tôi sẽ quét TikTok 7 ngày…').",
         "- KHÔNG dán JSON/log thô cho người dùng; câu trả lời được gửi tự động dưới danh tính bot.",
+        # 01/10: câu trả lời về Taobao liệt kê 6 kiểu túi không có nguồn nào; một lượt khác
+        # tả hình quảng cáo trong khi vision trả 403. Nguồn hỏng thì phải lộ ra, không lấp.
+        "- NGUỒN HỎNG / BỊ CẮT / CHẠM TRẦN (tool báo lỗi, `platforms_failed`, 'CÓ THỂ BỊ CẮT', "
+        "vision hay browser trả lỗi 403…): NÓI RÕ phần đó không có dữ liệu. TUYỆT ĐỐI không lấp "
+        "chỗ trống bằng phỏng đoán hay kiến thức chung rồi trình bày như kết quả tra được.",
+        # 23/09: cùng một phạm vi, lần trước báo 35 bài, lần sau 24 bài, không một lời giải thích.
+        "- Người dùng hỏi LẠI cùng phạm vi trong cùng cuộc chat: đối chiếu với kết quả lần "
+        "trước (số cũ, số mới, vì sao lệch — khác khoảng ngày, nguồn, bộ lọc, mẫu). Không "
+        "im lặng đưa ra con số mâu thuẫn với lần trước.",
+        # 01/10: được nhờ "gán nhãn từng bình luận và thống kê", Mark trả lời là không làm được.
+        "- Số SENTIMENT bình luận chỉ lấy từ `thong_ke`/`dong_thong_ke` của `social_deep_dive` "
+        "và luôn nói đã phân loại bao nhiêu/tổng — không tự ước lượng tỉ lệ. Nhờ 'gán nhãn từng "
+        "bình luận và thống kê' thì dùng `social_deep_dive` (tool tự gán nhãn), đừng nói không "
+        "làm được.",
     ]
 )
 

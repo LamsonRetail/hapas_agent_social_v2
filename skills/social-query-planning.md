@@ -11,6 +11,7 @@
 | Soi MỘT sản phẩm cụ thể — người dùng dán link Shopee hoặc TikTok Shop | `soi_san` với `link` |
 | Đối thủ đang CHẠY QUẢNG CÁO gì | `fb_ads_library` |
 | Người ta bình luận gì dưới một bài cụ thể | `social_deep_dive` |
+| Gán nhãn từng bình luận, thống kê % khen/chê/chủ đề | `social_deep_dive` (tự gán nhãn) |
 
 Một lần quét cần đủ ba thứ: **từ khoá hoặc brand**, **nền tảng**, **khoảng thời gian**.
 Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị trường.
@@ -19,11 +20,16 @@ Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị tr�
 hot", "format nào đang viral"): gọi `social_listen` với `che_do`="trend". Không cần từ
 khoá hay ngày; kỳ là 7 ngày gần nhất (hoặc 30). Không cào hashtag chung chung như
 #trend, #viral, #xuhuong: cách đó chỉ ra mẫu ngẫu nhiên, lẫn video cũ và video nước
-ngoài. Người dùng xin "đủ N bài" thì đặt `so_video_mau`=N. Chi phí thường khoảng 0,4 USD.
-Khi báo kết quả:
+ngoài. Người dùng xin "đủ N bài" thì đặt `so_video_mau`=N. Chi phí thường khoảng 0,6–1
+USD (gồm bảng nhạc đang lên ~0,2 USD; đặt `so_nhac`=0 để bỏ). Khi báo kết quả:
 
 - Hashtag và top video là bảng xếp hạng chính thức của TikTok. Ưu tiên nêu hashtag đang lên
-- Âm thanh và hiệu ứng là tín hiệu SUY từ mẫu: nói rõ cỡ mẫu, không gọi là bảng xếp hạng
+- Hashtag gắn cờ nhạy cảm (buôn người, tai nạn, cái chết, bạo lực, chính trị, tôn giáo,
+  scandal…) thì nói rõ là không nên bám, KHÔNG gợi ý nội dung móc vào
+- Nhạc đang lên là bảng chính thức của Creative Center. Bảng rỗng cho VN thì nói thẳng
+  là Creative Center không trả bảng nhạc cho VN; tuyệt đối không lấy bảng nước khác
+- Âm thanh và hiệu ứng là tín hiệu SUY từ mẫu: nói rõ cỡ mẫu, không gọi là bảng xếp hạng.
+  Tách bài hát dùng lại với âm thanh gốc của kênh
 - Top video có thể là quảng cáo của brand. Mặc định đã bỏ video trả tiền; nếu vẫn thấy
   video của brand lớn thì nói rõ đó là nội dung brand chứ không phải trend tự nhiên
 
@@ -56,6 +62,8 @@ khi người dùng HỎI thì mới trả lời:
 - Soi một tài khoản, 30 bài: TikTok ~0,09 USD, Facebook ~0,15 USD, Instagram ~0,003 USD
   (Instagram chỉ có 12 bài mới nhất)
 - Shopee, 30 sản phẩm: ~0,15 USD
+- Bình luận (gói hiện tại, 10/2026): TikTok ~0,00125 USD/bình luận, YouTube ~0,002,
+  Facebook ~0,0025 — 10 bài TikTok × 50 bình luận ≈ 0,63 USD
 - Soi một sản phẩm từ link: TikTok Shop ~0,004 USD; Shopee ~0,1–0,2 USD (tìm giá theo tên
   rẻ, phải tìm trong shop thì đắt hơn; cộng ~0,04 USD lấy số đã bán)
 - Mỗi lượt chạy bị chặn ở trần chi phí (mặc định 1 USD). Chạm trần thì actor dừng giữa
