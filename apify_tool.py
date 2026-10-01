@@ -2377,14 +2377,24 @@ def _cot(n: int) -> str:
 _RE_TRU_NGUY = re.compile(r"^-\s*(?:=|[A-Za-z_][\w.]*\s*[(|!]|[\d.,]+\s*[-+*/^&])")
 
 
+# Ký tự vô hình hay dùng để lách bộ lọc: zero-width space/joiner, word joiner, BOM.
+_VO_HINH = "\u200b\u200c\u200d\u2060\ufeff"
+
+
 def _o_an_toan(v):
-    """Một ô sheet -> giá trị an toàn (chỉ đụng tới chuỗi)."""
+    """Một ô sheet -> giá trị an toàn (chỉ đụng tới chuỗi).
+
+    Bỏ MỘT lượt mọi khoảng trắng/ký tự vô hình đầu ô rồi mới xét ký tự đầu thật — review
+    02/10/2026: hai phép xét tách rời để lọt dấu cách + tab, hoặc zero-width space trước '='.
+    """
     if not isinstance(v, str) or not v:
         return v
-    if v[0] in "\t\r":
-        return "'" + v
-    t = v.lstrip(" \n\u00a0\u3000")
-    if t and (t[0] in "=+@\uff1d\uff0b\uff20" or _RE_TRU_NGUY.match(t)):
+    i = 0
+    while i < len(v) and (v[i].isspace() or v[i] in _VO_HINH):
+        i += 1
+    t = v[i:]
+    if any(c in "\t\r" for c in v[:i]) or (
+            t and (t[0] in "=+@\uff1d\uff0b\uff20" or _RE_TRU_NGUY.match(t))):
         return "'" + v
     return v
 

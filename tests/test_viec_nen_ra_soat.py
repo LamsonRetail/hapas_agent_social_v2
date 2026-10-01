@@ -472,3 +472,15 @@ def test_R20_gateway_va_web_mang_ma_khu_trung(monkeypatch):
     lsr_platform.gui_lark("oc_1", "kq", "cli", uuid="q1-kq")
     lsr_platform.bao_su_kien_job(9, "kq", ma_su_kien="q1-kq")
     assert goi[0][1]["uuid"] == "q1-kq" and goi[1][1]["data"]["id"] == "q1-kq"
+
+
+@pytest.mark.parametrize("v", [" \t=1+1", "\xa0\t=1+1", "\u3000\t@SUM(1)", "  \t=1+1",
+                               "\u200b=1+1", "\ufeff=1+1", "\u2060 +84 9", "\t hello"])
+def test_R18b_khoang_trang_la_truoc_cong_thuc_van_bi_chan(v):
+    """Review lần 2 (02/10/2026): khoảng trắng thường + tab, hoặc ký tự vô hình trước '='."""
+    assert A._o_an_toan(v) == "'" + v
+
+
+@pytest.mark.parametrize("v", ["- gạch đầu dòng", "-15% hôm nay", "  bình thường", "Tốt =))"])
+def test_R18b_chu_thuong_giu_nguyen(v):
+    assert A._o_an_toan(v) == v
