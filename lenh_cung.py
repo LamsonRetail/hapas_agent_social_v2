@@ -69,7 +69,9 @@ LENH_TOOL_TU_DO: dict[str, str] = {
 }
 
 #: Lệnh tự trả lời, không gọi model. Rẻ, nhanh, và quan trọng hơn: không bịa được.
-LENH_TIEN_ICH = ("/help", "/nangluc")
+#: `/viec` (02/10/2026): xem việc quét nền của cuộc chat — đọc thẳng sổ `viec_nen`, không
+#: gọi model, nên tiến độ/link/chi phí là số thật, không phải model kể lại.
+LENH_TIEN_ICH = ("/help", "/nangluc", "/viec")
 
 _CU_PHAP = re.compile(r"^\s*(/[a-zA-Z][a-zA-Z0-9_-]*)\s*(.*)$", re.S)
 
@@ -180,6 +182,9 @@ def _van_help() -> str:
         "      Đặt một lời nhắc theo thời gian, đến giờ Mark tự nhắn vào đây.",
         "  /nangluc",
         "      Xem quyền hạn platform cấp và từng công tắc đang bật hay tắt.",
+        "  /viec",
+        "      Xem các việc quét nền (quét lớn chạy ngoài lượt trả lời): tiến độ, link "
+        "sheet, chi phí thật. /viec <mã> để xem một việc.",
         "",
         "Ví dụ: /search áo thun nam 7 ngày tiktok",
         "Muốn biết kỹ một việc làm gì, ra kết quả gì thì hỏi bằng lời thường, không gõ "
@@ -222,6 +227,15 @@ def _van_nangluc() -> str:
     return "\n".join(d)
 
 
+def _van_viec(doi_so: str) -> str:
+    """`/viec` — chat/người hỏi lấy từ ngữ cảnh lượt (brain.reply đặt trước `xu_ly`)."""
+    try:
+        import viec_nen
+        return viec_nen.van_ban_lenh(doi_so)
+    except Exception as e:  # noqa: BLE001 — sổ hỏng thì nói thật, không gọi model đoán
+        return f"Không đọc được sổ việc quét nền ({type(e).__name__})."
+
+
 def _lam_luot_nguoi_dung(lenh: str, tool: str, doi_so: str) -> str:
     """Dựng lại lượt người dùng cho lệnh ép tool.
 
@@ -259,6 +273,8 @@ def xu_ly(text: str) -> KetQua:
         return KetQua(van_ban=con_lai, lenh=lenh, tra_loi_thang=_van_help())
     if lenh == "/nangluc":
         return KetQua(van_ban=con_lai, lenh=lenh, tra_loi_thang=_van_nangluc())
+    if lenh == "/viec":
+        return KetQua(van_ban=con_lai, lenh=lenh, tra_loi_thang=_van_viec(con_lai))
 
     if lenh in LENH_NGUON:
         return KetQua(van_ban=con_lai or text, lenh=lenh, chi_thi=LENH_NGUON[lenh])

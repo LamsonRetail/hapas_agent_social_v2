@@ -57,6 +57,7 @@ import ky_nang_tool  # noqa: E402,F401  (registers `dung_ky_nang`: nạp thân k
 import account_tool  # noqa: E402,F401  (registers `soi_tai_khoan`: soi tài khoản brand/KOC)
 import shopee_tool  # noqa: E402,F401  (registers `soi_san`: giá và sản phẩm trên Shopee)
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
+import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
@@ -167,6 +168,13 @@ _TOOLING_NOTE = "\n".join(
         "kết quả luôn nói thị trường đã quét và số bài thị trường khác giữ/chuyển "
         "(`cau_thi_truong`). `social_deep_dive` trả `vuot_tran` = chưa chạy vì vượt trần chủ "
         "agent đặt: nói mức vừa trần (`goi_y`), không có cách chạy vượt.",
+        # 02/10: quét tới 10.000 bài / 30.000 bình luận chạy NỀN; xác nhận chi phí vẫn ở lời
+        # dặn (chủ agent chốt), chỉ trần tiền là chặn cứng.
+        "- QUÉT/BÓC LỚN: gọi trước với `chi_uoc_tinh`=true, nói USD + phút ước tính và giới "
+        "hạn nguồn (lần này PHẢI nói chi phí), kết bằng \"Chạy nhé?\" — kể cả `/search` khi ước "
+        "tính > 1 USD; >1000 bài chưa rõ nền tảng thì hỏi nền tảng; `dang_chay_nen` = chưa có "
+        "số liệu, chỉ báo mã việc; 'xong chưa/kết quả quét' → `tra_viec_nen`, 'huỷ quét' → "
+        "`huy_viec_nen`.",
     ]
 )
 

@@ -19,11 +19,17 @@ Khi báo kết quả:
   dung video là chủ đề KOL/nội dung, không phải cảm xúc về sản phẩm
 - Bài có trạng thái "CÓ THỂ BỊ CẮT DO TRẦN CHI PHÍ" là bài CHƯA lấy hết, không phải bài
   không có bình luận. Nói rõ và đề xuất soi lại riêng các bài đó
-- Chủ agent đặt trần CỨNG cho MỖI lần bóc: trần bình luận (mặc định 300, 50–3000) và trần
-  chi phí (mặc định 0,5 USD, 0,1–5). Tổng tiền có thể bị tính của cả lần bóc không bao
-  giờ vượt trần chi phí; mỗi lượt chạy YouTube/Facebook phải giữ tối thiểu 0,5 USD trong
-  trần đó, nên trần 0,5 USD chỉ đủ MỘT lượt (~225 bình luận YouTube). Trong trần, người
-  dùng xin bao nhiêu bình luận/bài cũng được, tối đa 1000/bài
+- Chủ agent đặt trần CỨNG cho MỖI lần bóc: trần bình luận (mặc định 300, 50–30000, tổng
+  mọi bài) và trần chi phí (mặc định 0,5 USD, 0,1–50; lượt chạy ngay trong câu trả lời
+  không quá 5 USD). Tổng tiền có thể bị tính của cả lần bóc không bao giờ vượt trần chi
+  phí; mỗi lượt chạy YouTube/Facebook phải giữ tối thiểu 0,5 USD trong trần đó, nên trần
+  0,5 USD chỉ đủ MỘT lượt (~225 bình luận YouTube). Trong trần, người dùng xin bao nhiêu
+  bình luận/bài cũng được, tối đa 1000/bài
+- Bóc LỚN (quá 1500 bình luận, hoặc chậm/đắt hơn một câu trả lời) tự CHẠY NỀN, xong Mark
+  tự nhắn link sheet. Gọi trước với `chi_uoc_tinh`=true, nói USD + phút ước tính, kết bằng
+  "Chạy nhé?". `dang_chay_nen` = chưa có số liệu, chỉ báo mã việc. Hỏi tiến độ →
+  `tra_viec_nen`, huỷ → `huy_viec_nen`. Việc nền chỉ gửi AI tối đa ~1000 bình luận nhiều
+  like nhất để gán nhãn; phần còn lại "Chưa phân loại" — nói rõ số đã phân loại
 - Tool trả `vuot_tran` nghĩa là chưa chạy gì: nói yêu cầu vượt trần, chép câu `goi_y`
   ("trong trần này bóc được tối đa N bình luận/bài cho M bài"), đề xuất giảm bớt hoặc
   nhờ chủ agent nâng "Trần bình luận" / "Trần chi phí bóc bình luận" ở Console → Năng

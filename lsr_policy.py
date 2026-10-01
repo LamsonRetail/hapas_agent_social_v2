@@ -39,6 +39,8 @@ _SAFE_EXACT = {
     # Tra lại kho của CHÍNH agent bằng nhiều bộ từ khoá (kho_tool.py). Không công tắc —
     # cùng lý do với `dung_ky_nang`: tắt đi là quay về lỗi "kho có mà không thấy".
     "tra_kho",
+    # Đọc sổ việc quét nền (viec_nen.py) — chỉ việc của chính chat này / người hỏi này.
+    "tra_viec_nen",
     "browser_navigate",
     "browser_snapshot",
     "browser_get_images",
@@ -59,6 +61,8 @@ _MUTATING_EXACT = {
     "soi_san": "write_data",             # giá và sản phẩm Shopee → tạo Lark Sheet
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
+    # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
+    "huy_viec_nen": "write_data",
     "remember_about_user": "write_data",
 }
 _MUTATING_WORDS = {

@@ -42,6 +42,9 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
 - Cào hết rồi AI đọc từng bài để giữ/loại kèm lý do (cột "Nhận định AI", bài loại ở
   tab "Bị loại"). Bài của brand ở thị trường khác vẫn giữ, có cột "Thị trường"
 - Số bài mỗi lượt bị chặn ở trần chủ agent đặt trên console. Chỉ đọc bài công khai
+- Quét lớn (tới 10.000 bài mỗi nền tảng) chạy nền tới 45 phút: Mark báo ước tính chi phí
+  và thời gian, hỏi "chạy nhé?", xong thì tự nhắn link sheet. Xem tiến độ bằng `/viec`
+  hoặc hỏi "xong chưa"; nhắn "huỷ quét" để dừng (phần đã lấy vẫn giữ)
 
 **Trend TikTok đang nổi** (vẫn là `/search`, không cần từ khoá)
 - Ví dụ: "trend TikTok tuần này có gì?"; "âm thanh nào đang hot?"
@@ -94,4 +97,5 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
 **Nội bộ và tiện ích**
 - `/wiki`: tra Wiki và tài liệu trên Lark. Đọc ảnh: gửi ảnh kèm câu hỏi
 - `/nhac`: đặt lời nhắc, tới giờ Mark tự nhắn. `/nho`: ghi nhớ một điều về người hỏi
-- `/help`: danh sách lệnh. `/nangluc`: công tắc nào đang bật
+- `/help`: danh sách lệnh. `/nangluc`: công tắc nào đang bật. `/viec`: các việc quét nền
+  của cuộc chat (tiến độ, link sheet, chi phí thật)
