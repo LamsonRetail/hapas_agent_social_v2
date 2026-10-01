@@ -595,6 +595,7 @@ def test_5xx_ma_run_da_tao_thi_nhan_run_khong_post_lai(ds_run):
 def test_dut_ket_noi_ma_run_da_tao_thi_khong_post_lai(ds_run):
     ds_run.start = [A.requests.ConnectionError("Connection aborted.")]
     ds_run.ds_run = [_run_moi()]
+    ds_run.input = {"kvX": {"q": 1}}
     items, meta = A._run_actor("a~b", {"q": 1}, 10, deadline=1000 + 120)
     assert len(ds_run.post_urls) == 1 and meta["run_id"] == "runX"
 
@@ -602,8 +603,28 @@ def test_dut_ket_noi_ma_run_da_tao_thi_khong_post_lai(ds_run):
 def test_read_timeout_ma_run_da_tao_thi_doc_tiep_run_do(ds_run):
     ds_run.start = [A.requests.ReadTimeout("read timed out")]
     ds_run.ds_run = [_run_moi(giay_truoc=0)]
+    ds_run.input = {"kvX": {}}
     items, meta = A._run_actor("a~b", {}, 10, deadline=1000 + 120)
     assert len(ds_run.post_urls) == 1 and items and meta["run_id"] == "runX"
+
+
+def test_khong_doc_duoc_input_thi_khong_nhan_run(ds_run):
+    """Fail-closed: không kiểm được INPUT thì KHÔNG nhận — nhận nhầm run của từ khoá
+    khác là lẫn dữ liệu im lặng (review 01/10/2026). Thử lại một lần như cũ."""
+    ds_run.start = [A.requests.ConnectionError("Connection aborted.")]
+    ds_run.ds_run = [_run_moi()]                      # INPUT trả 404
+    items, meta = A._run_actor("a~b", {"q": 1}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 2 and meta["run_id"] == "run1"
+
+
+def test_hai_run_cung_luc_chi_nhan_run_khop_input(ds_run):
+    """Fan-out FB/IG cùng gặp lỗi: run mới nhất (không đọc được INPUT) không được nhận,
+    run khớp INPUT mới là của mình."""
+    ds_run.start = [R(502, text="Bad Gateway")]
+    ds_run.ds_run = [_run_moi("runKhac", giay_truoc=1, kv="kvKhac"), _run_moi("runX")]
+    ds_run.input = {"kvX": {"q": 1}}
+    items, meta = A._run_actor("a~b", {"q": 1}, 10, deadline=1000 + 120)
+    assert len(ds_run.post_urls) == 1 and meta["run_id"] == "runX"
 
 
 def test_5xx_khong_thay_run_thi_thu_lai_mot_lan(ds_run):

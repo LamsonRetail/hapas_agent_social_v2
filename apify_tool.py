@@ -540,15 +540,20 @@ def _tim_run_vua_tao(actor: str, payload: dict, h: dict,
         bd = _to_vn(run.get("startedAt"))
         if not bd or bd < moc:
             continue
+        # INPUT phải ĐỌC ĐƯỢC và TRÙNG payload mới nhận. Không kiểm được thì bỏ qua (thử lại
+        # như cũ): nhận nhầm run của từ khoá khác cùng actor (fan-out FB/IG cùng gặp một
+        # nhịp lỗi) là lẫn dữ liệu IM LẶNG — tệ hơn rủi ro hiếm trả tiền trùng (review
+        # 01/10/2026).
         kv = run.get("defaultKeyValueStoreId")
-        if kv:
-            try:
-                ri = requests.get(f"{_APIFY_BASE}/key-value-stores/{kv}/records/INPUT",
-                                  headers=h, timeout=8)
-                if ri.status_code < 400 and ri.json() != payload:
-                    continue                      # run của lượt khác cùng actor
-            except (requests.RequestException, ValueError, AttributeError):
-                pass
+        if not kv:
+            continue
+        try:
+            ri = requests.get(f"{_APIFY_BASE}/key-value-stores/{kv}/records/INPUT",
+                              headers=h, timeout=8)
+            if ri.status_code >= 400 or ri.json() != payload:
+                continue                          # của lượt khác, hoặc không kiểm được
+        except (requests.RequestException, ValueError, AttributeError):
+            continue
         with _RUN_KHOA:                           # nhận NGUYÊN TỬ: hai luồng không cùng nhận
             if run["id"] in _RUN_CUA_MINH:
                 continue

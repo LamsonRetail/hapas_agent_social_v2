@@ -96,7 +96,10 @@ _NHAY_CAM = (
     ("lừa đảo / bắt cóc", r"luadao|batcoc|mattich", ("lừađảo", "bắtcóc", "mấttích")),
     ("tai nạn / thiên tai",
      r"(?:vu|gay|bi)tainan|tainan(?:giaothong|xe|lienhoan|thamkhoc|kinhhoang|nghiemtrong"
-     r"|chetnguoi|laodong|maybay|hamtau)|lulut|ngaplut|satlodat|dongdat|chayno|hoahoan",
+     r"|chetnguoi|laodong|maybay|hamtau)|lulut|ngaplut|satlodat|dongdat|chayno|hoahoan"
+     # "thientai" trơn bỏ dấu trùng "thiên tài" nên chỉ tính khi kèm ngữ cảnh thảm hoạ;
+     # hashtag cứu trợ/bão lũ thì brand cũng không nên bám (review 01/10/2026).
+     r"|thientai(?:mientrung|cuutro|lulut|baolu|thamkhoc|ungho)|cuutro|baolu",
      ("tainạn", "thiêntai", "lũlụt", "độngđất", "cháynổ", "hỏahoạn", "hoảhoạn")),
     # Không có "quadoi": bỏ dấu thì "qua đời" trùng "quà đôi" — hashtag quà tặng của brand.
     ("chết chóc",

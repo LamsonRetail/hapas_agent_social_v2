@@ -372,3 +372,9 @@ def test_uoc_tinh_truoc_tinh_ca_luot_hai_te_nhat(gia):
     mau = 720 * 0.003
     assert kq["uoc_tinh_chi_phi_usd"] >= round(mau, 3)
     assert T._so_mau_toi_da(20, 800, 10.0) == 50 + 121, "mẫu nhỏ: 2,5×20 + 6×20+1"
+
+
+def test_thientai_khong_dau_chi_tinh_khi_kem_ngu_canh_tham_hoa():
+    assert T._nhay_cam("thientai") == "" and T._nhay_cam("thientaiamnhac") == ""
+    for h in ("thientaimientrung", "thientaicuutro", "cuutromientrung", "baolumientrung"):
+        assert T._nhay_cam(h), h
