@@ -378,3 +378,30 @@ def test_thientai_khong_dau_chi_tinh_khi_kem_ngu_canh_tham_hoa():
     assert T._nhay_cam("thientai") == "" and T._nhay_cam("thientaiamnhac") == ""
     for h in ("thientaimientrung", "thientaicuutro", "cuutromientrung", "baolumientrung"):
         assert T._nhay_cam(h), h
+
+
+def test_trend_tra_dung_han_va_moi_actor_nhan_han_chot(gia, monkeypatch):
+    """Rà 01/10/2026: mỗi bảng chờ nguyên _TOOL_DEADLINE riêng và lượt lấy mẫu đầu không
+    kiểm giờ — cộng dồn 300–400s. Nay một hạn chót chung, truyền xuống từng lời gọi actor."""
+    import time as _t
+    monkeypatch.setattr(A, "_TOOL_DEADLINE", 1.5)
+    thay = []
+
+    def bang_treo(vung, ky, n):
+        thay.append(A._HAN_CHOT.get())
+        _t.sleep(4)
+        return []
+    monkeypatch.setattr(T, "_bang_hashtag", bang_treo)
+    monkeypatch.setattr(T, "_bang_video", lambda *a: (thay.append(A._HAN_CHOT.get()), [])[1])
+    t0 = _t.monotonic()
+    T.chay({"so_nhac": 0})
+    assert _t.monotonic() - t0 < 3.5, "trend phải trả trong hạn, không chờ bảng treo"
+    assert thay and all(h is not None for h in thay), "actor phải nhận hạn chót của lượt"
+
+
+def test_het_gio_thi_bo_lay_mau_va_noi_ro(gia, monkeypatch):
+    monkeypatch.setattr(T, "_TOI_THIEU_GIAY_MAU", 10 ** 6)
+    goi = []
+    monkeypatch.setattr(T, "_mau_am_thanh", lambda *a: goi.append(1))
+    kq = json.loads(T.chay({}))
+    assert not goi and "hết thời gian" in json.dumps(kq, ensure_ascii=False)

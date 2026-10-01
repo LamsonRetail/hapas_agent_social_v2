@@ -26,6 +26,7 @@ thật được ghi vào sổ audit như lần quét thường.
 from __future__ import annotations
 
 import collections
+import contextvars
 import datetime
 import math
 import re
@@ -70,6 +71,16 @@ _SO_HASHTAG_SOI_TOI_DA = 25
 # hashtag CHƯA soi (vẫn trong trần mỗi lượt).
 _HE_SO_XIN = 2.5
 _CON_GIAY_DE_CAO_THEM = 60
+# Còn ít hơn chừng này giây thì bỏ hẳn lượt lấy mẫu âm thanh (nói rõ), khỏi chạy dở.
+_TOI_THIEU_GIAY_MAU = 30
+
+
+def _trong_han(han_run: float, fn, *a):
+    """Chạy `fn` với hạn chót + sổ run của apify_tool: tới hạn thì run bị huỷ và `_call`
+    trả phần đã lấy thay vì ném QUA_GIO. Gọi trong `contextvars.copy_context().run`."""
+    A._SO_RUN.set([])
+    A._HAN_CHOT.set(han_run)
+    return fn(*a)
 # Lượt cào thêm dùng PHẦN CÒN LẠI của trần mỗi lượt sau lượt đầu, không phải cả trần lần
 # nữa (rà 01/10/2026: hai lượt mỗi lượt 90% trần = tiêu gần gấp đôi). Còn ít hơn chừng
 # này video thì thôi, không đáng một lượt khởi chạy.
@@ -396,34 +407,48 @@ def chay(args: dict) -> str:
     t0 = time.monotonic()
     loi: dict[str, str] = {}
 
+    # MỘT hạn chót cho cả lượt, truyền vào từng lời gọi actor qua contextvars của
+    # apify_tool: tới hạn thì run bị HUỶ và trả phần đã có. Rà 01/10/2026: mỗi bảng chờ
+    # nguyên `_TOOL_DEADLINE` riêng, lượt lấy mẫu đầu chạy không kiểm giờ — cộng dồn
+    # 300–400s, đúng kiểu lỗi 340s/508s đã sửa ở social_listen.
+    han = t0 + A._TOOL_DEADLINE
+    han_run = han - A._DU_PHONG_HUY
+
+    def con() -> float:
+        return max(0.05, han - time.monotonic())
+
     ex = ThreadPoolExecutor(max_workers=3)
     try:
-        f_tag = ex.submit(_bang_hashtag, vung, ky, n_tag)
-        f_vid = ex.submit(_bang_video, vung, ky, so_vid, tu_nhien) if so_vid else None
-        f_nhac = ex.submit(_bang_nhac, vung, ky, n_nhac) if n_nhac else None
+        def gui(fn, *a):
+            return ex.submit(contextvars.copy_context().run, _trong_han, han_run, fn, *a)
+        f_tag = gui(_bang_hashtag, vung, ky, n_tag)
+        f_vid = gui(_bang_video, vung, ky, so_vid, tu_nhien) if so_vid else None
+        f_nhac = gui(_bang_nhac, vung, ky, n_nhac) if n_nhac else None
         try:
-            tat_ca_tag = f_tag.result(timeout=A._TOOL_DEADLINE)
+            tat_ca_tag = f_tag.result(timeout=con())
         except Exception as e:  # noqa: BLE001
-            tat_ca_tag, loi["hashtag"] = [], f"{type(e).__name__}: {e}"[:250]
+            tat_ca_tag, loi["hashtag"] = [], A._che_token(f"{type(e).__name__}: {e}")[:250]
         tags = tat_ca_tag[:so_tag]
         try:
-            vids = f_vid.result(timeout=A._TOOL_DEADLINE) if f_vid else []
+            vids = f_vid.result(timeout=con()) if f_vid else []
         except Exception as e:  # noqa: BLE001
-            vids, loi["video"] = [], f"{type(e).__name__}: {e}"[:250]
+            vids, loi["video"] = [], A._che_token(f"{type(e).__name__}: {e}")[:250]
 
         mau = {"cao": 0, "giu": 0, "am_thanh": [], "hieu_ung": [], "cao_du": True}
         thu_tu = _thu_tu_soi(tat_ca_tag) if so_mau else []
-        if so_mau and thu_tu:
+        if so_mau and thu_tu and con() < _TOI_THIEU_GIAY_MAU:
+            loi["am_thanh"] = "bỏ qua lấy mẫu âm thanh vì hết thời gian của lượt"
+        elif so_mau and thu_tu:
             try:
-                mau = _mau_am_thanh(thu_tu, so_mau, vung, ky, tran_bai, tran_usd,
-                                    A._TOOL_DEADLINE - (time.monotonic() - t0))
+                mau = contextvars.copy_context().run(
+                    _trong_han, han_run, _mau_am_thanh, thu_tu, so_mau, vung, ky,
+                    tran_bai, tran_usd, con())
             except Exception as e:  # noqa: BLE001
-                loi["am_thanh"] = f"{type(e).__name__}: {e}"[:250]
+                loi["am_thanh"] = A._che_token(f"{type(e).__name__}: {e}")[:250]
         try:
-            nhac = f_nhac.result(timeout=max(1.0, A._TOOL_DEADLINE - (time.monotonic() - t0))) \
-                if f_nhac else []
+            nhac = f_nhac.result(timeout=con()) if f_nhac else []
         except Exception as e:  # noqa: BLE001
-            nhac, loi["nhac"] = [], f"{type(e).__name__}: {e}"[:250]
+            nhac, loi["nhac"] = [], A._che_token(f"{type(e).__name__}: {e}")[:250]
     finally:
         # Không chờ lượt treo: trần trả lời 180s của run.py không đợi ai.
         ex.shutdown(wait=False)
