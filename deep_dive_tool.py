@@ -18,6 +18,9 @@ Nền tảng — đo thật 27/08/2026
   voteCount, replyCount, publishedTimeText. LƯU Ý: thời gian là chữ tương đối
   ("2 years ago"), KHÔNG phải mốc tuyệt đối.
   Actor này bắt maxTotalChargeUsd >= 0.50 (trần cho phép, không phải phí thực).
+  `_call(min_charge=…)` TỪ CHỐI (báo rõ) khi trần console thấp hơn mức này chứ
+  không tự nâng trần — trước 01/10/2026 `_call` thiếu tham số nên mọi lượt
+  YouTube/Facebook chết vì TypeError.
 - Facebook (apify/facebook-comments-scraper, 4.73*): chạy được nhưng khi bài
   không có comment / bài riêng tư thì trả về OBJECT LỖI
   {"error": "no_items", "errorDescription": "..."} chứ KHÔNG phải mảng rỗng.
@@ -34,8 +37,8 @@ import datetime
 import re
 
 import memory_store
-from apify_tool import (_VN_TZ, _call, _grant, _create_sheet, _first_sheet_id,
-                        _to_vn, lark)
+from apify_tool import (_VN_TZ, _call, _che_token, _grant, _create_sheet,
+                        _first_sheet_id, _to_vn, lark)
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
@@ -223,9 +226,10 @@ def _handle(args: dict, **kwargs) -> str:
         try:
             got = _FETCH[p](us, per)
         except Exception as e:  # noqa: BLE001
+            # Che token: chuỗi lỗi đi thẳng vào câu trả lời của model và sổ audit.
             for u in us:
                 per_url[u] = {"platform": p, "status": "LỖI",
-                              "error": f"{type(e).__name__}: {e}"[:220]}
+                              "error": _che_token(f"{type(e).__name__}: {e}")[:220]}
             failed.append(p)
             continue
         for c in got:
@@ -269,8 +273,8 @@ def _handle(args: dict, **kwargs) -> str:
     except Exception as e:  # noqa: BLE001
         return tool_result(
             success=False, sheet_url=None, **base,
-            error=f"Lấy được {len(rows)} comment nhưng TẠO/GHI SHEET THẤT BẠI: "
-                  f"{type(e).__name__}: {e}",
+            error=_che_token(f"Lấy được {len(rows)} comment nhưng TẠO/GHI SHEET THẤT "
+                             f"BẠI: {type(e).__name__}: {e}"),
             mau=[{"kenh": c["kenh"], "text": c["text"][:120]} for c in rows[:5]])
 
     sender = memory_store.get_current_sender()

@@ -255,21 +255,61 @@ def _to_vn(raw) -> datetime.datetime | None:
 
 
 # ───────────────────────── Apify ─────────────────────────
-def _call(actor: str, payload: dict, limit: int, mem: int | None = None) -> list[dict]:
+def _che_token(s, token: str | None = None) -> str:
+    """Che APIFY_TOKEN khỏi MỌI chuỗi lỗi trước khi nó tới model, audit hay log.
+
+    Chuỗi lỗi của `requests` chứa nguyên URL; bản trước để token trên query
+    (`?token=…`) nên một lần mất mạng là token chui vào `per_platform.error`,
+    rồi vào câu trả lời của model và sổ audit (rà 01/10/2026). Token nay đi qua
+    header, hàm này là lớp chặn thứ hai.
+    """
+    s = str(s)
+    tok = (os.environ.get("APIFY_TOKEN", "") if token is None else token).strip()
+    if tok:
+        s = s.replace(tok, "***").replace(urllib.parse.quote(tok), "***")
+    return re.sub(r"(?i)(token=)[^&\s'\"]+", r"\1***", s)
+
+
+def _call(actor: str, payload: dict, limit: int, mem: int | None = None,
+          min_charge: float = 0) -> list[dict]:
+    """Chạy actor đồng bộ rồi trả dataset.
+
+    `min_charge`: mức `maxTotalChargeUsd` tối thiểu actor đòi (YouTube/Facebook
+    comments đòi 0,5 USD — deep_dive_tool). Trần console THẤP HƠN mức đó thì TỪ
+    CHỐI chứ không tự nâng trần: chủ agent đặt trần là để không lượt nào tiêu quá
+    số đó, và giá mỗi comment của actor ta không kiểm soát nên không chứng minh
+    được `maxItems × giá` luôn nằm dưới trần console. Trước 01/10/2026 deep_dive
+    đã truyền tham số này mà `_call` không có -> TypeError 9/9 lượt kéo bình luận
+    YouTube/Facebook.
+    """
     token = os.environ.get("APIFY_TOKEN", "").strip()
     if not token:
         raise RuntimeError(
             "Thiếu APIFY_TOKEN trong .env "
             "(lấy ở https://console.apify.com/settings/integrations)."
         )
+    tran_usd = _tran()[1]
+    if min_charge and tran_usd < min_charge:
+        def usd(x: float) -> str:
+            return f"{x:g}".replace(".", ",")
+        raise RuntimeError(
+            f"Trần chi phí trên console ({usd(tran_usd)} USD/lượt) thấp hơn mức tối thiểu "
+            f"actor {actor} yêu cầu ({usd(min_charge)} USD) — không chạy để khỏi vượt "
+            f"trần. Chủ agent nâng trần ở console: Năng lực → Quét mạng xã hội.")
+    # Token đi qua header Authorization, KHÔNG nằm trên URL (xem `_che_token`).
     url = (f"{_APIFY_BASE}/acts/{actor}/run-sync-get-dataset-items"
-           f"?token={urllib.parse.quote(token)}"
            # Đây là TRẦN cho phép, không phải phí thực — phí vẫn tính theo item.
-           f"&maxItems={limit}&maxTotalChargeUsd={_tran()[1]}"
+           f"?maxItems={limit}&maxTotalChargeUsd={tran_usd}"
            + (f"&memory={mem}" if mem else ""))
-    r = requests.post(url, json=payload, timeout=_RUN_TIMEOUT)
+    try:
+        r = requests.post(url, json=payload, timeout=_RUN_TIMEOUT,
+                          headers={"Authorization": f"Bearer {token}"})
+    except requests.RequestException as e:
+        raise RuntimeError(
+            f"Không kết nối được Apify ({type(e).__name__}): {_che_token(e, token)}"[:300]
+        ) from None
     if r.status_code >= 400:
-        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:250]}")
+        raise RuntimeError(f"HTTP {r.status_code}: {_che_token(r.text[:250], token)}")
     data = r.json()
     return data if isinstance(data, list) else []
 
@@ -424,8 +464,12 @@ def _tags_from(text: str) -> str:
 
 
 def _norm(s: str) -> str:
-    """Bỏ dấu + thường hoá, để so khớp từ khoá bền vững."""
-    s = unicodedata.normalize("NFD", s or "")
+    """Bỏ dấu + thường hoá, để so khớp từ khoá bền vững.
+
+    'đ' KHÔNG tách dấu được qua NFD (là chữ riêng U+0111) nên phải đổi tay, không
+    thì "Đồng hồ" không bao giờ khớp từ khoá gõ không dấu "dong ho".
+    """
+    s = unicodedata.normalize("NFD", (s or "").replace("đ", "d").replace("Đ", "D"))
     return "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
 
 
@@ -433,6 +477,9 @@ def _norm(s: str) -> str:
 # "hapas" trên Facebook trả về "Happy Animals", "Happy With Raveen",
 # "Happy Syrian" — khớp chữ "Happy". Instagram thì ra #hapasguitars (hãng đàn)
 # và post tiếng Thái vì actor không lọc được quốc gia.
+# Từ 01/10/2026 MỌI nền tảng đi qua `_khop_tu_khoa`; danh sách này chỉ còn dùng
+# khi `khop_long`=true (truy vấn khám phá kiểu "viral"): khi đó giữ đúng hành vi
+# cũ — ba nguồn khớp lỏng này vẫn phải chứa chuỗi con từ khoá (`_relevant`).
 _NEEDS_RELEVANCE_FILTER = ("facebook", "instagram", "youtube")
 
 # Nguồn KHÔNG lọc được khoảng ngày ở phía server: chỉ lấy được N item MỚI NHẤT
@@ -451,6 +498,95 @@ def _relevant(d: dict, queries: list[str]) -> bool:
     """
     hay = _norm(f"{d.get('text','')} {d.get('hashtags','')} {d.get('kenh','')}")
     return any(_norm(q) in hay for q in queries)
+
+
+def _tokens(s: str) -> list[str]:
+    """Chuẩn hoá (bỏ dấu, đ→d, thường) rồi tách theo ký tự KHÔNG phải chữ/số.
+
+    '#' '.' '_' '@' đều là dấu tách: "hapas.official" -> ["hapas", "official"].
+    Dùng lớp chữ Unicode chứ không chỉ a-z để từ khoá tiếng Thái/Hindi vẫn so được.
+    """
+    return re.findall(r"[^\W_]+", _norm(s))
+
+
+def _ghep_lien(tokens: list[str], kim: str) -> bool:
+    """`kim` bằng đúng phần GHÉP của vài token LIỀN NHAU — khớp ranh giới cả hai đầu.
+
+    Để "matemade" khớp "Mate Made" mà "hapas" KHÔNG khớp "hapa systems" (ghép
+    "hapasystems" chứa "hapas" nhưng cắt giữa chữ "systems").
+    """
+    for i in range(len(tokens)):
+        s = ""
+        for t in tokens[i:]:
+            s += t
+            if len(s) >= len(kim):
+                break
+        if s == kim:
+            return True
+    return False
+
+
+def _khop_mot_tu(tokens: list[str], tu: str, the: tuple = ()) -> bool:
+    if len(tu) <= 3:
+        # Kim ngắn ("ai", "k", "20") khớp chuỗi con là khớp bừa ("ai" nằm trong
+        # "hai", "mai", "thailand") — bắt buộc trùng nguyên một từ. Riêng HASHTAG
+        # thì cho khớp ĐẦU token: brand ngắn hay gõ dính ("#PNJ30Nam",
+        # "PNJSpring2026") — chỉ hashtag, không áp cho chữ thường trong nội dung.
+        return tu in tokens or any(t.startswith(tu) for t in the)
+    # Kim dài: được nằm GIỮA một token, vì người Việt gõ dính hashtag
+    # ("#HAPASNUOCHOAHAPAS"). Nhưng không bắc qua ranh giới từ, xem `_ghep_lien`.
+    return any(tu in t for t in tokens) or _ghep_lien(tokens, tu)
+
+
+def _khop_tu_khoa(d: dict, queries: list[str]) -> bool:
+    """Bài có THỰC SỰ nhắc từ khoá không — áp cho MỌI nền tảng.
+
+    Vì sao: trước 01/10/2026 chỉ Facebook/Instagram/YouTube được kiểm, TikTok và
+    Threads lọt thẳng vào sheet. Sheet ngày 01/10 có bài Threads của "Mason
+    Nguyễn" ("vote Tinh Hà ở đâu"), "Bùi Trường Linh" ("Đt gập thì a k có…"),
+    "Tu Anh Vu" (Thơm Da LAB x Folio's Men x Narciso) — không bài nào có chữ
+    "hapas". Actor search của Threads/TikTok khớp cả hồ sơ, bình luận, gợi ý.
+
+    Haystack = nội dung (tiêu đề/caption) + hashtag + tên kênh + username.
+    TUYỆT ĐỐI không đưa trường actor VỌNG LẠI từ khoá vào (`searchKeyword`,
+    `input` — apidojo `includeSearchKeywords`): dòng nào cũng có, lọc thành vô hiệu.
+
+    Luật: bỏ dấu (đ→d) + thường hoá; từ khoá nhiều chữ khớp khi ĐỦ mọi chữ hoặc
+    khi dạng viết liền của nó xuất hiện; chữ ≤3 ký tự phải trùng nguyên từ.
+    "hapa" (lưới nuôi cá — "Taj Nets – aquaculture hapa", YouTube 01/10) KHÔNG
+    khớp "hapas". "Hapas Ashen" (ban nhạc metal "SHINAI – Hapas Ashen") thì CÓ
+    chữ "Hapas" nên vẫn khớp — bài đó do cổng thị trường VN hoặc AI loại.
+    """
+    hay = " ".join(str(d.get(k) or "") for k in ("text", "hashtags", "kenh", "username"))
+    tokens = _tokens(hay)
+    # Token HASHTAG: trường `hashtags` (tên đã bỏ '#') + các '#…' trong nội dung.
+    the = tuple(_tokens(" ".join([str(d.get("hashtags") or "")]
+                                 + re.findall(r"#(\S+)", str(d.get("text") or "")))))
+    hay_norm = _norm(hay)
+    co_kiem = False
+    for q in queries:
+        tu = _tokens(q)
+        if not tu:
+            continue
+        co_kiem = True
+        if len(tu) > 1 and all(t.isdigit() for t in tu):
+            # Từ khoá NGÀY/SỐ ("20/10", "11/11", "8/3"): các số phải ĐỨNG LIỀN theo
+            # đúng thứ tự, nối bằng / - . hoặc chữ "tháng". Luật "đủ mọi chữ" thì
+            # "Sale có 20 mẫu giảm giá tới 10%" thành khớp "20/10". Cố ý KHÔNG nhận
+            # dạng dính "2010": trùng năm 2010.
+            mau = r"\s*(?:[/.\-]|\s+thang\s+)\s*".join(re.escape(t) for t in tu)
+            if re.search(rf"(?<!\d){mau}(?!\d)", hay_norm):
+                return True
+            continue
+        gon = "".join(tu)
+        if len(tu) > 1 and len(gon) > 3 and (any(gon in t for t in tokens)
+                                             or _ghep_lien(tokens, gon)):
+            return True
+        # Nhiều chữ ("túi xách nữ"): đủ MỌI chữ, không cần đúng thứ tự/liền nhau.
+        if all(_khop_mot_tu(tokens, w, the) for w in tu):
+            return True
+    # Từ khoá không có chữ/số nào (emoji…) thì không kiểm được -> giữ, đừng loại bừa.
+    return not co_kiem
 
 
 # Thị trường dùng chữ Latin — chỉ ở những nước này mới lọc theo hệ chữ.
@@ -486,7 +622,8 @@ _AI_TOI_THIEU = 5      # ít hơn thế thì không bõ một lượt gọi mode
 
 
 def _loc_bang_ai(rows: list, queries: list[str], boi_canh: str, log: list,
-                 con_lai: float = _AI_TIMEOUT) -> set:
+                 con_lai: float = _AI_TIMEOUT, trang_thai: dict | None = None,
+                 da_khop_tu_khoa: bool = True) -> set:
     """Chia lô rồi lọc — KHÔNG BAO GIỜ bỏ qua chỉ vì nhiều bài.
 
     Bản đầu đặt trần 150 bài, quá thì bỏ lọc. Sai nặng, và đã hỏng thật
@@ -497,7 +634,14 @@ def _loc_bang_ai(rows: list, queries: list[str], boi_canh: str, log: list,
     Nay chia lô `_AI_LO` bài mỗi lượt gọi, chạy tiếp tới khi hết ngân sách thời
     gian. Hết giờ giữa chừng thì **giữ phần chưa xét** (không loại bừa) và ghi
     rõ đã xét được bao nhiêu — người dùng phải biết bộ lọc mới chạy một phần.
+
+    `trang_thai` (nếu truyền) được điền CHUYỆN THỰC SỰ XẢY RA: {"trang_thai":
+    "đã chạy" | "chạy một phần" | "bỏ qua vì hết thời gian" | "bỏ qua vì quá ít
+    bài" | "lỗi", "da_xet": n}. Bản trước trả `loc_bang_ai=True` cứng kể cả khi
+    bộ lọc không chạy dòng nào vì hết giờ — Mark báo "đã lọc bằng AI" sai sự thật.
     """
+    tt = trang_thai if trang_thai is not None else {}
+    tt.update(trang_thai="bỏ qua vì quá ít bài", da_xet=0)
     if len(rows) < _AI_TOI_THIEU:
         return set()
     # Thiếu `boi_canh` thì VẪN lọc, chỉ đổi cách hỏi: bảo model tự nhìn ra chủ
@@ -513,21 +657,36 @@ def _loc_bang_ai(rows: list, queries: list[str], boi_canh: str, log: list,
     bo: set = set()
     t0 = time.monotonic()
     da_xet = 0
+    ket: list[str] = []          # kết cục từng lô: "ok" | "het_gio" | "loi"
     for i0 in range(0, len(xet), _AI_LO):
         con = con_lai - (time.monotonic() - t0)
         if con < 15:
+            ket.append("het_gio")
             break
         lo = xet[i0:i0 + _AI_LO]
-        bo |= {i0 + j for j in _loc_mot_lo(lo, queries, boi_canh, log, con)}
-        da_xet += len(lo)
+        n_ket = len(ket)
+        bo |= {i0 + j for j in _loc_mot_lo(lo, queries, boi_canh, log, con, ket,
+                                           da_khop_tu_khoa)}
+        if ket[n_ket:] == ["ok"]:
+            da_xet += len(lo)
     if da_xet < len(rows):
         log.append(f"loc_ai: moi xet {da_xet}/{len(rows)} bai thi het ngan sach — "
                    f"phan con lai GIU NGUYEN, chua duoc loc")
+    if da_xet and da_xet >= len(rows):
+        tt["trang_thai"] = "đã chạy"
+    elif da_xet:
+        tt["trang_thai"] = "chạy một phần"
+    elif "loi" in ket:
+        tt["trang_thai"] = "lỗi"
+    else:
+        tt["trang_thai"] = "bỏ qua vì hết thời gian"
+    tt["da_xet"] = da_xet
     return bo
 
 
 def _loc_mot_lo(rows: list, queries: list[str], boi_canh: str, log: list,
-                con_lai: float) -> set:
+                con_lai: float, ket: list | None = None,
+                da_khop_tu_khoa: bool = True) -> set:
     """Nhờ CHÍNH model của Mark đọc bối cảnh ngành hàng rồi loại bài lạc đề.
 
     Vì sao cần, dù đã có lọc hệ chữ và `exclude`: nhiễu đồng âm có thể viết
@@ -550,25 +709,36 @@ def _loc_mot_lo(rows: list, queries: list[str], boi_canh: str, log: list,
     # model viết câu trả lời; cộng thêm 50s gọi model ở đây là vượt trần 180s
     # của run.py và bị cắt CẢ lượt trả lời — người dùng mất trắng cả lượt quét
     # vừa tốn tiền Apify. Không đủ giờ thì thà bỏ lọc, giữ nguyên dữ liệu.
+    ket = ket if ket is not None else []
     ngan_sach = min(_AI_TIMEOUT, con_lai)
     if ngan_sach < 15:
         log.append(f"loc_ai: chi con {con_lai:.0f}s -> bo qua de khong lam vo tran "
                    f"tra loi (giu nguyen tat ca)")
+        ket.append("het_gio")
         return set()
 
     dong = []
     for i, (d, _) in enumerate(rows):
         tieu_de = " ".join(str(d.get("text") or "").split())[:110]
-        dong.append(f"{i}. [{str(d.get('kenh') or '')[:28]}] {tieu_de}")
+        # Kèm nền tảng + hashtag: nhiều bài TikTok/Instagram chỉ nói bằng hashtag
+        # ("#HAPAS #túixách"), cắt mất hashtag thì model thấy bài "trống", đoán bừa.
+        the = str(d.get("hashtags") or "")[:60]
+        dong.append(f"{i}. ({d.get('platform') or '?'}) [{str(d.get('kenh') or '')[:28]}] "
+                    f"{tieu_de}" + (f" | hashtag: {the}" if the else ""))
+    # Tiền đề phải ĐÚNG: từ 01/10/2026 mọi bài đã qua `_khop_tu_khoa` nên thật sự
+    # có nhắc từ khoá; với `khop_long` thì không — nói khác đi cho model khỏi hiểu sai.
+    tien_de = ("đã được kiểm là CÓ nhắc từ khoá (trong nội dung, hashtag hoặc tên kênh)"
+               if da_khop_tu_khoa else
+               "vừa cào về theo từ khoá (có thể KHÔNG chứa nguyên văn từ khoá)")
     nhac = (
         f"Brand đang theo dõi: {', '.join(queries)}\n"
         + (f"Ngành hàng / bối cảnh: {boi_canh}\n\n" if boi_canh else
            "KHÔNG biết trước ngành hàng. Hãy tự nhìn ra chủ đề mà ĐA SỐ bài đang "
            "nói tới — đó chính là ngành hàng của brand — rồi loại những bài lạc "
            "hẳn khỏi chủ đề đó.\n\n")
-        + f"Dưới đây là {len(rows)} bài vừa cào về vì có chứa tên brand. Nhưng tên "
-        f"brand có thể TRÙNG với thứ khác (địa danh, hãng khác, từ thông dụng ở "
-        f"nước khác). Hãy chỉ ra những bài KHÔNG liên quan gì tới brand và ngành "
+        + f"Dưới đây là {len(rows)} bài {tien_de}. Nhưng tên "
+        f"brand có thể TRÙNG với thứ khác (địa danh, hãng khác, ban nhạc, từ thông "
+        f"dụng ở nước khác). Hãy chỉ ra những bài KHÔNG liên quan gì tới brand và ngành "
         f"hàng trên.\n"
         f"QUY TẮC:\n"
         f"- Không chắc thì GIỮ LẠI. Chỉ loại khi rõ ràng là chuyện khác hẳn.\n"
@@ -593,18 +763,25 @@ def _loc_mot_lo(rows: list, queries: list[str], boi_canh: str, log: list,
     try:
         with ThreadPoolExecutor(max_workers=1) as ex:
             tra_loi = ex.submit(_chay).result(timeout=ngan_sach)
+    except _FutTimeout:
+        log.append(f"loc_ai: model qua {ngan_sach:.0f}s chua tra loi -> giu nguyen tat ca")
+        ket.append("het_gio")
+        return set()
     except Exception as e:  # noqa: BLE001
         log.append(f"loc_ai: KHONG chay duoc ({type(e).__name__}) -> giu nguyen tat ca")
+        ket.append("loi")
         return set()
 
     m = re.search(r'\{[^{}]*"loai"\s*:\s*\[[^\]]*\][^{}]*\}', tra_loi or "", re.S)
     if not m:
         log.append("loc_ai: model tra ve khong dung dang JSON -> giu nguyen tat ca")
+        ket.append("loi")
         return set()
     try:
         chi_so = json.loads(m.group(0)).get("loai") or []
     except ValueError:
         log.append("loc_ai: JSON hong -> giu nguyen tat ca")
+        ket.append("loi")
         return set()
 
     bo = {int(x) for x in chi_so if isinstance(x, (int, float, str))
@@ -614,7 +791,9 @@ def _loc_mot_lo(rows: list, queries: list[str], boi_canh: str, log: list,
     if len(bo) > len(rows) * 0.9:
         log.append(f"loc_ai: model doi loai {len(bo)}/{len(rows)} bai — NGHI SAI, "
                    f"giu nguyen tat ca")
+        ket.append("loi")
         return set()
+    ket.append("ok")
     return bo
 
 
@@ -628,10 +807,16 @@ def _bi_loai_tru(d: dict, loai_tru: list[str]) -> bool:
     động nào đoán nổi cái nào liên quan tới brand; người dùng biết, nên đưa cần
     gạt cho họ.
     """
+    return bool(_tu_loai_tru_khop(d, loai_tru))
+
+
+def _tu_loai_tru_khop(d: dict, loai_tru: list[str]) -> str:
+    """Từ loại trừ đầu tiên bài chứa (để ghi LÝ DO vào tab Bị loại), "" nếu không."""
     if not loai_tru:
-        return False
-    hay = _norm(f"{d.get('text','')} {d.get('hashtags','')} {d.get('kenh','')}")
-    return any(_norm(x) in hay for x in loai_tru if x)
+        return ""
+    hay = _norm(f"{d.get('text','')} {d.get('hashtags','')} {d.get('kenh','')} "
+                f"{d.get('username') or ''}")
+    return next((x for x in loai_tru if x and _norm(x) in hay), "")
 
 
 def _ngoai_thi_truong(d: dict, country: str) -> bool:
@@ -662,6 +847,130 @@ def _ngoai_thi_truong(d: dict, country: str) -> bool:
     return _ti_le_phi_latin(f"{dau} {d.get('kenh','')}") >= _NGUONG_PHI_LATIN
 
 
+# ── Cổng thị trường VN ──
+# Vì sao, rà sheet 01/10/2026: lọc hệ chữ chỉ bắt chữ phi-Latin, nên bài TIẾNG ANH
+# lọt hết — YouTube ra "SHINAI – Hapas Ashen // Humanity's Last Breath" (ban nhạc
+# metal), Threads ra tote của HAPAS THAILAND. Và lọc cũ chỉ chạy khi KHÔNG có
+# `boi_canh`, trong khi Mark gần như luôn điền `boi_canh` -> cổng gần như chưa mở.
+# Nay quét VN thì luôn kiểm; bài bị loại không mất mà sang tab "Bị loại".
+_NEN_TANG_CONG_VN = ("youtube", "threads")   # + TikTok từ actor dự phòng (không lọc nước)
+_DAU_CHI_TIENG_VIET = {"̆", "̛", "̣", "̉"}  # ă · ơ ư · ạ · ả
+# Âm tiết tiếng Việt viết KHÔNG dấu, ít trùng tiếng Anh/Pháp. Người Việt hay gõ không
+# dấu; thiếu danh sách này thì "tui xach dep qua" thành "tiêu đề tiếng nước ngoài".
+_TU_VIET_KHONG_DAU = {
+    "khong", "duoc", "nhung", "nhieu", "minh", "voi", "nguoi", "xinh", "xach", "nhe",
+    "nha", "roi", "dep", "tui", "nhat", "thich", "chung", "cua", "mua", "vay", "dang",
+    "ngay", "thoi", "biet", "muon", "nhin", "dien", "thoai", "trang", "suc", "nuoc",
+    "hoa", "sieu", "cuc", "xiu", "luon", "gium", "nhau", "chiec", "dau",
+}
+
+
+def _chu_chi_tieng_viet(c: str) -> bool:
+    """ă â đ ơ ư, nguyên âm có dấu nặng/hỏi, nguyên âm ghép dấu (ấ ề ổ…), ẽ ĩ ũ ỹ.
+
+    Không tính à á è é ê ô ã: tiếng Pháp/Tây Ban Nha/Bồ Đào Nha cũng có.
+    """
+    if c in "đĐ":
+        return True
+    n = unicodedata.normalize("NFD", c)
+    dau = n[1:]
+    if not dau:
+        return False
+    if any(m in _DAU_CHI_TIENG_VIET for m in dau) or len(dau) >= 2:
+        return True
+    goc = n[0].lower()
+    return (goc == "a" and dau == "̂") or (goc in "eiuy" and dau == "̃")
+
+
+def _la_noi_dung_vn(d: dict) -> bool:
+    """Bài có dấu hiệu Việt Nam không: chữ tiếng Việt, ngôn ngữ 'vi', kênh ở VN."""
+    if str(d.get("_quoc_gia") or "").upper() == "VN":
+        return True
+    if str(d.get("_ngon_ngu") or "").lower().startswith("vi"):
+        return True
+    s = unicodedata.normalize("NFC", f"{d.get('text') or ''} {d.get('kenh') or ''}")
+    if sum(_chu_chi_tieng_viet(c) for c in s) >= 2:
+        return True
+    return len(set(_tokens(s)) & _TU_VIET_KHONG_DAU) >= 2
+
+
+def _so_tu_latin(s: str) -> int:
+    """Số từ chữ Latin (≥2 ký tự) trong tiêu đề, BỎ hashtag/@mention/link —
+    "#hapas #tuixach #fyp #xuhuong #tiktokvn" không phải câu tiếng Anh."""
+    s = re.sub(r"(https?://\S+|[#@]\S+)", " ", unicodedata.normalize("NFC", s or ""))
+    return sum(1 for w in re.findall(r"[^\W\d_]+", s)
+               if len(w) >= 2 and all("LATIN" in unicodedata.name(c, "") for c in w))
+
+
+# "299k" chỉ là giá khi KHÔNG đi kèm chữ đếm tương tác: "100k views", "50k followers"
+# là cách viết chung toàn cầu — khớp nó thì video metal nước ngoài ghi "100k views
+# milestone" lọt lại (review 01/10/2026). Số điện thoại 10 số chỉ tính khi có chữ gọi
+# đi kèm (sđt/hotline/zalo…), không thì mã đơn hàng ngẫu nhiên cũng thành "VN".
+_DAU_HIEU_VN_RE = re.compile(
+    r"(\.vn\b|₫|\bvnd\b"
+    r"|\b\d{2,4}\s?k\b(?!\s*(?:views?|likes?|followers?|follows?|fl|subs?|subscribers?"
+    r"|plays?|shares?|comments?|cmts?|luot|lượt|tim|mat|mắt)\b)"
+    r"|\b\d{1,3}(?:[.,]\d{3})+\s?(?:d|đ|vnd)\b"
+    r"|\+84|(?:sdt|sđt|hotline|zalo|lien he|liên hệ|\blh)\W{0,3}0[35789]\d{8}\b"
+    r"|\bviet\s?nam\b|\bsai\s?gon\b|\bha\s?noi\b|\bda\s?nang\b|\b(?:tp)?hcm\b)")
+_TU_VN = ("vietnam", "saigon", "hanoi")
+# Tên nước khác nằm TRONG tên kênh/username = tài khoản của thị trường đó ("HAPAS
+# THAILAND", Threads 01/10/2026). Không xét trong nội dung: kênh VN viết "ship đi
+# Thailand" vẫn là bài VN. Không có "thai" trơn: "Thái" bỏ dấu cũng thành "thai".
+_NUOC_KHAC_TRONG_KENH = ("thailand", "philippines", "malaysia", "indonesia", "singapore",
+                         "cambodia", "myanmar", "india", "japan", "korea", "usa")
+
+
+def _co_dau_hieu_vn(d: dict) -> bool:
+    """Dấu hiệu VN ngoài chữ có dấu: '#tiktokvn', 'hapas.vn', giá '299k'/'₫', +84…
+
+    Rà 01/10/2026: caption tiếng Anh của chính kênh brand VN ("HAPAS Flash Sale
+    Today Only…") bị cổng loại nhầm vì không có chữ tiếng Việt nào.
+    """
+    hay = " ".join(str(d.get(k) or "") for k in ("text", "hashtags", "kenh", "username"))
+    if _DAU_HIEU_VN_RE.search(hay.lower()) or _DAU_HIEU_VN_RE.search(_norm(hay)):
+        return True
+    return any(t == "vn" or (len(t) > 2 and t.endswith("vn")) or any(x in t for x in _TU_VN)
+               for t in _tokens(hay))
+
+
+def _ly_do_ngoai_vn(d: dict, p: str = "youtube", queries: list[str] | None = None) -> str:
+    """Lý do bài nằm NGOÀI thị trường VN, "" nếu giữ.
+
+    Chỉ loại khi CHẮC, theo thứ tự:
+      1. kênh khai nước khác VN -> loại;
+      2. có dấu hiệu Việt (chữ có dấu, ngôn ngữ 'vi', kênh ở VN, '#tiktokvn',
+         '.vn', giá '299k'/'₫', +84…) -> giữ;
+      3. tên kênh/username chứa tên nước khác ("HAPAS THAILAND") -> loại;
+      4. từ khoá khớp ngay ở TÊN KÊNH/USERNAME (kênh của brand hoặc fan) -> giữ;
+      5. chỉ YouTube: tiêu đề là câu ≥5 từ Latin -> loại.
+    Vì sao (5) chỉ còn YouTube: nhiễu tiếng Anh thật nằm ở YouTube (ban metal
+    "SHINAI – Hapas Ashen // Humanity's Last Breath", 01/10/2026); trên TikTok/
+    Threads luật này loại nhầm caption tiếng Anh của chính brand. Ngưỡng giữ 5 vì
+    tiêu đề SHINAI chỉ có 6 từ Latin — nâng lên 7 là lọt đúng bài cần loại.
+    """
+    qg = str(d.get("_quoc_gia") or "").upper()
+    if qg and qg != "VN":
+        return f"ngoài thị trường VN: kênh đăng ký ở nước {qg}"
+    if _la_noi_dung_vn(d) or _co_dau_hieu_vn(d):
+        return ""
+    kenh_khop = bool(queries) and _khop_tu_khoa(
+        {"kenh": d.get("kenh"), "username": d.get("username")}, queries)
+    # Tên nước chỉ tính khi đi CÙNG từ khoá trong tên kênh: "HAPAS THAILAND" là tài khoản
+    # brand ở thị trường khác; còn "Korea Cosmetics Shop", "Thailand Closet" là shop VN
+    # đặt tên theo nguồn hàng nhập — không được loại vì tên nước (review 01/10/2026).
+    if kenh_khop:
+        kenh = _tokens(f"{d.get('kenh') or ''} {d.get('username') or ''}")
+        nuoc = next((n for n in _NUOC_KHAC_TRONG_KENH if any(n in t for t in kenh)), "")
+        if nuoc:
+            return f"ngoài thị trường VN: tài khoản của thị trường '{nuoc}'"
+        return ""
+    tieu_de = str(d.get("text") or "").split(" — ", 1)[0][:200]
+    if p == "youtube" and _so_tu_latin(tieu_de) >= 5:
+        return "ngoài thị trường VN: không có dấu hiệu tiếng Việt, tiêu đề tiếng nước ngoài"
+    return ""
+
+
 # Mỗi adapter: chạy actor rồi trả list[(dict đã chuẩn hoá, datetime giờ VN)]
 def _fanout(fn, keys: list[str]) -> list[dict]:
     """Chạy `fn(kw)` cho từng từ khoá SONG SONG rồi gộp kết quả.
@@ -679,7 +988,7 @@ def _fanout(fn, keys: list[str]) -> list[dict]:
             try:
                 out.extend(f.result())
             except Exception as e:  # noqa: BLE001
-                print(f"[social_listen] fanout lỗi 1 từ khoá: {e}")
+                print(f"[social_listen] fanout lỗi 1 từ khoá: {_che_token(e)}")
     return out
 
 
@@ -700,7 +1009,7 @@ def _fetch_tiktok_fallback(q: list[str], limit: int) -> list[dict]:
         raw = _call(_ACTORS["tiktok_fallback"],
                     {"hashtags": tags, "resultsPerPage": per}, limit)
     except Exception as e:  # noqa: BLE001
-        print(f"[social_listen] tiktok fallback lỗi: {e}")
+        print(f"[social_listen] tiktok fallback lỗi: {_che_token(e)}")
         return []
     out = []
     for it in raw:
@@ -714,6 +1023,10 @@ def _fetch_tiktok_fallback(q: list[str], limit: int) -> list[dict]:
             "comments": it.get("commentCount"), "shares": it.get("shareCount"),
             "hashtags": [h.get("name") for h in (it.get("hashtags") or []) if isinstance(h, dict)],
             "title": it.get("text"), "postPage": it.get("webVideoUrl"),
+            # Actor dự phòng KHÔNG lọc quốc gia -> cần tín hiệu cho cổng thị trường
+            # VN. `textLanguage` chưa kiểm chứng có mặt ở mọi bản actor: đọc phòng
+            # thủ, thiếu thì cổng chỉ dựa vào chữ tiếng Việt trong nội dung/kênh.
+            "textLanguage": it.get("textLanguage"),
             "_nguon": "clockworks (dự phòng)",
         })
     return out
@@ -758,8 +1071,12 @@ def _fetch_tiktok(q: list[str], limit: int, country: str, d_from, d_to) -> list[
     for it in raw:
         dt = _to_vn(it.get("uploadedAtFormatted"))
         ch = it.get("channel") or {}
+        # KHÔNG mang `searchKeyword` (includeSearchKeywords vọng lại từ khoá) vào
+        # dòng: `_khop_tu_khoa` mà đọc trường đó thì bài nào cũng "khớp".
         out.append(({
             "kenh": ch.get("name") or ch.get("username") or "",
+            "username": ch.get("username") or "",
+            "_ngon_ngu": str(it.get("textLanguage") or ""),
             "followers": int(ch.get("followers") or 0),
             "views": int(it.get("views") or 0),
             "likes": int(it.get("likes") or 0),
@@ -899,15 +1216,19 @@ def _fetch_youtube(q: list[str], limit: int, country: str, d_from, d_to) -> list
         if cid and cid not in channel_ids:
             channel_ids.append(cid)
     subscribers: dict[str, int] = {}
+    quoc_gia: dict[str, str] = {}
     for batch in _chunks(channel_ids):
+        # Thêm `snippet` để lấy `snippet.country` cho cổng thị trường VN. Quota
+        # channels.list là 1 đơn vị mỗi lượt gọi BẤT KỂ số part — không tốn thêm.
         data = _youtube_get("channels", {
-            "part": "statistics", "id": ",".join(batch), "maxResults": 50,
+            "part": "snippet,statistics", "id": ",".join(batch), "maxResults": 50,
         })
         for item in data.get("items") or []:
             if not isinstance(item, dict) or not item.get("id"):
                 continue
             stats = item.get("statistics") or {}
             subscribers[str(item["id"])] = int(stats.get("subscriberCount") or 0)
+            quoc_gia[str(item["id"])] = str((item.get("snippet") or {}).get("country") or "")
 
     out = []
     for found in search_items:
@@ -924,6 +1245,11 @@ def _fetch_youtube(q: list[str], limit: int, country: str, d_from, d_to) -> list
         channel_id = str(snippet.get("channelId") or "")
         out.append(({
             "kenh": html.unescape(str(snippet.get("channelTitle") or "")),
+            # Tín hiệu cho cổng thị trường VN (`_ly_do_ngoai_vn`): nước kênh tự khai
+            # và ngôn ngữ video tự khai — videos.list part=snippet đã trả sẵn.
+            "_quoc_gia": quoc_gia.get(channel_id, ""),
+            "_ngon_ngu": str(snippet.get("defaultAudioLanguage")
+                             or snippet.get("defaultLanguage") or ""),
             "followers": subscribers.get(channel_id, 0),
             "views": int(stats.get("viewCount") or 0),
             "likes": int(stats.get("likeCount") or 0),
@@ -948,6 +1274,7 @@ def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list
         txt = str(it.get("text_content") or "")
         out.append(({
             "kenh": it.get("display_name") or it.get("username") or "",
+            "username": it.get("username") or "",
             "followers": int(it.get("followers_count") or 0),
             "views": int(it.get("view_count") or 0),
             "likes": int(it.get("like_count") or 0),
@@ -992,16 +1319,60 @@ def _cot(n: int) -> str:
     return s
 
 
-def _write_values(token: str, sheet_id: str, values: list[list]) -> None:
+def _write_values(token: str, sheet_id: str, values: list[list], dong_dau: int = 1) -> None:
     # Vùng ghi theo đúng số cột của dữ liệu. Cố định "A:L" (12 cột của social_listen) làm
     # tool Shopee 13 cột hỏng: "columns of value:13 > range" (đo thật 25/09/2026).
+    # `dong_dau`: dòng bắt đầu (1-based) — để ghi NỐI dưới dữ liệu sẵn có mà không đè.
     rong = _cot(max((len(r) for r in values), default=1))
     for i in range(0, len(values), 1000):
         chunk = values[i:i + 1000]
+        a = dong_dau + i
         lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/values_batch_update",
                   body={"valueRanges": [{
-                      "range": f"{sheet_id}!A{i + 1}:{rong}{i + len(chunk)}",
+                      "range": f"{sheet_id}!A{a}:{rong}{a + len(chunk) - 1}",
                       "values": chunk}]})
+
+
+_TAB_BI_LOAI = "Bị loại"
+
+
+def _them_tab(token: str, ten: str) -> str:
+    """Thêm một tab vào sheet, trả sheet_id. Cùng request `addSheet` mà
+    san_link.ghi_nhieu_tab đang chạy thật; không lấy được id thì ném lỗi để bên
+    gọi chuyển sang phương án dự phòng (ghi dưới sheet chính)."""
+    d = lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/sheets_batch_update",
+                  body={"requests": [{"addSheet": {"properties": {"title": ten}}}]})
+    replies = (d.get("data") or {}).get("replies") or []
+    sid = ((replies[0].get("addSheet") or {}).get("properties") or {}).get("sheetId") \
+        if replies and isinstance(replies[0], dict) else ""
+    if not sid:
+        raise RuntimeError("Lark không trả sheetId cho tab mới.")
+    return sid
+
+
+def _ghi_bi_loai(token: str, sheet_id: str, so_dong_chinh: int,
+                 bi_loai_rows: list[list]) -> str:
+    """Ghi bài BỊ LOẠI (kèm lý do) — trả nơi đã ghi để báo cho model.
+
+    Vì sao: bài bị lọc mà biến mất thì bộ lọc sai cũng không ai phát hiện được.
+    Ưu tiên tab riêng "Bị loại" để sheet chính sạch (người dùng lọc/đếm/sắp xếp
+    trên đó). Thêm tab hỏng thì KHÔNG bỏ dữ liệu: ghi nối dưới sheet chính, cách
+    một dòng trống và một dòng phân cách "BỊ LOẠI — lý do". Sheet chính đã ghi
+    xong TRƯỚC bước này nên lỗi ở đây không làm hỏng dữ liệu chính.
+    """
+    try:
+        _write_values(token, _them_tab(token, _TAB_BI_LOAI), bi_loai_rows)
+        return f"tab '{_TAB_BI_LOAI}'"
+    except Exception as e:  # noqa: BLE001
+        print(f"[social_listen] thêm tab Bị loại hỏng, ghi dưới sheet chính: {_che_token(e)}")
+    # Đệm dòng phân cách cho ĐỦ số cột: một vùng ghi mà dòng 1 cột lẫn dòng 13 cột
+    # thì Lark có thể từ chối cả khối (cùng loại lỗi "columns of value > range").
+    rong = max((len(r) for r in bi_loai_rows), default=1)
+    phan_cach = [[""] * rong,
+                 ["BỊ LOẠI — lý do ở cột cuối (bài khớp sai/ngoài thị trường)"]
+                 + [""] * (rong - 1)]
+    _write_values(token, sheet_id, phan_cach + bi_loai_rows, dong_dau=so_dong_chinh + 1)
+    return "cuối sheet chính (dưới dòng 'BỊ LOẠI')"
 
 
 def _grant(token: str, open_id: str) -> bool:
@@ -1011,7 +1382,7 @@ def _grant(token: str, open_id: str) -> bool:
                   body={"member_type": "openid", "member_id": open_id, "perm": "edit"})
         return True
     except Exception as e:  # noqa: BLE001
-        print(f"[social_listen] cấp quyền thất bại: {e}")
+        print(f"[social_listen] cấp quyền thất bại: {_che_token(e)}")
         return False
 
 
@@ -1063,7 +1434,8 @@ SCHEMA = {
         "hỏng, TUYỆT ĐỐI KHÔNG trình bày dữ liệu các nguồn còn lại như thể là toàn bộ.\n"
         "- Nói cả hai con số: `scraped` (số post CÀO) và `in_range` (số nằm trong khoảng).\n"
         "- `in_range` NHỎ HƠN `scraped` là BÌNH THƯỜNG — do lọc ngày, KHÔNG phải ghi "
-        "sheet thiếu. Sheet luôn chứa ĐỦ toàn bộ post trong khoảng (`ghi_du_khong`=true). "
+        "sheet thiếu. Sheet luôn chứa ĐỦ toàn bộ post trong khoảng đã qua bộ lọc liên quan "
+        "(`ghi_du_khong`=true); bài bị lọc nằm riêng ở `bi_loai_ghi_o`. "
         "TUYỆT ĐỐI không chạy lại tool để 'ghi cho đủ' — chỉ tốn tiền, kết quả y hệt.\n"
         "- Người dùng muốn NHIỀU POST HƠN trong sheet: đọc `goi_y_limit` rồi gọi lại với "
         "`limit` lớn hơn (tối đa `tran_bai`), hoặc nới khoảng ngày. Đừng hứa số post mà nguồn "
@@ -1076,6 +1448,14 @@ SCHEMA = {
         "tính); lượt sau mới hỏi thì gọi `tra_chi_phi_quet`. Không tự tính, không lấy "
         "`uoc_tinh_chi_phi_usd` thay cho số thực.\n"
         "- `limit_bi_cat` có nội dung thì BẮT BUỘC nói ra: người dùng xin nhiều hơn trần.\n"
+        "- BÀI BỊ LOẠI: BẮT BUỘC nói con số theo `tom_tat_loai` (không nhắc từ khoá / "
+        "chứa từ loại trừ / ngoài thị trường VN / AI loại) và chỉ chỗ xem (`bi_loai_ghi_o`, "
+        "thường là tab 'Bị loại' kèm lý do). Đừng để người dùng tưởng brand ít được nhắc "
+        "trong khi ta vừa lọc bớt; ai thấy lọc nhầm thì gợi ý `khop_long`/`giu_nuoc_ngoai`.\n"
+        "- LỌC AI: CHỈ được nói 'đã lọc bằng AI' khi `loc_bang_ai`=true. "
+        "`loc_ai_trang_thai` khác 'đã chạy' (bỏ qua vì hết thời gian / lỗi / chạy một "
+        "phần / quá ít bài) thì phải nói rõ AI CHƯA lọc (hoặc mới lọc `loc_ai_da_xet` bài) "
+        "nên sheet có thể còn nhiễu.\n"
         "- `cham_tran_chi_phi`=true: có lượt chạy bị dừng giữa chừng, nên nói rõ kết "
         "quả có thể THIẾU và đề xuất giảm số từ khoá hoặc giảm `limit` (không cần nêu "
         "số tiền).\n"
@@ -1108,7 +1488,28 @@ SCHEMA = {
                     "không nói ra, hãy suy từ ngữ cảnh cuộc trò chuyện. Có trường này "
                     "thì hệ thống sẽ nhờ chính model đọc từng bài rồi TỰ loại bài lạc đề "
                     "(tên brand trùng địa danh, trùng hãng khác…), người dùng không phải "
-                    "tự nghĩ ra từ khoá loại trừ. Bỏ trống = không lọc bằng AI."),
+                    "tự nghĩ ra từ khoá loại trừ. Bỏ trống thì AI VẪN lọc nhưng phải tự "
+                    "đoán ngành hàng từ chủ đề đa số — kém chính xác hơn, nên điền. AI có "
+                    "thể bị bỏ qua khi hết thời gian: xem `loc_ai_trang_thai`. Điền hay "
+                    "không thì cổng thị trường VN vẫn chạy (tắt bằng `giu_nuoc_ngoai`)."),
+            },
+            "khop_long": {
+                "type": "boolean",
+                "description": (
+                    "Mặc định false: bài phải THỰC SỰ nhắc từ khoá (nội dung/hashtag/tên "
+                    "kênh/username) mới vào sheet, áp cho MỌI nền tảng. Đặt true CHỈ cho truy "
+                    "vấn khám phá chung mà bài không nhất thiết chứa nguyên chữ (vd 'viral', "
+                    "'xu hướng', 'outfit đi làm') — khi đó TikTok/Threads không bị kiểm từ "
+                    "khoá. Theo dõi brand thì ĐỪNG bật."),
+            },
+            "giu_nuoc_ngoai": {
+                "type": "boolean",
+                "description": (
+                    "Mặc định false: quét `country`=VN thì loại bài ngoài thị trường VN "
+                    "(hệ chữ khác; kênh khai nước khác; hoặc tiêu đề tiếng nước ngoài mà "
+                    "không có dấu hiệu tiếng Việt) — vd 'HAPAS THAILAND', ban nhạc metal "
+                    "'Hapas Ashen'. Đặt true khi người dùng muốn xem CẢ thị trường nước "
+                    "ngoài (brand bán nhiều nước)."),
             },
             "exclude": {
                 "type": "array", "items": {"type": "string"},
@@ -1117,7 +1518,8 @@ SCHEMA = {
                     "bị TRÙNG NGHĨA với thứ khác (địa danh, hãng khác, từ thông dụng). "
                     "Ví dụ: brand 'hapas' trùng tên một địa danh ở Ấn Độ đang có tin nóng "
                     "và một hãng đàn guitar, nên exclude=['sania','salim','guitars'] sẽ "
-                    "cắt sạch. Nếu kết quả trả về có `bi_loai_vi_khac_he_chu` cao hoặc "
+                    "cắt sạch. Áp cho MỌI nền tảng. Nếu kết quả trả về có "
+                    "`bi_loai_vi_khac_he_chu` cao hoặc "
                     "người dùng kêu nhiễu, HÃY GỢI Ý họ dùng tham số này."),
             },
             "title": {"type": "string", "description": "Tên file sheet. Bỏ trống sẽ tự đặt."},
@@ -1147,6 +1549,53 @@ SCHEMA = {
         "required": [],
     },
 }
+
+
+def _co(v) -> bool:
+    """Cờ boolean từ model: chấp nhận true/"true"/"có"/1; mặc định False."""
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes", "co", "có")
+    return bool(v)
+
+
+def _vi_du(d: dict) -> str:
+    return f"{str(d.get('kenh') or '')[:30]}: {' '.join(str(d.get('text') or '').split())[:60]}"
+
+
+def _ly_do_loai(d: dict, p: str, queries: list[str], loai_tru: list[str], country: str,
+                boi_canh: str, khop_long: bool, giu_nuoc_ngoai: bool) -> tuple[str, str]:
+    """(nhóm, lý do) nếu bài bị loại, ("", "") nếu giữ. Nhóm dùng để đếm/báo cáo.
+
+    Thứ tự cố định: từ khoá -> loại trừ -> thị trường; bài trúng nhiều luật chỉ
+    tính vào luật đầu, để các con số cộng lại đúng bằng số bài bị loại.
+    """
+    if khop_long:
+        # Giữ đúng hành vi cũ cho truy vấn khám phá: chỉ ba nguồn khớp lỏng bị kiểm.
+        if p in _NEEDS_RELEVANCE_FILTER and not _relevant(d, queries):
+            return "tu_khoa", "không nhắc từ khoá"
+    elif not _khop_tu_khoa(d, queries):
+        return "tu_khoa", "không nhắc từ khoá"
+    tu = _tu_loai_tru_khop(d, loai_tru)
+    if tu:
+        return "loai_tru", f"chứa từ loại trừ '{tu}'"
+    if giu_nuoc_ngoai:
+        return "", ""
+    if country == "VN":
+        # Quét VN: cổng thị trường chạy BẤT KỂ có `boi_canh` (rà 01/10/2026: Mark
+        # gần như luôn điền `boi_canh` nên lọc hệ chữ cũ gần như không bao giờ chạy).
+        # Bài Thái đúng ngành (#HAPAS #กระเป๋า, 08/09) không mất: nằm ở tab Bị loại,
+        # và người dùng muốn thì bật `giu_nuoc_ngoai`.
+        if _ngoai_thi_truong(d, country):
+            return "he_chu", "ngoài thị trường VN: hệ chữ khác (Thái/Hindi/…)"
+        if p in _NEN_TANG_CONG_VN or (
+                p == "tiktok" and str(d.get("_nguon") or "").startswith("clockworks")):
+            ly_do = _ly_do_ngoai_vn(d, p, queries)
+            if ly_do:
+                return "thi_truong", ly_do
+    elif not boi_canh and p in _NEEDS_RELEVANCE_FILTER and _ngoai_thi_truong(d, country):
+        # Nước khác VN: giữ nguyên luật cũ.
+        return "he_chu", "hệ chữ khác thị trường đang quét"
+    return "", ""
 
 
 def _handle(args: dict, **kwargs) -> str:
@@ -1183,12 +1632,16 @@ def _handle(args: dict, **kwargs) -> str:
     ex = args.get("exclude") or []
     loai_tru = [str(x).strip() for x in (ex if isinstance(ex, list) else [ex]) if str(x).strip()]
     boi_canh = str(args.get("boi_canh") or "").strip()[:400]
-    rng = f"{d_from:%Y-%m-%d} → {d_to:%Y-%m-%d}"
+    khop_long = _co(args.get("khop_long"))
+    giu_nuoc_ngoai = _co(args.get("giu_nuoc_ngoai"))
+    rng =f"{d_from:%Y-%m-%d} → {d_to:%Y-%m-%d}"
 
     # Không chỉ định nền tảng = quét RỘNG-NÔNG (giới hạn theo giá từng nguồn).
     # Gọi đích danh = ĐÀO SÂU, dùng nguyên `limit` người dùng đặt.
     explicit = bool(args.get("platforms"))
     per_platform, hits, failed = {}, [], []
+    trong_khoang = 0          # số bài nằm trong khoảng ngày, TRƯỚC lọc liên quan
+    bi_loai: list[tuple] = []  # (dòng, ngày, lý do) — ghi tab "Bị loại", không vứt
     # Chạy các nền tảng SONG SONG: tuần tự thì tổng thời gian là tổng của tất cả,
     # rất dễ vượt trần trả lời. Nền tảng nào không kịp hạn thì báo LỖI rõ ràng
     # chứ không âm thầm biến mất khỏi kết quả.
@@ -1219,44 +1672,54 @@ def _handle(args: dict, **kwargs) -> str:
         lim_p = lims[p]
         got = results.get(p)
         if isinstance(got, Exception):
-            per_platform[p] = {"status": "LỖI", "error": f"{type(got).__name__}: {got}"[:250]}
+            # Che token: chuỗi lỗi đi thẳng vào câu trả lời của model và sổ audit.
+            per_platform[p] = {"status": "LỖI",
+                               "error": _che_token(f"{type(got).__name__}: {got}")[:250]}
             failed.append(p)
             continue
         keep = [(d, dt) for d, dt in got if dt and d_from <= dt <= d_to]
-        dropped = nhieu = 0
-        vi_du_nhieu: list[str] = []
-        if p in _NEEDS_RELEVANCE_FILTER:
-            before = len(keep)
-            keep = [(d, dt) for d, dt in keep if _relevant(d, queries)]
-            dropped = before - len(keep)
-            # Lọc tiếp lớp NHIỄU ĐỒNG ÂM: khớp từ khoá thật nhưng khác hệ chữ,
-            # tức khác hẳn thị trường đang quét. Ghi lại số bị loại + vài ví dụ
-            # để Mark nói ra được — loại âm thầm thì người dùng tưởng brand mình
-            # không ai nhắc, mà thật ra là ta vừa vứt đi hoặc vừa giữ nhầm.
-            # Có `boi_canh` thì KHÔNG lọc theo hệ chữ nữa — để AI phân xử.
-            # Lọc hệ chữ là dao phay: đo thật 08/09/2026, nó vứt sạch bài
-            # tiếng Thái, trong đó có mấy bài #HAPAS #กระเป๋า (kra-pao = túi
-            # xách) ĐÚNG ngành hàng mà AI giữ lại được. Còn `exclude` thì
-            # vẫn áp dụng: đó là luật cứng do người dùng cố ý đặt.
-            ngoai = [(d, dt) for d, dt in keep
-                     if (not boi_canh and _ngoai_thi_truong(d, country))
-                     or _bi_loai_tru(d, loai_tru)]
-            if ngoai:
-                nhieu = len(ngoai)
-                vi_du_nhieu = [str(d.get("text") or d.get("kenh") or "")[:60]
-                               for d, _ in ngoai[:3]]
-                keep = [x for x in keep if x not in ngoai]
+        trong_khoang += len(keep)
+        # Lọc liên quan cho MỌI nền tảng (từ khoá -> loại trừ -> thị trường). Bài
+        # bị loại KHÔNG vứt: gom vào `bi_loai` kèm lý do để ghi tab "Bị loại", và
+        # đếm + ví dụ để Mark nói ra — loại âm thầm thì người dùng tưởng brand mình
+        # không ai nhắc, mà thật ra là ta vừa vứt đi hoặc vừa giữ nhầm.
+        nhom: dict[str, list] = {}
+        giu = []
         for d, dt in keep:
             d["platform"] = p
-            hits.append((d, dt))
+            k, ly_do = _ly_do_loai(d, p, queries, loai_tru, country, boi_canh,
+                                   khop_long, giu_nuoc_ngoai)
+            if k:
+                nhom.setdefault(k, []).append(d)
+                bi_loai.append((d, dt, ly_do))
+            else:
+                giu.append((d, dt))
+        keep = giu
+        hits.extend(keep)
         per_platform[p] = {"status": "OK", "limit": lim_p,
                            "scraped": len(got), "in_range": len(keep)}
-        if nhieu:
+        tk = nhom.get("tu_khoa") or []
+        if tk:
             per_platform[p].update({
-                "bi_loai_vi_khac_he_chu": nhieu,
-                "vi_du_bi_loai": vi_du_nhieu,
+                "loai_vi_khong_chua_tu_khoa": len(tk),
+                "vi_du_khong_chua_tu_khoa": [_vi_du(d) for d in tk[:3]]})
+        lt = nhom.get("loai_tru") or []
+        if lt:
+            per_platform[p].update({
+                "bi_loai_vi_tu_loai_tru": len(lt),
+                "vi_du_tu_loai_tru": [_vi_du(d) for d in lt[:3]]})
+        hc = nhom.get("he_chu") or []
+        tt_ = hc + (nhom.get("thi_truong") or [])
+        if tt_:
+            per_platform[p].update({
+                "bi_loai_vi_ngoai_thi_truong": len(tt_),
+                "vi_du_ngoai_thi_truong": [_vi_du(d) for d in tt_[:3]]})
+        if hc:
+            per_platform[p].update({
+                "bi_loai_vi_khac_he_chu": len(hc),
+                "vi_du_bi_loai": [_vi_du(d) for d in hc[:3]],
                 "ghi_chu_nhieu": (
-                    f"{nhieu} bài KHỚP từ khoá nhưng viết bằng hệ chữ khác "
+                    f"{len(hc)} bài KHỚP từ khoá nhưng viết bằng hệ chữ khác "
                     f"(Hindi/Thái/…) nên đã loại khỏi sheet — từ khoá này bị "
                     f"TRÙNG NGHĨA ở thị trường khác. Nói cho người dùng biết và "
                     f"gợi ý thu hẹp từ khoá (thêm tên ngành, hoặc dùng hashtag "
@@ -1310,8 +1773,6 @@ def _handle(args: dict, **kwargs) -> str:
                     f"đừng đưa ra kết luận kiểu 'chỉ có N bài trong {so_ngay} ngày'. "
                     f"Muốn đầy đủ hơn thì tăng `limit` hoặc chia nhỏ khoảng ngày."
                 )
-        if dropped:
-            per_platform[p]["loai_vi_khong_lien_quan"] = dropped
         if not got:
             # Cào 0 item KHÔNG đồng nghĩa "không có bài nào". Actor Facebook gói
             # free chỉ cho 1 lần chạy / 24h và khi hết hạn mức nó vẫn trả về
@@ -1336,13 +1797,18 @@ def _handle(args: dict, **kwargs) -> str:
     # từng nền tảng: một lượt gọi model cho cả lượt quét, vì quota Codex dùng
     # chung với meeting agent.
     ai_log: list[str] = []
+    ai_tt: dict = {"trang_thai": "bỏ qua vì quá ít bài", "da_xet": 0}
     bo_ai = _loc_bang_ai(hits, queries, boi_canh, ai_log,
-                         con_lai=_TOOL_DEADLINE - (time.monotonic() - _t0))
+                         con_lai=_TOOL_DEADLINE - (time.monotonic() - _t0),
+                         trang_thai=ai_tt, da_khop_tu_khoa=not khop_long)
     vi_du_ai: list[str] = []
     if bo_ai:
         vi_du_ai = [f"[{hits[i][0].get('platform')}] "
                     f"{str(hits[i][0].get('text') or '')[:70]}" for i in sorted(bo_ai)[:4]]
+        bi_loai.extend((d, dt, "AI: lạc đề so với brand/ngành hàng")
+                       for i, (d, dt) in enumerate(hits) if i in bo_ai)
         hits = [x for i, x in enumerate(hits) if i not in bo_ai]
+    loc_bang_ai = ai_tt.get("trang_thai") in ("đã chạy", "chạy một phần")
 
     hits.sort(key=lambda x: (x[0]["views"], x[0]["likes"]), reverse=True)
 
@@ -1351,7 +1817,8 @@ def _handle(args: dict, **kwargs) -> str:
     ty_le = (len(hits) / scraped) if scraped else 0.0
     goi_y = None
     if 0 < ty_le < 0.9:
-        goi_y = (f"Chỉ {ty_le:.0%} post cào được nằm trong khoảng ngày. Muốn khoảng N "
+        goi_y = (f"Chỉ {ty_le:.0%} post cào được nằm trong khoảng ngày và qua bộ lọc liên "
+                 f"quan. Muốn khoảng N "
                  f"post trong sheet thì đặt limit ≈ N/{ty_le:.2f} (vd muốn 50 post → "
                  f"limit ≈ {min(tran_bai, max(1, int(50 / ty_le)))}). Trần limit là {tran_bai}.")
 
@@ -1370,6 +1837,28 @@ def _handle(args: dict, **kwargs) -> str:
         thuc = {**thuc, "cham_tran": 0}
     chi_phi_tool.ghi(queries=queries, platforms=plats, date_range=rng, thuc=thuc, est=est)
 
+    # Tổng kết bài bị loại thành MỘT câu cho model chép — trường rải rác trong
+    # `per_platform` thì model hay bỏ sót (rà 01/10/2026: sheet đầy nhiễu mà Mark
+    # không nói đã/không lọc gì).
+    dem_loai = {"tu_khoa": 0, "loai_tru": 0, "thi_truong": 0, "ai": len(bo_ai)}
+    for v in per_platform.values():
+        dem_loai["tu_khoa"] += v.get("loai_vi_khong_chua_tu_khoa", 0)
+        dem_loai["loai_tru"] += v.get("bi_loai_vi_tu_loai_tru", 0)
+        dem_loai["thi_truong"] += v.get("bi_loai_vi_ngoai_thi_truong", 0)
+
+    def _tom_tat(noi: str) -> str:
+        if not bi_loai:
+            return (f"Không bài nào bị bộ lọc liên quan loại ({trong_khoang} bài trong "
+                    f"khoảng ngày đều giữ).")
+        phan = [f"Đã loại {dem_loai['tu_khoa']}/{trong_khoang} bài không nhắc từ khoá"]
+        if dem_loai["loai_tru"]:
+            phan.append(f"{dem_loai['loai_tru']} bài chứa từ loại trừ")
+        if dem_loai["thi_truong"]:
+            phan.append(f"{dem_loai['thi_truong']} bài ngoài thị trường {country}")
+        if dem_loai["ai"]:
+            phan.append(f"{dem_loai['ai']} bài AI đánh giá lạc đề")
+        return "; ".join(phan) + (f" (xem {noi})." if noi else ".")
+
     base = dict(queries=queries, date_range=rng, platforms=plats,
                 ty_le_trong_khoang=round(ty_le, 3), goi_y_limit=goi_y,
                 che_do="đào sâu (gọi đích danh)" if explicit else "quét rộng-nông (mặc định)",
@@ -1382,11 +1871,19 @@ def _handle(args: dict, **kwargs) -> str:
                 cham_tran_chi_phi=bool(thuc and thuc["cham_tran"]),
                 chi_phi=_dong_chi_phi(thuc, est),
                 per_platform=per_platform, platforms_failed=failed,
-                platforms_not_supported=not_yet, scraped=scraped, in_range=len(hits))
+                platforms_not_supported=not_yet, scraped=scraped, in_range=len(hits),
+                trong_khoang_ngay=trong_khoang, tong_bi_loai=len(bi_loai),
+                khop_long=khop_long, giu_nuoc_ngoai=giu_nuoc_ngoai,
+                # Lọc bằng AI: báo ĐÚNG chuyện đã xảy ra. Trước 01/10/2026 trường này
+                # là True cứng kể cả khi bộ lọc chưa chạy dòng nào vì hết giờ.
+                loc_bang_ai=loc_bang_ai,
+                loc_ai_trang_thai=ai_tt.get("trang_thai"),
+                loc_ai_da_xet=ai_tt.get("da_xet", 0))
 
-    if not hits:
+    if not hits and not bi_loai:
         return tool_result(
             success=not failed, sheet_url=None, **base,
+            tom_tat_loai=_tom_tat(""),
             note=(f"Cào {scraped} post, KHÔNG post nào nằm trong {rng}. Không tạo sheet."
                   + (f" LƯU Ý: nguồn hỏng: {', '.join(failed)} — phải báo người dùng."
                      if failed else "")),
@@ -1395,23 +1892,38 @@ def _handle(args: dict, **kwargs) -> str:
     title = (args.get("title") or "").strip() or \
         f"Social · {', '.join(queries)[:30]} · {d_from:%d-%m}→{d_to:%d-%m}"
     kw = ", ".join(queries)
-    rows = [list(_HEADER)] + [[
-        d["platform"], dt.strftime("%Y-%m-%d %H:%M"), d["kenh"], d["followers"],
-        d["views"], d["likes"], d["comments"], d["shares"], d["hashtags"],
-        d["text"], d["link"], kw,
-    ] for d, dt in hits]
+
+    def _dong(d: dict, dt) -> list:
+        return [d["platform"], dt.strftime("%Y-%m-%d %H:%M"), d["kenh"], d["followers"],
+                d["views"], d["likes"], d["comments"], d["shares"], d["hashtags"],
+                d["text"], d["link"], kw]
+
+    rows = [list(_HEADER)] + [_dong(d, dt) for d, dt in hits]
+    # Bài bị loại vẫn có sheet để kiểm (kể cả khi KHÔNG bài nào được giữ): bộ lọc
+    # loại nhầm mà không ai thấy được thì không bao giờ sửa được.
+    rows_loai = [list(_HEADER) + ["Lý do loại"]] + [
+        _dong(d, dt) + [ly_do] for d, dt, ly_do in bi_loai]
 
     try:
         tok, url = _create_sheet(title)
-        _write_values(tok, _first_sheet_id(tok), rows)
+        sid = _first_sheet_id(tok)
+        _write_values(tok, sid, rows)
     except Exception as e:  # noqa: BLE001
         return tool_result(
             success=False, sheet_url=None, **base,
-            error=f"Cào OK ({len(hits)} post trong khoảng) nhưng TẠO/GHI SHEET THẤT BẠI: "
-                  f"{type(e).__name__}: {e}",
+            tom_tat_loai=_tom_tat(""),
+            error=_che_token(f"Cào OK ({len(hits)} post trong khoảng) nhưng TẠO/GHI SHEET "
+                             f"THẤT BẠI: {type(e).__name__}: {e}"),
             top=[{"nen_tang": d["platform"], "kenh": d["kenh"], "views": d["views"],
                   "link": d["link"]} for d, _ in hits[:5]],
         )
+    bi_loai_ghi_o = None
+    if bi_loai:
+        try:
+            bi_loai_ghi_o = _ghi_bi_loai(tok, sid, len(rows), rows_loai)
+        except Exception as e:  # noqa: BLE001
+            bi_loai_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — chỉ còn ví dụ trong "
+                             f"per_platform")
 
     sender = memory_store.get_current_sender()
     granted = _grant(tok, sender) if sender else False
@@ -1419,29 +1931,32 @@ def _handle(args: dict, **kwargs) -> str:
     return tool_result(
         success=True, title=title, sheet_url=url, granted=granted, **base,
         top=_top_per_platform(hits, 3),
+        tom_tat_loai=_tom_tat(bi_loai_ghi_o or ""),
+        bi_loai_ghi_o=bi_loai_ghi_o,
         # Các trường DƯỚI ĐÂY cố tình tách bạch và đặt tên dài, vì bản trước ghi
         # gọn "Đã ghi 7/100 post vào sheet" và model đọc thành "sheet mới ghi
         # được 7 trong 100" — tưởng GHI HỎNG, rồi chạy lại 3 lần + xuất CSV để
         # chữa một lỗi không hề tồn tại. Con số tụt là do LỌC NGÀY, không phải
         # ghi thiếu; phải nói thẳng ra chứ đừng để suy diễn.
         da_ghi_vao_sheet=len(hits),
-        bi_loai_vi_ngoai_khoang_ngay=scraped - len(hits),
+        bi_loai_vi_ngoai_khoang_ngay=scraped - trong_khoang,
         ghi_du_khong=True,
-        # Lọc bằng AI: PHẢI báo ra. Loại âm thầm thì người dùng tưởng brand mình
-        # ít được nhắc, mà thật ra là ta vừa vứt bớt — và nếu vứt nhầm thì không
-        # ai phát hiện được.
-        loc_bang_ai=True,
         bi_loai_boi_ai=len(bo_ai),
         vi_du_ai_da_loai=vi_du_ai,
         ai_ghi_chu=("; ".join(ai_log) if ai_log else
-                    (f"AI đã đọc bối cảnh '{boi_canh}' và loại {len(bo_ai)} bài lạc đề. "
-                     f"Nói cho người dùng biết con số này." if bo_ai else
-                     "AI đã kiểm nhưng không thấy bài nào lạc đề.")),
+                    (f"AI đã đọc bối cảnh '{boi_canh or 'tự đoán chủ đề đa số'}' và loại "
+                     f"{len(bo_ai)} bài lạc đề. Nói cho người dùng biết con số này."
+                     if bo_ai else
+                     "AI đã kiểm nhưng không thấy bài nào lạc đề." if loc_bang_ai else
+                     f"AI CHƯA lọc ({ai_tt.get('trang_thai')}).")),
         note=(f"GHI ĐỦ, KHÔNG thiếu dòng nào: sheet '{title}' có đúng {len(hits)} post "
-              f"— là TẤT CẢ post nằm trong {rng}. "
-              f"Đã cào {scraped} post, {scraped - len(hits)} post nằm NGOÀI khoảng ngày "
+              f"— là TẤT CẢ post nằm trong {rng} đã qua bộ lọc liên quan. "
+              f"Đã cào {scraped} post, {scraped - trong_khoang} post nằm NGOÀI khoảng ngày "
               f"nên bị lọc bỏ (đây là hành vi ĐÚNG của bộ lọc ngày, KHÔNG phải lỗi ghi "
-              f"sheet — đừng chạy lại). Muốn nhiều post trong khoảng hơn thì tăng "
+              f"sheet — đừng chạy lại)"
+              + (f"; {len(bi_loai)} post trong khoảng bị bộ lọc liên quan loại, ghi ở "
+                 f"{bi_loai_ghi_o} kèm lý do" if bi_loai else "")
+              + ". Muốn nhiều post trong khoảng hơn thì tăng "
               f"`limit` hoặc nới khoảng ngày. GỬI `sheet_url`."
               + (f" CẢNH BÁO: nguồn HỎNG: {', '.join(failed)} — dữ liệu KHÔNG đầy đủ, "
                  f"phải nói rõ với người dùng." if failed else "")
