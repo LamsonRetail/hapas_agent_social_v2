@@ -49,6 +49,12 @@ def main() -> int:
             pass
 
     print(lsr_platform.bat(), flush=True)
+    try:
+        import viec_nen
+
+        print(viec_nen.khoi_dong(), flush=True)
+    except Exception as e:  # noqa: BLE001 — việc nền hỏng không chặn worker
+        print(f"Việc nền: lỗi khởi động ({type(e).__name__})", flush=True)
     if not lsr_platform.chay_vong_job(brain.reply, stop):
         print("Platform worker không khởi động được; kiểm tra LSR_*.", flush=True)
         return 2

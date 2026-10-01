@@ -207,16 +207,22 @@ def resolve_user_name(open_id: str | None) -> Optional[str]:
 
 
 # ───────────────────────── send helpers ─────────────────────────
-def send_text(receive_id_type: str, receive_id: str, text: str) -> dict:
+def send_text(receive_id_type: str, receive_id: str, text: str,
+              uuid: str | None = None) -> dict:
+    """`uuid` (tuỳ chọn, ≤50 ký tự): Lark khử trùng tin cùng uuid trong 1 giờ — việc nền
+    gửi kết quả kèm uuid để khởi động lại giữa chừng không thành hai tin."""
+    body = {
+        "receive_id": receive_id,
+        "msg_type": "text",
+        "content": json.dumps({"text": text}, ensure_ascii=False),
+    }
+    if uuid:
+        body["uuid"] = str(uuid)[:50]
     return call(
         "POST",
         "/open-apis/im/v1/messages",
         query={"receive_id_type": receive_id_type},
-        body={
-            "receive_id": receive_id,
-            "msg_type": "text",
-            "content": json.dumps({"text": text}, ensure_ascii=False),
-        },
+        body=body,
     )
 
 

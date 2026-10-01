@@ -38,7 +38,8 @@ def test_dat_trong_khoang_thi_dung_dung_so(cau_hinh):
 
 
 @pytest.mark.parametrize("c, mong", [
-    ({"tran_bai": 100000, "tran_usd": 1000}, (1000, 5.0)),      # gõ nhầm vượt trần cứng
+    # gõ nhầm vượt trần cứng: bài kẹp 10000; USD kẹp 50 rồi lượt TẠI CHỖ kẹp tiếp 5 USD
+    ({"tran_bai": 100000, "tran_usd": 1000}, (10000, 5.0)),
     ({"tran_bai": 0, "tran_usd": 0}, (10, 0.1)),               # 0 không được làm câm tool
     ({"tran_bai": -5, "tran_usd": -1}, (10, 0.1)),
 ])
@@ -143,22 +144,72 @@ def test_chua_khai_capabilities_thi_khong_con_cau_hinh_cu(danh_ba):
     assert time.time() - lsr_policy._nho_nl["luc"] < 5
 
 
+def test_viec_nen_duoc_tran_console_toi_50_usd(cau_hinh):
+    """Chỉ lượt chạy NỀN (viec_nen) mới dùng trần console tới 50 USD; tại chỗ kẹp 5."""
+    cau_hinh({"tran_bai": 100000, "tran_usd": 1000})
+    tok = A._NEN.set(True)
+    try:
+        assert A._tran() == (10000, 50.0)
+    finally:
+        A._NEN.reset(tok)
+    assert A._tran(nen=True) == (10000, 50.0)
+    cau_hinh({"tran_usd": 12})
+    assert A._tran()[1] == 5.0 and A._tran(nen=True)[1] == 12.0
+
+
+def test_tran_usd_rieng_cua_luot_tai_cho_cung_kep_5(monkeypatch):
+    """deep_dive/trend truyền `tran_usd` riêng: lượt tại chỗ vẫn không quá 5 USD."""
+    url = []
+
+    class R:
+        status_code = 200
+
+        def json(self):
+            return []
+
+    monkeypatch.setenv("APIFY_TOKEN", "tok")
+    monkeypatch.setattr(A.requests, "post", lambda u, **k: url.append(u) or R())
+    A._call("a~b", {}, 10, tran_usd=40)
+    tok = A._NEN.set(True)
+    try:
+        A._call("a~b", {}, 10, tran_usd=40)
+    finally:
+        A._NEN.reset(tok)
+    assert "maxTotalChargeUsd=5.0" in url[0] and "maxTotalChargeUsd=40.0" in url[1]
+
+
+def _ts_platform() -> str:
+    """File console của repo Platform. PLATFORM_REPO trỏ được sang bản checkout mới hơn
+    (mặc định D:\\Platform); không có thì bỏ qua và nói rõ vì sao."""
+    import os
+    import pathlib
+    goc = pathlib.Path(os.environ.get("PLATFORM_REPO") or r"D:\Platform")
+    ts = goc / "apps" / "platform-web" / "lib" / "agentToolCapabilities.ts"
+    if not ts.is_file():
+        pytest.skip(f"không thấy {ts} — đặt PLATFORM_REPO trỏ tới repo Platform")
+    return ts.read_text(encoding="utf-8")
+
+
+def _truong(s: str, khoa: str) -> dict:
+    import re
+    m = re.search(rf'khoa:\s*"{khoa}"[^}}]*', s)
+    assert m, f"console không có ô {khoa}"
+    return {k: float(re.search(rf"\b{k}:\s*([\d.]+)", m.group(0)).group(1))
+            for k in ("min", "max", "mac_dinh")}
+
+
 def test_khop_khoang_va_mac_dinh_ben_console():
     """Console chặn gõ nhầm bằng min/max của nó; lệch với runtime là console cho lưu
     một số rồi runtime lặng lẽ kẹp thành số khác, hoặc báo "đang dùng mặc định" sai."""
-    import pathlib
-    import re
-    ts = pathlib.Path(r"D:\Platform\apps\platform-web\lib\agentToolCapabilities.ts")
-    if not ts.is_file():
-        pytest.skip("không thấy repo Platform trên máy này")
-    s = ts.read_text(encoding="utf-8")
-
-    def truong(khoa):
-        m = re.search(rf'khoa:\s*"{khoa}"[^}}]*', s)
-        assert m, f"console không có ô {khoa}"
-        return {k: float(re.search(rf"\b{k}:\s*([\d.]+)", m.group(0)).group(1))
-                for k in ("min", "max", "mac_dinh")}
-
-    bai, usd = truong("tran_bai"), truong("tran_usd")
+    s = _ts_platform()
+    bai, usd = _truong(s, "tran_bai"), _truong(s, "tran_usd")
     assert (bai["min"], bai["max"], bai["mac_dinh"]) == (*A._TRAN_BAI_KHOANG, A._MAX_LIMIT)
     assert (usd["min"], usd["max"], usd["mac_dinh"]) == (*A._TRAN_USD_KHOANG, A._MAX_CHARGE)
+
+
+def test_khop_khoang_deep_dive_ben_console():
+    import deep_dive_tool as D
+    s = _ts_platform()
+    bl, usd = _truong(s, "tran_binh_luan"), _truong(s, "tran_usd_goi")
+    assert (bl["mac_dinh"], bl["min"], bl["max"]) == D._TRAN_BL
+    assert (usd["mac_dinh"], usd["min"], usd["max"]) == D._TRAN_USD

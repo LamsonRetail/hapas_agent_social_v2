@@ -55,13 +55,18 @@ def _luot_hien_tai() -> dict:
 
 
 def ghi(*, queries, platforms, date_range, thuc: dict | None, est: float,
-        chat: str | None = None) -> dict:
-    """Ghi một lần quét vào sổ cục bộ rồi đẩy lên Base ở thread nền. Trả bản ghi."""
+        chat: str | None = None, ma_viec: str | None = None,
+        nguoi: str | None = None) -> dict:
+    """Ghi một lần quét vào sổ cục bộ rồi đẩy lên Base ở thread nền. Trả bản ghi.
+
+    `ma_viec`: việc quét NỀN (viec_nen) — chạy ngoài lượt trả lời nên không có turn audit;
+    `chat`/`nguoi` lấy từ sổ việc thay cho lượt đang chạy."""
     luot = _luot_hien_tai()
     rec = {
         "ts": time.time(),
         "thoi_diem": datetime.datetime.now(_VN).isoformat(timespec="seconds"),
-        "turn_id": luot["turn_id"], "chat": chat or luot["chat"], "nguoi": luot["nguoi"],
+        "turn_id": luot["turn_id"], "chat": chat or luot["chat"],
+        "nguoi": nguoi or luot["nguoi"],
         "tu_khoa": list(queries or []), "nen_tang": list(platforms or []),
         "khoang_ngay": date_range or "",
         "chi_phi_thuc_usd": thuc["usd"] if thuc and thuc.get("so_run") else None,
@@ -69,6 +74,8 @@ def ghi(*, queries, platforms, date_range, thuc: dict | None, est: float,
         "so_luot_chay": (thuc or {}).get("so_run") or 0,
         "cham_tran": bool((thuc or {}).get("cham_tran")),
     }
+    if ma_viec:
+        rec["ma_viec"] = ma_viec
     try:
         _SO.parent.mkdir(parents=True, exist_ok=True)
         with _khoa, open(_SO, "a", encoding="utf-8") as fh:
@@ -116,7 +123,8 @@ def _fields(rec: dict) -> dict:
         "Số lượt chạy": rec.get("so_luot_chay") or 0,
         "Chạm trần": "có" if rec.get("cham_tran") else "",
         "Nguồn số": "Apify (thực)" if thuc is not None else "ước tính — chưa lấy được số thực",
-        "Turn ID": rec.get("turn_id") or "",
+        "Turn ID": rec.get("turn_id") or (f"viec-nen:{rec['ma_viec']}"
+                                          if rec.get("ma_viec") else ""),
     }
 
 

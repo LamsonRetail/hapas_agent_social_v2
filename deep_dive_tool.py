@@ -88,8 +88,10 @@ _DANH_CHO_SAU = 40
 _PHAN_LOAI_TOI_DA = 50
 
 # Ô cấu hình của chủ agent trên console (Năng lực → social_deep_dive). Giá trị thô bị kẹp.
-_TRAN_BL = (300, 50, 3000)       # (mặc định, thấp nhất, cao nhất) bình luận mỗi lần gọi
-_TRAN_USD = (0.5, 0.1, 5.0)      # USD mỗi lần gọi, cũng là trần MỖI lượt chạy actor
+# Chủ agent chốt 01–02/10/2026: console cho tới 30.000 bình luận / 50 USD mỗi lần gọi; lượt
+# lớn chạy NỀN (viec_nen), lượt tại chỗ vẫn kẹp `apify_tool._TRAN_USD_TUONG_TAC` (5 USD).
+_TRAN_BL = (300, 50, 30000)      # (mặc định, thấp nhất, cao nhất) TỔNG bình luận mỗi lần gọi
+_TRAN_USD = (0.5, 0.1, 50.0)     # USD mỗi lần gọi (cả lượt), cũng là trần MỖI lượt chạy actor
 
 _HEADER = ["Nền tảng", "Người bình luận", "Nội dung bình luận", "Sắc thái", "Chủ đề",
            "Likes", "Trả lời", "Thời gian", "Tác giả đã thích", "Link bài"]
@@ -118,15 +120,18 @@ def _kep(v, md: float, lo: float, hi: float) -> float:
     return md if v != v else min(hi, max(lo, v))
 
 
-def _cau_hinh() -> tuple[int, float]:
-    """(trần bình luận, trần USD) mỗi lần gọi tool — trần CỨNG do chủ agent đặt."""
+def _cau_hinh(nen: bool | None = None) -> tuple[int, float]:
+    """(trần bình luận, trần USD) mỗi lần gọi tool — trần CỨNG do chủ agent đặt. Trần USD
+    kẹp thêm 5 USD trừ khi lập kế hoạch/chạy cho việc NỀN (`nen=True` hoặc `A._NEN`)."""
     try:
         import lsr_policy
         c = lsr_policy.cau_hinh_tool("social_deep_dive")
     except Exception:  # noqa: BLE001 — đọc hỏng thì dùng mặc định
         c = {}
+    nen = A._NEN.get() if nen is None else nen
+    usd = _kep(c.get("tran_usd_goi"), *_TRAN_USD)
     return (int(_kep(c.get("tran_binh_luan"), *_TRAN_BL)),
-            round(_kep(c.get("tran_usd_goi"), *_TRAN_USD), 2))
+            round(usd if nen else min(usd, A._TRAN_USD_TUONG_TAC), 2))
 
 
 def _platform_of(url: str) -> str | None:
@@ -202,8 +207,20 @@ def _gio(raw) -> str:
 
 
 def _fetch_tiktok(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict], int]:
-    raw = _call(_ACTORS["tiktok"], {"postURLs": urls, "commentsPerPost": per},
+    raw = _call(_ACTORS["tiktok"], _payload("tiktok", urls, per),
                 per * len(urls), tran_usd=tran_usd)
+    return _map_tiktok(raw)
+
+
+def _payload(p: str, urls: list[str], per: int) -> dict:
+    if p == "tiktok":
+        return {"postURLs": urls, "commentsPerPost": per}
+    if p == "youtube":
+        return {"startUrls": [{"url": u} for u in urls], "maxComments": per}
+    return {"startUrls": [{"url": u} for u in urls], "resultsLimit": per}
+
+
+def _map_tiktok(raw: list) -> tuple[list[dict], int]:
     return [{
         "kenh": it.get("uniqueId") or "",
         "text": str(it.get("text") or "")[:1000],
@@ -218,9 +235,12 @@ def _fetch_tiktok(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict
 
 
 def _fetch_youtube(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict], int]:
-    raw = _call(_ACTORS["youtube"],
-                {"startUrls": [{"url": u} for u in urls], "maxComments": per},
+    raw = _call(_ACTORS["youtube"], _payload("youtube", urls, per),
                 per * len(urls), min_charge=_MIN_CHARGE["youtube"], tran_usd=tran_usd)
+    return _map_youtube(raw)
+
+
+def _map_youtube(raw: list) -> tuple[list[dict], int]:
     return [{
         "kenh": it.get("author") or "",
         "text": str(it.get("comment") or "")[:1000],
@@ -238,9 +258,12 @@ def _fetch_youtube(urls: list[str], per: int, tran_usd: float) -> tuple[list[dic
 
 
 def _fetch_facebook(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict], int]:
-    raw = _call(_ACTORS["facebook"],
-                {"startUrls": [{"url": u} for u in urls], "resultsLimit": per},
+    raw = _call(_ACTORS["facebook"], _payload("facebook", urls, per),
                 per * len(urls), min_charge=_MIN_CHARGE["facebook"], tran_usd=tran_usd)
+    return _map_facebook(raw)
+
+
+def _map_facebook(raw: list) -> tuple[list[dict], int]:
     out, la = [], []
     for it in raw:
         if it.get("error"):          # {"error":"no_items", ...} chứ không phải comment
@@ -268,6 +291,7 @@ def _fetch_facebook(urls: list[str], per: int, tran_usd: float) -> tuple[list[di
 
 
 _FETCH = {"tiktok": _fetch_tiktok, "youtube": _fetch_youtube, "facebook": _fetch_facebook}
+_MAP = {"tiktok": _map_tiktok, "youtube": _map_youtube, "facebook": _map_facebook}
 
 
 # ───────────────────────── chia lô theo trần ─────────────────────────
@@ -547,7 +571,13 @@ SCHEMA = {
         "- YouTube trả thời gian dạng chữ tương đối ('2 years ago'), KHÔNG phải ngày "
         "tuyệt đối — đừng quy đổi thành ngày cụ thể.\n"
         "- Gửi NGUYÊN `sheet_url`. `granted`=false thì báo người dùng có thể mở không được.\n"
-        "- Chi phí: chỉ nói khi được hỏi, đọc NGUYÊN VĂN `chi_phi`."
+        "- Chi phí: chỉ nói khi được hỏi, đọc NGUYÊN VĂN `chi_phi`. NGOẠI LỆ: bóc LỚN thì "
+        "PHẢI nói USD ước tính trước khi chạy.\n"
+        "- BÓC LỚN (>1500 bình luận tổng, hoặc lượt chậm/đắt hơn một lượt trả lời): tool tự "
+        "CHẠY NỀN rồi Mark tự nhắn kết quả. Gọi trước với `chi_uoc_tinh`=true (không chạy, "
+        "không tốn tiền), báo USD + phút ước tính, KẾT THÚC bằng \"Chạy nhé?\". Kết quả "
+        "`dang_chay_nen`=true: chưa có số liệu — chỉ nói mã việc, ước tính, sẽ báo qua đâu. "
+        "Hỏi 'xong chưa' → `tra_viec_nen`; 'huỷ' → `huy_viec_nen`."
     ),
     "parameters": {
         "type": "object",
@@ -558,6 +588,10 @@ SCHEMA = {
                              "description": ("Số bình luận tối đa MỖI bài (mặc định 50, tối "
                                              "đa 1000; tổng vẫn trong trần chủ agent đặt).")},
             "title": {"type": "string", "description": "Tên file sheet. Bỏ trống sẽ tự đặt."},
+            "chi_uoc_tinh": {"type": "boolean", "description": (
+                "true = CHỈ ước tính số bình luận/USD/phút, không chạy, không tốn tiền.")},
+            "chay_nen": {"type": "boolean", "description": (
+                "true = ép chạy nền (xong Mark tự nhắn). Bỏ trống = tool tự quyết theo cỡ.")},
         },
         "required": ["post_urls"],
     },
@@ -613,27 +647,16 @@ def _handle(args: dict, **kwargs) -> str:
     uoc_bl, est = _uoc_tinh(ke_hoach)
     cat_per = (f"Người dùng xin {per_xin} bình luận/bài, tối đa {_MAX_PER_POST} mỗi lần — "
                f"đã dùng {_MAX_PER_POST}. Nói rõ." if per_xin > _MAX_PER_POST else None)
+    # Bóc LỚN (chủ agent chốt 01–02/10/2026: tới 30.000 bình luận) thành việc NỀN — xét
+    # TRƯỚC trần của lượt tại chỗ (5 USD), kẻo lượt lớn hợp lệ bị báo "vượt trần".
+    tra_ngay, ghi_chu_nen = _thu_chay_nen(args, urls, nhom, per, cat_per, ke_hoach, per_url)
+    if tra_ngay is not None:
+        return tra_ngay
     # Trần chủ agent là trần CỨNG (chốt 01/10/2026): vượt thì không chạy, không có cờ bỏ
     # qua. Trước đây `xac_nhan_chi_phi`=true cho chạy vượt trần sau một câu "ok".
     vuot = _ly_do_vuot(ke_hoach, tran_bl, tran_usd) if nhom else []
     if vuot:
-        bai = [(_platform_of(u), u) for u in urls if _platform_of(u) in nhom]
-        vua = _vua_tran(bai, per, tran_bl, tran_usd)
-        n, k, m = len(bai), vua["max_comments_cho_du_bai"], vua["so_bai_voi_max_comments_hien_tai"]
-        goi_y = ((f"Trong trần này bóc được tối đa {k} bình luận/bài cho {n} bài" if k else
-                  f"Trần này không đủ cho {n} bài, kể cả 1 bình luận/bài")
-                 + (f", hoặc {m} bài nếu giữ {per} bình luận/bài" if 0 < m < n else "") + ".")
-        return tool_result(
-            success=False, vuot_tran=True, chua_chay=True, so_bai=len(urls),
-            max_comments=per, max_comments_bi_cat=cat_per,
-            uoc_tinh_binh_luan=uoc_bl, uoc_tinh_chi_phi_usd=est,
-            tran={"tran_binh_luan": tran_bl, "tran_usd_goi": tran_usd}, vuot=vuot,
-            vua_tran=vua, goi_y=goi_y,
-            note=(f"CHƯA CHẠY, chưa tốn tiền: yêu cầu vượt trần chủ agent đặt cho mỗi lần "
-                  f"bóc bình luận ({'; '.join(vuot)}). {goi_y} Nói đúng như vậy, đề xuất "
-                  f"giảm số bình luận/bài hoặc bớt bài; muốn chạy đủ thì nhờ chủ agent nâng "
-                  f"'Trần bình luận' / 'Trần chi phí bóc bình luận' ở Console → Năng lực. "
-                  f"Không có cách nào chạy vượt trần từ phía bạn."))
+        return _tra_vuot(urls, nhom, per, cat_per, ke_hoach, tran_bl, tran_usd, vuot)
 
     # ── kéo bình luận: các lô chạy song song, không chờ quá hạn ──
     bat_dau = datetime.datetime.now(_VN_TZ) - datetime.timedelta(seconds=5)
@@ -748,6 +771,7 @@ def _handle(args: dict, **kwargs) -> str:
                   or v["status"] == _CHUA_CHAY_GIO)
 
     base = dict(so_bai=len(urls), max_comments=per, max_comments_bi_cat=cat_per,
+                quet_nen_ghi_chu=ghi_chu_nen or None,
                 tran={"tran_binh_luan": tran_bl, "tran_usd_goi": tran_usd},
                 max_comments_thuc={p: k[0] for p, k in ke_hoach.items()},
                 per_url={u: per_url[u] for u in urls if u in per_url},
@@ -816,6 +840,297 @@ def _handle(args: dict, **kwargs) -> str:
               + canh_bao
               + ("" if granted else " CẢNH BÁO: chưa cấp được quyền tự động.")),
     )
+
+
+def _tra_vuot(urls, nhom, per, cat_per, ke_hoach, tran_bl, tran_usd, vuot) -> str:
+    uoc_bl, est = _uoc_tinh(ke_hoach)
+    bai = [(_platform_of(u), u) for u in urls if _platform_of(u) in nhom]
+    vua = _vua_tran(bai, per, tran_bl, tran_usd)
+    n, k, m = len(bai), vua["max_comments_cho_du_bai"], vua["so_bai_voi_max_comments_hien_tai"]
+    goi_y = ((f"Trong trần này bóc được tối đa {k} bình luận/bài cho {n} bài" if k else
+              f"Trần này không đủ cho {n} bài, kể cả 1 bình luận/bài")
+             + (f", hoặc {m} bài nếu giữ {per} bình luận/bài" if 0 < m < n else "") + ".")
+    return tool_result(
+        success=False, vuot_tran=True, chua_chay=True, so_bai=len(urls),
+        max_comments=per, max_comments_bi_cat=cat_per,
+        uoc_tinh_binh_luan=uoc_bl, uoc_tinh_chi_phi_usd=est,
+        tran={"tran_binh_luan": tran_bl, "tran_usd_goi": tran_usd}, vuot=vuot,
+        vua_tran=vua, goi_y=goi_y,
+        note=(f"CHƯA CHẠY, chưa tốn tiền: yêu cầu vượt trần chủ agent đặt cho mỗi lần "
+              f"bóc bình luận ({'; '.join(vuot)}). {goi_y} Nói đúng như vậy, đề xuất "
+              f"giảm số bình luận/bài hoặc bớt bài; muốn chạy đủ thì nhờ chủ agent nâng "
+              f"'Trần bình luận' / 'Trần chi phí bóc bình luận' ở Console → Năng lực. "
+              f"Không có cách nào chạy vượt trần từ phía bạn."))
+
+
+# ───────────────────────── chạy NỀN (viec_nen) ─────────────────────────
+def _giay_ke(ke: dict, song_song: int = _SONG_SONG) -> float:
+    """Giây ước tính chạy hết các lô của kế hoạch (`song_song` lô một lúc)."""
+    import quet_lon
+    tong = dai = 0.0
+    for p, (pc, cac_lo) in ke.items():
+        for lo in cac_lo:
+            g = quet_lon._GIAY_KHOI_DONG + pc * len(lo) / quet_lon.toc(_ACTORS[p])
+            tong += g
+            dai = max(dai, g)
+    return round(max(dai, tong / max(1, song_song)), 1)
+
+
+def _ke_hoach_nen(ke: dict, tran_usd: float) -> dict:
+    """Kế hoạch lô -> `nen_tang` của sổ việc (mỗi lô là một lượt con)."""
+    import quet_lon
+    nt: dict = {}
+    for p, (pc, cac_lo) in ke.items():
+        ds = []
+        for i, lo in enumerate(cac_lo):
+            uoc = _uoc_lo(p, lo, pc)
+            pl = _payload(p, lo, pc)
+            ds.append({"id": f"{p}-{i}", "actor": _ACTORS[p], "lo": list(lo), "per": pc,
+                       "payload": pl, "payload_sha": quet_lon._sha(pl),
+                       "limit": pc * len(lo), "uoc_usd": round(uoc, 4),
+                       "uoc_giay": round(quet_lon._GIAY_KHOI_DONG
+                                         + pc * len(lo) / quet_lon.toc(_ACTORS[p]), 1),
+                       "can": _can_lo(p, uoc), "tran_lo": _tran_lo(p, uoc, tran_usd),
+                       "min_charge": _MIN_CHARGE.get(p, 0.0), "gia": _GIA[p],
+                       "trang_thai": "cho", "nhan": f"lô {i + 1}: {len(lo)} bài"})
+        nt[p] = {"limit": sum(x["limit"] for x in ds), "phan": ds, "chua_phu": [],
+                 "ghi_chu": []}
+    return nt
+
+
+def _thu_chay_nen(args, urls, nhom, per, cat_per, ke_tai_cho, per_url):
+    """-> (kết quả trả NGAY | None, ghi chú cho lượt tại chỗ)."""
+    import quet_lon
+    import viec_nen
+    if not nhom:
+        return None, ""
+    ep = args.get("chay_nen")
+    ep = None if ep is None or ep == "" else A._co(ep)
+    chi_uoc = A._co(args.get("chi_uoc_tinh"))
+    tran_bl, tran_usd = _cau_hinh()
+    tok = A._NEN.set(True)
+    try:
+        tran_bl_n, tran_usd_n = _cau_hinh()
+    finally:
+        A._NEN.reset(tok)
+    # Lô của việc nền vẫn ≤5 USD/lô: một lô hỏng giữa chừng không đốt cả ngân sách, và
+    # khởi động lại thì chỉ lô dở phải đọc tiếp.
+    ke_n = {p: _chia_lo(p, us, per, min(tran_usd_n, A._TRAN_USD_TUONG_TAC))
+            for p, us in nhom.items()}
+    bl_n, est_n = _uoc_tinh(ke_n)
+    _, est_tc = _uoc_tinh(ke_tai_cho)
+    giay = _giay_ke(ke_tai_cho)
+    han_tc = A._TOOL_DEADLINE - _DANH_CHO_SAU
+    nguong = A._so_env("SOCIAL_NEN_BINH_LUAN", 1500, 50, 10 ** 6)
+    vi_sao = ""
+    if ep is True:
+        vi_sao = "yêu cầu chạy nền"
+    elif ep is None and bl_n > nguong:
+        vi_sao = f"{bl_n} bình luận > {nguong}"
+    elif ep is None and giay > han_tc:
+        vi_sao = f"ước tính ~{giay:.0f} giây > {han_tc:.0f} giây của một lượt trả lời"
+    elif ep is None and est_tc > tran_usd + 1e-9 and tran_usd_n > tran_usd + 1e-9:
+        vi_sao = (f"ước tính {_usd(est_tc)} USD > trần {_usd(tran_usd)} USD của lượt chạy "
+                  f"tại chỗ")
+    if vi_sao and not viec_nen.bat():
+        return None, (f"Chạy nền đang TẮT (SOCIAL_QUET_NEN=0) nên chạy tại chỗ trong trần "
+                      f"lượt thường (lý do cần nền: {vi_sao}). Nói rõ.")
+    if not vi_sao:
+        if not chi_uoc:
+            return None, ""
+        uoc_bl, est = _uoc_tinh(ke_tai_cho)
+        return tool_result(
+            success=True, chi_uoc_tinh=True, se_chay_nen=False, so_bai=len(urls),
+            max_comments=per, uoc_tinh_binh_luan=uoc_bl, uoc_tinh_chi_phi_usd=est,
+            uoc_tinh_giay=giay, tran={"tran_binh_luan": tran_bl, "tran_usd_goi": tran_usd},
+            note=("CHƯA CHẠY gì (chỉ ước tính). Lượt nhỏ, sẽ chạy ngay trong câu trả lời. "
+                  "Báo phạm vi + ước tính rồi KẾT THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi "
+                  "lại không có `chi_uoc_tinh`.")), ""
+    vuot = _ly_do_vuot(ke_n, tran_bl_n, tran_usd_n)
+    if vuot:
+        return _tra_vuot(urls, nhom, per, cat_per, ke_n, tran_bl_n, tran_usd_n, vuot), ""
+    ns, _hm, cau_ns = quet_lon.ngan_sach(tran_usd_n)
+    phut = min(viec_nen.han_phut(), math.ceil((_giay_ke(ke_n, 2) + 180) / 60))
+    base = dict(so_bai=len(urls), max_comments=per, max_comments_bi_cat=cat_per,
+                ly_do_chay_nen=vi_sao, uoc_tinh_binh_luan=bl_n, uoc_tinh_usd=est_n,
+                uoc_tinh_phut=phut, ngan_sach_usd=ns, ngan_sach_thang=cau_ns,
+                tran={"tran_binh_luan": tran_bl_n, "tran_usd_goi": tran_usd_n},
+                so_luot_chay=sum(len(c) for _, c in ke_n.values()),
+                per_url_loi={u: v for u, v in per_url.items()} or None)
+    if est_n > ns + 1e-9:
+        return tool_result(
+            success=False, chua_chay=True, vuot_ngan_sach=True, **base,
+            thieu_ngan_sach_usd=round(est_n - ns, 2),
+            note=(f"CHƯA CHẠY, chưa tốn tiền: ước tính {_usd(est_n)} USD vượt ngân sách "
+                  f"{_usd(ns)} USD ({cau_ns}). Đề xuất bớt bài hoặc bớt bình luận/bài.")), ""
+    if chi_uoc:
+        return tool_result(
+            success=True, chi_uoc_tinh=True, se_chay_nen=True, **base,
+            note=(f"CHƯA CHẠY gì (chỉ ước tính). Lượt LỚN sẽ CHẠY NỀN: ~{bl_n} bình luận, "
+                  f"~{_usd(est_n)} USD, ~{phut} phút. Lần này PHẢI nói số USD ước tính. KẾT "
+                  f"THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi lại bỏ `chi_uoc_tinh`.")), ""
+    ts = {"post_urls": urls, "max_comments": per, "so_bai": len(urls),
+          "title": str(args.get("title") or "").strip()}
+    tom = viec_nen.tao_viec("social_deep_dive", ts, _ke_hoach_nen(ke_n, tran_usd_n),
+                            {"usd": est_n, "phut": phut, "binh_luan": bl_n}, ns,
+                            ghi_chu=[cau_ns])
+    return tool_result(**{**base, **tom, "success": not tom.get("tu_choi")}), ""
+
+
+def _chuan_nen(p: str, ph: dict, items: list) -> list[tuple]:
+    bl, _ = _MAP[p](items)
+    for c in bl:
+        c["platform"] = p
+        c["bai"] = _quy_ve_bai(c.pop("_nguon", []) + [c.get("link") or ""], ph["lo"])
+    return [(c, None) for c in bl]
+
+
+_AI_NEN_BINH_LUAN = 1000      # bình luận tối đa gửi model trong một việc nền (10 lượt × 100)
+
+
+def _nhan_nen(v, rows: list[dict]) -> dict:
+    """Gán nhãn sắc thái/chủ đề cho việc nền, có cache theo sha1(bài|nội dung): khởi động
+    lại không hỏi model lại. Luật trước; model chỉ cho `SOCIAL_AI_NEN_BINH_LUAN` bình luận
+    nhiều like nhất còn lại; phần sau "Chưa phân loại" — nói rõ, không đoán."""
+    import hashlib
+    import json as _json
+    f = v.thu_muc() / "phan_loai.jsonl"
+    cache: dict = {}
+    try:
+        for l in f.read_text(encoding="utf-8").splitlines():
+            try:
+                x = _json.loads(l)
+                cache[x["k"]] = tuple(x["v"])
+            except (ValueError, KeyError, TypeError):
+                continue
+    except OSError:
+        pass
+
+    def khoa(c):
+        return hashlib.sha1(f"{c.get('bai')}|{c.get('text')}".encode("utf-8")).hexdigest()
+    tt: dict = {}
+    can = []
+    for i, c in enumerate(rows):
+        k = cache.get(khoa(c))
+        if k:
+            c["sac_thai"], c["chu_de"] = k
+            continue
+        lu = phan_loai._luat(c.get("text") or "")
+        if lu and lu[0] != phan_loai.CHUA:
+            c["sac_thai"], c["chu_de"] = lu
+        else:
+            can.append(i)
+    toi_da = A._so_env("SOCIAL_AI_NEN_BINH_LUAN", _AI_NEN_BINH_LUAN, 0, 100000)
+    can.sort(key=lambda i: -int(rows[i].get("likes") or 0))
+    gui = can[:toi_da] if not v.da_huy() else []
+    moi = {}
+    if gui:
+        han = max(30.0, min(420.0, v.con_giay() + 240))
+        nhan = phan_loai.phan_loai_binh_luan([rows[i] for i in gui], han, tt)
+        for i, nh in zip(gui, nhan):
+            rows[i]["sac_thai"], rows[i]["chu_de"] = nh
+            if nh[0] != phan_loai.CHUA:
+                moi[khoa(rows[i])] = list(nh)
+    if moi:
+        with open(f, "a", encoding="utf-8") as fh:
+            for k, val in moi.items():
+                fh.write(_json.dumps({"k": k, "v": val}, ensure_ascii=False) + "\n")
+    tt["khong_gui_model"] = len(can) - len(gui)
+    return tt
+
+
+def chay_viec_nen(v) -> tuple[str, str]:
+    """Runner của viec_nen cho `social_deep_dive`. -> (trạng thái cuối, tin kết quả)."""
+    import quet_lon
+    import sheet_lon
+    ts = v.d["tham_so"]
+    ly_do: list[str] = []
+    if v.d["trang_thai"] == "dang_cao":
+        if v.qua_han():
+            quet_lon._dong_phan_dang_chay(v, ts, chuan=_chuan_nen)
+            ly_do.append("bot khởi động lại sau hạn chót — huỷ lô đang chạy, giữ phần đã có")
+        else:
+            quet_lon._chay_cac_phan(v, quet_lon._so_ngan_sach(v), ts, lambda p: None,
+                                    chuan=_chuan_nen)
+        v.dat("dang_loc")
+    rows: list[dict] = []
+    da = set()
+    for p in v.d["nen_tang"]:
+        for c, _ in v.doc_dong(p):
+            k = (c.get("bai"), c.get("kenh"), c.get("text"), c.get("thoi_gian"))
+            if k in da:
+                continue
+            da.add(k)
+            rows.append(c)
+    tt_pl = _nhan_nen(v, rows) if rows else {}
+    v.dat("dang_ghi")
+    per_url: dict = {}
+    for p, nt in v.d["nen_tang"].items():
+        for ph in nt["phan"]:
+            st, lo = ph.get("trang_thai"), ph["lo"]
+            cat = int(ph.get("so_item") or 0) >= 0.95 * ph["per"] * len(lo)
+            for u in lo:
+                n = sum(1 for c in rows if c.get("bai") == u)
+                per_url[u] = {"platform": p, "comments": n, "status": (
+                    "LỖI" if st == "loi" else "ĐÃ HUỶ" if st == "da_huy" else
+                    _CHUA_XONG_GIU if st == "mot_phan" else
+                    _CAT if (n == 0 and cat) else "OK")}
+                if st == "loi":
+                    per_url[u]["error"] = ph.get("ly_do") or ph.get("ma")
+    mot_phan = any(x["status"] != "OK" for x in per_url.values())
+    trang_thai = "da_huy" if v.da_huy() else "xong_mot_phan" if mot_phan else "xong"
+    cp = v.chot_chi_phi([f"bình luận {len(ts['post_urls'])} bài"], list(v.d["nen_tang"]), "")
+    tk = phan_loai.dem(rows, "bai") if rows else None
+    url = ""
+    if rows:
+        try:
+            s = sheet_lon.SoSheet(v)
+            title = ts.get("title") or f"Bình luận nền · {len(ts['post_urls'])} bài · {v.ma}"
+            s.dam_bao(title, "Bình luận", v.d.get("nguoi_yeu_cau") or "")
+            s.bat_dau_giai_doan("cuoi")
+            s.ghi_tab("Bình luận", [list(_HEADER)] + [[
+                c["platform"], c.get("kenh") or "", str(c.get("text") or "")[:500],
+                c.get("sac_thai", phan_loai.CHUA), c.get("chu_de", phan_loai.CHUA),
+                c.get("likes") or 0, c.get("replies") or 0, c.get("thoi_gian") or "",
+                c.get("tac_gia_thich") or "", c.get("bai") or c.get("link") or ""]
+                for c in rows])
+            s.ghi_tab(_TAB_THONG_KE, _dong_thong_ke(tk))
+            url = s.s.get("url") or ""
+        except Exception as e:  # noqa: BLE001
+            ly_do.append(f"ghi sheet lỗi: {_che_token(e)[:150]}")
+    dau = {"xong": "XONG", "xong_mot_phan": "XONG MỘT PHẦN", "da_huy": "ĐÃ HUỶ"}[trang_thai]
+    d = [f"[{dau}] Bóc bình luận nền {v.ma}: {len(ts['post_urls'])} bài, lấy được "
+         f"{len(rows)} bình luận."]
+    if trang_thai == "da_huy":
+        d.append("Đã huỷ theo yêu cầu — sheet giữ phần lấy được tới lúc huỷ.")
+    d.append(f"Link: {url}" if url else "Chưa có sheet (không có bình luận nào hoặc ghi lỗi).")
+    for p in v.d["nen_tang"]:
+        cua = [x for x in per_url.values() if x["platform"] == p]
+        xau: dict = {}
+        for x in cua:
+            if x["status"] != "OK":
+                xau[x["status"]] = xau.get(x["status"], 0) + 1
+        d.append(f"- {p}: {sum(x['comments'] for x in cua)} bình luận từ {len(cua)} bài"
+                 + (" · " + ", ".join(f"{n} bài {k}" for k, n in xau.items()) if xau else ""))
+    if tk:
+        d.append(f"Sắc thái (đã phân loại {tk['da_phan_loai']}/{tk['tong']}): "
+                 + phan_loai.dong_thong_ke(tk).replace("\n", " "))
+        if tt_pl.get("khong_gui_model"):
+            d.append(f"{tt_pl['khong_gui_model']} bình luận ít like không gửi AI (trần "
+                     f"{A._so_env('SOCIAL_AI_NEN_BINH_LUAN', _AI_NEN_BINH_LUAN, 0, 100000)}) — "
+                     f"để 'Chưa phân loại'.")
+    if any(x["status"] == _CAT for x in per_url.values()):
+        d.append(f"Bài '{_CAT}' là CHƯA lấy hết, không phải không có bình luận.")
+    d.append(f"Chi phí thật: {_usd(cp.get('usd'))} USD ({cp.get('so_run', 0)} lượt chạy Apify; "
+             f"ngân sách việc {_usd(v.d.get('ngan_sach_usd'))} USD).")
+    if ly_do:
+        d.append("Lưu ý: " + "; ".join(ly_do) + ".")
+    with v._khoa:
+        v.d["ket_qua"] = {"per_url": per_url, "tong_comment": len(rows), "sheet_url": url,
+                          "phan_loai": {k: tt_pl.get(k) for k in ("trang_thai", "theo_ai",
+                                                                   "theo_luat")}}
+        v.luu()
+    return trang_thai, "\n".join(d)
 
 
 def _available() -> bool:

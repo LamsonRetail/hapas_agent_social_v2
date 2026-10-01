@@ -242,6 +242,15 @@ def main() -> None:
     except Exception as e:
         print(f"  Reminders:  ❌ {e}")
 
+    # Việc quét nền (viec_nen.py): nhận lại việc dở của lần chạy trước — đọc tiếp đúng run
+    # Apify đã ghi, không POST lại — và gửi nốt kết quả chưa nhắn được.
+    try:
+        import viec_nen
+
+        print(f"  {viec_nen.khoi_dong()}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  Việc nền:   ❌ {type(e).__name__}: {e}")
+
     # Nhịp nền theo dõi nguồn Wiki: quét định kỳ và BÁO, chỉ nhập khi chủ agent bấm
     # "Nhập ngay" trên console. Trước đây giao diện hứa "agent sẽ quét ở lượt kiểm
     # nguồn kế tiếp" mà không có lượt nào — dán link xong ngồi đợi mãi.

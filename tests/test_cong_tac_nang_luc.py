@@ -28,8 +28,10 @@ GOC = pathlib.Path(__file__).resolve().parent.parent
 if str(GOC) not in sys.path:
     sys.path.insert(0, str(GOC))
 
-#: Repo Platform trên máy dev. Không có thì bỏ qua bài đối chiếu chéo.
-_TS_PLATFORM = pathlib.Path(r"D:\Platform\apps\platform-web\lib\agentToolCapabilities.ts")
+#: Repo Platform trên máy dev (PLATFORM_REPO trỏ được sang bản checkout mới hơn). Không có
+#: thì bỏ qua bài đối chiếu chéo.
+_TS_PLATFORM = (pathlib.Path(__import__("os").environ.get("PLATFORM_REPO") or r"D:\Platform")
+                / "apps" / "platform-web" / "lib" / "agentToolCapabilities.ts")
 
 HOP_DONG_DU = {"reply", "call_agent", "write_data"}
 

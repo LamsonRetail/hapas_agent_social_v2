@@ -562,6 +562,39 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
     return (hop.get("dap") or "", bool(hop.get("ok")), False)
 
 
+# Job platform đang được trả lời theo từng phiên — việc NỀN ghi lại job id lúc tool được
+# gọi để sau này đẩy kết quả về đúng job gốc (web console).
+_JOB_PHIEN: dict[str, object] = {}
+_JOB_PHIEN_KHOA = threading.Lock()
+
+
+def job_cua_phien(phien: str):
+    """Job id platform đang xử lý cho `phien`, None nếu không có (tin Lark trực tiếp)."""
+    with _JOB_PHIEN_KHOA:
+        return _JOB_PHIEN.get(phien or "")
+
+
+def gui_lark(chat_id: str, text: str, app_id: str = "") -> dict:
+    """Gửi tin vào chat Lark qua platform (`/v1/lark/send`) bằng token của CHÍNH agent —
+    đường cho chat tới qua gateway (`lark:<app>:<oc>`), runtime không cầm secret app đó."""
+    c = _cau_hinh()
+    if not c:
+        raise RuntimeError("chưa cấu hình LSR_* nên không gửi được qua platform")
+    return _goi(c, "/v1/lark/send", {"to": chat_id, "to_type": "chat_id",
+                                     "app_id": app_id or None, "text": text[:15000]},
+                timeout=20)
+
+
+def bao_su_kien_job(job_id, text: str) -> dict:
+    """Gắn một sự kiện "message" vào job gốc trên console (đường TẠM cho web, 02/10/2026:
+    console chưa có kênh đẩy tin chủ động cho agent)."""
+    c = _cau_hinh()
+    if not c or not job_id:
+        raise RuntimeError("không có job gốc / chưa cấu hình LSR_*")
+    return _goi(c, f"/v1/self/jobs/{job_id}/event",
+                {"kind": "message", "data": {"text": text[:15000]}}, timeout=20)
+
+
 def _mot_vong(c: dict, tra_loi) -> int:
     """Lấy tối đa một job, xử lý, trả lời. Trả về số job đã làm."""
     try:
@@ -591,7 +624,15 @@ def _mot_vong(c: dict, tra_loi) -> int:
         print(f"[anh] lỗi tải ảnh job #{jid}: {type(e).__name__}: {e}", flush=True)
     hoi = _cau_hoi_kem_anh(hoi, j, anh)
 
-    dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p), _kenh_cua_job(j))
+    with _JOB_PHIEN_KHOA:
+        _JOB_PHIEN[phien] = jid
+    try:
+        dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p),
+                                     _kenh_cua_job(j))
+    finally:
+        with _JOB_PHIEN_KHOA:
+            if _JOB_PHIEN.get(phien) == jid:
+                _JOB_PHIEN.pop(phien, None)
     if treo:
         print(f"[job] #{jid} QUÁ HẠN {_HAN_TRA_LOI:.0f}s — bỏ lượt, đi tiếp. "
               f"Luồng cũ vẫn chạy nền và sẽ tự tắt khi xong.", flush=True)

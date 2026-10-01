@@ -46,6 +46,11 @@ def set_current_chat(chat_id: str | None) -> None:
     _current_chat.set(chat_id)
 
 
+def get_current_chat() -> str | None:
+    """Chat của lượt đang chạy — việc nền (viec_nen) ghi lại để biết gửi kết quả về đâu."""
+    return _current_chat.get()
+
+
 # ───────────────────────── storage ─────────────────────────
 def _load() -> list[dict]:
     try:
