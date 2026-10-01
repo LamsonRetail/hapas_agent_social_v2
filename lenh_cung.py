@@ -255,11 +255,16 @@ def _lam_luot_nguoi_dung(lenh: str, tool: str, doi_so: str) -> str:
     if not doi_so:
         return (f"[LỆNH {lenh}] Tôi muốn dùng `{tool}` nhưng chưa nói tra gì. "
                 f"Hỏi lại tôi một câu ngắn.")
+    # Quét/bóc LỚN (chủ agent chốt 02/10/2026): lệnh cứng vẫn không được bỏ qua câu hỏi chi
+    # phí khi ước tính > 1 USD — gọi tool ở chế độ ước tính (không tốn tiền) là đã "gọi".
+    lon = (" Riêng quét/bóc LỚN (nhiều bài, có thể > 1 USD): gọi với `chi_uoc_tinh`=true "
+           "trước, báo USD + phút ước tính rồi kết bằng \"Chạy nhé?\"."
+           if tool in ("social_listen", "social_deep_dive") else "")
     return (
         f"{doi_so}\n\n"
         f"[LỆNH {lenh}] Dòng trên là đối số. Lượt này BẮT BUỘC gọi tool `{tool}` — "
         f"đừng hỏi lại, đừng trả lời chay. Tham số phụ nào thiếu thì lấy mặc định "
-        f"hợp lý rồi chạy, và nói rõ đã lấy mặc định gì."
+        f"hợp lý rồi chạy, và nói rõ đã lấy mặc định gì.{lon}"
     )
 
 

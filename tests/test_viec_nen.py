@@ -739,13 +739,21 @@ def test_tra_viec_nen_chi_thay_viec_cua_chat_hoac_nguoi_hoi(nen):
 
 
 def test_khoa_chu_cua_tien_trinh_khac_thi_khong_nhan_viec(nen):
+    import os
     f = V._khoa_chu()
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"pid": -1, "agent_id": "AG-THU", "heartbeat": V._bay_gio()}),
+    song = os.getppid()                      # tiến trình cha: chắc chắn còn sống
+    assert V._pid_song(song) and V._pid_song(os.getpid()) and not V._pid_song(-1)
+    f.write_text(json.dumps({"pid": song, "agent_id": "AG-THU", "heartbeat": V._bay_gio()}),
                  encoding="utf-8")
     assert "tiến trình khác" in V.khoi_dong(chay_luong=False)
-    f.write_text(json.dumps({"pid": -1, "agent_id": "AG-THU",
+    # Nhịp tim cũ -> nhận lại.
+    f.write_text(json.dumps({"pid": song, "agent_id": "AG-THU",
                              "heartbeat": V._bay_gio() - 500}), encoding="utf-8")
+    assert "✅" in V.khoi_dong(chay_luong=False)
+    # Stop+Start nhanh: nhịp tim còn mới nhưng pid cũ đã chết -> vẫn nhận lại.
+    f.write_text(json.dumps({"pid": 999999999, "agent_id": "AG-THU",
+                             "heartbeat": V._bay_gio()}), encoding="utf-8")
     assert "✅" in V.khoi_dong(chay_luong=False)
 
 
@@ -818,3 +826,12 @@ def test_nam_nen_tang_mot_viec_chuan_hoa_dung(nen, monkeypatch):
     assert {"TikTok", "Instagram", "Facebook", "Threads", "YouTube"} <= tab
     assert not any("/acts/youtube" in u for u in nen.post_urls)
     assert "Facebook" in d["thong_bao"]["ket_qua"] and "Chưa phủ" in d["thong_bao"]["ket_qua"]
+
+
+def test_facebook_free_lon_khong_day_sang_nen_vo_ich(nen, monkeypatch):
+    nhan = []
+    monkeypatch.setitem(A._FETCH, "facebook", lambda q, lim, *a: nhan.append(lim) or [])
+    monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
+    monkeypatch.setattr(A, "_goi_apify", lambda: "FREE")
+    kq = _quet(platforms=["facebook"], limit=700)
+    assert "dang_chay_nen" not in kq and nhan == [700] and not V.tat_ca()

@@ -17,3 +17,13 @@ def test_policy_tool_viec_nen():
     import lsr_policy
     assert "tra_viec_nen" in lsr_policy._SAFE_EXACT
     assert lsr_policy._MUTATING_EXACT["huy_viec_nen"] == "write_data"
+
+
+def test_search_lon_van_uoc_tinh_va_hoi_truoc(monkeypatch):
+    import lenh_cung
+    monkeypatch.setattr(lenh_cung.lsr_policy, "decide",
+                        lambda t, a=None: lenh_cung.lsr_policy.PolicyDecision(True, ""))
+    kq = lenh_cung.xu_ly("/search hapas 5000 bài tiktok")
+    assert "chi_uoc_tinh" in kq.van_ban and "Chạy nhé?" in kq.van_ban
+    assert "đừng hỏi lại" in kq.van_ban
+    assert "chi_uoc_tinh" not in lenh_cung.xu_ly("/ad hapas").van_ban

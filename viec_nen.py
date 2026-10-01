@@ -561,6 +561,35 @@ def _ghi_khoa_chu() -> None:
     os.replace(tmp, f)
 
 
+def _pid_song(pid) -> bool:
+    """Tiến trình `pid` còn sống không. KHÔNG dùng os.kill(pid, 0) trên Windows: ở đó nó
+    gọi TerminateProcess — hỏi thăm thành giết."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            ma = ctypes.c_ulong()
+            return bool(k32.GetExitCodeProcess(h, ctypes.byref(ma))) and ma.value == 259
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
 def khoi_dong(chay_luong: bool = True) -> str:
     """Gọi MỘT lần lúc bot khởi động (run.py, scripts/run_platform_worker.py).
 
@@ -569,7 +598,9 @@ def khoi_dong(chay_luong: bool = True) -> str:
     một run là đọc trùng, gửi tin hai lần. Chỉ nhận lại việc có ĐÚNG agent_id của mình."""
     try:
         k = _doc_khoa_chu()
-        if (k and k.get("pid") != os.getpid()
+        # Stop+Start trong vòng 2 phút: nhịp tim còn "mới" nhưng pid cũ đã chết — phải nhận
+        # lại, không thì việc dở nằm im tới lần khởi động sau.
+        if (k and k.get("pid") != os.getpid() and _pid_song(k.get("pid"))
                 and _bay_gio() - float(k.get("heartbeat") or 0) < _KHOA_CHU_CU_GIAY):
             return (f"Việc nền: ⛔ tiến trình khác (pid {k.get('pid')}) đang giữ — không "
                     f"nhận lại việc ở tiến trình này")

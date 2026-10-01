@@ -469,8 +469,13 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
     ep = args.get("chay_nen")
     ep = None if ep is None or ep == "" else A._co(ep)
     chi_uoc = A._co(args.get("chi_uoc_tinh"))
-    giay = giay_tai_cho(plats, lims, queries)
-    nen, vi_sao = can_chay_nen(lims, giay, ep)
+    # Facebook gói Free chỉ cho 20 bài/24h dù xin bao nhiêu: xét cỡ theo số THẬT lấy được,
+    # kẻo "facebook 700 bài" bị đẩy sang nền để rồi cũng chỉ ra 20 bài.
+    goi = A._goi_apify() if "facebook" in plats else None
+    lims_xet = {p: (min(n, 20) if p == "facebook" and goi in ("FREE", "") else n)
+                for p, n in lims.items()}
+    giay = giay_tai_cho(plats, lims_xet, queries)
+    nen, vi_sao = can_chay_nen(lims_xet, giay, ep)
     import viec_nen
     ts = {"queries": A._bo_trung_tu_khoa(queries), "platforms": plats, "limit": lims,
           "date_from": f"{d_from:%Y-%m-%d}", "date_to": f"{d_to:%Y-%m-%d}",
