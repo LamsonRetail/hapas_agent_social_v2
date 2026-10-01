@@ -495,6 +495,12 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
     if not nen and not chi_uoc:
         return None, lims, ""
     tran_nen = tran_usd_nen()
+    # Thử thật 02/10/2026: xin 1500 video nhưng trần console 112 → Mark nói "nguồn chỉ cho
+    # tối đa 112", người dùng tưởng nguồn yếu. Đây là trần CHỦ AGENT đặt, phải nói đúng.
+    cau_tran = (f" Người dùng xin {limit_xin} bài/nền tảng nhưng TRẦN TRÊN CONSOLE (Năng lực "
+                f"→ Quét mạng xã hội) đang là {tran_bai} bài/nền tảng — nói rõ đây là trần chủ "
+                "agent đặt, KHÔNG phải giới hạn của nguồn; muốn nhiều hơn thì nhờ chủ agent nâng."
+                if limit_xin and tran_bai and limit_xin > tran_bai else "")
     if not nen:
         est_tai_cho = sum(
             A._START_COST.get(p, 0.0) * (len(queries) if p in ("instagram", "facebook") else 1)
@@ -503,10 +509,11 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
             success=True, chi_uoc_tinh=True, se_chay_nen=False, queries=queries,
             platforms=plats, limit=lims, uoc_tinh_usd=round(est_tai_cho, 2),
             uoc_tinh_giay=giay, tran_chi_phi_usd_moi_luot=A._tran()[1],
+            tran_bai_console=tran_bai,
             note=("CHƯA CHẠY gì, chưa tốn tiền (chỉ ước tính). Lượt này nhỏ, sẽ chạy ngay "
                   f"trong câu trả lời (~{giay:.0f} giây, ~{est_tai_cho:.2f} USD). Báo phạm vi "
                   "+ ước tính cho người dùng rồi KẾT THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi "
-                  "lại KHÔNG có `chi_uoc_tinh`.")), lims, ""
+                  "lại KHÔNG có `chi_uoc_tinh`." + cau_tran)), lims, ""
     hp = viec_nen.han_phut()
     ctx = _ctx_nguon(plats)
     ma = None
@@ -544,7 +551,7 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
                      if thieu else "")
                   + ". Lần này PHẢI nói số USD ước tính (ngoại lệ của luật không tự nói chi "
                   "phí). KẾT THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi lại y tham số, bỏ "
-                  "`chi_uoc_tinh`.")), lims, ""
+                  "`chi_uoc_tinh`." + cau_tran)), lims, ""
     if thieu:
         if ma:
             A._youtube_tra(ma)
