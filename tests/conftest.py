@@ -10,6 +10,10 @@ import pytest
 @pytest.fixture(autouse=True)
 def _tat_lease_that(monkeypatch):
     monkeypatch.setenv("MARK_THEO_TAI_KHOAN_CONSOLE", "0")
+    # social_listen: không hỏi hạn mức Apify thật (GET /users/me…) và không gọi model
+    # thật để "cứu" bài — bài cần thì tự bật lại và giả `requests.get` / `_hoi_model`.
+    monkeypatch.setenv("APIFY_KIEM_TRUOC", "0")
+    monkeypatch.setenv("SOCIAL_AI_CUU", "0")
     try:
         import tai_khoan_ai
         tai_khoan_ai.xoa_cache()

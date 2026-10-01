@@ -493,7 +493,7 @@ def test_loi_ket_noi_chua_url_khong_lam_lo_token(monkeypatch):
     kq = A._handle({"queries": ["hapas"], "platforms": ["threads"],
                     "date_from": "2026-09-25", "date_to": "2026-10-01"})
     assert BI_MAT not in kq and "BIMAT" not in kq
-    assert json.loads(kq)["per_platform"]["threads"]["status"] == "LỖI"
+    assert json.loads(kq)["per_platform"]["threads"]["status"] == "LOI"
 
 
 def test_che_token_ca_dang_lo_tren_query():

@@ -52,14 +52,19 @@ Chuẩn bị: 1 dòng trong .env
     APIFY_TOKEN=apify_api_xxx      # https://console.apify.com/settings/integrations
     APIFY_MAX_CHARGE_USD=1.0       # tuỳ chọn, trần chi phí MỖI NỀN TẢNG mỗi lần chạy
     YOUTUBE_DATA_API_KEY=AIza...   # Google Cloud, bật YouTube Data API v3
+    APIFY_KIEM_TRUOC=0             # tuỳ chọn: tắt hỏi trước hạn mức tháng / lượt Facebook
+    SOCIAL_AI_CUU=0                # tuỳ chọn: tắt bước AI cứu bài không nhắc tên brand
 """
 
 from __future__ import annotations
 
+import contextvars
 import datetime
 import html
 import json
+import math
 import os
+import threading
 import time
 import re
 import unicodedata
@@ -270,9 +275,339 @@ def _che_token(s, token: str | None = None) -> str:
     return re.sub(r"(?i)(token=)[^&\s'\"]+", r"\1***", s)
 
 
+# ── Chạy actor: khởi chạy → hỏi trạng thái → lấy dataset → HUỶ khi quá giờ ──
+# Vì sao bỏ `run-sync-get-dataset-items` (rà audit 01/10/2026): Threads cần ~227s
+# cho 2 từ khoá × 100 bài mà run-sync bị cắt ở 120s -> tool báo lỗi, KHÔNG có dữ liệu,
+# nhưng Apify vẫn tính $0,08–0,165: run hết giờ phía mình không bao giờ bị huỷ, nó
+# chạy tiếp tới xong và giữ chỗ trong 5 job đồng thời của gói Free -> lượt quét sau
+# (cả của đồng nghiệp) dính "lỗi chạy đồng thời", "chạy cùng lệnh mà không ra gì".
+# run-sync còn giấu `statusMessage` nên Facebook hết lượt 24h trông y hệt "0 bài".
+_DONG_THOI_TOI_DA = 4     # gói Free cho 5 job đồng thời; chừa 1 cho console/người khác
+_CHO_APIFY = threading.BoundedSemaphore(_DONG_THOI_TOI_DA)
+_KET_THUC = ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT")
+_DU_PHONG_HUY = 8.0       # giây chừa sau hạn run để lấy item dở dang + gửi lệnh huỷ
+# Hạn chót (time.monotonic) và sổ ghi trạng thái từng run, truyền NGẦM xuống `_call`
+# qua contextvars — giữ nguyên chữ ký `_call` cho 6 module đang gọi nó. Luồng con phải
+# được submit qua `contextvars.copy_context().run` thì mới thấy (xem `_fanout`).
+_HAN_CHOT: contextvars.ContextVar = contextvars.ContextVar("apify_han_chot", default=None)
+_SO_RUN: contextvars.ContextVar = contextvars.ContextVar("apify_so_run", default=None)
+_TU_KHOA: contextvars.ContextVar = contextvars.ContextVar("apify_tu_khoa", default=None)
+_lan_cuoi = threading.local()
+_dong_ho = time.monotonic     # tách tên để bộ thử giả đồng hồ/giấc ngủ
+_ngu = time.sleep
+
+# Trạng thái MỖI NGUỒN trả cho model (per_platform[p]["status"]).
+_MA_NGUON = ("OK", "OK_MOT_PHAN", "HET_LUOT_24H", "HET_TIEN_THANG", "QUA_GIO",
+             "NGHEN_DONG_THOI", "LOI")
+# Lỗi nặng hơn thắng khi một nguồn có nhiều run hỏng khác nhau.
+_DO_NANG = {"HET_TIEN_THANG": 5, "HET_LUOT_24H": 4, "NGHEN_DONG_THOI": 3, "QUA_GIO": 2,
+            "LOI": 1}
+_GOI_Y = {
+    "HET_LUOT_24H": ("Gói Free của actor Facebook chỉ cho 1 lượt chạy mỗi 24 giờ, tối đa 20 "
+                     "bài/lượt. Đợi tới giờ mở lại, hoặc chủ tài khoản nâng gói Apify."),
+    "HET_TIEN_THANG": ("Hết ngân sách Apify của tháng: mọi nguồn trả tiền (TikTok, Facebook, "
+                       "Instagram, Threads) tạm dừng tới ngày reset. YouTube vẫn quét được."),
+    "QUA_GIO": ("Nguồn chạy chậm hơn thời gian cho phép của một lượt trả lời. Giảm số từ "
+                "khoá hoặc `limit`, hoặc quét riêng nền tảng này."),
+    "NGHEN_DONG_THOI": ("Tài khoản Apify đang chạy đủ số lượt cùng lúc (có thể đồng nghiệp "
+                        "đang quét). Thử lại sau 1–2 phút."),
+    "LOI": "Thử lại sau ít phút; lặp lại thì báo người vận hành bot.",
+}
+
+
+class LoiApify(RuntimeError):
+    """Lỗi Apify ĐÃ PHÂN LOẠI: `ma` thuộc `_MA_NGUON`, `meta` là thông tin run.
+
+    Là RuntimeError để mọi bên gọi cũ (bắt Exception, đọc `str(e)`) chạy y như trước.
+    """
+
+    def __init__(self, ma: str, ly_do: str, meta: dict | None = None):
+        super().__init__(ly_do)
+        self.ma = ma
+        self.meta = meta if meta is not None else {}
+        self.meta.update(ma=ma, ly_do=ly_do)
+
+
+# ── Hỏi trước hạn mức (GET miễn phí) — có cache, hỏng thì coi như "không biết" ──
+_NHO_APIFY: dict = {}
+_NHO_KHOA = threading.Lock()
+
+
+def _kiem_truoc_bat() -> bool:
+    """Công tắc APIFY_KIEM_TRUOC=0 tắt mọi lượt hỏi trước hạn mức (bộ thử dùng để không
+    chạm mạng; vận hành dùng khi API hạn mức của Apify trục trặc)."""
+    return os.environ.get("APIFY_KIEM_TRUOC", "1").strip() != "0"
+
+
+def _apify_get(path: str, params: dict | None = None, timeout: float = 8):
+    """GET đọc-thôi tới Apify; lỗi gì cũng trả None (bên gọi tự đi đường cũ)."""
+    token = os.environ.get("APIFY_TOKEN", "").strip()
+    if not token:
+        return None
+    try:
+        r = requests.get(f"{_APIFY_BASE}{path}", params=params, timeout=timeout,
+                         headers={"Authorization": f"Bearer {token}"})
+        return r.json() if r.status_code < 400 else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def _nho(khoa: str, song: float, lay):
+    with _NHO_KHOA:
+        v = _NHO_APIFY.get(khoa)
+        if v and _dong_ho() - v[0] < song:
+            return v[1]
+    val = lay()
+    if val is not None:
+        with _NHO_KHOA:
+            _NHO_APIFY[khoa] = (_dong_ho(), val)
+    return val
+
+
+def _han_muc_thang() -> dict | None:
+    """{dung, tran, con_lai, reset} của chu kỳ tháng (USD, reset = giờ VN); None nếu
+    không hỏi được. Đo 01/10/2026: gói Free trần $5, đã dùng $3,92, chu kỳ 26/09→25/10."""
+    if not _kiem_truoc_bat():
+        return None
+
+    def lay():
+        d = ((_apify_get("/users/me/limits") or {}).get("data")) or {}
+        try:
+            tran = float(d["limits"]["maxMonthlyUsageUsd"])
+            dung = float(d["current"]["monthlyUsageUsd"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        het = _to_vn((d.get("monthlyUsageCycle") or {}).get("endAt"))
+        # endAt là 23:59:59.999Z ngày cuối chu kỳ -> +1 giây là đúng NGÀY reset.
+        return {"dung": dung, "tran": tran, "con_lai": max(0.0, tran - dung),
+                "reset": het + datetime.timedelta(seconds=1) if het else None}
+    return _nho("han_muc", 60, lay)
+
+
+def _goi_apify() -> str:
+    """Mã gói Apify ("FREE", …) — "" nếu không biết. Cache 1 giờ: gói hiếm khi đổi."""
+    if not _kiem_truoc_bat():
+        return ""
+
+    def lay():
+        d = ((_apify_get("/users/me") or {}).get("data")) or {}
+        return str((d.get("plan") or {}).get("id") or "").upper() or None
+    return _nho("goi", 3600, lay) or ""
+
+
+def _cau_het_tien(hm: dict | None) -> str:
+    if not hm:
+        return ("Tài khoản Apify đã chạm trần chi phí tháng (Apify báo 'Monthly usage hard "
+                "limit exceeded') — không chạy thêm được tới chu kỳ mới.")
+    s = f"Tài khoản Apify đã dùng ${hm['dung']:.2f}/${hm['tran']:g} tháng này"
+    return s + (f", reset ngày {hm['reset']:%d/%m}." if hm.get("reset") else ".")
+
+
+def _phan_loai_http(code: int, text: str) -> tuple[str, str, bool]:
+    """(mã, lý do cho người dùng, có nên thử lại) cho một phản hồi HTTP lỗi của Apify."""
+    t = (text or "").lower()
+    if "monthly usage hard limit" in t:
+        return "HET_TIEN_THANG", _cau_het_tien(_han_muc_thang()), False
+    if code == 429 or (code == 402 and re.search(r"concurren|memory.limit|too many|parallel", t)):
+        return ("NGHEN_DONG_THOI",
+                "Apify từ chối vì tài khoản đang chạy đủ số lượt cùng lúc cho phép "
+                "(gói Free: 5) — có thể có lượt quét khác đang chạy.", True)
+    if code >= 500:
+        return "LOI", f"Apify lỗi máy chủ (HTTP {code}).", True
+    return "LOI", f"HTTP {code}: {text[:250]}", False
+
+
+def _lay_items(run: dict, limit: int, headers: dict) -> list | None:
+    ds = run.get("defaultDatasetId")
+    if not ds:
+        return None
+    for _ in range(2):
+        try:
+            r = requests.get(f"{_APIFY_BASE}/datasets/{ds}/items",
+                             params={"clean": 1, "limit": limit, "format": "json"},
+                             headers=headers, timeout=15)
+            if r.status_code < 400:
+                d = r.json()
+                return d if isinstance(d, list) else []
+        except (requests.RequestException, ValueError):
+            pass
+    return None
+
+
+def _huy_run(run_id: str, headers: dict) -> bool:
+    try:
+        r = requests.post(f"{_APIFY_BASE}/actor-runs/{run_id}/abort", headers=headers, timeout=8)
+        return r.status_code < 400
+    except requests.RequestException:
+        return False
+
+
+def _run_actor(actor: str, payload: dict, limit: int, mem: int | None = None,
+               deadline: float | None = None, min_charge: float = 0, *,
+               tran_usd: float | None = None, mot_phan: bool = False) -> tuple[list, dict]:
+    """Chạy một actor tới khi xong hoặc tới `deadline` (time.monotonic). -> (items, meta).
+
+    meta = {run_id, status, statusMessage, giay, ma, ly_do?, so_item, ...}. Lỗi đã phân
+    loại thì ném `LoiApify`. Quá hạn: HUỶ run trên Apify (ngừng tính tiền, trả chỗ chạy
+    đồng thời), rồi lấy item đã có — trả về nếu `mot_phan` (bên gọi đọc được meta),
+    không thì ném QUA_GIO như run-sync cũ. Chỉ thử lại MỘT lần, cho lỗi thoáng qua
+    (5xx, mất kết nối, nghẽn đồng thời 402/429); KHÔNG BAO GIỜ thử lại sau khi quá giờ.
+    """
+    token = os.environ.get("APIFY_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError(
+            "Thiếu APIFY_TOKEN trong .env "
+            "(lấy ở https://console.apify.com/settings/integrations)."
+        )
+    tran = (_tran()[1] if tran_usd is None
+            else round(_kep(tran_usd, *_TRAN_USD_KHOANG, _MAX_CHARGE), 2))
+    if min_charge and tran < min_charge:
+        def usd(x: float) -> str:
+            return f"{x:g}".replace(".", ",")
+        noi = ("Năng lực → Quét mạng xã hội" if tran_usd is None
+               else "Năng lực, mục trần của công cụ này")
+        raise RuntimeError(
+            f"Trần chi phí trên console ({usd(tran)} USD/lượt) thấp hơn mức tối thiểu "
+            f"actor {actor} yêu cầu ({usd(min_charge)} USD) — không chạy để khỏi vượt "
+            f"trần. Chủ agent nâng trần ở console: {noi}.")
+    t0 = _dong_ho()
+    het = deadline if deadline is not None else t0 + _RUN_TIMEOUT
+    meta: dict = {"actor": actor, "run_id": None, "status": None, "statusMessage": "",
+                  "giay": 0.0, "ma": "OK", "so_item": 0}
+    if _TU_KHOA.get():
+        meta["tu_khoa"] = _TU_KHOA.get()
+
+    def con() -> float:
+        return het - _dong_ho()
+
+    hm = _han_muc_thang()
+    if hm and hm["con_lai"] <= 0.01:
+        raise LoiApify("HET_TIEN_THANG", _cau_het_tien(hm), meta)
+    # Chờ chỗ trong hàng đợi chung của tiến trình — nhưng không chờ tới lúc chẳng còn
+    # giờ chạy: thà báo nghẽn ngay còn hơn khởi chạy một run sắp bị huỷ (vẫn mất phí start).
+    if not _CHO_APIFY.acquire(timeout=max(0.0, con() - 15)):
+        raise LoiApify("NGHEN_DONG_THOI",
+                       f"Bot đang chạy đủ {_DONG_THOI_TOI_DA} lượt Apify cùng lúc, chờ không "
+                       f"kịp chỗ trước hạn.", meta)
+    try:
+        return _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan)
+    except LoiApify as e:
+        e.meta["giay"] = round(_dong_ho() - t0, 1)
+        raise
+    finally:
+        _CHO_APIFY.release()
+
+
+def _chay_run(actor, payload, limit, mem, token, tran, meta, t0, con, mot_phan):
+    h = {"Authorization": f"Bearer {token}"}      # token KHÔNG nằm trên URL (`_che_token`)
+    # maxTotalChargeUsd là TRẦN cho phép, không phải phí thực — phí vẫn tính theo item.
+    q: dict = {"maxItems": limit, "maxTotalChargeUsd": tran}
+    if mem:
+        q["memory"] = mem
+    # Trần thời gian PHÍA APIFY: lệnh huỷ của mình mà hỏng (mất mạng) thì run vẫn tự chết
+    # ngay sau hạn, không chạy tới 3600s mặc định (đo 01/10/2026: options.timeoutSecs=3600).
+    q["timeout"] = max(30, int(con()) + 30)
+    data, loi = None, None
+    for lan in (1, 2):
+        cho = int(max(0, min(60, con() - 10)))
+        url = (f"{_APIFY_BASE}/acts/{actor}/runs?"
+               + urllib.parse.urlencode({**q, "waitForFinish": cho}))
+        thu_lai = False
+        try:
+            r = requests.post(url, json=payload, timeout=cho + 8, headers=h)
+        except requests.ConnectionError as e:     # chưa tới được Apify -> thử lại an toàn
+            loi = LoiApify("LOI", f"Không kết nối được Apify ({type(e).__name__}): "
+                                  f"{_che_token(e, token)}"[:300], meta)
+            thu_lai = True
+        except requests.RequestException as e:
+            # ReadTimeout: KHÔNG biết run đã tạo chưa -> không thử lại (chạy trùng = trả
+            # tiền hai lần). Trần `timeout` phía Apify vẫn chặn run mồ côi.
+            raise LoiApify("LOI", f"Không kết nối được Apify ({type(e).__name__}): "
+                                  f"{_che_token(e, token)}"[:300], meta) from None
+        else:
+            if r.status_code < 400:
+                try:
+                    data = r.json()
+                except ValueError:
+                    data = None
+                break
+            ma, ly_do, thu_lai = _phan_loai_http(r.status_code, r.text or "")
+            loi = LoiApify(ma, _che_token(ly_do, token), meta)
+        if not thu_lai or lan == 2 or con() < 25:
+            raise loi
+        _ngu(8 if loi.ma == "NGHEN_DONG_THOI" else 3)
+
+    if isinstance(data, list):
+        # Body là MẢNG item (kiểu run-sync): chỉ gặp ở fake cũ trong tests/ — Apify thật
+        # trả {"data": run}. Nhận luôn cho khỏi vỡ các bộ thử đang giả `requests.post`.
+        items = data[:limit] if limit else data
+        meta.update(status="SUCCEEDED", so_item=len(items), giay=round(_dong_ho() - t0, 1))
+        return items, meta
+    run = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(run, dict) or not run.get("id"):
+        raise LoiApify("LOI", "Apify trả phản hồi lạ khi khởi chạy actor (không có run id).",
+                       meta)
+    meta["run_id"] = run["id"]
+
+    while run.get("status") not in _KET_THUC:
+        c = con()
+        if c < 5:
+            break
+        cho = int(min(60, c - 4))
+        try:
+            r = requests.get(f"{_APIFY_BASE}/actor-runs/{run['id']}",
+                             params={"waitForFinish": cho}, headers=h, timeout=cho + 3)
+            if r.status_code < 400:
+                run = (r.json() or {}).get("data") or run
+                continue
+        except (requests.RequestException, ValueError, AttributeError):
+            pass
+        _ngu(min(2.0, max(0.0, con() - 5)))
+
+    st = run.get("status")
+    msg = _che_token(str(run.get("statusMessage") or "")[:300], token)
+    meta.update(status=st, statusMessage=msg)
+    qua_gio = st not in _KET_THUC
+    if qua_gio:
+        # Huỷ TRƯỚC rồi mới lấy item: ngừng đồng hồ tính tiền sớm nhất có thể; dataset
+        # của run đã huỷ vẫn đọc được bình thường.
+        meta["da_huy"] = _huy_run(run["id"], h)
+    items = _lay_items(run, limit, h)
+    meta.update(giay=round(_dong_ho() - t0, 1), so_item=len(items or []),
+                usd=run.get("usageTotalUsd"))
+    if qua_gio or st == "TIMED-OUT":
+        n = len(items or [])
+        ly_do = (f"Quá giờ sau {meta['giay']:.0f}s — đã dừng run trên Apify"
+                 + (f", giữ {n} bài lấy được tới lúc đó." if n else ", chưa có bài nào."))
+        if n and mot_phan:
+            meta.update(ma="QUA_GIO", ly_do=ly_do)
+            return items, meta
+        raise LoiApify("QUA_GIO", ly_do, meta)
+    if items is None:
+        raise LoiApify("LOI", f"Run {st} nhưng không tải được dataset từ Apify.", meta)
+    if st == "SUCCEEDED":
+        if re.match(r"(?i)\s*free tier", msg):
+            # Đo 01/10/2026 (run 08/09): run Facebook nào của gói Free cũng mang thông điệp
+            # "Free tier: up to 20 results per run, 1 run per 24h…", kể cả run CÓ dữ liệu.
+            # Chỉ khi dataset RỖNG mới là hết lượt 24h — trước đây trông như "0 bài".
+            meta["gioi_han_goi"] = "Gói Free của actor: tối đa 20 bài/lượt, 1 lượt/24 giờ."
+            if not items:
+                raise LoiApify("HET_LUOT_24H",
+                               "Actor báo gói Free đã dùng hết lượt chạy 24 giờ "
+                               "(tối đa 20 bài/lượt) nên trả 0 bài — KHÔNG phải không có bài.",
+                               meta)
+        return items, meta
+    # FAILED / ABORTED (vd chạm trần maxTotalChargeUsd): item đã trả tiền thì giữ.
+    ly_do = f"Run kết thúc {st}" + (f": {msg[:200]}" if msg else "") + "."
+    if items:
+        meta.update(ma="OK_MOT_PHAN", ly_do=ly_do + f" Giữ {len(items)} bài đã lấy được.")
+        return items, meta
+    raise LoiApify("LOI", ly_do, meta)
+
+
 def _call(actor: str, payload: dict, limit: int, mem: int | None = None,
-          min_charge: float = 0) -> list[dict]:
-    """Chạy actor đồng bộ rồi trả dataset.
+          min_charge: float = 0, tran_usd: float | None = None) -> list[dict]:
+    """Chạy actor rồi trả dataset (list item) — hợp đồng cũ cho mọi module gọi nó.
 
     `min_charge`: mức `maxTotalChargeUsd` tối thiểu actor đòi (YouTube/Facebook
     comments đòi 0,5 USD — deep_dive_tool). Trần console THẤP HƠN mức đó thì TỪ
@@ -281,37 +616,34 @@ def _call(actor: str, payload: dict, limit: int, mem: int | None = None,
     được `maxItems × giá` luôn nằm dưới trần console. Trước 01/10/2026 deep_dive
     đã truyền tham số này mà `_call` không có -> TypeError 9/9 lượt kéo bình luận
     YouTube/Facebook.
+
+    `tran_usd`: trần USD RIÊNG cho lượt này, thay trần console của social_listen (vẫn
+    kẹp trong `_TRAN_USD_KHOANG`). Vì sao, thử thật 01/10/2026 19:05: kéo bình luận
+    YouTube bị từ chối vì trần social_listen 0,37 < mức tối thiểu 0,5 của actor —
+    deep_dive cần trần của chính nó.
+
+    Hạn chót và sổ trạng thái run đến NGẦM qua contextvars (`_HAN_CHOT`, `_SO_RUN`) do
+    `_handle` đặt; không có thì hạn = `_RUN_TIMEOUT` như run-sync cũ. Meta run gần nhất
+    của luồng đọc qua `meta_lan_cuoi()`.
     """
-    token = os.environ.get("APIFY_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError(
-            "Thiếu APIFY_TOKEN trong .env "
-            "(lấy ở https://console.apify.com/settings/integrations)."
-        )
-    tran_usd = _tran()[1]
-    if min_charge and tran_usd < min_charge:
-        def usd(x: float) -> str:
-            return f"{x:g}".replace(".", ",")
-        raise RuntimeError(
-            f"Trần chi phí trên console ({usd(tran_usd)} USD/lượt) thấp hơn mức tối thiểu "
-            f"actor {actor} yêu cầu ({usd(min_charge)} USD) — không chạy để khỏi vượt "
-            f"trần. Chủ agent nâng trần ở console: Năng lực → Quét mạng xã hội.")
-    # Token đi qua header Authorization, KHÔNG nằm trên URL (xem `_che_token`).
-    url = (f"{_APIFY_BASE}/acts/{actor}/run-sync-get-dataset-items"
-           # Đây là TRẦN cho phép, không phải phí thực — phí vẫn tính theo item.
-           f"?maxItems={limit}&maxTotalChargeUsd={tran_usd}"
-           + (f"&memory={mem}" if mem else ""))
+    so = _SO_RUN.get()
     try:
-        r = requests.post(url, json=payload, timeout=_RUN_TIMEOUT,
-                          headers={"Authorization": f"Bearer {token}"})
-    except requests.RequestException as e:
-        raise RuntimeError(
-            f"Không kết nối được Apify ({type(e).__name__}): {_che_token(e, token)}"[:300]
-        ) from None
-    if r.status_code >= 400:
-        raise RuntimeError(f"HTTP {r.status_code}: {_che_token(r.text[:250], token)}")
-    data = r.json()
-    return data if isinstance(data, list) else []
+        items, meta = _run_actor(actor, payload, limit, mem, _HAN_CHOT.get(), min_charge,
+                                 tran_usd=tran_usd, mot_phan=so is not None)
+    except LoiApify as e:
+        _lan_cuoi.meta = e.meta
+        if so is not None:
+            so.append(e.meta)
+        raise
+    _lan_cuoi.meta = meta
+    if so is not None:
+        so.append(meta)
+    return items
+
+
+def meta_lan_cuoi() -> dict | None:
+    """Meta của lượt `_call` gần nhất TRONG LUỒNG hiện tại (run_id, status, giay, ma…)."""
+    return getattr(_lan_cuoi, "meta", None)
 
 
 def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
@@ -337,11 +669,14 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
 
     def _mot_luot() -> dict | None:
         tong, so_run, cham_tran, dang_chay = 0.0, 0, 0, 0
+        # Không `with`: nó chờ mọi luồng xong nên `timeout=15` vô nghĩa (xem `_handle`).
+        ex = ThreadPoolExecutor(max_workers=len(actors))
         try:
-            with ThreadPoolExecutor(max_workers=len(actors)) as ex:
-                ds = list(ex.map(_mot, actors, timeout=15))
+            ds = list(ex.map(_mot, actors, timeout=15))
         except Exception:  # noqa: BLE001 — không để token lọt vào lỗi
             return None
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
         for items in ds:
             for it in items:
                 st = _to_vn(it.get("startedAt"))
@@ -684,6 +1019,30 @@ def _loc_bang_ai(rows: list, queries: list[str], boi_canh: str, log: list,
     return bo
 
 
+def _hoi_model(nhac: str, ngan_sach: float) -> str:
+    """Hỏi CHÍNH model của Mark một lượt (không tool), tối đa `ngan_sach` giây.
+
+    Ném `_FutTimeout` khi quá giờ. KHÔNG dùng `with ThreadPoolExecutor`: `with` gọi
+    shutdown(wait=True) nên vẫn ngồi chờ model trả lời dù đã quá hạn — audit 01/10/2026
+    có lượt social_listen chạy 340s so với hạn 135s, kẹt đúng ở bước lọc AI này.
+    """
+    def _chay():
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+        from run_agent import AIAgent
+        rt = resolve_runtime_provider(requested=config.agent_provider)
+        ag = AIAgent(model=config.agent_model, provider=rt.get("provider"),
+                     api_mode=rt.get("api_mode"), base_url=rt.get("base_url"),
+                     api_key=rt.get("api_key"), max_iterations=1, quiet_mode=True,
+                     enabled_toolsets=[], disabled_toolsets=["terminal"])
+        return (ag.run_conversation(nhac) or {}).get("final_response") or ""
+
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        return ex.submit(_chay).result(timeout=ngan_sach)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+
 def _loc_mot_lo(rows: list, queries: list[str], boi_canh: str, log: list,
                 con_lai: float, ket: list | None = None,
                 da_khop_tu_khoa: bool = True) -> set:
@@ -750,19 +1109,8 @@ def _loc_mot_lo(rows: list, queries: list[str], boi_canh: str, log: list,
         + "\n".join(dong)
     )
 
-    def _chay():
-        from hermes_cli.runtime_provider import resolve_runtime_provider
-        from run_agent import AIAgent
-        rt = resolve_runtime_provider(requested=config.agent_provider)
-        ag = AIAgent(model=config.agent_model, provider=rt.get("provider"),
-                     api_mode=rt.get("api_mode"), base_url=rt.get("base_url"),
-                     api_key=rt.get("api_key"), max_iterations=1, quiet_mode=True,
-                     enabled_toolsets=[], disabled_toolsets=["terminal"])
-        return (ag.run_conversation(nhac) or {}).get("final_response") or ""
-
     try:
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            tra_loi = ex.submit(_chay).result(timeout=ngan_sach)
+        tra_loi = _hoi_model(nhac, ngan_sach)
     except _FutTimeout:
         log.append(f"loc_ai: model qua {ngan_sach:.0f}s chua tra loi -> giu nguyen tat ca")
         ket.append("het_gio")
@@ -795,6 +1143,92 @@ def _loc_mot_lo(rows: list, queries: list[str], boi_canh: str, log: list,
         return set()
     ket.append("ok")
     return bo
+
+
+_CUU_TOI_DA = 60       # số bài tối đa gửi AI xét cứu, ưu tiên nhiều view
+_GHI_CHU_CUU = "giữ lại nhờ AI: bàn về quảng cáo/brand dù không nhắc tên"
+
+
+def _cuu_bang_ai(rows: list, queries: list[str], boi_canh: str, log: list,
+                 con_lai: float, trang_thai: dict) -> set:
+    """Nhờ AI CỨU bài bị loại CHỈ vì không nhắc từ khoá — trả chỉ số (trong `rows`) được giữ.
+
+    Vì sao, thử thật 01/10/2026 19:03 ("hapas", Threads 29/09→01/10): lọc từ khoá loại
+    đúng Mason Nguyễn / Bùi Trường Linh / Thơm Da LAB, nhưng loại LUÔN các trả lời bàn
+    về chính iTVC của HAPAS mà không gọi tên brand — "Đây chính là biểu cảm của t khi xem
+    30 giây đầu của cái quảng cáo này =)))" (954k view), "…campaign 20/10 nhưng cái quảng
+    cáo này…". Đó đúng là UGC đội marketing cần.
+
+    NGƯỢC chiều bộ lọc chính: KHÔNG CHẮC THÌ BỎ (bài đã trượt luật từ khoá, cứu bừa là
+    đổ nhiễu lại vào sheet). Hỏng/hết giờ thì FAIL-CLOSED: bài ở nguyên tab "Bị loại".
+    Bắt buộc có `boi_canh` — không biết brand làm gì thì không phân xử được.
+    `trang_thai` nhận {"trang_thai": …, "da_xet": n}.
+    """
+    tt = trang_thai
+    tt.update(trang_thai="không có bài cần xét", da_xet=0)
+    if not rows:
+        return set()
+    if os.environ.get("SOCIAL_AI_CUU", "1").strip() == "0":
+        tt["trang_thai"] = "tắt (SOCIAL_AI_CUU=0)"
+        return set()
+    if not boi_canh:
+        tt["trang_thai"] = "bỏ qua vì thiếu boi_canh"
+        return set()
+    ngan_sach = min(_AI_TIMEOUT, con_lai)
+    if ngan_sach < 15:
+        tt["trang_thai"] = "bỏ qua vì hết thời gian"
+        log.append(f"cuu_ai: chi con {con_lai:.0f}s -> bo qua, bai van o tab Bi loai")
+        return set()
+    thu_tu = sorted(range(len(rows)), key=lambda i: -int(rows[i][0].get("views") or 0))
+    xet = thu_tu[:_CUU_TOI_DA]
+    dong = []
+    for j, i in enumerate(xet):
+        d = rows[i][0]
+        dong.append(f"{j}. ({d.get('platform') or '?'}) [{str(d.get('kenh') or '')[:28]}] "
+                    f"{' '.join(str(d.get('text') or '').split())[:200]}")
+    nhac = (
+        f"Brand đang theo dõi: {', '.join(queries)}\n"
+        f"Ngành hàng / bối cảnh: {boi_canh}\n\n"
+        f"Dưới đây là {len(xet)} bài KHÔNG nhắc tên brand nên đã bị loại. Một số có thể vẫn "
+        f"đang BÀN VỀ brand: bình luận/trả lời về quảng cáo, chiến dịch, sản phẩm của brand "
+        f"mà không gọi tên (vd 'cái quảng cáo này', 'campaign 20/10', 'mẫu túi trong clip').\n"
+        f"QUY TẮC:\n"
+        f"- Chỉ chọn bài RÕ RÀNG đang nói về brand, sản phẩm, hoặc quảng cáo/chiến dịch của "
+        f"brand trong bối cảnh trên.\n"
+        f"- KHÔNG CHẮC THÌ KHÔNG CHỌN. Bài chuyện khác, chung chung, hoặc nói về brand khác "
+        f"thì không chọn.\n"
+        f"CHỈ trả về JSON đúng dạng {{\"giu\": [số, số, ...]}} — không giải thích.\n\n"
+        + "\n".join(dong))
+    try:
+        tra_loi = _hoi_model(nhac, ngan_sach)
+    except _FutTimeout:
+        tt["trang_thai"] = "bỏ qua vì hết thời gian"
+        log.append(f"cuu_ai: model qua {ngan_sach:.0f}s -> khong cuu bai nao")
+        return set()
+    except Exception as e:  # noqa: BLE001
+        tt["trang_thai"] = "lỗi"
+        log.append(f"cuu_ai: KHONG chay duoc ({type(e).__name__}) -> khong cuu bai nao")
+        return set()
+    m = re.search(r'\{[^{}]*"giu"\s*:\s*\[[^\]]*\][^{}]*\}', tra_loi or "", re.S)
+    try:
+        chi_so = json.loads(m.group(0)).get("giu") or [] if m else None
+    except ValueError:
+        chi_so = None
+    if chi_so is None:
+        tt["trang_thai"] = "lỗi"
+        log.append("cuu_ai: model tra ve khong dung dang JSON -> khong cuu bai nao")
+        return set()
+    giu = {xet[int(x)] for x in chi_so if isinstance(x, (int, float, str))
+           and str(x).strip().isdigit() and 0 <= int(x) < len(xet)}
+    # Chốt an toàn: đòi cứu gần hết thì nhiều khả năng model hiểu ngược đề.
+    if len(xet) >= 10 and len(giu) > 0.8 * len(xet):
+        tt["trang_thai"] = "lỗi"
+        log.append(f"cuu_ai: model doi cuu {len(giu)}/{len(xet)} bai — NGHI SAI, khong cuu")
+        return set()
+    tt.update(trang_thai="đã chạy", da_xet=len(xet))
+    if len(rows) > len(xet):
+        log.append(f"cuu_ai: chi xet {len(xet)}/{len(rows)} bai nhieu view nhat")
+    return giu
 
 
 def _bi_loai_tru(d: dict, loai_tru: list[str]) -> bool:
@@ -972,23 +1406,70 @@ def _ly_do_ngoai_vn(d: dict, p: str = "youtube", queries: list[str] | None = Non
 
 
 # Mỗi adapter: chạy actor rồi trả list[(dict đã chuẩn hoá, datetime giờ VN)]
-def _fanout(fn, keys: list[str]) -> list[dict]:
+def _bo_trung_tu_khoa(keys: list[str]) -> list[str]:
+    """Bỏ từ khoá TRÙNG sau khi chuẩn hoá (hoa/thường, '#', dấu), giữ bản gặp đầu.
+
+    Vì sao, audit 01/10/2026: ["HAPAS", "#HAPAS", "hapas"] gửi nguyên cho Threads thì
+    actor báo "truy vấn trùng"; với Instagram/Facebook thì mỗi bản trùng là một run
+    (thêm phí khởi động) để lấy lại đúng chừng ấy bài.
+    """
+    out, da = [], set()
+    for k in keys:
+        k = str(k).strip().lstrip("#").strip()
+        khoa = " ".join(_tokens(k)) or k.lower()
+        if k and khoa not in da:
+            da.add(khoa)
+            out.append(k)
+    return out
+
+
+def _fanout(fn, keys: list[str], loi_ra: list | None = None) -> list[dict]:
     """Chạy `fn(kw)` cho từng từ khoá SONG SONG rồi gộp kết quả.
 
     Instagram và Facebook chỉ nhận MỘT từ khoá mỗi lần gọi actor. Chạy tuần tự
     thì 6 từ khoá = 6 lần gọi nối đuôi, cộng với các nền tảng khác là vượt trần
     trả lời 180s của run.py (đã xảy ra thật 26/08/2026). Từ khoá nào lỗi thì bỏ
-    qua từ khoá đó, không làm hỏng cả nguồn.
+    qua từ khoá đó, không làm hỏng cả nguồn — nhưng lỗi KHÔNG còn chỉ in ra log:
+    nó vào sổ `_SO_RUN` (và `loi_ra` nếu truyền) để `_handle` báo đúng nguồn chỉ có
+    MỘT PHẦN. Trước 01/10/2026 Facebook 3 từ khoá hỏng 2 vẫn hiện "OK".
+
+    Hạn chót: chờ tới `_HAN_CHOT` + `_DU_PHONG_HUY` rồi thôi; luồng chưa xong bỏ lại
+    (run của nó tự bị huỷ khi tới hạn trong `_run_actor`).
     """
+    keys = _bo_trung_tu_khoa(keys)
     if len(keys) <= 1:
         return fn(keys[0]) if keys else []
+    so, het = _SO_RUN.get(), _HAN_CHOT.get()
+
+    def ghi(x: dict) -> None:
+        for dich in (so, loi_ra):
+            if dich is not None and x not in dich:
+                dich.append(x)
+
+    def mot(k):
+        _TU_KHOA.set(k)
+        return fn(k)
+
     out = []
-    with ThreadPoolExecutor(max_workers=min(len(keys), 5)) as ex:
-        for f in [ex.submit(fn, k) for k in keys]:
+    ex = ThreadPoolExecutor(max_workers=min(len(keys), 5))
+    try:
+        futs = [(k, ex.submit(contextvars.copy_context().run, mot, k)) for k in keys]
+        for k, f in futs:
+            cho = None if het is None else max(0.05, het + _DU_PHONG_HUY - 1 - time.monotonic())
             try:
-                out.extend(f.result())
+                out.extend(f.result(timeout=cho))
+            except _FutTimeout:
+                ghi({"tu_khoa": k, "ma": "QUA_GIO",
+                     "ly_do": "chưa xong trước hạn trả lời, đã bỏ qua"})
+            except LoiApify as e:              # `_call` đã ghi vào `_SO_RUN`
+                print(f"[social_listen] fanout lỗi từ khoá {k!r}: {e.ma} {_che_token(e)}")
+                ghi(e.meta)
             except Exception as e:  # noqa: BLE001
-                print(f"[social_listen] fanout lỗi 1 từ khoá: {_che_token(e)}")
+                ly_do = _che_token(f"{type(e).__name__}: {e}")[:250]
+                print(f"[social_listen] fanout lỗi từ khoá {k!r}: {ly_do}")
+                ghi({"tu_khoa": k, "ma": "LOI", "ly_do": ly_do})
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
     return out
 
 
@@ -1117,8 +1598,47 @@ def _fetch_instagram(q: list[str], limit: int, country: str, d_from, d_to) -> li
     return out
 
 
+def _fb_luot_24h() -> tuple | None:
+    """(lúc đã dùng lượt, lúc mở lại) nếu lượt 24h của gói Free ĐÃ dùng; None nếu còn
+    lượt hoặc không hỏi được (khi đó cứ chạy như cũ).
+
+    Lượt "ăn quota" là run đầu tiên cách run ăn quota trước đó ≥24 giờ; các run chen
+    giữa (bị actor chặn, trả 0 bài) không dời mốc. Giả định suy từ thông điệp actor
+    "1 run per 24h", chưa có tài liệu chính thức — sai thì chỉ báo mở lại muộn hơn thật.
+    """
+    d = _apify_get(f"/acts/{_ACTORS['facebook']}/runs", {"desc": 1, "limit": 20})
+    if not d:
+        return None
+    items = (d.get("data") or {}).get("items") or []
+    moc = sorted(t for t in (_to_vn(it.get("startedAt")) for it in items) if t)
+    an, ngay = None, datetime.timedelta(hours=24)
+    for t in moc:
+        if an is None or t - an >= ngay:
+            an = t
+    if an and datetime.datetime.now(_VN_TZ) - an < ngay:
+        return an, an + ngay
+    return None
+
+
 def _fetch_facebook(q: list[str], limit: int, country: str, d_from, d_to) -> list[tuple]:
     # Actor chỉ nhận MỘT query (string); có lọc ngày server-side thật.
+    # Gói Free của actor: 20 bài/lượt, 1 lượt/24h (thông điệp run thật 08/09/2026). Bản
+    # cũ bắn mỗi từ khoá một run: chỉ run đầu có dữ liệu, các run sau trả 0 bài, người
+    # dùng nghe "hết token / bị chặn". Nay hỏi trước (GET miễn phí): đã dùng lượt thì
+    # KHÔNG chạy và nói giờ mở lại; còn lượt thì dồn vào MỘT từ khoá và nói rõ từ nào.
+    q = _bo_trung_tu_khoa(q)
+    so = _SO_RUN.get()
+    if _goi_apify() == "FREE":
+        luot = _fb_luot_24h()
+        if luot:
+            raise LoiApify("HET_LUOT_24H",
+                           f"Facebook (gói Free): đã dùng lượt 24h lúc {luot[0]:%H:%M %d/%m}, "
+                           f"mở lại lúc {luot[1]:%H:%M %d/%m}, tối đa 20 bài/lượt.")
+        if len(q) > 1 and so is not None:
+            so.append({"ghi_chu": (
+                f"Facebook gói Free chỉ 1 lượt/24h nên CHỈ quét từ khoá '{q[0]}'; chưa quét: "
+                f"{', '.join(repr(x) for x in q[1:])}. Phải nói rõ với người dùng.")})
+        q, limit = q[:1], min(limit, 20)
     per = max(1, limit // max(1, len(q)))
     raw = _fanout(lambda kw: _call(_ACTORS["facebook"], {
         "query": kw, "search_type": "posts", "max_results": per,
@@ -1263,9 +1783,17 @@ def _fetch_youtube(q: list[str], limit: int, country: str, d_from, d_to) -> list
 
 
 def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list[tuple]:
+    # `max_posts` là trần MỖI TỪ KHOÁ (input schema actor, đọc 01/10/2026: "A cap per user
+    # or per keyword, not a total for the run"). Bản cũ đặt = limit nên 2 từ khoá đòi gấp
+    # đôi, chạy ~227s, vượt hạn và bị tính tiền mà không trả gì. `maxItems`=limit trên URL
+    # vẫn chặn tổng. "recent" (cùng schema: 'top' | 'recent') ưu tiên bài MỚI — đúng với
+    # quét theo khoảng ngày; 'top' mặc định trả bài nổi bật của mọi thời điểm.
+    q = _bo_trung_tu_khoa(q)
     raw = _call(_ACTORS["threads"], {
         "mode": "search", "keywords": q,
-        "max_posts": max(10, limit),           # actor từ chối max_posts < 10
+        # actor từ chối max_posts < 10
+        "max_posts": max(10, math.ceil(limit / max(1, len(q)))),
+        "search_filter": "recent",
         "start_date": d_from.strftime("%Y-%m-%d"),
         "end_date": d_to.strftime("%Y-%m-%d"),
     }, limit, mem=_MEMORY.get("threads"))
@@ -1432,6 +1960,13 @@ SCHEMA = {
         "BẮT BUỘC KHI TRẢ LỜI:\n"
         "- Đọc `per_platform` và `platforms_failed`. Nguồn nào hỏng phải NÓI RÕ nguồn đó "
         "hỏng, TUYỆT ĐỐI KHÔNG trình bày dữ liệu các nguồn còn lại như thể là toàn bộ.\n"
+        "- `per_platform[nguồn].status`: OK | OK_MOT_PHAN (chỉ có MỘT PHẦN — nói thiếu gì) | "
+        "HET_LUOT_24H (Facebook gói Free đã dùng lượt 24h) | HET_TIEN_THANG (tài khoản Apify "
+        "hết ngân sách tháng) | QUA_GIO | NGHEN_DONG_THOI (đang có lượt quét khác chiếm chỗ) "
+        "| LOI. Nguồn KHÔNG phải OK: nói ĐẦU câu trả lời, dùng đúng `ly_do` + `goi_y` (có giờ mở "
+        "lại / số tiền / ngày reset) — KHÔNG nói chung chung 'hết token', 'bị chặn'. "
+        "`note` đã xếp nguồn hỏng lên trước; `ghi_chu_quet` (vd Facebook chỉ quét 1 từ khoá) "
+        "cũng phải nói ra.\n"
         "- Nói cả hai con số: `scraped` (số post CÀO) và `in_range` (số nằm trong khoảng).\n"
         "- `in_range` NHỎ HƠN `scraped` là BÌNH THƯỜNG — do lọc ngày, KHÔNG phải ghi "
         "sheet thiếu. Sheet luôn chứa ĐỦ toàn bộ post trong khoảng đã qua bộ lọc liên quan "
@@ -1461,7 +1996,10 @@ SCHEMA = {
         "số tiền).\n"
         "- Chất lượng nguồn KHÔNG bằng nhau, phải nhắc khi liên quan: Instagram và "
         "Facebook KHÔNG có followers; Instagram không lọc được quốc gia nên nhiễu quốc "
-        "tế; Facebook khớp từ khoá lỏng và gói free chỉ 20 kết quả + 1 lần chạy/24h.\n"
+        "tế; Facebook khớp từ khoá lỏng và gói free chỉ 20 kết quả + 1 lần chạy/24h (nên "
+        "chỉ quét từ khoá ĐẦU TIÊN).\n"
+        "- `cuu_lai_boi_ai` > 0: AI đã giữ lại chừng ấy bài bàn về brand/quảng cáo dù không "
+        "nhắc tên (cột 'Ghi chú lọc' trong sheet) — nói con số này theo `tom_tat_loai`.\n"
         "- Tool TỐN TIỀN. Xác nhận từ khoá + khoảng ngày + nền tảng TRƯỚC khi gọi.\n"
         "- Gửi NGUYÊN `sheet_url` cho người dùng. `granted`=false thì phải báo họ có thể "
         "mở không được."
@@ -1563,13 +2101,17 @@ def _vi_du(d: dict) -> str:
 
 
 def _ly_do_loai(d: dict, p: str, queries: list[str], loai_tru: list[str], country: str,
-                boi_canh: str, khop_long: bool, giu_nuoc_ngoai: bool) -> tuple[str, str]:
+                boi_canh: str, khop_long: bool, giu_nuoc_ngoai: bool, *,
+                bo_kiem_tu_khoa: bool = False) -> tuple[str, str]:
     """(nhóm, lý do) nếu bài bị loại, ("", "") nếu giữ. Nhóm dùng để đếm/báo cáo.
 
     Thứ tự cố định: từ khoá -> loại trừ -> thị trường; bài trúng nhiều luật chỉ
     tính vào luật đầu, để các con số cộng lại đúng bằng số bài bị loại.
+    `bo_kiem_tu_khoa`: chỉ xét loại trừ + thị trường — để chọn bài cho AI cứu lại.
     """
-    if khop_long:
+    if bo_kiem_tu_khoa:
+        pass
+    elif khop_long:
         # Giữ đúng hành vi cũ cho truy vấn khám phá: chỉ ba nguồn khớp lỏng bị kiểm.
         if p in _NEEDS_RELEVANCE_FILTER and not _relevant(d, queries):
             return "tu_khoa", "không nhắc từ khoá"
@@ -1596,6 +2138,76 @@ def _ly_do_loai(d: dict, p: str, queries: list[str], loai_tru: list[str], countr
         # Nước khác VN: giữ nguyên luật cũ.
         return "he_chu", "hệ chữ khác thị trường đang quét"
     return "", ""
+
+
+_TEN_NGUON = {"tiktok": "TikTok", "facebook": "Facebook", "instagram": "Instagram",
+              "youtube": "YouTube", "threads": "Threads"}
+
+
+def _tong_hop_nguon(got, so: list) -> dict:
+    """Gộp kết quả fetcher + sổ run của MỘT nguồn thành trạng thái cho model.
+
+    -> {status ∈ _MA_NGUON, ly_do?, goi_y?, run_id?, giay?, error?, ...}. Vì sao cần,
+    audit 01/10/2026: người dùng nghe "hết token / bị chặn" cho cả ba chuyện khác hẳn
+    nhau — Facebook hết lượt 24h, tài khoản hết $5 tháng, Threads quá giờ.
+    """
+    runs = [x for x in so if x.get("ma")]
+    loi = [x for x in runs if x["ma"] != "OK"]
+    ghi_chu = [x["ghi_chu"] for x in so if x.get("ghi_chu")]
+    out: dict = {}
+    if isinstance(got, Exception):
+        ma = getattr(got, "ma", None) or "LOI"
+        if ma == "LOI" and loi:          # lỗi chung chung, nhưng sổ có mã cụ thể hơn
+            ma = max(loi, key=lambda x: _DO_NANG.get(x["ma"], 0))["ma"]
+        ly_do = str(got) if isinstance(got, LoiApify) else f"{type(got).__name__}: {got}"
+        out.update(status=ma, ly_do=_che_token(ly_do)[:400])
+        # Giữ trường `error` cũ cho ai đang đọc nó.
+        out["error"] = out["ly_do"][:250]
+    elif loi:
+        ma = max(loi, key=lambda x: _DO_NANG.get(x["ma"], 0))["ma"]
+        chi_tiet = "; ".join(
+            (f"từ khoá '{x['tu_khoa']}': " if x.get("tu_khoa") else "")
+            + str(x.get("ly_do") or x["ma"]) for x in loi)
+        out.update(status="OK_MOT_PHAN" if got else (ma if ma in _DO_NANG else "LOI"),
+                   ly_do=_che_token(chi_tiet)[:400])
+    else:
+        out["status"] = "OK"
+    if out["status"] != "OK":
+        goc = out["status"] if out["status"] in _GOI_Y else (
+            max(loi, key=lambda x: _DO_NANG.get(x["ma"], 0))["ma"] if loi else "LOI")
+        out["goi_y"] = _GOI_Y.get(goc, _GOI_Y["LOI"])
+    moc = (loi or runs)[-1] if (loi or runs) else None
+    if moc:
+        out.update(run_id=moc.get("run_id"), giay=moc.get("giay"))
+    gh = next((x["gioi_han_goi"] for x in runs if x.get("gioi_han_goi")), None)
+    if gh:
+        out["gioi_han_goi"] = gh
+    if ghi_chu:
+        out["ghi_chu_quet"] = " ".join(ghi_chu)
+    return out
+
+
+def _cau_nguon_hong(per_platform: dict, plats: list[str]) -> str:
+    """Câu mở đầu `note`: nguồn hỏng TRƯỚC, nguồn thiếu sau — model chép nguyên văn."""
+    hong = [p for p in plats if per_platform[p]["status"] not in ("OK", "OK_MOT_PHAN")]
+    mot = [p for p in plats if per_platform[p]["status"] == "OK_MOT_PHAN"
+           or per_platform[p].get("ghi_chu_quet")]
+    if not hong and not mot:
+        return ""
+    phan = []
+    if hong:
+        phan.append("NGUỒN KHÔNG LẤY ĐƯỢC DỮ LIỆU — nói ĐẦU TIÊN, nói thẳng từng nguồn: "
+                    + " | ".join(f"{_TEN_NGUON.get(p, p)} [{per_platform[p]['status']}]: "
+                                 f"{per_platform[p].get('ly_do')} Gợi ý: "
+                                 f"{per_platform[p].get('goi_y')}" for p in hong) + ".")
+    if mot:
+        def thieu(v: dict) -> str:
+            return " ".join(x for x in (v.get("ly_do"), v.get("ghi_chu_quet")) if x)
+        phan.append("NGUỒN CHỈ CÓ MỘT PHẦN: " + " | ".join(
+            f"{_TEN_NGUON.get(p, p)}: {thieu(per_platform[p])}" for p in mot) + ".")
+    phan.append("TUYỆT ĐỐI không trình bày kết quả như thể đầy đủ; không nói chung chung "
+                "'hết token/bị chặn' — dùng đúng lý do trên.")
+    return " ".join(phan) + " "
 
 
 def _handle(args: dict, **kwargs) -> str:
@@ -1653,28 +2265,51 @@ def _handle(args: dict, **kwargs) -> str:
     # Lùi vài giây để đồng hồ máy lệch với Apify không làm sót run đầu tiên.
     _bat_dau = datetime.datetime.now(_VN_TZ) - datetime.timedelta(seconds=5)
     _t0 = time.monotonic()
-    with ThreadPoolExecutor(max_workers=len(plats)) as ex:
-        futs = {p: ex.submit(_FETCH[p], queries, lims[p], country, d_from, d_to)
-                for p in plats}
-        results = {}
+    han_chot = _t0 + _TOOL_DEADLINE
+    results: dict = {}
+    # Ngân sách tháng (GET miễn phí, cache 60s): không đủ cho ước tính thì KHÔNG chạy
+    # nguồn trả tiền nào — chạy là Apify trả 403 "Monthly usage hard limit exceeded" giữa
+    # chừng, người dùng chỉ nghe "lỗi". YouTube không tốn tiền Apify nên vẫn chạy.
+    hm = _han_muc_thang() if est > 0 and any(p in _ACTORS for p in plats) else None
+    if hm and hm["con_lai"] < est:
+        cau = (_cau_het_tien(hm) + f" Lượt này ước {est:.2f} USD, chỉ còn "
+               f"{hm['con_lai']:.2f} USD.")
+        for p in plats:
+            if p in _ACTORS:
+                results[p] = LoiApify("HET_TIEN_THANG", cau)
+    so_run = {p: [] for p in plats}
+
+    def _chay_nguon(p: str):
+        _SO_RUN.set(so_run[p])
+        # Run Apify dừng TRƯỚC hạn tool để kịp lấy bài dở dang + huỷ run (`_run_actor`).
+        _HAN_CHOT.set(han_chot - _DU_PHONG_HUY)
+        return _FETCH[p](queries, lims[p], country, d_from, d_to)
+
+    chay = [p for p in plats if p not in results]
+    # KHÔNG `with ThreadPoolExecutor`: `with` gọi shutdown(wait=True), ngồi chờ luồng
+    # chậm nhất nên hạn chót vô hiệu — audit 01/10/2026 có lượt tool chạy 340s và 508s
+    # so với hạn 135s. Luồng còn treo bỏ lại; run Apify của nó tự bị huỷ khi tới hạn.
+    ex = ThreadPoolExecutor(max_workers=max(1, len(chay)))
+    try:
+        futs = {p: ex.submit(contextvars.copy_context().run, _chay_nguon, p) for p in chay}
         for p, f in futs.items():
-            con_lai = _TOOL_DEADLINE - (time.monotonic() - _t0)
             try:
-                results[p] = f.result(timeout=max(1.0, con_lai))
+                results[p] = f.result(timeout=max(0.05, han_chot - time.monotonic()))
             except _FutTimeout:
-                results[p] = RuntimeError(
-                    f"Quá {_TOOL_DEADLINE:.0f}s — nguồn này chưa kịp trả. Thử giảm số từ "
-                    f"khoá, giảm `limit`, hoặc quét từng nền tảng một.")
+                results[p] = LoiApify(
+                    "QUA_GIO", f"Quá {_TOOL_DEADLINE:.0f}s — nguồn này chưa kịp trả.")
             except Exception as e:  # noqa: BLE001
                 results[p] = e
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
 
+    ung_vien_cuu: list[int] = []   # chỉ số trong `bi_loai`: loại CHỈ vì không nhắc từ khoá
     for p in plats:
         lim_p = lims[p]
         got = results.get(p)
+        tt_nguon = _tong_hop_nguon(got, list(so_run[p]))
         if isinstance(got, Exception):
-            # Che token: chuỗi lỗi đi thẳng vào câu trả lời của model và sổ audit.
-            per_platform[p] = {"status": "LỖI",
-                               "error": _che_token(f"{type(got).__name__}: {got}")[:250]}
+            per_platform[p] = tt_nguon
             failed.append(p)
             continue
         keep = [(d, dt) for d, dt in got if dt and d_from <= dt <= d_to]
@@ -1691,13 +2326,19 @@ def _handle(args: dict, **kwargs) -> str:
                                    khop_long, giu_nuoc_ngoai)
             if k:
                 nhom.setdefault(k, []).append(d)
+                if k == "tu_khoa" and _ly_do_loai(
+                        d, p, queries, loai_tru, country, boi_canh, khop_long,
+                        giu_nuoc_ngoai, bo_kiem_tu_khoa=True) == ("", ""):
+                    ung_vien_cuu.append(len(bi_loai))
                 bi_loai.append((d, dt, ly_do))
             else:
                 giu.append((d, dt))
         keep = giu
         hits.extend(keep)
-        per_platform[p] = {"status": "OK", "limit": lim_p,
+        per_platform[p] = {**tt_nguon, "limit": lim_p,
                            "scraped": len(got), "in_range": len(keep)}
+        if tt_nguon["status"] not in ("OK", "OK_MOT_PHAN"):
+            failed.append(p)      # vd Facebook: mọi từ khoá đều hỏng -> 0 bài
         tk = nhom.get("tu_khoa") or []
         if tk:
             per_platform[p].update({
@@ -1798,9 +2439,32 @@ def _handle(args: dict, **kwargs) -> str:
     # chung với meeting agent.
     ai_log: list[str] = []
     ai_tt: dict = {"trang_thai": "bỏ qua vì quá ít bài", "da_xet": 0}
+    # AI CỨU bài loại chỉ vì không nhắc tên (xem `_cuu_bang_ai`) — luồng riêng, song song
+    # với bộ lọc chính để không ăn thêm thời gian; cùng hạn chót của tool.
+    cuu_log: list[str] = []
+    cuu_tt: dict = {"trang_thai": "không có bài cần xét", "da_xet": 0}
+    ds_cuu = [bi_loai[i][:2] for i in ung_vien_cuu]
+    ex_cuu = f_cuu = None
+    if ds_cuu:
+        _tt_luong: dict = {}
+        ex_cuu = ThreadPoolExecutor(max_workers=1)
+        f_cuu = ex_cuu.submit(_cuu_bang_ai, ds_cuu, queries, boi_canh, cuu_log,
+                              han_chot - time.monotonic(), _tt_luong)
     bo_ai = _loc_bang_ai(hits, queries, boi_canh, ai_log,
-                         con_lai=_TOOL_DEADLINE - (time.monotonic() - _t0),
+                         con_lai=han_chot - time.monotonic(),
                          trang_thai=ai_tt, da_khop_tu_khoa=not khop_long)
+    cuu: set = set()
+    if f_cuu is not None:
+        try:
+            cuu = f_cuu.result(timeout=max(0.05, han_chot - time.monotonic()))
+            cuu_tt = dict(_tt_luong)
+        except _FutTimeout:
+            cuu_tt = {"trang_thai": "bỏ qua vì hết thời gian", "da_xet": 0}
+        except Exception as e:  # noqa: BLE001 — fail-closed: bài ở lại tab Bị loại
+            cuu_tt = {"trang_thai": "lỗi", "da_xet": 0}
+            cuu_log.append(f"cuu_ai: {type(e).__name__}")
+        finally:
+            ex_cuu.shutdown(wait=False, cancel_futures=True)
     vi_du_ai: list[str] = []
     if bo_ai:
         vi_du_ai = [f"[{hits[i][0].get('platform')}] "
@@ -1809,6 +2473,22 @@ def _handle(args: dict, **kwargs) -> str:
                        for i, (d, dt) in enumerate(hits) if i in bo_ai)
         hits = [x for i, x in enumerate(hits) if i not in bo_ai]
     loc_bang_ai = ai_tt.get("trang_thai") in ("đã chạy", "chạy một phần")
+    # Bài được cứu quay về sheet chính (KHÔNG qua bộ lọc chính nữa — AI cứu đã xét chặt
+    # hơn), đánh dấu ở cột "Ghi chú lọc" và đếm riêng.
+    vi_du_cuu: list[str] = []
+    if cuu:
+        bi_cuu = {ung_vien_cuu[i] for i in cuu}
+        for j in sorted(bi_cuu):
+            d, dt, _ = bi_loai[j]
+            d["_ghi_chu_loc"] = _GHI_CHU_CUU
+            hits.append((d, dt))
+            v = per_platform[d["platform"]]
+            v["in_range"] += 1
+            v["loai_vi_khong_chua_tu_khoa"] = v.get("loai_vi_khong_chua_tu_khoa", 1) - 1
+            v["cuu_lai_boi_ai"] = v.get("cuu_lai_boi_ai", 0) + 1
+            vi_du_cuu.append(f"[{d['platform']}] {_vi_du(d)}")
+        bi_loai = [x for j, x in enumerate(bi_loai) if j not in bi_cuu]
+    cuu_lai = len(cuu)
 
     hits.sort(key=lambda x: (x[0]["views"], x[0]["likes"]), reverse=True)
 
@@ -1847,10 +2527,13 @@ def _handle(args: dict, **kwargs) -> str:
         dem_loai["thi_truong"] += v.get("bi_loai_vi_ngoai_thi_truong", 0)
 
     def _tom_tat(noi: str) -> str:
+        cuu_cau = (f" (AI giữ lại {cuu_lai} bài bàn về brand dù không nhắc tên — cột "
+                   f"'Ghi chú lọc')" if cuu_lai else "")
         if not bi_loai:
             return (f"Không bài nào bị bộ lọc liên quan loại ({trong_khoang} bài trong "
-                    f"khoảng ngày đều giữ).")
-        phan = [f"Đã loại {dem_loai['tu_khoa']}/{trong_khoang} bài không nhắc từ khoá"]
+                    f"khoảng ngày đều giữ){cuu_cau}.")
+        phan = [f"Đã loại {dem_loai['tu_khoa']}/{trong_khoang} bài không nhắc từ khoá"
+                + cuu_cau]
         if dem_loai["loai_tru"]:
             phan.append(f"{dem_loai['loai_tru']} bài chứa từ loại trừ")
         if dem_loai["thi_truong"]:
@@ -1871,6 +2554,13 @@ def _handle(args: dict, **kwargs) -> str:
                 cham_tran_chi_phi=bool(thuc and thuc["cham_tran"]),
                 chi_phi=_dong_chi_phi(thuc, est),
                 per_platform=per_platform, platforms_failed=failed,
+                nguon_mot_phan=[p for p in plats
+                                if per_platform[p]["status"] == "OK_MOT_PHAN"],
+                nguon_loi=[{"nen_tang": p, **{k: per_platform[p].get(k) for k in
+                                              ("status", "ly_do", "goi_y", "run_id")}}
+                           for p in plats if per_platform[p]["status"] != "OK"],
+                cuu_lai_boi_ai=cuu_lai, cuu_ai_trang_thai=cuu_tt.get("trang_thai"),
+                vi_du_cuu_lai=vi_du_cuu[:4],
                 platforms_not_supported=not_yet, scraped=scraped, in_range=len(hits),
                 trong_khoang_ngay=trong_khoang, tong_bi_loai=len(bi_loai),
                 khop_long=khop_long, giu_nuoc_ngoai=giu_nuoc_ngoai,
@@ -1880,13 +2570,13 @@ def _handle(args: dict, **kwargs) -> str:
                 loc_ai_trang_thai=ai_tt.get("trang_thai"),
                 loc_ai_da_xet=ai_tt.get("da_xet", 0))
 
+    canh_bao_nguon = _cau_nguon_hong(per_platform, plats)
     if not hits and not bi_loai:
         return tool_result(
             success=not failed, sheet_url=None, **base,
             tom_tat_loai=_tom_tat(""),
-            note=(f"Cào {scraped} post, KHÔNG post nào nằm trong {rng}. Không tạo sheet."
-                  + (f" LƯU Ý: nguồn hỏng: {', '.join(failed)} — phải báo người dùng."
-                     if failed else "")),
+            note=(canh_bao_nguon
+                  + f"Cào {scraped} post, KHÔNG post nào nằm trong {rng}. Không tạo sheet."),
         )
 
     title = (args.get("title") or "").strip() or \
@@ -1898,7 +2588,13 @@ def _handle(args: dict, **kwargs) -> str:
                 d["views"], d["likes"], d["comments"], d["shares"], d["hashtags"],
                 d["text"], d["link"], kw]
 
-    rows = [list(_HEADER)] + [_dong(d, dt) for d, dt in hits]
+    # Cột "Ghi chú lọc" CHỈ thêm khi có bài được AI cứu: sheet thường giữ nguyên 12 cột
+    # mà người dùng/công cụ khác đã quen.
+    if cuu_lai:
+        rows = [list(_HEADER) + ["Ghi chú lọc"]] + [
+            _dong(d, dt) + [d.get("_ghi_chu_loc") or ""] for d, dt in hits]
+    else:
+        rows = [list(_HEADER)] + [_dong(d, dt) for d, dt in hits]
     # Bài bị loại vẫn có sheet để kiểm (kể cả khi KHÔNG bài nào được giữ): bộ lọc
     # loại nhầm mà không ai thấy được thì không bao giờ sửa được.
     rows_loai = [list(_HEADER) + ["Lý do loại"]] + [
@@ -1912,8 +2608,9 @@ def _handle(args: dict, **kwargs) -> str:
         return tool_result(
             success=False, sheet_url=None, **base,
             tom_tat_loai=_tom_tat(""),
-            error=_che_token(f"Cào OK ({len(hits)} post trong khoảng) nhưng TẠO/GHI SHEET "
-                             f"THẤT BẠI: {type(e).__name__}: {e}"),
+            error=_che_token(canh_bao_nguon
+                         + f"Cào OK ({len(hits)} post trong khoảng) nhưng TẠO/GHI SHEET "
+                         f"THẤT BẠI: {type(e).__name__}: {e}"),
             top=[{"nen_tang": d["platform"], "kenh": d["kenh"], "views": d["views"],
                   "link": d["link"]} for d, _ in hits[:5]],
         )
@@ -1943,13 +2640,15 @@ def _handle(args: dict, **kwargs) -> str:
         ghi_du_khong=True,
         bi_loai_boi_ai=len(bo_ai),
         vi_du_ai_da_loai=vi_du_ai,
+        cuu_ai_ghi_chu="; ".join(cuu_log) or None,
         ai_ghi_chu=("; ".join(ai_log) if ai_log else
                     (f"AI đã đọc bối cảnh '{boi_canh or 'tự đoán chủ đề đa số'}' và loại "
                      f"{len(bo_ai)} bài lạc đề. Nói cho người dùng biết con số này."
                      if bo_ai else
                      "AI đã kiểm nhưng không thấy bài nào lạc đề." if loc_bang_ai else
                      f"AI CHƯA lọc ({ai_tt.get('trang_thai')}).")),
-        note=(f"GHI ĐỦ, KHÔNG thiếu dòng nào: sheet '{title}' có đúng {len(hits)} post "
+        note=(canh_bao_nguon
+              + f"GHI ĐỦ, KHÔNG thiếu dòng nào: sheet '{title}' có đúng {len(hits)} post "
               f"— là TẤT CẢ post nằm trong {rng} đã qua bộ lọc liên quan. "
               f"Đã cào {scraped} post, {scraped - trong_khoang} post nằm NGOÀI khoảng ngày "
               f"nên bị lọc bỏ (đây là hành vi ĐÚNG của bộ lọc ngày, KHÔNG phải lỗi ghi "
@@ -1958,8 +2657,8 @@ def _handle(args: dict, **kwargs) -> str:
                  f"{bi_loai_ghi_o} kèm lý do" if bi_loai else "")
               + ". Muốn nhiều post trong khoảng hơn thì tăng "
               f"`limit` hoặc nới khoảng ngày. GỬI `sheet_url`."
-              + (f" CẢNH BÁO: nguồn HỎNG: {', '.join(failed)} — dữ liệu KHÔNG đầy đủ, "
-                 f"phải nói rõ với người dùng." if failed else "")
+              + (f" AI giữ lại {cuu_lai} bài bàn về brand dù không nhắc tên (cột 'Ghi chú "
+                 f"lọc') — nói con số này." if cuu_lai else "")
               + ("" if granted else " CẢNH BÁO: chưa cấp được quyền tự động.")),
     )
 
