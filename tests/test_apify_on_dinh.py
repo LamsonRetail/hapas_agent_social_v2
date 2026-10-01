@@ -104,7 +104,8 @@ def test_running_roi_succeeded_tra_item(api):
     assert "run-sync" not in url and "token" not in url and BI_MAT not in url
     assert api.headers[0]["Authorization"] == f"Bearer {BI_MAT}"
     ds = [p for u, p in api.get_urls if "/datasets/ds1/items" in u]
-    assert ds and ds[0]["clean"] == 1 and ds[0]["limit"] == 30
+    # skipHidden (không clean/skipEmpty): offset đi đúng theo cỡ trang — xem `_lay_items`.
+    assert ds and ds[0]["skipHidden"] == 1 and "clean" not in ds[0] and ds[0]["limit"] == 30
     assert api.abort == []
 
 

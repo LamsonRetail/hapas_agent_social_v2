@@ -16,10 +16,6 @@ import lenh_cung
 _GOC = Path(__file__).resolve().parents[1]
 _TS = (Path(__import__("os").environ.get("PLATFORM_REPO") or r"D:\Platform")
        / "apps" / "platform-web" / "lib" / "agentToolCapabilities.ts")
-#: Lệnh runtime đã nhận mà console CHƯA bày — chờ phía Platform thêm vào
-#: `LENH_KHONG_CONG_TAC` (02/10/2026: `/viec` xem việc quét nền, trả lời thẳng từ sổ).
-#: Console đã có thì bài canh tự đòi khớp tuyệt đối trở lại.
-_CHO_PLATFORM = {"/viec"}
 
 
 def _lenh_tren_console() -> dict[str, str]:
@@ -59,12 +55,10 @@ def test_lenh_khong_cong_tac_cung_khop():
     runtime = (set(lenh_cung.LENH_NGUON)
                | set(lenh_cung.LENH_TOOL_TU_DO)
                | set(lenh_cung.LENH_TIEN_ICH))
-    cho = _CHO_PLATFORM - console          # đúng tập đang chờ, không nới thêm lệnh nào
-    assert console == runtime - cho, (
-        f"console bày {sorted(console)} · runtime nhận {sorted(runtime)} · "
-        f"chờ Platform {sorted(cho)}"
+    # Platform đã có `/viec` (PR #83) — khớp TUYỆT ĐỐI, không còn tập chờ.
+    assert console == runtime, (
+        f"console bày {sorted(console)} · runtime nhận {sorted(runtime)}"
     )
-    assert cho <= runtime, "tập chờ Platform có lệnh runtime không còn nhận — xoá khỏi tập"
 
 
 def test_moi_lenh_chi_mot_tool():

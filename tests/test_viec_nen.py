@@ -188,8 +188,10 @@ def nen(monkeypatch, tmp_path):
     monkeypatch.setattr(memory_store, "append_turns", lambda c, t_: g.lich_su.append((c, t_)))
     monkeypatch.setattr(lsr_platform, "ghi_luot_ngu_canh",
                         lambda *a, **k: g.ngu_canh.append(a) or True)
-    monkeypatch.setattr(lsr_platform, "gui_lark", lambda *a: g.gw.append(a) or {})
-    monkeypatch.setattr(lsr_platform, "bao_su_kien_job", lambda *a: g.su_kien.append(a) or {})
+    monkeypatch.setattr(lsr_platform, "gui_lark",
+                        lambda *a, **k: g.gw.append(a + tuple(k.values())) or {})
+    monkeypatch.setattr(lsr_platform, "bao_su_kien_job",
+                        lambda *a, **k: g.su_kien.append(a + tuple(k.values())) or {})
     monkeypatch.setattr(chi_phi_tool, "ghi", lambda **k: g.so_chi_phi.append(k) or k)
     scheduler.set_current_chat("oc_nhom1")
     memory_store.set_current_sender("ou_nguoi1")
@@ -263,7 +265,7 @@ def test_luot_lon_tra_ma_viec_truoc_moi_post(nen):
               "ngan_sach_usd", "nen_tang", "phan_xu", "sheet", "chi_phi", "thong_bao", "huy"):
         assert k in d, k
     assert d["kenh"] == {"loai": "lark_truc_tiep", "chat_id": "oc_nhom1", "app_id": "",
-                         "oc": "oc_nhom1", "job_id": None}
+                         "oc": "oc_nhom1", "job_id": None, "loai_chat": ""}
     ph = d["nen_tang"]["tiktok"]["phan"]
     assert ph[0]["kieu"] == "do" and ph[1]["payload"] == {"hashtags": ["hapas"],
                                                            "resultsPerPage": ph[1]["limit"]}
@@ -687,10 +689,10 @@ def _viec_xong(kenh: dict, chat="oc_nhom1"):
 def test_gui_qua_gateway_web_va_hoi_quy(nen):
     v = _viec_xong({"loai": "lark_gateway", "app_id": "cli_a", "oc": "oc_9"},
                    "lark:cli_a:oc_9")
-    assert V.gui(v) and nen.gw == [("oc_9", "xong rồi", "cli_a")]
+    assert V.gui(v) and nen.gw == [("oc_9", "xong rồi", "cli_a", "qthu-abcde-kq")]
     assert nen.ngu_canh[-1][0] == "lark:cli_a:oc_9"
     v = _viec_xong({"loai": "web", "job_id": 77}, "web:abc")
-    assert V.gui(v) and nen.su_kien == [(77, "xong rồi")]
+    assert V.gui(v) and nen.su_kien == [(77, "xong rồi", "qthu-abcde-kq")]
     v = _viec_xong({"loai": "khac"}, "hoiquy-1")
     V.gui(v)
     assert v.d["thong_bao"]["khong_day"] and not nen.lark.tin()
@@ -699,7 +701,7 @@ def test_gui_qua_gateway_web_va_hoi_quy(nen):
 def test_gui_thu_lai_roi_khong_gui_lai(nen, monkeypatch):
     lan = []
 
-    def gw(*a):
+    def gw(*a, **k):
         lan.append(a)
         if len(lan) == 1:
             raise RuntimeError("502")
@@ -729,11 +731,16 @@ def test_kenh_ghi_lai_job_platform(nen):
 def test_tra_viec_nen_chi_thay_viec_cua_chat_hoac_nguoi_hoi(nen):
     kq = _quet()
     assert V.tra(chat="oc_nhom1", nguoi="ou_khac")["tim_thay"]
-    assert V.tra(chat="oc_khac", nguoi="ou_nguoi1")["tim_thay"]
+    # Người yêu cầu chỉ thấy việc của mình ở chat RIÊNG; ở nhóm khác thì không (review 02/10).
+    assert V.tra(chat="oc_rieng", nguoi="ou_nguoi1", rieng=True)["tim_thay"]
+    assert not V.tra(chat="oc_nhom_khac", nguoi="ou_nguoi1", rieng=False)["tim_thay"]
     r = V.tra(chat="oc_khac", nguoi="ou_khac")
     assert not r["tim_thay"]
     assert not V.tra(kq["ma_viec"], chat="oc_khac", nguoi="ou_khac")["tim_thay"]
     assert not V.huy(kq["ma_viec"], chat="oc_khac", nguoi="ou_khac")["ok"]
+    assert not V.huy(kq["ma_viec"], chat="oc_nhom_khac", nguoi="ou_nguoi1")["ok"]
+    # Không có mã: chỉ huỷ việc của CHÍNH chat này, kể cả khi là người yêu cầu ở chat riêng.
+    assert not V.huy(chat="oc_rieng", nguoi="ou_nguoi1", rieng=True)["ok"]
     x = V.tra(chat="oc_nhom1", nguoi="")["viec"][0]
     assert x["ma_viec"] == kq["ma_viec"] and x["trang_thai"] == "xep_hang"
 
@@ -762,7 +769,7 @@ def test_chi_phi_cong_dung_run_cua_viec(nen):
     b = nen.tao_run("x~y", {}, [1] * 50, "SUCCEEDED")
     nen.tao_run("x~y", {}, [1] * 999, "SUCCEEDED")         # run của người khác cùng actor
     kq = A._chi_phi_cac_run([a, b, a])
-    assert kq == {"usd": 0.15, "so_run": 2, "chua_doc": 0}
+    assert kq == {"usd": 0.15, "so_run": 2, "chua_doc": 0, "con_song": []}
 
 
 # ───────────────────────────── deep dive ─────────────────────────────
