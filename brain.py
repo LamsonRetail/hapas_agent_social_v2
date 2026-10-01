@@ -129,6 +129,21 @@ _TOOLING_NOTE = "\n".join(
         "- ĐẶT NHẮC/HẸN GIỜ: `schedule_reminder` (đến giờ tự gửi vào chat này), xem/hủy bằng "
         "`list_reminders`/`cancel_reminder`. Ai nhờ 'nhắc…' thì XÁC NHẬN thời điểm+nội dung rồi đặt nhắc THẬT.",
         "- `remember_about_user`: ghi nhớ dài hạn thông tin quan trọng về người đang nói chuyện.",
+        # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
+        # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
+        # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).
+        "- TOOL TỐN TIỀN (`social_listen`, `social_deep_dive`, `soi_tai_khoan`, `soi_san`): "
+        "TRƯỚC khi gọi, tóm tắt phạm vi (từ khoá hoặc link, nền tảng, khoảng ngày, số bài) rồi "
+        "KẾT THÚC bằng câu hỏi \"Chạy nhé?\" và DỪNG, chờ người dùng trả lời. Chỉ gọi ngay khi: "
+        "người dùng vừa đồng ý câu chốt đó (ok, chạy đi, làm luôn…); người dùng nói rõ không "
+        "cần hỏi (quét luôn, chạy liền, làm luôn…); hoặc là lệnh cứng (/search, /comment, "
+        "/profile, /shop). Câu hỏi chung như 'có gì viral không', 'hóng trend tuần này' CHƯA "
+        "phải là đồng ý quét.",
+        # 01/10: Claude viết cả kế hoạch nội bộ lên đầu tin nhắn ("Câu này là trend chung →
+        # gọi social_listen với che_do=… ---"), người dùng thấy tên tool và tham số.
+        "- CHỈ viết phần gửi người dùng. KHÔNG viết suy nghĩ/kế hoạch nội bộ trước câu trả lời "
+        "(kiểu 'Câu này là … → gọi <tool> với …', 'Tôi sẽ chốt phạm vi rồi hỏi…'), KHÔNG nêu "
+        "tên tool hay tham số kỹ thuật — nói bằng lời thường ('tôi sẽ quét TikTok 7 ngày…').",
         "- KHÔNG dán JSON/log thô cho người dùng; câu trả lời được gửi tự động dưới danh tính bot.",
     ]
 )
