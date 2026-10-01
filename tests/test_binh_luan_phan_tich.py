@@ -69,39 +69,69 @@ def moi_truong(monkeypatch):
 
 
 # ───────────────────────── chia lô, cổng xác nhận ─────────────────────────
-def test_chia_lo_moi_luot_gon_trong_tran(moi_truong):
+def test_chia_lo_moi_luot_gon_trong_tran(moi_truong, monkeypatch):
     ap = moi_truong[0]
-    urls = [TT.format(7000000 + i) for i in range(25)]
-    kq = json.loads(D._handle({"post_urls": urls, "xac_nhan_chi_phi": True}))
-    # 0,9 × 0,5 / 0,00125 = 360 bình luận mỗi lượt → 7 bài × 50
-    assert [len(g["payload"]["postURLs"]) for g in ap.goi] == [7, 7, 7, 4]
+    monkeypatch.setattr(D, "_cau_hinh", lambda: (3000, 0.5))
+    urls = [TT.format(7000000 + i) for i in range(8)]
+    kq = json.loads(D._handle({"post_urls": urls}))
+    # 0,9 × 0,5 / 0,00125 = 360 bình luận mỗi lượt → 7 bài × 50; ước tính cả lượt 0,5 ≤ trần
+    assert [len(g["payload"]["postURLs"]) for g in ap.goi] == [7, 1]
     for g in ap.goi:
         assert g["limit"] * 0.00125 <= 0.9 * 0.5, "mỗi lượt phải nằm dưới trần"
     # Trần mỗi lô = ước tính lô × 1,5, không quá trần riêng 0,5 của deep_dive (không phải
-    # 0,37 của listen): lô 7 bài (0,4375 × 1,5) chạm 0,5; lô cuối 4 bài 0,25 × 1,5 → 0,38.
-    assert sorted(g["tran_usd"] for g in ap.goi) == [0.38, 0.5, 0.5, 0.5]
+    # 0,37 của listen): lô 7 bài (0,4375 × 1,5) chạm 0,5; lô 1 bài 0,0625 × 1,5 → sàn 0,1.
+    assert sorted(g["tran_usd"] for g in ap.goi) == [0.1, 0.5]
     gui = [u for g in ap.goi for u in g["payload"]["postURLs"]]
     assert sorted(gui) == sorted(urls), "mỗi bài đúng một lần"
-    assert kq["so_luot_chay"] == 4
+    assert kq["so_luot_chay"] == 2 and kq["so_bai_cham_ngan_sach"] == 0
 
 
-def test_vuot_ngan_sach_thi_hoi_truoc_khong_goi_apify(moi_truong):
+def test_vuot_tran_thi_khong_chay_va_goi_y_muc_vua(moi_truong):
+    """Chủ agent chốt 01/10/2026: trần console là trần CỨNG, không có cờ xác nhận để vượt."""
     ap = moi_truong[0]
     urls = [TT.format(7000000 + i) for i in range(25)]
-    kq = json.loads(D._handle({"post_urls": urls}))
-    assert ap.goi == [], "chưa xác nhận thì không được chạy lượt nào"
-    assert kq["can_xac_nhan"] is True and kq["chua_chay"] is True
+    kq = json.loads(D._handle({"post_urls": urls, "xac_nhan_chi_phi": True}))
+    assert ap.goi == [], "vượt trần thì KHÔNG lượt nào chạy, kể cả khi model cố xác nhận"
+    assert kq["vuot_tran"] is True and kq["chua_chay"] is True and "can_xac_nhan" not in kq
     assert kq["uoc_tinh_binh_luan"] == 1250
     assert kq["uoc_tinh_chi_phi_usd"] == pytest.approx(1.5625, abs=0.001)
-    assert kq["vua_ngan_sach"]["max_comments_cho_du_bai"] == 12, "300 // 25 bài"
-    assert "xac_nhan_chi_phi" in kq["note"] and "CHƯA CHẠY" in kq["note"]
+    assert kq["tran"] == {"tran_binh_luan": 300, "tran_usd_goi": 0.5}
+    assert kq["vua_tran"] == {"max_comments_cho_du_bai": 12,
+                              "so_bai_voi_max_comments_hien_tai": 6}
+    assert kq["goi_y"] == ("Trong trần này bóc được tối đa 12 bình luận/bài cho 25 bài, "
+                           "hoặc 6 bài nếu giữ 50 bình luận/bài.")
+    assert kq["goi_y"] in kq["note"] and "Console → Năng lực" in kq["note"]
+    assert "Trần bình luận" in kq["note"] and "xac_nhan_chi_phi" not in kq["note"]
+    assert "xac_nhan_chi_phi" not in D.SCHEMA["parameters"]["properties"]
+    assert "vuot_tran" in D.SCHEMA["description"]
 
 
-def test_vuot_usd_du_chua_vuot_so_binh_luan_cung_phai_hoi(moi_truong, monkeypatch):
+def test_vuot_usd_du_chua_vuot_so_binh_luan_cung_khong_chay(moi_truong, monkeypatch):
     ap = moi_truong[0]
     monkeypatch.setattr(D, "_cau_hinh", lambda: (3000, 0.1))
     kq = json.loads(D._handle({"post_urls": [TT.format(7000001 + i) for i in range(2)]}))
-    assert kq["can_xac_nhan"] is True and ap.goi == []
+    assert kq["vuot_tran"] is True and ap.goi == []
+    assert kq["vuot"] == ["chi phí 0,12 > 0,10 USD"]
+    # 2 bài × k × 0,00125 ≤ 0,1 → k = 40 (mỗi lô chứa ≤ 72 bình luận: 2 lô × 40)
+    assert kq["vua_tran"]["max_comments_cho_du_bai"] == 40
+
+
+def test_max_comments_1000_khi_tran_cho_phep(moi_truong, monkeypatch):
+    ap = moi_truong[0]
+    monkeypatch.setattr(D, "_cau_hinh", lambda: (3000, 5.0))
+    kq = json.loads(D._handle({"post_urls": [TT.format(7000001)], "max_comments": 1000}))
+    assert ap.goi[0]["payload"]["commentsPerPost"] == 1000 and kq["max_comments"] == 1000
+    assert kq["max_comments_bi_cat"] is None
+    kq = json.loads(D._handle({"post_urls": [TT.format(7000001)], "max_comments": 1500}))
+    assert ap.goi[1]["payload"]["commentsPerPost"] == 1000
+    assert "1500" in kq["max_comments_bi_cat"]
+
+
+def test_max_comments_1000_vuot_tran_binh_luan_thi_goi_y(moi_truong):
+    ap = moi_truong[0]
+    kq = json.loads(D._handle({"post_urls": [TT.format(7000001)], "max_comments": 1000}))
+    assert ap.goi == [] and kq["vuot_tran"] is True
+    assert kq["goi_y"] == "Trong trần này bóc được tối đa 300 bình luận/bài cho 1 bài."
 
 
 def test_trong_ngan_sach_thi_chay_ngay(moi_truong):
@@ -341,23 +371,49 @@ def test_tran_lo_theo_uoc_tinh_va_san_actor():
 
 def test_gia_lech_thi_dung_lo_sau_khi_cham_ngan_sach_luot(moi_truong, monkeypatch):
     """Rà 01/10: mỗi lô từng được cả `tran_usd_goi` → N lô tiêu tới N × ngân sách. Nay lô
-    sau không chạy khi (đã tiêu + đang giữ chỗ) vượt max(ước tính × 1,3; trần tool)."""
+    sau không chạy khi (đã tiêu + đang giữ chỗ) vượt `tran_usd_goi` — trần cứng của chủ
+    agent, không còn nới thành ước tính × 1,3."""
     ap = moi_truong[0]
     monkeypatch.setattr(D, "_SONG_SONG", 1)
+    monkeypatch.setattr(D, "_cau_hinh", lambda: (3000, 1.0))
 
     def tra(payload, limit):
-        # Giá lệch: mỗi lô Apify báo 0,9 USD (ước tính chỉ 0,44). `_SO_RUN` phải có sẵn.
+        # Giá lệch: lô 1 Apify báo 0,9 USD (ước tính 0,875). `_SO_RUN` phải có sẵn.
         A._SO_RUN.get().append({"ma": "OK", "usd": 0.9})
         return []
     ap.tra = tra
-    urls = [TT.format(7000000 + i) for i in range(25)]
-    kq = json.loads(D._handle({"post_urls": urls, "xac_nhan_chi_phi": True}))
-    # Ngân sách lượt = 1,5625 × 1,3 = 2,03: lô 1 (0,9) + lô 2 (0,9) = 1,8; lô 3 giữ 0,5 → vượt.
-    assert len(ap.goi) == 2
+    urls = [TT.format(7000000 + i) for i in range(16)]
+    kq = json.loads(D._handle({"post_urls": urls}))
+    # Ước tính 16 × 50 × 0,00125 = 1,0 ≤ trần → chạy; lô 14 bài + lô 2 bài. Lô 1 tiêu 0,9,
+    # lô 2 giữ 0,125 → 1,025 > 1,0 → không khởi chạy.
+    assert len(ap.goi) == 1
     dung = [u for u, v in kq["per_url"].items() if v["status"] == D._CHUA_CHAY_NS]
-    assert len(dung) == 11 and kq["so_bai_cham_ngan_sach"] == 11
+    assert len(dung) == 2 and kq["so_bai_cham_ngan_sach"] == 2
     assert D._CHUA_CHAY_NS in kq["note"] and kq["success"] is False
-    assert kq["so_luot_chay"] == 2
+    assert kq["so_luot_chay"] == 1
+
+
+def test_so_ngan_sach_khong_bao_gio_vuot_tran_usd_goi(moi_truong, monkeypatch):
+    ap = moi_truong[0]
+    monkeypatch.setattr(D, "_cau_hinh", lambda: (3000, 1.0))
+    so: list = []
+
+    class Ghi(D._SoNganSach):
+        def __init__(self, tran):
+            super().__init__(tran)
+            so.append(self)
+            self.dinh = 0.0
+
+        def xin(self, so_tien):
+            ok = super().xin(so_tien)
+            self.dinh = max(self.dinh, self.da + self.giu)
+            return ok
+    monkeypatch.setattr(D, "_SoNganSach", Ghi)
+    urls = [TT.format(7000000 + i) for i in range(16)]
+    kq = json.loads(D._handle({"post_urls": urls}))
+    assert so[0].tran == 1.0, "sổ lấy đúng trần console, không phải ước tính × 1,3"
+    assert so[0].dinh <= 1.0 + 1e-9 and len(ap.goi) == 2, "lượt vừa khít trần vẫn chạy đủ lô"
+    assert kq["so_bai_cham_ngan_sach"] == 0
 
 
 def test_ngan_sach_khong_tinh_san_youtube_la_tien_that(moi_truong):

@@ -19,9 +19,13 @@ Khi báo kết quả:
   dung video là chủ đề KOL/nội dung, không phải cảm xúc về sản phẩm
 - Bài có trạng thái "CÓ THỂ BỊ CẮT DO TRẦN CHI PHÍ" là bài CHƯA lấy hết, không phải bài
   không có bình luận. Nói rõ và đề xuất soi lại riêng các bài đó
-- Tool trả `can_xac_nhan` nghĩa là chưa chạy gì: báo số bình luận và chi phí dự kiến,
-  mức vừa ngân sách, rồi hỏi người dùng chọn. Chỉ gọi lại với `xac_nhan_chi_phi` khi họ
-  đã đồng ý
+- Chủ agent đặt trần cho MỖI lần bóc: trần bình luận (mặc định 300, 50–3000) và trần chi
+  phí (mặc định 0,5 USD, 0,1–5). Trong trần, người dùng xin bao nhiêu bình luận/bài cũng
+  được, tối đa 1000/bài
+- Tool trả `vuot_tran` nghĩa là chưa chạy gì: nói yêu cầu vượt trần, chép câu `goi_y`
+  ("trong trần này bóc được tối đa N bình luận/bài cho M bài"), đề xuất giảm bớt hoặc
+  nhờ chủ agent nâng "Trần bình luận" / "Trần chi phí bóc bình luận" ở Console → Năng
+  lực. Không có cách chạy vượt trần
 
 Giá tham khảo (gói hiện tại, 10/2026): TikTok ~0,00125 USD/bình luận, YouTube ~0,002,
 Facebook ~0,0025. Ví dụ 10 bài TikTok × 50 bình luận ≈ 0,63 USD.

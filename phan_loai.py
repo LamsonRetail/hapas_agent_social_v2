@@ -123,7 +123,7 @@ def _ho_tro(ts, ten: str) -> bool:
 def _goi_model(nhac: str) -> str:
     """Một lượt model bằng "tài khoản AI của Mark" (`tai_khoan_ai.chon_runtime`: lease
     console, hỏng thì máy): 1 vòng, không tool, không nạp ngữ cảnh/bộ nhớ. (Khác
-    `apify_tool._loc_mot_lo`, vốn dựng thẳng runtime máy qua `resolve_runtime_provider`.)
+    `apify_tool._hoi_model`, vốn dựng thẳng runtime máy qua `resolve_runtime_provider`.)
 
     Lượt hỏng thì phân loại CHỈ theo dữ liệu có cấu trúc (`phan_loai_that_bai`) và báo
     platform "limit"/"auth_error" — tối đa MỘT lần mỗi lượt gán nhãn (sổ `_DA_BAO` dùng

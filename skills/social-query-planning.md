@@ -16,6 +16,18 @@
 Một lần quét cần đủ ba thứ: **từ khoá hoặc brand**, **nền tảng**, **khoảng thời gian**.
 Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị trường.
 
+**Thị trường:**
+
+- Mặc định quét VN. Bài của brand ở nước khác (vd HAPAS THAILAND) vẫn được giữ, cột
+  "Thị trường" ghi mã nước. Người dùng nói "chỉ VN" thì bật `chi_thi_truong_nay`
+- Hỏi về Thái Lan / HAPAS Thailand → `country`="TH". Hỏi nhiều nước cùng lúc → bật
+  `giu_nuoc_ngoai`
+- Người bên team Thái hỏi mơ hồ, không nói nước → hỏi "quét VN hay Thái?" trước
+- Khi báo kết quả, luôn nói đã quét thị trường nào và giữ / chuyển bao nhiêu bài thị
+  trường khác (chép `cau_thi_truong`)
+- Luôn điền `boi_canh` (brand làm gì, đang chạy chiến dịch gì): thiếu nó thì không có
+  bước AI đọc từng bài, chỉ lọc theo luật
+
 **Ngoại lệ — hỏi trend chung** (không có brand: "trend TikTok đang nổi", "âm thanh đang
 hot", "format nào đang viral"): gọi `social_listen` với `che_do`="trend". Không cần từ
 khoá hay ngày; kỳ là 7 ngày gần nhất (hoặc 30). Không cào hashtag chung chung như
@@ -63,7 +75,8 @@ khi người dùng HỎI thì mới trả lời:
   (Instagram chỉ có 12 bài mới nhất)
 - Shopee, 30 sản phẩm: ~0,15 USD
 - Bình luận (gói hiện tại, 10/2026): TikTok ~0,00125 USD/bình luận, YouTube ~0,002,
-  Facebook ~0,0025 — 10 bài TikTok × 50 bình luận ≈ 0,63 USD
+  Facebook ~0,0025 — 10 bài TikTok × 50 bình luận ≈ 0,63 USD. Mỗi lần bóc bị chặn cứng ở
+  trần chủ agent đặt (mặc định 300 bình luận, 0,5 USD)
 - Soi một sản phẩm từ link: TikTok Shop ~0,004 USD; Shopee ~0,1–0,2 USD (tìm giá theo tên
   rẻ, phải tìm trong shop thì đắt hơn; cộng ~0,04 USD lấy số đã bán)
 - Mỗi lượt chạy bị chặn ở trần chi phí (mặc định 1 USD). Chạm trần thì actor dừng giữa

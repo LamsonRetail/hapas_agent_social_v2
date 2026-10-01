@@ -8,13 +8,13 @@ Nhiễu thật trong sheet ngày 01/10/2026 (brand "hapas"):
     "Taj Nets – aquaculture hapa" (lưới nuôi cá).
   • `loc_bang_ai=True` cứng kể cả khi bộ lọc AI không chạy dòng nào vì hết giờ.
 Bài bị loại KHÔNG được biến mất: phải nằm ở tab "Bị loại" kèm lý do.
+Từ 01/10/2026 các luật ở đây là DỰ PHÒNG khi bước AI phân xử không chạy (bộ thử tắt AI
+qua SOCIAL_AI_PHAN_XU=0); bước AI xem test_phan_xu_ai.py.
 """
 from __future__ import annotations
 
 import datetime
 import json
-import sys
-import types
 
 import pytest
 
@@ -277,7 +277,7 @@ FIXTURE = {
 @pytest.fixture
 def quet(monkeypatch):
     """Chạy `_handle` trên dữ liệu giả — không mạng, không Lark, không Apify, không model."""
-    ghi, ai = [], {}
+    ghi, hoi = [], []
     for p, rows in FIXTURE.items():
         monkeypatch.setitem(A._FETCH, p, lambda *a, _r=rows: [(dict(d), NOW) for d in _r])
     monkeypatch.setattr(A, "_tran", lambda: (500, 1.0))
@@ -291,13 +291,7 @@ def quet(monkeypatch):
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
     monkeypatch.setattr(A.chi_phi_tool, "ghi", lambda **k: {})
 
-    def loc_ai(rows, queries, boi_canh, log, con_lai=0, trang_thai=None, **k):
-        ai["so_bai"] = len(rows)
-        trang_thai.update(ai.get("tt") or {"trang_thai": "bỏ qua vì hết thời gian",
-                                           "da_xet": 0})
-        return set(ai.get("bo") or ())
-
-    monkeypatch.setattr(A, "_loc_bang_ai", loc_ai)
+    monkeypatch.setattr(A, "_hoi_model", lambda nhac, ns: hoi.append(nhac) or "{}")
 
     def chay(**them):
         args = {"queries": ["hapas"], "platforms": ["threads", "youtube", "tiktok"],
@@ -305,7 +299,7 @@ def quet(monkeypatch):
                 "date_to": f"{NOW + datetime.timedelta(hours=1):%Y-%m-%d}",
                 "exclude": ["guitars"], "boi_canh": "HAPAS: túi xách, nước hoa", **them}
         return json.loads(A._handle(args))
-    return chay, ghi, ai
+    return chay, ghi, hoi
 
 
 def test_dau_cuoi_dem_loai_tung_nen_tang(quet):
@@ -322,9 +316,12 @@ def test_dau_cuoi_dem_loai_tung_nen_tang(quet):
     assert [pp[p]["in_range"] for p in ("threads", "youtube", "tiktok")] == [1, 1, 1]
     assert kq["trong_khoang_ngay"] == 11 and kq["tong_bi_loai"] == 8 and kq["in_range"] == 3
     assert kq["bi_loai_vi_ngoai_khoang_ngay"] == 0, "bị bộ lọc liên quan loại ≠ ngoài khoảng ngày"
-    assert kq["tom_tat_loai"].startswith("Đã loại 5/11 bài không nhắc từ khoá")
-    assert "Bị loại" in kq["tom_tat_loai"]
-    assert ai["so_bai"] == 3, "AI chỉ đọc bài đã qua lọc rẻ tiền"
+    tom = kq["tom_tat_loai"]
+    assert tom.startswith("Lọc theo luật 10 bài (AI bỏ qua: tắt (SOCIAL_AI_PHAN_XU=0)): "
+                          "loại 7 (5 không nhắc từ khoá, 2 ngoài thị trường VN)"), tom
+    assert "1 bài chứa từ loại trừ" in tom and "Bị loại" in tom
+    assert ai == [], "AI tắt thì không gọi model"
+    assert kq["thi_truong_quet"] == "VN" and "Đã quét thị trường VN" in kq["cau_thi_truong"]
 
 
 def test_bai_bi_loai_ghi_tab_rieng_kem_ly_do(quet):
@@ -367,21 +364,13 @@ def test_loi_tao_sheet_khong_lam_lo_token(quet, monkeypatch):
 
 
 def test_loc_ai_khong_chay_thi_khong_duoc_bao_da_loc(quet):
-    chay, _, ai = quet
+    chay, ghi, _ = quet
     kq = chay()
-    assert kq["loc_bang_ai"] is False
-    assert kq["loc_ai_trang_thai"] == "bỏ qua vì hết thời gian"
-    assert "CHƯA" in kq["ai_ghi_chu"]
-
-
-def test_loc_ai_da_chay_thi_bao_va_dua_bai_vao_tab_bi_loai(quet):
-    chay, ghi, ai = quet
-    ai.update(tt={"trang_thai": "đã chạy", "da_xet": 3}, bo={0})
-    kq = chay()
-    assert kq["loc_bang_ai"] is True and kq["bi_loai_boi_ai"] == 1
-    assert kq["in_range"] == 2 and kq["tong_bi_loai"] == 9
-    assert any(r[-1].startswith("AI") for r in ghi[1][1][1:])
-    assert "AI đánh giá lạc đề" in kq["tom_tat_loai"]
+    assert kq["loc_bang_ai"] is False and kq["loc_ai_da_xet"] == 0
+    assert kq["loc_ai_trang_thai"] == "bỏ qua: tắt (SOCIAL_AI_PHAN_XU=0)"
+    chinh = ghi[0][1]
+    assert chinh[0][-2:] == ["Thị trường", "Nhận định AI"]
+    assert all(r[-1] == "chưa qua AI (lọc theo luật)" for r in chinh[1:])
 
 
 def test_moi_bai_deu_bi_loai_van_tao_sheet_de_kiem(quet, monkeypatch):
@@ -396,63 +385,11 @@ def test_schema_noi_dung_su_that():
     mo_ta = A.SCHEMA["description"]
     assert "tom_tat_loai" in mo_ta and "loc_ai_trang_thai" in mo_ta
     props = A.SCHEMA["parameters"]["properties"]
-    assert "Bỏ trống = không lọc bằng AI" not in props["boi_canh"]["description"]
-    assert "khop_long" in props and "giu_nuoc_ngoai" in props
-
-
-# ───────────────────────────── _loc_bang_ai: trạng thái thật ─────────────────────────────
-
-ROWS = [(dict(_bai(f"bài {i} #hapas", f"k{i}"), platform="tiktok"), NOW) for i in range(8)]
-
-
-def test_loc_ai_qua_it_bai():
-    tt: dict = {}
-    assert A._loc_bang_ai(ROWS[:2], Q, "", [], trang_thai=tt) == set()
-    assert tt["trang_thai"] == "bỏ qua vì quá ít bài"
-
-
-def test_loc_ai_het_thoi_gian():
-    tt: dict = {}
-    assert A._loc_bang_ai(ROWS, Q, "túi", [], con_lai=5, trang_thai=tt) == set()
-    assert tt == {"trang_thai": "bỏ qua vì hết thời gian", "da_xet": 0}
-
-
-def test_loc_ai_loi(monkeypatch):
-    monkeypatch.setattr(A, "_loc_mot_lo",
-                        lambda rows, q, b, log, con, ket=None, dk=True: ket.append("loi") or set())
-    tt: dict = {}
-    A._loc_bang_ai(ROWS, Q, "túi", [], con_lai=50, trang_thai=tt)
-    assert tt["trang_thai"] == "lỗi"
-
-
-def test_loc_ai_gui_nen_tang_hashtag_va_tien_de_dung(monkeypatch):
-    """Không gọi model thật: giả `hermes_cli` + `run_agent` để bắt câu hỏi."""
-    hoi = []
-
-    class AIAgent:
-        def __init__(self, **k):
-            pass
-
-        def run_conversation(self, nhac):
-            hoi.append(nhac)
-            return {"final_response": '{"loai": [1]}'}
-
-    rp = types.ModuleType("hermes_cli.runtime_provider")
-    rp.resolve_runtime_provider = lambda requested=None: {}
-    pkg = types.ModuleType("hermes_cli")
-    pkg.runtime_provider = rp
-    ra = types.ModuleType("run_agent")
-    ra.AIAgent = AIAgent
-    monkeypatch.setitem(sys.modules, "hermes_cli", pkg)
-    monkeypatch.setitem(sys.modules, "hermes_cli.runtime_provider", rp)
-    monkeypatch.setitem(sys.modules, "run_agent", ra)
-    rows = [(dict(_bai(f"bài {i}", f"k{i}", hashtags="HAPAS, tuixach"), platform="threads"), NOW)
-            for i in range(6)]
-    tt: dict = {}
-    bo = A._loc_bang_ai(rows, Q, "túi xách", [], con_lai=50, trang_thai=tt)
-    assert bo == {1} and tt == {"trang_thai": "đã chạy", "da_xet": 6}
-    assert "(threads)" in hoi[0] and "hashtag: HAPAS, tuixach" in hoi[0]
-    assert "CÓ nhắc từ khoá" in hoi[0]
+    assert "KHÔNG có bước AI" in props["boi_canh"]["description"], "nói đúng: thiếu = luật"
+    assert "khop_long" in props and "giu_nuoc_ngoai" in props and "chi_thi_truong_nay" in props
+    assert "'TH'" in props["country"]["description"]
+    assert "quét VN hay Thái?" in props["country"]["description"]
+    assert "cau_thi_truong" in mo_ta and "cuu_lai_boi_ai" not in mo_ta
 
 
 # ───────────────────────────── token Apify không được lộ ─────────────────────────────

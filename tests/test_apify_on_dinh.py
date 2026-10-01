@@ -419,7 +419,7 @@ def test_het_ngan_sach_thang_thi_bo_nguon_tra_tien_giu_youtube(api, monkeypatch)
     assert kq["nguon_loi"][0]["nen_tang"] == "tiktok"
 
 
-# ───────────────────────────── AI cứu bài không nhắc tên ─────────────────────────────
+# ───────────── nguồn một phần (bước AI phân xử: xem test_phan_xu_ai.py) ─────────────
 
 def _bai(text, kenh, views=0, **kw):
     d = {"kenh": kenh, "followers": 0, "views": views, "likes": 0, "comments": 0,
@@ -428,20 +428,12 @@ def _bai(text, kenh, views=0, **kw):
     return d
 
 
-BIEU_CAM = _bai("Đây chính là biểu cảm của t khi xem 30 giây đầu của cái quảng cáo này =)))",
-                "Linh Đan", views=954000)
-DINH_KIEN = _bai("T biết brand lên ý tưởng cho campaign 20/10 nhưng cái quảng cáo này đâu đó "
-                 "vẫn có định kiến về giới…", "Minh Thư", views=12000)
-MASON = _bai("vote Tinh Hà ở đâu", "Mason Nguyễn", views=500)
 CO_TEN = _bai("Mới mua túi Hapas xinh xỉu luôn mọi người ơi", "Ngọc Trâm")
 
 
 @pytest.fixture
 def quet(monkeypatch):
-    ghi, hoi = [], []
-    monkeypatch.setenv("SOCIAL_AI_CUU", "1")
-    monkeypatch.setitem(A._FETCH, "threads", lambda *a: [(dict(d), NOW) for d in
-                                                         (BIEU_CAM, DINH_KIEN, MASON, CO_TEN)])
+    ghi = []
     monkeypatch.setattr(A, "_tran", lambda: (500, 1.0))
     monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
     monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
@@ -451,47 +443,18 @@ def quet(monkeypatch):
     monkeypatch.setattr(A.memory_store, "get_current_sender", lambda: "ou_test")
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
     monkeypatch.setattr(A.chi_phi_tool, "ghi", lambda **k: {})
-    monkeypatch.setattr(A, "_loc_bang_ai", lambda rows, *a, trang_thai=None, **k: (
-        trang_thai.update(trang_thai="bỏ qua vì quá ít bài", da_xet=0) or set()))
-
-    def model(nhac, ngan_sach):
-        """AI giả: chỉ giữ dòng nào bàn về 'quảng cáo' — như model thật nên làm."""
-        hoi.append(nhac)
-        dong = [x for x in nhac.splitlines() if x[:1].isdigit() and ". (" in x]
-        return json.dumps({"giu": [int(x.split(".")[0]) for x in dong if "quảng cáo" in x]})
-    monkeypatch.setattr(A, "_hoi_model", model)
 
     def chay(**them):
         args = {"queries": ["hapas"], "platforms": ["threads"],
                 "date_from": f"{NOW - datetime.timedelta(days=2):%Y-%m-%d}",
                 "date_to": f"{NOW + datetime.timedelta(hours=1):%Y-%m-%d}",
-                "boi_canh": "HAPAS: túi xách, trang sức, nước hoa; đang chạy iTVC 20/10",
-                **them}
+                "boi_canh": "HAPAS: túi xách, trang sức, nước hoa", **them}
         return json.loads(A._handle(args))
-    return chay, ghi, hoi
-
-
-def test_ai_cuu_ugc_ban_ve_quang_cao_va_khong_cuu_mason(quet):
-    chay, ghi, hoi = quet
-    kq = chay()
-    assert kq["cuu_lai_boi_ai"] == 2 and kq["cuu_ai_trang_thai"] == "đã chạy"
-    chinh, loai = ghi[0][1], ghi[1][1]
-    assert chinh[0][-1] == "Ghi chú lọc"
-    giu = {r[2]: r[-1] for r in chinh[1:]}
-    assert giu["Linh Đan"] == giu["Minh Thư"] == A._GHI_CHU_CUU
-    assert giu["Ngọc Trâm"] == "", "bài có tên brand không bị gắn nhãn cứu"
-    assert [r[2] for r in loai[1:]] == ["Mason Nguyễn"]
-    pp = kq["per_platform"]["threads"]
-    assert pp["cuu_lai_boi_ai"] == 2 and pp["loai_vi_khong_chua_tu_khoa"] == 1
-    assert pp["in_range"] == 3 and kq["in_range"] == 3 and kq["tong_bi_loai"] == 1
-    assert "AI giữ lại 2 bài bàn về brand dù không nhắc tên" in kq["tom_tat_loai"]
-    assert kq["tom_tat_loai"].startswith("Đã loại 1/4 bài không nhắc từ khoá")
-    assert "KHÔNG CHẮC THÌ KHÔNG CHỌN" in hoi[0] and "iTVC 20/10" in hoi[0]
-    assert "Ngọc Trâm" not in hoi[0], "chỉ gửi bài bị loại vì không nhắc từ khoá"
+    return chay, ghi
 
 
 def test_nguon_mot_phan_khong_tinh_la_hong_nhung_note_noi_truoc(quet, monkeypatch):
-    chay, ghi, _ = quet
+    chay, ghi = quet
 
     def threads(*a):
         A._SO_RUN.get().append({"tu_khoa": "matemade", "ma": "QUA_GIO", "run_id": "r9",
@@ -504,50 +467,6 @@ def test_nguon_mot_phan_khong_tinh_la_hong_nhung_note_noi_truoc(quet, monkeypatc
     assert kq["platforms_failed"] == [] and kq["nguon_mot_phan"] == ["threads"]
     assert kq["note"].startswith("NGUỒN CHỈ CÓ MỘT PHẦN: Threads: từ khoá 'matemade'")
     assert kq["success"] is True and kq["sheet_url"]
-
-
-def test_ai_cuu_can_boi_canh(quet):
-    chay, ghi, hoi = quet
-    kq = chay(boi_canh="")
-    assert kq["cuu_lai_boi_ai"] == 0 and kq["cuu_ai_trang_thai"] == "bỏ qua vì thiếu boi_canh"
-    assert hoi == []
-
-
-def test_ai_cuu_hong_thi_bai_o_lai_tab_bi_loai(quet, monkeypatch):
-    chay, ghi, _ = quet
-
-    def hong(nhac, ngan_sach):
-        raise RuntimeError("quota")
-    monkeypatch.setattr(A, "_hoi_model", hong)
-    kq = chay()
-    assert kq["cuu_lai_boi_ai"] == 0 and kq["cuu_ai_trang_thai"] == "lỗi"
-    assert len(ghi[1][1]) == 1 + 3 and ghi[0][1][0][-1] == "Từ khoá"
-
-
-def test_ai_cuu_khong_xet_bai_ngoai_thi_truong(quet, monkeypatch):
-    chay, ghi, hoi = quet
-    thai = _bai("โฆษณานี้สวยมาก กระเป๋าใบนี้", "ร้านไทย", views=10**6)
-    monkeypatch.setitem(A._FETCH, "threads", lambda *a: [(dict(d), NOW) for d in
-                                                         (thai, BIEU_CAM, CO_TEN)])
-    chay()
-    assert "ร้านไทย" not in hoi[0] and "Linh Đan" in hoi[0]
-
-
-def test_ai_cuu_gioi_han_60_bai_nhieu_view_nhat_va_ton_trong_han(monkeypatch):
-    monkeypatch.setenv("SOCIAL_AI_CUU", "1")
-    hoi = []
-    monkeypatch.setattr(A, "_hoi_model", lambda nhac, ns: hoi.append(nhac) or '{"giu": [0]}')
-    rows = [(dict(_bai(f"bài số {i}", f"k{i}", views=i), platform="threads"), NOW)
-            for i in range(70)]
-    tt: dict = {}
-    giu = A._cuu_bang_ai(rows, ["hapas"], "túi", [], con_lai=50, trang_thai=tt)
-    dong = [x for x in hoi[0].splitlines() if ". (threads)" in x]
-    assert len(dong) == A._CUU_TOI_DA == 60
-    assert "[k69]" in dong[0] and "[k10]" in hoi[0] and "[k9]" not in hoi[0]
-    assert giu == {69} and tt == {"trang_thai": "đã chạy", "da_xet": 60}
-    tt = {}
-    assert A._cuu_bang_ai(rows, ["hapas"], "túi", [], con_lai=5, trang_thai=tt) == set()
-    assert tt["trang_thai"] == "bỏ qua vì hết thời gian" and len(hoi) == 1
 
 
 # ──────── rà độc lập 01/10/2026: POST lại sau lỗi mơ hồ = có thể trả tiền hai lần ────────

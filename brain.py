@@ -159,6 +159,14 @@ _TOOLING_NOTE = "\n".join(
         "và luôn nói đã phân loại bao nhiêu/tổng — không tự ước lượng tỉ lệ. Nhờ 'gán nhãn từng "
         "bình luận và thống kê' thì dùng `social_deep_dive` (tool tự gán nhãn), đừng nói không "
         "làm được.",
+        # 01/10: chủ agent chốt — bài của brand ở nước khác (HAPAS THAILAND) phải giữ, và
+        # trần bóc bình luận trên console là trần cứng.
+        "- `social_listen`: luôn điền `boi_canh` (thiếu thì không có bước AI đọc từng bài). "
+        "Thái Lan → `country`=\"TH\"; nhiều nước → `giu_nuoc_ngoai`; 'chỉ VN' → "
+        "`chi_thi_truong_nay`; người bên team Thái hỏi mơ hồ → hỏi 'quét VN hay Thái?'. Báo "
+        "kết quả luôn nói thị trường đã quét và số bài thị trường khác giữ/chuyển "
+        "(`cau_thi_truong`). `social_deep_dive` trả `vuot_tran` = chưa chạy vì vượt trần chủ "
+        "agent đặt: nói mức vừa trần (`goi_y`), không có cách chạy vượt.",
     ]
 )
 

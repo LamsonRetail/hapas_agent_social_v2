@@ -39,6 +39,8 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
 - Ví dụ: "/search áo thun nam 7 ngày tiktok"; "tuần này mọi người nói gì về Routine?"
 - Ra một Lark Sheet: nền tảng, ngày đăng, kênh, follower, view, like, bình luận,
   share, hashtag, nội dung, link. Mark tóm tắt chủ đề nổi bật và dẫn bài thật
+- Cào hết rồi AI đọc từng bài để giữ/loại kèm lý do (cột "Nhận định AI", bài loại ở
+  tab "Bị loại"). Bài của brand ở thị trường khác vẫn giữ, có cột "Thị trường"
 - Số bài mỗi lượt bị chặn ở trần chủ agent đặt trên console. Chỉ đọc bài công khai
 
 **Trend TikTok đang nổi** (vẫn là `/search`, không cần từ khoá)
@@ -54,7 +56,8 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
 - Ví dụ: "/comment <link>"; "khách nói gì dưới video này?"; "gán nhãn và thống kê
   bình luận mấy bài này"
 - Ra Lark Sheet bình luận có cột Sắc thái, Chủ đề và tab Thống kê, mặc định 50 bình
-  luận mỗi bài. Nhiều quá ngân sách thì Mark báo chi phí dự kiến và hỏi trước
+  luận mỗi bài, xin được tới 1000/bài trong trần chủ agent đặt (mặc định 300 bình luận,
+  0,5 USD mỗi lần). Vượt trần thì Mark không chạy, báo mức vừa trần
 - Được TikTok, YouTube, Facebook. Chưa được Instagram và Threads
 
 **Soi tài khoản đối thủ hoặc KOC — `/profile`**

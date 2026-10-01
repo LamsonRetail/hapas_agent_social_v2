@@ -38,6 +38,11 @@ trong trần riêng của tool này (`tran_usd_goi` trên console, mặc định
 0,5 USD actor YouTube đòi; mượn trần của social_listen 0,37 thì YouTube bị từ chối),
 chạy tối đa 3 lô song song, và bài rỗng trong lô chạm trần được báo "CÓ THỂ BỊ CẮT".
 Giá gói FREE: TikTok 0,00125 USD/bình luận, YouTube 0,002, Facebook 0,0025 + 0,001/lượt.
+
+Trần của chủ agent là trần CỨNG (chốt 01/10/2026): console đặt `tran_binh_luan` và
+`tran_usd_goi` cho MỖI lần gọi; trong trần người dùng xin bao nhiêu cũng được (tới
+`_MAX_PER_POST` bình luận/bài), vượt trần thì KHÔNG chạy — trả `vuot_tran` kèm mức vừa trần.
+Không còn cờ `xac_nhan_chi_phi` để chạy vượt; hỏi "Chạy nhé?" là việc của lời dặn prompt.
 """
 
 from __future__ import annotations
@@ -60,7 +65,10 @@ from apify_tool import (_VN_TZ, _call, _che_token, _grant, _create_sheet,
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
 _TOOLSET = "social"
-_MAX_PER_POST = 300
+# Đọc input schema 3 actor ngày 02/10/2026 (commentsPerPost / maxComments / resultsLimit):
+# đều là integer KHÔNG có maximum. 1000/bài là trần của tool; tổng vẫn bị `tran_binh_luan`
+# chặn. TikTok tự ghi chú bài nghìn bình luận có thể trả ít hơn số xin.
+_MAX_PER_POST = 1000
 _MAX_POSTS = 50
 
 _ACTORS = {
@@ -94,10 +102,10 @@ _CHUA_XONG_GIU = "CHƯA XONG — giữ phần đã lấy"
 # Trần USD MỖI LÔ = ước tính lô × 1,5 (kẹp [mức actor đòi hoặc 0,1; trần tool]). Rà
 # 01/10/2026: lô nào cũng được cả `tran_usd_goi` nên N lô có thể tiêu tới N × ngân sách
 # đã duyệt nếu giá actor lệch. Cả lượt gọi tool thì giữ sổ: tiền lô đã xong + phần giữ
-# chỗ của lô đang chạy không được vượt max(ước tính × 1,3; trần tool) — vượt thì lô sau
-# không khởi chạy.
+# chỗ (= ước tính) của lô đang chạy không được vượt `tran_usd_goi` — vượt thì lô sau
+# không khởi chạy. Giữ chỗ theo ƯỚC TÍNH chứ không × 1,5: lượt đã được duyệt vì ước tính
+# ≤ trần, giữ × 1,5 thì lượt sát trần bị chặn oan lô cuối.
 _HE_SO_TRAN_LO = 1.5
-_HE_SO_NGAN_SACH = 1.3
 # Còn ít hơn chừng này giây tới hạn run thì không khởi chạy lô (vẫn mất phí start mà
 # run bị huỷ ngay).
 _GIAY_TOI_THIEU_LO = 20
@@ -112,7 +120,7 @@ def _kep(v, md: float, lo: float, hi: float) -> float:
 
 
 def _cau_hinh() -> tuple[int, float]:
-    """(trần bình luận, trần USD) mỗi lần gọi tool — quá thì phải hỏi người dùng trước."""
+    """(trần bình luận, trần USD) mỗi lần gọi tool — trần CỨNG do chủ agent đặt."""
     try:
         import lsr_policy
         c = lsr_policy.cau_hinh_tool("social_deep_dive")
@@ -365,15 +373,35 @@ def _keo_lo(p: str, lo: list[str], per: int, tran_lo: float, giu: float,
     return kq
 
 
-def _vua_ngan_sach(nhom: dict, per: int, tran_bl: int, tran_usd: float) -> dict:
-    """Mức vừa ngân sách không cần hỏi: max_comments cho đủ số bài, hoặc số bài với per hiện tại."""
-    n = sum(len(us) for us in nhom.values())
-    gia_bai = sum(len(us) * _GIA[p] for p, us in nhom.items())
-    khoi = sum(_GIA_KHOI_DONG.get(p, 0.0) for p in nhom)
-    k = min(per, tran_bl // max(1, n), int((tran_usd - khoi) / gia_bai) if gia_bai else per)
-    gia_tb = gia_bai / max(1, n)
-    so_bai = min(n, tran_bl // max(1, per), int((tran_usd - khoi) / (per * gia_tb)) if gia_tb else n)
-    return {"max_comments_cho_du_bai": max(0, k), "so_bai_voi_max_comments_hien_tai": max(0, so_bai)}
+def _trong_tran(bai: list[tuple[str, str]], per: int, tran_bl: int, tran_usd: float) -> bool:
+    """Kế hoạch (chia lô thật, kể cả phí khởi động mỗi lô) cho `bai` = [(nền tảng, link)]
+    với `per` bình luận/bài có nằm trong CẢ hai trần không."""
+    nhom: dict[str, list[str]] = {}
+    for p, u in bai:
+        nhom.setdefault(p, []).append(u)
+    bl, usd = _uoc_tinh({p: _chia_lo(p, us, per, tran_usd) for p, us in nhom.items()})
+    return bl <= tran_bl and usd <= tran_usd + 1e-9
+
+
+def _lon_nhat(hi: int, duoc) -> int:
+    """Số lớn nhất trong 1..hi mà `duoc(k)` đúng (đơn điệu), 0 nếu không có."""
+    lo, kq = 1, 0
+    while lo <= hi:
+        giua = (lo + hi) // 2
+        if duoc(giua):
+            kq, lo = giua, giua + 1
+        else:
+            hi = giua - 1
+    return kq
+
+
+def _vua_tran(bai: list[tuple[str, str]], per: int, tran_bl: int, tran_usd: float) -> dict:
+    """Mức VỪA trần, tính bằng đúng phép chia lô sẽ chạy: số bình luận/bài tối đa cho đủ
+    mọi bài, và số bài đầu tiên chạy được nếu giữ nguyên `per`."""
+    return {"max_comments_cho_du_bai": _lon_nhat(
+                per, lambda k: _trong_tran(bai, k, tran_bl, tran_usd)),
+            "so_bai_voi_max_comments_hien_tai": _lon_nhat(
+                len(bai), lambda m: _trong_tran(bai[:m], per, tran_bl, tran_usd))}
 
 
 # ───────────────────────── sheet ─────────────────────────
@@ -441,10 +469,12 @@ SCHEMA = {
         "hai nền tảng đó phải NÓI THẲNG là chưa nối nguồn, TUYỆT ĐỐI không thay bằng "
         "nền tảng khác rồi để người dùng tưởng là của nền tảng họ hỏi.\n"
         "BẮT BUỘC KHI TRẢ LỜI:\n"
-        "- `can_xac_nhan`=true: tool CHƯA CHẠY gì, chưa tốn tiền — dự kiến vượt ngân sách. "
-        "Báo `uoc_tinh_binh_luan` + `uoc_tinh_chi_phi_usd` và mức vừa ngân sách "
-        "(`vua_ngan_sach`), hỏi người dùng chọn. Họ đồng ý chạy đủ thì gọi lại y nguyên với "
-        "`xac_nhan_chi_phi`=true; KHÔNG tự đặt true khi chưa hỏi.\n"
+        "- TRẦN: chủ agent đặt trần bình luận + trần USD cho MỖI lần gọi (`tran`). Trong "
+        "trần người dùng xin bao nhiêu bình luận/bài cũng được (tới 1000). `vuot_tran`=true: "
+        "tool CHƯA CHẠY, chưa tốn tiền — nói rõ yêu cầu vượt trần (`uoc_tinh_binh_luan`, "
+        "`uoc_tinh_chi_phi_usd` so với `tran`), chép câu `goi_y` (mức vừa trần), đề xuất giảm "
+        "số bình luận/bài hoặc bớt bài, hoặc nhờ chủ agent nâng 'Trần bình luận' / 'Trần chi "
+        "phí bóc bình luận' ở Console → Năng lực. Không có cách nào chạy vượt trần.\n"
         "- Đọc `per_url`. `status`='" + _CAT + "' nghĩa là lượt chạy chạm trần nên bài đó "
         "CHƯA lấy hết — nói rõ như vậy, TUYỆT ĐỐI không nói bài đó không có bình luận. Chỉ "
         "bài `status`='OK' với 0 comment mới là bài thật sự chưa có bình luận. 'CHƯA CHẠY'/"
@@ -455,7 +485,8 @@ SCHEMA = {
         "`da_phan_loai`/`tong`. TUYỆT ĐỐI không tự ước lượng tỉ lệ, không làm tròn khác đi. "
         "Dẫn bình luận thật từ `trich_dan`. `phan_loai.trang_thai` khác 'đã chạy' thì nói "
         "rõ phần chưa phân loại.\n"
-        "- Mặc định 50 comment/bài; đừng tự ý đẩy lên cao.\n"
+        "- Mặc định 50 comment/bài; đừng tự ý đẩy lên cao — người dùng xin số nào thì đặt "
+        "đúng số đó vào `max_comments`.\n"
         "- YouTube trả thời gian dạng chữ tương đối ('2 years ago'), KHÔNG phải ngày "
         "tuyệt đối — đừng quy đổi thành ngày cụ thể.\n"
         "- Gửi NGUYÊN `sheet_url`. `granted`=false thì báo người dùng có thể mở không được.\n"
@@ -467,21 +498,13 @@ SCHEMA = {
             "post_urls": {"type": "array", "items": {"type": "string"},
                           "description": "Link bài cần soi (tối đa 50). Lấy từ cột Link của sheet social_listen."},
             "max_comments": {"type": "integer",
-                             "description": "Số bình luận tối đa MỖI bài (mặc định 50, trần 300)."},
-            "xac_nhan_chi_phi": {"type": "boolean",
-                                 "description": ("Chỉ đặt true SAU KHI người dùng đã đồng ý "
-                                                 "mức chi phí tool báo ở lượt `can_xac_nhan`.")},
+                             "description": ("Số bình luận tối đa MỖI bài (mặc định 50, tối "
+                                             "đa 1000; tổng vẫn trong trần chủ agent đặt).")},
             "title": {"type": "string", "description": "Tên file sheet. Bỏ trống sẽ tự đặt."},
         },
         "required": ["post_urls"],
     },
 }
-
-
-def _co(v) -> bool:
-    if isinstance(v, str):
-        return v.strip().lower() in ("true", "1", "yes", "co", "có")
-    return v is True or v == 1
 
 
 def _usd(x: float) -> str:
@@ -496,10 +519,10 @@ def _handle(args: dict, **kwargs) -> str:
     if len(urls) > _MAX_POSTS:
         return tool_error(f"Tối đa {_MAX_POSTS} bài mỗi lần, bạn đưa {len(urls)}.")
     try:
-        per = int(args.get("max_comments") or 50)
+        per_xin = int(args.get("max_comments") or 50)
     except (TypeError, ValueError):
-        per = 50
-    per = max(1, min(per, _MAX_PER_POST))
+        per_xin = 50
+    per = max(1, min(per_xin, _MAX_PER_POST))
     tran_bl, tran_usd = _cau_hinh()
 
     nhom: dict[str, list[str]] = {}
@@ -531,17 +554,30 @@ def _handle(args: dict, **kwargs) -> str:
 
     ke_hoach = {p: _chia_lo(p, us, per, tran_usd) for p, us in nhom.items()}
     uoc_bl, est = _uoc_tinh(ke_hoach)
-    if nhom and (uoc_bl > tran_bl or est > tran_usd) and not _co(args.get("xac_nhan_chi_phi")):
+    cat_per = (f"Người dùng xin {per_xin} bình luận/bài, tối đa {_MAX_PER_POST} mỗi lần — "
+               f"đã dùng {_MAX_PER_POST}. Nói rõ." if per_xin > _MAX_PER_POST else None)
+    # Trần chủ agent là trần CỨNG (chốt 01/10/2026): vượt thì không chạy, không có cờ bỏ
+    # qua. Trước đây `xac_nhan_chi_phi`=true cho chạy vượt trần sau một câu "ok".
+    if nhom and (uoc_bl > tran_bl or est > tran_usd + 1e-9):
+        bai = [(_platform_of(u), u) for u in urls if _platform_of(u) in nhom]
+        vua = _vua_tran(bai, per, tran_bl, tran_usd)
+        n, k, m = len(bai), vua["max_comments_cho_du_bai"], vua["so_bai_voi_max_comments_hien_tai"]
+        goi_y = ((f"Trong trần này bóc được tối đa {k} bình luận/bài cho {n} bài" if k else
+                  f"Trần này không đủ cho {n} bài, kể cả 1 bình luận/bài")
+                 + (f", hoặc {m} bài nếu giữ {per} bình luận/bài" if 0 < m < n else "") + ".")
+        vuot = ([f"bình luận {uoc_bl} > {tran_bl}"] if uoc_bl > tran_bl else []) + (
+            [f"chi phí {_usd(est)} > {_usd(tran_usd)} USD"] if est > tran_usd + 1e-9 else [])
         return tool_result(
-            success=False, can_xac_nhan=True, chua_chay=True, so_bai=len(urls),
-            max_comments=per, uoc_tinh_binh_luan=uoc_bl, uoc_tinh_chi_phi_usd=est,
-            ngan_sach={"tran_binh_luan": tran_bl, "tran_usd_goi": tran_usd},
-            vua_ngan_sach=_vua_ngan_sach(nhom, per, tran_bl, tran_usd),
-            note=(f"CHƯA CHẠY, chưa tốn tiền. Dự kiến tối đa {uoc_bl} bình luận, khoảng "
-                  f"{_usd(est)} USD — vượt ngân sách mỗi lần ({tran_bl} bình luận / "
-                  f"{_usd(tran_usd)} USD). Báo người dùng đúng các số này cùng "
-                  f"`vua_ngan_sach`, hỏi: giảm số bình luận/bài, bớt bài, hay chạy đủ. Chạy "
-                  f"đủ thì gọi lại với `xac_nhan_chi_phi`=true."))
+            success=False, vuot_tran=True, chua_chay=True, so_bai=len(urls),
+            max_comments=per, max_comments_bi_cat=cat_per,
+            uoc_tinh_binh_luan=uoc_bl, uoc_tinh_chi_phi_usd=est,
+            tran={"tran_binh_luan": tran_bl, "tran_usd_goi": tran_usd}, vuot=vuot,
+            vua_tran=vua, goi_y=goi_y,
+            note=(f"CHƯA CHẠY, chưa tốn tiền: yêu cầu vượt trần chủ agent đặt cho mỗi lần "
+                  f"bóc bình luận ({'; '.join(vuot)}). {goi_y} Nói đúng như vậy, đề xuất "
+                  f"giảm số bình luận/bài hoặc bớt bài; muốn chạy đủ thì nhờ chủ agent nâng "
+                  f"'Trần bình luận' / 'Trần chi phí bóc bình luận' ở Console → Năng lực. "
+                  f"Không có cách nào chạy vượt trần từ phía bạn."))
 
     # ── kéo bình luận: các lô chạy song song, không chờ quá hạn ──
     bat_dau = datetime.datetime.now(_VN_TZ) - datetime.timedelta(seconds=5)
@@ -552,15 +588,15 @@ def _handle(args: dict, **kwargs) -> str:
         han_keo = time.monotonic() + han
         # Run dừng TRƯỚC hạn chờ `_DU_PHONG_HUY` giây: đủ để huỷ run + lấy item dở dang.
         han_run = han_keo - A._DU_PHONG_HUY
-        so_ns = _SoNganSach(max(est * _HE_SO_NGAN_SACH, tran_usd))
+        so_ns = _SoNganSach(tran_usd)
         ex = ThreadPoolExecutor(max_workers=min(_SONG_SONG, len(viec)))
         futs = {}
         for p, lo, pc in viec:
             uoc = _uoc_lo(p, lo, pc)
             tl = _tran_lo(p, uoc, tran_usd)
-            # Giữ chỗ trong sổ theo ước tính × 1,5 (không theo sàn 0,5 USD của YouTube/
-            # Facebook): sàn là điều kiện actor đòi để chạy, tiền vẫn tính theo bình luận.
-            giu = min(tl, uoc * _HE_SO_TRAN_LO)
+            # Giữ chỗ trong sổ theo ước tính (không theo sàn 0,5 USD của YouTube/Facebook):
+            # sàn là điều kiện actor đòi để chạy, tiền vẫn tính theo bình luận.
+            giu = min(tl, uoc)
             futs[ex.submit(contextvars.copy_context().run, _keo_lo, p, lo, pc, tl, giu,
                            so_ns, han_run)] = (p, lo, pc)
         xong, chua = wait(futs, timeout=max(0.05, han_keo - time.monotonic()))
@@ -656,7 +692,8 @@ def _handle(args: dict, **kwargs) -> str:
     so_chua = sum(1 for v in per_url.values() if v["status"].startswith("CHƯA X")
                   or v["status"] == _CHUA_CHAY_GIO)
 
-    base = dict(so_bai=len(urls), max_comments=per,
+    base = dict(so_bai=len(urls), max_comments=per, max_comments_bi_cat=cat_per,
+                tran={"tran_binh_luan": tran_bl, "tran_usd_goi": tran_usd},
                 max_comments_thuc={p: k[0] for p, k in ke_hoach.items()},
                 per_url={u: per_url[u] for u in urls if u in per_url},
                 platforms_failed=failed, chua_ho_tro=list(chua_ho_tro),
