@@ -212,6 +212,13 @@ def _van_nangluc() -> str:
         d.append(f"  {lenh:<9} {tool:<18} {'dùng được' if cho else 'KHÔNG — ' + (ly_do or 'bị chặn')}")
     d += ["", "Hợp đồng đổi trên platform · công tắc đổi ở khối Năng lực trên console. "
           "Không sửa được từ chat."]
+    try:
+        import tai_khoan_ai
+        tk = tai_khoan_ai.mo_ta_luot_gan_nhat()
+    except (Exception, SystemExit):   # config thiếu .env thì SystemExit — /nangluc vẫn phải chạy
+        tk = ""
+    if tk:
+        d += ["", tk]
     return "\n".join(d)
 
 

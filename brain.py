@@ -30,6 +30,7 @@ import lark_client as lark
 import lsr_platform
 import lenh_cung
 import lsr_policy
+import tai_khoan_ai
 from config import config
 
 # Make Hermes importable and point it at its home (config.yaml, auth.json, toolsets).
@@ -505,11 +506,26 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
 def _resolve_agent(sender_open_id: str | None = None,
                    platform_ctx: dict | None = None,
                    chi_thi_lenh: str = "", nguon: str = "",
-                   kenh: dict | None = None) -> AIAgent:
-    """Resolve Codex credentials fresh and build an AIAgent bound to them."""
-    rt = resolve_runtime_provider(requested=config.agent_provider)
+                   kenh: dict | None = None, chon: tuple | None = None) -> AIAgent:
+    """Chọn tài khoản AI (console trước, máy sau — xem tai_khoan_ai) và dựng AIAgent.
+
+    `chon` = (runtime, model, nguon_tai_khoan) đã chọn sẵn, dùng khi đổi tài khoản giữa
+    lượt; None = tự chọn. Cờ MARK_THEO_TAI_KHOAN_CONSOLE=0 → đúng đường cũ:
+    resolve_runtime_provider(requested=config.agent_provider) + config.agent_model.
+    """
+    rt, model, tk = chon or tai_khoan_ai.chon_runtime()
+    if tai_khoan_ai.bat():
+        print(f"[tai_khoan] {tk.get('label')} ({tk.get('provider')}, {tk.get('tu')})"
+              + (f" — {tk['ly_do']}" if tk.get("ly_do") else ""), flush=True)
+    agent = _dung_agent(rt, model, sender_open_id, platform_ctx, chi_thi_lenh, nguon, kenh)
+    tai_khoan_ai.gan_vao_agent(agent, tk)
+    return agent
+
+
+def _dung_agent(rt: dict, model: str, sender_open_id, platform_ctx, chi_thi_lenh,
+                nguon, kenh) -> AIAgent:
     return AIAgent(
-        model=config.agent_model,
+        model=model,
         provider=rt.get("provider"),
         api_mode=rt.get("api_mode"),
         base_url=rt.get("base_url"),
@@ -625,6 +641,66 @@ def _loi_mo_hinh(text: str, d: dict) -> str | None:
             "Bạn thử lại sau ít phút nhé — câu hỏi chưa được thực hiện.")
 
 
+def _loi_cua_luot(out, exc: BaseException | None) -> str | None:
+    """Chuỗi lỗi nếu lượt model HỎNG (ném lỗi, hoặc Hermes trả chuỗi lỗi), None nếu ổn.
+    Cùng tiêu chí với `_loi_mo_hinh`."""
+    if exc is not None:
+        return f"{type(exc).__name__}: {exc}"
+    d = out if isinstance(out, dict) else {}
+    t = str((d.get("final_response") if d else out) or "").strip()
+    if d.get("failed") or t.startswith("API call failed") or "HTTP 429" in t[:200]:
+        return f"{d.get('error') or ''} {t}".strip()
+    return None
+
+
+def _da_chay_tool(out) -> bool:
+    """Lượt hỏng mà đã chạy tool (quét Apify, ghi Sheet…) thì KHÔNG chạy lại: chạy lại là
+    tốn tiền và ghi trùng lần hai. Lịch sử đưa vào chỉ có user/assistant, nên có message
+    role "tool" là tool đã chạy trong chính lượt này."""
+    msgs = out.get("messages") if isinstance(out, dict) else None
+    return any(isinstance(m, dict) and m.get("role") == "tool" for m in (msgs or []))
+
+
+def _chay_co_doi_tai_khoan(agent, user_text: str, history_msgs: list, dung_lai):
+    """Chạy một lượt. Tài khoản console hết hạn mức / hỏng đăng nhập thì: báo platform,
+    xin lease mới chạy lại MỘT lần; vẫn hỏng thì chạy MỘT lần bằng tài khoản máy.
+    Tối đa 3 lần, không bao giờ lặp. Lượt chạy bằng máy hỏng thì trả nguyên như cũ.
+
+    → (agent đã chạy lần cuối, out, exception hoặc None, số lần chạy)
+    """
+    da_hong: list = []
+    so_lan = 0
+    while True:
+        so_lan += 1
+        out, exc = None, None
+        try:
+            out = agent.run_conversation(user_text, conversation_history=history_msgs)
+        except Exception as e:
+            exc = e
+        tk = getattr(agent, "_tai_khoan_nguon", None)
+        loi = _loi_cua_luot(out, exc)
+        if loi is None or not tk or tk.get("tu") != "console" or so_lan >= 3:
+            return agent, out, exc, so_lan
+        ly_do = tai_khoan_ai.bao_loi(tk, loi)
+        if not ly_do or _da_chay_tool(out):
+            return agent, out, exc, so_lan
+        da_hong.append(tk.get("credential_id"))
+        try:
+            chon = tai_khoan_ai.chon_runtime() if so_lan == 1 else None
+            if chon is None or (chon[2].get("tu") == "console"
+                                and chon[2].get("credential_id") in da_hong):
+                chon = tai_khoan_ai.chon_runtime_may(
+                    f"tài khoản console lỗi {ly_do} — chạy lại bằng máy")
+            agent_moi = dung_lai(chon)
+        except Exception as e2:
+            print(f"[tai_khoan] không dựng được tài khoản thay thế: {type(e2).__name__}",
+                  flush=True)
+            return agent, out, exc, so_lan
+        print(f"[tai_khoan] {tk.get('label')} lỗi {ly_do} → chạy lại lượt bằng "
+              f"{chon[2].get('label')} ({chon[2].get('tu')})", flush=True)
+        agent = agent_moi
+
+
 def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
           kenh: dict | None = None) -> str:
     """Generate Mark's reply, with persistent per-chat context + per-user memory.
@@ -672,21 +748,28 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     # tự ghi vào đó (audit.boc_registry đã bọc handler của cả 10 tool).
     turn_id = audit.bat_dau(chat_id, sender_open_id, user_text)
 
-    agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi,
-                           kq.lenh if kq.lenh in lenh_cung.LENH_NGUON else "", kenh)
-    try:
-        out = agent.run_conversation(user_text, conversation_history=history_msgs)
-    except Exception as e:
+    nguon_lenh = kq.lenh if kq.lenh in lenh_cung.LENH_NGUON else ""
+    agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi, nguon_lenh, kenh)
+    agent, out, loi_nem, so_lan = _chay_co_doi_tai_khoan(
+        agent, user_text, history_msgs,
+        lambda chon: _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi,
+                                    nguon_lenh, kenh, chon=chon))
+    tk = getattr(agent, "_tai_khoan_nguon", None)
+    if loi_nem is not None:
+        e = loi_nem
         # Đóng lượt audit TRƯỚC khi ném tiếp, không thì lượt lỗi biến mất khỏi
         # bản ghi — mà đó đúng là lượt cần soi nhất.
         audit.ket_thuc(turn_id, "", agent, loi=f"{type(e).__name__}: {e}",
                        trang_thai="lỗi")
-        raise
+        tai_khoan_ai.ghi_luot(tk, getattr(agent, "model", ""), chat_id, "loi", so_lan)
+        raise e
     text = (out.get("final_response") if isinstance(out, dict) else str(out)) or ""
     text = _strip_markdown(text) or "(Bot chưa tạo được câu trả lời)"
 
     d = out if isinstance(out, dict) else {}
     cau_loi = _loi_mo_hinh(text, d)
+    tai_khoan_ai.ghi_luot(tk, getattr(agent, "model", ""), chat_id,
+                          "loi" if cau_loi else "ok", so_lan)
     if cau_loi:
         # Ghi lỗi THẬT vào audit để còn soi, nhưng trả người dùng câu dễ hiểu, và KHÔNG
         # ghi lượt này vào lịch sử — không có gì đã được làm để mà nhớ.
