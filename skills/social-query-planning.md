@@ -18,8 +18,9 @@ Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị tr�
 
 **Thị trường:**
 
-- Mặc định quét VN. Bài của brand ở nước khác (vd HAPAS THAILAND) vẫn được giữ, cột
-  "Thị trường" ghi mã nước. Người dùng nói "chỉ VN" thì bật `chi_thi_truong_nay`
+- Mặc định quét VN. Bài của brand ở nước khác (vd HAPAS THAILAND) vẫn được giữ nhưng ở
+  tab riêng "Thị trường khác" (sheet chính chỉ có bài VN). Người dùng nói "chỉ VN" thì
+  bật `chi_thi_truong_nay`
 - Hỏi về Thái Lan / HAPAS Thailand → `country`="TH". Hỏi nhiều nước cùng lúc → bật
   `giu_nuoc_ngoai`
 - Người bên team Thái hỏi mơ hồ, không nói nước → hỏi "quét VN hay Thái?" trước

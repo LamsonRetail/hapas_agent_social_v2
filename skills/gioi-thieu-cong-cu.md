@@ -40,7 +40,7 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
 - Ra một Lark Sheet: nền tảng, ngày đăng, kênh, follower, view, like, bình luận,
   share, hashtag, nội dung, link. Mark tóm tắt chủ đề nổi bật và dẫn bài thật
 - Cào hết rồi AI đọc từng bài để giữ/loại kèm lý do (cột "Nhận định AI", bài loại ở
-  tab "Bị loại"). Bài của brand ở thị trường khác vẫn giữ, có cột "Thị trường"
+  tab "Bị loại"). Bài của brand ở thị trường khác vẫn giữ, ở tab riêng "Thị trường khác"
 - Số bài mỗi lượt bị chặn ở trần chủ agent đặt trên console (đặt được riêng từng nền
   tảng, hoặc tắt hẳn một nền tảng). Chỉ đọc bài công khai
 - Quét lớn (tới 10.000 bài mỗi nền tảng) chạy nền tới 45 phút: Mark báo ước tính chi phí
