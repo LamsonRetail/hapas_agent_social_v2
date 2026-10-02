@@ -122,34 +122,33 @@ def _ho_tro(ts, ten: str) -> bool:
 
 def _goi_model(nhac: str) -> str:
     """Một lượt model bằng "tài khoản AI của Mark" (`tai_khoan_ai.chon_runtime`: lease
-    console, hỏng thì máy): 1 vòng, không tool, không nạp ngữ cảnh/bộ nhớ. (Khác
-    `apify_tool._hoi_model`, vốn dựng thẳng runtime máy qua `resolve_runtime_provider`.)
+    console, hỏng thì máy) và ĐÚNG model console như lượt chat: 1 vòng, không tool, không
+    nạp ngữ cảnh/bộ nhớ. Model console bị từ chối → `chay_mot_luot` chạy lại một lần
+    bằng model mặc định.
 
     Lượt hỏng thì phân loại CHỈ theo dữ liệu có cấu trúc (`phan_loai_that_bai`) và báo
     platform "limit"/"auth_error" — tối đa MỘT lần mỗi lượt gán nhãn (sổ `_DA_BAO` dùng
     chung giữa các lô), kẻo 3 lô song song cùng hết hạn mức báo ba lần."""
-    rt, model, nguon = tai_khoan_ai.chon_runtime()
     lop = _lop_agent()
-    kw = dict(model=model, provider=rt.get("provider"), api_mode=rt.get("api_mode"),
-              base_url=rt.get("base_url"), api_key=rt.get("api_key"), max_iterations=1,
-              quiet_mode=True, enabled_toolsets=[], disabled_toolsets=["terminal"])
     try:
         ts = inspect.signature(lop).parameters
     except (TypeError, ValueError):
         ts = {}
-    # Gán nhãn không cần suy luận dài; tắt nạp file ngữ cảnh/bộ nhớ cho lượt phụ này.
-    if _ho_tro(ts, "reasoning_config"):
-        kw["reasoning_config"] = {"enabled": True, "effort": "low"}
-    for ten in ("skip_context_files", "skip_memory"):
-        if _ho_tro(ts, ten):
-            kw[ten] = True
-    ag = lop(**kw)
-    tai_khoan_ai.gan_vao_agent(ag, nguon)
-    out, exc = None, None
-    try:
-        out = ag.run_conversation(nhac)
-    except Exception as e:  # noqa: BLE001 — phân loại xong ném lại: lô này fail-open
-        exc = e
+
+    def dung(rt, model, _nguon):
+        kw = dict(model=model, provider=rt.get("provider"), api_mode=rt.get("api_mode"),
+                  base_url=rt.get("base_url"), api_key=rt.get("api_key"), max_iterations=1,
+                  quiet_mode=True, enabled_toolsets=[], disabled_toolsets=["terminal"])
+        # Gán nhãn không cần suy luận dài; tắt nạp file ngữ cảnh/bộ nhớ cho lượt phụ này.
+        if _ho_tro(ts, "reasoning_config"):
+            kw["reasoning_config"] = {"enabled": True, "effort": "low"}
+        for ten in ("skip_context_files", "skip_memory"):
+            if _ho_tro(ts, ten):
+                kw[ten] = True
+        return lop(**kw)
+
+    # Phân loại xong mới ném lại: lô này fail-open.
+    ag, out, exc, (_, _, nguon) = tai_khoan_ai.chay_mot_luot(dung, nhac)
     if exc is not None or (isinstance(out, dict) and out.get("failed") is True):
         _bao_mot_lan(ag, out, exc, nguon)
     if exc is not None:

@@ -53,6 +53,8 @@ __all__ = [
     "dong_bo_auth",
     "flush_wal",
     "ghi_luot_ngu_canh",
+    "ghi_model_vua_chay",
+    "lay_model_vua_chay",
     "lay_ngu_canh",
 ]
 
@@ -169,9 +171,33 @@ def flush_wal(max_items: int = 200) -> dict:
     return {"sent": sent, "pending": pending, "enabled": True}
 
 
+#: Model ĐÃ CHẠY lượt gần nhất của từng chat (tai_khoan_ai.ghi_luot ghi). Trước đây usage
+#: luôn báo env AGENT_MODEL, nên lượt chạy bằng Claude bị tính tiền theo giá GPT.
+_MODEL_VUA_CHAY: dict[str, str] = {}
+_MODEL_KHOA = threading.Lock()
+
+
+def ghi_model_vua_chay(chat_id: str, model: str) -> None:
+    with _MODEL_KHOA:
+        _MODEL_VUA_CHAY.pop(chat_id or "", None)
+        _MODEL_VUA_CHAY[chat_id or ""] = str(model)
+        # Cầu nối ngắn như audit._vua_xong, không phải kho.
+        while len(_MODEL_VUA_CHAY) > 500:
+            _MODEL_VUA_CHAY.pop(next(iter(_MODEL_VUA_CHAY)))
+
+
+def lay_model_vua_chay(chat_id: str) -> str:
+    """LẤY-VÀ-XOÁ model của lượt vừa chạy; chưa có (lệnh cứng, lượt treo) → env cũ."""
+    with _MODEL_KHOA:
+        m = _MODEL_VUA_CHAY.pop(chat_id or "", "")
+    return m or os.environ.get("AGENT_MODEL", "unknown")
+
+
 def bao_luot(run_id: str, cau_hoi: str, tra_loi: str, *, ok: bool = True,
-             tool: list[str] | None = None, audit_record: dict | None = None) -> None:
-    """Ghi WAL rồi báo một lượt hỏi–đáp ở nền; không đưa câu hỏi thô vào trace."""
+             tool: list[str] | None = None, audit_record: dict | None = None,
+             model: str = "") -> None:
+    """Ghi WAL rồi báo một lượt hỏi–đáp ở nền; không đưa câu hỏi thô vào trace.
+    `model` = model đã chạy (`lay_model_vua_chay`); trống thì env AGENT_MODEL như cũ."""
     c = _cau_hinh()
     if not c:
         return
@@ -186,7 +212,7 @@ def bao_luot(run_id: str, cau_hoi: str, tra_loi: str, *, ok: bool = True,
         "source": os.environ.get("LSR_TRACE_SOURCE")
                   or ("test" if c["agent_id"].endswith("-TEST") else "production"),
         "llm_calls": [{
-            "model": os.environ.get("AGENT_MODEL", "unknown"),
+            "model": model or os.environ.get("AGENT_MODEL", "unknown"),
             "input_tokens": int(record.get("token_vao") or 0),
             "output_tokens": int(record.get("token_ra") or 0),
         }],
@@ -667,6 +693,8 @@ def _mot_vong(c: dict, tra_loi) -> int:
     # LẤY-VÀ-XOÁ, gọi lúc này sẽ cướp mất số của lượt đang chạy dở và ghi nhầm cho job
     # đã bỏ. Thà thiếu số còn hơn số sai.
     if not treo:
+        # Model ĐÃ CHẠY, cùng lý do lấy-và-xoá như token: quá hạn thì giữ env cũ.
+        dung["model"] = lay_model_vua_chay(phien)
         try:
             import audit
             ghi = audit.lay_luot_vua_xong(phien) or {}

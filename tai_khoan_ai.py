@@ -15,6 +15,15 @@ xin "lease" từ platform (`POST /v1/self/model-auth/lease`) và dựng runtime 
                                               (requested=config.agent_provider)
   MARK_THEO_TAI_KHOAN_CONSOLE=0             → luôn đường cũ, không lease, không ghi sổ
 
+MODEL THEO CONSOLE (chủ agent chốt 02/10/2026)
+Chủ agent chọn MỘT model cho mỗi provider trên console; lease mang nó ở khoá `model`
+(chuỗi hoặc null). Áp cho MỌI việc của Mark: lượt chat, AI phân xử, gán nhãn bình luận,
+quét nền — người dùng trong chat không đổi được. Model chỉ được dùng khi khác rỗng và
+nằm trong `MODEL_CHO_PHEP` của ĐÚNG provider đó; không thì về mặc định cũ (env) và ghi lý
+do. Chạy bằng máy thì luôn giữ model mặc định của máy: model console của provider mà máy
+không đăng nhập thì không chạy được. Nhà cung cấp từ chối model lúc gọi (không có / gói
+không cho) → chạy lại MỘT lần bằng model mặc định của cùng tài khoản (`model_bi_tu_choi`).
+
 VÌ SAO KHÔNG GHI auth.json
 Platform tự gia hạn token OpenAI lúc phát lease. Nếu Hermes ở máy này cũng cầm cùng
 refresh_token và tự gia hạn, hai bên sẽ lần lượt vô hiệu hoá token của nhau. Nên token
@@ -52,15 +61,19 @@ import lsr_platform
 from config import config
 
 __all__ = [
+    "MODEL_CHO_PHEP",
     "bao_loi",
     "bat",
+    "chay_mot_luot",
     "chon_runtime",
     "chon_runtime_may",
     "gan_vao_agent",
     "ghi_luot",
     "mo_ta_luot_gan_nhat",
+    "model_bi_tu_choi",
     "phan_loai_that_bai",
     "ten_hien_thi",
+    "ve_model_mac_dinh",
     "xoa_cache",
 ]
 
@@ -87,6 +100,38 @@ def _ttl() -> float:
 
 def _model_anthropic() -> str:
     return (os.environ.get("MARK_MODEL_ANTHROPIC") or "claude-sonnet-4-6").strip()
+
+
+#: Model chủ agent được chọn trên console, theo provider của lease. BẢN SAO hằng số của
+#: platform (bộ thử test_model_console đối chiếu khi có PLATFORM_REPO). "openai" = đúng
+#: `DEFAULT_CODEX_MODELS` của Hermes (hermes_cli/codex_models.py) — Codex chỉ nhận các
+#: model đó với tài khoản ChatGPT.
+MODEL_CHO_PHEP: dict[str, tuple[str, ...]] = {
+    "anthropic": ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-6",
+                  "claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"),
+    "openai": ("gpt-5.6-sol", "gpt-5.6-sol-pro", "gpt-5.6-terra", "gpt-5.6-terra-pro",
+               "gpt-5.6-luna", "gpt-5.6-luna-pro", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4",
+               "gpt-5.3-codex", "gpt-5.3-codex-spark"),
+}
+
+
+def _model_mac_dinh(prov: str) -> str:
+    """Model khi console không chọn (hoặc chọn sai): đúng như trước khi có ô chọn."""
+    return _model_anthropic() if prov == "anthropic" else config.agent_model
+
+
+def _model_console(lease: dict, prov: str) -> tuple[str, str]:
+    """→ (model console dùng được hoặc "", lý do bỏ). null/thiếu là bình thường: không
+    lý do. Chuỗi model in ra log được — không phải bí mật — nhưng vẫn cắt ngắn."""
+    m = lease.get("model")
+    if m is None:
+        return "", ""
+    if not isinstance(m, str) or not m.strip():
+        return "", "model console rỗng hoặc không phải chuỗi"
+    m = m.strip()
+    if m not in MODEL_CHO_PHEP.get(prov, ()):
+        return "", f"model console {m[:60]!r} không thuộc danh sách của {prov}"
+    return m, ""
 
 
 # ───────────────────────────── lease + cache ─────────────────────────────
@@ -117,13 +162,15 @@ def _lay_lease() -> tuple[dict | None, str]:
 
 # ───────────────────────────── dựng runtime ─────────────────────────────
 
-def chon_runtime_may(ly_do: str = "") -> tuple[dict, str, dict]:
-    """Đường CŨ, đúng từng chữ: tài khoản Hermes đăng nhập trên máy này."""
+def chon_runtime_may(ly_do: str = "", ly_do_model: str = "") -> tuple[dict, str, dict]:
+    """Đường CŨ, đúng từng chữ: tài khoản Hermes đăng nhập trên máy này — và model mặc
+    định của máy, KHÔNG BAO GIỜ model console (`ly_do_model` ghi vì sao bỏ nó)."""
     from hermes_cli.runtime_provider import resolve_runtime_provider
 
     rt = resolve_runtime_provider(requested=config.agent_provider)
     nguon = {"credential_id": None, "provider": config.agent_provider, "mode": "may",
-             "tu": "may", "ly_do": ly_do}
+             "tu": "may", "ly_do": ly_do, "model_tu": "mac_dinh",
+             "ly_do_model": ly_do_model}
     return rt, config.agent_model, nguon
 
 
@@ -159,8 +206,9 @@ _DUNG = {"anthropic": _runtime_anthropic, "openai": _runtime_openai}
 def chon_runtime() -> tuple[dict, str, dict]:
     """→ (runtime cho AIAgent, model, nguon).
 
-    nguon = {credential_id, provider, mode, tu: "console"|"may", ly_do}. Không chứa
-    secret, và cố ý không giữ `label` của lease (có thể là email chủ tài khoản).
+    nguon = {credential_id, provider, mode, tu: "console"|"may", ly_do,
+    model_tu: "console"|"mac_dinh", ly_do_model}. Không chứa secret, và cố ý không giữ
+    `label` của lease (có thể là email chủ tài khoản).
     """
     if not bat():
         return chon_runtime_may("cờ MARK_THEO_TAI_KHOAN_CONSOLE=0")
@@ -169,17 +217,34 @@ def chon_runtime() -> tuple[dict, str, dict]:
         return chon_runtime_may(f"không xin được lease: {lsr_platform._redact(vi_sao)[:160]}")
     mode = str(lease.get("mode") or "")
     prov = str(lease.get("provider") or "")
+    # Lease có chọn model mà lượt rơi về máy: ghi lại là đã bỏ nó, kẻo người soát sổ
+    # tưởng console chọn mà Mark lờ đi.
+    bo = ("bỏ model console: đang chạy bằng tài khoản máy"
+          if lease.get("model") not in (None, "") else "")
     if mode != "subscription" or prov not in _DUNG:
-        return chon_runtime_may(f"lease mode={mode or '?'} provider={prov or '?'} chưa hỗ trợ")
+        return chon_runtime_may(f"lease mode={mode or '?'} provider={prov or '?'} chưa hỗ trợ",
+                                bo)
     if not lease.get("secret"):
-        return chon_runtime_may("lease không mang secret (credential kiểu file trên VM)")
+        return chon_runtime_may("lease không mang secret (credential kiểu file trên VM)", bo)
     try:
         rt, model = _DUNG[prov](lease)
     except Exception as e:
-        return chon_runtime_may(f"dựng runtime {prov} lỗi: {type(e).__name__}")
+        return chon_runtime_may(f"dựng runtime {prov} lỗi: {type(e).__name__}", bo)
+    m, ly_do_model = _model_console(lease, prov)
+    if ly_do_model:
+        print(f"[tai_khoan] {ly_do_model} — dùng mặc định {model}", flush=True)
     nguon = {"credential_id": lease.get("credential_id"), "provider": prov,
-             "mode": mode, "tu": "console", "ly_do": ""}
-    return rt, model, nguon
+             "mode": mode, "tu": "console", "ly_do": "",
+             "model_tu": "console" if m else "mac_dinh", "ly_do_model": ly_do_model}
+    return rt, m or model, nguon
+
+
+def ve_model_mac_dinh(chon: tuple, ly_do: str) -> tuple[dict, str, dict]:
+    """CÙNG tài khoản (cùng runtime), model mặc định của provider — dùng khi nhà cung cấp
+    từ chối model console. Không xin lease lại: tài khoản không hỏng, chỉ model."""
+    rt, _, nguon = chon
+    nguon = {**nguon, "model_tu": "mac_dinh", "ly_do_model": ly_do}
+    return rt, _model_mac_dinh(str(nguon.get("provider") or "")), nguon
 
 
 def gan_vao_agent(agent, nguon: dict | None) -> None:
@@ -206,18 +271,77 @@ def _ghi_loi_api_vao(agent) -> None:
     `failure_reason`; hook này là chỗ duy nhất status_code đi ra có cấu trúc."""
     goc = getattr(agent, "_invoke_api_request_error_hook", None)
     agent._tai_khoan_loi_api = None
+    agent._tai_khoan_model_tu_choi = False
     if goc is None:
         return
 
     def boc(*a, **k):
         st = k.get("status_code")
+        st = st if isinstance(st, int) and not isinstance(st, bool) else None
         agent._tai_khoan_loi_api = {
-            "status_code": st if isinstance(st, int) and not isinstance(st, bool) else None,
+            "status_code": st,
             "reason": str(k.get("reason") or ""),
             "error_type": str(k.get("error_type") or ""),
         }
+        # Chỉ giữ MỘT cờ, không giữ thông điệp (có thể trích header/token).
+        agent._tai_khoan_model_tu_choi = _la_tu_choi_model(st, k.get("reason"),
+                                                           k.get("error_message"))
         return goc(*a, **k)
     agent._invoke_api_request_error_hook = boc
+
+
+def _la_tu_choi_model(status, reason, thong_diep) -> bool:
+    """Nhà cung cấp từ chối CHÍNH model (không có / gói không cho), theo đúng cách Hermes
+    đưa ra: `reason="model_not_found"` khi bộ phân loại của nó nhận ra; còn Anthropic 404
+    `not_found_error` "model: …" và Codex 400 "The '…' model is not supported when using
+    Codex with a ChatGPT account" thì Hermes xếp vào unknown/format_error — phải đọc
+    status + thông điệp LỖI API (của nhà cung cấp, không phải chữ model viết)."""
+    if str(reason or "") == "model_not_found":
+        return True
+    t = str(thong_diep or "").lower()
+    if status not in (400, 403, 404) or "model" not in t:
+        return False
+    return any(d in t for d in ("not found", "not_found", "does not exist", "not supported",
+                                "unsupported", "not available", "not_available",
+                                "not allowed", "invalid model", "unknown model"))
+
+
+def model_bi_tu_choi(agent, out, exc: BaseException | None) -> bool:
+    """Lượt hỏng vì model bị từ chối? Như `phan_loai_that_bai`: chỉ khi lượt THẬT SỰ hỏng
+    (exception / `failed`), và không bao giờ đọc `final_response`."""
+    if exc is not None:
+        st = getattr(exc, "status_code", None)
+        return type(exc).__name__ == "NotFoundError" or _la_tu_choi_model(st, "", str(exc))
+    if not (isinstance(out, dict) and out.get("failed") is True):
+        return False
+    if out.get("failure_reason") == "model_not_found":
+        return True
+    return getattr(agent, "_tai_khoan_model_tu_choi", False) is True
+
+
+def chay_mot_luot(dung_agent, nhac: str, chon: tuple | None = None):
+    """Lượt phụ một vòng (AI phân xử, gán nhãn bình luận, quét nền) bằng ĐÚNG lựa chọn của
+    lượt chat: `chon` (None → `chon_runtime()`), `dung_agent(rt, model, nguon)` dựng agent.
+    Model console bị từ chối → chạy lại MỘT lần bằng model mặc định của cùng tài khoản.
+
+    → (agent chạy cuối, out, exception hoặc None, chon đã dùng). Không ném: bên gọi quyết.
+    """
+    chon = chon or chon_runtime()
+    lan = 0
+    while True:
+        lan += 1
+        ag = dung_agent(*chon)
+        gan_vao_agent(ag, chon[2])
+        out, exc = None, None
+        try:
+            out = ag.run_conversation(nhac)
+        except Exception as e:  # noqa: BLE001 — trả về cho bên gọi
+            exc = e
+        if (lan >= 2 or chon[2].get("model_tu") != "console"
+                or not model_bi_tu_choi(ag, out, exc)):
+            return ag, out, exc, chon
+        chon = ve_model_mac_dinh(chon, f"nhà cung cấp từ chối model console {chon[1]}")
+        print(f"[tai_khoan] {chon[2]['ly_do_model']} — chạy lại bằng {chon[1]}", flush=True)
 
 
 # ───────────────────────────── phân loại + báo lỗi ─────────────────────────────
@@ -312,16 +436,23 @@ _GAN_NHAT: dict = {}
 
 def ghi_luot(nguon: dict | None, model: str = "", chat_id: str = "",
              ket_qua: str = "ok", so_lan: int = 1) -> None:
-    """Ghi tài khoản đã phục vụ lượt: một dòng JSONL, và nhớ cho /nangluc."""
+    """Ghi tài khoản đã phục vụ lượt: một dòng JSONL, và nhớ cho /nangluc.
+
+    `model` là model ĐÃ CHẠY (agent của lần chạy cuối). Nó cũng được nhớ theo chat cho
+    báo cáo usage — kể cả khi cờ tắt — để platform tính tiền đúng model."""
     global _GAN_NHAT
+    if model:
+        lsr_platform.ghi_model_vua_chay(chat_id, model)
     if not bat() or not nguon:
         return
     now = datetime.datetime.now(_VN)
     rec = {"thoi_diem": now.isoformat(timespec="seconds"), "chat": chat_id or "",
            "credential_id": nguon.get("credential_id"),
            "provider": nguon.get("provider"), "mode": nguon.get("mode"),
-           "tu": nguon.get("tu"), "model": model, "ket_qua": ket_qua,
-           "so_lan": so_lan, "ly_do": nguon.get("ly_do") or ""}
+           "tu": nguon.get("tu"), "model": model,
+           "model_tu": nguon.get("model_tu") or "mac_dinh", "ket_qua": ket_qua,
+           "so_lan": so_lan, "ly_do": nguon.get("ly_do") or "",
+           "ly_do_model": nguon.get("ly_do_model") or ""}
     _GAN_NHAT = rec
     try:
         _SO_DIR.mkdir(parents=True, exist_ok=True)
@@ -347,6 +478,8 @@ def mo_ta_runtime(rt: dict, model: str, nguon: dict) -> dict:
     """Các trường KHÔNG bí mật để in kiểm tra (không api_key, không label/email)."""
     return {"provider": rt.get("provider"), "api_mode": rt.get("api_mode"),
             "base_url_host": urlparse(str(rt.get("base_url") or "")).hostname,
-            "model": model, "ten": ten_hien_thi(nguon), "tu": nguon.get("tu"),
+            "model": model, "model_tu": nguon.get("model_tu"),
+            "ly_do_model": nguon.get("ly_do_model"),
+            "ten": ten_hien_thi(nguon), "tu": nguon.get("tu"),
             "mode": nguon.get("mode"), "credential_id": nguon.get("credential_id"),
             "ly_do": nguon.get("ly_do")}

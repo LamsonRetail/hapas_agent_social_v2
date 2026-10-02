@@ -180,6 +180,7 @@ def _do_reply(msg: dict) -> None:
         reply,
         ok=(delivered and not failed),
         audit_record=audit_record,
+        model=lsr_platform.lay_model_vua_chay(chat_id),
     )
 
 

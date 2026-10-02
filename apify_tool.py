@@ -77,6 +77,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout, 
 import chi_phi_tool
 import lark_client as lark
 import memory_store
+import tai_khoan_ai
 from config import config
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
@@ -1551,22 +1552,76 @@ def _ai_phan_xu_bat() -> bool:
     return os.environ.get("SOCIAL_AI_PHAN_XU", "1").strip() != "0"
 
 
+# Lựa chọn tài khoản AI dùng chung cho MỌI lô của một bước phân xử: `_phan_xu_ai` đặt
+# một dict rỗng, lô đầu tiên điền `chon` (một lần xin lease, dưới khoá), lô sau dùng lại —
+# cả bước chạy đúng một tài khoản + một model. Luồng lô thấy nó vì `_phan_xu_ai` submit
+# qua `contextvars.copy_context().run`. None (gọi lẻ) → mỗi lần tự chọn, lease vẫn cache.
+_CHON_PHAN_XU: contextvars.ContextVar = contextvars.ContextVar("apify_chon_phan_xu",
+                                                               default=None)
+_KHOA_CHON = threading.Lock()
+
+
+def _chon_tai_khoan(so: dict | None) -> tuple:
+    if so is None:
+        return tai_khoan_ai.chon_runtime()
+    with _KHOA_CHON:
+        if "chon" not in so:
+            so["chon"] = tai_khoan_ai.chon_runtime()
+        return so["chon"]
+
+
+def _bao_mot_lan(ag, out, exc, nguon, so: dict | None) -> None:
+    """Hết hạn mức / hỏng đăng nhập ở tài khoản console → báo platform, tối đa MỘT lần
+    mỗi bước phân xử (3 lô song song cùng hỏng thì không báo ba lần). Chỉ dữ liệu có cấu
+    trúc (`phan_loai_that_bai`), như lượt chat."""
+    if exc is None and not (isinstance(out, dict) and out.get("failed") is True):
+        return
+    try:
+        ly_do, _ = tai_khoan_ai.phan_loai_that_bai(ag, out, exc)
+    except Exception:  # noqa: BLE001 — phân loại hỏng thì thôi báo, lô vẫn về luật
+        return
+    if ly_do not in ("limit", "auth_error"):
+        return
+    with _KHOA_CHON:
+        if so is not None:
+            if so.get("da_bao"):
+                return
+            so["da_bao"] = ly_do
+    try:
+        tai_khoan_ai.bao_loi(nguon, ly_do)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _hoi_model(nhac: str, ngan_sach: float) -> str:
-    """Hỏi CHÍNH model của Mark một lượt (không tool), tối đa `ngan_sach` giây.
+    """Hỏi CHÍNH model của Mark một lượt (không tool), tối đa `ngan_sach` giây — cùng tài
+    khoản console và cùng model như lượt chat (`tai_khoan_ai.chay_mot_luot`). Trước
+    02/10/2026 bước này luôn dựng runtime máy + AGENT_MODEL, lờ hẳn console.
 
     Ném `_FutTimeout` khi quá giờ. KHÔNG dùng `with ThreadPoolExecutor`: `with` gọi
     shutdown(wait=True) nên vẫn ngồi chờ model trả lời dù đã quá hạn — audit 01/10/2026
     có lượt social_listen chạy 340s so với hạn 135s, kẹt đúng ở bước lọc AI cũ.
     """
+    # Đọc contextvar Ở ĐÂY (luồng lô); luồng `_chay` bên dưới không mang context.
+    so = _CHON_PHAN_XU.get()
+
     def _chay():
-        from hermes_cli.runtime_provider import resolve_runtime_provider
         from run_agent import AIAgent
-        rt = resolve_runtime_provider(requested=config.agent_provider)
-        ag = AIAgent(model=config.agent_model, provider=rt.get("provider"),
-                     api_mode=rt.get("api_mode"), base_url=rt.get("base_url"),
-                     api_key=rt.get("api_key"), max_iterations=1, quiet_mode=True,
-                     enabled_toolsets=[], disabled_toolsets=["terminal"])
-        return (ag.run_conversation(nhac) or {}).get("final_response") or ""
+
+        def dung(rt, model, _nguon):
+            return AIAgent(model=model, provider=rt.get("provider"),
+                           api_mode=rt.get("api_mode"), base_url=rt.get("base_url"),
+                           api_key=rt.get("api_key"), max_iterations=1, quiet_mode=True,
+                           enabled_toolsets=[], disabled_toolsets=["terminal"])
+        ag, out, exc, chon = tai_khoan_ai.chay_mot_luot(dung, nhac, _chon_tai_khoan(so))
+        if so is not None and chon[2].get("ly_do_model"):
+            # Model console vừa bị từ chối: lô sau của bước này đi thẳng model mặc định.
+            with _KHOA_CHON:
+                so["chon"] = chon
+        _bao_mot_lan(ag, out, exc, chon[2], so)
+        if exc is not None:
+            raise exc
+        return (out or {}).get("final_response") or ""
 
     ex = ThreadPoolExecutor(max_workers=1)
     try:
@@ -1736,7 +1791,12 @@ def _phan_xu_ai(rows: list, queries: list[str], boi_canh: str, thi_truong_quet: 
         tt["trang_thai"] = "bỏ qua: không có bài cần xét"
         return {}, tt
     ex = ThreadPoolExecutor(max_workers=min(song_song or _AI_SONG_SONG, len(cac_lo)))
-    futs = {ex.submit(_xu_mot_lo, [rows[i][0] for i in lo], dau, han): lo for lo in cac_lo}
+    tok = _CHON_PHAN_XU.set({})   # một tài khoản + một model cho cả bước (`_hoi_model`)
+    try:
+        futs = {ex.submit(contextvars.copy_context().run, _xu_mot_lo,
+                          [rows[i][0] for i in lo], dau, han): lo for lo in cac_lo}
+    finally:
+        _CHON_PHAN_XU.reset(tok)
     xong, chua = wait(futs, timeout=max(0.05, han - time.monotonic()))
     # Không chờ lô treo (xem `_hoi_model`): trần trả lời 180s của run.py không đợi ai.
     ex.shutdown(wait=False, cancel_futures=True)

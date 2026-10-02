@@ -565,6 +565,10 @@ def _resolve_agent(sender_open_id: str | None = None,
               flush=True)
     agent = _dung_agent(rt, model, sender_open_id, platform_ctx, chi_thi_lenh, nguon, kenh)
     tai_khoan_ai.gan_vao_agent(agent, tk)
+    if tai_khoan_ai.bat():
+        # Giữ lựa chọn để chạy lại CÙNG tài khoản bằng model mặc định khi nhà cung cấp từ
+        # chối model console (runtime chỉ sống trong RAM, như api_key của chính agent).
+        agent._tai_khoan_chon = (rt, model, tk)
     return agent
 
 
@@ -718,6 +722,10 @@ def _chay_co_doi_tai_khoan(agent, user_text: str, history_msgs: list, dung_lai):
     `failure_reason`, lỗi API Hermes đã phân loại) — xem tai_khoan_ai.phan_loai_that_bai.
     Chữ trong câu trả lời không bao giờ làm báo platform hay chạy lại.
 
+    Nhà cung cấp từ chối CHÍNH model console (không có / gói không cho) thì tài khoản vẫn
+    tốt: chạy lại MỘT lần cùng tài khoản bằng model mặc định, không báo platform. Xét
+    trước 403 — 403 "model không được phép" mà xuống máy là bỏ oan tài khoản console.
+
     → (agent đã chạy lần cuối, out, exception hoặc None, số lần chạy)
     """
     da_hong: list = []
@@ -732,6 +740,22 @@ def _chay_co_doi_tai_khoan(agent, user_text: str, history_msgs: list, dung_lai):
         tk = getattr(agent, "_tai_khoan_nguon", None)
         if not tk or tk.get("tu") != "console" or so_lan >= 3:
             return agent, out, exc, so_lan
+        chon_cu = getattr(agent, "_tai_khoan_chon", None)
+        if (tk.get("model_tu") == "console" and isinstance(chon_cu, tuple)
+                and not _da_chay_tool(out)
+                and tai_khoan_ai.model_bi_tu_choi(agent, out, exc)):
+            chon = tai_khoan_ai.ve_model_mac_dinh(
+                chon_cu, f"nhà cung cấp từ chối model console {chon_cu[1]}")
+            try:
+                agent_moi = dung_lai(chon)
+            except Exception as e2:
+                print(f"[tai_khoan] không dựng được agent model mặc định: "
+                      f"{type(e2).__name__}", flush=True)
+                return agent, out, exc, so_lan
+            print(f"[tai_khoan] {chon[2]['ly_do_model']} → chạy lại lượt bằng {chon[1]}",
+                  flush=True)
+            agent = agent_moi
+            continue
         ly_do, doi = tai_khoan_ai.phan_loai_that_bai(agent, out, exc)
         if ly_do:
             tai_khoan_ai.bao_loi(tk, ly_do)
