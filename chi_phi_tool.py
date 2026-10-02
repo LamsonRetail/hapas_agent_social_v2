@@ -11,14 +11,18 @@ Vậy phải có một chỗ giữ số, và một tool để tra:
   • `tra_chi_phi_quet` — tool chỉ đọc, trả các lần quét gần nhất của chat hiện tại.
 
 Không đụng `audit.py`: chỉ ĐỌC lượt đang chạy của nó để biết turn/chat/người hỏi.
+Quét ngoài lượt bot (việc nền, script/test chạy tay) không có Turn ID: cột Turn ID ghi
+`viec-nen:<mã>` hoặc `ngoai-luot:<script>` — không bao giờ để trống.
 Mọi lỗi đều nuốt (fail-open) — sổ chi phí hỏng không được làm hỏng lần quét.
 """
 from __future__ import annotations
 
 import datetime
 import json
+import sys
 import threading
 import time
+from pathlib import Path
 
 import audit
 import lark_client as lark
@@ -43,10 +47,22 @@ _COT = [
 _khoa = threading.Lock()
 
 
-def _luot_hien_tai() -> dict:
-    """Turn/chat/người hỏi của lượt đang chạy trên thread này (đọc từ audit)."""
+def _nguon_ngoai_luot() -> str:
+    """Tên tiến trình chạy lần quét NGOÀI lượt trả lời (script/test chạy tay).
+
+    15/18 dòng trống Turn ID tới 02/10/2026 là loại này: tiền Apify thật nhưng không
+    có lượt bot nào — để trống thì không ai biết từ đâu ra. Ghi rõ nguồn thay vì đoán."""
     try:
-        tid = getattr(audit._cuc_bo, "turn_id", "")
+        ten = Path(sys.argv[0]).stem if sys.argv and sys.argv[0] else ""
+    except Exception:  # noqa: BLE001
+        ten = ""
+    return f"ngoai-luot:{ten or 'khong-ro'}"
+
+
+def _luot_hien_tai() -> dict:
+    """Turn/chat/người hỏi của lượt đang chạy trong ngữ cảnh này (đọc từ audit)."""
+    try:
+        tid = audit.turn_id_hien_tai()
         with audit._khoa_luot:
             luot = dict(audit._dang_chay.get(tid) or {})
         return {"turn_id": tid, "chat": luot.get("chat") or "", "nguoi": luot.get("nguoi") or ""}
@@ -76,6 +92,8 @@ def ghi(*, queries, platforms, date_range, thuc: dict | None, est: float,
     }
     if ma_viec:
         rec["ma_viec"] = ma_viec
+    elif not rec["turn_id"]:
+        rec["nguon"] = _nguon_ngoai_luot()
     try:
         _SO.parent.mkdir(parents=True, exist_ok=True)
         with _khoa, open(_SO, "a", encoding="utf-8") as fh:
@@ -124,7 +142,7 @@ def _fields(rec: dict) -> dict:
         "Chạm trần": "có" if rec.get("cham_tran") else "",
         "Nguồn số": "Apify (thực)" if thuc is not None else "ước tính — chưa lấy được số thực",
         "Turn ID": rec.get("turn_id") or (f"viec-nen:{rec['ma_viec']}"
-                                          if rec.get("ma_viec") else ""),
+                                          if rec.get("ma_viec") else rec.get("nguon") or ""),
     }
 
 

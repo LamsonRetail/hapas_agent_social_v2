@@ -26,4 +26,17 @@ def _tat_lease_that(monkeypatch, tmp_path):
         tai_khoan_ai.xoa_cache()
     except BaseException:
         pass
+    # Audit + sổ chi phí: KHÔNG BAO GIỜ ghi vào .audit/ thật hay đẩy lên Base production.
+    # Lần quét chạy ngoài lượt bot từng để lại dòng trống Turn ID trong "Chi phí quét"
+    # (25–28/09/2026). Bài nào cần thử đường Base thì tự monkeypatch `lark.call`.
+    try:
+        import audit
+        import chi_phi_tool
+        monkeypatch.setattr(audit, "_THU_MUC", tmp_path / ".audit")
+        monkeypatch.setattr(audit, "_DAY_LEN_BASE", False)
+        monkeypatch.setattr(audit, "_CAU_HINH", tmp_path / "audit_base.json")
+        monkeypatch.setattr(chi_phi_tool, "_CAU_HINH", tmp_path / "chi_phi_quet_base.json")
+        monkeypatch.setattr(chi_phi_tool, "_SO", tmp_path / ".audit" / "chi-phi" / "so.jsonl")
+    except BaseException:
+        pass
     yield

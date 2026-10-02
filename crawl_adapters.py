@@ -45,9 +45,10 @@ SẢN LƯỢNG THẤP, không đợi tới lúc lỗi hẳn.
 
 from __future__ import annotations
 
+import datetime
 import re
 
-from apify_tool import _call
+from apify_tool import _VN_TZ, _call
 from crawl_runner import _sp   # dùng chung bộ chuẩn hoá sản phẩm, một nguồn sự thật
 
 # Actor chính ra ít hơn ngưỡng này thì coi như nó đang hỏng -> gọi dự phòng.
@@ -150,6 +151,24 @@ def tim(url: str) -> tuple[str, dict] | tuple[None, None]:
     return None, None
 
 
+def _ghi_so(url: str, actors: list[str], bat_dau, est: float, log: list) -> None:
+    """Ghi tiền Apify của adapter vào sổ chi phí quét — như mọi tool quét khác.
+
+    Trước 02/10/2026 adapter tốn tiền thật mà không có dòng nào trong "Chi phí quét"
+    (UAT-WEB-04). Ghi cả khi actor lỗi/ra 0 dòng: Apify vẫn tính tiền lượt chạy.
+    Fail-open: sổ hỏng không được làm hỏng kết quả cào."""
+    if not actors:
+        return
+    try:
+        import apify_tool
+        import chi_phi_tool
+        thuc = apify_tool._chi_phi_thuc(list(dict.fromkeys(actors)), bat_dau, est)
+        chi_phi_tool.ghi(queries=[url], platforms=["web"], date_range="hiện tại",
+                         thuc=thuc, est=est)
+    except Exception as e:  # noqa: BLE001
+        log.append(f"adapter: ghi so chi phi loi {type(e).__name__}: {str(e)[:80]}")
+
+
 def chay(url: str, toi_da: int, log: list) -> dict:
     """Chạy adapter cho `url`. Trả dict luôn có khoá `san_pham` (có thể rỗng).
 
@@ -164,7 +183,9 @@ def chay(url: str, toi_da: int, log: list) -> dict:
     goc = (re.match(r"(https?://[^/]+)", url) or [None, url])[1] if "://" in url else url
     sp: list[dict] = []
     da_dung: list[str] = []
+    da_goi: list[str] = []
     chi_phi = 0.0
+    bat_dau = datetime.datetime.now(_VN_TZ) - datetime.timedelta(seconds=5)
 
     for nhan in ("chinh", "du_phong"):
         buoc = cfg.get(nhan)
@@ -172,6 +193,7 @@ def chay(url: str, toi_da: int, log: list) -> dict:
             continue
         if sp and len(sp) >= _NGUONG_LEO_THANG:
             break
+        da_goi.append(buoc["actor"])
         try:
             raw = _call(buoc["actor"], buoc["input"](url, toi_da), toi_da)
         except Exception as e:  # noqa: BLE001
@@ -206,6 +228,7 @@ def chay(url: str, toi_da: int, log: list) -> dict:
             log.append(f"adapter: actor chinh ra {len(sp)} sp (< nguong "
                        f"{_NGUONG_LEO_THANG}) -> thu actor du phong")
 
+    _ghi_so(url, da_goi, bat_dau, chi_phi, log)
     return {"san_pham": sp[:toi_da], "adapter": cfg["ten"] if sp else None,
             "actor_da_dung": da_dung, "uoc_tinh_chi_phi_usd": round(chi_phi, 4),
             "ghi_chu": cfg.get("ghi_chu") if sp else None}

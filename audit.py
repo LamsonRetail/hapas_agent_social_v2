@@ -37,6 +37,7 @@ Token lấy ở đâu
 
 from __future__ import annotations
 
+import contextvars
 import datetime
 import json
 import os
@@ -119,17 +120,78 @@ def _doc_cau_hinh() -> dict:
         return {}
 
 
-def _ghi_moc(turn_id: str) -> None:
-    """Ghi mốc "đã đẩy tới đâu" để `dong_bo_lai()` biết chỗ tiếp tục."""
+_khoa_moc = threading.Lock()
+
+
+def _ghi_moc(turn_id: str, ts: float | None = None) -> None:
+    """Ghi mốc "đã đẩy tới đâu" để `dong_bo_lai()` biết chỗ tiếp tục.
+
+    Mốc chỉ TIẾN, không lùi: hai thread `_day()` xong lệch thứ tự (lượt cũ đẩy chậm
+    hơn lượt mới) thì lượt cũ không được kéo mốc về trước lượt mới. Ghi lỗi thì IN
+    ra — bản đầu nuốt im lặng, mốc kẹt lại mà không ai biết (xem `dong_bo_lai`).
+    """
     if not turn_id:
         return
     try:
-        cfg = _doc_cau_hinh()
-        cfg["da_day_den"] = turn_id
-        _CAU_HINH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
-                             encoding="utf-8")
-    except Exception:  # noqa: BLE001
-        pass
+        with _khoa_moc:
+            cfg = _doc_cau_hinh()
+            if not cfg.get("table_id"):
+                return   # đọc hỏng giữa chừng: đừng ghi đè mất app_token/table_id
+            if ts is not None and float(cfg.get("da_day_den_ts") or 0) > ts:
+                return
+            cfg["da_day_den"] = turn_id
+            if ts is not None:
+                cfg["da_day_den_ts"] = ts
+            _CAU_HINH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        print(f"[audit] ghi moc loi: {type(e).__name__}: {e}")
+
+
+def _doc_jsonl_gan_day() -> list[dict]:
+    """Dòng JSONL của tháng trước + tháng này, đúng thứ tự ghi.
+
+    Đọc cả tháng trước: khởi động đầu tháng thì mốc nằm ở file tháng trước, chỉ đọc
+    file tháng này là không tìm thấy mốc và lượt cuối tháng trước bị bỏ sót.
+    """
+    nay = datetime.datetime.now(_VN)
+    truoc = nay.replace(day=1) - datetime.timedelta(days=1)
+    dong: list[dict] = []
+    for thang in (truoc, nay):
+        f = _THU_MUC / f"audit-{thang:%Y-%m}.jsonl"
+        if not f.exists():
+            continue
+        for x in f.read_text(encoding="utf-8").splitlines():
+            if x.strip():
+                try:
+                    dong.append(json.loads(x))
+                except ValueError:
+                    continue
+    return dong
+
+
+def _turn_id_tren_base(cfg: dict, toi_da_trang: int = 40) -> set[str]:
+    """Mọi Turn ID đang có trong bảng audit trên Base. Lỗi thì NÉM, không trả rỗng:
+    trả rỗng tức là "chưa có gì" và đẩy bù sẽ nhân đôi cả bảng."""
+    co: set[str] = set()
+    trang = None
+    for _ in range(toi_da_trang):
+        q = {"page_size": 500, "field_names": json.dumps(["Turn ID"])}
+        if trang:
+            q["page_token"] = trang
+        d = (lark.call("GET", f"/open-apis/bitable/v1/apps/{cfg['app_token']}"
+                              f"/tables/{cfg['table_id']}/records", query=q)
+             .get("data") or {})
+        for it in d.get("items") or []:
+            v = (it.get("fields") or {}).get("Turn ID")
+            if isinstance(v, list):   # text field trả [{"text": ..., "type": "text"}]
+                v = "".join(str(p.get("text") or "") for p in v if isinstance(p, dict))
+            if v:
+                co.add(str(v))
+        trang = d.get("page_token")
+        if not d.get("has_more") or not trang:
+            return co
+    raise RuntimeError(f"bang audit qua {toi_da_trang} trang, dung kiem de khoi doc nham")
 
 
 def dong_bo_lai(toi_da: int = 200) -> int:
@@ -138,26 +200,45 @@ def dong_bo_lai(toi_da: int = 200) -> int:
     Vì sao cần: `_day()` chạy trong thread `daemon=True` nên nếu tiến trình
     thoát ngay sau một lượt (bot restart, kill), dòng đó KHÔNG lên Base — JSONL
     vẫn có, Base thì thiếu. Bản ghi mà thiếu lỗ thì mất hết giá trị đối chiếu.
-    Hàm này đọc mốc `da_day_den` rồi đẩy tiếp từ sau nó.
+
+    Mốc `da_day_den` chỉ để thu hẹp chỗ cần xét; quyết định đẩy hay không là theo
+    Turn ID ĐÃ CÓ TRÊN BASE. Bản đầu tin hẳn vào mốc, mà mốc có thể lệch (POST
+    hết giờ chờ dù Base đã tạo dòng, ghi mốc lỗi bị nuốt) → lúc khởi động đẩy lại
+    dòng đã có: 4 lượt bị nhân đôi trong bảng Audit, 25/09 và 30/09/2026. Không
+    đọc được Base thì KHÔNG đẩy — lần khởi động sau thử lại, mốc vẫn giữ nguyên.
     """
     if not _DAY_LEN_BASE:
         return 0
     try:
-        f = _THU_MUC / f"audit-{datetime.datetime.now(_VN):%Y-%m}.jsonl"
-        if not f.exists():
-            return 0
-        dong = [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()
-                if x.strip()]
+        dong = _doc_jsonl_gan_day()
     except Exception as e:  # noqa: BLE001
         print(f"[audit] dong_bo_lai doc JSONL loi: {type(e).__name__}: {e}")
         return 0
-    moc = (_doc_cau_hinh() or {}).get("da_day_den") or ""
+    if not dong:
+        return 0
+    cfg = _doc_cau_hinh() or {}
+    moc = cfg.get("da_day_den") or ""
     vt = next((i for i, r in enumerate(dong) if r.get("turn_id") == moc), -1)
-    con = dong[vt + 1:][:toi_da]
+    ung_vien = [r for r in dong[vt + 1:] if r.get("turn_id")]
+    if not ung_vien:
+        return 0
+    if not cfg.get("table_id"):
+        return 0   # Base chưa tạo — lượt đầu tiên sẽ tạo rồi tự đẩy
+    try:
+        co = _turn_id_tren_base(cfg)
+    except Exception as e:  # noqa: BLE001
+        print(f"[audit] dong_bo_lai: khong doc duoc Turn ID tren Base, bo qua lan nay: "
+              f"{type(e).__name__}: {e}")
+        return 0
+    con = [r for r in ung_vien if r["turn_id"] not in co][:toi_da]
     for r in con:
         _day(r)
+    cuoi = ung_vien[-1]
+    if not con or cuoi["turn_id"] in co:
+        _ghi_moc(cuoi["turn_id"], cuoi.get("ts"))
     if con:
-        print(f"[audit] dong_bo_lai: da day bu {len(con)} dong")
+        print(f"[audit] dong_bo_lai: da day bu {len(con)} dong "
+              f"(bo qua {len(ung_vien) - len(con)} dong da co tren Base)")
     return len(con)
 
 
@@ -273,7 +354,7 @@ def _day(rec: dict) -> None:
         }
         lark.call("POST", f"/open-apis/bitable/v1/apps/{cfg['app_token']}"
                           f"/tables/{cfg['table_id']}/records", body={"fields": f})
-        _ghi_moc(rec.get("turn_id") or "")
+        _ghi_moc(rec.get("turn_id") or "", rec.get("ts"))
     except Exception as e:  # noqa: BLE001
         print(f"[audit] day len Base loi (bo qua): {type(e).__name__}: {e}")
 
@@ -286,9 +367,18 @@ def link_base() -> str:
 _dang_chay: dict[str, dict] = {}
 _vua_xong: dict[str, dict] = {}
 _khoa_luot = threading.Lock()
-# Mark chạy nhiều chat song song (AGENT_MAX_WORKERS). Mỗi thread giữ turn_id
-# riêng để `ghi_tool()` biết mình thuộc lượt nào — không truyền tay qua 10 tool.
-_cuc_bo = threading.local()
+# Mark chạy nhiều chat song song (AGENT_MAX_WORKERS). Mỗi lượt giữ turn_id riêng để
+# `ghi_tool()` và sổ chi phí biết mình thuộc lượt nào — không truyền tay qua 10 tool.
+# ContextVar, KHÔNG threading.local: Hermes chạy tool trong ThreadPoolExecutor qua
+# `contextvars.copy_context()` (xem memory_store.py), và các tool quét lại tách luồng
+# con bằng `copy_context().run`. threading.local không sang được các luồng đó nên
+# tool chạy ở đó mất turn_id — ghi_tool rơi mất, sổ chi phí để trống Turn ID.
+_TURN: contextvars.ContextVar[str] = contextvars.ContextVar("audit_turn_id", default="")
+
+
+def turn_id_hien_tai() -> str:
+    """Turn ID của lượt đang chạy trong ngữ cảnh này ("" nếu ngoài lượt)."""
+    return _TURN.get()
 
 
 def bat_dau(chat_id: str, sender: str | None, hoi: str) -> str:
@@ -299,7 +389,7 @@ def bat_dau(chat_id: str, sender: str | None, hoi: str) -> str:
         _dang_chay[tid] = {"turn_id": tid, "ts": time.time(), "t0": time.monotonic(),
                            "chat": chat_id or "", "nguoi": sender or "",
                            "hoi": _cat(hoi, _TOI_DA_TEXT), "tool": []}
-    _cuc_bo.turn_id = tid
+    _TURN.set(tid)
     return tid
 
 
@@ -307,7 +397,7 @@ def ghi_tool(ten: str, args, ket_qua, giay: float, loi: str = "") -> None:
     """Ghi một lượt gọi tool vào lượt đang chạy của thread này."""
     if not _BAT:
         return
-    tid = getattr(_cuc_bo, "turn_id", "")
+    tid = _TURN.get()
     with _khoa_luot:
         luot = _dang_chay.get(tid)
         if luot is None:
@@ -327,6 +417,10 @@ def ket_thuc(turn_id: str, tra_loi: str, agent=None, loi: str = "",
         return {}
     with _khoa_luot:
         luot = _dang_chay.pop(turn_id, None)
+    if _TURN.get() == turn_id:
+        # Worker thread được dùng lại cho tin sau: đừng để việc chạy ngoài lượt trên
+        # thread này (việc nền, nhắc lịch) mang nhầm turn_id của lượt đã đóng.
+        _TURN.set("")
     if luot is None:
         return {}
 
