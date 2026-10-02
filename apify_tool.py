@@ -127,20 +127,109 @@ def _kep(v, lo: float, hi: float, mac_dinh: float) -> float:
     return min(hi, max(lo, v))
 
 
-def _tran(nen: bool | None = None) -> tuple[int, float]:
-    """(trần bài mỗi nền tảng, trần USD mỗi lượt chạy actor) đang có hiệu lực.
-
-    Trần USD kẹp thêm `_TRAN_USD_TUONG_TAC` (5 USD) trừ khi đang chạy nền (`_NEN`) hoặc
-    bên gọi hỏi rõ `nen=True` (lập kế hoạch cho một việc nền)."""
+def _cau_hinh_quet() -> dict:
+    """`cau_hinh` của social_listen trên console; đọc hỏng thì {} (dùng mặc định)."""
     try:
         import lsr_policy
         c = lsr_policy.cau_hinh_tool("social_listen")
     except Exception:  # noqa: BLE001 — đọc hỏng thì dùng mặc định, không chặn quét
         c = {}
+    return c if isinstance(c, dict) else {}
+
+
+def _tran(nen: bool | None = None) -> tuple[int, float]:
+    """(trần bài mỗi nền tảng, trần USD mỗi lượt chạy actor) đang có hiệu lực.
+
+    Trần USD kẹp thêm `_TRAN_USD_TUONG_TAC` (5 USD) trừ khi đang chạy nền (`_NEN`) hoặc
+    bên gọi hỏi rõ `nen=True` (lập kế hoạch cho một việc nền)."""
+    c = _cau_hinh_quet()
     nen = _NEN.get() if nen is None else nen
     usd = _kep(c.get("tran_usd"), *_TRAN_USD_KHOANG, _MAX_CHARGE)
     return (int(_kep(c.get("tran_bai"), *_TRAN_BAI_KHOANG, _MAX_LIMIT)),
             round(usd if nen else min(usd, _TRAN_USD_TUONG_TAC), 2))
+
+
+# Trần THEO NỀN TẢNG (chủ agent xin 02/10/2026: "nên làm 1 bộ lọc giá cho từng nền tảng
+# để ví dụ họ muốn chỉ cào 1 nền tảng thì có thể điều chỉnh"). Console lưu trong cùng
+# `cau_hinh` của social_listen, mọi khoá TUỲ CHỌN: `bat_<p>` (0 = tắt), `tran_bai_<p>`,
+# `tran_usd_<p>`. Thiếu khoá thì dùng trần chung — không đặt gì thì y như trước.
+# YouTube là API miễn phí nên `tran_usd_youtube` bỏ qua.
+_TEN_NGUON = {"tiktok": "TikTok", "facebook": "Facebook", "instagram": "Instagram",
+              "youtube": "YouTube", "threads": "Threads"}
+_NOI_CONSOLE = "Năng lực → Quét mạng xã hội"
+
+
+def _co_so(v) -> bool:
+    """Giá trị console là một số dùng được (không rỗng/rác/NaN)."""
+    if isinstance(v, bool) or v is None:
+        return False
+    try:
+        return float(v) == float(v)
+    except (TypeError, ValueError):
+        return False
+
+
+def _khoa_rieng(p: str, c: dict | None = None) -> set[str]:
+    """Trần RIÊNG nào của nền tảng `p` đang được đặt trên console: tập con {"bai", "usd"}."""
+    c = _cau_hinh_quet() if c is None else c
+    ra = {"bai"} if _co_so(c.get(f"tran_bai_{p}")) else set()
+    if p != "youtube" and _co_so(c.get(f"tran_usd_{p}")):
+        ra.add("usd")
+    return ra
+
+
+def _tran_nen_tang(p: str, nen: bool | None = None,
+                   c: dict | None = None) -> tuple[int, float, bool]:
+    """(trần bài, trần USD mỗi lượt, có bật không) của MỘT nền tảng.
+
+    Kẹp trong cùng khoảng an toàn với trần chung (`_TRAN_BAI_KHOANG`, `_TRAN_USD_KHOANG`)
+    và cùng kẹp 5 USD cho lượt không chạy nền. Khoá thiếu/rác → trần chung; `bat_<p>` chỉ
+    TẮT khi đúng bằng 0 — rác hay thiếu thì coi như bật (mặc định của console)."""
+    c = _cau_hinh_quet() if c is None else c
+    # Trần chung đi qua `_tran()` để nền tảng không có trần riêng y hệt trước.
+    bai, usd = _tran() if nen is None else _tran(nen=nen)
+    nen = _NEN.get() if nen is None else nen
+    k = _khoa_rieng(p, c)
+    if "bai" in k:
+        bai = int(_kep(c.get(f"tran_bai_{p}"), *_TRAN_BAI_KHOANG, bai))
+    if "usd" in k:
+        u = _kep(c.get(f"tran_usd_{p}"), *_TRAN_USD_KHOANG, usd)
+        usd = round(u if nen else min(u, _TRAN_USD_TUONG_TAC), 2)
+    bat = c.get(f"bat_{p}")
+    return bai, usd, not (_co_so(bat) and float(bat) == 0)
+
+
+def _ly_do_tat(p: str) -> str:
+    return f"chủ agent đã tắt {_TEN_NGUON.get(p, p)} trên console ({_NOI_CONSOLE})"
+
+
+def _usd_vn(x: float) -> str:
+    return f"{x:g}".replace(".", ",")
+
+
+def _cau_tran_rieng(plats: list[str], limit_xin: int | None, est_p: dict | None = None,
+                    nen: bool | None = None) -> str:
+    """Các trần console RIÊNG của nền tảng đang trói lượt này, vd "trần console của TikTok
+    là 200 bài; trần console của Threads là 0,3 USD/lượt (ước tính 0,75 USD)". '' nếu
+    không trần riêng nào trói — khi đó giữ nguyên câu trần chung cũ."""
+    c = _cau_hinh_quet()
+    phan, chung = [], []
+    co_rieng = any("bai" in _khoa_rieng(p, c) for p in plats)
+    for p in plats:
+        k = _khoa_rieng(p, c)
+        bai, usd, _ = _tran_nen_tang(p, nen, c)
+        if limit_xin and limit_xin > bai:
+            if "bai" in k:
+                phan.append(f"trần console của {_TEN_NGUON.get(p, p)} là {bai} bài")
+            elif co_rieng:
+                chung.append(p)
+        if "usd" in k and est_p and est_p.get(p, 0) > usd + 1e-9:
+            phan.append(f"trần console của {_TEN_NGUON.get(p, p)} là {_usd_vn(usd)} USD/lượt "
+                        f"(ước tính {_usd_vn(round(est_p[p], 2))} USD)")
+    if chung:
+        phan.append(f"trần chung {_tran_nen_tang(chung[0], nen, c)[0]} bài/nền tảng cho "
+                    + ", ".join(_TEN_NGUON.get(p, p) for p in chung))
+    return "; ".join(phan)
 
 _ALL = ("tiktok", "facebook", "instagram", "youtube", "threads")
 
@@ -330,6 +419,9 @@ _DU_PHONG_HUY = 8.0       # giây chừa sau hạn run để lấy item dở dan
 _HAN_CHOT: contextvars.ContextVar = contextvars.ContextVar("apify_han_chot", default=None)
 _SO_RUN: contextvars.ContextVar = contextvars.ContextVar("apify_so_run", default=None)
 _TU_KHOA: contextvars.ContextVar = contextvars.ContextVar("apify_tu_khoa", default=None)
+# Nền tảng của lượt `_call` đang chạy (`_handle._chay_nguon` đặt): trần USD gửi Apify lấy
+# theo `tran_usd_<p>` của nền tảng đó thay vì trần chung.
+_NEN_TANG: contextvars.ContextVar = contextvars.ContextVar("apify_nen_tang", default=None)
 _lan_cuoi = threading.local()
 _dong_ho = time.monotonic     # tách tên để bộ thử giả đồng hồ/giấc ngủ
 _ngu = time.sleep
@@ -540,7 +632,8 @@ def _huy_run(run_id: str, headers: dict) -> bool:
 
 def _run_actor(actor: str, payload: dict, limit: int, mem: int | None = None,
                deadline: float | None = None, min_charge: float = 0, *,
-               tran_usd: float | None = None, mot_phan: bool = False) -> tuple[list, dict]:
+               tran_usd: float | None = None, mot_phan: bool = False,
+               nen_tang: str | None = None) -> tuple[list, dict]:
     """Chạy một actor tới khi xong hoặc tới `deadline` (time.monotonic). -> (items, meta).
 
     meta = {run_id, status, statusMessage, giay, ma, ly_do?, so_item, ...}. Lỗi đã phân
@@ -557,16 +650,18 @@ def _run_actor(actor: str, payload: dict, limit: int, mem: int | None = None,
             "Thiếu APIFY_TOKEN trong .env "
             "(lấy ở https://console.apify.com/settings/integrations)."
         )
-    tran = (_tran()[1] if tran_usd is None
-            else round(_kep(tran_usd, _TRAN_USD_KHOANG[0], _tran_usd_toi_da(), _MAX_CHARGE), 2))
+    p = nen_tang or _NEN_TANG.get()
+    if tran_usd is not None:
+        tran = round(_kep(tran_usd, _TRAN_USD_KHOANG[0], _tran_usd_toi_da(), _MAX_CHARGE), 2)
+    else:
+        tran = _tran_nen_tang(p)[1] if p in _TEN_NGUON else _tran()[1]
     if min_charge and tran < min_charge:
-        def usd(x: float) -> str:
-            return f"{x:g}".replace(".", ",")
-        noi = ("Năng lực → Quét mạng xã hội" if tran_usd is None
-               else "Năng lực, mục trần của công cụ này")
+        noi = (_NOI_CONSOLE + (f" (trần riêng {_TEN_NGUON[p]})" if p in _TEN_NGUON
+                               and "usd" in _khoa_rieng(p) else "")
+               if tran_usd is None else "Năng lực, mục trần của công cụ này")
         raise RuntimeError(
-            f"Trần chi phí trên console ({usd(tran)} USD/lượt) thấp hơn mức tối thiểu "
-            f"actor {actor} yêu cầu ({usd(min_charge)} USD) — không chạy để khỏi vượt "
+            f"Trần chi phí trên console ({_usd_vn(tran)} USD/lượt) thấp hơn mức tối thiểu "
+            f"actor {actor} yêu cầu ({_usd_vn(min_charge)} USD) — không chạy để khỏi vượt "
             f"trần. Chủ agent nâng trần ở console: {noi}.")
     t0 = _dong_ho()
     het = deadline if deadline is not None else t0 + _RUN_TIMEOUT
@@ -910,7 +1005,8 @@ def _cho_run(run, h, token, limit, meta, t0, con, mot_phan):
 
 
 def _call(actor: str, payload: dict, limit: int, mem: int | None = None,
-          min_charge: float = 0, tran_usd: float | None = None) -> list[dict]:
+          min_charge: float = 0, tran_usd: float | None = None, *,
+          nen_tang: str | None = None) -> list[dict]:
     """Chạy actor rồi trả dataset (list item) — hợp đồng cũ cho mọi module gọi nó.
 
     `min_charge`: mức `maxTotalChargeUsd` tối thiểu actor đòi (YouTube/Facebook
@@ -926,6 +1022,9 @@ def _call(actor: str, payload: dict, limit: int, mem: int | None = None,
     YouTube bị từ chối vì trần social_listen 0,37 < mức tối thiểu 0,5 của actor —
     deep_dive cần trần của chính nó.
 
+    `nen_tang`: lượt này của nền tảng nào (mặc định đọc `_NEN_TANG` do `_handle` đặt) —
+    không truyền `tran_usd` thì trần là `tran_usd_<nền tảng>` trên console nếu có.
+
     Hạn chót và sổ trạng thái run đến NGẦM qua contextvars (`_HAN_CHOT`, `_SO_RUN`) do
     `_handle` đặt; không có thì hạn = `_RUN_TIMEOUT` như run-sync cũ. Meta run gần nhất
     của luồng đọc qua `meta_lan_cuoi()`.
@@ -933,7 +1032,8 @@ def _call(actor: str, payload: dict, limit: int, mem: int | None = None,
     so = _SO_RUN.get()
     try:
         items, meta = _run_actor(actor, payload, limit, mem, _HAN_CHOT.get(), min_charge,
-                                 tran_usd=tran_usd, mot_phan=so is not None)
+                                 tran_usd=tran_usd, mot_phan=so is not None,
+                                 nen_tang=nen_tang)
     except LoiApify as e:
         _lan_cuoi.meta = e.meta
         if so is not None:
@@ -2556,6 +2656,9 @@ SCHEMA = {
         "`cat_theo_ngan_sach`=true hoặc bớt bài/nền tảng. Hỏi 'xong chưa'/'kết quả quét' → "
         "`tra_viec_nen`; 'huỷ quét' → `huy_viec_nen`.\n"
         "- `limit_bi_cat` có nội dung thì BẮT BUỘC nói ra: người dùng xin nhiều hơn trần.\n"
+        "- Chủ agent đặt được trần RIÊNG từng nền tảng hoặc TẮT hẳn một nền tảng trên console "
+        "(`tran_theo_nen_tang`, `nen_tang_tat`, status `TAT_BOI_CHU_AGENT`): nói đúng tên "
+        "nền tảng bị tắt / trần nào đang trói, không thay bằng nguồn khác.\n"
         "- BÀI BỊ LOẠI: BẮT BUỘC nói con số theo `tom_tat_loai` (AI giữ/loại theo lý do, "
         "lọc theo luật, từ loại trừ, thị trường) và chỉ chỗ xem (`bi_loai_ghi_o`, thường là "
         "tab 'Bị loại' kèm lý do). Đừng để người dùng tưởng brand ít được nhắc trong khi ta "
@@ -2593,7 +2696,8 @@ SCHEMA = {
             },
             "limit": {"type": "integer", "description": (
                 "Số post CÀO tối đa MỖI nền tảng (mặc định 100, tối đa theo trần chủ agent đặt "
-                "— mặc định 500, tối đa 10000; lượt lớn tự chạy nền).")},
+                "— mặc định 500, tối đa 10000, có thể đặt riêng từng nền tảng; lượt lớn tự "
+                "chạy nền).")},
             "chi_uoc_tinh": {"type": "boolean", "description": (
                 "true = CHỈ ước tính (USD, phút, giới hạn từng nguồn, ngân sách tháng) bằng "
                 "lượt hỏi miễn phí — KHÔNG chạy, không tốn tiền. Luôn gọi thế này trước một "
@@ -2737,10 +2841,6 @@ def _ly_do_loai(d: dict, p: str, queries: list[str], loai_tru: list[str], countr
     return "", ""
 
 
-_TEN_NGUON = {"tiktok": "TikTok", "facebook": "Facebook", "instagram": "Instagram",
-              "youtube": "YouTube", "threads": "Threads"}
-
-
 def _tong_hop_nguon(got, so: list) -> dict:
     """Gộp kết quả fetcher + sổ run của MỘT nguồn thành trạng thái cho model.
 
@@ -2830,13 +2930,27 @@ def _handle(args: dict, **kwargs) -> str:
             f"ĐỪNG thay bằng nguồn khác rồi để người dùng tưởng là nguồn họ hỏi."
         )
 
+    # Nền tảng chủ agent TẮT trên console (`bat_<p>`=0): không quét. Gọi đích danh mà bị
+    # tắt thì nói ĐẦU TIÊN; quét rộng (không chỉ định) thì bỏ qua, nhắc một lần.
+    explicit = bool(args.get("platforms"))
+    c_quet = _cau_hinh_quet()
+    tran_nt = {p: _tran_nen_tang(p, c=c_quet) for p in plats}
+    tat = [p for p in plats if not tran_nt[p][2]]
+    if tat and len(tat) == len(plats):
+        return tool_error(
+            "KHÔNG QUÉT, chưa tốn tiền: " + "; ".join(_ly_do_tat(p) for p in tat)
+            + ". Nói thẳng với người dùng như vậy; muốn quét thì nhờ chủ agent bật lại trên "
+              "console. ĐỪNG thay bằng nền tảng khác.")
+    plats = [p for p in plats if p not in tat]
+
     try:
         limit = int(args.get("limit") or 100)
     except (TypeError, ValueError):
         limit = 100
     tran_bai, tran_usd = _tran()
     limit_xin = limit
-    limit = max(1, min(limit, tran_bai))
+    # Trần bài RIÊNG từng nền tảng (`tran_bai_<p>`; thiếu thì = trần chung).
+    lim_nt = {p: max(1, min(limit_xin, tran_nt[p][0])) for p in plats}
     country = (str(args.get("country") or "VN").strip() or "VN").upper()
     ex = args.get("exclude") or []
     loai_tru = [str(x).strip() for x in (ex if isinstance(ex, list) else [ex]) if str(x).strip()]
@@ -2851,14 +2965,25 @@ def _handle(args: dict, **kwargs) -> str:
 
     # Không chỉ định nền tảng = quét RỘNG-NÔNG (giới hạn theo giá từng nguồn).
     # Gọi đích danh = ĐÀO SÂU, dùng nguyên `limit` người dùng đặt.
-    explicit = bool(args.get("platforms"))
     per_platform, hits, failed = {}, [], []
     trong_khoang = 0          # số bài nằm trong khoảng ngày, TRƯỚC lọc liên quan
     bi_loai: list[tuple] = []  # (dòng, ngày, lý do) — ghi tab "Bị loại", không vứt
     # Chạy các nền tảng SONG SONG: tuần tự thì tổng thời gian là tổng của tất cả,
     # rất dễ vượt trần trả lời. Nền tảng nào không kịp hạn thì báo LỖI rõ ràng
     # chứ không âm thầm biến mất khỏi kết quả.
-    lims = {p: (limit if explicit else min(limit, _SHALLOW.get(p, limit))) for p in plats}
+    lims = {p: (lim_nt[p] if explicit else min(lim_nt[p], _SHALLOW.get(p, lim_nt[p])))
+            for p in plats}
+    for p in tat:
+        per_platform[p] = {"status": "TAT_BOI_CHU_AGENT", "ly_do": _ly_do_tat(p),
+                           "goi_y": "Muốn quét thì nhờ chủ agent bật lại trên console."}
+    cau_tat = ""
+    if tat and explicit:
+        cau_tat = ("NỀN TẢNG CHỦ AGENT ĐÃ TẮT — nói ĐẦU TIÊN: "
+                   + "; ".join(_ly_do_tat(p) for p in tat)
+                   + " — KHÔNG quét, không thay bằng nguồn khác. ")
+    elif tat:
+        cau_tat = ("Nhắc một lần: " + "; ".join(_ly_do_tat(p) for p in tat)
+                   + " — không quét. ")
     # Quét LỚN (chủ agent chốt 01–02/10/2026: tới 10.000 bài một yêu cầu): quá cỡ một lượt
     # trả lời thì thành VIỆC NỀN (quet_lon + viec_nen), trả mã việc ngay; `chi_uoc_tinh`
     # chỉ ước tính bằng GET miễn phí, không chạy gì.
@@ -2867,13 +2992,19 @@ def _handle(args: dict, **kwargs) -> str:
         args, queries=queries, plats=plats, lims=lims, explicit=explicit, country=country,
         d_from=d_from, d_to=d_to, boi_canh=boi_canh, loai_tru=loai_tru, khop_long=khop_long,
         giu_nuoc_ngoai=giu_nuoc_ngoai, chi_thi_truong_nay=chi_thi_truong_nay,
-        not_yet=not_yet, limit_xin=limit_xin, tran_bai=tran_bai)
+        not_yet=not_yet, limit_xin=limit_xin, tran_bai=tran_bai, tat=tat)
     if tra_ngay is not None:
         return tra_ngay
     # Instagram/Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ khoá.
     so_run = {p: (len(queries) if p in ("instagram", "facebook") else 1) for p in plats}
     est = sum(_START_COST.get(p, 0.0) * so_run[p] + _UNIT_COST.get(p, 0.0) * lims[p]
               for p in plats)
+    # Ước tính MỖI LƯỢT chạy actor của từng nền tảng — so với `tran_usd_<p>` để nói ra
+    # khi trần riêng trói (Apify dừng ở trần, có thể thiếu bài).
+    est_luot = {p: _START_COST.get(p, 0.0) + _UNIT_COST.get(p, 0.0) * lims[p] / so_run[p]
+                for p in plats}
+    cau_bai_rieng = _cau_tran_rieng(plats, limit_xin)
+    cau_usd_rieng = _cau_tran_rieng(plats, None, est_luot)
     # Lùi vài giây để đồng hồ máy lệch với Apify không làm sót run đầu tiên.
     _bat_dau = datetime.datetime.now(_VN_TZ) - datetime.timedelta(seconds=5)
     _t0 = time.monotonic()
@@ -2897,6 +3028,7 @@ def _handle(args: dict, **kwargs) -> str:
 
     def _chay_nguon(p: str):
         _SO_RUN.set(so_run[p])
+        _NEN_TANG.set(p)               # trần USD của lượt = `tran_usd_<p>` nếu có
         # Run Apify dừng TRƯỚC hạn tool để kịp lấy bài dở dang + huỷ run (`_run_actor`).
         _HAN_CHOT.set(han_apify - _DU_PHONG_HUY)
         return _FETCH[p](queries, lims[p], country, d_from, d_to)
@@ -3242,9 +3374,21 @@ def _handle(args: dict, **kwargs) -> str:
                 che_do="đào sâu (gọi đích danh)" if explicit else "quét rộng-nông (mặc định)",
                 uoc_tinh_chi_phi_usd=round(est, 3),
                 tran_bai=tran_bai, tran_chi_phi_usd_moi_luot=tran_usd,
-                limit_bi_cat=(f"Người dùng xin {limit_xin} bài, trần hiện tại là {tran_bai} "
+                limit_bi_cat=(f"Người dùng xin {limit_xin} bài: {cau_bai_rieng}. Chủ agent "
+                              f"nâng được ở console: {_NOI_CONSOLE}." if cau_bai_rieng else
+                              f"Người dùng xin {limit_xin} bài, trần hiện tại là {tran_bai} "
                               f"bài mỗi nền tảng. Chủ agent nâng được ở console: Năng lực → "
-                              f"Quét mạng xã hội.") if limit_xin > tran_bai else None,
+                              f"Quét mạng xã hội." if limit_xin > tran_bai else None),
+                tran_theo_nen_tang=({p: {"tran_bai": tran_nt[p][0],
+                                         **({} if p == "youtube" else
+                                            {"tran_usd_moi_luot": tran_nt[p][1]})}
+                                     for p in plats} if any(
+                                         _khoa_rieng(p, c_quet) for p in tran_nt) else None),
+                tran_rieng_rang_buoc=(
+                    f"{cau_usd_rieng} — Apify dừng khi chạm trần nên nền tảng đó có thể thiếu "
+                    f"bài; nói rõ đây là trần chủ agent đặt trên console ({_NOI_CONSOLE})."
+                    if cau_usd_rieng else None),
+                nen_tang_tat=tat or None,
                 chi_phi_thuc_usd=thuc["usd"] if thuc else None,
                 cham_tran_chi_phi=bool(thuc and thuc["cham_tran"]),
                 chi_phi=_dong_chi_phi(thuc, est),
@@ -3270,7 +3414,10 @@ def _handle(args: dict, **kwargs) -> str:
                 vi_du_ai_da_loai=vi_du_ai, giay_ai=giay_ai,
                 ai_ghi_chu="; ".join(ai_log) or None)
 
-    canh_bao_nguon = _cau_nguon_hong(per_platform, plats)
+    canh_bao_nguon = (cau_tat + _cau_nguon_hong(per_platform, plats)
+                      + (f"{base['limit_bi_cat']} " if cau_bai_rieng else "")
+                      + (f"Trần riêng: {base['tran_rieng_rang_buoc']} " if cau_usd_rieng
+                         else ""))
     if not hits and not bi_loai:
         return tool_result(
             success=not failed, sheet_url=None, **base,

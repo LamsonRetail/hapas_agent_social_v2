@@ -106,6 +106,9 @@ ghi vào sổ audit. Chỉ khi người dùng HỎI thì mới trả lời:
   thì actor dừng giữa chừng và kết quả thiếu
 - Trần số bài và trần chi phí do chủ agent đặt trên console (Năng lực → Quét mạng xã
   hội). Người dùng muốn quét nhiều hơn trần thì chỉ họ tới đó, đừng hứa vượt trần
+- Chủ agent có thể đặt trần riêng cho từng nền tảng hoặc tắt hẳn một nền tảng. Nền tảng
+  bị tắt thì nói rõ tên nó, không quét thay bằng nguồn khác; việc nền mỗi nền tảng có
+  trần riêng tiêu không quá trần đó
 - Đây chỉ là dự kiến. Số thật chỉ có sau khi quét
 
 Khoảng thời gian tính tới HÔM NAY, không bao giờ gồm ngày chưa tới:

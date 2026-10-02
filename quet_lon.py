@@ -391,14 +391,18 @@ def _hoan_tat(nt: dict, ts: dict, han_phut: int) -> dict:
             "uoc_phut": min(phut, han_phut)}
 
 
-def thu_nho(kh: dict, ts: dict, han_phut: int, ngan_sach: float) -> dict:
-    """Cắt phần TRẢ TIỀN của kế hoạch cho vừa `ngan_sach` (YouTube không tốn tiền)."""
-    tra = sum(x["uoc_usd"] for p, x in kh["nen_tang"].items() if p != "youtube")
+def thu_nho(kh: dict, ts: dict, han_phut: int, ngan_sach: float,
+            chi: set | None = None, nhan: str | None = None) -> dict:
+    """Cắt phần TRẢ TIỀN của kế hoạch cho vừa `ngan_sach` (YouTube không tốn tiền).
+    `chi`: chỉ cắt các nền tảng này (trần riêng của một nền tảng / nhóm dùng trần chung);
+    `nhan`: tên trần đưa vào `chua_phu`."""
+    tra = sum(x["uoc_usd"] for p, x in kh["nen_tang"].items()
+              if p != "youtube" and (chi is None or p in chi))
     if tra <= ngan_sach or tra <= 0:
         return kh
     f = max(0.0, ngan_sach / tra) * 0.95
     for p, x in kh["nen_tang"].items():
-        if p == "youtube":
+        if p == "youtube" or (chi is not None and p not in chi):
             continue
         truoc = sum(int(ph["limit"]) for ph in x["phan"])
         giu = []
@@ -409,8 +413,8 @@ def thu_nho(kh: dict, ts: dict, han_phut: int, ngan_sach: float) -> dict:
                 giu.append(ph)
         x["phan"] = giu
         sau = sum(int(ph["limit"]) for ph in giu)
-        x["chua_phu"].append(f"{A._TEN_NGUON.get(p, p)}: cắt theo ngân sách {ngan_sach:.2f} USD "
-                             f"— chỉ ~{sau}/{truoc} bài.")
+        x["chua_phu"].append(f"{A._TEN_NGUON.get(p, p)}: cắt theo {nhan or 'ngân sách'} "
+                             f"{ngan_sach:.2f} USD — chỉ ~{sau}/{truoc} bài.")
         for i, ph in enumerate(giu):
             ph["id"] = f"{p}-{i}"
     return _hoan_tat(kh["nen_tang"], ts, han_phut)
@@ -461,16 +465,67 @@ def tom_tat_ke_hoach(kh: dict) -> dict:
     return {p: {"limit_xin": x["limit"], "limit_ke_hoach": x["limit_ke_hoach"],
                 "so_luot_chay": len(x["phan"]), "uoc_usd": x["uoc_usd"],
                 "uoc_phut": round(x["uoc_giay"] / 60, 1), "chua_phu": x["chua_phu"] or None,
-                "gioi_han_nguon": x["ghi_chu"] or None}
+                "gioi_han_nguon": x["ghi_chu"] or None,
+                **({"tran_console_usd_rieng": x["tran_usd_rieng"]} if x.get("tran_usd_rieng")
+                   else {})}
             for p, x in kh["nen_tang"].items()}
+
+
+def _tran_nhom(plats: list[str], tran_nen: float) -> tuple[dict, list[str], float]:
+    """Trần USD việc nền theo nền tảng TRẢ TIỀN -> ({p: trần riêng}, nền tảng dùng trần
+    chung, tổng trần của việc). Không nền tảng nào có `tran_usd_<p>` thì tổng = trần chung
+    như trước; có thì mỗi nền tảng có trần riêng một ngân sách riêng, các nền tảng còn lại
+    CHUNG `tran_nen`, tổng = cộng các phần (vẫn kẹp theo tháng ở `ngan_sach`)."""
+    c = A._cau_hinh_quet()
+    tra = [p for p in plats if p != "youtube"]
+    rieng = {p: A._tran_nen_tang(p, nen=True, c=c)[1] for p in tra
+             if "usd" in A._khoa_rieng(p, c)}
+    chung = [p for p in tra if p not in rieng]
+    if not rieng:
+        return {}, chung, tran_nen
+    return rieng, chung, round(sum(rieng.values()) + (tran_nen if chung else 0.0), 2)
+
+
+def _can_giu(x: dict) -> float:
+    """Tiền một nền tảng phải giữ được trong sổ để chạy đủ kế hoạch: mỗi lượt con giữ ít
+    nhất `_can` (≥ 0,1 USD) dù ước tính nhỏ hơn — so trần riêng bằng số này, không thì kế
+    hoạch "vừa trần" vẫn bị sổ từ chối ngay lượt đầu."""
+    return max(float(x.get("uoc_usd") or 0), sum(_can(ph) for ph in x.get("phan") or []))
+
+
+def _vua_tran(kh: dict, ts: dict, hp: int, u: float, p: str) -> dict:
+    """Cắt kế hoạch của nền tảng `p` cho vừa trần riêng `u` (tính cả phần giữ tối thiểu)."""
+    nhan = f"trần console của {A._TEN_NGUON.get(p, p)}"
+    for _ in range(6):
+        x = kh["nen_tang"].get(p)
+        if not x or _can_giu(x) <= u + 1e-9:
+            break
+        du = max(0.0, _can_giu(x) - float(x["uoc_usd"]))
+        kh = thu_nho(kh, ts, hp, max(0.0, u - du - 0.01), chi={p}, nhan=nhan)
+    return kh
+
+
+def _vuot_nhom(kh: dict, rieng: dict, chung: list[str], tran_nen: float) -> list[str]:
+    """Câu cho từng trần riêng (và trần chung của nhóm còn lại) mà kế hoạch đang vượt."""
+    nt = kh["nen_tang"]
+    ra = [f"trần console của {A._TEN_NGUON.get(p, p)} là {A._usd_vn(u)} USD (ước tính "
+          f"{A._usd_vn(round(_can_giu(nt[p]), 2))} USD)"
+          for p, u in rieng.items() if p in nt and _can_giu(nt[p]) > u + 1e-9]
+    tc = sum(nt[p]["uoc_usd"] for p in chung if p in nt)
+    if rieng and chung and tc > tran_nen + 1e-9:
+        ra.append(f"trần chung {A._usd_vn(tran_nen)} USD cho "
+                  + ", ".join(A._TEN_NGUON.get(p, p) for p in chung)
+                  + f" (ước tính {A._usd_vn(round(tc, 2))} USD)")
+    return ra
 
 
 # ───────────────────────────── cửa vào từ social_listen ─────────────────────────────
 def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_to,
               boi_canh, loai_tru, khop_long, giu_nuoc_ngoai, chi_thi_truong_nay,
-              not_yet, limit_xin, tran_bai) -> tuple[str | None, dict, str]:
+              not_yet, limit_xin, tran_bai, tat=None) -> tuple[str | None, dict, str]:
     """Quyết định trước khi chạy tại chỗ. -> (kết quả tool trả NGAY | None, lims dùng cho
-    lượt tại chỗ, ghi chú thêm cho lượt tại chỗ)."""
+    lượt tại chỗ, ghi chú thêm cho lượt tại chỗ). `tat`: nền tảng chủ agent đã tắt
+    (`_handle` đã bỏ khỏi `plats`) — chỉ để nói ra."""
     ep = args.get("chay_nen")
     ep = None if ep is None or ep == "" else A._co(ep)
     chi_uoc = A._co(args.get("chi_uoc_tinh"))
@@ -497,23 +552,46 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
     tran_nen = tran_usd_nen()
     # Thử thật 02/10/2026: xin 1500 video nhưng trần console 112 → Mark nói "nguồn chỉ cho
     # tối đa 112", người dùng tưởng nguồn yếu. Đây là trần CHỦ AGENT đặt, phải nói đúng.
+    # Có trần RIÊNG theo nền tảng (02/10/2026) thì nói từng nền tảng: "trần console của
+    # TikTok là 200 bài" — câu trần chung sẽ sai với nền tảng có trần riêng.
+    rieng_bai = A._cau_tran_rieng(plats, limit_xin)
     cau_tran = (f" Người dùng xin {limit_xin} bài/nền tảng nhưng TRẦN TRÊN CONSOLE (Năng lực "
+                f"→ Quét mạng xã hội) đang trói: {rieng_bai} — nói rõ đây là trần chủ agent "
+                "đặt, KHÔNG phải giới hạn của nguồn; muốn nhiều hơn thì nhờ chủ agent nâng."
+                if rieng_bai else
+                f" Người dùng xin {limit_xin} bài/nền tảng nhưng TRẦN TRÊN CONSOLE (Năng lực "
                 f"→ Quét mạng xã hội) đang là {tran_bai} bài/nền tảng — nói rõ đây là trần chủ "
                 "agent đặt, KHÔNG phải giới hạn của nguồn; muốn nhiều hơn thì nhờ chủ agent nâng."
                 if limit_xin and tran_bai and limit_xin > tran_bai else "")
+    tat = list(tat or [])
+    cau_tat = ""
+    if tat:
+        cau_tat = (("NỀN TẢNG CHỦ AGENT ĐÃ TẮT — nói ĐẦU TIÊN: " if explicit else
+                    "Nhắc một lần: ")
+                   + "; ".join(A._ly_do_tat(p) for p in tat) + " — không quét. ")
+    tran_nt = ({p: dict(zip(("tran_bai", "tran_usd_moi_luot"),
+                            A._tran_nen_tang(p, nen=nen)[:2])) for p in plats}
+               if any(A._khoa_rieng(p) for p in plats) else None)
     if not nen:
+        so_luot = {p: (len(queries) if p in ("instagram", "facebook") else 1) for p in plats}
         est_tai_cho = sum(
-            A._START_COST.get(p, 0.0) * (len(queries) if p in ("instagram", "facebook") else 1)
+            A._START_COST.get(p, 0.0) * so_luot[p]
             + A._UNIT_COST.get(p, 0.0) * lims[p] for p in plats)
+        rieng_usd = A._cau_tran_rieng(plats, None, {
+            p: A._START_COST.get(p, 0.0) + A._UNIT_COST.get(p, 0.0) * lims[p] / so_luot[p]
+            for p in plats}, nen=False)
         return tool_result(
             success=True, chi_uoc_tinh=True, se_chay_nen=False, queries=queries,
             platforms=plats, limit=lims, uoc_tinh_usd=round(est_tai_cho, 2),
             uoc_tinh_giay=giay, tran_chi_phi_usd_moi_luot=A._tran()[1],
-            tran_bai_console=tran_bai,
-            note=("CHƯA CHẠY gì, chưa tốn tiền (chỉ ước tính). Lượt này nhỏ, sẽ chạy ngay "
+            tran_bai_console=tran_bai, tran_theo_nen_tang=tran_nt, nen_tang_tat=tat or None,
+            note=(cau_tat
+                  + "CHƯA CHẠY gì, chưa tốn tiền (chỉ ước tính). Lượt này nhỏ, sẽ chạy ngay "
                   f"trong câu trả lời (~{giay:.0f} giây, ~{est_tai_cho:.2f} USD). Báo phạm vi "
                   "+ ước tính cho người dùng rồi KẾT THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi "
-                  "lại KHÔNG có `chi_uoc_tinh`." + cau_tran)), lims, ""
+                  "lại KHÔNG có `chi_uoc_tinh`." + cau_tran
+                  + (f" Trần riêng trói lượt này: {rieng_usd} — Apify dừng ở trần, nền tảng đó "
+                     "có thể thiếu bài; nói rõ." if rieng_usd else ""))), lims, ""
     hp = viec_nen.han_phut()
     ctx = _ctx_nguon(plats)
     ma = None
@@ -523,18 +601,34 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
         ma = viec_nen.ma_moi("social_listen")
         ctx["yt_con"] = A._youtube_giu(ma, math.ceil(lims["youtube"] / 50))
     kh = ke_hoach(queries, plats, lims, ts, hp, ctx)
-    ns, hm, cau_ns = ngan_sach(tran_nen)
+    # Trần USD theo nền tảng (02/10/2026): nền tảng có `tran_usd_<p>` có ngân sách riêng,
+    # các nền tảng còn lại chung trần console; tổng việc vẫn ≤ phần còn lại của tháng.
+    rieng, chung, tong_tran = _tran_nhom(plats, tran_nen)
+    ns, hm, cau_ns = ngan_sach(tong_tran)
     tra_tien = sum(x["uoc_usd"] for p, x in kh["nen_tang"].items() if p != "youtube")
     thieu = round(max(0.0, tra_tien - ns), 2)
+    vuot = _vuot_nhom(kh, rieng, chung, tran_nen)
     cat = A._co(args.get("cat_theo_ngan_sach"))
-    if thieu and cat:
+    if (thieu or vuot) and cat:
+        for p, u in rieng.items():
+            kh = _vua_tran(kh, ts, hp, u, p)
+        if rieng and chung:
+            kh = thu_nho(kh, ts, hp, tran_nen, chi=set(chung), nhan="trần chung")
         kh = thu_nho(kh, ts, hp, ns)
-        thieu = 0.0
+        thieu, vuot = 0.0, []
+    for p, x in kh["nen_tang"].items():
+        if p in rieng:
+            x["tran_usd_rieng"] = rieng[p]
+        elif p in chung and rieng:
+            x["tran_usd_chung"] = round(tran_nen, 2)
+    cau_vuot = ("; ".join(vuot) + " — trần chủ agent đặt trên console (Năng lực → Quét "
+                "mạng xã hội)") if vuot else ""
     base = dict(queries=queries, platforms=plats, limit_xin=limit_xin, tran_bai=tran_bai,
                 ly_do_chay_nen=vi_sao, uoc_tinh_usd=kh["uoc_usd"],
                 uoc_tinh_phut=kh["uoc_phut"], han_phut=hp, ngan_sach_usd=ns,
                 tran_console_usd=tran_nen, ngan_sach_thang=cau_ns,
-                thieu_ngan_sach_usd=thieu or None,
+                thieu_ngan_sach_usd=thieu or None, vuot_tran_nen_tang=cau_vuot or None,
+                tran_theo_nen_tang=tran_nt, nen_tang_tat=tat or None,
                 per_platform=tom_tat_ke_hoach(kh), platforms_not_supported=not_yet,
                 goi_y_nen_tang=(None if explicit else
                                 "Chưa chỉ định nền tảng nên mỗi nền tảng chỉ quét nông; "
@@ -542,31 +636,37 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
     if chi_uoc:
         return tool_result(
             success=True, chi_uoc_tinh=True, se_chay_nen=True, **base,
-            note=("CHƯA CHẠY gì, chưa tốn tiền (chỉ ước tính bằng lượt hỏi miễn phí). Lượt "
+            note=(cau_tat
+                  + "CHƯA CHẠY gì, chưa tốn tiền (chỉ ước tính bằng lượt hỏi miễn phí). Lượt "
                   "này LỚN nên sẽ CHẠY NỀN. Báo người dùng: ước tính ~"
                   f"{kh['uoc_usd']:.2f} USD, ~{kh['uoc_phut']} phút, giới hạn từng nguồn "
                   "(`per_platform.*.chua_phu` / `gioi_han_nguon`)"
                   + (f", THIẾU ngân sách {thieu:.2f} USD (ngân sách {ns:.2f} USD — đề xuất "
                      "cắt theo ngân sách `cat_theo_ngan_sach`=true hoặc bớt nền tảng/bài)"
                      if thieu else "")
+                  + (f", VƯỢT {cau_vuot} — đề xuất `cat_theo_ngan_sach`=true (cắt số bài "
+                     "nền tảng đó cho vừa trần) hoặc nhờ chủ agent nâng" if vuot else "")
                   + ". Lần này PHẢI nói số USD ước tính (ngoại lệ của luật không tự nói chi "
                   "phí). KẾT THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi lại y tham số, bỏ "
                   "`chi_uoc_tinh`." + cau_tran)), lims, ""
-    if thieu:
+    if thieu or vuot:
         if ma:
             A._youtube_tra(ma)
         return tool_result(
             success=False, chua_chay=True, vuot_ngan_sach=True, **base,
-            note=(f"CHƯA CHẠY, chưa tốn tiền: ước tính phần trả tiền {tra_tien:.2f} USD vượt "
-                  f"ngân sách {ns:.2f} USD ({cau_ns}). Nói đúng như vậy; đề xuất chạy với "
+            note=(cau_tat + "CHƯA CHẠY, chưa tốn tiền: "
+                  + (f"ước tính phần trả tiền {tra_tien:.2f} USD vượt ngân sách {ns:.2f} USD "
+                     f"({cau_ns})" if thieu else "")
+                  + ("; " if thieu and vuot else "") + (f"vượt {cau_vuot}" if vuot else "")
+                  + ". Nói đúng như vậy; đề xuất chạy với "
                   "`cat_theo_ngan_sach`=true (cắt số bài cho vừa), bớt nền tảng/bài, hoặc chỉ "
                   "YouTube (miễn phí).")), lims, ""
     if not any(x["phan"] for x in kh["nen_tang"].values()):
         if ma:
             A._youtube_tra(ma)
         return tool_result(success=False, chua_chay=True, **base,
-                           note="Không còn lượt nào chạy được (xem `chua_phu` từng nguồn). "
-                                "Nói rõ từng nguồn vì sao."), lims, ""
+                           note=cau_tat + "Không còn lượt nào chạy được (xem `chua_phu` từng "
+                                          "nguồn). Nói rõ từng nguồn vì sao."), lims, ""
     tom = viec_nen.tao_viec(
         "social_listen", ts, kh["nen_tang"],
         {"usd": kh["uoc_usd"], "phut": kh["uoc_phut"], "giay": kh["uoc_giay"]}, ns,
@@ -574,17 +674,21 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
         ma=ma, con_lai_thang=hm["con_lai"] if hm else None)
     if ma and tom.get("ma_viec") != ma:
         A._youtube_tra(ma)               # trùng việc cũ / bị từ chối: trả chỗ đã giữ
-    return tool_result(**{**base, **tom, "success": not tom.get("tu_choi")}), lims, ""
+    kq = {**base, **tom, "success": not tom.get("tu_choi")}
+    if cau_tat:
+        kq["note"] = cau_tat + str(kq.get("note") or "")
+    return tool_result(**kq), lims, ""
 
 
 # ───────────────────────────── chạy việc ─────────────────────────────
 _KET_PHAN = ("xong", "mot_phan", "loi", "da_huy")
 
 
-def _so_ngan_sach(v):
+def _dung_so(tran: float, cac: list):
+    """Dựng một sổ tiền từ các lượt con (đúng cả sau khi khởi động lại)."""
     from deep_dive_tool import _SoNganSach
     da = giu = cho = 0.0
-    for _, ph in v.cac_phan():
+    for _, ph in cac:
         if ph["actor"] == "youtube":
             continue
         st = ph.get("trang_thai")
@@ -597,9 +701,64 @@ def _so_ngan_sach(v):
             giu += float(ph["tran_usd"])
         else:
             cho += _can(ph)
-    ns = _SoNganSach(float(v.d.get("ngan_sach_usd") or 0), cho)
+    ns = _SoNganSach(float(tran or 0), cho)
     ns.da, ns.giu = da, giu
     return ns
+
+
+class _SoTheoNenTang:
+    """Sổ tiền của việc khi có trần USD RIÊNG theo nền tảng (02/10/2026): mỗi lượt con xin
+    ở sổ NHÓM của nền tảng nó (trần riêng `tran_usd_<p>`, hoặc nhóm chung trần console)
+    rồi ở sổ CHUNG của việc (ngân sách việc ≤ tháng). Trần gửi Apify = phần nhỏ hơn, nên
+    các lượt con của một nền tảng không bao giờ tiêu quá trần của nền tảng đó. Một nhóm
+    từ chối thì chỉ nhóm đó dừng; sổ chung từ chối thì cả việc dừng (như `_SoNganSach`)."""
+
+    def __init__(self, chung, nhom: dict, cua: dict):
+        self.chung, self.nhom, self.cua = chung, nhom, cua
+        self._khoa = threading.Lock()
+
+    @property
+    def da(self) -> float:
+        return self.chung.da
+
+    @property
+    def giu(self) -> float:
+        return self.chung.giu
+
+    def xin(self, can: float, tran_lo: float, p: str | None = None) -> float:
+        n = self.nhom.get(self.cua.get(p))
+        with self._khoa:
+            if n is None:
+                return self.chung.xin(can, tran_lo)
+            cap_n = n.xin(can, tran_lo)
+            if not cap_n:
+                self.chung.bo(can)          # lượt này không chạy: trả phần để dành chung
+                return 0.0
+            cap = self.chung.xin(can, cap_n)
+            if cap < cap_n:
+                n.tra(cap_n - cap, 0.0)     # nhóm chỉ giữ đúng phần sổ chung cấp
+            return cap
+
+    def tra(self, giu: float, thuc: float, p: str | None = None) -> None:
+        n = self.nhom.get(self.cua.get(p))
+        with self._khoa:
+            if n is not None:
+                n.tra(giu, thuc)
+            self.chung.tra(giu, thuc)
+
+
+def _so_ngan_sach(v):
+    chung = _dung_so(float(v.d.get("ngan_sach_usd") or 0), list(v.cac_phan()))
+    nt = v.d.get("nen_tang") or {}
+    if not any(x.get("tran_usd_rieng") for x in nt.values()):
+        return chung
+    cua = {p: (p if x.get("tran_usd_rieng") else "_chung") for p, x in nt.items()
+           if x.get("tran_usd_rieng") or x.get("tran_usd_chung")}
+    tran = {p: float(nt[p]["tran_usd_rieng"]) for p in cua if cua[p] == p}
+    tran.update({"_chung": float(nt[p]["tran_usd_chung"]) for p in cua if cua[p] == "_chung"})
+    nhom = {k: _dung_so(t, [(p, ph) for p, ph in v.cac_phan() if cua.get(p) == k])
+            for k, t in tran.items()}
+    return _SoTheoNenTang(chung, nhom, cua)
 
 
 def _can(ph: dict) -> float:
@@ -669,11 +828,16 @@ def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
     meta: dict = {}
     items: list = []
     loi = None
+    theo_p = {"p": p} if isinstance(ns, _SoTheoNenTang) else {}
     if not cap:
-        cap = ns.xin(_can(ph), _tran_lo(ph))
+        cap = ns.xin(_can(ph), _tran_lo(ph), **theo_p)
         if not cap:
+            n = ns.nhom.get(p) if theo_p else None
             v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0, usd_so=0.0,
-                            ly_do="hết ngân sách của việc — lượt này chưa chạy")
+                            ly_do=(f"hết trần console của {A._TEN_NGUON.get(p, p)} "
+                                   f"({A._usd_vn(n.tran)} USD) — lượt này chưa chạy"
+                                   if n is not None and n.dung else
+                                   "hết ngân sách của việc — lượt này chưa chạy"))
             return 0
     try:
         if ph.get("run_id"):
@@ -688,7 +852,7 @@ def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
                     actor, payload, _h(), datetime.datetime.fromisoformat(ph["moc_gui"]),
                     nghiem=True)
                 if not run and not kiem:
-                    ns.tra(cap, cap)
+                    ns.tra(cap, cap, **theo_p)
                     v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
                                     usd_so=cap, ly_do=_CAU_KHONG_KIEM)
                     return 0
@@ -712,7 +876,7 @@ def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
     tien = _so_tien(p, ph, items, meta)
     if loi is not None and meta.get("khong_kiem_duoc"):
         tien = cap                       # POST mơ hồ, không kiểm được: coi như đã tiêu trần
-    ns.tra(cap, tien)
+    ns.tra(cap, tien, **theo_p)
     rows = (chuan or _chuan_hoa)(p, ph, items or [])
     if rows:
         v.ghi_dong(p, rows, ph["id"])

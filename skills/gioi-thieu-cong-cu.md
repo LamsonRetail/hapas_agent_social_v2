@@ -41,7 +41,8 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
   share, hashtag, nội dung, link. Mark tóm tắt chủ đề nổi bật và dẫn bài thật
 - Cào hết rồi AI đọc từng bài để giữ/loại kèm lý do (cột "Nhận định AI", bài loại ở
   tab "Bị loại"). Bài của brand ở thị trường khác vẫn giữ, có cột "Thị trường"
-- Số bài mỗi lượt bị chặn ở trần chủ agent đặt trên console. Chỉ đọc bài công khai
+- Số bài mỗi lượt bị chặn ở trần chủ agent đặt trên console (đặt được riêng từng nền
+  tảng, hoặc tắt hẳn một nền tảng). Chỉ đọc bài công khai
 - Quét lớn (tới 10.000 bài mỗi nền tảng) chạy nền tới 45 phút: Mark báo ước tính chi phí
   và thời gian, hỏi "chạy nhé?", xong thì tự nhắn link sheet. Xem tiến độ bằng `/viec`
   hoặc hỏi "xong chưa"; nhắn "huỷ quét" để dừng (phần đã lấy vẫn giữ)
