@@ -17,7 +17,9 @@ Mark không cần cổng vào nào: nó tự kéo việc từ platform (`/v1/sel
 còn không lên sau 45 giây thì in log lỗi. Bot chết giữa chừng thì systemd tự chạy lại sau 10
 giây; chết liên tục 10 lần trong 10 phút thì dừng hẳn (khỏi đốt quota) — xem `mark logs`.
 
-Cập nhật code: trên PC `bash deploy/vps/push-from-pc.sh code`, rồi `mark restart`.
+Cập nhật code: **push lên `main`** — VPS tự kéo mỗi phút và restart khi cần (`agent-deploy`, timer
+`agent-deploy@mark.timer`; xem `agent-deploy mark --check`, nhật ký `/var/log/agent-deploy.log`).
+`push-from-pc.sh code` chỉ dùng khi khẩn cấp: nó đẩy cả thay đổi chưa commit nên VPS sẽ lệch git.
 `.env` chỉ được đọc lúc khởi động — đổi `.env` thì `push-from-pc.sh env` rồi `mark restart`.
 
 ## Lần đầu
