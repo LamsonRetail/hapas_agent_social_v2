@@ -67,7 +67,7 @@ def _cho_lease(monkeypatch, lease):
     (_lease_anthropic(model="claude-opus-5-5"), "claude-opus-5-5"),
     (_lease_anthropic(model="  claude-haiku-4-5 "), "claude-haiku-4-5"),
     (_lease_openai(model="gpt-5.5"), "gpt-5.5"),
-    (_lease_openai(model="gpt-5.3-codex-spark"), "gpt-5.3-codex-spark"),
+    (_lease_openai(model="gpt-6.1-sol"), "gpt-6.1-sol"),
 ])
 def test_lease_co_model_hop_le_thi_dung_model_do(monkeypatch, console, lease, mong):
     _cho_lease(monkeypatch, lease)
@@ -82,11 +82,15 @@ def test_lease_co_model_hop_le_thi_dung_model_do(monkeypatch, console, lease, mo
     (_lease_anthropic(model="gpt-5.5"), "claude-sonnet-4-6"),        # chéo provider
     (_lease_openai(model="claude-opus-5-5"), config.agent_model),     # chéo provider
     (_lease_openai(model="gpt-4o"), config.agent_model),
+    # Hermes liệt kê nhưng Codex backend trả 400 với tài khoản ChatGPT (thử thật 02/10).
+    (_lease_openai(model="gpt-5.6-sol-pro"), config.agent_model),
+    (_lease_openai(model="gpt-5.3-codex-spark"), config.agent_model),
     (_lease_openai(model=""), config.agent_model),
     (_lease_openai(model="   "), config.agent_model),
     (_lease_anthropic(model=123), "claude-sonnet-4-6"),
     (_lease_anthropic(model=["claude-opus-5-5"]), "claude-sonnet-4-6"),
-], ids=["la", "cheo-anthropic", "cheo-openai", "ngoai-ds", "rong", "trang", "so", "list"])
+], ids=["la", "cheo-anthropic", "cheo-openai", "ngoai-ds", "pro", "spark", "rong", "trang",
+        "so", "list"])
 def test_model_sai_hoac_cheo_provider_thi_ve_mac_dinh_va_ghi_ly_do(monkeypatch, console,
                                                                     lease, mac_dinh, capsys):
     _cho_lease(monkeypatch, lease)
@@ -137,9 +141,11 @@ def test_mo_ta_runtime_hien_nguon_model(monkeypatch, console):
 
 # ─────────────────────── danh sách khớp platform + Hermes ───────────────────────
 
-def test_ds_openai_khop_DEFAULT_CODEX_MODELS_cua_hermes_cai_tren_may():
-    cm = pytest.importorskip("hermes_cli.codex_models")
-    assert T.MODEL_CHO_PHEP["openai"] == tuple(cm.DEFAULT_CODEX_MODELS)
+def test_ds_openai_dung_danh_sach_da_thu_that_tren_codex():
+    """Không còn chép Hermes: đúng 7 model đã gọi thật được qua Codex backend (02/10)."""
+    assert T.MODEL_CHO_PHEP["openai"] == (
+        "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra",
+        "gpt-5.6-luna", "gpt-5.5")
 
 
 def _goc_platform() -> pathlib.Path:
@@ -161,18 +167,6 @@ def test_ds_model_khop_hang_so_platform():
     ds = getattr(mod, "MODEL_ALLOWLIST", None)
     assert isinstance(ds, dict), f"{f} không còn MODEL_ALLOWLIST"
     assert {p: tuple(v) for p, v in ds.items()} == T.MODEL_CHO_PHEP
-
-
-def test_ds_openai_khop_ban_hermes_cua_platform():
-    f = (_goc_platform() / "infra" / "lsr-platform" / "model_gateway" / "hermes"
-         / "hermes_cli" / "codex_models.py")
-    if not f.is_file():
-        pytest.skip(f"không thấy {f} — đặt PLATFORM_REPO trỏ tới repo Platform")
-    m = re.search(r"DEFAULT_CODEX_MODELS[^=]*=\s*\[(.*?)\n\]", f.read_text(encoding="utf-8"),
-                  re.S)
-    assert m, "platform không còn DEFAULT_CODEX_MODELS"
-    ds = re.findall(r'^\s*"([\w.-]+)"', m.group(1), re.M)
-    assert tuple(ds) == T.MODEL_CHO_PHEP["openai"]
 
 
 # ─────────────────────── nhà cung cấp từ chối model ───────────────────────
@@ -227,6 +221,21 @@ def test_nhan_ra_tu_choi_model_tu_hook_hermes(console, su_kien, mong):
     out = a.run_conversation()
     assert T.model_bi_tu_choi(a, out, None) is mong
     assert "error_message" not in json.dumps(a._tai_khoan_loi_api), "không giữ thông điệp"
+
+
+@pytest.mark.parametrize("m", ["gpt-5.6-sol-pro", "gpt-5.6-terra-pro", "gpt-5.6-luna-pro",
+                               "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex",
+                               "gpt-5.3-codex-spark"])
+def test_hoi_quy_codex_400_that_la_tu_choi_model(console, m):
+    """Đúng lỗi Codex backend trả khi thử thật 02/10/2026: Hermes xếp vào format_error,
+    status 400 — vẫn phải nhận ra là model bị từ chối để chạy lại bằng mặc định."""
+    a = _agent_hook({"status_code": 400, "reason": "format_error",
+                     "error_message": f"The '{m}' model is not supported when using "
+                                      f"Codex with a ChatGPT account."})
+    out = a.run_conversation()
+    assert a._tai_khoan_model_tu_choi is True
+    assert T.model_bi_tu_choi(a, out, None) is True
+    assert m not in T.MODEL_CHO_PHEP["openai"]
 
 
 def test_tu_choi_model_chi_khi_luot_that_su_hong(console):

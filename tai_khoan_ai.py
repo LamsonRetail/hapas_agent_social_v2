@@ -103,15 +103,16 @@ def _model_anthropic() -> str:
 
 
 #: Model chủ agent được chọn trên console, theo provider của lease. BẢN SAO hằng số của
-#: platform (bộ thử test_model_console đối chiếu khi có PLATFORM_REPO). "openai" = đúng
-#: `DEFAULT_CODEX_MODELS` của Hermes (hermes_cli/codex_models.py) — Codex chỉ nhận các
-#: model đó với tài khoản ChatGPT.
+#: platform (bộ thử test_model_console đối chiếu khi có PLATFORM_REPO). "openai" KHÔNG
+#: chép từ `DEFAULT_CODEX_MODELS` của Hermes: đã gọi thử thật từng model qua Codex backend
+#: bằng tài khoản ChatGPT ngày 02/10/2026 — chỉ giữ model chạy được. Các bản -pro,
+#: gpt-5.4, gpt-5.4-mini, gpt-5.3-codex(-spark) bị trả 400 "The '<m>' model is not
+#: supported when using Codex with a ChatGPT account." dù Hermes vẫn liệt kê.
 MODEL_CHO_PHEP: dict[str, tuple[str, ...]] = {
     "anthropic": ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-6",
                   "claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"),
-    "openai": ("gpt-5.6-sol", "gpt-5.6-sol-pro", "gpt-5.6-terra", "gpt-5.6-terra-pro",
-               "gpt-5.6-luna", "gpt-5.6-luna-pro", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4",
-               "gpt-5.3-codex", "gpt-5.3-codex-spark"),
+    "openai": ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra",
+               "gpt-5.6-luna", "gpt-5.5"),
 }
 
 
