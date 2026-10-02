@@ -292,10 +292,34 @@ def _o(khoi: str, khoa: str) -> dict | None:
     return ra
 
 
+def _nen_tang_sinh_tu_truong_chung() -> dict | None:
+    """Cách console (PR #85, 02/10/2026) khai báo: bảng `NEN_TANG_THEO_TOOL.social_listen`
+    + `truongNenTang` CHÉP khoảng của ô chung (`{ ...gBai, khoa: `${lk.bai}_${nt.ma}` }`).
+    -> {mã nền tảng: có ô USD?} hoặc None nếu console không khai kiểu này."""
+    import os
+    import pathlib
+    goc = pathlib.Path(os.environ.get("PLATFORM_REPO") or r"D:\Platform")
+    ts = goc / "apps" / "platform-web" / "lib" / "agentToolCapabilities.ts"
+    s = ts.read_text(encoding="utf-8") if ts.is_file() else ""
+    m = re.search(r"NEN_TANG_THEO_TOOL[^=]*=\s*\{\s*social_listen:\s*\[(.*?)\]", s, re.S)
+    if not m or not re.search(r"\.\.\.gBai,\s*khoa:\s*`\$\{lk\.bai\}_\$\{nt\.ma\}`", s) \
+            or not re.search(r"\.\.\.gUsd,\s*khoa:\s*`\$\{lk\.usd\}_\$\{nt\.ma\}`", s):
+        return None
+    return {ma: gia != "null" for ma, gia in
+            re.findall(r'ma:\s*"(\w+)"[^}]*?usd_moi_bai:\s*([\w.]+)', m.group(1))}
+
+
 def test_khop_tran_theo_nen_tang_ben_console():
     """Console chặn gõ nhầm bằng min/max của nó; lệch với runtime là console cho lưu một
     số rồi runtime lặng lẽ kẹp thành số khác."""
     khoi = _ts_social_listen()
+    sinh = _nen_tang_sinh_tu_truong_chung()
+    if sinh is not None:
+        # Ô theo nền tảng chép khoảng của ô chung, mà ô chung đã đối chiếu ở
+        # test_tran_quet — ở đây chỉ cần cùng bộ nền tảng, và YouTube không có ô USD.
+        assert set(sinh) == set(A._ALL), f"console có nền tảng {sorted(sinh)}"
+        assert sinh["youtube"] is False and all(sinh[p] for p in A._ALL if p != "youtube")
+        return
     if _o(khoi, "tran_bai_tiktok") is None:
         pytest.skip("Platform chưa có trần theo nền tảng")
     for p in A._ALL:
