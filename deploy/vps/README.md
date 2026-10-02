@@ -35,8 +35,10 @@ Cập nhật code: trên PC `bash deploy/vps/push-from-pc.sh code`, rồi `mark 
 1. **Dựng môi trường** — trên PC: `bash deploy/vps/push-from-pc.sh kit`, rồi trên VPS:
    `bash /opt/mark/kit/setup.sh` (vá bảo mật, swap 4 GB, tường lửa chỉ mở SSH, fail2ban, user
    `mark`, Node 22 + lark-cli, Python 3.11/3.12, Hermes đúng commit PC đang chạy, Chromium,
-   Scrapling). Sau đó `bash /opt/mark/kit/harden-ssh.sh` (tắt đăng nhập bằng mật khẩu — tự từ
-   chối nếu chưa có khoá) và **đổi mật khẩu root** (`passwd`).
+   Scrapling). Sau đó `bash /opt/mark/kit/harden-ssh.sh` — giữ **ba đường vào** độc lập:
+   SSH bằng khoá · Console web của nhà cung cấp (root + mật khẩu, không qua SSH) · SSH bằng mật
+   khẩu với user quản trị `tham` (có sudo; tự đặt mật khẩu bằng `passwd tham`). Chỉ tắt đúng cửa
+   root đăng nhập SSH bằng mật khẩu (cửa bị dò liên tục); fail2ban chặn IP dò mật khẩu.
 2. **Đẩy code + cấu hình** — trên PC: `bash deploy/vps/push-from-pc.sh prep`
    (code đang chạy trên PC, `.env` đã đổi đường dẫn Windows → Linux, `config.yaml` của Hermes).
 3. **Kiểm khi CHƯA bật bot** — trên VPS: `mark check` (đọc `.env`, lark-cli, Scrapling, nạp

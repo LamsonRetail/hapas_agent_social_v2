@@ -19,7 +19,7 @@ MARK_SRC="${MARK_SRC:-D:/hapas_agent_social}"
 HERMES_HOME_PC="${HERMES_HOME_PC:-${LOCALAPPDATA:-C:/Users/PC/AppData/Local}/hermes}"
 
 # Đọc ĐÚNG bốn khoá cần cho SSH — không `source` cả file (có mật khẩu root trong đó).
-lay() { grep -E "^$1=" "$VPS_ENV" | tail -1 | cut -d= -f2- | tr -d '\r"'"'"; }
+lay() { grep -E "^$1=" "$VPS_ENV" | tail -1 | cut -d= -f2- | tr -d '"'"'" | tr -d '[:cntrl:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
 HOST="$(lay VPS_HOST)"; PORT="$(lay VPS_PORT)"; USER_="$(lay VPS_USER)"; KEY="$(lay SSH_KEY_PATH)"
 PORT="${PORT:-22}"; USER_="${USER_:-root}"
 KEY="${KEY:-.ssh/vps_test_key}"; case "$KEY" in /*|[A-Za-z]:*) ;; *) KEY="$(dirname "$VPS_ENV")/$KEY";; esac
