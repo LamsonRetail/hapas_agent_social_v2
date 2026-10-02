@@ -146,33 +146,21 @@ def _goc_platform() -> pathlib.Path:
     return pathlib.Path(os.environ.get("PLATFORM_REPO") or r"D:\Platform")
 
 
-def _ds_trong_khoi(s: str, mau: str) -> list[str] | None:
-    """Danh sách chuỗi trong khối [...] / (...) / {...} đầu tiên chứa `mau`."""
-    for m in re.finditer(r"[\[({][^\[\](){}]*?" + re.escape(f'"{mau}"') + r"[^\[\](){}]*[\])}]",
-                         s):
-        return re.findall(r'"([\w.-]+)"', m.group(0))
-    return None
-
-
-def test_ds_anthropic_khop_hang_so_platform():
-    """Platform (PR song song) giữ danh sách gốc. Chưa có checkout / chưa có hằng số thì
-    bỏ qua, như test_tran_nen_tang."""
-    goc = _goc_platform()
-    if not goc.is_dir():
-        pytest.skip(f"không thấy {goc} — đặt PLATFORM_REPO trỏ tới repo Platform")
-    tep = [goc / "infra" / "lsr-platform" / "platform_api" / "app.py",
-           *sorted((goc / "infra" / "lsr-platform" / "platform_api").glob("*model*.py")),
-           *sorted((goc / "apps" / "platform-web" / "lib").glob("*.ts"))]
-    for f in tep:
-        if not f.is_file():
-            continue
-        ds = _ds_trong_khoi(f.read_text(encoding="utf-8", errors="replace"),
-                            "claude-sonnet-5-5")
-        if ds:
-            assert set(x for x in ds if x.startswith("claude-")) == set(
-                T.MODEL_CHO_PHEP["anthropic"]), f"lệch với {f}"
-            return
-    pytest.skip("Platform chưa có danh sách model cho console")
+def test_ds_model_khop_hang_so_platform():
+    """Platform (PR #88) giữ danh sách gốc ở `core/agent_model.py` (thuần: không DB,
+    không HTTP). So TỪNG phần tử, đúng thứ tự, cả hai provider. Chưa có checkout / chưa
+    có hằng số thì bỏ qua, như test_tran_nen_tang."""
+    import importlib.util
+    f = (_goc_platform() / "infra" / "lsr-platform" / "platform_api" / "core"
+         / "agent_model.py")
+    if not f.is_file():
+        pytest.skip(f"không thấy {f} — đặt PLATFORM_REPO trỏ tới repo Platform có PR #88")
+    spec = importlib.util.spec_from_file_location("_agent_model_platform", f)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    ds = getattr(mod, "MODEL_ALLOWLIST", None)
+    assert isinstance(ds, dict), f"{f} không còn MODEL_ALLOWLIST"
+    assert {p: tuple(v) for p, v in ds.items()} == T.MODEL_CHO_PHEP
 
 
 def test_ds_openai_khop_ban_hermes_cua_platform():

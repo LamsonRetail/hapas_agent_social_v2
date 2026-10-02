@@ -3,8 +3,56 @@
 `brain._resolve_agent` mặc định xin tài khoản AI từ console (tai_khoan_ai). Trong bộ
 thử, mặc định tắt cờ đó để mọi bài cũ chạy đúng đường cũ, không chạm mạng. Bài nào cần
 đường console tự bật lại bằng monkeypatch và giả lease.
+
+Cấu hình console (Năng lực → trần quét, công tắc) cũng KHÔNG đọc thật. Ngày 02/10/2026
+chủ agent đặt trần TikTok 50 bài và tắt Facebook trên console: 34 bài đỏ vì bộ chạy nạp
+`.env` gốc (có khoá platform) nên `lsr_policy.cau_hinh_tool` đọc số sống — bài đặt trần
+chung vẫn bị trần riêng từng nền tảng đè. Nay mặc định là cấu hình rỗng cố định, và mọi
+kết nối mạng ra ngoài máy bị chặn. Bài nào cần cấu hình riêng thì tự monkeypatch
+`cau_hinh_tool` / giả `urlopen` như trước; cần mạng thật thì đặt MARK_TEST_CHO_MANG=1.
 """
+import math
+import os
+import socket
+
 import pytest
+
+#: Biến khiến runtime gọi platform (lease, stamp, danh bạ Năng lực, trace, job).
+_BIEN_PLATFORM = ("LSR_TELEMETRY_API_KEY", "LSR_COLLECTOR", "LSR_PLATFORM_URL",
+                  "LSR_PLATFORM_TOKEN", "LSR_PLATFORM_ADMIN_TOKEN")
+_DIA_CHI_MAY = {"localhost", "127.0.0.1", "::1", None}
+_goc_getaddrinfo = socket.getaddrinfo
+
+
+def _getaddrinfo_chan(host, *a, **k):
+    h = host.decode() if isinstance(host, bytes) else host
+    if h not in _DIA_CHI_MAY:
+        # gaierror: thư viện nào cũng hiểu là "mất mạng" và đi đường lỗi của nó.
+        raise socket.gaierror(socket.EAI_NONAME,
+                              f"bộ thử chặn mạng ra ngoài ({h}) — MARK_TEST_CHO_MANG=1 để mở")
+    return _goc_getaddrinfo(host, *a, **k)
+
+
+@pytest.fixture(autouse=True)
+def _khong_cham_console_that(monkeypatch):
+    """Không bài nào đọc console/platform sống, trừ khi tự chọn."""
+    for ten in _BIEN_PLATFORM:
+        monkeypatch.delenv(ten, raising=False)
+    try:
+        import lsr_policy
+        # Bản nhớ MỚI cho mỗi bài: không mang trần/công tắc của bài trước hay của console.
+        # `luc=inf` = luôn còn hạn → không bao giờ tự đi hỏi; bài nào ép làm mới
+        # (`_nho_nl.update(bat=None, luc=0.0)`) thì đọc qua `urlopen` nó tự giả.
+        monkeypatch.setattr(lsr_policy, "_nho_nl", {
+            "bat": lsr_policy.KHONG_THU_HEP, "luc": math.inf, "nguon": "bộ thử",
+            "cau_hinh": {}})
+        monkeypatch.setattr(lsr_policy, "_nho", {"quyen": None, "luc": 0.0,
+                                                 "nguon": "chưa hỏi"})
+    except BaseException:
+        pass
+    if os.environ.get("MARK_TEST_CHO_MANG", "").strip() != "1":
+        monkeypatch.setattr(socket, "getaddrinfo", _getaddrinfo_chan)
+    yield
 
 
 @pytest.fixture(autouse=True)
