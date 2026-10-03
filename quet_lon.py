@@ -1297,7 +1297,16 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
 # ───────────────────────────── sheet ─────────────────────────────
 _TAB_TONG = "Tổng hợp"
 _TAB_LOAI = "Bị loại"
+_TAB_KHAC = A._TAB_THI_TRUONG_KHAC   # bài của brand ở nước khác — tab riêng (chốt 02/10/2026)
 _BI_LOAI_TOI_DA = 20000
+
+
+def _nuoc_khac(ts: dict):
+    """Hàm xét một bài có thuộc tab `_TAB_KHAC` không: bài brand ở nước khác, trừ khi người
+    dùng hỏi nhiều nước (`giu_nuoc_ngoai`) — khi đó chung tab nền tảng như cũ."""
+    nuoc = ts.get("country") or "VN"
+    return lambda d: (not ts.get("giu_nuoc_ngoai")
+                      and (d.get("_thi_truong") or "không rõ") not in (nuoc, "không rõ"))
 _COT_THEM = ["Thị trường", "Nhận định AI", "Phân xử"]
 
 
@@ -1365,6 +1374,9 @@ def _dong_tong_hop(v, ts, ket: dict, cp: dict, trang_thai: str) -> list[list]:
             if ph.get("trang_thai") in ("loi", "mot_phan", "da_huy"):
                 r.append([f"{_ten_tab(p)} — {ph.get('nhan')}",
                           f"{ph.get('trang_thai')}: {ph.get('ly_do') or ph.get('ma')}"])
+    cau_khac = _cau_nuoc_khac(ts, ket)
+    if cau_khac:
+        r.append([_TAB_KHAC, cau_khac])
     px = ket["phan_xu"]
     r.append(["Phân xử", _cau_phan_xu(px)])
     r.append(["Chi phí thật", f"{_usd(cp.get('usd'))} USD ({cp.get('so_run', 0)} lượt chạy "
@@ -1378,12 +1390,20 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
     s.dam_bao(_title(v, ts), _TAB_TONG, v.d.get("nguoi_yeu_cau") or "")
     s.bat_dau_giai_doan("cuoi")
     kw = ", ".join(ts["queries"])
+    khac = _nuoc_khac(ts)
     for p in v.d["nen_tang"]:
         rows = [_dong(d, dt, kw, 500) + [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""]
-                for d, dt in ket["hits"] if d["platform"] == p]
+                for d, dt in ket["hits"] if d["platform"] == p and not khac(d)]
         s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows)
+    # Tab phụ rỗng: chưa từng có thì KHÔNG tạo tab trống; đã có từ lượt trước (việc tiếp tục
+    # sau `xong_mot_phan`) thì vẫn ghi lại chỉ tiêu đề — `ghi_tab` xoá các dòng cũ thừa, kẻo
+    # bài của lượt trước nằm lại như kết quả của lượt này.
+    rows = [_dong(d, dt, kw, 500) + [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""]
+            for d, dt in ket["hits"] if khac(d)]
+    if rows or _TAB_KHAC in s.s["tabs"]:
+        s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM] + rows)
     bl = ket["bi_loai"]
-    if bl:
+    if bl or _TAB_LOAI in s.s["tabs"]:
         rows = [_dong(d, dt, kw, 300) + [ly_do, d.get("_phan_xu") or ""]
                 for d, dt, ly_do in bl[:_BI_LOAI_TOI_DA]]
         s.ghi_tab(_TAB_LOAI, [list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"]] + rows)
@@ -1392,10 +1412,30 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
         tong.append(["Bị loại — không ghi", f"{len(bl) - _BI_LOAI_TOI_DA} dòng (trần "
                                             f"{_BI_LOAI_TOI_DA} dòng/tab)"])
     s.ghi_tab(_TAB_TONG, tong)
+    # Tab nền tảng/phụ đều thêm bằng `addSheet` (SoSheet.dam_bao_tab → A._them_tab), mà
+    # Lark chèn tab mới vào vị trí 0 → link mở ra tab thêm sau cùng. Kéo "Tổng hợp" về
+    # đầu — cố gắng, hỏng chỉ in cảnh báo (xem `A._dua_tab_chinh_len_dau`).
+    tong_sid = (s.s["tabs"].get(_TAB_TONG) or {}).get("sheet_id")
+    if tong_sid and len(s.s["tabs"]) > 1:
+        A._dua_tab_chinh_len_dau(s.s.get("token") or "", tong_sid)
     return s.s.get("url") or ""
 
 
 # ───────────────────────────── tin kết quả ─────────────────────────────
+def _cau_nuoc_khac(ts: dict, ket: dict) -> str:
+    """Câu báo bài của brand ở nước khác đã sang tab riêng; rỗng nếu không có bài nào."""
+    khac = _nuoc_khac(ts)
+    dem: dict[str, int] = {}
+    for d, _ in ket["hits"]:
+        if khac(d):
+            dem[d["_thi_truong"]] = dem.get(d["_thi_truong"], 0) + 1
+    if not dem:
+        return ""
+    nuoc = ", ".join(f"{k} {n}" for k, n in sorted(dem.items(), key=lambda x: -x[1]))
+    return (f"giữ {sum(dem.values())} bài của brand ở nước khác ({nuoc}) ở tab riêng "
+            f"'{_TAB_KHAC}' — các tab nền tảng chỉ có bài {ts['country']}")
+
+
 def _cau_phan_xu(px: dict) -> str:
     d = px.get("dem") or {}
 
@@ -1445,6 +1485,9 @@ def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list
             s += f" · {len(loi)}/{len(v.d['nen_tang'][p]['phan'])} lượt hỏng/không chạy (" + \
                  "; ".join(sorted({str(ph.get('ma')) for ph in loi})) + ")"
         d.append(s)
+    cau_khac = _cau_nuoc_khac(ts, ket)
+    if cau_khac:
+        d.append(f"Thị trường khác: {cau_khac}.")
     d.append("Phân xử: " + _cau_phan_xu(ket["phan_xu"]) + ".")
     chua = [c for x in v.d["nen_tang"].values() for c in (x.get("chua_phu") or [])]
     if chua:

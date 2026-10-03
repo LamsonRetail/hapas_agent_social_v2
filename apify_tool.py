@@ -2580,6 +2580,10 @@ def _write_values(token: str, sheet_id: str, values: list[list], dong_dau: int =
 
 
 _TAB_BI_LOAI = "Bị loại"
+# Chủ agent chốt 02/10/2026: bài của brand ở NƯỚC KHÁC (vd shop bán lại HAPAS ở Thái) không
+# lẫn vào sheet chính của thị trường đang quét, cũng không bị coi là rác ("Bị loại") —
+# nằm ở tab riêng này. `giu_nuoc_ngoai`=true (hỏi nhiều nước) thì vẫn chung sheet chính.
+_TAB_THI_TRUONG_KHAC = "Thị trường khác"
 
 
 def _them_tab(token: str, ten: str) -> str:
@@ -2596,29 +2600,62 @@ def _them_tab(token: str, ten: str) -> str:
     return sid
 
 
+def _ghi_tab_phu(token: str, sheet_id: str, so_dong_chinh: int, rows: list[list],
+                 ten: str, dau: str, nhan: str) -> tuple[str, int]:
+    """Ghi `rows` vào tab riêng `ten`; trả (nơi đã ghi, số dòng sheet chính đã dùng).
+
+    Thêm tab hỏng thì KHÔNG bỏ dữ liệu: ghi nối dưới sheet chính, cách một dòng trống
+    và một dòng phân cách (`dau` — `nhan`). Số dòng trả về để tab phụ kế tiếp (cũng hỏng)
+    ghi nối TIẾP chứ không đè lên phần vừa ghi. Sheet chính đã ghi xong TRƯỚC bước này
+    nên lỗi ở đây không làm hỏng dữ liệu chính.
+
+    Ghi dưới sheet chính CŨNG hỏng thì lỗi gốc vẫn ném ra, nhưng gắn `so_dong_tiep` (số
+    dòng sau vùng vừa định ghi): `_write_values` ghi từng khối 1000 dòng nên có thể đã ghi
+    được một phần — phần ghi tiếp phải nằm DƯỚI vùng đó chứ không đè lên.
+    """
+    try:
+        _write_values(token, _them_tab(token, ten), rows)
+        return f"tab '{ten}'", so_dong_chinh
+    except Exception as e:  # noqa: BLE001
+        print(f"[social_listen] thêm tab {ten} hỏng, ghi dưới sheet chính: {_che_token(e)}")
+    # Đệm dòng phân cách cho ĐỦ số cột: một vùng ghi mà dòng 1 cột lẫn dòng 13 cột
+    # thì Lark có thể từ chối cả khối (cùng loại lỗi "columns of value > range").
+    rong = max((len(r) for r in rows), default=1)
+    phan_cach = [[""] * rong, [f"{dau} — {nhan}"] + [""] * (rong - 1)]
+    so_dong_tiep = so_dong_chinh + len(phan_cach) + len(rows)
+    try:
+        _write_values(token, sheet_id, phan_cach + rows, dong_dau=so_dong_chinh + 1)
+    except Exception as e:  # noqa: BLE001
+        # Gắn vào chính lỗi gốc (không bọc lớp mới) để bên gọi vẫn thấy đúng loại lỗi.
+        e.so_dong_tiep = so_dong_tiep
+        raise
+    return f"cuối sheet chính (dưới dòng '{dau}')", so_dong_tiep
+
+
+def _dua_tab_chinh_len_dau(token: str, sheet_id: str) -> None:
+    """Đưa tab `sheet_id` về vị trí đầu — cố gắng, hỏng chỉ in cảnh báo.
+
+    Vì sao: `addSheet` của Lark chèn tab mới vào vị trí 0, nên link chia sẻ mở ra tab
+    thêm SAU CÙNG (vd "Bị loại") thay vì sheet chính. Thứ tự tab chỉ là tiện xem, dữ liệu
+    đã ghi đủ — không bao giờ để bước này làm hỏng kết quả công cụ."""
+    try:
+        lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/sheets_batch_update",
+                  body={"requests": [{"updateSheet": {"properties": {
+                      "sheetId": sheet_id, "index": 0}}}]})
+    except Exception as e:  # noqa: BLE001
+        print(f"[apify_tool] đưa tab chính lên đầu hỏng (bỏ qua): {_che_token(e)}")
+
+
 def _ghi_bi_loai(token: str, sheet_id: str, so_dong_chinh: int,
                  bi_loai_rows: list[list]) -> str:
     """Ghi bài BỊ LOẠI (kèm lý do) — trả nơi đã ghi để báo cho model.
 
     Vì sao: bài bị lọc mà biến mất thì bộ lọc sai cũng không ai phát hiện được.
     Ưu tiên tab riêng "Bị loại" để sheet chính sạch (người dùng lọc/đếm/sắp xếp
-    trên đó). Thêm tab hỏng thì KHÔNG bỏ dữ liệu: ghi nối dưới sheet chính, cách
-    một dòng trống và một dòng phân cách "BỊ LOẠI — lý do". Sheet chính đã ghi
-    xong TRƯỚC bước này nên lỗi ở đây không làm hỏng dữ liệu chính.
+    trên đó); thêm tab hỏng thì ghi dưới sheet chính (xem `_ghi_tab_phu`).
     """
-    try:
-        _write_values(token, _them_tab(token, _TAB_BI_LOAI), bi_loai_rows)
-        return f"tab '{_TAB_BI_LOAI}'"
-    except Exception as e:  # noqa: BLE001
-        print(f"[social_listen] thêm tab Bị loại hỏng, ghi dưới sheet chính: {_che_token(e)}")
-    # Đệm dòng phân cách cho ĐỦ số cột: một vùng ghi mà dòng 1 cột lẫn dòng 13 cột
-    # thì Lark có thể từ chối cả khối (cùng loại lỗi "columns of value > range").
-    rong = max((len(r) for r in bi_loai_rows), default=1)
-    phan_cach = [[""] * rong,
-                 ["BỊ LOẠI — lý do ở cột cuối (bài khớp sai/ngoài thị trường)"]
-                 + [""] * (rong - 1)]
-    _write_values(token, sheet_id, phan_cach + bi_loai_rows, dong_dau=so_dong_chinh + 1)
-    return "cuối sheet chính (dưới dòng 'BỊ LOẠI')"
+    return _ghi_tab_phu(token, sheet_id, so_dong_chinh, bi_loai_rows, _TAB_BI_LOAI,
+                        "BỊ LOẠI", "lý do ở cột cuối (bài khớp sai/ngoài thị trường)")[0]
 
 
 def _grant(token: str, open_id: str) -> bool:
@@ -2730,7 +2767,8 @@ SCHEMA = {
         "nên sheet có thể còn nhiễu.\n"
         "- THỊ TRƯỜNG: BẮT BUỘC nói đã quét thị trường nào và giữ/chuyển bao nhiêu bài thị "
         "trường khác — chép `cau_thi_truong`. Mặc định bài của brand ở nước khác (vd HAPAS "
-        "THAILAND) được GIỮ, cột 'Thị trường' ghi mã (`thi_truong_khac`).\n"
+        "THAILAND) được GIỮ nhưng ở TAB RIÊNG 'Thị trường khác' (`thi_truong_khac_ghi_o`), "
+        "sheet chính chỉ có thị trường đang quét — nói rõ số bài và tên tab đó.\n"
         "- `cham_tran_chi_phi`=true: có lượt chạy bị dừng giữa chừng, nên nói rõ kết "
         "quả có thể THIẾU và đề xuất giảm số từ khoá hoặc giảm `limit` (không cần nêu "
         "số tiền).\n"
@@ -2804,7 +2842,7 @@ SCHEMA = {
                 "type": "boolean",
                 "description": (
                     "Mặc định false: bài của brand ở thị trường khác (vd HAPAS THAILAND "
-                    "khi quét VN) vẫn GIỮ trong sheet, cột 'Thị trường' ghi mã. Đặt true "
+                    "khi quét VN) vẫn GIỮ, ở tab riêng 'Thị trường khác'. Đặt true "
                     "CHỈ khi người dùng nói rõ 'chỉ VN'/'chỉ thị trường này' — khi đó các "
                     "bài đó chuyển sang tab 'Bị loại'. Bài trùng tên thứ khác ở nước ngoài "
                     "thì AI loại bất kể cờ này."),
@@ -3018,8 +3056,9 @@ def _handle(args: dict, **kwargs) -> str:
     khop_long = _co(args.get("khop_long"))
     giu_nuoc_ngoai = _co(args.get("giu_nuoc_ngoai"))
     # Chủ agent chốt 01/10/2026 ("youtube thì có cả ở thái lan cx có hapas mà"): bài của
-    # brand ở thị trường khác GIỮ trong sheet, có cột "Thị trường". Chỉ khi người dùng nói
-    # "chỉ VN" mới chuyển chúng sang tab "Bị loại".
+    # brand ở thị trường khác GIỮ, có cột "Thị trường"; chốt thêm 02/10/2026: ở tab riêng
+    # `_TAB_THI_TRUONG_KHAC`, không lẫn sheet chính. Chỉ khi người dùng nói "chỉ VN" mới
+    # chuyển chúng sang tab "Bị loại".
     chi_thi_truong_nay = _co(args.get("chi_thi_truong_nay"))
     rng =f"{d_from:%Y-%m-%d} → {d_to:%Y-%m-%d}"
 
@@ -3359,8 +3398,9 @@ def _handle(args: dict, **kwargs) -> str:
                     nuoc[d["_thi_truong"]] = nuoc.get(d["_thi_truong"], 0) + 1
             khong_ten = sum(1 for d in ai_giu if not d["_khop"])
             s = f"AI đọc {ai_tt['da_xet']} bài: giữ {len(ai_giu)}"
-            them = ([f"{sum(nuoc.values())} bài thị trường {_dem_nuoc(nuoc)}, có cột "
-                     f"Thị trường"] if nuoc else []) + (
+            them = ([f"{sum(nuoc.values())} bài thị trường {_dem_nuoc(nuoc)}, "
+                     + ("có cột Thị trường" if giu_nuoc_ngoai
+                        else f"ở tab '{_TAB_THI_TRUONG_KHAC}'")] if nuoc else []) + (
                 [f"{khong_ten} bài bàn về brand dù không nhắc tên"] if khong_ten else [])
             s += f" ({'; '.join(them)})" if them else ""
             s += f", loại {len(ai_bo)}"
@@ -3417,8 +3457,12 @@ def _handle(args: dict, **kwargs) -> str:
     cau_thi_truong = (
         f"Đã quét thị trường {country}"
         + (" (giu_nuoc_ngoai: không lọc thị trường)" if giu_nuoc_ngoai else "")
-        + (f"; giữ {sum(thi_truong_khac.values())} bài thị trường khác "
-           f"({_dem_nuoc(thi_truong_khac)}) trong sheet, cột 'Thị trường' ghi rõ"
+        + ((f"; giữ {sum(thi_truong_khac.values())} bài thị trường khác "
+            f"({_dem_nuoc(thi_truong_khac)}) trong sheet, cột 'Thị trường' ghi rõ"
+            if giu_nuoc_ngoai else
+            f"; giữ {sum(thi_truong_khac.values())} bài thị trường khác "
+            f"({_dem_nuoc(thi_truong_khac)}) ở tab riêng '{_TAB_THI_TRUONG_KHAC}' — sheet "
+            f"chính chỉ có bài {country}")
            if thi_truong_khac else "")
         + (f"; chuyển {sum(chuyen_thi_truong.values())} bài thị trường khác "
            f"({_dem_nuoc(chuyen_thi_truong)}) sang tab Bị loại theo yêu cầu chỉ {country}"
@@ -3495,9 +3539,17 @@ def _handle(args: dict, **kwargs) -> str:
                 d["views"], d["likes"], d["comments"], d["shares"], d["hashtags"],
                 d["text"], d["link"], kw, d.get("_thi_truong") or "không rõ"]
 
+    # Bài của brand ở nước khác sang tab riêng (xem `_TAB_THI_TRUONG_KHAC`); hỏi nhiều nước
+    # (`giu_nuoc_ngoai`) thì chung sheet chính như cũ.
+    def _nuoc_khac(d: dict) -> bool:
+        return not giu_nuoc_ngoai and d.get("_thi_truong") not in (country, "không rõ")
+    hits_chinh = [(d, dt) for d, dt in hits if not _nuoc_khac(d)]
+    hits_khac = [(d, dt) for d, dt in hits if _nuoc_khac(d)]
     # Hai cột mới nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen.
     rows = [list(_HEADER) + ["Thị trường", "Nhận định AI"]] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or ""] for d, dt in hits]
+        _dong(d, dt) + [d.get("_nhan_dinh") or ""] for d, dt in hits_chinh]
+    rows_khac = [list(_HEADER) + ["Thị trường", "Nhận định AI"]] + [
+        _dong(d, dt) + [d.get("_nhan_dinh") or ""] for d, dt in hits_khac]
     # Bài bị loại vẫn có sheet để kiểm (kể cả khi KHÔNG bài nào được giữ): bộ lọc
     # loại nhầm mà không ai thấy được thì không bao giờ sửa được.
     rows_loai = [list(_HEADER) + ["Thị trường", "Lý do loại"]] + [
@@ -3514,25 +3566,48 @@ def _handle(args: dict, **kwargs) -> str:
             error=_che_token(canh_bao_nguon
                              + f"Cào OK ({len(hits)} post trong khoảng) nhưng TẠO/GHI SHEET "
                              f"THẤT BẠI: {type(e).__name__}: {e}"),
+            # "top" là bài của thị trường đang quét: bài brand ở nước khác (vd shop bán lại
+            # ở Thái) không được nêu như bài nổi bật của thị trường này.
             top=[{"nen_tang": d["platform"], "kenh": d["kenh"], "views": d["views"],
-                  "link": d["link"]} for d, _ in hits[:5]],
+                  "link": d["link"]} for d, _ in hits_chinh[:5]],
         )
+    so_dong = len(rows)
+    thi_truong_khac_ghi_o = None
+    if hits_khac:
+        try:
+            thi_truong_khac_ghi_o, so_dong = _ghi_tab_phu(
+                tok, sid, so_dong, rows_khac, _TAB_THI_TRUONG_KHAC, "THỊ TRƯỜNG KHÁC",
+                f"bài của brand ở nước khác, không phải {country}")
+        except Exception as e:  # noqa: BLE001
+            # Ghi dưới sheet chính hỏng giữa chừng: vẫn giữ chỗ vùng đó (`so_dong_tiep`)
+            # để "Bị loại" ghi bên dưới, không đè lên phần có thể đã ghi dở.
+            so_dong = getattr(e, "so_dong_tiep", so_dong)
+            thi_truong_khac_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — "
+                                     f"{len(hits_khac)} bài thị trường khác thiếu trong sheet")
     bi_loai_ghi_o = None
     if bi_loai:
         try:
-            bi_loai_ghi_o = _ghi_bi_loai(tok, sid, len(rows), rows_loai)
+            bi_loai_ghi_o = _ghi_bi_loai(tok, sid, so_dong, rows_loai)
         except Exception as e:  # noqa: BLE001
             bi_loai_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — chỉ còn ví dụ trong "
                              f"per_platform")
+    # Có tab phụ thật (không phải ghi dưới sheet chính) thì sheet chính đã bị đẩy khỏi vị
+    # trí đầu (xem `_dua_tab_chinh_len_dau`) — kéo về để link mở ra đúng sheet chính.
+    if any(o == f"tab '{t}'" for o, t in ((thi_truong_khac_ghi_o, _TAB_THI_TRUONG_KHAC),
+                                          (bi_loai_ghi_o, _TAB_BI_LOAI))):
+        _dua_tab_chinh_len_dau(tok, sid)
 
     sender = memory_store.get_current_sender()
     granted = _grant(tok, sender) if sender else False
 
     return tool_result(
         success=True, title=title, sheet_url=url, granted=granted, **base,
-        top=_top_per_platform(hits, 3),
+        top=_top_per_platform(hits_chinh, 3),
         tom_tat_loai=_tom_tat(bi_loai_ghi_o or ""),
         bi_loai_ghi_o=bi_loai_ghi_o,
+        so_bai_sheet_chinh=len(hits_chinh),
+        so_bai_thi_truong_khac=len(hits_khac),
+        thi_truong_khac_ghi_o=thi_truong_khac_ghi_o,
         # Các trường DƯỚI ĐÂY cố tình tách bạch và đặt tên dài, vì bản trước ghi
         # gọn "Đã ghi 7/100 post vào sheet" và model đọc thành "sheet mới ghi
         # được 7 trong 100" — tưởng GHI HỎNG, rồi chạy lại 3 lần + xuất CSV để
@@ -3543,7 +3618,9 @@ def _handle(args: dict, **kwargs) -> str:
         ghi_du_khong=True,
         note=(canh_bao_nguon
               + f"GHI ĐỦ, KHÔNG thiếu dòng nào: sheet '{title}' có đúng {len(hits)} post "
-              f"— là TẤT CẢ post nằm trong {rng} đã qua bộ lọc liên quan. "
+              f"— là TẤT CẢ post nằm trong {rng} đã qua bộ lọc liên quan"
+              + (f" ({len(hits_chinh)} bài {country} ở sheet chính, {len(hits_khac)} bài thị "
+                 f"trường khác ở {thi_truong_khac_ghi_o})" if hits_khac else "") + ". "
               f"Đã cào {scraped} post, {scraped - trong_khoang} post nằm NGOÀI khoảng ngày "
               f"nên bị lọc bỏ (đây là hành vi ĐÚNG của bộ lọc ngày, KHÔNG phải lỗi ghi "
               f"sheet — đừng chạy lại)"
