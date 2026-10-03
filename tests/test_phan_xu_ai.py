@@ -19,6 +19,8 @@ import pytest
 import apify_tool as A
 
 NOW = datetime.datetime.now(A._VN_TZ) - datetime.timedelta(hours=1)
+# Bản thật — fixture `quet` thay bằng bản giả; bài kiểm "đổi thứ tự hỏng" cần bản thật.
+_DUA_TAB_THAT = A._dua_tab_chinh_len_dau
 BOI_CANH = "HAPAS: túi xách, trang sức, nước hoa; đang chạy iTVC 20/10"
 
 
@@ -67,6 +69,9 @@ def quet(monkeypatch):
     monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
     monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows, **k: ghi.append((sid, rows)))
     monkeypatch.setattr(A, "_them_tab", lambda tok, ten: _SID_TAB[ten])
+    # Không gọi Lark thật khi đổi thứ tự tab — chỉ ghi lại lần gọi (`chay.dua`).
+    dua = []
+    monkeypatch.setattr(A, "_dua_tab_chinh_len_dau", lambda tok, sid: dua.append((tok, sid)))
     monkeypatch.setattr(A, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(A.memory_store, "get_current_sender", lambda: "ou_test")
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
@@ -84,6 +89,7 @@ def quet(monkeypatch):
                 "date_to": f"{NOW + datetime.timedelta(hours=1):%Y-%m-%d}",
                 "boi_canh": BOI_CANH, **them}
         return json.loads(A._handle(args))
+    chay.dua = dua
     return chay, ghi, hoi, tra
 
 
@@ -390,3 +396,85 @@ def test_tab_thi_truong_khac_hong_thi_ghi_duoi_sheet_chinh_khong_de_bi_loai(quet
     assert loai[1][0].startswith("BỊ LOẠI — ")
     assert kq["thi_truong_khac_ghi_o"] == "cuối sheet chính (dưới dòng 'THỊ TRƯỜNG KHÁC')"
     assert kq["bi_loai_ghi_o"] == "cuối sheet chính (dưới dòng 'BỊ LOẠI')"
+    assert chay.dua == [], "ghi dưới sheet chính: không có tab phụ nào, không đổi thứ tự tab"
+
+
+def test_ghi_duoi_sheet_chinh_hong_hai_lan_khong_de_vung_da_ghi_do(quet, monkeypatch):
+    """Thêm tab hỏng VÀ ghi dưới sheet chính phần thị trường khác cũng hỏng (có thể đã ghi
+    dở một khối): "Bị loại" vẫn ghi DƯỚI vùng đó, không đè lên."""
+    chay, _, _, _ = quet
+    ghi = []
+
+    def viet(tok, sid, rows, dong_dau=1):
+        ghi.append((sid, dong_dau, rows))
+        if any(str(r[0]).startswith("THỊ TRƯỜNG KHÁC — ") for r in rows):
+            raise RuntimeError("Lark 500 giữa chừng")
+    monkeypatch.setattr(A, "_write_values", viet)
+
+    def hong(tok, ten):
+        raise RuntimeError("Lark không trả sheetId")
+    monkeypatch.setattr(A, "_them_tab", hong)
+    kq = chay()
+    (_, d0, chinh), (_, d1, khac), (_, d2, loai) = ghi
+    assert d1 == len(chinh) + 1
+    assert d2 == d1 + len(khac), "Bị loại nằm dưới vùng thị trường khác dù vùng đó ghi hỏng"
+    assert loai[1][0].startswith("BỊ LOẠI — ")
+    assert kq["thi_truong_khac_ghi_o"].startswith("KHÔNG ghi được (RuntimeError)")
+    assert kq["bi_loai_ghi_o"] == "cuối sheet chính (dưới dòng 'BỊ LOẠI')"
+    assert kq["success"] is True and chay.dua == []
+
+
+def _kenh_top(kq) -> list:
+    return [t["kenh"] for t in kq["top"]]
+
+
+def test_top_chi_lay_bai_sheet_chinh(quet):
+    """Bài brand ở nước khác không được nêu là "top" của thị trường đang quét: nó không có
+    trong sheet chính."""
+    chay, _, _, _ = quet
+    kq = chay()
+    assert "HAPAS THAILAND" not in _kenh_top(kq)
+    assert {"Linh Đan", "Ngọc Trâm"} <= set(_kenh_top(kq))
+
+
+def test_tao_sheet_hong_top_cung_chi_lay_bai_sheet_chinh(quet, monkeypatch):
+    chay, _, _, _ = quet
+
+    def hong(title):
+        raise RuntimeError("lark 500")
+    monkeypatch.setattr(A, "_create_sheet", hong)
+    kq = chay()
+    assert kq["success"] is False and "TẠO/GHI SHEET" in kq["error"]
+    assert "HAPAS THAILAND" not in _kenh_top(kq)
+    assert "Linh Đan" in _kenh_top(kq)
+
+
+def test_co_tab_phu_thi_dua_sheet_chinh_len_dau_mot_lan(quet):
+    """addSheet của Lark chèn tab mới ở vị trí 0 → link mở ra "Bị loại". Có tab phụ thì
+    kéo sheet chính về đầu, đúng MỘT lần sau khi ghi xong mọi tab phụ."""
+    chay, _, _, _ = quet
+    chay()
+    assert chay.dua == [("tok", "s1")]
+
+
+def test_khong_tab_phu_thi_khong_doi_thu_tu_tab(quet):
+    chay, ghi, _, tra = quet
+    tra["fn"] = lambda nhac: json.dumps(
+        {i: ["k", "brand"] for i in re.findall(r'<p i="(\d+)">', nhac)})
+    kq = chay(giu_nuoc_ngoai=True, platforms=["threads"])
+    assert kq["success"] is True and not kq.get("bi_loai_ghi_o")
+    assert {s for s, _ in ghi} == {"s1"}
+    assert chay.dua == []
+
+
+def test_doi_thu_tu_tab_hong_khong_lam_hong_ket_qua(quet, monkeypatch):
+    chay, _, _, _ = quet
+    monkeypatch.setattr(A, "_dua_tab_chinh_len_dau", _DUA_TAB_THAT)
+
+    def lark_hong(*a, **k):
+        raise RuntimeError("lark 500")
+    monkeypatch.setattr(A.lark, "call", lark_hong)
+    kq = chay()
+    assert kq["success"] is True and kq["sheet_url"] == "https://sheet"
+    assert kq["thi_truong_khac_ghi_o"] == "tab 'Thị trường khác'"
+    assert kq["bi_loai_ghi_o"] == "tab 'Bị loại'"

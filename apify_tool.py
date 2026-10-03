@@ -2608,6 +2608,10 @@ def _ghi_tab_phu(token: str, sheet_id: str, so_dong_chinh: int, rows: list[list]
     và một dòng phân cách (`dau` — `nhan`). Số dòng trả về để tab phụ kế tiếp (cũng hỏng)
     ghi nối TIẾP chứ không đè lên phần vừa ghi. Sheet chính đã ghi xong TRƯỚC bước này
     nên lỗi ở đây không làm hỏng dữ liệu chính.
+
+    Ghi dưới sheet chính CŨNG hỏng thì lỗi gốc vẫn ném ra, nhưng gắn `so_dong_tiep` (số
+    dòng sau vùng vừa định ghi): `_write_values` ghi từng khối 1000 dòng nên có thể đã ghi
+    được một phần — phần ghi tiếp phải nằm DƯỚI vùng đó chứ không đè lên.
     """
     try:
         _write_values(token, _them_tab(token, ten), rows)
@@ -2618,9 +2622,28 @@ def _ghi_tab_phu(token: str, sheet_id: str, so_dong_chinh: int, rows: list[list]
     # thì Lark có thể từ chối cả khối (cùng loại lỗi "columns of value > range").
     rong = max((len(r) for r in rows), default=1)
     phan_cach = [[""] * rong, [f"{dau} — {nhan}"] + [""] * (rong - 1)]
-    _write_values(token, sheet_id, phan_cach + rows, dong_dau=so_dong_chinh + 1)
-    return (f"cuối sheet chính (dưới dòng '{dau}')",
-            so_dong_chinh + len(phan_cach) + len(rows))
+    so_dong_tiep = so_dong_chinh + len(phan_cach) + len(rows)
+    try:
+        _write_values(token, sheet_id, phan_cach + rows, dong_dau=so_dong_chinh + 1)
+    except Exception as e:  # noqa: BLE001
+        # Gắn vào chính lỗi gốc (không bọc lớp mới) để bên gọi vẫn thấy đúng loại lỗi.
+        e.so_dong_tiep = so_dong_tiep
+        raise
+    return f"cuối sheet chính (dưới dòng '{dau}')", so_dong_tiep
+
+
+def _dua_tab_chinh_len_dau(token: str, sheet_id: str) -> None:
+    """Đưa tab `sheet_id` về vị trí đầu — cố gắng, hỏng chỉ in cảnh báo.
+
+    Vì sao: `addSheet` của Lark chèn tab mới vào vị trí 0, nên link chia sẻ mở ra tab
+    thêm SAU CÙNG (vd "Bị loại") thay vì sheet chính. Thứ tự tab chỉ là tiện xem, dữ liệu
+    đã ghi đủ — không bao giờ để bước này làm hỏng kết quả công cụ."""
+    try:
+        lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/sheets_batch_update",
+                  body={"requests": [{"updateSheet": {"properties": {
+                      "sheetId": sheet_id, "index": 0}}}]})
+    except Exception as e:  # noqa: BLE001
+        print(f"[apify_tool] đưa tab chính lên đầu hỏng (bỏ qua): {_che_token(e)}")
 
 
 def _ghi_bi_loai(token: str, sheet_id: str, so_dong_chinh: int,
@@ -3543,8 +3566,10 @@ def _handle(args: dict, **kwargs) -> str:
             error=_che_token(canh_bao_nguon
                              + f"Cào OK ({len(hits)} post trong khoảng) nhưng TẠO/GHI SHEET "
                              f"THẤT BẠI: {type(e).__name__}: {e}"),
+            # "top" là bài của thị trường đang quét: bài brand ở nước khác (vd shop bán lại
+            # ở Thái) không được nêu như bài nổi bật của thị trường này.
             top=[{"nen_tang": d["platform"], "kenh": d["kenh"], "views": d["views"],
-                  "link": d["link"]} for d, _ in hits[:5]],
+                  "link": d["link"]} for d, _ in hits_chinh[:5]],
         )
     so_dong = len(rows)
     thi_truong_khac_ghi_o = None
@@ -3554,6 +3579,9 @@ def _handle(args: dict, **kwargs) -> str:
                 tok, sid, so_dong, rows_khac, _TAB_THI_TRUONG_KHAC, "THỊ TRƯỜNG KHÁC",
                 f"bài của brand ở nước khác, không phải {country}")
         except Exception as e:  # noqa: BLE001
+            # Ghi dưới sheet chính hỏng giữa chừng: vẫn giữ chỗ vùng đó (`so_dong_tiep`)
+            # để "Bị loại" ghi bên dưới, không đè lên phần có thể đã ghi dở.
+            so_dong = getattr(e, "so_dong_tiep", so_dong)
             thi_truong_khac_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — "
                                      f"{len(hits_khac)} bài thị trường khác thiếu trong sheet")
     bi_loai_ghi_o = None
@@ -3563,13 +3591,18 @@ def _handle(args: dict, **kwargs) -> str:
         except Exception as e:  # noqa: BLE001
             bi_loai_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — chỉ còn ví dụ trong "
                              f"per_platform")
+    # Có tab phụ thật (không phải ghi dưới sheet chính) thì sheet chính đã bị đẩy khỏi vị
+    # trí đầu (xem `_dua_tab_chinh_len_dau`) — kéo về để link mở ra đúng sheet chính.
+    if any(o == f"tab '{t}'" for o, t in ((thi_truong_khac_ghi_o, _TAB_THI_TRUONG_KHAC),
+                                          (bi_loai_ghi_o, _TAB_BI_LOAI))):
+        _dua_tab_chinh_len_dau(tok, sid)
 
     sender = memory_store.get_current_sender()
     granted = _grant(tok, sender) if sender else False
 
     return tool_result(
         success=True, title=title, sheet_url=url, granted=granted, **base,
-        top=_top_per_platform(hits, 3),
+        top=_top_per_platform(hits_chinh, 3),
         tom_tat_loai=_tom_tat(bi_loai_ghi_o or ""),
         bi_loai_ghi_o=bi_loai_ghi_o,
         so_bai_sheet_chinh=len(hits_chinh),
