@@ -363,8 +363,8 @@ def test_R13_R14_bang_doi_thi_ghi_lai_tu_dau_va_xoa_cot_thua(monkeypatch):
 
 def test_R14_ban_so_bo_cung_so_cot_ban_cuoi():
     d = {"platform": "tiktok", "kenh": "k", "link": "l", "text": "t"}
-    so_bo = Q._dong(d, NOW, "kw", 500) + ["chưa lọc", "sơ bộ"]
-    assert len(so_bo) == len(list(A._HEADER) + Q._COT_THEM)
+    so_bo = Q._dong_du(d, NOW, "kw", 500, ["chưa lọc", "sơ bộ"])
+    assert len(so_bo) == len(list(A._HEADER) + Q._COT_THEM + Q._COT_CUOI)
 
 
 def test_R15_phan_trang_dataset_khong_cat_cut_khong_trung(monkeypatch):

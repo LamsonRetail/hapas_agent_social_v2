@@ -1308,6 +1308,9 @@ def _nuoc_khac(ts: dict):
     return lambda d: (not ts.get("giu_nuoc_ngoai")
                       and (d.get("_thi_truong") or "không rõ") not in (nuoc, "không rõ"))
 _COT_THEM = ["Thị trường", "Nhận định AI", "Phân xử"]
+# Cột nối SAU CÙNG (sau `_COT_THEM`/"Lý do loại") để các cột cũ không đổi chỗ: affiliate
+# (gắn giỏ) / viral (không giỏ) cho bài TikTok — xem `A._COT_LOAI_VIDEO`.
+_COT_CUOI = [A._COT_LOAI_VIDEO]
 
 
 def _dong(d: dict, dt, kw: str, n_chu: int) -> list:
@@ -1316,6 +1319,12 @@ def _dong(d: dict, dt, kw: str, n_chu: int) -> list:
             d.get("comments") or 0, d.get("shares") or 0, str(d.get("hashtags") or "")[:300],
             str(d.get("text") or "")[:n_chu], d.get("link") or "", kw,
             d.get("_thi_truong") or "không rõ"]
+
+
+def _dong_du(d: dict, dt, kw: str, n_chu: int, them: list) -> list:
+    """Dòng đủ cột: `_dong` + cột thêm của tab (Nhận định/Lý do, Phân xử) + `_COT_CUOI` —
+    một chỗ duy nhất ghép, để tiêu đề và dòng luôn cùng số cột ở mọi tab."""
+    return _dong(d, dt, kw, n_chu) + list(them) + [A._loai_video_tiktok(d)]
 
 
 def _ten_tab(p: str) -> str:
@@ -1347,9 +1356,9 @@ def _ghi_so_bo(v, p: str, ts: dict, d_from, d_to) -> None:
                 continue
             da.add(k)
             d["platform"] = p
-            rows.append(_dong(d, dt, kw, 500) + ["chưa lọc", "sơ bộ"])
+            rows.append(_dong_du(d, dt, kw, 500, ["chưa lọc", "sơ bộ"]))
         rows.sort(key=lambda r: -int(r[4] or 0))
-        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows, tu_dau=True)
+        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows, tu_dau=True)
     except Exception as e:  # noqa: BLE001
         if type(e).__name__ == "MatQuyen":
             raise
@@ -1377,6 +1386,9 @@ def _dong_tong_hop(v, ts, ket: dict, cp: dict, trang_thai: str) -> list[list]:
     cau_khac = _cau_nuoc_khac(ts, ket)
     if cau_khac:
         r.append([_TAB_KHAC, cau_khac])
+    cau_tt = A._cau_loai_video_tiktok([d for d, _ in ket["hits"]], "các tab")
+    if cau_tt:
+        r.append([A._COT_LOAI_VIDEO, cau_tt])
     px = ket["phan_xu"]
     r.append(["Phân xử", _cau_phan_xu(px)])
     r.append(["Chi phí thật", f"{_usd(cp.get('usd'))} USD ({cp.get('so_run', 0)} lượt chạy "
@@ -1392,18 +1404,19 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
     kw = ", ".join(ts["queries"])
     khac = _nuoc_khac(ts)
     for p in v.d["nen_tang"]:
-        rows = [_dong(d, dt, kw, 500) + [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""]
+        rows = [_dong_du(d, dt, kw, 500, [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""])
                 for d, dt in ket["hits"] if d["platform"] == p and not khac(d)]
-        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows)
-    rows = [_dong(d, dt, kw, 500) + [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""]
+        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows)
+    rows = [_dong_du(d, dt, kw, 500, [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""])
             for d, dt in ket["hits"] if khac(d)]
     if rows:
-        s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM] + rows)
+        s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows)
     bl = ket["bi_loai"]
     if bl:
-        rows = [_dong(d, dt, kw, 300) + [ly_do, d.get("_phan_xu") or ""]
+        rows = [_dong_du(d, dt, kw, 300, [ly_do, d.get("_phan_xu") or ""])
                 for d, dt, ly_do in bl[:_BI_LOAI_TOI_DA]]
-        s.ghi_tab(_TAB_LOAI, [list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"]] + rows)
+        s.ghi_tab(_TAB_LOAI, [list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"]
+                              + _COT_CUOI] + rows)
     tong = _dong_tong_hop(v, ts, ket, cp, trang_thai)
     if len(bl) > _BI_LOAI_TOI_DA:
         tong.append(["Bị loại — không ghi", f"{len(bl) - _BI_LOAI_TOI_DA} dòng (trần "
@@ -1479,6 +1492,10 @@ def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list
     cau_khac = _cau_nuoc_khac(ts, ket)
     if cau_khac:
         d.append(f"Thị trường khác: {cau_khac}.")
+    # Affiliate (gắn giỏ) / viral (không giỏ) — Mark chép nguyên câu này cho marketing.
+    cau_tt = A._cau_loai_video_tiktok([x for x, _ in ket["hits"]], "các tab")
+    if cau_tt:
+        d.append(cau_tt)
     d.append("Phân xử: " + _cau_phan_xu(ket["phan_xu"]) + ".")
     chua = [c for x in v.d["nen_tang"].values() for c in (x.get("chua_phu") or [])]
     if chua:
