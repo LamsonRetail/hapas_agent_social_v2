@@ -1,0 +1,29 @@
+[Unit]
+Description=Mark Tran (AG-SOCIAL-LISTENING) - Lark bot
+After=network-online.target
+Wants=network-online.target
+# Chết liên tục 10 lần trong 10 phút thì dừng hẳn, khỏi đốt quota / spam log.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=mark
+Group=mark
+WorkingDirectory=/opt/mark/app
+Environment=HOME=/opt/mark
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/mark/ms-playwright
+# Chặn bật khi chưa xác nhận Mark trên PC đã tắt (`mark go-live`): hai bản cùng chạy là
+# giành job của nhau, trả lời hai lần, quét trùng.
+ExecStartPre=+/usr/local/bin/mark guard
+ExecStart=/opt/mark/hermes-agent/venv/bin/python -X utf8 run.py
+Restart=always
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target
