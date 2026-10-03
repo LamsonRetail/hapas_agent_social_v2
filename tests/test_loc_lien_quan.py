@@ -330,9 +330,9 @@ def test_bai_bi_loai_ghi_tab_rieng_kem_ly_do(quet):
     assert [sid for sid, _, _ in ghi] == ["s1", "s2"]
     chinh, loai = ghi[0][1], ghi[1][1]
     assert len(chinh) == 1 + 3
-    assert loai[0][-1] == "Lý do loại" and len(loai) == 1 + 8
-    assert all(r[-1] for r in loai[1:]), "dòng bị loại nào cũng phải có lý do"
-    assert any("Mason Nguyễn" == r[2] and "từ khoá" in r[-1] for r in loai[1:])
+    assert loai[0][-2:] == ["Lý do loại", A._COT_LOAI_VIDEO] and len(loai) == 1 + 8
+    assert all(r[-2] for r in loai[1:]), "dòng bị loại nào cũng phải có lý do"
+    assert any("Mason Nguyễn" == r[2] and "từ khoá" in r[-2] for r in loai[1:])
     assert kq["bi_loai_ghi_o"] == "tab 'Bị loại'"
 
 
@@ -369,8 +369,8 @@ def test_loc_ai_khong_chay_thi_khong_duoc_bao_da_loc(quet):
     assert kq["loc_bang_ai"] is False and kq["loc_ai_da_xet"] == 0
     assert kq["loc_ai_trang_thai"] == "bỏ qua: tắt (SOCIAL_AI_PHAN_XU=0)"
     chinh = ghi[0][1]
-    assert chinh[0][-2:] == ["Thị trường", "Nhận định AI"]
-    assert all(r[-1] == "chưa qua AI (lọc theo luật)" for r in chinh[1:])
+    assert chinh[0][-3:] == ["Thị trường", "Nhận định AI", A._COT_LOAI_VIDEO]
+    assert all(r[-2] == "chưa qua AI (lọc theo luật)" for r in chinh[1:])
 
 
 def test_moi_bai_deu_bi_loai_van_tao_sheet_de_kiem(quet, monkeypatch):

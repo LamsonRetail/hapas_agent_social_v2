@@ -558,10 +558,11 @@ _TRANG_ITEM = 1000          # item mỗi trang khi đọc dataset
 _TRUONG_ACTOR = {
     "apidojo~tiktok-scraper": ("uploadedAtFormatted", "channel", "views", "likes",
                                "comments", "shares", "hashtags", "title", "postPage",
-                               "textLanguage", "noResults"),
+                               "textLanguage", "noResults", "hasTikTokShopProduct"),
     "clockworks~tiktok-hashtag-scraper": ("createTimeISO", "authorMeta", "playCount",
                                           "diggCount", "commentCount", "shareCount",
-                                          "hashtags", "text", "webVideoUrl", "textLanguage"),
+                                          "hashtags", "text", "webVideoUrl", "textLanguage",
+                                          "hasTikTokShopProduct"),
     "apidojo~instagram-hashtag-scraper": ("createdAt", "owner", "video", "caption",
                                           "likeCount", "commentCount", "url"),
     "scrapeforge~facebook-search-posts": ("timestamp", "author", "message",
@@ -2135,9 +2136,58 @@ def _chuan_clockworks(raw: list) -> list[dict]:
             # VN. `textLanguage` chưa kiểm chứng có mặt ở mọi bản actor: đọc phòng
             # thủ, thiếu thì cổng chỉ dựa vào chữ tiếng Việt trong nội dung/kênh.
             "textLanguage": it.get("textLanguage"),
+            # Cờ giỏ hàng TikTok Shop — tách video affiliate (gắn giỏ) khỏi video viral.
+            "hasTikTokShopProduct": it.get("hasTikTokShopProduct"),
             "_nguon": "clockworks (dự phòng)",
         })
     return out
+
+
+# Marketing báo (backlog đội): tìm theo từ khoá trên TikTok bị LẪN video affiliate với
+# video viral, phải tách riêng — video affiliate luôn gắn giỏ hàng TikTok Shop, video viral
+# thì không. Trường thật: `hasTikTokShopProduct` (bool) của clockworks — run thật 02/10/2026
+# (từ khoá "hapas", 30 item) có 6 true / 24 false, item nào cũng có. apidojo KHÔNG công bố
+# trường giỏ hàng: vẫn đọc cùng tên phòng khi có, thiếu thì None = "nguồn không báo" — tuyệt
+# đối không đoán thành "viral", vì đếm nhầm là báo sai tỉ lệ affiliate cho marketing.
+_COT_LOAI_VIDEO = "Loại video TikTok"
+_NHAN_GIO = {True: "Affiliate (gắn giỏ)", False: "Viral (không giỏ)"}
+
+
+def _gio_hang_tiktok(it: dict) -> bool | None:
+    """True = video gắn giỏ TikTok Shop, False = không gắn, None = nguồn không báo."""
+    v = it.get("hasTikTokShopProduct")
+    return v if isinstance(v, bool) else None
+
+
+def _loai_video_tiktok(d: dict) -> str:
+    """Giá trị cột `_COT_LOAI_VIDEO`: rỗng cho bài không phải TikTok hoặc chưa rõ giỏ."""
+    if d.get("platform") != "tiktok":
+        return ""
+    return _NHAN_GIO.get(d.get("gio_hang"), "")
+
+
+def _dem_loai_video(ds: list[dict]) -> dict[str, int]:
+    """Đếm bài TikTok theo giỏ hàng: affiliate / viral / chua_ro_gio."""
+    tt = [d for d in ds if d.get("platform") == "tiktok"]
+    aff = sum(1 for d in tt if d.get("gio_hang") is True)
+    vir = sum(1 for d in tt if d.get("gio_hang") is False)
+    return {"affiliate": aff, "viral": vir, "chua_ro_gio": len(tt) - aff - vir}
+
+
+def _cau_loai_video_tiktok(ds: list[dict], noi: str = "sheet") -> str:
+    """Một câu cho model chép nguyên văn; rỗng nếu không có bài TikTok nào được giữ."""
+    dem = _dem_loai_video(ds)
+    n = sum(dem.values())
+    if not n:
+        return ""
+    if dem["chua_ro_gio"] == n:
+        return (f"TikTok: nguồn không báo giỏ hàng cho cả {n} bài nên CHƯA tách được video "
+                f"affiliate/viral (cột '{_COT_LOAI_VIDEO}' để trống) — đừng đoán.")
+    s = (f"TikTok: {n} bài trong {noi} — {dem['affiliate']} video affiliate (có gắn giỏ hàng "
+         f"TikTok Shop), {dem['viral']} video viral (không gắn giỏ)")
+    if dem["chua_ro_gio"]:
+        s += f", {dem['chua_ro_gio']} bài chưa rõ (nguồn không báo giỏ hàng)"
+    return s + f"; lọc theo cột '{_COT_LOAI_VIDEO}'."
 
 
 def _fetch_tiktok_fallback(q: list[str], limit: int) -> list[dict]:
@@ -2183,6 +2233,7 @@ def _chuan_tiktok(raw: list) -> list[tuple]:
             "text": str(it.get("title") or "")[:1000],
             "link": it.get("postPage") or "",
             "_nguon": it.get("_nguon") or "apidojo",
+            "gio_hang": _gio_hang_tiktok(it),
         }, dt))
     return out
 
@@ -2769,6 +2820,12 @@ SCHEMA = {
         "trường khác — chép `cau_thi_truong`. Mặc định bài của brand ở nước khác (vd HAPAS "
         "THAILAND) được GIỮ nhưng ở TAB RIÊNG 'Thị trường khác' (`thi_truong_khac_ghi_o`), "
         "sheet chính chỉ có thị trường đang quét — nói rõ số bài và tên tab đó.\n"
+        "- TIKTOK AFFILIATE / VIRAL: có `cau_loai_video_tiktok` thì BẮT BUỘC chép nguyên "
+        "văn. Video affiliate = video CÓ GẮN GIỎ HÀNG TikTok Shop; video viral = video "
+        "KHÔNG gắn giỏ (không phải nói về lượt xem). Số đếm ở `per_platform.tiktok` "
+        "(`affiliate`/`viral`/`chua_ro_gio`), sheet có cột 'Loại video TikTok' để lọc. "
+        "`chua_ro_gio` = nguồn KHÔNG báo giỏ hàng cho bài đó (actor chính thường không "
+        "báo) — nói là chưa rõ, TUYỆT ĐỐI không tự xếp vào viral hay affiliate.\n"
         "- `cham_tran_chi_phi`=true: có lượt chạy bị dừng giữa chừng, nên nói rõ kết "
         "quả có thể THIẾU và đề xuất giảm số từ khoá hoặc giảm `limit` (không cần nêu "
         "số tiền).\n"
@@ -3333,6 +3390,8 @@ def _handle(args: dict, **kwargs) -> str:
         if ttk:
             v["thi_truong_khac"] = ttk
         if p == "tiktok":
+            # Tách affiliate (gắn giỏ) / viral (không giỏ) — xem `_COT_LOAI_VIDEO`.
+            v.update(_dem_loai_video(cua_p))
             # Nói rõ bài nào đến từ actor dự phòng: nó đắt hơn ~10 lần, và nếu
             # nó phải gánh phần lớn kết quả thì actor chính đang chạm trần —
             # người vận hành cần biết để còn tính chi phí.
@@ -3509,6 +3568,7 @@ def _handle(args: dict, **kwargs) -> str:
                 thi_truong_khac=thi_truong_khac, chuyen_sang_bi_loai_vi_thi_truong=(
                     chuyen_thi_truong or None),
                 cau_thi_truong=cau_thi_truong,
+                cau_loai_video_tiktok=_cau_loai_video_tiktok([d for d, _ in hits]) or None,
                 # Báo ĐÚNG chuyện đã xảy ra: chỉ true khi AI thật sự phán ít nhất một bài.
                 loc_bang_ai=loc_bang_ai,
                 loc_ai_trang_thai=ai_tt.get("trang_thai"),
@@ -3545,15 +3605,18 @@ def _handle(args: dict, **kwargs) -> str:
         return not giu_nuoc_ngoai and d.get("_thi_truong") not in (country, "không rõ")
     hits_chinh = [(d, dt) for d, dt in hits if not _nuoc_khac(d)]
     hits_khac = [(d, dt) for d, dt in hits if _nuoc_khac(d)]
-    # Hai cột mới nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen.
-    rows = [list(_HEADER) + ["Thị trường", "Nhận định AI"]] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or ""] for d, dt in hits_chinh]
-    rows_khac = [list(_HEADER) + ["Thị trường", "Nhận định AI"]] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or ""] for d, dt in hits_khac]
+    # Cột mới luôn nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen; cột
+    # loại video TikTok sau cùng để cột "Nhận định AI"/"Lý do loại" không đổi chỗ.
+    rows = [list(_HEADER) + ["Thị trường", "Nhận định AI", _COT_LOAI_VIDEO]] + [
+        _dong(d, dt) + [d.get("_nhan_dinh") or "", _loai_video_tiktok(d)]
+        for d, dt in hits_chinh]
+    rows_khac = [list(_HEADER) + ["Thị trường", "Nhận định AI", _COT_LOAI_VIDEO]] + [
+        _dong(d, dt) + [d.get("_nhan_dinh") or "", _loai_video_tiktok(d)]
+        for d, dt in hits_khac]
     # Bài bị loại vẫn có sheet để kiểm (kể cả khi KHÔNG bài nào được giữ): bộ lọc
     # loại nhầm mà không ai thấy được thì không bao giờ sửa được.
-    rows_loai = [list(_HEADER) + ["Thị trường", "Lý do loại"]] + [
-        _dong(d, dt) + [ly_do] for d, dt, ly_do in bi_loai]
+    rows_loai = [list(_HEADER) + ["Thị trường", "Lý do loại", _COT_LOAI_VIDEO]] + [
+        _dong(d, dt) + [ly_do, _loai_video_tiktok(d)] for d, dt, ly_do in bi_loai]
 
     try:
         tok, url = _create_sheet(title)
@@ -3628,6 +3691,7 @@ def _handle(args: dict, **kwargs) -> str:
                  f"{bi_loai_ghi_o} kèm lý do" if bi_loai else "")
               + ". Muốn nhiều post trong khoảng hơn thì tăng "
               f"`limit` hoặc nới khoảng ngày. GỬI `sheet_url`. " + cau_thi_truong
+              + (f" {base['cau_loai_video_tiktok']}" if base["cau_loai_video_tiktok"] else "")
               + ("" if granted else " CẢNH BÁO: chưa cấp được quyền tự động.")),
     )
 

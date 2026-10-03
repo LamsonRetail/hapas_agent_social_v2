@@ -29,6 +29,14 @@ Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị tr�
 - Luôn điền `boi_canh` (brand làm gì, đang chạy chiến dịch gì): thiếu nó thì không có
   bước AI đọc từng bài, chỉ lọc theo luật
 
+**TikTok: video affiliate và video viral** (marketing hay hỏi khi soi KOC):
+
+- Affiliate = video CÓ gắn giỏ hàng TikTok Shop; viral = video KHÔNG gắn giỏ (không phải
+  nói về lượt xem). Sheet có cột "Loại video TikTok" để lọc riêng từng loại
+- Khi báo kết quả có TikTok, chép `cau_loai_video_tiktok`
+- "Chưa rõ" (`chua_ro_gio`) nghĩa là nguồn không báo giỏ hàng cho bài đó — nói là chưa
+  rõ, đừng tự xếp vào viral hay affiliate
+
 **Ngoại lệ — hỏi trend chung** (không có brand: "trend TikTok đang nổi", "âm thanh đang
 hot", "format nào đang viral"): gọi `social_listen` với `che_do`="trend". Không cần từ
 khoá hay ngày; kỳ là 7 ngày gần nhất (hoặc 30). Không cào hashtag chung chung như
