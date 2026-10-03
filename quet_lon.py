@@ -1407,12 +1407,15 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
         rows = [_dong_du(d, dt, kw, 500, [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""])
                 for d, dt in ket["hits"] if d["platform"] == p and not khac(d)]
         s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows)
+    # Tab phụ rỗng: chưa từng có thì KHÔNG tạo tab trống; đã có từ lượt trước (việc tiếp tục
+    # sau `xong_mot_phan`) thì vẫn ghi lại chỉ tiêu đề — `ghi_tab` xoá các dòng cũ thừa, kẻo
+    # bài của lượt trước nằm lại như kết quả của lượt này.
     rows = [_dong_du(d, dt, kw, 500, [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""])
             for d, dt in ket["hits"] if khac(d)]
-    if rows:
+    if rows or _TAB_KHAC in s.s["tabs"]:
         s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows)
     bl = ket["bi_loai"]
-    if bl:
+    if bl or _TAB_LOAI in s.s["tabs"]:
         rows = [_dong_du(d, dt, kw, 300, [ly_do, d.get("_phan_xu") or ""])
                 for d, dt, ly_do in bl[:_BI_LOAI_TOI_DA]]
         s.ghi_tab(_TAB_LOAI, [list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"]
@@ -1422,6 +1425,12 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
         tong.append(["Bị loại — không ghi", f"{len(bl) - _BI_LOAI_TOI_DA} dòng (trần "
                                             f"{_BI_LOAI_TOI_DA} dòng/tab)"])
     s.ghi_tab(_TAB_TONG, tong)
+    # Tab nền tảng/phụ đều thêm bằng `addSheet` (SoSheet.dam_bao_tab → A._them_tab), mà
+    # Lark chèn tab mới vào vị trí 0 → link mở ra tab thêm sau cùng. Kéo "Tổng hợp" về
+    # đầu — cố gắng, hỏng chỉ in cảnh báo (xem `A._dua_tab_chinh_len_dau`).
+    tong_sid = (s.s["tabs"].get(_TAB_TONG) or {}).get("sheet_id")
+    if tong_sid and len(s.s["tabs"]) > 1:
+        A._dua_tab_chinh_len_dau(s.s.get("token") or "", tong_sid)
     return s.s.get("url") or ""
 
 
