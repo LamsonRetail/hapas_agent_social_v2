@@ -20,8 +20,14 @@ Cách làm ở đây:
      song. Đo 25/09: actor này trả RỖNG cho VN (cả toàn cầu) — nên khi rỗng phải nói thẳng
      là không có bảng cho VN, TUYỆT ĐỐI không lấy bảng nước khác thay vào.
 
-Mọi lượt chạy đi qua `apify_tool._call` nên tự chịu trần chi phí trên console, và chi phí
-thật được ghi vào sổ audit như lần quét thường.
+Trần chi phí: cả lượt trend là MỘT lượt TikTok — mọi lượt actor con (bảng hashtag, top
+video, lấy mẫu, bảng nhạc) cộng lại phải gọn trong trần TikTok trên console (`tran_usd_tiktok`,
+`tran_bai_tiktok`, `bat_tiktok`; Năng lực → Quét mạng xã hội). E2E 04-05/10/2026: trend từng
+đọc trần CHUNG (`A._tran()`) và gọi `_call` không kèm `nen_tang`, nên một lượt cào hashtag
+5×30 = 150 video tiêu 0,45 USD trong khi trần TikTok là 0,17 USD. Nay `_ke_hoach` chia trần
+cho từng lượt con theo thứ tự ưu tiên, cắt hoặc bỏ lượt kém ưu tiên khi không đủ (và nói ra),
+mỗi lượt `_call` mang `nen_tang="tiktok"` và trần USD riêng = phần được chia. Chi phí thật
+được ghi vào sổ audit như lần quét thường.
 """
 from __future__ import annotations
 
@@ -33,6 +39,7 @@ import re
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 
 import apify_tool as A
 import chi_phi_tool
@@ -60,7 +67,9 @@ _GIA_KHOI_DONG = 0.025
 _GIA_VIDEO_MAU = 0.003      # clockworks, như lần quét thường
 _GIA_NHAC_KHOI_DONG = 0.02  # burbn, gói FREE: 0,02/lượt (ghim 1 GB) + 0,02/bài
 _GIA_NHAC = 0.02
-_BIEN = 0.9                 # mỗi lượt chỉ xin tới 90% trần USD
+_BIEN = 0.9                 # cả lượt trend chỉ xin tới 90% trần USD TikTok
+# Bảng hashtag/top video ít hơn chừng này dòng thì không đáng một lượt khởi chạy.
+_TOI_THIEU_BANG = 5
 # TikTok chỉ trả khoảng 30–70 video mỗi hashtag dù xin nhiều hơn. Đo thật 25/09/2026: xin
 # 160 video/hashtag cho 5 hashtag, được 33–71 mỗi cái, một hashtag trả 0, tổng 209/800.
 # Nên mẫu N video phải soi khoảng N/40 hashtag, không phải dồn vào 5 cái.
@@ -76,12 +85,50 @@ _CON_GIAY_DE_CAO_THEM = 60
 _TOI_THIEU_GIAY_MAU = 30
 
 
-def _trong_han(han_run: float, fn, *a):
+def _trong_han(han_run: float, fn, *a, so_run: list | None = None):
     """Chạy `fn` với hạn chót + sổ run của apify_tool: tới hạn thì run bị huỷ và `_call`
-    trả phần đã lấy thay vì ném QUA_GIO. Gọi trong `contextvars.copy_context().run`."""
-    A._SO_RUN.set([])
+    trả phần đã lấy thay vì ném QUA_GIO. Gọi trong `contextvars.copy_context().run`.
+    `so_run`: sổ dùng chung cả lượt trend (meta mỗi run, để cộng tiền thật đã tiêu)."""
+    A._SO_RUN.set([] if so_run is None else so_run)
     A._HAN_CHOT.set(han_run)
     return fn(*a)
+
+
+# Giá theo actor (phí khởi động, giá mỗi dòng) — để ước tiền một run khi Apify chưa trả
+# `usageTotalUsd`.
+def _gia_actor(actor: str) -> tuple[float, float]:
+    if actor == ACTOR_TREND:
+        return _GIA_KHOI_DONG, _GIA_DONG
+    if actor == ACTOR_NHAC:
+        return _GIA_NHAC_KHOI_DONG, _GIA_NHAC
+    return 0.0, _GIA_VIDEO_MAU
+
+
+def _tien_run(meta) -> float:
+    """Tiền một run đã tiêu: `usageTotalUsd` nếu đọc được, không thì ước theo số dòng trả
+    về (actor tính tiền theo dòng) — lấy số LỚN hơn, vì usage của Apify có thể trễ. Run
+    chưa hề được tạo (không run id, không dòng) thì 0."""
+    if not isinstance(meta, dict):
+        return 0.0
+    kd, gia = _gia_actor(str(meta.get("actor") or ""))
+    so = int(meta.get("so_item") or 0)
+    if not meta.get("run_id") and not so:
+        return 0.0
+    uoc = kd + gia * so
+    try:
+        u = float(meta["usd"]) if meta.get("usd") is not None else None
+    except (TypeError, ValueError):
+        u = None
+    return max(u, uoc) if u is not None else uoc
+
+
+# Mỗi bảng Creative Center chạy 6–8 giây (đo 25/09); cho tối đa chừng này giây rồi huỷ,
+# để lượt tuần tự không để một bảng ăn hết giờ của các lượt sau.
+_GIAY_BANG = 45
+# Còn ít hơn chừng này giây thì bỏ bảng (nói rõ) thay vì khởi chạy một run sắp bị huỷ.
+_TOI_THIEU_GIAY_BANG = 15
+# Giây chừa cho bảng nhạc khi lấy mẫu chạy trước nó.
+_GIAY_NHAC = 30
 # Lượt cào thêm dùng PHẦN CÒN LẠI của trần mỗi lượt sau lượt đầu, không phải cả trần lần
 # nữa (rà 01/10/2026: hai lượt mỗi lượt 90% trần = tiêu gần gấp đôi). Còn ít hơn chừng
 # này video thì thôi, không đáng một lượt khởi chạy.
@@ -197,14 +244,16 @@ def _first(d: dict, *names, default=""):
     return default
 
 
-def _bang_hashtag(vung: str, ky: int, n: int, nganh_id: str = "") -> list[dict]:
+def _bang_hashtag(vung: str, ky: int, n: int, nganh_id: str = "",
+                  tran_usd: float | None = None) -> list[dict]:
     """`nganh_id`: `industryId` của actor (mã 11 số của ngành cha, xem nganh_tiktok) —
-    actor lọc phía nó nên không tốn thêm tiền; rỗng = mọi ngành như trước."""
+    actor lọc phía nó nên không tốn thêm tiền; rỗng = mọi ngành như trước. `tran_usd`:
+    phần trần TikTok `_ke_hoach` chia cho lượt này."""
     payload = {"trendType": "hashtags", "countryCode": vung, "hashtagPeriod": str(ky),
                "maxItems": n}
     if nganh_id:
         payload["industryId"] = nganh_id
-    raw = A._call(ACTOR_TREND, payload, n)
+    raw = A._call(ACTOR_TREND, payload, n, tran_usd=tran_usd, nen_tang="tiktok")
     return [{
         "hang": x.get("Rank"), "hashtag": str(x.get("Hashtag") or "").lstrip("#"),
         "huong": {"up": "lên", "down": "xuống"}.get(str(x.get("Trend Direction")),
@@ -215,10 +264,12 @@ def _bang_hashtag(vung: str, ky: int, n: int, nganh_id: str = "") -> list[dict]:
     } for x in raw if x.get("Hashtag")]
 
 
-def _bang_video(vung: str, ky: int, n: int, tu_nhien: bool) -> list[dict]:
+def _bang_video(vung: str, ky: int, n: int, tu_nhien: bool,
+               tran_usd: float | None = None) -> list[dict]:
     raw = A._call(ACTOR_TREND, {"trendType": "videos", "videoCountry": vung,
                                 "videoPeriod": str(ky), "maxItems": n,
-                                "videoOrganicOnly": tu_nhien}, n)
+                                "videoOrganicOnly": tu_nhien}, n,
+                  tran_usd=tran_usd, nen_tang="tiktok")
     return [{
         "hang": x.get("Video Rank"), "luot_xem": x.get("Views") or 0,
         "luot_xem_tu_nhien": _metric(x.get("Metrics"), "Organic Views"),
@@ -230,14 +281,15 @@ def _bang_video(vung: str, ky: int, n: int, tu_nhien: bool) -> list[dict]:
     } for x in raw]
 
 
-def _bang_nhac(vung: str, ky: int, n: int) -> list[dict]:
+def _bang_nhac(vung: str, ky: int, n: int, tran_usd: float | None = None) -> list[dict]:
     """Bảng nhạc đang lên của Creative Center. Shape đầu ra actor không công bố (01/10/2026)
     nên map phòng thủ nhiều tên trường; dòng của nước KHÁC thì bỏ, không bao giờ trình bày
     như của `vung`."""
     raw = A._call(ACTOR_NHAC, {"country_code": vung, "period": str(ky),
                                "rank_type": "surging", "new_on_board": "false",
                                "commercial_music": "false", "maxResults": n,
-                               "limit": min(20, n)}, n, mem=1024)
+                               "limit": min(20, n)}, n, mem=1024,
+                 tran_usd=tran_usd, nen_tang="tiktok")
     out = []
     for x in raw:
         if not isinstance(x, dict) or x.get("error"):
@@ -259,25 +311,124 @@ def _bang_nhac(vung: str, ky: int, n: int) -> list[dict]:
     return out[:n]
 
 
-def _so_xin(so_mau: int, tran_bai: int, tran_usd: float) -> int:
-    """Số video xin ở lượt cào đầu: dư `_HE_SO_XIN` lần, nhưng gọn trong trần bài và trần USD."""
-    suc = max(1, int(_BIEN * tran_usd / _GIA_VIDEO_MAU))
-    return max(1, min(tran_bai, suc, math.ceil(so_mau * _HE_SO_XIN)))
+def _suc(ngan_sach: float) -> int:
+    """Số video mẫu mua được bằng `ngan_sach` USD."""
+    return int(max(0.0, ngan_sach) / _GIA_VIDEO_MAU + 1e-9)
 
 
-def _so_mau_toi_da(so_mau: int, tran_bai: int, tran_usd: float) -> int:
-    """Số video mẫu TỆ NHẤT của cả hai lượt cào — để ước tính trước khi chạy cho thật.
+def _so_xin(so_mau: int, tran_bai: int, ngan_sach: float) -> int:
+    """Số video xin ở lượt cào đầu: dư `_HE_SO_XIN` lần, nhưng gọn trong trần bài và ngân
+    sách USD của phần lấy mẫu."""
+    return max(1, min(tran_bai, _suc(ngan_sach), math.ceil(so_mau * _HE_SO_XIN)))
 
-    Lượt hai xin tối đa 6 lần số còn thiếu (+1), và cả hai lượt cộng lại không quá
-    `_BIEN` × trần (xem `_mau_am_thanh`)."""
-    suc = max(1, int(_BIEN * tran_usd / _GIA_VIDEO_MAU))
-    return min(suc, _so_xin(so_mau, tran_bai, tran_usd) + min(tran_bai, 6 * so_mau + 1))
+
+def _gia_bang(n: int) -> float:
+    return _GIA_KHOI_DONG + _GIA_DONG * n if n else 0.0
+
+
+def _gia_nhac(n: int) -> float:
+    return _GIA_NHAC_KHOI_DONG + _GIA_NHAC * n if n else 0.0
+
+
+def _dong_vua(con: float, khoi_dong: float, gia: float) -> int:
+    """Số dòng mua được bằng `con` USD sau phí khởi động."""
+    return max(0, int((con - khoi_dong) / gia + 1e-9))
+
+
+def _ke_hoach(tran_usd: float, tran_bai: int, so_tag: int, so_vid: int, so_mau: int,
+              so_nhac: int) -> dict:
+    """Chia trần USD TikTok cho CẢ lượt trend (E2E 04-05/10/2026, xem docstring module).
+
+    Ngân sách = `_BIEN` × trần. Thứ tự ưu tiên: bảng hashtag > top video > lượt lấy mẫu
+    đầu (kèm dòng hashtag thêm để có chỗ soi) > bảng nhạc > lượt cào thêm mẫu. Lượt nào
+    không đủ thì CẮT số dòng, dưới mức tối thiểu thì BỎ — ghi vào `cat` để nói ra.
+    `tran` là trần USD gửi kèm từng lượt `_call`; tổng của chúng <= ngân sách <= trần.
+    `tu_choi` = trần không đủ cả bảng hashtag tối thiểu.
+
+    Sàn Apify: `_run_actor` nâng mọi trần < 0,1 USD lên 0,1, và các lượt chạy tuần tự
+    (xem `chay`). Nên một lượt chỉ được xếp khi trần TikTok trừ phần các lượt TRƯỚC nó
+    tiêu vẫn còn >= 0,1 USD — ước tính khớp với cái `chay` sẽ thật sự chạy."""
+    ngan_sach = _BIEN * tran_usd
+    con, cat = ngan_sach, []
+    san = A._TRAN_USD_KHOANG[0]
+    duoi_san = "trần còn lại dưới sàn 0,1 USD của một lượt Apify"
+
+    def du_san() -> bool:
+        return tran_usd - (ngan_sach - con) + 1e-9 >= san
+    # 1. Bảng hashtag — lõi của trend, không đủ thì không chạy gì.
+    n_tag = min(so_tag, _dong_vua(con, _GIA_KHOI_DONG, _GIA_DONG))
+    if n_tag < min(so_tag, _TOI_THIEU_BANG):
+        return {"tu_choi": True, "ngan_sach": ngan_sach, "cat": cat}
+    if n_tag < so_tag:
+        cat.append(f"bảng hashtag còn {n_tag}/{so_tag} dòng")
+    con -= _gia_bang(n_tag)
+    # 2. Top video.
+    n_vid = 0
+    if so_vid and not du_san():
+        cat.append(f"bỏ bảng top video: {duoi_san}")
+    elif so_vid:
+        n_vid = min(so_vid, _dong_vua(con, _GIA_KHOI_DONG, _GIA_DONG))
+        if n_vid < min(so_vid, _TOI_THIEU_BANG):
+            n_vid = 0
+            cat.append("bỏ bảng top video")
+        elif n_vid < so_vid:
+            cat.append(f"top video còn {n_vid}/{so_vid}")
+        con -= _gia_bang(n_vid)
+    # 3. Lượt lấy mẫu đầu, kèm dòng hashtag thêm để có đủ hashtag mà soi (0,0015 USD/dòng).
+    n1 = them_tag = 0
+    muon = _so_xin(so_mau, tran_bai, 10 ** 6) if so_mau else 0
+    if so_mau and not du_san():
+        cat.append(f"bỏ lấy mẫu âm thanh/hiệu ứng: {duoi_san}")
+    elif so_mau:
+        k = -(-so_mau // _VIDEO_MOI_HASHTAG)
+        them_tag = max(0, min(100, 2 * k + 10) - n_tag)
+        # Dòng hashtag thêm chạy trong lượt hashtag (đầu tiên): sau nó vẫn phải còn sàn
+        # cho lượt lấy mẫu (và cho top video, vốn chạy ngay sau bảng hashtag).
+        them_tag = min(them_tag, max(0, int(
+            (tran_usd - san - (ngan_sach - con)) / _GIA_DONG + 1e-9)))
+        n1 = min(muon, _suc(con - _GIA_DONG * them_tag))
+        if n1 < _MAU_THEM_TOI_THIEU:
+            n1 = them_tag = 0
+            cat.append("bỏ lấy mẫu âm thanh/hiệu ứng")
+        elif n1 < muon:
+            cat.append(f"lấy mẫu âm thanh còn {n1}/{muon} video")
+        con -= _GIA_DONG * them_tag + _GIA_VIDEO_MAU * n1
+    # 4. Bảng nhạc đang lên (0,02 USD/bài).
+    n_nhac = 0
+    if so_nhac and not du_san():
+        cat.append(f"bỏ bảng nhạc đang lên: {duoi_san}")
+    elif so_nhac:
+        n_nhac = min(so_nhac, _dong_vua(con, _GIA_NHAC_KHOI_DONG, _GIA_NHAC))
+        if not n_nhac:
+            cat.append("bỏ bảng nhạc đang lên")
+        elif n_nhac < so_nhac:
+            cat.append(f"bảng nhạc còn {n_nhac}/{so_nhac} bài")
+        con -= _gia_nhac(n_nhac)
+    # 5. Lượt cào thêm mẫu: chỉ phần còn lại (tối đa 6 lần số cần + 1, như trước).
+    # Lượt cào thêm chạy TRƯỚC bảng nhạc (xem `chay`) nên phải chừa cho nhạc cả trần đã
+    # nâng sàn của nó.
+    con_them = con
+    if n_nhac:
+        con_them = min(con, tran_usd - max(san, _gia_nhac(n_nhac))
+                       - (ngan_sach - con - _gia_nhac(n_nhac)))
+    them_mau = min(tran_bai, 6 * so_mau + 1, _suc(con_them)) if n1 and du_san() else 0
+    tran = {"hashtag": round(_gia_bang(n_tag + them_tag), 4),
+            "video": round(_gia_bang(n_vid), 4),
+            "mau": round(_GIA_VIDEO_MAU * (n1 + them_mau), 4),
+            "nhac": round(_gia_nhac(n_nhac), 4)}
+    k_du = -(-so_mau // _VIDEO_MOI_HASHTAG) if so_mau else 0
+    est_xin = (_gia_bang(max(so_tag, min(100, 2 * k_du + 10) if so_mau else 0))
+               + _gia_bang(so_vid) + _GIA_VIDEO_MAU * muon + _gia_nhac(so_nhac))
+    return {"tu_choi": False, "ngan_sach": ngan_sach, "cat": cat, "tran": tran,
+            "est": round(sum(tran.values()), 4), "est_xin": round(est_xin, 4),
+            "n_tag": n_tag, "them_tag": them_tag, "n_vid": n_vid, "n1": n1,
+            "them_mau": them_mau, "n_nhac": n_nhac}
 
 
 def _cao_mau(tags: list[str], n: int, tran_usd: float | None = None) -> list[dict]:
     per = max(1, -(-n // max(1, len(tags))))
     return A._call(A._ACTORS["tiktok_fallback"], {"hashtags": tags, "resultsPerPage": per}, n,
-                   tran_usd=tran_usd)
+                   tran_usd=tran_usd, nen_tang="tiktok")
 
 
 def _khoa_video(it: dict) -> str:
@@ -297,11 +448,16 @@ def _la_am_goc(m: dict) -> bool:
 
 
 def _mau_am_thanh(thu_tu: list[str], so_mau: int, vung: str, ky: int,
-                  tran_bai: int = 10 ** 6, tran_usd: float = 10.0,
-                  con_giay: float = 0.0) -> dict:
-    """Lấy mẫu video dưới các hashtag theo `thu_tu` rồi đếm âm thanh/hiệu ứng nhiều kênh dùng lại."""
-    suc = max(1, int(_BIEN * tran_usd / _GIA_VIDEO_MAU))       # video mỗi lượt trong trần
-    n1 = _so_xin(so_mau, tran_bai, tran_usd)
+                  tran_bai: int = 10 ** 6, ngan_sach: float = 9.0,
+                  con_giay: float = 0.0, n1: int | None = None, tran_con=None) -> dict:
+    """Lấy mẫu video dưới các hashtag theo `thu_tu` rồi đếm âm thanh/hiệu ứng nhiều kênh dùng lại.
+
+    `ngan_sach`: USD của CẢ phần lấy mẫu (hai lượt cộng lại), do `_ke_hoach` chia từ trần
+    TikTok; `n1`: số video lượt đầu theo kế hoạch. `tran_con()`: trần TikTok còn lại sau
+    tiền THẬT đã tiêu (gồm lượt đầu) — lượt hai chỉ chạy khi trần sàn 0,1 USD của
+    `_run_actor` vẫn gọn trong phần còn lại."""
+    suc = max(1, _suc(ngan_sach))                               # video cả hai lượt
+    n1 = max(1, min(n1, suc)) if n1 else _so_xin(so_mau, tran_bai, ngan_sach)
     k1 = _so_hashtag_soi(n1)
     t0 = time.monotonic()
     moc = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=ky)
@@ -319,12 +475,12 @@ def _mau_am_thanh(thu_tu: list[str], so_mau: int, vung: str, ky: int,
         return giu
 
     da_soi = thu_tu[:k1]
-    raw = _cao_mau(da_soi, n1)
+    raw = _cao_mau(da_soi, n1, round(n1 * _GIA_VIDEO_MAU, 4))
     da_thay = {_khoa_video(it) for it in raw}
     giu = loc(raw)
     cao, da_xin, so_luot = len(raw), n1, 1
     con_lai = thu_tu[k1:]
-    # Ngân sách lượt hai = trần mỗi lượt − tiền lượt đầu THẬT tiêu (actor tính theo video
+    # Ngân sách lượt hai = ngân sách mẫu − tiền lượt đầu THẬT tiêu (actor tính theo video
     # trả về). Lượt đầu cào ít — đúng lúc cần lượt hai — thì còn nhiều; cào gần đủ thì
     # còn ít và lượt hai bị bỏ.
     suc2 = suc - len(raw)
@@ -335,13 +491,19 @@ def _mau_am_thanh(thu_tu: list[str], so_mau: int, vung: str, ky: int,
         n2 = max(1, min(tran_bai, suc2, int((so_mau - len(giu)) * ti_le) + 1))
         them = con_lai[:max(1, min(_SO_HASHTAG_SOI_TOI_DA, -(-n2 // _VIDEO_MOI_HASHTAG)))]
         # Trần USD của lượt hai cũng chỉ là phần còn lại — Apify tự chặn nếu giá lệch.
-        tran2 = round(max(0.1, tran_usd - len(raw) * _GIA_VIDEO_MAU), 2)
-        try:
-            moi = [it for it in _cao_mau(them, n2, tran2) if _khoa_video(it) not in da_thay]
-            da_soi, cao, da_xin, so_luot = da_soi + them, cao + len(moi), da_xin + n2, 2
-            giu += loc(moi)
-        except Exception as e:  # noqa: BLE001 — lượt đầu vẫn dùng được
-            print(f"[trend] cào thêm mẫu hỏng: {A._che_token(e)}"[:300])
+        tran2 = round(max(0.0, ngan_sach - len(raw) * _GIA_VIDEO_MAU), 4)
+        con_tran = tran_con() if tran_con else tran2
+        tran2 = round(min(tran2, con_tran), 4)
+        n2 = min(n2, _suc(tran2))
+        # `_run_actor` nâng trần < 0,1 USD lên 0,1: phần còn lại dưới sàn thì không chạy.
+        if con_tran + 1e-9 >= A._TRAN_USD_KHOANG[0] and n2 >= _MAU_THEM_TOI_THIEU:
+            try:
+                moi = [it for it in _cao_mau(them, n2, tran2)
+                       if _khoa_video(it) not in da_thay]
+                da_soi, cao, da_xin, so_luot = da_soi + them, cao + len(moi), da_xin + n2, 2
+                giu += loc(moi)
+            except Exception as e:  # noqa: BLE001 — lượt đầu vẫn dùng được
+                print(f"[trend] cào thêm mẫu hỏng: {A._che_token(e)}"[:300])
 
     am = collections.defaultdict(lambda: {"kenh": set(), "video": 0, "view": 0, "tag": set()})
     hu = collections.defaultdict(lambda: {"kenh": set(), "video": 0, "tag": set()})
@@ -398,25 +560,64 @@ def chay(args: dict) -> str:
         if not nganh or not nganh["id_trend"]:
             return tool_error(f"Chưa lọc trend được theo ngành '{args['nganh']}'. Ngành "
                               f"nhận được: {nganh_tiktok.danh_sach()}.")
+    # Trần RIÊNG của TikTok (bài, USD, bật/tắt) — không phải trần chung (E2E 04-05/10).
+    tran_bai, tran_usd, bat = A._tran_nen_tang("tiktok")
+    if not bat:
+        return tool_error(
+            "KHÔNG CHẠY, chưa tốn tiền: " + A._ly_do_tat("tiktok")
+            + " — trend TikTok cũng không chạy. Nói thẳng với người dùng như vậy; muốn chạy "
+              "thì nhờ chủ agent bật lại TikTok trên console.")
     so_tag = _so(args.get("so_hashtag"), 20, 5, 100)
     so_vid = _so(args.get("so_video"), 20, 5, 100) if vung in _VUNG_VIDEO else 0
     tu_nhien = args.get("chi_tu_nhien") is not False
-    tran_bai, tran_usd = A._tran()
     so_mau = _so(args.get("so_video_mau"), 100, 20, tran_bai) \
         if args.get("soi_am_thanh") is not False else 0
     so_nhac = _so(args.get("so_nhac"), 10, 0, 50) if vung in _VUNG_NHAC else 0
-    # Bảng nhạc tính tiền theo BÀI (0,02 USD) — cắt số bài cho vừa trần mỗi lượt.
-    n_nhac = max(0, min(so_nhac, int((_BIEN * tran_usd - _GIA_NHAC_KHOI_DONG) / _GIA_NHAC)))
-
-    # Lấy bảng hashtag DÀI hơn số cần báo khi mẫu lớn: cần đủ hashtag để soi (xem
+    # Chia trần TikTok cho cả lượt (mọi bảng + lấy mẫu); thiếu thì cắt lượt kém ưu tiên.
+    kh = _ke_hoach(tran_usd, tran_bai, so_tag, so_vid, so_mau, so_nhac)
+    cau_tran = (f"trần TikTok trên console là {A._usd_vn(tran_usd)} USD/lượt — cả lượt "
+                f"trend (mọi bảng + lấy mẫu) gộp lại phải gọn trong trần này")
+    if kh["tu_choi"]:
+        return tool_error(
+            f"KHÔNG CHẠY, chưa tốn tiền: {cau_tran}, không đủ cho bảng hashtag tối thiểu "
+            f"{_TOI_THIEU_BANG} dòng. Chủ agent nâng trần TikTok ở {A._NOI_CONSOLE}.")
+    cat = kh["cat"]
+    so_tag_bao, so_vid, n_nhac = kh["n_tag"], kh["n_vid"], kh["n_nhac"]
+    # Bảng hashtag DÀI hơn số cần báo khi lấy mẫu: cần đủ hashtag để soi (xem
     # `_chon_hashtag_soi`, và lượt cào thêm), mà mỗi dòng chỉ 0,0015 USD.
-    k = -(-so_mau // _VIDEO_MOI_HASHTAG) if so_mau else 0
-    n_tag = max(so_tag, min(100, 2 * k + 10)) if so_mau else so_tag
-    # Ước tính tính cả lượt cào thêm TỆ NHẤT, không chỉ lượt đầu.
-    n_mau = _so_mau_toi_da(so_mau, tran_bai, tran_usd) if so_mau else 0
-    est = (_GIA_KHOI_DONG * (1 + bool(so_vid)) + _GIA_DONG * (n_tag + so_vid)
-           + _GIA_VIDEO_MAU * n_mau
-           + ((_GIA_NHAC_KHOI_DONG + _GIA_NHAC * n_nhac) if n_nhac else 0))
+    n_tag = so_tag_bao + kh["them_tag"]
+    if not kh["n1"]:
+        so_mau = 0
+    # Ước tính = tổng trần đã chia (gồm cả lượt cào thêm TỆ NHẤT) — luôn <= trần TikTok.
+    est = kh["est"]
+    vuot = kh["est_xin"] > kh["ngan_sach"] + 1e-9
+    cau_cat = (f"Yêu cầu đầy đủ ước {A._usd_vn(round(kh['est_xin'], 2))} USD, vượt trần — "
+               f"sẽ cắt: {'; '.join(cat)}." if cat else "")
+    cau_uoc = (f"Ước tính tối đa {A._usd_vn(round(est, 2))} USD; {cau_tran}."
+               + (" " + cau_cat if cau_cat else ""))
+
+    if args.get("chi_uoc_tinh") in (True, "true", "True", 1, "1"):
+        hm = A._han_muc_thang()
+        con = round(hm["con_lai"], 2) if hm else None
+        thieu = bool(hm and con is not None and con < est)
+        return tool_result(
+            success=True, che_do="trend", chi_uoc_tinh=True, da_chay=False, vung=vung,
+            ky_ngay=ky, nganh=({"ten": nganh["ten"], "loc_theo": nganh["ten_nhom"]}
+                               if nganh else None),
+            ke_hoach={"so_hashtag": so_tag_bao, "so_video": so_vid,
+                      "so_video_mau_luot_dau": kh["n1"],
+                      "so_video_mau_cao_them_toi_da": kh["them_mau"], "so_nhac": n_nhac},
+            uoc_tinh_chi_phi_usd=round(est, 3), tran_usd_tiktok=tran_usd,
+            uoc_tinh_neu_khong_cat_usd=round(kh["est_xin"], 3), vuot_tran=vuot,
+            bi_cat_theo_tran=cat or None, ngan_sach_thang_con_usd=con,
+            vuot_ngan_sach=thieu, cau_uoc_tinh=cau_uoc,
+            note=("CHƯA chạy, không tốn tiền. Nêu phạm vi (vùng, kỳ, ngành nếu có) rồi chép "
+                  "`cau_uoc_tinh` (số USD + trần TikTok"
+                  + (", và phần sẽ bị cắt" if cat else "") + ") TRƯỚC khi kết bằng "
+                  "\"Chạy nhé?\" và DỪNG. Đồng ý mới gọi lại bỏ `chi_uoc_tinh`."
+                  + (" Ngân sách Apify tháng không đủ — nói rõ, chưa chạy được."
+                     if thieu else "")),
+        )
     bat_dau = datetime.datetime.now(A._VN_TZ) - datetime.timedelta(seconds=5)
     t0 = time.monotonic()
     loi: dict[str, str] = {}
@@ -431,38 +632,103 @@ def chay(args: dict) -> str:
     def con() -> float:
         return max(0.05, han - time.monotonic())
 
-    ex = ThreadPoolExecutor(max_workers=3)
+    # Các lượt actor chạy TUẦN TỰ theo thứ tự ưu tiên (review PR #13): `_run_actor` nâng
+    # mọi trần < 0,1 USD lên 0,1, nên ba bảng chạy song song dưới trần 0,17 USD có thể
+    # cùng lúc giữ 0,3 USD trần Apify. Tuần tự thì trước MỖI lượt: trần còn lại = trần
+    # TikTok − tiền THẬT đã tiêu (`_tien_run`); còn dưới sàn 0,1 USD hoặc không đủ phí
+    # khởi động + một dòng thì BỎ lượt đó (nói trong `bi_cat_theo_tran`). Như vậy tiền đã
+    # tiêu + trần (đã nâng sàn) của lượt đang chạy luôn <= trần TikTok.
+    so_run: list = []
+    thieu_so: list[float] = []      # lượt không để lại meta (giả lập) → tính theo trần chia
+    san = A._TRAN_USD_KHOANG[0]
+    tr = kh["tran"]
+
+    def da_tieu() -> float:
+        return sum(_tien_run(m) for m in so_run) + sum(thieu_so)
+
+    def tran_con() -> float:
+        return round(tran_usd - da_tieu(), 4)
+
+    ex = ThreadPoolExecutor(max_workers=4)
+
+    def chay_con(ten: str, phan: float, toi_thieu: float, giay_min: float, han_rieng: float,
+                 goi):
+        """Một lượt con, chờ xong mới sang lượt sau. `goi(tran_goi)` chạy actor với trần
+        USD của lượt. -> (kết quả, None) | (None, lý do bỏ / lỗi)."""
+        con_tran = tran_con()
+        tran_goi = round(min(phan, con_tran), 4)
+        if con_tran + 1e-9 < san or tran_goi + 1e-9 < toi_thieu:
+            ly_do = (f"bỏ {ten}: trần TikTok còn {A._usd_vn(max(0.0, round(con_tran, 3)))} "
+                     f"USD sau các lượt trước, dưới sàn 0,1 USD của một lượt Apify")
+            cat.append(ly_do)
+            return None, ly_do
+        if con() < giay_min:
+            ly_do = f"bỏ {ten} vì hết thời gian của lượt"
+            cat.append(ly_do)
+            return None, ly_do
+        truoc = len(so_run)
+        han_goi = min(han_run, han_rieng)
+        f = ex.submit(contextvars.copy_context().run, _trong_han, han_goi, goi, tran_goi,
+                      so_run=so_run)
+        try:
+            ket, ly_do = f.result(timeout=max(0.05, min(
+                con(), han_goi + A._DU_PHONG_HUY - time.monotonic()))), None
+        except FuturesTimeout:
+            # Lượt treo vẫn chạy tới khi `_run_actor` tự huỷ: tính đủ trần (đã nâng sàn).
+            thieu_so.append(max(san, tran_goi))
+            return None, f"{ten}: quá giờ, đã bỏ"
+        except Exception as e:  # noqa: BLE001
+            ket, ly_do = None, A._che_token(f"{type(e).__name__}: {e}")[:250]
+        if len(so_run) == truoc:
+            thieu_so.append(tran_goi)     # không đọc được tiền thật → tính theo trần chia
+        return ket, ly_do
+
     try:
-        def gui(fn, *a):
-            return ex.submit(contextvars.copy_context().run, _trong_han, han_run, fn, *a)
-        f_tag = gui(_bang_hashtag, vung, ky, n_tag, *([nganh["id_trend"]] if nganh else []))
-        f_vid = gui(_bang_video, vung, ky, so_vid, tu_nhien) if so_vid else None
-        f_nhac = gui(_bang_nhac, vung, ky, n_nhac) if n_nhac else None
-        try:
-            tat_ca_tag = f_tag.result(timeout=con())
-        except Exception as e:  # noqa: BLE001
-            tat_ca_tag, loi["hashtag"] = [], A._che_token(f"{type(e).__name__}: {e}")[:250]
-        tags = tat_ca_tag[:so_tag]
-        try:
-            vids = f_vid.result(timeout=con()) if f_vid else []
-        except Exception as e:  # noqa: BLE001
-            vids, loi["video"] = [], A._che_token(f"{type(e).__name__}: {e}")[:250]
+        # Bảng hashtag là lõi: luôn thử (giay_min 0), lúc này còn gần đủ `_TOOL_DEADLINE`.
+        tat_ca_tag, ly = chay_con(
+            "bảng hashtag", tr["hashtag"], _GIA_KHOI_DONG + _GIA_DONG, 0.0,
+            time.monotonic() + _GIAY_BANG,
+            lambda t: _bang_hashtag(vung, ky, max(1, min(n_tag, _dong_vua(
+                t, _GIA_KHOI_DONG, _GIA_DONG))), nganh["id_trend"] if nganh else "", t))
+        if tat_ca_tag is None:
+            tat_ca_tag, loi["hashtag"] = [], ly
+        tags = tat_ca_tag[:so_tag_bao]
+        vids: list = []
+        if so_vid:
+            vids, ly = chay_con(
+                "bảng top video", tr["video"], _GIA_KHOI_DONG + _GIA_DONG,
+                _TOI_THIEU_GIAY_BANG, time.monotonic() + _GIAY_BANG,
+                lambda t: _bang_video(vung, ky, max(1, min(so_vid, _dong_vua(
+                    t, _GIA_KHOI_DONG, _GIA_DONG))), tu_nhien, t))
+            if vids is None:
+                vids, loi["video"] = [], ly
 
         mau = {"cao": 0, "giu": 0, "am_thanh": [], "hieu_ung": [], "cao_du": True}
         thu_tu = _thu_tu_soi(tat_ca_tag) if so_mau else []
-        if so_mau and thu_tu and con() < _TOI_THIEU_GIAY_MAU:
-            loi["am_thanh"] = "bỏ qua lấy mẫu âm thanh vì hết thời gian của lượt"
-        elif so_mau and thu_tu:
-            try:
-                mau = contextvars.copy_context().run(
-                    _trong_han, han_run, _mau_am_thanh, thu_tu, so_mau, vung, ky,
-                    tran_bai, tran_usd, con())
-            except Exception as e:  # noqa: BLE001
-                loi["am_thanh"] = A._che_token(f"{type(e).__name__}: {e}")[:250]
-        try:
-            nhac = f_nhac.result(timeout=con()) if f_nhac else []
-        except Exception as e:  # noqa: BLE001
-            nhac, loi["nhac"] = [], A._che_token(f"{type(e).__name__}: {e}")[:250]
+        if so_mau and thu_tu:
+            # Chừa giờ cho bảng nhạc (ưu tiên hơn lượt cào thêm mẫu).
+            chua = _GIAY_NHAC if n_nhac else 0.0
+            ket, ly = chay_con(
+                "lấy mẫu âm thanh/hiệu ứng", tr["mau"],
+                _GIA_VIDEO_MAU * _MAU_THEM_TOI_THIEU, _TOI_THIEU_GIAY_MAU + chua,
+                han_run - chua,
+                lambda t: _mau_am_thanh(
+                    thu_tu, so_mau, vung, ky, tran_bai, t, max(0.0, con() - chua), kh["n1"],
+                    # Lượt cào thêm kém ưu tiên hơn bảng nhạc: chừa phần trần của nhạc.
+                    lambda: tran_con() - (max(san, tr["nhac"]) if n_nhac else 0.0)))
+            if ket is None:
+                loi["am_thanh"] = ly
+            else:
+                mau = ket
+        nhac: list = []
+        if n_nhac:
+            nhac, ly = chay_con(
+                "bảng nhạc đang lên", tr["nhac"], _GIA_NHAC_KHOI_DONG + _GIA_NHAC,
+                _TOI_THIEU_GIAY_BANG, han_run,
+                lambda t: _bang_nhac(vung, ky, max(1, min(n_nhac, _dong_vua(
+                    t, _GIA_NHAC_KHOI_DONG, _GIA_NHAC))), t))
+            if nhac is None:
+                nhac, loi["nhac"] = [], ly
     finally:
         # Không chờ lượt treo: trần trả lời 180s của run.py không đợi ai.
         ex.shutdown(wait=False)
@@ -477,7 +743,8 @@ def chay(args: dict) -> str:
     if not so_nhac and vung not in _VUNG_NHAC:
         ghi_chu_nhac = f"Creative Center không có bảng nhạc cho {vung}."
     elif so_nhac and not n_nhac:
-        ghi_chu_nhac = "Trần chi phí mỗi lượt không đủ để lấy bảng nhạc — đã bỏ qua."
+        ghi_chu_nhac = ("Trần chi phí TikTok của lượt không còn đủ cho bảng nhạc sau các bảng "
+                        "ưu tiên hơn — đã bỏ qua.")
     elif not n_nhac:
         ghi_chu_nhac = "Không lấy bảng nhạc (so_nhac=0)."
     elif "nhac" in loi:
@@ -558,12 +825,15 @@ def chay(args: dict) -> str:
                       "giu_lai_trong_ky_dung_ngon_ngu": mau["giu"],
                       "so_video_mau_can": so_mau, "so_luot_cao": mau.get("so_luot", 0)},
         loi=loi or None, sheet_url=url, granted=granted, title=title,
-        uoc_tinh_chi_phi_usd=round(est, 3),
+        uoc_tinh_chi_phi_usd=round(est, 3), tran_usd_tiktok=tran_usd,
+        bi_cat_theo_tran=cat or None,
         chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,
         cham_tran_chi_phi=bool(thuc and thuc.get("cham_tran")),
         chi_phi=A._dong_chi_phi(thuc, est),
         giay=round(time.monotonic() - t0, 1),
-        note=(ghi_chu_nhac + ghi_chu_nganh
+        note=((f"ĐÃ CẮT cho vừa trần TikTok ({A._usd_vn(tran_usd)} USD/lượt): "
+               f"{'; '.join(cat)} — nói ra với người dùng. " if cat else "")
+              + ghi_chu_nhac + ghi_chu_nganh
               + (" Mẫu giữ được ít hơn số cần — nói rõ cỡ mẫu thật."
                  if so_mau and mau["giu"] < so_mau else "")
               + (f" HASHTAG NHẠY CẢM: {'; '.join(nhay_cam)} — KHÔNG đề xuất brand bám các "

@@ -720,3 +720,53 @@ def test_bo_du_phong_ma_van_co_ads_thi_noi_trong_canh_bao(gia, monkeypatch):
     kq = chay()
     assert [g["actor"] for g in gia["goi"]] == [T.ACTOR_CHINH]
     assert any("Không chạy nguồn dự phòng" in c for c in kq["canh_bao"])
+
+
+# ───────────────────────── B4: actor chính đòi maxItems >= 10 ─────────────────────────
+@pytest.mark.parametrize("xin", [1, 3, 9])
+def test_xin_duoi_10_ads_van_goi_actor_chinh_10_roi_cat(gia, xin):
+    """E2E 04-05/10/2026: input schema azzouzana có `maxItems` minimum 10 — xin 3 ads là
+    actor chính từ chối và mọi lượt nhỏ rơi sang lexis (chậm, đắt hơn)."""
+    gia["ket"]["chinh"] = [dict(AZZ[i % 3], adId=f"a{i}", rank=i + 1) for i in range(10)]
+    kq = chay(so_ads=xin)
+    assert [g["actor"] for g in gia["goi"]] == [T.ACTOR_CHINH]
+    g = gia["goi"][0]
+    assert g["payload"]["maxItems"] == 10 and g["limit"] == 10
+    assert kq["tom_tat"]["so_ads"] == xin and len(_o(gia)) == xin + 1, "cắt về đúng n"
+    assert kq["so_ads_xin"] == xin
+    assert gia["so_ghi"][0]["est"] == pytest.approx(10 * 0.003), "trả tiền cho 10 ads"
+
+
+def test_uoc_tinh_dung_10_ads_cho_actor_chinh(gia):
+    kq = chay(so_ads=3, chi_uoc_tinh=True)
+    assert kq["so_ads"] == 3 and kq["nguon_du_kien"] == "chính"
+    assert kq["uoc_tinh_chi_phi_usd"] == pytest.approx(10 * 0.003)
+    assert not gia["goi"]
+
+
+def test_tu_10_ads_tro_len_giu_nguyen_so_xin(gia):
+    chay(so_ads=25)
+    assert gia["goi"][0]["payload"]["maxItems"] == 25
+
+
+def test_10_ads_khong_vua_tran_thi_chay_thang_du_phong(gia, monkeypatch):
+    """Giá giả cao để 10 ads chính (0,22 USD) vượt 90% trần 0,12 USD; dự phòng vẫn vừa."""
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (500, 0.12, True))
+    monkeypatch.setattr(T, "_GIA_AD", 0.02)
+    uoc = chay(so_ads=3, chi_uoc_tinh=True)
+    assert uoc["nguon_du_kien"] == "dự phòng"
+    assert uoc["uoc_tinh_chi_phi_usd"] <= 0.12 * T._BIEN + 1e-9
+    assert any("tối thiểu 10 ads" in c for c in uoc["canh_bao"])
+    kq = chay(so_ads=3)
+    assert [g["actor"] for g in gia["goi"]] == [T.ACTOR_DU_PHONG], "không chạy chính"
+    dp = gia["goi"][0]
+    assert dp["tran_usd"] <= 0.12 + 1e-9 and dp["limit"] == 3
+    assert "DỰ PHÒNG" in kq["nguon"] and not (kq["loi"] or {}).get("nguon_chinh")
+    assert gia["so_ghi"][0]["thuc"]["_actors"] == [T.ACTOR_DU_PHONG]
+
+
+def test_10_ads_va_du_phong_deu_khong_vua_tran_thi_tu_choi(gia, monkeypatch):
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (500, 0.03, True))
+    kq = chay(so_ads=3)
+    assert "error" in kq and "KHÔNG CHẠY" in kq["error"] and "10 ads" in kq["error"]
+    assert not gia["goi"] and not gia["so_ghi"]

@@ -48,6 +48,26 @@ def test_cau_tieng_viet_ra_dung_nganh(cau, khoa, nhan, nhom):
     assert n["id_trend"] == nhom + "000000000"
 
 
+@pytest.mark.parametrize("cau", [
+    "thời trang & phụ kiện", "thời trang và phụ kiện", "Thời trang & Phụ kiện",
+    "thoi trang va phu kien", "thời trang", "ngành thời trang & phụ kiện"])
+def test_cum_nganh_cha_thang_nganh_con_hep_hon(cau):
+    """E2E 04-05/10/2026: "thời trang & phụ kiện" khớp "phụ kiện" của Clothing Accessories
+    trước dòng cha Apparel & Accessories — khớp cụm đầu tiên thay vì cụm tốt nhất."""
+    n = N.tim(cau)
+    assert n and n["khoa"] == "thoi_trang" and n["nhan_actor"] == "Apparel & Accessories"
+    assert n["la_nganh_con"] is False
+
+
+@pytest.mark.parametrize("cau, khoa", [
+    ("túi xách", "tui_xach"), ("túi xách thời trang", "tui_xach"),
+    ("phụ kiện", "phu_kien_thoi_trang"), ("phụ kiện thời trang", "phu_kien_thoi_trang"),
+    ("phụ kiện trang sức", "trang_suc"), ("trang sức cao cấp", "trang_suc_cao_cap"),
+    ("thời trang nữ", "thoi_trang_nu"), ("giày nữ", "giay_nu")])
+def test_cum_dai_nhat_thang_va_nganh_con_giu_nhu_cu(cau, khoa):
+    assert N.tim(cau)["khoa"] == khoa
+
+
 @pytest.mark.parametrize("cau", ["", "vũ trụ", "tui", "vay", "vi", "123"])
 def test_khong_doan_bua(cau):
     """Bỏ dấu chỉ cho cụm dài: "tui" (= tôi), "vay" (vay tiền), "vi" (ví/vì)."""
@@ -89,7 +109,7 @@ def trend(monkeypatch):
         return []
 
     monkeypatch.setattr(A, "_call", call)
-    monkeypatch.setattr(A, "_tran", lambda: (800, 2.4))
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, 2.4, True))
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
     monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: {})
     monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
