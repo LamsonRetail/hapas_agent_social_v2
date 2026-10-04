@@ -1230,13 +1230,22 @@ def _youtube_so():
 
 
 def _youtube_doc() -> dict:
-    """{"trang": đã dùng, "giu": {mã việc: trang đã giữ chỗ}} của hôm nay (giờ PT)."""
+    """{"trang": đã dùng, "giu": {mã việc: trang đã giữ chỗ}, "dv": đơn vị quota của lượt
+    KHÔNG phải search (bình luận — social_deep_dive), "het": đã gặp quotaExceeded} của hôm
+    nay (giờ PT)."""
     try:
         d = json.loads(_youtube_so().read_text(encoding="utf-8"))
         return {"trang": int(d.get("trang") or 0),
-                "giu": {str(k): int(v) for k, v in (d.get("giu") or {}).items() if int(v) > 0}}
+                "giu": {str(k): int(v) for k, v in (d.get("giu") or {}).items() if int(v) > 0},
+                "dv": int(d.get("dv") or 0), "het": bool(d.get("het"))}
     except Exception:  # noqa: BLE001
-        return {"trang": 0, "giu": {}}
+        return {"trang": 0, "giu": {}, "dv": 0, "het": False}
+
+
+def _youtube_trang_tinh(d: dict) -> int:
+    """Trang search đã dùng + quota của lượt bình luận quy ra trang (100 đơn vị = 1 trang
+    search): cùng một quota 10.000 đơn vị/ngày, bình luận ăn bớt thì search còn ít hơn."""
+    return d["trang"] + int(d.get("dv") or 0) // 100
 
 
 def _youtube_ghi(d: dict) -> None:
@@ -1271,6 +1280,27 @@ def _youtube_dem(n: int = 1) -> int:
         return d["trang"]
 
 
+def _youtube_dem_dv(n: int = 1) -> int:
+    """Cộng `n` đơn vị quota của lượt không phải search (commentThreads/comments.list = 1
+    đơn vị/lượt) vào sổ ngày. -> tổng đơn vị bình luận hôm nay."""
+    with _YT_KHOA:
+        d = _youtube_doc()
+        d["dv"] += n
+        _youtube_ghi(d)
+        return d["dv"]
+
+
+def _youtube_het_quota(dat: bool | None = None) -> bool:
+    """Hôm nay (giờ PT) đã gặp quotaExceeded chưa; `dat=True` thì ghi nhận. Lượt bình luận
+    sau đó đi thẳng nguồn dự phòng, khỏi tốn một lượt gọi chỉ để nhận 403."""
+    with _YT_KHOA:
+        d = _youtube_doc()
+        if dat and not d["het"]:
+            d["het"] = True
+            _youtube_ghi(d)
+        return d["het"]
+
+
 def _youtube_tran(nen: bool) -> int:
     tran = _so_env("YOUTUBE_SEARCH_NGAY", 100, 1, 100000)
     if nen:
@@ -1285,7 +1315,7 @@ def _youtube_con_trang(nen: bool = True, ma: str | None = None) -> int:
     việc nền KHÁC đã giữ chỗ bị trừ ra, trang của chính việc `ma` thì cộng lại."""
     d = _youtube_doc()
     khac = sum(v for k, v in d["giu"].items() if k != ma)
-    return max(0, _youtube_tran(nen) - d["trang"] - khac)
+    return max(0, _youtube_tran(nen) - _youtube_trang_tinh(d) - khac)
 
 
 def _youtube_giu(ma: str, n: int) -> int:
@@ -1294,7 +1324,7 @@ def _youtube_giu(ma: str, n: int) -> int:
     with _YT_KHOA:
         d = _youtube_doc()
         khac = sum(v for k, v in d["giu"].items() if k != ma)
-        duoc = max(0, min(int(n), _youtube_tran(True) - d["trang"] - khac))
+        duoc = max(0, min(int(n), _youtube_tran(True) - _youtube_trang_tinh(d) - khac))
         if duoc:
             d["giu"][ma] = duoc
         else:
@@ -1313,32 +1343,52 @@ def _youtube_tra(ma: str) -> int:
         return con
 
 
-def _youtube_get(resource: str, params: dict) -> dict:
-    """GET một endpoint YouTube, không bao giờ để API key lọt vào lỗi/log."""
+class LoiYouTube(RuntimeError):
+    """Lỗi YouTube Data API ĐÃ PHÂN LOẠI: `ly_do` là `errors[0].reason` của Google
+    ("quotaExceeded", "commentsDisabled", "videoNotFound"…, "" nếu không có), `http` là mã
+    HTTP (0 = không kết nối được / thiếu key). Là RuntimeError: bên gọi cũ không đổi."""
+
+    def __init__(self, thong_bao: str, ly_do: str = "", http: int = 0):
+        super().__init__(thong_bao)
+        self.ly_do, self.http = ly_do, http
+
+
+def _youtube_co_key() -> bool:
+    return bool(os.environ.get("YOUTUBE_DATA_API_KEY", "").strip())
+
+
+def _youtube_get(resource: str, params: dict, timeout: float | None = None) -> dict:
+    """GET một endpoint YouTube, không bao giờ để API key lọt vào lỗi/log.
+
+    Lượt search đếm vào sổ trang ngày; lượt khác (commentThreads, comments — 1 đơn vị) đếm
+    vào sổ đơn vị (`_youtube_dem_dv`). `timeout` (giây) để bên gọi có hạn chót riêng."""
     key = os.environ.get("YOUTUBE_DATA_API_KEY", "").strip()
     if not key:
-        raise RuntimeError(
+        raise LoiYouTube(
             "Thiếu YOUTUBE_DATA_API_KEY trong .env. Bật YouTube Data API v3 "
             "trong Google Cloud rồi tạo API key; nguồn YouTube không dùng Apify "
-            "fallback để tránh phát sinh chi phí âm thầm."
+            "fallback để tránh phát sinh chi phí âm thầm.", "khongCoKey"
         )
     try:
         r = requests.get(
             f"{_YOUTUBE_BASE}/{resource}",
             params={**params, "key": key},
-            timeout=min(45, _RUN_TIMEOUT),
+            timeout=min(45, _RUN_TIMEOUT) if timeout is None else max(1.0, timeout),
         )
     except requests.RequestException as e:
         # requests có thể nhét prepared URL (kèm key) vào chuỗi lỗi; chỉ nêu loại.
-        raise RuntimeError(
-            f"Không kết nối được YouTube Data API: {type(e).__name__}"
+        raise LoiYouTube(
+            f"Không kết nối được YouTube Data API: {type(e).__name__}", "ketNoi"
         ) from None
     try:
         data = r.json()
     except ValueError:
         data = {}
-    if resource == "search" and getattr(r, "status_code", 500) < 400:
-        _youtube_dem(1)
+    if getattr(r, "status_code", 500) < 400:
+        if resource == "search":
+            _youtube_dem(1)
+        else:
+            _youtube_dem_dv(1)
     if r.status_code >= 400:
         err = data.get("error") if isinstance(data, dict) else {}
         err = err if isinstance(err, dict) else {}
@@ -1346,17 +1396,19 @@ def _youtube_get(resource: str, params: dict) -> dict:
         reason = reasons[0].get("reason") if reasons and isinstance(reasons[0], dict) else ""
         message = str(err.get("message") or "")[:180]
         if reason in ("quotaExceeded", "dailyLimitExceeded"):
-            raise RuntimeError(
+            raise LoiYouTube(
                 "YouTube Data API đã hết quota hôm nay (search.list mặc định "
-                "100 lượt/ngày; reset theo giờ Pacific)."
+                "100 lượt/ngày; reset theo giờ Pacific).", reason, r.status_code
             )
         if reason in ("keyInvalid", "accessNotConfigured", "forbidden"):
-            raise RuntimeError(
-                f"YouTube Data API key chưa hợp lệ/chưa bật API ({reason}). {message}"
+            raise LoiYouTube(
+                f"YouTube Data API key chưa hợp lệ/chưa bật API ({reason}). {message}",
+                reason, r.status_code
             )
-        raise RuntimeError(
+        raise LoiYouTube(
             f"YouTube Data API HTTP {r.status_code}"
-            f"{f' ({reason})' if reason else ''}: {message or 'không có mô tả'}"
+            f"{f' ({reason})' if reason else ''}: {message or 'không có mô tả'}",
+            reason, r.status_code
         )
     if not isinstance(data, dict):
         raise RuntimeError("YouTube Data API trả dữ liệu không phải JSON object.")
