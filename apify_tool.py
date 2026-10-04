@@ -1124,14 +1124,24 @@ def _chi_phi_cac_run(run_ids: list[str]) -> dict:
     return {"usd": round(tong, 4), "so_run": so, "chua_doc": chua, "con_song": song}
 
 
+# Hỏi lại tiền thật tới khi SỐ CUỐI: mọi run đã kết thúc VÀ tổng giữ nguyên qua hai lần
+# đọc liền nhau. E2E 04-05/10/2026: lượt f2 ghi sổ 0,143 USD, thật 0,193 — bản cũ dừng
+# hỏi khi số đã ≥ 50% ước tính, lúc Apify còn đang ghi tiền.
+_CP_NGHI = 3.0          # giây giữa hai lần hỏi
+_CP_LAN_TOI_DA = 6      # lần hỏi lại tối đa (~18 giây) khi bên gọi không đưa hạn chót
+
+
 def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
-                  uoc_tinh: float = 0.0) -> dict | None:
+                  uoc_tinh: float = 0.0, han: float | None = None) -> dict | None:
     """Cộng `usageTotalUsd` các run của `actors` bắt đầu từ `tu` — tiền Apify THẬT tính.
 
     Endpoint run-sync không trả phí, nên hỏi lại lịch sử run sau khi quét. Trước
     đây chỉ có ước tính trước khi chạy: 23/09/2026 Mark báo "khoảng 0,30 USD"
     trong khi thực tế là 0,83 USD. Trả None nếu không hỏi được (không đoán số).
-    """
+
+    `han` (time.monotonic): hạn chót của bên gọi — không bắt đầu lần chờ nào vượt hạn,
+    trả số mới nhất đang có. Kết quả có `on_dinh`=True khi số đã là số cuối (run xong,
+    hai lần đọc khớp nhau)."""
     token = os.environ.get("APIFY_TOKEN", "").strip()
     if not token or not actors:
         return None
@@ -1164,23 +1174,34 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
                 tong += u
                 so_run += 1
                 cham_tran += u >= 0.95 * tran_usd
-                dang_chay += it.get("status") in ("READY", "RUNNING")
+                dang_chay += it.get("status") not in _KET_THUC
         return {"usd": round(tong, 3), "so_run": so_run,
                 "cham_tran": cham_tran, "dang_chay": dang_chay}
 
-    kq = _mot_luot()
+    def _on_dinh(moi: dict | None, cu: dict | None) -> bool:
+        return bool(moi and cu and not moi["dang_chay"] and moi["so_run"] == cu["so_run"]
+                    and abs(moi["usd"] - cu["usd"]) < 1e-9)
+
+    kq, truoc = _mot_luot(), None
     # run-sync đã trả dữ liệu nhưng Apify ghi tiền CHẬM vài giây, kể cả khi run đã báo
     # SUCCEEDED. Đo 25/09: lượt soi tài khoản vừa xong vẫn "đang chạy"; lượt Shopee báo
-    # 0,01 USD trong khi thật là 0,105. Hỏi lại khi còn "đang chạy" hoặc số thật thấp hơn
-    # nửa ước tính — tối đa hai lần, mỗi lần 3 giây.
+    # 0,01 USD trong khi thật là 0,105. Nên: hỏi lại tới khi số ỔN ĐỊNH (`_on_dinh`) —
+    # luôn ít nhất một lần đọc xác nhận; số thấp hơn nửa ước tính thì hỏi thêm ít nhất
+    # hai lần dù đã khớp (Apify có thể đứng ở phí khởi động vài giây).
     # Hỏi hỏng (None) cũng hỏi lại: đo 25/09, lượt soi TikTok Shop chạy xong trong khoảng
     # thời gian đối chiếu mà sổ vẫn ghi "chưa lấy được số thực" — một lần gọi Apify lỗi
     # thoáng qua là bỏ cuộc luôn.
-    for _ in range(2):
-        if kq and not (kq["dang_chay"] or (uoc_tinh and kq["usd"] < 0.5 * uoc_tinh)):
+    for lan in range(_CP_LAN_TOI_DA):
+        thap = bool(kq and uoc_tinh and kq["usd"] < 0.5 * uoc_tinh)
+        if _on_dinh(kq, truoc) and not (thap and lan < 2):
             break
-        time.sleep(3)
+        if han is not None and time.monotonic() + _CP_NGHI > han:
+            break
+        time.sleep(_CP_NGHI)
+        truoc = kq or truoc
         kq = _mot_luot() or kq
+    if kq:
+        kq = {**kq, "on_dinh": _on_dinh(kq, truoc)}
     return kq
 
 
@@ -3433,7 +3454,8 @@ def _handle(args: dict, **kwargs) -> str:
     if "tiktok" in plats:
         actors.append(_ACTORS["tiktok_fallback"])
     ex_cp = ThreadPoolExecutor(max_workers=1)
-    f_cp = ex_cp.submit(_chi_phi_thuc, actors, _bat_dau, est) if actors else None
+    f_cp = (ex_cp.submit(_chi_phi_thuc, actors, _bat_dau, est, han_chot - 1.0)
+            if actors else None)
 
     # Bước 2 — MỘT bước AI phân xử cho cả lượt quét (thay bộ lọc AI + AI cứu cũ).
     ai_log: list[str] = []

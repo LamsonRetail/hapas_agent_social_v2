@@ -16,6 +16,7 @@ import json
 import pytest
 
 import apify_tool as A
+from test_binh_luan_phan_tich import moi_truong  # noqa: F401
 
 TU = datetime.datetime(2026, 9, 25, 9, 27, tzinfo=A._VN_TZ)
 
@@ -53,13 +54,15 @@ def lich_su(monkeypatch):
     monkeypatch.setattr(A.requests, "get", get)
     # Ghim trần 1 USD: không ghim thì test đọc trần THẬT trên console qua mạng.
     monkeypatch.setattr(A, "_tran", lambda: (500, 1.0))
+    monkeypatch.setattr(A.time, "sleep", lambda s: None)   # lần đọc xác nhận, khỏi chờ thật
     return goi
 
 
 def test_cong_dung_run_cua_luot_nay_va_bao_cham_tran(lich_su):
     thuc = A._chi_phi_thuc(
         ["apidojo~tiktok-scraper", "clockworks~tiktok-hashtag-scraper"], TU)
-    assert thuc == {"usd": 1.002, "so_run": 2, "cham_tran": 1, "dang_chay": 0}, (
+    assert thuc == {"usd": 1.002, "so_run": 2, "cham_tran": 1, "dang_chay": 0,
+                    "on_dinh": True}, (
         "run 23/09 bắt đầu trước lượt quét này nên không được cộng")
     dong = A._dong_chi_phi(thuc, 0.3)
     assert "1,00 USD" in dong and "số thực" in dong and "chạm trần" in dong
@@ -222,3 +225,68 @@ def test_hoi_chi_phi_loi_thoang_qua_thi_hoi_lai(monkeypatch):
     monkeypatch.setattr(A.requests, "get", get)
     thuc = A._chi_phi_thuc(["pro100chok~tiktok-shop-scraper-usage"], TU, 0.0035)
     assert thuc and thuc["usd"] == 0.004 and thuc["so_run"] == 1
+
+
+# ───────── B7 (E2E 04-05/10/2026): sổ ghi 0,143 USD, Apify tính thật 0,193 ─────────
+def _apify_theo_lan(monkeypatch, cac_lan):
+    """`requests.get` giả: lần đọc thứ i trả (trạng thái, usd) = cac_lan[min(i, cuối)]."""
+    lan, ngu = [], []
+
+    def get(url, **kw):
+        st, usd = cac_lan[min(len(lan), len(cac_lan) - 1)]
+        lan.append(1)
+        return _Resp([{"startedAt": "2026-09-25T02:27:39Z", "usageTotalUsd": usd,
+                       "status": st}])
+
+    monkeypatch.setenv("APIFY_TOKEN", "tok")
+    monkeypatch.setattr(A, "_tran", lambda: (500, 1.0))
+    monkeypatch.setattr(A.time, "sleep", lambda s: ngu.append(s))
+    monkeypatch.setattr(A.requests, "get", get)
+    return lan, ngu
+
+
+def test_hoi_lai_toi_khi_so_on_dinh_khong_dung_o_nua_uoc_tinh(monkeypatch):
+    """Bản cũ: số đầu 0,143 ≥ 50% ước tính 0,2 là thôi hỏi -> sổ ghi thiếu 0,05 USD."""
+    lan, _ = _apify_theo_lan(monkeypatch, [("SUCCEEDED", 0.143), ("SUCCEEDED", 0.193)])
+    thuc = A._chi_phi_thuc(["apify~facebook-comments-scraper"], TU, 0.2)
+    assert thuc["usd"] == 0.193 and thuc["on_dinh"] is True
+    assert len(lan) == 3, "đọc tới khi hai lần liền nhau khớp nhau"
+
+
+def test_run_con_chay_thi_cho_co_gioi_han_va_bao_chua_on_dinh(monkeypatch):
+    lan, ngu = _apify_theo_lan(monkeypatch, [("RUNNING", 0.05)])
+    thuc = A._chi_phi_thuc(["x~y"], TU)
+    assert len(lan) == 1 + A._CP_LAN_TOI_DA and sum(ngu) <= 20, "chờ có trần"
+    assert thuc["dang_chay"] == 1 and thuc["on_dinh"] is False
+    assert "vẫn đang chạy" in A._dong_chi_phi(thuc, 0.1)
+
+
+def test_khong_cho_qua_han_chot_cua_ben_goi(monkeypatch):
+    lan, ngu = _apify_theo_lan(monkeypatch, [("SUCCEEDED", 0.1), ("SUCCEEDED", 0.2)])
+    thuc = A._chi_phi_thuc(["x~y"], TU, 0.1, han=A.time.monotonic() + 1.0)
+    assert ngu == [] and len(lan) == 1, "không bắt đầu lần chờ nào vượt hạn"
+    assert thuc["usd"] == 0.1 and thuc["on_dinh"] is False
+
+
+def test_so_thap_hon_nua_uoc_tinh_thi_hoi_them_du_da_khop(monkeypatch):
+    """Apify có thể đứng ở phí khởi động vài giây rồi mới cộng tiền theo dòng."""
+    lan, _ = _apify_theo_lan(monkeypatch, [("SUCCEEDED", 0.02), ("SUCCEEDED", 0.02),
+                                           ("SUCCEEDED", 0.07)])
+    thuc = A._chi_phi_thuc(["x~y"], TU, 0.08)
+    assert thuc["usd"] == 0.07 and thuc["on_dinh"] is True
+
+
+def test_deep_dive_dua_han_chot_cho_viec_hoi_tien(moi_truong, monkeypatch):  # noqa: F811
+    """Chờ số ổn định không được vượt `f_cp.result(timeout=…)`, kẻo mất luôn số đã đọc."""
+    import json
+    import deep_dive_tool as D
+    from test_binh_luan_phan_tich import TT, _bl
+    ap = moi_truong[0]
+    ap.tra = lambda payload, limit: [_bl(TT.format(7000001), "đẹp")]
+    han = []
+    monkeypatch.setattr(A, "_chi_phi_thuc", lambda actors, tu, est=0.0, h=None, **k: (
+        han.append(h) or {"usd": 0.2, "so_run": 1, "cham_tran": 0, "dang_chay": 0}))
+    t = A.time.monotonic()
+    kq = json.loads(D._handle({"post_urls": [TT.format(7000001)]}))
+    assert kq["chi_phi_thuc_usd"] == 0.2
+    assert han and t < han[0] <= t + A._TOOL_DEADLINE - 9

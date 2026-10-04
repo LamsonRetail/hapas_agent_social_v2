@@ -275,7 +275,8 @@ def test_chi_phi_hoi_lai_khi_apify_con_bao_dang_chay(monkeypatch):
     monkeypatch.setattr(A.time, "sleep", lambda s: None)
     monkeypatch.setattr(A.requests, "get", lambda *a, **k: lan.append(1) or R())
     thuc = A._chi_phi_thuc(["x~y"], A._to_vn(_iso(1)))
-    assert thuc == {"usd": 0.08, "so_run": 1, "cham_tran": 0, "dang_chay": 0}
+    assert thuc == {"usd": 0.08, "so_run": 1, "cham_tran": 0, "dang_chay": 0,
+                    "on_dinh": True}
 
 
 def test_shopee_thieu_tu_khoa():

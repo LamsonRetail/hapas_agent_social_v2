@@ -1437,7 +1437,10 @@ def _xu_ly(args: dict) -> str:
     dv_yt = sum(int(kq.get("dv") or 0) for kq in lo_kq)
     lo_yt = [kq for kq in lo_kq if kq.get("yt_api")]
     ex_cp = ThreadPoolExecutor(max_workers=1)
-    f_cp = ex_cp.submit(A._chi_phi_thuc, actors, bat_dau, est) if actors else None
+    # Hạn chót cho việc hỏi lại tiền: xong trước `f_cp.result(timeout=…)` bên dưới, kẻo
+    # chờ số ổn định quá lâu rồi mất luôn cả số đã đọc được.
+    f_cp = (ex_cp.submit(A._chi_phi_thuc, actors, bat_dau, est,
+                         t0 + A._TOOL_DEADLINE - 10) if actors else None)
 
     tt_pl: dict = {}
     _danh_dau_thuong_hieu(rows, _thuong_hieu(args.get("thuong_hieu")))
