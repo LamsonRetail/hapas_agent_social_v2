@@ -57,6 +57,7 @@ import ky_nang_tool  # noqa: E402,F401  (registers `dung_ky_nang`: nạp thân k
 import account_tool  # noqa: E402,F401  (registers `soi_tai_khoan`: soi tài khoản brand/KOC)
 import shopee_tool  # noqa: E402,F401  (registers `soi_san`: giá và sản phẩm trên Shopee)
 import tiktok_ads_tool  # noqa: E402,F401  (registers `tiktok_top_ads`: top ads TikTok -> Lark Sheet)
+import kenh_nha_tool  # noqa: E402,F401  (registers `binh_luan_kenh_nha`: bình luận kênh HAPAS qua API Meta)
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
@@ -139,8 +140,9 @@ _TOOLING_NOTE = "\n".join(
         # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
         # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).
-        "- TOOL TỐN TIỀN (`social_listen`, `social_deep_dive`, `soi_tai_khoan`, `soi_san`, "
-        "`tiktok_top_ads` — tool này gọi `chi_uoc_tinh`=true trước, miễn phí): "
+        "- TOOL TỐN TIỀN HOẶC GHI SHEET (`social_listen`, `social_deep_dive`, `soi_tai_khoan`, "
+        "`soi_san`, `tiktok_top_ads`, `binh_luan_kenh_nha` — hai tool cuối gọi `chi_uoc_tinh`="
+        "true trước, miễn phí; `binh_luan_kenh_nha` luôn 0 USD nhưng vẫn hỏi vì ghi Sheet): "
         "TRƯỚC khi gọi, tóm tắt phạm vi (từ khoá hoặc link, nền tảng, khoảng ngày, số bài) rồi "
         "KẾT THÚC bằng câu hỏi \"Chạy nhé?\" và DỪNG, chờ người dùng trả lời. Chỉ gọi ngay khi: "
         "người dùng vừa đồng ý câu chốt đó (ok, chạy đi, làm luôn…); người dùng nói rõ không "
@@ -177,6 +179,12 @@ _TOOLING_NOTE = "\n".join(
         "Instagram bóc KHÔNG đăng nhập: không có trả lời lồng nhau, Instagram chỉ được MỘT "
         "PHẦN bình luận công khai — khi báo phải nói rõ giới hạn đó (`gioi_han_nen_tang`), "
         "không gọi là toàn bộ bình luận; không lấy nền tảng khác thay vào.",
+        # 04/10: bài của CHÍNH HAPAS đọc được đủ bằng token chủ kênh qua API Meta.
+        "- BÌNH LUẬN TRÊN KÊNH CỦA HAPAS (Threads, Instagram, Fanpage của mình — 'khách nói gì "
+        "dưới bài mới của HAPAS'): dùng `binh_luan_kenh_nha` — API chính thức, MIỄN PHÍ, đủ "
+        "bình luận và trả lời lồng nhau. Bài của đối thủ/người khác (hoặc TikTok/YouTube) mới "
+        "dùng `social_deep_dive` (cào, chỉ một phần, tốn tiền). Kênh báo 'chưa nối' hoặc 'token "
+        "hết hạn' thì nói thẳng: chủ agent cần cấp lại token cho kênh đó.",
         # 01/10: chủ agent chốt — bài của brand ở nước khác (HAPAS THAILAND) phải giữ, và
         # trần bóc bình luận trên console là trần cứng.
         "- `social_listen`: luôn điền `boi_canh` (thiếu thì không có bước AI đọc từng bài). "
@@ -214,6 +222,8 @@ _TOOL_CAN_XET = {
                       "rồi xuất Lark Sheet", {}),
     "soi_san": ("xem thị trường Shopee theo từ khoá, hoặc dán link sản phẩm Shopee / TikTok "
                 "Shop để đọc đánh giá của khách, rồi xuất Lark Sheet", {}),
+    "binh_luan_kenh_nha": ("đọc đủ bình luận trên kênh Threads/Instagram/Facebook của "
+                           "chính HAPAS (API Meta, miễn phí) rồi xuất Lark Sheet", {}),
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
     "tiktok_top_ads": ("xem top quảng cáo TikTok theo từ khoá hoặc ngành (TikTok Creative "
                        "Center) rồi xuất Lark Sheet", {}),

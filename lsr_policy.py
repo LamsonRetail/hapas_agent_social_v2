@@ -60,6 +60,8 @@ _MUTATING_EXACT = {
     "soi_tai_khoan": "write_data",       # soi tài khoản brand/KOC → tạo Lark Sheet
     "soi_san": "write_data",             # giá và sản phẩm Shopee → tạo Lark Sheet
     "tiktok_top_ads": "write_data",      # top quảng cáo TikTok (Apify) → tạo Lark Sheet
+    # Bình luận trên kênh CỦA HAPAS qua API Meta (miễn phí) → tạo Lark Sheet.
+    "binh_luan_kenh_nha": "write_data",
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
     # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
@@ -214,7 +216,7 @@ def quyen_phat() -> set[str]:
 _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
-    "tiktok_top_ads",
+    "tiktok_top_ads", "binh_luan_kenh_nha",
 })
 
 #: Tool có công tắc riêng nhưng RA ĐỜI SAU công tắc cha → khi `capabilities` chưa có
@@ -230,7 +232,11 @@ _TOOL_CO_CONG_TAC = frozenset({
 #:   • không có dòng nào (console cũ, hoặc chưa ai bấm)   → theo `social_listen`
 #: Nhờ vậy thứ tự merge hai repo không quan trọng: console chưa có công tắc thì hành vi
 #: y như trước; có rồi thì công tắc riêng ăn ngay khi chủ agent bấm.
-_CONG_TAC_LUI = {"tiktok_top_ads": "social_listen"}
+#:
+#: `binh_luan_kenh_nha` (04/10/2026, đọc bình luận kênh HAPAS qua API Meta) đi đúng
+#: đường này từ ngày đầu: console chưa có công tắc của nó thì mượn "Quét mạng xã hội";
+#: platform thêm dòng `theo: "social_listen"` thì công tắc riêng ăn, runtime không sửa.
+_CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen"}
 
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.
 KHONG_THU_HEP = object()
