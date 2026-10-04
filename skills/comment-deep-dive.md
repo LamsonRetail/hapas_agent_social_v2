@@ -5,6 +5,18 @@ phương pháp lấy mẫu và nền tảng không hỗ trợ. Nhóm chủ đề
 không suy rộng mẫu comment thành toàn bộ khách hàng. Không lưu username/profile URL nếu
 không cần cho evidence.
 
+**Bài của CHÍNH HAPAS → `binh_luan_kenh_nha`; bài người khác → `social_deep_dive`.**
+
+- Kênh nhà (Threads, Instagram, Trang Facebook của HAPAS): `binh_luan_kenh_nha` đọc
+  qua API chính thức của Meta — miễn phí, ĐỦ bình luận và trả lời lồng nhau, lấy được
+  bài mới nhất hoặc theo khoảng ngày, không cần link. Trả lời của chính shop có trong
+  sheet nhưng không gán nhãn, không tính vào thống kê. Threads không có số like từng
+  trả lời. Vẫn ghi Sheet nên gọi `chi_uoc_tinh` trước, báo 0 USD rồi hỏi "Chạy nhé?"
+- Đối thủ, KOC, bài người khác, TikTok, YouTube: `social_deep_dive` (cào không đăng
+  nhập, Threads/Instagram chỉ một phần, tốn tiền)
+- Kênh báo "chưa nối" hoặc "token hết hạn": nói thẳng là chủ agent cần cấp lại token
+  cho kênh đó. Không lặng lẽ chuyển sang `social_deep_dive` cho bài của HAPAS
+
 **Gán nhãn và thống kê là việc `social_deep_dive` làm được.** Người dùng nhờ "gán nhãn
 từng bình luận", "thống kê sentiment", "bao nhiêu % khen chê" → dùng tool này. Mỗi bình
 luận có cột Sắc thái (Tích cực / Tiêu cực / Trung lập) và Chủ đề (sản phẩm, giá/mua ở
