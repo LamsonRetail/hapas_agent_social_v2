@@ -44,11 +44,20 @@ gọi agent. Phải có một bộ ở giữa:
 lấy golden case  →  đưa qua ingress THẬT  →  gom câu trả lời  →  nộp chấm
 ```
 
-`tests/chay_hoi_quy.py` làm việc đó. Hai quyết định trong nó đáng mang sang agent khác:
+`tests/chay_hoi_quy.py` làm việc đó. Mấy quyết định trong nó đáng mang sang agent khác:
 
 **Đi qua đúng ingress thật** (`/v1/chat/{id}/messages`), không gọi model trực tiếp. Hồi
 quy phải đo thứ người dùng thật sự gặp — gồm cả policy, công tắc năng lực và prompt. Gọi
 thẳng model là đo một hệ thống khác.
+
+**Đọc câu trả lời từ platform, không từ máy chạy script.** Câu trả lời lấy qua SSE
+`/v1/chat/{id}/stream` bằng chính agent key đã gửi câu hỏi (dự phòng: panel hội thoại
+của console bằng cookie `~/.lsr/token`). Nhìn `.audit/` của máy chạy script là sai khi
+agent chạy ở máy khác: case nào cũng "KHÔNG TRẢ LỜI".
+
+**Nhãn version là dev, người trả lời đọc prod.** Điểm gắn vào version ở dev (version
+`_eval_gate` sẽ kiểm), nhưng Mark thật luôn dựng prompt từ env `prod`. Script cảnh báo
+khi hai version lệch: lúc đó hồi quy chưa đo instruction/kỹ năng mới của bản dev.
 
 **Lọc case theo skill.** Golden set dùng chung cho nhiều agent. Trong 10 case active có 5
 case của agent pháp chế. Chấm Mark bằng những câu đó là chấm sai người: Mark trả lời
