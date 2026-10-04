@@ -25,5 +25,9 @@ Chỉ chạy khi người dùng đồng ý.
 - Link video MP4 hết hạn sau 24–48 giờ; trang ad trên Creative Center thì còn. Cần giữ
   video thì tải ngay
 
+Giới hạn đo thật (10/2026): tài khoản Apify đang ở gói Free nên mỗi lượt chỉ ra khoảng 5
+ads đầu bảng (tool báo trong `canh_bao`), chạy lại cũng ra đúng 5 ads đó. TikTok thường
+không trả tên brand: đừng đoán, chỉ đọc từ caption hoặc landing page và nói là suy ra.
+
 Nguồn chính hỏng thì tool tự chuyển sang nguồn dự phòng: nói rõ, và nói nếu lọc ngành đã
 bị nới ra ngành cha (vd "túi xách" thành "thời trang và phụ kiện").

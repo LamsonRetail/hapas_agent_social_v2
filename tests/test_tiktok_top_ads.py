@@ -154,7 +154,7 @@ def test_chi_uoc_tinh_khong_chay_khong_ghi_so(gia):
     kq = chay(nganh="túi xách", so_ads=20, chi_uoc_tinh=True)
     assert kq["da_chay"] is False and not gia["goi"] and not gia["so_ghi"]
     assert kq["uoc_tinh_chi_phi_usd"] == pytest.approx(0.06)
-    assert kq["uoc_tinh_toi_da_usd"] == pytest.approx(0.06 + 0.0025 + 20 * 0.004, abs=1e-3)
+    assert kq["uoc_tinh_toi_da_usd"] == pytest.approx(0.06 + 0.01 + 20 * 0.004, abs=1e-3)
     assert "Chạy nhé?" in kq["note"] and kq["vuot_ngan_sach"] is False
     assert "ngành Túi xách" in kq["pham_vi"]
 
@@ -310,3 +310,349 @@ def test_prompt_ke_tool_va_luat_hoi_truoc():
     assert "tiktok_top_ads" in brain._TOOL_CAN_XET
     assert "`tiktok_top_ads`" in brain._TOOLING_NOTE.split("TOOL TỐN TIỀN")[1][:200]
     assert "Chạy nhé?" in T.SCHEMA["description"] and "chi_uoc_tinh" in T.SCHEMA["description"]
+
+
+# ───────────────────────────── dữ liệu THẬT 04/10/2026 ─────────────────────────────
+# Lượt chạy thật: VN · 30 ngày · Apparel & Accessories · xếp CTR · xin 10. Đã làm sạch:
+# link CDN có chữ ký, link landing page thay bằng chỗ giữ; giữ nguyên mọi tên trường và
+# giá trị số. Tài khoản Apify gói Free → actor chính chỉ trả 5 ads kèm statusMessage dưới.
+MSG_GOI_FREE = ("⚠️ To ensure service stability, free accounts have limited data "
+                "extraction. Upgrade to a paid plan to unlock full access 👉 "
+                "https://apify.com/pricing")
+AZZ_THAT = json.loads(r'''[
+    {
+        "adId": "7678197312435617800",
+        "adTitle": "#HEAVEN #sweater #aosweater #sweaterunisex #aokhoacnhe ",
+        "brandName": null,
+        "ctr": 0.34,
+        "likes": 310,
+        "costScore": 1,
+        "favorite": false,
+        "industryKey": "label_22110000000",
+        "industryName": "Women's Clothing",
+        "objectiveKey": "campaign_objective_product_sales",
+        "isSparkAd": null,
+        "isSearch": false,
+        "videoId": "v10025g50000da73cv7og65ha5mqdgag",
+        "durationSec": 21.967,
+        "coverUrl": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4",
+        "videoUrl720p": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4",
+        "videoUrl540p": null,
+        "videoUrl360p": null,
+        "width": 576,
+        "height": 1024,
+        "countryCode": "VN",
+        "periodDays": 30,
+        "orderBy": "ctr",
+        "industryId": "22000000000",
+        "industryLabel": "Apparel & Accessories",
+        "filterObjective": null,
+        "adLanguage": null,
+        "adFormat": null,
+        "adFormatLabel": null,
+        "likeTier": null,
+        "keyword": null,
+        "rank": 1,
+        "detailUrl": "https://ads.tiktok.com/business/creativecenter/topads/7678197312435617800/pc/en",
+        "creativeCenterUrl": "https://ads.tiktok.com/business/creativecenter/inspiration/topads/pc/en",
+        "scrapedAt": "2026-10-04T09:58:06.763Z",
+        "landingPageUrl": "https://vt.tiktok.com/ZS0000000/",
+        "keywords": null,
+        "tags": null,
+        "ctrTier": null,
+        "detailFetched": true
+    },
+    {
+        "adId": "7680941719622057991",
+        "adTitle": "The Winter Collection You’ve Been Waiting For! 😍",
+        "brandName": null,
+        "ctr": 0.39,
+        "likes": 187,
+        "costScore": 1,
+        "favorite": false,
+        "industryKey": "label_22110000000",
+        "industryName": "Women's Clothing",
+        "objectiveKey": "campaign_objective_conversion",
+        "isSparkAd": null,
+        "isSearch": false,
+        "videoId": "v1c044g50000dac2fmnog65io6j9o2ig",
+        "durationSec": 24.474,
+        "coverUrl": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4",
+        "videoUrl720p": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4",
+        "videoUrl540p": null,
+        "videoUrl360p": null,
+        "width": 576,
+        "height": 1024,
+        "countryCode": "VN",
+        "periodDays": 30,
+        "orderBy": "ctr",
+        "industryId": "22000000000",
+        "industryLabel": "Apparel & Accessories",
+        "filterObjective": null,
+        "adLanguage": null,
+        "adFormat": null,
+        "adFormatLabel": null,
+        "likeTier": null,
+        "keyword": null,
+        "rank": 2,
+        "detailUrl": "https://ads.tiktok.com/business/creativecenter/topads/7680941719622057991/pc/en",
+        "creativeCenterUrl": "https://ads.tiktok.com/business/creativecenter/inspiration/topads/pc/en",
+        "scrapedAt": "2026-10-04T09:58:07.412Z",
+        "landingPageUrl": "https://shop.example/collections/winter",
+        "keywords": null,
+        "tags": null,
+        "ctrTier": null,
+        "detailFetched": true
+    },
+    {
+        "adId": "7686714050252242962",
+        "adTitle": "Vắt cạn em chân váy này 👆🏻 #outfit #ootd #goiyphoido #chanvay #banamofashion ",
+        "brandName": null,
+        "ctr": 0.44,
+        "likes": 48,
+        "costScore": 0,
+        "favorite": false,
+        "industryKey": "label_22110000000",
+        "industryName": "Women's Clothing",
+        "objectiveKey": "campaign_objective_product_sales",
+        "isSparkAd": null,
+        "isSearch": false,
+        "videoId": "v10025g50000dama0a7og65qqsote6ig",
+        "durationSec": 10.171,
+        "coverUrl": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4",
+        "videoUrl720p": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4",
+        "videoUrl540p": null,
+        "videoUrl360p": null,
+        "width": 576,
+        "height": 1024,
+        "countryCode": "VN",
+        "periodDays": 30,
+        "orderBy": "ctr",
+        "industryId": "22000000000",
+        "industryLabel": "Apparel & Accessories",
+        "filterObjective": null,
+        "adLanguage": null,
+        "adFormat": null,
+        "adFormatLabel": null,
+        "likeTier": null,
+        "keyword": null,
+        "rank": 3,
+        "detailUrl": "https://ads.tiktok.com/business/creativecenter/topads/7686714050252242962/pc/en",
+        "creativeCenterUrl": "https://ads.tiktok.com/business/creativecenter/inspiration/topads/pc/en",
+        "scrapedAt": "2026-10-04T09:58:07.432Z",
+        "landingPageUrl": null,
+        "keywords": null,
+        "tags": null,
+        "ctrTier": null,
+        "detailFetched": true
+    }
+]''')
+LEXIS_THAT = json.loads(r'''[
+    {
+        "id": "7678197312435617800",
+        "title": "#HEAVEN #sweater #aosweater #sweaterunisex #aokhoacnhe ",
+        "brandName": "",
+        "countryCodes": [
+            "VN"
+        ],
+        "landingPage": "https://vt.tiktok.com/ZS0000000/",
+        "source": "Others",
+        "sourceKey": 73,
+        "industryKey": "label_22110000000",
+        "objectiveKey": "campaign_objective_product_sales",
+        "objectives": [
+            {
+                "label": "campaign_objective_product_sales",
+                "value": 15
+            },
+            {
+                "label": "campaign_objective_reach",
+                "value": 5
+            }
+        ],
+        "ctr": 0.34,
+        "cost": 1,
+        "likes": 310,
+        "comments": 3,
+        "shares": 1,
+        "favorite": false,
+        "keywords": [],
+        "patternLabels": [],
+        "highlightText": "",
+        "hasSummary": false,
+        "voiceOver": false,
+        "videoId": "v10025g50000da73cv7og65ha5mqdgag",
+        "videoDuration": 21.967,
+        "videoCover": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4",
+        "videoUrls": {
+            "720p": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4"
+        },
+        "videoWidth": 576,
+        "videoHeight": 1024,
+        "retainCvr": {
+            "duration": 23,
+            "highlights": [],
+            "analysis": []
+        },
+        "retainCtr": {
+            "duration": 23,
+            "highlights": [
+                3,
+                10,
+                16
+            ],
+            "analysis": []
+        },
+        "clickCount": {
+            "duration": 23,
+            "highlights": [
+                2,
+                10,
+                14
+            ],
+            "analysis": []
+        },
+        "conversionCount": {
+            "duration": 23,
+            "highlights": [],
+            "analysis": []
+        },
+        "playRetainCount": {
+            "duration": 23,
+            "highlights": [],
+            "analysis": []
+        }
+    },
+    {
+        "id": "7680941719622057991",
+        "title": "The Winter Collection You’ve Been Waiting For! 😍",
+        "brandName": "",
+        "countryCodes": [
+            "PK",
+            "VN"
+        ],
+        "landingPage": "https://shop.example/collections/winter",
+        "source": "Others",
+        "sourceKey": 73,
+        "industryKey": "label_22110000000",
+        "objectiveKey": "campaign_objective_conversion",
+        "objectives": [
+            {
+                "label": "campaign_objective_conversion",
+                "value": 3
+            }
+        ],
+        "ctr": 0.39,
+        "cost": 1,
+        "likes": 187,
+        "comments": 3,
+        "shares": 5,
+        "favorite": false,
+        "keywords": [],
+        "patternLabels": [],
+        "highlightText": "",
+        "hasSummary": false,
+        "voiceOver": false,
+        "videoId": "v1c044g50000dac2fmnog65io6j9o2ig",
+        "videoDuration": 24.474,
+        "videoCover": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4",
+        "videoUrls": {
+            "720p": "https://v16m-default.tiktokcdn.com/SIGNED/video.mp4"
+        },
+        "videoWidth": 576,
+        "videoHeight": 1024,
+        "retainCvr": {
+            "duration": 26,
+            "highlights": [
+                11,
+                20,
+                24
+            ],
+            "analysis": []
+        },
+        "retainCtr": {
+            "duration": 26,
+            "highlights": [
+                14,
+                21,
+                23
+            ],
+            "analysis": []
+        },
+        "clickCount": {
+            "duration": 26,
+            "highlights": [
+                7,
+                14,
+                23
+            ],
+            "analysis": []
+        },
+        "conversionCount": {
+            "duration": 26,
+            "highlights": [
+                11,
+                14,
+                20
+            ],
+            "analysis": []
+        },
+        "playRetainCount": {
+            "duration": 26,
+            "highlights": [],
+            "analysis": []
+        }
+    }
+]''')
+
+
+def test_du_lieu_that_actor_chinh_ra_dung_cot(gia):
+    gia["ket"]["chinh"], gia["ket"]["msg"] = AZZ_THAT, MSG_GOI_FREE
+    kq = chay(nganh="thời trang", so_ads=10)
+    o = _o(gia)
+    d = o[1]
+    assert d[1] == "#HEAVEN #sweater #aosweater #sweaterunisex #aokhoacnhe"
+    assert d[2] == "", "brandName null → ô trống, không ghi 'None'"
+    assert d[3] == "Women's Clothing", "ưu tiên ngành CON của actor"
+    assert d[4] == "Bán sản phẩm" and d[5] == "điểm 0.34" and d[6] == 310
+    assert d[7] == "mức 1" and d[8] == "30 ngày"
+    assert d[9].endswith("/video.mp4") and d[10] == "https://vt.tiktok.com/ZS0000000/"
+    assert d[11].startswith("https://ads.tiktok.com/business/creativecenter/topads/7678")
+    assert o[3][7] == "mức 0", "costScore 0 vẫn là một mức, không bỏ trống"
+    assert o[3][10] == "", "landingPageUrl null → trống"
+    assert all("None" not in str(c) for r in o for c in r)
+    t = kq["tom_tat"]
+    assert t["so_ads"] == 3 and t["so_brand"] == 0 and t["khong_ro_brand"] == 3
+    assert t["theo_muc_tieu"] == {"Bán sản phẩm": 2, "Chuyển đổi": 1}
+    assert any("gói Free" in c for c in kq["canh_bao"]), "phải nói vì sao chỉ có 5 ads"
+    assert len(gia["goi"]) == 1, "gói Free cắt bớt KHÔNG phải lỗi — không chạy dự phòng"
+
+
+def test_du_lieu_that_actor_du_phong_ra_dung_cot(gia):
+    gia["ket"]["chinh"] = A.LoiApify("LOI", "Run kết thúc FAILED.")
+    gia["ket"]["du_phong"] = LEXIS_THAT
+    chay(nganh="thời trang", so_ads=10)
+    d = _o(gia)[1]
+    assert d[1] == "#HEAVEN #sweater #aosweater #sweaterunisex #aokhoacnhe"
+    assert d[2] == "" and d[3] == "Apparel & Accessories"
+    assert d[4] == "Bán sản phẩm" and d[5] == "điểm 0.34" and d[6] == 310 and d[7] == "mức 1"
+    assert d[9].endswith("/video.mp4") and d[10] == "https://vt.tiktok.com/ZS0000000/"
+    assert d[11].startswith("https://ads.tiktok.com/business/creativecenter/topads/7678")
+    assert d[12] == "lexis-solutions"
+
+
+def test_du_phong_bi_huy_vi_het_gio_thi_canh_bao(gia, monkeypatch):
+    """Đo thật: lexis 1 GB lấy 3 ads trong 110 giây rồi bị huỷ — `_call` trả phần dở."""
+    gia["ket"]["chinh"] = A.LoiApify("LOI", "x")
+    goc = A._call
+
+    def call(actor, payload, limit, *a, **k):
+        r = goc(actor, payload, limit, *a, **k)
+        if actor == T.ACTOR_DU_PHONG:
+            A._SO_RUN.get()[-1].update(ma="QUA_GIO", ly_do="Quá giờ sau 118s — giữ 2 bài")
+        return r
+
+    monkeypatch.setattr(A, "_call", call)
+    gia["ket"]["du_phong"] = LEXIS_THAT
+    kq = chay()
+    assert any("QUA_GIO" in c and "118s" in c for c in kq["canh_bao"])

@@ -16,11 +16,20 @@ Vì sao là TOOL RIÊNG đặt cạnh `fb_ads_library`, không phải chế đ�
 Nguồn: endpoint JSON của Creative Center đòi header ký, nên đi qua actor Apify — KHÔNG tự
 dựng chữ ký hay lách chống bot.
   • Chính: `azzouzana~tiktok-creative-center-top-ads-scraper` — 0,001 USD/ad, +0,002 USD
-    khi lấy chi tiết (landing page, hạng CTR). Lọc được NGÀNH CON (túi, trang sức…).
-    README ghi gói Free của actor chỉ trả tối đa 5 ad/lượt, 5 lượt/ngày.
-  • Dự phòng: `lexis-solutions~tiktok-top-ads-scraper` — 0,0025 USD/lượt + 0,004 USD/ad;
-    chỉ lọc ngành CHA, không có mục tiêu "Tương tác".
+    khi lấy chi tiết (landing page). Lọc được NGÀNH CON (túi, trang sức…).
+  • Dự phòng: `lexis-solutions~tiktok-top-ads-scraper` — 0,0025 USD mỗi GB khởi động (mặc
+    định 4 GB = 0,01 USD) + 0,004 USD/ad; chỉ lọc ngành CHA, không có mục tiêu "Tương
+    tác". BẮT BUỘC có `startUrls` hoặc `keyword`, thiếu là FAILED mà vẫn mất phí khởi động.
   • Không dùng `doliz` (đòi cookie đăng nhập).
+
+Đo thật 04/10/2026 (VN, 30 ngày, Apparel & Accessories, xếp CTR, xin 10):
+  • Chính: 5 ads trong 16 giây, 0,015 USD. Tài khoản Apify của Mark là gói FREE (hạn mức
+    10 USD/tháng) nên actor CẮT ở 5 ads/lượt, statusMessage "free accounts have limited
+    data extraction" — muốn nhiều hơn phải nâng gói Apify. `brandName` rỗng ở cả 5 ads,
+    `ctrTier`/`keywords`/`tags` rỗng; `industryName` là ngành CON (Women's Clothing);
+    `ctr` là số 0,34–0,64 (điểm TikTok xếp, không phải CTR thật); `costScore` 0–2.
+  • Dự phòng (1 GB): chậm, ~3 ads trong 110 giây rồi bị huỷ vì hết giờ, 0,0145 USD. Cùng
+    ads với actor chính; `brandName` cũng rỗng; có thêm comments/shares.
 
 Mọi lượt chạy đi qua `apify_tool._call` với `nen_tang="tiktok"`: chịu trần USD/bài của
 TikTok trên console (Năng lực → Quét mạng xã hội; `bat_tiktok`=0 thì không chạy), hạn chót
@@ -46,17 +55,19 @@ ACTOR_CHINH = "azzouzana~tiktok-creative-center-top-ads-scraper"
 ACTOR_DU_PHONG = "lexis-solutions~tiktok-top-ads-scraper"
 _GIA_AD = 0.001             # azzouzana, mỗi ad
 _GIA_CHI_TIET = 0.002       # azzouzana, mỗi ad khi `extractDetails`
-_GIA_DP_KHOI_DONG = 0.0025  # lexis, mỗi lượt
+_GIA_DP_KHOI_DONG = 0.01    # lexis, 0,0025 USD/GB × 4 GB mặc định
 _GIA_DP_AD = 0.004          # lexis, mỗi ad (gói FREE 0,00399)
 _BIEN = 0.9                 # mỗi lượt chỉ xin tới 90% trần USD
 _MAC_DINH_ADS = 20
 _TOI_DA_ADS = 200           # 30 ngày VN chỉ có ~229 ads; gọn trong một lượt trả lời
-_GOI_FREE_CHINH = 5         # README azzouzana: gói Free tối đa 5 ad/lượt
+_GOI_FREE_CHINH = 5         # azzouzana cắt 5 ad/lượt khi tài khoản Apify là gói Free
 # Còn ít hơn chừng này giây sau khi actor chính hỏng thì không chạy dự phòng.
 _GIAY_DU_PHONG = 40
 # Lỗi mà actor dự phòng cũng sẽ gặp y hệt — không chạy dự phòng, đỡ mất phí khởi động.
 _KHONG_DU_PHONG = {"HET_TIEN_THANG", "NGHEN_DONG_THOI", "DA_HUY"}
-_DAU_HIEU_GOI = re.compile(r"(?i)free|trial|limit|upgrade|quota")
+# statusMessage thật 04/10: "⚠️ To ensure service stability, free accounts have limited
+# data extraction. Upgrade to a paid plan to unlock full access 👉 https://apify.com/pricing"
+_DAU_HIEU_GOI = re.compile(r"(?i)free account|free tier|trial|limited data|upgrade|quota")
 
 _VUNG = {"US", "CA", "MX", "BR", "GB", "DE", "FR", "IT", "ES", "NL", "PL", "SE", "TR", "SA",
          "AE", "AU", "JP", "KR", "ID", "TH", "VN", "MY", "PH", "SG"}
@@ -262,7 +273,9 @@ SCHEMA = {
         "một brand đang chạy — không có brand trong kết quả KHÔNG có nghĩa là brand không "
         "chạy ads. CTR và chi phí là MỨC TƯƠNG ĐỐI của TikTok, KHÔNG phải số tiền chi thật "
         "hay CTR thật — đừng quy ra ngân sách. Link video MP4 hết hạn sau 24–48 giờ (trang "
-        "Creative Center thì còn). Nói số ads, brand nổi bật, ngành, mục tiêu từ `tom_tat`; "
+        "Creative Center thì còn). TikTok thường KHÔNG trả tên brand (đo 04/10: rỗng cả 5 "
+        "ads VN) — đừng đoán brand, chỉ đọc từ caption/landing page và nói là suy ra. "
+        "Nói số ads, brand nổi bật, ngành, mục tiêu từ `tom_tat`; "
         "`nguon` là dự phòng hoặc `canh_bao` có nội dung thì nói ra. Gửi NGUYÊN `sheet_url`."
     ),
     "parameters": {
@@ -416,10 +429,18 @@ def _handle(args: dict, **_kwargs) -> str:
     elif loi_chinh is not None:
         loi["nguon_chinh"] = A._che_token(
             f"{getattr(loi_chinh, 'ma', type(loi_chinh).__name__)}: {loi_chinh}")[:250]
-    elif (len(items) == _GOI_FREE_CHINH < n
+    elif (len(items) < n
           and _DAU_HIEU_GOI.search(str((meta or {}).get("statusMessage") or ""))):
-        canh_bao.append(f"Nguồn chính chỉ trả {_GOI_FREE_CHINH} ads — giới hạn gói Free "
-                        f"của actor (tối đa {_GOI_FREE_CHINH} ad/lượt).")
+        canh_bao.append(
+            f"Chỉ lấy được {len(items)}/{n} ads: tài khoản Apify đang ở gói Free nên actor cắt "
+            f"còn khoảng {_GOI_FREE_CHINH} ads mỗi lượt. Muốn nhiều hơn thì chủ tài khoản "
+            f"nâng gói Apify; chạy lại cũng chỉ ra cùng {_GOI_FREE_CHINH} ads đầu bảng.")
+    # Run bị huỷ vì hết giờ / dừng giữa chừng: `_call` trả phần đã có (sổ run được đặt) —
+    # phải nói ra, không trình bày như đủ.
+    cuoi = so_run[-1] if so_run else {}
+    if items and cuoi.get("ma") in ("QUA_GIO", "OK_MOT_PHAN"):
+        canh_bao.append(f"Nguồn {nguon} dừng giữa chừng ({cuoi['ma']}): "
+                        + A._che_token(str(cuoi.get("ly_do") or ""))[:200])
 
     est_that = est + (_gia_du_phong(n_dp) if ACTOR_DU_PHONG in actors else 0.0)
     thuc = A._chi_phi_thuc(actors, bat_dau, est_that)

@@ -101,8 +101,8 @@ ghi vào sổ audit. Chỉ khi người dùng HỎI thì mới trả lời:
 - Soi một tài khoản, 30 bài: TikTok ~0,09 USD, Facebook ~0,15 USD, Instagram ~0,003 USD
   (Instagram chỉ có 12 bài mới nhất)
 - Shopee, 30 sản phẩm: ~0,15 USD
-- Top quảng cáo TikTok: ~0,003 USD mỗi ad (20 ads ≈ 0,06 USD); nguồn chính hỏng thì
-  nguồn dự phòng ~0,004 USD mỗi ad
+- Top quảng cáo TikTok: ~0,003 USD mỗi ad; gói Apify Free chỉ ra ~5 ads/lượt (≈0,015
+  USD). Nguồn dự phòng ~0,01 USD khởi động + 0,004 USD mỗi ad, chậm (vài ads mỗi lượt)
 - Bình luận (gói hiện tại, 10/2026): TikTok ~0,00125 USD/bình luận, YouTube ~0,002,
   Facebook ~0,0025 — 10 bài TikTok × 50 bình luận ≈ 0,63 USD. Mỗi lần bóc bị chặn cứng ở
   trần chủ agent đặt (mặc định 300 bình luận, 0,5 USD)
