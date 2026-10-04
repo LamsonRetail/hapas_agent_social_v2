@@ -173,9 +173,10 @@ _TOOLING_NOTE = "\n".join(
         "Tool không trả số thì nói chưa có số. Nhờ 'gán nhãn từng bình luận và thống kê' thì "
         "dùng `social_deep_dive` (tool tự gán nhãn), đừng nói không làm được.",
         "- Muốn sentiment ở mức BÌNH LUẬN (người ta bình luận gì, khen chê dưới bài): đề xuất "
-        "`social_deep_dive` cho link TikTok, YouTube, Facebook. Bình luận Threads và Instagram "
-        "CHƯA bóc được — nói thẳng như vậy, chỉ có sắc thái của chính BÀI đăng; không lấy nền "
-        "tảng khác thay vào.",
+        "`social_deep_dive` cho link TikTok, YouTube, Facebook, Threads, Instagram. Threads và "
+        "Instagram bóc KHÔNG đăng nhập: không có trả lời lồng nhau, Instagram chỉ được MỘT "
+        "PHẦN bình luận công khai — khi báo phải nói rõ giới hạn đó (`gioi_han_nen_tang`), "
+        "không gọi là toàn bộ bình luận; không lấy nền tảng khác thay vào.",
         # 01/10: chủ agent chốt — bài của brand ở nước khác (HAPAS THAILAND) phải giữ, và
         # trần bóc bình luận trên console là trần cứng.
         "- `social_listen`: luôn điền `boi_canh` (thiếu thì không có bước AI đọc từng bài). "

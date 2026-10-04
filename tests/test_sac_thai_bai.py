@@ -226,8 +226,12 @@ def test_luat_sentiment_nam_o_prompt_va_ky_nang():
     note = brain._TOOLING_NOTE
     assert "SENTIMENT / ĐO LƯỜNG" in note and "`social_listen`" in note
     assert "TUYỆT ĐỐI không tự đếm tay hay ước lượng" in note
-    assert "Bình luận Threads và Instagram CHƯA bóc được" in note
+    # 04/10: bình luận Threads/Instagram đã bóc được (không đăng nhập) — lời dặn nay đòi
+    # nói rõ giới hạn thay vì nói "chưa bóc được".
+    assert "CHƯA bóc được" not in note
+    assert "không có trả lời lồng nhau" in note and "MỘT PHẦN bình luận" in note
     for ten in ("comment-deep-dive.md", "crisis-sentiment-sov.md"):
         s = (GOC / "skills" / ten).read_text(encoding="utf-8")
         assert "`social_listen`" in s and "Threads và Instagram" in s, ten
+        assert "chưa bóc được" not in s and "lồng nhau" in s, ten
         assert "không tự đếm tay" in s or "Không tự đếm tay" in s, ten

@@ -13,8 +13,9 @@ số, không tự đếm tay, không ước lượng "khoảng 60% tích cực".
   Trung lập) trong cùng bước AI đọc bài, trả `thong_ke` tổng và `theo_nen_tang`, kèm
   `trich_dan`. Hỏi "tích cực hay tiêu cực, focus vào Threads" thì đọc đúng nhóm Threads
   trong `theo_nen_tang`. Bài AI chưa đọc là "chưa phân loại", phải nói ra
-- Sắc thái BÌNH LUẬN: `social_deep_dive` cho link TikTok, YouTube, Facebook. Bình luận
-  Threads và Instagram chưa bóc được, nói thẳng như vậy
+- Sắc thái BÌNH LUẬN: `social_deep_dive` cho link TikTok, YouTube, Facebook, Threads,
+  Instagram. Threads và Instagram bóc không đăng nhập: không có trả lời lồng nhau,
+  Instagram chỉ được một phần bình luận công khai — nói rõ, đừng gọi là toàn bộ
 - Đừng trộn hai loại số: % bài tiêu cực không phải % bình luận tiêu cực
 
 Nguồn nào hỏng, bị cắt hoặc chạm trần chi phí thì nói rõ phần đó thiếu dữ liệu, không
