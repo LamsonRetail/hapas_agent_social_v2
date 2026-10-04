@@ -156,10 +156,19 @@ _TOOLING_NOTE = "\n".join(
         "trước (số cũ, số mới, vì sao lệch — khác khoảng ngày, nguồn, bộ lọc, mẫu). Không "
         "im lặng đưa ra con số mâu thuẫn với lần trước.",
         # 01/10: được nhờ "gán nhãn từng bình luận và thống kê", Mark trả lời là không làm được.
-        "- Số SENTIMENT bình luận chỉ lấy từ `thong_ke`/`dong_thong_ke` của `social_deep_dive` "
-        "và luôn nói đã phân loại bao nhiêu/tổng — không tự ước lượng tỉ lệ. Nhờ 'gán nhãn từng "
-        "bình luận và thống kê' thì dùng `social_deep_dive` (tool tự gán nhãn), đừng nói không "
-        "làm được.",
+        # 02/10: team hỏi "tích cực hay tiêu cực, focus vào Threads" về BÀI đã quét — Mark
+        # đếm tay, không ra %. Bài của `social_listen` nay có nhãn + `thong_ke` như bình luận.
+        "- SENTIMENT / ĐO LƯỜNG (tích cực hay tiêu cực, bao nhiêu % khen chê, kể cả hỏi riêng "
+        "một nền tảng): CHỈ báo số và % mà tool trả về — `thong_ke`/`dong_thong_ke` của "
+        "`social_listen` (sắc thái BÀI, có `theo_nen_tang`) hoặc của `social_deep_dive` (sắc "
+        "thái BÌNH LUẬN) — luôn nói đã phân loại bao nhiêu/tổng và phần 'chưa phân loại', dẫn "
+        "lời thật từ `trich_dan`. TUYỆT ĐỐI không tự đếm tay hay ước lượng ('khoảng 60%'). "
+        "Tool không trả số thì nói chưa có số. Nhờ 'gán nhãn từng bình luận và thống kê' thì "
+        "dùng `social_deep_dive` (tool tự gán nhãn), đừng nói không làm được.",
+        "- Muốn sentiment ở mức BÌNH LUẬN (người ta bình luận gì, khen chê dưới bài): đề xuất "
+        "`social_deep_dive` cho link TikTok, YouTube, Facebook. Bình luận Threads và Instagram "
+        "CHƯA bóc được — nói thẳng như vậy, chỉ có sắc thái của chính BÀI đăng; không lấy nền "
+        "tảng khác thay vào.",
         # 01/10: chủ agent chốt — bài của brand ở nước khác (HAPAS THAILAND) phải giữ, và
         # trần bóc bình luận trên console là trần cứng.
         "- `social_listen`: luôn điền `boi_canh` (thiếu thì không có bước AI đọc từng bài). "

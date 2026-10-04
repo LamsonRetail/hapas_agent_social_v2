@@ -31,7 +31,7 @@
   },
   "sk_2d37e7d0e7": {
     "ten": "Phân tích crisis, sentiment và share of voice",
-    "khi_nao_dung": "Khi có dấu hiệu tiêu cực cần đánh giá, hoặc được hỏi về sentiment, khủng hoảng, so sánh độ phủ thương hiệu. Cả khi người dùng chỉ hỏi 'có sao không' về một làn sóng bình luận."
+    "khi_nao_dung": "Khi được hỏi sentiment, tích cực hay tiêu cực (bài đã quét hoặc bình luận), khủng hoảng, so sánh độ phủ thương hiệu; cả khi chỉ hỏi 'có sao không' về một làn sóng bình luận."
   },
   "sk_8776392ea3": {
     "ten": "Phân tích quảng cáo đối thủ",

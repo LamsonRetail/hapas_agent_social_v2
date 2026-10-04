@@ -315,17 +315,18 @@ def _pt(x: float | None) -> str:
     return "—" if x is None else f"{x:.1f}".replace(".", ",") + "%"
 
 
-def dong_thong_ke(tk: dict) -> str:
-    """Câu dựng sẵn để model chép nguyên văn, khỏi tự tính."""
+def dong_thong_ke(tk: dict, don_vi: str = "bình luận") -> str:
+    """Câu dựng sẵn để model chép nguyên văn, khỏi tự tính. `don_vi`="bài" cho sắc thái
+    bài đăng của social_listen (apify_tool.thong_ke_sac_thai)."""
     if not tk.get("da_phan_loai"):
-        return (f"Chưa gán được nhãn cho bình luận nào (0/{tk.get('tong', 0)}) — chưa có "
+        return (f"Chưa gán được nhãn cho {don_vi} nào (0/{tk.get('tong', 0)}) — chưa có "
                 f"số liệu sắc thái.")
     st = tk["sac_thai"]
-    s = (f"Đã phân loại {tk['da_phan_loai']}/{tk['tong']} bình luận"
+    s = (f"Đã phân loại {tk['da_phan_loai']}/{tk['tong']} {don_vi}"
          + (f" ({tk['chua_phan_loai']} chưa phân loại)" if tk["chua_phan_loai"] else "")
          + ": " + ", ".join(f"{lab} {st[lab]['so']} ({_pt(st[lab]['ti_le'])})"
                             for lab in SAC_THAI.values()) + ".")
-    cd = sorted(tk["chu_de"].items(), key=lambda kv: -kv[1]["so"])[:3]
+    cd = sorted((tk.get("chu_de") or {}).items(), key=lambda kv: -kv[1]["so"])[:3]
     if cd:
         s += " Chủ đề nhiều nhất: " + ", ".join(
             f"{lab} {v['so']} ({_pt(v['ti_le'])})" for lab, v in cd) + "."
