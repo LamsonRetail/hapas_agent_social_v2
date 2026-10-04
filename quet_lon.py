@@ -52,6 +52,9 @@ _TOC_HAT_GIONG = {
     "clockworks~tiktok-comments-scraper": 15.0,
     "streamers~youtube-comments-scraper": 15.0,
     "apify~facebook-comments-scraper": 5.0,
+    # Bình luận Threads/Instagram (04/10/2026): chưa đủ mẫu, cùng mức với Facebook.
+    "futurizerush~threads-replies-scraper": 5.0,
+    "apify~instagram-comment-scraper": 5.0,
 }
 _GIAY_KHOI_DONG = 20       # mỗi run Apify: xếp lịch + khởi động container
 _GIAY_TAI_CHO_KHOI_DONG = 15

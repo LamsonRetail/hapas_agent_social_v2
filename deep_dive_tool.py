@@ -26,7 +26,23 @@ Nền tảng — đo thật 27/08/2026
   Tên trường khi có dữ liệu chưa kiểm chứng được (chưa tìm ra bài FB nào có
   comment) -> map phòng thủ nhiều tên ứng viên, không khớp thì BÁO RA thay vì
   ghi dòng rỗng.
-- Instagram: CHƯA nối. Phải từ chối rõ, không được lặng lẽ bỏ qua.
+
+Threads và Instagram — đo thật 04/10/2026, KHÔNG đăng nhập
+-----------------------------------------------------------
+- Threads (futurizerush/threads-replies-scraper): bài hapas.vn DeBjCyXDzaz trả 19/21 trả
+  lời, không có trả lời lồng nhau. Mỗi lượt tối đa 20 bài, `max_replies` 10–300. Phí 0,02
+  USD khởi động (ghim RAM 1 GB) + 0,0025/dòng, và actor TÍNH TIỀN cả dòng bài gốc
+  (`item_type`="original_post") — bỏ khỏi bảng nhưng tính vào ước tính. Dự phòng:
+  fetch_cat/threads-replies-scraper (0,005 + 0,0002/trả lời, lấy 14/21).
+- Instagram (apify/instagram-comment-scraper, 0,0026/bình luận): bài /p/DHn78JLv9-U/ trả
+  8/18 bình luận thấy được khi chưa đăng nhập. Dự phòng:
+  apidojo/instagram-comments-scraper-api (0,0075/bài + 0,0005/bình luận, chậm hơn).
+- Chưa đăng nhập thì cả hai KHÔNG trả trả-lời-lồng-nhau, Instagram chỉ trả một PHẦN bình
+  luận — Mark phải nói ra (`gioi_han_nen_tang`), không trình bày như đủ.
+- Công tắc `bat_threads`/`bat_instagram` và trần USD riêng `tran_usd_<p>` của console
+  (Quét mạng xã hội) áp cho hai nền tảng này; trần cả lượt vẫn là `tran_usd_goi`.
+- Nguồn chính HỎNG thì chạy nguồn dự phòng trong PHẦN CÒN LẠI của trần lô (cùng cách
+  `tiktok_ads_tool._tran_du_phong`): tiền nguồn chính + trần dự phòng ≤ trần lô.
 
 Trần chi phí — đo thật 01/10/2026
 ---------------------------------
@@ -75,12 +91,42 @@ _ACTORS = {
     "tiktok": "clockworks~tiktok-comments-scraper",
     "youtube": "streamers~youtube-comments-scraper",
     "facebook": "apify~facebook-comments-scraper",
+    "threads": "futurizerush~threads-replies-scraper",
+    "instagram": "apify~instagram-comment-scraper",
+}
+# Nguồn DỰ PHÒNG khi nguồn chính hỏng (đo thật 04/10/2026, xem docstring).
+_ACTORS_DU_PHONG = {
+    "threads": "fetch_cat~threads-replies-scraper",
+    "instagram": "apidojo~instagram-comments-scraper-api",
 }
 # Actor YouTube từ chối chạy nếu trần chi phí < 0.50 (đo thật).
 _MIN_CHARGE = {"youtube": 0.5, "facebook": 0.5}
 # Giá gói FREE (Apify, 01/10/2026). Ước tính dùng giá này nên CAO hơn gói trả tiền.
-_GIA = {"tiktok": 0.00125, "youtube": 0.002, "facebook": 0.0025}
-_GIA_KHOI_DONG = {"facebook": 0.001}
+_GIA = {"tiktok": 0.00125, "youtube": 0.002, "facebook": 0.0025,
+        "threads": 0.0025, "instagram": 0.0026}
+_GIA_KHOI_DONG = {"facebook": 0.001, "threads": 0.02}
+# Tiền tính thêm cho MỖI BÀI của lượt: Threads tính cả dòng bài gốc (`original_post`).
+_GIA_MOI_BAI = {"threads": 0.0025}
+# (dưới, trên) số bình luận/bài actor nhận: Threads `max_replies` chỉ nhận 10–300.
+_PER_KHOANG = {"threads": (10, 300)}
+_BAI_MOI_LO = {"threads": 20}           # Threads: tối đa 20 link mỗi lượt
+_RAM = {"threads": 1024}                # phí khởi động Threads tính theo GB RAM
+# Dự phòng: (phí khởi động, mỗi bình luận, mỗi bài). apidojo IG cho 15 bình luận đầu
+# mỗi bài miễn phí — bỏ qua cho ước tính cao hơn thực tế.
+_GIA_DU_PHONG = {"threads": (0.005, 0.00021, 0.0), "instagram": (0.0, 0.0005, 0.0075)}
+# Lỗi mà nguồn dự phòng cũng gặp y hệt — không chạy dự phòng (như tiktok_ads_tool).
+_KHONG_DU_PHONG = {"HET_TIEN_THANG", "NGHEN_DONG_THOI", "DA_HUY", "QUA_GIO"}
+# Nền tảng theo công tắc + trần riêng của console "Quét mạng xã hội" (`bat_<p>`,
+# `tran_usd_<p>` — xem apify_tool._tran_nen_tang).
+_THEO_CONSOLE_QUET = ("threads", "instagram")
+# Giới hạn khi chưa đăng nhập — Mark phải nói ra khi báo kết quả nền tảng đó.
+_GIOI_HAN = {
+    "threads": ("Threads (không đăng nhập): chỉ lấy trả lời cấp 1 công khai, KHÔNG có trả "
+                "lời lồng nhau; có thể thiếu vài trả lời so với số trên bài."),
+    "instagram": ("Instagram (không đăng nhập): chỉ lấy được MỘT PHẦN bình luận thấy được "
+                  "công khai (đo thật 8/18), KHÔNG có trả lời lồng nhau — không phải toàn "
+                  "bộ bình luận của bài."),
+}
 _BIEN = 0.9            # mỗi lô chỉ tiêu tối đa 90% trần: giá thật lệch chút vẫn không chạm
 _SONG_SONG = 3
 # Chừa cho gán nhãn + ghi sheet sau khi kéo xong (trong `_TOOL_DEADLINE` 135s).
@@ -143,10 +189,22 @@ def _platform_of(url: str) -> str | None:
     if "facebook.com" in u or "fb.com" in u or "fb.watch" in u:
         return "facebook"
     if "instagram.com" in u:
-        return "instagram"      # biết tên nhưng CHƯA nối actor
+        return "instagram"
     if "threads.net" in u or "threads.com" in u:
-        return "threads"        # biết tên nhưng CHƯA nối actor
+        return "threads"
     return None
+
+
+def _tran_p(p: str, tran_usd: float) -> float:
+    """Trần USD MỖI LƯỢT của nền tảng `p`: trần của tool, hạ thêm theo `tran_usd_<p>` trên
+    console Quét mạng xã hội nếu chủ agent đặt riêng (chỉ Threads/Instagram)."""
+    if p not in _THEO_CONSOLE_QUET:
+        return tran_usd
+    c = A._cau_hinh_quet()
+    if "usd" not in A._khoa_rieng(p, c):
+        return tran_usd
+    return round(min(tran_usd, A._kep(c.get(f"tran_usd_{p}"), *A._TRAN_USD_KHOANG,
+                                      tran_usd)), 2)
 
 
 # ───────────────────────── quy bình luận về bài ─────────────────────────
@@ -158,6 +216,9 @@ _ID_RE = {
                 r"/(?:shorts|live|embed)/([\w-]{11})"],
     "facebook": [r"story_fbid=(\w+)", r"[?&]fbid=(\d+)", r"/posts/(\w+)",
                  r"/(?:videos|reel|reels|permalink)/(?:[^/?#]+/)?(\d+)", r"[?&]v=(\d+)"],
+    # threads.net và threads.com cùng một mã bài: …/@kenh/post/<mã>, link cũ …/t/<mã>.
+    "threads": [r"/post/([\w-]+)", r"threads\.(?:net|com)/t/([\w-]+)"],
+    "instagram": [r"/(?:p|reels?|tv)/([\w-]+)"],
 }
 
 
@@ -217,7 +278,25 @@ def _payload(p: str, urls: list[str], per: int) -> dict:
         return {"postURLs": urls, "commentsPerPost": per}
     if p == "youtube":
         return {"startUrls": [{"url": u} for u in urls], "maxComments": per}
+    if p == "threads":
+        lo, hi = _PER_KHOANG["threads"]
+        return {"post_urls": [{"url": u} for u in urls],
+                "max_replies": max(lo, min(hi, per)), "include_nested_replies": False}
+    if p == "instagram":
+        return {"directUrls": list(urls), "resultsLimit": per}
     return {"startUrls": [{"url": u} for u in urls], "resultsLimit": per}
+
+
+def _payload_du_phong(p: str, urls: list[str], per: int) -> dict:
+    if p == "threads":
+        return {"postUrls": [{"url": u} for u in urls], "maxRepliesPerThread": per,
+                "maxDepth": 1}
+    return {"startUrls": list(urls), "maxItems": per * len(urls), "fetchReplies": False}
+
+
+def _limit(p: str, urls: list[str], per: int) -> int:
+    """Số item đọc về của một lượt: Threads trả thêm một dòng bài gốc mỗi bài."""
+    return per * len(urls) + (len(urls) if p in _GIA_MOI_BAI else 0)
 
 
 def _map_tiktok(raw: list) -> tuple[list[dict], int]:
@@ -290,14 +369,144 @@ def _map_facebook(raw: list) -> tuple[list[dict], int]:
     return out, len(raw)
 
 
-_FETCH = {"tiktok": _fetch_tiktok, "youtube": _fetch_youtube, "facebook": _fetch_facebook}
-_MAP = {"tiktok": _map_tiktok, "youtube": _map_youtube, "facebook": _map_facebook}
+def _so(v) -> int:
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _bao_shape(p: str, la: list, out: list) -> None:
+    if la and not out:
+        raise RuntimeError(
+            f"Actor {p} trả về shape KHÔNG khớp map hiện tại — không ghi bừa. "
+            f"Các key nhận được: {la[0]}. Báo lại để sửa mapping.")
+
+
+def _fetch_threads(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict], int]:
+    pl = _payload("threads", urls, per)
+    raw = _call(_ACTORS["threads"], pl, _limit("threads", urls, pl["max_replies"]),
+                mem=_RAM["threads"], tran_usd=tran_usd)
+    return _map_threads(raw)
+
+
+def _map_threads(raw: list) -> tuple[list[dict], int]:
+    """futurizerush: một dòng/trả lời + MỘT dòng bài gốc (`item_type`="original_post") —
+    dòng gốc bị tính tiền nên vẫn đếm vào số item thô, nhưng không phải bình luận."""
+    out, la = [], []
+    for it in raw:
+        if it.get("error") or it.get("item_type") == "original_post":
+            continue
+        if "text_content" not in it and "author_username" not in it:
+            la.append(sorted(it.keys())[:12])
+            continue
+        goc = str(it.get("source_post_url") or "")
+        out.append({
+            "kenh": str(it.get("author_username") or ""),
+            "text": str(it.get("text_content") or "")[:1000],
+            "likes": _so(it.get("like_count")),
+            "replies": _so(it.get("reply_count")),
+            "thoi_gian": _gio(it.get("created_at")),
+            "tac_gia_thich": "có" if it.get("is_liked_by_author") else "",
+            "link": goc,
+            # KHÔNG đưa reply_url vào: …/post/<mã TRẢ LỜI> không phải mã bài.
+            "_nguon": [goc] + [str(it.get(k) or "") for k in ("inputUrl", "url")],
+        })
+    _bao_shape("Threads", la, out)
+    return out, len(raw)
+
+
+def _map_threads_du_phong(raw: list) -> tuple[list[dict], int]:
+    """fetch_cat: trả lời cấp 1 (`depth`=1); `createdAt` thường rỗng khi chưa đăng nhập."""
+    out, la = [], []
+    for it in raw:
+        if it.get("error") or it.get("depth") == 0:
+            continue
+        if "text" not in it and "authorUsername" not in it:
+            la.append(sorted(it.keys())[:12])
+            continue
+        goc = str(it.get("rootPostUrl") or it.get("sourceUrl") or "")
+        out.append({
+            "kenh": str(it.get("authorUsername") or ""),
+            "text": str(it.get("text") or "")[:1000],
+            "likes": _so(it.get("likeCount")),
+            "replies": _so(it.get("replyCount")),
+            "thoi_gian": _gio(it.get("createdAt")),
+            "tac_gia_thich": "có" if it.get("isLikedByRootAuthor") else "",
+            "link": goc,
+            "_nguon": [str(it.get(k) or "") for k in ("sourceUrl", "rootPostUrl")],
+        })
+    _bao_shape("Threads (dự phòng)", la, out)
+    return out, len(raw)
+
+
+def _fetch_instagram(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict], int]:
+    raw = _call(_ACTORS["instagram"], _payload("instagram", urls, per),
+                _limit("instagram", urls, per), tran_usd=tran_usd)
+    return _map_instagram(raw)
+
+
+def _map_instagram(raw: list) -> tuple[list[dict], int]:
+    out, la = [], []
+    for it in raw:
+        if it.get("error"):
+            continue
+        if "text" not in it and "ownerUsername" not in it:
+            la.append(sorted(it.keys())[:12])
+            continue
+        chu = it.get("owner") if isinstance(it.get("owner"), dict) else {}
+        out.append({
+            "kenh": str(it.get("ownerUsername") or chu.get("username") or ""),
+            "text": str(it.get("text") or "")[:1000],
+            "likes": _so(it.get("likesCount")),
+            "replies": _so(it.get("repliesCount")),
+            "thoi_gian": _gio(it.get("timestamp")),
+            "tac_gia_thich": "",
+            "link": str(it.get("postUrl") or ""),
+            "_nguon": [str(it.get(k) or "") for k in
+                       ("postUrl", "inputUrl", "url", "commentUrl")],
+        })
+    _bao_shape("Instagram", la, out)
+    return out, len(raw)
+
+
+def _map_instagram_du_phong(raw: list) -> tuple[list[dict], int]:
+    out, la = [], []
+    for it in raw:
+        if it.get("error") or it.get("type") not in (None, "comment"):
+            continue
+        if "message" not in it and "user" not in it:
+            la.append(sorted(it.keys())[:12])
+            continue
+        nd = it.get("user") if isinstance(it.get("user"), dict) else {}
+        goc = str(it.get("inputSource") or "")
+        out.append({
+            "kenh": str(nd.get("username") or ""),
+            "text": str(it.get("message") or "")[:1000],
+            "likes": _so(it.get("likeCount")),
+            "replies": _so(it.get("replyCount")),
+            "thoi_gian": _gio(it.get("createdAt")),
+            "tac_gia_thich": "",
+            "link": goc,
+            "_nguon": [goc] + ([f"https://www.instagram.com/p/{it['postId']}/"]
+                               if it.get("postId") else []),
+        })
+    _bao_shape("Instagram (dự phòng)", la, out)
+    return out, len(raw)
+
+
+_FETCH = {"tiktok": _fetch_tiktok, "youtube": _fetch_youtube, "facebook": _fetch_facebook,
+          "threads": _fetch_threads, "instagram": _fetch_instagram}
+_MAP = {"tiktok": _map_tiktok, "youtube": _map_youtube, "facebook": _map_facebook,
+        "threads": _map_threads, "instagram": _map_instagram}
+_MAP_DU_PHONG = {"threads": _map_threads_du_phong, "instagram": _map_instagram_du_phong}
 
 
 # ───────────────────────── chia lô theo trần ─────────────────────────
 def _suc_chua(p: str, tran_usd: float) -> int:
-    """Số bình luận tối đa MỘT lượt chạy mà vẫn nằm dưới `_BIEN` × trần."""
-    return max(1, int((_BIEN * tran_usd - _GIA_KHOI_DONG.get(p, 0.0)) / _GIA[p]))
+    """Số bình luận tối đa MỘT lượt chạy (một bài) mà vẫn nằm dưới `_BIEN` × trần."""
+    return max(1, int((_BIEN * _tran_p(p, tran_usd) - _GIA_KHOI_DONG.get(p, 0.0)
+                       - _GIA_MOI_BAI.get(p, 0.0)) / _GIA[p]))
 
 
 def _chia_lo(p: str, us: list[str], per: int,
@@ -306,10 +515,18 @@ def _chia_lo(p: str, us: list[str], per: int,
 
     Chia ĐỀU số bài giữa các lô (8 bài -> 4 + 4, không 7 + 1): mỗi lô phải giữ ít nhất
     mức trần tối thiểu `_san` (0,1 USD; YouTube/Facebook 0,5), lô vụn cuối cũng tốn
-    nguyên mức đó trong trần cứng của lượt."""
+    nguyên mức đó trong trần cứng của lượt. Threads: số bình luận/bài trong 10–300 (actor
+    chỉ nhận vậy), tối đa 20 bài mỗi lượt, mỗi bài tốn thêm dòng bài gốc."""
     suc = _suc_chua(p, tran_usd)
-    per_thuc = min(per, suc)
-    co = max(1, suc // per_thuc)
+    duoi, tren = _PER_KHOANG.get(p, (1, _MAX_PER_POST))
+    per_thuc = max(duoi, min(per, suc, tren))
+    moi_bai = _GIA_MOI_BAI.get(p, 0.0)
+    if moi_bai:
+        ngan = _BIEN * _tran_p(p, tran_usd) - _GIA_KHOI_DONG.get(p, 0.0)
+        co = max(1, int(ngan / (per_thuc * _GIA[p] + moi_bai)))
+    else:
+        co = max(1, suc // per_thuc)
+    co = min(co, _BAI_MOI_LO.get(p, co))
     so_lo = max(1, math.ceil(len(us) / co))
     co = max(1, math.ceil(len(us) / so_lo))
     return per_thuc, [us[i:i + co] for i in range(0, len(us), co)]
@@ -319,14 +536,14 @@ def _uoc_tinh(ke_hoach: dict) -> tuple[int, float]:
     """(tổng bình luận tối đa, USD) của kế hoạch {p: (per, lô)}."""
     bl = usd = 0.0
     for p, (per, cac_lo) in ke_hoach.items():
-        n = sum(len(lo) for lo in cac_lo) * per
-        bl += n
-        usd += n * _GIA[p] + len(cac_lo) * _GIA_KHOI_DONG.get(p, 0.0)
+        bl += sum(len(lo) for lo in cac_lo) * per
+        usd += sum(_uoc_lo(p, lo, per) for lo in cac_lo)
     return int(bl), round(usd, 4)
 
 
 def _uoc_lo(p: str, lo: list[str], per: int) -> float:
-    return len(lo) * per * _GIA[p] + _GIA_KHOI_DONG.get(p, 0.0)
+    return (len(lo) * (per * _GIA[p] + _GIA_MOI_BAI.get(p, 0.0))
+            + _GIA_KHOI_DONG.get(p, 0.0))
 
 
 def _san(p: str) -> float:
@@ -349,7 +566,8 @@ def _tran_lo(p: str, uoc: float, tran_usd: float) -> float:
     """maxTotalChargeUsd TỐI ĐA của MỘT lô: ước tính × 1,5, làm tròn LÊN tới cent (kẻo
     `_call` làm tròn xuống dưới ước tính), không thấp hơn mức actor đòi, không quá trần
     tool. Trần thật gửi đi còn bị `_SoNganSach.xin` cắt theo phần trần còn lại."""
-    return min(tran_usd, max(_san(p), math.ceil(uoc * _HE_SO_TRAN_LO * 100 - 1e-9) / 100))
+    return min(_tran_p(p, tran_usd),
+               max(_san(p), math.ceil(uoc * _HE_SO_TRAN_LO * 100 - 1e-9) / 100))
 
 
 class _SoNganSach:
@@ -395,6 +613,80 @@ class _SoNganSach:
             self.da += thuc
 
 
+def _da_tieu(metas: list, mac_dinh: float) -> float:
+    """Tiền các run trong `metas` đã tiêu (như `tiktok_ads_tool._da_tieu`): run chưa hề
+    được tạo = 0; số Apify báo nếu có; không thì hỏi lại theo run id; vẫn không đọc được
+    thì coi như đã tiêu `mac_dinh` (ước tính) — thà để dự phòng ít trần hơn là vượt trần."""
+    tong = 0.0
+    for m in metas:
+        if not isinstance(m, dict) or not m.get("run_id"):
+            continue
+        u = m.get("usd")
+        if u is None:
+            cp = A._chi_phi_cac_run([m["run_id"]]) or {}
+            u = cp.get("usd") if cp.get("so_run") else None
+        try:
+            tong += max(0.0, float(u)) if u is not None else mac_dinh
+        except (TypeError, ValueError):
+            tong += mac_dinh
+    return tong
+
+
+def _tran_du_phong(p: str, tran_lo: float, da_tieu: float, n_bai: int,
+                   per: int) -> tuple[float, int]:
+    """(trần USD, bình luận/bài) cho lượt dự phòng = PHẦN CÒN LẠI của trần lô sau nguồn
+    chính — cùng cách `tiktok_ads_tool._tran_du_phong` (review PR #6): tiền nguồn chính +
+    trần dự phòng ≤ trần lô, nên cả lượt gọi tool vẫn ≤ `tran_usd_goi`. Làm tròn XUỐNG tới
+    cent; dưới sàn 0,1 USD của `_call` (dưới đó nó tự nâng) hoặc không đủ khởi động + một
+    bình luận mỗi bài thì (0, 0) = không chạy."""
+    con = math.floor(max(0.0, tran_lo - da_tieu) * 100) / 100
+    kd, moi_bl, moi_bai = _GIA_DU_PHONG[p]
+    if con < max(A._TRAN_USD_KHOANG[0], kd + n_bai * (moi_bai + moi_bl)):
+        return 0.0, 0
+    per_dp = min(per, int((_BIEN * con - kd - n_bai * moi_bai) / (moi_bl * n_bai)))
+    return (con, per_dp) if per_dp >= 1 else (0.0, 0)
+
+
+def _chay_du_phong(kq: dict, p: str, lo: list[str], per: int, cap: float, so: list,
+                   han_run: float, tien: list, uoc: float) -> None:
+    """Nguồn chính của lô hỏng (không phải hết giờ/hết tiền tháng): chạy nguồn dự phòng
+    trong phần trần lô còn lại. Ghi đè `kq` khi dự phòng lấy được bình luận."""
+    loi_chinh = kq["loi"]
+    actor = _ACTORS_DU_PHONG[p]
+    da_tieu = _da_tieu(so, uoc)
+    tien[0] = max(tien[0], da_tieu)
+    tran_dp, per_dp = _tran_du_phong(p, cap, da_tieu, len(lo), per)
+    if han_run - time.monotonic() < _GIAY_TOI_THIEU_LO:
+        kq["loi"] = f"{loi_chinh} | dự phòng {actor} không chạy: hết thời gian của lượt"
+        return
+    if not per_dp:
+        kq["loi"] = (f"{loi_chinh} | dự phòng {actor} không chạy: nguồn chính đã tiêu "
+                     f"~{_usd(da_tieu)} USD, phần còn lại của trần lượt ({_usd(cap)} USD) "
+                     f"không đủ")
+        return
+    kq["actors"].append(actor)
+    truoc = len(so)
+    try:
+        raw = _call(actor, _payload_du_phong(p, lo, per_dp), per_dp * len(lo),
+                    tran_usd=tran_dp)
+        bl, n = _MAP_DU_PHONG[p](raw)
+    except Exception as e:  # noqa: BLE001
+        # Không biết dự phòng tiêu bao nhiêu thì tính nguyên trần của nó vào sổ.
+        tien[0] = da_tieu + _da_tieu(so[truoc:], tran_dp)
+        if getattr(e, "ma", "") == "QUA_GIO":
+            kq["loi"], kq["loi_nguon_chinh"] = "", loi_chinh
+            kq["trang_thai"] = ("CHƯA XONG — nguồn chính hỏng, nguồn dự phòng hết thời "
+                                "gian, chưa lấy được bình luận")
+        else:
+            kq["loi"] = (f"{loi_chinh} | dự phòng {actor}: "
+                         + _che_token(f"{type(e).__name__}: {e}"))[:400]
+        return
+    kd, moi_bl, moi_bai = _GIA_DU_PHONG[p]
+    tien[0] = da_tieu + kd + len(lo) * moi_bai + n * moi_bl
+    kq.update(binh_luan=bl, n_raw=n, loi="", per=per_dp, nguon="dự phòng",
+              du_phong=actor, loi_nguon_chinh=loi_chinh)
+
+
 def _keo_lo(p: str, lo: list[str], per: int, can: float, tran_lo: float,
             so_ns: _SoNganSach, han_run: float) -> dict:
     """Kéo MỘT lô — chạy trong `contextvars.copy_context()` của riêng nó.
@@ -415,24 +707,36 @@ def _keo_lo(p: str, lo: list[str], per: int, can: float, tran_lo: float,
         kq["trang_thai"] = _CHUA_CHAY_NS
         return kq
     kq["tran_lo"] = cap
+    kq["actors"] = [_ACTORS[p]]
     so: list = []
     A._SO_RUN.set(so)
     A._HAN_CHOT.set(han_run)
+    loi_chinh = None
+    tien = [0.0]                  # tiền đã chắc chắn tiêu (giá × item, hoặc đo thật)
     try:
-        kq["binh_luan"], kq["n_raw"] = _FETCH[p](lo, per, cap)
-    except A.LoiApify as e:
-        if e.ma == "QUA_GIO":
-            kq["trang_thai"] = "CHƯA XONG — hết thời gian, đã dừng run, chưa lấy được bình luận"
-        else:
+        try:
+            kq["binh_luan"], kq["n_raw"] = _FETCH[p](lo, per, cap)
+            if kq["n_raw"]:
+                # Apify ghi tiền chậm vài giây: lấy số lớn hơn giữa tiền run báo và giá × item.
+                tien[0] = kq["n_raw"] * _GIA[p] + _GIA_KHOI_DONG.get(p, 0.0)
+        except A.LoiApify as e:
+            loi_chinh = e
+            if e.ma == "QUA_GIO":
+                kq["trang_thai"] = ("CHƯA XONG — hết thời gian, đã dừng run, chưa lấy được "
+                                    "bình luận")
+            else:
+                kq["loi"] = _che_token(f"{type(e).__name__}: {e}")[:220]
+        except Exception as e:  # noqa: BLE001
+            loi_chinh = e
+            # Che token: chuỗi lỗi đi thẳng vào câu trả lời của model và sổ audit.
             kq["loi"] = _che_token(f"{type(e).__name__}: {e}")[:220]
-    except Exception as e:  # noqa: BLE001
-        # Che token: chuỗi lỗi đi thẳng vào câu trả lời của model và sổ audit.
-        kq["loi"] = _che_token(f"{type(e).__name__}: {e}")[:220]
+        if kq["loi"] and p in _ACTORS_DU_PHONG \
+                and getattr(loi_chinh, "ma", "LOI") not in _KHONG_DU_PHONG:
+            _chay_du_phong(kq, p, lo, per, cap, so, han_run, tien, _uoc_lo(p, lo, per))
     finally:
         usd = sum(float(m.get("usd") or 0) for m in so if isinstance(m, dict))
-        # Apify ghi tiền chậm vài giây: lấy số lớn hơn giữa tiền run báo và giá × số item.
-        theo_item = (kq["n_raw"] * _GIA[p] + _GIA_KHOI_DONG.get(p, 0.0)) if kq["n_raw"] else 0
-        so_ns.tra(cap, max(usd, theo_item))
+        kq["tien"] = max(usd, tien[0])
+        so_ns.tra(cap, kq["tien"])
     ma = {m.get("ma") for m in so if isinstance(m, dict)}
     if "QUA_GIO" in ma and kq["binh_luan"]:
         kq["ma"], kq["trang_thai"] = "OK_MOT_PHAN", _CHUA_XONG_GIU
@@ -446,7 +750,15 @@ def _ly_do_vuot(ke_hoach: dict, tran_bl: int, tran_usd: float) -> list[str]:
     trần các lô cần giữ (mỗi lượt YouTube/Facebook đòi giữ tối thiểu 0,5 USD)."""
     bl, usd = _uoc_tinh(ke_hoach)
     can = _can_giu(ke_hoach)
+    # Trần RIÊNG mỗi lượt của Threads/Instagram (console) mà một lô vẫn vượt — vd Threads
+    # buộc ≥10 trả lời/bài + 0,02 USD khởi động dưới trần riêng quá thấp.
+    rieng = sorted({p for p, (per, cac_lo) in ke_hoach.items() for lo in cac_lo
+                    if _can_lo(p, _uoc_lo(p, lo, per)) > _tran_lo(p, _uoc_lo(p, lo, per),
+                                                                 tran_usd) + 1e-9})
     return (([f"bình luận {bl} > {tran_bl}"] if bl > tran_bl else [])
+            + [f"một lượt {A._TEN_NGUON.get(p, p)} cần hơn trần {_usd(_tran_p(p, tran_usd))} "
+               f"USD/lượt" + (" (trần riêng trên console Quét mạng xã hội)"
+                              if _tran_p(p, tran_usd) < tran_usd else "") for p in rieng]
             + ([f"chi phí {_usd(usd)} > {_usd(tran_usd)} USD"] if usd > tran_usd + 1e-9 else [])
             + ([f"phần trần cần giữ cho {sum(len(c) for _, c in ke_hoach.values())} lượt "
                 f"chạy {_usd(can)} > {_usd(tran_usd)} USD"]
@@ -546,9 +858,14 @@ SCHEMA = {
         "phát hiện khủng hoảng. Việc gán nhãn + thống kê là tool LÀM ĐƯỢC — đừng nói không.\n"
         "ĐẦU VÀO: `post_urls` — lấy từ cột `Link` trong sheet mà `social_listen` đã tạo, "
         "hoặc link người dùng dán vào.\n"
-        "HỖ TRỢ: TikTok, YouTube, Facebook. CHƯA hỗ trợ Instagram và Threads — gặp link "
-        "hai nền tảng đó phải NÓI THẲNG là chưa nối nguồn, TUYỆT ĐỐI không thay bằng "
-        "nền tảng khác rồi để người dùng tưởng là của nền tảng họ hỏi.\n"
+        "HỖ TRỢ: TikTok, YouTube, Facebook, Threads (threads.net/threads.com), Instagram. "
+        "Link nền tảng khác (`chua_ho_tro`) phải NÓI THẲNG là chưa nối nguồn, TUYỆT ĐỐI không "
+        "thay bằng nền tảng khác rồi để người dùng tưởng là của nền tảng họ hỏi.\n"
+        "- Threads/Instagram bóc KHÔNG đăng nhập: không có trả lời lồng nhau, Instagram chỉ "
+        "lấy được MỘT PHẦN bình luận công khai — luôn nói rõ theo `gioi_han_nen_tang`, không "
+        "gọi là toàn bộ bình luận. `per_url[...].nguon` có 'DỰ PHÒNG' = nguồn chính hỏng, "
+        "đã lấy bằng nguồn dự phòng (vẫn trong trần) — nói ra. 'ĐÃ TẮT' = chủ agent tắt nền "
+        "tảng đó trên console.\n"
         "BẮT BUỘC KHI TRẢ LỜI:\n"
         "- TRẦN CỨNG: chủ agent đặt trần bình luận + trần USD cho MỖI lần gọi (`tran`); "
         "tổng tiền Apify có thể tính của cả lần gọi không bao giờ vượt trần USD (mỗi lượt "
@@ -625,14 +942,27 @@ def _handle(args: dict, **kwargs) -> str:
             nhom.setdefault(p, []).append(u)
         else:
             chua_ho_tro.setdefault(p or "không nhận ra", []).append(u)
+    # Chủ agent TẮT Threads/Instagram trên console (`bat_<p>`=0) thì cũng không bóc bình luận.
+    tat = {p: nhom.pop(p) for p in [p for p in nhom if p in _THEO_CONSOLE_QUET]
+           if not A._tran_nen_tang(p)[2]}
+    cau_tat = "; ".join(A._ly_do_tat(p) for p in tat)
 
     if not nhom:
+        if tat and not chua_ho_tro:
+            return tool_error(
+                f"Không chạy: {cau_tat} — bóc bình luận nền tảng đó cũng tắt. Nói rõ như "
+                f"vậy; muốn bóc thì chủ agent bật lại ở Console → {A._NOI_CONSOLE}.")
         return tool_error(
-            f"Không link nào thuộc nền tảng đã nối. Chưa hỗ trợ: "
-            f"{', '.join(chua_ho_tro)}. Hãy NÓI THẲNG là chưa nối nguồn cho các nền "
-            f"tảng đó, đừng thay bằng nguồn khác.")
+            f"Không link nào thuộc nền tảng đã nối (TikTok, YouTube, Facebook, Threads, "
+            f"Instagram). Chưa hỗ trợ: {', '.join(chua_ho_tro)}"
+            + (f"; {cau_tat}" if tat else "")
+            + ". Hãy NÓI THẲNG là chưa nối nguồn cho các link đó, đừng thay bằng nguồn khác.")
 
     per_url: dict[str, dict] = {}
+    for p, us in tat.items():
+        for u in us:
+            per_url[u] = {"platform": p, "status": "ĐÃ TẮT",
+                          "error": A._ly_do_tat(p) + " — không bóc bình luận."}
     failed: list[str] = []
     # Trần của tool thấp hơn mức actor đòi → từ chối rõ, không gọi Apify, không tự nâng.
     for p in list(nhom):
@@ -648,6 +978,11 @@ def _handle(args: dict, **kwargs) -> str:
     uoc_bl, est = _uoc_tinh(ke_hoach)
     cat_per = (f"Người dùng xin {per_xin} bình luận/bài, tối đa {_MAX_PER_POST} mỗi lần — "
                f"đã dùng {_MAX_PER_POST}. Nói rõ." if per_xin > _MAX_PER_POST else None)
+    if "threads" in nhom and per != ke_hoach["threads"][0] \
+            and ke_hoach["threads"][0] in _PER_KHOANG["threads"]:
+        cat_per = ((cat_per + " ") if cat_per else "") + (
+            f"Threads chỉ nhận {_PER_KHOANG['threads'][0]}–{_PER_KHOANG['threads'][1]} "
+            f"trả lời/bài nên dùng {ke_hoach['threads'][0]}. Nói rõ.")
     # Bóc LỚN (chủ agent chốt 01–02/10/2026: tới 30.000 bình luận) thành việc NỀN — xét
     # TRƯỚC trần của lượt tại chỗ (5 USD), kẻo lượt lớn hợp lệ bị báo "vượt trần".
     tra_ngay, ghi_chu_nen = _thu_chay_nen(args, urls, nhom, per, cat_per, ke_hoach, per_url)
@@ -705,7 +1040,7 @@ def _handle(args: dict, **kwargs) -> str:
 
     # ── chi phí thật (hỏi song song với gán nhãn: Apify ghi tiền chậm vài giây) ──
     da_chay = [kq for kq in lo_kq if not kq["trang_thai"].startswith("CHƯA CHẠY")]
-    actors = sorted({_ACTORS[kq["p"]] for kq in da_chay})
+    actors = sorted({a for kq in da_chay for a in kq.get("actors") or [_ACTORS[kq["p"]]]})
     ex_cp = ThreadPoolExecutor(max_workers=1)
     f_cp = ex_cp.submit(A._chi_phi_thuc, actors, bat_dau, est) if actors else None
 
@@ -727,6 +1062,13 @@ def _handle(args: dict, **kwargs) -> str:
         # `_chi_phi_thuc` so mỗi lượt với trần của social_listen (vd 0,37), mà lô ở đây được
         # phép tới 90% trần RIÊNG (vd 0,45 của 0,5) — cờ đó báo nhầm. Dựa vào đếm từng lô.
         thuc = {**thuc, "cham_tran": 0}
+    # Apify ghi tiền CHẬM: đo 04/10 lượt Threads xong vẫn chỉ báo 0,02 USD (phí khởi động)
+    # sau hai lần hỏi lại, thật là 0,07 (khởi động + 20 dòng × 0,0025). Số dòng actor đã
+    # tính phí là sàn chắc chắn — số Apify báo thấp hơn sàn thì dùng sàn, và nói rõ.
+    san = round(sum(float(kq.get("tien") or 0) for kq in lo_kq), 3)
+    theo_dem = bool(thuc and thuc.get("so_run") and thuc.get("usd", 0) < san - 1e-9)
+    if theo_dem:
+        thuc = {**thuc, "usd": san}
     if actors:
         chi_phi_tool.ghi(queries=[f"bình luận {len(urls)} bài"], platforms=list(ke_hoach),
                          date_range="", thuc=thuc, est=est)
@@ -762,6 +1104,12 @@ def _handle(args: dict, **kwargs) -> str:
                 per_url[u] = {"platform": p, "status": "OK", "comments": n}
         if kq["loi"] and p not in failed:
             failed.append(p)
+        if kq.get("du_phong"):
+            for u in lo:
+                per_url[u]["nguon"] = (f"DỰ PHÒNG {kq['du_phong']} — nguồn chính hỏng: "
+                                       f"{kq.get('loi_nguon_chinh', '')}")[:300]
+    du_phong = sorted({kq["p"] for kq in lo_kq if kq.get("du_phong")})
+    gioi_han = {p: _GIOI_HAN[p] for p in ke_hoach if p in _GIOI_HAN}
     for p, us in chua_ho_tro.items():
         for u in us:
             per_url[u] = {"platform": p, "status": "CHƯA HỖ TRỢ",
@@ -777,20 +1125,29 @@ def _handle(args: dict, **kwargs) -> str:
                 max_comments_thuc={p: k[0] for p, k in ke_hoach.items()},
                 per_url={u: per_url[u] for u in urls if u in per_url},
                 platforms_failed=failed, chua_ho_tro=list(chua_ho_tro),
+                nen_tang_da_tat=list(tat) or None, gioi_han_nen_tang=gioi_han or None,
+                dung_nguon_du_phong=du_phong or None,
                 tong_comment=len(rows), khong_quy_ve_bai=khong_quy,
                 so_luot_chay=len(da_chay), so_bai_co_the_bi_cat=so_cat,
                 so_bai_cham_ngan_sach=so_ns_cham,
                 uoc_tinh_chi_phi_usd=est,
                 chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,
                 cham_tran_chi_phi=cham_tran_thuc or bool(so_cat),
-                chi_phi=A._dong_chi_phi(thuc, est))
+                chi_phi=(f"Chi phí lượt quét: {_usd(thuc['usd'])} USD ({thuc['so_run']} lượt "
+                         f"chạy; Apify chưa ghi xong tiền nên tính theo số dòng actor đã tính "
+                         f"phí)." if theo_dem else A._dong_chi_phi(thuc, est)))
     canh_bao = ((f" {so_cat} bài {_CAT} — nói rõ, đừng gọi là 0 bình luận." if so_cat else "")
                 + (f" {so_chua} bài chưa kéo xong vì hết thời gian." if so_chua else "")
                 + (f" {so_ns_cham} bài {_CHUA_CHAY_NS}: các lô trước đã tiêu gần hết ngân "
                    f"sách đã duyệt — nói rõ, đề xuất soi riêng các bài đó." if so_ns_cham else "")
                 + (f" CẢNH BÁO: nguồn HỎNG: {', '.join(failed)}." if failed else "")
                 + (f" CHƯA HỖ TRỢ: {', '.join(chua_ho_tro)} — phải nói rõ."
-                   if chua_ho_tro else ""))
+                   if chua_ho_tro else "")
+                + (f" ĐÃ TẮT: {cau_tat} — nói rõ các bài đó không được bóc." if tat else "")
+                + (f" {', '.join(A._TEN_NGUON.get(p, p) for p in du_phong)}: nguồn chính hỏng, "
+                   f"đã lấy bằng nguồn DỰ PHÒNG (xem `per_url[...].nguon`) — nói rõ."
+                   if du_phong else "")
+                + (" GIỚI HẠN PHẢI NÓI RA: " + " ".join(gioi_han.values()) if gioi_han else ""))
 
     if not rows:
         return tool_result(
@@ -888,11 +1245,12 @@ def _ke_hoach_nen(ke: dict, tran_usd: float) -> dict:
             pl = _payload(p, lo, pc)
             ds.append({"id": f"{p}-{i}", "actor": _ACTORS[p], "lo": list(lo), "per": pc,
                        "payload": pl, "payload_sha": quet_lon._sha(pl),
-                       "limit": pc * len(lo), "uoc_usd": round(uoc, 4),
+                       "limit": _limit(p, lo, pc), "uoc_usd": round(uoc, 4),
                        "uoc_giay": round(quet_lon._GIAY_KHOI_DONG
                                          + pc * len(lo) / quet_lon.toc(_ACTORS[p]), 1),
                        "can": _can_lo(p, uoc), "tran_lo": _tran_lo(p, uoc, tran_usd),
                        "min_charge": _MIN_CHARGE.get(p, 0.0), "gia": _GIA[p],
+                       **({"mem": _RAM[p]} if p in _RAM else {}),
                        "trang_thai": "cho", "nhan": f"lô {i + 1}: {len(lo)} bài"})
         nt[p] = {"limit": sum(x["limit"] for x in ds), "phan": ds, "chua_phu": [],
                  "ghi_chu": []}
@@ -1149,7 +1507,8 @@ def register() -> None:
         registry.register(
             name="social_deep_dive", toolset=_TOOLSET, schema=SCHEMA, handler=_handle,
             check_fn=_available, requires_env=[], is_async=False,
-            description="Kéo bình luận của bài cụ thể (TikTok/YouTube/Facebook), gán nhãn "
+            description="Kéo bình luận của bài cụ thể (TikTok/YouTube/Facebook/Threads/"
+                        "Instagram), gán nhãn "
                         "sắc thái/chủ đề, thống kê, ghi vào Lark Sheet",
             emoji="\U0001f4ac", override=True,
         )

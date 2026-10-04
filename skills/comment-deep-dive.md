@@ -14,8 +14,20 @@ luận có cột Sắc thái (Tích cực / Tiêu cực / Trung lập) và Chủ
 được một nhãn Tích cực / Tiêu cực / Trung lập (cột Sắc thái, tab Thống kê, `thong_ke`
 có `theo_nen_tang`). Người dùng hỏi "tích cực hay tiêu cực" về các bài đã quét thì báo
 từ đó. Muốn biết người ta BÌNH LUẬN gì dưới bài thì đề xuất `social_deep_dive` cho link
-TikTok, YouTube, Facebook. Bình luận Threads và Instagram chưa bóc được: nói thẳng, chỉ
-có sắc thái của chính bài đăng, không lấy nền tảng khác thay vào.
+TikTok, YouTube, Facebook, Threads (threads.net hoặc threads.com), Instagram.
+
+**Threads và Instagram bóc KHÔNG đăng nhập — giới hạn phải nói ra** (tool trả
+`gioi_han_nen_tang`):
+
+- Threads: chỉ trả lời cấp 1 công khai, không có trả lời lồng nhau; có thể thiếu vài
+  trả lời so với số đếm trên bài (đo thật: 19/21)
+- Instagram: chỉ được MỘT PHẦN bình luận thấy được công khai (đo thật: 8/18), không có
+  trả lời lồng nhau. Không gọi đó là "toàn bộ bình luận", không suy rộng tỉ lệ thành
+  "khách hàng nói chung"
+- `per_url[...].nguon` có "DỰ PHÒNG" = nguồn chính hỏng, tool đã lấy bằng nguồn dự phòng
+  trong cùng trần chi phí — nói ra. "ĐÃ TẮT" = chủ agent tắt Threads/Instagram ở Console
+  → Năng lực → Quét mạng xã hội; công tắc và trần USD riêng ở đó áp cho cả bóc bình luận
+- Không lấy nền tảng khác thay vào khi một nền tảng hỏng
 
 Khi báo kết quả:
 
@@ -44,4 +56,6 @@ Khi báo kết quả:
   lực. Không có cách chạy vượt trần
 
 Giá tham khảo (gói hiện tại, 10/2026): TikTok ~0,00125 USD/bình luận, YouTube ~0,002,
-Facebook ~0,0025. Ví dụ 10 bài TikTok × 50 bình luận ≈ 0,63 USD.
+Facebook ~0,0025, Instagram ~0,0026, Threads ~0,0025 mỗi dòng + 0,02 USD mỗi lượt (tính cả
+dòng bài gốc; 10–300 trả lời/bài, tối đa 20 bài/lượt). Ví dụ 10 bài TikTok × 50 bình luận
+≈ 0,63 USD; 1 bài Threads × 30 trả lời ≈ 0,10 USD.
