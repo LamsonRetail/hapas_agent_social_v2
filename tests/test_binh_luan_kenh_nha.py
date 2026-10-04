@@ -463,3 +463,45 @@ def test_loi_dan_prompt_va_ky_nang():
     sk = (goc / "skills" / "comment-deep-dive.md").read_text(encoding="utf-8")
     assert "binh_luan_kenh_nha" in sk and "social_deep_dive" in sk
     assert "Chạy nhé?" in K.SCHEMA["description"] and "0 USD" in K.SCHEMA["description"]
+
+
+# ───────────────────────── ID bài trần: chỉ nhận đúng hình ID Meta ─────────────────────────
+_TIEM = ["123?fields=x", "123&access_token=y", "../me", "123#x", "1/2", "me", "12 3", "１２３"]
+
+
+@pytest.mark.parametrize("xau", _TIEM)
+@pytest.mark.parametrize("kenh", ["threads", "instagram", "facebook"])
+def test_id_tran_chen_tham_so_hay_duong_dan_bi_tu_choi(env, mang, kenh, xau):
+    env(FB_PAGE_ID="111", FB_PAGE_ACCESS_TOKEN=TOK_FB, THREADS_ACCESS_TOKEN=TOK_TH,
+        IG_ACCESS_TOKEN=TOK_IG)
+    kq = json.loads(K._handle({"kenh": [kenh], "bai": [xau]}))
+    assert "error" in kq, f"'{xau}' lọt qua kiểm đầu vào"
+    assert ("không phải ID bài" in kq["error"]
+            or "không phải Threads/Instagram/Facebook" in kq["error"]), kq["error"]
+    assert mang.goi == [], "không được gọi Graph với ID bẩn"
+    # Phòng thủ lớp hai: gọi thẳng `_tim_bai` cũng không gửi gì đi
+    bai, khong = K._tim_bai(kenh, TOK_FB, [xau], time.monotonic() + 5) \
+        if "/" not in xau and "." not in xau else ([], {xau: "link"})
+    assert bai == [] and xau in khong
+    assert all(xau not in u and "access_token=y" not in u for u, _ in mang.goi)
+
+
+@pytest.mark.parametrize("kenh,vao,duong", [
+    ("threads", "17890000000000001", "v1.0/17890000000000001"),
+    ("instagram", "18000000000000002", "v26.0/18000000000000002"),
+    ("facebook", "111_9", "v26.0/111_9"),
+    ("facebook", "9", "v26.0/111_9"),
+])
+def test_id_tran_hop_le(env, mang, kenh, vao, duong):
+    env(FB_PAGE_ID="111")
+    mang.tuyen[duong.split("/", 1)[1]] = (200, {"id": vao, "permalink": "https://x/p/1"})
+    bai, khong = K._tim_bai(kenh, TOK_FB, [vao], time.monotonic() + 5)
+    assert khong == {} and len(bai) == 1
+    assert mang.duong_da_goi() == [duong]
+    assert K.id_hop_le(kenh, vao)
+
+
+def test_id_facebook_cua_trang_khac_bi_tu_choi(env, mang):
+    env(FB_PAGE_ID="111")
+    bai, khong = K._tim_bai("facebook", TOK_FB, ["222_9"], time.monotonic() + 5)
+    assert bai == [] and "FB_PAGE_ID" in khong["222_9"] and mang.goi == []

@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, wait
 
 import apify_tool as A
@@ -117,6 +118,22 @@ def _ma_trong_link(kenh: str, u: str) -> str:
     return ""
 
 
+# ID bài trần được nhận (review bảo mật PR #10): ID đi thẳng vào đường dẫn Graph, nên chỉ
+# nhận đúng hình ID Meta công bố — media Threads/Instagram là dãy số; bài Trang Facebook là
+# "<id Trang>_<id bài>" hoặc chỉ id bài (số). Có `?`, `&`, `#`, `/`… là từ chối.
+_RE_ID = {"threads": re.compile(r"[0-9]{1,30}"), "instagram": re.compile(r"[0-9]{1,30}"),
+          "facebook": re.compile(r"[0-9]{1,30}(?:_[0-9]{1,30})?")}
+
+
+def id_hop_le(kenh: str, u: str) -> bool:
+    return bool(_RE_ID[kenh].fullmatch(u))
+
+
+def _doan(x: str) -> str:
+    """Một đoạn đường dẫn Graph đã quote (phòng thủ thêm sau allow-list)."""
+    return urllib.parse.quote(str(x), safe="_")
+
+
 def _chuan_link(u: str) -> str:
     return re.sub(r"^https?://(?:www\.|m\.)?", "", str(u or "").strip().lower()
                   ).split("?")[0].split("#")[0].rstrip("/")
@@ -186,20 +203,23 @@ def _tim_bai(kenh: str, tok: str, yeu_cau: list[str], han: float) -> tuple[list[
         la_link = "/" in u or "." in u
         ma = _ma_trong_link(kenh, u) if la_link else ""
         if not la_link:
-            # ID trần: FB "<page>_<post>" hoặc số bài; Threads/IG là media id.
+            # ID trần: FB "<page>_<post>" hoặc số bài; Threads/IG là media id (số).
+            if not id_hop_le(kenh, u):
+                khong[u] = f"không phải ID bài {M.TEN[kenh]} hợp lệ (chỉ nhận chữ số)"
+                continue
             mid = u if (kenh != "facebook" or "_" in u) else f"{page_id}_{u}"
             if kenh == "facebook" and not mid.startswith(page_id + "_"):
                 khong[u] = "ID không thuộc Trang của kênh nhà (FB_PAGE_ID)"
                 continue
             try:
-                x = M.goi(kenh, mid, {"fields": _BAI[kenh][1]}, tok)
+                x = M.goi(kenh, _doan(mid), {"fields": _BAI[kenh][1]}, tok)
                 bai.append({**_BAI[kenh][2](x), "dau_vao": u})
             except M.LoiKenh as e:
                 khong[u] = f"không đọc được bài bằng token kênh nhà ({e.ma})"
             continue
         if kenh == "facebook" and ma.isdigit() and page_id:
             try:
-                x = M.goi(kenh, f"{page_id}_{ma}", {"fields": _F_FB_BAI}, tok)
+                x = M.goi(kenh, _doan(f"{page_id}_{ma}"), {"fields": _F_FB_BAI}, tok)
                 bai.append({**_bai_fb(x), "dau_vao": u})
                 continue
             except M.LoiKenh:
@@ -480,6 +500,10 @@ def _doc_tham_so(args: dict) -> tuple[dict | None, str]:
             if len(kenh) != 1:
                 return None, f"ID bài trần '{u}' cần `kenh` là đúng MỘT kênh."
             k = kenh[0]
+            if not id_hop_le(k, u):
+                return None, (f"'{u}' không phải ID bài {M.TEN[k]} hợp lệ: ID bài chỉ gồm chữ "
+                              f"số (Facebook có thể là <id Trang>_<id bài>). Gửi link bài "
+                              f"hoặc đúng ID.")
         bai.setdefault(k, []).append(u)
     if bai:
         kenh = [k for k in M.KENH if k in bai]
