@@ -37,11 +37,13 @@ giữ sha256). Không có endpoint cấp lại. Nên phải nhờ admin chạy
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import pathlib
 import re
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -652,6 +654,42 @@ def bao_su_kien_job(job_id, text: str, ma_su_kien: str | None = None) -> dict:
                 timeout=20)
 
 
+#: Giãn cách các lần thử lại `/reply` và `/complete` (giây). Sự cố 04/10/2026 21:46:
+#: job 5632 dính 502 Bad Gateway một lần là mất câu trả lời — người dùng không nhận gì.
+_LUI_TRA_JOB = (1, 3, 9)
+_ngu = time.sleep
+
+
+def _loi_tam(e: Exception) -> bool:
+    """5xx hoặc lỗi mạng = đáng thử lại. 4xx = yêu cầu sai / trạng thái sai, thử lại
+    cũng thế (vd 409 job không còn running)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code >= 500
+    return isinstance(e, (urllib.error.URLError, OSError, http.client.HTTPException))
+
+
+def _goi_job(c: dict, duong: str, than: dict):
+    """`_goi` cho `/reply` và `/complete`, thử lại tối đa 3 lần (1s, 3s, 9s) khi lỗi tạm.
+
+    Thử lại AN TOÀN, không ra hai tin Lark — platform (`self_job_reply`) khoá theo job
+    (`pg_advisory_xact_lock`) rồi kiểm job đã có sự kiện `message` chưa; có rồi thì trả
+    `duplicate: true` và KHÔNG gửi ra kênh nữa. Nên 502 do proxy (handler vẫn chạy xong
+    và commit) thì lần thử lại thấy bản trùng; handler còn đang chạy thì lần thử lại chờ
+    khoá rồi cũng thấy bản trùng. Chỗ hở duy nhất: tiến trình platform chết ĐÚNG giữa
+    lúc đã gửi Lark và lúc commit — giao dịch rollback, lần thử lại gửi thêm một tin.
+    `/complete` gửi hai lần thì lần sau nhận 409 (job đã `done`) — vô hại."""
+    for lan in range(len(_LUI_TRA_JOB) + 1):
+        try:
+            return _goi(c, duong, than)
+        except Exception as e:  # noqa: BLE001
+            if lan >= len(_LUI_TRA_JOB) or not _loi_tam(e):
+                e.so_lan_thu = lan  # type: ignore[attr-defined]
+                raise
+            print(f"[job] {duong} lỗi tạm ({type(e).__name__}: {e}) — thử lại sau "
+                  f"{_LUI_TRA_JOB[lan]}s", flush=True)
+            _ngu(_LUI_TRA_JOB[lan])
+
+
 def _mot_vong(c: dict, tra_loi) -> int:
     """Lấy tối đa một job, xử lý, trả lời. Trả về số job đã làm."""
     try:
@@ -714,8 +752,13 @@ def _mot_vong(c: dict, tra_loi) -> int:
         (f"/v1/self/jobs/{jid}/complete", {"ok": ok, "usage": dung}),
     ):
         try:
-            _goi(c, duong, than)
+            _goi_job(c, duong, than)
         except Exception as e:
+            if (duong.endswith("/complete") and getattr(e, "code", None) == 409
+                    and getattr(e, "so_lan_thu", 0)):
+                # Lần trước đã tới platform, chỉ mất phản hồi — job đã done.
+                print(f"[job] {duong}: đã xong từ lần gửi trước (409)", flush=True)
+                continue
             print(f"[job] {duong} lỗi: {type(e).__name__}: {e}", flush=True)
     print(
         f"[job] #{jid} {'xong' if ok else 'LỖI'} · {hoi[:40]!r} → {dap[:60]!r}",
