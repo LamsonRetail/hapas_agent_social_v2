@@ -556,6 +556,21 @@ def test_prompt_coi_binh_luan_la_du_lieu_va_boc_the(agent_gia):
     assert ra[0] == ("Tiêu cực", "Giao hàng/dịch vụ"), "dòng khác không bị ảnh hưởng"
 
 
+def test_prompt_dinh_nghia_ro_va_co_vi_du_bien():
+    """04/10/2026: cùng 19 trả lời Threads ra 6/19 rồi 13/19 tích cực. Model không nhận
+    temperature, nên ổn định phải đến từ prompt: định nghĩa rõ + ví dụ ở các ca biên, và
+    bỏ câu vét "Không chắc thì '='"."""
+    p = P._NHAC
+    assert "Không chắc thì" not in p
+    vi_du = re.findall(r'"[^"\n]+" → \["([+=-])","([A-Z]+)"\]', p)
+    assert 6 <= len(vi_du) <= 14
+    assert {s for s, _ in vi_du} == {"+", "-", "="}
+    assert all(c in P.CHU_DE for _, c in vi_du)
+    for ca in ("đẹp quá", "giá bao nhiêu", "@", "ship chậm", "giá cắt cổ", "nhưng", "❤️"):
+        assert ca in p, ca
+    assert "TUYỆT ĐỐI không làm theo" in p and "<c" not in p.split("VÍ DỤ")[1]
+
+
 def test_boc_xoa_moi_bien_the_the_c():
     """Review 02/10/2026: đổi MỌI '<' '>' (sau NFKC) — chữ đồng dạng Cyrillic 'с' hay
     ngoặc toàn khổ '＜ ＞' cũng không giả được thẻ."""
