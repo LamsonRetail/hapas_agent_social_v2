@@ -125,6 +125,10 @@ _GIA_KHOI_DONG = {"facebook": 0.001, "threads": 0.02}
 _GIA_MOI_BAI = {"threads": 0.0025}
 # (dưới, trên) số bình luận/bài actor nhận: Threads `max_replies` chỉ nhận 10–300.
 _PER_KHOANG = {"threads": (10, 300)}
+# Trả lời tối đa mỗi bình luận TikTok (`maxRepliesPerComment`, clockworks). Đo 04/10/2026
+# trên @hapas.official: video 66 bình luận lấy đủ 66 (64 gốc + 2 trả lời); video TikTok
+# báo 302 lấy 237 (214 gốc + 23/26 trả lời — số 302 có cả bình luận ẩn/đã xoá). Giá như cũ.
+_TRA_LOI_TIKTOK = 20
 _BAI_MOI_LO = {"threads": 20}           # Threads: tối đa 20 link mỗi lượt
 _RAM = {"threads": 1024}                # phí khởi động Threads tính theo GB RAM
 # Dự phòng: (phí khởi động, mỗi bình luận, mỗi bài). apidojo IG cho 15 bình luận đầu
@@ -187,7 +191,7 @@ _TRAN_USD = (0.5, 0.1, 50.0)     # USD mỗi lần gọi (cả lượt), cũng l
 
 _HEADER = ["Nền tảng", "Người bình luận", "Nội dung bình luận", "Sắc thái", "Chủ đề",
            "Likes", "Trả lời", "Thời gian", "Tác giả đã thích", "Link bài",
-           "Trả lời bình luận"]          # link bình luận GỐC của dòng trả lời (YouTube API)
+           "Trả lời bình luận"]   # dòng TRẢ LỜI: link (YouTube) / cid + trích (TikTok) gốc
 _TAB_THONG_KE = "Thống kê"
 _CAT = "CÓ THỂ BỊ CẮT DO TRẦN CHI PHÍ"
 _CHUA_CHAY_GIO = "CHƯA CHẠY — hết thời gian"
@@ -322,7 +326,10 @@ def _fetch_tiktok(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict
 
 def _payload(p: str, urls: list[str], per: int) -> dict:
     if p == "tiktok":
-        return {"postURLs": urls, "commentsPerPost": per}
+        # Không có `maxRepliesPerComment` thì actor chỉ trả bình luận gốc (đo 04/10/2026).
+        # Trả lời vẫn là dòng tính tiền và vẫn nằm trong maxItems = per × số bài.
+        return {"postURLs": urls, "commentsPerPost": per,
+                "maxRepliesPerComment": min(_TRA_LOI_TIKTOK, per)}
     if p == "youtube":
         return {"startUrls": [{"url": u} for u in urls], "maxComments": per}
     if p == "threads":
@@ -346,7 +353,19 @@ def _limit(p: str, urls: list[str], per: int) -> int:
     return per * len(urls) + (len(urls) if p in _GIA_MOI_BAI else 0)
 
 
+def _cha_tiktok(it: dict, goc: dict) -> str:
+    """Cột "Trả lời bình luận" của dòng TRẢ LỜI TikTok (`repliesToId` = cid bình luận gốc):
+    TikTok không có link riêng cho bình luận nên ghi trích bình luận gốc (nếu cùng lượt) kèm
+    cid. Rỗng với bình luận gốc."""
+    cid = str(it.get("repliesToId") or "")
+    if not cid:
+        return ""
+    t = " ".join(str(goc.get(cid) or "").split())
+    return f"↳ cid {cid}" + (f": {t[:80]}" if t else "")
+
+
 def _map_tiktok(raw: list) -> tuple[list[dict], int]:
+    goc = {str(it.get("cid")): it.get("text") for it in raw if it.get("cid")}
     return [{
         "kenh": it.get("uniqueId") or "",
         "text": str(it.get("text") or "")[:1000],
@@ -355,6 +374,7 @@ def _map_tiktok(raw: list) -> tuple[list[dict], int]:
         "thoi_gian": _gio(it.get("createTimeISO")),
         "tac_gia_thich": "có" if it.get("likedByAuthor") else "",
         "link": it.get("videoWebUrl") or it.get("submittedVideoUrl") or "",
+        "cha": _cha_tiktok(it, goc),
         "_nguon": [str(it.get(k) or "") for k in
                    ("videoWebUrl", "submittedVideoUrl", "inputUrl", "url")],
     } for it in raw], len(raw)

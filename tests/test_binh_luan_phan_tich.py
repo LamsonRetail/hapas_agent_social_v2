@@ -628,3 +628,47 @@ def test_loi_401_co_cau_truc_thi_bao_auth_error(agent_gia, monkeypatch):
     P.phan_loai_binh_luan(_dong("a b"), 30)
     assert bao == ["auth_error"]
 
+
+
+# ──────── 04/10/2026: TikTok kéo cả TRẢ LỜI (maxRepliesPerComment) ────────
+def test_payload_tiktok_xin_tra_loi_trong_tran_binh_luan():
+    pl = D._payload("tiktok", [TT.format(7000001)], 50)
+    assert pl["maxRepliesPerComment"] == 20 and pl["commentsPerPost"] == 50
+    assert D._payload("tiktok", [TT.format(7000001)], 5)["maxRepliesPerComment"] == 5
+    # Ước tính vẫn theo TỔNG dòng (gốc + trả lời) = maxItems của lượt.
+    assert D._limit("tiktok", [TT.format(7000001)] * 2, 50) == 100
+    assert D._uoc_lo("tiktok", [TT.format(7000001)] * 2, 50) == pytest.approx(100 * 0.00125)
+
+
+def test_map_tiktok_danh_dau_dong_tra_loi():
+    import pathlib
+    mau = json.loads((pathlib.Path(__file__).parent / "mau_binh_luan_tiktok_tra_loi.json")
+                     .read_text(encoding="utf-8"))
+    rows, n = D._map_tiktok(mau)
+    assert n == len(mau) == 6
+    tra_loi = [r for r in rows if r["cha"]]
+    assert len(tra_loi) == 2
+    goc = {m["cid"]: m["text"] for m in mau}
+    for r, m in zip(rows, mau):
+        if m.get("repliesToId"):
+            assert r["cha"].startswith(f"↳ cid {m['repliesToId']}: ")
+            assert goc[m["repliesToId"]][:20] in r["cha"], "trích bình luận gốc"
+            assert r["replies"] == 0, "replyCommentTotal=null ở dòng trả lời"
+        else:
+            assert r["cha"] == ""
+    # Bình luận gốc không nằm trong lượt: vẫn đánh dấu là trả lời, chỉ thiếu trích.
+    lac = D._map_tiktok([dict(mau[1], repliesToId="999")])[0][0]
+    assert lac["cha"] == "↳ cid 999"
+
+
+def test_sheet_tiktok_co_cot_tra_loi_binh_luan(moi_truong):
+    ap, _, sheet, _ = moi_truong
+    u = TT.format(7000001)
+    ap.tra = lambda payload, limit: [
+        {"cid": "1", "uniqueId": "a", "text": "túi đẹp quá", "videoWebUrl": u,
+         "replyCommentTotal": 1},
+        {"cid": "2", "uniqueId": "b", "text": "chuẩn", "videoWebUrl": u, "repliesToId": "1"}]
+    json.loads(D._handle({"post_urls": [u]}))
+    assert sheet[0][-1] == "Trả lời bình luận"
+    assert [r[-1] for r in sheet[1:]] == ["", "↳ cid 1: túi đẹp quá"]
+    assert ap.goi[0]["payload"]["maxRepliesPerComment"] == 20
