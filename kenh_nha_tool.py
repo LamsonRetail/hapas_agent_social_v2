@@ -16,6 +16,10 @@ KHÔNG gán nhãn, KHÔNG vào thống kê — "cảm ơn bạn" của shop khô
 Tiền: 0 USD (API Meta miễn phí, có hạn mức gọi). Vẫn ghi Lark Sheet nên lời dặn ở prompt
 giữ nếp "ước tính miễn phí → Chạy nhé?" như các tool ghi sheet khác.
 Mạng + token: `kenh_nha_meta.py`.
+
+Công tắc riêng trên console, lệnh `/hapas` (chưa đặt riêng thì theo công tắc Quét mạng
+xã hội — xem `_CONG_TAC_LUI` trong lsr_policy). `/hapas` trơn báo công tắc, kênh đã nối
+và hạn token, không gọi model (`lenh_cung._van_hapas`).
 """
 from __future__ import annotations
 

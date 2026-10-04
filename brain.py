@@ -147,7 +147,8 @@ _TOOLING_NOTE = "\n".join(
         "KẾT THÚC bằng câu hỏi \"Chạy nhé?\" và DỪNG, chờ người dùng trả lời. Chỉ gọi ngay khi: "
         "người dùng vừa đồng ý câu chốt đó (ok, chạy đi, làm luôn…); người dùng nói rõ không "
         "cần hỏi (quét luôn, chạy liền, làm luôn…); hoặc là lệnh cứng (/search, /comment, "
-        "/profile, /shop, /topads). Câu hỏi chung như 'có gì viral không', 'hóng trend tuần này' CHƯA "
+        "/profile, /shop, /topads, /hapas kèm việc cần đọc). Câu hỏi chung như "
+        "'có gì viral không', 'hóng trend tuần này' CHƯA "
         "phải là đồng ý quét.",
         # 01/10: Claude viết cả kế hoạch nội bộ lên đầu tin nhắn ("Câu này là trend chung →
         # gọi social_listen với che_do=… ---"), người dùng thấy tên tool và tham số.

@@ -257,3 +257,33 @@ def test_danh_ba_doc_lai_khong_giu_dau_tat_cu(P, danh_ba):
     danh_ba(None)
     assert P.nang_luc_bat() is P.KHONG_THU_HEP
     assert P.decide("tiktok_top_ads", {}).allowed
+
+
+# ─────────── `binh_luan_kenh_nha`: công tắc riêng, chưa đặt thì theo Quét MXH (như Top Ads) ───────────
+
+def test_kenh_nha_cong_tac_lui_ve_quet_mxh(P):
+    assert P._CONG_TAC_LUI["binh_luan_kenh_nha"] == "social_listen"
+    assert "binh_luan_kenh_nha" in P._TOOL_CO_CONG_TAC
+
+
+def test_danh_ba_kenh_nha_bat_rieng_khi_quet_mxh_tat(P, danh_ba):
+    danh_ba([_muc("soi_san"), _muc("binh_luan_kenh_nha")])
+    assert P.decide("binh_luan_kenh_nha", {}).allowed, "công tắc riêng bật mà vẫn theo cha"
+    assert not P.decide("social_listen", {}).allowed
+    assert not P.decide("tiktok_top_ads", {}).allowed, "bật kênh nhà không được bật lây Top Ads"
+
+
+def test_danh_ba_kenh_nha_tat_ro_khi_quet_mxh_bat(P, danh_ba):
+    danh_ba([_muc("social_listen"), {"tool": "binh_luan_kenh_nha", "bat": False}])
+    d = P.decide("binh_luan_kenh_nha", {})
+    assert not d.allowed and "đang TẮT" in d.reason and "theo công tắc" not in d.reason
+    assert P.decide("social_listen", {}).allowed, "tắt kênh nhà không được tắt lây cha"
+    assert P.decide("tiktok_top_ads", {}).allowed, "dấu tắt của kênh nhà không đụng Top Ads"
+
+
+def test_danh_ba_kenh_nha_console_cu_thi_theo_quet_mxh(P, danh_ba):
+    danh_ba([_muc("social_listen")])
+    assert P.decide("binh_luan_kenh_nha", {}).allowed
+    danh_ba([_muc("soi_san")])
+    d = P.decide("binh_luan_kenh_nha", {})
+    assert not d.allowed and "theo công tắc 'social_listen'" in d.reason
