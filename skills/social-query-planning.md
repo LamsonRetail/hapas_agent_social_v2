@@ -9,7 +9,8 @@
 | Một TÀI KHOẢN cụ thể đăng gì — đối thủ, KOC định book | `soi_tai_khoan` |
 | Giá, sản phẩm đang bán trên sàn | `soi_san` với `tu_khoa` (chỉ Shopee) |
 | Soi MỘT sản phẩm cụ thể — người dùng dán link Shopee hoặc TikTok Shop | `soi_san` với `link` |
-| Đối thủ đang CHẠY QUẢNG CÁO gì | `fb_ads_library` |
+| Đối thủ đang CHẠY QUẢNG CÁO gì trên Facebook / Instagram / Threads | `fb_ads_library` |
+| Top quảng cáo TikTok theo brand, sản phẩm hoặc ngành | `tiktok_top_ads` (gọi `chi_uoc_tinh` trước) |
 | Người ta bình luận gì dưới một bài cụ thể | `social_deep_dive` |
 | Gán nhãn từng bình luận, thống kê % khen/chê/chủ đề | `social_deep_dive` (tự gán nhãn) |
 
@@ -45,6 +46,10 @@ USD (gồm bảng nhạc đang lên ~0,2 USD; đặt `so_nhac`=0 để bỏ). Kh
   Tách bài hát dùng lại với âm thanh gốc của kênh
 - Top video có thể là quảng cáo của brand. Mặc định đã bỏ video trả tiền; nếu vẫn thấy
   video của brand lớn thì nói rõ đó là nội dung brand chứ không phải trend tự nhiên
+- Hỏi trend THEO NGÀNH ("trend thời trang", "túi xách", "phụ kiện", "mỹ phẩm") → thêm
+  `nganh`. Chỉ bảng hashtag lọc theo ngành, theo ngành CHA của TikTok ("túi xách" lọc
+  thành "thời trang và phụ kiện"); top video không lọc được theo ngành. Không tốn thêm
+  tiền
 
 **Luôn chờ người dùng đồng ý trước khi chạy một lần quét tốn tiền.**
 
@@ -96,6 +101,8 @@ ghi vào sổ audit. Chỉ khi người dùng HỎI thì mới trả lời:
 - Soi một tài khoản, 30 bài: TikTok ~0,09 USD, Facebook ~0,15 USD, Instagram ~0,003 USD
   (Instagram chỉ có 12 bài mới nhất)
 - Shopee, 30 sản phẩm: ~0,15 USD
+- Top quảng cáo TikTok: ~0,003 USD mỗi ad (20 ads ≈ 0,06 USD); nguồn chính hỏng thì
+  nguồn dự phòng ~0,004 USD mỗi ad
 - Bình luận (gói hiện tại, 10/2026): TikTok ~0,00125 USD/bình luận, YouTube ~0,002,
   Facebook ~0,0025 — 10 bài TikTok × 50 bình luận ≈ 0,63 USD. Mỗi lần bóc bị chặn cứng ở
   trần chủ agent đặt (mặc định 300 bình luận, 0,5 USD)
