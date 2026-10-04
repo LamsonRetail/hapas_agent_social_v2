@@ -56,6 +56,7 @@ import crawl_tool  # noqa: E402,F401  (registers `web_crawl`: cào sản phẩm 
 import ky_nang_tool  # noqa: E402,F401  (registers `dung_ky_nang`: nạp thân kỹ năng khi cần)
 import account_tool  # noqa: E402,F401  (registers `soi_tai_khoan`: soi tài khoản brand/KOC)
 import shopee_tool  # noqa: E402,F401  (registers `soi_san`: giá và sản phẩm trên Shopee)
+import tiktok_ads_tool  # noqa: E402,F401  (registers `tiktok_top_ads`: top ads TikTok -> Lark Sheet)
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
@@ -115,6 +116,11 @@ _TOOLING_NOTE = "\n".join(
         "Instagram') → truyền tham số `platform` (facebook/instagram/messenger/threads/"
         "audience_network); Meta lọc server-side nên mọi ad trả về đúng nền tảng đó. Ảnh creative là "
         "bản thu nhỏ, link có hạn (tải ngay nếu cần); ad video chỉ có thumbnail.",
+        # 04/10: Meta Ad Library không có quảng cáo TikTok.
+        "- QUẢNG CÁO TIKTOK ('ads TikTok của đối thủ', 'ngành túi xách chạy ads TikTok gì') → "
+        "`tiktok_top_ads` (Top Ads của TikTok Creative Center, theo từ khoá/ngành). Đây là tập "
+        "ads hiệu quả cao nhất, KHÔNG phải mọi ad của brand; CTR/chi phí là mức tương đối, "
+        "không phải tiền thật; link video hết hạn sau 24–48 giờ.",
         "- DUYỆT WEB / TRANG CÔNG KHAI (`browser_navigate` + `browser_snapshot`/`browser_get_images`/"
         "`browser_click`…): tự mở URL, đọc nội dung, click, lấy ảnh — dùng cho web thường và các "
         "trang công khai KHÔNG cần đăng nhập. LƯU Ý: feed Facebook/Instagram/Threads/TikTok thường "
@@ -133,7 +139,8 @@ _TOOLING_NOTE = "\n".join(
         # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
         # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).
-        "- TOOL TỐN TIỀN (`social_listen`, `social_deep_dive`, `soi_tai_khoan`, `soi_san`): "
+        "- TOOL TỐN TIỀN (`social_listen`, `social_deep_dive`, `soi_tai_khoan`, `soi_san`, "
+        "`tiktok_top_ads` — tool này gọi `chi_uoc_tinh`=true trước, miễn phí): "
         "TRƯỚC khi gọi, tóm tắt phạm vi (từ khoá hoặc link, nền tảng, khoảng ngày, số bài) rồi "
         "KẾT THÚC bằng câu hỏi \"Chạy nhé?\" và DỪNG, chờ người dùng trả lời. Chỉ gọi ngay khi: "
         "người dùng vừa đồng ý câu chốt đó (ok, chạy đi, làm luôn…); người dùng nói rõ không "
@@ -207,6 +214,8 @@ _TOOL_CAN_XET = {
     "soi_san": ("xem thị trường Shopee theo từ khoá, hoặc dán link sản phẩm Shopee / TikTok "
                 "Shop để đọc đánh giá của khách, rồi xuất Lark Sheet", {}),
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
+    "tiktok_top_ads": ("xem top quảng cáo TikTok theo từ khoá hoặc ngành (TikTok Creative "
+                       "Center) rồi xuất Lark Sheet", {}),
     "doc_bang": ("đọc nguyên một Base hoặc Sheet của Lark khi người hỏi cũng có quyền xem",
                  {"nguon": "https://example.larksuite.com/base/x"}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),

@@ -37,6 +37,7 @@ from concurrent.futures import ThreadPoolExecutor
 import apify_tool as A
 import chi_phi_tool
 import memory_store
+import nganh_tiktok
 
 from tools.registry import tool_error, tool_result  # type: ignore
 
@@ -196,9 +197,14 @@ def _first(d: dict, *names, default=""):
     return default
 
 
-def _bang_hashtag(vung: str, ky: int, n: int) -> list[dict]:
-    raw = A._call(ACTOR_TREND, {"trendType": "hashtags", "countryCode": vung,
-                                "hashtagPeriod": str(ky), "maxItems": n}, n)
+def _bang_hashtag(vung: str, ky: int, n: int, nganh_id: str = "") -> list[dict]:
+    """`nganh_id`: `industryId` của actor (mã 11 số của ngành cha, xem nganh_tiktok) —
+    actor lọc phía nó nên không tốn thêm tiền; rỗng = mọi ngành như trước."""
+    payload = {"trendType": "hashtags", "countryCode": vung, "hashtagPeriod": str(ky),
+               "maxItems": n}
+    if nganh_id:
+        payload["industryId"] = nganh_id
+    raw = A._call(ACTOR_TREND, payload, n)
     return [{
         "hang": x.get("Rank"), "hashtag": str(x.get("Hashtag") or "").lstrip("#"),
         "huong": {"up": "lên", "down": "xuống"}.get(str(x.get("Trend Direction")),
@@ -384,6 +390,14 @@ def chay(args: dict) -> str:
         return tool_error(f"Creative Center chưa có trend cho vùng {vung}. Có: "
                           f"{', '.join(sorted(_VUNG_HASHTAG))}.")
     ky = 30 if str(args.get("ky_ngay") or "7").strip() == "30" else 7
+    # Ngành (chủ agent xin 04/10/2026: "trend ngành thời trang / túi / phụ kiện"). Chỉ bảng
+    # hashtag lọc được; Creative Center không lọc top video theo ngành.
+    nganh = None
+    if str(args.get("nganh") or "").strip():
+        nganh = nganh_tiktok.tim(args["nganh"])
+        if not nganh or not nganh["id_trend"]:
+            return tool_error(f"Chưa lọc trend được theo ngành '{args['nganh']}'. Ngành "
+                              f"nhận được: {nganh_tiktok.danh_sach()}.")
     so_tag = _so(args.get("so_hashtag"), 20, 5, 100)
     so_vid = _so(args.get("so_video"), 20, 5, 100) if vung in _VUNG_VIDEO else 0
     tu_nhien = args.get("chi_tu_nhien") is not False
@@ -421,7 +435,7 @@ def chay(args: dict) -> str:
     try:
         def gui(fn, *a):
             return ex.submit(contextvars.copy_context().run, _trong_han, han_run, fn, *a)
-        f_tag = gui(_bang_hashtag, vung, ky, n_tag)
+        f_tag = gui(_bang_hashtag, vung, ky, n_tag, *([nganh["id_trend"]] if nganh else []))
         f_vid = gui(_bang_video, vung, ky, so_vid, tu_nhien) if so_vid else None
         f_nhac = gui(_bang_nhac, vung, ky, n_nhac) if n_nhac else None
         try:
@@ -482,7 +496,8 @@ def chay(args: dict) -> str:
           and len(nhac) >= n_nhac)
     if thuc and thuc.get("cham_tran") and du:
         thuc = {**thuc, "cham_tran": 0}
-    chi_phi_tool.ghi(queries=[f"trend {vung}"], platforms=["tiktok"],
+    chi_phi_tool.ghi(queries=[f"trend {vung}" + (f" · {nganh['ten']}" if nganh else "")],
+                     platforms=["tiktok"],
                      date_range=f"{ky} ngày gần nhất", thuc=thuc, est=est)
 
     if not tags and not vids:
@@ -491,7 +506,8 @@ def chay(args: dict) -> str:
 
     url, granted = None, False
     title = (args.get("title") or "").strip() or \
-        f"Trend TikTok {vung} · {ky} ngày · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y}"
+        (f"Trend TikTok {vung} · " + (f"{nganh['ten_nhom']} · " if nganh else "")
+         + f"{ky} ngày · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y}")
     rows = [["Loại", "Hạng", "Tên", "Hướng / Kênh", "Số bài / Số kênh dùng",
              "Lượt xem", "Ghi chú", "Link"]]
     rows += [["Hashtag", t["hang"], "#" + t["hashtag"], t["huong"], t["so_bai"],
@@ -517,8 +533,19 @@ def chay(args: dict) -> str:
     except Exception as e:  # noqa: BLE001
         loi["sheet"] = f"{type(e).__name__}: {e}"[:250]
 
+    ghi_chu_nganh = ""
+    if nganh:
+        ghi_chu_nganh = (
+            f" Bảng hashtag đã lọc theo ngành {nganh['ten_nhom']} của TikTok"
+            + (f" (ngành cha của {nganh['ten']} — TikTok không lọc hashtag hẹp hơn)"
+               if nganh["la_nganh_con"] else "")
+            + "; top video KHÔNG lọc được theo ngành."
+            + (f" Ngành này chỉ có {len(tat_ca_tag)} hashtag trên bảng."
+               if len(tat_ca_tag) < n_tag and "hashtag" not in loi else ""))
     return tool_result(
         success=not loi, che_do="trend", vung=vung, ky_ngay=ky,
+        nganh=({"ten": nganh["ten"], "loc_theo": nganh["ten_nhom"],
+                "industry_id": nganh["id_trend"]} if nganh else None),
         nguon=("Bảng xếp hạng chính thức TikTok Creative Center (hashtag + video + nhạc đang "
                "lên). Âm thanh/hiệu ứng SUY từ mẫu video dưới các hashtag đang lên."),
         hashtag=tags, video=vids, chi_video_tu_nhien=tu_nhien,
@@ -536,7 +563,7 @@ def chay(args: dict) -> str:
         cham_tran_chi_phi=bool(thuc and thuc.get("cham_tran")),
         chi_phi=A._dong_chi_phi(thuc, est),
         giay=round(time.monotonic() - t0, 1),
-        note=(ghi_chu_nhac
+        note=(ghi_chu_nhac + ghi_chu_nganh
               + (" Mẫu giữ được ít hơn số cần — nói rõ cỡ mẫu thật."
                  if so_mau and mau["giu"] < so_mau else "")
               + (f" HASHTAG NHẠY CẢM: {'; '.join(nhay_cam)} — KHÔNG đề xuất brand bám các "

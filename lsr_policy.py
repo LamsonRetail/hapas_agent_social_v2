@@ -59,6 +59,7 @@ _MUTATING_EXACT = {
     "web_crawl": "write_data",           # cào nhiều trang → tạo Lark Sheet
     "soi_tai_khoan": "write_data",       # soi tài khoản brand/KOC → tạo Lark Sheet
     "soi_san": "write_data",             # giá và sản phẩm Shopee → tạo Lark Sheet
+    "tiktok_top_ads": "write_data",      # top quảng cáo TikTok (Apify) → tạo Lark Sheet
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
     # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
@@ -215,6 +216,14 @@ _TOOL_CO_CONG_TAC = frozenset({
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
 })
 
+#: Tool CHƯA có công tắc riêng trên console thì đi theo công tắc của tool cha, để chủ
+#: agent vẫn tắt được nó. `tiktok_top_ads` (04/10/2026) dùng Apify + trần TikTok của
+#: `social_listen`, nên tắt "Quét mạng xã hội" là tắt luôn nó. Khi platform thêm mục
+#: `tiktok_top_ads` vào `NANG_LUC_THEO_AGENT["AG-SOCIAL-LISTENING"]` thì chuyển tên này
+#: sang `_TOOL_CO_CONG_TAC` và bỏ dòng ở đây — không thêm trước, kẻo console chưa có công
+#: tắc mà runtime hiểu là "đang tắt".
+_CONG_TAC_MUON = {"tiktok_top_ads": "social_listen"}
+
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.
 KHONG_THU_HEP = object()
 
@@ -308,13 +317,15 @@ def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision
     if not d.allowed:
         return d
     name = (tool_name or "").strip()
-    if name in _TOOL_CO_CONG_TAC:
+    cong_tac = name if name in _TOOL_CO_CONG_TAC else _CONG_TAC_MUON.get(name)
+    if cong_tac:
         bat = nang_luc_bat()
-        if bat is not KHONG_THU_HEP and name not in bat:
+        if bat is not KHONG_THU_HEP and cong_tac not in bat:
             return PolicyDecision(
                 False,
-                f"'{name}' đang TẮT ở khối Năng lực trên console — chủ agent đã tắt, "
-                f"không phải thiếu quyền")
+                f"'{name}' đang TẮT ở khối Năng lực trên console"
+                + (f" (theo công tắc '{cong_tac}')" if cong_tac != name else "")
+                + " — chủ agent đã tắt, không phải thiếu quyền")
     return d
 
 

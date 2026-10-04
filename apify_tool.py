@@ -2818,7 +2818,10 @@ SCHEMA = {
         "`nhac` là bảng nhạc đang lên CHÍNH THỨC; `nhac_trong_vn`=true thì nói thẳng "
         "Creative Center không trả bảng nhạc cho VN, chỉ có âm thanh suy từ mẫu — không "
         "lấy nước khác thay vào. Tách `nhac_dung_lai` (bài hát) với `am_thanh_goc`. Hashtag "
-        "có `nhay_cam` (`hashtag_nhay_cam`) thì KHÔNG đề xuất brand bám trend đó.\n"
+        "có `nhay_cam` (`hashtag_nhay_cam`) thì KHÔNG đề xuất brand bám trend đó. Hỏi "
+        "trend THEO NGÀNH ('trend thời trang', 'túi xách', 'phụ kiện', 'mỹ phẩm') → thêm "
+        "`nganh`: chỉ bảng hashtag lọc theo ngành (ngành cha của TikTok), top video thì "
+        "không — nói rõ như `note`.\n"
         "NỀN TẢNG: không nói gì thì cào CẢ NĂM (tiktok, facebook, instagram, youtube, "
         "threads) ở chế độ QUÉT RỘNG-NÔNG — YouTube 50 post (quota 100 search/ngày), "
         "Threads 30 post (chi phí cao). Gọi đích danh nền tảng nào thì nền tảng đó "
@@ -2998,6 +3001,11 @@ SCHEMA = {
                         "description": ("Chỉ cho che_do='trend': số bài trong bảng nhạc đang "
                                         "lên của Creative Center (mặc định 10, 0 = bỏ; tự "
                                         "cắt theo trần chi phí).")},
+            "nganh": {"type": "string",
+                      "description": ("Chỉ cho che_do='trend': ngành bằng lời người dùng "
+                                      "('thời trang', 'túi xách', 'trang sức', 'mỹ phẩm', "
+                                      "'đồ ăn'…) — lọc bảng hashtag theo ngành, không tốn "
+                                      "thêm tiền. Bỏ trống = mọi ngành.")},
         },
         # Rỗng vì chế độ trend không cần từ khoá/ngày. Chế độ thường vẫn tự kiểm và báo
         # lỗi rõ ràng trong `_handle` khi thiếu.
