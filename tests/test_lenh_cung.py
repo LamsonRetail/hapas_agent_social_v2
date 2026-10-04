@@ -34,6 +34,11 @@ def _lenh_tren_console() -> dict[str, str]:
 def test_bang_lenh_khop_console():
     tren_console = _lenh_tren_console()
     cua_runtime = {tool: lenh for lenh, tool in lenh_cung.BANG_LENH.items()}
+    # Tool có công tắc lùi (`lsr_policy._CONG_TAC_LUI`) được CHỜ console: console chưa
+    # có dòng của nó thì lệnh vẫn chạy được, công tắc lùi về cha. Có rồi thì phải khớp.
+    cho = {t: cua_runtime[t] for t in lenh_cung.lsr_policy._CONG_TAC_LUI
+           if t in cua_runtime and t not in tren_console}
+    cua_runtime = {t: x for t, x in cua_runtime.items() if t not in cho}
     assert cua_runtime == tren_console, (
         "bảng lệnh runtime lệch khỏi console.\n"
         f"  runtime: {sorted(cua_runtime.items())}\n"

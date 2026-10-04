@@ -214,15 +214,23 @@ def quyen_phat() -> set[str]:
 _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
+    "tiktok_top_ads",
 })
 
-#: Tool CHƯA có công tắc riêng trên console thì đi theo công tắc của tool cha, để chủ
-#: agent vẫn tắt được nó. `tiktok_top_ads` (04/10/2026) dùng Apify + trần TikTok của
-#: `social_listen`, nên tắt "Quét mạng xã hội" là tắt luôn nó. Khi platform thêm mục
-#: `tiktok_top_ads` vào `NANG_LUC_THEO_AGENT["AG-SOCIAL-LISTENING"]` thì chuyển tên này
-#: sang `_TOOL_CO_CONG_TAC` và bỏ dòng ở đây — không thêm trước, kẻo console chưa có công
-#: tắc mà runtime hiểu là "đang tắt".
-_CONG_TAC_MUON = {"tiktok_top_ads": "social_listen"}
+#: Tool có công tắc riêng nhưng RA ĐỜI SAU công tắc cha → khi `capabilities` chưa có
+#: dòng nào của nó thì đi theo công tắc cha. Khớp `theo:` trong
+#: `NANG_LUC_THEO_AGENT` của console.
+#:
+#: `tiktok_top_ads` (04/10/2026) ban đầu mượn hẳn công tắc `social_listen`. Console
+#: lưu `capabilities` = danh sách tool ĐANG BẬT, nên với agent đã lưu năng lực từ trước,
+#: "vắng mặt" không phân biệt được "chủ agent tắt" với "console chưa có công tắc này".
+#: Vì thế:
+#:   • có dòng bật `{tool: "tiktok_top_ads", …}`         → bật, bất kể Quét MXH
+#:   • có dấu tắt rõ `{tool: "tiktok_top_ads", bat: false}` → tắt
+#:   • không có dòng nào (console cũ, hoặc chưa ai bấm)   → theo `social_listen`
+#: Nhờ vậy thứ tự merge hai repo không quan trọng: console chưa có công tắc thì hành vi
+#: y như trước; có rồi thì công tắc riêng ăn ngay khi chủ agent bấm.
+_CONG_TAC_LUI = {"tiktok_top_ads": "social_listen"}
 
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.
 KHONG_THU_HEP = object()
@@ -237,6 +245,8 @@ KHONG_THU_HEP = object()
 #: cuối đỡ.
 _TTL_NANG_LUC = float(os.environ.get("LSR_TTL_NANG_LUC_SECONDS", "60"))
 _nho_nl: dict[str, Any] = {"bat": None, "luc": 0.0, "nguon": "chưa hỏi"}
+#: `_nho_nl["tat_ro"]`: tool có dấu tắt rõ `bat: false` trong `capabilities` (xem
+#: `_CONG_TAC_LUI`). Vắng khoá = không có dấu nào.
 
 
 def _nang_luc_tu_danh_ba():
@@ -265,9 +275,17 @@ def _nang_luc_tu_danh_ba():
         caps = hang.get("capabilities")
         if not isinstance(caps, list):
             _nho_nl["cau_hinh"] = {}
+            _nho_nl["tat_ro"] = set()
             return KHONG_THU_HEP          # null / chưa khai
-        bat = {str(c["tool"]) for c in caps
-               if isinstance(c, dict) and isinstance(c.get("tool"), str)}
+        co_dong = {str(c["tool"]) for c in caps
+                   if isinstance(c, dict) and isinstance(c.get("tool"), str)}
+        # Dấu tắt rõ của tool có công tắc lùi (`_CONG_TAC_LUI`). Tắt thắng bật nếu
+        # (bất thường) có cả hai: đây là lớp thu hẹp, nghi ngờ thì hẹp.
+        tat_ro = {str(c["tool"]) for c in caps
+                  if isinstance(c, dict) and isinstance(c.get("tool"), str)
+                  and c.get("bat") is False}
+        bat = co_dong - tat_ro
+        _nho_nl["tat_ro"] = tat_ro
         # Ô cấu hình console gắn vào CÙNG mục năng lực (vd trần quét của social_listen).
         # Đọc chung một lượt với công tắc để khỏi thêm lời gọi mạng.
         _nho_nl["cau_hinh"] = {
@@ -276,7 +294,8 @@ def _nang_luc_tu_danh_ba():
             and isinstance(c.get("cau_hinh"), dict)}
         # Có `capabilities` nhưng không mục nào mang khoá `tool` → dữ liệu do nơi khác
         # ghi, không phải bảng công tắc của console. Không diễn giải bừa thành "tắt hết".
-        return bat if bat else KHONG_THU_HEP
+        # Chỉ còn dấu tắt rõ (chủ agent tắt hết) thì VẪN là bảng công tắc: tập rỗng.
+        return bat if co_dong else KHONG_THU_HEP
     except Exception:
         return None
 
@@ -306,6 +325,15 @@ def cau_hinh_tool(tool: str) -> dict:
     return dict((_nho_nl.get("cau_hinh") or {}).get(tool) or {})
 
 
+def cong_tac_cua(name: str, bat: set[str]) -> str:
+    """Công tắc thật quyết định `name`: chính nó, hoặc công tắc cha khi `capabilities`
+    chưa có dòng nào của nó (xem `_CONG_TAC_LUI`)."""
+    cha = _CONG_TAC_LUI.get(name)
+    if cha and name not in bat and name not in (_nho_nl.get("tat_ro") or ()):
+        return cha
+    return name
+
+
 def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision:
     """Hợp đồng xét trước, rồi mới tới công tắc Năng lực.
 
@@ -317,9 +345,9 @@ def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision
     if not d.allowed:
         return d
     name = (tool_name or "").strip()
-    cong_tac = name if name in _TOOL_CO_CONG_TAC else _CONG_TAC_MUON.get(name)
-    if cong_tac:
+    if name in _TOOL_CO_CONG_TAC:
         bat = nang_luc_bat()
+        cong_tac = name if bat is KHONG_THU_HEP else cong_tac_cua(name, bat)
         if bat is not KHONG_THU_HEP and cong_tac not in bat:
             return PolicyDecision(
                 False,

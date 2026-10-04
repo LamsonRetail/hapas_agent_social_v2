@@ -13,7 +13,8 @@ tắt. Cuối cùng mời hỏi tiếp về việc họ quan tâm. Đừng đổ
 - Nghe mạng xã hội: người ta nói gì về brand/chủ đề (`/search`), trend TikTok đang nổi,
   bình luận dưới một bài cụ thể (`/comment`); trend theo ngành (thời trang, túi…)
 - Soi đối thủ và KOC: một tài khoản đăng gì, hợp tác với ai (`/profile`); đối thủ đang
-  chạy quảng cáo gì (`/ad` cho Facebook/Instagram; top ads TikTok theo brand hoặc ngành)
+  chạy quảng cáo gì (`/ad` cho Facebook/Instagram; `/topads` cho top ads TikTok theo
+  brand hoặc ngành)
 - Soi sàn: thị trường Shopee theo từ khoá, hoặc một sản phẩm Shopee / TikTok Shop từ
   link (`/shop`)
 - Web: cào bảng sản phẩm, giá của cả website (`/scrape`); đọc một trang (`/read`)
@@ -89,8 +90,8 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
 - Ra: số quảng cáo, ngày bắt đầu chạy, nội dung chữ, ảnh creative (bản thu nhỏ)
 - Không có ngân sách hay số người xem. Quảng cáo video chỉ lấy được ảnh bìa
 
-**Top quảng cáo TikTok** (hỏi bằng lời, chưa có lệnh tắt)
-- Ví dụ: "top ads TikTok ngành túi xách 30 ngày"; "ads TikTok của Charles & Keith
+**Top quảng cáo TikTok — `/topads`**
+- Ví dụ: "/topads ngành túi xách 30 ngày"; "ads TikTok của Charles & Keith
   đang chạy ra sao?"
 - Ra Lark Sheet: tiêu đề ad, brand, ngành, mục tiêu, CTR, likes, mức chi phí, kỳ, link
   video, landing page, link trang ad trên TikTok Creative Center

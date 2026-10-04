@@ -45,6 +45,7 @@ BANG_LENH: dict[str, str] = {
     "/profile": "soi_tai_khoan",
     "/shop": "soi_san",
     "/bang": "doc_bang",
+    "/topads": "tiktok_top_ads",
 }
 
 #: Lệnh ghi đè THỨ TỰ DÙNG NGUỒN (mặc định: kho trước, web là đường lùi).
