@@ -213,3 +213,226 @@ def test_luot_model_hong_KHONG_ghi_vao_lich_su(monkeypatch):
     dap = brain.reply("quét HAPAS tuần này", chat_id="lark:a:oc_1", sender_open_id=None)
     assert "HTTP 429" not in dap, "gửi nguyên văn lỗi cho người dùng"
     assert ghi == [], f"lượt hỏng vẫn bị ghi vào lịch sử: {ghi}"
+
+
+# ─────────────────────────────── lịch sử có lượt rỗng ──────────────────────
+# 03/10 15:54 một chat Lark hỏng MỌI lượt: HTTP 400 "text content blocks must contain
+# non-whitespace text". Lịch sử cắt còn 20 lượt bắt đầu bằng lượt assistant (tin việc
+# nền báo xong ghi MỘT MÌNH một lượt assistant, lệch cặp user/assistant), Hermes chèn
+# lượt user " " lên đầu cho Anthropic, và Anthropic từ chối chính lượt đó.
+
+def _hop_le(msgs):
+    """Luật của Anthropic cho lịch sử + câu hỏi hiện tại nối sau."""
+    assert all(m["content"].strip() for m in msgs), "còn lượt rỗng"
+    if msgs:
+        assert msgs[0]["role"] == "user", "lịch sử không mở đầu bằng user"
+        assert msgs[-1]["role"] == "assistant", "câu hỏi hiện tại sẽ đứng sau một lượt user"
+    for a, b in zip(msgs, msgs[1:]):
+        assert a["role"] != b["role"], f"hai lượt {a['role']} liền nhau"
+
+
+def _lich_su_bi_hong():
+    """Đúng hình dạng file lịch sử trên VPS: 20 lượt, mở đầu assistant, cuối là hai
+    lượt assistant (câu trả lời + tin [XONG] của việc nền), thêm vài lượt rỗng."""
+    hist = [{"role": "assistant", "text": "Tôi đặt nhắc lúc 14:00 rồi nhé"}]
+    for i in range(8):
+        hist += [{"role": "user", "text": f"hỏi {i}", "sender": "ou_1"},
+                 {"role": "assistant", "text": f"đáp {i}"}]
+    hist += [{"role": "user", "text": "   ", "sender": "ou_1"},
+             {"role": "assistant", "text": "Oki, tôi sẽ ghi ngày"},
+             {"role": "assistant", "text": "[XONG] Quét nền q1: 120 bài"},
+             {"role": "user", "text": "\n"}]
+    return hist
+
+
+def _gia_reply(monkeypatch, agent_cls, hist=None, ctx=None):
+    ghi = []
+    monkeypatch.setattr(brain, "_resolve_agent", lambda *a, **k: agent_cls())
+    monkeypatch.setattr(brain.lsr_platform, "lay_ngu_canh", lambda *a, **k: ctx or {})
+    monkeypatch.setattr(brain.lsr_platform, "ghi_luot_ngu_canh",
+                        lambda *a, **k: ghi.append(("platform", a)))
+    monkeypatch.setattr(brain.memory_store, "load_history", lambda cid: list(hist or []))
+    monkeypatch.setattr(brain.memory_store, "append_turns",
+                        lambda cid, turns: ghi.append(("local", turns)))
+    monkeypatch.setattr(brain.audit, "bat_dau", lambda *a, **k: "t")
+    monkeypatch.setattr(brain.audit, "ket_thuc", lambda *a, **k: {})
+    return ghi
+
+
+def test_lich_su_bi_hong_tu_lanh():
+    ra = brain._lich_su(_lich_su_bi_hong(), False)
+    _hop_le(ra)
+    assert ra[0]["content"] == brain._DAU_LICH_SU
+    assert ra[1]["content"].startswith("Tôi đặt nhắc"), "bỏ mất lượt cũ nhất của Mark"
+    assert "[XONG] Quét nền q1" in ra[-1]["content"], "bỏ mất kết quả việc nền"
+
+
+@pytest.mark.parametrize("hist", [
+    [],
+    [{"role": "assistant", "text": "[XONG] việc nền"}],
+    [{"role": "user", "text": " "}, {"role": "assistant", "text": ""}],
+    [{"role": "user", "text": "a"}, {"role": "user", "text": "b"},
+     {"role": "assistant", "text": " \t"}, {"role": "assistant", "text": "c"}],
+    [{"role": "user", "text": None}, {"role": "tool", "text": "x"}, "rác",
+     {"role": "assistant", "text": ["không phải chữ"]}],
+])
+def test_luan_phien_luon_hop_le(hist):
+    _hop_le(brain._lich_su(hist, False))
+
+
+def test_recent_turns_cua_platform_cung_duoc_chuan_hoa(monkeypatch):
+    nhan = {}
+
+    class AgentGia:
+        def run_conversation(self, user_text, conversation_history=None):
+            nhan["ls"] = conversation_history
+            return {"final_response": "ok"}
+
+    _gia_reply(monkeypatch, AgentGia, ctx={"recent_turns": [
+        {"role": "assistant", "text": "[XONG] việc nền"},
+        {"role": "user", "text": ""},
+        {"role": "assistant", "text": "  "}]})
+    brain.reply("kết quả sao rồi", chat_id="lark:a:oc_1")
+    _hop_le(nhan["ls"])
+    assert nhan["ls"][-1]["content"] == "[XONG] việc nền"
+
+
+def test_luot_tren_lich_su_bi_hong_khong_con_gui_luot_rong(monkeypatch):
+    nhan = {}
+
+    class AgentGia:
+        def run_conversation(self, user_text, conversation_history=None):
+            nhan["ls"] = conversation_history
+            return {"final_response": "Đã lọc xong."}
+
+    _gia_reply(monkeypatch, AgentGia, hist=_lich_su_bi_hong())
+    assert brain.reply("lọc theo Hapas x Thơm", chat_id="lark:a:oc_1") == "Đã lọc xong."
+    _hop_le(nhan["ls"])
+
+
+def test_van_bi_tu_choi_vi_luot_rong_thi_chay_lai_khong_lich_su(monkeypatch):
+    """Lưới cuối: dạng hỏng chưa lường vẫn bị 400 thì chạy lại MỘT lần không lịch sử,
+    thay vì hỏng mãi mọi lượt của chat đó."""
+    goi = []
+
+    class AgentGia:
+        def run_conversation(self, user_text, conversation_history=None):
+            goi.append(list(conversation_history or []))
+            if conversation_history:
+                return {"final_response": "API call failed", "failed": True,
+                        "error": "HTTP 400: messages: text content blocks must contain "
+                                 "non-whitespace text"}
+            return {"final_response": "Trả lời được rồi."}
+
+    ghi = _gia_reply(monkeypatch, AgentGia, hist=[
+        {"role": "user", "text": "a"}, {"role": "assistant", "text": "b"}])
+    assert brain.reply("ê chạy được chưa", chat_id="lark:a:oc_1") == "Trả lời được rồi."
+    assert len(goi) == 2 and goi[1] == [], "không chạy lại, hoặc chạy lại vẫn kèm lịch sử"
+    assert any(n == "local" for n, _ in ghi), "lượt chạy lại thành công phải được ghi"
+
+
+def test_chay_lai_van_hong_thi_bao_loi_khong_lap(monkeypatch):
+    goi = []
+
+    class AgentGia:
+        def run_conversation(self, user_text, conversation_history=None):
+            goi.append(1)
+            return {"final_response": "API call failed", "failed": True,
+                    "error": "HTTP 400: messages: text content blocks must contain "
+                             "non-whitespace text"}
+
+    ghi = _gia_reply(monkeypatch, AgentGia, hist=[
+        {"role": "user", "text": "a"}, {"role": "assistant", "text": "b"}])
+    dap = brain.reply("hỏi", chat_id="lark:a:oc_1")
+    assert len(goi) == 2, "chạy lại quá một lần"
+    assert "chưa được thực hiện" in dap and ghi == []
+
+
+def test_loi_400_khac_khong_chay_lai(monkeypatch):
+    goi = []
+
+    class AgentGia:
+        def run_conversation(self, user_text, conversation_history=None):
+            goi.append(1)
+            return {"final_response": "API call failed", "failed": True,
+                    "error": "HTTP 400: max_tokens: too large"}
+
+    _gia_reply(monkeypatch, AgentGia, hist=[
+        {"role": "user", "text": "a"}, {"role": "assistant", "text": "b"}])
+    brain.reply("hỏi", chat_id="lark:a:oc_1")
+    assert len(goi) == 1
+
+
+def test_chu_model_viet_khong_lam_chay_lai():
+    """Chỉ đọc lỗi có cấu trúc: model trích nguyên câu lỗi trong câu trả lời thì thôi."""
+    assert not brain._loi_lich_su_rong(
+        {"final_response": "text content blocks must contain non-whitespace text"}, None)
+    assert brain._loi_lich_su_rong(
+        None, RuntimeError("messages: text content blocks must contain non-whitespace text"))
+
+
+# ─────────────────────────────── tin rỗng / chỉ tag / chỉ ảnh ──────────────
+
+@pytest.mark.parametrize("tin", ["", "   ", "\n\t", "@Mark", "@_user_1",
+                                 " @_user_1 @_all ", None])
+def test_tin_chi_tag_hoac_rong_khong_thanh_luot_rong(monkeypatch, tin):
+    nhan = {}
+
+    class AgentGia:
+        def run_conversation(self, user_text, conversation_history=None):
+            nhan["hoi"] = user_text
+            return {"final_response": "Chào bạn, cần gì nhé?"}
+
+    ghi = _gia_reply(monkeypatch, AgentGia)
+    brain.reply(tin, chat_id="lark:a:oc_1")
+    assert nhan["hoi"] == brain._CAU_TAG_SUONG
+    luu = [t for n, turns in ghi if n == "local" for t in turns]
+    assert luu and all(t["text"].strip() for t in luu)
+
+
+def test_tin_co_tag_va_chu_giu_nguyen():
+    assert brain._cau_hoi_co_chu("@Mark check link này") == "@Mark check link này"
+
+
+def test_tin_rich_text_chi_co_anh_van_co_chu():
+    j = {"payload": {"message_type": "post", "image_keys": ["img_v3_x"],
+                     "message_id": "om_1"}}
+    hoi = P._cau_hoi_kem_anh("", j, ["D:/x/.dinh_kem/om_1.jpg"])
+    assert hoi.startswith("(Người dùng gửi một ảnh")
+    assert "[Ảnh đính kèm: D:/x/.dinh_kem/om_1.jpg]" in hoi
+    hong = P._cau_hoi_kem_anh("  ", j, [])
+    assert hong.startswith("(Người dùng gửi một ảnh") and "không tải được" in hong
+
+
+def test_tin_co_chu_va_anh_giu_chu():
+    j = {"payload": {"message_type": "post", "image_keys": ["img_v3_x"]}}
+    assert P._cau_hoi_kem_anh("soi ảnh này", j, ["a.jpg"]).startswith("soi ảnh này")
+
+
+# ─────────────────────────────── không ghi lượt rỗng ───────────────────────
+
+def test_khong_ghi_luot_rong_vao_lich_su_may(tmp_path, monkeypatch):
+    import memory_store
+    monkeypatch.setattr(memory_store, "_HIST_DIR", tmp_path)
+    memory_store.append_turns("oc_x", [{"role": "user", "text": "  "},
+                                       {"role": "assistant", "text": ""},
+                                       {"role": "assistant", "text": None}])
+    assert not list(tmp_path.iterdir()), "ghi file chỉ toàn lượt rỗng"
+    memory_store.append_turns("oc_x", [{"role": "user", "text": "\n"},
+                                       {"role": "assistant", "text": "xong"}])
+    assert memory_store.load_history("oc_x") == [{"role": "assistant", "text": "xong"}]
+
+
+def test_khong_ghi_luot_rong_len_platform(monkeypatch):
+    gui = []
+    monkeypatch.setattr(P, "_cau_hinh", lambda: {"url": "u", "key": "k", "agent_id": "A"})
+    monkeypatch.setattr(P, "_goi", lambda c, duong, body=None, timeout=0: gui.append(body))
+    assert P.ghi_luot_ngu_canh("oc_x", "   ", "[XONG] việc nền")
+    assert [b["role"] for b in gui] == ["assistant"]
+
+
+def test_cau_hoi_chua_tra_loi_van_giu_lam_ngu_canh():
+    ra = brain._lich_su([{"role": "user", "text": "quét HAPAS"},
+                         {"role": "assistant", "text": "  "}], False)
+    assert ra == [{"role": "user", "content": "quét HAPAS"},
+                  {"role": "assistant", "content": brain._CHUA_TRA_LOI}]
