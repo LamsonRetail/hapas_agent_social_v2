@@ -75,7 +75,7 @@ def gia(monkeypatch):
     goi.gioi_han = gioi_han
 
     monkeypatch.setattr(A, "_call", call)
-    monkeypatch.setattr(A, "_tran", lambda: (800, 2.4))
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, 2.4, True))
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: {
         "usd": 0.41, "so_run": 3, "cham_tran": 0, "dang_chay": 0})
     monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: {})
@@ -113,12 +113,16 @@ def test_lay_mau_duoi_hashtag_dang_len(gia):
 
 
 def test_so_video_mau_bi_kep_theo_tran_bai(gia):
-    """Mẫu xin dư 2,5 lần nhưng vẫn gọn trong trần bài (800) VÀ trần USD mỗi lượt (2,4)."""
+    """Mẫu xin dư 2,5 lần nhưng vẫn gọn trong trần bài (800) VÀ phần trần USD TikTok (2,4)
+    còn lại sau bảng hashtag + top video."""
     goi, _ = gia
     T.chay({"so_video_mau": 5000})
     mau = [p for a, p in goi if a == A._ACTORS["tiktok_fallback"]][0]
     xin = [n for a, n in goi.gioi_han if a == A._ACTORS["tiktok_fallback"]][0]
-    assert xin == int(0.9 * 2.4 / 0.003) == 720, "trần USD chặn trước trần 800 bài"
+    kh = T._ke_hoach(2.4, 800, 20, 20, 800, 10)
+    assert xin == kh["n1"] == int((0.9 * 2.4 - 2 * (0.025 + 20 * 0.0015) - 30 * 0.0015)
+                                  / 0.003), "trần USD chặn trước trần 800 bài"
+    assert xin < 800
     assert mau["resultsPerPage"] * 3 >= xin, "chia đều cho 3 hashtag có được"
 
 
@@ -181,7 +185,7 @@ def test_lay_du_thi_khong_bao_cham_tran(gia, monkeypatch):
         "usd": 2.4, "so_run": 3, "cham_tran": 1, "dang_chay": 0})
     # Bảng trả ĐỦ số hỏi (5 hashtag, 5 video) và mẫu cào đủ 20 → không gì bị cắt, dù
     # tiền tiêu sát trần.
-    monkeypatch.setattr(T, "_bang_hashtag", lambda vung, ky, n: [
+    monkeypatch.setattr(T, "_bang_hashtag", lambda vung, ky, n, *a: [
         {"hang": i, "hashtag": f"t{i}", "huong": "lên", "so_bai": 0, "luot_xem": 0,
          "nganh": "", "link": ""} for i in range(n)])
     monkeypatch.setattr(T, "_bang_video", lambda *a: [
@@ -189,7 +193,7 @@ def test_lay_du_thi_khong_bao_cham_tran(gia, monkeypatch):
          "tieu_de": "", "chu_de": "", "link": ""} for i in range(5)])
     monkeypatch.setattr(T, "_mau_am_thanh", lambda *a: {
         "cao": 20, "giu": 20, "am_thanh": [], "hieu_ung": [], "cao_du": True})
-    monkeypatch.setattr(T, "_bang_nhac", lambda vung, ky, n: [
+    monkeypatch.setattr(T, "_bang_nhac", lambda vung, ky, n, *a: [
         {"hang": i, "ten": "", "tac_gia": "", "thay_doi_hang": "", "moi_vao_bang": False,
          "link": ""} for i in range(n)])
     kq = json.loads(T.chay({"so_hashtag": 5, "so_video": 5, "so_video_mau": 20}))
@@ -234,17 +238,21 @@ def test_vn_rong_thi_noi_thang_khong_lay_nuoc_khac(gia, monkeypatch):
 
 
 def test_so_nhac_bi_kep_theo_tran_usd(gia, monkeypatch):
+    """Bảng nhạc chỉ được phần trần TikTok còn lại sau bảng hashtag + top video."""
     goi, _ = gia
-    monkeypatch.setattr(A, "_tran", lambda: (800, 0.1))
-    T.chay({"so_nhac": 50})
-    assert _goi_actor(goi, T.ACTOR_NHAC)[0]["maxResults"] == int((0.09 - 0.02) / 0.02) == 3
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, 0.3, True))
+    kq = json.loads(T.chay({"so_nhac": 50, "soi_am_thanh": False}))
+    # 0,9 × 0,3 = 0,27 − 2 × (0,025 + 20 × 0,0015) = 0,16 → (0,16 − 0,02) / 0,02 = 7 bài.
+    assert _goi_actor(goi, T.ACTOR_NHAC)[0]["maxResults"] == 7
+    assert "bảng nhạc còn 7/50 bài" in kq["bi_cat_theo_tran"]
+    assert "ĐÃ CẮT cho vừa trần TikTok" in kq["note"]
 
 
 def test_so_nhac_0_thi_khong_goi_va_uoc_tinh_co_tinh_nhac(gia):
     goi, _ = gia
-    khong = json.loads(T.chay({"so_nhac": 0}))
+    khong = json.loads(T.chay({"so_nhac": 0, "soi_am_thanh": False}))
     assert not _goi_actor(goi, T.ACTOR_NHAC)
-    co = json.loads(T.chay({"so_nhac": 5}))
+    co = json.loads(T.chay({"so_nhac": 5, "soi_am_thanh": False}))
     assert co["uoc_tinh_chi_phi_usd"] - khong["uoc_tinh_chi_phi_usd"] == pytest.approx(0.12)
 
 
@@ -281,7 +289,7 @@ def test_hashtag_nhay_cam_bi_gan_co_va_khong_dem_lay_mau(gia, monkeypatch):
 def test_mau_thieu_thi_cao_them_duoi_hashtag_chua_soi(gia, monkeypatch):
     """01/10: xin 100 → cào 40, giữ 21. Nay xin dư, thiếu thì cào thêm một lượt."""
     goi, _ = gia
-    monkeypatch.setattr(T, "_bang_hashtag", lambda vung, ky, n: [
+    monkeypatch.setattr(T, "_bang_hashtag", lambda vung, ky, n, *a: [
         {"hang": i, "hashtag": f"t{i}", "huong": "lên", "so_bai": 0, "luot_xem": 0,
          "nganh": "", "link": ""} for i in range(12)])
     luot = []
@@ -326,7 +334,7 @@ def test_nhay_cam_van_bat_dung(tag, nhan):
 
 def _hai_luot(monkeypatch, goi, raw1: int, giu1: int):
     """Lượt 1 trả `raw1` video, chỉ `giu1` video trong kỳ; lượt 2 trả 20 video mới."""
-    monkeypatch.setattr(T, "_bang_hashtag", lambda vung, ky, n: [
+    monkeypatch.setattr(T, "_bang_hashtag", lambda vung, ky, n, *a: [
         {"hang": i, "hashtag": f"t{i}", "huong": "lên", "so_bai": 0, "luot_xem": 0,
          "nganh": "", "link": ""} for i in range(40)])
     luot = []
@@ -345,16 +353,19 @@ def _hai_luot(monkeypatch, goi, raw1: int, giu1: int):
 
 
 def test_luot_hai_chi_dung_phan_con_lai_cua_tran(gia, monkeypatch):
-    """Rà 01/10: lượt hai từng được xin lại CẢ trần mỗi lượt → tiêu gần gấp đôi."""
+    """Rà 01/10: lượt hai từng được xin lại CẢ trần mỗi lượt → tiêu gần gấp đôi. Nay cả
+    hai lượt chỉ chia nhau phần trần TikTok mà `_ke_hoach` dành cho lấy mẫu."""
     goi, _ = gia
     luot = _hai_luot(monkeypatch, goi, raw1=500, giu1=10)
     json.loads(T.chay({"so_video_mau": 200}))
-    suc = int(0.9 * 2.4 / 0.003)                   # 720 video mỗi lượt
-    assert luot[0]["limit"] == 500 and luot[0]["tran_usd"] is None
-    assert len(luot) == 2 and luot[1]["limit"] == suc - 500, "chỉ phần còn lại của trần"
-    assert luot[1]["tran_usd"] == pytest.approx(2.4 - 500 * 0.003)
+    kh = T._ke_hoach(2.4, 800, 20, 20, 200, 10)
+    suc = kh["n1"] + kh["them_mau"]                # video cả hai lượt trong phần mẫu
+    assert kh["n1"] == 500 and kh["them_mau"] > 20
+    assert luot[0]["limit"] == 500 and luot[0]["tran_usd"] == pytest.approx(500 * 0.003)
+    assert len(luot) == 2 and luot[1]["limit"] == suc - 500, "chỉ phần còn lại"
+    assert luot[1]["tran_usd"] == pytest.approx(kh["tran"]["mau"] - 500 * 0.003)
     tong = (500 + luot[1]["limit"]) * 0.003
-    assert tong <= 0.9 * 2.4 + 1e-9, "hai lượt cộng lại vẫn trong một trần"
+    assert tong <= kh["tran"]["mau"] + 1e-9, "hai lượt cộng lại vẫn trong phần mẫu"
 
 
 def test_luot_dau_an_gan_het_tran_thi_khong_cao_them(gia, monkeypatch):
@@ -367,11 +378,14 @@ def test_luot_dau_an_gan_het_tran_thi_khong_cao_them(gia, monkeypatch):
 
 def test_uoc_tinh_truoc_tinh_ca_luot_hai_te_nhat(gia):
     kq = json.loads(T.chay({"so_nhac": 0, "so_video": 5, "so_hashtag": 5}))
-    # so_video_mau mặc định 100: lượt 1 xin 250, lượt 2 tệ nhất tới hết trần 720 video.
-    assert T._so_mau_toi_da(100, 800, 2.4) == 720
-    mau = 720 * 0.003
-    assert kq["uoc_tinh_chi_phi_usd"] >= round(mau, 3)
-    assert T._so_mau_toi_da(20, 800, 10.0) == 50 + 121, "mẫu nhỏ: 2,5×20 + 6×20+1"
+    # so_video_mau mặc định 100: lượt 1 xin 250, lượt 2 tệ nhất tới hết phần trần còn lại.
+    kh = T._ke_hoach(2.4, 800, 5, 5, 100, 0)
+    assert kh["n1"] == 250 and kh["them_mau"] > 0
+    assert kq["uoc_tinh_chi_phi_usd"] == pytest.approx(kh["est"], abs=1e-3)
+    assert kq["uoc_tinh_chi_phi_usd"] >= round((250 + kh["them_mau"]) * 0.003, 3)
+    assert kq["uoc_tinh_chi_phi_usd"] <= 0.9 * 2.4 + 1e-9, "ước tính không vượt trần"
+    kh = T._ke_hoach(10.0, 800, 5, 5, 20, 0)
+    assert kh["n1"] + kh["them_mau"] == 50 + 121, "mẫu nhỏ: 2,5×20 + 6×20+1"
 
 
 def test_thientai_khong_dau_chi_tinh_khi_kem_ngu_canh_tham_hoa():
@@ -405,3 +419,113 @@ def test_het_gio_thi_bo_lay_mau_va_noi_ro(gia, monkeypatch):
     monkeypatch.setattr(T, "_mau_am_thanh", lambda *a: goi.append(1))
     kq = json.loads(T.chay({}))
     assert not goi and "hết thời gian" in json.dumps(kq, ensure_ascii=False)
+
+# ───────────── B1 (E2E 04-05/10/2026): trend chịu trần + công tắc TikTok ─────────────
+# Lượt cào hashtag 5×30 = 150 video tiêu 0,45 USD trong khi trần TikTok trên console là
+# 0,17 USD: trend đọc trần CHUNG (`A._tran()`) và gọi `_call` không kèm `nen_tang`.
+_TRAN_THU = [0.1, 0.17, 0.25, 0.5, 1.0, 2.4, 5.0]
+
+
+@pytest.mark.parametrize("tran", _TRAN_THU)
+@pytest.mark.parametrize("xin", [(20, 20, 100, 10), (100, 100, 800, 50), (5, 5, 20, 0),
+                                 (20, 0, 0, 10), (100, 0, 800, 0)])
+def test_tong_tran_cac_luot_con_khong_vuot_tran_tiktok(tran, xin):
+    kh = T._ke_hoach(tran, 800, *xin)
+    assert not kh["tu_choi"]
+    assert sum(kh["tran"].values()) <= tran + 1e-9
+    assert kh["est"] == pytest.approx(sum(kh["tran"].values()))
+    # Số dòng/video thật sự xin cũng phải gọn trong phần trần được chia.
+    assert T._gia_bang(kh["n_tag"] + kh["them_tag"]) <= kh["tran"]["hashtag"] + 1e-9
+    assert (kh["n1"] + kh["them_mau"]) * T._GIA_VIDEO_MAU <= kh["tran"]["mau"] + 1e-9
+
+
+@pytest.mark.parametrize("tran", _TRAN_THU)
+def test_chay_that_tong_tran_gui_apify_khong_vuot_tran_tiktok(gia, monkeypatch, tran):
+    goi, _ = gia
+    tran_goi = []
+
+    def call(actor, payload, limit, mem=None, tran_usd=None, nen_tang=None, **kw):
+        tran_goi.append((actor, tran_usd, nen_tang))
+        goi.append((actor, payload))
+        if actor == T.ACTOR_TREND:
+            return HASHTAG if payload["trendType"] == "hashtags" else VIDEO
+        return NHAC[:payload["maxResults"]] if actor == T.ACTOR_NHAC else MAU
+    monkeypatch.setattr(A, "_call", call)
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, tran, True))
+    kq = json.loads(T.chay({}))
+    assert tran_goi and all(nt == "tiktok" for _, _, nt in tran_goi)
+    assert all(t is not None for _, t, _ in tran_goi), "mỗi lượt mang phần trần riêng"
+    assert sum(t for _, t, _ in tran_goi) <= tran + 1e-9
+    assert kq["uoc_tinh_chi_phi_usd"] <= tran + 1e-9 and kq["tran_usd_tiktok"] == tran
+
+
+def test_tran_017_nhu_e2e_thi_cat_lay_mau_va_noi_ra(gia, monkeypatch):
+    goi, _ = gia
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, 0.17, True))
+    kq = json.loads(T.chay({}))
+    assert not _goi_actor(goi, A._ACTORS["tiktok_fallback"]), "mẫu không vừa trần → bỏ"
+    assert "bỏ lấy mẫu âm thanh/hiệu ứng" in kq["bi_cat_theo_tran"]
+    assert "ĐÃ CẮT cho vừa trần TikTok (0,17 USD/lượt)" in kq["note"]
+    assert kq["uoc_tinh_chi_phi_usd"] <= 0.9 * 0.17 + 1e-9
+
+
+def test_tiktok_tat_tren_console_thi_trend_khong_chay(gia, monkeypatch):
+    goi, _ = gia
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, 2.4, False))
+    for args in ({}, {"chi_uoc_tinh": True}):
+        kq = json.loads(T.chay(args))
+        assert "error" in kq and "KHÔNG CHẠY" in kq["error"] and "tắt TikTok" in kq["error"]
+    assert not goi
+
+
+def test_doc_tran_rieng_tiktok_khong_doc_tran_chung(gia, monkeypatch):
+    hoi = []
+    monkeypatch.setattr(A, "_tran_nen_tang",
+                        lambda p, *a, **k: hoi.append(p) or (800, 2.4, True))
+    monkeypatch.setattr(A, "_tran", lambda *a, **k: pytest.fail("trend đọc trần chung"))
+    T.chay({})
+    assert hoi == ["tiktok"]
+
+
+def test_moi_loi_goi_call_trong_trend_deu_kem_nen_tang_tiktok():
+    """Kiểu grep (AST): không lời gọi `_call` nào thiếu `nen_tang="tiktok"`, và trend không
+    còn đọc trần chung `_tran()`."""
+    import ast
+    import inspect
+    cay = ast.parse(inspect.getsource(T))
+    goi = [n for n in ast.walk(cay) if isinstance(n, ast.Call)
+           and isinstance(n.func, ast.Attribute)]
+    call = [n for n in goi if n.func.attr == "_call"]
+    assert len(call) >= 4
+    for n in call:
+        nt = [k for k in n.keywords if k.arg == "nen_tang"]
+        assert nt and isinstance(nt[0].value, ast.Constant) and nt[0].value.value == "tiktok", (
+            f"dòng {n.lineno}: A._call thiếu nen_tang='tiktok'")
+    assert not [n for n in goi if n.func.attr == "_tran"], "trend không được đọc trần chung"
+
+
+def test_chi_uoc_tinh_bao_usd_va_tran_truoc_khi_hoi(gia, monkeypatch):
+    goi, dong = gia
+    monkeypatch.setattr(A, "_han_muc_thang", lambda: {"con_lai": 3.0})
+    ghi = []
+    monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: ghi.append(k) or {})
+    kq = json.loads(A._handle({"che_do": "trend", "chi_uoc_tinh": True}))
+    assert kq["chi_uoc_tinh"] is True and kq["da_chay"] is False
+    assert not goi and not dong and not ghi, "ước tính không chạy, không ghi sheet/sổ"
+    assert kq["tran_usd_tiktok"] == 2.4 and kq["uoc_tinh_chi_phi_usd"] <= 2.4
+    assert "USD" in kq["cau_uoc_tinh"] and "trần TikTok trên console là 2,4 USD" in kq[
+        "cau_uoc_tinh"]
+    assert "Chạy nhé?" in kq["note"] and kq["note"].index("cau_uoc_tinh") < kq["note"].index(
+        "Chạy nhé?")
+    assert kq["vuot_ngan_sach"] is False
+
+
+def test_chi_uoc_tinh_vuot_tran_thi_noi_se_cat_gi(gia, monkeypatch):
+    monkeypatch.setattr(A, "_han_muc_thang", lambda: None)
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, 0.17, True))
+    kq = json.loads(T.chay({"chi_uoc_tinh": True}))
+    assert kq["vuot_tran"] is True and kq["bi_cat_theo_tran"]
+    assert "vượt trần — sẽ cắt:" in kq["cau_uoc_tinh"]
+    assert "bỏ lấy mẫu âm thanh/hiệu ứng" in kq["cau_uoc_tinh"]
+    assert "0,17 USD" in kq["cau_uoc_tinh"] and "phần sẽ bị cắt" in kq["note"]
+    assert kq["uoc_tinh_chi_phi_usd"] <= 0.17

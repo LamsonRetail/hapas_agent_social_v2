@@ -109,7 +109,7 @@ def trend(monkeypatch):
         return []
 
     monkeypatch.setattr(A, "_call", call)
-    monkeypatch.setattr(A, "_tran", lambda: (800, 2.4))
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, 2.4, True))
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
     monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: {})
     monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))

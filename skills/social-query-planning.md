@@ -34,8 +34,15 @@ Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị tr�
 hot", "format nào đang viral"): gọi `social_listen` với `che_do`="trend". Không cần từ
 khoá hay ngày; kỳ là 7 ngày gần nhất (hoặc 30). Không cào hashtag chung chung như
 #trend, #viral, #xuhuong: cách đó chỉ ra mẫu ngẫu nhiên, lẫn video cũ và video nước
-ngoài. Người dùng xin "đủ N bài" thì đặt `so_video_mau`=N. Chi phí thường khoảng 0,6–1
-USD (gồm bảng nhạc đang lên ~0,2 USD; đặt `so_nhac`=0 để bỏ). Khi báo kết quả:
+ngoài. Người dùng xin "đủ N bài" thì đặt `so_video_mau`=N. Đặt `so_nhac`=0 để bỏ bảng
+nhạc đang lên.
+
+Trend tốn tiền: gọi TRƯỚC với `chi_uoc_tinh`=true (miễn phí, không chạy), chép
+`cau_uoc_tinh` (số USD và trần TikTok trên console, kèm phần sẽ bị cắt nếu vượt trần) rồi
+mới hỏi "Chạy nhé?". Cả lượt trend gộp mọi bảng phải gọn trong trần TikTok; trần thấp thì
+tool tự cắt theo thứ tự ưu tiên: hashtag, rồi top video, rồi lấy mẫu âm thanh, rồi bảng
+nhạc. Phần bị cắt (`bi_cat_theo_tran`) phải nói ra khi báo kết quả. Chủ agent tắt TikTok
+trên console thì trend không chạy: nói thẳng, không thay bằng nguồn khác. Khi báo kết quả:
 
 - Hashtag và top video là bảng xếp hạng chính thức của TikTok. Ưu tiên nêu hashtag đang lên
 - Hashtag gắn cờ nhạy cảm (buôn người, tai nạn, cái chết, bạo lực, chính trị, tôn giáo,
