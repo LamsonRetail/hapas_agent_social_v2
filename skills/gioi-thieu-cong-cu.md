@@ -12,7 +12,8 @@ tắt. Cuối cùng mời hỏi tiếp về việc họ quan tâm. Đừng đổ
 
 - Nghe mạng xã hội: người ta nói gì về brand/chủ đề (`/search`), trend TikTok đang nổi,
   bình luận dưới một bài cụ thể (`/comment`); trend theo ngành (thời trang, túi…);
-  bình luận trên kênh Threads/Instagram/Fanpage của chính HAPAS (miễn phí, đủ trả lời)
+  bình luận trên kênh Threads/Instagram/Fanpage của chính HAPAS (`/hapas`, miễn phí,
+  đủ trả lời)
 - Soi đối thủ và KOC: một tài khoản đăng gì, hợp tác với ai (`/profile`); đối thủ đang
   chạy quảng cáo gì (`/ad` cho Facebook/Instagram; `/topads` cho top ads TikTok theo
   brand hoặc ngành)
@@ -99,13 +100,16 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
 - Chỉ là tập ads TikTok xếp hạng hiệu quả cao nhất, không phải mọi ad của một brand.
   CTR và chi phí là mức tương đối, không phải tiền thật. Link video hết hạn sau 1–2 ngày
 
-**Bình luận trên kênh của HAPAS** (hỏi bằng lời, chưa có lệnh tắt)
-- Ví dụ: "khách bình luận gì dưới 5 bài mới nhất trên Threads và Instagram của mình?";
+**Bình luận trên kênh của HAPAS — `/hapas`**
+- Ví dụ: "/hapas bình luận 5 bài mới nhất trên Instagram"; "khách bình luận gì dưới
+  5 bài mới nhất trên Threads và Instagram của mình?";
   "sentiment bình luận Fanpage HAPAS tuần này"
 - Ra Lark Sheet: mọi bình luận và trả lời (cấp, trả lời cho ai), Sắc thái, Chủ đề, tab
   Thống kê, tab Bài đã đọc. Miễn phí — đọc qua API chính thức của Meta
 - Chỉ đọc kênh của HAPAS mà chủ agent đã nối token; bài đối thủ dùng `/comment`.
   Threads không có số like của từng trả lời
+- Gõ `/hapas` trơn: Mark báo ngay công tắc đang bật hay tắt, kênh nào đã nối, token
+  hết hạn ngày nào — không lộ token
 
 **Web — `/scrape` và `/read`**
 - `/scrape`: cào bảng sản phẩm của cả website (tên, giá, giá gốc, % giảm, ảnh, link)
@@ -116,5 +120,6 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
 **Nội bộ và tiện ích**
 - `/wiki`: tra Wiki và tài liệu trên Lark. Đọc ảnh: gửi ảnh kèm câu hỏi
 - `/nhac`: đặt lời nhắc, tới giờ Mark tự nhắn. `/nho`: ghi nhớ một điều về người hỏi
-- `/help`: danh sách lệnh. `/nangluc`: công tắc nào đang bật. `/viec`: các việc quét nền
+- `/help`: danh sách lệnh. `/nangluc`: công tắc nào đang bật. `/hapas` trơn: kênh
+  Hapas nào đã nối, token còn hạn tới đâu. `/viec`: các việc quét nền
   của cuộc chat (tiến độ, link sheet, chi phí thật)
