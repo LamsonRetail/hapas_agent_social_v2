@@ -17,7 +17,8 @@ Vì sao là TOOL RIÊNG đặt cạnh `fb_ads_library`, không phải chế đ�
 Nguồn: endpoint JSON của Creative Center đòi header ký, nên đi qua actor Apify — KHÔNG tự
 dựng chữ ký hay lách chống bot.
   • Chính: `azzouzana~tiktok-creative-center-top-ads-scraper` — 0,001 USD/ad, +0,002 USD
-    khi lấy chi tiết (landing page). Lọc được NGÀNH CON (túi, trang sức…).
+    khi lấy chi tiết (landing page). Lọc được NGÀNH CON (túi, trang sức…). `maxItems`
+    tối thiểu 10: xin ít hơn thì vẫn gửi 10 (tính tiền 10) rồi cắt về đúng số xin.
   • Dự phòng: `lexis-solutions~tiktok-top-ads-scraper` — 0,0025 USD mỗi GB khởi động (mặc
     định 4 GB = 0,01 USD) + 0,004 USD/ad; chỉ lọc ngành CHA, không có mục tiêu "Tương
     tác". BẮT BUỘC có `startUrls` hoặc `keyword`, thiếu là FAILED mà vẫn mất phí khởi động.
@@ -57,6 +58,10 @@ ACTOR_CHINH = "azzouzana~tiktok-creative-center-top-ads-scraper"
 ACTOR_DU_PHONG = "lexis-solutions~tiktok-top-ads-scraper"
 _GIA_AD = 0.001             # azzouzana, mỗi ad
 _GIA_CHI_TIET = 0.002       # azzouzana, mỗi ad khi `extractDetails`
+# Input schema của azzouzana: `maxItems` có `minimum: 10`. E2E 04-05/10/2026: xin dưới 10
+# ads là actor chính từ chối và mọi lượt nhỏ rơi sang lexis (chậm, đắt hơn). Nên luôn xin
+# ít nhất chừng này, trả tiền cho chừng đó, rồi cắt kết quả về đúng số người dùng xin.
+_TOI_THIEU_CHINH = 10
 _GIA_DP_KHOI_DONG = 0.01    # lexis, 0,0025 USD/GB × 4 GB mặc định
 _GIA_DP_AD = 0.004          # lexis, mỗi ad (gói FREE 0,00399)
 _BIEN = 0.9                 # mỗi lượt chỉ xin tới 90% trần USD
@@ -122,10 +127,15 @@ def _gia_du_phong(n: int) -> float:
     return _GIA_DP_KHOI_DONG + n * _GIA_DP_AD
 
 
+def _so_xin_chinh(n: int) -> int:
+    """Số ads gửi actor chính: không dưới `_TOI_THIEU_CHINH` (minimum của input schema)."""
+    return max(_TOI_THIEU_CHINH, n)
+
+
 # ───────────────────────────── đầu vào actor ─────────────────────────────
 def _payload_chinh(bo: dict) -> dict:
     p = {"countryCode": bo["vung"], "period": bo["ky"], "orderBy": bo["sap_xep"],
-         "maxItems": bo["n"], "extractDetails": bo["chi_tiet"]}
+         "maxItems": _so_xin_chinh(bo["n"]), "extractDetails": bo["chi_tiet"]}
     if bo["tu_khoa"]:
         p["keyword"] = bo["tu_khoa"]
     if bo["nganh"]:
@@ -408,10 +418,33 @@ def _handle(args: dict, **_kwargs) -> str:
                         f"{bo['nganh']['ten_nhom']} (rộng hơn {bo['nganh']['ten']}).")
     if bo["muc_tieu"] == "tuong_tac":
         canh_bao.append("Nguồn dự phòng không lọc được mục tiêu Tương tác.")
-    est = _gia_chinh(n, bo["chi_tiet"])
-    # Trường hợp xấu nhất: lượt chính tiêu đủ ước tính rồi hỏng, dự phòng dùng phần còn lại.
-    _, n_dp = _tran_du_phong(tran_usd, est, n)
-    est_toi_da = est + (_gia_du_phong(n_dp) if n_dp else 0.0)
+    # Actor chính tính tiền cho `_so_xin_chinh(n)` ads (ít nhất 10) dù chỉ giữ n.
+    n_chinh = _so_xin_chinh(n)
+    est = _gia_chinh(n_chinh, bo["chi_tiet"])
+    chay_chinh = est <= _BIEN * tran_usd + 1e-9
+    if not chay_chinh:
+        # 10 ads tối thiểu của nguồn chính không vừa trần: dùng thẳng dự phòng với cả trần,
+        # không vừa nữa thì từ chối — không bao giờ vượt trần để chạy cho được.
+        est = 0.0
+        _, n_dp = _tran_du_phong(tran_usd, 0.0, n)
+        if not n_dp:
+            return tool_error(
+                f"KHÔNG CHẠY, chưa tốn tiền: trần TikTok trên console "
+                f"({A._usd_vn(tran_usd)} USD/lượt) không đủ cho {_TOI_THIEU_CHINH} ads tối "
+                f"thiểu của nguồn chính ({A._usd_vn(round(_gia_chinh(n_chinh, bo['chi_tiet']), 3))}"
+                f" USD), cũng không đủ cho nguồn dự phòng. Chủ agent nâng trần TikTok ở "
+                f"{A._NOI_CONSOLE}.")
+        canh_bao.append(
+            f"Nguồn chính đòi tối thiểu {_TOI_THIEU_CHINH} ads/lượt "
+            f"({A._usd_vn(round(_gia_chinh(n_chinh, bo['chi_tiet']), 3))} USD), vượt trần "
+            f"TikTok trên console ({A._usd_vn(tran_usd)} USD/lượt) — dùng thẳng nguồn dự "
+            f"phòng (chậm hơn, chỉ lọc ngành cha) cho {n_dp} ads.")
+        est_toi_da = _gia_du_phong(n_dp)
+    else:
+        # Trường hợp xấu nhất: lượt chính tiêu đủ ước tính rồi hỏng, dự phòng dùng phần
+        # còn lại.
+        _, n_dp = _tran_du_phong(tran_usd, est, n)
+        est_toi_da = est + (_gia_du_phong(n_dp) if n_dp else 0.0)
     pham_vi = _pham_vi(bo)
 
     if _co(args.get("chi_uoc_tinh"), False):
@@ -419,15 +452,19 @@ def _handle(args: dict, **_kwargs) -> str:
         con = round(hm["con_lai"], 2) if hm else None
         return tool_result(
             success=True, chi_uoc_tinh=True, da_chay=False, pham_vi=pham_vi, so_ads=n,
-            uoc_tinh_chi_phi_usd=round(est, 3),
+            nguon_du_kien="chính" if chay_chinh else "dự phòng",
+            uoc_tinh_chi_phi_usd=round(est if chay_chinh else est_toi_da, 3),
             uoc_tinh_toi_da_usd=round(est_toi_da, 3),
-            ngan_sach_thang_con_usd=con, vuot_ngan_sach=bool(hm and con is not None and con < est),
+            ngan_sach_thang_con_usd=con,
+            vuot_ngan_sach=bool(hm and con is not None
+                                and con < (est if chay_chinh else est_toi_da)),
             canh_bao=canh_bao or None,
             note=("CHƯA chạy, không tốn tiền. Nêu phạm vi + số ads + ước tính USD (tối đa "
                   "nếu phải dùng nguồn dự phòng) rồi kết bằng \"Chạy nhé?\" và DỪNG. "
                   "Đồng ý mới gọi lại bỏ `chi_uoc_tinh`."
                   + (" Ngân sách Apify tháng không đủ — nói rõ, chưa chạy được."
-                     if hm and con is not None and con < est else "")),
+                     if hm and con is not None
+                     and con < (est if chay_chinh else est_toi_da) else "")),
         )
 
     bat_dau = datetime.datetime.now(A._VN_TZ) - datetime.timedelta(seconds=5)
@@ -435,22 +472,25 @@ def _handle(args: dict, **_kwargs) -> str:
     han = t0 + A._TOOL_DEADLINE
     han_run = han - A._DU_PHONG_HUY
     so_run: list = []
-    actors = [ACTOR_CHINH]
+    actors = [ACTOR_CHINH] if chay_chinh else []
     nguon, loi_chinh, items = "chính", None, []
-    try:
-        items = contextvars.copy_context().run(
-            _trong_han, han_run, so_run, ACTOR_CHINH, _payload_chinh(bo), n)
-    except Exception as e:  # noqa: BLE001
-        loi_chinh = e
+    if chay_chinh:
+        try:
+            items = contextvars.copy_context().run(
+                _trong_han, han_run, so_run, ACTOR_CHINH, _payload_chinh(bo), n_chinh)
+        except Exception as e:  # noqa: BLE001
+            loi_chinh = e
+        items = list(items or [])[:n]      # trả tiền cho >= 10, giữ đúng n người dùng xin
     meta = so_run[-1] if so_run else None
     loi: dict[str, str] = {}
-    if _can_du_phong(loi_chinh, items, meta):
-        ly_do = (A._che_token(f"{getattr(loi_chinh, 'ma', type(loi_chinh).__name__)}: "
-                              f"{loi_chinh}") if loi_chinh is not None
-                 else "trả 0 ads kèm báo giới hạn gói: "
-                      + A._che_token(str((meta or {}).get("statusMessage") or ""))[:150])
-        loi["nguon_chinh"] = ly_do[:250]
-        da_tieu = _da_tieu(meta, est)
+    if not chay_chinh or _can_du_phong(loi_chinh, items, meta):
+        if chay_chinh:
+            ly_do = (A._che_token(f"{getattr(loi_chinh, 'ma', type(loi_chinh).__name__)}: "
+                                  f"{loi_chinh}") if loi_chinh is not None
+                     else "trả 0 ads kèm báo giới hạn gói: "
+                          + A._che_token(str((meta or {}).get("statusMessage") or ""))[:150])
+            loi["nguon_chinh"] = ly_do[:250]
+        da_tieu = _da_tieu(meta, est) if chay_chinh else 0.0
         tran_dp, n_dp = _tran_du_phong(tran_usd, da_tieu, n)
         if han - time.monotonic() < _GIAY_DU_PHONG:
             loi["du_phong"] = "không còn đủ thời gian của lượt để chạy nguồn dự phòng"
