@@ -97,9 +97,9 @@ def test_cot_sac_thai_va_thong_ke_tren_sheet_chinh(quet):
     assert len(hoi) == 1, "sắc thái đi cùng đúng một lượt phân xử"
     chinh = _tab(ghi, "s1")
     hd = ghi[0][1][0]
-    assert hd[-1] == "Sắc thái" and hd[:12] == A._HEADER, "12 cột đầu giữ nguyên"
-    assert chinh["Ngọc Trâm"][-1] == TC and chinh["Linh Đan"][-1] == TI
-    assert _tab(ghi, "s3")["HAPAS THAILAND"][-1] == TL, "tab thị trường khác cũng có cột"
+    assert hd[-2:] == ["Sắc thái", "Nguồn"] and hd[:12] == A._HEADER, "12 cột đầu giữ nguyên"
+    assert chinh["Ngọc Trâm"][-2] == TC and chinh["Linh Đan"][-2] == TI
+    assert _tab(ghi, "s3")["HAPAS THAILAND"][-2] == TL, "tab thị trường khác cũng có cột"
     tk = kq["thong_ke"]
     # Chỉ đếm bài của sheet chính (VN), không trộn bài Thái.
     assert tk["tong"] == 2 and tk["da_phan_loai"] == 2 and tk["chua_phan_loai"] == 0
@@ -125,7 +125,7 @@ def test_bai_ai_khong_doc_la_chua_phan_loai_va_khong_tao_tab(quet):
     tra["fn"] = lambda nhac: "không phải JSON"          # lô hỏng -> luật
     kq = chay()
     chinh = _tab(ghi, "s1")
-    assert {r[-1] for r in chinh.values()} == {CHUA}
+    assert {r[-2] for r in chinh.values()} == {CHUA}
     assert kq["thong_ke"]["da_phan_loai"] == 0 and kq["thong_ke"]["chua_phan_loai"] == 1
     assert kq["dong_thong_ke"] == ("Chưa gán được nhãn cho bài nào (0/1) — chưa có số "
                                    "liệu sắc thái.")

@@ -293,7 +293,7 @@ _SHALLOW = {"tiktok": 100, "facebook": 100, "instagram": 100,
 _HEADER = ["Nền tảng", "Ngày đăng", "Kênh", "Followers", "Views", "Likes",
            "Comments", "Shares", "Hashtags", "Nội dung", "Link", "Từ khoá"]
 # Cột nối sau `_HEADER` ở sheet chính + tab "Thị trường khác" của lượt tại chỗ.
-_COT_THEM_BAI = ["Thị trường", "Nhận định AI", "Sắc thái"]
+_COT_THEM_BAI = ["Thị trường", "Nhận định AI", "Sắc thái", phan_loai.NGUON_COT]
 
 _HASHTAG_RE = re.compile(r"#([A-Za-z0-9_\u00C0-\u1EF9]+)")
 
@@ -2766,7 +2766,8 @@ def _trich_dan_bai(bai: list[dict], n: int = _TRICH_DAN_MOI_NHAN) -> dict[str, l
     qua `_khong_the` (không còn dấu ngoặc nhọn, gộp khoảng trắng) và cắt ngắn."""
     ra = {}
     for lab in phan_loai.SAC_THAI.values():
-        con = sorted((d for d in bai if d.get("_sac_thai") == lab),
+        con = sorted((d for d in bai if d.get("_sac_thai") == lab
+                      and not d.get("_cua_thuong_hieu")),
                      key=lambda d: (-int(d.get("views") or 0), -int(d.get("likes") or 0),
                                     str(d.get("link") or "")))[:n]
         ra[lab] = [{"nen_tang": d.get("platform"), "kenh": _khong_the(d.get("kenh"))[:40],
@@ -2776,12 +2777,32 @@ def _trich_dan_bai(bai: list[dict], n: int = _TRICH_DAN_MOI_NHAN) -> dict[str, l
     return ra
 
 
+def danh_dau_bai_nha(bai, thuong_hieu=()) -> int:
+    """Gắn `_cua_thuong_hieu` cho bài do CHÍNH brand đăng (E2E 04-05/10/2026: 3 bài của
+    HAPAS bị đếm vào sắc thái bài). Handle (`username`) hoặc tên kênh là handle trong
+    `phan_loai.tai_khoan_nha()`, hoặc handle chính chủ của brand đang quét (`thuong_hieu`
+    = từ khoá: "hapas" -> hapas, hapas.official, hapas_vn…). -> số bài của brand."""
+    n = 0
+    for d in bai:
+        nha = any(phan_loai.la_tai_khoan_nha(d.get(k), thuong_hieu)
+                  for k in ("username", "kenh"))
+        d["_cua_thuong_hieu"] = nha
+        n += nha
+    return n
+
+
+def _nguon_bai(d: dict) -> str:
+    return phan_loai.NGUON_NHA if d.get("_cua_thuong_hieu") else phan_loai.NGUON_KHACH
+
+
 def thong_ke_sac_thai(bai: list[dict]) -> dict:
     """Bài đã giữ (dict có platform/likes/views/text/`_sac_thai`) -> {thong_ke,
     dong_thong_ke, trich_dan}. Tỉ lệ tính trên số ĐÃ phân loại (`phan_loai.dem`), kèm số
-    chưa phân loại — tổng thể và theo từng nền tảng."""
+    chưa phân loại — tổng thể và theo từng nền tảng. Bài `_cua_thuong_hieu` (gắn bằng
+    `danh_dau_bai_nha`) không vào số/% — đếm riêng ở `cua_thuong_hieu`."""
     rows = [{"platform": d.get("platform") or "?", "likes": int(d.get("likes") or 0),
-             "sac_thai": d.get("_sac_thai") or phan_loai.CHUA} for d in bai]
+             "sac_thai": d.get("_sac_thai") or phan_loai.CHUA,
+             "cua_thuong_hieu": bool(d.get("_cua_thuong_hieu"))} for d in bai]
     tk = phan_loai.dem(rows)
     tk.pop("theo_bai", None)                 # mỗi bài là một "bài" — bảng theo bài vô nghĩa
     for g in [tk, *tk["theo_nen_tang"].values()]:
@@ -2810,6 +2831,9 @@ def _bang_thong_ke(st: dict) -> list[list]:
              "Tỉ lệ % theo lượt thích"],
             [f"TỔNG: đã phân loại {tk['da_phan_loai']}/{tk['tong']} bài "
              f"({tk['chua_phan_loai']} chưa phân loại)", "", "", "", ""]]
+    if tk.get("cua_thuong_hieu"):
+        rows.append([f"{tk['cua_thuong_hieu']} bài của chính thương hiệu (không tính)",
+                     "", "", "", ""])
     rows += khoi("Tổng", tk)
     for p, g in tk["theo_nen_tang"].items():
         rows += khoi(f"Nền tảng: {_TEN_NGUON.get(p, p)}", g)
@@ -3726,11 +3750,14 @@ def _handle(args: dict, **kwargs) -> str:
         return not giu_nuoc_ngoai and d.get("_thi_truong") not in (country, "không rõ")
     hits_chinh = [(d, dt) for d, dt in hits if not _nuoc_khac(d)]
     hits_khac = [(d, dt) for d, dt in hits if _nuoc_khac(d)]
+    danh_dau_bai_nha([d for d, _ in hits], queries)
     # Cột mới nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen.
     rows = [list(_HEADER) + _COT_THEM_BAI] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d)] for d, dt in hits_chinh]
+        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d), _nguon_bai(d)]
+        for d, dt in hits_chinh]
     rows_khac = [list(_HEADER) + _COT_THEM_BAI] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d)] for d, dt in hits_khac]
+        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d), _nguon_bai(d)]
+        for d, dt in hits_khac]
     # Sắc thái đếm trên bài của sheet chính (thị trường đang quét) — đúng bảng người dùng
     # mở ra; bài brand ở nước khác không trộn vào tỉ lệ của thị trường này.
     st = thong_ke_sac_thai([d for d, _ in hits_chinh])  # thong_ke, dong_thong_ke, trich_dan
