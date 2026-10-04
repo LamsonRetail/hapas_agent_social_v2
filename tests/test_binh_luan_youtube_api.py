@@ -139,12 +139,12 @@ def test_api_lay_binh_luan_va_tra_loi_0_usd_khong_goi_apify(mt):
     assert kq["uoc_tinh_chi_phi_usd"] == 0 and "0 USD" in kq["chi_phi"]
     assert "3 đơn vị quota" in kq["chi_phi"]
     hd, dong = sheet[0], {r[2]: r for r in sheet[1:]}
-    assert hd[-1] == "Trả lời bình luận" and len(hd) == len(D._HEADER)
+    assert hd[-2] == "Trả lời bình luận" and hd[-1] == "Nguồn" and len(hd) == len(D._HEADER)
     goc = dong["Túi đẹp quá & xinh"]
-    assert goc[6] == 3 and goc[-1] == "" and goc[7] == "2026-10-01 10:00", "mốc tuyệt đối, giờ VN"
-    assert dong["mua ở đâu"][-1].endswith("&lc=c1") and dong["chuẩn luôn"][-1].endswith("&lc=c1")
+    assert goc[6] == 3 and goc[-2] == "" and goc[7] == "2026-10-01 10:00", "mốc tuyệt đối, giờ VN"
+    assert dong["mua ở đâu"][-2].endswith("&lc=c1") and dong["chuẩn luôn"][-2].endswith("&lc=c1")
     assert sum(1 for r in sheet[1:] if r[2] == "chuẩn luôn") == 1, "trả lời kèm sẵn không lặp"
-    assert all(r[-2] == V1 for r in sheet[1:]), "quy về đúng link bài"
+    assert all(r[-3] == V1 for r in sheet[1:]), "quy về đúng link bài"
     assert A._youtube_doc()["dv"] == 3, "đơn vị quota vào sổ ngày dùng chung"
 
 

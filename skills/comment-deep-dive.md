@@ -53,6 +53,10 @@ Khi báo kết quả:
 - Số và tỉ lệ sắc thái CHỈ lấy từ `thong_ke` hoặc chép `dong_thong_ke` mà tool trả về.
   Luôn nói đã phân loại bao nhiêu trên tổng và phần "chưa phân loại". Không tự đếm tay,
   không ước lượng, không làm tròn khác đi
+- Phản hồi của CHÍNH thương hiệu (chủ bài/video, hapas.official, hapas.vn…) vẫn nằm
+  trong sheet với cột Nguồn = "thương hiệu" nhưng KHÔNG nằm trong số đếm và %. Nói đúng
+  câu "N phản hồi của chính thương hiệu (không tính)" có trong `dong_thong_ke`, đừng
+  cộng chúng vào. Soi bài của KOL mà brand có vào trả lời thì truyền `thuong_hieu`
 - Dẫn bình luận thật từ `trich_dan`, không tự diễn cảm xúc
 - Hỏi giá, hỏi mua ở đâu là Trung lập (ý định mua), không phải khen. Khen KOL hay nội
   dung video là chủ đề KOL/nội dung, không phải cảm xúc về sản phẩm

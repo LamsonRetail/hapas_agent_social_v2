@@ -192,7 +192,9 @@ def test_threads_conversation_tra_loi_long_nhau_va_tra_loi_cua_kenh(env, mang, s
     assert by_text["Inbox bạn nhé"][10] == "trả lời cấp 3"
     assert by_text["Inbox bạn nhé"][3] == K._KENH_NHA, "trả lời của shop không được gán nhãn"
     # Thống kê chỉ đếm bình luận của khách
-    assert kq["thong_ke"]["tong"] == 3
+    assert kq["thong_ke"]["tong"] == 3 and kq["thong_ke"]["cua_thuong_hieu"] == 1
+    assert "1 phản hồi của chính thương hiệu (không tính)" in kq["dong_thong_ke"]
+    assert by_text["Inbox bạn nhé"][-1] == "thương hiệu" and by_text["Đẹp quá"][-1] == "khách"
     # cây: trả lời nằm ngay dưới cha
     thu_tu = [r[2].lstrip("'") for r in rows[1:]]
     assert thu_tu.index("Giá bao nhiêu?") == thu_tu.index("Đẹp quá") + 1
