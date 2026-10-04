@@ -48,7 +48,7 @@ _QUET_TIM_BAI = 300         # số bài gần nhất được dò khi tìm bài 
 _DANH_CHO_SAU = 45          # giây chừa cho gán nhãn + ghi sheet trong `_TOOL_DEADLINE`
 _PHAN_LOAI_TOI_DA = 50
 
-_HEADER = list(D._HEADER[:10]) + ["Cấp", "Trả lời cho"]
+_HEADER = list(D._HEADER[:10]) + ["Cấp", "Trả lời cho", phan_loai.NGUON_COT]
 _HEADER_BAI = ["Nền tảng", "Link bài", "Ngày đăng", "Nội dung bài", "Bình luận đã lấy",
                "Số bình luận nền tảng báo", "Trạng thái"]
 _TAB_BAI = "Bài đã đọc"
@@ -426,7 +426,8 @@ def _o(r: dict) -> list:
             _KENH_NHA if r["cua_kenh"] else r.get("sac_thai", phan_loai.CHUA),
             "" if r["cua_kenh"] else r.get("chu_de", phan_loai.CHUA),
             "" if r["likes"] is None else r["likes"], r["replies"], r["thoi_gian"],
-            r["tac_gia_thich"], r["bai"], _cap_chu(r), r.get("tra_loi_cho") or ""]
+            r["tac_gia_thich"], r["bai"], _cap_chu(r), r.get("tra_loi_cho") or "",
+            phan_loai.NGUON_NHA if r["cua_kenh"] else phan_loai.NGUON_KHACH]
 
 
 def _o_bai(kenh: str, b: dict) -> list:
@@ -578,6 +579,11 @@ def _handle(args: dict, **_kw) -> str:
     per_bai = [{"kenh": k, "link": b["link"] or b["id"], "ngay": b["ngay"],
                 "binh_luan": b.get("bl", 0), "nen_tang_bao": b.get("bao"),
                 "trang_thai": b.get("trang_thai", "")} for k, b in bai]
+    # Kênh nhà = chính thương hiệu: API báo "của tôi" (`cua_kenh`) hoặc handle nằm trong
+    # `phan_loai.tai_khoan_nha()` (vd hapas.vn trả lời trên bài Instagram của hapas.official).
+    for r in rows:
+        r["cua_kenh"] = bool(r["cua_kenh"]) or phan_loai.la_tai_khoan_nha(r["kenh"])
+        r["cua_thuong_hieu"] = r["cua_kenh"]
     khach = [r for r in rows if not r["cua_kenh"]]
     so_loi = [k for k, v in per_kenh.items() if v["loi"]]
     chua_du = [p for p in per_bai if p["trang_thai"] != "OK"]
@@ -600,7 +606,7 @@ def _handle(args: dict, **_kw) -> str:
         han_pl = min(_PHAN_LOAI_TOI_DA, A._TOOL_DEADLINE - (time.monotonic() - t0) - 12)
         for r, (s, cd) in zip(khach, phan_loai.phan_loai_binh_luan(khach, han_pl, tt_pl)):
             r["sac_thai"], r["chu_de"] = s, cd
-    tk = phan_loai.dem(khach, "bai")
+    tk = phan_loai.dem(rows, "bai")     # dòng của kênh nhà: đếm riêng, không vào %
     dong_tk = phan_loai.dong_thong_ke(tk)
     pl = {"trang_thai": tt_pl.get("trang_thai", ""), "da_phan_loai": tk["da_phan_loai"],
           "tong": tk["tong"], "ghi_chu": tt_pl.get("ghi_chu", "")}
@@ -624,10 +630,12 @@ def _handle(args: dict, **_kw) -> str:
     except Exception as e:  # noqa: BLE001
         thong_ke_o = f"KHÔNG ghi được ({type(e).__name__})"
     try:
-        A._write_values(tok, A._them_tab(tok, _TAB_BAI),
-                        [list(_HEADER_BAI)] + [_o_bai(k, b) for k, b in bai])
+        sid_bai = A._them_tab(tok, _TAB_BAI)
+        A._write_values(tok, sid_bai, [list(_HEADER_BAI)] + [_o_bai(k, b) for k, b in bai])
+        A._vua_cot(tok, sid_bai, len(_HEADER_BAI))
     except Exception as e:  # noqa: BLE001 — chỉ thiếu tab phụ
         M.ghi_log(f"không thêm được tab '{_TAB_BAI}': {type(e).__name__}")
+    A._sua_tab_chinh(tok, sid, A.TAB_BINH_LUAN, len(_HEADER))
     sender = memory_store.get_current_sender()
     granted = A._grant(tok, sender) if sender else False
     return tool_result(

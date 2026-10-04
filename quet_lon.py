@@ -1341,7 +1341,7 @@ def _nuoc_khac(ts: dict):
     nuoc = ts.get("country") or "VN"
     return lambda d: (not ts.get("giu_nuoc_ngoai")
                       and (d.get("_thi_truong") or "không rõ") not in (nuoc, "không rõ"))
-_COT_THEM = ["Thị trường", "Nhận định AI", "Phân xử", "Sắc thái"]
+_COT_THEM = ["Thị trường", "Nhận định AI", "Phân xử", "Sắc thái", phan_loai.NGUON_COT]
 _TAB_TK = A._TAB_THONG_KE
 
 
@@ -1355,7 +1355,7 @@ def _dong(d: dict, dt, kw: str, n_chu: int) -> list:
 
 def _cot_them(d: dict) -> list:
     return [d.get("_nhan_dinh") or "", d.get("_phan_xu") or "",
-            d.get("_sac_thai") or phan_loai.CHUA]
+            d.get("_sac_thai") or phan_loai.CHUA, A._nguon_bai(d)]
 
 
 def _ten_tab(p: str) -> str:
@@ -1387,7 +1387,9 @@ def _ghi_so_bo(v, p: str, ts: dict, d_from, d_to) -> None:
                 continue
             da.add(k)
             d["platform"] = p
-            rows.append(_dong(d, dt, kw, 500) + ["chưa lọc", "sơ bộ", phan_loai.CHUA])
+            A.danh_dau_bai_nha([d], ts["queries"])
+            rows.append(_dong(d, dt, kw, 500) + ["chưa lọc", "sơ bộ", phan_loai.CHUA,
+                                                 A._nguon_bai(d)])
         rows.sort(key=lambda r: -int(r[4] or 0))
         s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows, tu_dau=True)
     except Exception as e:  # noqa: BLE001
@@ -1433,6 +1435,7 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
     s.bat_dau_giai_doan("cuoi")
     kw = ", ".join(ts["queries"])
     khac = _nuoc_khac(ts)
+    A.danh_dau_bai_nha([d for d, _ in ket["hits"]], ts["queries"])   # cột Nguồn
     for p in v.d["nen_tang"]:
         rows = [_dong(d, dt, kw, 500) + _cot_them(d)
                 for d, dt in ket["hits"] if d["platform"] == p and not khac(d)]
@@ -1572,6 +1575,7 @@ def chay_viec(v) -> tuple[str, str]:
     cho_ai = not v.da_huy() and v.con_giay() > -120
     ket = _loc(v, ts, d_from, d_to, cho_ai, log)
     khac = _nuoc_khac(ts)
+    A.danh_dau_bai_nha([d for d, _ in ket["hits"]], ts["queries"])
     ket["sac_thai"] = A.thong_ke_sac_thai([d for d, _ in ket["hits"] if not khac(d)])
     with v._khoa:
         v.d["phan_xu"] = {k: val for k, val in ket["phan_xu"].items() if k != "_moi"}

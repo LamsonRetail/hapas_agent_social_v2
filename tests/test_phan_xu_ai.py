@@ -72,6 +72,9 @@ def quet(monkeypatch):
     # Không gọi Lark thật khi đổi thứ tự tab — chỉ ghi lại lần gọi (`chay.dua`).
     dua = []
     monkeypatch.setattr(A, "_dua_tab_chinh_len_dau", lambda tok, sid: dua.append((tok, sid)))
+    # Đặt tên tab / bỏ cột thừa: không gọi Lark thật (canh riêng ở test_sheet_gon).
+    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: None)
+    monkeypatch.setattr(A, "_vua_cot", lambda *a: None)
     monkeypatch.setattr(A, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(A.memory_store, "get_current_sender", lambda: "ou_test")
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
@@ -115,13 +118,13 @@ def test_ai_phan_xu_giu_loai_dung_va_mot_luot_model(quet):
     kq = chay()
     hd, chinh, loai = _bang(ghi)
     khac = _khac(ghi)
-    assert hd[-3:] == ["Thị trường", "Nhận định AI", "Sắc thái"]
+    assert hd[-4:-1] == ["Thị trường", "Nhận định AI", "Sắc thái"]
     assert set(chinh) == {"Linh Đan", "Ngọc Trâm"}, "sheet chính chỉ có bài VN"
     assert set(khac) == {"HAPAS THAILAND"}, "bài brand ở Thái sang tab riêng, không bị loại"
-    assert chinh["Linh Đan"][-2] == "bàn về quảng cáo/chiến dịch của brand", \
+    assert chinh["Linh Đan"][-3] == "bàn về quảng cáo/chiến dịch của brand", \
         "bàn về quảng cáo không nhắc tên brand vẫn giữ"
-    assert khac["HAPAS THAILAND"][-3:-1] == ["TH", "brand ở thị trường khác"]
-    assert chinh["Ngọc Trâm"][-3] == "VN" and "HAPAS THAILAND" not in loai
+    assert khac["HAPAS THAILAND"][-4:-2] == ["TH", "brand ở thị trường khác"]
+    assert chinh["Ngọc Trâm"][-4] == "VN" and "HAPAS THAILAND" not in loai
     assert loai["Mason Nguyễn"][-1] == loai["Bùi Trường Linh"][-1] == \
         "AI: chuyện người nổi tiếng khác"
     assert loai["SHINAI"][-1] == "AI: trùng tên — ban nhạc metal"
@@ -193,7 +196,7 @@ def test_json_hong_thi_ca_luot_ve_luat_cu_va_bao_that(quet):
     assert set(chinh) == {"Ngọc Trâm"}, "luật cũ: chỉ bài nhắc tên + có dấu hiệu VN"
     assert loai["Linh Đan"][-1] == "không nhắc từ khoá"
     assert loai["HAPAS THAILAND"][-1].startswith("ngoài thị trường VN")
-    assert chinh["Ngọc Trâm"][-2:] == ["chưa qua AI (lọc theo luật)", "chưa phân loại"]
+    assert chinh["Ngọc Trâm"][-3:-1] == ["chưa qua AI (lọc theo luật)", "chưa phân loại"]
     assert kq["tom_tat_loai"].startswith("Lọc theo luật 7 bài (AI bỏ qua: model lỗi (0/7))")
     assert "lo 7 bai hong" in kq["ai_ghi_chu"]
 
@@ -224,7 +227,7 @@ def test_khong_chac_thi_ve_luat_du_phong(quet):
     kq = chay()
     _, chinh, loai = _bang(ghi)
     assert set(chinh) == {"Ngọc Trâm"}, "y như luật dự phòng"
-    assert chinh["Ngọc Trâm"][-2:] == ["AI không chắc — lọc theo luật", "chưa phân loại"]
+    assert chinh["Ngọc Trâm"][-3:-1] == ["AI không chắc — lọc theo luật", "chưa phân loại"]
     assert loai["SHINAI"][-1].startswith("ngoài thị trường VN")
     assert loai["Mason Nguyễn"][-1] == "không nhắc từ khoá"
     assert kq["tom_tat_loai"].startswith(
@@ -246,7 +249,7 @@ def test_tin_hindi_ve_dia_danh_hapas_khong_chac_bi_luat_loai_bai_thai_giu(quet, 
     kq = chay()
     _, chinh, loai = _bang(ghi)
     assert loai["Aaj Tak"][-1] == "ngoài thị trường VN: hệ chữ khác (Thái/Hindi/…)"
-    assert _khac(ghi)["HAPAS THAILAND"][-3:-1] == ["TH", "brand ở thị trường khác"]
+    assert _khac(ghi)["HAPAS THAILAND"][-4:-2] == ["TH", "brand ở thị trường khác"]
     assert "HAPAS THAILAND" not in chinh and kq["thi_truong_khac"] == {"TH": 1}
 
 

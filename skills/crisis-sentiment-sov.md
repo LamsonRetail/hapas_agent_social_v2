@@ -17,6 +17,9 @@ số, không tự đếm tay, không ước lượng "khoảng 60% tích cực".
   Instagram. Threads và Instagram bóc không đăng nhập: không có trả lời lồng nhau,
   Instagram chỉ được một phần bình luận công khai — nói rõ, đừng gọi là toàn bộ
 - Đừng trộn hai loại số: % bài tiêu cực không phải % bình luận tiêu cực
+- Bài và phản hồi của CHÍNH thương hiệu không phải tiếng khách: tool đã loại khỏi số
+  đếm và % (cột Nguồn = "thương hiệu", đếm riêng ở `cua_thuong_hieu`). Chép nguyên câu
+  "N bài/phản hồi của chính thương hiệu (không tính)", không tự cộng lại
 
 Nguồn nào hỏng, bị cắt hoặc chạm trần chi phí thì nói rõ phần đó thiếu dữ liệu, không
 lấp bằng phỏng đoán. Hỏi lại cùng phạm vi thì đối chiếu với số lần trước và giải thích

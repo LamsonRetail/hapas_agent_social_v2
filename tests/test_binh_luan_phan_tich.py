@@ -65,6 +65,9 @@ def moi_truong(monkeypatch):
     monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows, **k: ghi_tab.append((sid, rows)))
     monkeypatch.setattr(D, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(D.memory_store, "get_current_sender", lambda: "ou_test")
+    # Đặt tên tab / bỏ cột thừa: không gọi Lark thật (canh riêng ở test_sheet_gon).
+    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: None)
+    monkeypatch.setattr(A, "_vua_cot", lambda *a: None)
     return ap, ghi_so, ghi_sheet, ghi_tab
 
 
@@ -669,6 +672,7 @@ def test_sheet_tiktok_co_cot_tra_loi_binh_luan(moi_truong):
          "replyCommentTotal": 1},
         {"cid": "2", "uniqueId": "b", "text": "chuẩn", "videoWebUrl": u, "repliesToId": "1"}]
     json.loads(D._handle({"post_urls": [u]}))
-    assert sheet[0][-1] == "Trả lời bình luận"
-    assert [r[-1] for r in sheet[1:]] == ["", "↳ cid 1: túi đẹp quá"]
+    i = sheet[0].index("Trả lời bình luận")
+    assert [r[i] for r in sheet[1:]] == ["", "↳ cid 1: túi đẹp quá"]
+    assert sheet[0][-1] == "Nguồn" and [r[-1] for r in sheet[1:]] == ["khách", "khách"]
     assert ap.goi[0]["payload"]["maxRepliesPerComment"] == 20

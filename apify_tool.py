@@ -293,7 +293,7 @@ _SHALLOW = {"tiktok": 100, "facebook": 100, "instagram": 100,
 _HEADER = ["Nền tảng", "Ngày đăng", "Kênh", "Followers", "Views", "Likes",
            "Comments", "Shares", "Hashtags", "Nội dung", "Link", "Từ khoá"]
 # Cột nối sau `_HEADER` ở sheet chính + tab "Thị trường khác" của lượt tại chỗ.
-_COT_THEM_BAI = ["Thị trường", "Nhận định AI", "Sắc thái"]
+_COT_THEM_BAI = ["Thị trường", "Nhận định AI", "Sắc thái", phan_loai.NGUON_COT]
 
 _HASHTAG_RE = re.compile(r"#([A-Za-z0-9_\u00C0-\u1EF9]+)")
 
@@ -1124,14 +1124,24 @@ def _chi_phi_cac_run(run_ids: list[str]) -> dict:
     return {"usd": round(tong, 4), "so_run": so, "chua_doc": chua, "con_song": song}
 
 
+# Hỏi lại tiền thật tới khi SỐ CUỐI: mọi run đã kết thúc VÀ tổng giữ nguyên qua hai lần
+# đọc liền nhau. E2E 04-05/10/2026: lượt f2 ghi sổ 0,143 USD, thật 0,193 — bản cũ dừng
+# hỏi khi số đã ≥ 50% ước tính, lúc Apify còn đang ghi tiền.
+_CP_NGHI = 3.0          # giây giữa hai lần hỏi
+_CP_LAN_TOI_DA = 6      # lần hỏi lại tối đa (~18 giây) khi bên gọi không đưa hạn chót
+
+
 def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
-                  uoc_tinh: float = 0.0) -> dict | None:
+                  uoc_tinh: float = 0.0, han: float | None = None) -> dict | None:
     """Cộng `usageTotalUsd` các run của `actors` bắt đầu từ `tu` — tiền Apify THẬT tính.
 
     Endpoint run-sync không trả phí, nên hỏi lại lịch sử run sau khi quét. Trước
     đây chỉ có ước tính trước khi chạy: 23/09/2026 Mark báo "khoảng 0,30 USD"
     trong khi thực tế là 0,83 USD. Trả None nếu không hỏi được (không đoán số).
-    """
+
+    `han` (time.monotonic): hạn chót của bên gọi — không bắt đầu lần chờ nào vượt hạn,
+    trả số mới nhất đang có. Kết quả có `on_dinh`=True khi số đã là số cuối (run xong,
+    hai lần đọc khớp nhau)."""
     token = os.environ.get("APIFY_TOKEN", "").strip()
     if not token or not actors:
         return None
@@ -1164,23 +1174,34 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
                 tong += u
                 so_run += 1
                 cham_tran += u >= 0.95 * tran_usd
-                dang_chay += it.get("status") in ("READY", "RUNNING")
+                dang_chay += it.get("status") not in _KET_THUC
         return {"usd": round(tong, 3), "so_run": so_run,
                 "cham_tran": cham_tran, "dang_chay": dang_chay}
 
-    kq = _mot_luot()
+    def _on_dinh(moi: dict | None, cu: dict | None) -> bool:
+        return bool(moi and cu and not moi["dang_chay"] and moi["so_run"] == cu["so_run"]
+                    and abs(moi["usd"] - cu["usd"]) < 1e-9)
+
+    kq, truoc = _mot_luot(), None
     # run-sync đã trả dữ liệu nhưng Apify ghi tiền CHẬM vài giây, kể cả khi run đã báo
     # SUCCEEDED. Đo 25/09: lượt soi tài khoản vừa xong vẫn "đang chạy"; lượt Shopee báo
-    # 0,01 USD trong khi thật là 0,105. Hỏi lại khi còn "đang chạy" hoặc số thật thấp hơn
-    # nửa ước tính — tối đa hai lần, mỗi lần 3 giây.
+    # 0,01 USD trong khi thật là 0,105. Nên: hỏi lại tới khi số ỔN ĐỊNH (`_on_dinh`) —
+    # luôn ít nhất một lần đọc xác nhận; số thấp hơn nửa ước tính thì hỏi thêm ít nhất
+    # hai lần dù đã khớp (Apify có thể đứng ở phí khởi động vài giây).
     # Hỏi hỏng (None) cũng hỏi lại: đo 25/09, lượt soi TikTok Shop chạy xong trong khoảng
     # thời gian đối chiếu mà sổ vẫn ghi "chưa lấy được số thực" — một lần gọi Apify lỗi
     # thoáng qua là bỏ cuộc luôn.
-    for _ in range(2):
-        if kq and not (kq["dang_chay"] or (uoc_tinh and kq["usd"] < 0.5 * uoc_tinh)):
+    for lan in range(_CP_LAN_TOI_DA):
+        thap = bool(kq and uoc_tinh and kq["usd"] < 0.5 * uoc_tinh)
+        if _on_dinh(kq, truoc) and not (thap and lan < 2):
             break
-        time.sleep(3)
+        if han is not None and time.monotonic() + _CP_NGHI > han:
+            break
+        time.sleep(_CP_NGHI)
+        truoc = kq or truoc
         kq = _mot_luot() or kq
+    if kq:
+        kq = {**kq, "on_dinh": _on_dinh(kq, truoc)}
     return kq
 
 
@@ -2612,6 +2633,63 @@ def _first_sheet_id(token: str) -> str:
     return sheets[0].get("sheet_id") or ""
 
 
+# ── Tab gọn gàng (E2E 04-05/10/2026) ──
+# Sheet mới của Lark có tab đầu tên "Sheet1" và lưới 20 cột: sheet 15 cột của social_listen
+# thừa 5 cột trống bên phải, sheet bình luận thừa 8. Ghi xong thì đặt tên tab theo nội dung
+# và xoá cột trống bên phải. Chỉ là tiện xem: hỏng thì in cảnh báo, KHÔNG BAO GIỜ ném lỗi
+# (dữ liệu đã ghi đủ, và bên gọi không được tưởng lần ghi hỏng mà ghi lại lần nữa).
+TAB_BAI_DANG = "Bài đăng"
+TAB_BINH_LUAN = "Bình luận"
+
+
+def _so_cot_luoi(token: str, sheet_id: str) -> int | None:
+    r = lark.call("GET", f"/open-apis/sheets/v3/spreadsheets/{token}/sheets/query")
+    for sh in ((r or {}).get("data") or {}).get("sheets") or []:
+        if sh.get("sheet_id") == sheet_id:
+            return int((sh.get("grid_properties") or {}).get("column_count") or 0) or None
+    return None
+
+
+def _vua_cot(token: str, sheet_id: str, so_cot: int) -> int | None:
+    """Xoá các cột lưới bên phải cột `so_cot` (1-based) của tab. -> số cột lưới sau khi
+    sửa, None nếu không đọc được. Không bao giờ ném.
+
+    DELETE dimension_range (v2): startIndex/endIndex đếm từ 1, gồm cả hai đầu. Lấy
+    startIndex = so_cot + 1 nên kể cả khi API hiểu khác (từ 0) cũng chỉ sót một cột
+    trống, không bao giờ xoá cột dữ liệu."""
+    try:
+        so_cot = max(1, int(so_cot))
+        hien = _so_cot_luoi(token, sheet_id)
+        if not hien or hien <= so_cot:
+            return hien
+        lark.call("DELETE", f"/open-apis/sheets/v2/spreadsheets/{token}/dimension_range",
+                  body={"dimension": {"sheetId": sheet_id, "majorDimension": "COLUMNS",
+                                      "startIndex": so_cot + 1, "endIndex": hien}})
+        return so_cot
+    except Exception as e:  # noqa: BLE001
+        print(f"[apify_tool] bỏ cột trống thừa hỏng (bỏ qua): {_che_token(e)[:160]}")
+        return None
+
+
+def _doi_ten_tab(token: str, sheet_id: str, ten: str) -> bool:
+    """Đặt tên tab (thay "Sheet1"). Hỏng chỉ in cảnh báo."""
+    try:
+        lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/sheets_batch_update",
+                  body={"requests": [{"updateSheet": {"properties": {
+                      "sheetId": sheet_id, "title": ten}}}]})
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[apify_tool] đổi tên tab hỏng (bỏ qua): {_che_token(e)[:160]}")
+        return False
+
+
+def _sua_tab_chinh(token: str, sheet_id: str, ten: str, so_cot: int) -> None:
+    """Tab chính sau khi ghi XONG mọi thứ (kể cả phần ghi nối bên dưới): đặt tên + bỏ cột
+    trống thừa. Phần ghi nối (tab phụ hỏng) không bao giờ rộng hơn tiêu đề tab chính."""
+    _doi_ten_tab(token, sheet_id, ten)
+    _vua_cot(token, sheet_id, so_cot)
+
+
 def _cot(n: int) -> str:
     """Số cột (1-based) → chữ cột Excel: 1→A, 12→L, 27→AA."""
     s = ""
@@ -2708,7 +2786,9 @@ def _ghi_tab_phu(token: str, sheet_id: str, so_dong_chinh: int, rows: list[list]
     được một phần — phần ghi tiếp phải nằm DƯỚI vùng đó chứ không đè lên.
     """
     try:
-        _write_values(token, _them_tab(token, ten), rows)
+        sid_tab = _them_tab(token, ten)
+        _write_values(token, sid_tab, rows)
+        _vua_cot(token, sid_tab, max((len(r) for r in rows), default=1))
         return f"tab '{ten}'", so_dong_chinh
     except Exception as e:  # noqa: BLE001
         print(f"[social_listen] thêm tab {ten} hỏng, ghi dưới sheet chính: {_che_token(e)}")
@@ -2766,7 +2846,8 @@ def _trich_dan_bai(bai: list[dict], n: int = _TRICH_DAN_MOI_NHAN) -> dict[str, l
     qua `_khong_the` (không còn dấu ngoặc nhọn, gộp khoảng trắng) và cắt ngắn."""
     ra = {}
     for lab in phan_loai.SAC_THAI.values():
-        con = sorted((d for d in bai if d.get("_sac_thai") == lab),
+        con = sorted((d for d in bai if d.get("_sac_thai") == lab
+                      and not d.get("_cua_thuong_hieu")),
                      key=lambda d: (-int(d.get("views") or 0), -int(d.get("likes") or 0),
                                     str(d.get("link") or "")))[:n]
         ra[lab] = [{"nen_tang": d.get("platform"), "kenh": _khong_the(d.get("kenh"))[:40],
@@ -2776,12 +2857,32 @@ def _trich_dan_bai(bai: list[dict], n: int = _TRICH_DAN_MOI_NHAN) -> dict[str, l
     return ra
 
 
+def danh_dau_bai_nha(bai, thuong_hieu=()) -> int:
+    """Gắn `_cua_thuong_hieu` cho bài do CHÍNH brand đăng (E2E 04-05/10/2026: 3 bài của
+    HAPAS bị đếm vào sắc thái bài). Handle (`username`) hoặc tên kênh là handle trong
+    `phan_loai.tai_khoan_nha()`, hoặc handle chính chủ của brand đang quét (`thuong_hieu`
+    = từ khoá: "hapas" -> hapas, hapas.official, hapas_vn…). -> số bài của brand."""
+    n = 0
+    for d in bai:
+        nha = any(phan_loai.la_tai_khoan_nha(d.get(k), thuong_hieu)
+                  for k in ("username", "kenh"))
+        d["_cua_thuong_hieu"] = nha
+        n += nha
+    return n
+
+
+def _nguon_bai(d: dict) -> str:
+    return phan_loai.NGUON_NHA if d.get("_cua_thuong_hieu") else phan_loai.NGUON_KHACH
+
+
 def thong_ke_sac_thai(bai: list[dict]) -> dict:
     """Bài đã giữ (dict có platform/likes/views/text/`_sac_thai`) -> {thong_ke,
     dong_thong_ke, trich_dan}. Tỉ lệ tính trên số ĐÃ phân loại (`phan_loai.dem`), kèm số
-    chưa phân loại — tổng thể và theo từng nền tảng."""
+    chưa phân loại — tổng thể và theo từng nền tảng. Bài `_cua_thuong_hieu` (gắn bằng
+    `danh_dau_bai_nha`) không vào số/% — đếm riêng ở `cua_thuong_hieu`."""
     rows = [{"platform": d.get("platform") or "?", "likes": int(d.get("likes") or 0),
-             "sac_thai": d.get("_sac_thai") or phan_loai.CHUA} for d in bai]
+             "sac_thai": d.get("_sac_thai") or phan_loai.CHUA,
+             "cua_thuong_hieu": bool(d.get("_cua_thuong_hieu"))} for d in bai]
     tk = phan_loai.dem(rows)
     tk.pop("theo_bai", None)                 # mỗi bài là một "bài" — bảng theo bài vô nghĩa
     for g in [tk, *tk["theo_nen_tang"].values()]:
@@ -2810,6 +2911,9 @@ def _bang_thong_ke(st: dict) -> list[list]:
              "Tỉ lệ % theo lượt thích"],
             [f"TỔNG: đã phân loại {tk['da_phan_loai']}/{tk['tong']} bài "
              f"({tk['chua_phan_loai']} chưa phân loại)", "", "", "", ""]]
+    if tk.get("cua_thuong_hieu"):
+        rows.append([f"{tk['cua_thuong_hieu']} bài của chính thương hiệu (không tính)",
+                     "", "", "", ""])
     rows += khoi("Tổng", tk)
     for p, g in tk["theo_nen_tang"].items():
         rows += khoi(f"Nền tảng: {_TEN_NGUON.get(p, p)}", g)
@@ -3409,7 +3513,8 @@ def _handle(args: dict, **kwargs) -> str:
     if "tiktok" in plats:
         actors.append(_ACTORS["tiktok_fallback"])
     ex_cp = ThreadPoolExecutor(max_workers=1)
-    f_cp = ex_cp.submit(_chi_phi_thuc, actors, _bat_dau, est) if actors else None
+    f_cp = (ex_cp.submit(_chi_phi_thuc, actors, _bat_dau, est, han_chot - 1.0)
+            if actors else None)
 
     # Bước 2 — MỘT bước AI phân xử cho cả lượt quét (thay bộ lọc AI + AI cứu cũ).
     ai_log: list[str] = []
@@ -3726,11 +3831,14 @@ def _handle(args: dict, **kwargs) -> str:
         return not giu_nuoc_ngoai and d.get("_thi_truong") not in (country, "không rõ")
     hits_chinh = [(d, dt) for d, dt in hits if not _nuoc_khac(d)]
     hits_khac = [(d, dt) for d, dt in hits if _nuoc_khac(d)]
+    danh_dau_bai_nha([d for d, _ in hits], queries)
     # Cột mới nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen.
     rows = [list(_HEADER) + _COT_THEM_BAI] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d)] for d, dt in hits_chinh]
+        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d), _nguon_bai(d)]
+        for d, dt in hits_chinh]
     rows_khac = [list(_HEADER) + _COT_THEM_BAI] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d)] for d, dt in hits_khac]
+        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d), _nguon_bai(d)]
+        for d, dt in hits_khac]
     # Sắc thái đếm trên bài của sheet chính (thị trường đang quét) — đúng bảng người dùng
     # mở ra; bài brand ở nước khác không trộn vào tỉ lệ của thị trường này.
     st = thong_ke_sac_thai([d for d, _ in hits_chinh])  # thong_ke, dong_thong_ke, trich_dan
@@ -3786,6 +3894,7 @@ def _handle(args: dict, **kwargs) -> str:
         except Exception as e:  # noqa: BLE001
             bi_loai_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — chỉ còn ví dụ trong "
                              f"per_platform")
+    _sua_tab_chinh(tok, sid, TAB_BAI_DANG, len(rows[0]))
     # Có tab phụ thật (không phải ghi dưới sheet chính) thì sheet chính đã bị đẩy khỏi vị
     # trí đầu (xem `_dua_tab_chinh_len_dau`) — kéo về để link mở ra đúng sheet chính.
     if any(o == f"tab '{t}'" for o, t in ((thi_truong_khac_ghi_o, _TAB_THI_TRUONG_KHAC),

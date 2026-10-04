@@ -191,7 +191,8 @@ _TRAN_USD = (0.5, 0.1, 50.0)     # USD mỗi lần gọi (cả lượt), cũng l
 
 _HEADER = ["Nền tảng", "Người bình luận", "Nội dung bình luận", "Sắc thái", "Chủ đề",
            "Likes", "Trả lời", "Thời gian", "Tác giả đã thích", "Link bài",
-           "Trả lời bình luận"]   # dòng TRẢ LỜI: link (YouTube) / cid + trích (TikTok) gốc
+           "Trả lời bình luận",   # dòng TRẢ LỜI: link (YouTube) / cid + trích (TikTok) gốc
+           phan_loai.NGUON_COT]   # "thương hiệu" = chính brand trả lời, không vào thống kê
 _TAB_THONG_KE = "Thống kê"
 _CAT = "CÓ THỂ BỊ CẮT DO TRẦN CHI PHÍ"
 _CHUA_CHAY_GIO = "CHƯA CHẠY — hết thời gian"
@@ -289,6 +290,44 @@ def _chuan(url: str) -> str:
     if "tiktok.com" in u:
         u = u.split("?")[0]
     return u.rstrip("/")
+
+
+_RE_CHU_BAI = re.compile(r"(?:tiktok\.com|threads\.(?:net|com))/@([^/?#]+)", re.I)
+
+
+def _chu_bai(*links: str) -> str:
+    """Handle chủ bài đọc từ link (TikTok `/@chủ/video/…`, Threads `/@chủ/post/…`)."""
+    for u in links:
+        m = _RE_CHU_BAI.search(str(u or ""))
+        if m:
+            return m.group(1)
+    return ""
+
+
+def _thuong_hieu(v) -> list[str]:
+    if not v:
+        return []
+    xs = v if isinstance(v, (list, tuple)) else re.split(r"[,;]+", str(v))
+    return [str(x).strip() for x in xs if str(x).strip()][:10]
+
+
+def _danh_dau_thuong_hieu(rows: list[dict], thuong_hieu=()) -> int:
+    """Gắn `cua_thuong_hieu` cho dòng do CHÍNH brand viết (E2E 04-05/10/2026: trả lời của
+    hapas.official bị đếm vào sắc thái). Dấu hiệu: nguồn báo là chủ kênh (`cua_chu`:
+    YouTube authorChannelId == kênh video), tác giả trùng chủ bài (TikTok uniqueId ==
+    chủ video, Threads), handle trong `phan_loai.tai_khoan_nha()`, hoặc handle chính chủ
+    của `thuong_hieu`. -> số dòng của brand. Dòng vẫn ghi sheet, chỉ không vào thống kê."""
+    n = 0
+    for c in rows:
+        nha = bool(c.get("cua_chu")) or phan_loai.la_tai_khoan_nha(
+            c.get("kenh"), thuong_hieu, _chu_bai(c.get("bai"), c.get("link")))
+        c["cua_thuong_hieu"] = nha
+        n += nha
+    return n
+
+
+def _nguon(c: dict) -> str:
+    return phan_loai.NGUON_NHA if c.get("cua_thuong_hieu") else phan_loai.NGUON_KHACH
 
 
 def _quy_ve_bai(nguon: list[str], us: list[str]) -> str:
@@ -396,6 +435,7 @@ def _map_youtube(raw: list) -> tuple[list[dict], int]:
         # KHÔNG bịa thành ngày tuyệt đối.
         "thoi_gian": str(it.get("publishedTimeText") or ""),
         "tac_gia_thich": "có" if it.get("hasCreatorHeart") else "",
+        "cua_chu": bool(it.get("authorIsChannelOwner")),
         "link": it.get("pageUrl") or "",
         "_nguon": [str(it.get(k) or "") for k in ("pageUrl", "videoUrl", "inputUrl", "url")]
                   + ([f"https://www.youtube.com/watch?v={it['videoId']}"]
@@ -578,6 +618,9 @@ def _yt_dong(sn: dict, vid: str, tra_loi: int = 0, cha: str = "") -> dict:
         "replies": tra_loi,
         "thoi_gian": _gio(sn.get("publishedAt")),      # API cho mốc tuyệt đối (ISO 8601)
         "tac_gia_thich": "",                          # API không trả "tim của tác giả"
+        # Chủ kênh trả lời: authorChannelId của bình luận == kênh của video (`channelId`).
+        "cua_chu": bool(sn.get("channelId")) and str(
+            (sn.get("authorChannelId") or {}).get("value") or "") == str(sn.get("channelId")),
         "link": link,
         "cha": cha,
         "_nguon": [link],
@@ -1140,6 +1183,9 @@ def _dong_thong_ke(tk: dict) -> list[list]:
     rows = [["Phạm vi", "Sắc thái / Chủ đề", "Số bình luận",
              "Tỉ lệ % (trên số đã phân loại)", "Tỉ lệ % theo lượt thích"],
             [f"TỔNG: đã phân loại {tk['da_phan_loai']}/{tk['tong']}", "", "", "", ""]]
+    if tk.get("cua_thuong_hieu"):
+        rows.append([f"{tk['cua_thuong_hieu']} phản hồi của chính thương hiệu (không tính)",
+                     "", "", "", ""])
     rows += khoi("Tổng", tk)
     for p, g in tk["theo_nen_tang"].items():
         rows += khoi(f"Nền tảng: {p}", g)
@@ -1155,7 +1201,9 @@ def _ghi_thong_ke(tok: str, sid_chinh: str, so_dong_chinh: int, tk: dict) -> str
     them_tab = getattr(A, "_them_tab", None)
     if them_tab:
         try:
-            A._write_values(tok, them_tab(tok, _TAB_THONG_KE), rows)
+            sid_tk = them_tab(tok, _TAB_THONG_KE)
+            A._write_values(tok, sid_tk, rows)
+            A._vua_cot(tok, sid_tk, 5)
             return f"tab '{_TAB_THONG_KE}'"
         except Exception as e:  # noqa: BLE001
             print(f"[social_deep_dive] thêm tab Thống kê hỏng, ghi dưới sheet chính: "
@@ -1236,6 +1284,10 @@ SCHEMA = {
                 "true = CHỈ ước tính số bình luận/USD/phút, không chạy, không tốn tiền.")},
             "chay_nen": {"type": "boolean", "description": (
                 "true = ép chạy nền (xong Mark tự nhắn). Bỏ trống = tool tự quyết theo cỡ.")},
+            "thuong_hieu": {"type": "string", "description": (
+                "Brand đang soi (vd 'hapas'), nhiều tên cách nhau dấu phẩy. Phản hồi của "
+                "chính brand (chủ bài/video, hapas.official, hapas.vn…) vẫn ghi sheet "
+                "nhưng KHÔNG tính vào thống kê sắc thái.")},
         },
         "required": ["post_urls"],
     },
@@ -1387,13 +1439,21 @@ def _xu_ly(args: dict) -> str:
     dv_yt = sum(int(kq.get("dv") or 0) for kq in lo_kq)
     lo_yt = [kq for kq in lo_kq if kq.get("yt_api")]
     ex_cp = ThreadPoolExecutor(max_workers=1)
-    f_cp = ex_cp.submit(A._chi_phi_thuc, actors, bat_dau, est) if actors else None
+    # Hạn chót cho việc hỏi lại tiền: xong trước `f_cp.result(timeout=…)` bên dưới, kẻo
+    # chờ số ổn định quá lâu rồi mất luôn cả số đã đọc được.
+    f_cp = (ex_cp.submit(A._chi_phi_thuc, actors, bat_dau, est,
+                         t0 + A._TOOL_DEADLINE - 10) if actors else None)
 
     tt_pl: dict = {}
-    if rows:
+    _danh_dau_thuong_hieu(rows, _thuong_hieu(args.get("thuong_hieu")))
+    khach = [c for c in rows if not c["cua_thuong_hieu"]]
+    for c in rows:
+        if c["cua_thuong_hieu"]:          # tiếng của brand: không gán nhãn, không tính
+            c["sac_thai"], c["chu_de"] = phan_loai.NHAN_NHA, ""
+    if khach:
         han_pl = min(_PHAN_LOAI_TOI_DA, A._TOOL_DEADLINE - (time.monotonic() - t0) - 12)
-        nhan = phan_loai.phan_loai_binh_luan(rows, han_pl, tt_pl)
-        for c, (s, cd) in zip(rows, nhan):
+        nhan = phan_loai.phan_loai_binh_luan(khach, han_pl, tt_pl)
+        for c, (s, cd) in zip(khach, nhan):
             c["sac_thai"], c["chu_de"] = s, cd
 
     thuc = None
@@ -1529,7 +1589,7 @@ def _xu_ly(args: dict) -> str:
     values = [list(_HEADER)] + [[
         c["platform"], c["kenh"], c["text"], c.get("sac_thai", phan_loai.CHUA),
         c.get("chu_de", phan_loai.CHUA), c["likes"], c["replies"], c["thoi_gian"],
-        c["tac_gia_thich"], c["bai"] or c["link"], c.get("cha") or "",
+        c["tac_gia_thich"], c["bai"] or c["link"], c.get("cha") or "", _nguon(c),
     ] for c in rows]
     pl = {"trang_thai": tt_pl.get("trang_thai", ""), "da_phan_loai": tk["da_phan_loai"],
           "tong": tk["tong"], "ghi_chu": tt_pl.get("ghi_chu", "")}
@@ -1548,6 +1608,7 @@ def _xu_ly(args: dict) -> str:
         thong_ke_o = _ghi_thong_ke(tok, sid, len(values), tk)
     except Exception as e:  # noqa: BLE001 — sheet chính đã ghi xong, chỉ thiếu bảng đếm
         thong_ke_o = f"KHÔNG ghi được ({_che_token(type(e).__name__)})"
+    A._sua_tab_chinh(tok, sid, A.TAB_BINH_LUAN, len(_HEADER))
 
     sender = memory_store.get_current_sender()
     granted = _grant(tok, sender) if sender else False
@@ -1560,6 +1621,9 @@ def _xu_ly(args: dict) -> str:
               f"'{title}'; thống kê ở {thong_ke_o}. GỬI `sheet_url`. Số sentiment CHỈ lấy "
               f"từ `thong_ke`/`dong_thong_ke`, nói rõ đã phân loại {tk['da_phan_loai']}/"
               f"{tk['tong']}; dẫn lời thật từ `trich_dan`."
+              + (f" {tk['cua_thuong_hieu']} phản hồi của CHÍNH thương hiệu (cột Nguồn = "
+                 f"'{phan_loai.NGUON_NHA}') nằm trong sheet nhưng KHÔNG tính vào số/% — "
+                 f"nói rõ như `dong_thong_ke`." if tk.get("cua_thuong_hieu") else "")
               + canh_bao
               + ("" if granted else " CẢNH BÁO: chưa cấp được quyền tự động.")),
     )
@@ -1712,7 +1776,8 @@ def _thu_chay_nen(args, urls, nhom, per, cat_per, ke_tai_cho, per_url):
                   f"~{_usd(est_n)} USD, ~{phut} phút. Lần này PHẢI nói số USD ước tính. KẾT "
                   f"THÚC bằng \"Chạy nhé?\"; đồng ý thì gọi lại bỏ `chi_uoc_tinh`.")), ""
     ts = {"post_urls": urls, "max_comments": per, "so_bai": len(urls),
-          "title": str(args.get("title") or "").strip()}
+          "title": str(args.get("title") or "").strip(),
+          "thuong_hieu": _thuong_hieu(args.get("thuong_hieu"))}
     tom = viec_nen.tao_viec("social_deep_dive", ts, _ke_hoach_nen(ke_n, tran_usd_n),
                             {"usd": est_n, "phut": phut, "binh_luan": bl_n}, ns,
                             ghi_chu=[cau_ns], con_lai_thang=hm["con_lai"] if hm else None)
@@ -1882,7 +1947,12 @@ def chay_viec_nen(v) -> tuple[str, str]:
                 continue
             da.add(k)
             rows.append(c)
-    tt_pl = _nhan_nen(v, rows) if rows else {}
+    _danh_dau_thuong_hieu(rows, ts.get("thuong_hieu") or ())
+    for c in rows:
+        if c["cua_thuong_hieu"]:          # tiếng của brand: không gán nhãn, không tính
+            c["sac_thai"], c["chu_de"] = phan_loai.NHAN_NHA, ""
+    khach = [c for c in rows if not c["cua_thuong_hieu"]]
+    tt_pl = _nhan_nen(v, khach) if khach else {}
     v.dat("dang_ghi")
     per_url: dict = {}
     for p, nt in v.d["nen_tang"].items():
@@ -1933,7 +2003,7 @@ def chay_viec_nen(v) -> tuple[str, str]:
                 c.get("sac_thai", phan_loai.CHUA), c.get("chu_de", phan_loai.CHUA),
                 c.get("likes") or 0, c.get("replies") or 0, c.get("thoi_gian") or "",
                 c.get("tac_gia_thich") or "", c.get("bai") or c.get("link") or "",
-                c.get("cha") or ""]
+                c.get("cha") or "", _nguon(c)]
                 for c in rows])
             s.ghi_tab(_TAB_THONG_KE, _dong_thong_ke(tk))
             url = s.s.get("url") or ""
