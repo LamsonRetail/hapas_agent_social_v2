@@ -49,8 +49,11 @@ def gia(monkeypatch):
         goi.append({"actor": actor, "payload": payload, "limit": limit,
                     "nen_tang": nen_tang, "tran_usd": tran_usd,
                     "han": A._HAN_CHOT.get(), "so": A._SO_RUN.get()})
+        goi[-1]["tran_usd"] = tran_usd
         r = ket["chinh"] if actor == T.ACTOR_CHINH else ket["du_phong"]
         if isinstance(r, Exception):
+            if A._SO_RUN.get() is not None:
+                A._SO_RUN.get().append(getattr(r, "meta", {}))
             raise r
         so = A._SO_RUN.get()
         if so is not None:
@@ -120,7 +123,7 @@ def test_moi_luot_di_qua_call_voi_tran_tiktok_va_han_chot(gia):
     chay(nganh="thời trang")
     g = gia["goi"][0]
     assert g["nen_tang"] == "tiktok", "phải chịu trần riêng TikTok trên console"
-    assert g["tran_usd"] is None, "không tự đặt trần riêng, để console quyết"
+    assert g["tran_usd"] is None, "lượt chính không tự đặt trần riêng, để console quyết"
     assert g["han"] is not None and g["so"] is not None, "thiếu hạn chót / sổ run"
 
 
@@ -656,3 +659,64 @@ def test_du_phong_bi_huy_vi_het_gio_thi_canh_bao(gia, monkeypatch):
     gia["ket"]["du_phong"] = LEXIS_THAT
     kq = chay()
     assert any("QUA_GIO" in c and "118s" in c for c in kq["canh_bao"])
+
+
+# ───────────────────────────── chính + dự phòng không vượt trần ─────────────────────────────
+def _hong(usd=None, run_id="r1"):
+    return A.LoiApify("LOI", "Run kết thúc FAILED.", {"run_id": run_id, "usd": usd})
+
+
+@pytest.mark.parametrize("tran", [0.1, 0.25, 0.5, 1.0, 2.4, 5.0])
+@pytest.mark.parametrize("phan_chinh", [0.0, 0.3, 0.6, 0.9])
+def test_chinh_cong_du_phong_khong_bao_gio_vuot_tran(gia, monkeypatch, tran, phan_chinh):
+    """Review PR #6: mỗi `_call` gửi maxTotalChargeUsd = nguyên trần → chính hỏng + dự
+    phòng từng tiêu tới ~1,8 lần trần. Tiền chính THẬT + trần gửi cho dự phòng ≤ trần."""
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (500, tran, True))
+    da_tieu = round(phan_chinh * tran, 4)
+    gia["ket"]["chinh"] = _hong(usd=da_tieu)
+    kq = chay(so_ads=200)
+    dp = [g for g in gia["goi"] if g["actor"] == T.ACTOR_DU_PHONG]
+    if dp:
+        tran_dp = dp[0]["tran_usd"]
+        assert tran_dp is not None, "dự phòng phải mang trần riêng = phần còn lại"
+        assert da_tieu + tran_dp <= tran + 1e-9
+        assert T._GIA_DP_KHOI_DONG + dp[0]["limit"] * T._GIA_DP_AD <= tran_dp + 1e-9
+        assert tran_dp >= A._TRAN_USD_KHOANG[0], "dưới sàn 0,1 USD thì _run_actor tự nâng"
+    else:
+        # Không có ad nào thì tool trả lỗi; lý do bỏ dự phòng phải nằm trong đó.
+        assert "trần TikTok" in kq.get("error", ""), kq
+
+
+def test_tien_chinh_khong_doc_duoc_thi_tru_theo_uoc_tinh(gia, monkeypatch):
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (500, 1.0, True))
+    monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {"usd": 0, "so_run": 0})
+    gia["ket"]["chinh"] = _hong(usd=None)
+    chay(so_ads=100)                       # ước tính chính = 100 × 0,003 = 0,3 USD
+    dp = [g for g in gia["goi"] if g["actor"] == T.ACTOR_DU_PHONG][0]
+    assert dp["tran_usd"] == pytest.approx(0.7)
+
+
+def test_run_chua_tao_thi_du_phong_duoc_ca_tran(gia, monkeypatch):
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (500, 1.0, True))
+    gia["ket"]["chinh"] = _hong(usd=None, run_id=None)
+    chay(so_ads=20)
+    dp = [g for g in gia["goi"] if g["actor"] == T.ACTOR_DU_PHONG][0]
+    assert dp["tran_usd"] == pytest.approx(1.0) and dp["limit"] == 20
+
+
+def test_con_lai_duoi_phi_khoi_dong_thi_bo_du_phong(gia, monkeypatch):
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (500, 0.1, True))
+    gia["ket"]["chinh"] = _hong(usd=0.09)
+    kq = chay()
+    assert [g["actor"] for g in gia["goi"]] == [T.ACTOR_CHINH]
+    assert "error" in kq and "trần TikTok" in kq["error"]
+
+
+def test_bo_du_phong_ma_van_co_ads_thi_noi_trong_canh_bao(gia, monkeypatch):
+    """Chính trả rỗng kèm báo gói (có tính phí) + hết trần → giữ kết quả, nói rõ lý do."""
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (500, 0.1, True))
+    monkeypatch.setattr(T, "_da_tieu", lambda meta, est: 0.09)
+    monkeypatch.setattr(T, "_can_du_phong", lambda *a: True)
+    kq = chay()
+    assert [g["actor"] for g in gia["goi"]] == [T.ACTOR_CHINH]
+    assert any("Không chạy nguồn dự phòng" in c for c in kq["canh_bao"])

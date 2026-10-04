@@ -40,6 +40,7 @@ from __future__ import annotations
 import collections
 import contextvars
 import datetime
+import math
 import os
 import re
 import time
@@ -241,11 +242,46 @@ def _tom_tat(ads: list[dict]) -> dict:
 
 
 # ───────────────────────────── chạy actor ─────────────────────────────
-def _trong_han(han_run: float, so_run: list, actor: str, payload: dict, n: int) -> list:
-    """Một lượt actor dưới hạn chót + sổ run của apify_tool (gọi trong copy_context)."""
+def _trong_han(han_run: float, so_run: list, actor: str, payload: dict, n: int,
+               tran_usd: float | None = None) -> list:
+    """Một lượt actor dưới hạn chót + sổ run của apify_tool (gọi trong copy_context).
+
+    `tran_usd` None = trần TikTok trên console; có số = trần riêng của lượt này (dự phòng
+    chỉ được phần còn lại sau lượt chính)."""
     A._SO_RUN.set(so_run)
     A._HAN_CHOT.set(han_run)
-    return A._call(actor, payload, n, nen_tang="tiktok")
+    if tran_usd is None:
+        return A._call(actor, payload, n, nen_tang="tiktok")
+    return A._call(actor, payload, n, tran_usd=tran_usd, nen_tang="tiktok")
+
+
+def _da_tieu(meta: dict | None, est: float) -> float:
+    """Tiền lượt chính đã tiêu: 0 nếu run chưa hề được tạo; số thật của Apify nếu đọc được;
+    không đọc được thì lấy ước tính (`est`, = số ads × giá — actor tính tiền theo ad)."""
+    if not meta or not meta.get("run_id"):
+        return 0.0
+    u = meta.get("usd")
+    if u is None:
+        cp = A._chi_phi_cac_run([meta["run_id"]]) or {}
+        u = cp.get("usd") if cp.get("so_run") else None
+    try:
+        return max(0.0, float(u)) if u is not None else est
+    except (TypeError, ValueError):
+        return est
+
+
+def _tran_du_phong(tran_usd: float, da_tieu: float, n: int) -> tuple[float, int]:
+    """(trần USD, số ads) cho lượt dự phòng = PHẦN CÒN LẠI của trần TikTok sau lượt chính.
+
+    Review PR #6: mỗi lượt `_call` gửi Apify `maxTotalChargeUsd` = NGUYÊN trần console, nên
+    chính hỏng rồi chạy dự phòng có thể tiêu tới ~1,8 lần trần. Trần dự phòng làm tròn
+    XUỐNG tới cent; dưới mức sàn Apify của `_run_actor` (0,1 USD — dưới đó nó tự nâng lên)
+    hoặc không đủ phí khởi động + một ad thì (0, 0) = không chạy."""
+    con = math.floor(max(0.0, tran_usd - da_tieu) * 100) / 100
+    if con < max(A._TRAN_USD_KHOANG[0], _GIA_DP_KHOI_DONG + _GIA_DP_AD):
+        return 0.0, 0
+    n_dp = min(n, int((_BIEN * con - _GIA_DP_KHOI_DONG) / _GIA_DP_AD))
+    return (con, n_dp) if n_dp >= 1 else (0.0, 0)
 
 
 def _can_du_phong(loi: Exception | None, items: list, meta: dict | None) -> bool:
@@ -371,10 +407,10 @@ def _handle(args: dict, **_kwargs) -> str:
                         f"{bo['nganh']['ten_nhom']} (rộng hơn {bo['nganh']['ten']}).")
     if bo["muc_tieu"] == "tuong_tac":
         canh_bao.append("Nguồn dự phòng không lọc được mục tiêu Tương tác.")
-    # Dự phòng chỉ xin số ads vừa trần USD của nó (đắt hơn ~1,3 lần).
-    n_dp = max(1, min(n, int((_BIEN * tran_usd - _GIA_DP_KHOI_DONG) / _GIA_DP_AD)))
     est = _gia_chinh(n, bo["chi_tiet"])
-    est_toi_da = est + _gia_du_phong(n_dp)
+    # Trường hợp xấu nhất: lượt chính tiêu đủ ước tính rồi hỏng, dự phòng dùng phần còn lại.
+    _, n_dp = _tran_du_phong(tran_usd, est, n)
+    est_toi_da = est + (_gia_du_phong(n_dp) if n_dp else 0.0)
     pham_vi = _pham_vi(bo)
 
     if _co(args.get("chi_uoc_tinh"), False):
@@ -413,14 +449,22 @@ def _handle(args: dict, **_kwargs) -> str:
                  else "trả 0 ads kèm báo giới hạn gói: "
                       + A._che_token(str((meta or {}).get("statusMessage") or ""))[:150])
         loi["nguon_chinh"] = ly_do[:250]
+        da_tieu = _da_tieu(meta, est)
+        tran_dp, n_dp = _tran_du_phong(tran_usd, da_tieu, n)
         if han - time.monotonic() < _GIAY_DU_PHONG:
             loi["du_phong"] = "không còn đủ thời gian của lượt để chạy nguồn dự phòng"
+        elif not n_dp:
+            loi["du_phong"] = "không chạy: trần TikTok của lượt đã gần hết"
+            canh_bao.append(
+                f"Không chạy nguồn dự phòng: nguồn chính đã tiêu khoảng "
+                f"{A._usd_vn(round(da_tieu, 3))} USD, phần còn lại của trần TikTok trên "
+                f"console ({A._usd_vn(tran_usd)} USD/lượt) không đủ cho một lượt dự phòng.")
         else:
             actors.append(ACTOR_DU_PHONG)
             try:
                 items = contextvars.copy_context().run(
                     _trong_han, han_run, so_run, ACTOR_DU_PHONG, _payload_du_phong(bo, n_dp),
-                    n_dp)
+                    n_dp, tran_dp)
                 nguon = "dự phòng"
             except Exception as e:  # noqa: BLE001
                 items = []
@@ -442,7 +486,7 @@ def _handle(args: dict, **_kwargs) -> str:
         canh_bao.append(f"Nguồn {nguon} dừng giữa chừng ({cuoi['ma']}): "
                         + A._che_token(str(cuoi.get("ly_do") or ""))[:200])
 
-    est_that = est + (_gia_du_phong(n_dp) if ACTOR_DU_PHONG in actors else 0.0)
+    est_that = est + (_gia_du_phong(n_dp) if ACTOR_DU_PHONG in actors and n_dp else 0.0)
     thuc = A._chi_phi_thuc(actors, bat_dau, est_that)
     chi_phi_tool.ghi(queries=[f"top ads TikTok: {pham_vi}"], platforms=["tiktok"],
                      date_range=f"{bo['ky']} ngày gần nhất", thuc=thuc, est=est_that)
