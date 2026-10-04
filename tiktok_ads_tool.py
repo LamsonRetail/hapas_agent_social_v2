@@ -11,7 +11,8 @@ Vì sao là TOOL RIÊNG đặt cạnh `fb_ads_library`, không phải chế đ�
     Gắn thêm một chế độ TỐN TIỀN và GHI Lark Sheet vào đó là cho việc cần `write_data`
     lọt qua danh sách chỉ-đọc của `lsr_policy`.
   • Tool riêng có mục policy riêng (`write_data`), có luật hỏi "Chạy nhé?" như mọi tool
-    tốn tiền, và có công tắc riêng trên console khi platform thêm (xem lsr_policy).
+    tốn tiền, và có công tắc riêng trên console (`/topads`; chưa đặt riêng thì theo
+    công tắc Quét mạng xã hội — xem `_CONG_TAC_LUI` trong lsr_policy).
 
 Nguồn: endpoint JSON của Creative Center đòi header ký, nên đi qua actor Apify — KHÔNG tự
 dựng chữ ký hay lách chống bot.
