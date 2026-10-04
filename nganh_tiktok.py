@@ -16,6 +16,11 @@ bên gọi phải nói rõ là đã lọc rộng hơn.
 
 Khớp câu: chữ CÓ DẤU trước. Bỏ dấu chỉ dùng cho cụm dài (>= 6 chữ cái): "son" bỏ dấu
 trùng "sơn", "váy" trùng "vay", "ví" trùng "vi", "túi" trùng "tui" (= "tôi" miền Nam).
+
+Khớp cụm chọn cụm TỐT NHẤT, không phải cụm đầu tiên (E2E 04-05/10/2026: "thời trang & phụ
+kiện" dính "phụ kiện" của ngành con Clothing Accessories trước ngành cha Apparel &
+Accessories): cả câu trùng đúng một cụm thì thắng (ngành cha trước), không thì cụm DÀI
+nhất (đếm theo chữ); bằng nhau thì theo thứ tự bảng — ngành con trước, như cũ.
 """
 from __future__ import annotations
 
@@ -38,8 +43,9 @@ NHOM_TREND = {"10", "11", "12", "14", "15", "17", "18", "19", "21", "22", "23", 
               "27", "28", "29"}
 
 # (khoá, tên tiếng Việt, nhãn azzouzana, mã ngành cha, cụm người dùng hay gõ).
-# THỨ TỰ CÓ NGHĨA: ngành con đứng trước ngành cha ("trang sức cao cấp" trước "trang
-# sức", "phụ kiện trang sức" trước "phụ kiện", "giày nữ" trước "giày").
+# THỨ TỰ chỉ phân xử khi hai cụm khớp DÀI BẰNG NHAU (xem `tim`): ngành con đứng trước
+# ngành cha ("túi xách thời trang" → Túi xách). Cụm dài hơn luôn thắng ("phụ kiện trang
+# sức" thắng "phụ kiện", "thời trang & phụ kiện" thắng "phụ kiện").
 _BANG = (
     ("tui_xach", "Túi xách", "Bags", "22",
      ("túi xách", "túi", "balo", "ba lô", "ví", "bóp", "handbag", "bags", "bag",
@@ -62,7 +68,7 @@ _BANG = (
      ("phụ kiện thời trang", "phụ kiện", "mũ", "nón", "khăn", "thắt lưng", "kính mát",
       "clothing accessories", "accessories")),
     ("thoi_trang", "Thời trang và phụ kiện", "Apparel & Accessories", "22",
-     ("thời trang", "quần áo", "giày dép", "giày", "apparel & accessories", "apparel",
+     ("thời trang & phụ kiện", "thời trang và phụ kiện", "thời trang", "quần áo", "giày dép", "giày", "apparel & accessories", "apparel",
       "fashion")),
     ("nuoc_hoa", "Nước hoa", "Fragrances & Perfumes", "14",
      ("nước hoa", "perfume", "fragrances", "fragrance")),
@@ -131,15 +137,22 @@ def tim(cau) -> dict | None:
         cha = next((d for d in _BANG if d[3] == nhom and not _ra(d)["la_nganh_con"]), None)
         if cha:
             return _ra(cha)
-    for dong in _BANG:
+    tot, diem_tot = None, None
+    for i, dong in enumerate(_BANG):
+        cha = not _ra(dong)["la_nganh_con"]
         for cum in dong[4]:
             c = _co_dau(cum)
-            if _co_cum(s, c):
-                return _ra(dong)
             ck = _khong_dau(c)
-            if len(ck.replace(" ", "")) >= _BO_DAU_TOI_THIEU and _co_cum(k, ck):
-                return _ra(dong)
-    return None
+            co_dau = _co_cum(s, c)
+            bo_dau = len(ck.replace(" ", "")) >= _BO_DAU_TOI_THIEU and _co_cum(k, ck)
+            if not (co_dau or bo_dau):
+                continue
+            trung = (co_dau and s == c) or (bo_dau and k == ck)
+            # Trùng nguyên câu > ngành cha khi trùng nguyên câu > cụm dài > thứ tự bảng.
+            diem = (trung, trung and cha, len(c.split()), -i)
+            if diem_tot is None or diem > diem_tot:
+                tot, diem_tot = dong, diem
+    return _ra(tot) if tot else None
 
 
 def ten_nhom_tu_key(key) -> str:
