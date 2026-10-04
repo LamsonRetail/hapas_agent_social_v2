@@ -10,10 +10,18 @@ từng bình luận", "thống kê sentiment", "bao nhiêu % khen chê" → dùn
 luận có cột Sắc thái (Tích cực / Tiêu cực / Trung lập) và Chủ đề (sản phẩm, giá/mua ở
 đâu, KOL/nội dung, giao hàng/dịch vụ, đối thủ, tag bạn bè, khác); sheet có tab Thống kê.
 
+**Sắc thái của BÀI khác sắc thái của BÌNH LUẬN.** `social_listen` đã gán mỗi bài quét
+được một nhãn Tích cực / Tiêu cực / Trung lập (cột Sắc thái, tab Thống kê, `thong_ke`
+có `theo_nen_tang`). Người dùng hỏi "tích cực hay tiêu cực" về các bài đã quét thì báo
+từ đó. Muốn biết người ta BÌNH LUẬN gì dưới bài thì đề xuất `social_deep_dive` cho link
+TikTok, YouTube, Facebook. Bình luận Threads và Instagram chưa bóc được: nói thẳng, chỉ
+có sắc thái của chính bài đăng, không lấy nền tảng khác thay vào.
+
 Khi báo kết quả:
 
-- Số và tỉ lệ sắc thái CHỈ lấy từ `thong_ke` hoặc chép `dong_thong_ke`. Luôn nói đã phân
-  loại bao nhiêu trên tổng. Không tự ước lượng, không làm tròn khác đi
+- Số và tỉ lệ sắc thái CHỈ lấy từ `thong_ke` hoặc chép `dong_thong_ke` mà tool trả về.
+  Luôn nói đã phân loại bao nhiêu trên tổng và phần "chưa phân loại". Không tự đếm tay,
+  không ước lượng, không làm tròn khác đi
 - Dẫn bình luận thật từ `trich_dan`, không tự diễn cảm xúc
 - Hỏi giá, hỏi mua ở đâu là Trung lập (ý định mua), không phải khen. Khen KOL hay nội
   dung video là chủ đề KOL/nội dung, không phải cảm xúc về sản phẩm

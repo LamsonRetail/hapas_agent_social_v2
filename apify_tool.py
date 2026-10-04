@@ -77,6 +77,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout, 
 import chi_phi_tool
 import lark_client as lark
 import memory_store
+import phan_loai
 import tai_khoan_ai
 from config import config
 
@@ -291,6 +292,8 @@ _SHALLOW = {"tiktok": 100, "facebook": 100, "instagram": 100,
 
 _HEADER = ["Nền tảng", "Ngày đăng", "Kênh", "Followers", "Views", "Likes",
            "Comments", "Shares", "Hashtags", "Nội dung", "Link", "Từ khoá"]
+# Cột nối sau `_HEADER` ở sheet chính + tab "Thị trường khác" của lượt tại chỗ.
+_COT_THEM_BAI = ["Thị trường", "Nhận định AI", "Sắc thái"]
 
 _HASHTAG_RE = re.compile(r"#([A-Za-z0-9_\u00C0-\u1EF9]+)")
 
@@ -1677,9 +1680,23 @@ KHÔNG CHẮC thì dùng mã khong_ro (hệ thống tự xét bài đó bằng l
 
 Mã: brand, ad, product, ugc, other_market (đi với "k") | lac_de, trung_ten,
 nguoi_noi_tieng_khac, spam (đi với "l") | khong_ro (với "k" hoặc "l").
-CHỈ trả JSON một dòng, khoá là số i của thẻ, ví dụ
-{{"0":["k","brand"],"1":["l","trung_ten","ban nhạc metal"],"2":["k","other_market","TH"]}}.
-Phần tử thứ ba tuỳ chọn: lý do ngắn (≤8 chữ); riêng other_market thì là mã nước 2 chữ.
+
+SẮC THÁI của MỖI bài: cảm nhận của người đăng về brand, sản phẩm, quảng cáo hay chiến
+dịch của brand.
+  tich_cuc  khen, thích, khoe đã mua, muốn mua, hào hứng với quảng cáo / bộ sưu tập
+  tieu_cuc  chê, phàn nàn (chất lượng, giá, giao hàng, dịch vụ), tố hàng giả, chê quảng
+            cáo; MỈA MAI (lời khen kèm dấu hiệu mỉa như "đẹp thật đấy 🙂", "=))" kèm ý chê)
+  trung_lap đưa tin, hỏi giá / hỏi mua ở đâu, review không nghiêng bên nào, bài đăng bán
+            hay quảng cáo của CHÍNH brand / shop (tiếng của brand, không phải cảm nhận
+            người dùng), không rõ
+Không chắc thì trung_lap.
+
+CHỈ trả JSON một dòng, khoá là số i của thẻ, giá trị là
+[quyết định, mã, sắc thái, ghi chú tuỳ chọn], ví dụ
+{{"0":["k","brand","tich_cuc"],"1":["l","trung_ten","trung_lap","ban nhạc metal"],\
+"2":["k","other_market","trung_lap","TH"]}}.
+Phần tử thứ ba BẮT BUỘC: tich_cuc | tieu_cuc | trung_lap. Phần tử thứ tư tuỳ chọn: lý do
+ngắn (≤8 chữ); riêng other_market thì là mã nước 2 chữ.
 Không giải thích.
 
 """
@@ -1698,9 +1715,25 @@ def _boc_bai(i: int, d: dict) -> str:
             f'thị trường: {d.get("_thi_truong") or "không rõ"}</p>')
 
 
-def _doc_phan_xu(tra_loi: str, n: int) -> dict[int, tuple[bool, str, str]]:
-    """JSON model trả -> {chỉ số: (giữ, mã, ghi chú)}. Dòng sai/thiếu/mâu thuẫn ("k" với mã
-    loại) thì bỏ — dòng đó tự rơi về luật cũ, không đoán."""
+# Mã sắc thái bài trong JSON phán xử -> nhãn của `phan_loai` (CÙNG bộ nhãn với bình luận
+# của social_deep_dive, để hai bảng đếm đọc chung được). Nhận cả "+", "-", "=" của phan_loai.
+_SAC_THAI_BAI = {"tich_cuc": phan_loai.SAC_THAI["+"], "tieu_cuc": phan_loai.SAC_THAI["-"],
+                 "trung_lap": phan_loai.SAC_THAI["="],
+                 **phan_loai.SAC_THAI}
+
+
+def _ma_sac_thai(x) -> str | None:
+    return _SAC_THAI_BAI.get(str(x or "").strip().lower())
+
+
+def _doc_phan_xu(tra_loi: str, n: int) -> dict[int, tuple[bool, str, str, str | None]]:
+    """JSON model trả -> {chỉ số: (giữ, mã, ghi chú, sắc thái)}. Dòng sai/thiếu/mâu thuẫn
+    ("k" với mã loại) thì bỏ — dòng đó tự rơi về luật cũ, không đoán.
+
+    Sắc thái (02/10/2026, cùng lượt model — không gọi thêm): phần tử SAU mã mà là mã sắc
+    thái thì lấy, phần tử đầu tiên không phải mã sắc thái là ghi chú. Nhận cả dạng cũ
+    `["k","other_market","TH"]` (không có sắc thái -> None = "chưa phân loại"); mã sắc
+    thái lạ cũng None, KHÔNG đoán."""
     m = re.search(r"\{.*\}", tra_loi or "", re.S)
     try:
         d = json.loads(m.group(0)) if m else None
@@ -1721,12 +1754,14 @@ def _doc_phan_xu(tra_loi: str, n: int) -> dict[int, tuple[bool, str, str]]:
             continue
         if (kl == "k" and ma in _MA_LOAI) or (kl == "l" and ma in _MA_GIU):
             continue
-        ghi = _khong_the(v[2])[:60] if len(v) > 2 else ""
-        ra[i] = (kl == "k", ma, ghi)
+        sau = list(v[2:])
+        sac = next((_ma_sac_thai(x) for x in sau if _ma_sac_thai(x)), None)
+        ghi = next((x for x in sau if not _ma_sac_thai(x)), "")
+        ra[i] = (kl == "k", ma, _khong_the(ghi)[:60] if ghi else "", sac)
     return ra
 
 
-def _xu_mot_lo(bai: list[dict], dau: str, han: float) -> dict[int, tuple[bool, str, str]]:
+def _xu_mot_lo(bai: list[dict], dau: str, han: float) -> dict[int, tuple]:
     """Một lượt model cho một lô. Ném lỗi nếu model hỏng/hết giờ/trả rác — bên gọi cho
     cả lô rơi về luật cũ."""
     nhac = dau + "\n".join(_boc_bai(i, d) for i, d in enumerate(bai))
@@ -1763,11 +1798,16 @@ def _phan_xu_ai(rows: list, queries: list[str], boi_canh: str, thi_truong_quet: 
     `toi_da`/`song_song`/`thu_tu` cho bước phân xử theo tầng của việc nền
     (`quet_lon._phan_xu_tang`): chỉ xét đúng các chỉ số `thu_tu` (đã xếp ưu tiên), tối đa
     `toi_da` bài, `song_song` lô một lúc. Bỏ trống = hành vi lượt tại chỗ như cũ.
+
+    SẮC THÁI (02/10/2026): cùng lượt model trả thêm sắc thái từng bài; nằm ở
+    `trạng thái["_sac_thai"]` = {chỉ số: "Tích cực"/"Tiêu cực"/"Trung lập"}. Chỉ có bài model
+    phán hợp lệ VÀ không phải `khong_ro` (bài đó rơi về luật) — bài còn lại là "chưa phân
+    loại" ở bên gọi, không đoán bù.
     """
     log = log if log is not None else []
     tong = len(rows)
     tt = {"trang_thai": "", "da_xet": 0, "tong": tong, "so_lo": 0, "lo_loi": 0,
-          "lo_het_gio": 0}
+          "lo_het_gio": 0, "_sac_thai": {}}
     ly_do = ("không có bài" if not rows else
              "tắt (SOCIAL_AI_PHAN_XU=0)" if not _ai_phan_xu_bat() else
              "thiếu boi_canh" if not boi_canh else
@@ -1816,7 +1856,9 @@ def _phan_xu_ai(rows: list, queries: list[str], boi_canh: str, thi_truong_quet: 
                        f"{_che_token(e)[:80]}) -> loc theo luat")
             continue
         for j, v in ra.items():
-            ket[lo[j]] = v
+            ket[lo[j]] = tuple(v[:3])
+            if len(v) > 3 and v[3] and v[1] != "khong_ro":
+                tt["_sac_thai"][lo[j]] = v[3]
     da = tt["da_xet"] = len(ket)
     if da and da >= tong:
         tt["trang_thai"] = "đã chạy"
@@ -2658,6 +2700,74 @@ def _ghi_bi_loai(token: str, sheet_id: str, so_dong_chinh: int,
                         "BỊ LOẠI", "lý do ở cột cuối (bài khớp sai/ngoài thị trường)")[0]
 
 
+# ── Sắc thái BÀI đăng (02/10/2026) ──
+# Team marketing hỏi "tích cực hay tiêu cực, focus vào Threads" về BÀI đã quét; trước đây
+# bài không có nhãn nên Mark tự đếm tay, không ra %. Nhãn đến từ CHÍNH lượt AI phân xử
+# (`_phan_xu_ai`), đếm bằng `phan_loai.dem` như bình luận của social_deep_dive. Bài AI
+# không đọc / lô hỏng / AI không chắc -> "chưa phân loại", không đoán bù.
+_TAB_THONG_KE = "Thống kê"
+_TRICH_DAN_MOI_NHAN = 3
+
+
+def _trich_dan_bai(bai: list[dict], n: int = _TRICH_DAN_MOI_NHAN) -> dict[str, list[dict]]:
+    """Tối đa `n` bài nhiều view nhất mỗi sắc thái — để DẪN lời thật. Chữ người lạ viết đi
+    qua `_khong_the` (không còn dấu ngoặc nhọn, gộp khoảng trắng) và cắt ngắn."""
+    ra = {}
+    for lab in phan_loai.SAC_THAI.values():
+        con = sorted((d for d in bai if d.get("_sac_thai") == lab),
+                     key=lambda d: (-int(d.get("views") or 0), -int(d.get("likes") or 0),
+                                    str(d.get("link") or "")))[:n]
+        ra[lab] = [{"nen_tang": d.get("platform"), "kenh": _khong_the(d.get("kenh"))[:40],
+                    "views": int(d.get("views") or 0), "likes": int(d.get("likes") or 0),
+                    "text": _khong_the(d.get("text"))[:160],
+                    "link": _khong_the(d.get("link"))[:300]} for d in con]
+    return ra
+
+
+def thong_ke_sac_thai(bai: list[dict]) -> dict:
+    """Bài đã giữ (dict có platform/likes/views/text/`_sac_thai`) -> {thong_ke,
+    dong_thong_ke, trich_dan}. Tỉ lệ tính trên số ĐÃ phân loại (`phan_loai.dem`), kèm số
+    chưa phân loại — tổng thể và theo từng nền tảng."""
+    rows = [{"platform": d.get("platform") or "?", "likes": int(d.get("likes") or 0),
+             "sac_thai": d.get("_sac_thai") or phan_loai.CHUA} for d in bai]
+    tk = phan_loai.dem(rows)
+    tk.pop("theo_bai", None)                 # mỗi bài là một "bài" — bảng theo bài vô nghĩa
+    for g in [tk, *tk["theo_nen_tang"].values()]:
+        g.pop("chu_de", None)                # bài không có chủ đề (chỉ bình luận có)
+    dong = phan_loai.dong_thong_ke(tk, "bài")
+    if tk["da_phan_loai"] and len(tk["theo_nen_tang"]) > 1:
+        dong += " Theo nền tảng: " + " | ".join(
+            f"{_TEN_NGUON.get(p, p)}: " + phan_loai.dong_thong_ke(g, "bài")
+            for p, g in tk["theo_nen_tang"].items())
+    return {"thong_ke": tk, "dong_thong_ke": dong, "trich_dan": _trich_dan_bai(bai)}
+
+
+def _bang_thong_ke(st: dict) -> list[list]:
+    """Bảng tab 'Thống kê': tổng, theo nền tảng, rồi trích dẫn. Mọi dòng đủ 5 cột."""
+    tk = st["thong_ke"]
+
+    def khoi(pham_vi: str, g: dict) -> list[list]:
+        r = [[pham_vi, lab, v["so"], "" if v["ti_le"] is None else v["ti_le"],
+              "" if v["ti_le_theo_like"] is None else v["ti_le_theo_like"]]
+             for lab, v in g["sac_thai"].items()]
+        if g["chua_phan_loai"]:
+            r.append([pham_vi, "Chưa phân loại", g["chua_phan_loai"], "", ""])
+        return r
+
+    rows = [["Phạm vi", "Sắc thái", "Số bài", "Tỉ lệ % (trên số đã phân loại)",
+             "Tỉ lệ % theo lượt thích"],
+            [f"TỔNG: đã phân loại {tk['da_phan_loai']}/{tk['tong']} bài "
+             f"({tk['chua_phan_loai']} chưa phân loại)", "", "", "", ""]]
+    rows += khoi("Tổng", tk)
+    for p, g in tk["theo_nen_tang"].items():
+        rows += khoi(f"Nền tảng: {_TEN_NGUON.get(p, p)}", g)
+    rows += [[""] * 5, ["TRÍCH DẪN", "Sắc thái", "Nền tảng · kênh", "Nội dung", "Link"]]
+    for lab, ds in st["trich_dan"].items():
+        rows += [["", lab, f"{_TEN_NGUON.get(x['nen_tang'], x['nen_tang'])} · {x['kenh']}",
+                  x["text"], x["link"]] for x in ds]
+    return rows
+
+
 def _grant(token: str, open_id: str) -> bool:
     """File do bot tạo nên bot là chủ; KHÔNG cấp quyền thì người dùng mở không được."""
     try:
@@ -2765,6 +2875,11 @@ SCHEMA = {
         "CHỈ được nói 'AI đã lọc' khi `loc_bang_ai`=true. `loc_ai_trang_thai` khác 'đã chạy' "
         "('chạy một phần (n/N)' / 'bỏ qua: …') thì nói rõ phần chưa qua AI chỉ lọc theo luật "
         "nên sheet có thể còn nhiễu.\n"
+        "- SẮC THÁI BÀI: cùng lượt AI gán mỗi bài Tích cực/Tiêu cực/Trung lập (cột 'Sắc "
+        "thái'); bài AI không đọc được là 'chưa phân loại'. Hỏi tích cực hay tiêu cực (kể cả "
+        "riêng một nền tảng): số và % CHỈ lấy từ `thong_ke` (tổng + `theo_nen_tang`) hoặc "
+        "chép `dong_thong_ke`, luôn nói đã phân loại `da_phan_loai`/`tong`, dẫn bài thật từ "
+        "`trich_dan`; bảng đếm ở `thong_ke_ghi_o` (tab 'Thống kê'). Không tự đếm tay.\n"
         "- THỊ TRƯỜNG: BẮT BUỘC nói đã quét thị trường nào và giữ/chuyển bao nhiêu bài thị "
         "trường khác — chép `cau_thi_truong`. Mặc định bài của brand ở nước khác (vd HAPAS "
         "THAILAND) được GIỮ nhưng ở TAB RIÊNG 'Thị trường khác' (`thi_truong_khac_ghi_o`), "
@@ -3243,6 +3358,7 @@ def _handle(args: dict, **kwargs) -> str:
                                  han_chot - _SAU_AI, ai_log)
     giay_ai = round(time.monotonic() - t_ai, 1)
     loc_bang_ai = ai_tt["da_xet"] > 0
+    sac_thai_ai = ai_tt.pop("_sac_thai", None) or {}
 
     # Bước 3 — quyết từng bài: có phán xử AI thì theo AI, không thì luật cũ; rồi xử lý
     # thị trường khác (giữ + gắn nhãn, hoặc chuyển "Bị loại" khi `chi_thi_truong_nay`).
@@ -3251,6 +3367,8 @@ def _handle(args: dict, **kwargs) -> str:
     for i, (d, dt) in enumerate(cho_xet):
         p = d["platform"]
         v = phan_xu.get(i)
+        # Sắc thái chỉ từ lượt AI vừa đọc bài này; không có thì "chưa phân loại".
+        d["_sac_thai"] = sac_thai_ai.get(i) or phan_loai.CHUA
         if v and v[1] == "khong_ro":
             # AI không chắc -> luật dự phòng đầy đủ (từ khoá + hệ chữ + thị trường). Review
             # 02/10/2026: "giữ nếu khớp chữ" cho lọt tin tiếng Hindi về địa danh Hapas.
@@ -3539,17 +3657,23 @@ def _handle(args: dict, **kwargs) -> str:
                 d["views"], d["likes"], d["comments"], d["shares"], d["hashtags"],
                 d["text"], d["link"], kw, d.get("_thi_truong") or "không rõ"]
 
+    def _sac(d: dict) -> str:
+        return d.get("_sac_thai") or phan_loai.CHUA
+
     # Bài của brand ở nước khác sang tab riêng (xem `_TAB_THI_TRUONG_KHAC`); hỏi nhiều nước
     # (`giu_nuoc_ngoai`) thì chung sheet chính như cũ.
     def _nuoc_khac(d: dict) -> bool:
         return not giu_nuoc_ngoai and d.get("_thi_truong") not in (country, "không rõ")
     hits_chinh = [(d, dt) for d, dt in hits if not _nuoc_khac(d)]
     hits_khac = [(d, dt) for d, dt in hits if _nuoc_khac(d)]
-    # Hai cột mới nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen.
-    rows = [list(_HEADER) + ["Thị trường", "Nhận định AI"]] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or ""] for d, dt in hits_chinh]
-    rows_khac = [list(_HEADER) + ["Thị trường", "Nhận định AI"]] + [
-        _dong(d, dt) + [d.get("_nhan_dinh") or ""] for d, dt in hits_khac]
+    # Cột mới nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen.
+    rows = [list(_HEADER) + _COT_THEM_BAI] + [
+        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d)] for d, dt in hits_chinh]
+    rows_khac = [list(_HEADER) + _COT_THEM_BAI] + [
+        _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d)] for d, dt in hits_khac]
+    # Sắc thái đếm trên bài của sheet chính (thị trường đang quét) — đúng bảng người dùng
+    # mở ra; bài brand ở nước khác không trộn vào tỉ lệ của thị trường này.
+    st = thong_ke_sac_thai([d for d, _ in hits_chinh])  # thong_ke, dong_thong_ke, trich_dan
     # Bài bị loại vẫn có sheet để kiểm (kể cả khi KHÔNG bài nào được giữ): bộ lọc
     # loại nhầm mà không ai thấy được thì không bao giờ sửa được.
     rows_loai = [list(_HEADER) + ["Thị trường", "Lý do loại"]] + [
@@ -3561,7 +3685,7 @@ def _handle(args: dict, **kwargs) -> str:
         _write_values(tok, sid, rows)
     except Exception as e:  # noqa: BLE001
         return tool_result(
-            success=False, sheet_url=None, **base,
+            success=False, sheet_url=None, **base, **st,
             tom_tat_loai=_tom_tat(""),
             error=_che_token(canh_bao_nguon
                              + f"Cào OK ({len(hits)} post trong khoảng) nhưng TẠO/GHI SHEET "
@@ -3584,6 +3708,17 @@ def _handle(args: dict, **kwargs) -> str:
             so_dong = getattr(e, "so_dong_tiep", so_dong)
             thi_truong_khac_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — "
                                      f"{len(hits_khac)} bài thị trường khác thiếu trong sheet")
+    # Tab "Thống kê" chỉ khi có ít nhất một bài được gán nhãn — 0 nhãn thì bảng vô nghĩa,
+    # `dong_thong_ke` đã nói rõ là chưa có số liệu.
+    thong_ke_ghi_o = None
+    if st["thong_ke"]["da_phan_loai"]:
+        try:
+            thong_ke_ghi_o, so_dong = _ghi_tab_phu(
+                tok, sid, so_dong, _bang_thong_ke(st), _TAB_THONG_KE, "THỐNG KÊ",
+                "sắc thái bài đăng của sheet chính")
+        except Exception as e:  # noqa: BLE001
+            so_dong = getattr(e, "so_dong_tiep", so_dong)
+            thong_ke_ghi_o = f"KHÔNG ghi được ({type(e).__name__}) — số liệu vẫn ở `thong_ke`"
     bi_loai_ghi_o = None
     if bi_loai:
         try:
@@ -3594,6 +3729,7 @@ def _handle(args: dict, **kwargs) -> str:
     # Có tab phụ thật (không phải ghi dưới sheet chính) thì sheet chính đã bị đẩy khỏi vị
     # trí đầu (xem `_dua_tab_chinh_len_dau`) — kéo về để link mở ra đúng sheet chính.
     if any(o == f"tab '{t}'" for o, t in ((thi_truong_khac_ghi_o, _TAB_THI_TRUONG_KHAC),
+                                          (thong_ke_ghi_o, _TAB_THONG_KE),
                                           (bi_loai_ghi_o, _TAB_BI_LOAI))):
         _dua_tab_chinh_len_dau(tok, sid)
 
@@ -3602,6 +3738,7 @@ def _handle(args: dict, **kwargs) -> str:
 
     return tool_result(
         success=True, title=title, sheet_url=url, granted=granted, **base,
+        **st, thong_ke_ghi_o=thong_ke_ghi_o,
         top=_top_per_platform(hits_chinh, 3),
         tom_tat_loai=_tom_tat(bi_loai_ghi_o or ""),
         bi_loai_ghi_o=bi_loai_ghi_o,
@@ -3628,6 +3765,11 @@ def _handle(args: dict, **kwargs) -> str:
                  f"{bi_loai_ghi_o} kèm lý do" if bi_loai else "")
               + ". Muốn nhiều post trong khoảng hơn thì tăng "
               f"`limit` hoặc nới khoảng ngày. GỬI `sheet_url`. " + cau_thi_truong
+              + " Sắc thái bài (cột 'Sắc thái'"
+              + (f", bảng đếm ở {thong_ke_ghi_o}" if thong_ke_ghi_o else "") + "): "
+              + st["dong_thong_ke"] + " Hỏi tích cực/tiêu cực thì số và % CHỈ lấy từ "
+              "`thong_ke`/`dong_thong_ke`, luôn nói đã phân loại bao nhiêu/tổng, dẫn bài "
+              "thật từ `trich_dan` — không tự đếm, không ước lượng."
               + ("" if granted else " CẢNH BÁO: chưa cấp được quyền tự động.")),
     )
 

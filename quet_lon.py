@@ -31,6 +31,7 @@ import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import apify_tool as A
+import phan_loai
 import sheet_lon
 
 from tools.registry import tool_error, tool_result  # type: ignore
@@ -1117,7 +1118,11 @@ def _phan_xu_tang(rows: list, ts: dict, han_mono: float, log: list, *, cache: di
     tối đa `SOCIAL_AI_NEN_TOI_DA_LUOT` (10) lượt, 2 lượt song song, gặp lỗi quota lần đầu là
     dừng (phần còn lại theo luật). Phán của AI lan theo KÊNH (≥2 phán cùng chiều). Thêm MỘT
     lượt kiểm mẫu 120 bài luật đã giữ để đo luật sai bao nhiêu. Cache phán theo sha1(link):
-    khởi động lại không hỏi model lại bài đã hỏi."""
+    khởi động lại không hỏi model lại bài đã hỏi.
+
+    Sắc thái (02/10/2026): cùng lượt AI trả sắc thái từng bài -> `thống kê["_sac_thai"]` =
+    {i: nhãn}, lưu kèm phán trong cache (phần tử thứ 4). Bài theo luật / theo kênh / AI
+    không chắc không có nhãn ("chưa phân loại"), không đoán bù."""
     cache = {} if cache is None else cache
     toi_da_luot = _ai_toi_da_luot() if toi_da_luot is None else toi_da_luot
     tang = [_tang(d, ts) for d, _ in rows]
@@ -1125,10 +1130,14 @@ def _phan_xu_tang(rows: list, ts: dict, han_mono: float, log: list, *, cache: di
           "mo_ho": tang.count("mo_ho"), "luot_ai": 0, "ai_xet": 0, "theo_kenh": 0,
           "tu_cache": 0, "dung_vi_quota": False, "mau_kiem": None, "trang_thai": ""}
     ket: dict = {}
+    sac: dict = {}
+    nhan_hop_le = set(A._SAC_THAI_BAI.values())
     for i, (d, _) in enumerate(rows):
         v = cache.get(_khoa_link(d))
         if v:
             ket[i] = (bool(v[0]), v[1], v[2] if len(v) > 2 else "", "AI")
+            if len(v) > 3 and v[3] in nhan_hop_le and v[1] != "khong_ro":
+                sac[i] = v[3]
             tt["tu_cache"] += 1
     ly_do = ("tắt (SOCIAL_AI_PHAN_XU=0)" if not A._ai_phan_xu_bat() else
              "thiếu boi_canh" if not ts.get("boi_canh") else
@@ -1142,9 +1151,12 @@ def _phan_xu_tang(rows: list, ts: dict, han_mono: float, log: list, *, cache: di
         r, t = A._phan_xu_ai(rows, ts["queries"], ts["boi_canh"], ts["country"], han, log,
                              toi_da=n_lo * A._AI_LO, song_song=min(song_song, n_lo),
                              thu_tu=chi_so)
+        sac_dot = t.pop("_sac_thai", None) or {}
         for i, val in r.items():
             ket[i] = (*val, "AI")
-            moi[_khoa_link(rows[i][0])] = val
+            if sac_dot.get(i):
+                sac[i] = sac_dot[i]
+            moi[_khoa_link(rows[i][0])] = (*val, sac_dot.get(i) or "")
         t["_ra"] = len(r)
         return t
 
@@ -1191,6 +1203,7 @@ def _phan_xu_tang(rows: list, ts: dict, han_mono: float, log: list, *, cache: di
             tt["theo_kenh"] += 1
     _ = moi and cache.update(moi)
     tt["_moi"] = moi
+    tt["_sac_thai"] = sac
     tt["trang_thai"] = (f"bỏ qua: {ly_do}" if ly_do else
                         "dừng vì hết quota model" if tt["dung_vi_quota"] else "đã chạy")
     return ket, tt
@@ -1238,6 +1251,7 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
     phan_xu, tt = _phan_xu_tang(cho_xet, ts, han_ai, log, cache=cache, ma=v.ma,
                                 toi_da_luot=None if cho_ai else 0)
     _cache_ghi(v, tt.pop("_moi", {}))
+    sac = tt.pop("_sac_thai", None) or {}       # không lưu {i: nhãn} 10k dòng vào sổ việc
     if not cho_ai:
         tt["trang_thai"] = ("chỉ dùng phán AI đã lưu (" + ("đã huỷ" if v.da_huy() else
                                                            "quá hạn chót") + ")")
@@ -1247,6 +1261,7 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
     for i, (d, dt) in enumerate(cho_xet):
         p = d["platform"]
         val = phan_xu.get(i)
+        d["_sac_thai"] = sac.get(i) or phan_loai.CHUA
         if val and val[1] == "khong_ro":
             d["_ai_khong_ro"] = True
             val = None
@@ -1307,7 +1322,8 @@ def _nuoc_khac(ts: dict):
     nuoc = ts.get("country") or "VN"
     return lambda d: (not ts.get("giu_nuoc_ngoai")
                       and (d.get("_thi_truong") or "không rõ") not in (nuoc, "không rõ"))
-_COT_THEM = ["Thị trường", "Nhận định AI", "Phân xử"]
+_COT_THEM = ["Thị trường", "Nhận định AI", "Phân xử", "Sắc thái"]
+_TAB_TK = A._TAB_THONG_KE
 
 
 def _dong(d: dict, dt, kw: str, n_chu: int) -> list:
@@ -1316,6 +1332,11 @@ def _dong(d: dict, dt, kw: str, n_chu: int) -> list:
             d.get("comments") or 0, d.get("shares") or 0, str(d.get("hashtags") or "")[:300],
             str(d.get("text") or "")[:n_chu], d.get("link") or "", kw,
             d.get("_thi_truong") or "không rõ"]
+
+
+def _cot_them(d: dict) -> list:
+    return [d.get("_nhan_dinh") or "", d.get("_phan_xu") or "",
+            d.get("_sac_thai") or phan_loai.CHUA]
 
 
 def _ten_tab(p: str) -> str:
@@ -1347,7 +1368,7 @@ def _ghi_so_bo(v, p: str, ts: dict, d_from, d_to) -> None:
                 continue
             da.add(k)
             d["platform"] = p
-            rows.append(_dong(d, dt, kw, 500) + ["chưa lọc", "sơ bộ"])
+            rows.append(_dong(d, dt, kw, 500) + ["chưa lọc", "sơ bộ", phan_loai.CHUA])
         rows.sort(key=lambda r: -int(r[4] or 0))
         s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows, tu_dau=True)
     except Exception as e:  # noqa: BLE001
@@ -1379,6 +1400,8 @@ def _dong_tong_hop(v, ts, ket: dict, cp: dict, trang_thai: str) -> list[list]:
         r.append([_TAB_KHAC, cau_khac])
     px = ket["phan_xu"]
     r.append(["Phân xử", _cau_phan_xu(px)])
+    if ket.get("sac_thai"):
+        r.append(["Sắc thái", ket["sac_thai"]["dong_thong_ke"]])
     r.append(["Chi phí thật", f"{_usd(cp.get('usd'))} USD ({cp.get('so_run', 0)} lượt chạy "
                               f"Apify)"])
     return r
@@ -1392,14 +1415,13 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
     kw = ", ".join(ts["queries"])
     khac = _nuoc_khac(ts)
     for p in v.d["nen_tang"]:
-        rows = [_dong(d, dt, kw, 500) + [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""]
+        rows = [_dong(d, dt, kw, 500) + _cot_them(d)
                 for d, dt in ket["hits"] if d["platform"] == p and not khac(d)]
         s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows)
     # Tab phụ rỗng: chưa từng có thì KHÔNG tạo tab trống; đã có từ lượt trước (việc tiếp tục
     # sau `xong_mot_phan`) thì vẫn ghi lại chỉ tiêu đề — `ghi_tab` xoá các dòng cũ thừa, kẻo
     # bài của lượt trước nằm lại như kết quả của lượt này.
-    rows = [_dong(d, dt, kw, 500) + [d.get("_nhan_dinh") or "", d.get("_phan_xu") or ""]
-            for d, dt in ket["hits"] if khac(d)]
+    rows = [_dong(d, dt, kw, 500) + _cot_them(d) for d, dt in ket["hits"] if khac(d)]
     if rows or _TAB_KHAC in s.s["tabs"]:
         s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM] + rows)
     bl = ket["bi_loai"]
@@ -1407,6 +1429,12 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
         rows = [_dong(d, dt, kw, 300) + [ly_do, d.get("_phan_xu") or ""]
                 for d, dt, ly_do in bl[:_BI_LOAI_TOI_DA]]
         s.ghi_tab(_TAB_LOAI, [list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"]] + rows)
+    # Bảng đếm sắc thái (bài của các tab nền tảng). 0 nhãn thì không tạo tab trống; tab
+    # đã có từ lượt trước thì vẫn ghi lại để số cũ không nằm lại.
+    st = ket.get("sac_thai") or A.thong_ke_sac_thai(
+        [d for d, _ in ket["hits"] if not khac(d)])
+    if st["thong_ke"]["da_phan_loai"] or _TAB_TK in s.s["tabs"]:
+        s.ghi_tab(_TAB_TK, A._bang_thong_ke(st))
     tong = _dong_tong_hop(v, ts, ket, cp, trang_thai)
     if len(bl) > _BI_LOAI_TOI_DA:
         tong.append(["Bị loại — không ghi", f"{len(bl) - _BI_LOAI_TOI_DA} dòng (trần "
@@ -1489,6 +1517,8 @@ def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list
     if cau_khac:
         d.append(f"Thị trường khác: {cau_khac}.")
     d.append("Phân xử: " + _cau_phan_xu(ket["phan_xu"]) + ".")
+    if ket.get("sac_thai"):
+        d.append("Sắc thái bài: " + ket["sac_thai"]["dong_thong_ke"])
     chua = [c for x in v.d["nen_tang"].values() for c in (x.get("chua_phu") or [])]
     if chua:
         d.append("Chưa phủ: " + " | ".join(chua))
@@ -1522,6 +1552,8 @@ def chay_viec(v) -> tuple[str, str]:
     _thu_don_het(v)
     cho_ai = not v.da_huy() and v.con_giay() > -120
     ket = _loc(v, ts, d_from, d_to, cho_ai, log)
+    khac = _nuoc_khac(ts)
+    ket["sac_thai"] = A.thong_ke_sac_thai([d for d, _ in ket["hits"] if not khac(d)])
     with v._khoa:
         v.d["phan_xu"] = {k: val for k, val in ket["phan_xu"].items() if k != "_moi"}
         v.luu()
@@ -1548,7 +1580,9 @@ def chay_viec(v) -> tuple[str, str]:
             v.luu()
     with v._khoa:
         v.d["ket_qua"] = {"per": ket["per"], "sheet_url": url,
-                          "giu": len(ket["hits"]), "loai": len(ket["bi_loai"])}
+                          "giu": len(ket["hits"]), "loai": len(ket["bi_loai"]),
+                          "thong_ke_sac_thai": ket["sac_thai"]["thong_ke"],
+                          "dong_thong_ke_sac_thai": ket["sac_thai"]["dong_thong_ke"]}
         v.luu()
     return trang_thai, _tin_nhan(v, ts, ket, cp, url, trang_thai, ly_do)
 
