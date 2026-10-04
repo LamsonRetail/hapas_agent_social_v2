@@ -39,8 +39,9 @@ Threads và Instagram — đo thật 04/10/2026, KHÔNG đăng nhập
   apidojo/instagram-comments-scraper-api (0,0075/bài + 0,0005/bình luận, chậm hơn).
 - Chưa đăng nhập thì cả hai KHÔNG trả trả-lời-lồng-nhau, Instagram chỉ trả một PHẦN bình
   luận — Mark phải nói ra (`gioi_han_nen_tang`), không trình bày như đủ.
-- Công tắc `bat_threads`/`bat_instagram` và trần USD riêng `tran_usd_<p>` của console
-  (Quét mạng xã hội) áp cho hai nền tảng này; trần cả lượt vẫn là `tran_usd_goi`.
+- Công tắc `bat_<p>` và trần USD riêng `tran_usd_<p>` của console (Quét mạng xã hội) áp
+  cho MỌI nền tảng (04/10/2026 — trước chỉ Threads/Instagram, chủ agent đặt `bat_tiktok=0`
+  mà bóc bình luận TikTok vẫn chạy); trần cả lượt vẫn là `tran_usd_goi`, lấy mức chặt hơn.
 - Nguồn chính HỎNG thì chạy nguồn dự phòng trong PHẦN CÒN LẠI của trần lô (cùng cách
   `tiktok_ads_tool._tran_du_phong`): tiền nguồn chính + trần dự phòng ≤ trần lô.
 
@@ -135,7 +136,9 @@ _GIA_DU_PHONG = {"threads": (0.005, 0.00021, 0.0), "instagram": (0.0, 0.0005, 0.
 _KHONG_DU_PHONG = {"HET_TIEN_THANG", "NGHEN_DONG_THOI", "DA_HUY", "QUA_GIO"}
 # Nền tảng theo công tắc + trần riêng của console "Quét mạng xã hội" (`bat_<p>`,
 # `tran_usd_<p>` — xem apify_tool._tran_nen_tang).
-_THEO_CONSOLE_QUET = ("threads", "instagram")
+# MỌI nền tảng (04/10/2026). YouTube: `tran_usd_youtube` không có (apify_tool._khoa_rieng
+# bỏ qua — API miễn phí), nhưng `bat_youtube`=0 vẫn tắt cả đường API lẫn dự phòng.
+_THEO_CONSOLE_QUET = ("tiktok", "youtube", "facebook", "threads", "instagram")
 # Giới hạn khi chưa đăng nhập — Mark phải nói ra khi báo kết quả nền tảng đó.
 _GIOI_HAN = {
     "threads": ("Threads (không đăng nhập): chỉ lấy trả lời cấp 1 công khai, KHÔNG có trả "
@@ -241,7 +244,7 @@ def _platform_of(url: str) -> str | None:
 
 def _tran_p(p: str, tran_usd: float) -> float:
     """Trần USD MỖI LƯỢT của nền tảng `p`: trần của tool, hạ thêm theo `tran_usd_<p>` trên
-    console Quét mạng xã hội nếu chủ agent đặt riêng (chỉ Threads/Instagram)."""
+    console Quét mạng xã hội nếu chủ agent đặt riêng — lấy mức CHẶT hơn trong hai."""
     if p not in _THEO_CONSOLE_QUET:
         return tran_usd
     c = A._cau_hinh_quet()
@@ -1047,7 +1050,7 @@ def _ly_do_vuot(ke_hoach: dict, tran_bl: int, tran_usd: float) -> list[str]:
     trần các lô cần giữ (mỗi lượt YouTube/Facebook đòi giữ tối thiểu 0,5 USD)."""
     bl, usd = _uoc_tinh(ke_hoach)
     can = _can_giu(ke_hoach)
-    # Trần RIÊNG mỗi lượt của Threads/Instagram (console) mà một lô vẫn vượt — vd Threads
+    # Trần RIÊNG mỗi lượt của nền tảng (console) mà một lô vẫn vượt — vd Threads
     # buộc ≥10 trả lời/bài + 0,02 USD khởi động dưới trần riêng quá thấp.
     rieng = sorted({p for p, (per, cac_lo) in ke_hoach.items() for lo in cac_lo
                     if _can_lo(p, _uoc_lo(p, lo, per)) > _tran_lo(p, _uoc_lo(p, lo, per),
@@ -1254,7 +1257,7 @@ def _xu_ly(args: dict) -> str:
             nhom.setdefault(p, []).append(u)
         else:
             chua_ho_tro.setdefault(p or "không nhận ra", []).append(u)
-    # Chủ agent TẮT Threads/Instagram trên console (`bat_<p>`=0) thì cũng không bóc bình luận.
+    # Chủ agent TẮT nền tảng trên console (`bat_<p>`=0) thì cũng không bóc bình luận.
     tat = {p: nhom.pop(p) for p in [p for p in nhom if p in _THEO_CONSOLE_QUET]
            if not A._tran_nen_tang(p)[2]}
     cau_tat = "; ".join(A._ly_do_tat(p) for p in tat)
@@ -1276,14 +1279,20 @@ def _xu_ly(args: dict) -> str:
             per_url[u] = {"platform": p, "status": "ĐÃ TẮT",
                           "error": A._ly_do_tat(p) + " — không bóc bình luận."}
     failed: list[str] = []
-    # Trần của tool thấp hơn mức actor đòi → từ chối rõ, không gọi Apify, không tự nâng.
+    # Trần (của tool, hoặc trần riêng nền tảng trên console nếu chặt hơn) thấp hơn mức
+    # actor đòi → từ chối rõ, không gọi Apify, không tự nâng.
     for p in list(nhom):
-        if not _mien_phi(p) and _MIN_CHARGE.get(p, 0) > tran_usd:
+        tp = _tran_p(p, tran_usd)
+        if not _mien_phi(p) and _MIN_CHARGE.get(p, 0) > tp:
+            rieng = tp < tran_usd
             for u in nhom.pop(p):
                 per_url[u] = {"platform": p, "status": "LỖI", "error": (
-                    f"Trần chi phí của social_deep_dive ({_usd(tran_usd)} USD/lượt) thấp hơn "
-                    f"mức tối thiểu actor {p} yêu cầu ({_usd(_MIN_CHARGE[p])} USD) — không "
-                    f"chạy. Chủ agent nâng ô `tran_usd_goi` của social_deep_dive trên console.")}
+                    (f"Trần riêng {A._TEN_NGUON.get(p, p)} trên console Quét mạng xã hội "
+                     if rieng else "Trần chi phí của social_deep_dive ")
+                    + f"({_usd(tp)} USD/lượt) thấp hơn mức tối thiểu actor {p} yêu cầu "
+                    f"({_usd(_MIN_CHARGE[p])} USD) — không chạy. Chủ agent nâng ô "
+                    + (f"`tran_usd_{p}` ở Console → {A._NOI_CONSOLE}." if rieng else
+                       "`tran_usd_goi` của social_deep_dive trên console."))}
             failed.append(p)
 
     ke_hoach = {p: _chia_lo(p, us, per, tran_usd) for p, us in nhom.items()}
@@ -1810,6 +1819,22 @@ def _nhan_nen(v, rows: list[dict]) -> dict:
     return tt
 
 
+def _bo_nen_tang_da_tat(v, ly_do: list) -> None:
+    """Chủ agent tắt nền tảng (`bat_<p>`=0) SAU khi việc nền đã tạo: lượt con CHƯA chạy của
+    nền tảng đó không chạy nữa (lượt đang chạy dở thì để `quet_lon` đọc tiếp như thường)."""
+    c = A._cau_hinh_quet()
+    tat = set()
+    for p, ph in list(v.cac_phan()):
+        if p in _THEO_CONSOLE_QUET and ph.get("trang_thai") in (None, "cho") \
+                and not A._tran_nen_tang(p, nen=True, c=c)[2]:
+            v.cap_nhat_phan(ph, trang_thai="loi", ma="DA_TAT", so_item=0, usd_so=0.0,
+                            ly_do=A._ly_do_tat(p) + " — lượt này không chạy")
+            tat.add(p)
+    if tat:
+        ly_do.append("; ".join(A._ly_do_tat(p) for p in sorted(tat))
+                     + " sau khi tạo việc — phần chưa chạy của nền tảng đó bỏ qua")
+
+
 def chay_viec_nen(v) -> tuple[str, str]:
     """Runner của viec_nen cho `social_deep_dive`. -> (trạng thái cuối, tin kết quả)."""
     import quet_lon
@@ -1817,6 +1842,7 @@ def chay_viec_nen(v) -> tuple[str, str]:
     ts = v.d["tham_so"]
     ly_do: list[str] = []
     if v.d["trang_thai"] == "dang_cao":
+        _bo_nen_tang_da_tat(v, ly_do)
         if v.qua_han():
             quet_lon._dong_phan_dang_chay(v, ts, chuan=_chuan_nen)
             ly_do.append("bot khởi động lại sau hạn chót — huỷ lô đang chạy, giữ phần đã có")
@@ -1851,6 +1877,10 @@ def chay_viec_nen(v) -> tuple[str, str]:
                 if u in loi_bai:              # video tắt bình luận / không tồn tại (API)
                     per_url[u] = {"platform": p, "comments": 0, "status": loi_bai[u][0],
                                   "error": loi_bai[u][1]}
+                    continue
+                if ph.get("ma") == "DA_TAT":  # chủ agent tắt nền tảng sau khi tạo việc
+                    per_url[u] = {"platform": p, "comments": n, "status": "ĐÃ TẮT",
+                                  "error": ph.get("ly_do") or ""}
                     continue
                 if u in loi_dp:               # API hỏng, dự phòng không đủ ngân sách
                     per_url[u] = {"platform": p, "comments": n, "status": "LỖI",
