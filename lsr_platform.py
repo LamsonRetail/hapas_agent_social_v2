@@ -489,7 +489,10 @@ def _cau_hoi_kem_anh(hoi: str, j: dict, anh: list[str]) -> str:
     text — model thấy một chuỗi JSON khó hiểu. Thay bằng một câu nói rõ là có ảnh.
     """
     p = j.get("payload") or {}
-    if str(p.get("message_type") or "") == "image" or hoi.lstrip().startswith('{"image_key"'):
+    co_anh = bool(p.get("image_key") or p.get("image_keys") or anh)
+    if (str(p.get("message_type") or "") == "image" or hoi.lstrip().startswith('{"image_key"')
+            or (co_anh and not hoi.strip())):
+        # Tin rich-text chỉ có ảnh (không chữ) cũng vậy: lượt user không được rỗng.
         hoi = "(Người dùng gửi một ảnh, không kèm chữ.)"
     if not anh:
         if p.get("image_key") or p.get("image_keys"):
@@ -529,7 +532,9 @@ def ghi_luot_ngu_canh(session_id: str, user_text: str, assistant_text: str,
         return False
     try:
         for role, text in (("user", user_text), ("assistant", assistant_text)):
-            if text:
+            # Lượt rỗng / chỉ khoảng trắng không ghi: nó quay lại qua `recent_turns`
+            # và làm Anthropic từ chối cả lượt sau.
+            if isinstance(text, str) and text.strip():
                 _goi(c, "/v1/self/session/turn", {
                     "session_id": session_id,
                     "role": role,
