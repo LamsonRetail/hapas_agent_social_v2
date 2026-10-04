@@ -164,30 +164,156 @@ def cancel_reminder(reminder_id: str) -> bool:
     return found
 
 
-def _fire_due(now: float | None = None) -> int:
-    """Send any due reminders as the bot. Returns how many fired."""
-    now = now or time.time()
-    fired = 0
-    with _lock:
-        items = _load()
-        dirty = False
-        for r in items:
-            if r.get("done") or r["due_ts"] > now:
-                continue
+# ───────────────────────── gửi ─────────────────────────
+# Sự cố 04/10/2026: nhắc đặt từ chat Lark đi qua gateway platform mang chat key
+# `lark:<app_id>:<oc_…>`. Bản cũ đưa nguyên chuỗi đó cho `lark.send_text` → Lark trả
+# 230001 "invalid receive_id", và vì MỌI lỗi đều "để lần sau thử lại" nên nhắc
+# 6cbd4598d1 của người dùng thật thử 4.271 lần (mỗi 20 giây), không bao giờ tới.
+# Nay: tách chat key giống `viec_nen.kenh_hien_tai`, gửi đúng đường việc nền dùng; lỗi
+# vĩnh viễn thì dừng hẳn, lỗi tạm thì lùi dần và có trần.
+
+#: Trễ quá chừng này thì không gửi nữa mà đánh dấu thất bại. Nhắc trễ 1–2 ngày vẫn có
+#: ích (người dùng biết việc mình hẹn đã qua, tự xử lý); trễ cả tuần thì gần như chắc
+#: chắn vô nghĩa, lại dễ làm người nhận hoang mang.
+_TRE_TOI_DA = 7 * 86400
+#: Trễ hơn chừng này mới ghi chú "nhắc trễ" (nhịp 20 giây + khởi động lại là bình thường).
+_TRE_GHI_CHU = 10 * 60
+#: Lỗi tạm thời: thử tối đa bấy nhiêu lần, lùi 30s, 60s, 120s… trần 1 giờ (≈3 giờ tổng).
+_THU_TOI_DA = 10
+_LUI_DAU = 30
+_LUI_TRAN = 3600
+
+#: Dấu hiệu Lark từ chối VĨNH VIỄN (thử lại cũng vô ích): sai receive_id, chat không
+#: còn, bot không ở trong chat. Qua gateway thì platform chỉ chuyển `msg` (không có mã),
+#: nên dò cả chữ lẫn mã.
+_DAU_VINH_VIEN = (
+    "230001", "230002", "232009", "232011",
+    "invalid receive_id", "not in the chat", "not in chat", "bot is not in",
+    "chat not found", "chat not exist", "chat does not exist", "chat_id not exist",
+    "dissolved", "disbanded",
+)
+
+
+class LoiGui(Exception):
+    """Gửi nhắc hỏng. `vinh_vien` = thử lại cũng không khá hơn."""
+
+    def __init__(self, chi_tiet: str, vinh_vien: bool):
+        super().__init__(chi_tiet)
+        self.vinh_vien = vinh_vien
+
+
+def _kenh(chat_id: str) -> tuple[str, str, str]:
+    """Tách chat key như `viec_nen.kenh_hien_tai` -> (loại, app_id, oc)."""
+    chat_id = chat_id or ""
+    if chat_id.startswith("lark:"):
+        phan = chat_id.split(":", 2)
+        if len(phan) == 3 and phan[2]:
+            return "lark_gateway", phan[1], phan[2]
+    elif chat_id.startswith("oc_"):
+        return "lark_truc_tiep", "", chat_id
+    return "khac", "", ""
+
+
+def _la_vinh_vien(chi_tiet: str) -> bool:
+    t = (chi_tiet or "").lower()
+    return any(d in t for d in _DAU_VINH_VIEN)
+
+
+def _gui(chat_id: str, text: str, uid: str) -> None:
+    """Gửi `text` vào chat của nhắc, qua đúng đường việc nền dùng. Ném `LoiGui`."""
+    loai, app_id, oc = _kenh(chat_id)
+    if loai == "khac":
+        raise LoiGui(f"chat {chat_id[:24]!r} không có kênh Lark để tự nhắn", True)
+    try:
+        if loai == "lark_gateway":
+            import lsr_platform
+            lsr_platform.gui_lark(oc, text, app_id, uuid=uid)
+        else:
+            lark.send_text("chat_id", oc, text, uuid=uid)
+    except Exception as e:  # noqa: BLE001
+        chi_tiet = f"{type(e).__name__}: {e}"
+        ma = getattr(e, "code", None)            # urllib HTTPError từ platform
+        if isinstance(ma, int):
             try:
-                lark.send_text("chat_id", r["chat_id"], r["message"])
-                fired += 1
-                print(f"[reminder] fired {r['id']} → {r['chat_id']}: {r['message'][:60]}")
-            except Exception as e:
-                print(f"[reminder] send error {r['id']}: {e}")
-                continue  # leave for retry next tick
-            if r.get("recurrence") == "daily":
-                r["due_ts"] += 86400  # next day, keep active
-            else:
-                r["done"] = True
-            dirty = True
-        if dirty:
-            _save(items)
+                chi_tiet += " " + e.read().decode("utf-8", "replace")[:300]  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                pass
+        # Platform trả 4xx (trừ 401 khoá/408/429 quá tải) = yêu cầu sai, không tự khỏi.
+        # 502 "Lark từ chối: …" thì phải nhìn nội dung mới biết.
+        vinh_vien = _la_vinh_vien(chi_tiet) or (
+            isinstance(ma, int) and 400 <= ma < 500 and ma not in (401, 408, 429))
+        raise LoiGui(chi_tiet[:400], vinh_vien) from e
+
+
+def _ngay_ke_tiep(due: float, now: float) -> float:
+    while due <= now:
+        due += 86400
+    return due
+
+
+def _xu_ly(r: dict, now: float) -> tuple[dict, bool]:
+    """Xử lý MỘT nhắc đến hạn. -> (các trường cần ghi đè, đã gửi?). In log chỉ khi trạng
+    thái đổi (gửi được / bắt đầu thử lại / thất bại), không in mỗi nhịp."""
+    rid, due = r["id"], float(r["due_ts"])
+    hang_ngay = r.get("recurrence") == "daily"
+    tre = now - due
+    xoa_thu = {"so_lan_thu": 0, "thu_lai_ts": None, "loi": None}
+    if tre > _TRE_TOI_DA:
+        if hang_ngay:
+            ke = _ngay_ke_tiep(due, now)
+            print(f"[reminder] {rid}: lỡ quá 7 ngày, bỏ các lần lỡ, hẹn lần kế "
+                  f"{_fmt(ke)}", flush=True)
+            return {"due_ts": ke, **xoa_thu}, False
+        print(f"[reminder] {rid}: THẤT BẠI — trễ {tre / 86400:.1f} ngày (quá 7), "
+              "không gửi muộn nữa", flush=True)
+        return {"done": True, "trang_thai": "that_bai", "that_bai_luc": now,
+                "loi": ((r.get("loi") or "") + " | quá hạn 7 ngày").strip(" |")}, False
+    text = r["message"]
+    if tre > _TRE_GHI_CHU:
+        text = f"(nhắc trễ do lỗi gửi — hẹn lúc {_fmt(due)}) {text}"
+    try:
+        _gui(r["chat_id"], text, f"nhac-{rid}-{int(due)}")
+    except LoiGui as e:
+        lan = int(r.get("so_lan_thu") or 0) + 1
+        if e.vinh_vien or lan >= _THU_TOI_DA:
+            ly_do = "lỗi vĩnh viễn" if e.vinh_vien else f"hết {_THU_TOI_DA} lần thử"
+            print(f"[reminder] {rid}: THẤT BẠI ({ly_do}), dừng thử: {e}", flush=True)
+            return {"done": True, "trang_thai": "that_bai", "that_bai_luc": now,
+                    "so_lan_thu": lan, "loi": str(e)}, False
+        if lan == 1:
+            print(f"[reminder] {rid}: gửi lỗi tạm, sẽ thử lại tối đa {_THU_TOI_DA} lần "
+                  f"(lùi dần): {e}", flush=True)
+        lui = min(_LUI_DAU * 2 ** (lan - 1), _LUI_TRAN)
+        return {"so_lan_thu": lan, "thu_lai_ts": now + lui, "loi": str(e)}, False
+    ghi_tre = f" (trễ {tre / 60:.0f} phút)" if tre > _TRE_GHI_CHU else ""
+    print(f"[reminder] fired {rid} → {r['chat_id'][:40]}{ghi_tre}: "
+          f"{r['message'][:60]}", flush=True)
+    if hang_ngay:
+        return {"due_ts": _ngay_ke_tiep(due, now), **xoa_thu}, True
+    return {"done": True, "trang_thai": "da_gui", "gui_luc": now, **xoa_thu}, True
+
+
+def _fire_due(now: float | None = None) -> int:
+    """Send any due reminders as the bot. Returns how many fired.
+
+    Gọi mạng NGOÀI khoá (gateway có thể mất tới 20 giây) để đặt/huỷ nhắc không bị
+    chặn; ghi kết quả theo id dưới khoá, bỏ qua nhắc bị huỷ trong lúc đang gửi."""
+    now = now or time.time()
+    with _lock:
+        den = [dict(r) for r in _load()
+               if not r.get("done") and r["due_ts"] <= now
+               and float(r.get("thu_lai_ts") or 0) <= now]
+    fired = 0
+    for r in den:
+        sua, da_gui = _xu_ly(r, now)
+        fired += int(da_gui)
+        with _lock:
+            items = _load()
+            for x in items:
+                if x.get("id") == r["id"] and not x.get("done"):
+                    x.update(sua)
+                    _save(items)
+                    break
     return fired
 
 
