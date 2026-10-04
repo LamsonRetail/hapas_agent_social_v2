@@ -39,8 +39,9 @@ Threads và Instagram — đo thật 04/10/2026, KHÔNG đăng nhập
   apidojo/instagram-comments-scraper-api (0,0075/bài + 0,0005/bình luận, chậm hơn).
 - Chưa đăng nhập thì cả hai KHÔNG trả trả-lời-lồng-nhau, Instagram chỉ trả một PHẦN bình
   luận — Mark phải nói ra (`gioi_han_nen_tang`), không trình bày như đủ.
-- Công tắc `bat_threads`/`bat_instagram` và trần USD riêng `tran_usd_<p>` của console
-  (Quét mạng xã hội) áp cho hai nền tảng này; trần cả lượt vẫn là `tran_usd_goi`.
+- Công tắc `bat_<p>` và trần USD riêng `tran_usd_<p>` của console (Quét mạng xã hội) áp
+  cho MỌI nền tảng (04/10/2026 — trước chỉ Threads/Instagram, chủ agent đặt `bat_tiktok=0`
+  mà bóc bình luận TikTok vẫn chạy); trần cả lượt vẫn là `tran_usd_goi`, lấy mức chặt hơn.
 - Nguồn chính HỎNG thì chạy nguồn dự phòng trong PHẦN CÒN LẠI của trần lô (cùng cách
   `tiktok_ads_tool._tran_du_phong`): tiền nguồn chính + trần dự phòng ≤ trần lô.
 
@@ -55,6 +56,20 @@ trong trần riêng của tool này (`tran_usd_goi` trên console, mặc định
 chạy tối đa 3 lô song song, và bài rỗng trong lô chạm trần được báo "CÓ THỂ BỊ CẮT".
 Giá gói FREE: TikTok 0,00125 USD/bình luận, YouTube 0,002, Facebook 0,0025 + 0,001/lượt.
 
+YouTube — YouTube Data API v3 làm nguồn CHÍNH (04/10/2026)
+-----------------------------------------------------------
+- `commentThreads.list` (part=snippet,replies, 100/trang, order=relevance, lật pageToken) +
+  `comments.list` cho luồng có nhiều trả lời hơn số kèm sẵn (API kèm tối đa 5). Mỗi lượt gọi
+  1 đơn vị quota trên 10.000 đơn vị miễn phí/ngày (sổ ngày dùng chung với search của
+  social_listen: `apify_tool._youtube_dem_dv`). 0 USD — không giữ trần, không ghi sổ chi
+  phí Apify; thời gian là mốc tuyệt đối; dòng trả lời có cột "Trả lời bình luận" (link gốc).
+- Actor streamers~youtube-comments-scraper (đòi giữ 0,5 USD mỗi lượt) chỉ còn là DỰ PHÒNG khi:
+  không có `YOUTUBE_DATA_API_KEY`, hết quota (403 quotaExceeded — ghi sổ ngày, lượt sau đi
+  thẳng dự phòng), lỗi HTTP/kết nối. Dự phòng chạy trong PHẦN CÒN LẠI của trần lượt gọi
+  (`_SoNganSach.xin(..., ngoai_ke_hoach=True)` + `_tran_du_phong`), không ăn chỗ các lô khác.
+- Video TẮT bình luận (403 commentsDisabled) hoặc không tồn tại (404 videoNotFound): báo
+  từng video, KHÔNG chạy dự phòng — actor cũng không lấy được gì mà vẫn giữ 0,5 USD.
+
 Trần của chủ agent là trần CỨNG (chốt 01/10/2026): console đặt `tran_binh_luan` và
 `tran_usd_goi` cho MỖI lần gọi; trong trần người dùng xin bao nhiêu cũng được (tới
 `_MAX_PER_POST` bình luận/bài), vượt trần thì KHÔNG chạy — trả `vuot_tran` kèm mức vừa trần.
@@ -65,6 +80,7 @@ from __future__ import annotations
 
 import contextvars
 import datetime
+import html
 import math
 import re
 import threading
@@ -109,16 +125,24 @@ _GIA_KHOI_DONG = {"facebook": 0.001, "threads": 0.02}
 _GIA_MOI_BAI = {"threads": 0.0025}
 # (dưới, trên) số bình luận/bài actor nhận: Threads `max_replies` chỉ nhận 10–300.
 _PER_KHOANG = {"threads": (10, 300)}
+# Trả lời tối đa mỗi bình luận TikTok (`maxRepliesPerComment`, clockworks). Đo 04/10/2026
+# trên @hapas.official: video 66 bình luận lấy đủ 66 (64 gốc + 2 trả lời); video TikTok
+# báo 302 lấy 237 (214 gốc + 23/26 trả lời — số 302 có cả bình luận ẩn/đã xoá). Giá như cũ.
+_TRA_LOI_TIKTOK = 20
 _BAI_MOI_LO = {"threads": 20}           # Threads: tối đa 20 link mỗi lượt
 _RAM = {"threads": 1024}                # phí khởi động Threads tính theo GB RAM
 # Dự phòng: (phí khởi động, mỗi bình luận, mỗi bài). apidojo IG cho 15 bình luận đầu
-# mỗi bài miễn phí — bỏ qua cho ước tính cao hơn thực tế.
-_GIA_DU_PHONG = {"threads": (0.005, 0.00021, 0.0), "instagram": (0.0, 0.0005, 0.0075)}
+# mỗi bài miễn phí — bỏ qua cho ước tính cao hơn thực tế. YouTube: nguồn chính là API
+# miễn phí, dự phòng là chính actor streamers (giá `_GIA["youtube"]`).
+_GIA_DU_PHONG = {"threads": (0.005, 0.00021, 0.0), "instagram": (0.0, 0.0005, 0.0075),
+                 "youtube": (0.0, 0.002, 0.0)}
 # Lỗi mà nguồn dự phòng cũng gặp y hệt — không chạy dự phòng (như tiktok_ads_tool).
 _KHONG_DU_PHONG = {"HET_TIEN_THANG", "NGHEN_DONG_THOI", "DA_HUY", "QUA_GIO"}
 # Nền tảng theo công tắc + trần riêng của console "Quét mạng xã hội" (`bat_<p>`,
 # `tran_usd_<p>` — xem apify_tool._tran_nen_tang).
-_THEO_CONSOLE_QUET = ("threads", "instagram")
+# MỌI nền tảng (04/10/2026). YouTube: `tran_usd_youtube` không có (apify_tool._khoa_rieng
+# bỏ qua — API miễn phí), nhưng `bat_youtube`=0 vẫn tắt cả đường API lẫn dự phòng.
+_THEO_CONSOLE_QUET = ("tiktok", "youtube", "facebook", "threads", "instagram")
 # Giới hạn khi chưa đăng nhập — Mark phải nói ra khi báo kết quả nền tảng đó.
 _GIOI_HAN = {
     "threads": ("Threads (không đăng nhập): chỉ lấy trả lời cấp 1 công khai, KHÔNG có trả "
@@ -127,6 +151,32 @@ _GIOI_HAN = {
                   "công khai (đo thật 8/18), KHÔNG có trả lời lồng nhau — không phải toàn "
                   "bộ bình luận của bài."),
 }
+# ── YouTube Data API v3 (nguồn chính, miễn phí; xem docstring) ──
+_YT_API_NGUON = "YouTube Data API v3 (miễn phí)"
+_YT_TRANG = 100               # maxResults tối đa của commentThreads.list / comments.list
+_YT_BAI_MOI_LO = 10           # video mỗi lô API (một lô = một luồng gọi tuần tự)
+_YT_THU_TU = "relevance"      # bình luận được quan tâm nhất trước (hoặc "time")
+_YT_QUOTA_NGAY = 10000        # đơn vị quota miễn phí mỗi ngày (giờ Pacific)
+_YT_TOC = 50.0                # bình luận/giây ước tính (một lượt ~100 dòng ~1–2 giây)
+_YT_HET_QUOTA = ("quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded")
+_TAT_BL = "VIDEO TẮT BÌNH LUẬN"
+# None = tự đọc (có key và hôm nay chưa hết quota); `_handle` chốt MỘT lần cho cả lượt gọi
+# (lô chạy trong bản sao context) để kế hoạch, sổ tiền và lúc chạy không lệch nhau.
+_YT_API: contextvars.ContextVar = contextvars.ContextVar("dd_yt_api", default=None)
+
+
+def _yt_api_san_sang() -> bool:
+    return A._youtube_co_key() and not A._youtube_het_quota()
+
+
+def _mien_phi(p: str) -> bool:
+    """Nền tảng `p` có kéo bằng nguồn MIỄN PHÍ trong lượt này không (YouTube Data API)."""
+    if p != "youtube":
+        return False
+    v = _YT_API.get()
+    return _yt_api_san_sang() if v is None else bool(v)
+
+
 _BIEN = 0.9            # mỗi lô chỉ tiêu tối đa 90% trần: giá thật lệch chút vẫn không chạm
 _SONG_SONG = 3
 # Chừa cho gán nhãn + ghi sheet sau khi kéo xong (trong `_TOOL_DEADLINE` 135s).
@@ -140,7 +190,8 @@ _TRAN_BL = (300, 50, 30000)      # (mặc định, thấp nhất, cao nhất) T�
 _TRAN_USD = (0.5, 0.1, 50.0)     # USD mỗi lần gọi (cả lượt), cũng là trần MỖI lượt chạy actor
 
 _HEADER = ["Nền tảng", "Người bình luận", "Nội dung bình luận", "Sắc thái", "Chủ đề",
-           "Likes", "Trả lời", "Thời gian", "Tác giả đã thích", "Link bài"]
+           "Likes", "Trả lời", "Thời gian", "Tác giả đã thích", "Link bài",
+           "Trả lời bình luận"]   # dòng TRẢ LỜI: link (YouTube) / cid + trích (TikTok) gốc
 _TAB_THONG_KE = "Thống kê"
 _CAT = "CÓ THỂ BỊ CẮT DO TRẦN CHI PHÍ"
 _CHUA_CHAY_GIO = "CHƯA CHẠY — hết thời gian"
@@ -197,7 +248,7 @@ def _platform_of(url: str) -> str | None:
 
 def _tran_p(p: str, tran_usd: float) -> float:
     """Trần USD MỖI LƯỢT của nền tảng `p`: trần của tool, hạ thêm theo `tran_usd_<p>` trên
-    console Quét mạng xã hội nếu chủ agent đặt riêng (chỉ Threads/Instagram)."""
+    console Quét mạng xã hội nếu chủ agent đặt riêng — lấy mức CHẶT hơn trong hai."""
     if p not in _THEO_CONSOLE_QUET:
         return tran_usd
     c = A._cau_hinh_quet()
@@ -275,7 +326,10 @@ def _fetch_tiktok(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict
 
 def _payload(p: str, urls: list[str], per: int) -> dict:
     if p == "tiktok":
-        return {"postURLs": urls, "commentsPerPost": per}
+        # Không có `maxRepliesPerComment` thì actor chỉ trả bình luận gốc (đo 04/10/2026).
+        # Trả lời vẫn là dòng tính tiền và vẫn nằm trong maxItems = per × số bài.
+        return {"postURLs": urls, "commentsPerPost": per,
+                "maxRepliesPerComment": min(_TRA_LOI_TIKTOK, per)}
     if p == "youtube":
         return {"startUrls": [{"url": u} for u in urls], "maxComments": per}
     if p == "threads":
@@ -299,7 +353,19 @@ def _limit(p: str, urls: list[str], per: int) -> int:
     return per * len(urls) + (len(urls) if p in _GIA_MOI_BAI else 0)
 
 
+def _cha_tiktok(it: dict, goc: dict) -> str:
+    """Cột "Trả lời bình luận" của dòng TRẢ LỜI TikTok (`repliesToId` = cid bình luận gốc):
+    TikTok không có link riêng cho bình luận nên ghi trích bình luận gốc (nếu cùng lượt) kèm
+    cid. Rỗng với bình luận gốc."""
+    cid = str(it.get("repliesToId") or "")
+    if not cid:
+        return ""
+    t = " ".join(str(goc.get(cid) or "").split())
+    return f"↳ cid {cid}" + (f": {t[:80]}" if t else "")
+
+
 def _map_tiktok(raw: list) -> tuple[list[dict], int]:
+    goc = {str(it.get("cid")): it.get("text") for it in raw if it.get("cid")}
     return [{
         "kenh": it.get("uniqueId") or "",
         "text": str(it.get("text") or "")[:1000],
@@ -308,6 +374,7 @@ def _map_tiktok(raw: list) -> tuple[list[dict], int]:
         "thoi_gian": _gio(it.get("createTimeISO")),
         "tac_gia_thich": "có" if it.get("likedByAuthor") else "",
         "link": it.get("videoWebUrl") or it.get("submittedVideoUrl") or "",
+        "cha": _cha_tiktok(it, goc),
         "_nguon": [str(it.get(k) or "") for k in
                    ("videoWebUrl", "submittedVideoUrl", "inputUrl", "url")],
     } for it in raw], len(raw)
@@ -495,6 +562,243 @@ def _map_instagram_du_phong(raw: list) -> tuple[list[dict], int]:
     return out, len(raw)
 
 
+# ───────────────────────── YouTube Data API v3 (nguồn chính) ─────────────────────────
+def _yt_link(vid: str) -> str:
+    return f"https://www.youtube.com/watch?v={vid}"
+
+
+def _yt_dong(sn: dict, vid: str, tra_loi: int = 0, cha: str = "") -> dict:
+    """Một comment (snippet của commentThreads/comments) -> dòng chung của tool. `cha` =
+    link bình luận gốc khi dòng này là TRẢ LỜI (rỗng với bình luận gốc)."""
+    link = _yt_link(vid)
+    return {
+        "kenh": str(sn.get("authorDisplayName") or ""),
+        "text": html.unescape(str(sn.get("textOriginal") or sn.get("textDisplay") or ""))[:1000],
+        "likes": _so(sn.get("likeCount")),
+        "replies": tra_loi,
+        "thoi_gian": _gio(sn.get("publishedAt")),      # API cho mốc tuyệt đối (ISO 8601)
+        "tac_gia_thich": "",                          # API không trả "tim của tác giả"
+        "link": link,
+        "cha": cha,
+        "_nguon": [link],
+    }
+
+
+def _yt_mot_video(vid: str, per: int, han: float, dv: list) -> tuple[list[dict], bool]:
+    """≤ `per` dòng (bình luận gốc + trả lời) của MỘT video -> (dòng, hết giờ giữa chừng).
+
+    Lượt 1: lật `commentThreads.list` (kèm tối đa 5 trả lời mỗi luồng) tới khi đủ `per`
+    hoặc hết trang. Lượt 2: còn chỗ thì `comments.list` (parentId) lấy nốt trả lời của các
+    luồng có nhiều trả lời hơn số kèm sẵn. Ném `A.LoiYouTube` khi API báo lỗi."""
+    rows: list[dict] = []
+    thieu: list[tuple[str, str, set]] = []      # (id gốc, link gốc, id trả lời đã có)
+
+    def goi(res: str, params: dict):
+        con = han - time.monotonic()
+        if con < 3:
+            return None
+        d = A._youtube_get(res, params, timeout=min(30.0, con))
+        dv[0] += 1
+        return d
+
+    tok = None
+    while len(rows) < per:
+        d = goi("commentThreads", {"part": "snippet,replies", "videoId": vid,
+                                   "maxResults": min(_YT_TRANG, max(1, per - len(rows))),
+                                   "order": _YT_THU_TU, "textFormat": "plainText",
+                                   **({"pageToken": tok} if tok else {})})
+        if d is None:
+            return rows, True
+        for th in d.get("items") or []:
+            if len(rows) >= per:
+                break
+            sn = th.get("snippet") or {}
+            goc = sn.get("topLevelComment") or {}
+            tong = _so(sn.get("totalReplyCount"))
+            rows.append(_yt_dong(goc.get("snippet") or {}, vid, tong))
+            cha = f"{_yt_link(vid)}&lc={goc.get('id') or ''}"
+            kem = (th.get("replies") or {}).get("comments") or []
+            da = set()
+            for r in kem:
+                if len(rows) >= per:
+                    break
+                rows.append(_yt_dong(r.get("snippet") or {}, vid, 0, cha))
+                da.add(r.get("id"))
+            if tong > len(kem) and goc.get("id"):
+                thieu.append((goc["id"], cha, da))
+        tok = d.get("nextPageToken")
+        if not tok:
+            break
+    for goc_id, cha, da in thieu:
+        tok = None
+        while len(rows) < per:
+            d = goi("comments", {"part": "snippet", "parentId": goc_id,
+                                 "maxResults": _YT_TRANG, "textFormat": "plainText",
+                                 **({"pageToken": tok} if tok else {})})
+            if d is None:
+                return rows, True
+            for r in d.get("items") or []:
+                if len(rows) >= per:
+                    break
+                if r.get("id") in da:
+                    continue
+                da.add(r.get("id"))
+                rows.append(_yt_dong(r.get("snippet") or {}, vid, 0, cha))
+            tok = d.get("nextPageToken")
+            if not tok:
+                break
+        if len(rows) >= per:
+            break
+    return rows, False
+
+
+def _yt_api_lo(lo: list[str], per: int, han: float) -> dict:
+    """Kéo bình luận các video của một lô bằng YouTube Data API.
+
+    -> {"binh_luan", "dv" (đơn vị quota), "loi_bai" {link: (trạng thái, lý do)} (tắt bình
+    luận / không có video — KHÔNG dự phòng), "con_lai" [link cần nguồn dự phòng], "loi"
+    (vì sao dự phòng), "mot_phan" [link hết giờ giữa chừng], "chua_chay" [link chưa tới
+    lượt khi hết giờ]}."""
+    ra = {"binh_luan": [], "dv": 0, "loi_bai": {}, "con_lai": [], "loi": "",
+          "mot_phan": [], "chua_chay": []}
+    dv = [0]
+    het_gio = False
+    for u in lo:
+        if het_gio:
+            ra["chua_chay"].append(u)
+            continue
+        if ra["loi"]:                     # lỗi chung (hết quota, key, mạng): khỏi gọi tiếp
+            ra["con_lai"].append(u)
+            continue
+        vid = (_id_bai(u) or ":").split(":", 1)[1]
+        if not vid:                       # không đọc được mã: actor dự phòng tự mở link
+            ra["con_lai"].append(u)
+            continue
+        try:
+            rows, het_gio = _yt_mot_video(vid, per, han, dv)
+        except A.LoiYouTube as e:
+            ly_do = getattr(e, "ly_do", "")
+            if ly_do == "commentsDisabled":
+                ra["loi_bai"][u] = (_TAT_BL, "Video đã TẮT bình luận (YouTube commentsDisabled) "
+                                             "— không có gì để bóc, không chạy dự phòng.")
+            elif ly_do == "videoNotFound":
+                ra["loi_bai"][u] = ("LỖI", "YouTube không tìm thấy video (riêng tư/đã xoá/sai "
+                                           "link — videoNotFound); không chạy dự phòng.")
+            else:
+                if ly_do in ("quotaExceeded", "dailyLimitExceeded"):
+                    A._youtube_het_quota(True)
+                ra["loi"] = _che_token(str(e))[:200]
+                ra["con_lai"].append(u)
+            continue
+        except Exception as e:  # noqa: BLE001 — lỗi lạ: như lỗi HTTP, đi dự phòng
+            ra["loi"] = _che_token(f"{type(e).__name__}: {e}")[:200]
+            ra["con_lai"].append(u)
+            continue
+        ra["binh_luan"] += rows
+        if het_gio:
+            ra["mot_phan"].append(u)
+    ra["dv"] = dv[0]
+    if ra["con_lai"] and not ra["loi"]:
+        ra["loi"] = "không đọc được mã video từ link"
+    return ra
+
+
+def _yt_du_phong(kq: dict, urls: list[str], per: int, so_ns: "_SoNganSach", han_run: float,
+                 tran_usd: float, ly_do: str) -> None:
+    """YouTube Data API không lấy được `urls` (không key/hết quota/lỗi HTTP): chạy actor
+    streamers trong PHẦN CÒN LẠI của trần lượt gọi (lô API không giữ chỗ gì từ đầu nên
+    `ngoai_ke_hoach`), cắt số bình luận/bài theo `_tran_du_phong`. Ghi vào `kq`."""
+    actor = _ACTORS["youtube"]
+    dp = {"urls": list(urls), "loi": "", "n_raw": 0, "per": 0, "ma": "OK", "actor": actor,
+          "ly_do": ly_do}
+    kq["du_phong_kq"] = dp
+    dau = f"YouTube Data API: {ly_do} | dự phòng {actor}"
+    if han_run - time.monotonic() < _GIAY_TOI_THIEU_LO:
+        dp["loi"] = f"{dau} không chạy: hết thời gian của lượt"
+        return
+    tok = _YT_API.set(False)                      # tính như lô Apify thường
+    try:
+        can = _san("youtube")
+        tran_lo = _tran_lo("youtube", _uoc_lo("youtube", urls, per), tran_usd)
+    finally:
+        _YT_API.reset(tok)
+    cap = so_ns.xin(can, tran_lo, ngoai_ke_hoach=True)
+    if not cap:
+        dp["loi"] = (f"{dau} không chạy: phần còn lại của trần lượt gọi không đủ mức "
+                     f"{_usd(can)} USD actor đòi giữ")
+        return
+    tran_dp, per_dp = _tran_du_phong("youtube", cap, 0.0, len(urls), per)
+    if not per_dp or tran_dp + 1e-9 < can:
+        so_ns.tra(cap, 0.0)
+        dp["loi"] = f"{dau} không chạy: phần trần còn lại ({_usd(cap)} USD) không đủ"
+        return
+    kq.setdefault("actors", []).append(actor)
+    so: list = []
+    A._SO_RUN.set(so)
+    A._HAN_CHOT.set(han_run)
+    tien = 0.0
+    try:
+        raw = _call(actor, _payload("youtube", urls, per_dp), per_dp * len(urls),
+                    min_charge=_MIN_CHARGE["youtube"], tran_usd=tran_dp)
+        bl, n = _map_youtube(raw)
+        tien = n * _GIA["youtube"]
+        kq["binh_luan"] += bl
+        dp.update(n_raw=n, per=per_dp)
+    except Exception as e:  # noqa: BLE001
+        tien = _da_tieu(so, tran_dp)
+        dp["loi"] = (f"{dau}: " + _che_token(f"{type(e).__name__}: {e}"))[:400]
+    finally:
+        tien = max(tien, sum(float(m.get("usd") or 0) for m in so if isinstance(m, dict)))
+        so_ns.tra(cap, tien)
+        kq["tien"] = float(kq.get("tien") or 0) + tien
+    if {m.get("ma") for m in so if isinstance(m, dict)} & {"OK_MOT_PHAN", "QUA_GIO"}:
+        dp["ma"] = "OK_MOT_PHAN"
+
+
+def _keo_lo_yt_api(kq: dict, lo: list[str], per: int, so_ns: "_SoNganSach",
+                   han_run: float, tran_usd: float) -> dict:
+    """Lô YouTube bằng API miễn phí: không xin sổ tiền; phần API không lấy được mới xin
+    phần còn lại của trần cho actor dự phòng."""
+    r = _yt_api_lo(lo, per, han_run)
+    kq.update(yt_api=True, actors=[], binh_luan=r["binh_luan"], n_raw=len(r["binh_luan"]),
+              dv=r["dv"], loi_bai=r["loi_bai"], mot_phan=r["mot_phan"],
+              chua_chay=r["chua_chay"], tien=0.0)
+    if r["con_lai"]:
+        _yt_du_phong(kq, r["con_lai"], per, so_ns, han_run, tran_usd, r["loi"])
+    return kq
+
+
+def _trang_thai_yt(kq: dict, per_url: dict, failed: list) -> None:
+    """Trạng thái TỪNG video của một lô API (lỗi riêng từng video, phần dự phòng)."""
+    p = "youtube"
+    dp = kq.get("du_phong_kq") or {}
+    dp_cat = bool(dp.get("n_raw")) and (dp["n_raw"] >= 0.95 * dp["per"] * len(dp["urls"])
+                                        or dp.get("ma") == "OK_MOT_PHAN")
+    for u in kq["lo"]:
+        n = sum(1 for c in kq["binh_luan"] if c["bai"] == u)
+        if u in kq.get("loi_bai", {}):
+            st, ly_do = kq["loi_bai"][u]
+            per_url[u] = {"platform": p, "status": st, "error": ly_do, "comments": 0}
+        elif u in kq.get("chua_chay", []):
+            per_url[u] = {"platform": p, "status": _CHUA_CHAY_GIO, "comments": 0}
+        elif u in kq.get("mot_phan", []):
+            per_url[u] = {"platform": p, "status": _CHUA_XONG_GIU, "ma": "OK_MOT_PHAN",
+                          "comments": n, "nguon": _YT_API_NGUON,
+                          "ghi_chu": "hết thời gian — chỉ là phần lấy được tới lúc đó"}
+        elif u in dp.get("urls", []):
+            if dp.get("loi"):
+                per_url[u] = {"platform": p, "status": "LỖI", "error": dp["loi"]}
+                if p not in failed:
+                    failed.append(p)
+                continue
+            per_url[u] = {"platform": p, "status": _CAT if (n == 0 and dp_cat) else "OK",
+                          "comments": n,
+                          "nguon": (f"DỰ PHÒNG {dp['actor']} — YouTube Data API không dùng "
+                                    f"được: {dp.get('ly_do', '')}")[:300]}
+        else:
+            per_url[u] = {"platform": p, "status": "OK", "comments": n, "nguon": _YT_API_NGUON}
+
+
 _FETCH = {"tiktok": _fetch_tiktok, "youtube": _fetch_youtube, "facebook": _fetch_facebook,
           "threads": _fetch_threads, "instagram": _fetch_instagram}
 _MAP = {"tiktok": _map_tiktok, "youtube": _map_youtube, "facebook": _map_facebook,
@@ -505,6 +809,8 @@ _MAP_DU_PHONG = {"threads": _map_threads_du_phong, "instagram": _map_instagram_d
 # ───────────────────────── chia lô theo trần ─────────────────────────
 def _suc_chua(p: str, tran_usd: float) -> int:
     """Số bình luận tối đa MỘT lượt chạy (một bài) mà vẫn nằm dưới `_BIEN` × trần."""
+    if _mien_phi(p):
+        return _MAX_PER_POST * _YT_BAI_MOI_LO
     return max(1, int((_BIEN * _tran_p(p, tran_usd) - _GIA_KHOI_DONG.get(p, 0.0)
                        - _GIA_MOI_BAI.get(p, 0.0)) / _GIA[p]))
 
@@ -526,7 +832,7 @@ def _chia_lo(p: str, us: list[str], per: int,
         co = max(1, int(ngan / (per_thuc * _GIA[p] + moi_bai)))
     else:
         co = max(1, suc // per_thuc)
-    co = min(co, _BAI_MOI_LO.get(p, co))
+    co = min(co, _YT_BAI_MOI_LO if _mien_phi(p) else _BAI_MOI_LO.get(p, co))
     so_lo = max(1, math.ceil(len(us) / co))
     co = max(1, math.ceil(len(us) / so_lo))
     return per_thuc, [us[i:i + co] for i in range(0, len(us), co)]
@@ -542,12 +848,17 @@ def _uoc_tinh(ke_hoach: dict) -> tuple[int, float]:
 
 
 def _uoc_lo(p: str, lo: list[str], per: int) -> float:
+    if _mien_phi(p):
+        return 0.0
     return (len(lo) * (per * _GIA[p] + _GIA_MOI_BAI.get(p, 0.0))
             + _GIA_KHOI_DONG.get(p, 0.0))
 
 
 def _san(p: str) -> float:
-    """maxTotalChargeUsd thấp nhất một lô được gửi: mức actor đòi, và 0,1 của `_call`."""
+    """maxTotalChargeUsd thấp nhất một lô được gửi: mức actor đòi, và 0,1 của `_call`.
+    Lô YouTube Data API không gửi Apify gì: 0."""
+    if _mien_phi(p):
+        return 0.0
     return max(_MIN_CHARGE.get(p, 0.0), _TRAN_USD[1])
 
 
@@ -566,6 +877,8 @@ def _tran_lo(p: str, uoc: float, tran_usd: float) -> float:
     """maxTotalChargeUsd TỐI ĐA của MỘT lô: ước tính × 1,5, làm tròn LÊN tới cent (kẻo
     `_call` làm tròn xuống dưới ước tính), không thấp hơn mức actor đòi, không quá trần
     tool. Trần thật gửi đi còn bị `_SoNganSach.xin` cắt theo phần trần còn lại."""
+    if _mien_phi(p):
+        return 0.0
     return min(_tran_p(p, tran_usd),
                max(_san(p), math.ceil(uoc * _HE_SO_TRAN_LO * 100 - 1e-9) / 100))
 
@@ -590,19 +903,24 @@ class _SoNganSach:
         with self._khoa:
             self.cho = max(0.0, self.cho - can)
 
-    def xin(self, can: float, tran_lo: float) -> float:
+    def xin(self, can: float, tran_lo: float, *, ngoai_ke_hoach: bool = False) -> float:
         """Trần Apify (USD, làm tròn xuống cent) cấp cho một lô, 0 nếu không được chạy.
         = min(`tran_lo`, phần còn lại sau khi để dành cho các lô chưa chạy); dưới `can`
         thì không chạy. Từ chối một lần là dừng hẳn: giá đang lệch, lô nhỏ phía sau có lọt
-        qua cũng chỉ làm kết quả lỗ chỗ."""
+        qua cũng chỉ làm kết quả lỗ chỗ.
+
+        `ngoai_ke_hoach`: lượt KHÔNG được để dành từ đầu (dự phòng của lô YouTube Data API
+        miễn phí) — không trừ phần để dành của lô khác, bị từ chối cũng không dừng sổ."""
         with self._khoa:
-            self.cho = max(0.0, self.cho - can)
+            if not ngoai_ke_hoach:
+                self.cho = max(0.0, self.cho - can)
             if self.dung:
                 return 0.0
             con = self.tran - self.da - self.giu - self.cho
             cap = math.floor(min(tran_lo, con) * 100 + 1e-9) / 100
-            if cap + 1e-9 < can:
-                self.dung = True
+            if cap + 1e-9 < can or cap <= 0:
+                if not ngoai_ke_hoach:
+                    self.dung = True
                 return 0.0
             self.giu += cap
             return cap
@@ -702,6 +1020,8 @@ def _keo_lo(p: str, lo: list[str], per: int, can: float, tran_lo: float,
         so_ns.bo(can)
         kq["trang_thai"] = _CHUA_CHAY_GIO
         return kq
+    if _mien_phi(p):
+        return _keo_lo_yt_api(kq, lo, per, so_ns, han_run, so_ns.tran)
     cap = so_ns.xin(can, tran_lo)
     if not cap:
         kq["trang_thai"] = _CHUA_CHAY_NS
@@ -750,7 +1070,7 @@ def _ly_do_vuot(ke_hoach: dict, tran_bl: int, tran_usd: float) -> list[str]:
     trần các lô cần giữ (mỗi lượt YouTube/Facebook đòi giữ tối thiểu 0,5 USD)."""
     bl, usd = _uoc_tinh(ke_hoach)
     can = _can_giu(ke_hoach)
-    # Trần RIÊNG mỗi lượt của Threads/Instagram (console) mà một lô vẫn vượt — vd Threads
+    # Trần RIÊNG mỗi lượt của nền tảng (console) mà một lô vẫn vượt — vd Threads
     # buộc ≥10 trả lời/bài + 0,02 USD khởi động dưới trần riêng quá thấp.
     rieng = sorted({p for p, (per, cac_lo) in ke_hoach.items() for lo in cac_lo
                     if _can_lo(p, _uoc_lo(p, lo, per)) > _tran_lo(p, _uoc_lo(p, lo, per),
@@ -866,10 +1186,15 @@ SCHEMA = {
         "gọi là toàn bộ bình luận. `per_url[...].nguon` có 'DỰ PHÒNG' = nguồn chính hỏng, "
         "đã lấy bằng nguồn dự phòng (vẫn trong trần) — nói ra. 'ĐÃ TẮT' = chủ agent tắt nền "
         "tảng đó trên console.\n"
+        "- YouTube lấy bằng YouTube Data API MIỄN PHÍ (0 USD, xem `youtube_api`: số đơn vị "
+        "quota, số trả lời); cột 'Trả lời bình luận' = link bình luận gốc của dòng trả lời. "
+        "API hỏng/hết quota thì tự chạy actor DỰ PHÒNG trong trần (`per_url[...].nguon`). '"
+        + _TAT_BL + "' = chủ video tắt bình luận — nói đúng vậy, không phải lỗi nguồn.\n"
         "BẮT BUỘC KHI TRẢ LỜI:\n"
         "- TRẦN CỨNG: chủ agent đặt trần bình luận + trần USD cho MỖI lần gọi (`tran`); "
         "tổng tiền Apify có thể tính của cả lần gọi không bao giờ vượt trần USD (mỗi lượt "
-        "YouTube/Facebook phải giữ tối thiểu 0,5 USD trong trần đó). Trong trần người dùng "
+        "Facebook và YouTube-dự-phòng phải giữ tối thiểu 0,5 USD trong trần đó). Trong trần "
+        "người dùng "
         "xin bao nhiêu bình luận/bài cũng được (tới 1000). `vuot_tran`=true: tool CHƯA CHẠY, "
         "chưa tốn tiền — nói rõ trần nào bị vượt (`vuot`), chép câu `goi_y` (mức vừa trần), đề xuất giảm "
         "số bình luận/bài hoặc bớt bài, hoặc nhờ chủ agent nâng 'Trần bình luận' / 'Trần chi "
@@ -886,7 +1211,8 @@ SCHEMA = {
         "rõ phần chưa phân loại.\n"
         "- Mặc định 50 comment/bài; đừng tự ý đẩy lên cao — người dùng xin số nào thì đặt "
         "đúng số đó vào `max_comments`.\n"
-        "- YouTube trả thời gian dạng chữ tương đối ('2 years ago'), KHÔNG phải ngày "
+        "- YouTube lấy bằng nguồn DỰ PHÒNG trả thời gian dạng chữ tương đối ('2 years ago'), "
+        "KHÔNG phải ngày "
         "tuyệt đối — đừng quy đổi thành ngày cụ thể.\n"
         "- Gửi NGUYÊN `sheet_url`. `granted`=false thì báo người dùng có thể mở không được.\n"
         "- Chi phí: chỉ nói khi được hỏi, đọc NGUYÊN VĂN `chi_phi`. NGOẠI LỆ: bóc LỚN thì "
@@ -921,6 +1247,15 @@ def _usd(x: float) -> str:
 
 
 def _handle(args: dict, **kwargs) -> str:
+    # Chốt MỘT lần: YouTube đi API miễn phí hay actor (kế hoạch, sổ tiền, lô cùng thấy).
+    tok = _YT_API.set(_yt_api_san_sang())
+    try:
+        return _xu_ly(args)
+    finally:
+        _YT_API.reset(tok)
+
+
+def _xu_ly(args: dict) -> str:
     t0 = time.monotonic()
     urls = [str(u).strip() for u in (args.get("post_urls") or []) if str(u).strip()]
     if not urls:
@@ -942,7 +1277,7 @@ def _handle(args: dict, **kwargs) -> str:
             nhom.setdefault(p, []).append(u)
         else:
             chua_ho_tro.setdefault(p or "không nhận ra", []).append(u)
-    # Chủ agent TẮT Threads/Instagram trên console (`bat_<p>`=0) thì cũng không bóc bình luận.
+    # Chủ agent TẮT nền tảng trên console (`bat_<p>`=0) thì cũng không bóc bình luận.
     tat = {p: nhom.pop(p) for p in [p for p in nhom if p in _THEO_CONSOLE_QUET]
            if not A._tran_nen_tang(p)[2]}
     cau_tat = "; ".join(A._ly_do_tat(p) for p in tat)
@@ -964,14 +1299,20 @@ def _handle(args: dict, **kwargs) -> str:
             per_url[u] = {"platform": p, "status": "ĐÃ TẮT",
                           "error": A._ly_do_tat(p) + " — không bóc bình luận."}
     failed: list[str] = []
-    # Trần của tool thấp hơn mức actor đòi → từ chối rõ, không gọi Apify, không tự nâng.
+    # Trần (của tool, hoặc trần riêng nền tảng trên console nếu chặt hơn) thấp hơn mức
+    # actor đòi → từ chối rõ, không gọi Apify, không tự nâng.
     for p in list(nhom):
-        if _MIN_CHARGE.get(p, 0) > tran_usd:
+        tp = _tran_p(p, tran_usd)
+        if not _mien_phi(p) and _MIN_CHARGE.get(p, 0) > tp:
+            rieng = tp < tran_usd
             for u in nhom.pop(p):
                 per_url[u] = {"platform": p, "status": "LỖI", "error": (
-                    f"Trần chi phí của social_deep_dive ({_usd(tran_usd)} USD/lượt) thấp hơn "
-                    f"mức tối thiểu actor {p} yêu cầu ({_usd(_MIN_CHARGE[p])} USD) — không "
-                    f"chạy. Chủ agent nâng ô `tran_usd_goi` của social_deep_dive trên console.")}
+                    (f"Trần riêng {A._TEN_NGUON.get(p, p)} trên console Quét mạng xã hội "
+                     if rieng else "Trần chi phí của social_deep_dive ")
+                    + f"({_usd(tp)} USD/lượt) thấp hơn mức tối thiểu actor {p} yêu cầu "
+                    f"({_usd(_MIN_CHARGE[p])} USD) — không chạy. Chủ agent nâng ô "
+                    + (f"`tran_usd_{p}` ở Console → {A._NOI_CONSOLE}." if rieng else
+                       "`tran_usd_goi` của social_deep_dive trên console."))}
             failed.append(p)
 
     ke_hoach = {p: _chia_lo(p, us, per, tran_usd) for p, us in nhom.items()}
@@ -1018,7 +1359,8 @@ def _handle(args: dict, **kwargs) -> str:
         ex.shutdown(wait=False, cancel_futures=True)
         for f, (p, lo, pc) in futs.items():
             kq = {"p": p, "lo": lo, "per": pc, "binh_luan": [], "n_raw": 0, "loi": "",
-                  "trang_thai": "OK", "ma": "OK"}
+                  "trang_thai": "OK", "ma": "OK",
+                  **({"actors": []} if _mien_phi(p) else {})}
             if f in xong:
                 try:
                     kq = f.result()
@@ -1040,7 +1382,10 @@ def _handle(args: dict, **kwargs) -> str:
 
     # ── chi phí thật (hỏi song song với gán nhãn: Apify ghi tiền chậm vài giây) ──
     da_chay = [kq for kq in lo_kq if not kq["trang_thai"].startswith("CHƯA CHẠY")]
-    actors = sorted({a for kq in da_chay for a in kq.get("actors") or [_ACTORS[kq["p"]]]})
+    # Lô YouTube Data API (`actors`=[]) KHÔNG phải lượt Apify: không hỏi/ghi chi phí Apify.
+    actors = sorted({a for kq in da_chay for a in kq.get("actors", [_ACTORS[kq["p"]]])})
+    dv_yt = sum(int(kq.get("dv") or 0) for kq in lo_kq)
+    lo_yt = [kq for kq in lo_kq if kq.get("yt_api")]
     ex_cp = ThreadPoolExecutor(max_workers=1)
     f_cp = ex_cp.submit(A._chi_phi_thuc, actors, bat_dau, est) if actors else None
 
@@ -1077,6 +1422,9 @@ def _handle(args: dict, **kwargs) -> str:
     # ── trạng thái từng bài ──
     for kq in lo_kq:
         p, lo = kq["p"], kq["lo"]
+        if kq.get("yt_api"):
+            _trang_thai_yt(kq, per_url, failed)
+            continue
         # Lượt trả gần đủ maxItems = các bài đầu đã ăn hết hạn mức, bài rỗng phía sau có
         # thể chỉ là bị cắt (đúng ca 01/10: 13/25 bài hiện 0).
         # Run dừng giữa chừng phía Apify (FAILED/ABORTED, vd chạm trần lô) cũng là bị cắt.
@@ -1108,12 +1456,24 @@ def _handle(args: dict, **kwargs) -> str:
             for u in lo:
                 per_url[u]["nguon"] = (f"DỰ PHÒNG {kq['du_phong']} — nguồn chính hỏng: "
                                        f"{kq.get('loi_nguon_chinh', '')}")[:300]
-    du_phong = sorted({kq["p"] for kq in lo_kq if kq.get("du_phong")})
+    du_phong = sorted({kq["p"] for kq in lo_kq if kq.get("du_phong")
+                       or (kq.get("du_phong_kq") and not kq["du_phong_kq"].get("loi"))})
+    yt_api = None
+    if lo_yt:
+        yt_api = {"nguon": _YT_API_NGUON, "chi_phi_usd": 0,
+                  "don_vi_quota": dv_yt, "quota_mien_phi_ngay": _YT_QUOTA_NGAY,
+                  # dòng lấy bằng API (gốc + trả lời); dòng của actor dự phòng không có "cha"
+                  "so_dong": sum(1 for kq in lo_yt for c in kq["binh_luan"] if "cha" in c),
+                  "tra_loi": sum(1 for kq in lo_yt for c in kq["binh_luan"] if c.get("cha")),
+                  "video_tat_binh_luan": [u for kq in lo_yt
+                                          for u, (st, _) in kq.get("loi_bai", {}).items()
+                                          if st == _TAT_BL] or None}
     gioi_han = {p: _GIOI_HAN[p] for p in ke_hoach if p in _GIOI_HAN}
     for p, us in chua_ho_tro.items():
         for u in us:
             per_url[u] = {"platform": p, "status": "CHƯA HỖ TRỢ",
                           "error": f"Chưa nối nguồn bình luận cho {p}. Phải nói thẳng."}
+    so_tat_bl = sum(1 for v in per_url.values() if v["status"] == _TAT_BL)
     so_cat = sum(1 for v in per_url.values() if v["status"] == _CAT)
     so_ns_cham = sum(1 for v in per_url.values() if v["status"] == _CHUA_CHAY_NS)
     so_chua = sum(1 for v in per_url.values() if v["status"].startswith("CHƯA X")
@@ -1126,7 +1486,7 @@ def _handle(args: dict, **kwargs) -> str:
                 per_url={u: per_url[u] for u in urls if u in per_url},
                 platforms_failed=failed, chua_ho_tro=list(chua_ho_tro),
                 nen_tang_da_tat=list(tat) or None, gioi_han_nen_tang=gioi_han or None,
-                dung_nguon_du_phong=du_phong or None,
+                dung_nguon_du_phong=du_phong or None, youtube_api=yt_api,
                 tong_comment=len(rows), khong_quy_ve_bai=khong_quy,
                 so_luot_chay=len(da_chay), so_bai_co_the_bi_cat=so_cat,
                 so_bai_cham_ngan_sach=so_ns_cham,
@@ -1135,7 +1495,10 @@ def _handle(args: dict, **kwargs) -> str:
                 cham_tran_chi_phi=cham_tran_thuc or bool(so_cat),
                 chi_phi=(f"Chi phí lượt quét: {_usd(thuc['usd'])} USD ({thuc['so_run']} lượt "
                          f"chạy; Apify chưa ghi xong tiền nên tính theo số dòng actor đã tính "
-                         f"phí)." if theo_dem else A._dong_chi_phi(thuc, est)))
+                         f"phí)." if theo_dem else A._dong_chi_phi(thuc, est)
+                         if actors else "Chi phí lượt quét: 0 USD (không chạy lượt Apify nào)."
+                         ) + (f" YouTube lấy bằng {_YT_API_NGUON}: 0 USD, dùng {dv_yt} đơn vị "
+                              f"quota (miễn phí {_YT_QUOTA_NGAY}/ngày)." if lo_yt else ""))
     canh_bao = ((f" {so_cat} bài {_CAT} — nói rõ, đừng gọi là 0 bình luận." if so_cat else "")
                 + (f" {so_chua} bài chưa kéo xong vì hết thời gian." if so_chua else "")
                 + (f" {so_ns_cham} bài {_CHUA_CHAY_NS}: các lô trước đã tiêu gần hết ngân "
@@ -1144,6 +1507,8 @@ def _handle(args: dict, **kwargs) -> str:
                 + (f" CHƯA HỖ TRỢ: {', '.join(chua_ho_tro)} — phải nói rõ."
                    if chua_ho_tro else "")
                 + (f" ĐÃ TẮT: {cau_tat} — nói rõ các bài đó không được bóc." if tat else "")
+                + (f" {so_tat_bl} video {_TAT_BL} — nói rõ là video tắt bình luận, không "
+                   f"phải lỗi nguồn." if so_tat_bl else "")
                 + (f" {', '.join(A._TEN_NGUON.get(p, p) for p in du_phong)}: nguồn chính hỏng, "
                    f"đã lấy bằng nguồn DỰ PHÒNG (xem `per_url[...].nguon`) — nói rõ."
                    if du_phong else "")
@@ -1164,7 +1529,7 @@ def _handle(args: dict, **kwargs) -> str:
     values = [list(_HEADER)] + [[
         c["platform"], c["kenh"], c["text"], c.get("sac_thai", phan_loai.CHUA),
         c.get("chu_de", phan_loai.CHUA), c["likes"], c["replies"], c["thoi_gian"],
-        c["tac_gia_thich"], c["bai"] or c["link"],
+        c["tac_gia_thich"], c["bai"] or c["link"], c.get("cha") or "",
     ] for c in rows]
     pl = {"trang_thai": tt_pl.get("trang_thai", ""), "da_phan_loai": tk["da_phan_loai"],
           "tong": tk["tong"], "ghi_chu": tt_pl.get("ghi_chu", "")}
@@ -1222,13 +1587,20 @@ def _tra_vuot(urls, nhom, per, cat_per, ke_hoach, tran_bl, tran_usd, vuot) -> st
 
 
 # ───────────────────────── chạy NỀN (viec_nen) ─────────────────────────
+def _giay_lo(p: str, lo: list[str], pc: int) -> float:
+    import quet_lon
+    if _mien_phi(p):
+        return 1.0 + pc * len(lo) / _YT_TOC
+    return quet_lon._GIAY_KHOI_DONG + pc * len(lo) / quet_lon.toc(_ACTORS[p])
+
+
 def _giay_ke(ke: dict, song_song: int = _SONG_SONG) -> float:
     """Giây ước tính chạy hết các lô của kế hoạch (`song_song` lô một lúc)."""
     import quet_lon
     tong = dai = 0.0
     for p, (pc, cac_lo) in ke.items():
         for lo in cac_lo:
-            g = quet_lon._GIAY_KHOI_DONG + pc * len(lo) / quet_lon.toc(_ACTORS[p])
+            g = _giay_lo(p, lo, pc)
             tong += g
             dai = max(dai, g)
     return round(max(dai, tong / max(1, song_song)), 1)
@@ -1241,13 +1613,24 @@ def _ke_hoach_nen(ke: dict, tran_usd: float) -> dict:
     for p, (pc, cac_lo) in ke.items():
         ds = []
         for i, lo in enumerate(cac_lo):
+            if _mien_phi(p):
+                # Lượt con YouTube Data API: quet_lon._mot_phan chuyển cho `mot_phan_yt_api`;
+                # không giữ tiền trong sổ việc (API hỏng mới xin phần còn lại cho dự phòng).
+                pl = {"video": list(lo), "per": pc}
+                ds.append({"id": f"{p}-{i}", "actor": _ACTORS[p], "kieu": KIEU_YT_API,
+                           "lo": list(lo), "per": pc, "payload": pl,
+                           "payload_sha": quet_lon._sha(pl), "limit": pc * len(lo),
+                           "uoc_usd": 0.0, "uoc_giay": round(_giay_lo(p, lo, pc), 1),
+                           "can": 0.0, "tran_lo": 0.0, "min_charge": 0.0, "gia": 0.0,
+                           "tran_usd_goi": round(min(float(tran_usd), A._TRAN_USD_TUONG_TAC), 2),
+                           "trang_thai": "cho", "nhan": f"lô {i + 1}: {len(lo)} video (API)"})
+                continue
             uoc = _uoc_lo(p, lo, pc)
             pl = _payload(p, lo, pc)
             ds.append({"id": f"{p}-{i}", "actor": _ACTORS[p], "lo": list(lo), "per": pc,
                        "payload": pl, "payload_sha": quet_lon._sha(pl),
                        "limit": _limit(p, lo, pc), "uoc_usd": round(uoc, 4),
-                       "uoc_giay": round(quet_lon._GIAY_KHOI_DONG
-                                         + pc * len(lo) / quet_lon.toc(_ACTORS[p]), 1),
+                       "uoc_giay": round(_giay_lo(p, lo, pc), 1),
                        "can": _can_lo(p, uoc), "tran_lo": _tran_lo(p, uoc, tran_usd),
                        "min_charge": _MIN_CHARGE.get(p, 0.0), "gia": _GIA[p],
                        **({"mem": _RAM[p]} if p in _RAM else {}),
@@ -1336,6 +1719,64 @@ def _thu_chay_nen(args, urls, nhom, per, cat_per, ke_tai_cho, per_url):
     return tool_result(**{**base, **tom, "success": not tom.get("tu_choi")}), ""
 
 
+KIEU_YT_API = "yt_api_binh_luan"   # `kieu` của lượt con việc nền đi YouTube Data API
+
+
+def mot_phan_yt_api(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
+    """Lượt con việc nền đi YouTube Data API (miễn phí). Phần API không lấy được (không
+    key/hết quota/lỗi HTTP) thì CHUYỂN lượt con thành lượt Apify actor streamers cho đúng
+    các video còn lại, trần = phần còn lại của sổ việc (`ngoai_ke_hoach`) cắt theo
+    `_tran_du_phong`, rồi để `quet_lon._mot_phan` chạy như lượt Apify thường (khởi động lại
+    giữa chừng thì đọc tiếp run cũ như mọi lượt khác). -> số dòng lấy được."""
+    import quet_lon
+    if v.da_huy():
+        v.cap_nhat_phan(ph, trang_thai="da_huy", ma="DA_HUY", so_item=0, usd_so=0.0)
+        return 0
+    han = v.han_mono(quet_lon._chua_nen_giay(60.0 * v.d.get("han_phut", 45)))
+    r = _yt_api_lo(ph["lo"], int(ph["per"]), han)
+    rows = []
+    for c in r["binh_luan"]:
+        c["platform"] = p
+        c["bai"] = _quy_ve_bai(c.pop("_nguon", []) + [c.get("link") or ""], ph["lo"])
+        rows.append((c, None))
+    if rows:
+        v.ghi_dong(p, rows, ph["id"])
+    chung = dict(don_vi_quota=int(ph.get("don_vi_quota") or 0) + r["dv"],
+                 loi_bai={u: list(x) for u, x in r["loi_bai"].items()}, so_item_api=len(rows))
+    if not r["con_lai"]:
+        v.cap_nhat_phan(ph, trang_thai="mot_phan" if r["mot_phan"] or r["chua_chay"] else "xong",
+                        so_item=len(rows), ma="OK", usd_so=0.0, ly_do="", **chung)
+        return len(rows)
+    con = r["con_lai"]
+    tok = _YT_API.set(False)
+    try:
+        can = _san(p)
+        tran_lo = _tran_lo(p, _uoc_lo(p, con, int(ph["per"])),
+                           float(ph.get("tran_usd_goi") or _TRAN_USD[0]))
+    finally:
+        _YT_API.reset(tok)
+    try:
+        cap = ns.xin(can, tran_lo, ngoai_ke_hoach=True)
+    except TypeError:                     # sổ theo nền tảng: không có lượt ngoài kế hoạch
+        cap = 0.0
+    tran_dp, per_dp = _tran_du_phong(p, cap, 0.0, len(con), int(ph["per"])) if cap else (0, 0)
+    if not per_dp or tran_dp + 1e-9 < can:
+        if cap:
+            ns.tra(cap, 0.0)
+        v.cap_nhat_phan(ph, trang_thai="mot_phan" if rows else "loi", ma="NGAN_SACH",
+                        so_item=len(rows), usd_so=0.0, video_loi=con,
+                        ly_do=(f"YouTube Data API: {r['loi']} | dự phòng {_ACTORS[p]} không "
+                               f"chạy: phần còn lại của ngân sách việc không đủ mức "
+                               f"{_usd(can)} USD actor đòi giữ")[:300], **chung)
+        return len(rows)
+    pl = _payload(p, con, per_dp)
+    v.cap_nhat_phan(ph, kieu="", payload=pl, payload_sha=quet_lon._sha(pl),
+                    limit=per_dp * len(con), can=can, tran_lo=tran_dp,
+                    min_charge=_MIN_CHARGE[p], gia=_GIA[p], du_phong_lo=con,
+                    du_phong_ly_do=r["loi"][:200], **chung)
+    return len(rows) + quet_lon._mot_phan(v, p, ph, ns, ts, chuan, cap_san=tran_dp)
+
+
 def _chuan_nen(p: str, ph: dict, items: list) -> list[tuple]:
     bl, _ = _MAP[p](items)
     for c in bl:
@@ -1398,6 +1839,22 @@ def _nhan_nen(v, rows: list[dict]) -> dict:
     return tt
 
 
+def _bo_nen_tang_da_tat(v, ly_do: list) -> None:
+    """Chủ agent tắt nền tảng (`bat_<p>`=0) SAU khi việc nền đã tạo: lượt con CHƯA chạy của
+    nền tảng đó không chạy nữa (lượt đang chạy dở thì để `quet_lon` đọc tiếp như thường)."""
+    c = A._cau_hinh_quet()
+    tat = set()
+    for p, ph in list(v.cac_phan()):
+        if p in _THEO_CONSOLE_QUET and ph.get("trang_thai") in (None, "cho") \
+                and not A._tran_nen_tang(p, nen=True, c=c)[2]:
+            v.cap_nhat_phan(ph, trang_thai="loi", ma="DA_TAT", so_item=0, usd_so=0.0,
+                            ly_do=A._ly_do_tat(p) + " — lượt này không chạy")
+            tat.add(p)
+    if tat:
+        ly_do.append("; ".join(A._ly_do_tat(p) for p in sorted(tat))
+                     + " sau khi tạo việc — phần chưa chạy của nền tảng đó bỏ qua")
+
+
 def chay_viec_nen(v) -> tuple[str, str]:
     """Runner của viec_nen cho `social_deep_dive`. -> (trạng thái cuối, tin kết quả)."""
     import quet_lon
@@ -1405,6 +1862,7 @@ def chay_viec_nen(v) -> tuple[str, str]:
     ts = v.d["tham_so"]
     ly_do: list[str] = []
     if v.d["trang_thai"] == "dang_cao":
+        _bo_nen_tang_da_tat(v, ly_do)
         if v.qua_han():
             quet_lon._dong_phan_dang_chay(v, ts, chuan=_chuan_nen)
             ly_do.append("bot khởi động lại sau hạn chót — huỷ lô đang chạy, giữ phần đã có")
@@ -1431,8 +1889,28 @@ def chay_viec_nen(v) -> tuple[str, str]:
         for ph in nt["phan"]:
             st, lo = ph.get("trang_thai"), ph["lo"]
             cat = int(ph.get("so_item") or 0) >= 0.95 * ph["per"] * len(lo)
+            loi_bai = ph.get("loi_bai") or {}
+            dp_lo = set(ph.get("du_phong_lo") or [])
+            loi_dp = set(ph.get("video_loi") or [])
             for u in lo:
                 n = sum(1 for c in rows if c.get("bai") == u)
+                if u in loi_bai:              # video tắt bình luận / không tồn tại (API)
+                    per_url[u] = {"platform": p, "comments": 0, "status": loi_bai[u][0],
+                                  "error": loi_bai[u][1]}
+                    continue
+                if ph.get("ma") == "DA_TAT":  # chủ agent tắt nền tảng sau khi tạo việc
+                    per_url[u] = {"platform": p, "comments": n, "status": "ĐÃ TẮT",
+                                  "error": ph.get("ly_do") or ""}
+                    continue
+                if u in loi_dp:               # API hỏng, dự phòng không đủ ngân sách
+                    per_url[u] = {"platform": p, "comments": n, "status": "LỖI",
+                                  "error": ph.get("ly_do") or ph.get("ma")}
+                    continue
+                if ph.get("so_item_api") is not None and u not in dp_lo:
+                    # Đã lấy bằng API: trạng thái lượt dự phòng không áp cho video này.
+                    per_url[u] = {"platform": p, "comments": n,
+                                  "status": "ĐÃ HUỶ" if st == "da_huy" and not n else "OK"}
+                    continue
                 per_url[u] = {"platform": p, "comments": n, "status": (
                     "LỖI" if st == "loi" else "ĐÃ HUỶ" if st == "da_huy" else
                     _CHUA_XONG_GIU if st == "mot_phan" else
@@ -1454,7 +1932,8 @@ def chay_viec_nen(v) -> tuple[str, str]:
                 c["platform"], c.get("kenh") or "", str(c.get("text") or "")[:500],
                 c.get("sac_thai", phan_loai.CHUA), c.get("chu_de", phan_loai.CHUA),
                 c.get("likes") or 0, c.get("replies") or 0, c.get("thoi_gian") or "",
-                c.get("tac_gia_thich") or "", c.get("bai") or c.get("link") or ""]
+                c.get("tac_gia_thich") or "", c.get("bai") or c.get("link") or "",
+                c.get("cha") or ""]
                 for c in rows])
             s.ghi_tab(_TAB_THONG_KE, _dong_thong_ke(tk))
             url = s.s.get("url") or ""
@@ -1483,6 +1962,11 @@ def chay_viec_nen(v) -> tuple[str, str]:
             d.append(f"{tt_pl['khong_gui_model']} bình luận ít like không gửi AI (trần "
                      f"{A._so_env('SOCIAL_AI_NEN_BINH_LUAN', _AI_NEN_BINH_LUAN, 0, 100000)}) — "
                      f"để 'Chưa phân loại'.")
+    if any(ph.get("so_item_api") is not None for _, ph in v.cac_phan()):
+        dv = sum(int(ph.get("don_vi_quota") or 0) for _, ph in v.cac_phan())
+        d.append(f"YouTube lấy bằng {_YT_API_NGUON}: 0 USD, {dv} đơn vị quota.")
+    if any(x["status"] == _TAT_BL for x in per_url.values()):
+        d.append(f"Video '{_TAT_BL}': chủ video tắt bình luận, không phải lỗi nguồn.")
     if any(x["status"] == _CAT for x in per_url.values()):
         d.append(f"Bài '{_CAT}' là CHƯA lấy hết, không phải không có bình luận.")
     d.append(f"Chi phí thật: {_usd(cp.get('usd'))} USD ({cp.get('so_run', 0)} lượt chạy Apify; "

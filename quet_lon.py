@@ -688,12 +688,21 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
 _KET_PHAN = ("xong", "mot_phan", "loi", "da_huy")
 
 
+# Lượt con bóc bình luận YouTube bằng YouTube Data API (deep_dive_tool.KIEU_YT_API): miễn
+# phí, không giữ tiền; deep_dive tự chạy và tự chuyển thành lượt Apify khi API hỏng.
+_KIEU_YT_API = "yt_api_binh_luan"
+
+
+def _la_yt_api(ph: dict) -> bool:
+    return ph.get("kieu") == _KIEU_YT_API
+
+
 def _dung_so(tran: float, cac: list):
     """Dựng một sổ tiền từ các lượt con (đúng cả sau khi khởi động lại)."""
     from deep_dive_tool import _SoNganSach
     da = giu = cho = 0.0
     for _, ph in cac:
-        if ph["actor"] == "youtube":
+        if ph["actor"] == "youtube" or _la_yt_api(ph):
             continue
         st = ph.get("trang_thai")
         if st in _KET_PHAN:
@@ -815,13 +824,18 @@ def _so_tien(p: str, ph: dict, items: list, meta: dict) -> float:
     return round(max(float(meta.get("usd") or 0), uoc), 4)
 
 
-def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
-    """Chạy / đọc tiếp MỘT lượt con trong luồng riêng. -> số item lấy được."""
+def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None, cap_san: float = 0.0) -> int:
+    """Chạy / đọc tiếp MỘT lượt con trong luồng riêng. -> số item lấy được.
+
+    `cap_san`: trần Apify ĐÃ xin sẵn trong sổ (lượt dự phòng của lượt YouTube Data API)."""
     A._NEN.set(True)
     A._HUY.set(v.co_dung)
     if ph["actor"] == "youtube":
         A._YT_MA.set(v.ma)
         return _mot_phan_youtube(v, ph, ts)
+    if _la_yt_api(ph):
+        import deep_dive_tool
+        return deep_dive_tool.mot_phan_yt_api(v, p, ph, ns, ts, chuan)
     actor, payload = ph["actor"], ph["payload"]
     han = v.han_mono(_chua_nen_giay(60.0 * v.d.get("han_phut", 45)))
     A._KHI_CO_RUN.set(lambda run, meta: v.cap_nhat_phan(
@@ -833,6 +847,8 @@ def _mot_phan(v, p: str, ph: dict, ns, ts: dict, chuan=None) -> int:
     items: list = []
     loi = None
     theo_p = {"p": p} if isinstance(ns, _SoTheoNenTang) else {}
+    if not cap and cap_san:
+        cap = float(cap_san)
     if not cap:
         cap = ns.xin(_can(ph), _tran_lo(ph), **theo_p)
         if not cap:
@@ -900,7 +916,7 @@ def _thu_don(v, p: str, ph: dict, chuan=None) -> None:
     if st in _KET_PHAN:
         return
     ma_dung = "DA_HUY" if v.da_huy() else "QUA_GIO"
-    if ph["actor"] == "youtube":
+    if ph["actor"] == "youtube" or _la_yt_api(ph):
         v.cap_nhat_phan(ph, trang_thai="da_huy" if ma_dung == "DA_HUY" else "loi",
                         ma=ma_dung, so_item=0, usd_so=0.0,
                         ly_do="việc dừng trước khi chạy lượt này")

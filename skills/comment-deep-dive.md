@@ -37,9 +37,16 @@ TikTok, YouTube, Facebook, Threads (threads.net hoặc threads.com), Instagram.
   trả lời lồng nhau. Không gọi đó là "toàn bộ bình luận", không suy rộng tỉ lệ thành
   "khách hàng nói chung"
 - `per_url[...].nguon` có "DỰ PHÒNG" = nguồn chính hỏng, tool đã lấy bằng nguồn dự phòng
-  trong cùng trần chi phí — nói ra. "ĐÃ TẮT" = chủ agent tắt Threads/Instagram ở Console
-  → Năng lực → Quét mạng xã hội; công tắc và trần USD riêng ở đó áp cho cả bóc bình luận
+  trong cùng trần chi phí — nói ra. "ĐÃ TẮT" = chủ agent tắt nền tảng đó ở Console →
+  Năng lực → Quét mạng xã hội; công tắc và trần USD riêng ở đó áp cho bóc bình luận MỌI
+  nền tảng (TikTok, YouTube, Facebook, Threads, Instagram)
 - Không lấy nền tảng khác thay vào khi một nền tảng hỏng
+
+**YouTube lấy bằng YouTube Data API — MIỄN PHÍ** (`youtube_api` trong kết quả: số đơn vị
+quota, số trả lời). Có cả trả lời; cột "Trả lời bình luận" là link bình luận gốc (TikTok:
+cid + trích bình luận gốc). API hết quota/hỏng thì tool tự chạy nguồn dự phòng có phí
+trong trần — `per_url[...].nguon` ghi rõ. "VIDEO TẮT BÌNH LUẬN" = chủ video tắt bình
+luận, nói đúng vậy, không phải lỗi nguồn.
 
 Khi báo kết quả:
 
@@ -54,8 +61,8 @@ Khi báo kết quả:
 - Chủ agent đặt trần CỨNG cho MỖI lần bóc: trần bình luận (mặc định 300, 50–30000, tổng
   mọi bài) và trần chi phí (mặc định 0,5 USD, 0,1–50; lượt chạy ngay trong câu trả lời
   không quá 5 USD). Tổng tiền có thể bị tính của cả lần bóc không bao giờ vượt trần chi
-  phí; mỗi lượt chạy YouTube/Facebook phải giữ tối thiểu 0,5 USD trong trần đó, nên trần
-  0,5 USD chỉ đủ MỘT lượt (~225 bình luận YouTube). Trong trần, người dùng xin bao nhiêu
+  phí; mỗi lượt chạy Facebook (và YouTube khi phải dùng nguồn dự phòng) phải giữ tối
+  thiểu 0,5 USD trong trần đó. Trong trần, người dùng xin bao nhiêu
   bình luận/bài cũng được, tối đa 1000/bài
 - Bóc LỚN (quá 1500 bình luận, hoặc chậm/đắt hơn một câu trả lời) tự CHẠY NỀN, xong Mark
   tự nhắn link sheet. Gọi trước với `chi_uoc_tinh`=true, nói USD + phút ước tính, kết bằng
@@ -67,7 +74,8 @@ Khi báo kết quả:
   nhờ chủ agent nâng "Trần bình luận" / "Trần chi phí bóc bình luận" ở Console → Năng
   lực. Không có cách chạy vượt trần
 
-Giá tham khảo (gói hiện tại, 10/2026): TikTok ~0,00125 USD/bình luận, YouTube ~0,002,
+Giá tham khảo (gói hiện tại, 10/2026): TikTok ~0,00125 USD/dòng (cả trả lời), YouTube 0
+(API; dự phòng ~0,002),
 Facebook ~0,0025, Instagram ~0,0026, Threads ~0,0025 mỗi dòng + 0,02 USD mỗi lượt (tính cả
 dòng bài gốc; 10–300 trả lời/bài, tối đa 20 bài/lượt). Ví dụ 10 bài TikTok × 50 bình luận
 ≈ 0,63 USD; 1 bài Threads × 30 trả lời ≈ 0,10 USD.
