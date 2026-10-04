@@ -1201,7 +1201,9 @@ def _ghi_thong_ke(tok: str, sid_chinh: str, so_dong_chinh: int, tk: dict) -> str
     them_tab = getattr(A, "_them_tab", None)
     if them_tab:
         try:
-            A._write_values(tok, them_tab(tok, _TAB_THONG_KE), rows)
+            sid_tk = them_tab(tok, _TAB_THONG_KE)
+            A._write_values(tok, sid_tk, rows)
+            A._vua_cot(tok, sid_tk, 5)
             return f"tab '{_TAB_THONG_KE}'"
         except Exception as e:  # noqa: BLE001
             print(f"[social_deep_dive] thêm tab Thống kê hỏng, ghi dưới sheet chính: "
@@ -1606,6 +1608,7 @@ def _xu_ly(args: dict) -> str:
         thong_ke_o = _ghi_thong_ke(tok, sid, len(values), tk)
     except Exception as e:  # noqa: BLE001 — sheet chính đã ghi xong, chỉ thiếu bảng đếm
         thong_ke_o = f"KHÔNG ghi được ({_che_token(type(e).__name__)})"
+    A._sua_tab_chinh(tok, sid, A.TAB_BINH_LUAN, len(_HEADER))
 
     sender = memory_store.get_current_sender()
     granted = _grant(tok, sender) if sender else False

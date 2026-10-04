@@ -630,10 +630,12 @@ def _handle(args: dict, **_kw) -> str:
     except Exception as e:  # noqa: BLE001
         thong_ke_o = f"KHÔNG ghi được ({type(e).__name__})"
     try:
-        A._write_values(tok, A._them_tab(tok, _TAB_BAI),
-                        [list(_HEADER_BAI)] + [_o_bai(k, b) for k, b in bai])
+        sid_bai = A._them_tab(tok, _TAB_BAI)
+        A._write_values(tok, sid_bai, [list(_HEADER_BAI)] + [_o_bai(k, b) for k, b in bai])
+        A._vua_cot(tok, sid_bai, len(_HEADER_BAI))
     except Exception as e:  # noqa: BLE001 — chỉ thiếu tab phụ
         M.ghi_log(f"không thêm được tab '{_TAB_BAI}': {type(e).__name__}")
+    A._sua_tab_chinh(tok, sid, A.TAB_BINH_LUAN, len(_HEADER))
     sender = memory_store.get_current_sender()
     granted = A._grant(tok, sender) if sender else False
     return tool_result(

@@ -72,6 +72,9 @@ def quet(monkeypatch):
     # Không gọi Lark thật khi đổi thứ tự tab — chỉ ghi lại lần gọi (`chay.dua`).
     dua = []
     monkeypatch.setattr(A, "_dua_tab_chinh_len_dau", lambda tok, sid: dua.append((tok, sid)))
+    # Đặt tên tab / bỏ cột thừa: không gọi Lark thật (canh riêng ở test_sheet_gon).
+    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: None)
+    monkeypatch.setattr(A, "_vua_cot", lambda *a: None)
     monkeypatch.setattr(A, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(A.memory_store, "get_current_sender", lambda: "ou_test")
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)

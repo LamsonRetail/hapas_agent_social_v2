@@ -2633,6 +2633,63 @@ def _first_sheet_id(token: str) -> str:
     return sheets[0].get("sheet_id") or ""
 
 
+# ── Tab gọn gàng (E2E 04-05/10/2026) ──
+# Sheet mới của Lark có tab đầu tên "Sheet1" và lưới 20 cột: sheet 15 cột của social_listen
+# thừa 5 cột trống bên phải, sheet bình luận thừa 8. Ghi xong thì đặt tên tab theo nội dung
+# và xoá cột trống bên phải. Chỉ là tiện xem: hỏng thì in cảnh báo, KHÔNG BAO GIỜ ném lỗi
+# (dữ liệu đã ghi đủ, và bên gọi không được tưởng lần ghi hỏng mà ghi lại lần nữa).
+TAB_BAI_DANG = "Bài đăng"
+TAB_BINH_LUAN = "Bình luận"
+
+
+def _so_cot_luoi(token: str, sheet_id: str) -> int | None:
+    r = lark.call("GET", f"/open-apis/sheets/v3/spreadsheets/{token}/sheets/query")
+    for sh in ((r or {}).get("data") or {}).get("sheets") or []:
+        if sh.get("sheet_id") == sheet_id:
+            return int((sh.get("grid_properties") or {}).get("column_count") or 0) or None
+    return None
+
+
+def _vua_cot(token: str, sheet_id: str, so_cot: int) -> int | None:
+    """Xoá các cột lưới bên phải cột `so_cot` (1-based) của tab. -> số cột lưới sau khi
+    sửa, None nếu không đọc được. Không bao giờ ném.
+
+    DELETE dimension_range (v2): startIndex/endIndex đếm từ 1, gồm cả hai đầu. Lấy
+    startIndex = so_cot + 1 nên kể cả khi API hiểu khác (từ 0) cũng chỉ sót một cột
+    trống, không bao giờ xoá cột dữ liệu."""
+    try:
+        so_cot = max(1, int(so_cot))
+        hien = _so_cot_luoi(token, sheet_id)
+        if not hien or hien <= so_cot:
+            return hien
+        lark.call("DELETE", f"/open-apis/sheets/v2/spreadsheets/{token}/dimension_range",
+                  body={"dimension": {"sheetId": sheet_id, "majorDimension": "COLUMNS",
+                                      "startIndex": so_cot + 1, "endIndex": hien}})
+        return so_cot
+    except Exception as e:  # noqa: BLE001
+        print(f"[apify_tool] bỏ cột trống thừa hỏng (bỏ qua): {_che_token(e)[:160]}")
+        return None
+
+
+def _doi_ten_tab(token: str, sheet_id: str, ten: str) -> bool:
+    """Đặt tên tab (thay "Sheet1"). Hỏng chỉ in cảnh báo."""
+    try:
+        lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/sheets_batch_update",
+                  body={"requests": [{"updateSheet": {"properties": {
+                      "sheetId": sheet_id, "title": ten}}}]})
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[apify_tool] đổi tên tab hỏng (bỏ qua): {_che_token(e)[:160]}")
+        return False
+
+
+def _sua_tab_chinh(token: str, sheet_id: str, ten: str, so_cot: int) -> None:
+    """Tab chính sau khi ghi XONG mọi thứ (kể cả phần ghi nối bên dưới): đặt tên + bỏ cột
+    trống thừa. Phần ghi nối (tab phụ hỏng) không bao giờ rộng hơn tiêu đề tab chính."""
+    _doi_ten_tab(token, sheet_id, ten)
+    _vua_cot(token, sheet_id, so_cot)
+
+
 def _cot(n: int) -> str:
     """Số cột (1-based) → chữ cột Excel: 1→A, 12→L, 27→AA."""
     s = ""
@@ -2729,7 +2786,9 @@ def _ghi_tab_phu(token: str, sheet_id: str, so_dong_chinh: int, rows: list[list]
     được một phần — phần ghi tiếp phải nằm DƯỚI vùng đó chứ không đè lên.
     """
     try:
-        _write_values(token, _them_tab(token, ten), rows)
+        sid_tab = _them_tab(token, ten)
+        _write_values(token, sid_tab, rows)
+        _vua_cot(token, sid_tab, max((len(r) for r in rows), default=1))
         return f"tab '{ten}'", so_dong_chinh
     except Exception as e:  # noqa: BLE001
         print(f"[social_listen] thêm tab {ten} hỏng, ghi dưới sheet chính: {_che_token(e)}")
@@ -3835,6 +3894,7 @@ def _handle(args: dict, **kwargs) -> str:
         except Exception as e:  # noqa: BLE001
             bi_loai_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — chỉ còn ví dụ trong "
                              f"per_platform")
+    _sua_tab_chinh(tok, sid, TAB_BAI_DANG, len(rows[0]))
     # Có tab phụ thật (không phải ghi dưới sheet chính) thì sheet chính đã bị đẩy khỏi vị
     # trí đầu (xem `_dua_tab_chinh_len_dau`) — kéo về để link mở ra đúng sheet chính.
     if any(o == f"tab '{t}'" for o, t in ((thi_truong_khac_ghi_o, _TAB_THI_TRUONG_KHAC),

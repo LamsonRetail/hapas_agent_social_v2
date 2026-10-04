@@ -65,6 +65,9 @@ def moi_truong(monkeypatch):
     monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows, **k: ghi_tab.append((sid, rows)))
     monkeypatch.setattr(D, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(D.memory_store, "get_current_sender", lambda: "ou_test")
+    # Đặt tên tab / bỏ cột thừa: không gọi Lark thật (canh riêng ở test_sheet_gon).
+    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: None)
+    monkeypatch.setattr(A, "_vua_cot", lambda *a: None)
     return ap, ghi_so, ghi_sheet, ghi_tab
 
 
