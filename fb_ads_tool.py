@@ -26,8 +26,10 @@ ships it). No token, so the tool is always live.
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
+import threading
 import time
 from urllib.parse import quote
 
@@ -180,6 +182,90 @@ def _filter_images(images) -> list[str]:
     return out
 
 
+#: Cột Lark Sheet theo dõi (chủ agent chốt 05/10/2026: tra ads cũng phải ra Sheet như
+#: Top Ads TikTok, để team lưu và so theo thời gian thay vì chỉ đọc trong chat).
+_HEADER_SHEET = ["STT", "Library ID", "Ngày bắt đầu chạy", "Nội dung quảng cáo",
+                 "Link trên Ad Library", "Trang / từ khoá", "Nền tảng lọc", "Quốc gia",
+                 "Trạng thái lọc", "Ngày quét"]
+_TRANG_THAI = {"active": "đang chạy", "inactive": "đã dừng", "all": "tất cả"}
+_VN_TZ = datetime.timezone(datetime.timedelta(hours=7))
+
+
+def _duoc_ghi_sheet() -> bool:
+    """Tra ads là việc ĐỌC (agent không có `write_data` vẫn tra được); Sheet là ghi dữ
+    liệu ra ngoài nên chỉ ghi khi hợp đồng agent có `write_data`."""
+    try:
+        import lsr_policy
+        return "write_data" in lsr_policy.quyen_phat()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _dong_sheet(ads: list[dict], nhan: str, platform: str, country: str,
+                active_status: str, ngay: str, stt_dau: int = 1) -> list[list]:
+    return [[stt_dau + i, a["library_id"], a.get("started") or "", a.get("text") or "",
+             f"https://www.facebook.com/ads/library/?id={a['library_id']}", nhan,
+             platform or "tất cả", country, _TRANG_THAI.get(active_status, active_status), ngay]
+            for i, a in enumerate(ads)]
+
+
+#: Sheet của LƯỢT trả lời đang chạy: (chat, mã lượt) -> {tok, sid, url, granted, dong}.
+#: 02/10/2026 một lượt gọi tool này 8 lần (8 brand) — mỗi lần một file là 8 link rác.
+#: Cùng lượt thì ghi NỐI vào sheet đầu; lượt sau (mã khác) là sheet mới.
+_SHEET_LUOT: dict[tuple, dict] = {}
+_SHEET_KHOA = threading.Lock()
+
+
+def _khoa_luot() -> tuple | None:
+    """Khoá của lượt hiện tại; None ngoài lượt trả lời (khi đó luôn tạo sheet mới)."""
+    try:
+        import dong_ho_luot
+        import scheduler
+        ma = dong_ho_luot.ma_luot()
+        return None if ma is None else (scheduler.get_current_chat() or "", ma)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _ghi_sheet(title: str, ads: list[dict], nhan: str, platform: str, country: str,
+               active_status: str) -> tuple[str | None, bool, str | None, bool]:
+    """Ghi các ad đã bóc vào Lark Sheet. -> (sheet_url, đã cấp quyền cho người hỏi, lỗi,
+    ghi nối vào sheet có sẵn của lượt). Lỗi ghi sheet KHÔNG làm hỏng kết quả tra — trả
+    kèm để Mark nói ra."""
+    import apify_tool as A
+    try:
+        import memory_store
+        sender = memory_store.get_current_sender()
+    except Exception:  # noqa: BLE001
+        sender = None
+    ngay = f"{datetime.datetime.now(_VN_TZ):%d/%m/%Y}"
+    khoa = _khoa_luot()
+    # Giữ khoá suốt lời gọi Lark: hai lời gọi song song cùng lượt không được cùng tạo
+    # sheet, hay ghi đè cùng dòng. Vài giây, chỉ chặn chính tool này.
+    with _SHEET_KHOA:
+        try:
+            co = _SHEET_LUOT.get(khoa) if khoa else None
+            if co:
+                dong = _dong_sheet(ads, nhan, platform, country, active_status, ngay,
+                                   stt_dau=co["dong"])
+                A._write_values(co["tok"], co["sid"], dong, dong_dau=co["dong"] + 1)
+                co["dong"] += len(dong)
+                return co["url"], co["granted"], None, True
+            tok, url = A._create_sheet(title)
+            sid = A._first_sheet_id(tok)
+            A._write_values(tok, sid, [list(_HEADER_SHEET)] + _dong_sheet(
+                ads, nhan, platform, country, active_status, ngay))
+            granted = A._grant(tok, sender) if sender else False
+            if khoa:
+                if len(_SHEET_LUOT) >= 200:
+                    _SHEET_LUOT.pop(next(iter(_SHEET_LUOT)))
+                _SHEET_LUOT[khoa] = {"tok": tok, "sid": sid, "url": url,
+                                     "granted": granted, "dong": len(ads) + 1}
+            return url, granted, None, False
+        except Exception as e:  # noqa: BLE001
+            return None, False, A._che_token(f"{type(e).__name__}: {e}")[:250], False
+
+
 FB_ADS_LIBRARY_SCHEMA = {
     "name": "fb_ads_library",
     "description": (
@@ -194,7 +280,10 @@ FB_ADS_LIBRARY_SCHEMA = {
         "active_status mặc định active.\n"
         "Trả về: total_results, danh sách ad (library_id, ngày bắt đầu chạy, nội dung "
         "ad), và URL ảnh creative. LƯU Ý: ảnh là bản thu nhỏ (<=600px), link có hạn — "
-        "tải ngay nếu cần; ad video chỉ lấy được thumbnail."
+        "tải ngay nếu cần; ad video chỉ lấy được thumbnail.\n"
+        "Có ad thì tự ghi một Lark Sheet theo dõi (mỗi ad một dòng, kèm link Ad Library); "
+        "tra nhiều brand trong CÙNG một lượt thì ghi nối vào cùng một sheet (`sheet_ghi_noi`) — "
+        "gửi NGUYÊN `sheet_url`. Có `loi_sheet` thì nói rõ là chưa ghi được sheet."
     ),
     "parameters": {
         "type": "object",
@@ -235,6 +324,7 @@ FB_ADS_LIBRARY_SCHEMA = {
                 "type": "boolean",
                 "description": "Có lấy URL ảnh creative không (mặc định true).",
             },
+            "title": {"type": "string", "description": "Tên file sheet. Bỏ trống sẽ tự đặt."},
         },
         "required": [],
     },
@@ -336,9 +426,23 @@ def _handle_fb_ads_library(args: dict, **kwargs) -> str:
         except Exception:  # noqa: BLE001
             images = []
 
+    sheet_url, granted, loi_sheet, ten_sheet, ghi_noi = None, False, None, None, False
+    if ads and _duoc_ghi_sheet():
+        nhan = f"page_id {page_id}" if page_id else query
+        ten_sheet = (str(args.get("title") or "").strip()
+                     or f"Ads Meta · {nhan} · {country}"[:90]
+                     + f" · {datetime.datetime.now(_VN_TZ):%d-%m-%Y}")
+        sheet_url, granted, loi_sheet, ghi_noi = _ghi_sheet(
+            ten_sheet, ads, nhan, platform, country, active_status)
+
     return tool_result(
         success=True,
         source="facebook_ads_library",
+        sheet_url=sheet_url,
+        granted=granted,
+        title=ten_sheet,
+        loi_sheet=loi_sheet,
+        sheet_ghi_noi=ghi_noi or None,
         url=url,
         page_id=page_id or None,
         query=query or None,
