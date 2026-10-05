@@ -586,6 +586,16 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
             _JOB_HIEN_TAI.set(job_id)
             with _JOB_PHIEN_KHOA:
                 _JOB_PHIEN[phien] = job_id
+        # Một lượt mỗi phiên: lượt quá hạn còn chạy, hoặc tin cùng cuộc chat vừa tới qua
+        # cửa kia (gateway ↔ listener Lark, run._do_reply), thì chờ lượt trước xong —
+        # hai lượt song song đọc/ghi lịch sử xen nhau. Chờ tối đa NỬA trần rồi chạy luôn
+        # (có log): một lượt treo không được khoá chết cả cuộc chat. Khoá giữ trong luồng
+        # này, không phải vòng job — vòng job không bao giờ đứng chờ một phiên.
+        kp = _khoa_phien(phien)
+        co_khoa = kp.acquire(timeout=max(0.0, _HAN_TRA_LOI / 2))
+        if not co_khoa:
+            print(f"[job] phiên còn lượt trước chưa xong sau {_HAN_TRA_LOI / 2:.0f}s — "
+                  "chạy luôn", flush=True)
         try:
             # `kenh` chỉ truyền khi có — `tra_loi` giả của các bộ thử không nhận nó.
             them = {"kenh": kenh} if kenh else {}
@@ -597,6 +607,8 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
             hop["ok"] = False
             hop["loi"] = f"{type(e).__name__}: {e}"
         finally:
+            if co_khoa:
+                kp.release()
             if job_id is not None:
                 with _JOB_PHIEN_KHOA:
                     if _JOB_PHIEN.get(phien) == job_id:
@@ -628,6 +640,24 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
     if hop.get("loi"):
         print(f"[job] lượt lỗi: {_redact(hop['loi'])}", flush=True)
     return (hop.get("dap") or "", bool(hop.get("ok")), False)
+
+
+_KHOA_PHIEN: dict[str, threading.Lock] = {}
+_KHOA_PHIEN_GUARD = threading.Lock()
+
+
+def _khoa_phien(phien: str) -> threading.Lock:
+    """Khoá theo phiên hội thoại, dùng chung cho đường job và listener Lark."""
+    with _KHOA_PHIEN_GUARD:
+        k = _KHOA_PHIEN.get(phien)
+        if k is None:
+            # Chặn trên như `_MODEL_VUA_CHAY`: bỏ khoá cũ nhất ĐANG RẢNH (khoá đang giữ
+            # mà bỏ thì lượt sau cùng phiên lấy khoá mới, chạy chen với lượt đang chạy).
+            if len(_KHOA_PHIEN) >= 500:
+                for cu in [p for p, kk in _KHOA_PHIEN.items() if not kk.locked()][:100]:
+                    _KHOA_PHIEN.pop(cu, None)
+            k = _KHOA_PHIEN[phien] = threading.Lock()
+        return k
 
 
 def _kenh_tra_loi_muon(phien: str, job_id, kenh: dict | None) -> dict | None:
@@ -783,6 +813,23 @@ def _goi_job(c: dict, duong: str, than: dict):
             _ngu(_LUI_TRA_JOB[lan])
 
 
+_APP_DA_CANH_BAO: set[str] = set()
+
+
+def _canh_bao_app_lech(phien: str) -> None:
+    """Phiên gateway `lark:<app>:<oc>` mà <app> khác LARK_APP_ID của Mark thì cảnh báo
+    MỘT lần: tin rơi vào listener (run._phien_lark) sẽ dựng phiên bằng LARK_APP_ID, lệch
+    là hai cửa lại thành hai cuộc hội thoại — lỗi im lặng, chỉ log mới thấy."""
+    if not str(phien).startswith("lark:"):
+        return
+    app = str(phien).split(":", 2)[1]
+    cua_minh = (os.environ.get("LARK_APP_ID") or "").strip()
+    if cua_minh and app and app != cua_minh and app not in _APP_DA_CANH_BAO:
+        _APP_DA_CANH_BAO.add(app)
+        print(f"[job] CẢNH BÁO: phiên gateway mang app {app} khác LARK_APP_ID "
+              f"{cua_minh} — tin Lark vào thẳng listener sẽ lệch phiên", flush=True)
+
+
 def _mot_vong(c: dict, tra_loi) -> int:
     """Lấy tối đa một job, xử lý, trả lời. Trả về số job đã làm."""
     try:
@@ -798,6 +845,7 @@ def _mot_vong(c: dict, tra_loi) -> int:
     p = j.get("payload") or {}
     hoi = (p.get("text") or "").strip()
     phien = j.get("session_id") or f"job:{jid}"
+    _canh_bao_app_lech(phien)
     t0 = time.time()
 
     # In NGAY khi nhận, đừng đợi xong mới in. Trước đây chỉ có một dòng lúc hoàn tất,

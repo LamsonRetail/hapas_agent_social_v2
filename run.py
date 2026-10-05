@@ -121,13 +121,27 @@ def _do_reply(msg: dict) -> None:
 
     # 2) brain, under a hard timeout so one bad message can't freeze the chat.
     failed = False
+    treo = False
+    phien = _phien_lark(chat_id)
     try:
         import brain
 
-        fut = _brain_pool.submit(
-            brain.reply, text, chat_id=chat_id, sender_open_id=sender_open_id
-        )
-        reply = fut.result(timeout=_REPLY_TIMEOUT)
+        if phien != chat_id:
+            # Chạy cùng gateway platform: Lark chia sự kiện ngẫu nhiên giữa các kết nối
+            # của cùng app, nên thỉnh thoảng một tin rơi vào listener này (05/10/2026:
+            # "ok chốt" tới đây, Mark tìm lịch sử theo `oc_…` thay vì `lark:<app>:oc_…`,
+            # không thấy đề xuất vừa đưa, chạy theo lịch sử cũ). Dùng ĐÚNG phiên, kiểu
+            # chat, trần thời gian và gửi bù như đường job — hai cửa, một cuộc hội thoại.
+            ct = str(msg.get("chat_type") or "").strip().lower()
+            kenh = {"chat_type": "p2p" if ct == "p2p" else "group"} if ct else None
+            reply, ok, treo = lsr_platform._chay_co_han(
+                brain.reply, text, phien, sender_open_id, kenh)
+            failed = not ok and not treo
+        else:
+            fut = _brain_pool.submit(
+                brain.reply, text, chat_id=chat_id, sender_open_id=sender_open_id
+            )
+            reply = fut.result(timeout=_REPLY_TIMEOUT)
     except FutureTimeout:
         print(f"[brain] TIMEOUT after {_REPLY_TIMEOUT:.0f}s chat={chat_id}")
         reply = "Xin lỗi, em xử lý hơi lâu và bị quá thời gian. Anh/chị nhắn lại giúp em nhé 🙏"
@@ -169,19 +183,36 @@ def _do_reply(msg: dict) -> None:
     # 5) Báo lượt cho platform. Đặt CUỐI CÙNG, sau khi tin đã ra và badge đã gỡ:
     # hàm này không ném, không đợi, và tự tắt nếu chưa cấu hình — nên không có
     # đường nào nó làm hỏng một câu trả lời.
-    try:
-        import audit
-        audit_record = audit.lay_luot_vua_xong(chat_id)
-    except Exception:
-        audit_record = {}
+    # Quá hạn thì lượt chưa xong: `lay_luot_vua_xong` / `lay_model_vua_chay` là LẤY-VÀ-XOÁ,
+    # gọi lúc này sẽ cướp số của lượt đang chạy (cùng lý do như `_mot_vong`).
+    audit_record = {}
+    if not treo:
+        try:
+            import audit
+            audit_record = audit.lay_luot_vua_xong(phien)
+        except Exception:
+            audit_record = {}
     lsr_platform.bao_luot(
         message_id or chat_id,
         text,
         reply,
-        ok=(delivered and not failed),
+        ok=(delivered and not failed and not treo),
         audit_record=audit_record,
-        model=lsr_platform.lay_model_vua_chay(chat_id),
+        model=("" if treo else lsr_platform.lay_model_vua_chay(phien)),
     )
+
+
+def _phien_lark(chat_id: str) -> str:
+    """Phiên hội thoại của tin Lark đến THẲNG listener này. Đang chạy cùng gateway
+    platform (job poll bật) thì phải trùng phiên gateway `lark:<app_id>:<chat_id>` —
+    lịch sử, ngữ cảnh platform, nhắc việc đều theo khoá đó. Không có platform (máy PC cũ)
+    thì giữ `chat_id` như trước."""
+    if not str(chat_id or "").startswith("oc_"):
+        return chat_id
+    c = lsr_platform._cau_hinh()
+    if not c or not lsr_platform._job_poll_duoc_phep(c):
+        return chat_id
+    return f"lark:{config.app_id}:{chat_id}"
 
 
 def _typing_badge_on() -> bool:
