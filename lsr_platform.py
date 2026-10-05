@@ -651,6 +651,11 @@ def _khoa_phien(phien: str) -> threading.Lock:
     with _KHOA_PHIEN_GUARD:
         k = _KHOA_PHIEN.get(phien)
         if k is None:
+            # Chặn trên như `_MODEL_VUA_CHAY`: bỏ khoá cũ nhất ĐANG RẢNH (khoá đang giữ
+            # mà bỏ thì lượt sau cùng phiên lấy khoá mới, chạy chen với lượt đang chạy).
+            if len(_KHOA_PHIEN) >= 500:
+                for cu in [p for p, kk in _KHOA_PHIEN.items() if not kk.locked()][:100]:
+                    _KHOA_PHIEN.pop(cu, None)
             k = _KHOA_PHIEN[phien] = threading.Lock()
         return k
 

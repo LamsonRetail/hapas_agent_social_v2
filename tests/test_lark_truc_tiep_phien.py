@@ -154,3 +154,13 @@ def test_canh_bao_app_lech_mot_lan(monkeypatch, capsys):
     LP._canh_bao_app_lech("lark:cli_khac:oc_2")
     assert capsys.readouterr().out.count("CẢNH BÁO") == 1
     LP._canh_bao_app_lech("web-123")
+
+
+def test_bang_khoa_co_chan_tren_va_khong_bo_khoa_dang_giu(LPk):
+    giu = LPk._khoa_phien("dang-giu")
+    giu.acquire()
+    for i in range(600):
+        LPk._khoa_phien(f"p{i}")
+    assert len(LPk._KHOA_PHIEN) <= 501
+    assert LPk._KHOA_PHIEN.get("dang-giu") is giu, "khoá đang giữ không được bỏ"
+    giu.release()
