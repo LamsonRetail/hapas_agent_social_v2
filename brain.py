@@ -29,6 +29,7 @@ from pathlib import Path
 import lark_client as lark
 import lsr_platform
 import lenh_cung
+import dong_ho_luot
 import lsr_policy
 import tai_khoan_ai
 from config import config
@@ -903,6 +904,9 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     memory_store.set_current_sender(sender_open_id)
     scheduler.set_current_chat(chat_id)
     scheduler.set_current_chat_type((kenh or {}).get("chat_type"))
+    # Đồng hồ của lượt: tool gọi muộn được nhắc gói lại, quá mốc chặn thì không chạy nữa
+    # (dong_ho_luot) — để lượt kịp trả lời trước trần của vòng job.
+    dong_ho_luot.bat_dau()
     # Tin rỗng / chỉ @tag (đường job platform không chặn trước như run.py) không bao
     # giờ thành một lượt user rỗng — gửi model hay ghi lịch sử đều hỏng.
     user_text = _cau_hoi_co_chu(user_text)

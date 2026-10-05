@@ -567,9 +567,16 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
     Luồng quá hạn KHÔNG bị giết: Python không có cách dừng một luồng an toàn, ép dừng
     giữa lúc nó đang giữ khoá hay ghi file thì hỏng nặng hơn. Để nó là daemon, chạy nốt
     rồi tự tắt, và không chặn lúc thoát tiến trình. Đổi lại: cửa hàng đợi thông ngay.
+
+    Lượt quá hạn chạy xong thì GỬI BÙ câu trả lời vào đúng cuộc chat (sự cố 01/10/2026:
+    lượt quét 617 giây đã ra kết quả + Sheet nhưng bị bỏ, người dùng chỉ thấy câu xin
+    lỗi rồi hỏi lại, cào lần hai). Ai quyết trước — luồng xong hay vòng job bỏ chờ — do
+    `khoa` phân xử: xong sát hạn thì trả như lượt thường, không bao giờ mất hay ra hai tin.
+    Khởi động lại bot giữa chừng thì luồng daemon chết theo — tin bù mất (nói thật ở đây).
     """
     import threading
     hop: dict = {}
+    khoa = threading.Lock()
 
     def chay():
         # Job id gắn vào CHÍNH luồng trả lời (contextvar + sổ theo phiên), gỡ trong finally
@@ -594,17 +601,103 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
                 with _JOB_PHIEN_KHOA:
                     if _JOB_PHIEN.get(phien) == job_id:
                         _JOB_PHIEN.pop(phien, None)
+            with khoa:
+                hop["xong"] = True
+                bo = hop.get("bo_lai")
+            if bo:
+                _gui_tra_loi_muon(hop, hoi, bo)
 
     t = threading.Thread(target=chay, name=f"tra-loi-{phien[:16]}", daemon=True)
     t.start()
     t.join(_HAN_TRA_LOI)
-    if t.is_alive():
+    with khoa:
+        xong = bool(hop.get("xong"))
+        k = None
+        if not xong:
+            k = _kenh_tra_loi_muon(phien, job_id, kenh)
+            hop["bo_lai"] = k
+    if not xong:
+        phut = max(1, round(_HAN_TRA_LOI / 60))
+        if k:
+            return (f"Câu này cần hơn {phut} phút nên Mark trả lượt trước để không chặn "
+                    "những người đang chờ. Mark vẫn đang làm tiếp và sẽ nhắn kết quả vào "
+                    "đây khi xong — bạn không cần hỏi lại.", False, True)
         return ("Xin lỗi, câu này Mark xử lý lâu quá mức cho phép nên tôi dừng lượt "
                 "để không chặn những người đang chờ. Bạn thử hỏi lại, hoặc thu hẹp "
                 "phạm vi (ít nền tảng hơn, khoảng ngày ngắn hơn).", False, True)
     if hop.get("loi"):
-        print(f"[job] lượt lỗi: {hop['loi']}", flush=True)
+        print(f"[job] lượt lỗi: {_redact(hop['loi'])}", flush=True)
     return (hop.get("dap") or "", bool(hop.get("ok")), False)
+
+
+def _kenh_tra_loi_muon(phien: str, job_id, kenh: dict | None) -> dict | None:
+    """Kênh để gửi bù câu trả lời muộn, None nếu phiên không đẩy tin được (hồi quy, bộ
+    thử…) — khi đó vẫn báo người dùng hỏi lại như trước. Không bao giờ ném."""
+    try:
+        import viec_nen
+        k = viec_nen.kenh_tu_chat(phien, job_id, (kenh or {}).get("chat_type") or "")
+        return k if viec_nen.co_the_day(k) else None
+    except Exception as e:  # noqa: BLE001
+        print(f"[job] không xác định được kênh gửi bù: {type(e).__name__}", flush=True)
+        return None
+
+
+#: Giãn cách thử gửi bù (giây), ~4,5 phút tổng: đã hứa "không cần hỏi lại" thì phải chịu
+#: được một lần platform/Lark chập lâu hơn vài giây (cùng lý do `_LUI_TRA_JOB`).
+_LUI_GUI_BU = (2, 6, 20, 60, 180)
+
+
+def _gui_tra_loi_muon(hop: dict, hoi: str, k: dict) -> None:
+    """Gửi bù câu trả lời của lượt đã quá hạn (đã được ghi vào lịch sử chat bởi
+    `brain.reply` như mọi lượt). Thử lại giãn dần; khử trùng theo job/phiên. Gửi hỏng hẳn
+    thì ghi chú vào lịch sử để lượt sau Mark biết người dùng CHƯA nhận câu trả lời đó.
+    Chạy trong `finally` của luồng trả lời — không bao giờ ném."""
+    try:
+        cau = " ".join((hoi or "").split())
+        cau = cau if len(cau) <= 80 else cau[:79] + "…"
+        dap = (hop.get("dap") or "").strip()
+        if hop.get("ok") and dap:
+            van = f"Trả lời muộn cho câu “{cau}”:\n\n{dap}"
+        else:
+            van = (f"Câu “{cau}” chạy quá lâu rồi gặp lỗi nên Mark chưa trả lời được. "
+                   "Bạn hỏi lại giúp Mark, hoặc thu hẹp phạm vi nhé.")
+        if hop.get("loi"):
+            print(f"[job] lượt quá hạn lỗi: {_redact(hop['loi'])}", flush=True)
+        kid = (f"j{k['job_id']}-muon" if k.get("job_id")
+               else f"muon-{uuid.uuid4().hex[:16]}")[:50]
+        import viec_nen
+        for lan in range(len(_LUI_GUI_BU) + 1):
+            try:
+                viec_nen.day_theo_kenh(k, van, kid)
+                print(f"[job] đã gửi bù trả lời muộn ({k.get('loai')})", flush=True)
+                return
+            except Exception as e:  # noqa: BLE001
+                print(f"[job] gửi bù trả lời muộn lỗi lần {lan + 1}: "
+                      f"{_redact(f'{type(e).__name__}: {e}')}", flush=True)
+                if lan < len(_LUI_GUI_BU):
+                    _ngu(_LUI_GUI_BU[lan])
+        print(f"[job] BỎ gửi bù trả lời muộn sau {len(_LUI_GUI_BU) + 1} lần "
+              f"({k.get('loai')})", flush=True)
+        _ghi_chu_chua_gui(k, cau)
+    except Exception as e:  # noqa: BLE001
+        print(f"[job] gửi bù trả lời muộn hỏng: {type(e).__name__}", flush=True)
+
+
+def _ghi_chu_chua_gui(k: dict, cau: str) -> None:
+    """Lịch sử đã có câu trả lời (brain.reply ghi) mà người dùng chưa từng thấy — thêm
+    ghi chú để lượt sau model không nói "như tôi đã trả lời ở trên"."""
+    chat = k.get("chat_id") or ""
+    if not chat:
+        return
+    chu = (f"(Ghi chú hệ thống: câu trả lời muộn cho câu “{cau}” KHÔNG gửi được tới "
+           "người dùng — họ chưa thấy nó. Nếu họ hỏi lại, trả lời đầy đủ.)")
+    try:
+        import memory_store
+        memory_store.append_turns(chat, [{"role": "assistant", "text": chu}])
+    except Exception as e:  # noqa: BLE001
+        print(f"[job] ghi chú chưa gửi lỗi: {type(e).__name__}", flush=True)
+    ghi_luot_ngu_canh(chat, "", chu, "",
+                      channel="lark" if str(k.get("loai", "")).startswith("lark") else "web")
 
 
 # Job platform đang được trả lời theo từng phiên — việc NỀN ghi lại job id lúc tool được
@@ -723,7 +816,8 @@ def _mot_vong(c: dict, tra_loi) -> int:
                                  _kenh_cua_job(j), job_id=jid)
     if treo:
         print(f"[job] #{jid} QUÁ HẠN {_HAN_TRA_LOI:.0f}s — bỏ lượt, đi tiếp. "
-              f"Luồng cũ vẫn chạy nền và sẽ tự tắt khi xong.", flush=True)
+              f"Luồng cũ chạy tiếp, xong thì gửi bù trả lời (nếu kênh đẩy được).",
+              flush=True)
 
     # Token của lượt vừa chạy. Đường Lark lấy qua `audit.lay_luot_vua_xong` trong
     # run.py; đường job trước đây chỉ gửi model + duration, nên dashboard báo 0 token
