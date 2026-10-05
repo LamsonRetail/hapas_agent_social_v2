@@ -626,7 +626,7 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
                 "để không chặn những người đang chờ. Bạn thử hỏi lại, hoặc thu hẹp "
                 "phạm vi (ít nền tảng hơn, khoảng ngày ngắn hơn).", False, True)
     if hop.get("loi"):
-        print(f"[job] lượt lỗi: {hop['loi']}", flush=True)
+        print(f"[job] lượt lỗi: {_redact(hop['loi'])}", flush=True)
     return (hop.get("dap") or "", bool(hop.get("ok")), False)
 
 
@@ -642,31 +642,62 @@ def _kenh_tra_loi_muon(phien: str, job_id, kenh: dict | None) -> dict | None:
         return None
 
 
+#: Giãn cách thử gửi bù (giây), ~4,5 phút tổng: đã hứa "không cần hỏi lại" thì phải chịu
+#: được một lần platform/Lark chập lâu hơn vài giây (cùng lý do `_LUI_TRA_JOB`).
+_LUI_GUI_BU = (2, 6, 20, 60, 180)
+
+
 def _gui_tra_loi_muon(hop: dict, hoi: str, k: dict) -> None:
     """Gửi bù câu trả lời của lượt đã quá hạn (đã được ghi vào lịch sử chat bởi
-    `brain.reply` như mọi lượt). 3 lần thử, giãn dần; khử trùng theo job/phiên."""
-    cau = " ".join((hoi or "").split())
-    cau = cau if len(cau) <= 80 else cau[:79] + "…"
-    dap = (hop.get("dap") or "").strip()
-    if hop.get("ok") and dap:
-        van = f"Trả lời muộn cho câu “{cau}”:\n\n{dap}"
-    else:
-        van = (f"Câu “{cau}” chạy quá lâu rồi gặp lỗi nên Mark chưa trả lời được. "
-               "Bạn hỏi lại giúp Mark, hoặc thu hẹp phạm vi nhé.")
-    if hop.get("loi"):
-        print(f"[job] lượt quá hạn lỗi: {_redact(hop['loi'])}", flush=True)
-    kid = f"j{k['job_id']}-muon" if k.get("job_id") else f"muon-{uuid.uuid4().hex[:16]}"
-    import viec_nen
-    for lan in range(3):
-        try:
-            viec_nen.day_theo_kenh(k, van, kid[:50])
-            print(f"[job] đã gửi bù trả lời muộn ({k.get('loai')})", flush=True)
-            return
-        except Exception as e:  # noqa: BLE001
-            print(f"[job] gửi bù trả lời muộn lỗi lần {lan + 1}: "
-                  f"{_redact(f'{type(e).__name__}: {e}')}", flush=True)
-            if lan < 2:
-                _ngu(2 * 3 ** lan)
+    `brain.reply` như mọi lượt). Thử lại giãn dần; khử trùng theo job/phiên. Gửi hỏng hẳn
+    thì ghi chú vào lịch sử để lượt sau Mark biết người dùng CHƯA nhận câu trả lời đó.
+    Chạy trong `finally` của luồng trả lời — không bao giờ ném."""
+    try:
+        cau = " ".join((hoi or "").split())
+        cau = cau if len(cau) <= 80 else cau[:79] + "…"
+        dap = (hop.get("dap") or "").strip()
+        if hop.get("ok") and dap:
+            van = f"Trả lời muộn cho câu “{cau}”:\n\n{dap}"
+        else:
+            van = (f"Câu “{cau}” chạy quá lâu rồi gặp lỗi nên Mark chưa trả lời được. "
+                   "Bạn hỏi lại giúp Mark, hoặc thu hẹp phạm vi nhé.")
+        if hop.get("loi"):
+            print(f"[job] lượt quá hạn lỗi: {_redact(hop['loi'])}", flush=True)
+        kid = (f"j{k['job_id']}-muon" if k.get("job_id")
+               else f"muon-{uuid.uuid4().hex[:16]}")[:50]
+        import viec_nen
+        for lan in range(len(_LUI_GUI_BU) + 1):
+            try:
+                viec_nen.day_theo_kenh(k, van, kid)
+                print(f"[job] đã gửi bù trả lời muộn ({k.get('loai')})", flush=True)
+                return
+            except Exception as e:  # noqa: BLE001
+                print(f"[job] gửi bù trả lời muộn lỗi lần {lan + 1}: "
+                      f"{_redact(f'{type(e).__name__}: {e}')}", flush=True)
+                if lan < len(_LUI_GUI_BU):
+                    _ngu(_LUI_GUI_BU[lan])
+        print(f"[job] BỎ gửi bù trả lời muộn sau {len(_LUI_GUI_BU) + 1} lần "
+              f"({k.get('loai')})", flush=True)
+        _ghi_chu_chua_gui(k, cau)
+    except Exception as e:  # noqa: BLE001
+        print(f"[job] gửi bù trả lời muộn hỏng: {type(e).__name__}", flush=True)
+
+
+def _ghi_chu_chua_gui(k: dict, cau: str) -> None:
+    """Lịch sử đã có câu trả lời (brain.reply ghi) mà người dùng chưa từng thấy — thêm
+    ghi chú để lượt sau model không nói "như tôi đã trả lời ở trên"."""
+    chat = k.get("chat_id") or ""
+    if not chat:
+        return
+    chu = (f"(Ghi chú hệ thống: câu trả lời muộn cho câu “{cau}” KHÔNG gửi được tới "
+           "người dùng — họ chưa thấy nó. Nếu họ hỏi lại, trả lời đầy đủ.)")
+    try:
+        import memory_store
+        memory_store.append_turns(chat, [{"role": "assistant", "text": chu}])
+    except Exception as e:  # noqa: BLE001
+        print(f"[job] ghi chú chưa gửi lỗi: {type(e).__name__}", flush=True)
+    ghi_luot_ngu_canh(chat, "", chu, "",
+                      channel="lark" if str(k.get("loai", "")).startswith("lark") else "web")
 
 
 # Job platform đang được trả lời theo từng phiên — việc NỀN ghi lại job id lúc tool được

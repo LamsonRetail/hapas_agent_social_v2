@@ -108,6 +108,25 @@ def test_gui_bu_loi_mang_thi_thu_lai(LP, monkeypatch):
     assert lan == ["j4-muon"] * 3, "thử lại cùng mã khử trùng"
 
 
+def test_gui_bu_hong_han_thi_ghi_chu_vao_lich_su(LP, monkeypatch):
+    """Lịch sử đã có câu trả lời mà người dùng chưa thấy — lượt sau phải biết."""
+    V = sys.modules["viec_nen"]
+    import memory_store
+    lan, ghi, nen = [], [], []
+    monkeypatch.setattr(V, "day_theo_kenh",
+                        lambda k, van, kid: lan.append(kid) or (_ for _ in ()).throw(
+                            OSError("mất mạng")))
+    monkeypatch.setattr(memory_store, "append_turns", lambda c, t: ghi.append((c, t)))
+    monkeypatch.setattr(LP, "ghi_luot_ngu_canh",
+                        lambda *a, **k: nen.append((a, k)) or LP._xong_test.set())
+    LP._chay_co_han(_cham(0.4), "độ phủ hapas", LARK, None, job_id=8)
+    assert LP._xong_test.wait(3)
+    assert len(lan) == len(LP._LUI_GUI_BU) + 1, "thử đủ số lần rồi mới bỏ"
+    assert ghi and ghi[0][0] == LARK
+    assert "KHÔNG gửi được" in ghi[0][1][0]["text"]
+    assert nen and nen[0][1]["channel"] == "lark"
+
+
 def test_cau_hoi_dai_bi_cat_gon(LP):
     LP._chay_co_han(_cham(), "a " * 200, LARK, None, job_id=5)
     assert LP._xong_test.wait(3)
