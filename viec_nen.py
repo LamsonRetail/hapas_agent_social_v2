@@ -280,6 +280,13 @@ def kenh_hien_tai() -> tuple[dict, str]:
         job_id = lsr_platform.job_cua_phien(chat) if chat else None
     except Exception:  # noqa: BLE001
         job_id = None
+    return kenh_tu_chat(chat, job_id, loai_chat), nguoi
+
+
+def kenh_tu_chat(chat: str, job_id=None, loai_chat: str = "") -> dict:
+    """Kênh đẩy tin chủ động cho cuộc chat `chat` — dùng chung cho việc nền và tin trả
+    lời muộn của vòng job (lsr_platform._chay_co_han)."""
+    chat = chat or ""
     k = {"loai": "khac", "chat_id": chat, "app_id": "", "oc": "", "job_id": job_id,
          "loai_chat": loai_chat}
     if chat.startswith("lark:"):
@@ -292,7 +299,32 @@ def kenh_hien_tai() -> tuple[dict, str]:
         k["loai"] = "khac"
     elif job_id:
         k["loai"] = "web"
-    return k, nguoi
+    return k
+
+
+def co_the_day(k: dict) -> bool:
+    """Kênh `k` có đẩy tin chủ động được không (hồi quy, bộ thử, chat lạ thì không)."""
+    return k.get("loai") in ("lark_gateway", "lark_truc_tiep", "web")
+
+
+def day_theo_kenh(k: dict, van: str, kid: str) -> bool:
+    """Gửi `van` MỘT lần qua kênh `k` (`kid` để khử trùng). True = đã đẩy; False = kênh
+    không đẩy được. Lỗi mạng thì ném — người gọi tự thử lại."""
+    loai = k.get("loai")
+    if loai == "lark_gateway":
+        import lsr_platform
+        lsr_platform.gui_lark(k["oc"], van, k.get("app_id") or "", uuid=kid)
+    elif loai == "lark_truc_tiep":
+        import lark_client
+        lark_client.send_text("chat_id", k["oc"], van, uuid=kid)
+    elif loai == "web":
+        import lsr_platform
+        # Tạm thời (02/10/2026): console chưa có kênh đẩy tin chủ động cho agent;
+        # sự kiện "message" gắn vào job gốc là chỗ duy nhất console đọc được.
+        lsr_platform.bao_su_kien_job(k["job_id"], van, ma_su_kien=kid)
+    else:
+        return False
+    return True
 
 
 def _se_bao_qua(k: dict) -> str:
@@ -851,23 +883,12 @@ def gui(v: Viec) -> bool:
         k = dict(v.d.get("kenh") or {})
     kid = f"{v.ma}-kq"[:50]
     if van and not da_gui:
-        loai = k.get("loai")
         for lan in range(3):
             v.kiem_quyen()
             try:
-                if loai == "lark_gateway":
-                    import lsr_platform
-                    lsr_platform.gui_lark(k["oc"], van, k.get("app_id") or "", uuid=kid)
-                elif loai == "lark_truc_tiep":
-                    import lark_client
-                    lark_client.send_text("chat_id", k["oc"], van, uuid=kid)
-                elif loai == "web":
-                    import lsr_platform
-                    # Tạm thời (02/10/2026): console chưa có kênh đẩy tin chủ động cho agent;
-                    # sự kiện "message" gắn vào job gốc là chỗ duy nhất console đọc được.
-                    lsr_platform.bao_su_kien_job(k["job_id"], van, ma_su_kien=kid)
+                da_day = day_theo_kenh(k, van, kid)
                 with v._khoa:
-                    if loai not in ("lark_gateway", "lark_truc_tiep", "web"):
+                    if not da_day:
                         tb["khong_day"] = True      # hồi quy / bộ thử / chat lạ: không đẩy
                     tb["da_gui"] = True
                     tb["gui_luc"] = _iso(_bay_gio())

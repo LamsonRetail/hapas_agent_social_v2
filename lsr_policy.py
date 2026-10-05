@@ -436,6 +436,18 @@ def install_registry_guard(audit_callback: Callable[..., None] | None = None) ->
         mode = "enforce"
 
     def guarded(self, name: str, args: dict, **kwargs):
+        # Đồng hồ lượt (dong_ho_luot) áp ở MỌI chế độ policy: là trần thời gian của vòng
+        # job, không phải quyền. Ngoài lượt trả lời thì `xet` trả "" — không đụng gì.
+        import dong_ho_luot
+        muc, g = dong_ho_luot.xet()
+        if muc == "chan":
+            if audit_callback:
+                audit_callback(name, args, None, 0.0, loi=f"hết giờ lượt ({g:.0f}s)")
+            return dong_ho_luot.loi_chan(name, g)
+        kq = _qua_policy(name, args, **kwargs)
+        return dong_ho_luot.gan_nhac(kq, g) if muc == "nhac" else kq
+
+    def _qua_policy(name: str, args: dict, **kwargs):
         if mode == "off":
             return original(name, args, **kwargs)
         verdict = decide(name, args)
