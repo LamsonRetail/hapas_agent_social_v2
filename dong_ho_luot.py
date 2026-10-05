@@ -22,9 +22,13 @@ import contextvars
 import json
 import os
 import time
+import uuid
 
 _BAT_DAU: contextvars.ContextVar = contextvars.ContextVar("lsr_luot_bat_dau", default=None)
 _dong_ho = time.monotonic     # tách tên để bộ thử giả đồng hồ
+#: Mã duy nhất của lượt — mốc giờ không dùng làm khoá được (Windows: monotonic nhảy ~15 ms,
+#: hai lượt sát nhau trùng mốc). fb_ads_tool dùng để ghi nối cùng sheet trong một lượt.
+_MA_LUOT: contextvars.ContextVar = contextvars.ContextVar("lsr_ma_luot", default=None)
 
 #: Phải chừa sau mốc chặn để model viết câu trả lời cuối (một lượt gọi model ~10–40 giây).
 _CHUA_VIET = 60.0
@@ -34,6 +38,12 @@ def bat_dau() -> None:
     """Gọi đầu mỗi lượt trả lời (brain.reply). Contextvar → theo đúng luồng của lượt đó;
     Hermes chép context sang luồng chạy tool song song (propagate_context_to_thread)."""
     _BAT_DAU.set(_dong_ho())
+    _MA_LUOT.set(uuid.uuid4().hex)
+
+
+def ma_luot() -> str | None:
+    """Mã của lượt trả lời đang chạy; None ngoài lượt (việc nền, nhắc việc, bộ thử)."""
+    return _MA_LUOT.get()
 
 
 def da_chay() -> float | None:
