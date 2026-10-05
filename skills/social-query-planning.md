@@ -9,7 +9,8 @@
 | Một TÀI KHOẢN cụ thể đăng gì — đối thủ, KOC định book | `soi_tai_khoan` |
 | Giá, sản phẩm đang bán trên sàn | `soi_san` với `tu_khoa` (chỉ Shopee) |
 | Soi MỘT sản phẩm cụ thể — người dùng dán link Shopee hoặc TikTok Shop | `soi_san` với `link` |
-| Đối thủ đang CHẠY QUẢNG CÁO gì | `fb_ads_library` |
+| Đối thủ đang CHẠY QUẢNG CÁO gì trên Facebook / Instagram / Threads | `fb_ads_library` |
+| Top quảng cáo TikTok theo brand, sản phẩm hoặc ngành | `tiktok_top_ads` (gọi `chi_uoc_tinh` trước) |
 | Người ta bình luận gì dưới một bài cụ thể | `social_deep_dive` |
 | Gán nhãn từng bình luận, thống kê % khen/chê/chủ đề | `social_deep_dive` (tự gán nhãn) |
 
@@ -41,8 +42,15 @@ Còn lại lấy mặc định: Việt Nam, giờ VN, ngôn ngữ theo thị tr�
 hot", "format nào đang viral"): gọi `social_listen` với `che_do`="trend". Không cần từ
 khoá hay ngày; kỳ là 7 ngày gần nhất (hoặc 30). Không cào hashtag chung chung như
 #trend, #viral, #xuhuong: cách đó chỉ ra mẫu ngẫu nhiên, lẫn video cũ và video nước
-ngoài. Người dùng xin "đủ N bài" thì đặt `so_video_mau`=N. Chi phí thường khoảng 0,6–1
-USD (gồm bảng nhạc đang lên ~0,2 USD; đặt `so_nhac`=0 để bỏ). Khi báo kết quả:
+ngoài. Người dùng xin "đủ N bài" thì đặt `so_video_mau`=N. Đặt `so_nhac`=0 để bỏ bảng
+nhạc đang lên.
+
+Trend tốn tiền: gọi TRƯỚC với `chi_uoc_tinh`=true (miễn phí, không chạy), chép
+`cau_uoc_tinh` (số USD và trần TikTok trên console, kèm phần sẽ bị cắt nếu vượt trần) rồi
+mới hỏi "Chạy nhé?". Cả lượt trend gộp mọi bảng phải gọn trong trần TikTok; trần thấp thì
+tool tự cắt theo thứ tự ưu tiên: hashtag, rồi top video, rồi lấy mẫu âm thanh, rồi bảng
+nhạc. Phần bị cắt (`bi_cat_theo_tran`) phải nói ra khi báo kết quả. Chủ agent tắt TikTok
+trên console thì trend không chạy: nói thẳng, không thay bằng nguồn khác. Khi báo kết quả:
 
 - Hashtag và top video là bảng xếp hạng chính thức của TikTok. Ưu tiên nêu hashtag đang lên
 - Hashtag gắn cờ nhạy cảm (buôn người, tai nạn, cái chết, bạo lực, chính trị, tôn giáo,
@@ -53,6 +61,10 @@ USD (gồm bảng nhạc đang lên ~0,2 USD; đặt `so_nhac`=0 để bỏ). Kh
   Tách bài hát dùng lại với âm thanh gốc của kênh
 - Top video có thể là quảng cáo của brand. Mặc định đã bỏ video trả tiền; nếu vẫn thấy
   video của brand lớn thì nói rõ đó là nội dung brand chứ không phải trend tự nhiên
+- Hỏi trend THEO NGÀNH ("trend thời trang", "túi xách", "phụ kiện", "mỹ phẩm") → thêm
+  `nganh`. Chỉ bảng hashtag lọc theo ngành, theo ngành CHA của TikTok ("túi xách" lọc
+  thành "thời trang và phụ kiện"); top video không lọc được theo ngành. Không tốn thêm
+  tiền
 
 **Luôn chờ người dùng đồng ý trước khi chạy một lần quét tốn tiền.**
 
@@ -104,6 +116,8 @@ ghi vào sổ audit. Chỉ khi người dùng HỎI thì mới trả lời:
 - Soi một tài khoản, 30 bài: TikTok ~0,09 USD, Facebook ~0,15 USD, Instagram ~0,003 USD
   (Instagram chỉ có 12 bài mới nhất)
 - Shopee, 30 sản phẩm: ~0,15 USD
+- Top quảng cáo TikTok: ~0,003 USD mỗi ad; gói Apify Free chỉ ra ~5 ads/lượt (≈0,015
+  USD). Nguồn dự phòng ~0,01 USD khởi động + 0,004 USD mỗi ad, chậm (vài ads mỗi lượt)
 - Bình luận (gói hiện tại, 10/2026): TikTok ~0,00125 USD/bình luận, YouTube ~0,002,
   Facebook ~0,0025 — 10 bài TikTok × 50 bình luận ≈ 0,63 USD. Mỗi lần bóc bị chặn cứng ở
   trần chủ agent đặt (mặc định 300 bình luận, 0,5 USD)

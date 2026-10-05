@@ -29,6 +29,7 @@ from pathlib import Path
 import lark_client as lark
 import lsr_platform
 import lenh_cung
+import dong_ho_luot
 import lsr_policy
 import tai_khoan_ai
 from config import config
@@ -56,6 +57,8 @@ import crawl_tool  # noqa: E402,F401  (registers `web_crawl`: cào sản phẩm 
 import ky_nang_tool  # noqa: E402,F401  (registers `dung_ky_nang`: nạp thân kỹ năng khi cần)
 import account_tool  # noqa: E402,F401  (registers `soi_tai_khoan`: soi tài khoản brand/KOC)
 import shopee_tool  # noqa: E402,F401  (registers `soi_san`: giá và sản phẩm trên Shopee)
+import tiktok_ads_tool  # noqa: E402,F401  (registers `tiktok_top_ads`: top ads TikTok -> Lark Sheet)
+import kenh_nha_tool  # noqa: E402,F401  (registers `binh_luan_kenh_nha`: bình luận kênh HAPAS qua API Meta)
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
@@ -115,6 +118,11 @@ _TOOLING_NOTE = "\n".join(
         "Instagram') → truyền tham số `platform` (facebook/instagram/messenger/threads/"
         "audience_network); Meta lọc server-side nên mọi ad trả về đúng nền tảng đó. Ảnh creative là "
         "bản thu nhỏ, link có hạn (tải ngay nếu cần); ad video chỉ có thumbnail.",
+        # 04/10: Meta Ad Library không có quảng cáo TikTok.
+        "- QUẢNG CÁO TIKTOK ('ads TikTok của đối thủ', 'ngành túi xách chạy ads TikTok gì') → "
+        "`tiktok_top_ads` (Top Ads của TikTok Creative Center, theo từ khoá/ngành). Đây là tập "
+        "ads hiệu quả cao nhất, KHÔNG phải mọi ad của brand; CTR/chi phí là mức tương đối, "
+        "không phải tiền thật; link video hết hạn sau 24–48 giờ.",
         "- DUYỆT WEB / TRANG CÔNG KHAI (`browser_navigate` + `browser_snapshot`/`browser_get_images`/"
         "`browser_click`…): tự mở URL, đọc nội dung, click, lấy ảnh — dùng cho web thường và các "
         "trang công khai KHÔNG cần đăng nhập. LƯU Ý: feed Facebook/Instagram/Threads/TikTok thường "
@@ -133,12 +141,15 @@ _TOOLING_NOTE = "\n".join(
         # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
         # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).
-        "- TOOL TỐN TIỀN (`social_listen`, `social_deep_dive`, `soi_tai_khoan`, `soi_san`): "
+        "- TOOL TỐN TIỀN HOẶC GHI SHEET (`social_listen`, `social_deep_dive`, `soi_tai_khoan`, "
+        "`soi_san`, `tiktok_top_ads`, `binh_luan_kenh_nha` — hai tool cuối gọi `chi_uoc_tinh`="
+        "true trước, miễn phí; `binh_luan_kenh_nha` luôn 0 USD nhưng vẫn hỏi vì ghi Sheet): "
         "TRƯỚC khi gọi, tóm tắt phạm vi (từ khoá hoặc link, nền tảng, khoảng ngày, số bài) rồi "
         "KẾT THÚC bằng câu hỏi \"Chạy nhé?\" và DỪNG, chờ người dùng trả lời. Chỉ gọi ngay khi: "
         "người dùng vừa đồng ý câu chốt đó (ok, chạy đi, làm luôn…); người dùng nói rõ không "
         "cần hỏi (quét luôn, chạy liền, làm luôn…); hoặc là lệnh cứng (/search, /comment, "
-        "/profile, /shop). Câu hỏi chung như 'có gì viral không', 'hóng trend tuần này' CHƯA "
+        "/profile, /shop, /topads, /hapas kèm việc cần đọc). Câu hỏi chung như "
+        "'có gì viral không', 'hóng trend tuần này' CHƯA "
         "phải là đồng ý quét.",
         # 01/10: Claude viết cả kế hoạch nội bộ lên đầu tin nhắn ("Câu này là trend chung →
         # gọi social_listen với che_do=… ---"), người dùng thấy tên tool và tham số.
@@ -156,10 +167,26 @@ _TOOLING_NOTE = "\n".join(
         "trước (số cũ, số mới, vì sao lệch — khác khoảng ngày, nguồn, bộ lọc, mẫu). Không "
         "im lặng đưa ra con số mâu thuẫn với lần trước.",
         # 01/10: được nhờ "gán nhãn từng bình luận và thống kê", Mark trả lời là không làm được.
-        "- Số SENTIMENT bình luận chỉ lấy từ `thong_ke`/`dong_thong_ke` của `social_deep_dive` "
-        "và luôn nói đã phân loại bao nhiêu/tổng — không tự ước lượng tỉ lệ. Nhờ 'gán nhãn từng "
-        "bình luận và thống kê' thì dùng `social_deep_dive` (tool tự gán nhãn), đừng nói không "
-        "làm được.",
+        # 02/10: team hỏi "tích cực hay tiêu cực, focus vào Threads" về BÀI đã quét — Mark
+        # đếm tay, không ra %. Bài của `social_listen` nay có nhãn + `thong_ke` như bình luận.
+        "- SENTIMENT / ĐO LƯỜNG (tích cực hay tiêu cực, bao nhiêu % khen chê, kể cả hỏi riêng "
+        "một nền tảng): CHỈ báo số và % mà tool trả về — `thong_ke`/`dong_thong_ke` của "
+        "`social_listen` (sắc thái BÀI, có `theo_nen_tang`) hoặc của `social_deep_dive` (sắc "
+        "thái BÌNH LUẬN) — luôn nói đã phân loại bao nhiêu/tổng và phần 'chưa phân loại', dẫn "
+        "lời thật từ `trich_dan`. TUYỆT ĐỐI không tự đếm tay hay ước lượng ('khoảng 60%'). "
+        "Tool không trả số thì nói chưa có số. Nhờ 'gán nhãn từng bình luận và thống kê' thì "
+        "dùng `social_deep_dive` (tool tự gán nhãn), đừng nói không làm được.",
+        "- Muốn sentiment ở mức BÌNH LUẬN (người ta bình luận gì, khen chê dưới bài): đề xuất "
+        "`social_deep_dive` cho link TikTok, YouTube, Facebook, Threads, Instagram. Threads và "
+        "Instagram bóc KHÔNG đăng nhập: không có trả lời lồng nhau, Instagram chỉ được MỘT "
+        "PHẦN bình luận công khai — khi báo phải nói rõ giới hạn đó (`gioi_han_nen_tang`), "
+        "không gọi là toàn bộ bình luận; không lấy nền tảng khác thay vào.",
+        # 04/10: bài của CHÍNH HAPAS đọc được đủ bằng token chủ kênh qua API Meta.
+        "- BÌNH LUẬN TRÊN KÊNH CỦA HAPAS (Threads, Instagram, Fanpage của mình — 'khách nói gì "
+        "dưới bài mới của HAPAS'): dùng `binh_luan_kenh_nha` — API chính thức, MIỄN PHÍ, đủ "
+        "bình luận và trả lời lồng nhau. Bài của đối thủ/người khác (hoặc TikTok/YouTube) mới "
+        "dùng `social_deep_dive` (cào, chỉ một phần, tốn tiền). Kênh báo 'chưa nối' hoặc 'token "
+        "hết hạn' thì nói thẳng: chủ agent cần cấp lại token cho kênh đó.",
         # 01/10: chủ agent chốt — bài của brand ở nước khác (HAPAS THAILAND) phải giữ, và
         # trần bóc bình luận trên console là trần cứng.
         "- `social_listen`: luôn điền `boi_canh` (thiếu thì không có bước AI đọc từng bài). "
@@ -197,7 +224,11 @@ _TOOL_CAN_XET = {
                       "rồi xuất Lark Sheet", {}),
     "soi_san": ("xem thị trường Shopee theo từ khoá, hoặc dán link sản phẩm Shopee / TikTok "
                 "Shop để đọc đánh giá của khách, rồi xuất Lark Sheet", {}),
+    "binh_luan_kenh_nha": ("đọc đủ bình luận trên kênh Threads/Instagram/Facebook của "
+                           "chính HAPAS (API Meta, miễn phí) rồi xuất Lark Sheet", {}),
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
+    "tiktok_top_ads": ("xem top quảng cáo TikTok theo từ khoá hoặc ngành (TikTok Creative "
+                       "Center) rồi xuất Lark Sheet", {}),
     "doc_bang": ("đọc nguyên một Base hoặc Sheet của Lark khi người hỏi cũng có quyền xem",
                  {"nguon": "https://example.larksuite.com/base/x"}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
@@ -653,6 +684,67 @@ def _ten_nguoi(open_id: str | None) -> str:
     return _TEN_DA_TRA[open_id]
 
 
+#: Lượt người dùng mở đầu khi lịch sử bắt đầu bằng lượt của Mark. Anthropic đòi
+#: messages[0] là user; thiếu thì Hermes tự chèn một lượt user CHỈ CÓ " " — và chính
+#: Anthropic từ chối lượt đó (400 "text content blocks must contain non-whitespace
+#: text"). Ngày 03/10 một chat Lark hỏng MỌI lượt vì vậy.
+_DAU_LICH_SU = "(Các lượt cũ hơn của cuộc trò chuyện đã được lược bớt.)"
+
+#: Lượt assistant đứng sau một câu hỏi không có câu trả lời ghi lại.
+_CHUA_TRA_LOI = "(Mark chưa trả lời câu này.)"
+
+#: Câu thay cho tin rỗng / chỉ có @tag. Cùng câu với đường Lark trực tiếp (run.py).
+_CAU_TAG_SUONG = ("(Đồng nghiệp vừa tag bot nhưng chưa nói gì. "
+                  "Hãy chào và hỏi cần hỗ trợ gì.)")
+
+#: @tag trong chữ: placeholder của Lark (`@_user_1`, `@_all`) hoặc tên đã hiện (`@Mark`).
+_TAG = re.compile(r"@_(?:user_\d+|all)\b|@\S+")
+
+
+def _co_chu(s) -> bool:
+    """Chuỗi có ít nhất một ký tự không phải khoảng trắng."""
+    return isinstance(s, str) and bool(s.strip())
+
+
+def _cau_hoi_co_chu(text) -> str:
+    """Câu hỏi đưa model không bao giờ rỗng. Tin rỗng hoặc chỉ có @tag (gateway đã bóc
+    phần tag, hoặc tin chỉ "@Mark") → câu nói rõ là người dùng chỉ tag bot."""
+    if isinstance(text, str) and _co_chu(_TAG.sub("", text)):
+        return text
+    return _CAU_TAG_SUONG
+
+
+def _chuan_hoa_lich_su(msgs: list[dict]) -> list[dict]:
+    """Lịch sử [{"role","content"}] hợp lệ cho MỌI nhà cung cấp, nhất là Anthropic:
+
+      • bỏ lượt rỗng / chỉ khoảng trắng / không phải chữ
+      • gộp các lượt liền nhau cùng vai (lượt rỗng bị bỏ, hoặc tin việc nền báo xong
+        ghi một mình một lượt assistant) — không bao giờ hai lượt cùng vai đứng cạnh
+      • mở đầu bằng user: lịch sử cắt còn 20 lượt có thể bắt đầu bằng assistant
+      • kết thúc bằng assistant: câu hỏi hiện tại (user) sẽ được nối ngay sau
+
+    Lịch sử đã lỡ ghi bẩn tự lành ở đây, không cần dọn file tay.
+    """
+    ra: list[dict] = []
+    for m in msgs:
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant"):
+            continue
+        noi_dung = m.get("content")
+        if not _co_chu(noi_dung):
+            continue
+        if ra and ra[-1]["role"] == m["role"]:
+            ra[-1]["content"] += "\n\n" + noi_dung
+        else:
+            ra.append({"role": m["role"], "content": noi_dung})
+    if ra and ra[0]["role"] == "assistant":
+        ra.insert(0, {"role": "user", "content": _DAU_LICH_SU})
+    if ra and ra[-1]["role"] == "user":
+        # Câu hỏi không có câu trả lời nào ghi lại (câu trả lời rỗng đã bị bỏ). Giữ câu
+        # hỏi làm ngữ cảnh, nói thật là chưa trả lời — không để hai lượt user liền nhau.
+        ra.append({"role": "assistant", "content": _CHUA_TRA_LOI})
+    return ra
+
+
 def _lich_su(hist: list[dict], nhom: bool) -> list[dict]:
     """Lịch sử cho model. Trong NHÓM, mỗi lượt người dùng mang [Tên] người nói.
 
@@ -662,7 +754,8 @@ def _lich_su(hist: list[dict], nhom: bool) -> list[dict]:
     """
     ra = []
     for m in hist:
-        if m.get("role") not in ("user", "assistant") or not m.get("text"):
+        if (not isinstance(m, dict) or m.get("role") not in ("user", "assistant")
+                or not _co_chu(m.get("text"))):
             continue
         noi_dung = m["text"]
         if nhom and m["role"] == "user":
@@ -670,7 +763,25 @@ def _lich_su(hist: list[dict], nhom: bool) -> list[dict]:
             if ten:
                 noi_dung = f"[{ten}] {noi_dung}"
         ra.append({"role": m["role"], "content": noi_dung})
-    return ra
+    return _chuan_hoa_lich_su(ra)
+
+
+#: Nhà cung cấp từ chối vì có lượt chữ rỗng trong lịch sử (Anthropic: "text content
+#: blocks must contain non-whitespace text"; vài bản khác: "must be non-empty").
+_LOI_LUOT_RONG = re.compile(
+    r"content blocks must contain non-whitespace text"
+    r"|text content blocks must be non-empty"
+    r"|must have non-empty content", re.I)
+
+
+def _loi_lich_su_rong(out, exc) -> bool:
+    """Lượt hỏng vì lịch sử có lượt rỗng? Như tai_khoan_ai: chỉ đọc exception thật và
+    trường `error` của lượt ĐÃ hỏng (`failed`), không đọc chữ model viết."""
+    if exc is not None:
+        return bool(_LOI_LUOT_RONG.search(str(exc)))
+    if not (isinstance(out, dict) and out.get("failed") is True):
+        return False
+    return bool(_LOI_LUOT_RONG.search(str(out.get("error") or "")))
 
 
 def _loi_mo_hinh(text: str, d: dict) -> str | None:
@@ -793,6 +904,12 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     memory_store.set_current_sender(sender_open_id)
     scheduler.set_current_chat(chat_id)
     scheduler.set_current_chat_type((kenh or {}).get("chat_type"))
+    # Đồng hồ của lượt: tool gọi muộn được nhắc gói lại, quá mốc chặn thì không chạy nữa
+    # (dong_ho_luot) — để lượt kịp trả lời trước trần của vòng job.
+    dong_ho_luot.bat_dau()
+    # Tin rỗng / chỉ @tag (đường job platform không chặn trước như run.py) không bao
+    # giờ thành một lượt user rỗng — gửi model hay ghi lịch sử đều hỏng.
+    user_text = _cau_hoi_co_chu(user_text)
 
     # Lệnh cứng: bóc `/search`, `/help`… ra khỏi câu hỏi. Câu KHÔNG bắt đầu bằng `/`
     # thì `xu_ly` trả về nguyên văn và mọi thứ dưới đây chạy y như trước.
@@ -808,7 +925,7 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
             {"role": "assistant", "text": kq.tra_loi_thang},
         ])
         return kq.tra_loi_thang
-    user_text = kq.van_ban or user_text
+    user_text = kq.van_ban if _co_chu(kq.van_ban) else user_text
 
     # Lịch sử hội thoại đưa vào ĐÚNG kênh conversation_history của Hermes
     # ([{"role","content"}]) thay vì nhồi thành 1 khối text — model hiểu ngữ cảnh
@@ -817,13 +934,13 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     history_msgs = _lich_su(hist, nhom)
     platform_ctx = lsr_platform.lay_ngu_canh(chat_id, user_text, sender_open_id or "")
     if not history_msgs and isinstance(platform_ctx.get("recent_turns"), list):
-        history_msgs = [
+        # Memory Service của platform cũng có thể giữ lượt rỗng / assistant mở đầu
+        # (việc nền ghi một mình lượt assistant) — chuẩn hoá y như lịch sử máy.
+        history_msgs = _chuan_hoa_lich_su([
             {"role": m.get("role"), "content": m.get("text")}
             for m in platform_ctx["recent_turns"]
             if isinstance(m, dict)
-            and m.get("role") in ("user", "assistant")
-            and m.get("text")
-        ]
+        ])
 
     # AUDIT: mở một lượt trước khi gọi model. Mọi tool được gọi trong lượt này
     # tự ghi vào đó (audit.boc_registry đã bọc handler của cả 10 tool).
@@ -831,10 +948,27 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
 
     nguon_lenh = kq.lenh if kq.lenh in lenh_cung.LENH_NGUON else ""
     agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi, nguon_lenh, kenh)
+
+    def dung_lai(chon):
+        return _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi, nguon_lenh, kenh,
+                              chon=chon)
+
     agent, out, loi_nem, so_lan = _chay_co_doi_tai_khoan(
-        agent, user_text, history_msgs,
-        lambda chon: _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi,
-                                    nguon_lenh, kenh, chon=chon))
+        agent, user_text, history_msgs, dung_lai)
+    if history_msgs and _loi_lich_su_rong(out, loi_nem) and not _da_chay_tool(out):
+        # Lưới cuối: lịch sử vẫn làm nhà cung cấp từ chối (dạng hỏng chưa lường) thì
+        # chạy lại MỘT lần KHÔNG lịch sử — mất ngữ cảnh còn hơn hỏng mãi mọi lượt.
+        print("[brain] lịch sử bị từ chối (lượt rỗng) → chạy lại lượt không lịch sử",
+              flush=True)
+        chon = getattr(agent, "_tai_khoan_chon", None)
+        try:
+            agent_moi = dung_lai(chon if isinstance(chon, tuple) else None)
+        except Exception as e2:
+            print(f"[brain] không dựng lại được agent: {type(e2).__name__}", flush=True)
+        else:
+            agent, out, loi_nem, them = _chay_co_doi_tai_khoan(
+                agent_moi, user_text, [], dung_lai)
+            so_lan += them
     tk = getattr(agent, "_tai_khoan_nguon", None)
     if loi_nem is not None:
         e = loi_nem

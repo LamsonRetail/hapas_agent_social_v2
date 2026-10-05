@@ -71,7 +71,16 @@ def load_history(chat_id: str) -> list[dict]:
 
 
 def append_turns(chat_id: str, turns: list[dict]) -> None:
-    """Append turns [{role, text, sender?}] and trim to MAX_HISTORY."""
+    """Append turns [{role, text, sender?}] and trim to MAX_HISTORY.
+
+    Lượt rỗng / chỉ khoảng trắng KHÔNG BAO GIỜ được ghi: Anthropic từ chối cả request
+    khi lịch sử có một khối chữ rỗng, và lịch sử bẩn làm hỏng mọi lượt sau của chat.
+    """
+    turns = [t for t in turns or []
+             if isinstance(t, dict) and isinstance(t.get("text"), str)
+             and t["text"].strip()]
+    if not turns:
+        return
     with _lock:
         hist = load_history(chat_id) + turns
         hist = hist[-MAX_HISTORY:]

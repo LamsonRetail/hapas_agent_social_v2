@@ -40,7 +40,8 @@ def _goi(method: str, path: str, **kw) -> dict:
 
 class SoSheet:
     """Trạng thái sheet trong sổ việc: v.d["sheet"] = {token, url, granted, giai_doan,
-    tabs: {tên: {sheet_id, da_ghi, so_dong_cu, luoi, hash, rong}}}.
+    tabs: {tên: {sheet_id, da_ghi, so_dong_cu, luoi, hash, rong, cot}}}. `cot` = số cột
+    lưới sau khi đã bỏ cột trống thừa (None/thiếu = chưa biết, lưới mặc định của Lark).
 
     MỌI thay đổi `v.d` đi dưới `v._khoa` (review 02/10/2026: luồng khác đang json.dumps sổ
     việc mà dict đổi cỡ giữa chừng là RuntimeError, mất lần lưu)."""
@@ -118,14 +119,27 @@ class SoSheet:
                 t["luoi"] += n
                 self._luu()
 
+    def _them_cot(self, t: dict, can: int) -> None:
+        """Tab đã bị bỏ cột thừa (`cot`) mà bảng mới rộng hơn: nới lưới trước khi ghi."""
+        cot = t.get("cot")
+        if cot and can > cot:
+            _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{self.s['token']}/dimension_range",
+                 body={"dimension": {"sheetId": t["sheet_id"], "majorDimension": "COLUMNS",
+                                     "length": can - cot}})
+            with self.v._khoa:
+                t["cot"] = can
+                self._luu()
+
     def _ghi_khoi(self, t: dict, dong_dau: int, khoi: list[list]) -> None:
         kiem = getattr(self.v, "kiem_quyen", None)
         if kiem:
             kiem()                          # tiến trình đã mất quyền chủ thì không ghi sheet
         khoi = A._bang_an_toan(khoi)        # chữ người lạ viết: chặn chèn công thức
-        rong = A._cot(max((len(r) for r in khoi), default=1))
+        so_cot = max((len(r) for r in khoi), default=1)
+        rong = A._cot(so_cot)
         cuoi = dong_dau + len(khoi) - 1
         self._them_dong(t, cuoi)
+        self._them_cot(t, so_cot)
         _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{self.s['token']}/values_batch_update",
              body={"valueRanges": [{"range": f"{t['sheet_id']}!A{dong_dau}:{rong}{cuoi}",
                                     "values": khoi}]})
@@ -182,4 +196,11 @@ class SoSheet:
         with self.v._khoa:
             t["so_dong_cu"] = len(bang)
             self._luu()
+        # Ghi xong cả bảng mới bỏ cột trống thừa bên phải (lưới mặc định 20 cột); khởi động
+        # lại giữa chừng thì lần ghi tiếp làm. Bảng sau rộng hơn thì `_them_cot` nới lại.
+        if t.get("cot") != rong:
+            cot = A._vua_cot(self.s["token"], t["sheet_id"], rong)
+            with self.v._khoa:
+                t["cot"] = cot
+                self._luu()
         return len(bang)

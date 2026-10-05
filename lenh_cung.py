@@ -45,7 +45,16 @@ BANG_LENH: dict[str, str] = {
     "/profile": "soi_tai_khoan",
     "/shop": "soi_san",
     "/bang": "doc_bang",
+    "/topads": "tiktok_top_ads",
+    "/hapas": "binh_luan_kenh_nha",
 }
+
+#: Lệnh năng lực mà gõ TRƠN (không đối số) thì tự trả lời trạng thái, không gọi model.
+#: `/hapas` (05/10/2026): `/hapas` trơn trả công tắc, kênh Meta đã nối, hạn token — đọc
+#: thẳng `.env` + sổ token, không lộ giá trị nào. Có đối số thì ép tool như mọi lệnh
+#: năng lực. Gõ trơn mà để model hỏi lại "cần đọc gì?" thì người ta không bao giờ biết
+#: kênh nào chưa nối cho tới khi chạy thật.
+LENH_TRANG_THAI_KHI_TRON = ("/hapas",)
 
 #: Lệnh ghi đè THỨ TỰ DÙNG NGUỒN (mặc định: kho trước, web là đường lùi).
 #: Không gọi tool nào nên không có gì để bật/tắt, và cũng không qua `decide()`.
@@ -165,6 +174,8 @@ def _van_help() -> str:
         mo_ta = _muc_tool(tool)[0]
         if mo_ta:
             d.append(f"      {mo_ta[0].upper() + mo_ta[1:]}.")
+        if lenh in LENH_TRANG_THAI_KHI_TRON:
+            d.append(f"      Gõ {lenh} trơn: xem công tắc, kênh đã nối và hạn token.")
     d += [
         "",
         "NGUỒN TRẢ LỜI — quyết định Mark lấy thông tin ở đâu",
@@ -224,6 +235,86 @@ def _van_nangluc() -> str:
         tk = ""
     if tk:
         d += ["", tk]
+    return "\n".join(d)
+
+
+def _ngay_vn(epoch: int) -> str:
+    """dd/mm/yyyy theo giờ Việt Nam — VPS chạy UTC, nên không dùng giờ máy."""
+    import datetime
+    vn = datetime.timezone(datetime.timedelta(hours=7))
+    return datetime.datetime.fromtimestamp(int(epoch), vn).strftime("%d/%m/%Y")
+
+
+def _dong_kenh(M, kenh: str, so: dict, bay_gio: int) -> str:
+    """Một dòng tình trạng kênh. Chỉ nói CÓ/KHÔNG và ngày — không bao giờ in giá trị
+    `.env` hay token (kể cả một phần)."""
+    import os
+    thieu = M.thieu_cau_hinh(kenh)
+    env = os.environ.get(M.ENV_TOKEN[kenh], "").strip()
+    e = so.get(kenh) if isinstance(so.get(kenh), dict) else None
+    co_luu = bool(e and e.get("token"))
+    phan = ["đã nối" if not thieu else "CHƯA NỐI",
+            ".env đủ" if not thieu else f".env thiếu {thieu}"]
+    if not co_luu:
+        phan.append("chưa có token đã lưu" + (" (nạp ở lần chạy đầu)" if not thieu else ""))
+    else:
+        if env and e.get("env") != M._van_tay(env):
+            phan.append("token đã lưu là của bản .env cũ — lần chạy tới nạp lại")
+        elif not env:
+            phan.append("còn token đã lưu nhưng tool cần khoá trong .env")
+        else:
+            phan.append("có token đã lưu")
+        het = e.get("het_han")
+        if e.get("loai") == "vinh_vien":
+            phan.append("không hết hạn")
+        elif het:
+            con = (int(het) - bay_gio) // 86400
+            phan.append(f"ĐÃ HẾT HẠN {_ngay_vn(het)}" if int(het) <= bay_gio
+                        else f"hết hạn {_ngay_vn(het)} (còn {con} ngày)")
+        else:
+            phan.append("chưa rõ hạn")
+        if e.get("loi_lam_moi"):
+            phan.append("lần làm mới gần nhất hỏng, sẽ tự thử lại")
+    return f"  {M.TEN[kenh]:<10} · " + " · ".join(phan)
+
+
+def _van_hapas() -> str:
+    """`/hapas` trơn: công tắc, kênh đã nối, hạn token — không gọi model, không gọi mạng.
+
+    Đọc `.env` (đã nạp vào môi trường) và sổ `.tokens/meta_kenh_nha.json` qua
+    `kenh_nha_meta`. Chỉ báo có/không và ngày hết hạn; giá trị nào cũng không in.
+    """
+    import time
+    tool = BANG_LENH["/hapas"]
+    d = ["Bình luận kênh Hapas — /hapas", ""]
+    try:
+        bat = lsr_policy.nang_luc_bat()
+    except Exception:
+        bat = lsr_policy.KHONG_THU_HEP
+    if bat is lsr_policy.KHONG_THU_HEP:
+        d.append("CÔNG TẮC: chưa khai trên console — không thu hẹp gì thêm.")
+    else:
+        ct = lsr_policy.cong_tac_cua(tool, bat)
+        nguon = ("chưa đặt riêng, đang theo công tắc Quét mạng xã hội (/search)"
+                 if ct != tool else "công tắc riêng")
+        d.append(f"CÔNG TẮC: {'đang bật' if ct in bat else 'ĐANG TẮT'} — {nguon}.")
+    cho, ly_do = _duoc_khong(tool)
+    d.append("Quyền hạn: cho chạy (kênh nào chưa nối thì kênh đó báo chưa nối)." if cho
+             else f"KHÔNG dùng được — {ly_do or 'bị chặn'}")
+    d += ["", "KÊNH (token Meta của chính Hapas):"]
+    try:
+        import kenh_nha_meta as M
+        so = M.doc_so()
+        bay_gio = int(time.time())
+        d += [_dong_kenh(M, k, so, bay_gio) for k in M.KENH]
+    except Exception as e:  # noqa: BLE001 — trạng thái hỏng thì nói thật, không đoán
+        d.append(f"  Không đọc được tình trạng kênh ({type(e).__name__}).")
+    d += ["",
+          "Dùng: /hapas <việc cần đọc>, vd \"/hapas bình luận 5 bài mới nhất trên "
+          "Instagram\" — miễn phí, ra Lark Sheet. Bài của đối thủ thì dùng /comment."]
+    if not cho:
+        d.append("Bật lại ở khối Năng lực trên console, hoặc gõ /nangluc để xem toàn bộ "
+                 "quyền hạn.")
     return "\n".join(d)
 
 
@@ -290,6 +381,10 @@ def xu_ly(text: str) -> KetQua:
             van_ban=con_lai or text, lenh=lenh, tool=tool,
             chi_thi=f"LỆNH CỨNG {lenh} — lượt này PHẢI dùng tool `{tool}`.",
         )
+
+    if lenh in LENH_TRANG_THAI_KHI_TRON and not con_lai:
+        # Trạng thái thì luôn trả, KỂ CẢ khi tool đang tắt — đó là lúc cần nó nhất.
+        return KetQua(van_ban="", lenh=lenh, tra_loi_thang=_van_hapas())
 
     if lenh in BANG_LENH:
         tool = BANG_LENH[lenh]

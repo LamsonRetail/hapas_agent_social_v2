@@ -34,6 +34,11 @@ def _lenh_tren_console() -> dict[str, str]:
 def test_bang_lenh_khop_console():
     tren_console = _lenh_tren_console()
     cua_runtime = {tool: lenh for lenh, tool in lenh_cung.BANG_LENH.items()}
+    # Tool có công tắc lùi (`lsr_policy._CONG_TAC_LUI`) được CHỜ console: console chưa
+    # có dòng của nó thì lệnh vẫn chạy được, công tắc lùi về cha. Có rồi thì phải khớp.
+    cho = {t: cua_runtime[t] for t in lenh_cung.lsr_policy._CONG_TAC_LUI
+           if t in cua_runtime and t not in tren_console}
+    cua_runtime = {t: x for t, x in cua_runtime.items() if t not in cho}
     assert cua_runtime == tren_console, (
         "bảng lệnh runtime lệch khỏi console.\n"
         f"  runtime: {sorted(cua_runtime.items())}\n"
@@ -246,3 +251,145 @@ def test_doi_so_tham_do_lark_cli_khong_rong():
     assert lenh_cung._doi_so_tham_do("lark_cli"), (
         "mất đối số thăm dò của lark_cli — /wiki sẽ luôn báo bị cấm"
     )
+
+
+# ─────────── `/hapas`: trơn thì báo trạng thái (không model), có đối số thì ép tool ───────────
+
+_TOK = {"THREADS_ACCESS_TOKEN": "THAAbimatEnv0123456789abcdefghijklm",
+        "IG_ACCESS_TOKEN": "IGAAbimatEnv0123456789abcdefghijklm",
+        "FB_PAGE_ACCESS_TOKEN": "EAAbimatEnv0123456789abcdefghijklmn",
+        "FB_PAGE_ID": "1029384756"}
+
+
+@pytest.fixture
+def hapas(monkeypatch, tmp_path):
+    """Môi trường giả cho `/hapas`: công tắc, quyền, `.env`, sổ token — không mạng."""
+    import json
+    import time
+
+    import kenh_nha_meta as M
+
+    tep = tmp_path / "meta_kenh_nha.json"
+    monkeypatch.setattr(M, "TEP_TOKEN", tep)
+    for k in list(_TOK) + ["META_APP_SECRET"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setitem(lenh_cung.lsr_policy._nho_nl, "tat_ro", set())
+
+    def dat(bat=None, cho=True, ly_do="", env=(), so=None, tat_ro=()):
+        monkeypatch.setattr(lenh_cung.lsr_policy, "nang_luc_bat",
+                            lambda: lenh_cung.lsr_policy.KHONG_THU_HEP if bat is None
+                            else set(bat))
+        monkeypatch.setitem(lenh_cung.lsr_policy._nho_nl, "tat_ro", set(tat_ro))
+        monkeypatch.setattr(lenh_cung.lsr_policy, "decide",
+                            lambda t, a=None: lenh_cung.lsr_policy.PolicyDecision(cho, ly_do))
+        for k in env:
+            monkeypatch.setenv(k, _TOK[k])
+        if so is not None:
+            tep.write_text(json.dumps(so), encoding="utf-8")
+        return lenh_cung.xu_ly("/hapas")
+
+    dat.M = M
+    dat.bay_gio = int(time.time())
+    return dat
+
+
+def test_hapas_trong_bang_lenh_va_co_trang_thai_khi_tron():
+    assert lenh_cung.BANG_LENH["/hapas"] == "binh_luan_kenh_nha"
+    assert "/hapas" in lenh_cung.LENH_TRANG_THAI_KHI_TRON
+    assert set(lenh_cung.LENH_TRANG_THAI_KHI_TRON) <= set(lenh_cung.BANG_LENH)
+
+
+def test_hapas_tron_tra_thang_khong_goi_model(hapas):
+    kq = hapas(bat={"social_listen"})
+    assert kq.tra_loi_thang, "/hapas trơn phải tự trả lời"
+    assert kq.chi_thi == "" and kq.tool == "" and not kq.sai, "không được ép tool / gọi model"
+    v = kq.tra_loi_thang
+    for ten in ("Threads", "Instagram", "Facebook"):
+        assert ten in v
+    assert v.count("CHƯA NỐI") == 3, v
+    assert "/hapas <việc cần đọc>" in v, "thiếu dòng hướng dẫn dùng"
+
+
+def test_hapas_tron_bao_cong_tac_theo_cha_hay_rieng(hapas):
+    v = hapas(bat={"social_listen"}).tra_loi_thang
+    assert "CÔNG TẮC: đang bật" in v and "theo công tắc Quét mạng xã hội" in v
+    v = hapas(bat={"soi_san"}).tra_loi_thang
+    assert "CÔNG TẮC: ĐANG TẮT" in v and "theo công tắc Quét mạng xã hội" in v
+    v = hapas(bat={"soi_san", "binh_luan_kenh_nha"}).tra_loi_thang
+    assert "CÔNG TẮC: đang bật — công tắc riêng" in v
+    v = hapas(bat={"social_listen"}, tat_ro={"binh_luan_kenh_nha"}).tra_loi_thang
+    assert "CÔNG TẮC: ĐANG TẮT — công tắc riêng" in v
+    v = hapas(bat=None).tra_loi_thang
+    assert "chưa khai trên console" in v
+
+
+def test_hapas_tron_van_tra_trang_thai_khi_tool_tat(hapas):
+    """Tool tắt thì `/hapas <việc>` bị từ chối — nhưng `/hapas` trơn vẫn phải báo trạng
+    thái: đó đúng là lúc người ta cần biết vì sao."""
+    kq = hapas(bat={"soi_san"}, cho=False, ly_do="đang TẮT ở khối Năng lực")
+    assert kq.tra_loi_thang and "KÊNH" in kq.tra_loi_thang
+    assert "KHÔNG dùng được — đang TẮT ở khối Năng lực" in kq.tra_loi_thang
+    assert "Không có lệnh" not in kq.tra_loi_thang
+
+
+def test_hapas_tron_ke_kenh_va_ngay_het_han_khong_lo_gia_tri(hapas):
+    M, g = hapas.M, hapas.bay_gio
+    luu = {k: f"{k[:2].upper()}AAbimatLuu0123456789abcdefghijklmnop" for k in M.KENH}
+    so = {
+        "threads": {"token": luu["threads"], "loai": "dai_han", "lay_luc": g,
+                    "env": M._van_tay(_TOK["THREADS_ACCESS_TOKEN"]),
+                    "het_han": g + 59 * 86400 + 60},
+        "instagram": {"token": luu["instagram"], "env": "khac", "het_han": g - 60},
+        "facebook": {"token": luu["facebook"], "loai": "vinh_vien", "het_han": None,
+                     "env": M._van_tay(_TOK["FB_PAGE_ACCESS_TOKEN"]),
+                     "loi_lam_moi": f"loi {luu['facebook']}"},
+    }
+    v = hapas(bat={"social_listen"}, so=so,
+              env=("THREADS_ACCESS_TOKEN", "FB_PAGE_ACCESS_TOKEN", "FB_PAGE_ID")).tra_loi_thang
+    dong = {k: next(d for d in v.splitlines() if d.strip().startswith(M.TEN[k]))
+            for k in M.KENH}
+    het = lenh_cung._ngay_vn(so["threads"]["het_han"])
+    assert "đã nối" in dong["threads"] and f"hết hạn {het} (còn 59 ngày)" in dong["threads"]
+    assert "CHƯA NỐI" in dong["instagram"] and "IG_ACCESS_TOKEN" in dong["instagram"]
+    assert "còn token đã lưu" in dong["instagram"] and "ĐÃ HẾT HẠN" in dong["instagram"]
+    assert "đã nối" in dong["facebook"] and "không hết hạn" in dong["facebook"]
+    assert "làm mới gần nhất hỏng" in dong["facebook"]
+    for bi_mat in [*_TOK.values(), *luu.values()]:
+        assert bi_mat not in v, "lộ giá trị .env / token"
+        assert bi_mat[:12] not in v and bi_mat[-8:] not in v, "lộ một phần token"
+
+
+def test_hapas_tron_env_moi_thi_bao_se_nap_lai(hapas):
+    M = hapas.M
+    so = {"threads": {"token": "THAAcu0123456789abcdefghijklmnopqrs", "env": "cu",
+                      "het_han": hapas.bay_gio + 86400 * 30}}
+    v = hapas(bat={"social_listen"}, so=so, env=("THREADS_ACCESS_TOKEN",)).tra_loi_thang
+    dong = next(d for d in v.splitlines() if d.strip().startswith(M.TEN["threads"]))
+    assert "bản .env cũ" in dong and "nạp lại" in dong
+
+
+def test_hapas_tron_so_hong_thi_noi_that(hapas, monkeypatch):
+    def hong():
+        raise RuntimeError("x")
+    monkeypatch.setattr(hapas.M, "doc_so", hong)
+    v = hapas(bat={"social_listen"}).tra_loi_thang
+    assert "Không đọc được tình trạng kênh (RuntimeError)" in v
+
+
+def test_hapas_co_doi_so_thi_ep_tool(monkeypatch):
+    monkeypatch.setattr(
+        lenh_cung.lsr_policy, "decide",
+        lambda t, a=None: lenh_cung.lsr_policy.PolicyDecision(True, ""),
+    )
+    kq = lenh_cung.xu_ly("/hapas bình luận 5 bài mới nhất Instagram")
+    assert kq.tra_loi_thang is None and kq.tool == "binh_luan_kenh_nha"
+    assert "binh_luan_kenh_nha" in kq.chi_thi and "5 bài mới nhất" in kq.van_ban
+
+
+def test_help_ke_hapas_tron(monkeypatch):
+    monkeypatch.setattr(
+        lenh_cung.lsr_policy, "decide",
+        lambda t, a=None: lenh_cung.lsr_policy.PolicyDecision(True, ""),
+    )
+    van = lenh_cung.xu_ly("/help").tra_loi_thang or ""
+    assert "Gõ /hapas trơn: xem công tắc, kênh đã nối và hạn token." in van

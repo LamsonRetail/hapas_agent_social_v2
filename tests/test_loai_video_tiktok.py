@@ -131,7 +131,8 @@ def test_cot_cuoi_va_dem_theo_gio_hang(quet):
         assert bang[0][:12] == A._HEADER, "12 cột đầu giữ nguyên"
         assert bang[0][-1] == A._COT_LOAI_VIDEO
         assert {len(r) for r in bang} == {len(bang[0])}, "tiêu đề và dòng cùng số cột"
-    assert chinh[0][-3:] == ["Thị trường", "Nhận định AI", A._COT_LOAI_VIDEO]
+    assert chinh[0][-5:] == ["Thị trường", "Nhận định AI", "Sắc thái", "Nguồn",
+                             A._COT_LOAI_VIDEO], "cột loại video sau cột Sắc thái/Nguồn"
     assert loai[0][-2:] == ["Lý do loại", A._COT_LOAI_VIDEO]
     theo_kenh = {r[2]: r[-1] for r in chinh[1:]}
     assert theo_kenh == {"Kênh 11": AFF, "Kênh 12": VIR, "Kênh 13": VIR, "Kênh 14": "",

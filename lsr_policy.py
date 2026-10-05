@@ -59,6 +59,9 @@ _MUTATING_EXACT = {
     "web_crawl": "write_data",           # cào nhiều trang → tạo Lark Sheet
     "soi_tai_khoan": "write_data",       # soi tài khoản brand/KOC → tạo Lark Sheet
     "soi_san": "write_data",             # giá và sản phẩm Shopee → tạo Lark Sheet
+    "tiktok_top_ads": "write_data",      # top quảng cáo TikTok (Apify) → tạo Lark Sheet
+    # Bình luận trên kênh CỦA HAPAS qua API Meta (miễn phí) → tạo Lark Sheet.
+    "binh_luan_kenh_nha": "write_data",
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
     # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
@@ -213,7 +216,27 @@ def quyen_phat() -> set[str]:
 _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
+    "tiktok_top_ads", "binh_luan_kenh_nha",
 })
+
+#: Tool có công tắc riêng nhưng RA ĐỜI SAU công tắc cha → khi `capabilities` chưa có
+#: dòng nào của nó thì đi theo công tắc cha. Khớp `theo:` trong
+#: `NANG_LUC_THEO_AGENT` của console.
+#:
+#: `tiktok_top_ads` (04/10/2026) ban đầu mượn hẳn công tắc `social_listen`. Console
+#: lưu `capabilities` = danh sách tool ĐANG BẬT, nên với agent đã lưu năng lực từ trước,
+#: "vắng mặt" không phân biệt được "chủ agent tắt" với "console chưa có công tắc này".
+#: Vì thế:
+#:   • có dòng bật `{tool: "tiktok_top_ads", …}`         → bật, bất kể Quét MXH
+#:   • có dấu tắt rõ `{tool: "tiktok_top_ads", bat: false}` → tắt
+#:   • không có dòng nào (console cũ, hoặc chưa ai bấm)   → theo `social_listen`
+#: Nhờ vậy thứ tự merge hai repo không quan trọng: console chưa có công tắc thì hành vi
+#: y như trước; có rồi thì công tắc riêng ăn ngay khi chủ agent bấm.
+#:
+#: `binh_luan_kenh_nha` (04/10/2026, đọc bình luận kênh HAPAS qua API Meta) đi đúng
+#: đường này từ ngày đầu: console chưa có công tắc của nó thì mượn "Quét mạng xã hội";
+#: platform thêm dòng `theo: "social_listen"` thì công tắc riêng ăn, runtime không sửa.
+_CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen"}
 
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.
 KHONG_THU_HEP = object()
@@ -228,6 +251,8 @@ KHONG_THU_HEP = object()
 #: cuối đỡ.
 _TTL_NANG_LUC = float(os.environ.get("LSR_TTL_NANG_LUC_SECONDS", "60"))
 _nho_nl: dict[str, Any] = {"bat": None, "luc": 0.0, "nguon": "chưa hỏi"}
+#: `_nho_nl["tat_ro"]`: tool có dấu tắt rõ `bat: false` trong `capabilities` (xem
+#: `_CONG_TAC_LUI`). Vắng khoá = không có dấu nào.
 
 
 def _nang_luc_tu_danh_ba():
@@ -256,9 +281,17 @@ def _nang_luc_tu_danh_ba():
         caps = hang.get("capabilities")
         if not isinstance(caps, list):
             _nho_nl["cau_hinh"] = {}
+            _nho_nl["tat_ro"] = set()
             return KHONG_THU_HEP          # null / chưa khai
-        bat = {str(c["tool"]) for c in caps
-               if isinstance(c, dict) and isinstance(c.get("tool"), str)}
+        co_dong = {str(c["tool"]) for c in caps
+                   if isinstance(c, dict) and isinstance(c.get("tool"), str)}
+        # Dấu tắt rõ của tool có công tắc lùi (`_CONG_TAC_LUI`). Tắt thắng bật nếu
+        # (bất thường) có cả hai: đây là lớp thu hẹp, nghi ngờ thì hẹp.
+        tat_ro = {str(c["tool"]) for c in caps
+                  if isinstance(c, dict) and isinstance(c.get("tool"), str)
+                  and c.get("bat") is False}
+        bat = co_dong - tat_ro
+        _nho_nl["tat_ro"] = tat_ro
         # Ô cấu hình console gắn vào CÙNG mục năng lực (vd trần quét của social_listen).
         # Đọc chung một lượt với công tắc để khỏi thêm lời gọi mạng.
         _nho_nl["cau_hinh"] = {
@@ -267,7 +300,8 @@ def _nang_luc_tu_danh_ba():
             and isinstance(c.get("cau_hinh"), dict)}
         # Có `capabilities` nhưng không mục nào mang khoá `tool` → dữ liệu do nơi khác
         # ghi, không phải bảng công tắc của console. Không diễn giải bừa thành "tắt hết".
-        return bat if bat else KHONG_THU_HEP
+        # Chỉ còn dấu tắt rõ (chủ agent tắt hết) thì VẪN là bảng công tắc: tập rỗng.
+        return bat if co_dong else KHONG_THU_HEP
     except Exception:
         return None
 
@@ -297,6 +331,15 @@ def cau_hinh_tool(tool: str) -> dict:
     return dict((_nho_nl.get("cau_hinh") or {}).get(tool) or {})
 
 
+def cong_tac_cua(name: str, bat: set[str]) -> str:
+    """Công tắc thật quyết định `name`: chính nó, hoặc công tắc cha khi `capabilities`
+    chưa có dòng nào của nó (xem `_CONG_TAC_LUI`)."""
+    cha = _CONG_TAC_LUI.get(name)
+    if cha and name not in bat and name not in (_nho_nl.get("tat_ro") or ()):
+        return cha
+    return name
+
+
 def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision:
     """Hợp đồng xét trước, rồi mới tới công tắc Năng lực.
 
@@ -310,11 +353,13 @@ def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision
     name = (tool_name or "").strip()
     if name in _TOOL_CO_CONG_TAC:
         bat = nang_luc_bat()
-        if bat is not KHONG_THU_HEP and name not in bat:
+        cong_tac = name if bat is KHONG_THU_HEP else cong_tac_cua(name, bat)
+        if bat is not KHONG_THU_HEP and cong_tac not in bat:
             return PolicyDecision(
                 False,
-                f"'{name}' đang TẮT ở khối Năng lực trên console — chủ agent đã tắt, "
-                f"không phải thiếu quyền")
+                f"'{name}' đang TẮT ở khối Năng lực trên console"
+                + (f" (theo công tắc '{cong_tac}')" if cong_tac != name else "")
+                + " — chủ agent đã tắt, không phải thiếu quyền")
     return d
 
 
@@ -391,6 +436,18 @@ def install_registry_guard(audit_callback: Callable[..., None] | None = None) ->
         mode = "enforce"
 
     def guarded(self, name: str, args: dict, **kwargs):
+        # Đồng hồ lượt (dong_ho_luot) áp ở MỌI chế độ policy: là trần thời gian của vòng
+        # job, không phải quyền. Ngoài lượt trả lời thì `xet` trả "" — không đụng gì.
+        import dong_ho_luot
+        muc, g = dong_ho_luot.xet()
+        if muc == "chan":
+            if audit_callback:
+                audit_callback(name, args, None, 0.0, loi=f"hết giờ lượt ({g:.0f}s)")
+            return dong_ho_luot.loi_chan(name, g)
+        kq = _qua_policy(name, args, **kwargs)
+        return dong_ho_luot.gan_nhac(kq, g) if muc == "nhac" else kq
+
+    def _qua_policy(name: str, args: dict, **kwargs):
         if mode == "off":
             return original(name, args, **kwargs)
         verdict = decide(name, args)

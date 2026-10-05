@@ -369,8 +369,11 @@ def test_loc_ai_khong_chay_thi_khong_duoc_bao_da_loc(quet):
     assert kq["loc_bang_ai"] is False and kq["loc_ai_da_xet"] == 0
     assert kq["loc_ai_trang_thai"] == "bỏ qua: tắt (SOCIAL_AI_PHAN_XU=0)"
     chinh = ghi[0][1]
-    assert chinh[0][-3:] == ["Thị trường", "Nhận định AI", A._COT_LOAI_VIDEO]
-    assert all(r[-2] == "chưa qua AI (lọc theo luật)" for r in chinh[1:])
+    assert chinh[0][-5:-2] == ["Thị trường", "Nhận định AI", "Sắc thái"]
+    assert chinh[0][-1] == A._COT_LOAI_VIDEO
+    assert all(r[-4] == "chưa qua AI (lọc theo luật)" for r in chinh[1:])
+    assert all(r[-3] == "chưa phân loại" for r in chinh[1:]), "AI không chạy -> không nhãn"
+    assert kq["thong_ke"]["da_phan_loai"] == 0 and kq["thong_ke_ghi_o"] is None
 
 
 def test_moi_bai_deu_bi_loai_van_tao_sheet_de_kiem(quet, monkeypatch):

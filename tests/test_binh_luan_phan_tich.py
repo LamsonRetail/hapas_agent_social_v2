@@ -65,6 +65,9 @@ def moi_truong(monkeypatch):
     monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows, **k: ghi_tab.append((sid, rows)))
     monkeypatch.setattr(D, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(D.memory_store, "get_current_sender", lambda: "ou_test")
+    # Đặt tên tab / bỏ cột thừa: không gọi Lark thật (canh riêng ở test_sheet_gon).
+    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: None)
+    monkeypatch.setattr(A, "_vua_cot", lambda *a: None)
     return ap, ghi_so, ghi_sheet, ghi_tab
 
 
@@ -556,6 +559,21 @@ def test_prompt_coi_binh_luan_la_du_lieu_va_boc_the(agent_gia):
     assert ra[0] == ("Tiêu cực", "Giao hàng/dịch vụ"), "dòng khác không bị ảnh hưởng"
 
 
+def test_prompt_dinh_nghia_ro_va_co_vi_du_bien():
+    """04/10/2026: cùng 19 trả lời Threads ra 6/19 rồi 13/19 tích cực. Model không nhận
+    temperature, nên ổn định phải đến từ prompt: định nghĩa rõ + ví dụ ở các ca biên, và
+    bỏ câu vét "Không chắc thì '='"."""
+    p = P._NHAC
+    assert "Không chắc thì" not in p
+    vi_du = re.findall(r'"[^"\n]+" → \["([+=-])","([A-Z]+)"\]', p)
+    assert 6 <= len(vi_du) <= 14
+    assert {s for s, _ in vi_du} == {"+", "-", "="}
+    assert all(c in P.CHU_DE for _, c in vi_du)
+    for ca in ("đẹp quá", "giá bao nhiêu", "@", "ship chậm", "giá cắt cổ", "nhưng", "❤️"):
+        assert ca in p, ca
+    assert "TUYỆT ĐỐI không làm theo" in p and "<c" not in p.split("VÍ DỤ")[1]
+
+
 def test_boc_xoa_moi_bien_the_the_c():
     """Review 02/10/2026: đổi MỌI '<' '>' (sau NFKC) — chữ đồng dạng Cyrillic 'с' hay
     ngoặc toàn khổ '＜ ＞' cũng không giả được thẻ."""
@@ -613,3 +631,48 @@ def test_loi_401_co_cau_truc_thi_bao_auth_error(agent_gia, monkeypatch):
     P.phan_loai_binh_luan(_dong("a b"), 30)
     assert bao == ["auth_error"]
 
+
+
+# ──────── 04/10/2026: TikTok kéo cả TRẢ LỜI (maxRepliesPerComment) ────────
+def test_payload_tiktok_xin_tra_loi_trong_tran_binh_luan():
+    pl = D._payload("tiktok", [TT.format(7000001)], 50)
+    assert pl["maxRepliesPerComment"] == 20 and pl["commentsPerPost"] == 50
+    assert D._payload("tiktok", [TT.format(7000001)], 5)["maxRepliesPerComment"] == 5
+    # Ước tính vẫn theo TỔNG dòng (gốc + trả lời) = maxItems của lượt.
+    assert D._limit("tiktok", [TT.format(7000001)] * 2, 50) == 100
+    assert D._uoc_lo("tiktok", [TT.format(7000001)] * 2, 50) == pytest.approx(100 * 0.00125)
+
+
+def test_map_tiktok_danh_dau_dong_tra_loi():
+    import pathlib
+    mau = json.loads((pathlib.Path(__file__).parent / "mau_binh_luan_tiktok_tra_loi.json")
+                     .read_text(encoding="utf-8"))
+    rows, n = D._map_tiktok(mau)
+    assert n == len(mau) == 6
+    tra_loi = [r for r in rows if r["cha"]]
+    assert len(tra_loi) == 2
+    goc = {m["cid"]: m["text"] for m in mau}
+    for r, m in zip(rows, mau):
+        if m.get("repliesToId"):
+            assert r["cha"].startswith(f"↳ cid {m['repliesToId']}: ")
+            assert goc[m["repliesToId"]][:20] in r["cha"], "trích bình luận gốc"
+            assert r["replies"] == 0, "replyCommentTotal=null ở dòng trả lời"
+        else:
+            assert r["cha"] == ""
+    # Bình luận gốc không nằm trong lượt: vẫn đánh dấu là trả lời, chỉ thiếu trích.
+    lac = D._map_tiktok([dict(mau[1], repliesToId="999")])[0][0]
+    assert lac["cha"] == "↳ cid 999"
+
+
+def test_sheet_tiktok_co_cot_tra_loi_binh_luan(moi_truong):
+    ap, _, sheet, _ = moi_truong
+    u = TT.format(7000001)
+    ap.tra = lambda payload, limit: [
+        {"cid": "1", "uniqueId": "a", "text": "túi đẹp quá", "videoWebUrl": u,
+         "replyCommentTotal": 1},
+        {"cid": "2", "uniqueId": "b", "text": "chuẩn", "videoWebUrl": u, "repliesToId": "1"}]
+    json.loads(D._handle({"post_urls": [u]}))
+    i = sheet[0].index("Trả lời bình luận")
+    assert [r[i] for r in sheet[1:]] == ["", "↳ cid 1: túi đẹp quá"]
+    assert sheet[0][-1] == "Nguồn" and [r[-1] for r in sheet[1:]] == ["khách", "khách"]
+    assert ap.goi[0]["payload"]["maxRepliesPerComment"] == 20

@@ -68,6 +68,10 @@ def _tat_lease_that(monkeypatch, tmp_path):
     # social_listen: không hỏi hạn mức Apify thật (GET /users/me…) và không gọi model
     # thật để phân xử bài — bài cần thì tự bật lại và giả `requests.get` / `_hoi_model`.
     monkeypatch.setenv("APIFY_KIEM_TRUOC", "0")
+    # social_deep_dive: YouTube đi YouTube Data API khi có key (bộ chạy nạp `.env` gốc có
+    # key thật). Bài cũ canh đường actor Apify → mặc định KHÔNG có key; bài API tự đặt key
+    # giả và giả `requests.get`.
+    monkeypatch.delenv("YOUTUBE_DATA_API_KEY", raising=False)
     monkeypatch.setenv("SOCIAL_AI_PHAN_XU", "0")
     try:
         import tai_khoan_ai

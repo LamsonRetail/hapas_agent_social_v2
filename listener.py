@@ -103,20 +103,49 @@ def _parse_event(line: str) -> dict | None:
 #: local KHÔNG BAO GIỜ nối được nữa. Đó là trạng thái ĐÚNG, không phải sự cố: tin Lark
 #: đi qua gateway rồi thành job, agent vẫn trả lời như thường.
 _BUS_BI_GIU = "another event bus is already connected"
+#: Bản lark-cli mới báo cùng tình trạng bằng gợi ý này (bus ở máy khác — gateway).
+_DAU_BI_GIU = (_BUS_BI_GIU, "remote event connection detected")
 
 
 def _drain_stderr(proc: subprocess.Popen, ready: threading.Event,
                   bi_giu: threading.Event | None = None) -> None:
+    """In stderr của lark-cli, trừ bản dump "bus bị giữ".
+
+    Sự cố 04/10/2026: mỗi 10 phút lark-cli in ~12 dòng (consuming as…, local bus not
+    found…, rồi một khối JSON lỗi) — 142 lần — dù đó là trạng thái ĐÚNG khi gateway
+    platform giữ bus. Bản trước chỉ nuốt đúng dòng có câu báo, phần còn lại vẫn ra log.
+    Nay giữ các dòng TRƯỚC khi sẵn sàng lại; hoá ra bus bị giữ thì bỏ cả khối
+    (supervisor in một dòng duy nhất), còn sẵn sàng hoặc thoát vì lý do khác thì in đủ."""
+    cho: list[str] = []
+
+    def xa():
+        for d in cho:
+            print(f"[event/stderr] {d}")
+        cho.clear()
+
     for raw in iter(proc.stderr.readline, ""):
         line = raw.rstrip("\n")
         if not line:
             continue
+        if bi_giu is not None and any(d in line for d in _DAU_BI_GIU):
+            bi_giu.set()
+            cho.clear()
+            continue
+        if bi_giu is not None and bi_giu.is_set():
+            continue          # phần còn lại của bản dump
         if _READY_MARKER in line and not ready.is_set():
             ready.set()
-        if _BUS_BI_GIU in line and bi_giu is not None:
-            bi_giu.set()
-            continue          # đã có câu giải thích gọn ở supervisor; đừng lặp lại
-        print(f"[event/stderr] {line}")
+            cho.append(line)
+            xa()
+            continue
+        if ready.is_set() or bi_giu is None:
+            print(f"[event/stderr] {line}")
+            continue
+        cho.append(line)
+        if len(cho) > 200:    # không bao giờ giữ vô hạn
+            xa()
+    if not (bi_giu is not None and bi_giu.is_set()):
+        xa()
 
 
 def _consume_once(cli: str, handler: Handler) -> bool:
@@ -139,9 +168,17 @@ def _consume_once(cli: str, handler: Handler) -> bool:
     )
     ready = threading.Event()
     bi_giu = threading.Event()
-    threading.Thread(target=_drain_stderr, args=(proc, ready, bi_giu), daemon=True).start()
+    doc_loi = threading.Thread(target=_drain_stderr, args=(proc, ready, bi_giu), daemon=True)
+    doc_loi.start()
 
-    if ready.wait(timeout=30):
+    # Chờ tối đa 30 giây, nhưng thôi chờ ngay khi biết bus bị giữ hoặc lark-cli đã thoát.
+    het = time.time() + 30
+    while not ready.is_set() and not bi_giu.is_set() and time.time() < het:
+        if proc.poll() is not None:
+            doc_loi.join(timeout=5)
+            break
+        ready.wait(0.5)
+    if ready.is_set():
         print(f"  Intake: ✅ event bus ready — consuming {_EVENT_KEY} as bot")
     elif bi_giu.is_set():
         pass          # supervisor giải thích, chỗ này im để khỏi nói hai lần
@@ -174,6 +211,9 @@ def _consume_once(cli: str, handler: Handler) -> bool:
             proc.wait(timeout=10)
         except Exception:
             pass
+        # Đọc hết stderr rồi mới kết luận: không thì dòng "bus bị giữ" có thể chưa kịp
+        # tới, supervisor tưởng thoát sạch và quay lại ngay.
+        doc_loi.join(timeout=5)
     return bi_giu.is_set()
 
 

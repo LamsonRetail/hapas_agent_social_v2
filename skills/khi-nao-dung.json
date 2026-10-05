@@ -19,7 +19,7 @@
   },
   "sk_9d02c5de94": {
     "ten": "Deep-dive bình luận",
-    "khi_nao_dung": "Khi được hỏi người ta bình luận gì dưới bài cụ thể, hoặc nhờ gán nhãn, thống kê cảm xúc/chủ đề bình luận. Dấu hiệu: có link bài đăng kèm theo."
+    "khi_nao_dung": "Khi được hỏi người ta bình luận gì dưới bài (của HAPAS hay người khác), hoặc nhờ gán nhãn, thống kê cảm xúc/chủ đề bình luận. Dấu hiệu: link bài, bình luận, khách nói gì."
   },
   "sk_41fc43d6b7": {
     "ten": "Lập kế hoạch truy vấn social",
@@ -31,11 +31,11 @@
   },
   "sk_2d37e7d0e7": {
     "ten": "Phân tích crisis, sentiment và share of voice",
-    "khi_nao_dung": "Khi có dấu hiệu tiêu cực cần đánh giá, hoặc được hỏi về sentiment, khủng hoảng, so sánh độ phủ thương hiệu. Cả khi người dùng chỉ hỏi 'có sao không' về một làn sóng bình luận."
+    "khi_nao_dung": "Khi được hỏi sentiment, tích cực hay tiêu cực (bài đã quét hoặc bình luận), khủng hoảng, so sánh độ phủ thương hiệu; cả khi chỉ hỏi 'có sao không' về một làn sóng bình luận."
   },
   "sk_8776392ea3": {
     "ten": "Phân tích quảng cáo đối thủ",
-    "khi_nao_dung": "Khi được hỏi đối thủ đang chạy quảng cáo gì, nội dung/creative quảng cáo, hoặc so sánh ads giữa các brand. Dấu hiệu: ads, quảng cáo, Ad Library, chạy ads."
+    "khi_nao_dung": "Khi được hỏi đối thủ hoặc một ngành đang chạy quảng cáo gì (Facebook, Instagram, TikTok), creative quảng cáo, so sánh ads. Dấu hiệu: ads, quảng cáo, Ad Library, top ads TikTok."
   },
   "sk_f2de0ac573": {
     "ten": "Lập kế hoạch chiến dịch quảng cáo",
