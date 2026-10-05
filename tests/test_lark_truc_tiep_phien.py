@@ -90,3 +90,67 @@ def test_qua_han_khong_danh_dau_loi_va_khong_lay_so_luot_dang_chay(R, monkeypatc
     assert "CrossMark" not in phan_ung
     assert lay == []
     assert R._gui_test[0][2] == "Mark vẫn đang làm tiếp"
+
+
+# ───────────────────── một lượt mỗi phiên (gateway ↔ listener) ─────────────────────
+import threading  # noqa: E402
+import time  # noqa: E402
+
+
+@pytest.fixture
+def LPk(monkeypatch):
+    import lsr_platform as LP
+    monkeypatch.setattr(LP, "_HAN_TRA_LOI", 2.0)
+    monkeypatch.setattr(LP, "_KHOA_PHIEN", {})
+    return LP
+
+
+def _do_chong(LP, phien_a, phien_b):
+    dang, max_dong = [0], [0]
+    kh = threading.Lock()
+
+    def tra_loi(h, chat_id=None, sender_open_id=None, **_):
+        with kh:
+            dang[0] += 1
+            max_dong[0] = max(max_dong[0], dang[0])
+        time.sleep(0.3)
+        with kh:
+            dang[0] -= 1
+        return "ok"
+    ts = [threading.Thread(target=LP._chay_co_han, args=(tra_loi, "h", p, None))
+          for p in (phien_a, phien_b)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(5)
+    return max_dong[0]
+
+
+def test_cung_phien_khong_chay_song_song(LPk):
+    assert _do_chong(LPk, "lark:a:oc_1", "lark:a:oc_1") == 1, (
+        "hai lượt cùng cuộc chat (một qua gateway, một qua listener) không được chen nhau"
+    )
+
+
+def test_khac_phien_van_song_song(LPk):
+    assert _do_chong(LPk, "lark:a:oc_1", "lark:a:oc_2") == 2
+
+
+def test_luot_truoc_treo_thi_cho_nua_tran_roi_chay(LPk):
+    LPk._khoa_phien("lark:a:oc_9").acquire()       # lượt trước treo, giữ khoá mãi
+    t0 = time.time()
+    dap, ok, treo = LPk._chay_co_han(lambda h, **_: "vẫn trả lời", "h", "lark:a:oc_9", None)
+    assert (dap, ok, treo) == ("vẫn trả lời", True, False)
+    assert 0.9 <= time.time() - t0 < 2.0, "chờ ~nửa trần rồi chạy, không khoá chết"
+
+
+def test_canh_bao_app_lech_mot_lan(monkeypatch, capsys):
+    import lsr_platform as LP
+    monkeypatch.setenv("LARK_APP_ID", "cli_mark")
+    monkeypatch.setattr(LP, "_APP_DA_CANH_BAO", set())
+    LP._canh_bao_app_lech("lark:cli_mark:oc_1")
+    assert "CẢNH BÁO" not in capsys.readouterr().out
+    LP._canh_bao_app_lech("lark:cli_khac:oc_1")
+    LP._canh_bao_app_lech("lark:cli_khac:oc_2")
+    assert capsys.readouterr().out.count("CẢNH BÁO") == 1
+    LP._canh_bao_app_lech("web-123")
