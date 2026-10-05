@@ -44,6 +44,8 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
   share, hashtag, nội dung, link. Mark tóm tắt chủ đề nổi bật và dẫn bài thật
 - Cào hết rồi AI đọc từng bài để giữ/loại kèm lý do (cột "Nhận định AI", bài loại ở
   tab "Bị loại"). Bài của brand ở thị trường khác vẫn giữ, ở tab riêng "Thị trường khác"
+- TikTok tách video affiliate (có gắn giỏ hàng TikTok Shop) với video viral (không gắn
+  giỏ) ở cột "Loại video TikTok". Bài nguồn không báo giỏ hàng thì để trống, ghi "chưa rõ"
 - Số bài mỗi lượt bị chặn ở trần chủ agent đặt trên console (đặt được riêng từng nền
   tảng, hoặc tắt hẳn một nền tảng). Chỉ đọc bài công khai
 - Quét lớn (tới 10.000 bài mỗi nền tảng) chạy nền tới 45 phút: Mark báo ước tính chi phí

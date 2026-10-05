@@ -1343,6 +1343,9 @@ def _nuoc_khac(ts: dict):
                       and (d.get("_thi_truong") or "không rõ") not in (nuoc, "không rõ"))
 _COT_THEM = ["Thị trường", "Nhận định AI", "Phân xử", "Sắc thái", phan_loai.NGUON_COT]
 _TAB_TK = A._TAB_THONG_KE
+# Cột nối SAU CÙNG (sau `_COT_THEM`/"Lý do loại") để các cột cũ không đổi chỗ: affiliate
+# (gắn giỏ) / viral (không giỏ) cho bài TikTok — xem `A._COT_LOAI_VIDEO`.
+_COT_CUOI = [A._COT_LOAI_VIDEO]
 
 
 def _dong(d: dict, dt, kw: str, n_chu: int) -> list:
@@ -1356,6 +1359,12 @@ def _dong(d: dict, dt, kw: str, n_chu: int) -> list:
 def _cot_them(d: dict) -> list:
     return [d.get("_nhan_dinh") or "", d.get("_phan_xu") or "",
             d.get("_sac_thai") or phan_loai.CHUA, A._nguon_bai(d)]
+
+
+def _dong_du(d: dict, dt, kw: str, n_chu: int, them: list) -> list:
+    """Dòng đủ cột: `_dong` + cột thêm của tab (`_cot_them` / Lý do loại) + `_COT_CUOI` —
+    một chỗ duy nhất ghép, để tiêu đề và dòng luôn cùng số cột ở mọi tab."""
+    return _dong(d, dt, kw, n_chu) + list(them) + [A._loai_video_tiktok(d)]
 
 
 def _ten_tab(p: str) -> str:
@@ -1388,10 +1397,10 @@ def _ghi_so_bo(v, p: str, ts: dict, d_from, d_to) -> None:
             da.add(k)
             d["platform"] = p
             A.danh_dau_bai_nha([d], ts["queries"])
-            rows.append(_dong(d, dt, kw, 500) + ["chưa lọc", "sơ bộ", phan_loai.CHUA,
-                                                 A._nguon_bai(d)])
+            rows.append(_dong_du(d, dt, kw, 500, ["chưa lọc", "sơ bộ", phan_loai.CHUA,
+                                                  A._nguon_bai(d)]))
         rows.sort(key=lambda r: -int(r[4] or 0))
-        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows, tu_dau=True)
+        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows, tu_dau=True)
     except Exception as e:  # noqa: BLE001
         if type(e).__name__ == "MatQuyen":
             raise
@@ -1419,6 +1428,9 @@ def _dong_tong_hop(v, ts, ket: dict, cp: dict, trang_thai: str) -> list[list]:
     cau_khac = _cau_nuoc_khac(ts, ket)
     if cau_khac:
         r.append([_TAB_KHAC, cau_khac])
+    cau_tt = A._cau_loai_video_tiktok([d for d, _ in ket["hits"]], "các tab")
+    if cau_tt:
+        r.append([A._COT_LOAI_VIDEO, cau_tt])
     px = ket["phan_xu"]
     r.append(["Phân xử", _cau_phan_xu(px)])
     if ket.get("sac_thai"):
@@ -1437,20 +1449,21 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
     khac = _nuoc_khac(ts)
     A.danh_dau_bai_nha([d for d, _ in ket["hits"]], ts["queries"])   # cột Nguồn
     for p in v.d["nen_tang"]:
-        rows = [_dong(d, dt, kw, 500) + _cot_them(d)
+        rows = [_dong_du(d, dt, kw, 500, _cot_them(d))
                 for d, dt in ket["hits"] if d["platform"] == p and not khac(d)]
-        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM] + rows)
+        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows)
     # Tab phụ rỗng: chưa từng có thì KHÔNG tạo tab trống; đã có từ lượt trước (việc tiếp tục
     # sau `xong_mot_phan`) thì vẫn ghi lại chỉ tiêu đề — `ghi_tab` xoá các dòng cũ thừa, kẻo
     # bài của lượt trước nằm lại như kết quả của lượt này.
-    rows = [_dong(d, dt, kw, 500) + _cot_them(d) for d, dt in ket["hits"] if khac(d)]
+    rows = [_dong_du(d, dt, kw, 500, _cot_them(d)) for d, dt in ket["hits"] if khac(d)]
     if rows or _TAB_KHAC in s.s["tabs"]:
-        s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM] + rows)
+        s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows)
     bl = ket["bi_loai"]
     if bl or _TAB_LOAI in s.s["tabs"]:
-        rows = [_dong(d, dt, kw, 300) + [ly_do, d.get("_phan_xu") or ""]
+        rows = [_dong_du(d, dt, kw, 300, [ly_do, d.get("_phan_xu") or ""])
                 for d, dt, ly_do in bl[:_BI_LOAI_TOI_DA]]
-        s.ghi_tab(_TAB_LOAI, [list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"]] + rows)
+        s.ghi_tab(_TAB_LOAI, [list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"]
+                              + _COT_CUOI] + rows)
     # Bảng đếm sắc thái (bài của các tab nền tảng). 0 nhãn thì không tạo tab trống; tab
     # đã có từ lượt trước thì vẫn ghi lại để số cũ không nằm lại.
     st = ket.get("sac_thai") or A.thong_ke_sac_thai(
@@ -1538,6 +1551,10 @@ def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list
     cau_khac = _cau_nuoc_khac(ts, ket)
     if cau_khac:
         d.append(f"Thị trường khác: {cau_khac}.")
+    # Affiliate (gắn giỏ) / viral (không giỏ) — Mark chép nguyên câu này cho marketing.
+    cau_tt = A._cau_loai_video_tiktok([x for x, _ in ket["hits"]], "các tab")
+    if cau_tt:
+        d.append(cau_tt)
     d.append("Phân xử: " + _cau_phan_xu(ket["phan_xu"]) + ".")
     if ket.get("sac_thai"):
         d.append("Sắc thái bài: " + ket["sac_thai"]["dong_thong_ke"])

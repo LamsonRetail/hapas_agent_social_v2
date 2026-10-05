@@ -97,7 +97,9 @@ def test_cot_sac_thai_va_thong_ke_tren_sheet_chinh(quet):
     assert len(hoi) == 1, "sắc thái đi cùng đúng một lượt phân xử"
     chinh = _tab(ghi, "s1")
     hd = ghi[0][1][0]
-    assert hd[-2:] == ["Sắc thái", "Nguồn"] and hd[:12] == A._HEADER, "12 cột đầu giữ nguyên"
+    # Cột "Loại video TikTok" (affiliate/viral) luôn nối SAU CÙNG, sau Sắc thái/Nguồn.
+    assert hd[-3:] == ["Sắc thái", "Nguồn", A._COT_LOAI_VIDEO] and hd[:12] == A._HEADER,         "12 cột đầu giữ nguyên"
+    # `_tab` đã bỏ cột cuối "Loại video TikTok" nên Sắc thái vẫn ở [-2].
     assert chinh["Ngọc Trâm"][-2] == TC and chinh["Linh Đan"][-2] == TI
     assert _tab(ghi, "s3")["HAPAS THAILAND"][-2] == TL, "tab thị trường khác cũng có cột"
     tk = kq["thong_ke"]

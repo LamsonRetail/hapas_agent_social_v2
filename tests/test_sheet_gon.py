@@ -105,7 +105,7 @@ def test_social_listen_tab_chinh_ten_bai_dang_vua_tieu_de(quet, monkeypatch):  #
     monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: sua.append(a))
     chay()
     assert sua == [("tok", "s1", "Bài đăng", len(ghi[0][1][0]))]
-    assert len(ghi[0][1][0]) == len(A._HEADER) + len(A._COT_THEM_BAI)
+    assert len(ghi[0][1][0]) == len(A._HEADER) + len(A._COT_THEM_BAI) + 1  # + Loại video TikTok
 
 
 def test_deep_dive_tab_chinh_ten_binh_luan_vua_tieu_de(moi_truong, monkeypatch):  # noqa: F811

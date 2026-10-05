@@ -100,7 +100,14 @@ _SID_TAB = {A._TAB_BI_LOAI: "s2", A._TAB_THI_TRUONG_KHAC: "s3", A._TAB_THONG_KE:
 
 
 def _tab(ghi, sid: str) -> dict:
-    return {r[2]: r for s, rows in ghi if s == sid for r in rows[1:]}
+    """Dòng theo tên kênh, BỎ cột cuối "Loại video TikTok" (canh ở test_loai_video_tiktok.py)
+    để `[-1]` vẫn là "Nhận định AI"/"Lý do loại" như trước khi có cột đó."""
+    ra = {}
+    for s, rows in ghi:
+        if s == sid:
+            assert rows[0][-1] == A._COT_LOAI_VIDEO and {len(r) for r in rows} == {len(rows[0])}
+            ra.update({r[2]: r[:-1] for r in rows[1:]})
+    return ra
 
 
 def _bang(ghi):
@@ -118,7 +125,8 @@ def test_ai_phan_xu_giu_loai_dung_va_mot_luot_model(quet):
     kq = chay()
     hd, chinh, loai = _bang(ghi)
     khac = _khac(ghi)
-    assert hd[-4:-1] == ["Thị trường", "Nhận định AI", "Sắc thái"]
+    assert hd[-5:-2] == ["Thị trường", "Nhận định AI", "Sắc thái"]
+    assert hd[-1] == A._COT_LOAI_VIDEO
     assert set(chinh) == {"Linh Đan", "Ngọc Trâm"}, "sheet chính chỉ có bài VN"
     assert set(khac) == {"HAPAS THAILAND"}, "bài brand ở Thái sang tab riêng, không bị loại"
     assert chinh["Linh Đan"][-3] == "bàn về quảng cáo/chiến dịch của brand", \
