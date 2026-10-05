@@ -132,3 +132,55 @@ def test_ngoai_luot_luon_tao_sheet_moi(F, monkeypatch):
     contextvars.Context().run(_chay, F)
     contextvars.Context().run(_chay, F)
     assert len(F._ghi_test["tao"]) == 2
+
+
+def test_noi_hong_van_tra_link_sheet_cua_luot(F, monkeypatch):
+    """Brand thứ hai không nối được thì sheet của lượt VẪN CÒN — không được báo 'không có'."""
+    import contextvars
+    import apify_tool as A
+    import dong_ho_luot
+    import scheduler
+    monkeypatch.setattr(F, "_SHEET_LUOT", {})
+    lan = []
+
+    def ghi(tok, sid, v, dong_dau=1):
+        lan.append(dong_dau)
+        if len(lan) == 2:
+            raise RuntimeError("lark 503 token=xyz")
+    monkeypatch.setattr(A, "_write_values", ghi)
+
+    def luot():
+        scheduler.set_current_chat("lark:cli_x:oc_2")
+        dong_ho_luot.bat_dau()
+        a = json.loads(F._handle_fb_ads_library({"query": "HAPAS"}))
+        b = json.loads(F._handle_fb_ads_library({"query": "PEDRO"}))
+        c = json.loads(F._handle_fb_ads_library({"query": "VASCARA"}))
+        return a, b, c
+    a, b, c = contextvars.copy_context().run(luot)
+    assert b["sheet_url"] == a["sheet_url"] and b["granted"] is True
+    assert b["loi_sheet"] and "xyz" not in b["loi_sheet"]
+    assert c["sheet_url"] == a["sheet_url"] and not c["loi_sheet"]
+    assert lan == [1, 4, 4], "lần nối hỏng không làm lệch dòng của lần sau"
+
+
+def test_cap_quyen_hong_van_luu_sheet_cua_luot(F, monkeypatch):
+    import contextvars
+    import apify_tool as A
+    import dong_ho_luot
+    import scheduler
+    monkeypatch.setattr(F, "_SHEET_LUOT", {})
+    monkeypatch.setattr(A, "_grant", lambda tok, ou: False)
+
+    def luot():
+        scheduler.set_current_chat("lark:cli_x:oc_3")
+        dong_ho_luot.bat_dau()
+        return (json.loads(F._handle_fb_ads_library({"query": "HAPAS"})),
+                json.loads(F._handle_fb_ads_library({"query": "PEDRO"})))
+    a, b = contextvars.copy_context().run(luot)
+    assert a["sheet_url"] and a["granted"] is False
+    assert b["sheet_url"] == a["sheet_url"] and len(F._ghi_test["tao"]) == 1
+
+
+def test_ten_tu_dat_khong_qua_90_ky_tu(F):
+    kq = _chay(F, query="x" * 200)
+    assert len(kq["title"]) <= 90

@@ -213,7 +213,24 @@ def _dong_sheet(ads: list[dict], nhan: str, platform: str, country: str,
 #: 02/10/2026 một lượt gọi tool này 8 lần (8 brand) — mỗi lần một file là 8 link rác.
 #: Cùng lượt thì ghi NỐI vào sheet đầu; lượt sau (mã khác) là sheet mới.
 _SHEET_LUOT: dict[tuple, dict] = {}
-_SHEET_KHOA = threading.Lock()
+_SHEET_GUARD = threading.Lock()
+_KHOA_SHEET_LUOT: dict[tuple, threading.Lock] = {}
+
+
+def _khoa_cho(khoa: tuple | None) -> threading.Lock:
+    """Khoá RIÊNG từng lượt: hai lời gọi song song cùng lượt không cùng tạo sheet hay
+    ghi đè cùng dòng; lượt/người khác không phải chờ nhau. Ngoài lượt: khoá mới (không
+    chia sẻ gì để mà tranh)."""
+    if khoa is None:
+        return threading.Lock()
+    with _SHEET_GUARD:
+        k = _KHOA_SHEET_LUOT.get(khoa)
+        if k is None:
+            if len(_KHOA_SHEET_LUOT) >= 200:
+                for cu in [x for x, kk in _KHOA_SHEET_LUOT.items() if not kk.locked()][:50]:
+                    _KHOA_SHEET_LUOT.pop(cu, None)
+            k = _KHOA_SHEET_LUOT[khoa] = threading.Lock()
+        return k
 
 
 def _khoa_luot() -> tuple | None:
@@ -240,27 +257,33 @@ def _ghi_sheet(title: str, ads: list[dict], nhan: str, platform: str, country: s
         sender = None
     ngay = f"{datetime.datetime.now(_VN_TZ):%d/%m/%Y}"
     khoa = _khoa_luot()
-    # Giữ khoá suốt lời gọi Lark: hai lời gọi song song cùng lượt không được cùng tạo
-    # sheet, hay ghi đè cùng dòng. Vài giây, chỉ chặn chính tool này.
-    with _SHEET_KHOA:
-        try:
-            co = _SHEET_LUOT.get(khoa) if khoa else None
-            if co:
-                dong = _dong_sheet(ads, nhan, platform, country, active_status, ngay,
-                                   stt_dau=co["dong"])
+    # Giữ khoá của LƯỢT suốt lời gọi Lark (vài giây).
+    with _khoa_cho(khoa):
+        co = _SHEET_LUOT.get(khoa) if khoa else None
+        if co:
+            dong = _dong_sheet(ads, nhan, platform, country, active_status, ngay,
+                               stt_dau=co["dong"])
+            try:
                 A._write_values(co["tok"], co["sid"], dong, dong_dau=co["dong"] + 1)
-                co["dong"] += len(dong)
-                return co["url"], co["granted"], None, True
+            except Exception as e:  # noqa: BLE001
+                # Sheet của lượt VẪN CÒN (đã có brand trước, đã cấp quyền) — trả đúng link,
+                # lỗi chỉ là brand này chưa nối vào được.
+                return (co["url"], co["granted"],
+                        A._che_token(f"{type(e).__name__}: {e}")[:250], True)
+            co["dong"] += len(dong)
+            return co["url"], co["granted"], None, True
+        try:
             tok, url = A._create_sheet(title)
             sid = A._first_sheet_id(tok)
             A._write_values(tok, sid, [list(_HEADER_SHEET)] + _dong_sheet(
                 ads, nhan, platform, country, active_status, ngay))
             granted = A._grant(tok, sender) if sender else False
             if khoa:
-                if len(_SHEET_LUOT) >= 200:
-                    _SHEET_LUOT.pop(next(iter(_SHEET_LUOT)))
-                _SHEET_LUOT[khoa] = {"tok": tok, "sid": sid, "url": url,
-                                     "granted": granted, "dong": len(ads) + 1}
+                with _SHEET_GUARD:
+                    if len(_SHEET_LUOT) >= 200:
+                        _SHEET_LUOT.pop(next(iter(_SHEET_LUOT)))
+                    _SHEET_LUOT[khoa] = {"tok": tok, "sid": sid, "url": url,
+                                         "granted": granted, "dong": len(ads) + 1}
             return url, granted, None, False
         except Exception as e:  # noqa: BLE001
             return None, False, A._che_token(f"{type(e).__name__}: {e}")[:250], False
@@ -283,7 +306,8 @@ FB_ADS_LIBRARY_SCHEMA = {
         "tải ngay nếu cần; ad video chỉ lấy được thumbnail.\n"
         "Có ad thì tự ghi một Lark Sheet theo dõi (mỗi ad một dòng, kèm link Ad Library); "
         "tra nhiều brand trong CÙNG một lượt thì ghi nối vào cùng một sheet (`sheet_ghi_noi`) — "
-        "gửi NGUYÊN `sheet_url`. Có `loi_sheet` thì nói rõ là chưa ghi được sheet."
+        "gửi NGUYÊN `sheet_url`. Có `loi_sheet` mà KHÔNG có `sheet_url` thì nói rõ chưa ghi "
+        "được sheet; có cả hai thì sheet vẫn có nhưng brand này chưa nối vào được."
     ),
     "parameters": {
         "type": "object",
@@ -430,7 +454,7 @@ def _handle_fb_ads_library(args: dict, **kwargs) -> str:
     if ads and _duoc_ghi_sheet():
         nhan = f"page_id {page_id}" if page_id else query
         ten_sheet = (str(args.get("title") or "").strip()
-                     or f"Ads Meta · {nhan} · {country}"[:90]
+                     or f"Ads Meta · {nhan} · {country}"[:77]
                      + f" · {datetime.datetime.now(_VN_TZ):%d-%m-%Y}")
         sheet_url, granted, loi_sheet, ghi_noi = _ghi_sheet(
             ten_sheet, ads, nhan, platform, country, active_status)
