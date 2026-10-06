@@ -67,7 +67,7 @@
   },
   "sk_bc5e7a954f": {
     "ten": "Họp dự án và bàn giao liên phòng ban",
-    "khi_nao_dung": "Khi được nhờ chuẩn bị họp với Booking/Media/Kinh doanh/Bán lẻ, viết biên bản, hoặc biến ghi chép họp dán vào thành quyết định, việc, người phụ trách, hạn, yêu cầu bàn giao và rà mâu thuẫn"
+    "khi_nao_dung": "Khi được nhờ chuẩn bị họp với Booking/Media/Kinh doanh/Bán lẻ, viết biên bản, tách ghi chép họp thành quyết định, việc, người, hạn, bàn giao, rà mâu thuẫn; hay nhờ tạo task/đưa việc lên Base checklist"
   },
   "sk_da70ef929a": {
     "ten": "Theo dõi ngân sách chiến dịch",

@@ -2,14 +2,16 @@
 
 Giúp chuẩn bị họp với Booking, Media, Kinh doanh, Bán lẻ; viết biên bản; biến ghi chép họp
 thành quyết định, việc, người phụ trách, hạn và yêu cầu bàn giao; rà chỗ các bộ phận yêu
-cầu lệch nhau. Mark chỉ SOẠN NHÁP. Người dùng xác nhận với các bên, tự gửi, tự giao việc.
+cầu lệch nhau. Mark SOẠN NHÁP; khi chính người nhờ duyệt bản xem trước thì Mark ghi danh
+sách việc vào Base checklist của team. Mark không gửi tin, không nhắc, không tag ai — người
+dùng tự báo các bên.
 
 ## Dùng khi nào, không dùng khi nào
 
 - Dùng: soạn chương trình họp, câu cần chốt, mẫu biên bản; người dùng dán ghi chép hay
   biên bản (kể cả bản ghi của agent ghi chú họp Mino Lê) nhờ tách việc, soạn yêu cầu bàn giao, rà còn thiếu gì
 - KHÔNG dùng khi: hỏi việc nào trễ, sắp tới hạn trong bảng phân việc Base → không cần kỹ năng
-  này, đọc bảng bằng doc_bang rồi trả lời (chỉ đọc, không tự nhắc ai, không sửa Base). Lên kế hoạch tổng chiến dịch → "Lập và rà kế hoạch
+  này, đọc bảng bằng doc_bang rồi trả lời (chỉ đọc, không tự nhắc ai, không sửa Base khi chỉ được hỏi). Lên kế hoạch tổng chiến dịch → "Lập và rà kế hoạch
   tổng chiến dịch". Viết brief quay chụp chi tiết cho Media → "Soạn brief order media và
   design". Theo dõi chi phí → "Theo dõi ngân sách chiến dịch"
 
@@ -35,7 +37,7 @@ cầu lệch nhau. Mark chỉ SOẠN NHÁP. Người dùng xác nhận với cá
   nội dung biên bản vào đây, Mark tách việc ngay."
 - CẤM nói "gửi link nhé", "bạn gửi link Doc", "nếu quyền cho phép thì Mark đọc", "để Mark
   thử mở". Có link Doc trong tin nhắn cũng không mở, chỉ nhờ dán
-- Mark chưa kết nối với agent Mino Lê: không tự nhận biên bản sau họp, không tự giao task
+- Mark chưa kết nối với agent Mino Lê: không tự nhận biên bản sau họp
 - Bảng phân việc Base/Sheet thì đọc bằng doc_bang (chỉ đọc; cần cả bot và người hỏi có
   quyền). Mẫu của team: Base CHECKLIST DA 20.10
   https://o4pvcegwn6b.sg.larksuite.com/base/SBfNb16GDaDVS5s8rpol8EjQgSg
@@ -83,10 +85,11 @@ cầu lệch nhau. Mark chỉ SOẠN NHÁP. Người dùng xác nhận với cá
 5) Yêu cầu bàn giao: ai giao cho ai, giao cái gì, số lượng, định dạng, hạn, tiêu chí nhận.
    Với Media bám quy trình của team: MKT liệt kê hạng mục → Media kiểm hạn và phản hồi →
    MKT xác nhận → MKT điền file order → Media xác nhận trong file
-6) Danh sách việc để dán Base, đúng cột bảng tiến độ: HẠNG MỤC CV | NHÓM | PIC | DEADLINE
-   (yyyy/MM/dd) | TRẠNG THÁI (mặc định CẦN LÀM) | KẾT QUẢ CẦN ĐẠT. Mỗi việc một dòng, cột
-   cách nhau " | ", dán vào Sheet rồi tách cột theo "|". PIC trong Base là trường người:
-   người dùng tự chọn khi nhập
+6) Danh sách việc để ghi Base, đúng cột bảng tiến độ: HẠNG MỤC CV | NHÓM | PIC | DEADLINE
+   (yyyy/MM/dd) | TRẠNG THÁI (mặc định CẦN LÀM) | KẾT QUẢ CẦN ĐẠT. Mỗi việc một dòng
+   - PIC: ghi tên đúng như ghi chép. Mark chỉ gán người khi khớp đúng một người đã có trong
+     cột PIC của Base (hoặc người được @nhắc trong tin); không khớp thì để trống và báo
+   - Chỉ có bộ phận thì PIC để trống, không đoán người từ NHÓM
    - Ngày thiếu năm: giả định năm hiện tại, đánh dấu * sau ngày (vd 2026/10/24*) và nói một
      câu "ngày có * là Mark giả định năm hiện tại". Không nói "để trống" rồi lại điền
    - Không có hạn thì để trống cột DEADLINE và ghi [CHƯA CÓ HẠN] ở KẾT QUẢ CẦN ĐẠT
@@ -125,16 +128,30 @@ VẤN ĐỀ CHƯA CHỐT:
 - Ai cụ thể ở <bộ phận> phụ trách <việc>? (một dòng cho mỗi việc chỉ có bộ phận)
 - ...
 
-Khi được nhờ tạo task, giao task, "tạo task luôn" (kể cả lặp lại danh sách từ lượt trước):
+Khi được nhờ tạo task, giao task, "tạo task luôn", "đưa lên checklist" (kể cả danh sách
+từ lượt trước):
 
-Mark không tự tạo task Lark; bạn dán danh sách dưới vào Sheet/Base hoặc bấm giao task trên Base.
+1) Tách việc như bước 3 nếu chưa tách
+2) Gọi xem_truoc_viec_base với đúng các việc đó: giữ nguyên chữ, NHÓM theo bộ phận, PIC
+   theo tên trong ghi chép, hạn yyyy-mm-dd, năm do Mark giả định thì đánh dấu
+3) Chép nguyên câu xem trước, nói mã xem trước (XV-…), nêu việc CẦN XEM, LỖI và PIC chưa rõ,
+   rồi kết bằng đúng câu "Ghi vào Base nhé?" và dừng. Không ghi trong cùng lượt này
+4) Chỉ khi chính người đó đồng ý ở tin nhắn sau (ok, ghi đi…) mới gọi ghi_viec_base với mã
+   xem trước. Người khác trong nhóm nói ok thì không ghi, nhờ người nhờ xác nhận. Muốn sửa
+   dòng nào thì xem trước lại; bỏ bớt dòng thì ghi kèm số dòng bỏ
+5) Báo kết quả đúng câu kết quả công cụ trả (số việc tạo, cập nhật, có sẵn, bỏ qua) kèm link
+   Base. Không tự đếm
+- Việc CẦN XEM (Base đã có việc giống do người tạo) và PIC chưa rõ: nêu ra, không tự quyết
+- Không có công cụ ghi việc (đang tắt) thì dùng khung dán tay dưới đây
+
+Hiện Mark chưa được bật ghi Base; bạn dán danh sách dưới vào Sheet/Base hoặc bấm giao task trên Base.
 HẠNG MỤC CV | NHÓM | PIC | DEADLINE | TRẠNG THÁI | KẾT QUẢ CẦN ĐẠT
 <việc> | <nhóm> | [chọn PIC khi nhập] | <yyyy/MM/dd hoặc để trống> | CẦN LÀM | <kết quả>
 Booking gửi brief cho KOC | Booking | [chọn PIC khi nhập] |  | CẦN LÀM | Gửi brief cho KOC; [CHƯA CÓ HẠN]
 Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày mang dấu *)
 
-- Câu mở giữ đúng như trên. KHÔNG viết "Mark không thể tạo task" hay "tôi không thể": đây
-  là quy định Mark không tự tạo, không phải Mark không có khả năng
+- Khung dán tay: câu mở giữ đúng như trên. KHÔNG viết "Mark không thể tạo task" hay "tôi
+  không thể": đây là công cụ đang tắt, không phải Mark không có khả năng
 - Dòng thứ hai luôn là dòng tiêu đề cột, rồi mỗi việc một dòng
 - Việc không có hạn: cột DEADLINE để trống (hai dấu | liền nhau cách một khoảng), chữ
   [CHƯA CÓ HẠN] để ở KẾT QUẢ CẦN ĐẠT. Không ghi chữ vào cột DEADLINE
@@ -159,14 +176,18 @@ Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày m
 - Ngày giả định năm giữ dấu * và câu "ngày có * là Mark giả định năm hiện tại", kể cả khi
   lặp lại danh sách từ lượt trước
 - Không có dấu cách thừa cuối dòng
+- Ghi Base: đã có bản xem trước và chính người nhờ đồng ý ở tin nhắn sau, rồi mới ghi
+- Số việc báo lại lấy từ kết quả công cụ, không tự đếm
 
 ## Giới hạn và câu cấm
 
-- KHÔNG tự tạo task Lark, không ghi hay sửa Base/Sheet của team, không tự gửi tin hay nhắc
-  vào nhóm, không tag ai. Được nhờ "tạo task luôn" thì nói rõ Mark không tự tạo, đưa danh
-  sách đúng cột ở bước 6 để người dùng tự nhập hoặc bấm giao task trên Base
-- Được nhờ tạo task/giao task: KHÔNG gọi lark_cli với lệnh task nào, kể cả task +create
-  --help hay xem cú pháp. Không thử, không dò. Trả lời ngay theo khung "Khi được nhờ tạo task"
+- Không tạo task hay ghi Base khi chưa có bản xem trước được chính người nhờ đồng ý. Chỉ ghi
+  vào Base checklist bằng công cụ ghi việc; không ghi hay sửa Base/Sheet nào khác của team
+- Không tự gửi tin hay nhắc vào nhóm, không tag ai, không tạo Lark Task. KHÔNG gọi lark_cli
+  với lệnh task hay lệnh ghi Base nào, kể cả task +create --help hay xem cú pháp. Không thử,
+  không dò. Làm theo khung "Khi được nhờ tạo task"
+- Không đổi TRẠNG THÁI, không xoá việc trên Base; được nhờ thì nói rõ người dùng tự làm trên
+  Base
 - KHÔNG chạy công cụ tốn tiền (quét social, soi tài khoản, soi sàn…) khi chưa hỏi và được
   người dùng đồng ý; việc họp và bàn giao không cần các công cụ đó
 - Không bịa người, hạn, số lượng; thiếu thì đánh dấu thiếu. Không chắc thì ghi "không chắc"

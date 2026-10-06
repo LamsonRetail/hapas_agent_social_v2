@@ -41,6 +41,9 @@ _SAFE_EXACT = {
     "tra_kho",
     # Đọc sổ việc quét nền (viec_nen.py) — chỉ việc của chính chat này / người hỏi này.
     "tra_viec_nen",
+    # Xem trước việc sẽ ghi vào Base checklist (viec_base_tool.py): đọc Base, chỉ ghi một
+    # file bản xem trước ở máy. Vẫn có công tắc + cổng env bên dưới (đi cùng tool ghi).
+    "xem_truoc_viec_base",
     "browser_navigate",
     "browser_snapshot",
     "browser_get_images",
@@ -69,6 +72,9 @@ _MUTATING_EXACT = {
     # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
     "huy_viec_nen": "write_data",
     "remember_about_user": "write_data",
+    # Ghi việc ĐÃ DUYỆT vào Base checklist (viec_base_tool.py) — tool DUY NHẤT được ghi Base
+    # của team; `lark_cli --yes` vẫn bị chặn ở dưới.
+    "ghi_viec_base": "write_data",
 }
 _MUTATING_WORDS = {
     "create", "update", "delete", "remove", "send", "write", "edit",
@@ -219,6 +225,7 @@ _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
     "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai",
+    "ghi_viec_base", "xem_truoc_viec_base",
 })
 
 #: Tool có công tắc riêng nhưng RA ĐỜI SAU công tắc cha → khi `capabilities` chưa có
@@ -240,8 +247,24 @@ _TOOL_CO_CONG_TAC = frozenset({
 #: platform thêm dòng `theo: "social_listen"` thì công tắc riêng ăn, runtime không sửa.
 #: `chi_so_bai` (06/10/2026, chỉ số theo danh sách link bài) cũng vậy: cào bằng Apify
 #: như Quét MXH, dùng chung trần/công tắc từng nền tảng của nó.
+#: `xem_truoc_viec_base` (07/10/2026) đi theo công tắc của tool ghi `ghi_viec_base`: bản
+#: xem trước không có tool ghi thì vô nghĩa.
 _CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen",
-                 "chi_so_bai": "social_listen"}
+                 "chi_so_bai": "social_listen", "xem_truoc_viec_base": "ghi_viec_base"}
+
+#: Tool có công tắc nhưng KHÔNG có công tắc cha để lùi về, và console CHƯA có dòng của nó.
+#: Agent đã khai `capabilities` thì vắng dòng = TẮT (đúng ý: ghi Base team phải được bật rõ).
+#: `ghi_viec_base` (07/10/2026, ghi việc đã duyệt vào Base checklist) — chủ agent chốt: mặc
+#: định TẮT, không mượn công tắc nào. `tests/test_cong_tac_nang_luc.py` cho phép console
+#: chưa có dòng của các tool này.
+_CHO_CONSOLE = frozenset({"ghi_viec_base"})
+
+#: Cổng env của máy chạy, xét SAU hợp đồng, TRƯỚC công tắc — chỉ thu hẹp. Lý do: khi agent
+#: chưa khai `capabilities` thì lớp công tắc không thu hẹp gì, nên một tool ghi Base chung
+#: của team sẽ mở chỉ vì hợp đồng có `write_data`. Cổng này giữ nó TẮT tới khi máy chạy đặt
+#: biến = "1" (staging trước, prod sau).
+_CAN_BIEN_MOI_TRUONG = {"ghi_viec_base": "MARK_GHI_VIEC_BASE",
+                        "xem_truoc_viec_base": "MARK_GHI_VIEC_BASE"}
 
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.
 KHONG_THU_HEP = object()
@@ -356,6 +379,9 @@ def decide(tool_name: str, args: dict[str, Any] | None = None) -> PolicyDecision
     if not d.allowed:
         return d
     name = (tool_name or "").strip()
+    bien = _CAN_BIEN_MOI_TRUONG.get(name)
+    if bien and os.environ.get(bien, "").strip() != "1":
+        return PolicyDecision(False, f"'{name}' chưa bật ở máy chạy ({bien}=1) — mặc định tắt")
     if name in _TOOL_CO_CONG_TAC:
         bat = nang_luc_bat()
         cong_tac = name if bat is KHONG_THU_HEP else cong_tac_cua(name, bat)

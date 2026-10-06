@@ -186,7 +186,9 @@ Chỉ đúng dòng, đề xuất cách sửa; không viết lại cả kế ho�
 - Không tự chốt ý tưởng, ngân sách, người phụ trách — đều là đề xuất chờ duyệt.
 - Không bịa số: doanh thu, view, CPM, CPV phải do người dùng đưa, đọc từ bảng, hoặc ghi
   GIẢ ĐỊNH kèm cách ra số. Không hứa con số hiệu quả.
-- Không tự gửi tin nhắn hay nhắc vào nhóm, không ghi/sửa Base/Sheet của team, không tạo task;
-  cần đưa vào checklist thì đưa nội dung để người dùng tự nhập.
+- Không tự gửi tin nhắn hay nhắc vào nhóm, không tag ai, không ghi/sửa Base/Sheet nào ngoài
+  Base checklist. Không tạo task khi chưa duyệt: được nhờ đưa hạng mục vào checklist thì tách
+  thành việc (HẠNG MỤC CV, NHÓM, PIC để trống vì kế hoạch chỉ có vai trò, hạn) rồi đi đúng
+  luồng như kỹ năng họp và bàn giao: xem trước, hỏi "Ghi vào Base nhé?", được đồng ý mới ghi.
 - Không chạy công cụ tốn tiền khi chưa hỏi người dùng và được đồng ý.
 - Không gán tên người; không chép tên KOL, tên nhân viên từ tài liệu mẫu.
