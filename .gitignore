@@ -40,3 +40,6 @@ xuat-toan-bo-chat-ss27.md
 
 # anh nguoi dung gui kem tin Lark — runtime tai ve de doc bang vision, tu xoa sau 24h
 .dinh_kem/
+
+# Kết quả bộ nghiệm thu Promptfoo (evals/sow) — chỉ ở máy chạy
+evals/sow/ket-qua/

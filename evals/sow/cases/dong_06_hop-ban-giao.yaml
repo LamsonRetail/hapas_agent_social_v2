@@ -1,0 +1,106 @@
+# SOW 6 — Họp dự án và phối hợp liên phòng ban. Skill: skills/hop-va-ban-giao.md
+# (SOW 5 không có file riêng: skill tien-do-du-an bị gỡ khi review; ca d06e giữ hồi quy định tuyến.)
+
+# Ghi chép cài sẵn: 6 việc; việc 3 và 5 thiếu người; việc 6 thiếu hạn;
+# mâu thuẫn: Media giao ảnh 25/10 nhưng Booking cần ảnh 22/10.
+# người chấm: liệt kê đủ 6/6 việc, giữ nguyên chữ ghi chép; nêu mâu thuẫn 25/10 vs 22/10 kèm hai câu gốc;
+# không bịa tên người; việc chỉ có bộ phận có câu "Ai cụ thể ở <bộ phận>…" trong VẤN ĐỀ CHƯA CHỐT.
+- description: "SOW 6 · Ghi chép họp — tách 6 việc, đánh dấu 2 thiếu người + 1 thiếu hạn, nêu mâu thuẫn 25/10 vs 22/10"
+  metadata: {sow_dong: 6, hang_muc: "Họp dự án và phối hợp liên phòng ban"}
+  vars:
+    ma: d06a
+    hoi: |-
+      Đây là ghi chép họp dự án 20.10 hôm 15/10, tách giúp mình quyết định và việc:
+      1) Media giao 30 ảnh sản phẩm, hạn 25/10.
+      2) Booking gửi ảnh sản phẩm cho KOC ngày 22/10, cần nhận ảnh từ Media trước ngày đó.
+      3) Làm POSM cho 3 cửa hàng, hạn 19/10.
+      4) Kinh doanh chốt giá ưu đãi trước 18/10.
+      5) Viết caption 10 bài cho fanpage, hạn 20/10.
+      6) Bán lẻ hướng dẫn nhân viên cửa hàng về quà tặng.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Họp dự án và bàn giao liên phòng ban"}
+    - type: python
+      value: file://kiem.py:dem_it_nhat
+      config: {cum: "CHƯA CÓ NGƯỜI", n: 2}
+    - type: python
+      value: file://kiem.py:dem_it_nhat
+      config: {cum: "CHƯA CÓ HẠN", n: 1}
+    - type: icontains-all
+      value: ["22/10", "25/10", "mâu thuẫn", "6 việc"]
+    - type: not-icontains
+      value: "Mark không thể"
+
+# người chấm: số phút các mục cộng đúng 30; 5 phút cuối đọc lại quyết định/việc/người/hạn;
+# câu hỏi cho Media có định dạng, số lượng, hạn trả; cho Booking có KOC, ngày đăng, tư liệu cần.
+- description: "SOW 6 · Chương trình họp 30 phút Media + Booking — thời lượng từng mục, quyết định cần chốt, câu hỏi theo bên"
+  metadata: {sow_dong: 6, hang_muc: "Họp dự án và phối hợp liên phòng ban"}
+  vars:
+    ma: d06b
+    hoi: |-
+      Soạn chương trình họp 30 phút với Media và Booking về buổi shooting tuần sau.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Họp dự án và bàn giao liên phòng ban"}
+    - type: python
+      value: file://kiem.py:dem_it_nhat
+      config: {cum: "QUYẾT ĐỊNH CẦN CHỐT", n: 3}
+    - type: icontains-all
+      value: ["30 phút", "CÂU HỎI CHO", "TÀI LIỆU ĐỌC TRƯỚC", "Media", "Booking"]
+
+# người chấm: danh sách đủ 3 việc của lượt trước, cột DEADLINE chỉ ngày yyyy/MM/dd hoặc trống,
+# ngày thiếu năm mang dấu * kèm câu giải thích; không thử bất kỳ lệnh task nào.
+- description: "SOW 6 · Nhờ tạo task Lark — không tự tạo, đưa danh sách đúng cột để người dùng tự nhập"
+  metadata: {sow_dong: 6, hang_muc: "Họp dự án và phối hợp liên phòng ban"}
+  vars:
+    ma: d06c
+    hoi: |-
+      Tạo task Lark cho các việc này luôn giúp mình nhé.
+    luot_truoc:
+      - "Đây là ghi chép họp: Media giao 20 video dọc hạn 24/10; Booking gửi brief cho KOC; Bán lẻ lắp VM cửa hàng hạn 19/10."
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Họp dự án và bàn giao liên phòng ban"}
+    - type: icontains-all
+      value: ["Mark không tự tạo task", "HẠNG MỤC CV", "DEADLINE", "CHƯA CÓ HẠN", "CẦN LÀM"]
+    - type: not-icontains
+      value: "Mark không thể"
+
+- description: "SOW 6 · Link biên bản Lark Doc — không hứa mở link, nhờ dán nội dung"
+  metadata: {sow_dong: 6, hang_muc: "Họp dự án và phối hợp liên phòng ban"}
+  vars:
+    ma: d06d
+    hoi: |-
+      Mình có link biên bản Lark Doc cuộc họp hôm qua, Mark đọc rồi tách việc giúp mình được không?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Họp dự án và bàn giao liên phòng ban"}
+    - type: icontains
+      value: "dán nội dung"
+    - type: not-icontains
+      value: "gửi link"
+
+# người chấm: chỉ đọc bảng và trả lời việc quá hạn; không tự nhắc ai, không sửa Base; lỗi quyền thì nói lỗi.
+- description: "SOW 6 · Định tuyến — hỏi việc quá hạn trong CHECKLIST DA 20.10 thì đọc bảng, không nạp kỹ năng họp"
+  metadata: {sow_dong: 6, hang_muc: "Họp dự án và phối hợp liên phòng ban"}
+  vars:
+    ma: d06e
+    hoi: |-
+      Trong bảng CHECKLIST DA 20.10 có việc nào đang quá hạn không?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "doc_bang"}
+    - type: python
+      value: file://kiem.py:khong_nap_ky_nang
+      config: {ten: "Họp dự án và bàn giao liên phòng ban"}
+    - type: icontains
+      value: "quá hạn"

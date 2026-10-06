@@ -1,0 +1,86 @@
+# SOW 4 — Đóng góp ý tưởng và xây dựng kế hoạch chiến dịch (master plan).
+# Skill: skills/ke-hoach-chien-dich-tong.md; ranh giới với campaign-plan.md (chỉ ads/booking).
+
+# người chấm: mỗi hoạt động có mục tiêu, người phụ trách theo VAI TRÒ (không tên người), mốc, ngân sách VND,
+# chỉ số + mức đích; tổng hoạt động + dự phòng ≤ 300 triệu; có ≥2 phương án kèm phân bổ VND và phép cộng
+# dồn; có mục câu cần làm rõ / cần duyệt.
+- description: "SOW 4 · Master plan 20/11 trang sức — 4 giai đoạn, ngân sách VND có phép cộng, không markdown"
+  metadata: {sow_dong: 4, hang_muc: "Đóng góp ý tưởng và xây dựng kế hoạch chiến dịch (master plan)"}
+  vars:
+    ma: d04a
+    hoi: |-
+      Lên master plan dịp 20/11 cho dòng trang sức, mục tiêu doanh thu 2 tỷ, ngân sách MKT 300 triệu, chạy 4 tuần
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Lập và rà kế hoạch tổng chiến dịch"}
+    - type: icontains-all
+      value: ["giới thiệu", "quan tâm", "chuyển đổi", "duy trì"]
+    - type: icontains-all
+      value: ["Cộng giai đoạn", "Tổng hoạt động", "người phụ trách"]
+    - type: icontains-any
+      value: ["VND", "₫", "triệu"]
+    - type: not-icontains
+      value: "**"
+    - type: not-regex
+      value: '(^|\n)\s*#{1,6}\s'
+
+# người chấm: 4 lỗi nặng tách riêng, đánh số riêng (lệch ngân sách, thiếu DUY TRÌ, thiếu bước chuyển đổi
+# thật, đo reach/impression cho giai đoạn chuyển đổi là sai chỉ số); không viết lại cả kế hoạch.
+- description: "SOW 4 · Rà kế hoạch — bắt lệch ngân sách 250 vs 200, thiếu DUY TRÌ, thiếu bước chuyển đổi, đo sai chỉ số"
+  metadata: {sow_dong: 4, hang_muc: "Đóng góp ý tưởng và xây dựng kế hoạch chiến dịch (master plan)"}
+  vars:
+    ma: d04b
+    hoi: |-
+      Rà giúp kế hoạch này: Giai đoạn 1 Giới thiệu: TVC + KOL, đo reach. Giai đoạn 2 Quan tâm: 10 KOC review, đo view. Giai đoạn 3 Chuyển đổi: chạy ads awareness, đo reach và impression. Ngân sách: KOL 100tr, KOC 60tr, ads 90tr, TỔNG 200tr.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Lập và rà kế hoạch tổng chiến dịch"}
+    - type: icontains-all
+      value: ["LỖI NẶNG", "250", "DUY TRÌ", "THIẾU BƯỚC CHUYỂN ĐỔI"]
+    - type: icontains-any
+      value: ["50 triệu", "50tr", "50.000.000"]
+    - type: icontains
+      value: "reach"
+
+# người chấm: mỗi ý tưởng có đủ 4 nhãn theo thứ tự, mục Hoạt động ghi vai trò sau từng hoạt động;
+# danh sách câu hỏi có doanh thu thuần, trần ngân sách, định hướng đã duyệt, người mua/người nhận, thời gian.
+- description: "SOW 4 · Góp ý tưởng khi chưa có ngân sách — hỏi gộp, vẫn đưa ≥2 ý tưởng có GIẢ ĐỊNH, câu kết chờ duyệt"
+  metadata: {sow_dong: 4, hang_muc: "Đóng góp ý tưởng và xây dựng kế hoạch chiến dịch (master plan)"}
+  vars:
+    ma: d04c
+    hoi: |-
+      Mark góp ý tưởng chiến dịch ra mắt BST túi mùa Tết gồm online, cửa hàng và booking được không? Chưa có ngân sách.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Lập và rà kế hoạch tổng chiến dịch"}
+    - type: python
+      value: file://kiem.py:dem_it_nhat
+      config: {cum: "Vấn đề khách hàng", n: 2}
+    - type: python
+      value: file://kiem.py:dem_it_nhat
+      config: {cum: "GIẢ ĐỊNH", n: 2}
+    - type: icontains
+      value: "Ý tưởng, ngân sách và người phụ trách là ĐỀ XUẤT, chờ người có thẩm quyền duyệt"
+
+- description: "SOW 4 · Định tuyến — kế hoạch chỉ ads TikTok/Spark Ads dùng kỹ năng chiến dịch quảng cáo, không nạp master plan"
+  metadata: {sow_dong: 4, hang_muc: "Đóng góp ý tưởng và xây dựng kế hoạch chiến dịch (master plan)"}
+  vars:
+    ma: d04d
+    hoi: |-
+      Lên kế hoạch chạy ads TikTok cho BST mới, có Spark Ads với KOC
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Lập kế hoạch chiến dịch quảng cáo"}
+    - type: python
+      value: file://kiem.py:khong_nap_ky_nang
+      config: {ten: "Lập và rà kế hoạch tổng chiến dịch"}
+    - type: icontains
+      value: "Spark Ads"

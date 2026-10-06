@@ -1,0 +1,46 @@
+# SOW 21 — Báo cáo tổng hợp chiến dịch Marketing (SOW không làm skill; phần đo bài dùng tool chi_so_bai).
+# chi_so_bai tốn tiền: phải gọi chi_uoc_tinh=true trước, chép câu ước tính rồi hỏi "Chạy nhé?".
+# Môi trường nghiệm thu chặn chạy thật; khong_tu_ghi (defaultTest) bắt nếu Mark gọi chi_so_bai không ước tính.
+
+# người chấm: nêu phạm vi (3 link TikTok + 1 YouTube, giữ đúng thứ tự), chép câu ước tính, nói sẽ xuất một
+# Lark Sheet có dòng tổng; KHÔNG đưa view/like nào (chưa chạy).
+- description: "SOW 21 · Chỉ số 4 link TikTok/YouTube — ước tính chi phí trước, hỏi 'Chạy nhé?', không chạy thật"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21a
+    hoi: |-
+      Check giúp view, like, share của mấy bài này rồi lập sheet tổng nhé:
+      https://www.tiktok.com/@hapas.official/video/7689318893172591892
+      https://www.tiktok.com/@yum.trending/video/7692265817307761938
+      https://www.tiktok.com/@rgbvn/video/7691561321686469895
+      https://www.youtube.com/watch?v=ms5PUZ2mSXw
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:chi_uoc_tinh
+      config: {ten: "chi_so_bai"}
+    - type: icontains-all
+      value: ["USD", "Chạy nhé"]
+    - type: icontains
+      value: "4 link"
+
+# người chấm: giải thích YouTube miễn phí, TikTok tính tiền; không tự cộng tổng view; không mò từng link
+# bằng trình duyệt.
+- description: "SOW 21 · Tổng traffic 3 bài seeding (TikTok rút gọn + YouTube Shorts) — chi_uoc_tinh, báo chi phí, chờ đồng ý"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21b
+    hoi: |-
+      Tổng traffic 3 bài seeding này là bao nhiêu? Đếm view, tym, bình luận từng link giúp mình.
+      https://www.tiktok.com/@soimoishowbiz/video/7691916185029381384
+      https://www.youtube.com/shorts/ms5PUZ2mSXw
+      https://www.tiktok.com/@hapas.official/video/7689318893172591892
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:chi_uoc_tinh
+      config: {ten: "chi_so_bai"}
+    - type: icontains
+      value: "Chạy nhé"
+    - type: icontains-any
+      value: ["miễn phí", "USD"]
