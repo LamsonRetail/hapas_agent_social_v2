@@ -134,7 +134,7 @@ Thấy link Sheet khảo sát kèm việc tổng hợp thì làm theo kỹ năng
 - Câu sàng lọc (vd tuổi, mục đích mua) KHÔNG thành gạch thuộc tính; chỉ đưa vào dòng "Nhóm
   mẫu còn thiếu"
 - Sheet có nhiều tab (vd store 52 + mall tỉnh 16): nêu cỡ mẫu TỪNG tab và nói tab nào đã
-  dùng. Mỗi thuộc tính trong chân dung kèm số/n
+  dùng. Bảng ngắn: mỗi thuộc tính kèm số/n; bảng dài: theo dòng trên, không thêm số tự đếm
 - Luôn có dòng "Nhóm mẫu còn thiếu": nêu điều kiện sàng lọc của phiếu (vd phiếu chỉ hỏi nam
   mua quà cho nữ thì thiếu khách nữ tự mua, khách online, ngoài 22–40). Thuộc tính do cách
   chọn mẫu mà ra thì KHÔNG đưa vào chân dung như đặc điểm khách

@@ -184,14 +184,30 @@ def test_bo_loc_sdt_email_bat_dung():
 
 
 _TRO_TOI = re.compile(r'(?:→|dùng kỹ năng|Dùng kỹ năng|nạp)\s*"([^"]{6,80})"')
+#: Cách viết không ngoặc kép: "dùng kỹ năng Lập và rà lịch nội dung" (tên có thể xuống dòng
+#: thụt lề). Không bắt sau "→" trơn vì mũi tên còn dùng cho rẽ nhánh/quy trình.
+_TRO_TOI_TRON = re.compile(r'(?:dùng kỹ năng|Dùng kỹ năng)\s+(?!")((?:[^.;,()"\n:]|\n[ \t]{2,}(?![-\d]))+)')
 
 
 @pytest.mark.parametrize("f", sorted(_TAT_CA))
 def test_ten_ky_nang_duoc_tro_toi_co_that(f):
     """Kỹ năng trỏ sang kỹ năng khác bằng TÊN: tên sai thì model nạp hụt hoặc nhắc một
-    khả năng không có thật. Tên trong ngoặc kép sau "→"/"dùng kỹ năng" phải là tiêu đề thật."""
+    khả năng không có thật. Tên sau "→"/"dùng kỹ năng" (có hay không ngoặc kép) phải là
+    tiêu đề thật."""
     ten_that = {p.read_text(encoding="utf-8").splitlines()[0].lstrip("# ").strip()
                 for p in (_GOC / "skills").glob("*.md")}
     than = (_GOC / "skills" / f).read_text(encoding="utf-8")
     sai = {re.sub(r"\s+", " ", m.group(1)).strip() for m in _TRO_TOI.finditer(than)} - ten_that
+    for m in _TRO_TOI_TRON.finditer(than):
+        x = re.sub(r"\s+", " ", m.group(1)).strip()
+        if x[:1].isupper() and not any(x.startswith(t) for t in ten_that):
+            sai.add(x)
     assert not sai, f"{f} trỏ tới kỹ năng không tồn tại: {sorted(sai)}"
+
+
+def test_bo_bat_ten_ky_nang_bat_dung():
+    """Chặn regex câm cho cả hai cách viết."""
+    sai_ngoac = 'hỏi trễ → "Theo dõi tiến\n  độ dự án"'
+    assert _TRO_TOI.search(sai_ngoac)
+    m = _TRO_TOI_TRON.search("(dùng kỹ năng Duyệt nội dung\n  KOL không có)")
+    assert m and re.sub(r"\s+", " ", m.group(1)).strip() == "Duyệt nội dung KOL không có"
