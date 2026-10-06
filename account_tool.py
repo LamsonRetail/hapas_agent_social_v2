@@ -250,6 +250,8 @@ SCHEMA = {
         "KHÁC `social_listen`: tool kia tìm bài NGƯỜI KHÁC nói về một từ khoá; tool này đọc "
         "bài của CHÍNH tài khoản đó. Hỏi 'mọi người nói gì về HAPAS' thì dùng social_listen.\n"
         "Muốn biết đối thủ đang CHẠY QUẢNG CÁO gì thì gọi thêm `fb_ads_library`.\n"
+        "Có LINK BÀI cụ thể (…/video/…, vt.tiktok.com, reel, share/…) cần đếm view/like/"
+        "share từng bài → dùng `chi_so_bai`, KHÔNG dùng tool này (nó đọc bài MỚI NHẤT).\n"
         "`tai_khoan`: dán link hồ sơ (tiktok.com/@…, facebook.com/…, instagram.com/…) hoặc "
         "@tên. Chưa biết link thì tra trang web chính thức của brand bằng `web_scrape` — "
         "thường có link mạng xã hội ở chân trang — đừng đoán tên tài khoản.\n"

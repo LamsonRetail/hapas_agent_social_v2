@@ -59,6 +59,7 @@ import account_tool  # noqa: E402,F401  (registers `soi_tai_khoan`: soi tài kho
 import shopee_tool  # noqa: E402,F401  (registers `soi_san`: giá và sản phẩm trên Shopee)
 import tiktok_ads_tool  # noqa: E402,F401  (registers `tiktok_top_ads`: top ads TikTok -> Lark Sheet)
 import kenh_nha_tool  # noqa: E402,F401  (registers `binh_luan_kenh_nha`: bình luận kênh HAPAS qua API Meta)
+import chi_so_bai_tool  # noqa: E402,F401  (registers `chi_so_bai`: view/like/share theo danh sách link bài)
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
@@ -142,8 +143,9 @@ _TOOLING_NOTE = "\n".join(
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
         # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).
         "- TOOL TỐN TIỀN HOẶC GHI SHEET (`social_listen`, `social_deep_dive`, `soi_tai_khoan`, "
-        "`soi_san`, `tiktok_top_ads`, `binh_luan_kenh_nha` — hai tool cuối gọi `chi_uoc_tinh`="
-        "true trước, miễn phí; `binh_luan_kenh_nha` luôn 0 USD nhưng vẫn hỏi vì ghi Sheet): "
+        "`soi_san`, `tiktok_top_ads`, `binh_luan_kenh_nha`, `chi_so_bai` — ba tool cuối gọi "
+        "`chi_uoc_tinh`=true trước, miễn phí; `binh_luan_kenh_nha` luôn 0 USD nhưng vẫn hỏi vì "
+        "ghi Sheet): "
         "TRƯỚC khi gọi, tóm tắt phạm vi (từ khoá hoặc link, nền tảng, khoảng ngày, số bài) rồi "
         "KẾT THÚC bằng câu hỏi \"Chạy nhé?\" và DỪNG, chờ người dùng trả lời. Chỉ gọi ngay khi: "
         "người dùng vừa đồng ý câu chốt đó (ok, chạy đi, làm luôn…); người dùng nói rõ không "
@@ -187,6 +189,13 @@ _TOOLING_NOTE = "\n".join(
         "bình luận và trả lời lồng nhau. Bài của đối thủ/người khác (hoặc TikTok/YouTube) mới "
         "dùng `social_deep_dive` (cào, chỉ một phần, tốn tiền). Kênh báo 'chưa nối' hoặc 'token "
         "hết hạn' thì nói thẳng: chủ agent cần cấp lại token cho kênh đó.",
+        # 06/10: team dán 33–70 link, xin "check view từng link, cộng tổng, ra sheet" — Mark
+        # mò bằng trình duyệt (TikTok chặn sau ~16 video) và soi_tai_khoan (lệch bài).
+        "- CHỈ SỐ THEO LINK BÀI ('check view/traffic các link này', 'đếm view, tym, lưu, share "
+        "từng link rồi lập sheet', 'tổng view các bài KOC đã lên'): dùng `chi_so_bai` — giữ "
+        "đúng thứ tự link, ra MỘT Lark Sheet, tổng do code cộng (chép `cau_tong`, KHÔNG tự "
+        "cộng). KHÔNG dùng `soi_tai_khoan` (chỉ đọc bài mới nhất của hồ sơ) hay mò từng link "
+        "bằng trình duyệt.",
         # 01/10: chủ agent chốt — bài của brand ở nước khác (HAPAS THAILAND) phải giữ, và
         # trần bóc bình luận trên console là trần cứng.
         "- `social_listen`: luôn điền `boi_canh` (thiếu thì không có bước AI đọc từng bài). "
@@ -226,6 +235,8 @@ _TOOL_CAN_XET = {
                 "Shop để đọc đánh giá của khách, rồi xuất Lark Sheet", {}),
     "binh_luan_kenh_nha": ("đọc đủ bình luận trên kênh Threads/Instagram/Facebook của "
                            "chính HAPAS (API Meta, miễn phí) rồi xuất Lark Sheet", {}),
+    "chi_so_bai": ("đếm view, like, bình luận, share, lưu của danh sách link bài "
+                   "TikTok/YouTube/Instagram/Facebook/Threads rồi xuất Lark Sheet", {}),
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
     "tiktok_top_ads": ("xem top quảng cáo TikTok theo từ khoá hoặc ngành (TikTok Creative "
                        "Center) rồi xuất Lark Sheet", {}),
