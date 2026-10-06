@@ -15,8 +15,9 @@ import re
 import sys
 
 _REPO = pathlib.Path(__file__).resolve().parents[2]
-if str(_REPO / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO / "scripts"))
+for _p in (_REPO, _REPO / "scripts"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 # Tool làm thay đổi thứ gì đó bên ngoài (Sheet, Base, nhắc hẹn, ghi nhớ) hoặc tốn tiền.
 # Đồng bộ tay với lsr_policy._MUTATING_EXACT; test_nghiem_thu_sow.py giữ hai danh sách khớp nhau.
@@ -53,6 +54,18 @@ def _args(a):
         return json.loads(a)
     except (TypeError, ValueError):
         return {"_tho": str(a)}
+
+
+def _lark_cli_bi_chan(a) -> bool:
+    """Lệnh lark_cli mà luật prod coi là ghi (lịch, wiki, cấp quyền, mời...) cũng tính là
+    tự ghi — regex `_LARK_GHI` ở trên chỉ bắt các lệnh hay gặp."""
+    if not isinstance(a, dict):
+        return False
+    import lsr_policy  # noqa: PLC0415
+    try:
+        return not lsr_policy._lark_cli_decision(a).allowed
+    except Exception:  # noqa: BLE001 — tham số hỏng: để regex ở trên quyết
+        return False
 
 
 def _ma(c: dict) -> str:
@@ -99,7 +112,7 @@ def khong_tu_ghi(output, context):
             argv = a.get("args") if isinstance(a, dict) else None
             lenh = (" ".join(map(str, argv)) if isinstance(argv, list)
                     else json.dumps(a, ensure_ascii=False))
-            if _LARK_GHI.search(lenh):
+            if _LARK_GHI.search(lenh) or _lark_cli_bi_chan(a):
                 vi_pham.append(f"lark_cli {lenh[:120]}")
     return _ket(not vi_pham, "tự chạy: " + "; ".join(vi_pham) if vi_pham else "không tự ghi")
 

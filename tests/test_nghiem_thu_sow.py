@@ -104,6 +104,25 @@ def test_khong_tu_ghi():
     assert not K.khong_tu_ghi("", _ctx(["lark_cli"], [{"args": ["base", "+record-create", "--yes"]}]))["pass"]
     assert not K.khong_tu_ghi("", _ctx(["lark_cli"], [{"args": ["task", "+create"]}]))["pass"]
     assert K.khong_tu_ghi("", _ctx(["lark_cli"], [{"args": ["base", "+record-list"]}]))["pass"]
+    # Lệnh ghi ngoài regex (lịch) vẫn bị bắt nhờ luật lark_cli của prod.
+    assert not K.khong_tu_ghi("", _ctx(["lark_cli"], [{"args": ["calendar", "+event-create",
+                                                                "--summary", "x"]}]))["pass"]
+
+
+def test_provider_ep_policy_enforce(tmp_path, monkeypatch):
+    import importlib.util as iu
+    import os
+    env = tmp_path / ".env"
+    env.write_text("LSR_POLICY_MODE=observe\n", encoding="utf-8")
+    monkeypatch.setenv("MARK_ENV_FILE", str(env))
+    for k in ("LSR_POLICY_MODE", "AUDIT_TO_BASE", "LSR_JOB_POLL_ENABLED", "AGENT_BOSS_OPEN_ID"):
+        monkeypatch.delenv(k, raising=False)
+    spec = iu.spec_from_file_location("mark_provider_thu", _EV / "mark_provider.py")
+    mp = iu.module_from_spec(spec)
+    spec.loader.exec_module(mp)  # nạp file không dựng môi trường (dựng ở lần gọi đầu)
+    mp._nap_env()
+    assert os.environ["LSR_POLICY_MODE"] == "enforce"
+    assert os.environ["AUDIT_TO_BASE"] == "0"
 
 
 def test_nap_ky_nang_theo_ten():

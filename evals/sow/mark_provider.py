@@ -43,6 +43,9 @@ def _nap_env() -> None:
             os.environ[k.strip()] = v.strip().strip('"').strip("'")
     os.environ["AUDIT_TO_BASE"] = "0"
     os.environ["LSR_JOB_POLL_ENABLED"] = "0"
+    # observe/off thì guard vẫn gọi handler thật dù decide() từ chối — bản vá chặn ghi bên
+    # dưới mất tác dụng. .env máy dev có thể còn sót chế độ đó, nên ép enforce.
+    os.environ["LSR_POLICY_MODE"] = "enforce"
     if not os.environ.get("AGENT_BOSS_OPEN_ID", "").strip():
         os.environ["AGENT_BOSS_OPEN_ID"] = CHU
 
