@@ -62,6 +62,8 @@ _MUTATING_EXACT = {
     "tiktok_top_ads": "write_data",      # top quảng cáo TikTok (Apify) → tạo Lark Sheet
     # Bình luận trên kênh CỦA HAPAS qua API Meta (miễn phí) → tạo Lark Sheet.
     "binh_luan_kenh_nha": "write_data",
+    # Chỉ số view/like/share theo danh sách link bài (Apify + YouTube API) → tạo Lark Sheet.
+    "chi_so_bai": "write_data",
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
     # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
@@ -216,7 +218,7 @@ def quyen_phat() -> set[str]:
 _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
-    "tiktok_top_ads", "binh_luan_kenh_nha",
+    "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai",
 })
 
 #: Tool có công tắc riêng nhưng RA ĐỜI SAU công tắc cha → khi `capabilities` chưa có
@@ -236,7 +238,10 @@ _TOOL_CO_CONG_TAC = frozenset({
 #: `binh_luan_kenh_nha` (04/10/2026, đọc bình luận kênh HAPAS qua API Meta) đi đúng
 #: đường này từ ngày đầu: console chưa có công tắc của nó thì mượn "Quét mạng xã hội";
 #: platform thêm dòng `theo: "social_listen"` thì công tắc riêng ăn, runtime không sửa.
-_CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen"}
+#: `chi_so_bai` (06/10/2026, chỉ số theo danh sách link bài) cũng vậy: cào bằng Apify
+#: như Quét MXH, dùng chung trần/công tắc từng nền tảng của nó.
+_CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen",
+                 "chi_so_bai": "social_listen"}
 
 #: Trả về khi agent chưa khai `capabilities` → không áp công tắc nào.
 KHONG_THU_HEP = object()

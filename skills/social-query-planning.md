@@ -7,6 +7,7 @@
 | Mọi người NÓI gì về một brand, chủ đề, từ khoá | `social_listen` |
 | Trend chung đang nổi, không có brand | `social_listen` với `che_do`="trend" |
 | Một TÀI KHOẢN cụ thể đăng gì — đối thủ, KOC định book | `soi_tai_khoan` |
+| View, like, bình luận, share, lưu của DANH SÁCH LINK BÀI cụ thể (traffic bài KOC/seeding, cộng tổng, ra sheet) | `chi_so_bai` (gọi `chi_uoc_tinh` trước) |
 | Giá, sản phẩm đang bán trên sàn | `soi_san` với `tu_khoa` (chỉ Shopee) |
 | Soi MỘT sản phẩm cụ thể — người dùng dán link Shopee hoặc TikTok Shop | `soi_san` với `link` |
 | Đối thủ đang CHẠY QUẢNG CÁO gì trên Facebook / Instagram / Threads | `fb_ads_library` |
