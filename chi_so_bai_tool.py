@@ -28,7 +28,8 @@ Nguồn — đo thật 06/10/2026 trên chính các link của lượt hỏi đ�
   • Threads (futurizerush~threads-replies-scraper): dòng `original_post` có view, like,
     trả lời, repost, share. Actor tính 0,02 USD khởi động + 0,0025/dòng và bắt tối thiểu
     10 trả lời → ~0,05 USD/link. Link share/… không chứa mã bài nên MỖI LINK MỘT LƯỢT
-    (không ghép được kết quả về link nếu gửi chung).
+    (không ghép được kết quả về link nếu gửi chung); trần USD vẫn tính cho CẢ lô Threads
+    của một lượt gọi (trần 0,5 USD → 9 link, phần còn lại vào `con_lai`).
 
 Trần: dùng trần RIÊNG từng nền tảng của console (Năng lực → Quét mạng xã hội:
 `tran_bai_<p>` link/lượt gọi, `tran_usd_<p>` USD/lượt chạy actor, `bat_<p>` = 0 là tắt),
@@ -361,10 +362,11 @@ def _ke_hoach(dong: list[dict]) -> tuple[dict, list, set, dict]:
             tat.add(p)
             continue
         n = tran_bai
-        if p == "threads":
-            n = tran_bai if tran_usd >= _GIA[p] else 0       # mỗi link một lượt actor
-        elif _GIA[p] > 0:
-            # Một lượt actor phải gọn trong trần USD (chừa 10% cho phí lệch giá).
+        if _GIA[p] > 0:
+            # Cả lô của nền tảng trong MỘT lượt gọi phải gọn trong trần USD (chừa 10% cho
+            # phí lệch giá). Threads chạy mỗi link một run nhưng vẫn tính CẢ lô vào trần:
+            # trần mỗi run (≥ 0,1 USD sau khi kẹp) luôn lớn hơn giá một link, tính theo run
+            # thì 300 link Threads đốt ~14 USD trong một câu (review PR #20).
             n = min(tran_bai, int(tran_usd / (_GIA[p] * 1.1)))
         if n < 1:
             tran_thap[p] = tran_usd
@@ -423,9 +425,19 @@ def _handle(args: dict, **_kwargs) -> str:
     loi: dict[str, str] = {}
     # KHÔNG `with ThreadPoolExecutor` (cùng lý do account_tool): một hạn chung cho mọi nguồn.
     han = t0 + A._TOOL_DEADLINE
+    so_run: list = []
+
+    def _lay(p: str, v: list[str]) -> dict:
+        # Hạn chót + sổ run của apify_tool cho MỌI lượt actor của tool này (cả các run
+        # Threads ở luồng con — copy_context kế thừa): tới hạn thì `_run_actor` HUỶ run trên
+        # Apify và trả phần đã có, không để run chạy tiếp tính tiền sau khi tool đã trả lời.
+        A._SO_RUN.set(so_run)
+        A._HAN_CHOT.set(han - A._DU_PHONG_HUY)
+        return _LAY[p](v)
+
     ex = ThreadPoolExecutor(max_workers=max(1, len(chay)))
     try:
-        futs = {p: ex.submit(contextvars.copy_context().run, _LAY[p], v)
+        futs = {p: ex.submit(contextvars.copy_context().run, _lay, p, v)
                 for p, v in chay.items()}
         for p, f in futs.items():
             try:
@@ -507,7 +519,7 @@ def _handle(args: dict, **_kwargs) -> str:
             sender = memory_store.get_current_sender()
             granted = A._grant(tok, sender) if sender else False
         except Exception as e:  # noqa: BLE001
-            loi["sheet"] = f"{type(e).__name__}: {e}"[:250]
+            loi["sheet"] = A._che_token(f"{type(e).__name__}: {e}")[:250]
 
     if not ok and loi:
         return tool_error("Không đếm được link nào: " + "; ".join(

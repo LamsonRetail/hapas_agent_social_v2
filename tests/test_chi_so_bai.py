@@ -170,6 +170,27 @@ def test_tran_threads_thap_hon_gia_mot_link(gia):
     assert any("thấp hơn giá một link" in x for x in kq["khong_lay_duoc"])
 
 
+def test_tran_usd_threads_tinh_ca_lo_khong_tinh_tung_run(gia):
+    # Review PR #20: trần mỗi run ≥ 0,1 USD luôn > giá một link Threads, nên phải tính cả lô.
+    links = [f"https://www.threads.com/@a/post/Ma{i}" for i in range(30)]
+    kq = _chay(link_bai=links, chi_uoc_tinh=True)
+    assert kq["theo_nen_tang"] == {"threads": 9}                    # 0,5 / (0,0475 × 1,1)
+    assert kq["vuot_tran_console"] == links[9:]
+
+
+def test_moi_luot_actor_co_han_chot_chung(gia, monkeypatch):
+    thay = []
+    goc = A._call
+
+    def call(*a, **k):
+        thay.append((A._HAN_CHOT.get(), A._SO_RUN.get() is not None))
+        return goc(*a, **k)
+
+    monkeypatch.setattr(A, "_call", call)
+    _chay(link_bai=[TH, TT1])
+    assert len(thay) == 2 and all(h is not None and co_so for h, co_so in thay)
+
+
 # ───────────────────────────── chạy thật (giả nguồn) ─────────────────────────────
 def test_chay_du_5_nen_tang_dung_thu_tu_va_tong_do_code_cong(gia):
     links = [YT, TT_NGAN, FB, TT1, IG, TH, TT_QUERY, TT1, "https://www.tiktok.com/@rgbvn"]
