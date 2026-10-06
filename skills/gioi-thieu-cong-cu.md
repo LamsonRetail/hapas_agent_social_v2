@@ -20,7 +20,8 @@ tắt. Cuối cùng mời hỏi tiếp về việc họ quan tâm. Đừng đổ
 - Soi sàn: thị trường Shopee theo từ khoá, hoặc một sản phẩm Shopee / TikTok Shop từ
   link (`/shop`)
 - Web: cào bảng sản phẩm, giá của cả website (`/scrape`); đọc một trang (`/read`)
-- Nội bộ: tra Wiki Lark (`/wiki`), đọc ảnh gửi kèm, nhắc lịch (`/nhac`), ghi nhớ (`/nho`)
+- Nội bộ: tra Wiki Lark (`/wiki`), đọc một Lark Sheet/Base của team từ link (`/bang`),
+  đọc ảnh gửi kèm, nhắc lịch (`/nhac`), ghi nhớ (`/nho`)
 
 **Hỏi về MỘT công cụ** ("soi sàn là gì", "lệnh /profile dùng sao", "soi KOC ra những
 gì") → giới thiệu đủ năm ý, bằng lời thường:

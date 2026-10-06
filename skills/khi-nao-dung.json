@@ -15,7 +15,7 @@
   ],
   "sk_7c28d5f2bb": {
     "ten": "Báo cáo dựa trên evidence",
-    "khi_nao_dung": "Khi phải đưa ra kết luận, nhận định hay con số cho người khác đọc — báo cáo, tổng hợp, so sánh, đề xuất. Không cần cho hỏi đáp ngắn hay trò chuyện thường."
+    "khi_nao_dung": "Khi phải đưa ra kết luận, nhận định hay con số cho người khác đọc — báo cáo, tổng hợp, so sánh, đề xuất. Không cần cho hỏi đáp ngắn hay trò chuyện thường. Rà lịch/khảo sát/ngân sách: kỹ năng riêng."
   },
   "sk_9d02c5de94": {
     "ten": "Deep-dive bình luận",
@@ -39,7 +39,7 @@
   },
   "sk_f2de0ac573": {
     "ten": "Lập kế hoạch chiến dịch quảng cáo",
-    "khi_nao_dung": "Khi được nhờ lên kế hoạch, brief hay đề xuất setup cho một chiến dịch quảng cáo, đợt booking KOL/KOC hoặc ra mắt bộ sưu tập. Không dùng khi chỉ cần lên truy vấn trước một lần quét social."
+    "khi_nao_dung": "Khi được nhờ lên kế hoạch, brief, setup chiến dịch quảng cáo, đợt booking KOL/KOC, ra mắt BST. Kế hoạch tổng nhiều mảng hay chỉ lên truy vấn quét thì dùng kỹ năng khác."
   },
   "sk_ac6ecb19f4": {
     "ten": "Phân tích định vị đối thủ",
@@ -47,7 +47,7 @@
   },
   "sk_e9b50ab8b9": {
     "ten": "Audit hiệu quả quảng cáo",
-    "khi_nao_dung": "Khi người dùng đưa số liệu quảng cáo của CHÍNH MÌNH (file, Sheet, số dán vào) và hỏi có hiệu quả không, nên tăng, giảm hay tắt gì. Không dùng để tra quảng cáo của đối thủ."
+    "khi_nao_dung": "Khi có số liệu ads của CHÍNH HAPAS (Sheet, ảnh, số dán) hỏi hiệu quả, check-in pillar, bản A hay B thắng, đổi audience/budget một camp, nhật ký tối ưu, tăng/giảm/tắt gì. Ads đối thủ: kỹ năng khác."
   },
   "sk_4c167bc456": {
     "ten": "Giới thiệu công cụ của Mark",
@@ -55,6 +55,42 @@
   },
   "sk_f4cc01322b": {
     "ten": "Duyệt nội dung KOL/KOC và quảng cáo",
-    "khi_nao_dung": "Khi được nhờ xem lại kịch bản, caption, bài đăng của KOL/KOC hay nội dung quảng cáo trước khi đăng: giọng thương hiệu, câu cam kết quá đà, so sánh đối thủ, thiếu gắn nhãn quảng cáo."
+    "khi_nao_dung": "Khi được nhờ soát kịch bản, caption, bài KOL/KOC hay nội dung quảng cáo trước khi đăng: giọng thương hiệu, cam kết quá đà, so sánh đối thủ, thiếu nhãn QC. Bài HAPAS tự viết: kỹ năng viết content."
+  },
+  "sk_a3caf424ab": {
+    "ten": "Nghiên cứu khách hàng và hành vi mua",
+    "khi_nao_dung": "Khi có link Sheet khảo sát khách (kể cả /bang), sắp dán ghi chép phỏng vấn, hay nhờ soạn bảng hỏi, tổng hợp lý do mua/chưa mua, rào cản, chân dung khách. Bình luận MXH thì dùng deep-dive."
+  },
+  "sk_329f5da9bd": {
+    "ten": "Lập và rà kế hoạch tổng chiến dịch",
+    "khi_nao_dung": "Khi được nhờ lên master plan/kế hoạch tổng cho chiến dịch nhiều mảng (online, cửa hàng, booking, sản xuất) hoặc rà kế hoạch có sẵn. Chỉ ads, Spark Ads, booking KOL/KOC: kỹ năng chiến dịch quảng cáo."
+  },
+  "sk_bc5e7a954f": {
+    "ten": "Họp dự án và bàn giao liên phòng ban",
+    "khi_nao_dung": "Khi được nhờ chuẩn bị họp với Booking/Media/Kinh doanh/Bán lẻ, viết biên bản, hoặc biến ghi chép họp dán vào thành quyết định, việc, người phụ trách, hạn, yêu cầu bàn giao và rà mâu thuẫn"
+  },
+  "sk_da70ef929a": {
+    "ten": "Theo dõi ngân sách chiến dịch",
+    "khi_nao_dung": "Khi được nhờ lập mẫu, rà, đối chiếu ngân sách CẢ chiến dịch (kể cả /bang Sheet ngân sách): tổng dự toán, thực tế, chênh lệch, cam kết, trùng/sót, báo giá. Một camp ads, nhật ký tối ưu: Audit."
+  },
+  "sk_8c0639b376": {
+    "ten": "Lập và rà lịch nội dung",
+    "khi_nao_dung": "Khi được nhờ lên lịch/content plan FB, IG, Threads, web, chia pillar, biến 1 thông điệp thành nhiều bài, rà lịch (link, /bang, thiếu tư liệu). Lịch TikTok từ trend/ý đã chấm: kỹ năng xu hướng TikTok."
+  },
+  "sk_927fc7b8b9": {
+    "ten": "Viết content bài đăng HAPAS",
+    "khi_nao_dung": "Khi được nhờ viết, sửa caption, bài FB/IG/TikTok, blog/website, mở đầu, CTA, chữ trên ảnh, bài nhiều ảnh cho HAPAS. 1 thông điệp ra nhiều bài: kỹ năng lịch. Soát KOL/KOC, QC: kỹ năng duyệt nội dung."
+  },
+  "sk_41f8d3f73e": {
+    "ten": "Chọn xu hướng và lên chuỗi TikTok",
+    "khi_nao_dung": "Khi đã có trend, video TikTok hoặc ý đã chấm hôm trước và cần chấm điểm, chọn, lên chuỗi hay lịch TikTok từ đó, hoặc rà chuỗi đã đăng. Tìm trend mới (tốn tiền): kỹ năng truy vấn social."
+  },
+  "sk_8acf68e9c2": {
+    "ten": "Soạn brief order media và design",
+    "khi_nao_dung": "Khi được nhờ viết brief/order chụp ảnh, quay video, thiết kế ấn phẩm, lập shot list, hoặc nghiệm thu ảnh/video bàn giao so với brief."
+  },
+  "sk_75633e3703": {
+    "ten": "Chuẩn bị nội dung cập nhật website",
+    "khi_nao_dung": "Khi được nhờ soạn mô tả sản phẩm, chữ banner, tên ảnh/alt text, nhật ký thay đổi trang hapas.vn, hoặc rà/cào giá hapas.vn so bảng giá. Bài blog/bài viết website: kỹ năng viết content."
   }
 }
