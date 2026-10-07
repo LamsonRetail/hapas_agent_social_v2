@@ -39,6 +39,10 @@ _SAFE_EXACT = {
     # Đếm/tính %/cộng trên một Base/Sheet bằng code (dem_bang_tool.py). Chỉ đọc, qua ĐÚNG
     # cửa quyền của `doc_bang` (`bang_tool.mo_nguon`). Có công tắc bên dưới (lùi về doc_bang).
     "dem_bang",
+    # Máy tính chính xác (tinh_tool.py): thuần tính toán trên chữ model đưa — không đọc,
+    # không ghi, không gọi mạng. CỐ Ý không đưa vào `_TOOL_CO_CONG_TAC`: tắt nó thì Mark
+    # quay về tự tính tay, không đổi lại được an toàn nào.
+    "tinh",
     # Tra lại kho của CHÍNH agent bằng nhiều bộ từ khoá (kho_tool.py). Không công tắc —
     # cùng lý do với `dung_ky_nang`: tắt đi là quay về lỗi "kho có mà không thấy".
     "tra_kho",

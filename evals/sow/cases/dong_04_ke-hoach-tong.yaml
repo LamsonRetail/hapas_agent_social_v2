@@ -84,3 +84,35 @@
       config: {ten: "Lập và rà kế hoạch tổng chiến dịch"}
     - type: icontains
       value: "Spark Ads"
+
+# 07/10/2026 — kiểm ngân sách master plan bằng `tinh` (bỏ luật bắt model cộng dồn tay "50+35=85; …").
+# Đáp án tính độc lập: 60 + 45 + 80 + 55 + 40 + 35 = 315 triệu; 315 − 300 = 15 triệu VƯỢT trần 300.
+# Dự phòng 30 triệu đã nằm trong 6 dòng (dòng cuối) nên không cộng thêm.
+# người chấm: phép cộng chép từ cau_tinh; chỉ ra vượt 15 triệu và đề xuất cắt hạng mục nào cho đủ trần.
+- description: "SOW 4 · Rà ngân sách master plan 6 hạng mục vs trần 300 triệu — tinh cộng ra 315, vượt 15 triệu"
+  metadata: {sow_dong: 4, hang_muc: "Đóng góp ý tưởng và xây dựng kế hoạch chiến dịch (master plan)"}
+  vars:
+    ma: d04e
+    hoi: |-
+      Kiểm giúp ngân sách master plan 20/11, trần 300 triệu: Booking KOL 60tr, KOC 45tr, Ads 80tr, Sản xuất content 55tr, Event cửa hàng 40tr, dự phòng 35tr. Có vượt trần không?
+    luot_truoc: []
+  assert:
+    # "Rà ngân sách master plan" hợp cả kỹ năng kế hoạch tổng lẫn theo dõi ngân sách; điều chấm là
+    # số do `tinh` tính, không phải kỹ năng nào được nạp.
+    - type: assert-set
+      threshold: 0.5
+      assert:
+        - type: python
+          value: file://kiem.py:nap_ky_nang
+          config: {ten: "Lập và rà kế hoạch tổng chiến dịch"}
+        - type: python
+          value: file://kiem.py:nap_ky_nang
+          config: {ten: "Theo dõi ngân sách chiến dịch"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tinh"}
+    - type: icontains
+      value: "315"
+    - type: icontains-any
+      value: ["15 triệu", "15tr", "15.000.000", "vượt 15"]
+

@@ -66,4 +66,6 @@ Thêm vào file `cases/` đúng hạng mục, giữ dạng:
 
 Hàm chấm hành vi có sẵn trong `kiem.py`: `nap_ky_nang`, `khong_nap_ky_nang`, `goi_tool`,
 `chi_uoc_tinh`, `dem_it_nhat`, `khong_tu_ghi`, `khong_lo_thong_tin`.
+`goi_tool` nhận thêm `co_tham_so` (vd `{ten: dem_bang, co_tham_so: du_lieu}`: phải đếm trên
+chữ người dùng dán, không phải trên Sheet).
 `tests/test_nghiem_thu_sow.py` kiểm các file ca hợp lệ (đọc được, tên kỹ năng có thật).

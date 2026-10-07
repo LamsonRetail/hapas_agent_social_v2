@@ -61,9 +61,39 @@
       value: ["50.000", "50k", "50 nghìn", "50,000"]
     - type: icontains-any
       value: ["42.857", "42.86", "42,86", "42.9", "42,9", "43.000", "43k", "42.800", "42,857"]
+    # 07/10/2026: CPC do `tinh` tính (không "tự tính, kiểm lại").
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tinh"}
     - type: icontains
       value: "7 ngày"
     - type: icontains-any
       value: ["15 kết quả", "15 click", "15 lượt"]
     - type: icontains-any
       value: ["1.000 hiển thị", "1000 hiển thị", "1.000 lượt hiển thị", "1.000 impression"]
+
+# 07/10/2026 — MTD theo nhãn "(21 ngày chạy)", check-in ngày thứ 6, tính bằng `tinh` (không tự chia).
+# Đáp án tính độc lập (Python Decimal): MTD = chi ÷ (ngân sách × 6 ÷ 21):
+#   EVENT 15.600.000 ÷ (42.000.000 × 6/21 = 12.000.000) = 130,0% → chi nhanh (>110%);
+#   SBD 5.400.000 ÷ (30.000.000 × 6/21 ≈ 8.571.429) = 63,0% → chi chậm (<80%);
+#   TVC 9.000.000 ÷ (35.000.000 × 6/21 = 10.000.000) = 90,0% → đúng tiến độ.
+# người chấm: ngưỡng ghi là ĐỀ XUẤT; đề xuất bằng VND tuyệt đối, chờ người phụ trách kênh xác nhận.
+- description: "SOW 16 · MTD 3 pillar (21 ngày chạy, check-in ngày 6) — tinh tính 130% / 63% / 90%"
+  metadata: {sow_dong: 16, hang_muc: "Theo dõi và tối ưu quảng cáo"}
+  vars:
+    ma: d16d
+    hoi: |-
+      Check-in ngày thứ 6 của đợt chạy 21 ngày trên TikTok: pillar EVENT ngân sách 42 triệu đã chi 15,6 triệu; SBD ngân sách 30 triệu đã chi 5,4 triệu; TVC ngân sách 35 triệu đã chi 9 triệu. Pillar nào chi nhanh hay chậm?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Audit hiệu quả quảng cáo"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tinh"}
+    - type: icontains-all
+      value: ["130", "63", "90"]
+    - type: icontains-all
+      value: ["EVENT", "SBD", "xác nhận"]
+

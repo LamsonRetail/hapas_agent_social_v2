@@ -63,7 +63,8 @@ import chi_so_bai_tool  # noqa: E402,F401  (registers `chi_so_bai`: view/like/sh
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
-import dem_bang_tool  # noqa: E402,F401  (registers `dem_bang`: code đếm/tính %/cộng trên Base/Sheet)
+import dem_bang_tool  # noqa: E402,F401  (registers `dem_bang`: code đếm/tính %/cộng trên Base/Sheet hoặc bảng dán)
+import tinh_tool  # noqa: E402,F401  (registers `tinh`: máy tính chính xác — Mark không tự tính tay)
 import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_viec_base`: việc đã duyệt -> Base checklist)
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho bài học chiến dịch, tắt khi thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY)
@@ -142,8 +143,8 @@ _TOOLING_NOTE = "\n".join(
         "`vision_analyze` với ĐÚNG đường dẫn đó rồi trả lời theo nội dung ảnh. Không có dòng "
         "đó nghĩa là không có ảnh — đừng đoán nội dung ảnh.",
         "- KHÔNG có quyền đọc/ghi file trên máy, chạy code Python hay giao việc cho subagent — "
-        "đừng thử gọi. Số liệu trên Base/Sheet thì dùng `dem_bang` (dòng dưới); số người dùng "
-        "dán vào chat thì tự tính và ghi rõ phép tính.",
+        "đừng thử gọi. Cần SỐ thì dùng `dem_bang` (bảng trên Base/Sheet, hoặc bảng/danh sách "
+        "người dùng dán vào chat qua `du_lieu`) và `tinh` (mọi phép tính) — xem dòng dưới.",
         "- ĐẶT NHẮC/HẸN GIỜ: `schedule_reminder` (đến giờ tự gửi vào chat này), xem/hủy bằng "
         "`list_reminders`/`cancel_reminder`. Ai nhờ 'nhắc…' thì XÁC NHẬN thời điểm+nội dung rồi đặt nhắc THẬT.",
         "- `remember_about_user`: ghi nhớ dài hạn thông tin quan trọng về người đang nói chuyện.",
@@ -212,6 +213,17 @@ _TOOLING_NOTE = "\n".join(
         "đọc NỘI DUNG (câu trả lời mở, rà từng dòng) thì `doc_bang`. Có `dem_bang` thì "
         "TUYỆT ĐỐI không tự đếm hay cộng tay trên bảng; `dem_bang` bị tắt hoặc từ chối thì "
         "nói rõ chưa đếm được bằng công cụ và đưa công thức (COUNTIF/SUM) để team tự ra số.",
+        # 07/10 (chủ agent: "sửa những phần bị limit 20 dòng luôn"): còn ba đường Mark tự làm
+        # toán — dữ liệu DÁN vào chat, tỷ lệ/phép tính từ số đã biết (13/90 ≈ 14,4%), MTD/CPM
+        # và cộng dồn ngân sách master plan. Cả ba nay về code (`dem_bang` du_lieu, `tinh`).
+        "- MỌI PHÉP TÍNH (tổng, chênh lệch, tỷ lệ vượt, %, MTD, CPM, chia ngân sách, cộng dồn "
+        "phương án, kiểm vượt trần, điểm trọng số, trung vị — kể cả phép ngắn như 13/90): "
+        "gọi `tinh` (code tính bằng số thập phân chính xác) rồi chép NGUYÊN `cau_tinh` — "
+        "phép tính vẫn hiện ra để người đọc soát, nhưng KẾT QUẢ là của code. Bảng hay danh "
+        "sách người dùng DÁN vào chat (ghi chép khảo sát, báo giá, danh sách số) cần đếm/cộng: "
+        "gọi `dem_bang` với `du_lieu` = nguyên văn phần dán, chép `cau_so`. TUYỆT ĐỐI không "
+        "tự tính nhẩm hay đếm tay; `tinh`/`dem_bang` bị tắt hoặc lỗi thì viết phép tính ra và "
+        "ghi rõ \"số tự tính, chưa qua công cụ — kiểm lại\".",
         # 07/10: chủ agent duyệt cho Mark ghi việc vào Base checklist — nhưng chỉ qua bản xem
         # trước mà CHÍNH người nhờ đồng ý. Code kiểm người/chat/mã; lời dặn giữ nhịp hỏi.
         "- GHI VIỆC VÀO BASE CHECKLIST ('tạo task', 'giao việc trên Base', 'đưa lên "
@@ -272,9 +284,11 @@ _TOOL_CAN_XET = {
                       "Base checklist của team (chỉ tạo việc và điền ô trống)", {}),
     "doc_bang": ("đọc nguyên một Base hoặc Sheet của Lark khi người hỏi cũng có quyền xem",
                  {"nguon": "https://example.larksuite.com/base/x"}),
-    "dem_bang": ("đếm, tính % và cộng tổng trên một Base hoặc Sheet của Lark bằng code "
-                 "(người hỏi cũng phải có quyền xem)",
+    "dem_bang": ("đếm, tính % và cộng tổng bằng code trên một Base hoặc Sheet của Lark "
+                 "(người hỏi cũng phải có quyền xem) hoặc trên bảng người dùng dán vào chat",
                  {"nguon": "https://example.larksuite.com/base/x"}),
+    "tinh": ("tính chính xác bằng code mọi phép cộng, trừ, nhân, chia, %, tỷ lệ",
+             {"phep_tinh": {"vuot": "103 - 90"}}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",
                  {"args": ["wiki", "+search", "x"]}),

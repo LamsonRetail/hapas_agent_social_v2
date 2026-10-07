@@ -28,9 +28,31 @@ cùng nguyên tắc với `chi_so_bai_tool.py`: CODE đếm/cộng, model chỉ 
 Quyền đọc đi CHUNG MỘT CỬA với `doc_bang` (`bang_tool.mo_nguon`): không có luật quyền
 thứ hai. Đi qua `ToolRegistry.dispatch` nên chịu `lsr_policy` (công tắc lùi về
 `doc_bang`) và tự ghi audit như mọi tool.
+
+DỮ LIỆU DÁN TRONG CHAT (`du_lieu`, 07/10/2026)
+Chủ agent: "sửa những phần bị limit 20 dòng luôn" — ghi chép khảo sát, bảng báo giá, danh
+sách số mà người dùng DÁN vào chat trước đây vẫn để model tự đếm/cộng ("số tự cộng, kiểm lại
+trên Sheet"). Nay cùng một đường đếm: `doc_du_lieu_dan` biến chữ dán thành lưới y như
+`doc_tho` trả, rồi chạy đúng `dem()`. Không kiểm quyền Lark (dữ liệu đã nằm trong chat, không
+đọc gì thêm), không gọi mạng. Luật đọc chữ dán (CỐ ĐỊNH, báo lại trong `dinh_dang`):
+- có ký tự tab → TSV (kiểu chép từ Sheet/Excel; ô có ngoặc kép giữ xuống dòng trong ô);
+- đa số dòng bắt đầu bằng "|" → bảng markdown (bỏ dòng |---|, "<br>" là xuống dòng trong ô);
+- đa số dòng có "|" → cột cách nhau bằng "|";
+- CSV dấu ";" rồi dấu "," (có ngoặc kép): chỉ khi ≥ 80% dòng cùng số cột > 1 VÀ dòng đầu
+  cũng đúng số cột đó — "1,5" một mình là số thập phân, không phải hai cột;
+- đa số dòng dạng "nhãn: số" → hai cột (A nhãn, B số), không dòng tiêu đề;
+- còn lại: mỗi dòng một ô (bỏ gạch đầu dòng "- ", "1) "); dòng đầu là tiêu đề chỉ khi nó
+  là chữ mà phần còn lại là số, hoặc nó kết thúc bằng ":"/"?".
+Ô nhiều lựa chọn trong chữ dán: xuống dòng trong ô (ngoặc kép, "<br>") như Sheet; thêm dấu
+";" — CHỈ khi cột không dùng ";" làm dấu cột và ≥ 2 ô của cột có ";" (kiểu xuất Microsoft
+Forms). Dấu phẩy vẫn KHÔNG tách (trừ `tach_dau_phay`).
+Không thấy dòng chữ nào ra dáng tiêu đề trong 5 dòng đầu → coi như KHÔNG có dòng tiêu đề
+(cột gọi bằng chữ cái) thay vì nuốt dòng số đầu làm tiêu đề như với Sheet.
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 import unicodedata
@@ -51,6 +73,11 @@ CAU_MO_DO_DAI = 60
 MAX_KY_TU_RA = 60_000
 #: Nhóm dưới ngưỡng này: số chỉ để tham khảo (skill nghiên cứu khách hàng dùng cùng mốc).
 NHOM_NHO = 10
+#: Trần dữ liệu dán: chữ quá dài thì model đã cắt/chép sai trước khi tới đây — bảng cỡ đó
+#: phải nằm trên Sheet (đọc thẳng bằng `nguon`), không đi qua chat.
+MAX_KY_TU_DAN = 200_000
+MAX_DONG_DAN = 5_000
+TEN_NGUON_DAN = "dữ liệu dán trong chat"
 
 HUONG_DAN = (
     "Chép NGUYÊN các số trong `cau_so` — số do CODE đếm trên toàn bộ dòng. KHÔNG tự đếm "
@@ -70,6 +97,10 @@ SCHEMA = {
         "lời mở, rà từng dòng) thì dùng `doc_bang`.\n"
         "Nguồn và quyền y như `doc_bang` (link /sheets/, /base/, /wiki/, `sheet:…`, "
         "`base:…`); người hỏi phải có quyền xem.\n"
+        "Người dùng DÁN bảng/danh sách vào chat (ghi chép khảo sát, báo giá, danh sách số): "
+        "đưa NGUYÊN VĂN phần dán vào `du_lieu`, bỏ trống `nguon` — nhận bảng tab (chép từ "
+        "Sheet), bảng markdown, CSV, cột '|', dòng 'nhãn: số' (cột A nhãn, cột B số), hoặc "
+        "mỗi dòng một giá trị (cột A). Không có dòng tiêu đề thì gọi cột bằng chữ cái.\n"
         "Cột chọn bằng chữ cái ('H'), mã câu ('B5', 'C2.') hoặc một đoạn tiêu đề; bỏ trống "
         "`cot` = đếm mọi cột. Ô nhiều lựa chọn = nhiều DÒNG trong ô; không tách dấu phẩy "
         "trừ khi `tach_dau_phay`.\n"
@@ -84,7 +115,11 @@ SCHEMA = {
         "properties": {
             "nguon": {"type": "string",
                       "description": "Link Base/Sheet/Wiki, hoặc `sheet:<mã>` / `base:<mã>` "
-                                     "từ thẻ mục lục."},
+                                     "từ thẻ mục lục. Bỏ trống khi dùng `du_lieu`."},
+            "du_lieu": {"type": "string",
+                        "description": "Bảng/danh sách người dùng DÁN trong chat, chép "
+                                       "NGUYÊN VĂN (không tự sửa, không bỏ dòng). Có thì "
+                                       "không cần `nguon`, không kiểm quyền Lark."},
             "tab": {"type": "string",
                     "description": "Tên hoặc mã tab/bảng khi link trỏ cả file. Bỏ trống = "
                                    "mọi tab (hoặc đúng tab trong link ?sheet=/?table=)."},
@@ -102,7 +137,8 @@ SCHEMA = {
                      "description": "Chỉ xét các dòng này (số dòng thật trên Sheet), vd "
                                     "'6-7' hay '9-11, 13'. Dùng để cộng dòng con của một nhóm."},
             "dong_tieu_de": {"type": "integer",
-                             "description": "Dòng tiêu đề (đếm từ 1). Bỏ trống = tự nhận."},
+                             "description": "Dòng tiêu đề (đếm từ 1). Bỏ trống = tự nhận; "
+                                            "0 = bảng không có dòng tiêu đề."},
             "tach_dau_phay": {"type": "boolean",
                               "description": "true = tách lựa chọn theo cả dấu phẩy/chấm "
                                              "phẩy. Mặc định false."},
@@ -111,15 +147,22 @@ SCHEMA = {
                                    "mảng, tên đầu là tên giữ lại. Một người chọn nhiều cách "
                                    "viết vẫn tính một."},
         },
-        "required": ["nguon"],
+        "required": [],
     },
 }
 
 
 # ───────────────────────────── chữ ─────────────────────────────
 def _gon(s: str) -> str:
-    """Chuẩn Unicode + gộp khoảng trắng (giữ nguyên hoa thường, dấu)."""
-    return " ".join(unicodedata.normalize("NFC", str(s or "")).split())
+    """Chuẩn Unicode + gộp khoảng trắng (giữ nguyên hoa thường, dấu), bỏ ký tự điều khiển
+    và ký tự định dạng vô hình (Cc/Cf: ESC, đảo chiều chữ U+202E, zero-width…).
+
+    Mọi chữ lấy từ bảng/đối số mà `cau_so` nhắc lại đều đi qua đây: `cau_so` là khối model
+    chép NGUYÊN vào câu trả lời, nên một ô hay tiêu đề mang xuống dòng/ký tự điều khiển là
+    đường chèn lệnh giả vào câu trả lời của bot."""
+    s = unicodedata.normalize("NFC", str(s or ""))
+    s = "".join(" " if unicodedata.category(c) in ("Cc", "Cf") else c for c in s)
+    return " ".join(s.split())
 
 
 _GACH_DAU = re.compile(r"^[\-–•*+·]\s+")
@@ -357,17 +400,22 @@ def _tu_nhan_tieu_de(luoi: list[list[list[str]]]) -> tuple[int, bool]:
 # ───────────────────────────── đếm một bảng ─────────────────────────────
 def dem(luoi: list[list[list[str]]], *, cot=None, nhom_theo: str = "", cong=None,
         dong: str = "", dong_tieu_de: int | None = None, tach_dau_phay: bool = False,
-        gop=None, loai_cot: list | None = None, top: int = TOP_GIA_TRI) -> dict:
+        gop=None, loai_cot: list | None = None, top: int = TOP_GIA_TRI,
+        khong_tieu_de: bool = False) -> dict:
     """Đếm trên lưới thô của `lark_bang.doc_tho`. Hàm thuần — không gọi mạng.
 
     Trả dict kết quả; `loi` khác rỗng khi không đếm được (tiêu đề ngoài bảng, dòng sai cú
     pháp…). Số dòng trả về là số dòng THẬT trên Sheet (đếm từ 1).
+    `khong_tieu_de` (hoặc `dong_tieu_de=0`): mọi dòng là dữ liệu, cột chỉ có chữ cái —
+    `dong_tieu_de_da_dung` = 0.
     """
     if not luoi:
         return {"loi": "bảng trống — không có dòng nào"}
     so_cot = max(len(r) for r in luoi)
     luoi = [list(r) + [[]] * (so_cot - len(r)) for r in luoi]
-    if dong_tieu_de:
+    if khong_tieu_de or dong_tieu_de == 0:
+        h, tu_nhan, ro = -1, False, True
+    elif dong_tieu_de:
         if not 1 <= int(dong_tieu_de) <= len(luoi):
             return {"loi": f"dòng tiêu đề {dong_tieu_de} nằm ngoài bảng (bảng có "
                            f"{len(luoi)} dòng)"}
@@ -382,7 +430,8 @@ def dem(luoi: list[list[list[str]]], *, cot=None, nhom_theo: str = "", cong=None
         t = next((_gon(_chu_o(luoi[i][j])) for i in range(h, -1, -1) if _chu_o(luoi[i][j])), "")
         tieu_de.append(t)
     stt = {j for j in range(so_cot) if any(_la_stt(_chu_o(luoi[i][j])) for i in range(h + 1))}
-    khoa_td = {j: _khoa(_chu_o(luoi[h][j])) for j in range(so_cot) if _chu_o(luoi[h][j])}
+    khoa_td = ({j: _khoa(_chu_o(luoi[h][j])) for j in range(so_cot) if _chu_o(luoi[h][j])}
+               if h >= 0 else {})
 
     loc = None
     if dong:
@@ -668,20 +717,31 @@ def _ds_gia_tri(ds: list[dict], con: dict | None) -> str:
     return s
 
 
-def cau_so(ten_tab: str, kq: dict) -> str:
-    """Khối chữ thuần (không bảng markdown) để model chép nguyên."""
+def cau_so(ten_tab: str, kq: dict, *, dan: str = "") -> str:
+    """Khối chữ thuần (không bảng markdown) để model chép nguyên.
+
+    `dan` = mô tả cách đọc chữ dán (`doc_du_lieu_dan`) → câu mở bằng "Dữ liệu dán trong
+    chat" thay cho tên tab, và số dòng là thứ tự dòng trong bảng dán.
+    """
+    dau_nguon = (f"Dữ liệu dán trong chat ({dan}; số dòng = thứ tự dòng trong bảng dán)"
+                 if dan else f'Tab "{_gon(ten_tab)}"')
     if kq.get("loi"):
-        return f'Tab "{ten_tab}": không đếm được — {kq["loi"]}.'
+        return f'{dau_nguon}: không đếm được — {_gon(kq["loi"])}.'
     n = kq["n"]
-    L = [f'Tab "{ten_tab}" — tiêu đề ở dòng {kq["dong_tieu_de_da_dung"]}'
-         + ((" (tự nhận, KHÔNG thấy dòng chữ nào rõ là tiêu đề trong 5 dòng đầu — kiểm lại, "
-              "sai thì gọi lại với dong_tieu_de)" if kq.get("tieu_de_khong_ro") else
-              " (tự nhận; sai thì gọi lại với dong_tieu_de)")
-            if kq["tieu_de_tu_nhan"] else " (theo dong_tieu_de đã chỉ định)")
+    if kq["dong_tieu_de_da_dung"] == 0:
+        td = " — không có dòng tiêu đề, cột gọi theo chữ cái (A, B…)"
+    else:
+        td = (f' — tiêu đề ở dòng {kq["dong_tieu_de_da_dung"]}'
+              + ((" (tự nhận, KHÔNG thấy dòng chữ nào rõ là tiêu đề trong 5 dòng đầu — kiểm "
+                  "lại, sai thì gọi lại với dong_tieu_de)" if kq.get("tieu_de_khong_ro") else
+                  " (tự nhận; sai thì gọi lại với dong_tieu_de)")
+                 if kq["tieu_de_tu_nhan"] else " (theo dong_tieu_de đã chỉ định)"))
+    L = [dau_nguon + td
          + f'. n = {n} dòng có dữ liệu'
          + (f' (dòng {kq["dong_du_lieu"]}; không tính dòng trống hoặc chỉ có STT)'
             if kq.get("dong_du_lieu") else "")
-         + (f'; chỉ xét dòng {kq["chi_xet_dong"]}' if kq.get("chi_xet_dong") else "") + "."]
+         + (f'; chỉ xét dòng {_gon(kq["chi_xet_dong"])}' if kq.get("chi_xet_dong") else "")
+         + "."]
     # Cột cá nhân bị bỏ qua: ghi NGAY ĐẦU — câu số dài bị cắt đuôi thì vẫn còn dòng này.
     for b in kq.get("cot_bo_qua", []):
         L.append(f"Bỏ qua {b['cot']}: {b['ly_do']}.")
@@ -691,8 +751,8 @@ def cau_so(ten_tab: str, kq: dict) -> str:
     if t is not None:
         if t["so_dong_trung"]:
             L.append(f"Dòng trùng (giống hệt mọi cột trừ STT): {t['so_dong_trung']} — " + "; ".join(
-                ("STT " + " = STT ".join(g["stt"]) if g.get("stt") and all(g["stt"]) else "")
-                + f" (dòng {', '.join(map(str, g['dong']))})" for g in t["nhom"])
+                ("STT " + " = STT ".join(g["stt"]) + " " if g.get("stt") and all(g["stt"])
+                 else "") + f"(dòng {', '.join(map(str, g['dong']))})" for g in t["nhom"])
                 + ". Không tự xoá: có thể là hai người trả lời giống nhau.")
         else:
             L.append("Dòng trùng (giống hệt mọi cột trừ STT): không có.")
@@ -702,7 +762,7 @@ def cau_so(ten_tab: str, kq: dict) -> str:
             f'"{x["gia_tri"]}" n={x["n"]}' + (" (dưới 10 người — chỉ tham khảo)" if x.get("nho") else "")
             for x in g["nhom"]) + ".")
     for c in kq.get("cot", []):
-        dau = f"{c['tieu_de'] or 'cột ' + c['cot']} [cột {c['cot']}]"
+        dau = f"{c['tieu_de']} [cột {c['cot']}]" if c["tieu_de"] else f"cột {c['cot']}"
         if c.get("trong"):
             L.append(f"{dau}: không ai trả lời trong các dòng đã xét.")
             continue
@@ -720,7 +780,7 @@ def cau_so(ten_tab: str, kq: dict) -> str:
                      + (": " + _ds_gia_tri(x["gia_tri"], x.get("con_lai")) if x["gia_tri"] else ": —")
                      + ".")
     for c in kq.get("tong", []):
-        ten_c = f"{c['tieu_de'] or 'cột ' + c['cot']} [cột {c['cot']}]"
+        ten_c = f"{c['tieu_de']} [cột {c['cot']}]" if c["tieu_de"] else f"cột {c['cot']}"
         if c.get("chi_phan_tram"):
             p = c["chi_phan_tram"]
             L.append(f"{ten_c}: cả {p['so_o']} ô đều là % nên KHÔNG cộng tổng (cộng tỷ lệ vô "
@@ -746,13 +806,134 @@ def cau_so(ten_tab: str, kq: dict) -> str:
         for x in c.get("theo_nhom", []):
             L.append(f'  · nhóm "{x["nhom"]}": {x["tong"]}')
     if kq.get("cot_khong_thay"):
-        L.append("Không thấy cột: " + ", ".join(f"'{x}'" for x in kq["cot_khong_thay"])
+        L.append("Không thấy cột: " + ", ".join(f"'{_gon(x)}'" for x in kq["cot_khong_thay"])
                  + " — xem danh sách `tieu_de`.")
     for x in kq.get("ghi_chu", []):
-        L.append(f"Lưu ý: {x}.")
+        L.append(f"Lưu ý: {_gon(x)}.")
     if kq.get("da_gop"):
-        L.append("Đã gộp: " + "; ".join(" = ".join(x) for x in kq["da_gop"]) + ".")
+        L.append("Đã gộp: " + "; ".join(" = ".join(_gon(y) for y in x) for x in kq["da_gop"])
+                 + ".")
     return "\n".join(L)
+
+
+# ───────────────────────────── dữ liệu dán trong chat ─────────────────────────────
+class LoiDan(ValueError):
+    """Chữ dán không đọc thành bảng được (quá cỡ, trống) — lời nhắn gửi thẳng cho model."""
+
+
+_DONG_KE_MD = re.compile(r"^\s*:?-{2,}:?\s*$")
+_BR = re.compile(r"<br\s*/?>", re.I)
+_GACH_DONG = re.compile(r"^\s*(?:[-•*+·]|\d{1,3}[.)])\s+")
+_NHAN_SO = re.compile(r"^\s*([^:\t|]*[^\W\d][^:\t|]*?)\s*:\s*(\S.*?)\s*$")
+
+
+def _la_so(chu: str) -> bool:
+    return doc_so(chu)[0] is not None
+
+
+def _csv(chu: str, dau: str) -> list[list[str]]:
+    return [r for r in csv.reader(io.StringIO(chu), delimiter=dau) if any(x.strip() for x in r)]
+
+
+def _tach_md(dong: str, bo_vien: bool) -> list[str]:
+    d = dong.strip()
+    if bo_vien:
+        d = d[1:] if d.startswith("|") else d
+        d = d[:-1] if d.endswith("|") and not d.endswith("\\|") else d
+    o = [x.replace("\\|", "|") for x in re.split(r"(?<!\\)\|", d)]
+    return [_BR.sub("\n", x).strip() for x in o]
+
+
+def _giong_csv(chu: str, dau: str) -> bool:
+    """Dấu phân cách là dấu CỘT (CSV xuất từ công cụ) chứ không phải dấu câu: CSV không có
+    dấu cách sau dấu phân cách (hoặc có ô ngoặc kép). Văn xuôi tiếng Việt luôn có — "Có, mua
+    luôn hôm nay" là MỘT đáp án, không phải hai cột."""
+    tong = chu.count(dau)
+    sau_cach = len(re.findall(re.escape(dau) + r"[ \t]", chu))
+    return bool(tong) and (sau_cach <= 0.1 * tong or f'{dau}"' in chu or f'"{dau}' in chu)
+
+
+def _deu_cot(dong: list[list[str]]) -> int:
+    """Số cột chung của CSV nếu ra dáng bảng thật (≥ 80% dòng cùng số cột > 1 và dòng đầu
+    cũng vậy), không thì 0."""
+    if len(dong) < 2:
+        return 0
+    dem_c: dict[int, int] = {}
+    for r in dong:
+        dem_c[len(r)] = dem_c.get(len(r), 0) + 1
+    c, so = max(dem_c.items(), key=lambda kv: (kv[1], kv[0]))
+    return c if c > 1 and so >= 0.8 * len(dong) and len(dong[0]) == c else 0
+
+
+def doc_du_lieu_dan(chu: str) -> tuple[list[list[list[str]]], str, bool | None]:
+    """Chữ người dùng dán → (lưới như `doc_tho`, mô tả cách đã đọc, có tiêu đề không).
+
+    "có tiêu đề": True/False khi cách đọc tự biết (dòng "nhãn: số" thì không; danh sách một
+    cột thì theo luật ở docstring module), None = để `dem()` tự nhận như với Sheet.
+    Luật xem docstring module (mục DỮ LIỆU DÁN). Không đoán theo nghĩa.
+    """
+    chu = unicodedata.normalize("NFC", str(chu or "")).replace("\ufeff", "")
+    chu = chu.replace("\r\n", "\n").replace("\r", "\n")
+    if len(chu) > MAX_KY_TU_DAN:
+        raise LoiDan(f"dữ liệu dán dài {so_vn(Decimal(len(chu)))} ký tự, trần "
+                     f"{so_vn(Decimal(MAX_KY_TU_DAN))} — bảng cỡ này nên đưa lên Lark Sheet "
+                     "rồi đếm bằng `nguon`")
+    dong = [d for d in chu.split("\n") if d.strip()]
+    if not dong:
+        raise LoiDan("dữ liệu dán trống")
+    co_td: bool | None = None
+    dau_cot = ""
+    if "\t" in chu:
+        rows, mo_ta, dau_cot = _csv(chu.strip("\n"), "\t"), "bảng cách nhau bằng tab", "\t"
+    elif sum(d.lstrip().startswith("|") for d in dong) >= 0.6 * len(dong):
+        rows = [_tach_md(d, True) for d in dong
+                if not all(_DONG_KE_MD.match(x) for x in _tach_md(d, True))]
+        mo_ta, dau_cot = "bảng markdown", "|"
+    elif sum("|" in d for d in dong) >= 0.6 * len(dong):
+        rows, mo_ta, dau_cot = [_tach_md(d, False) for d in dong], "cột cách nhau bằng '|'", "|"
+    else:
+        rows, mo_ta = [], ""
+        for dau, ten in ((";", "CSV dấu ';'"), (",", "CSV dấu ','")):
+            r = _csv(chu, dau)
+            if _deu_cot(r) and _giong_csv(chu, dau):
+                rows, mo_ta, dau_cot = r, ten, dau
+                break
+        if not rows:
+            nhan = [_NHAN_SO.match(d) for d in dong]
+            if sum(1 for m in nhan if m and _la_so(m.group(2))) >= max(2, 0.8 * len(dong)):
+                rows = [[m.group(1), m.group(2)] if m else [d.strip()] for m, d in zip(nhan, dong)]
+                mo_ta, co_td = "dòng 'nhãn: số' — cột A nhãn, cột B số", False
+            else:
+                rows = [[_GACH_DONG.sub("", d).strip()] for d in dong]
+                mo_ta = "mỗi dòng một giá trị (cột A)"
+                dau = rows[0][0]
+                con = [r[0] for r in rows[1:]]
+                co_td = bool(con) and (dau.endswith((":", "?")) or (
+                    not _la_so(dau) and sum(map(_la_so, con)) >= 0.8 * len(con)))
+    if len(rows) > MAX_DONG_DAN:
+        raise LoiDan(f"dữ liệu dán có {len(rows)} dòng, trần {MAX_DONG_DAN} — đưa lên Lark "
+                     "Sheet rồi đếm bằng `nguon`")
+    so_cot = max(len(r) for r in rows)
+    # Ô nhiều lựa chọn tách bằng ";" (kiểu xuất Microsoft Forms) — chỉ khi rõ ràng.
+    cham_phay = []
+    if dau_cot != ";":
+        for j in range(so_cot):
+            o = [r[j] for r in rows[1:] if j < len(r) and r[j].strip()]
+            if sum(";" in x for x in o) >= 2 and not any(_la_so(x) for x in o):
+                cham_phay.append(j)
+    luoi = []
+    for r in rows:
+        hang = []
+        for j in range(so_cot):
+            x = r[j] if j < len(r) else ""
+            if j in cham_phay:
+                x = "\n".join(p.strip() for p in x.split(";"))
+            hang.append([x] if x.strip() else [])
+        luoi.append(hang)
+    if cham_phay:
+        mo_ta += "; ô có ';' ở cột " + ", ".join(chu_cot(j) for j in cham_phay) \
+            + " tách thành nhiều lựa chọn"
+    return luoi, mo_ta, co_td
 
 
 # ───────────────────────────── tool ─────────────────────────────
@@ -764,44 +945,24 @@ def _ds(x) -> list[str]:
     return [str(v).strip() for v in x if str(v).strip()]
 
 
-def _handle(args: dict, **_kw) -> str:
-    a = args or {}
-    nguon = str(a.get("nguon") or "").strip()
-    try:
-        loai, token, phu, ten_loai, vi_sao = BT.mo_nguon(nguon)
-    except BT.TuChoi as e:
-        return tool_error(str(e))
-    tab = str(a.get("tab") or "").strip()
-    try:
-        tho = B.doc_tho(loai, token, tab or phu)
-    except Exception as e:
-        return tool_error(BT.loi_doc(ten_loai, e))
-    if not tho["bang"]:
-        return tool_error(f"Không thấy tab/bảng '{tab or phu}' trong {ten_loai} này. Các "
-                          f"tab: {', '.join(map(str, tho['tat_ca'])) or '(không có)'}.")
-    try:
-        dong_td = int(a["dong_tieu_de"]) if a.get("dong_tieu_de") not in (None, "") else None
-    except (TypeError, ValueError):
-        return tool_error("`dong_tieu_de` phải là số dòng (đếm từ 1).")
-    tham = dict(cot=_ds(a.get("cot")), nhom_theo=str(a.get("nhom_theo") or "").strip(),
-                cong=_ds(a.get("cong")), dong=str(a.get("dong") or "").strip(),
-                dong_tieu_de=dong_td, tach_dau_phay=bool(a.get("tach_dau_phay")),
-                gop=[x for x in (a.get("gop") or []) if isinstance(x, list)])
-
+def _dem_va_gon(bang_vao: list[dict], tham: dict, dau: dict, dan: str = "") -> dict:
+    """Đếm từng bảng rồi thu gọn kết quả cho vừa `MAX_KY_TU_RA` — chung cho Sheet/Base và
+    dữ liệu dán. `bang_vao`: [{ten, luoi, loai_cot?, bi_cat?, khong_tieu_de?}]."""
     ra: dict = {}
     for top in (TOP_GIA_TRI, 10, 5):
         bang, cau, bi_cat = [], [], False
-        for b in tho["bang"]:
-            kq = dem(b["luoi"], loai_cot=b.get("loai_cot"), top=top, **tham)
+        for b in bang_vao:
+            kq = dem(b["luoi"], loai_cot=b.get("loai_cot"), top=top,
+                     khong_tieu_de=b.get("khong_tieu_de", False), **tham)
             # Nhiều tab mà tab này không có cột nào được hỏi: bỏ, khỏi làm rối câu số.
-            if (len(tho["bang"]) > 1 and (tham["cot"] or tham["cong"])
+            if (len(bang_vao) > 1 and (tham["cot"] or tham["cong"])
                     and not kq.get("cot") and not kq.get("tong")):
                 continue
             bang.append({"tab": b["ten"], **kq})
-            cau.append(cau_so(b["ten"], kq))
+            cau.append(cau_so(b["ten"], kq, dan=dan))
             bi_cat = bi_cat or b.get("bi_cat", False)
-        ra = {"nguon": nguon, "loai": ten_loai, "ten": tho["ten"], "ly_do_duoc_doc": vi_sao,
-              "bang": bang, "cau_so": "\n\n".join(cau) or "Không tab nào có cột được hỏi.",
+        ra = {**dau, "bang": bang,
+              "cau_so": "\n\n".join(cau) or "Không tab nào có cột được hỏi.",
               "huong_dan": HUONG_DAN}
         if bi_cat:
             ra["bi_cat"] = True
@@ -817,7 +978,91 @@ def _handle(args: dict, **_kw) -> str:
         ra["cau_so"] = ra["cau_so"][:MAX_KY_TU_RA // 2] + (
             "\n…(đã cắt: kết quả quá dài — gọi lại với `tab` và `cot` cụ thể)")
         ra["bi_cat_ket_qua"] = True
+    return ra
+
+
+def _cot_so(luoi: list[list[list[str]]], co_td: bool) -> tuple[list[str], list[str]]:
+    """(cột gần như toàn số, cột chữ) của phần dữ liệu — để tự chọn `cong` cho danh sách
+    số dán vào chat mà không nói cột nào."""
+    so, chu = [], []
+    for j in range(max(len(r) for r in luoi)):
+        o = [_chu_o(r[j]) for r in luoi[1 if co_td else 0:] if j < len(r) and _chu_o(r[j])]
+        if not o:
+            continue
+        if sum(map(_la_so, o)) < 0.8 * len(o):
+            chu.append(chu_cot(j))
+        elif [doc_so(x)[0] for x in o] != [Decimal(k) for k in range(1, len(o) + 1)]:
+            # Cột 1, 2, 3… là mã/STT của người trả lời, không phải số để cộng.
+            so.append(chu_cot(j))
+    return so, chu
+
+
+def _handle_dan(a: dict, du_lieu: str, tham: dict) -> str:
+    """`du_lieu`: bảng người dùng dán. Không kiểm quyền Lark, không đọc gì qua mạng."""
+    try:
+        luoi, mo_ta, co_td = doc_du_lieu_dan(du_lieu)
+    except LoiDan as e:
+        return tool_error(f"Không đọc được dữ liệu dán: {e}.")
+    khong_td = False
+    if tham["dong_tieu_de"] is None:
+        if co_td is not None:
+            khong_td = not co_td
+            if co_td:
+                tham = {**tham, "dong_tieu_de": 1}
+        else:
+            # Không dòng chữ nào ra dáng tiêu đề → bảng số không tiêu đề; đừng nuốt dòng
+            # số đầu làm tiêu đề (với Sheet thì vẫn báo "tiêu đề không rõ" như cũ).
+            khong_td = not _tu_nhan_tieu_de(luoi)[1]
+    tu_chon = None
+    if not (tham["cot"] or tham["cong"] or tham["nhom_theo"]):
+        so, chu = _cot_so(luoi, not khong_td and tham["dong_tieu_de"] != 0)
+        # Danh sách số / "nhãn: số" (≤ 1 cột chữ làm nhãn): hỏi tổng là việc hiển nhiên.
+        if so and len(chu) <= 1:
+            tham = {**tham, "cong": so}
+            tu_chon = so
+    ra = _dem_va_gon([{"ten": TEN_NGUON_DAN, "luoi": luoi, "khong_tieu_de": khong_td}], tham,
+                     {"nguon": TEN_NGUON_DAN, "loai": "Dữ liệu dán", "dinh_dang": mo_ta,
+                      "so_dong_doc_duoc": len(luoi), "so_cot": max(len(r) for r in luoi)},
+                     dan=mo_ta)
+    if tu_chon:
+        ra["tu_chon_cong"] = tu_chon
+        ra["cau_so"] += ("\nTự cộng cột " + ", ".join(tu_chon) + " (dữ liệu dán chỉ có số"
+                         " và nhãn); muốn đếm theo giá trị thì gọi lại với `cot`.")
     return tool_result(ra)
+
+
+def _handle(args: dict, **_kw) -> str:
+    a = args or {}
+    nguon = str(a.get("nguon") or "").strip()
+    try:
+        dong_td = int(a["dong_tieu_de"]) if a.get("dong_tieu_de") not in (None, "") else None
+    except (TypeError, ValueError):
+        return tool_error("`dong_tieu_de` phải là số dòng (đếm từ 1; 0 = không có tiêu đề).")
+    tham = dict(cot=_ds(a.get("cot")), nhom_theo=str(a.get("nhom_theo") or "").strip(),
+                cong=_ds(a.get("cong")), dong=str(a.get("dong") or "").strip(),
+                dong_tieu_de=dong_td, tach_dau_phay=bool(a.get("tach_dau_phay")),
+                gop=[x for x in (a.get("gop") or []) if isinstance(x, list)])
+    du_lieu = a.get("du_lieu")
+    if isinstance(du_lieu, str) and du_lieu.strip():
+        return _handle_dan(a, du_lieu, tham)
+    if not nguon:
+        return tool_error("Cần `nguon` (link Base/Sheet) hoặc `du_lieu` (bảng/danh sách "
+                          "người dùng dán trong chat, chép nguyên văn).")
+    try:
+        loai, token, phu, ten_loai, vi_sao = BT.mo_nguon(nguon)
+    except BT.TuChoi as e:
+        return tool_error(str(e))
+    tab = str(a.get("tab") or "").strip()
+    try:
+        tho = B.doc_tho(loai, token, tab or phu)
+    except Exception as e:
+        return tool_error(BT.loi_doc(ten_loai, e))
+    if not tho["bang"]:
+        return tool_error(f"Không thấy tab/bảng '{tab or phu}' trong {ten_loai} này. Các "
+                          f"tab: {', '.join(map(str, tho['tat_ca'])) or '(không có)'}.")
+    return tool_result(_dem_va_gon(tho["bang"], tham,
+                                   {"nguon": nguon, "loai": ten_loai, "ten": tho["ten"],
+                                    "ly_do_duoc_doc": vi_sao}))
 
 
 def register() -> None:

@@ -56,8 +56,12 @@
     - type: regex
       value: '20\s*[–-]\s*30 triệu|(?:1[0-5])(?:[,.]\d+)?\s*%'
 
-# người chấm: ghép báo giá với hạng mục kế hoạch; cộng lần hai theo thứ tự khác; nói tổng có thể còn tăng.
-- description: "SOW 7 · Đối chiếu báo giá booth 103 triệu vs duyệt 90 triệu — phép tính, mức ĐỎ, khoản dễ sót, dự phòng VND"
+# Đáp án tính độc lập (tay, rồi kiểm bằng Python Decimal): 85.000.000 + 12.000.000 + 6.000.000 =
+# 103.000.000; 103.000.000 − 90.000.000 = 13.000.000; 13.000.000 ÷ 90.000.000 = 0,1444… → 14,4% (ĐỎ, >5%).
+# "13,5" dưới đây KHÔNG phải tỷ lệ vượt: là mức trên của dự phòng 15% × 90 triệu = 13,5 triệu (9–13,5 triệu).
+# 07/10/2026: phép tính phải do `tinh` làm (Mark không tự cộng/chia), Mark chép `cau_tinh`.
+# người chấm: ghép báo giá với hạng mục kế hoạch; phép tính chép từ công cụ; nói tổng có thể còn tăng.
+- description: "SOW 7 · Đối chiếu báo giá booth 103 triệu vs duyệt 90 triệu — tinh tính 14,4%, mức ĐỎ, khoản dễ sót, dự phòng VND"
   metadata: {sow_dong: 7, hang_muc: "Theo dõi ngân sách từng chiến dịch"}
   vars:
     ma: d07c
@@ -72,7 +76,48 @@
       value: ["103", "13", "ĐỎ", "VAT", "ngưỡng đề xuất"]
     - type: icontains-any
       value: ["14,4", "14.4"]
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tinh"}
     - type: icontains-any
       value: ["tháo dỡ", "dọn địa điểm", "dọn dẹp"]
+    # Dự phòng 10–15% của 90 triệu = 9–13,5 triệu (không phải tỷ lệ vượt).
     - type: icontains-any
       value: ["13,5", "13.5"]
+
+# 07/10/2026 — báo giá DÁN dạng bảng (6 dòng) vs dự toán 150 triệu: cộng bằng dem_bang (du_lieu), tỷ lệ
+# bằng tinh. Đáp án tính độc lập (Python Decimal trên đúng các số dưới):
+#   48.500.000 + 36.000.000 + 22.750.000 + 18.000.000 + 9.600.000 + 7.250.000 = 142.100.000;
+#   150.000.000 − 142.100.000 = 7.900.000 (còn dư, chưa vượt); 142.100.000 ÷ 150.000.000 = 94,7% dự toán.
+# người chấm: tổng do công cụ cộng (không "số tự cộng"); nói chưa vượt nhưng còn khoản dễ sót (VAT,
+# tháo dỡ, dự phòng) có thể đẩy quá dự toán; dự phòng ghi bằng VND.
+- description: "SOW 7 · Báo giá pop-up DÁN dạng bảng 6 dòng vs 150 triệu — dem_bang cộng trên du_lieu, tinh tính tỷ lệ"
+  metadata: {sow_dong: 7, hang_muc: "Theo dõi ngân sách từng chiến dịch"}
+  vars:
+    ma: d07d
+    hoi: |-
+      Báo giá bên agency gửi cho pop-up, dự toán duyệt 150 triệu. Kiểm giúp có vượt không:
+      Hạng mục | Thành tiền
+      Thiết kế và dựng quầy | 48.500.000
+      Thuê mặt bằng 3 ngày | 36.000.000
+      In ấn POSM | 22.750.000
+      Nhân sự PG 3 ngày | 18.000.000
+      Quà tặng khách | 9.600.000
+      Vận chuyển | 7.250.000
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Theo dõi ngân sách chiến dịch"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "dem_bang", co_tham_so: "du_lieu"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tinh"}
+    - type: icontains-any
+      value: ["142.100.000", "142,1 triệu", "142.1 triệu"]
+    - type: icontains-any
+      value: ["7.900.000", "7,9 triệu", "7.9 triệu"]
+    - type: icontains-any
+      value: ["VAT", "thuế"]

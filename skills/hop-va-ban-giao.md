@@ -52,7 +52,8 @@ dùng tự báo các bên.
    - Mỗi mục chương trình có số phút, nội dung VÀ một dòng "QUYẾT ĐỊNH CẦN CHỐT". Mục chỉ
      có câu hỏi mà không có quyết định cần chốt là thiếu
    - Cộng phút các mục phải đúng tổng thời lượng người dùng cho; 5 phút cuối đọc lại quyết
-     định, việc, người, hạn
+     định, việc, người, hạn. Kiểm bằng `tinh` (vd {"tongPhut": "tong(5; 10; 10; 5)",
+     "lech": "30 - tongPhut"}), không tự cộng; "lech" khác 0 thì sửa chương trình
    - NGƯỜI DỰ ghi theo bên; chưa có tên thì ghi bên kèm [CHƯA CÓ NGƯỜI]
    - TÀI LIỆU ĐỌC TRƯỚC là thứ các bên đọc trước khi vào họp (kế hoạch, danh sách hạng mục,
      bảng phân việc…), khác với đồ mang theo
@@ -159,7 +160,8 @@ Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày m
 
 ## Bảng kiểm trước khi gửi
 
-- Số việc khớp ghi chép, đếm lại; nói "tách được N việc, bạn soát giúp"
+- Số việc khớp ghi chép; N lấy từ kết quả `xem_truoc_viec_base` (công cụ đếm), công cụ
+  tắt thì đếm số dòng việc đã liệt kê; nói "tách được N việc, bạn soát giúp"
 - Mọi việc có người và hạn, hoặc có đúng dấu [CHƯA CÓ NGƯỜI] / [CHƯA CÓ HẠN]
 - Số câu "Ai cụ thể ở…" trong VẤN ĐỀ CHƯA CHỐT bằng số việc chỉ ghi bộ phận
 - QUYẾT ĐỊNH không chứa việc cần làm; chữ trong VIỆC không bị cắt so với ghi chép
@@ -168,7 +170,7 @@ Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày m
 - Mỗi yêu cầu bàn giao đủ: giao gì, định dạng, hạn, tiêu chí nhận, đủ để bên nhận làm ngay
 - Đã nêu mọi chỗ hạn giao muộn hơn ngày cần dùng và mọi việc chưa có quyết định
 - Chương trình họp: mục nào cũng có QUYẾT ĐỊNH CẦN CHỐT; có NGƯỜI DỰ và TÀI LIỆU ĐỌC TRƯỚC;
-  phút cộng đúng tổng; không giả định lại điều người dùng đã cho
+  phút cộng đúng tổng (đã kiểm bằng `tinh`); không giả định lại điều người dùng đã cho
 - Ghi rõ đây là bản nháp, cần các bên xác nhận
 - Danh sách task có dòng tiêu đề cột "HẠNG MỤC CV | NHÓM | PIC | DEADLINE | TRẠNG THÁI |
   KẾT QUẢ CẦN ĐẠT" ngay trên các dòng việc

@@ -57,7 +57,8 @@ Bảng mẫu: QUẢN LÝ NGÂN SÁCH & MỤC TIÊU HAPAS 20.10, tab BẢNG TỔN
 - Header 2 tầng, `doc_bang` lấy dòng 1 làm tiêu đề. Cột: Nhóm lớn, Hoạt động, Chi tiết,
   NGÂN SÁCH (dự toán), các cột "CHI PHÍ THỰC TẾ (dd.m)", mục tiêu/thực tế view, số post
 - Qua `doc_bang` số là số thô (vd 1070000000, có thể lẻ thập phân). Số người dùng dán có
-  thể dạng "1,070,000,000 ₫": bỏ dấu phẩy và ₫ rồi mới tính. "-" là không áp dụng
+  thể dạng "1,070,000,000 ₫": đưa nguyên văn vào `dem_bang` (`du_lieu`), công cụ tự đọc;
+  đưa vào `tinh` thì viết số trơn (1070000000). "-" là không áp dụng
 - Không thấy công thức. Cấp cha/con suy từ tên dòng (nhóm cha viết hoa), kiểm bằng
   `dem_bang` (mục "Tính toán")
 - Tổng dự toán, tổng thực tế đọc thẳng dòng TỔNG (Sheet đã tính), ghi "theo dòng TỔNG"
@@ -105,13 +106,18 @@ Bảng mẫu: QUẢN LÝ NGÂN SÁCH & MỤC TIÊU HAPAS 20.10, tab BẢNG TỔN
 
 1. Ghép từng dòng báo giá với hạng mục kế hoạch; nêu dòng lệch đơn giá/số lượng, dòng có
    trong báo giá mà kế hoạch không có, và ngược lại
-2. Cộng báo giá và tính vượt, VIẾT RA phép tính, không chỉ đưa kết quả. Mẫu: "85 + 12 + 6
-   = 103 triệu; 103 − 90 = 13 triệu; 13 / 90 ≈ 14,4%". Cộng lại lần hai theo thứ tự khác
-   (vd 6 + 12 + 85) rồi gắn mức ĐỎ/VÀNG kèm câu "ngưỡng đề xuất, team chốt lại"
+2. Cộng báo giá và tính vượt bằng công cụ `tinh` (KHÔNG tự cộng/chia, kể cả 3 dòng), một
+   lần gọi, vd `phep_tinh` = {"tong": "85000000 + 12000000 + 6000000", "vuot":
+   "tong - 90000000", "tyle": "ty_le(vuot; 90000000)", "dp10":
+   "90000000 * 10%", "dp15": "90000000 * 15%"}. Chép NGUYÊN `cau_tinh` để người đọc
+   thấy phép tính, vd "85.000.000 + 12.000.000 + 6.000.000 = 103.000.000; 103.000.000 −
+   90.000.000 = 13.000.000; 13.000.000 ÷ 90.000.000 × 100 ≈ 14,4%". Rồi gắn mức ĐỎ/VÀNG
+   kèm câu "ngưỡng đề xuất, team chốt lại". Báo giá dán dạng bảng nhiều dòng thì cộng bằng
+   `dem_bang` với `du_lieu` = nguyên văn phần dán, rồi lấy tổng đó vào `tinh`
 3. BẮT BUỘC, kể cả khi báo giá chỉ có vài dòng: gọi tên các khoản dễ sót CHƯA thấy trong
    báo giá, tối thiểu: tháo dỡ/dọn địa điểm, VAT (hỏi báo giá đã gồm VAT chưa), và dự
-   phòng 10–15% ghi bằng VND (vd dự toán 90 triệu → dự phòng 9–13,5 triệu ₫). Không gộp
-   chung thành "các khoản phát sinh khác"
+   phòng 10–15% ghi bằng VND lấy từ `cau_tinh` (vd dự toán 90 triệu → dự phòng 9–13,5
+   triệu ₫). Không gộp chung thành "các khoản phát sinh khác"
 4. Nói rõ tổng có thể còn tăng nếu các khoản ở bước 3 chưa nằm trong báo giá
 
 ## Tính toán
@@ -130,13 +136,17 @@ tự cộng lại, và nói rõ số đó là "công cụ cộng" (khác số "t
      của cột đó cũng trống/0 — kiểm khi đọc, rồi ghi "công cụ cộng các dòng chi tiết"
 - `cau_so` có CẢNH BÁO dòng TỔNG trong vùng cộng thì gọi lại với `dong` để loại dòng đó.
   Ô không phải số ("-", chữ) công cụ đã báo riêng: nói ra, không coi là 0
-- Tỷ lệ vượt (%) từ hai số đã có (vd 13 / 90): VIẾT phép chia ngay cạnh, ghi "tự tính"
-- Số người dùng dán vào chat (không có Sheet): tự cộng, ghi phép tính, cộng hai lần theo
-  hai thứ tự khác nhau, ghi "số tự cộng, kiểm lại trên Sheet"; lệch tự cộng chỉ báo là
-  NGHI NGỜ, không công bố như số chắc chắn
-- `dem_bang` bị tắt hoặc lỗi (không phải lỗi quyền): KHÔNG tự cộng bảng dài. Chỉ báo số
-  đọc thẳng (dòng TỔNG, dòng nhóm, từng ô) và cách để team tự kiểm trên Sheet:
-  =SUM(<các ô con>) so với ô nhóm, cột Chênh lệch = Ngân sách − Thực tế rồi lọc < 0
+- Tỷ lệ vượt (%), chênh lệch, dự phòng, "tổng đã cộng so với ô nhóm lệch bao nhiêu": gọi
+  `tinh` (vd "ty_le(13000000; 90000000)", "chenh_lech(tong; nhom)") rồi chép
+  NGUYÊN `cau_tinh` — phép tính hiện ngay cạnh, kết quả do công cụ tính
+- Số người dùng dán vào chat (không có Sheet): bảng hay danh sách số → `dem_bang` với
+  `du_lieu` = nguyên văn phần dán (`cong` = cột số; dòng "Hạng mục: số" công cụ tự cộng
+  cột B); vài số rời → `tinh`. Ghi nguồn "số người dùng dán, công cụ cộng". Không cộng
+  tay, không "cộng hai lần theo hai thứ tự"
+- `dem_bang`/`tinh` bị tắt hoặc lỗi (không phải lỗi quyền): KHÔNG tự cộng bảng dài. Chỉ
+  báo số đọc thẳng (dòng TỔNG, dòng nhóm, từng ô) và cách để team tự kiểm trên Sheet:
+  =SUM(<các ô con>) so với ô nhóm, cột Chênh lệch = Ngân sách − Thực tế rồi lọc < 0. Phép
+  ngắn bắt buộc phải có thì viết phép tính và ghi "số tự tính, chưa qua công cụ — kiểm lại"
 - Gọi tên hạng mục khi báo lệch
 - ±5% trong SOW là tiêu chí chấm, cách tính chưa thống nhất; ngưỡng đỏ/vàng chỉ là đề xuất
 - Thiếu số thì nói thiếu, không đoán
@@ -150,12 +160,12 @@ Rà bảng của team: mọi tổng tự tính lấy từ `dem_bang` (mục "Tí
 thẳng từ bảng (dòng TỔNG, dòng nhóm, từng ô). Nêu các dấu hiệu bất thường đọc được (TỔNG
 = 0, dòng có số ngoài nhóm, cột còn thiếu, ô thực tế lớn hơn ô ngân sách cùng dòng). Chỉ
 viết "khớp" cho một nhóm hay dòng TỔNG khi đã có tổng của `dem_bang` đặt cạnh ô đó. KHÔNG
-gắn mức ĐỎ/VÀNG nếu chưa viết phép chia ngay cạnh. Danh sách vượt luôn ghi "có thể chưa
-đủ, lọc cột Chênh lệch < 0 để có danh sách đủ".
-DÒNG ĐẦU TIÊN ghi nguồn số: "Tổng do công cụ cộng trên Sheet, số còn lại đọc thẳng từ
-bảng; kiểm lại trên Sheet trước khi dùng." Số tự cộng (số dán vào chat, hoặc khi
-`dem_bang` không chạy) thì ghi rõ "số tự cộng". Thêm: "Danh sách vượt có thể sót mục; team
-soát lại từng nhóm trên Sheet."
+gắn mức ĐỎ/VÀNG nếu chưa có phép chia của `tinh` (chép từ `cau_tinh`) ngay cạnh. Danh sách
+vượt luôn ghi "có thể chưa đủ, lọc cột Chênh lệch < 0 để có danh sách đủ".
+DÒNG ĐẦU TIÊN ghi nguồn số: "Tổng và tỷ lệ do công cụ tính, số còn lại đọc thẳng từ bảng;
+kiểm lại trên Sheet trước khi dùng." Số người dùng dán thì ghi "số người dùng dán, công cụ
+cộng". Chỉ khi công cụ không chạy mới có "số tự tính, chưa qua công cụ". Thêm: "Danh sách
+vượt có thể sót mục; team soát lại từng nhóm trên Sheet."
 
 1) Nguồn: tên bảng, tab, cột thực tế dùng (ngày chốt)
 2) Tổng: dự toán, thực tế, chênh lệch (ghi rõ theo dòng TỔNG hay công cụ cộng)
@@ -164,8 +174,9 @@ soát lại từng nhóm trên Sheet."
    nhóm cấp cao nhất so với dòng TỔNG. Dòng có số mà không thuộc nhóm nào (vd SẢN XUẤT
    CONTENT) thì báo "không vào tổng". Chỉ báo một cột thực tế = 0 mà không soát nhóm là
    CHƯA XONG. Mỗi nhóm một dòng theo khuôn "PRODUCTION (dòng 23–25): X so với dòng nhóm Y
-   → khớp/lệch Z (công cụ cộng)"; số dán vào chat thì ghi phép cộng "a + b + c = X (số tự
-   cộng)". Không viết "khớp" chung cho cả bảng
+   → khớp/lệch Z (công cụ cộng)", Z lấy từ `tinh`; số dán vào chat thì cộng bằng
+   `dem_bang` với `du_lieu` (hoặc `tinh` với tong(a; b; c)) và chép phép cộng từ công cụ.
+   Không viết "khớp" chung cho cả bảng
 3) Cảnh báo: mỗi dòng gồm hạng mục, số, lý do, mức đỏ/vàng/nghi ngờ. Duyệt TỪNG dòng con
    từ trên xuống, lấy số thực tế mới nhất (ô trống hoặc "-" thì lấy cột trước) so với ngân
    sách; cuối danh sách ghi "đã soát N dòng con". Tên hạng mục chứa tên KOL/nghệ sĩ (dòng
@@ -176,11 +187,12 @@ soát lại từng nhóm trên Sheet."
 ## Bảng kiểm trước khi gửi
 
 - Có đủ dự toán, thực tế, dự kiến cuối kỳ (hoặc nói rõ thiếu)
-- Mỗi con số có nguồn: dòng TỔNG, công cụ cộng (`dem_bang`), tự cộng, hay người dùng đưa
+- Mỗi con số có nguồn: dòng TỔNG, công cụ cộng (`dem_bang`), công cụ tính (`tinh`), hay
+  người dùng đưa; không số nào tự tính tay khi công cụ đang chạy
 - Đã soát danh sách khoản dễ sót; dự phòng ghi bằng VND
 - Lập mẫu: đủ 16 cột kể cả %, có công thức Chênh lệch và công thức %, dự phòng ghi kèm ₫
-- Đối chiếu báo giá: đã ghi phép tính, đã hỏi VAT, đã nêu ≥2 khoản dễ sót gồm dự phòng
-  bằng VND
+- Đối chiếu báo giá: đã gọi `tinh` và chép phép tính trong `cau_tinh`, đã hỏi VAT, đã nêu
+  ≥2 khoản dễ sót gồm dự phòng bằng VND
 - Mỗi cảnh báo vượt có mức ĐỎ/VÀNG và câu "ngưỡng đề xuất, team chốt"; không nhắc tên kỹ
   năng hay tài liệu hướng dẫn nội bộ
 - Không đọc được bảng vì quyền: đã xin người dùng dán số tab BẢNG TỔNG, không chỉ bảo đi

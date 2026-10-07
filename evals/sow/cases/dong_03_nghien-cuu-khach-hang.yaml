@@ -96,3 +96,59 @@
       config: {ten: "Nghiên cứu khách hàng và hành vi mua"}
     - type: icontains
       value: "link"
+
+# 07/10/2026 — bảng khảo sát DÁN vào chat (không có Sheet): trước đây kỹ năng bảo Mark tự đếm và
+# "đếm hai lần"; nay phải gọi dem_bang với du_lieu. Dữ liệu GIẢ, 24 người, cột "Biết HAPAS qua đâu"
+# chọn nhiều tách bằng ";". Đáp án đếm ĐỘC LẬP bằng collections.Counter trên đúng chữ dưới đây (tách
+# cột theo " | ", tách ô theo ";"), không qua dem_bang_tool:
+#   n = 24; TikTok 14 (58,3%), Facebook 9 (37,5%), Instagram 5 (20,8%), Bạn bè giới thiệu 4 (16,7%),
+#   Đi ngang cửa hàng 2 (8,3%) — tổng >100% vì chọn nhiều; Đã mua 16 (66,7%) / Chưa mua 8 (33,3%);
+#   nhóm Đã mua: TikTok 11/16; nhóm Chưa mua: TikTok 3/8, Facebook 3/8 (nhóm dưới 10 — chỉ tham khảo);
+#   Ngân sách quà: 500-800k 12, dưới 500k 7, trên 800k 5.
+# người chấm: số khớp đáp án (chép từ cau_so, không lệch ±1); nói câu chọn nhiều nên tổng % >100%;
+# nhóm Chưa mua (8) ghi chỉ tham khảo; không khuyên team tự đếm bằng COUNTIF.
+- description: "SOW 3 · Khảo sát DÁN vào chat 24 dòng, câu chọn nhiều — dem_bang đếm trên du_lieu, đúng từng số"
+  metadata: {sow_dong: 3, hang_muc: "Nghiên cứu khách hàng và hành vi mua (tổng hợp khảo sát cửa hàng)"}
+  vars:
+    ma: d03e
+    hoi: |-
+      Mình dán kết quả khảo sát nhanh ở quầy, tổng hợp giúp: khách biết HAPAS qua đâu, so người đã mua với chưa mua.
+      STT | Biết HAPAS qua đâu (chọn nhiều) | Đã mua chưa | Ngân sách quà
+      1 | TikTok; Facebook | Đã mua | 500-800k
+      2 | Facebook | Chưa mua | dưới 500k
+      3 | TikTok | Đã mua | 500-800k
+      4 | Instagram; TikTok | Đã mua | trên 800k
+      5 | Bạn bè giới thiệu | Chưa mua | dưới 500k
+      6 | TikTok | Đã mua | 500-800k
+      7 | Facebook; Bạn bè giới thiệu | Đã mua | 500-800k
+      8 | TikTok; Instagram | Chưa mua | dưới 500k
+      9 | Facebook | Đã mua | trên 800k
+      10 | TikTok | Đã mua | 500-800k
+      11 | Đi ngang cửa hàng | Chưa mua | dưới 500k
+      12 | TikTok; Facebook | Đã mua | 500-800k
+      13 | Instagram | Đã mua | trên 800k
+      14 | TikTok | Chưa mua | 500-800k
+      15 | Facebook; TikTok | Đã mua | 500-800k
+      16 | Bạn bè giới thiệu | Đã mua | dưới 500k
+      17 | TikTok | Đã mua | 500-800k
+      18 | Đi ngang cửa hàng; Facebook | Chưa mua | dưới 500k
+      19 | TikTok; Instagram | Đã mua | trên 800k
+      20 | Facebook | Chưa mua | 500-800k
+      21 | TikTok | Đã mua | 500-800k
+      22 | Instagram; Facebook | Đã mua | trên 800k
+      23 | TikTok | Chưa mua | dưới 500k
+      24 | Bạn bè giới thiệu; TikTok | Đã mua | 500-800k
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Nghiên cứu khách hàng và hành vi mua"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "dem_bang", co_tham_so: "du_lieu"}
+    - type: icontains-all
+      value: ["24", "58,3%", "37,5%", "20,8%", "16,7%"]
+    - type: icontains-any
+      value: ["66,7%", "16/24", "16 người"]
+    - type: not-icontains
+      value: "COUNTIF"

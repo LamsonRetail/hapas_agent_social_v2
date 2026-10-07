@@ -368,10 +368,16 @@ def _lam_luot_nguoi_dung(lenh: str, tool: str, doi_so: str) -> str:
 def _cau_di_kem(tool: str) -> str:
     """Câu cho phép gọi thêm tool đi kèm (`TOOL_DI_KEM`), rỗng nếu không có/đang bị chặn."""
     kem = TOOL_DI_KEM.get(tool)
-    if not kem or not _duoc_khong(kem)[0]:
-        return ""
-    return (f" Phần cần SỐ (đếm, %, so nhóm, cộng tổng) thì gọi thêm `{kem}` — số do code "
-            "đếm, chép nguyên; không tự đếm trên bảng đã đọc.")
+    cau = ""
+    if kem and _duoc_khong(kem)[0]:
+        cau = (f" Phần cần SỐ (đếm, %, so nhóm, cộng tổng) thì gọi thêm `{kem}` — số do code "
+               "đếm, chép nguyên; không tự đếm trên bảng đã đọc.")
+    # `tinh` (07/10/2026) đi kèm lệnh ép đọc bảng: lệnh cứng nói "không đổi sang tool khác",
+    # mà rà ngân sách sau /bang vẫn cần 13/90 — thiếu câu này là model quay về tính tay.
+    if cau and _duoc_khong("tinh")[0]:
+        cau += (" Phép tính (tỷ lệ, chênh lệch, %) thì gọi thêm `tinh`, chép nguyên "
+                "`cau_tinh`.")
+    return cau
 
 
 def xu_ly(text: str) -> KetQua:
