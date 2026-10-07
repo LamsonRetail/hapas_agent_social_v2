@@ -1,0 +1,8 @@
+# TUỲ CHỌN — chỉ cần khi bật trace Phoenix (PHOENIX_COLLECTOR_ENDPOINT).
+# Mark chạy bằng venv của Hermes (không có requirements.txt riêng). Cài vào ĐÚNG venv đó:
+#   <HERMES_AGENT_DIR>/venv/bin/pip install -r requirements-phoenix.txt
+# Ghim trùng extra `otlp` của Hermes (pyproject.toml: opentelemetry-*==1.39.1) để không
+# đụng bản Hermes tự cài lười cho monitoring. Thiếu gói thì phoenix_trace tự tắt.
+# KHÔNG cài arize-phoenix (server) vào venv này — nó có venv riêng /opt/phoenix/venv.
+opentelemetry-sdk==1.39.1
+opentelemetry-exporter-otlp-proto-http==1.39.1
