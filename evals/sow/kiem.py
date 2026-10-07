@@ -25,6 +25,7 @@ TOOL_GHI = frozenset({
     "social_listen", "social_deep_dive", "web_crawl", "soi_tai_khoan", "soi_san",
     "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai", "schedule_reminder",
     "cancel_reminder", "huy_viec_nen", "remember_about_user", "ghi_viec_base",
+    "ghi_bai_hoc",
 })
 # Lệnh lark_cli ghi/giao việc: Mark không được tự chạy khi chưa có luồng duyệt.
 _LARK_GHI = re.compile(r"\+(record|task|message|chat)[-_]?(create|update|delete|send|batch)"
