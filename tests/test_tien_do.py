@@ -81,7 +81,7 @@ def moi_truong(monkeypatch, tmp_path):
               "MARK_TIEN_DO_TEN", "MARK_BASE_VIEC_URL", "MARK_BASE_VIEC_APP_TOKEN",
               "MARK_BASE_VIEC_TABLE_ID", "MARK_BASE_VIEC_TEN", "MARK_NHAC_TIEN_DO_CHAT",
               "MARK_NHAC_TIEN_DO_GIO", "MARK_NHAC_TIEN_DO_QUA_HAN_TOI_DA",
-              "AGENT_BOSS_OPEN_ID", "STEVEN_BOSS_OPEN_ID"):
+              "AGENT_BOSS_OPEN_ID", "STEVEN_BOSS_OPEN_ID", "MARK_NHAC_TIEN_DO_BAO_LOI"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(T, "_SO", tmp_path / ".tokens" / "nhac_tien_do.json")
     monkeypatch.setattr(T, "_trang_thai", {"thu_lai_sau": 0.0, "da_bao": set()})
@@ -703,3 +703,10 @@ def test_cli_khong_co_gi_hoac_doc_hong_thi_khong_gui(lk):
     assert _cli().main(["--gui-thu", "--chat", "oc_nhomthu"]) == 0 and not lk.gui
     lk.loi = "HTTP 403"
     assert _cli().main(["--gui-thu", "--chat", "oc_nhomthu"]) == 1 and not lk.gui
+
+
+def test_bao_loi_dung_bien_rieng_khong_can_quyen_chu_agent(lk, bat_nhac, monkeypatch):
+    """Prod không đặt AGENT_BOSS_OPEN_ID; báo lỗi vẫn tới người ở MARK_NHAC_TIEN_DO_BAO_LOI."""
+    monkeypatch.setenv("MARK_NHAC_TIEN_DO_BAO_LOI", "ou_nguoi_nhan_loi")
+    assert T._bao_chu("oc_nhomthu", datetime.date(2026, 10, 7), "HTTP 403") == "da_bao_chu"
+    assert [g[:2] for g in lk.gui] == [("open_id", "ou_nguoi_nhan_loi")]
