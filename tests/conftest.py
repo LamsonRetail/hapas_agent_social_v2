@@ -19,7 +19,10 @@ import pytest
 
 #: Biến khiến runtime gọi platform (lease, stamp, danh bạ Năng lực, trace, job).
 _BIEN_PLATFORM = ("LSR_TELEMETRY_API_KEY", "LSR_COLLECTOR", "LSR_PLATFORM_URL",
-                  "LSR_PLATFORM_TOKEN", "LSR_PLATFORM_ADMIN_TOKEN")
+                  "LSR_PLATFORM_TOKEN", "LSR_PLATFORM_ADMIN_TOKEN",
+                  # Phoenix: không bài nào tự xuất trace (phoenix_trace đọc lại env mỗi lượt).
+                  "PHOENIX_COLLECTOR_ENDPOINT", "PHOENIX_API_KEY", "MARK_PHOENIX_SALT",
+                  "MARK_PHOENIX_CONTENT", "MARK_PHOENIX_LLM_INPUT")
 _DIA_CHI_MAY = {"localhost", "127.0.0.1", "::1", None}
 _goc_getaddrinfo = socket.getaddrinfo
 

@@ -26,6 +26,7 @@ Cơ chế:
 | `scheduler.py` | Ticker nền: bắn nhắc hẹn đã đặt, gửi AS bot. |
 | `run.py` | Main: check token → in bot open_id → start scheduler → `start_listener`. Mỗi tin: ack reaction → brain (có timeout) → reply as bot. |
 | `start.ps1` | Launcher dùng venv của Hermes (đã có `requests`) + UTF-8. |
+| `phoenix_trace.py` | Tuỳ chọn: trace mỗi lượt (span LLM + tool) sang Arize Phoenix tự host. Tắt nếu không đặt `PHOENIX_COLLECTOR_ENDPOINT`. Cài server: `deploy/phoenix/README.md`. |
 
 ## Cài đặt
 

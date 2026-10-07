@@ -23,6 +23,7 @@ from concurrent.futures import TimeoutError as FutureTimeout
 
 import lark_client as lark
 import lsr_platform            # nối platform — chỉ báo cáo, không đổi hành vi
+import phoenix_trace           # trace sang Phoenix — tắt nếu thiếu env, không đổi hành vi
 from config import config
 from listener import start_listener
 
@@ -225,6 +226,7 @@ def main() -> None:
     print(f"  Model:      {config.agent_model} (provider={config.agent_provider})")
     print(f"  App ID:     {config.app_id}")
     print(f"  {lsr_platform.bat()}")
+    print(f"  {phoenix_trace.bat()}")
 
     # Cửa vào thứ hai: người quản trị nhắn thử trên console thì platform tạo job.
     # Vòng này đi lấy và đưa vào ĐÚNG brain.reply mà listener Lark vẫn gọi — không

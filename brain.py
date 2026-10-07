@@ -69,6 +69,7 @@ import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho b
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
 import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian)
+import phoenix_trace  # noqa: E402  (trace sang Phoenix tự host; tắt nếu thiếu env)
 
 # Cưỡng chế policy tại điểm hội tụ dispatch, rồi bọc handler của MỌI tool để tự ghi audit.
 # Phải gọi SAU khi tất cả tool đã
@@ -76,6 +77,9 @@ import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian
 # agent chụp lại registry lúc khởi tạo.
 lsr_policy.install_registry_guard(audit.ghi_tool)
 audit.boc_registry()
+# Gắn hook quan sát của Hermes (post_api_request/post_tool_call) — sau khi run_agent và
+# model_tools đã import (discover_plugins chạy lúc đó), trước AIAgent đầu tiên.
+phoenix_trace.bat()
 
 
 # ───────────────────────── persona (character card) ─────────────────────────
@@ -930,6 +934,7 @@ def _chay_co_doi_tai_khoan(agent, user_text: str, history_msgs: list, dung_lai):
         agent = agent_moi
 
 
+@phoenix_trace.luot
 def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
           kenh: dict | None = None) -> str:
     """Generate Mark's reply, with persistent per-chat context + per-user memory.

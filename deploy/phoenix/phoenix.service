@@ -1,0 +1,49 @@
+# /etc/systemd/system/phoenix.service — Arize Phoenix (trace LLM cho Mark), CHỈ localhost.
+# UI + OTLP/HTTP ở 127.0.0.1:6006 (PHOENIX_HOST). gRPC 4317 luôn bind [::] (Phoenix bỏ qua
+# PHOENIX_HOST cho gRPC) — ufw của VPS đã chặn mọi cổng vào trừ 22, xem README.md.
+[Unit]
+Description=Arize Phoenix (LLM tracing for Mark) - localhost only
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=phoenix
+Group=phoenix
+EnvironmentFile=/etc/phoenix/phoenix.env
+Environment=HOME=/var/lib/phoenix
+WorkingDirectory=/var/lib/phoenix
+ExecStart=/opt/phoenix/venv/bin/phoenix serve
+Restart=on-failure
+RestartSec=5
+# Mark thắng khi tranh CPU/IO
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=2G
+CPUQuota=200%
+TasksMax=512
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/phoenix
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+ProtectHostname=yes
+ProtectClock=yes
+# Chỉ nói chuyện với loopback (127.0.0.0/8, ::1): Mark gửi OTLP/HTTP và UI qua tunnel đều
+# là 127.0.0.1:6006. Lớp thứ hai sau ufw: gRPC [::]:4317 cũng không nhận gói từ ngoài, và
+# Phoenix không gọi ra Internet được (đã tắt telemetry/external resources).
+IPAddressAllow=localhost
+IPAddressDeny=any
+# Không đặt MemoryDenyWriteExecute: numpy/pyarrow/grpc có thể cần trang W+X.
+
+[Install]
+WantedBy=multi-user.target
