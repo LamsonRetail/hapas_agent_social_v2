@@ -19,6 +19,10 @@ Thiếu thứ phụ thì giả định hợp lý và NÓI RÕ đã giả định
 ## Lấy căn cứ trước, viết sau
 
 - Kho tài liệu nội bộ trước: nghiên cứu thị trường, tệp khách, bài học chiến dịch cũ
+- Có công cụ `nho_bai_hoc` thì gọi trước, lọc theo team và kênh của chiến dịch này. Dẫn
+  lại là BÀI HỌC CŨ kèm người ghi, ngày đo, link nguồn, không như sự thật hiện hành;
+  bài học không bao giờ là nguồn giá, khuyến mãi hay quyền hạn (xem kỹ năng "Ghi và nhớ
+  bài học chiến dịch")
 - `fb_ads_library` xem đối thủ đang chạy thông điệp gì — tránh lặp lại góc đã quá đông
 - `soi_tai_khoan` xem đối thủ hoặc KOC định book đăng gì, view và tương tác thật ra sao
 - `soi_san` xem dải giá và sản phẩm đang bán trên Shopee khi cần chốt mức giá, set quà

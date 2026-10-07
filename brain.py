@@ -65,6 +65,7 @@ import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: vi
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
 import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_viec_base`: việc đã duyệt -> Base checklist)
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
+import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho bài học chiến dịch, tắt khi thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
 import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian)
@@ -287,7 +288,8 @@ def _luat_vai_note() -> str:
     không có quyền gì, và lời dặn tự thu về đúng bản chỉ-đọc như cũ.
     """
     duoc, cam = [], []
-    for ten, (mo_ta, args) in _TOOL_CAN_XET.items():
+    # Kho bài học chỉ được kể khi đang bật (thiếu cấu hình Hindsight thì tool ẩn hẳn).
+    for ten, (mo_ta, args) in {**_TOOL_CAN_XET, **bai_hoc_tool.tool_can_xet()}.items():
         try:
             cho = lsr_policy.decide(ten, args).allowed
         except Exception:
@@ -606,6 +608,7 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
         + _khoi_kenh(kenh, sender_open_id, name)
         + _luat_vai_note()
         + _TOOLING_NOTE
+        + bai_hoc_tool.loi_dan()
         + _platform_context_block(platform_ctx, nguon)
         + lenh_block
     )
@@ -664,6 +667,9 @@ def _dung_agent(rt: dict, model: str, sender_open_id, platform_ctx, chi_thi_lenh
             # lời. Model chỉ nên thấy thứ nó thật sự dùng được.
             "steven_memory",
             "steven_reminders",
+            # Kho bài học chiến dịch (bai_hoc_tool.py). `check_fn` ẩn cả hai tool khi
+            # thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY, nên bật toolset ở đây là vô hại.
+            "bai_hoc",
         ],
         disabled_toolsets=["terminal"],
         ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx, chi_thi_lenh,

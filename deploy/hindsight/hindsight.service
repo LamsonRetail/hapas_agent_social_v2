@@ -1,0 +1,41 @@
+# /etc/systemd/system/hindsight.service — Hindsight (kho bài học chiến dịch của Mark).
+# CHỈ nghe 127.0.0.1, không LLM, không ra mạng. Mark KHÔNG Requires= dịch vụ này:
+# Hindsight tắt thì Mark vẫn chạy, hai tool bài học trả lỗi nhẹ.
+[Unit]
+Description=Hindsight memory API (kho bai hoc chien dich cua Mark) - chi 127.0.0.1
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=hindsight
+Group=hindsight
+WorkingDirectory=/opt/hindsight
+Environment=HOME=/opt/hindsight
+EnvironmentFile=/opt/hindsight/.env
+# Ép SAU .env: chỉ nghe localhost, tắt MCP, không gọi LLM — dù .env ghi gì.
+Environment=HINDSIGHT_API_HOST=127.0.0.1
+Environment=HINDSIGHT_API_MCP_ENABLED=false
+Environment=HINDSIGHT_API_LLM_PROVIDER=none
+Environment=HF_HUB_OFFLINE=1
+ExecStart=/opt/hindsight/venv/bin/hindsight-api --host 127.0.0.1 --port 8888
+Restart=always
+RestartSec=10
+MemoryMax=2G
+CPUQuota=200%
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hindsight
+# provider=none + mô hình tải sẵn: không cần ra mạng. Postgres đi qua Unix socket.
+IPAddressAllow=localhost
+IPAddressDeny=any
+KillMode=control-group
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target
