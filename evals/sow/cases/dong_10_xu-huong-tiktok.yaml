@@ -1,0 +1,61 @@
+# SOW 10 — Nghiên cứu xu hướng và lập kế hoạch TikTok. Skill: skills/cham-diem-xu-huong-tiktok.md
+# Tìm trend mới (tốn tiền) chuyển sang skills/social-query-planning.md.
+
+# 5 trend, trend 3 (nấu mì cay) là gượng ép, lệch ngành. Không trend nào có ngày đăng → Thời gian "không rõ".
+# người chấm: mỗi trend đủ 4 tiêu chí kèm một câu lý do; điểm tổng đúng trọng số (không trung bình cộng),
+# ghi "tổng chưa tính thời gian"; trend mì cay bị loại hoặc chấm thấp; có 1 chuỗi 3–5 tập, mỗi tập có vai trò
+# sản phẩm; lịch (nếu có) viết từng khối, không dấu gạch đứng, có Video tham khảo và Lý do chọn (điểm X/5).
+- description: "SOW 10 · Chấm 5 trend — 4 tiêu chí có lý do, Thời gian 'không rõ', loại trend nấu ăn gượng ép, ra chuỗi"
+  metadata: {sow_dong: 10, hang_muc: "Nghiên cứu xu hướng và lập kế hoạch TikTok"}
+  vars:
+    ma: d10a
+    hoi: |-
+      Mình có 5 trend TikTok: 1) 'Get ready with me' đi hẹn hò; 2) 'What's in my bag' đi làm; 3) công thức nấu mì cay 7 cấp độ; 4) biến hình outfit theo nhịp nhạc; 5) 'Quà tặng mẹ bất ngờ'. Chấm giúp xem cái nào hợp HAPAS và lên một chuỗi cho tháng 11.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Chọn xu hướng và lên chuỗi TikTok"}
+    - type: icontains-all
+      value: ["mì cay", "gượng ép", "không rõ", "chưa tính thời gian"]
+    - type: icontains
+      value: "Điểm do Mark tính tay theo bảng tra"
+
+# người chấm: nêu phạm vi (TikTok VN, 7 ngày, ngành túi xách) và chép câu ước tính chi phí; chưa đưa trend nào.
+- description: "SOW 10 · Tìm trend TikTok tuần này — ước tính chi phí miễn phí trước, hỏi 'Chạy nhé?', không tự quét"
+  metadata: {sow_dong: 10, hang_muc: "Nghiên cứu xu hướng và lập kế hoạch TikTok"}
+  vars:
+    ma: d10b
+    hoi: |-
+      Tìm trend TikTok tuần này cho túi xách.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Lập kế hoạch truy vấn social"}
+    - type: python
+      value: file://kiem.py:chi_uoc_tinh
+      config: {ten: "social_listen"}
+    - type: icontains
+      value: "Chạy nhé"
+    - type: icontains-any
+      value: ["USD", "$"]
+
+# Dãy view 12k, 8k, 30k, 9k → xếp tăng 8k, 9k, 12k, 30k → trung vị (9k + 12k) ÷ 2 = 10,5k.
+# người chấm: so tương tác từng tập với trung vị (trung vị tương tác = (2,4 + 3,1) ÷ 2 = 2,75%), nói riêng
+# tập 4 (mới nhất) tụt lại sau tập đột biến; kết luận tiếp tục/chỉnh/dừng kèm lý do bằng số.
+- description: "SOW 10 · Đánh giá chuỗi đã đăng — câu mở bắt buộc, trung vị view 10,5k, xét tập mới nhất"
+  metadata: {sow_dong: 10, hang_muc: "Nghiên cứu xu hướng và lập kế hoạch TikTok"}
+  vars:
+    ma: d10c
+    hoi: |-
+      Chuỗi 'Trong túi nàng có gì' đã đăng 4 tập, view lần lượt 12k, 8k, 30k, 9k; tương tác 3,1%, 2,4%, 5,0%, 2,2%. Nên làm tiếp hay đổi?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Chọn xu hướng và lên chuỗi TikTok"}
+    - type: icontains
+      value: "Mark không tự đọc được số liệu kênh TikTok của HAPAS"
+    - type: icontains-any
+      value: ["10,5k", "10.5k", "10,5 k", "10.5 k", "10.500"]

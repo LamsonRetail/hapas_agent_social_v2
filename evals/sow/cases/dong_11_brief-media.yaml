@@ -1,0 +1,62 @@
+# SOW 11 — Đặt yêu cầu và phối hợp sản xuất ảnh/video (brief order media/design).
+# Skill: skills/brief-order-media.md
+
+# người chấm: dòng brief giữ đủ 11 cột đúng tên (Người order và PIC tách riêng); có shot list (chính diện,
+# nghiêng 45 độ, mặt sau, đáy, cận khoá/logo, lòng túi, trên người mẫu...) và đạo cụ; câu hỏi gộp cuối có
+# số mã/màu, địa điểm/bối cảnh, người mẫu, số lượng, KV, REF, ngày ready quay, deadline có năm, budget, PIC;
+# 25/10 được ghi "giả định: deadline media trả".
+- description: "SOW 11 · Brief chụp BST túi cho TikTok + FB feed hạn 25/10 — đủ cột, 9:16 và 4:5, bảng kiểm nghiệm thu, hỏi thiếu"
+  metadata: {sow_dong: 11, hang_muc: "Đặt yêu cầu và phối hợp sản xuất ảnh/video (brief order media/design)"}
+  vars:
+    ma: d11a
+    hoi: |-
+      Viết brief order media cho buổi chụp BST túi mới dùng cho TikTok và FB feed, deadline 25/10
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Soạn brief order media và design"}
+    - type: icontains-all
+      value: ["9:16", "4:5", "25/10", "BẢNG KIỂM NGHIỆM THU", "CẦN BỔ SUNG", "REF", "Người order"]
+    - type: icontains
+      value: "dễ viral trên social"
+    - type: icontains-all
+      value: ["địa điểm", "người mẫu"]
+
+# người chấm: đủ 4 mục ORD (Hạng mục thiết kế, Phong cách, Content, Tài nguyên); trường bắt buộc chưa có
+# ghi THIẾU (gợi ý nếu có phải sau chữ THIẾU, nhãn "gợi ý, giả định"); không đoán kích thước banner.
+- description: "SOW 11 · Order design banner sale 11.11 — đủ 4 mục ORD, 8 trường (BẮT BUỘC), trường thiếu ghi THIẾU"
+  metadata: {sow_dong: 11, hang_muc: "Đặt yêu cầu và phối hợp sản xuất ảnh/video (brief order media/design)"}
+  vars:
+    ma: d11b
+    hoi: |-
+      Order design banner sale 11.11
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Soạn brief order media và design"}
+    - type: python
+      value: file://kiem.py:dem_it_nhat
+      config: {cum: "(BẮT BUỘC)", n: 8}
+    - type: icontains-all
+      value: ["Yêu cầu bố cục", "Kích thước", "Tone & Mood", "Màu chủ đạo", "Headline", "Link drive", "THIẾU"]
+
+# người chấm: không bảo gửi video vào chat; xin script/chữ on-screen dạng text hoặc ảnh chụp khung hình chính;
+# bảng kiểm điền sẵn tiêu chí từ brief, tiêu chí brief không nêu ghi CẦN BỔ SUNG; không bịa kết quả kiểm.
+- description: "SOW 11 · Nghiệm thu video TVC — nói thẳng không xem được video, bảng kiểm điền sẵn 9:16, 30 giây, KV, chữ on-screen"
+  metadata: {sow_dong: 11, hang_muc: "Đặt yêu cầu và phối hợp sản xuất ảnh/video (brief order media/design)"}
+  vars:
+    ma: d11c
+    hoi: |-
+      Media vừa gửi video TVC bản cuối, check giúp đã đúng brief chưa
+    luot_truoc:
+      - "Brief TVC: 1 video dọc 9:16 30 giây, kết hiện KV, text on-screen 'Yêu chiều nàng'"
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Soạn brief order media và design"}
+    - type: icontains
+      value: "không xem được"
+    - type: icontains-all
+      value: ["9:16", "30 giây", "Yêu chiều nàng", "KV"]

@@ -1,0 +1,67 @@
+# SOW 7 — Theo dõi ngân sách từng chiến dịch. Skill: skills/theo-doi-ngan-sach.md
+# Đáp án tab BẢNG TỔNG (đọc chỉ-đọc ngày 06/10): dòng TỔNG NGÂN SÁCH = 8.385.649.200;
+# TỔNG thực tế cột (18.9) = 7.919.960.726; cột (5.10) chưa có công thức tổng.
+
+# người chấm: chỉ ra cột thực tế 5.10 có số ở dòng chi tiết mà dòng TỔNG trống/0; chỉ ra SẢN XUẤT CONTENT
+# đứng ngoài tổng PRODUCTION; nêu bảng thiếu cột đã cam kết / đã thanh toán / dự kiến cuối kỳ; danh sách
+# vượt ghi "có thể chưa đủ, lọc cột Chênh lệch < 0"; không chép tên KOL/nghệ sĩ trong tên hạng mục.
+- description: "SOW 7 · Rà BẢNG TỔNG — tổng dự toán ≈8,39 tỷ, thực tế ≈7,92 tỷ, khoản ngoài tổng, cột còn thiếu"
+  metadata: {sow_dong: 7, hang_muc: "Theo dõi ngân sách từng chiến dịch"}
+  vars:
+    ma: d07a
+    hoi: |-
+      /bang https://o4pvcegwn6b.sg.larksuite.com/sheets/OsbvsgC1chru5mtG7RFli2vFg1b?sheet=f99011 tab BẢNG TỔNG: cho mình tổng dự toán, thực tế, chênh lệch, hạng mục vượt và lỗi cộng tổng nếu có
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Theo dõi ngân sách chiến dịch"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "doc_bang"}
+    - type: icontains-any
+      value: ["8.385", "8,385", "8385", "8,39", "8.39"]
+    - type: icontains-any
+      value: ["7.919", "7,919", "7919", "7,92", "7.92"]
+    - type: icontains-all
+      value: ["SẢN XUẤT CONTENT", "cam kết", "dự kiến cuối kỳ", "kiểm lại trên Sheet"]
+
+# người chấm: không dùng bảng markdown; liệt kê ≥5 khoản dễ sót (VAT/thuế TNCN, vận chuyển, overtime,
+# in lại, quà/merch, phí nền tảng, setup/dọn địa điểm, phí agency).
+- description: "SOW 7 · Lập mẫu theo dõi ngân sách pop-up 200 triệu — đủ 16 cột, công thức, dự phòng bằng VND"
+  metadata: {sow_dong: 7, hang_muc: "Theo dõi ngân sách từng chiến dịch"}
+  vars:
+    ma: d07b
+    hoi: |-
+      Lập giúp mình mẫu theo dõi ngân sách cho event pop-up 200 triệu
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Theo dõi ngân sách chiến dịch"}
+    - type: icontains-all
+      value: ["Dự toán duyệt", "Đã cam kết", "Đã thanh toán", "Dự kiến cuối kỳ", "Chênh lệch", "Chứng từ", "dự phòng", "VAT"]
+    # Dự phòng 10–15% của 200 triệu: chấp nhận khoảng "20–30 triệu" hoặc một mức % trong 10–15.
+    - type: regex
+      value: '20\s*[–-]\s*30 triệu|(?:1[0-5])(?:[,.]\d+)?\s*%'
+
+# người chấm: ghép báo giá với hạng mục kế hoạch; cộng lần hai theo thứ tự khác; nói tổng có thể còn tăng.
+- description: "SOW 7 · Đối chiếu báo giá booth 103 triệu vs duyệt 90 triệu — phép tính, mức ĐỎ, khoản dễ sót, dự phòng VND"
+  metadata: {sow_dong: 7, hang_muc: "Theo dõi ngân sách từng chiến dịch"}
+  vars:
+    ma: d07c
+    hoi: |-
+      Đây là báo giá bên setup booth mình dán: dựng booth 85.000.000, in ấn 12.000.000, vận chuyển 6.000.000. Kế hoạch duyệt cho hạng mục này là 90 triệu. Đối chiếu giúp mình.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Theo dõi ngân sách chiến dịch"}
+    - type: icontains-all
+      value: ["103", "13", "ĐỎ", "VAT", "ngưỡng đề xuất"]
+    - type: icontains-any
+      value: ["14,4", "14.4"]
+    - type: icontains-any
+      value: ["tháo dỡ", "dọn địa điểm", "dọn dẹp"]
+    - type: icontains-any
+      value: ["13,5", "13.5"]

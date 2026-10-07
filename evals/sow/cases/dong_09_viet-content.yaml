@@ -1,0 +1,87 @@
+# SOW 9 — Viết content. Skill: skills/viet-content.md
+
+# Câu hỏi không có giá, hạn, điều kiện → mọi thông tin thương mại phải là [CẦN XÁC NHẬN...].
+# Regex: không có ngày dd/mm nào khác '20/11' (trừ dạng "slide 1/5"), không số tiền, không phần trăm.
+# người chấm: có 3 mở đầu khác góc; mục CẦN XÁC NHẬN liệt kê riêng từng điều kiện (kênh/cửa hàng, cộng dồn,
+# số lượng, đơn tối thiểu, quà kèm, thời hạn); bài xưng HAPAS, không xưng "tôi"; hashtag tự đặt có "(gợi ý)".
+- description: "SOW 9 · Caption FB mua túi tặng ví 20/11 khi chưa có giá/hạn — đủ bộ nhãn, mọi thông tin thương mại CẦN XÁC NHẬN"
+  metadata: {sow_dong: 9, hang_muc: "Viết content"}
+  vars:
+    ma: d09a
+    hoi: |-
+      Viết caption FB cho chương trình mua túi tặng ví dịp 20/11
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Viết content bài đăng HAPAS"}
+    - type: icontains-all
+      value: ["MỞ ĐẦU", "CTA", "CHỮ TRÊN ẢNH", "CẦN XÁC NHẬN", "điều kiện áp dụng"]
+    - type: not-regex
+      value: '(?<![\w/])(?<!lide )(?!20/11(?!\d))(?!24/7(?!\d))(?:0?[1-9]|[12]\d|3[01])/(?:0?[1-9]|1[0-2])(?!\d)'
+    - type: not-regex
+      value: '\d{1,3}(?:[.,]\d{3})+\s*(?:đ|₫|VND|VNĐ|vnđ)|\d+\s*[kK]\b|\d+\s*(?:nghìn|triệu)'
+    - type: not-regex
+      value: '\d+\s*%'
+    - type: icontains
+      value: "Tôi không đăng bài"
+
+# người chấm: bài nhiều ảnh đúng 5 slide, slide 1 hook, slide cuối CTA có link; CẦN XÁC NHẬN có dòng
+# hỏi 890.000đ là giá gốc hay giá ưu đãi; không đổi "15-20/11" thành "15–20/11" hay "15 đến 20/11".
+- description: "SOW 9 · Bài FB + nhiều ảnh túi Mây có đủ thông tin — giá, hạn, link dùng nguyên văn, link có ở 3 chỗ"
+  metadata: {sow_dong: 9, hang_muc: "Viết content"}
+  vars:
+    ma: d09b
+    hoi: |-
+      Viết bài FB + bản nhiều ảnh cho túi Mây, giá 890.000đ, áp dụng 15-20/11, link https://hapas.vn/vi-du, CTA nhắn tin page
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Viết content bài đăng HAPAS"}
+    - type: icontains-all
+      value: ["890.000đ", "15-20/11", "BÀI NHIỀU ẢNH", "BẢN RÚT GỌN"]
+    - type: python
+      value: file://kiem.py:dem_it_nhat
+      config: {cum: "https://hapas.vn/vi-du", n: 3}
+
+# Caption cài sẵn 4 lỗi: "Tui" (Túi), "thiếc" (thiết), "hôm nai" (hôm nay) và cam kết "tốt nhất thị trường".
+# người chấm: mỗi chỗ sửa một dòng "câu gốc -> đề xuất -> lý do"; "tốt nhất thị trường" có cụm thay thế cụ thể
+# (không chỉ "bỏ"); bản đã sửa giữ hạn "hôm nay", không thay bằng [CẦN XÁC NHẬN].
+- description: "SOW 9 · Sửa caption — bắt 3 lỗi chính tả + cam kết 'tốt nhất thị trường', giữ ý gốc 'hôm nay'"
+  metadata: {sow_dong: 9, hang_muc: "Viết content"}
+  vars:
+    ma: d09c
+    hoi: |-
+      Sửa giúp caption này: 'Tui xách HAPAS da mềm mại, thiếc kế tinh tế, tốt nhất thị trường, mua ngay kẻo lỡ nhé các nàng, sale chỉ còn hôm nai!'
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Viết content bài đăng HAPAS"}
+    - type: icontains-all
+      value: ["SỬA TỪNG CHỖ", "BẢN ĐÃ SỬA", "Túi xách", "thiết kế", "hôm nay", "tốt nhất thị trường", "lỗi chính tả"]
+
+# Kịch bản cài sẵn: tuyên bố không kiểm chứng ("bền nhất thị trường", "10 năm không hỏng"),
+# giảm giá chưa xác nhận, không gắn nhãn quảng cáo/hợp tác.
+# người chấm: trích nguyên văn đoạn có vấn đề, gắn cờ thiếu nhãn quảng cáo/hợp tác, ưu đãi 50% phải khớp chính sách,
+# không tự kết luận pháp lý; giữ giọng KOC khi đề xuất sửa.
+- description: "SOW 9 · Định tuyến — duyệt kịch bản KOC là việc duyệt nội dung KOL/KOC, không phải viết content"
+  metadata: {sow_dong: 9, hang_muc: "Viết content"}
+  vars:
+    ma: d09d
+    hoi: |-
+      Duyệt giúp kịch bản video KOC review túi HAPAS này trước khi họ đăng:
+      Cảnh 1: "Chiếc túi này bền nhất thị trường, dùng 10 năm không hỏng luôn mọi người ơi."
+      Cảnh 2: mở túi, cho thấy đựng vừa laptop và bình nước.
+      Cảnh 3: "Đang giảm 50% chỉ hôm nay, link ở bio nha!"
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Duyệt nội dung KOL/KOC và quảng cáo"}
+    - type: python
+      value: file://kiem.py:khong_nap_ky_nang
+      config: {ten: "Viết content bài đăng HAPAS"}
+    - type: icontains-all
+      value: ["bền nhất thị trường", "50%"]

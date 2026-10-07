@@ -1,0 +1,50 @@
+# SOW 2 — Nghiên cứu thị trường và đối thủ (DA_CO_SAN: không viết skill mới).
+# Ca hồi quy: các skill SOW mới không được cướp việc chọn skill của mảng đối thủ.
+
+# người chấm: câu trả lời nêu đủ 3 ý — công cụ sẽ dùng (quét social / soi tài khoản / thư viện quảng cáo),
+# phạm vi (3 đối thủ, FB + TikTok, dịp 20/11) và chi phí ước tính — rồi mới hỏi xác nhận; chưa đưa kết quả nào.
+- description: "SOW 2 · Đối thủ — so 3 brand dịp 20/11 trên FB/TikTok: báo phạm vi, chi phí, hỏi 'Chạy nhé?'"
+  metadata: {sow_dong: 2, hang_muc: "Nghiên cứu thị trường và đối thủ"}
+  vars:
+    ma: d02a
+    hoi: |-
+      So sánh thông điệp và ưu đãi dịp 20/11 của 3 đối thủ Charles & Keith, Vascara, Juno trên Facebook và TikTok. Chưa chạy vội, báo mình phạm vi và chi phí trước.
+    luot_truoc: []
+  assert:
+    - type: assert-set
+      threshold: 0.5
+      assert:
+        - type: python
+          value: file://kiem.py:nap_ky_nang
+          config: {ten: "Lập kế hoạch truy vấn social"}
+        - type: python
+          value: file://kiem.py:nap_ky_nang
+          config: {ten: "Phân tích định vị đối thủ"}
+    - type: python
+      value: file://kiem.py:khong_nap_ky_nang
+      config: {ten: "Lập và rà kế hoạch tổng chiến dịch"}
+    - type: icontains
+      value: "Chạy nhé"
+    - type: icontains-any
+      value: ["USD", "$"]
+
+# người chấm: kết quả trích thông điệp/ưu đãi có nguồn từ thư viện quảng cáo, không bịa mẫu quảng cáo.
+- description: "SOW 2 · Đối thủ — hỏi quảng cáo FB của đối thủ → thư viện quảng cáo (miễn phí), không nhầm sang audit ads nhà"
+  metadata: {sow_dong: 2, hang_muc: "Nghiên cứu thị trường và đối thủ"}
+  vars:
+    ma: d02b
+    hoi: |-
+      Đối thủ Charles & Keith đang chạy quảng cáo Facebook gì dịp 20/10?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Phân tích quảng cáo đối thủ"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "fb_ads_library"}
+    - type: python
+      value: file://kiem.py:khong_nap_ky_nang
+      config: {ten: "Audit hiệu quả quảng cáo"}
+    - type: icontains-any
+      value: ["Charles & Keith", "Charles&Keith", "Charles and Keith"]

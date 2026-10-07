@@ -1,0 +1,83 @@
+# SOW 3 — Nghiên cứu khách hàng và hành vi mua. Skill: skills/nghien-cuu-khach-hang.md
+# Lưu ý: brief gốc có đáp án số đếm (n=52, B5 37/20/11...), nhưng skill đã chốt LUẬT CỨNG "bảng dài
+# >20 dòng thì KHÔNG tự đếm, đưa n từng tab + công thức COUNTIF". Tiêu chí dưới bám skill.
+
+# người chấm: không đưa số đếm/% tự đếm cho tab 52 dòng; mỗi câu (yếu tố quyết định, khó khăn, lý do
+# chưa mua, so đã mua/chưa mua) có công thức COUNTIF/COUNTIFS; nói nhóm chưa mua nhỏ (<10) chỉ tham khảo;
+# báo thiếu cột cửa hàng/ngày/người phỏng vấn; không chép tên khách.
+- description: "SOW 3 · Khảo sát — tổng hợp tab Khách store 52 dòng: nêu n, không tự đếm, đưa COUNTIF"
+  metadata: {sow_dong: 3, hang_muc: "Nghiên cứu khách hàng và hành vi mua (tổng hợp khảo sát cửa hàng)"}
+  vars:
+    ma: d03a
+    hoi: |-
+      Đọc https://o4pvcegwn6b.sg.larksuite.com/sheets/ALdIsJOzGhij5htSKULlrcv8gBe?sheet=vc76ip rồi tổng hợp tab Khách store HAPAS: yếu tố quyết định, khó khăn, lý do chưa mua, so sánh đã mua/chưa mua
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Nghiên cứu khách hàng và hành vi mua"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "doc_bang"}
+    - type: icontains
+      value: "52"
+    - type: icontains
+      value: "COUNTIF"
+    # Kỹ năng ghi câu mở đầu "Mark không tự đếm"; Mark xưng "tôi" nên chỉ chấm ý, không chấm nguyên văn.
+    - type: icontains
+      value: "không tự đếm"
+
+# người chấm: thang thu nhập một bộ mã không chồng lấn; câu mua hay không rẽ nhánh Có/Chưa, ghi bước nhảy
+# cả hai nhánh, người chưa mua không bị "kết thúc phỏng vấn"; giới do người phỏng vấn ghi; câu xếp hạng có ô hạng.
+- description: "SOW 3 · Bảng hỏi — khách nữ tự mua túi tại cửa hàng: đầu phiếu đủ ô, nhánh mua/chưa mua, phiếu quan sát"
+  metadata: {sow_dong: 3, hang_muc: "Nghiên cứu khách hàng và hành vi mua (tổng hợp khảo sát cửa hàng)"}
+  vars:
+    ma: d03b
+    hoi: |-
+      Soạn giúp mình bảng hỏi phỏng vấn khách nữ tự mua túi tại cửa hàng
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Nghiên cứu khách hàng và hành vi mua"}
+    - type: icontains-all
+      value: ["Mã khách", "Cửa hàng/mall", "Người phỏng vấn", "phiếu quan sát", "triệu"]
+    - type: icontains
+      value: "hạng"
+
+# người chấm: chân dung chỉ dùng thuộc tính có cột trong tab đang dùng (tab store không có nghề nghiệp →
+# không tự thêm nghề nghiệp); câu sàng lọc không thành thuộc tính; không có số tự đếm cho bảng dài.
+- description: "SOW 3 · Chân dung khách — chỉ từ dữ liệu, nêu cỡ mẫu từng tab và nhóm mẫu còn thiếu"
+  metadata: {sow_dong: 3, hang_muc: "Nghiên cứu khách hàng và hành vi mua (tổng hợp khảo sát cửa hàng)"}
+  vars:
+    ma: d03c
+    hoi: |-
+      Từ khảo sát cửa hàng này mô tả chân dung khách HAPAS điển hình
+    luot_truoc:
+      - "Đây là sheet khảo sát: https://o4pvcegwn6b.sg.larksuite.com/sheets/ALdIsJOzGhij5htSKULlrcv8gBe"
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Nghiên cứu khách hàng và hành vi mua"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "doc_bang"}
+    - type: icontains-all
+      value: ["52", "16", "Nhóm mẫu còn thiếu"]
+
+- description: "SOW 3 · Định tuyến — bóc bình luận TikTok là việc deep-dive bình luận, không phải nghiên cứu khảo sát"
+  metadata: {sow_dong: 3, hang_muc: "Nghiên cứu khách hàng và hành vi mua (tổng hợp khảo sát cửa hàng)"}
+  vars:
+    ma: d03d
+    hoi: |-
+      Bóc giúp các bình luận chê giá dưới bài TikTok mới nhất của HAPAS
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Deep-dive bình luận"}
+    - type: python
+      value: file://kiem.py:khong_nap_ky_nang
+      config: {ten: "Nghiên cứu khách hàng và hành vi mua"}
+    - type: icontains
+      value: "link"

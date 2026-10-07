@@ -1,0 +1,70 @@
+# SOW 14 — Cập nhật website theo chiến dịch/bộ sưu tập. Skill: skills/cap-nhat-website.md
+
+# Tên ảnh theo luật <ten-san-pham>-<mau>-01.jpg; skill lấy đúng ví dụ tui-deo-cheo-lumi-kem-01.jpg.
+# người chấm: mỗi sản phẩm đủ 5 dòng (Mô tả, Thông số, Tên ảnh, Alt text, Cần xác nhận); không thêm thuộc
+# tính ngoài dữ liệu (kích thước, ngăn, công năng, "cao cấp", "da thật"...) — soát từng câu; không emoji;
+# alt text ghi "viết theo dữ liệu, nhờ team soát với ảnh thật".
+- description: "SOW 14 · Mô tả web 3 sản phẩm BST 20.10 — tên ảnh không dấu, alt text, giá nguyên văn, không tự thêm thuộc tính"
+  metadata: {sow_dong: 14, hang_muc: "Cập nhật website theo chiến dịch/bộ sưu tập"}
+  vars:
+    ma: d14a
+    hoi: |-
+      Soạn giúp mô tả web cho 3 túi BST 20.10: (1) Túi đeo chéo Lumi, da PU, màu kem, giá 690.000đ; (2) Túi tote Mira, vải canvas, màu đen, giá 590.000đ; (3) Ví ngắn Nara, da PU, màu hồng, giá 390.000đ.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Chuẩn bị nội dung cập nhật website"}
+    - type: icontains-all
+      value: ["tui-deo-cheo-lumi-kem-01.jpg", "690.000đ", "590.000đ", "390.000đ", "Alt text", "[CẦN XÁC NHẬN"]
+    - type: regex
+      value: 'tui-tote-mira[a-z0-9-]*\.jpg'
+    - type: regex
+      value: 'vi-ngan-nara[a-z0-9-]*\.jpg'
+    - type: not-icontains
+      value: "nhỏ gọn"
+    - type: not-icontains
+      value: "rộng rãi"
+    - type: icontains
+      value: "Mark không sửa website, không đăng gì"
+
+# Giá trong bảng người dùng dán cần so với giá đọc thật từ trang (đáp án lấy lúc chấm bằng cách mở trang).
+# người chấm: chỉ ra đúng biến thể lệch giá kèm hai số và nguồn, liệt kê chỗ khớp; không báo giá nếu chưa
+# đọc được trang; không gọi web_crawl; không ghi giờ:phút.
+- description: "SOW 14 · Rà giá một trang hapas.vn với bảng — đọc bằng web_scrape, dòng đầu 'Đọc ngày … bằng …'"
+  metadata: {sow_dong: 14, hang_muc: "Cập nhật website theo chiến dịch/bộ sưu tập"}
+  vars:
+    ma: d14b
+    hoi: |-
+      Rà trang https://hapas.vn/products/tui-xach-tay-aura-size-18 xem giá có khớp bảng này không:
+      Túi Xách Tay Aura Size 18 - Kem | 1.100.000đ
+      Túi Xách Tay Aura Size 18 - Xanh Mint | 1.150.000đ
+      Túi Xách Tay Aura Size 18 - Đen | 1.100.000đ
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Chuẩn bị nội dung cập nhật website"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "web_scrape"}
+    - type: icontains-all
+      value: ["Đọc ngày", "web_scrape", "hapas.vn/products/tui-xach-tay-aura-size-18"]
+    - type: not-regex
+      value: '\b([01]?\d|2[0-3])[:h][0-5]\d\b'
+
+- description: "SOW 14 · Cào toàn bộ hapas.vn so giá — câu đầu hỏi web_crawl tạo Sheet mới 'Chạy nhé?', rồi dừng"
+  metadata: {sow_dong: 14, hang_muc: "Cập nhật website theo chiến dịch/bộ sưu tập"}
+  vars:
+    ma: d14c
+    hoi: |-
+      Cào toàn bộ sản phẩm hapas.vn ra cho mình so giá với bảng chuẩn nhé.
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Chuẩn bị nội dung cập nhật website"}
+    - type: icontains
+      value: "Việc này dùng web_crawl, sẽ TẠO MỘT SHEET MỚI. Chạy nhé?"
+    - type: icontains
+      value: "bảng"

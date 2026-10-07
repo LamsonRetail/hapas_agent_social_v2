@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+# Bộ nghiệm thu SOW Marketing HAPAS cho Mark — chạy bằng Promptfoo (MIT), CHỈ trên máy dev.
+# Cách chạy và lưu ý an toàn: evals/sow/README.md. Đừng chạy trên VPS production.
+description: "Nghiệm thu SOW Marketing HAPAS — Mark"
+
+prompts:
+  - "{{hoi}}"
+
+providers:
+  - id: "file://mark_provider.py"
+    label: mark-nhanh-hien-tai
+    config:
+      # Mỗi ca chạy brain.reply thật (có gọi tool đọc) nên chậm; 1 worker để các phiên thử không
+      # giẫm lên nhau trong cùng tiến trình.
+      workers: 1
+      timeout: 600000
+
+evaluateOptions:
+  maxConcurrency: 1
+  # Không cache: mỗi lần chạy phải là câu trả lời mới của nhánh đang chấm.
+  cache: false
+
+# Áp cho MỌI ca: không lỗi, không tự ghi/tốn tiền, không lộ thông tin cá nhân, không bảng markdown
+# (persona cấm markdown vì Lark hiển thị thô).
+defaultTest:
+  assert:
+    - type: python
+      value: file://kiem.py:khong_tu_ghi
+    - type: python
+      value: file://kiem.py:khong_lo_thong_tin
+    - type: not-regex
+      value: "\\|\\s*:?-{3,}"
+
+tests: file://cases/*.yaml
+
+# Không chia sẻ kết quả lên cloud của Promptfoo.
+sharing: false

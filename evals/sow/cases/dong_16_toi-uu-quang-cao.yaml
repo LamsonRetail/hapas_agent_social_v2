@@ -1,0 +1,69 @@
+# SOW 16 — Theo dõi và tối ưu quảng cáo. Skill: skills/ad-performance-audit.md (sửa đợt 06/10).
+# Đáp án đọc chỉ-đọc tab CHECK IN CHỈ SỐ ADS: lần check-in mới nhất ghi 5/10/2026 (khối trên cùng);
+# khối Facebook có pillar STORE chi 0 đ (chậm hẳn), ô #DIV/0!.
+
+# người chấm: danh sách pillar MTD >110% / <80% theo từng kênh khớp đáp án ≥80%; nói cột CPM của bảng là
+# chi phí/1 impression (chưa × 1000); nêu số ngày chạy gõ cứng không thống nhất / nhãn "(N ngày chạy)";
+# soát dòng TỔNG từng khối; đề xuất bằng VND tuyệt đối, "chờ người phụ trách kênh xác nhận"; không tên nhân sự.
+- description: "SOW 16 · Check-in ads theo pillar — lần 5/10, pillar chi nhanh/chậm, CPM chưa ×1000, đề xuất VND chờ xác nhận"
+  metadata: {sow_dong: 16, hang_muc: "Theo dõi và tối ưu quảng cáo"}
+  vars:
+    ma: d16a
+    hoi: |-
+      /bang https://o4pvcegwn6b.sg.larksuite.com/sheets/OsbvsgC1chru5mtG7RFli2vFg1b?sheet=BEoYUt tab CHECK IN CHỈ SỐ ADS: lần check-in mới nhất, pillar nào chi nhanh hoặc chậm, đề xuất giúp mình
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Audit hiệu quả quảng cáo"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "doc_bang"}
+    - type: icontains-any
+      value: ["5/10", "05/10", "5.10"]
+    - type: icontains-any
+      value: ["1000", "1.000"]
+    - type: icontains-all
+      value: ["STORE", "người phụ trách", "xác nhận"]
+
+# người chấm: không bịa bất kỳ số liệu nào của file; không khuyên tắt camp nào khi chưa có số.
+- description: "SOW 16 · Gửi kèm file xlsx — nói chưa đọc được file, nhờ đưa lên Lark Sheet hoặc dán số, không bịa"
+  metadata: {sow_dong: 16, hang_muc: "Theo dõi và tối ưu quảng cáo"}
+  vars:
+    ma: d16b
+    hoi: |-
+      (gửi kèm file ads_thang9.xlsx) Xem giúp quảng cáo tháng 9 hiệu quả không, nên tắt camp nào?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Audit hiệu quả quảng cáo"}
+    - type: icontains-any
+      value: ["chưa đọc được", "không đọc được"]
+    - type: icontains-all
+      value: ["Lark Sheet", "dán"]
+
+# A: 2.000.000 ÷ 40 = 50.000 đ/click; B: 1.500.000 ÷ 35 ≈ 42.857 đ/click; mới 3 ngày, không có impression.
+# người chấm: câu mở nói chưa đủ ngưỡng dữ liệu (không mở bằng "B thắng/B nhỉnh hơn"); nói thiếu số hiển thị
+# nên không tính CPM; vùng target là biến đang thử; quyết định do người phụ trách kênh xác nhận.
+- description: "SOW 16 · So bản A/B 3 ngày — tự tính CPC, nêu ngưỡng 7 ngày / 1.000 hiển thị / 15 kết quả, chưa chọn bên thắng"
+  metadata: {sow_dong: 16, hang_muc: "Theo dõi và tối ưu quảng cáo"}
+  vars:
+    ma: d16c
+    hoi: |-
+      Bản A target toàn quốc và bản B target Tây Nam Bộ chạy 3 ngày, A tốn 2 triệu ra 40 click, B tốn 1,5 triệu ra 35 click. Bản nào thắng?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Audit hiệu quả quảng cáo"}
+    - type: icontains-any
+      value: ["50.000", "50k", "50 nghìn", "50,000"]
+    - type: icontains-any
+      value: ["42.857", "42.86", "42,86", "42.9", "42,9", "43.000", "43k", "42.800", "42,857"]
+    - type: icontains
+      value: "7 ngày"
+    - type: icontains-any
+      value: ["15 kết quả", "15 click", "15 lượt"]
+    - type: icontains-any
+      value: ["1.000 hiển thị", "1000 hiển thị", "1.000 lượt hiển thị", "1.000 impression"]

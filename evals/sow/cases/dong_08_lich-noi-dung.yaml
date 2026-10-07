@@ -1,0 +1,60 @@
+# SOW 8 — Lập kế hoạch nội dung. Skill: skills/lich-noi-dung.md
+# 1/11/2026 là Chủ nhật → lịch 2 tuần đúng là T2 19/10 đến CN 1/11 (skill nêu rõ ví dụ này).
+
+# người chấm: đúng 8 bài, 4 bài mỗi tuần (T2 19/10–CN 25/10 và T2 26/10–CN 1/11); không ngày nào 2 bài;
+# mỗi bài đủ ngày (kèm thứ), mục đích (1 trong 5 tên chuẩn), pillar, định dạng, CTA, tư liệu cần;
+# bài Thúc đẩy mua ≤ 40%; có khung pillar đề xuất cộng 100%; cuối bài hỏi đích danh thứ còn thiếu.
+- description: "SOW 8 · Lịch FB 2 tuần BST ra 1/11, 4 bài/tuần, 1 người — 8 bài từ T2 19/10, có bài giải thích công năng"
+  metadata: {sow_dong: 8, hang_muc: "Lập kế hoạch nội dung"}
+  vars:
+    ma: d08a
+    hoi: |-
+      Lên lịch Facebook 2 tuần cho BST túi mới ra 1/11, 4 bài/tuần, 1 người làm
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Lập và rà lịch nội dung"}
+    - type: python
+      value: file://kiem.py:dem_it_nhat
+      config: {cum: "Chưa động vào", n: 8}
+    - type: icontains-all
+      value: ["19/10", "1/11", "Giải thích công năng", "chờ team xác nhận"]
+
+# Đáp án đọc chỉ-đọc tab MASTER MAP (b3df89): dòng TOTAL = 0.7 (70%), ô tỷ trọng Event lẫn trong chữ.
+# người chấm: nói ô tỷ trọng Event là ô chữ; không đưa số đếm/% pillar tự đếm cho tab dài (đưa COUNTIF);
+# bài thiếu Link Media liệt kê theo ngày + kênh + STT; không bịa bài; tên celeb thay bằng [celeb].
+- description: "SOW 8 · Rà CONTENT CALENDAR — MASTER MAP chỉ cộng 70%, tab dài dùng COUNTIF, không bịa bài"
+  metadata: {sow_dong: 8, hang_muc: "Lập kế hoạch nội dung"}
+  vars:
+    ma: d08b
+    hoi: |-
+      /bang https://o4pvcegwn6b.sg.larksuite.com/wiki/Rjegw4QiBioXnpk98KGliXlVgke rà tab FACEBOOK và TIKTOK: tỷ trọng pillar so với MASTER MAP, bài trùng, bài thiếu tư liệu
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Lập và rà lịch nội dung"}
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "doc_bang"}
+    - type: icontains-any
+      value: ["70%", "70 %", "0,7", "0.7"]
+    - type: icontains-all
+      value: ["MASTER MAP", "COUNTIF", "Link Media"]
+
+# người chấm: đúng 5 bài cụ thể theo mẫu cột (không chỉ kể tên mục đích); câu giả định nêu nguồn lực;
+# Hạn tư liệu là ngày cụ thể tính lùi từ ngày đăng; kênh trong lịch đúng kênh đã giả định.
+- description: "SOW 8 · Một thông điệp thành nhiều bài — đủ 5 mục đích kể cả Thúc đẩy mua, ưu đãi 'chờ team xác nhận'"
+  metadata: {sow_dong: 8, hang_muc: "Lập kế hoạch nội dung"}
+  vars:
+    ma: d08c
+    hoi: |-
+      Mình có 1 thông điệp 'túi nhỏ mà đựng vừa đủ đồ đi làm', biến thành vài bài khác mục đích cho tuần sau được không?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:nap_ky_nang
+      config: {ten: "Lập và rà lịch nội dung"}
+    - type: icontains-all
+      value: ["Giới thiệu sản phẩm", "Giải thích công năng", "Tạo tương tác", "Thúc đẩy mua", "Hỗ trợ cửa hàng", "chờ team xác nhận"]
