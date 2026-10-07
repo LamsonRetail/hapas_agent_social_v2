@@ -90,6 +90,19 @@ def append_turns(chat_id: str, turns: list[dict]) -> None:
         )
 
 
+def load_execution_evidence(chat_id: str, limit: int = 5) -> str:
+    """Bằng chứng tool tách khỏi lịch sử kể chuyện user/assistant.
+
+    Import muộn tránh biến receipt thành phụ thuộc bắt buộc của kho trí nhớ:
+    file receipt hỏng thì chat vẫn hoạt động, chỉ mất khối bằng chứng.
+    """
+    try:
+        import execution_receipts
+        return execution_receipts.prompt_block(chat_id, limit=limit)
+    except Exception:
+        return ""
+
+
 # ───────────────────────── per-user long-term memory ─────────────────────────
 def _mem_path(open_id: str) -> Path:
     return _MEM_DIR / f"{_safe(open_id)}.md"

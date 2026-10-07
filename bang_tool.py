@@ -156,7 +156,7 @@ class TuChoi(Exception):
     """Không mở nguồn cho người hỏi. `str(e)` là câu nói NGUYÊN với người dùng."""
 
 
-def mo_nguon(nguon: str) -> tuple[str, str, str, str, str]:
+def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None) -> tuple[str, str, str, str, str]:
     """Link/mã → (loại, token, phụ, tên loại, vì sao được đọc) — hoặc ném `TuChoi`.
 
     Cửa DUY NHẤT cho mọi tool đọc Base/Sheet bằng token bot (`doc_bang`, `dem_bang`).
@@ -181,8 +181,18 @@ def mo_nguon(nguon: str) -> tuple[str, str, str, str, str]:
                          "Wiki thì tra trong kho kiến thức, không đọc bằng tool này.")
     ten_loai = _TEN_LOAI[loai]
 
-    ok, vi_sao = quyen_nguoi_hoi(loai, token, _nguoi_hoi(), node)
+    # Lệnh cứng chạy trước audit.bat_dau nên truyền asker tường minh. None giữ đường
+    # doc_bang/dem_bang cũ; chuỗi rỗng vẫn xét như không có danh tính, không mượn bot.
+    ok, vi_sao = quyen_nguoi_hoi(
+        loai, token, _nguoi_hoi() if nguoi_hoi is None else nguoi_hoi, node)
     if not ok:
+        if vi_sao.startswith("không biết ai đang hỏi"):
+            raise TuChoi(
+                f"Không thể kiểm tra quyền đọc {ten_loai}: Console chưa chuyển danh tính "
+                "Lark đã xác thực của tài khoản đang hỏi. Hãy kết nối tài khoản Console "
+                "với danh tính Lark, hoặc mở lại yêu cầu từ Lark. Chia sẻ thêm tài liệu "
+                "không tự khắc phục lỗi nhận diện này."
+            )
         raise TuChoi(
             f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Mark chỉ đọc {ten_loai} mà CHÍNH "
             f"người hỏi cũng được xem. Nhờ chủ {ten_loai} chia sẻ cho bạn, hoặc nhờ chủ agent "

@@ -67,14 +67,17 @@ _GIA_DP_AD = 0.004          # lexis, mỗi ad (gói FREE 0,00399)
 _BIEN = 0.9                 # mỗi lượt chỉ xin tới 90% trần USD
 _MAC_DINH_ADS = 20
 _TOI_DA_ADS = 200           # 30 ngày VN chỉ có ~229 ads; gọn trong một lượt trả lời
-_GOI_FREE_CHINH = 5         # azzouzana cắt 5 ad/lượt khi tài khoản Apify là gói Free
 # Còn ít hơn chừng này giây sau khi actor chính hỏng thì không chạy dự phòng.
 _GIAY_DU_PHONG = 40
 # Lỗi mà actor dự phòng cũng sẽ gặp y hệt — không chạy dự phòng, đỡ mất phí khởi động.
 _KHONG_DU_PHONG = {"HET_TIEN_THANG", "NGHEN_DONG_THOI", "DA_HUY"}
-# statusMessage thật 04/10: "⚠️ To ensure service stability, free accounts have limited
-# data extraction. Upgrade to a paid plan to unlock full access 👉 https://apify.com/pricing"
-_DAU_HIEU_GOI = re.compile(r"(?i)free account|free tier|trial|limited data|upgrade|quota")
+# Không dùng một regex chung để suy ra gói tài khoản. `quota`, `trial`, `upgrade` và
+# `limited data` có thể xuất hiện ở tài khoản trả phí hoặc ở giới hạn riêng của actor.
+_DAU_HIEU_FREE = re.compile(r"(?i)\bfree\s+(?:account|accounts|tier|plan)\b")
+_DAU_HIEU_QUOTA = re.compile(r"(?i)\bquota\b|usage\s+limit|rate\s+limit")
+_DAU_HIEU_PAID = re.compile(r"(?i)\bpaid\s+(?:account|plan|tier)\b")
+_DAU_HIEU_TRIAL = re.compile(r"(?i)\btrial\b")
+_DAU_HIEU_DU_LIEU = re.compile(r"(?i)limited\s+data|data\s+(?:extraction\s+)?limit")
 
 _VUNG = {"US", "CA", "MX", "BR", "GB", "DE", "FR", "IT", "ES", "NL", "PL", "SE", "TR", "SA",
          "AE", "AU", "JP", "KR", "ID", "TH", "VN", "MY", "PH", "SG"}
@@ -300,7 +303,42 @@ def _can_du_phong(loi: Exception | None, items: list, meta: dict | None) -> bool
         return getattr(loi, "ma", "LOI") not in _KHONG_DU_PHONG
     # Rỗng mà actor báo giới hạn gói (hết lượt Free trong ngày…) là HỎNG, không phải
     # "không có ad nào".
-    return not items and bool(_DAU_HIEU_GOI.search(str((meta or {}).get("statusMessage") or "")))
+    ly_do = _phan_loai_gioi_han(str((meta or {}).get("statusMessage") or ""), 0, 1)
+    return not items and ly_do["code"] != "unknown_short_result"
+
+
+def _phan_loai_gioi_han(status_message: str, actual: int, requested: int) -> dict:
+    """Phân loại nguyên nhân thiếu dữ liệu, chỉ gắn plan khi actor nói rõ plan đó."""
+    text = str(status_message or "").strip()
+    chung = {"verified": bool(text), "evidence": "actor_status_message" if text else None}
+    if _DAU_HIEU_FREE.search(text):
+        return {"code": "free_plan_data_limit", "plan": "free", **chung}
+    if _DAU_HIEU_QUOTA.search(text):
+        return {"code": "quota_exceeded",
+                "plan": "paid" if _DAU_HIEU_PAID.search(text) else None, **chung}
+    if _DAU_HIEU_TRIAL.search(text):
+        return {"code": "trial_limit", "plan": "trial", **chung}
+    if _DAU_HIEU_DU_LIEU.search(text):
+        return {"code": "data_limit", "plan": None, **chung}
+    return {"code": "unknown_short_result", "verified": False, "evidence": None}
+
+
+def _canh_bao_thieu(ly_do: dict, actual: int, requested: int) -> str:
+    dau = f"Chỉ lấy được {actual}/{requested} ads"
+    code = ly_do.get("code")
+    if code == "free_plan_data_limit":
+        return (dau + ": status của actor báo tài khoản đang ở gói Free và bị giới hạn dữ liệu. "
+                "Chưa có bằng chứng rằng chạy lại sẽ trả cùng kết quả; chủ tài khoản cần "
+                "kiểm tra hạn mức hiện tại trước khi đổi gói hoặc chạy lại.")
+    if code == "quota_exceeded":
+        plan = " trả phí" if ly_do.get("plan") == "paid" else ""
+        return (dau + f": actor báo đã chạm quota của tài khoản{plan}. "
+                "Cần kiểm tra loại quota và thời điểm reset trước khi chạy lại.")
+    if code == "trial_limit":
+        return dau + ": actor báo giới hạn trial; cần kiểm tra trạng thái gói hiện tại."
+    if code == "data_limit":
+        return dau + ": actor báo giới hạn dữ liệu nhưng không xác nhận loại gói tài khoản."
+    return dau + ": chưa xác định nguyên nhân; không được suy ra loại gói từ số lượng này."
 
 
 SCHEMA = {
@@ -398,6 +436,23 @@ def _pham_vi(bo: dict) -> str:
     return " · ".join(phan)
 
 
+def _doi_chieu_pham_vi(bo: dict, nguon: str) -> dict:
+    """Phạm vi thực tế của nguồn; fallback không được giả là lọc đúng ngành con."""
+    requested = _pham_vi(bo)
+    actual_bo = dict(bo)
+    partial_reason = None
+    if nguon == "dự phòng" and bo.get("nganh") and bo["nganh"].get("la_nganh_con"):
+        actual_bo["nganh"] = dict(bo["nganh"], ten=bo["nganh"]["ten_nhom"],
+                                  la_nganh_con=False)
+        partial_reason = "broader_industry"
+    if nguon == "dự phòng" and bo.get("muc_tieu") == "tuong_tac":
+        actual_bo["muc_tieu"] = ""
+        partial_reason = partial_reason or "unsupported_objective"
+    actual = _pham_vi(actual_bo)
+    return {"requested_scope": requested, "actual_scope": actual,
+            "scope_match": partial_reason is None, "partial_reason": partial_reason}
+
+
 def _handle(args: dict, **_kwargs) -> str:
     bo, loi_vao = _doc_tham_so(args)
     if bo is None:
@@ -410,6 +465,7 @@ def _handle(args: dict, **_kwargs) -> str:
     n = max(1, min(xin, tran_bai, int(_BIEN * tran_usd / gia_1)))
     bo["n"] = n
     canh_bao: list[str] = []
+    limit_reason: dict | None = None
     if n < xin:
         canh_bao.append(f"Xin {xin} ads nhưng trần TikTok trên console ({tran_bai} bài, "
                         f"{A._usd_vn(tran_usd)} USD/lượt) chỉ cho {n} ads.")
@@ -451,7 +507,8 @@ def _handle(args: dict, **_kwargs) -> str:
         hm = A._han_muc_thang()
         con = round(hm["con_lai"], 2) if hm else None
         return tool_result(
-            success=True, chi_uoc_tinh=True, da_chay=False, pham_vi=pham_vi, so_ads=n,
+            success=True, chi_uoc_tinh=True, da_chay=False, execution_state="estimated",
+            pham_vi=pham_vi, so_ads=n,
             nguon_du_kien="chính" if chay_chinh else "dự phòng",
             uoc_tinh_chi_phi_usd=round(est if chay_chinh else est_toi_da, 3),
             uoc_tinh_toi_da_usd=round(est_toi_da, 3),
@@ -514,12 +571,10 @@ def _handle(args: dict, **_kwargs) -> str:
     elif loi_chinh is not None:
         loi["nguon_chinh"] = A._che_token(
             f"{getattr(loi_chinh, 'ma', type(loi_chinh).__name__)}: {loi_chinh}")[:250]
-    elif (len(items) < n
-          and _DAU_HIEU_GOI.search(str((meta or {}).get("statusMessage") or ""))):
-        canh_bao.append(
-            f"Chỉ lấy được {len(items)}/{n} ads: tài khoản Apify đang ở gói Free nên actor cắt "
-            f"còn khoảng {_GOI_FREE_CHINH} ads mỗi lượt. Muốn nhiều hơn thì chủ tài khoản "
-            f"nâng gói Apify; chạy lại cũng chỉ ra cùng {_GOI_FREE_CHINH} ads đầu bảng.")
+    elif len(items) < n:
+        limit_reason = _phan_loai_gioi_han(
+            str((meta or {}).get("statusMessage") or ""), len(items), n)
+        canh_bao.append(_canh_bao_thieu(limit_reason, len(items), n))
     # Run bị huỷ vì hết giờ / dừng giữa chừng: `_call` trả phần đã có (sổ run được đặt) —
     # phải nói ra, không trình bày như đủ.
     cuoi = so_run[-1] if so_run else {}
@@ -533,6 +588,11 @@ def _handle(args: dict, **_kwargs) -> str:
                      date_range=f"{bo['ky']} ngày gần nhất", thuc=thuc, est=est_that)
 
     ten_nguon = ACTOR_CHINH if nguon == "chính" else ACTOR_DU_PHONG
+    scope = _doi_chieu_pham_vi(bo, nguon)
+    if not scope["scope_match"]:
+        canh_bao.append(
+            "Kết quả chỉ đáp ứng một phần phạm vi: nguồn dự phòng thực tế dùng "
+            f"'{scope['actual_scope']}', rộng/khác yêu cầu '{scope['requested_scope']}'.")
     ads = [a for a in (_chuan(it, ten_nguon.split("~")[0], bo, i + 1)
                        for i, it in enumerate(items or [])) if a]
     if not ads and loi:
@@ -560,7 +620,9 @@ def _handle(args: dict, **_kwargs) -> str:
         top=[{"hang": a["hang"], "tieu_de": a["tieu_de"][:120], "brand": a["brand"],
               "nganh": a["nganh"], "ctr": a["ctr"], "likes": a["likes"],
               "link_cc": a["link_cc"]} for a in ads[:5]],
-        so_ads_xin=n, canh_bao=canh_bao or None, loi=loi or None,
+        status="completed" if scope["scope_match"] and len(ads) >= n else "partial",
+        requested_count=n, actual_count=len(ads), so_ads_xin=n, **scope,
+        limit_reason=limit_reason, canh_bao=canh_bao or None, loi=loi or None,
         sheet_url=url, granted=granted, title=title,
         uoc_tinh_chi_phi_usd=round(est_that, 3),
         chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,

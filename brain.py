@@ -70,6 +70,7 @@ import tien_do  # noqa: E402  (registers `tra_tien_do`: việc quá hạn/sắp 
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho bài học chiến dịch, tắt khi thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
+import execution_receipts  # noqa: E402  (bằng chứng tool bền vững theo chat)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
 import audit  # noqa: E402  (audit toàn luồng: token, tool, link, thời gian)
 import phoenix_trace  # noqa: E402  (trace sang Phoenix tự host; tắt nếu thiếu env)
@@ -80,6 +81,7 @@ import phoenix_trace  # noqa: E402  (trace sang Phoenix tự host; tắt nếu t
 # agent chụp lại registry lúc khởi tạo.
 lsr_policy.install_registry_guard(audit.ghi_tool)
 audit.boc_registry()
+execution_receipts.install_registry_capture()
 # Gắn hook quan sát của Hermes (post_api_request/post_tool_call) — sau khi run_agent và
 # model_tools đã import (discover_plugins chạy lúc đó), trước AIAgent đầu tiên.
 phoenix_trace.bat()
@@ -595,7 +597,7 @@ def _khoi_kenh(kenh: dict | None, sender_open_id: str | None, name: str) -> str:
 
 def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None = None,
                          chi_thi_lenh: str = "", nguon: str = "",
-                         kenh: dict | None = None) -> str:
+                         kenh: dict | None = None, execution_evidence: str = "") -> str:
     """Nạp persona.md, thay biến động, ghép trí nhớ về người này + hướng dẫn tool."""
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     try:
@@ -650,6 +652,7 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
         + bai_hoc_tool.loi_dan()
         + tien_do.loi_dan()
         + _platform_context_block(platform_ctx, nguon)
+        + execution_evidence
         + lenh_block
     )
 
@@ -657,7 +660,8 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
 def _resolve_agent(sender_open_id: str | None = None,
                    platform_ctx: dict | None = None,
                    chi_thi_lenh: str = "", nguon: str = "",
-                   kenh: dict | None = None, chon: tuple | None = None) -> AIAgent:
+                   kenh: dict | None = None, chon: tuple | None = None,
+                   execution_evidence: str = "") -> AIAgent:
     """Chọn tài khoản AI (console trước, máy sau — xem tai_khoan_ai) và dựng AIAgent.
 
     `chon` = (runtime, model, nguon_tai_khoan) đã chọn sẵn, dùng khi đổi tài khoản giữa
@@ -669,7 +673,8 @@ def _resolve_agent(sender_open_id: str | None = None,
         print(f"[tai_khoan] {tk.get('provider')}/{tk.get('credential_id') or '-'} "
               f"({tk.get('tu')})" + (f" — {tk['ly_do']}" if tk.get("ly_do") else ""),
               flush=True)
-    agent = _dung_agent(rt, model, sender_open_id, platform_ctx, chi_thi_lenh, nguon, kenh)
+    agent = _dung_agent(rt, model, sender_open_id, platform_ctx, chi_thi_lenh, nguon, kenh,
+                        execution_evidence)
     tai_khoan_ai.gan_vao_agent(agent, tk)
     if tai_khoan_ai.bat():
         # Giữ lựa chọn để chạy lại CÙNG tài khoản bằng model mặc định khi nhà cung cấp từ
@@ -679,7 +684,7 @@ def _resolve_agent(sender_open_id: str | None = None,
 
 
 def _dung_agent(rt: dict, model: str, sender_open_id, platform_ctx, chi_thi_lenh,
-                nguon, kenh) -> AIAgent:
+                nguon, kenh, execution_evidence="") -> AIAgent:
     return AIAgent(
         model=model,
         provider=rt.get("provider"),
@@ -713,7 +718,7 @@ def _dung_agent(rt: dict, model: str, sender_open_id, platform_ctx, chi_thi_lenh
         ],
         disabled_toolsets=["terminal"],
         ephemeral_system_prompt=_build_system_prompt(sender_open_id, platform_ctx, chi_thi_lenh,
-                                                     nguon, kenh),
+                                                     nguon, kenh, execution_evidence),
     )
 
 
@@ -992,7 +997,8 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
 
     # Lệnh cứng: bóc `/search`, `/help`… ra khỏi câu hỏi. Câu KHÔNG bắt đầu bằng `/`
     # thì `xu_ly` trả về nguyên văn và mọi thứ dưới đây chạy y như trước.
-    kq = lenh_cung.xu_ly(user_text)
+    kq = lenh_cung.xu_ly(user_text, kenh=kenh, chat_id=chat_id,
+                         sender_open_id=sender_open_id)
     if kq.tra_loi_thang is not None:
         # `/help`, `/nangluc`, và ca bị từ chối — trả lời thẳng, KHÔNG gọi model.
         # Nấu một lượt model để nói một câu đã biết trước là đốt tiền, và tệ hơn:
@@ -1024,30 +1030,38 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     # AUDIT: mở một lượt trước khi gọi model. Mọi tool được gọi trong lượt này
     # tự ghi vào đó (audit.boc_registry đã bọc handler của cả 10 tool).
     turn_id = audit.bat_dau(chat_id, sender_open_id, user_text)
+    execution_evidence = memory_store.load_execution_evidence(chat_id)
 
     nguon_lenh = kq.lenh if kq.lenh in lenh_cung.LENH_NGUON else ""
-    agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi, nguon_lenh, kenh)
+    agent = _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi, nguon_lenh, kenh,
+                           execution_evidence=execution_evidence)
 
     def dung_lai(chon):
         return _resolve_agent(sender_open_id, platform_ctx, kq.chi_thi, nguon_lenh, kenh,
-                              chon=chon)
+                              chon=chon, execution_evidence=execution_evidence)
 
-    agent, out, loi_nem, so_lan = _chay_co_doi_tai_khoan(
-        agent, user_text, history_msgs, dung_lai)
-    if history_msgs and _loi_lich_su_rong(out, loi_nem) and not _da_chay_tool(out):
-        # Lưới cuối: lịch sử vẫn làm nhà cung cấp từ chối (dạng hỏng chưa lường) thì
-        # chạy lại MỘT lần KHÔNG lịch sử — mất ngữ cảnh còn hơn hỏng mãi mọi lượt.
-        print("[brain] lịch sử bị từ chối (lượt rỗng) → chạy lại lượt không lịch sử",
-              flush=True)
-        chon = getattr(agent, "_tai_khoan_chon", None)
-        try:
-            agent_moi = dung_lai(chon if isinstance(chon, tuple) else None)
-        except Exception as e2:
-            print(f"[brain] không dựng lại được agent: {type(e2).__name__}", flush=True)
-        else:
-            agent, out, loi_nem, them = _chay_co_doi_tai_khoan(
-                agent_moi, user_text, [], dung_lai)
-            so_lan += them
+    execution_receipts.set_current_turn(chat_id, turn_id)
+    try:
+        agent, out, loi_nem, so_lan = _chay_co_doi_tai_khoan(
+            agent, user_text, history_msgs, dung_lai)
+        if history_msgs and _loi_lich_su_rong(out, loi_nem) and not _da_chay_tool(out):
+            # Lưới cuối: lịch sử vẫn làm nhà cung cấp từ chối (dạng hỏng chưa lường) thì
+            # chạy lại MỘT lần KHÔNG lịch sử — mất ngữ cảnh còn hơn hỏng mãi mọi lượt.
+            print("[brain] lịch sử bị từ chối (lượt rỗng) → chạy lại lượt không lịch sử",
+                  flush=True)
+            chon = getattr(agent, "_tai_khoan_chon", None)
+            try:
+                agent_moi = dung_lai(chon if isinstance(chon, tuple) else None)
+            except Exception as e2:
+                print(f"[brain] không dựng lại được agent: {type(e2).__name__}", flush=True)
+            else:
+                agent, out, loi_nem, them = _chay_co_doi_tai_khoan(
+                    agent_moi, user_text, [], dung_lai)
+                so_lan += them
+    finally:
+        # Worker thread có thể được tái dùng. Không để tool ngoài lượt sau
+        # exception mang nhầm chat/turn và làm nhiễm receipt cuộc hội thoại khác.
+        execution_receipts.clear_current_turn()
     tk = getattr(agent, "_tai_khoan_nguon", None)
     if loi_nem is not None:
         e = loi_nem
@@ -1071,6 +1085,8 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
                        loi=_che((str(d.get("error") or "") or text)[:300]), trang_thai="lỗi")
         print(f"[brain] model không chạy: {text[:120]}", flush=True)
         return cau_loi
+    text, _da_sua_theo_receipt = execution_receipts.ground_final_answer(
+        chat_id, user_text, text)
     audit.ket_thuc(turn_id, text, agent, loi=_che(str(d.get("error") or "")),
                    trang_thai="ok" if not d.get("failed") else "lỗi")
 

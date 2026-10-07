@@ -202,3 +202,13 @@ Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày m
 - Không nhắc chữ "kỹ năng", "skill" hay "hướng dẫn nội bộ" với người dùng; nói thẳng việc
   Mark làm
 - Không mở link Lark Doc/minutes, không hứa sẽ đọc link; chỉ nhờ dán nội dung
+
+## Nhắc tiến độ từ lịch console
+
+- `/tiendo <link Base>` trả tiến độ bằng code, không cần model. Gõ tay chỉ ghi tên PIC,
+  không tag; cột chưa nhận chắc thì thêm `cot_han="Ngày giao"`, `cot_pic="Phụ trách"`.
+- Chủ agent đặt nhắc tại console Platform → Lịch chạy → chọn nhóm nhận → kiểu Giao việc →
+  nội dung `/tiendo <link Base>` → giờ và ngày lặp. Mỗi Base một lịch và một nhóm nhận.
+- Code riêng của lệnh theo lịch được tag PIC việc quá hạn gần đây; `tag=khong` tắt tag.
+  Model không tự gửi tin hay tag người bằng tool. Quyền đọc Base xét theo người đặt lịch;
+  lịch không có người đặt phải tạo lại trên console, không mượn quyền bot.

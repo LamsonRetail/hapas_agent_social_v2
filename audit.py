@@ -417,8 +417,137 @@ def bat_dau(chat_id: str, sender: str | None, hoi: str) -> str:
     return tid
 
 
+_MA_BI_CHAN = re.compile(
+    r"(?i)(?:permission|policy)[_-]?denied|missing[_-]?(?:identity|sender)|"
+    r"forbidden|unauthorized|requires?[_-]?(?:approval|confirmation)|"
+    r"vuot[_-]?tran|budget[_-]?(?:blocked|exceeded)|"
+    r"policy\s*:|hết giờ lượt|thiếu danh tính|không xác định.{0,30}người|"
+    r"không có quyền|bị chặn|vượt trần")
+
+
+def _dict_ket_qua(ket_qua) -> dict | None:
+    """Đọc object/JSON object mà không để telemetry làm hỏng lượt chính."""
+    if isinstance(ket_qua, dict):
+        return ket_qua
+    if isinstance(ket_qua, str):
+        try:
+            doc = json.loads(ket_qua)
+            return doc if isinstance(doc, dict) else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _so_ket_qua(doc: dict) -> int | None:
+    """Số item thực tế từ các envelope hiện có; None = tool không công bố số lượng."""
+    for ten in ("actual_count", "so_ket_qua", "count", "total"):
+        v = doc.get(ten)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return max(0, int(v))
+    tom_tat = doc.get("tom_tat")
+    if isinstance(tom_tat, dict):
+        for ten in ("so_ads", "so_bai", "so_dong", "so_ket_qua"):
+            v = tom_tat.get(ten)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return max(0, int(v))
+    for ten in ("items", "results", "data", "top"):
+        v = doc.get(ten)
+        if isinstance(v, list):
+            return len(v)
+    return None
+
+
+def _so_yeu_cau(doc: dict) -> int | None:
+    for ten in ("requested_count", "so_ads_xin", "limit"):
+        v = doc.get(ten)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return max(0, int(v))
+    return None
+
+
+def phan_loai_ket_qua_tool(ket_qua, loi: str = "") -> dict:
+    """Chuẩn hoá outcome để audit/receipt dùng cùng một nguồn sự thật.
+
+    Tương thích với tool cũ trả chuỗi tự do, đồng thời hiểu các envelope JSON. Hàm này
+    fail-open và không ném lỗi vì được gọi ngay trên đường trả lời chính.
+    """
+    try:
+        if (not loi and
+                (ket_qua is None or (isinstance(ket_qua, str) and not ket_qua.strip()))):
+            return {"trang_thai": "failed", "co_ket_qua": False,
+                    "so_ket_qua": 0, "ma_loi": "empty_result",
+                    "loi": str(loi or "tool không trả kết quả")}
+        doc = _dict_ket_qua(ket_qua)
+        ma_loi = ""
+        thong_bao = str(loi or "").strip()
+        if doc is not None:
+            raw_error = doc.get("error")
+            if isinstance(raw_error, dict):
+                ma_loi = str(raw_error.get("code") or raw_error.get("type") or "error")
+                thong_bao = thong_bao or str(raw_error.get("message") or raw_error)
+            elif raw_error not in (None, "", False):
+                ma_loi = str(raw_error)
+            # `code` chung có thể là HTTP/status thành công (0/200), không được coi là lỗi.
+            ma_loi = str(doc.get("error_code") or ma_loi or "")
+            thong_bao = thong_bao or str(doc.get("message") or doc.get("loi") or
+                                         doc.get("content") or "")
+
+        if loi or (doc is not None and (doc.get("success") is False or ma_loi)):
+            dau = " ".join((ma_loi, thong_bao))
+            trang_thai = "blocked" if _MA_BI_CHAN.search(dau) else "failed"
+            return {"trang_thai": trang_thai, "co_ket_qua": False,
+                    "so_ket_qua": 0, "ma_loi": ma_loi or "exception",
+                    "loi": thong_bao or ma_loi or "tool failed"}
+
+        so = _so_ket_qua(doc) if doc is not None else None
+        xin = _so_yeu_cau(doc) if doc is not None else None
+        explicit = str((doc or {}).get("status") or (doc or {}).get("trang_thai") or "").lower()
+        mot_phan = explicit in {"partial", "ok_mot_phan", "incomplete"}
+        if so is not None and xin is not None and so < xin:
+            mot_phan = True
+        return {"trang_thai": "partial" if mot_phan else "completed",
+                "co_ket_qua": bool(ket_qua) if so is None else so > 0,
+                "so_ket_qua": so, "ma_loi": "", "loi": ""}
+    except Exception:  # noqa: BLE001 - audit tuyệt đối không làm chết tool
+        return {"trang_thai": "completed", "co_ket_qua": bool(ket_qua),
+                "so_ket_qua": None, "ma_loi": "", "loi": _cat(loi, 200)}
+
+
+def ghi_chat_luong(trang_thai: str, ly_do: str = "", evidence_turn_id: str = "") -> None:
+    """Gắn kết quả đối chiếu bằng chứng vào lượt hiện tại, không ghi nội dung nhạy cảm."""
+    if not _BAT:
+        return
+    state = str(trang_thai or "").strip().lower()
+    if state not in {"verified", "corrected", "contradicted", "unverified"}:
+        state = "unverified"
+    tid = _TURN.get()
+    with _khoa_luot:
+        luot = _dang_chay.get(tid)
+        if luot is not None:
+            luot["chat_luong"] = {
+                "trang_thai": state,
+                "ly_do": _cat(ly_do, 200),
+                "evidence_turn_id": _cat(evidence_turn_id, 40),
+            }
+
+
 def ghi_tool(ten: str, args, ket_qua, giay: float, loi: str = "") -> None:
     """Ghi một lượt gọi tool vào lượt đang chạy của thread này."""
+    outcome = phan_loai_ket_qua_tool(ket_qua, loi)
+    # Policy/deadline có thể chặn ngay trong registry.dispatch, trước handler. Wrapper
+    # receipt quanh handler sẽ không bao giờ thấy nhánh này, nên ghi riêng đúng loại
+    # denial. Chỉ hook hai prefix do lsr_policy tạo để không nhân đôi receipt của handler.
+    ly_do = str(loi or "")
+    la_policy_enforce = (ly_do.startswith("policy:")
+                         and os.environ.get("LSR_POLICY_MODE", "enforce").strip().lower()
+                         not in {"off", "observe"})
+    la_het_gio = ly_do.startswith("hết giờ lượt")
+    if outcome["trang_thai"] == "blocked" and (la_policy_enforce or la_het_gio):
+        try:
+            import execution_receipts
+            execution_receipts.record_current(ten, args, ket_qua, error=ly_do)
+        except Exception:
+            pass
     if not _BAT:
         return
     tid = _TURN.get()
@@ -427,11 +556,14 @@ def ghi_tool(ten: str, args, ket_qua, giay: float, loi: str = "") -> None:
         if luot is None:
             return
         luot["tool"].append({
-            "ten": ten, "giay": round(giay, 2), "loi": _cat(loi, 200),
+            "ten": ten, "giay": round(giay, 2),
+            "loi": _cat(outcome["loi"], 200), "ma_loi": _cat(outcome["ma_loi"], 100),
+            "trang_thai": outcome["trang_thai"],
             "args": _cat(json.dumps(args, ensure_ascii=False, default=str)
                          if not isinstance(args, str) else args, _TOI_DA_ARG),
             "link": _links(ket_qua),
-            "co_ket_qua": bool(ket_qua),
+            "co_ket_qua": outcome["co_ket_qua"],
+            "so_ket_qua": outcome["so_ket_qua"],
         })
 
 
@@ -451,11 +583,38 @@ def ket_thuc(turn_id: str, tra_loi: str, agent=None, loi: str = "",
     def g(ten, mac_dinh=0):
         return getattr(agent, ten, mac_dinh) if agent is not None else mac_dinh
 
+    def nhan_agent(*ten) -> str:
+        for attr in ten:
+            v = getattr(agent, attr, None) if agent is not None else None
+            if isinstance(v, (str, int, float)) and str(v).strip():
+                return _cat(str(v), 100)
+        nguon = getattr(agent, "_tai_khoan_nguon", None) if agent is not None else None
+        if isinstance(nguon, dict):
+            for attr in ten:
+                v = nguon.get(attr)
+                if isinstance(v, (str, int, float)) and str(v).strip():
+                    return _cat(str(v), 100)
+        return "unknown"
+
     tools = luot["tool"]
     link: list[str] = []
     for t in tools:
         link += t.get("link") or []
     link += _links(tra_loi)
+
+    muc = {"completed": 0, "partial": 1, "blocked": 2, "failed": 3}
+    cac_trang_thai = [str(t.get("trang_thai") or "completed") for t in tools]
+    te_nhat = max(cac_trang_thai, key=lambda x: muc.get(x, 0), default="completed")
+    # Có tool lỗi rồi tool khác hoàn thành thường là fallback thành công: lượt là partial,
+    # vẫn giữ trạng thái xấu nhất riêng để vận hành không bỏ sót lỗi nguồn.
+    if "completed" in cac_trang_thai and ({"blocked", "failed"} & set(cac_trang_thai)):
+        trang_thai_tool = "partial"
+    else:
+        trang_thai_tool = te_nhat
+    # Giữ `ok` cho lượt hoàn thành để dashboard cũ không vỡ; chỉ nâng trạng thái khi
+    # caller chưa ghi một lỗi riêng và tool cho thấy kết quả không hoàn chỉnh/bị chặn.
+    if trang_thai == "ok" and trang_thai_tool != "completed":
+        trang_thai = trang_thai_tool
 
     rec = {
         "loai": "turn", "turn_id": luot["turn_id"], "ts": luot["ts"],
@@ -470,10 +629,16 @@ def ket_thuc(turn_id: str, tra_loi: str, agent=None, loi: str = "",
         "token_ra": g("session_completion_tokens"),
         "token_tong": g("session_total_tokens"),
         "api_calls": g("session_api_calls"),
+        "model_thuc_te": nhan_agent("model", "model_name"),
+        "provider_thuc_te": nhan_agent("provider_name", "provider"),
         "chi_phi_usd": round(float(g("session_estimated_cost_usd", 0.0) or 0.0), 6),
         "giay": round(time.monotonic() - luot["t0"], 2),
-        "trang_thai": trang_thai, "loi": _cat(loi, 500),
+        "trang_thai": trang_thai, "trang_thai_tool": trang_thai_tool,
+        "trang_thai_tool_te_nhat": te_nhat,
+        "loi": _cat(loi, 500),
     }
+    if luot.get("chat_luong"):
+        rec["chat_luong"] = luot["chat_luong"]
     with _khoa_luot:
         _vua_xong[luot["chat"]] = rec
         # Chỉ là cầu nối ngắn giữa brain worker và run worker; không phải kho audit.
