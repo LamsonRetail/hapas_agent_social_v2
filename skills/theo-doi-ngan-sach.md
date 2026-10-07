@@ -77,6 +77,16 @@ Bảng mẫu: QUẢN LÝ NGÂN SÁCH & MỤC TIÊU HAPAS 20.10, tab BẢNG TỔN
   `doc_bang` không đọc được, nhờ người dùng dán nội dung. File xlsx/pdf gửi kèm không đọc được, nhờ đưa lên Sheet;
   ảnh báo giá đọc bằng `vision_analyze`, nói rõ số đọc từ ảnh cần kiểm lại
 
+## Bài học chiến dịch cũ
+
+- Lập mẫu hay rà ngân sách: có công cụ `nho_bai_hoc` thì tra bài học cũ của team về
+  khoản hay vượt (booking, sản xuất, phát sinh). Dẫn lại là BÀI HỌC CŨ kèm người ghi,
+  ngày đo, link nguồn; không dùng bài học thay báo giá, đơn giá, khuyến mãi hay quyền hạn
+  hiện hành
+- Chênh lệch đã chốt, có số và link Sheet thì có thể đề nghị lưu thành bài học: đọc lại,
+  hỏi "Lưu bài học này nhé?" và chỉ gọi `ghi_bai_hoc` khi người dùng đồng ý ở tin nhắn
+  sau (xem kỹ năng "Ghi và nhớ bài học chiến dịch")
+
 ## Cảnh báo cần soát
 
 - Vượt dự toán: mỗi khoản vượt PHẢI ghi mức trong câu trả lời: ĐỎ nếu vượt trên 5%, VÀNG

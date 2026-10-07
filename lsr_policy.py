@@ -44,6 +44,10 @@ _SAFE_EXACT = {
     # Xem trước việc sẽ ghi vào Base checklist (viec_base_tool.py): đọc Base, chỉ ghi một
     # file bản xem trước ở máy. Vẫn có công tắc + cổng env bên dưới (đi cùng tool ghi).
     "xem_truoc_viec_base",
+    # Tra kho bài học chiến dịch (bai_hoc_tool.py, Hindsight 127.0.0.1). Chỉ đọc. Không
+    # công tắc console (chưa có dòng trong agentToolCapabilities.ts): cổng bật/tắt là env
+    # MARK_HINDSIGHT_URL + MARK_HINDSIGHT_API_KEY — thiếu thì tool ẩn hẳn.
+    "nho_bai_hoc",
     "browser_navigate",
     "browser_snapshot",
     "browser_get_images",
@@ -75,6 +79,10 @@ _MUTATING_EXACT = {
     # Ghi việc ĐÃ DUYỆT vào Base checklist (viec_base_tool.py) — tool DUY NHẤT được ghi Base
     # của team; `lark_cli --yes` vẫn bị chặn ở dưới.
     "ghi_viec_base": "write_data",
+    # Lưu MỘT bài học chiến dịch vào kho Hindsight của team: ghi dữ liệu bền, dùng chung
+    # cả team → đòi `write_data`. Như `nho_bai_hoc`: CỐ Ý ngoài `_TOOL_CO_CONG_TAC`,
+    # cổng là env (an toàn mặc định = tắt); thêm công tắc phải sửa cùng lúc console.
+    "ghi_bai_hoc": "write_data",
 }
 _MUTATING_WORDS = {
     "create", "update", "delete", "remove", "send", "write", "edit",

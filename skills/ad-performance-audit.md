@@ -65,6 +65,15 @@ https://o4pvcegwn6b.sg.larksuite.com/sheets/OsbvsgC1chru5mtG7RFli2vFg1b?sheet=BE
   >110% và <80% theo từng kênh; ghi chú đơn vị cột CPM; kết quả soát dòng TỔNG từng khối
   kênh; đề xuất chỉnh tiền bằng VND tuyệt đối, chờ người phụ trách xác nhận
 
+## Bài học chiến dịch cũ
+
+- Có công cụ `nho_bai_hoc` thì tra bài học cũ của đúng kênh/chiến dịch trước khi đề xuất.
+  Dẫn lại là BÀI HỌC CŨ kèm người ghi, ngày đo, link nguồn; số của kỳ này vẫn là căn cứ
+  chính, bài học chỉ để tham khảo, không bao giờ là nguồn giá, khuyến mãi hay quyền hạn
+- Kết luận đã đủ ngưỡng dữ liệu, có số và link nguồn thì có thể đề nghị lưu thành bài
+  học: đọc lại bài học, hỏi "Lưu bài học này nhé?" và chỉ gọi `ghi_bai_hoc` khi người
+  dùng đồng ý ở tin nhắn sau (xem kỹ năng "Ghi và nhớ bài học chiến dịch")
+
 ## Nhật ký tối ưu
 
 Mỗi thay đổi một mục: Ngày, Kênh, Campaign, Vấn đề quan sát (có số), Giả thuyết, Thay đổi
