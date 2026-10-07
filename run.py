@@ -276,6 +276,15 @@ def main() -> None:
     except Exception as e:
         print(f"  Reminders:  ❌ {e}")
 
+    # Nhắc tiến độ dự án vào MỘT nhóm (tien_do.py): chỉ chạy khi máy chạy đặt
+    # MARK_NHAC_TIEN_DO_CHAT. In trạng thái để biết vì sao sáng nay nhóm không có tin.
+    try:
+        import tien_do
+
+        print(f"  {tien_do.khoi_dong()}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  Nhắc tiến độ: ❌ {type(e).__name__}: {e}")
+
     # Việc quét nền (viec_nen.py): nhận lại việc dở của lần chạy trước — đọc tiếp đúng run
     # Apify đã ghi, không POST lại — và gửi nốt kết quả chưa nhắn được.
     try:

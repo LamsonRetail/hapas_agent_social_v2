@@ -43,6 +43,9 @@ _SAFE_EXACT = {
     # không ghi, không gọi mạng. CỐ Ý không đưa vào `_TOOL_CO_CONG_TAC`: tắt nó thì Mark
     # quay về tự tính tay, không đổi lại được an toàn nào.
     "tinh",
+    # Việc quá hạn/sắp hạn trên Base checklist (tien_do.py). Chỉ đọc (GET fields + POST
+    # records/search), qua ĐÚNG cửa quyền của `doc_bang`. Công tắc lùi về doc_bang bên dưới.
+    "tra_tien_do",
     # Tra lại kho của CHÍNH agent bằng nhiều bộ từ khoá (kho_tool.py). Không công tắc —
     # cùng lý do với `dung_ky_nang`: tắt đi là quay về lỗi "kho có mà không thấy".
     "tra_kho",
@@ -240,7 +243,7 @@ _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
     "dem_bang", "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai",
-    "ghi_viec_base", "xem_truoc_viec_base",
+    "ghi_viec_base", "xem_truoc_viec_base", "tra_tien_do",
 })
 
 #: Tool có công tắc riêng nhưng RA ĐỜI SAU công tắc cha → khi `capabilities` chưa có
@@ -268,9 +271,11 @@ _TOOL_CO_CONG_TAC = frozenset({
 #: (`doc_bang`): cùng nguồn, cùng cửa quyền, chỉ khác là code đếm thay model. Tắt đọc bảng
 #: mà vẫn cho đếm thì nút tắt hở một nửa. Console KHÔNG cần thêm dòng: chưa có dòng riêng
 #: thì công tắc `doc_bang` quyết.
+#: `tra_tien_do` (07/10/2026, việc quá hạn/sắp hạn trên Base checklist) cũng theo
+#: `doc_bang`, cùng lý do: chỉ đọc Base, cùng cửa quyền `bang_tool.mo_nguon`.
 _CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen",
                  "chi_so_bai": "social_listen", "xem_truoc_viec_base": "ghi_viec_base",
-                 "dem_bang": "doc_bang"}
+                 "dem_bang": "doc_bang", "tra_tien_do": "doc_bang"}
 
 #: Tool có công tắc nhưng KHÔNG có công tắc cha để lùi về, và console CHƯA có dòng của nó.
 #: Agent đã khai `capabilities` thì vắng dòng = TẮT (đúng ý: ghi Base team phải được bật rõ).

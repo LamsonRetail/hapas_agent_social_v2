@@ -11,7 +11,8 @@ dùng tự báo các bên.
 - Dùng: soạn chương trình họp, câu cần chốt, mẫu biên bản; người dùng dán ghi chép hay
   biên bản (kể cả bản ghi của agent ghi chú họp Mino Lê) nhờ tách việc, soạn yêu cầu bàn giao, rà còn thiếu gì
 - KHÔNG dùng khi: hỏi việc nào trễ, sắp tới hạn trong bảng phân việc Base → không cần kỹ năng
-  này, đọc bảng bằng doc_bang rồi trả lời (chỉ đọc, không tự nhắc ai, không sửa Base khi chỉ được hỏi). Lên kế hoạch tổng chiến dịch → "Lập và rà kế hoạch
+  này, gọi tra_tien_do rồi chép nguyên câu tiến độ công cụ trả (code so ngày; không tự so ngày
+  trên doc_bang, không tự nhắc ai, không sửa Base khi chỉ được hỏi). Lên kế hoạch tổng chiến dịch → "Lập và rà kế hoạch
   tổng chiến dịch". Viết brief quay chụp chi tiết cho Media → "Soạn brief order media và
   design". Theo dõi chi phí → "Theo dõi ngân sách chiến dịch"
 
@@ -42,6 +43,11 @@ dùng tự báo các bên.
   quyền). Mẫu của team: Base CHECKLIST DA 20.10
   https://o4pvcegwn6b.sg.larksuite.com/base/SBfNb16GDaDVS5s8rpol8EjQgSg
   Đọc khi cần đúng giá trị cột NHÓM hoặc đối chiếu việc đã có. Lỗi quyền thì nói lỗi, không đoán
+- Việc trễ, sắp tới hạn, việc của ai còn tồn trên Base checklist: tra_tien_do (chỉ đọc, cùng
+  luật quyền với doc_bang). Trả lời trong chat không tag ai
+- Nhắc deadline vào nhóm chung là bộ nhắc hằng ngày do CODE gửi, chỉ chạy khi chủ agent đã bật
+  trên máy chạy. Chỉ nói Mark nhắc nhóm khi lời dặn NHẮC TIẾN ĐỘ HẰNG NGÀY ghi đang BẬT; đang
+  tắt thì không hứa
 - Doc/Wiki như "20.10 | CÁC HẠNG MỤC ORDER MEDIA", MASTER PLAN 20.10: doc_bang không đọc
   docx. Thử tra_kho nếu đã nạp vào kho; không có thì nhờ dán
 

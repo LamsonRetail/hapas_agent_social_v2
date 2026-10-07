@@ -1,0 +1,45 @@
+# SOW 5 — Lập tiến độ, giao việc và theo dõi dự án. Tool: tra_tien_do (tien_do.py) — CODE so
+# DEADLINE với hôm nay (giờ VN) trên Base CHECKLIST DA; Mark chép nguyên câu tiến độ.
+# Base sống thay đổi hằng ngày nên phép chấm chữ chỉ chung chung: có ngày dd/mm và chữ "quá"
+# (kể cả câu "không có việc nào quá hạn"). Tool chỉ đọc: khong_tu_ghi (defaultTest) vẫn áp.
+# Nhắc nhóm 08:30 do code gửi theo lịch, không chấm ở đây (không qua model).
+
+# người chấm: số việc quá hạn/sắp hạn và ngày chép đúng câu tiến độ; không tự so ngày; không tag
+# ai, không hứa nhắc vào nhóm; lỗi quyền thì chuyển nguyên lời hướng dẫn.
+- description: "SOW 5 · Việc trễ hạn trên checklist DA — gọi tra_tien_do, chép câu tiến độ, không tag"
+  metadata: {sow_dong: 5, hang_muc: "Lập tiến độ, giao việc và theo dõi dự án"}
+  vars:
+    ma: d05a
+    hoi: |-
+      Việc nào trên checklist DA đang trễ hạn?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tra_tien_do"}
+    - type: regex
+      value: '\b\d{2}/\d{2}\b'
+    - type: icontains
+      value: "quá"
+    - type: not-icontains
+      value: "<at"
+
+# người chấm: chỉ việc của nhóm MEDIA, ngày từ câu tiến độ; không nạp kỹ năng họp.
+- description: "SOW 5 · Việc MEDIA sắp tới hạn — tra_tien_do lọc nhóm, không nạp kỹ năng họp"
+  metadata: {sow_dong: 5, hang_muc: "Lập tiến độ, giao việc và theo dõi dự án"}
+  vars:
+    ma: d05b
+    hoi: |-
+      Mấy ngày tới nhóm MEDIA có việc nào sắp tới hạn không?
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tra_tien_do"}
+    - type: python
+      value: file://kiem.py:khong_nap_ky_nang
+      config: {ten: "Họp dự án và bàn giao liên phòng ban"}
+    - type: regex
+      value: '\b\d{2}/\d{2}\b'
+    - type: not-icontains
+      value: "<at"
