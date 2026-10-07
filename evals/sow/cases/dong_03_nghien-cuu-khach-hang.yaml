@@ -1,11 +1,21 @@
 # SOW 3 — Nghiên cứu khách hàng và hành vi mua. Skill: skills/nghien-cuu-khach-hang.md
-# Lưu ý: brief gốc có đáp án số đếm (n=52, B5 37/20/11...), nhưng skill đã chốt LUẬT CỨNG "bảng dài
-# >20 dòng thì KHÔNG tự đếm, đưa n từng tab + công thức COUNTIF". Tiêu chí dưới bám skill.
+# 07/10/2026: bỏ luật "bảng >20 dòng không tự đếm, đưa COUNTIF" — số nay do tool `dem_bang` (code) đếm,
+# Mark chép nguyên `cau_so`. Ca d03a/d03c chấm ĐÚNG SỐ.
+#
+# Đáp án tính ĐỘC LẬP, không qua dem_bang_tool: script riêng đọc dump lark-cli (+csv-get, 06/10) của
+# tab vc76ip/AQ9ihe bằng csv.reader, lấy dòng 2 làm câu hỏi, dữ liệu = dòng ≥3 có ô nào ngoài cột A,
+# tách ô theo xuống dòng, gộp hoa/thường + khoảng trắng; % = số/52. Rồi chạy dem_bang trên cùng dump:
+# khớp từng số. Kết quả tab Khách store HAPAS (vc76ip): n=52 (dòng 3–54); B4 Vợ/người yêu 35 (67,3%);
+# B5 Thiết kế/mẫu mã 37 (71,2%), Mức giá phù hợp 20 (38,5%), Set quà đóng gói 11 (21,2%);
+# C1 Không gặp khó khăn 21 (40,4%), Phân vân nhiều mẫu 18 (34,6%), Không biết người nhận thích 14 (26,9%);
+# C2 Có 45 (86,5%) / Không 7 (13,5%); C4 (7 người chưa mua) "Cần thời gian suy nghĩ thêm" 2 + biến thể
+# ".../tham khảo thêm nơi khác" 2 = 4/7 khi gộp (không ai chọn cả hai); dòng trùng STT 20 = STT 38.
+# Tab Khách mall tỉnh (AQ9ihe): n=16 (dòng 3–18), không dòng trùng.
 
-# người chấm: không đưa số đếm/% tự đếm cho tab 52 dòng; mỗi câu (yếu tố quyết định, khó khăn, lý do
-# chưa mua, so đã mua/chưa mua) có công thức COUNTIF/COUNTIFS; nói nhóm chưa mua nhỏ (<10) chỉ tham khảo;
-# báo thiếu cột cửa hàng/ngày/người phỏng vấn; không chép tên khách.
-- description: "SOW 3 · Khảo sát — tổng hợp tab Khách store 52 dòng: nêu n, không tự đếm, đưa COUNTIF"
+# người chấm: số khớp đáp án trên (chép từ công cụ, không lệch ±1); nói nhóm chưa mua (7) chỉ tham khảo;
+# nêu dòng trùng STT 20/38; báo thiếu cột cửa hàng/ngày/người phỏng vấn; câu mở C3 ghi là Mark đọc;
+# không chép tên khách.
+- description: "SOW 3 · Khảo sát — tổng hợp tab Khách store 52 dòng: số do dem_bang đếm, đúng từng con số"
   metadata: {sow_dong: 3, hang_muc: "Nghiên cứu khách hàng và hành vi mua (tổng hợp khảo sát cửa hàng)"}
   vars:
     ma: d03a
@@ -18,14 +28,18 @@
       config: {ten: "Nghiên cứu khách hàng và hành vi mua"}
     - type: python
       value: file://kiem.py:goi_tool
-      config: {ten: "doc_bang"}
-    - type: icontains
-      value: "52"
-    - type: icontains
+      config: {ten: "dem_bang"}
+    - type: icontains-all
+      value: ["52", "71,2%", "38,5%", "40,4%", "34,6%"]
+    # C2 có thể ghi bằng % hoặc bằng số người — cả hai đều chép từ cau_so.
+    - type: icontains-any
+      value: ["86,5%", "45/52", "45 người"]
+    # Dòng trùng do công cụ báo: STT 20 = STT 38.
+    - type: regex
+      value: 'STT\s*20\b[^\n]{0,60}\b38\b'
+    # Công cụ đếm được thì không đẩy việc đếm cho team bằng công thức nữa.
+    - type: not-icontains
       value: "COUNTIF"
-    # Kỹ năng ghi câu mở đầu "Mark không tự đếm"; Mark xưng "tôi" nên chỉ chấm ý, không chấm nguyên văn.
-    - type: icontains
-      value: "không tự đếm"
 
 # người chấm: thang thu nhập một bộ mã không chồng lấn; câu mua hay không rẽ nhánh Có/Chưa, ghi bước nhảy
 # cả hai nhánh, người chưa mua không bị "kết thúc phỏng vấn"; giới do người phỏng vấn ghi; câu xếp hạng có ô hạng.
@@ -46,7 +60,7 @@
       value: "hạng"
 
 # người chấm: chân dung chỉ dùng thuộc tính có cột trong tab đang dùng (tab store không có nghề nghiệp →
-# không tự thêm nghề nghiệp); câu sàng lọc không thành thuộc tính; không có số tự đếm cho bảng dài.
+# không tự thêm nghề nghiệp); câu sàng lọc không thành thuộc tính; số/% chép từ dem_bang (đáp án ở đầu file).
 - description: "SOW 3 · Chân dung khách — chỉ từ dữ liệu, nêu cỡ mẫu từng tab và nhóm mẫu còn thiếu"
   metadata: {sow_dong: 3, hang_muc: "Nghiên cứu khách hàng và hành vi mua (tổng hợp khảo sát cửa hàng)"}
   vars:
@@ -61,9 +75,10 @@
       config: {ten: "Nghiên cứu khách hàng và hành vi mua"}
     - type: python
       value: file://kiem.py:goi_tool
-      config: {ten: "doc_bang"}
+      config: {ten: "dem_bang"}
+    # n từng tab + thuộc tính chính của tab store: mua quà cho Vợ/người yêu 35/52 = 67,3%.
     - type: icontains-all
-      value: ["52", "16", "Nhóm mẫu còn thiếu"]
+      value: ["52", "16", "Nhóm mẫu còn thiếu", "67,3%"]
 
 - description: "SOW 3 · Định tuyến — bóc bình luận TikTok là việc deep-dive bình luận, không phải nghiên cứu khảo sát"
   metadata: {sow_dong: 3, hang_muc: "Nghiên cứu khách hàng và hành vi mua (tổng hợp khảo sát cửa hàng)"}

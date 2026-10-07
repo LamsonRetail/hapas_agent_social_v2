@@ -13,7 +13,7 @@ Môi trường thử (giống harness staging dùng khi viết 9 kỹ năng SOW 
 - Chặn mọi đường GHI: báo lượt, ghi ngữ cảnh, báo lỗi tài khoản AI, đẩy audit lên Base, tạo
   Lark Sheet, cấp quyền Sheet, chạy actor Apify, tool đổi trạng thái (nhắc hẹn, ghi nhớ...).
   Tool tốn tiền chỉ được gọi ở chế độ `chi_uoc_tinh`.
-- Người hỏi: MARK_EVAL_SENDER (open_id chủ agent) — chỉ để doc_bang kiểm quyền ĐỌC.
+- Người hỏi: MARK_EVAL_SENDER (open_id chủ agent) — chỉ để doc_bang/dem_bang kiểm quyền ĐỌC.
 
 Trả về: `output` là câu trả lời của Mark; `metadata` có danh sách tool đã gọi, tham số, mã kỹ
 năng đã nạp, lỗi tool — kiem.py dùng metadata để chấm hành vi.
