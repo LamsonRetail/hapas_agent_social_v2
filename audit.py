@@ -112,6 +112,15 @@ _COT = [
     ("Thời gian (giây)", 2), ("Trạng thái", 1), ("Lỗi", 1), ("Turn ID", 1),
 ]
 
+_COT_V2 = [
+    ("Thời gian", 5), ("Người hỏi", 1), ("Chat", 1),
+    ("Câu hỏi của User", 1), ("Kết quả / Trả lời", 1),
+    ("Tool gọi", 1), ("Số tool", 2), ("Link trả về", 1),
+    ("Token vào", 2), ("Token ra", 2), ("Token tổng", 2),
+    ("Lượt gọi API", 2), ("Chi phí USD", 2),
+    ("Thời gian (giây)", 2), ("Trạng thái", 1), ("Lỗi", 1), ("Turn ID", 1),
+]
+
 
 def _doc_cau_hinh() -> dict:
     try:
@@ -249,6 +258,8 @@ def _ten_nguoi(open_id: str) -> str:
     """
     if not open_id:
         return ""
+    if not open_id.startswith("ou_"):
+        return open_id
     try:
         return lark.resolve_user_name(open_id) or open_id
     except Exception:  # noqa: BLE001
@@ -258,17 +269,18 @@ def _ten_nguoi(open_id: str) -> str:
 def _tao_base(cap_quyen_cho: str = "") -> dict:
     """Tạo Base + bảng audit MỘT LẦN, ghi lại token để lần sau dùng luôn."""
     d = lark.call("POST", "/open-apis/bitable/v1/apps",
-                  body={"name": f"Audit Mark — {datetime.datetime.now(_VN):%m/%Y}"})
+                  body={"name": "Audit Mark Trần"})
     app = ((d.get("data") or {}).get("app") or {})
     tok = app.get("app_token")
     if not tok:
         raise RuntimeError(f"khong tao duoc base: {str(d)[:200]}")
     t = lark.call("POST", f"/open-apis/bitable/v1/apps/{tok}/tables",
-                  body={"table": {"name": "Luồng hỏi–đáp",
+                  body={"table": {"name": "Audit_Logs",
                                   "fields": [{"field_name": n, "type": ty}
-                                             for n, ty in _COT]}})
+                                             for n, ty in _COT_V2]}})
     tid = ((t.get("data") or {}).get("table_id"))
-    cfg = {"app_token": tok, "table_id": tid, "url": app.get("url") or ""}
+    cfg = {"app_token": tok, "table_id": tid, "url": app.get("url") or "",
+           "schema_version": 2}
     try:
         _CAU_HINH.parent.mkdir(parents=True, exist_ok=True)
         _CAU_HINH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
@@ -314,7 +326,7 @@ def _dam_bao_cot(cfg: dict) -> None:
                                  f"/tables/{cfg['table_id']}/fields",
                           query={"page_size": 100})
             co = {f.get("field_name") for f in ((d.get("data") or {}).get("items") or [])}
-            for ten, ty in _COT:
+            for ten, ty in (_COT_V2 if cfg.get("schema_version") == 2 else _COT):
                 if ten in co:
                     continue
                 lark.call("POST", f"/open-apis/bitable/v1/apps/{cfg['app_token']}"
@@ -326,14 +338,9 @@ def _dam_bao_cot(cfg: dict) -> None:
             print(f"[audit] kiem cot Base loi (bo qua): {type(e).__name__}: {e}")
 
 
-def _day(rec: dict) -> None:
-    """Đẩy một dòng lên Base. Chạy trong thread nền, fail-open."""
-    try:
-        cfg = _doc_cau_hinh() or _tao_base(rec.get("nguoi") or "")
-        if not cfg.get("table_id"):
-            return
-        _dam_bao_cot(cfg)
-        f = {
+def _base_fields(rec: dict, schema_version: int = 1) -> dict:
+    """Ánh xạ một lượt audit sang schema Base đang dùng."""
+    fields = {
             "Thời điểm": int(rec["ts"] * 1000),
             "Người hỏi": _ten_nguoi(rec.get("nguoi") or ""),
             "Chat": rec.get("chat") or "",
@@ -351,7 +358,24 @@ def _day(rec: dict) -> None:
             "Trạng thái": rec.get("trang_thai") or "",
             "Lỗi": rec.get("loi") or "",
             "Turn ID": rec.get("turn_id") or "",
-        }
+    }
+    if schema_version >= 2:
+        for old, new in (("Thời điểm", "Thời gian"),
+                         ("Câu hỏi", "Câu hỏi của User"),
+                         ("Trả lời", "Kết quả / Trả lời"),
+                         ("Tool đã gọi", "Tool gọi")):
+            fields[new] = fields.pop(old)
+    return fields
+
+
+def _day(rec: dict) -> None:
+    """Đẩy một dòng lên Base. Chạy trong thread nền, fail-open."""
+    try:
+        cfg = _doc_cau_hinh() or _tao_base(rec.get("nguoi") or "")
+        if not cfg.get("table_id"):
+            return
+        _dam_bao_cot(cfg)
+        f = _base_fields(rec, cfg.get("schema_version") or 1)
         lark.call("POST", f"/open-apis/bitable/v1/apps/{cfg['app_token']}"
                           f"/tables/{cfg['table_id']}/records", body={"fields": f})
         _ghi_moc(rec.get("turn_id") or "", rec.get("ts"))
