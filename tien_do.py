@@ -518,12 +518,16 @@ def _bao_chu(chat: str, ngay: datetime.date, ly_do: str) -> str:
     Vì sao: lỗi chỉ nằm trong log thì không ai biết sáng nay nhóm thiếu tin. Gửi vào chính
     nhóm thì lộ lỗi kỹ thuật cho cả team và vẫn có thể hỏng y như tin nhắc. Chỉ open_id
     của chủ agent (env), không bao giờ là nhóm; uuid theo ngày để Lark bỏ tin trùng."""
-    chu = ((os.environ.get("AGENT_BOSS_OPEN_ID") or "").strip()
+    # MARK_NHAC_TIEN_DO_BAO_LOI trước: prod cố ý KHÔNG đặt AGENT_BOSS_OPEN_ID (biến đó còn cấp
+    # quyền chủ agent cho doc_bang…), nên báo lỗi cần một biến riêng chỉ dùng cho việc này.
+    chu = ((os.environ.get("MARK_NHAC_TIEN_DO_BAO_LOI") or "").strip()
+           or (os.environ.get("AGENT_BOSS_OPEN_ID") or "").strip()
            or (os.environ.get("STEVEN_BOSS_OPEN_ID") or "").strip())
     ket = "da_bao_chu"
     if not chu.startswith("ou_"):
         ket = "khong_bao_duoc_chu"
-        _bao_mot_lan(f"chu-{ngay}", "không có AGENT_BOSS_OPEN_ID để báo lỗi nhắc tiến độ")
+        _bao_mot_lan(f"chu-{ngay}", "không có MARK_NHAC_TIEN_DO_BAO_LOI/AGENT_BOSS_OPEN_ID để báo "
+                                    "lỗi nhắc tiến độ")
     else:
         try:
             lark.send_text("open_id", chu,
