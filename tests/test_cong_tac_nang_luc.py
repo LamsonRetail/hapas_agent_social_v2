@@ -37,8 +37,12 @@ HOP_DONG_DU = {"reply", "call_agent", "write_data"}
 
 
 @pytest.fixture
-def P():
+def P(monkeypatch):
     p = pytest.importorskip("lsr_policy")
+    # Tool ghi việc vào Base có thêm cổng env của máy chạy (`_CAN_BIEN_MOI_TRUONG`, mặc định
+    # tắt). Bài ở đây canh lớp CÔNG TẮC, nên mở cổng đó để mọi tool chỉ còn công tắc quyết.
+    for bien in set(p._CAN_BIEN_MOI_TRUONG.values()):
+        monkeypatch.setenv(bien, "1")
     q_cu, nl_cu = dict(p._nho), dict(p._nho_nl)
     yield p
     p._nho.clear(); p._nho.update(q_cu)
@@ -130,9 +134,12 @@ def test_khop_danh_muc_ben_console():
     # Tool có công tắc lùi được phép CHỜ console: console chưa có dòng của nó thì runtime
     # lùi về công tắc cha — đúng hành vi cũ, nên thứ tự merge hai repo không quan trọng.
     cho = set(lsr_policy._CONG_TAC_LUI)
-    assert ben_console in (runtime, runtime - cho), (
+    # Tool KHÔNG có công tắc lùi mà console chưa có dòng (`_CHO_CONSOLE`, vd `ghi_viec_base`)
+    # cũng được chờ: vắng dòng = TẮT, đúng mặc định chủ agent chốt. Console có rồi thì khớp.
+    cho_moi = set(getattr(lsr_policy, "_CHO_CONSOLE", ()))
+    assert not ben_console - runtime and not (runtime - ben_console) - cho - cho_moi, (
         f"lệch danh mục công tắc — console {sorted(ben_console)} vs "
-        f"runtime {sorted(runtime)} (được chờ: {sorted(cho)})"
+        f"runtime {sorted(runtime)} (được chờ: {sorted(cho | cho_moi)})"
     )
     # Console đã có tool lùi thì nó phải khai đúng công tắc cha (`theo:`).
     for tool, cha in lsr_policy._CONG_TAC_LUI.items():

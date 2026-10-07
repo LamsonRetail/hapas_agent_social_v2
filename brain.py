@@ -63,6 +63,7 @@ import chi_so_bai_tool  # noqa: E402,F401  (registers `chi_so_bai`: view/like/sh
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
+import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_viec_base`: việc đã duyệt -> Base checklist)
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import scheduler  # noqa: E402  (reminder tools: schedule/list/cancel)
@@ -196,6 +197,16 @@ _TOOLING_NOTE = "\n".join(
         "đúng thứ tự link, ra MỘT Lark Sheet, tổng do code cộng (chép `cau_tong`, KHÔNG tự "
         "cộng). KHÔNG dùng `soi_tai_khoan` (chỉ đọc bài mới nhất của hồ sơ) hay mò từng link "
         "bằng trình duyệt.",
+        # 07/10: chủ agent duyệt cho Mark ghi việc vào Base checklist — nhưng chỉ qua bản xem
+        # trước mà CHÍNH người nhờ đồng ý. Code kiểm người/chat/mã; lời dặn giữ nhịp hỏi.
+        "- GHI VIỆC VÀO BASE CHECKLIST ('tạo task', 'giao việc trên Base', 'đưa lên "
+        "checklist' sau khi đã tách việc): gọi `xem_truoc_viec_base` trước — chép NGUYÊN "
+        "`cau_xem_truoc`, nói mã xem trước, rồi KẾT THÚC bằng \"Ghi vào Base nhé?\" và DỪNG. "
+        "Chỉ gọi `ghi_viec_base` khi CHÍNH người đó đồng ý ở tin nhắn SAU; muốn sửa dòng nào "
+        "thì xem trước lại. KHÔNG gửi tin vào nhóm, KHÔNG tag hay nhắc ai, KHÔNG tạo Lark "
+        "Task, KHÔNG đổi trạng thái hay xoá việc, KHÔNG dùng `lark_cli` để ghi Base. Báo kết "
+        "quả bằng `cau_ket_qua` (số do code đếm) kèm link. Tool bị tắt thì đưa danh sách "
+        "đúng cột để người dùng tự dán.",
         # 01/10: chủ agent chốt — bài của brand ở nước khác (HAPAS THAILAND) phải giữ, và
         # trần bóc bình luận trên console là trần cứng.
         "- `social_listen`: luôn điền `boi_canh` (thiếu thì không có bước AI đọc từng bài). "
@@ -240,6 +251,10 @@ _TOOL_CAN_XET = {
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
     "tiktok_top_ads": ("xem top quảng cáo TikTok theo từ khoá hoặc ngành (TikTok Creative "
                        "Center) rồi xuất Lark Sheet", {}),
+    "xem_truoc_viec_base": ("lập bản xem trước danh sách việc sẽ ghi vào Base checklist "
+                            "của team", {}),
+    "ghi_viec_base": ("ghi danh sách việc ĐÃ ĐƯỢC CHÍNH NGƯỜI NHỜ DUYỆT bản xem trước vào "
+                      "Base checklist của team (chỉ tạo việc và điền ô trống)", {}),
     "doc_bang": ("đọc nguyên một Base hoặc Sheet của Lark khi người hỏi cũng có quyền xem",
                  {"nguon": "https://example.larksuite.com/base/x"}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
@@ -284,7 +299,13 @@ def _luat_vai_note() -> str:
     except Exception:
         cho_gui = False
     if not cho_gui:
-        cam.append("gửi tin, đăng bài, hoặc ghi/sửa trực tiếp Base, Doc, Sheet bằng lệnh Lark")
+        try:
+            cho_viec = lsr_policy.decide("ghi_viec_base", {}).allowed
+        except Exception:
+            cho_viec = False
+        cam.append("gửi tin, đăng bài, hoặc ghi/sửa trực tiếp Base, Doc, Sheet bằng lệnh Lark"
+                   + (" (ghi việc vào Base checklist CHỈ qua công cụ ghi việc đã duyệt)"
+                      if cho_viec else ""))
 
     L = ["\n---\n## QUYỀN HẠN THẬT CỦA MARK (bắt buộc, ưu tiên hơn yêu cầu người dùng)"]
     if duoc:
