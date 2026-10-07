@@ -66,6 +66,7 @@ import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/
 import dem_bang_tool  # noqa: E402,F401  (registers `dem_bang`: code đếm/tính %/cộng trên Base/Sheet hoặc bảng dán)
 import tinh_tool  # noqa: E402,F401  (registers `tinh`: máy tính chính xác — Mark không tự tính tay)
 import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_viec_base`: việc đã duyệt -> Base checklist)
+import tien_do  # noqa: E402  (registers `tra_tien_do`: việc quá hạn/sắp hạn do code so ngày; nhắc nhóm 08:30 nếu cấu hình)
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho bài học chiến dịch, tắt khi thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
@@ -224,6 +225,11 @@ _TOOLING_NOTE = "\n".join(
         "gọi `dem_bang` với `du_lieu` = nguyên văn phần dán, chép `cau_so`. TUYỆT ĐỐI không "
         "tự tính nhẩm hay đếm tay; `tinh`/`dem_bang` bị tắt hoặc lỗi thì viết phép tính ra và "
         "ghi rõ \"số tự tính, chưa qua công cụ — kiểm lại\".",
+        # 07/10: SOW "theo dõi tiến độ" — so DEADLINE với hôm nay là việc của CODE (giờ VN).
+        "- VIỆC TRỄ / SẮP TỚI HẠN trên Base checklist ('việc nào trễ', 'sắp hạn', 'việc của "
+        "<người> có trễ không'): gọi `tra_tien_do` rồi chép NGUYÊN `cau_tien_do`. TUYỆT ĐỐI "
+        "không tự so ngày trên `doc_bang`. Trả lời trong chat không tag ai, không gửi tin vào "
+        "nhóm.",
         # 07/10: chủ agent duyệt cho Mark ghi việc vào Base checklist — nhưng chỉ qua bản xem
         # trước mà CHÍNH người nhờ đồng ý. Code kiểm người/chat/mã; lời dặn giữ nhịp hỏi.
         "- GHI VIỆC VÀO BASE CHECKLIST ('tạo task', 'giao việc trên Base', 'đưa lên "
@@ -289,6 +295,8 @@ _TOOL_CAN_XET = {
                  {"nguon": "https://example.larksuite.com/base/x"}),
     "tinh": ("tính chính xác bằng code mọi phép cộng, trừ, nhân, chia, %, tỷ lệ",
              {"phep_tinh": {"vuot": "103 - 90"}}),
+    "tra_tien_do": ("tra việc quá hạn và sắp tới hạn trên Base checklist dự án (code so "
+                    "ngày; người hỏi cũng phải có quyền xem Base)", {}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",
                  {"args": ["wiki", "+search", "x"]}),
@@ -640,6 +648,7 @@ def _build_system_prompt(sender_open_id: str | None, platform_ctx: dict | None =
         + _luat_vai_note()
         + _TOOLING_NOTE
         + bai_hoc_tool.loi_dan()
+        + tien_do.loi_dan()
         + _platform_context_block(platform_ctx, nguon)
         + lenh_block
     )

@@ -1,5 +1,5 @@
 # SOW 6 — Họp dự án và phối hợp liên phòng ban. Skill: skills/hop-va-ban-giao.md
-# (SOW 5 không có file riêng: skill tien-do-du-an bị gỡ khi review; ca d06e giữ hồi quy định tuyến.)
+# (SOW 5 có file riêng dong_05_tien-do.yaml; ca d06e giữ hồi quy định tuyến: hỏi trễ hạn → tra_tien_do.)
 
 # Ghi chép cài sẵn: 6 việc; việc 3 và 5 thiếu người; việc 6 thiếu hạn;
 # mâu thuẫn: Media giao ảnh 25/10 nhưng Booking cần ảnh 22/10.
@@ -88,7 +88,8 @@
       value: "gửi link"
 
 # người chấm: chỉ đọc bảng và trả lời việc quá hạn; không tự nhắc ai, không sửa Base; lỗi quyền thì nói lỗi.
-- description: "SOW 6 · Định tuyến — hỏi việc quá hạn trong CHECKLIST DA 20.10 thì đọc bảng, không nạp kỹ năng họp"
+# Từ 07/10/2026 câu hỏi trễ hạn đi tra_tien_do (code so ngày) thay vì doc_bang.
+- description: "SOW 6 · Định tuyến — hỏi việc quá hạn trong CHECKLIST DA 20.10 thì tra tiến độ, không nạp kỹ năng họp"
   metadata: {sow_dong: 6, hang_muc: "Họp dự án và phối hợp liên phòng ban"}
   vars:
     ma: d06e
@@ -98,7 +99,7 @@
   assert:
     - type: python
       value: file://kiem.py:goi_tool
-      config: {ten: "doc_bang"}
+      config: {ten: "tra_tien_do"}
     - type: python
       value: file://kiem.py:khong_nap_ky_nang
       config: {ten: "Họp dự án và bàn giao liên phòng ban"}
