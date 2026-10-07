@@ -137,6 +137,12 @@ def test_chi_uoc_tinh_va_goi_tool():
     assert K.chi_uoc_tinh("", _ctx(["chi_so_bai"], ['{"chi_uoc_tinh": true}'], ten="chi_so_bai"))["pass"]
     assert not K.chi_uoc_tinh("", _ctx(["chi_so_bai"], [{}], ten="chi_so_bai"))["pass"]
     assert K.goi_tool("", _ctx(["doc_bang"], [{}], ten="doc_bang"))["pass"]
+    # `co_tham_so`: dem_bang trên chữ DÁN (du_lieu), không phải trên Sheet.
+    dan = _ctx(["dem_bang"], ['{"du_lieu": "a\\tb\\n1\\t2"}'], ten="dem_bang", co_tham_so="du_lieu")
+    assert K.goi_tool("", dan)["pass"]
+    sheet = _ctx(["dem_bang"], [{"nguon": "https://x/sheets/a"}], ten="dem_bang",
+                 co_tham_so="du_lieu")
+    assert not K.goi_tool("", sheet)["pass"]
 
 
 def test_dem_va_lo_thong_tin():

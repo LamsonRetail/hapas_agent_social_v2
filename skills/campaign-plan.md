@@ -46,7 +46,9 @@ Mỗi nhận định về thị trường phải chỉ ra nguồn, hoặc ghi r�
 6. **Tài sản cần làm** — tên, loại, bắt buộc hay nên có, hạn
 7. **KPI** — một KPI chính có con số đích, 3–5 KPI phụ, đo ở đâu, báo cáo bao lâu một lần
 8. **Ngân sách** — theo kênh, sản xuất tách phân phối, dự phòng 10–15%. **Luôn ghi số
-   tiền tuyệt đối bằng VND**, không chỉ phần trăm
+   tiền tuyệt đối bằng VND**, không chỉ phần trăm. Đổi % ra VND, cộng các kênh và so với
+   tổng được duyệt bằng công cụ `tinh` (vd "200000000 * 35%", "tong(70; 50; 40; 20)"),
+   chép kết quả trong `cau_tinh` — không tự tính
 9. **Rủi ro** — 2–3 rủi ro (lệch tệp khách, KOC trễ, kênh kém) kèm cách giảm
 10. **Việc tiếp theo** — ai duyệt gì, quyết định nào phải chốt trước
 

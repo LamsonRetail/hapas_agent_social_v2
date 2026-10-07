@@ -93,11 +93,29 @@ def khong_nap_ky_nang(output, context):
     return _ket(ma not in da, f"không được nạp {ma}; đã nạp {da}")
 
 
+def _co_tham_so(a, can: str) -> bool:
+    """Tham số `can` có mặt và khác rỗng. Provider cắt chuỗi tham số dài ở 2.000 ký tự nên
+    JSON có thể hỏng (vd `du_lieu` dán 24 dòng) — khi đó dò thẳng `"can": "<có chữ>"`."""
+    b = _args(a)
+    if isinstance(b, dict) and "_tho" not in b:
+        return bool(b.get(can))
+    tho = b.get("_tho", "") if isinstance(b, dict) else str(a)
+    return bool(re.search(r'"' + re.escape(can) + r'"\s*:\s*("[^"]|\[|\{|[0-9tf])', tho))
+
+
 def goi_tool(output, context):
-    """config: {ten: "<tool>"}. Đạt khi Mark gọi tool này ít nhất một lần."""
-    ten = _cfg(context)["ten"]
-    da = _meta(context).get("tool") or []
-    return _ket(ten in da, f"cần gọi {ten}; đã gọi {da}")
+    """config: {ten: "<tool>", co_tham_so?: "<tham số>"}. Đạt khi Mark gọi tool này ít nhất
+    một lần — và nếu có `co_tham_so`, ít nhất một lần gọi có tham số đó khác rỗng (vd
+    `dem_bang` với `du_lieu`: đếm trên chữ người dùng dán, không phải trên Sheet)."""
+    c = _cfg(context)
+    ten, can = c["ten"], c.get("co_tham_so")
+    m = _meta(context)
+    da = m.get("tool") or []
+    if not can:
+        return _ket(ten in da, f"cần gọi {ten}; đã gọi {da}")
+    co = any(t == ten and _co_tham_so(a, can)
+             for t, a in zip(da, m.get("tool_args") or []))
+    return _ket(co, f"cần gọi {ten} có `{can}`; đã gọi {da}")
 
 
 def khong_tu_ghi(output, context):

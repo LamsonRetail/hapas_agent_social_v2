@@ -18,8 +18,12 @@
       config: {ten: "Chọn xu hướng và lên chuỗi TikTok"}
     - type: icontains-all
       value: ["mì cay", "gượng ép", "không rõ", "chưa tính thời gian"]
+    # 07/10/2026: điểm tổng do `tinh` tính (bỏ bảng tra tính tay); câu cuối đổi theo kỹ năng.
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tinh"}
     - type: icontains
-      value: "Điểm do Mark tính tay theo bảng tra"
+      value: "Điểm tổng do công cụ tính"
 
 # người chấm: nêu phạm vi (TikTok VN, 7 ngày, ngành túi xách) và chép câu ước tính chi phí; chưa đưa trend nào.
 - description: "SOW 10 · Tìm trend TikTok tuần này — ước tính chi phí miễn phí trước, hỏi 'Chạy nhé?', không tự quét"
@@ -59,3 +63,6 @@
       value: "Mark không tự đọc được số liệu kênh TikTok của HAPAS"
     - type: icontains-any
       value: ["10,5k", "10.5k", "10,5 k", "10.5 k", "10.500"]
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "tinh"}

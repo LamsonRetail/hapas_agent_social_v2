@@ -75,11 +75,17 @@ _TOOL_KHUNG = {"vision_analyze", "browser_navigate", "browser_snapshot",
 #: Chữ snake_case trong kỹ năng mà KHÔNG phải tên tool: tham số của tool có thật.
 #: `che_do`, `chi_uoc_tinh` là tham số của social_listen (apify_tool.py). Từ 07/10/2026 kỹ
 #: năng dạy gọi `dem_bang` (bỏ luật "bảng >20 dòng không tự đếm") nên nhắc tham số và
-#: trường kết quả của nó — mỗi tên phải còn trong dem_bang_tool.py.
+#: trường kết quả của nó — mỗi tên phải còn trong dem_bang_tool.py. Cũng từ 07/10/2026 kỹ
+#: năng dạy KHÔNG tự tính tay: dán vào chat → `dem_bang` với `du_lieu`; phép tính → tool
+#: `tinh` (tham số, trường kết quả và tên hàm trong biểu thức — phải còn trong tinh_tool.py).
 _THAM_SO = {"che_do": "apify_tool.py", "chi_uoc_tinh": "apify_tool.py",
             "cau_so": "dem_bang_tool.py", "nhom_theo": "dem_bang_tool.py",
             "dong_tieu_de": "dem_bang_tool.py", "dong_tieu_de_da_dung": "dem_bang_tool.py",
-            "tach_dau_phay": "dem_bang_tool.py", "bi_cat": "dem_bang_tool.py"}
+            "tach_dau_phay": "dem_bang_tool.py", "bi_cat": "dem_bang_tool.py",
+            "du_lieu": "dem_bang_tool.py",
+            "phep_tinh": "tinh_tool.py", "cau_tinh": "tinh_tool.py", "ty_le": "tinh_tool.py",
+            "chenh_lech": "tinh_tool.py", "trung_vi": "tinh_tool.py",
+            "trung_binh": "tinh_tool.py", "lam_tron": "tinh_tool.py"}
 
 _SNAKE = re.compile(r"(?<![\w/.:=-])[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?![\w])")
 _URL = re.compile(r"https?://\S+|sheet:\S+")
@@ -87,7 +93,7 @@ _URL = re.compile(r"https?://\S+|sheet:\S+")
 
 def test_danh_sach_tool_lay_duoc_va_tool_khung_con_trong_brain():
     co = _tool_da_dang_ky()
-    for t in ("doc_bang", "dem_bang", "social_listen", "dung_ky_nang", "tra_kho", "lark_cli",
+    for t in ("doc_bang", "dem_bang", "tinh", "social_listen", "dung_ky_nang", "tra_kho", "lark_cli",
               "tra_chi_phi_quet", "binh_luan_kenh_nha"):
         assert t in co, f"không quét ra tool {t} — regex lấy tên tool đã lệch với code"
     brain = (_GOC / "brain.py").read_text(encoding="utf-8")
