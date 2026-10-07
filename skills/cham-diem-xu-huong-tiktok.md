@@ -20,7 +20,7 @@ Thiếu thứ phụ thì giả định và nói rõ đã giả định gì.
 
 ## Bước 1: chấm 4 tiêu chí, thang 1–5, mỗi điểm kèm một câu lý do
 
-- Hợp thương hiệu (30%): hợp hình ảnh HAPAS và khách thật. Căn cứ khách lấy từ tra_kho hoặc Sheet khảo sát khách tại cửa hàng (https://o4pvcegwn6b.sg.larksuite.com/sheets/ALdIsJOzGhij5htSKULlrcv8gBe, đọc bằng doc_bang: dịp mua quà, mua cho ai, yếu tố quyết định); không có căn cứ thì ghi là suy luận
+- Hợp thương hiệu (30%): hợp hình ảnh HAPAS và khách thật. Căn cứ khách lấy từ tra_kho hoặc Sheet khảo sát khách tại cửa hàng (https://o4pvcegwn6b.sg.larksuite.com/sheets/ALdIsJOzGhij5htSKULlrcv8gBe, số người theo dịp mua quà, mua cho ai, yếu tố quyết định lấy bằng dem_bang, không tự đếm); không có căn cứ thì ghi là suy luận
 - Gắn sản phẩm (30%): túi/phụ kiện có vai trò thật trong tình huống. Bỏ sản phẩm ra mà video vẫn y nguyên thì tối đa 1
 - Nguồn lực quay (20%): người, đạo cụ, địa điểm, công dựng có sẵn không
 - Thời gian (20%): trend còn hiệu lực tới ngày đăng không, có kịp quay dựng không. Căn cứ DUY NHẤT: ngày đăng video mẫu, thứ hạng hashtag có nguồn

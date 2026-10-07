@@ -104,15 +104,13 @@ LUẬN, phải nói rõ và nhờ team xác nhận. Ưu tiên đọc nội dung 
 
 ## Rà lịch có sẵn
 
-BẢNG DÀI (tab trên 20 dòng bài): Mark KHÔNG có công cụ đếm, đếm tay tỷ trọng pillar trên
-tab dài đã lệch nhiều lần. Vì vậy KHÔNG đưa số đếm hay % tự đếm (pillar, mục đích, bài bán…). Thay vào đó: nêu
-tỷ trọng MASTER MAP (đọc thẳng), đưa công thức để team đếm đúng, vd =COUNTIF(<cột
-Pillar>;"Event") và =COUNTA(<cột Pillar>), rồi nhận xét định tính ghi "đọc lướt, chưa
-đếm". Phần "bài sắp đăng trong 3 ngày còn Chưa động vào / thiếu Link Media" vẫn làm (chỉ
-xét vài ngày, ít dòng): viết rõ hôm nay là ngày nào, liệt kê ĐỦ các dòng trong khoảng đó
-theo ngày + kênh + STT. Bài trùng: chỉ báo cặp đã so ô Content thấy giống hệt, kèm câu
-"có thể còn cặp khác chưa thấy". Không chép tên người (kể cả celeb, KOL trong ô Content):
-thay bằng [celeb]/[tên người]. Tab ngắn (≤20 dòng) thì đếm theo bước 6 bên dưới.
+SỐ ĐẾM (tỷ trọng pillar, mục đích, số bài bán…) lấy từ `dem_bang`, tab dài hay ngắn đều
+vậy: code đếm trên mọi dòng, Mark chép NGUYÊN `cau_so`, không tự đếm lại. Đọc nội dung bài
+(trùng chủ đề, thiếu tư liệu) thì dùng `doc_bang`. Phần "bài sắp đăng trong 3 ngày còn
+Chưa động vào / thiếu Link Media": viết rõ hôm nay là ngày nào, liệt kê ĐỦ các dòng trong
+khoảng đó theo ngày + kênh + STT. Bài trùng: chỉ báo cặp đã so ô Content thấy giống hệt,
+kèm câu "có thể còn cặp khác chưa thấy". Không chép tên người (kể cả celeb, KOL trong ô
+Content): thay bằng [celeb]/[tên người].
 
 1. Đọc bằng doc_bang. doc_bang lấy dòng 1 làm tiêu đề, nhưng tab kênh có tiêu đề thật ở
    dòng 2-3 (dưới dòng tên kênh, dòng PHASE): tìm dòng có "STT | Ngày đăng bài"
@@ -126,20 +124,20 @@ thay bằng [celeb]/[tên người]. Tab ngắn (≤20 dòng) thì đếm theo b
 5. MASTER MAP: tỷ trọng có thể là phân số (0.1 = 10%), tổng phải bằng 1. Báo nếu tổng
    khác 100% hoặc có ô tỷ trọng là chữ. Ô tỷ trọng là chữ (vd "30%" lẫn trong ô Vai trò) thì
    nói rõ là ô chữ, không cộng vào tổng; có dùng số đó để so thì ghi "tạm lấy từ ô chữ"
-6. Đếm bằng cách LIỆT KÊ: mỗi kênh, mỗi pillar ghi danh sách STT rồi mới ra số (vd "Event:
-   STT 2, 3, 12, 15, 16, 17, 18, 20 = 8"). Đếm MỌI dòng có ô Pillar, kể cả Status trống,
-   "Đã order media/design" hay chưa có ngày; muốn loại dòng nào (vd ghi huỷ) thì nêu đích
-   danh dòng đó. Tổng các pillar phải bằng số dòng có pillar. Không viết "chưa thấy pillar
-   X" khi đã nhắc tới một dòng có pillar X. Tab TIKTOK đánh STT lại từ 1 mỗi ngày và có
-   dòng không STT: liệt kê theo "ngày + kênh + STT" (vd "1/10 official #4"), không dùng STT
-   trần. Phải VIẾT danh sách ra câu trả lời trước khi nêu số; chưa có danh sách thì không
-   nêu tỷ trọng. Bước này CHỈ cho tab ≤20 dòng có pillar; tab dài hơn thì KHÔNG đếm, theo
-   luật BẢNG DÀI ở đầu mục (công thức COUNTIF + nhận xét "đọc lướt, chưa đếm"). Rồi mới so
-   với MASTER MAP. Bảng đọc ra lệch cột
-   thì nói số có thể lệch và liệt kê dòng để người dùng soát
+6. Tỷ trọng pillar: gọi `dem_bang` cho từng tab kênh, `tab` = tên tab (FACEBOOK,
+   TIKTOK…), `cot` = ["Pillar"] (thêm "Mục đích" nếu tab có). Công cụ tự nhận dòng tiêu
+   đề "STT | Ngày đăng bài" (dòng 3), bỏ dòng PHASE và dòng tiêu đề lặp lại, đếm MỌI dòng
+   có ô Pillar (kể cả Status trống, "Đã order media/design" hay chưa có ngày). Chép số và %
+   trong `cau_so`, nêu số dòng đã đếm (n) và số dòng có pillar. Tách theo kênh con (tab
+   TIKTOK có cột Kênh): thêm `nhom_theo` = "Kênh". Muốn loại dòng nào (vd ghi huỷ) thì nêu
+   đích danh dòng đó và nói số trên chưa loại. Rồi mới so với MASTER MAP. Tab IG là lưới
+   tuần (pillar nằm theo dòng, không theo cột) nên `dem_bang` không đếm được: liệt kê từng
+   bài theo ngày + ô Pillar rồi mới ra số, ghi "Mark tự đếm, kiểm lại". `dem_bang` bị tắt
+   hoặc lỗi: không tự đếm tab dài, đưa công thức =COUNTIF(<cột Pillar>;"Event") và
+   =COUNTA(<cột Pillar>) để team ra số, nhận xét ghi "đọc lướt, chưa đếm"
 7. Cảnh báo, tính theo ngày hôm nay:
-   - bài thúc đẩy mua vượt 40%; thiếu bài giải thích công năng (bảng dài: không tự đếm %,
-     đưa công thức COUNTIF cột Mục đích/Content theo luật BẢNG DÀI)
+   - bài thúc đẩy mua vượt 40%; thiếu bài giải thích công năng (% lấy từ `dem_bang` trên
+     cột Mục đích; tab không có cột Mục đích thì nói không đếm được, không tự suy từ Content)
    - trùng chủ đề trong 3 ngày: so nội dung từng cặp bài cách nhau ≤3 ngày; content giống
      hệt nhau là trùng. Ghi STT kèm ngày đã điền xuống, đối chiếu lại STT trước khi gửi. Khi
      báo trùng, trích nguyên văn ô Content của cả hai bài; hai ô không giống thì không gọi
@@ -176,9 +174,10 @@ kèm STT, ngày và nguồn (tab nào).
   theo pillar với khung
 - Chỗ chưa có dữ liệu ghi đúng chữ "chờ team xác nhận"
 - Đa dạng: không pillar nào lấn át ngoài tỷ trọng, thúc đẩy mua không quá 40% (lịch tự lập
-  hoặc tab ≤20 dòng; tab dài không tự đếm %)
+  thì đếm trên lịch vừa lập; tab có sẵn thì % lấy từ `dem_bang`)
 - Bám chiến dịch: thông điệp khớp big idea, mốc ngày khớp lịch kinh doanh
-- Mọi con số lấy từ dữ liệu người dùng đưa hoặc doc_bang đọc được; thiếu thì nói thiếu
+- Mọi con số lấy từ dữ liệu người dùng đưa, `dem_bang` đếm, hoặc doc_bang đọc thẳng; thiếu
+  thì nói thiếu
 - Không chép tên nhân viên, tên khách, SĐT từ Sheet của team
 
 ## Không làm

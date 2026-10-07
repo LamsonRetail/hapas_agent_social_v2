@@ -31,13 +31,15 @@ SCHEMA = {
     "description": (
         "Đọc NGUYÊN một Base hoặc Sheet của Lark — mọi bảng/tab, mọi cột, mọi dòng (tới "
         "trần 2.000 dòng) — bản MỚI NHẤT, ngay lúc hỏi.\n"
-        "KHI NÀO GỌI: câu hỏi cần dữ liệu trong một Base/Sheet: đếm, lọc, tổng hợp, tìm "
-        "ai/cái gì, so sánh. Nguồn là link người dùng dán (/base/, /sheets/, /wiki/), hoặc "
-        "cách gọi ghi trong thẻ mục lục của kho (`sheet:…`, `base:…`, link Wiki).\n"
+        "KHI NÀO GỌI: câu hỏi cần NỘI DUNG trong một Base/Sheet: lọc, tìm ai/cái gì, đọc "
+        "câu trả lời mở, rà từng dòng. Nguồn là link người dùng dán (/base/, /sheets/, "
+        "/wiki/), hoặc cách gọi ghi trong thẻ mục lục của kho (`sheet:…`, `base:…`, link "
+        "Wiki).\n"
         "KHÔNG trả lời câu hỏi về bảng bằng mẩu kho: kho chỉ giữ mục lục, không có dòng.\n"
         "BẮT BUỘC KHI TRẢ LỜI:\n"
-        "- Trả lời từ `noi_dung`, dẫn link nguồn. Đếm/tính thì tính trên đúng các dòng "
-        "đã đọc.\n"
+        "- Trả lời từ `noi_dung`, dẫn link nguồn. Cần ĐẾM, tính %, so nhóm hay CỘNG tổng "
+        "thì gọi `dem_bang` (code đếm, chép số nguyên văn) — không tự đếm trên "
+        "`noi_dung`.\n"
         "- `bi_cat`=true: mới đọc một phần — nói rõ đã đọc bao nhiêu/tổng bao nhiêu dòng, "
         "đừng trình bày như toàn bộ.\n"
         "- Bị từ chối vì quyền thì chuyển NGUYÊN lời hướng dẫn cho người dùng, đừng tìm "
@@ -150,38 +152,60 @@ def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str) -> tup
     return False, "chưa thấy bạn trong danh sách người có quyền"
 
 
-def _handle(args: dict, **_kw) -> str:
-    nguon = str((args or {}).get("nguon") or "").strip()
+class TuChoi(Exception):
+    """Không mở nguồn cho người hỏi. `str(e)` là câu nói NGUYÊN với người dùng."""
+
+
+def mo_nguon(nguon: str) -> tuple[str, str, str, str, str]:
+    """Link/mã → (loại, token, phụ, tên loại, vì sao được đọc) — hoặc ném `TuChoi`.
+
+    Cửa DUY NHẤT cho mọi tool đọc Base/Sheet bằng token bot (`doc_bang`, `dem_bang`).
+    Tách ra để tool đếm không có luật quyền thứ hai: hai bản luật thì sớm muộn một bản
+    nới hơn bản kia, và Base audit lại thành cửa cho ai cũng đọc được.
+    """
     nd = B.nhan_dien(nguon)
     if not nd:
-        return tool_error("Không nhận ra link. Cần link Base (/base/), Sheet (/sheets/), "
-                          "Wiki (/wiki/), hoặc `sheet:…`/`base:…` từ thẻ mục lục.")
+        raise TuChoi("Không nhận ra link. Cần link Base (/base/), Sheet (/sheets/), "
+                     "Wiki (/wiki/), hoặc `sheet:…`/`base:…` từ thẻ mục lục.")
     loai, token, phu = nd
     node = ""
     if loai == "wiki":
         node = token
         g = B.giai_wiki(node)
         if not g:
-            return tool_error("Mark không mở được node Wiki này — bot chưa được chia sẻ. "
-                              "Nhờ chủ Wiki thêm bot 'Mark Trần - Social Assistant' với quyền xem.")
+            raise TuChoi("Mark không mở được node Wiki này — bot chưa được chia sẻ. "
+                         "Nhờ chủ Wiki thêm bot 'Mark Trần - Social Assistant' với quyền xem.")
         loai, token = g
         if loai not in _TEN_LOAI:
-            return tool_error(f"Node Wiki này là '{loai}', không phải Base hay Sheet. Tài liệu "
-                              "Wiki thì tra trong kho kiến thức, không đọc bằng tool này.")
+            raise TuChoi(f"Node Wiki này là '{loai}', không phải Base hay Sheet. Tài liệu "
+                         "Wiki thì tra trong kho kiến thức, không đọc bằng tool này.")
     ten_loai = _TEN_LOAI[loai]
 
     ok, vi_sao = quyen_nguoi_hoi(loai, token, _nguoi_hoi(), node)
     if not ok:
-        return tool_error(
+        raise TuChoi(
             f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Mark chỉ đọc {ten_loai} mà CHÍNH "
             f"người hỏi cũng được xem. Nhờ chủ {ten_loai} chia sẻ cho bạn, hoặc nhờ chủ agent "
             "thêm nó vào Nguồn Wiki của Mark.")
+    return loai, token, phu, ten_loai, vi_sao
+
+
+def loi_doc(ten_loai: str, e: Exception) -> str:
+    """Câu báo khi bot không đọc được (thường là chưa được chia sẻ) — dùng chung."""
+    return (f"Mark chưa đọc được {ten_loai} này ({str(e)[:160]}). Thường là do bot chưa được "
+            f"chia sẻ — thêm bot 'Mark Trần - Social Assistant' vào {ten_loai} với quyền xem.")
+
+
+def _handle(args: dict, **_kw) -> str:
+    nguon = str((args or {}).get("nguon") or "").strip()
+    try:
+        loai, token, phu, ten_loai, vi_sao = mo_nguon(nguon)
+    except TuChoi as e:
+        return tool_error(str(e))
     try:
         kq = B.doc(loai, token, phu)
     except Exception as e:
-        return tool_error(
-            f"Mark chưa đọc được {ten_loai} này ({str(e)[:160]}). Thường là do bot chưa được "
-            f"chia sẻ — thêm bot 'Mark Trần - Social Assistant' vào {ten_loai} với quyền xem.")
+        return tool_error(loi_doc(ten_loai, e))
     return tool_result({"nguon": nguon, "loai": ten_loai, "ten": kq["ten"],
                         "ly_do_duoc_doc": vi_sao, "bang": kq["bang"],
                         "bi_cat": kq["bi_cat"], "noi_dung": kq["noi_dung"]})

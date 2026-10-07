@@ -63,6 +63,7 @@ import chi_so_bai_tool  # noqa: E402,F401  (registers `chi_so_bai`: view/like/sh
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
+import dem_bang_tool  # noqa: E402,F401  (registers `dem_bang`: code đếm/tính %/cộng trên Base/Sheet)
 import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_viec_base`: việc đã duyệt -> Base checklist)
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho bài học chiến dịch, tắt khi thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY)
@@ -141,7 +142,8 @@ _TOOLING_NOTE = "\n".join(
         "`vision_analyze` với ĐÚNG đường dẫn đó rồi trả lời theo nội dung ảnh. Không có dòng "
         "đó nghĩa là không có ảnh — đừng đoán nội dung ảnh.",
         "- KHÔNG có quyền đọc/ghi file trên máy, chạy code Python hay giao việc cho subagent — "
-        "đừng thử gọi. Cần tính toán thì tự tính và ghi rõ phép tính.",
+        "đừng thử gọi. Số liệu trên Base/Sheet thì dùng `dem_bang` (dòng dưới); số người dùng "
+        "dán vào chat thì tự tính và ghi rõ phép tính.",
         "- ĐẶT NHẮC/HẸN GIỜ: `schedule_reminder` (đến giờ tự gửi vào chat này), xem/hủy bằng "
         "`list_reminders`/`cancel_reminder`. Ai nhờ 'nhắc…' thì XÁC NHẬN thời điểm+nội dung rồi đặt nhắc THẬT.",
         "- `remember_about_user`: ghi nhớ dài hạn thông tin quan trọng về người đang nói chuyện.",
@@ -202,6 +204,14 @@ _TOOLING_NOTE = "\n".join(
         "đúng thứ tự link, ra MỘT Lark Sheet, tổng do code cộng (chép `cau_tong`, KHÔNG tự "
         "cộng). KHÔNG dùng `soi_tai_khoan` (chỉ đọc bài mới nhất của hồ sơ) hay mò từng link "
         "bằng trình duyệt.",
+        # 07/10: đếm tay tab khảo sát 52 dòng sai 3 lượt liền; chủ agent duyệt cho CODE đếm
+        # (như `cau_tong` của chi_so_bai) và bỏ trần "bảng >20 dòng không tự đếm" ở kỹ năng.
+        "- SỐ TRÊN BASE/SHEET (bao nhiêu người chọn X, %, tần suất đáp án, so nhóm đã mua/"
+        "chưa mua, tỷ trọng pillar, tổng một cột chi phí, dòng trùng): gọi `dem_bang` — code "
+        "đếm trên MỌI dòng — rồi chép NGUYÊN `cau_so`, kể cả n và dòng tiêu đề đã dùng. Cần "
+        "đọc NỘI DUNG (câu trả lời mở, rà từng dòng) thì `doc_bang`. Có `dem_bang` thì "
+        "TUYỆT ĐỐI không tự đếm hay cộng tay trên bảng; `dem_bang` bị tắt hoặc từ chối thì "
+        "nói rõ chưa đếm được bằng công cụ và đưa công thức (COUNTIF/SUM) để team tự ra số.",
         # 07/10: chủ agent duyệt cho Mark ghi việc vào Base checklist — nhưng chỉ qua bản xem
         # trước mà CHÍNH người nhờ đồng ý. Code kiểm người/chat/mã; lời dặn giữ nhịp hỏi.
         "- GHI VIỆC VÀO BASE CHECKLIST ('tạo task', 'giao việc trên Base', 'đưa lên "
@@ -261,6 +271,9 @@ _TOOL_CAN_XET = {
     "ghi_viec_base": ("ghi danh sách việc ĐÃ ĐƯỢC CHÍNH NGƯỜI NHỜ DUYỆT bản xem trước vào "
                       "Base checklist của team (chỉ tạo việc và điền ô trống)", {}),
     "doc_bang": ("đọc nguyên một Base hoặc Sheet của Lark khi người hỏi cũng có quyền xem",
+                 {"nguon": "https://example.larksuite.com/base/x"}),
+    "dem_bang": ("đếm, tính % và cộng tổng trên một Base hoặc Sheet của Lark bằng code "
+                 "(người hỏi cũng phải có quyền xem)",
                  {"nguon": "https://example.larksuite.com/base/x"}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",

@@ -53,9 +53,10 @@ https://o4pvcegwn6b.sg.larksuite.com/sheets/OsbvsgC1chru5mtG7RFli2vFg1b?sheet=BE
 - CPM chuẩn = chi phí ÷ impression × 1000. Cột CPM của bảng là chi phí/1 impression (chưa
   nhân 1000): nói rõ khi so với số nền tảng, không gọi là bảng sai
 - Soát: khối thiếu dòng TỔNG hoặc thiếu CPM tổng; TỔNG chỉ cộng một phần pillar; tỉ trọng
-  pillar khác tab PHÂN BỔ; ô #DIV/0!. Tự cộng Chi phí và Impression của CẢ 5 pillar rồi so
-  với dòng TỔNG; lệch thì báo cả hai số và nói TỔNG chỉ cộng một phần pillar. Chưa cộng đủ
-  5 pillar thì không được viết "khớp"
+  pillar khác tab PHÂN BỔ; ô #DIV/0!. Cộng Chi phí và Impression của CẢ 5 pillar bằng
+  `dem_bang` (`cong` = hai cột đó, `dong` = 5 dòng pillar của khối, số dòng thật trên
+  Sheet) rồi so với dòng TỔNG; lệch thì báo cả hai số và nói TỔNG chỉ cộng một phần
+  pillar. Chưa cộng đủ 5 pillar thì không được viết "khớp"
 - Đề xuất VND không cần CPM: còn lại = Ngân sách − Chi phí tới ngày. Với mỗi pillar chi
   nhanh/chậm ghi "còn X đ cho phần còn lại của kỳ, đề xuất nhịp chi Y đ/ngày, chờ người phụ
   trách kênh xác nhận". Không bỏ đề xuất VND vì thiếu CPM

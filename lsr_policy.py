@@ -36,6 +36,9 @@ _SAFE_EXACT = {
     # Đọc nguyên một Base/Sheet (bang_tool.py). Chỉ đọc; tự kiểm NGƯỜI HỎI có quyền xem
     # (bot đọc bằng token của nó, nên không kiểm là lộ Base nội bộ). Có công tắc bên dưới.
     "doc_bang",
+    # Đếm/tính %/cộng trên một Base/Sheet bằng code (dem_bang_tool.py). Chỉ đọc, qua ĐÚNG
+    # cửa quyền của `doc_bang` (`bang_tool.mo_nguon`). Có công tắc bên dưới (lùi về doc_bang).
+    "dem_bang",
     # Tra lại kho của CHÍNH agent bằng nhiều bộ từ khoá (kho_tool.py). Không công tắc —
     # cùng lý do với `dung_ky_nang`: tắt đi là quay về lỗi "kho có mà không thấy".
     "tra_kho",
@@ -232,7 +235,7 @@ def quyen_phat() -> set[str]:
 _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
-    "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai",
+    "dem_bang", "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai",
     "ghi_viec_base", "xem_truoc_viec_base",
 })
 
@@ -257,8 +260,13 @@ _TOOL_CO_CONG_TAC = frozenset({
 #: như Quét MXH, dùng chung trần/công tắc từng nền tảng của nó.
 #: `xem_truoc_viec_base` (07/10/2026) đi theo công tắc của tool ghi `ghi_viec_base`: bản
 #: xem trước không có tool ghi thì vô nghĩa.
+#: `dem_bang` (07/10/2026, đếm/cộng trên Base/Sheet bằng code) đi theo "Đọc Base/Sheet"
+#: (`doc_bang`): cùng nguồn, cùng cửa quyền, chỉ khác là code đếm thay model. Tắt đọc bảng
+#: mà vẫn cho đếm thì nút tắt hở một nửa. Console KHÔNG cần thêm dòng: chưa có dòng riêng
+#: thì công tắc `doc_bang` quyết.
 _CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen",
-                 "chi_so_bai": "social_listen", "xem_truoc_viec_base": "ghi_viec_base"}
+                 "chi_so_bai": "social_listen", "xem_truoc_viec_base": "ghi_viec_base",
+                 "dem_bang": "doc_bang"}
 
 #: Tool có công tắc nhưng KHÔNG có công tắc cha để lùi về, và console CHƯA có dòng của nó.
 #: Agent đã khai `capabilities` thì vắng dòng = TẮT (đúng ý: ghi Base team phải được bật rõ).

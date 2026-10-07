@@ -1,8 +1,10 @@
 """Đọc NGUYÊN một Base hoặc Sheet của Lark thành markdown — CHỈ ĐỌC, không ghi gì.
 
-Dùng ở hai chỗ:
+Dùng ở ba chỗ:
   • tool `doc_bang` (`bang_tool.py`): hỏi tới Base/Sheet nào thì đọc nguyên cái đó NGAY
     LÚC HỎI — mọi bảng, mọi cột, mọi dòng (tới trần).
+  • tool `dem_bang` (`dem_bang_tool.py`): đếm/cộng bằng CODE qua `doc_tho` — đọc thô
+    từng ô, không qua markdown.
   • nhập Wiki (`scripts/nap_wiki.py`): node Base/Sheet chỉ nhập một THẺ MỤC LỤC (tên
     bảng, cột, số dòng, link) để RAG tìm thấy; nội dung thật đọc qua `doc_bang`.
 
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import datetime
 import re
+import unicodedata
 
 import lark_client as lark
 
@@ -240,6 +243,172 @@ def _gom(ten: str, loai: str, tom: list[dict], phan: list[str], bi_cat: bool) ->
         noi_dung = noi_dung[:MAX_KY_TU] + "\n\n…(đã cắt: vượt trần ký tự một lần đọc)"
         bi_cat = True
     return {"ten": ten, "loai": loai, "bang": tom, "noi_dung": noi_dung, "bi_cat": bi_cat}
+
+
+# ───────────────────────────── đọc THÔ (cho tool đếm) ─────────────────────────────
+# `doc_sheet`/`doc_base` trả markdown để MODEL đọc: ô nhiều dòng bị nối thành " / ",
+# ô danh sách Base bị nối bằng ", ", dòng 1 bị coi là tiêu đề. Đủ để đọc, không đủ để
+# ĐẾM: tách lại " / " hay ", " là đoán (đáp án "Có, đã mua" vốn chứa dấu phẩy). Nên tool
+# đếm (`dem_bang_tool.py`) đọc qua cửa riêng này: giữ nguyên từng ô, từng lựa chọn, và
+# để nơi đếm tự quyết dòng nào là tiêu đề.
+
+#: Loại cột Base mà mỗi phần tử danh sách là MỘT lựa chọn riêng: 4 chọn nhiều, 11 người,
+#: 18/21 liên kết bảng, 23 nhóm chat. Loại khác (văn bản 1 cũng là danh sách — các mẩu
+#: chữ của CÙNG một ô) thì gộp về một chuỗi.
+_COT_DANH_SACH = {4, 11, 18, 21, 23}
+
+
+def _bo_dau(s: str) -> str:
+    s = unicodedata.normalize("NFD", str(s or "")).replace("đ", "d").replace("Đ", "D")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return " ".join(s.lower().split())
+
+
+def _so_tho(v) -> str:
+    """Số từ API → chữ KHÔNG mơ hồ cho bộ đọc số của tool đếm.
+
+    Bộ đọc số coi "1.500" là một nghìn năm trăm (dấu chấm phân cách nghìn kiểu VN). Số
+    thực 1.5 thì không sao, nhưng 1.125 in ra "1.125" sẽ bị đọc thành 1125. Thêm một số 0
+    ("1.1250") để phần lẻ không bao giờ đúng 3 chữ số — giá trị không đổi.
+    """
+    if isinstance(v, bool):
+        return "có" if v else "không"
+    if isinstance(v, int) or (isinstance(v, float) and v.is_integer()):
+        return str(int(v))
+    s = repr(float(v))
+    if "e" in s or "E" in s:
+        s = f"{v:.10f}".rstrip("0")
+    if "." in s and len(s.split(".")[1]) == 3:
+        s += "0"
+    return s
+
+
+def _o_sheet(x) -> list[str]:
+    """Một ô Sheet → [chuỗi nguyên văn] (giữ xuống dòng), [] nếu trống."""
+    if x is None:
+        return []
+    if isinstance(x, (int, float)):
+        s = _so_tho(x)
+    elif isinstance(x, list):
+        # Ô chữ có link/nhắc tên: API trả các MẨU của cùng một ô → nối liền, không phẩy.
+        s = "".join(gia_tri(e) for e in x)
+    else:
+        s = gia_tri(x)
+    return [s] if s.strip() else []
+
+
+def _o_base(v, loai: int | None) -> list[str]:
+    """Một ô Base → danh sách chuỗi; cột chọn nhiều/người giữ TỪNG lựa chọn riêng."""
+    if v is None or v == "" or v == []:
+        return []
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and loai not in _COT_NGAY:
+        return [_so_tho(v)]
+    if isinstance(v, list) and loai in _COT_DANH_SACH:
+        return [s for s in (gia_tri(e, loai) for e in v) if s.strip()]
+    if isinstance(v, list) and loai == 1:
+        s = "".join(gia_tri(e, loai) for e in v)
+    else:
+        s = gia_tri(v, loai)
+    return [s] if s.strip() else []
+
+
+def _chon(ds: list[dict], chi: str, khoa_id: str, khoa_ten: str) -> list[dict]:
+    """Lọc bảng/tab theo mã HOẶC tên (không phân biệt hoa thường, dấu). Không khớp → []."""
+    if not chi:
+        return ds
+    co = [t for t in ds if t.get(khoa_id) == chi]
+    if co:
+        return co
+    k = _bo_dau(chi)
+    co = [t for t in ds if _bo_dau(t.get(khoa_ten) or "") == k]
+    if co:
+        return co
+    co = [t for t in ds if k and k in _bo_dau(t.get(khoa_ten) or "")]
+    return co if len(co) == 1 else []
+
+
+def doc_tho(loai: str, token: str, phu: str = "") -> dict:
+    """Đọc THÔ từng ô của Sheet (mọi dòng của vùng đã dùng, KỂ CẢ dòng 1) hoặc Base.
+
+    `phu` = mã HOẶC tên tab/bảng; bỏ trống = mọi tab/bảng. Trả
+    {ten, loai, bang: [{ten, id, luoi, loai_cot, bi_cat}], tat_ca: [tên tab/bảng]}.
+    `luoi[dòng][cột]` là danh sách chuỗi: Sheet mỗi ô tối đa MỘT chuỗi nguyên văn (giữ
+    xuống dòng); Base dòng 1 là tên cột, ô chọn nhiều/người giữ từng lựa chọn riêng.
+    `loai_cot` = mã loại cột Base (Sheet: None). Không khớp `phu` → `bang` rỗng, nơi gọi
+    báo lại bằng `tat_ca`. Cùng trần với `doc`: MAX_DONG dòng, MAX_BANG bảng, MAX_COT cột.
+    Lỗi Lark ném ra nguyên — như `doc`.
+    """
+    if loai == "sheet":
+        return _tho_sheet(token, phu)
+    if loai == "bitable":
+        return _tho_base(token, phu)
+    raise RuntimeError(f"loại '{loai}' không phải Base hay Sheet")
+
+
+def _tho_sheet(tok: str, chi: str) -> dict:
+    try:
+        ten = ((lark.call("GET", f"/open-apis/sheets/v3/spreadsheets/{tok}")
+                .get("data") or {}).get("spreadsheet") or {}).get("title") or ""
+    except Exception:
+        ten = ""
+    tabs = ((lark.call("GET", f"/open-apis/sheets/v3/spreadsheets/{tok}/sheets/query")
+             .get("data") or {}).get("sheets")) or []
+    tabs = [t for t in tabs if (t.get("resource_type") or "sheet") == "sheet"]
+    tat_ca = [t.get("title") or t.get("sheet_id") for t in tabs]
+    con_dong = MAX_DONG
+    ra = []
+    for t in _chon(tabs, chi, "sheet_id", "title")[:MAX_BANG]:
+        sid = t.get("sheet_id")
+        g = t.get("grid_properties") or {}
+        so_dong = int(g.get("row_count") or 0)
+        so_cot = min(int(g.get("column_count") or 0), MAX_COT)
+        luoi: list[list[list[str]]] = []
+        doc_toi = min(so_dong, max(con_dong, 0))
+        if doc_toi and so_cot:
+            d = lark.call("GET", f"/open-apis/sheets/v2/spreadsheets/{tok}/values/"
+                                 f"{sid}!A1:{_ten_cot(so_cot)}{doc_toi}",
+                          query={"valueRenderOption": "ToString",
+                                 "dateTimeRenderOption": "FormattedString"})
+            vals = ((((d or {}).get("data") or {}).get("valueRange") or {}).get("values")) or []
+            luoi = [[_o_sheet(x) for x in (list(r or []) + [None] * so_cot)[:so_cot]]
+                    for r in vals]
+            # Lưới Sheet mặc định dài hơn dữ liệu thật (khảo sát 52 dòng trên lưới 191).
+            while luoi and not any(luoi[-1]):
+                luoi.pop()
+        con_dong -= len(luoi)
+        ra.append({"ten": t.get("title") or sid, "id": sid, "luoi": luoi, "loai_cot": None,
+                   # Chưa đọc hết lưới: không biết phần sau có dữ liệu không → báo CÓ THỂ cắt.
+                   "bi_cat": so_dong > doc_toi})
+    return {"ten": ten or tok, "loai": "Sheet", "bang": ra, "tat_ca": tat_ca}
+
+
+def _tho_base(app_token: str, chi: str) -> dict:
+    try:
+        ten = ((lark.call("GET", f"/open-apis/bitable/v1/apps/{app_token}")
+                .get("data") or {}).get("app") or {}).get("name") or ""
+    except Exception:
+        ten = ""
+    bangs = _trang(f"/open-apis/bitable/v1/apps/{app_token}/tables", {"page_size": 100})
+    tat_ca = [b.get("name") or b.get("table_id") for b in bangs]
+    con_dong = MAX_DONG
+    ra = []
+    for b in _chon(bangs, chi, "table_id", "name")[:MAX_BANG]:
+        tid = b.get("table_id")
+        fields = _trang(f"/open-apis/bitable/v1/apps/{app_token}/tables/{tid}/fields",
+                        {"page_size": 100})[:MAX_COT]
+        cot = [f.get("field_name") or "" for f in fields]
+        loai_cot = [f.get("type") for f in fields]
+        recs = _trang(f"/open-apis/bitable/v1/apps/{app_token}/tables/{tid}/records",
+                      {"page_size": 500}, toi_da=con_dong + 1) if con_dong > 0 else []
+        dung = recs[:max(con_dong, 0)]
+        luoi = [[[c] if c else [] for c in cot]]
+        for r in dung:
+            f = r.get("fields") or {}
+            luoi.append([_o_base(f.get(c), l) for c, l in zip(cot, loai_cot)])
+        con_dong -= len(dung)
+        ra.append({"ten": b.get("name") or tid, "id": tid, "luoi": luoi, "loai_cot": loai_cot,
+                   "bi_cat": len(recs) > len(dung)})
+    return {"ten": ten or app_token, "loai": "Base", "bang": ra, "tat_ca": tat_ca}
 
 
 def doc(loai: str, token: str, phu: str = "", *, ca_dong: bool = True) -> dict:

@@ -21,6 +21,8 @@ tắt. Cuối cùng mời hỏi tiếp về việc họ quan tâm. Đừng đổ
   link (`/shop`)
 - Web: cào bảng sản phẩm, giá của cả website (`/scrape`); đọc một trang (`/read`)
 - Nội bộ: tra Wiki Lark (`/wiki`), đọc một Lark Sheet/Base của team từ link (`/bang`),
+  đếm/tính %/cộng tổng trên Sheet/Base đó bằng công cụ (số chính xác trên mọi dòng,
+  vd tổng hợp khảo sát, tỷ trọng pillar, tổng một cột chi phí),
   đọc ảnh gửi kèm, nhắc lịch (`/nhac`), ghi nhớ (`/nho`)
 
 **Hỏi về MỘT công cụ** ("soi sàn là gì", "lệnh /profile dùng sao", "soi KOC ra những

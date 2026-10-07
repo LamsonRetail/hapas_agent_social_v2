@@ -22,9 +22,17 @@
       value: ["19/10", "1/11", "Giải thích công năng", "chờ team xác nhận"]
 
 # Đáp án đọc chỉ-đọc tab MASTER MAP (b3df89): dòng TOTAL = 0.7 (70%), ô tỷ trọng Event lẫn trong chữ.
-# người chấm: nói ô tỷ trọng Event là ô chữ; không đưa số đếm/% pillar tự đếm cho tab dài (đưa COUNTIF);
+# 07/10/2026: tỷ trọng pillar nay do `dem_bang` đếm (bỏ luật "tab >20 dòng không tự đếm %, đưa COUNTIF").
+# Số tính ĐỘC LẬP, không qua dem_bang_tool: script riêng đọc dump lark-cli tab FACEBOOK (3uxqqA) và
+# TIKTOK (1U7qVi), tiêu đề ở dòng 3, bỏ dòng PHASE (chỉ có chữ ở cột A) và dòng lặp "STT…", đếm ô
+# Pillar đã gộp hoa/thường + khoảng trắng; rồi chạy dem_bang trên cùng dump — khớp:
+#   FACEBOOK: 23 dòng bài, 23 có pillar — Event 8 (34,8%), Celeb 7 (30,4%), Sản phẩm 5 (21,7%),
+#             TVC 2 (8,7%), Retail 1 (4,3%);
+#   TIKTOK:   68 dòng bài, 66 có pillar — Celeb 21 (31,8%), Event 21 (31,8%), TVC 11 (16,7%),
+#             Sản phẩm 9 (13,6%), Retail 2 (3,0%), SBD 2 (3,0%).
+# người chấm: nói ô tỷ trọng Event là ô chữ; % pillar chép từ công cụ (đúng số trên), nói n từng tab;
 # bài thiếu Link Media liệt kê theo ngày + kênh + STT; không bịa bài; tên celeb thay bằng [celeb].
-- description: "SOW 8 · Rà CONTENT CALENDAR — MASTER MAP chỉ cộng 70%, tab dài dùng COUNTIF, không bịa bài"
+- description: "SOW 8 · Rà CONTENT CALENDAR — MASTER MAP chỉ cộng 70%, % pillar do dem_bang đếm, không bịa bài"
   metadata: {sow_dong: 8, hang_muc: "Lập kế hoạch nội dung"}
   vars:
     ma: d08b
@@ -37,11 +45,13 @@
       config: {ten: "Lập và rà lịch nội dung"}
     - type: python
       value: file://kiem.py:goi_tool
-      config: {ten: "doc_bang"}
-    - type: icontains-any
-      value: ["70%", "70 %", "0,7", "0.7"]
+      config: {ten: "dem_bang"}
+    # Lịch do team cập nhật liên tục (07/10: FACEBOOK 33 bài, MASTER MAP cộng 80% — khác bản dump
+    # 06/10 ở trên) nên KHÔNG chấm % cụ thể; % do dem_bang đếm (goi_tool), người chấm đối chiếu Sheet.
+    - type: regex
+      value: '\d{1,2},\d%'
     - type: icontains-all
-      value: ["MASTER MAP", "COUNTIF", "Link Media"]
+      value: ["MASTER MAP", "Link Media"]
 
 # người chấm: đúng 5 bài cụ thể theo mẫu cột (không chỉ kể tên mục đích); câu giả định nêu nguồn lực;
 # Hạn tư liệu là ngày cụ thể tính lùi từ ngày đăng; kênh trong lịch đúng kênh đã giả định.

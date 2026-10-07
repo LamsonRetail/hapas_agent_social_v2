@@ -49,6 +49,12 @@ BANG_LENH: dict[str, str] = {
     "/hapas": "binh_luan_kenh_nha",
 }
 
+#: Tool ĐI KÈM được phép gọi thêm trong cùng lệnh ép. `/bang` ép `doc_bang` (đọc), nhưng
+#: câu "/bang <link> tổng hợp tỷ lệ…" cần SỐ — và số phải do `dem_bang` đếm (07/10/2026:
+#: model tự đếm tab 52 dòng sai ba lượt). Không có dòng này thì lệnh ép "không đổi sang tool
+#: khác" đẩy model quay lại đếm tay. Chỉ nói tới tool đi kèm khi policy đang cho nó chạy.
+TOOL_DI_KEM: dict[str, str] = {"doc_bang": "dem_bang"}
+
 #: Lệnh năng lực mà gõ TRƠN (không đối số) thì tự trả lời trạng thái, không gọi model.
 #: `/hapas` (05/10/2026): `/hapas` trơn trả công tắc, kênh Meta đã nối, hạn token — đọc
 #: thẳng `.env` + sổ token, không lộ giá trị nào. Có đối số thì ép tool như mọi lệnh
@@ -355,8 +361,17 @@ def _lam_luot_nguoi_dung(lenh: str, tool: str, doi_so: str) -> str:
         f"{doi_so}\n\n"
         f"[LỆNH {lenh}] Dòng trên là đối số. Lượt này BẮT BUỘC gọi tool `{tool}` — "
         f"đừng hỏi lại, đừng trả lời chay. Tham số phụ nào thiếu thì lấy mặc định "
-        f"hợp lý rồi chạy, và nói rõ đã lấy mặc định gì.{lon}"
+        f"hợp lý rồi chạy, và nói rõ đã lấy mặc định gì.{lon}{_cau_di_kem(tool)}"
     )
+
+
+def _cau_di_kem(tool: str) -> str:
+    """Câu cho phép gọi thêm tool đi kèm (`TOOL_DI_KEM`), rỗng nếu không có/đang bị chặn."""
+    kem = TOOL_DI_KEM.get(tool)
+    if not kem or not _duoc_khong(kem)[0]:
+        return ""
+    return (f" Phần cần SỐ (đếm, %, so nhóm, cộng tổng) thì gọi thêm `{kem}` — số do code "
+            "đếm, chép nguyên; không tự đếm trên bảng đã đọc.")
 
 
 def xu_ly(text: str) -> KetQua:
@@ -405,6 +420,7 @@ def xu_ly(text: str) -> KetQua:
             chi_thi=(
                 f"LỆNH CỨNG {lenh} — người dùng đã chỉ định công cụ. Lượt này gọi "
                 f"`{tool}`, không đổi sang tool khác và không trả lời chay."
+                + _cau_di_kem(tool)
                 + ("" if con_lai else
                    " Họ chưa đưa đối số: hỏi lại ngắn gọn cần tra gì, rồi dừng.")
             ),

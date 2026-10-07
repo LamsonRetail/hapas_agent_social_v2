@@ -1,8 +1,15 @@
 # SOW 7 — Theo dõi ngân sách từng chiến dịch. Skill: skills/theo-doi-ngan-sach.md
 # Đáp án tab BẢNG TỔNG (đọc chỉ-đọc ngày 06/10): dòng TỔNG NGÂN SÁCH = 8.385.649.200;
-# TỔNG thực tế cột (18.9) = 7.919.960.726; cột (5.10) chưa có công thức tổng.
+# TỔNG thực tế cột (18.9) = 7.919.960.726; cột (5.10) chưa có công thức tổng (dòng TỔNG = 0).
+# 07/10/2026: tổng tự tính nay do `dem_bang` cộng (bỏ luật "bảng >20 dòng không tự cộng"). Số tính ĐỘC
+# LẬP, không qua dem_bang_tool: script riêng đọc dump lark-cli của tab f99011, bỏ "₫" và dấu phẩy nghìn,
+# cộng bằng Decimal; rồi chạy dem_bang trên cùng dump — khớp:
+#   cột (5.10) cộng các dòng chi tiết = 2.053.550.950 (dòng nhóm và dòng TỔNG của cột này trống/0);
+#   PRODUCTION: dòng 23–25 = 2.541.849.200 = ô nhóm; dòng 23–27 (gồm SẢN XUẤT CONTENT) = 2.581.849.200;
+#   5 nhóm cấp cao (dòng 4, 17, 22, 28, 43) = 8.385.649.200 = dòng TỔNG.
 
-# người chấm: chỉ ra cột thực tế 5.10 có số ở dòng chi tiết mà dòng TỔNG trống/0; chỉ ra SẢN XUẤT CONTENT
+# người chấm: chỉ ra cột thực tế 5.10 có số ở dòng chi tiết (tổng 2.053.550.950 do công cụ cộng) mà dòng
+# TỔNG trống/0; tổng tự tính ghi rõ là công cụ cộng, không phải số tự cộng; chỉ ra SẢN XUẤT CONTENT
 # đứng ngoài tổng PRODUCTION; nêu bảng thiếu cột đã cam kết / đã thanh toán / dự kiến cuối kỳ; danh sách
 # vượt ghi "có thể chưa đủ, lọc cột Chênh lệch < 0"; không chép tên KOL/nghệ sĩ trong tên hạng mục.
 - description: "SOW 7 · Rà BẢNG TỔNG — tổng dự toán ≈8,39 tỷ, thực tế ≈7,92 tỷ, khoản ngoài tổng, cột còn thiếu"
@@ -18,13 +25,17 @@
       config: {ten: "Theo dõi ngân sách chiến dịch"}
     - type: python
       value: file://kiem.py:goi_tool
-      config: {ten: "doc_bang"}
+      config: {ten: "dem_bang"}
     - type: icontains-any
       value: ["8.385", "8,385", "8385", "8,39", "8.39"]
     - type: icontains-any
       value: ["7.919", "7,919", "7919", "7,92", "7.92"]
+    # Sheet này team còn cập nhật (07/10 đã khác bản dump 06/10) nên KHÔNG chấm con số cụ thể ở đây;
+    # số do dem_bang cộng (chấm ở goi_tool), người chấm đối chiếu số với Sheet lúc chạy.
+    - type: regex
+      value: '\d{1,3}(\.\d{3}){2,}'
     - type: icontains-all
-      value: ["SẢN XUẤT CONTENT", "cam kết", "dự kiến cuối kỳ", "kiểm lại trên Sheet"]
+      value: ["SẢN XUẤT CONTENT", "cam kết", "dự kiến cuối kỳ"]
 
 # người chấm: không dùng bảng markdown; liệt kê ≥5 khoản dễ sót (VAT/thuế TNCN, vận chuyển, overtime,
 # in lại, quà/merch, phí nền tảng, setup/dọn địa điểm, phí agency).
