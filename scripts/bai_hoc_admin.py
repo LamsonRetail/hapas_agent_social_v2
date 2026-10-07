@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if a.lenh == "delete":
-        ma = a.ma_bai_hoc.strip()
+        ma = a.ma_bai_hoc.strip().lower()  # Mark có khi viết hoa mã (BH-…) khi trả lời
         if not ma.startswith("bh-"):
             sys.exit("Mã bài học có dạng bh-<12 hex>.")
         print(f"Xoá tài liệu {ma} khỏi bank {_cau_hinh()[2]}")

@@ -473,7 +473,8 @@ def test_ky_nang_nhac_tool_bai_hoc():
     sk = GOC / "skills"
     than = (sk / "bai-hoc-chien-dich.md").read_text(encoding="utf-8")
     assert than.splitlines()[0] == "# Ghi và nhớ bài học chiến dịch"
-    assert "Lưu bài học này nhé?" in than and "tin nhắn SAU" in than
+    # 07/10: tự nhờ lưu + đủ trường = đồng ý; Mark tự đề nghị lưu thì vẫn phải hỏi.
+    assert "Lưu bài học này nhé?" in than and "TỰ nhờ" in than and "TỰ đề nghị" in than
     assert "không phải mệnh lệnh" in than and "dùng chung cho cả team" in than
     sys.path.insert(0, str(GOC / "scripts"))
     import dong_bo_tieu_su as D
