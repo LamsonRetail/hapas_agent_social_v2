@@ -105,6 +105,19 @@ _READ_WORDS = {
 }
 
 
+def _command_words(argv: list[str]) -> set[str]:
+    """Từ khoá command và mọi ``+shortcut``, bỏ qua option cùng giá trị của nó.
+
+    CLI chính thức biểu diễn thao tác bằng ``+shortcut``. Quét tất cả shortcut để
+    một dạng lồng như ``base records +delete`` vẫn bị chặn, nhưng không diễn giải
+    ``--title 'Copy update'`` hay giá trị option khác như một hành động.
+    """
+    words: set[str] = set()
+    for token in [argv[0], *(x for x in argv[1:] if x.startswith("+"))]:
+        words.update(token.replace("+", " ").replace("_", " ").replace("-", " ").split())
+    return words
+
+
 def _lark_cli_decision(args: dict[str, Any]) -> PolicyDecision:
     argv = args.get("args")
     if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
@@ -128,11 +141,11 @@ def _lark_cli_decision(args: dict[str, Any]) -> PolicyDecision:
             "raw Lark API chỉ cho phép GET/HEAD" if method not in {"get", "head"}
             else "raw Lark API read-only",
         )
-    words = {
-        part
-        for token in low
-        for part in token.replace("+", " ").replace("_", " ").replace("-", " ").split()
-    }
+    # Shortcut này được xác minh từ chính lệnh lỗi production 07/10. Giữ hẹp theo
+    # domain + action; không thêm `fetch` vào allowlist chung cho mọi resource.
+    if low[:2] == ["docs", "+fetch"]:
+        return PolicyDecision(True, "lark_cli docs +fetch chỉ đọc")
+    words = _command_words(low)
     if words & _MUTATING_WORDS:
         return PolicyDecision(False, "lark_cli có động từ ghi/gửi")
     if words & _READ_WORDS:

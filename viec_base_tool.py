@@ -252,6 +252,7 @@ def _doc_cot(d: dict) -> dict[str, dict]:
         for f in data.get("items") or []:
             ten = str(f.get("field_name") or "")
             ra[ten] = {"id": f.get("field_id"), "type": f.get("type"),
+                       "primary": bool(f.get("is_primary")),
                        "options": [str(o.get("name") or "")
                                    for o in ((f.get("property") or {}).get("options") or [])]}
         tok = data.get("page_token")

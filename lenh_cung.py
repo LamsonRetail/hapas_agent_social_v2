@@ -86,7 +86,7 @@ LENH_TOOL_TU_DO: dict[str, str] = {
 #: Lệnh tự trả lời, không gọi model. Rẻ, nhanh, và quan trọng hơn: không bịa được.
 #: `/viec` (02/10/2026): xem việc quét nền của cuộc chat — đọc thẳng sổ `viec_nen`, không
 #: gọi model, nên tiến độ/link/chi phí là số thật, không phải model kể lại.
-LENH_TIEN_ICH = ("/help", "/nangluc", "/viec")
+LENH_TIEN_ICH = ("/help", "/nangluc", "/viec", "/tiendo")
 
 _CU_PHAP = re.compile(r"^\s*(/[a-zA-Z][a-zA-Z0-9_-]*)\s*(.*)$", re.S)
 
@@ -199,6 +199,8 @@ def _van_help() -> str:
         "      Đặt một lời nhắc theo thời gian, đến giờ Mark tự nhắn vào đây.",
         "  /nangluc",
         "      Xem quyền hạn platform cấp và từng công tắc đang bật hay tắt.",
+        "  /tiendo <link Base> [cot_han=\"Ngày giao\"] [tag=khong]",
+        "      Tiến độ bằng code. Đặt lịch nhắc trên console → Lịch chạy → chọn nhóm → Giao việc.",
         "  /viec",
         "      Xem các việc quét nền (quét lớn chạy ngoài lượt trả lời): tiến độ, link "
         "sheet, chi phí thật. /viec <mã> để xem một việc.",
@@ -380,12 +382,21 @@ def _cau_di_kem(tool: str) -> str:
     return cau
 
 
-def xu_ly(text: str) -> KetQua:
+def xu_ly(text: str, *, kenh: dict | None = None, chat_id: str = "",
+          sender_open_id: str | None = None) -> KetQua:
     """Bóc lệnh khỏi câu hỏi. Không có lệnh thì trả nguyên văn, không đụng gì."""
     lenh, con_lai = tach(text)
     if not lenh:
         return KetQua(van_ban=text or "")
 
+    if lenh == "/tiendo":
+        cho, ly_do = _duoc_khong("tra_tien_do")
+        if not cho:
+            return KetQua(van_ban=con_lai, lenh=lenh, sai=True,
+                          tra_loi_thang=f"Không đọc tiến độ: {ly_do or 'năng lực đang tắt'}")
+        import tien_do
+        return KetQua(van_ban=con_lai, lenh=lenh, tra_loi_thang=tien_do.lenh_tiendo(
+            con_lai, kenh=kenh, chat_id=chat_id, sender_open_id=sender_open_id))
     if lenh == "/help":
         return KetQua(van_ban=con_lai, lenh=lenh, tra_loi_thang=_van_help())
     if lenh == "/nangluc":

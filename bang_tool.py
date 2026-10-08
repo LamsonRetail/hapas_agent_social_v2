@@ -17,6 +17,7 @@ audit như mọi tool.
 from __future__ import annotations
 
 import os
+import re
 
 import lark_bang as B
 import lark_client as lark
@@ -118,14 +119,110 @@ def base_noi_bo() -> set[str]:
     return ra
 
 
-def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str) -> tuple[bool, str]:
+def _thu_muc_token():
+    import pathlib
+    try:
+        from config import config
+        return pathlib.Path(config.token_file).parent
+    except Exception:
+        return pathlib.Path(__file__).resolve().parent / ".tokens"
+
+
+def _doc_json_bat_buoc(ten: str) -> tuple[dict | None, bool]:
+    """Trả (nội dung, file tồn tại). File có mà hỏng được giữ là trạng thái fail-closed."""
+    import json
+    f = _thu_muc_token() / ten
+    if not f.exists():
+        return None, False
+    try:
+        j = json.loads(f.read_text(encoding="utf-8"))
+        return (j if isinstance(j, dict) else None), True
+    except Exception:
+        return None, True
+
+
+def _id_app(v) -> bool:
+    return isinstance(v, str) and bool(re.fullmatch(r"[A-Za-z0-9]+", v))
+
+
+def _id_bang(v) -> bool:
+    return isinstance(v, str) and bool(re.fullmatch(r"tbl[A-Za-z0-9]+", v))
+
+
+def _ngoai_le_bang_noi_bo(token: str, table_id: str, nguoi: str) -> tuple[bool, str]:
+    """Kiểm cấu hình ngoại lệ theo bảng; quyền thật của người hỏi được kiểm ở bước sau."""
+    if not nguoi:
+        return False, "không biết ai đang hỏi (kênh không gửi danh tính)"
+    if not table_id:
+        return False, "Base nội bộ chứa cả bảng công việc và Audit/Chi phí; chưa cho phép đúng bảng"
+
+    audit, co_audit = _doc_json_bat_buoc("audit_base.json")
+    chi_phi, co_chi_phi = _doc_json_bat_buoc("chi_phi_quet_base.json")
+    cu, co_cu = _doc_json_bat_buoc("audit_base.previous.json")
+    # Chỉ mở ngoại lệ khi biết đủ cả Audit hiện tại, Audit trước đó và Chi phí. Thiếu
+    # previous cũng phải đóng: nếu đoán "không có" ta có thể bỏ sót một bảng cũ còn dữ liệu.
+    bat_buoc = (audit, cu, chi_phi)
+    if (not co_audit or not co_cu or not co_chi_phi or
+            any(not x or not _id_app(x.get("app_token")) or not _id_bang(x.get("table_id"))
+                for x in bat_buoc)):
+        return False, "metadata bảo vệ Audit/Chi phí chưa đầy đủ; mặc định không mở bảng"
+    if audit["app_token"] != token or chi_phi["app_token"] != token:
+        return False, "Base nội bộ chưa có cấu hình ngoại lệ theo bảng"
+    bao_ve = {(str(x["app_token"]), str(x["table_id"])) for x in (audit, chi_phi, cu)
+              if x and x.get("app_token") and x.get("table_id")}
+    if (token, table_id) in bao_ve:
+        return False, "đây là bảng Audit/Chi phí nội bộ; chỉ chủ agent xem được"
+
+    cho, co_cho = _doc_json_bat_buoc("mixed_base_read_allowlist.json")
+    if not co_cho or not cho or cho.get("version") != 1 or not isinstance(cho.get("tables"), list):
+        return False, "Base nội bộ chứa cả bảng công việc và Audit/Chi phí; chưa cho phép đúng bảng"
+    if not cho["tables"] or any(not isinstance(x, dict) or not _id_app(x.get("app_token"))
+                                 or not _id_bang(x.get("table_id")) for x in cho["tables"]):
+        return False, "cấu hình bảng được phép không hợp lệ; mặc định không mở bảng"
+    cap = {(str(x.get("app_token") or ""), str(x.get("table_id") or ""))
+           for x in cho["tables"] if isinstance(x, dict)}
+    if (token, table_id) not in cap:
+        return False, "Base nội bộ chứa cả bảng công việc và Audit/Chi phí; chưa cho phép đúng bảng"
+    return True, "bảng được chủ agent cho phép trong Base hỗn hợp"
+
+
+def _quyen_thuc_te(loai: str, token: str, nguoi: str) -> tuple[bool, str]:
+    """Chứng minh quyền người hỏi, không dùng việc Wiki được khai báo thay cho quyền."""
+    try:
+        d = lark.call("GET", f"/open-apis/drive/v2/permissions/{token}/public",
+                      query={"type": loai})
+        if (((d.get("data") or {}).get("permission_public") or {})
+                .get("link_share_entity")) in _CONG_TY:
+            return True, "mở cho cả công ty"
+    except Exception:
+        pass
+    try:
+        tv = B._trang(f"/open-apis/drive/v1/permissions/{token}/members",
+                      {"type": loai}, toi_da=2000)
+    except Exception:
+        return False, "Mark không xem được danh sách người có quyền để đối chiếu"
+    for m in tv:
+        if m.get("member_type") == "openid" and m.get("member_id") == nguoi:
+            return True, "là thành viên"
+    for m in tv:
+        if m.get("member_type") == "openchat" and _trong_chat(str(m.get("member_id")), nguoi):
+            return True, "thuộc nhóm chat được chia sẻ"
+    return False, "chưa thấy bạn trong danh sách người có quyền"
+
+
+def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str,
+                    table_id: str = "") -> tuple[bool, str]:
     """(được đọc?, vì sao). Chỉ trả True khi CHỨNG MINH được người hỏi có quyền."""
     boss = {x for x in (os.environ.get("AGENT_BOSS_OPEN_ID", "").strip(),
                         os.environ.get("STEVEN_BOSS_OPEN_ID", "").strip()) if x}
     if nguoi and nguoi in boss:
         return True, "chủ agent"
     if token in base_noi_bo():
-        return False, "đây là Base nội bộ của Mark (nhật ký hỏi–đáp, chi phí) — chỉ chủ agent xem được"
+        ok, ly_do = _ngoai_le_bang_noi_bo(token, table_id, nguoi)
+        if not ok:
+            return False, ly_do
+        quyen, bang_chung = _quyen_thuc_te(loai, token, nguoi)
+        return (True, f"{ly_do}; {bang_chung}") if quyen else (False, bang_chung)
     if _trong_cay_wiki(token, *wiki_tokens):
         return True, "nằm trong Nguồn Wiki chủ agent đã khai báo"
     try:
@@ -156,18 +253,18 @@ class TuChoi(Exception):
     """Không mở nguồn cho người hỏi. `str(e)` là câu nói NGUYÊN với người dùng."""
 
 
-def mo_nguon(nguon: str) -> tuple[str, str, str, str, str]:
+def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None) -> tuple[str, str, str, str, str]:
     """Link/mã → (loại, token, phụ, tên loại, vì sao được đọc) — hoặc ném `TuChoi`.
 
     Cửa DUY NHẤT cho mọi tool đọc Base/Sheet bằng token bot (`doc_bang`, `dem_bang`).
     Tách ra để tool đếm không có luật quyền thứ hai: hai bản luật thì sớm muộn một bản
     nới hơn bản kia, và Base audit lại thành cửa cho ai cũng đọc được.
     """
-    nd = B.nhan_dien(nguon)
+    nd = B.nhan_dien_chi_tiet(nguon)
     if not nd:
         raise TuChoi("Không nhận ra link. Cần link Base (/base/), Sheet (/sheets/), "
                      "Wiki (/wiki/), hoặc `sheet:…`/`base:…` từ thẻ mục lục.")
-    loai, token, phu = nd
+    loai, token, phu, kieu_phu = nd
     node = ""
     if loai == "wiki":
         node = token
@@ -179,10 +276,31 @@ def mo_nguon(nguon: str) -> tuple[str, str, str, str, str]:
         if loai not in _TEN_LOAI:
             raise TuChoi(f"Node Wiki này là '{loai}', không phải Base hay Sheet. Tài liệu "
                          "Wiki thì tra trong kho kiến thức, không đọc bằng tool này.")
+        if kieu_phu and ((loai == "bitable" and kieu_phu != "table") or
+                         (loai == "sheet" and kieu_phu != "sheet")):
+            raise TuChoi("Phạm vi table/sheet trong link Wiki không khớp loại tài liệu.")
     ten_loai = _TEN_LOAI[loai]
 
-    ok, vi_sao = quyen_nguoi_hoi(loai, token, _nguoi_hoi(), node)
+    # Lệnh cứng chạy trước audit.bat_dau nên truyền asker tường minh. None giữ đường
+    # doc_bang/dem_bang cũ; chuỗi rỗng vẫn xét như không có danh tính, không mượn bot.
+    ok, vi_sao = quyen_nguoi_hoi(
+        loai, token, _nguoi_hoi() if nguoi_hoi is None else nguoi_hoi, node,
+        table_id=phu)
     if not ok:
+        if vi_sao.startswith("không biết ai đang hỏi"):
+            raise TuChoi(
+                f"Không thể kiểm tra quyền đọc {ten_loai}: Console chưa chuyển danh tính "
+                "Lark đã xác thực của tài khoản đang hỏi. Hãy kết nối tài khoản Console "
+                "với danh tính Lark, hoặc mở lại yêu cầu từ Lark. Chia sẻ thêm tài liệu "
+                "không tự khắc phục lỗi nhận diện này."
+            )
+        if (token in base_noi_bo() or "Audit/Chi phí" in vi_sao or
+                "bảng được phép" in vi_sao or "metadata bảo vệ" in vi_sao):
+            raise TuChoi(
+                f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Nhờ chủ agent cấu hình đúng "
+                "cặp app_token/table_id trong mixed_base_read_allowlist.json; không mở quyền "
+                "cho cả Base nội bộ."
+            )
         raise TuChoi(
             f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Mark chỉ đọc {ten_loai} mà CHÍNH "
             f"người hỏi cũng được xem. Nhờ chủ {ten_loai} chia sẻ cho bạn, hoặc nhờ chủ agent "
@@ -192,6 +310,8 @@ def mo_nguon(nguon: str) -> tuple[str, str, str, str, str]:
 
 def loi_doc(ten_loai: str, e: Exception) -> str:
     """Câu báo khi bot không đọc được (thường là chưa được chia sẻ) — dùng chung."""
+    if isinstance(e, LookupError):
+        return str(e)
     return (f"Mark chưa đọc được {ten_loai} này ({str(e)[:160]}). Thường là do bot chưa được "
             f"chia sẻ — thêm bot 'Mark Trần - Social Assistant' vào {ten_loai} với quyền xem.")
 

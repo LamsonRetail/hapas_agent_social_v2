@@ -392,13 +392,21 @@ def _context_env(c: dict) -> str:
     return "prod"
 
 
-def _lark_sender_ref(payload: dict) -> str | None:
+def _lark_sender_ref(payload: dict, channel: str = "") -> str | None:
     """Chỉ đưa Lark user open_id thật vào ``brain.reply``.
 
     Web console dùng email làm ``user_ref``. Truyền email vào tham số
     ``sender_open_id`` khiến brain gọi Contact API như thể đó là ``ou_...`` và
     sinh một lỗi 400 vô ích cho mỗi web job.
     """
+    # Job web chỉ được tin dấu do Platform tự đóng sau khi resolve session/PAT trong
+    # đúng app agent. `user_ref` nằm trong body của đường agent/admin token cũ nên có
+    # thể bị giả thành `ou_victim`; tuyệt đối không nâng nó thành danh tính Lark.
+    if (channel or "").strip().lower() == "web":
+        ref = str((payload or {}).get("sender_open_id") or "").strip()
+        if (payload or {}).get("sender_identity_verified") is True and ref.startswith("ou_"):
+            return ref
+        return None
     # Job Lark mang người gửi ở `sender_open_id`; chỉ job console mới có `user_ref`.
     # Bản trước chỉ đọc `user_ref`, nên MỌI tin Lark tới qua gateway đều mất người gửi —
     # đếm 25/09: 54/70 lượt Lark trong sổ audit có `nguoi` trống. Hệ quả là Mark không
@@ -419,6 +427,11 @@ def _kenh_cua_job(j: dict) -> dict | None:
     """
     rt = j.get("reply_to") or {}
     ct = str(rt.get("chat_type") or "").strip().lower()
+    p = j.get("payload") or {}
+    if p.get("scheduled") is True:
+        return {"chat_type": "p2p" if ct == "p2p" else "group",
+                "scheduled": True, "scheduled_by": p.get("scheduled_by") or "",
+                "schedule_id": p.get("schedule_id"), "job_id": j.get("id")}
     if not ct:
         return None
     return {"chat_type": "p2p" if ct == "p2p" else "group"}
@@ -617,6 +630,7 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
                 hop["xong"] = True
                 bo = hop.get("bo_lai")
             if bo:
+                bo["tien_do_kenh"] = kenh
                 _gui_tra_loi_muon(hop, hoi, bo)
 
     t = threading.Thread(target=chay, name=f"tra-loi-{phien[:16]}", daemon=True)
@@ -699,6 +713,9 @@ def _gui_tra_loi_muon(hop: dict, hoi: str, k: dict) -> None:
         for lan in range(len(_LUI_GUI_BU) + 1):
             try:
                 viec_nen.day_theo_kenh(k, van, kid)
+                if hop.get("ok") and (k.get("tien_do_kenh") or {}).get("tien_do_gui"):
+                    import tien_do
+                    tien_do.xac_nhan_gui(k["tien_do_kenh"])
                 print(f"[job] đã gửi bù trả lời muộn ({k.get('loai')})", flush=True)
                 return
             except Exception as e:  # noqa: BLE001
@@ -708,6 +725,9 @@ def _gui_tra_loi_muon(hop: dict, hoi: str, k: dict) -> None:
                     _ngu(_LUI_GUI_BU[lan])
         print(f"[job] BỎ gửi bù trả lời muộn sau {len(_LUI_GUI_BU) + 1} lần "
               f"({k.get('loai')})", flush=True)
+        if (k.get("tien_do_kenh") or {}).get("tien_do_gui"):
+            import tien_do
+            tien_do.huy_cho_gui(k["tien_do_kenh"])
         _ghi_chu_chua_gui(k, cau)
     except Exception as e:  # noqa: BLE001
         print(f"[job] gửi bù trả lời muộn hỏng: {type(e).__name__}", flush=True)
@@ -860,8 +880,10 @@ def _mot_vong(c: dict, tra_loi) -> int:
         print(f"[anh] lỗi tải ảnh job #{jid}: {type(e).__name__}: {e}", flush=True)
     hoi = _cau_hoi_kem_anh(hoi, j, anh)
 
-    dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p),
-                                 _kenh_cua_job(j), job_id=jid)
+    kenh = _kenh_cua_job(j)
+    channel = str(j.get("channel") or (j.get("reply_to") or {}).get("channel") or "")
+    dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p, channel),
+                                 kenh, job_id=jid)
     if treo:
         print(f"[job] #{jid} QUÁ HẠN {_HAN_TRA_LOI:.0f}s — bỏ lượt, đi tiếp. "
               f"Luồng cũ chạy tiếp, xong thì gửi bù trả lời (nếu kênh đẩy được).",
@@ -895,12 +917,18 @@ def _mot_vong(c: dict, tra_loi) -> int:
     ):
         try:
             _goi_job(c, duong, than)
+            if duong.endswith("/reply") and ok and not treo and (kenh or {}).get("tien_do_gui"):
+                import tien_do
+                tien_do.xac_nhan_gui(kenh)
         except Exception as e:
             if (duong.endswith("/complete") and getattr(e, "code", None) == 409
                     and getattr(e, "so_lan_thu", 0)):
                 # Lần trước đã tới platform, chỉ mất phản hồi — job đã done.
                 print(f"[job] {duong}: đã xong từ lần gửi trước (409)", flush=True)
                 continue
+            if duong.endswith("/reply") and not treo and (kenh or {}).get("tien_do_gui"):
+                import tien_do
+                tien_do.huy_cho_gui(kenh)
             print(f"[job] {duong} lỗi: {type(e).__name__}: {e}", flush=True)
     print(
         f"[job] #{jid} {'xong' if ok else 'LỖI'} · {hoi[:40]!r} → {dap[:60]!r}",

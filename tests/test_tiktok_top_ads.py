@@ -156,6 +156,7 @@ def test_ghi_so_chi_phi_dung_actor_va_nen_tang(gia):
 def test_chi_uoc_tinh_khong_chay_khong_ghi_so(gia):
     kq = chay(nganh="túi xách", so_ads=20, chi_uoc_tinh=True)
     assert kq["da_chay"] is False and not gia["goi"] and not gia["so_ghi"]
+    assert kq["execution_state"] == "estimated", "ước tính không được thành biên nhận đã chạy"
     assert kq["uoc_tinh_chi_phi_usd"] == pytest.approx(0.06)
     assert kq["uoc_tinh_toi_da_usd"] == pytest.approx(0.06 + 0.01 + 20 * 0.004, abs=1e-3)
     assert "Chạy nhé?" in kq["note"] and kq["vuot_ngan_sach"] is False
@@ -248,6 +249,10 @@ def test_nguon_chinh_hong_thi_chay_lexis(gia):
     assert d[12] == "lexis-solutions"
     assert gia["so_ghi"][0]["thuc"]["_actors"] == [T.ACTOR_CHINH, T.ACTOR_DU_PHONG]
     assert any("ngành cha" in c for c in kq["canh_bao"])
+    assert kq["status"] == "partial" and kq["scope_match"] is False
+    assert kq["partial_reason"] == "broader_industry"
+    assert kq["requested_scope"] != kq["actual_scope"]
+    assert any("chỉ đáp ứng một phần phạm vi" in c for c in kq["canh_bao"])
 
 
 def test_du_phong_dung_tu_khoa_va_ma_muc_tieu(gia):
