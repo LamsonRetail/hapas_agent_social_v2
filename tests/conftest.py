@@ -73,6 +73,12 @@ def _tat_lease_that(monkeypatch, tmp_path):
     # Việc nền (viec_nen.py): sổ việc + bộ đếm YouTube vào thư mục tạm, không bao giờ tự
     # dựng luồng điều phối — bài nào cần thì gọi thẳng `viec_nen.chay_ngay`.
     monkeypatch.setenv("SOCIAL_NEN_THU_MUC", str(tmp_path / "viec-nen"))
+    try:
+        import memory_store
+        # Cờ phiên có số ads (memory_store.danh_dau_phien_han_che) không ghi vào .tokens thật.
+        monkeypatch.setattr(memory_store, "_HAN_CHE_DIR", tmp_path / "han_che")
+    except BaseException:
+        pass
     monkeypatch.setenv("SOCIAL_NEN_TU_CHAY", "0")
     # Bài cũ của social_listen/deep_dive canh đường TẠI CHỖ: mặc định tắt chạy nền (lượt
     # ≤600 bài/nền tảng không đổi gì). Bài của việc nền tự bật lại SOCIAL_QUET_NEN=1.

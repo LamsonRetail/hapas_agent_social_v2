@@ -622,9 +622,11 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
         if not co_khoa:
             print(f"[job] phiên còn lượt trước chưa xong sau {_HAN_TRA_LOI / 2:.0f}s — "
                   "chạy luôn", flush=True)
-        # Cờ hạn chế còn sót từ lượt trước của phiên (đường không có job) không được dính
-        # vào lượt này.
-        lay_han_che(phien)
+        # Hộp cờ hạn chế CỦA RIÊNG lượt này (contextvar trong luồng trả lời; Hermes chép
+        # context sang luồng chạy tool nên tool ghi vào đúng hộp). Hai lượt chồng nhau cùng
+        # phiên (quá nửa trần chờ khoá) không xoá hay lấy nhầm cờ của nhau.
+        hop_han_che: dict = {}
+        _HOP_HAN_CHE.set(hop_han_che)
         try:
             # `kenh` chỉ truyền khi có — `tra_loi` giả của các bộ thử không nhận nó.
             them = {"kenh": kenh} if kenh else {}
@@ -636,8 +638,9 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
             hop["ok"] = False
             hop["loi"] = f"{type(e).__name__}: {e}"
         finally:
-            # Lấy cờ TRƯỚC khi nhả khoá phiên: lượt sau cùng phiên không xoá mất cờ này.
-            hop["han_che"] = lay_han_che(phien)
+            # Cờ của lượt, hoặc cờ BÁM PHIÊN: phiên đã từng có số ads thì mọi câu trả lời
+            # sau đều có thể nhắc lại số từ lịch sử → cũng gắn cờ.
+            hop["han_che"] = hop_han_che.get("tool") or phien_han_che(phien)
             if co_khoa:
                 kp.release()
             if job_id is not None:
@@ -782,24 +785,35 @@ import contextvars as _cv  # noqa: E402
 _JOB_HIEN_TAI: _cv.ContextVar = _cv.ContextVar("lsr_job_hien_tai", default=None)
 
 
-#: Phiên có câu trả lời mang dữ liệu hạn chế theo tool (vd `chi_so_ads` vừa trả số).
-#: Tool đánh dấu trong lượt; luồng trả lời lấy-và-xoá sau lượt rồi gửi kèm `/reply` dưới
-#: khoá `restricted` = tên tool — Platform dựa vào đó ẩn nội dung khỏi người dưới
-#: moderator ở bản ghi hội thoại. Cờ do CHÍNH tool đặt, không đoán theo chữ.
-_HAN_CHE: dict[str, str] = {}
+#: Cờ dữ liệu hạn chế theo tool (vd `chi_so_ads` vừa trả số), gửi kèm `/reply` dưới khoá
+#: `restricted` = tên tool — Platform ẩn nội dung khỏi người dưới moderator ở bản ghi hội
+#: thoại. Cờ do CHÍNH tool đặt (không đoán theo chữ), theo hai lớp:
+#: - hộp của LƯỢT (`_HOP_HAN_CHE`, contextvar do luồng trả lời đặt) — không khoá theo phiên
+#:   nên hai lượt chồng nhau không lấy/xoá nhầm cờ của nhau;
+#: - cờ BÁM PHIÊN lưu đĩa (`memory_store`), sống qua khởi động lại: lượt sau nhắc lại số
+#:   từ lịch sử vẫn được gắn cờ.
+_HOP_HAN_CHE: _cv.ContextVar = _cv.ContextVar("lsr_hop_han_che", default=None)
 _HAN_CHE_JOB: dict[object, str] = {}
 _HAN_CHE_KHOA = threading.Lock()
 
 
-def danh_dau_han_che(phien: str | None, tool: str) -> None:
-    with _HAN_CHE_KHOA:
-        _HAN_CHE[phien or ""] = tool
+def danh_dau_han_che(tool: str) -> bool:
+    """Tool gọi trong lượt khi vừa trả dữ liệu hạn chế. False = không ở trong lượt job."""
+    hop = _HOP_HAN_CHE.get()
+    if hop is None:
+        return False
+    hop["tool"] = tool
+    return True
 
 
-def lay_han_che(phien: str | None) -> str:
-    """Lấy-và-xoá cờ hạn chế của phiên; "" nếu lượt không trả dữ liệu hạn chế."""
-    with _HAN_CHE_KHOA:
-        return _HAN_CHE.pop(phien or "", "")
+def phien_han_che(phien: str | None) -> str:
+    """Tên tool nếu phiên đã từng trả dữ liệu hạn chế (đọc đĩa); lỗi đọc → "" (lớp lượt
+    vẫn còn; Platform cũng tự bám phiên)."""
+    try:
+        import memory_store
+        return memory_store.phien_han_che(phien or "")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _lay_han_che_job(job_id) -> str:

@@ -103,6 +103,37 @@ def load_execution_evidence(chat_id: str, limit: int = 5) -> str:
         return ""
 
 
+# ───────────────────────── phiên đã chứa dữ liệu hạn chế ─────────────────────────
+#: Phiên (chat) đã từng nhận số hạn chế (vd `chi_so_ads`). Bám phiên vì lịch sử còn giữ số:
+#: các lượt sau có thể nhắc lại nên cũng phải gắn cờ `restricted` khi trả về Platform.
+#: Lưu đĩa để sống qua khởi động lại; không bao giờ tự xoá.
+_HAN_CHE_DIR = _BASE / "han_che"
+
+
+def danh_dau_phien_han_che(chat_id: str, tool: str) -> None:
+    if not chat_id:
+        return
+    with _lock:
+        _HAN_CHE_DIR.mkdir(parents=True, exist_ok=True)
+        (_HAN_CHE_DIR / f"{_safe(chat_id)}.json").write_text(
+            json.dumps({"tool": tool, "luc": datetime.datetime.now().isoformat(timespec="seconds")},
+                       ensure_ascii=False), encoding="utf-8")
+
+
+def phien_han_che(chat_id: str) -> str:
+    """Tên tool nếu phiên đã nhận dữ liệu hạn chế, "" nếu chưa."""
+    if not chat_id:
+        return ""
+    try:
+        d = json.loads((_HAN_CHE_DIR / f"{_safe(chat_id)}.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return ""
+    except Exception:  # noqa: BLE001 — có file mà đọc hỏng: nghi ngờ thì coi là hạn chế
+        return "restricted"
+    tool = d.get("tool") if isinstance(d, dict) else None
+    return tool if isinstance(tool, str) and tool else "restricted"
+
+
 # ───────────────────────── per-user long-term memory ─────────────────────────
 def _mem_path(open_id: str) -> Path:
     return _MEM_DIR / f"{_safe(open_id)}.md"

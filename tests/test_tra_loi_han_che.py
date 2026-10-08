@@ -17,7 +17,6 @@ def nen(monkeypatch):
     monkeypatch.setattr(P, "_tai_anh", lambda c, j: [])
     monkeypatch.setattr(P, "_goi_job", lambda c, duong, than: goi.append((duong, than)) or {"ok": 1})
     with P._HAN_CHE_KHOA:
-        P._HAN_CHE.clear()
         P._HAN_CHE_JOB.clear()
     return goi
 
@@ -37,20 +36,59 @@ def test_flagged_turn_sends_restricted(monkeypatch, nen):
 
     def tra_loi(hoi, chat_id, sender_open_id=None, kenh=None):
         seen.update(kenh=kenh, sender=sender_open_id)
-        P.danh_dau_han_che(chat_id, "chi_so_ads")
+        assert P.danh_dau_han_che("chi_so_ads")
         return "Tổng chi tiêu 1.000.000"
     assert P._mot_vong({}, tra_loi) == 1
     assert _reply_body(nen) == {"text": "Tổng chi tiêu 1.000.000", "restricted": "chi_so_ads"}
     assert seen["kenh"] == {"chat_type": "p2p", "channel": "lark", "nguoi_gui": "ou_a"}
-    assert P.lay_han_che("lark:cli:oc_1") == "" and not P._HAN_CHE_JOB
+    assert not P._HAN_CHE_JOB
 
 
-def test_unflagged_turn_and_stale_flag(monkeypatch, nen):
-    P.danh_dau_han_che("web:s1", "chi_so_ads")          # sót từ đường không có job
+def test_unflagged_turn_in_clean_session(monkeypatch, nen):
+    assert not P.danh_dau_han_che("chi_so_ads")          # ngoài lượt: không có hộp, không dính
     _job(monkeypatch, {"id": 72, "channel": "web", "session_id": "web:s1",
                        "payload": {"text": "chào", "sender_open_id": "ou_a"}})
     assert P._mot_vong({}, lambda hoi, chat_id, sender_open_id=None, **k: "chào bạn") == 1
     assert _reply_body(nen) == {"text": "chào bạn"}
+
+
+def test_later_turns_in_ads_session_stay_flagged(monkeypatch, nen):
+    """Lượt sau nhắc lại số từ lịch sử (không gọi tool) vẫn mang cờ — cờ bám phiên, lưu đĩa."""
+    import memory_store
+    memory_store.danh_dau_phien_han_che("lark:cli:oc_9", "chi_so_ads")
+    _job(monkeypatch, {"id": 74, "channel": "lark", "session_id": "lark:cli:oc_9",
+                       "reply_to": {"chat_type": "p2p"}, "payload": {"text": "tổng lúc nãy?",
+                                                                     "sender_open_id": "ou_a"}})
+    assert P._mot_vong({}, lambda hoi, chat_id, sender_open_id=None, **k: "Chi tiêu 1.000.000") == 1
+    assert _reply_body(nen) == {"text": "Chi tiêu 1.000.000", "restricted": "chi_so_ads"}
+
+
+def test_overlapping_turns_do_not_steal_or_clear_flag(monkeypatch):
+    """Lượt B chạy chồng lượt A cùng phiên (quá nửa trần chờ khoá): cờ của A ở lại với A."""
+    import threading
+    import time
+    monkeypatch.setattr(P, "_HAN_TRA_LOI", 1.0)
+    monkeypatch.setattr(P, "_KHOA_PHIEN", {})
+    with P._HAN_CHE_KHOA:
+        P._HAN_CHE_JOB.clear()
+    a_flagged = threading.Event()
+
+    def turn_a(hoi, chat_id, sender_open_id=None, **k):
+        P.danh_dau_han_che("chi_so_ads")
+        a_flagged.set()
+        time.sleep(0.8)                  # B bắt đầu (sau 0,5 s chờ khoá) và xong trước A
+        return "số"
+
+    def turn_b(hoi, chat_id, sender_open_id=None, **k):
+        assert a_flagged.is_set()
+        return "chào"
+    ta = threading.Thread(target=P._chay_co_han, args=(turn_a, "a", "lark:x:oc_1", None), kwargs={"job_id": 1})
+    ta.start()
+    assert a_flagged.wait(2)
+    assert P._chay_co_han(turn_b, "b", "lark:x:oc_1", None, job_id=2)[1]
+    ta.join(3)
+    assert P._lay_han_che_job(2) == ""
+    assert P._lay_han_che_job(1) == "chi_so_ads"
 
 
 def test_a2a_kenh_never_carries_user_ref_identity(monkeypatch, nen):

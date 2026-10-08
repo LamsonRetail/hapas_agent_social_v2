@@ -88,12 +88,14 @@ _HOI_RIENG = "Hãy tự hỏi Mark trong chat riêng Lark hoặc web console đ�
 
 
 def _actor():
-    """Người được nhận số. Chỉ ba nguồn danh tính được tin (review 08/10/2026):
+    """Người được nhận số. Chỉ hai nguồn danh tính được tin (review 08/10/2026):
 
     (a) chat RIÊNG Lark, người gửi do Platform/listener ghi (`nguoi_gui`) và đúng người
-        brain đang trả lời; (b) job web có `sender_identity_verified` do Platform đóng;
-    (c) lịch Platform (`scheduled_by`) gửi vào chat riêng. A2A và kênh lạ: từ chối —
-    `user_ref` của job A2A do agent gọi tự khai, giả được thành bất kỳ `ou_`.
+        brain đang trả lời; (b) job web có `sender_identity_verified` do Platform đóng.
+    A2A và kênh lạ: từ chối — `user_ref` của job A2A do agent gọi tự khai, giả được thành
+    bất kỳ `ou_`. Lịch: CHƯA hỗ trợ (giai đoạn 2) — Platform chưa gửi `chat_type` cho job
+    lịch và chưa xác minh chat riêng đó thuộc `scheduled_by`; trả số vào đó có thể lộ cho
+    người khác, nên từ chối mọi job lịch.
     """
     context = _context.get()
     channel = str(context.get("channel") or "").strip().lower()
@@ -103,10 +105,9 @@ def _actor():
     if scheduler.get_current_chat_type() == "group" or chat_type == "group":
         raise ValueError("Số ads là dữ liệu hạn chế, không trả trong nhóm. " + _HOI_RIENG)
     if context.get("scheduled") is True:
-        actor = context.get("scheduled_by")
-        if channel != "lark" or chat_type != "p2p":
-            raise ValueError("Lịch số ads chỉ chạy khi gửi vào chat riêng của người đặt lịch.")
-    elif channel == "web":
+        raise ValueError("Lịch số ads chưa hỗ trợ: chưa xác minh được chat nhận lịch là chat riêng của người "
+                         "đặt lịch. " + _HOI_RIENG)
+    if channel == "web":
         actor = memory_store.get_current_sender()
         if context.get("sender_identity_verified") is not True or actor != context.get("nguoi_gui"):
             raise ValueError("Web chưa xác thực người hỏi. Đăng nhập console rồi hỏi lại, hoặc hỏi trong chat riêng Lark.")
@@ -185,13 +186,17 @@ def _divide(a, b, scale=1):
 #: Chỉ số đọc từ danh sách hành động. Meta BỎ HẲN action/giá trị bằng 0 khỏi dòng
 #: (không trả `{"value": "0"}`), nên vắng mặt trên dòng đã có số phân phối là 0 thật.
 _ACTION_KEYS = ("purchases", "revenue", "meta_roas", "messages", "leads", "video_3s", "thruplay")
+#: Chỉ số chuyển đổi/giá trị: khi chia nhỏ (tuổi, giới tính, nền tảng, vị trí) Meta có thể
+#: ẩn chúng vì quyền riêng tư, nên vắng mặt KHÔNG chứng minh là 0.
+_CONVERSION_KEYS = ("purchases", "revenue", "meta_roas", "messages", "leads")
 #: Trường luôn xin kèm để biết dòng có số phân phối hay không (0 khác "không có số").
 DELIVERY_FIELDS = ("impressions", "spend")
 
 
-def _values(row, fetched=None):
+def _values(row, fetched=None, breakdown=False):
     """`fetched` = các trường đã xin Meta. Action của chỉ số đã xin mà vắng trên dòng có
-    số hiển thị/chi tiêu (kể cả 0) thì là 0; dòng không có số phân phối thì để trống."""
+    số hiển thị/chi tiêu (kể cả 0) thì là 0; dòng không có số phân phối thì để trống.
+    Dòng của truy vấn chia nhỏ (`breakdown`): chỉ số chuyển đổi/giá trị vắng vẫn để trống."""
     values = {key: _number(row.get(key)) for key in GROUPS["co_ban"]}
     values.update(purchases=_action(row.get("actions"), PURCHASE),
                   revenue=_action(row.get("action_values"), PURCHASE),
@@ -203,6 +208,8 @@ def _values(row, fetched=None):
     spend, impressions = _number(row.get("spend")), _number(row.get("impressions"))
     if fetched is not None and (spend is not None or impressions is not None):
         for key in _ACTION_KEYS:
+            if breakdown and key in _CONVERSION_KEYS:
+                continue
             if values[key] is None and set(METRICS[key][3]) <= set(fetched):
                 # ROAS Meta không xác định khi chưa chi đồng nào.
                 if key != "meta_roas" or (spend or 0) > 0:
@@ -541,7 +548,7 @@ def _handle(args, **kwargs):
                                            MAX_ROWS - len(rows))
             for item in data:
                 rows.append({"account": account, "data": item, "currency": account["currency"],
-                             "values": _values(item, fields), "start": a_start, "end": a_end,
+                             "values": _values(item, fields, bool(breakdown)), "start": a_start, "end": a_end,
                              "tz": account.get("timezone_name") if tz else "Asia/Ho_Chi_Minh (TK không báo múi giờ)"})
             cut = cut or truncated
             if len(rows) >= MAX_ROWS:
@@ -567,6 +574,10 @@ def _handle(args, **kwargs):
                       "Số theo phân bổ mặc định của Meta. Reach/tần suất/ROAS Meta không cộng tổng. "
                       "Dòng có số hiển thị/chi tiêu mà Meta không trả mua/lead/tin nhắn/video thì ghi 0 (Meta bỏ số 0); "
                       "ô trống = Meta không trả số phân phối cho dòng đó, không phải 0."])
+        if breakdown:
+            sheet.append(["Có chia nhỏ (tuổi/giới tính/nền tảng/vị trí): Meta có thể ẩn số mua, giá trị mua, "
+                          "ROAS Meta, lead, tin nhắn vì quyền riêng tư; ô trống ở các cột đó = Meta không trả số, "
+                          "không phải 0, và tổng cột đó để trống."])
         if partial:
             sheet.append(["Khoảng ngày gồm HÔM NAY theo múi giờ tài khoản: ngày chưa hết, số hôm nay còn thay đổi."])
         if unknown_tz:
@@ -585,7 +596,9 @@ def _handle(args, **kwargs):
             sentence += "; " + summary
         # Câu trả lời của lượt này mang số hạn chế: Platform ẩn nội dung khỏi người dưới
         # moderator ở bản ghi hội thoại (cờ `restricted` gửi kèm /reply).
-        lsr_platform.danh_dau_han_che(scheduler.get_current_chat(), "chi_so_ads")
+        # Lượt này (hộp của lượt) và cả phiên (lưu đĩa): lượt sau có thể nhắc lại số từ lịch sử.
+        lsr_platform.danh_dau_han_che("chi_so_ads")
+        memory_store.danh_dau_phien_han_che(scheduler.get_current_chat() or "", "chi_so_ads")
         return tool_result({"link": url, "cau_tong": sentence + ".", "so_dong": len(rows), "bi_cat": cut,
                             "chi_so": wanted, "nguoi_duoc_chia_se": actor})
     except Exception as error:

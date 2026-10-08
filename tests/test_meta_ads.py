@@ -206,16 +206,14 @@ def test_directory_failure_closes(monkeypatch):
     monkeypatch.setattr(T.urllib.request,"urlopen",lambda *a,**k: (_ for _ in ()).throw(OSError("offline")))
     assert not T._allowed("ou_asker")
 
-def test_scheduled_actor_cannot_borrow_sender():
-    T.set_context({"channel":"lark","chat_type":"p2p","scheduled":True,"scheduled_by":"ou_scheduler"})
-    assert T._actor()=="ou_scheduler"
-    T.set_context({"channel":"lark","chat_type":"p2p","scheduled":True,"scheduled_by":""})
-    with pytest.raises(ValueError): T._actor()
-    # Lịch gửi vào nhóm, hoặc lịch không qua kênh Lark: không trả số.
-    for bad in ({"channel":"lark","chat_type":"group"}, {"channel":"web","chat_type":"p2p"},
-                {"channel":"lark"}):
-        T.set_context({**bad, "scheduled":True, "scheduled_by":"ou_scheduler"})
-        with pytest.raises(ValueError): T._actor()
+def test_scheduled_actor_never_accepted_yet():
+    # Giai đoạn 2: chưa xác minh chat nhận lịch là chat riêng của người đặt → mọi lịch bị từ chối,
+    # kể cả khi (giả định) kênh mang chat_type p2p; không mượn người gửi của lượt.
+    for ctx in ({"channel":"lark","chat_type":"p2p","nguoi_gui":"ou_asker"}, {"channel":"lark","chat_type":"group"},
+                {"channel":"web","chat_type":"p2p"}, {"channel":"lark"}):
+        for by in ("ou_scheduler", ""):
+            T.set_context({**ctx, "scheduled":True, "scheduled_by":by})
+            with pytest.raises(ValueError, match="Lịch số ads chưa hỗ trợ|nhóm"): T._actor()
 
 def test_group_refused_before_meta(monkeypatch):
     scheduler.set_current_chat_type("group")
@@ -236,8 +234,7 @@ def test_catalog_all_metrics_without_token_or_permission(monkeypatch):
 
 def test_exact_requested_metrics_and_private_recipient(monkeypatch):
     monkeypatch.setenv("MARK_META_ADS_TOKEN","fake")
-    monkeypatch.setattr(T,"_allowed",lambda actor: actor=="ou_scheduler")
-    T.set_context({"channel":"lark","chat_type":"p2p","scheduled":True,"scheduled_by":"ou_scheduler"})
+    monkeypatch.setattr(T,"_allowed",lambda actor: actor=="ou_asker")
     calls, sheets = [], []
     class Client:
         def __init__(self,*a): pass
@@ -248,13 +245,13 @@ def test_exact_requested_metrics_and_private_recipient(monkeypatch):
     monkeypatch.setattr(T,"MetaClient",Client)
     monkeypatch.setattr(T,"_private_sheet",lambda title,rows,actor: sheets.append((rows,actor)) or "https://sheet.invalid")
     result=run(chi_so=["roas"])
-    assert result["chi_so"]==["roas"] and result["nguoi_duoc_chia_se"]=="ou_scheduler"
+    assert result["chi_so"]==["roas"] and result["nguoi_duoc_chia_se"]=="ou_asker"
     # Chỉ xin trường của chỉ số được hỏi + tín hiệu phân phối (hiển thị/chi tiêu) để phân
     # biệt 0 thật với không có số; không xin `actions` khi không hỏi số mua/lead/video.
     assert set(calls[0]["fields"].split(",")) == {"action_values", "spend", "impressions", "account_id",
                                                   "account_name", "date_start", "date_stop"}
     assert len(sheets[0][0][0])==9 and sheets[0][0][1][-1]==5
-    assert sheets[0][1]=="ou_scheduler"
+    assert sheets[0][1]=="ou_asker"
 
 @pytest.mark.parametrize("breakdown", [["vi_tri"],["tuoi","nen_tang"],["unknown"]])
 def test_invalid_breakdown_before_meta(monkeypatch, breakdown):
@@ -429,22 +426,70 @@ def test_web_needs_platform_verified_identity(monkeypatch, verified, ok):
         assert "xác thực" in result["error"]
 
 
-def test_scheduled_job_to_p2p_uses_scheduler_identity(monkeypatch):
-    sheets = _ok_meta(monkeypatch)
-    _job_context({"channel": "lark", "reply_to": {"chat_type": "p2p"},
-                  "payload": {"scheduled": True, "scheduled_by": "ou_owner", "sender_open_id": "ou_owner"}})
-    assert run()["nguoi_duoc_chia_se"] == "ou_owner" and sheets[0][1] == "ou_owner"
+@pytest.mark.parametrize("reply_to", [
+    {"channel": "lark", "chat_id": "oc_1", "app_id": "cli"},                     # đúng như Platform gửi hôm nay
+    {"channel": "lark", "chat_id": "oc_1", "app_id": "cli", "chat_type": "p2p"}])  # kể cả khi có chat_type
+def test_scheduled_ads_refused_until_phase2(monkeypatch, reply_to):
+    """Job lịch của Platform không mang chat_type (app.py lịch → _ingest) và chưa có bằng chứng
+    chat riêng đó thuộc `scheduled_by` → lịch số ads luôn bị từ chối, trước tra quyền/Meta."""
+    monkeypatch.setattr(T, "_allowed", lambda *a: pytest.fail("permission lookup"))
+    monkeypatch.setattr(T, "MetaClient", lambda *a: pytest.fail("meta"))
+    _job_context({"channel": "lark", "reply_to": reply_to,
+                  "payload": {"scheduled": True, "scheduled_by": "ou_owner", "sender_open_id": "ou_owner",
+                              "schedule_id": 7, "schedule_source": "console"}})
+    assert "error" in run()
 
 
-def test_success_marks_reply_restricted_and_refusal_does_not(monkeypatch):
+def test_success_marks_turn_and_session_restricted_refusal_does_not(monkeypatch):
     _ok_meta(monkeypatch)
     scheduler.set_current_chat("lark:cli:oc_1")
-    P.lay_han_che("lark:cli:oc_1")
+    box = {}
+    P._HOP_HAN_CHE.set(box)
     assert "link" in run()
-    assert P.lay_han_che("lark:cli:oc_1") == "chi_so_ads"
+    assert box == {"tool": "chi_so_ads"}
+    assert memory_store.phien_han_che("lark:cli:oc_1") == "chi_so_ads"
+    scheduler.set_current_chat("lark:cli:oc_2")
+    box = {}
+    P._HOP_HAN_CHE.set(box)
     T.set_context({"channel": "a2a"})
     assert "error" in run()
-    assert P.lay_han_che("lark:cli:oc_1") == ""
+    assert box == {} and memory_store.phien_han_che("lark:cli:oc_2") == ""
+    P._HOP_HAN_CHE.set(None)
+
+
+def test_session_flag_survives_restart_and_fails_closed(monkeypatch, tmp_path):
+    memory_store.danh_dau_phien_han_che("web:s1", "chi_so_ads")
+    files = list(memory_store._HAN_CHE_DIR.glob("*.json"))
+    assert len(files) == 1 and str(tmp_path) in str(files[0])          # không ghi .tokens thật
+    assert memory_store.phien_han_che("web:s1") == "chi_so_ads"        # đọc lại từ đĩa
+    files[0].write_text("{hỏng", encoding="utf-8")
+    assert memory_store.phien_han_che("web:s1") == "restricted"
+    assert memory_store.phien_han_che("web:khac") == ""
+
+
+# Chia nhỏ: Meta có thể ẩn chuyển đổi vì quyền riêng tư → vắng là KHÔNG BIẾT, không phải 0.
+def test_breakdown_rows_keep_missing_conversions_blank():
+    fetched = {"spend", "impressions", "actions", "action_values", "purchase_roas",
+               "video_thruplay_watched_actions"}
+    row = {"spend": "50", "impressions": "1000", "age": "18-24"}
+    values = T._values(row, fetched, breakdown=True)
+    for key in ("purchases", "revenue", "meta_roas", "messages", "leads"):
+        assert values[key] is None, key
+    assert values["video_3s"] == 0 and values["thruplay"] == 0
+    assert T._values(row, fetched)["purchases"] == 0                  # không chia nhỏ: vẫn là 0
+
+
+def test_breakdown_sheet_blank_and_note(monkeypatch):
+    calls = []
+    sheets = _ok_meta(monkeypatch, calls=calls, rows=[{"spend": "10", "impressions": "100", "age": "18-24"},
+        {"spend": "5", "impressions": "50", "age": "25-34", "actions": [{"action_type": "purchase", "value": "1"}]}])
+    result = run(chi_so=["purchases"], chia_theo=["tuoi"])
+    sheet = sheets[0][0]
+    assert sheet[1][-1] == "" and sheet[2][-1] == 1.0
+    assert any("TỔNG" in str(r[0]) and r[-1] == "" for r in sheet if r)
+    assert any("quyền riêng tư" in str(r) for r in sheet)
+    assert "Mua hàng" not in result["cau_tong"]
+    assert calls[0][1]["breakdowns"] == "age"
 
 
 @pytest.mark.parametrize("switch,on", [
