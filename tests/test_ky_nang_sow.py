@@ -79,7 +79,7 @@ _TOOL_KHUNG = {"vision_analyze", "browser_navigate", "browser_snapshot",
 #: năng dạy KHÔNG tự tính tay: dán vào chat → `dem_bang` với `du_lieu`; phép tính → tool
 #: `tinh` (tham số, trường kết quả và tên hàm trong biểu thức — phải còn trong tinh_tool.py).
 _THAM_SO = {"che_do": "apify_tool.py", "chi_uoc_tinh": "apify_tool.py",
-            "cot_han": "tien_do.py", "cot_pic": "tien_do.py",
+            "cot_han": "tien_do.py", "cot_pic": "tien_do.py", "cua_toi": "tien_do.py",
             "cau_so": "dem_bang_tool.py", "nhom_theo": "dem_bang_tool.py",
             "dong_tieu_de": "dem_bang_tool.py", "dong_tieu_de_da_dung": "dem_bang_tool.py",
             "tach_dau_phay": "dem_bang_tool.py", "bi_cat": "dem_bang_tool.py",

@@ -16,8 +16,11 @@ audit như mọi tool.
 """
 from __future__ import annotations
 
+import datetime
 import os
 import re
+import time
+from dataclasses import dataclass
 
 import lark_bang as B
 import lark_client as lark
@@ -210,19 +213,80 @@ def _quyen_thuc_te(loai: str, token: str, nguoi: str) -> tuple[bool, str]:
     return False, "chưa thấy bạn trong danh sách người có quyền"
 
 
+#: Câu "vì sao được đọc" khi căn cứ là phép kiểm của Platform cho lịch.
+LY_DO_LICH = "người đặt lịch xem được bảng này (Platform kiểm bằng tài khoản Lark của họ)"
+#: Phép kiểm của Platform chỉ còn giá trị trong chừng này (Platform kiểm lại MỖI lần chạy).
+_HAN_CHUNG_MINH = 2 * 3600
+#: Lệch đồng hồ chấp nhận được giữa Platform và máy chạy Mark.
+_LECH_DONG_HO = 300
+
+
+@dataclass(frozen=True)
+class ChungMinhLich:
+    """Bằng chứng quyền xem do PLATFORM tính khi chạy một lịch mode=run (08/10/2026).
+
+    Bot chỉ có quyền XEM tài liệu thì API danh sách thành viên trả 403 — Mark không tự
+    chứng minh được người hỏi xem được bảng, và chặn tất cả. Platform kiểm thay bằng token
+    Lark CỦA CHÍNH người đặt lịch (lúc tạo và lại ở mỗi lần chạy), rồi đặt vào payload job
+    `nguon_da_kiem` = {loai, token, table_id, kiem_luc, boi}. Chỉ dựng từ payload job theo
+    lịch (`lsr_platform._kenh_cua_job`); `nguoi_dat` = `scheduled_by` của chính job đó.
+    Chỉ được tính khi `dung_cho` khớp TUYỆT ĐỐI tài liệu + bảng + người hỏi và còn mới."""
+    loai: str
+    token: str
+    table_id: str
+    kiem_luc: float          # epoch giây
+    boi: str
+    nguoi_dat: str
+
+    @classmethod
+    def tu_payload(cls, p, nguoi_dat: str) -> "ChungMinhLich | None":
+        """Payload `nguon_da_kiem` → bằng chứng, None nếu thiếu/sai kiểu (không đoán)."""
+        if not isinstance(p, dict):
+            return None
+        loai, token, bang, boi = (p.get(k) for k in ("loai", "token", "table_id", "boi"))
+        if (loai not in _TEN_LOAI or not _id_app(token) or not _id_app(bang)
+                or not isinstance(boi, str) or not re.fullmatch(r"ou_[A-Za-z0-9]+", boi)
+                or not isinstance(nguoi_dat, str) or not nguoi_dat):
+            return None
+        try:
+            t = datetime.datetime.fromisoformat(
+                str(p.get("kiem_luc") or "").replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=datetime.timezone.utc)
+        return cls(loai, token, bang, t.timestamp(), boi, nguoi_dat)
+
+    def dung_cho(self, loai: str, token: str, table_id: str, nguoi: str,
+                 now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        return (bool(table_id) and self.boi == self.nguoi_dat == nguoi
+                and (self.loai, self.token, self.table_id) == (loai, token, table_id)
+                and now - _HAN_CHUNG_MINH <= self.kiem_luc <= now + _LECH_DONG_HO)
+
+
 def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str,
-                    table_id: str = "") -> tuple[bool, str]:
-    """(được đọc?, vì sao). Chỉ trả True khi CHỨNG MINH được người hỏi có quyền."""
+                    table_id: str = "", chung_minh: ChungMinhLich | None = None
+                    ) -> tuple[bool, str]:
+    """(được đọc?, vì sao). Chỉ trả True khi CHỨNG MINH được người hỏi có quyền.
+
+    `chung_minh` (chỉ lịch Platform, xem `ChungMinhLich`) thay cho bước tra thành viên —
+    SAU mọi luật Base nội bộ, nên không bao giờ mở bảng Audit/Chi phí."""
     boss = {x for x in (os.environ.get("AGENT_BOSS_OPEN_ID", "").strip(),
                         os.environ.get("STEVEN_BOSS_OPEN_ID", "").strip()) if x}
     if nguoi and nguoi in boss:
         return True, "chủ agent"
+    hop_le = chung_minh is not None and chung_minh.dung_cho(loai, token, table_id, nguoi)
     if token in base_noi_bo():
         ok, ly_do = _ngoai_le_bang_noi_bo(token, table_id, nguoi)
         if not ok:
             return False, ly_do
+        if hop_le:
+            return True, f"{ly_do}; {LY_DO_LICH}"
         quyen, bang_chung = _quyen_thuc_te(loai, token, nguoi)
         return (True, f"{ly_do}; {bang_chung}") if quyen else (False, bang_chung)
+    if hop_le:
+        return True, LY_DO_LICH
     if _trong_cay_wiki(token, *wiki_tokens):
         return True, "nằm trong Nguồn Wiki chủ agent đã khai báo"
     try:
@@ -249,11 +313,19 @@ def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str,
     return False, "chưa thấy bạn trong danh sách người có quyền"
 
 
+def _gon_loi(s) -> str:
+    """Lý do từ payload Platform → một dòng ngắn, không thành thẻ `<at>`/`{{@…}}` được."""
+    s = " ".join(str(s or "").split())[:200]
+    return re.sub(r"\{(?=\{)", "{ ", s.replace("<", "‹").replace(">", "›"))
+
+
 class TuChoi(Exception):
     """Không mở nguồn cho người hỏi. `str(e)` là câu nói NGUYÊN với người dùng."""
 
 
-def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None) -> tuple[str, str, str, str, str]:
+def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None,
+             chung_minh: ChungMinhLich | None = None,
+             loi_lich: str = "") -> tuple[str, str, str, str, str]:
     """Link/mã → (loại, token, phụ, tên loại, vì sao được đọc) — hoặc ném `TuChoi`.
 
     Cửa DUY NHẤT cho mọi tool đọc Base/Sheet bằng token bot (`doc_bang`, `dem_bang`).
@@ -283,9 +355,12 @@ def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None) -> tuple[str, str, str
 
     # Lệnh cứng chạy trước audit.bat_dau nên truyền asker tường minh. None giữ đường
     # doc_bang/dem_bang cũ; chuỗi rỗng vẫn xét như không có danh tính, không mượn bot.
+    # `chung_minh`/`loi_lich`: chỉ `tien_do.lenh_tiendo` truyền, và chỉ cho job THEO LỊCH
+    # (lấy từ payload Platform). Không truyền thì mọi đường cũ y như trước.
+    them = {"chung_minh": chung_minh} if chung_minh is not None else {}
     ok, vi_sao = quyen_nguoi_hoi(
         loai, token, _nguoi_hoi() if nguoi_hoi is None else nguoi_hoi, node,
-        table_id=phu)
+        table_id=phu, **them)
     if not ok:
         if vi_sao.startswith("không biết ai đang hỏi"):
             raise TuChoi(
@@ -301,6 +376,11 @@ def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None) -> tuple[str, str, str
                 "cặp app_token/table_id trong mixed_base_read_allowlist.json; không mở quyền "
                 "cho cả Base nội bộ."
             )
+        if loi_lich:
+            raise TuChoi(
+                f"Không đọc {ten_loai} này theo lịch: Platform chưa kiểm được người đặt lịch "
+                f"xem được bảng ({_gon_loi(loi_lich)}). Người đặt lịch mở console → Lịch chạy "
+                "để Kết nối Lark/kiểm lại.")
         raise TuChoi(
             f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Mark chỉ đọc {ten_loai} mà CHÍNH "
             f"người hỏi cũng được xem. Nhờ chủ {ten_loai} chia sẻ cho bạn, hoặc nhờ chủ agent "

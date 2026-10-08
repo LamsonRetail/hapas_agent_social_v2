@@ -429,9 +429,17 @@ def _kenh_cua_job(j: dict) -> dict | None:
     ct = str(rt.get("chat_type") or "").strip().lower()
     p = j.get("payload") or {}
     if p.get("scheduled") is True:
-        return {"chat_type": "p2p" if ct == "p2p" else "group",
-                "scheduled": True, "scheduled_by": p.get("scheduled_by") or "",
-                "schedule_id": p.get("schedule_id"), "job_id": j.get("id")}
+        k = {"chat_type": "p2p" if ct == "p2p" else "group",
+             "scheduled": True, "scheduled_by": p.get("scheduled_by") or "",
+             "schedule_id": p.get("schedule_id"), "job_id": j.get("id")}
+        # Platform kiểm quyền xem bảng bằng token Lark của người đặt lịch ở MỖI lần chạy
+        # (08/10/2026): đạt thì `nguon_da_kiem`, hỏng thì `nguon_loi`. CHỈ mang sang cho job
+        # theo lịch — job/tin thường có hai khoá này cũng bị bỏ (không ai tự cấp bằng chứng).
+        if isinstance(p.get("nguon_da_kiem"), dict):
+            k["nguon_da_kiem"] = dict(p["nguon_da_kiem"])
+        if isinstance(p.get("nguon_loi"), str) and p["nguon_loi"].strip():
+            k["nguon_loi"] = p["nguon_loi"].strip()[:300]
+        return k
     if not ct:
         return None
     return {"chat_type": "p2p" if ct == "p2p" else "group"}

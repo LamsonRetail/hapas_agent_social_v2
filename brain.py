@@ -148,8 +148,18 @@ _TOOLING_NOTE = "\n".join(
         "- KHÔNG có quyền đọc/ghi file trên máy, chạy code Python hay giao việc cho subagent — "
         "đừng thử gọi. Cần SỐ thì dùng `dem_bang` (bảng trên Base/Sheet, hoặc bảng/danh sách "
         "người dùng dán vào chat qua `du_lieu`) và `tinh` (mọi phép tính) — xem dòng dưới.",
-        "- ĐẶT NHẮC/HẸN GIỜ: `schedule_reminder` (đến giờ tự gửi vào chat này), xem/hủy bằng "
-        "`list_reminders`/`cancel_reminder`. Ai nhờ 'nhắc…' thì XÁC NHẬN thời điểm+nội dung rồi đặt nhắc THẬT.",
+        # 08/10: lịch chuyển hẳn lên Platform (console → Lịch chạy) — xem scheduler.py.
+        "- ĐẶT LỊCH / NHẮC / GIAO VIỆC ĐỊNH KỲ: `schedule_reminder` ghi lịch lên console Platform "
+        "cho CHÍNH cuộc chat này (người đặt = người đang nói); xem/huỷ bằng `list_reminders`/"
+        "`cancel_reminder`. Hai kiểu: mode=send nhắn đúng một câu khi tới giờ; mode=run tới giờ "
+        "Mark tự làm việc ghi trong message rồi gửi kết quả. TRƯỚC KHI ĐẶT luôn nói lại: giờ + "
+        "ngày lặp, nội dung (câu sẽ nhắn hoặc việc sẽ làm), cuộc chat nhận — rồi chờ người dùng "
+        "đồng ý; không tự đặt khi chưa đồng ý. Nhờ 'nhắc tiến độ / nhắc việc quá hạn mỗi sáng' "
+        "→ mode=run, recurrence=daily, message=`/tiendo <link Base có ?table=tbl…>` (thêm "
+        "` cua_toi=co` khi họ nói 'việc của tôi/em'); chưa có link đúng bảng thì xin link "
+        "trước. Đặt xong báo id + giờ chạy kế và nói họ xem/sửa/xoá được trên console "
+        "(agent → Lịch chạy). Tool báo lỗi thì nói nguyên lý do, KHÔNG nói đã đặt; tool báo "
+        "`da_co_san` thì nói lịch đó đã có, không đặt lại.",
         "- `remember_about_user`: ghi nhớ dài hạn thông tin quan trọng về người đang nói chuyện.",
         # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
@@ -988,6 +998,8 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     memory_store.set_current_sender(sender_open_id)
     scheduler.set_current_chat(chat_id)
     scheduler.set_current_chat_type((kenh or {}).get("chat_type"))
+    # Lượt do LỊCH đẩy tới: không ai đang chờ xác nhận → không được đặt/huỷ lịch từ đây.
+    scheduler.set_current_scheduled((kenh or {}).get("scheduled") is True)
     # Đồng hồ của lượt: tool gọi muộn được nhắc gói lại, quá mốc chặn thì không chạy nữa
     # (dong_ho_luot) — để lượt kịp trả lời trước trần của vòng job.
     dong_ho_luot.bat_dau()

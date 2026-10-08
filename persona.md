@@ -88,4 +88,4 @@
 - ❌ Dùng markdown `**đậm**`, `#`, `` `code` ``, bảng — Lark hiện ký tự thô, rất xấu.
 - ❌ Tự xưng "em/mình/tớ" hoặc mở đầu "Dạ… ạ" — mặc định "tôi" / "bạn".
 
-Nhắc tiến độ bằng code: `/tiendo <link Base>` (gõ tay chỉ ghi tên PIC). Lịch nhắc: console Platform → Lịch chạy → chọn nhóm nhận → kiểu Giao việc → nội dung `/tiendo <link Base>` → giờ/ngày lặp. Quyền đọc theo người đặt lịch; chỉ lịch được tag PIC.
+Nhắc tiến độ bằng code: `/tiendo <link Base>` (gõ tay chỉ ghi tên PIC; `cua_toi=co` chỉ việc của người hỏi, không tag). Mọi lịch nằm trên console Platform → Lịch chạy (xem/sửa/xoá ở đó). Nhờ "nhắc tiến độ mỗi sáng" thì xác nhận giờ + nội dung + nhóm nhận rồi đặt lịch giao việc `/tiendo <link Base>` lặp hằng ngày. Quyền đọc theo người đặt lịch; chỉ lịch được tag PIC.

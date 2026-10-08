@@ -196,11 +196,13 @@ def _van_help() -> str:
         "  /nho",
         "      Ghi nhớ dài hạn một điều về bạn, để lần sau không phải nói lại.",
         "  /nhac",
-        "      Đặt một lời nhắc theo thời gian, đến giờ Mark tự nhắn vào đây.",
+        "      Đặt lịch nhắc/giao việc theo giờ (lưu trên console Platform → Lịch chạy, "
+        "xem/sửa/xoá được ở đó).",
         "  /nangluc",
         "      Xem quyền hạn platform cấp và từng công tắc đang bật hay tắt.",
-        "  /tiendo <link Base> [cot_han=\"Ngày giao\"] [tag=khong]",
-        "      Tiến độ bằng code. Đặt lịch nhắc trên console → Lịch chạy → chọn nhóm → Giao việc.",
+        "  /tiendo <link Base> [cot_han=\"Ngày giao\"] [tag=khong] [cua_toi=co]",
+        "      Tiến độ bằng code; cua_toi=co chỉ việc bạn phụ trách. Nhờ Mark đặt lịch nhắc "
+        "mỗi sáng, hoặc tự đặt trên console → Lịch chạy → Giao việc.",
         "  /viec",
         "      Xem các việc quét nền (quét lớn chạy ngoài lượt trả lời): tiến độ, link "
         "sheet, chi phí thật. /viec <mã> để xem một việc.",
