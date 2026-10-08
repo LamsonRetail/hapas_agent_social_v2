@@ -4,14 +4,16 @@ import json
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 import memory_store
 import meta_ads_tool as T
-import pytest
 import scheduler
 
 
 @pytest.fixture(autouse=True)
-def context():
+def context(monkeypatch):
+    monkeypatch.delenv("MARK_META_AD_ACCOUNT_IDS", raising=False)
     memory_store.set_current_sender("ou_asker")
     scheduler.set_current_chat(None)
     scheduler.set_current_chat_type("p2p")
@@ -83,7 +85,8 @@ def test_bad_date_ranges(args):
 
 @pytest.mark.parametrize("url", ["http://graph.facebook.com/v26.0/me/adaccounts", "https://evil.test/v26.0/me/adaccounts",
     "https://graph.facebook.com:443/v26.0/me/adaccounts", "https://graph.facebook.com/v26.0/act_1",
-    "https://graph.facebook.com/v26.0/act_1/ads", "https://graph.facebook.com/v26.0/me/adaccounts#evil"])
+    "https://graph.facebook.com/v26.0/act_1/ads", "https://graph.facebook.com/v26.0/me/adaccounts#evil",
+    "https://graph.facebook.com/v26.0/1417955788397052/owned_ad_accounts"])
 def test_read_endpoint_allowlist_before_network(monkeypatch, url):
     monkeypatch.setattr(T.requests,"get",lambda *a,**k: pytest.fail("network"))
     with pytest.raises(ValueError):
@@ -129,10 +132,54 @@ def test_errors_never_surface_token(monkeypatch, code, message):
 def test_redaction():
     assert "secret" not in T._redact("URL access_token=secret&next=1; secret", "secret")
 
-def test_accounts_are_owned_and_granted(monkeypatch):
+def test_accounts_are_approved_and_currently_granted(monkeypatch):
+    monkeypatch.setenv("MARK_META_AD_ACCOUNT_IDS", "act_1, 2,act_2")
     client = T.MetaClient("fake")
-    monkeypatch.setattr(client,"pages", lambda tail,*a: ([{"id":"act_1"},{"id":"act_2"}] if tail.startswith(T.BUSINESS) else [{"id":"act_2"},{"id":"act_3"}],False))
-    assert client.accounts() == [{"id":"act_2"}]
+    def pages(tail, params, limit):
+        assert tail == "me/adaccounts"
+        assert params["fields"] == "id,name,currency,timezone_name"
+        return [{"id": "act_2", "name": "Renamed account", "currency": "VND"},
+                {"id": "act_3", "name": "HAPAS", "currency": "USD"}], False
+    monkeypatch.setattr(client, "pages", pages)
+    assert client.accounts() == [{"id": "act_2", "name": "Renamed account", "currency": "VND"}]
+
+
+@pytest.mark.parametrize("raw", ["", " ", "*", "tat_ca", "act_1,", "act_1,evil", "act_0", "-1",
+                                "act_1/insights", "act_1,act_2;act_3", ",".join(["act_1"] * 201)])
+def test_invalid_approved_ids_close_before_meta(monkeypatch, raw):
+    monkeypatch.setenv("MARK_META_AD_ACCOUNT_IDS", raw)
+    client = T.MetaClient("fake")
+    monkeypatch.setattr(client, "pages", lambda *a: pytest.fail("network before config validation"))
+    with pytest.raises(ValueError, match="MARK_META_AD_ACCOUNT_IDS"):
+        client.accounts()
+
+
+def test_revoked_account_is_excluded(monkeypatch):
+    monkeypatch.setenv("MARK_META_AD_ACCOUNT_IDS", "act_1")
+    client = T.MetaClient("fake")
+    monkeypatch.setattr(client, "pages", lambda *a: ([{"id": "act_2"}], False))
+    assert client.accounts() == []
+
+
+def test_truncated_granted_accounts_close(monkeypatch):
+    monkeypatch.setenv("MARK_META_AD_ACCOUNT_IDS", "act_1")
+    client = T.MetaClient("fake")
+    monkeypatch.setattr(client, "pages", lambda *a: ([{"id": "act_1"}], True))
+    with pytest.raises(ValueError, match="bị cắt"):
+        client.accounts()
+
+
+def test_unapproved_requested_account_never_fetches_insights(monkeypatch):
+    monkeypatch.setenv("MARK_META_ADS_TOKEN", "fake")
+    monkeypatch.setenv("MARK_META_AD_ACCOUNT_IDS", "act_1")
+    monkeypatch.setattr(T, "_allowed", lambda actor: True)
+    def pages(self, tail, *a):
+        assert tail == "me/adaccounts", "unapproved insights"
+        return [{"id": "act_1", "name": "Approved", "currency": "VND"},
+                {"id": "act_2", "name": "HAPAS", "currency": "VND"}], False
+    monkeypatch.setattr(T.MetaClient, "pages", pages)
+    monkeypatch.setattr(T, "_private_sheet", lambda *a: pytest.fail("disclosed"))
+    assert "Không tìm thấy" in run(tai_khoan="act_2")["error"]
 
 @pytest.mark.parametrize("people,caps,allowed", [([], [{"tool":"chi_so_ads"}], False),
     (["ou_asker"], [{"tool":"chi_so_ads"}], True), (["ou_other"], [{"tool":"chi_so_ads"}], False),

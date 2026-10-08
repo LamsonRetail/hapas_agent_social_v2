@@ -16,16 +16,16 @@ import urllib.request
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl, urlencode, urlparse
 
+import requests
+from tools.registry import registry, tool_error, tool_result
+
 import apify_tool as A
 import lark_client as lark
 import memory_store
-import requests
 import scheduler
-from tools.registry import registry, tool_error, tool_result
 
 VN = dt.timezone(dt.timedelta(hours=7))
 MAX_ROWS = 20000
-BUSINESS = "1417955788397052"
 _context = contextvars.ContextVar("mark_ads_context", default={})
 
 # key -> (Vietnamese name, unit, meaning, source fields)
@@ -218,8 +218,7 @@ class MetaClient:
                 or parsed.username or parsed.fragment or not path.startswith("/" + self.version + "/")):
             raise ValueError("Chặn URL ngoài Graph API.")
         tail = path[len(self.version) + 2:]
-        if not (tail in (BUSINESS + "/owned_ad_accounts", "me/adaccounts")
-                or re.fullmatch(r"act_\d+/insights", tail)):
+        if not (tail == "me/adaccounts" or re.fullmatch(r"act_\d+/insights", tail)):
             raise ValueError("Meta client chỉ cho phép đọc tài khoản và insights.")
         query = [(k, v) for k, v in parse_qsl(parsed.query) if k.lower() != "access_token"]
         return parsed._replace(query=urlencode(query)).geturl()
@@ -280,13 +279,18 @@ class MetaClient:
         raise ValueError("Meta trả quá nhiều trang; hãy thu hẹp khoảng ngày.")
 
     def accounts(self):
-        # Intersect HAPAS-owned accounts with those granted to the system user.
-        owned, cut1 = self.pages(BUSINESS + "/owned_ad_accounts", {"fields": "id,name,currency,timezone_name", "limit": 100}, 1000)
-        granted, cut2 = self.pages("me/adaccounts", {"fields": "id", "limit": 100}, 1000)
-        if cut1 or cut2:
+        # Owner-verified IDs keep the token limited to ads_read/read_insights.
+        raw = os.environ.get("MARK_META_AD_ACCOUNT_IDS", "").strip()
+        if not raw:
+            raise ValueError("Chưa cấu hình ID tài khoản HAPAS đã xác minh. Nhờ chủ agent đặt MARK_META_AD_ACCOUNT_IDS.")
+        items = raw.split(",")
+        if len(items) > 200 or any(not re.fullmatch(r"(?:act_)?[1-9]\d*", item.strip()) for item in items):
+            raise ValueError("MARK_META_AD_ACCOUNT_IDS cần tối đa 200 ID dạng act_123 hoặc 123, cách nhau bằng dấu phẩy; không dùng wildcard.")
+        approved = {"act_" + item.strip().removeprefix("act_") for item in items}
+        granted, cut = self.pages("me/adaccounts", {"fields": "id,name,currency,timezone_name", "limit": 100}, 1000)
+        if cut:
             raise ValueError("Danh sách tài khoản bị cắt; chưa thể chọn chính xác.")
-        ids = {a.get("id") for a in granted}
-        return [a for a in owned if a.get("id") in ids]
+        return [a for a in granted if a.get("id") in approved]
 
 
 def _select(accounts, wanted):
