@@ -16,6 +16,9 @@ def meta(tq: list) -> str:
     """Khối siêu dữ liệu của tab Tổng quan (dòng 2.. "Nhãn | Giá trị") → "Nhãn: giá trị · …"."""
     ra = []
     for r in tq[1:]:
+        if len(r) >= 2 and r[0] == "" and r[1] and ra:      # dòng tiếp của giá trị dài
+            ra[-1] += " " + str(r[1])
+            continue
         if len(r) < 2 or not r[0] or r[0] not in ("Nguồn", "Thời gian", "Phạm vi",
                                                    "Người yêu cầu", "Tạo lúc"):
             break

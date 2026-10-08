@@ -173,7 +173,7 @@ def test_dong_cuoi_trong_hop_le_khong_bi_coi_la_thieu(gia):
 def test_tong_quan_nhan_gia_tri_rong_va_khong_o_rong_chan_chu(gia):
     lon, nho = _hai_bang()
     tq = T.TongQuan("Soi", nguon="social_deep_dive", thoi_gian="01/10–08/10",
-                    pham_vi="9 bài " + "x" * 200,
+                    pham_vi="9 bài " + "x" * 60,
                     so_lieu=[T.SoLieu("Bình luận", 9, "so_nguyen", ghi_chu="đã ghi")])
     T.xuat("Soi", [lon, T.Bang("C", [T.Cot("a")], [["z"]] * 8), nho], tq, luc=LUC)
     o = gia.tab("Tổng quan")
@@ -224,3 +224,43 @@ def test_granted_la_and_cua_moi_bang_tinh():
     T.gop_quyen(cap, False)
     T.gop_quyen(cap, True)
     assert cap["granted"] is False, "một phần không cấp được thì không báo đã cấp"
+
+
+def test_gia_tri_sieu_du_lieu_gop_truoc_roi_moi_canh_trai(gia):
+    """Lark căn giữa ô vừa gộp (live 09/10/2026): tô hAlign=0 phải đến SAU lần gộp B:D."""
+    T.xuat("Soi", [T.Bang("Bài", [T.Cot("a")], [["1"]])],
+           T.TongQuan("Soi", nguon="account_tool", thoi_gian="01/10–08/10"), luc=LUC)
+    sid = gia.tab("Tổng quan")["sheet_id"]
+    i_gop = next(i for i, (m, p, q, b) in enumerate(gia.goi) if p.endswith("/merge_cells")
+                 and b["range"].startswith(f"{sid}!B2:") and b["mergeType"] == "MERGE_ROWS")
+    i_kieu = [i for i, (m, p, q, b) in enumerate(gia.goi)
+              if p.endswith("/styles_batch_update") and any(
+                  r.startswith(f"{sid}!B2:") and d["style"].get("hAlign") == 0
+                  and d["style"].get("vAlign") == 1
+                  for d in b["data"] for r in d["ranges"])]
+    assert i_kieu and min(i_kieu) > i_gop, "canh trái + giữa dọc đặt SAU khi gộp"
+    assert all(st.get("hAlign") == 0 for st in gia.kieu_o("Tổng quan", 2, 2)
+               if "hAlign" in st)
+
+
+def test_gia_tri_sieu_du_lieu_dai_chia_nhieu_dong_khong_cat(gia):
+    nguon = ("account_tool · Facebook (apify~facebook-posts-scraper), Instagram "
+             "(apify~instagram-profile-scraper), TikTok (clockworks~tiktok-profile-scraper); "
+             "YouTube Data API v3")
+    T.xuat("Soi", [T.Bang("Bài", [T.Cot("a")], [["1"]])],
+           T.TongQuan("Soi", nguon=nguon, thoi_gian="01/10–08/10"), luc=LUC)
+    tq = gia.o("Tổng quan")
+    i = next(k for k, r in enumerate(tq) if r[0] == "Nguồn")
+    dong = [tq[i][1]]
+    k = i + 1
+    while tq[k][0] == "" and tq[k][1]:
+        dong.append(tq[k][1])
+        k += 1
+    assert len(dong) >= 2 and all(len(d) <= T.TRAN_KY_TU_META for d in dong)
+    assert " ".join(dong) == nguon, "đủ nguyên văn, không cắt"
+    assert tq[k][0] == "Thời gian", "nhãn chỉ ở dòng đầu, dòng sau là nhãn kế tiếp"
+    sid = gia.tab("Tổng quan")["sheet_id"]
+    gop = [b for m, p, q, b in gia.goi if p.endswith("/merge_cells")]
+    assert {"range": f"{sid}!B2:D{k + 2}", "mergeType": "MERGE_ROWS"} in gop, \
+        "mọi dòng giá trị (cả dòng tiếp) gộp B:D"
+    assert T._tach_dong("x" * 200) == ["x" * 90, "x" * 90, "x" * 20], "từ quá dài: cắt cứng"

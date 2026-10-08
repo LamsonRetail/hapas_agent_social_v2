@@ -918,8 +918,10 @@ def dung_tong_quan(tq: TongQuan, tabs: list, gap: list, kiem: dict | None = None
     for nhan, gt in (("Nguồn", tq.nguon), ("Thời gian", tq.thoi_gian), ("Phạm vi", tq.pham_vi),
                      ("Người yêu cầu", tq.nguoi_yeu_cau),
                      ("Tạo lúc", f"{luc.astimezone(VN):%d/%m/%Y %H:%M} (giờ VN)")):
-        if gt:
-            vai["meta"].append(them([nhan, gt]))
+        # Giá trị dài hơn bề ngang B:D chia thành nhiều dòng (nhãn chỉ ở dòng đầu) — không
+        # bao giờ cắt bớt chữ.
+        for i, doan in enumerate(_tach_dong(str(gt)) if gt else []):
+            vai["meta"].append(them([nhan if i == 0 else "", doan]))
     if kiem and kiem.get("cau"):
         vai["kiem"] = them([kiem["cau"]])
     them([])
@@ -1001,6 +1003,33 @@ def dung_tong_quan(tq: TongQuan, tabs: list, gap: list, kiem: dict | None = None
     return dong, vai
 
 
+#: Số ký tự một ô giá trị siêu dữ liệu (gộp B:D ≈ 790px, chữ 10pt) hiện trọn trên Lark.
+TRAN_KY_TU_META = 90
+
+
+def _tach_dong(s: str, toi_da: int = TRAN_KY_TU_META) -> list:
+    """Chia chuỗi thành các dòng ≤`toi_da` ký tự: ưu tiên ngắt sau "; " rồi ", ", rồi khoảng
+    trắng; chỉ cắt giữa từ khi một từ dài hơn cả dòng. Ghép lại (theo dấu ngắt) đủ nguyên văn."""
+    s = " ".join(s.split())
+    if len(s) <= toi_da:
+        return [s]
+    ra = []
+    while len(s) > toi_da:
+        cat = -1
+        for dau in ("; ", ", ", " "):
+            k = s.rfind(dau, 0, toi_da)
+            if k > 0:
+                cat = k + len(dau.rstrip())
+                break
+        if cat <= 0:
+            cat = toi_da
+        ra.append(s[:cat].rstrip())
+        s = s[cat:].lstrip()
+    if s:
+        ra.append(s)
+    return ra
+
+
 def _link_tab(url: str, sid: str) -> str:
     return f"{url.split('?')[0].split('#')[0]}?sheet={sid}"
 
@@ -1031,13 +1060,8 @@ def _trang_tri_tong_quan(tok: str, sid: str, dong: list, vai: dict, cb: list) ->
         st = _style_so(kieu, False, tt)
         if st:
             muc.append((f"{sid}!{A._cot(c)}{r}:{A._cot(c)}{r}", st))
-    try:
-        _kieu(tok, muc)
-    except Exception:  # noqa: BLE001 — lùi định dạng an toàn
-        try:
-            _kieu(tok, _an_toan_muc(muc))
-        except Exception as e:  # noqa: BLE001
-            _canh(cb, "Tô tab Tổng quan", e)
+    # Gộp ô TRƯỚC, tô SAU: ô vừa gộp bị Lark căn giữa (Lark thật 09/10/2026: giá trị "Nguồn"
+    # dài bị cắt hai đầu) — tô hAlign=0 sau khi gộp mới giữ canh trái.
     gop = [(f"{sid}!A{vai['tieu_de']}:{A._cot(w)}{vai['tieu_de']}", "MERGE_ALL")]
     if vai["meta"]:   # giá trị siêu dữ liệu gộp B:cuối, MỖI dòng một ô (MERGE_ROWS, 1 lời gọi)
         gop.append((f"{sid}!B{vai['meta'][0]}:{A._cot(w)}{vai['meta'][-1]}", "MERGE_ROWS"))
@@ -1050,6 +1074,13 @@ def _trang_tri_tong_quan(tok: str, sid: str, dong: list, vai: dict, cb: list) ->
         except Exception as e:  # noqa: BLE001
             _canh(cb, "Gộp ô Tổng quan", e)
             break
+    try:
+        _kieu(tok, muc)
+    except Exception:  # noqa: BLE001 — lùi định dạng an toàn
+        try:
+            _kieu(tok, _an_toan_muc(muc))
+        except Exception as e:  # noqa: BLE001
+            _canh(cb, "Tô tab Tổng quan", e)
     try:
         _dat_rong(tok, sid, _RONG_TONG_QUAN + [140] * (w - 4))
     except Exception as e:  # noqa: BLE001
