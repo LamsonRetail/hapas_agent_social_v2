@@ -183,7 +183,8 @@ def test_unapproved_requested_account_never_fetches_insights(monkeypatch):
                 {"id": "act_2", "name": "HAPAS", "currency": "VND"}], False
     monkeypatch.setattr(T.MetaClient, "pages", pages)
     monkeypatch.setattr(T, "_private_sheet", lambda *a: pytest.fail("disclosed"))
-    assert "Không tìm thấy" in run(tai_khoan="act_2")["error"]
+    err = run(tai_khoan="act_2")["error"]
+    assert "Không thấy" in err and "Approved — act_1" in err and "act_2" not in err.split("“act_2”")[-1]
 
 @pytest.mark.parametrize("people,caps,allowed", [([], [{"tool":"chi_so_ads"}], False),
     (["ou_asker"], [{"tool":"chi_so_ads"}], True), (["ou_other"], [{"tool":"chi_so_ads"}], False),
@@ -301,9 +302,65 @@ def test_private_sheet_closed_before_write_and_only_requester_granted(monkeypatc
                                 "member_id":"ou_asker","perm":"view"}})
     assert ("WRITE" in [e[0] for e in events[:-1]])
 
+_TK = [{"id":"act_1","name":"HTC - [TRANG SỨC] HAPAS 1"},{"id":"act_2","name":"HAPAS 11 - FB ADS"},
+       {"id":"act_3","name":"MATEMADE - 5"},{"id":"act_4","name":"HAPAS 1"}]
+
+
 def test_ambiguous_account_does_not_silently_select_multiple():
-    with pytest.raises(ValueError,match="chưa rõ"):
+    with pytest.raises(ValueError,match="khớp"):
         T._select([{"id":"act_1","name":"HAPAS A"},{"id":"act_2","name":"HAPAS B"}],"HAPAS")
+
+
+def test_mo_ho_liet_ke_ten_kem_ma_danh_so():
+    with pytest.raises(T.ChonTaiKhoan) as e:
+        T._select(_TK,"hapas")
+    s=str(e.value)
+    assert "khớp 3 tài khoản" in s and "1. HTC - [TRANG SỨC] HAPAS 1 — act_1" in s
+    assert "HAPAS 11 - FB ADS — act_2" in s and "MATEMADE" not in s and "lấy hết 3" in s
+
+
+def test_lay_het_khop_lay_ca_nhom():
+    assert [a["id"] for a in T._select(_TK,"HAPAS",lay_het=True)]==["act_1","act_2","act_4"]
+
+
+def test_trung_ten_day_du_thi_chon_dung_mot():
+    assert [a["id"] for a in T._select(_TK,"hapas 1")]==["act_4"]
+    assert [a["id"] for a in T._select(_TK,"act_3")]==["act_3"]
+    assert [a["id"] for a in T._select(_TK,["HAPAS 1","MATEMADE - 5"])]==["act_4","act_3"]
+
+
+def test_khong_thay_thi_liet_ke_tat_ca_ten():
+    with pytest.raises(T.ChonTaiKhoan) as e:
+        T._select(_TK,"thai")
+    assert "MATEMADE - 5 — act_3" in str(e.value)
+
+
+def _qua_quyen(monkeypatch, ok=True):
+    monkeypatch.setattr(T,"_actor",lambda:"ou_x")
+    monkeypatch.setattr(T,"_allowed",lambda actor:ok)
+    monkeypatch.setattr(T,"_token",lambda:"tok")
+
+
+def test_cau_chon_tai_khoan_khong_bi_cat_500_ky_tu(monkeypatch):
+    nhieu=[{"id":f"act_{i}","name":f"HAPAS {i} - FB ADS DAI TEN DE VUOT TRAN","currency":"VND"} for i in range(1,21)]
+    _qua_quyen(monkeypatch)
+    monkeypatch.setattr(T.MetaClient,"accounts",lambda self:nhieu)
+    msg=json.dumps(json.loads(T._handle({"tai_khoan":"hapas","khoang_ngay":"7_ngay"})),ensure_ascii=False)
+    assert "20. HAPAS 20" in msg and "act_20" in msg
+
+
+def test_danh_sach_tai_khoan_can_quyen(monkeypatch):
+    _qua_quyen(monkeypatch, ok=False)
+    monkeypatch.setattr(T.MetaClient,"accounts",lambda self:pytest.fail("không được gọi Meta"))
+    out=json.loads(T._handle({"danh_sach_tai_khoan":True}))
+    assert "chưa được phép" in json.dumps(out,ensure_ascii=False)
+
+
+def test_danh_sach_tai_khoan_tra_ten(monkeypatch):
+    _qua_quyen(monkeypatch)
+    monkeypatch.setattr(T.MetaClient,"accounts",lambda self:_TK)
+    out=json.loads(T._handle({"danh_sach_tai_khoan":True}))
+    assert out["so_tai_khoan"]==4 and "3. MATEMADE - 5 — act_3" in out["danh_sach"]
 
 
 def test_large_sheet_grid_and_columns_grow_before_write(monkeypatch):

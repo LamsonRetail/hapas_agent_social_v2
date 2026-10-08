@@ -395,7 +395,17 @@ class MetaClient:
         return [a for a in granted if a.get("id") in approved]
 
 
-def _select(accounts, wanted):
+class ChonTaiKhoan(ValueError):
+    """Cần người dùng chọn tài khoản. Câu đầy đủ (kèm danh sách TÊN) chép nguyên cho người dùng;
+    không cắt ở 500 ký tự như lỗi thường — mã act_ trần không ai đọc hiểu được (08/10)."""
+
+
+def _ds_tai_khoan(accounts):
+    return "\n".join(f"{i}. {a.get('name') or '(chưa đặt tên)'} — {a.get('id')}"
+                     for i, a in enumerate(accounts, 1))
+
+
+def _select(accounts, wanted, lay_het=False):
     if wanted == "tat_ca":
         return accounts
     fragments = wanted if isinstance(wanted, list) else [wanted]
@@ -403,14 +413,20 @@ def _select(accounts, wanted):
         raise ValueError("Cần tên tài khoản, act_ID hoặc tat_ca.")
     selected = {}
     for fragment in fragments:
-        matches = [a for a in accounts if fragment.lower() in str(a.get("name", "")).lower()
-                   or str(a.get("id")) == fragment or str(a.get("id")) == "act_" + fragment]
+        f = fragment.strip()
+        exact = [a for a in accounts if str(a.get("name", "")).strip().lower() == f.lower()
+                 or str(a.get("id")) == f or str(a.get("id")) == "act_" + f]
+        matches = exact or [a for a in accounts if f.lower() in str(a.get("name", "")).lower()]
         if not matches:
-            raise ValueError("Không tìm thấy tài khoản: " + fragment)
-        if len(matches) > 1:
-            raise ValueError("Tên tài khoản chưa rõ: " + fragment + ". Chọn act_ID: " +
-                             ", ".join(str(a.get("id")) for a in matches))
-        selected[matches[0]["id"]] = matches[0]
+            raise ChonTaiKhoan(f"Không thấy tài khoản nào có chữ “{f}”. Các tài khoản đọc được:\n"
+                               + _ds_tai_khoan(accounts)
+                               + "\nBạn chọn một hoặc vài tên trong danh sách.")
+        if len(matches) > 1 and not lay_het:
+            raise ChonTaiKhoan(f"“{f}” khớp {len(matches)} tài khoản:\n" + _ds_tai_khoan(matches)
+                               + "\nBạn muốn lấy một/vài tài khoản (nói tên hoặc số thứ tự), hay "
+                               f"lấy hết {len(matches)} tài khoản này gộp lại?")
+        for a in matches:
+            selected[a["id"]] = a
     return list(selected.values())
 
 
@@ -493,6 +509,14 @@ def _handle(args, **kwargs):
         actor = _actor()
         if not _allowed(actor):
             raise ValueError("Bạn chưa được phép xem số ads hoặc không đọc được quyền. Nhờ quản trị agent thêm email vào Console → Mark → Năng lực → Danh sách người được xem số ads.")
+        if args.get("danh_sach_tai_khoan") is True:
+            token = _token()
+            if not token:
+                raise ValueError("Chưa cấu hình token Meta Ads. Nhờ chủ agent cấu hình MARK_META_ADS_TOKEN chỉ đọc trên VPS.")
+            ds = MetaClient(token).accounts()
+            return tool_result({"so_tai_khoan": len(ds), "danh_sach": _ds_tai_khoan(ds),
+                                "hoi_tiep": "Chép nguyên danh_sach. Bạn cần tài khoản nào (một, vài, hay "
+                                            "hết các tài khoản có chung một chữ như HAPAS)?"})
         if "tai_khoan" not in args or not any(k in args for k in ("khoang_ngay", "tu_ngay", "den_ngay")):
             raise ValueError("Bạn cần số của tài khoản nào và khoảng thời gian nào? Gọi danh_muc=true để xem các chỉ số.")
         wanted = _metrics(args.get("chi_so", ["co_ban"]))
@@ -513,7 +537,9 @@ def _handle(args, **kwargs):
         if not token:
             raise ValueError("Chưa cấu hình token Meta Ads. Nhờ chủ agent cấu hình MARK_META_ADS_TOKEN chỉ đọc trên VPS.")
         client = MetaClient(token)
-        accounts = _select(client.accounts(), args["tai_khoan"])
+        if "lay_het_khop" in args and not isinstance(args["lay_het_khop"], bool):
+            raise ValueError("lay_het_khop phải là true/false.")
+        accounts = _select(client.accounts(), args["tai_khoan"], lay_het=args.get("lay_het_khop") is True)
         if not accounts:
             raise ValueError("Không có tài khoản HAPAS được cấp quyền xem hiệu quả.")
         # Fetch only requested fields, inputs needed for requested ratios, and the
@@ -601,6 +627,8 @@ def _handle(args, **kwargs):
         memory_store.danh_dau_phien_han_che(scheduler.get_current_chat() or "", "chi_so_ads")
         return tool_result({"link": url, "cau_tong": sentence + ".", "so_dong": len(rows), "bi_cat": cut,
                             "chi_so": wanted, "nguoi_duoc_chia_se": actor})
+    except ChonTaiKhoan as error:
+        return tool_error(_redact(str(error), token)[:4000] + "\n(Chép nguyên danh sách này cho người dùng.)")
     except Exception as error:
         return tool_error(_redact(str(error), token)[:500])
 
@@ -608,7 +636,10 @@ def _handle(args, **kwargs):
 SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng.",
     "parameters": {"type": "object", "properties": {
         "danh_muc": {"type": "boolean"},
-        "tai_khoan": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+        "danh_sach_tai_khoan": {"type": "boolean", "description": "true = liệt kê tên + mã các tài khoản đọc được (không lấy số)."},
+        "tai_khoan": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                      "description": "Tên đầy đủ, một chữ trong tên, act_ID, hoặc tat_ca."},
+        "lay_het_khop": {"type": "boolean", "description": "true = lấy HẾT các tài khoản có chữ trong tai_khoan (vd cả nhóm HAPAS), gộp lại. Chỉ dùng khi người dùng nói rõ muốn lấy hết."},
         "khoang_ngay": {"type": "string", "enum": ["hom_nay", "hom_qua", "7_ngay", "14_ngay", "30_ngay", "thang_nay", "thang_truoc"]},
         "tu_ngay": {"type": "string"}, "den_ngay": {"type": "string"},
         "cap": {"type": "string", "enum": list(LEVELS)}, "theo_ngay": {"type": "boolean"},

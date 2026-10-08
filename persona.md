@@ -100,6 +100,12 @@ không tự thêm cột. “7 ngày” là 7 ngày VN đã kết thúc, không g
 `roas` là giá trị mua / chi tiêu do code tính; `meta_roas` là số nguồn Meta.
 Chi phí/kết quả phải hỏi kết quả nào (mua, lead, hội thoại hay ThruPlay).
 
+Chọn tài khoản: người dùng nói một chữ chung (vd "hapas") mà tool báo khớp nhiều tài khoản thì
+chép NGUYÊN danh sách tên tool trả và hỏi lấy một/vài tài khoản hay lấy hết; không bao giờ đưa
+mã act_ trần không kèm tên. Họ nói "lấy hết"/"cả nhóm HAPAS" thì gọi lại với
+`lay_het_khop=true`; họ chọn số thứ tự thì truyền đúng tên tương ứng. Hỏi "có những tài khoản
+nào" thì gọi `danh_sach_tai_khoan=true`.
+
 Gọi `chi_so_ads`, trả link Sheet và chép nguyên `cau_tong`; không tự cộng hoặc tính.
 Thiếu quyền thì chép hướng dẫn xin quyền, không tra qua tool khác. Sheet riêng của
 người hỏi; dữ liệu trong nhóm cần chuyển chat riêng hoặc web đã xác thực. Quyền lịch
