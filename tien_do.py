@@ -47,6 +47,12 @@ từng ngày, từng số. Nhóm nhận = chính cuộc chat của job, không c
      nhóm trong một ngày: sổ `.tokens/nhac_tien_do.json` ghi `lich_ngay`/`lich_base` (băm, không
      phải app_token — xem 6), hai bên kiểm dưới cùng khoá `_KHOA`.
  11. Chỉ ĐỌC thêm hai endpoint lấy TÊN Base/bảng cho dòng tiêu đề (`_goi_ten`, hỏng thì bỏ qua).
+ 12. `cua_toi=co` (chủ agent chốt 08/10/2026): chỉ việc mà NGƯỜI HỎI (gõ tay = người gửi; theo
+     lịch = `scheduled_by`) nằm trong cột người phụ trách — so bằng open_id, KHÔNG BAO GIỜ theo
+     tên (trùng tên/đổi tên là lộ việc người khác hoặc sót việc của mình). Không có danh tính
+     `ou_…` thì TỪ CHỐI. Danh sách của chính mình nên KHÔNG BAO GIỜ gắn `<at>` (kể cả lượt
+     theo lịch). Không có tham số nào cho chọn "của ai" — chỉ là người hỏi, nên không ai mượn
+     được lệnh để xem riêng việc của người khác. Khử trùng lượt lịch theo Base+nhóm+người.
 """
 from __future__ import annotations
 
@@ -95,7 +101,15 @@ _TRAN_TEN_BASE = 80
 TRAN_KY_TU = 6000
 CU_PHAP_NGAN = ('Dùng /tiendo <link Base> [cot_ten="Tên việc"] [cot_pic="Phụ trách"] '
                 '[cot_han="Ngày hết hạn"] [cot_tt="Status"] [xong="Done;Huỷ"] '
-                '[so_ngay=3] [qua_han_toi_da=14] [tag=co|khong].')
+                '[so_ngay=3] [qua_han_toi_da=14] [tag=co|khong] [cua_toi=co|khong].')
+#: Lời từ chối `cua_toi` khi lượt không mang danh tính Lark `ou_…` (job web chưa xác thực,
+#: lịch không có người đặt…). Không lùi về lọc theo tên — trùng tên là lộ việc người khác.
+LOI_KHONG_RO_NGUOI = ("Chưa biết bạn là ai trên Lark nên không lọc được việc của bạn. Hỏi "
+                      "Mark trong Lark (nhóm hoặc chat riêng), hoặc bỏ cua_toi=co.")
+
+
+def _la_open_id(s) -> bool:
+    return bool(re.fullmatch(r"ou_[A-Za-z0-9]+", str(s or "")))
 
 
 class CauTrucLoi(Exception):
@@ -395,6 +409,9 @@ def _mot_dong(r: dict, cot: dict | None = None) -> dict | None:
     if not ten:
         return None                 # dòng trống của Base — không phải việc
     pic = VB._nguoi(f.get(c["pic"])) if c.get("pic") else []
+    # MỌI open_id trong ô người phụ trách (việc nhiều PIC): `cua_toi` so trên cả danh sách,
+    # còn `pic_id` (người đầu) vẫn là người được tag/đứng tên nhóm như trước.
+    pic_ids = [x[0] for x in pic]
     oid, ten_pic = ((pic[0][0], _sach(VB._ten_goc(pic[0][1]))[:_TRAN_TEN_NGUOI] or "(chưa rõ tên)")
                     if pic else ("", ""))
     o_tt = f.get(c["tt"]) if c.get("tt") else None
@@ -402,7 +419,7 @@ def _mot_dong(r: dict, cot: dict | None = None) -> dict | None:
     xong = (o_tt is True) if c.get("kieu_tt") == 7 else (VB.chuan(VB._chu(o_tt)) in c["xong"])
     return {"record_id": r.get("record_id"), "ten": ten,
             "nhom": _sach(VB._chu(f.get(c["nhom"]))) if c.get("nhom") else "",
-            "pic_id": oid, "pic": ten_pic, "han": ngay_vn(f.get(c["han"])),
+            "pic_id": oid, "pic_ids": pic_ids, "pic": ten_pic, "han": ngay_vn(f.get(c["han"])),
             "tt": VB._gon(VB._chu(o_tt)) if not isinstance(o_tt, bool) else str(o_tt),
             "xong": xong}
 
@@ -421,7 +438,7 @@ def qua_han_toi_da() -> int:
 
 def loc_viec(records: list[dict], hom_nay: datetime.date, so_ngay: int = SO_NGAY_MAC_DINH,
              *, pic: str = "", nhom: str = "", qua_han_toi_da_ngay: int | None = None,
-             cot: dict | None = None) -> dict:
+             cot: dict | None = None, chi_cua: str = "") -> dict:
     """Hàm thuần. Dòng Bitable thô → {qua_han, qua_han_khong_pic, qua_han_lau, sap_han,
     thieu, dem}.
 
@@ -435,6 +452,8 @@ def loc_viec(records: list[dict], hom_nay: datetime.date, so_ngay: int = SO_NGAY
       Hạn đúng hôm nay là SẮP HẠN, chưa quá.
     - `pic`/`nhom`: lọc theo đoạn tên (không dấu, không hoa thường).
     - `cot`: ánh xạ cột (`nhan_cot`); None = bộ cột CHECKLIST DA.
+    - `chi_cua`: open_id — chỉ giữ việc có người này trong cột PIC (so open_id, không theo
+      tên); lọc TRƯỚC mọi đếm để số "đã xong" cũng chỉ là việc của người đó.
     """
     nguong = qua_han_toi_da() if qua_han_toi_da_ngay is None else int(qua_han_toi_da_ngay)
     k_pic, k_nhom = VB.chuan(pic), VB.chuan(nhom)
@@ -443,6 +462,8 @@ def loc_viec(records: list[dict], hom_nay: datetime.date, so_ngay: int = SO_NGAY
     for r in records or []:
         v = _mot_dong(r, cot)
         if v is None:
+            continue
+        if chi_cua and chi_cua not in v["pic_ids"]:
             continue
         if v["xong"]:
             xong += 1
@@ -495,18 +516,22 @@ def _dong_viec(v: dict) -> str:
 
 def soan_tin(ket: dict, hom_nay: datetime.date, d: dict, *, gan_the: bool,
              so_ngay: int = SO_NGAY_MAC_DINH, toi_da: int = TOI_DA_DONG,
-             nhac: bool | None = None, cot: dict | None = None) -> str:
+             nhac: bool | None = None, cot: dict | None = None, cua_toi: bool = False) -> str:
     """Chữ thuần (persona cấm bảng markdown). "" khi không có việc quá hạn trong ngưỡng hay
     sắp hạn — tin nhắc nhóm khi đó không gửi (việc quá hạn lâu một mình không đủ để gửi:
     nhắc mỗi sáng một dòng đếm y hệt thì thành tiếng ồn). `gan_the`=True chỉ dành cho tin
-    nhắc nhóm theo lịch: thẻ `<at>` chỉ gắn cho PIC của việc quá hạn trong ngưỡng."""
+    nhắc nhóm theo lịch: thẻ `<at>` chỉ gắn cho PIC của việc quá hạn trong ngưỡng.
+    `cua_toi`: danh sách việc của CHÍNH người hỏi — không bao giờ gắn thẻ, không gom theo
+    PIC (việc nhiều PIC thì người đứng đầu ô có thể là người khác)."""
     qua, qua_kp, sap = ket["qua_han"], ket["qua_han_khong_pic"], ket["sap_han"]
     if not qua and not qua_kp and not sap:
         return ""
     n = ket["qua_han_toi_da"]
     nhac = gan_the if nhac is None else nhac
-    L = [f"{'NHẮC TIẾN ĐỘ' if nhac else 'TIẾN ĐỘ'} — {_THU[hom_nay.weekday()]} "
-         f"{hom_nay:%d/%m/%Y} — {_sach(d['ten'])[:_TRAN_TEN_BASE]}",
+    if cua_toi:
+        gan_the = False
+    L = [f"{'NHẮC TIẾN ĐỘ' if nhac else 'TIẾN ĐỘ'}{' — VIỆC CỦA BẠN' if cua_toi else ''} — "
+         f"{_THU[hom_nay.weekday()]} {hom_nay:%d/%m/%Y} — {_sach(d['ten'])[:_TRAN_TEN_BASE]}",
          f"Quá hạn (trong {n} ngày): {len(qua) + len(qua_kp)} việc · Tới hạn trong {so_ngay} "
          f"ngày tới: {len(sap)} việc"]
     con, bo = toi_da, 0
@@ -520,7 +545,7 @@ def soan_tin(ket: dict, hom_nay: datetime.date, d: dict, *, gan_the: bool,
             bo += len(ds)
             continue
         L += ["", tieu_de + ":"]
-        for v0, viec in (_nhom_theo_pic(ds) if theo_pic else [(None, ds)]):
+        for v0, viec in (_nhom_theo_pic(ds) if theo_pic and not cua_toi else [(None, ds)]):
             if con <= 0:
                 bo += len(viec)
                 continue
@@ -537,10 +562,12 @@ def soan_tin(ket: dict, hom_nay: datetime.date, d: dict, *, gan_the: bool,
     if bo:
         duoi.append(f"… và {bo} việc khác — xem Base (link bên dưới).")
     if ket["qua_han_lau"]:
-        duoi.append(f"{len(ket['qua_han_lau'])} việc quá hạn hơn {n} ngày — nhờ PIC cập nhật "
-                 f"{_sach((cot or COT_MAC_DINH)['tt'])[:40]} trên Base (link bên dưới).")
+        duoi.append(f"{len(ket['qua_han_lau'])} việc quá hạn hơn {n} ngày — "
+                    f"{'bạn cập nhật' if cua_toi else 'nhờ PIC cập nhật'} "
+                    f"{_sach((cot or COT_MAC_DINH)['tt'])[:40]} trên Base (link bên dưới).")
     if ket["thieu"]:
-        duoi.append(f"{len(ket['thieu'])} việc chưa có hạn/PIC — xem Base (link bên dưới).")
+        duoi.append(f"{len(ket['thieu'])} việc chưa có hạn{'' if cua_toi else '/PIC'} — xem "
+                    "Base (link bên dưới).")
     duoi.append(f"Base: {d['url']}")
     tin = "\n".join(L + [""] + duoi)
     if len(tin) <= TRAN_KY_TU:
@@ -565,7 +592,8 @@ SCHEMA = {
         "do cấu hình máy chạy chọn — CHECKLIST DA), bản mới nhất. CODE so DEADLINE với hôm "
         "nay theo giờ VN, bỏ việc ĐÃ XONG/CANCEL.\n"
         "KHI NÀO GỌI: 'việc nào trễ/quá hạn', 'sắp tới hạn', 'tuần này còn gì', 'việc của "
-        "<người>/nhóm <X> có trễ không'. KHÔNG tự so ngày trên `doc_bang`.\n"
+        "<người>/nhóm <X> có trễ không', 'việc của tôi còn gì' (→ `cua_toi`=true). KHÔNG tự "
+        "so ngày trên `doc_bang`.\n"
         "KHI TRẢ LỜI: chép NGUYÊN `cau_tien_do`; không tag ai, không gửi tin vào nhóm. Bị từ "
         "chối vì quyền thì chuyển NGUYÊN lời hướng dẫn."
     ),
@@ -575,6 +603,11 @@ SCHEMA = {
             "so_ngay": {"type": "integer",
                         "description": "Sắp hạn = tới hạn trong bao nhiêu ngày tới (mặc định 3, 0–30)."},
             "pic": {"type": "string", "description": "Chỉ việc của người này (một đoạn tên)."},
+            "cua_toi": {"type": "boolean",
+                        "description": "true khi người hỏi muốn VIỆC CỦA CHÍNH HỌ ('việc của "
+                                       "tôi/em', 'tôi còn trễ gì'): code lọc theo danh tính "
+                                       "Lark của người đang nói (không theo tên). Đừng điền "
+                                       "tên họ vào `pic` thay cho cái này."},
             "nhom": {"type": "string", "description": "Chỉ việc của NHÓM này (MEDIA, BOOKING…)."},
             "qua_han_toi_da": {"type": "integer",
                                "description": "Quá hạn hơn bấy nhiêu ngày thì gộp thành một "
@@ -628,6 +661,12 @@ def _handle(args: dict, **_kw) -> str:
                   if a.get("qua_han_toi_da") not in (None, "") else qua_han_toi_da())
     except (TypeError, ValueError):
         return tool_error("`qua_han_toi_da` phải là số ngày (1–365).")
+    cua_toi = a.get("cua_toi") is True or str(a.get("cua_toi") or "").strip().lower() in (
+        "true", "1", "co", "có", "yes")
+    # Danh tính lấy từ LƯỢT (cùng nguồn `mo_nguon` xét quyền), không bao giờ từ đối số model.
+    chu_viec = BT._nguoi_hoi() if cua_toi else ""
+    if cua_toi and not _la_open_id(chu_viec):
+        return tool_error(LOI_KHONG_RO_NGUOI)
     try:
         d = cau_hinh()
     except ValueError as e:
@@ -660,12 +699,15 @@ def _handle(args: dict, **_kw) -> str:
         return tool_error(BT.loi_doc("Base", e))
     hom_nay = hom_nay_vn()
     ket = loc_viec(dong, hom_nay, so_ngay, pic=str(a.get("pic") or ""),
-                   nhom=str(a.get("nhom") or ""), qua_han_toi_da_ngay=nguong, cot=cot)
+                   nhom=str(a.get("nhom") or ""), qua_han_toi_da_ngay=nguong, cot=cot,
+                   chi_cua=chu_viec)
     loc = ", ".join(x for x in (f"PIC '{a['pic']}'" if a.get("pic") else "",
                                 f"NHÓM '{a['nhom']}'" if a.get("nhom") else "") if x)
-    cau = soan_tin(ket, hom_nay, dich, gan_the=False, so_ngay=so_ngay, cot=cot)
+    cau = soan_tin(ket, hom_nay, dich, gan_the=False, so_ngay=so_ngay, cot=cot,
+                   cua_toi=cua_toi)
     if not cau:
-        cau = (f"Không có việc nào quá hạn trong {nguong} ngày gần đây hoặc tới hạn trong "
+        cau = (f"{'Bạn không có' if cua_toi else 'Không có'} việc nào quá hạn trong "
+               f"{nguong} ngày gần đây hoặc tới hạn trong "
                f"{so_ngay} ngày tới" + (f" ({loc})" if loc else "")
                + f" trên {_sach(dich['ten'])} (tính tới {hom_nay:%d/%m/%Y})."
                + (f" {len(ket['qua_han_lau'])} việc quá hạn hơn {nguong} ngày — nhờ PIC cập "
@@ -676,7 +718,7 @@ def _handle(args: dict, **_kw) -> str:
         cau = cau.replace("\n", f" (lọc {loc})\n", 1)
     return tool_result(
         success=True, bang=dich["ten"], bang_url=dich["url"], hom_nay=f"{hom_nay:%Y-%m-%d}",
-        so_ngay=so_ngay, qua_han_toi_da=nguong, dem=ket["dem"],
+        so_ngay=so_ngay, qua_han_toi_da=nguong, dem=ket["dem"], chi_viec_cua_nguoi_hoi=cua_toi,
         qua_han=[_gon_viec(v) for v in ket["qua_han"][:_TOI_DA_TRA]],
         qua_han_khong_pic=[_gon_viec(v) for v in ket["qua_han_khong_pic"][:_TOI_DA_TRA]],
         qua_han_lau=[_gon_viec(v) for v in ket["qua_han_lau"][:_TOI_DA_TRA]],
@@ -914,13 +956,15 @@ def loi_dan() -> str:
                 "ngày CODE tự gửi danh sách việc quá hạn/sắp tới hạn của Base checklist vào "
                 "MỘT nhóm đã cấu hình sẵn (chỉ tag PIC việc quá hạn gần đây; không có gì thì không "
                 "gửi). Được hỏi thì nói đúng vậy. Mark KHÔNG đổi được nhóm, giờ hay nội dung "
-                "nhắc, và không tự gửi tin hay tag ai từ chat. Nhắc Base khác: chủ agent đặt "
-                "trên console → Lịch chạy → chọn nhóm → Giao việc → /tiendo <link Base>.")
-    return ("\n- NHẮC TIẾN ĐỘ HẰNG NGÀY vào nhóm: đang TẮT (máy chạy chưa cấu hình). KHÔNG "
-            "nói hay hứa Mark sẽ tự nhắc deadline vào nhóm; hỏi trễ hạn thì dùng "
-            "`tra_tien_do` hoặc /tiendo <link Base>. Muốn nhắc nhóm hằng ngày: chủ agent đặt "
-            "trên console → Lịch chạy → chọn nhóm → Giao việc → /tiendo <link Base>. Trạng "
-            "thái TẮT ở đây chỉ là bộ nhắc cũ trên máy; không khẳng định trạng thái lịch console.")
+                "bộ nhắc này, và không tự gửi tin hay tag ai từ chat. Nhắc Base khác hoặc nhóm "
+                "khác: đặt LỊCH (`schedule_reminder` mode=run, message `/tiendo <link Base>`) "
+                "sau khi người dùng xác nhận, hoặc họ tự đặt trên console → Lịch chạy.")
+    return ("\n- BỘ NHẮC TIẾN ĐỘ CŨ TRÊN MÁY: đang TẮT (máy chạy chưa cấu hình) — trạng thái "
+            "này KHÔNG nói gì về lịch trên console. Hỏi trễ hạn thì dùng `tra_tien_do` hoặc "
+            "/tiendo <link Base>. Muốn nhắc tiến độ hằng ngày: đặt LỊCH (`schedule_reminder` "
+            "mode=run, recurrence=daily, message `/tiendo <link Base>`) sau khi người dùng "
+            "xác nhận giờ + nội dung + nhóm nhận, hoặc họ tự đặt trên console → Lịch chạy. "
+            "Chưa đặt lịch thật thì KHÔNG hứa Mark sẽ tự nhắc.")
 
 
 def register() -> None:
@@ -943,7 +987,7 @@ def tach_tuy_chon(text: str) -> tuple[str, dict]:
     parts = shlex.split(text)
     nguon, opts = "", {}
     cho = {"cot_ten", "cot_pic", "cot_han", "cot_tt", "xong", "so_ngay",
-           "qua_han_toi_da", "tag"}
+           "qua_han_toi_da", "tag", "cua_toi"}
     for part in parts:
         if "=" not in part or part.startswith(("https://", "http://", "base:")):
             if nguon:
@@ -960,21 +1004,28 @@ def tach_tuy_chon(text: str) -> tuple[str, dict]:
             raise ValueError(f"{key} phải từ {lo} đến {hi}.")
     if opts.get("tag", "co") not in ("co", "khong"):
         raise ValueError("tag phải là co hoặc khong.")
+    if opts.get("cua_toi", "khong") not in ("co", "khong"):
+        raise ValueError("cua_toi phải là co hoặc khong.")
     return nguon, opts
 
 
-def _khoa_base(d: dict) -> str:
+def _khoa_base(d: dict, rieng: str = "") -> str:
+    """Khoá sổ của một Base+bảng; `rieng` (open_id) = lượt `cua_toi` của MỘT người — khoá
+    riêng để lịch "việc của tôi" không chặn (hay bị chặn bởi) lịch cả nhóm cùng Base."""
     # Không lưu app_token: bang_tool coi token trong sổ là Base nội bộ.
-    return hashlib.sha256(f"{d['app_token']}:{d['table_id']}".encode()).hexdigest()
+    goc = f"{d['app_token']}:{d['table_id']}" + (f":{rieng}" if rieng else "")
+    return hashlib.sha256(goc.encode()).hexdigest()
 
 
-def da_nhac(chat: str, d: dict, ngay: datetime.date) -> bool:
+def da_nhac(chat: str, d: dict, ngay: datetime.date, rieng: str = "") -> bool:
     so = _doc_so().get(chat) or {}
-    entry = (so.get("bases") or {}).get(_khoa_base(d)) or {}
+    entry = (so.get("bases") or {}).get(_khoa_base(d, rieng)) or {}
     if entry.get("ngay") == ngay.isoformat():
         return True
     if entry.get("cho_ngay") == ngay.isoformat() and entry.get("cho_den", 0) > time.time():
         return True
+    if rieng:
+        return False   # bộ nhắc env chỉ gửi danh sách cả nhóm — không thay lượt riêng
     # Tương thích sổ env cũ chỉ có ngày, áp riêng Base cấu hình.
     try:
         mac = cau_hinh()
@@ -984,10 +1035,14 @@ def da_nhac(chat: str, d: dict, ngay: datetime.date) -> bool:
         return False
 
 
-def ghi_nhac(chat: str, d: dict, ngay: datetime.date) -> None:
+def ghi_nhac(chat: str, d: dict, ngay: datetime.date, rieng: str = "") -> None:
     so = _doc_so().get(chat) or {}
-    bases = {k: v for k, v in (so.get("bases") or {}).items() if v.get("ngay") == ngay.isoformat()}
-    bases[_khoa_base(d)] = {"ngay": ngay.isoformat()}
+    # Giữ cả chỗ ĐANG GIỮ hôm nay của khoá khác (lịch cả nhóm và lịch "việc của tôi" cùng
+    # nhóm có thể đang chờ /reply cùng lúc) — xoá nó là mở cửa cho gửi trùng.
+    hom = ngay.isoformat()
+    bases = {k: v for k, v in (so.get("bases") or {}).items()
+             if v.get("ngay") == hom or v.get("cho_ngay") == hom}
+    bases[_khoa_base(d, rieng)] = {"ngay": hom}
     _cap_nhat_so(chat, bases=bases)
 
 
@@ -1001,12 +1056,18 @@ def lenh_tiendo(text: str, *, kenh: dict | None = None, chat_id: str = "",
         return "Lịch chưa có người đặt — tạo lại lịch trên console."
     try:
         nguon, opts = tach_tuy_chon(text)
+        # `cua_toi`: người lọc LUÔN là người hỏi (người gửi / người đặt lịch) — không có tham
+        # số nào chọn người khác. Thiếu danh tính thì từ chối TRƯỚC khi đọc Base.
+        cua_toi = opts.get("cua_toi") == "co"
+        if cua_toi and not _la_open_id(asker):
+            return LOI_KHONG_RO_NGUOI
         try:
             mac = cau_hinh()
         except ValueError:
             mac = None
         if not nguon and not mac:
-            return 'Dùng /tiendo <link Base?table=tbl…> [cot_han="Ngày giao"] [tag=khong].'
+            return ('Dùng /tiendo <link Base?table=tbl…> [cot_han="Ngày giao"] [tag=khong] '
+                    '[cua_toi=co].')
         # Cùng cửa doc_bang; lệnh chạy trước audit nên truyền chính danh tường minh.
         d, loi = _dich_tu_nguon(nguon or mac["url"], mac, nguoi_hoi=asker)
         if not d:
@@ -1018,30 +1079,37 @@ def lenh_tiendo(text: str, *, kenh: dict | None = None, chat_id: str = "",
                                 mac_dinh=not nguon)
         ngay = hom_nay_vn()
         ket = loc_viec(rows, ngay, opts["so_ngay"], cot=cot,
-                       qua_han_toi_da_ngay=opts["qua_han_toi_da"])
-        tin = soan_tin(ket, ngay, d, gan_the=lich and opts.get("tag", "co") == "co",
-                       nhac=lich, cot=cot, so_ngay=opts["so_ngay"])
+                       qua_han_toi_da_ngay=opts["qua_han_toi_da"],
+                       chi_cua=asker if cua_toi else "")
+        tin = soan_tin(ket, ngay, d,
+                       gan_the=lich and not cua_toi and opts.get("tag", "co") == "co",
+                       nhac=lich, cot=cot, so_ngay=opts["so_ngay"], cua_toi=cua_toi)
         if not tin:
-            tin = (f"✅ Không có việc trễ trong {opts['qua_han_toi_da']} ngày gần đây hay sắp tới hạn "
+            tin = (f"✅ {'Bạn không có' if cua_toi else 'Không có'} việc trễ trong "
+                   f"{opts['qua_han_toi_da']} ngày gần đây hay sắp tới hạn "
                    f"trong {opts['so_ngay']} ngày tới. "
-                   f"{len(ket['qua_han_lau'])} việc quá hạn lâu; {len(ket['thieu'])} việc thiếu hạn/PIC. "
-                   f"Base: {d['url']}")
+                   f"{len(ket['qua_han_lau'])} việc quá hạn lâu; {len(ket['thieu'])} việc thiếu "
+                   f"hạn{'' if cua_toi else '/PIC'}. Base: {d['url']}")
         if lich:
             parts = chat_id.split(":", 2)
             chat = parts[2] if len(parts) == 3 and parts[0] == "lark" else chat_id
             if not re.fullmatch(r"oc_[A-Za-z0-9]+", chat):
                 return "Lịch cần chạy trong nhóm Lark đã chọn trên console."
+            rieng = asker if cua_toi else ""
             with _KHOA:
-                if da_nhac(chat, d, ngay):
-                    return "Nhóm đã nhận hoặc đang gửi nhắc tiến độ của Base này hôm nay."
+                if da_nhac(chat, d, ngay, rieng):
+                    return ("Hôm nay đã gửi hoặc đang gửi danh sách việc của bạn trên Base này."
+                            if rieng else
+                            "Nhóm đã nhận hoặc đang gửi nhắc tiến độ của Base này hôm nay.")
                 # Giữ chỗ dưới cùng khoá với env, hết hạn sau 15 phút nếu bot chết.
                 # Không coi là ĐÃ GỬI cho tới khi /reply được Platform xác nhận.
                 so = _doc_so().get(chat) or {}
                 bases = dict(so.get("bases") or {})
-                bases[_khoa_base(d)] = {"cho_ngay": ngay.isoformat(), "cho_den": time.time() + 900}
+                bases[_khoa_base(d, rieng)] = {"cho_ngay": ngay.isoformat(),
+                                               "cho_den": time.time() + 900}
                 _cap_nhat_so(chat, bases=bases)
                 if kenh is not None:
-                    kenh["tien_do_gui"] = (chat, d, ngay)
+                    kenh["tien_do_gui"] = (chat, d, ngay, rieng)
         return tin
     except (ValueError, CauTrucLoi) as e:
         return _sach(str(e))
@@ -1060,13 +1128,14 @@ def huy_cho_gui(kenh: dict | None) -> None:
     """Gửi thất bại hẳn: giải phóng lượt để env thử lại."""
     entry = (kenh or {}).get("tien_do_gui")
     if entry:
-        chat, d, _ngay = entry
+        chat, d, _ngay, *con = entry
+        khoa = _khoa_base(d, con[0] if con else "")
         with _KHOA:
             so = _doc_so().get(chat) or {}
             bases = dict(so.get("bases") or {})
-            cu = bases.get(_khoa_base(d)) or {}
+            cu = bases.get(khoa) or {}
             if not cu.get("ngay"):
-                bases.pop(_khoa_base(d), None)
+                bases.pop(khoa, None)
                 _cap_nhat_so(chat, bases=bases)
 
 
