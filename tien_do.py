@@ -1110,8 +1110,6 @@ def lenh_tiendo(text: str, *, kenh: dict | None = None, chat_id: str = "",
             return loi + _goi_y_lich(loi)
         if not mac or _khoa_base(d) != _khoa_base(mac):
             d["ten"] = ten_base(d)
-        if not mac or _khoa_base(d) != _khoa_base(mac):
-            d["ten"] = ten_base(d)
         cot, rows = doc_theo_cot(d, {**{key[4:]: v for key, v in opts.items() if key.startswith("cot_")},
                                     **({"xong": opts["xong"]} if "xong" in opts else {})},
                                 mac_dinh=not nguon)
