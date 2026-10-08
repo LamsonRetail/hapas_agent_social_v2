@@ -199,3 +199,97 @@ def test_het_ngan_sach_cho_thi_dung_va_bao_kem_link(gia, monkeypatch):
         T.xuat("x", [T.Bang("Bài", [T.Cot("a")], [["1"]] * 5)])
     assert "CHƯA đủ dữ liệu" in str(loi.value)
     assert getattr(loi.value, "trinh_bay_url", "").endswith("/sht1"), "kèm link đã tạo"
+
+
+# ───────────────────────── rà soát lần 3 ─────────────────────────
+def test_ghi_lai_hong_giua_chung_lan_sau_khong_sot_dong_cu(gia):
+    """Ghi lại Tổng quan hỏng giữa chừng (đã ghi được vài dòng bản mới): lần ghi lại sau
+    phải xoá hết — không còn dòng 'STALE' nằm dưới bản mới mà vẫn báo đủ."""
+    kq = T.xuat("x", [T.Bang("Bài", [T.Cot("a")], [["1"]] * 8)],
+                T.TongQuan("x", ghi_chu=["c0"]))
+    cu = len(gia.o("Tổng quan"))
+    goc = gia.call
+    dem = {"n": 0, "bat": True}
+
+    def call(method, path, query=None, body=None):
+        if dem["bat"] and path.endswith("values_batch_update") and \
+                body["valueRanges"][0]["range"].startswith(kq.tong_quan_sid + "!"):
+            dem["n"] += 1
+            if dem["n"] >= 7:
+                raise RuntimeError("HTTP 500")
+        return goc(method, path, query, body)
+    A.lark.call = call
+    tq1 = T.TongQuan("x", nhom=[T.Nhom("Nhóm cũ", [("STALE-A", 1), ("STALE-B", 2)])],
+                     ghi_chu=["STALE-NOTE"])
+    ket = T.ghi_lai_tong_quan(kq.token, kq.tong_quan_sid, kq.url, tq1, kq.tabs, so_dong_cu=cu)
+    assert ket["ok"] is False and ket["so_dong"] > cu, "tính cả dòng mới có thể đã ghi"
+    dem["bat"] = False
+    ket2 = T.ghi_lai_tong_quan(kq.token, kq.tong_quan_sid, kq.url,
+                               T.TongQuan("x", ghi_chu=["moi"]), kq.tabs,
+                               so_dong_cu=ket["so_dong"])
+    o = gia.o("Tổng quan")
+    assert ket2["ok"] and len(o) == ket2["so_dong"]
+    assert "STALE" not in json.dumps(o, ensure_ascii=False) and o[-1][0] == "• moi"
+
+
+def test_ghi_lai_don_duoi_ke_ca_dong_khong_duoc_tinh(gia):
+    """Dòng sót dưới Tổng quan mà bên gọi KHÔNG biết (so_dong_cu thấp) vẫn bị dọn."""
+    kq = T.xuat("x", [T.Bang("Bài", [T.Cot("a")], [["1"]] * 8)], T.TongQuan("x"))
+    cu = len(gia.o("Tổng quan"))
+    gia.tab("Tổng quan")["cells"][(150, 1)] = "RÁC CŨ"      # sót, bên gọi không biết
+    T.ghi_lai_tong_quan(kq.token, kq.tong_quan_sid, kq.url, T.TongQuan("x"), kq.tabs,
+                        so_dong_cu=cu)
+    assert "RÁC CŨ" not in json.dumps(gia.o("Tổng quan"), ensure_ascii=False)
+
+
+@pytest.mark.parametrize("vao", [None, {"day_du": None, "cau": "lỗi đọc", "tabs": []},
+                                 {"day_du": False, "cau": "THIẾU x", "tabs": []}])
+def test_gop_kiem_tong_quan_khong_nhan_du_khi_tab_du_lieu_chua_kiem(vao):
+    tot = {"so_dong": 9, "ok": True,
+           "kiem": {"tab": "Tổng quan", "du_kien": 9, "cot": 4, "ket": "du", "cau": "đủ"}}
+    gop = T.gop_kiem_tong_quan(vao, tot)
+    assert gop["day_du"] is not True and "0/0" not in gop["cau"]
+    if vao and vao["day_du"] is False:
+        assert gop["day_du"] is False and "THIẾU x" in gop["cau"]
+    else:
+        assert gop["cau"].startswith("Chưa kiểm được ghi đủ")
+
+
+def test_het_ngan_sach_khong_bi_nhanh_bo_link_nuot(gia, monkeypatch):
+    """Nhánh 'ghi lại không link' không được bắt HetNganSachCho rồi ghi lại."""
+    lan = []
+
+    def ghi_gon(tok, sid, dong, dong_dau=1):
+        lan.append(dong_dau)
+        raise T.HetNganSachCho("hết ngân sách chờ")
+    monkeypatch.setattr(T, "_ghi_gon", ghi_gon)
+    with pytest.raises(T.HetNganSachCho):
+        T._viet_tong_quan("sht", "s", [[{"text": "a", "link": "u", "type": "url"}]], (200, 20))
+    assert len(lan) == 1, "không thử lại khi hết ngân sách"
+
+
+def test_bo_link_thi_co_canh_bao(gia, monkeypatch):
+    goc = gia.call
+
+    def call(method, path, query=None, body=None):
+        if path.endswith("/values_batch_update") and "'type': 'url'" in str(body):
+            raise RuntimeError("Lark 400: invalid link cell")
+        return goc(method, path, query, body)
+    A.lark.call = call
+    kq = T.xuat("x", [T.Bang("Bài", [T.Cot("a")], [["1"]] * 8)], T.TongQuan("x"))
+    tq = gia.o("Tổng quan")
+    assert any(r[0] == "Dữ liệu" for r in tq), "mục lục ghi dạng chữ"
+    assert "Ô link mục lục" in kq.cho_tool()["canh_bao_trinh_bay"]
+
+
+def test_fb_ads_ghi_noi_co_ngan_sach_cho(F, gia, monkeypatch):
+    import trinh_bay_sheet as TB
+    ns = []
+    goc_ghi = TB._ghi
+
+    def ghi(*a, **k):
+        ns.append(TB._NGAN_SACH.get())
+        return goc_ghi(*a, **k)
+    monkeypatch.setattr(TB, "_ghi", ghi)
+    _hai_luot(F)
+    assert ns and all(x is not None for x in ns), "mọi lần ghi (cả ghi nối) có trần chờ 429"

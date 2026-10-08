@@ -74,6 +74,7 @@ API Lark Sheets đã đối chiếu tài liệu chính thức (bản markdown c�
 from __future__ import annotations
 
 import collections
+import contextlib
 import contextvars
 import dataclasses
 import datetime
@@ -633,6 +634,17 @@ class HetNganSachCho(RuntimeError):
 _NGAN_SACH: contextvars.ContextVar = contextvars.ContextVar("tb_ngan_sach_cho", default=None)
 
 
+@contextlib.contextmanager
+def ngan_sach_cho(giay: float | None = None):
+    """Một ngân sách chờ 429 (mặc định NGAN_SACH_CHO giây) cho mọi lần ghi bên trong — dùng
+    cho các đường ghi ngoài `xuat` (vd fb_ads ghi nối)."""
+    moc = _NGAN_SACH.set({"con": NGAN_SACH_CHO if giay is None else giay})
+    try:
+        yield
+    finally:
+        _NGAN_SACH.reset(moc)
+
+
 def _cho(giay: float) -> None:
     ns = _NGAN_SACH.get()
     if ns is not None:
@@ -1129,14 +1141,23 @@ def _bo_link(dong: list) -> list:
     return [[(v.get("text") if isinstance(v, dict) else v) for v in r] for r in dong]
 
 
-def _viet_tong_quan(tok: str, sid: str, dong: list, luoi: tuple) -> None:
-    """Nới lưới rồi ghi các dòng Tổng quan (gọn). Ô link bị từ chối → ghi lại không link.
+def _viet_tong_quan(tok: str, sid: str, dong: list, luoi: tuple, cb: list | None = None,
+                    dong_dau: int = 1) -> None:
+    """Nới lưới rồi ghi các dòng Tổng quan (gọn) từ dòng `dong_dau`. Ô link bị từ chối →
+    ghi lại không link (có cảnh báo). Hết ngân sách chờ 429 thì NÉM ngay, không thử lại.
     Lỗi ghi → NÉM (bên gọi quyết)."""
-    _noi_luoi(tok, sid, luoi, len(dong), max((len(r) for r in dong), default=1))
+    _noi_luoi(tok, sid, luoi, dong_dau - 1 + len(dong),
+              max((len(r) for r in dong), default=1))
     try:
-        _ghi_gon(tok, sid, dong)
-    except Exception:  # noqa: BLE001
-        _ghi_gon(tok, sid, _bo_link(dong))
+        _ghi_gon(tok, sid, dong, dong_dau=dong_dau)
+    except HetNganSachCho:
+        raise
+    except Exception as e:  # noqa: BLE001 — ô link (mục lục) bị từ chối?
+        if not any(isinstance(v, dict) for r in dong for v in r):
+            raise
+        _ghi_gon(tok, sid, _bo_link(dong), dong_dau=dong_dau)
+        if cb is not None:
+            _canh(cb, "Ô link mục lục Tổng quan (đã ghi lại dạng chữ, không bấm được)", e)
 
 
 def _an_toan(fmt: str) -> str:
@@ -1273,11 +1294,8 @@ def xuat(tieu_de: str, bang: list, tong_quan: TongQuan | None = None, goc: Bang 
     của bảng tính ĐẦU hoặc lỗi callback thì NÉM (như code cũ); bảng tính tiếp theo hỏng thì
     các phần đã ghi vẫn có Tổng quan + quyền, phần hỏng báo rõ (`phan_hong`, `day_du`=False).
     Lỗi trang trí chỉ cảnh báo."""
-    moc = _NGAN_SACH.set({"con": NGAN_SACH_CHO})
-    try:
+    with ngan_sach_cho():
         return _xuat(tieu_de, bang, tong_quan, goc, sau_khi_tao, cap_quyen, luc)
-    finally:
-        _NGAN_SACH.reset(moc)
 
 
 def _xuat(tieu_de, bang, tong_quan, goc, sau_khi_tao, cap_quyen, luc) -> KetQua:
@@ -1562,7 +1580,7 @@ def _ghi_tong_quan(tok, url, tq, da_ghi, gap, kiem, cb, luc, khac) -> tuple[str,
         return "", hong("Thêm tab Tổng quan", e)
     dong, vai = dung_tong_quan(tq, da_ghi, gap, kiem, url, luc, khac)
     try:
-        _viet_tong_quan(tok, sid, dong, (LUOI_DONG, LUOI_COT))
+        _viet_tong_quan(tok, sid, dong, (LUOI_DONG, LUOI_COT), cb)
     except Exception as e:  # noqa: BLE001
         return sid, hong("Ghi tab Tổng quan", e)
     _trang_tri_tong_quan(tok, sid, dong, vai, cb)
@@ -1597,14 +1615,12 @@ def ghi_lai_tong_quan(tok: str, sid: str, url: str, tq: TongQuan, tabs: list,
     cu = max(0, int(so_dong_cu or 0))
     luoi = _luoi(tok).get(sid, (0, 0))
     try:
-        _noi_luoi(tok, sid, luoi, cu + len(dong), max((len(r) for r in dong), default=1))
-        try:
-            _ghi_gon(tok, sid, dong, dong_dau=cu + 1)
-        except Exception:  # noqa: BLE001 — ô link bị từ chối → ghi lại không link
-            _ghi_gon(tok, sid, _bo_link(dong), dong_dau=cu + 1)
+        _viet_tong_quan(tok, sid, dong, luoi, cb, dong_dau=cu + 1)
     except Exception as e:  # noqa: BLE001
         _canh(cb, "Ghi lại tab Tổng quan (bản cũ giữ nguyên, CHƯA cập nhật)", e, du=False)
-        return {"so_dong": cu, "ok": False, "kiem": {
+        # Có thể đã ghi được MỘT PHẦN bản mới (dòng cu+1…): tính cả vào số dòng đang dùng để
+        # lần ghi lại sau xoá hết, không để sót dòng cũ dưới bản mới (review 09/10).
+        return {"so_dong": cu + len(dong), "ok": False, "kiem": {
             "tab": TAB_TONG_QUAN, "du_kien": len(dong), "cot": vai["rong"], "ket": "thieu",
             "cau": f"không ghi lại được Tổng quan ({type(e).__name__}) — tab còn bản cũ, "
                    "số liệu/ghi chú mới chưa vào sheet"}}
@@ -1619,6 +1635,16 @@ def ghi_lai_tong_quan(tok: str, sid: str, url: str, tq: TongQuan, tabs: list,
                 "tab": TAB_TONG_QUAN, "du_kien": len(dong), "cot": vai["rong"],
                 "ket": "chua_kiem",
                 "cau": f"bản Tổng quan mới ghi ở dòng {cu + 1} trở đi, bản cũ chưa xoá được"}}
+    # Dọn đuôi: mọi dòng lưới SAU bản mới (sót từ lần ghi dở trước, kể cả không được tính)
+    # bỏ hẳn — Tổng quan chỉ còn đúng bản mới.
+    hang = _luoi(tok).get(sid, (0, 0))[0]
+    if hang > len(dong):
+        try:
+            _goi("DELETE", f"/open-apis/sheets/v2/spreadsheets/{tok}/dimension_range",
+                 body={"dimension": {"sheetId": sid, "majorDimension": "ROWS",
+                                     "startIndex": len(dong) + 1, "endIndex": hang}})
+        except Exception as e:  # noqa: BLE001
+            _canh(cb, "Dọn dòng thừa dưới Tổng quan", e)
     _trang_tri_tong_quan(tok, sid, dong, vai, cb)
     k = _kiem_tong_quan(tok, sid, dong, vai, tq.tieu_de)
     return {"so_dong": len(dong), "ok": k["ket"] != "thieu", "kiem": k}
@@ -1634,5 +1660,18 @@ def ghi_tong_quan_vao(tok: str, sid: str, url: str, tq: TongQuan, tabs: list,
 
 def gop_kiem_tong_quan(kiem: dict, ket_tq: dict) -> dict:
     """Gộp mục kiểm Tổng quan (của `ghi_lai_tong_quan`) vào kết quả kiểm các tab dữ liệu:
-    Tổng quan hỏng thì `day_du` không còn True."""
-    return _gop_kiem([kiem, {"tabs": [ket_tq["kiem"]]}])
+    Tổng quan hỏng thì `day_du` không còn True; tab dữ liệu chưa kiểm được (`day_du` vào
+    không phải True, kể cả `kiem`=None) thì kết quả gộp KHÔNG BAO GIỜ True."""
+    vao = kiem or {}
+    gop = _gop_kiem([vao, {"tabs": [ket_tq["kiem"]]}])
+    dd = vao.get("day_du")
+    if dd is True or gop["day_du"] is False:
+        return gop
+    if dd is False:
+        return dict(gop, day_du=False, cau="CẢNH BÁO GHI THIẾU: "
+                    + (vao.get("cau") or "các tab dữ liệu chưa đủ"))
+    tabs = gop["tabs"] + [{"tab": "(các tab dữ liệu)", "du_kien": 0, "cot": "",
+                           "ket": "chua_kiem", "cau": vao.get("cau") or "chưa kiểm được"}]
+    return {"day_du": None, "tabs": tabs,
+            "cau": "Chưa kiểm được ghi đủ các tab dữ liệu"
+                   + (f" ({vao['cau']})" if vao.get("cau") else "") + "."}

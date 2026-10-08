@@ -327,11 +327,13 @@ def _ghi_sheet(title: str, ads: list[dict], nhan: str, platform: str, country: s
             cot = _cot_sheet()
             try:
                 # Ngày ghi dạng chữ dd/MM/yyyy: định dạng đặt SAU khi ghi (trang_tri_bang).
-                TB._noi_luoi(co["tok"], co["sid"], TB._luoi(co["tok"]).get(co["sid"], (0, 0)),
-                             co["dong"] + len(dong), len(cot))
-                TB._ghi(co["tok"], co["sid"],
-                        [[TB._o(v, c.kieu, False) for v, c in zip(r, cot)] for r in dong],
-                        dong_dau=co["dong"] + 1)
+                with TB.ngan_sach_cho():          # chờ 429 có trần, như `xuat`
+                    TB._noi_luoi(co["tok"], co["sid"],
+                                 TB._luoi(co["tok"]).get(co["sid"], (0, 0)),
+                                 co["dong"] + len(dong), len(cot))
+                    TB._ghi(co["tok"], co["sid"],
+                            [[TB._o(v, c.kieu, False) for v, c in zip(r, cot)] for r in dong],
+                            dong_dau=co["dong"] + 1)
             except Exception as e:  # noqa: BLE001
                 # Sheet của lượt VẪN CÒN (đã có brand trước, đã cấp quyền) — trả đúng link,
                 # lỗi chỉ là brand này chưa nối vào được.
@@ -340,7 +342,8 @@ def _ghi_sheet(title: str, ads: list[dict], nhan: str, platform: str, country: s
             co["dong"] += len(dong)
             co["rows"] += dong
             co["notes"].append(note)
-            kiem = _sau_khi_noi(co, title, ngay)
+            with TB.ngan_sach_cho():              # trang trí + ghi lại Tổng quan
+                kiem = _sau_khi_noi(co, title, ngay)
             return co["url"], co["granted"], None, True, kiem
         try:
             rows = _dong_sheet(ads, nhan, platform, country, active_status, ngay)
