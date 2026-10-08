@@ -101,7 +101,7 @@ def test_deep_dive_tra_loi_cua_brand_o_sheet_nhung_khong_tinh(moi_truong):  # no
     assert tk["sac_thai"][TC]["so"] == 1 and tk["sac_thai"][TC]["ti_le"] == 50.0
     assert "1 phản hồi của chính thương hiệu (không tính)" in kq["dong_thong_ke"]
     assert "KHÔNG tính vào số/%" in kq["note"]
-    bang = next(rows for x in ghi_tab if isinstance(x, tuple) for rows in [x[1]])
+    bang = list(ghi_tab)                        # tab "Thống kê" của sheet (Lark giả)
     assert ["1 phản hồi của chính thương hiệu (không tính)", "", "", "", ""] in bang
 
 

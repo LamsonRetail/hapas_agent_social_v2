@@ -85,8 +85,8 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
   - Ra: khoảng giá phổ biến, sản phẩm đầu bảng, nhiều đánh giá nhất, shop nổi bật.
     Sản phẩm lạc đề đã được đánh dấu. Chế độ này không có số đã bán
 - Theo link (Shopee hoặc TikTok Shop): soi đúng MỘT sản phẩm. Ví dụ "/shop <link>"
-  - Ra Sheet bốn tab: Tổng quan (giá, đã bán, điểm, phân bố sao), Phân loại (từng màu,
-    size, giá, tồn kho), Mô tả, Bình luận (đã bỏ bình luận trống và trùng)
+  - Ra Sheet: tab Tổng quan rồi Sản phẩm (giá, đã bán, điểm, phân bố sao), Phân loại
+    (từng màu, size, giá, tồn kho), Mô tả, Bình luận (đã bỏ bình luận trống và trùng)
   - Chỉ đánh giá sản phẩm đó. Muốn số liệu cả shop thì nói thêm "xem cả shop"
   - TikTok Shop chỉ cho đọc vài bình luận mỗi sản phẩm, nhưng phân bố sao là đủ
   - Shopee hay chặn đọc bình luận và mô tả. Gặp thì báo thẳng, số đã bán và giá vẫn có

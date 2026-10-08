@@ -112,9 +112,8 @@ def trend(monkeypatch):
     monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (800, 2.4, True))
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
     monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: {})
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_write_values", lambda *a, **k: None)
+    from sheet_gia import LarkGia
+    monkeypatch.setattr(A.lark, "call", LarkGia().call)       # Sheet: Lark giả, không mạng
     monkeypatch.setattr(T.memory_store, "get_current_sender", lambda: None)
     return goi
 

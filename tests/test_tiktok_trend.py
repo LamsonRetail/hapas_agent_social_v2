@@ -14,6 +14,7 @@ import pytest
 
 import apify_tool as A
 import tiktok_trend as T
+from sheet_gia import LarkGia
 
 GIO = datetime.datetime.now(datetime.timezone.utc)
 
@@ -79,12 +80,11 @@ def gia(monkeypatch):
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: {
         "usd": 0.41, "so_run": 3, "cham_tran": 0, "dang_chay": 0})
     monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: {})
-    dong = []
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows: dong.extend(rows))
+    # Lark giả (tests/sheet_gia.py) ghi lại bảng tính trinh_bay_sheet dựng.
+    lark = LarkGia()
+    monkeypatch.setattr(A.lark, "call", lark.call)
     monkeypatch.setattr(T.memory_store, "get_current_sender", lambda: None)
-    return goi, dong
+    return goi, lark
 
 
 def test_handle_chuyen_sang_che_do_trend_khong_can_tu_khoa(gia):
@@ -172,12 +172,16 @@ def test_vung_la_thi_bao_ro(gia):
 
 
 def test_sheet_co_du_bon_loai_dong(gia):
-    _, dong = gia
+    """Mỗi loại một bảng riêng (trước: dồn chung một bảng, cột "Loại"). Hiệu ứng chỉ 1 dòng
+    nên gấp vào Tổng quan; các loại còn lại mỗi loại một tab đánh số."""
+    _, lark = gia
     kq = json.loads(T.chay({}))
-    loai = {r[0] for r in dong[1:]}
-    assert loai == {"Hashtag", "Video", "Nhạc dùng lại (suy từ mẫu)", "Hiệu ứng (suy từ mẫu)",
-                    "Nhạc đang lên (bảng Creative Center)"}
-    assert kq["sheet_url"] == "https://sheet"
+    assert lark.tab_ten() == ["Tổng quan", "1. Hashtag đang nổi", "2. Top video",
+                              "3. Nhạc đang lên", "4. Âm thanh suy từ mẫu", "Dữ liệu gốc"]
+    tq = [r[0] for r in lark.o("Tổng quan")]
+    assert "HIỆU ỨNG SUY TỪ MẪU" in tq
+    assert lark.o("4. Âm thanh suy từ mẫu")[1][3] == "Nhạc (bài hát) dùng lại"
+    assert kq["sheet_url"] == "https://x.larksuite.com/sheets/sht1"
 
 
 def test_lay_du_thi_khong_bao_cham_tran(gia, monkeypatch):
@@ -513,13 +517,13 @@ def test_moi_loi_goi_call_trong_trend_deu_kem_nen_tang_tiktok():
 
 
 def test_chi_uoc_tinh_bao_usd_va_tran_truoc_khi_hoi(gia, monkeypatch):
-    goi, dong = gia
+    goi, lark = gia
     monkeypatch.setattr(A, "_han_muc_thang", lambda: {"con_lai": 3.0})
     ghi = []
     monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: ghi.append(k) or {})
     kq = json.loads(A._handle({"che_do": "trend", "chi_uoc_tinh": True}))
     assert kq["chi_uoc_tinh"] is True and kq["da_chay"] is False
-    assert not goi and not dong and not ghi, "ước tính không chạy, không ghi sheet/sổ"
+    assert not goi and not lark.bt and not ghi, "ước tính không chạy, không ghi sheet/sổ"
     assert kq["tran_usd_tiktok"] == 2.4 and kq["uoc_tinh_chi_phi_usd"] <= 2.4
     assert "USD" in kq["cau_uoc_tinh"] and "trần TikTok trên console là 2,4 USD" in kq[
         "cau_uoc_tinh"]

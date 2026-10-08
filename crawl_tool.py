@@ -35,9 +35,10 @@ import re
 import subprocess
 from pathlib import Path
 
-import lark_client as lark
+import lark_client as lark  # noqa: F401 — giữ tên cũ (bộ thử/patch cũ gọi crawl_tool.lark)
 import memory_store
-from apify_tool import _bang_an_toan, _create_sheet, _first_sheet_id, _grant
+import trinh_bay_sheet as T
+from apify_tool import _bang_an_toan, _create_sheet, _first_sheet_id, _grant  # noqa: F401
 from cli_support import env_tien_trinh_con
 from config import config
 from web_tool import _DA_BIET_CHAN, _PY
@@ -58,6 +59,31 @@ _COT = ["Tên sản phẩm", "Giá bán", "Giá gốc", "Giảm %", "SKU", "Link
 # Tầng ĐOÁN THEO MẪU GIÁ (khác tầng dữ liệu có cấu trúc). `sitemap_dm` cũng
 # dùng chính bộ bóc đó, chỉ khác là chạy trên nhiều trang danh mục.
 _TANG_DOAN = ("html_gia", "browser", "sitemap_dm")
+# Khoá của một sản phẩm runner trả (`crawl_runner._sp`) — đều đã lên sheet. Khoá khác (hoặc
+# `__goc` của adapter Apify) thì thêm tab "Dữ liệu gốc" để không mất trường nào.
+_KHOA_SP = {"ten", "gia", "gia_goc", "link", "anh", "anh_tat_ca", "so_anh", "sku"}
+
+
+def _tien_te(dom: str, url: str, sp: list) -> str | None:
+    """Đơn vị giá: `currency` của bản ghi adapter nếu có và thống nhất; web .vn (hoặc đường
+    dẫn /vn/) là VND (bộ bóc theo mẫu giá chỉ nhận ₫/đ/VND); còn lại None = không chắc."""
+    cur = {str((p.get("__goc") or {}).get("currency") or "").strip().upper() for p in sp
+           if isinstance(p.get("__goc"), dict)} - {""}
+    if cur:
+        return cur.pop() if len(cur) == 1 else None
+    if dom.lower().endswith(".vn") or re.search(r"/vn(?:/|$)", url.lower()):
+        return "VND"
+    return None
+
+
+def _cot(tien_te: str | None) -> list:
+    """Cột sheet sản phẩm. Giá VND → tiền ₫; đơn vị khác/không chắc → số nguyên (bộ bóc giá
+    `_so` trả số nguyên, bỏ phần lẻ) — không gán ký hiệu tiền khi không chắc."""
+    gia = ("tien", "VND") if tien_te == "VND" else ("so_nguyen", None)
+    return [T.Cot("Tên sản phẩm"), T.Cot("Giá bán", gia[0], gia[1]),
+            T.Cot("Giá gốc", gia[0], gia[1]), T.Cot("Giảm %", "phan_tram_100"),
+            T.Cot("SKU", "ma"), T.Cot("Link", "link"), T.Cot("Ảnh", "link"),
+            T.Cot("Số ảnh", "so_nguyen"), T.Cot("Tất cả ảnh", "chu_dai"), T.Cot("Nguồn")]
 
 
 SCHEMA = {
@@ -199,39 +225,20 @@ def _handle(args: dict, **kwargs) -> str:
                     if d.get("nghi_ngo") else ""))
 
     dom = re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
-    rows = [list(_COT)]
+    rows = []
     for p in sp:
         gia, goc = p.get("gia"), p.get("gia_goc")
-        giam = f"{round((goc - gia) / goc * 100)}%" if (gia and goc and goc > gia) else ""
+        # Giảm % do tool tính (số ĐÃ nhân 100, làm tròn) → định dạng "23.00%".
+        giam = round((goc - gia) / goc * 100) if (gia and goc and goc > gia) else ""
         ds = p.get("anh_tat_ca") or ([p["anh"]] if p.get("anh") else [])
         rows.append([p.get("ten", ""), gia or "", goc or "", giam,
                      p.get("sku", ""), p.get("link", ""), p.get("anh", ""),
                      len(ds), "\n".join(ds), dom])
+    rows = _bang_an_toan(rows)            # tên/mô tả sản phẩm từ web: chặn chèn công thức
 
     title = (args.get("title") or "").strip() or \
         f"Sản phẩm · {dom} · {datetime.datetime.now():%d-%m %H%M}"
-    try:
-        tok, sheet_url = _create_sheet(title)
-        sid = _first_sheet_id(tok)
-        col = chr(ord("A") + len(_COT) - 1)
-        rows = _bang_an_toan(rows)            # tên/mô tả sản phẩm từ web: chặn chèn công thức
-        for i in range(0, len(rows), 1000):
-            ch = rows[i:i + 1000]
-            lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{tok}/values_batch_update",
-                      body={"valueRanges": [{"range": f"{sid}!A{i+1}:{col}{i+len(ch)}",
-                                             "values": ch}]})
-    except Exception as e:  # noqa: BLE001
-        return tool_result(
-            success=False, url=url, tang=d.get("tang"), so_san_pham=len(sp),
-            sheet_url=None, nhat_ky=d.get("nhat_ky") or [],
-            error=f"Cào được {len(sp)} sản phẩm nhưng GHI SHEET THẤT BẠI: "
-                  f"{type(e).__name__}: {e}",
-            mau=[{"ten": p["ten"], "gia": p["gia"]} for p in sp[:5]])
-
-    sender = memory_store.get_current_sender()
-    granted = _grant(tok, sender) if sender else False
     cham_tran = len(sp) >= n
-
     tang = d.get("tang") or ""
     doan = [t for t in _TANG_DOAN if t in tang]
     het_ns, chan = bool(d.get("het_ngan_sach")), int(d.get("bi_chan_toc_do") or 0)
@@ -242,12 +249,66 @@ def _handle(args: dict, **kwargs) -> str:
         d["tong_so_anh"] = sum(p.get("so_anh", 0) for p in sp)
     thieu_anh = len(sp) - int(d.get("so_co_anh") or 0)
 
+    tien_te = _tien_te(dom, url, sp)
+    bang = T.Bang("Sản phẩm", _cot(tien_te), rows,
+                  mo_ta=f"Mỗi sản phẩm một dòng (cào từ {dom}, tầng {tang})")
+    goc_ds = [p.get("__goc") if isinstance(p.get("__goc"), dict)
+              else {k: v for k, v in p.items() if k != "__goc"} for p in sp]
+    can_goc = any(isinstance(p.get("__goc"), dict) or set(p) - _KHOA_SP - {"__goc"}
+                  for p in sp)
+    tq = T.TongQuan(
+        tieu_de=title, nguon="web_crawl — tầng " + (tang or "?")
+        + (f" · adapter {adapter.get('adapter')} (Apify)" if adapter else ""),
+        pham_vi=f"{url} · tối đa {n} sản phẩm",
+        top=T.top_theo(bang, "Giảm %", 5, ["Tên sản phẩm", "Giá bán", "Giá gốc", "Giảm %",
+                                            "Link"], "Top 5 giảm giá sâu nhất"),
+        ghi_chu=[g for g in [
+            "Giá: " + ("đồng (VND)." if tien_te == "VND" else
+                       f"đơn vị {tien_te} theo nguồn." if tien_te else
+                       "đơn vị tiền theo web (không xác định chắc nên để số trơn).")
+            + " Bộ bóc giá trả số nguyên (bỏ phần lẻ); ô trống = web không ghi giá đó.",
+            "Giảm % = (giá gốc − giá bán) / giá gốc, làm tròn số nguyên, do tool tính.",
+            (f"LƯU Ý: một phần lấy bằng tầng {'/'.join(doan)} (đoán theo mẫu giá) nên số liệu "
+             "có thể lệch — đối chiếu vài sản phẩm với web.") if doan else "",
+            (f"CHẠM TRẦN {n} sản phẩm: đây mới là MẪU, chưa phải toàn bộ catalog (chưa biết "
+             f"còn bao nhiêu sản phẩm) — muốn đủ thì cào lại với max_products cao hơn "
+             f"(tối đa 1000).") if cham_tran else "",
+            (f"HẾT NGÂN SÁCH {d.get('ngan_sach_s')}s trước khi quét xong: kết quả MỘT PHẦN, "
+             "chưa phải toàn bộ catalog.") if het_ns else "",
+            (f"Site chặn tốc độ {chan} lần — sản phẩm thiếu ảnh có thể do BỊ CHẶN, không phải "
+             "không có ảnh.") if chan else "",
+            f"{thieu_anh} sản phẩm không lấy được ảnh." if thieu_anh else "",
+            "'Tất cả ảnh': tối đa 20 ảnh mỗi sản phẩm (giới hạn bộ cào), mỗi ảnh một dòng "
+            "trong ô; tên sản phẩm cắt ở 250 ký tự.",
+            (f"Adapter CÓ TÍNH TIỀN: {adapter.get('adapter')}, ước tính "
+             f"{adapter.get('uoc_tinh_chi_phi_usd')} USD.") if adapter else "",
+            (adapter or {}).get("ghi_chu") or "",
+        ] if g])
+    sender = memory_store.get_current_sender()
+    cap: dict = {}
+
+    def _cap_quyen(tok: str) -> None:
+        cap["granted"] = _grant(tok, sender) if sender else False
+
+    try:
+        kq = T.xuat(title, [bang], tq, goc=T.bang_goc(goc_ds) if can_goc else None,
+                    cap_quyen=_cap_quyen)
+    except Exception as e:  # noqa: BLE001
+        return tool_result(
+            success=False, url=url, tang=d.get("tang"), so_san_pham=len(sp),
+            sheet_url=None, nhat_ky=d.get("nhat_ky") or [],
+            error=f"Cào được {len(sp)} sản phẩm nhưng GHI SHEET THẤT BẠI: "
+                  f"{type(e).__name__}: {e}",
+            mau=[{"ten": p["ten"], "gia": p["gia"]} for p in sp[:5]])
+    sheet_url = kq.url
+    granted = bool(cap.get("granted"))
+
     return tool_result(
         success=True, url=url, tang=tang, so_san_pham=len(sp),
         so_co_anh=d.get("so_co_anh"), tong_so_anh=d.get("tong_so_anh"),
         het_ngan_sach=het_ns, bi_chan_toc_do=chan,
         cham_tran=cham_tran, title=title, sheet_url=sheet_url, granted=granted,
-        nhat_ky=d.get("nhat_ky") or [],
+        nhat_ky=d.get("nhat_ky") or [], **kq.cho_tool(),
         # Adapter là tầng CÓ TÍNH TIỀN -> phải báo ra, không được im lặng.
         qua_adapter=(adapter or {}).get("adapter"),
         actor_da_dung=(adapter or {}).get("actor_da_dung"),
@@ -255,8 +316,13 @@ def _handle(args: dict, **kwargs) -> str:
         adapter_ghi_chu=(adapter or {}).get("ghi_chu"),
         mau=[{"ten": p["ten"], "gia": p["gia"], "gia_goc": p["gia_goc"],
               "so_anh": p.get("so_anh", 0)} for p in sp[:8]],
-        note=(f"Đã ghi ĐỦ {len(sp)} sản phẩm vào sheet '{title}' "
-              f"({d.get('tong_so_anh')} ảnh). GỬI `sheet_url`."
+        note=(f"Đã ghi {'ĐỦ ' if kq.day_du else ''}{len(sp)} sản phẩm vào sheet '{title}' "
+              f"({d.get('tong_so_anh')} ảnh): tab '{T.TAB_TONG_QUAN}' rồi tab "
+              f"'{kq.tabs[0].ten if kq.tabs else T.TAB_DU_LIEU}'. Kiểm ghi: {kq.cau_kiem} "
+              + ("" if kq.day_du is not False else
+                 "CẢNH BÁO GHI THIẾU: sheet CHƯA đủ dòng như `kiem_ghi` nói — báo rõ, đừng nói "
+                 "là đủ. ")
+              + "GỬI `sheet_url` kèm NGUYÊN câu `kiem_ghi`."
               + (f" CHẠM TRẦN {n} — đây mới là MẪU, chưa phải toàn bộ catalog; muốn đủ "
                  f"thì tăng `max_products`." if cham_tran else "")
               # html_gia và sitemap_dm dùng CHÍNH bộ đoán-theo-mẫu của tầng browser,

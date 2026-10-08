@@ -16,6 +16,7 @@ import pytest
 
 import apify_tool as A
 import deep_dive_tool as D
+from sheet_gia import LarkGia
 
 GOC = pathlib.Path(A.__file__).resolve().parent
 NOI_GOI = ["deep_dive_tool.py", "account_tool.py", "shopee_tool.py", "tiktok_trend.py",
@@ -62,8 +63,7 @@ def _khong_cham_mang(monkeypatch):
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
     monkeypatch.setattr(D.chi_phi_tool, "ghi", lambda **k: {})
     monkeypatch.setattr(D.phan_loai, "_goi_model", lambda nhac: "{}")
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: "s2")
-    monkeypatch.setattr(A, "_write_values", lambda *a, **k: None)
+    monkeypatch.setattr(A.lark, "call", LarkGia().call)      # Lark giả (sheet_gia)
     monkeypatch.setattr(D, "_cau_hinh", lambda: (300, 0.5))
 
 
@@ -97,9 +97,6 @@ def apify_gia(monkeypatch):
     monkeypatch.setattr(A, "_tran", lambda: (500, 0.37))
     monkeypatch.setattr(D, "_cau_hinh", lambda: (300, 0.5))
     monkeypatch.setattr(A.requests, "post", post)
-    monkeypatch.setattr(D, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(D, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(D, "_write", lambda tok, sid, values: None)
     monkeypatch.setattr(D, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(D.memory_store, "get_current_sender", lambda: "ou_test")
     return goi

@@ -109,7 +109,7 @@ def test_cot_sac_thai_va_thong_ke_tren_sheet_chinh(quet):
     assert tk["sac_thai"][TI]["so"] == 1 and tk["sac_thai"][TL]["so"] == 0
     assert set(tk["theo_nen_tang"]) == {"threads"} and "theo_bai" not in tk
     assert kq["dong_thong_ke"].startswith("Đã phân loại 2/2 bài: Tích cực 1 (50,0%)")
-    assert kq["thong_ke_ghi_o"] == "tab 'Thống kê'"
+    assert kq["thong_ke_ghi_o"] == "tab '3. Thống kê'"
     assert [x["text"][:12] for x in kq["trich_dan"][TC]] == ["Mới mua túi "]
     assert kq["dong_thong_ke"] in kq["note"] and "không tự đếm" in kq["note"]
     bang = [r for s, rows in ghi if s == "s4" for r in rows]
@@ -117,9 +117,14 @@ def test_cot_sac_thai_va_thong_ke_tren_sheet_chinh(quet):
     assert bang[1][0] == "TỔNG: đã phân loại 2/2 bài (0 chưa phân loại)"
     assert ["Tổng", TC, 1, 50.0, ""] in bang
     assert any(r[0] == "Nền tảng: Threads" and r[1] == TI for r in bang)
-    assert any(r[1] == TC and "Mới mua túi" in str(r[3]) for r in bang), "có trích dẫn"
+    # Bảng trích dẫn tí hon (≤5 dòng) gấp vào tab Tổng quan thành một khối.
+    tq = chay.gia.o("Tổng quan")
+    i = next(k for k, r in enumerate(tq) if r[0] == "TRÍCH DẪN")
+    assert any(r[0] == TC and "Mới mua túi" in str(r[2]) for r in tq[i + 2:]), "có trích dẫn"
     assert all(len(r) == 5 for r in bang)
-    assert ("tok", "s1") in chay.dua, "tab chính kéo về đầu"
+    ten = chay.gia.tab_ten()
+    assert ten[:5] == ["Tổng quan", "1. Bài đăng", "2. Thị trường khác", "3. Thống kê",
+                       "4. Bị loại"], "Tổng quan đầu, bài chính kế tiếp"
 
 
 def test_bai_ai_khong_doc_la_chua_phan_loai_va_khong_tao_tab(quet):

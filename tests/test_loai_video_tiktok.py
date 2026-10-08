@@ -15,6 +15,7 @@ import json
 import pytest
 
 import apify_tool as A
+from sheet_gia import LarkGia
 import quet_lon
 import sheet_lon
 
@@ -91,17 +92,16 @@ THREADS = {"kenh": "Ngọc Trâm", "followers": 0, "views": 9, "likes": 0, "comm
 
 @pytest.fixture
 def quet(monkeypatch):
-    ghi = []
     monkeypatch.setenv("SOCIAL_AI_PHAN_XU", "0")
     du_lieu = {"raw": RAW}
     monkeypatch.setitem(A._FETCH, "tiktok",
                         lambda *a: A._chuan_tiktok(A._chuan_clockworks(du_lieu["raw"])))
     monkeypatch.setitem(A._FETCH, "threads", lambda *a: [(dict(THREADS), NOW)])
     monkeypatch.setattr(A, "_tran", lambda: (500, 1.0))
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows, **k: ghi.append((sid, rows)))
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: {A._TAB_BI_LOAI: "s2"}.get(ten, "s3"))
+    gia = LarkGia(url="https://sheet")           # Lark giả (tests/sheet_gia.py)
+    monkeypatch.setattr(A.lark, "call", gia.call)
+    ghi = gia.ghi_cu({A.TAB_BAI_DANG: "s1", "Dữ liệu": "s1", A._TAB_BI_LOAI: "s2",
+                      A._TAB_THI_TRUONG_KHAC: "s3"})
     monkeypatch.setattr(A, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(A.memory_store, "get_current_sender", lambda: "ou_test")
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
@@ -189,9 +189,19 @@ def test_quet_nen_cung_cot_va_cau(monkeypatch):
         def bat_dau_giai_doan(self, *a):
             pass
 
-        def ghi_tab(self, ten, bang, tu_dau=False):
+        def ghi_tab(self, ten, bang, tu_dau=False, cot=None, mo_ta=""):
             tabs[ten] = bang
             return len(bang)
+
+        def kiem_ghi(self, bo_qua=()):
+            return {"day_du": None, "cau": "chưa kiểm (giả)", "tabs": []}
+
+        def ghi_tong_quan(self, ten, tq, kiem=None, bo_qua=()):
+            import trinh_bay_sheet as T
+            tabs[ten] = T.dung_tong_quan(tq, [], [], kiem)[0]
+
+        def sap_tab(self, thu_tu):
+            pass
     monkeypatch.setattr(sheet_lon, "SoSheet", SoGia)
 
     class V:
@@ -218,7 +228,7 @@ def test_quet_nen_cung_cot_va_cau(monkeypatch):
     cau = ("TikTok: 3 bài trong các tab — 1 video affiliate (có gắn giỏ hàng TikTok Shop), "
            "1 video viral (không gắn giỏ), 1 bài chưa rõ (nguồn không báo giỏ hàng); lọc "
            "theo cột 'Loại video TikTok'.")
-    assert [A._COT_LOAI_VIDEO, cau] in tabs[quet_lon._TAB_TONG]
+    assert [A._COT_LOAI_VIDEO, cau] in [r[:2] for r in tabs[quet_lon._TAB_TONG]]
     tin = quet_lon._tin_nhan(V(), ts, ket, {"usd": 0.1, "so_run": 1}, "https://sheet",
                              "xong", [])
     assert cau in tin

@@ -17,6 +17,8 @@ import apify_tool as A
 import kenh_nha_meta as M
 import kenh_nha_tool as K
 import lsr_policy
+from sheet_gia import LarkGia
+from test_binh_luan_phan_tich import TabGia
 
 # Giá trị giả đủ dài để lộ ra là thấy ngay; KHÔNG phải token thật.
 TOK_TH = "THAAfakeThreadsShortToken0123456789abcdef"
@@ -70,12 +72,10 @@ def mang(monkeypatch):
 
 @pytest.fixture
 def sheet(monkeypatch):
-    """Giả Lark Sheet ở tầng `lark.call` — bộ chặn công thức thật vẫn chạy."""
-    ghi: list = []
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet/x"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: "tab-" + ten)
-    monkeypatch.setattr(A.lark, "call", lambda *a, **k: ghi.append(k.get("body")) or {})
+    """Lark Sheet giả (`sheet_gia.LarkGia`) ở tầng `lark.call` — trinh_bay_sheet và bộ chặn
+    công thức thật vẫn chạy."""
+    ghi = LarkGia()
+    monkeypatch.setattr(A.lark, "call", ghi.call)
     monkeypatch.setattr(K.memory_store, "get_current_sender", lambda: None)
 
     def nhan(rows, han, tt):
@@ -86,13 +86,10 @@ def sheet(monkeypatch):
     return ghi
 
 
-def _bang(ghi, tab: str) -> list[list]:
-    ra = []
-    for b in ghi:
-        for vr in (b or {}).get("valueRanges", []):
-            if vr["range"].startswith(tab + "!"):
-                ra += vr["values"]
-    return ra
+def _bang(ghi: LarkGia, tab: str) -> list[list]:
+    """Lưới ô của tab dữ liệu tên `tab` ("Bình luận", "Thống kê", "Bài đã đọc"; tab thật
+    có thể đánh số "2. Thống kê")."""
+    return list(TabGia(ghi, tab))
 
 
 def chay(**args) -> dict:
@@ -176,14 +173,14 @@ def test_threads_conversation_tra_loi_long_nhau_va_tra_loi_cua_kenh(env, mang, s
     _so_dai_han("threads", TOK_TH_DAI, TOK_TH_DAI, 50 * M.NGAY, 2 * M.NGAY)
     _threads(mang)
     kq = chay(kenh=["threads"], so_bai=3)
-    assert kq["success"] and kq["sheet_url"] == "https://sheet/x"
+    assert kq["success"] and kq["sheet_url"].startswith("https://x.larksuite.com/sheets/")
     url, p = next(g for g in mang.goi if "conversation" in g[0])
     assert url.startswith("https://graph.threads.net/v1.0/P1/conversation")
     assert {"text", "username", "timestamp", "replied_to", "root_post"} <= set(p["fields"].split(","))
     assert kq["tong_comment"] == 4 and kq["tra_loi_cua_kenh_nha"] == 1
     # bài đăng lại của người khác không phải bài kênh
     assert len(kq["per_bai"]) == 1
-    rows = _bang(sheet, "s1")
+    rows = _bang(sheet, "Bình luận")
     assert rows[0] == K._HEADER and "Sắc thái" in rows[0] and "Chủ đề" in rows[0]
     by_text = {r[2].lstrip("'"): r for r in rows[1:]}
     assert by_text["Đẹp quá"][10] == "bình luận" and by_text["Đẹp quá"][6] == 1
@@ -207,11 +204,11 @@ def test_bo_chan_cong_thuc_va_tab_thong_ke(env, mang, sheet):
     _so_dai_han("threads", TOK_TH_DAI, TOK_TH_DAI, 50 * M.NGAY, 2 * M.NGAY)
     _threads(mang)
     chay(kenh="threads")
-    o = [r[2] for r in _bang(sheet, "s1")[1:]]
+    o = [r[2] for r in _bang(sheet, "Bình luận")[1:]]
     assert any(x.startswith("'=HYPERLINK") for x in o), "ô '=' phải bị vô hiệu hoá"
-    tk = _bang(sheet, "tab-Thống kê")
+    tk = _bang(sheet, "Thống kê")
     assert tk and tk[0][3].startswith("Tỉ lệ %")
-    bai = _bang(sheet, "tab-" + K._TAB_BAI)
+    bai = _bang(sheet, K._TAB_BAI)
     assert bai[0] == K._HEADER_BAI and bai[1][4] == 4
 
 
@@ -229,7 +226,7 @@ def test_instagram_phan_trang_va_doc_them_tra_loi(env, mang, sheet):
     assert all("access_token=" not in u for u, _ in mang.goi)
     p = next(p for u, p in mang.goi if u.endswith("M1/comments"))
     assert "replies{" in p["fields"] and "like_count" in p["fields"]
-    rows = {r[2]: r for r in _bang(sheet, "s1")[1:]}
+    rows = {r[2]: r for r in _bang(sheet, "Bình luận")[1:]}
     assert set(rows) == {"Xinh", "đồng ý", "Cảm ơn bạn", "Chất da xấu"}
     assert rows["đồng ý"][11] == "a" and rows["Xinh"][5] == 3
     assert rows["Cảm ơn bạn"][3] == K._KENH_NHA
@@ -245,7 +242,7 @@ def test_facebook_stream_phan_trang_va_parent(env, mang, sheet):
     p = next(p for u, p in mang.goi if u.endswith("111_9/comments"))
     assert p["filter"] == "stream" and "parent" in p["fields"]
     assert mang.goi[0][0].startswith("https://graph.facebook.com/v26.0/")
-    rows = {r[2]: r for r in _bang(sheet, "s1")[1:]}
+    rows = {r[2]: r for r in _bang(sheet, "Bình luận")[1:]}
     assert rows["Dạ còn ạ"][3] == K._KENH_NHA and rows["Dạ còn ạ"][11] == "Lan"
     assert rows["Ship chậm, xấu"][10] == "trả lời cấp 3"
     assert kq["per_bai"][0]["nen_tang_bao"] == 3 and kq["per_bai"][0]["binh_luan"] == 3

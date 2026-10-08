@@ -47,6 +47,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 import apify_tool as A
+import trinh_bay_sheet as T
 
 ACTOR_DG_SHOPEE = "zen-studio~shopee-product-reviews-scraper"
 ACTOR_TIM_SHOPEE = "zen-studio~shopee-product-scraper"
@@ -150,6 +151,7 @@ def _danh_gia_shopee(links: list[dict], n: int, sao: str = "all") -> dict[str, l
             "mua_lai": bool(r.get("isRepeatPurchase")), "da_mua_that": True,
             "shop_tra_loi": bool(tra_loi.get("comment") if isinstance(tra_loi, dict) else tra_loi),
             "co_anh": bool(r.get("images")),
+            "__goc": r,           # bản ghi gốc → tab "Dữ liệu gốc" (không vào tool_result)
         })
     return ra
 
@@ -201,7 +203,7 @@ def _gia_shopee(x: dict) -> dict | None:
             "ngay_bat_dau_ban": str(it.get("createdAt") or "")[:10] or None,
             "shop": it.get("shopName"), "shopee_mall": bool(it.get("isOfficialShop")),
             "shop_da_xac_minh": bool(it.get("isVerifiedSeller")),
-            "noi_gui": it.get("shopLocation")}
+            "noi_gui": it.get("shopLocation"), "__goc": it}
 
 
 def _chi_tiet_shopee(x: dict) -> dict | None:
@@ -218,7 +220,7 @@ def _chi_tiet_shopee(x: dict) -> dict | None:
           "shop_so_san_pham": _so(sh.get("item_count")) or None,
           "shop_diem": round(_so(sh.get("rating_star"), float), 2) or None,
           "shop_xac_minh_shopee": bool(sh.get("is_shopee_verified"))}
-    return {k: v for k, v in ra.items() if v is not None}
+    return {**{k: v for k, v in ra.items() if v is not None}, "__goc": it}
 
 
 def _giao_hang(s) -> str | None:
@@ -266,6 +268,7 @@ def _tiktok_shop(links: list[dict], n: int) -> list[dict]:
         sao = ((p.get("ratingsBreakdown") or {}).get("stars") or {})
         ra.append({
             "product_id": str(p.get("productId")),
+            "__goc": p,           # cả sản phẩm (kèm đánh giá lồng) → tab "Dữ liệu gốc"
             "thong_tin": {
                 "ten": p.get("title"), "gia": _so(p.get("currentPrice")),
                 "gia_cao_nhat": _so(p.get("maxPrice")) or None,
@@ -333,8 +336,11 @@ def tong_hop_danh_gia(dg: list[dict], san: str) -> dict:
     return ra
 
 
-# Sheet 4 tab — chủ agent muốn PHỦ MỌI KHÍA CẠNH của sản phẩm (28/09): tổng quan, từng phân
+# Sheet 4 bảng — chủ agent muốn PHỦ MỌI KHÍA CẠNH của sản phẩm (28/09): sản phẩm, từng phân
 # loại, mô tả, bình luận. Cột bình luận gọi là "Bình luận", không phải "Nội dung".
+# 08/10/2026 (trinh_bay_sheet): tab đầu "Tổng quan" do lớp trình bày dựng (mục lục, kiểm ghi,
+# ghi chú) nên bảng tổng hợp từng sản phẩm đổi tên thành "Sản phẩm" (tên biến giữ nguyên).
+TEN_TAB_SAN_PHAM = "Sản phẩm"
 TAB_TONG_QUAN = ["Sàn", "Sản phẩm", "Danh mục", "Giá từ", "Giá đến", "Giá gốc", "Giảm",
                  "Flash sale", "Đã bán", "Điểm", "Tổng đánh giá", "5★", "4★", "3★", "2★", "1★",
                  "Số phân loại", "Giao hàng", "Shop", "Shop follower", "Shop đã bán",
@@ -457,14 +463,21 @@ def soi(links_vao: list[str], so_danh_gia: int, gom_shop: bool = False) -> dict:
 
     san_pham = []
     tq, pl_rows, mt_rows, bl_rows = [], [], [], []
+    goc: list[dict] = []          # bản ghi nguồn nguyên vẹn (mọi trường) cho "Dữ liệu gốc"
     for x in shopee:
         dg_goc = dg_sp.get(x["item_id"], [])
         dg, loc = loc_binh_luan(dg_goc)
         tt = gia.get(x["item_id"])
         thong_tin = dict(tt or {"ten": x["ten_trong_link"] or None})
-        c = ct.get(x["item_id"])
+        g_tim = thong_tin.pop("__goc", None)
+        c = dict(ct.get(x["item_id"]) or {})
+        g_ct = c.pop("__goc", None)
         if c:
             thong_tin.update(c)
+        ten_g = thong_tin.get("ten") or x["ten_trong_link"]
+        goc += [_ban_ghi_goc(a, ten_g, it) for a, it in
+                [(ACTOR_TIM_SHOPEE, g_tim), (ACTOR_CT_SHOPEE, g_ct)]
+                + [(ACTOR_DG_SHOPEE, d.get("__goc")) for d in dg_goc] if it]
         thieu = [m for m, co in (("số đã bán", "da_ban" in thong_tin), ("mô tả", False),
                                  ("giá sau voucher", False), ("phí ship", False),
                                  ("voucher shop", False), ("tồn kho", False)) if not co]
@@ -495,6 +508,8 @@ def soi(links_vao: list[str], so_danh_gia: int, gom_shop: bool = False) -> dict:
                                                "đã gỡ, hoặc không bán ở Việt Nam)."})
             continue
         dg, loc = loc_binh_luan(p["danh_gia"])
+        if p.get("__goc"):
+            goc.append(_ban_ghi_goc(ACTOR_TTS, p["thong_tin"].get("ten"), p["__goc"]))
         bl = tong_hop_danh_gia(dg, "tiktok_shop")
         tong = p["thong_tin"].get("tong_danh_gia") or 0
         if tong > bl["so_danh_gia_da_doc"]:
@@ -531,36 +546,128 @@ def soi(links_vao: list[str], so_danh_gia: int, gom_shop: bool = False) -> dict:
         for sp in san_pham:
             if sp.get("thong_tin"):
                 sp["thong_tin"] = _bo_shop(sp["thong_tin"])
-    tabs = [("Tổng quan", [tieu_de_tq] + tq),
-            ("Phân loại", [TAB_PHAN_LOAI] + pl_rows),
-            ("Mô tả", [TAB_MO_TA] + mt_rows),
-            ("Bình luận", [HEADER] + bl_rows)]
+    tabs = DanhSachTab([(TEN_TAB_SAN_PHAM, [tieu_de_tq] + tq),
+                        ("Phân loại", [TAB_PHAN_LOAI] + pl_rows),
+                        ("Mô tả", [TAB_MO_TA] + mt_rows),
+                        ("Bình luận", [HEADER] + bl_rows)])
+    bi_co = (f"Xin {so_danh_gia} bình luận mỗi sản phẩm, lấy {n_sp or n_tt} để nằm trong trần "
+             f"hiện tại ({tran_bai} bài · {tran_usd:g} USD mỗi lượt).") if co else None
+    tabs.goc = goc
+    tabs.ghi_chu = _ghi_chu_sheet(san_pham, shopee, tts, gom_shop, bi_co, loi, khong_nhan)
+    tabs.pham_vi = (f"{len(shopee)} link Shopee, {len(tts)} link TikTok Shop"
+                    + (f" · {len(khong_nhan)} link không nhận ra" if khong_nhan else ""))
     return {"san_pham": san_pham, "tabs": tabs, "dong_sheet": bl_rows, "loi": loi or None,
             "khong_nhan_ra": khong_nhan or None, "actors": actors, "est": est,
             "so_danh_gia_moi_sp": {"shopee": n_sp or None, "tiktok_shop": n_tt or None},
-            "bi_co_theo_tran": (f"Xin {so_danh_gia} bình luận mỗi sản phẩm, lấy "
-                                f"{n_sp or n_tt} để nằm trong trần hiện tại "
-                                f"({tran_bai} bài · {tran_usd:g} USD mỗi lượt).") if co else None,
+            "bi_co_theo_tran": bi_co,
             "nen": sorted({x["san"] for x in nhan})}
 
 
-def ghi_nhieu_tab(title: str, tabs: list[tuple[str, list[list]]]) -> tuple[str, str]:
-    """Tạo MỘT Lark Sheet có nhiều tab, ghi từng tab. Trả (token, url).
+class DanhSachTab(list):
+    """[(tên tab, [tiêu đề] + dòng)] như cũ (shopee_tool đọc `tabs[0][1]`), kèm ngữ cảnh cho
+    sheet: `goc` (bản ghi nguồn), `ghi_chu`, `pham_vi`; sau khi ghi có `ket_qua` (T.KetQua)."""
+    goc: list = []
+    ghi_chu: list = []
+    pham_vi: str = ""
+    ket_qua = None
 
-    Tab đầu là tab sẵn có của file mới (đổi tên), các tab sau thêm bằng sheets_batch_update.
-    """
-    import lark_client as lark
-    tok, url = A._create_sheet(title)
-    sid0 = A._first_sheet_id(tok)
-    yeu_cau = [{"updateSheet": {"properties": {"sheetId": sid0, "title": tabs[0][0]}}}]
-    yeu_cau += [{"addSheet": {"properties": {"title": ten, "index": i}}}
-                for i, (ten, _) in enumerate(tabs[1:], start=1)]
-    d = lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{tok}/sheets_batch_update",
-                  body={"requests": yeu_cau})
-    replies = (d.get("data") or {}).get("replies") or []
-    sids = [sid0] + [((r.get("addSheet") or {}).get("properties") or {}).get("sheetId")
-                     for r in replies[1:]]
-    for (ten, rows), sid in zip(tabs, sids):
-        if sid and rows:
-            A._write_values(tok, sid, rows)
-    return tok, url
+
+def _ban_ghi_goc(actor: str, ten, it: dict) -> dict:
+    return {"Nguồn (actor)": actor, "Sản phẩm (của tool)": ten or "", **it}
+
+
+def _ghi_chu_sheet(san_pham: list, shopee: list, tts: list, gom_shop: bool, bi_co, loi: dict,
+                   khong_nhan: list) -> list:
+    """Cách hiểu số + giới hạn nguồn đã biết (đo 25/09/2026) cho phần Ghi chú của Tổng quan."""
+    g = ["Giá, số đã bán, điểm là số TẠI THỜI ĐIỂM SOI (xem 'Tạo lúc'); tiền là đồng (VND).",
+         "Ô trống = nguồn không trả số đó, KHÔNG phải 0 (vd 'Đã bán' của Shopee khi nguồn chi "
+         "tiết không trả). Cột 'Không lấy được' nói rõ thiếu gì."]
+    if shopee:
+        g.append(f"Shopee: giá lấy qua tìm kiếm (theo tên trong link, trượt thì trong "
+                 f"{_SHOP_TOI_DA} sản phẩm bán chạy của shop) rồi khớp mã sản phẩm; nhiều phân "
+                 "loại thì 'Giá từ'–'Giá đến' là KHOẢNG giá theo phân loại. Cột 'Giảm' = số % "
+                 "(34 = 34%). Mô tả Shopee chưa lấy được (Shopee chặn trang chi tiết); danh sách "
+                 "phân loại tối đa 25.")
+    if tts:
+        g.append("TikTok Shop: giá động theo khuyến mãi (có thể đổi giữa hai lần soi); chỉ đọc "
+                 "được vài bình luận mỗi sản phẩm khi không đăng nhập nên bảng Bình luận KHÔNG "
+                 "phải mẫu đại diện — phân bổ 5★…1★ ở bảng Sản phẩm là của TOÀN BỘ đánh giá. "
+                 "Cột 'Giảm' giữ nguyên chữ nguồn trả ('7%'). Mô tả cắt ở 5.000 ký tự.")
+    g.append("Bình luận rỗng hoặc trùng nội dung đã bỏ ('Bình luận đọc được' → 'Bình luận sau "
+             "lọc'); nội dung mỗi bình luận cắt ở 1.000 ký tự.")
+    if not gom_shop:
+        g.append("Chỉ đánh giá SẢN PHẨM: số liệu của cả shop (follower, đã bán, điểm, số sản "
+                 "phẩm) không đưa vào — hỏi về shop thì soi lại với gom_shop.")
+    if bi_co:
+        g.append(bi_co)
+    for sp in san_pham:
+        if sp.get("chua_lay_duoc_gia"):
+            g.append(f"{sp['san']} {sp['link']}: {sp['chua_lay_duoc_gia']}")
+        if sp.get("khong_doc_duoc"):
+            g.append(f"{sp['san']} {sp['link']}: {sp['khong_doc_duoc']} — không có dòng trong "
+                     "các bảng.")
+        if (sp.get("binh_luan") or {}).get("chi_doc_duoc"):
+            g.append(f"{sp['san']} {sp['link']}: {sp['binh_luan']['chi_doc_duoc']}")
+    for k, v in (loi or {}).items():
+        g.append(f"Lỗi nguồn {k}: {v}")
+    if khong_nhan:
+        g.append("Không nhận ra link sản phẩm: " + ", ".join(khong_nhan))
+    return g
+
+
+# Kiểu cột theo tên tiêu đề (mọi bảng). Giá Shopee (region VN) và TikTok Shop (region vn) là
+# số nguyên đồng → tiền VND. "Giảm" trộn số (Shopee) và chữ "7%" (TikTok) → để chữ.
+_KIEU = {"Giá từ": "tien", "Giá đến": "tien", "Giá gốc": "tien", "Giá": "tien",
+         "Đã bán": "so_nguyen", "Điểm": "thap_phan", "Tổng đánh giá": "so_nguyen",
+         **{f"{k}★": "so_nguyen" for k in range(1, 6)}, "Số phân loại": "so_nguyen",
+         "Shop follower": "so_nguyen", "Shop đã bán": "so_nguyen", "Shop điểm": "thap_phan",
+         "Shop số sản phẩm": "so_nguyen", "Bình luận đọc được": "so_nguyen",
+         "Bình luận sau lọc": "so_nguyen", "Không lấy được": "chu_dai", "Link": "link",
+         "Tồn kho": "so_nguyen", "Mô tả": "chu_dai", "Ngày": "ngay", "Sao": "so_nguyen",
+         "Bình luận": "chu_dai"}
+_MO_TA = {TEN_TAB_SAN_PHAM: "Mỗi sản phẩm một dòng: giá, đã bán, điểm, phân bổ sao, shop",
+          "Phân loại": "Từng phân loại: giá, giá gốc, % giảm, còn hàng, tồn kho",
+          "Mô tả": "Mô tả sản phẩm (TikTok Shop; Shopee chưa lấy được)",
+          "Bình luận": "Bình luận/đánh giá đọc được (đã bỏ rỗng/trùng)"}
+
+
+def _bang_tu_tab(tabs: list) -> list:
+    ra = []
+    for ten, rows in tabs:
+        if not rows:
+            continue
+        cot = [T.Cot(c, _KIEU.get(c, "chu"), tien_te="VND" if _KIEU.get(c) == "tien" else None)
+               for c in rows[0]]
+        # Mô tả dài: luôn tab riêng, không gấp vào Tổng quan dù ít dòng.
+        ra.append(T.Bang(ten, cot, rows[1:], mo_ta=_MO_TA.get(ten, ""), gap_duoc=ten != "Mô tả"))
+    return ra
+
+
+def xuat_soi(title: str, tabs: list, cap_quyen=None) -> "T.KetQua":
+    """Ghi sheet soi sản phẩm qua `trinh_bay_sheet`: Tổng quan (phạm vi, đếm theo sàn/sao,
+    ghi chú nguồn), "1. Sản phẩm", "2. Phân loại", "3. Mô tả", "4. Bình luận", "Dữ liệu gốc".
+    `cap_quyen(tok)` chạy SAU CÙNG (như cũ: cấp quyền sau khi ghi). Lỗi tạo/ghi thì ném."""
+    bang = _bang_tu_tab(tabs)
+    sp = next((x for x in bang if x.ten == TEN_TAB_SAN_PHAM), bang[0] if bang else None)
+    bl = next((x for x in bang if x.ten == "Bình luận"), None)
+    nhom = [T.dem_theo(sp, "Sàn", "Sản phẩm theo sàn")] if sp and sp.dong else []
+    if bl is not None and bl.dong:
+        nhom.append(T.dem_theo(bl, "Sao", "Bình luận theo số sao"))
+    goc = list(getattr(tabs, "goc", None) or [])
+    tq = T.TongQuan(
+        tieu_de=title, nguon="soi_san — soi sản phẩm theo link (Apify: Shopee / TikTok Shop)",
+        thoi_gian="số liệu tại thời điểm soi", pham_vi=getattr(tabs, "pham_vi", "") or
+        f"{len(sp.dong) if sp else 0} sản phẩm", nhom=nhom,
+        ghi_chu=list(getattr(tabs, "ghi_chu", None) or []))
+    kq = T.xuat(title, bang, tq, goc=T.bang_goc(goc) if goc else None, cap_quyen=cap_quyen)
+    if isinstance(tabs, DanhSachTab):
+        tabs.ket_qua = kq
+    return kq
+
+
+def ghi_nhieu_tab(title: str, tabs: list[tuple[str, list[list]]],
+                  cap_quyen=None) -> tuple[str, str]:
+    """Tạo MỘT Lark Sheet nhiều tab (qua `xuat_soi`). Trả (token, url) như cũ; kết quả đủ
+    (kiểm ghi, `cho_tool()`) nằm ở `tabs.ket_qua` khi `tabs` là `DanhSachTab` của `soi`."""
+    kq = xuat_soi(title, tabs, cap_quyen=cap_quyen)
+    return kq.token, kq.url

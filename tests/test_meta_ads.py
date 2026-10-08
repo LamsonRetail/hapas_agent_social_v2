@@ -9,6 +9,7 @@ import pytest
 import memory_store
 import meta_ads_tool as T
 import scheduler
+import trinh_bay_sheet as TB
 
 
 P2P = {"channel": "lark", "chat_type": "p2p", "nguoi_gui": "ou_asker"}
@@ -32,6 +33,14 @@ def response(data, status=200):
 
 def run(**args):
     return json.loads(T._handle({"tai_khoan":"tat_ca", "khoang_ngay":"7_ngay", **args}))
+
+def _kq(url="https://sheet.invalid"):
+    """KetQua giả cho bài thử thay `_private_sheet` (không chạm Lark)."""
+    return TB.KetQua(url, "tok", [url], [], {"day_du": True, "cau": "Đã ghi đủ 1/1 dòng ở 1 tab dữ liệu (đã đọc lại kiểm).", "tabs": []}, [], TB.BAO_CAO)
+
+def _bang(rows=([123],)):
+    return TB.Bang("Số ads", [TB.Cot("Chi tiêu (tiền TK)", "tien", cot_tien_te="Tiền tệ"), TB.Cot("Tiền tệ")],
+                   [list(r) + ["VND"] for r in rows])
 
 @pytest.mark.parametrize("aliases", [["purchase","omni_purchase"], ["omni_purchase","offsite_conversion.fb_pixel_purchase"]])
 def test_overlapping_purchase_aliases_are_not_added(aliases):
@@ -244,15 +253,16 @@ def test_exact_requested_metrics_and_private_recipient(monkeypatch):
             calls.append(params)
             return [{"spend":"100", "action_values":[{"action_type":"purchase","value":"500"}]}],False
     monkeypatch.setattr(T,"MetaClient",Client)
-    monkeypatch.setattr(T,"_private_sheet",lambda title,rows,actor: sheets.append((rows,actor)) or "https://sheet.invalid")
+    monkeypatch.setattr(T,"_private_sheet",lambda title,bang,tq,actor,goc=None: sheets.append((bang,actor)) or _kq())
     result=run(chi_so=["roas"])
     assert result["chi_so"]==["roas"] and result["nguoi_duoc_chia_se"]=="ou_asker"
     # Chỉ xin trường của chỉ số được hỏi + tín hiệu phân phối (hiển thị/chi tiêu) để phân
     # biệt 0 thật với không có số; không xin `actions` khi không hỏi số mua/lead/video.
     assert set(calls[0]["fields"].split(",")) == {"action_values", "spend", "impressions", "account_id",
                                                   "account_name", "date_start", "date_stop"}
-    assert len(sheets[0][0][0])==9 and sheets[0][0][1][-1]==5
+    assert len(sheets[0][0].cot)==9 and sheets[0][0].dong[0][-1]==5
     assert sheets[0][1]=="ou_asker"
+    assert result["link"]=="https://sheet.invalid" and result["day_du"] is True and "Đã ghi đủ" in result["kiem_ghi"]
 
 @pytest.mark.parametrize("breakdown", [["vi_tri"],["tuoi","nen_tang"],["unknown"]])
 def test_invalid_breakdown_before_meta(monkeypatch, breakdown):
@@ -280,27 +290,47 @@ def test_private_sheet_not_written_if_privacy_not_confirmed(monkeypatch, public)
     monkeypatch.setattr(T.A,"_create_sheet",lambda title:("fake","url"))
     monkeypatch.setattr(T.lark,"call",lambda method,*a,**k: {"data":{"permission_public":public}})
     monkeypatch.setattr(T.A,"_write_values",lambda *a:pytest.fail("confidential write"))
-    with pytest.raises(ValueError): T._private_sheet("title",[[123]],"ou_asker")
+    with pytest.raises(ValueError): T._private_sheet("title",_bang(),TB.TongQuan("title"),"ou_asker")
+
+def _lark_rieng(monkeypatch, public=None, hong=()):
+    """LarkGia (bảng tính giả) + Drive v2 public permission giả; trả gia."""
+    from sheet_gia import LarkGia
+    gia = LarkGia(hong=hong)
+    import collections
+    monkeypatch.setattr(TB, "_LOC_LUOT", collections.deque())   # trần 20 lần lọc/phút
+    def call(method, path, query=None, body=None):
+        if "/drive/v2/permissions/" in path and path.endswith("/public"):
+            gia.goi.append((method, path, query, body))
+            return {"data": {"permission_public": dict(_CLOSED if public is None else public)}}
+        return gia.call(method, path, query=query, body=body)
+    monkeypatch.setattr(T.lark, "call", call)
+    monkeypatch.setattr(T.A, "_grant", lambda *a: pytest.fail("edit grant"))
+    return gia
+
 
 def test_private_sheet_closed_before_write_and_only_requester_granted(monkeypatch):
-    events=[]
-    monkeypatch.setattr(T.A,"_create_sheet",lambda title:("fake","url"))
-    def call(method,path,**kwargs):
-        events.append((method,kwargs))
-        return {"data":{"permission_public":{"link_share_entity":"closed","external_access_entity":"closed",
-                    "share_entity":"same_tenant","manage_collaborator_entity":"collaborator_full_access"}}}
-    monkeypatch.setattr(T.lark,"call",call)
-    monkeypatch.setattr(T.A,"_first_sheet_id",lambda token:"sid")
-    monkeypatch.setattr(T.A,"_write_values",lambda *a,**k:events.append(("WRITE",a)))
-    monkeypatch.setattr(T.A,"_grant",lambda *a: pytest.fail("edit grant"))
-    assert T._private_sheet("title",[[123]],"ou_asker")=="url"
-    assert events[0][0]=="PATCH"
-    assert events[0][1]["body"] == {"external_access_entity":"closed", "link_share_entity":"closed",
-                                  "share_entity":"same_tenant", "manage_collaborator_entity":"collaborator_full_access"}
-    # Người hỏi chỉ được XEM; cấp sau khi đã ghi số vào Sheet đã khoá.
-    assert events[-1]==("POST",{"query":{"type":"sheet"},"body":{"member_type":"openid",
-                                "member_id":"ou_asker","perm":"view"}})
-    assert ("WRITE" in [e[0] for e in events[:-1]])
+    gia = _lark_rieng(monkeypatch)
+    kq = T._private_sheet("title", _bang(), TB.TongQuan("title"), "ou_asker")
+    assert kq.url.startswith("https://") and kq.day_du is True
+    patch = [g for g in gia.goi if g[0] == "PATCH"]
+    assert patch[0][3] == {"external_access_entity":"closed", "link_share_entity":"closed",
+                           "share_entity":"same_tenant", "manage_collaborator_entity":"collaborator_full_access"}
+    i_patch, i_get = [i for i, g in enumerate(gia.goi) if "/drive/v2/permissions/" in g[1]][:2]
+    writes = [i for i, g in enumerate(gia.goi) if g[1].endswith("/values_batch_update")]
+    grants = [i for i, g in enumerate(gia.goi) if g[1].endswith("/members")]
+    # Khoá + kiểm lại TRƯỚC lần ghi số đầu tiên; quyền XEM cấp SAU lần ghi cuối (cả Tổng quan).
+    assert gia.goi[i_patch][0] == "PATCH" and gia.goi[i_get][0] == "GET"
+    assert i_patch < i_get < writes[0]
+    assert len(grants) == 1 and grants[0] > writes[-1] and grants[0] == len(gia.goi) - 1
+    assert gia.goi[-1][0] == "POST" and gia.goi[-1][2] == {"type": "sheet"}
+    assert gia.goi[-1][3] == {"member_type":"openid", "member_id":"ou_asker", "perm":"view"}
+
+
+def test_private_sheet_view_grant_failure_raises_after_data(monkeypatch):
+    _lark_rieng(monkeypatch, hong={"/members"})
+    with pytest.raises(ValueError, match="Chưa chia sẻ được Sheet riêng"):
+        T._private_sheet("title", _bang(), TB.TongQuan("title"), "ou_asker")
+
 
 _TK = [{"id":"act_1","name":"HTC - [TRANG SỨC] HAPAS 1"},{"id":"act_2","name":"HAPAS 11 - FB ADS"},
        {"id":"act_3","name":"MATEMADE - 5"},{"id":"act_4","name":"HAPAS 1"}]
@@ -364,23 +394,19 @@ def test_danh_sach_tai_khoan_tra_ten(monkeypatch):
 
 
 def test_large_sheet_grid_and_columns_grow_before_write(monkeypatch):
-    events=[]
-    monkeypatch.setattr(T.A,"_create_sheet",lambda title:("fake","url"))
-    monkeypatch.setattr(T.A,"_first_sheet_id",lambda token:"sid")
-    def call(method,path,**kwargs):
-        if "/public" in path:
-            return {"data":{"permission_public":{"link_share_entity":"closed","external_access_entity":"closed",
-                    "share_entity":"same_tenant","manage_collaborator_entity":"collaborator_full_access"}}}
-        return {"data":{"sheets":[{"sheet_id":"sid","grid_properties":{"row_count":200,"column_count":20}}]}}
-    monkeypatch.setattr(T.lark,"call",call)
-    import sheet_lon
-    monkeypatch.setattr(sheet_lon,"_goi",lambda method,path,**k:events.append(k["body"]["dimension"]))
-    monkeypatch.setattr(T.A,"_write_values",lambda *a,**k:events.append({"write":len(a[2]),"start":k["dong_dau"]}))
-    monkeypatch.setattr(T.time,"sleep",lambda *a:None)
-    assert T._private_sheet("title",[[1]*25 for _ in range(1205)],"ou_asker")=="url"
-    assert events[:2]==[{"sheetId":"sid","majorDimension":"ROWS","length":1005},
-                       {"sheetId":"sid","majorDimension":"COLUMNS","length":5}]
-    assert events[2:]==[{"write":1000,"start":1},{"write":205,"start":1001}]
+    gia = _lark_rieng(monkeypatch)
+    cot = [TB.Cot(f"c{i}", "so_nguyen") for i in range(25)]
+    kq = T._private_sheet("title", TB.Bang("Số ads", cot, [[1] * 25 for _ in range(1205)]),
+                          TB.TongQuan("title"), "ou_asker")
+    grow = [(i, g[3]["dimension"]) for i, g in enumerate(gia.goi)
+            if g[0] == "POST" and g[1].endswith("/dimension_range")]
+    writes = [i for i, g in enumerate(gia.goi) if g[1].endswith("/values_batch_update")]
+    dims = [d for _, d in grow]
+    assert any(d["majorDimension"] == "ROWS" and d["length"] == 1006 for d in dims)
+    assert any(d["majorDimension"] == "COLUMNS" and d["length"] == 5 for d in dims)
+    assert all(i < writes[0] for i, _ in grow)
+    assert len(gia.o("Dữ liệu")) == 1206 and kq.day_du is True
+
 
 def test_unknown_lark_chat_not_allowed():
     scheduler.set_current_chat("oc_unknown")
@@ -398,10 +424,12 @@ def test_truncated_report_labels_partial_totals(monkeypatch):
     monkeypatch.setattr(T.MetaClient,"accounts",lambda self:[{"id":"act_1","currency":"VND"}])
     monkeypatch.setattr(T.MetaClient,"pages",lambda *a:([{"spend":"12"}],True))
     sheet=[]
-    monkeypatch.setattr(T,"_private_sheet",lambda title,rows,actor:sheet.extend(rows) or "url")
+    monkeypatch.setattr(T,"_private_sheet",lambda title,bang,tq,actor,goc=None:sheet.append((bang,tq)) or _kq())
     result=run(chi_so=["spend"])
     assert result["bi_cat"] and "phần đã đọc" in result["cau_tong"]
-    assert any("TỔNG PHẦN ĐÃ ĐỌC" in str(row) for row in sheet)
+    bang, tq = sheet[0]
+    assert bang.dong_tong[0][0] == "TỔNG PHẦN ĐÃ ĐỌC VND"
+    assert any("ĐÃ CẮT ở 20.000 dòng" in g for g in tq.ghi_chu)
 
 
 # ───────────── review 08/10/2026: danh tính theo kênh, cờ hạn chế, số 0, trang, múi giờ ─────────────
@@ -421,8 +449,18 @@ def _ok_meta(monkeypatch, accounts=None, rows=None, calls=None):
         return list(rows if rows is not None else [{"spend": "10", "impressions": "100"}]), False
     monkeypatch.setattr(T.MetaClient, "pages", pages)
     sheets = []
-    monkeypatch.setattr(T, "_private_sheet", lambda title, sheet, actor: sheets.append((sheet, actor)) or "url")
+    monkeypatch.setattr(T, "_private_sheet", lambda title, bang, tq, actor, goc=None:
+                        sheets.append(_Chup(bang, actor, tq, goc)) or _kq("url"))
     return sheets
+
+
+class _Chup(tuple):
+    """(dòng như sheet cũ: tiêu đề + dữ liệu + trống + tổng, người nhận) + bang/tq/goc."""
+    def __new__(cls, bang, actor, tq, goc):
+        rows = [[c.ten for c in bang.cot]] + bang.dong + [[]] + bang.dong_tong
+        self = super().__new__(cls, (rows, actor))
+        self.bang, self.tq, self.goc = bang, tq, goc
+        return self
 
 
 def _job_context(job):
@@ -544,7 +582,7 @@ def test_breakdown_sheet_blank_and_note(monkeypatch):
     sheet = sheets[0][0]
     assert sheet[1][-1] == "" and sheet[2][-1] == 1.0
     assert any("TỔNG" in str(r[0]) and r[-1] == "" for r in sheet if r)
-    assert any("quyền riêng tư" in str(r) for r in sheet)
+    assert any("quyền riêng tư" in g for g in sheets[0].tq.ghi_chu)
     assert "Mua hàng" not in result["cau_tong"]
     assert calls[0][1]["breakdowns"] == "age"
 
@@ -588,7 +626,7 @@ def test_sheet_note_explains_zero_vs_blank(monkeypatch):
     result = run(chi_so=["purchases"])
     sheet = sheets[0][0]
     assert sheet[1][-1] == 0.0
-    note = " ".join(str(r) for r in sheet)
+    note = " ".join(sheets[0].tq.ghi_chu)
     assert "ghi 0" in note and "ô trống = Meta không trả số phân phối" in note
     assert "Mua hàng 0" in result["cau_tong"]
 
@@ -664,7 +702,7 @@ def test_partial_today_is_stated(monkeypatch, preset):
     sheets = _ok_meta(monkeypatch)
     result = run(khoang_ngay=preset)
     assert "hôm nay chưa hết ngày" in result["cau_tong"]
-    assert any("ngày chưa hết" in str(row) for row in sheets[0][0])
+    assert any("ngày chưa hết" in g for g in sheets[0].tq.ghi_chu)
 
 
 def test_completed_presets_not_marked_partial(monkeypatch):
@@ -677,7 +715,7 @@ def test_unknown_account_timezone_falls_back_to_vn_and_says_so(monkeypatch):
     sheets = _ok_meta(monkeypatch, accounts=[{"id": "act_1", "name": "X", "currency": "VND",
                                              "timezone_name": "Not/AZone"}])
     run(khoang_ngay="hom_qua")
-    assert any("không báo múi giờ" in str(row) for row in sheets[0][0])
+    assert any("không báo múi giờ" in g for g in sheets[0].tq.ghi_chu)
 
 
 # Token: không lọt vào bộ thử, không lọt vào tiến trình con.

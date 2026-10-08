@@ -101,10 +101,15 @@ _TEN_MUC_TIEU = {**{v[1]: v[2] for v in _MUC_TIEU.values() if v[1]},
                  **{v[0]: v[2] for v in _MUC_TIEU.values()}}
 _NGON_NGU = {"vi", "en", "th", "id", "ja", "zh", "pt"}
 
-_HEADER = ["Hạng", "Tiêu đề / caption", "Brand", "Ngành", "Mục tiêu",
-           "CTR (mức tương đối)", "Likes", "Mức chi phí (tương đối)", "Kỳ",
-           "Link video MP4 (hết hạn sau 24–48 giờ)", "Landing page",
-           "Trang ad trên Creative Center", "Nguồn"]
+#: (tên cột, kiểu cột của trinh_bay_sheet). CTR/chi phí: tool ghi CHỮ ("điểm 0.34",
+#: "top 10% (điểm 0.12)", "mức 2") vì actor trả ĐIỂM xếp hạng tương đối (0–1) chứ không
+#: phải CTR thật — không đổi thành %.
+_COT = [("Hạng", "so_nguyen"), ("Tiêu đề / caption", "chu_dai"), ("Brand", "chu"),
+        ("Ngành", "chu"), ("Mục tiêu", "chu"), ("CTR (mức tương đối)", "chu"),
+        ("Likes", "so_nguyen"), ("Mức chi phí (tương đối)", "chu"), ("Kỳ", "chu"),
+        ("Link video MP4 (hết hạn sau 24–48 giờ)", "link"), ("Landing page", "link"),
+        ("Trang ad trên Creative Center", "link"), ("Nguồn", "chu")]
+_HEADER = [t for t, _ in _COT]
 
 
 def _so(v, mac_dinh: int, lo: int, hi: int) -> int:
@@ -231,6 +236,9 @@ def _chuan(it: dict, nguon: str, bo: dict, hang: int) -> dict | None:
         "ky": f"{ky} ngày", "video": _link_video(it),
         "landing": str(_dau(it, "landingPageUrl", "landingPage", mac_dinh="") or ""),
         "link_cc": link_cc, "spark": bool(it.get("isSparkAd")), "nguon": nguon,
+        # Bản ghi actor nguyên vẹn → tab "Dữ liệu gốc" (tool chỉ chọn một phần trường).
+        # Chỉ đi vào sheet; KHÔNG đưa vào tool_result (top/tom_tat chọn khoá tường minh).
+        "_goc": it,
     }
 
 
@@ -603,12 +611,13 @@ def _handle(args: dict, **_kwargs) -> str:
     title = (str(args.get("title") or "").strip()
              or f"Top Ads TikTok {bo['vung']} · {pham_vi}"[:90]
              + f" · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y}")
+    kiem: dict = {}
     if ads:
         try:
-            tok, url = A._create_sheet(title)
-            A._write_values(tok, A._first_sheet_id(tok), [list(_HEADER)] + [_dong(a) for a in ads])
-            sender = memory_store.get_current_sender()
-            granted = A._grant(tok, sender) if sender else False
+            kq, granted = _xuat_sheet(title, ads, bo, n, ten_nguon, scope, canh_bao)
+            url, kiem = kq.url, kq.cho_tool()
+            if kq.day_du is False:
+                canh_bao.append("Sheet có thể thiếu dữ liệu: " + kq.cau_kiem)
         except Exception as e:  # noqa: BLE001
             loi["sheet"] = A._che_token(f"{type(e).__name__}: {e}")[:250]
 
@@ -623,16 +632,61 @@ def _handle(args: dict, **_kwargs) -> str:
         status="completed" if scope["scope_match"] and len(ads) >= n else "partial",
         requested_count=n, actual_count=len(ads), so_ads_xin=n, **scope,
         limit_reason=limit_reason, canh_bao=canh_bao or None, loi=loi or None,
-        sheet_url=url, granted=granted, title=title,
+        sheet_url=url, granted=granted, title=title, **kiem,
         uoc_tinh_chi_phi_usd=round(est_that, 3),
         chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,
         chi_phi=A._dong_chi_phi(thuc, est_that), giay=round(time.monotonic() - t0, 1),
-        note=("Tập ads XẾP HẠNG HIỆU QUẢ CAO của TikTok, không phải mọi ad brand đang chạy. "
-              "CTR / chi phí là mức tương đối, không phải số tiền thật. Link video MP4 hết "
-              "hạn sau 24–48 giờ.")
+        note=_NOTE
              + (" Không có ad nào khớp bộ lọc — thử bỏ bớt lọc hoặc kỳ 180 ngày."
                 if not ads else ""),
     )
+
+
+_NOTE = ("Tập ads XẾP HẠNG HIỆU QUẢ CAO của TikTok, không phải mọi ad brand đang chạy. "
+         "CTR / chi phí là mức tương đối, không phải số tiền thật. Link video MP4 hết "
+         "hạn sau 24–48 giờ.")
+
+
+def _xuat_sheet(title: str, ads: list[dict], bo: dict, n: int, ten_nguon: str, scope: dict,
+                canh_bao: list[str]):
+    """Sheet qua lớp trình bày chung: Tổng quan (cỡ mẫu, phân bố theo Ngành/Mục tiêu/Brand,
+    top theo Likes, ghi chú + cảnh báo) → tab Dữ liệu → tab Dữ liệu gốc. -> (KetQua, đã cấp
+    quyền edit cho người hỏi — cấp sau cùng, như cũ)."""
+    import trinh_bay_sheet as TB
+    bang = TB.Bang("Top ads TikTok", [TB.Cot(t, k) for t, k in _COT], [_dong(a) for a in ads],
+                   mo_ta="Mỗi ad một dòng, theo thứ hạng Top Ads của Creative Center")
+    tt = _tom_tat(ads)
+    ghi_chu = [_NOTE,
+               "Cột CTR là ĐIỂM xếp hạng tương đối actor trả (số 0–1, kèm hạng nếu có), không "
+               "phải tỉ lệ click thật — giữ dạng chữ. Mức chi phí là bậc tương đối (0–2).",
+               "TikTok thường không trả tên brand: ô Brand trống = không rõ brand, đừng đoán.",
+               "Tab Dữ liệu gốc: mọi trường actor trả cho từng ad (làm phẳng), cùng thứ tự dòng."]
+    if len(ads) < n:
+        ghi_chu.append(f"Sheet có {len(ads)}/{n} ads đã xin — thiếu {n - len(ads)} ads "
+                       "(lý do ở cảnh báo bên dưới nếu biết).")
+    ghi_chu += list(canh_bao)
+    tq = TB.TongQuan(
+        tieu_de=title,
+        nguon=f"TikTok Creative Center · Top Ads (tiktok_top_ads, actor {ten_nguon})",
+        thoi_gian=f"{bo['ky']} ngày gần nhất (kỳ của Creative Center)",
+        pham_vi=scope.get("actual_scope") or _pham_vi(bo),
+        so_lieu=[TB.SoLieu("Số ads trong mẫu", len(ads), "so_nguyen", ghi_chu=f"xin {n}"),
+                 TB.SoLieu("Ads không rõ brand", tt["khong_ro_brand"], "so_nguyen"),
+                 TB.SoLieu("Spark ads", tt["so_spark_ads"], "so_nguyen")],
+        nhom=[TB.dem_theo(bang, "Ngành"), TB.dem_theo(bang, "Mục tiêu"),
+              TB.dem_theo(bang, "Brand")],
+        top=TB.top_theo(bang, "Likes", 5, ["Hạng", "Tiêu đề / caption", "Ngành", "Likes",
+                                           "Trang ad trên Creative Center"],
+                        "Top 5 theo Likes"),
+        ghi_chu=ghi_chu)
+    sender = memory_store.get_current_sender()
+    cap: dict = {"granted": False}
+
+    def cap_quyen(tok):
+        cap["granted"] = A._grant(tok, sender) if sender else False
+    kq = TB.xuat(title, [bang], tq, goc=TB.bang_goc([a["_goc"] for a in ads]),
+                 cap_quyen=cap_quyen)
+    return kq, cap["granted"]
 
 
 def _available() -> bool:

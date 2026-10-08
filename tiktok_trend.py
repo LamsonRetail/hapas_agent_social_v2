@@ -45,6 +45,7 @@ import apify_tool as A
 import chi_phi_tool
 import memory_store
 import nganh_tiktok
+import trinh_bay_sheet as TB
 
 from tools.registry import tool_error, tool_result  # type: ignore
 
@@ -261,6 +262,7 @@ def _bang_hashtag(vung: str, ky: int, n: int, nganh_id: str = "",
         "so_bai": x.get("Posts") or 0, "luot_xem": x.get("Video Views") or 0,
         "nganh": ", ".join(x.get("Industries") or []),
         "link": x.get("TikTok URL") or "",
+        "_goc": x,       # bản ghi nguồn cho tab "Dữ liệu gốc"; `chay` gỡ ra trước tool_result
     } for x in raw if x.get("Hashtag")]
 
 
@@ -278,6 +280,7 @@ def _bang_video(vung: str, ky: int, n: int, tu_nhien: bool,
         "tieu_de": str(x.get("Title") or "")[:200],
         "chu_de": ", ".join(x.get("Content Tags") or []),
         "link": x.get("Video TikTok URL") or "",
+        "_goc": x,
     } for x in raw]
 
 
@@ -307,6 +310,7 @@ def _bang_nhac(vung: str, ky: int, n: int, tran_usd: float | None = None) -> lis
             "thay_doi_hang": _first(x, "rank_diff", "rankDiff", "rank_change"),
             "moi_vao_bang": bool(_first(x, "is_new", "new_on_board", "isNew", default=False)),
             "link": str(_first(x, "link", "url", "tiktok_url", "music_url", "sound_url")),
+            "_goc": x,
         })
     return out[:n]
 
@@ -538,8 +542,10 @@ def _mau_am_thanh(thu_tu: list[str], so_mau: int, vung: str, ky: int,
     hieu_ung = sorted(({"ten": k, "so_kenh": len(v["kenh"]), "so_video": v["video"],
                         "di_kem_hashtag": ", ".join(sorted(t for t in v["tag"] if t))}
                        for k, v in hu.items() if len(v["kenh"]) >= 2),
-                      key=lambda x: -x["so_kenh"])[:10]
-    return {"cao": cao, "giu": len(giu), "am_thanh": tat_ca[:15], "hieu_ung": hieu_ung,
+                      key=lambda x: -x["so_kenh"])
+    return {"cao": cao, "giu": len(giu), "am_thanh": tat_ca[:15], "hieu_ung": hieu_ung[:10],
+            # Số tín hiệu TRƯỚC khi cắt top 15/10 — để Sheet nói rõ bỏ bớt bao nhiêu.
+            "tong_am_thanh": len(tat_ca), "tong_hieu_ung": len(hieu_ung),
             "nhac_dung_lai": [a for a in tat_ca if a["loai"] != "Âm thanh gốc"][:10],
             "am_thanh_goc": [a for a in tat_ca if a["loai"] == "Âm thanh gốc"][:10],
             "cao_du": cao >= da_xin, "hashtag_da_soi": da_soi, "da_xin": da_xin,
@@ -771,35 +777,6 @@ def chay(args: dict) -> str:
         return tool_error("Không lấy được bảng trend: " + "; ".join(
             f"{k}: {v}" for k, v in loi.items()))
 
-    url, granted = None, False
-    title = (args.get("title") or "").strip() or \
-        (f"Trend TikTok {vung} · " + (f"{nganh['ten_nhom']} · " if nganh else "")
-         + f"{ky} ngày · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y}")
-    rows = [["Loại", "Hạng", "Tên", "Hướng / Kênh", "Số bài / Số kênh dùng",
-             "Lượt xem", "Ghi chú", "Link"]]
-    rows += [["Hashtag", t["hang"], "#" + t["hashtag"], t["huong"], t["so_bai"],
-              t["luot_xem"], (t["nhay_cam"].upper() + "; " if t.get("nhay_cam") else "")
-              + t["nganh"], t["link"]] for t in tags]
-    rows += [["Video", v["hang"], v["tieu_de"], v["kenh"], "", v["luot_xem"],
-              f"tự nhiên {v['luot_xem_tu_nhien']} · {v['chu_de']}", v["link"]] for v in vids]
-    rows += [["Nhạc đang lên (bảng Creative Center)", n["hang"], n["ten"], n["tac_gia"], "",
-              "", (f"đổi hạng {n['thay_doi_hang']}" if n["thay_doi_hang"] != "" else "")
-              + (" · mới vào bảng" if n["moi_vao_bang"] else ""), n["link"]] for n in nhac]
-    rows += [[("Âm thanh gốc" if a.get("loai") == "Âm thanh gốc" else "Nhạc dùng lại")
-              + " (suy từ mẫu)", i + 1, a["ten"], a["tac_gia"], a["so_kenh"],
-              a["tong_view"], f"{a['so_video']} video · #{a['di_kem_hashtag']}", a["link"]]
-             for i, a in enumerate(mau["am_thanh"])]
-    rows += [["Hiệu ứng (suy từ mẫu)", i + 1, h["ten"], "", h["so_kenh"], "",
-              f"{h['so_video']} video · #{h['di_kem_hashtag']}", ""]
-             for i, h in enumerate(mau["hieu_ung"])]
-    try:
-        tok, url = A._create_sheet(title)
-        A._write_values(tok, A._first_sheet_id(tok), rows)
-        sender = memory_store.get_current_sender()
-        granted = A._grant(tok, sender) if sender else False
-    except Exception as e:  # noqa: BLE001
-        loi["sheet"] = f"{type(e).__name__}: {e}"[:250]
-
     ghi_chu_nganh = ""
     if nganh:
         ghi_chu_nganh = (
@@ -809,6 +786,36 @@ def chay(args: dict) -> str:
             + "; top video KHÔNG lọc được theo ngành."
             + (f" Ngành này chỉ có {len(tat_ca_tag)} hashtag trên bảng."
                if len(tat_ca_tag) < n_tag and "hashtag" not in loi else ""))
+
+    # Bản ghi nguồn (cho tab "Dữ liệu gốc") gỡ ra khỏi các dòng TRƯỚC khi chúng vào
+    # tool_result — model không bao giờ thấy bản ghi thô.
+    goc = {"tag": [t.pop("_goc", None) for t in tat_ca_tag][:len(tags)],
+           "vid": [v.pop("_goc", None) for v in vids],
+           "nhac": [x.pop("_goc", None) for x in nhac]}
+
+    url, granted, kq_sheet = None, False, None
+    title = (args.get("title") or "").strip() or \
+        (f"Trend TikTok {vung} · " + (f"{nganh['ten_nhom']} · " if nganh else "")
+         + f"{ky} ngày · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y}")
+    cap = {"granted": False}
+
+    def _cap_quyen(tok: str) -> None:
+        sender = memory_store.get_current_sender()
+        cap["granted"] = A._grant(tok, sender) if sender else False
+
+    try:
+        bang = _cac_bang_sheet(tags, vids, nhac, mau)
+        kq_sheet = TB.xuat(
+            title, bang,
+            _tong_quan_sheet(title, vung, ky, nganh, tu_nhien, bang, tags, tat_ca_tag, mau,
+                             so_mau, cat, nhay_cam, ghi_chu_nhac, ghi_chu_nganh, loi),
+            goc=_bang_goc(bang, goc), cap_quyen=_cap_quyen)
+        url, granted = kq_sheet.url, cap["granted"]
+    except Exception as e:  # noqa: BLE001
+        loi["sheet"] = f"{type(e).__name__}: {e}"[:250]
+    if kq_sheet is not None and kq_sheet.day_du is False:
+        loi["kiem_ghi"] = kq_sheet.cau_kiem
+
     return tool_result(
         success=not loi, che_do="trend", vung=vung, ky_ngay=ky,
         nganh=({"ten": nganh["ten"], "loc_theo": nganh["ten_nhom"],
@@ -837,5 +844,129 @@ def chay(args: dict) -> str:
               + (" Mẫu giữ được ít hơn số cần — nói rõ cỡ mẫu thật."
                  if so_mau and mau["giu"] < so_mau else "")
               + (f" HASHTAG NHẠY CẢM: {'; '.join(nhay_cam)} — KHÔNG đề xuất brand bám các "
-                 f"trend này." if nhay_cam else "")),
+                 f"trend này." if nhay_cam else "")
+              + (f" {kq_sheet.cau_kiem}" if kq_sheet is not None and kq_sheet.day_du is False
+                 else "")),
+        **(kq_sheet.cho_tool() if kq_sheet is not None
+           else {"day_du": None, "kiem_ghi": None, "bang_tinh_tiep": None}),
     )
+
+
+# ───────────────────────────── Sheet (trinh_bay_sheet) ─────────────────────────────
+# Mỗi loại một bảng (trước 08/10/2026: năm loại dồn chung một bảng, cột "Loại"). Không có
+# cột phần trăm: Creative Center chỉ trả hướng lên/xuống (chữ) và đổi hạng (số hạng).
+_TAB_TAG, _TAB_VID, _TAB_NHAC = "Hashtag đang nổi", "Top video", "Nhạc đang lên"
+_TAB_AM, _TAB_HU = "Âm thanh suy từ mẫu", "Hiệu ứng suy từ mẫu"
+
+
+def _cac_bang_sheet(tags: list, vids: list, nhac: list, mau: dict) -> list:
+    """Các bảng có dòng (bảng rỗng không thành tab — Tổng quan nói vì sao)."""
+    ra = []
+    if tags:
+        ra.append(TB.Bang(_TAB_TAG, [
+            TB.Cot("Hạng", "so_nguyen"), TB.Cot("Hashtag"), TB.Cot("Hướng"),
+            TB.Cot("Số bài", "so_nguyen"), TB.Cot("Lượt xem", "so_nguyen"), TB.Cot("Ngành"),
+            TB.Cot("Cảnh báo"), TB.Cot("Link", "link")],
+            [[t["hang"], "#" + t["hashtag"], t["huong"], t["so_bai"], t["luot_xem"],
+              t["nganh"], (t.get("nhay_cam") or "").upper(), t["link"]] for t in tags],
+            mo_ta="Bảng xếp hạng hashtag chính thức của TikTok Creative Center"))
+    if vids:
+        ra.append(TB.Bang(_TAB_VID, [
+            TB.Cot("Hạng", "so_nguyen"), TB.Cot("Tiêu đề", "chu_dai"), TB.Cot("Kênh"),
+            TB.Cot("Followers", "so_nguyen"), TB.Cot("Lượt xem", "so_nguyen"),
+            TB.Cot("Lượt xem tự nhiên", "so_nguyen"), TB.Cot("Chủ đề"), TB.Cot("Link", "link")],
+            [[v["hang"], v["tieu_de"], v["kenh"], v["followers"], v["luot_xem"],
+              v["luot_xem_tu_nhien"], v["chu_de"], v["link"]] for v in vids],
+            mo_ta="Top video của vùng theo Creative Center"))
+    if nhac:
+        ra.append(TB.Bang(_TAB_NHAC, [
+            TB.Cot("Hạng", "so_nguyen"), TB.Cot("Tên"), TB.Cot("Tác giả"),
+            TB.Cot("Đổi hạng"), TB.Cot("Mới vào bảng"), TB.Cot("Link", "link")],
+            [[n["hang"], n["ten"], n["tac_gia"], n["thay_doi_hang"],
+              "có" if n["moi_vao_bang"] else "", n["link"]] for n in nhac],
+            mo_ta="Bảng nhạc đang lên chính thức của Creative Center (không phải suy từ mẫu)"))
+    if mau.get("am_thanh"):
+        ra.append(TB.Bang(_TAB_AM, [
+            TB.Cot("STT", "so_nguyen"), TB.Cot("Tên"), TB.Cot("Tác giả"), TB.Cot("Loại"),
+            TB.Cot("Số kênh dùng", "so_nguyen"), TB.Cot("Số video", "so_nguyen"),
+            TB.Cot("Tổng view", "so_nguyen"), TB.Cot("Đi kèm hashtag", "chu_dai"),
+            TB.Cot("Link", "link")],
+            [[i + 1, a["ten"], a["tac_gia"], a.get("loai", ""), a["so_kenh"], a["so_video"],
+              a["tong_view"], a["di_kem_hashtag"], a["link"]]
+             for i, a in enumerate(mau["am_thanh"])],
+            mo_ta="Âm thanh ≥2 kênh khác nhau dùng lại trong mẫu video (SUY từ mẫu)"))
+    if mau.get("hieu_ung"):
+        ra.append(TB.Bang(_TAB_HU, [
+            TB.Cot("STT", "so_nguyen"), TB.Cot("Tên"), TB.Cot("Số kênh dùng", "so_nguyen"),
+            TB.Cot("Số video", "so_nguyen"), TB.Cot("Đi kèm hashtag", "chu_dai")],
+            [[i + 1, h["ten"], h["so_kenh"], h["so_video"], h["di_kem_hashtag"]]
+             for i, h in enumerate(mau["hieu_ung"])],
+            mo_ta="Hiệu ứng ≥2 kênh khác nhau dùng trong mẫu video (SUY từ mẫu)"))
+    return ra
+
+
+def _tong_quan_sheet(title, vung, ky, nganh, tu_nhien, bang, tags, tat_ca_tag, mau, so_mau,
+                     cat, nhay_cam, ghi_chu_nhac, ghi_chu_nganh, loi) -> "TB.TongQuan":
+    so_lieu = []
+    if so_mau:
+        so_lieu = [
+            TB.SoLieu("Video mẫu đã cào", mau["cao"], "so_nguyen",
+                      ghi_chu="dưới các hashtag đang lên, để suy âm thanh/hiệu ứng"),
+            TB.SoLieu("Giữ lại (trong kỳ, đúng ngôn ngữ, không QC)", mau["giu"], "so_nguyen",
+                      ghi_chu=f"cần {so_mau}"),
+            TB.SoLieu("Hashtag đã soi để lấy mẫu", len(mau.get("hashtag_da_soi") or []),
+                      "so_nguyen")]
+    theo = {b.ten: b for b in bang}
+    nhom = []
+    if _TAB_TAG in theo:
+        nhom.append(TB.dem_theo(theo[_TAB_TAG], "Hướng", "Hashtag theo hướng"))
+    if _TAB_AM in theo:
+        nhom.append(TB.dem_theo(theo[_TAB_AM], "Loại", "Âm thanh suy từ mẫu theo loại"))
+    ghi_chu = [
+        "Hashtag, top video, nhạc đang lên: bảng xếp hạng CHÍNH THỨC của TikTok Creative "
+        "Center. Âm thanh/hiệu ứng: SUY từ mẫu video dưới các hashtag đang lên — chỉ tính khi "
+        "≥2 kênh khác nhau dùng; bỏ hashtag chiến dịch brand và chủ đề nhạy cảm khỏi mẫu.",
+        ghi_chu_nhac.strip(),
+    ]
+    if ghi_chu_nganh:
+        ghi_chu.append(ghi_chu_nganh.strip())
+    if len(tat_ca_tag) > len(tags):
+        ghi_chu.append(f"Bảng hashtag ghi {len(tags)} dòng đầu như đã xin; "
+                       f"{len(tat_ca_tag) - len(tags)} hashtag lấy thêm chỉ để chọn chỗ lấy "
+                       "mẫu, không ghi vào sheet.")
+    if mau.get("tong_am_thanh", 0) > len(mau.get("am_thanh") or []):
+        ghi_chu.append(f"Âm thanh: ghi top {len(mau['am_thanh'])}/{mau['tong_am_thanh']} "
+                       "theo số kênh dùng.")
+    if mau.get("tong_hieu_ung", 0) > len(mau.get("hieu_ung") or []):
+        ghi_chu.append(f"Hiệu ứng: ghi top {len(mau['hieu_ung'])}/{mau['tong_hieu_ung']} "
+                       "theo số kênh dùng.")
+    if so_mau:
+        ghi_chu.append("Từng video mẫu không ghi vào sheet (chỉ dùng để đếm âm thanh/hiệu ứng).")
+        if mau["giu"] < so_mau:
+            ghi_chu.append(f"Mẫu giữ được {mau['giu']}/{so_mau} video cần — cỡ mẫu thật nhỏ "
+                           "hơn yêu cầu.")
+    if nhay_cam:
+        ghi_chu.append("HASHTAG NHẠY CẢM — không đề xuất brand bám: " + "; ".join(nhay_cam))
+    if cat:
+        ghi_chu.append("Đã cắt cho vừa trần TikTok: " + "; ".join(cat))
+    ghi_chu += [f"Lỗi {k}: {v}" for k, v in loi.items() if k != "sheet"]
+    return TB.TongQuan(
+        tieu_de=title,
+        nguon=f"Tool social_listen (chế độ trend) · Creative Center ({ACTOR_TREND}, "
+              f"{ACTOR_NHAC}) + mẫu video ({A._ACTORS['tiktok_fallback']})",
+        thoi_gian=f"{ky} ngày gần nhất (tới {datetime.datetime.now(A._VN_TZ):%d/%m/%Y})",
+        pham_vi=f"Vùng {vung}" + (f" · ngành {nganh['ten_nhom']}" if nganh else "")
+        + (" · top video chỉ video tự nhiên" if tu_nhien else ""),
+        so_lieu=so_lieu, nhom=nhom, ghi_chu=[g for g in ghi_chu if g])
+
+
+def _bang_goc(bang: list, goc: dict):
+    """Bản ghi Creative Center nguyên vẹn (cùng thứ tự các bảng): tool chỉ chọn vài trường
+    (vd top video bỏ phần lớn `Metrics`)."""
+    ra = []
+    for ten, khoa in ((_TAB_TAG, "tag"), (_TAB_VID, "vid"), (_TAB_NHAC, "nhac")):
+        if not any(b.ten == ten for b in bang):
+            continue
+        ra += [{"Bảng": ten, "Dòng": i, **x} for i, x in enumerate(goc[khoa], 1)
+               if isinstance(x, dict)]
+    return TB.bang_goc(ra) if ra else None

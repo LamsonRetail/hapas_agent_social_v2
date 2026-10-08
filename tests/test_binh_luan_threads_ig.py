@@ -15,6 +15,8 @@ import pytest
 
 import apify_tool as A
 import deep_dive_tool as D
+from sheet_gia import LarkGia
+from test_binh_luan_phan_tich import TabGia
 import quet_lon
 
 MAU = json.loads((Path(__file__).parent / "mau_binh_luan_threads_ig.json")
@@ -59,7 +61,7 @@ class _Apify:
 @pytest.fixture
 def mt(monkeypatch):
     ap = _Apify()
-    sheet, cp = [], []
+    cp = []
     monkeypatch.setattr(D, "_call", ap)
     monkeypatch.setattr(D, "_cau_hinh", lambda: (300, 0.5))
     monkeypatch.setattr(A, "_cau_hinh_quet", lambda: {})
@@ -69,11 +71,9 @@ def mt(monkeypatch):
     monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {})
     monkeypatch.setattr(D.chi_phi_tool, "ghi", lambda **k: {})
     monkeypatch.setattr(D.phan_loai, "_goi_model", _model_gia)
-    monkeypatch.setattr(D, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(D, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(D, "_write", lambda tok, sid, values: sheet.extend(values))
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: "s2")
-    monkeypatch.setattr(A, "_write_values", lambda *a, **k: None)
+    gia = LarkGia()                     # Lark giả: sheet đi qua trinh_bay_sheet thật
+    monkeypatch.setattr(A.lark, "call", gia.call)
+    sheet = TabGia(gia, "Bình luận")
     monkeypatch.setattr(D, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(D.memory_store, "get_current_sender", lambda: "ou_test")
     return ap, sheet, cp

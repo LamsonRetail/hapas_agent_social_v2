@@ -13,6 +13,7 @@ import pytest
 
 import apify_tool as A
 import deep_dive_tool as D
+from sheet_gia import LarkGia
 
 TT = "https://www.tiktok.com/@hapas/video/7000000000000000001"
 TT2 = "https://www.tiktok.com/@hapas/video/7000000000000000002"
@@ -48,11 +49,7 @@ def mt(monkeypatch):
     monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {})
     monkeypatch.setattr(D.chi_phi_tool, "ghi", lambda **k: {})
     monkeypatch.setattr(D.phan_loai, "_goi_model", lambda nhac: "{}")
-    monkeypatch.setattr(D, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(D, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(D, "_write", lambda *a: None)
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: "s2")
-    monkeypatch.setattr(A, "_write_values", lambda *a, **k: None)
+    monkeypatch.setattr(A.lark, "call", LarkGia().call)   # sheet: Lark giả, không mạng
     monkeypatch.setattr(D, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(D.memory_store, "get_current_sender", lambda: "ou_test")
     return ap, cfg

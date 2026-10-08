@@ -16,6 +16,7 @@ import apify_tool as A
 import lenh_cung
 import lsr_policy
 import shopee_tool as S
+from sheet_gia import LarkGia
 
 GIO = datetime.datetime.now(datetime.timezone.utc)
 
@@ -82,11 +83,10 @@ def gia(monkeypatch):
     for m in (T, S):
         monkeypatch.setattr(m.chi_phi_tool, "ghi", lambda **k: {})
         monkeypatch.setattr(m.memory_store, "get_current_sender", lambda: None)
-    dong = []
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows: dong.extend(rows))
-    return goi, dong
+    # Lark giả ghi lại bảng tính do trinh_bay_sheet dựng (tests/sheet_gia.py).
+    lark = LarkGia()
+    monkeypatch.setattr(A.lark, "call", lark.call)
+    return goi, lark
 
 
 # ───────────────────────────── soi_tai_khoan ─────────────────────────────
@@ -163,8 +163,9 @@ def test_so_bai_bi_kep_theo_tran(gia):
 
 
 def test_sheet_chi_ghi_bai_trong_khoang(gia):
-    _, dong = gia
+    _, lark = gia
     T._handle({"tai_khoan": ["@thybui.__"]})
+    dong = lark.o("2. Bài đăng")
     assert len(dong) == 1 + 2 and dong[0][0] == "Nền tảng"
 
 
@@ -179,7 +180,8 @@ def test_shopee_tong_hop_gia_va_thu_hang_ban_chay(gia):
     assert th["nhieu_danh_gia_nhat"][0]["ten"] == "Túi tote công sở"
     assert th["phan_bo_gia"] == {"dưới 100k": 1, "100k–300k": 1, "1 triệu–2 triệu": 1}
     assert th["shop_noi_bat"][0]["shop"] == "Uyên store"
-    assert kq["khong_co_so_da_ban"] is True and kq["sheet_url"] == "https://sheet"
+    assert kq["khong_co_so_da_ban"] is True
+    assert kq["sheet_url"] == "https://x.larksuite.com/sheets/sht1"
 
 
 def test_shopee_mac_dinh_xep_theo_lien_quan(gia):
