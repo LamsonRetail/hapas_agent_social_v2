@@ -42,14 +42,15 @@ từng ngày, từng số. Nhóm nhận = chính cuộc chat của job, không c
      gõ tay KHÔNG BAO GIỜ tag — chỉ ghi tên — để không ai mượn Mark tag cả nhóm hàng loạt.
   9. Quyền đọc Base: CÙNG luật `bang_tool.mo_nguon` với doc_bang, xét cho NGƯỜI HỎI — gõ tay
      là người gửi; theo lịch là `scheduled_by`. Lịch không có `scheduled_by` thì TỪ CHỐI,
-     không bao giờ lùi về "bot đọc được là đủ".
+     không lùi về "bot đọc được là đủ" — TRỪ đúng một ngoại lệ có bằng chứng Platform:
+     lịch console `bot_console` (bất biến 14).
  10. Bộ nhắc env (`MARK_NHAC_TIEN_DO_CHAT`) và lịch console không cùng nhắc một Base vào một
      nhóm trong một ngày: sổ `.tokens/nhac_tien_do.json` ghi `lich_ngay`/`lich_base` (băm, không
      phải app_token — xem 6), hai bên kiểm dưới cùng khoá `_KHOA`.
  11. Chỉ ĐỌC thêm hai endpoint lấy TÊN Base/bảng cho dòng tiêu đề (`_goi_ten`, hỏng thì bỏ qua).
  12. `cua_toi=co` (chủ agent chốt 08/10/2026): chỉ việc mà NGƯỜI HỎI (gõ tay = người gửi; theo
-     lịch = `scheduled_by`) nằm trong cột người phụ trách — so bằng open_id, KHÔNG BAO GIỜ theo
-     tên (trùng tên/đổi tên là lộ việc người khác hoặc sót việc của mình). Không có danh tính
+     lịch = `scheduled_by`, lịch console thiếu nó thì `boi` của Platform) nằm trong cột
+     người phụ trách — so bằng open_id, KHÔNG BAO GIỜ theo tên (trùng tên/đổi tên là lộ việc người khác hoặc sót việc của mình). Không có danh tính
      `ou_…` thì TỪ CHỐI. Danh sách của chính mình nên KHÔNG BAO GIỜ gắn `<at>` (kể cả lượt
      theo lịch). Không có tham số nào cho chọn "của ai" — chỉ là người hỏi, nên không ai mượn
      được lệnh để xem riêng việc của người khác. Khử trùng lượt lịch theo Base+nhóm+người.
@@ -61,7 +62,21 @@ từng ngày, từng số. Nhóm nhận = chính cuộc chat của job, không c
      `kiem_luc` trong 2 giờ; luật Base nội bộ xét TRƯỚC, không đổi (không mở Audit/Chi phí).
      Chỉ `_kenh_cua_job` của job theo lịch mang khoá này; gõ tay, tool model, tin thường
      giữ nguyên luật cũ. Platform báo `nguon_loi` mà không căn cứ nào khác đạt → từ chối,
-     nêu lý do + "console → Lịch chạy để Kết nối Lark/kiểm lại".
+     nêu lý do + "console → Lịch chạy để kiểm lại" (bot đã được thêm, link đúng bảng).
+ 14. LỊCH CONSOLE (chủ agent chốt 08/10/2026: bỏ "Kết nối tài khoản Lark"; lịch đọc bằng
+     quyền XEM đã cấp cho bot, tách khỏi kiến thức được nạp, chỉ quét và gửi vào nhóm nhận).
+     Platform chỉ cho quản trị agent (moderator+) đặt lịch console và gửi `nguon_da_kiem`
+     có `cach: "bot_console"` cùng `schedule_source: "console"`. Phép kiểm này CHỈ được tính
+     khi: job theo lịch (`_kenh_cua_job`), `schedule_source` == "console", (loại, token,
+     bảng) khớp TUYỆT ĐỐI link trong lệnh sau khi giải Wiki, bảng không rỗng, `kiem_luc`
+     trong 2 giờ (lệch tương lai ≤ 5 phút). Khi đó KHÔNG đòi người hỏi == người đặt, KHÔNG
+     đòi `scheduled_by` cho /tiendo thường; `cua_toi=co` vẫn cần open_id thật (`scheduled_by`
+     hoặc `boi`), thiếu thì từ chối. Base nội bộ vẫn chặn y như cũ (không mở Audit/Chi
+     phí). Lịch tạo trong chat (`schedule_source` "lark"), /tiendo gõ tay, tool model
+     (doc_bang, dem_bang, tra_tien_do) và tin thường: `bot_console` bị BỎ QUA, giữ luật
+     theo người. Kết quả chỉ là câu trả lời của chính job (Platform gửi vào chat của job);
+     /tiendo không ghi kho kiến thức, Nguồn Wiki, bài học hay trí nhớ dài hạn theo người;
+     lịch sử hội thoại của chính cuộc chat vẫn ghi như mọi lệnh (giữ ngữ cảnh).
 """
 from __future__ import annotations
 
@@ -115,6 +130,11 @@ CU_PHAP_NGAN = ('Dùng /tiendo <link Base> [cot_ten="Tên việc"] [cot_pic="Ph�
 #: lịch không có người đặt…). Không lùi về lọc theo tên — trùng tên là lộ việc người khác.
 LOI_KHONG_RO_NGUOI = ("Chưa biết bạn là ai trên Lark nên không lọc được việc của bạn. Hỏi "
                       "Mark trong Lark (nhóm hoặc chat riêng), hoặc bỏ cua_toi=co.")
+#: Như trên, cho lượt THEO LỊCH không mang open_id người đặt (lịch console đặt bằng tài
+#: khoản chưa tra được trên Lark).
+LOI_KHONG_RO_NGUOI_LICH = ("Lịch này chưa biết tài khoản Lark của người đặt nên không lọc "
+                           "được \"việc của tôi\". Bỏ cua_toi=co để báo cả bảng, hoặc người "
+                           "đặt nhắn Mark trên Lark để đặt lịch việc của riêng mình.")
 
 
 def _la_open_id(s) -> bool:
@@ -122,11 +142,11 @@ def _la_open_id(s) -> bool:
 
 
 #: Hướng dẫn khi /tiendo bị từ chối vì chưa chứng minh được quyền xem (thường: bot chỉ có
-#: quyền xem nên không tra được danh sách thành viên). Đường chạy được: lịch console — Platform
-#: kiểm bằng tài khoản Lark của người đặt (bất biến 13).
-HUONG_DAN_LICH = ("Muốn Mark báo tiến độ bảng này mỗi ngày: thêm bot vào tài liệu (quyền "
-                  "xem), dán link bảng, đặt lịch trên console → Lịch chạy (lần đầu bấm Kết "
-                  "nối tài khoản Lark).")
+#: quyền xem nên không tra được danh sách thành viên). Đường chạy được: lịch console do quản
+#: trị agent đặt — đọc bằng quyền xem của bot, chỉ gửi vào nhóm nhận (bất biến 14).
+HUONG_DAN_LICH = ("Muốn Mark báo tiến độ bảng này mỗi ngày: thêm bot Mark vào tài liệu "
+                  "(quyền xem), dán link bảng, đặt lịch trên console (chọn nhóm nhận, giờ) — "
+                  "việc của quản trị agent.")
 
 
 def _goi_y_lich(loi: str) -> str:
@@ -1079,19 +1099,33 @@ def ghi_nhac(chat: str, d: dict, ngay: datetime.date, rieng: str = "") -> None:
 
 def lenh_tiendo(text: str, *, kenh: dict | None = None, chat_id: str = "",
                 sender_open_id: str | None = None) -> str:
-    """Đường cứng: quyền theo người hỏi/người đặt lịch, không model, không ghi Base."""
+    """Đường cứng: quyền theo người hỏi/người đặt lịch (hoặc lịch console — bất biến 14),
+    không model, không ghi Base, không ghi kho/trí nhớ."""
     k = kenh or {}
     lich = k.get("scheduled") is True
     asker = str(k.get("scheduled_by") or "") if lich else (sender_open_id or "")
-    if lich and not re.fullmatch(r"ou_[A-Za-z0-9]+", asker):
+    # Lượt theo lịch: mang phép kiểm Platform vào cửa quyền — cửa tự đối chiếu bảng/người/độ
+    # mới, không khớp thì như không có. `bot_console` chỉ dựng được khi job theo lịch có
+    # `schedule_source` == "console" (bất biến 14); gõ tay/tin thường không bao giờ có `cm`.
+    cm = (BT.ChungMinhLich.tu_payload(k.get("nguon_da_kiem"), asker,
+                                      nguon_lich=str(k.get("schedule_source") or ""))
+          if lich else None)
+    lich_console = cm is not None and cm.la_console
+    loi_lich = str(k.get("nguon_loi") or "") if lich else ""
+    if lich and not _la_open_id(asker) and not lich_console:
+        if loi_lich:
+            return BT._loi_lich_platform("Base", loi_lich)
         return "Lịch chưa có người đặt — tạo lại lịch trên console."
+    # Người "của tôi": người gửi / người đặt lịch; lịch console thiếu `scheduled_by` thì
+    # lấy `boi` (Platform ghi) — không bao giờ đoán, thiếu thì từ chối.
+    chu = asker if _la_open_id(asker) else (cm.boi if lich_console else "")
     try:
         nguon, opts = tach_tuy_chon(text)
         # `cua_toi`: người lọc LUÔN là người hỏi (người gửi / người đặt lịch) — không có tham
         # số nào chọn người khác. Thiếu danh tính thì từ chối TRƯỚC khi đọc Base.
         cua_toi = opts.get("cua_toi") == "co"
-        if cua_toi and not _la_open_id(asker):
-            return LOI_KHONG_RO_NGUOI
+        if cua_toi and not _la_open_id(chu):
+            return LOI_KHONG_RO_NGUOI_LICH if lich else LOI_KHONG_RO_NGUOI
         try:
             mac = cau_hinh()
         except ValueError:
@@ -1100,10 +1134,6 @@ def lenh_tiendo(text: str, *, kenh: dict | None = None, chat_id: str = "",
             return ('Dùng /tiendo <link Base?table=tbl…> [cot_han="Ngày giao"] [tag=khong] '
                     '[cua_toi=co].')
         # Cùng cửa doc_bang; lệnh chạy trước audit nên truyền chính danh tường minh.
-        # Lượt theo lịch: mang phép kiểm Platform (bằng token Lark của người đặt) vào cửa
-        # quyền — cửa tự đối chiếu bảng/người/độ mới, không khớp thì như không có.
-        cm = BT.ChungMinhLich.tu_payload(k.get("nguon_da_kiem"), asker) if lich else None
-        loi_lich = str(k.get("nguon_loi") or "") if lich else ""
         d, loi = _dich_tu_nguon(nguon or mac["url"], mac, nguoi_hoi=asker,
                                 chung_minh=cm, loi_lich=loi_lich)
         if not d:
@@ -1116,7 +1146,7 @@ def lenh_tiendo(text: str, *, kenh: dict | None = None, chat_id: str = "",
         ngay = hom_nay_vn()
         ket = loc_viec(rows, ngay, opts["so_ngay"], cot=cot,
                        qua_han_toi_da_ngay=opts["qua_han_toi_da"],
-                       chi_cua=asker if cua_toi else "")
+                       chi_cua=chu if cua_toi else "")
         tin = soan_tin(ket, ngay, d,
                        gan_the=lich and not cua_toi and opts.get("tag", "co") == "co",
                        nhac=lich, cot=cot, so_ngay=opts["so_ngay"], cua_toi=cua_toi)
@@ -1131,7 +1161,7 @@ def lenh_tiendo(text: str, *, kenh: dict | None = None, chat_id: str = "",
             chat = parts[2] if len(parts) == 3 and parts[0] == "lark" else chat_id
             if not re.fullmatch(r"oc_[A-Za-z0-9]+", chat):
                 return "Lịch cần chạy trong nhóm Lark đã chọn trên console."
-            rieng = asker if cua_toi else ""
+            rieng = chu if cua_toi else ""
             with _KHOA:
                 if da_nhac(chat, d, ngay, rieng):
                     return ("Hôm nay đã gửi hoặc đang gửi danh sách việc của bạn trên Base này."

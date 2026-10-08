@@ -215,10 +215,20 @@ def _quyen_thuc_te(loai: str, token: str, nguoi: str) -> tuple[bool, str]:
 
 #: Câu "vì sao được đọc" khi căn cứ là phép kiểm của Platform cho lịch.
 LY_DO_LICH = "người đặt lịch xem được bảng này (Platform kiểm bằng tài khoản Lark của họ)"
+#: Câu "vì sao được đọc" cho lịch console (`cach` = `CACH_BOT_CONSOLE`).
+LY_DO_LICH_CONSOLE = "lịch console do quản trị agent đặt; bot được cấp quyền xem bảng"
+#: `nguon_da_kiem.cach` của lịch đặt trên console bởi quản trị agent (moderator+, Platform
+#: kiểm vai trò). Chủ agent chốt 08/10/2026: bỏ "Kết nối tài khoản Lark" — lịch console
+#: đọc bằng quyền XEM đã cấp cho bot, và chỉ gửi vào nhóm nhận của chính lịch đó.
+CACH_BOT_CONSOLE = "bot_console"
 #: Phép kiểm của Platform chỉ còn giá trị trong chừng này (Platform kiểm lại MỖI lần chạy).
 _HAN_CHUNG_MINH = 2 * 3600
 #: Lệch đồng hồ chấp nhận được giữa Platform và máy chạy Mark.
 _LECH_DONG_HO = 300
+
+
+def _la_open_id(v) -> bool:
+    return isinstance(v, str) and bool(re.fullmatch(r"ou_[A-Za-z0-9]+", v))
 
 
 @dataclass(frozen=True)
@@ -226,28 +236,50 @@ class ChungMinhLich:
     """Bằng chứng quyền xem do PLATFORM tính khi chạy một lịch mode=run (08/10/2026).
 
     Bot chỉ có quyền XEM tài liệu thì API danh sách thành viên trả 403 — Mark không tự
-    chứng minh được người hỏi xem được bảng, và chặn tất cả. Platform kiểm thay bằng token
-    Lark CỦA CHÍNH người đặt lịch (lúc tạo và lại ở mỗi lần chạy), rồi đặt vào payload job
-    `nguon_da_kiem` = {loai, token, table_id, kiem_luc, boi}. Chỉ dựng từ payload job theo
-    lịch (`lsr_platform._kenh_cua_job`); `nguoi_dat` = `scheduled_by` của chính job đó.
-    Chỉ được tính khi `dung_cho` khớp TUYỆT ĐỐI tài liệu + bảng + người hỏi và còn mới."""
+    chứng minh được người hỏi xem được bảng, và chặn tất cả. Platform đặt vào payload job
+    `nguon_da_kiem` = {loai, token, table_id, kiem_luc, boi[, cach, nguoi_dat]}. Chỉ dựng từ
+    payload job theo lịch (`lsr_platform._kenh_cua_job`); `nguoi_dat` = `scheduled_by` của
+    chính job đó, `nguon_lich` = `schedule_source` của job đó. Hai loại:
+      • THEO NGƯỜI (không có `cach`, hoặc `cach` khác): Platform kiểm bằng token Lark CỦA
+        người đặt. Chỉ tính khi `boi` == `scheduled_by` == người hỏi.
+      • `cach` == "bot_console" (CACH_BOT_CONSOLE): lịch do quản trị agent đặt trên console
+        (Platform chỉ cho moderator+ đặt), bot đã được cấp quyền xem bảng. Chỉ tính khi job
+        có `schedule_source` == "console"; KHÔNG đòi người hỏi == người đặt.
+    Cả hai: (loại, token, bảng) khớp TUYỆT ĐỐI, bảng không rỗng, `kiem_luc` trong 2 giờ
+    (lệch tương lai ≤ 5 phút). Không khớp thì như không có. Luật Base nội bộ xét TRƯỚC."""
     loai: str
     token: str
     table_id: str
     kiem_luc: float          # epoch giây
     boi: str
     nguoi_dat: str
+    cach: str = ""
+    nguon_lich: str = ""
 
     @classmethod
-    def tu_payload(cls, p, nguoi_dat: str) -> "ChungMinhLich | None":
-        """Payload `nguon_da_kiem` → bằng chứng, None nếu thiếu/sai kiểu (không đoán)."""
+    def tu_payload(cls, p, nguoi_dat: str, *, nguon_lich: str = "") -> "ChungMinhLich | None":
+        """Payload `nguon_da_kiem` → bằng chứng, None nếu thiếu/sai kiểu (không đoán).
+
+        `nguon_lich` = `schedule_source` của job theo lịch ("console" | "lark" | "")."""
         if not isinstance(p, dict):
             return None
         loai, token, bang, boi = (p.get(k) for k in ("loai", "token", "table_id", "boi"))
-        if (loai not in _TEN_LOAI or not _id_app(token) or not _id_app(bang)
-                or not isinstance(boi, str) or not re.fullmatch(r"ou_[A-Za-z0-9]+", boi)
-                or not isinstance(nguoi_dat, str) or not nguoi_dat):
+        if loai not in _TEN_LOAI or not _id_app(token) or not _id_app(bang):
             return None
+        if p.get("cach") == CACH_BOT_CONSOLE:
+            # Chỉ lịch đặt TRÊN CONSOLE; lịch tạo trong chat ("lark") giữ luật theo người.
+            if nguon_lich != "console":
+                return None
+            if boi in (None, ""):
+                boi = ""
+            elif not _la_open_id(boi):
+                return None
+            cach = CACH_BOT_CONSOLE
+            nguoi_dat = nguoi_dat if _la_open_id(nguoi_dat) else ""
+        else:
+            if (not _la_open_id(boi) or not isinstance(nguoi_dat, str) or not nguoi_dat):
+                return None
+            cach = ""
         try:
             t = datetime.datetime.fromisoformat(
                 str(p.get("kiem_luc") or "").replace("Z", "+00:00"))
@@ -255,14 +287,26 @@ class ChungMinhLich:
             return None
         if t.tzinfo is None:
             t = t.replace(tzinfo=datetime.timezone.utc)
-        return cls(loai, token, bang, t.timestamp(), boi, nguoi_dat)
+        return cls(loai, token, bang, t.timestamp(), boi, nguoi_dat, cach,
+                   nguon_lich if isinstance(nguon_lich, str) else "")
+
+    @property
+    def la_console(self) -> bool:
+        return self.cach == CACH_BOT_CONSOLE
+
+    @property
+    def ly_do(self) -> str:
+        return LY_DO_LICH_CONSOLE if self.la_console else LY_DO_LICH
 
     def dung_cho(self, loai: str, token: str, table_id: str, nguoi: str,
                  now: float | None = None) -> bool:
         now = time.time() if now is None else now
-        return (bool(table_id) and self.boi == self.nguoi_dat == nguoi
+        khop = (bool(table_id) and bool(self.table_id)
                 and (self.loai, self.token, self.table_id) == (loai, token, table_id)
                 and now - _HAN_CHUNG_MINH <= self.kiem_luc <= now + _LECH_DONG_HO)
+        if self.la_console:
+            return khop and self.nguon_lich == "console"
+        return khop and bool(nguoi) and self.boi == self.nguoi_dat == nguoi
 
 
 def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str,
@@ -271,7 +315,8 @@ def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str,
     """(được đọc?, vì sao). Chỉ trả True khi CHỨNG MINH được người hỏi có quyền.
 
     `chung_minh` (chỉ lịch Platform, xem `ChungMinhLich`) thay cho bước tra thành viên —
-    SAU mọi luật Base nội bộ, nên không bao giờ mở bảng Audit/Chi phí."""
+    SAU mọi luật Base nội bộ, nên không bao giờ mở bảng Audit/Chi phí. Lịch console
+    (`bot_console`) không có người hỏi vẫn bị Base nội bộ chặn ("không biết ai đang hỏi")."""
     boss = {x for x in (os.environ.get("AGENT_BOSS_OPEN_ID", "").strip(),
                         os.environ.get("STEVEN_BOSS_OPEN_ID", "").strip()) if x}
     if nguoi and nguoi in boss:
@@ -282,11 +327,11 @@ def quyen_nguoi_hoi(loai: str, token: str, nguoi: str, *wiki_tokens: str,
         if not ok:
             return False, ly_do
         if hop_le:
-            return True, f"{ly_do}; {LY_DO_LICH}"
+            return True, f"{ly_do}; {chung_minh.ly_do}"
         quyen, bang_chung = _quyen_thuc_te(loai, token, nguoi)
         return (True, f"{ly_do}; {bang_chung}") if quyen else (False, bang_chung)
     if hop_le:
-        return True, LY_DO_LICH
+        return True, chung_minh.ly_do
     if _trong_cay_wiki(token, *wiki_tokens):
         return True, "nằm trong Nguồn Wiki chủ agent đã khai báo"
     try:
@@ -317,6 +362,13 @@ def _gon_loi(s) -> str:
     """Lý do từ payload Platform → một dòng ngắn, không thành thẻ `<at>`/`{{@…}}` được."""
     s = " ".join(str(s or "").split())[:200]
     return re.sub(r"\{(?=\{)", "{ ", s.replace("<", "‹").replace(">", "›"))
+
+
+def _loi_lich_platform(ten_loai: str, loi_lich: str) -> str:
+    """Platform báo `nguon_loi` cho lượt theo lịch — nêu lý do + đường sửa trên console."""
+    return (f"Không đọc {ten_loai} này theo lịch: Platform chưa kiểm được bảng "
+            f"({_gon_loi(loi_lich)}). Mở console → Lịch chạy để kiểm lại: bot Mark đã được "
+            "thêm vào tài liệu (quyền xem) và link đúng bảng chưa, rồi lưu lại lịch.")
 
 
 class TuChoi(Exception):
@@ -356,31 +408,39 @@ def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None,
     # Lệnh cứng chạy trước audit.bat_dau nên truyền asker tường minh. None giữ đường
     # doc_bang/dem_bang cũ; chuỗi rỗng vẫn xét như không có danh tính, không mượn bot.
     # `chung_minh`/`loi_lich`: chỉ `tien_do.lenh_tiendo` truyền, và chỉ cho job THEO LỊCH
-    # (lấy từ payload Platform). Không truyền thì mọi đường cũ y như trước.
-    them = {"chung_minh": chung_minh} if chung_minh is not None else {}
+    # (lấy từ payload Platform). Không truyền thì mọi đường cũ y như trước. Chỉ phép kiểm
+    # `bot_console` của lịch console (khớp bảng, còn mới) mới cho đọc khi người hỏi rỗng.
+    them ={"chung_minh": chung_minh} if chung_minh is not None else {}
     ok, vi_sao = quyen_nguoi_hoi(
         loai, token, _nguoi_hoi() if nguoi_hoi is None else nguoi_hoi, node,
         table_id=phu, **them)
     if not ok:
+        noi_bo = (token in base_noi_bo() or "Audit/Chi phí" in vi_sao or
+                  "bảng được phép" in vi_sao or "metadata bảo vệ" in vi_sao)
+        loi_noi_bo = (f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Nhờ chủ agent cấu hình "
+                      "đúng cặp app_token/table_id trong mixed_base_read_allowlist.json; không "
+                      "mở quyền cho cả Base nội bộ.")
+        if chung_minh is not None and chung_minh.la_console:
+            # Lịch console: không có "người hỏi" để hướng dẫn xin quyền — chỉ có nội bộ
+            # (không mở), lỗi Platform, hoặc phép kiểm không khớp/đã cũ.
+            if noi_bo:
+                raise TuChoi(loi_noi_bo)
+            if loi_lich:
+                raise TuChoi(_loi_lich_platform(ten_loai, loi_lich))
+            raise TuChoi(
+                f"Không đọc {ten_loai} này theo lịch: phép kiểm của Platform không khớp đúng "
+                "bảng trong lệnh hoặc đã quá 2 giờ. Mở console → Lịch chạy, kiểm lại link "
+                "bảng (đúng ?table=…) rồi lưu lại lịch.")
         if vi_sao.startswith("không biết ai đang hỏi"):
             raise TuChoi(
                 f"Không thể kiểm tra quyền đọc {ten_loai}: Console chưa chuyển danh tính "
-                "Lark đã xác thực của tài khoản đang hỏi. Hãy kết nối tài khoản Console "
-                "với danh tính Lark, hoặc mở lại yêu cầu từ Lark. Chia sẻ thêm tài liệu "
-                "không tự khắc phục lỗi nhận diện này."
+                "Lark đã xác thực của tài khoản đang hỏi. Hãy mở lại yêu cầu từ Lark. "
+                "Chia sẻ thêm tài liệu không tự khắc phục lỗi nhận diện này."
             )
-        if (token in base_noi_bo() or "Audit/Chi phí" in vi_sao or
-                "bảng được phép" in vi_sao or "metadata bảo vệ" in vi_sao):
-            raise TuChoi(
-                f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Nhờ chủ agent cấu hình đúng "
-                "cặp app_token/table_id trong mixed_base_read_allowlist.json; không mở quyền "
-                "cho cả Base nội bộ."
-            )
+        if noi_bo:
+            raise TuChoi(loi_noi_bo)
         if loi_lich:
-            raise TuChoi(
-                f"Không đọc {ten_loai} này theo lịch: Platform chưa kiểm được người đặt lịch "
-                f"xem được bảng ({_gon_loi(loi_lich)}). Người đặt lịch mở console → Lịch chạy "
-                "để Kết nối Lark/kiểm lại.")
+            raise TuChoi(_loi_lich_platform(ten_loai, loi_lich))
         raise TuChoi(
             f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Mark chỉ đọc {ten_loai} mà CHÍNH "
             f"người hỏi cũng được xem. Nhờ chủ {ten_loai} chia sẻ cho bạn, hoặc nhờ chủ agent "

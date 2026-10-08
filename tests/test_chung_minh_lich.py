@@ -144,10 +144,10 @@ def test_mo_nguon_wiki_so_voi_token_da_giai(cua, monkeypatch):
 
 def test_mo_nguon_nguon_loi_noi_ly_do_va_console(cua):
     with pytest.raises(BT.TuChoi) as e:
-        BT.mo_nguon(LINK, nguoi_hoi=OWNER, loi_lich="người đặt chưa Kết nối Lark <at>")
+        BT.mo_nguon(LINK, nguoi_hoi=OWNER, loi_lich="bot chưa được thêm vào Base <at>")
     s = str(e.value)
-    assert "người đặt chưa Kết nối Lark" in s and "<at" not in s
-    assert "console → Lịch chạy để Kết nối Lark/kiểm lại" in s
+    assert "bot chưa được thêm vào Base" in s and "<at" not in s
+    assert "console → Lịch chạy để kiểm lại" in s and "Kết nối" not in s
 
 
 def test_mo_nguon_khong_chung_minh_giu_luat_cu(cua):
@@ -222,8 +222,8 @@ def test_tiendo_go_tay_mang_chung_minh_bi_bo_qua_va_huong_dan(td):
     k = {"chat_type": "group", "nguon_da_kiem": _p(), "scheduled_by": OWNER}
     text = T.lenh_tiendo(LINK, kenh=k, sender_open_id=OWNER)
     assert "Gửi brief" not in text
-    assert ("thêm bot vào tài liệu (quyền xem), dán link bảng, đặt lịch trên console"
-            in text) and "Kết nối tài khoản Lark" in text
+    assert ("thêm bot Mark vào tài liệu (quyền xem), dán link bảng, đặt lịch trên console "
+            "(chọn nhóm nhận, giờ)" in text) and "Kết nối" not in text
 
 
 def test_tool_model_khong_nhan_chung_minh(td, monkeypatch):

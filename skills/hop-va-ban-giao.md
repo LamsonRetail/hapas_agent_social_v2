@@ -231,11 +231,15 @@ Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày m
 - Nhắc một câu cố định (vd "14h nhắc cả nhóm nộp báo cáo") thì mode=send, message là đúng
   câu sẽ nhắn.
 - Code riêng của lệnh theo lịch được tag PIC việc quá hạn gần đây; `tag=khong` tắt tag.
-  Model không tự gửi tin hay tag người bằng tool. Quyền đọc Base xét theo người đặt lịch;
-  lịch không có người đặt phải tạo lại trên console, không mượn quyền bot.
+  Model không tự gửi tin hay tag người bằng tool. Lịch đặt trong chat: quyền đọc Base xét
+  theo người đặt lịch; lịch không có người đặt phải tạo lại, không mượn quyền bot.
+- Lịch đặt TRÊN CONSOLE bởi quản trị agent: Mark đọc bảng bằng quyền xem đã cấp cho bot
+  và chỉ gửi kết quả vào nhóm nhận của lịch đó. Phần đọc này tách khỏi kho kiến thức:
+  không nạp vào kho hay Nguồn Wiki, không lưu thành trí nhớ dài hạn (remember). Base
+  nội bộ (Audit/Chi phí) vẫn không bao giờ mở
 - Bảng mà bot chỉ có quyền xem (vd CHECKLIST DỰ ÁN 20.10): Mark không tự tra được ai xem
-  được bảng nên /tiendo gõ tay có thể bị từ chối. Hướng dẫn đúng một câu: thêm bot vào tài
-  liệu (quyền xem), dán link bảng, đặt lịch trên console → Lịch chạy (lần đầu bấm Kết nối
-  tài khoản Lark). Khi đó Platform kiểm bằng tài khoản Lark của người đặt lịch ở mỗi lần
-  chạy. Lịch báo "Platform chưa kiểm được…" thì người đặt mở console → Lịch chạy để Kết nối
-  Lark hoặc kiểm lại; không hứa Mark tự sửa được
+  được bảng nên /tiendo gõ tay có thể bị từ chối. Hướng dẫn đúng một câu: thêm bot Mark vào
+  tài liệu (quyền xem), dán link bảng, đặt lịch trên console (chọn nhóm nhận, giờ) — việc
+  này do quản trị agent làm. Không có bước kết nối tài khoản nào. Lịch báo "Platform chưa
+  kiểm được…" hoặc "không khớp đúng bảng" thì quản trị agent mở console → Lịch chạy, kiểm
+  lại bot đã được thêm và link đúng bảng rồi lưu lại lịch; không hứa Mark tự sửa được
