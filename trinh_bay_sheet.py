@@ -74,6 +74,7 @@ API Lark Sheets đã đối chiếu tài liệu chính thức (bản markdown c�
 from __future__ import annotations
 
 import collections
+import contextvars
 import dataclasses
 import datetime
 import decimal
@@ -102,6 +103,7 @@ NHO_DONG, NHO_COT = 5, 6       # bảng tí hon gấp vào Tổng quan
 TRAN_VUNG_MOI_LAN = 200        # số vùng kiểu tối đa mỗi lần styles_batch_update
 LUOI_DONG, LUOI_COT = 200, 20  # lưới tab mới của Lark khi không đọc được lưới thật
 NGHI_GHI = 0.2                 # giây nghỉ giữa hai khối ghi (như meta_ads/sheet_lon cũ)
+NGAN_SACH_CHO = 180.0          # tổng giây được chờ lùi (429) trong MỘT lần xuất
 _ngu = time.sleep              # bộ thử thay để không ngủ thật
 
 TAB_TONG_QUAN = "Tổng quan"
@@ -622,6 +624,26 @@ def _ghi(tok: str, sid: str, values: list, dong_dau: int = 1) -> None:
             _ngu(NGHI_GHI)                 # nghỉ giữa các khối: Lark báo vượt tần suất (429)
 
 
+class HetNganSachCho(RuntimeError):
+    """Lark báo vượt tần suất quá lâu: hết NGAN_SACH_CHO giây chờ của lần xuất này — dừng,
+    bảng tính (nếu đã tạo) còn thiếu, link gắn vào lỗi (`trinh_bay_url`)."""
+
+
+#: {"con": giây còn được chờ} của lần xuất đang chạy (mỗi luồng/lượt riêng).
+_NGAN_SACH: contextvars.ContextVar = contextvars.ContextVar("tb_ngan_sach_cho", default=None)
+
+
+def _cho(giay: float) -> None:
+    ns = _NGAN_SACH.get()
+    if ns is not None:
+        if ns["con"] < giay:
+            raise HetNganSachCho(
+                f"Lark báo vượt tần suất quá lâu: đã chờ hết {NGAN_SACH_CHO:.0f} giây cho lần "
+                "xuất này — dừng ghi, bảng tính CHƯA đủ dữ liệu")
+        ns["con"] -= giay
+    _ngu(giay)
+
+
 def _ghi_khoi(tok: str, sid: str, khoi: list, dong_dau: int, cot_dau: int) -> None:
     """Một khối qua `apify_tool._write_values` (chặn chèn công thức); Lark báo vượt tần suất
     thì lùi dần và ghi LẠI đúng vùng đó (ghi đè cùng vùng — không nhân đôi dòng)."""
@@ -634,7 +656,7 @@ def _ghi_khoi(tok: str, sid: str, khoi: list, dong_dau: int, cot_dau: int) -> No
             return
         except RuntimeError as e:
             if lan < 5 and _RE_DAY.search(str(e)):
-                _ngu(min(24.0, 1.5 * 2 ** lan))
+                _cho(min(24.0, 1.5 * 2 ** lan))
                 continue
             raise
 
@@ -1251,6 +1273,14 @@ def xuat(tieu_de: str, bang: list, tong_quan: TongQuan | None = None, goc: Bang 
     của bảng tính ĐẦU hoặc lỗi callback thì NÉM (như code cũ); bảng tính tiếp theo hỏng thì
     các phần đã ghi vẫn có Tổng quan + quyền, phần hỏng báo rõ (`phan_hong`, `day_du`=False).
     Lỗi trang trí chỉ cảnh báo."""
+    moc = _NGAN_SACH.set({"con": NGAN_SACH_CHO})
+    try:
+        return _xuat(tieu_de, bang, tong_quan, goc, sau_khi_tao, cap_quyen, luc)
+    finally:
+        _NGAN_SACH.reset(moc)
+
+
+def _xuat(tieu_de, bang, tong_quan, goc, sau_khi_tao, cap_quyen, luc) -> KetQua:
     tq = tong_quan or TongQuan(tieu_de)
     if not tq.nguoi_yeu_cau:
         tq = dataclasses.replace(tq, nguoi_yeu_cau=_ten_nguoi_yeu_cau())
@@ -1474,7 +1504,13 @@ def _ghi_tabs(tok: str, tabs: list, cb: list, sid_dau: str | None, vi_tri0: int,
                        dinh_dang_xong=dinh_dang_xong and ve is None, mau=dong,
                        canh_bao=cb, dong_dau=dd, rieng_tab=ve is None, tong=tong,
                        an_toan=an_toan or not dinh_dang_xong)
-    for sid, (_, c) in can.items():          # bỏ cột lưới trống bên phải (lưới mặc định 20)
+    # Bỏ cột lưới trống bên phải CHỈ ở tab vừa dựng trong lượt này. Tab `noi` đã có dữ liệu
+    # từ bước trước (cứu bảng tí hon khi Tổng quan hỏng) thì KHÔNG bao giờ bỏ cột: bảng ghi
+    # nối hẹp hơn bảng sẵn có — bỏ cột theo bảng hẹp là xoá mất cột dữ liệu (review 09/10).
+    co_san = {sid_noi} if noi[1] > 0 else set()
+    for sid, (_, c) in can.items():
+        if sid in co_san:
+            continue
         _bo_cot_thua(tok, sid, max(c, luoi.get(sid, (0, 0))[1] or LUOI_COT), c, cb)
     return da_ghi
 
@@ -1530,39 +1566,73 @@ def _ghi_tong_quan(tok, url, tq, da_ghi, gap, kiem, cb, luc, khac) -> tuple[str,
     except Exception as e:  # noqa: BLE001
         return sid, hong("Ghi tab Tổng quan", e)
     _trang_tri_tong_quan(tok, sid, dong, vai, cb)
-    # Đọc lại: dòng tiêu đề + dòng cuối có chữ ở cột A (ghi chú / mục lục).
+    return sid, _kiem_tong_quan(tok, sid, dong, vai, tq.tieu_de)
+
+
+def _kiem_tong_quan(tok: str, sid: str, dong: list, vai: dict, tieu_de: str) -> dict:
+    """Đọc lại Tổng quan: dòng tiêu đề + dòng cuối có chữ ở cột A (ghi chú / mục lục)."""
     cuoi = max((i for i, r in enumerate(dong, 1) if r and r[0] not in ("", None)), default=1)
-    tg = TabDaGhi(TAB_TONG_QUAN, sid, [Cot(str(tq.tieu_de))], cuoi - 1, 1, r_kiem=cuoi)
+    tg = TabDaGhi(TAB_TONG_QUAN, sid, [Cot(str(tieu_de))], cuoi - 1, 1, r_kiem=cuoi)
     k = kiem_ghi(tok, [tg])["tabs"][0]
     k.update(du_kien=len(dong), cot=vai["rong"])
     if k["ket"] == "du":
         k["cau"] = f"Đã ghi đủ {len(dong)} dòng (số liệu chính, mục lục, ghi chú)"
     elif k["ket"] == "thieu":
         k["cau"] = "THIẾU: đọc lại không thấy đủ nội dung Tổng quan"
-    return sid, k
+    return k
+
+
+def ghi_lai_tong_quan(tok: str, sid: str, url: str, tq: TongQuan, tabs: list,
+                      kiem: dict | None = None, gap: list | None = None,
+                      canh_bao: list | None = None, so_dong_cu: int = 0) -> dict:
+    """Ghi lại Tổng quan vào tab có sẵn (ghi nối brand vào sheet của lượt, việc nền). Không ném.
+
+    Thứ tự an toàn (review 09/10/2026): ghi bản MỚI xuống DƯỚI bản cũ (dòng so_dong_cu+1…),
+    ghi được rồi mới XOÁ các dòng bản cũ (1..so_dong_cu) — bản mới dồn lên đầu, ô "" không
+    chặn chữ tràn, kiểu/gộp ô cũ đi theo dòng bị xoá. Ghi hỏng thì bản cũ còn nguyên. Xong
+    thì trang trí và đọc lại kiểm.
+    -> {"so_dong": số dòng tab đang dùng, "ok": bool, "kiem": mục kiểm Tổng quan}."""
+    cb = canh_bao if canh_bao is not None else []
+    dong, vai = dung_tong_quan(tq, tabs, gap or [], kiem, url)
+    cu = max(0, int(so_dong_cu or 0))
+    luoi = _luoi(tok).get(sid, (0, 0))
+    try:
+        _noi_luoi(tok, sid, luoi, cu + len(dong), max((len(r) for r in dong), default=1))
+        try:
+            _ghi_gon(tok, sid, dong, dong_dau=cu + 1)
+        except Exception:  # noqa: BLE001 — ô link bị từ chối → ghi lại không link
+            _ghi_gon(tok, sid, _bo_link(dong), dong_dau=cu + 1)
+    except Exception as e:  # noqa: BLE001
+        _canh(cb, "Ghi lại tab Tổng quan (bản cũ giữ nguyên, CHƯA cập nhật)", e, du=False)
+        return {"so_dong": cu, "ok": False, "kiem": {
+            "tab": TAB_TONG_QUAN, "du_kien": len(dong), "cot": vai["rong"], "ket": "thieu",
+            "cau": f"không ghi lại được Tổng quan ({type(e).__name__}) — tab còn bản cũ, "
+                   "số liệu/ghi chú mới chưa vào sheet"}}
+    if cu:
+        try:
+            _goi("DELETE", f"/open-apis/sheets/v2/spreadsheets/{tok}/dimension_range",
+                 body={"dimension": {"sheetId": sid, "majorDimension": "ROWS",
+                                     "startIndex": 1, "endIndex": cu}})
+        except Exception as e:  # noqa: BLE001
+            _canh(cb, "Xoá bản Tổng quan cũ (bản mới nằm BÊN DƯỚI bản cũ)", e, du=False)
+            return {"so_dong": cu + len(dong), "ok": False, "kiem": {
+                "tab": TAB_TONG_QUAN, "du_kien": len(dong), "cot": vai["rong"],
+                "ket": "chua_kiem",
+                "cau": f"bản Tổng quan mới ghi ở dòng {cu + 1} trở đi, bản cũ chưa xoá được"}}
+    _trang_tri_tong_quan(tok, sid, dong, vai, cb)
+    k = _kiem_tong_quan(tok, sid, dong, vai, tq.tieu_de)
+    return {"so_dong": len(dong), "ok": k["ket"] != "thieu", "kiem": k}
 
 
 def ghi_tong_quan_vao(tok: str, sid: str, url: str, tq: TongQuan, tabs: list,
                       kiem: dict | None = None, gap: list | None = None,
                       canh_bao: list | None = None, so_dong_cu: int = 0) -> int:
-    """Ghi/ghi ĐÈ Tổng quan vào tab có sẵn (ghi nối thêm brand vào sheet của lượt, việc nền).
-    Bản trước (`so_dong_cu` dòng) được XOÁ DÒNG (không ghi đè ô "" — ô "" chặn chữ tràn),
-    rồi ghi gọn + trang trí. -> số dòng đã ghi (bản cũ nếu ghi hỏng). Không ném."""
-    cb = canh_bao if canh_bao is not None else []
-    dong, vai = dung_tong_quan(tq, tabs, gap or [], kiem, url)
-    luoi = _luoi(tok).get(sid, (0, 0))
-    if so_dong_cu > 1:
-        try:      # giữ dòng 1 (tab phải còn ít nhất một dòng); dòng 2..cũ bỏ hẳn
-            _goi("DELETE", f"/open-apis/sheets/v2/spreadsheets/{tok}/dimension_range",
-                 body={"dimension": {"sheetId": sid, "majorDimension": "ROWS",
-                                     "startIndex": 2, "endIndex": so_dong_cu}})
-            luoi = (max(1, (luoi[0] or LUOI_DONG) - (so_dong_cu - 1)), luoi[1])
-        except Exception as e:  # noqa: BLE001
-            _canh(cb, "Xoá bản Tổng quan cũ", e)
-    try:
-        _viet_tong_quan(tok, sid, dong, luoi)
-    except Exception as e:  # noqa: BLE001
-        _canh(cb, "Ghi tab Tổng quan", e, du=False)
-        return so_dong_cu
-    _trang_tri_tong_quan(tok, sid, dong, vai, cb)
-    return len(dong)
+    """Như `ghi_lai_tong_quan`, chỉ trả số dòng tab đang dùng (giữ cho bên gọi cũ)."""
+    return ghi_lai_tong_quan(tok, sid, url, tq, tabs, kiem, gap, canh_bao,
+                             so_dong_cu)["so_dong"]
+
+
+def gop_kiem_tong_quan(kiem: dict, ket_tq: dict) -> dict:
+    """Gộp mục kiểm Tổng quan (của `ghi_lai_tong_quan`) vào kết quả kiểm các tab dữ liệu:
+    Tổng quan hỏng thì `day_du` không còn True."""
+    return _gop_kiem([kiem, {"tabs": [ket_tq["kiem"]]}])

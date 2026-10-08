@@ -266,25 +266,31 @@ class SoSheet:
             print(f"[sheet_lon] xếp tab lỗi (bỏ qua): {A._che_token(e)[:120]}")
 
     def ghi_tong_quan(self, ten: str, tq, kiem: dict | None = None,
-                      bo_qua: Iterable[str] = ()) -> None:
+                      bo_qua: Iterable[str] = ()) -> dict:
         """Ghi tab Tổng quan `ten` (mục lục các tab dữ liệu + kiểm ghi + số liệu/ghi chú của
-        `tq`), xoá dòng thừa của bản trước, trang trí, rồi xếp tab: Tổng quan đầu, các tab
-        khác theo thứ tự thêm (`addSheet` của Lark chèn tab mới ở vị trí 0). Hỏng trang
-        trí/xếp tab chỉ cảnh báo."""
+        `tq`) qua `trinh_bay_sheet.ghi_lai_tong_quan` (ghi bản mới trước, xoá bản cũ sau),
+        rồi xếp tab: Tổng quan đầu, các tab khác theo thứ tự thêm (`addSheet` của Lark chèn
+        tab mới ở vị trí 0). -> kết quả kiểm GỘP (tab dữ liệu + Tổng quan) — Tổng quan hỏng
+        thì `day_du` không còn True; cũng lưu vào sổ (`s["kiem"]`). Không ném lỗi Lark."""
         tabs = self.tab_da_ghi(set(bo_qua) | {ten})
-        if kiem is not None:
-            with self.v._khoa:
-                self.s["kiem"] = {"day_du": kiem.get("day_du"), "cau": kiem.get("cau")}
-                self._luu()
         t = self.dam_bao_tab(ten)
         kiem_ = getattr(self.v, "kiem_quyen", None)
         if kiem_:
             kiem_()                         # tiến trình đã mất quyền chủ thì không ghi sheet
         # Ghi GỌN qua lớp chung (xoá dòng bản trước, không đệm ô "" — ô "" chặn chữ dài tràn
         # sang ô kế), trang trí luôn. Không ném: Tổng quan hỏng không làm hỏng việc.
-        n = T.ghi_tong_quan_vao(self.s["token"], t["sheet_id"], self.s.get("url") or "", tq,
-                                tabs, kiem, so_dong_cu=int(t.get("so_dong_cu") or 0))
+        cb: list = []
+        ket = T.ghi_lai_tong_quan(self.s["token"], t["sheet_id"], self.s.get("url") or "", tq,
+                                  tabs, kiem, canh_bao=cb,
+                                  so_dong_cu=int(t.get("so_dong_cu") or 0))
+        n = ket["so_dong"]
+        gop = T.gop_kiem_tong_quan(kiem or {"tabs": []}, ket)
+        if cb:
+            print(f"[sheet_lon] Tổng quan: {'; '.join(cb)[:300]}")
         with self.v._khoa:
             t.update(so_dong_cu=n, da_ghi=n, hash=None, so_dong_dl=max(0, n - 1), so_cot_dl=4)
+            self.s["kiem"] = {"day_du": gop.get("day_du"), "cau": gop.get("cau"),
+                              "canh_bao": cb[:4] or None}
             self._luu()
         self.sap_tab([ten] + [t for t in self.s["tabs"] if t != ten])
+        return gop

@@ -2209,7 +2209,7 @@ def chay_viec_nen(v) -> tuple[str, str]:
                 f"{len(ts['post_urls'])} bài · nền tảng: {', '.join(v.d['nen_tang'])}",
                 bang_bl, tk, ghi_chu, len(rows))
             try:
-                s.ghi_tong_quan(T.TAB_TONG_QUAN, tq, kiem)
+                kiem = s.ghi_tong_quan(T.TAB_TONG_QUAN, tq, kiem) or kiem
             except Exception as e:  # noqa: BLE001
                 if type(e).__name__ == "MatQuyen":
                     raise

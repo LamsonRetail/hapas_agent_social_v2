@@ -375,15 +375,24 @@ def _sau_khi_noi(co: dict, title: str, ngay) -> dict:
     cb: list = []
     tab = co["tabs"][0]
     tab.so_dong = len(co["rows"])
+    # Đọc lại dòng CUỐI vừa nối (không phải dòng cuối của lần ghi trước — review 09/10).
+    cuoi = max((i for i, r in enumerate(co["rows"]) if any(v not in ("", None) for v in r)),
+               default=None)
+    tab.r_kiem = tab.dong_dau if cuoi is None else tab.dong_dau + 1 + cuoi
     TB.trang_tri_bang(co["tok"], co["sid"], tab.cot, tab.so_dong, mau=co["rows"],
                       dinh_dang_xong=False, canh_bao=cb)
     kiem = TB.kiem_ghi(co["tok"], co["tabs"])
     if co.get("tq_sid"):
         _, tq = _tong_quan_sheet(co.get("title") or title, co["rows"], co["notes"], ngay)
-        co["tq_dong"] = TB.ghi_tong_quan_vao(co["tok"], co["tq_sid"], co["url"], tq, co["tabs"],
-                                             kiem=kiem, canh_bao=cb, so_dong_cu=co["tq_dong"])
-    return {"day_du": kiem.get("day_du"), "kiem_ghi": kiem.get("cau") or "",
-            "bang_tinh_tiep": None}
+        ket = TB.ghi_lai_tong_quan(co["tok"], co["tq_sid"], co["url"], tq, co["tabs"],
+                                   kiem=kiem, canh_bao=cb, so_dong_cu=co["tq_dong"])
+        co["tq_dong"] = ket["so_dong"]
+        kiem = TB.gop_kiem_tong_quan(kiem, ket)
+    ra = {"day_du": kiem.get("day_du"), "kiem_ghi": kiem.get("cau") or "",
+          "bang_tinh_tiep": None}
+    if cb:
+        ra["canh_bao_trinh_bay"] = "; ".join(c[:140] for c in cb[:4])[:600]
+    return ra
 
 
 FB_ADS_LIBRARY_SCHEMA = {
