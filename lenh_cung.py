@@ -47,6 +47,7 @@ BANG_LENH: dict[str, str] = {
     "/bang": "doc_bang",
     "/topads": "tiktok_top_ads",
     "/hapas": "binh_luan_kenh_nha",
+    "/soads": "chi_so_ads",
 }
 
 #: Tool ĐI KÈM được phép gọi thêm trong cùng lệnh ép. `/bang` ép `doc_bang` (đọc), nhưng
