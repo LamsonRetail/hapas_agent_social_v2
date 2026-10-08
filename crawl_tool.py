@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -39,6 +38,7 @@ from pathlib import Path
 import lark_client as lark
 import memory_store
 from apify_tool import _bang_an_toan, _create_sheet, _first_sheet_id, _grant
+from cli_support import env_tien_trinh_con
 from config import config
 from web_tool import _DA_BIET_CHAN, _PY
 
@@ -133,7 +133,7 @@ def _handle(args: dict, **kwargs) -> str:
         n = 100
     n = max(1, min(n, 1000))
 
-    env = dict(os.environ)
+    env = env_tien_trinh_con()  # không mang token Meta vào Scrapling
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     try:

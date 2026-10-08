@@ -135,6 +135,12 @@ def _do_reply(msg: dict) -> None:
             # chat, trần thời gian và gửi bù như đường job — hai cửa, một cuộc hội thoại.
             ct = str(msg.get("chat_type") or "").strip().lower()
             kenh = {"chat_type": "p2p" if ct == "p2p" else "group"} if ct else None
+            if kenh is not None:
+                # Người gửi lấy từ sự kiện Lark mà listener nhận (không từ nội dung tin):
+                # tool cần danh tính đã xác thực (chi_so_ads) chỉ tin nguồn này.
+                kenh["channel"] = "lark"
+                if str(sender_open_id or "").startswith("ou_"):
+                    kenh["nguoi_gui"] = sender_open_id
             reply, ok, treo = lsr_platform._chay_co_han(
                 brain.reply, text, phien, sender_open_id, kenh)
             failed = not ok and not treo

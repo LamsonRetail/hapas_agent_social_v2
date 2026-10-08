@@ -307,9 +307,10 @@ def co_the_day(k: dict) -> bool:
     return k.get("loai") in ("lark_gateway", "lark_truc_tiep", "web")
 
 
-def day_theo_kenh(k: dict, van: str, kid: str) -> bool:
+def day_theo_kenh(k: dict, van: str, kid: str, han_che: str = "") -> bool:
     """Gửi `van` MỘT lần qua kênh `k` (`kid` để khử trùng). True = đã đẩy; False = kênh
-    không đẩy được. Lỗi mạng thì ném — người gọi tự thử lại."""
+    không đẩy được. Lỗi mạng thì ném — người gọi tự thử lại. `han_che` = cờ `restricted`
+    (tool trả dữ liệu hạn chế) cho bản ghi web; tin Lark đi thẳng, không vào bản ghi."""
     loai = k.get("loai")
     if loai == "lark_gateway":
         import lsr_platform
@@ -321,7 +322,8 @@ def day_theo_kenh(k: dict, van: str, kid: str) -> bool:
         import lsr_platform
         # Tạm thời (02/10/2026): console chưa có kênh đẩy tin chủ động cho agent;
         # sự kiện "message" gắn vào job gốc là chỗ duy nhất console đọc được.
-        lsr_platform.bao_su_kien_job(k["job_id"], van, ma_su_kien=kid)
+        lsr_platform.bao_su_kien_job(k["job_id"], van, ma_su_kien=kid,
+                                     **({"han_che": han_che} if han_che else {}))
     else:
         return False
     return True

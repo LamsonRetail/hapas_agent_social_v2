@@ -59,6 +59,7 @@ import account_tool  # noqa: E402,F401  (registers `soi_tai_khoan`: soi tài kho
 import shopee_tool  # noqa: E402,F401  (registers `soi_san`: giá và sản phẩm trên Shopee)
 import tiktok_ads_tool  # noqa: E402,F401  (registers `tiktok_top_ads`: top ads TikTok -> Lark Sheet)
 import kenh_nha_tool  # noqa: E402,F401  (registers `binh_luan_kenh_nha`: bình luận kênh HAPAS qua API Meta)
+import meta_ads_tool  # noqa: E402,F401
 import chi_so_bai_tool  # noqa: E402,F401  (registers `chi_so_bai`: view/like/share theo danh sách link bài)
 import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ chi phí khi được hỏi)
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
@@ -293,6 +294,7 @@ _TOOL_CAN_XET = {
                            "chính HAPAS (API Meta, miễn phí) rồi xuất Lark Sheet", {}),
     "chi_so_bai": ("đếm view, like, bình luận, share, lưu của danh sách link bài "
                    "TikTok/YouTube/Instagram/Facebook/Threads rồi xuất Lark Sheet", {}),
+    "chi_so_ads": ("đọc số quảng cáo Meta HAPAS, danh mục chỉ số và xuất Sheet riêng cho người có quyền", {}),
     "fb_ads_library": ("tra Meta Ad Library xem đối thủ đang chạy quảng cáo gì", {}),
     "tiktok_top_ads": ("xem top quảng cáo TikTok theo từ khoá hoặc ngành (TikTok Creative "
                        "Center) rồi xuất Lark Sheet", {}),
@@ -996,6 +998,7 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     nhom = (kenh or {}).get("chat_type") == "group"
     # tell the remember/reminder tools the current context
     memory_store.set_current_sender(sender_open_id)
+    meta_ads_tool.set_context(kenh)
     scheduler.set_current_chat(chat_id)
     scheduler.set_current_chat_type((kenh or {}).get("chat_type"))
     # Lượt do LỊCH đẩy tới: không ai đang chờ xác nhận → không được đặt/huỷ lịch từ đây.

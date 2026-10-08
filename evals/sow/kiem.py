@@ -23,7 +23,7 @@ for _p in (_REPO, _REPO / "scripts"):
 # Đồng bộ tay với lsr_policy._MUTATING_EXACT; test_nghiem_thu_sow.py giữ hai danh sách khớp nhau.
 TOOL_GHI = frozenset({
     "social_listen", "social_deep_dive", "web_crawl", "soi_tai_khoan", "soi_san",
-    "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai", "schedule_reminder",
+    "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai", "chi_so_ads", "schedule_reminder",
     "cancel_reminder", "huy_viec_nen", "remember_about_user", "ghi_viec_base",
     "ghi_bai_hoc",
 })

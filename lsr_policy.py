@@ -81,6 +81,7 @@ _MUTATING_EXACT = {
     "binh_luan_kenh_nha": "write_data",
     # Chỉ số view/like/share theo danh sách link bài (Apify + YouTube API) → tạo Lark Sheet.
     "chi_so_bai": "write_data",
+    "chi_so_ads": "write_data",
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
     # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
@@ -255,7 +256,7 @@ def quyen_phat() -> set[str]:
 _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
-    "dem_bang", "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai",
+    "dem_bang", "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai", "chi_so_ads",
     "ghi_viec_base", "xem_truoc_viec_base", "tra_tien_do",
 })
 
@@ -295,7 +296,7 @@ _CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "socia
 #: `ghi_viec_base` (07/10/2026, ghi việc đã duyệt vào Base checklist) — chủ agent chốt: mặc
 #: định TẮT, không mượn công tắc nào. `tests/test_cong_tac_nang_luc.py` cho phép console
 #: chưa có dòng của các tool này.
-_CHO_CONSOLE = frozenset({"ghi_viec_base"})
+_CHO_CONSOLE = frozenset({"ghi_viec_base", "chi_so_ads"})
 
 #: Cổng env của máy chạy, xét SAU hợp đồng, TRƯỚC công tắc — chỉ thu hẹp. Lý do: khi agent
 #: chưa khai `capabilities` thì lớp công tắc không thu hẹp gì, nên một tool ghi Base chung

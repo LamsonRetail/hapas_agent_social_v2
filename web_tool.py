@@ -30,10 +30,10 @@ chữ ký request, không phải bot detection.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
+from cli_support import env_tien_trinh_con
 from config import config
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
@@ -126,7 +126,7 @@ def _handle(args: dict, **kwargs) -> str:
         "max_chars": max(500, min(mc, _MAX_CHARS)),
     }, ensure_ascii=False)
 
-    env = dict(os.environ)
+    env = env_tien_trinh_con()  # không mang token Meta vào Scrapling
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     try:
