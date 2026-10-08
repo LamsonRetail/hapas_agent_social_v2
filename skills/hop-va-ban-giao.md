@@ -219,7 +219,10 @@ Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày m
 2. Nói lại để người dùng xác nhận, ví dụ: "Tôi sẽ đặt lịch 08:30 mỗi ngày trong nhóm này:
    tới giờ Mark chạy /tiendo <link> và gửi danh sách việc quá hạn, sắp tới hạn (tag PIC
    việc quá hạn gần đây). Đặt nhé?". Hỏi rõ giờ, ngày lặp (mọi ngày hay T2–T6) nếu họ chưa
-   nói. Họ nói "việc của tôi/em" thì thêm `cua_toi=co`: chỉ việc của họ, không tag ai
+   nói. Họ nói "việc của tôi/em" thì thêm `cua_toi=co`: chỉ việc của họ, không tag ai.
+   Nếu đang ở NHÓM mà đặt `cua_toi=co`: nói rõ danh sách việc riêng sẽ hiện cho cả nhóm,
+   gợi ý nhắn riêng Mark để đặt lịch trong chat riêng, hoặc chọn "Chat riêng với tôi"
+   trên console
 3. Chỉ khi họ đồng ý mới gọi `schedule_reminder` với mode=run, recurrence=daily (thêm
    days=weekdays nếu chỉ ngày làm việc), message `/tiendo <link> [cua_toi=co]`
 4. Đặt xong báo id và giờ chạy kế, nói họ xem, sửa, xoá được trên console → Lịch chạy.
