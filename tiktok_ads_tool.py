@@ -683,7 +683,7 @@ def _xuat_sheet(title: str, ads: list[dict], bo: dict, n: int, ten_nguon: str, s
     cap: dict = {"granted": False}
 
     def cap_quyen(tok):
-        cap["granted"] = A._grant(tok, sender) if sender else False
+        TB.gop_quyen(cap, A._grant(tok, sender) if sender else False)
     kq = TB.xuat(title, [bang], tq, goc=TB.bang_goc([a["_goc"] for a in ads]),
                  cap_quyen=cap_quyen)
     return kq, cap["granted"]

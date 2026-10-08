@@ -45,7 +45,8 @@ API Lark Sheets đã đối chiếu tài liệu chính thức (bản markdown c�
 - Kiểu giá trị ghi được (chuỗi, số, link {text,link,type:url}, ngày = số ngày từ 1899-12-30 +
   định dạng ngày đặt TRƯỚC)
   https://open.feishu.cn/document/server-docs/docs/sheets-v3/data-types-supported-by-sheets.md
-- Định dạng số hỗ trợ (@, #,##0, #,##0.00, 0.00%, yyyy/MM/dd, yyyy/MM/dd HH:mm:ss …)
+- Định dạng số hỗ trợ (@, #,##0, #,##0.00, 0.00%, yyyy/MM/dd, yyyy/MM/dd HH:mm:ss …) — Lark
+  thật CHỈ nhận đúng danh sách này (thử 09/10/2026; định dạng tự chế bị 90204)
   https://open.feishu.cn/document/server-docs/docs/sheets-v3/data-formats-supported-by-sheets.md
 - Kiểu ô hàng loạt  PUT .../sheets/v2/spreadsheets/:t/styles_batch_update {data:[{ranges,style:{
   font{bold,italic,fontSize:"10pt/1.5"},formatter,hAlign 0/1/2,vAlign,foreColor,backColor,
@@ -61,6 +62,7 @@ API Lark Sheets đã đối chiếu tài liệu chính thức (bản markdown c�
   https://open.feishu.cn/document/server-docs/docs/sheets-v3/data-operation/merge-cells.md
 - Bộ lọc  POST .../sheets/v3/spreadsheets/:t/sheets/:sheet_id/filter {range,col,condition{
   filter_type}} — 20 lần/phút; mỗi tab một vùng lọc; "clear" = cột không có điều kiện
+  (đã chạy được trên Lark thật 09/10/2026)
   https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet-filter/create.md
   https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet-filter/filter-user-guide.md
 - Đọc lại  GET .../sheets/v2/spreadsheets/:t/values_batch_get?ranges=a,b
@@ -98,6 +100,9 @@ NGUONG_LON_DONG = 20_000       # bảng lớn: chỉ trang trí theo cột
 NGUONG_LON_O = 1_000_000
 NHO_DONG, NHO_COT = 5, 6       # bảng tí hon gấp vào Tổng quan
 TRAN_VUNG_MOI_LAN = 200        # số vùng kiểu tối đa mỗi lần styles_batch_update
+LUOI_DONG, LUOI_COT = 200, 20  # lưới tab mới của Lark khi không đọc được lưới thật
+NGHI_GHI = 0.2                 # giây nghỉ giữa hai khối ghi (như meta_ads/sheet_lon cũ)
+_ngu = time.sleep              # bộ thử thay để không ngủ thật
 
 TAB_TONG_QUAN = "Tổng quan"
 TAB_DU_LIEU = "Dữ liệu"
@@ -117,15 +122,19 @@ KIEU = {"chu", "chu_dai", "so_nguyen", "tien", "thap_phan", "phan_tram", "phan_t
         "ti_le", "ngay", "ngay_gio", "link", "ma"}
 _KIEU_SO = {"so_nguyen", "tien", "thap_phan", "phan_tram", "phan_tram_100", "ti_le"}
 
-# (định dạng ưa dùng, định dạng an toàn trong danh sách tài liệu) — ưa dùng hỏng thì lùi.
+# (định dạng dùng, định dạng lùi). Lark THẬT (thử 09/10/2026 trên bảng tính nháp) chỉ nhận
+# ĐÚNG danh sách tài liệu: "dd/MM/yyyy", "dd/MM/yyyy HH:mm", '#,##0 "₫"', '0.00"%"', "0.00",
+# "yyyy/MM/dd HH:mm" đều bị từ chối (90204 invalid formatter). Nên dùng thẳng danh sách đó:
+# ngày yyyy/MM/dd, tiền VND #,##0 (đơn vị nằm ở tiêu đề / cột Tiền tệ), % đã nhân 100 hiện
+# số thập phân (tiêu đề cột ghi "%"). Cặp lùi giữ lại phòng Lark đổi danh sách.
 _DINH_DANG = {
     "so_nguyen": ("#,##0", "#,##0"),
     "thap_phan": ("#,##0.00", "#,##0.00"),
-    "ti_le": ("0.00", "#,##0.00"),
-    "phan_tram": ("0.00%", "0.00%"),           # giá trị là PHÂN SỐ (0.1234 → 12.34%)
-    "phan_tram_100": ('0.00"%"', "#,##0.00"),  # giá trị ĐÃ nhân 100 (12.34 → 12.34%)
-    "ngay": ("dd/MM/yyyy", "yyyy/MM/dd"),
-    "ngay_gio": ("dd/MM/yyyy HH:mm", "yyyy/MM/dd HH:mm:ss"),
+    "ti_le": ("#,##0.00", "#,##0.00"),
+    "phan_tram": ("0.00%", "0.00%"),            # giá trị là PHÂN SỐ (0.1234 → 12.34%)
+    "phan_tram_100": ("#,##0.00", "#,##0.00"),  # giá trị ĐÃ nhân 100 (12.34, tiêu đề có %)
+    "ngay": ("yyyy/MM/dd", "yyyy/MM/dd"),
+    "ngay_gio": ("yyyy/MM/dd HH:mm:ss", "yyyy/MM/dd HH:mm:ss"),
     "ma": ("@", "@"),
 }
 _CAN = {"so_nguyen": 2, "tien": 2, "thap_phan": 2, "phan_tram": 2, "phan_tram_100": 2,
@@ -137,7 +146,7 @@ _RONG_SO = 110
 def _dinh_dang_tien(tien_te: str | None, an_toan: bool) -> str:
     t = str(tien_te or "").strip().upper()
     if t == "VND":
-        return "#,##0" if an_toan else '#,##0 "₫"'
+        return "#,##0"           # '#,##0 "₫"' bị Lark thật từ chối (09/10/2026)
     return "#,##0.00"
 
 
@@ -454,14 +463,35 @@ def _o(v, kieu: str, ngay_that: bool):
     return v
 
 
+def _dau_nguy(c: str) -> bool:
+    return c.isspace() or c in "=+-@\uff1d\uff0b\uff20" or c in A._VO_HINH
+
+
+def _cat_o(s: str) -> list:
+    """Cắt chữ thành các đoạn ≤TRAN_KY_TU_O; lùi chỗ cắt để đoạn sau KHÔNG mở đầu bằng ký tự
+    mà bộ chặn công thức sẽ thêm "'" (= + - @, khoảng trắng, ký tự vô hình) — ghép các đoạn
+    lại là đúng nguyên văn."""
+    ra, i = [], 0
+    while i < len(s):
+        j = min(len(s), i + TRAN_KY_TU_O)
+        k = j
+        while k < len(s) and k > i + 1 and _dau_nguy(s[k]):
+            k -= 1
+        if k <= i + 1:          # cả khúc toàn ký tự "nguy" (hầu như không có): cắt cứng
+            k = j
+        ra.append(s[i:k])
+        i = k
+    return ra or [""]
+
+
 def _chia_o_dai(b_cot: list, dong: list) -> tuple[list, list, list]:
-    """Ô chữ dài hơn TRAN_KY_TU_O → chảy sang cột "(tiếp)" ngay sau. -> (cột mới, dòng mới,
-    bản đồ cột mới → cột gốc)."""
+    """Ô chữ dài hơn TRAN_KY_TU_O → chảy sang cột "(tiếp)" ngay sau (xem `_cat_o`). -> (cột
+    mới, dòng mới, bản đồ cột mới → cột gốc)."""
     can: dict = {}
     for r in dong:
         for j, v in enumerate(r):
             if isinstance(v, str) and len(v) > TRAN_KY_TU_O:
-                can[j] = max(can.get(j, 1), -(-len(v) // TRAN_KY_TU_O))
+                can[j] = max(can.get(j, 1), len(_cat_o(v)))
     if not can:
         return b_cot, dong, list(range(len(b_cot)))
     cot, ban_do = [], []
@@ -478,8 +508,9 @@ def _chia_o_dai(b_cot: list, dong: list) -> tuple[list, list, list]:
             v = r[j] if j < len(r) else ""
             n = can.get(j, 1)
             if n > 1:
-                s = v if isinstance(v, str) else ("" if v is None else str(v))
-                o += [s[k * TRAN_KY_TU_O:(k + 1) * TRAN_KY_TU_O] for k in range(n)]
+                s_ = v if isinstance(v, str) else ("" if v is None else str(v))
+                doan = _cat_o(s_) if len(s_) > TRAN_KY_TU_O else [s_]
+                o += doan + [""] * (n - len(doan))
             else:
                 o.append(v)
         moi.append(o)
@@ -494,15 +525,21 @@ def _goi(method: str, path: str, **kw) -> dict:
         try:
             return A.lark.call(method, path, **kw) or {}
         except RuntimeError as e:
-            if lan < 3 and re.search(r"(?i)\b429\b|frequency|too many|rate.?limit|90217", str(e)):
-                time.sleep(min(8.0, 1.0 * 2 ** lan))
+            if lan < 3 and _RE_DAY.search(str(e)):
+                _ngu(min(8.0, 1.0 * 2 ** lan))
                 lan += 1
                 continue
             raise
 
 
-def _canh(canh_bao: list, viec: str, e: Exception) -> None:
-    cau = f"{viec} hỏng (bỏ qua, dữ liệu vẫn đủ): {A._che_token(e)[:160]}"
+_RE_DAY = re.compile(r"(?i)\b429\b|frequency|too many|rate.?limit|90217|99991400")
+
+
+def _canh(canh_bao: list, viec: str, e: Exception, du: bool = True) -> None:
+    """Ghi cảnh báo. `du`=False: việc hỏng làm THIẾU nội dung (vd Tổng quan) — không nói
+    "dữ liệu vẫn đủ"."""
+    cau = (f"{viec} hỏng (bỏ qua, dữ liệu vẫn đủ)" if du else f"{viec} HỎNG") + \
+        f": {A._che_token(e)[:160]}"
     canh_bao.append(cau)
     print(f"[trinh_bay_sheet] {cau}", flush=True)
 
@@ -536,12 +573,13 @@ def _luoi(tok: str) -> dict:
 
 
 def _noi_luoi(tok: str, sid: str, co: tuple, can_dong: int, can_cot: int) -> None:
-    """Nới lưới tab đủ `can_dong` × `can_cot` (POST dimension_range, ≤5000 mỗi lần)."""
+    """Nới lưới tab đủ `can_dong` × `can_cot` (POST dimension_range, ≤5000 mỗi lần). Không
+    đọc được lưới → coi là lưới tab mới của Lark (200 × 20) và vẫn nới: thêm thừa vài dòng
+    trống vô hại, thiếu dòng thì ghi hỏng."""
     dong, cot = co
-    if not dong and not cot:
-        return                                   # không biết lưới → để Lark tự nới khi ghi
+    dong, cot = dong or LUOI_DONG, cot or LUOI_COT
     for chieu, hien, can in (("ROWS", dong, can_dong), ("COLUMNS", cot, can_cot)):
-        while hien and hien < can:
+        while hien < can:
             n = min(5000, can - hien)
             _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{tok}/dimension_range",
                  body={"dimension": {"sheetId": sid, "majorDimension": chieu, "length": n}})
@@ -578,11 +616,27 @@ def _ghi(tok: str, sid: str, values: list, dong_dau: int = 1) -> None:
             j += 1
         for c0 in range(0, rong, TRAN_COT_GHI):
             khoi = [r[c0:c0 + TRAN_COT_GHI] for r in values[i:j]]
-            if c0 == 0:
-                A._write_values(tok, sid, khoi, dong_dau=dong_dau + i)
-            else:
-                A._write_values(tok, sid, khoi, dong_dau=dong_dau + i, cot_dau=c0 + 1)
+            _ghi_khoi(tok, sid, khoi, dong_dau + i, c0 + 1)
         i = j
+        if i < len(values):
+            _ngu(NGHI_GHI)                 # nghỉ giữa các khối: Lark báo vượt tần suất (429)
+
+
+def _ghi_khoi(tok: str, sid: str, khoi: list, dong_dau: int, cot_dau: int) -> None:
+    """Một khối qua `apify_tool._write_values` (chặn chèn công thức); Lark báo vượt tần suất
+    thì lùi dần và ghi LẠI đúng vùng đó (ghi đè cùng vùng — không nhân đôi dòng)."""
+    for lan in range(6):
+        try:
+            if cot_dau == 1:
+                A._write_values(tok, sid, khoi, dong_dau=dong_dau)
+            else:
+                A._write_values(tok, sid, khoi, dong_dau=dong_dau, cot_dau=cot_dau)
+            return
+        except RuntimeError as e:
+            if lan < 5 and _RE_DAY.search(str(e)):
+                _ngu(min(24.0, 1.5 * 2 ** lan))
+                continue
+            raise
 
 
 def _vung(sid: str, c1: int, r1: int, c2: int, r2: int) -> list:
@@ -722,15 +776,17 @@ def _bat_loc(tok: str, sid: str, vung: str) -> None:
         if len(_LOC_LUOT) >= 18:
             raise RuntimeError("đã gần trần 20 lần/phút của API bộ lọc")
         _LOC_LUOT.append(now)
+        cac_dk = list(_LOC_DIEU_KIEN)
     duong = f"/open-apis/sheets/v3/spreadsheets/{tok}/sheets/{sid}/filter"
     loi = None
     for lan in range(2):
-        for dk in list(_LOC_DIEU_KIEN):
+        for dk in cac_dk:
             try:
                 _goi("POST", duong, body={"range": vung, "col": "A", "condition": dk})
-                if dk is not _LOC_DIEU_KIEN[0]:          # nhớ dạng chạy được cho lần sau
-                    _LOC_DIEU_KIEN.remove(dk)
-                    _LOC_DIEU_KIEN.insert(0, dk)
+                with _LOC_KHOA:                          # nhớ dạng chạy được cho lần sau
+                    if dk in _LOC_DIEU_KIEN and _LOC_DIEU_KIEN[0] is not dk:
+                        _LOC_DIEU_KIEN.remove(dk)
+                        _LOC_DIEU_KIEN.insert(0, dk)
                 return
             except Exception as e:  # noqa: BLE001
                 loi = e
@@ -770,6 +826,7 @@ class TabDaGhi:
     dong_dau: int = 1             # dòng tiêu đề của bảng trong tab
     kiem: str = ""                # "du" | "thieu" | "chua_kiem"
     cau_kiem: str = ""
+    r_kiem: int | None = None     # dòng đọc lại để kiểm (dòng CUỐI có chữ); None = dòng cuối
 
 
 def trang_tri_bang(tok: str, sid: str, cot: list, so_dong: int, so_tong: int = 0,
@@ -841,39 +898,42 @@ def _so_vn(v) -> str:
 def dung_tong_quan(tq: TongQuan, tabs: list, gap: list, kiem: dict | None = None,
                    url: str = "", luc: datetime.datetime | None = None,
                    bang_tinh_khac: list | None = None) -> tuple[list, dict]:
-    """Dựng các dòng tab Tổng quan (thuần). -> (dòng, vai trò) với vai trò =
-    {"tieu_de": r, "meta": r, "muc": [r], "dau_bang": [(r, số cột)], "so": [(r, c, kiểu, tiền tệ)],
-    "rong": số cột}."""
+    """Dựng các dòng tab Tổng quan (thuần). Dòng KHÔNG đệm ô trống bên phải (ô "" chặn chữ
+    dài tràn sang ô kế — đo trên Lark thật 09/10/2026). -> (dòng, vai trò) với vai trò =
+    {"tieu_de": r, "meta": [r], "kiem": r, "muc": [r], "dau_bang": [(r, số cột)],
+     "so": [(r, c, kiểu, tiền tệ)], "rong": số cột}."""
     luc = luc or datetime.datetime.now(VN)
     dong: list = []
-    vai: dict = {"muc": [], "dau_bang": [], "so": [], "link": []}
+    vai: dict = {"muc": [], "dau_bang": [], "so": [], "link": [], "meta": []}
 
     def them(r):
-        dong.append(list(r))
+        r = list(r)
+        while r and r[-1] in ("", None):
+            r.pop()
+        dong.append(r)
         return len(dong)
 
     vai["tieu_de"] = them([tq.tieu_de])
-    meta = [x for x in (
-        f"Nguồn: {tq.nguon}" if tq.nguon else "",
-        f"Thời gian: {tq.thoi_gian}" if tq.thoi_gian else "",
-        f"Phạm vi: {tq.pham_vi}" if tq.pham_vi else "",
-        f"Người yêu cầu: {tq.nguoi_yeu_cau}" if tq.nguoi_yeu_cau else "",
-        f"Tạo lúc: {luc.astimezone(VN):%d/%m/%Y %H:%M} (giờ VN)") if x]
-    vai["meta"] = them([" · ".join(meta)])
+    # Siêu dữ liệu: mỗi mục một dòng nhãn | giá trị (giá trị gộp B:D, canh trái).
+    for nhan, gt in (("Nguồn", tq.nguon), ("Thời gian", tq.thoi_gian), ("Phạm vi", tq.pham_vi),
+                     ("Người yêu cầu", tq.nguoi_yeu_cau),
+                     ("Tạo lúc", f"{luc.astimezone(VN):%d/%m/%Y %H:%M} (giờ VN)")):
+        if gt:
+            vai["meta"].append(them([nhan, gt]))
     if kiem and kiem.get("cau"):
         vai["kiem"] = them([kiem["cau"]])
     them([])
 
     if tq.so_lieu:
         vai["muc"].append(them(["SỐ LIỆU CHÍNH"]))
-        vai["dau_bang"].append((them(["Chỉ số", "Giá trị", "Ghi chú"]), 3))
+        vai["dau_bang"].append((them(["Chỉ số", "Giá trị", "", "Ghi chú"]), 4))
         for s in tq.so_lieu:
             gt = s.gia_tri
             if s.kieu in ("ngay", "ngay_gio"):
                 gt = _o(gt, s.kieu, False)
             elif isinstance(gt, decimal.Decimal):
                 gt = float(gt)
-            r = them([s.nhan, "" if gt is None else gt, s.ghi_chu])
+            r = them([s.nhan, "" if gt is None else gt, "", s.ghi_chu])
             if s.kieu in _KIEU_SO and _la_so(gt):
                 vai["so"].append((r, 2, s.kieu, s.tien_te))
         them([])
@@ -920,10 +980,12 @@ def dung_tong_quan(tq: TongQuan, tabs: list, gap: list, kiem: dict | None = None
         them([])
 
     if kiem and kiem.get("tabs"):
+        # Kết quả (chữ dài) ở cột D — cột rộng nhất, không bị ô kế chặn.
         vai["muc"].append(them(["KIỂM GHI"]))
-        vai["dau_bang"].append((them(["Tab", "Kết quả"]), 2))
+        vai["dau_bang"].append((them(["Tab", "Số dòng", "Số cột", "Kết quả"]), 4))
         for k in kiem["tabs"]:
-            them([k["tab"], k["cau"]])
+            r = them([k["tab"], k.get("du_kien", ""), k.get("cot", ""), k["cau"]])
+            vai["so"].append((r, 2, "so_nguyen", None))
         them([])
 
     for b in gap:
@@ -933,6 +995,8 @@ def dung_tong_quan(tq: TongQuan, tabs: list, gap: list, kiem: dict | None = None
         vai["muc"].append(them(["GHI CHÚ"]))
         for g in tq.ghi_chu:
             them([f"• {g}"])
+    while dong and not dong[-1]:
+        dong.pop()
     vai["rong"] = max(4, max((len(r) for r in dong), default=1))
     return dong, vai
 
@@ -941,15 +1005,22 @@ def _link_tab(url: str, sid: str) -> str:
     return f"{url.split('?')[0].split('#')[0]}?sheet={sid}"
 
 
+#: Độ rộng cột Tổng quan: D rộng vì chứa chữ dài (Nội dung mục lục, Kết quả kiểm, Ghi chú).
+_RONG_TONG_QUAN = [220, 160, 110, 520]
+
+
 def _trang_tri_tong_quan(tok: str, sid: str, dong: list, vai: dict, cb: list) -> None:
     w = vai["rong"]
+    trai = {"hAlign": 0, "vAlign": 1}
     muc = [(f"{sid}!A{vai['tieu_de']}:{A._cot(w)}{vai['tieu_de']}",
-            {"font": {"bold": True, "fontSize": "16pt/1.5"}, "foreColor": CHU_TOI}),
-           (f"{sid}!A{vai['meta']}:{A._cot(w)}{vai['meta']}",
-            {"font": {"italic": True}, "foreColor": "#555F6D"})]
+            {"font": {"bold": True, "fontSize": "16pt/1.5"}, "foreColor": CHU_TOI, **trai})]
+    for r in vai["meta"]:
+        muc.append((f"{sid}!A{r}:A{r}", {"font": {"bold": True}, "foreColor": "#555F6D",
+                                         **trai}))
+        muc.append((f"{sid}!B{r}:{A._cot(w)}{r}", {"foreColor": CHU_TOI, **trai}))
     if vai.get("kiem"):
         muc.append((f"{sid}!A{vai['kiem']}:{A._cot(w)}{vai['kiem']}",
-                    {"font": {"bold": True}, "foreColor": CHU_TOI}))
+                    {"font": {"bold": True}, "foreColor": CHU_TOI, **trai}))
     for r in vai["muc"]:
         muc.append((f"{sid}!A{r}:{A._cot(w)}{r}", {"font": {"bold": True},
                                                     "foreColor": TRANG, "backColor": NAVY}))
@@ -962,22 +1033,57 @@ def _trang_tri_tong_quan(tok: str, sid: str, dong: list, vai: dict, cb: list) ->
             muc.append((f"{sid}!{A._cot(c)}{r}:{A._cot(c)}{r}", st))
     try:
         _kieu(tok, muc)
-    except Exception:  # noqa: BLE001 — định dạng ưa dùng bị từ chối → lùi định dạng an toàn
+    except Exception:  # noqa: BLE001 — lùi định dạng an toàn
         try:
             _kieu(tok, _an_toan_muc(muc))
         except Exception as e:  # noqa: BLE001
             _canh(cb, "Tô tab Tổng quan", e)
-    for r in (vai["tieu_de"], vai["meta"]) + ((vai["kiem"],) if vai.get("kiem") else ()):
+    gop = [(f"{sid}!A{vai['tieu_de']}:{A._cot(w)}{vai['tieu_de']}", "MERGE_ALL")]
+    if vai["meta"]:   # giá trị siêu dữ liệu gộp B:cuối, MỖI dòng một ô (MERGE_ROWS, 1 lời gọi)
+        gop.append((f"{sid}!B{vai['meta'][0]}:{A._cot(w)}{vai['meta'][-1]}", "MERGE_ROWS"))
+    if vai.get("kiem"):
+        gop.append((f"{sid}!A{vai['kiem']}:{A._cot(w)}{vai['kiem']}", "MERGE_ALL"))
+    for vung, kieu_gop in gop:
         try:
             _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{tok}/merge_cells",
-                 body={"range": f"{sid}!A{r}:{A._cot(w)}{r}", "mergeType": "MERGE_ALL"})
+                 body={"range": vung, "mergeType": kieu_gop})
         except Exception as e:  # noqa: BLE001
-            _canh(cb, "Gộp ô tiêu đề", e)
+            _canh(cb, "Gộp ô Tổng quan", e)
             break
     try:
-        _dat_rong(tok, sid, [260, 160, 120, 360] + [140] * (w - 4))
+        _dat_rong(tok, sid, _RONG_TONG_QUAN + [140] * (w - 4))
     except Exception as e:  # noqa: BLE001
         _canh(cb, "Đặt độ rộng Tổng quan", e)
+
+
+def _ghi_gon(tok: str, sid: str, dong: list, dong_dau: int = 1) -> None:
+    """Ghi các dòng KHÔNG đệm ô trống: gom dòng liền nhau cùng số ô thành một vùng; dòng
+    trống bỏ qua (ô để trống thật, chữ dài bên trái tràn sang được)."""
+    i = 0
+    while i < len(dong):
+        n = len(dong[i])
+        if not n:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(dong) and len(dong[j + 1]) == n:
+            j += 1
+        _ghi(tok, sid, [list(r) for r in dong[i:j + 1]], dong_dau=dong_dau + i)
+        i = j + 1
+
+
+def _bo_link(dong: list) -> list:
+    return [[(v.get("text") if isinstance(v, dict) else v) for v in r] for r in dong]
+
+
+def _viet_tong_quan(tok: str, sid: str, dong: list, luoi: tuple) -> None:
+    """Nới lưới rồi ghi các dòng Tổng quan (gọn). Ô link bị từ chối → ghi lại không link.
+    Lỗi ghi → NÉM (bên gọi quyết)."""
+    _noi_luoi(tok, sid, luoi, len(dong), max((len(r) for r in dong), default=1))
+    try:
+        _ghi_gon(tok, sid, dong)
+    except Exception:  # noqa: BLE001
+        _ghi_gon(tok, sid, _bo_link(dong))
 
 
 def _an_toan(fmt: str) -> str:
@@ -998,8 +1104,8 @@ def kiem_ghi(tok: str, tabs: list) -> dict:
             continue
         w = A._cot(max(1, t.so_cot))
         ranges.append(f"{t.sheet_id}!A{t.dong_dau}:{w}{t.dong_dau}")
-        if t.so_dong:
-            r = t.dong_dau + t.so_dong
+        r = _r_kiem(t)
+        if r != t.dong_dau:
             ranges.append(f"{t.sheet_id}!A{r}:{w}{r}")
     doc: dict = {}
     try:
@@ -1018,14 +1124,15 @@ def kiem_ghi(tok: str, tabs: list) -> dict:
             ket, cau = None, f"ghi dưới tab {t.noi_duoi} (thêm tab hỏng) — chưa kiểm riêng"
         else:
             r_cuoi = t.dong_dau + t.so_dong
+            r_k = _r_kiem(t)
             dau = _tim(doc, t.sheet_id, f"A{t.dong_dau}", f"{w}{t.dong_dau}")
-            cuoi = _tim(doc, t.sheet_id, f"A{r_cuoi}", f"{w}{r_cuoi}") if t.so_dong else []
+            cuoi = _tim(doc, t.sheet_id, f"A{r_k}", f"{w}{r_k}") if r_k != t.dong_dau else []
             lo = luoi.get(t.sheet_id)
-            if dau is None or (t.so_dong and cuoi is None):
+            if dau is None or (r_k != t.dong_dau and cuoi is None):
                 ket = None
             else:
                 du_dau = _dem_o(dau) >= sum(1 for c in t.cot if c.ten)
-                du_cuoi = (not t.so_dong) or _dem_o(cuoi) >= 1
+                du_cuoi = r_k == t.dong_dau or _dem_o(cuoi) >= 1
                 du_luoi = lo is None or (lo[0] >= r_cuoi and lo[1] >= t.so_cot)
                 ket = du_dau and du_cuoi and du_luoi
             if ket is True:
@@ -1041,24 +1148,14 @@ def kiem_ghi(tok: str, tabs: list) -> dict:
         t.cau_kiem = cau
         ket_tabs.append({"tab": t.ten, "du_kien": t.so_dong, "cot": t.so_cot,
                          "ket": t.kiem, "cau": cau})
-    kets = [k["ket"] for k in ket_tabs]
-    if any(k == "thieu" for k in kets):
-        day_du = False
-    elif kets and all(k == "du" for k in kets):
-        day_du = True
-    else:
-        day_du = None
-    tong_dong = sum(k["du_kien"] for k in ket_tabs)
-    if day_du is True:
-        cau = (f"Đã ghi đủ {_so_vn(tong_dong)}/{_so_vn(tong_dong)} dòng ở {len(ket_tabs)} tab "
-               "dữ liệu (đã đọc lại kiểm).")
-    elif day_du is False:
-        cau = ("CẢNH BÁO GHI THIẾU: " + "; ".join(f"{k['tab']}: {k['cau']}" for k in ket_tabs
-                                                if k["ket"] == "thieu") + ".")
-    else:
-        cau = (f"Đã gửi {_so_vn(tong_dong)} dòng ở {len(ket_tabs)} tab dữ liệu; chưa đọc lại "
-               "được để kiểm đủ.")
-    return {"day_du": day_du, "cau": cau, "tabs": ket_tabs}
+    return _gop_kiem([{"tabs": ket_tabs}])
+
+
+def _r_kiem(t) -> int:
+    """Dòng đọc lại của tab: dòng dữ liệu cuối CÓ CHỮ (biết lúc ghi), không thì dòng cuối."""
+    if t.r_kiem is not None:
+        return t.r_kiem
+    return t.dong_dau + t.so_dong
 
 
 def _tim(doc: dict, sid: str, a: str, b: str):
@@ -1082,13 +1179,15 @@ def _dem_o(values) -> int:
 class KetQua:
     url: str
     token: str
-    urls: list
+    urls: list                    # link các bảng tính ĐÃ ghi được (phần 1 trước)
     tabs: list
     kiem: dict
     canh_bao: list
     loai: str
     tong_quan_sid: str = ""       # sheet_id tab Tổng quan (bảng tính đầu; "" nếu thêm hỏng)
     tong_quan: TongQuan | None = None
+    tong_quan_hong: bool = False  # Tổng quan bảng tính đầu không ghi được
+    phan_hong: list = dataclasses.field(default_factory=list)   # [{phan, url, loi}]
 
     @property
     def day_du(self):
@@ -1099,52 +1198,116 @@ class KetQua:
         return self.kiem.get("cau") or ""
 
     def cho_tool(self) -> dict:
-        """Trường gắn vào tool_result: Mark chép NGUYÊN `kiem_ghi` khi gửi link."""
-        return {"day_du": self.day_du, "kiem_ghi": self.cau_kiem,
-                "bang_tinh_tiep": self.urls[1:] or None}
+        """Trường gắn vào tool_result: Mark chép NGUYÊN `kiem_ghi` khi gửi link, gửi MỌI link
+        ở `bang_tinh_tiep`. Có trục trặc thì kèm `canh_bao_trinh_bay` (ngắn); Tổng quan không
+        ghi được thì các ghi chú của nó (vd "ĐÃ CẮT ở 20.000 dòng") ở `ghi_chu_sheet`."""
+        ra = {"day_du": self.day_du, "kiem_ghi": self.cau_kiem,
+              "bang_tinh_tiep": self.urls[1:] or None}
+        if self.canh_bao:
+            ra["canh_bao_trinh_bay"] = "; ".join(c[:140] for c in self.canh_bao[:4])[:600]
+        if self.tong_quan_hong and self.tong_quan is not None and self.tong_quan.ghi_chu:
+            ra["ghi_chu_sheet"] = list(self.tong_quan.ghi_chu)
+        if self.phan_hong:
+            ra["bang_tinh_hong"] = [dict(p) for p in self.phan_hong]
+        return ra
 
 
 def xuat(tieu_de: str, bang: list, tong_quan: TongQuan | None = None, goc: Bang | None = None,
          sau_khi_tao: Callable[[str], Any] | None = None,
          cap_quyen: Callable[[str], Any] | None = None,
          luc: datetime.datetime | None = None) -> KetQua:
-    """MỘT lời gọi dựng cả bảng tính (xem docstring module cho thứ tự). Lỗi tạo bảng tính /
-    ghi dữ liệu / callback thì NÉM (như code cũ); lỗi trang trí chỉ cảnh báo."""
+    """MỘT lời gọi dựng cả bảng tính (xem docstring module cho thứ tự). Lỗi tạo / ghi dữ liệu
+    của bảng tính ĐẦU hoặc lỗi callback thì NÉM (như code cũ); bảng tính tiếp theo hỏng thì
+    các phần đã ghi vẫn có Tổng quan + quyền, phần hỏng báo rõ (`phan_hong`, `day_du`=False).
+    Lỗi trang trí chỉ cảnh báo."""
     tq = tong_quan or TongQuan(tieu_de)
     if not tq.nguoi_yeu_cau:
         tq = dataclasses.replace(tq, nguoi_yeu_cau=_ten_nguoi_yeu_cau())
     kh = ke_hoach(bang, tq, goc)
-    urls, tok_dau, cac_tab, cb = [], "", [], []
-    kiem_tong: dict = {"day_du": True, "cau": "", "tabs": []}
+    cb: list = []
     so_bt = len(kh.bang_tinh)
-    ket_bt = []
+    phan: list = []
     for k, tabs in enumerate(kh.bang_tinh):
         td = tieu_de if so_bt == 1 else f"{tieu_de} (phần {k + 1}/{so_bt})"
-        tok, url, da_ghi, kiem = _xuat_mot(td, tabs, kh, sau_khi_tao, cb)
-        urls.append(url)
-        ket_bt.append((tok, url, da_ghi, kiem, td))
-        tok_dau = tok_dau or tok
-        cac_tab += da_ghi
-    # Kiểm tổng các bảng tính
-    kets = [kq[3]["day_du"] for kq in ket_bt]
-    if any(x is False for x in kets):
-        dd = False
-    elif all(x is True for x in kets):
-        dd = True
-    else:
-        dd = None
-    kiem_tong = {"day_du": dd, "tabs": [t for kq in ket_bt for t in kq[3]["tabs"]],
-                 "cau": " ".join(kq[3]["cau"] for kq in ket_bt) if len(ket_bt) > 1
-                 else ket_bt[0][3]["cau"]}
-    tq_sid = ""
-    for i, (tok, url, da_ghi, kiem, td) in enumerate(ket_bt):
-        tq_i = dataclasses.replace(tq, tieu_de=td)
-        sid = _ghi_tong_quan(tok, url, tq_i, da_ghi, kh.gap if i == 0 else [], kiem, cb, luc,
-                             urls[1:] if i == 0 else [])
-        tq_sid = tq_sid or (sid if i == 0 else "")
+        try:
+            tok, url, da_ghi, kiem = _xuat_mot(td, tabs, kh, sau_khi_tao, cb)
+        except Exception as e:  # noqa: BLE001
+            if k == 0:
+                raise
+            _canh(cb, f"Bảng tính phần {k + 1}/{so_bt}", e, du=False)
+            phan.append({"k": k, "td": td, "url": getattr(e, "trinh_bay_url", "") or "",
+                         "loi": A._che_token(f"{type(e).__name__}: {e}")[:200], "tabs": tabs})
+            continue
+        phan.append({"k": k, "td": td, "tok": tok, "url": url, "da_ghi": da_ghi,
+                     "kiem": kiem, "loi": None, "tabs": tabs})
+    ok = [p for p in phan if not p["loi"]]
+    hong = [p for p in phan if p["loi"]]
+    urls = [p["url"] for p in ok]
+    tq_sid, tq_hong = "", False
+    for p in ok:
+        dau = p["k"] == 0
+        gap = kh.gap if dau else []
+        tq_i = dataclasses.replace(tq, tieu_de=p["td"])
+        sid, tq_kiem = _ghi_tong_quan(p["tok"], p["url"], tq_i, p["da_ghi"], gap, p["kiem"],
+                                      cb, luc, urls[1:] if dau else [])
+        if dau:
+            tq_sid, tq_hong = sid, tq_kiem["ket"] == "thieu"
+        if tq_kiem["ket"] == "thieu" and gap:
+            # Bảng tí hon CHỈ nằm trong Tổng quan: Tổng quan hỏng → ghi chúng thành tab riêng
+            # (hoặc dưới tab dữ liệu đầu), kẻo mất mà không ai biết.
+            them, kiem_gap = _ghi_bang_gap(p["tok"], p["da_ghi"], gap, cb, co_tq=bool(sid))
+            p["da_ghi"] = p["da_ghi"] + them
+            p["kiem"] = _gop_kiem([p["kiem"], kiem_gap])
+        p["kiem"] = _gop_kiem([p["kiem"], {"day_du": None, "cau": "", "tabs": [tq_kiem]}])
         if cap_quyen:
-            cap_quyen(tok)
-    return KetQua(urls[0], tok_dau, urls, cac_tab, kiem_tong, cb, kh.loai, tq_sid or "", tq)
+            cap_quyen(p["tok"])
+    kiem_tong = _gop_kiem([p["kiem"] for p in ok] + [_kiem_phan_hong(p, so_bt) for p in hong])
+    return KetQua(urls[0], ok[0]["tok"], urls, [t for p in ok for t in p["da_ghi"]], kiem_tong,
+                  cb, kh.loai, tq_sid or "", tq, tq_hong,
+                  [{"phan": f"{p['k'] + 1}/{so_bt}", "url": p["url"] or None,
+                    "loi": p["loi"]} for p in hong])
+
+
+def _kiem_phan_hong(p: dict, so_bt: int) -> dict:
+    ten = ", ".join(t.ten for t in p["tabs"])
+    cau = (f"bảng tính phần {p['k'] + 1}/{so_bt} HỎNG ({p['loi']})"
+           + (f" — link đã tạo nhưng chưa đủ: {p['url']}" if p["url"] else "")
+           + f"; thiếu các tab: {ten}")
+    return {"day_du": False, "cau": "",
+            "tabs": [{"tab": f"Phần {p['k'] + 1}/{so_bt}",
+                      "du_kien": sum(len(t.dong) for t in p["tabs"]), "cot": "",
+                      "ket": "thieu", "cau": cau}]}
+
+
+def _gop_kiem(ds: list) -> dict:
+    """Gộp kết quả kiểm: THIẾU ở đâu là False; đủ hết (kể cả Tổng quan) mới True."""
+    tabs = [t for k in ds if k for t in k.get("tabs") or []]
+    kets = [t["ket"] for t in tabs]
+    if any(k == "thieu" for k in kets):
+        day_du = False
+    elif kets and all(k == "du" for k in kets):
+        day_du = True
+    else:
+        day_du = None
+    du_lieu = [t for t in tabs if t["tab"] != TAB_TONG_QUAN and not t["tab"].startswith("Phần ")]
+    tong_dong = sum(int(t.get("du_kien") or 0) for t in du_lieu)
+    if day_du is True:
+        cau = (f"Đã ghi đủ {_so_vn(tong_dong)}/{_so_vn(tong_dong)} dòng ở {len(du_lieu)} tab "
+               "dữ liệu (đã đọc lại kiểm).")
+    elif day_du is False:
+        cau = ("CẢNH BÁO GHI THIẾU: " + "; ".join(f"{t['tab']}: {t['cau']}" for t in tabs
+                                                if t["ket"] == "thieu") + ".")
+    else:
+        cau = (f"Đã gửi {_so_vn(tong_dong)} dòng ở {len(du_lieu)} tab dữ liệu; chưa đọc lại "
+               "được để kiểm đủ.")
+    return {"day_du": day_du, "cau": cau, "tabs": tabs}
+
+
+def gop_quyen(cap: dict, ok) -> None:
+    """`cap_quyen` chạy MỘT lần mỗi bảng tính (bảng tính tiếp theo khi quá 10 tab): `granted`
+    là AND của mọi lần cấp — một phần không cấp được thì không báo "đã cấp"."""
+    cap["granted"] = bool(ok) if not cap.get("_da_cap") else (cap["granted"] and bool(ok))
+    cap["_da_cap"] = True
 
 
 def _ten_nguoi_yeu_cau() -> str:
@@ -1176,25 +1339,38 @@ def _xuat_mot_tiep(tok: str, url: str, tabs: list, kh: KeHoach, sau_khi_tao, cb:
     if sau_khi_tao:
         sau_khi_tao(tok)
     sid0 = A._first_sheet_id(tok)
-    da_ghi: list = []
     if not tabs:
-        return tok, url, da_ghi, {"day_du": True, "cau": "Không có bảng dữ liệu.", "tabs": []}
-    # 1) tab: tab dữ liệu đầu dùng tab sẵn có (luôn tồn tại — dữ liệu không phụ thuộc
-    #    addSheet); tab sau thêm ở đúng vị trí. Thêm hỏng → ghi dưới tab đầu, có dòng ngăn.
+        return tok, url, [], {"day_du": True, "cau": "Không có bảng dữ liệu.", "tabs": []}
+    da_ghi = _ghi_tabs(tok, tabs, cb, sid_dau=sid0, vi_tri0=0, noi=(sid0, 0, tabs[0].ten))
+    try:
+        _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{tok}/sheets_batch_update",
+             body={"requests": [{"updateSheet": {"properties": {"sheetId": sid0,
+                                                                "title": tabs[0].ten}}}]})
+    except Exception as e:  # noqa: BLE001
+        _canh(cb, "Đặt tên tab dữ liệu đầu", e)
+    return tok, url, da_ghi, kiem_ghi(tok, da_ghi)
+
+
+def _ghi_tabs(tok: str, tabs: list, cb: list, sid_dau: str | None, vi_tri0: int,
+              noi: tuple) -> list:
+    """Ghi các TabKH: tab đầu vào `sid_dau` (nếu có — tab luôn tồn tại, dữ liệu không phụ
+    thuộc addSheet), các tab sau thêm ở vị trí `vi_tri0 + i`. Thêm tab hỏng → ghi dưới tab
+    `noi` = (sheet_id, số dòng đã dùng, tên tab) kèm dòng ngăn. Ghi dữ liệu lỗi → NÉM.
+    -> [TabDaGhi]."""
     sids: list = []
     for i, t in enumerate(tabs):
-        if i == 0:
-            sids.append(sid0)
+        if i == 0 and sid_dau:
+            sids.append(sid_dau)
             continue
         try:
-            sids.append(_them_tab(tok, t.ten, i))
+            sids.append(_them_tab(tok, t.ten, vi_tri0 + i))
         except Exception as e:  # noqa: BLE001
             _canh(cb, f"Thêm tab '{t.ten}'", e)
             sids.append(None)
     luoi = _luoi(tok)
-    # 2) chuẩn bị bảng (ô dài → cột tiếp) + vị trí ghi
+    sid_noi, dong_noi, ten_noi = noi
+    # 1) chuẩn bị bảng (ô dài → cột tiếp) + vị trí ghi
     ke: list = []
-    dong_noi = 0     # số dòng đã dùng ở tab đầu (để ghi nối dưới)
     for i, t in enumerate(tabs):
         cot, dong, _ = _chia_o_dai(t.bang.cot, t.dong)
         tong = t.bang.dong_tong if t.co_tong else []
@@ -1204,16 +1380,16 @@ def _xuat_mot_tiep(tok: str, url: str, tabs: list, kh: KeHoach, sau_khi_tao, cb:
                 cot, dong, _ = _chia_o_dai(t.bang.cot, t.dong + t.bang.dong_tong)
                 dong, tong = dong[:len(t.dong)], dong[len(t.dong):]
         if sids[i] is None:
-            sid, dd, noi = sid0, dong_noi + 3, tabs[0].ten
+            sid, dd, ve = sid_noi, dong_noi + 3, ten_noi
         else:
-            sid, dd, noi = sids[i], 1, None
+            sid, dd, ve = sids[i], 1, None
         so_dong_tab = 1 + len(dong) + ((1 + len(tong)) if tong else 0)
-        if sid == sid0:
+        if sid == sid_noi:
             dong_noi = max(dong_noi, dd - 1 + so_dong_tab)
-        ke.append((t, sid, dd, noi, cot, dong, tong))
-    # 3) nới lưới (dòng/cột) trước khi đặt định dạng và ghi
+        ke.append((t, sid, dd, ve, cot, dong, tong))
+    # 2) nới lưới (dòng/cột) trước khi đặt định dạng và ghi
     can: dict = {}
-    for t, sid, dd, noi, cot, dong, tong in ke:
+    for t, sid, dd, ve, cot, dong, tong in ke:
         r = dd - 1 + 1 + len(dong) + ((1 + len(tong)) if tong else 0)
         a, b = can.get(sid, (0, 0))
         can[sid] = (max(a, r), max(b, len(cot)))
@@ -1221,12 +1397,11 @@ def _xuat_mot_tiep(tok: str, url: str, tabs: list, kh: KeHoach, sau_khi_tao, cb:
         try:
             _noi_luoi(tok, sid, luoi.get(sid, (0, 0)), r, c)
         except Exception as e:  # noqa: BLE001
-            _canh(cb, "Nới lưới", e)       # Lark thường tự nới khi ghi; lỗi thật lộ ở bước ghi
-    # 4) định dạng số TRƯỚC khi ghi (để ngày là ngày thật). Định dạng ưa dùng bị từ chối
-    #    thì lùi bộ định dạng an toàn (đúng danh sách tài liệu); vẫn hỏng → ngày ghi dạng chữ.
+            _canh(cb, "Nới lưới", e)       # lỗi thật (nếu có) lộ ở bước ghi
+    # 3) định dạng số TRƯỚC khi ghi (để ngày là ngày thật). Hỏng → ngày ghi dạng chữ.
     muc_a = []
-    for t, sid, dd, noi, cot, dong, tong in ke:
-        if noi is None:
+    for t, sid, dd, ve, cot, dong, tong in ke:
+        if ve is None:
             muc_a += _muc_dinh_dang(sid, cot, dong, dd + 1, an_toan=False)
     dinh_dang_xong, an_toan = False, False
     if muc_a:
@@ -1238,92 +1413,125 @@ def _xuat_mot_tiep(tok: str, url: str, tabs: list, kh: KeHoach, sau_khi_tao, cb:
             except Exception as e:  # noqa: BLE001
                 if an_toan:
                     _canh(cb, "Đặt định dạng số trước khi ghi", e)
-    # 5) GHI DỮ LIỆU (lỗi → ném, như code cũ)
-    for t, sid, dd, noi, cot, dong, tong in ke:
-        ngay_that = dinh_dang_xong and noi is None
-        vals = [[c.ten for c in cot]] + [
-            [_o(r[j] if j < len(r) else "", c.kieu, ngay_that) for j, c in enumerate(cot)]
-            for r in dong]
+    # 4) GHI DỮ LIỆU (lỗi → ném, như code cũ)
+    da_ghi: list = []
+    for t, sid, dd, ve, cot, dong, tong in ke:
+        ngay_that = dinh_dang_xong and ve is None
+        than = [[_o(r[j] if j < len(r) else "", c.kieu, ngay_that) for j, c in enumerate(cot)]
+                for r in dong]
+        vals = [[c.ten for c in cot]] + than
         if tong:
             vals += [[""] * len(cot)] + [
                 [_o(r[j] if j < len(r) else "", c.kieu, False) for j, c in enumerate(cot)]
                 for r in tong]
-        if noi is not None:
+        if ve is not None:
             vals = [[f"— {t.ten} — (không thêm được tab riêng)"] + [""] * (len(cot) - 1)] + vals
             _ghi(tok, sid, vals, dong_dau=dd - 1)
         else:
             _ghi(tok, sid, vals, dong_dau=dd)
-        da_ghi.append(TabDaGhi(t.ten, sid if noi is None else sid0, cot, len(dong), len(cot),
-                               len(tong), t.bang.mo_ta + (f" (phần {t.phan[0]}/{t.phan[1]})"
-                                                          if t.phan else ""),
-                               noi, dd))
-    # 6) trang trí (cảnh báo nếu hỏng)
-    try:
-        reqs = [{"updateSheet": {"properties": {"sheetId": sid0, "title": tabs[0].ten}}}]
-        _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{tok}/sheets_batch_update",
-             body={"requests": reqs})
-    except Exception as e:  # noqa: BLE001
-        _canh(cb, "Đặt tên tab dữ liệu đầu", e)
-    for (t, sid, dd, noi, cot, dong, tong), tg in zip(ke, da_ghi):
+        # Dòng để đọc lại kiểm: dòng dữ liệu CUỐI có chữ (dòng trống hợp lệ không bị coi là
+        # thiếu); không dòng nào có chữ thì kiểm dòng tiêu đề.
+        cuoi = next((k for k in range(len(than) - 1, -1, -1)
+                     if any(v not in ("", None) for v in than[k])), None)
+        da_ghi.append(TabDaGhi(t.ten, sid, cot, len(dong), len(cot), len(tong),
+                               t.bang.mo_ta + (f" (phần {t.phan[0]}/{t.phan[1]})"
+                                               if t.phan else ""),
+                               ve, dd, r_kiem=dd if cuoi is None else dd + 1 + cuoi))
+    # 5) trang trí (cảnh báo nếu hỏng)
+    for (t, sid, dd, ve, cot, dong, tong), tg in zip(ke, da_ghi):
         trang_tri_bang(tok, tg.sheet_id, cot, len(dong), len(tong),
-                       dinh_dang_xong=dinh_dang_xong and noi is None, mau=dong,
-                       canh_bao=cb, dong_dau=dd, rieng_tab=noi is None, tong=tong,
+                       dinh_dang_xong=dinh_dang_xong and ve is None, mau=dong,
+                       canh_bao=cb, dong_dau=dd, rieng_tab=ve is None, tong=tong,
                        an_toan=an_toan or not dinh_dang_xong)
     for sid, (_, c) in can.items():          # bỏ cột lưới trống bên phải (lưới mặc định 20)
-        _bo_cot_thua(tok, sid, luoi.get(sid, (0, 0))[1], c, cb)
-    # 7) đọc lại kiểm
-    kiem = kiem_ghi(tok, da_ghi)
-    return tok, url, da_ghi, kiem
+        _bo_cot_thua(tok, sid, max(c, luoi.get(sid, (0, 0))[1] or LUOI_COT), c, cb)
+    return da_ghi
 
 
-def _ghi_tong_quan(tok, url, tq, da_ghi, gap, kiem, cb, luc, khac) -> str:
-    """Thêm tab Tổng quan ở vị trí 0, ghi + trang trí. Hỏng → cảnh báo (dữ liệu đã đủ).
-    -> sheet_id của tab ("" nếu không thêm được)."""
+def _ghi_bang_gap(tok: str, da_ghi: list, gap: list, cb: list, co_tq: bool
+                  ) -> tuple[list, dict]:
+    """Tổng quan hỏng: bảng tí hon (vốn gấp vào Tổng quan) ghi thành tab riêng ở CUỐI, hoặc
+    dưới tab dữ liệu đầu nếu thêm tab cũng hỏng. -> ([TabDaGhi], kết quả kiểm). Ghi hỏng →
+    cảnh báo + kiểm THIẾU cho từng bảng (không bao giờ im lặng)."""
+    da_co = [t.ten for t in da_ghi]
+    tabs = []
+    for b in gap:
+        ten = ten_tab_sach(b.ten, da_co)
+        da_co.append(ten)
+        tabs.append(TabKH(ten, b, None, 0, len(b.dong)))
+    dau = da_ghi[0] if da_ghi else None
+
+    def thieu(ly_do):
+        return [], {"day_du": False, "cau": "", "tabs": [
+            {"tab": t.ten, "du_kien": len(t.dong), "cot": len(t.bang.cot), "ket": "thieu",
+             "cau": f"bảng nhỏ (vốn ở Tổng quan) KHÔNG ghi được: {ly_do}"} for t in tabs]}
+    if dau is None:
+        return thieu("không có tab dữ liệu để ghi nối")
+    cung = [t for t in da_ghi if t.sheet_id == dau.sheet_id]
+    da_dung = max(t.dong_dau + t.so_dong + ((1 + t.dong_tong) if t.dong_tong else 0)
+                  for t in cung)
+    vi_tri = len({t.sheet_id for t in da_ghi}) + (1 if co_tq else 0)
+    try:
+        them = _ghi_tabs(tok, tabs, cb, sid_dau=None, vi_tri0=vi_tri,
+                         noi=(dau.sheet_id, da_dung, dau.ten))
+    except Exception as e:  # noqa: BLE001
+        _canh(cb, "Ghi bảng nhỏ (vốn ở Tổng quan) thành tab riêng", e, du=False)
+        return thieu(type(e).__name__)
+    return them, kiem_ghi(tok, them)
+
+
+def _ghi_tong_quan(tok, url, tq, da_ghi, gap, kiem, cb, luc, khac) -> tuple[str, dict]:
+    """Thêm tab Tổng quan ở vị trí 0, ghi + trang trí, đọc lại kiểm. Không ném.
+    -> (sheet_id hoặc "", mục kiểm {"tab": "Tổng quan", "ket": du/thieu/chua_kiem, ...})."""
+    def hong(viec, e):
+        _canh(cb, viec, e, du=False)
+        return {"tab": TAB_TONG_QUAN, "du_kien": 0, "cot": "", "ket": "thieu",
+                "cau": f"không ghi được Tổng quan ({type(e).__name__}) — số liệu chính và ghi "
+                       "chú nằm ở `ghi_chu_sheet` của kết quả tool"
+                       + ("; bảng nhỏ chuyển sang tab riêng" if gap else "")}
     try:
         sid = _them_tab(tok, TAB_TONG_QUAN, 0)
     except Exception as e:  # noqa: BLE001
-        _canh(cb, "Thêm tab Tổng quan", e)
-        return ""
+        return "", hong("Thêm tab Tổng quan", e)
     dong, vai = dung_tong_quan(tq, da_ghi, gap, kiem, url, luc, khac)
-    rong = vai["rong"]
-    vals = [list(r) + [""] * (rong - len(r)) for r in dong]
     try:
-        _ghi(tok, sid, vals)
-    except Exception:  # noqa: BLE001 — thử lại không có link (ô link bị từ chối)
-        vals = [[(v.get("text") if isinstance(v, dict) else v) for v in r] for r in vals]
-        try:
-            _ghi(tok, sid, vals)
-        except Exception as e:  # noqa: BLE001
-            _canh(cb, "Ghi tab Tổng quan", e)
-            return sid
+        _viet_tong_quan(tok, sid, dong, (LUOI_DONG, LUOI_COT))
+    except Exception as e:  # noqa: BLE001
+        return sid, hong("Ghi tab Tổng quan", e)
     _trang_tri_tong_quan(tok, sid, dong, vai, cb)
-    _bo_cot_thua(tok, sid, 20, rong, cb)       # tab mới: lưới mặc định 20 cột
-    return sid
+    # Đọc lại: dòng tiêu đề + dòng cuối có chữ ở cột A (ghi chú / mục lục).
+    cuoi = max((i for i, r in enumerate(dong, 1) if r and r[0] not in ("", None)), default=1)
+    tg = TabDaGhi(TAB_TONG_QUAN, sid, [Cot(str(tq.tieu_de))], cuoi - 1, 1, r_kiem=cuoi)
+    k = kiem_ghi(tok, [tg])["tabs"][0]
+    k.update(du_kien=len(dong), cot=vai["rong"])
+    if k["ket"] == "du":
+        k["cau"] = f"Đã ghi đủ {len(dong)} dòng (số liệu chính, mục lục, ghi chú)"
+    elif k["ket"] == "thieu":
+        k["cau"] = "THIẾU: đọc lại không thấy đủ nội dung Tổng quan"
+    return sid, k
 
 
 def ghi_tong_quan_vao(tok: str, sid: str, url: str, tq: TongQuan, tabs: list,
                       kiem: dict | None = None, gap: list | None = None,
                       canh_bao: list | None = None, so_dong_cu: int = 0) -> int:
-    """Ghi/ghi ĐÈ Tổng quan vào tab có sẵn (vd ghi nối thêm brand vào sheet của lượt).
-    `so_dong_cu` = số dòng bản trước (xoá trắng phần thừa). -> số dòng đã ghi. Không ném."""
+    """Ghi/ghi ĐÈ Tổng quan vào tab có sẵn (ghi nối thêm brand vào sheet của lượt, việc nền).
+    Bản trước (`so_dong_cu` dòng) được XOÁ DÒNG (không ghi đè ô "" — ô "" chặn chữ tràn),
+    rồi ghi gọn + trang trí. -> số dòng đã ghi (bản cũ nếu ghi hỏng). Không ném."""
     cb = canh_bao if canh_bao is not None else []
     dong, vai = dung_tong_quan(tq, tabs, gap or [], kiem, url)
-    rong = vai["rong"]
-    vals = [list(r) + [""] * (rong - len(r)) for r in dong]
-    vals += [[""] * rong for _ in range(max(0, so_dong_cu - len(vals)))]
+    luoi = _luoi(tok).get(sid, (0, 0))
+    if so_dong_cu > 1:
+        try:      # giữ dòng 1 (tab phải còn ít nhất một dòng); dòng 2..cũ bỏ hẳn
+            _goi("DELETE", f"/open-apis/sheets/v2/spreadsheets/{tok}/dimension_range",
+                 body={"dimension": {"sheetId": sid, "majorDimension": "ROWS",
+                                     "startIndex": 2, "endIndex": so_dong_cu}})
+            luoi = (max(1, (luoi[0] or LUOI_DONG) - (so_dong_cu - 1)), luoi[1])
+        except Exception as e:  # noqa: BLE001
+            _canh(cb, "Xoá bản Tổng quan cũ", e)
     try:
-        _ghi(tok, sid, vals)
-    except Exception:  # noqa: BLE001 — thử lại không có ô link
-        try:
-            _ghi(tok, sid, [[(v.get("text") if isinstance(v, dict) else v) for v in r]
-                            for r in vals])
-        except Exception as e:  # noqa: BLE001
-            _canh(cb, "Ghi tab Tổng quan", e)
-            return so_dong_cu
-    if so_dong_cu:                # bỏ kiểu cũ (dòng mục đã dời chỗ) trước khi tô lại
-        try:
-            _kieu(tok, [(v, {"clean": True}) for v in _vung(sid, 1, 4, rong, len(vals))])
-        except Exception as e:  # noqa: BLE001
-            _canh(cb, "Xoá kiểu cũ Tổng quan", e)
+        _viet_tong_quan(tok, sid, dong, luoi)
+    except Exception as e:  # noqa: BLE001
+        _canh(cb, "Ghi tab Tổng quan", e, du=False)
+        return so_dong_cu
     _trang_tri_tong_quan(tok, sid, dong, vai, cb)
     return len(dong)

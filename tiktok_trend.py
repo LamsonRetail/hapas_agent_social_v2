@@ -801,7 +801,7 @@ def chay(args: dict) -> str:
 
     def _cap_quyen(tok: str) -> None:
         sender = memory_store.get_current_sender()
-        cap["granted"] = A._grant(tok, sender) if sender else False
+        TB.gop_quyen(cap, A._grant(tok, sender) if sender else False)
 
     try:
         bang = _cac_bang_sheet(tags, vids, nhac, mau)

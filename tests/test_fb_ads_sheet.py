@@ -18,7 +18,8 @@ GOC = pathlib.Path(__file__).resolve().parent.parent
 if str(GOC) not in sys.path:
     sys.path.insert(0, str(GOC))
 
-from sheet_gia import LarkGia  # noqa: E402
+from sheet_gia import LarkGia  # noqa: E402
+from sheet_gia import meta  # noqa: E402
 
 SNAP = (
     'Library ID: 111\n Started running on 1 Oct 2026\n button "=HAPAS túi mới, mua ngay '
@@ -92,7 +93,7 @@ def test_kieu_cot_tieu_de_co_dinh_loc(F):
     gia = F._gia
     assert _fmt(gia, "Dữ liệu", 1, 2) == "#,##0"
     assert _fmt(gia, "Dữ liệu", 2, 2) == "@", "Library ID là chữ"
-    assert _fmt(gia, "Dữ liệu", 10, 2) == "dd/MM/yyyy"
+    assert _fmt(gia, "Dữ liệu", 10, 2) == "yyyy/MM/dd"
     assert any(s.get("backColor") == "#1F3864" for s in gia.kieu_o("Dữ liệu", 1, 1))
     assert gia.tab("Dữ liệu")["frozen"] == 1
     sid = gia.tab("Dữ liệu")["sheet_id"]
@@ -106,7 +107,7 @@ def test_tong_quan_mau_nhom_va_ghi_chu(F, monkeypatch):
     o = F._gia.o("Tổng quan")
     chu = " ".join(str(c) for r in o for c in r)
     assert o[0][0] == kq["title"]
-    assert "Meta Ad Library" in o[1][0] and "Trang / từ khoá: HAPAS" in o[1][0]
+    assert "Meta Ad Library" in meta(o) and "Trang / từ khoá: HAPAS" in meta(o)
     so = {r[0]: r[1] for r in o if len(r) > 1 and isinstance(r[0], str)}
     assert so["Số ad trong sheet (mẫu đã bóc)"] == 2 and so["Số trang / từ khoá đã tra"] == 1
     assert "THEO TRANG / TỪ KHOÁ" in chu and "THEO QUỐC GIA" in chu and "THEO NỀN TẢNG LỌC" in chu

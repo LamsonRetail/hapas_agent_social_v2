@@ -11,7 +11,8 @@ import json
 import account_tool as T
 import apify_tool as A
 import test_soi_tai_khoan_va_san as TS
-from test_soi_tai_khoan_va_san import gia  # noqa: F401 — fixture dùng chung
+from test_soi_tai_khoan_va_san import gia  # noqa: F401 — fixture dùng chung
+from sheet_gia import meta  # noqa: E402
 
 
 def _chay(**args) -> tuple[dict, str]:
@@ -32,7 +33,7 @@ def test_tab_nhieu_bang_va_bang_nho_gap_vao_tong_quan(gia):
     assert "BÀI TRONG KHOẢNG THEO TÀI KHOẢN" in tq and "MỤC LỤC" in tq
     chu = " ".join(map(str, tq))
     assert "2/3 bài đã đọc; 1 bài ngoài khoảng" in chu
-    assert "soi_tai_khoan" in tq[1] and kq["day_du"] is True
+    assert "soi_tai_khoan" in meta(lark.o("Tổng quan")) and kq["day_du"] is True
 
 
 def test_ho_so_la_so_tool_da_tinh_va_ti_le_la_phan_so(gia):
@@ -59,7 +60,7 @@ def test_bai_dang_ngay_that_va_tieu_de_co_dinh(gia):
     o = lark.o("2. Bài đăng")
     assert o[0][:3] == ["Nền tảng", "Tài khoản", "Ngày đăng"] and len(o) == 3
     assert isinstance(o[1][2], float)
-    assert "dd/MM/yyyy HH:mm" in _fmt(lark, "2. Bài đăng", 3)
+    assert "yyyy/MM/dd HH:mm:ss" in _fmt(lark, "2. Bài đăng", 3)
     assert "#,##0" in _fmt(lark, "2. Bài đăng", 5)
     assert lark.tab("2. Bài đăng")["frozen"] == 1
     sid = lark.tab("2. Bài đăng")["sheet_id"]

@@ -4015,7 +4015,7 @@ def _handle(args: dict, **kwargs) -> str:
     quyen = {"granted": False}
 
     def _cap(tok_):
-        quyen["granted"] = _grant(tok_, sender) if sender else False
+        T.gop_quyen(quyen, _grant(tok_, sender) if sender else False)
 
     try:
         kq = T.xuat(title, ds_bang, tq, goc=T.bang_goc(goc) if any(len(g) > 1 for g in goc)

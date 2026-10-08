@@ -11,6 +11,7 @@ import json
 import apify_tool as A
 import tiktok_ads_tool as T
 from test_tiktok_top_ads import AZZ, AZZ_THAT, MSG_GOI_FREE, chay, gia  # noqa: F401
+from sheet_gia import meta  # noqa: E402
 
 
 def _fmt(lark, tab, cot, dong):
@@ -38,7 +39,7 @@ def test_tong_quan_mau_phan_bo_top(gia):
     kq = chay(nganh="túi xách")
     o = gia["lark"].o("Tổng quan")
     assert o[0][0] == kq["title"]
-    assert "TikTok Creative Center" in o[1][0] and "30 ngày" in o[1][0]
+    assert "TikTok Creative Center" in meta(o) and "30 ngày" in meta(o)
     so = {r[0]: r[1] for r in o if len(r) > 1 and isinstance(r[0], str)}
     assert so["Số ads trong mẫu"] == kq["tom_tat"]["so_ads"] == 3
     assert so["Ads không rõ brand"] == kq["tom_tat"]["khong_ro_brand"] == 1

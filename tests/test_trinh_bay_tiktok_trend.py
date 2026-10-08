@@ -11,7 +11,8 @@ import json
 
 import test_tiktok_trend as TT
 import tiktok_trend as T
-from test_tiktok_trend import gia  # noqa: F401 — fixture dùng chung
+from test_tiktok_trend import gia  # noqa: F401 — fixture dùng chung
+from sheet_gia import meta  # noqa: E402
 
 
 def _chay(**args) -> tuple[dict, str]:
@@ -35,7 +36,7 @@ def test_tong_quan_co_mau_cua_tool_va_ghi_chu(gia):
     chu = " ".join(str(r[0]) for r in tq)
     assert kq["ghi_chu_nhac"] in chu and "SUY từ mẫu" in chu
     assert "HASHTAG THEO HƯỚNG" in chu and "Mẫu giữ được 7/100" in chu
-    assert "Vùng VN" in tq[1][0]
+    assert "Vùng VN" in meta(tq)
 
 
 def test_dinh_dang_cot_va_tieu_de(gia):

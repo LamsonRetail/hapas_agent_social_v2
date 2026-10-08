@@ -12,7 +12,8 @@ import apify_tool as A
 import chi_so_bai_tool as C
 import test_chi_so_bai as TC
 import trinh_bay_sheet as TB
-from test_chi_so_bai import gia  # noqa: F401 — fixture dùng chung
+from test_chi_so_bai import gia  # noqa: F401 — fixture dùng chung
+from sheet_gia import meta  # noqa: E402
 
 
 LINKS = [TC.YT, TC.TT_NGAN, TC.FB, TC.TT1, TC.IG, TC.TH, TC.TT_QUERY, TC.TT1,
@@ -33,11 +34,11 @@ def test_tab_dung_thu_tu_va_tong_quan_la_so_cua_tool(gia):
     lark = gia["lark"]
     assert lark.tab_ten() == ["Tổng quan", "Dữ liệu", "Dữ liệu gốc"]
     tq = lark.o("Tổng quan")
-    assert tq[0][0] == lark.dau.title and "chi_so_bai" in tq[1][0]
+    assert tq[0][0] == lark.dau.title and "chi_so_bai" in meta(tq)
     # Số chính = ĐÚNG số tool đã cộng (không cộng lại ở lớp trình bày).
     assert _dong_tq(lark, "Tổng view")[1] == kq["tong"]["view"]["tong"] == 545274
     assert _dong_tq(lark, "Tổng lưu")[1] == kq["tong"]["luu"]["tong"]
-    assert "3 link có số" in _dong_tq(lark, "Tổng lưu")[2]
+    assert "3 link có số" in _dong_tq(lark, "Tổng lưu")[3]
     assert _dong_tq(lark, "Link đếm được")[1] == kq["so_link_ok"] == 7
     for p, v in kq["tong_view_theo_nen_tang"].items():
         assert _dong_tq(lark, f"View {p}")[1] == v
@@ -76,7 +77,7 @@ def test_tieu_de_co_dinh_va_dinh_dang_theo_kieu_cot(gia):
         return [s["formatter"] for s in lark.kieu_o("Dữ liệu", cot, dong) if "formatter" in s]
 
     assert "#,##0" in fmt(1) and "#,##0" in fmt(6) and "#,##0" in fmt(10)
-    assert "dd/MM/yyyy" in fmt(5) and "dd/MM/yyyy HH:mm" in fmt(13)
+    assert "yyyy/MM/dd" in fmt(5) and "yyyy/MM/dd HH:mm:ss" in fmt(13)
     assert "@" in fmt(4), "tài khoản là mã: giữ dạng chữ"
     o = lark.o("Dữ liệu")
     assert isinstance(o[1][4], int) and isinstance(o[1][12], float), "ngày ghi thành ngày thật"

@@ -17,7 +17,8 @@ import phan_loai as P
 import trinh_bay_sheet as T
 from sheet_gia import LarkGia
 from test_binh_luan_phan_tich import TT, _bl, moi_truong  # noqa: F401
-from test_viec_nen import nen  # noqa: F401
+from test_viec_nen import nen  # noqa: F401
+from sheet_gia import meta  # noqa: E402
 
 
 def _lark(mt) -> LarkGia:
@@ -106,13 +107,13 @@ def test_tong_quan_chep_dung_thong_ke_va_cau_dong_thong_ke(moi_truong):  # noqa:
     tq = gia.o("Tổng quan")
     tk = kq["thong_ke"]
     assert tq[0][0] == "Soi bình luận HAPAS"
-    assert "Nguồn: social_deep_dive" in tq[1][0] and "Phạm vi: 1 bài" in tq[1][0]
+    assert "Nguồn: social_deep_dive" in meta(tq) and "Phạm vi: 1 bài" in meta(tq)
     assert _tq(gia, "Bình luận đã ghi sheet")[1] == kq["tong_comment"] == 2
     assert _tq(gia, "Đã phân loại")[1] == tk["da_phan_loai"]
     for lab in ("Tích cực", "Tiêu cực", "Trung lập"):
         r = _tq(gia, lab)
         assert r[1] == tk["sac_thai"][lab]["so"]
-        assert P._pt(tk["sac_thai"][lab]["ti_le"]) in r[2], "tỉ lệ đúng dạng dong_thong_ke"
+        assert P._pt(tk["sac_thai"][lab]["ti_le"]) in r[3], "tỉ lệ đúng dạng dong_thong_ke"
     ghi = [r[0] for r in tq if r and str(r[0]).startswith("• ")]
     assert f"• {kq['dong_thong_ke']}" in ghi
     assert any("tối đa 50 bình luận" in g for g in ghi), "nói rõ trần max_comments"
@@ -134,12 +135,12 @@ def test_dinh_dang_cot_tieu_de_co_dinh_va_loc(moi_truong):  # noqa: F811
     assert dong[5] == 9 and "#,##0" in _fmt(gia, bl, 6)
     ngay = round((__import__("datetime").datetime(2026, 10, 1, 10, 0)
                   - __import__("datetime").datetime(1899, 12, 30)).total_seconds() / 86400, 6)
-    assert dong[7] == ngay and "dd/MM/yyyy HH:mm" in _fmt(gia, bl, 8), "giờ VN, ngày thật"
+    assert dong[7] == ngay and "yyyy/MM/dd HH:mm:ss" in _fmt(gia, bl, 8), "giờ VN, ngày thật"
     # Thống kê: tỉ lệ của phan_loai ĐÃ nhân 100 → 75.0 hiển thị 75.00%, không nhân nữa.
     t = gia.o(tk)
     tong = next(r for r in t if r[0] == "Tổng" and r[1] == "Tích cực")
     assert tong[2:] == [1, 50.0, 81.8]
-    assert '0.00"%"' in _fmt(gia, tk, 4) and '0.00"%"' in _fmt(gia, tk, 5)
+    assert "#,##0.00" in _fmt(gia, tk, 4) and "#,##0.00" in _fmt(gia, tk, 5)
     for ten in (bl, tk):
         tab = gia.tab(ten)
         assert tab["frozen"] == 1
@@ -168,8 +169,13 @@ def test_doc_lai_khong_duoc_thi_chua_kiem_khong_tu_nhan_du(moi_truong):  # noqa:
 
 def test_ghi_thieu_thi_canh_bao_trong_note(moi_truong, monkeypatch):  # noqa: F811
     goc = T.kiem_ghi
-    monkeypatch.setattr(T, "kiem_ghi", lambda tok, tabs: dict(
-        goc(tok, tabs), day_du=False, cau="CẢNH BÁO GHI THIẾU: 1. Bình luận: THIẾU"))
+    def thieu(tok, tabs):
+        k = goc(tok, tabs)
+        for t in k["tabs"]:
+            if t["tab"] == "1. Bình luận":
+                t.update(ket="thieu", cau="THIẾU")
+        return dict(k, day_du=False, cau="CẢNH BÁO GHI THIẾU: 1. Bình luận: THIẾU")
+    monkeypatch.setattr(T, "kiem_ghi", thieu)
     kq, _ = _chay(moi_truong, n_bai=1)
     assert kq["day_du"] is False and "CẢNH BÁO GHI THIẾU" in kq["note"]
 
@@ -238,4 +244,4 @@ def test_viec_nen_co_tong_quan_muc_luc_kiem_ghi(nen, monkeypatch):  # noqa: F811
     # Chế độ LỚN đặt định dạng an toàn sau khi ghi: tỉ lệ ĐÃ ×100 → số 2 lẻ, không bao giờ
     # "0.00%" (sẽ nhân 100 lần nữa).
     fmt = _fmt(gia, "Thống kê", 4)
-    assert fmt and set(fmt) <= {'0.00"%"', "#,##0.00"} and "0.00%" not in fmt
+    assert fmt and set(fmt) <= {"#,##0.00", "#,##0.00"} and "0.00%" not in fmt

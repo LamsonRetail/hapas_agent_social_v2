@@ -357,7 +357,7 @@ def _handle(args: dict, **_kwargs) -> str:
 
         def _cap_quyen(tok: str) -> None:
             sender = memory_store.get_current_sender()
-            cap["granted"] = A._grant(tok, sender) if sender else False
+            TB.gop_quyen(cap, A._grant(tok, sender) if sender else False)
 
         try:
             bang_bai = _bang_bai(trong)

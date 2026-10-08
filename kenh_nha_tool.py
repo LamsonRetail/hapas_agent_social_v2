@@ -658,7 +658,7 @@ def _handle(args: dict, **_kw) -> str:
     cap: dict = {}
 
     def _cap_quyen(tok: str) -> None:
-        cap["granted"] = A._grant(tok, sender) if sender else False
+        T.gop_quyen(cap, A._grant(tok, sender) if sender else False)
 
     try:
         kq_sheet = T.xuat(title, [bang_bl, D.bang_thong_ke(tk), bang_bai], tq, goc=goc,

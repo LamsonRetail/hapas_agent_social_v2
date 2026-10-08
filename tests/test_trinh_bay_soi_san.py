@@ -33,8 +33,8 @@ def test_tab_va_dinh_dang_tien_phan_tram_diem(gia):
     assert lark.tab_ten() == ["Tổng quan", "Dữ liệu", "Dữ liệu gốc"]
     o = lark.o("Dữ liệu")
     assert o[0] == S._HEADER and o[1][3] == 169000 and o[1][5] == 32
-    assert '#,##0 "₫"' in _fmt(lark, "Dữ liệu", 4) and '#,##0 "₫"' in _fmt(lark, "Dữ liệu", 5)
-    assert '0.00"%"' in _fmt(lark, "Dữ liệu", 6), "32 đã là phần trăm: không nhân 100 nữa"
+    assert "#,##0" in _fmt(lark, "Dữ liệu", 4) and "#,##0" in _fmt(lark, "Dữ liệu", 5)
+    assert "#,##0.00" in _fmt(lark, "Dữ liệu", 6), "32 đã là phần trăm: không nhân 100 nữa"
     assert "#,##0.00" in _fmt(lark, "Dữ liệu", 9) and "#,##0" in _fmt(lark, "Dữ liệu", 7)
     assert lark.tab("Dữ liệu")["frozen"] == 1
     sid = lark.tab("Dữ liệu")["sheet_id"]

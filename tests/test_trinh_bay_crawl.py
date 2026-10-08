@@ -15,7 +15,8 @@ import pytest
 import apify_tool as A
 import crawl_tool as C
 import trinh_bay_sheet as T
-from sheet_gia import LarkGia
+from sheet_gia import LarkGia
+from sheet_gia import meta  # noqa: E402
 
 SP = [{"ten": "=cmd|' /C calc'!A0", "gia": 1000000, "gia_goc": 1300000, "link": "https://hapas.vn/a",
        "anh": "https://hapas.vn/a.jpg", "anh_tat_ca": ["https://hapas.vn/a.jpg"], "so_anh": 1,
@@ -58,15 +59,15 @@ def test_web_vn_tien_dong_giam_phan_tram_sku_chu_va_chan_cong_thuc(chay):
     o = gia.o("Dữ liệu")
     assert o[0] == C._COT
     assert o[1][0].startswith("'="), "tên sản phẩm '=…' vẫn bị vô hiệu hoá"
-    assert o[1][1] == 1000000 and '#,##0 "₫"' in _fmt(gia, 2) and '#,##0 "₫"' in _fmt(gia, 3)
-    assert o[1][3] == 23 and '0.00"%"' in _fmt(gia, 4), "Giảm % đã ×100: không nhân nữa"
+    assert o[1][1] == 1000000 and "#,##0" in _fmt(gia, 2) and "#,##0" in _fmt(gia, 3)
+    assert o[1][3] == 23 and "#,##0.00" in _fmt(gia, 4), "Giảm % đã ×100: không nhân nữa"
     assert o[2][3] == "" and o[2][2] == "", "không có giá gốc → ô trống, không 0"
     assert o[1][4] == "00123" and "@" in _fmt(gia, 5)
     assert gia.tab("Dữ liệu")["frozen"] == 1
     sid = gia.tab("Dữ liệu")["sheet_id"]
     assert [b["range"] for p, b in gia.loc()] == [f"{sid}!A1:J3"]
     tq = " ".join(str(r[0]) for r in gia.o("Tổng quan"))
-    assert "Nguồn: web_crawl — tầng catalog_json" in tq and "đồng (VND)" in tq
+    assert "Nguồn: web_crawl — tầng catalog_json" in meta(gia.o("Tổng quan")) and "đồng (VND)" in tq
     assert "TOP 5 GIẢM GIÁ SÂU NHẤT" in tq
     assert kq["day_du"] is True and kq["kiem_ghi"] in kq["note"] and kq["granted"] is True
     ghi = [i for i, g in enumerate(gia.goi) if g[1].endswith("values_batch_update")]
@@ -98,7 +99,7 @@ def test_adapter_co_du_lieu_goc_khong_lot_ra_tool_result(chay, monkeypatch):
     g = gia.o(T.TAB_GOC)
     assert "colors" in g[0] and g[1][g[0].index("productId")] == "E489147-000"
     assert "colors" not in raw and "__goc" not in raw
-    assert '#,##0 "₫"' in _fmt(gia, 2), "currency VND của bản ghi adapter"
+    assert "#,##0" in _fmt(gia, 2), "currency VND của bản ghi adapter"
     tq = " ".join(str(r[0]) for r in gia.o("Tổng quan"))
     assert "Adapter CÓ TÍNH TIỀN" in tq and "Uniqlo trùng tên" in tq
 

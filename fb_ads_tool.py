@@ -327,9 +327,11 @@ def _ghi_sheet(title: str, ads: list[dict], nhan: str, platform: str, country: s
             cot = _cot_sheet()
             try:
                 # Ngày ghi dạng chữ dd/MM/yyyy: định dạng đặt SAU khi ghi (trang_tri_bang).
-                A._write_values(co["tok"], co["sid"],
-                                [[TB._o(v, c.kieu, False) for v, c in zip(r, cot)] for r in dong],
-                                dong_dau=co["dong"] + 1)
+                TB._noi_luoi(co["tok"], co["sid"], TB._luoi(co["tok"]).get(co["sid"], (0, 0)),
+                             co["dong"] + len(dong), len(cot))
+                TB._ghi(co["tok"], co["sid"],
+                        [[TB._o(v, c.kieu, False) for v, c in zip(r, cot)] for r in dong],
+                        dong_dau=co["dong"] + 1)
             except Exception as e:  # noqa: BLE001
                 # Sheet của lượt VẪN CÒN (đã có brand trước, đã cấp quyền) — trả đúng link,
                 # lỗi chỉ là brand này chưa nối vào được.
@@ -346,7 +348,7 @@ def _ghi_sheet(title: str, ads: list[dict], nhan: str, platform: str, country: s
             cap: dict = {"granted": False}
 
             def cap_quyen(tok):
-                cap["granted"] = A._grant(tok, sender) if sender else False
+                TB.gop_quyen(cap, A._grant(tok, sender) if sender else False)
             kq = TB.xuat(title, [bang], tq, cap_quyen=cap_quyen)
             granted = cap["granted"]
             if khoa and kq.tabs:

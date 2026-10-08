@@ -128,8 +128,8 @@ class SoSheet:
 
     def _them_cot(self, t: dict, can: int) -> None:
         """Tab đã bị bỏ cột thừa (`cot`) mà bảng mới rộng hơn: nới lưới trước khi ghi."""
-        cot = t.get("cot")
-        if cot and can > cot:
+        cot = t.get("cot") or T.LUOI_COT          # chưa biết = lưới tab mới (20 cột)
+        if can > cot:
             _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{self.s['token']}/dimension_range",
                  body={"dimension": {"sheetId": t["sheet_id"], "majorDimension": "COLUMNS",
                                      "length": can - cot}})
@@ -276,12 +276,15 @@ class SoSheet:
             with self.v._khoa:
                 self.s["kiem"] = {"day_du": kiem.get("day_du"), "cau": kiem.get("cau")}
                 self._luu()
-        dong, vai = T.dung_tong_quan(tq, tabs, [], kiem, self.s.get("url") or "")
-        rong = vai["rong"]
-        self.ghi_tab(ten, [list(r) + [""] * (rong - len(r)) for r in dong], tu_dau=True)
-        try:
-            T._trang_tri_tong_quan(self.s["token"], self.s["tabs"][ten]["sheet_id"], dong, vai,
-                                   [])
-        except Exception as e:  # noqa: BLE001
-            print(f"[sheet_lon] trang trí Tổng quan lỗi: {A._che_token(e)[:120]}")
+        t = self.dam_bao_tab(ten)
+        kiem_ = getattr(self.v, "kiem_quyen", None)
+        if kiem_:
+            kiem_()                         # tiến trình đã mất quyền chủ thì không ghi sheet
+        # Ghi GỌN qua lớp chung (xoá dòng bản trước, không đệm ô "" — ô "" chặn chữ dài tràn
+        # sang ô kế), trang trí luôn. Không ném: Tổng quan hỏng không làm hỏng việc.
+        n = T.ghi_tong_quan_vao(self.s["token"], t["sheet_id"], self.s.get("url") or "", tq,
+                                tabs, kiem, so_dong_cu=int(t.get("so_dong_cu") or 0))
+        with self.v._khoa:
+            t.update(so_dong_cu=n, da_ghi=n, hash=None, so_dong_dl=max(0, n - 1), so_cot_dl=4)
+            self._luu()
         self.sap_tab([ten] + [t for t in self.s["tabs"] if t != ten])

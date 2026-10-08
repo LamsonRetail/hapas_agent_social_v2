@@ -101,10 +101,11 @@ def test_xuat_bao_cao_day_du_bo_cuc(gia):
     assert gia.tab_ten() == ["Tổng quan", "Dữ liệu"]
     tq = gia.o("Tổng quan")
     assert tq[0][0] == "Báo cáo thử"
-    assert tq[1][0] == ("Nguồn: chi_so_ads · Thời gian: 01/10–02/10 · Phạm vi: 2 tài khoản · "
-                        "Tạo lúc: 08/10/2026 09:30 (giờ VN)")
-    assert tq[2][0] == "Đã ghi đủ 2/2 dòng ở 1 tab dữ liệu (đã đọc lại kiểm)."
-    assert ["Chi tiêu (VND)", 1500000.0, ""] == tq[tq.index(["SỐ LIỆU CHÍNH", "", "", ""]) + 2][:3]
+    assert [r[:2] for r in tq[1:5]] == [["Nguồn", "chi_so_ads"], ["Thời gian", "01/10–02/10"],
+                                         ["Phạm vi", "2 tài khoản"],
+                                         ["Tạo lúc", "08/10/2026 09:30 (giờ VN)"]]
+    assert tq[5][0] == "Đã ghi đủ 2/2 dòng ở 1 tab dữ liệu (đã đọc lại kiểm)."
+    assert ["Chi tiêu (VND)", 1500000.0] == tq[tq.index(["SỐ LIỆU CHÍNH", "", "", ""]) + 2][:2]
     muc = next(i for i, r in enumerate(tq) if r[0] == "MỤC LỤC")
     link = tq[muc + 2][0]
     assert link["text"] == "Dữ liệu" and link["link"] == \
@@ -123,8 +124,8 @@ def test_xuat_bao_cao_day_du_bo_cuc(gia):
                and s["font"]["bold"] for s in hd)
     fmt = {c: [s.get("formatter") for s in gia.kieu_o("Dữ liệu", c, 2) if "formatter" in s]
            for c in range(1, 10)}
-    assert fmt[2] == ["@"] and fmt[4] == ["dd/MM/yyyy"] and fmt[6] == ["#,##0"]
-    assert fmt[5] == ['#,##0 "₫"'] and fmt[7] == ['0.00"%"'] and fmt[8] == ["0.00"]
+    assert fmt[2] == ["@"] and fmt[4] == ["yyyy/MM/dd"] and fmt[6] == ["#,##0"]
+    assert fmt[5] == ["#,##0"] and fmt[7] == ["#,##0.00"] and fmt[8] == ["#,##0.00"]
     assert fmt[9] == ["0.00%"], "phần trăm dạng phân số"
     assert [s.get("formatter") for s in gia.kieu_o("Dữ liệu", 5, 3)] == ["#,##0.00"], \
         "dòng USD định dạng theo tiền tệ của dòng"
@@ -177,17 +178,31 @@ def test_trang_tri_hong_van_du_du_lieu_va_link(gia):
     assert gia.tab("Dữ liệu")["frozen"] == 1
 
 
-def test_dinh_dang_ua_dung_bi_tu_choi_thi_lui_dinh_dang_an_toan(gia):
+#: Định dạng Lark THẬT nhận (09/10/2026: dd/MM/yyyy, '#,##0 "₫"', '0.00"%"', "0.00" đều bị
+#: từ chối với 90204 invalid formatter) — đúng danh sách tài liệu.
+_DINH_DANG_TAI_LIEU = {"", "@", "0", "#,##0", "#,##0.00", "0%", "0.00%", "0.00E+00",
+                       "¥#,##0", "¥#,##0.00", "$#,##0", "$#,##0.00", "yyyy/MM/dd",
+                       "yyyy-MM-dd", "HH:mm:ss", "yyyy/MM/dd HH:mm:ss"}
+
+
+def test_chi_gui_dinh_dang_trong_tai_lieu_mot_lan_khong_bi_tu_choi(gia):
+    """Lark từ chối cả lô kiểu nếu có MỘT định dạng lạ: chỉ gửi định dạng trong tài liệu,
+    và lô định dạng trước khi ghi đi qua ngay lần đầu (không có lần thử hỏng rồi lùi)."""
     goc = gia.call
+    loi = []
 
     def call(method, path, query=None, body=None):
-        if path.endswith("/styles_batch_update") and any(
-                "₫" in str(d["style"].get("formatter")) or "dd/" in
-                str(d["style"].get("formatter")) for d in body["data"]):
-            raise RuntimeError("Lark 400: invalid formatter")
+        if path.endswith("/styles_batch_update"):
+            la = [d["style"]["formatter"] for d in body["data"]
+                  if "formatter" in d["style"]
+                  and d["style"]["formatter"] not in _DINH_DANG_TAI_LIEU]
+            if la:
+                loi.append(la)
+                raise RuntimeError("Lark PUT styles failed: HTTP 200: 90204 invalid formatter")
         return goc(method, path, query, body)
     A.lark.call = call
-    T.xuat("Báo cáo thử", [_bang_ads()], _tq())
+    kq = T.xuat("Báo cáo thử", [_bang_ads()], _tq())
+    assert loi == [] and not kq.canh_bao
     fmt = [s.get("formatter") for s in gia.kieu_o("Dữ liệu", 4, 2)]
     assert fmt == ["yyyy/MM/dd"] and gia.o("Dữ liệu")[1][3] == 46296
     assert [s.get("formatter") for s in gia.kieu_o("Dữ liệu", 5, 2)] == ["#,##0"]
@@ -326,5 +341,5 @@ def test_ten_nguoi_yeu_cau_tren_dong_sieu_du_lieu(gia, monkeypatch):
     """Dòng siêu dữ liệu ghi TÊN người hỏi (không bao giờ open_id)."""
     monkeypatch.setattr(T, "_ten_nguoi_yeu_cau", lambda: "Nguyễn Thị Lan")
     T.xuat("x", [T.Bang("Bài", [T.Cot("a")], [["1"]])], T.TongQuan("x", nguon="t"), luc=LUC)
-    assert "Người yêu cầu: Nguyễn Thị Lan" in gia.o("Tổng quan")[1][0]
+    assert ["Người yêu cầu", "Nguyễn Thị Lan"] in [r[:2] for r in gia.o("Tổng quan")]
     assert "ou_" not in str(gia.o("Tổng quan"))

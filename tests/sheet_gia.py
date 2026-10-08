@@ -12,6 +12,17 @@ from __future__ import annotations
 import re
 
 
+def meta(tq: list) -> str:
+    """Khối siêu dữ liệu của tab Tổng quan (dòng 2.. "Nhãn | Giá trị") → "Nhãn: giá trị · …"."""
+    ra = []
+    for r in tq[1:]:
+        if len(r) < 2 or not r[0] or r[0] not in ("Nguồn", "Thời gian", "Phạm vi",
+                                                   "Người yêu cầu", "Tạo lúc"):
+            break
+        ra.append(f"{r[0]}: {r[1]}")
+    return " · ".join(ra)
+
+
 def _so_cot(chu: str) -> int:
     n = 0
     for ch in chu:
@@ -40,12 +51,17 @@ class BangTinhGia:
 
 
 class LarkGia:
-    def __init__(self, hong=(), doc_lai: bool = True, url: str | None = None):
+    """`chat_luoi`=True (mặc định): ghi vượt lưới tab (chưa nới bằng dimension_range) bị TỪ
+    CHỐI như lỗi Lark — để bài thử thật sự canh việc nới lưới trước khi ghi."""
+
+    def __init__(self, hong=(), doc_lai: bool = True, url: str | None = None,
+                 chat_luoi: bool = True):
         self.goi: list = []
         self.bt: dict[str, BangTinhGia] = {}
         self.hong = set(hong)
         self.doc_lai = doc_lai
         self.url = url                 # url cố định mọi bảng tính (bài cũ so "https://sheet")
+        self.chat_luoi = chat_luoi
         self.dem = 0
 
     # ── tra cứu ──
@@ -175,6 +191,10 @@ class LarkGia:
                 sid, v = _vung(vr["range"])
                 t = b.tab(sid)
                 c1, r1, c2, r2 = v
+                if self.chat_luoi and (r2 > t["rows"] or c2 > t["cols"]):
+                    raise RuntimeError(
+                        f"Lark POST {path} failed: HTTP 400: range {vr['range']} vượt lưới "
+                        f"{t['rows']}x{t['cols']} (giả)")
                 assert len(vr["values"]) == r2 - r1 + 1, "số dòng khớp vùng"
                 assert len(vr["values"]) <= 5000 and c2 - c1 + 1 <= 100, "trần ghi"
                 for i, row in enumerate(vr["values"]):
@@ -204,6 +224,12 @@ class LarkGia:
                 t["rows" if d["majorDimension"] == "ROWS" else "cols"] += d["length"]
             elif method == "DELETE" and d["majorDimension"] == "COLUMNS":
                 t["cols"] -= d["endIndex"] - d["startIndex"] + 1
+            elif method == "DELETE" and d["majorDimension"] == "ROWS":
+                a_, b_ = d["startIndex"], d["endIndex"]
+                n = b_ - a_ + 1
+                t["cells"] = {(r if r < a_ else r - n, c): v for (r, c), v in t["cells"].items()
+                              if not a_ <= r <= b_}
+                t["rows"] -= n
             return {"data": {}}
         return {"data": {}}
 

@@ -1755,7 +1755,7 @@ def _xu_ly(args: dict) -> str:
     cap: dict = {}
 
     def _cap_quyen(tok: str) -> None:
-        cap["granted"] = _grant(tok, sender) if sender else False
+        T.gop_quyen(cap, _grant(tok, sender) if sender else False)
 
     try:
         kq_sheet = T.xuat(title, [bang_bl, bang_thong_ke(tk), _bang_bai(urls, per_url)], tq,

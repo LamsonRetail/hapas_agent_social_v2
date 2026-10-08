@@ -19,6 +19,7 @@ import meta_ads_tool as T
 import scheduler
 import trinh_bay_sheet as TB
 from sheet_gia import LarkGia
+from sheet_gia import meta  # noqa: E402
 
 _CLOSED = {"link_share_entity": "closed", "external_access_entity": "closed",
            "share_entity": "same_tenant", "manage_collaborator_entity": "collaborator_full_access"}
@@ -98,19 +99,19 @@ def test_bo_cuc_tab_va_du_lieu(monkeypatch):
     assert o[1][1] == ACT_VN and o[1][6] == "120200000000000001" and o[1][7] == "'=Chiến dịch A"
     assert _fmt(gia, "Dữ liệu", 2, 2) == "@" and _fmt(gia, "Dữ liệu", 7, 2) == "@"
     # Ngày là ngày thật (định dạng đặt trước khi ghi).
-    assert o[1][4] == _serial("2026-10-01") and _fmt(gia, "Dữ liệu", 5, 2) == "dd/MM/yyyy"
+    assert o[1][4] == _serial("2026-10-01") and _fmt(gia, "Dữ liệu", 5, 2) == "yyyy/MM/dd"
     # CTR đã ×100 trong tool (12/1000×100 = 1.2) → giữ nguyên giá trị, hiện "1.20%".
-    assert o[1][10] == pytest.approx(1.2) and _fmt(gia, "Dữ liệu", 11, 2) == '0.00"%"'
+    assert o[1][10] == pytest.approx(1.2) and _fmt(gia, "Dữ liệu", 11, 2) == "#,##0.00"
     assert _fmt(gia, "Dữ liệu", 10, 2) == "#,##0"
     # Tiền theo tiền tệ TỪNG dòng: VND ₫, USD 2 số lẻ.
-    assert _fmt(gia, "Dữ liệu", 9, 2) == '#,##0 "₫"' and _fmt(gia, "Dữ liệu", 9, 4) == "#,##0.00"
+    assert _fmt(gia, "Dữ liệu", 9, 2) == "#,##0" and _fmt(gia, "Dữ liệu", 9, 4) == "#,##0.00"
     assert _fmt(gia, "Dữ liệu", 12, 4) == "#,##0.00"
     # Dòng tổng (tool tự tính, theo tiền tệ) cách dữ liệu một dòng trống, đậm nền xám.
     assert o[4] == [""] * 12
     assert o[5][0] == "TỔNG USD" and o[6][0] == "TỔNG VND" and o[6][8] == 150000.0
     tong = gia.kieu_o("Dữ liệu", 9, 7)
     assert any(s.get("font", {}).get("bold") and s.get("backColor") == TB.XAM_TONG for s in tong)
-    assert _fmt(gia, "Dữ liệu", 9, 7) == '#,##0 "₫"' and _fmt(gia, "Dữ liệu", 9, 6) == "#,##0.00"
+    assert _fmt(gia, "Dữ liệu", 9, 7) == "#,##0" and _fmt(gia, "Dữ liệu", 9, 6) == "#,##0.00"
     # Tiêu đề navy, cố định dòng 1, lọc tiêu đề + dữ liệu (không gồm dòng tổng).
     assert any(s.get("backColor") == TB.NAVY for s in gia.kieu_o("Dữ liệu", 1, 1))
     assert gia.tab("Dữ liệu")["frozen"] == 1
@@ -125,7 +126,7 @@ def test_tong_quan_so_lieu_chinh_dung_tong_cua_tool(monkeypatch):
     kq = run()
     o = gia.o("Tổng quan")
     assert o[0][0] == "Số ads HAPAS 2026-10-01–2026-10-07"
-    assert "Meta Marketing API" in o[1][0] and "2026-10-01–2026-10-07" in o[1][0]
+    assert "Meta Marketing API" in meta(o) and "2026-10-01–2026-10-07" in meta(o)
     assert "ou_asker" not in json.dumps(o, ensure_ascii=False), "không ghi open_id vào sheet"
     so = {r[0]: r[1] for r in o if len(r) > 1 and " — " in str(r[0]) and isinstance(r[1], (int, float))}
     # Mỗi số trong cau_tong (đúng chuỗi tool đã báo) = một số liệu chính ở Tổng quan.

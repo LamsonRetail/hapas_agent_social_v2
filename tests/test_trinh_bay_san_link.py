@@ -13,7 +13,8 @@ import json
 import san_link as L
 import shopee_tool as S
 import trinh_bay_sheet as T
-from test_san_link import SP_URL, TT_URL, gia  # noqa: F401
+from test_san_link import SP_URL, TT_URL, gia  # noqa: F401
+from sheet_gia import meta  # noqa: E402
 
 
 def _fmt(lk, tab, cot, dong=2):
@@ -33,11 +34,11 @@ def test_bon_bang_tab_danh_so_muc_luc_va_dinh_dang(gia):  # noqa: F811
     assert muc["4. Bình luận"] == len(lk.o("4. Bình luận")) - 1 == 4
     sp = lk.o("1. Sản phẩm")
     i = sp[0].index("Giá từ")
-    assert sp[1][i] == 19900 and '#,##0 "₫"' in _fmt(lk, "1. Sản phẩm", i + 1)
+    assert sp[1][i] == 19900 and "#,##0" in _fmt(lk, "1. Sản phẩm", i + 1)
     j = sp[0].index("Điểm")
     assert "#,##0.00" in _fmt(lk, "1. Sản phẩm", j + 1)
     bl = lk.o("4. Bình luận")
-    assert isinstance(bl[1][2], int) and "dd/MM/yyyy" in _fmt(lk, "4. Bình luận", 3)
+    assert isinstance(bl[1][2], int) and "yyyy/MM/dd" in _fmt(lk, "4. Bình luận", 3)
     assert lk.tab("4. Bình luận")["frozen"] == 1
     assert "__goc" not in raw and "reviewId" not in raw
 
@@ -52,7 +53,7 @@ def test_tong_quan_dem_theo_san_sao_va_ghi_chu_nguon(gia):  # noqa: F811
     assert nhom == {"Shopee": 1, "TikTok Shop": 1}
     assert any(r and r[0] == "BÌNH LUẬN THEO SỐ SAO" for r in tq)
     ghi = " ".join(str(r[0]) for r in tq)
-    assert "Phạm vi: 1 link Shopee, 1 link TikTok Shop" in ghi
+    assert "Phạm vi: 1 link Shopee, 1 link TikTok Shop" in meta(tq)
     assert "KHÔNG phải mẫu đại diện" in ghi and "Chỉ đọc được 2/7 bình luận" in ghi
     assert "Ô trống = nguồn không trả số đó, KHÔNG phải 0" in ghi
 

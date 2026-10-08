@@ -288,7 +288,7 @@ def _handle(args: dict, **kwargs) -> str:
     cap: dict = {}
 
     def _cap_quyen(tok: str) -> None:
-        cap["granted"] = _grant(tok, sender) if sender else False
+        T.gop_quyen(cap, _grant(tok, sender) if sender else False)
 
     try:
         kq = T.xuat(title, [bang], tq, goc=T.bang_goc(goc_ds) if can_goc else None,
