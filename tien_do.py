@@ -75,7 +75,8 @@ từng ngày, từng số. Nhóm nhận = chính cuộc chat của job, không c
      phí). Lịch tạo trong chat (`schedule_source` "lark"), /tiendo gõ tay, tool model
      (doc_bang, dem_bang, tra_tien_do) và tin thường: `bot_console` bị BỎ QUA, giữ luật
      theo người. Kết quả chỉ là câu trả lời của chính job (Platform gửi vào chat của job);
-     /tiendo không ghi kho kiến thức, trí nhớ người dùng hay lịch sử chat (`brain.reply`).
+     /tiendo không ghi kho kiến thức, Nguồn Wiki, bài học hay trí nhớ dài hạn theo người;
+     lịch sử hội thoại của chính cuộc chat vẫn ghi như mọi lệnh (giữ ngữ cảnh).
 """
 from __future__ import annotations
 

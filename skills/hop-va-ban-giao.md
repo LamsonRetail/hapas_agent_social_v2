@@ -234,9 +234,9 @@ Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày m
   Model không tự gửi tin hay tag người bằng tool. Lịch đặt trong chat: quyền đọc Base xét
   theo người đặt lịch; lịch không có người đặt phải tạo lại, không mượn quyền bot.
 - Lịch đặt TRÊN CONSOLE bởi quản trị agent: Mark đọc bảng bằng quyền xem đã cấp cho bot
-  và chỉ gửi kết quả vào nhóm nhận của lịch đó. Phần đọc này tách khỏi kho kiến thức: không
-  nạp vào kho, không ghi nhớ, không dùng để trả lời câu hỏi khác. Base nội bộ (Audit/Chi
-  phí) vẫn không bao giờ mở
+  và chỉ gửi kết quả vào nhóm nhận của lịch đó. Phần đọc này tách khỏi kho kiến thức:
+  không nạp vào kho hay Nguồn Wiki, không lưu thành trí nhớ dài hạn (remember). Base
+  nội bộ (Audit/Chi phí) vẫn không bao giờ mở
 - Bảng mà bot chỉ có quyền xem (vd CHECKLIST DỰ ÁN 20.10): Mark không tự tra được ai xem
   được bảng nên /tiendo gõ tay có thể bị từ chối. Hướng dẫn đúng một câu: thêm bot Mark vào
   tài liệu (quyền xem), dán link bảng, đặt lịch trên console (chọn nhóm nhận, giờ) — việc

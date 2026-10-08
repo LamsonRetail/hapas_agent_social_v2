@@ -9,7 +9,8 @@ nhận thôi." Ranh giới kiểm ở đây:
   • `cua_toi=co` vẫn cần open_id thật (`scheduled_by` hoặc `boi`);
   • Base nội bộ chặn y như cũ;
   • gõ tay, tool model, lịch tạo trong chat, tin thường: `bot_console` bị bỏ qua;
-  • /tiendo không ghi kho/trí nhớ/lịch sử, kết quả chỉ là câu trả lời của chính job.
+  • /tiendo không ghi kho/Nguồn Wiki/bài học/trí nhớ dài hạn (lịch sử chat giữ như
+    cũ); kết quả chỉ là câu trả lời của chính job.
 Không chạm mạng.
 """
 from __future__ import annotations
@@ -305,7 +306,10 @@ def test_tool_model_bo_qua_bot_console_ca_luot_theo_lich(td, ghi_cua, monkeypatc
 
 
 # ───────────────────────────── tách khỏi kiến thức ─────────────────────────────
-def test_tiendo_theo_lich_khong_ghi_kho_tri_nho(td, monkeypatch):
+@pytest.mark.parametrize("theo_lich", [True, False])
+def test_tiendo_khong_ghi_kho_tri_nho_chi_giu_lich_su_chat(td, monkeypatch, theo_lich):
+    """Tách khỏi KIẾN THỨC (kho, Nguồn Wiki, bài học, trí nhớ dài hạn theo người); lịch
+    sử hội thoại của chính cuộc chat vẫn ghi như mọi lệnh để câu hỏi tiếp giữ ngữ cảnh."""
     import bai_hoc_tool
     import brain
     import memory_store
@@ -314,19 +318,29 @@ def test_tiendo_theo_lich_khong_ghi_kho_tri_nho(td, monkeypatch):
     def cam(ten):
         return lambda *a, **k: pytest.fail(f"/tiendo đã ghi {ten}")
     monkeypatch.setattr(brain, "_resolve_agent", cam("model"))
-    for mod, ten in ((memory_store, "append_turns"), (memory_store, "append_user_memory"),
+    for mod, ten in ((memory_store, "append_user_memory"), (memory_store, "_handle_remember"),
                      (P, "ghi_luot_ngu_canh"), (bai_hoc_tool, "_luu"),
-                     (bai_hoc_tool, "_goi"), (wiki_tu_dong, "mot_luot"),
-                     (wiki_tu_dong, "_goi")):
+                     (bai_hoc_tool, "_goi"), (bai_hoc_tool, "_handle_ghi"),
+                     (wiki_tu_dong, "mot_luot"), (wiki_tu_dong, "_goi")):
         monkeypatch.setattr(mod, ten, cam(f"{mod.__name__}.{ten}"))
+    lich_su = []
+    monkeypatch.setattr(memory_store, "append_turns",
+                        lambda chat, turns: lich_su.append((chat, turns)))
     monkeypatch.setattr(brain.audit, "bat_dau", lambda *a, **kw: "t")
     monkeypatch.setattr(brain.audit, "ket_thuc", lambda *a, **kw: None)
-    k = _lich()
-    text = brain.reply("/tiendo " + LINK, chat_id="lark:cli_x:oc_g", sender_open_id=None,
+    if theo_lich:
+        k, nguoi = _lich(), None
+    else:
+        monkeypatch.setattr(BT, "quyen_nguoi_hoi", lambda *a, **kw: (True, "là thành viên"))
+        k, nguoi = {"chat_type": "group"}, OWNER
+    text = brain.reply("/tiendo " + LINK, chat_id="lark:cli_x:oc_g", sender_open_id=nguoi,
                        kenh=k)
     assert "Gửi brief" in text
-    # Chỉ giữ chỗ gửi cho CHÍNH nhóm của job (Platform gửi câu trả lời vào chat của job).
-    assert k["tien_do_gui"][0] == "oc_g"
+    assert [c for c, _ in lich_su] == ["lark:cli_x:oc_g"]
+    assert lich_su[0][1][-1] == {"role": "assistant", "text": text}
+    if theo_lich:
+        # Chỉ giữ chỗ gửi cho CHÍNH nhóm của job (Platform gửi câu trả lời vào chat của job).
+        assert k["tien_do_gui"][0] == "oc_g"
 
 
 def test_vong_job_chi_tra_loi_vao_job_cua_no(td, monkeypatch):
