@@ -1053,11 +1053,16 @@ def _handle(args: dict, **_kw) -> str:
     except BT.TuChoi as e:
         return tool_error(str(e))
     tab = str(a.get("tab") or "").strip()
+    if phu and tab and tab != phu:
+        return tool_error("Nguồn đã chỉ đúng một bảng/tab; không được đổi sang bảng/tab khác.")
     try:
-        tho = B.doc_tho(loai, token, tab or phu)
+        tho = B.doc_tho(loai, token, tab or phu, strict_scope=bool(phu))
     except Exception as e:
         return tool_error(BT.loi_doc(ten_loai, e))
     if not tho["bang"]:
+        # Base nội bộ hỗn hợp: không liệt kê tên bảng (lộ tên Audit/Chi phí).
+        if token in BT.base_noi_bo():
+            return tool_error(f"Không thấy bảng '{tab or phu}' trong {ten_loai} này.")
         return tool_error(f"Không thấy tab/bảng '{tab or phu}' trong {ten_loai} này. Các "
                           f"tab: {', '.join(map(str, tho['tat_ca'])) or '(không có)'}.")
     return tool_result(_dem_va_gon(tho["bang"], tham,

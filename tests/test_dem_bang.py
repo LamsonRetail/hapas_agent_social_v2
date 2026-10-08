@@ -92,7 +92,7 @@ def _sheet_gia(values: list[list], tok: str = TOK, sid: str = SID,
 @pytest.fixture
 def cho_doc(monkeypatch):
     """Người hỏi có quyền; Lark giả trả tab khảo sát thật."""
-    monkeypatch.setattr(BT, "quyen_nguoi_hoi", lambda *a: (True, "chủ agent"))
+    monkeypatch.setattr(BT, "quyen_nguoi_hoi", lambda *a, **k: (True, "chủ agent"))
     lk = _sheet_gia(_MAU["values"])
     monkeypatch.setattr(B.lark, "call", lk)
     return lk
@@ -492,7 +492,7 @@ def test_link_la_va_wiki_tai_lieu(monkeypatch):
 
 
 def test_bot_khong_doc_duoc_bao_nhu_doc_bang(monkeypatch):
-    monkeypatch.setattr(BT, "quyen_nguoi_hoi", lambda *a: (True, "chủ agent"))
+    monkeypatch.setattr(BT, "quyen_nguoi_hoi", lambda *a, **k: (True, "chủ agent"))
     monkeypatch.setattr(B.lark, "call", LarkGia({}))
     r = json.loads(D._handle({"nguon": "https://x.larksuite.com/sheets/tok"}))
     assert "Mark chưa đọc được Sheet này" in r["error"] and "Social Assistant" in r["error"]

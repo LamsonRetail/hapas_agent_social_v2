@@ -143,12 +143,12 @@ def test_brain_khong_goi_model_va_noi_dung_code(ctx, monkeypatch):
 def test_cua_quyen_that_nhan_chinh_danh_lich(ctx, monkeypatch):
     monkeypatch.setattr(T.BT, "mo_nguon", _OPEN)
     got=[]
-    def check(kind, token, asker, node):
-        got.append(asker)
+    def check(kind, token, asker, node, *, table_id=""):
+        got.append((asker, table_id))
         return False, "fixture denied"
     monkeypatch.setattr(T.BT, "quyen_nguoi_hoi", check)
     text=T.lenh_tiendo(D["url"], kenh=scheduled(), chat_id="oc_group", sender_open_id="ou_other")
-    assert got==["ou_owner"] and "fixture denied" in text
+    assert got==[("ou_owner", "tblTest")] and "fixture denied" in text
 
 def test_nua_bang_khong_bao_thanh_day_du(monkeypatch):
     monkeypatch.setattr(T.VB, "_goi", lambda *a,**kw: {"data": {"items": [row()], "has_more": True}})

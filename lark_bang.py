@@ -22,6 +22,7 @@ from __future__ import annotations
 import datetime
 import re
 import unicodedata
+from urllib.parse import parse_qs, urlparse
 
 import lark_client as lark
 
@@ -37,6 +38,45 @@ _COT_NGAY = {5, 1001, 1002}
 
 
 # ───────────────────────────── nhận diện link ─────────────────────────────
+def nhan_dien_chi_tiet(nguon: str) -> tuple[str, str, str, str] | None:
+    """Như :func:`nhan_dien`, kèm loại phạm vi ``table``/``sheet``.
+
+    Một link có phạm vi trùng hoặc mâu thuẫn bị từ chối. Không được âm thầm chọn
+    giá trị đầu tiên vì giá trị còn lại có thể trỏ sang bảng nhạy cảm.
+    """
+    s = (nguon or "").strip()
+    m = re.match(r"^(sheet|base):([A-Za-z0-9]+)(?:_([A-Za-z0-9]+))?$", s)
+    if m:
+        loai = "sheet" if m.group(1) == "sheet" else "bitable"
+        phu = m.group(3) or ""
+        return loai, m.group(2), phu, ("sheet" if loai == "sheet" and phu else
+                                      "table" if phu else "")
+    try:
+        u = urlparse(s)
+        q = parse_qs(u.query, keep_blank_values=True)
+    except ValueError:
+        return None
+    bang = q.get("table", [])
+    trang = q.get("sheet", [])
+    if len(bang) > 1 or len(trang) > 1 or (bang and trang):
+        return None
+    if bang and (not bang[0] or not re.fullmatch(r"[A-Za-z0-9]+", bang[0])):
+        return None
+    if trang and (not trang[0] or not re.fullmatch(r"[A-Za-z0-9]+", trang[0])):
+        return None
+    phu, kieu_phu = (bang[0], "table") if bang else ((trang[0], "sheet") if trang else ("", ""))
+    m = re.search(r"/base/([A-Za-z0-9]+)", u.path)
+    if m:
+        return None if kieu_phu == "sheet" else ("bitable", m.group(1), phu, kieu_phu)
+    m = re.search(r"/sheets/([A-Za-z0-9]+)", u.path)
+    if m:
+        return None if kieu_phu == "table" else ("sheet", m.group(1), phu, kieu_phu)
+    m = re.search(r"/wiki/([A-Za-z0-9]+)", u.path)
+    if m:
+        return "wiki", m.group(1), phu, kieu_phu
+    return None
+
+
 def nhan_dien(nguon: str) -> tuple[str, str, str] | None:
     """Link/mã → (loại, token, phụ). Loại: "bitable" | "sheet" | "wiki".
 
@@ -44,22 +84,8 @@ def nhan_dien(nguon: str) -> tuple[str, str, str] | None:
     thẻ mục lục ghi dạng `sheet:<token>_<sheet_id>` hoặc `base:<app_token>_<table_id>`.
     `phụ` = sheet_id / table_id nếu link chỉ đúng một tab / một bảng.
     """
-    s = (nguon or "").strip()
-    m = re.match(r"^(sheet|base):([A-Za-z0-9]+)(?:_([A-Za-z0-9]+))?$", s)
-    if m:
-        return ("sheet" if m.group(1) == "sheet" else "bitable", m.group(2), m.group(3) or "")
-    m = re.search(r"/base/([A-Za-z0-9]+)", s)
-    if m:
-        t = re.search(r"[?&]table=([A-Za-z0-9]+)", s)
-        return ("bitable", m.group(1), t.group(1) if t else "")
-    m = re.search(r"/sheets/([A-Za-z0-9]+)", s)
-    if m:
-        t = re.search(r"[?&]sheet=([A-Za-z0-9]+)", s)
-        return ("sheet", m.group(1), t.group(1) if t else "")
-    m = re.search(r"/wiki/([A-Za-z0-9]+)", s)
-    if m:
-        return ("wiki", m.group(1), "")
-    return None
+    d = nhan_dien_chi_tiet(nguon)
+    return d[:3] if d else None
 
 
 def giai_wiki(node_token: str) -> tuple[str, str] | None:
@@ -148,7 +174,9 @@ def doc_base(app_token: str, chi_bang: str = "", *, ca_dong: bool = True) -> dic
         ten = ""
     bangs = _trang(f"/open-apis/bitable/v1/apps/{app_token}/tables", {"page_size": 100})
     if chi_bang:
-        bangs = [b for b in bangs if b.get("table_id") == chi_bang] or bangs
+        bangs = [b for b in bangs if b.get("table_id") == chi_bang]
+        if not bangs:
+            raise LookupError(f"Không thấy bảng '{chi_bang}' trong Base; không đọc bảng khác.")
     bangs = bangs[:MAX_BANG]
     con_dong = MAX_DONG
     phan, tom, bi_cat = [], [], False
@@ -198,7 +226,9 @@ def doc_sheet(tok: str, chi_sheet: str = "", *, ca_dong: bool = True) -> dict:
              .get("data") or {}).get("sheets")) or []
     tabs = [t for t in tabs if (t.get("resource_type") or "sheet") == "sheet"]
     if chi_sheet:
-        tabs = [t for t in tabs if t.get("sheet_id") == chi_sheet] or tabs
+        tabs = [t for t in tabs if t.get("sheet_id") == chi_sheet]
+        if not tabs:
+            raise LookupError(f"Không thấy tab '{chi_sheet}' trong Sheet; không đọc tab khác.")
     tabs = tabs[:MAX_BANG]
     con_dong = MAX_DONG
     phan, tom, bi_cat = [], [], False
@@ -312,12 +342,13 @@ def _o_base(v, loai: int | None) -> list[str]:
     return [s] if s.strip() else []
 
 
-def _chon(ds: list[dict], chi: str, khoa_id: str, khoa_ten: str) -> list[dict]:
+def _chon(ds: list[dict], chi: str, khoa_id: str, khoa_ten: str, *, chi_id: bool = False
+          ) -> list[dict]:
     """Lọc bảng/tab theo mã HOẶC tên (không phân biệt hoa thường, dấu). Không khớp → []."""
     if not chi:
         return ds
     co = [t for t in ds if t.get(khoa_id) == chi]
-    if co:
+    if co or chi_id:
         return co
     k = _bo_dau(chi)
     co = [t for t in ds if _bo_dau(t.get(khoa_ten) or "") == k]
@@ -327,7 +358,7 @@ def _chon(ds: list[dict], chi: str, khoa_id: str, khoa_ten: str) -> list[dict]:
     return co if len(co) == 1 else []
 
 
-def doc_tho(loai: str, token: str, phu: str = "") -> dict:
+def doc_tho(loai: str, token: str, phu: str = "", *, strict_scope: bool = False) -> dict:
     """Đọc THÔ từng ô của Sheet (mọi dòng của vùng đã dùng, KỂ CẢ dòng 1) hoặc Base.
 
     `phu` = mã HOẶC tên tab/bảng; bỏ trống = mọi tab/bảng. Trả
@@ -339,13 +370,13 @@ def doc_tho(loai: str, token: str, phu: str = "") -> dict:
     Lỗi Lark ném ra nguyên — như `doc`.
     """
     if loai == "sheet":
-        return _tho_sheet(token, phu)
+        return _tho_sheet(token, phu, strict_scope=strict_scope)
     if loai == "bitable":
-        return _tho_base(token, phu)
+        return _tho_base(token, phu, strict_scope=strict_scope)
     raise RuntimeError(f"loại '{loai}' không phải Base hay Sheet")
 
 
-def _tho_sheet(tok: str, chi: str) -> dict:
+def _tho_sheet(tok: str, chi: str, *, strict_scope: bool = False) -> dict:
     try:
         ten = ((lark.call("GET", f"/open-apis/sheets/v3/spreadsheets/{tok}")
                 .get("data") or {}).get("spreadsheet") or {}).get("title") or ""
@@ -357,7 +388,7 @@ def _tho_sheet(tok: str, chi: str) -> dict:
     tat_ca = [t.get("title") or t.get("sheet_id") for t in tabs]
     con_dong = MAX_DONG
     ra = []
-    for t in _chon(tabs, chi, "sheet_id", "title")[:MAX_BANG]:
+    for t in _chon(tabs, chi, "sheet_id", "title", chi_id=strict_scope)[:MAX_BANG]:
         sid = t.get("sheet_id")
         g = t.get("grid_properties") or {}
         so_dong = int(g.get("row_count") or 0)
@@ -382,7 +413,7 @@ def _tho_sheet(tok: str, chi: str) -> dict:
     return {"ten": ten or tok, "loai": "Sheet", "bang": ra, "tat_ca": tat_ca}
 
 
-def _tho_base(app_token: str, chi: str) -> dict:
+def _tho_base(app_token: str, chi: str, *, strict_scope: bool = False) -> dict:
     try:
         ten = ((lark.call("GET", f"/open-apis/bitable/v1/apps/{app_token}")
                 .get("data") or {}).get("app") or {}).get("name") or ""
@@ -392,7 +423,7 @@ def _tho_base(app_token: str, chi: str) -> dict:
     tat_ca = [b.get("name") or b.get("table_id") for b in bangs]
     con_dong = MAX_DONG
     ra = []
-    for b in _chon(bangs, chi, "table_id", "name")[:MAX_BANG]:
+    for b in _chon(bangs, chi, "table_id", "name", chi_id=strict_scope)[:MAX_BANG]:
         tid = b.get("table_id")
         fields = _trang(f"/open-apis/bitable/v1/apps/{app_token}/tables/{tid}/fields",
                         {"page_size": 100})[:MAX_COT]

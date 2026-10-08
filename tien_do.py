@@ -640,18 +640,30 @@ def _handle(args: dict, **_kw) -> str:
     dich, loi = _dich_tu_nguon(nguon or d["url"], d)
     if not dich:
         return tool_error(loi)
+    # `tra_tien_do` trước đây luôn ép mọi nguồn qua cột cố định CHECKLIST DA. Vì vậy
+    # Base Kế hoạch có đủ motif nhưng dùng tên tự nhiên (Hạng mục, Người phụ trách,
+    # Hạn, Trạng thái) vẫn bị báo sai cấu trúc, trong khi đường cứng /tiendo đọc được.
+    # Chỉ nguồn TƯỜNG MINH khác Base cấu hình mới tự nhận cột; đường mặc định và link
+    # trỏ đúng Base cấu hình giữ nguyên doc_viec kiểm chặt để không đổi bộ nhắc cũ.
+    nguon_khac_mac_dinh = bool(nguon) and (
+        d is None or _khoa_base(dich) != _khoa_base(d)
+    )
     try:
-        dong = doc_viec(dich)
+        if nguon_khac_mac_dinh:
+            dich["ten"] = ten_base(dich)
+            cot, dong = doc_theo_cot(dich)
+        else:
+            cot, dong = None, doc_viec(dich)
     except CauTrucLoi as e:
         return tool_error(str(e))
     except Exception as e:  # noqa: BLE001
         return tool_error(BT.loi_doc("Base", e))
     hom_nay = hom_nay_vn()
     ket = loc_viec(dong, hom_nay, so_ngay, pic=str(a.get("pic") or ""),
-                   nhom=str(a.get("nhom") or ""), qua_han_toi_da_ngay=nguong)
+                   nhom=str(a.get("nhom") or ""), qua_han_toi_da_ngay=nguong, cot=cot)
     loc = ", ".join(x for x in (f"PIC '{a['pic']}'" if a.get("pic") else "",
                                 f"NHÓM '{a['nhom']}'" if a.get("nhom") else "") if x)
-    cau = soan_tin(ket, hom_nay, dich, gan_the=False, so_ngay=so_ngay)
+    cau = soan_tin(ket, hom_nay, dich, gan_the=False, so_ngay=so_ngay, cot=cot)
     if not cau:
         cau = (f"Không có việc nào quá hạn trong {nguong} ngày gần đây hoặc tới hạn trong "
                f"{so_ngay} ngày tới" + (f" ({loc})" if loc else "")
