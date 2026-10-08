@@ -1017,6 +1017,11 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
         # model có thể diễn đạt lại thành thứ khác với sự thật về quyền hạn.
         tid = audit.bat_dau(chat_id, sender_open_id, user_text)
         audit.ket_thuc(tid, kq.tra_loi_thang, None, trang_thai="lệnh")
+        if kq.lenh == "/tiendo":
+            # Dữ liệu đọc từ Base (kể cả lịch console đọc bằng quyền bot) tách khỏi kiến
+            # thức/trí nhớ: chỉ là câu trả lời của chính lượt này, không vào lịch sử chat —
+            # lượt model sau trong nhóm không trả lời về bảng mà bỏ qua cửa quyền theo người.
+            return kq.tra_loi_thang
         memory_store.append_turns(chat_id, [
             {"role": "user", "text": user_text, "sender": sender_open_id},
             {"role": "assistant", "text": kq.tra_loi_thang},
