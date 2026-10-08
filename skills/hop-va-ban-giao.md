@@ -233,3 +233,9 @@ Ngày có * là Mark giả định năm hiện tại. (chỉ ghi khi có ngày m
 - Code riêng của lệnh theo lịch được tag PIC việc quá hạn gần đây; `tag=khong` tắt tag.
   Model không tự gửi tin hay tag người bằng tool. Quyền đọc Base xét theo người đặt lịch;
   lịch không có người đặt phải tạo lại trên console, không mượn quyền bot.
+- Bảng mà bot chỉ có quyền xem (vd CHECKLIST DỰ ÁN 20.10): Mark không tự tra được ai xem
+  được bảng nên /tiendo gõ tay có thể bị từ chối. Hướng dẫn đúng một câu: thêm bot vào tài
+  liệu (quyền xem), dán link bảng, đặt lịch trên console → Lịch chạy (lần đầu bấm Kết nối
+  tài khoản Lark). Khi đó Platform kiểm bằng tài khoản Lark của người đặt lịch ở mỗi lần
+  chạy. Lịch báo "Platform chưa kiểm được…" thì người đặt mở console → Lịch chạy để Kết nối
+  Lark hoặc kiểm lại; không hứa Mark tự sửa được

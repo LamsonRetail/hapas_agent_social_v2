@@ -53,6 +53,15 @@ từng ngày, từng số. Nhóm nhận = chính cuộc chat của job, không c
      `ou_…` thì TỪ CHỐI. Danh sách của chính mình nên KHÔNG BAO GIỜ gắn `<at>` (kể cả lượt
      theo lịch). Không có tham số nào cho chọn "của ai" — chỉ là người hỏi, nên không ai mượn
      được lệnh để xem riêng việc của người khác. Khử trùng lượt lịch theo Base+nhóm+người.
+ 13. Bot chỉ có quyền XEM thì Lark không cho bot xem danh sách thành viên (403) — Mark
+     không tự chứng minh được ai xem được bảng. Lượt THEO LỊCH nhận thêm phép kiểm của
+     Platform (payload `nguon_da_kiem`, Platform kiểm bằng token Lark CỦA người đặt lịch lúc
+     tạo và ở mỗi lần chạy). Nó chỉ thay bước tra thành viên khi `boi` == `scheduled_by` ==
+     người hỏi, (loại, token, bảng) KHỚP TUYỆT ĐỐI link trong lệnh (sau khi giải Wiki) và
+     `kiem_luc` trong 2 giờ; luật Base nội bộ xét TRƯỚC, không đổi (không mở Audit/Chi phí).
+     Chỉ `_kenh_cua_job` của job theo lịch mang khoá này; gõ tay, tool model, tin thường
+     giữ nguyên luật cũ. Platform báo `nguon_loi` mà không căn cứ nào khác đạt → từ chối,
+     nêu lý do + "console → Lịch chạy để Kết nối Lark/kiểm lại".
 """
 from __future__ import annotations
 
@@ -110,6 +119,23 @@ LOI_KHONG_RO_NGUOI = ("Chưa biết bạn là ai trên Lark nên không lọc đ
 
 def _la_open_id(s) -> bool:
     return bool(re.fullmatch(r"ou_[A-Za-z0-9]+", str(s or "")))
+
+
+#: Hướng dẫn khi /tiendo bị từ chối vì chưa chứng minh được quyền xem (thường: bot chỉ có
+#: quyền xem nên không tra được danh sách thành viên). Đường chạy được: lịch console — Platform
+#: kiểm bằng tài khoản Lark của người đặt (bất biến 13).
+HUONG_DAN_LICH = ("Muốn Mark báo tiến độ bảng này mỗi ngày: thêm bot vào tài liệu (quyền "
+                  "xem), dán link bảng, đặt lịch trên console → Lịch chạy (lần đầu bấm Kết "
+                  "nối tài khoản Lark).")
+
+
+def _goi_y_lich(loi: str) -> str:
+    """Gợi ý đường lịch console cho lời từ chối QUYỀN thường — không cho từ chối Base nội bộ
+    (lịch cũng không mở được) hay lời đã chỉ console sẵn."""
+    if (not loi.startswith("Không đọc ") or "nội bộ" in loi or "Audit" in loi
+            or "Lịch chạy" in loi):
+        return ""
+    return " " + HUONG_DAN_LICH
 
 
 class CauTrucLoi(Exception):
@@ -627,12 +653,17 @@ def _gon_viec(v: dict) -> dict:
             **({"con_ngay": v["con_ngay"]} if "con_ngay" in v else {})}
 
 
-def _dich_tu_nguon(nguon: str, d: dict | None, *, nguoi_hoi: str | None = None
-                  ) -> tuple[dict | None, str]:
+def _dich_tu_nguon(nguon: str, d: dict | None, *, nguoi_hoi: str | None = None,
+                   chung_minh=None, loi_lich: str = "") -> tuple[dict | None, str]:
     """Link người dùng dán (hoặc Base mặc định) → (đích đọc, lỗi). Quyền đọc kiểm ở
-    `bang_tool.mo_nguon` — CHUNG MỘT CỬA với doc_bang/dem_bang."""
+    `bang_tool.mo_nguon` — CHUNG MỘT CỬA với doc_bang/dem_bang. `chung_minh`/`loi_lich`
+    chỉ có ở lượt THEO LỊCH (bất biến 13)."""
     try:
         them = {} if nguoi_hoi is None else {"nguoi_hoi": nguoi_hoi}
+        if chung_minh is not None:
+            them["chung_minh"] = chung_minh
+        if loi_lich:
+            them["loi_lich"] = loi_lich
         loai, token, phu, ten_loai, _vi_sao = BT.mo_nguon(nguon, **them)
     except BT.TuChoi as e:
         return None, str(e)
@@ -1069,9 +1100,16 @@ def lenh_tiendo(text: str, *, kenh: dict | None = None, chat_id: str = "",
             return ('Dùng /tiendo <link Base?table=tbl…> [cot_han="Ngày giao"] [tag=khong] '
                     '[cua_toi=co].')
         # Cùng cửa doc_bang; lệnh chạy trước audit nên truyền chính danh tường minh.
-        d, loi = _dich_tu_nguon(nguon or mac["url"], mac, nguoi_hoi=asker)
+        # Lượt theo lịch: mang phép kiểm Platform (bằng token Lark của người đặt) vào cửa
+        # quyền — cửa tự đối chiếu bảng/người/độ mới, không khớp thì như không có.
+        cm = BT.ChungMinhLich.tu_payload(k.get("nguon_da_kiem"), asker) if lich else None
+        loi_lich = str(k.get("nguon_loi") or "") if lich else ""
+        d, loi = _dich_tu_nguon(nguon or mac["url"], mac, nguoi_hoi=asker,
+                                chung_minh=cm, loi_lich=loi_lich)
         if not d:
-            return loi
+            return loi + _goi_y_lich(loi)
+        if not mac or _khoa_base(d) != _khoa_base(mac):
+            d["ten"] = ten_base(d)
         if not mac or _khoa_base(d) != _khoa_base(mac):
             d["ten"] = ten_base(d)
         cot, rows = doc_theo_cot(d, {**{key[4:]: v for key, v in opts.items() if key.startswith("cot_")},
