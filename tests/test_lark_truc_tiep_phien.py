@@ -50,7 +50,7 @@ def test_co_gateway_dung_phien_gateway_va_kieu_chat(R, monkeypatch):
     R._do_reply({"chat_id": OC, "message_id": "om_1", "sender_id": "ou_1",
                  "text": "ok chốt", "message_type": "text", "chat_type": "p2p"})
     assert R._goi_test == [{"text": "ok chốt", "chat_id": f"lark:cli_app_mark:{OC}",
-                            "kenh": {"chat_type": "p2p"}}]
+                            "kenh": {"chat_type": "p2p", "channel": "lark", "nguoi_gui": "ou_1"}}]
     assert R._gui_test and R._gui_test[0][1] == OC, "vẫn trả lời thẳng vào chat Lark"
 
 
@@ -58,7 +58,8 @@ def test_nhom_cung_ra_group(R, monkeypatch):
     _gateway(monkeypatch, True)
     R._do_reply({"chat_id": OC, "message_id": "om_2", "text": "hi",
                  "message_type": "text", "chat_type": "group"})
-    assert R._goi_test[0]["kenh"] == {"chat_type": "group"}
+    # Không có sender_id hợp lệ → không có `nguoi_gui` (tool cần danh tính sẽ từ chối).
+    assert R._goi_test[0]["kenh"] == {"chat_type": "group", "channel": "lark"}
 
 
 def test_khong_platform_giu_nguyen_duong_cu(R, monkeypatch):

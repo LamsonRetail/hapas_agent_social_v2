@@ -17,6 +17,13 @@ import socket
 
 import pytest
 
+# Bí mật Meta Ads không bao giờ vào bộ thử: chặn `config` nạp chúng từ `.env` thật (biến
+# này phải đặt TRƯỚC khi module nào import config) và gỡ bản đang có trong môi trường
+# shell, trước khi `meta_ads_tool` kịp giữ token vào bộ nhớ module.
+os.environ["MARK_DOTENV_BO_QUA"] = "MARK_META_"
+for _k in [k for k in os.environ if k.startswith("MARK_META_")]:
+    os.environ.pop(_k, None)
+
 #: Biến khiến runtime gọi platform (lease, stamp, danh bạ Năng lực, trace, job).
 _BIEN_PLATFORM = ("LSR_TELEMETRY_API_KEY", "LSR_COLLECTOR", "LSR_PLATFORM_URL",
                   "LSR_PLATFORM_TOKEN", "LSR_PLATFORM_ADMIN_TOKEN",
@@ -40,6 +47,8 @@ def _getaddrinfo_chan(host, *a, **k):
 def _khong_cham_console_that(monkeypatch):
     """Không bài nào đọc console/platform sống, trừ khi tự chọn."""
     for ten in _BIEN_PLATFORM:
+        monkeypatch.delenv(ten, raising=False)
+    for ten in [k for k in os.environ if k.startswith("MARK_META_")]:
         monkeypatch.delenv(ten, raising=False)
     try:
         import lsr_policy

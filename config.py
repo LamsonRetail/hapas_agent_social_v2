@@ -35,12 +35,19 @@ def _load_dotenv(path: Path) -> None:
     """
     if not path.exists():
         return
+    # Bộ thử đặt `MARK_DOTENV_BO_QUA=MARK_META_` (tests/conftest.py, trước khi nạp
+    # config): khoá có tiền tố này trong `.env` thật KHÔNG được nạp, để token Meta thật
+    # không bao giờ vào tiến trình pytest. Máy chạy không đặt biến này → hành vi như cũ.
+    bo_qua = tuple(t.strip() for t in os.environ.get("MARK_DOTENV_BO_QUA", "").split(",")
+                   if t.strip())
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, val = line.split("=", 1)
         key = key.strip()
+        if bo_qua and key.startswith(bo_qua):
+            continue
         val = val.strip().strip('"').strip("'")
         cu = os.environ.get(key)
         if cu is not None and cu != val:

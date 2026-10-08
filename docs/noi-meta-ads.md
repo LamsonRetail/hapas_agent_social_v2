@@ -19,8 +19,20 @@ loại; ID khác vẫn bị loại dù token có quyền. Thêm tài khoản m�
 cấu hình. Code không gọi Business API, không yêu cầu `business_management` và chỉ GET Meta.
 
 Đây là cấu hình tài khoản quảng cáo. Người hỏi vẫn phải có tên trong danh sách console
-và tool phải bật; dữ liệu chỉ xuất trong chat riêng/web xác thực. Luồng Sheet cần cấu hình
-Lark và Platform của agent thử. Kiểm Meta trực tiếp chưa thay thế nghiệm thu luồng này.
+và công tắc tool phải bật rõ (có dòng `chi_so_ads`, không dòng nào `bat` khác `true`).
+Mark chỉ nhận người hỏi từ: chat riêng Lark (người gửi do gateway/listener ghi), job web có
+`sender_identity_verified`, hoặc lịch Platform gửi vào chat riêng (`scheduled_by`). Job A2A
+và kênh không rõ bị từ chối. Sheet chỉ cấp quyền **xem** cho người hỏi. Lượt trả số gửi kèm
+cờ `restricted: chi_so_ads` lên `/reply` để Platform ẩn nội dung khỏi role `user` trong bản
+ghi hội thoại. Luồng Sheet cần cấu hình Lark và Platform của agent thử. Kiểm Meta trực tiếp
+chưa thay thế nghiệm thu luồng này.
+
+Mốc ngày (hôm qua, 7 ngày…) tính theo múi giờ của từng tài khoản (`timezone_name`), đúng
+cách Meta cộng số; "hôm nay" và "tháng này" ghi rõ ngày hiện tại chưa hết. Dòng có hiển thị
+hoặc chi tiêu mà Meta không trả action (Meta bỏ số 0) được ghi 0.
+
+Token rời `os.environ` khi nạp `meta_ads_tool` (giữ trong bộ nhớ module), và mọi env tiến
+trình con dựng qua `cli_support` bỏ `MARK_META_*`. Bộ thử không nạp `MARK_META_*` từ `.env`.
 
 Restart runtime sau khi sửa `.env` vì loader nạp cấu hình khi khởi động.
 Phase 2 Base hằng ngày chỉ bắt đầu sau khi phase 1 được kiểm tra thật.

@@ -46,10 +46,24 @@ def resolve_cli() -> str | None:
     return None
 
 
+#: Bí mật của chính Mark mà KHÔNG tiến trình con nào cần (lark-cli, Scrapling…):
+#: token/cấu hình Meta Ads chỉ dùng trong `meta_ads_tool` của tiến trình chính.
+_TIEN_TO_BI_MAT = ("MARK_META_",)
+
+
+def env_tien_trinh_con(base: dict | None = None) -> dict:
+    """Bản sao môi trường cho tiến trình con, đã gỡ bí mật Mark (`MARK_META_*`)."""
+    env = dict(os.environ if base is None else base)
+    for k in list(env):
+        if k.upper().startswith(_TIEN_TO_BI_MAT):
+            env.pop(k, None)
+    return env
+
+
 def cli_env() -> dict:
     """Clean env for file-based bot auth: point at the shared config dir, and
-    strip the injected credential vars + hermes-context markers."""
-    env = dict(os.environ)
+    strip the injected credential vars + hermes-context markers + Mark secrets."""
+    env = env_tien_trinh_con()
     for k in list(env):
         if k.startswith("LARKSUITE_CLI_") or k in ("HERMES_HOME", "HERMES_AGENT_DIR"):
             env.pop(k, None)

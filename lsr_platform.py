@@ -622,6 +622,9 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
         if not co_khoa:
             print(f"[job] phiên còn lượt trước chưa xong sau {_HAN_TRA_LOI / 2:.0f}s — "
                   "chạy luôn", flush=True)
+        # Cờ hạn chế còn sót từ lượt trước của phiên (đường không có job) không được dính
+        # vào lượt này.
+        lay_han_che(phien)
         try:
             # `kenh` chỉ truyền khi có — `tra_loi` giả của các bộ thử không nhận nó.
             them = {"kenh": kenh} if kenh else {}
@@ -633,6 +636,8 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
             hop["ok"] = False
             hop["loi"] = f"{type(e).__name__}: {e}"
         finally:
+            # Lấy cờ TRƯỚC khi nhả khoá phiên: lượt sau cùng phiên không xoá mất cờ này.
+            hop["han_che"] = lay_han_che(phien)
             if co_khoa:
                 kp.release()
             if job_id is not None:
@@ -642,6 +647,11 @@ def _chay_co_han(tra_loi, hoi: str, phien: str, sender,
             with khoa:
                 hop["xong"] = True
                 bo = hop.get("bo_lai")
+                # Vòng job còn chờ (chưa bỏ lượt) thì nó đọc cờ cho /reply; bỏ rồi thì
+                # đường gửi bù tự mang cờ theo `hop`.
+                if hop["han_che"] and job_id is not None and "bo_lai" not in hop:
+                    with _HAN_CHE_KHOA:
+                        _HAN_CHE_JOB[job_id] = hop["han_che"]
             if bo:
                 bo["tien_do_kenh"] = kenh
                 _gui_tra_loi_muon(hop, hoi, bo)
@@ -725,7 +735,8 @@ def _gui_tra_loi_muon(hop: dict, hoi: str, k: dict) -> None:
         import viec_nen
         for lan in range(len(_LUI_GUI_BU) + 1):
             try:
-                viec_nen.day_theo_kenh(k, van, kid)
+                han_che = hop.get("han_che") or ""
+                viec_nen.day_theo_kenh(k, van, kid, **({"han_che": han_che} if han_che else {}))
                 if hop.get("ok") and (k.get("tien_do_kenh") or {}).get("tien_do_gui"):
                     import tien_do
                     tien_do.xac_nhan_gui(k["tien_do_kenh"])
@@ -771,6 +782,58 @@ import contextvars as _cv  # noqa: E402
 _JOB_HIEN_TAI: _cv.ContextVar = _cv.ContextVar("lsr_job_hien_tai", default=None)
 
 
+#: Phiên có câu trả lời mang dữ liệu hạn chế theo tool (vd `chi_so_ads` vừa trả số).
+#: Tool đánh dấu trong lượt; luồng trả lời lấy-và-xoá sau lượt rồi gửi kèm `/reply` dưới
+#: khoá `restricted` = tên tool — Platform dựa vào đó ẩn nội dung khỏi người dưới
+#: moderator ở bản ghi hội thoại. Cờ do CHÍNH tool đặt, không đoán theo chữ.
+_HAN_CHE: dict[str, str] = {}
+_HAN_CHE_JOB: dict[object, str] = {}
+_HAN_CHE_KHOA = threading.Lock()
+
+
+def danh_dau_han_che(phien: str | None, tool: str) -> None:
+    with _HAN_CHE_KHOA:
+        _HAN_CHE[phien or ""] = tool
+
+
+def lay_han_che(phien: str | None) -> str:
+    """Lấy-và-xoá cờ hạn chế của phiên; "" nếu lượt không trả dữ liệu hạn chế."""
+    with _HAN_CHE_KHOA:
+        return _HAN_CHE.pop(phien or "", "")
+
+
+def _lay_han_che_job(job_id) -> str:
+    with _HAN_CHE_KHOA:
+        return _HAN_CHE_JOB.pop(job_id, "")
+
+
+def _than_tra_loi(dap: str, han_che: str = "") -> dict:
+    """Thân `/reply`: thêm `restricted` khi lượt trả dữ liệu hạn chế (hợp đồng với Platform)."""
+    return {"text": dap, "restricted": han_che} if han_che else {"text": dap}
+
+
+def _kenh_job_day_du(j: dict, channel: str) -> dict:
+    """`kenh` của job kèm nguồn danh tính cho tool cần biết người hỏi là ai (chi_so_ads).
+
+    - `channel`: cột job do Platform ghi (lark/web/a2a/…), không lấy từ nội dung tin.
+    - `nguoi_gui`: open_id người gửi mà Platform đã xác thực — Lark: `sender_open_id` do
+      gateway/lịch ghi; web: chỉ khi `sender_identity_verified`. KHÔNG bao giờ lấy
+      `user_ref` (A2A/agent token tự khai được).
+    """
+    p = j.get("payload") or {}
+    k = dict(_kenh_cua_job(j) or {})
+    ch = (channel or "").strip().lower()
+    k["channel"] = ch or "khong_ro"
+    oid = str(p.get("sender_open_id") or "").strip()
+    if ch == "web":
+        if p.get("sender_identity_verified") is True and oid.startswith("ou_"):
+            k["sender_identity_verified"] = True
+            k["nguoi_gui"] = oid
+    elif ch == "lark" and oid.startswith("ou_"):
+        k["nguoi_gui"] = oid
+    return k
+
+
 def job_cua_phien(phien: str):
     """Job id platform đang xử lý cho `phien`, None nếu không có (tin Lark trực tiếp).
     Ưu tiên job của CHÍNH luồng đang chạy (phiên có job mới chen vào thì không lẫn)."""
@@ -796,16 +859,19 @@ def gui_lark(chat_id: str, text: str, app_id: str = "", uuid: str | None = None)
     return _goi(c, "/v1/lark/send", than, timeout=20)
 
 
-def bao_su_kien_job(job_id, text: str, ma_su_kien: str | None = None) -> dict:
+def bao_su_kien_job(job_id, text: str, ma_su_kien: str | None = None,
+                    han_che: str = "") -> dict:
     """Gắn một sự kiện "message" vào job gốc trên console (đường TẠM cho web, 02/10/2026:
     console chưa có kênh đẩy tin chủ động cho agent). `ma_su_kien` nằm trong `data.id` để
-    console bỏ trùng khi agent gửi lại sau khởi động."""
+    console bỏ trùng khi agent gửi lại sau khởi động. `han_che` = cờ `restricted` như /reply."""
     c = _cau_hinh()
     if not c or not job_id:
         raise RuntimeError("không có job gốc / chưa cấu hình LSR_*")
     data = {"text": text[:15000]}
     if ma_su_kien:
         data["id"] = ma_su_kien
+    if han_che:
+        data["restricted"] = han_che
     return _goi(c, f"/v1/self/jobs/{job_id}/event", {"kind": "message", "data": data},
                 timeout=20)
 
@@ -893,10 +959,12 @@ def _mot_vong(c: dict, tra_loi) -> int:
         print(f"[anh] lỗi tải ảnh job #{jid}: {type(e).__name__}: {e}", flush=True)
     hoi = _cau_hoi_kem_anh(hoi, j, anh)
 
-    kenh = _kenh_cua_job(j)
     channel = str(j.get("channel") or (j.get("reply_to") or {}).get("channel") or "")
+    kenh = _kenh_job_day_du(j, channel)
     dap, ok, treo = _chay_co_han(tra_loi, hoi, phien, _lark_sender_ref(p, channel),
                                  kenh, job_id=jid)
+    # Quá hạn: lượt còn chạy, /reply dưới đây chỉ là câu báo chờ (không có số).
+    han_che = "" if treo else _lay_han_che_job(jid)
     if treo:
         print(f"[job] #{jid} QUÁ HẠN {_HAN_TRA_LOI:.0f}s — bỏ lượt, đi tiếp. "
               f"Luồng cũ chạy tiếp, xong thì gửi bù trả lời (nếu kênh đẩy được).",
@@ -925,7 +993,7 @@ def _mot_vong(c: dict, tra_loi) -> int:
             print(f"[job] không lấy được token: {type(e).__name__}: {e}", flush=True)
 
     for duong, than in (
-        (f"/v1/self/jobs/{jid}/reply", {"text": dap}),
+        (f"/v1/self/jobs/{jid}/reply", _than_tra_loi(dap, han_che)),
         (f"/v1/self/jobs/{jid}/complete", {"ok": ok, "usage": dung}),
     ):
         try:
