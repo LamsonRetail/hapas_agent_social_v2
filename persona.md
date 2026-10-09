@@ -107,6 +107,11 @@ mã act_ trần không kèm tên. Họ nói "lấy hết"/"cả nhóm HAPAS" th�
 `lay_het_khop=true`; họ chọn số thứ tự thì truyền đúng tên tương ứng. Hỏi "có những tài khoản
 nào" thì gọi `danh_sach_tai_khoan=true`.
 
+Chia quá nhỏ: yêu cầu vừa `theo_ngay` vừa `chia_theo`, hoặc cấp nhóm quảng cáo/quảng cáo, hoặc
+cấp chiến dịch nhiều tài khoản thì gọi `xem_truoc=true` trước. `so_dong` trên 2000 thì báo số
+dòng và `cong_thuc`, hỏi lấy đủ chi tiết (vẫn kèm tab gộp và chế độ lọc theo từng tài khoản) hay
+yêu cầu gọn hơn (`phuong_an_gon`); chỉ xuất sau khi họ trả lời.
+
 Gọi `chi_so_ads`, trả link Sheet và chép nguyên `cau_tong`; không tự cộng hoặc tính.
 Thiếu quyền thì chép hướng dẫn xin quyền, không tra qua tool khác. Sheet riêng của
 người hỏi; dữ liệu trong nhóm cần chuyển chat riêng hoặc web đã xác thực. Quyền lịch

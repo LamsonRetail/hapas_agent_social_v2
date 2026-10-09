@@ -446,6 +446,165 @@ def _cell(number):
     return "" if number is None else float(round(number, 6))
 
 
+# ───────────── tab gộp, dữ liệu gốc gọn, xem trước (chủ agent chốt 09/10/2026) ─────────────
+# Lần xuất thật 6 TK × cấp chiến dịch × theo ngày × nền tảng ra 5.900 dòng khó đọc: thêm các
+# tab gộp do CODE cộng (cùng `_totals`), tab "Chi tiết" giữ đủ mọi dòng + chế độ lọc theo
+# từng tài khoản, "Dữ liệu gốc" chỉ giữ cột mã + trường Chi tiết không có.
+TAB_CHI_TIET = "Chi tiết"
+_TEN_CHIA = {"age": "Tuổi", "gender": "Giới tính", "publisher_platform": "Nền tảng",
+             "platform_position": "Vị trí"}
+#: Không cộng được qua ngày/nền tảng/đối tượng: tab gộp không có các cột này.
+_KHONG_CONG = ("reach", "frequency", "meta_roas")
+#: Dòng chi tiết từ ngưỡng này thì Mark phải hỏi lại người dùng trước khi xuất (persona).
+NGUONG_HOI_DONG = 2000
+_GOC_DAU = ("account_id", "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id",
+            "ad_name", "date_start", "date_stop")
+
+
+def _ten_tk(row):
+    return str(row["account"].get("name") or row["account"]["id"])
+
+
+def _cac_gop(level, breakdown, theo_ngay, so_tai_khoan):
+    """Các tab gộp nên có -> [(tên tab, [Cot khoá], khoá(row) -> tuple, mô tả nhóm)]."""
+    ra = []
+    if so_tai_khoan > 1 or level != "account":
+        ra.append(("Theo tài khoản", [TB.Cot("Tài khoản"), TB.Cot("Mã TK", "ma")],
+                   lambda r: (_ten_tk(r), r["account"]["id"]), "tài khoản"))
+    for b in breakdown:
+        if b == "platform_position":     # vị trí chỉ có nghĩa trong một nền tảng (feed FB ≠ IG)
+            ra.append(("Theo vị trí", [TB.Cot("Nền tảng"), TB.Cot("Vị trí")],
+                       lambda r: (str(r["data"].get("publisher_platform", "")),
+                                  str(r["data"].get("platform_position", ""))), "nền tảng × vị trí"))
+        else:
+            ra.append(("Theo " + _TEN_CHIA[b].lower(), [TB.Cot(_TEN_CHIA[b])],
+                       lambda r, b=b: (str(r["data"].get(b, "")),), _TEN_CHIA[b].lower()))
+    if theo_ngay:
+        ra.append(("Theo ngày", [TB.Cot("Ngày", "ngay")],
+                   lambda r: (r["data"].get("date_start", r["start"]),), "ngày"))
+    if level in ("adset", "ad") or (level == "campaign" and (theo_ngay or breakdown)):
+        ra.append(("Theo chiến dịch", [TB.Cot("Tài khoản"), TB.Cot("Mã TK", "ma"),
+                                        TB.Cot("Mã chiến dịch", "ma"), TB.Cot("Tên chiến dịch")],
+                   lambda r: (_ten_tk(r), r["account"]["id"], str(r["data"].get("campaign_id", "")),
+                              str(r["data"].get("campaign_name", ""))), "chiến dịch"))
+    return ra
+
+
+def _gop(rows, khoa):
+    """Cộng các dòng theo (tiền tệ, khoá): chỉ số cộng được cộng bằng `_totals` (thiếu một dòng
+    thì để trống), tỉ lệ tính lại từ tổng. Không bao giờ cộng hai tiền tệ. Sắp theo tiền tệ
+    rồi chi tiêu giảm dần (chi tiêu trống xuống cuối); hoà thì giữ thứ tự gặp."""
+    nhom = {}
+    for r in rows:
+        nhom.setdefault((r["currency"],) + tuple(khoa(r)), []).append(r)
+    ra = [{"currency": k[0], "khoa": k[1:], "so_dong": len(rs), "values": _totals(rs)[k[0]]}
+          for k, rs in nhom.items()]
+    ra.sort(key=lambda g: (g["currency"], g["values"].get("spend") is None,
+                           -(g["values"].get("spend") or 0)))
+    return ra
+
+
+def _tinh_gop(rows, level, breakdown, theo_ngay, so_tai_khoan):
+    """-> [(tên tab, [Cot khoá], nhóm đã cộng, mô tả)] — chỉ tab THÊM thông tin: tab có số
+    nhóm bằng số dòng chi tiết (không gộp được gì) bị bỏ."""
+    ra = []
+    for ten, cot, khoa, mo in _cac_gop(level, breakdown, theo_ngay, so_tai_khoan):
+        nhom = _gop(rows, khoa)
+        if nhom and len(nhom) < len(rows):
+            ra.append((ten, cot, nhom, mo))
+    return ra
+
+
+def _bang_gop(gop, wanted, label):
+    """Tab gộp → TB.Bang: khoá, Tiền tệ, chỉ số cộng được + tỉ lệ; dòng tổng theo tiền tệ
+    cộng từ CHÍNH các nhóm (phải khớp tổng tab Chi tiết)."""
+    so = [k for k in wanted if k not in _KHONG_CONG]
+    ra = []
+    for ten, khoa_cot, nhom, mo in gop:
+        cot = [*khoa_cot, TB.Cot("Tiền tệ"),
+               *[TB.Cot(METRICS[k][0] + " (" + METRICS[k][1] + ")", **_kieu_cot(k)) for k in so]]
+        dong = [[*g["khoa"], g["currency"], *[_cell(g["values"].get(k)) for k in so]] for g in nhom]
+        tong = [[label + " " + cur, *[""] * (len(khoa_cot) - 1), cur, *[_cell(v.get(k)) for k in so]]
+                for cur, v in _totals(nhom).items()]
+        ra.append(TB.Bang(ten, cot, dong, dong_tong=tong, gap_duoc=False, ten_tab=ten,
+                          mo_ta=f"Mỗi dòng một {mo} (cộng từ tab {TAB_CHI_TIET}, từng tiền tệ); "
+                                "tỉ lệ tính lại từ tổng; sắp theo chi tiêu"))
+    return ra
+
+
+def _toan_0(row, wanted):
+    """Dòng không hiển thị, không chi tiêu và mọi chỉ số đã hỏi đều 0/trống."""
+    return all(row["values"].get(k) in (None, 0) for k in {*wanted, *DELIVERY_FIELDS})
+
+
+def _goc_gon(rows, wanted, breakdown):
+    """"Dữ liệu gốc" gọn: cột mã/ngày/chia nhỏ + MỌI trường Meta mà tab Chi tiết không mang
+    nguyên (actions, action_values… dạng JSON; spend/impressions… khi không hỏi). Trường đã có
+    nguyên giá trị ở Chi tiết (chỉ số hỏi trực tiếp, tên TK) bỏ. Không còn trường riêng → None."""
+    co_roi = {k for k in wanted if METRICS[k][3] == [k]} | {"account_name"}
+    dau = [*_GOC_DAU, *breakdown]
+    ban = []
+    for row in rows:
+        d = row["data"]
+        b = {k: d[k] for k in dau if k in d}
+        b.update((k, v) for k, v in d.items() if k not in b and k not in co_roi)
+        ban.append(b)
+    if not {k for b in ban for k in b} - set(dau):
+        return None
+    return TB.bang_goc(ban, mo_ta="Cột mã, ngày, chia nhỏ + các trường Meta tab Chi tiết không có "
+                                  "(danh sách actions… ở dạng JSON), cùng thứ tự dòng với tab Chi tiết")
+
+
+_KHOA_CHIA = {v: k for k, v in BREAKDOWNS.items()}
+_KHOA_CAP = {v: k for k, v in LEVELS.items()}
+
+
+def _xem_truoc(rows, level, breakdown, theo_ngay, wanted, cut, span, so_tai_khoan):
+    """Kích thước Sheet sẽ xuất — KHÔNG tạo Sheet, không gọi Lark, không trả số chỉ số."""
+    def dem(f):
+        return len({f(r) for r in rows})
+    kt = {"tai_khoan": dem(lambda r: r["account"]["id"])}
+    if level in ("adset", "ad"):
+        kt["chien_dich"] = dem(lambda r: (r["account"]["id"], r["data"].get("campaign_id")))
+    if level != "account":
+        kt[_KHOA_CAP[level]] = dem(lambda r: (r["account"]["id"], r["data"].get(level + "_id")))
+    if theo_ngay:
+        kt["ngay"] = dem(lambda r: r["data"].get("date_start"))
+    for b in breakdown:
+        kt[_KHOA_CHIA[b]] = dem(lambda r, b=b: r["data"].get(b))
+    ten = {"tai_khoan": "tài khoản", "chien_dich": "chiến dịch", "nhom_quang_cao": "nhóm quảng cáo",
+           "quang_cao": "quảng cáo", "ngay": "ngày", "tuoi": "nhóm tuổi", "gioi_tinh": "giới tính",
+           "nen_tang": "nền tảng", "vi_tri": "vị trí"}
+    # Tài khoản (và chiến dịch khi cấp nhỏ hơn) CHỨA đối tượng, không nhân thêm: đứng trước ":".
+    long = set() if level == "account" else {"tai_khoan"} | ({"chien_dich"} if level in ("adset", "ad") else set())
+    cong_thuc = " × ".join(f"{n} {ten[k]}" for k, n in kt.items() if k not in long)
+    if long:
+        cong_thuc = (", ".join(f"{kt[k]} {ten[k]}" for k in ("tai_khoan", "chien_dich") if k in long)
+                     + ": " + cong_thuc)
+    gop = _tinh_gop(rows, level, breakdown, theo_ngay, so_tai_khoan)
+    goi_y = [{"tab": t, "so_dong": len(n)} for t, _, n, _ in gop] + [{"tab": TAB_CHI_TIET, "so_dong": len(rows)}]
+    obj = (lambda r: (r["account"]["id"], r["data"].get(level + "_id"))) if level != "account" \
+        else (lambda r: r["account"]["id"])
+    gon = []
+    if theo_ngay:
+        gon.append({"bo": "theo_ngay", "so_dong_uoc": dem(lambda r: (obj(r), *[r["data"].get(b) for b in breakdown]))})
+    if breakdown:
+        gon.append({"bo": "chia_theo", "so_dong_uoc": dem(lambda r: (obj(r), r["data"].get("date_start")))})
+    zero = sum(1 for r in rows if _toan_0(r, wanted))
+    ra = {"xem_truoc": True, "so_dong": len(rows), "bi_cat": cut, "khoang": span, "kich_thuoc": kt,
+          "cong_thuc": cong_thuc, "so_dong_toan_0": zero, "tab_se_co": goi_y, "phuong_an_gon": gon}
+    if len(rows) > NGUONG_HOI_DONG:
+        ra["hoi_tiep"] = (f"CHƯA xuất. Báo người dùng: tab Chi tiết sẽ có {len(rows)} dòng ({cong_thuc}), "
+                          f"{zero} dòng toàn 0. Hỏi họ chọn: (1) lấy đủ chi tiết — vẫn kèm các tab gộp "
+                          + (", ".join(g["tab"] for g in goi_y[:-1]) or "(không có)")
+                          + (" và chế độ lọc theo từng tài khoản" if kt["tai_khoan"] > 1 else "") + "; "
+                          "hoặc (2) yêu cầu gọn hơn (xem phuong_an_gon: bỏ theo ngày / bỏ chia nhỏ / cấp cao hơn). "
+                          "Chỉ xuất sau khi họ trả lời: gọi lại đúng đối số đã chọn, bỏ xem_truoc.")
+    else:
+        ra["hoi_tiep"] = "Dưới ngưỡng hỏi lại: gọi lại cùng đối số, bỏ xem_truoc, để xuất Sheet."
+    return ra
+
+
 def _khoa_rieng_tu(token):
     """Chạy NGAY SAU khi tạo bảng tính, TRƯỚC mọi lần ghi số (`xuat(sau_khi_tao=...)`)."""
     # Drive v2 fields/enums verified against larksuite/oapi-sdk-go v3.12.0 drive/v2.
@@ -464,15 +623,16 @@ def _khoa_rieng_tu(token):
         raise ValueError("Chưa xác minh được Sheet riêng tư; chưa ghi số ads.")
 
 
-def _private_sheet(title, bang, tong_quan, actor, goc=None):
+def _private_sheet(title, bang, tong_quan, actor, goc=None, gop=()):
     """Sheet riêng qua lớp trình bày chung. Thứ tự (trinh_bay_sheet.xuat): tạo → khoá chia sẻ
     link/tenant + kiểm lại (`_khoa_rieng_tu`) → ghi số → trang trí → Tổng quan → cấp quyền
     XEM cho đúng người hỏi (hỏng thì ném, như cũ). Lưới lớn (tới 20.000 dòng) do lớp tự nới.
-    -> KetQua (kq.url là link)."""
+    `gop` = các tab gộp, đứng sau Tổng quan và trước tab Chi tiết (`bang`); mỗi bảng tính tràn
+    (quá 10 tab) cũng qua đúng thứ tự khoá → ghi → cấp quyền. -> KetQua (kq.url là link)."""
     def cap_quyen(token):
         if not _grant_view(token, actor):
             raise ValueError("Chưa chia sẻ được Sheet riêng cho bạn; nhờ chủ agent kiểm quyền Lark.")
-    return TB.xuat(title, [bang], tong_quan, goc=goc, sau_khi_tao=_khoa_rieng_tu,
+    return TB.xuat(title, [*gop, bang], tong_quan, goc=goc, sau_khi_tao=_khoa_rieng_tu,
                    cap_quyen=cap_quyen)
 
 
@@ -536,8 +696,10 @@ def _handle(args, **kwargs):
         if set(breakdown) not in (set(), {"age"}, {"gender"}, {"age", "gender"},
                 {"publisher_platform"}, {"publisher_platform", "platform_position"}):
             raise ValueError("Tổ hợp chia nhỏ chưa hỗ trợ. Vị trí cần kèm nền tảng; tuổi/giới tính phải tách khỏi nền tảng/vị trí.")
-        if "theo_ngay" in args and not isinstance(args["theo_ngay"], bool):
-            raise ValueError("theo_ngay phải là true/false.")
+        for k in ("theo_ngay", "xem_truoc"):
+            if k in args and not isinstance(args[k], bool):
+                raise ValueError(k + " phải là true/false.")
+        theo_ngay = args.get("theo_ngay") is True
         token = _token()
         if not token:
             raise ValueError("Chưa cấu hình token Meta Ads. Nhờ chủ agent cấu hình MARK_META_ADS_TOKEN chỉ đọc trên VPS.")
@@ -554,9 +716,11 @@ def _handle(args, **kwargs):
         fields.update(("account_id", "account_name", "date_start", "date_stop"))
         if level != "account":
             fields.update((level + "_id", level + "_name"))
+        if level in ("adset", "ad"):         # tab gộp "Theo chiến dịch"
+            fields.update(("campaign_id", "campaign_name"))
         parameters = {"fields": ",".join(sorted(fields)), "level": level, "limit": 500,
                       "use_unified_attribution_setting": "true"}
-        if args.get("theo_ngay"):
+        if theo_ngay:
             parameters["time_increment"] = 1
         if breakdown:
             parameters["breakdowns"] = ",".join(breakdown)
@@ -587,22 +751,36 @@ def _handle(args, **kwargs):
                 break
         start, end = min(s for s, _ in spans), max(e for _, e in spans)
         span = f"{start}–{end}" + ("" if len(spans) == 1 else " theo múi giờ từng TK")
+        so_tk = len({r["account"]["id"] for r in rows}) or len(accounts)
+        if args.get("xem_truoc") is True:
+            # Chỉ kích thước, không số chỉ số: không tạo Sheet, không gọi Lark, không gắn cờ hạn chế.
+            return tool_result(_xem_truoc(rows, level, breakdown, theo_ngay, wanted, cut, span, so_tk))
         totals = _totals(rows)
+        camp = level in ("adset", "ad")
         columns = [TB.Cot("Tài khoản"), TB.Cot("Mã TK", "ma"), TB.Cot("Tiền tệ"), TB.Cot("Múi giờ TK"),
                    TB.Cot("Từ ngày", "ngay"), TB.Cot("Đến ngày", "ngay"), TB.Cot("Mã đối tượng", "ma"),
-                   TB.Cot("Tên đối tượng"), *[TB.Cot(b) for b in breakdown],
+                   TB.Cot("Tên đối tượng"),
+                   *([TB.Cot("Mã chiến dịch", "ma"), TB.Cot("Tên chiến dịch")] if camp else []),
+                   *[TB.Cot(_TEN_CHIA[b]) for b in breakdown],
                    *[TB.Cot(METRICS[k][0] + " (" + METRICS[k][1] + ")", **_kieu_cot(k)) for k in wanted]]
         table = []
         for row in rows:
             data, account = row["data"], row["account"]
             table.append([account.get("name", ""), account["id"], row["currency"], row["tz"],
                           data.get("date_start", row["start"]), data.get("date_stop", row["end"]), data.get(level + "_id", account["id"]),
-                          data.get(level + "_name", account.get("name", "")), *[data.get(k, "") for k in breakdown],
+                          data.get(level + "_name", account.get("name", "")),
+                          *([data.get("campaign_id", ""), data.get("campaign_name", "")] if camp else []),
+                          *[data.get(k, "") for k in breakdown],
                           *[_cell(row["values"].get(k)) for k in wanted]])
         label = "TỔNG PHẦN ĐÃ ĐỌC" if cut else "TỔNG"
-        total_rows = [[label + " " + currency, "", currency, "", start, end, "", "",
+        total_rows = [[label + " " + currency, "", currency, "", start, end, "", "", *(["", ""] if camp else []),
                        *["" for _ in breakdown], *[_cell(values.get(k)) for k in wanted]]
                       for currency, values in totals.items()]
+        gop = (_tinh_gop(rows, level, breakdown, theo_ngay, so_tk)
+               if any(k not in _KHONG_CONG for k in wanted) else [])
+        gop_bang = _bang_gop(gop, wanted, label)
+        raw = _goc_gon(rows, wanted, breakdown) if rows else None
+        zero = sum(1 for r in rows if _toan_0(r, wanted))
         notes = [f"{span}. Mốc ngày tính theo múi giờ của từng tài khoản (cột Múi giờ TK), đúng cách Meta cộng số. "
                  "Số theo phân bổ mặc định của Meta. Reach/tần suất/ROAS Meta không cộng tổng. "
                  "Dòng có số hiển thị/chi tiêu mà Meta không trả mua/lead/tin nhắn/video thì ghi 0 (Meta bỏ số 0); "
@@ -620,14 +798,32 @@ def _handle(args, **kwargs):
         notes.append(f"Dòng {label} (theo từng tiền tệ) và SỐ LIỆU CHÍNH là tổng tool tự cộng từ các dòng đã đọc; "
                      "CTR/CPC/CPM/ROAS/chi phí mỗi kết quả của dòng tổng tính lại từ tổng, không cộng tỉ lệ. "
                      "Tiền theo đơn vị tiền tệ của từng tài khoản (cột Tiền tệ), không quy đổi.")
-        notes.append("Tab Dữ liệu gốc: bản ghi insights Meta trả về (mọi trường đã xin, kể cả danh sách actions), "
-                     "cùng thứ tự dòng với tab Dữ liệu — để đối chiếu cách tính.")
-        bang = TB.Bang("Số ads", columns, table, dong_tong=total_rows,
-                       mo_ta="Mỗi dòng một " + _TEN_CAP.get(level, level) + (" theo ngày" if args.get("theo_ngay") else "")
-                       + (" × " + ", ".join(breakdown) if breakdown else ""))
-        key_figures = [TB.SoLieu(METRICS[k][0] + " — " + currency, float(round(values[k], 4)),
-                                 _kieu_cot(k)["kieu"], tien_te=currency,
-                                 ghi_chu=METRICS[k][1] + ("; tổng phần đã đọc" if cut else ""))
+        if gop_bang:
+            bo = [METRICS[k][0].lower() for k in wanted if k in _KHONG_CONG]
+            notes.append(("Các tab " if len(gop_bang) > 1 else "Tab ") + ", ".join(b.ten_tab for b in gop_bang)
+                         + f": tool tự cộng từ các dòng của tab "
+                         f"{TAB_CHI_TIET}, riêng từng tiền tệ (không cộng VND với USD); tỉ lệ tính lại từ tổng; "
+                         f"sắp theo chi tiêu giảm dần; dòng {label} ở đó bằng đúng dòng {label} của "
+                         f"{TAB_CHI_TIET}. Tiếp cận, tần suất và ROAS Meta không cộng được qua ngày/nền tảng/đối "
+                         "tượng nên không có ở các tab gộp"
+                         + (" (" + ", ".join(bo) + ": xem từng dòng ở " + TAB_CHI_TIET + ")" if bo else "") + ".")
+        if zero:
+            notes.append(f"{zero}/{len(rows)} dòng ở tab {TAB_CHI_TIET} toàn 0 (không hiển thị, không chi tiêu); "
+                         "vẫn giữ đủ — muốn ẩn thì lọc bỏ số 0 ở cột chỉ số.")
+        if raw is not None:
+            notes.append(f"Tab Dữ liệu gốc: cột mã/ngày/chia nhỏ + các trường Meta mà tab {TAB_CHI_TIET} không có "
+                         f"(danh sách actions… ở dạng JSON), cùng thứ tự dòng với tab {TAB_CHI_TIET} — để đối chiếu "
+                         "cách tính.")
+        bang = TB.Bang(TAB_CHI_TIET, columns, table, dong_tong=total_rows, ten_tab=TAB_CHI_TIET,
+                       loc_san="Tài khoản" if so_tk > 1 else None,
+                       mo_ta="Mỗi dòng một " + _TEN_CAP.get(level, level) + (" theo ngày" if theo_ngay else "")
+                       + (" × " + ", ".join(_TEN_CHIA[b].lower() for b in breakdown) if breakdown else "")
+                       + "; giữ cả dòng toàn 0")
+        # Hậu tố tiền tệ CHỈ ở chỉ số tiền; nhiều tiền tệ thì mỗi tiền tệ một khối.
+        key_figures = [TB.SoLieu(METRICS[k][0] + (" — " + currency if METRICS[k][1].startswith("tiền TK") else ""),
+                                 float(round(values[k], 4)), _kieu_cot(k)["kieu"], tien_te=currency,
+                                 ghi_chu=METRICS[k][1] + ("; tổng phần đã đọc" if cut else ""),
+                                 khoi=("Tài khoản tiền " + currency) if len(totals) > 1 else "")
                        for currency, values in totals.items() for k in wanted if values.get(k) is not None]
         names = (list(dict.fromkeys(str(r["account"].get("name") or r["account"]["id"]) for r in rows))
                  or [str(a.get("name") or a.get("id")) for a in accounts])
@@ -635,16 +831,16 @@ def _handle(args, **kwargs):
             tieu_de="Số ads HAPAS " + start + "–" + end,
             nguon="Meta Marketing API Insights (chi_so_ads, phân bổ mặc định)", thoi_gian=span,
             pham_vi=(f"{len(accounts)} tài khoản: " + ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
-                     + " · cấp " + _TEN_CAP.get(level, level) + (" · chia theo " + ", ".join(breakdown) if breakdown else "")
+                     + " · cấp " + _TEN_CAP.get(level, level) + (" · chia theo " + ", ".join(_TEN_CHIA[b].lower() for b in breakdown) if breakdown else "")
+                     + (" · theo ngày" if theo_ngay else "")
                      + (" · lọc chiến dịch chứa '" + args["loc"] + "'" if args.get("loc") else "")),
             so_lieu=key_figures,
             nhom=[TB.dem_theo(bang, "Tài khoản", "Số dòng theo tài khoản")] if len(accounts) > 1 and table else [],
             ghi_chu=notes)
-        raw = TB.bang_goc([row["data"] for row in rows]) if rows else None
         # Recheck immediately before disclosure: list or switch may have changed mid-fetch.
         if not _allowed(actor):
             raise ValueError("Quyền xem số ads đã đổi hoặc không đọc được quyền; chưa xuất Sheet.")
-        kq = _private_sheet("Số ads HAPAS " + start + "–" + end, bang, overview, actor, raw)
+        kq = _private_sheet("Số ads HAPAS " + start + "–" + end, bang, overview, actor, raw, gop_bang)
         summary = "; ".join(currency + ": " + ", ".join(METRICS[k][0] + " " + str(round(values[k], 4))
                        for k in wanted if values.get(k) is not None) for currency, values in totals.items())
         sentence = (f"Đã đọc {len(rows)} dòng ({span})" + ("; đã cắt, tổng chỉ phần đã đọc" if cut else "")
@@ -657,7 +853,10 @@ def _handle(args, **kwargs):
         lsr_platform.danh_dau_han_che("chi_so_ads")
         memory_store.danh_dau_phien_han_che(scheduler.get_current_chat() or "", "chi_so_ads")
         result = {"link": kq.url, "cau_tong": sentence + ".", "so_dong": len(rows), "bi_cat": cut,
-                  "chi_so": wanted, "nguoi_duoc_chia_se": actor, **kq.cho_tool()}
+                  "chi_so": wanted, "nguoi_duoc_chia_se": actor, "so_dong_toan_0": zero,
+                  "tab": ([b.ten_tab for b in gop_bang] + [TAB_CHI_TIET]
+                          + (["Dữ liệu gốc"] if raw is not None else [])),
+                  **kq.cho_tool()}
         if kq.day_du is False:
             result["canh_bao"] = "Sheet có thể thiếu dữ liệu: " + kq.cau_kiem
         return tool_result(result)
@@ -667,7 +866,7 @@ def _handle(args, **kwargs):
         return tool_error(_redact(str(error), token)[:500])
 
 
-SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng.",
+SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng. Yêu cầu vừa theo_ngay vừa chia_theo, hoặc cấp nhom_quang_cao/quang_cao, hoặc cấp chien_dich nhiều tài khoản: gọi xem_truoc=true TRƯỚC; so_dong > 2000 thì báo số dòng + kich_thuoc, hỏi lấy đủ chi tiết (vẫn có tab gộp + chế độ lọc theo tài khoản) hay gọn hơn, chỉ xuất sau khi họ trả lời. Sheet: Tổng quan, các tab gộp (Theo tài khoản/nền tảng/ngày/chiến dịch), Chi tiết, Dữ liệu gốc.",
     "parameters": {"type": "object", "properties": {
         "danh_muc": {"type": "boolean"},
         "danh_sach_tai_khoan": {"type": "boolean", "description": "true = liệt kê tên + mã các tài khoản đọc được (không lấy số)."},
@@ -679,7 +878,9 @@ SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi
         "cap": {"type": "string", "enum": list(LEVELS)}, "theo_ngay": {"type": "boolean"},
         "chia_theo": {"type": "array", "items": {"type": "string", "enum": list(BREAKDOWNS)}},
         "chi_so": {"type": "array", "items": {"type": "string", "enum": list(METRICS) + list(GROUPS)}},
-        "loc": {"type": "string"}}, "additionalProperties": False}}
+        "loc": {"type": "string"},
+        "xem_truoc": {"type": "boolean", "description": "true = chạy đúng truy vấn Meta nhưng KHÔNG tạo Sheet: trả so_dong, kich_thuoc (tài khoản, chiến dịch/đối tượng, ngày, giá trị chia), so_dong_toan_0, tab_se_co, phuong_an_gon."}},
+        "additionalProperties": False}}
 
 registry.register(name="chi_so_ads", toolset="social", schema=SCHEMA, handler=_handle,
                   check_fn=lambda: True, requires_env=[], is_async=False,

@@ -253,7 +253,7 @@ def test_exact_requested_metrics_and_private_recipient(monkeypatch):
             calls.append(params)
             return [{"spend":"100", "action_values":[{"action_type":"purchase","value":"500"}]}],False
     monkeypatch.setattr(T,"MetaClient",Client)
-    monkeypatch.setattr(T,"_private_sheet",lambda title,bang,tq,actor,goc=None: sheets.append((bang,actor)) or _kq())
+    monkeypatch.setattr(T,"_private_sheet",lambda title,bang,tq,actor,goc=None,gop=(): sheets.append((bang,actor)) or _kq())
     result=run(chi_so=["roas"])
     assert result["chi_so"]==["roas"] and result["nguoi_duoc_chia_se"]=="ou_asker"
     # Chỉ xin trường của chỉ số được hỏi + tín hiệu phân phối (hiển thị/chi tiêu) để phân
@@ -424,7 +424,7 @@ def test_truncated_report_labels_partial_totals(monkeypatch):
     monkeypatch.setattr(T.MetaClient,"accounts",lambda self:[{"id":"act_1","currency":"VND"}])
     monkeypatch.setattr(T.MetaClient,"pages",lambda *a:([{"spend":"12"}],True))
     sheet=[]
-    monkeypatch.setattr(T,"_private_sheet",lambda title,bang,tq,actor,goc=None:sheet.append((bang,tq)) or _kq())
+    monkeypatch.setattr(T,"_private_sheet",lambda title,bang,tq,actor,goc=None,gop=():sheet.append((bang,tq)) or _kq())
     result=run(chi_so=["spend"])
     assert result["bi_cat"] and "phần đã đọc" in result["cau_tong"]
     bang, tq = sheet[0]
@@ -449,7 +449,7 @@ def _ok_meta(monkeypatch, accounts=None, rows=None, calls=None):
         return list(rows if rows is not None else [{"spend": "10", "impressions": "100"}]), False
     monkeypatch.setattr(T.MetaClient, "pages", pages)
     sheets = []
-    monkeypatch.setattr(T, "_private_sheet", lambda title, bang, tq, actor, goc=None:
+    monkeypatch.setattr(T, "_private_sheet", lambda title, bang, tq, actor, goc=None, gop=():
                         sheets.append(_Chup(bang, actor, tq, goc)) or _kq("url"))
     return sheets
 
