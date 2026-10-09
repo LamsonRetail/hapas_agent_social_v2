@@ -13,6 +13,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 import urllib.request
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -704,6 +705,172 @@ def _tham_so(args):
     return wanted, level, breakdown, args.get("theo_ngay") is True
 
 
+# ───────────── lọc tên chiến dịch nhiều chữ (audit 09/10/2026) ─────────────
+# Ngân hỏi "có cả 20/10 và product trong tên"; Mark gửi loc="20/10 AND product" thành MỘT
+# bộ lọc CONTAIN nên Meta trả 0 dòng, trong khi tên thật viết HOA ("20/10_Reach_PRODUCT_…").
+# Chưa biết CONTAIN của Graph có phân biệt hoa thường / dạng Unicode không, nên bộ lọc phía
+# Meta KHÔNG BAO GIỜ được quyết dòng nào bị bỏ: chỉ gửi Meta các chữ không đổi khi đổi hoa
+# thường và dạng NFC/NFD (vd "20/10"); MỌI chữ do code tự lọc (casefold + NFC). Không chữ nào
+# như vậy thì đọc không lọc tên rồi tự lọc. Không bao giờ trả "0 dòng" trần khi có lọc.
+LOC_TOI_DA = 10
+#: Chuỗi `loc` cũ chỉ tách ở " AND " viết HOA (dạng model hay sinh). Không tách "và", "&", "+",
+#: "and" thường hay dấu cách: tên thật có "Mẹ và Bé", "Black & White", "Mua 1 + 1".
+_NOI_LOC = re.compile(r"\s+AND\s+")
+
+
+def _chuan(text):
+    """So khớp tên: NFC (dấu dựng sẵn = dấu tổ hợp) + casefold (không phân biệt hoa thường)."""
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", str(text or "")).casefold())
+
+
+def _long(text):
+    """Chuẩn lỏng chỉ để xếp tên GẦN ĐÚNG: bỏ dấu, bỏ ký tự không phải chữ/số."""
+    bo_dau = "".join(c for c in unicodedata.normalize("NFD", _chuan(text))
+                     if not unicodedata.combining(c)).replace("đ", "d")
+    return re.sub(r"[\W_]+", "", bo_dau)
+
+
+def _loc_tu_khoa(args):
+    """`loc` (chuỗi cũ hoặc mảng) + `loc_tat_ca` (mảng) -> danh sách chữ mà tên chiến dịch
+    phải chứa ĐỦ. Chuỗi `loc` chỉ tách ở " AND " viết hoa. Kiểm trước mạng."""
+    chu = []
+    loc = args.get("loc")
+    if loc not in (None, "", []):
+        if isinstance(loc, str):
+            if len(loc) > 200:
+                raise ValueError("loc cần tên chiến dịch tối đa 200 ký tự.")
+            chu.extend(_NOI_LOC.split(loc))
+        elif isinstance(loc, list):
+            chu.extend(loc)
+        else:
+            raise ValueError("loc cần chuỗi hoặc danh sách chữ trong tên chiến dịch.")
+    tat_ca = args.get("loc_tat_ca")
+    if tat_ca not in (None, []):
+        if not isinstance(tat_ca, list):
+            raise ValueError("loc_tat_ca cần danh sách chữ, mỗi chữ một mục (vd [\"20/10\", \"product\"]).")
+        chu.extend(tat_ca)
+    if any(not isinstance(c, str) for c in chu):
+        raise ValueError("Mỗi chữ lọc phải là chuỗi.")
+    ra = {}
+    for c in chu:
+        c = unicodedata.normalize("NFC", c).strip()
+        if len(c) > 100:
+            raise ValueError("Mỗi chữ lọc tên chiến dịch tối đa 100 ký tự.")
+        if c:
+            ra.setdefault(_chuan(c), c)
+    if len(ra) > LOC_TOI_DA:
+        raise ValueError(f"Lọc tên tối đa {LOC_TOI_DA} chữ.")
+    return list(ra.values())
+
+
+def _khop_ten(ten, loc):
+    """Tên chiến dịch chứa ĐỦ mọi chữ của `loc` (không phân biệt hoa thường, NFC)."""
+    t = _chuan(ten)
+    return all(_chuan(c) in t for c in loc)
+
+
+def _bat_bien(chu):
+    """Chữ mà mọi cách so CONTAIN (phân biệt hoa thường hay không, NFC hay NFD) đều cho cùng
+    kết quả: không có chữ hoa/thường, không có dấu tổ hợp (vd "20/10", "2024", "1+1"). Chữ có
+    "%" hay "_" không gửi Meta: CONTAIN có thể coi chúng là ký tự đại diện kiểu LIKE."""
+    return ("%" not in chu and "_" not in chu
+            and chu == chu.upper() == chu.lower() == chu.casefold()
+            and unicodedata.normalize("NFC", chu) == unicodedata.normalize("NFD", chu))
+
+
+def _loc_may_chu(loc):
+    """Chữ được gửi Meta làm bộ lọc tên: chỉ chữ bất biến — Meta chỉ thu hẹp, không bỏ sót."""
+    return [c for c in loc if _bat_bien(c)]
+
+
+def _loc_graph(chu):
+    """Mỗi chữ một bộ lọc Graph `filtering` (các bộ lọc trong mảng cùng phải đúng)."""
+    return json.dumps([{"field": "campaign.name", "operator": "CONTAIN", "value": c} for c in chu],
+                      ensure_ascii=False)
+
+
+def _ds_chu(loc):
+    q = [f"“{c}”" for c in loc]
+    if not q:
+        return ""
+    return q[0] if len(q) == 1 else "đủ cả " + ", ".join(q[:-1]) + " và " + q[-1]
+
+
+def _mo_ta_loc(loc):
+    return ("Tên chiến dịch chứa tất cả: " + ", ".join(loc)
+            + " (không phân biệt hoa thường)")
+
+
+def _cach_loc(loc):
+    """Một câu nói thật cách đã lọc (giống nhau cho mọi tài khoản)."""
+    mc = _loc_may_chu(loc)
+    if not mc:
+        return "Tool đọc mọi chiến dịch có số trong khoảng ngày rồi tự lọc tên."
+    return ("Meta chỉ lọc sơ theo " + ", ".join(f"“{c}”" for c in mc)
+            + " (chữ không có hoa/thường, không dấu); tool tự kiểm đủ mọi chữ trên từng tên.")
+
+
+def _cap_loc(level, loc):
+    """Lọc theo tên CHIẾN DỊCH mà cấp tài khoản thì không kiểm được tên từng dòng: lấy cấp
+    chiến dịch (tab Theo tài khoản vẫn có tổng từng tài khoản)."""
+    return "campaign" if loc and level == "account" else level
+
+
+def _ten_gan_dung(ten, loc, toi_da=10):
+    """Tên chứa ít nhất một chữ (rồi tới khớp lỏng: bỏ dấu/ký tự nối); không có thì vài tên
+    bất kỳ đang có số. -> (danh sách tên, có tên chứa chữ nào không)."""
+    diem = []
+    for t in dict.fromkeys(x for x in ten if x):
+        chat = sum(_chuan(c) in _chuan(t) for c in loc)
+        long = sum(bool(_long(c)) and _long(c) in _long(t) for c in loc)
+        if chat or long:
+            diem.append((-chat, -long, t))
+    if diem:
+        return [t for *_, t in sorted(diem)[:toi_da]], True
+    return sorted(dict.fromkeys(x for x in ten if x))[:toi_da], False
+
+
+def _cau_cat(so_doc):
+    return (f" Lần đọc đã chạm trần {so_doc} dòng nên có thể còn chiến dịch khớp ở phần chưa "
+            "đọc; hãy thu hẹp ngày/tài khoản.")
+
+
+def _khong_khop(loc, accounts, span, da_doc, cut, so_doc):
+    """Có lọc mà không dòng nào khớp: nói RÕ chữ nào, tài khoản nào, ngày nào, bao nhiêu chiến
+    dịch đã đọc và tên gần đúng — chỉ từ các dòng ĐÃ đọc (không đọc thêm). Chỉ trả TÊN.
+    Chỉ nói "tên chứa X" khi code đã tự kiểm tên chứa X; bộ lọc Meta không được coi là sự thật."""
+    mc = _loc_may_chu(loc)
+    con = [c for c in loc if c not in mc]
+    ten = list(da_doc.values())
+    so = len(ten)
+    co_mc = [t for t in ten if mc and _khop_ten(t, mc)]
+    gan, chua_chu = _ten_gan_dung(ten, loc)
+    tk = [str(a.get("name") or a.get("id")) for a in accounts]
+    s, _, e = span.partition("–")
+    ngay = ("ngày " + s) if s == e.split(" ")[0] else ("từ " + span.replace("–", " đến "))
+    pham = "trong phần đã đọc" if cut else "trong khoảng đó"
+    so_meta = (" (Meta lọc sơ theo " + ", ".join(f"“{c}”" for c in mc) + ")") if mc else ""
+    cau = (f"Không có chiến dịch nào có tên chứa {_ds_chu(loc)} (không phân biệt hoa thường) "
+           f"ở tài khoản {', '.join(tk[:5])}{'…' if len(tk) > 5 else ''}, {ngay}. ")
+    if not so:
+        cau += (f"Meta không trả chiến dịch nào có số{so_meta}." if mc
+                else "Trong khoảng đó tài khoản không có chiến dịch nào có số.")
+    elif con and co_mc:
+        cau += (f"{pham[0].upper()}{pham[1:]} có {len(co_mc)} chiến dịch có số mà tên chứa {_ds_chu(mc)} "
+                f"nhưng không chứa {_ds_chu(con)}; gần nhất: " + "; ".join(gan) + ".")
+    else:
+        dem = (f"Tài khoản có {so} chiến dịch có số {pham}" if not (mc or cut)
+               else f"Đã đọc {so} chiến dịch có số {pham}{so_meta}")
+        cau += (dem + "; gần nhất: " + "; ".join(gan) + "." if chua_chu
+                else dem + ", không tên nào chứa chữ đã hỏi; ví dụ: " + "; ".join(gan) + ".")
+    if cut:
+        cau += _cau_cat(so_doc)
+    return {"so_dong": 0, "bi_cat": cut, "khoang": span, "loc_ap_dung": _mo_ta_loc(loc),
+            "loc_may_chu": mc, "so_chien_dich_da_doc": so, "ten_gan_dung": gan,
+            "cau_loc": cau, "cau_tong": cau,
+            "hoi_tiep": "Chép nguyên cau_loc; mời người dùng chọn tên trong ten_gan_dung hoặc đổi chữ lọc."}
+
+
 def _truong(wanted, level):
     # Fetch only requested fields, inputs needed for requested ratios, and the
     # delivery signal that tells a real 0 (Meta omits zero actions) from no data.
@@ -748,6 +915,9 @@ def xuat_mau(dong_gia, args, cap_quyen, tai_khoan=None):
         raise ValueError("xuat_mau cần cap_quyen(token) do bên gọi cấp.")
     args = {"khoang_ngay": "7_ngay", **dict(args or {})}
     wanted, level, breakdown, theo_ngay = _tham_so(args)
+    loc = _loc_tu_khoa(args)
+    level = _cap_loc(level, loc)
+    dong_gia = [d for d in dong_gia if not loc or _khop_ten(d.get("campaign_name"), loc)]
     if tai_khoan is None:
         tai_khoan = list({("act_" + str(d.get("account_id", "1")).removeprefix("act_")): {
             "id": "act_" + str(d.get("account_id", "1")).removeprefix("act_"),
@@ -766,7 +936,7 @@ def xuat_mau(dong_gia, args, cap_quyen, tai_khoan=None):
     if not rows:
         raise ValueError("xuat_mau: không có dòng nào khớp tài khoản.")
     sh = _dung_sheet(rows, tai_khoan, wanted, level, breakdown, theo_ngay, False, spans, partial,
-                     unknown_tz, args.get("loc"))
+                     unknown_tz, loc)
     tq = dataclasses.replace(sh["overview"], nguon="DỮ LIỆU GIẢ — Sheet mẫu, không gọi Meta",
                              ghi_chu=["SHEET MẪU: mọi số là số GIẢ, chỉ để xem bố cục."]
                              + list(sh["overview"].ghi_chu))
@@ -796,6 +966,8 @@ def _handle(args, **kwargs):
         if "tai_khoan" not in args or not any(k in args for k in ("khoang_ngay", "tu_ngay", "den_ngay")):
             raise ValueError("Bạn cần số của tài khoản nào và khoảng thời gian nào? Gọi danh_muc=true để xem các chỉ số.")
         wanted, level, breakdown, theo_ngay = _tham_so(args)
+        loc = _loc_tu_khoa(args)
+        level = _cap_loc(level, loc)
         token = _token()
         if not token:
             raise ValueError("Chưa cấu hình token Meta Ads. Nhờ chủ agent cấu hình MARK_META_ADS_TOKEN chỉ đọc trên VPS.")
@@ -812,11 +984,12 @@ def _handle(args, **kwargs):
             parameters["time_increment"] = 1
         if breakdown:
             parameters["breakdowns"] = ",".join(breakdown)
-        if args.get("loc"):
-            if not isinstance(args["loc"], str) or len(args["loc"]) > 200:
-                raise ValueError("loc cần tên chiến dịch tối đa 200 ký tự.")
-            parameters["filtering"] = json.dumps([{"field": "campaign.name", "operator": "CONTAIN", "value": args["loc"]}])
+        may_chu = _loc_may_chu(loc)
+        if may_chu:
+            # Chỉ chữ bất biến (vd "20/10"): Meta so kiểu nào cũng không bỏ sót tên khớp.
+            parameters["filtering"] = _loc_graph(may_chu)
         rows, cut, spans, partial, unknown_tz = [], False, set(), False, False
+        so_doc, da_doc = 0, {}     # dòng Meta đã trả (trước khi tự lọc); {(TK, mã CD): tên}
         for index, account in enumerate(accounts):
             a_start, a_end, tz = _moc_tai_khoan(args, account)
             unknown_tz = unknown_tz or tz is None
@@ -824,20 +997,47 @@ def _handle(args, **kwargs):
             partial = partial or _partial(args, a_end, tz or VN)
             data, truncated = client.pages(account["id"] + "/insights",
                                            {**parameters, "time_range": json.dumps({"since": a_start, "until": a_end})},
-                                           MAX_ROWS - len(rows))
+                                           MAX_ROWS - so_doc)
+            so_doc += len(data)
+            if loc:
+                # MỌI chữ do code tự lọc (casefold + NFC), kể cả chữ đã gửi Meta.
+                da_doc.update(((account["id"], str(d.get("campaign_id"))), str(d.get("campaign_name") or ""))
+                              for d in data)
+                data = [d for d in data if _khop_ten(d.get("campaign_name"), loc)]
             rows.extend(_dong(account, item, fields, breakdown, a_start, a_end, tz) for item in data)
             cut = cut or truncated
-            if len(rows) >= MAX_ROWS:
+            if so_doc >= MAX_ROWS:
                 cut = cut or index < len(accounts) - 1
                 break
         start, end = min(s for s, _ in spans), max(e for _, e in spans)
         span = f"{start}–{end}" + ("" if len(spans) == 1 else " theo múi giờ từng TK")
         so_tk = len({r["account"]["id"] for r in rows}) or len(accounts)
+        if loc and not rows:
+            # Không trả "0 dòng" trần: nói rõ chữ lọc, TK, ngày, số chiến dịch đã xét, tên gần
+            # đúng — từ các dòng đã đọc. Chỉ tên, không số; không tạo Sheet.
+            if not _allowed(actor):
+                raise ValueError("Quyền xem số ads đã đổi hoặc không đọc được quyền; chưa trả kết quả.")
+            ra = _khong_khop(loc, accounts, span, da_doc, cut, so_doc)
+            if args.get("xem_truoc") is True:
+                ra["xem_truoc"] = True
+            lsr_platform.danh_dau_han_che("chi_so_ads")
+            memory_store.danh_dau_phien_han_che(scheduler.get_current_chat() or "", "chi_so_ads")
+            return tool_result(ra)
+        loc_kq = {}
+        if loc:
+            so_cd = len({(r["account"]["id"], r["data"].get("campaign_id")) for r in rows})
+            loc_kq = {"loc_ap_dung": _mo_ta_loc(loc), "loc_may_chu": may_chu,
+                      "cau_loc": (f"Đã lọc tên chiến dịch chứa {_ds_chu(loc)} (không phân biệt hoa thường): "
+                                  f"{so_cd} chiến dịch khớp." + (_cau_cat(so_doc) if cut else ""))}
+            if LEVELS.get(args.get("cap", "tai_khoan")) == "account":
+                loc_kq["cap_thuc_te"] = ("Có lọc tên nên tool lấy cấp chiến dịch; tab Theo tài khoản "
+                                         "có tổng từng tài khoản.")
         if args.get("xem_truoc") is True:
             # Chỉ kích thước, không số chỉ số: không tạo Sheet, không gọi Lark, không gắn cờ hạn chế.
-            return tool_result(_xem_truoc(rows, level, breakdown, theo_ngay, wanted, cut, span, so_tk))
+            return tool_result({**_xem_truoc(rows, level, breakdown, theo_ngay, wanted, cut, span, so_tk),
+                                **loc_kq})
         sh = _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans, partial,
-                         unknown_tz, args.get("loc"))
+                         unknown_tz, loc)
         totals, zero, gop_bang, raw = sh["totals"], sh["zero"], sh["gop_bang"], sh["raw"]
         # Recheck immediately before disclosure: list or switch may have changed mid-fetch.
         if not _allowed(actor):
@@ -845,7 +1045,10 @@ def _handle(args, **kwargs):
         kq = _private_sheet(sh["title"], sh["bang"], sh["overview"], actor, raw, gop_bang)
         summary = "; ".join(currency + ": " + ", ".join(METRICS[k][0] + " " + str(round(values[k], 4))
                        for k in wanted if values.get(k) is not None) for currency, values in totals.items())
-        sentence = (f"Đã đọc {len(rows)} dòng ({span})" + ("; đã cắt, tổng chỉ phần đã đọc" if cut else "")
+        sentence = (f"Đã đọc {len(rows)} dòng ({span})"
+                    + ("; chỉ chiến dịch có tên chứa " + _ds_chu(loc) + " (không phân biệt hoa thường)"
+                       if loc else "")
+                    + ("; đã cắt, tổng chỉ phần đã đọc" if cut else "")
                     + ("; gồm hôm nay chưa hết ngày, số còn thay đổi" if partial else ""))
         if summary:
             sentence += "; " + summary
@@ -858,7 +1061,7 @@ def _handle(args, **kwargs):
                   "chi_so": wanted, "nguoi_duoc_chia_se": actor, "so_dong_toan_0": zero,
                   "tab": ([b.ten_tab for b in gop_bang] + [TAB_CHI_TIET]
                           + (["Dữ liệu gốc"] if raw is not None else [])),
-                  **kq.cho_tool()}
+                  **loc_kq, **kq.cho_tool()}
         if kq.day_du is False:
             result["canh_bao"] = "Sheet có thể thiếu dữ liệu: " + kq.cau_kiem
         return tool_result(result)
@@ -869,9 +1072,10 @@ def _handle(args, **kwargs):
 
 
 def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans, partial,
-                unknown_tz, loc=None):
+                unknown_tz, loc=()):
     """Dựng mọi bảng của Sheet số ads từ các dòng đã đọc (THUẦN, không gọi mạng) — dùng chung
-    cho `_handle` và `xuat_mau`. -> {title, bang, overview, raw, gop_bang, totals, zero}."""
+    cho `_handle` và `xuat_mau`. `loc` = các chữ tên chiến dịch phải chứa đủ (đã lọc xong).
+    -> {title, bang, overview, raw, gop_bang, totals, zero}."""
     start, end = min(s for s, _ in spans), max(e for _, e in spans)
     span = f"{start}–{end}" + ("" if len(spans) == 1 else " theo múi giờ từng TK")
     so_tk = len({r["account"]["id"] for r in rows}) or len(accounts)
@@ -905,6 +1109,10 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
              "Số theo phân bổ mặc định của Meta. Reach/tần suất/ROAS Meta không cộng tổng. "
              "Dòng có số hiển thị/chi tiêu mà Meta không trả mua/lead/tin nhắn/video thì ghi 0 (Meta bỏ số 0); "
              "ô trống = Meta không trả số phân phối cho dòng đó, không phải 0."]
+    if loc:
+        notes.insert(0, _mo_ta_loc(loc) + ". Chỉ các dòng thuộc chiến dịch có tên chứa đủ mọi chữ này"
+                     + (" (lọc theo tên CHIẾN DỊCH, kể cả ở cấp " + _TEN_CAP[level] + ")"
+                        if level in ("adset", "ad") else "") + ". " + _cach_loc(loc))
     if breakdown:
         notes.append("Có chia nhỏ (tuổi/giới tính/nền tảng/vị trí): Meta có thể ẩn số mua, giá trị mua, "
                      "ROAS Meta, lead, tin nhắn vì quyền riêng tư; ô trống ở các cột đó = Meta không trả số, "
@@ -914,7 +1122,9 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
     if unknown_tz:
         notes.append("Có tài khoản Meta không báo múi giờ; mốc ngày của tài khoản đó tính theo giờ VN (UTC+7).")
     if cut:
-        notes.append("ĐÃ CẮT ở 20.000 dòng; tổng chỉ cho phần đã đọc. Hãy thu hẹp ngày/tài khoản.")
+        notes.append("ĐÃ CẮT ở 20.000 dòng; tổng chỉ cho phần đã đọc. Hãy thu hẹp ngày/tài khoản."
+                     + (" Có lọc tên: trần tính trên dòng Meta trả TRƯỚC khi tự lọc, nên có thể còn "
+                        "chiến dịch khớp ở phần chưa đọc." if loc else ""))
     notes.append(f"Dòng {label} (theo từng tiền tệ) và SỐ LIỆU CHÍNH là tổng tool tự cộng từ các dòng đã đọc; "
                  "CTR/CPC/CPM/ROAS/chi phí mỗi kết quả của dòng tổng tính lại từ tổng, không cộng tỉ lệ. "
                  "Tiền theo đơn vị tiền tệ của từng tài khoản (cột Tiền tệ), không quy đổi.")
@@ -958,7 +1168,7 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
         pham_vi=(f"{len(accounts)} tài khoản: " + ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
                  + " · cấp " + _TEN_CAP.get(level, level) + (" · chia theo " + ", ".join(_TEN_CHIA[b].lower() for b in breakdown) if breakdown else "")
                  + (" · theo ngày" if theo_ngay else "")
-                 + (" · lọc chiến dịch chứa '" + loc + "'" if loc else "")),
+                 + (" · " + _mo_ta_loc(loc).lower()[:1] + _mo_ta_loc(loc)[1:] if loc else "")),
         so_lieu=key_figures,
         nhom=[TB.dem_theo(bang, "Tài khoản", "Số dòng theo tài khoản")] if len(accounts) > 1 and table else [],
         ghi_chu=notes)
@@ -966,7 +1176,7 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
             "raw": raw, "gop_bang": gop_bang, "totals": totals, "zero": zero}
 
 
-SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng. Yêu cầu vừa theo_ngay vừa chia_theo, hoặc cấp nhom_quang_cao/quang_cao, hoặc cấp chien_dich nhiều tài khoản: gọi xem_truoc=true TRƯỚC; so_dong > 2000 thì báo số dòng + kich_thuoc, hỏi lấy đủ chi tiết (vẫn có tab gộp + chế độ lọc theo tài khoản) hay gọn hơn, chỉ xuất sau khi họ trả lời. Sheet: Tổng quan, các tab gộp (Theo tài khoản/nền tảng/ngày/chiến dịch), Chi tiết, Dữ liệu gốc.",
+SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng. Yêu cầu vừa theo_ngay vừa chia_theo, hoặc cấp nhom_quang_cao/quang_cao, hoặc cấp chien_dich nhiều tài khoản: gọi xem_truoc=true TRƯỚC; so_dong > 2000 thì báo số dòng + kich_thuoc, hỏi lấy đủ chi tiết (vẫn có tab gộp + chế độ lọc theo tài khoản) hay gọn hơn, chỉ xuất sau khi họ trả lời. Sheet: Tổng quan, các tab gộp (Theo tài khoản/nền tảng/ngày/chiến dịch), Chi tiết, Dữ liệu gốc. Tên chiến dịch phải chứa đủ nhiều chữ: loc_tat_ca=[chữ 1, chữ 2] (mỗi chữ một mục, cả khi xem_truoc); có loc_ap_dung mà không khớp thì chép nguyên cau_loc, mời chọn trong ten_gan_dung.",
     "parameters": {"type": "object", "properties": {
         "danh_muc": {"type": "boolean"},
         "danh_sach_tai_khoan": {"type": "boolean", "description": "true = liệt kê tên + mã các tài khoản đọc được (không lấy số)."},
@@ -978,7 +1188,16 @@ SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi
         "cap": {"type": "string", "enum": list(LEVELS)}, "theo_ngay": {"type": "boolean"},
         "chia_theo": {"type": "array", "items": {"type": "string", "enum": list(BREAKDOWNS)}},
         "chi_so": {"type": "array", "items": {"type": "string", "enum": list(METRICS) + list(GROUPS)}},
-        "loc": {"type": "string"},
+        "loc_tat_ca": {"type": "array", "maxItems": LOC_TOI_DA,
+                       "items": {"type": "string", "maxLength": 100},
+                       "description": "Lọc theo TÊN CHIẾN DỊCH: tên phải chứa ĐỦ MỌI chữ, không phân biệt hoa thường. "
+                                      "Người dùng nói \"có cả A và B trong tên\" / \"chứa A và B\" → [\"A\", \"B\"], mỗi chữ một "
+                                      "mục; KHÔNG ghép \"A AND B\" vào một chuỗi. Ở cấp nhom_quang_cao/quang_cao vẫn lọc theo tên "
+                                      "chiến dịch chứa nhóm/quảng cáo đó; cấp tai_khoan có lọc thì tool lấy cấp chien_dich. "
+                                      "Không khớp gì: tool trả cau_loc + ten_gan_dung, chép nguyên cau_loc."},
+        "loc": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                "description": "Cũ, giữ tương thích: một chữ trong tên chiến dịch (không phân biệt hoa thường). "
+                               "Chuỗi chỉ tách ở \" AND \" viết hoa; nhiều chữ phải có đủ thì dùng loc_tat_ca."},
         "xem_truoc": {"type": "boolean", "description": "true = chạy đúng truy vấn Meta nhưng KHÔNG tạo Sheet: trả so_dong, kich_thuoc (tài khoản, chiến dịch/đối tượng, ngày, giá trị chia), so_dong_toan_0, tab_se_co, phuong_an_gon."}},
         "additionalProperties": False}}
 

@@ -112,6 +112,11 @@ cấp chiến dịch nhiều tài khoản thì gọi `xem_truoc=true` trước. 
 dòng và `cong_thuc`, hỏi lấy đủ chi tiết (vẫn kèm tab gộp và chế độ lọc theo từng tài khoản) hay
 yêu cầu gọn hơn (`phuong_an_gon`); chỉ xuất sau khi họ trả lời.
 
+Lọc tên chiến dịch: người dùng kể nhiều chữ phải cùng có trong tên ("có cả 20/10 và product")
+thì truyền `loc_tat_ca`, mỗi chữ một mục (`["20/10", "product"]`); không bao giờ ghép "AND"
+vào một chuỗi. Không phân biệt hoa thường; `xem_truoc` cũng lọc. Kết quả 0 dòng thì chép
+nguyên `cau_loc` và mời chọn tên trong `ten_gan_dung`, không tự kết luận "không có".
+
 Gọi `chi_so_ads`, trả link Sheet và chép nguyên `cau_tong`; không tự cộng hoặc tính.
 Thiếu quyền thì chép hướng dẫn xin quyền, không tra qua tool khác. Sheet riêng của
 người hỏi; dữ liệu trong nhóm cần chuyển chat riêng hoặc web đã xác thực. Quyền lịch
