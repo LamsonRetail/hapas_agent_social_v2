@@ -66,6 +66,7 @@ import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: vi
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
 import dem_bang_tool  # noqa: E402,F401  (registers `dem_bang`: code đếm/tính %/cộng trên Base/Sheet hoặc bảng dán)
 import doc_tai_lieu_tool  # noqa: E402,F401  (registers `doc_tai_lieu`: đọc tài liệu Docs/Wiki khi người hỏi có quyền)
+import thong_ke_tool  # noqa: E402,F401  (registers `tao_sheet_thong_ke`: Sheet thống kê/dashboard, code đếm)
 import tinh_tool  # noqa: E402,F401  (registers `tinh`: máy tính chính xác — Mark không tự tính tay)
 import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_viec_base`: việc đã duyệt -> Base checklist)
 import tien_do  # noqa: E402  (registers `tra_tien_do`: việc quá hạn/sắp hạn do code so ngày; nhắc nhóm 08:30 nếu cấu hình)
@@ -210,6 +211,16 @@ _TOOLING_NOTE = "\n".join(
         "lời thật từ `trich_dan`. TUYỆT ĐỐI không tự đếm tay hay ước lượng ('khoảng 60%'). "
         "Tool không trả số thì nói chưa có số. Nhờ 'gán nhãn từng bình luận và thống kê' thì "
         "dùng `social_deep_dive` (tool tự gán nhãn), đừng nói không làm được.",
+        # 01/10 + 07/10: nhờ "tạo dashboard thống kê tỉ lệ tiêu cực tích cực" từ Sheet bình
+        # luận Mark đã xuất — Mark nói không tạo được Sheet, nhờ tạo Sheet trống, dán số thô.
+        "- DASHBOARD / SHEET THỐNG KÊ ('tạo dashboard', 'thống kê ra sheet', 'tỉ lệ tích "
+        "cực tiêu cực', 'gán nhãn rồi thống kê'): gọi `tao_sheet_thong_ke` — tool TỰ TẠO "
+        "Sheet mới và cấp quyền cho người hỏi. Có Sheet/Base nguồn (vd Sheet bình luận đã "
+        "xuất, cột Sắc thái/Chủ đề) thì truyền `nguon`; bình luận/dòng chưa có nhãn thì Mark "
+        "gán nhãn từng dòng rồi truyền `du_lieu` (chỉ dòng + nhãn, KHÔNG số tổng) và nói rõ "
+        "nhãn do AI gán, số do code đếm. Người dùng đã nói rõ muốn dashboard/Sheet thì đó là "
+        "đồng ý, gọi luôn (0 USD). TUYỆT ĐỐI không nói 'không tạo được Sheet', không nhờ "
+        "người dùng tạo Sheet trống, không dán bảng số thô thay cho Sheet.",
         "- Muốn sentiment ở mức BÌNH LUẬN (người ta bình luận gì, khen chê dưới bài): đề xuất "
         "`social_deep_dive` cho link TikTok, YouTube, Facebook, Threads, Instagram. Threads và "
         "Instagram bóc KHÔNG đăng nhập: không có trả lời lồng nhau, Instagram chỉ được MỘT "
@@ -319,6 +330,8 @@ _TOOL_CAN_XET = {
     "doc_tai_lieu": ("đọc nội dung một tài liệu Lark Docs hoặc trang Wiki dạng tài liệu (người "
                      "hỏi cũng phải có quyền xem)",
                      {"nguon": "https://example.larksuite.com/docx/x"}),
+    "tao_sheet_thong_ke": ("lập Lark Sheet thống kê/dashboard mới (đếm, %, bảng chéo do code "
+                           "tính) từ một Base/Sheet hoặc từ các dòng đã gán nhãn", {}),
     "tinh": ("tính chính xác bằng code mọi phép cộng, trừ, nhân, chia, %, tỷ lệ",
              {"phep_tinh": {"vuot": "103 - 90"}}),
     "tra_tien_do": ("tra việc quá hạn và sắp tới hạn trên Base checklist dự án (code so "

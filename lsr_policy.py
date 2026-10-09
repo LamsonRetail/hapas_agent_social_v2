@@ -87,6 +87,9 @@ _MUTATING_EXACT = {
     # Chỉ số view/like/share theo danh sách link bài (Apify + YouTube API) → tạo Lark Sheet.
     "chi_so_bai": "write_data",
     "chi_so_ads": "write_data",
+    # Lập Sheet thống kê/dashboard MỚI (bot là chủ, cấp quyền người hỏi) từ Base/Sheet người
+    # hỏi xem được hoặc từ dòng Mark đã gán nhãn; code đếm (thong_ke_tool.py) → tạo Sheet.
+    "tao_sheet_thong_ke": "write_data",
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
     # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
@@ -284,6 +287,7 @@ _TOOL_CO_CONG_TAC = frozenset({
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
     "dem_bang", "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai", "chi_so_ads",
     "ghi_viec_base", "xem_truoc_viec_base", "tra_tien_do", "doc_tai_lieu",
+    "tao_sheet_thong_ke",
 })
 
 #: Tool có công tắc riêng nhưng RA ĐỜI SAU công tắc cha → khi `capabilities` chưa có
@@ -317,10 +321,13 @@ _TOOL_CO_CONG_TAC = frozenset({
 #: "Tra Wiki công khai" vốn là đường đọc trang Wiki và tài liệu; nay tài liệu đi tool có
 #: kiểm quyền người hỏi. Tắt "Tra Wiki" mà vẫn đọc được tài liệu thì nút tắt hở.
 #: Console KHÔNG cần thêm dòng: chưa có dòng riêng thì công tắc `lark_cli` quyết.
+#: `tao_sheet_thong_ke` (09/10/2026, Sheet thống kê/dashboard) theo `doc_bang`: nguồn chính
+#: là Base/Sheet đọc qua cùng cửa quyền với `doc_bang`/`dem_bang`, số do code đếm như
+#: `dem_bang`. Tắt "Đọc Base và Sheet" mà vẫn lập được Sheet từ Base là nút tắt hở.
 _CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen",
                  "chi_so_bai": "social_listen", "xem_truoc_viec_base": "ghi_viec_base",
                  "dem_bang": "doc_bang", "tra_tien_do": "doc_bang",
-                 "doc_tai_lieu": "lark_cli"}
+                 "doc_tai_lieu": "lark_cli", "tao_sheet_thong_ke": "doc_bang"}
 
 #: Tool có công tắc nhưng KHÔNG có công tắc cha để lùi về, và console CHƯA có dòng của nó.
 #: Agent đã khai `capabilities` thì vắng dòng = TẮT (đúng ý: ghi Base team phải được bật rõ).
