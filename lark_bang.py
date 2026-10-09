@@ -88,15 +88,23 @@ def nhan_dien(nguon: str) -> tuple[str, str, str] | None:
     return d[:3] if d else None
 
 
-def giai_wiki(node_token: str) -> tuple[str, str] | None:
-    """Node Wiki → (obj_type, obj_token). None nếu bot không đọc được node."""
+def nut_wiki(node_token: str) -> dict | None:
+    """Node Wiki → nguyên `node` Lark trả (obj_type, obj_token, title, obj_edit_time…).
+    None nếu bot không đọc được node. GET /open-apis/wiki/v2/spaces/get_node
+    (https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node.md)."""
     try:
         d = lark.call("GET", "/open-apis/wiki/v2/spaces/get_node",
                       query={"token": node_token, "obj_type": "wiki"})
     except Exception:
         return None
     n = ((d or {}).get("data") or {}).get("node") or {}
-    if not n.get("obj_token"):
+    return n if n.get("obj_token") else None
+
+
+def giai_wiki(node_token: str) -> tuple[str, str] | None:
+    """Node Wiki → (obj_type, obj_token). None nếu bot không đọc được node."""
+    n = nut_wiki(node_token)
+    if not n:
         return None
     return str(n.get("obj_type") or ""), str(n["obj_token"])
 

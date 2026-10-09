@@ -398,8 +398,10 @@ def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None,
                          "Nhờ chủ Wiki thêm bot 'Mark Trần - Social Assistant' với quyền xem.")
         loai, token = g
         if loai not in _TEN_LOAI:
-            raise TuChoi(f"Node Wiki này là '{loai}', không phải Base hay Sheet. Tài liệu "
-                         "Wiki thì tra trong kho kiến thức, không đọc bằng tool này.")
+            raise TuChoi(f"Node Wiki này là '{loai}', không phải Base hay Sheet. "
+                         + ("Tài liệu thì đọc bằng `doc_tai_lieu` với nguyên link này."
+                            if loai in _TEN_TAI_LIEU else
+                            "Loại này Mark chưa đọc được bằng tool này."))
         if kieu_phu and ((loai == "bitable" and kieu_phu != "table") or
                          (loai == "sheet" and kieu_phu != "sheet")):
             raise TuChoi("Phạm vi table/sheet trong link Wiki không khớp loại tài liệu.")
@@ -432,20 +434,122 @@ def mo_nguon(nguon: str, *, nguoi_hoi: str | None = None,
                 "bảng trong lệnh hoặc đã quá 2 giờ. Mở console → Lịch chạy, kiểm lại link "
                 "bảng (đúng ?table=…) rồi lưu lại lịch.")
         if vi_sao.startswith("không biết ai đang hỏi"):
-            raise TuChoi(
-                f"Không thể kiểm tra quyền đọc {ten_loai}: Console chưa chuyển danh tính "
-                "Lark đã xác thực của tài khoản đang hỏi. Hãy mở lại yêu cầu từ Lark. "
-                "Chia sẻ thêm tài liệu không tự khắc phục lỗi nhận diện này."
-            )
+            raise TuChoi(_loi_khong_danh_tinh(ten_loai))
         if noi_bo:
             raise TuChoi(loi_noi_bo)
         if loi_lich:
             raise TuChoi(_loi_lich_platform(ten_loai, loi_lich))
-        raise TuChoi(
-            f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Mark chỉ đọc {ten_loai} mà CHÍNH "
+        raise TuChoi(_loi_khong_quyen(ten_loai, vi_sao))
+    return loai, token, phu, ten_loai, vi_sao
+
+
+def _loi_khong_danh_tinh(ten_loai: str) -> str:
+    return (f"Không thể kiểm tra quyền đọc {ten_loai}: Console chưa chuyển danh tính "
+            "Lark đã xác thực của tài khoản đang hỏi. Hãy mở lại yêu cầu từ Lark. "
+            "Chia sẻ thêm tài liệu không tự khắc phục lỗi nhận diện này.")
+
+
+def _loi_khong_quyen(ten_loai: str, vi_sao: str) -> str:
+    return (f"Không đọc {ten_loai} này cho bạn: {vi_sao}. Mark chỉ đọc {ten_loai} mà CHÍNH "
             f"người hỏi cũng được xem. Nhờ chủ {ten_loai} chia sẻ cho bạn, hoặc nhờ chủ agent "
             "thêm nó vào Nguồn Wiki của Mark.")
-    return loai, token, phu, ten_loai, vi_sao
+
+
+# ───────────────────────────── tài liệu Docx / Doc (doc_tai_lieu) ─────────────────────────────
+#: Loại tài liệu chữ đọc được (`type` của API quyền drive: docx = tài liệu mới, doc = bản cũ).
+_TEN_TAI_LIEU = {"docx": "tài liệu", "doc": "tài liệu"}
+LOI_BOT_CHUA_CHIA_SE = ("Nhờ chủ tài liệu thêm bot 'Mark Trần - Social Assistant' quyền xem "
+                        "(Chia sẻ → thêm ứng dụng/bot), rồi gửi lại link.")
+
+
+@dataclass(frozen=True)
+class TaiLieu:
+    """Tài liệu đã MỞ cho người hỏi: bot đọc được VÀ người hỏi được chứng minh có quyền."""
+    loai: str                 # "docx" | "doc"
+    token: str                # token tài liệu thật (đã giải node Wiki)
+    node: str                 # token node Wiki ("" nếu link thẳng)
+    ten: str                  # tiêu đề (từ node Wiki hoặc bước thăm dò)
+    sua_luc: str              # giây epoch lần sửa cuối nếu node Wiki có ("" nếu không)
+    ly_do: str                # vì sao được đọc (từ `quyen_nguoi_hoi`)
+    meta: dict                # kết quả bước thăm dò (`tham_do`)
+
+
+def nhan_dien_tai_lieu(nguon: str) -> tuple[str, str] | None:
+    """Link/mã → (kiểu, token). Kiểu: "docx" | "doc" | "wiki" | "?" (token trần).
+
+    Nhận /docx/<tok>, /docs/<tok> (bản cũ), /wiki/<tok>, `docx:<tok>`, `doc:<tok>`,
+    `wiki:<tok>` và token trần (thử node Wiki trước, không phải thì coi là docx)."""
+    s = (nguon or "").strip()
+    m = re.fullmatch(r"(docx|doc|wiki):([A-Za-z0-9]+)", s)
+    if m:
+        return m.group(1), m.group(2)
+    if re.fullmatch(r"[A-Za-z0-9]{16,}", s):
+        return "?", s
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(s).path
+    except ValueError:
+        return None
+    for mau, kieu in ((r"/docx/([A-Za-z0-9]+)", "docx"), (r"/docs/([A-Za-z0-9]+)", "doc"),
+                      (r"/wiki/([A-Za-z0-9]+)", "wiki")):
+        m = re.search(mau, p)
+        if m:
+            return kieu, m.group(1)
+    return None
+
+
+def mo_tai_lieu(nguon: str, tham_do, *, nguoi_hoi: str | None = None) -> TaiLieu:
+    """Link tài liệu → `TaiLieu`, hoặc ném `TuChoi` (câu nói NGUYÊN với người dùng).
+
+    Cùng MỘT luật quyền với `mo_nguon` (Base/Sheet): `quyen_nguoi_hoi` — chủ agent, Nguồn
+    Wiki chủ agent khai báo, mở cho cả công ty, thành viên trực tiếp hoặc qua nhóm chat.
+    Không có luật thứ hai. Khác `mo_nguon` đúng một chỗ: `tham_do(loai, token)` (gọi Lark
+    bằng token bot, ném lỗi nếu bot không đọc được) chạy TRƯỚC bước quyền — bot chưa được
+    chia sẻ thì bước tra thành viên cũng hỏng theo, và người dùng nhận câu "không xem được
+    danh sách người có quyền" thay vì đường sửa thật là thêm bot. Kết quả thăm dò (tiêu
+    đề…) chỉ trả ra SAU khi quyền đã chứng minh.
+    """
+    nd = nhan_dien_tai_lieu(nguon)
+    if not nd:
+        raise TuChoi("Không nhận ra link tài liệu. Cần link Lark Docs (/docx/ hoặc /docs/), "
+                     "Wiki (/wiki/), hoặc `docx:<mã>`.")
+    kieu, token = nd
+    node, ten, sua_luc = "", "", ""
+    if kieu in ("wiki", "?"):
+        n = B.nut_wiki(token)
+        if n is None and kieu == "wiki":
+            raise TuChoi("Mark không mở được node Wiki này — bot chưa được chia sẻ. "
+                         + LOI_BOT_CHUA_CHIA_SE)
+        if n is not None:
+            node, loai_nut = token, str(n.get("obj_type") or "")
+            token = str(n["obj_token"])
+            ten = str(n.get("title") or "")
+            sua_luc = str(n.get("obj_edit_time") or "")
+            if loai_nut in _TEN_LOAI:
+                raise TuChoi(
+                    f"Node Wiki này là một {_TEN_LOAI[loai_nut]}, không phải tài liệu chữ. "
+                    "Đọc nội dung bằng `doc_bang`, đếm/thống kê bằng `dem_bang` (hoặc lập "
+                    "Sheet thống kê bằng `tao_sheet_thong_ke`) với nguyên link này.")
+            if loai_nut not in _TEN_TAI_LIEU:
+                raise TuChoi(f"Node Wiki này là '{loai_nut}' — Mark chỉ đọc được tài liệu "
+                             "chữ (Docs), Base và Sheet.")
+            kieu = loai_nut
+        else:
+            kieu = "docx"
+    ten_loai = _TEN_TAI_LIEU[kieu]
+    try:
+        meta = tham_do(kieu, token) or {}
+    except Exception as e:  # noqa: BLE001
+        raise TuChoi(f"Mark chưa đọc được tài liệu này ({str(e)[:160]}). Thường là do bot "
+                     "chưa được chia sẻ. " + LOI_BOT_CHUA_CHIA_SE) from None
+    nguoi = _nguoi_hoi() if nguoi_hoi is None else nguoi_hoi
+    ok, vi_sao = quyen_nguoi_hoi(kieu, token, nguoi, node)
+    if not ok:
+        if vi_sao.startswith("không biết ai đang hỏi"):
+            raise TuChoi(_loi_khong_danh_tinh(ten_loai))
+        raise TuChoi(_loi_khong_quyen(ten_loai, vi_sao))
+    return TaiLieu(kieu, token, node, ten or str(meta.get("ten") or ""), sua_luc, vi_sao,
+                   dict(meta))
 
 
 def loi_doc(ten_loai: str, e: Exception) -> str:

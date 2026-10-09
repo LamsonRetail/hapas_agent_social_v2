@@ -75,8 +75,9 @@ Bảng mẫu: QUẢN LÝ NGÂN SÁCH & MỤC TIÊU HAPAS 20.10, tab BẢNG TỔN
   Có số dán thì rà tạm theo đúng quy trình dưới đây, ghi nguồn là "số người dùng dán".
   Trong lúc chờ, nêu trước các điểm sẽ soát (dòng TỔNG từng cột thực tế, nhóm đứng ngoài
   tổng, cột cam kết/thanh toán/dự kiến cuối kỳ)
-- Base/Sheet khác: đọc bằng `doc_bang`. Tài liệu docx (kể cả trang Wiki dạng docx) thì
-  `doc_bang` không đọc được, nhờ người dùng dán nội dung. File xlsx/pdf gửi kèm không đọc được, nhờ đưa lên Sheet;
+- Base/Sheet khác: đọc bằng `doc_bang`. Tài liệu docx (kể cả trang Wiki dạng docx, vd
+  master plan) đọc bằng `doc_tai_lieu`; số trong đó cần cộng thì đưa vào `dem_bang` với
+  `du_lieu` hoặc `tinh`, không tự cộng. File xlsx/pdf gửi kèm không đọc được, nhờ đưa lên Sheet;
   ảnh báo giá đọc bằng `vision_analyze`, nói rõ số đọc từ ảnh cần kiểm lại
 
 ## Bài học chiến dịch cũ

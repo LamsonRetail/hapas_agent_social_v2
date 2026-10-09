@@ -10,11 +10,14 @@ import lsr_platform
 from lsr_policy import decide
 
 
-def test_docs_fetch_markdown_is_read_only():
+def test_docs_fetch_is_refused_with_redirect_to_doc_tai_lieu():
+    """09/10: `docs +fetch` đọc bằng quyền BOT, không kiểm người hỏi — nay bị chặn và lý do
+    chỉ đường sang `doc_tai_lieu` (kiểm quyền người hỏi như doc_bang)."""
     verdict = decide("lark_cli", {
         "args": ["docs", "+fetch", "--doc-token", "doc_123", "--doc-format", "markdown"],
     })
-    assert verdict.allowed, verdict.reason
+    assert not verdict.allowed
+    assert "doc_tai_lieu" in verdict.reason
 
 
 def test_option_values_cannot_turn_ambiguous_command_into_read():
@@ -26,10 +29,31 @@ def test_option_values_cannot_turn_ambiguous_command_into_read():
 
 
 def test_option_values_do_not_make_read_command_look_mutating():
+    """Giá trị option ('Copy update plan') không biến lệnh đọc thành lệnh ghi: lý do từ
+    chối vẫn là đường đọc tài liệu, không phải 'động từ ghi/gửi'."""
     verdict = decide("lark_cli", {
         "args": ["docs", "+fetch", "--title", "Copy update plan"],
     })
-    assert verdict.allowed, verdict.reason
+    assert not verdict.allowed
+    assert "doc_tai_lieu" in verdict.reason and "động từ ghi" not in verdict.reason
+
+
+def test_raw_api_cannot_read_doc_content_either():
+    for path in ("/open-apis/docx/v1/documents/doxAbc/raw_content",
+                 "/open-apis/docx/v1/documents/doxAbc/blocks",
+                 "open-apis/doc/v2/docAbc/raw_content"):
+        verdict = decide("lark_cli", {"args": ["api", "GET", path]})
+        assert not verdict.allowed, path
+        assert "doc_tai_lieu" in verdict.reason
+
+
+def test_doc_discovery_and_wiki_metadata_still_allowed():
+    for args in (["docs", "--help"], ["docs", "+fetch", "--help"],
+                 ["schema", "docx.document.raw_content"],
+                 ["wiki", "+node-get", "--token", "wikTok"],
+                 ["api", "GET", "/open-apis/wiki/v2/spaces/get_node"]):
+        verdict = decide("lark_cli", {"args": args})
+        assert verdict.allowed, (args, verdict.reason)
 
 
 def test_lark_cli_write_commands_stay_blocked():

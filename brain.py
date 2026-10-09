@@ -65,6 +65,7 @@ import chi_phi_tool  # noqa: E402,F401  (registers `tra_chi_phi_quet`: tra sổ 
 import viec_nen  # noqa: E402,F401  (registers `tra_viec_nen`/`huy_viec_nen`: việc quét nền)
 import bang_tool  # noqa: E402,F401  (registers `doc_bang`: đọc nguyên Base/Sheet khi người hỏi có quyền)
 import dem_bang_tool  # noqa: E402,F401  (registers `dem_bang`: code đếm/tính %/cộng trên Base/Sheet hoặc bảng dán)
+import doc_tai_lieu_tool  # noqa: E402,F401  (registers `doc_tai_lieu`: đọc tài liệu Docs/Wiki khi người hỏi có quyền)
 import tinh_tool  # noqa: E402,F401  (registers `tinh`: máy tính chính xác — Mark không tự tính tay)
 import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_viec_base`: việc đã duyệt -> Base checklist)
 import tien_do  # noqa: E402  (registers `tra_tien_do`: việc quá hạn/sắp hạn do code so ngày; nhắc nhóm 08:30 nếu cấu hình)
@@ -113,13 +114,21 @@ _TOOLING_NOTE = "\n".join(
     [
         "\n---\n## HƯỚNG DẪN DÙNG CÔNG CỤ (kỹ thuật — người dùng không thấy phần này)",
         "- Thao tác Lark: ƯU TIÊN `lark_cli` (CLI chính thức, đủ domain: calendar, im, wiki, "
-        "docs/docx, drive, task, base, sheets, approval, contact, vc, minutes). Chạy dưới "
+        "drive, task, base, sheets, approval, contact, vc, minutes). Chạy dưới "
         "danh tính BOT (tenant token) — KHÔNG thấy tài nguyên cá nhân của người khác. "
         "Xem lệnh: args=[\"<domain>\",\"--help\"]; ưu tiên +shortcut (vd [\"task\",\"+create\",...]); "
         "xem tham số: [\"schema\",\"<svc.res.method>\"]; gọi thẳng: [\"api\",\"GET\",\"/open-apis/...\"].",
         "- Khi có LINK wiki/tài liệu hoặc nhờ tra cứu/đọc/tạo/sửa nội dung Lark: ĐỪNG nói không truy cập "
-        "được — DÙNG tool tự dò API rồi trả lời. Link chứa token/id (…/wiki/XXXX, ?table=YYYY) thì trích ra "
-        "và gọi API tương ứng. Chỉ báo lỗi khi tool trả lỗi thật (thiếu quyền/không tồn tại).",
+        "được — DÙNG tool rồi trả lời. Chỉ báo lỗi khi tool trả lỗi thật (thiếu quyền/không tồn tại).",
+        # 07/10: link Wiki "MASTER PLAN 20.10 Copy" (docx) — Mark gọi `lark_cli docs +fetch`,
+        # bị chặn, rồi báo không đọc được. lark_cli đọc bằng quyền BOT nên nay không đọc nội
+        # dung tài liệu nữa; `doc_tai_lieu` kiểm người hỏi như `doc_bang`.
+        "- LINK TÀI LIỆU LARK (/docx/, /docs/, /wiki/ là tài liệu — kế hoạch, master plan, "
+        "biên bản, brief): gọi `doc_tai_lieu` với NGUYÊN link — TUYỆT ĐỐI không đọc tài liệu "
+        "bằng `lark_cli`. `con_tiep`=true là mới đọc một phần: đọc tiếp bằng `goi_tiep` hoặc "
+        "`muc` trước khi kết luận về phần chưa đọc. Link /base/, /sheets/ hoặc Wiki là Base/"
+        "Sheet thì `doc_bang`/`dem_bang`. Bị từ chối thì chép NGUYÊN hướng dẫn (thêm bot vào "
+        "tài liệu, hoặc vì sao bạn chưa được xem), không tìm đường khác.",
         "- QUẢNG CÁO ĐỐI THỦ (Meta Ad Library) — hỏi 'đối thủ đang chạy ads gì', tổng hợp/liệt kê "
         "ad đang chạy, nội dung & creative quảng cáo, số lượng ad, so sánh ad giữa các brand → "
         "BẮT BUỘC dùng tool `fb_ads_library`. Truyền page_id (ID số Trang FB → xem TẤT CẢ ad của "
@@ -307,6 +316,9 @@ _TOOL_CAN_XET = {
     "dem_bang": ("đếm, tính % và cộng tổng bằng code trên một Base hoặc Sheet của Lark "
                  "(người hỏi cũng phải có quyền xem) hoặc trên bảng người dùng dán vào chat",
                  {"nguon": "https://example.larksuite.com/base/x"}),
+    "doc_tai_lieu": ("đọc nội dung một tài liệu Lark Docs hoặc trang Wiki dạng tài liệu (người "
+                     "hỏi cũng phải có quyền xem)",
+                     {"nguon": "https://example.larksuite.com/docx/x"}),
     "tinh": ("tính chính xác bằng code mọi phép cộng, trừ, nhân, chia, %, tỷ lệ",
              {"phep_tinh": {"vuot": "103 - 90"}}),
     "tra_tien_do": ("tra việc quá hạn và sắp tới hạn trên Base checklist dự án (code so "
