@@ -771,8 +771,10 @@ def _khop_ten(ten, loc):
 
 def _bat_bien(chu):
     """Chữ mà mọi cách so CONTAIN (phân biệt hoa thường hay không, NFC hay NFD) đều cho cùng
-    kết quả: không có chữ hoa/thường, không có dấu tổ hợp (vd "20/10", "2024", "1+1")."""
-    return (chu == chu.upper() == chu.lower() == chu.casefold()
+    kết quả: không có chữ hoa/thường, không có dấu tổ hợp (vd "20/10", "2024", "1+1"). Chữ có
+    "%" hay "_" không gửi Meta: CONTAIN có thể coi chúng là ký tự đại diện kiểu LIKE."""
+    return ("%" not in chu and "_" not in chu
+            and chu == chu.upper() == chu.lower() == chu.casefold()
             and unicodedata.normalize("NFC", chu) == unicodedata.normalize("NFD", chu))
 
 
@@ -789,6 +791,8 @@ def _loc_graph(chu):
 
 def _ds_chu(loc):
     q = [f"“{c}”" for c in loc]
+    if not q:
+        return ""
     return q[0] if len(q) == 1 else "đủ cả " + ", ".join(q[:-1]) + " và " + q[-1]
 
 
@@ -833,34 +837,36 @@ def _cau_cat(so_doc):
 
 def _khong_khop(loc, accounts, span, da_doc, cut, so_doc):
     """Có lọc mà không dòng nào khớp: nói RÕ chữ nào, tài khoản nào, ngày nào, bao nhiêu chiến
-    dịch đã xét và tên gần đúng — chỉ từ các dòng ĐÃ đọc (không đọc thêm). Chỉ trả TÊN."""
+    dịch đã đọc và tên gần đúng — chỉ từ các dòng ĐÃ đọc (không đọc thêm). Chỉ trả TÊN.
+    Chỉ nói "tên chứa X" khi code đã tự kiểm tên chứa X; bộ lọc Meta không được coi là sự thật."""
     mc = _loc_may_chu(loc)
     con = [c for c in loc if c not in mc]
-    so = len(da_doc)
-    gan, chua_chu = _ten_gan_dung(list(da_doc.values()), loc)
+    ten = list(da_doc.values())
+    so = len(ten)
+    co_mc = [t for t in ten if mc and _khop_ten(t, mc)]
+    gan, chua_chu = _ten_gan_dung(ten, loc)
     tk = [str(a.get("name") or a.get("id")) for a in accounts]
     s, _, e = span.partition("–")
     ngay = ("ngày " + s) if s == e.split(" ")[0] else ("từ " + span.replace("–", " đến "))
+    pham = "trong phần đã đọc" if cut else "trong khoảng đó"
+    so_meta = (" (Meta lọc sơ theo " + ", ".join(f"“{c}”" for c in mc) + ")") if mc else ""
     cau = (f"Không có chiến dịch nào có tên chứa {_ds_chu(loc)} (không phân biệt hoa thường) "
            f"ở tài khoản {', '.join(tk[:5])}{'…' if len(tk) > 5 else ''}, {ngay}. ")
-    if mc:
-        co = _ds_chu(mc)
-        if not so:
-            cau += f"Trong khoảng đó không có chiến dịch nào có số mà tên chứa {co}."
-        else:
-            cau += (f"Có {so} chiến dịch có số mà tên chứa {co} nhưng không chứa {_ds_chu(con)}; "
-                    "gần nhất: " + "; ".join(gan) + ".")
-    elif not so:
-        cau += "Trong khoảng đó tài khoản không có chiến dịch nào có số."
-    elif chua_chu:
-        cau += f"Tài khoản có {so} chiến dịch có số trong khoảng đó; gần nhất: " + "; ".join(gan) + "."
+    if not so:
+        cau += (f"Meta không trả chiến dịch nào có số{so_meta}." if mc
+                else "Trong khoảng đó tài khoản không có chiến dịch nào có số.")
+    elif con and co_mc:
+        cau += (f"{pham[0].upper()}{pham[1:]} có {len(co_mc)} chiến dịch có số mà tên chứa {_ds_chu(mc)} "
+                f"nhưng không chứa {_ds_chu(con)}; gần nhất: " + "; ".join(gan) + ".")
     else:
-        cau += (f"Tài khoản có {so} chiến dịch có số trong khoảng đó, không tên nào chứa chữ đã hỏi; "
-                "ví dụ: " + "; ".join(gan) + ".")
+        dem = (f"Tài khoản có {so} chiến dịch có số {pham}" if not (mc or cut)
+               else f"Đã đọc {so} chiến dịch có số {pham}{so_meta}")
+        cau += (dem + "; gần nhất: " + "; ".join(gan) + "." if chua_chu
+                else dem + ", không tên nào chứa chữ đã hỏi; ví dụ: " + "; ".join(gan) + ".")
     if cut:
         cau += _cau_cat(so_doc)
     return {"so_dong": 0, "bi_cat": cut, "khoang": span, "loc_ap_dung": _mo_ta_loc(loc),
-            "loc_may_chu": mc, "so_chien_dich_khong_loc": so, "ten_gan_dung": gan,
+            "loc_may_chu": mc, "so_chien_dich_da_doc": so, "ten_gan_dung": gan,
             "cau_loc": cau, "cau_tong": cau,
             "hoi_tiep": "Chép nguyên cau_loc; mời người dùng chọn tên trong ten_gan_dung hoặc đổi chữ lọc."}
 
