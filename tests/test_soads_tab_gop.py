@@ -106,10 +106,19 @@ def test_tab_gop_dung_thu_tu_va_dung_tong(monkeypatch, ba_tk):
     for tab in ("Theo tài khoản", "Theo nền tảng", "Theo ngày", "Theo chiến dịch"):
         h, rows, tong = _bang(gia, tab)
         assert not any(x.startswith(("Tiếp cận", "Tần suất")) for x in h), tab
-        # Sắp theo chi tiêu giảm dần trong mỗi tiền tệ.
+        # Trong mỗi tiền tệ: Theo ngày sắp theo ngày tăng dần (dòng thời gian), tab khác theo
+        # chi tiêu giảm dần; khối tiền tệ liền nhau.
+        tt = [r[h.index("Tiền tệ")] for r in rows]
+        assert tt == sorted(tt), tab
         for cur in ("VND", "USD"):
-            sp = [r[h.index("Chi tiêu (tiền TK)")] for r in rows if r[h.index("Tiền tệ")] == cur]
-            assert sp == sorted(sp, reverse=True), tab
+            if tab == "Theo ngày":
+                ng = [r[0] for r in rows if r[h.index("Tiền tệ")] == cur]
+                assert ng == sorted(ng) and len(ng) == 2, ng
+                sp = [r[h.index("Chi tiêu (tiền TK)")] for r in rows if r[h.index("Tiền tệ")] == cur]
+                assert sp != sorted(sp, reverse=True), "dữ liệu thử phải phân biệt hai cách sắp"
+            else:
+                sp = [r[h.index("Chi tiêu (tiền TK)")] for r in rows if r[h.index("Tiền tệ")] == cur]
+                assert sp == sorted(sp, reverse=True), tab
         # Dòng tổng của tab gộp = dòng tổng của Chi tiết (từng tiền tệ, từng chỉ số).
         assert [r[0] for r in tong] == ["TỔNG USD", "TỔNG VND"]
         for r, rc in zip(tong, ct_tong):
@@ -121,6 +130,7 @@ def test_tab_gop_dung_thu_tu_va_dung_tong(monkeypatch, ba_tk):
     tq = " ".join(str(r[0]) for r in gia.o("Tổng quan"))
     assert "Tiếp cận, tần suất và ROAS Meta không cộng được" in tq and "không cộng VND với USD" in tq
     assert "6/24 dòng ở tab Chi tiết toàn 0" in tq
+    assert "Theo ngày sắp theo ngày tăng dần; các tab khác theo chi tiêu giảm dần" in tq
     # Mục lục liệt kê mọi tab gộp + Chi tiết; đọc lại kiểm đủ mọi tab.
     muc = [r[0]["text"] for r in gia.o("Tổng quan") if r and isinstance(r[0], dict)]
     assert muc == gia.tab_ten()[1:]
@@ -395,3 +405,58 @@ def test_xem_truoc_cap_quang_cao_khong_nhan_cap_chua():
     assert kq["kich_thuoc"] == {"tai_khoan": 1, "chien_dich": 2, "quang_cao": 6, "ngay": 2}
     assert kq["cong_thuc"] == "1 tài khoản, 2 chiến dịch: 6 quảng cáo × 2 ngày"
     assert [t["tab"] for t in kq["tab_se_co"]] == ["Theo tài khoản", "Theo ngày", "Theo chiến dịch", "Chi tiết"]
+
+
+
+# ───────────── Sheet mẫu từ số giả (xuat_mau) ─────────────
+def test_xuat_mau_cung_duong_that_khong_meta_khong_quyen(monkeypatch):
+    """`xuat_mau`: số giả → đúng bảng/tab gộp/TB.xuat của bản thật, khoá riêng tư trước khi
+    ghi, `cap_quyen` của bên gọi chạy sau cùng; không gọi Meta, không qua _handle/_actor/_allowed."""
+    gia = _gia(monkeypatch)
+
+    def cam(*a, **k):
+        raise AssertionError("xuat_mau không được gọi Meta / kiểm người hỏi")
+    monkeypatch.setattr(T, "_handle", cam)
+    monkeypatch.setattr(T, "_actor", cam)
+    monkeypatch.setattr(T, "_allowed", cam)
+    monkeypatch.setattr(T, "_grant_view", cam)
+    monkeypatch.setattr(T.MetaClient, "accounts", cam)
+    monkeypatch.setattr(T.MetaClient, "pages", cam)
+    monkeypatch.setattr(T.lsr_platform, "danh_dau_han_che", cam)
+    cap = []
+    dong = [r for rs in ROWS.values() for r in rs]
+    kq = T.xuat_mau(dong, {"cap": "chien_dich", "theo_ngay": True, "chia_theo": ["nen_tang"],
+                           "chi_so": CHI_SO, "tu_ngay": "2026-10-01", "den_ngay": "2026-10-02"},
+                    cap_quyen=lambda tok: cap.append((tok, len(gia.goi))), tai_khoan=[dict(a) for a in ACC])
+    assert kq.url and kq.day_du is True
+    assert gia.tab_ten() == ["Tổng quan", "Theo tài khoản", "Theo nền tảng", "Theo ngày", "Theo chiến dịch",
+                             "Chi tiết"]
+    assert gia.dau.title.startswith("MẪU (số giả) Số ads HAPAS 2026-10-01–2026-10-02")
+    assert len(_bang(gia, "Chi tiết")[1]) == 24 and len(gia.che_do_loc("Chi tiết")) == 3
+    tq = " ".join(str(r[0]) for r in gia.o("Tổng quan"))
+    assert "SHEET MẪU: mọi số là số GIẢ" in tq
+    # Thứ tự riêng tư y như bản thật: khoá + kiểm khoá → ghi → cap_quyen sau mọi lần ghi.
+    i_patch = next(i for i, g in enumerate(gia.goi) if g[0] == "PATCH" and "/permissions/" in g[1])
+    i_get = next(i for i, g in enumerate(gia.goi) if g[0] == "GET" and "/permissions/" in g[1])
+    ghi = [i for i, g in enumerate(gia.goi) if g[1].endswith("/values_batch_update")]
+    assert i_patch < i_get < ghi[0] and len(cap) == 1 and cap[0][1] > ghi[-1]
+    assert cap[0][0] == kq.token
+
+
+def test_xuat_mau_suy_tai_khoan_va_khoa_hong_thi_khong_ghi(monkeypatch):
+    gia = LarkGia()
+
+    def call(method, path, query=None, body=None):
+        if path.endswith("/public"):
+            return {"data": {"permission_public": {"link_share_entity": "anyone"}}}
+        return gia.call(method, path, query=query, body=body)
+    monkeypatch.setattr(T.lark, "call", call)
+    monkeypatch.setattr(A.lark, "call", call)
+    dong = [{"account_id": "9", "account_name": "Mẫu", "campaign_id": "1", "campaign_name": "C",
+             "date_start": "2026-10-01", "date_stop": "2026-10-01", "spend": "5", "impressions": "50"}]
+    with pytest.raises(ValueError, match="riêng tư"):
+        T.xuat_mau(dong, {"cap": "chien_dich", "chi_so": ["spend"], "tu_ngay": "2026-10-01",
+                          "den_ngay": "2026-10-01"}, cap_quyen=lambda tok: pytest.fail("không cấp"))
+    assert not [g for g in gia.goi if g[1].endswith("/values_batch_update")]
+    with pytest.raises(ValueError, match="cap_quyen"):
+        T.xuat_mau(dong, {}, cap_quyen=None)
