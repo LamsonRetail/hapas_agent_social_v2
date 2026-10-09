@@ -2,7 +2,8 @@
 
 Ngân hỏi "có cả 20/10 và product trong tên"; Mark gửi loc="20/10 AND product" thành MỘT bộ lọc
 CONTAIN nên Meta trả 0 dòng, trong khi tên thật viết HOA ("20/10_Reach_PRODUCT_…"). Meta giả ở
-đây lọc CONTAIN PHÂN BIỆT hoa thường (trường hợp xấu nhất) để buộc đường đọc lại không lọc.
+đây mặc định lọc CONTAIN PHÂN BIỆT hoa thường và so từng byte (không chuẩn hoá Unicode) —
+trường hợp xấu nhất: bộ lọc phía Meta không bao giờ được làm rơi tên khớp.
 """
 from __future__ import annotations
 
@@ -30,7 +31,8 @@ def _dong(ten=TEN):
 
 
 def _meta(monkeypatch, ten=TEN, hoa_thuong=True, bo_qua_loc=False):
-    """Meta giả: CONTAIN phân biệt hoa thường (`hoa_thuong`) hoặc không; mọi bộ lọc AND."""
+    """Meta giả: CONTAIN phân biệt hoa thường + so byte (`hoa_thuong`) hoặc không; mọi bộ lọc AND.
+    Trả tối đa `limit` dòng, cờ cắt khi còn dòng."""
     monkeypatch.setattr(T.MetaClient, "accounts", lambda self: [dict(a) for a in ACC])
     goi = []
 
@@ -61,6 +63,10 @@ def _ten_chi_tiet(gia):
     return [r[i] for r in o[1:] if len(r) > i and r[i] and not str(r[0]).startswith("TỔNG")]
 
 
+def _gui_meta(goi):
+    return [[f["value"] for f in json.loads(p["filtering"])] if "filtering" in p else None for p in goi]
+
+
 # ───────────── chữ lọc ─────────────
 def test_loc_tat_ca_khop_du_moi_chu():
     loc = T._loc_tu_khoa({"loc_tat_ca": ["20/10", "product"]})
@@ -70,14 +76,14 @@ def test_loc_tat_ca_khop_du_moi_chu():
     assert not T._khop_ten("Always_on_PRODUCT", loc)
 
 
-@pytest.mark.parametrize("chuoi", ["20/10 AND product", "20/10 and product", "20/10 & product",
-                                   "20/10 + product", "20/10 và product", "20/10  And  product"])
-def test_loc_chuoi_cu_tach_o_dau_noi(chuoi):
+@pytest.mark.parametrize("chuoi", ["20/10 AND product", "20/10  AND  product"])
+def test_loc_chuoi_cu_chi_tach_o_and_viet_hoa(chuoi):
     assert T._loc_tu_khoa({"loc": chuoi}) == ["20/10", "product"]
 
 
-@pytest.mark.parametrize("chuoi", ["Reach PRODUCT", "Mẹ&Bé", "C+", "Android TV"])
-def test_loc_chuoi_khong_tach_o_dau_cach(chuoi):
+@pytest.mark.parametrize("chuoi", ["Reach PRODUCT", "Mẹ và Bé", "Black & White", "Mua 1 + 1",
+                                   "20/10 and product", "Mẹ&Bé", "Android TV"])
+def test_loc_chuoi_cu_giu_nguyen_cum_that(chuoi):
     assert T._loc_tu_khoa({"loc": chuoi}) == [chuoi]
 
 
@@ -104,56 +110,99 @@ def test_loc_sai_bao_loi_truoc_meta(monkeypatch, args, loi):
 def test_hoa_thuong_va_nfc():
     nfd = unicodedata.normalize("NFD", "20/10_Sản_Phẩm_Mới")
     assert nfd != unicodedata.normalize("NFC", nfd)
-    assert T._khop_ten(nfd, T._loc_tu_khoa({"loc_tat_ca": ["SẢN PHẨM".replace(" ", "_")]}))
+    assert T._khop_ten(nfd, T._loc_tu_khoa({"loc_tat_ca": ["SẢN_PHẨM"]}))
     assert T._khop_ten("20/10_SẢN_PHẨM", T._loc_tu_khoa({"loc_tat_ca": [unicodedata.normalize("NFD", "sản")]}))
-    # Chuỗi cũ viết tách bằng "và" dạng tổ hợp vẫn tách đúng.
-    assert T._loc_tu_khoa({"loc": unicodedata.normalize("NFD", "20/10 và sản phẩm")}) == ["20/10", "sản phẩm"]
+    assert T._loc_tu_khoa({"loc": unicodedata.normalize("NFD", "20/10 AND sản phẩm")}) == ["20/10", "sản phẩm"]
     assert not T._khop_ten("San pham", ["sản phẩm"]), "khớp thật không bỏ dấu"
 
 
-# ───────────── gọi Meta ─────────────
-def test_moi_chu_mot_bo_loc_graph(monkeypatch):
-    _gia(monkeypatch)
-    goi = _meta(monkeypatch, hoa_thuong=False)
+@pytest.mark.parametrize("chu, bat_bien", [
+    ("20/10", True), ("2024", True), ("1+1", True), ("_", True),
+    ("product", False), ("PRODUCT", False), ("Sản", False), ("ß", False), ("năm", False)])
+def test_chi_chu_bat_bien_moi_gui_meta(chu, bat_bien):
+    assert T._bat_bien(chu) is bat_bien
+
+
+# ───────────── gọi Meta: bộ lọc Meta chỉ thu hẹp, code quyết ─────────────
+def test_khop_mot_phan_phia_meta_khong_lam_roi_ten(monkeypatch):
+    """Review 10f4a90: CONTAIN phân biệt hoa thường + Meta lọc cả "product" thì chỉ giữ 1/3."""
+    gia = _gia(monkeypatch)
+    ten = ["20/10_product_test", "20/10_Reach_PRODUCT_Mass", "20/10_Conv_PRODUCT_R", "20/10_CELEB"]
+    goi = _meta(monkeypatch, ten=ten, hoa_thuong=True)
     kq = run(loc_tat_ca=["20/10", "product"])
     assert "error" not in kq, kq
+    assert _gui_meta(goi) == [["20/10"]], "chỉ chữ bất biến được gửi Meta; một lần đọc"
+    assert kq["so_dong"] == 3 and kq["loc_may_chu"] == ["20/10"]
+    assert sorted(_ten_chi_tiet(gia)) == sorted(ten[:3])
+    assert "3 chiến dịch khớp" in kq["cau_loc"]
+    assert "Chi tiêu 600000" in kq["cau_tong"] and "chứa đủ cả “20/10” và “product”" in kq["cau_tong"]
+
+
+def test_hai_chu_bat_bien_thanh_hai_bo_loc(monkeypatch):
+    _gia(monkeypatch)
+    goi = _meta(monkeypatch)
+    kq = run(loc_tat_ca=["20/10", "product", "_"])
     assert json.loads(goi[0]["filtering"]) == [
         {"field": "campaign.name", "operator": "CONTAIN", "value": "20/10"},
-        {"field": "campaign.name", "operator": "CONTAIN", "value": "product"}]
-    assert len(goi) == 1 and kq["loc_du_phong"] is False, "Meta đã lọc ra dòng: không đọc lại"
-    assert "2 chiến dịch khớp" in kq["cau_loc"]
-
-
-def test_chuoi_cu_and_duoc_tach_thanh_hai_bo_loc(monkeypatch):
-    _gia(monkeypatch)
-    goi = _meta(monkeypatch, hoa_thuong=False)
-    kq = run(loc="20/10 AND product")
-    assert [f["value"] for f in json.loads(goi[0]["filtering"])] == ["20/10", "product"]
+        {"field": "campaign.name", "operator": "CONTAIN", "value": "_"}]
     assert kq["so_dong"] == 2
 
 
-def test_meta_tra_0_thi_doc_lai_khong_loc_va_tu_loc(monkeypatch):
+def test_tu_khoa_nfd_ten_nfc(monkeypatch):
     gia = _gia(monkeypatch)
-    goi = _meta(monkeypatch, hoa_thuong=True)      # "product" ≠ "PRODUCT" phía Meta
-    kq = run(loc_tat_ca=["20/10", "product"])
-    assert "error" not in kq, kq
-    assert len(goi) == 2 and "filtering" in goi[0] and "filtering" not in goi[1]
-    assert goi[0]["time_range"] == goi[1]["time_range"]
-    assert kq["loc_du_phong"] is True and kq["so_dong"] == 2
-    assert sorted(_ten_chi_tiet(gia)) == ["20/10_Conv_PRODUCT_Retarget", "20/10_Reach_PRODUCT_Mass"]
-    assert "đọc lại không lọc" in kq["cau_loc"]
-    # Tổng chỉ của chiến dịch khớp: 100.000 + 300.000.
-    assert "Chi tiêu 400000" in kq["cau_tong"] and "chứa đủ cả “20/10” và “product”" in kq["cau_tong"]
+    ten = ["20/10_Sản_Phẩm_A", "20/10_San_Pham_B", "1/6_Sản_Phẩm_C"]
+    goi = _meta(monkeypatch, ten=ten, hoa_thuong=True)
+    kq = run(loc_tat_ca=["20/10", unicodedata.normalize("NFD", "SẢN_PHẨM")])
+    assert _gui_meta(goi) == [["20/10"]], "chữ có dấu/hoa thường không gửi Meta"
+    assert kq["so_dong"] == 1 and _ten_chi_tiet(gia) == ["20/10_Sản_Phẩm_A"]
+
+
+def test_khong_chu_bat_bien_thi_doc_khong_loc_ten(monkeypatch):
+    gia = _gia(monkeypatch)
+    goi = _meta(monkeypatch)
+    kq = run(loc_tat_ca=["product"])
+    assert _gui_meta(goi) == [None], "không gửi bộ lọc tên; một lần đọc"
+    assert kq["so_dong"] == 3 and kq["loc_may_chu"] == []
+    assert sorted(_ten_chi_tiet(gia)) == ["20/10_Conv_PRODUCT_Retarget", "20/10_Reach_PRODUCT_Mass",
+                                          "Always_on_PRODUCT"]
+
+
+def test_chuoi_cu_and_duoc_tach(monkeypatch):
+    _gia(monkeypatch)
+    goi = _meta(monkeypatch)
+    kq = run(loc="20/10 AND product")
+    assert _gui_meta(goi) == [["20/10"]] and kq["so_dong"] == 2
 
 
 def test_meta_bo_qua_loc_thi_code_van_loc(monkeypatch):
     gia = _gia(monkeypatch)
     _meta(monkeypatch, bo_qua_loc=True)
     kq = run(loc_tat_ca=["20/10", "product"])
-    assert kq["so_dong"] == 2 and kq["loc_du_phong"] is False
+    assert kq["so_dong"] == 2
     assert "20/10_Reach_CELEB_M" not in _ten_chi_tiet(gia)
 
 
+def test_doc_khong_loc_cham_tran_thi_noi_ro(monkeypatch):
+    gia = _gia(monkeypatch)
+    monkeypatch.setattr(T, "MAX_ROWS", 3)
+    goi = _meta(monkeypatch)
+    kq = run(loc_tat_ca=["product"])
+    assert goi and "filtering" not in goi[0]
+    assert kq["bi_cat"] is True and kq["so_dong"] == 2
+    assert "chạm trần 3 dòng" in kq["cau_loc"] and "có thể còn chiến dịch khớp" in kq["cau_loc"]
+    tq = " ".join(" ".join(str(x) for x in r) for r in gia.o("Tổng quan"))
+    assert "trần tính trên dòng Meta trả TRƯỚC khi tự lọc" in tq
+
+
+def test_khong_khop_vi_cham_tran_van_noi_ro(monkeypatch):
+    monkeypatch.setattr(T, "MAX_ROWS", 3)
+    _meta(monkeypatch)
+    kq = run(loc_tat_ca=["always"])
+    assert kq["so_dong"] == 0 and kq["bi_cat"] is True
+    assert "chạm trần 3 dòng" in kq["cau_loc"] and kq["so_chien_dich_khong_loc"] == 3
+
+
+# ───────────── không khớp: không trả "0 dòng" trần ─────────────
 def test_khong_khop_noi_ro_khong_tra_0_tran(monkeypatch):
     goi = _meta(monkeypatch, hoa_thuong=True)
 
@@ -164,18 +213,28 @@ def test_khong_khop_noi_ro_khong_tra_0_tran(monkeypatch):
     monkeypatch.setattr(A.lark, "call", cam)
     kq = run(loc_tat_ca=["20/10", "tet"])
     assert "error" not in kq, kq
-    assert len(goi) == 2 and kq["so_dong"] == 0 and "link" not in kq
+    assert _gui_meta(goi) == [["20/10"]], "không đọc thêm lần nào chỉ để lấy tên"
+    assert kq["so_dong"] == 0 and "link" not in kq
     assert kq["loc_ap_dung"] == "Tên chiến dịch chứa tất cả: 20/10, tet (không phân biệt hoa thường)"
-    assert kq["loc_du_phong"] is True and kq["so_chien_dich_khong_loc"] == 5
+    assert kq["loc_may_chu"] == ["20/10"] and kq["so_chien_dich_khong_loc"] == 3
     assert kq["ten_gan_dung"] == ["20/10_Conv_PRODUCT_Retarget", "20/10_Reach_CELEB_M",
                                   "20/10_Reach_PRODUCT_Mass"]
     c = kq["cau_loc"]
     assert c == kq["cau_tong"]
     assert "Không có chiến dịch nào có tên chứa đủ cả “20/10” và “tet”" in c
-    assert "HAPAS 10 - INSTAGRAM" in c and "ngày 2026-10-08" in c and "có 5 chiến dịch có số" in c
-    assert "20/10_Reach_CELEB_M" in c
+    assert "HAPAS 10 - INSTAGRAM" in c and "ngày 2026-10-08" in c
+    assert "Có 3 chiến dịch có số mà tên chứa “20/10” nhưng không chứa “tet”" in c
+    assert "20/10_Reach_CELEB_M" in c and "Meta không lọc ra" not in c
     s = json.dumps(kq, ensure_ascii=False)
     assert "100000" not in s and "Chi tiêu" not in s, "không trả số chỉ số cho chiến dịch không khớp"
+
+
+def test_khong_khop_khong_loc_meta_dem_moi_chien_dich(monkeypatch):
+    goi = _meta(monkeypatch)
+    kq = run(loc_tat_ca=["product", "tet"])
+    assert _gui_meta(goi) == [None]
+    assert kq["so_chien_dich_khong_loc"] == 5
+    assert "Tài khoản có 5 chiến dịch có số trong khoảng đó; gần nhất:" in kq["cau_loc"]
 
 
 def test_khong_khop_khong_ten_nao_gan_thi_van_dua_vai_ten(monkeypatch):
@@ -189,7 +248,7 @@ def test_khong_khop_tai_khoan_khong_chay_gi(monkeypatch):
     _meta(monkeypatch, ten=[])
     kq = run(loc_tat_ca=["20/10"])
     assert kq["so_chien_dich_khong_loc"] == 0 and kq["ten_gan_dung"] == []
-    assert "không có chiến dịch nào có số" in kq["cau_loc"]
+    assert "không có chiến dịch nào có số mà tên chứa “20/10”" in kq["cau_loc"]
 
 
 def test_khong_khop_van_kiem_lai_quyen(monkeypatch):
@@ -217,7 +276,16 @@ def test_tong_quan_ghi_bo_loc(monkeypatch):
     assert kq["link"]
     tq = " ".join(" ".join(str(x) for x in r) for r in gia.o("Tổng quan"))
     assert "Tên chiến dịch chứa tất cả: 20/10, product (không phân biệt hoa thường)" in tq
-    assert "đọc lại không lọc rồi tự lọc tên" in tq
+    assert "Meta chỉ lọc sơ theo “20/10”" in tq and "tool tự kiểm đủ mọi chữ" in tq
+    assert "Meta không lọc ra" not in tq and "đọc lại không lọc" not in tq
+
+
+def test_tong_quan_khong_loc_meta(monkeypatch):
+    gia = _gia(monkeypatch)
+    _meta(monkeypatch)
+    run(loc_tat_ca=["product"])
+    tq = " ".join(" ".join(str(x) for x in r) for r in gia.o("Tổng quan"))
+    assert "Tool đọc mọi chiến dịch có số trong khoảng ngày rồi tự lọc tên." in tq
 
 
 def test_rieng_tu_khong_doi_khi_co_loc(monkeypatch):
@@ -257,7 +325,7 @@ def test_xem_truoc_ton_trong_loc(monkeypatch):
     kq = run(loc_tat_ca=["20/10", "product"], xem_truoc=True)
     assert kq["xem_truoc"] is True and kq["so_dong"] == 2
     assert kq["kich_thuoc"] == {"tai_khoan": 1, "chien_dich": 2}
-    assert kq["loc_du_phong"] is True and "2 chiến dịch khớp" in kq["cau_loc"]
+    assert kq["loc_may_chu"] == ["20/10"] and "2 chiến dịch khớp" in kq["cau_loc"]
     assert "Chi tiêu" not in json.dumps(kq, ensure_ascii=False)
 
 
