@@ -194,8 +194,11 @@ class Bang:
     ten_tab: str | None = None
     #: Tên cột: dựng sẵn một CHẾ ĐỘ LỌC (filter view) cho mỗi giá trị khác nhau của cột này
     #: (tối đa TRAN_LOC_SAN, nhóm nhiều dòng trước). Hỏng chỉ cảnh báo — dữ liệu không phụ
-    #: thuộc vào nó.
+    #: thuộc vào nó. Nên là cột MÃ (duy nhất, không trống), vd "Mã TK".
     loc_san: str | None = None
+    #: Cột lấy TÊN chế độ lọc (vd "Tài khoản"); tên trùng giữa hai mã → "tên — mã"; tên trống
+    #: → mã. None = tên là chính giá trị cột `loc_san`.
+    loc_san_ten: str | None = None
 
     def __post_init__(self):
         self.cot = [c if isinstance(c, Cot) else Cot(*c) if isinstance(c, (tuple, list))
@@ -305,6 +308,29 @@ def _gia_tri_goc(v):
 
 
 _RE_MA = re.compile(r"(?i)(^|[._])(id|ids|pk|uid|code|ma)$|Id$")
+#: Từ (sau khi tách tên cột theo . _ - khoảng trắng và chữ hoa camelCase) đánh dấu cột MÃ —
+#: giá trị trông như số nhưng phải giữ chữ (mã vạch 13 số, điện thoại, mã bưu chính, SKU…).
+_TU_MA = {"id", "ids", "pk", "uid", "ma", "code", "sku", "barcode", "ean", "gtin", "upc",
+          "zip", "zipcode", "postcode", "postal", "phone", "sdt", "tel", "mobile", "msisdn"}
+#: Đuôi của một từ (không có dấu tách): shortcode, postcode, telephone, productsku…
+_DUOI_MA = ("code", "phone", "sku", "barcode", "zipcode", "postcode")
+_RE_TU = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
+
+
+def la_cot_ma(ten: str) -> bool:
+    """Tên cột là cột MÃ (giữ chữ, không đổi chuỗi số thành số). Không phân biệt hoa thường:
+    `_RE_MA` cũ + các từ trong `_TU_MA` + từ kết thúc bằng `_DUOI_MA` (shortCode, zipcode)
+    + "so_dien_thoai"."""
+    t = str(ten or "")
+    if _RE_MA.search(t):
+        return True
+    thap = t.lower()
+    if "so_dien_thoai" in thap or "sodienthoai" in thap:
+        return True
+    tu = [w.lower() for phan in re.split(r"[._\-\s]+", t) for w in _RE_TU.findall(phan)]
+    tu += [phan.lower() for phan in re.split(r"[._\-\s]+", t) if phan]
+    tu += [re.sub(r"\d+$", "", w) for w in tu]          # ean13, sku2
+    return any(w in _TU_MA or w.endswith(_DUOI_MA) for w in tu if w)
 
 
 def bang_goc(ban_ghi: list, ten: str = TAB_GOC,
@@ -318,7 +344,7 @@ def bang_goc(ban_ghi: list, ten: str = TAB_GOC,
             khoa.setdefault(k, None)
     # Độ rộng đồng loạt 140px: bảng gốc có thể vài trăm cột — một lời gọi dimension_range
     # thay vì một lời gọi cho mỗi cụm cột khác độ rộng.
-    la_ma = {k: bool(_RE_MA.search(k)) for k in khoa}
+    la_ma = {k: la_cot_ma(k) for k in khoa}
     cot = [Cot(k, "ma" if la_ma[k] else "chu", rong=140) for k in khoa]
     # Chuỗi số của nguồn (Meta trả "spend": "100000") ghi thành SỐ, không thành "số lưu dạng
     # chữ" (tam giác xanh). Cột mã giữ nguyên chữ; chuỗi đổi có thể mất thông tin cũng giữ
@@ -333,16 +359,20 @@ TRAN_CHU_SO = 15               # số thực giữ đúng ≤15 chữ số có n
 
 
 def so_tu_chuoi(v):
-    """Chuỗi là số thập phân trần ("100000", "12.5", "-3") → số; còn lại giữ nguyên. GIỮ
-    chữ khi đổi có thể mất thông tin: số 0 đầu ("0123" — mã, điện thoại), dấu "+", mũ, khoảng
-    trắng, hoặc quá TRAN_CHU_SO chữ số (mã 18 chữ số mất chữ số
-    cuối khi thành số thực)."""
+    """Chuỗi là số thập phân trần ("100000", "12.5", "-3") → số; còn lại giữ nguyên. Chỉ đổi
+    khi số viết lại ĐÚNG y chuỗi gốc (`str(số) == v`): "1.10", "2.50", "-0" giữ chữ (đổi là
+    mất số 0 người ta cố ý ghi). Cũng giữ chữ: số 0 đầu ("0123"), dấu "+", mũ, NaN/inf, khoảng
+    trắng, dấu phẩy, hoặc quá TRAN_CHU_SO chữ số (mã 18 chữ số mất chữ số cuối khi thành số
+    thực)."""
     if not isinstance(v, str) or not _RE_SO_CHUOI.fullmatch(v):
         return v
     chu_so = v.lstrip("-").replace(".", "").lstrip("0")
     if len(chu_so) > TRAN_CHU_SO:
         return v
-    return int(v) if "." not in v else float(v)
+    so = int(v) if "." not in v else float(v)
+    if so == 0 and v.startswith("-"):      # "-0.0": số âm 0 hiện thành 0 — giữ chữ
+        return v
+    return so if str(so) == v else v
 
 
 def _la_so(v) -> bool:
@@ -929,29 +959,43 @@ def _chu_o(v) -> str:
 
 
 def tao_loc_san(tok: str, sid: str, cot: list, dong: list, ten_cot: str, dong_dau: int = 1,
-                canh_bao: list | None = None) -> LocSan | None:
+                canh_bao: list | None = None, cot_ten: str | None = None) -> LocSan | None:
     """Mỗi giá trị khác nhau của cột `ten_cot` (nhóm nhiều dòng trước, tối đa TRAN_LOC_SAN)
-    → một chế độ lọc tên = giá trị, vùng = tiêu đề + dữ liệu, điều kiện multiValue chỉ hiện
-    giá trị đó. Lỗi → cảnh báo, DỪNG (không gọi tiếp), xoá chế độ lọc vừa tạo mà chưa có điều
-    kiện (kẻo nó hiện tất cả dưới tên một tài khoản). Không bao giờ ném."""
+    → một chế độ lọc, vùng = tiêu đề + dữ liệu, điều kiện multiValue chỉ hiện giá trị đó.
+    Tên chế độ lọc: giá trị ở cột `cot_ten` (vd tên tài khoản khi lọc theo mã); hai mã cùng
+    tên → "tên — mã"; tên trống → mã. Lỗi → cảnh báo, DỪNG (không gọi tiếp), xoá chế độ lọc vừa
+    tạo mà chưa có điều kiện (kẻo nó hiện tất cả dưới tên một tài khoản). Không bao giờ ném."""
     cb = canh_bao if canh_bao is not None else []
     ten = [c.ten for c in cot]
     if ten_cot not in ten or not dong:
         return None
     j = ten.index(ten_cot)
+    jt = ten.index(cot_ten) if cot_ten in ten else None
     dem: collections.Counter = collections.Counter()
+    nhan: dict = {}
     for r in dong:
         v = r[j] if j < len(r) else ""
         if v not in ("", None):
-            dem[_chu_o(v)] += 1
+            k = _chu_o(v)
+            dem[k] += 1
+            if jt is not None and k not in nhan:
+                t = r[jt] if jt < len(r) else ""
+                nhan[k] = "" if t in ("", None) else str(t).strip()
     thu_tu = {s: i for i, s in enumerate(dem)}
     gia_tri = sorted(dem, key=lambda s: (-dem[s], thu_tu[s]))
-    kq = LocSan(ten_cot, 0, len(gia_tri))
+    so_ma = collections.Counter(nhan.get(s) for s in gia_tri if nhan.get(s))
+
+    def ten_hien(s):
+        t = nhan.get(s, "") if jt is not None else s
+        if not t:
+            return s
+        return t if so_ma[t] <= 1 or jt is None else f"{t} — {s}"
+    kq = LocSan(cot_ten if jt is not None else ten_cot, 0, len(gia_tri))
     vung = f"{sid}!A{dong_dau}:{A._cot(len(cot))}{dong_dau + len(dong)}"
     duong = f"/open-apis/sheets/v3/spreadsheets/{tok}/sheets/{sid}/filter_views"
     da: set = set()
     for s in gia_tri[:TRAN_LOC_SAN]:
-        ten_v, fid = _ten_loc(s, da), ""
+        ten_v, fid = _ten_loc(ten_hien(s), da), ""
         try:
             _nhip_loc_san()
             d = _goi("POST", duong, body={"filter_view_name": ten_v, "range": vung})
@@ -986,11 +1030,11 @@ def _ghi_chu_loc_san(tabs: list) -> list:
             continue
         if ls.tao:
             cau = (f"Tab {t.ten} có sẵn {ls.tao} chế độ lọc (filter view) theo cột {ls.cot}, mỗi "
-                   f"{ls.cot.lower()} một chế độ mang đúng tên đó: mở menu Lọc → chế độ lọc, "
+                   f"{ls.cot.lower()} một chế độ mang tên của nó: mở menu Lọc → chế độ lọc, "
                    "chọn tên để chỉ xem các dòng của nó (dữ liệu không đổi, người khác không "
                    "bị ảnh hưởng).")
             if ls.tao < ls.tong:
-                cau += (f" Chỉ dựng {ls.tao}/{ls.tong} giá trị nhiều dòng nhất"
+                cau += (f" Chỉ dựng {ls.tao}/{ls.tong} {ls.cot.lower()} nhiều dòng nhất"
                         + (" (dừng vì lỗi)" if ls.loi else f" (trần {TRAN_LOC_SAN})")
                         + f"; giá trị còn lại lọc tay ở cột {ls.cot}.")
         else:
@@ -1700,7 +1744,8 @@ def _ghi_tabs(tok: str, tabs: list, cb: list, sid_dau: str | None, vi_tri0: int,
                        an_toan=an_toan or not dinh_dang_xong)
         if t.bang.loc_san and ve is None and dong:
             try:
-                tg.loc_san = tao_loc_san(tok, tg.sheet_id, cot, dong, t.bang.loc_san, dd, cb)
+                tg.loc_san = tao_loc_san(tok, tg.sheet_id, cot, dong, t.bang.loc_san, dd, cb,
+                                         t.bang.loc_san_ten)
             except Exception as e:  # noqa: BLE001 — dữ liệu không phụ thuộc chế độ lọc
                 _canh(cb, "Tạo chế độ lọc dựng sẵn", e)
     # Bỏ cột lưới trống bên phải CHỈ ở tab vừa dựng trong lượt này. Tab `noi` đã có dữ liệu

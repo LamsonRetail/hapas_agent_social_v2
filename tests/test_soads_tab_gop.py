@@ -77,9 +77,9 @@ def test_tab_gop_dung_thu_tu_va_dung_tong(monkeypatch, ba_tk):
     kq = run()
     assert "error" not in kq, kq
     assert ba_tk[0]["breakdowns"] == "publisher_platform" and ba_tk[0]["time_increment"] == 1
-    # Mọi trường Meta trả đã nằm nguyên ở Chi tiết → không có tab Dữ liệu gốc.
+    # Dữ liệu gốc giữ tiếp cận/tần suất/chi tiêu đầy đủ số lẻ (Chi tiết làm tròn).
     assert gia.tab_ten() == ["Tổng quan", "Theo tài khoản", "Theo nền tảng", "Theo ngày", "Theo chiến dịch",
-                             "Chi tiết"]
+                             "Chi tiết", "Dữ liệu gốc"]
     assert kq["tab"] == gia.tab_ten()[1:]
     hd, ct, ct_tong = _bang(gia, "Chi tiết")
     assert len(ct) == 3 * 8, "Chi tiết giữ ĐỦ dòng, kể cả dòng toàn 0"
@@ -194,7 +194,11 @@ def test_che_do_loc_moi_tai_khoan(monkeypatch, ba_tk):
     vung = f"{sid}!A1:{A._cot(len(hd))}{1 + len(ct)}"
     for v in views:
         assert v["range"] == vung
-        assert v["conditions"] == [{"condition_id": "A", "filter_type": "multiValue", "expected": [v["name"]]}]
+    # Khoá theo cột Mã TK (B), tên lấy cột Tài khoản.
+    ma = {"HAPAS A": "act_111111111111111111", "HAPAS B": "act_2", "HAPAS US": "act_3"}
+    for v in views:
+        assert v["conditions"] == [{"condition_id": "B", "filter_type": "multiValue",
+                                    "expected": [ma[v["name"]]]}]
     assert all(not gia.che_do_loc(t) for t in gia.tab_ten() if t not in ("Chi tiết",) and t != "Tổng quan")
     assert kq["che_do_loc"] == 3
     tq = " ".join(str(r[0]) for r in gia.o("Tổng quan"))
@@ -232,7 +236,7 @@ def test_che_do_loc_co_tran(monkeypatch, ba_tk):
     kq = run()
     assert len(gia.che_do_loc("Chi tiết")) == 2 and kq["che_do_loc"] == 2
     tq = " ".join(str(r[0]) for r in gia.o("Tổng quan"))
-    assert "Chỉ dựng 2/3 giá trị nhiều dòng nhất (trần 2)" in tq
+    assert "Chỉ dựng 2/3 tài khoản nhiều dòng nhất (trần 2)" in tq
 
 
 def test_che_do_loc_mot_tai_khoan_khong_tao(monkeypatch):
@@ -264,7 +268,7 @@ def test_du_lieu_goc_gon_so_la_so_ma_la_chu(monkeypatch, ba_tk):
     run(chi_so=["spend", "ctr"])
     goc = gia.o("Dữ liệu gốc")
     assert goc[0] == ["account_id", "campaign_id", "campaign_name", "date_start", "date_stop",
-                      "publisher_platform", "impressions", "clicks", "reach", "frequency"]
+                      "publisher_platform", "spend", "impressions", "clicks", "reach", "frequency"]
     r = goc[1]
     # Mã 18 chữ số giữ CHỮ (không mất chữ số), định dạng "@".
     assert r[0] == "111111111111111111" and isinstance(r[1], str)
@@ -272,8 +276,9 @@ def test_du_lieu_goc_gon_so_la_so_ma_la_chu(monkeypatch, ba_tk):
     fmt = [s["formatter"] for s in gia.kieu_o("Dữ liệu gốc", 1, 2) if "formatter" in s]
     assert fmt and fmt[-1] == "@", sid
     # Chuỗi số của Meta ghi thành số (không "số lưu dạng chữ").
-    assert r[6] == 101 and isinstance(r[6], int) and isinstance(r[7], int) and r[9] == 1.9
-    assert "spend" not in goc[0] and "account_name" not in goc[0], "Chi tiết đã có nguyên giá trị"
+    assert r[7] == 101 and isinstance(r[7], int) and isinstance(r[8], int) and r[10] == 1.9
+    assert r[6] == 1037 and isinstance(r[6], int)
+    assert "account_name" not in goc[0], "Chi tiết đã có nguyên giá trị"
 
 
 def test_du_lieu_goc_giu_actions_json(monkeypatch):
@@ -290,10 +295,11 @@ def test_du_lieu_goc_giu_actions_json(monkeypatch):
 def test_du_lieu_goc_khong_con_truong_rieng_thi_bo_tab(monkeypatch):
     gia = _gia(monkeypatch)
     import test_trinh_bay_meta_ads as M
+    # Chỉ còn trường số nguyên Chi tiết hiện nguyên (hiển thị, click) → không cần tab gốc.
     monkeypatch.setattr(T.MetaClient, "pages", lambda self, tail, params, limit: (
-        [{k: v for k, v in r.items() if k != "actions"} for r in M.INSIGHTS[tail]], False))
+        [{k: v for k, v in r.items() if k not in ("actions", "spend")} for r in M.INSIGHTS[tail]], False))
     kq = json.loads(T._handle({"tai_khoan": "tat_ca", "tu_ngay": "2026-10-01", "den_ngay": "2026-10-07",
-                               "cap": "chien_dich", "chi_so": ["spend", "impressions", "clicks"]}))
+                               "cap": "chien_dich", "chi_so": ["impressions", "clicks"]}))
     assert "Dữ liệu gốc" not in gia.tab_ten() and "Dữ liệu gốc" not in kq["tab"]
 
 
@@ -430,7 +436,7 @@ def test_xuat_mau_cung_duong_that_khong_meta_khong_quyen(monkeypatch):
                     cap_quyen=lambda tok: cap.append((tok, len(gia.goi))), tai_khoan=[dict(a) for a in ACC])
     assert kq.url and kq.day_du is True
     assert gia.tab_ten() == ["Tổng quan", "Theo tài khoản", "Theo nền tảng", "Theo ngày", "Theo chiến dịch",
-                             "Chi tiết"]
+                             "Chi tiết", "Dữ liệu gốc"]
     assert gia.dau.title.startswith("MẪU (số giả) Số ads HAPAS 2026-10-01–2026-10-02")
     assert len(_bang(gia, "Chi tiết")[1]) == 24 and len(gia.che_do_loc("Chi tiết")) == 3
     tq = " ".join(str(r[0]) for r in gia.o("Tổng quan"))
@@ -460,3 +466,144 @@ def test_xuat_mau_suy_tai_khoan_va_khoa_hong_thi_khong_ghi(monkeypatch):
     assert not [g for g in gia.goi if g[1].endswith("/values_batch_update")]
     with pytest.raises(ValueError, match="cap_quyen"):
         T.xuat_mau(dong, {}, cap_quyen=None)
+
+
+
+# ───────────── review 09/10/2026 ─────────────
+@pytest.mark.parametrize("vao", ["1.10", "2.50", "0.10", "-0", "-0.0", "NaN", "nan", "inf",
+                                 "-inf", "1e5", "12,5", "007", "+5", " 5"])
+def test_so_tu_chuoi_khong_doi_gia_tri(vao):
+    """Chỉ đổi khi số viết lại đúng y chuỗi: "1.10"/"2.50"/"-0" giữ chữ."""
+    assert TB.so_tu_chuoi(vao) == vao
+
+
+@pytest.mark.parametrize("ten,ma", [
+    ("barcode", True), ("ean", True), ("ean13", True), ("gtin", True), ("upc", True), ("sku", True),
+    ("product_sku", True), ("variantSku", True), ("zip", True), ("zipcode", True), ("postcode", True),
+    ("postal_code", True), ("phone", True), ("Phone", True), ("telephone", True), ("sdt", True),
+    ("so_dien_thoai", True), ("tel", True), ("mobile", True), ("shortCode", True), ("SHORTCODE", True),
+    ("spend", False), ("impressions", False), ("mean_score", False), ("hotel_name", False),
+    ("frequency", False), ("actions", False), ("publisher_platform", False)])
+def test_cot_ma_rong(ten, ma):
+    assert TB.la_cot_ma(ten) is ma
+
+
+def test_bang_goc_cot_ma_giu_chu():
+    b = TB.bang_goc([{"barcode": "8935049501503", "phone": "84912345678", "sku": "1.10",
+                      "gia": "1.10", "luot": "8935049501503", "tel": "0912"}])
+    hang = dict(zip([c.ten for c in b.cot], b.dong[0]))
+    assert hang == {"barcode": "8935049501503", "phone": "84912345678", "sku": "1.10", "gia": "1.10",
+                    "luot": 8935049501503, "tel": "0912"}
+    assert {c.ten: c.kieu for c in b.cot} == {"barcode": "ma", "phone": "ma", "sku": "ma", "gia": "chu",
+                                              "luot": "chu", "tel": "ma"}
+
+
+def test_che_do_loc_tai_khoan_trung_ten_va_khong_ten(monkeypatch):
+    acc = [{"id": "act_11", "name": "HAPAS", "currency": "VND", "timezone_name": "Asia/Ho_Chi_Minh"},
+           {"id": "act_12", "name": "HAPAS", "currency": "VND", "timezone_name": "Asia/Ho_Chi_Minh"},
+           {"id": "act_13", "currency": "VND", "timezone_name": "Asia/Ho_Chi_Minh"},
+           {"id": "act_14", "name": "Khác", "currency": "VND", "timezone_name": "Asia/Ho_Chi_Minh"}]
+    monkeypatch.setattr(T.MetaClient, "accounts", lambda self: [dict(a) for a in acc])
+    monkeypatch.setattr(T.MetaClient, "pages", lambda self, tail, params, limit: (
+        [{"campaign_id": "1", "campaign_name": "C", "spend": "1", "impressions": "1"}], False))
+    gia = _gia(monkeypatch)
+    json.loads(T._handle({"tai_khoan": "tat_ca", "tu_ngay": "2026-10-01", "den_ngay": "2026-10-07",
+                          "cap": "chien_dich", "chi_so": ["spend"]}))
+    v = {x["name"]: x["conditions"][0]["expected"] for x in gia.che_do_loc("Chi tiết")}
+    assert v == {"HAPAS — act_11": ["act_11"], "HAPAS — act_12": ["act_12"], "act_13": ["act_13"],
+                 "Khác": ["act_14"]}
+
+
+def test_toan_0_chi_khi_chi_tieu_va_hien_thi_dung_bang_0():
+    f = {"spend", "impressions", "clicks"}
+    w = ["spend", "impressions", "clicks", "ctr"]
+    dong = lambda d: {"values": T._values(d, f)}  # noqa: E731
+    assert T._toan_0(dong({"spend": "0", "impressions": "0", "clicks": "0"}), w)
+    assert not T._toan_0(dong({"spend": "0"}), w), "hiển thị không rõ ≠ 0"
+    assert not T._toan_0(dong({"impressions": "0"}), w), "chi tiêu không rõ ≠ 0"
+    assert not T._toan_0(dong({}), w)
+    assert not T._toan_0(dong({"spend": "0", "impressions": "0", "clicks": "2"}), w)
+
+
+def test_du_lieu_goc_giu_so_le_chi_tiet_lam_tron(monkeypatch):
+    monkeypatch.setattr(T.MetaClient, "accounts", lambda self: [dict(ACC[0])])
+    monkeypatch.setattr(T.MetaClient, "pages", lambda self, tail, params, limit: (
+        [{"campaign_id": "1", "campaign_name": "C", "spend": "12.12345678", "impressions": "100",
+          "clicks": "3", "reach": "77", "frequency": "1.298701298701"}], False))
+    gia = _gia(monkeypatch)
+    json.loads(T._handle({"tai_khoan": "tat_ca", "tu_ngay": "2026-10-01", "den_ngay": "2026-10-07",
+                          "cap": "chien_dich", "chi_so": ["spend", "impressions", "clicks", "reach",
+                                                          "frequency"]}))
+    goc = gia.o("Dữ liệu gốc")
+    hang = dict(zip(goc[0], goc[1]))
+    assert hang["frequency"] == 1.298701298701 and hang["spend"] == 12.12345678 and hang["reach"] == 77
+    assert "impressions" not in hang and "clicks" not in hang, "số nguyên Chi tiết đã hiện nguyên"
+    hd = gia.o("Chi tiết")[0]
+    assert gia.o("Chi tiết")[1][hd.index("Tần suất (lần/người)")] == 1.298701
+
+
+def test_gop_chuyen_doi_trong_khi_chia_nho_khop_chi_tiet(monkeypatch):
+    """Mua/giá trị/ROAS ở tab gộp khớp Chi tiết; dòng chia nhỏ Meta ẩn chuyển đổi → nhóm chứa
+    nó để trống (không giả 0), tổng để trống như Chi tiết."""
+    monkeypatch.setattr(T.MetaClient, "accounts", lambda self: [dict(a) for a in ACC[:2]])
+    buy = lambda n, v: {"actions": [{"action_type": "purchase", "value": str(n)}],  # noqa: E731
+                        "action_values": [{"action_type": "purchase", "value": str(v)}]}
+    data = {
+        ACC[0]["id"] + "/insights": [
+            {"campaign_id": "1", "campaign_name": "A1", "date_start": "2026-10-01", "publisher_platform": "facebook",
+             "spend": "100", "impressions": "10", **buy(2, 500)},
+            {"campaign_id": "1", "campaign_name": "A1", "date_start": "2026-10-01", "publisher_platform": "instagram",
+             "spend": "50", "impressions": "5"}],                     # chuyển đổi bị ẩn
+        ACC[1]["id"] + "/insights": [
+            {"campaign_id": "2", "campaign_name": "B1", "date_start": "2026-10-01", "publisher_platform": "facebook",
+             "spend": "300", "impressions": "30", **buy(1, 900)}]}
+    monkeypatch.setattr(T.MetaClient, "pages", lambda self, tail, params, limit: (
+        [dict(r) for r in data[tail]], False))
+    gia = _gia(monkeypatch)
+    kq = json.loads(T._handle({"tai_khoan": "tat_ca", "tu_ngay": "2026-10-01", "den_ngay": "2026-10-01",
+                               "cap": "chien_dich", "chia_theo": ["nen_tang"],
+                               "chi_so": ["spend", "purchases", "revenue", "roas"]}))
+    assert "error" not in kq
+    hd, ct, ct_tong = _bang(gia, "Chi tiết")
+    c = {k: hd.index(k) for k in ("Mua hàng (lượt)", "Giá trị mua (tiền TK)", "ROAS tính (lần)")}
+    assert all(ct_tong[0][j] == "" for j in c.values()), "Chi tiết: tổng chuyển đổi trống"
+    h, nen, tong = _bang(gia, "Theo nền tảng")
+    fb = next(r for r in nen if r[0] == "facebook")
+    ig = next(r for r in nen if r[0] == "instagram")
+    assert fb[h.index("Mua hàng (lượt)")] == 3 and fb[h.index("Giá trị mua (tiền TK)")] == 1400
+    assert fb[h.index("ROAS tính (lần)")] == pytest.approx(1400 / 400)
+    assert all(ig[h.index(k)] == "" for k in c), "nhóm có dòng bị ẩn: trống, không 0"
+    for k, j in c.items():
+        assert tong[0][h.index(k)] == ct_tong[0][j], k
+    h2, tk, tong2 = _bang(gia, "Theo tài khoản")
+    b = next(r for r in tk if r[0] == "HAPAS B")
+    assert b[h2.index("Mua hàng (lượt)")] == 1 and b[h2.index("ROAS tính (lần)")] == 3
+    assert next(r for r in tk if r[0] == "HAPAS A")[h2.index("Mua hàng (lượt)")] == ""
+    for k, j in c.items():
+        assert tong2[0][h2.index(k)] == ct_tong[0][j], k
+
+
+_KHOA_XEM_TRUOC = {"xem_truoc", "so_dong", "bi_cat", "khoang", "kich_thuoc", "cong_thuc", "so_dong_toan_0",
+                   "tab_se_co", "phuong_an_gon", "hoi_tiep"}
+
+
+def test_xem_truoc_chi_tra_khoa_cho_phep(monkeypatch, ba_tk):
+    kq = run(xem_truoc=True, chi_so=["spend", "purchases", "revenue"])
+    assert set(kq) <= _KHOA_XEM_TRUOC, set(kq) - _KHOA_XEM_TRUOC
+    assert {k for t in kq["tab_se_co"] for k in t} <= {"tab", "so_dong"}
+    assert {k for g in kq["phuong_an_gon"] for k in g} <= {"bo", "so_dong_uoc"}
+    assert all(isinstance(v, int) for v in kq["kich_thuoc"].values())
+
+
+def test_xem_truoc_van_kiem_quyen(monkeypatch, ba_tk):
+    monkeypatch.setattr(T, "_allowed", lambda actor: False)
+    kq = run(xem_truoc=True)
+    assert "error" in kq and "chưa được phép" in kq["error"] and not ba_tk
+
+
+def test_xem_truoc_tu_choi_trong_nhom(monkeypatch, ba_tk):
+    import scheduler
+    scheduler.set_current_chat_type("group")
+    T.set_context({"channel": "lark", "chat_type": "group", "nguoi_gui": "ou_asker"})
+    kq = run(xem_truoc=True)
+    assert "error" in kq and "không trả trong nhóm" in kq["error"] and not ba_tk

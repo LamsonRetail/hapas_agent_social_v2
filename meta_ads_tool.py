@@ -460,6 +460,8 @@ _KHONG_CONG = ("reach", "frequency", "meta_roas")
 NGUONG_HOI_DONG = 2000
 #: Tab gộp đọc như dòng thời gian: sắp theo khoá tăng dần (trong từng tiền tệ), không theo chi tiêu.
 _GOP_THEO_KHOA = {"Theo ngày"}
+#: Trường Meta là số nguyên mà Chi tiết hiện nguyên giá trị (không làm tròn) — gốc được bỏ.
+_NGUYEN_DU = ("impressions", "clicks")
 _GOC_DAU = ("account_id", "campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id",
             "ad_name", "date_start", "date_stop")
 
@@ -541,15 +543,21 @@ def _bang_gop(gop, wanted, label):
 
 
 def _toan_0(row, wanted):
-    """Dòng không hiển thị, không chi tiêu và mọi chỉ số đã hỏi đều 0/trống."""
-    return all(row["values"].get(k) in (None, 0) for k in {*wanted, *DELIVERY_FIELDS})
+    """Dòng toàn 0: chi tiêu VÀ hiển thị Meta trả đúng bằng 0 (vắng/không rõ thì KHÔNG tính),
+    và không chỉ số đã hỏi nào khác 0 (tỉ lệ chia cho 0 / chuyển đổi bị ẩn thì trống)."""
+    v = row["values"]
+    if any(v.get(k) is None or v.get(k) != 0 for k in DELIVERY_FIELDS):
+        return False
+    return all(v.get(k) in (None, 0) for k in wanted)
 
 
 def _goc_gon(rows, wanted, breakdown):
     """"Dữ liệu gốc" gọn: cột mã/ngày/chia nhỏ + MỌI trường Meta mà tab Chi tiết không mang
     nguyên (actions, action_values… dạng JSON; spend/impressions… khi không hỏi). Trường đã có
     nguyên giá trị ở Chi tiết (chỉ số hỏi trực tiếp, tên TK) bỏ. Không còn trường riêng → None."""
-    co_roi = {k for k in wanted if METRICS[k][3] == [k]} | {"account_name"}
+    # Chỉ bỏ trường số NGUYÊN Chi tiết đã có nguyên giá trị (hiển thị, click) + tên TK. Tiếp cận,
+    # tần suất, chi tiêu… giữ: Chi tiết làm tròn 6 số lẻ qua `_cell`, gốc giữ số đầy đủ.
+    co_roi = {k for k in wanted if k in _NGUYEN_DU} | {"account_name"}
     dau = [*_GOC_DAU, *breakdown]
     ban = []
     for row in rows:
@@ -931,7 +939,8 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
                      f"(danh sách actions… ở dạng JSON), cùng thứ tự dòng với tab {TAB_CHI_TIET} — để đối chiếu "
                      "cách tính.")
     bang = TB.Bang(TAB_CHI_TIET, columns, table, dong_tong=total_rows, ten_tab=TAB_CHI_TIET,
-                   loc_san="Tài khoản" if so_tk > 1 else None,
+                   # Khoá theo MÃ TK (tên có thể trùng/trống); tên chế độ lọc lấy cột Tài khoản.
+                   loc_san="Mã TK" if so_tk > 1 else None, loc_san_ten="Tài khoản",
                    mo_ta="Mỗi dòng một " + _TEN_CAP.get(level, level) + (" theo ngày" if theo_ngay else "")
                    + (" × " + ", ".join(_TEN_CHIA[b].lower() for b in breakdown) if breakdown else "")
                    + "; giữ cả dòng toàn 0")
