@@ -122,6 +122,10 @@ class LarkGia:
                 ra.append(st)
         return ra
 
+    def che_do_loc(self, ten_tab: str, tok: str | None = None) -> list[dict]:
+        """Chế độ lọc (filter view) còn lại của tab: [{id, name, range, conditions}]."""
+        return list(self.tab(ten_tab, tok).get("views", []))
+
     def loc(self) -> list[tuple[str, dict]]:
         return [(p, b) for m, p, q, b in self.goi if p.endswith("/filter")]
 
@@ -220,6 +224,31 @@ class LarkGia:
                         for r in range(r1, r2 + 1)]
                 out.append({"range": rg, "values": vals})
             return {"data": {"valueRanges": out}}
+        m2 = re.fullmatch(r"sheets/([^/]+)/filter_views(?:/([^/]+)(/conditions)?)?", rest)
+        if m2:
+            # Chế độ lọc (filter view) Sheets v3: tên ≤100 ký tự, không trùng (1310240).
+            t = b.tab(m2.group(1))
+            views = t.setdefault("views", [])
+            fid, cond = m2.group(2), m2.group(3)
+            if method == "POST" and not fid:
+                ten = body.get("filter_view_name", "")
+                if len(ten) > 100 or any(v["name"] == ten for v in views):
+                    raise RuntimeError(f"Lark POST {path} failed: {{'code': 1310240}}")
+                v = {"id": f"fv{len(views):08d}", "name": ten, "range": body["range"],
+                     "conditions": []}
+                views.append(v)
+                return {"code": 0, "data": {"filter_view": {
+                    "filter_view_id": v["id"], "filter_view_name": ten, "range": v["range"]}}}
+            v = next((x for x in views if x["id"] == fid), None)
+            if v is None:
+                raise RuntimeError(f"Lark {method} {path} failed: {{'code': 1310237}}")
+            if method == "POST" and cond:
+                v["conditions"].append(dict(body))
+                return {"code": 0, "data": {"condition": dict(body)}}
+            if method == "DELETE" and not cond:
+                views.remove(v)
+                return {"code": 0, "data": {}}
+            return {"data": {}}
         if rest == "dimension_range":
             d = body["dimension"]
             t = b.tab(d["sheetId"])
