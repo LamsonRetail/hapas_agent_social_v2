@@ -127,7 +127,7 @@ def test_tong_quan_co_khoi_nhom_kem_thanh_bieu_do_va_top(monkeypatch):
     assert tq[j + 2][:3] == [7, "Tích cực", 1500], "dòng 7 trên Sheet nguồn, giá trị 1.500"
     ghi = " ".join(str(r[0]) for r in tq if r)
     assert "do CODE tính trên mọi dòng của nguồn" in ghi
-    assert "chưa có API tạo biểu đồ gốc" in ghi
+    assert "thử tạo biểu đồ cột gốc" in ghi
 
 
 def test_bang_cheo(monkeypatch):

@@ -42,7 +42,7 @@ _SAFE_EXACT = {
     "dem_bang",
     # Đọc một tài liệu Lark Docs/Wiki (doc_tai_lieu_tool.py). Chỉ đọc, qua ĐÚNG luật quyền
     # của `doc_bang` (`bang_tool.mo_tai_lieu` → `quyen_nguoi_hoi`). Thay cho `lark_cli docs
-    # +fetch` (đọc bằng quyền bot, không kiểm người hỏi). Công tắc lùi về `lark_cli` bên dưới.
+    # +fetch` (đọc bằng quyền bot, không kiểm người hỏi). Công tắc lùi về `doc_bang` bên dưới.
     "doc_tai_lieu",
     # Máy tính chính xác (tinh_tool.py): thuần tính toán trên chữ model đưa — không đọc,
     # không ghi, không gọi mạng. CỐ Ý không đưa vào `_TOOL_CO_CONG_TAC`: tắt nó thì Mark
@@ -127,55 +127,45 @@ def _command_words(argv: list[str]) -> set[str]:
     return words
 
 
-#: lark_cli đọc bằng quyền BOT, không biết người hỏi là ai. PR #30 (08/10) mở `docs +fetch`
-#: để chữa lỗi 07/10 (không đọc được link MASTER PLAN) — nhưng thế là ai cũng nhờ Mark đọc
-#: được mọi tài liệu bot thấy. Nội dung tài liệu nay CHỈ đọc qua `doc_tai_lieu` (kiểm người
-#: hỏi bằng đúng luật của `doc_bang`). Chặn cả shortcut lẫn raw API; `--help`/`schema` vẫn
-#: đi nhánh discovery ở trên, `wiki +node-get`/`docs +search` (siêu dữ liệu) giữ như cũ.
-LY_DO_DUNG_DOC_TAI_LIEU = (
-    "lark_cli không đọc nội dung tài liệu (đọc bằng quyền bot, không kiểm người hỏi) — "
-    "gọi tool `doc_tai_lieu` với nguyên link /docx/, /docs/ hoặc /wiki/ của tài liệu")
-_DOMAIN_TAI_LIEU = {"docs", "doc", "docx"}
-_TU_DOC_NOI_DUNG = {"fetch", "get", "read", "export", "download", "content", "raw", "blocks",
-                    "block", "cat", "view", "open", "show", "dump"}
-_API_TAI_LIEU = re.compile(r"/open-apis/(?:docx/v1/documents|doc/v2)/", re.I)
-
-
-def _doc_noi_dung_tai_lieu(low: list[str], words: set[str]) -> bool:
-    """Lệnh lark_cli đọc NỘI DUNG tài liệu Docs (shortcut domain docs, hoặc raw API docx/doc)."""
-    if low[0] in _DOMAIN_TAI_LIEU and words & _TU_DOC_NOI_DUNG:
-        return True
-    if low[0] == "api" and any(_API_TAI_LIEU.search("/" + x.lstrip("/")) for x in low[2:3]):
-        return True
-    return False
+# Bot-only CLI reads must never bypass asker checks.
+from lark_cli_read_gate import deny_reason, discovery, api_args, command_args, DOC
+LY_DO_DUNG_DOC_TAI_LIEU = DOC
 
 
 def _lark_cli_decision(args: dict[str, Any]) -> PolicyDecision:
     argv = args.get("args")
-    if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+    if not isinstance(argv, list) or not argv or not all(isinstance(x, str) and x.strip() for x in argv):
         return PolicyDecision(False, "lark_cli thiếu danh sách args hợp lệ")
     low = [x.strip().lower() for x in argv]
-    if "--dry-run" in low:
-        return PolicyDecision(True, "lark_cli dry-run không tạo side effect")
-    if "--yes" in low:
-        # CỐ Ý hẹp hơn hợp đồng. Từ 17/09 Mark là `executive` và có `write_data`,
-        # nên `base +record-create --yes` đã nằm trong hợp đồng — nhưng việc ghi mà
-        # Mark thật sự cần nằm TRONG `social_listen` (xuất Sheet kết quả), không đi
-        # qua `lark_cli`. Chặn ở đây để một lệnh ghi Lark tuỳ ý không lọt qua chỉ
-        # nhờ một cờ dòng lệnh. Nới dòng này là mở ghi Base thật, không qua duyệt.
-        return PolicyDecision(False, "lark_cli --yes bị chặn ở runtime, hẹp hơn hợp đồng")
-    if low[0] in {"schema", "skills", "help", "--help", "-h"} or "--help" in low:
+    original = low
+    try:
+        low = command_args(low)
+    except ValueError:
+        return PolicyDecision(False, "lark_cli cờ toàn cục mơ hồ nên fail-closed")
+    if original != low:
+        reason = deny_reason(["help", *original])
+        if reason:
+            return PolicyDecision(False, reason)
+    reason = deny_reason(low)
+    if reason:
+        return PolicyDecision(False, reason)
+    if discovery(low):
         return PolicyDecision(True, "lệnh discovery chỉ đọc")
-    words = _command_words(low)
-    if _doc_noi_dung_tai_lieu(low, words):
-        return PolicyDecision(False, LY_DO_DUNG_DOC_TAI_LIEU)
+    if "--yes" in original:
+        return PolicyDecision(False, "lark_cli --yes bị chặn ở runtime, hẹp hơn hợp đồng")
     if low[0] == "api":
-        method = low[1] if len(low) > 1 else ""
-        return PolicyDecision(
-            method in {"get", "head"},
-            "raw Lark API chỉ cho phép GET/HEAD" if method not in {"get", "head"}
-            else "raw Lark API read-only",
-        )
+        try:
+            method, _ = api_args(low)
+        except ValueError:
+            return PolicyDecision(False, "lark_cli api mơ hồ nên fail-closed")
+        return PolicyDecision(method in {"get", "head"}, "raw Lark API chỉ cho phép GET/HEAD")
+    if "--dry-run" in low:
+        # Value-taking flags cannot smuggle --dry-run as their argument.
+        idx = low.index("--dry-run")
+        if idx and low[idx - 1].startswith("-"):
+            return PolicyDecision(False, "lark_cli dry-run mơ hồ nên fail-closed")
+        return PolicyDecision(True, "lark_cli dry-run không tạo side effect")
+    words = _command_words(low)
     if words & _MUTATING_WORDS:
         return PolicyDecision(False, "lark_cli có động từ ghi/gửi")
     if words & _READ_WORDS:
@@ -317,17 +307,16 @@ _TOOL_CO_CONG_TAC = frozenset({
 #: thì công tắc `doc_bang` quyết.
 #: `tra_tien_do` (07/10/2026, việc quá hạn/sắp hạn trên Base checklist) cũng theo
 #: `doc_bang`, cùng lý do: chỉ đọc Base, cùng cửa quyền `bang_tool.mo_nguon`.
-#: `doc_tai_lieu` (09/10/2026, đọc tài liệu Docs/Wiki) theo `lark_cli` — công tắc console
-#: "Tra Wiki công khai" vốn là đường đọc trang Wiki và tài liệu; nay tài liệu đi tool có
-#: kiểm quyền người hỏi. Tắt "Tra Wiki" mà vẫn đọc được tài liệu thì nút tắt hở.
-#: Console KHÔNG cần thêm dòng: chưa có dòng riêng thì công tắc `lark_cli` quyết.
+#: `doc_tai_lieu` (09/10/2026, đọc tài liệu Docs/Wiki) theo `doc_bang`: cùng luật kiểm quyền
+#: người hỏi; tắt CLI vẫn giữ được đường đọc tài liệu an toàn.
+#: Console KHÔNG cần thêm dòng: chưa có dòng riêng thì công tắc `doc_bang` quyết.
 #: `tao_sheet_thong_ke` (09/10/2026, Sheet thống kê/dashboard) theo `doc_bang`: nguồn chính
 #: là Base/Sheet đọc qua cùng cửa quyền với `doc_bang`/`dem_bang`, số do code đếm như
 #: `dem_bang`. Tắt "Đọc Base và Sheet" mà vẫn lập được Sheet từ Base là nút tắt hở.
 _CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen",
                  "chi_so_bai": "social_listen", "xem_truoc_viec_base": "ghi_viec_base",
                  "dem_bang": "doc_bang", "tra_tien_do": "doc_bang",
-                 "doc_tai_lieu": "lark_cli", "tao_sheet_thong_ke": "doc_bang"}
+                 "doc_tai_lieu": "doc_bang", "tao_sheet_thong_ke": "doc_bang"}
 
 #: Tool có công tắc nhưng KHÔNG có công tắc cha để lùi về, và console CHƯA có dòng của nó.
 #: Agent đã khai `capabilities` thì vắng dòng = TẮT (đúng ý: ghi Base team phải được bật rõ).

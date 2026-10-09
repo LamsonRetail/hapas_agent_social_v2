@@ -22,15 +22,13 @@ cộng số kiểu VN, ô "%" không cộng). Tool này chỉ GHÉP kết quả 
 từng cột nhóm, bảng chéo hai cột (số và % theo dòng), tổng/trung bình một cột số theo nhóm,
 top-N dòng theo cột số. % = số / số dòng có giá trị ở cột đó. Thanh "█" chỉ là hình vẽ từ số.
 
-BIỂU ĐỒ GỐC CỦA LARK SHEETS: KHÔNG có. Tài liệu Sheets Open API (tổng quan
-https://open.feishu.cn/document/server-docs/docs/sheets-v3/overview.md, đọc 09/10/2026) chỉ
-có bảng tính, tab, định dạng có điều kiện, bộ lọc, chế độ lọc, dòng/cột, vùng bảo vệ, dữ
-liệu/kiểu ô/gộp ô/ảnh, ảnh nổi, kiểm dữ liệu — không có API tạo biểu đồ. Nên "biểu đồ" là
-cột thanh chữ █ (Tổng quan và từng tab nhóm).
+Bản này tạo biểu đồ cột gốc qua sheet_ai/v2 (đường gọi chart-create của CLI chính thức,
+đã thử bằng app bot 09/10/2026). Thanh chữ █ vẫn có nếu tạo biểu đồ không thành công.
 """
 from __future__ import annotations
 
 import datetime
+import json
 import re
 import unicodedata
 from decimal import Decimal
@@ -79,7 +77,7 @@ SCHEMA = {
         "không đưa số đếm, %, dòng tổng — code tự đếm.\n"
         "`nhom_theo` = 1–5 cột để đếm theo nhóm (vd ['Sắc thái','Nền tảng']); `cheo` = cặp "
         "cột cho bảng chéo (vd [['Nền tảng','Sắc thái']]); `cot_so` = một cột số để cộng/"
-        "trung bình theo nhóm và lấy top (vd 'View').\n"
+        "trung bình theo nhóm và lấy top (vd 'View'), CHỈ với `nguon`; `du_lieu` chỉ đếm dòng.\n"
         "KHI TRẢ LỜI: gửi link, chép NGUYÊN `cau_so` và `kiem_ghi`; nhãn do Mark gán thì nói "
         "rõ nhãn là AI gán, số do code đếm. Bị từ chối vì quyền thì chuyển NGUYÊN lời hướng dẫn."
     ),
@@ -154,7 +152,9 @@ def _cap_cheo(x) -> list[tuple[str, str]]:
     return ra
 
 
-_DONG_TONG = {"tong", "tong cong", "total", "grand total", "cong", "sum", "tong so"}
+def _la_dong_tong(row) -> bool:
+    return any(re.match(r"(?:tong|total|grand total|chenh lech|sum|cong)\b",
+                        B._bo_dau(str(x)).strip()) for x in row)
 
 
 def _o_nhap(v) -> str | int | float:
@@ -203,7 +203,7 @@ def doc_nhap(du: dict) -> tuple[list[str], list[list], int]:
                 v, cat = v[:MAX_KY_TU_O - 1] + "…", cat + 1
             hang.append(v)
         dau = next((str(x) for x in hang if str(x).strip()), "")
-        if B._bo_dau(dau).rstrip(":") in _DONG_TONG:
+        if _la_dong_tong(hang):
             raise LoiNhap(f"dòng {i} là dòng TỔNG ('{dau[:30]}') — chỉ đưa từng dòng gốc, code "
                           "tự đếm và cộng")
         if any(str(x).strip() for x in hang):
@@ -247,11 +247,20 @@ def thong_ke(luoi: list, nhom_theo: list[str], cheo=(), cot_so: str = "",
                      **chung)
     if tham_do.get("loi"):
         return {"loi": tham_do["loi"]}
+    bo_tong = [i + 1 for i in tham_do.get("chi_so_dong_du_lieu") or []
+               if _la_dong_tong([DB._chu_o(o) for o in luoi[i]])]
+    if bo_tong:
+        # Keep source indices/header detection; blank excluded rows in every count.
+        luoi = [[] if i + 1 in set(bo_tong) else r for i, r in enumerate(luoi)]
+        chung["dong_tieu_de"] = tham_do["dong_tieu_de_da_dung"]
+        tham_do = DB.dem(luoi, cot=can, cong=[cot_so] if cot_so else None,
+                        tra_chi_so=True, **chung)
     so_cot = max(len(r) for r in luoi)
     tieu_de = [""] * so_cot
     for t in tham_do.get("tieu_de") or []:
         tieu_de[DB._so_cot(t["cot"])] = t["tieu_de"]
-    canh: list[str] = []
+    canh: list[str] = ([f"đã bỏ {len(bo_tong)} dòng tổng: "
+                        + ", ".join(map(str, bo_tong))] if bo_tong else [])
     bo_qua = {b["cot"]: b["ly_do"] for b in tham_do.get("cot_bo_qua") or []}
     ca_nhan = {j for j in range(so_cot)
                if any(f"[cột {DB.chu_cot(j)}]" in k or k == f"cột {DB.chu_cot(j)}"
@@ -279,7 +288,8 @@ def thong_ke(luoi: list, nhom_theo: list[str], cheo=(), cot_so: str = "",
                 "tieu_de_tu_nhan": tham_do.get("tieu_de_tu_nhan"),
                 "tieu_de_khong_ro": bool(tham_do.get("tieu_de_khong_ro")),
                 "nhom": [], "cheo": [], "so": None, "top": [], "canh_bao": canh,
-                "cot_bo_qua": [f"{k}: {v}" for k, v in bo_qua.items()]}
+                "cot_bo_qua": [f"{k}: {v}" for k, v in bo_qua.items()],
+                "dong_tong_bo_qua": bo_tong}
     if j_so is not None:
         kq["ten_cot_so"] = ten(j_so)
     chu_so = DB.chu_cot(j_so) if j_so is not None else ""
@@ -505,7 +515,8 @@ def dung_tong_quan(kq: dict, tieu_de: str, nguon: str, ai_gan: bool, bi_cat: boo
                       [[t["dong"], *t["nhom"], _so_ra(t["gia_tri"])] for t in kq["top"]])
     ghi = [GHI_CHU_AI if ai_gan else GHI_CHU_CODE,
            "Cột Biểu đồ là thanh chữ █ vẽ từ số (nhóm lớn nhất = 30 ký tự); Lark Sheets "
-           "Open API chưa có API tạo biểu đồ gốc."]
+           "tool cũng thử tạo biểu đồ cột gốc trên các tab nhóm; nếu không tạo được, "
+           "bảng số và thanh chữ vẫn dùng được."]
     if kq.get("tieu_de_tu_nhan") and not ai_gan:
         ghi.append(f"Dòng tiêu đề tự nhận: dòng {kq['dong_tieu_de_da_dung']}"
                    + (" (không rõ — kiểm lại)" if kq.get("tieu_de_khong_ro") else "") + ".")
@@ -520,6 +531,40 @@ def dung_tong_quan(kq: dict, tieu_de: str, nguon: str, ai_gan: bool, bi_cat: boo
         pham += f"; cột số: {s['cot']}"
     return TB.TongQuan(tieu_de, nguon=nguon, pham_vi=pham, so_lieu=so_lieu, nhom=nhom,
                        top=top, ghi_chu=ghi)
+
+
+def tao_bieu_do(ket: TB.KetQua, kq: dict) -> tuple[list[dict], list[str]]:
+    """Charts on this newly created Sheet only; never read a business source here."""
+    charts, warnings = [], []
+    for group in kq["nhom"]:
+        tab = next((t for t in ket.tabs if t.cot and t.cot[0].ten == group["cot"][:100]
+                    and len(t.cot) >= 3 and t.cot[2].ten == "Tỉ lệ"
+                    and not t.noi_duoi and t.kiem == "du"), None)
+        if tab is None:
+            warnings.append(f"Chưa tạo biểu đồ {group['cot']}: tab chưa ghi đủ hoặc đã gộp.")
+            continue
+        quoted = tab.ten.replace("'", "''")
+        config = {"position": {"row": 1, "col": "H"},
+                  "size": {"width": 600, "height": 400},
+                  "snapshot": {"title": {"text": f"Theo {group['cot']}"},
+                               "plotArea": {"plot": {"type": "column"}},
+                               "data": {"refs": [{"value": f"'{quoted}'!A{tab.dong_dau}:B{tab.dong_dau + tab.so_dong}"}],
+                                        "dim1": {"serie": {"index": 1}},
+                                        "dim2": {"series": [{"index": 2}]}}}}
+        try:
+            result = A.lark.call("POST", f"/open-apis/sheet_ai/v2/spreadsheets/{ket.token}/tools/invoke_write",
+                                 body={"tool_name": "manage_chart_object",
+                                       "input": json.dumps({"excel_id": ket.token, "sheet_id": tab.sheet_id,
+                                                            "operation": "create", "properties": config})})
+            output = (result.get("data") or {}).get("output") or {}
+            if isinstance(output, str):
+                output = json.loads(output)
+            if not output.get("chart_id"):
+                raise ValueError("API chưa trả mã biểu đồ")
+            charts.append({"tab": tab.ten, "chart_id": output["chart_id"]})
+        except Exception as exc:
+            warnings.append(f"Chưa tạo biểu đồ {group['cot']} ({type(exc).__name__}); dùng thanh chữ.")
+    return charts, warnings
 
 
 # ───────────────────────────── tool ─────────────────────────────
@@ -587,6 +632,9 @@ def _handle(args: dict, **_kw) -> str:
                   loai_cot=loai_cot, tach_dau_phay=tach)
     if kq.get("loi"):
         return tool_error(f"Không thống kê được: {kq['loi']}.")
+    if ai_gan and cot_so:
+        return tool_error("Không cộng số Mark tự đưa vào `du_lieu`: dùng `nguon` Sheet/Base "
+                          "để đọc số gốc. Với dòng AI gán nhãn, bỏ `cot_so` để code đếm dòng.")
     if not kq["nhom"] and not kq["cheo"]:
         return tool_error("Không lập được nhóm nào: " + "; ".join(
             kq["canh_bao"] + kq["cot_bo_qua"]) + ". Kiểm tên cột (chữ cái, mã câu hoặc tên).")
@@ -624,6 +672,7 @@ def _handle(args: dict, **_kw) -> str:
         return tool_error("Tạo Sheet thống kê hỏng: " + A._che_token(f"{type(e).__name__}: {e}")[:250]
                           + (f". Bảng tính đã tạo nhưng CHƯA ghi đủ: {url}" if url else "")
                           + ". Số (do code đếm, chưa có Sheet):\n" + cau)
+    charts, chart_warnings = tao_bieu_do(ket, kq)
     return tool_result(
         success=ket.day_du is not False, sheet_url=ket.url, granted=cap["granted"],
         nguon=ten_nguon, nhan_do_ai_gan=ai_gan, n=kq["n"], cau_so=cau,
@@ -631,8 +680,12 @@ def _handle(args: dict, **_kw) -> str:
                "gia_tri": [{"gia_tri": m["gia_tri"], "so": m["so"], "ty_le": m["ty_le_chu"]}
                            for m in g["gia_tri"][:20]]} for g in kq["nhom"]],
         canh_bao=kq["canh_bao"] or None, bi_cat=bi_cat or None,
+        dong_tong_bo_qua=kq["dong_tong_bo_qua"],
+        bieu_do=charts, canh_bao_bieu_do=chart_warnings or None,
         huong_dan=("Gửi link Sheet, chép NGUYÊN `cau_so` và `kiem_ghi`. "
                    + ("Nói rõ nhãn do Mark (AI) gán, số do code đếm. " if ai_gan else "")
+                   + ("Nêu `canh_bao_bieu_do`: biểu đồ chưa tạo được, bảng số vẫn có. "
+                      if chart_warnings else "")
                    + ("`granted`=false: người hỏi chưa được cấp quyền mở — nói rõ. "
                       if not cap["granted"] else "")),
         **ket.cho_tool(),

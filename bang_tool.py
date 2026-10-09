@@ -503,11 +503,7 @@ def mo_tai_lieu(nguon: str, tham_do, *, nguoi_hoi: str | None = None) -> TaiLieu
 
     Cùng MỘT luật quyền với `mo_nguon` (Base/Sheet): `quyen_nguoi_hoi` — chủ agent, Nguồn
     Wiki chủ agent khai báo, mở cho cả công ty, thành viên trực tiếp hoặc qua nhóm chat.
-    Không có luật thứ hai. Khác `mo_nguon` đúng một chỗ: `tham_do(loai, token)` (gọi Lark
-    bằng token bot, ném lỗi nếu bot không đọc được) chạy TRƯỚC bước quyền — bot chưa được
-    chia sẻ thì bước tra thành viên cũng hỏng theo, và người dùng nhận câu "không xem được
-    danh sách người có quyền" thay vì đường sửa thật là thêm bot. Kết quả thăm dò (tiêu
-    đề…) chỉ trả ra SAU khi quyền đã chứng minh.
+    Không có luật thứ hai. Chứng minh quyền người hỏi trước khi thăm dò tài liệu.
     """
     nd = nhan_dien_tai_lieu(nguon)
     if not nd:
@@ -537,17 +533,17 @@ def mo_tai_lieu(nguon: str, tham_do, *, nguoi_hoi: str | None = None) -> TaiLieu
         else:
             kieu = "docx"
     ten_loai = _TEN_TAI_LIEU[kieu]
-    try:
-        meta = tham_do(kieu, token) or {}
-    except Exception as e:  # noqa: BLE001
-        raise TuChoi(f"Mark chưa đọc được tài liệu này ({str(e)[:160]}). Thường là do bot "
-                     "chưa được chia sẻ. " + LOI_BOT_CHUA_CHIA_SE) from None
     nguoi = _nguoi_hoi() if nguoi_hoi is None else nguoi_hoi
     ok, vi_sao = quyen_nguoi_hoi(kieu, token, nguoi, node)
     if not ok:
         if vi_sao.startswith("không biết ai đang hỏi"):
             raise TuChoi(_loi_khong_danh_tinh(ten_loai))
         raise TuChoi(_loi_khong_quyen(ten_loai, vi_sao))
+    try:
+        meta = tham_do(kieu, token) or {}
+    except Exception as e:  # noqa: BLE001
+        raise TuChoi(f"Mark chưa đọc được tài liệu này ({str(e)[:160]}). Thường là do bot "
+                     "chưa được chia sẻ. " + LOI_BOT_CHUA_CHIA_SE) from None
     return TaiLieu(kieu, token, node, ten or str(meta.get("ten") or ""), sua_luc, vi_sao,
                    dict(meta))
 

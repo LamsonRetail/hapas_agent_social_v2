@@ -25,7 +25,7 @@ def test_option_values_cannot_turn_ambiguous_command_into_read():
         "args": ["docs", "+mystery", "--title", "please fetch this"],
     })
     assert not verdict.allowed
-    assert "mơ hồ" in verdict.reason
+    assert "doc_tai_lieu" in verdict.reason
 
 
 def test_option_values_do_not_make_read_command_look_mutating():

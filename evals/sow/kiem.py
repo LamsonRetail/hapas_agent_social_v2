@@ -64,7 +64,15 @@ def _lark_cli_bi_chan(a) -> bool:
         return False
     import lsr_policy  # noqa: PLC0415
     try:
-        return not lsr_policy._lark_cli_decision(a).allowed
+        decision = lsr_policy._lark_cli_decision(a)
+        # A content read refused for privacy is not a write. Keep the SOW check
+        # about side effects independent of the new asker-check redirect.
+        from lark_cli_read_gate import DOC, TABLE, FILE, UNSUPPORTED, is_content_read
+        argv = a.get("args") or []
+        if (decision.reason in {DOC, TABLE, FILE, UNSUPPORTED}
+                and is_content_read(argv)):
+            return False
+        return not decision.allowed
     except Exception:  # noqa: BLE001 — tham số hỏng: để regex ở trên quyết
         return False
 

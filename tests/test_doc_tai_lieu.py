@@ -278,7 +278,7 @@ def test_tai_lieu_dai_tra_tung_doan_khong_mat_chu(monkeypatch):
     assert len(md) > 2 * D.MAX_KY_TU
     ghep, tu, lan = "", 0, 0
     while True:
-        r = _goi(nguon=LINK, tu_ky_tu=tu)
+        r = _goi(nguon=LINK, tu_ky_tu=tu, phien_ban=7)
         assert r["tong_ky_tu"] == len(md) and r["tu_ky_tu"] == tu
         assert len(r["noi_dung"]) <= D.MAX_KY_TU
         ghep += r["noi_dung"]
@@ -311,7 +311,7 @@ def test_muc_khong_co_thi_liet_ke_muc(monkeypatch):
 def test_doc_tiep_dung_bo_nho_tam_nhung_van_kiem_quyen(monkeypatch):
     g = _gia(monkeypatch, _tuyen(_khoi_dai()))
     _goi(nguon=LINK)
-    _goi(nguon=LINK, tu_ky_tu=D.MAX_KY_TU)
+    _goi(nguon=LINK, tu_ky_tu=D.MAX_KY_TU, phien_ban=7)
     assert sum(p.endswith("/blocks") for _, p, _, _ in g.goi) == 1
     assert sum(p.endswith("/members") for _, p, _, _ in g.goi) == 2, \
         "quyền người hỏi kiểm lại ở MỖI lần đọc"
@@ -347,18 +347,18 @@ def test_tai_lieu_ban_cu(monkeypatch):
 
 
 # ───────────────────────────── đăng ký + policy ─────────────────────────────
-def test_policy_chi_doc_va_lui_ve_cong_tac_lark_cli():
+def test_policy_chi_doc_va_lui_ve_cong_tac_doc_bang():
     assert "doc_tai_lieu" in lsr_policy._SAFE_EXACT
     assert "doc_tai_lieu" not in lsr_policy._MUTATING_EXACT
-    assert lsr_policy._CONG_TAC_LUI["doc_tai_lieu"] == "lark_cli"
+    assert lsr_policy._CONG_TAC_LUI["doc_tai_lieu"] == "doc_bang"
     assert lsr_policy.decide("doc_tai_lieu", {"nguon": LINK}).allowed
 
 
-def test_tat_tra_wiki_tren_console_thi_tat_luon_doc_tai_lieu(monkeypatch):
-    monkeypatch.setattr(lsr_policy, "_nho_nl", {"bat": {"doc_bang"}, "luc": float("inf"),
+def test_tat_doc_bang_tren_console_thi_tat_luon_doc_tai_lieu(monkeypatch):
+    monkeypatch.setattr(lsr_policy, "_nho_nl", {"bat": {"lark_cli"}, "luc": float("inf"),
                                                 "nguon": "test", "tat_ro": set()})
     d = lsr_policy.decide("doc_tai_lieu", {"nguon": LINK})
-    assert not d.allowed and "lark_cli" in d.reason
+    assert not d.allowed and "doc_bang" in d.reason
 
 
 def test_lark_cli_docs_fetch_bi_tu_choi_chi_sang_doc_tai_lieu():

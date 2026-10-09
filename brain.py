@@ -114,11 +114,10 @@ _TEAM_MEMBERS = [
 _TOOLING_NOTE = "\n".join(
     [
         "\n---\n## HƯỚNG DẪN DÙNG CÔNG CỤ (kỹ thuật — người dùng không thấy phần này)",
-        "- Thao tác Lark: ƯU TIÊN `lark_cli` (CLI chính thức, đủ domain: calendar, im, wiki, "
-        "drive, task, base, sheets, approval, contact, vc, minutes). Chạy dưới "
-        "danh tính BOT (tenant token) — KHÔNG thấy tài nguyên cá nhân của người khác. "
-        "Xem lệnh: args=[\"<domain>\",\"--help\"]; ưu tiên +shortcut (vd [\"task\",\"+create\",...]); "
-        "xem tham số: [\"schema\",\"<svc.res.method>\"]; gọi thẳng: [\"api\",\"GET\",\"/open-apis/...\"].",
+        "- Lark CLI chỉ tra siêu dữ liệu, tìm theo tiêu đề, danh bạ, lịch và tin nhắn. "
+        "NỘI DUNG Docs/Wiki dùng `doc_tai_lieu`; Base/Sheet dùng `doc_bang`/`dem_bang`, "
+        "mọi đường đọc đều kiểm người hỏi. Không dùng CLI để tải/xuất file, đọc slide/minutes. "
+        "Xem lệnh: args=[\"<domain>\",\"--help\"]; xem tham số bằng `schema`.",
         "- Khi có LINK wiki/tài liệu hoặc nhờ tra cứu/đọc/tạo/sửa nội dung Lark: ĐỪNG nói không truy cập "
         "được — DÙNG tool rồi trả lời. Chỉ báo lỗi khi tool trả lỗi thật (thiếu quyền/không tồn tại).",
         # 07/10: link Wiki "MASTER PLAN 20.10 Copy" (docx) — Mark gọi `lark_cli docs +fetch`,
