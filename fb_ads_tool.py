@@ -184,9 +184,13 @@ def _filter_images(images) -> list[str]:
 
 #: Cột Lark Sheet theo dõi (chủ agent chốt 05/10/2026: tra ads cũng phải ra Sheet như
 #: Top Ads TikTok, để team lưu và so theo thời gian thay vì chỉ đọc trong chat).
-_HEADER_SHEET = ["STT", "Library ID", "Ngày bắt đầu chạy", "Nội dung quảng cáo",
-                 "Link trên Ad Library", "Trang / từ khoá", "Nền tảng lọc", "Quốc gia",
-                 "Trạng thái lọc", "Ngày quét"]
+#: (tên, kiểu cột của trinh_bay_sheet). "Ngày bắt đầu chạy" giữ nguyên chữ Ad Library hiện
+#: (vd "1 Oct 2026" / "1 thg 10, 2026" theo ngôn ngữ giao diện) — không đoán ngày.
+_COT_SHEET = [("STT", "so_nguyen"), ("Library ID", "ma"), ("Ngày bắt đầu chạy", "chu"),
+              ("Nội dung quảng cáo", "chu_dai"), ("Link trên Ad Library", "link"),
+              ("Trang / từ khoá", "chu"), ("Nền tảng lọc", "chu"), ("Quốc gia", "chu"),
+              ("Trạng thái lọc", "chu"), ("Ngày quét", "ngay")]
+_HEADER_SHEET = [t for t, _ in _COT_SHEET]
 _TRANG_THAI = {"active": "đang chạy", "inactive": "đã dừng", "all": "tất cả"}
 _VN_TZ = datetime.timezone(datetime.timedelta(hours=7))
 
@@ -202,11 +206,64 @@ def _duoc_ghi_sheet() -> bool:
 
 
 def _dong_sheet(ads: list[dict], nhan: str, platform: str, country: str,
-                active_status: str, ngay: str, stt_dau: int = 1) -> list[list]:
+                active_status: str, ngay, stt_dau: int = 1) -> list[list]:
     return [[stt_dau + i, a["library_id"], a.get("started") or "", a.get("text") or "",
              f"https://www.facebook.com/ads/library/?id={a['library_id']}", nhan,
              platform or "tất cả", country, _TRANG_THAI.get(active_status, active_status), ngay]
             for i, a in enumerate(ads)]
+
+
+def _cot_sheet():
+    import trinh_bay_sheet as TB
+    return [TB.Cot(t, k) for t, k in _COT_SHEET]
+
+
+def _ghi_chu_brand(nhan: str, platform: str, country: str, active_status: str,
+                   so_ad: int, total, limit) -> str:
+    """Một dòng ghi chú cho mỗi trang/từ khoá: Ad Library báo bao nhiêu, sheet có bao nhiêu,
+    thiếu bao nhiêu và lấy thêm bằng cách nào (không bao giờ cắt âm thầm)."""
+    bo_loc = (f"{country}, {platform or 'mọi nền tảng'}, "
+              f"{_TRANG_THAI.get(active_status, active_status)}")
+    if total is None:
+        cau = (f"{nhan} ({bo_loc}): sheet có {so_ad} ad; Ad Library không hiện tổng số kết "
+               "quả nên không biết còn bao nhiêu ad chưa đưa vào.")
+    else:
+        cau = f"{nhan} ({bo_loc}): Ad Library báo khoảng {total} kết quả; sheet có {so_ad} ad"
+        cau += (f" — còn khoảng {total - so_ad} ad chưa đưa vào sheet" if total > so_ad else "")
+        cau += "."
+    if limit and (total is None or total > so_ad):
+        cau += (f" Lượt này bóc tối đa {limit} ad (trần {_MAX_ADS}); muốn thêm thì tra lại với "
+                f"limit lớn hơn (tối đa {_MAX_ADS}) hoặc lọc hẹp hơn (platform, active_status).")
+    return cau
+
+
+_GHI_CHU_CHUNG = [
+    "Mỗi dòng một ad bóc từ trang Meta Ad Library công khai (trình duyệt, không API). "
+    "Nhiều trang/từ khoá tra trong cùng một lượt được ghi nối vào cùng sheet này.",
+    "Nền tảng lọc / Quốc gia / Trạng thái lọc là BỘ LỌC gửi cho Meta (lọc phía Meta), không "
+    "phải nền tảng của từng ad — thẻ ad không đọc được trường nền tảng.",
+    "Ngày bắt đầu chạy giữ nguyên chữ Ad Library hiển thị. Nội dung quảng cáo là chữ dài "
+    "nhất trong thẻ ad, cắt ở 700 ký tự; ô trống = thẻ ad không có chữ đọc được.",
+    "Ảnh creative không đưa vào sheet (link ảnh có chữ ký, hết hạn) — xem bằng Link trên "
+    "Ad Library.",
+]
+
+
+def _tong_quan_sheet(title: str, rows: list[list], brand_notes: list[str], ngay):
+    import trinh_bay_sheet as TB
+    bang = TB.Bang("Quảng cáo", _cot_sheet(), rows,
+                   mo_ta="Mỗi ad một dòng (Meta Ad Library), kèm link Ad Library")
+    nhan = list(dict.fromkeys(str(r[5]) for r in rows))
+    tq = TB.TongQuan(
+        tieu_de=title, nguon="Meta Ad Library (fb_ads_library — trang công khai, trình duyệt)",
+        thoi_gian=f"quét ngày {ngay:%d/%m/%Y}",
+        pham_vi="Trang / từ khoá: " + ", ".join(nhan[:10]) + ("…" if len(nhan) > 10 else ""),
+        so_lieu=[TB.SoLieu("Số ad trong sheet (mẫu đã bóc)", len(rows), "so_nguyen"),
+                 TB.SoLieu("Số trang / từ khoá đã tra", len(nhan), "so_nguyen")],
+        nhom=[TB.dem_theo(bang, "Trang / từ khoá"), TB.dem_theo(bang, "Nền tảng lọc"),
+              TB.dem_theo(bang, "Quốc gia"), TB.dem_theo(bang, "Trạng thái lọc")],
+        ghi_chu=list(brand_notes) + _GHI_CHU_CHUNG)
+    return bang, tq
 
 
 #: Sheet của LƯỢT trả lời đang chạy: (chat, mã lượt) -> {tok, sid, url, granted, dong}.
@@ -245,17 +302,21 @@ def _khoa_luot() -> tuple | None:
 
 
 def _ghi_sheet(title: str, ads: list[dict], nhan: str, platform: str, country: str,
-               active_status: str) -> tuple[str | None, bool, str | None, bool]:
-    """Ghi các ad đã bóc vào Lark Sheet. -> (sheet_url, đã cấp quyền cho người hỏi, lỗi,
-    ghi nối vào sheet có sẵn của lượt). Lỗi ghi sheet KHÔNG làm hỏng kết quả tra — trả
-    kèm để Mark nói ra."""
+               active_status: str, total=None, limit=None
+               ) -> tuple[str | None, bool, str | None, bool, dict]:
+    """Ghi các ad đã bóc vào Lark Sheet (lớp trình bày chung `trinh_bay_sheet`). -> (sheet_url,
+    đã cấp quyền cho người hỏi, lỗi, ghi nối vào sheet có sẵn của lượt, kiểm ghi
+    {day_du, kiem_ghi, bang_tinh_tiep}). Lỗi ghi sheet KHÔNG làm hỏng kết quả tra — trả kèm
+    để Mark nói ra."""
     import apify_tool as A
+    import trinh_bay_sheet as TB
     try:
         import memory_store
         sender = memory_store.get_current_sender()
     except Exception:  # noqa: BLE001
         sender = None
-    ngay = f"{datetime.datetime.now(_VN_TZ):%d/%m/%Y}"
+    ngay = datetime.datetime.now(_VN_TZ).date()
+    note = _ghi_chu_brand(nhan, platform, country, active_status, len(ads), total, limit)
     khoa = _khoa_luot()
     # Giữ khoá của LƯỢT suốt lời gọi Lark (vài giây).
     with _khoa_cho(khoa):
@@ -263,30 +324,78 @@ def _ghi_sheet(title: str, ads: list[dict], nhan: str, platform: str, country: s
         if co:
             dong = _dong_sheet(ads, nhan, platform, country, active_status, ngay,
                                stt_dau=co["dong"])
+            cot = _cot_sheet()
             try:
-                A._write_values(co["tok"], co["sid"], dong, dong_dau=co["dong"] + 1)
+                # Ngày ghi dạng chữ dd/MM/yyyy: định dạng đặt SAU khi ghi (trang_tri_bang).
+                with TB.ngan_sach_cho():          # chờ 429 có trần, như `xuat`
+                    TB._noi_luoi(co["tok"], co["sid"],
+                                 TB._luoi(co["tok"]).get(co["sid"], (0, 0)),
+                                 co["dong"] + len(dong), len(cot))
+                    TB._ghi(co["tok"], co["sid"],
+                            [[TB._o(v, c.kieu, False) for v, c in zip(r, cot)] for r in dong],
+                            dong_dau=co["dong"] + 1)
             except Exception as e:  # noqa: BLE001
                 # Sheet của lượt VẪN CÒN (đã có brand trước, đã cấp quyền) — trả đúng link,
                 # lỗi chỉ là brand này chưa nối vào được.
                 return (co["url"], co["granted"],
-                        A._che_token(f"{type(e).__name__}: {e}")[:250], True)
+                        A._che_token(f"{type(e).__name__}: {e}")[:250], True, {})
             co["dong"] += len(dong)
-            return co["url"], co["granted"], None, True
+            co["rows"] += dong
+            co["notes"].append(note)
+            with TB.ngan_sach_cho():              # trang trí + ghi lại Tổng quan
+                kiem = _sau_khi_noi(co, title, ngay)
+            return co["url"], co["granted"], None, True, kiem
         try:
-            tok, url = A._create_sheet(title)
-            sid = A._first_sheet_id(tok)
-            A._write_values(tok, sid, [list(_HEADER_SHEET)] + _dong_sheet(
-                ads, nhan, platform, country, active_status, ngay))
-            granted = A._grant(tok, sender) if sender else False
-            if khoa:
+            rows = _dong_sheet(ads, nhan, platform, country, active_status, ngay)
+            bang, tq = _tong_quan_sheet(title, rows, [note], ngay)
+            cap: dict = {"granted": False}
+
+            def cap_quyen(tok):
+                TB.gop_quyen(cap, A._grant(tok, sender) if sender else False)
+            kq = TB.xuat(title, [bang], tq, cap_quyen=cap_quyen)
+            granted = cap["granted"]
+            if khoa and kq.tabs:
+                tq_dong = len(TB.dung_tong_quan(kq.tong_quan or tq, kq.tabs, [], kq.kiem,
+                                                kq.url)[0]) if kq.tong_quan_sid else 0
                 with _SHEET_GUARD:
                     if len(_SHEET_LUOT) >= 200:
                         _SHEET_LUOT.pop(next(iter(_SHEET_LUOT)))
-                    _SHEET_LUOT[khoa] = {"tok": tok, "sid": sid, "url": url,
-                                         "granted": granted, "dong": len(ads) + 1}
-            return url, granted, None, False
+                    _SHEET_LUOT[khoa] = {"tok": kq.token, "sid": kq.tabs[0].sheet_id,
+                                         "url": kq.url, "granted": granted,
+                                         "dong": len(ads) + 1, "rows": list(rows),
+                                         "notes": [note], "tabs": kq.tabs, "title": title,
+                                         "tq_sid": kq.tong_quan_sid, "tq_dong": tq_dong}
+            return kq.url, granted, None, False, kq.cho_tool()
         except Exception as e:  # noqa: BLE001
-            return None, False, A._che_token(f"{type(e).__name__}: {e}")[:250], False
+            return None, False, A._che_token(f"{type(e).__name__}: {e}")[:250], False, {}
+
+
+def _sau_khi_noi(co: dict, title: str, ngay) -> dict:
+    """Sau khi nối dòng của brand mới: trang trí lại tab dữ liệu cho đủ dòng mới (định dạng,
+    bộ lọc), đọc lại kiểm, ghi đè Tổng quan theo toàn bộ dòng. Trang trí/Tổng quan hỏng chỉ
+    cảnh báo (dữ liệu đã ghi). -> {day_du, kiem_ghi, bang_tinh_tiep}."""
+    import trinh_bay_sheet as TB
+    cb: list = []
+    tab = co["tabs"][0]
+    tab.so_dong = len(co["rows"])
+    # Đọc lại dòng CUỐI vừa nối (không phải dòng cuối của lần ghi trước — review 09/10).
+    cuoi = max((i for i, r in enumerate(co["rows"]) if any(v not in ("", None) for v in r)),
+               default=None)
+    tab.r_kiem = tab.dong_dau if cuoi is None else tab.dong_dau + 1 + cuoi
+    TB.trang_tri_bang(co["tok"], co["sid"], tab.cot, tab.so_dong, mau=co["rows"],
+                      dinh_dang_xong=False, canh_bao=cb)
+    kiem = TB.kiem_ghi(co["tok"], co["tabs"])
+    if co.get("tq_sid"):
+        _, tq = _tong_quan_sheet(co.get("title") or title, co["rows"], co["notes"], ngay)
+        ket = TB.ghi_lai_tong_quan(co["tok"], co["tq_sid"], co["url"], tq, co["tabs"],
+                                   kiem=kiem, canh_bao=cb, so_dong_cu=co["tq_dong"])
+        co["tq_dong"] = ket["so_dong"]
+        kiem = TB.gop_kiem_tong_quan(kiem, ket)
+    ra = {"day_du": kiem.get("day_du"), "kiem_ghi": kiem.get("cau") or "",
+          "bang_tinh_tiep": None}
+    if cb:
+        ra["canh_bao_trinh_bay"] = "; ".join(c[:140] for c in cb[:4])[:600]
+    return ra
 
 
 FB_ADS_LIBRARY_SCHEMA = {
@@ -451,13 +560,16 @@ def _handle_fb_ads_library(args: dict, **kwargs) -> str:
             images = []
 
     sheet_url, granted, loi_sheet, ten_sheet, ghi_noi = None, False, None, None, False
+    kiem: dict = {}
     if ads and _duoc_ghi_sheet():
         nhan = f"page_id {page_id}" if page_id else query
         ten_sheet = (str(args.get("title") or "").strip()
                      or f"Ads Meta · {nhan} · {country}"[:77]
                      + f" · {datetime.datetime.now(_VN_TZ):%d-%m-%Y}")
-        sheet_url, granted, loi_sheet, ghi_noi = _ghi_sheet(
-            ten_sheet, ads, nhan, platform, country, active_status)
+        sheet_url, granted, loi_sheet, ghi_noi, kiem = _ghi_sheet(
+            ten_sheet, ads, nhan, platform, country, active_status, total=total, limit=limit)
+    if kiem.get("day_du") is False:
+        kiem["canh_bao_sheet"] = "Sheet có thể thiếu dữ liệu: " + str(kiem.get("kiem_ghi") or "")
 
     return tool_result(
         success=True,
@@ -479,6 +591,7 @@ def _handle_fb_ads_library(args: dict, **kwargs) -> str:
         image_count=len(images),
         image_urls=images,
         page_title=title,
+        **kiem,
         note=(
             "Ảnh creative là bản thu nhỏ (<=600px) và URL có token hết hạn — tải ngay "
             "nếu cần dùng. Ad video chỉ lấy được thumbnail. total_results là tổng ad "

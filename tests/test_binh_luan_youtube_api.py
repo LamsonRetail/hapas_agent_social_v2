@@ -7,6 +7,7 @@ lại của trần. Không bài nào gọi mạng thật: `requests.get` và `_c
 from __future__ import annotations
 
 import contextvars
+import datetime
 import json
 import threading
 
@@ -14,6 +15,8 @@ import pytest
 
 import apify_tool as A
 import deep_dive_tool as D
+from sheet_gia import LarkGia
+from test_binh_luan_phan_tich import TabGia
 import quet_lon
 
 V1 = "https://www.youtube.com/watch?v=AAAAAAAAAA1"
@@ -99,7 +102,7 @@ class _Apify:
 @pytest.fixture
 def mt(monkeypatch):
     yt, ap = _YT(), _Apify()
-    sheet, so_cp = [], []
+    so_cp = []
     monkeypatch.setenv("YOUTUBE_DATA_API_KEY", "AIzaGIA_KHONG_THAT")
     monkeypatch.setattr(A.requests, "get", yt)
     monkeypatch.setattr(D, "_call", ap)
@@ -111,11 +114,9 @@ def mt(monkeypatch):
     monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {})
     monkeypatch.setattr(D.chi_phi_tool, "ghi", lambda **k: so_cp.append(k) or {})
     monkeypatch.setattr(D.phan_loai, "_goi_model", lambda nhac: "{}")
-    monkeypatch.setattr(D, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(D, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(D, "_write", lambda tok, sid, values: sheet.extend(values))
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: "s2")
-    monkeypatch.setattr(A, "_write_values", lambda *a, **k: None)
+    gia = LarkGia()                     # Lark giả: sheet đi qua trinh_bay_sheet thật
+    monkeypatch.setattr(A.lark, "call", gia.call)
+    sheet = TabGia(gia, "Bình luận")
     monkeypatch.setattr(D, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(D.memory_store, "get_current_sender", lambda: "ou_test")
     return yt, ap, sheet, so_cp
@@ -141,7 +142,10 @@ def test_api_lay_binh_luan_va_tra_loi_0_usd_khong_goi_apify(mt):
     hd, dong = sheet[0], {r[2]: r for r in sheet[1:]}
     assert hd[-2] == "Trả lời bình luận" and hd[-1] == "Nguồn" and len(hd) == len(D._HEADER)
     goc = dong["Túi đẹp quá & xinh"]
-    assert goc[6] == 3 and goc[-2] == "" and goc[7] == "2026-10-01 10:00", "mốc tuyệt đối, giờ VN"
+    # Cột Thời gian là ngày giờ THẬT (số ngày từ 1899-12-30, định dạng dd/MM/yyyy HH:mm).
+    ngay = round((datetime.datetime(2026, 10, 1, 10, 0) - datetime.datetime(1899, 12, 30))
+                 .total_seconds() / 86400, 6)
+    assert goc[6] == 3 and goc[-2] == "" and goc[7] == ngay, "mốc tuyệt đối, giờ VN"
     assert dong["mua ở đâu"][-2].endswith("&lc=c1") and dong["chuẩn luôn"][-2].endswith("&lc=c1")
     assert sum(1 for r in sheet[1:] if r[2] == "chuẩn luôn") == 1, "trả lời kèm sẵn không lặp"
     assert all(r[-3] == V1 for r in sheet[1:]), "quy về đúng link bài"

@@ -23,6 +23,7 @@ import lsr_platform
 import memory_store
 import requests
 import scheduler
+import trinh_bay_sheet as TB
 from tools.registry import registry, tool_error, tool_result
 
 VN = dt.timezone(dt.timedelta(hours=7))
@@ -445,15 +446,15 @@ def _cell(number):
     return "" if number is None else float(round(number, 6))
 
 
-def _private_sheet(title, rows, actor):
-    token, url = A._create_sheet(title)
+def _khoa_rieng_tu(token):
+    """Chạy NGAY SAU khi tạo bảng tính, TRƯỚC mọi lần ghi số (`xuat(sau_khi_tao=...)`)."""
     # Drive v2 fields/enums verified against larksuite/oapi-sdk-go v3.12.0 drive/v2.
     # Close inherited tenant/link sharing BEFORE writing confidential values.
     lark.call("PATCH", f"/open-apis/drive/v2/permissions/{token}/public", query={"type": "sheet"},
               body={"external_access_entity": "closed", "link_share_entity": "closed",
                     "share_entity": "same_tenant", "manage_collaborator_entity": "collaborator_full_access"})
     permission = lark.call("GET", f"/open-apis/drive/v2/permissions/{token}/public", query={"type": "sheet"})
-    public = (permission.get("data") or {}).get("permission_public") or {}
+    public = ((permission or {}).get("data") or {}).get("permission_public") or {}
     # `share_entity` của Drive v2 chỉ có `anyone` | `same_tenant`; đòi đúng giá trị vừa
     # đặt (không phải `anyone`), cộng `collaborator_full_access` để chỉ người toàn quyền
     # (bot) thêm được cộng tác viên.
@@ -461,29 +462,33 @@ def _private_sheet(title, rows, actor):
             or public.get("share_entity") != "same_tenant"
             or public.get("manage_collaborator_entity") != "collaborator_full_access"):
         raise ValueError("Chưa xác minh được Sheet riêng tư; chưa ghi số ads.")
-    sheet_id = A._first_sheet_id(token)
-    grid_response = lark.call("GET", f"/open-apis/sheets/v3/spreadsheets/{token}/sheets/query")
-    grid = next((s.get("grid_properties") or {} for s in
-                (grid_response.get("data") or {}).get("sheets", []) if s.get("sheet_id") == sheet_id), {})
-    row_count = int(grid.get("row_count") or 200)
-    column_count = int(grid.get("column_count") or 20)
-    import sheet_lon
-    while row_count < len(rows):
-        extra = min(5000, len(rows) - row_count)
-        sheet_lon._goi("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/dimension_range",
-                      body={"dimension": {"sheetId": sheet_id, "majorDimension": "ROWS", "length": extra}})
-        row_count += extra
-    columns = max((len(row) for row in rows), default=1)
-    if columns > column_count:
-        sheet_lon._goi("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/dimension_range",
-                      body={"dimension": {"sheetId": sheet_id, "majorDimension": "COLUMNS", "length": columns - column_count}})
-    for offset in range(0, len(rows), 1000):
-        A._write_values(token, sheet_id, rows[offset:offset+1000], dong_dau=offset+1)
-        if offset + 1000 < len(rows):
-            time.sleep(0.2)
-    if not _grant_view(token, actor):
-        raise ValueError("Chưa chia sẻ được Sheet riêng cho bạn; nhờ chủ agent kiểm quyền Lark.")
-    return url
+
+
+def _private_sheet(title, bang, tong_quan, actor, goc=None):
+    """Sheet riêng qua lớp trình bày chung. Thứ tự (trinh_bay_sheet.xuat): tạo → khoá chia sẻ
+    link/tenant + kiểm lại (`_khoa_rieng_tu`) → ghi số → trang trí → Tổng quan → cấp quyền
+    XEM cho đúng người hỏi (hỏng thì ném, như cũ). Lưới lớn (tới 20.000 dòng) do lớp tự nới.
+    -> KetQua (kq.url là link)."""
+    def cap_quyen(token):
+        if not _grant_view(token, actor):
+            raise ValueError("Chưa chia sẻ được Sheet riêng cho bạn; nhờ chủ agent kiểm quyền Lark.")
+    return TB.xuat(title, [bang], tong_quan, goc=goc, sau_khi_tao=_khoa_rieng_tu,
+                   cap_quyen=cap_quyen)
+
+
+_TEN_CAP = {"account": "tài khoản", "campaign": "chiến dịch", "adset": "nhóm quảng cáo", "ad": "quảng cáo"}
+
+
+def _kieu_cot(key):
+    """Kiểu cột theo đơn vị của METRICS: tiền theo tiền tệ từng dòng; CTR đã ×100 (`_ratios`)."""
+    unit = METRICS[key][1]
+    if unit.startswith("tiền TK"):
+        return {"kieu": "tien", "cot_tien_te": "Tiền tệ"}
+    if unit in ("lượt", "người"):
+        return {"kieu": "so_nguyen"}
+    if unit == "%":
+        return {"kieu": "phan_tram_100"}
+    return {"kieu": "ti_le"}                 # "lần", "lần/người"
 
 
 def _grant_view(token, actor):
@@ -583,37 +588,63 @@ def _handle(args, **kwargs):
         start, end = min(s for s, _ in spans), max(e for _, e in spans)
         span = f"{start}–{end}" + ("" if len(spans) == 1 else " theo múi giờ từng TK")
         totals = _totals(rows)
-        headers = ["Tài khoản", "Mã TK", "Tiền tệ", "Múi giờ TK", "Từ ngày", "Đến ngày", "Mã đối tượng", "Tên đối tượng", *breakdown,
-                   *[METRICS[k][0] + " (" + METRICS[k][1] + ")" for k in wanted]]
-        sheet = [headers]
+        columns = [TB.Cot("Tài khoản"), TB.Cot("Mã TK", "ma"), TB.Cot("Tiền tệ"), TB.Cot("Múi giờ TK"),
+                   TB.Cot("Từ ngày", "ngay"), TB.Cot("Đến ngày", "ngay"), TB.Cot("Mã đối tượng", "ma"),
+                   TB.Cot("Tên đối tượng"), *[TB.Cot(b) for b in breakdown],
+                   *[TB.Cot(METRICS[k][0] + " (" + METRICS[k][1] + ")", **_kieu_cot(k)) for k in wanted]]
+        table = []
         for row in rows:
             data, account = row["data"], row["account"]
-            sheet.append([account.get("name", ""), account["id"], row["currency"], row["tz"],
+            table.append([account.get("name", ""), account["id"], row["currency"], row["tz"],
                           data.get("date_start", row["start"]), data.get("date_stop", row["end"]), data.get(level + "_id", account["id"]),
                           data.get(level + "_name", account.get("name", "")), *[data.get(k, "") for k in breakdown],
                           *[_cell(row["values"].get(k)) for k in wanted]])
-        sheet.append([])
-        for currency, values in totals.items():
-            sheet.append([("TỔNG PHẦN ĐÃ ĐỌC" if cut else "TỔNG") + " " + currency, "", currency, "", start, end, "", "",
-                          *["" for _ in breakdown], *[_cell(values.get(k)) for k in wanted]])
-        sheet.append([f"{span}. Mốc ngày tính theo múi giờ của từng tài khoản (cột Múi giờ TK), đúng cách Meta cộng số. "
-                      "Số theo phân bổ mặc định của Meta. Reach/tần suất/ROAS Meta không cộng tổng. "
-                      "Dòng có số hiển thị/chi tiêu mà Meta không trả mua/lead/tin nhắn/video thì ghi 0 (Meta bỏ số 0); "
-                      "ô trống = Meta không trả số phân phối cho dòng đó, không phải 0."])
+        label = "TỔNG PHẦN ĐÃ ĐỌC" if cut else "TỔNG"
+        total_rows = [[label + " " + currency, "", currency, "", start, end, "", "",
+                       *["" for _ in breakdown], *[_cell(values.get(k)) for k in wanted]]
+                      for currency, values in totals.items()]
+        notes = [f"{span}. Mốc ngày tính theo múi giờ của từng tài khoản (cột Múi giờ TK), đúng cách Meta cộng số. "
+                 "Số theo phân bổ mặc định của Meta. Reach/tần suất/ROAS Meta không cộng tổng. "
+                 "Dòng có số hiển thị/chi tiêu mà Meta không trả mua/lead/tin nhắn/video thì ghi 0 (Meta bỏ số 0); "
+                 "ô trống = Meta không trả số phân phối cho dòng đó, không phải 0."]
         if breakdown:
-            sheet.append(["Có chia nhỏ (tuổi/giới tính/nền tảng/vị trí): Meta có thể ẩn số mua, giá trị mua, "
-                          "ROAS Meta, lead, tin nhắn vì quyền riêng tư; ô trống ở các cột đó = Meta không trả số, "
-                          "không phải 0, và tổng cột đó để trống."])
+            notes.append("Có chia nhỏ (tuổi/giới tính/nền tảng/vị trí): Meta có thể ẩn số mua, giá trị mua, "
+                         "ROAS Meta, lead, tin nhắn vì quyền riêng tư; ô trống ở các cột đó = Meta không trả số, "
+                         "không phải 0, và tổng cột đó để trống.")
         if partial:
-            sheet.append(["Khoảng ngày gồm HÔM NAY theo múi giờ tài khoản: ngày chưa hết, số hôm nay còn thay đổi."])
+            notes.append("Khoảng ngày gồm HÔM NAY theo múi giờ tài khoản: ngày chưa hết, số hôm nay còn thay đổi.")
         if unknown_tz:
-            sheet.append(["Có tài khoản Meta không báo múi giờ; mốc ngày của tài khoản đó tính theo giờ VN (UTC+7)."])
+            notes.append("Có tài khoản Meta không báo múi giờ; mốc ngày của tài khoản đó tính theo giờ VN (UTC+7).")
         if cut:
-            sheet.append(["ĐÃ CẮT ở 20.000 dòng; tổng chỉ cho phần đã đọc. Hãy thu hẹp ngày/tài khoản."])
+            notes.append("ĐÃ CẮT ở 20.000 dòng; tổng chỉ cho phần đã đọc. Hãy thu hẹp ngày/tài khoản.")
+        notes.append(f"Dòng {label} (theo từng tiền tệ) và SỐ LIỆU CHÍNH là tổng tool tự cộng từ các dòng đã đọc; "
+                     "CTR/CPC/CPM/ROAS/chi phí mỗi kết quả của dòng tổng tính lại từ tổng, không cộng tỉ lệ. "
+                     "Tiền theo đơn vị tiền tệ của từng tài khoản (cột Tiền tệ), không quy đổi.")
+        notes.append("Tab Dữ liệu gốc: bản ghi insights Meta trả về (mọi trường đã xin, kể cả danh sách actions), "
+                     "cùng thứ tự dòng với tab Dữ liệu — để đối chiếu cách tính.")
+        bang = TB.Bang("Số ads", columns, table, dong_tong=total_rows,
+                       mo_ta="Mỗi dòng một " + _TEN_CAP.get(level, level) + (" theo ngày" if args.get("theo_ngay") else "")
+                       + (" × " + ", ".join(breakdown) if breakdown else ""))
+        key_figures = [TB.SoLieu(METRICS[k][0] + " — " + currency, float(round(values[k], 4)),
+                                 _kieu_cot(k)["kieu"], tien_te=currency,
+                                 ghi_chu=METRICS[k][1] + ("; tổng phần đã đọc" if cut else ""))
+                       for currency, values in totals.items() for k in wanted if values.get(k) is not None]
+        names = (list(dict.fromkeys(str(r["account"].get("name") or r["account"]["id"]) for r in rows))
+                 or [str(a.get("name") or a.get("id")) for a in accounts])
+        overview = TB.TongQuan(
+            tieu_de="Số ads HAPAS " + start + "–" + end,
+            nguon="Meta Marketing API Insights (chi_so_ads, phân bổ mặc định)", thoi_gian=span,
+            pham_vi=(f"{len(accounts)} tài khoản: " + ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
+                     + " · cấp " + _TEN_CAP.get(level, level) + (" · chia theo " + ", ".join(breakdown) if breakdown else "")
+                     + (" · lọc chiến dịch chứa '" + args["loc"] + "'" if args.get("loc") else "")),
+            so_lieu=key_figures,
+            nhom=[TB.dem_theo(bang, "Tài khoản", "Số dòng theo tài khoản")] if len(accounts) > 1 and table else [],
+            ghi_chu=notes)
+        raw = TB.bang_goc([row["data"] for row in rows]) if rows else None
         # Recheck immediately before disclosure: list or switch may have changed mid-fetch.
         if not _allowed(actor):
             raise ValueError("Quyền xem số ads đã đổi hoặc không đọc được quyền; chưa xuất Sheet.")
-        url = _private_sheet("Số ads HAPAS " + start + "–" + end, sheet, actor)
+        kq = _private_sheet("Số ads HAPAS " + start + "–" + end, bang, overview, actor, raw)
         summary = "; ".join(currency + ": " + ", ".join(METRICS[k][0] + " " + str(round(values[k], 4))
                        for k in wanted if values.get(k) is not None) for currency, values in totals.items())
         sentence = (f"Đã đọc {len(rows)} dòng ({span})" + ("; đã cắt, tổng chỉ phần đã đọc" if cut else "")
@@ -625,8 +656,11 @@ def _handle(args, **kwargs):
         # Lượt này (hộp của lượt) và cả phiên (lưu đĩa): lượt sau có thể nhắc lại số từ lịch sử.
         lsr_platform.danh_dau_han_che("chi_so_ads")
         memory_store.danh_dau_phien_han_che(scheduler.get_current_chat() or "", "chi_so_ads")
-        return tool_result({"link": url, "cau_tong": sentence + ".", "so_dong": len(rows), "bi_cat": cut,
-                            "chi_so": wanted, "nguoi_duoc_chia_se": actor})
+        result = {"link": kq.url, "cau_tong": sentence + ".", "so_dong": len(rows), "bi_cat": cut,
+                  "chi_so": wanted, "nguoi_duoc_chia_se": actor, **kq.cho_tool()}
+        if kq.day_du is False:
+            result["canh_bao"] = "Sheet có thể thiếu dữ liệu: " + kq.cau_kiem
+        return tool_result(result)
     except ChonTaiKhoan as error:
         return tool_error(_redact(str(error), token)[:4000] + "\n(Chép nguyên danh sách này cho người dùng.)")
     except Exception as error:

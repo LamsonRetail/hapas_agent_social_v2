@@ -48,6 +48,7 @@ from urllib.parse import parse_qs, urlparse
 import apify_tool as A
 import chi_phi_tool
 import memory_store
+import trinh_bay_sheet as TB
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
@@ -170,9 +171,11 @@ def _so(v) -> int | None:
 
 
 # ───────────────────────────── lấy dữ liệu ─────────────────────────────
-def _ket(tai_khoan=None, ngay=None, link=None, **so) -> dict:
+def _ket(tai_khoan=None, ngay=None, link=None, goc=None, **so) -> dict:
+    """`_goc` = bản ghi nguồn nguyên vẹn (cho tab "Dữ liệu gốc" của Sheet) — KHÔNG bao giờ
+    đi vào tool_result."""
     return {"tai_khoan": str(tai_khoan or ""), "ngay": ngay, "link_that": str(link or ""),
-            **{c: so.get(c) for c in _COT}}
+            **{c: so.get(c) for c in _COT}, "_goc": goc}
 
 
 def _id_tiktok(u: str) -> str:
@@ -192,7 +195,7 @@ def _lay_tiktok(urls: list[str]) -> dict[str, dict]:
         k = _ket(am.get("name"), A._to_vn(it.get("createTimeISO")), it.get("webVideoUrl"),
                  view=_so(it.get("playCount")), like=_so(it.get("diggCount")),
                  binh_luan=_so(it.get("commentCount")), share=_so(it.get("shareCount")),
-                 luu=_so(it.get("collectCount")))
+                 luu=_so(it.get("collectCount")), goc=it)
         if it.get("submittedVideoUrl"):
             ra[str(it["submittedVideoUrl"])] = k
         if _id_tiktok(it["webVideoUrl"]):
@@ -215,7 +218,7 @@ def _lay_youtube(urls: list[str]) -> dict[str, dict]:
                 sn.get("channelTitle"), A._to_vn(sn.get("publishedAt")),
                 f"https://www.youtube.com/watch?v={it.get('id')}",
                 view=_so(st.get("viewCount")), like=_so(st.get("likeCount")),
-                binh_luan=_so(st.get("commentCount")))
+                binh_luan=_so(st.get("commentCount")), goc=it)
     return {u: theo_id[v] for u, v in id_cua.items() if v in theo_id}
 
 
@@ -230,7 +233,7 @@ def _lay_instagram(urls: list[str]) -> dict[str, dict]:
         theo_ma[str(it["shortCode"])] = _ket(
             it.get("ownerUsername"), A._to_vn(it.get("timestamp")), it.get("url"),
             view=view if view is not None else _so(it.get("videoViewCount")),
-            like=_so(it.get("likesCount")), binh_luan=_so(it.get("commentsCount")))
+            like=_so(it.get("likesCount")), binh_luan=_so(it.get("commentsCount")), goc=it)
     return {u: theo_ma[_nhan_dien(u)[1][3:]] for u in urls
             if _nhan_dien(u)[1][3:] in theo_ma}
 
@@ -255,7 +258,7 @@ def _lay_facebook(urls: list[str]) -> dict[str, dict]:
             bl = _so(it.get("total_comment_count"))
         k = _ket(it.get("pageName"), A._to_vn(it.get("time") or it.get("creation_time")),
                  it.get("url") or it.get("facebookUrl"),
-                 view=view, like=like, binh_luan=bl, share=share)
+                 view=view, like=like, binh_luan=bl, share=share, goc=it)
         for khoa in (it.get("inputUrl"), it.get("facebookUrl")):
             if khoa:
                 theo[_fb_khoa(khoa)] = k
@@ -272,7 +275,7 @@ def _lay_threads_mot(url: str) -> dict | None:
                         str(it.get("post_url") or "").split("?")[0],
                         view=_so(it.get("view_count")), like=_so(it.get("like_count")),
                         binh_luan=_so(it.get("reply_count")),
-                        share=_so(it.get("share_count")))
+                        share=_so(it.get("share_count")), goc=it)
     return None
 
 
@@ -494,32 +497,28 @@ def _handle(args: dict, **_kwargs) -> str:
                                     f"({tong[c]['so_link_co_so']} link)"
                                     for c in _COT[1:] if tong[c]["so_link_co_so"]) + ".")
 
-    url, granted = None, False
-    header = ["STT", "Link", "Nền tảng", "Tài khoản", "Ngày đăng", "View", "Like",
-              "Bình luận", "Share", "Lưu", "Trạng thái", "Ghi chú", "Lấy số lúc"]
-    rows = [header]
-    for d in dong:
-        k = d["ket"] or {}
-        rows.append([
-            d["stt"], d["link"], _ten(d["nen"]), k.get("tai_khoan", ""),
-            f"{k['ngay']:%Y-%m-%d}" if k.get("ngay") else "",
-            *[k.get(c) if k.get(c) is not None else "" for c in _COT],
-            d["trang_thai"], _GHI_CHU_NEN.get(d["nen"] or "", "") if k else "",
-            f"{luc:%Y-%m-%d %H:%M}" if k else ""])
-    rows.append([""] * len(header))
-    rows.append(["", f"TỔNG ({len(ok)} link OK, không cộng dòng trùng)", "", "", "",
-                 *[tong[c]["tong"] if tong[c]["so_link_co_so"] else "" for c in _COT],
-                 "", "Ô trống = nguồn không có số, không tính là 0", ""])
+    url, granted, kq_sheet = None, False, None
     if ok:
-        title = (args.get("title") or "").strip() or \
-            f"Chỉ số {len(links)} link bài · {luc:%d-%m-%Y %H:%M}"
-        try:
-            tok, url = A._create_sheet(title)
-            A._write_values(tok, A._first_sheet_id(tok), rows)
+        title = ((args.get("title") or "").strip()
+                 or f"Chỉ số {len(links)} link bài · {luc:%d-%m-%Y %H:%M}")
+        cap = {"granted": False}
+
+        def _cap_quyen(tok: str) -> None:
+            # Như cũ: người hỏi được quyền SỬA file bot vừa tạo; hỏng thì granted=False.
             sender = memory_store.get_current_sender()
-            granted = A._grant(tok, sender) if sender else False
+            TB.gop_quyen(cap, A._grant(tok, sender) if sender else False)
+
+        try:
+            bang = _bang_sheet(dong, tong, ok, luc)
+            kq_sheet = TB.xuat(title, [bang],
+                               _tong_quan_sheet(title, bang, links, dong, ok, tong, view_nen,
+                                                cau_tong, con_lai, du, loi, chay, luc),
+                               goc=_bang_goc(dong), cap_quyen=_cap_quyen)
+            url, granted = kq_sheet.url, cap["granted"]
         except Exception as e:  # noqa: BLE001
             loi["sheet"] = A._che_token(f"{type(e).__name__}: {e}")[:250]
+        if kq_sheet is not None and kq_sheet.day_du is False:
+            loi["kiem_ghi"] = kq_sheet.cau_kiem
 
     if not ok and loi:
         return tool_error("Không đếm được link nào: " + "; ".join(
@@ -538,7 +537,117 @@ def _handle(args: dict, **_kwargs) -> str:
         lay_so_luc=f"{luc:%H:%M %d/%m/%Y}", uoc_tinh_chi_phi_usd=round(est, 3),
         chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,
         chi_phi=A._dong_chi_phi(thuc, est), giay=round(time.monotonic() - t0, 1),
+        **(kq_sheet.cho_tool() if kq_sheet is not None
+           else {"day_du": None, "kiem_ghi": None, "bang_tinh_tiep": None}),
     )
+
+
+# ───────────────────────────── Sheet (trinh_bay_sheet) ─────────────────────────────
+_COT_SHEET = [TB.Cot("STT", "so_nguyen"), TB.Cot("Link", "link"), TB.Cot("Nền tảng"),
+              TB.Cot("Tài khoản", "ma"), TB.Cot("Ngày đăng", "ngay"),
+              *[TB.Cot(_TEN_COT[c], "so_nguyen") for c in _COT],
+              TB.Cot("Trạng thái"), TB.Cot("Ghi chú", "chu_dai"),
+              TB.Cot("Lấy số lúc", "ngay_gio")]
+
+
+def _bang_sheet(dong: list, tong: dict, ok: list, luc) -> "TB.Bang":
+    """Mỗi link một dòng đúng thứ tự dán + dòng TỔNG (tổng code đã cộng, giữ nguyên nhãn)."""
+    rows = []
+    for d in dong:
+        k = d["ket"] or {}
+        rows.append([
+            d["stt"], d["link"], _ten(d["nen"]), k.get("tai_khoan", ""), k.get("ngay") or "",
+            *[k.get(c) if k.get(c) is not None else "" for c in _COT],
+            d["trang_thai"], _GHI_CHU_NEN.get(d["nen"] or "", "") if k else "",
+            luc if k else ""])
+    tong_row = ["", f"TỔNG ({len(ok)} link OK, không cộng dòng trùng)", "", "", "",
+                *[tong[c]["tong"] if tong[c]["so_link_co_so"] else "" for c in _COT],
+                "", "Ô trống = nguồn không có số, không tính là 0", ""]
+    return TB.Bang("Chỉ số từng link", list(_COT_SHEET), rows, dong_tong=[tong_row],
+                   mo_ta="Mỗi link một dòng, đúng thứ tự dán; dòng TỔNG cuối bảng")
+
+
+def _nhom_trang_thai(tt: str) -> str:
+    if tt == "OK":
+        return "OK (đã cộng vào tổng)"
+    if tt.startswith("Trùng link"):
+        return "Trùng link (không cộng lại)"
+    if tt.startswith("Chưa đếm"):
+        return "Chưa đếm: vượt trần console, gọi lượt sau"
+    if tt.startswith("Lỗi nguồn"):
+        return "Lỗi nguồn"
+    if tt.startswith("Không đếm"):
+        return "Không đếm (link không phải bài / nền tảng tắt / trần thấp)"
+    return "Không lấy được (bài xoá, riêng tư hoặc nguồn chặn)"
+
+
+def _tong_quan_sheet(title, bang, links, dong, ok, tong, view_nen, cau_tong, con_lai, du,
+                     loi, chay, luc) -> "TB.TongQuan":
+    """Tổng quan = ĐÚNG các số tool đã cộng (`tong`, `tong_view_theo_nen_tang`, như
+    `cau_tong`) — không cộng lại gì ở đây."""
+    so_lieu = [TB.SoLieu("Link đếm được", len(ok), "so_nguyen",
+                         ghi_chu=f"trên {len(links)} link đã dán")]
+    for c in _COT:
+        # Như `cau_tong`: view luôn có; chỉ số khác chỉ khi có link nào có số.
+        if c == "view" or tong[c]["so_link_co_so"]:
+            so_lieu.append(TB.SoLieu(
+                f"Tổng {_TEN_COT[c].lower()}", tong[c]["tong"], "so_nguyen",
+                ghi_chu=f"cộng trên {tong[c]['so_link_co_so']} link có số"))
+    if len(view_nen) > 1:
+        so_lieu += [TB.SoLieu(f"View {p}", v, "so_nguyen", ghi_chu="tổng view của nền tảng")
+                    for p, v in view_nen.items()]
+    theo_nen = {}
+    for d in dong:
+        nen = _ten(d["nen"]) or "(không nhận ra)"
+        theo_nen[nen] = theo_nen.get(nen, 0) + 1
+    dem_tt = {}
+    for d in dong:
+        k = _nhom_trang_thai(d["trang_thai"])
+        dem_tt[k] = dem_tt.get(k, 0) + 1
+    nhom = [TB.Nhom("Theo nền tảng", sorted(theo_nen.items(), key=lambda x: (-x[1], x[0])),
+                    len(dong)),
+            TB.Nhom("Theo trạng thái", sorted(dem_tt.items(), key=lambda x: (-x[1], x[0])),
+                    len(dong))]
+    # Top theo view chỉ trên dòng OK: dòng trùng mang số của dòng gốc, tính vào là lặp bài.
+    bang_ok = TB.Bang("ok", bang.cot, [r for r, d in zip(bang.dong, dong)
+                                       if d["trang_thai"] == "OK"])
+    top = TB.top_theo(bang_ok, "View", 5, ["STT", "Link", "Nền tảng", "Tài khoản", "View"],
+                      ten="Top 5 link theo view")
+    ghi_chu = [
+        "Ô trống = nguồn không có số, không tính là 0.",
+        "Tổng do code cộng trên các link OK; link trùng hiện số của dòng gốc nhưng KHÔNG "
+        "cộng lại vào tổng.",
+        f"Câu tổng: {cau_tong}",
+    ]
+    ghi_chu += [_GHI_CHU_NEN[p] for p in sorted({d["nen"] for d in ok}) if p in _GHI_CHU_NEN]
+    khong = [d for d in dong if d["trang_thai"] != "OK" and d["trung_voi"] is None]
+    if khong:
+        ghi_chu.append(f"{len(khong)} link không có số (xem cột Trạng thái): "
+                       + "; ".join(f"dòng {d['stt']}" for d in khong[:30])
+                       + (f"… và {len(khong) - 30} link nữa" if len(khong) > 30 else "") + ".")
+    if con_lai:
+        ghi_chu.append(f"{len(con_lai)} link CHƯA đếm vì vượt trần console mỗi lượt — gọi "
+                       "lại chi_so_bai với đúng các link đó để lấy nốt.")
+    if du:
+        ghi_chu.append(f"{len(du)} link bị bỏ vì quá tối đa {_TOI_DA_LINK} link mỗi lượt — "
+                       "không có trong sheet; gửi lượt sau.")
+    ghi_chu += [f"Lỗi nguồn {_ten(p)}: {v}" for p, v in loi.items() if p != "sheet"]
+    nguon = "Tool chi_so_bai · " + ", ".join(
+        f"{_ten(p)} ({_NGUON.get(p, 'YouTube Data API v3')})" for p in chay)
+    return TB.TongQuan(
+        tieu_de=title, nguon=nguon,
+        thoi_gian=f"chỉ số công khai lấy lúc {luc:%H:%M %d/%m/%Y}",
+        pham_vi=f"{len(links)} link bài, đúng thứ tự dán",
+        so_lieu=so_lieu, nhom=nhom, top=top, ghi_chu=ghi_chu)
+
+
+def _bang_goc(dong: list):
+    """Bản ghi nguồn nguyên vẹn của mỗi link lấy được số (cùng thứ tự tab dữ liệu; dòng
+    trùng không lặp lại) — tool chỉ chọn vài trường của bản ghi Apify/YouTube."""
+    goc = [{"STT (tab dữ liệu)": d["stt"], "Link đã dán": d["link"], **d["ket"]["_goc"]}
+           for d in dong if d["trung_voi"] is None and d["ket"]
+           and isinstance(d["ket"].get("_goc"), dict)]
+    return TB.bang_goc(goc) if goc else None
 
 
 def _available() -> bool:

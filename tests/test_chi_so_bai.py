@@ -16,6 +16,7 @@ import chi_phi_tool
 import chi_so_bai_tool as C
 import lsr_policy
 import memory_store
+from sheet_gia import LarkGia
 
 TT1 = "https://www.tiktok.com/@rgbvn/video/7691561321686469895"
 TT_NGAN = "https://vt.tiktok.com/ZSbf7vghV/"
@@ -59,7 +60,7 @@ YOUTUBE = {"items": [{"id": "ms5PUZ2mSXw",
 
 @pytest.fixture
 def gia(monkeypatch):
-    s = {"goi": [], "rows": None, "tran": {}, "loi": {}, "grant": [], "yt": []}
+    s = {"goi": [], "tran": {}, "loi": {}, "grant": [], "yt": [], "lark": LarkGia()}
 
     def call(actor, payload, limit, mem=None, min_charge=0, tran_usd=None, *, nen_tang=None):
         s["goi"].append((actor, payload, limit, nen_tang))
@@ -79,9 +80,8 @@ def gia(monkeypatch):
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: {
         "usd": 0.02, "so_run": 4, "cham_tran": 0, "dang_chay": 0})
     monkeypatch.setattr(chi_phi_tool, "ghi", lambda **k: {})
-    monkeypatch.setattr(A, "_create_sheet", lambda t: ("tok", "https://x/sheets/tok"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda t: "s1")
-    monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows: s.__setitem__("rows", rows))
+    # Lark giả (tests/sheet_gia.py): Sheet dựng bằng trinh_bay_sheet, soi được từng tab.
+    monkeypatch.setattr(A.lark, "call", s["lark"].call)
     monkeypatch.setattr(A, "_grant", lambda tok, oid: s["grant"].append(oid) or True)
     monkeypatch.setattr(memory_store, "get_current_sender", lambda: "ou_x")
     return s
@@ -135,7 +135,7 @@ def test_doc_so(v, ra):
 def test_uoc_tinh_khong_chay_va_chia_dung_nen_tang(gia):
     kq = _chay(link_bai=[TT1, TT_NGAN, FB, YT, IG, TH, "https://www.tiktok.com/@rgbvn"],
                chi_uoc_tinh=True)
-    assert gia["goi"] == [] and gia["yt"] == [] and gia["rows"] is None
+    assert gia["goi"] == [] and gia["yt"] == [] and not gia["lark"].bt
     assert kq["chi_uoc_tinh"] and kq["theo_nen_tang"] == {
         "tiktok": 2, "facebook": 1, "youtube": 1, "instagram": 1, "threads": 1}
     assert kq["uoc_tinh_chi_phi_usd"] == round(2 * 0.003 + 0.005 + 0.0027 + 0.0475, 3)
@@ -195,7 +195,7 @@ def test_moi_luot_actor_co_han_chot_chung(gia, monkeypatch):
 def test_chay_du_5_nen_tang_dung_thu_tu_va_tong_do_code_cong(gia):
     links = [YT, TT_NGAN, FB, TT1, IG, TH, TT_QUERY, TT1, "https://www.tiktok.com/@rgbvn"]
     kq = _chay(link_bai=links)
-    rows = gia["rows"]
+    rows = gia["lark"].o("Dữ liệu")
     assert rows[0][:3] == ["STT", "Link", "Nền tảng"]
     assert [r[1] for r in rows[1:10]] == links                     # đúng thứ tự dán
     by = {r[1]: r for r in rows[1:7]}
@@ -216,7 +216,7 @@ def test_chay_du_5_nen_tang_dung_thu_tu_va_tong_do_code_cong(gia):
     tong_row = rows[-1]
     assert tong_row[1].startswith("TỔNG") and tong_row[5] == kq["tong"]["view"]["tong"]
     assert "545.274" in kq["cau_tong"] and "6 link" in kq["cau_tong"]
-    assert kq["sheet_url"] == "https://x/sheets/tok" and gia["grant"] == ["ou_x"]
+    assert kq["sheet_url"] == "https://x.larksuite.com/sheets/sht1" and gia["grant"] == ["ou_x"]
     assert kq["trung_lap"] == ["8 trùng 4"]
     assert any("Instagram" in g for g in kq["gioi_han_nen_tang"])
 
@@ -246,7 +246,7 @@ def test_bai_khong_tra_ve_thi_bao_khong_lay_duoc(gia):
 
 def test_khong_link_nao_dem_duoc_thi_khong_tao_sheet(gia):
     kq = _chay(link_bai=["https://www.tiktok.com/@rgbvn"])
-    assert gia["rows"] is None and kq["sheet_url"] is None and kq["so_link_ok"] == 0
+    assert not gia["lark"].bt and kq["sheet_url"] is None and kq["so_link_ok"] == 0
 
 
 def test_thieu_link_bao_loi(gia):

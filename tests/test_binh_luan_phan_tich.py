@@ -17,6 +17,7 @@ import pytest
 import apify_tool as A
 import deep_dive_tool as D
 import phan_loai as P
+from sheet_gia import LarkGia
 
 TT = "https://www.tiktok.com/@kenh/video/{}"
 
@@ -47,10 +48,42 @@ def _model_gia(nhac: str) -> str:
     return json.dumps(ra)
 
 
+class TabGia:
+    """Lưới ô của MỘT tab dữ liệu trong Lark giả (`tests/sheet_gia.LarkGia`), tìm theo tên
+    bảng (tab có thể đánh số "2. Thống kê"). Đọc lười: dùng sau khi tool chạy xong."""
+
+    def __init__(self, gia: LarkGia, ten: str):
+        self.gia, self.ten = gia, ten
+
+    def tab_that(self) -> str | None:
+        if not self.gia.bt:
+            return None
+        mau = re.compile(rf"(?:\d+\. )?{re.escape(self.ten)}")
+        return next((t for t in self.gia.tab_ten() if mau.fullmatch(t)), None)
+
+    def _o(self) -> list:
+        t = self.tab_that()
+        return self.gia.o(t) if t else []
+
+    def __getitem__(self, i):
+        return self._o()[i]
+
+    def __iter__(self):
+        return iter(self._o())
+
+    def __len__(self):
+        return len(self._o())
+
+
 @pytest.fixture
 def moi_truong(monkeypatch):
+    """-> (Apify giả, sổ chi phí, bảng 'Bình luận', bảng 'Thống kê'). Sheet đi qua
+    `trinh_bay_sheet` thật trên Lark giả (`sheet_gia.LarkGia`, gắn ở `.gia`)."""
     ap = _Apify()
-    ghi_so, ghi_sheet, ghi_tab = [], [], []
+    ghi_so = []
+    gia = LarkGia()
+    ghi_sheet, ghi_tab = TabGia(gia, "Bình luận"), TabGia(gia, "Thống kê")
+    ghi_sheet.gia_lark = gia
     monkeypatch.setattr(D, "_call", ap)
     monkeypatch.setattr(D, "_cau_hinh", lambda: (300, 0.5))
     monkeypatch.setattr(A, "_tran", lambda: (500, 0.37))
@@ -58,16 +91,9 @@ def moi_truong(monkeypatch):
         "usd": 0.2, "so_run": len(ap.goi), "cham_tran": 0, "dang_chay": 0})
     monkeypatch.setattr(D.chi_phi_tool, "ghi", lambda **k: ghi_so.append(k) or {})
     monkeypatch.setattr(D.phan_loai, "_goi_model", _model_gia)
-    monkeypatch.setattr(D, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(D, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(D, "_write", lambda tok, sid, values: ghi_sheet.extend(values))
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: ghi_tab.append(ten) or "s2")
-    monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows, **k: ghi_tab.append((sid, rows)))
+    monkeypatch.setattr(A.lark, "call", gia.call)
     monkeypatch.setattr(D, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(D.memory_store, "get_current_sender", lambda: "ou_test")
-    # Đặt tên tab / bỏ cột thừa: không gọi Lark thật (canh riêng ở test_sheet_gon).
-    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: None)
-    monkeypatch.setattr(A, "_vua_cot", lambda *a: None)
     return ap, ghi_so, ghi_sheet, ghi_tab
 
 
@@ -223,16 +249,20 @@ def test_sheet_co_cot_sac_thai_chu_de_va_tab_thong_ke(moi_truong):
     assert nhan["túi đẹp quá"] == ("Tích cực", "Sản phẩm/chất lượng")
     assert nhan["giao chậm"] == ("Tiêu cực", "Giao hàng/dịch vụ")
     assert nhan["giá bao nhiêu"] == ("Trung lập", "Giá/mua ở đâu/ý định mua")
-    assert nhan["@ban"] == ("Trung lập", "Tag bạn bè")
-    assert tab[0] == "Thống kê" and tab[1][0] == "s2"
-    assert all(len(r) == 5 for r in tab[1][1]), "mọi dòng bảng thống kê cùng số cột"
+    assert nhan["'@ban"] == ("Trung lập", "Tag bạn bè"), "ô '@…' vẫn bị chặn chèn công thức"
+    assert tab.tab_that() == "2. Thống kê"
+    assert tab[0] == ["Phạm vi", "Sắc thái / Chủ đề", "Số bình luận",
+                      "Tỉ lệ % (trên số đã phân loại)", "Tỉ lệ % theo lượt thích"]
+    assert all(len(r) == 5 for r in tab), "mọi dòng bảng thống kê cùng số cột"
+    assert ["Tổng", "Tích cực", 1, 25.0, 75.0] in list(tab), "đúng số của `thong_ke`"
     tk = kq["thong_ke"]
     assert tk["tong"] == 4 and tk["da_phan_loai"] == 4
     assert tk["sac_thai"]["Tích cực"] == {"so": 1, "ti_le": 25.0, "ti_le_theo_like": 75.0}
     assert tk["theo_bai"][u]["tong"] == 4 and tk["theo_nen_tang"]["tiktok"]["tong"] == 4
     assert kq["dong_thong_ke"].startswith("Đã phân loại 4/4 bình luận")
     assert kq["trich_dan"]["Tích cực"][0]["text"] == "túi đẹp quá"
-    assert kq["thong_ke_ghi_o"] == "tab 'Thống kê'"
+    assert kq["thong_ke_ghi_o"] == "tab '2. Thống kê'"
+    assert kq["day_du"] is True and kq["kiem_ghi"].startswith("Đã ghi đủ")
 
 
 # ───────────────────────── phan_loai ─────────────────────────
@@ -482,7 +512,7 @@ def test_lo_chay_trong_context_rieng_co_han_va_so_run(moi_truong, monkeypatch):
     assert kq["per_url"][a]["status"] == D._CHUA_XONG_GIU
     assert kq["per_url"][a]["comments"] == 2 and kq["per_url"][a]["ma"] == "OK_MOT_PHAN"
     assert kq["per_url"][b]["status"] == D._CHUA_XONG_GIU and kq["per_url"][b]["comments"] == 0
-    assert kq["tong_comment"] == 2 and kq["sheet_url"] == "https://sheet", "giữ phần đã lấy"
+    assert kq["tong_comment"] == 2 and kq["sheet_url"], "giữ phần đã lấy"
 
 
 class _R:

@@ -19,6 +19,7 @@ import json
 import pytest
 
 import apify_tool as A
+from sheet_gia import LarkGia
 
 Q = ["hapas"]
 
@@ -277,15 +278,14 @@ FIXTURE = {
 @pytest.fixture
 def quet(monkeypatch):
     """Chạy `_handle` trên dữ liệu giả — không mạng, không Lark, không Apify, không model."""
-    ghi, hoi = [], []
+    hoi = []
     for p, rows in FIXTURE.items():
         monkeypatch.setitem(A._FETCH, p, lambda *a, _r=rows: [(dict(d), NOW) for d in _r])
     monkeypatch.setattr(A, "_tran", lambda: (500, 1.0))
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_write_values",
-                        lambda tok, sid, rows, **k: ghi.append((sid, rows, k)))
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: "s2")
+    # Lark giả trọn vẹn: `ghi` nhìn tab dữ liệu như [(mã cũ, dòng, {})] — s1 bài, s2 Bị loại.
+    gia = LarkGia(url="https://sheet")
+    monkeypatch.setattr(A.lark, "call", gia.call)
+    ghi = gia.ghi_cu({A.TAB_BAI_DANG: "s1", "Dữ liệu": "s1", A._TAB_BI_LOAI: "s2"}, ba=True)
     monkeypatch.setattr(A, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(A.memory_store, "get_current_sender", lambda: "ou_test")
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
@@ -299,6 +299,7 @@ def quet(monkeypatch):
                 "date_to": f"{NOW + datetime.timedelta(hours=1):%Y-%m-%d}",
                 "exclude": ["guitars"], "boi_canh": "HAPAS: túi xách, nước hoa", **them}
         return json.loads(A._handle(args))
+    chay.gia = gia
     return chay, ghi, hoi
 
 
@@ -333,22 +334,30 @@ def test_bai_bi_loai_ghi_tab_rieng_kem_ly_do(quet):
     assert loai[0][-2:] == ["Lý do loại", A._COT_LOAI_VIDEO] and len(loai) == 1 + 8
     assert all(r[-2] for r in loai[1:]), "dòng bị loại nào cũng phải có lý do"
     assert any("Mason Nguyễn" == r[2] and "từ khoá" in r[-2] for r in loai[1:])
-    assert kq["bi_loai_ghi_o"] == "tab 'Bị loại'"
+    assert kq["bi_loai_ghi_o"] == "tab '2. Bị loại'"
+    assert chay.gia.tab_ten()[:3] == ["Tổng quan", "1. Bài đăng", "2. Bị loại"]
 
 
-def test_them_tab_hong_thi_ghi_duoi_sheet_chinh(quet, monkeypatch):
+def test_them_tab_hong_thi_ghi_duoi_sheet_chinh(quet):
     chay, ghi, _ = quet
+    gia = chay.gia
+    goc = gia.call
 
-    def hong(tok, ten):
-        raise RuntimeError("lark 500")
-    monkeypatch.setattr(A, "_them_tab", hong)
+    def call(method, path, query=None, body=None):
+        if path.endswith("/sheets_batch_update") and any(
+                "addSheet" in r and r["addSheet"]["properties"]["title"] != "Tổng quan"
+                for r in body["requests"]):
+            raise RuntimeError("lark 500")
+        return goc(method, path, query, body)
+    A.lark.call = call
     kq = chay()
-    assert [sid for sid, _, _ in ghi] == ["s1", "s1"]
-    sid, rows, k = ghi[1]
-    assert k.get("dong_dau") == 1 + 3 + 1, "phải ghi NỐI dưới, không đè sheet chính"
-    assert any("BỊ LOẠI" in str(c) for r in rows for c in r)
-    assert len({len(r) for r in rows}) == 1, "dòng phân cách phải đệm đủ số cột"
-    assert "cuối sheet chính" in kq["bi_loai_ghi_o"]
+    o = gia.o(gia.tab_ten()[1])
+    assert o[0][0] == "Nền tảng" and len(gia.du_lieu(gia.tab_ten()[1])) == 1 + 3
+    assert o[4] == [""] * len(o[0]), "một dòng trống rồi mới tới bảng ghi nối"
+    assert o[5][0] == "— 2. Bị loại — (không thêm được tab riêng)"
+    assert [x for x in o[6] if x][-2:] == ["Lý do loại", A._COT_LOAI_VIDEO], "ghi nối"
+    assert len(o) == 6 + 1 + 8
+    assert kq["bi_loai_ghi_o"].startswith("cuối tab '1. Bài đăng'")
 
 
 def test_loi_tao_sheet_khong_lam_lo_token(quet, monkeypatch):

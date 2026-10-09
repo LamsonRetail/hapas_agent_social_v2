@@ -101,23 +101,26 @@ def test_tab_phu_moi_cung_bo_cot_thua(luoi):
 # ───────────────────────── từng tool ─────────────────────────
 def test_social_listen_tab_chinh_ten_bai_dang_vua_tieu_de(quet, monkeypatch):  # noqa: F811
     chay, ghi, _, _ = quet
-    sua = []
-    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: sua.append(a))
     chay()
-    assert sua == [("tok", "s1", "Bài đăng", len(ghi[0][1][0]))]
-    assert len(ghi[0][1][0]) == len(A._HEADER) + len(A._COT_THEM_BAI) + 1  # + Loại video TikTok
+    gia = chay.gia
+    so_cot = len(A._HEADER) + len(A._COT_THEM_BAI) + 1  # + Loại video TikTok
+    assert len(ghi[0][1][0]) == so_cot
+    # Tab bài chính đặt tên (không còn "Sheet1") và bỏ cột lưới trống bên phải.
+    assert gia.tab_ten()[1] == "1. Bài đăng" and "Sheet1" not in gia.tab_ten()
+    assert gia.tab("1. Bài đăng")["cols"] == so_cot
 
 
-def test_deep_dive_tab_chinh_ten_binh_luan_vua_tieu_de(moi_truong, monkeypatch):  # noqa: F811
-    ap = moi_truong[0]
+def test_deep_dive_tab_chinh_ten_binh_luan_vua_tieu_de(moi_truong):  # noqa: F811
+    """Sheet bình luận đi qua trinh_bay_sheet: không còn "Sheet1", tab đầu là Tổng quan,
+    tab dữ liệu đánh số, cột lưới vừa đúng số cột của bảng."""
+    ap, gia = moi_truong[0], moi_truong[2].gia_lark
     ap.tra = lambda payload, limit: [_bl(TT.format(7000001), "đẹp")]
-    sua, vua = [], []
-    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: sua.append(a))
-    monkeypatch.setattr(A, "_vua_cot", lambda *a: vua.append(a))
     kq = json.loads(D._handle({"post_urls": [TT.format(7000001)]}))
     assert kq["success"] is True
-    assert sua == [("tok", "s1", "Bình luận", len(D._HEADER))]
-    assert vua == [("tok", "s2", 5)], "tab Thống kê 5 cột"
+    ten = gia.tab_ten()
+    assert ten[:3] == ["Tổng quan", "1. Bình luận", "2. Thống kê"] and "Sheet1" not in ten
+    assert gia.tab("1. Bình luận")["cols"] == len(D._HEADER)
+    assert gia.tab("2. Thống kê")["cols"] == 5, "tab Thống kê 5 cột"
 
 
 # ───────────────────────── sheet_lon (việc nền) ─────────────────────────

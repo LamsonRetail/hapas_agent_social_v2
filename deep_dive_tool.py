@@ -91,8 +91,9 @@ import apify_tool as A
 import chi_phi_tool
 import memory_store
 import phan_loai
-from apify_tool import (_VN_TZ, _call, _che_token, _grant, _create_sheet,
-                        _first_sheet_id, _to_vn, lark)
+import trinh_bay_sheet as T
+from apify_tool import (_VN_TZ, _call, _che_token, _grant, _create_sheet,  # noqa: F401
+                        _first_sheet_id, _to_vn, lark)  # (_create_sheet: bộ thử cũ patch)
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
@@ -416,6 +417,7 @@ def _map_tiktok(raw: list) -> tuple[list[dict], int]:
         "cha": _cha_tiktok(it, goc),
         "_nguon": [str(it.get(k) or "") for k in
                    ("videoWebUrl", "submittedVideoUrl", "inputUrl", "url")],
+        "__goc": it,          # bản ghi gốc → tab "Dữ liệu gốc" (không vào sổ việc/tool_result)
     } for it in raw], len(raw)
 
 
@@ -440,6 +442,7 @@ def _map_youtube(raw: list) -> tuple[list[dict], int]:
         "_nguon": [str(it.get(k) or "") for k in ("pageUrl", "videoUrl", "inputUrl", "url")]
                   + ([f"https://www.youtube.com/watch?v={it['videoId']}"]
                      if it.get("videoId") else []),
+        "__goc": it,
     } for it in raw], len(raw)
 
 
@@ -468,6 +471,7 @@ def _map_facebook(raw: list) -> tuple[list[dict], int]:
             "link": str(_first(it, "facebookUrl", "commentUrl", "postUrl")),
             "_nguon": [str(it.get(k) or "") for k in
                        ("facebookUrl", "postUrl", "inputUrl", "url", "commentUrl")],
+            "__goc": it,
         })
     if la and not out:
         raise RuntimeError(
@@ -518,6 +522,7 @@ def _map_threads(raw: list) -> tuple[list[dict], int]:
             "link": goc,
             # KHÔNG đưa reply_url vào: …/post/<mã TRẢ LỜI> không phải mã bài.
             "_nguon": [goc] + [str(it.get(k) or "") for k in ("inputUrl", "url")],
+            "__goc": it,
         })
     _bao_shape("Threads", la, out)
     return out, len(raw)
@@ -542,6 +547,7 @@ def _map_threads_du_phong(raw: list) -> tuple[list[dict], int]:
             "tac_gia_thich": "có" if it.get("isLikedByRootAuthor") else "",
             "link": goc,
             "_nguon": [str(it.get(k) or "") for k in ("sourceUrl", "rootPostUrl")],
+            "__goc": it,
         })
     _bao_shape("Threads (dự phòng)", la, out)
     return out, len(raw)
@@ -572,6 +578,7 @@ def _map_instagram(raw: list) -> tuple[list[dict], int]:
             "link": str(it.get("postUrl") or ""),
             "_nguon": [str(it.get(k) or "") for k in
                        ("postUrl", "inputUrl", "url", "commentUrl")],
+            "__goc": it,
         })
     _bao_shape("Instagram", la, out)
     return out, len(raw)
@@ -597,6 +604,7 @@ def _map_instagram_du_phong(raw: list) -> tuple[list[dict], int]:
             "link": goc,
             "_nguon": [goc] + ([f"https://www.instagram.com/p/{it['postId']}/"]
                                if it.get("postId") else []),
+            "__goc": it,
         })
     _bao_shape("Instagram (dự phòng)", la, out)
     return out, len(raw)
@@ -607,9 +615,10 @@ def _yt_link(vid: str) -> str:
     return f"https://www.youtube.com/watch?v={vid}"
 
 
-def _yt_dong(sn: dict, vid: str, tra_loi: int = 0, cha: str = "") -> dict:
+def _yt_dong(sn: dict, vid: str, tra_loi: int = 0, cha: str = "", goc: dict | None = None) -> dict:
     """Một comment (snippet của commentThreads/comments) -> dòng chung của tool. `cha` =
-    link bình luận gốc khi dòng này là TRẢ LỜI (rỗng với bình luận gốc)."""
+    link bình luận gốc khi dòng này là TRẢ LỜI (rỗng với bình luận gốc). `goc` = cả đối
+    tượng comment API trả (cho tab "Dữ liệu gốc"); không có thì dùng snippet."""
     link = _yt_link(vid)
     return {
         "kenh": str(sn.get("authorDisplayName") or ""),
@@ -624,6 +633,7 @@ def _yt_dong(sn: dict, vid: str, tra_loi: int = 0, cha: str = "") -> dict:
         "link": link,
         "cha": cha,
         "_nguon": [link],
+        "__goc": goc if goc is not None else sn,
     }
 
 
@@ -658,14 +668,14 @@ def _yt_mot_video(vid: str, per: int, han: float, dv: list) -> tuple[list[dict],
             sn = th.get("snippet") or {}
             goc = sn.get("topLevelComment") or {}
             tong = _so(sn.get("totalReplyCount"))
-            rows.append(_yt_dong(goc.get("snippet") or {}, vid, tong))
+            rows.append(_yt_dong(goc.get("snippet") or {}, vid, tong, goc=goc))
             cha = f"{_yt_link(vid)}&lc={goc.get('id') or ''}"
             kem = (th.get("replies") or {}).get("comments") or []
             da = set()
             for r in kem:
                 if len(rows) >= per:
                     break
-                rows.append(_yt_dong(r.get("snippet") or {}, vid, 0, cha))
+                rows.append(_yt_dong(r.get("snippet") or {}, vid, 0, cha, goc=r))
                 da.add(r.get("id"))
             if tong > len(kem) and goc.get("id"):
                 thieu.append((goc["id"], cha, da))
@@ -686,7 +696,7 @@ def _yt_mot_video(vid: str, per: int, han: float, dv: list) -> tuple[list[dict],
                 if r.get("id") in da:
                     continue
                 da.add(r.get("id"))
-                rows.append(_yt_dong(r.get("snippet") or {}, vid, 0, cha))
+                rows.append(_yt_dong(r.get("snippet") or {}, vid, 0, cha, goc=r))
             tok = d.get("nextPageToken")
             if not tok:
                 break
@@ -1213,6 +1223,113 @@ def _ghi_thong_ke(tok: str, sid_chinh: str, so_dong_chinh: int, tk: dict) -> str
     return "cuối sheet chính (dưới dòng 'THỐNG KÊ')"
 
 
+# ── Trình bày sheet (08/10/2026, `trinh_bay_sheet`) — dùng chung với kenh_nha_tool ──
+# Kiểu cột theo TÊN tiêu đề. "Thời gian" là "YYYY-MM-DD HH:MM" giờ VN (`_gio`) → ngày giờ
+# thật; YouTube dự phòng trả chữ tương đối ("2 years ago") thì giữ nguyên chữ.
+_KIEU_COT_BL = {"Nền tảng": "chu", "Người bình luận": "ma", "Nội dung bình luận": "chu_dai",
+                "Sắc thái": "chu", "Chủ đề": "chu", "Likes": "so_nguyen",
+                "Trả lời": "so_nguyen", "Thời gian": "ngay_gio", "Tác giả đã thích": "chu",
+                "Link bài": "link", "Trả lời bình luận": "chu", "Cấp": "chu",
+                "Trả lời cho": "ma"}
+TAB_BAI = "Bài đăng"
+_COT_BAI = [T.Cot("Link bài", "link"), T.Cot("Nền tảng"), T.Cot("Trạng thái"),
+            T.Cot("Số bình luận", "so_nguyen"), T.Cot("Ghi chú / lỗi", "chu_dai"),
+            T.Cot("Nguồn lấy", "chu_dai")]
+
+
+def cot_binh_luan(header: list) -> list:
+    """Tiêu đề bảng bình luận → [T.Cot] có kiểu (tên lạ → chữ)."""
+    return [T.Cot(c, _KIEU_COT_BL.get(c, "chu")) for c in header]
+
+
+def bang_thong_ke(tk: dict, ten: str = _TAB_THONG_KE) -> "T.Bang":
+    """`_dong_thong_ke` → bảng "Thống kê" (ĐÚNG các dòng/số cũ, kể cả dòng TỔNG và dòng
+    phản hồi thương hiệu). Tỉ lệ của `phan_loai` ĐÃ nhân 100 (25.0 = 25%) → phan_tram_100."""
+    rows = _dong_thong_ke(tk)
+    h = rows[0]
+    return T.Bang(ten, [T.Cot(h[0]), T.Cot(h[1]), T.Cot(h[2], "so_nguyen"),
+                        T.Cot(h[3], "phan_tram_100"), T.Cot(h[4], "phan_tram_100")],
+                  rows[1:], mo_ta="Đếm sắc thái/chủ đề: tổng, theo nền tảng, theo bài "
+                                  "(tỉ lệ % trên số ĐÃ phân loại)", gap_duoc=False)
+
+
+def so_lieu_thong_ke(tk: dict, so_dong_sheet: int) -> list:
+    """Số liệu chính cho Tổng quan — CHÉP từ `thong_ke` (`phan_loai.dem`), không tính lại.
+    Tỉ lệ ghi đúng dạng câu `dong_thong_ke` (1 chữ số thập phân)."""
+    sl = [T.SoLieu("Bình luận đã ghi sheet", so_dong_sheet, "so_nguyen",
+                   ghi_chu="gồm cả phản hồi của chính thương hiệu (nếu có)"),
+          T.SoLieu("Bình luận tính thống kê", tk["tong"], "so_nguyen",
+                   ghi_chu="không gồm phản hồi của chính thương hiệu"),
+          T.SoLieu("Đã phân loại", tk["da_phan_loai"], "so_nguyen",
+                   ghi_chu=f"{tk['da_phan_loai']}/{tk['tong']}")]
+    if tk.get("chua_phan_loai"):
+        sl.append(T.SoLieu("Chưa phân loại", tk["chua_phan_loai"], "so_nguyen",
+                           ghi_chu="không đoán nhãn — không vào tỉ lệ"))
+    for lab, v in (tk.get("sac_thai") or {}).items():
+        sl.append(T.SoLieu(lab, v["so"], "so_nguyen", ghi_chu=(
+            f"{phan_loai._pt(v['ti_le'])} trên số đã phân loại · "
+            f"{phan_loai._pt(v['ti_le_theo_like'])} theo lượt thích")))
+    if tk.get("cua_thuong_hieu"):
+        sl.append(T.SoLieu("Phản hồi của chính thương hiệu", tk["cua_thuong_hieu"],
+                           "so_nguyen", ghi_chu="có trong sheet, KHÔNG tính vào số/%"))
+    return sl
+
+
+def ghi_chu_thong_ke(dong_tk: str) -> list:
+    return [dong_tk,
+            "Sắc thái/Chủ đề do tool tự gán (luật + AI). Tỉ lệ % tính trên số bình luận ĐÃ "
+            "phân loại (làm tròn 1 chữ số); 'theo lượt thích' = trọng số theo Likes. Phản hồi "
+            f"của chính thương hiệu (cột {phan_loai.NGUON_COT} = '{phan_loai.NGUON_NHA}') nằm "
+            "trong bảng bình luận nhưng không vào thống kê."]
+
+
+def tong_quan_binh_luan(tieu_de: str, nguon: str, pham_vi: str, bang_bl: "T.Bang",
+                        tk: dict | None, ghi_chu: list, so_dong: int) -> "T.TongQuan":
+    """Tổng quan chung của sheet bình luận (social_deep_dive, binh_luan_kenh_nha)."""
+    ten_cot = [c.ten for c in bang_bl.cot]
+    nhom = [T.dem_theo(bang_bl, "Nền tảng")]
+    if phan_loai.NGUON_COT in ten_cot:
+        nhom.append(T.dem_theo(bang_bl, phan_loai.NGUON_COT))
+    hien = [c for c in ("Nền tảng", "Người bình luận", "Nội dung bình luận", "Sắc thái",
+                        "Likes", "Link bài") if c in ten_cot]
+    return T.TongQuan(
+        tieu_de=tieu_de, nguon=nguon, pham_vi=pham_vi,
+        so_lieu=so_lieu_thong_ke(tk, so_dong) if tk else
+        [T.SoLieu("Bình luận đã ghi sheet", so_dong, "so_nguyen")],
+        nhom=nhom, top=T.top_theo(bang_bl, "Likes", 5, hien, "Top 5 bình luận nhiều like"),
+        ghi_chu=[g for g in ghi_chu if g])
+
+
+def noi_ghi(kq, ten: str) -> str:
+    """Nơi bảng `ten` thật sự nằm trong sheet `kq` (tên tab sau khi đánh số/tách phần)."""
+    mau = re.compile(rf"(?:\d+\. )?{re.escape(ten)}(?: \(\d+/\d+\))?")
+    for t in kq.tabs:
+        if mau.fullmatch(t.ten):
+            return (f"tab '{t.ten}'" if not t.noi_duoi
+                    else f"cuối tab '{t.noi_duoi}' (dưới dòng '— {t.ten} —')")
+    return f"tab '{T.TAB_TONG_QUAN}' (khối '{ten}')"
+
+
+def bang_goc_dong(rows: list[dict]):
+    """Bản ghi gốc (`__goc`) theo ĐÚNG thứ tự dòng bình luận → bảng "Dữ liệu gốc"; None nếu
+    không dòng nào mang bản ghi gốc. Lấy RA khỏi dòng (pop) để khỏi lọt đi đâu khác."""
+    goc = [c.pop("__goc", None) for c in rows]
+    if not any(isinstance(g, dict) and g for g in goc):
+        return None
+    return T.bang_goc([g if isinstance(g, dict) else {} for g in goc])
+
+
+def _bang_bai(urls: list[str], per_url: dict) -> "T.Bang":
+    dong = []
+    for u in urls:
+        x = per_url.get(u) or {}
+        dong.append([u, x.get("platform") or "", x.get("status") or "",
+                     x["comments"] if isinstance(x.get("comments"), int) else "",
+                     x.get("error") or x.get("ghi_chu") or "", x.get("nguon") or ""])
+    return T.Bang(TAB_BAI, _COT_BAI, dong, mo_ta="Trạng thái từng bài đã soi (số bình luận "
+                                                  "lấy được, lỗi, nguồn dự phòng)")
+
+
 # ───────────────────────── tool ─────────────────────────
 SCHEMA = {
     "name": "social_deep_dive",
@@ -1262,7 +1379,8 @@ SCHEMA = {
         "- YouTube lấy bằng nguồn DỰ PHÒNG trả thời gian dạng chữ tương đối ('2 years ago'), "
         "KHÔNG phải ngày "
         "tuyệt đối — đừng quy đổi thành ngày cụ thể.\n"
-        "- Gửi NGUYÊN `sheet_url`. `granted`=false thì báo người dùng có thể mở không được.\n"
+        "- Gửi NGUYÊN `sheet_url` kèm NGUYÊN câu `kiem_ghi` (`day_du`=false = sheet ghi "
+        "thiếu, nói rõ). `granted`=false thì báo người dùng có thể mở không được.\n"
         "- Chi phí: chỉ nói khi được hỏi, đọc NGUYÊN VĂN `chi_phi`. NGOẠI LỆ: bóc LỚN thì "
         "PHẢI nói USD ước tính trước khi chạy.\n"
         "- BÓC LỚN (>1500 bình luận tổng, hoặc lượt chậm/đắt hơn một lượt trả lời): tool tự "
@@ -1586,7 +1704,7 @@ def _xu_ly(args: dict) -> str:
     dong_tk = phan_loai.dong_thong_ke(tk)
     title = (args.get("title") or "").strip() or \
         f"Bình luận · {len(urls)} bài · {datetime.datetime.now(_VN_TZ):%d-%m %H%M}"
-    values = [list(_HEADER)] + [[
+    values = [[
         c["platform"], c["kenh"], c["text"], c.get("sac_thai", phan_loai.CHUA),
         c.get("chu_de", phan_loai.CHUA), c["likes"], c["replies"], c["thoi_gian"],
         c["tac_gia_thich"], c["bai"] or c["link"], c.get("cha") or "", _nguon(c),
@@ -1594,31 +1712,76 @@ def _xu_ly(args: dict) -> str:
     pl = {"trang_thai": tt_pl.get("trang_thai", ""), "da_phan_loai": tk["da_phan_loai"],
           "tong": tk["tong"], "ghi_chu": tt_pl.get("ghi_chu", "")}
 
+    # ── sheet: Tổng quan + Bình luận + Thống kê + Bài đăng (+ Dữ liệu gốc) ──
+    goc = bang_goc_dong(rows)
+    bang_bl = T.Bang(A.TAB_BINH_LUAN, cot_binh_luan(_HEADER), values, gap_duoc=False,
+                     mo_ta="Mỗi bình luận một dòng, kèm nhãn Sắc thái/Chủ đề; cột Nguồn = "
+                           "khách / thương hiệu")
+    ghi_chu = ghi_chu_thong_ke(dong_tk) + [
+        f"Phân loại: {pl['trang_thai']}. {pl['ghi_chu']}".strip()
+        if pl["trang_thai"] and pl["trang_thai"] != "đã chạy" or pl["ghi_chu"] else "",
+        f"Mỗi bài lấy tối đa {per} bình luận (max_comments); bài nhiều hơn thì phần còn lại "
+        f"CHƯA lấy — muốn thêm thì soi lại với max_comments cao hơn (trong trần chủ agent đặt)."
+        + (f" {cat_per}" if cat_per else ""),
+        "Nội dung bình luận trong bảng cắt ở 1.000 ký tự; bản đầy đủ mọi trường nguồn trả "
+        f"nằm ở tab '{T.TAB_GOC}'." if goc else
+        "Nội dung bình luận trong bảng cắt ở 1.000 ký tự.",
+        "Likes/Trả lời là số nguồn trả lúc lấy; ô 'Số bình luận' trống ở bảng Bài đăng = bài "
+        "không chạy được/lỗi, KHÔNG phải 0.",
+        (f"{so_cat} bài '{_CAT}': lượt chạy chạm trần chi phí nên CHƯA lấy hết — không phải "
+         f"bài không có bình luận.") if so_cat else "",
+        f"{so_chua} bài chưa kéo xong vì hết thời gian (chỉ có phần đã lấy)." if so_chua else "",
+        (f"{so_ns_cham} bài '{_CHUA_CHAY_NS}': các lô trước đã tiêu gần hết ngân sách đã "
+         f"duyệt.") if so_ns_cham else "",
+        f"Nguồn HỎNG: {', '.join(failed)}." if failed else "",
+        f"Chưa hỗ trợ: {', '.join(chua_ho_tro)} — không bóc." if chua_ho_tro else "",
+        f"Đã tắt: {cau_tat} — các bài đó không được bóc." if tat else "",
+        f"{so_tat_bl} video '{_TAT_BL}' (chủ video tắt bình luận)." if so_tat_bl else "",
+        (f"{', '.join(A._TEN_NGUON.get(p, p) for p in du_phong)}: nguồn chính hỏng, đã lấy "
+         f"bằng nguồn DỰ PHÒNG (cột 'Nguồn lấy' của bảng Bài đăng).") if du_phong else "",
+        (f"{khong_quy} bình luận không quy được về bài nào trong danh sách (cột Link bài để "
+         f"link nguồn trả).") if khong_quy else "",
+        ("YouTube lấy bằng nguồn dự phòng trả thời gian dạng chữ tương đối ('2 years ago') — "
+         "giữ nguyên văn, không quy đổi thành ngày.")
+        if any(c["platform"] == "youtube" and not re.match(r"\d{4}-", str(c["thoi_gian"]))
+               for c in rows) else "",
+    ] + list(gioi_han.values())
+    tq = tong_quan_binh_luan(
+        title, "social_deep_dive — bình luận qua Apify"
+        + (f" + {_YT_API_NGUON}" if lo_yt else ""),
+        f"{len(urls)} bài · nền tảng: {', '.join(sorted(set(ke_hoach) | set(tat)))}",
+        bang_bl, tk, ghi_chu, len(rows))
+    sender = memory_store.get_current_sender()
+    cap: dict = {}
+
+    def _cap_quyen(tok: str) -> None:
+        T.gop_quyen(cap, _grant(tok, sender) if sender else False)
+
     try:
-        tok, url = _create_sheet(title)
-        sid = _first_sheet_id(tok)
-        _write(tok, sid, values)
+        kq_sheet = T.xuat(title, [bang_bl, bang_thong_ke(tk), _bang_bai(urls, per_url)], tq,
+                          goc=goc, cap_quyen=_cap_quyen)
     except Exception as e:  # noqa: BLE001
         return tool_result(
             success=False, sheet_url=None, **base, thong_ke=tk, dong_thong_ke=dong_tk,
             phan_loai=pl, trich_dan=phan_loai.trich_dan(rows),
             error=_che_token(f"Lấy được {len(rows)} comment nhưng TẠO/GHI SHEET THẤT "
                              f"BẠI: {type(e).__name__}: {e}"))
-    try:
-        thong_ke_o = _ghi_thong_ke(tok, sid, len(values), tk)
-    except Exception as e:  # noqa: BLE001 — sheet chính đã ghi xong, chỉ thiếu bảng đếm
-        thong_ke_o = f"KHÔNG ghi được ({_che_token(type(e).__name__)})"
-    A._sua_tab_chinh(tok, sid, A.TAB_BINH_LUAN, len(_HEADER))
-
-    sender = memory_store.get_current_sender()
-    granted = _grant(tok, sender) if sender else False
+    url = kq_sheet.url
+    granted = bool(cap.get("granted"))
+    thong_ke_o = noi_ghi(kq_sheet, _TAB_THONG_KE)
+    tab_bl = noi_ghi(kq_sheet, A.TAB_BINH_LUAN)
 
     return tool_result(
         success=True, title=title, sheet_url=url, granted=granted, **base,
         thong_ke=tk, dong_thong_ke=dong_tk, phan_loai=pl, thong_ke_ghi_o=thong_ke_o,
-        trich_dan=phan_loai.trich_dan(rows),
-        note=(f"Đã ghi ĐỦ {len(rows)} bình luận (kèm cột Sắc thái, Chủ đề) vào sheet "
-              f"'{title}'; thống kê ở {thong_ke_o}. GỬI `sheet_url`. Số sentiment CHỈ lấy "
+        trich_dan=phan_loai.trich_dan(rows), **kq_sheet.cho_tool(),
+        note=(f"Đã ghi {'ĐỦ ' if kq_sheet.day_du else ''}{len(rows)} bình luận (kèm cột Sắc "
+              f"thái, Chủ đề) vào sheet '{title}': tab '{T.TAB_TONG_QUAN}', bình luận ở "
+              f"{tab_bl}, thống kê ở {thong_ke_o}. Kiểm ghi: {kq_sheet.cau_kiem} "
+              + ("" if kq_sheet.day_du is not False else
+                 "CẢNH BÁO GHI THIẾU: sheet CHƯA đủ dòng như `kiem_ghi` nói — báo rõ với "
+                 "người dùng, đừng nói là đủ. ")
+              + "GỬI `sheet_url`. Số sentiment CHỈ lấy "
               f"từ `thong_ke`/`dong_thong_ke`, nói rõ đã phân loại {tk['da_phan_loai']}/"
               f"{tk['tong']}; dẫn lời thật từ `trich_dan`."
               + (f" {tk['cua_thuong_hieu']} phản hồi của CHÍNH thương hiệu (cột Nguồn = "
@@ -1992,31 +2155,76 @@ def chay_viec_nen(v) -> tuple[str, str]:
     cp = v.chot_chi_phi([f"bình luận {len(ts['post_urls'])} bài"], list(v.d["nen_tang"]), "")
     tk = phan_loai.dem(rows, "bai") if rows else None
     url = ""
+    kiem: dict = {}
     if rows:
+        title = ts.get("title") or f"Bình luận nền · {len(ts['post_urls'])} bài · {v.ma}"
+        dong_bl = [[
+            c["platform"], c.get("kenh") or "", str(c.get("text") or "")[:500],
+            c.get("sac_thai", phan_loai.CHUA), c.get("chu_de", phan_loai.CHUA),
+            c.get("likes") or 0, c.get("replies") or 0, c.get("thoi_gian") or "",
+            c.get("tac_gia_thich") or "", c.get("bai") or c.get("link") or "",
+            c.get("cha") or "", _nguon(c)] for c in rows]
+        bang_bl = T.Bang(A.TAB_BINH_LUAN, cot_binh_luan(_HEADER), dong_bl,
+                         mo_ta="Mỗi bình luận một dòng, kèm nhãn Sắc thái/Chủ đề; cột Nguồn "
+                               "= khách / thương hiệu")
+        bang_tk = bang_thong_ke(tk)
+        bang_bai = _bang_bai(list(ts["post_urls"]), per_url)
         try:
             s = sheet_lon.SoSheet(v)
-            title = ts.get("title") or f"Bình luận nền · {len(ts['post_urls'])} bài · {v.ma}"
-            s.dam_bao(title, "Bình luận", v.d.get("nguoi_yeu_cau") or "")
+            # Tab đầu = Tổng quan (việc cũ đã tạo sheet với tab đầu "Bình luận" thì Tổng quan
+            # thêm ở cuối — dữ liệu không đổi chỗ).
+            s.dam_bao(title, T.TAB_TONG_QUAN, v.d.get("nguoi_yeu_cau") or "")
             s.bat_dau_giai_doan("cuoi")
-            s.ghi_tab("Bình luận", [list(_HEADER)] + [[
-                c["platform"], c.get("kenh") or "", str(c.get("text") or "")[:500],
-                c.get("sac_thai", phan_loai.CHUA), c.get("chu_de", phan_loai.CHUA),
-                c.get("likes") or 0, c.get("replies") or 0, c.get("thoi_gian") or "",
-                c.get("tac_gia_thich") or "", c.get("bai") or c.get("link") or "",
-                c.get("cha") or "", _nguon(c)]
-                for c in rows])
-            s.ghi_tab(_TAB_THONG_KE, _dong_thong_ke(tk))
+            for b in (bang_bl, bang_tk, bang_bai):
+                s.ghi_tab(b.ten, [[c.ten for c in b.cot]] + b.dong, cot=b.cot, mo_ta=b.mo_ta)
             url = s.s.get("url") or ""
         except Exception as e:  # noqa: BLE001
             if type(e).__name__ == "MatQuyen":
                 raise
             ly_do.append(f"ghi sheet lỗi: {_che_token(e)[:150]}")
+        if url:
+            # Đọc lại các tab dữ liệu rồi mới dựng Tổng quan (mục lục + kiểm ghi). Hỏng Tổng
+            # quan không làm mất link: dữ liệu đã nằm ở các tab trên.
+            kiem = s.kiem_ghi(bo_qua=(T.TAB_TONG_QUAN,))
+            so_tat_bl = sum(1 for x in per_url.values() if x["status"] == _TAT_BL)
+            so_cat = sum(1 for x in per_url.values() if x["status"] == _CAT)
+            ghi_chu = ghi_chu_thong_ke(phan_loai.dong_thong_ke(tk)) + [
+                (f"{tt_pl['khong_gui_model']} bình luận ít like không gửi AI (trần "
+                 f"{A._so_env('SOCIAL_AI_NEN_BINH_LUAN', _AI_NEN_BINH_LUAN, 0, 100000)}) — "
+                 f"để 'Chưa phân loại'.") if tt_pl.get("khong_gui_model") else "",
+                f"Mỗi bài lấy tối đa {ts.get('max_comments') or '?'} bình luận (max_comments); "
+                "bài nhiều hơn thì phần còn lại CHƯA lấy.",
+                "Việc nền: nội dung bình luận trong sheet cắt ở 500 ký tự; sổ việc nền không "
+                f"lưu bản ghi gốc của nguồn nên sheet này không có tab '{T.TAB_GOC}' — cần "
+                "đủ trường thì soi lại ít bài hơn (chạy tại chỗ).",
+                "Ô 'Số bình luận' trống ở bảng Bài đăng = bài không chạy được/lỗi, KHÔNG phải 0.",
+                (f"{so_cat} bài '{_CAT}': chạm trần nên CHƯA lấy hết — không phải bài không có "
+                 f"bình luận.") if so_cat else "",
+                f"{so_tat_bl} video '{_TAT_BL}' (chủ video tắt bình luận)." if so_tat_bl else "",
+                "Đã huỷ theo yêu cầu — sheet giữ phần lấy được tới lúc huỷ."
+                if trang_thai == "da_huy" else "",
+            ] + ly_do
+            tq = tong_quan_binh_luan(
+                title, f"social_deep_dive (việc nền {v.ma})",
+                f"{len(ts['post_urls'])} bài · nền tảng: {', '.join(v.d['nen_tang'])}",
+                bang_bl, tk, ghi_chu, len(rows))
+            try:
+                kiem = s.ghi_tong_quan(T.TAB_TONG_QUAN, tq, kiem) or kiem
+            except Exception as e:  # noqa: BLE001
+                if type(e).__name__ == "MatQuyen":
+                    raise
+                ly_do.append(f"ghi tab Tổng quan lỗi (dữ liệu vẫn đủ ở các tab): "
+                             f"{_che_token(e)[:120]}")
     dau = {"xong": "XONG", "xong_mot_phan": "XONG MỘT PHẦN", "da_huy": "ĐÃ HUỶ"}[trang_thai]
     d = [f"[{dau}] Bóc bình luận nền {v.ma}: {len(ts['post_urls'])} bài, lấy được "
          f"{len(rows)} bình luận."]
     if trang_thai == "da_huy":
         d.append("Đã huỷ theo yêu cầu — sheet giữ phần lấy được tới lúc huỷ.")
     d.append(f"Link: {url}" if url else "Chưa có sheet (không có bình luận nào hoặc ghi lỗi).")
+    if url and kiem.get("cau"):
+        d.append(f"Kiểm ghi: {kiem['cau']}" + (
+            " — sheet CHƯA đủ dòng, phần thiếu ở tab báo THIẾU; đừng coi là đủ."
+            if kiem.get("day_du") is False else ""))
     for p in v.d["nen_tang"]:
         cua = [x for x in per_url.values() if x["platform"] == p]
         xau: dict = {}
@@ -2045,6 +2253,8 @@ def chay_viec_nen(v) -> tuple[str, str]:
         d.append("Lưu ý: " + "; ".join(ly_do) + ".")
     with v._khoa:
         v.d["ket_qua"] = {"per_url": per_url, "tong_comment": len(rows), "sheet_url": url,
+                          "day_du": kiem.get("day_du") if url else None,
+                          "kiem_ghi": kiem.get("cau") if url else None,
                           "phan_loai": {k: tt_pl.get(k) for k in ("trang_thai", "theo_ai",
                                                                    "theo_luat")}}
         v.luu()

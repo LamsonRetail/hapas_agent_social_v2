@@ -17,6 +17,7 @@ import time
 import pytest
 
 import apify_tool as A
+from sheet_gia import LarkGia
 
 NOW = datetime.datetime.now(A._VN_TZ) - datetime.timedelta(hours=1)
 # Bản thật — fixture `quet` thay bằng bản giả; bài kiểm "đổi thứ tự hỏng" cần bản thật.
@@ -60,21 +61,17 @@ def _phan_xu_gia(nhac: str) -> str:
 
 @pytest.fixture
 def quet(monkeypatch):
-    ghi, hoi = [], []
+    hoi = []
     monkeypatch.setenv("SOCIAL_AI_PHAN_XU", "1")
     monkeypatch.setitem(A._FETCH, "threads", lambda *a: [(dict(d), NOW) for d in THREADS])
     monkeypatch.setitem(A._FETCH, "youtube", lambda *a: [(dict(d), NOW) for d in YOUTUBE])
     monkeypatch.setattr(A, "_tran", lambda: (500, 1.0))
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows, **k: ghi.append((sid, rows)))
-    monkeypatch.setattr(A, "_them_tab", lambda tok, ten: _SID_TAB[ten])
-    # Không gọi Lark thật khi đổi thứ tự tab — chỉ ghi lại lần gọi (`chay.dua`).
+    # Lark giả trọn vẹn (tests/sheet_gia.py): `ghi` nhìn các tab dữ liệu như list
+    # [(mã tab cũ, dòng)] — "s1" bài chính, "s2" Bị loại, "s3" Thị trường khác, "s4" Thống kê.
+    gia = LarkGia(url="https://sheet")
+    monkeypatch.setattr(A.lark, "call", gia.call)
+    ghi = gia.ghi_cu(_SID_TAB)
     dua = []
-    monkeypatch.setattr(A, "_dua_tab_chinh_len_dau", lambda tok, sid: dua.append((tok, sid)))
-    # Đặt tên tab / bỏ cột thừa: không gọi Lark thật (canh riêng ở test_sheet_gon).
-    monkeypatch.setattr(A, "_sua_tab_chinh", lambda *a: None)
-    monkeypatch.setattr(A, "_vua_cot", lambda *a: None)
     monkeypatch.setattr(A, "_grant", lambda tok, oid: True)
     monkeypatch.setattr(A.memory_store, "get_current_sender", lambda: "ou_test")
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
@@ -93,10 +90,12 @@ def quet(monkeypatch):
                 "boi_canh": BOI_CANH, **them}
         return json.loads(A._handle(args))
     chay.dua = dua
+    chay.gia = gia
     return chay, ghi, hoi, tra
 
 
-_SID_TAB = {A._TAB_BI_LOAI: "s2", A._TAB_THI_TRUONG_KHAC: "s3", A._TAB_THONG_KE: "s4"}
+_SID_TAB = {A.TAB_BAI_DANG: "s1", "Dữ liệu": "s1", A._TAB_BI_LOAI: "s2",
+            A._TAB_THI_TRUONG_KHAC: "s3", A._TAB_THONG_KE: "s4", "Trích dẫn": "s5"}
 
 
 def _tab(ghi, sid: str) -> dict:
@@ -146,14 +145,15 @@ def test_ai_phan_xu_giu_loai_dung_va_mot_luot_model(quet):
     assert kq["tom_tat_loai"] == (
         "AI đọc 7 bài: giữ 3 (1 bài thị trường TH, ở tab 'Thị trường khác'; 1 bài bàn về brand "
         "dù không nhắc tên), loại 4 (chuyện người nổi tiếng khác 2, trùng tên 2) — xem tab "
-        "'Bị loại'.")
+        "'3. Bị loại'.")
     assert ("giữ 1 bài thị trường khác (TH) ở tab riêng 'Thị trường khác' — sheet chính chỉ "
             "có bài VN") in kq["cau_thi_truong"]
     assert kq["cau_thi_truong"] in kq["note"]
     assert kq["so_bai_sheet_chinh"] == 2 and kq["so_bai_thi_truong_khac"] == 1
-    assert kq["thi_truong_khac_ghi_o"] == "tab 'Thị trường khác'"
+    assert kq["thi_truong_khac_ghi_o"] == "tab '2. Thị trường khác'"
     assert kq["in_range"] == kq["da_ghi_vao_sheet"] == 3, "vẫn đếm đủ bài đã giữ"
-    assert "(2 bài VN ở sheet chính, 1 bài thị trường khác ở tab 'Thị trường khác')"         in kq["note"]
+    assert ("(2 bài VN ở sheet chính, 1 bài thị trường khác ở tab '2. Thị trường khác')"
+            in kq["note"])
     assert isinstance(kq["giay_ai"], float)
 
 
@@ -386,53 +386,50 @@ def test_thi_truong_tin_hieu():
         "không rõ", "shop VN đặt tên theo nguồn hàng không phải tài khoản thị trường TH"
 
 
-def test_tab_thi_truong_khac_hong_thi_ghi_duoi_sheet_chinh_khong_de_bi_loai(quet, monkeypatch):
-    """Thêm tab hỏng: bài thị trường khác ghi nối dưới sheet chính, rồi Bị loại (cũng hỏng)
-    ghi TIẾP phía dưới — không đè lên nhau, không mất bài nào."""
+def test_tab_thi_truong_khac_hong_thi_ghi_duoi_sheet_chinh_khong_de_bi_loai(quet):
+    """Thêm tab hỏng (trinh_bay_sheet): bài thị trường khác và Bị loại ghi NỐI dưới bảng bài
+    chính, mỗi bảng có dòng ngăn — không đè lên nhau, không mất bài nào."""
     chay, _, _, _ = quet
-    ghi = []
-    monkeypatch.setattr(A, "_write_values",
-                        lambda tok, sid, rows, dong_dau=1: ghi.append((sid, dong_dau, rows)))
+    gia = chay.gia
+    goc = gia.call
 
-    def hong(tok, ten):
-        raise RuntimeError("Lark không trả sheetId")
-    monkeypatch.setattr(A, "_them_tab", hong)
+    def call(method, path, query=None, body=None):
+        if path.endswith("/sheets_batch_update") and any(
+                "addSheet" in r and r["addSheet"]["properties"]["title"] != "Tổng quan"
+                for r in body["requests"]):
+            raise RuntimeError("Lark không trả sheetId")
+        return goc(method, path, query, body)
+    A.lark.call = call
     kq = chay()
-    assert [sid for sid, _, _ in ghi] == ["s1", "s1", "s1"], "mọi thứ nằm trên sheet chính"
-    (_, d0, chinh), (_, d1, khac), (_, d2, loai) = ghi
-    assert d0 == 1 and d1 == len(chinh) + 1
-    assert khac[1][0] == "THỊ TRƯỜNG KHÁC — bài của brand ở nước khác, không phải VN"
-    assert [r[2] for r in khac[3:]] == ["HAPAS THAILAND"]
-    assert d2 == d1 + len(khac), "Bị loại ghi NỐI TIẾP, không đè phần thị trường khác"
-    assert loai[1][0].startswith("BỊ LOẠI — ")
-    assert kq["thi_truong_khac_ghi_o"] == "cuối sheet chính (dưới dòng 'THỊ TRƯỜNG KHÁC')"
-    assert kq["bi_loai_ghi_o"] == "cuối sheet chính (dưới dòng 'BỊ LOẠI')"
-    assert chay.dua == [], "ghi dưới sheet chính: không có tab phụ nào, không đổi thứ tự tab"
+    o = gia.o(gia.tab_ten()[1])
+    cot0 = [r[0] for r in o]
+    i_khac = cot0.index("— 2. Thị trường khác — (không thêm được tab riêng)")
+    i_loai = next(i for i, x in enumerate(cot0) if str(x).startswith("— ")
+                  and "Bị loại" in str(x))
+    assert i_khac < i_loai, "Bị loại ghi NỐI TIẾP, không đè phần thị trường khác"
+    assert [r[2] for r in o[i_khac + 2:i_loai] if r[2]] == ["HAPAS THAILAND"]
+    assert kq["thi_truong_khac_ghi_o"].startswith(("cuối tab 'Dữ liệu'", "cuối tab '1. "))
+    assert kq["bi_loai_ghi_o"].startswith("cuối tab ")
+    assert kq["success"] is True
 
 
-def test_ghi_duoi_sheet_chinh_hong_hai_lan_khong_de_vung_da_ghi_do(quet, monkeypatch):
-    """Thêm tab hỏng VÀ ghi dưới sheet chính phần thị trường khác cũng hỏng (có thể đã ghi
-    dở một khối): "Bị loại" vẫn ghi DƯỚI vùng đó, không đè lên."""
+def test_ghi_tab_phu_hong_thi_bao_loi_kem_link(quet):
+    """Ghi dữ liệu hỏng giữa chừng: tool báo THẤT BẠI kèm link đã tạo, không nhận là đủ."""
     chay, _, _, _ = quet
-    ghi = []
+    gia = chay.gia
+    goc = gia.call
+    dem = {"n": 0}
 
-    def viet(tok, sid, rows, dong_dau=1):
-        ghi.append((sid, dong_dau, rows))
-        if any(str(r[0]).startswith("THỊ TRƯỜNG KHÁC — ") for r in rows):
-            raise RuntimeError("Lark 500 giữa chừng")
-    monkeypatch.setattr(A, "_write_values", viet)
-
-    def hong(tok, ten):
-        raise RuntimeError("Lark không trả sheetId")
-    monkeypatch.setattr(A, "_them_tab", hong)
+    def call(method, path, query=None, body=None):
+        if path.endswith("/values_batch_update"):
+            dem["n"] += 1
+            if dem["n"] == 2:
+                raise RuntimeError("Lark 500 giữa chừng")
+        return goc(method, path, query, body)
+    A.lark.call = call
     kq = chay()
-    (_, d0, chinh), (_, d1, khac), (_, d2, loai) = ghi
-    assert d1 == len(chinh) + 1
-    assert d2 == d1 + len(khac), "Bị loại nằm dưới vùng thị trường khác dù vùng đó ghi hỏng"
-    assert loai[1][0].startswith("BỊ LOẠI — ")
-    assert kq["thi_truong_khac_ghi_o"].startswith("KHÔNG ghi được (RuntimeError)")
-    assert kq["bi_loai_ghi_o"] == "cuối sheet chính (dưới dòng 'BỊ LOẠI')"
-    assert kq["success"] is True and chay.dua == []
+    assert kq["success"] is False and "TẠO/GHI SHEET" in kq["error"]
+    assert kq["sheet_url"] == "https://sheet" and "có thể thiếu dữ liệu" in kq["error"]
 
 
 def _kenh_top(kq) -> list:
@@ -460,12 +457,17 @@ def test_tao_sheet_hong_top_cung_chi_lay_bai_sheet_chinh(quet, monkeypatch):
     assert "Linh Đan" in _kenh_top(kq)
 
 
-def test_co_tab_phu_thi_dua_sheet_chinh_len_dau_mot_lan(quet):
-    """addSheet của Lark chèn tab mới ở vị trí 0 → link mở ra "Bị loại". Có tab phụ thì
-    kéo sheet chính về đầu, đúng MỘT lần sau khi ghi xong mọi tab phụ."""
+def test_co_tab_phu_thi_tong_quan_dau_bai_chinh_ke_tiep(quet):
+    """Tab theo thứ tự cố định: Tổng quan, bài chính, các tab phụ đánh số, Dữ liệu gốc cuối
+    — thêm tab đúng vị trí nên không còn bước kéo tab chính về đầu."""
     chay, _, _, _ = quet
-    chay()
-    assert chay.dua == [("tok", "s1")]
+    kq = chay()
+    ten = chay.gia.tab_ten()
+    assert ten[0] == "Tổng quan" and ten[1] == "1. Bài đăng"
+    assert ten.index("1. Bài đăng") < ten.index("2. Thị trường khác") < next(
+        i for i, t in enumerate(ten) if t.endswith("Bị loại"))
+    assert kq["thi_truong_khac_ghi_o"] == "tab '2. Thị trường khác'"
+    assert chay.dua == []
 
 
 def test_khong_tab_phu_thi_khong_doi_thu_tu_tab(quet):
@@ -475,17 +477,14 @@ def test_khong_tab_phu_thi_khong_doi_thu_tu_tab(quet):
     kq = chay(giu_nuoc_ngoai=True, platforms=["threads"])
     assert kq["success"] is True and not kq.get("bi_loai_ghi_o")
     assert {s for s, _ in ghi} == {"s1"}
-    assert chay.dua == []
+    assert chay.gia.tab_ten()[:2] == ["Tổng quan", "Dữ liệu"]
 
 
-def test_doi_thu_tu_tab_hong_khong_lam_hong_ket_qua(quet, monkeypatch):
+def test_trang_tri_hong_khong_lam_hong_ket_qua(quet):
     chay, _, _, _ = quet
-    monkeypatch.setattr(A, "_dua_tab_chinh_len_dau", _DUA_TAB_THAT)
-
-    def lark_hong(*a, **k):
-        raise RuntimeError("lark 500")
-    monkeypatch.setattr(A.lark, "call", lark_hong)
+    chay.gia.hong = {"styles_batch_update", "/filter", "dimension_range", "merge_cells"}
     kq = chay()
     assert kq["success"] is True and kq["sheet_url"] == "https://sheet"
-    assert kq["thi_truong_khac_ghi_o"] == "tab 'Thị trường khác'"
-    assert kq["bi_loai_ghi_o"] == "tab 'Bị loại'"
+    assert kq["thi_truong_khac_ghi_o"] == "tab '2. Thị trường khác'"
+    assert kq["bi_loai_ghi_o"].endswith("Bị loại'")
+    assert kq["day_du"] is True and kq["kiem_ghi"].startswith("Đã ghi đủ")

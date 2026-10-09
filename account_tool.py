@@ -34,6 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 import apify_tool as A
 import chi_phi_tool
 import memory_store
+import trinh_bay_sheet as TB
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
@@ -116,6 +117,7 @@ def _lay_tiktok(ten: list[str], n: int) -> dict[str, dict]:
             "hashtag": [h.get("name") for h in it.get("hashtags") or [] if h.get("name")],
             "am_thanh": (it.get("musicMeta") or {}).get("musicName") or "",
             "tra_tien": bool(it.get("isAd") or it.get("isSponsored")),
+            "_goc": it,          # bản ghi nguồn cho tab "Dữ liệu gốc" — không vào tool_result
         })
     return ra
 
@@ -142,6 +144,7 @@ def _lay_facebook(urls: list[str], n: int) -> dict[str, dict]:
             "am_thanh": "", "tra_tien": bool(it.get("paidPartnership")),
             "dong_tac_gia": [c.get("name") for c in it.get("collaborators") or []
                              if isinstance(c, dict) and c.get("name")],
+            "_goc": it,
         })
     return ra
 
@@ -162,13 +165,16 @@ def _lay_instagram(ten: list[str], n: int) -> dict[str, dict]:
             "hashtag": list(p.get("hashtags") or []), "am_thanh": "",
             "tra_tien": bool(p.get("paidPartnership")),
             "nhac_ten": list(p.get("mentions") or []),
+            "_goc": p,
         } for p in (it.get("latestPosts") or [])[:min(n, _IG_TOI_DA)]]
         ra[k] = {"ho_so": {
             "ten": it.get("fullName") or k, "tai_khoan": k,
             "followers": _so(it.get("followersCount")), "tong_bai": _so(it.get("postsCount")),
             "xac_minh": bool(it.get("verified")), "nganh": it.get("businessCategoryName") or "",
             "link": it.get("url") or f"https://www.instagram.com/{k}/"},
-            "bai": bai, "ghi_chu": "" if bai else "tài khoản riêng tư hoặc chưa có bài"}
+            "bai": bai, "ghi_chu": "" if bai else "tài khoản riêng tư hoặc chưa có bài",
+            # Trường cấp HỒ SƠ của Instagram (bài nằm trong `latestPosts`, đã có ở từng bài).
+            "_goc_ho_so": {k: v for k, v in it.items() if k != "latestPosts"}}
     return ra
 
 
@@ -280,8 +286,6 @@ SCHEMA = {
 }
 
 _LAY = {"tiktok": _lay_tiktok, "facebook": _lay_facebook, "instagram": _lay_instagram}
-_HEADER = ["Nền tảng", "Tài khoản", "Ngày đăng", "Loại", "View", "Like", "Bình luận",
-           "Share", "Hợp tác / QC", "Hashtag", "Nội dung", "Link"]
 
 
 def _handle(args: dict, **_kwargs) -> str:
@@ -343,23 +347,30 @@ def _handle(args: dict, **_kwargs) -> str:
     khong_thay = [v for p, vs in nhom.items() if p not in loi for v in vs
                   if v.rstrip("/").split("/")[-1].lower() not in da_thay]
 
-    url, granted = None, False
-    rows = [list(_HEADER)] + [[
-        p, tk["ho_so"]["tai_khoan"], f"{b['ngay']:%Y-%m-%d %H:%M}" if b["ngay"] else "",
-        b["loai"], b["view"] or "", b["like"], b["binh_luan"], b["share"] or "",
-        "có" if _la_hop_tac(b) else "",
-        " ".join(f"#{h}" for h in b["hashtag"][:8]), b["noi_dung"][:1000], b["link"],
-    ] for p, tk in ket_qua for b in tk["bai"] if b["ngay"] and tu <= b["ngay"] <= den]
-    if len(rows) > 1:
+    url, granted, kq_sheet = None, False, None
+    trong = [(p, tk, b) for p, tk in ket_qua for b in tk["bai"]
+             if b["ngay"] and tu <= b["ngay"] <= den]
+    if trong:
         title = (args.get("title") or "").strip() or \
             f"Soi tài khoản · {', '.join(t['ho_so']['tai_khoan'] for t in tong)[:40]} · {tu:%d-%m}→{den:%d-%m}"
-        try:
-            tok, url = A._create_sheet(title)
-            A._write_values(tok, A._first_sheet_id(tok), rows)
+        cap = {"granted": False}
+
+        def _cap_quyen(tok: str) -> None:
             sender = memory_store.get_current_sender()
-            granted = A._grant(tok, sender) if sender else False
+            TB.gop_quyen(cap, A._grant(tok, sender) if sender else False)
+
+        try:
+            bang_bai = _bang_bai(trong)
+            kq_sheet = TB.xuat(
+                title, [_bang_ho_so(tong), bang_bai, _bang_noi_bat(tong)],
+                _tong_quan_sheet(title, tong, ket_qua, trong, bang_bai, tu, den, n, loi,
+                                 khong_thay, khong_hieu),
+                goc=_bang_goc(trong, ket_qua), cap_quyen=_cap_quyen)
+            url, granted = kq_sheet.url, cap["granted"]
         except Exception as e:  # noqa: BLE001
             loi["sheet"] = f"{type(e).__name__}: {e}"[:250]
+        if kq_sheet is not None and kq_sheet.day_du is False:
+            loi["kiem_ghi"] = kq_sheet.cau_kiem
 
     if not tong and loi:
         return tool_error("Không đọc được tài khoản nào: " + "; ".join(
@@ -371,7 +382,133 @@ def _handle(args: dict, **_kwargs) -> str:
         uoc_tinh_chi_phi_usd=round(est, 3),
         chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,
         chi_phi=A._dong_chi_phi(thuc, est), giay=round(time.monotonic() - t0, 1),
+        **(kq_sheet.cho_tool() if kq_sheet is not None
+           else {"day_du": None, "kiem_ghi": None, "bang_tinh_tiep": None}),
     )
+
+
+# ───────────────────────────── Sheet (trinh_bay_sheet) ─────────────────────────────
+# Tab "Hồ sơ": một dòng mỗi tài khoản, CHỈ các số `_tong_hop` đã tính (không tính thêm).
+_COT_HO_SO = [
+    TB.Cot("Nền tảng"), TB.Cot("Tài khoản", "ma"), TB.Cot("Tên"), TB.Cot("Link", "link"),
+    TB.Cot("Followers", "so_nguyen"), TB.Cot("Xác minh"),
+    TB.Cot("Tổng like hồ sơ", "so_nguyen"), TB.Cot("Tổng video/bài hồ sơ", "so_nguyen"),
+    TB.Cot("Ngành (IG)"), TB.Cot("Bài đã đọc", "so_nguyen"),
+    TB.Cot("Bài trong khoảng", "so_nguyen"), TB.Cot("Bài/tuần", "thap_phan"),
+    TB.Cot("Tương tác TB/bài", "so_nguyen"), TB.Cot("Like TB", "so_nguyen"),
+    TB.Cot("Bình luận TB", "so_nguyen"), TB.Cot("View trung vị", "so_nguyen"),
+    # Ba tỉ lệ dưới là PHÂN SỐ (0,0875 = 8,75%) — `_tong_hop` chia rồi làm tròn, không x100.
+    TB.Cot("Tương tác / view", "phan_tram"), TB.Cot("View trung vị / follower", "phan_tram"),
+    TB.Cot("Tương tác TB / follower", "phan_tram"),
+    TB.Cot("Bài hợp tác / QC", "so_nguyen"), TB.Cot("Hashtag hay dùng", "chu_dai"),
+    TB.Cot("Nhắc tới nhiều"), TB.Cot("Âm thanh hay dùng", "chu_dai"),
+    TB.Cot("Ghi chú", "chu_dai"),
+]
+_COT_BAI = [TB.Cot("Nền tảng"), TB.Cot("Tài khoản", "ma"), TB.Cot("Ngày đăng", "ngay_gio"),
+            TB.Cot("Loại"), TB.Cot("View", "so_nguyen"), TB.Cot("Like", "so_nguyen"),
+            TB.Cot("Bình luận", "so_nguyen"), TB.Cot("Share", "so_nguyen"),
+            TB.Cot("Hợp tác / QC"), TB.Cot("Hashtag", "chu_dai"),
+            TB.Cot("Nội dung", "chu_dai"), TB.Cot("Link", "link")]
+_COT_NOI_BAT = [TB.Cot("Tài khoản", "ma"), TB.Cot("Ngày"), TB.Cot("View", "so_nguyen"),
+                TB.Cot("Tương tác", "so_nguyen"), TB.Cot("Nội dung", "chu_dai"),
+                TB.Cot("Link", "link")]
+
+
+def _o(v):
+    return "" if v is None else v
+
+
+def _bang_ho_so(tong: list) -> "TB.Bang":
+    rows = []
+    for t in tong:
+        h = t["ho_so"]
+        ghi = "; ".join(x for x in (t.get("ghi_chu") or "", t.get("chua_phu_het_khoang") or "")
+                        if x)
+        rows.append([
+            A._TEN_NGUON.get(t["nen_tang"], t["nen_tang"]), h.get("tai_khoan", ""), h.get("ten", ""), h.get("link", ""),
+            _o(h.get("followers")), "có" if h.get("xac_minh") else "",
+            _o(h.get("tong_like")), _o(h.get("tong_video", h.get("tong_bai"))),
+            h.get("nganh", ""), t["so_bai_da_doc"], t["so_bai_trong_khoang"],
+            _o(t.get("bai_moi_tuan")), _o(t.get("tuong_tac_tb_moi_bai")), _o(t.get("like_tb")),
+            _o(t.get("binh_luan_tb")), _o(t.get("view_trung_vi")),
+            _o(t.get("ti_le_tuong_tac_tren_view")), _o(t.get("view_trung_vi_tren_follower")),
+            _o(t.get("ti_le_tuong_tac_tren_follower")), _o(t.get("bai_hop_tac_hoac_quang_cao")),
+            " ".join(t.get("hashtag_hay_dung") or []),
+            ", ".join(t.get("nhac_toi_nhieu") or []),
+            "; ".join(t.get("am_thanh_hay_dung") or []), ghi])
+    return TB.Bang("Hồ sơ", list(_COT_HO_SO), rows,
+                   mo_ta="Mỗi tài khoản một dòng: hồ sơ + số liệu tool tính trên bài trong khoảng")
+
+
+def _bang_bai(trong: list) -> "TB.Bang":
+    rows = [[
+        A._TEN_NGUON.get(p, p), tk["ho_so"]["tai_khoan"], b["ngay"], b["loai"], b["view"] or "", b["like"],
+        b["binh_luan"], b["share"] or "", "có" if _la_hop_tac(b) else "",
+        " ".join(f"#{h}" for h in b["hashtag"][:8]), b["noi_dung"][:1000], b["link"],
+    ] for p, tk, b in trong]
+    return TB.Bang("Bài đăng", list(_COT_BAI), rows,
+                   mo_ta="Bài đăng trong khoảng ngày của mọi tài khoản")
+
+
+def _bang_noi_bat(tong: list):
+    rows = [[t["ho_so"].get("tai_khoan", ""), x["ngay"], _o(x["view"]), x["tuong_tac"],
+             x["noi_dung"], x["link"]] for t in tong for x in t.get("bai_noi_bat") or []]
+    if not rows:
+        return None
+    return TB.Bang("Bài nổi bật", list(_COT_NOI_BAT), rows,
+                   mo_ta="Tối đa 3 bài mỗi tài khoản: theo view nếu mọi bài có view, "
+                         "không thì theo tương tác")
+
+
+def _tong_quan_sheet(title, tong, ket_qua, trong, bang_bai, tu, den, n, loi, khong_thay,
+                     khong_hieu) -> "TB.TongQuan":
+    da_doc = sum(len(tk["bai"]) for _, tk in ket_qua)
+    ngoai = da_doc - len(trong)
+    ghi_chu = [
+        f"Mỗi tài khoản đọc tối đa {n} bài MỚI NHẤT (Instagram: tối đa {_IG_TOI_DA} bài — "
+        "giới hạn của nguồn); số liệu tính trên bài nằm trong khoảng ngày.",
+        f"Tab Bài đăng chỉ ghi bài trong khoảng: {len(trong)}/{da_doc} bài đã đọc"
+        + (f"; {ngoai} bài ngoài khoảng (hoặc không có ngày) không ghi" if ngoai else "")
+        + ".",
+        "Tương tác = like + bình luận + share. Tương tác / view = tổng tương tác của các bài "
+        "có view ÷ tổng view. View trung vị / follower = view thường đạt so với follower.",
+        "Hợp tác / QC: theo cờ của nền tảng hoặc chữ trong caption (#ad, hợp tác, "
+        "BRAND × BRAND) — là dấu hiệu, không phải xác nhận.",
+        "Ô View/Share trống = nguồn không trả số (vd bài ảnh Facebook/Instagram), không "
+        "phải 0. Facebook không trả số người theo dõi trang.",
+        "Nội dung cắt ở 1.000 ký tự, hashtag tối đa 8 mỗi bài — bản đầy đủ ở tab Dữ liệu gốc.",
+    ]
+    for t in tong:
+        for k in ("ghi_chu", "chua_phu_het_khoang"):
+            if t.get(k):
+                ghi_chu.append(f"{t['ho_so'].get('tai_khoan', '')}: {t[k]}")
+    if khong_thay:
+        ghi_chu.append("Không tìm thấy: " + ", ".join(khong_thay))
+    if khong_hieu:
+        ghi_chu.append("Không nhận ra: " + ", ".join(khong_hieu))
+    ghi_chu += [f"Lỗi nguồn {p}: {v}" for p, v in loi.items() if p != "sheet"]
+    nen = sorted({p for p, _ in ket_qua})
+    ten_nen = A._TEN_NGUON
+    return TB.TongQuan(
+        tieu_de=title,
+        nguon="Tool soi_tai_khoan · " + ", ".join(f"{ten_nen.get(p, p)} ({_ACTOR[p]})"
+                                                  for p in nen),
+        thoi_gian=f"{tu:%d/%m/%Y} → {den:%d/%m/%Y}",
+        pham_vi=", ".join(f"{t['ho_so'].get('tai_khoan', '')} "
+                          f"({ten_nen.get(t['nen_tang'], t['nen_tang'])})" for t in tong),
+        nhom=[TB.dem_theo(bang_bai, "Tài khoản", "Bài trong khoảng theo tài khoản"),
+              TB.dem_theo(bang_bai, "Loại", "Bài trong khoảng theo loại")],
+        ghi_chu=ghi_chu)
+
+
+def _bang_goc(trong: list, ket_qua: list):
+    """Bản ghi nguồn nguyên vẹn của từng bài (cùng thứ tự tab Bài đăng) + trường cấp hồ sơ
+    của Instagram (Apify trả hồ sơ và bài chung một bản ghi). Tool chỉ chọn vài trường."""
+    goc = [{"Loại bản ghi": f"bài (dòng {i} tab Bài đăng)", **b["_goc"]}
+           for i, (_, _, b) in enumerate(trong, 1) if isinstance(b.get("_goc"), dict)]
+    goc += [{"Loại bản ghi": "hồ sơ Instagram", **tk["_goc_ho_so"]}
+            for _, tk in ket_qua if isinstance(tk.get("_goc_ho_so"), dict)]
+    return TB.bang_goc(goc) if goc else None
 
 
 def _available() -> bool:

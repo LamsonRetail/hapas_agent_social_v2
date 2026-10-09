@@ -14,6 +14,7 @@ import pytest
 import apify_tool as A
 import lsr_policy
 import tiktok_ads_tool as T
+from sheet_gia import LarkGia
 
 AZZ = [
     {"adId": "7644097429029437458", "adTitle": "=HYPERLINK(\"http://x\") Túi da mới",
@@ -43,7 +44,10 @@ def gia(monkeypatch):
     goi: list = []
     ket = {"chinh": AZZ, "du_phong": LEXIS}
     so_ghi: list = []
-    dong: list = []
+    lark = LarkGia()
+    import collections
+    import trinh_bay_sheet
+    monkeypatch.setattr(trinh_bay_sheet, "_LOC_LUOT", collections.deque())  # trần lọc/phút
 
     def call(actor, payload, limit, mem=None, min_charge=0, tran_usd=None, *, nen_tang=None):
         goi.append({"actor": actor, "payload": payload, "limit": limit,
@@ -65,12 +69,10 @@ def gia(monkeypatch):
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda actors, tu, est: {
         "usd": 0.06, "so_run": len(actors), "cham_tran": 0, "dang_chay": 0, "_actors": actors})
     monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: so_ghi.append(k) or {})
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A.lark, "call", lambda *a, **k: dong.append(k.get("body")) or {})
+    monkeypatch.setattr(A.lark, "call", lark.call)
     monkeypatch.setattr(T.memory_store, "get_current_sender", lambda: None)
     monkeypatch.setattr(A, "_han_muc_thang", lambda: {"con_lai": 3.2})
-    return {"goi": goi, "ket": ket, "so_ghi": so_ghi, "dong": dong}
+    return {"goi": goi, "ket": ket, "so_ghi": so_ghi, "lark": lark}
 
 
 def chay(**args) -> dict:
@@ -78,7 +80,8 @@ def chay(**args) -> dict:
 
 
 def _o(gia) -> list[list]:
-    return gia["dong"][0]["valueRanges"][0]["values"]
+    """Tab dữ liệu (tiêu đề ở dòng 1) của sheet giả."""
+    return gia["lark"].o("Dữ liệu")
 
 
 # ───────────────────────────── đầu vào ─────────────────────────────
@@ -186,9 +189,7 @@ def test_dung_call_that_thi_tran_usd_tiktok_len_toi_apify(monkeypatch):
     monkeypatch.setattr(A.requests, "post", lambda u, **k: url.append(u) or _Post())
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
     monkeypatch.setattr(T.chi_phi_tool, "ghi", lambda **k: {})
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_write_values", lambda *a, **k: None)
+    monkeypatch.setattr(A.lark, "call", LarkGia().call)
     monkeypatch.setattr(T.memory_store, "get_current_sender", lambda: None)
     kq = json.loads(T._handle({"nganh": "túi"}))
     assert kq["tom_tat"]["so_ads"] == 3
@@ -208,7 +209,7 @@ def test_dong_sheet_du_cot_va_chan_cong_thuc(gia):
                      "azzouzana"]
     assert o[2][4] == "Bán sản phẩm" and o[2][9] == "https://v/540.mp4"
     assert o[2][5] == "điểm 0.08", "không có hạng thì ghi điểm"
-    assert kq["sheet_url"] == "https://sheet"
+    assert kq["sheet_url"] == "https://x.larksuite.com/sheets/sht1"
 
 
 def test_tom_tat_dem_cho_model(gia):

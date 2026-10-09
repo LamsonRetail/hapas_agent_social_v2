@@ -13,6 +13,7 @@ import pytest
 import apify_tool as A
 import san_link as L
 import shopee_tool as S
+from sheet_gia import LarkGia
 
 SP_URL = "https://shopee.vn/Hop-Qua-Tang-Kep-Toc-Nu-NHA-CU-i.59009982.25022958529"
 TT_URL = "https://shop.tiktok.com/vn/pdp/tui-xach-nu-deo-cheo/1731382848795347431"
@@ -61,15 +62,37 @@ def gia(monkeypatch):
         "usd": 0.2, "so_run": 3, "cham_tran": 0, "dang_chay": 0})
     monkeypatch.setattr(S.chi_phi_tool, "ghi", lambda **k: {})
     monkeypatch.setattr(S.memory_store, "get_current_sender", lambda: None)
-    dong = []
-    monkeypatch.setattr(A, "_create_sheet", lambda title: ("tok", "https://sheet"))
-    monkeypatch.setattr(A, "_first_sheet_id", lambda tok: "s1")
-    monkeypatch.setattr(A, "_write_values", lambda tok, sid, rows: dong.extend(rows))
-    # Sheet nhiều tab: tab 2–4 thêm bằng sheets_batch_update — giả luôn, đừng gọi Lark thật.
-    import lark_client
-    monkeypatch.setattr(lark_client, "call", lambda m, path, **k: {"data": {"replies": [{}] + [
-        {"addSheet": {"properties": {"sheetId": f"s{i}"}}} for i in range(2, 5)]}})
+    # Sheet nhiều tab đi qua trinh_bay_sheet thật trên Lark giả — không gọi Lark thật.
+    lk = LarkGia()
+    monkeypatch.setattr(A.lark, "call", lk.call)
+    dong = DongGia(lk)
     return goi, dong
+
+
+class DongGia:
+    """Mọi dòng (tiêu đề + dữ liệu) của các tab dữ liệu theo thứ tự tab — như danh sách
+    `_write_values` nhận trước đây. Đọc lười sau khi tool chạy; `.lk` = Lark giả."""
+
+    def __init__(self, lk: LarkGia):
+        self.lk = lk
+
+    def _all(self) -> list:
+        if not self.lk.bt:
+            return []
+        return [r for t in self.lk.tab_ten() if t not in ("Tổng quan", "Dữ liệu gốc")
+                for r in self.lk.o(t)]
+
+    def __iter__(self):
+        return iter(self._all())
+
+    def __getitem__(self, i):
+        return self._all()[i]
+
+    def __len__(self):
+        return len(self._all())
+
+    def index(self, x):
+        return self._all().index(x)
 
 
 @pytest.mark.parametrize("u, san, id_", [
@@ -118,7 +141,7 @@ def test_soi_hai_san_cung_luc(gia):
     assert tt["thong_tin"]["da_ban"] == 128 and "shop_tong_da_ban" not in tt["thong_tin"]
     assert tt["thong_tin"]["phan_bo_sao_toan_bo"] == {"1": 2, "4": 1, "5": 4}
     assert tt["binh_luan"]["den_ngay"].endswith("2026"), "date mili-giây phải đổi đúng"
-    assert kq["sheet_url"] == "https://sheet"
+    assert kq["sheet_url"].startswith("https://x.larksuite.com/sheets/")
     tieu_de = [r for r in dong if r and r[0] == "Sàn"]
     assert [r[2] for r in tieu_de] == ["Danh mục", "Phân loại", "Mô tả", "Ngày"], "đủ 4 tab"
     assert "Bình luận" in dong[dong.index(tieu_de[-1])], "cột gọi là Bình luận, không phải Nội dung"
@@ -268,7 +291,7 @@ def test_shopee_bi_chan_binh_luan_van_tao_sheet(gia, monkeypatch):
     """Bản cũ chỉ tạo Sheet khi có bình luận: Shopee chặn đọc bình luận là mất cả Sheet."""
     monkeypatch.setattr(L, "_danh_gia_shopee", lambda *a, **k: {})
     kq = json.loads(S._handle({"link": [SP_URL]}))
-    assert kq["sheet_url"] == "https://sheet"
+    assert kq["sheet_url"].startswith("https://x.larksuite.com/sheets/")
     assert "mô tả" in kq["san_pham"][0]["thong_tin"]["khong_co"]
 
 

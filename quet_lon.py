@@ -33,6 +33,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import apify_tool as A
 import phan_loai
 import sheet_lon
+import trinh_bay_sheet as T
 
 from tools.registry import tool_error, tool_result  # type: ignore
 
@@ -1329,7 +1330,9 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
 
 
 # ───────────────────────────── sheet ─────────────────────────────
-_TAB_TONG = "Tổng hợp"
+# Tab đầu = "Tổng quan" của lớp trình bày chung (trinh_bay_sheet, 08/10/2026): mục lục các
+# tab, kiểm ghi đủ, số liệu của việc. Trước 08/10 tên "Tổng hợp".
+_TAB_TONG = T.TAB_TONG_QUAN
 _TAB_LOAI = "Bị loại"
 _TAB_KHAC = A._TAB_THI_TRUONG_KHAC   # bài của brand ở nước khác — tab riêng (chốt 02/10/2026)
 _BI_LOAI_TOI_DA = 20000
@@ -1371,6 +1374,12 @@ def _ten_tab(p: str) -> str:
     return A._TEN_NGUON.get(p, p)
 
 
+def _cot_quet(them: list) -> list:
+    """Kiểu cột của tab bài (chế độ LỚN: trang trí theo cột sau khi ghi đủ)."""
+    return [T.Cot(c, A._KIEU_COT_BAI.get(c, "chu"))
+            for c in list(A._HEADER) + list(them) + _COT_CUOI]
+
+
 def _title(v, ts: dict) -> str:
     return ts.get("title") or (f"Quét nền · {', '.join(ts['queries'])[:30]} · "
                                f"{ts['date_from'][8:10]}-{ts['date_from'][5:7]}→"
@@ -1386,7 +1395,7 @@ def _ghi_so_bo(v, p: str, ts: dict, d_from, d_to) -> None:
         if s.s.get("giai_doan") == "cuoi":
             return
         if not s.s["tabs"][_TAB_TONG].get("da_ghi"):
-            s.ghi_tab(_TAB_TONG, [["Mục", "Giá trị"],
+            s.ghi_tab(_TAB_TONG, [[_title(v, ts), ""],
                                   ["Trạng thái", f"ĐANG QUÉT NỀN ({v.ma}) — bản sơ bộ, chưa lọc AI"]])
         kw = ", ".join(ts["queries"])
         da, rows = set(), []
@@ -1400,7 +1409,8 @@ def _ghi_so_bo(v, p: str, ts: dict, d_from, d_to) -> None:
             rows.append(_dong_du(d, dt, kw, 500, ["chưa lọc", "sơ bộ", phan_loai.CHUA,
                                                   A._nguon_bai(d)]))
         rows.sort(key=lambda r: -int(r[4] or 0))
-        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows, tu_dau=True)
+        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows, tu_dau=True,
+                  cot=_cot_quet(_COT_THEM), mo_ta="Bản sơ bộ (chưa lọc AI)")
     except Exception as e:  # noqa: BLE001
         if type(e).__name__ == "MatQuyen":
             raise
@@ -1451,36 +1461,53 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
     for p in v.d["nen_tang"]:
         rows = [_dong_du(d, dt, kw, 500, _cot_them(d))
                 for d, dt in ket["hits"] if d["platform"] == p and not khac(d)]
-        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows)
+        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows,
+                  cot=_cot_quet(_COT_THEM), mo_ta=f"Bài {_ten_tab(p)} đã lọc (thị trường "
+                                                   f"{ts['country']})")
     # Tab phụ rỗng: chưa từng có thì KHÔNG tạo tab trống; đã có từ lượt trước (việc tiếp tục
     # sau `xong_mot_phan`) thì vẫn ghi lại chỉ tiêu đề — `ghi_tab` xoá các dòng cũ thừa, kẻo
     # bài của lượt trước nằm lại như kết quả của lượt này.
     rows = [_dong_du(d, dt, kw, 500, _cot_them(d)) for d, dt in ket["hits"] if khac(d)]
     if rows or _TAB_KHAC in s.s["tabs"]:
-        s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows)
+        s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows,
+                  cot=_cot_quet(_COT_THEM), mo_ta="Bài của brand ở nước khác")
     bl = ket["bi_loai"]
     if bl or _TAB_LOAI in s.s["tabs"]:
         rows = [_dong_du(d, dt, kw, 300, [ly_do, d.get("_phan_xu") or ""])
                 for d, dt, ly_do in bl[:_BI_LOAI_TOI_DA]]
         s.ghi_tab(_TAB_LOAI, [list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"]
-                              + _COT_CUOI] + rows)
+                              + _COT_CUOI] + rows,
+                  cot=_cot_quet(["Thị trường", "Lý do loại", "Phân xử"]),
+                  mo_ta=f"Bài bị loại kèm lý do (tối đa {_BI_LOAI_TOI_DA} dòng)")
     # Bảng đếm sắc thái (bài của các tab nền tảng). 0 nhãn thì không tạo tab trống; tab
     # đã có từ lượt trước thì vẫn ghi lại để số cũ không nằm lại.
     st = ket.get("sac_thai") or A.thong_ke_sac_thai(
         [d for d, _ in ket["hits"] if not khac(d)])
     if st["thong_ke"]["da_phan_loai"] or _TAB_TK in s.s["tabs"]:
-        s.ghi_tab(_TAB_TK, A._bang_thong_ke(st))
+        bang_tk = A._bang_thong_ke(st)
+        s.ghi_tab(_TAB_TK, bang_tk, cot=[T.Cot(str(c)) for c in bang_tk[0]],
+                  mo_ta="Đếm sắc thái bài + trích dẫn")
     tong = _dong_tong_hop(v, ts, ket, cp, trang_thai)
     if len(bl) > _BI_LOAI_TOI_DA:
         tong.append(["Bị loại — không ghi", f"{len(bl) - _BI_LOAI_TOI_DA} dòng (trần "
-                                            f"{_BI_LOAI_TOI_DA} dòng/tab)"])
-    s.ghi_tab(_TAB_TONG, tong)
-    # Tab nền tảng/phụ đều thêm bằng `addSheet` (SoSheet.dam_bao_tab → A._them_tab), mà
-    # Lark chèn tab mới vào vị trí 0 → link mở ra tab thêm sau cùng. Kéo "Tổng hợp" về
-    # đầu — cố gắng, hỏng chỉ in cảnh báo (xem `A._dua_tab_chinh_len_dau`).
-    tong_sid = (s.s["tabs"].get(_TAB_TONG) or {}).get("sheet_id")
-    if tong_sid and len(s.s["tabs"]) > 1:
-        A._dua_tab_chinh_len_dau(s.s.get("token") or "", tong_sid)
+                                            f"{_BI_LOAI_TOI_DA} dòng/tab) — thu hẹp khoảng "
+                                            "ngày/từ khoá để xem hết"])
+    # Kiểm ghi (đọc lại từng tab) rồi Tổng quan: mục lục + kiểm + số liệu của việc.
+    kiem = s.kiem_ghi(bo_qua={_TAB_TONG})
+    tq = T.TongQuan(
+        tieu_de=_title(v, ts), nguon=f"Quét nền social_listen (mã việc {v.ma})",
+        thoi_gian=f"{ts['date_from']} → {ts['date_to']}",
+        pham_vi=f"Từ khoá: {', '.join(ts['queries'])} · Nền tảng: "
+                f"{', '.join(_ten_tab(p) for p in v.d['nen_tang'])} · Thị trường: "
+                f"{ts['country']}",
+        so_lieu=[T.SoLieu(str(m), g) for m, g in tong[1:]],
+        ghi_chu=["Bảng lớn: chỉ trang trí theo cột (tiêu đề, cố định dòng 1, bộ lọc, định "
+                 "dạng số); ngày đăng ở dạng chữ dd/MM/yyyy hh:mm (giờ VN).",
+                 "Followers/Shares = 0 ở Instagram/Facebook/YouTube là do nguồn không trả "
+                 "số, không phải 0 thật."])
+    # Lưu kiem vào sổ (s.s["kiem"]) và xếp tab MỘT lần: Tổng quan đầu, các tab dữ liệu theo
+    # thứ tự thêm (`addSheet` của Lark chèn tab mới ở vị trí 0).
+    s.ghi_tong_quan(_TAB_TONG, tq, kiem)
     return s.s.get("url") or ""
 
 
@@ -1539,6 +1566,9 @@ def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list
         d.append("Đã huỷ theo yêu cầu — các lượt đang chạy đã dừng, sheet giữ phần lấy được "
                  "tới lúc huỷ.")
     d.append(f"Link: {url}" if url else "Không tạo được sheet — xem lỗi ở dưới.")
+    kiem = (v.d.get("sheet") or {}).get("kiem") or {}
+    if url and kiem.get("cau"):
+        d.append(f"Kiểm ghi: {kiem['cau']}")
     for p, x in ket["per"].items():
         loi = [ph for ph in v.d["nen_tang"][p].get("phan") or []
                if ph.get("trang_thai") in ("loi", "da_huy")]

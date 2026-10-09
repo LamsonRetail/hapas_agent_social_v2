@@ -9,8 +9,9 @@ Ranh giới với `social_deep_dive` (chốt 04/10/2026):
 Đầu ra cùng hình với `social_deep_dive`: mỗi bình luận một dòng (nền tảng, người bình
 luận, nội dung, Sắc thái, Chủ đề, likes, số trả lời, thời gian, link bài) + hai cột quan
 hệ cha–con (Cấp, Trả lời cho); gán nhãn bằng `phan_loai.phan_loai_binh_luan`, tab
-"Thống kê" bằng `deep_dive_tool._ghi_thong_ke`, ghi sheet qua `apify_tool._write_values`
-(bộ chặn công thức `_bang_an_toan`). Trả lời của CHÍNH kênh nhà nằm trong sheet nhưng
+"Thống kê" bằng `deep_dive_tool.bang_thong_ke`, ghi sheet qua `trinh_bay_sheet.xuat` (Tổng
+quan + tab đánh số + "Dữ liệu gốc"; mọi lần ghi vẫn qua `apify_tool._write_values` — bộ chặn
+công thức `_bang_an_toan`). Trả lời của CHÍNH kênh nhà nằm trong sheet nhưng
 KHÔNG gán nhãn, KHÔNG vào thống kê — "cảm ơn bạn" của shop không phải tiếng nói khách.
 
 Tiền: 0 USD (API Meta miễn phí, có hạn mức gọi). Vẫn ghi Lark Sheet nên lời dặn ở prompt
@@ -36,6 +37,7 @@ import deep_dive_tool as D
 import kenh_nha_meta as M
 import memory_store
 import phan_loai
+import trinh_bay_sheet as T
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
@@ -52,6 +54,8 @@ _HEADER = list(D._HEADER[:10]) + ["Cấp", "Trả lời cho", phan_loai.NGUON_CO
 _HEADER_BAI = ["Nền tảng", "Link bài", "Ngày đăng", "Nội dung bài", "Bình luận đã lấy",
                "Số bình luận nền tảng báo", "Trạng thái"]
 _TAB_BAI = "Bài đã đọc"
+_KIEU_BAI = {"Link bài": "link", "Ngày đăng": "ngay_gio", "Nội dung bài": "chu_dai",
+             "Bình luận đã lấy": "so_nguyen", "Số bình luận nền tảng báo": "so_nguyen"}
 _KENH_NHA = "— (kênh nhà trả lời)"
 _CHAM_TRAN = "CHẠM TRẦN max_comments — còn bình luận chưa lấy"
 _HET_GIO = "CHƯA XONG — hết thời gian, chỉ có phần đã lấy"
@@ -245,12 +249,24 @@ def _tim_bai(kenh: str, tok: str, yeu_cau: list[str], han: float) -> tuple[list[
 
 
 # ───────────────────────── bình luận ─────────────────────────
+def _goc_sach(x):
+    """Bản ghi API cho tab "Dữ liệu gốc": bỏ mọi `paging` (URL `next` của Meta mang
+    access_token) và che chuỗi có hình token/secret (`kenh_nha_meta.che`)."""
+    if isinstance(x, dict):
+        return {k: _goc_sach(v) for k, v in x.items() if k != "paging"}
+    if isinstance(x, list):
+        return [_goc_sach(v) for v in x]
+    return M.che(x) if isinstance(x, str) else x
+
+
 def _dong(kenh: str, bai: dict, id_: str, ten: str, text: str, likes, ts, cha: str,
-          cua_kenh: bool, link: str = "") -> dict:
+          cua_kenh: bool, link: str = "", goc: dict | None = None) -> dict:
+    """`goc` = bản ghi API nguyên vẹn → tab "Dữ liệu gốc" (khoá "__": không vào tool_result)."""
     return {"platform": kenh, "kenh": ten, "text": str(text or "")[:1000],
             "likes": likes, "replies": 0, "thoi_gian": _gio(ts), "tac_gia_thich": "",
             "link": link or bai["link"], "bai": bai["link"] or bai["id"], "id": id_,
-            "cha": cha, "cua_kenh": cua_kenh}
+            "cha": cha, "cua_kenh": cua_kenh,
+            "__goc": _goc_sach(goc) if goc is not None else None}
 
 
 def _bl_threads(tok: str, bai: dict, toi_da: int, han: float, toi: dict) -> tuple[list, bool]:
@@ -263,7 +279,7 @@ def _bl_threads(tok: str, bai: dict, toi_da: int, han: float, toi: dict) -> tupl
         ra.append(_dong("threads", bai, str(x.get("id") or ""), ten, x.get("text"), None,
                         x.get("timestamp"), "" if cha == bai["id"] else cha,
                         bool(x.get("is_reply_owned_by_me") or (ten and ten == toi.get("ten"))),
-                        str(x.get("permalink") or "")))
+                        str(x.get("permalink") or ""), goc=x))
     return ra, con
 
 
@@ -275,7 +291,7 @@ def _bl_instagram(tok: str, bai: dict, toi_da: int, han: float, toi: dict) -> tu
         ten = str(x.get("username") or "")
         cid = str(x.get("id") or "")
         ra.append(_dong("instagram", bai, cid, ten, x.get("text"), x.get("like_count"),
-                        x.get("timestamp"), "", bool(ten and ten == toi.get("ten"))))
+                        x.get("timestamp"), "", bool(ten and ten == toi.get("ten")), goc=x))
         tl = x.get("replies") or {}
         ds = tl.get("data") or []
         # Trường lồng `replies{…}` chỉ trả trang đầu; còn trang sau thì đọc cả cạnh replies.
@@ -289,7 +305,7 @@ def _bl_instagram(tok: str, bai: dict, toi_da: int, han: float, toi: dict) -> tu
             t2 = str(r.get("username") or "")
             ra.append(_dong("instagram", bai, str(r.get("id") or ""), t2, r.get("text"),
                             r.get("like_count"), r.get("timestamp"), cid,
-                            bool(t2 and t2 == toi.get("ten"))))
+                            bool(t2 and t2 == toi.get("ten")), goc=r))
         if len(ra) >= toi_da:
             return ra[:toi_da], True
     return ra, con
@@ -306,7 +322,7 @@ def _bl_facebook(tok: str, bai: dict, toi_da: int, han: float, toi: dict) -> tup
                         x.get("message"), x.get("like_count"), x.get("created_time"),
                         str((x.get("parent") or {}).get("id") or ""),
                         bool(tu.get("id")) and str(tu.get("id")) == toi.get("id"),
-                        str(x.get("permalink_url") or "")))
+                        str(x.get("permalink_url") or ""), goc=x))
     return ra, con
 
 
@@ -613,11 +629,40 @@ def _handle(args: dict, **_kw) -> str:
     title = (str(args.get("title") or "").strip()
              or f"Bình luận kênh nhà · {'+'.join(M.TEN[k] for k in chay)} · "
                 f"{datetime.datetime.now(A._VN_TZ):%d-%m %H%M}")
-    values = [list(_HEADER)] + [_o(r) for r in rows]
+    # Sheet (trinh_bay_sheet): Tổng quan + Bình luận + Thống kê + Bài đã đọc (+ Dữ liệu gốc).
+    goc = D.bang_goc_dong(rows)
+    bang_bl = T.Bang(A.TAB_BINH_LUAN, D.cot_binh_luan(_HEADER), [_o(r) for r in rows],
+                     gap_duoc=False, mo_ta="Mỗi bình luận/trả lời một dòng, xếp trả lời ngay "
+                                           "dưới bình luận cha; cột Nguồn = khách / thương hiệu")
+    bang_bai = T.Bang(_TAB_BAI, [T.Cot(c, _KIEU_BAI.get(c, "chu")) for c in _HEADER_BAI],
+                      [_o_bai(k, b) for k, b in bai], gap_duoc=False,
+                      mo_ta="Bài của kênh nhà đã đọc: số bình luận lấy được / nền tảng báo")
+    ghi_chu = D.ghi_chu_thong_ke(dong_tk) + [
+        f"Phân loại: {pl['trang_thai']}. {pl['ghi_chu']}".strip()
+        if pl["trang_thai"] and pl["trang_thai"] != "đã chạy" or pl["ghi_chu"] else "",
+        f"Phạm vi đọc: {pham_vi}. Bài trạng thái '{_CHAM_TRAN}' / '{_HET_GIO}' là CHƯA lấy "
+        "hết bình luận — muốn đủ thì tăng max_comments hoặc đọc ít bài hơn."
+        if chua_du else f"Phạm vi đọc: {pham_vi}.",
+        "Threads không trả số like của từng trả lời: ô Likes TRỐNG = không có số, KHÔNG phải 0.",
+        "Nội dung bình luận cắt ở 1.000 ký tự, nội dung bài ở 300 ký tự; bản đầy đủ mọi "
+        f"trường API Meta trả cho từng bình luận nằm ở tab '{T.TAB_GOC}'." if goc else
+        "Nội dung bình luận cắt ở 1.000 ký tự, nội dung bài ở 300 ký tự.",
+        ("Kênh lỗi/chưa nối: " + "; ".join(per_kenh[k]["loi"] for k in so_loi)
+         + " — chủ agent cần cấp lại token.") if so_loi else "",
+        "Chi phí 0 USD — API chính thức của Meta, không dùng Apify.",
+    ]
+    tq = D.tong_quan_binh_luan(title, f"{TEN_TOOL} — API chính thức của Meta",
+                               ", ".join(M.TEN[k] for k in chay), bang_bl, tk, ghi_chu,
+                               len(rows))
+    sender = memory_store.get_current_sender()
+    cap: dict = {}
+
+    def _cap_quyen(tok: str) -> None:
+        T.gop_quyen(cap, A._grant(tok, sender) if sender else False)
+
     try:
-        tok, url = A._create_sheet(title)
-        sid = A._first_sheet_id(tok)
-        A._write_values(tok, sid, values)
+        kq_sheet = T.xuat(title, [bang_bl, D.bang_thong_ke(tk), bang_bai], tq, goc=goc,
+                          cap_quyen=_cap_quyen)
     except Exception as e:  # noqa: BLE001
         M.ghi_log(f"ghi sheet hỏng: {type(e).__name__}")
         return tool_result(
@@ -625,26 +670,23 @@ def _handle(args: dict, **_kw) -> str:
             phan_loai=pl, trich_dan=phan_loai.trich_dan(khach),
             error=A._che_token(M.che(f"Lấy được {len(rows)} bình luận nhưng TẠO/GHI SHEET "
                                      f"THẤT BẠI: {type(e).__name__}: {e}")))
-    try:
-        thong_ke_o = D._ghi_thong_ke(tok, sid, len(values), tk)
-    except Exception as e:  # noqa: BLE001
-        thong_ke_o = f"KHÔNG ghi được ({type(e).__name__})"
-    try:
-        sid_bai = A._them_tab(tok, _TAB_BAI)
-        A._write_values(tok, sid_bai, [list(_HEADER_BAI)] + [_o_bai(k, b) for k, b in bai])
-        A._vua_cot(tok, sid_bai, len(_HEADER_BAI))
-    except Exception as e:  # noqa: BLE001 — chỉ thiếu tab phụ
-        M.ghi_log(f"không thêm được tab '{_TAB_BAI}': {type(e).__name__}")
-    A._sua_tab_chinh(tok, sid, A.TAB_BINH_LUAN, len(_HEADER))
-    sender = memory_store.get_current_sender()
-    granted = A._grant(tok, sender) if sender else False
+    url = kq_sheet.url
+    granted = bool(cap.get("granted"))
+    thong_ke_o = D.noi_ghi(kq_sheet, D._TAB_THONG_KE)
     return tool_result(
         success=True, title=title, sheet_url=url, granted=granted, **base,
         thong_ke=tk, dong_thong_ke=dong_tk, phan_loai=pl, thong_ke_ghi_o=thong_ke_o,
         trich_dan=phan_loai.trich_dan(khach), giay=round(time.monotonic() - t0, 1),
+        **kq_sheet.cho_tool(),
         note=(f"Đã ghi {len(rows)} bình luận (đủ trả lời lồng nhau; {len(rows) - len(khach)} "
               f"trả lời của chính kênh nhà không gán nhãn, không tính thống kê) vào sheet "
-              f"'{title}'; thống kê ở {thong_ke_o}. GỬI `sheet_url`. Số sentiment CHỈ lấy từ "
+              f"'{title}': tab '{T.TAB_TONG_QUAN}', bình luận ở "
+              f"{D.noi_ghi(kq_sheet, A.TAB_BINH_LUAN)}, thống kê ở {thong_ke_o}, bài ở "
+              f"{D.noi_ghi(kq_sheet, _TAB_BAI)}. Kiểm ghi: {kq_sheet.cau_kiem} "
+              + ("" if kq_sheet.day_du is not False else
+                 "CẢNH BÁO GHI THIẾU: sheet CHƯA đủ dòng như `kiem_ghi` nói — báo rõ với "
+                 "người dùng, đừng nói là đủ. ")
+              + f"GỬI `sheet_url` kèm NGUYÊN câu `kiem_ghi`. Số sentiment CHỈ lấy từ "
               f"`thong_ke`/`dong_thong_ke`, nói rõ đã phân loại {tk['da_phan_loai']}/"
               f"{tk['tong']}; dẫn lời thật từ `trich_dan`. Chi phí 0 USD." + canh_bao
               + ("" if granted else " CẢNH BÁO: chưa cấp được quyền tự động.")))

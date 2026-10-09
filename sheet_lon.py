@@ -6,6 +6,11 @@ gọi liên tiếp: Lark trả "frequency limit"/429 giữa chừng, và lưới
 có ~200 dòng. Ở đây: khối ≤1000 dòng, nghỉ ~0,2 giây giữa các khối, lùi dần khi 429, tự
 thêm dòng (`dimension_range`) khi lưới thiếu, và ghi `da_ghi` của từng tab vào sổ việc
 sau MỖI khối — khởi động lại thì ghi tiếp từ đó, không nhân đôi dòng.
+
+Trình bày (08/10/2026, `trinh_bay_sheet`): `ghi_tab(..., cot=[Cot])` ghi xong cả bảng thì
+trang trí THEO CỘT (tiêu đề navy, cố định dòng 1, bộ lọc, định dạng số, độ rộng) — chế độ
+LỚN: không tô từng dòng, số request có trần. `ghi_tong_quan` dựng tab Tổng quan (mục lục +
+kiểm ghi), `kiem_ghi` đọc lại từng tab.
 """
 from __future__ import annotations
 
@@ -13,8 +18,10 @@ import hashlib
 import json
 import re
 import time
+from typing import Iterable
 
 import apify_tool as A
+import trinh_bay_sheet as T
 
 KHOI = 1000            # dòng mỗi lượt ghi
 NGHI = 0.2             # giây nghỉ giữa hai khối
@@ -121,8 +128,8 @@ class SoSheet:
 
     def _them_cot(self, t: dict, can: int) -> None:
         """Tab đã bị bỏ cột thừa (`cot`) mà bảng mới rộng hơn: nới lưới trước khi ghi."""
-        cot = t.get("cot")
-        if cot and can > cot:
+        cot = t.get("cot") or T.LUOI_COT          # chưa biết = lưới tab mới (20 cột)
+        if can > cot:
             _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{self.s['token']}/dimension_range",
                  body={"dimension": {"sheetId": t["sheet_id"], "majorDimension": "COLUMNS",
                                      "length": can - cot}})
@@ -154,7 +161,8 @@ class SoSheet:
             self.s["giai_doan"] = giai_doan
             self._luu()
 
-    def ghi_tab(self, ten: str, bang: list[list], tu_dau: bool = False) -> int:
+    def ghi_tab(self, ten: str, bang: list[list], tu_dau: bool = False,
+                cot: list | None = None, mo_ta: str = "") -> int:
         """Ghi `bang` (dòng 0 = tiêu đề) vào tab, tiếp từ `da_ghi`. -> số dòng đã có.
 
         Ghi tiếp chỉ khi bảng Y HỆT lần ghi dở trước (băm `hash`): khởi động lại mà danh sách
@@ -163,6 +171,13 @@ class SoSheet:
         dòng 1. Mọi dòng đệm tới cột RỘNG NHẤT từng ghi (`rong`) để cột thừa của bản cũ
         (bản sơ bộ) bị xoá chứ không nằm lại."""
         t = self.dam_bao_tab(ten)
+        if cot:
+            # Ô theo kiểu cột (mã → chữ, Decimal → số…); ngày giữ dạng chữ vì định dạng chỉ
+            # đặt SAU khi ghi (ghi dần, khởi động lại được).
+            cot = [c if isinstance(c, T.Cot) else T.Cot(str(c)) for c in cot]
+            bang = [bang[0]] + [[T._o(r[j] if j < len(r) else "", c.kieu, False)
+                                 for j, c in enumerate(cot)] + list(r[len(cot):])
+                                for r in bang[1:]]
         rong = max(max((len(r) for r in bang), default=1), int(t.get("rong") or 0))
         bang = [list(r) + [""] * (rong - len(r)) for r in bang]
         h = hashlib.sha1(json.dumps(bang, ensure_ascii=False, default=str)
@@ -199,8 +214,83 @@ class SoSheet:
         # Ghi xong cả bảng mới bỏ cột trống thừa bên phải (lưới mặc định 20 cột); khởi động
         # lại giữa chừng thì lần ghi tiếp làm. Bảng sau rộng hơn thì `_them_cot` nới lại.
         if t.get("cot") != rong:
-            cot = A._vua_cot(self.s["token"], t["sheet_id"], rong)
+            so_cot_luoi = A._vua_cot(self.s["token"], t["sheet_id"], rong)
             with self.v._khoa:
-                t["cot"] = cot
+                t["cot"] = so_cot_luoi
+                self._luu()
+        with self.v._khoa:
+            t["so_dong_dl"], t["so_cot_dl"] = len(bang) - 1, len(bang[0]) if bang else 0
+            t["ten_cot"] = [str(x) for x in (bang[0] if bang else [])]
+            t["mo_ta"] = mo_ta or t.get("mo_ta") or ""
+            self._luu()
+        # Trang trí một lần cho mỗi nội dung (băm) — khởi động lại không tô lại.
+        if cot and t.get("trang_tri") != h:
+            T.trang_tri_bang(self.s["token"], t["sheet_id"], cot, len(bang) - 1,
+                             mau=bang[1:501] if len(bang) - 1 <= 500 else None)
+            with self.v._khoa:
+                t["trang_tri"] = h
                 self._luu()
         return len(bang)
+
+    def tab_da_ghi(self, bo_qua: Iterable[str] = ()) -> list:
+        """Các tab dữ liệu đã ghi (để mục lục/kiểm ghi), theo thứ tự thêm."""
+        ra = []
+        for ten, t in self.s["tabs"].items():
+            if ten in bo_qua or "so_dong_dl" not in t:
+                continue
+            ra.append(T.TabDaGhi(ten, t["sheet_id"], [T.Cot(x) for x in t.get("ten_cot") or []],
+                                 int(t["so_dong_dl"]), int(t["so_cot_dl"]),
+                                 mo_ta=t.get("mo_ta") or ""))
+        return ra
+
+    def kiem_ghi(self, bo_qua: Iterable[str] = ()) -> dict:
+        """Đọc lại các tab dữ liệu (xem `trinh_bay_sheet.kiem_ghi`). Không ném."""
+        try:
+            return T.kiem_ghi(self.s["token"], self.tab_da_ghi(bo_qua))
+        except Exception as e:  # noqa: BLE001
+            return {"day_du": None, "tabs": [],
+                    "cau": f"Chưa kiểm được ghi đủ: {A._che_token(e)[:120]}"}
+
+    def sap_tab(self, thu_tu: list) -> None:
+        """Xếp tab theo `thu_tu` (tên) bằng MỘT sheets_batch_update — `addSheet` của Lark
+        chèn tab mới ở vị trí 0. Cố gắng: hỏng chỉ in cảnh báo."""
+        reqs = [{"updateSheet": {"properties": {"sheetId": self.s["tabs"][t]["sheet_id"],
+                                                "index": i}}}
+                for i, t in enumerate(thu_tu) if t in self.s["tabs"]]
+        if len(reqs) < 2:
+            return
+        try:
+            _goi("POST", f"/open-apis/sheets/v2/spreadsheets/{self.s['token']}"
+                         "/sheets_batch_update", body={"requests": reqs})
+        except Exception as e:  # noqa: BLE001
+            print(f"[sheet_lon] xếp tab lỗi (bỏ qua): {A._che_token(e)[:120]}")
+
+    def ghi_tong_quan(self, ten: str, tq, kiem: dict | None = None,
+                      bo_qua: Iterable[str] = ()) -> dict:
+        """Ghi tab Tổng quan `ten` (mục lục các tab dữ liệu + kiểm ghi + số liệu/ghi chú của
+        `tq`) qua `trinh_bay_sheet.ghi_lai_tong_quan` (ghi bản mới trước, xoá bản cũ sau),
+        rồi xếp tab: Tổng quan đầu, các tab khác theo thứ tự thêm (`addSheet` của Lark chèn
+        tab mới ở vị trí 0). -> kết quả kiểm GỘP (tab dữ liệu + Tổng quan) — Tổng quan hỏng
+        thì `day_du` không còn True; cũng lưu vào sổ (`s["kiem"]`). Không ném lỗi Lark."""
+        tabs = self.tab_da_ghi(set(bo_qua) | {ten})
+        t = self.dam_bao_tab(ten)
+        kiem_ = getattr(self.v, "kiem_quyen", None)
+        if kiem_:
+            kiem_()                         # tiến trình đã mất quyền chủ thì không ghi sheet
+        # Ghi GỌN qua lớp chung (xoá dòng bản trước, không đệm ô "" — ô "" chặn chữ dài tràn
+        # sang ô kế), trang trí luôn. Không ném: Tổng quan hỏng không làm hỏng việc.
+        cb: list = []
+        ket = T.ghi_lai_tong_quan(self.s["token"], t["sheet_id"], self.s.get("url") or "", tq,
+                                  tabs, kiem, canh_bao=cb,
+                                  so_dong_cu=int(t.get("so_dong_cu") or 0))
+        n = ket["so_dong"]
+        gop = T.gop_kiem_tong_quan(kiem or {"tabs": []}, ket)
+        if cb:
+            print(f"[sheet_lon] Tổng quan: {'; '.join(cb)[:300]}")
+        with self.v._khoa:
+            t.update(so_dong_cu=n, da_ghi=n, hash=None, so_dong_dl=max(0, n - 1), so_cot_dl=4)
+            self.s["kiem"] = {"day_du": gop.get("day_du"), "cau": gop.get("cau"),
+                              "canh_bao": cb[:4] or None}
+            self._luu()
+        self.sap_tab([ten] + [t for t in self.s["tabs"] if t != ten])
+        return gop

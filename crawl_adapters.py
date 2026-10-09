@@ -206,6 +206,9 @@ def chay(url: str, toi_da: int, log: list) -> dict:
             p = cfg["chuan_hoa"](it, goc)
             if not p.get("ten"):
                 continue
+            # Bản ghi actor nguyên vẹn → tab "Dữ liệu gốc" của sheet (crawl_tool); khoá "__"
+            # không bao giờ vào tool_result.
+            p["__goc"] = it
             k = _ma_mau(it)
             if k and k in da_co_mau:
                 gop += 1

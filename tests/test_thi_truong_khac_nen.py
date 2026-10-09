@@ -14,10 +14,12 @@ import pytest
 import apify_tool as A
 import quet_lon
 import sheet_lon
+import trinh_bay_sheet as T
 
 DT = datetime.datetime(2026, 9, 30, 10, 0, tzinfo=A._VN_TZ)
 # Bản thật — fixture `chay` thay bằng bản giả; bài kiểm "đổi thứ tự hỏng" cần bản thật.
 _DUA_TAB_THAT = A._dua_tab_chinh_len_dau
+_SO_THAT = sheet_lon.SoSheet
 
 
 def _bai(p, kenh, tt):
@@ -54,12 +56,23 @@ def chay(monkeypatch):
         def bat_dau_giai_doan(self, *a):
             pass
 
-        def ghi_tab(self, ten, bang, tu_dau=False):
+        def ghi_tab(self, ten, bang, tu_dau=False, cot=None, mo_ta=""):
             if ten not in so["tabs"]:
                 tao.append(ten)
                 so["tabs"][ten] = {"sheet_id": f"sid-{ten}"}
             tabs[ten] = bang
             return len(bang)
+
+        def kiem_ghi(self, bo_qua=()):
+            return {"day_du": True, "cau": "Đã ghi đủ (giả).", "tabs": []}
+
+        def ghi_tong_quan(self, ten, tq, kiem=None, bo_qua=()):
+            so["kiem"] = kiem
+            self.ghi_tab(ten, T.dung_tong_quan(tq, [], [], kiem)[0], tu_dau=True)
+            self.sap_tab([ten] + [t for t in so["tabs"] if t != ten])
+
+        def sap_tab(self, thu_tu):
+            dua.append(tuple(thu_tu))
     monkeypatch.setattr(sheet_lon, "SoSheet", SoGia)
     monkeypatch.setattr(A, "_dua_tab_chinh_len_dau", lambda tok, sid: dua.append((tok, sid)))
 
@@ -74,6 +87,7 @@ def chay(monkeypatch):
                            "loai": 0} for p in ("tiktok", "youtube")},
                "phan_xu": {}}
         v = _V()
+        v.d["sheet"] = so                       # như sổ việc thật: SoSheet.s = v.d["sheet"]
         quet_lon._ghi_cuoi(v, ts, ket, {"usd": 0.1, "so_run": 1}, "xong")
         tin = quet_lon._tin_nhan(v, ts, ket, {"usd": 0.1, "so_run": 1}, "https://sheet",
                                  "xong", [])
@@ -95,8 +109,9 @@ def test_bai_nuoc_khac_sang_tab_rieng_tab_nen_tang_chi_con_vn(chay):
     assert quet_lon._TAB_LOAI not in tabs, "bài brand ở nước khác KHÔNG phải rác"
     cau = ("giữ 1 bài của brand ở nước khác (TH 1) ở tab riêng 'Thị trường khác' — các tab "
            "nền tảng chỉ có bài VN")
-    assert [A._TAB_THI_TRUONG_KHAC, cau] in tabs[quet_lon._TAB_TONG]
+    assert [A._TAB_THI_TRUONG_KHAC, cau] in [r[:2] for r in tabs[quet_lon._TAB_TONG]]
     assert f"Thị trường khác: {cau}." in tin
+    assert "Kiểm ghi: Đã ghi đủ (giả)." in tin
 
 
 def test_hoi_nhieu_nuoc_thi_chung_tab_nen_tang(chay):
@@ -131,18 +146,23 @@ def test_khong_bai_nuoc_khac_khong_bi_loai_thi_khong_tao_tab_trong(chay):
     assert A._TAB_THI_TRUONG_KHAC not in chay.tao and quet_lon._TAB_LOAI not in chay.tao
 
 
-def test_tong_hop_ve_dau_sau_khi_ghi_xong(chay):
-    """addSheet của Lark chèn tab mới ở vị trí 0: sau khi ghi hết, kéo "Tổng hợp" về đầu."""
+def test_tong_quan_ve_dau_sau_khi_ghi_xong(chay):
+    """addSheet của Lark chèn tab mới ở vị trí 0: sau khi ghi hết, xếp lại MỘT lần — Tổng
+    quan đầu, các tab dữ liệu theo thứ tự thêm."""
     chay()
-    assert chay.dua == [("shtA", "s0")]
+    assert chay.dua == [(quet_lon._TAB_TONG, "TikTok", "YouTube", A._TAB_THI_TRUONG_KHAC)]
 
 
 def test_doi_thu_tu_tab_hong_khong_lam_hong_ghi_cuoi(chay, monkeypatch):
-    monkeypatch.setattr(A, "_dua_tab_chinh_len_dau", _DUA_TAB_THAT)
+    """Sổ sheet thật: xếp tab hỏng (Lark 500) chỉ in cảnh báo."""
+    s = sheet_lon.SoSheet.__new__(sheet_lon.SoSheet)
+    s.s = {"token": "shtA", "tabs": {"a": {"sheet_id": "1"}, "b": {"sheet_id": "2"}}}
 
     def lark_hong(*a, **k):
         raise RuntimeError("lark 500")
     monkeypatch.setattr(A.lark, "call", lark_hong)
+    monkeypatch.setattr(sheet_lon, "_ngu", lambda *_: None)
+    _SO_THAT.sap_tab(s, ["b", "a"])                 # không ném
     tabs, _ = chay()
     assert _kenh(tabs[A._TAB_THI_TRUONG_KHAC]) == ["Shop Thái"]
     assert quet_lon._TAB_TONG in tabs

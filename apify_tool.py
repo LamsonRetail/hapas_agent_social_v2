@@ -79,6 +79,7 @@ import lark_client as lark
 import memory_store
 import phan_loai
 import tai_khoan_ai
+import trinh_bay_sheet as T
 from config import config
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
@@ -2254,6 +2255,7 @@ def _chuan_clockworks(raw: list) -> list[dict]:
             # Cờ giỏ hàng TikTok Shop — tách video affiliate (gắn giỏ) khỏi video viral.
             "hasTikTokShopProduct": it.get("hasTikTokShopProduct"),
             "_nguon": "clockworks (dự phòng)",
+            "__goc": it,                   # bản ghi gốc của actor → tab "Dữ liệu gốc"
         })
     return out
 
@@ -2349,6 +2351,9 @@ def _chuan_tiktok(raw: list) -> list[tuple]:
             "link": it.get("postPage") or "",
             "_nguon": it.get("_nguon") or "apidojo",
             "gio_hang": _gio_hang_tiktok(it),
+            # Bản ghi gốc (mọi trường) cho tab "Dữ liệu gốc". Khoá "__" không vào sổ việc
+            # nền (viec_nen.ghi_dong bỏ khoá "__") và không bao giờ vào tool_result.
+            "__goc": it.get("__goc") or it,
         }, dt))
     return out
 
@@ -2409,6 +2414,7 @@ def _chuan_instagram(raw: list) -> list[tuple]:
             "hashtags": _tags_from(cap),
             "text": cap[:1000],
             "link": it.get("url") or "",
+            "__goc": it,
         }, dt))
     return out
 
@@ -2461,6 +2467,7 @@ def _chuan_facebook(raw: list) -> list[tuple]:
             "hashtags": _tags_from(msg),
             "text": msg[:1000],
             "link": it.get("url") or "",
+            "__goc": it,
         }, dt))
     return out
 
@@ -2619,6 +2626,7 @@ def _youtube_tim(q: list[str], limit: int, country: str, d_from, d_to,
             "hashtags": hashtags,
             "text": f"{title} — {desc}"[:1000],
             "link": f"https://www.youtube.com/watch?v={vid}",
+            "__goc": {"search": found, "video": detail},
         }, _to_vn(snippet.get("publishedAt"))))
     return out, so_trang, bi_cat
 
@@ -2639,6 +2647,7 @@ def _chuan_threads(raw: list) -> list[tuple]:
             "hashtags": _tags_from(txt) or str(it.get("topic_tag") or ""),
             "text": txt[:1000],
             "link": it.get("post_url") or "",
+            "__goc": it,
         }, _to_vn(it.get("created_at_timestamp") or it.get("created_at"))))
     return out
 
@@ -2787,18 +2796,21 @@ def _bang_an_toan(values: list[list]) -> list[list]:
     return [[_o_an_toan(c) for c in (r or [])] for r in values]
 
 
-def _write_values(token: str, sheet_id: str, values: list[list], dong_dau: int = 1) -> None:
+def _write_values(token: str, sheet_id: str, values: list[list], dong_dau: int = 1,
+                  cot_dau: int = 1) -> None:
     # Vùng ghi theo đúng số cột của dữ liệu. Cố định "A:L" (12 cột của social_listen) làm
     # tool Shopee 13 cột hỏng: "columns of value:13 > range" (đo thật 25/09/2026).
     # `dong_dau`: dòng bắt đầu (1-based) — để ghi NỐI dưới dữ liệu sẵn có mà không đè.
+    # `cot_dau`: cột bắt đầu (1-based) — trinh_bay_sheet ghi bảng >100 cột theo khối cột.
     values = _bang_an_toan(values)
-    rong = _cot(max((len(r) for r in values), default=1))
+    dau = _cot(cot_dau)
+    rong = _cot(cot_dau - 1 + max((len(r) for r in values), default=1))
     for i in range(0, len(values), 1000):
         chunk = values[i:i + 1000]
         a = dong_dau + i
         lark.call("POST", f"/open-apis/sheets/v2/spreadsheets/{token}/values_batch_update",
                   body={"valueRanges": [{
-                      "range": f"{sheet_id}!A{a}:{rong}{a + len(chunk) - 1}",
+                      "range": f"{sheet_id}!{dau}{a}:{rong}{a + len(chunk) - 1}",
                       "values": chunk}]})
 
 
@@ -2973,6 +2985,51 @@ def _bang_thong_ke(st: dict) -> list[list]:
         rows += [["", lab, f"{_TEN_NGUON.get(x['nen_tang'], x['nen_tang'])} · {x['kenh']}",
                   x["text"], x["link"]] for x in ds]
     return rows
+
+
+# ── Trình bày sheet (08/10/2026, `trinh_bay_sheet`) ──
+_KIEU_COT_BAI = {"Nền tảng": "chu", "Ngày đăng": "ngay_gio", "Kênh": "chu",
+                 "Followers": "so_nguyen", "Views": "so_nguyen", "Likes": "so_nguyen",
+                 "Comments": "so_nguyen", "Shares": "so_nguyen", "Hashtags": "chu",
+                 "Nội dung": "chu_dai", "Link": "link", "Từ khoá": "chu",
+                 "Nhận định AI": "chu_dai", "Lý do loại": "chu_dai", "Phân xử": "chu_dai"}
+
+
+def _cot_bai(them: list) -> list:
+    """Cột của bảng bài (`_HEADER` + cột thêm + loại video TikTok) kèm kiểu."""
+    return [T.Cot(c, _KIEU_COT_BAI.get(c, "chu"))
+            for c in list(_HEADER) + list(them) + [_COT_LOAI_VIDEO]]
+
+
+def _bang_thong_ke_tach(st: dict) -> list:
+    """`_bang_thong_ke` → hai bảng: "Thống kê" (đếm, tỉ lệ ĐÃ nhân 100 như `phan_loai`)
+    và "Trích dẫn" (bài thật dẫn lời). Cùng số, chỉ tách khối cho mỗi tab một kiểu cột."""
+    rows = _bang_thong_ke(st)
+    i = next((k for k, r in enumerate(rows) if r and r[0] == "TRÍCH DẪN"), len(rows))
+    tk = [r for r in rows[1:i] if any(str(x) for x in r)]
+    ra = [T.Bang(_TAB_THONG_KE, [T.Cot(rows[0][0]), T.Cot(rows[0][1]),
+                                 T.Cot(rows[0][2], "so_nguyen"),
+                                 T.Cot(rows[0][3], "phan_tram_100"),
+                                 T.Cot(rows[0][4], "phan_tram_100")], tk,
+                 mo_ta="Đếm sắc thái bài (tỉ lệ trên số ĐÃ phân loại)", gap_duoc=False)]
+    td = rows[i + 1:] if i < len(rows) else []
+    if td:
+        h = rows[i]
+        ra.append(T.Bang("Trích dẫn", [T.Cot(h[1]), T.Cot(h[2]), T.Cot(h[3], "chu_dai"),
+                                       T.Cot(h[4], "link")], [r[1:] for r in td],
+                         mo_ta="Bài nhiều view nhất mỗi sắc thái (dẫn lời thật)"))
+    return ra
+
+
+def _noi_ghi(kq, ten: str) -> str:
+    """Nơi bảng `ten` đã nằm trong sheet (tên tab thật sau khi đánh số)."""
+    for t in kq.tabs:
+        if t.ten == ten or t.ten.endswith(f". {ten}") or t.ten.startswith(f"{ten} ("):
+            return (f"tab '{t.ten}'" if not t.noi_duoi
+                    else f"cuối tab '{t.noi_duoi}' (dưới dòng '— {t.ten} —')")
+    if ten == TAB_BAI_DANG and kq.tabs:          # một bảng → tab tên "Dữ liệu"
+        return f"tab '{kq.tabs[0].ten}'"
+    return f"tab '{T.TAB_TONG_QUAN}' (khối '{ten}')"
 
 
 def _grant(token: str, open_id: str) -> bool:
@@ -3910,67 +3967,83 @@ def _handle(args: dict, **kwargs) -> str:
     rows_loai = [list(_HEADER) + ["Thị trường", "Lý do loại", _COT_LOAI_VIDEO]] + [
         _dong(d, dt) + [ly_do, _loai_video_tiktok(d)] for d, dt, ly_do in bi_loai]
 
+    nen = ", ".join(_TEN_NGUON.get(p, p) for p in plats)
+    bang_chinh = T.Bang(TAB_BAI_DANG, _cot_bai(_COT_THEM_BAI), rows[1:],
+                        mo_ta=f"Bài trong {rng} đã qua bộ lọc liên quan — thị trường {country}")
+    ds_bang = [bang_chinh]
+    if hits_khac:
+        ds_bang.append(T.Bang(_TAB_THI_TRUONG_KHAC, _cot_bai(_COT_THEM_BAI), rows_khac[1:],
+                              mo_ta=f"Bài của brand ở nước khác, không phải {country}"))
+    if st["thong_ke"]["da_phan_loai"]:
+        ds_bang += _bang_thong_ke_tach(st)
+    if bi_loai:
+        ds_bang.append(T.Bang(_TAB_BI_LOAI, _cot_bai(["Thị trường", "Lý do loại"]),
+                              rows_loai[1:], mo_ta="Bài trong khoảng bị bộ lọc liên quan "
+                                                   "loại, kèm lý do"))
+    goc = [dict({"Thuộc tab": ten}, **(d.get("__goc") or {}))
+           for ten, ds in ((TAB_BAI_DANG, hits_chinh), (_TAB_THI_TRUONG_KHAC, hits_khac))
+           for d, _ in ds] + [dict({"Thuộc tab": _TAB_BI_LOAI}, **(d.get("__goc") or {}))
+                              for d, _, _ in bi_loai]
+    tq = T.TongQuan(
+        tieu_de=title, nguon="social_listen — quét bài theo từ khoá (Apify, YouTube Data API)",
+        thoi_gian=rng, pham_vi=f"Từ khoá: {kw} · Nền tảng: {nen} · Thị trường: {country}",
+        so_lieu=[T.SoLieu("Post đã cào", scraped, "so_nguyen"),
+                 T.SoLieu("Post trong khoảng ngày", trong_khoang, "so_nguyen"),
+                 T.SoLieu("Post ghi vào sheet (đã qua bộ lọc liên quan)", len(hits),
+                          "so_nguyen"),
+                 T.SoLieu(f"— ở tab bài {country}", len(hits_chinh), "so_nguyen"),
+                 T.SoLieu("— bài của brand ở thị trường khác", len(hits_khac), "so_nguyen"),
+                 T.SoLieu("Post bị bộ lọc liên quan loại", len(bi_loai), "so_nguyen")],
+        nhom=[T.dem_theo(bang_chinh, "Nền tảng", "Số bài theo nền tảng (tab bài chính)")]
+        + ([T.dem_theo(bang_chinh, "Sắc thái", "Sắc thái bài (tab bài chính)")]
+           if st["thong_ke"]["da_phan_loai"] else []),
+        top=T.top_theo(bang_chinh, "Views", 5, ["Nền tảng", "Kênh", "Views", "Likes", "Link"],
+                       "Top 5 bài theo Views"),
+        ghi_chu=[x for x in (
+            canh_bao_nguon.strip(),
+            f"Đã cào {scraped} post; {scraped - trong_khoang} post nằm NGOÀI khoảng ngày nên "
+            "bị lọc bỏ (đúng hành vi bộ lọc ngày, không phải ghi thiếu).",
+            cau_thi_truong.strip(), (base.get("cau_loai_video_tiktok") or "").strip(),
+            "Sắc thái bài: " + st["dong_thong_ke"],
+            "Followers/Shares = 0 ở Instagram/Facebook/YouTube là do nguồn không trả số đó, "
+            "không phải 0 thật.",
+            "Cột Nội dung cắt ở 1.000 ký tự; nội dung đầy đủ và mọi trường khác của nguồn ở "
+            f"tab '{T.TAB_GOC}'.",
+            "Muốn nhiều post hơn: tăng `limit` (tối đa theo trần nền tảng) hoặc nới khoảng ngày.",
+        ) if x])
+    sender = memory_store.get_current_sender()
+    quyen = {"granted": False}
+
+    def _cap(tok_):
+        T.gop_quyen(quyen, _grant(tok_, sender) if sender else False)
+
     try:
-        tok, url = _create_sheet(title)
-        sid = _first_sheet_id(tok)
-        _write_values(tok, sid, rows)
+        kq = T.xuat(title, ds_bang, tq, goc=T.bang_goc(goc) if any(len(g) > 1 for g in goc)
+                    else None, cap_quyen=_cap)
     except Exception as e:  # noqa: BLE001
+        url_do = getattr(e, "trinh_bay_url", None)
         return tool_result(
-            success=False, sheet_url=None, **base, **st,
+            success=False, sheet_url=url_do, **base, **st,
             tom_tat_loai=_tom_tat(""),
             error=_che_token(canh_bao_nguon
                              + f"Cào OK ({len(hits)} post trong khoảng) nhưng TẠO/GHI SHEET "
-                             f"THẤT BẠI: {type(e).__name__}: {e}"),
+                             f"THẤT BẠI: {type(e).__name__}: {e}"
+                             + (" (sheet đã tạo nhưng có thể thiếu dữ liệu — đừng gửi như "
+                                "bản đủ)" if url_do else "")),
             # "top" là bài của thị trường đang quét: bài brand ở nước khác (vd shop bán lại
             # ở Thái) không được nêu như bài nổi bật của thị trường này.
             top=[{"nen_tang": d["platform"], "kenh": d["kenh"], "views": d["views"],
                   "link": d["link"]} for d, _ in hits_chinh[:5]],
         )
-    so_dong = len(rows)
-    thi_truong_khac_ghi_o = None
-    if hits_khac:
-        try:
-            thi_truong_khac_ghi_o, so_dong = _ghi_tab_phu(
-                tok, sid, so_dong, rows_khac, _TAB_THI_TRUONG_KHAC, "THỊ TRƯỜNG KHÁC",
-                f"bài của brand ở nước khác, không phải {country}")
-        except Exception as e:  # noqa: BLE001
-            # Ghi dưới sheet chính hỏng giữa chừng: vẫn giữ chỗ vùng đó (`so_dong_tiep`)
-            # để "Bị loại" ghi bên dưới, không đè lên phần có thể đã ghi dở.
-            so_dong = getattr(e, "so_dong_tiep", so_dong)
-            thi_truong_khac_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — "
-                                     f"{len(hits_khac)} bài thị trường khác thiếu trong sheet")
-    # Tab "Thống kê" chỉ khi có ít nhất một bài được gán nhãn — 0 nhãn thì bảng vô nghĩa,
-    # `dong_thong_ke` đã nói rõ là chưa có số liệu.
-    thong_ke_ghi_o = None
-    if st["thong_ke"]["da_phan_loai"]:
-        try:
-            thong_ke_ghi_o, so_dong = _ghi_tab_phu(
-                tok, sid, so_dong, _bang_thong_ke(st), _TAB_THONG_KE, "THỐNG KÊ",
-                "sắc thái bài đăng của sheet chính")
-        except Exception as e:  # noqa: BLE001
-            so_dong = getattr(e, "so_dong_tiep", so_dong)
-            thong_ke_ghi_o = f"KHÔNG ghi được ({type(e).__name__}) — số liệu vẫn ở `thong_ke`"
-    bi_loai_ghi_o = None
-    if bi_loai:
-        try:
-            bi_loai_ghi_o = _ghi_bi_loai(tok, sid, so_dong, rows_loai)
-        except Exception as e:  # noqa: BLE001
-            bi_loai_ghi_o = (f"KHÔNG ghi được ({type(e).__name__}) — chỉ còn ví dụ trong "
-                             f"per_platform")
-    _sua_tab_chinh(tok, sid, TAB_BAI_DANG, len(rows[0]))
-    # Có tab phụ thật (không phải ghi dưới sheet chính) thì sheet chính đã bị đẩy khỏi vị
-    # trí đầu (xem `_dua_tab_chinh_len_dau`) — kéo về để link mở ra đúng sheet chính.
-    if any(o == f"tab '{t}'" for o, t in ((thi_truong_khac_ghi_o, _TAB_THI_TRUONG_KHAC),
-                                          (thong_ke_ghi_o, _TAB_THONG_KE),
-                                          (bi_loai_ghi_o, _TAB_BI_LOAI))):
-        _dua_tab_chinh_len_dau(tok, sid)
-
-    sender = memory_store.get_current_sender()
-    granted = _grant(tok, sender) if sender else False
+    url, granted = kq.url, quyen["granted"]
+    thi_truong_khac_ghi_o = _noi_ghi(kq, _TAB_THI_TRUONG_KHAC) if hits_khac else None
+    thong_ke_ghi_o = _noi_ghi(kq, _TAB_THONG_KE) if st["thong_ke"]["da_phan_loai"] else None
+    bi_loai_ghi_o = _noi_ghi(kq, _TAB_BI_LOAI) if bi_loai else None
+    tab_bai = _noi_ghi(kq, TAB_BAI_DANG)
 
     return tool_result(
         success=True, title=title, sheet_url=url, granted=granted, **base,
-        **st, thong_ke_ghi_o=thong_ke_ghi_o,
+        **st, thong_ke_ghi_o=thong_ke_ghi_o, **kq.cho_tool(),
         top=_top_per_platform(hits_chinh, 3),
         tom_tat_loai=_tom_tat(bi_loai_ghi_o or ""),
         bi_loai_ghi_o=bi_loai_ghi_o,
@@ -4003,6 +4076,7 @@ def _handle(args: dict, **kwargs) -> str:
               + st["dong_thong_ke"] + " Hỏi tích cực/tiêu cực thì số và % CHỈ lấy từ "
               "`thong_ke`/`dong_thong_ke`, luôn nói đã phân loại bao nhiêu/tổng, dẫn bài "
               "thật từ `trich_dan` — không tự đếm, không ước lượng."
+              + f" Sheet: tab 'Tổng quan' rồi bài chính ở {tab_bai}. {kq.cau_kiem}"
               + ("" if granted else " CẢNH BÁO: chưa cấp được quyền tự động.")),
     )
 

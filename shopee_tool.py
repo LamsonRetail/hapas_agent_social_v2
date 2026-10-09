@@ -35,6 +35,7 @@ import apify_tool as A
 import chi_phi_tool
 import memory_store
 import san_link
+import trinh_bay_sheet as TB
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
@@ -194,10 +195,6 @@ SCHEMA = {
     },
 }
 
-_HEADER = ["Hạng", "Sản phẩm", "Khớp từ khoá", "Giá (VND)", "Giá gốc", "Giảm %",
-           "Lượt đánh giá", "Lượt thích", "Điểm", "Shop", "Shopee Mall", "Thương hiệu",
-           "Nơi gửi", "Link"]
-
 
 def _handle_link(args: dict) -> str:
     links = args.get("link") or []
@@ -227,7 +224,13 @@ def _handle_link(args: dict) -> str:
             granted = A._grant(tok, sender) if sender else False
         except Exception as e:  # noqa: BLE001
             loi = {**(loi or {}), "sheet": f"{type(e).__name__}: {e}"[:250]}
+    # Kiểm ghi của lớp trình bày chung (san_link gắn `ket_qua` vào danh sách tab sau khi ghi).
+    kq_sheet = getattr(kq["tabs"], "ket_qua", None) if url else None
+    if kq_sheet is not None and kq_sheet.day_du is False:
+        loi = {**(loi or {}), "kiem_ghi": kq_sheet.cau_kiem}
     return tool_result(
+        **(kq_sheet.cho_tool() if kq_sheet is not None
+           else {"day_du": None, "kiem_ghi": None, "bang_tinh_tiep": None}),
         success=not loi, che_do="soi_theo_link", san_pham=kq["san_pham"],
         so_danh_gia_moi_sp=kq["so_danh_gia_moi_sp"], bi_co_theo_tran=kq["bi_co_theo_tran"],
         khong_nhan_ra=kq["khong_nhan_ra"], loi=loi, sheet_url=url, granted=granted,
@@ -272,10 +275,13 @@ def _handle(args: dict, **_kwargs) -> str:
                 "nguồn Shopee đòi. Nhờ chủ agent nâng trần ở console rồi thử lại.")
         return tool_error(f"Không đọc được Shopee: {type(e).__name__}: {e}"[:300])
 
-    sp = []
+    sp, goc = [], []
     for it in raw:
         if not it.get("name"):
             continue
+        # Bản ghi nguồn nguyên vẹn (cùng thứ tự tab dữ liệu) cho tab "Dữ liệu gốc": tool chỉ
+        # chọn vài trường. Chỉ đi vào Sheet, không vào tool_result.
+        goc.append({"Hạng": len(sp) + 1, **it})
         sp.append({
             "hang": len(sp) + 1, "ten": str(it.get("name"))[:200],
             "gia": int(_so(it.get("price"), float)),
@@ -298,32 +304,37 @@ def _handle(args: dict, **_kwargs) -> str:
                     "đáng tin; đề xuất đổi từ khoá cụ thể hơn.")
         dung = sp
 
+    tong_hop = _tong_hop(dung)
     thuc = A._chi_phi_thuc([ACTOR], bat_dau, est)
     if thuc and thuc.get("cham_tran") and len(raw) >= n:
         thuc = {**thuc, "cham_tran": 0}
     chi_phi_tool.ghi(queries=kw, platforms=["shopee"], date_range="hiện tại", thuc=thuc, est=est)
 
-    url, granted, loi = None, False, None
+    url, granted, loi, kq_sheet = None, False, None, None
     if sp:
         title = (args.get("title") or "").strip() or \
             f"Shopee · {', '.join(kw)[:40]} · {datetime.datetime.now(A._VN_TZ):%d-%m-%Y}"
-        rows = [list(_HEADER)] + [[
-            s["hang"], s["ten"], "có" if s["khop"] else "lạc đề", s["gia"],
-            s["gia_goc"] or "", s["giam_pct"] or "",
-            s["luot_danh_gia"], s["luot_thich"], s["diem"] or "", s["shop"],
-            "có" if s["chinh_hang"] else "", s["thuong_hieu"], s["noi_gui"], s["link"]]
-            for s in sp]
-        try:
-            tok, url = A._create_sheet(title)
-            A._write_values(tok, A._first_sheet_id(tok), rows)
+        cap = {"granted": False}
+
+        def _cap_quyen(tok: str) -> None:
             sender = memory_store.get_current_sender()
-            granted = A._grant(tok, sender) if sender else False
+            TB.gop_quyen(cap, A._grant(tok, sender) if sender else False)
+
+        try:
+            bang = _bang_sheet(sp)
+            kq_sheet = TB.xuat(title, [bang],
+                               _tong_quan_sheet(title, bang, kw, xep, sp, dung, tong_hop,
+                                                canh_bao, bi_co),
+                               goc=TB.bang_goc(goc) if goc else None, cap_quyen=_cap_quyen)
+            url, granted = kq_sheet.url, cap["granted"]
         except Exception as e:  # noqa: BLE001
             loi = f"Tạo/ghi sheet thất bại: {type(e).__name__}: {e}"[:250]
+    canh_bao_ghi = (kq_sheet.cau_kiem if kq_sheet is not None and kq_sheet.day_du is False
+                    else None)
 
     return tool_result(
         success=bool(sp) and not loi, tu_khoa=kw, xep_theo=xep, so_san_pham=len(sp),
-        khong_co_so_da_ban=True, bi_co_theo_tran=bi_co, tong_hop=_tong_hop(dung),
+        khong_co_so_da_ban=True, bi_co_theo_tran=bi_co, tong_hop=tong_hop,
         so_sp_khop_tu_khoa=sum(s["khop"] for s in sp), vi_du_lac_de=lac[:5] or None,
         canh_bao_lac_de=canh_bao, loi=loi,
         sheet_url=url, granted=granted,
@@ -331,8 +342,94 @@ def _handle(args: dict, **_kwargs) -> str:
         chi_phi_thuc_usd=thuc["usd"] if thuc and thuc.get("so_run") else None,
         cham_tran_chi_phi=bool(thuc and thuc.get("cham_tran")),
         chi_phi=A._dong_chi_phi(thuc, est), giay=round(time.monotonic() - t0, 1),
-        note=None if sp else "Shopee không trả sản phẩm nào cho các từ khoá này.",
+        note=(canh_bao_ghi if sp else "Shopee không trả sản phẩm nào cho các từ khoá này."),
+        **(kq_sheet.cho_tool() if kq_sheet is not None
+           else {"day_du": None, "kiem_ghi": None, "bang_tinh_tiep": None}),
     )
+
+
+# ───────────────────────────── Sheet (trinh_bay_sheet) ─────────────────────────────
+# Giá: số VND nguyên (zen-studio trả `price` theo đồng). Giảm %: `discountPercent` là số
+# ĐÃ nhân 100 (32 = giảm 32%) → phan_tram_100. Điểm: 0–5, hai chữ số thập phân.
+_COT_SHEET = [
+    TB.Cot("Hạng", "so_nguyen"), TB.Cot("Sản phẩm", "chu_dai"), TB.Cot("Khớp từ khoá"),
+    TB.Cot("Giá (VND)", "tien", tien_te="VND"), TB.Cot("Giá gốc", "tien", tien_te="VND"),
+    TB.Cot("Giảm %", "phan_tram_100"), TB.Cot("Lượt đánh giá", "so_nguyen"),
+    TB.Cot("Lượt thích", "so_nguyen"), TB.Cot("Điểm", "thap_phan"), TB.Cot("Shop"),
+    TB.Cot("Shopee Mall"), TB.Cot("Thương hiệu"), TB.Cot("Nơi gửi"), TB.Cot("Link", "link"),
+]
+_HEADER = [c.ten for c in _COT_SHEET]
+
+
+def _bang_sheet(sp: list) -> "TB.Bang":
+    rows = [[
+        s["hang"], s["ten"], "có" if s["khop"] else "lạc đề", s["gia"],
+        s["gia_goc"] or "", s["giam_pct"] or "",
+        s["luot_danh_gia"], s["luot_thich"], s["diem"] or "", s["shop"],
+        "có" if s["chinh_hang"] else "", s["thuong_hieu"], s["noi_gui"], s["link"]]
+        for s in sp]
+    return TB.Bang("Sản phẩm", list(_COT_SHEET), rows,
+                   mo_ta="Sản phẩm Shopee theo đúng thứ tự Shopee trả, có cột khớp từ khoá")
+
+
+def _tong_quan_sheet(title, bang, kw, xep, sp, dung, th, canh_bao, bi_co) -> "TB.TongQuan":
+    """Số liệu chính = ĐÚNG `tong_hop` tool đã tính (trên sản phẩm khớp từ khoá)."""
+    tren = (f"trên {len(dung)} sản phẩm khớp từ khoá" if not canh_bao
+            else f"trên TẤT CẢ {len(dung)} sản phẩm (ít hàng khớp — không đáng tin)")
+    so_lieu = [TB.SoLieu("Sản phẩm lấy được", len(sp), "so_nguyen"),
+               TB.SoLieu("Khớp từ khoá", sum(s["khop"] for s in sp), "so_nguyen",
+                         ghi_chu="tên chứa đủ chữ của một từ khoá (bỏ dấu, bỏ số)")]
+    g = th.get("gia") or {}
+    for k, nhan in (("thap_nhat", "Giá thấp nhất"), ("pho_bien_tu", "Giá phổ biến từ (Q1)"),
+                    ("trung_vi", "Giá trung vị"), ("pho_bien_den", "Giá phổ biến đến (Q3)"),
+                    ("cao_nhat", "Giá cao nhất")):
+        if k in g:
+            so_lieu.append(TB.SoLieu(nhan, g[k], "tien", tien_te="VND", ghi_chu=tren))
+    if th.get("dang_giam_gia"):
+        so_lieu += [TB.SoLieu("Sản phẩm đang giảm giá", th["dang_giam_gia"]["so_sp"],
+                              "so_nguyen", ghi_chu=tren),
+                    TB.SoLieu("Mức giảm trung bình", th["dang_giam_gia"]["giam_tb_pct"],
+                              "phan_tram_100", ghi_chu="trung bình trên sản phẩm đang giảm")]
+    if th.get("diem_danh_gia_tb"):
+        so_lieu.append(TB.SoLieu("Điểm đánh giá trung bình", th["diem_danh_gia_tb"],
+                                 "thap_phan", ghi_chu=tren))
+    nhom = []
+    if th.get("phan_bo_gia"):
+        nhom.append(TB.Nhom("Phân bố giá (" + ("mọi sản phẩm" if canh_bao else
+                                               "sản phẩm khớp từ khoá") + ")",
+                            list(th["phan_bo_gia"].items()),
+                            sum(th["phan_bo_gia"].values())))
+    nhom += [TB.dem_theo(bang, "Khớp từ khoá", "Theo khớp từ khoá (mọi sản phẩm)"),
+             TB.dem_theo(bang, "Shop", "Theo shop (mọi sản phẩm)", toi_da=10)]
+    top = None
+    if th.get("nhieu_danh_gia_nhat"):
+        top = TB.Bang(
+            "Nhiều đánh giá nhất (" + ("mọi sản phẩm" if canh_bao else
+                                       "sản phẩm khớp từ khoá") + ")",
+            [TB.Cot("Sản phẩm", "chu_dai"), TB.Cot("Giá (VND)", "tien", tien_te="VND"),
+             TB.Cot("Lượt đánh giá", "so_nguyen"), TB.Cot("Shop"), TB.Cot("Link", "link")],
+            [[x["ten"], x["gia"], x["luot_danh_gia"], x["shop"], x["link"]]
+             for x in th["nhieu_danh_gia_nhat"]])
+    ghi_chu = [
+        "Nguồn KHÔNG có số đã bán. Lượt đánh giá chỉ là chỉ báo gián tiếp cho lượng bán.",
+        "Hạng = thứ tự Shopee trả về"
+        + (" — là thứ hạng bán chạy của Shopee (xếp theo bán chạy)." if xep == "ban_chay"
+           else f" khi xếp theo '{xep}' — KHÔNG phải thứ hạng bán chạy."),
+        "Số liệu tổng hợp chỉ tính sản phẩm có tên khớp từ khoá; tab dữ liệu giữ đủ mọi "
+        "sản phẩm, cột 'Khớp từ khoá' = 'lạc đề' là hàng Shopee trả lệch từ khoá.",
+        "Shopee Mall = shop chính hãng (isOfficialShop). Ô Giá gốc / Giảm % / Điểm trống = "
+        "nguồn không trả.",
+        "Tên sản phẩm cắt ở 200 ký tự — bản đầy đủ ở tab Dữ liệu gốc.",
+    ]
+    if canh_bao:
+        ghi_chu.append(canh_bao)
+    if bi_co:
+        ghi_chu.append(bi_co)
+    return TB.TongQuan(
+        tieu_de=title, nguon=f"Tool soi_san · Shopee ({ACTOR})",
+        thoi_gian=f"giá tại thời điểm lấy, {datetime.datetime.now(A._VN_TZ):%H:%M %d/%m/%Y}",
+        pham_vi=f"Shopee Việt Nam · từ khoá: {', '.join(kw)} · xếp theo: {xep}",
+        so_lieu=so_lieu, nhom=nhom, top=top, ghi_chu=ghi_chu)
 
 
 def _available() -> bool:

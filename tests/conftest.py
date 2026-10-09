@@ -110,3 +110,19 @@ def _tat_lease_that(monkeypatch, tmp_path):
     except BaseException:
         pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def _xoa_dem_bo_loc(monkeypatch):
+    """Bộ đếm trần 20 lần/phút của API bộ lọc (trinh_bay_sheet) là của cả tiến trình: mỗi bài
+    bắt đầu với bộ đếm rỗng, kẻo bài sau bị "gần trần" vì các bài trước."""
+    try:
+        import trinh_bay_sheet
+        trinh_bay_sheet._LOC_LUOT.clear()
+        # Tên người hỏi trên dòng siêu dữ liệu: không tra danh bạ/bộ nhớ tên thật.
+        monkeypatch.setattr(trinh_bay_sheet, "_ten_nguoi_yeu_cau", lambda: "")
+        # Nghỉ giữa các khối ghi / lùi khi 429: không ngủ thật trong bộ thử.
+        monkeypatch.setattr(trinh_bay_sheet, "_ngu", lambda giay: None)
+    except BaseException:
+        pass
+    yield
