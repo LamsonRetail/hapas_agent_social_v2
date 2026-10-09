@@ -30,6 +30,7 @@ from tools.registry import registry, tool_error, tool_result
 
 VN = dt.timezone(dt.timedelta(hours=7))
 MAX_ROWS = 20000
+MAX_CAMPAIGNS = 20000
 _context = contextvars.ContextVar("mark_ads_context", default={})
 #: Token Meta rời khỏi os.environ ngay khi nạp module: mọi tiến trình con (lark-cli,
 #: Scrapling, browser/terminal của Hermes — nơi Mark không sửa được danh sách chặn) đều
@@ -314,16 +315,16 @@ class MetaClient:
         return parsed, path[len(self.version) + 2:]
 
     def _url(self, url, entry=None):
-        """Lối vào chỉ có `me/adaccounts` và `act_<id>/insights`. `entry` = tail của trang
+        """Lối vào chỉ có `me/adaccounts`, `act_<id>/insights` và danh sách campaigns. `entry` = tail của trang
         đầu khi đang đi theo `paging.next`: trang sau phải cùng tail, riêng danh sách tài
         khoản thì Meta hay đổi `me` thành ID số của người dùng (`<số>/adaccounts`)."""
         parsed, tail = self._tail(url)
         if entry is None:
-            allowed = tail == "me/adaccounts" or re.fullmatch(r"act_\d+/insights", tail)
+            allowed = tail == "me/adaccounts" or re.fullmatch(r"act_\d+/(?:insights|campaigns)", tail)
         else:
             allowed = tail == entry or (entry == "me/adaccounts" and re.fullmatch(r"[1-9]\d*/adaccounts", tail))
         if not allowed:
-            raise ValueError("Meta client chỉ cho phép đọc tài khoản và insights.")
+            raise ValueError("Meta client chỉ cho phép đọc tài khoản, danh sách chiến dịch và insights.")
         query = [(k, v) for k, v in parse_qsl(parsed.query) if k.lower() != "access_token"]
         return parsed._replace(query=urlencode(query)).geturl()
 
@@ -835,6 +836,72 @@ def _cau_cat(so_doc):
             "đọc; hãy thu hẹp ngày/tài khoản.")
 
 
+def _doi_chieu_campaign(client, accounts, loc, rows, cut):
+    """Inventory không có mốc ngày; không biến campaign thiếu Insights thành dòng số 0."""
+    found, read_count = {}, 0
+    for account in accounts:
+        if read_count >= MAX_CAMPAIGNS:
+            raise ValueError("Danh sách chiến dịch chạm trần; hãy thu hẹp tài khoản để đối chiếu đủ.")
+        parameters = {"fields": "id,name,status,effective_status,start_time,stop_time", "limit": 500}
+        invariant = _loc_may_chu(loc)
+        if invariant:
+            # Campaign edge dùng `name`, Insights dùng `campaign.name`. Chỉ lọc sơ
+            # bằng chữ bất biến; PRODUCT/Unicode vẫn do code tự kiểm ở dưới.
+            parameters["filtering"] = json.dumps([
+                {"field": "name", "operator": "CONTAIN", "value": c} for c in invariant], ensure_ascii=False)
+        items, truncated = client.pages(account["id"] + "/campaigns", parameters, MAX_CAMPAIGNS - read_count)
+        read_count += len(items)
+        if truncated:
+            raise ValueError("Danh sách chiến dịch bị cắt; hãy thu hẹp tài khoản để đối chiếu đủ.")
+        for item in items:
+            if not isinstance(item, dict) or not item.get("id") or not isinstance(item.get("name"), str):
+                raise ValueError("Meta thiếu mã/tên chiến dịch; chưa thể đối chiếu đủ.")
+            if _khop_ten(item["name"], loc):
+                found[(account["id"], str(item["id"]))] = {
+                    "tai_khoan": account.get("name") or account["id"], "ma_tai_khoan": account["id"],
+                    "campaign_id": str(item["id"]), "ten": item["name"],
+                    "ket_thuc": item.get("stop_time") or "", "trang_thai_meta": item.get("effective_status") or ""}
+    reported = set()
+    for row in rows:
+        data, account = row["data"], row["account"]
+        if not data.get("campaign_id"):
+            raise ValueError("Insights thiếu mã chiến dịch; chưa thể đối chiếu với danh sách.")
+        key = (account["id"], str(data["campaign_id"]))
+        reported.add(key)
+        # Insights vẫn có thể giữ campaign đã xoá/đổi tên giữa hai lần đọc.
+        found.setdefault(key, {"tai_khoan": account.get("name") or account["id"],
+            "ma_tai_khoan": account["id"], "campaign_id": key[1],
+            "ten": data.get("campaign_name") or key[1], "ket_thuc": "", "trang_thai_meta": ""})
+    missing = []
+    for key, item in found.items():
+        item["bao_cao"] = ("Có dòng Insights" if key in reported else
+                            "Chưa thấy trong phần Insights đã đọc" if cut else "Không có dòng Insights trong khoảng ngày")
+        if key not in reported:
+            missing.append(item)
+    sentence = (f"Có {len(found)} chiến dịch khớp tên trong danh sách đã đối chiếu; "
+                f"{len(reported)} chiến dịch có dòng báo cáo Insights trong "
+                + ("phần đã đọc" if cut else "khoảng ngày đã chọn")
+                + f"; {len(missing)} chiến dịch "
+                + ("chưa thấy trong phần đã đọc" if cut else "không có dòng báo cáo trong khoảng ngày") + ".")
+    if missing:
+        sentence += " " + "; ".join(str(m["ten"]) + (" (mốc kết thúc Meta: " + m["ket_thuc"] + ")"
+                                   if m["ket_thuc"] else "") for m in missing[:5]) + "."
+    sentence += " Không có dòng Insights không có nghĩa là campaign không tồn tại hoặc chi tiêu bằng 0."
+    result = {"so_chien_dich_khop_ten": len(found), "so_chien_dich_co_bao_cao": len(reported),
+              "so_chien_dich_chua_co_bao_cao": len(missing), "cau_doi_chieu": sentence,
+              "chien_dich_chua_co_bao_cao": missing[:20]}
+    return result, list(found.values())
+
+
+def _bang_doi_chieu(items):
+    return TB.Bang("Đối chiếu campaign", [TB.Cot("Tài khoản"), TB.Cot("Mã TK", "ma"),
+        TB.Cot("Mã chiến dịch", "ma"), TB.Cot("Tên chiến dịch"), TB.Cot("Báo cáo trong khoảng ngày"),
+        TB.Cot("Mốc kết thúc Meta"), TB.Cot("Trạng thái Meta")],
+        [[m["tai_khoan"], m["ma_tai_khoan"], m["campaign_id"], m["ten"], m["bao_cao"],
+          m["ket_thuc"], m["trang_thai_meta"]] for m in items], ten_tab="Đối chiếu campaign",
+        mo_ta="Danh sách campaign đối chiếu với Insights; không tự gán số 0 cho campaign thiếu báo cáo.")
+
+
 def _khong_khop(loc, accounts, span, da_doc, cut, so_doc):
     """Có lọc mà không dòng nào khớp: nói RÕ chữ nào, tài khoản nào, ngày nào, bao nhiêu chiến
     dịch đã đọc và tên gần đúng — chỉ từ các dòng ĐÃ đọc (không đọc thêm). Chỉ trả TÊN.
@@ -850,7 +917,7 @@ def _khong_khop(loc, accounts, span, da_doc, cut, so_doc):
     ngay = ("ngày " + s) if s == e.split(" ")[0] else ("từ " + span.replace("–", " đến "))
     pham = "trong phần đã đọc" if cut else "trong khoảng đó"
     so_meta = (" (Meta lọc sơ theo " + ", ".join(f"“{c}”" for c in mc) + ")") if mc else ""
-    cau = (f"Không có chiến dịch nào có tên chứa {_ds_chu(loc)} (không phân biệt hoa thường) "
+    cau = (f"Không có dòng báo cáo của chiến dịch có tên chứa {_ds_chu(loc)} (không phân biệt hoa thường) "
            f"ở tài khoản {', '.join(tk[:5])}{'…' if len(tk) > 5 else ''}, {ngay}. ")
     if not so:
         cau += (f"Meta không trả chiến dịch nào có số{so_meta}." if mc
@@ -1012,12 +1079,15 @@ def _handle(args, **kwargs):
         start, end = min(s for s, _ in spans), max(e for _, e in spans)
         span = f"{start}–{end}" + ("" if len(spans) == 1 else " theo múi giờ từng TK")
         so_tk = len({r["account"]["id"] for r in rows}) or len(accounts)
-        if loc and not rows:
+        doi_chieu, inventory = _doi_chieu_campaign(client, accounts, loc, rows, cut) if loc else ({}, [])
+        if loc and not rows and not inventory:
             # Không trả "0 dòng" trần: nói rõ chữ lọc, TK, ngày, số chiến dịch đã xét, tên gần
             # đúng — từ các dòng đã đọc. Chỉ tên, không số; không tạo Sheet.
             if not _allowed(actor):
                 raise ValueError("Quyền xem số ads đã đổi hoặc không đọc được quyền; chưa trả kết quả.")
             ra = _khong_khop(loc, accounts, span, da_doc, cut, so_doc)
+            ra.update(doi_chieu)
+            ra["cau_loc"] = ra["cau_tong"] = doi_chieu["cau_doi_chieu"] + " " + ra["cau_loc"]
             if args.get("xem_truoc") is True:
                 ra["xem_truoc"] = True
             lsr_platform.danh_dau_han_che("chi_so_ads")
@@ -1025,19 +1095,29 @@ def _handle(args, **kwargs):
             return tool_result(ra)
         loc_kq = {}
         if loc:
-            so_cd = len({(r["account"]["id"], r["data"].get("campaign_id")) for r in rows})
-            loc_kq = {"loc_ap_dung": _mo_ta_loc(loc), "loc_may_chu": may_chu,
-                      "cau_loc": (f"Đã lọc tên chiến dịch chứa {_ds_chu(loc)} (không phân biệt hoa thường): "
-                                  f"{so_cd} chiến dịch khớp." + (_cau_cat(so_doc) if cut else ""))}
+            loc_kq = {**doi_chieu, "so_chien_dich_da_doc": len(da_doc),
+                      "loc_ap_dung": _mo_ta_loc(loc), "loc_may_chu": may_chu,
+                      "cau_loc": doi_chieu["cau_doi_chieu"] + (_cau_cat(so_doc) if cut else "")}
             if LEVELS.get(args.get("cap", "tai_khoan")) == "account":
                 loc_kq["cap_thuc_te"] = ("Có lọc tên nên tool lấy cấp chiến dịch; tab Theo tài khoản "
                                          "có tổng từng tài khoản.")
         if args.get("xem_truoc") is True:
             # Chỉ kích thước, không số chỉ số: không tạo Sheet, không gọi Lark, không gắn cờ hạn chế.
-            return tool_result({**_xem_truoc(rows, level, breakdown, theo_ngay, wanted, cut, span, so_tk),
-                                **loc_kq})
+            if not _allowed(actor):
+                raise ValueError("Quyền xem số ads đã đổi hoặc không đọc được quyền; chưa trả kết quả.")
+            preview = _xem_truoc(rows, level, breakdown, theo_ngay, wanted, cut, span, so_tk)
+            if inventory:
+                preview["tab_se_co"].append({"tab": "Đối chiếu campaign", "so_dong": len(inventory)})
+            if loc:
+                # Preview nay có tên campaign, phải ẩn bản ghi khỏi người không có quyền.
+                lsr_platform.danh_dau_han_che("chi_so_ads")
+                memory_store.danh_dau_phien_han_che(scheduler.get_current_chat() or "", "chi_so_ads")
+            return tool_result({**preview, **loc_kq})
         sh = _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans, partial,
                          unknown_tz, loc)
+        if inventory:
+            sh["gop_bang"].append(_bang_doi_chieu(inventory))
+            sh["overview"].ghi_chu.insert(0, doi_chieu["cau_doi_chieu"])
         totals, zero, gop_bang, raw = sh["totals"], sh["zero"], sh["gop_bang"], sh["raw"]
         # Recheck immediately before disclosure: list or switch may have changed mid-fetch.
         if not _allowed(actor):
@@ -1052,6 +1132,8 @@ def _handle(args, **kwargs):
                     + ("; gồm hôm nay chưa hết ngày, số còn thay đổi" if partial else ""))
         if summary:
             sentence += "; " + summary
+        if loc:
+            sentence += ". " + doi_chieu["cau_doi_chieu"]
         # Câu trả lời của lượt này mang số hạn chế: Platform ẩn nội dung khỏi người dưới
         # moderator ở bản ghi hội thoại (cờ `restricted` gửi kèm /reply).
         # Lượt này (hộp của lượt) và cả phiên (lưu đĩa): lượt sau có thể nhắc lại số từ lịch sử.
@@ -1176,7 +1258,7 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
             "raw": raw, "gop_bang": gop_bang, "totals": totals, "zero": zero}
 
 
-SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng. Yêu cầu vừa theo_ngay vừa chia_theo, hoặc cấp nhom_quang_cao/quang_cao, hoặc cấp chien_dich nhiều tài khoản: gọi xem_truoc=true TRƯỚC; so_dong > 2000 thì báo số dòng + kich_thuoc, hỏi lấy đủ chi tiết (vẫn có tab gộp + chế độ lọc theo tài khoản) hay gọn hơn, chỉ xuất sau khi họ trả lời. Sheet: Tổng quan, các tab gộp (Theo tài khoản/nền tảng/ngày/chiến dịch), Chi tiết, Dữ liệu gốc. Tên chiến dịch phải chứa đủ nhiều chữ: loc_tat_ca=[chữ 1, chữ 2] (mỗi chữ một mục, cả khi xem_truoc); có loc_ap_dung mà không khớp thì chép nguyên cau_loc, mời chọn trong ten_gan_dung.",
+SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Có lọc tên: tool đối chiếu danh sách campaign với Insights; chép cau_doi_chieu, phân biệt campaign khớp tên và campaign có báo cáo trong ngày. Không có dòng Insights không chứng minh campaign không tồn tại hay chi tiêu bằng 0. Không suy đoán khác tài khoản khi đã quét tất cả. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng. Yêu cầu vừa theo_ngay vừa chia_theo, hoặc cấp nhom_quang_cao/quang_cao, hoặc cấp chien_dich nhiều tài khoản: gọi xem_truoc=true TRƯỚC; so_dong > 2000 thì báo số dòng + kich_thuoc, hỏi lấy đủ chi tiết (vẫn có tab gộp + chế độ lọc theo tài khoản) hay gọn hơn, chỉ xuất sau khi họ trả lời. Sheet: Tổng quan, các tab gộp (Theo tài khoản/nền tảng/ngày/chiến dịch), Đối chiếu campaign, Chi tiết, Dữ liệu gốc. Tên chiến dịch phải chứa đủ nhiều chữ: loc_tat_ca=[chữ 1, chữ 2] (mỗi chữ một mục, cả khi xem_truoc); có loc_ap_dung mà không khớp thì chép nguyên cau_loc, mời chọn trong ten_gan_dung.",
     "parameters": {"type": "object", "properties": {
         "danh_muc": {"type": "boolean"},
         "danh_sach_tai_khoan": {"type": "boolean", "description": "true = liệt kê tên + mã các tài khoản đọc được (không lấy số)."},
