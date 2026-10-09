@@ -37,6 +37,9 @@ def _meta(monkeypatch, ten=TEN, hoa_thuong=True, bo_qua_loc=False):
     goi = []
 
     def pages(self, tail, params, limit):
+        if tail.endswith("/campaigns"):
+            return [{"id": r["campaign_id"], "name": r["campaign_name"]} for r in _dong(ten)], False
+        # Các kiểm tra CONTAIN bên dưới chỉ theo dõi truy vấn Insights.
         goi.append(dict(params))
         rows = _dong(ten)
         if "filtering" in params and not bo_qua_loc:
@@ -195,12 +198,13 @@ def test_doc_khong_loc_cham_tran_thi_noi_ro(monkeypatch):
 
 
 def test_khong_khop_vi_cham_tran_van_noi_ro(monkeypatch):
+    _gia(monkeypatch)
     monkeypatch.setattr(T, "MAX_ROWS", 3)
     _meta(monkeypatch)
     kq = run(loc_tat_ca=["always"])
     assert kq["so_dong"] == 0 and kq["bi_cat"] is True
     assert "chạm trần 3 dòng" in kq["cau_loc"] and kq["so_chien_dich_da_doc"] == 3
-    assert "Đã đọc 3 chiến dịch có số trong phần đã đọc" in kq["cau_loc"]
+    assert kq["so_chien_dich_khop_ten"] == 1 and "chưa thấy trong phần đã đọc" in kq["cau_loc"]
     assert "Tài khoản có" not in kq["cau_loc"]
 
 
@@ -231,7 +235,7 @@ def test_khong_khop_noi_ro_khong_tra_0_tran(monkeypatch):
                                   "20/10_Reach_PRODUCT_Mass"]
     c = kq["cau_loc"]
     assert c == kq["cau_tong"]
-    assert "Không có chiến dịch nào có tên chứa đủ cả “20/10” và “tet”" in c
+    assert "Không có dòng báo cáo của chiến dịch có tên chứa đủ cả “20/10” và “tet”" in c
     assert "HAPAS 10 - INSTAGRAM" in c and "ngày 2026-10-08" in c
     assert "Trong khoảng đó có 3 chiến dịch có số mà tên chứa “20/10” nhưng không chứa “tet”" in c
     assert "20/10_Reach_CELEB_M" in c and "Meta không lọc ra" not in c
@@ -316,7 +320,9 @@ def test_cap_quang_cao_loc_theo_ten_chien_dich(monkeypatch):
     _gia(monkeypatch)
     monkeypatch.setattr(T.MetaClient, "accounts", lambda self: [dict(a) for a in ACC])
     rows = [dict(r, ad_id=r["campaign_id"] + "1", ad_name="Ad product " + r["campaign_name"]) for r in _dong()]
-    monkeypatch.setattr(T.MetaClient, "pages", lambda self, tail, params, limit: ([dict(r) for r in rows], False))
+    monkeypatch.setattr(T.MetaClient, "pages", lambda self, tail, params, limit:
+        ([{"id": r["campaign_id"], "name": r["campaign_name"]} for r in rows] if tail.endswith("/campaigns")
+         else [dict(r) for r in rows], False))
     kq = run(cap="quang_cao", loc_tat_ca=["20/10", "product"])
     assert kq["so_dong"] == 2, "tên QUẢNG CÁO có 'product' không đủ: lọc theo tên chiến dịch"
 
