@@ -17,6 +17,9 @@ số, không tự đếm tay, không ước lượng "khoảng 60% tích cực".
   Instagram. Threads và Instagram bóc không đăng nhập: không có trả lời lồng nhau,
   Instagram chỉ được một phần bình luận công khai — nói rõ, đừng gọi là toàn bộ
 - Đừng trộn hai loại số: % bài tiêu cực không phải % bình luận tiêu cực
+- Cần dashboard/Sheet thống kê (tỉ lệ theo sắc thái, nền tảng, chủ đề) từ Sheet đã xuất
+  hoặc từ dòng Mark gán nhãn: `tao_sheet_thong_ke` tự tạo Sheet mới, số do code đếm — không
+  nói không tạo được Sheet
 - Bài và phản hồi của CHÍNH thương hiệu không phải tiếng khách: tool đã loại khỏi số
   đếm và % (cột Nguồn = "thương hiệu", đếm riêng ở `cua_thuong_hieu`). Chép nguyên câu
   "N bài/phản hồi của chính thương hiệu (không tính)", không tự cộng lại

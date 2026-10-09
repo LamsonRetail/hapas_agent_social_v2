@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import types
 from pathlib import Path
 from dataclasses import dataclass
@@ -39,6 +40,10 @@ _SAFE_EXACT = {
     # Đếm/tính %/cộng trên một Base/Sheet bằng code (dem_bang_tool.py). Chỉ đọc, qua ĐÚNG
     # cửa quyền của `doc_bang` (`bang_tool.mo_nguon`). Có công tắc bên dưới (lùi về doc_bang).
     "dem_bang",
+    # Đọc một tài liệu Lark Docs/Wiki (doc_tai_lieu_tool.py). Chỉ đọc, qua ĐÚNG luật quyền
+    # của `doc_bang` (`bang_tool.mo_tai_lieu` → `quyen_nguoi_hoi`). Thay cho `lark_cli docs
+    # +fetch` (đọc bằng quyền bot, không kiểm người hỏi). Công tắc lùi về `doc_bang` bên dưới.
+    "doc_tai_lieu",
     # Máy tính chính xác (tinh_tool.py): thuần tính toán trên chữ model đưa — không đọc,
     # không ghi, không gọi mạng. CỐ Ý không đưa vào `_TOOL_CO_CONG_TAC`: tắt nó thì Mark
     # quay về tự tính tay, không đổi lại được an toàn nào.
@@ -82,6 +87,9 @@ _MUTATING_EXACT = {
     # Chỉ số view/like/share theo danh sách link bài (Apify + YouTube API) → tạo Lark Sheet.
     "chi_so_bai": "write_data",
     "chi_so_ads": "write_data",
+    # Lập Sheet thống kê/dashboard MỚI (bot là chủ, cấp quyền người hỏi) từ Base/Sheet người
+    # hỏi xem được hoặc từ dòng Mark đã gán nhãn; code đếm (thong_ke_tool.py) → tạo Sheet.
+    "tao_sheet_thong_ke": "write_data",
     "schedule_reminder": "write_data",
     "cancel_reminder": "write_data",
     # Huỷ việc quét nền (viec_nen.py): dừng run Apify, ghi sheet phần dở — như cancel_reminder.
@@ -119,33 +127,44 @@ def _command_words(argv: list[str]) -> set[str]:
     return words
 
 
+# Bot-only CLI reads must never bypass asker checks.
+from lark_cli_read_gate import deny_reason, discovery, api_args, command_args, DOC
+LY_DO_DUNG_DOC_TAI_LIEU = DOC
+
+
 def _lark_cli_decision(args: dict[str, Any]) -> PolicyDecision:
     argv = args.get("args")
-    if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+    if not isinstance(argv, list) or not argv or not all(isinstance(x, str) and x.strip() for x in argv):
         return PolicyDecision(False, "lark_cli thiếu danh sách args hợp lệ")
     low = [x.strip().lower() for x in argv]
-    if "--dry-run" in low:
-        return PolicyDecision(True, "lark_cli dry-run không tạo side effect")
-    if "--yes" in low:
-        # CỐ Ý hẹp hơn hợp đồng. Từ 17/09 Mark là `executive` và có `write_data`,
-        # nên `base +record-create --yes` đã nằm trong hợp đồng — nhưng việc ghi mà
-        # Mark thật sự cần nằm TRONG `social_listen` (xuất Sheet kết quả), không đi
-        # qua `lark_cli`. Chặn ở đây để một lệnh ghi Lark tuỳ ý không lọt qua chỉ
-        # nhờ một cờ dòng lệnh. Nới dòng này là mở ghi Base thật, không qua duyệt.
-        return PolicyDecision(False, "lark_cli --yes bị chặn ở runtime, hẹp hơn hợp đồng")
-    if low[0] in {"schema", "skills", "help", "--help", "-h"} or "--help" in low:
+    original = low
+    try:
+        low = command_args(low)
+    except ValueError:
+        return PolicyDecision(False, "lark_cli cờ toàn cục mơ hồ nên fail-closed")
+    if original != low:
+        reason = deny_reason(["help", *original])
+        if reason:
+            return PolicyDecision(False, reason)
+    reason = deny_reason(low)
+    if reason:
+        return PolicyDecision(False, reason)
+    if discovery(low):
         return PolicyDecision(True, "lệnh discovery chỉ đọc")
+    if "--yes" in original:
+        return PolicyDecision(False, "lark_cli --yes bị chặn ở runtime, hẹp hơn hợp đồng")
     if low[0] == "api":
-        method = low[1] if len(low) > 1 else ""
-        return PolicyDecision(
-            method in {"get", "head"},
-            "raw Lark API chỉ cho phép GET/HEAD" if method not in {"get", "head"}
-            else "raw Lark API read-only",
-        )
-    # Shortcut này được xác minh từ chính lệnh lỗi production 07/10. Giữ hẹp theo
-    # domain + action; không thêm `fetch` vào allowlist chung cho mọi resource.
-    if low[:2] == ["docs", "+fetch"]:
-        return PolicyDecision(True, "lark_cli docs +fetch chỉ đọc")
+        try:
+            method, _ = api_args(low)
+        except ValueError:
+            return PolicyDecision(False, "lark_cli api mơ hồ nên fail-closed")
+        return PolicyDecision(method in {"get", "head"}, "raw Lark API chỉ cho phép GET/HEAD")
+    if "--dry-run" in low:
+        # Value-taking flags cannot smuggle --dry-run as their argument.
+        idx = low.index("--dry-run")
+        if idx and low[idx - 1].startswith("-"):
+            return PolicyDecision(False, "lark_cli dry-run mơ hồ nên fail-closed")
+        return PolicyDecision(True, "lark_cli dry-run không tạo side effect")
     words = _command_words(low)
     if words & _MUTATING_WORDS:
         return PolicyDecision(False, "lark_cli có động từ ghi/gửi")
@@ -257,7 +276,8 @@ _TOOL_CO_CONG_TAC = frozenset({
     "social_listen", "social_deep_dive", "fb_ads_library",
     "web_crawl", "web_scrape", "lark_cli", "soi_tai_khoan", "soi_san", "doc_bang",
     "dem_bang", "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai", "chi_so_ads",
-    "ghi_viec_base", "xem_truoc_viec_base", "tra_tien_do",
+    "ghi_viec_base", "xem_truoc_viec_base", "tra_tien_do", "doc_tai_lieu",
+    "tao_sheet_thong_ke",
 })
 
 #: Tool có công tắc riêng nhưng RA ĐỜI SAU công tắc cha → khi `capabilities` chưa có
@@ -287,9 +307,16 @@ _TOOL_CO_CONG_TAC = frozenset({
 #: thì công tắc `doc_bang` quyết.
 #: `tra_tien_do` (07/10/2026, việc quá hạn/sắp hạn trên Base checklist) cũng theo
 #: `doc_bang`, cùng lý do: chỉ đọc Base, cùng cửa quyền `bang_tool.mo_nguon`.
+#: `doc_tai_lieu` (09/10/2026, đọc tài liệu Docs/Wiki) theo `doc_bang`: cùng luật kiểm quyền
+#: người hỏi; tắt CLI vẫn giữ được đường đọc tài liệu an toàn.
+#: Console KHÔNG cần thêm dòng: chưa có dòng riêng thì công tắc `doc_bang` quyết.
+#: `tao_sheet_thong_ke` (09/10/2026, Sheet thống kê/dashboard) theo `doc_bang`: nguồn chính
+#: là Base/Sheet đọc qua cùng cửa quyền với `doc_bang`/`dem_bang`, số do code đếm như
+#: `dem_bang`. Tắt "Đọc Base và Sheet" mà vẫn lập được Sheet từ Base là nút tắt hở.
 _CONG_TAC_LUI = {"tiktok_top_ads": "social_listen", "binh_luan_kenh_nha": "social_listen",
                  "chi_so_bai": "social_listen", "xem_truoc_viec_base": "ghi_viec_base",
-                 "dem_bang": "doc_bang", "tra_tien_do": "doc_bang"}
+                 "dem_bang": "doc_bang", "tra_tien_do": "doc_bang",
+                 "doc_tai_lieu": "doc_bang", "tao_sheet_thong_ke": "doc_bang"}
 
 #: Tool có công tắc nhưng KHÔNG có công tắc cha để lùi về, và console CHƯA có dòng của nó.
 #: Agent đã khai `capabilities` thì vắng dòng = TẮT (đúng ý: ghi Base team phải được bật rõ).

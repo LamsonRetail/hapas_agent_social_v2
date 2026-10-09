@@ -344,7 +344,8 @@ def test_cong_theo_nhom_va_so_le():
     l = _luoi([["Kênh", "Chi"], ["FB", "1,5"], ["FB", "2"], ["TikTok", "0,25"]])
     t = D.dem(l, cong=["Chi"], nhom_theo="Kênh")["tong"][0]
     assert t["tong"] == "3,75"
-    assert t["theo_nhom"] == [{"nhom": "FB", "tong": "3,5"}, {"nhom": "TikTok", "tong": "0,25"}]
+    assert t["theo_nhom"] == [{"nhom": "FB", "tong": "3,5", "so_o_so": 2},
+                              {"nhom": "TikTok", "tong": "0,25", "so_o_so": 1}]
 
 
 def test_ty_le_lam_tron_nua_len():

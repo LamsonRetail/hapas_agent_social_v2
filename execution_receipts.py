@@ -51,7 +51,8 @@ _STATUS_FOLLOWUP = re.compile(
 _SUBSTANTIVE_TOOLS = {
     "tiktok_top_ads", "social_listen", "social_deep_dive", "fb_ads_library",
     "soi_tai_khoan", "soi_san", "web_crawl", "web_scrape", "doc_bang",
-    "dem_bang", "chi_so_bai", "binh_luan_kenh_nha", "ghi_viec_base",
+    "dem_bang", "chi_so_bai", "binh_luan_kenh_nha", "ghi_viec_base", "doc_tai_lieu",
+    "tao_sheet_thong_ke",
 }
 _TOOL_TERMS = {
     "tiktok_top_ads": {"tiktok", "top ads", "creative center"},
@@ -61,6 +62,8 @@ _TOOL_TERMS = {
     "fb_ads_library": {"facebook", "meta", "ad library"},
     "doc_bang": {"base", "sheet", "bảng"},
     "dem_bang": {"base", "sheet", "bảng", "đếm"},
+    "doc_tai_lieu": {"tài liệu", "doc", "wiki"},
+    "tao_sheet_thong_ke": {"thống kê", "dashboard", "sheet"},
     "web_crawl": {"website", "web", "crawl", "cào"},
     "web_scrape": {"website", "web", "scrape", "đọc trang"},
     "soi_tai_khoan": {"tài khoản", "brand", "koc", "kol"},

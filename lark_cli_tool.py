@@ -41,9 +41,12 @@ LARK_CLI_SCHEMA = {
     "description": (
         "Chạy official Lark CLI (lark-cli) dưới danh tính BOT (tenant token) để làm "
         "việc trên Lark bằng quyền của app bot: im (gửi/đọc tin nhắn, chat), base/"
-        "bitable, wiki, docs/docx, drive, task, sheets, approval, contact, vc, "
+        "bitable, wiki, drive, task, sheets, approval, contact, vc, "
         "minutes... Đây là công cụ MẠNH NHẤT, ưu tiên dùng. Lưu ý: bot KHÔNG thấy "
         "tài nguyên cá nhân của người khác (lịch/mail/drive riêng).\n"
+        "KHÔNG đọc NỘI DUNG tài liệu, Base/Sheet, slide/minutes hoặc tải/xuất file bằng "
+        "lệnh này. Docs/Wiki dùng `doc_tai_lieu`; Base/Sheet dùng `doc_bang`/`dem_bang` "
+        "để kiểm quyền người hỏi. Slide/minutes/tệp khác chưa có đường đọc an toàn.\n"
         "Cách agent tự dò & gọi API (làm theo thứ tự):\n"
         "  1) Xem lệnh của 1 domain:  args=[\"<domain>\",\"--help\"]  (domain: calendar, im, wiki, docs, drive, task, base, sheets, mail, okr, approval, contact, vc, minutes)\n"
         "  2) Ưu tiên +shortcut (việc mức cao):  args=[\"calendar\",\"+agenda\"]  hay  args=[\"task\",\"+create\",\"--summary\",\"Gọi khách\"]\n"

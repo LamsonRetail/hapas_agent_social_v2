@@ -56,6 +56,13 @@ BANG_LENH: dict[str, str] = {
 #: khác" đẩy model quay lại đếm tay. Chỉ nói tới tool đi kèm khi policy đang cho nó chạy.
 TOOL_DI_KEM: dict[str, str] = {"doc_bang": "dem_bang"}
 
+#: `/wiki` ép `lark_cli`, nhưng từ 09/10/2026 lark_cli KHÔNG đọc NỘI DUNG tài liệu, bản ghi
+#: Base, giá trị Sheet hay tệp (đọc bằng quyền bot, không kiểm người hỏi — `lsr_policy`).
+#: "/wiki <link tài liệu>" mà không có đường này thì lệnh ép đẩy model vào lời từ chối.
+#: Các tool đọc có kiểm quyền người hỏi được gọi thêm khi policy đang cho chúng chạy.
+TOOL_DOC_NOI_DUNG_KEM: dict[str, tuple[str, ...]] = {
+    "lark_cli": ("doc_tai_lieu", "doc_bang", "dem_bang")}
+
 #: Lệnh năng lực mà gõ TRƠN (không đối số) thì tự trả lời trạng thái, không gọi model.
 #: `/hapas` (05/10/2026): `/hapas` trơn trả công tắc, kênh Meta đã nối, hạn token — đọc
 #: thẳng `.env` + sổ token, không lộ giá trị nào. Có đối số thì ép tool như mọi lệnh
@@ -374,6 +381,13 @@ def _cau_di_kem(tool: str) -> str:
     """Câu cho phép gọi thêm tool đi kèm (`TOOL_DI_KEM`), rỗng nếu không có/đang bị chặn."""
     kem = TOOL_DI_KEM.get(tool)
     cau = ""
+    doc = [t for t in TOOL_DOC_NOI_DUNG_KEM.get(tool, ()) if _duoc_khong(t)[0]]
+    if doc:
+        cau += (" `lark_cli` chỉ tra siêu dữ liệu (tìm trang Wiki, thông tin node, danh sách); "
+                "NỘI DUNG thì gọi thêm: " + ", ".join(
+                    {"doc_tai_lieu": "`doc_tai_lieu` cho tài liệu Docs/Wiki",
+                     "doc_bang": "`doc_bang` để đọc Base/Sheet",
+                     "dem_bang": "`dem_bang` để đếm trên Base/Sheet"}[t] for t in doc) + ".")
     if kem and _duoc_khong(kem)[0]:
         cau = (f" Phần cần SỐ (đếm, %, so nhóm, cộng tổng) thì gọi thêm `{kem}` — số do code "
                "đếm, chép nguyên; không tự đếm trên bảng đã đọc.")

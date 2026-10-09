@@ -10,7 +10,7 @@ Không dùng khi: viết caption, bài đăng → "Viết content bài đăng HA
 - Mẫu order design "Nội dung ORD MẪU": https://o4pvcegwn6b.sg.larksuite.com/wiki/JBfxw60YcihjxxkOoPslB0kagqg
 - CONTENT CALENDAR (Sheet, tab SẢN XUẤT và trạng thái "Đã order media/design"): https://o4pvcegwn6b.sg.larksuite.com/sheets/NF4EsSe2khDMettKalsl06ZEgJe
 
-Sheet thì đọc bằng doc_bang. Hai mẫu đầu là tài liệu docx, doc_bang KHÔNG đọc được: tìm mẫu bằng tra_kho, không có thì dùng khung dưới đây hoặc nhờ người dùng dán nội dung. KHÔNG dùng công cụ tìm kiếm web với link hay domain larksuite nội bộ: việc đó đẩy link nội bộ ra máy tìm kiếm bên ngoài và không lấy được gì. Không chép tên celeb, KOL hay nhân sự trong các brief mẫu; ô PIC, Người order để người dùng điền.
+Sheet thì đọc bằng doc_bang. Hai mẫu đầu là tài liệu docx: đọc bằng doc_tai_lieu (người hỏi cũng phải được xem tài liệu); bị từ chối thì chép nguyên lời hướng dẫn của công cụ, rồi tìm mẫu bằng tra_kho, không có thì dùng khung dưới đây hoặc nhờ người dùng dán nội dung. Không đọc tài liệu bằng lark_cli. KHÔNG dùng công cụ tìm kiếm web với link hay domain larksuite nội bộ: việc đó đẩy link nội bộ ra máy tìm kiếm bên ngoài và không lấy được gì. Không chép tên celeb, KOL hay nhân sự trong các brief mẫu; ô PIC, Người order để người dùng điền.
 
 ## Hỏi trước, gộp một lần
 

@@ -229,6 +229,24 @@ class Nhom:
     ten: str
     dong: list                  # [(giá trị nhóm, số dòng)]
     tong: int | None = None
+    #: Thêm cột "Biểu đồ": thanh chữ █ tỉ lệ với số (nhóm lớn nhất = THANH_TOI_DA ký tự).
+    thanh: bool = False
+    #: Nhãn cột số (vd "Số lượt chọn" khi ô nhiều lựa chọn).
+    nhan_so: str = "Số dòng"
+
+
+THANH_TOI_DA = 30
+
+
+def thanh_chu(n, lon_nhat, toi_da: int = THANH_TOI_DA) -> str:
+    """Thanh chữ █ tỉ lệ `n / lon_nhat` (tối đa `toi_da` ký tự; n > 0 thì ít nhất 1)."""
+    try:
+        n, lon_nhat = float(n), float(lon_nhat)
+    except (TypeError, ValueError):
+        return ""
+    if n <= 0 or lon_nhat <= 0:
+        return ""
+    return "█" * max(1, min(toi_da, round(toi_da * n / lon_nhat)))
 
 
 @dataclasses.dataclass
@@ -1192,10 +1210,13 @@ def dung_tong_quan(tq: TongQuan, tabs: list, gap: list, kiem: dict | None = None
 
     for g in tq.nhom:
         vai["muc"].append(them([g.ten.upper()]))
-        vai["dau_bang"].append((them(["Nhóm", "Số dòng", "Tỉ lệ"]), 3))
+        dau = ["Nhóm", g.nhan_so or "Số dòng", "Tỉ lệ"] + (["Biểu đồ"] if g.thanh else [])
+        vai["dau_bang"].append((them(dau), len(dau)))
         tong = g.tong if g.tong else sum(n for _, n in g.dong)
+        lon = max((n for _, n in g.dong), default=0)
         for k, n in g.dong:
-            r = them([k, n, (n / tong) if tong else ""])
+            r = them([k, n, (n / tong) if tong else ""]
+                     + ([thanh_chu(n, lon)] if g.thanh else []))
             vai["so"].append((r, 2, "so_nguyen", None))
             if tong:
                 vai["so"].append((r, 3, "phan_tram", None))

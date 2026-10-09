@@ -25,7 +25,7 @@ TOOL_GHI = frozenset({
     "social_listen", "social_deep_dive", "web_crawl", "soi_tai_khoan", "soi_san",
     "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai", "chi_so_ads", "schedule_reminder",
     "cancel_reminder", "huy_viec_nen", "remember_about_user", "ghi_viec_base",
-    "ghi_bai_hoc",
+    "ghi_bai_hoc", "tao_sheet_thong_ke",
 })
 # Lệnh lark_cli ghi/giao việc: Mark không được tự chạy khi chưa có luồng duyệt.
 _LARK_GHI = re.compile(r"\+(record|task|message|chat)[-_]?(create|update|delete|send|batch)"
@@ -64,7 +64,15 @@ def _lark_cli_bi_chan(a) -> bool:
         return False
     import lsr_policy  # noqa: PLC0415
     try:
-        return not lsr_policy._lark_cli_decision(a).allowed
+        decision = lsr_policy._lark_cli_decision(a)
+        # A content read refused for privacy is not a write. Keep the SOW check
+        # about side effects independent of the new asker-check redirect.
+        from lark_cli_read_gate import DOC, TABLE, FILE, UNSUPPORTED, is_content_read
+        argv = a.get("args") or []
+        if (decision.reason in {DOC, TABLE, FILE, UNSUPPORTED}
+                and is_content_read(argv)):
+            return False
+        return not decision.allowed
     except Exception:  # noqa: BLE001 — tham số hỏng: để regex ở trên quyết
         return False
 

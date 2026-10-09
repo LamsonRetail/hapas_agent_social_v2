@@ -401,13 +401,15 @@ def _tu_nhan_tieu_de(luoi: list[list[list[str]]]) -> tuple[int, bool]:
 def dem(luoi: list[list[list[str]]], *, cot=None, nhom_theo: str = "", cong=None,
         dong: str = "", dong_tieu_de: int | None = None, tach_dau_phay: bool = False,
         gop=None, loai_cot: list | None = None, top: int = TOP_GIA_TRI,
-        khong_tieu_de: bool = False) -> dict:
+        khong_tieu_de: bool = False, tra_chi_so: bool = False) -> dict:
     """Đếm trên lưới thô của `lark_bang.doc_tho`. Hàm thuần — không gọi mạng.
 
     Trả dict kết quả; `loi` khác rỗng khi không đếm được (tiêu đề ngoài bảng, dòng sai cú
     pháp…). Số dòng trả về là số dòng THẬT trên Sheet (đếm từ 1).
     `khong_tieu_de` (hoặc `dong_tieu_de=0`): mọi dòng là dữ liệu, cột chỉ có chữ cái —
     `dong_tieu_de_da_dung` = 0.
+    `tra_chi_so`: thêm `chi_so_dong_du_lieu` (chỉ số từ 0 trong `luoi` của đúng n dòng đã
+    đếm) để nơi gọi bằng code (`thong_ke_tool`) dùng ĐÚNG tập dòng này, không tự chọn lại.
     """
     if not luoi:
         return {"loi": "bảng trống — không có dòng nào"}
@@ -470,6 +472,8 @@ def dem(luoi: list[list[list[str]]], *, cot=None, nhom_theo: str = "", cong=None
                 "tieu_de": [{"cot": chu_cot(j), "tieu_de": t} for j, t in enumerate(tieu_de)
                             if t], "n": n,
                 "dong_du_lieu": (f"{du_lieu[0] + 1}–{du_lieu[-1] + 1}" if du_lieu else None)}
+    if tra_chi_so:
+        kq["chi_so_dong_du_lieu"] = list(du_lieu)
     if lap:
         kq["dong_lap_tieu_de_bo_qua"] = lap
     if loc is not None:
@@ -637,6 +641,7 @@ def dem(luoi: list[list[list[str]]], *, cot=None, nhom_theo: str = "", cong=None
             so_bo = 0
             dong_tong = []
             theo: dict[str, Decimal] = {}
+            theo_o: Counter = Counter()
             for i in du_lieu:
                 chu = _chu_o(luoi[i][j])
                 if not chu:
@@ -662,6 +667,7 @@ def dem(luoi: list[list[list[str]]], *, cot=None, nhom_theo: str = "", cong=None
                 if g_j is not None:
                     for k in nhom_cua[i]:
                         theo[k] = theo.get(k, Decimal(0)) + v
+                        theo_o[k] += 1
             # Cột đã có ô "1.100.000" (dấu chấm nhiều nhóm) thì "1.500" cùng cột chắc chắn
             # cũng là nghìn — chỉ báo mơ hồ khi cột không tự cho biết quy ước.
             ro = {d for d in ".," if any(re.search(rf"\d{re.escape(d)}\d{{3}}{re.escape(d)}\d{{3}}",
@@ -687,7 +693,8 @@ def dem(luoi: list[list[list[str]]], *, cot=None, nhom_theo: str = "", cong=None
                 m["dong_co_chu_tong"] = dong_tong
             if g_j is not None and m["tong"] is not None:
                 m["theo_nhom"] = [{"nhom": ten_nhom[k].most_common(1)[0][0],
-                                   "tong": so_vn(theo.get(k, Decimal(0)))}
+                                   "tong": so_vn(theo.get(k, Decimal(0))),
+                                   "so_o_so": theo_o[k]}
                                   for k, _ in sorted(co_nhom.items(), key=lambda kv: -kv[1])]
             ket_cong.append(m)
         kq["tong"] = ket_cong
