@@ -34,6 +34,20 @@
     Dự báo <progress class="thanh{% if db.vuot %} thanh--day{% endif %}" max="100" value="{{ '%.1f'|format(d.pt_du_bao) }}">{{ d.pt_du_bao|pt_vn }}</progress> {{ d.pt_du_bao|pt_vn }} trần</p>
 
   <div class="khoi-bl">
+    <h3>Tìm theo từ khoá</h3>
+    <p class="ghi-chu sat-tren">Mỗi lượt /theodoi tìm các <a href="/nguon?du_an={{ d.ma|urlencode }}">từ khoá của dự án</a> trên TikTok, Facebook, Instagram, YouTube để bắt bài của MỌI tài khoản (không chỉ nguồn đã theo dõi); AI loại bài không liên quan; tài khoản nổi thành đề xuất nguồn. Facebook gói Free: 20 bài, 1 lượt/24h; Instagram: 2 từ không dấu cách; YouTube miễn phí.
+      {% if d.tk_bat %}Hiện: {{ (d.tu_khoa or [])|length }} từ khoá, tối đa <b>{{ d.tk_so_bai }}</b> bài mỗi nền tảng — tối đa ≈ <b>{{ d.tk_uoc|usd_vn }}</b> USD/lượt.{% else %}Hiện: <b>đang tắt</b>.{% endif %}</p>
+    {% if ql %}
+    <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/tu-khoa" class="hang">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o"><span><input type="checkbox" name="tk_bat" value="1"{% if d.tk_bat %} checked{% endif %}> Bật tìm theo từ khoá</span></label>
+      <label class="o">Số bài mỗi nền tảng (0–100) <input type="number" name="tk_so_bai" min="0" max="100" value="{{ d.tk_so_bai }}" required></label>
+      <button class="nut nut--nho" type="submit">Lưu</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="khoi-bl">
     <h3>Cào bình luận</h3>
     <p class="ghi-chu sat-tren">Sau mỗi lượt /theodoi, Mark cào bình luận của các bài nhiều bình luận nhất (bài chưa cào trước, rồi bài có bình luận tăng ≥ 20%), gán sắc thái + chủ đề, để bấm vào biểu đồ đọc được từng bình luận. Tiền tính vào trần tháng ở trên. Giá mỗi bình luận: TikTok 0,00125 · Facebook 0,0025 · Instagram 0,0026 USD · YouTube miễn phí.
       {% if d.bl_bat %}Hiện: tối đa <b>{{ d.bl_so_bai }}</b> bài × <b>{{ d.bl_moi_bai }}</b> bình luận mỗi lượt — tối đa ≈ <b>{{ d.bl_uoc|usd_vn }}</b> USD/lượt.{% else %}Hiện: <b>đang tắt</b>.{% endif %}</p>

@@ -930,10 +930,12 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             nguon = await _k(app.state.kho.cac_nguon, d["ma"])
             db = CP.du_bao(nguon, tieu, tran_du_an, tran_pf, bay_gio)
             tran = db["tran"]
+            tk_uoc = (CP.uoc_tu_khoa_luot(int(d.get("tk_so_bai") or 0), list(d.get("tu_khoa") or []))
+                      if d.get("tk_bat", True) else 0.0)
             bl_uoc = (CP.uoc_binh_luan_luot(int(d.get("bl_so_bai") or 0), int(d.get("bl_moi_bai") or 20))
                       if d.get("bl_bat", True) else 0.0)
             dong.append({**d, "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
-                         "bl_uoc": bl_uoc,
+                         "bl_uoc": bl_uoc, "tk_uoc": tk_uoc,
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
@@ -954,6 +956,23 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         except (NL.LoiNhap, LoiDuLieu) as e:
             return _chuyen(request, ve, "loi", str(e))
         return _chuyen(request, ve, "ok", f"Đã đặt trần tháng {usd_vn(usd)} USD cho dự án {ma}.")
+
+    @app.post("/ngan-sach/{ma}/tu-khoa")
+    async def ngan_sach_tu_khoa(request: Request, ma: str):
+        nguoi, form = await _sua(request)
+        ve = _url("/ngan-sach", du_an=ma)
+        try:
+            d = await _du_an_phai_co(ma)
+            bat = form.get("tk_bat") == "1"
+            so_bai = NL.so_nguyen(form.get("tk_so_bai"), "Số bài mỗi nền tảng", 0, 100)
+            await _k(app.state.kho.dat_tim_tu_khoa, nguoi["email"], ma, bat, so_bai)
+        except (NL.LoiNhap, LoiDuLieu) as e:
+            return _chuyen(request, ve, "loi", str(e))
+        return _chuyen(request, ve, "ok",
+                       (f"Đã lưu: tìm {len(d.get('tu_khoa') or [])} từ khoá, tối đa {so_bai} bài mỗi "
+                        f"nền tảng mỗi lượt (tối đa ≈ "
+                        f"{usd_vn(CP.uoc_tu_khoa_luot(so_bai, list(d.get('tu_khoa') or [])))} USD/lượt)."
+                        if bat else "Đã tắt tìm theo từ khoá."))
 
     @app.post("/ngan-sach/{ma}/binh-luan")
     async def ngan_sach_binh_luan(request: Request, ma: str):

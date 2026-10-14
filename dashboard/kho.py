@@ -90,7 +90,7 @@ def vai_tro(email: str) -> str | None:
 # ───────────────────────────── dự án ─────────────────────────────
 _COT_DU_AN = ("ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
               "tran_usd_thang::float AS tran_usd_thang, dang_bat, tao_luc, sua_luc, sua_boi, "
-              "bl_bat, bl_so_bai, bl_moi_bai")
+              "bl_bat, bl_so_bai, bl_moi_bai, tk_bat, tk_so_bai")
 
 
 def cac_du_an() -> list[dict]:
@@ -313,6 +313,19 @@ def dat_binh_luan(ai: str, ma: str, bat: bool, so_bai: int, moi_bai: int) -> Non
         _nhat_ky(c, ai, "sua_binh_luan", f"du_an:{ma}",
                  {"truoc": dict(cu), "sau": {"bl_bat": bat, "bl_so_bai": so_bai,
                                               "bl_moi_bai": moi_bai}})
+
+
+def dat_tim_tu_khoa(ai: str, ma: str, bat: bool, so_bai: int) -> None:
+    """Cấu hình tìm theo từ khoá trong mỗi lượt /theodoi (từ khoá = từ khoá của dự án)."""
+    with ket_noi() as c:
+        cu = c.execute("SELECT tk_bat, tk_so_bai FROM du_an WHERE ma = %s FOR UPDATE",
+                       (ma,)).fetchone()
+        if not cu:
+            raise LoiDuLieu("Không còn dự án này.")
+        c.execute("UPDATE du_an SET tk_bat = %s, tk_so_bai = %s, sua_luc = now(), sua_boi = %s "
+                  "WHERE ma = %s", (bat, so_bai, ai, ma))
+        _nhat_ky(c, ai, "sua_tim_tu_khoa", f"du_an:{ma}",
+                 {"truoc": dict(cu), "sau": {"tk_bat": bat, "tk_so_bai": so_bai}})
 
 
 def da_tieu_thang() -> dict[str, float]:

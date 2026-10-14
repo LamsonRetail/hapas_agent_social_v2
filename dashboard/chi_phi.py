@@ -38,6 +38,28 @@ BL_KHOI_DONG = {"facebook": 0.001}
 NGAY_THANG_CAU_HINH = 30     # "theo cấu hình": tháng chuẩn 30 ngày (để so sánh tháng với tháng)
 
 
+#: `theo_doi._TK_GIA` / `_TK_KHOI` / `TK_*` — tìm theo từ khoá (actor của social_listen).
+TK_GIA = {"tiktok": 0.003, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0}
+TK_KHOI = {"instagram": 0.016, "facebook": 0.00005}
+TK_IG_TOI_DA_TU = 2
+TK_FB_TOI_DA = 20
+
+
+def uoc_tu_khoa_luot(so_bai: int, tu: list[str]) -> float:
+    """Bản sao `theo_doi.uoc_tu_khoa`: USD tối đa một lượt tìm theo từ khoá của dự án."""
+    tong = 0.0
+    for p, gia in TK_GIA.items():
+        q = [t for t in tu if " " not in t][:TK_IG_TOI_DA_TU] if p == "instagram" else tu
+        if not q or not gia or so_bai <= 0:
+            continue
+        if p == "instagram":
+            tong += round(len(q) * (TK_KHOI["instagram"] + so_bai * gia) * HE_SO_UOC, 4)
+        else:
+            n = min(so_bai, TK_FB_TOI_DA) if p == "facebook" else so_bai
+            tong += round((n * gia + TK_KHOI.get(p, 0.0)) * HE_SO_UOC, 4)
+    return round(tong, 4)
+
+
 def uoc_binh_luan_luot(so_bai: int, moi_bai: int, p: str = "facebook") -> float:
     """Bản sao `theo_doi.uoc_binh_luan`: USD TỐI ĐA cào bình luận một lượt (giá Facebook khi
     chưa biết bài nào — thực tế thấp hơn: chỉ bài có bình luận mới/tăng mới được cào lại)."""
