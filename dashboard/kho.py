@@ -279,6 +279,15 @@ def da_tieu_thang() -> dict[str, float]:
     return {r["du_an"]: float(r["usd"] or 0) for r in rows}
 
 
+def tran_platform(du_an: str | None = None) -> float | None:
+    """Trần USD tháng do PLATFORM đặt (cấp cửa hàng, KDLA — platform PR #101 chưa xong).
+    Tạm thời luôn None ("chưa có"). Khi KDLA ra: Mark đọc trần từ platform rồi GHI vào kho này
+    (bảng/cột mới do Mark và schema.sql thêm — dashboard không gọi platform, chủ dự án: "mark vẫn
+    phải theo luật của platform"); hàm này đổi sang đọc dòng đó. Trần hiệu lực = min(platform,
+    dự án) — `chi_phi.tran_hieu_luc`."""
+    return None
+
+
 def cac_luot(du_an: str, trang: int = 1, moi_trang: int = 20) -> tuple[list[dict], int]:
     trang = max(1, int(trang))
     with ket_noi() as c:

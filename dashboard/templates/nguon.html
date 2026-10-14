@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block tieu_de %}Nguồn theo dõi{% endblock %}
+{% block dau %}<script src="/tinh/nguon.js" defer></script>{% endblock %}
 {% block noi_dung %}
+{% macro uoc_tinh(nen_tang, usd) %}≈ {{ usd|usd_vn(3) }} USD/tháng theo bài{% if phi_khoi_dong.get(nen_tang) %} + phí khởi động actor chung {{ phi_khoi_dong[nen_tang]|usd_vn(4) }} USD mỗi ngày quét{% endif %}{% endmacro %}
 {% set ql = nguoi.vai_tro == 'quan_ly' %}
+<script type="application/json" id="chi-phi-hang-so">{{ chi_phi_js|json_script }}</script>
 <div class="tieu-de-khoi">
   <h1>Dự án &amp; nguồn theo dõi{% if du_an %} — {{ du_an.ten }}{% endif %}</h1>
   {% if du_an_ds %}
@@ -55,6 +58,7 @@
   <table>
     <thead><tr>
       <th>Nguồn</th><th>Loại</th><th>Nhãn</th><th>Trạng thái</th><th class="so">Chu kỳ</th><th class="so">Bài/lần</th>
+      <th class="so" title="Theo cấu hình, 30 ngày, chưa gồm phí khởi động actor dùng chung">≈ USD/tháng</th>
       <th>Quét cuối</th><th>Lỗi cuối</th><th>Thêm</th>{% if ql %}<th></th>{% endif %}
     </tr></thead>
     <tbody>
@@ -68,6 +72,7 @@
         <td>{% if n.trang_thai == 'dang_theo_doi' %}<span class="the the--tot">Đang theo dõi</span>{% else %}<span class="the">Tạm dừng</span>{% endif %}</td>
         <td class="so">{{ n.chu_ky_ngay }} ngày</td>
         <td class="so">{{ n.so_bai_moi_lan }}</td>
+        <td class="so">{% if n.trang_thai == 'dang_theo_doi' %}{{ n.usd_thang|usd_vn(3) }}{% else %}<span class="mo" title="Tạm dừng: không tốn tiền; tiếp tục thì ≈ {{ n.usd_thang|usd_vn(3) }}">0</span>{% endif %}</td>
         <td class="nho">{{ n.quet_cuoi|gio_vn if n.quet_cuoi else 'chưa quét' }}</td>
         <td class="nho">{% if n.loi_cuoi %}<span class="the the--loi">lỗi</span> {{ n.loi_cuoi }}<div class="mo">{{ n.loi_luc|gio_vn }}</div>{% else %}<span class="mo">—</span>{% endif %}</td>
         <td class="nho">{{ {'dashboard': 'tay', 'de_xuat': 'đề xuất', 'nhap_file': 'nhập tệp'}.get(n.them_qua, n.them_qua) }}<div class="mo">{{ n.them_boi or '' }}</div></td>
@@ -86,7 +91,7 @@
           </div>
           <details>
             <summary class="nho">Sửa</summary>
-            <form method="post" action="/nguon/{{ n.id }}/sua" class="luoi-form">
+            <form method="post" action="/nguon/{{ n.id }}/sua" class="luoi-form" data-uoc-tinh>
               <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
               <label class="o">Nền tảng
                 <select name="nen_tang">{% for k, v in TEN_NEN_TANG.items() %}<option value="{{ k }}"{% if n.nen_tang == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
@@ -97,6 +102,7 @@
               <label class="o">Nhãn (dấu phẩy) <input type="text" name="nhan" value="{{ n.nhan|join(', ') }}"></label>
               <label class="o">Chu kỳ quét (1–30 ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="{{ n.chu_ky_ngay }}" required></label>
               <label class="o">Số bài mỗi lần (1–30) <input type="number" name="so_bai_moi_lan" min="1" max="30" value="{{ n.so_bai_moi_lan }}" required></label>
+              <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh(n.nen_tang, n.usd_thang) }}</output>
               <div><button class="nut nut--nho" type="submit">Lưu</button></div>
             </form>
           </details>
@@ -115,7 +121,7 @@
 {% if ql %}
 <section class="the-khoi cach-duoi">
   <h2>Thêm nguồn</h2>
-  <form method="post" action="/nguon/them" class="luoi-form">
+  <form method="post" action="/nguon/them" class="luoi-form" data-uoc-tinh>
     <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
     <input type="hidden" name="du_an" value="{{ du_an.ma }}">
     <label class="o">Nền tảng
@@ -127,6 +133,7 @@
     <label class="o">Nhãn (dấu phẩy) <input type="text" name="nhan" maxlength="500"></label>
     <label class="o">Chu kỳ quét (1–30 ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="1" required></label>
     <label class="o">Số bài mỗi lần (1–30) <input type="number" name="so_bai_moi_lan" min="1" max="30" value="5" required></label>
+    <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh('tiktok', 30 * 5 * chi_phi_js.gia.tiktok * chi_phi_js.he_so) }}</output>
     <div><button class="nut" type="submit">Thêm nguồn</button></div>
   </form>
   <p class="ghi-chu">Kênh nhà (kênh của chính brand): Mark giữ mọi bài; nguồn khác chỉ giữ bài nhắc từ khoá dự án.</p>

@@ -7,8 +7,8 @@ Trang web nội bộ cho team marketing HAPAS (đợt 2, chủ dự án chốt 1
 Dashboard **chỉ gồm**:
 
 1. **Chỉ số** (`/`): bài, thảo luận (= bài + bình luận nền tảng báo, như Kompa), nguồn có bài, lượt xem, tương tác, % tích cực/tiêu cực/trung lập, so với kỳ liền trước cùng độ dài; xu hướng theo ngày (theo tuần khi khoảng > 92 ngày, giờ VN); sắc thái × chủ đề; theo nền tảng; theo loại nguồn; nguồn nổi bật; từ khoá nổi bật; bài nổi bật. Lọc theo dự án, khoảng ngày (mặc định 30 ngày trọn tới hết hôm qua — so ngày trọn với ngày trọn), nền tảng, loại nguồn. Tự cập nhật khi Mark quét xong (không tải lại trang).
-2. **Nguồn** (`/nguon`): thêm/sửa dự án; thêm/sửa/tạm dừng/xoá nguồn theo dõi (dán nguyên link trang cá nhân cũng được); duyệt/từ chối nguồn Mark đề xuất.
-3. **Ngân sách** (`/ngan-sach`): trần USD tháng của từng dự án (0–100), đã tiêu tháng này (giờ VN), lịch sử lượt quét.
+2. **Nguồn** (`/nguon`): thêm/sửa dự án; thêm/sửa/tạm dừng/xoá nguồn theo dõi (dán nguyên link trang cá nhân cũng được), mỗi nguồn kèm ước tính USD/tháng (tính lại ngay khi đổi số bài/chu kỳ); duyệt/từ chối nguồn Mark đề xuất.
+3. **Ngân sách** (`/ngan-sach`) — quản trị chi phí (chủ dự án 15/10/2026). Hai tầng trần: platform đặt trần tháng cấp cửa hàng (KDLA, chưa có — trang hiện "chưa có (chờ KDLA)"; `kho.tran_platform()` trả None tới khi Mark ghi trần đó vào kho), dashboard đặt trần tháng từng dự án (0–100 USD); Mark áp trần THẤP HƠN. Trang hiện: đã tiêu tháng này (giờ VN), **dự báo cả tháng** = đã tiêu + phần còn lại của tháng theo cấu hình nguồn hiện tại (nguồn tạm dừng không tính, YouTube 0), dự báo theo nền tảng, cảnh báo đỏ khi dự báo > trần hiệu lực kèm 3 nguồn tốn nhất và cách giảm (tăng chu kỳ / giảm số bài / tạm dừng); lịch sử lượt quét. Công thức ở `chi_phi.py`, chép từ `theo_doi._uoc_phan` (giá, hệ số 1,3, phí khởi động actor) — bài thử đối chiếu với Mark.
 4. **Người xem** (`/nguoi-xem`, chỉ quản lý): ai được vào, vai trò, nhật ký thay đổi.
 5. **BigQuery** (`/bigquery`): trạng thái đồng bộ kho lên BigQuery; quản lý bấm "Đồng bộ ngay".
 
@@ -21,6 +21,7 @@ Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần
 | `app.py` | FastAPI `tao_app(kho=…, cau_hinh=…, lark=…, dong_bo=…)`; mọi trang, API, SSE, báo nội bộ |
 | `kho.py` | module DUY NHẤT có SQL (psycopg 3, role `lang_nghe_web`); mỗi thao tác sửa ghi `nhat_ky` cùng giao dịch |
 | `chi_so.py` | phép đếm chỉ số, thuần Python |
+| `chi_phi.py` | dự báo chi phí theo dõi tháng (thuần Python; hằng số chép từ Mark, có bài đối chiếu) |
 | `nhap_lieu.py` | kiểm biểu mẫu, chuẩn hoá định danh nguồn đúng dạng Mark dùng khi quét |
 | `dang_nhap.py` | đăng nhập Lark (OAuth), phiên cookie ký HMAC, CSRF |
 | `dong_bo_bq.py` | đồng bộ kho → BigQuery (gắn vào hook `app.state.sau_cap_nhat`) |

@@ -42,6 +42,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import MutableHeaders
 
+from dashboard import chi_phi as CP
 from dashboard import chi_so as CS
 from dashboard import dang_nhap as DN
 from dashboard import nhap_lieu as NL
@@ -213,8 +214,8 @@ def pt_vn(x) -> str:
     return "—" if x is None else f"{float(x):.1f}".replace(".", ",") + "%"
 
 
-def usd_vn(x) -> str:
-    s = f"{float(x or 0):,.2f}"
+def usd_vn(x, so_le: int = 2) -> str:
+    s = f"{float(x or 0):,.{int(so_le)}f}"
     return s.replace(",", "\0").replace(".", ",").replace("\0", ".")
 
 
@@ -276,6 +277,11 @@ def an_chi_tiet(nguoi: dict, rows: list[dict], cot_an: tuple = (),
 async def _k(fn, *a, **kw):
     """Kho dùng psycopg đồng bộ: chạy trong threadpool để không chặn vòng sự kiện."""
     return await run_in_threadpool(fn, *a, **kw)
+
+
+def _bay_gio() -> datetime.datetime:
+    """Giờ VN hiện tại (một chỗ để bộ thử cố định thời điểm dự báo chi phí)."""
+    return datetime.datetime.now(VN)
 
 
 def _hom_nay() -> datetime.date:
@@ -656,9 +662,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         nguon = await _k(app.state.kho.cac_nguon, du_an["ma"]) if du_an else []
         de_xuat = await _k(app.state.kho.cac_de_xuat, du_an["ma"]) if du_an else []
         du_an = an_chi_tiet(nguoi, [du_an], ("sua_boi",))[0] if du_an else None
+        # Ước tính tiền/tháng mỗi nguồn theo cấu hình (cùng công thức trang Ngân sách); trình
+        # duyệt tính lại ngay khi sửa số bài/chu kỳ bằng chính các hằng số này (`chi_phi_js`).
+        nguon = [{**n, "usd_thang": CP.chi_phi_thang_nguon(n)} for n in nguon]
         return _trang(request, "nguon.html", nguoi, "nguon", du_an_ds=ds, du_an=du_an,
                       nguon=an_chi_tiet(nguoi, nguon, ("them_boi",), ("loi_cuoi",)),
-                      de_xuat=an_chi_tiet(nguoi, de_xuat, ("xu_ly_boi",)))
+                      de_xuat=an_chi_tiet(nguoi, de_xuat, ("xu_ly_boi",)),
+                      chi_phi_js=CP.hang_so_cho_trinh_duyet(),
+                      phi_khoi_dong={p: CP.phi_khoi_dong_ngay(p) for p in NL.NEN_TANG})
 
     @app.post("/du-an/them")
     async def du_an_them(request: Request):
@@ -796,17 +807,24 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         luot, tong = (await _k(app.state.kho.cac_luot, du_an["ma"], trang, LUOT_MOI_TRANG)
                       if du_an else ([], 0))
         so_trang = max(1, -(-tong // LUOT_MOI_TRANG))
+        bay_gio = _bay_gio()
         dong = []
         for d in ds:
-            tran = float(d.get("tran_usd_thang") or 0)
+            tran_du_an = float(d.get("tran_usd_thang") or 0)
             tieu = float(da_tieu.get(d["ma"], 0.0))
-            dong.append({**d, "da_tieu": tieu, "con_lai": max(0.0, tran - tieu),
-                         "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0)})
+            tran_pf = await _k(app.state.kho.tran_platform, d["ma"])
+            nguon = await _k(app.state.kho.cac_nguon, d["ma"])
+            db = CP.du_bao(nguon, tieu, tran_du_an, tran_pf, bay_gio)
+            tran = db["tran"]
+            dong.append({**d, "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
+                         "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
+                         "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
+                                       else (100.0 if db["du_bao_thang"] else 0))})
         return _trang(request, "ngan_sach.html", nguoi, "ngan_sach",
                       dong=an_chi_tiet(nguoi, dong, ("sua_boi",)), du_an=du_an,
                       luot=an_chi_tiet(nguoi, luot, ("ghi_chu",), ("loi",)), tong=tong,
-                      trang=trang, so_trang=so_trang,
-                      thang=datetime.datetime.now(VN).strftime("%m/%Y"))
+                      trang=trang, so_trang=so_trang, thang=bay_gio.strftime("%m/%Y"),
+                      so_ngay_thang=CP.so_ngay_thang(bay_gio))
 
     @app.post("/ngan-sach/{ma}")
     async def ngan_sach_luu(request: Request, ma: str):

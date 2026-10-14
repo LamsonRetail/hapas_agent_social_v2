@@ -206,6 +206,12 @@ def test_loi_kho_khong_lo_dsn(monkeypatch):
     assert e.value.__cause__ is None and e.value.__suppress_context__
 
 
+def test_tran_platform_chua_co_va_khong_cham_kho(gia):
+    """Trần platform (KDLA) chưa có: luôn None, không mở kết nối (Mark sẽ ghi vào kho sau)."""
+    assert K.tran_platform("hapas") is None and K.tran_platform() is None
+    assert gia.gd == []
+
+
 def test_thieu_psycopg_bao_loi_kho(monkeypatch):
     monkeypatch.setitem(sys.modules, "psycopg", None)
     with pytest.raises(K.LoiKho, match="psycopg"):
