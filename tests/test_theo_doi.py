@@ -977,3 +977,12 @@ def test_gia_tim_tu_khoa_khop_dashboard():
     tu = ["hapas", "túi hapas", "yeutudieunhonhat"]
     assert CP.uoc_tu_khoa_luot(15, tu) == T.uoc_tu_khoa(15, tu)
 
+
+def test_ke_hoach_chua_nguon_toi_han_van_tim_tu_khoa(mo):
+    kho = GiaKho(du_an={"hapas": dict(DU_AN, tk_bat=True, tk_so_bai=15)}).cai(mo)
+    kho.nguon = []
+    kh = T.ke_hoach("hapas")
+    assert "loi" not in kh and kh["nguon"] == [] and kh["con_thang"] == 5.0
+    GiaKho(du_an={"hapas": dict(DU_AN, tk_bat=False, tk_so_bai=15)}).cai(mo)
+    assert "tới hạn" in T.ke_hoach("hapas")["loi"]
+

@@ -202,6 +202,11 @@ def ke_hoach(ma: str) -> dict:
         da_tieu = K.da_tieu_thang(ma)
     except K.LoiKho as e:
         return {"loi": f"Kho lắng nghe chưa dùng được: {e}."}
+    if not toi_han and du_an.get("tk_bat") and int(du_an.get("tk_so_bai") or 0) > 0:
+        # Đợt 2c: tìm theo từ khoá là việc của cả dự án — chạy được dù chưa nguồn nào tới hạn.
+        tran = float(du_an["tran_usd_thang"] or 0)
+        return {"du_an": du_an, "nguon": [], "bo_qua": [], "uoc_tinh": {},
+                "con_thang": max(0.0, tran - da_tieu), "tran_thang": tran, "da_tieu": da_tieu}
     if not toi_han:
         return {"loi": (f"Chưa có nguồn nào của {du_an['ten']} tới hạn quét "
                         f"(đang theo dõi {dem.get('dang_theo_doi', 0)}, tạm dừng "
@@ -290,7 +295,9 @@ def lenh_theodoi(doi_so: str) -> str:
         dem[n["nen_tang"]] = dem.get(n["nen_tang"], 0) + 1
     ds = ", ".join(f"{_TEN.get(p, p)} {k}" for p, k in dem.items())
     cau = (f"Đã nhận lượt theo dõi {kh['du_an']['ten']} (mã {kq.get('ma_viec')}): "
-           f"{len(kh['nguon'])} nguồn ({ds}), ước tính tối đa {_usd(tong)} USD"
+           + (f"{len(kh['nguon'])} nguồn ({ds})" if kh['nguon'] else
+              "chưa nguồn nào tới hạn — lượt này chỉ tìm theo từ khoá")
+           + f", ước tính tối đa {_usd(tong)} USD"
            + (f" (gồm tới {_usd(tk_uoc)} USD tìm theo từ khoá)" if tk_uoc else "")
            + (f" (gồm tới {_usd(bl_uoc)} USD cào bình luận)" if bl_uoc else "")
            + "; ngân sách tháng "
