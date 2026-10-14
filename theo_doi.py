@@ -261,8 +261,12 @@ def lenh_theodoi(doi_so: str) -> str:
     bl_uoc = round(uoc_binh_luan(int(da.get("bl_so_bai") or 0), int(da.get("bl_moi_bai") or 20))
                    if da.get("bl_bat", True) else 0.0, 2)
     ns_apify, hm, _ = quet_lon.ngan_sach(quet_lon.tran_usd_nen())
-    # Bình luận chỉ dùng phần ngân sách việc nền còn lại sau phần bài — lúc chạy mỗi lượt actor
-    # bình luận vẫn bị kẹp theo trần console và phần còn lại của tháng.
+    # Tìm theo từ khoá rồi bình luận chỉ dùng phần ngân sách việc nền còn lại sau phần bài — lúc
+    # chạy mỗi lượt actor vẫn bị kẹp theo trần console, phần còn của tháng và ngân sách việc.
+    tk_uoc = round(uoc_tu_khoa(int(da.get("tk_so_bai") or 0), tu_tim(da))
+                   if da.get("tk_bat", True) else 0.0, 2)
+    tk_uoc = round(max(0.0, min(tk_uoc, ns_apify - tong)), 2)
+    tong = round(tong + tk_uoc, 2)
     bl_uoc = round(max(0.0, min(bl_uoc, ns_apify - tong)), 2)
     tong = round(tong + bl_uoc, 2)
     if tong > ns_apify + 1e-9:
@@ -275,7 +279,8 @@ def lenh_theodoi(doi_so: str) -> str:
         {"du_an": ma, "ngay": _hom_nay(), "nguon": sorted(int(n["id"]) for n in kh["nguon"])},
         {p: {"phan": cac} for p, cac in phan.items()}, {"usd": tong,
                                                          "phut": max(3, len(kh["nguon"]) // 4)
-                                                         + (3 if bl_uoc else 0)},
+                                                         + (3 if bl_uoc else 0)
+                                                         + (3 if tk_uoc else 0)},
         ngan_sach, [f"bỏ qua {len(kh['bo_qua'])} nguồn"] if kh["bo_qua"] else [],
         con_lai_thang=(hm or {}).get("con_lai"))
     if kq.get("tu_choi") or kq.get("da_xong_truoc"):
@@ -286,6 +291,7 @@ def lenh_theodoi(doi_so: str) -> str:
     ds = ", ".join(f"{_TEN.get(p, p)} {k}" for p, k in dem.items())
     cau = (f"Đã nhận lượt theo dõi {kh['du_an']['ten']} (mã {kq.get('ma_viec')}): "
            f"{len(kh['nguon'])} nguồn ({ds}), ước tính tối đa {_usd(tong)} USD"
+           + (f" (gồm tới {_usd(tk_uoc)} USD tìm theo từ khoá)" if tk_uoc else "")
            + (f" (gồm tới {_usd(bl_uoc)} USD cào bình luận)" if bl_uoc else "")
            + "; ngân sách tháng "
            f"của dự án còn {_usd(kh['con_thang'])}/{_usd(kh['tran_thang'])} USD. "
@@ -611,6 +617,209 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
     return float(tien)
 
 
+# ───────────────────────────── tìm theo từ khoá (đợt 2c, 15/10/2026) ─────────────────────────────
+# Chủ dự án 15/10: "social listening cho cả hapas như nghiệp vụ của kompa, họ sẽ lấy tất cả từ
+# khóa liên quan cho hapas" — không chỉ nguồn đã theo dõi: mỗi lượt /theodoi còn TÌM theo từ
+# khoá của dự án trên TikTok, Facebook, Instagram, YouTube để bắt bài của MỌI tài khoản. Dùng lại
+# bộ tìm của social_listen (`apify_tool._FETCH`, đã đo thật) + bước AI phân xử giữ/loại; bài giữ
+# ghi kho với kieu_quet 'tu_khoa' (tài khoản đã theo dõi thì gắn nguồn). Tài khoản nổi chưa theo
+# dõi thành ĐỀ XUẤT trên dashboard. Tiền: run id vào phần "tu_khoa" của việc → chốt chung lượt.
+TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram")
+_TK_GIA = {"tiktok": 0.003, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0}
+_TK_KHOI = {"instagram": 0.016, "facebook": 0.00005}
+TK_IG_TOI_DA_TU = 2          # actor Instagram chạy MỘT lượt mỗi từ (phí khởi động mỗi lượt)
+TK_FB_TOI_DA = 20            # actor Facebook gói Free: 20 bài, 1 lượt/24h
+TK_NGAY_DAU = 30             # lần đầu dự án tìm theo từ khoá: lùi 30 ngày
+TK_NGAY = 3                  # các lần sau: 3 ngày gần nhất (trùng thì khử theo khoá bài)
+TK_TOI_DA_TU = 12
+
+
+def tu_tim(du_an: dict) -> list[str]:
+    """Từ khoá tìm của dự án (bỏ trùng, giữ thứ tự, tối đa `TK_TOI_DA_TU`)."""
+    ra: list[str] = []
+    for x in du_an.get("tu_khoa") or [du_an.get("ten") or ""]:
+        x = " ".join(str(x).split())
+        if x and A._norm(x) not in {A._norm(y) for y in ra}:
+            ra.append(x)
+    return ra[:TK_TOI_DA_TU]
+
+
+def _tu_cho(p: str, tu: list[str]) -> list[str]:
+    if p == "instagram":                 # actor tìm theo hashtag: chỉ từ không có dấu cách
+        return [t for t in tu if " " not in t][:TK_IG_TOI_DA_TU]
+    return tu
+
+
+def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str]) -> float:
+    q = _tu_cho(p, tu)
+    if not q or not _TK_GIA.get(p) or so_bai <= 0:
+        return 0.0
+    if p == "instagram":
+        return round(len(q) * (_TK_KHOI["instagram"] + so_bai * _TK_GIA[p]) * _HE_SO_UOC, 4)
+    n = min(so_bai, TK_FB_TOI_DA) if p == "facebook" else so_bai
+    return round((n * _TK_GIA[p] + _TK_KHOI.get(p, 0.0)) * _HE_SO_UOC, 4)
+
+
+def uoc_tu_khoa(so_bai: int, tu: list[str]) -> float:
+    return round(sum(uoc_tu_khoa_nen_tang(p, so_bai, tu) for p in TK_NEN_TANG), 4)
+
+
+def _phan_tk(v) -> list[dict]:
+    with v._khoa:
+        return v.d.setdefault("nen_tang", {}).setdefault("tu_khoa", {"phan": []})["phan"]
+
+
+def _them_phan_tk(v, ph: dict) -> dict:
+    with v._khoa:
+        _phan_tk(v).append(ph)
+        v.luu()
+    return ph
+
+
+def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
+    """Tìm theo từ khoá + phân xử AI + ghi kho. -> thống kê. Lỗi Apify của một nền tảng không
+    làm hỏng nền tảng khác; bot khởi động lại giữa lượt tìm thì KHÔNG gửi lại (không kiểm
+    được lượt cũ trả gì — tiền vẫn chốt theo run id)."""
+    tk = {"tu": [], "lay": 0, "giu": 0, "moi": 0, "cu": 0, "de_xuat": 0, "usd": 0.0,
+          "ghi_chu": [], "ai": ""}
+    so_bai = int(du_an.get("tk_so_bai") or 0)
+    if not du_an.get("tk_bat", True) or so_bai <= 0:
+        return tk
+    ma = du_an["ma"]
+    tu = tu_tim(du_an)
+    tk["tu"] = tu
+    bay_gio = datetime.datetime.now(_VN)
+    ngay = TK_NGAY if K.co_bai_tu_khoa(ma) else TK_NGAY_DAU
+    d_from = (bay_gio - datetime.timedelta(days=ngay)).replace(hour=0, minute=0, second=0,
+                                                               microsecond=0)
+    phan = _phan_tk(v)
+    da_xong = {ph["nen_tang"] for ph in phan if ph.get("loai") == "moc"}
+    co_run = {ph["nen_tang"] for ph in phan if ph.get("run_id")}
+    hits: list[tuple] = []
+    for p in TK_NEN_TANG:
+        if p in da_xong:
+            continue
+        q = _tu_cho(p, tu)
+        if not q:
+            continue
+        if p in co_run:
+            tk["ghi_chu"].append(f"tìm {_TEN[p]}: bot khởi động lại giữa lượt tìm — không gửi lại")
+            _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p, "trang_thai": "loi",
+                              "ma": "KHONG_KIEM_DUOC", "usd_so": 0.0})
+            continue
+        dung = A._youtube_co_key() if p == "youtube" else _nen_tang_dung_duoc(p)[0]
+        if not dung:
+            continue
+        uoc = uoc_tu_khoa_nen_tang(p, so_bai, tu)
+        if uoc > min(con, _con_viec(v)) + 1e-9 or v.con_giay() < _CHUA_GIAY_CUOI + 60:
+            ly = "hết giờ" if v.con_giay() < _CHUA_GIAY_CUOI + 60 else "hết ngân sách"
+            tk["ghi_chu"].append(f"tìm {_TEN[p]}: bỏ qua ({ly})")
+            _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p, "trang_thai": "loi",
+                              "ma": "NGAN_SACH", "usd_so": 0.0})
+            continue
+        A._NEN_TANG.set(p)
+        A._HAN_CHOT.set(han)
+        A._KHI_CO_RUN.set(lambda run, meta, p=p: _them_phan_tk(v, {
+            "id": f"tk-{p}-{run.get('id')}", "nen_tang": p, "run_id": run.get("id"),
+            "trang_thai": "dang_chay"}))
+        got: list = []
+        loi = None
+        try:
+            got = A._FETCH[p](q, min(so_bai, TK_FB_TOI_DA) if p == "facebook" else so_bai,
+                              "VN", d_from, bay_gio) or []
+        except Exception as e:
+            if type(e).__name__ == "MatQuyen":
+                raise
+            loi = A._che_token(f"{getattr(e, 'ma', type(e).__name__)}: {e}")[:150]
+            tk["ghi_chu"].append(f"tìm {_TEN[p]}: {loi}")
+        finally:
+            A._KHI_CO_RUN.set(None)
+        tien = round(len(got) * _TK_GIA.get(p, 0.0)
+                     + (_TK_KHOI.get(p, 0.0) * (len(q) if p == "instagram" else 1)
+                        if _TK_GIA.get(p) and got else 0.0), 4)
+        for ph in _phan_tk(v):
+            if ph.get("nen_tang") == p and ph.get("run_id") and ph.get("trang_thai") == "dang_chay":
+                v.cap_nhat_phan(ph, trang_thai="xong" if loi is None else "loi")
+        _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p,
+                          "trang_thai": "xong" if loi is None else "loi", "usd_so": tien,
+                          "so_item": len(got)})
+        con = max(0.0, con - tien)
+        tk["usd"] += tien
+        for d, dt in got:
+            if dt and d_from <= dt <= bay_gio and d.get("link"):
+                d["platform"] = p
+                hits.append((d, dt))
+    tk["lay"] = len(hits)
+    if hits:
+        _giu_tu_khoa(du_an, luot, hits, tu, han, tk)
+    tk["usd"] = round(tk["usd"], 4)
+    return tk
+
+
+def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
+                 tk: dict) -> None:
+    """Phân xử AI (như social_listen): AI giữ thì giữ; AI không phán được thì giữ khi bài
+    THỰC SỰ nhắc từ khoá. Từ loại trừ bỏ cứng trước AI."""
+    ma = du_an["ma"]
+    loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
+    cho, thay = [], set()
+    for d, dt in hits:
+        goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
+        khoa = _khoa_bai(d["platform"], d["link"], {"id": goc.get("id")})
+        if khoa in thay or A._tu_loai_tru_khop(d, loai_tru):
+            continue
+        thay.add(khoa)
+        d["_khoa"] = khoa
+        d["_khop"] = A._khop_tu_khoa(d, tu)
+        d["_thi_truong"] = A._thi_truong(d, tu)
+        cho.append((d, dt))
+    if not cho:
+        return
+    han_ai = time.monotonic() + max(0.0, min(150.0, han - time.monotonic() - 30))
+    px_all, tt = A._phan_xu_ai(cho, tu, du_an.get("boi_canh") or du_an["ten"],
+                               du_an.get("thi_truong") or "VN", han_ai)
+    tk["ai"] = tt.get("trang_thai") or ""
+    nguon = K.nguon_cua_du_an(ma)
+    theo = {(n["nen_tang"], _chuan_dinh_danh(n["nen_tang"], n["dinh_danh"])): int(n["id"])
+            for n in nguon}
+    rows, ban = [], []
+    for i, (d, dt) in enumerate(cho):
+        px = px_all.get(i)
+        if px and px[1] == "khong_ro":
+            px = None
+        if (px and not px[0]) or (not px and not d["_khop"]):
+            continue
+        dd = _dinh_danh_tai_khoan(d)
+        rows.append({
+            "khoa": d["_khoa"], "nen_tang": d["platform"],
+            "nguon_id": theo.get((dd[0], dd[1])) if dd else None, "link": d["link"],
+            "tac_gia": str(d.get("kenh") or "")[:200],
+            "tai_khoan": str(d.get("username") or "")[:200],
+            "followers": _so_hay_none(d.get("followers")), "dang_luc": dt,
+            "noi_dung": str(d.get("text") or "")[:1000],
+            "hashtag": str(d.get("hashtags") or "")[:500], "khop_tu_khoa": bool(d["_khop"]),
+            "sac_thai": tt["_sac_thai"].get(i), "chu_de": tt["_chu_de"].get(i),
+            "ly_do_giu": str(px[1] if px else "khop_tu_khoa")[:60],
+            "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
+            "binh_luan": _so_hay_none(d.get("comments")),
+            "chia_se": _so_hay_none(d.get("shares")),
+        })
+        ban.append((d, dt))
+    tk["giu"] = len(rows)
+    if rows:
+        tk["moi"], tk["cu"] = K.ghi_bai(ma, luot, "tu_khoa", rows)
+        tk["de_xuat"] = K.ghi_de_xuat(ma, _de_xuat_tu(ban, set(theo), tu))
+
+
+def _cau_tk(tk: dict) -> list[str]:
+    if not tk or not tk.get("tu"):
+        return list((tk or {}).get("ghi_chu") or [])
+    cau = (f"tìm theo {len(tk['tu'])} từ khoá: lấy {tk.get('lay', 0)} bài, giữ "
+           f"{tk.get('giu', 0)} ({tk.get('moi', 0)} mới), {tk.get('de_xuat', 0)} đề xuất nguồn, "
+           f"{_usd(tk.get('usd') or 0)} USD")
+    return [cau, *(tk.get("ghi_chu") or [])]
+
+
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
 # Chủ dự án 15/10: dashboard phải bóc được TỪNG bình luận như Kompa. Sau khi ghi bài, lượt cào
 # bình luận của tối đa `bl_so_bai` bài (chưa cào trước, rồi nhiều bình luận nhất) × `bl_moi_bai`
@@ -871,6 +1080,7 @@ def _chay_viec(v) -> tuple[str, str]:
     ghi_chu: list[str] = []
     moi = cu = lam_moi = 0
     bl: dict = {}
+    tkq: dict = {}
     ok: list[int] = []
     loi_chung = None
     usd = 0.0
@@ -949,6 +1159,13 @@ def _chay_viec(v) -> tuple[str, str]:
             moi, cu = K.ghi_bai(ma, luot, "theo_doi", rows)
         lam_moi = _lam_moi_youtube(ma, luot)
         try:
+            tkq = _tim_tu_khoa(v, du_an, luot, con, han)
+            con = max(0.0, con - float(tkq.get("usd") or 0))
+        except Exception as e:  # tìm từ khoá hỏng không làm hỏng lượt bài
+            if type(e).__name__ == "MatQuyen":
+                raise
+            tkq = {"ghi_chu": [f"tìm từ khoá lỗi: {A._che_token(f'{type(e).__name__}: {e}')[:150]}"]}
+        try:
             bl = _lay_binh_luan(v, du_an, luot, con, han)
         except Exception as e:  # bình luận hỏng không làm hỏng lượt bài
             if type(e).__name__ == "MatQuyen":
@@ -965,14 +1182,15 @@ def _chay_viec(v) -> tuple[str, str]:
         # đếm thiếu và lượt sau quét lại, trả tiền lần nữa.
         if v.run_ids():
             usd = float(v.chot_chi_phi([f"theo dõi {ma}"], sorted(
-                {p for p, _ in v.cac_phan() if p not in ("youtube", "binh_luan")}),
+                {p for p, _ in v.cac_phan() if p not in ("youtube", "binh_luan", "tu_khoa")}),
                 _hom_nay()).get("usd") or 0)
         trang_thai = ("da_huy" if v.da_huy() else "loi" if loi_chung or not ok and nguon
                       else "xong" if not loi and not ghi_chu else "mot_phan")
         try:
             K.dong_luot(luot, trang_thai=trang_thai, so_nguon=len(nguon), so_nguon_loi=len(loi),
-                        bai_moi=moi, bai_cap_nhat=cu + lam_moi, chi_phi_usd=usd,
-                        ghi_chu="; ".join([*ghi_chu, *_cau_bl(bl)]) or None,
+                        bai_moi=moi + int(tkq.get("moi") or 0),
+                        bai_cap_nhat=cu + lam_moi + int(tkq.get("cu") or 0), chi_phi_usd=usd,
+                        ghi_chu="; ".join([*ghi_chu, *_cau_tk(tkq), *_cau_bl(bl)]) or None,
                         loi=(loi_chung or "; ".join(sorted(set(loi.values())))[:500] or None))
         except K.LoiKho as e:
             print(f"[theo_doi] không đóng được lượt {luot}: {e}", flush=True)
@@ -1000,6 +1218,8 @@ def _chay_viec(v) -> tuple[str, str]:
         van_ban += f" {len(loi)} nguồn lỗi: " + "; ".join(sorted(set(loi.values())))[:300] + "."
     if ghi_chu:
         van_ban += " " + "; ".join(ghi_chu) + "."
+    if _cau_tk(tkq):
+        van_ban += " " + "; ".join(_cau_tk(tkq)) + "."
     if _cau_bl(bl):
         van_ban += " " + "; ".join(_cau_bl(bl)) + "."
     st_viec = {"mot_phan": "xong_mot_phan"}.get(trang_thai, trang_thai)

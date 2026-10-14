@@ -886,3 +886,94 @@ def test_tra_loi_cua_chu_bai_khong_phai_kenh_nha_khong_tinh_la_thuong_hieu(mo, n
     theo = {r["ma"]: r for r in kho.ghi[0][2]}
     assert not theo["c1"]["cua_thuong_hieu"] and theo["c2"]["cua_thuong_hieu"]
 
+
+# ───────────────────────────── tìm theo từ khoá (đợt 2c) ─────────────────────────────
+def _tt_tim(user, vid, text, ngay=None):
+    ngay = ngay or datetime.datetime.now(_VN) - datetime.timedelta(days=1)
+    return ({"kenh": user, "username": user, "followers": 10, "views": 100, "likes": 5,
+             "comments": 3, "shares": 0, "hashtags": "", "text": text,
+             "link": f"https://www.tiktok.com/@{user}/video/{vid}", "__goc": {"id": vid}}, ngay)
+
+
+class GiaKhoTk:
+    def __init__(self, mp, co_bai=False):
+        self.co_bai, self.bai, self.dx = co_bai, [], []
+        mp.setattr(K, "co_bai_tu_khoa", lambda ma: self.co_bai)
+        mp.setattr(K, "nguon_cua_du_an", lambda ma: [
+            {"id": 7, "nen_tang": "tiktok", "dinh_danh": "hapas.official"}])
+        mp.setattr(K, "ghi_bai", lambda ma, luot, kieu, rows: (
+            self.bai.append((kieu, [dict(r) for r in rows])), (len(rows), 0))[1])
+        mp.setattr(K, "ghi_de_xuat", lambda ma, cac: (self.dx.append(list(cac)), len(cac))[1])
+
+
+def test_tim_tu_khoa_giu_bai_nhac_hapas_gan_nguon_va_ghi_tien(mo):
+    kho = GiaKhoTk(mo)
+    goi = {}
+
+    def tim(p):
+        def f(q, limit, country, d_from, d_to):
+            goi[p] = (list(q), limit, (d_to - d_from).days)
+            fn = A._KHI_CO_RUN.get()
+            if fn:
+                fn({"id": f"run-{p}"}, {})
+            if p == "tiktok":
+                return [_tt_tim("hapas.official", "1", "túi hapas mới về"),
+                        _tt_tim("kol.b", "2", "review túi HAPAS xinh"),
+                        _tt_tim("kol.b", "3", "hôm nay ăn phở"),
+                        _tt_tim("x", "4", "hapas guitar đỉnh"),
+                        _tt_tim("kol.c", "5", "hapas cũ", datetime.datetime.now(_VN)
+                                - datetime.timedelta(days=60))]
+            return []
+        return f
+    mo.setattr(A, "_FETCH", {p: tim(p) for p in ("tiktok", "facebook", "instagram", "youtube")})
+    du_an = dict(DU_AN, tu_khoa=["hapas", "túi hapas", "Hapas", "yeutudieunhonhat"],
+                 tk_bat=True, tk_so_bai=15)
+    v = GiaViec({}, [])
+    import contextvars
+    tk = contextvars.copy_context().run(T._tim_tu_khoa, v, du_an, 3, 5.0, time.monotonic() + 600)
+    assert goi["tiktok"][0] == ["hapas", "túi hapas", "yeutudieunhonhat"]   # bỏ trùng hoa/thường
+    assert goi["instagram"][0] == ["hapas", "yeutudieunhonhat"]            # không dấu cách
+    assert goi["facebook"][1] == 15 and goi["tiktok"][2] >= 30           # lần đầu lùi 30 ngày
+    kieu, rows = kho.bai[0]
+    assert kieu == "tu_khoa"
+    theo = {r["khoa"]: r for r in rows}
+    assert set(theo) == {"tiktok:1", "tiktok:2"}        # phở: không nhắc; guitar: loại trừ; cũ: ngoài khoảng
+    assert theo["tiktok:1"]["nguon_id"] == 7 and theo["tiktok:2"]["nguon_id"] is None
+    assert [ph["run_id"] for ph in v.d["nen_tang"]["tu_khoa"]["phan"] if ph.get("run_id")] \
+        == ["run-youtube", "run-tiktok", "run-facebook", "run-instagram"]
+    assert tk["giu"] == 2 and tk["usd"] == pytest.approx(5 * 0.003, abs=1e-6)
+    assert "tìm theo 3 từ khoá: lấy 4 bài, giữ 2" in T._cau_tk(tk)[0]
+
+
+def test_tim_tu_khoa_khoi_dong_lai_khong_gui_lai_va_ngan_sach(mo):
+    GiaKhoTk(mo, co_bai=True)
+    goi = []
+    mo.setattr(A, "_FETCH", {p: (lambda q, *a, p=p: goi.append(p) or [])
+                             for p in ("tiktok", "facebook", "instagram", "youtube")})
+    v = GiaViec({"tu_khoa": {"phan": [{"id": "tk-tiktok-r9", "nen_tang": "tiktok",
+                                        "run_id": "r9", "trang_thai": "dang_chay"},
+                                       {"id": "tk-youtube", "loai": "moc", "nen_tang": "youtube",
+                                        "trang_thai": "xong"}]}}, [])
+    v.d["ngan_sach_usd"] = 0.04
+    du_an = dict(DU_AN, tu_khoa=["hapas"], tk_bat=True, tk_so_bai=15)
+    import contextvars
+    tk = contextvars.copy_context().run(T._tim_tu_khoa, v, du_an, 3, 5.0, time.monotonic() + 600)
+    # TikTok có run dở: không gửi lại; YouTube đã xong; FB (≈0,051) vượt ngân sách việc 0,04;
+    # Instagram (≈0,029) vừa.
+    assert goi == ["instagram"]
+    assert any("không gửi lại" in x for x in tk["ghi_chu"])
+    assert any("Facebook: bỏ qua (hết ngân sách)" in x for x in tk["ghi_chu"])
+
+
+def test_tim_tu_khoa_tat_thi_khong_goi(mo):
+    mo.setattr(A, "_FETCH", {})
+    tk = T._tim_tu_khoa(GiaViec({}, []), dict(DU_AN, tk_bat=False, tk_so_bai=15), 1, 5.0, 0)
+    assert tk["lay"] == 0 and T._cau_tk(tk) == []
+
+
+def test_gia_tim_tu_khoa_khop_dashboard():
+    from dashboard import chi_phi as CP
+    assert CP.TK_GIA == T._TK_GIA and CP.TK_KHOI == T._TK_KHOI
+    tu = ["hapas", "túi hapas", "yeutudieunhonhat"]
+    assert CP.uoc_tu_khoa_luot(15, tu) == T.uoc_tu_khoa(15, tu)
+

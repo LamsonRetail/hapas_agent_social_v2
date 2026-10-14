@@ -59,7 +59,8 @@ def doc_du_an(ma: str) -> dict | None:
     with ket_noi() as c:
         return c.execute(
             "SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
-            "tran_usd_thang::float AS tran_usd_thang, dang_bat, bl_bat, bl_so_bai, bl_moi_bai "
+            "tran_usd_thang::float AS tran_usd_thang, dang_bat, bl_bat, bl_so_bai, bl_moi_bai, "
+            "tk_bat, tk_so_bai "
             "FROM du_an WHERE ma = %s",
             (ma,)).fetchone()
 
@@ -254,6 +255,13 @@ def bai_youtube_can_lam_moi(ma: str, ngay: int = 14, toi_da: int = 200) -> list[
             "dang_luc >= now() - make_interval(days => %s) AND "
             "cap_nhat_cuoi < (date_trunc('day', now() AT TIME ZONE %s) AT TIME ZONE %s) "
             "ORDER BY dang_luc DESC LIMIT %s", (ma, ngay, _TZ, _TZ, toi_da)).fetchall()
+
+
+def co_bai_tu_khoa(ma: str) -> bool:
+    """Dự án đã từng có bài tìm theo từ khoá chưa (lần đầu thì lùi xa hơn)."""
+    with ket_noi() as c:
+        return bool(c.execute("SELECT EXISTS (SELECT 1 FROM bai WHERE du_an = %s AND "
+                              "kieu_quet = 'tu_khoa') AS co", (ma,)).fetchone()["co"])
 
 
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────

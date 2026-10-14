@@ -161,6 +161,10 @@ class GiaKho:
     def binh_luan_cua_bai(self, du_an, khoa, toi_da=300):
         return [dict(c) for c in self.bl if c["khoa_bai"] == khoa][:toi_da]
 
+    def dat_tim_tu_khoa(self, ai, ma, bat, so_bai):
+        self.du_an[ma].update(tk_bat=bat, tk_so_bai=so_bai)
+        self._ghi(ai, "sua_tim_tu_khoa", f"du_an:{ma}")
+
     def dat_binh_luan(self, ai, ma, bat, so_bai, moi_bai):
         self.du_an[ma].update(bl_bat=bat, bl_so_bai=so_bai, bl_moi_bai=moi_bai)
         self._ghi(ai, "sua_binh_luan", f"du_an:{ma}")
@@ -1206,3 +1210,19 @@ def test_cau_hinh_binh_luan_chi_quan_ly_va_kiem_so():
     r = c.post("/ngan-sach/hapas/binh-luan", data={"csrf": csrf, "bl_so_bai": "5", "bl_moi_bai": "30"})
     assert "Đã tắt cào bình luận" in thong_bao(c, r) and kho.du_an["hapas"]["bl_bat"] is False
     assert "Cào bình luận" in c.get("/ngan-sach").text
+
+
+def test_cau_hinh_tim_tu_khoa():
+    _, c, kho = tao()
+    kho.du_an["hapas"].update(tk_bat=True, tk_so_bai=15)
+    csrf = dang_nhap(c, QL)
+    r = c.post("/ngan-sach/hapas/tu-khoa", data={"csrf": csrf, "tk_bat": "1", "tk_so_bai": "20"})
+    assert "Đã lưu: tìm 1 từ khoá, tối đa 20 bài" in thong_bao(c, r)
+    assert kho.du_an["hapas"]["tk_so_bai"] == 20 and kho.nk[-1][1] == "sua_tim_tu_khoa"
+    r = c.post("/ngan-sach/hapas/tu-khoa", data={"csrf": csrf, "tk_so_bai": "20"})
+    assert "Đã tắt tìm theo từ khoá" in thong_bao(c, r)
+    assert "Tìm theo từ khoá" in c.get("/ngan-sach").text
+    csrf = dang_nhap(c, XEM)
+    assert c.post("/ngan-sach/hapas/tu-khoa",
+                  data={"csrf": csrf, "tk_bat": "1", "tk_so_bai": "5"}).status_code == 403
+

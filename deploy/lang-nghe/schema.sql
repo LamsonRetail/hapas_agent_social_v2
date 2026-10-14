@@ -56,7 +56,9 @@ CREATE TABLE IF NOT EXISTS du_an (
   sua_boi         TEXT,
   bl_bat          BOOLEAN NOT NULL DEFAULT TRUE,
   bl_so_bai       INT NOT NULL DEFAULT 10 CHECK (bl_so_bai BETWEEN 0 AND 100),
-  bl_moi_bai      INT NOT NULL DEFAULT 20 CHECK (bl_moi_bai BETWEEN 5 AND 200)
+  bl_moi_bai      INT NOT NULL DEFAULT 20 CHECK (bl_moi_bai BETWEEN 5 AND 200),
+  tk_bat          BOOLEAN NOT NULL DEFAULT TRUE,
+  tk_so_bai       INT NOT NULL DEFAULT 15 CHECK (tk_so_bai BETWEEN 0 AND 100)
 );
 -- Đợt 2b (15/10/2026): cào bình luận — DB đã tạo trước đó thì thêm cột ở đây.
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_bat BOOLEAN NOT NULL DEFAULT TRUE;
@@ -64,6 +66,10 @@ ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_so_bai INT NOT NULL DEFAULT 10
   CHECK (bl_so_bai BETWEEN 0 AND 100);
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_moi_bai INT NOT NULL DEFAULT 20
   CHECK (bl_moi_bai BETWEEN 5 AND 200);
+-- Đợt 2c (15/10/2026): tìm theo từ khoá trong mỗi lượt /theodoi.
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS tk_bat BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS tk_so_bai INT NOT NULL DEFAULT 15
+  CHECK (tk_so_bai BETWEEN 0 AND 100);
 
 -- 1 dòng = 1 nguồn theo dõi. `dinh_danh`: username TikTok/Instagram, kênh YouTube (UC… hoặc
 -- @handle), URL trang Facebook — đã chuẩn hoá chữ thường (trừ id kênh YouTube UC…).
@@ -264,6 +270,8 @@ COMMENT ON COLUMN du_an.sua_luc IS 'Thời điểm sửa dự án gần nhất (
 COMMENT ON COLUMN du_an.bl_bat IS 'TRUE: mỗi lượt /theodoi cào thêm bình luận của các bài nhiều bình luận nhất (tính vào trần tháng). FALSE: không cào bình luận.';
 COMMENT ON COLUMN du_an.bl_so_bai IS 'Số bài tối đa được cào bình luận mỗi lượt, bài, 0–100. 0 = không cào. Ưu tiên bài chưa cào, rồi bài có số bình luận tăng ≥ 20%.';
 COMMENT ON COLUMN du_an.bl_moi_bai IS 'Số bình luận tối đa cào mỗi bài mỗi lượt, bình luận, 5–200. Actor tính tiền theo bình luận (TikTok 0,00125, Facebook 0,0025, Instagram 0,0026 USD; YouTube miễn phí).';
+COMMENT ON COLUMN du_an.tk_bat IS 'TRUE: mỗi lượt /theodoi còn TÌM theo từ khoá dự án trên TikTok, Facebook, Instagram, YouTube để bắt bài của mọi tài khoản (tính vào trần tháng). FALSE: chỉ quét nguồn đã theo dõi.';
+COMMENT ON COLUMN du_an.tk_so_bai IS 'Số bài tối đa lấy mỗi nền tảng mỗi lượt khi tìm theo từ khoá, bài, 0–100 (Facebook gói Free tối đa 20 bài, 1 lượt/24h). 0 = không tìm.';
 COMMENT ON COLUMN du_an.sua_boi IS 'Email người sửa gần nhất trên dashboard. NULL khi tạo bằng lệnh cài đặt. Email nội bộ — không đẩy lên BigQuery.';
 
 COMMENT ON TABLE nguon IS $$[Lớp] Raw
