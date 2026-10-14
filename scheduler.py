@@ -422,9 +422,18 @@ def _gon(s) -> str:
 
 
 def _kiem_lenh_tiendo(message: str, mode: str) -> str:
-    """Lịch có nội dung `/tiendo …`: kiểm cú pháp NGAY lúc đặt (sai thì sáng nào lịch cũng
-    trả lời lỗi vào nhóm). "" = ổn."""
+    """Lịch có nội dung `/tiendo …` hoặc `/theodoi …`: kiểm cú pháp NGAY lúc đặt (sai thì
+    sáng nào lịch cũng trả lời lỗi vào nhóm). "" = ổn."""
     phan = message.strip().split(None, 1)
+    if phan and phan[0].lower() == "/theodoi":
+        if mode != "run":
+            return ("Lịch `/theodoi` phải là kiểu giao việc (mode=run): mode=send chỉ nhắn "
+                    "nguyên câu lệnh vào chat, không ai chạy nó.")
+        ma = (phan[1] if len(phan) > 1 else "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,39}", ma):
+            return ("Lịch /theodoi cần đúng một mã dự án (chữ thường, số, '-', '_'), vd "
+                    "`/theodoi hapas` — mã dự án xem trên dashboard social.hapas.vn.")
+        return ""
     if not phan or phan[0].lower() != "/tiendo":
         return ""
     if mode != "run":

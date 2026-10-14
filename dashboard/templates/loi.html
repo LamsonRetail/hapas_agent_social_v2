@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block tieu_de %}{{ tieu_de }}{% endblock %}
+{% block noi_dung %}
+<div class="trang-dang-nhap">
+  <div class="the-khoi">
+    <h1>{{ tieu_de }}</h1>
+    <p>{{ thong_diep }}</p>
+    {% if dang_nhap_lai %}
+    <p><a class="nut" href="/dang-nhap">Đăng nhập lại</a></p>
+    {% else %}
+    <p><a href="/">Về trang Chỉ số</a></p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

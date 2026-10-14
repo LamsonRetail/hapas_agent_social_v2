@@ -365,7 +365,7 @@ def khoa_trung(loai: str, chat: str, tham_so: dict) -> str:
 
 
 def ma_moi(loai: str) -> str:
-    return (f"{'q' if loai == 'social_listen' else 'b'}"
+    return (f"{ {'social_listen': 'q', 'theo_doi': 't'}.get(loai, 'b') }"
             f"{datetime.datetime.fromtimestamp(_bay_gio(), _VN):%m%d%H%M}-{uuid.uuid4().hex[:5]}")
 
 
@@ -753,6 +753,9 @@ def _runner(loai: str):
     if loai == "social_deep_dive":
         import deep_dive_tool
         return deep_dive_tool.chay_viec_nen
+    if loai == "theo_doi":
+        import theo_doi
+        return theo_doi.chay_viec
     raise ValueError(f"loại việc lạ: {loai}")
 
 

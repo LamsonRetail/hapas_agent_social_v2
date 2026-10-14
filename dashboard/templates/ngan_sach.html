@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block tieu_de %}Ngân sách theo dõi{% endblock %}
+{% block noi_dung %}
+{% set ql = nguoi.vai_tro == 'quan_ly' %}
+<h1>Ngân sách theo dõi — tháng {{ thang }}</h1>
+<p class="ghi-chu sat-tren cach-duoi">Đã tiêu = tiền Apify thật của các lượt <b>/theodoi</b> trong tháng (giờ VN). Trần tháng của dự án chỉ THU HẸP thêm — không nới được trần mỗi lượt đặt trên console platform. {{ LICH_CHAY }}</p>
+
+<section class="the-khoi cach-duoi">
+  {% if dong %}
+  <div class="cuon-ngang">
+  <table>
+    <thead><tr><th>Dự án</th><th class="so">Trần tháng (USD)</th><th class="so">Đã tiêu</th><th class="so">Còn lại</th><th>Mức dùng</th>{% if ql %}<th>Đổi trần (0–100 USD)</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for d in dong %}
+      <tr>
+        <td><a href="/ngan-sach?du_an={{ d.ma|urlencode }}">{{ d.ten }}</a> <span class="mo nho">{{ d.ma }}</span>{% if not d.dang_bat %} <span class="the">đang tắt</span>{% endif %}</td>
+        <td class="so">{{ d.tran_usd_thang|usd_vn }}</td>
+        <td class="so">{{ d.da_tieu|usd_vn }}</td>
+        <td class="so">{{ d.con_lai|usd_vn }}</td>
+        <td><progress class="thanh{% if d.pt >= 100 %} thanh--day{% endif %}" max="100" value="{{ '%.1f'|format(d.pt) }}">{{ d.pt|pt_vn }}</progress>
+          <span class="mo nho">{{ d.pt|pt_vn }}</span></td>
+        {% if ql %}
+        <td>
+          <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}" class="hang">
+            <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+            <input type="number" name="tran_usd_thang" min="0" max="100" step="0.01" value="{{ '%.2f'|format(d.tran_usd_thang) }}" aria-label="Trần tháng USD của {{ d.ten }}" required>
+            <button class="nut nut--nho" type="submit">Lưu</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="trong">Chưa có dự án nào.</p>
+  {% endif %}
+</section>
+
+{% if du_an %}
+<section class="the-khoi">
+  <div class="tieu-de-khoi"><h2>Lịch sử lượt quét — {{ du_an.ten }}</h2><span class="mo nho">{{ tong|so_vn }} lượt</span></div>
+  {% if luot %}
+  <div class="cuon-ngang">
+  <table>
+    <thead><tr><th>#</th><th>Kiểu</th><th>Bắt đầu</th><th>Kết thúc</th><th>Trạng thái</th><th class="so">Nguồn</th><th class="so">Nguồn lỗi</th><th class="so">Bài mới</th><th class="so">Bài cập nhật</th><th class="so">Chi phí (USD)</th><th>Lỗi / ghi chú</th></tr></thead>
+    <tbody>
+    {% for x in luot %}
+      <tr>
+        <td class="so">{{ x.id }}{% if x.ma_viec %}<div class="mo nho">{{ x.ma_viec }}</div>{% endif %}</td>
+        <td>{{ 'theo dõi' if x.kieu == 'theo_doi' else 'từ khoá' }}</td>
+        <td class="nho">{{ x.bat_dau|gio_vn }}</td>
+        <td class="nho">{{ x.ket_thuc|gio_vn }}</td>
+        <td>{% set tt = {'dang_chay': ('đang chạy', 'the--nhan'), 'xong': ('xong', 'the--tot'), 'mot_phan': ('một phần', ''), 'loi': ('lỗi', 'the--loi'), 'da_huy': ('đã huỷ', '')}.get(x.trang_thai, (x.trang_thai, '')) %}<span class="the {{ tt[1] }}">{{ tt[0] }}</span></td>
+        <td class="so">{{ x.so_nguon }}</td>
+        <td class="so">{{ x.so_nguon_loi }}</td>
+        <td class="so">{{ x.bai_moi|so_vn }}</td>
+        <td class="so">{{ x.bai_cap_nhat|so_vn }}</td>
+        <td class="so">{{ '%.4f'|format(x.chi_phi_usd or 0)|replace('.', ',') }}</td>
+        <td class="nho"><div class="cat-chu" title="{{ x.loi or '' }} {{ x.ghi_chu or '' }}">{{ x.loi or '' }}{% if x.loi and x.ghi_chu %} · {% endif %}{{ x.ghi_chu or '' }}</div></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="phan-trang">
+    {% if trang > 1 %}<a class="nut nut--nhe nut--nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}&amp;trang={{ trang - 1 }}">← Mới hơn</a>{% endif %}
+    <span class="mo nho">Trang {{ trang }}/{{ so_trang }}</span>
+    {% if trang < so_trang %}<a class="nut nut--nhe nut--nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}&amp;trang={{ trang + 1 }}">Cũ hơn →</a>{% endif %}
+  </div>
+  {% else %}
+  <p class="trong">Chưa có lượt quét nào.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

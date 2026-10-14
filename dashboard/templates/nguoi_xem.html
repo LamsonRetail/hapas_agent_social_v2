@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block tieu_de %}Người xem{% endblock %}
+{% block noi_dung %}
+<h1>Người xem dashboard</h1>
+<p class="ghi-chu sat-tren cach-duoi">Đăng nhập bằng Lark; email phải nằm trong danh sách này. <b>Chỉ xem</b>: xem mọi trang trừ trang này. <b>Quản lý</b>: sửa dự án, nguồn, ngân sách, người xem. Luôn phải còn ít nhất một quản lý.</p>
+
+<div class="luoi luoi--2">
+  <section class="the-khoi">
+    <h2>Danh sách ({{ ds|length }})</h2>
+    <div class="cuon-ngang">
+    <table>
+      <thead><tr><th>Email</th><th>Vai trò</th><th>Thêm bởi</th><th>Thêm lúc</th><th></th></tr></thead>
+      <tbody>
+      {% for x in ds %}
+        <tr>
+          <td>{{ x.email }}{% if x.email == nguoi.email %} <span class="the the--nhan">bạn</span>{% endif %}</td>
+          <td>{{ VAI_TRO.get(x.vai_tro, x.vai_tro) }}</td>
+          <td class="nho">{{ x.them_boi or '—' }}</td>
+          <td class="nho">{{ x.them_luc|gio_vn }}</td>
+          <td>
+            {% set cuoi = x.vai_tro == 'quan_ly' and so_quan_ly <= 1 %}
+            <form method="post" action="/nguoi-xem/xoa" data-xac-nhan="Xoá {{ x.email }} khỏi danh sách người xem?">
+              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+              <input type="hidden" name="email" value="{{ x.email }}">
+              <button class="nut nut--loi nut--nho" type="submit"{% if cuoi %} disabled title="Quản lý cuối cùng — thêm quản lý khác trước"{% endif %}>Xoá</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  <section class="the-khoi">
+    <h2>Thêm hoặc đổi vai trò</h2>
+    <form method="post" action="/nguoi-xem/them" class="luoi-form">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o rong">Email Lark <input type="email" name="email" required maxlength="254" placeholder="ten@hapas.vn"></label>
+      <label class="o">Vai trò
+        <select name="vai_tro">{% for k, v in VAI_TRO.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+      <div><button class="nut" type="submit">Lưu</button></div>
+    </form>
+    <p class="ghi-chu">Email đã có thì chỉ đổi vai trò.</p>
+  </section>
+</div>
+
+<section class="the-khoi cach-doc">
+  <h2>Nhật ký thay đổi (100 dòng mới nhất)</h2>
+  {% if nhat_ky %}
+  <div class="cuon-ngang">
+  <table>
+    <thead><tr><th>Lúc</th><th>Ai</th><th>Hành động</th><th>Đối tượng</th><th>Chi tiết</th></tr></thead>
+    <tbody>
+    {% for x in nhat_ky %}
+      <tr>
+        <td class="nho">{{ x.luc|gio_vn }}</td>
+        <td class="nho">{{ x.ai }}</td>
+        <td>{{ x.hanh_dong }}</td>
+        <td class="nho">{{ x.doi_tuong }}</td>
+        <td class="nho"><div class="cat-chu" title="{{ x.chi_tiet_chu }}">{{ x.chi_tiet_chu }}</div></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="trong">Chưa có thay đổi nào.</p>
+  {% endif %}
+</section>
+{% endblock %}

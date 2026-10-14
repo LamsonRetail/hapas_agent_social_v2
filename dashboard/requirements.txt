@@ -1,0 +1,15 @@
+# Venv RIÊNG của dashboard trên VPS (/opt/lang-nghe/venv, Python 3.12) — không dùng venv Hermes.
+# Ghim trùng bản đã chạy bộ thử tests/test_dashboard_*.py (venv Hermes 14/10/2026), trừ psycopg
+# và google-cloud-bigquery (venv thử không có — bộ thử giả kho/BigQuery; kiểm khi cài, README).
+fastapi==0.133.1
+starlette==1.3.1
+pydantic==2.13.4
+anyio==4.12.1
+uvicorn==0.41.0
+jinja2==3.1.6
+markupsafe==3.0.3
+httpx==0.28.1
+# cùng dải với Mark (deploy/lang-nghe/README.md: psycopg[binary]>=3.2,<3.3)
+psycopg[binary]==3.2.9
+# đồng bộ BigQuery (dashboard/dong_bo_bq.py); chỉ dùng khi đặt BQ_DATASET
+google-cloud-bigquery==3.34.0
