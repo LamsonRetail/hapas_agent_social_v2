@@ -16,6 +16,10 @@ số, không tự đếm tay, không ước lượng "khoảng 60% tích cực".
 - Sắc thái BÌNH LUẬN: `social_deep_dive` cho link TikTok, YouTube, Facebook, Threads,
   Instagram. Threads và Instagram bóc không đăng nhập: không có trả lời lồng nhau,
   Instagram chỉ được một phần bình luận công khai — nói rõ, đừng gọi là toàn bộ
+- Xu hướng, nguồn nổi bật, chủ đề × sắc thái, từ khoá nổi bật, bình luận YouTube:
+  `social_listen` đã đếm sẵn — chép `cau_tong_hop` hoặc số trong `tong_hop`, không tự đếm
+  trên sheet. "Thảo luận" chỉ là bài + bình luận trên các bài đã quét; so sánh chỉ là 7
+  ngày cuối với 7 ngày liền trước trong khoảng đã quét, không có số "tháng trước"
 - Đừng trộn hai loại số: % bài tiêu cực không phải % bình luận tiêu cực
 - Bài và phản hồi của CHÍNH thương hiệu không phải tiếng khách: tool đã loại khỏi số
   đếm và % (cột Nguồn = "thương hiệu", đếm riêng ở `cua_thuong_hieu`). Chép nguyên câu

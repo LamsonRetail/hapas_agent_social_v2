@@ -33,6 +33,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import apify_tool as A
 import phan_loai
 import sheet_lon
+import tong_hop_lang_nghe as TH
 import trinh_bay_sheet as T
 
 from tools.registry import tool_error, tool_result  # type: ignore
@@ -547,6 +548,7 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
           "country": country, "boi_canh": boi_canh, "exclude": loai_tru,
           "khop_long": khop_long, "giu_nuoc_ngoai": giu_nuoc_ngoai,
           "chi_thi_truong_nay": chi_thi_truong_nay,
+          "binh_luan_youtube": A._bat_mac_dinh(args.get("binh_luan_youtube")),
           "title": str(args.get("title") or "").strip()}
     if nen and not viec_nen.bat():
         moi = kep_tai_cho(lims)
@@ -1151,13 +1153,17 @@ def _phan_xu_tang(rows: list, ts: dict, han_mono: float, log: list, *, cache: di
           "tu_cache": 0, "dung_vi_quota": False, "mau_kiem": None, "trang_thai": ""}
     ket: dict = {}
     sac: dict = {}
+    cd: dict = {}            # chủ đề (13/10/2026) — phần tử thứ 5 của phán trong cache
     nhan_hop_le = set(A._SAC_THAI_BAI.values())
+    chu_de_hop_le = set(phan_loai.CHU_DE_BAI.values())
     for i, (d, _) in enumerate(rows):
         v = cache.get(_khoa_link(d))
         if v:
             ket[i] = (bool(v[0]), v[1], v[2] if len(v) > 2 else "", "AI")
             if len(v) > 3 and v[3] in nhan_hop_le and v[1] != "khong_ro":
                 sac[i] = v[3]
+            if len(v) > 4 and v[4] in chu_de_hop_le and v[1] != "khong_ro":
+                cd[i] = v[4]
             tt["tu_cache"] += 1
     ly_do = ("tắt (SOCIAL_AI_PHAN_XU=0)" if not A._ai_phan_xu_bat() else
              "thiếu boi_canh" if not ts.get("boi_canh") else
@@ -1172,11 +1178,14 @@ def _phan_xu_tang(rows: list, ts: dict, han_mono: float, log: list, *, cache: di
                              toi_da=n_lo * A._AI_LO, song_song=min(song_song, n_lo),
                              thu_tu=chi_so)
         sac_dot = t.pop("_sac_thai", None) or {}
+        cd_dot = t.pop("_chu_de", None) or {}
         for i, val in r.items():
             ket[i] = (*val, "AI")
             if sac_dot.get(i):
                 sac[i] = sac_dot[i]
-            moi[_khoa_link(rows[i][0])] = (*val, sac_dot.get(i) or "")
+            if cd_dot.get(i):
+                cd[i] = cd_dot[i]
+            moi[_khoa_link(rows[i][0])] = (*val, sac_dot.get(i) or "", cd_dot.get(i) or "")
         t["_ra"] = len(r)
         return t
 
@@ -1224,6 +1233,7 @@ def _phan_xu_tang(rows: list, ts: dict, han_mono: float, log: list, *, cache: di
     _ = moi and cache.update(moi)
     tt["_moi"] = moi
     tt["_sac_thai"] = sac
+    tt["_chu_de"] = cd
     tt["trang_thai"] = (f"bỏ qua: {ly_do}" if ly_do else
                         "dừng vì hết quota model" if tt["dung_vi_quota"] else "đã chạy")
     return ket, tt
@@ -1272,6 +1282,7 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
                                 toi_da_luot=None if cho_ai else 0)
     _cache_ghi(v, tt.pop("_moi", {}))
     sac = tt.pop("_sac_thai", None) or {}       # không lưu {i: nhãn} 10k dòng vào sổ việc
+    cd = tt.pop("_chu_de", None) or {}
     if not cho_ai:
         tt["trang_thai"] = ("chỉ dùng phán AI đã lưu (" + ("đã huỷ" if v.da_huy() else
                                                            "quá hạn chót") + ")")
@@ -1282,6 +1293,7 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
         p = d["platform"]
         val = phan_xu.get(i)
         d["_sac_thai"] = sac.get(i) or phan_loai.CHUA
+        d["_chu_de"] = cd.get(i) or phan_loai.CHUA
         if val and val[1] == "khong_ro":
             d["_ai_khong_ro"] = True
             val = None
@@ -1374,10 +1386,18 @@ def _ten_tab(p: str) -> str:
     return A._TEN_NGUON.get(p, p)
 
 
-def _cot_quet(them: list) -> list:
+def _cot_quet(them: list, cuoi: list = ()) -> list:
     """Kiểu cột của tab bài (chế độ LỚN: trang trí theo cột sau khi ghi đủ)."""
     return [T.Cot(c, A._KIEU_COT_BAI.get(c, "chu"))
-            for c in list(A._HEADER) + list(them) + _COT_CUOI]
+            for c in list(A._HEADER) + list(them) + _COT_CUOI + list(cuoi)]
+
+
+# Chủ đề bài (13/10/2026) nối SAU "Loại video TikTok" ở tab bài giữ (như lượt tại chỗ).
+_TIEU_DE_BAI = list(A._HEADER) + _COT_THEM + _COT_CUOI + [A._COT_CHU_DE]
+
+
+def _dong_bai(d: dict, dt, kw: str) -> list:
+    return _dong_du(d, dt, kw, 500, _cot_them(d)) + [d.get("_chu_de") or phan_loai.CHUA]
 
 
 def _title(v, ts: dict) -> str:
@@ -1407,10 +1427,10 @@ def _ghi_so_bo(v, p: str, ts: dict, d_from, d_to) -> None:
             d["platform"] = p
             A.danh_dau_bai_nha([d], ts["queries"])
             rows.append(_dong_du(d, dt, kw, 500, ["chưa lọc", "sơ bộ", phan_loai.CHUA,
-                                                  A._nguon_bai(d)]))
+                                                  A._nguon_bai(d)]) + [phan_loai.CHUA])
         rows.sort(key=lambda r: -int(r[4] or 0))
-        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows, tu_dau=True,
-                  cot=_cot_quet(_COT_THEM), mo_ta="Bản sơ bộ (chưa lọc AI)")
+        s.ghi_tab(_ten_tab(p), [_TIEU_DE_BAI] + rows, tu_dau=True,
+                  cot=_cot_quet(_COT_THEM, [A._COT_CHU_DE]), mo_ta="Bản sơ bộ (chưa lọc AI)")
     except Exception as e:  # noqa: BLE001
         if type(e).__name__ == "MatQuyen":
             raise
@@ -1445,6 +1465,8 @@ def _dong_tong_hop(v, ts, ket: dict, cp: dict, trang_thai: str) -> list[list]:
     r.append(["Phân xử", _cau_phan_xu(px)])
     if ket.get("sac_thai"):
         r.append(["Sắc thái", ket["sac_thai"]["dong_thong_ke"]])
+    if ket.get("cau_tong_hop"):
+        r.append(["Tổng hợp", ket["cau_tong_hop"]])
     r.append(["Chi phí thật", f"{_usd(cp.get('usd'))} USD ({cp.get('so_run', 0)} lượt chạy "
                               f"Apify)"])
     return r
@@ -1459,18 +1481,18 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
     khac = _nuoc_khac(ts)
     A.danh_dau_bai_nha([d for d, _ in ket["hits"]], ts["queries"])   # cột Nguồn
     for p in v.d["nen_tang"]:
-        rows = [_dong_du(d, dt, kw, 500, _cot_them(d))
+        rows = [_dong_bai(d, dt, kw)
                 for d, dt in ket["hits"] if d["platform"] == p and not khac(d)]
-        s.ghi_tab(_ten_tab(p), [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows,
-                  cot=_cot_quet(_COT_THEM), mo_ta=f"Bài {_ten_tab(p)} đã lọc (thị trường "
-                                                   f"{ts['country']})")
+        s.ghi_tab(_ten_tab(p), [_TIEU_DE_BAI] + rows,
+                  cot=_cot_quet(_COT_THEM, [A._COT_CHU_DE]),
+                  mo_ta=f"Bài {_ten_tab(p)} đã lọc (thị trường {ts['country']})")
     # Tab phụ rỗng: chưa từng có thì KHÔNG tạo tab trống; đã có từ lượt trước (việc tiếp tục
     # sau `xong_mot_phan`) thì vẫn ghi lại chỉ tiêu đề — `ghi_tab` xoá các dòng cũ thừa, kẻo
     # bài của lượt trước nằm lại như kết quả của lượt này.
-    rows = [_dong_du(d, dt, kw, 500, _cot_them(d)) for d, dt in ket["hits"] if khac(d)]
+    rows = [_dong_bai(d, dt, kw) for d, dt in ket["hits"] if khac(d)]
     if rows or _TAB_KHAC in s.s["tabs"]:
-        s.ghi_tab(_TAB_KHAC, [list(A._HEADER) + _COT_THEM + _COT_CUOI] + rows,
-                  cot=_cot_quet(_COT_THEM), mo_ta="Bài của brand ở nước khác")
+        s.ghi_tab(_TAB_KHAC, [_TIEU_DE_BAI] + rows,
+                  cot=_cot_quet(_COT_THEM, [A._COT_CHU_DE]), mo_ta="Bài của brand ở nước khác")
     bl = ket["bi_loai"]
     if bl or _TAB_LOAI in s.s["tabs"]:
         rows = [_dong_du(d, dt, kw, 300, [ly_do, d.get("_phan_xu") or ""])
@@ -1487,6 +1509,22 @@ def _ghi_cuoi(v, ts: dict, ket: dict, cp: dict, trang_thai: str) -> str:
         bang_tk = A._bang_thong_ke(st)
         s.ghi_tab(_TAB_TK, bang_tk, cot=[T.Cot(str(c)) for c in bang_tk[0]],
                   mo_ta="Đếm sắc thái bài + trích dẫn")
+    # Tổng hợp kiểu dashboard (13/10/2026). Bảng không có dòng: tab chưa có thì không tạo,
+    # đã có từ lượt trước thì ghi lại chỉ tiêu đề (như các tab phụ ở trên). Dòng TỔNG của
+    # bảng xu hướng không ghi vào tab (chế độ LỚN không có vùng dòng tổng) — số tổng đã ở
+    # Tổng quan.
+    # Lượt này không có tổng hợp (lỗi / 0 bài) mà tab cũ còn thì vẫn ghi đè, kẻo số của lượt
+    # trước nằm lại như kết quả lượt này.
+    th = ket.get("tong_hop")
+    moi = {b.ten: b for b in TH.cac_bang(th, ket.get("bl_yt"))} if th is not None else {}
+    for ten in (TH.TAB_XU_HUONG, TH.TAB_NGUON, TH.TAB_CHU_DE, TH.TAB_TU_KHOA, TH.TAB_BL_YT):
+        b = moi.get(ten)
+        if b is None and ten not in s.s["tabs"]:
+            continue
+        if b is None:
+            s.ghi_tab(ten, [["(không có dòng nào ở lượt này)"]], mo_ta="")
+            continue
+        s.ghi_tab(ten, [[c.ten for c in b.cot]] + b.dong, cot=b.cot, mo_ta=b.mo_ta)
     tong = _dong_tong_hop(v, ts, ket, cp, trang_thai)
     if len(bl) > _BI_LOAI_TOI_DA:
         tong.append(["Bị loại — không ghi", f"{len(bl) - _BI_LOAI_TOI_DA} dòng (trần "
@@ -1588,6 +1626,10 @@ def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list
     d.append("Phân xử: " + _cau_phan_xu(ket["phan_xu"]) + ".")
     if ket.get("sac_thai"):
         d.append("Sắc thái bài: " + ket["sac_thai"]["dong_thong_ke"])
+    if ket.get("cau_tong_hop"):
+        tab = TH.ten_cac_tab(ket.get("tong_hop"), ket.get("bl_yt"))
+        d.append("Tổng hợp" + (f" (tab {', '.join(tab)})" if tab else "") + ": "
+                 + ket["cau_tong_hop"])
     chua = [c for x in v.d["nen_tang"].values() for c in (x.get("chua_phu") or [])]
     if chua:
         d.append("Chưa phủ: " + " | ".join(chua))
@@ -1599,6 +1641,56 @@ def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list
     if not (v.d.get("sheet") or {}).get("granted", True):
         d.append("Chưa cấp được quyền sheet tự động — nhờ người vận hành chia sẻ nếu không mở được.")
     return "\n".join(d)
+
+
+_YT_NEN_GIAY_KEO = 90           # giây tối đa kéo bình luận YouTube của việc nền
+_YT_NEN_GIAY_NHAN = 120         # giây tối đa gán nhãn các bình luận đó
+_YT_NEN_CON_TOI_THIEU = 60      # còn ít hơn chừng này giây tới hạn chót thì bỏ hẳn bước này
+
+
+def _binh_luan_youtube_nen(v, ts: dict, hits: list, cho_ai: bool) -> dict | None:
+    """Bình luận YouTube cho việc nền (API miễn phí): video nhiều bình luận nhất trong bài
+    đã giữ. Không chạy khi việc không được dùng AI (`cho_ai`=False), không có YouTube, hoặc
+    người dùng tắt (`binh_luan_youtube`=False). Kiểm LẠI huỷ / hạn chót ngay trước bước này
+    (bước lọc AI có thể đã chạy tới sát hạn — rà 13/10/2026: người huỷ giữa chừng phải chờ
+    thêm 5 phút), và chia phần giờ còn lại; gán nhãn ≤ `TH.YT_SONG_SONG_NEN` lượt model
+    song song (quota dùng chung). Hỏng thì báo trong kết quả, không làm hỏng việc."""
+    if not cho_ai or "youtube" not in v.d["nen_tang"] or not A._bat_mac_dinh(
+            ts.get("binh_luan_youtube")):
+        return None
+    video = TH.chon_video_youtube(hits, TH.YT_VIDEO_NEN, ts.get("country") or "VN")
+    con = v.con_giay() if hasattr(v, "con_giay") else 10_000.0
+    if (hasattr(v, "da_huy") and v.da_huy()) or con < _YT_NEN_CON_TOI_THIEU:
+        return {"trang_thai": "bỏ qua: việc đã huỷ hoặc sát hạn chót", "dong": [],
+                "thong_ke": None, "dong_thong_ke": "", "video": len(video)}
+    try:
+        kq = TH.keo_binh_luan_youtube(video, TH.YT_MOI_VIDEO_NEN,
+                                      time.monotonic() + min(_YT_NEN_GIAY_KEO, con / 3))
+        return {**TH.phan_tich_binh_luan_youtube(kq, video, ts["queries"],
+                                                 min(_YT_NEN_GIAY_NHAN, con / 3),
+                                                 song_song=TH.YT_SONG_SONG_NEN),
+                "trang_thai": kq["trang_thai"], "video": len(video)}
+    except Exception as e:  # noqa: BLE001
+        return {"trang_thai": "không lấy được: " + A._che_token(f"{type(e).__name__}: {e}")[:150],
+                "dong": [], "thong_ke": None, "dong_thong_ke": "", "video": len(video)}
+
+
+def _mau_nen(v, ts: dict, ket: dict) -> list[str]:
+    """Nguồn của việc nền mà kết quả chỉ là MẪU (xem `apify_tool._cau_mau`): còn đoạn chưa
+    phủ (`chua_phu`), có lượt con hỏng / dở / huỷ, hoặc cào chạm trần bài của nền tảng."""
+    ra = []
+    lim = ts.get("limit") if isinstance(ts.get("limit"), dict) else {}
+    for p, x in v.d["nen_tang"].items():
+        ten = _ten_tab(p)
+        per = (ket.get("per") or {}).get(p) or {}
+        if x.get("chua_phu"):
+            ra.append(f"{ten} còn đoạn chưa phủ")
+        elif any(ph.get("trang_thai") in ("loi", "mot_phan", "da_huy")
+                 for ph in x.get("phan") or []):
+            ra.append(f"{ten} chỉ lấy được một phần")
+        elif lim.get(p) and per.get("scraped", 0) >= lim[p]:
+            ra.append(f"{ten} chạm trần {lim[p]} bài")
+    return ra
 
 
 def chay_viec(v) -> tuple[str, str]:
@@ -1624,6 +1716,19 @@ def chay_viec(v) -> tuple[str, str]:
     khac = _nuoc_khac(ts)
     A.danh_dau_bai_nha([d for d, _ in ket["hits"]], ts["queries"])
     ket["sac_thai"] = A.thong_ke_sac_thai([d for d, _ in ket["hits"] if not khac(d)])
+    # Tổng hợp kiểu dashboard + bình luận YouTube (13/10/2026) trên bài của các tab nền tảng.
+    hits_chinh = [(d, dt) for d, dt in ket["hits"] if not khac(d)]
+    # Phần THÊM: lỗi thì bỏ (ghi chú), không làm hỏng việc đã trả tiền.
+    try:
+        ket["bl_yt"] = _binh_luan_youtube_nen(v, ts, hits_chinh, cho_ai)
+        if hits_chinh:
+            ket["tong_hop"] = TH.tong_hop(hits_chinh, d_from, d_to, ts["queries"],
+                                          mau=_mau_nen(v, ts, ket))
+            ket["cau_tong_hop"] = TH.cau_tong_hop(ket["tong_hop"], ket["bl_yt"])
+    except Exception as e:  # noqa: BLE001
+        log.append(f"tong_hop: {type(e).__name__}: {A._che_token(e)[:120]}")
+        ket.pop("tong_hop", None)
+        ket.pop("cau_tong_hop", None)
     with v._khoa:
         v.d["phan_xu"] = {k: val for k, val in ket["phan_xu"].items() if k != "_moi"}
         v.luu()
@@ -1652,7 +1757,10 @@ def chay_viec(v) -> tuple[str, str]:
         v.d["ket_qua"] = {"per": ket["per"], "sheet_url": url,
                           "giu": len(ket["hits"]), "loai": len(ket["bi_loai"]),
                           "thong_ke_sac_thai": ket["sac_thai"]["thong_ke"],
-                          "dong_thong_ke_sac_thai": ket["sac_thai"]["dong_thong_ke"]}
+                          "dong_thong_ke_sac_thai": ket["sac_thai"]["dong_thong_ke"],
+                          "tong_hop": (TH.tom_tat(ket["tong_hop"], ket.get("bl_yt"))
+                                       if ket.get("tong_hop") else None),
+                          "cau_tong_hop": ket.get("cau_tong_hop")}
         v.luu()
     return trang_thai, _tin_nhan(v, ts, ket, cp, url, trang_thai, ly_do)
 

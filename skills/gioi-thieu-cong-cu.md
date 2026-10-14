@@ -49,6 +49,11 @@ theo bảng giá trong kỹ năng Lập kế hoạch truy vấn social.
   tab "Bị loại"). Bài của brand ở thị trường khác vẫn giữ, ở tab riêng "Thị trường khác"
 - TikTok tách video affiliate (có gắn giỏ hàng TikTok Shop) với video viral (không gắn
   giỏ) ở cột "Loại video TikTok". Bài nguồn không báo giỏ hàng thì để trống, ghi "chưa rõ"
+- Tổng hợp kiểu dashboard (từ 5 bài trở lên): tab Xu hướng (thảo luận theo ngày; khoảng
+  14–92 ngày và không nguồn nào chạm trần thì so 7 ngày cuối với 7 ngày trước), Nguồn nổi bật (kênh nhiều thảo luận nhất từng nền tảng), Chủ đề
+  (13 nhóm như giá cả, chất lượng, chiến dịch… × khen/chê), Từ khoá nổi bật, và khi có
+  YouTube thì Bình luận YouTube kèm khen/chê (miễn phí). "Thảo luận" = bài + số bình luận
+  nền tảng hiển thị trên các bài đã quét, không phải toàn bộ mạng xã hội
 - Số bài mỗi lượt bị chặn ở trần chủ agent đặt trên console (đặt được riêng từng nền
   tảng, hoặc tắt hẳn một nền tảng). Chỉ đọc bài công khai
 - Quét lớn (tới 10.000 bài mỗi nền tảng) chạy nền tới 45 phút: Mark báo ước tính chi phí

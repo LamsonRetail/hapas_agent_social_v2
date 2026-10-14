@@ -40,6 +40,10 @@ def test_doc_phan_xu_lay_sac_thai_cung_luot():
         "6": ["k", "ad", "-"],                      # mã của phan_loai cũng nhận
         "7": ["k", "other_market", "TH", "tich_cuc"],   # đảo thứ tự vẫn đọc đúng
     }), 8)
+    # Phần tử thứ 5 là chủ đề (13/10/2026, canh ở test_tong_hop_lang_nghe.py): JSON dạng cũ
+    # không có chủ đề -> None.
+    assert all(v[4] is None for v in ra.values())
+    ra = {i: v[:4] for i, v in ra.items()}
     assert ra[0] == (True, "brand", "", TC)
     assert ra[1] == (False, "trung_ten", "ban nhạc metal", TL)
     assert ra[2] == (True, "other_market", "TH", TL)
@@ -96,7 +100,8 @@ def test_cot_sac_thai_va_thong_ke_tren_sheet_chinh(quet):
     kq = chay()
     assert len(hoi) == 1, "sắc thái đi cùng đúng một lượt phân xử"
     chinh = _tab(ghi, "s1")
-    hd = ghi[0][1][0]
+    assert ghi[0][1][0][-1] == A._COT_CHU_DE, "cột Chủ đề nối sau cùng (13/10/2026)"
+    hd = ghi[0][1][0][:-1]
     # Cột "Loại video TikTok" (affiliate/viral) luôn nối SAU CÙNG, sau Sắc thái/Nguồn.
     assert hd[-3:] == ["Sắc thái", "Nguồn", A._COT_LOAI_VIDEO] and hd[:12] == A._HEADER,         "12 cột đầu giữ nguyên"
     # `_tab` đã bỏ cột cuối "Loại video TikTok" nên Sắc thái vẫn ở [-2].
@@ -193,7 +198,8 @@ def test_phan_xu_tang_co_sac_thai_luu_cache_va_doc_lai(monkeypatch):
     sac = tt["_sac_thai"]
     assert sac and set(sac) <= {i for i, v in ket.items() if v[3] == "AI"}
     assert set(sac.values()) == {TC, TI}
-    assert all(len(v) == 4 and v[3] in (TC, TI) for v in tt["_moi"].values())
+    # Phần tử thứ 5 = chủ đề (13/10/2026); model giả không trả chủ đề -> "".
+    assert all(len(v) == 5 and v[3] in (TC, TI) and v[4] == "" for v in tt["_moi"].values())
     # Khởi động lại: đọc nhãn từ cache, không hỏi model lại.
     monkeypatch.setattr(A, "_hoi_model", lambda *a: pytest.fail("không được hỏi lại"))
     ket2, tt2 = Q._phan_xu_tang(rows, _TS_AI, time.monotonic() + 600, [],
