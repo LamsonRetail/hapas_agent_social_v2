@@ -89,7 +89,8 @@ def vai_tro(email: str) -> str | None:
 
 # ───────────────────────────── dự án ─────────────────────────────
 _COT_DU_AN = ("ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
-              "tran_usd_thang::float AS tran_usd_thang, dang_bat, tao_luc, sua_luc, sua_boi")
+              "tran_usd_thang::float AS tran_usd_thang, dang_bat, tao_luc, sua_luc, sua_boi, "
+              "bl_bat, bl_so_bai, bl_moi_bai")
 
 
 def cac_du_an() -> list[dict]:
@@ -256,7 +257,7 @@ def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) 
     kỳ trước, và trang báo rõ bằng cờ `bi_cat` — không lặng lẽ mất bài mới nhất."""
     with ket_noi() as c:
         rows = c.execute(
-            "SELECT b.nen_tang, b.nguon_id, left(b.link, 500) AS link, "
+            "SELECT b.khoa, b.nen_tang, b.nguon_id, left(b.link, 500) AS link, b.bl_da_lay, "
             "left(b.tac_gia, 200) AS tac_gia, left(b.tai_khoan, 200) AS tai_khoan, b.followers, "
             "b.dang_luc, left(b.noi_dung, 1000) AS noi_dung, left(b.hashtag, 500) AS hashtag, "
             "b.sac_thai, left(b.chu_de, 100) AS chu_de, b.xem, b.thich, b.binh_luan, b.chia_se, "
@@ -265,6 +266,53 @@ def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) 
             "WHERE b.du_an = %s AND b.dang_luc >= %s AND b.dang_luc < %s "
             "ORDER BY b.dang_luc DESC LIMIT %s", (du_an, tu, den, BAI_TOI_DA + 1)).fetchall()
     return {"rows": rows[:BAI_TOI_DA], "bi_cat": len(rows) > BAI_TOI_DA}
+
+
+# ───────────────────────────── bình luận (đợt 2b, chỉ đọc + cấu hình) ─────────────────────────────
+BL_TOI_DA = 50_000
+_COT_BL = ("b.khoa_bai, b.ma, b.nen_tang, left(b.tac_gia, 200) AS tac_gia, "
+           "left(b.noi_dung, 1000) AS noi_dung, b.thich, b.tra_loi, b.la_tra_loi, "
+           "b.cua_thuong_hieu, b.dang_luc, b.sac_thai, b.chu_de")
+
+
+def binh_luan_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) -> dict:
+    """Bình luận đã cào, đăng trong [tu, den) (bình luận không có giờ đăng: theo giờ cào), kèm
+    loại nguồn của bài để lọc giống trang Chỉ số. -> {"rows", "bi_cat"}."""
+    with ket_noi() as c:
+        rows = c.execute(
+            f"SELECT {_COT_BL}, COALESCE(b.dang_luc, b.thay_lan_dau) AS luc, "
+            "n.loai AS nguon_loai, bai.nguon_id FROM binh_luan b "
+            "JOIN bai ON bai.du_an = b.du_an AND bai.khoa = b.khoa_bai "
+            "LEFT JOIN nguon n ON n.id = bai.nguon_id "
+            "WHERE b.du_an = %s AND COALESCE(b.dang_luc, b.thay_lan_dau) >= %s "
+            "AND COALESCE(b.dang_luc, b.thay_lan_dau) < %s "
+            "ORDER BY COALESCE(b.dang_luc, b.thay_lan_dau) DESC LIMIT %s",
+            (du_an, tu, den, BL_TOI_DA + 1)).fetchall()
+    return {"rows": rows[:BL_TOI_DA], "bi_cat": len(rows) > BL_TOI_DA}
+
+
+def binh_luan_cua_bai(du_an: str, khoa: str, toi_da: int = 300) -> list[dict]:
+    """Bình luận đã cào của MỘT bài, nhiều thích trước."""
+    with ket_noi() as c:
+        return c.execute(
+            f"SELECT {_COT_BL} FROM binh_luan b WHERE b.du_an = %s AND b.khoa_bai = %s "
+            "ORDER BY b.la_tra_loi, COALESCE(b.thich, 0) DESC, b.dang_luc LIMIT %s",
+            (du_an, khoa, toi_da)).fetchall()
+
+
+def dat_binh_luan(ai: str, ma: str, bat: bool, so_bai: int, moi_bai: int) -> None:
+    """Cấu hình cào bình luận của dự án (CHECK của bảng chặn thêm một lớp)."""
+    with ket_noi() as c:
+        cu = c.execute("SELECT bl_bat, bl_so_bai, bl_moi_bai FROM du_an WHERE ma = %s FOR UPDATE",
+                       (ma,)).fetchone()
+        if not cu:
+            raise LoiDuLieu("Không còn dự án này.")
+        c.execute("UPDATE du_an SET bl_bat = %s, bl_so_bai = %s, bl_moi_bai = %s, "
+                  "sua_luc = now(), sua_boi = %s WHERE ma = %s",
+                  (bat, so_bai, moi_bai, ai, ma))
+        _nhat_ky(c, ai, "sua_binh_luan", f"du_an:{ma}",
+                 {"truoc": dict(cu), "sau": {"bl_bat": bat, "bl_so_bai": so_bai,
+                                              "bl_moi_bai": moi_bai}})
 
 
 def da_tieu_thang() -> dict[str, float]:

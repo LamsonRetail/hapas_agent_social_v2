@@ -33,6 +33,21 @@
   <p class="nho phu">Đã tiêu <progress class="thanh{% if d.pt >= 100 %} thanh--day{% endif %}" max="100" value="{{ '%.1f'|format(d.pt) }}">{{ d.pt|pt_vn }}</progress> {{ d.pt|pt_vn }} trần ·
     Dự báo <progress class="thanh{% if db.vuot %} thanh--day{% endif %}" max="100" value="{{ '%.1f'|format(d.pt_du_bao) }}">{{ d.pt_du_bao|pt_vn }}</progress> {{ d.pt_du_bao|pt_vn }} trần</p>
 
+  <div class="khoi-bl">
+    <h3>Cào bình luận</h3>
+    <p class="ghi-chu sat-tren">Sau mỗi lượt /theodoi, Mark cào bình luận của các bài nhiều bình luận nhất (bài chưa cào trước, rồi bài có bình luận tăng ≥ 20%), gán sắc thái + chủ đề, để bấm vào biểu đồ đọc được từng bình luận. Tiền tính vào trần tháng ở trên. Giá mỗi bình luận: TikTok 0,00125 · Facebook 0,0025 · Instagram 0,0026 USD · YouTube miễn phí.
+      {% if d.bl_bat %}Hiện: tối đa <b>{{ d.bl_so_bai }}</b> bài × <b>{{ d.bl_moi_bai }}</b> bình luận mỗi lượt — tối đa ≈ <b>{{ d.bl_uoc|usd_vn }}</b> USD/lượt.{% else %}Hiện: <b>đang tắt</b>.{% endif %}</p>
+    {% if ql %}
+    <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/binh-luan" class="hang">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o"><span><input type="checkbox" name="bl_bat" value="1"{% if d.bl_bat %} checked{% endif %}> Bật cào bình luận</span></label>
+      <label class="o">Số bài mỗi lượt (0–100) <input type="number" name="bl_so_bai" min="0" max="100" value="{{ d.bl_so_bai }}" required></label>
+      <label class="o">Bình luận mỗi bài (5–200) <input type="number" name="bl_moi_bai" min="5" max="200" value="{{ d.bl_moi_bai }}" required></label>
+      <button class="nut nut--nho" type="submit">Lưu</button>
+    </form>
+    {% endif %}
+  </div>
+
   {% if db.vuot %}
   <div class="thong-bao thong-bao--loi" role="alert">
     <b>⚠ Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD</b> ({{ db.du_bao_thang|usd_vn }} / {{ db.tran|usd_vn }} USD). Giữ nguyên cấu hình thì Mark sẽ chạm trần trước cuối tháng và BỎ QUA các nguồn còn lại tới tháng sau.

@@ -89,11 +89,20 @@
              axisLabel: { color: m.mo, fontSize: 11, formatter: function (v) { return SO.format(v); } } };
   }
 
+  // Bấm vào biểu đồ → khung chi tiết (đợt 2b). Mỗi biểu đồ đặt hàm xử lý ở `xuLyBam[id]` mỗi
+  // lần vẽ; sự kiện ECharts gắn MỘT lần lúc khởi tạo nên vẽ lại không gắn trùng.
+  var xuLyBam = {};
   function ve(id, opt) {
     var el = $(id);
     if (!el || !window.echarts) return;
     var bd = bieuDo[id];
-    if (!bd) bd = bieuDo[id] = window.echarts.init(el, null, { renderer: "canvas" });
+    if (!bd) {
+      bd = bieuDo[id] = window.echarts.init(el, null, { renderer: "canvas" });
+      bd.on("click", function (p) {
+        var f = xuLyBam[id];
+        if (f && p.componentType === "series" && p.dataIndex != null) f(p);
+      });
+    }
     bd.setOption(opt, true);
   }
 
@@ -151,6 +160,10 @@
         data: [{ type: "max" }] } : undefined
     }];
     ve("bd-xu-huong", o);
+    xuLyBam["bd-xu-huong"] = function (p) {
+      var kh = khoangMoc(x, p.dataIndex);
+      moChiTiet("bai", kh, so(x.thao_luan[p.dataIndex]) + " thảo luận " + moTaKhoang(kh));
+    };
 
     var o2 = coBan(m);
     o2.xAxis = trucDanhMuc(m, nhan);
@@ -163,6 +176,10 @@
                             borderRadius: i === lop.length - 1 ? [4, 4, 0, 0] : 0 } };
     });
     ve("bd-bai-ngay", o2);
+    xuLyBam["bd-bai-ngay"] = function (p) {
+      var kh = khoangMoc(x, p.dataIndex);
+      moChiTiet("bai", Object.assign({ sac_thai: p.seriesName }, kh), p.seriesName + " · " + moTaKhoang(kh));
+    };
   }
 
   function veThanhNgang(id, m, ten, gia, mauCua, nhanCuoi) {
@@ -193,6 +210,10 @@
         if (x.sac_thai === "chưa phân loại" || !daPhan) return so(x.so);
         return so(x.so) + " · " + pt(Math.round(1000 * x.so / daPhan) / 10);
       }));
+    xuLyBam["bd-sac-thai"] = function (p) {
+      var x = d.sac_thai[d.sac_thai.length - 1 - p.dataIndex];
+      if (x) moChiTiet("bai", { sac_thai: x.sac_thai }, "sắc thái " + x.sac_thai);
+    };
     $("ghi-chu-sac-thai").textContent = tong ? "% tính trên " + so(daPhan) + " bài đã phân loại; không tính bài kênh nhà." : "";
 
     var cd = d.sac_thai_chu_de.slice(0, 12);
@@ -211,6 +232,10 @@
     $("bd-chu-de").style.height = Math.max(220, 60 + 30 * cd.length) + "px";
     if (bieuDo["bd-chu-de"]) bieuDo["bd-chu-de"].resize();
     ve("bd-chu-de", o);
+    xuLyBam["bd-chu-de"] = function (p) {
+      var x = cd[cd.length - 1 - p.dataIndex];
+      if (x) moChiTiet("bai", { chu_de: x.chu_de, sac_thai: p.seriesName }, x.chu_de + " · " + p.seriesName);
+    };
     $("trong-chu-de").hidden = cd.length > 0;
   }
 
@@ -223,6 +248,14 @@
       d.loai_nguon.map(function (x) { return x.thao_luan; }),
       d.loai_nguon.map(function (x) { return m.loai[x.loai] || m.mo; }),
       d.loai_nguon.map(function (x) { return so(x.thao_luan) + " (" + so(x.bai) + " bài)"; }));
+    xuLyBam["bd-nen-tang"] = function (p) {
+      var x = d.nen_tang[d.nen_tang.length - 1 - p.dataIndex];
+      if (x) moChiTiet("bai", { nen_tang: x.nen_tang }, x.ten);
+    };
+    xuLyBam["bd-loai-nguon"] = function (p) {
+      var x = d.loai_nguon[d.loai_nguon.length - 1 - p.dataIndex];
+      if (x) moChiTiet("bai", { loai: x.loai }, x.ten);
+    };
   }
 
   // ─── bảng ───
@@ -273,7 +306,12 @@
       { ten: "Bài", so: true, lay: function (r) { return so(r.bai); } },
       { ten: "Bình luận", so: true, lay: function (r) { return so(r.binh_luan); } },
       { ten: "Thảo luận", so: true, lay: function (r) { return so(r.thao_luan); } },
-      { ten: "Lượt xem", so: true, lay: function (r) { return so(r.xem); } }
+      { ten: "Lượt xem", so: true, lay: function (r) { return so(r.xem); } },
+      { ten: "", lay: function (r) {
+        var b = tao("button", "nut nut--nhe nut--nho", "Xem bài");
+        b.type = "button";
+        b.addEventListener("click", function () { moChiTiet("bai", { nguon: r.khoa_nguon, nen_tang: g.nen_tang }, r.ten); });
+        return b; } }
     ], g.nguon));
   }
 
@@ -282,9 +320,11 @@
     xoa(el);
     if (!d.tu_khoa.length) { el.appendChild(tao("div", "trong", "Chưa đủ bài để có từ khoá nổi bật (cụm phải xuất hiện ở ít nhất 2 bài).")); return; }
     d.tu_khoa.forEach(function (x) {
-      var s = tao("span", "", x.tu);
+      var s = tao("button", "", x.tu);
+      s.type = "button";
       s.appendChild(tao("b", "", so(x.so_bai)));
-      s.title = so(x.so_bai) + " bài nhắc";
+      s.title = so(x.so_bai) + " bài nhắc — bấm để xem";
+      s.addEventListener("click", function () { moChiTiet("bai", { cum: x.tu }, "bài nhắc “" + x.tu + "”"); });
       el.appendChild(s);
     });
   }
@@ -302,7 +342,13 @@
       { ten: "Thảo luận", so: true, lay: function (r) { return so(r.thao_luan); } },
       { ten: "Xem", so: true, lay: function (r) { return so(r.xem); } },
       { ten: "Thích", so: true, lay: function (r) { return so(r.thich); } },
-      { ten: "Chia sẻ", so: true, lay: function (r) { return so(r.chia_se); } }
+      { ten: "Chia sẻ", so: true, lay: function (r) { return so(r.chia_se); } },
+      { ten: "Bình luận đã đọc", lay: function (r) {
+        if (!r.bl_da_lay) return "—";
+        var b = tao("button", "nut nut--nhe nut--nho", so(r.bl_da_lay));
+        b.type = "button";
+        b.addEventListener("click", function () { moMotBai(r); });
+        return b; } }
     ], d.top_bai));
   }
 
@@ -316,8 +362,216 @@
     veTopNguon(duLieu);
     veTuKhoa(duLieu);
     veTopBai(duLieu);
+    veBinhLuan(duLieu, m);
     $("ky-truoc").textContent = "So với " + ngayDu(duLieu.khoang.ky_truoc.tu) + " – " + ngayDu(duLieu.khoang.ky_truoc.den) + " (kỳ liền trước cùng độ dài).";
     $("canh-bao").hidden = !duLieu.bi_cat;
+  }
+
+  // ─── bình luận đã đọc (đợt 2b) ───
+  function veBinhLuan(d, m) {
+    var b = d.binh_luan_da_cao, el = $("kpi-bl");
+    if (!b || !el) return;
+    var k = b.kpi;
+    xoa(el);
+    el.appendChild(theKpi("Bình luận đã đọc", so(k.so), null, "trên " + so(k.so_bai) + " bài"));
+    el.appendChild(theKpi("Của khách", so(k.khach), null, k.thuong_hieu ? "+ " + so(k.thuong_hieu) + " của thương hiệu" : "bình luận"));
+    el.appendChild(theKpi("Tích cực", pt(k.tich_cuc_pt), null, so(k.tich_cuc) + " bình luận"));
+    el.appendChild(theKpi("Tiêu cực", pt(k.tieu_cuc_pt), null, so(k.tieu_cuc) + " bình luận"));
+    el.appendChild(theKpi("Trung lập", pt(k.trung_lap_pt), null, so(k.trung_lap) + " bình luận"));
+    el.appendChild(theKpi("Chưa phân loại", so(k.chua_phan_loai), null, "bình luận"));
+    $("trong-bl").hidden = k.so > 0;
+    var x = b.xu_huong, nhan = x.moc.map(x.don_vi === "tuần" ? function (s) { return "từ " + ngayNgan(s); } : ngayNgan);
+    $("don-vi-bl").textContent = "theo " + x.don_vi + " đăng bình luận (giờ VN)";
+    var o = coBan(m);
+    o.xAxis = trucDanhMuc(m, nhan);
+    o.yAxis = trucSo(m);
+    var lop = [["Tích cực", "tich_cuc"], ["Trung lập", "trung_lap"], ["Tiêu cực", "tieu_cuc"], ["chưa phân loại", "chua_phan_loai"]];
+    o.series = lop.map(function (l, i) {
+      return { name: l[0], type: "bar", stack: "bl", data: x[l[1]], barMaxWidth: 18,
+               itemStyle: { color: m.sac[l[0]], borderColor: m.mat, borderWidth: 1,
+                            borderRadius: i === lop.length - 1 ? [4, 4, 0, 0] : 0 } };
+    });
+    ve("bd-bl-ngay", o);
+    xuLyBam["bd-bl-ngay"] = function (p) {
+      var kh = khoangMoc(x, p.dataIndex);
+      moChiTiet("binh-luan", Object.assign(kh, { sac_thai: p.seriesName }),
+                p.seriesName + " · " + moTaKhoang(kh));
+    };
+    var cd = b.chu_de.slice(0, 12);
+    var o2 = coBan(m);
+    o2.grid.top = 32;
+    o2.yAxis = Object.assign(trucDanhMuc(m, cd.map(function (c) { return c.chu_de; }).reverse()),
+                             { axisLabel: { color: m.phu, fontSize: 12, width: 150, overflow: "truncate" } });
+    o2.xAxis = trucSo(m);
+    var lop2 = ["Tích cực", "Trung lập", "Tiêu cực", "chưa phân loại"];
+    o2.series = lop2.map(function (s, i) {
+      return { name: s, type: "bar", stack: "cd", barMaxWidth: 18,
+               data: cd.map(function (c) { return c[s]; }).reverse(),
+               itemStyle: { color: m.sac[s], borderColor: m.mat, borderWidth: 1,
+                            borderRadius: i === lop2.length - 1 ? [0, 4, 4, 0] : 0 } };
+    });
+    $("bd-bl-chu-de").style.height = Math.max(220, 60 + 30 * cd.length) + "px";
+    if (bieuDo["bd-bl-chu-de"]) bieuDo["bd-bl-chu-de"].resize();
+    ve("bd-bl-chu-de", o2);
+    xuLyBam["bd-bl-chu-de"] = function (p) {
+      var c = cd[cd.length - 1 - p.dataIndex];
+      if (!c) return;
+      moChiTiet("binh-luan", { chu_de: c.chu_de, sac_thai: p.seriesName }, c.chu_de + " · " + p.seriesName);
+    };
+  }
+
+  // ─── khung chi tiết ───
+  function ngayISO(d) { return d.toISOString().slice(0, 10); }
+  function congNgay(iso, n) {
+    var d = new Date(iso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + n);
+    return ngayISO(d);
+  }
+  // Mốc i của xu hướng -> {ngay_tu, ngay_den}: theo tuần thì tới trước mốc kế (mốc cuối: tới `den`).
+  function khoangMoc(x, i) {
+    var tu = x.moc[i];
+    if (x.don_vi !== "tuần") return { ngay_tu: tu, ngay_den: tu };
+    var den = i + 1 < x.moc.length ? congNgay(x.moc[i + 1], -1) : cfg.den;
+    return { ngay_tu: tu, ngay_den: den };
+  }
+  function moTaKhoang(kh) {
+    return kh.ngay_tu === kh.ngay_den ? "ngày " + ngayDu(kh.ngay_tu) : ngayDu(kh.ngay_tu) + " – " + ngayDu(kh.ngay_den);
+  }
+  function ngayGio(iso) {
+    if (!iso) return "";
+    var s = String(iso);
+    return ngayDu(s) + (s.length >= 16 ? " " + s.slice(11, 16) : "");
+  }
+  var TEN_NT = { tiktok: "TikTok", facebook: "Facebook", youtube: "YouTube", instagram: "Instagram" };
+
+  function nhanThe(chu, lop) { return tao("span", "the" + (lop ? " " + lop : ""), chu); }
+  function lopSac(s) {
+    return s === "Tích cực" ? "the--tot" : s === "Tiêu cực" ? "the--loi" : "";
+  }
+
+  function theBinhLuan(c) {
+    var o = tao("div", "the-bl" + (c.la_tra_loi ? " the-bl--tra-loi" : ""));
+    var dau = tao("div", "the-bl__dau");
+    dau.appendChild(tao("b", "", c.tac_gia || "(ẩn danh)"));
+    if (c.dang_luc) dau.appendChild(tao("span", "mo nho", " · " + ngayGio(c.dang_luc)));
+    if (c.thich) dau.appendChild(tao("span", "mo nho", " · ♥ " + so(c.thich)));
+    if (c.la_tra_loi) dau.appendChild(tao("span", "mo nho", " · trả lời"));
+    o.appendChild(dau);
+    o.appendChild(tao("p", "the-bl__chu", c.noi_dung || ""));
+    var nh = tao("div", "the-bl__nhan");
+    nh.appendChild(nhanThe(c.sac_thai, lopSac(c.sac_thai)));
+    if (c.chu_de) nh.appendChild(nhanThe(c.chu_de, "the--nhan"));
+    o.appendChild(nh);
+    return o;
+  }
+
+  function theBai(r) {
+    var o = tao("article", "the-bai");
+    var dau = tao("div", "the-bai__dau");
+    dau.appendChild(tao("b", "", r.tac_gia || "?"));
+    dau.appendChild(tao("span", "mo nho", " · " + (TEN_NT[r.nen_tang] || r.nen_tang) + " · " + ngayGio(r.dang_luc) + " · " + r.loai));
+    o.appendChild(dau);
+    o.appendChild(tao("p", "the-bai__chu", r.noi_dung || "(không có chữ)"));
+    var nh = tao("div", "the-bl__nhan");
+    nh.appendChild(nhanThe(r.sac_thai, lopSac(r.sac_thai)));
+    if (r.chu_de) nh.appendChild(nhanThe(r.chu_de, "the--nhan"));
+    o.appendChild(nh);
+    o.appendChild(tao("div", "mo nho", "Thảo luận " + so(r.thao_luan) + " · bình luận nền tảng báo " + so(r.binh_luan) +
+                      " · xem " + so(r.xem) + " · thích " + so(r.thich) + " · chia sẻ " + so(r.chia_se)));
+    var hd = tao("div", "the-bai__hanh-dong");
+    hd.appendChild(linkAnToan(r.link, "Mở bài gốc ↗"));
+    var ds = tao("div", "the-bai__bl");
+    if (r.bl_da_lay) {
+      var nut = tao("button", "nut nut--nhe nut--nho", "Xem " + so(r.bl_da_lay) + " bình luận đã đọc");
+      nut.type = "button";
+      nut.addEventListener("click", function () {
+        if (ds.childNodes.length) { xoa(ds); nut.textContent = "Xem " + so(r.bl_da_lay) + " bình luận đã đọc"; return; }
+        nut.disabled = true;
+        goiApi("binh-luan", { khoa: r.khoa }).then(function (j) {
+          j.binh_luan.forEach(function (c) { ds.appendChild(theBinhLuan(c)); });
+          if (!j.binh_luan.length) ds.appendChild(tao("div", "trong", "Chưa có bình luận đã đọc."));
+          nut.textContent = "Ẩn bình luận";
+        }).catch(function (e) { ds.appendChild(tao("div", "thong-bao thong-bao--loi", e.message)); })
+          .then(function () { nut.disabled = false; });
+      });
+      hd.appendChild(nut);
+    } else if (r.binh_luan) {
+      hd.appendChild(tao("span", "mo nho", "Bình luận chưa được cào"));
+    }
+    o.appendChild(hd);
+    o.appendChild(ds);
+    return o;
+  }
+
+  function goiApi(duong, dk) {
+    var q = new URLSearchParams({ du_an: cfg.du_an, tu: cfg.tu, den: cfg.den });
+    if (cfg.nen_tang) q.set("nen_tang", cfg.nen_tang);
+    if (cfg.loai) q.set("loai", cfg.loai);
+    Object.keys(dk).forEach(function (k) { if (dk[k] != null && dk[k] !== "") q.set(k, dk[k]); });
+    return fetch("/api/" + duong + "?" + q.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) throw new Error("Phiên đăng nhập đã hết hạn — tải lại trang để đăng nhập lại.");
+        return r.json().then(function (j) {
+          if (!r.ok) throw new Error(j && j.loi ? j.loi : "Không tải được chi tiết.");
+          return j;
+        });
+      });
+  }
+
+  var hop = $("chi-tiet");
+  if (hop) {
+    $("chi-tiet-dong").addEventListener("click", function () { hop.close ? hop.close() : hop.removeAttribute("open"); });
+    hop.addEventListener("click", function (e) { if (e.target === hop && hop.close) hop.close(); });
+  }
+
+  // loai: "bai" | "binh-luan"; dk: điều kiện của cột vừa bấm; moTa: chữ cho tiêu đề.
+  function moChiTiet(loai, dk, moTa, trang) {
+    if (!hop) return;
+    var than = $("chi-tiet-than"), ph = $("chi-tiet-trang");
+    $("chi-tiet-tieu-de").textContent = (loai === "bai" ? "Bài" : "Bình luận") + " — " + moTa;
+    $("chi-tiet-mo-ta").textContent = "Đang tải…";
+    xoa(than);
+    xoa(ph);
+    if (!hop.open) { if (hop.showModal) hop.showModal(); else hop.setAttribute("open", ""); }
+    goiApi(loai, Object.assign({ trang: trang || 1 }, dk)).then(function (j) {
+      var ds = loai === "bai" ? j.bai : j.binh_luan;
+      $("chi-tiet-mo-ta").textContent = loai === "bai"
+        ? so(j.tong) + " bài · " + so(j.thao_luan) + " thảo luận (bài + bình luận nền tảng báo) · xếp theo thảo luận"
+        : so(j.tong) + " bình luận đã đọc · xếp theo lượt thích";
+      if (!ds.length) than.appendChild(tao("div", "trong", "Không có " + (loai === "bai" ? "bài" : "bình luận") + " nào."));
+      ds.forEach(function (x) { than.appendChild(loai === "bai" ? theBai(x) : theBinhLuan(x)); });
+      if (j.so_trang > 1) {
+        if (j.trang > 1) {
+          var t = tao("button", "nut nut--nhe nut--nho", "← Trước");
+          t.type = "button";
+          t.addEventListener("click", function () { moChiTiet(loai, dk, moTa, j.trang - 1); });
+          ph.appendChild(t);
+        }
+        ph.appendChild(tao("span", "mo nho", "Trang " + j.trang + "/" + j.so_trang));
+        if (j.trang < j.so_trang) {
+          var s = tao("button", "nut nut--nhe nut--nho", "Sau →");
+          s.type = "button";
+          s.addEventListener("click", function () { moChiTiet(loai, dk, moTa, j.trang + 1); });
+          ph.appendChild(s);
+        }
+      }
+      than.scrollTop = 0;
+    }).catch(function (e) { $("chi-tiet-mo-ta").textContent = e.message || "Không tải được chi tiết."; });
+  }
+
+  // Một bài (bảng Bài nổi bật): mở khung với đúng bài đó, tự mở bình luận đã đọc.
+  function moMotBai(r) {
+    if (!hop) return;
+    var than = $("chi-tiet-than");
+    $("chi-tiet-tieu-de").textContent = "Bài — " + (r.tac_gia || "?") + " · " + ngayDu(r.dang_luc);
+    $("chi-tiet-mo-ta").textContent = so(r.bl_da_lay) + " bình luận đã đọc của bài này.";
+    xoa(than);
+    xoa($("chi-tiet-trang"));
+    var the = theBai(r);
+    than.appendChild(the);
+    if (!hop.open) { if (hop.showModal) hop.showModal(); else hop.setAttribute("open", ""); }
+    var nut = the.querySelector(".the-bai__hanh-dong button");
+    if (nut) nut.click();
   }
 
   function baoLoi(chu) {

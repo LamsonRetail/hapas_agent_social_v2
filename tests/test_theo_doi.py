@@ -688,7 +688,7 @@ def test_kho_theo_quy_chuan_mo_ta_bi():
     sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
         encoding="utf-8")
     bang = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", sql, re.DOTALL)
-    assert len(bang) == 9
+    assert len(bang) == 10
     for ten, khoi in bang:
         m = re.search(rf"COMMENT ON TABLE {ten} IS \$\$(.*?)\$\$;", sql, re.DOTALL)
         assert m, f"{ten}: thiếu mô tả bảng"
@@ -713,3 +713,176 @@ def test_cot_ghi_bai_khop_schema():
     # Quyền: Mark không được sửa dự án hay thêm nguồn.
     assert re.search(r"GRANT SELECT ON du_an, nguon TO mark;", sql)
     assert not re.search(r"GRANT[^;]*(INSERT|DELETE)[^;]*ON du_an[^;]*TO mark", sql)
+
+
+# ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
+def _bai_bl(vid, so_bl=10, tk="hapas.official", p="tiktok"):
+    return {"khoa": f"{p}:{vid}", "nen_tang": p, "link": f"https://www.tiktok.com/@{tk}/video/{vid}",
+            "tai_khoan": tk, "tac_gia": tk.upper(), "binh_luan": so_bl, "bl_lay_luc": None}
+
+
+def _bl_tt(cid, vid, user, text, likes=0, tra_loi_cho=None, tk="hapas.official"):
+    x = {"cid": cid, "uniqueId": user, "text": text, "diggCount": likes,
+         "createTimeISO": "2026-10-13T02:00:00.000Z", "replyCommentTotal": 0,
+         "videoWebUrl": f"https://www.tiktok.com/@{tk}/video/{vid}"}
+    if tra_loi_cho:
+        x["repliesToId"] = tra_loi_cho
+    return x
+
+
+def _lay_bl(*a):
+    """Chạy trong BẢN SAO ngữ cảnh như runner thật — cờ Apify (_NEN_TANG…) không rò sang test khác."""
+    import contextvars
+    return contextvars.copy_context().run(T._lay_binh_luan, *a)
+
+
+class GiaKhoBl:
+    def __init__(self, mp, bai):
+        self.bai, self.hoi, self.ghi = bai, [], []
+        mp.setattr(K, "bai_can_lay_binh_luan", self.can)
+        mp.setattr(K, "ghi_binh_luan", self.ghi_bl)
+
+    def can(self, ma, nen_tang, toi_da):
+        self.hoi.append((ma, list(nen_tang), toi_da))
+        return [b for b in self.bai if b["nen_tang"] in nen_tang][:toi_da]
+
+    def ghi_bl(self, ma, luot, rows, da_lay):
+        self.ghi.append((ma, luot, [dict(r) for r in rows], dict(da_lay)))
+        return len(rows), 0
+
+
+@pytest.fixture
+def nhan_gia(monkeypatch):
+    import phan_loai
+    goi = []
+
+    def gan(rows, han, tt=None, song_song=None):
+        goi.append([r["text"] for r in rows])
+        if tt is not None:
+            tt["trang_thai"] = "đã chạy"
+        return [("Tích cực", "Sản phẩm/chất lượng")] * len(rows)
+    monkeypatch.setattr(phan_loai, "phan_loai_binh_luan", gan)
+    return goi
+
+
+def test_binh_luan_tiktok_ghi_kho_nhan_va_tach_thuong_hieu(mo, nhan_gia):
+    kho = GiaKhoBl(mo, [_bai_bl("111", 30), _bai_bl("222", 5)])
+    ap = GiaApify(mo, items=[
+        _bl_tt("c1", "111", "khach1", "túi đẹp quá", likes=3),
+        _bl_tt("c2", "111", "hapas.official", "cảm ơn bạn ạ", tra_loi_cho="c1"),
+        _bl_tt("c3", "222", "khach2", "giá bao nhiêu shop"),
+        _bl_tt("c3", "222", "khach2", "giá bao nhiêu shop")], usd=0.01)
+    v = GiaViec({}, [])
+    du_an = dict(DU_AN, bl_bat=True, bl_so_bai=10, bl_moi_bai=20)
+    tk = _lay_bl(v, du_an, 7, 5.0, time.monotonic() + 300)
+    assert kho.hoi == [("hapas", ["youtube", "tiktok", "instagram", "facebook"], 10)]
+    g = ap.gui[0]
+    assert g["actor"] == "clockworks~tiktok-comments-scraper" and g["nen_tang"] == "tiktok"
+    assert g["payload"]["postURLs"] == [b["link"] for b in kho.bai]
+    assert g["payload"]["commentsPerPost"] == 20 and g["limit"] == 40
+    assert g["tran_usd"] == round(max(0.1, T.uoc_binh_luan(2, 20, "tiktok") * 1.5), 2)
+    ma, luot, rows, da_lay = kho.ghi[0]
+    assert ma == "hapas" and luot == 7
+    theo = {r["ma"]: r for r in rows}
+    assert set(theo) == {"c1", "c2", "c3"}                  # khử trùng theo mã bình luận
+    assert theo["c1"]["khoa_bai"] == "tiktok:111" and theo["c3"]["khoa_bai"] == "tiktok:222"
+    assert theo["c1"]["sac_thai"] == "Tích cực" and theo["c1"]["chu_de"] == "Sản phẩm/chất lượng"
+    # trả lời của chính chủ video: giữ, đánh dấu thương hiệu, KHÔNG đưa đi gán nhãn
+    assert theo["c2"]["cua_thuong_hieu"] and theo["c2"]["la_tra_loi"] and theo["c2"]["sac_thai"] is None
+    assert nhan_gia == [["túi đẹp quá", "giá bao nhiêu shop"]]
+    assert theo["c1"]["dang_luc"] == datetime.datetime(2026, 10, 13, 9, 0, tzinfo=_VN)
+    assert da_lay == {"tiktok:111": (2, 30), "tiktok:222": (1, 5)}
+    ph = v.d["nen_tang"]["binh_luan"]["phan"][0]
+    assert ph["run_id"] == "r1" and ph["trang_thai"] == "xong"     # run id vào sổ → chốt chi phí
+    assert tk["lay"] == 3 and tk["nha"] == 1 and tk["usd"] > 0
+    assert "đọc 3 bình luận của 2 bài" in T._cau_bl(tk)[0]
+
+
+def test_binh_luan_facebook_tran_con_duoi_muc_actor_doi_thi_khong_chay(mo, nhan_gia):
+    """Actor bình luận Facebook đòi maxTotalChargeUsd ≥ 0,5: tháng còn ít hơn thì bỏ, nói rõ."""
+    GiaKhoBl(mo, [dict(_bai_bl("9", 40), nen_tang="facebook", khoa="facebook:9",
+                       link="https://www.facebook.com/hapas/posts/9")])
+    ap = GiaApify(mo)
+    v = GiaViec({}, [])
+    tk = _lay_bl(v, dict(DU_AN, bl_so_bai=5, bl_moi_bai=20), 1, 0.3,
+                          time.monotonic() + 300)
+    assert ap.gui == []
+    assert any("bỏ qua" in x and "Facebook" in x for x in tk["ghi_chu"])
+    assert v.d["nen_tang"]["binh_luan"]["phan"][0]["ma"] == "NGAN_SACH"
+
+
+def test_binh_luan_khoi_dong_lai_doc_tiep_run_khong_gui_lai(mo, nhan_gia):
+    kho = GiaKhoBl(mo, [_bai_bl("111", 30)])
+    ap = GiaApify(mo, items=[_bl_tt("c1", "111", "khach1", "đẹp")])
+    v = GiaViec({}, [])
+    ph = T._tao_phan_bl(v, "tiktok", kho.bai, 20)
+    ph.update(trang_thai="dang_chay", run_id="r-cu", tran_usd=0.2)
+    _lay_bl(v, dict(DU_AN, bl_so_bai=10, bl_moi_bai=20), 1, 5.0, time.monotonic() + 300)
+    assert ap.gui == [] and ap.doc_tiep == ["r-cu"]
+    assert kho.hoi == []                       # phần đã lập từ trước: không chọn bài lại
+    assert [r["ma"] for r in kho.ghi[0][2]] == ["c1"]
+
+
+def test_binh_luan_tat_hoac_0_bai_thi_khong_lam_gi(mo):
+    kho = GiaKhoBl(mo, [_bai_bl("1")])
+    for du_an in (dict(DU_AN, bl_bat=False, bl_so_bai=10), dict(DU_AN, bl_bat=True, bl_so_bai=0)):
+        tk = _lay_bl(GiaViec({}, []), du_an, 1, 5.0, time.monotonic() + 300)
+        assert tk["bai"] == 0
+    assert kho.hoi == []
+
+
+def test_gia_binh_luan_khop_dashboard():
+    from dashboard import chi_phi as CP
+    assert CP.BL_GIA == T._BL_GIA and CP.BL_KHOI_DONG == T._BL_KHOI_DONG
+    assert CP.uoc_binh_luan_luot(10, 20) == T.uoc_binh_luan(10, 20)
+
+
+def test_kho_binh_luan_quyen_va_cot():
+    sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
+        encoding="utf-8")
+    assert "GRANT SELECT, INSERT, UPDATE ON bai, chi_so_ngay, luot_quet, binh_luan TO mark;" in sql
+    for c in ("bl_bat", "bl_so_bai", "bl_moi_bai"):
+        assert f"ALTER TABLE du_an ADD COLUMN IF NOT EXISTS {c} " in sql
+    for c in ("bl_lay_luc", "bl_da_lay", "bl_lay_khi_co"):
+        assert f"ALTER TABLE bai ADD COLUMN IF NOT EXISTS {c} " in sql
+    khoi = re.search(r"CREATE TABLE IF NOT EXISTS binh_luan \((.*?)\n\);", sql, re.DOTALL).group(1)
+    cot = set(re.findall(r"^\s{2}([a-z_]+)\s", khoi, re.MULTILINE))
+    assert set(K._COT_BL) | {"du_an", "khoa_bai", "luot_id"} <= cot
+
+
+def test_binh_luan_khong_vuot_ngan_sach_cua_viec(mo, nhan_gia):
+    """Review 15/10: bình luận kẹp theo ngân sách việc đã giữ chỗ (trừ phần đã tiêu)."""
+    GiaKhoBl(mo, [_bai_bl("111", 30), _bai_bl("222", 30)])
+    ap = GiaApify(mo, items=[_bl_tt("c1", "111", "khach1", "đẹp")])
+    v = GiaViec({"tiktok": {"phan": [{"id": "tiktok-5", "trang_thai": "xong", "usd_so": 0.45}]}}, [])
+    v.d["ngan_sach_usd"] = 0.6
+    _lay_bl(v, dict(DU_AN, bl_so_bai=10, bl_moi_bai=100), 1, 5.0, time.monotonic() + 300)
+    assert ap.gui[0]["tran_usd"] == 0.15                # 0,6 − 0,45; ước tính ×1,5 = 0,49
+    v2 = GiaViec({"tiktok": {"phan": [{"id": "t", "trang_thai": "xong", "usd_so": 0.55}]}}, [])
+    v2.d["ngan_sach_usd"] = 0.6
+    ap.gui.clear()
+    tk = _lay_bl(v2, dict(DU_AN, bl_so_bai=10, bl_moi_bai=20), 1, 5.0, time.monotonic() + 300)
+    assert ap.gui == [] and any("bỏ qua" in x for x in tk["ghi_chu"])
+
+
+def test_binh_luan_loi_khong_danh_dau_bai_khong_tra_ve(mo, nhan_gia):
+    kho = GiaKhoBl(mo, [_bai_bl("111", 30), _bai_bl("222", 30)])
+    ap = GiaApify(mo, items=[_bl_tt("c1", "111", "khach1", "đẹp")])
+    ap.run_actor_goc = ap.run_actor
+
+    def qua_gio(*a, **k):
+        items, meta = ap.run_actor_goc(*a, **k)
+        return items, {**meta, "ma": "QUA_GIO"}
+    mo.setattr(A, "_run_actor", qua_gio)
+    _lay_bl(GiaViec({}, []), dict(DU_AN, bl_so_bai=10, bl_moi_bai=20), 1, 5.0, time.monotonic() + 300)
+    assert kho.ghi[0][3] == {"tiktok:111": (1, 30)}       # bài 222 không bị gạch khỏi lượt sau
+
+
+def test_tra_loi_cua_chu_bai_khong_phai_kenh_nha_khong_tinh_la_thuong_hieu(mo, nhan_gia):
+    kho = GiaKhoBl(mo, [_bai_bl("111", 30, tk="kol.a"), dict(_bai_bl("222", 30, tk="shop.x"), nguon_loai="kenh_nha")])
+    GiaApify(mo, items=[_bl_tt("c1", "111", "kol.a", "cảm ơn", tk="kol.a"),
+                        _bl_tt("c2", "222", "shop.x", "cảm ơn", tk="shop.x")])
+    _lay_bl(GiaViec({}, []), dict(DU_AN, bl_so_bai=10, bl_moi_bai=20), 1, 5.0, time.monotonic() + 300)
+    theo = {r["ma"]: r for r in kho.ghi[0][2]}
+    assert not theo["c1"]["cua_thuong_hieu"] and theo["c2"]["cua_thuong_hieu"]
+

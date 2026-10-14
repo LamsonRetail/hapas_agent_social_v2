@@ -118,7 +118,9 @@ def test_doc_bai_gon_va_giu_bai_moi_nhat_khi_cat(gia):
     assert kq["bi_cat"] is True and len(kq["rows"]) == K.BAI_TOI_DA
     sql, ts = gia.gd[0].lenh[0]
     assert "ORDER BY b.dang_luc DESC LIMIT %s" in sql and ts[-1] == K.BAI_TOI_DA + 1
-    assert "left(b.noi_dung, 1000)" in sql and "b.khoa" not in sql and "b.*" not in sql
+    assert "left(b.noi_dung, 1000)" in sql and "b.*" not in sql
+    # Đợt 2b: khoá bài cần cho khung chi tiết (mở bình luận của bài) — chỉ khoá, không cột dài.
+    assert "b.khoa," in sql and "b.bl_da_lay" in sql
 
 
 def test_duyet_de_xuat_them_nguon_qua_de_xuat(gia):

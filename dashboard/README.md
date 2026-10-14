@@ -10,7 +10,8 @@ Dashboard **chỉ gồm**:
 2. **Nguồn** (`/nguon`): thêm/sửa dự án; thêm/sửa/tạm dừng/xoá nguồn theo dõi (dán nguyên link trang cá nhân cũng được), mỗi nguồn kèm ước tính USD/tháng (tính lại ngay khi đổi số bài/chu kỳ); duyệt/từ chối nguồn Mark đề xuất.
 3. **Ngân sách** (`/ngan-sach`) — quản trị chi phí (chủ dự án 15/10/2026). Hai tầng trần: platform đặt trần tháng cấp cửa hàng (KDLA, chưa có — trang hiện "chưa có (chờ KDLA)"; `kho.tran_platform()` trả None tới khi Mark ghi trần đó vào kho), dashboard đặt trần tháng từng dự án (0–100 USD); Mark áp trần THẤP HƠN. Trang hiện: đã tiêu tháng này (giờ VN), **dự báo cả tháng** = đã tiêu + phần còn lại của tháng theo cấu hình nguồn hiện tại (nguồn tạm dừng không tính, YouTube 0), dự báo theo nền tảng, cảnh báo đỏ khi dự báo > trần hiệu lực kèm 3 nguồn tốn nhất và cách giảm (tăng chu kỳ / giảm số bài / tạm dừng); lịch sử lượt quét. Công thức ở `chi_phi.py`, chép từ `theo_doi._uoc_phan` (giá, hệ số 1,3, phí khởi động actor) — bài thử đối chiếu với Mark.
 4. **Người xem** (`/nguoi-xem`, chỉ quản lý): ai được vào, vai trò, nhật ký thay đổi.
-5. **BigQuery** (`/bigquery`): trạng thái đồng bộ kho lên BigQuery; quản lý bấm "Đồng bộ ngay".
+5. **Chi tiết + bình luận** (đợt 2b, 15/10/2026): bấm vào điểm/cột/dòng bất kỳ trên trang Chỉ số mở khung các bài làm nên con số đó (`/api/bai`), mỗi bài mở được bình luận Mark đã cào (`/api/binh-luan`). Khối "Bình luận đã đọc" đếm sắc thái/chủ đề bình luận của khách (bình luận của thương hiệu không tính). Số bài × số bình luận mỗi lượt đặt ở trang Ngân sách.
+6. **BigQuery** (`/bigquery`): trạng thái đồng bộ kho lên BigQuery; quản lý bấm "Đồng bộ ngay".
 
 Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần mỗi lượt hay lịch chạy của Mark — những thứ đó vẫn ở console platform (chủ dự án: "mark vẫn phải theo luật của platform như trước không đổi … dashboard chỉ gồm những chỉ số và quản lý nguồn cũng như ngân sách"). **Lịch quét đặt trên console platform:** tab Lịch chạy, kiểu Giao việc, nội dung `/theodoi <mã dự án>` (xem `deploy/lang-nghe/README.md` mục 5).
 
@@ -66,7 +67,7 @@ sudo sed -i "s/__KHOA_PHIEN_openssl_rand_hex_32__/$(openssl rand -hex 32)/" /opt
 KHOA_BAO=$(openssl rand -hex 32)                                                                  # LANG_NGHE_BAO_KHOA
 sudo sed -i "s/__KHOA_BAO_openssl_rand_hex_32__/$KHOA_BAO/" /opt/lang-nghe/.env
 #    cùng khoá báo đặt vào .env của Mark (LANG_NGHE_BAO_KHOA=…), rồi xoá biến khỏi shell
-sudoedit /opt/mark/.env; unset KHOA_BAO
+sudoedit /opt/mark/app/.env; unset KHOA_BAO
 sudoedit /opt/lang-nghe/.env        # DASH_LARK_APP_ID/SECRET, DASH_LARK_TENANT_KEY
 
 # 4. kiểm peer auth, rồi thêm người quản lý ĐẦU TIÊN
@@ -121,7 +122,7 @@ Endpoint Lark (đối chiếu tài liệu open.larksuite.com ngày 14/10/2026, n
 
 ### Phía Mark
 
-Trong `/opt/mark/.env` (xem `deploy/lang-nghe/README.md` mục 3): `LANG_NGHE_BAO_URL=http://127.0.0.1:8090/noi-bo/co-du-lieu` và `LANG_NGHE_BAO_KHOA=<trùng khoá dashboard>`, rồi `mark restart`. Không đặt cũng được — dashboard tự kiểm 30 giây một lần.
+Trong `/opt/mark/app/.env` (xem `deploy/lang-nghe/README.md` mục 3): `LANG_NGHE_BAO_URL=http://127.0.0.1:8090/noi-bo/co-du-lieu` và `LANG_NGHE_BAO_KHOA=<trùng khoá dashboard>`, rồi `mark restart`. Không đặt cũng được — dashboard tự kiểm 30 giây một lần.
 
 ### BigQuery (tuỳ chọn — để trống `BQ_DATASET` là tắt)
 

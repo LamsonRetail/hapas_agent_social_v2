@@ -67,6 +67,7 @@ KHOANG_TOI_DA_NGAY = 400
 TINH_SONG_SONG = 2          # lượt tính /api/chi-so chạy cùng lúc (MemoryMax 512M)
 NHO_CHI_SO_GIAY = 60.0      # kết quả /api/chi-so giữ lại chừng này giây (khoá có mốc lượt quét)
 NHO_CHI_SO_TOI_DA = 64
+NHO_DONG_TOI_DA = 4         # bộ dòng (bài/bình luận) giữ cho khung chi tiết — mỗi bộ tới 20k dòng
 SUC_KHOE_GIAY = 15.0        # /suc-khoe công khai: không mở kết nối DB mỗi lần gọi
 _CHUA_KIEM = object()
 
@@ -460,6 +461,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     # /api/chi-so: tối đa TINH_SONG_SONG lượt đọc + tính cùng lúc (quá thì 503, không xếp hàng
     # — người xem bấm liên tục khoảng 400 ngày không làm cạn bộ nhớ dịch vụ) + bộ nhớ đệm ngắn.
     app.state.ban = threading.Semaphore(TINH_SONG_SONG)
+    app.state.nho_dong = collections.OrderedDict()
     app.state.nho_chi_so = collections.OrderedDict()
     app.state.nho_suc_khoe = (0.0, False)
     # Hook sau mỗi `cap-nhat`: danh sách hàm (du_an, luot), chạy NỀN sau khi đã đẩy sự kiện
@@ -595,14 +597,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         return _trang(request, "chi_so.html", nguoi, "chi_so", du_an_ds=ds, du_an=du_an,
                       loc=loc, loi_loc=loi, chua_tron=den >= _hom_nay())
 
-    @app.get("/api/chi-so")
-    async def api_chi_so(request: Request):
+    async def _loc_api(request: Request):
+        """Bộ lọc chung của các API số liệu. -> (dự án, từ, đến, nền tảng, loại) hoặc
+        JSONResponse lỗi."""
         await _nguoi(request)
         q = request.query_params
         du_an = await _k(app.state.kho.doc_du_an, q.get("du_an") or "")
         if not du_an:
             return JSONResponse({"loi": "Không có dự án này."}, status_code=404)
-        hom_nay = _hom_nay()
         try:
             tu, den = _doc_khoang(q)
         except NL.LoiNhap as e:
@@ -616,6 +618,111 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         loai = q.get("loai") or None
         if (nen_tang and nen_tang not in NL.NEN_TANG) or (loai and loai not in CS.TEN_LOAI):
             return JSONResponse({"loi": "Bộ lọc không hợp lệ."}, status_code=400)
+        return du_an, tu, den, nen_tang, loai
+
+    def _moc_ngay(tu: datetime.date, den: datetime.date) -> tuple:
+        return (datetime.datetime.combine(tu, datetime.time(0), VN),
+                datetime.datetime.combine(den + datetime.timedelta(days=1), datetime.time(0), VN))
+
+    async def _dong_nho(loai_dong: str, du_an: str, tu, den):
+        """Dòng bài / bình luận của [tu, den] cho khung chi tiết, nhớ `NHO_CHI_SO_GIAY` giây
+        theo mốc lượt quét mới nhất (bấm liên tiếp nhiều cột không đọc lại kho mỗi lần).
+        -> None khi máy chủ đang bận."""
+        moc = await _k(app.state.kho.luot_xong_moi_nhat) or {}
+        khoa = (loai_dong, du_an, tu, den, moc.get("id"), str(moc.get("ket_thuc")))
+        nho = app.state.nho_dong
+        x = nho.get(khoa)
+        if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
+            return x[1]
+        if not app.state.ban.acquire(blocking=False):
+            return None
+        try:
+            bd, kt = _moc_ngay(tu, den)
+            fn = (app.state.kho.bai_trong_khoang if loai_dong == "bai"
+                  else app.state.kho.binh_luan_trong_khoang)
+            rows = (await _k(fn, du_an, bd, kt))["rows"]
+        finally:
+            app.state.ban.release()
+        nho[khoa] = (time.monotonic(), rows)
+        while len(nho) > NHO_DONG_TOI_DA:
+            nho.popitem(last=False)
+        return rows
+
+    def _dk_chi_tiet(q) -> dict:
+        """Điều kiện của khung chi tiết (cột/điểm vừa bấm). Ném NL.LoiNhap khi rác."""
+        dk: dict = {}
+        for k in ("ngay_tu", "ngay_den"):
+            if q.get(k):
+                dk[k] = NL.ngay(q.get(k), _hom_nay())
+        s = q.get("sac_thai") or ""
+        if s:
+            if s not in (*CS.SAC_THAI, CS.CHUA, "kênh nhà"):
+                raise NL.LoiNhap("Sắc thái không hợp lệ.")
+            dk["sac_thai"] = s
+        for k, dai in (("chu_de", 100), ("nguon", 300), ("cum", 100)):
+            v = (q.get(k) or "").strip()
+            if v:
+                if len(v) > dai:
+                    raise NL.LoiNhap("Điều kiện quá dài.")
+                dk[k] = v
+        return dk
+
+    def _ban():
+        return JSONResponse({"loi": "Máy chủ đang bận — thử lại sau ít giây."},
+                            status_code=503, headers={"Retry-After": "5"})
+
+    @app.get("/api/bai")
+    async def api_bai(request: Request):
+        x = await _loc_api(request)
+        if isinstance(x, JSONResponse):
+            return x
+        du_an, tu, den, nen_tang, loai = x
+        q = request.query_params
+        try:
+            dk = _dk_chi_tiet(q)
+        except NL.LoiNhap as e:
+            return JSONResponse({"loi": str(e)}, status_code=400)
+        rows = await _dong_nho("bai", du_an["ma"], tu, den)
+        if rows is None:
+            return _ban()
+        kq = await _k(CS.chi_tiet_bai, rows, tu, den, trang=_so_trang(q.get("trang")),
+                      **{"nen_tang": nen_tang, "loai_nguon": loai, **dk})
+        return JSONResponse(kq)
+
+    @app.get("/api/binh-luan")
+    async def api_binh_luan(request: Request):
+        x = await _loc_api(request)
+        if isinstance(x, JSONResponse):
+            return x
+        du_an, tu, den, nen_tang, loai = x
+        q = request.query_params
+        khoa = (q.get("khoa") or "").strip()
+        if khoa:
+            if len(khoa) > 200:
+                return JSONResponse({"loi": "Khoá bài không hợp lệ."}, status_code=400)
+            ds = await _k(app.state.kho.binh_luan_cua_bai, du_an["ma"], khoa)
+            return JSONResponse({"tong": len(ds), "trang": 1, "so_trang": 1,
+                                 "binh_luan": [CS.the_bl(c) for c in ds]})
+        try:
+            dk = _dk_chi_tiet(q)
+        except NL.LoiNhap as e:
+            return JSONResponse({"loi": str(e)}, status_code=400)
+        if dk.get("sac_thai") == "kênh nhà" or dk.get("nguon") or dk.get("cum"):
+            return JSONResponse({"loi": "Điều kiện không hợp lệ cho bình luận."}, status_code=400)
+        rows = await _dong_nho("bl", du_an["ma"], tu, den)
+        if rows is None:
+            return _ban()
+        kq = await _k(CS.chi_tiet_bl, rows, tu, den, trang=_so_trang(q.get("trang")),
+                      **{"nen_tang": nen_tang, "loai_nguon": loai, **dk})
+        return JSONResponse(kq)
+
+    @app.get("/api/chi-so")
+    async def api_chi_so(request: Request):
+        x = await _loc_api(request)
+        if isinstance(x, JSONResponse):
+            return x
+        du_an, tu, den, nen_tang, loai = x
+        hom_nay = _hom_nay()
         # Bộ nhớ đệm: khoá gồm mốc lượt quét vừa xong — có lượt mới là tính lại ngay, không có
         # thì nhiều người mở cùng bộ lọc trong NHO_CHI_SO_GIAY giây chỉ tốn một lần đọc kho.
         moc = await _k(app.state.kho.luot_xong_moi_nhat) or {}
@@ -640,6 +747,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                 loai_nguon=loai, hom_nay=hom_nay)
                 data["bi_cat"] = bool(kq["bi_cat"])
                 del kq
+                bd, kt = _moc_ngay(tu, den)
+                kb = await _k(app.state.kho.binh_luan_trong_khoang, du_an["ma"], bd, kt)
+                data["binh_luan_da_cao"] = await _k(CS.tong_hop_bl, kb["rows"], tu, den,
+                                                    nen_tang=nen_tang, loai_nguon=loai,
+                                                    hom_nay=hom_nay)
+                data["bl_bi_cat"] = bool(kb["bi_cat"])
+                del kb
             finally:
                 app.state.ban.release()
             nho[khoa] = (time.monotonic(), data)
@@ -816,7 +930,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             nguon = await _k(app.state.kho.cac_nguon, d["ma"])
             db = CP.du_bao(nguon, tieu, tran_du_an, tran_pf, bay_gio)
             tran = db["tran"]
+            bl_uoc = (CP.uoc_binh_luan_luot(int(d.get("bl_so_bai") or 0), int(d.get("bl_moi_bai") or 20))
+                      if d.get("bl_bat", True) else 0.0)
             dong.append({**d, "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
+                         "bl_uoc": bl_uoc,
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
@@ -837,6 +954,23 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         except (NL.LoiNhap, LoiDuLieu) as e:
             return _chuyen(request, ve, "loi", str(e))
         return _chuyen(request, ve, "ok", f"Đã đặt trần tháng {usd_vn(usd)} USD cho dự án {ma}.")
+
+    @app.post("/ngan-sach/{ma}/binh-luan")
+    async def ngan_sach_binh_luan(request: Request, ma: str):
+        nguoi, form = await _sua(request)
+        ve = _url("/ngan-sach", du_an=ma)
+        try:
+            await _du_an_phai_co(ma)
+            bat = form.get("bl_bat") == "1"
+            so_bai = NL.so_nguyen(form.get("bl_so_bai"), "Số bài cào bình luận mỗi lượt", 0, 100)
+            moi_bai = NL.so_nguyen(form.get("bl_moi_bai"), "Số bình luận mỗi bài", 5, 200)
+            await _k(app.state.kho.dat_binh_luan, nguoi["email"], ma, bat, so_bai, moi_bai)
+        except (NL.LoiNhap, LoiDuLieu) as e:
+            return _chuyen(request, ve, "loi", str(e))
+        return _chuyen(request, ve, "ok",
+                       (f"Đã lưu: cào bình luận tối đa {so_bai} bài × {moi_bai} bình luận mỗi "
+                        f"lượt (tối đa ≈ {usd_vn(CP.uoc_binh_luan_luot(so_bai, moi_bai))} USD/lượt)."
+                        if bat else "Đã tắt cào bình luận."))
 
     # ─── người xem ───
     async def _chi_quan_ly(request: Request) -> dict:
