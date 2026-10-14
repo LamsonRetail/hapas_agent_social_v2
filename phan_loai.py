@@ -39,8 +39,27 @@ CHU_DE = {
     "KHAC": "Khác",
 }
 CHUA = "chưa phân loại"
+# Chủ đề của BÀI đăng (social_listen, 13/10/2026) — bộ nhãn RIÊNG, khác `CHU_DE` của bình
+# luận (TAG/ND là chuyện của bình luận). Bám theo các nhóm dashboard Kompa mà team HAPAS
+# đang đọc (Chiến dịch, Giá cả, Chất lượng, Giao hàng, So sánh, Nguồn gốc…) để hai bên so
+# được; tên không bảo đảm trùng từng chữ. AI gán cùng lượt phân xử (apify_tool._NHAC_PHAN_XU).
+CHU_DE_BAI = {
+    "chien_dich": "Chiến dịch & quảng cáo",
+    "gia_ca": "Giá cả & khuyến mãi",
+    "chat_luong": "Chất lượng sản phẩm",
+    "mau_ma": "Hình ảnh & mẫu mã",
+    "trai_nghiem": "Trải nghiệm mua sắm",
+    "dich_vu": "Dịch vụ khách hàng",
+    "giao_hang": "Giao hàng",
+    "so_sanh": "So sánh thương hiệu",
+    "nguon_goc": "Nguồn gốc & chính hãng",
+    "van_hanh": "Cửa hàng & vận hành",
+    "tuyen_dung": "Tuyển dụng",
+    "doanh_nghiep": "Doanh nghiệp & truyền thông",
+    "khac": "Khác",
+}
 
-_LO = 100              # bình luận mỗi lượt gọi model
+_LO = 100             # bình luận mỗi lượt gọi model
 _SONG_SONG = 3         # quota model dùng chung với bot chính — không mở nhiều hơn
 _TOI_DA_CHU = 200      # cắt mỗi bình luận: đủ hiểu ý, không phình prompt
 _TOI_THIEU_GIAY = 12   # ít hơn thế thì không kịp một lượt model, bỏ hẳn cho rõ ràng
@@ -241,11 +260,13 @@ def _mot_lo(texts: list[str]) -> dict[int, tuple[str, str]]:
 
 
 def phan_loai_binh_luan(rows: list[dict], han_giay: float,
-                        trang_thai: dict | None = None) -> list[tuple[str, str]]:
+                        trang_thai: dict | None = None,
+                        song_song: int | None = None) -> list[tuple[str, str]]:
     """→ [(sắc thái, chủ đề)] cùng thứ tự `rows` (mỗi dòng có "text", "likes").
 
     `trang_thai` (nếu truyền) được điền chuyện THỰC SỰ xảy ra: tong, da_phan_loai,
-    theo_luat, theo_ai, lo_loi, lo_het_gio, trang_thai.
+    theo_luat, theo_ai, lo_loi, lo_het_gio, trang_thai. `song_song` (≤ `_SONG_SONG`) hạ
+    số lượt model cùng lúc cho việc nền (tong_hop_lang_nghe, 13/10/2026).
     """
     t0 = time.monotonic()
     n = len(rows)
@@ -261,7 +282,8 @@ def phan_loai_binh_luan(rows: list[dict], han_giay: float,
     elif con:
         cac_lo = [con[i:i + _LO] for i in range(0, len(con), _LO)]
         tok = _DA_BAO.set({})   # báo platform tối đa một lần cho cả lượt gán nhãn
-        ex = ThreadPoolExecutor(max_workers=min(_SONG_SONG, len(cac_lo)))
+        ex = ThreadPoolExecutor(max_workers=min(max(1, min(song_song or _SONG_SONG,
+                                                            _SONG_SONG)), len(cac_lo)))
         futs = {ex.submit(contextvars.copy_context().run, _mot_lo,
                           [rows[i].get("text") or "" for i in lo]): lo
                 for lo in cac_lo}

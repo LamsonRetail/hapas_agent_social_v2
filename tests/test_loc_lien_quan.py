@@ -378,6 +378,9 @@ def test_loc_ai_khong_chay_thi_khong_duoc_bao_da_loc(quet):
     assert kq["loc_bang_ai"] is False and kq["loc_ai_da_xet"] == 0
     assert kq["loc_ai_trang_thai"] == "bỏ qua: tắt (SOCIAL_AI_PHAN_XU=0)"
     chinh = ghi[0][1]
+    assert chinh[0][-1] == A._COT_CHU_DE and all(r[-1] == "chưa phân loại" for r in chinh[1:]), \
+        "AI không chạy -> chủ đề cũng không có nhãn"
+    chinh = [r[:-1] for r in chinh]          # bỏ cột "Chủ đề" để đọc cột cũ như trước
     assert chinh[0][-5:-2] == ["Thị trường", "Nhận định AI", "Sắc thái"]
     assert chinh[0][-1] == A._COT_LOAI_VIDEO
     assert all(r[-4] == "chưa qua AI (lọc theo luật)" for r in chinh[1:])

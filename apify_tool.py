@@ -79,6 +79,7 @@ import lark_client as lark
 import memory_store
 import phan_loai
 import tai_khoan_ai
+import tong_hop_lang_nghe as TH
 import trinh_bay_sheet as T
 from config import config
 
@@ -1623,6 +1624,14 @@ _AI_TOI_THIEU_GIAY = 12  # còn ít hơn thế thì không kịp một lượt m
 # đúng lượt nhiễu nhất. Chỉnh bằng env SOCIAL_AI_CHUA_GIAY.
 _CHUA_GIAY_AI = float(os.environ.get("SOCIAL_AI_CHUA_GIAY", "35"))
 _SAU_AI = 5.0          # giây chừa sau AI cho ghi sheet + cấp quyền, vẫn trong `_TOOL_DEADLINE`
+# Tổng hợp kiểu dashboard (13/10/2026): ghi thêm ~5 tab tốn ~20–25s (đo sống: 11 tab ≈ 55s,
+# 6 tab ≈ 30s) và gán nhãn bình luận YouTube ~20s. Cả hai là PHẦN THÊM: chỉ làm khi còn
+# dư giờ, để lượt xấu nhất không dài hơn trước (trần cứng 180s của run.py cho cả lượt).
+# - gán nhãn bình luận YouTube phải xong trước `han_chot - _SAU_AI - _CHUA_GIAY_TONG_HOP`;
+# - lúc ghi sheet mà đã quá `han_chot - _CHUA_GIAY_TONG_HOP` thì BỎ các tab tổng hợp (câu
+#   `cau_tong_hop` vẫn đủ số) — bước ghi sheet về đúng cỡ trước 13/10.
+_CHUA_GIAY_TONG_HOP = float(os.environ.get("SOCIAL_TONG_HOP_CHUA_GIAY", "25"))
+_GIAY_NHAN_YT_TAI_CHO = 40.0   # trần giây gán nhãn bình luận YouTube ở lượt tại chỗ
 
 
 def _ai_phan_xu_bat() -> bool:
@@ -1766,12 +1775,29 @@ dịch của brand.
             người dùng), không rõ
 Không chắc thì trung_lap.
 
+CHỦ ĐỀ của MỖI bài: ý CHÍNH của bài, chọn MỘT mã.
+  chien_dich   quảng cáo, campaign, TVC, KOL/KOC hợp tác, minigame, sự kiện của brand
+  gia_ca       giá, sale, khuyến mãi, voucher, đắt/rẻ
+  chat_luong   chất lượng, chất liệu, độ bền, lỗi hàng
+  mau_ma       kiểu dáng, màu, thiết kế, khoe/phối đồ, bộ sưu tập mới
+  trai_nghiem  đi mua, mở hộp, dùng thử, cảm nhận khi dùng
+  dich_vu      tư vấn, thái độ nhân viên, đổi trả, bảo hành
+  giao_hang    giao hàng, đóng gói, vận chuyển
+  so_sanh      so sánh / nhắc thương hiệu khác
+  nguon_goc    xuất xứ, chính hãng, hàng giả / hàng nhái
+  van_hanh     cửa hàng, khai trương, website / app, hệ thống bán
+  tuyen_dung   tuyển dụng, việc làm ở brand
+  doanh_nghiep tin doanh nghiệp: lãnh đạo, gọi vốn, doanh thu, chiến lược
+  khac         còn lại
+Không chắc thì khac.
+
 CHỈ trả JSON một dòng, khoá là số i của thẻ, giá trị là
-[quyết định, mã, sắc thái, ghi chú tuỳ chọn], ví dụ
-{{"0":["k","brand","tich_cuc"],"1":["l","trung_ten","trung_lap","ban nhạc metal"],\
-"2":["k","other_market","trung_lap","TH"]}}.
-Phần tử thứ ba BẮT BUỘC: tich_cuc | tieu_cuc | trung_lap. Phần tử thứ tư tuỳ chọn: lý do
-ngắn (≤8 chữ); riêng other_market thì là mã nước 2 chữ.
+[quyết định, mã, sắc thái, chủ đề, ghi chú tuỳ chọn], ví dụ
+{{"0":["k","brand","tich_cuc","mau_ma"],"1":["l","trung_ten","trung_lap","khac",\
+"ban nhạc metal"],"2":["k","other_market","trung_lap","chien_dich","TH"]}}.
+Phần tử thứ ba BẮT BUỘC: tich_cuc | tieu_cuc | trung_lap. Phần tử thứ tư BẮT BUỘC: mã
+chủ đề ở trên. Phần tử thứ năm tuỳ chọn: lý do ngắn (≤8 chữ); riêng other_market thì là
+mã nước 2 chữ.
 Không giải thích.
 
 """
@@ -1801,14 +1827,19 @@ def _ma_sac_thai(x) -> str | None:
     return _SAC_THAI_BAI.get(str(x or "").strip().lower())
 
 
-def _doc_phan_xu(tra_loi: str, n: int) -> dict[int, tuple[bool, str, str, str | None]]:
-    """JSON model trả -> {chỉ số: (giữ, mã, ghi chú, sắc thái)}. Dòng sai/thiếu/mâu thuẫn
-    ("k" với mã loại) thì bỏ — dòng đó tự rơi về luật cũ, không đoán.
+def _ma_chu_de(x) -> str | None:
+    return phan_loai.CHU_DE_BAI.get(str(x or "").strip().lower())
 
-    Sắc thái (02/10/2026, cùng lượt model — không gọi thêm): phần tử SAU mã mà là mã sắc
-    thái thì lấy, phần tử đầu tiên không phải mã sắc thái là ghi chú. Nhận cả dạng cũ
-    `["k","other_market","TH"]` (không có sắc thái -> None = "chưa phân loại"); mã sắc
-    thái lạ cũng None, KHÔNG đoán."""
+
+def _doc_phan_xu(tra_loi: str, n: int) -> dict[int, tuple[bool, str, str, str | None,
+                                                           str | None]]:
+    """JSON model trả -> {chỉ số: (giữ, mã, ghi chú, sắc thái, chủ đề)}. Dòng sai/thiếu/mâu
+    thuẫn ("k" với mã loại) thì bỏ — dòng đó tự rơi về luật cũ, không đoán.
+
+    Sắc thái (02/10/2026) và chủ đề (13/10/2026), cùng lượt model — không gọi thêm: phần tử
+    SAU mã mà là mã sắc thái / mã chủ đề (`phan_loai.CHU_DE_BAI`) thì lấy, phần tử đầu tiên
+    không phải hai loại mã đó là ghi chú. Nhận cả dạng cũ `["k","other_market","TH"]`
+    (thiếu -> None = "chưa phân loại"); mã lạ cũng None, KHÔNG đoán."""
     m = re.search(r"\{.*\}", tra_loi or "", re.S)
     try:
         d = json.loads(m.group(0)) if m else None
@@ -1831,8 +1862,9 @@ def _doc_phan_xu(tra_loi: str, n: int) -> dict[int, tuple[bool, str, str, str | 
             continue
         sau = list(v[2:])
         sac = next((_ma_sac_thai(x) for x in sau if _ma_sac_thai(x)), None)
-        ghi = next((x for x in sau if not _ma_sac_thai(x)), "")
-        ra[i] = (kl == "k", ma, _khong_the(ghi)[:60] if ghi else "", sac)
+        cd = next((_ma_chu_de(x) for x in sau if _ma_chu_de(x)), None)
+        ghi = next((x for x in sau if not _ma_sac_thai(x) and not _ma_chu_de(x)), "")
+        ra[i] = (kl == "k", ma, _khong_the(ghi)[:60] if ghi else "", sac, cd)
     return ra
 
 
@@ -1882,7 +1914,7 @@ def _phan_xu_ai(rows: list, queries: list[str], boi_canh: str, thi_truong_quet: 
     log = log if log is not None else []
     tong = len(rows)
     tt = {"trang_thai": "", "da_xet": 0, "tong": tong, "so_lo": 0, "lo_loi": 0,
-          "lo_het_gio": 0, "_sac_thai": {}}
+          "lo_het_gio": 0, "_sac_thai": {}, "_chu_de": {}}
     ly_do = ("không có bài" if not rows else
              "tắt (SOCIAL_AI_PHAN_XU=0)" if not _ai_phan_xu_bat() else
              "thiếu boi_canh" if not boi_canh else
@@ -1934,6 +1966,8 @@ def _phan_xu_ai(rows: list, queries: list[str], boi_canh: str, thi_truong_quet: 
             ket[lo[j]] = tuple(v[:3])
             if len(v) > 3 and v[3] and v[1] != "khong_ro":
                 tt["_sac_thai"][lo[j]] = v[3]
+            if len(v) > 4 and v[4] and v[1] != "khong_ro":
+                tt["_chu_de"][lo[j]] = v[4]
     da = tt["da_xet"] = len(ket)
     if da and da >= tong:
         tt["trang_thai"] = "đã chạy"
@@ -2995,10 +3029,20 @@ _KIEU_COT_BAI = {"Nền tảng": "chu", "Ngày đăng": "ngay_gio", "Kênh": "ch
                  "Nhận định AI": "chu_dai", "Lý do loại": "chu_dai", "Phân xử": "chu_dai"}
 
 
-def _cot_bai(them: list) -> list:
-    """Cột của bảng bài (`_HEADER` + cột thêm + loại video TikTok) kèm kiểu."""
+def _cot_bai(them: list, cuoi: list = ()) -> list:
+    """Cột của bảng bài (`_HEADER` + cột thêm + loại video TikTok + `cuoi`) kèm kiểu."""
     return [T.Cot(c, _KIEU_COT_BAI.get(c, "chu"))
-            for c in list(_HEADER) + list(them) + [_COT_LOAI_VIDEO]]
+            for c in list(_HEADER) + list(them) + [_COT_LOAI_VIDEO] + list(cuoi)]
+
+
+# Chủ đề bài (13/10/2026) nối SAU CÙNG — sau "Loại video TikTok" — để mọi cột cũ không đổi
+# chỗ (người/công cụ đã quen vị trí cột). Chỉ ở tab bài giữ; tab "Bị loại" không cần.
+_COT_CHU_DE = "Chủ đề"
+# Bộ tab lớn nhất của social_listen: Bài đăng, Thị trường khác, Thống kê, Trích dẫn, 5 tab
+# tổng hợp, Bị loại, Dữ liệu gốc = 11. Trần chung 10 tab đẩy "Dữ liệu gốc" sang một bảng
+# tính THỨ HAI (lượt sống 13/10/2026 hapas/YouTube) — Mark phải gửi hai link. Lark cho
+# ≤300 tab nên nới riêng cho tool này.
+_TRAN_TAB_SOCIAL = 12
 
 
 def _bang_thong_ke_tach(st: dict) -> list:
@@ -3147,6 +3191,17 @@ SCHEMA = {
         "riêng một nền tảng): số và % CHỈ lấy từ `thong_ke` (tổng + `theo_nen_tang`) hoặc "
         "chép `dong_thong_ke`, luôn nói đã phân loại `da_phan_loai`/`tong`, dẫn bài thật từ "
         "`trich_dan`; bảng đếm ở `thong_ke_ghi_o` (tab 'Thống kê'). Không tự đếm tay.\n"
+        "- TỔNG HỢP (kiểu dashboard): tool tự đếm xu hướng theo ngày, nguồn nhiều thảo luận "
+        "nhất từng nền tảng, chủ đề × sắc thái (AI gán chủ đề cùng lượt đọc bài, cột 'Chủ "
+        "đề'), từ khoá nổi bật, và (có YouTube) bình luận YouTube kèm sắc thái — ở "
+        "`tong_hop`, các tab trong `tong_hop_ghi_o`. Hỏi 'ngày nào nhiều nhất', 'ai nói nhiều "
+        "nhất', 'khen chê về chuyện gì', 'từ khoá nổi bật' → CHÉP `cau_tong_hop` hoặc số "
+        "trong `tong_hop`, không tự đếm. 'Thảo luận' = bài + bình luận nền tảng hiển thị "
+        "trên CÁC BÀI ĐÃ QUÉT — nói đúng như vậy, đừng gọi là toàn bộ thảo luận về brand. "
+        "So sánh chỉ là 7 ngày cuối với 7 ngày liền trước TRONG khoảng đã quét — không có "
+        "số kỳ trước khoảng quét thì đừng nói '% so với tháng trước'. `tong_hop.la_mau` có "
+        "nội dung (nguồn chạm trần / một phần) thì đường xu hướng là của MẪU và không có so "
+        "sánh — phải nói ra, đừng kết luận 'ngày đầu ít người nói'.\n"
         "- THỊ TRƯỜNG: BẮT BUỘC nói đã quét thị trường nào và giữ/chuyển bao nhiêu bài thị "
         "trường khác — chép `cau_thi_truong`. Mặc định bài của brand ở nước khác (vd HAPAS "
         "THAILAND) được GIỮ nhưng ở TAB RIÊNG 'Thị trường khác' (`thi_truong_khac_ghi_o`), "
@@ -3247,6 +3302,10 @@ SCHEMA = {
                     "người dùng kêu nhiễu, HÃY GỢI Ý họ dùng tham số này."),
             },
             "title": {"type": "string", "description": "Tên file sheet. Bỏ trống sẽ tự đặt."},
+            "binh_luan_youtube": {"type": "boolean", "description": (
+                "Mặc định true: có YouTube thì tự kéo bình luận các video nhiều bình luận "
+                "nhất (YouTube Data API, miễn phí) và gán sắc thái — tab 'Bình luận "
+                "YouTube'. Đặt false khi người dùng không cần.")},
             "che_do": {
                 "type": "string", "enum": ["trend"],
                 "description": ("'trend' = trend TikTok đang nổi theo vùng (bảng chính thức "
@@ -3288,6 +3347,16 @@ def _co(v) -> bool:
     """Cờ boolean từ model: chấp nhận true/"true"/"có"/1; mặc định False."""
     if isinstance(v, str):
         return v.strip().lower() in ("true", "1", "yes", "co", "có")
+    return bool(v)
+
+
+def _bat_mac_dinh(v) -> bool:
+    """Cờ MẶC ĐỊNH BẬT: chỉ tắt khi model nói rõ false/"false"/0/"không". Thiếu, null hay
+    chuỗi rỗng = bật (model hay gửi `null` cho trường không cần — `_co(None)` thì thành tắt)."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return True
+    if isinstance(v, str):
+        return v.strip().lower() not in ("false", "0", "no", "khong", "không", "tat", "tắt")
     return bool(v)
 
 
@@ -3373,6 +3442,24 @@ def _tong_hop_nguon(got, so: list) -> dict:
     if ghi_chu:
         out["ghi_chu_quet"] = " ".join(ghi_chu)
     return out
+
+
+def _cau_mau(per_platform: dict, plats: list[str]) -> list[str]:
+    """Nguồn mà kết quả chỉ là MẪU: cào chạm `limit` (nguồn trả theo "liên quan"/mới nhất,
+    còn bài chưa lấy) hoặc chỉ lấy được một phần. Nguồn hỏng hẳn (không có `scraped`) không
+    tính — nó không có bài nào để làm lệch đường xu hướng. Dùng cho `tong_hop_lang_nghe`:
+    có mẫu thì không so 7 ngày với 7 ngày và câu tổng hợp nói rõ (rà 13/10/2026)."""
+    ra = []
+    for p in plats:
+        v = per_platform.get(p) or {}
+        if "scraped" not in v:
+            continue
+        ten = _TEN_NGUON.get(p, p)
+        if v.get("status") == "OK_MOT_PHAN":
+            ra.append(f"{ten} chỉ lấy được một phần")
+        elif v.get("limit") and v["scraped"] >= v["limit"]:
+            ra.append(f"{ten} chạm trần {v['limit']} bài")
+    return ra
 
 
 def _cau_nguon_hong(per_platform: dict, plats: list[str]) -> str:
@@ -3629,6 +3716,38 @@ def _handle(args: dict, **kwargs) -> str:
     ex_cp = ThreadPoolExecutor(max_workers=1)
     f_cp = (ex_cp.submit(_chi_phi_thuc, actors, _bat_dau, est, han_chot - 1.0)
             if actors else None)
+    # Bình luận YouTube (13/10/2026, API miễn phí) kéo SONG SONG với bước AI. Ứng viên:
+    # video trong khoảng có nhắc từ khoá, nhiều bình luận trước; video bị AI loại thì bỏ
+    # bình luận của nó lúc đếm. Gán nhãn (≤100 bình luận = một lượt model) cũng chạy song
+    # song NẾU bước AI dùng ≤ `_AI_SONG_SONG`-1 lô — tổng lượt model cùng lúc vẫn ≤3 (quota
+    # dùng chung với bot chính); không thì gán nhãn sau AI. Đo sống: nối tiếp thì lượt dài
+    # thêm ~25s. Hạn gán nhãn sớm hơn hạn AI `_CHUA_GIAY_TONG_HOP` (phần thêm, xem đó).
+    f_yt, ex_yt, video_yt = None, None, []
+    han_nhan_yt = han_chot - _SAU_AI - _CHUA_GIAY_TONG_HOP
+
+    def _giay_nhan_yt() -> float:
+        # Trần riêng cho lượt gán nhãn: đo sống 13/10/2026 một lô 53 bình luận lúc 15s lúc
+        # 58s — chậm thì bình luận về "chưa phân loại" chứ không kéo cả lượt chờ theo.
+        return min(han_nhan_yt - time.monotonic(), _GIAY_NHAN_YT_TAI_CHO)
+    if "youtube" in plats and _bat_mac_dinh(args.get("binh_luan_youtube")):
+        video_yt = TH.chon_video_youtube(cho_xet, TH.YT_VIDEO_TAI_CHO, country)
+        # Đánh dấu bài của chính brand TRƯỚC khi luồng phụ đọc `_cua_thuong_hieu` (luồng
+        # chính đánh dấu lại sau phân xử — cùng kết quả, không đua).
+        danh_dau_bai_nha(video_yt, queries)
+        lo_ai = (math.ceil(min(len(cho_xet), _AI_TOI_DA) / _AI_LO)
+                 if co_ai and _ai_phan_xu_bat() else 0)
+        lo_nhan = math.ceil(TH.YT_VIDEO_TAI_CHO * TH.YT_MOI_VIDEO_TAI_CHO / phan_loai._LO)
+        nhan_song_song = lo_ai + lo_nhan <= _AI_SONG_SONG
+
+        def _viec_yt():
+            kq = TH.keo_binh_luan_youtube(video_yt, TH.YT_MOI_VIDEO_TAI_CHO, han_nhan_yt + 3)
+            rows = (TH.gan_nhan_binh_luan_youtube(kq, video_yt, queries,
+                                                   _giay_nhan_yt())[0]
+                    if nhan_song_song else None)
+            return kq, rows
+        if video_yt:
+            ex_yt = ThreadPoolExecutor(max_workers=1)
+            f_yt = ex_yt.submit(contextvars.copy_context().run, _viec_yt)
 
     # Bước 2 — MỘT bước AI phân xử cho cả lượt quét (thay bộ lọc AI + AI cứu cũ).
     ai_log: list[str] = []
@@ -3638,6 +3757,7 @@ def _handle(args: dict, **kwargs) -> str:
     giay_ai = round(time.monotonic() - t_ai, 1)
     loc_bang_ai = ai_tt["da_xet"] > 0
     sac_thai_ai = ai_tt.pop("_sac_thai", None) or {}
+    chu_de_ai = ai_tt.pop("_chu_de", None) or {}
 
     # Bước 3 — quyết từng bài: có phán xử AI thì theo AI, không thì luật cũ; rồi xử lý
     # thị trường khác (giữ + gắn nhãn, hoặc chuyển "Bị loại" khi `chi_thi_truong_nay`).
@@ -3646,8 +3766,9 @@ def _handle(args: dict, **kwargs) -> str:
     for i, (d, dt) in enumerate(cho_xet):
         p = d["platform"]
         v = phan_xu.get(i)
-        # Sắc thái chỉ từ lượt AI vừa đọc bài này; không có thì "chưa phân loại".
+        # Sắc thái / chủ đề chỉ từ lượt AI vừa đọc bài này; không có thì "chưa phân loại".
         d["_sac_thai"] = sac_thai_ai.get(i) or phan_loai.CHUA
+        d["_chu_de"] = chu_de_ai.get(i) or phan_loai.CHUA
         if v and v[1] == "khong_ro":
             # AI không chắc -> luật dự phòng đầy đủ (từ khoá + hệ chữ + thị trường). Review
             # 02/10/2026: "giữ nếu khớp chữ" cho lọt tin tiếng Hindi về địa danh Hapas.
@@ -3923,6 +4044,8 @@ def _handle(args: dict, **kwargs) -> str:
                       + (f"Trần riêng: {base['tran_rieng_rang_buoc']} " if cau_usd_rieng
                          else ""))
     if not hits and not bi_loai:
+        if ex_yt is not None:
+            ex_yt.shutdown(wait=False, cancel_futures=True)
         return tool_result(
             success=not failed, sheet_url=None, **base,
             tom_tat_loai=_tom_tat(""),
@@ -3951,31 +4074,88 @@ def _handle(args: dict, **kwargs) -> str:
     danh_dau_bai_nha([d for d, _ in hits], queries)
     # Cột mới nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen; cột loại
     # video TikTok sau cùng để các cột "Nhận định AI"/"Sắc thái"/nguồn không đổi chỗ.
-    rows = [list(_HEADER) + _COT_THEM_BAI + [_COT_LOAI_VIDEO]] + [
+    rows = [list(_HEADER) + _COT_THEM_BAI + [_COT_LOAI_VIDEO, _COT_CHU_DE]] + [
         _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d), _nguon_bai(d),
-                        _loai_video_tiktok(d)]
+                        _loai_video_tiktok(d), d.get("_chu_de") or phan_loai.CHUA]
         for d, dt in hits_chinh]
-    rows_khac = [list(_HEADER) + _COT_THEM_BAI + [_COT_LOAI_VIDEO]] + [
+    rows_khac = [list(_HEADER) + _COT_THEM_BAI + [_COT_LOAI_VIDEO, _COT_CHU_DE]] + [
         _dong(d, dt) + [d.get("_nhan_dinh") or "", _sac(d), _nguon_bai(d),
-                        _loai_video_tiktok(d)]
+                        _loai_video_tiktok(d), d.get("_chu_de") or phan_loai.CHUA]
         for d, dt in hits_khac]
     # Sắc thái đếm trên bài của sheet chính (thị trường đang quét) — đúng bảng người dùng
     # mở ra; bài brand ở nước khác không trộn vào tỉ lệ của thị trường này.
     st = thong_ke_sac_thai([d for d, _ in hits_chinh])  # thong_ke, dong_thong_ke, trich_dan
+    # Bình luận YouTube: lấy kết quả chạy song song (chờ tối đa tới hạn gán nhãn + vài giây
+    # cho lô model đang dở), gán nhãn nốt nếu chưa gán (không kịp thì "chưa phân loại",
+    # không đoán), rồi CHỈ đếm bình luận của video còn ở sheet chính.
+    bl_yt, th_loi = None, []
+    if f_yt is not None:
+        giu = {str(d.get("link")) for d, _ in hits_chinh if d.get("platform") == "youtube"}
+        video_giu = [d for d in video_yt if str(d.get("link")) in giu]
+        rows_yt = None
+        if not video_giu:
+            # Video có bình luận đều bị bộ lọc loại: khỏi chờ luồng phụ (bình luận đằng nào
+            # cũng bỏ) — rà 13/10/2026.
+            ex_yt.shutdown(wait=False, cancel_futures=True)
+            kq_yt, rows_yt = {"trang_thai": "bỏ qua: các video có bình luận đều bị bộ lọc "
+                                            "liên quan loại", "binh_luan": []}, []
+        else:
+            try:
+                kq_yt, rows_yt = f_yt.result(
+                    timeout=max(0.05, han_nhan_yt + 3 - time.monotonic()))
+            except Exception as e:  # noqa: BLE001 — hết giờ / lỗi: báo, không làm hỏng lượt
+                kq_yt = {"trang_thai": "không lấy được: " + (
+                    "hết thời gian" if isinstance(e, _FutTimeout) else _che_token(
+                        f"{type(e).__name__}: {e}")[:150]), "binh_luan": []}
+            finally:
+                ex_yt.shutdown(wait=False, cancel_futures=True)
+        try:
+            if rows_yt is None:
+                rows_yt = TH.gan_nhan_binh_luan_youtube(kq_yt, video_yt, queries,
+                                                        _giay_nhan_yt())[0]
+            bl_yt = {**TH.thong_ke_binh_luan_youtube(rows_yt, giu),
+                     "trang_thai": kq_yt.get("trang_thai"), "video": len(video_giu)}
+        except Exception as e:  # noqa: BLE001 — phần thêm: hỏng thì bỏ, không hỏng lượt quét
+            th_loi.append(f"binh_luan_youtube: {type(e).__name__}: {_che_token(e)[:120]}")
+            bl_yt = None
+    # Tổng hợp kiểu dashboard (13/10/2026): code đếm trên ĐÚNG bài của sheet chính. Nguồn
+    # chạm trần / một phần -> MẪU (không so 7 ngày với 7 ngày). Phần THÊM: lỗi thì bỏ, không
+    # làm hỏng lượt quét đã trả tiền.
+    try:
+        th = TH.tong_hop(hits_chinh, d_from, d_to, queries,
+                         mau=_cau_mau(per_platform, plats)) if hits_chinh else None
+        cau_th = TH.cau_tong_hop(th, bl_yt) if th else None
+        tom_th = TH.tom_tat(th, bl_yt) if th else None
+    except Exception as e:  # noqa: BLE001
+        th_loi.append(f"tong_hop: {type(e).__name__}: {_che_token(e)[:120]}")
+        th, cau_th, tom_th = None, None, None
     # Bài bị loại vẫn có sheet để kiểm (kể cả khi KHÔNG bài nào được giữ): bộ lọc
     # loại nhầm mà không ai thấy được thì không bao giờ sửa được.
     rows_loai = [list(_HEADER) + ["Thị trường", "Lý do loại", _COT_LOAI_VIDEO]] + [
         _dong(d, dt) + [ly_do, _loai_video_tiktok(d)] for d, dt, ly_do in bi_loai]
 
     nen = ", ".join(_TEN_NGUON.get(p, p) for p in plats)
-    bang_chinh = T.Bang(TAB_BAI_DANG, _cot_bai(_COT_THEM_BAI), rows[1:],
+    bang_chinh = T.Bang(TAB_BAI_DANG, _cot_bai(_COT_THEM_BAI, [_COT_CHU_DE]), rows[1:],
                         mo_ta=f"Bài trong {rng} đã qua bộ lọc liên quan — thị trường {country}")
     ds_bang = [bang_chinh]
     if hits_khac:
-        ds_bang.append(T.Bang(_TAB_THI_TRUONG_KHAC, _cot_bai(_COT_THEM_BAI), rows_khac[1:],
+        ds_bang.append(T.Bang(_TAB_THI_TRUONG_KHAC, _cot_bai(_COT_THEM_BAI, [_COT_CHU_DE]),
+                              rows_khac[1:],
                               mo_ta=f"Bài của brand ở nước khác, không phải {country}"))
     if st["thong_ke"]["da_phan_loai"]:
         ds_bang += _bang_thong_ke_tach(st)
+    # Sát hạn thì bỏ tab tổng hợp (xem `_CHUA_GIAY_TONG_HOP`): câu tổng hợp vẫn đủ số.
+    try:
+        bang_th = TH.cac_bang(th, bl_yt) if th else []
+    except Exception as e:  # noqa: BLE001
+        th_loi.append(f"tong_hop bảng: {type(e).__name__}: {_che_token(e)[:120]}")
+        bang_th = []
+    bo_tab_th = bool(bang_th) and time.monotonic() > han_chot - _CHUA_GIAY_TONG_HOP
+    if bo_tab_th:
+        bang_th = []
+        cau_th += (" Lượt quét đã gần hết giờ nên sheet không có các tab tổng hợp; số ở câu "
+                   "này vẫn đủ.")
+    ds_bang += bang_th
     if bi_loai:
         ds_bang.append(T.Bang(_TAB_BI_LOAI, _cot_bai(["Thị trường", "Lý do loại"]),
                               rows_loai[1:], mo_ta="Bài trong khoảng bị bộ lọc liên quan "
@@ -3993,7 +4173,8 @@ def _handle(args: dict, **kwargs) -> str:
                           "so_nguyen"),
                  T.SoLieu(f"— ở tab bài {country}", len(hits_chinh), "so_nguyen"),
                  T.SoLieu("— bài của brand ở thị trường khác", len(hits_khac), "so_nguyen"),
-                 T.SoLieu("Post bị bộ lọc liên quan loại", len(bi_loai), "so_nguyen")],
+                 T.SoLieu("Post bị bộ lọc liên quan loại", len(bi_loai), "so_nguyen")]
+        + (TH.so_lieu(th) if th else []),
         nhom=[T.dem_theo(bang_chinh, "Nền tảng", "Số bài theo nền tảng (tab bài chính)")]
         + ([T.dem_theo(bang_chinh, "Sắc thái", "Sắc thái bài (tab bài chính)")]
            if st["thong_ke"]["da_phan_loai"] else []),
@@ -4005,6 +4186,7 @@ def _handle(args: dict, **kwargs) -> str:
             "bị lọc bỏ (đúng hành vi bộ lọc ngày, không phải ghi thiếu).",
             cau_thi_truong.strip(), (base.get("cau_loai_video_tiktok") or "").strip(),
             "Sắc thái bài: " + st["dong_thong_ke"],
+            ("Tổng hợp: " + cau_th) if cau_th else "",
             "Followers/Shares = 0 ở Instagram/Facebook/YouTube là do nguồn không trả số đó, "
             "không phải 0 thật.",
             "Cột Nội dung cắt ở 1.000 ký tự; nội dung đầy đủ và mọi trường khác của nguồn ở "
@@ -4019,7 +4201,7 @@ def _handle(args: dict, **kwargs) -> str:
 
     try:
         kq = T.xuat(title, ds_bang, tq, goc=T.bang_goc(goc) if any(len(g) > 1 for g in goc)
-                    else None, cap_quyen=_cap)
+                    else None, cap_quyen=_cap, tran_tab=_TRAN_TAB_SOCIAL)
     except Exception as e:  # noqa: BLE001
         url_do = getattr(e, "trinh_bay_url", None)
         return tool_result(
@@ -4034,16 +4216,24 @@ def _handle(args: dict, **kwargs) -> str:
             # ở Thái) không được nêu như bài nổi bật của thị trường này.
             top=[{"nen_tang": d["platform"], "kenh": d["kenh"], "views": d["views"],
                   "link": d["link"]} for d, _ in hits_chinh[:5]],
+            tong_hop=tom_th,
+            cau_tong_hop=cau_th,
         )
     url, granted = kq.url, quyen["granted"]
     thi_truong_khac_ghi_o = _noi_ghi(kq, _TAB_THI_TRUONG_KHAC) if hits_khac else None
     thong_ke_ghi_o = _noi_ghi(kq, _TAB_THONG_KE) if st["thong_ke"]["da_phan_loai"] else None
     bi_loai_ghi_o = _noi_ghi(kq, _TAB_BI_LOAI) if bi_loai else None
     tab_bai = _noi_ghi(kq, TAB_BAI_DANG)
+    tong_hop_ghi_o = {b.ten: _noi_ghi(kq, b.ten) for b in bang_th} or None
 
     return tool_result(
         success=True, title=title, sheet_url=url, granted=granted, **base,
         **st, thong_ke_ghi_o=thong_ke_ghi_o, **kq.cho_tool(),
+        tong_hop=tom_th,
+        cau_tong_hop=cau_th,
+        tong_hop_ghi_o=tong_hop_ghi_o,
+        tong_hop_bo_tab_vi_gio=bo_tab_th or None,
+        tong_hop_loi=th_loi or None,
         top=_top_per_platform(hits_chinh, 3),
         tom_tat_loai=_tom_tat(bi_loai_ghi_o or ""),
         bi_loai_ghi_o=bi_loai_ghi_o,
@@ -4076,6 +4266,13 @@ def _handle(args: dict, **kwargs) -> str:
               + st["dong_thong_ke"] + " Hỏi tích cực/tiêu cực thì số và % CHỈ lấy từ "
               "`thong_ke`/`dong_thong_ke`, luôn nói đã phân loại bao nhiêu/tổng, dẫn bài "
               "thật từ `trich_dan` — không tự đếm, không ước lượng."
+              + (" TỔNG HỢP (xu hướng, nguồn nổi bật, chủ đề, từ khoá; số do code đếm — chép "
+                 "`cau_tong_hop`, chi tiết ở `tong_hop`"
+                 + (" và các tab " + ", ".join(f"'{b.ten}'" for b in bang_th) if bang_th
+                    else "") + "): " + cau_th
+                 + (" Sheet không có tab tổng hợp vì lượt đã gần hết giờ — nếu người dùng "
+                    "cần các tab, đề xuất quét lại với `chay_nen`=true." if bo_tab_th else "")
+                 if cau_th else "")
               + f" Sheet: tab 'Tổng quan' rồi bài chính ở {tab_bai}. {kq.cau_kiem}"
               + ("" if granted else " CẢNH BÁO: chưa cấp được quyền tự động.")),
     )

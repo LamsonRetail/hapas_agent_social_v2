@@ -119,8 +119,16 @@ def quet(monkeypatch):
     return chay, ghi
 
 
+def _bo_chu_de(rows: list) -> list:
+    """Tab bài giữ có thêm cột cuối "Chủ đề" (13/10/2026, canh ở test_tong_hop_lang_nghe.py)
+    SAU cột loại video — bỏ đi để các bài ở đây vẫn đọc `[-1]` là loại video."""
+    if rows and rows[0] and rows[0][-1] == A._COT_CHU_DE:
+        return [r[:-1] for r in rows]
+    return rows
+
+
 def _bang(ghi, sid):
-    return next(rows for s, rows in ghi if s == sid)
+    return _bo_chu_de(next(rows for s, rows in ghi if s == sid))
 
 
 def test_cot_cuoi_va_dem_theo_gio_hang(quet):
@@ -220,6 +228,8 @@ def test_quet_nen_cung_cot_va_cau(monkeypatch):
                               "loai": 1}},
            "phan_xu": {}}
     quet_lon._ghi_cuoi(V(), ts, ket, {"usd": 0.1, "so_run": 1}, "xong")
+    assert tabs["TikTok"][0][-2:] == [A._COT_LOAI_VIDEO, A._COT_CHU_DE]
+    tabs["TikTok"] = _bo_chu_de(tabs["TikTok"])
     for ten in ("TikTok", quet_lon._TAB_LOAI):
         bang = tabs[ten]
         assert bang[0][-1] == A._COT_LOAI_VIDEO and {len(r) for r in bang} == {len(bang[0])}

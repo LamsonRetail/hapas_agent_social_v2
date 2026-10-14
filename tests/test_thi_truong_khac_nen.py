@@ -133,7 +133,7 @@ def test_viec_tiep_tuc_khong_con_bai_nuoc_khac_thi_xoa_tab_cu(chay):
     hd_khac, hd_loai = tabs[A._TAB_THI_TRUONG_KHAC][0], tabs[quet_lon._TAB_LOAI][0]
     tabs, tin = chay(hits=[vn])
     assert tabs[A._TAB_THI_TRUONG_KHAC] == [hd_khac] == [
-        list(A._HEADER) + quet_lon._COT_THEM + quet_lon._COT_CUOI]
+        list(A._HEADER) + quet_lon._COT_THEM + quet_lon._COT_CUOI + [A._COT_CHU_DE]]
     assert tabs[quet_lon._TAB_LOAI] == [hd_loai] == [
         list(A._HEADER) + ["Thị trường", "Lý do loại", "Phân xử"] + quet_lon._COT_CUOI]
     assert "Thị trường khác:" not in tin

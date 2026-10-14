@@ -103,7 +103,7 @@ def test_social_listen_tab_chinh_ten_bai_dang_vua_tieu_de(quet, monkeypatch):  #
     chay, ghi, _, _ = quet
     chay()
     gia = chay.gia
-    so_cot = len(A._HEADER) + len(A._COT_THEM_BAI) + 1  # + Loại video TikTok
+    so_cot = len(A._HEADER) + len(A._COT_THEM_BAI) + 2  # + Loại video TikTok + Chủ đề
     assert len(ghi[0][1][0]) == so_cot
     # Tab bài chính đặt tên (không còn "Sheet1") và bỏ cột lưới trống bên phải.
     assert gia.tab_ten()[1] == "1. Bài đăng" and "Sheet1" not in gia.tab_ten()

@@ -98,12 +98,21 @@ _SID_TAB = {A.TAB_BAI_DANG: "s1", "Dữ liệu": "s1", A._TAB_BI_LOAI: "s2",
             A._TAB_THI_TRUONG_KHAC: "s3", A._TAB_THONG_KE: "s4", "Trích dẫn": "s5"}
 
 
+def bo_chu_de(rows: list) -> list:
+    """Tab bài giữ có cột cuối "Chủ đề" (13/10/2026, canh ở test_tong_hop_lang_nghe.py) —
+    bỏ đi để các bài cũ đọc cột như trước; tab Bị loại không có cột đó."""
+    if rows and rows[0] and rows[0][-1] == A._COT_CHU_DE:
+        return [r[:-1] for r in rows]
+    return rows
+
+
 def _tab(ghi, sid: str) -> dict:
     """Dòng theo tên kênh, BỎ cột cuối "Loại video TikTok" (canh ở test_loai_video_tiktok.py)
     để `[-1]` vẫn là "Nhận định AI"/"Lý do loại" như trước khi có cột đó."""
     ra = {}
     for s, rows in ghi:
         if s == sid:
+            rows = bo_chu_de(rows)
             assert rows[0][-1] == A._COT_LOAI_VIDEO and {len(r) for r in rows} == {len(rows[0])}
             ra.update({r[2]: r[:-1] for r in rows[1:]})
     return ra
@@ -111,7 +120,7 @@ def _tab(ghi, sid: str) -> dict:
 
 def _bang(ghi):
     """(tiêu đề sheet chính, sheet chính, tab Bị loại) theo tên kênh."""
-    return ghi[0][1][0], _tab(ghi, "s1"), _tab(ghi, "s2")
+    return bo_chu_de(ghi[0][1])[0], _tab(ghi, "s1"), _tab(ghi, "s2")
 
 
 def _khac(ghi) -> dict:
@@ -477,7 +486,12 @@ def test_khong_tab_phu_thi_khong_doi_thu_tu_tab(quet):
     kq = chay(giu_nuoc_ngoai=True, platforms=["threads"])
     assert kq["success"] is True and not kq.get("bi_loai_ghi_o")
     assert {s for s, _ in ghi} == {"s1"}
-    assert chay.gia.tab_ten()[:2] == ["Tổng quan", "Dữ liệu"]
+    # Từ 13/10/2026 lượt ≥5 bài có thêm các tab tổng hợp (Xu hướng…) — bài chính vẫn là tab
+    # đầu sau Tổng quan, không có tab Bị loại / Thị trường khác.
+    ten = chay.gia.tab_ten()
+    assert ten[:2] == ["Tổng quan", "1. Bài đăng"]
+    assert not any("Bị loại" in t or "Thị trường khác" in t for t in ten)
+    assert any(t.endswith("Xu hướng") for t in ten)
 
 
 def test_trang_tri_hong_khong_lam_hong_ket_qua(quet):

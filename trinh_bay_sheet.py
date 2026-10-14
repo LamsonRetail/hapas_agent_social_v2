@@ -418,7 +418,8 @@ class KeHoach:
     lon: bool
 
 
-def ke_hoach(bang: list, tong_quan: TongQuan | None = None, goc: Bang | None = None) -> KeHoach:
+def ke_hoach(bang: list, tong_quan: TongQuan | None = None, goc: Bang | None = None,
+             tran_tab: int = TRAN_TAB_DU_LIEU) -> KeHoach:
     """Bố cục theo HÌNH DẠNG dữ liệu, không phụ thuộc thời gian/mạng (cùng vào → cùng ra).
 
     - LON: bảng nào > NGUONG_LON_DONG dòng hoặc > NGUONG_LON_O ô → chỉ trang trí theo cột.
@@ -429,7 +430,9 @@ def ke_hoach(bang: list, tong_quan: TongQuan | None = None, goc: Bang | None = N
     Một bảng → tab "Dữ liệu"; nhiều bảng → "1. Tên", "2. Tên"… (`Bang.ten_tab` thì dùng đúng
     tên đó). "Dữ liệu gốc" luôn cuối.
     Bảng vượt TRAN_O_MOI_TAB tách thành "(phần k của n)" ("/" không hợp lệ trong tên tab). Quá TRAN_TAB_DU_LIEU tab dữ liệu thì
-    các tab sau sang bảng tính tiếp theo."""
+    các tab sau sang bảng tính tiếp theo. `tran_tab` thay trần đó cho tool có bộ tab cố định
+    lớn hơn (social_listen tới 11 tab, 13/10/2026) — Lark cho ≤300 tab, trần 10 là lựa chọn
+    bố cục, không phải giới hạn của Lark."""
     bang = [b for b in bang if b is not None]
     lon = any(len(b.dong) > NGUONG_LON_DONG or len(b.dong) * max(1, len(b.cot)) > NGUONG_LON_O
               for b in bang + ([goc] if goc else []))
@@ -449,8 +452,8 @@ def ke_hoach(bang: list, tong_quan: TongQuan | None = None, goc: Bang | None = N
         tabs += _tach(b, goc_ten, da)
     if goc is not None:
         tabs += _tach(goc, TAB_GOC, da)
-    bang_tinh = [tabs[i:i + TRAN_TAB_DU_LIEU] for i in range(0, len(tabs), TRAN_TAB_DU_LIEU)] \
-        or [[]]
+    tran_tab = max(1, int(tran_tab))
+    bang_tinh = [tabs[i:i + tran_tab] for i in range(0, len(tabs), tran_tab)] or [[]]
     if lon:
         loai = LON
     elif nhieu:
@@ -1508,20 +1511,21 @@ class KetQua:
 def xuat(tieu_de: str, bang: list, tong_quan: TongQuan | None = None, goc: Bang | None = None,
          sau_khi_tao: Callable[[str], Any] | None = None,
          cap_quyen: Callable[[str], Any] | None = None,
-         luc: datetime.datetime | None = None) -> KetQua:
+         luc: datetime.datetime | None = None, tran_tab: int = TRAN_TAB_DU_LIEU) -> KetQua:
     """MỘT lời gọi dựng cả bảng tính (xem docstring module cho thứ tự). Lỗi tạo / ghi dữ liệu
     của bảng tính ĐẦU hoặc lỗi callback thì NÉM (như code cũ); bảng tính tiếp theo hỏng thì
     các phần đã ghi vẫn có Tổng quan + quyền, phần hỏng báo rõ (`phan_hong`, `day_du`=False).
-    Lỗi trang trí chỉ cảnh báo."""
+    Lỗi trang trí chỉ cảnh báo. `tran_tab`: xem `ke_hoach`."""
     with ngan_sach_cho():
-        return _xuat(tieu_de, bang, tong_quan, goc, sau_khi_tao, cap_quyen, luc)
+        return _xuat(tieu_de, bang, tong_quan, goc, sau_khi_tao, cap_quyen, luc, tran_tab)
 
 
-def _xuat(tieu_de, bang, tong_quan, goc, sau_khi_tao, cap_quyen, luc) -> KetQua:
+def _xuat(tieu_de, bang, tong_quan, goc, sau_khi_tao, cap_quyen, luc,
+          tran_tab: int = TRAN_TAB_DU_LIEU) -> KetQua:
     tq = tong_quan or TongQuan(tieu_de)
     if not tq.nguoi_yeu_cau:
         tq = dataclasses.replace(tq, nguoi_yeu_cau=_ten_nguoi_yeu_cau())
-    kh = ke_hoach(bang, tq, goc)
+    kh = ke_hoach(bang, tq, goc, tran_tab)
     cb: list = []
     so_bt = len(kh.bang_tinh)
     phan: list = []
