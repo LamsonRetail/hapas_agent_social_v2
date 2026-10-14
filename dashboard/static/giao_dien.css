@@ -70,6 +70,7 @@ small, .mo { color: var(--chu-mo); }
 .so { font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
 .cach-duoi { margin-bottom: 12px; }
+.chu-loi { color: var(--loi); }
 .cach-doc { margin: 12px 0; }
 .sat-tren { margin-top: 0; }
 

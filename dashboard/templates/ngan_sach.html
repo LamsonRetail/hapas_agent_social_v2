@@ -3,40 +3,70 @@
 {% block noi_dung %}
 {% set ql = nguoi.vai_tro == 'quan_ly' %}
 <h1>Ngân sách theo dõi — tháng {{ thang }}</h1>
-<p class="ghi-chu sat-tren cach-duoi">Đã tiêu = tiền Apify thật của các lượt <b>/theodoi</b> trong tháng (giờ VN). Trần tháng của dự án chỉ THU HẸP thêm — không nới được trần mỗi lượt đặt trên console platform. {{ LICH_CHAY }}</p>
+<p class="ghi-chu sat-tren cach-duoi">Hai tầng trần: <b>platform</b> đặt trần tháng cấp cửa hàng, <b>dashboard</b> đặt trần tháng từng dự án — Mark áp trần THẤP HƠN và dừng quét khi chạm trần. Đã tiêu = tiền Apify thật của các lượt <b>/theodoi</b> trong tháng (giờ VN). Dự báo = đã tiêu + phần còn lại của tháng nếu giữ nguyên cấu hình nguồn hiện tại (nguồn tạm dừng không tính; YouTube miễn phí). Trần mỗi lượt vẫn ở console platform. {{ LICH_CHAY }}</p>
 
+{% for d in dong %}
+{% set db = d.du_bao %}
 <section class="the-khoi cach-duoi">
-  {% if dong %}
-  <div class="cuon-ngang">
-  <table>
-    <thead><tr><th>Dự án</th><th class="so">Trần tháng (USD)</th><th class="so">Đã tiêu</th><th class="so">Còn lại</th><th>Mức dùng</th>{% if ql %}<th>Đổi trần (0–100 USD)</th>{% endif %}</tr></thead>
-    <tbody>
-    {% for d in dong %}
-      <tr>
-        <td><a href="/ngan-sach?du_an={{ d.ma|urlencode }}">{{ d.ten }}</a> <span class="mo nho">{{ d.ma }}</span>{% if not d.dang_bat %} <span class="the">đang tắt</span>{% endif %}</td>
-        <td class="so">{{ d.tran_usd_thang|usd_vn }}</td>
-        <td class="so">{{ d.da_tieu|usd_vn }}</td>
-        <td class="so">{{ d.con_lai|usd_vn }}</td>
-        <td><progress class="thanh{% if d.pt >= 100 %} thanh--day{% endif %}" max="100" value="{{ '%.1f'|format(d.pt) }}">{{ d.pt|pt_vn }}</progress>
-          <span class="mo nho">{{ d.pt|pt_vn }}</span></td>
-        {% if ql %}
-        <td>
-          <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}" class="hang">
-            <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-            <input type="number" name="tran_usd_thang" min="0" max="100" step="0.01" value="{{ '%.2f'|format(d.tran_usd_thang) }}" aria-label="Trần tháng USD của {{ d.ten }}" required>
-            <button class="nut nut--nho" type="submit">Lưu</button>
-          </form>
-        </td>
-        {% endif %}
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="tieu-de-khoi">
+    <h2><a href="/ngan-sach?du_an={{ d.ma|urlencode }}">{{ d.ten }}</a> <span class="mo nho">{{ d.ma }}</span>{% if not d.dang_bat %} <span class="the">đang tắt</span>{% endif %}</h2>
+    {% if ql %}
+    <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}" class="hang">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o">Trần tháng của dự án (0–100 USD)
+        <input type="number" name="tran_usd_thang" min="0" max="100" step="0.01" value="{{ '%.2f'|format(d.tran_usd_thang) }}" required></label>
+      <button class="nut nut--nho" type="submit">Lưu</button>
+    </form>
+    {% endif %}
   </div>
+
+  <div class="luoi luoi--kpi">
+    <div class="kpi"><div class="kpi__nhan">Trần dự án (dashboard)</div><div class="kpi__so so">{{ d.tran_usd_thang|usd_vn }}</div><div class="kpi__doi">USD/tháng</div></div>
+    <div class="kpi"><div class="kpi__nhan">Trần do platform đặt</div>
+      {% if db.tran_platform is none %}<div class="kpi__so mo">chưa có</div><div class="kpi__doi">chờ KDLA (platform PR #101)</div>
+      {% else %}<div class="kpi__so so">{{ db.tran_platform|usd_vn }}</div><div class="kpi__doi">USD/tháng, cấp cửa hàng</div>{% endif %}</div>
+    <div class="kpi"><div class="kpi__nhan">Trần hiệu lực (thấp hơn)</div><div class="kpi__so so">{{ db.tran|usd_vn }}</div><div class="kpi__doi">Mark áp trần này</div></div>
+    <div class="kpi"><div class="kpi__nhan">Đã tiêu tháng này</div><div class="kpi__so so">{{ d.da_tieu|usd_vn }}</div><div class="kpi__doi">còn {{ d.con_lai|usd_vn }} USD trước trần</div></div>
+    <div class="kpi"><div class="kpi__nhan">Dự báo cả tháng</div><div class="kpi__so so{% if db.vuot %} chu-loi{% endif %}">{{ db.du_bao_thang|usd_vn }}</div><div class="kpi__doi">+ {{ db.con_lai|usd_vn }} USD trong {{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày còn lại</div></div>
+    <div class="kpi"><div class="kpi__nhan">Theo cấu hình, 30 ngày</div><div class="kpi__so so">{{ db.thang_cau_hinh|usd_vn }}</div><div class="kpi__doi">nhu cầu một tháng trọn</div></div>
+  </div>
+  <p class="nho phu">Đã tiêu <progress class="thanh{% if d.pt >= 100 %} thanh--day{% endif %}" max="100" value="{{ '%.1f'|format(d.pt) }}">{{ d.pt|pt_vn }}</progress> {{ d.pt|pt_vn }} trần ·
+    Dự báo <progress class="thanh{% if db.vuot %} thanh--day{% endif %}" max="100" value="{{ '%.1f'|format(d.pt_du_bao) }}">{{ d.pt_du_bao|pt_vn }}</progress> {{ d.pt_du_bao|pt_vn }} trần</p>
+
+  {% if db.vuot %}
+  <div class="thong-bao thong-bao--loi" role="alert">
+    <b>⚠ Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD</b> ({{ db.du_bao_thang|usd_vn }} / {{ db.tran|usd_vn }} USD). Giữ nguyên cấu hình thì Mark sẽ chạm trần trước cuối tháng và BỎ QUA các nguồn còn lại tới tháng sau.
+    Muốn đủ tháng: tăng chu kỳ quét, giảm số bài mỗi lần, hoặc tạm dừng nguồn tốn nhất{% if db.top_ton %}:
+    {% for x in db.top_ton %}<b>{{ x.ten }}</b> ({{ x.nen_tang|ten_nen_tang }}, {{ x.so_bai_moi_lan }} bài/{{ x.chu_ky_ngay }} ngày, ≈ {{ x.thang_usd|usd_vn }} USD/tháng){{ '; ' if not loop.last else '' }}{% endfor %}{% endif %}.
+    {% if ql %}Hoặc tăng trần dự án ở trên{% if db.tran_platform is not none and db.tran_platform < db.tran_du_an %} (đang bị trần platform giữ — tăng ở console platform){% endif %}.{% endif %}
+    <a href="/nguon?du_an={{ d.ma|urlencode }}">Sửa nguồn</a>
+  </div>
+  {% endif %}
+
+  {% if db.nen_tang %}
+  <details>
+    <summary>Dự báo theo nền tảng</summary>
+    <div class="cuon-ngang">
+    <table>
+      <thead><tr><th>Nền tảng</th><th class="so">Nguồn đang theo dõi</th><th class="so">Theo bài (còn lại)</th><th class="so">Phí khởi động actor (còn lại)</th><th class="so">Còn lại tháng này</th><th class="so">Theo cấu hình 30 ngày</th></tr></thead>
+      <tbody>
+      {% for p in db.nen_tang %}
+        <tr><td>{{ p.nen_tang|ten_nen_tang }}</td><td class="so">{{ p.so_nguon }}</td>
+          <td class="so">{{ p.nguon_con_lai|usd_vn(4) }}</td><td class="so">{{ p.khoi_dong_con_lai|usd_vn(4) }}</td>
+          <td class="so">{{ p.con_lai|usd_vn(4) }}</td><td class="so">{{ p.thang_cau_hinh|usd_vn(4) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="ghi-chu">Phí khởi động actor tính gần đúng một lần mỗi nền tảng mỗi ngày quét (theo chu kỳ ngắn nhất của nền tảng). Giá đo thật 25/09/2026, đã nhân hệ số hao hụt 1,3 như Mark.</p>
+  </details>
   {% else %}
-  <p class="trong">Chưa có dự án nào.</p>
+  <p class="trong">Không có nguồn nào đang theo dõi — dự báo phần còn lại 0 USD.</p>
   {% endif %}
 </section>
+{% else %}
+<section class="the-khoi cach-duoi"><p class="trong">Chưa có dự án nào.</p></section>
+{% endfor %}
 
 {% if du_an %}
 <section class="the-khoi">

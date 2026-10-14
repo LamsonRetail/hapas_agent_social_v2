@@ -154,6 +154,11 @@ class GiaKho:
     def da_tieu_thang(self):
         return {"hapas": 1.25}
 
+    tran_pf = None                     # trần platform (KDLA) — kho thật hiện luôn None
+
+    def tran_platform(self, du_an=None):
+        return self.tran_pf
+
     def cac_luot(self, du_an, trang=1, moi_trang=20):
         ds = [x for x in self.luot if x["du_an"] == du_an]
         return ds[(trang - 1) * moi_trang: trang * moi_trang], len(ds)
@@ -1029,3 +1034,75 @@ def test_nguoi_xem_khong_thay_email_va_loi_tho():
     dang_nhap(c, QL)
     t = c.get("/nguon").text + c.get("/ngan-sach").text
     assert all(x in t for x in bi_mat)
+
+
+# ───────────────────────────── quản trị chi phí (15/10/2026) ─────────────────────────────
+def _kho_co_nguon_ton() -> GiaKho:
+    """Cùng bộ nguồn với tests/test_dashboard_chi_phi.py (số tính tay ở đó)."""
+    kho = GiaKho()
+    for i, p, so_bai, ky, tt in ((1, "tiktok", 10, 1, "dang_theo_doi"),
+                                 (2, "instagram", 30, 2, "dang_theo_doi"),
+                                 (3, "youtube", 5, 1, "dang_theo_doi"),
+                                 (4, "facebook", 5, 3, "tam_dung"),
+                                 (5, "facebook", 4, 3, "dang_theo_doi")):
+        kho.nguon[i] = {"id": i, "du_an": "hapas", "nen_tang": p, "dinh_danh": f"n{i}",
+                        "ten": f"Nguồn {i}", "link": "", "loai": "kol", "nhan": [],
+                        "trang_thai": tt, "chu_ky_ngay": ky, "so_bai_moi_lan": so_bai,
+                        "them_qua": "dashboard", "them_boi": None, "them_luc": None,
+                        "quet_cuoi": None, "loi_cuoi": None, "loi_luc": None}
+    return kho
+
+
+@pytest.fixture
+def giua_thang(monkeypatch):
+    monkeypatch.setattr(A, "_bay_gio",
+                        lambda: datetime.datetime(2026, 10, 15, 12, 0, tzinfo=VN))
+
+
+def test_ngan_sach_du_bao_trong_tran(giua_thang):
+    _, c, _ = tao(_kho_co_nguon_ton())
+    dang_nhap(c, XEM)
+    t = c.get("/ngan-sach").text
+    # đã tiêu 1,25 + còn lại 0,9863 (16,5 ngày) = 2,2363 ≤ trần 5
+    assert "Dự báo cả tháng" in t and "2,24" in t and "0,99" in t and "16,5 ngày" in t
+    assert "Trần do platform đặt" in t and "chưa có" in t and "chờ KDLA" in t
+    assert "Dự báo vượt trần" not in t
+    assert "Dự báo theo nền tảng" in t and "0,6435" in t and "0,1716" in t   # TikTok, khởi động IG
+    assert "1,79" in t                                                   # theo cấu hình 30 ngày
+
+
+def test_ngan_sach_canh_bao_vuot_tran_va_goi_y(giua_thang):
+    kho = _kho_co_nguon_ton()
+    kho.du_an["hapas"]["tran_usd_thang"] = 2.0
+    _, c, _ = tao(kho)
+    dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert "Dự báo vượt trần 0,24 USD" in t and 'role="alert"' in t and "chu-loi" in t
+    i1, i5, i2 = t.index("<b>Nguồn 1</b>"), t.index("<b>Nguồn 5</b>"), t.index("<b>Nguồn 2</b>")
+    assert i1 < i5 < i2                                       # 3 nguồn tốn nhất, tốn nhất trước
+    assert "<b>Nguồn 3</b>" not in t and "<b>Nguồn 4</b>" not in t   # YouTube 0, tạm dừng
+    assert "tăng chu kỳ quét, giảm số bài mỗi lần, hoặc tạm dừng nguồn tốn nhất" in t
+    assert "Hoặc tăng trần dự án" in t
+
+
+def test_ngan_sach_tran_platform_thap_hon_thi_ap_tran_platform(giua_thang):
+    kho = _kho_co_nguon_ton()
+    kho.tran_pf = 1.0                                 # khi KDLA ra: Mark ghi trần platform vào kho
+    _, c, _ = tao(kho)
+    dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert "chưa có" not in t and "cấp cửa hàng" in t
+    assert "Dự báo vượt trần 1,24 USD" in t and "(2,24 / 1,00 USD)" in t
+    assert "đang bị trần platform giữ" in t
+
+
+def test_trang_nguon_hien_uoc_tinh_moi_nguon(giua_thang):
+    _, c, _ = tao(_kho_co_nguon_ton())
+    dang_nhap(c, QL)
+    t = c.get("/nguon?du_an=hapas").text
+    assert "≈ USD/tháng" in t
+    assert "≈ 1,170 USD/tháng theo bài" in t                       # TikTok 10 bài, mỗi ngày
+    assert "≈ 0,051 USD/tháng theo bài + phí khởi động actor chung 0,0208 USD" in t   # Instagram
+    assert "≈ 0,000 USD/tháng theo bài" in t                       # YouTube miễn phí
+    assert '<script type="application/json" id="chi-phi-hang-so">' in t and '"he_so": 1.3' in t
+    assert 'src="/tinh/nguon.js"' in t and t.count("data-uoc-tinh") == 6   # 5 sửa + 1 thêm
