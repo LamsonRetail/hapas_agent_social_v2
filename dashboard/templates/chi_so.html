@@ -50,7 +50,7 @@
 
 <section class="the-khoi cach-doc">
   <div class="tieu-de-khoi"><h2>Thảo luận</h2><span class="mo nho" id="don-vi-xu-huong"></span></div>
-  <p class="ghi-chu sat-tren">Thảo luận = số bài + số bình luận nền tảng báo trên các bài đó (cách tính của Kompa).</p>
+  <p class="ghi-chu sat-tren">Thảo luận = số bài + số bình luận nền tảng báo trên các bài đó (cách tính của Kompa). Bấm vào một điểm, cột hay dòng bất kỳ trên trang để xem các bài làm nên con số đó.</p>
   <div class="bieu-do" id="bd-xu-huong" role="img" aria-label="Biểu đồ thảo luận theo thời gian"></div>
 </section>
 
@@ -83,6 +83,17 @@
   </section>
 </div>
 
+<section class="the-khoi cach-duoi" id="khoi-bl">
+  <div class="tieu-de-khoi"><h2>Bình luận đã đọc</h2><span class="mo nho" id="don-vi-bl"></span></div>
+  <p class="ghi-chu sat-tren">Mẫu bình luận Mark cào dưới các bài nhiều bình luận nhất (cấu hình ở trang Ngân sách), gán sắc thái + chủ đề. Không gồm bình luận của chính thương hiệu. Bấm vào cột để đọc từng bình luận.</p>
+  <div class="luoi luoi--kpi" id="kpi-bl" aria-live="polite"></div>
+  <div class="luoi luoi--2">
+    <div><h3>Theo ngày đăng bình luận</h3><div class="bieu-do" id="bd-bl-ngay" role="img" aria-label="Bình luận theo sắc thái theo thời gian"></div></div>
+    <div><h3>Chủ đề × sắc thái</h3><div class="bieu-do" id="bd-bl-chu-de" role="img" aria-label="Chủ đề bình luận theo sắc thái"></div></div>
+  </div>
+  <p class="trong" id="trong-bl" hidden>Chưa có bình luận nào được cào trong khoảng này.</p>
+</section>
+
 <section class="the-khoi cach-duoi">
   <h2>Nguồn nổi bật</h2>
   <div class="tab" id="tab-nen-tang" role="tablist" aria-label="Nền tảng"></div>
@@ -99,5 +110,14 @@
   <h2>Bài nổi bật</h2>
   <div id="top-bai"></div>
 </section>
+<dialog class="chi-tiet" id="chi-tiet" aria-labelledby="chi-tiet-tieu-de">
+  <div class="chi-tiet__dau">
+    <h2 id="chi-tiet-tieu-de">Chi tiết</h2>
+    <button class="nut nut--nhe nut--nho" type="button" id="chi-tiet-dong" aria-label="Đóng">Đóng ✕</button>
+  </div>
+  <p class="mo nho" id="chi-tiet-mo-ta"></p>
+  <div class="chi-tiet__than" id="chi-tiet-than"></div>
+  <div class="phan-trang" id="chi-tiet-trang"></div>
+</dialog>
 {% endif %}
 {% endblock %}

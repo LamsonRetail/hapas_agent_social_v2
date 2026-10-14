@@ -59,7 +59,8 @@ def doc_du_an(ma: str) -> dict | None:
     with ket_noi() as c:
         return c.execute(
             "SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
-            "tran_usd_thang::float AS tran_usd_thang, dang_bat FROM du_an WHERE ma = %s",
+            "tran_usd_thang::float AS tran_usd_thang, dang_bat, bl_bat, bl_so_bai, bl_moi_bai "
+            "FROM du_an WHERE ma = %s",
             (ma,)).fetchone()
 
 
@@ -253,6 +254,70 @@ def bai_youtube_can_lam_moi(ma: str, ngay: int = 14, toi_da: int = 200) -> list[
             "dang_luc >= now() - make_interval(days => %s) AND "
             "cap_nhat_cuoi < (date_trunc('day', now() AT TIME ZONE %s) AT TIME ZONE %s) "
             "ORDER BY dang_luc DESC LIMIT %s", (ma, ngay, _TZ, _TZ, toi_da)).fetchall()
+
+
+# ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
+#: Bài đã cào được cào lại khi số bình luận nền tảng báo tăng ≥ 20% (và ≥ 5) — bài cũ ít đổi
+#: thì không trả tiền đọc lại cùng bình luận.
+BL_TANG_TOI_THIEU = 1.2
+BL_NGAY = 35
+
+
+def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int) -> list[dict]:
+    """Bài nên cào bình luận lượt này: đăng trong `BL_NGAY` ngày, nền tảng báo có bình luận,
+    chưa cào hoặc bình luận tăng đủ nhiều. Bài chưa cào đi trước, rồi bài nhiều bình luận."""
+    if toi_da <= 0 or not nen_tang:
+        return []
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT b.khoa, b.nen_tang, b.link, b.tai_khoan, b.tac_gia, b.binh_luan, "
+            "b.bl_lay_luc, n.loai AS nguon_loai FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
+            "WHERE b.du_an = %s AND b.nen_tang = ANY(%s) AND COALESCE(b.binh_luan, 0) > 0 "
+            "AND b.link <> '' AND b.dang_luc >= now() - make_interval(days => %s) "
+            "AND (b.bl_lay_luc IS NULL OR (b.bl_lay_luc < now() - interval '20 hours' AND "
+            " b.binh_luan >= COALESCE(b.bl_lay_khi_co, 0) * %s + 5)) "
+            "ORDER BY (b.bl_lay_luc IS NULL) DESC, b.binh_luan DESC LIMIT %s",
+            (ma, list(nen_tang), BL_NGAY, BL_TANG_TOI_THIEU, toi_da)).fetchall()
+
+
+_COT_BL = ("ma", "nen_tang", "tac_gia", "noi_dung", "thich", "tra_loi", "la_tra_loi",
+           "cua_thuong_hieu", "dang_luc", "sac_thai", "chu_de")
+
+
+def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
+                  da_lay: dict[str, tuple[int, int | None]]) -> tuple[int, int]:
+    """Upsert bình luận (mỗi dòng có `khoa_bai` + `_COT_BL`) và đánh dấu bài đã cào
+    (`da_lay` = {khoa bài: (số bình luận lấy được, số nền tảng báo lúc đó)}) trong CÙNG giao
+    dịch. Nhãn chỉ đè khi lượt này có nhãn. -> (mới, cập nhật)."""
+    moi = cu = 0
+    cot = ", ".join(_COT_BL)
+    dat = ", ".join(["%s"] * len(_COT_BL))
+    with ket_noi() as c:
+        for r in rows:
+            x = c.execute(
+                f"INSERT INTO binh_luan (du_an, khoa_bai, luot_id, {cot}) "
+                f"SELECT %s, %s, %s, {dat} WHERE EXISTS "
+                "(SELECT 1 FROM bai WHERE du_an = %s AND khoa = %s) "
+                "ON CONFLICT (du_an, khoa_bai, ma) DO UPDATE SET "
+                "thich = COALESCE(EXCLUDED.thich, binh_luan.thich), "
+                "tra_loi = COALESCE(EXCLUDED.tra_loi, binh_luan.tra_loi), "
+                "sac_thai = COALESCE(EXCLUDED.sac_thai, binh_luan.sac_thai), "
+                "chu_de = COALESCE(EXCLUDED.chu_de, binh_luan.chu_de), "
+                "luot_id = EXCLUDED.luot_id, cap_nhat_cuoi = now() "
+                "RETURNING (xmax = 0) AS moi",
+                [ma, r["khoa_bai"], luot_id, *[r.get(k) for k in _COT_BL],
+                 ma, r["khoa_bai"]]).fetchone()
+            if not x:
+                continue
+            if x["moi"]:
+                moi += 1
+            else:
+                cu += 1
+        for khoa, (n, co) in da_lay.items():
+            c.execute("UPDATE bai SET bl_lay_luc = now(), bl_da_lay = %s, "
+                      "bl_lay_khi_co = COALESCE(%s, binh_luan) WHERE du_an = %s AND khoa = %s",
+                      (n, co, ma, khoa))
+    return moi, cu
 
 
 def ghi_de_xuat(ma: str, cac: list[dict]) -> int:

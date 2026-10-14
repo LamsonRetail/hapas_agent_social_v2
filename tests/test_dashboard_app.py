@@ -38,7 +38,8 @@ class GiaKho:
         self.du_an = {"hapas": {"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas"],
                                 "tu_loai_tru": [], "boi_canh": "", "thi_truong": "VN",
                                 "tran_usd_thang": 5.0, "dang_bat": True, "tao_luc": now,
-                                "sua_luc": now, "sua_boi": None}}
+                                "sua_luc": now, "sua_boi": None, "bl_bat": True,
+                                "bl_so_bai": 10, "bl_moi_bai": 20}}
         self.nguon: dict[int, dict] = {}
         self.de_xuat = {
             5: {"id": 5, "du_an": "hapas", "nen_tang": "tiktok", "dinh_danh": "@KolA", "ten": "KOL A",
@@ -54,6 +55,8 @@ class GiaKho:
         self.luot: list[dict] = []
         self.luot_moi_nhat = None
         self.goi_bai: list[tuple] = []
+        self.bl: list[dict] = []
+        self.goi_bl: list[tuple] = []
         self.loi_kiem = False
 
     def _ghi(self, ai, hanh_dong, doi_tuong):
@@ -150,6 +153,17 @@ class GiaKho:
     def bai_trong_khoang(self, du_an, tu, den):
         self.goi_bai.append((du_an, tu, den))
         return {"rows": [b for b in self.bai if tu <= b["dang_luc"] < den], "bi_cat": False}
+
+    def binh_luan_trong_khoang(self, du_an, tu, den):
+        self.goi_bl.append((du_an, tu, den))
+        return {"rows": [c for c in self.bl if tu <= c["luc"] < den], "bi_cat": False}
+
+    def binh_luan_cua_bai(self, du_an, khoa, toi_da=300):
+        return [dict(c) for c in self.bl if c["khoa_bai"] == khoa][:toi_da]
+
+    def dat_binh_luan(self, ai, ma, bat, so_bai, moi_bai):
+        self.du_an[ma].update(bl_bat=bat, bl_so_bai=so_bai, bl_moi_bai=moi_bai)
+        self._ghi(ai, "sua_binh_luan", f"du_an:{ma}")
 
     def da_tieu_thang(self):
         return {"hapas": 1.25}
@@ -1106,3 +1120,89 @@ def test_trang_nguon_hien_uoc_tinh_moi_nguon(giua_thang):
     assert "≈ 0,000 USD/tháng theo bài" in t                       # YouTube miễn phí
     assert '<script type="application/json" id="chi-phi-hang-so">' in t and '"he_so": 1.3' in t
     assert 'src="/tinh/nguon.js"' in t and t.count("data-uoc-tinh") == 6   # 5 sửa + 1 thêm
+
+
+# ───────────────────────────── chi tiết + bình luận (đợt 2b) ─────────────────────────────
+def _bl(khoa, ma, luc, sac="Tích cực", nha=False, thich=0, chu_de="Sản phẩm/chất lượng"):
+    return {"khoa_bai": khoa, "ma": ma, "nen_tang": "tiktok", "tac_gia": "khach", "noi_dung": "ok",
+            "thich": thich, "tra_loi": 0, "la_tra_loi": False, "cua_thuong_hieu": nha,
+            "dang_luc": luc, "sac_thai": None if nha else sac, "chu_de": None if nha else chu_de,
+            "luc": luc, "nguon_loai": "kol", "nguon_id": 1}
+
+
+def test_api_bai_loc_theo_cot_vua_bam():
+    _, c, kho = tao()
+    d1 = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    d2 = datetime.datetime(2026, 10, 11, 9, 0, tzinfo=VN)
+    kho.bai = [_bai(d1, khoa="tiktok:1", binh_luan=50),
+               _bai(d1, khoa="tiktok:2", sac_thai="Tiêu cực", binh_luan=1),
+               _bai(d2, khoa="tiktok:3", nguon_loai="kenh_nha")]
+    dang_nhap(c, XEM)
+    q = "/api/bai?du_an=hapas&tu=2026-10-08&den=2026-10-14"
+    d = c.get(q + "&ngay_tu=2026-10-10&ngay_den=2026-10-10").json()
+    assert d["tong"] == 2 and d["thao_luan"] == 53
+    assert [b["khoa"] for b in d["bai"]] == ["tiktok:1", "tiktok:2"]     # nhiều thảo luận trước
+    assert c.get(q + "&sac_thai=Tiêu cực").json()["tong"] == 1
+    assert [b["khoa"] for b in c.get(q + "&sac_thai=kênh nhà").json()["bai"]] == ["tiktok:3"]
+    assert c.get(q + "&nguon=n:1").json()["tong"] == 3
+    assert c.get(q + "&sac_thai=<script>").status_code == 400
+    assert c.get(q + "&ngay_tu=2026-13-01").status_code == 400
+    assert c.get("/api/bai?du_an=khong-co").status_code == 404
+
+
+def test_api_bai_can_dang_nhap():
+    _, c, _ = tao()
+    assert c.get("/api/bai?du_an=hapas").status_code == 401
+    assert c.get("/api/binh-luan?du_an=hapas&khoa=tiktok:1").status_code == 401
+
+
+def test_api_chi_so_co_khoi_binh_luan_khong_tinh_thuong_hieu():
+    _, c, kho = tao()
+    luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    kho.bai = [_bai(luc, khoa="tiktok:1")]
+    kho.bl = [_bl("tiktok:1", "a", luc), _bl("tiktok:1", "b", luc, sac="Tiêu cực"),
+              _bl("tiktok:1", "c", luc, nha=True)]
+    dang_nhap(c, XEM)
+    d = c.get("/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14").json()
+    k = d["binh_luan_da_cao"]["kpi"]
+    assert k["so"] == 3 and k["khach"] == 2 and k["thuong_hieu"] == 1
+    assert k["tich_cuc_pt"] == 50.0 and k["tieu_cuc"] == 1
+    i = d["binh_luan_da_cao"]["xu_huong"]["moc"].index("2026-10-10")
+    assert d["binh_luan_da_cao"]["xu_huong"]["tieu_cuc"][i] == 1
+
+
+def test_api_binh_luan_theo_bai_va_theo_cot():
+    _, c, kho = tao()
+    luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    kho.bl = [_bl("tiktok:1", "a", luc, thich=1), _bl("tiktok:1", "b", luc, sac="Tiêu cực", thich=9),
+              _bl("tiktok:2", "c", luc, nha=True)]
+    dang_nhap(c, XEM)
+    q = "/api/binh-luan?du_an=hapas&tu=2026-10-08&den=2026-10-14"
+    d = c.get(q + "&khoa=tiktok:1").json()
+    assert d["tong"] == 2 and {x["sac_thai"] for x in d["binh_luan"]} == {"Tích cực", "Tiêu cực"}
+    d = c.get(q + "&sac_thai=Tiêu cực&ngay_tu=2026-10-10&ngay_den=2026-10-10").json()
+    assert d["tong"] == 1 and d["binh_luan"][0]["thich"] == 9
+    d = c.get(q).json()
+    assert d["tong"] == 3 and d["binh_luan"][0]["thich"] == 9          # nhiều thích trước
+    assert [x["sac_thai"] for x in d["binh_luan"]].count("thương hiệu") == 1
+    assert c.get(q + "&sac_thai=kênh nhà").status_code == 400
+    assert c.get(q + "&khoa=" + "x" * 300).status_code == 400
+
+
+def test_cau_hinh_binh_luan_chi_quan_ly_va_kiem_so():
+    _, c, kho = tao()
+    csrf = dang_nhap(c, XEM)
+    r = c.post("/ngan-sach/hapas/binh-luan",
+               data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "5", "bl_moi_bai": "30"})
+    assert r.status_code == 403
+    csrf = dang_nhap(c, QL)
+    r = c.post("/ngan-sach/hapas/binh-luan",
+               data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "5", "bl_moi_bai": "30"})
+    assert "Đã lưu: cào bình luận tối đa 5 bài × 30 bình luận" in thong_bao(c, r)
+    assert kho.du_an["hapas"]["bl_so_bai"] == 5 and kho.nk[-1][1] == "sua_binh_luan"
+    r = c.post("/ngan-sach/hapas/binh-luan",
+               data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "500", "bl_moi_bai": "30"})
+    assert kho.du_an["hapas"]["bl_so_bai"] == 5 and "0" in thong_bao(c, r)
+    r = c.post("/ngan-sach/hapas/binh-luan", data={"csrf": csrf, "bl_so_bai": "5", "bl_moi_bai": "30"})
+    assert "Đã tắt cào bình luận" in thong_bao(c, r) and kho.du_an["hapas"]["bl_bat"] is False
+    assert "Cào bình luận" in c.get("/ngan-sach").text

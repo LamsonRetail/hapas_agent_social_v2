@@ -18,10 +18,8 @@ Chủ dự án chốt ngày 14/10/2026: platform phải quản trị được kh
   - kho được đăng ký trên console và admin duyệt;
   - Mark gửi ảnh chụp tổng quan lên platform;
   - platform giữ công tắc cho phép ghi.
-- Chỉ chạy bước 1 khi đủ ba điều:
-  1. thint đã duyệt bản nháp `KDLA`;
-  2. phần platform đã chạy;
-  3. kho `lang_nghe` của AG-SOCIAL-LISTENING đã ở trạng thái `hoat_dong`.
+- Điều kiện ban đầu là thint duyệt bản nháp `KDLA`, phần platform chạy và kho ở trạng thái `hoat_dong` rồi mới tạo DB.
+  - **Ngày 14/10/2026 chủ dự án bỏ điều kiện này** (đã hỏi ý kiến trực tiếp): DB được tạo trên VPS lúc 21:45 khi KDLA còn là bản nháp. Khi KDLA chạy, đăng ký kho này trên console như mọi kho khác.
 
 Mô tả bảng và cột theo quy chuẩn BI (task Lark t280613, skill `lsr-bq-description-standard`) đã nằm sẵn trong `schema.sql` dưới dạng `COMMENT ON`. Test `tests/test_theo_doi.py::test_kho_theo_quy_chuan_mo_ta_bi` kiểm việc này.
 
@@ -52,14 +50,15 @@ Quyền của Mark:
 ## 2. Thư viện cho Mark
 
 ```bash
-sudo -u mark /opt/mark/hermes-agent/venv/bin/pip install 'psycopg[binary]>=3.2,<3.3'
+# venv Hermes do uv quản (không có pip); DEPS_CMD của agent-deploy chỉ `uv pip install` nên không gỡ psycopg
+sudo -u mark env HOME=/opt/mark /usr/local/bin/uv pip install --python /opt/mark/hermes-agent/venv/bin/python 'psycopg[binary]>=3.2,<3.3'
 sudo -u mark /opt/mark/hermes-agent/venv/bin/python -c "import psycopg; print(psycopg.__version__)"
 sudo -u mark psql -d lang_nghe -c 'select count(*) from du_an'   # kiểm peer auth
 ```
 
 Thiếu thư viện hoặc chưa có DB thì `/theodoi` báo "Kho lắng nghe chưa dùng được: …". Các tính năng khác của Mark không bị ảnh hưởng.
 
-## 3. Biến môi trường của Mark (`/opt/mark/.env`)
+## 3. Biến môi trường của Mark (`/opt/mark/app/.env`)
 
 ```
 # tuỳ chọn — mặc định "dbname=lang_nghe" (Unix socket, peer)

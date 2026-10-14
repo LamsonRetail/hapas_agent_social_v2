@@ -246,6 +246,7 @@ def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON) -> list[dict]:
                 "ten": r.get("nguon_ten") or r.get("tac_gia") or r.get("tai_khoan") or "?",
                 "dinh_danh": r.get("nguon_dinh_danh") or r.get("tai_khoan") or "",
                 "loai": loai(r), "ten_loai": TEN_LOAI.get(loai(r), loai(r)),
+                "khoa_nguon": khoa_nguon_chu(r),
                 "link": r.get("nguon_link") or "", "bai": 0, "binh_luan": 0, "thao_luan": 0,
                 "xem": 0, "followers": 0}
         g["bai"] += 1
@@ -265,12 +266,35 @@ def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON) -> list[dict]:
     return ra
 
 
+def khoa_nguon_chu(r: dict) -> str:
+    """Khoá nguồn (`_khoa_nguon`) dạng chuỗi để trình duyệt gửi lại khi bấm vào một nguồn."""
+    k = _khoa_nguon(r)
+    return f"{k[0]}:{k[1]}"
+
+
+def _the_bai(r: dict) -> dict:
+    dt = r.get("dang_luc")
+    return {
+        "khoa": r.get("khoa") or "", "bl_da_lay": so(r.get("bl_da_lay")),
+        "link": r.get("link") or "", "nen_tang": r.get("nen_tang") or "",
+        "tac_gia": r.get("tac_gia") or r.get("tai_khoan") or "",
+        "dang_luc": (dt.astimezone(VN).isoformat(timespec="minutes")
+                     if isinstance(dt, datetime.datetime) and dt.tzinfo else None),
+        "noi_dung": " ".join(str(r.get("noi_dung") or "").split())[:500],
+        "sac_thai": "kênh nhà" if la_kenh_nha(r) else sac(r),
+        "chu_de": r.get("chu_de") or "", "loai": TEN_LOAI.get(loai(r), loai(r)),
+        "xem": so(r.get("xem")), "thich": so(r.get("thich")),
+        "binh_luan": so(r.get("binh_luan")), "chia_se": so(r.get("chia_se")),
+        "thao_luan": thao_luan(r)}
+
+
 def top_bai(rows: list[dict], toi_da: int = TOP_BAI) -> list[dict]:
     ds = sorted(rows, key=lambda r: (-thao_luan(r), -so(r.get("xem")), str(r.get("link") or "")))
     ra = []
     for r in ds[:toi_da]:
         dt = r.get("dang_luc")
         ra.append({
+            "khoa": r.get("khoa") or "", "bl_da_lay": so(r.get("bl_da_lay")),
             "link": r.get("link") or "", "nen_tang": r.get("nen_tang") or "",
             "tac_gia": r.get("tac_gia") or r.get("tai_khoan") or "",
             "dang_luc": (dt.astimezone(VN).isoformat(timespec="minutes")
@@ -379,3 +403,143 @@ def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
         "top_nguon": top_nguon(nay), "tu_khoa": tu_khoa(nay, tu_khoa_du_an),
         "top_bai": top_bai(nay),
     }
+
+
+# ───────────────────────── chi tiết: bấm vào biểu đồ (đợt 2b, 15/10/2026) ─────────────────────────
+# Chủ dự án 15/10: bấm vào một điểm/cột phải ra đúng các bài (và bình luận) làm nên con số đó,
+# như khung "5.768 thảo luận trong ngày …" của Kompa. Lọc trên CÙNG các dòng trang Chỉ số đã
+# đếm (cùng bộ lọc dự án/khoảng/nền tảng/loại nguồn) nên tổng khung chi tiết khớp con số đã bấm.
+MOI_TRANG = 20
+SAC_BL = (TC, TI, TL)
+
+
+def _khop(r: dict, ngay: datetime.date | None, *, kenh_nha: bool, ngay_tu=None, ngay_den=None,
+          sac_thai=None, chu_de=None, nen_tang=None, loai_nguon=None, nguon=None,
+          cum=None) -> bool:
+    if ngay_tu and (ngay is None or ngay < ngay_tu):
+        return False
+    if ngay_den and (ngay is None or ngay > ngay_den):
+        return False
+    if nen_tang and r.get("nen_tang") != nen_tang:
+        return False
+    if loai_nguon and loai(r) != loai_nguon:
+        return False
+    if nguon and khoa_nguon_chu(r) != nguon:
+        return False
+    if sac_thai:
+        if sac_thai == "kênh nhà":
+            if not kenh_nha:
+                return False
+        elif kenh_nha or sac(r) != sac_thai:
+            return False
+    if chu_de and (kenh_nha or (str(r.get("chu_de") or "").strip() or CHUA) != chu_de):
+        return False
+    return not (cum and (kenh_nha or cum not in _cum(r)))
+
+
+def _trang(ds: list, trang: int, moi_trang: int = MOI_TRANG) -> tuple[list, int, int]:
+    so_trang = max(1, -(-len(ds) // moi_trang))
+    trang = max(1, min(int(trang or 1), so_trang))
+    return ds[(trang - 1) * moi_trang: trang * moi_trang], trang, so_trang
+
+
+def chi_tiet_bai(rows: list[dict], tu: datetime.date, den: datetime.date, *,
+                 trang: int = 1, **dk) -> dict:
+    """Bài trong [tu, den] khớp điều kiện `dk` (ngay_tu, ngay_den, sac_thai, chu_de, nen_tang,
+    loai_nguon, nguon, cum), nhiều thảo luận trước. -> {tong, thao_luan, trang, so_trang, bai}."""
+    ds = [r for r in trong_khoang(rows, tu, den)
+          if _khop(r, ngay_vn(r.get("dang_luc")), kenh_nha=la_kenh_nha(r), **dk)]
+    ds.sort(key=lambda r: (-thao_luan(r), -so(r.get("xem")), str(r.get("link") or "")))
+    tl = sum(thao_luan(r) for r in ds)
+    mot, trang, so_trang = _trang(ds, trang)
+    return {"tong": len(ds), "thao_luan": tl, "trang": trang, "so_trang": so_trang,
+            "bai": [_the_bai(r) for r in mot]}
+
+
+# ───────────────────────── bình luận đã cào ─────────────────────────
+def sac_bl(c: dict) -> str:
+    s = c.get("sac_thai")
+    return s if s in SAC_BL else CHUA
+
+
+def _ngay_bl(c: dict) -> datetime.date | None:
+    return ngay_vn(c.get("luc") or c.get("dang_luc"))
+
+
+def the_bl(c: dict) -> dict:
+    dt = c.get("dang_luc")
+    return {"tac_gia": c.get("tac_gia") or "", "noi_dung": str(c.get("noi_dung") or "")[:1000],
+            "thich": so(c.get("thich")), "tra_loi": so(c.get("tra_loi")),
+            "la_tra_loi": bool(c.get("la_tra_loi")),
+            "cua_thuong_hieu": bool(c.get("cua_thuong_hieu")),
+            "dang_luc": (dt.astimezone(VN).isoformat(timespec="minutes")
+                         if isinstance(dt, datetime.datetime) and dt.tzinfo else None),
+            "sac_thai": "thương hiệu" if c.get("cua_thuong_hieu") else sac_bl(c),
+            "chu_de": c.get("chu_de") or "", "khoa_bai": c.get("khoa_bai") or "",
+            "nen_tang": c.get("nen_tang") or ""}
+
+
+def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
+                nen_tang: str | None = None, loai_nguon: str | None = None,
+                hom_nay: datetime.date | None = None) -> dict:
+    """Bình luận đã cào trong kỳ: số, sắc thái (chỉ của khách), xu hướng, chủ đề × sắc thái.
+    Đây là MẪU bình luận Mark đọc được, không phải toàn bộ bình luận nền tảng báo."""
+    hom_nay = hom_nay or datetime.datetime.now(VN).date()
+    rows = [c for c in loc(rows, nen_tang, loai_nguon)
+            if (n := _ngay_bl(c)) is not None and tu <= n <= den]
+    khach = [c for c in rows if not c.get("cua_thuong_hieu")]
+    dem = collections.Counter(sac_bl(c) for c in khach)
+    da = sum(dem[s] for s in SAC_BL)
+    theo_tuan = (den - tu).days + 1 > NGAY_TOI_DA_THEO_NGAY
+    cuoi = max(tu, min(den, hom_nay))
+    moc = _cac_moc(tu, cuoi, theo_tuan)
+    chi = {m: i for i, m in enumerate(moc)}
+    cot = {k: [0] * len(moc) for k in ("tich_cuc", "tieu_cuc", "trung_lap", "chua_phan_loai")}
+    khoa = {TC: "tich_cuc", TI: "tieu_cuc", TL: "trung_lap", CHUA: "chua_phan_loai"}
+    cd: dict[str, dict] = {}
+    for c in khach:
+        n = _ngay_bl(c)
+        if n <= cuoi:
+            m = max(tu, n - datetime.timedelta(days=n.weekday())) if theo_tuan else n
+            cot[khoa[sac_bl(c)]][chi[m]] += 1
+        t = str(c.get("chu_de") or "").strip() or CHUA
+        g = cd.setdefault(t, {"chu_de": t, "so": 0, TC: 0, TI: 0, TL: 0, CHUA: 0})
+        g["so"] += 1
+        g[sac_bl(c)] += 1
+
+    def pt(x: str) -> float | None:
+        return round(100.0 * dem[x] / da, 1) if da else None
+    return {
+        "kpi": {"so": len(rows), "khach": len(khach), "thuong_hieu": len(rows) - len(khach),
+                "so_bai": len({c.get("khoa_bai") for c in rows}), "da_phan_loai": da,
+                "tich_cuc": dem[TC], "tieu_cuc": dem[TI], "trung_lap": dem[TL],
+                "chua_phan_loai": dem[CHUA], "tich_cuc_pt": pt(TC), "tieu_cuc_pt": pt(TI),
+                "trung_lap_pt": pt(TL)},
+        "xu_huong": {"don_vi": "tuần" if theo_tuan else "ngày",
+                     "moc": [m.isoformat() for m in moc], **cot},
+        "chu_de": sorted(cd.values(), key=lambda g: (g["chu_de"] == CHUA, -g["so"], g["chu_de"])),
+    }
+
+
+def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
+                trang: int = 1, ngay_tu=None, ngay_den=None, sac_thai=None, chu_de=None,
+                nen_tang=None, loai_nguon=None) -> dict:
+    """Bình luận khớp điều kiện (sắc thái/chủ đề chỉ xét bình luận của khách), nhiều thích
+    trước. -> {tong, trang, so_trang, binh_luan}."""
+    ds = []
+    for c in loc(rows, nen_tang, loai_nguon):
+        n = _ngay_bl(c)
+        if n is None or not tu <= n <= den:
+            continue
+        if (ngay_tu and n < ngay_tu) or (ngay_den and n > ngay_den):
+            continue
+        nha = bool(c.get("cua_thuong_hieu"))
+        if sac_thai and (nha or sac_bl(c) != sac_thai):
+            continue
+        if chu_de and (nha or (str(c.get("chu_de") or "").strip() or CHUA) != chu_de):
+            continue
+        ds.append(c)
+    ds.sort(key=lambda c: (-so(c.get("thich")), str(c.get("khoa_bai") or "")))
+    mot, trang, so_trang = _trang(ds, trang)
+    return {"tong": len(ds), "trang": trang, "so_trang": so_trang,
+            "binh_luan": [the_bl(c) for c in mot]}

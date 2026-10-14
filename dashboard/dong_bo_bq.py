@@ -78,8 +78,19 @@ BANG: dict[str, dict] = {
         "cot": [("du_an", "STRING"), ("khoa", "STRING"), ("ngay", "DATE"), ("xem", "INT64"),
                 ("thich", "INT64"), ("binh_luan", "INT64"), ("chia_se", "INT64")],
     },
+    # Đợt 2b (15/10/2026): bình luận đã cào. tac_gia là tên hiển thị CÔNG KHAI trên nền tảng
+    # (không phải email nội bộ) — cần để BI đọc lại bình luận như dashboard.
+    "binh_luan": {
+        "khoa": ["du_an", "khoa_bai", "ma"], "kieu": "tang_dan", "moc": "cap_nhat_cuoi",
+        "cot": [("du_an", "STRING"), ("khoa_bai", "STRING"), ("ma", "STRING"),
+                ("nen_tang", "STRING"), ("tac_gia", "STRING"), ("noi_dung", "STRING"),
+                ("thich", "INT64"), ("tra_loi", "INT64"), ("la_tra_loi", "BOOL"),
+                ("cua_thuong_hieu", "BOOL"), ("dang_luc", "TIMESTAMP"), ("sac_thai", "STRING"),
+                ("chu_de", "STRING"), ("luot_id", "INT64"), ("thay_lan_dau", "TIMESTAMP"),
+                ("cap_nhat_cuoi", "TIMESTAMP")],
+    },
 }
-THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay")   # cha trước con
+THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan")   # cha trước con
 
 
 def dataset() -> str:

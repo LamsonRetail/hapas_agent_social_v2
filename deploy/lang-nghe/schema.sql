@@ -53,8 +53,17 @@ CREATE TABLE IF NOT EXISTS du_an (
   dang_bat        BOOLEAN NOT NULL DEFAULT TRUE,
   tao_luc         TIMESTAMPTZ NOT NULL DEFAULT now(),
   sua_luc         TIMESTAMPTZ NOT NULL DEFAULT now(),
-  sua_boi         TEXT
+  sua_boi         TEXT,
+  bl_bat          BOOLEAN NOT NULL DEFAULT TRUE,
+  bl_so_bai       INT NOT NULL DEFAULT 10 CHECK (bl_so_bai BETWEEN 0 AND 100),
+  bl_moi_bai      INT NOT NULL DEFAULT 20 CHECK (bl_moi_bai BETWEEN 5 AND 200)
 );
+-- Đợt 2b (15/10/2026): cào bình luận — DB đã tạo trước đó thì thêm cột ở đây.
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_bat BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_so_bai INT NOT NULL DEFAULT 10
+  CHECK (bl_so_bai BETWEEN 0 AND 100);
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_moi_bai INT NOT NULL DEFAULT 20
+  CHECK (bl_moi_bai BETWEEN 5 AND 200);
 
 -- 1 dòng = 1 nguồn theo dõi. `dinh_danh`: username TikTok/Instagram, kênh YouTube (UC… hoặc
 -- @handle), URL trang Facebook — đã chuẩn hoá chữ thường (trừ id kênh YouTube UC…).
@@ -149,10 +158,43 @@ CREATE TABLE IF NOT EXISTS bai (
   cap_nhat_cuoi   TIMESTAMPTZ NOT NULL DEFAULT now(),
   luot_dau        BIGINT REFERENCES luot_quet(id) ON DELETE SET NULL,
   luot_cuoi       BIGINT REFERENCES luot_quet(id) ON DELETE SET NULL,
+  bl_lay_luc      TIMESTAMPTZ,
+  bl_da_lay       INT,
+  bl_lay_khi_co   BIGINT,
   PRIMARY KEY (du_an, khoa)
 );
 CREATE INDEX IF NOT EXISTS bai_du_an_dang_luc ON bai (du_an, dang_luc);
 CREATE INDEX IF NOT EXISTS bai_nguon ON bai (nguon_id);
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_lay_luc TIMESTAMPTZ;
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_da_lay INT;
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_lay_khi_co BIGINT;
+
+-- 1 dòng = 1 bình luận (hoặc trả lời) Mark đã cào của một bài đã giữ. Đợt 2b (15/10/2026):
+-- Kompa đếm "thảo luận" chủ yếu từ bình luận dưới bài của các trang — đọc được nội dung mới
+-- gán sắc thái/chủ đề được tiếng khách. Bình luận của chính thương hiệu giữ lại nhưng không
+-- gán nhãn, không tính vào sắc thái.
+CREATE TABLE IF NOT EXISTS binh_luan (
+  du_an           TEXT NOT NULL,
+  khoa_bai        TEXT NOT NULL,
+  ma              TEXT NOT NULL,
+  nen_tang        TEXT NOT NULL,
+  tac_gia         TEXT NOT NULL DEFAULT '',
+  noi_dung        TEXT NOT NULL DEFAULT '',
+  thich           BIGINT,
+  tra_loi         BIGINT,
+  la_tra_loi      BOOLEAN NOT NULL DEFAULT FALSE,
+  cua_thuong_hieu BOOLEAN NOT NULL DEFAULT FALSE,
+  dang_luc        TIMESTAMPTZ,
+  sac_thai        TEXT,
+  chu_de          TEXT,
+  luot_id         BIGINT REFERENCES luot_quet(id) ON DELETE SET NULL,
+  thay_lan_dau    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  cap_nhat_cuoi   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (du_an, khoa_bai, ma),
+  FOREIGN KEY (du_an, khoa_bai) REFERENCES bai (du_an, khoa) ON UPDATE CASCADE ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS binh_luan_du_an_dang_luc ON binh_luan (du_an, dang_luc);
+CREATE INDEX IF NOT EXISTS binh_luan_cap_nhat ON binh_luan (cap_nhat_cuoi);
 
 -- 1 dòng = 1 bài × 1 dự án × 1 ngày (giờ VN): số đọc được lần cuối trong ngày đó.
 CREATE TABLE IF NOT EXISTS chi_so_ngay (
@@ -219,6 +261,9 @@ COMMENT ON COLUMN du_an.tran_usd_thang IS 'Trần chi phí theo dõi mỗi thán
 COMMENT ON COLUMN du_an.dang_bat IS 'TRUE: dự án bật, /theodoi được quét. FALSE: tắt, /theodoi từ chối.';
 COMMENT ON COLUMN du_an.tao_luc IS 'Thời điểm tạo dự án (TIMESTAMPTZ, hiển thị theo múi giờ phiên; lưu UTC).';
 COMMENT ON COLUMN du_an.sua_luc IS 'Thời điểm sửa dự án gần nhất (TIMESTAMPTZ, lưu UTC).';
+COMMENT ON COLUMN du_an.bl_bat IS 'TRUE: mỗi lượt /theodoi cào thêm bình luận của các bài nhiều bình luận nhất (tính vào trần tháng). FALSE: không cào bình luận.';
+COMMENT ON COLUMN du_an.bl_so_bai IS 'Số bài tối đa được cào bình luận mỗi lượt, bài, 0–100. 0 = không cào. Ưu tiên bài chưa cào, rồi bài có số bình luận tăng ≥ 20%.';
+COMMENT ON COLUMN du_an.bl_moi_bai IS 'Số bình luận tối đa cào mỗi bài mỗi lượt, bình luận, 5–200. Actor tính tiền theo bình luận (TikTok 0,00125, Facebook 0,0025, Instagram 0,0026 USD; YouTube miễn phí).';
 COMMENT ON COLUMN du_an.sua_boi IS 'Email người sửa gần nhất trên dashboard. NULL khi tạo bằng lệnh cài đặt. Email nội bộ — không đẩy lên BigQuery.';
 
 COMMENT ON TABLE nguon IS $$[Lớp] Raw
@@ -305,7 +350,7 @@ COMMENT ON COLUMN luot_quet.ghi_chu IS 'Ghi chú vận hành (vd hết ngân sá
 COMMENT ON TABLE bai IS $$[Lớp] Raw
 [Mục đích] Bài mạng xã hội liên quan tới dự án mà Mark đã giữ, kèm nhãn AI và tương tác mới nhất.
 [Grain] 1 dòng = 1 bài × 1 dự án
-[Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
+[Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay, binh_luan; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá (social_listen)
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook (Threads từ tìm theo từ khoá) | Bài đăng trong 35 ngày trước lượt theo dõi, từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Chỉ bài liên quan (nhắc từ khoá trừ kênh nhà, không chứa từ loại trừ, không bị AI loại); khử trùng theo khoa; nội dung cắt 1.000 ký tự
@@ -337,6 +382,37 @@ COMMENT ON COLUMN bai.thay_lan_dau IS 'Thời điểm ghi bài lần đầu (UTC
 COMMENT ON COLUMN bai.cap_nhat_cuoi IS 'Thời điểm cập nhật gần nhất (UTC). Mốc đồng bộ BigQuery.';
 COMMENT ON COLUMN bai.luot_dau IS 'Lượt ghi bài lần đầu. FK → luot_quet.id.';
 COMMENT ON COLUMN bai.luot_cuoi IS 'Lượt cập nhật bài gần nhất. FK → luot_quet.id.';
+COMMENT ON COLUMN bai.bl_lay_luc IS 'Lần cào bình luận gần nhất (UTC). NULL khi chưa cào bình luận của bài.';
+COMMENT ON COLUMN bai.bl_da_lay IS 'Số bình luận lấy được ở lần cào gần nhất, bình luận. NULL khi chưa cào.';
+COMMENT ON COLUMN bai.bl_lay_khi_co IS 'Số bình luận nền tảng báo lúc cào gần nhất, bình luận — để biết bài có thêm bình luận đáng cào lại không. NULL khi chưa cào.';
+
+COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
+[Mục đích] Bình luận (và trả lời) dưới các bài đã giữ của dự án, kèm sắc thái và chủ đề AI gán — tiếng khách hàng.
+[Grain] 1 dòng = 1 bình luận × 1 bài × 1 dự án
+[Khoá] PK: du_an + khoa_bai + ma | Join: (du_an, khoa_bai) → bai.(du_an, khoa); luot_id → luot_quet.id
+[Nguồn] Mark cào sau mỗi lượt /theodoi: Apify (TikTok, Facebook, Instagram comments scraper), YouTube Data API
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; tối đa bl_so_bai bài × bl_moi_bai bình luận mỗi lượt; từ 15/10/2026
+[Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; bình luận của chính thương hiệu đánh dấu cua_thuong_hieu và không gán nhãn
+[Refresh] Upsert tức thời sau mỗi lượt quét (bài được cào lại khi số bình luận tăng ≥ 20%)
+[Dùng khi] Đọc từng bình luận, sắc thái/chủ đề bình luận, đếm bình luận đã đọc theo ngày
+[Không dùng khi] Tổng bình luận nền tảng báo → dùng bai.binh_luan; bản cho BI → dùng ganesha-381907.SOCIAL_LISTENING.binh_luan
+[Lưu ý] MẪU bình luận (bài nhiều bình luận nhất, tối đa bl_moi_bai mỗi bài), không phải toàn bộ; Instagram/Facebook chưa đăng nhập chỉ trả một phần.$$;
+COMMENT ON COLUMN binh_luan.du_an IS 'Dự án. Một phần PK. FK (cùng khoa_bai) → bai.';
+COMMENT ON COLUMN binh_luan.khoa_bai IS 'Khoá bài chứa bình luận. Một phần PK. FK (cùng du_an) → bai.khoa.';
+COMMENT ON COLUMN binh_luan.ma IS 'Mã bình luận trên nền tảng; không có thì "h" + 16 ký tự băm SHA-1 (tác giả, nội dung, thời điểm). Một phần PK.';
+COMMENT ON COLUMN binh_luan.nen_tang IS 'Nền tảng. Giá trị: tiktok, instagram, youtube, facebook.';
+COMMENT ON COLUMN binh_luan.tac_gia IS 'Tên/username người bình luận (công khai trên nền tảng). Chuỗi rỗng khi không có.';
+COMMENT ON COLUMN binh_luan.noi_dung IS 'Nội dung bình luận, tối đa 1.000 ký tự.';
+COMMENT ON COLUMN binh_luan.thich IS 'Lượt thích bình luận lúc cào, lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN binh_luan.tra_loi IS 'Số trả lời của bình luận lúc cào, bình luận. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN binh_luan.la_tra_loi IS 'TRUE: dòng là trả lời của một bình luận khác. FALSE: bình luận gốc.';
+COMMENT ON COLUMN binh_luan.cua_thuong_hieu IS 'TRUE: do tài khoản của chính thương hiệu viết (không gán nhãn, không tính sắc thái). FALSE: khách.';
+COMMENT ON COLUMN binh_luan.dang_luc IS 'Thời điểm đăng bình luận (UTC). NULL khi nền tảng chỉ trả thời gian tương đối.';
+COMMENT ON COLUMN binh_luan.sac_thai IS 'Sắc thái AI/luật gán. Giá trị: Tích cực, Tiêu cực, Trung lập. NULL khi chưa gán hoặc bình luận của thương hiệu.';
+COMMENT ON COLUMN binh_luan.chu_de IS 'Chủ đề bình luận theo 7 nhóm của Mark (Sản phẩm/chất lượng, Giá/mua ở đâu/ý định mua, KOL/nội dung, Giao hàng/dịch vụ, Đối thủ, Tag bạn bè, Khác). NULL khi chưa gán.';
+COMMENT ON COLUMN binh_luan.luot_id IS 'Lượt quét cào bình luận gần nhất. FK → luot_quet.id.';
+COMMENT ON COLUMN binh_luan.thay_lan_dau IS 'Thời điểm ghi bình luận lần đầu (UTC).';
+COMMENT ON COLUMN binh_luan.cap_nhat_cuoi IS 'Thời điểm cập nhật gần nhất (UTC). Mốc đồng bộ BigQuery.';
 
 COMMENT ON TABLE chi_so_ngay IS $$[Lớp] Raw
 [Mục đích] Tương tác lũy kế của từng bài theo ngày đọc, để vẽ tăng trưởng và tính phần tăng trong kỳ.
@@ -396,7 +472,7 @@ COMMENT ON TABLE dong_bo_bq IS $$[Lớp] Raw
 [Grain] 1 dòng = 1 bảng được đồng bộ
 [Khoá] PK: bang | Join: Không có
 [Nguồn] Dashboard (dashboard/dong_bo_bq.py) ghi sau mỗi lượt đồng bộ
-[Phạm vi] 5 bảng: du_an, nguon, luot_quet, bai, chi_so_ngay | Kênh: Không có | Từ khi bật đồng bộ
+[Phạm vi] 6 bảng: du_an, nguon, luot_quet, bai, chi_so_ngay, binh_luan | Kênh: Không có | Từ khi bật đồng bộ
 [Đã xử lý] Không xử lý
 [Refresh] Ghi sau mỗi lượt đồng bộ (sau mỗi lượt quét và 6 giờ một lần)
 [Dùng khi] Kiểm độ trễ và lỗi đồng bộ BigQuery
@@ -413,7 +489,7 @@ RESET ROLE;
 -- Quyền của bot: đọc cấu hình, ghi kết quả. Không sửa dự án, không thêm/xoá nguồn.
 GRANT SELECT ON du_an, nguon TO mark;
 GRANT UPDATE (quet_cuoi, loi_cuoi, loi_luc) ON nguon TO mark;
-GRANT SELECT, INSERT, UPDATE ON bai, chi_so_ngay, luot_quet TO mark;
+GRANT SELECT, INSERT, UPDATE ON bai, chi_so_ngay, luot_quet, binh_luan TO mark;
 GRANT SELECT, INSERT ON de_xuat TO mark;
 GRANT UPDATE (ten, link, ly_do, so_bai, thao_luan) ON de_xuat TO mark;
 GRANT USAGE ON SEQUENCE luot_quet_id_seq, de_xuat_id_seq TO mark;

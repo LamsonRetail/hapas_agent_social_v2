@@ -255,7 +255,16 @@ def lenh_theodoi(doi_so: str) -> str:
     import viec_nen
     phan = chia_phan(kh["nguon"])
     tong = round(sum(ph["uoc_usd"] for cac in phan.values() for ph in cac), 2)
+    da = kh["du_an"]
+    # Bình luận (đợt 2b): chưa biết bài nào sẽ được cào nên giữ chỗ theo trần cấu hình, giá
+    # Facebook; tiền thật vẫn chốt theo run id.
+    bl_uoc = round(uoc_binh_luan(int(da.get("bl_so_bai") or 0), int(da.get("bl_moi_bai") or 20))
+                   if da.get("bl_bat", True) else 0.0, 2)
     ns_apify, hm, _ = quet_lon.ngan_sach(quet_lon.tran_usd_nen())
+    # Bình luận chỉ dùng phần ngân sách việc nền còn lại sau phần bài — lúc chạy mỗi lượt actor
+    # bình luận vẫn bị kẹp theo trần console và phần còn lại của tháng.
+    bl_uoc = round(max(0.0, min(bl_uoc, ns_apify - tong)), 2)
+    tong = round(tong + bl_uoc, 2)
     if tong > ns_apify + 1e-9:
         return (f"Chưa chạy: lượt này ước tính {_usd(tong)} USD mà ngân sách Apify còn dùng được "
                 f"cho việc nền là {_usd(ns_apify)} USD (trần console hoặc hạn mức tháng của tài "
@@ -265,7 +274,8 @@ def lenh_theodoi(doi_so: str) -> str:
         "theo_doi",
         {"du_an": ma, "ngay": _hom_nay(), "nguon": sorted(int(n["id"]) for n in kh["nguon"])},
         {p: {"phan": cac} for p, cac in phan.items()}, {"usd": tong,
-                                                         "phut": max(3, len(kh["nguon"]) // 4)},
+                                                         "phut": max(3, len(kh["nguon"]) // 4)
+                                                         + (3 if bl_uoc else 0)},
         ngan_sach, [f"bỏ qua {len(kh['bo_qua'])} nguồn"] if kh["bo_qua"] else [],
         con_lai_thang=(hm or {}).get("con_lai"))
     if kq.get("tu_choi") or kq.get("da_xong_truoc"):
@@ -275,7 +285,9 @@ def lenh_theodoi(doi_so: str) -> str:
         dem[n["nen_tang"]] = dem.get(n["nen_tang"], 0) + 1
     ds = ", ".join(f"{_TEN.get(p, p)} {k}" for p, k in dem.items())
     cau = (f"Đã nhận lượt theo dõi {kh['du_an']['ten']} (mã {kq.get('ma_viec')}): "
-           f"{len(kh['nguon'])} nguồn ({ds}), ước tính {_usd(tong)} USD; ngân sách tháng "
+           f"{len(kh['nguon'])} nguồn ({ds}), ước tính tối đa {_usd(tong)} USD"
+           + (f" (gồm tới {_usd(bl_uoc)} USD cào bình luận)" if bl_uoc else "")
+           + "; ngân sách tháng "
            f"của dự án còn {_usd(kh['con_thang'])}/{_usd(kh['tran_thang'])} USD. "
            f"Xong Mark nhắn kết quả vào đây.")
     if kh["bo_qua"]:
@@ -533,8 +545,12 @@ def _ghi_phan(v, p: str, ph: dict, kq: dict[int, list], loi: dict[int, str]) -> 
     v.cap_nhat_phan(ph, loi_nguon={str(k): x for k, x in loi.items()})
 
 
-def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float) -> float:
-    """Một lượt actor, cùng kỷ luật với `quet_lon._mot_phan`. -> USD theo sổ của phần."""
+def _chay_actor(v, p: str, ph: dict, cap: float, han: float,
+                min_charge: float = 0.0) -> tuple[list, dict, Exception | None, float | None]:
+    """Chạy / đọc tiếp MỘT lượt actor của phần `ph`, cùng kỷ luật với `quet_lon._mot_phan`:
+    ghi run id ngay khi Apify trả; phần có run id thì đọc tiếp; phần đang gửi dở thì tìm run
+    vừa tạo, không kiểm được thì KHÔNG gửi lại. -> (items, meta, lỗi, tiền phải coi như đã
+    tiêu khi không kiểm được run cũ — None nếu không phải trường hợp đó)."""
     import quet_lon
     actor = ph["actor"]
     A._NEN_TANG.set(p)
@@ -553,18 +569,15 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
                     actor, ph["payload"], quet_lon._h(),
                     datetime.datetime.fromisoformat(ph["moc_gui"]), nghiem=True)
                 if not run and not kiem:
-                    tien = float(ph.get("tran_usd") or cap)
-                    v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
-                                    usd_so=tien, ly_do=quet_lon._CAU_KHONG_KIEM)
-                    return tien
+                    return [], {}, None, float(ph.get("tran_usd") or cap)
             if run:
                 v.cap_nhat_phan(ph, run_id=run["id"], trang_thai="dang_chay", nhan_lai=True)
                 items, meta = A._doc_tiep_run(run["id"], int(ph["limit"]), han, True, actor)
             else:
                 v.cap_nhat_phan(ph, trang_thai="dang_gui", tran_usd=cap,
                                 moc_gui=datetime.datetime.now(_VN).isoformat())
-                items, meta = A._run_actor(actor, ph["payload"], int(ph["limit"]), None, han, 0,
-                                           tran_usd=cap, mot_phan=True, nen_tang=p)
+                items, meta = A._run_actor(actor, ph["payload"], int(ph["limit"]), None, han,
+                                           min_charge, tran_usd=cap, mot_phan=True, nen_tang=p)
     except A.LoiApify as e:
         loi, meta = e, e.meta
     except Exception as e:
@@ -574,17 +587,263 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
         meta = loi.meta
     finally:
         A._KHI_CO_RUN.set(None)
-    kq, loi_nguon = ghep_nguon(p, _doc_ket_qua(p, items or [], int(ph.get("n") or 0)), ds)
+    return items or [], meta, loi, None
+
+
+def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float) -> float:
+    """Một lượt actor quét bài của một phần. -> USD theo sổ của phần."""
+    import quet_lon
+    items, meta, loi, khong_kiem = _chay_actor(v, p, ph, cap, han)
+    if khong_kiem is not None:
+        v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
+                        usd_so=khong_kiem, ly_do=quet_lon._CAU_KHONG_KIEM)
+        return khong_kiem
+    kq, loi_nguon = ghep_nguon(p, _doc_ket_qua(p, items, int(ph.get("n") or 0)), ds)
     if loi is not None:
         for nid, dong in kq.items():
             if not dong:
                 loi_nguon[nid] = A._che_token(str(loi))[:200]
     _ghi_phan(v, p, ph, kq, loi_nguon)
-    tien = quet_lon._so_tien(p, ph, items or [], meta)
+    tien = quet_lon._so_tien(p, ph, items, meta)
     if loi is not None and meta.get("khong_kiem_duoc"):
         tien = cap                       # POST mơ hồ, không kiểm được: coi như đã tiêu trần
-    quet_lon._ket_phan(v, ph, meta, len(items or []), loi, usd_so=tien)
+    quet_lon._ket_phan(v, ph, meta, len(items), loi, usd_so=tien)
     return float(tien)
+
+
+# ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
+# Chủ dự án 15/10: dashboard phải bóc được TỪNG bình luận như Kompa. Sau khi ghi bài, lượt cào
+# bình luận của tối đa `bl_so_bai` bài (chưa cào trước, rồi nhiều bình luận nhất) × `bl_moi_bai`
+# bình luận mỗi bài. Dùng lại actor + bộ đọc của `deep_dive_tool` (đã đo thật) và bộ gán nhãn
+# bình luận `phan_loai`. YouTube qua Data API miễn phí. Tiền đi chung lượt (run id trong phần
+# "binh_luan" của việc → `chot_chi_phi`), nên tính vào trần tháng của dự án.
+BL_NEN_TANG = ("youtube", "tiktok", "instagram", "facebook")
+_BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0}
+_BL_KHOI_DONG = {"facebook": 0.001}
+_BL_LO = 25                       # bài mỗi lượt actor bình luận
+
+
+def uoc_binh_luan(so_bai: int, moi_bai: int, p: str = "facebook") -> float:
+    """USD ước tính cào `moi_bai` bình luận × `so_bai` bài trên nền tảng `p` (mặc định giá
+    Facebook — đắt nhất trừ Instagram, dùng để giữ chỗ ngân sách khi chưa biết bài nào)."""
+    if not so_bai or not _BL_GIA.get(p):
+        return 0.0
+    return round((so_bai * moi_bai * _BL_GIA[p] + _BL_KHOI_DONG.get(p, 0.0)) * _HE_SO_UOC, 4)
+
+
+def _ma_bl(r: dict) -> str:
+    g = r.get("__goc") or {}
+    m = g.get("cid") or g.get("id") or g.get("commentId") if isinstance(g, dict) else None
+    if m:
+        return str(m)[:120]
+    s = f"{r.get('kenh')}|{r.get('text')}|{r.get('thoi_gian')}"
+    return "h" + hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]
+
+
+def _gio_bl(s) -> datetime.datetime | None:
+    """`deep_dive_tool._gio` trả "YYYY-MM-DD HH:MM" giờ VN; chữ khác (thời gian tương đối) → None."""
+    try:
+        return datetime.datetime.strptime(str(s or ""), "%Y-%m-%d %H:%M").replace(tzinfo=_VN)
+    except ValueError:
+        return None
+
+
+def _dong_bl(r: dict, bai: dict, thuong_hieu: list[str]) -> dict:
+    import phan_loai
+    # Chủ bài trả lời = tiếng thương hiệu CHỈ khi bài ở kênh nhà; trên bài KOL/đối thủ, chủ
+    # bài trả lời không phải HAPAS (review 15/10).
+    chu = ([x for x in (bai.get("tai_khoan"), bai.get("tac_gia")) if x]
+           if bai.get("nguon_loai") == "kenh_nha" else [])
+    nha = bool(r.get("cua_chu")) or any(
+        phan_loai.la_tai_khoan_nha(r.get("kenh"), thuong_hieu, c) for c in chu or [""])
+    return {"khoa_bai": bai["khoa"], "ma": _ma_bl(r), "nen_tang": bai["nen_tang"],
+            "tac_gia": str(r.get("kenh") or "")[:200], "noi_dung": str(r.get("text") or "")[:1000],
+            "thich": _so_hay_none(r.get("likes")), "tra_loi": _so_hay_none(r.get("replies")),
+            "la_tra_loi": bool(r.get("cha")), "cua_thuong_hieu": nha,
+            "dang_luc": _gio_bl(r.get("thoi_gian")), "sac_thai": None, "chu_de": None,
+            "likes": r.get("likes"), "text": r.get("text")}
+
+
+def _phan_bl(v) -> list[dict]:
+    with v._khoa:
+        return v.d.setdefault("nen_tang", {}).setdefault("binh_luan", {"phan": []})["phan"]
+
+
+def _tao_phan_bl(v, p: str, lo: list[dict], per: int) -> dict:
+    """Một phần bình luận cho các bài `lo` cùng nền tảng (lập rồi lưu sổ ngay)."""
+    _tao_cac_phan_bl(v, [dict(b, nen_tang=p) for b in lo], per)
+    return _phan_bl(v)[-1]
+
+
+def _tao_cac_phan_bl(v, ds: list[dict], per: int) -> None:
+    """Lập MỌI phần bình luận rồi lưu sổ một lần — bot tắt giữa chừng thì hoặc chưa có phần
+    nào (lần sau chọn lại), hoặc có đủ (không lặng lẽ bỏ nền tảng còn lại)."""
+    import deep_dive_tool as D
+    cac = []
+    for p in BL_NEN_TANG:
+        bp = [b for b in ds if b["nen_tang"] == p]
+        for i in range(0, len(bp), _BL_LO):
+            lo = bp[i:i + _BL_LO]
+            urls = [b["link"] for b in lo]
+            ph = {"id": f"bl-{p}-{len(_phan_bl(v)) + len(cac)}", "nen_tang": p, "trang_thai": "cho",
+                  "bai": [{k: b.get(k) for k in ("khoa", "link", "nen_tang", "tai_khoan",
+                                                 "tac_gia", "binh_luan", "nguon_loai")}
+                          for b in lo],
+                  "per": per, "gia": _BL_GIA.get(p, 0.0), "uoc_usd": uoc_binh_luan(len(lo), per, p)}
+            if p != "youtube":
+                ph.update(actor=D._ACTORS[p], payload=D._payload(p, urls, per),
+                          limit=D._limit(p, urls, per))
+            cac.append(ph)
+    if cac:
+        with v._khoa:
+            _phan_bl(v).extend(cac)
+            v.luu()
+
+
+def _con_viec(v) -> float:
+    """Ngân sách CỦA VIỆC còn lại (đã giữ chỗ trong sổ việc nền lúc tạo, ≤ trần console nền và
+    hạn mức tháng của tài khoản) trừ tiền các phần đã xong. Việc không có ngân sách (bộ thử cũ)
+    thì không giới hạn thêm. Review 15/10: bình luận không được vượt phần đã giữ chỗ — hai việc
+    nền song song mới không cùng tiêu quá hạn mức tài khoản."""
+    ns = v.d.get("ngan_sach_usd")
+    if ns is None:
+        return float("inf")
+    da = sum(float(ph.get("usd_so") or 0) for _, ph in v.cac_phan()
+             if ph.get("trang_thai") in _KET_PHAN)
+    return max(0.0, float(ns) - da)
+
+
+def _doc_bl(p: str, items: list) -> list[dict]:
+    import deep_dive_tool as D
+    rows, _ = {"tiktok": D._map_tiktok, "facebook": D._map_facebook,
+               "instagram": D._map_instagram}[p](items)
+    return rows
+
+
+def _quy_bl(rows: list[dict], bai: list[dict]) -> dict[str, list[dict]]:
+    """Bình luận → bài (theo id bài trong link, như `deep_dive_tool._quy_ve_bai`)."""
+    import deep_dive_tool as D
+    theo_link = {b["link"]: b for b in bai}
+    ra: dict[str, list[dict]] = {b["khoa"]: [] for b in bai}
+    for r in rows:
+        u = D._quy_ve_bai(r.get("_nguon") or [r.get("link") or ""], list(theo_link))
+        if u:
+            ra[theo_link[u]["khoa"]].append(r)
+    return ra
+
+
+def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
+    """Cào + gán nhãn + ghi bình luận cho các bài nên cào. -> thống kê. Tiền: run id nằm trong
+    phần "binh_luan" của việc nên `chot_chi_phi` tính chung. Không ném lỗi Apify ra ngoài —
+    bình luận hỏng thì lượt bài vẫn xong."""
+    import deep_dive_tool as D
+    import quet_lon
+    ma = du_an["ma"]
+    tk = {"bai": 0, "lay": 0, "moi": 0, "cu": 0, "nha": 0, "usd": 0.0, "ghi_chu": [],
+          "nhan": ""}
+    if not du_an.get("bl_bat", True) or int(du_an.get("bl_so_bai") or 0) <= 0:
+        return tk
+    per = max(5, min(200, int(du_an.get("bl_moi_bai") or 20)))
+    thuong_hieu = [du_an["ten"], *(du_an.get("tu_khoa") or [])]
+    if not _phan_bl(v):
+        dung = [p for p in BL_NEN_TANG if p == "youtube" and A._youtube_co_key()
+                or p != "youtube" and _nen_tang_dung_duoc(p)[0]]
+        ds = K.bai_can_lay_binh_luan(ma, dung, int(du_an["bl_so_bai"]))
+        _tao_cac_phan_bl(v, ds, per)
+    for ph in list(_phan_bl(v)):
+        p = ph["nen_tang"]
+        if ph.get("trang_thai") in _KET_PHAN:
+            continue
+        bai = ph["bai"]
+        tk["bai"] += len(bai)
+        rows: list[dict] = []
+        if p == "youtube":
+            kq = D._yt_api_lo([b["link"] for b in bai], per, han)
+            rows = kq["binh_luan"]
+            if kq["loi"]:
+                tk["ghi_chu"].append(f"bình luận YouTube: {A._che_token(kq['loi'])[:120]}")
+            _ghi_bl_kho(ma, luot, ph, rows, thuong_hieu, han, tk,
+                        day_du=not (kq["loi"] or kq["chua_chay"] or kq["mot_phan"]))
+            v.cap_nhat_phan(ph, trang_thai="xong" if not kq["loi"] else "mot_phan",
+                            ma="OK" if not kq["loi"] else "LOI", so_item=len(rows), usd_so=0.0,
+                            ly_do=kq["loi"][:200])
+            continue
+        dang_do = ph.get("trang_thai") in ("dang_gui", "dang_chay")
+        min_charge = float(D._MIN_CHARGE.get(p, 0.0))
+        if dang_do:
+            cap = float(ph.get("tran_usd") or 0) or _TRAN_TOI_THIEU
+        else:
+            tran_console = A._tran_nen_tang(p, nen=True)[1]
+            cap = round(min(tran_console, con, _con_viec(v), max(
+                _TRAN_TOI_THIEU, min_charge, float(ph["uoc_usd"]) * _HE_SO_TRAN)), 2)
+            het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
+            if cap < max(min_charge, _TRAN_TOI_THIEU) - 1e-9 or het_gio:
+                ly = ("hết giờ" if het_gio else
+                      f"trần còn {_usd(cap)} USD (trần console, phần còn của tháng và ngân sách "
+                      f"của lượt) < mức actor đòi {_usd(max(min_charge, _TRAN_TOI_THIEU))} USD")
+                tk["ghi_chu"].append(f"bình luận {_TEN[p]}: bỏ qua ({ly})")
+                v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0, usd_so=0.0,
+                                ly_do=ly)
+                continue
+        items, meta, loi, khong_kiem = _chay_actor(v, p, ph, cap, han, min_charge)
+        if khong_kiem is not None:
+            v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
+                            usd_so=khong_kiem, ly_do=quet_lon._CAU_KHONG_KIEM)
+            con = max(0.0, con - khong_kiem)
+            continue
+        try:
+            rows = _doc_bl(p, items)
+        except RuntimeError as e:             # shape lạ: báo, không ghi bừa
+            loi = loi or A.LoiApify("LOI", str(e)[:250])
+        tien = quet_lon._so_tien(p, ph, items, meta)
+        con = max(0.0, con - tien)
+        tk["usd"] += tien
+        if loi is not None:
+            tk["ghi_chu"].append(f"bình luận {_TEN[p]}: {A._che_token(str(loi))[:120]}")
+        # Ghi kho TRƯỚC khi đánh dấu phần xong: khởi động lại giữa hai bước thì đọc lại run.
+        _ghi_bl_kho(ma, luot, ph, rows, thuong_hieu, han, tk,
+                    day_du=loi is None and meta.get("ma", "OK") == "OK")
+        quet_lon._ket_phan(v, ph, meta, len(items), loi, usd_so=tien)
+    tk["usd"] = round(tk["usd"], 4)
+    return tk
+
+
+def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: list[str],
+                han: float, tk: dict, day_du: bool = True) -> None:
+    """`day_du`=False (lỗi, huỷ, hết giờ, hết quota): chỉ bài CÓ bình luận trả về được đánh dấu
+    đã cào — bài 0 dòng vì lỗi không bị gạch khỏi lượt sau (review 15/10)."""
+    import phan_loai
+    bai = ph["bai"]
+    theo = _quy_bl(rows, bai)
+    dong: list[dict] = []
+    da_lay: dict[str, tuple[int, int | None]] = {}
+    for b in bai:
+        cua = theo.get(b["khoa"]) or []
+        thay: set[str] = set()
+        for r in cua:
+            d = _dong_bl(r, b, thuong_hieu)
+            if d["ma"] in thay:
+                continue
+            thay.add(d["ma"])
+            dong.append(d)
+        if thay or day_du:
+            da_lay[b["khoa"]] = (len(thay), _so_hay_none(b.get("binh_luan")))
+    khach = [d for d in dong if not d["cua_thuong_hieu"] and str(d.get("text") or "").strip()]
+    tk["nha"] += len(dong) - len(khach)
+    if khach:
+        tt: dict = {}
+        nhan = phan_loai.phan_loai_binh_luan(
+            khach, max(0.0, min(120.0, han - time.monotonic() - 20)), tt, song_song=2)
+        for d, (s, c) in zip(khach, nhan):
+            if s != phan_loai.CHUA:
+                d["sac_thai"] = s
+            if c != phan_loai.CHUA:
+                d["chu_de"] = c
+        tk["nhan"] = tt.get("trang_thai") or tk["nhan"]
+    moi, cu = K.ghi_binh_luan(ma, luot, dong, da_lay)
+    tk["lay"] += len(dong)
+    tk["moi"] += moi
+    tk["cu"] += cu
 
 
 def _chay_viec(v) -> tuple[str, str]:
@@ -611,6 +870,7 @@ def _chay_viec(v) -> tuple[str, str]:
     loi: dict[int, str] = {}
     ghi_chu: list[str] = []
     moi = cu = lam_moi = 0
+    bl: dict = {}
     ok: list[int] = []
     loi_chung = None
     usd = 0.0
@@ -618,7 +878,11 @@ def _chay_viec(v) -> tuple[str, str]:
         # Đọc LẠI nguồn: nguồn đã tạm dừng/xoá sau khi tạo việc thì không quét. Nguồn đã quét
         # xong ở lần chạy trước khởi động lại (đã dời quet_cuoi) vẫn giữ để đọc lại bài từ đĩa.
         nguon = {int(n["id"]): n for n in K.nguon_toi_han(ma) if int(n["id"]) in ids}
-        con = max(0.0, float(du_an["tran_usd_thang"] or 0) - K.da_tieu_thang(ma))
+        # Review 15/10: lượt chỉ ghi chi phí vào kho ở `finally` — khởi động lại giữa chừng thì
+        # tiền các phần đã xong của việc này chưa nằm trong "đã tiêu tháng": trừ ở đây.
+        da_xong = sum(float(ph.get("usd_so") or 0) for _, ph in v.cac_phan()
+                      if ph.get("trang_thai") in _KET_PHAN)
+        con = max(0.0, float(du_an["tran_usd_thang"] or 0) - K.da_tieu_thang(ma) - da_xong)
         han = v.han_mono(_CHUA_GIAY_CUOI)
         for p in THU_TU:
             for ph in ((v.d.get("nen_tang") or {}).get(p) or {}).get("phan") or []:
@@ -684,6 +948,12 @@ def _chay_viec(v) -> tuple[str, str]:
         if rows:
             moi, cu = K.ghi_bai(ma, luot, "theo_doi", rows)
         lam_moi = _lam_moi_youtube(ma, luot)
+        try:
+            bl = _lay_binh_luan(v, du_an, luot, con, han)
+        except Exception as e:  # bình luận hỏng không làm hỏng lượt bài
+            if type(e).__name__ == "MatQuyen":
+                raise
+            bl = {"ghi_chu": [f"bình luận lỗi: {A._che_token(f'{type(e).__name__}: {e}')[:150]}"]}
         ok = sorted(i for i in xong_ids if i in nguon and i not in loi)
         K.danh_dau_nguon(ok, {k: x for k, x in loi.items() if k in nguon})
     except Exception as e:
@@ -695,13 +965,14 @@ def _chay_viec(v) -> tuple[str, str]:
         # đếm thiếu và lượt sau quét lại, trả tiền lần nữa.
         if v.run_ids():
             usd = float(v.chot_chi_phi([f"theo dõi {ma}"], sorted(
-                {p for p, _ in v.cac_phan() if p != "youtube"}), _hom_nay()).get("usd") or 0)
+                {p for p, _ in v.cac_phan() if p not in ("youtube", "binh_luan")}),
+                _hom_nay()).get("usd") or 0)
         trang_thai = ("da_huy" if v.da_huy() else "loi" if loi_chung or not ok and nguon
                       else "xong" if not loi and not ghi_chu else "mot_phan")
         try:
             K.dong_luot(luot, trang_thai=trang_thai, so_nguon=len(nguon), so_nguon_loi=len(loi),
                         bai_moi=moi, bai_cap_nhat=cu + lam_moi, chi_phi_usd=usd,
-                        ghi_chu="; ".join(ghi_chu) or None,
+                        ghi_chu="; ".join([*ghi_chu, *_cau_bl(bl)]) or None,
                         loi=(loi_chung or "; ".join(sorted(set(loi.values())))[:500] or None))
         except K.LoiKho as e:
             print(f"[theo_doi] không đóng được lượt {luot}: {e}", flush=True)
@@ -729,8 +1000,24 @@ def _chay_viec(v) -> tuple[str, str]:
         van_ban += f" {len(loi)} nguồn lỗi: " + "; ".join(sorted(set(loi.values())))[:300] + "."
     if ghi_chu:
         van_ban += " " + "; ".join(ghi_chu) + "."
+    if _cau_bl(bl):
+        van_ban += " " + "; ".join(_cau_bl(bl)) + "."
     st_viec = {"mot_phan": "xong_mot_phan"}.get(trang_thai, trang_thai)
     return st_viec, van_ban
+
+
+def _cau_bl(bl: dict) -> list[str]:
+    """Câu tóm tắt bước bình luận cho lượt quét + tin nhắn kết quả."""
+    if not bl:
+        return []
+    ra = []
+    if bl.get("bai"):
+        ra.append(f"bình luận: đọc {bl.get('lay', 0)} bình luận của {bl['bai']} bài "
+                  f"({bl.get('moi', 0)} mới"
+                  + (f", {bl['nha']} của chính thương hiệu" if bl.get("nha") else "")
+                  + f"), {_usd(bl.get('usd') or 0)} USD"
+                  + (f", gán nhãn: {bl['nhan']}" if bl.get("nhan") else ""))
+    return ra + list(bl.get("ghi_chu") or [])
 
 
 def _lam_moi_youtube(ma: str, luot: int) -> int:

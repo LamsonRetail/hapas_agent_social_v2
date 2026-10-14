@@ -170,6 +170,39 @@ OPTIONS(description='''[Lớp] Raw
 [Không dùng khi] Nội dung và tương tác bài → dùng SOCIAL_LISTENING.bai; cấu hình trần tháng → dùng SOCIAL_LISTENING.du_an
 [Lưu ý] Tháng của ngân sách tính theo giờ VN: DATE_TRUNC(DATE(bat_dau, "Asia/Ho_Chi_Minh"), MONTH). Lượt kẹt dang_chay quá 3 giờ được đóng thành loi ở lượt sau.''');
 
+CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.binh_luan`
+(
+  du_an           STRING    OPTIONS(description='Dự án. Một phần PK. FK (cùng khoa_bai) → bai.du_an.'),
+  khoa_bai        STRING    OPTIONS(description='Khoá bài chứa bình luận "<nền tảng>:<id bài>". Một phần PK. FK (cùng du_an) → bai.khoa.'),
+  ma              STRING    OPTIONS(description='Mã bình luận trên nền tảng; không có thì "h" + 16 ký tự băm SHA-1 (tác giả, nội dung, thời điểm). Một phần PK.'),
+  nen_tang        STRING    OPTIONS(description='Nền tảng. Giá trị: tiktok, instagram, youtube, facebook.'),
+  tac_gia         STRING    OPTIONS(description='Tên/username công khai của người bình luận trên nền tảng. Chuỗi rỗng khi không có.'),
+  noi_dung        STRING    OPTIONS(description='Nội dung bình luận, tối đa 1.000 ký tự.'),
+  thich           INT64     OPTIONS(description='Lượt thích bình luận lúc cào, lượt. NULL khi nền tảng không trả.'),
+  tra_loi         INT64     OPTIONS(description='Số trả lời của bình luận lúc cào, bình luận. NULL khi nền tảng không trả.'),
+  la_tra_loi      BOOL      OPTIONS(description='TRUE: dòng là trả lời của bình luận khác. FALSE: bình luận gốc.'),
+  cua_thuong_hieu BOOL      OPTIONS(description='TRUE: do tài khoản của chính thương hiệu viết — không gán nhãn, loại khỏi sắc thái. FALSE: khách.'),
+  dang_luc        TIMESTAMP OPTIONS(description='Thời điểm đăng bình luận, UTC (giờ VN = +7). NULL khi nền tảng chỉ trả thời gian tương đối.'),
+  sac_thai        STRING    OPTIONS(description='Sắc thái AI/luật gán. Giá trị: Tích cực, Tiêu cực, Trung lập. NULL khi chưa gán hoặc bình luận của thương hiệu.'),
+  chu_de          STRING    OPTIONS(description='Chủ đề bình luận (7 nhóm: Sản phẩm/chất lượng, Giá/mua ở đâu/ý định mua, KOL/nội dung, Giao hàng/dịch vụ, Đối thủ, Tag bạn bè, Khác). NULL khi chưa gán.'),
+  luot_id         INT64     OPTIONS(description='Lượt quét cào bình luận gần nhất. FK → luot_quet.id.'),
+  thay_lan_dau    TIMESTAMP OPTIONS(description='Thời điểm Mark ghi bình luận lần đầu, UTC.'),
+  cap_nhat_cuoi   TIMESTAMP OPTIONS(description='Thời điểm cập nhật gần nhất ở DB nguồn, UTC. Mốc đồng bộ.'),
+  dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
+)
+CLUSTER BY du_an, nen_tang
+OPTIONS(description='''[Lớp] Raw
+[Mục đích] Bình luận (và trả lời) dưới các bài đã giữ của dự án, kèm sắc thái và chủ đề AI gán — tiếng khách hàng.
+[Grain] 1 dòng = 1 bình luận × 1 bài × 1 dự án
+[Khoá] PK: du_an + khoa_bai + ma | Join: (du_an, khoa_bai) → bai.(du_an, khoa); luot_id → luot_quet.id
+[Nguồn] Postgres lang_nghe.public.binh_luan trên VPS Mark; Mark cào sau mỗi lượt /theodoi (Apify comments scraper TikTok/Facebook/Instagram, YouTube Data API)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; tối đa bl_so_bai bài × bl_moi_bai bình luận mỗi lượt; từ 15/10/2026
+[Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; bình luận của thương hiệu đánh dấu cua_thuong_hieu, không gán nhãn
+[Refresh] MERGE theo du_an + khoa_bai + ma các dòng có cap_nhat_cuoi mới, sau mỗi lượt quét và 6 giờ một lần
+[Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày
+[Không dùng khi] Tổng bình luận nền tảng báo của bài → dùng SOCIAL_LISTENING.bai.binh_luan
+[Lưu ý] MẪU bình luận (bài nhiều bình luận nhất, tối đa bl_moi_bai mỗi bài), không phải toàn bộ; Instagram/Facebook chưa đăng nhập chỉ trả một phần; lọc cua_thuong_hieu = FALSE khi tính sắc thái.''');
+
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`
 --   WHERE option_name = 'description';
