@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block tieu_de %}Chỉ số{% endblock %}
+{% block dau %}
+<script src="{{ ECHARTS }}" integrity="{{ ECHARTS_SRI }}" defer></script>
+<script src="/tinh/chi_so.js" defer></script>
+{% endblock %}
+{% block noi_dung %}
+{% if not du_an %}
+<div class="the-khoi">
+  <h1>Chỉ số</h1>
+  <p>Chưa có dự án nào. {% if nguoi.vai_tro == 'quan_ly' %}Thêm dự án ở trang <a href="/nguon">Nguồn</a>.{% else %}Nhờ người quản lý thêm dự án.{% endif %}</p>
+</div>
+{% else %}
+<script type="application/json" id="cau-hinh-chi-so">{{ loc|json_script }}</script>
+<div class="tieu-de-khoi">
+  <h1>Chỉ số — {{ du_an.ten }}</h1>
+  <span class="mo nho" id="cap-nhat-luc" aria-live="polite">Đang tải…</span>
+</div>
+
+<form class="the-khoi hang cach-duoi" method="get" action="/">
+  <label class="o">Dự án
+    <select name="du_an">
+      {% for d in du_an_ds %}<option value="{{ d.ma }}"{% if d.ma == du_an.ma %} selected{% endif %}>{{ d.ten }}{% if not d.dang_bat %} (đang tắt){% endif %}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="o">Từ ngày <input type="date" name="tu" value="{{ loc.tu }}"></label>
+  <label class="o">Đến ngày <input type="date" name="den" value="{{ loc.den }}"></label>
+  <label class="o">Nền tảng
+    <select name="nen_tang">
+      <option value="">Tất cả</option>
+      {% for k, v in TEN_NEN_TANG.items() %}<option value="{{ k }}"{% if loc.nen_tang == k %} selected{% endif %}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="o">Loại nguồn
+    <select name="loai">
+      <option value="">Tất cả</option>
+      {% for k, v in TEN_LOAI.items() %}<option value="{{ k }}"{% if loc.loai == k %} selected{% endif %}>{{ v }}</option>{% endfor %}
+    </select>
+  </label>
+  <button class="nut" type="submit">Xem</button>
+</form>
+{% if loi_loc %}<div class="thong-bao thong-bao--loi">{{ loi_loc }} Đang hiện 30 ngày trọn gần nhất.</div>{% endif %}
+<p class="ghi-chu sat-tren cach-duoi">Mặc định: 30 ngày trọn tới hết hôm qua (giờ VN), so với 30 ngày liền trước.
+  {% if chua_tron %}<b>Khoảng đang chọn có hôm nay — ngày chưa hết nên số ngày cuối và % so với kỳ trước còn thấp hơn thực tế.</b>{% endif %}</p>
+<div class="thong-bao thong-bao--loi" id="loi-tai" hidden></div>
+<div class="thong-bao thong-bao--loi" id="canh-bao" hidden>Khoảng này có quá nhiều bài — chỉ tính 20.000 bài MỚI NHẤT; đầu khoảng và kỳ trước bị thiếu nên % so sánh không đáng tin. Chọn khoảng ngắn hơn.</div>
+
+<div class="luoi luoi--kpi" id="kpi" aria-live="polite"></div>
+<p class="ghi-chu" id="ky-truoc"></p>
+
+<section class="the-khoi cach-doc">
+  <div class="tieu-de-khoi"><h2>Thảo luận</h2><span class="mo nho" id="don-vi-xu-huong"></span></div>
+  <p class="ghi-chu sat-tren">Thảo luận = số bài + số bình luận nền tảng báo trên các bài đó (cách tính của Kompa).</p>
+  <div class="bieu-do" id="bd-xu-huong" role="img" aria-label="Biểu đồ thảo luận theo thời gian"></div>
+</section>
+
+<section class="the-khoi cach-duoi">
+  <h2>Bài đăng theo sắc thái</h2>
+  <div class="bieu-do" id="bd-bai-ngay" role="img" aria-label="Biểu đồ số bài theo sắc thái theo thời gian"></div>
+</section>
+
+<div class="luoi luoi--2">
+  <section class="the-khoi">
+    <h2>Sắc thái</h2>
+    <div class="bieu-do bieu-do--thap" id="bd-sac-thai" role="img" aria-label="Biểu đồ sắc thái"></div>
+    <p class="ghi-chu" id="ghi-chu-sac-thai"></p>
+  </section>
+  <section class="the-khoi">
+    <h2>Chủ đề × sắc thái</h2>
+    <div class="bieu-do" id="bd-chu-de" role="img" aria-label="Biểu đồ chủ đề theo sắc thái"></div>
+    <p class="trong" id="trong-chu-de" hidden>Chưa có bài được gán chủ đề.</p>
+  </section>
+</div>
+
+<div class="luoi luoi--2">
+  <section class="the-khoi">
+    <h2>Theo nền tảng</h2>
+    <div class="bieu-do bieu-do--thap" id="bd-nen-tang" role="img" aria-label="Thảo luận theo nền tảng"></div>
+  </section>
+  <section class="the-khoi">
+    <h2>Theo loại nguồn</h2>
+    <div class="bieu-do bieu-do--thap" id="bd-loai-nguon" role="img" aria-label="Thảo luận theo loại nguồn"></div>
+  </section>
+</div>
+
+<section class="the-khoi cach-duoi">
+  <h2>Nguồn nổi bật</h2>
+  <div class="tab" id="tab-nen-tang" role="tablist" aria-label="Nền tảng"></div>
+  <div id="top-nguon"></div>
+</section>
+
+<section class="the-khoi cach-duoi">
+  <h2>Từ khoá nổi bật</h2>
+  <p class="ghi-chu sat-tren">Hashtag và cụm hai chữ, đếm theo số bài nhắc; đã bỏ chính từ khoá của dự án và bài kênh nhà.</p>
+  <div class="tu-khoa" id="tu-khoa"></div>
+</section>
+
+<section class="the-khoi">
+  <h2>Bài nổi bật</h2>
+  <div id="top-bai"></div>
+</section>
+{% endif %}
+{% endblock %}

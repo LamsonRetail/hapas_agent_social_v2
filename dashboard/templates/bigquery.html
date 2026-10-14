@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block tieu_de %}Kết nối BigQuery{% endblock %}
+{% block noi_dung %}
+<h1>Kết nối BigQuery</h1>
+<p class="ghi-chu sat-tren cach-duoi">Dashboard đẩy kho lắng nghe lên BigQuery sau mỗi lượt quét và 6 giờ một lần (MERGE theo khoá, không nhân đôi). KHÔNG đẩy: người xem, nhật ký, đề xuất nguồn, cột email (người sửa/người thêm). Báo cáo BI đọc các bảng của dataset dưới đây — bảng và cột đã có mô tả theo quy chuẩn 11 nhãn (xem <code>deploy/lang-nghe/bigquery.sql</code>).</p>
+
+{% if loi_tt %}<div class="thong-bao thong-bao--loi">{{ loi_tt }}</div>{% endif %}
+
+<section class="the-khoi cach-duoi">
+  <div class="tieu-de-khoi">
+    <h2>Dataset:
+      {% if tt.da_bat %}<code>{{ tt.dataset }}</code> <span class="the the--tot">Đang bật</span>
+      {% else %}<span class="the">chưa bật — thiếu BQ_DATASET</span>{% endif %}
+    </h2>
+    {% if nguoi.vai_tro == 'quan_ly' %}
+    <form method="post" action="/bigquery/dong-bo">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <button class="nut" type="submit"{% if not tt.da_bat %} disabled title="Chưa bật đồng bộ"{% endif %}>Đồng bộ ngay</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="cuon-ngang">
+  <table>
+    <thead><tr><th>Bảng</th><th>Mốc đã đẩy tới</th><th>Lần chạy cuối</th><th class="so">Số dòng lần cuối</th><th>Lỗi</th></tr></thead>
+    <tbody>
+    {% for b in tt.bang %}
+      <tr>
+        <td><code>{{ b.bang }}</code></td>
+        <td class="nho">{{ b.moc|gio_vn if b.moc else '—' }}</td>
+        <td class="nho">{{ b.lan_cuoi|gio_vn if b.lan_cuoi else 'chưa chạy' }}</td>
+        <td class="so">{{ b.so_dong|so_vn if b.so_dong is not none else '—' }}</td>
+        <td class="nho">{% if b.loi %}<span class="the the--loi">lỗi</span> <span class="cat-chu" title="{{ b.loi }}">{{ b.loi }}</span>{% else %}<span class="mo">—</span>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="trong">Chưa có thông tin đồng bộ.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="ghi-chu">Bảng nhỏ (du_an, nguon) nạp lại toàn bộ mỗi lần; bảng lớn (luot_quet, bai, chi_so_ngay) chỉ đẩy dòng mới/sửa sau mốc.</p>
+</section>
+{% endblock %}

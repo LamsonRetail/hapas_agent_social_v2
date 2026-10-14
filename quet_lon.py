@@ -1718,6 +1718,12 @@ def chay_viec(v) -> tuple[str, str]:
     ket["sac_thai"] = A.thong_ke_sac_thai([d for d, _ in ket["hits"] if not khac(d)])
     # Tổng hợp kiểu dashboard + bình luận YouTube (13/10/2026) trên bài của các tab nền tảng.
     hits_chinh = [(d, dt) for d, dt in ket["hits"] if not khac(d)]
+    # Đợt 2 (14/10/2026): bài đã giữ + nguồn nổi chưa theo dõi vào kho lắng nghe (luồng nền).
+    try:
+        import theo_doi
+        theo_doi.luu_tu_khoa_nen(ts["queries"], hits_chinh)
+    except Exception as e:  # noqa: BLE001
+        log.append(f"kho lắng nghe: {type(e).__name__}")
     # Phần THÊM: lỗi thì bỏ (ghi chú), không làm hỏng việc đã trả tiền.
     try:
         ket["bl_yt"] = _binh_luan_youtube_nen(v, ts, hits_chinh, cho_ai)

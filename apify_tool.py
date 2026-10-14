@@ -4072,6 +4072,13 @@ def _handle(args: dict, **kwargs) -> str:
     hits_chinh = [(d, dt) for d, dt in hits if not _nuoc_khac(d)]
     hits_khac = [(d, dt) for d, dt in hits if _nuoc_khac(d)]
     danh_dau_bai_nha([d for d, _ in hits], queries)
+    # Đợt 2 (14/10/2026): bài đã giữ + nguồn nổi chưa theo dõi vào kho lắng nghe (luồng nền,
+    # lỗi chỉ ghi log, không đụng tới câu trả lời).
+    try:
+        import theo_doi
+        theo_doi.luu_tu_khoa_nen(queries, hits_chinh)
+    except Exception as e:  # noqa: BLE001
+        print(f"[apify] bỏ ghi kho lắng nghe: {type(e).__name__}", flush=True)
     # Cột mới nối ở CUỐI: 12 cột đầu giữ nguyên vị trí cho người/công cụ đã quen; cột loại
     # video TikTok sau cùng để các cột "Nhận định AI"/"Sắc thái"/nguồn không đổi chỗ.
     rows = [list(_HEADER) + _COT_THEM_BAI + [_COT_LOAI_VIDEO, _COT_CHU_DE]] + [

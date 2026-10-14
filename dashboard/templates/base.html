@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>{% block tieu_de %}Lắng nghe MXH{% endblock %} · HAPAS</title>
+<link rel="stylesheet" href="/tinh/giao_dien.css">
+<script src="/tinh/chung.js" defer></script>
+{% block dau %}{% endblock %}
+</head>
+<body>
+<header class="dau-trang">
+  <div class="khung dau-trang__trong">
+    <a class="ten-trang" href="/">Lắng nghe MXH</a>
+    {% if nguoi %}
+    <nav class="dieu-huong" aria-label="Điều hướng chính">
+      <a href="/"{% if trang_hien == 'chi_so' %} aria-current="page"{% endif %}>Chỉ số</a>
+      <a href="/nguon"{% if trang_hien == 'nguon' %} aria-current="page"{% endif %}>Nguồn</a>
+      <a href="/ngan-sach"{% if trang_hien == 'ngan_sach' %} aria-current="page"{% endif %}>Ngân sách</a>
+      <a href="/bigquery"{% if trang_hien == 'bigquery' %} aria-current="page"{% endif %}>BigQuery</a>
+      {% if nguoi.vai_tro == 'quan_ly' %}
+      <a href="/nguoi-xem"{% if trang_hien == 'nguoi_xem' %} aria-current="page"{% endif %}>Người xem</a>
+      {% endif %}
+    </nav>
+    <div class="tai-khoan">
+      <span class="email" title="{{ nguoi.email }}">{{ nguoi.email }}</span>
+      <span class="the">{{ VAI_TRO[nguoi.vai_tro] }}</span>
+      <form method="post" action="/dang-xuat">
+        <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+        <button class="nut nut--nhe nut--nho" type="submit">Đăng xuất</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</header>
+<main class="khung">
+  {% if tb %}
+  <div class="thong-bao thong-bao--{{ 'loi' if tb.loai == 'loi' else 'ok' }}" role="status">{{ tb.nd }}</div>
+  {% endif %}
+  {% block noi_dung %}{% endblock %}
+</main>
+<footer class="khung chan-trang">
+  {{ LICH_CHAY }} Dashboard chỉ gồm chỉ số, nguồn, ngân sách và người xem; kỹ năng và công tắc của Mark vẫn ở console platform.
+</footer>
+</body>
+</html>

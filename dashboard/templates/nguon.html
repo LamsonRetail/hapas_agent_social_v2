@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block tieu_de %}Nguồn theo dõi{% endblock %}
+{% block noi_dung %}
+{% set ql = nguoi.vai_tro == 'quan_ly' %}
+<div class="tieu-de-khoi">
+  <h1>Dự án &amp; nguồn theo dõi{% if du_an %} — {{ du_an.ten }}{% endif %}</h1>
+  {% if du_an_ds %}
+  <form class="hang" method="get" action="/nguon">
+    <label class="o">Dự án
+      <select name="du_an">
+        {% for d in du_an_ds %}<option value="{{ d.ma }}"{% if du_an and d.ma == du_an.ma %} selected{% endif %}>{{ d.ten }} ({{ d.ma }})</option>{% endfor %}
+      </select>
+    </label>
+    <button class="nut nut--nhe" type="submit">Chọn</button>
+  </form>
+  {% endif %}
+</div>
+<p class="ghi-chu sat-tren cach-duoi">{{ LICH_CHAY }}</p>
+
+{% if du_an %}
+<section class="the-khoi cach-duoi">
+  <div class="tieu-de-khoi">
+    <h2>Dự án {{ du_an.ten }} <span class="the">{{ du_an.ma }}</span>
+      {% if du_an.dang_bat %}<span class="the the--tot">Đang bật</span>{% else %}<span class="the the--loi">Đang tắt</span>{% endif %}</h2>
+    <span class="mo nho">Sửa lần cuối {{ du_an.sua_luc|gio_vn }}{% if du_an.sua_boi %} bởi {{ du_an.sua_boi }}{% endif %}</span>
+  </div>
+  <div class="luoi luoi--3">
+    <div><h3>Từ khoá</h3>{% for x in du_an.tu_khoa %}<span class="the the--nhan">{{ x }}</span> {% else %}<span class="mo">—</span>{% endfor %}</div>
+    <div><h3>Từ loại trừ</h3>{% for x in du_an.tu_loai_tru %}<span class="the">{{ x }}</span> {% else %}<span class="mo">—</span>{% endfor %}</div>
+    <div><h3>Thị trường · trần tháng</h3>{{ du_an.thi_truong }} · {{ du_an.tran_usd_thang|usd_vn }} USD <a class="nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}">(sửa ở Ngân sách)</a></div>
+  </div>
+  {% if du_an.boi_canh %}<p class="ghi-chu">Bối cảnh cho bước AI: {{ du_an.boi_canh }}</p>{% endif %}
+  {% if ql %}
+  <details>
+    <summary>Sửa dự án</summary>
+    <form method="post" action="/du-an/{{ du_an.ma|urlencode }}/sua" class="luoi-form">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o">Tên dự án <input type="text" name="ten" value="{{ du_an.ten }}" required maxlength="200"></label>
+      <label class="o">Thị trường (mã 2 chữ) <input type="text" name="thi_truong" value="{{ du_an.thi_truong }}" maxlength="2" required></label>
+      <label class="o rong">Từ khoá (cách nhau bằng dấu phẩy) <input type="text" name="tu_khoa" value="{{ du_an.tu_khoa|join(', ') }}" required></label>
+      <label class="o rong">Từ loại trừ (bài có từ này bị bỏ, không qua AI) <input type="text" name="tu_loai_tru" value="{{ du_an.tu_loai_tru|join(', ') }}"></label>
+      <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000">{{ du_an.boi_canh }}</textarea></label>
+      <label class="o"><span><input type="checkbox" name="dang_bat" value="1"{% if du_an.dang_bat %} checked{% endif %}> Đang bật (tắt thì /theodoi không quét)</span></label>
+      <div><button class="nut" type="submit">Lưu dự án</button></div>
+    </form>
+  </details>
+  {% endif %}
+</section>
+
+<section class="the-khoi cach-duoi">
+  <div class="tieu-de-khoi"><h2>Nguồn đang có ({{ nguon|length }})</h2>
+    <span class="mo nho">Mark quét nguồn "đang theo dõi" đã tới chu kỳ, mỗi lần tối đa "số bài mỗi lần" bài mới nhất.</span></div>
+  {% if nguon %}
+  <div class="cuon-ngang">
+  <table>
+    <thead><tr>
+      <th>Nguồn</th><th>Loại</th><th>Nhãn</th><th>Trạng thái</th><th class="so">Chu kỳ</th><th class="so">Bài/lần</th>
+      <th>Quét cuối</th><th>Lỗi cuối</th><th>Thêm</th>{% if ql %}<th></th>{% endif %}
+    </tr></thead>
+    <tbody>
+    {% for n in nguon %}
+      <tr>
+        <td><span class="the">{{ n.nen_tang|ten_nen_tang }}</span>
+          {% set lk = n.link|link_an_toan %}{% if lk %}<a href="{{ lk }}" target="_blank" rel="noopener noreferrer">{{ n.ten or n.dinh_danh }}</a>{% else %}{{ n.ten or n.dinh_danh }}{% endif %}
+          <div class="mo nho">{{ n.dinh_danh }}</div></td>
+        <td>{{ LOAI_NGUON.get(n.loai, n.loai) }}</td>
+        <td>{% for x in n.nhan %}<span class="the">{{ x }}</span> {% endfor %}</td>
+        <td>{% if n.trang_thai == 'dang_theo_doi' %}<span class="the the--tot">Đang theo dõi</span>{% else %}<span class="the">Tạm dừng</span>{% endif %}</td>
+        <td class="so">{{ n.chu_ky_ngay }} ngày</td>
+        <td class="so">{{ n.so_bai_moi_lan }}</td>
+        <td class="nho">{{ n.quet_cuoi|gio_vn if n.quet_cuoi else 'chưa quét' }}</td>
+        <td class="nho">{% if n.loi_cuoi %}<span class="the the--loi">lỗi</span> {{ n.loi_cuoi }}<div class="mo">{{ n.loi_luc|gio_vn }}</div>{% else %}<span class="mo">—</span>{% endif %}</td>
+        <td class="nho">{{ {'dashboard': 'tay', 'de_xuat': 'đề xuất', 'nhap_file': 'nhập tệp'}.get(n.them_qua, n.them_qua) }}<div class="mo">{{ n.them_boi or '' }}</div></td>
+        {% if ql %}
+        <td>
+          <div class="cum-nut">
+            <form method="post" action="/nguon/{{ n.id }}/trang-thai">
+              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+              <input type="hidden" name="trang_thai" value="{{ 'tam_dung' if n.trang_thai == 'dang_theo_doi' else 'dang_theo_doi' }}">
+              <button class="nut nut--nhe nut--nho" type="submit">{{ 'Tạm dừng' if n.trang_thai == 'dang_theo_doi' else 'Tiếp tục' }}</button>
+            </form>
+            <form method="post" action="/nguon/{{ n.id }}/xoa" data-xac-nhan="Xoá nguồn {{ n.dinh_danh }}? Bài đã quét vẫn giữ nhưng không còn gắn với nguồn. Muốn ngừng quét thì nên Tạm dừng.">
+              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+              <button class="nut nut--loi nut--nho" type="submit">Xoá</button>
+            </form>
+          </div>
+          <details>
+            <summary class="nho">Sửa</summary>
+            <form method="post" action="/nguon/{{ n.id }}/sua" class="luoi-form">
+              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+              <label class="o">Nền tảng
+                <select name="nen_tang">{% for k, v in TEN_NEN_TANG.items() %}<option value="{{ k }}"{% if n.nen_tang == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+              <label class="o">Tài khoản / link trang <input type="text" name="dinh_danh" value="{{ n.dinh_danh }}" required maxlength="500"></label>
+              <label class="o">Tên hiển thị <input type="text" name="ten" value="{{ n.ten }}" maxlength="200"></label>
+              <label class="o">Loại
+                <select name="loai">{% for k, v in LOAI_NGUON.items() %}<option value="{{ k }}"{% if n.loai == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+              <label class="o">Nhãn (dấu phẩy) <input type="text" name="nhan" value="{{ n.nhan|join(', ') }}"></label>
+              <label class="o">Chu kỳ quét (1–30 ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="{{ n.chu_ky_ngay }}" required></label>
+              <label class="o">Số bài mỗi lần (1–30) <input type="number" name="so_bai_moi_lan" min="1" max="30" value="{{ n.so_bai_moi_lan }}" required></label>
+              <div><button class="nut nut--nho" type="submit">Lưu</button></div>
+            </form>
+          </details>
+        </td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="trong">Dự án chưa có nguồn nào.{% if ql %} Thêm nguồn ở dưới.{% endif %}</p>
+  {% endif %}
+</section>
+
+{% if ql %}
+<section class="the-khoi cach-duoi">
+  <h2>Thêm nguồn</h2>
+  <form method="post" action="/nguon/them" class="luoi-form">
+    <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+    <input type="hidden" name="du_an" value="{{ du_an.ma }}">
+    <label class="o">Nền tảng
+      <select name="nen_tang" required>{% for k, v in TEN_NEN_TANG.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+    <label class="o rong">Tài khoản hoặc link trang (dán nguyên link cũng được) <input type="text" name="dinh_danh" required maxlength="500" placeholder="vd @hapas.official, youtube.com/@hapas, facebook.com/hapasvn"></label>
+    <label class="o">Tên hiển thị (tuỳ chọn) <input type="text" name="ten" maxlength="200"></label>
+    <label class="o">Loại
+      <select name="loai">{% for k, v in LOAI_NGUON.items() %}<option value="{{ k }}"{% if k == 'kol' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+    <label class="o">Nhãn (dấu phẩy) <input type="text" name="nhan" maxlength="500"></label>
+    <label class="o">Chu kỳ quét (1–30 ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="1" required></label>
+    <label class="o">Số bài mỗi lần (1–30) <input type="number" name="so_bai_moi_lan" min="1" max="30" value="5" required></label>
+    <div><button class="nut" type="submit">Thêm nguồn</button></div>
+  </form>
+  <p class="ghi-chu">Kênh nhà (kênh của chính brand): Mark giữ mọi bài; nguồn khác chỉ giữ bài nhắc từ khoá dự án.</p>
+</section>
+{% endif %}
+
+<section class="the-khoi cach-duoi">
+  <h2>Đề xuất nguồn chờ duyệt ({{ de_xuat|length }})</h2>
+  <p class="ghi-chu sat-tren">Nguồn Mark thấy nổi khi quét mà chưa có trong danh sách. Mark không tự thêm nguồn — người quản lý duyệt ở đây.</p>
+  {% if de_xuat %}
+  <div class="cuon-ngang">
+  <table>
+    <thead><tr><th>Nguồn</th><th>Lý do</th><th class="so">Bài</th><th class="so">Thảo luận</th><th>Đề xuất lúc</th>{% if ql %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for x in de_xuat %}
+      <tr>
+        <td><span class="the">{{ x.nen_tang|ten_nen_tang }}</span>
+          {% set lk = x.link|link_an_toan %}{% if lk %}<a href="{{ lk }}" target="_blank" rel="noopener noreferrer">{{ x.ten or x.dinh_danh }}</a>{% else %}{{ x.ten or x.dinh_danh }}{% endif %}
+          <div class="mo nho">{{ x.dinh_danh }}</div></td>
+        <td class="nho">{{ x.ly_do }}</td>
+        <td class="so">{{ x.so_bai|so_vn }}</td>
+        <td class="so">{{ x.thao_luan|so_vn }}</td>
+        <td class="nho">{{ x.de_xuat_luc|gio_vn }}</td>
+        {% if ql %}
+        <td>
+          <div class="cum-nut">
+            <form method="post" action="/de-xuat/{{ x.id }}/duyet" class="hang">
+              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+              <select name="loai" aria-label="Loại nguồn">{% for k, v in LOAI_NGUON.items() %}<option value="{{ k }}"{% if k == 'kol' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select>
+              <button class="nut nut--nho" type="submit">Duyệt</button>
+            </form>
+            <form method="post" action="/de-xuat/{{ x.id }}/tu-choi">
+              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+              <button class="nut nut--nhe nut--nho" type="submit">Từ chối</button>
+            </form>
+          </div>
+        </td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="trong">Không có đề xuất nào đang chờ.</p>
+  {% endif %}
+</section>
+{% else %}
+<div class="the-khoi cach-duoi"><p>Chưa có dự án nào.{% if not ql %} Nhờ người quản lý thêm dự án.{% endif %}</p></div>
+{% endif %}
+
+{% if ql %}
+<section class="the-khoi">
+  <details{% if not du_an %} open{% endif %}>
+    <summary>Thêm dự án mới</summary>
+    <form method="post" action="/du-an/them" class="luoi-form">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o">Mã dự án (gõ sau /theodoi) <input type="text" name="ma" required maxlength="40" pattern="[a-z0-9][a-z0-9_\-]{1,39}" placeholder="vd hapas"></label>
+      <label class="o">Tên dự án <input type="text" name="ten" required maxlength="200"></label>
+      <label class="o">Thị trường (mã 2 chữ) <input type="text" name="thi_truong" value="VN" maxlength="2" required></label>
+      <label class="o rong">Từ khoá (cách nhau bằng dấu phẩy) <input type="text" name="tu_khoa" required placeholder="vd hapas, túi hapas"></label>
+      <label class="o rong">Từ loại trừ (tuỳ chọn) <input type="text" name="tu_loai_tru"></label>
+      <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000" placeholder="vd HAPAS — thương hiệu túi xách, trang sức Việt Nam"></textarea></label>
+      <label class="o"><span><input type="checkbox" name="dang_bat" value="1" checked> Bật ngay</span></label>
+      <div><button class="nut" type="submit">Thêm dự án</button></div>
+    </form>
+    <p class="ghi-chu">Trần tháng mặc định 5 USD — đổi ở trang Ngân sách.</p>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

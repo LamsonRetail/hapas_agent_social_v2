@@ -93,10 +93,20 @@ def _so(v) -> int:
 
 
 # ───────────────────────────── lấy dữ liệu ─────────────────────────────
+# Mỗi nền tảng tách làm ba: `_payload_*` (input actor), `_doc_*` (item -> hồ sơ + bài), `_lay_*`
+# (gọi actor rồi đọc). Lượt theo dõi nguồn (`theo_doi`, 14/10/2026) cần payload và bộ đọc riêng
+# để chạy qua `_run_actor` với trần USD của chính nó và đọc TIẾP run cũ sau khi bot khởi động
+# lại (`_doc_tiep_run`) — không POST lại, không trả tiền hai lần.
+def _payload_tiktok(ten: list[str], n: int) -> dict:
+    return {"profiles": ten, "resultsPerPage": n, "profileSorting": "latest",
+            "excludePinnedPosts": True}
+
+
 def _lay_tiktok(ten: list[str], n: int) -> dict[str, dict]:
-    raw = A._call(_ACTOR["tiktok"], {"profiles": ten, "resultsPerPage": n,
-                                     "profileSorting": "latest", "excludePinnedPosts": True},
-                  n * len(ten))
+    return _doc_tiktok(A._call(_ACTOR["tiktok"], _payload_tiktok(ten, n), n * len(ten)))
+
+
+def _doc_tiktok(raw: list) -> dict[str, dict]:
     ra: dict[str, dict] = {}
     for it in raw:
         am = it.get("authorMeta") or {}
@@ -122,9 +132,15 @@ def _lay_tiktok(ten: list[str], n: int) -> dict[str, dict]:
     return ra
 
 
+def _payload_facebook(urls: list[str], n: int) -> dict:
+    return {"startUrls": [{"url": u} for u in urls], "resultsLimit": n}
+
+
 def _lay_facebook(urls: list[str], n: int) -> dict[str, dict]:
-    raw = A._call(_ACTOR["facebook"], {"startUrls": [{"url": u} for u in urls],
-                                       "resultsLimit": n}, n * len(urls))
+    return _doc_facebook(A._call(_ACTOR["facebook"], _payload_facebook(urls, n), n * len(urls)))
+
+
+def _doc_facebook(raw: list) -> dict[str, dict]:
     ra: dict[str, dict] = {}
     for it in raw:
         if it.get("error"):
@@ -149,8 +165,15 @@ def _lay_facebook(urls: list[str], n: int) -> dict[str, dict]:
     return ra
 
 
+def _payload_instagram(ten: list[str]) -> dict:
+    return {"usernames": ten}
+
+
 def _lay_instagram(ten: list[str], n: int) -> dict[str, dict]:
-    raw = A._call(_ACTOR["instagram"], {"usernames": ten}, len(ten))
+    return _doc_instagram(A._call(_ACTOR["instagram"], _payload_instagram(ten), len(ten)), n)
+
+
+def _doc_instagram(raw: list, n: int) -> dict[str, dict]:
     ra: dict[str, dict] = {}
     for it in raw:
         k = str(it.get("username") or "").lower()

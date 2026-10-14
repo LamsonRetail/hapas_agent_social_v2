@@ -87,7 +87,9 @@ LENH_TOOL_TU_DO: dict[str, str] = {
 #: Lệnh tự trả lời, không gọi model. Rẻ, nhanh, và quan trọng hơn: không bịa được.
 #: `/viec` (02/10/2026): xem việc quét nền của cuộc chat — đọc thẳng sổ `viec_nen`, không
 #: gọi model, nên tiến độ/link/chi phí là số thật, không phải model kể lại.
-LENH_TIEN_ICH = ("/help", "/nangluc", "/viec", "/tiendo")
+#: `/theodoi` (14/10/2026, đợt 2): quét nguồn theo dõi của một dự án trong kho `lang_nghe`
+#: — chạy nền, trả lời ngay mã việc; đặt lịch hằng ngày trên console (Giao việc).
+LENH_TIEN_ICH = ("/help", "/nangluc", "/viec", "/tiendo", "/theodoi")
 
 _CU_PHAP = re.compile(r"^\s*(/[a-zA-Z][a-zA-Z0-9_-]*)\s*(.*)$", re.S)
 
@@ -207,6 +209,10 @@ def _van_help() -> str:
         "  /viec",
         "      Xem các việc quét nền (quét lớn chạy ngoài lượt trả lời): tiến độ, link "
         "sheet, chi phí thật. /viec <mã> để xem một việc.",
+        "  /theodoi <mã dự án>",
+        "      Quét các nguồn đang theo dõi của dự án (danh sách + ngân sách tháng sửa trên "
+        "dashboard social.hapas.vn), chạy nền. Đặt hằng ngày: console → Lịch chạy → Giao "
+        "việc, nội dung /theodoi hapas. Tuân công tắc Soi tài khoản.",
         "",
         "Ví dụ: /search áo thun nam 7 ngày tiktok",
         "Muốn biết kỹ một việc làm gì, ra kết quả gì thì hỏi bằng lời thường, không gõ "
@@ -400,6 +406,16 @@ def xu_ly(text: str, *, kenh: dict | None = None, chat_id: str = "",
         import tien_do
         return KetQua(van_ban=con_lai, lenh=lenh, tra_loi_thang=tien_do.lenh_tiendo(
             con_lai, kenh=kenh, chat_id=chat_id, sender_open_id=sender_open_id))
+    if lenh == "/theodoi":
+        # Cùng actor theo tài khoản với `soi_tai_khoan` nên đi theo công tắc của nó; công tắc
+        # từng nền tảng + trần mỗi lượt (Quét mạng xã hội) kiểm tiếp trong `theo_doi`.
+        cho, ly_do = _duoc_khong("soi_tai_khoan")
+        if not cho:
+            return KetQua(van_ban=con_lai, lenh=lenh, sai=True, tra_loi_thang=(
+                f"Không chạy theo dõi nguồn: {ly_do or 'năng lực Soi tài khoản đang tắt'}"))
+        import theo_doi
+        return KetQua(van_ban=con_lai, lenh=lenh,
+                      tra_loi_thang=theo_doi.lenh_theodoi(con_lai))
     if lenh == "/help":
         return KetQua(van_ban=con_lai, lenh=lenh, tra_loi_thang=_van_help())
     if lenh == "/nangluc":

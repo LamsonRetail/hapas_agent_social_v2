@@ -158,7 +158,10 @@ _TOOLING_NOTE = "\n".join(
         "đồng ý; không tự đặt khi chưa đồng ý. Nhờ 'nhắc tiến độ / nhắc việc quá hạn mỗi sáng' "
         "→ mode=run, recurrence=daily, message=`/tiendo <link Base có ?table=tbl…>` (thêm "
         "` cua_toi=co` khi họ nói 'việc của tôi/em'); chưa có link đúng bảng thì xin link "
-        "trước. Đặt xong báo id + giờ chạy kế và nói họ xem/sửa/xoá được trên console "
+        "trước. Nhờ 'theo dõi nguồn / quét danh sách nguồn của <dự án> mỗi ngày' → mode=run, "
+        "recurrence=daily, message=`/theodoi <mã dự án>` (danh sách nguồn + ngân sách tháng "
+        "sửa trên dashboard social.hapas.vn, KHÔNG sửa qua chat). "
+        "Đặt xong báo id + giờ chạy kế và nói họ xem/sửa/xoá được trên console "
         "(agent → Lịch chạy). Tool báo lỗi thì nói nguyên lý do, KHÔNG nói đã đặt; tool báo "
         "`da_co_san` thì nói lịch đó đã có, không đặt lại.",
         "- `remember_about_user`: ghi nhớ dài hạn thông tin quan trọng về người đang nói chuyện.",

@@ -1,0 +1,65 @@
+# /etc/systemd/system/lang-nghe-dashboard.service — dashboard lắng nghe MXH social.hapas.vn.
+# Chỉ nghe 127.0.0.1:8090; Caddy (https) chuyển tiếp vào. MỘT worker: kênh sự kiện thời gian
+# thực (SSE) và vòng kiểm 30 giây giữ trong bộ nhớ tiến trình. Xem dashboard/README.md.
+[Unit]
+Description=Lang nghe MXH dashboard (social.hapas.vn) - localhost only
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lang_nghe_web
+Group=lang_nghe_web
+EnvironmentFile=/opt/lang-nghe/.env
+Environment=HOME=/opt/lang-nghe
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/lang-nghe/app
+# --proxy-headers chỉ tin X-Forwarded-For từ 127.0.0.1 (Caddy): IP người xem thật đi vào
+# request.client, nên /noi-bo/co-du-lieu chỉ nhận đúng lời gọi thẳng của Mark trên máy.
+ExecStart=/opt/lang-nghe/venv/bin/uvicorn --factory dashboard.app:tao_app \
+  --host 127.0.0.1 --port 8090 --workers 1 \
+  --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header
+Restart=on-failure
+RestartSec=5
+# Mark thắng khi tranh CPU/IO
+Nice=5
+MemoryMax=512M
+CPUQuota=100%
+TasksMax=256
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+# ProtectSystem=strict: /opt/lang-nghe (mã, venv, .env, khoá BigQuery) chỉ đọc; dịch vụ không
+# ghi đĩa (log ra journald).
+# Dashboard không có việc gì với thư mục của Mark (.env của Mark có token Lark/Apify/model).
+# Dấu '-' = bỏ qua nếu đường dẫn chưa có. Chiều ngược lại (InaccessiblePaths=/opt/lang-nghe
+# trong unit của Mark) thêm SAU, khi chủ dự án duyệt sửa unit của Mark.
+InaccessiblePaths=-/opt/mark
+# Không thấy tiến trình khác (dòng lệnh/env của Mark) trong /proc.
+ProtectProc=invisible
+ProcSubset=pid
+# Không cần quyền đặc biệt nào: cổng 8090 > 1024, đọc tệp bằng quyền user thường.
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Không đặt MemoryDenyWriteExecute: thư viện Google (grpc) có thể cần trang W+X — như Phoenix.
+# AF_UNIX: socket Postgres (peer auth). AF_INET/6: Caddy vào 127.0.0.1:8090, và gọi RA Lark
+# (đăng nhập) + BigQuery — nên KHÔNG đặt IPAddressDeny=any như Phoenix.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+ProtectHostname=yes
+ProtectClock=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
