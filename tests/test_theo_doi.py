@@ -828,12 +828,13 @@ def test_binh_luan_tiktok_ghi_kho_nhan_va_tach_thuong_hieu(mo, nhan_gia):
 
 
 def test_binh_luan_facebook_tran_con_duoi_muc_actor_doi_thi_khong_chay(mo, nhan_gia):
-    """Actor bình luận Facebook đòi maxTotalChargeUsd ≥ 0,5: tháng còn ít hơn thì bỏ, nói rõ."""
+    """Trần gửi Apify tối thiểu 0,1 USD (`_call`; Facebook chỉ đòi 0,0017 — API Apify 15/10):
+    tháng còn ít hơn 0,1 thì bỏ, nói rõ."""
     GiaKhoBl(mo, [dict(_bai_bl("9", 40), nen_tang="facebook", khoa="facebook:9",
                        link="https://www.facebook.com/hapas/posts/9")])
     ap = GiaApify(mo)
     v = GiaViec({}, [])
-    tk = _lay_bl(v, dict(DU_AN, bl_so_bai=5, bl_moi_bai=20), 1, 0.3,
+    tk = _lay_bl(v, dict(DU_AN, bl_so_bai=5, bl_moi_bai=20), 1, 0.05,
                           time.monotonic() + 300)
     assert ap.gui == []
     assert any("bỏ qua" in x and "Facebook" in x for x in tk["ghi_chu"])

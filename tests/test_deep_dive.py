@@ -110,7 +110,9 @@ def test_youtube_facebook_khong_con_typeerror(apify_gia, url):
     assert kq["platforms_failed"] == [], kq["per_url"]
     assert kq["tong_comment"] == 1
     tran = float(re.search(r"maxTotalChargeUsd=([\d.]+)", apify_gia[0][0]).group(1))
-    assert tran == 0.5, "trần của lượt là trần RIÊNG của deep_dive, không phải 0,37 của listen"
+    # YouTube: actor đòi 0,5 = trần riêng của deep_dive (không phải 0,37 của listen). Facebook
+    # chỉ đòi 0,0017 (API Apify 15/10/2026): lô 10 bình luận giữ đúng sàn 0,1 của `_call`.
+    assert tran == (0.5 if "youtube" in url else 0.1), "trần lô theo actor, không theo listen"
     assert "token" not in apify_gia[0][0]
 
 

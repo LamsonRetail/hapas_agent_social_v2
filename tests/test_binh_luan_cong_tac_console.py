@@ -94,13 +94,15 @@ def test_tran_tool_chat_hon_tran_console_thi_lay_tran_tool(mt, monkeypatch):
     assert ap.goi[0]["tran_usd"] <= 0.15
 
 
-def test_tran_rieng_facebook_duoi_muc_actor_doi_thi_tu_choi_ro(mt):
+def test_tran_rieng_facebook_thap_van_chay_trong_tran(mt):
+    """15/10/2026: actor Facebook chỉ đòi maxTotalChargeUsd 0,0017 (API Apify), không phải 0,5
+    — trần riêng 0,3 vẫn bóc được, và trần gửi Apify không vượt 0,3."""
     ap, cfg = mt
     cfg["tran_usd_facebook"] = 0.3
     kq = json.loads(D._handle({"post_urls": [FB, TT]}))
-    e = kq["per_url"][FB]
-    assert e["status"] == "LỖI" and "tran_usd_facebook" in e["error"] and "0,30" in e["error"]
-    assert [g["actor"] for g in ap.goi] == [D._ACTORS["tiktok"]]
+    assert kq["per_url"][FB]["status"] != "LỖI"
+    fb = [g for g in ap.goi if g["actor"] == D._ACTORS["facebook"]]
+    assert fb and all(g["tran_usd"] <= 0.3 + 1e-9 for g in fb)
 
 
 def test_youtube_du_phong_khong_co_tran_usd_rieng(mt):
