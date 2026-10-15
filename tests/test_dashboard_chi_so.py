@@ -315,6 +315,41 @@ def test_doc_bo_loc_chuan_hoa_va_tu_choi():
     assert hoi_mua["loc"]["chu_de"] in CS.CHU_DE_BL
 
 
+def test_loc_nhanh_ngoai_theo_doi_bo_bai_cua_nguon_da_xoa():
+    """Bài của nguồn đã xoá: nguon_id NULL nhưng kieu_quet vẫn theo_doi — không phải "nguồn mới"."""
+    moi = bai("2026-10-10T09:00+07:00", nid=None, tk="moi")              # tìm theo từ khoá
+    da_xoa = bai("2026-10-10T09:00+07:00", nid=None, tk="cu")
+    da_xoa["kieu_quet"] = "theo_doi"
+    theo_doi = bai("2026-10-10T09:00+07:00", nid=1, tk="kol")
+    p = next(x for x in CS.BO_LOC_NHANH if x["ma"] == "ngoai_theo_doi")
+    assert [r["tai_khoan"] for r in CS.loc_bai([moi, da_xoa, theo_doi],
+                                               CS.doc_bo_loc(p["loc"]))] == ["moi"]
+
+
+def test_khoa_nguon_link_dai_van_loc_duoc():
+    """Bài không tác giả/tài khoản: khoá nguồn = "link:" + link (kho cắt 500) — 505 ký tự."""
+    r = bai("2026-10-10T09:00+07:00", nid=None, tk="", tg="", link="https://x.vn/" + "a" * 487)
+    k = CS.khoa_nguon_chu(r)
+    assert len(k) == 505 and len(k) <= CS.NGUON_TOI_DA_KY_TU
+    assert CS.loc_bai([r, bai("2026-10-10T09:00+07:00")], CS.doc_bo_loc({"nguon": k})) == [r]
+    with pytest.raises(CS.LoiBoLoc):
+        CS.doc_bo_loc({"nguon": "link:" + "a" * CS.NGUON_TOI_DA_KY_TU})
+
+
+def test_loc_theo_tuong_tac_khong_so_phan_tram_ky_truoc():
+    """Tương tác cộng dồn trọn đời bài: lọc "từ N tương tác" ưu ái bài cũ — không hiện % lệch."""
+    rows = [bai("2026-10-10T09:00+07:00", thich=200, tk="nay"),
+            bai("2026-10-02T09:00+07:00", thich=900, tk="truoc1"),
+            bai("2026-10-03T09:00+07:00", thich=150, tk="truoc2")]
+    a, b = D(2026, 10, 8), D(2026, 10, 14)
+    th = CS.tong_hop(rows, a, b, hom_nay=b, bo_loc=CS.doc_bo_loc({"tuong_tac": "100"}))
+    assert th["so_sanh_lech"] == "tuong_tac"
+    assert th["so_sanh"]["bai"] == {"nay": 1, "truoc": 2, "doi_pt": None}
+    assert all(v["doi_pt"] is None for v in th["so_sanh"].values())
+    th = CS.tong_hop(rows, a, b, hom_nay=b)
+    assert th["so_sanh_lech"] is None and th["so_sanh"]["bai"]["doi_pt"] == -50.0
+
+
 def test_nhan_chu_de_khop_mark():
     import phan_loai
     assert CS.CHU_DE_BAI == tuple(phan_loai.CHU_DE_BAI.values())

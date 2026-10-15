@@ -146,6 +146,8 @@ CHU_DE_BL = ("Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua"
 _TOI_DA_GIA_TRI = {"nen_tang": 4, "loai": 7, "nguon": 50, "sac_thai": 4, "chu_de": 40,
                    "anh_huong": 5}
 _RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube):")
+#: Khoá nguồn dài nhất: "link:" + link bài (kho cắt 500 ký tự) — bài không có tác giả/tài khoản.
+NGUON_TOI_DA_KY_TU = 520
 
 #: Bộ lọc nhanh (chip trên trang) — DỮ LIỆU: thêm/bớt một mục ở đây là đủ, trang tự hiện. `loc`
 #: dùng đúng tham số URL (bài thử kiểm từng mục đọc được bằng `doc_bo_loc`); `so_ngay` (tuỳ chọn)
@@ -174,9 +176,11 @@ BO_LOC_NHANH = (
     {"ma": "khen", "ten": "Khen từ bên ngoài",
      "mo_ta": "Bài bên ngoài tích cực — UGC để cảm ơn, xin đăng lại.",
      "loc": {"pham_vi": "ben_ngoai", "sac_thai": "tich_cuc"}},
+    # Cả hai điều kiện: bài không gắn nguồn VÀ vào kho qua lượt tìm từ khoá — loại bài của nguồn
+    # đã xoá (nguon_id NULL nhưng kieu_quet vẫn theo_doi), vốn là nguồn cũ chứ không phải mới.
     {"ma": "ngoai_theo_doi", "ten": "Ngoài danh sách theo dõi",
      "mo_ta": "Bài Mark tìm theo từ khoá từ tài khoản chưa theo dõi — nguồn mới nên xem.",
-     "loc": {"loai": KHONG_NGUON}},
+     "loc": {"loai": KHONG_NGUON, "kieu_quet": "tu_khoa"}},
 )
 
 
@@ -240,8 +244,9 @@ def doc_bo_loc(q) -> dict:
         ds = list(dict.fromkeys(ds))
         if len(ds) > _TOI_DA_GIA_TRI[k]:
             raise LoiBoLoc(f"Bộ lọc “{k}”: chọn tối đa {_TOI_DA_GIA_TRI[k]} giá trị.")
+        dai = NGUON_TOI_DA_KY_TU if k == "nguon" else 300
         for x in ds:
-            if (hop_le is not None and x not in hop_le) or len(x) > 300:
+            if (hop_le is not None and x not in hop_le) or len(x) > dai:
                 raise LoiBoLoc("Bộ lọc không hợp lệ.")
         return tuple(sorted(ds))
 
@@ -709,16 +714,24 @@ def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     từ đầu kỳ trước); hàm tự chia. `bo_loc` (bộ lọc chung) áp cho CẢ hai kỳ — so sánh cùng một
     tập. -> dict thuần JSON (ngày dạng ISO)."""
     hom_nay = hom_nay or datetime.datetime.now(VN).date()
-    rows = loc_bai(rows, _gop(bo_loc, nen_tang, loai_nguon))
+    f = bien_dich(_gop(bo_loc, nen_tang, loai_nguon))
+    rows = loc_bai(rows, f)
     tu_truoc, den_truoc = khoang_truoc(tu, den)
     nay = trong_khoang(rows, tu, den)
     truoc = trong_khoang(rows, tu_truoc, den_truoc)
     k_nay, k_truoc = kpi(nay), kpi(truoc)
+    ss = so_sanh(k_nay, k_truoc)
+    # Tương tác là số CỘNG DỒN trọn đời bài: bài kỳ trước có thêm thời gian tích tương tác nên
+    # lọc "từ N tương tác" ưu ái kỳ trước — % so sánh lệch, không hiện (`so_sanh_lech` nói lý do).
+    lech = "tuong_tac" if f.tt else None
+    if lech:
+        for v in ss.values():
+            v["doi_pt"] = None
     return {
         "khoang": {"tu": tu.isoformat(), "den": den.isoformat(),
                    "so_ngay": (den - tu).days + 1,
                    "ky_truoc": {"tu": tu_truoc.isoformat(), "den": den_truoc.isoformat()}},
-        "kpi": k_nay, "kpi_truoc": k_truoc, "so_sanh": so_sanh(k_nay, k_truoc),
+        "kpi": k_nay, "kpi_truoc": k_truoc, "so_sanh": ss, "so_sanh_lech": lech,
         "xu_huong": xu_huong(nay, tu, den, hom_nay),
         "sac_thai": sac_thai(nay), "sac_thai_chu_de": sac_thai_chu_de(nay),
         "nen_tang": phan_bo_nen_tang(nay), "loai_nguon": phan_bo_loai(nay),

@@ -489,16 +489,18 @@
     return o;
   }
   function veKpi(d) {
-    var k = d.kpi, ss = d.so_sanh, el = $("kpi");
+    var k = d.kpi, el = $("kpi");
+    // Lọc theo mức tương tác: tương tác cộng dồn theo tuổi bài -> so với kỳ trước lệch, không hiện.
+    var lech = d.so_sanh_lech === "tuong_tac", ss = lech ? {} : d.so_sanh, ghi = lech ? "không so kỳ trước" : null;
     xoa(el);
-    el.appendChild(theKpi("Bài đăng", so(k.bai), ss.bai));
-    el.appendChild(theKpi("Thảo luận", so(k.thao_luan), ss.thao_luan));
-    el.appendChild(theKpi("Nguồn có bài", so(k.nguon_co_bai), ss.nguon_co_bai));
+    el.appendChild(theKpi("Bài đăng", so(k.bai), ss.bai, ghi));
+    el.appendChild(theKpi("Thảo luận", so(k.thao_luan), ss.thao_luan, ghi));
+    el.appendChild(theKpi("Nguồn có bài", so(k.nguon_co_bai), ss.nguon_co_bai, ghi));
     if (k.bai_khu_trung != null && k.bai_khu_trung < k.bai) {
       el.appendChild(theKpi("Bài (khử trùng nội dung)", so(k.bai_khu_trung), null, so(k.bai - k.bai_khu_trung) + " bài đăng lại cùng nội dung"));
     }
-    el.appendChild(theKpi("Lượt xem", so(k.xem), ss.xem));
-    el.appendChild(theKpi("Tương tác", so(k.tuong_tac), ss.tuong_tac));
+    el.appendChild(theKpi("Lượt xem", so(k.xem), ss.xem, ghi));
+    el.appendChild(theKpi("Tương tác", so(k.tuong_tac), ss.tuong_tac, ghi));
     el.appendChild(theSacKpi(k));
   }
   // Bốn chỉ số sắc thái của bài gộp vào MỘT thẻ rộng có thanh 100% (bấm ô → xem bài).
@@ -1840,13 +1842,13 @@
   }
   // loai: "bai" | "binh-luan"; dk: điều kiện của điểm/cột vừa bấm; moTa: chữ cho tiêu đề.
   function moChiTiet(loai, dk, moTa) {
-    if (!hop) return;
+    if (!hop || soCu) return;                      // số đang hiện là của bộ lọc trước: không mở
     var ctl = batDauNgan(loai === "bai" ? "Bài đăng" : "Bình luận", moTa);
     taiDs(loai, dk, 1, ctl);
   }
   // Từ khoá: hai thẻ Bình luận (q=) / Bài đăng (cum=) — từ khoá đếm trên cả bài lẫn bình luận.
   function moTuKhoa(x) {
-    if (!hop) return;
+    if (!hop || soCu) return;
     var ctl = batDauNgan("Từ khoá", "“" + x.tu + "”");
     var dk = { "binh-luan": { q_bl: x.tu.slice(0, 100), loai_bl: "hop_le" }, bai: { cum: x.tu } };
     var kq = {}, chon = "binh-luan", tab = $("chi-tiet-tab"), than = $("chi-tiet-than");
@@ -1903,7 +1905,7 @@
   }
   // Một bài (bảng Bài nổi bật): mở ngăn với đúng bài đó, tự mở chuỗi bình luận đã đọc.
   function moMotBai(r) {
-    if (!hop) return;
+    if (!hop || soCu) return;
     batDauNgan("Bài đăng", (r.tac_gia || "?") + " · " + ngayDu(r.dang_luc));
     $("chi-tiet-mo-ta").textContent = so(r.bl_da_lay) + " bình luận đã đọc của bài này · trả lời nằm dưới bình luận gốc.";
     $("chi-tiet-than").appendChild(theBai(r, true));
@@ -2217,9 +2219,11 @@
   }
   function veTomTat() {
     var n = soChieuDang(G), el = $("loc-tom"), ds = moTaLoc();
-    var k = duLieu && !dangDoi ? duLieu.kpi : null;
-    var b = duLieu && !dangDoi && duLieu.binh_luan_da_cao ? duLieu.binh_luan_da_cao.kpi : null;
-    var so1 = k ? so(k.thao_luan) + " thảo luận · " + so(k.bai) + " bài" + (b ? " · " + so(b.so) + " bình luận đã cào" : "") : "đang tải…";
+    var tot = duLieu && !dangDoi && !loiLuot;
+    var k = tot ? duLieu.kpi : null;
+    var b = tot && duLieu.binh_luan_da_cao ? duLieu.binh_luan_da_cao.kpi : null;
+    var so1 = k ? so(k.thao_luan) + " thảo luận · " + so(k.bai) + " bài" + (b ? " · " + so(b.so) + " bình luận đã cào" : "")
+      : loiLuot && !dangDoi ? "chưa tải được số liệu" : "đang tải…";
     xoa(el);
     el.appendChild(tao("span", "cs-bo-loc__tom-nhan", n ? "Đang lọc: " : "Đang xem: "));
     el.appendChild(tao("b", "", (n ? ds : [ds[0], "tất cả nguồn"]).join(" · ")));
@@ -2341,7 +2345,7 @@
   }
 
   // ─── đổi bộ lọc: URL, chờ (khung xương), một AbortController cho mọi khối ───
-  var ctlChung = null, henLoc = null, dangDoi = false;
+  var ctlChung = null, henLoc = null, dangDoi = false, loiLuot = false;
   function urlHienTai() {
     var q = new URLSearchParams();
     q.set("du_an", cfg.du_an);
@@ -2350,10 +2354,38 @@
     Object.keys(t).forEach(function (k) { q.set(k, t[k]); });
     return "/?" + q.toString();
   }
-  function ghiUrl() {
+  // thay = true: sửa mục lịch sử hiện tại (gõ liên tiếp trong ô tìm không đẻ một mục Lùi mỗi chữ).
+  function ghiUrl(thay) {
     var u = urlHienTai();
     if (u === location.pathname + location.search || !window.history || !history.pushState) return;
-    try { history.pushState({ cs: 1 }, "", u); } catch (_) { /* trình duyệt chặn: link vẫn dùng được */ }
+    try { history[thay ? "replaceState" : "pushState"]({ cs: 1 }, "", u); } catch (_) { /* trình duyệt chặn: link vẫn dùng được */ }
+  }
+  // Số liệu đang hiện là của bộ lọc TRƯỚC (lượt đổi lỗi): mờ + `inert` các khối (không bấm xem
+  // chi tiết được — tránh trộn bộ lọc mới với số cũ), tới khi tải được.
+  var soCu = false;
+  var CHON_KHOI_CU = "#cs-trang > .luoi, #cs-trang > .cs-ky-truoc, " +
+    "#cs-trang > section.the-khoi:not(.cs-bo-loc):not(#khoi-bl), #khoi-bl .cs-bl-ben";
+  function khoiCu(cu) {
+    soCu = cu;
+    $("cs-trang").classList.toggle("cs-so-cu", cu);
+    Array.prototype.forEach.call(document.querySelectorAll(CHON_KHOI_CU), function (el) {
+      if (cu) el.setAttribute("inert", ""); else el.removeAttribute("inert");
+    });
+  }
+  // Luồng bình luận về trạng thái lỗi có nút Thử lại (không kẹt ở khung xương "Đang tải…").
+  function loiBl(chu) {
+    var ds = $("bl-ds");
+    if (!ds) return;
+    if (bl.ctl) { bl.ctl.abort(); bl.ctl = null; }
+    xoa(ds);
+    ds.classList.remove("cs-dang-doi");
+    ds.removeAttribute("aria-busy");
+    var o = tao("div", "thong-bao thong-bao--loi");
+    o.appendChild(chuNode(chu + " "));
+    o.appendChild(nut("Thử lại", "cs-nut-chu", function () { taiBl(false); }));
+    ds.appendChild(o);
+    $("bl-dem").textContent = "";
+    xoa($("bl-them-khoi"));
   }
   function batDauDoi() {
     var t = $("cs-trang");
@@ -2383,6 +2415,8 @@
   }
   // thay: các chiều đổi (+ tu/den). opt.tuUrl: đang theo nút Lùi/Tiến (không ghi URL);
   // opt.ngay: tải ngay (đã chờ gõ xong ở ô tìm). Mặc định chờ 300 ms gom các lần bấm liền nhau.
+  // opt.laQ: đổi do gõ ô tìm — lần gõ kế tiếp sửa mục lịch sử này (replaceState) thay vì thêm mục.
+  var goQ = false;
   function datLocChung(thay, opt) {
     opt = opt || {};
     if (thay.tu) cfg.tu = thay.tu;
@@ -2390,7 +2424,9 @@
     var moi = Object.assign({}, G);
     CHIEU.forEach(function (k) { if (Object.prototype.hasOwnProperty.call(thay, k)) moi[k] = thay[k]; });
     G = chuanLoc(moi);
-    if (!opt.tuUrl) ghiUrl();
+    if (!opt.tuUrl) ghiUrl(!!opt.laQ && goQ);
+    goQ = !!opt.laQ;
+    loiLuot = false;
     baoLoiLoc("");
     if (ctlChung) { ctlChung.abort(); ctlChung = null; }
     if (bl.ctl) { bl.ctl.abort(); bl.ctl = null; }
@@ -2473,9 +2509,10 @@
     var q = $("loc-q");
     var timNgay = function () {
       var v = q.value.replace(/\s+/g, " ").trim().slice(0, 100);
-      if (v !== G.q) datLocChung({ q: v }, { ngay: true });
+      if (v !== G.q) datLocChung({ q: v }, { ngay: true, laQ: true });
     };
     q.addEventListener("input", treo(timNgay, 300));
+    q.addEventListener("blur", function () { goQ = false; });     // rời ô: lần gõ sau là mục mới
     f.addEventListener("submit", function (e) { e.preventDefault(); timNgay(); doiNgay(); });
     $("loc-du-an").addEventListener("change", function (e) {
       var sp = new URLSearchParams();                  // đổi dự án: tải trang mới, giữ ngày + bộ lọc
@@ -2505,15 +2542,20 @@
     chay("nguồn nổi bật", function () { veTopNguon(d); });
     chay("bài nổi bật", function () { veTopBai(d); });
     chay("bình luận", function () { veBinhLuan(d); });
-    $("ky-truoc").textContent = "So với " + ngayDu(d.khoang.ky_truoc.tu) + " – " + ngayDu(d.khoang.ky_truoc.den) + " (kỳ liền trước cùng độ dài).";
+    $("ky-truoc").textContent = d.so_sanh_lech === "tuong_tac"
+      ? "Không so % với kỳ trước khi lọc theo mức tương tác: tương tác cộng dồn theo tuổi bài nên bài kỳ trước (" +
+        ngayDu(d.khoang.ky_truoc.tu) + " – " + ngayDu(d.khoang.ky_truoc.den) + ") luôn được lợi."
+      : "So với " + ngayDu(d.khoang.ky_truoc.tu) + " – " + ngayDu(d.khoang.ky_truoc.den) + " (kỳ liền trước cùng độ dài).";
     $("canh-bao").hidden = !d.bi_cat;
     $("canh-bao-bl").hidden = !d.bl_bi_cat;
     $("chua-tron").hidden = !d.ngay_cuoi_chua_tron;
   }
 
-  function baoLoi(chu) {
+  // thuLai: hàm chạy khi bấm "Thử lại" (nút dựng bằng createElement, không chèn HTML).
+  function baoLoi(chu, thuLai) {
     var el = $("loi-tai");
-    el.textContent = chu;
+    el.textContent = chu ? chu + (thuLai ? " " : "") : "";
+    if (chu && thuLai) el.appendChild(nut("Thử lại", "cs-nut-chu", thuLai));
     el.hidden = !chu;
   }
   function nhapSong() {
@@ -2544,7 +2586,9 @@
           var nguon = coBinhLuan(j) ? "bl" : "bai";
           tt.sacNguon = tt.tgNguon = tt.cdNguon = nguon;
         }
+        loiLuot = false;
         ketThucDoi();
+        khoiCu(false);
         veTatCa();
         $("cs-trang").classList.remove("dang-tai");
         var t = "Cập nhật lúc " + gioVN(new Date());
@@ -2559,14 +2603,27 @@
       .catch(function (e) {
         if ((e && e.name === "AbortError") || !conMoi()) return;
         ctlChung = null;
+        loiLuot = true;
         ketThucDoi();
-        baoLoi((e && e.message) || "Không tải được số liệu.");
-        var ds = $("bl-ds");
-        if (ds) ds.classList.remove("cs-dang-doi");
+        var chu = (e && e.message) || "Không tải được số liệu.";
         if (!duLieu || doiLoc) {
+          // Lượt đổi bộ lọc lỗi: KPI / kênh nhà-bên ngoài đang là khung xương -> báo trống; các khối
+          // còn lại vẫn là số của bộ lọc trước -> đánh dấu cũ + khoá bấm; luồng bình luận đang chờ
+          // lượt này -> báo lỗi kèm Thử lại (không kẹt "Đang tải…").
           $("cs-trang").classList.remove("dang-tai");
-          xoa($("kpi"));
+          var k = $("kpi");
+          xoa(k);
+          k.appendChild(tao("div", "trong cs-trong-kpi", "Chưa tải được số liệu cho bộ lọc này."));
           xoa($("nha-ngoai"));
+          xoa($("nn-ty"));
+          if (duLieu) khoiCu(true);
+          loiBl("Chưa tải được bình luận cho bộ lọc này.");
+          baoLoi(chu + (duLieu ? " Các khối bên dưới vẫn là số của bộ lọc trước." : ""),
+                 function () { baoLoi(""); taiChung(false); });
+        } else {
+          baoLoi(chu, function () { baoLoi(""); taiChung(true); });
+          var ds = $("bl-ds");
+          if (ds) ds.classList.remove("cs-dang-doi");
         }
         if (!duLieu) $("cap-nhat-luc").textContent = "Chưa tải được số liệu";
         veTomTat();

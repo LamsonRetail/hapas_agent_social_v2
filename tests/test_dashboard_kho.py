@@ -132,9 +132,17 @@ def test_doc_bai_theo_khoa_cung_cot_tung_lo(gia):
     assert len(K.bai_theo_khoa("hapas", khoa)) == 3            # 3 lô: 5.000 + 5.000 + 2.000
     lenh = gia.gd[0].lenh
     assert [len(p[1]) for _, p in lenh] == [5000, 5000, 2000]
-    assert all("b.khoa = ANY(%s)" in s and K._COT_BAI_CS in s for s, _ in lenh)
-    cot = set(re.findall(r"\bb\.([a-z_]+)", K._COT_BAI_CS))
-    assert "kieu_quet" in cot and cot <= _cot("bai")
+    # Cột HẸP: không nội dung / hashtag / cột hiển thị khi không lọc chữ.
+    assert all("b.khoa = ANY(%s)" in s and K._COT_BAI_GOC in s for s, _ in lenh)
+    assert not any(c in lenh[0][0] for c in ("noi_dung", "hashtag", "b.xem", "sac_thai"))
+    cot = set(re.findall(r"\bb\.([a-z_]+)", K._COT_BAI_GOC))
+    assert cot == {"khoa", "nen_tang", "nguon_id", "tai_khoan", "tac_gia", "followers", "thich",
+                   "binh_luan", "chia_se", "kieu_quet", "link"} and cot <= _cot("bai")
+    assert "n.loai AS nguon_loai" in K._COT_BAI_GOC
+    K.bai_theo_khoa("hapas", ["k1"], co_chu=True)               # đang lọc chữ: thêm nội dung
+    sql = gia.gd[1].lenh[0][0]
+    assert "left(b.noi_dung, 1000) AS noi_dung" in sql and "AS hashtag" in sql
+    assert set(re.findall(r"\bb\.([a-z_]+)", K._COT_BAI_CS)) <= _cot("bai")
 
 
 def test_duyet_de_xuat_them_nguon_qua_de_xuat(gia):

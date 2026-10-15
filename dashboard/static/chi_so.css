@@ -106,6 +106,12 @@
 .cs-trang.cs-dang-doi > .luoi, .cs-trang.cs-dang-doi > section.the-khoi:not(.cs-bo-loc), .cs-trang.cs-dang-doi > .cs-ky-truoc {
   opacity: .5; transition: opacity .15s; pointer-events: none;
 }
+/* lượt đổi bộ lọc lỗi: khối còn số của bộ lọc TRƯỚC — mờ hẳn, JS đặt `inert` (không bấm xem chi tiết) */
+.cs-trang.cs-so-cu > .luoi:not(#kpi), .cs-trang.cs-so-cu > .cs-ky-truoc,
+.cs-trang.cs-so-cu > section.the-khoi:not(.cs-bo-loc):not(#khoi-bl), .cs-trang.cs-so-cu #khoi-bl .cs-bl-ben {
+  opacity: .35; filter: grayscale(.6);
+}
+#kpi > .cs-trong-kpi { flex: 1 1 100%; padding: 18px 0; }
 
 /* ─── Kênh nhà vs Bên ngoài ─── */
 .cs-nn__ty { margin: 2px 0 10px; }

@@ -12,7 +12,7 @@ import json
 import re
 import threading
 from decimal import Decimal
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 import pytest
@@ -59,6 +59,7 @@ class GiaKho:
         self.bl: list[dict] = []
         self.goi_bl: list[tuple] = []
         self.goi_bai_khoa: list[tuple] = []
+        self.goi_bai_khoa_chu: list[bool] = []
         self.loi_kiem = False
 
     def _ghi(self, ai, hanh_dong, doi_tuong):
@@ -163,9 +164,13 @@ class GiaKho:
     def binh_luan_cua_bai(self, du_an, khoa, toi_da=300):
         return [dict(c) for c in self.bl if c["khoa_bai"] == khoa][:toi_da]
 
-    def bai_theo_khoa(self, du_an, khoa):
+    def bai_theo_khoa(self, du_an, khoa, co_chu=False):
+        """Như kho thật: cột hẹp, nội dung + hashtag chỉ khi `co_chu`."""
         self.goi_bai_khoa.append(tuple(khoa))
-        return [b for b in self.bai if b["khoa"] in set(khoa)]
+        self.goi_bai_khoa_chu.append(co_chu)
+        bo = () if co_chu else ("noi_dung", "hashtag")
+        return [{k: v for k, v in b.items() if k not in bo} for b in self.bai
+                if b["khoa"] in set(khoa)]
 
     def dat_tim_tu_khoa(self, ai, ma, bat, so_bai):
         self.du_an[ma].update(tk_bat=bat, tk_so_bai=so_bai)
@@ -1515,6 +1520,92 @@ def test_api_bai_va_binh_luan_theo_bo_loc_chung():
     assert c.get(ql + "&sac_thai_bl=Tiêu cực&pham_vi=ben_ngoai").json()["tong"] == 2
 
 
+def test_nho_dong_ngan_sach_dong_lru_va_het_han(monkeypatch):
+    """Review 2f: dòng thô giới hạn theo TỔNG SỐ DÒNG; đọc/ghi lại đưa khoá về cuối hàng; quá hạn
+    bị bỏ ngay khi tra."""
+    gio = [1000.0]
+    monkeypatch.setattr(A.time, "monotonic", lambda: gio[0])
+    n = A.NhoDong(100, 60)
+    n.dat("a", "A", 60)
+    n.dat("b", "B", 30)
+    assert (len(n), n.so_dong) == (2, 90)
+    n.dat("c", "C", 20)                        # 110 > 100: bỏ mục ít dùng nhất (a)
+    assert "a" not in n and n.so_dong == 50
+    assert n.lay("b") == "B"                   # đọc b -> b về cuối hàng
+    n.dat("d", "D", 60)                        # 110: bỏ c, không bỏ b vừa đọc
+    assert "c" not in n and "b" in n
+    n.dat("b", "B2", 30)                       # ghi lại b -> cuối hàng (trước đây bị bỏ kế tiếp)
+    n.dat("e", "E", 20)                        # 110: bỏ d
+    assert "d" not in n and n.lay("b") == "B2"
+    gio[0] += 61                               # quá hạn: tra là bỏ luôn
+    assert n.lay("b") is None and "b" not in n
+    n.dat("f", "F", 1)                         # ghi mục mới dọn nốt mục quá hạn
+    assert (len(n), n.so_dong) == (1, 1)
+    to = A.NhoDong(10, 60)
+    to.dat("x", "X", 500)                      # một bộ lớn hơn ngân sách vẫn phục vụ lượt này
+    assert to.lay("x") == "X"
+    assert A.NHO_DONG_TOI_DA_DONG >= A.BAI_TOI_DA + A.BL_TOI_DA   # ~ một khoảng bài + bình luận
+
+
+def test_api_dong_tho_giu_trong_ngan_sach_dong():
+    c, kho = _kho_loc()
+    nho = c.app.state.nho_dong
+    assert isinstance(nho, A.NhoDong) and nho.toi_da_dong == A.NHO_DONG_TOI_DA_DONG
+    nho.toi_da_dong = 5                        # tí hon: 3 bài + 4 bình luận không cùng nằm được
+    assert c.get("/api/chi-so?du_an=hapas" + Q_LOC).status_code == 200
+    assert nho.so_dong <= 5 and len(kho.goi_bai) == 1
+    assert c.get("/api/bai?du_an=hapas" + Q_LOC).status_code == 200
+    assert len(kho.goi_bai) == 2 and nho.so_dong <= 5    # bộ bài đã bị bỏ để giữ ngân sách
+
+
+def test_api_bai_goc_thieu_nho_theo_moc_chi_doc_khoa_moi():
+    """Review 2f: bài gốc thiếu nhớ theo CÙNG mốc lượt quét với dòng đã đọc, lượt sau chỉ đọc khoá
+    chưa có; cột chữ chỉ khi lọc chữ; mốc lượt quét đọc MỘT lần mỗi yêu cầu."""
+    c, kho = _kho_loc()
+    dem: list = []
+    goc = kho.luot_xong_moi_nhat
+    kho.luot_xong_moi_nhat = lambda: dem.append(1) or goc()
+    kho.bai.append(_bai(datetime.datetime(2026, 6, 1, 9, 0, tzinfo=VN), khoa="tiktok:cu2",
+                        followers=3_000_000))
+    kho.bl.append(_bl("tiktok:cu2", "e", datetime.datetime(2026, 10, 15, 9, 0, tzinfo=VN)))
+    ql = "/api/binh-luan?du_an=hapas&anh_huong=mega"
+    assert c.get(ql + Q_LOC).json()["tong"] == 1
+    assert kho.goi_bai_khoa == [("tiktok:cu",)] and kho.goi_bai_khoa_chu == [False]
+    assert len(dem) == 1
+    # Khoảng khác, cùng mốc: chỉ đọc bài gốc MỚI thiếu (cu đã nhớ).
+    assert c.get(ql + "&tu=2026-10-08&den=2026-10-15").json()["tong"] == 2
+    assert kho.goi_bai_khoa == [("tiktok:cu",), ("tiktok:cu2",)]
+    # Lượt quét mới: bài gốc đọc lại theo mốc MỚI, không dùng bản của mốc cũ.
+    kho.luot_moi_nhat = {"id": 9, "du_an": "hapas", "ket_thuc": "x"}
+    c.get(ql + Q_LOC)
+    assert kho.goi_bai_khoa[-1] == ("tiktok:cu",)
+    # Lọc chữ: bài gốc đọc KÈM nội dung — "d" khớp nhờ chữ của bài cũ.
+    assert c.get("/api/binh-luan?du_an=hapas&q=túi xách" + Q_LOC).json()["tong"] == 4
+    assert kho.goi_bai_khoa_chu[-1] is True
+    dem.clear()
+    c.get("/api/chi-so?du_an=hapas&anh_huong=mega" + Q_LOC)
+    c.get("/api/bai?du_an=hapas" + Q_LOC)
+    assert len(dem) == 2
+
+
+def test_api_khoa_nguon_dai_va_tim_trong_ngan_tu_khoa():
+    c, kho = _kho_loc()
+    link = "https://x.vn/" + "a" * 487                       # kho cắt link 500 ký tự
+    kho.bai.append(_bai(datetime.datetime(2026, 10, 11, 9, 0, tzinfo=VN), khoa="web:1",
+                        nguon_id=None, nguon_loai=None, tac_gia="", tai_khoan="", link=link))
+    kho.bl.append(dict(_bl("tiktok:1", "f", datetime.datetime(2026, 10, 11, 9, 0, tzinfo=VN)),
+                       noi_dung="Ship lâu quá, mk xin link mua"))
+    k = "link:" + link                                        # 505 ký tự: vẫn lọc được
+    qb = "/api/bai?du_an=hapas" + Q_LOC + "&"
+    assert c.get(qb + urlencode({"ct_nguon": k})).json()["tong"] == 1
+    assert c.get(qb + urlencode({"nguon": k})).json()["tong"] == 1
+    assert c.get(qb + urlencode({"ct_nguon": "x" * 521})).status_code == 400
+    # Ngăn "Từ khoá" (q_bl): trả đúng bình luận chứa từ, có đủ chữ.
+    d = c.get("/api/binh-luan?du_an=hapas" + Q_LOC + "&q_bl=mk xin&loai_bl=hop_le").json()
+    assert [x["ma"] for x in d["binh_luan"]] == ["f"]
+    assert "mk xin" in d["binh_luan"][0]["noi_dung"]
+
+
 def test_trang_chi_so_co_thanh_loc_chung():
     _, c, _ = tao()
     dang_nhap(c, XEM)
@@ -1547,6 +1638,9 @@ def test_trang_chi_so_co_thanh_loc_chung():
     assert cau_hinh(r.text)["bo_loc"]["pham_vi"] == "tat_ca"
     js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
     for can in ("history.pushState", "popstate", "AbortController", "ct_sac_thai", "sac_thai_bl",
-                "showModal"):
+                "showModal",
+                '"replaceState" : "pushState"',          # gõ ô tìm liên tiếp: sửa mục lịch sử
+                'setAttribute("inert"',                  # lượt lỗi: khối số cũ không bấm được
+                "so_sanh_lech"):                         # lọc tương tác: không so kỳ trước
         assert can in js, can
 

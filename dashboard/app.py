@@ -47,7 +47,7 @@ from dashboard import chi_phi as CP
 from dashboard import chi_so as CS
 from dashboard import dang_nhap as DN
 from dashboard import nhap_lieu as NL
-from dashboard.kho import LoiDuLieu, LoiKho
+from dashboard.kho import BAI_TOI_DA, BL_TOI_DA, LoiDuLieu, LoiKho
 
 THU_MUC = Path(__file__).resolve().parent
 VN = CS.VN
@@ -67,7 +67,10 @@ KHOANG_TOI_DA_NGAY = 400
 TINH_SONG_SONG = 2          # lượt tính /api/chi-so chạy cùng lúc (MemoryMax 512M)
 NHO_CHI_SO_GIAY = 60.0      # kết quả /api/chi-so giữ lại chừng này giây (khoá có mốc lượt quét)
 NHO_CHI_SO_TOI_DA = 64
-NHO_DONG_TOI_DA = 4         # bộ dòng (bài/bình luận) giữ cho khung chi tiết — mỗi bộ tới 20k dòng
+# Dòng thô nhớ lại (bài tới BAI_TOI_DA = 20k/bộ, bình luận tới BL_TOI_DA = 50k/bộ, bài gốc thiếu)
+# giới hạn theo TỔNG SỐ DÒNG, không theo số bộ: chừng MỘT khoảng ngày (bài + bình luận) cùng lúc —
+# 4 bộ bình luận 50k dòng chữ dài là vượt MemoryMax 512M. Khoảng thứ hai mở thì khoảng cũ bị bỏ.
+NHO_DONG_TOI_DA_DONG = BAI_TOI_DA + BL_TOI_DA + 10_000
 SUC_KHOE_GIAY = 15.0        # /suc-khoe công khai: không mở kết nối DB mỗi lần gọi
 _CHUA_KIEM = object()
 
@@ -128,6 +131,47 @@ class BangTin:
     @property
     def so_ket_noi(self) -> int:
         return len(self._hang)
+
+
+class NhoDong:
+    """Bộ nhớ đệm dòng thô của trang Chỉ số (bài / bình luận / bài gốc thiếu), giới hạn theo
+    TỔNG SỐ DÒNG (`toi_da_dong`) chứ không theo số mục: mục ít dùng nhất bị bỏ trước (LRU — đọc
+    hay ghi lại một khoá đều đưa nó về cuối hàng). Mục quá `song_giay` bị bỏ ngay khi tra hoặc
+    khi ghi mục khác, không nằm chờ bị đẩy ra. Mục mới luôn được giữ (một bộ lớn hơn ngân sách
+    vẫn phục vụ lượt hiện tại; lượt sau đọc lại)."""
+
+    def __init__(self, toi_da_dong: int, song_giay: float):
+        self.toi_da_dong, self.song_giay = toi_da_dong, song_giay
+        self._d: collections.OrderedDict = collections.OrderedDict()
+
+    def lay(self, khoa):
+        x = self._d.get(khoa)
+        if x is None:
+            return None
+        if time.monotonic() - x[0] >= self.song_giay:
+            del self._d[khoa]
+            return None
+        self._d.move_to_end(khoa)
+        return x[1]
+
+    def dat(self, khoa, gia_tri, so_dong: int) -> None:
+        bay_gio = time.monotonic()
+        self._d.pop(khoa, None)
+        for k in [k for k, x in self._d.items() if bay_gio - x[0] >= self.song_giay]:
+            del self._d[k]
+        self._d[khoa] = (bay_gio, gia_tri, int(so_dong))
+        while len(self._d) > 1 and self.so_dong > self.toi_da_dong:
+            self._d.popitem(last=False)
+
+    @property
+    def so_dong(self) -> int:
+        return sum(x[2] for x in self._d.values())
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+    def __contains__(self, khoa) -> bool:
+        return khoa in self._d
 
 
 def _sse(ten: str, du_lieu: dict) -> str:
@@ -478,8 +522,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     # /api/chi-so: tối đa TINH_SONG_SONG lượt đọc + tính cùng lúc (quá thì 503, không xếp hàng
     # — người xem bấm liên tục khoảng 400 ngày không làm cạn bộ nhớ dịch vụ) + bộ nhớ đệm ngắn.
     app.state.ban = threading.Semaphore(TINH_SONG_SONG)
-    app.state.nho_dong = collections.OrderedDict()
-    app.state.nho_bai_thieu = collections.OrderedDict()
+    # Dòng thô (bài, bình luận) + bài gốc thiếu: MỘT ngân sách dòng chung (xem `NhoDong`).
+    app.state.nho_dong = NhoDong(NHO_DONG_TOI_DA_DONG, NHO_CHI_SO_GIAY)
     app.state.nho_chi_so = collections.OrderedDict()
     app.state.nho_suc_khoe = (0.0, False)
     # Hook sau mỗi `cap-nhat`: danh sách hàm (du_an, luot), chạy NỀN sau khi đã đẩy sự kiện
@@ -651,21 +695,26 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         return (datetime.datetime.combine(tu, datetime.time(0), VN),
                 datetime.datetime.combine(den + datetime.timedelta(days=1), datetime.time(0), VN))
 
-    async def _kq_nho(loai_dong: str, du_an: str, tu, den, *, da_giu: bool = False):
+    async def _moc_luot() -> tuple:
+        """Mốc lượt quét vừa xong — đọc MỘT lần mỗi yêu cầu, mọi khoá nhớ của yêu cầu dùng chung
+        (dòng thô, bài gốc thiếu, kết quả /api/chi-so cùng một mốc)."""
+        x = await _k(app.state.kho.luot_xong_moi_nhat) or {}
+        return x.get("id"), str(x.get("ket_thuc"))
+
+    async def _kq_nho(loai_dong: str, du_an: str, tu, den, moc: tuple, *,
+                      da_giu: bool = False):
         """{rows, bi_cat} bài / bình luận của [tu, den] (CHƯA lọc), nhớ `NHO_CHI_SO_GIAY` giây
-        theo mốc lượt quét mới nhất: đổi bộ lọc, bấm liên tiếp nhiều cột, lật trang bình luận
-        không đọc lại kho. Bài luôn đọc từ đầu KỲ TRƯỚC (`/api/chi-so` cần so sánh; khung chi
-        tiết tự cắt về kỳ này) nên mọi API dùng chung một bộ dòng mỗi khoảng. `da_giu`: bên gọi
-        đã giữ suất tính (`app.state.ban`). -> None khi máy chủ đang bận."""
+        theo mốc lượt quét `moc`: đổi bộ lọc, bấm liên tiếp nhiều cột, lật trang bình luận không
+        đọc lại kho. Bài luôn đọc từ đầu KỲ TRƯỚC (`/api/chi-so` cần so sánh; khung chi tiết tự
+        cắt về kỳ này) nên mọi API dùng chung một bộ dòng mỗi khoảng. `da_giu`: bên gọi đã giữ
+        suất tính (`app.state.ban`). -> None khi máy chủ đang bận."""
         if loai_dong == "bai":
             tu = CS.khoang_truoc(tu, den)[0]
-        moc = await _k(app.state.kho.luot_xong_moi_nhat) or {}
-        khoa = (loai_dong, du_an, tu, den, moc.get("id"), str(moc.get("ket_thuc")))
+        khoa = (loai_dong, du_an, tu, den, *moc)
         nho = app.state.nho_dong
-        x = nho.get(khoa)
-        if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
-            nho.move_to_end(khoa)
-            return x[1]
+        x = nho.lay(khoa)
+        if x is not None:
+            return x
         if not da_giu and not app.state.ban.acquire(blocking=False):
             return None
         try:
@@ -677,41 +726,40 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         finally:
             if not da_giu:
                 app.state.ban.release()
-        nho[khoa] = (time.monotonic(), kq)
-        while len(nho) > NHO_DONG_TOI_DA:
-            nho.popitem(last=False)
+        nho.dat(khoa, kq, len(kq["rows"]))
         return kq
 
-    async def _dong_nho(loai_dong: str, du_an: str, tu, den):
-        kq = await _kq_nho(loai_dong, du_an, tu, den)
+    async def _dong_nho(loai_dong: str, du_an: str, tu, den, moc: tuple):
+        kq = await _kq_nho(loai_dong, du_an, tu, den, moc)
         return None if kq is None else kq["rows"]
 
-    async def _bai_cho_bl(du_an: str, bai: list, bl: list, khoa_nho: tuple, *,
+    async def _bai_cho_bl(du_an: str, bai: list, bl: list, moc: tuple, co_chu: bool, *,
                           da_giu: bool = False):
         """Bài gốc theo khoá cho các bình luận, khi bộ lọc có điều kiện cấp bài mà dòng bình luận
         không mang (ảnh hưởng, tương tác, kiểu quét, nguồn tìm theo từ khoá, chữ tìm). Bài đã đọc
-        của khoảng dùng lại; bài đăng TRƯỚC khoảng (bình luận mới dưới bài cũ) đọc thêm theo
-        khoá — chỉ cột hẹp, chỉ các bài thiếu — và nhớ như `_kq_nho`. -> None khi bận."""
+        của khoảng dùng lại; bài đăng TRƯỚC khoảng (bình luận mới dưới bài cũ) đọc thêm theo khoá
+        — cột hẹp (nội dung + hashtag chỉ khi `co_chu`, tức đang lọc chữ). Nhớ theo CÙNG mốc
+        `moc` với dòng đã đọc, gộp dần: lượt sau chỉ đọc khoá chưa từng đọc. -> None khi bận."""
         ds = CS.chi_muc_bai(bai)
         thieu = CS.khoa_bai_thieu(bl, ds)
         if not thieu:
             return ds
-        nho = app.state.nho_bai_thieu
-        x = nho.get(khoa_nho)
-        if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
-            them = x[1]
-        else:
+        nho = app.state.nho_dong
+        khoa_nho = ("bai_thieu", du_an, *moc, co_chu)
+        x = nho.lay(khoa_nho) or {"bai": {}, "khong_co": frozenset()}
+        can = [k for k in thieu if k not in x["bai"] and k not in x["khong_co"]]
+        if can:
             if not da_giu and not app.state.ban.acquire(blocking=False):
                 return None
             try:
-                them = await _k(app.state.kho.bai_theo_khoa, du_an, thieu)
+                them = await _k(app.state.kho.bai_theo_khoa, du_an, can, co_chu)
             finally:
                 if not da_giu:
                     app.state.ban.release()
-            nho[khoa_nho] = (time.monotonic(), them)
-            while len(nho) > NHO_DONG_TOI_DA:
-                nho.popitem(last=False)
-        ds.update(CS.chi_muc_bai(them))
+            moi = {**x["bai"], **CS.chi_muc_bai(them)}
+            x = {"bai": moi, "khong_co": x["khong_co"] | (set(can) - set(moi))}
+            nho.dat(khoa_nho, x, len(moi))
+        ds.update((k, x["bai"][k]) for k in thieu if k in x["bai"])
         return ds
 
     def _dk_chi_tiet(q) -> dict:
@@ -734,8 +782,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             if q.get("ct_loai") not in CS.TEN_LOAI:
                 raise NL.LoiNhap("Loại nguồn không hợp lệ.")
             dk["loai_nguon"] = q.get("ct_loai")
-        for k, ra, dai in (("ct_chu_de", "chu_de", 100), ("ct_nguon", "nguon", 300),
-                           ("cum", "cum", 100)):
+        for k, ra, dai in (("ct_chu_de", "chu_de", 100),
+                           ("ct_nguon", "nguon", CS.NGUON_TOI_DA_KY_TU), ("cum", "cum", 100)):
             v = (q.get(k) or "").strip()
             if v:
                 if len(v) > dai:
@@ -758,7 +806,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             dk = _dk_chi_tiet(q)
         except NL.LoiNhap as e:
             return JSONResponse({"loi": str(e)}, status_code=400)
-        rows = await _dong_nho("bai", du_an["ma"], tu, den)
+        rows = await _dong_nho("bai", du_an["ma"], tu, den, await _moc_luot())
         if rows is None:
             return _ban()
         kq = await _k(CS.chi_tiet_bai, rows, tu, den, trang=_so_trang(q.get("trang")),
@@ -822,18 +870,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             dk = _dk_bl(q)
         except NL.LoiNhap as e:
             return JSONResponse({"loi": str(e)}, status_code=400)
-        rows = await _dong_nho("bl", du_an["ma"], tu, den)
+        moc = await _moc_luot()
+        rows = await _dong_nho("bl", du_an["ma"], tu, den, moc)
         if rows is None:
             return _ban()
         bai_khoa = None
         if CS.can_tra_bai(bo_loc):
-            bai = await _dong_nho("bai", du_an["ma"], tu, den)
+            bai = await _dong_nho("bai", du_an["ma"], tu, den, moc)
             if bai is None:
                 return _ban()
-            moc = await _k(app.state.kho.luot_xong_moi_nhat) or {}
-            bai_khoa = await _bai_cho_bl(du_an["ma"], bai, rows,
-                                         (du_an["ma"], tu, den, moc.get("id"),
-                                          str(moc.get("ket_thuc"))))
+            bai_khoa = await _bai_cho_bl(du_an["ma"], bai, rows, moc, bool(bo_loc["q"]))
             if bai_khoa is None:
                 return _ban()
         kq = await _k(CS.chi_tiet_bl, rows, tu, den, trang=_so_trang(q.get("trang")),
@@ -854,9 +900,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         # Bộ nhớ đệm: khoá gồm BỘ LỌC + mốc lượt quét vừa xong — có lượt mới là tính lại ngay,
         # không có thì nhiều người mở cùng bộ lọc trong NHO_CHI_SO_GIAY giây chỉ tính một lần.
         # Dòng thô (chưa lọc) nhớ riêng theo khoảng (`_kq_nho`): đổi bộ lọc không đọc lại kho.
-        moc = await _k(app.state.kho.luot_xong_moi_nhat) or {}
+        moc = await _moc_luot()
         khoa = (du_an["ma"], tu, den, CS.khoa_bo_loc(bo_loc), hom_nay,
-                tuple(du_an["tu_khoa"] or []), moc.get("id"), str(moc.get("ket_thuc")))
+                tuple(du_an["tu_khoa"] or []), *moc)
         nho = app.state.nho_chi_so
         x = nho.get(khoa)
         if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
@@ -866,14 +912,12 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 return JSONResponse({"loi": "Máy chủ đang bận tính số liệu — thử lại sau ít giây."},
                                     status_code=503, headers={"Retry-After": "5"})
             try:
-                kq = await _kq_nho("bai", du_an["ma"], tu, den, da_giu=True)
-                kb = await _kq_nho("bl", du_an["ma"], tu, den, da_giu=True)
+                kq = await _kq_nho("bai", du_an["ma"], tu, den, moc, da_giu=True)
+                kb = await _kq_nho("bl", du_an["ma"], tu, den, moc, da_giu=True)
                 bai_khoa = None
                 if CS.can_tra_bai(bo_loc):
-                    bai_khoa = await _bai_cho_bl(
-                        du_an["ma"], kq["rows"], kb["rows"],
-                        (du_an["ma"], tu, den, moc.get("id"), str(moc.get("ket_thuc"))),
-                        da_giu=True)
+                    bai_khoa = await _bai_cho_bl(du_an["ma"], kq["rows"], kb["rows"], moc,
+                                                 bool(bo_loc["q"]), da_giu=True)
                 tu_khoa_da = du_an["tu_khoa"] or []
 
                 def tinh() -> dict:

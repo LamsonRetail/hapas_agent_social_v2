@@ -274,18 +274,28 @@ _COT_BAI_CS = (
     "n.link AS nguon_link")
 
 
-def bai_theo_khoa(du_an: str, khoa: list[str]) -> list[dict]:
-    """Bài theo khoá, cùng cột `bai_trong_khoang` — bài gốc của bình luận trong khoảng mà bài
-    đăng TRƯỚC khoảng đã đọc, chỉ khi bộ lọc chung có điều kiện cấp bài (đợt 2f). Tối đa
-    `BL_TOI_DA` khoá (= số bình luận tối đa của một khoảng), đọc từng lô 5.000."""
+# Bài gốc của bình luận chỉ cần đủ cột cho các chiều lọc CẤP BÀI (nguồn, ảnh hưởng, tương tác,
+# kiểu quét); nội dung + hashtag chỉ khi đang lọc chữ — mỗi bài thiếu không mang chữ dài vô ích.
+_COT_BAI_GOC = (
+    "b.khoa, b.nen_tang, b.nguon_id, n.loai AS nguon_loai, left(b.tai_khoan, 200) AS tai_khoan, "
+    "left(b.tac_gia, 200) AS tac_gia, b.followers, b.thich, b.binh_luan, b.chia_se, "
+    "b.kieu_quet, left(b.link, 500) AS link")
+_COT_BAI_GOC_CHU = ", left(b.noi_dung, 1000) AS noi_dung, left(b.hashtag, 500) AS hashtag"
+
+
+def bai_theo_khoa(du_an: str, khoa: list[str], co_chu: bool = False) -> list[dict]:
+    """Bài gốc theo khoá (cột hẹp `_COT_BAI_GOC`; `co_chu` thêm nội dung + hashtag) — cho bình
+    luận trong khoảng mà bài đăng TRƯỚC khoảng đã đọc, chỉ khi bộ lọc chung có điều kiện cấp bài
+    (đợt 2f). Tối đa `BL_TOI_DA` khoá (= số bình luận tối đa của một khoảng), từng lô 5.000."""
     khoa = list(dict.fromkeys(k for k in khoa if k))[:BL_TOI_DA]
     rows: list[dict] = []
     if not khoa:
         return rows
+    cot = _COT_BAI_GOC + (_COT_BAI_GOC_CHU if co_chu else "")
     with ket_noi() as c:
         for i in range(0, len(khoa), 5000):
             rows += c.execute(
-                f"SELECT {_COT_BAI_CS} FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
+                f"SELECT {cot} FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
                 "WHERE b.du_an = %s AND b.khoa = ANY(%s)", (du_an, khoa[i:i + 5000])).fetchall()
     return rows
 
