@@ -116,4 +116,52 @@ def test_ngay_con_lai_theo_thang_gio_vn(luc, con, so_ngay):
 
 def test_hang_so_cho_trinh_duyet():
     hs = CP.hang_so_cho_trinh_duyet()
-    assert hs == {"gia": CP.GIA, "he_so": 1.3, "start": CP.START_COST, "ngay": 30}
+    assert {k: hs[k] for k in ("gia", "he_so", "start", "ngay")} == {
+        "gia": CP.GIA, "he_so": 1.3, "start": CP.START_COST, "ngay": 30}
+    # Đợt 2e: đủ hằng số để trang Ngân sách tính lại ước tính cấu hình ngay trên trình duyệt.
+    assert hs["tk_gia"] == CP.TK_GIA and hs["bl_gia"] == CP.BL_GIA and hs["gioi_han"] == CP.GIOI_HAN
+
+
+def test_cau_hinh_dashboard_khop_mark():
+    """Bản sao `theo_doi.cau_hinh` / ước tính trên dashboard phải ra cùng số với Mark."""
+    import theo_doi as T
+    cac = [
+        {"tk_bat": True, "tk_so_bai": 15, "bl_bat": True, "bl_so_bai": 10, "bl_moi_bai": 0,
+         "cau_hinh": {}},
+        {"tk_bat": True, "tk_so_bai": 15, "bl_bat": False, "bl_so_bai": 10, "bl_moi_bai": 0,
+         "cau_hinh": {"tu_khoa": {"facebook": {"so_bai": 60}, "instagram": {"so_tu": 4}},
+                      "binh_luan": {"tiktok": {"bat": True, "so_bai": 30, "moi_bai": 2},
+                                    "youtube": {"so_bai": "xx"}}}},
+        # Rác trong JSONB: chuỗi "false", số âm, bool, null -> theo cột chung, KHÔNG về 0 (= hết).
+        {"tk_bat": True, "tk_so_bai": 15, "bl_bat": True, "bl_so_bai": 10, "bl_moi_bai": 40,
+         "cau_hinh": {"tu_khoa": {"tiktok": {"bat": "false"}, "instagram": {"so_tu": 0}},
+                      "binh_luan": {"tiktok": {"moi_bai": -3}, "facebook": {"moi_bai": None},
+                                    "instagram": {"so_bai": True}, "youtube": {"bat": 1}}}},
+        # Công tắc tổng tắt: mọi nền tảng tắt dù JSONB bật.
+        {"tk_bat": False, "tk_so_bai": 15, "bl_bat": False, "bl_so_bai": 10, "bl_moi_bai": 0,
+         "cau_hinh": {"tu_khoa": {"tiktok": {"bat": True}}, "binh_luan": {"tiktok": {"bat": True}}}},
+    ]
+    tu = ["hapas", "túi hapas", "yeutudieunhonhat", "hahahapas"]
+    for da in cac:
+        for nhom in ("tu_khoa", "binh_luan"):
+            for p in CP.NEN_TANG:
+                assert CP.cau_hinh(da, nhom, p) == T.cau_hinh(da, nhom, p), (nhom, p)
+        for p in CP.NEN_TANG:
+            c = CP.cau_hinh(da, "tu_khoa", p)
+            assert CP.uoc_tk_nen_tang(p, c["so_bai"], tu, c["so_tu"]) == \
+                T.uoc_tu_khoa_nen_tang(p, c["so_bai"], tu, c["so_tu"])
+    assert CP.GIOI_HAN == T.GIOI_HAN and CP.TK_GIA == T._TK_GIA
+    rac = cac[2]
+    assert not CP.cau_hinh(rac, "tu_khoa", "tiktok")["bat"]
+    assert CP.cau_hinh(rac, "tu_khoa", "instagram")["so_tu"] == CP.TK_IG_TOI_DA_TU
+    assert [CP.cau_hinh(rac, "binh_luan", p)["moi_bai"] for p in ("tiktok", "facebook")] == [40, 40]
+    assert CP.cau_hinh(rac, "binh_luan", "instagram")["so_bai"] == 10
+    assert not CP.cau_hinh(rac, "binh_luan", "youtube")["bat"]
+    assert not any(CP.cau_hinh(cac[3], n, "tiktok")["bat"] for n in ("tu_khoa", "binh_luan"))
+    for da in ({"ten": "HAPAS", "tu_khoa": []},
+               {"tu_khoa": [" Túi  HAPAS ", "tui hapas", "Đồng hồ", "dong ho", ""] + list("abcdefghijklmn")}):
+        assert CP.tu_tim(da) == T.tu_tim(da)
+    # Dashboard không biết gói Apify: Facebook báo theo đúng số bài cấu hình (mức trần).
+    b = CP.bang_cau_hinh({**cac[1], "tu_khoa": tu})
+    assert b["tu_khoa"]["facebook"]["uoc"] == T.uoc_tu_khoa_nen_tang("facebook", 60, tu,
+                                                                      fb_toi_da=10 ** 6)

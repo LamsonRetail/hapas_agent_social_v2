@@ -202,7 +202,7 @@ def ke_hoach(ma: str) -> dict:
         da_tieu = K.da_tieu_thang(ma)
     except K.LoiKho as e:
         return {"loi": f"Kho lắng nghe chưa dùng được: {e}."}
-    if not toi_han and du_an.get("tk_bat") and int(du_an.get("tk_so_bai") or 0) > 0:
+    if not toi_han and tk_co_bat(du_an):
         # Đợt 2c: tìm theo từ khoá là việc của cả dự án — chạy được dù chưa nguồn nào tới hạn.
         tran = float(du_an["tran_usd_thang"] or 0)
         return {"du_an": du_an, "nguon": [], "bo_qua": [], "uoc_tinh": {},
@@ -263,13 +263,11 @@ def lenh_theodoi(doi_so: str) -> str:
     da = kh["du_an"]
     # Bình luận (đợt 2b): chưa biết bài nào sẽ được cào nên giữ chỗ theo trần cấu hình, giá
     # Facebook; tiền thật vẫn chốt theo run id.
-    bl_uoc = round(uoc_binh_luan(int(da.get("bl_so_bai") or 0), int(da.get("bl_moi_bai") or 0))
-                   if da.get("bl_bat", True) else 0.0, 2)
+    bl_uoc = round(uoc_binh_luan_du_an(da), 2)
     ns_apify, hm, _ = quet_lon.ngan_sach(quet_lon.tran_usd_nen())
     # Tìm theo từ khoá rồi bình luận chỉ dùng phần ngân sách việc nền còn lại sau phần bài — lúc
     # chạy mỗi lượt actor vẫn bị kẹp theo trần console, phần còn của tháng và ngân sách việc.
-    tk_uoc = round(uoc_tu_khoa(int(da.get("tk_so_bai") or 0), tu_tim(da))
-                   if da.get("tk_bat", True) else 0.0, 2)
+    tk_uoc = round(uoc_tu_khoa_du_an(da, _fb_toi_da()), 2)
     tk_uoc = round(max(0.0, min(tk_uoc, ns_apify - tong)), 2)
     tong = round(tong + tk_uoc, 2)
     bl_uoc = round(max(0.0, min(bl_uoc, ns_apify - tong)), 2)
@@ -415,11 +413,20 @@ def _lay_youtube(nguon: list[dict]) -> tuple[dict[int, list], dict[int, str]]:
             loi[nid] = "kênh không có danh sách video công khai"
             continue
         try:
-            pl = A._youtube_get("playlistItems", {
-                "part": "contentDetails", "playlistId": uploads,
-                "maxResults": min(50, int(x.get("so_bai_moi_lan") or 5))})
-            ids = [str((v.get("contentDetails") or {}).get("videoId") or "")
-                   for v in pl.get("items") or [] if isinstance(v, dict)]
+            # Không trần số video (chủ dự án 15/10): lật trang 50 video/trang, 1 đơn vị/trang.
+            can = int(x.get("so_bai_moi_lan") or 5)
+            ids, trang = [], None
+            while len(ids) < can:
+                q = {"part": "contentDetails", "playlistId": uploads,
+                     "maxResults": min(50, can - len(ids))}
+                if trang:
+                    q["pageToken"] = trang
+                pl = A._youtube_get("playlistItems", q)
+                ids += [str((v.get("contentDetails") or {}).get("videoId") or "")
+                        for v in pl.get("items") or [] if isinstance(v, dict)]
+                trang = pl.get("nextPageToken")
+                if not trang or not pl.get("items"):
+                    break
             ra[nid] = _video_youtube([i for i in ids if i], {
                 "kenh": str(sn.get("title") or x.get("ten") or ""),
                 "followers": int((it.get("statistics") or {}).get("subscriberCount") or 0),
@@ -638,7 +645,77 @@ TK_IG_TOI_DA_TU = 2          # actor Instagram chạy MỘT lượt mỗi từ (
 TK_FB_TOI_DA = 20            # actor Facebook gói Free: 20 bài, 1 lượt/24h
 TK_NGAY_DAU = 30             # lần đầu dự án tìm theo từ khoá: lùi 30 ngày
 TK_NGAY = 3                  # các lần sau: 3 ngày gần nhất (trùng thì khử theo khoá bài)
-TK_TOI_DA_TU = 12
+TK_TOI_DA_TU = 50           # = số mục tối đa của ô từ khoá trên dashboard (không cắt thêm)
+
+# ───────────────────────────── cấu hình theo nền tảng (đợt 2e, 15/10/2026) ─────────────────────────────
+# Chủ dự án 15/10: "không có giới hạn" — mọi số thu thập TUỲ CHỈNH được trên dashboard (không
+# cứng "15 bài mỗi nền tảng"), kể cả cào bình luận. `du_an.cau_hinh` (JSONB) ghi đè TỪNG nền tảng:
+#   {"tu_khoa":  {"<nền tảng>": {"bat": bool, "so_bai": int, "so_tu": int}},
+#    "binh_luan": {"<nền tảng>": {"bat": bool, "so_bai": int, "moi_bai": int}}}
+# Cột chung (tk_bat, tk_so_bai, bl_bat, bl_so_bai, bl_moi_bai) là mặc định khi không ghi đè.
+# Chặn tiền: trần tháng của dự án + trần console mỗi lượt; còn giới hạn của chính nền tảng
+# (Facebook gói Free: 20 bài/lượt tìm). `SO_TOI_DA` chỉ chặn số rác, không phải trần nghiệp vụ.
+SO_TOI_DA = 1_000_000
+GIOI_HAN = {"tk_so_bai": (0, SO_TOI_DA), "tk_so_tu": (1, TK_TOI_DA_TU),
+            "bl_so_bai": (0, SO_TOI_DA), "bl_moi_bai": (0, SO_TOI_DA)}
+
+
+def _kep(v, lo: int, hi: int, md: int) -> int:
+    try:
+        return max(lo, min(hi, int(v)))
+    except (TypeError, ValueError):
+        return md
+
+
+def _so_rieng(v, lo: int, hi: int, md: int) -> int:
+    """Số ghi đè trong JSONB: rác / bool / dưới `lo` -> `md` (giá trị cột chung), KHÔNG rơi về 0
+    — 0 bình luận mỗi bài nghĩa là cào HẾT (đắt nhất)."""
+    if isinstance(v, bool):
+        return md
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return md
+    return md if n < lo else min(hi, n)
+
+
+def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
+    """Cấu hình HIỆU LỰC của một nền tảng. `nhom`: "tu_khoa" | "binh_luan".
+
+    Cột `tk_bat` / `bl_bat` là CÔNG TẮC TỔNG: tắt thì mọi nền tảng tắt dù JSONB ghi gì. Trong
+    JSONB chỉ `bat` đúng bằng True mới là bật (chuỗi "false" không phải bật). Số bỏ trống/rác
+    lấy cột chung — số bài cột chung áp cho TỪNG nền tảng."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    nh = goc.get(nhom) if isinstance(goc.get(nhom), dict) else {}
+    rieng = nh.get(p) if isinstance(nh.get(p), dict) else {}
+    if nhom == "tu_khoa":
+        chung = _kep(du_an.get("tk_so_bai") or 0, *GIOI_HAN["tk_so_bai"], 0)
+        so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["tk_so_bai"], chung)
+        return {"bat": bool(du_an.get("tk_bat", True)) and rieng.get("bat", True) is True
+                and so > 0,
+                "so_bai": so,
+                "so_tu": _so_rieng(rieng.get("so_tu"), *GIOI_HAN["tk_so_tu"], TK_IG_TOI_DA_TU)}
+    chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
+    so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
+    moi_chung = _kep(du_an.get("bl_moi_bai") or 0, *GIOI_HAN["bl_moi_bai"], 0)
+    moi = _so_rieng(rieng.get("moi_bai"), *GIOI_HAN["bl_moi_bai"], moi_chung)
+    return {"bat": bool(du_an.get("bl_bat", True)) and rieng.get("bat", True) is True and so > 0,
+            "so_bai": so, "moi_bai": 5 if 0 < moi < 5 else moi}
+
+
+def tk_co_bat(du_an: dict) -> bool:
+    """Lượt này có tìm theo từ khoá ở ít nhất một nền tảng không (theo cấu hình hiệu lực)."""
+    return any(cau_hinh(du_an, "tu_khoa", p)["bat"] for p in TK_NEN_TANG)
+
+
+def _fb_toi_da() -> int:
+    """Số bài tối đa một lượt tìm Facebook: 20 với gói Apify Free (hoặc chưa biết gói — an
+    toàn), không giới hạn thêm với gói trả phí (chủ dự án 15/10: sẽ nâng gói)."""
+    try:
+        goi = A._goi_apify()
+    except Exception:  # noqa: BLE001 — không hỏi được gói thì giữ mức an toàn
+        goi = ""
+    return TK_FB_TOI_DA if goi in ("", "FREE") else 10 ** 6
 
 
 def tu_tim(du_an: dict) -> list[str]:
@@ -651,24 +728,46 @@ def tu_tim(du_an: dict) -> list[str]:
     return ra[:TK_TOI_DA_TU]
 
 
-def _tu_cho(p: str, tu: list[str]) -> list[str]:
+def _tu_cho(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU) -> list[str]:
     if p == "instagram":                 # actor tìm theo hashtag: chỉ từ không có dấu cách
-        return [t for t in tu if " " not in t][:TK_IG_TOI_DA_TU]
+        return [t for t in tu if " " not in t][:so_tu]
     return tu
 
 
-def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str]) -> float:
-    q = _tu_cho(p, tu)
+def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU,
+                         fb_toi_da: int = TK_FB_TOI_DA) -> float:
+    q = _tu_cho(p, tu, so_tu)
     if not q or not _TK_GIA.get(p) or so_bai <= 0:
         return 0.0
     if p == "instagram":
         return round(len(q) * (_TK_KHOI["instagram"] + so_bai * _TK_GIA[p]) * _HE_SO_UOC, 4)
-    n = min(so_bai, TK_FB_TOI_DA) if p == "facebook" else so_bai
+    n = min(so_bai, fb_toi_da) if p == "facebook" else so_bai
     return round((n * _TK_GIA[p] + _TK_KHOI.get(p, 0.0)) * _HE_SO_UOC, 4)
 
 
 def uoc_tu_khoa(so_bai: int, tu: list[str]) -> float:
     return round(sum(uoc_tu_khoa_nen_tang(p, so_bai, tu) for p in TK_NEN_TANG), 4)
+
+
+def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA) -> float:
+    """USD tối đa một lượt tìm theo từ khoá với cấu hình hiệu lực từng nền tảng."""
+    tu = tu_tim(du_an)
+    tong = 0.0
+    for p in TK_NEN_TANG:
+        c = cau_hinh(du_an, "tu_khoa", p)
+        if c["bat"]:
+            tong += uoc_tu_khoa_nen_tang(p, c["so_bai"], tu, c["so_tu"], fb_toi_da)
+    return round(tong, 4)
+
+
+def uoc_binh_luan_du_an(du_an: dict) -> float:
+    """USD giữ chỗ một lượt cào bình luận với cấu hình hiệu lực từng nền tảng."""
+    tong = 0.0
+    for p in BL_NEN_TANG:
+        c = cau_hinh(du_an, "binh_luan", p)
+        if c["bat"]:
+            tong += uoc_binh_luan(c["so_bai"], c["moi_bai"], p)
+    return round(tong, 4)
 
 
 def _phan_tk(v) -> list[dict]:
@@ -689,9 +788,10 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     được lượt cũ trả gì — tiền vẫn chốt theo run id)."""
     tk = {"tu": [], "lay": 0, "giu": 0, "moi": 0, "cu": 0, "de_xuat": 0, "usd": 0.0,
           "ghi_chu": [], "ai": ""}
-    so_bai = int(du_an.get("tk_so_bai") or 0)
-    if not du_an.get("tk_bat", True) or so_bai <= 0:
+    cfg = {p: cau_hinh(du_an, "tu_khoa", p) for p in TK_NEN_TANG}
+    if not any(c["bat"] for c in cfg.values()):
         return tk
+    fb_toi_da = _fb_toi_da()
     ma = du_an["ma"]
     tu = tu_tim(du_an)
     tk["tu"] = tu
@@ -704,9 +804,10 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     co_run = {ph["nen_tang"] for ph in phan if ph.get("run_id")}
     hits: list[tuple] = []
     for p in TK_NEN_TANG:
-        if p in da_xong:
+        if p in da_xong or not cfg[p]["bat"]:
             continue
-        q = _tu_cho(p, tu)
+        so_bai = cfg[p]["so_bai"]
+        q = _tu_cho(p, tu, cfg[p]["so_tu"])
         if not q:
             continue
         if p in co_run:
@@ -717,7 +818,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         dung = A._youtube_co_key() if p == "youtube" else _nen_tang_dung_duoc(p)[0]
         if not dung:
             continue
-        uoc = uoc_tu_khoa_nen_tang(p, so_bai, tu)
+        uoc = uoc_tu_khoa_nen_tang(p, so_bai, tu, cfg[p]["so_tu"], fb_toi_da)
         if uoc > min(con, _con_viec(v)) + 1e-9 or v.con_giay() < _CHUA_GIAY_CUOI + 60:
             ly = "hết giờ" if v.con_giay() < _CHUA_GIAY_CUOI + 60 else "hết ngân sách"
             tk["ghi_chu"].append(f"tìm {_TEN[p]}: bỏ qua ({ly})")
@@ -732,7 +833,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         got: list = []
         loi = None
         try:
-            got = A._FETCH[p](q, min(so_bai, TK_FB_TOI_DA) if p == "facebook" else so_bai,
+            got = A._FETCH[p](q, min(so_bai, fb_toi_da) if p == "facebook" else so_bai,
                               "VN", d_from, bay_gio) or []
         except Exception as e:
             if type(e).__name__ == "MatQuyen":
@@ -843,10 +944,11 @@ _BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube"
 _BL_KHOI_DONG = {"facebook": 0.001}
 _BL_LO = 25                       # bài mỗi lượt actor bình luận
 # Đợt 2d (chủ dự án 15/10): "1 bài thì phải cào hết tất cả thảo luận". bl_moi_bai = 0 → mỗi bài
-# xin đủ số nền tảng báo (+15% + 10 dư cho trả lời mới), trần an toàn `BL_TRAN_BAI`. Facebook
-# lấy cả trả lời (includeNestedComments); bài đã cào đủ thì lần sau chỉ lấy bình luận MỚI
-# (RECENT_ACTIVITY + onlyCommentsNewerThan, +0,002 USD/bài). TikTok trả lời tới 100/bình luận.
-BL_TRAN_BAI = 3000
+# xin đủ số nền tảng báo (+15% + 10 dư cho trả lời mới) — KHÔNG trần mỗi bài (chủ dự án 15/10:
+# "không có giới hạn"); bài to hơn trần mỗi lượt thì actor dừng ở trần, lượt sau cào tiếp
+# (`bai.bl_lan_thieu`). Facebook lấy cả trả lời (includeNestedComments); bài đã cào đủ thì lần
+# sau chỉ lấy bình luận MỚI (RECENT_ACTIVITY + onlyCommentsNewerThan, +0,002 USD/bài). TikTok
+# trả lời tới 100/bình luận.
 _BL_LO_DAY_DU = 10                # bài mỗi lượt actor khi cào hết (số bình luận chênh nhiều)
 _BL_UOC_MOI_BAI = 60              # giữ chỗ ngân sách khi chưa biết bài nào (cào hết)
 _BL_FB_LOC_NGAY = 0.002           # phụ phí mỗi bài khi Facebook lọc theo ngày
@@ -887,7 +989,16 @@ def _dong_bl(r: dict, bai: dict, thuong_hieu: list[str]) -> dict:
            if bai.get("nguon_loai") == "kenh_nha" else [])
     nha = bool(r.get("cua_chu")) or any(
         phan_loai.la_tai_khoan_nha(r.get("kenh"), thuong_hieu, c) for c in chu or [""])
-    return {"khoa_bai": bai["khoa"], "ma": _ma_bl(r), "nen_tang": bai["nen_tang"],
+    ma = _ma_bl(r)
+    g = r.get("__goc") if isinstance(r.get("__goc"), dict) else {}
+    sn = g.get("snippet") if isinstance(g.get("snippet"), dict) else {}
+    cha = (g.get("repliesToId") or g.get("replyToCommentId") or g.get("parentCommentId")
+           or sn.get("parentId"))
+    link = str(g.get("commentUrl") or "") or None
+    if not link and bai["nen_tang"] == "youtube" and r.get("link"):
+        link = f"{r['link']}&lc={ma}"            # YouTube mở thẳng tới bình luận
+    return {"khoa_bai": bai["khoa"], "ma": ma, "nen_tang": bai["nen_tang"],
+            "link": str(link)[:500] if link else None, "ma_cha": str(cha)[:120] if cha else None,
             "tac_gia": str(r.get("kenh") or "")[:200], "noi_dung": str(r.get("text") or "")[:1000],
             "thich": _so_hay_none(r.get("likes")), "tra_loi": _so_hay_none(r.get("replies")),
             "la_tra_loi": _la_tra_loi(r), "cua_thuong_hieu": nha,
@@ -902,14 +1013,14 @@ def _la_tra_loi(r: dict) -> bool:
 
 
 def _can_bl(b: dict, moi_bai: int) -> int:
-    """Số bình luận xin cho một bài. Cào hết: số nền tảng báo +15% +10 (trần `BL_TRAN_BAI`);
+    """Số bình luận xin cho một bài. Cào hết: số nền tảng báo +15% +10 (không trần mỗi bài);
     lần sau của bài đã cào đủ (Facebook lọc theo ngày): phần tăng + 20."""
     if moi_bai:
         return moi_bai
     co = int(b.get("binh_luan") or 0)
     if _tang_dan(b):
         co = max(0, co - int(b.get("bl_lay_khi_co") or 0))
-    return max(10, min(BL_TRAN_BAI, int(co * 1.15) + (20 if _tang_dan(b) else 10)))
+    return max(10, int(co * 1.15) + (20 if _tang_dan(b) else 10))
 
 
 def _tang_dan(b: dict) -> bool:
@@ -943,13 +1054,15 @@ def _tao_phan_bl(v, p: str, lo: list[dict], per: int) -> dict:
     return _phan_bl(v)[-1]
 
 
-def _tao_cac_phan_bl(v, ds: list[dict], per: int) -> None:
+def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
     """Lập MỌI phần bình luận rồi lưu sổ một lần — bot tắt giữa chừng thì hoặc chưa có phần
-    nào (lần sau chọn lại), hoặc có đủ (không lặng lẽ bỏ nền tảng còn lại)."""
+    nào (lần sau chọn lại), hoặc có đủ (không lặng lẽ bỏ nền tảng còn lại). `per_cfg`: số
+    bình luận mỗi bài (0 = cào hết) — một số chung, hoặc {nền tảng: số}."""
     import deep_dive_tool as D
-    day_du = not per
     cac = []
     for p in BL_NEN_TANG:
+        per = int(per_cfg.get(p, 0) if isinstance(per_cfg, dict) else per_cfg or 0)
+        day_du = not per
         for lo, moc in _chia_lo_bl(p, [b for b in ds if b["nen_tang"] == p], per):
             urls = [b["link"] for b in lo]
             can = [_can_bl(b, per) for b in lo]
@@ -1049,16 +1162,18 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     ma = du_an["ma"]
     tk = {"bai": 0, "lay": 0, "moi": 0, "cu": 0, "nha": 0, "usd": 0.0, "ghi_chu": [],
           "nhan": ""}
-    if not du_an.get("bl_bat", True) or int(du_an.get("bl_so_bai") or 0) <= 0:
+    cfg = {p: cau_hinh(du_an, "binh_luan", p) for p in BL_NEN_TANG}
+    if not any(c["bat"] for c in cfg.values()):
         return tk
-    per = int(du_an.get("bl_moi_bai") or 0)
-    per = 0 if per <= 0 else max(5, min(5000, per))       # 0 = cào hết
     thuong_hieu = [du_an["ten"], *(du_an.get("tu_khoa") or [])]
     if not _phan_bl(v):
-        dung = [p for p in BL_NEN_TANG if p == "youtube" and A._youtube_co_key()
-                or p != "youtube" and _nen_tang_dung_duoc(p)[0]]
-        ds = K.bai_can_lay_binh_luan(ma, dung, int(du_an["bl_so_bai"]), cao_het=not per)
-        _tao_cac_phan_bl(v, ds, per)
+        ds: list[dict] = []
+        for p in BL_NEN_TANG:
+            c = cfg[p]
+            dung = A._youtube_co_key() if p == "youtube" else _nen_tang_dung_duoc(p)[0]
+            if c["bat"] and dung:
+                ds += K.bai_can_lay_binh_luan(ma, [p], c["so_bai"], cao_het=not c["moi_bai"])
+        _tao_cac_phan_bl(v, ds, {p: c["moi_bai"] for p, c in cfg.items()})
     for ph in list(_phan_bl(v)):
         p = ph["nen_tang"]
         if ph.get("trang_thai") in _KET_PHAN:
@@ -1067,7 +1182,7 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         tk["bai"] += len(bai)
         rows: list[dict] = []
         if p == "youtube":
-            kq = D._yt_api_lo([b["link"] for b in bai], int(ph.get("per") or per or 100), han)
+            kq = D._yt_api_lo([b["link"] for b in bai], int(ph.get("per") or 100), han)
             rows = kq["binh_luan"]
             if kq["loi"]:
                 tk["ghi_chu"].append(f"bình luận YouTube: {A._che_token(kq['loi'])[:120]}")

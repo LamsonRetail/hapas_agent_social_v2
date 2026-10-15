@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.du_an`
   tu_loai_tru     ARRAY<STRING> OPTIONS(description='Từ loại trừ: bài chứa một từ này bị bỏ cứng trước bước AI (vd hapasguitars). Mảng rỗng khi không đặt.'),
   boi_canh        STRING    OPTIONS(description='Mô tả brand đưa cho bước AI phân xử giữ/loại và gán sắc thái, chủ đề. Chuỗi rỗng khi chưa viết.'),
   thi_truong      STRING    OPTIONS(description='Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN. Dùng cho bước AI nhận bài ngoài thị trường.'),
-  tran_usd_thang  NUMERIC   OPTIONS(description='Trần chi phí theo dõi mỗi tháng, USD (tiền Apify, không VAT). 0–100 (ràng buộc nguồn), mặc định 5. Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng.'),
+  tran_usd_thang  NUMERIC   OPTIONS(description='Trần chi phí theo dõi mỗi tháng, USD (tiền Apify, không VAT). ≥ 0, không trần trên (ràng buộc nguồn), mặc định 5. Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng.'),
   dang_bat        BOOL      OPTIONS(description='TRUE: dự án đang bật, /theodoi được quét. FALSE: tắt trên dashboard, /theodoi từ chối.'),
   tao_luc         TIMESTAMP OPTIONS(description='Thời điểm tạo dự án ở DB nguồn, UTC; giờ VN = DATETIME(tao_luc, "Asia/Ho_Chi_Minh").'),
   sua_luc         TIMESTAMP OPTIONS(description='Thời điểm sửa dự án gần nhất ở DB nguồn, UTC.'),
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.nguon`
   nhan            ARRAY<STRING> OPTIONS(description='Nhãn tự do người quản lý gắn để lọc (vd đối thủ, top Kompa). Mảng rỗng khi không gắn.'),
   trang_thai      STRING    OPTIONS(description='Giá trị: dang_theo_doi (được quét khi tới hạn), tam_dung (bỏ qua).'),
   chu_ky_ngay     INT64     OPTIONS(description='Chu kỳ quét, số ngày (1–30, ràng buộc nguồn). Nguồn tới hạn khi lần quét cuối cách đây ít nhất chu kỳ trừ 3 giờ.'),
-  so_bai_moi_lan  INT64     OPTIONS(description='Số bài mới nhất lấy mỗi lần quét, bài (1–30). Instagram luôn trả tối đa 12 bài mới nhất.'),
+  so_bai_moi_lan  INT64     OPTIONS(description='Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram luôn trả tối đa 12 bài mới nhất (giới hạn của actor hồ sơ).'),
   them_qua        STRING    OPTIONS(description='Nguồn vào danh sách bằng cách nào. Giá trị: dashboard (người quản lý thêm), de_xuat (duyệt từ đề xuất của Mark), nhap_file.'),
   them_luc        TIMESTAMP OPTIONS(description='Thời điểm thêm nguồn, UTC.'),
   quet_cuoi       TIMESTAMP OPTIONS(description='Thời điểm quét thành công gần nhất, UTC. NULL khi chưa quét thành công lần nào.'),
@@ -191,7 +191,9 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.binh_luan`
   cap_nhat_cuoi   TIMESTAMP OPTIONS(description='Thời điểm cập nhật gần nhất ở DB nguồn, UTC. Mốc đồng bộ.'),
   loai            STRING    OPTIONS(description='Nhãn lọc. Giá trị: hop_le (thảo luận sạch, có sắc thái), it_noi_dung (chỉ dấu chấm/emoji/tag), spam (quảng cáo/lừa đảo/kéo khách), trung (cùng người cùng nội dung cùng bài), seeding (cùng nội dung từ ≥ 3 tài khoản trong 7 ngày), thuong_hieu (thương hiệu viết). Đếm thảo luận sạch: loai = hop_le.'),
   ly_do_loc       STRING    OPTIONS(description='Lý do lọc khi loai không phải hop_le (vd lien_ket_quang_cao, keo_khach, vay_tien, co_bac, viec_lam_mmo, cung_nguoi_cung_noi_dung, cung_noi_dung_nhieu_tai_khoan). NULL khi hợp lệ.'),
-  ma_noi_dung     STRING    OPTIONS(description='Băm 16 ký tự nội dung đã chuẩn hoá khi ≥ 15 ký tự — cùng mã từ nhiều tài khoản là seeding. NULL khi quá ngắn.'),
+  ma_noi_dung     STRING    OPTIONS(description='Băm 16 ký tự nội dung đã chuẩn hoá khi ≥ 40 ký tự — cùng mã từ ≥ 3 tài khoản trên ≥ 2 bài là seeding. NULL khi quá ngắn.'),
+  link            STRING    OPTIONS(description='Link mở thẳng tới bình luận khi nền tảng có (Facebook, Instagram, YouTube); NULL thì dùng bai.link.'),
+  ma_cha          STRING    OPTIONS(description='Mã bình luận cha khi dòng là trả lời (cùng khoa_bai). NULL với bình luận gốc.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 CLUSTER BY du_an, nen_tang
@@ -200,12 +202,22 @@ OPTIONS(description='''[Lớp] Raw
 [Grain] 1 dòng = 1 bình luận × 1 bài × 1 dự án
 [Khoá] PK: du_an + khoa_bai + ma | Join: (du_an, khoa_bai) → bai.(du_an, khoa); luot_id → luot_quet.id
 [Nguồn] Postgres lang_nghe.public.binh_luan trên VPS Mark; Mark cào sau mỗi lượt /theodoi (Apify comments scraper TikTok/Facebook/Instagram, YouTube Data API)
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; tối đa bl_so_bai bài × bl_moi_bai bình luận mỗi lượt; từ 15/10/2026
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; số bài và số bình luận mỗi bài theo cấu hình từng nền tảng (du_an.cau_hinh trên Postgres, 0 = cào hết); từ 15/10/2026
 [Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng có nhãn lọc loai (spam/rác/trùng/seeding/thương hiệu) — chỉ hop_le được gán sắc thái/chủ đề
 [Refresh] MERGE theo du_an + khoa_bai + ma các dòng có cap_nhat_cuoi mới, sau mỗi lượt quét và 6 giờ một lần
 [Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày
 [Không dùng khi] Tổng bình luận nền tảng báo của bài → dùng SOCIAL_LISTENING.bai.binh_luan
 [Lưu ý] Thảo luận sạch / sắc thái: lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, bài rất lớn có thể thiếu (so bai.binh_luan để biết độ phủ).''');
+
+-- Nâng cấp bảng đã tạo TRƯỚC đợt 2e (15/10/2026): CREATE … IF NOT EXISTS không thêm cột vào bảng
+-- có sẵn, mà dong_bo_bq MERGE cả link + ma_cha — chạy khối này trước khi bật đồng bộ bản mới.
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
+  ADD COLUMN IF NOT EXISTS link STRING OPTIONS(description='Link mở thẳng tới bình luận khi nền tảng có (Facebook, Instagram, YouTube); NULL thì dùng bai.link.'),
+  ADD COLUMN IF NOT EXISTS ma_cha STRING OPTIONS(description='Mã bình luận cha khi dòng là trả lời (cùng khoa_bai). NULL với bình luận gốc.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.nguon`
+  ALTER COLUMN so_bai_moi_lan SET OPTIONS(description='Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram luôn trả tối đa 12 bài mới nhất (giới hạn của actor hồ sơ).');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.du_an`
+  ALTER COLUMN tran_usd_thang SET OPTIONS(description='Trần chi phí theo dõi mỗi tháng, USD (tiền Apify, không VAT). ≥ 0, không trần trên (ràng buộc nguồn), mặc định 5. Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng.');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`

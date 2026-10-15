@@ -18,7 +18,6 @@
   </form>
   {% endif %}
 </div>
-<p class="ghi-chu sat-tren cach-duoi">{{ LICH_CHAY }}</p>
 
 {% if du_an %}
 <section class="the-khoi cach-duoi">
@@ -52,7 +51,7 @@
 
 <section class="the-khoi cach-duoi">
   <div class="tieu-de-khoi"><h2>Nguồn đang có ({{ nguon|length }})</h2>
-    <span class="mo nho">Mark quét nguồn "đang theo dõi" đã tới chu kỳ, mỗi lần tối đa "số bài mỗi lần" bài mới nhất.</span></div>
+    <span class="mo nho">Tới chu kỳ thì quét, mỗi lần lấy tối đa "Bài/lần" bài mới nhất.</span></div>
   {% if nguon %}
   <div class="cuon-ngang">
   <table>
@@ -101,7 +100,7 @@
                 <select name="loai">{% for k, v in LOAI_NGUON.items() %}<option value="{{ k }}"{% if n.loai == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
               <label class="o">Nhãn (dấu phẩy) <input type="text" name="nhan" value="{{ n.nhan|join(', ') }}"></label>
               <label class="o">Chu kỳ quét (1–30 ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="{{ n.chu_ky_ngay }}" required></label>
-              <label class="o">Số bài mỗi lần (1–30) <input type="number" name="so_bai_moi_lan" min="1" max="30" value="{{ n.so_bai_moi_lan }}" required></label>
+              <label class="o">Số bài mỗi lần <input type="number" name="so_bai_moi_lan" min="1" value="{{ n.so_bai_moi_lan }}" required></label>
               <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh(n.nen_tang, n.usd_thang) }}</output>
               <div><button class="nut nut--nho" type="submit">Lưu</button></div>
             </form>
@@ -132,17 +131,17 @@
       <select name="loai">{% for k, v in LOAI_NGUON.items() %}<option value="{{ k }}"{% if k == 'kol' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
     <label class="o">Nhãn (dấu phẩy) <input type="text" name="nhan" maxlength="500"></label>
     <label class="o">Chu kỳ quét (1–30 ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="1" required></label>
-    <label class="o">Số bài mỗi lần (1–30) <input type="number" name="so_bai_moi_lan" min="1" max="30" value="5" required></label>
+    <label class="o">Số bài mỗi lần <input type="number" name="so_bai_moi_lan" min="1" value="5" required></label>
     <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh('tiktok', 30 * 5 * chi_phi_js.gia.tiktok * chi_phi_js.he_so) }}</output>
     <div><button class="nut" type="submit">Thêm nguồn</button></div>
   </form>
-  <p class="ghi-chu">Kênh nhà (kênh của chính brand): Mark giữ mọi bài; nguồn khác chỉ giữ bài nhắc từ khoá dự án.</p>
+  <p class="ghi-chu">Kênh nhà: giữ mọi bài. Nguồn khác: chỉ giữ bài nhắc từ khoá dự án.</p>
 </section>
 {% endif %}
 
 <section class="the-khoi cach-duoi">
   <h2>Đề xuất nguồn chờ duyệt ({{ de_xuat|length }})</h2>
-  <p class="ghi-chu sat-tren">Nguồn Mark thấy nổi khi quét mà chưa có trong danh sách. Mark không tự thêm nguồn — người quản lý duyệt ở đây.</p>
+  <p class="ghi-chu sat-tren">Nguồn nổi lên khi quét nhưng chưa được theo dõi — chỉ thêm khi quản lý duyệt.</p>
   {% if de_xuat %}
   <div class="cuon-ngang">
   <table>

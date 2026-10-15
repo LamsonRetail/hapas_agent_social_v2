@@ -82,13 +82,15 @@ def test_dinh_danh_la_diem_co_dinh_cua_cach_mark_so_khop():
 
 
 @pytest.mark.parametrize("vao, ra", [("5", "5.00"), ("12,5", "12.50"), (" 0 ", "0.00"),
-                                     ("100", "100.00"), ("99.999", "100.00")])
+                                     ("100", "100.00"), ("99.999", "100.00"),
+                                     ("100.01", "100.01"), ("2500", "2500.00")])
 def test_tran_usd_hop_le(vao, ra):
+    """Chủ dự án 15/10: trần tháng không còn trần trên 100 USD."""
     assert NL.tran_usd(vao) == Decimal(ra)
 
 
-@pytest.mark.parametrize("vao", ["100.01", "-1", "abc", "", "nan", "inf", "1e9"])
-def test_tran_usd_ngoai_0_100(vao):
+@pytest.mark.parametrize("vao", ["-1", "abc", "", "nan", "inf", "1e9"])   # 1e9: tràn cột
+def test_tran_usd_am_rac_hoac_tran_cot(vao):
     with pytest.raises(NL.LoiNhap):
         NL.tran_usd(vao)
 
@@ -132,10 +134,14 @@ def test_bieu_mau_du_an_va_nguon():
     assert n == {"nen_tang": "tiktok", "dinh_danh": "kola", "link": "https://www.tiktok.com/@kola",
                  "ten": "kola", "loai": "kol", "nhan": ["kol", "mỹ phẩm"], "chu_ky_ngay": 3,
                  "so_bai_moi_lan": 10}
-    for sai in ({"chu_ky_ngay": "0"}, {"chu_ky_ngay": "31"}, {"so_bai_moi_lan": "31"},
+    for sai in ({"chu_ky_ngay": "0"}, {"chu_ky_ngay": "31"}, {"so_bai_moi_lan": "0"},
+                {"so_bai_moi_lan": "-5"}, {"so_bai_moi_lan": str(NL.SO_TOI_DA + 1)},
                 {"loai": "fanpage"}):
         with pytest.raises(NL.LoiNhap):
             NL.nguon({"nen_tang": "tiktok", "dinh_danh": "kola", **sai})
+    # Không trần trên nghiệp vụ cho số bài mỗi lần (chủ dự án 15/10: "không có giới hạn").
+    assert NL.nguon({"nen_tang": "tiktok", "dinh_danh": "kola",
+                     "so_bai_moi_lan": "500"})["so_bai_moi_lan"] == 500
 
 
 def test_ngay():

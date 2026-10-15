@@ -485,10 +485,31 @@ def loai_bl(c: dict) -> str:
     return "thuong_hieu" if c.get("cua_thuong_hieu") else "hop_le"
 
 
+def _iso_vn(dt) -> str | None:
+    return (dt.astimezone(VN).isoformat(timespec="minutes")
+            if isinstance(dt, datetime.datetime) and dt.tzinfo else None)
+
+
+def khoa_nguon_bl(c: dict) -> tuple[str, str]:
+    """(khoá, tên) nguồn của bình luận: nguồn theo dõi của bài, không thì tác giả bài."""
+    if c.get("nguon_id") is not None:
+        return f"n:{c['nguon_id']}", c.get("nguon_ten") or c.get("bai_tac_gia") or "?"
+    t = str(c.get("bai_tac_gia") or "").strip()
+    return (f"t:{t.lower()}", t) if t else ("t:?", "Không rõ nguồn")
+
+
 def the_bl(c: dict) -> dict:
     dt = c.get("dang_luc")
     lb = loai_bl(c)
-    return {"tac_gia": c.get("tac_gia") or "", "noi_dung": str(c.get("noi_dung") or "")[:1000],
+    kn, tn = khoa_nguon_bl(c)
+    return {"ma": c.get("ma") or "", "ma_cha": c.get("ma_cha") or "",
+            "link": c.get("link") or "",
+            "bai": {"link": c.get("bai_link") or "", "tac_gia": c.get("bai_tac_gia") or "",
+                    "noi_dung": " ".join(str(c.get("bai_noi_dung") or "").split())[:200],
+                    "dang_luc": _iso_vn(c.get("bai_dang_luc"))},
+            "nguon": {"khoa": kn, "ten": tn,
+                      "loai": TEN_LOAI.get(loai(c), loai(c)) if "nguon_loai" in c else ""},
+            "tac_gia": c.get("tac_gia") or "", "noi_dung": str(c.get("noi_dung") or "")[:1000],
             "thich": so(c.get("thich")), "tra_loi": so(c.get("tra_loi")),
             "la_tra_loi": bool(c.get("la_tra_loi")),
             "cua_thuong_hieu": bool(c.get("cua_thuong_hieu")),
@@ -548,28 +569,129 @@ def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     }
 
 
+def xep_theo_luong(rows: list[dict]) -> list[dict]:
+    """Bình luận của MỘT bài theo luồng như trên nền tảng: bình luận gốc nhiều thích trước, ngay
+    sau mỗi gốc là các trả lời của nó (cũ trước). Trả lời mất cha (cha chưa cào) thành gốc."""
+    ma = {c.get("ma") for c in rows if c.get("ma")}
+    con: dict[str, list] = collections.defaultdict(list)
+    goc: list[dict] = []
+    for c in rows:
+        cha = c.get("ma_cha")
+        (con[cha] if cha and cha in ma and cha != c.get("ma") else goc).append(c)
+    luc_min = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    goc.sort(key=lambda c: (-so(c.get("thich")), c.get("dang_luc") or luc_min))
+    ra: list[dict] = []
+    da: set = set()
+
+    def them(c: dict) -> None:
+        ngan = [c]
+        while ngan:                       # duyệt sâu không đệ quy (luồng dài không tràn ngăn xếp)
+            x = ngan.pop()
+            if id(x) in da:
+                continue
+            da.add(id(x))
+            ra.append(x)
+            ngan.extend(sorted(con.get(x.get("ma"), []),
+                               key=lambda y: y.get("dang_luc") or luc_min, reverse=True))
+    for g in goc:
+        them(g)
+    ra.extend(c for c in rows if id(c) not in da)      # vòng cha-con lỗi: vẫn không mất dòng
+    return ra
+
+
+def gan_ngu_canh_bai(ds: list[dict], ngu_canh: dict[str, dict]) -> None:
+    """Điền link / đoạn nội dung / giờ đăng của bài vào các thẻ bình luận (`the_bl`) đã chọn."""
+    for x in ds:
+        b = ngu_canh.get(x.get("khoa_bai"))
+        if b:
+            x["bai"].update(link=b.get("bai_link") or "",
+                            noi_dung=" ".join(str(b.get("bai_noi_dung") or "").split())[:200],
+                            dang_luc=_iso_vn(b.get("bai_dang_luc")))
+
+
+SAP_XEP_BL = ("thich", "moi", "cu")
+#: Trường lọc của luồng bình luận (kiểu Kompa) — mỗi trường có đếm số theo giá trị (facets).
+TRUONG_LOC_BL = ("nen_tang", "nguon", "sac_thai", "chu_de", "loai")
+
+
+def _gia_tri_bl(c: dict, truong: str) -> str:
+    if truong == "nen_tang":
+        return c.get("nen_tang") or ""
+    if truong == "nguon":
+        return khoa_nguon_bl(c)[0]
+    lb = loai_bl(c)
+    if truong == "loai":
+        return lb
+    if lb != "hop_le":                    # sắc thái/chủ đề chỉ có nghĩa với bình luận hợp lệ
+        return ""
+    if truong == "sac_thai":
+        return sac_bl(c)
+    return str(c.get("chu_de") or "").strip() or CHUA
+
+
 def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
                 trang: int = 1, ngay_tu=None, ngay_den=None, sac_thai=None, chu_de=None,
-                nen_tang=None, loai_nguon=None, loai=None) -> dict:
-    """Bình luận khớp điều kiện (sắc thái/chủ đề chỉ xét bình luận của khách), nhiều thích
-    trước. -> {tong, trang, so_trang, binh_luan}."""
-    ds = []
-    for c in loc(rows, nen_tang, loai_nguon):
+                nen_tang=None, loai_nguon=None, loai=None, nguon=None, q=None,
+                sap_xep: str = "thich", moi_trang: int = MOI_TRANG) -> dict:
+    """Luồng bình luận lọc theo các trường (kiểu Kompa): nền tảng, nguồn, sắc thái, chủ đề,
+    nhãn lọc, chữ tìm (bỏ dấu), khoảng ngày; sắp xếp nhiều thích / mới / cũ.
+    -> {tong, trang, so_trang, binh_luan, facets}. `facets` = {trường: [{gia_tri, ten, so}]}
+    đếm trên các dòng khớp MỌI điều kiện TRỪ chính trường đó (chọn tiếp được giá trị khác)."""
+    chu = _bo_dau(q).strip() if q else ""
+    dk = {"nen_tang": nen_tang, "nguon": nguon, "sac_thai": sac_thai, "chu_de": chu_de,
+          "loai": loai}
+    co_so: list[dict] = []
+    for c in loc(rows, None, loai_nguon):
         n = _ngay_bl(c)
         if n is None or not tu <= n <= den:
             continue
         if (ngay_tu and n < ngay_tu) or (ngay_den and n > ngay_den):
             continue
-        lb = loai_bl(c)
-        if loai and lb != loai:
+        if chu and chu not in _bo_dau(f"{c.get('noi_dung') or ''} {c.get('tac_gia') or ''}"):
             continue
-        sach = lb == "hop_le"
-        if sac_thai and (not sach or sac_bl(c) != sac_thai):
-            continue
-        if chu_de and (not sach or (str(c.get("chu_de") or "").strip() or CHUA) != chu_de):
-            continue
-        ds.append(c)
-    ds.sort(key=lambda c: (-so(c.get("thich")), str(c.get("khoa_bai") or "")))
-    mot, trang, so_trang = _trang(ds, trang)
+        co_so.append(c)
+
+    def khop(c: dict, bo: str | None = None) -> bool:
+        return all(not v or k == bo or _gia_tri_bl(c, k) == v for k, v in dk.items())
+    ds = [c for c in co_so if khop(c)]
+    if sap_xep == "moi":
+        ds.sort(key=lambda c: c.get("luc") or c.get("dang_luc") or datetime.datetime.min.replace(
+            tzinfo=datetime.timezone.utc), reverse=True)
+    elif sap_xep == "cu":
+        ds.sort(key=lambda c: c.get("luc") or c.get("dang_luc") or datetime.datetime.max.replace(
+            tzinfo=datetime.timezone.utc))
+    else:
+        ds.sort(key=lambda c: (-so(c.get("thich")), str(c.get("khoa_bai") or "")))
+    facets: dict[str, list] = {}
+    for t in TRUONG_LOC_BL:
+        dem: collections.Counter = collections.Counter()
+        ten: dict[str, str] = {}
+        for c in co_so:
+            if not khop(c, bo=t):
+                continue
+            g = _gia_tri_bl(c, t)
+            if not g:
+                continue
+            dem[g] += 1
+            if t == "nguon":
+                ten[g] = khoa_nguon_bl(c)[1]
+        ten_mac_dinh = {"nen_tang": TEN_NEN_TANG, "loai": TEN_LOAI_BL}.get(t, {})
+        facets[t] = [{"gia_tri": g, "ten": ten.get(g) or ten_mac_dinh.get(g, g), "so": n}
+                     for g, n in dem.most_common(30 if t == "nguon" else None)]
+    mot, trang, so_trang = _trang(ds, trang, moi_trang)
     return {"tong": len(ds), "trang": trang, "so_trang": so_trang,
-            "binh_luan": [the_bl(c) for c in mot]}
+            "binh_luan": [the_bl(c) for c in mot], "facets": facets}
+
+
+def tu_khoa_thao_luan(bai: list[dict], bl: list[dict], tu: datetime.date, den: datetime.date, *,
+                      nen_tang: str | None = None, loai_nguon: str | None = None,
+                      tu_khoa_du_an: list[str] | tuple = ()) -> dict:
+    """Từ khoá nổi bật kiểu Kompa: đếm trên THẢO LUẬN = bài (không phải kênh nhà) + bình luận
+    hợp lệ trong kỳ. -> {"tu_khoa": [{tu, so_bai (= số thảo luận nhắc), sắc thái…}], "tong"}."""
+    b = trong_khoang(loc(bai, nen_tang, loai_nguon), tu, den)
+    c = [x for x in loc(bl, nen_tang, loai_nguon) if loai_bl(x) == "hop_le"
+         and (n := _ngay_bl(x)) is not None and tu <= n <= den]
+    # Bình luận: chỉ chữ + sắc thái (không gắn nguồn — bình luận dưới bài kênh nhà là tiếng khách).
+    dong = b + [{"noi_dung": x.get("noi_dung") or "", "sac_thai": x.get("sac_thai")} for x in c]
+    return {"tu_khoa": tu_khoa(dong, tu_khoa_du_an),
+            "tong": sum(not la_kenh_nha(r) for r in b) + len(c)}

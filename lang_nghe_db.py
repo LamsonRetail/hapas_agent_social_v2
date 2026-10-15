@@ -60,7 +60,7 @@ def doc_du_an(ma: str) -> dict | None:
         return c.execute(
             "SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
             "tran_usd_thang::float AS tran_usd_thang, dang_bat, bl_bat, bl_so_bai, bl_moi_bai, "
-            "tk_bat, tk_so_bai "
+            "tk_bat, tk_so_bai, cau_hinh "
             "FROM du_an WHERE ma = %s",
             (ma,)).fetchone()
 
@@ -310,7 +310,7 @@ def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
 
 _COT_BL = ("ma", "nen_tang", "tac_gia", "noi_dung", "thich", "tra_loi", "la_tra_loi",
            "cua_thuong_hieu", "dang_luc", "sac_thai", "chu_de", "loai", "ly_do_loc",
-           "ma_noi_dung")
+           "ma_noi_dung", "link", "ma_cha")
 
 
 def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
@@ -338,6 +338,8 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "ly_do_loc = CASE WHEN binh_luan.loai = 'seeding' AND EXCLUDED.loai = 'hop_le' "
                 "THEN binh_luan.ly_do_loc ELSE EXCLUDED.ly_do_loc END, "
                 "ma_noi_dung = EXCLUDED.ma_noi_dung, "
+                "link = COALESCE(EXCLUDED.link, binh_luan.link), "
+                "ma_cha = COALESCE(EXCLUDED.ma_cha, binh_luan.ma_cha), "
                 "luot_id = EXCLUDED.luot_id, cap_nhat_cuoi = now() "
                 "RETURNING (xmax = 0) AS moi",
                 [ma, r["khoa_bai"], luot_id, *[r.get(k) for k in _COT_BL],

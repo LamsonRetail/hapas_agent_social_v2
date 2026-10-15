@@ -90,7 +90,7 @@ def vai_tro(email: str) -> str | None:
 # ───────────────────────────── dự án ─────────────────────────────
 _COT_DU_AN = ("ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
               "tran_usd_thang::float AS tran_usd_thang, dang_bat, tao_luc, sua_luc, sua_boi, "
-              "bl_bat, bl_so_bai, bl_moi_bai, tk_bat, tk_so_bai")
+              "bl_bat, bl_so_bai, bl_moi_bai, tk_bat, tk_so_bai, cau_hinh")
 
 
 def cac_du_an() -> list[dict]:
@@ -273,18 +273,26 @@ def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) 
 BL_TOI_DA = 50_000
 _COT_BL = ("b.khoa_bai, b.ma, b.nen_tang, left(b.tac_gia, 200) AS tac_gia, "
            "left(b.noi_dung, 1000) AS noi_dung, b.thich, b.tra_loi, b.la_tra_loi, "
-           "b.cua_thuong_hieu, b.dang_luc, b.sac_thai, b.chu_de, b.loai, b.ly_do_loc")
+           "b.cua_thuong_hieu, b.dang_luc, b.sac_thai, b.chu_de, b.loai, b.ly_do_loc, "
+           "left(b.link, 500) AS link, b.ma_cha")
+# Nguồn của bình luận (đợt 2e: lọc/đếm theo nguồn) — cột HẸP, đi cùng mọi dòng của khoảng.
+_COT_BL_NGUON = ("COALESCE(b.dang_luc, b.thay_lan_dau) AS luc, n.loai AS nguon_loai, "
+                 "bai.nguon_id, left(n.ten, 120) AS nguon_ten, "
+                 "left(bai.tac_gia, 120) AS bai_tac_gia")
+# Ngữ cảnh bài (link, đoạn nội dung): chỉ đọc cho bình luận của trang đang xem (`ngu_canh_bai`)
+# hoặc của MỘT bài — đọc cho cả 50.000 dòng của khoảng thì gấp đôi bộ nhớ dịch vụ (MemoryMax).
+_COT_BAI_RONG = ("left(bai.link, 500) AS bai_link, left(bai.noi_dung, 240) AS bai_noi_dung, "
+                 "bai.dang_luc AS bai_dang_luc")
+_TU_BL = ("FROM binh_luan b JOIN bai ON bai.du_an = b.du_an AND bai.khoa = b.khoa_bai "
+          "LEFT JOIN nguon n ON n.id = bai.nguon_id ")
 
 
 def binh_luan_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) -> dict:
     """Bình luận đã cào, đăng trong [tu, den) (bình luận không có giờ đăng: theo giờ cào), kèm
-    loại nguồn của bài để lọc giống trang Chỉ số. -> {"rows", "bi_cat"}."""
+    nguồn của bài để lọc giống trang Chỉ số. -> {"rows", "bi_cat"}."""
     with ket_noi() as c:
         rows = c.execute(
-            f"SELECT {_COT_BL}, COALESCE(b.dang_luc, b.thay_lan_dau) AS luc, "
-            "n.loai AS nguon_loai, bai.nguon_id FROM binh_luan b "
-            "JOIN bai ON bai.du_an = b.du_an AND bai.khoa = b.khoa_bai "
-            "LEFT JOIN nguon n ON n.id = bai.nguon_id "
+            f"SELECT {_COT_BL}, {_COT_BL_NGUON} {_TU_BL}"
             "WHERE b.du_an = %s AND COALESCE(b.dang_luc, b.thay_lan_dau) >= %s "
             "AND COALESCE(b.dang_luc, b.thay_lan_dau) < %s "
             "ORDER BY COALESCE(b.dang_luc, b.thay_lan_dau) DESC LIMIT %s",
@@ -293,12 +301,40 @@ def binh_luan_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.date
 
 
 def binh_luan_cua_bai(du_an: str, khoa: str, toi_da: int = 3000) -> list[dict]:
-    """Bình luận đã cào của MỘT bài, nhiều thích trước."""
+    """Bình luận đã cào của MỘT bài, nhiều thích trước (app xếp lại theo luồng trả lời)."""
     with ket_noi() as c:
         return c.execute(
-            f"SELECT {_COT_BL} FROM binh_luan b WHERE b.du_an = %s AND b.khoa_bai = %s "
+            f"SELECT {_COT_BL}, {_COT_BL_NGUON}, {_COT_BAI_RONG} {_TU_BL}"
+            "WHERE b.du_an = %s AND b.khoa_bai = %s "
             "ORDER BY b.la_tra_loi, COALESCE(b.thich, 0) DESC, b.dang_luc LIMIT %s",
             (du_an, khoa, toi_da)).fetchall()
+
+
+def ngu_canh_bai(du_an: str, khoa: list[str]) -> dict[str, dict]:
+    """Link + đoạn nội dung + giờ đăng của các bài (≤ 100 khoá — bình luận một trang)."""
+    khoa = list(dict.fromkeys(k for k in khoa if k))[:100]
+    if not khoa:
+        return {}
+    with ket_noi() as c:
+        rows = c.execute(
+            f"SELECT bai.khoa, {_COT_BAI_RONG} FROM bai WHERE bai.du_an = %s "
+            "AND bai.khoa = ANY(%s)", (du_an, khoa)).fetchall()
+    return {r["khoa"]: r for r in rows}
+
+
+def dat_cau_hinh(ai: str, ma: str, cau_hinh: dict) -> None:
+    """Cấu hình thu thập theo từng nền tảng (đợt 2e) — JSON đã kiểm ở app. Cột tk_bat / bl_bat
+    (công tắc tổng của Mark) = có ít nhất một nền tảng bật, để công tắc cũ và mới không lệch."""
+    tk_bat = any(v.get("bat") is True for v in cau_hinh.get("tu_khoa", {}).values())
+    bl_bat = any(v.get("bat") is True for v in cau_hinh.get("binh_luan", {}).values())
+    with ket_noi() as c:
+        cu = c.execute("SELECT cau_hinh FROM du_an WHERE ma = %s FOR UPDATE", (ma,)).fetchone()
+        if not cu:
+            raise LoiDuLieu("Không còn dự án này.")
+        c.execute("UPDATE du_an SET cau_hinh = %s::jsonb, tk_bat = %s, bl_bat = %s, "
+                  "sua_luc = now(), sua_boi = %s WHERE ma = %s",
+                  (json.dumps(cau_hinh, ensure_ascii=False), tk_bat, bl_bat, ai, ma))
+        _nhat_ky(c, ai, "sua_cau_hinh", f"du_an:{ma}", {"truoc": cu["cau_hinh"], "sau": cau_hinh})
 
 
 def dat_binh_luan(ai: str, ma: str, bat: bool, so_bai: int, moi_bai: int) -> None:

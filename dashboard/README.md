@@ -1,4 +1,4 @@
-# Dashboard lắng nghe MXH — `social.hapas.vn`
+# Dashboard Social Listening — `social.hapas.vn`
 
 Trang web nội bộ cho team marketing HAPAS (đợt 2, chủ dự án chốt 14/10/2026). Đọc kho Postgres `lang_nghe` trên VPS của Mark (Mark ghi bài sau mỗi lượt `/theodoi <mã dự án>`), hiển thị chỉ số kiểu Kompa và cho người quản lý sửa danh sách nguồn + ngân sách.
 
