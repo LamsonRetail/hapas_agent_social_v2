@@ -44,12 +44,13 @@ class GiaKho:
         self.danh_dau: list[tuple] = []
         self.lam_moi: list[dict] = []
         self.hong_ghi = False
+        self.chua_toi_han: set[int] = set()     # nguồn đang theo dõi nhưng chưa tới chu kỳ
 
     def cai(self, mp):
         for ten in ("doc_du_an", "cac_du_an", "nguon_toi_han", "dem_nguon", "da_tieu_thang",
                     "luot_dang_chay", "mo_luot", "dong_luot", "danh_dau_nguon", "ghi_bai",
                     "bai_youtube_can_lam_moi", "cap_nhat_so_lieu", "du_an_dang_bat",
-                    "nguon_cua_du_an", "ghi_de_xuat"):
+                    "nguon_cua_du_an", "ghi_de_xuat", "nguon_dang_theo_doi"):
             mp.setattr(K, ten, getattr(self, ten))
         self.de_xuat: list[tuple] = []
         return self
@@ -73,6 +74,9 @@ class GiaKho:
         return [{"ma": k, "ten": v["ten"], "dang_bat": v["dang_bat"]} for k, v in self.du_an.items()]
 
     def nguon_toi_han(self, ma):
+        return [dict(n) for n in self.nguon if n["id"] not in self.chua_toi_han]
+
+    def nguon_dang_theo_doi(self, ma):
         return [dict(n) for n in self.nguon]
 
     def dem_nguon(self, ma):
@@ -84,9 +88,9 @@ class GiaKho:
     def luot_dang_chay(self, ma):
         return self.dang_chay
 
-    def mo_luot(self, ma, kieu, ma_viec=None, job_id=None):
+    def mo_luot(self, ma, kieu, ma_viec=None, job_id=None, **kw):
         i = len(self.luot) + 1
-        self.luot[i] = {"du_an": ma, "kieu": kieu, "ma_viec": ma_viec, "job_id": job_id}
+        self.luot[i] = {"du_an": ma, "kieu": kieu, "ma_viec": ma_viec, "job_id": job_id, **kw}
         return i
 
     def dong_luot(self, luot_id, **kw):
@@ -152,6 +156,7 @@ class GiaViec:
 
     def chot_chi_phi(self, q, p, r):
         self.chot.append((list(q), list(p), r))
+        self.d["chi_phi"] = {"usd": 0.0123, "da_ghi_so": True}       # như Viec thật: ghi sổ việc
         return {"usd": 0.0123}
 
 
@@ -334,6 +339,136 @@ def test_lenh_theodoi_tu_choi_khi_con_viec_cung_du_an(mo):
     assert "chưa xong (mã t1)" in s
 
 
+# ───────────────────────────── lịch quét tự động (15/10/2026) ─────────────────────────────
+def test_ke_hoach_quet_moi_nguon_bo_qua_chu_ky(mo):
+    """Lịch chiến dịch `quet_moi_nguon`: quét MỌI nguồn đang theo dõi, kể cả nguồn chưa tới chu kỳ."""
+    kho = GiaKho(nguon=[_nguon(1, "tiktok", "a"), _nguon(2, "youtube", "@b")]).cai(mo)
+    kho.chua_toi_han = {2}
+    assert [n["id"] for n in T.ke_hoach("hapas")["nguon"]] == [1]
+    assert [n["id"] for n in T.ke_hoach("hapas", moi_nguon=True)["nguon"]] == [1, 2]
+
+
+def test_ke_hoach_tra_ma_loi_cho_lich(mo):
+    GiaKho(du_an={"hapas": dict(DU_AN, dang_bat=False)}).cai(mo)
+    assert T.ke_hoach("hapas")["ma_loi"] == "du_an_tat"
+    GiaKho(dang_chay={"id": 7, "ma_viec": "t1"}).cai(mo)
+    assert T.ke_hoach("hapas")["ma_loi"] == "dang_chay"
+    GiaKho(nguon=[]).cai(mo)
+    assert T.ke_hoach("hapas")["ma_loi"] == "khong_co_gi"
+    GiaKho(nguon=[_nguon(1, "tiktok", "a")], da_tieu=5.0).cai(mo)
+    assert T.ke_hoach("hapas")["ma_loi"] == "het_ngan_sach"
+    GiaKho(nguon=[_nguon(1, "tiktok", "a")]).cai(mo)
+    mo.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 5.0, False))
+    assert T.ke_hoach("hapas")["ma_loi"] == "khong_quet_duoc"
+    assert T.ke_hoach("khongco")["ma_loi"] == "khong_co_du_an"
+
+
+def _bat_tao_viec(mo, kq=None):
+    import quet_lon
+    import viec_nen
+    mo.setattr(quet_lon, "tran_usd_nen", lambda: 20.0)
+    mo.setattr(quet_lon, "ngan_sach", lambda tran: (8.0, {"con_lai": 9.0}, ""))
+    goi: list[dict] = []
+
+    def tao(loai, tham_so, nen_tang, uoc, ngan_sach, ghi_chu=None, **kw):
+        goi.append({"loai": loai, "tham_so": tham_so, "ns": ngan_sach})
+        return kq or {"dang_chay_nen": True, "ma_viec": "t10150900-abcde"}
+    mo.setattr(viec_nen, "tao_viec", tao)
+    return goi
+
+
+def test_tao_luot_theo_lich_gan_moc_va_quet_moi_nguon(mo):
+    """Mốc lịch nằm trong tham số việc: lượt mỗi giờ không bị khoá chống trùng 6 giờ coi là việc
+    cũ, còn cùng một mốc nhận hai lần thì ra đúng việc cũ."""
+    kho = GiaKho(nguon=[_nguon(1, "tiktok", "a"), _nguon(2, "tiktok", "b")]).cai(mo)
+    kho.chua_toi_han = {2}
+    goi = _bat_tao_viec(mo)
+    kq = T.tao_luot("hapas", moi_nguon=True, lich={"id": 7, "moc": "2026-10-15T09:00:00+07:00"})
+    assert kq["ok"] and kq["ma_viec"] == "t10150900-abcde" and kq["so_nguon"] == 2
+    ts = goi[0]["tham_so"]
+    assert ts["lich_id"] == 7 and ts["moc"] == "2026-10-15T09:00:00+07:00"
+    assert ts["moi_nguon"] is True and ts["nguon"] == [1, 2]
+    # /theodoi gõ tay: tham số y như trước (không có khoá lịch).
+    assert T.tao_luot("hapas")["ok"]
+    assert set(goi[1]["tham_so"]) == {"du_an", "ngay", "nguon"} and goi[1]["tham_so"]["nguon"] == [1]
+
+
+def test_tao_luot_theo_lich_het_thang_khong_tao_viec(mo):
+    """Tháng của dự án đã hết: lịch KHÔNG tạo việc (chat vẫn chạy được phần miễn phí như cũ)."""
+    GiaKho(du_an={"hapas": dict(DU_AN, tk_bat=True, tk_so_bai=10)}, nguon=[], da_tieu=5.0).cai(mo)
+    goi = _bat_tao_viec(mo)
+    kq = T.tao_luot("hapas", lich={"id": 3, "moc": "x"})
+    assert not kq["ok"] and kq["ma_loi"] == "het_ngan_sach" and "5,00/5,00" in kq["cau"]
+    assert goi == []
+    assert T.tao_luot("hapas")["ok"] and len(goi) == 1
+
+
+def test_tao_luot_ma_loi_viec_cu_va_so_tu_choi(mo):
+    import viec_nen
+    GiaKho(nguon=[_nguon(1, "tiktok", "a")]).cai(mo)
+    _bat_tao_viec(mo, {"dang_chay_nen": False, "tu_choi": True, "note": "Hàng đợi đầy."})
+    kq = T.tao_luot("hapas", lich={"id": 1, "moc": "x"})
+    assert kq == {"ok": False, "ma_loi": "tu_choi", "ma_viec": None, "cau": "Hàng đợi đầy."}
+    mo.setattr(viec_nen, "tat_ca", lambda: [{"ma": "t9", "loai": "theo_doi", "trang_thai": "dang_cao",
+                                             "tham_so": {"du_an": "hapas"}}])
+    kq = T.tao_luot("hapas", lich={"id": 1, "moc": "x"})
+    assert kq["ma_loi"] == "dang_chay" and kq["ma_viec"] == "t9"
+    _bat_tao_viec(mo, {"dang_chay_nen": False, "tu_choi": True})
+    mo.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 5.0, True))
+    import quet_lon
+    mo.setattr(viec_nen, "tat_ca", list)
+    mo.setattr(quet_lon, "ngan_sach", lambda tran: (0.0001, None, ""))
+    assert T.tao_luot("hapas", lich={"id": 1, "moc": "x"})["ma_loi"] == "het_ngan_sach_apify"
+
+
+def _dua_hai_luong(mo):
+    """Hai luồng cùng gọi tao_luot cho CÙNG dự án đúng một lúc (lịch console qua luồng job + lịch
+    dashboard qua luồng nhịp). `tao_viec` giả ghi sổ chậm 0,2 giây — cửa sổ đua."""
+    import quet_lon
+    import viec_nen
+    GiaKho(nguon=[_nguon(1, "tiktok", "a")]).cai(mo)
+    mo.setattr(quet_lon, "tran_usd_nen", lambda: 20.0)
+    mo.setattr(quet_lon, "ngan_sach", lambda tran: (8.0, {"con_lai": 9.0}, ""))
+    so: list[dict] = []
+
+    def tao(loai, tham_so, *a, **k):
+        time.sleep(0.2)
+        so.append({"ma": f"t{len(so) + 1}", "loai": "theo_doi", "tham_so": tham_so,
+                   "trang_thai": "xep_hang"})
+        return {"dang_chay_nen": True, "ma_viec": so[-1]["ma"]}
+    mo.setattr(viec_nen, "tao_viec", tao)
+    mo.setattr(viec_nen, "tat_ca", lambda: list(so))
+    cung_luc = threading.Barrier(2)
+    ra: list[dict] = []
+
+    def chay(lich):
+        cung_luc.wait()
+        ra.append(T.tao_luot("hapas", lich=lich))
+    luong = [threading.Thread(target=chay, args=(x,)) for x in (None, {"id": 3, "moc": "m"})]
+    for t in luong:
+        t.start()
+    for t in luong:
+        t.join(10)
+    return so, ra
+
+
+def test_tao_luot_cung_du_an_dong_thoi_chi_tao_mot_viec(mo):
+    """Review 15/10 (M1): kiểm việc dở → ghi sổ là MỘT bước dưới khoá theo dự án — chỉ một việc,
+    bên kia nhận dang_chay (lịch ghi bỏ qua có lý do), không quét trùng, không trả tiền hai lần."""
+    so, ra = _dua_hai_luong(mo)
+    assert len(so) == 1
+    assert sorted(x["ok"] for x in ra) == [False, True]
+    assert next(x for x in ra if not x["ok"])["ma_loi"] == "dang_chay"
+
+
+def test_bai_thu_dua_bat_duoc_loi_khi_khong_co_khoa(mo):
+    """Chứng minh bài thử trên bắt được lỗi thật: bỏ khoá thì hai việc cùng được tạo."""
+    import contextlib
+    mo.setattr(T, "_khoa_tao", lambda ma: contextlib.nullcontext())
+    so, _ = _dua_hai_luong(mo)
+    assert len(so) == 2
+
+
 # ───────────────────────────── lọc + nhãn ─────────────────────────────
 def _dong(link, text, ngay, kenh="KOL A", views=100, p="tiktok"):
     return ({"platform": p, "kenh": kenh, "username": "kola", "views": views,
@@ -514,6 +649,34 @@ def test_chay_viec_het_ngan_sach_thang_khong_goi_actor(mo):
     _, van_ban = T.chay_viec(v)
     assert ap.gui == [] and "hết ngân sách tháng" in van_ban
     assert v.d["nen_tang"]["tiktok"]["phan"][0]["ma"] == "NGAN_SACH" and v.chot == []
+
+
+def test_chay_viec_theo_lich_quet_moi_nguon_ghi_lich_id_va_bao_lich(mo):
+    """Việc do lịch quét tự động giao: lượt mang lich_id, nguồn chưa tới chu kỳ vẫn quét (quét
+    mọi nguồn), sổ chi phí ghi "(lịch #id)", và kết quả cuối báo về lịch."""
+    import quet_tu_dong
+    kho = GiaKho(nguon=[_nguon(1, "tiktok", "kola")]).cai(mo)
+    kho.chua_toi_han = {1}
+    ap = GiaApify(mo, [_tt("kola", 21, "túi hapas")])
+    bao = []
+    mo.setattr(quet_tu_dong, "ket_thuc_viec", lambda *a, **k: bao.append((a, k)))
+    v = _viec(kho.nguon)
+    v.d["tham_so"].update(lich_id=7, moc="2026-10-15T09:00:00+07:00", moi_nguon=True)
+    trang_thai, _ = T.chay_viec(v)
+    assert len(ap.gui) == 1 and trang_thai == "xong"
+    luot = v.d["luot_id"]
+    assert kho.luot[luot]["lich_id"] == 7
+    assert v.chot[0][0] == ["theo dõi hapas (lịch #7)"]
+    ((a, k),) = bao
+    assert a[:4] == (7, v.ma, luot, "xong")
+    # chi phí THẬT (đã chốt theo run id) + dự án + mốc đi kèm để báo platform
+    assert k == {"chi_phi_usd": 0.0123, "du_an": "hapas", "moc": "2026-10-15T09:00:00+07:00"}
+    # Việc gõ tay: không mở lượt kèm lich_id, không báo lịch.
+    bao.clear()
+    v2 = _viec([_nguon(2, "tiktok", "kolb")])
+    kho.nguon.append(_nguon(2, "tiktok", "kolb"))
+    T.chay_viec(v2)
+    assert "lich_id" not in kho.luot[v2.d["luot_id"]] and bao == []
 
 
 def test_khoi_dong_lai_phan_da_xong_doc_tu_dia_khong_quet_lai(mo):
@@ -714,7 +877,9 @@ def test_kho_theo_quy_chuan_mo_ta_bi():
     sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
         encoding="utf-8")
     bang = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", sql, re.DOTALL)
-    assert len(bang) == 10
+    assert len(bang) == 11                       # + lich_quet (lịch quét tự động, 15/10/2026)
+    # Cột thêm bằng ALTER (không nằm trong khối CREATE) cũng phải có mô tả.
+    assert re.search(r"COMMENT ON COLUMN luot_quet\.lich_id IS '.{10,}';", sql)
     for ten, khoi in bang:
         m = re.search(rf"COMMENT ON TABLE {ten} IS \$\$(.*?)\$\$;", sql, re.DOTALL)
         assert m, f"{ten}: thiếu mô tả bảng"
@@ -739,6 +904,38 @@ def test_cot_ghi_bai_khop_schema():
     # Quyền: Mark không được sửa dự án hay thêm nguồn.
     assert re.search(r"GRANT SELECT ON du_an, nguon TO mark;", sql)
     assert not re.search(r"GRANT[^;]*(INSERT|DELETE)[^;]*ON du_an[^;]*TO mark", sql)
+
+
+def test_quyen_lich_quet_va_cot_mark_ghi():
+    """Lịch quét tự động: dashboard tạo/sửa/xoá; Mark chỉ đọc + ghi đúng các cột trạng thái chạy
+    mà `lang_nghe_db` ghi (lệch thì lỗi quyền chỉ lộ trên VPS). DDL chạy lại được."""
+    sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
+        encoding="utf-8")
+    # Review 15/10 (L4): Mark đọc ĐÚNG các cột nó dùng (không email tao_boi/sua_boi) — quyền theo
+    # cột, thu quyền cả bảng của bản nháp trước khi cấp.
+    assert "GRANT SELECT ON lich_quet TO mark;" not in sql
+    assert sql.index("REVOKE SELECT ON lich_quet FROM mark;") < sql.index(
+        "GRANT SELECT (id,")
+    m = re.search(r"GRANT SELECT \(([^)]*)\) ON lich_quet TO mark;", sql)
+    doc = {re.sub(r"\s+", "", c) for c in m.group(1).split(",")}
+    assert doc == {c.strip() for c in K._COT_LICH.split(",")}
+    assert not doc & {"tao_boi", "sua_boi", "tao_luc", "sua_luc"}
+    # M3: lớp chặn thứ hai ở DB cho khoảng chiến dịch; DDL chạy lại được.
+    assert "DROP CONSTRAINT IF EXISTS lich_quet_chien_dich_check" in sql
+    assert "BETWEEN 30 AND 10080" in sql and "PGOPTIONS='-c lock_timeout=5s'" in sql
+    m = re.search(r"GRANT UPDATE \(([^)]*)\) ON lich_quet TO mark;", sql)
+    cot_mark = {c.strip() for c in m.group(1).split(",")}
+    assert cot_mark == {"lan_chay_ke", "lan_chay_cuoi", "ket_qua_cuoi", "so_lan_chay"}
+    assert not re.search(r"GRANT[^;]*(INSERT|DELETE)[^;]*ON lich_quet[^;]*TO mark", sql)
+    assert "GRANT INSERT, UPDATE, DELETE ON lich_quet TO lang_nghe_web;" in sql
+    assert "GRANT USAGE ON SEQUENCE lich_quet_id_seq TO lang_nghe_web;" in sql
+    assert "ALTER TABLE luot_quet ADD COLUMN IF NOT EXISTS lich_id" in sql
+    # Mọi cột UPDATE trong lang_nghe_db.py trên lich_quet phải nằm trong quyền của Mark.
+    src = (Path(__file__).resolve().parents[1] / "lang_nghe_db.py").read_text(encoding="utf-8")
+    sua = set()
+    for khoi in re.findall(r'UPDATE lich_quet SET (.*?)WHERE', src, re.DOTALL):
+        sua |= set(re.findall(r"([a-z_]+) = ", khoi.replace('"', " ")))
+    assert sua and sua <= cot_mark, sua - cot_mark
 
 
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────

@@ -129,13 +129,21 @@
   {% endif %}
 {% endfor %}
 {% set tong_luot = b.uoc_tk + b.uoc_bl %}
-{% set toi_da = d.da_tieu + db.con_lai + db.ngay_con_lai * tong_luot %}
-{% set du_luot = ((db.tran - d.da_tieu - db.con_lai) / db.ngay_con_lai) if db.ngay_con_lai > 0 else 0 %}
+{# Lịch quét tự động (15/10/2026): có lịch đang bật thì số lượt còn lại tháng này theo lịch (và phần
+   nguồn của lịch "quét mọi nguồn"); không có thì giữ giả định 1 lượt/ngày của lịch console. #}
+{% set ll = d.lich if d.lich is mapping else {} %}
+{% set co_lich = ll.co_lich or false %}
+{% set so_luot = ll.luot_con_lai if co_lich else db.ngay_con_lai %}
+{% set nguon_con = db.con_lai + (ll.nguon_them or 0) %}
+{% set luot_30 = ll.luot_30 if co_lich else hang_so.ngay %}
+{% set toi_da = d.da_tieu + nguon_con + so_luot * tong_luot %}
+{% set du_luot = ((db.tran - d.da_tieu - nguon_con) / so_luot) if so_luot > 0 else 0 %}
 <section class="the-khoi cach-duoi ns-ch" aria-labelledby="ns-ch-tieu-de">
   {% if ql %}
   <script type="application/json" id="ns-du-lieu">{{ {"hang_so": hang_so, "tu_khoa": d.tu_khoa or [], "ten": d.ten,
     "mac_dinh": {"tk_so_bai": d.tk_so_bai or 0, "bl_so_bai": d.bl_so_bai or 0, "bl_moi_bai": d.bl_moi_bai or 0},
-    "da_tieu": d.da_tieu, "nguon_con_lai": db.con_lai, "ngay_con_lai": db.ngay_con_lai,
+    "da_tieu": d.da_tieu, "nguon_con_lai": nguon_con, "ngay_con_lai": db.ngay_con_lai,
+    "co_lich": co_lich, "luot_con_lai": so_luot, "luot_30": luot_30,
     "tran_platform": db.tran_platform, "tran_da": d.tran_usd_thang|float}|json_script }}</script>
   <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/cau-hinh" id="ns-form">
   <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
@@ -237,11 +245,11 @@
       <input type="number" name="tran_usd_thang" min="0" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(d.tran_usd_thang|float) }}" required></label>
     {% endif %}
     <div class="ns-du-kien">
-      <div>Tìm + bình luận tối đa <b data-o="tong-luot">{{ tong_luot|usd_vn(3) }}</b> USD/lượt · ≈ <b data-o="tong-30">{{ (tong_luot * hang_so.ngay)|usd_vn }}</b> USD/30 ngày (1 lượt/ngày)</div>
+      <div>Tìm + bình luận tối đa <b data-o="tong-luot">{{ tong_luot|usd_vn(3) }}</b> USD/lượt · ≈ <b data-o="tong-30">{{ (tong_luot * luot_30)|usd_vn }}</b> USD/30 ngày {% if co_lich %}(theo <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a>: {{ luot_30|so_vn }} lượt){% else %}(1 lượt/ngày — không có <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a> nào bật){% endif %}</div>
       <div class="ns-du-kien__thang{% if toi_da > db.tran + 1e-9 %} ns-du-kien__thang--canh{% endif %}" data-o="thang-hop">
         Cả tháng nếu mỗi lượt dùng hết: <b data-o="thang-so">{{ toi_da|usd_vn }}</b> / <span data-o="thang-tran">{{ db.tran|usd_vn }}</span> USD —
         <span data-o="thang-ket-luan" aria-live="polite">{% if toi_da > db.tran + 1e-9 %}vượt trần {{ (toi_da - db.tran)|usd_vn }} USD, Mark dừng quét khi chạm trần; {% if du_luot > 0 %}vừa trần khi ≤ {{ du_luot|usd_vn(3) }} USD/lượt.{% else %}riêng nguồn theo dõi đã chạm trần.{% endif %}{% else %}trong trần, còn dư {{ (db.tran - toi_da)|usd_vn }} USD.{% endif %}</span>
-        <div class="nho mo" data-o="thang-cong-thuc">= đã tiêu {{ d.da_tieu|usd_vn }} + nguồn {{ db.con_lai|usd_vn }} + {{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày × {{ tong_luot|usd_vn(3) }}</div>
+        <div class="nho mo" data-o="thang-cong-thuc">= đã tiêu {{ d.da_tieu|usd_vn }} + nguồn {{ nguon_con|usd_vn }} + {% if co_lich %}{{ so_luot|so_vn }} lượt theo lịch{% else %}{{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày{% endif %} × {{ tong_luot|usd_vn(3) }}</div>
       </div>
     </div>
     {% if ql %}

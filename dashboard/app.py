@@ -2,7 +2,9 @@
 
 Phạm vi (chủ dự án chốt 14/10/2026): chỉ số, dự án + nguồn + đề xuất nguồn, ngân sách theo dõi
 tháng, người xem, trạng thái đồng bộ BigQuery. KHÔNG có kỹ năng, persona, công tắc năng lực, trần
-mỗi lượt hay lịch chạy của Mark — những thứ đó ở console platform.
+mỗi lượt hay lịch "Giao việc" của Mark — những thứ đó ở console platform. Riêng lịch quét TỰ ĐỘNG
+của `/theodoi` đặt ở đây (chủ dự án chốt 15/10/2026 "Dashboard + Mark tự chạy"; tab Lịch quét,
+bảng `lich_quet`, Mark tự chạy theo mốc — `quet_tu_dong.py`).
 
 Kiểm thử được mà không cần Postgres hay mạng: `tao_app(kho=…, cau_hinh=…, lark=…, dong_bo=…)`
 nhận bản giả. Chạy thật: `uvicorn --factory dashboard.app:tao_app` (đọc env, xem README.md).
@@ -46,7 +48,9 @@ from starlette.datastructures import MutableHeaders
 from dashboard import chi_phi as CP
 from dashboard import chi_so as CS
 from dashboard import dang_nhap as DN
+from dashboard import lich_quet as LQ
 from dashboard import nhap_lieu as NL
+from dashboard import trang_lich as TL
 from dashboard.kho import BAI_TOI_DA, BL_TOI_DA, LoiDuLieu, LoiKho
 
 THU_MUC = Path(__file__).resolve().parent
@@ -57,7 +61,10 @@ VN = CS.VN
 # thì sửa cả hai dòng dưới (trình duyệt từ chối chạy tệp lệch `integrity`).
 ECHARTS = "/tinh/echarts.min.js"
 ECHARTS_SRI = "sha256-6EJwvQzVvfYP78JtAMKjkcsugfTSanqe4WGFpUdzo88="
-LICH_CHAY = "Lịch quét đặt ở console platform: Lịch chạy → Giao việc “/theodoi <mã dự án>”."
+#: Chân trang (15/10/2026): lịch quét đặt ở tab Lịch quét — Mark tự chạy; lịch Giao việc trên
+#: console vẫn chạy song song (không còn câu "lịch chỉ đặt trên console").
+LICH_CHAY = ("Quét tự động: tab Lịch quét (Mark tự chạy theo giờ/ngày/tuần/chiến dịch, kết quả "
+             "hiện ở đây). Lịch Giao việc “/theodoi <mã dự án>” trên console vẫn chạy song song.")
 CHU_KY_KIEM = 30.0          # giây; vòng kiểm lượt quét mới khi Mark không báo được
 SSE_TOI_DA_KET_NOI = 200    # trình duyệt mở cùng lúc; quá thì từ chối, khỏi cạn bộ nhớ
 SSE_MOI_EMAIL = 5           # mỗi người tối đa ngần này tab nghe sự kiện
@@ -1113,8 +1120,15 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             nguon = await _k(app.state.kho.cac_nguon, d["ma"])
             db = CP.du_bao(nguon, tieu, tran_du_an, tran_pf, bay_gio)
             tran = db["tran"]
+            # Lịch quét tự động (15/10/2026): số lượt còn lại tháng này theo lịch đang bật thay cho
+            # giả định 1 lượt/ngày. Bảng lich_quet chưa có (schema chưa áp) thì giữ giả định cũ.
+            try:
+                cac_lich = await _k(app.state.kho.cac_lich, d["ma"])
+            except LoiKho:
+                cac_lich = []
             dong.append({**d, "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
                          "bang": CP.bang_cau_hinh(d),
+                         "lich": CP.du_bao_lich(cac_lich, CP.bang_cau_hinh(d), nguon, bay_gio),
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
@@ -1219,6 +1233,149 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                         + ("mỗi bài cào HẾT bình luận" if not moi_bai else f"mỗi bài {moi_bai} bình luận")
                         + f" (ước tối đa ≈ {usd_vn(b['uoc_bl'])} USD/lượt)."
                         if bat else "Đã tắt cào bình luận."))
+
+    # ─── lịch quét tự động (chủ dự án chốt 15/10/2026: "Dashboard + Mark tự chạy") ───
+    async def _du_lieu_lich(ma: str):
+        """(lịch, nguồn, đã tiêu tháng, trần platform) của một dự án — đủ cho trang + xem trước."""
+        kho = app.state.kho
+        return (await _k(kho.cac_lich, ma), await _k(kho.cac_nguon, ma),
+                float((await _k(kho.da_tieu_thang)).get(ma, 0.0)), await _k(kho.tran_platform, ma))
+
+    async def _trang_lich(request: Request, nguoi: dict, ma: str | None, sua_id: str = "",
+                          bm: dict | None = None, loi: str = "", ma_http: int = 200):
+        """Trang Lịch quét. `bm` + `loi`: vẽ lại biểu mẫu vừa gửi bị từ chối (không mất chữ)."""
+        ds = await _k(app.state.kho.cac_du_an)
+        du_an = _chon_du_an(ds, ma)
+        bay_gio = _bay_gio()
+        ql = nguoi["vai_tro"] == "quan_ly"
+        ctx: dict = {"du_an_ds": ds, "du_an": du_an, "lich": [], "tong": None, "bm": None,
+                     "xt": None, "sua": None, "loi_bm": loi}
+        if du_an:
+            cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an["ma"])
+            sua = (next((x for x in cac if str(x["id"]) == str(sua_id)), None)
+                   if ql and sua_id else None)
+            if ql:
+                bm = bm or (LQ.tu_form(sua, bay_gio) if sua else LQ.tu_form_mac_dinh(bay_gio))
+
+            def dung() -> dict:
+                """Đếm mốc + chi phí (thuần, có thể vài chục nghìn vòng): chạy trong threadpool,
+                không chặn vòng sự kiện (review 15/10, M2)."""
+                ra = {"lich": TL.dong_lich(cac, du_an, nguon, bay_gio, ql, LOI_CHUNG),
+                      "tong": TL.tong_quan(cac, du_an, nguon, da_tieu, tran_pf, bay_gio)}
+                if ql:
+                    try:
+                        d = LQ.chuan_hoa(LQ.bieu_mau(bm), bay_gio)
+                        ra["xt"] = TL.xem_truoc(d, cac, du_an, nguon, da_tieu, tran_pf, bay_gio,
+                                                sua["id"] if sua else None)
+                    except LQ.LoiLich as e:
+                        ra["xt"] = {"loi": str(e)}
+                    ra.update(sua=sua, bm=bm)
+                return ra
+            ctx.update(await _k(dung))
+        return _trang(request, "lich_quet.html", nguoi, "lich_quet", ma=ma_http, KIEU_LICH=LQ.KIEU,
+                      THU=LQ.THU, MOI_GIO=LQ.MOI_GIO, PHUT_TOI_THIEU=LQ.PHUT_TOI_THIEU, **ctx)
+
+    @app.get("/lich-quet")
+    async def trang_lich_quet(request: Request):
+        nguoi = await _nguoi(request)
+        q = request.query_params
+        return await _trang_lich(request, nguoi, q.get("du_an"), q.get("sua") or "")
+
+    @app.get("/api/lich-quet/xem-truoc")
+    async def api_lich_xem_truoc(request: Request):
+        """10 lần chạy tới + chi phí của biểu mẫu đang gõ (chưa lưu). Chỉ đọc, ai đăng nhập cũng
+        gọi được; tính ở máy chủ bằng đúng hàm Mark dùng (`dashboard/lich_quet.py`)."""
+        await _nguoi(request)
+        q = request.query_params
+        if len(str(request.url.query)) > 4000:
+            return JSONResponse({"loi": "Yêu cầu quá dài."}, status_code=400)
+        du_an = await _k(app.state.kho.doc_du_an, q.get("du_an") or "")
+        if not du_an:
+            return JSONResponse({"loi": "Không có dự án này."}, status_code=404)
+        lid = q.get("lid") or ""
+        bay_gio = _bay_gio()
+        try:
+            d = await _k(LQ.chuan_hoa, dict(q), bay_gio)
+        except LQ.LoiLich as e:
+            return JSONResponse({"loi": str(e)}, status_code=400)
+        cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an["ma"])
+        # Đếm mốc trong threadpool (review 15/10, M2): không chặn vòng sự kiện của cả dashboard.
+        return JSONResponse(await _k(TL.xem_truoc, d, cac, du_an, nguon, da_tieu, tran_pf,
+                                     bay_gio, int(lid) if lid.isdigit() and len(lid) < 19
+                                     else None))
+
+    async def _lich_phai_co(lid: int) -> dict:
+        x = await _k(app.state.kho.doc_lich, lid)
+        if not x:
+            raise _Cam("Không còn lịch này.", 404)
+        return x
+
+    def _cau_lan_dau(d: dict, bay_gio) -> str:
+        ke = d.get("lan_chay_ke")
+        if not d.get("bat"):
+            return "Lịch đang tắt — bật khi cần."
+        return f"Lần chạy đầu: {LQ.chu_moc(ke, bay_gio)} ({LQ.chu_con(ke, bay_gio)})." if ke else ""
+
+    @app.post("/lich-quet/them")
+    async def lich_them(request: Request):
+        nguoi, form = await _sua(request)
+        ma = str(form.get("du_an") or "")
+        bay_gio = _bay_gio()
+        try:
+            await _du_an_phai_co(ma)
+            d = LQ.chuan_hoa(form, bay_gio)
+            d["lan_chay_ke"] = LQ.moc_ke(d["kieu"], d["cau_hinh"], bay_gio) if d["bat"] else None
+            lid = await _k(app.state.kho.them_lich, nguoi["email"], ma, d)
+        except (NL.LoiNhap, LQ.LoiLich, LoiDuLieu) as e:
+            return await _trang_lich(request, nguoi, ma, "", LQ.gia_tri_tu_form(form, bay_gio),
+                                     str(e), 400)
+        return _chuyen(request, _url("/lich-quet", du_an=ma), "ok",
+                       f"Đã tạo lịch #{lid} “{d['ten']}”. {_cau_lan_dau(d, bay_gio)}")
+
+    @app.post("/lich-quet/{lid}/sua")
+    async def lich_sua(request: Request, lid: int):
+        nguoi, form = await _sua(request)
+        x = await _lich_phai_co(lid)
+        bay_gio = _bay_gio()
+        try:
+            d = LQ.chuan_hoa(form, bay_gio)
+            d["lan_chay_ke"] = LQ.moc_ke(d["kieu"], d["cau_hinh"], bay_gio) if d["bat"] else None
+            await _k(app.state.kho.sua_lich, nguoi["email"], lid, d)
+        except (LQ.LoiLich, LoiDuLieu) as e:
+            return await _trang_lich(request, nguoi, x["du_an"], str(lid),
+                                     LQ.gia_tri_tu_form(form, bay_gio), str(e), 400)
+        return _chuyen(request, _url("/lich-quet", du_an=x["du_an"]), "ok",
+                       f"Đã lưu lịch #{lid} “{d['ten']}”. {_cau_lan_dau(d, bay_gio)}")
+
+    @app.post("/lich-quet/{lid}/bat-tat")
+    async def lich_bat_tat(request: Request, lid: int):
+        nguoi, form = await _sua(request)
+        x = await _lich_phai_co(lid)
+        ve = _url("/lich-quet", du_an=x["du_an"])
+        bat = form.get("bat") == "1"
+        bay_gio = _bay_gio()
+        ke = LQ.moc_ke(x["kieu"], x.get("cau_hinh") or {}, bay_gio) if bat else None
+        if bat and ke is None:
+            return _chuyen(request, ve, "loi", f"Lịch #{lid} không còn mốc chạy nào (chiến dịch đã "
+                           "kết thúc) — sửa thời gian rồi bật lại.")
+        try:
+            await _k(app.state.kho.bat_tat_lich, nguoi["email"], lid, bat, ke)
+        except LoiDuLieu as e:
+            return _chuyen(request, ve, "loi", str(e))
+        return _chuyen(request, ve, "ok", (f"Đã bật lịch #{lid}. "
+                                           + _cau_lan_dau({"bat": True, "lan_chay_ke": ke}, bay_gio))
+                       if bat else f"Đã tắt lịch #{lid} — Mark không chạy lịch này nữa.")
+
+    @app.post("/lich-quet/{lid}/xoa")
+    async def lich_xoa(request: Request, lid: int):
+        nguoi, _ = await _sua(request)
+        x = await _lich_phai_co(lid)
+        ve = _url("/lich-quet", du_an=x["du_an"])
+        try:
+            await _k(app.state.kho.xoa_lich, nguoi["email"], lid)
+        except LoiDuLieu as e:
+            return _chuyen(request, ve, "loi", str(e))
+        return _chuyen(request, ve, "ok", f"Đã xoá lịch #{lid} (lượt đã chạy vẫn giữ trong lịch sử).")
 
     # ─── người xem ───
     async def _chi_quan_ly(request: Request) -> dict:

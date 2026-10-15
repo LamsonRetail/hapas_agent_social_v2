@@ -292,6 +292,53 @@ def bang_cau_hinh(du_an: dict) -> dict:
             "uoc_bl": round(sum(x["uoc"] for x in bl.values()), 4)}
 
 
+# ───── lịch quét tự động (15/10/2026): chi phí theo TẦN SUẤT lịch, không còn giả định 1 lượt/ngày ─────
+def nguon_moi_luot(nguon: list[dict]) -> float:
+    """USD TỐI ĐA phần NGUỒN của MỘT lượt quét mọi nguồn (lịch `quet_moi_nguon`): chia lượt actor
+    đúng như `theo_doi.chia_phan` — mỗi (nền tảng, số bài mỗi lần) một lượt, mỗi lượt =
+    (đơn vị × giá + phí khởi động) × 1,3 (`uoc_mot_luot`). Nguồn tạm dừng, YouTube: 0."""
+    nhom: dict[tuple[str, int], int] = {}
+    for n in nguon:
+        p = n.get("nen_tang")
+        if (n.get("trang_thai") or "dang_theo_doi") != "dang_theo_doi" or not GIA.get(p):
+            continue
+        k = (p, 0 if p == "instagram" else _so(n.get("so_bai_moi_lan"), 5))
+        nhom[k] = nhom.get(k, 0) + 1
+    return round(sum(uoc_mot_luot(p, so, bai) for (p, bai), so in nhom.items()), 4)
+
+
+def uoc_lich(lich: dict, bang: dict, nguon: list[dict]) -> dict:
+    """USD TỐI ĐA một lượt của một lịch: tìm theo từ khoá + cào bình luận (`bang_cau_hinh` — chạy
+    mỗi lượt) + phần nguồn khi lịch quét mọi nguồn. Lịch thường: nguồn tốn theo CHU KỲ của nguồn
+    (đã nằm trong `du_bao`), không nhân theo số lượt."""
+    tk_bl = round(float(bang.get("uoc_tk") or 0) + float(bang.get("uoc_bl") or 0), 4)
+    ng = nguon_moi_luot(nguon) if lich.get("quet_moi_nguon") else 0.0
+    return {"tk_bl": tk_bl, "nguon": ng, "moi_luot": round(tk_bl + ng, 4)}
+
+
+def du_bao_lich(cac_lich: list[dict], bang: dict, nguon: list[dict],
+                bay_gio: datetime.datetime) -> dict:
+    """Ngân sách theo LỊCH QUÉT TỰ ĐỘNG đang bật của một dự án: số lượt còn lại tháng này (giờ
+    VN) và trong 30 ngày tới (mốc lịch thường trong khung chiến dịch không tính — nhường), cùng
+    phần nguồn thêm của lịch quét mọi nguồn. Không có lịch đang bật -> {"co_lich": False}
+    (trang Ngân sách giữ giả định cũ: 1 lượt/ngày từ lịch console).
+    -> {co_lich, luot_con_lai, luot_30, nguon_them, nguon_them_30, theo_lich: {id: lượt tháng}}."""
+    from dashboard import lich_quet as LQ
+    if not any(x.get("bat") for x in cac_lich):
+        return {"co_lich": False}
+    bay_gio = bay_gio if bay_gio.tzinfo else bay_gio.replace(tzinfo=datetime.timezone.utc)
+    het = _dau_thang_sau(bay_gio) - datetime.timedelta(microseconds=1)
+    thang = LQ.dem_luot_du_an(cac_lich, bay_gio, het)
+    ba_muoi = LQ.dem_luot_du_an(cac_lich, bay_gio, bay_gio + datetime.timedelta(days=30))
+    ng = nguon_moi_luot(nguon)
+    moi = {x.get("id") for x in cac_lich if x.get("bat") and x.get("quet_moi_nguon")}
+    return {"co_lich": True, "luot_con_lai": sum(thang.values()),
+            "luot_30": sum(ba_muoi.values()),
+            "nguon_them": round(sum(n * ng for i, n in thang.items() if i in moi), 4),
+            "nguon_them_30": round(sum(n * ng for i, n in ba_muoi.items() if i in moi), 4),
+            "theo_lich": thang}
+
+
 def hang_so_cho_trinh_duyet() -> dict:
     """Hằng số cho phép tính lại ngay trên trình duyệt khi sửa số bài / chu kỳ / cấu hình."""
     return {"gia": GIA, "he_so": HE_SO_UOC, "start": START_COST, "ngay": NGAY_THANG_CAU_HINH,

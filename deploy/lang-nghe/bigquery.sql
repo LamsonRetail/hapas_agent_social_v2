@@ -109,7 +109,7 @@ OPTIONS(description='''[Lớp] Raw
 [Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook (Threads nếu từ tìm theo từ khoá) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; khử trùng theo khoa; nội dung cắt 1.000 ký tự
-[Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi thường 1 lần/ngày theo lịch console)
+[Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
 [Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet
 [Lưu ý] Số liệu là lần đọc gần nhất, không phải cuối kỳ; bài YouTube được đọc lại số mỗi ngày trong 14 ngày đầu, nền tảng khác chỉ khi bài còn nằm trong N bài mới nhất của nguồn. Đây là mẫu theo nguồn đã chọn, không phải toàn bộ thảo luận trên mạng.''');
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.luot_quet`
   du_an           STRING    OPTIONS(description='Dự án của lượt. FK → du_an.ma.'),
   kieu            STRING    OPTIONS(description='Giá trị: theo_doi (lượt /theodoi quét nguồn, tính vào trần tháng), tu_khoa (lượt tìm theo từ khoá ghi vào kho).'),
   ma_viec         STRING    OPTIONS(description='Mã việc nền của Mark (vd t10140830-ab12c), đối chiếu với /viec. NULL khi lượt không chạy qua việc nền.'),
-  job_id          STRING    OPTIONS(description='Mã job platform đã giao lượt (lịch run trên console). NULL khi không lấy được.'),
+  job_id          STRING    OPTIONS(description='Mã job platform đã giao lượt (lịch run trên console). NULL khi lượt do Lịch quét tự động trên dashboard giao (không qua job platform) hoặc không lấy được.'),
   bat_dau         TIMESTAMP OPTIONS(description='Thời điểm bắt đầu lượt, UTC.'),
   ket_thuc        TIMESTAMP OPTIONS(description='Thời điểm kết thúc lượt, UTC. NULL khi lượt đang chạy.'),
   so_nguon        INT64     OPTIONS(description='Số nguồn lượt này xét, nguồn.'),

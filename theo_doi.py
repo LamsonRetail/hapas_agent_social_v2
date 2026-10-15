@@ -6,8 +6,14 @@ hỏi; Kompa theo dõi sẵn danh sách nguồn và cộng dồn mỗi ngày. L�
 sách nguồn và ngân sách tháng quản lý trên dashboard (`social.hapas.vn`), Mark quét theo lịch.
 
 Mark VẪN theo luật platform như trước (chủ dự án chốt 14/10/2026 — "không đổi"):
-  • Lượt chạy đến từ LỊCH `run` đặt trên console platform (nội dung `/theodoi hapas`), đi qua
-    hàng đợi job + audit như mọi việc khác — không có timer riêng trên VPS.
+  • Lượt chạy đến từ HAI đường lịch (và lệnh gõ tay):
+      1. Lịch `run` trên console platform (nội dung `/theodoi hapas`) — đi qua hàng đợi job +
+         audit của platform như mọi việc khác.
+      2. Từ 15/10/2026 (chủ dự án chốt "Dashboard + Mark tự chạy"): LỊCH QUÉT TỰ ĐỘNG đặt trên
+         dashboard (bảng `lich_quet`). Đây LÀ một nhịp riêng trên VPS (`quet_tu_dong.py`, 30
+         giây, trong tiến trình Mark) — không qua hàng đợi job của platform, nên mỗi lượt báo
+         platform bằng trace (`lsr_platform.bao_luot`). Cùng đường `tao_luot`, cùng công tắc +
+         trần; kết quả chỉ lên dashboard, không nhắn Lark.
   • Cần công tắc `soi_tai_khoan` (cùng actor theo tài khoản) đang bật — kiểm ở `lenh_cung`.
   • Mỗi nền tảng tôn trọng công tắc + trần USD mỗi lượt ở "Năng lực → Quét mạng xã hội".
   • Trần tháng của dự án (dashboard) chỉ THU HẸP thêm: mỗi lượt actor mang trần USD =
@@ -28,6 +34,7 @@ import contextvars
 import datetime
 import hashlib
 import re
+import threading
 import time
 
 import apify_tool as A
@@ -180,35 +187,43 @@ def _viec_dang_do(ma: str) -> dict | None:
     return None
 
 
-def ke_hoach(ma: str) -> dict:
+def ke_hoach(ma: str, moi_nguon: bool = False) -> dict:
     """Đọc kho + console, quyết định lượt này quét gì. Không gọi Apify, không tốn tiền.
+    `moi_nguon` (lịch quét tự động kiểu chiến dịch, 15/10/2026): quét MỌI nguồn đang theo dõi,
+    không xét chu kỳ của nguồn.
 
-    -> {"loi": câu báo} khi không chạy được; ngược lại {"du_an", "nguon", "bo_qua" (nguồn
-    không quét lượt này + lý do), "uoc_tinh", "con_thang", "tran_thang", "da_tieu"}."""
+    -> {"loi": câu báo, "ma_loi": mã} khi không chạy được (mã: khong_co_du_an, du_an_tat,
+    dang_chay, kho_loi, khong_co_gi, het_ngan_sach, khong_quet_duoc); ngược lại {"du_an",
+    "nguon", "bo_qua" (nguồn không quét lượt này + lý do), "uoc_tinh", "con_thang",
+    "tran_thang", "da_tieu"}."""
     try:
         du_an = K.doc_du_an(ma)
         if not du_an:
             co = ", ".join(x["ma"] for x in K.cac_du_an()) or "chưa có dự án nào"
-            return {"loi": f"Không có dự án '{ma}' trong kho lắng nghe. Dự án đang có: {co}. "
+            return {"ma_loi": "khong_co_du_an",
+                    "loi": f"Không có dự án '{ma}' trong kho lắng nghe. Dự án đang có: {co}. "
                            "Thêm dự án trên dashboard social.hapas.vn."}
         if not du_an["dang_bat"]:
-            return {"loi": f"Dự án {du_an['ten']} đang tắt trên dashboard — lượt này không quét."}
+            return {"ma_loi": "du_an_tat",
+                    "loi": f"Dự án {du_an['ten']} đang tắt trên dashboard — lượt này không quét."}
         dang = K.luot_dang_chay(ma)
         if dang:
-            return {"loi": f"Lượt theo dõi trước của {du_an['ten']} còn đang chạy "
+            return {"ma_loi": "dang_chay",
+                    "loi": f"Lượt theo dõi trước của {du_an['ten']} còn đang chạy "
                            f"(mã {dang.get('ma_viec') or dang['id']}) — đợi lượt đó xong."}
-        toi_han = K.nguon_toi_han(ma)
+        toi_han = K.nguon_dang_theo_doi(ma) if moi_nguon else K.nguon_toi_han(ma)
         dem = K.dem_nguon(ma) if not toi_han else {}
         da_tieu = K.da_tieu_thang(ma)
     except K.LoiKho as e:
-        return {"loi": f"Kho lắng nghe chưa dùng được: {e}."}
+        return {"ma_loi": "kho_loi", "loi": f"Kho lắng nghe chưa dùng được: {e}."}
     if not toi_han and tk_co_bat(du_an):
         # Đợt 2c: tìm theo từ khoá là việc của cả dự án — chạy được dù chưa nguồn nào tới hạn.
         tran = float(du_an["tran_usd_thang"] or 0)
         return {"du_an": du_an, "nguon": [], "bo_qua": [], "uoc_tinh": {},
                 "con_thang": max(0.0, tran - da_tieu), "tran_thang": tran, "da_tieu": da_tieu}
     if not toi_han:
-        return {"loi": (f"Chưa có nguồn nào của {du_an['ten']} tới hạn quét "
+        return {"ma_loi": "khong_co_gi",
+                "loi": (f"Chưa có nguồn nào của {du_an['ten']} tới hạn quét "
                         f"(đang theo dõi {dem.get('dang_theo_doi', 0)}, tạm dừng "
                         f"{dem.get('tam_dung', 0)}). Thêm nguồn hoặc đổi chu kỳ trên dashboard.")}
     bo_qua: list[tuple[dict, str]] = []
@@ -232,7 +247,10 @@ def ke_hoach(ma: str) -> dict:
         bo_qua.append((n, f"hết ngân sách tháng của dự án ({_usd(da_tieu)}/{_usd(tran)} USD)"))
     if not giu:
         ly = bo_qua[0][1] if bo_qua else "không có nguồn quét được"
-        return {"loi": f"Lượt theo dõi {du_an['ten']} không quét được nguồn nào: {ly}."}
+        # `giu` rỗng: hoặc mọi nguồn còn lại đều vượt phần còn của tháng (het_tien), hoặc không
+        # còn nguồn nào (nền tảng tắt / thiếu key).
+        return {"ma_loi": "het_ngan_sach" if het_tien else "khong_quet_duoc",
+                "loi": f"Lượt theo dõi {du_an['ten']} không quét được nguồn nào: {ly}."}
     return {"du_an": du_an, "nguon": giu, "bo_qua": bo_qua, "uoc_tinh": uoc_tinh(giu),
             "con_thang": con_thang, "tran_thang": tran, "da_tieu": da_tieu}
 
@@ -247,15 +265,52 @@ def lenh_theodoi(doi_so: str) -> str:
         except K.LoiKho as e:
             return f"Kho lắng nghe chưa dùng được: {e}."
         return (f"Cách dùng: {_LENH} <mã dự án>, vd `{_LENH} hapas`. Dự án đang có: {ds}. "
-                "Đặt lịch hằng ngày ở tab Lịch chạy trên console: kiểu Giao việc, nội dung "
-                f"`{_LENH} <mã dự án>`.")
+                "Quét tự động theo giờ/ngày/tuần/chiến dịch: tab Lịch quét trên dashboard "
+                "social.hapas.vn (Mark tự chạy, kết quả xem trên dashboard). Lịch hằng ngày trên "
+                f"console (Lịch chạy → Giao việc `{_LENH} <mã dự án>`) vẫn chạy như cũ.")
+    return tao_luot(ma)["cau"]
+
+
+#: Khoá tạo việc theo dự án (review 15/10, M1): lịch console (luồng job) và lịch dashboard (luồng
+#: nhịp) cùng phút cùng dự án thì cả hai đều qua `_viec_dang_do` trước khi bên kia kịp ghi sổ —
+#: hai việc quét trùng nguồn, trả tiền hai lần. Giữ khoá từ lúc kiểm việc dở tới lúc ghi việc vào
+#: sổ. Hai TIẾN TRÌNH thì đã có quyền chủ việc nền (`viec_nen`): bản không giữ quyền không tạo việc.
+_KHOA_TAO: dict[str, threading.Lock] = {}
+_KHOA_TAO_SO = threading.Lock()
+
+
+def _khoa_tao(ma: str) -> threading.Lock:
+    with _KHOA_TAO_SO:
+        return _KHOA_TAO.setdefault(ma, threading.Lock())
+
+
+def tao_luot(ma: str, *, moi_nguon: bool = False, lich: dict | None = None) -> dict:
+    """Tạo MỘT việc nền theo dõi dự án `ma` — đường chung của `/theodoi` (chat, lịch console)
+    và lịch quét tự động trên dashboard (`quet_tu_dong`, `lich` = {"id", "moc"}). Cùng dự án thì
+    chạy tuần tự (`_khoa_tao`): kiểm việc dở → kế hoạch → ghi sổ việc là MỘT bước.
+
+    -> {"ok": True, "ma_viec", "cau"} hoặc {"ok": False, "ma_loi", "cau"}; `cau` là câu trả
+    lời chat. Mã lỗi: các mã của `ke_hoach`, cùng dang_chay (việc cũ chưa xong), het_ngan_sach
+    (lịch: tháng của dự án đã hết), het_ngan_sach_apify (ngân sách việc nền của tài khoản),
+    tu_choi (sổ việc nền từ chối — hàng đợi đầy, tiến trình khác giữ quyền)."""
+    with _khoa_tao(ma):
+        return _tao_luot(ma, moi_nguon=moi_nguon, lich=lich)
+
+
+def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
     cu = _viec_dang_do(ma)
     if cu:
-        return (f"Đã có việc theo dõi '{ma}' chưa xong (mã {cu.get('ma')}) — không tạo thêm để "
-                "khỏi quét trùng nguồn. Gõ /viec để xem tiến độ.")
-    kh = ke_hoach(ma)
+        return {"ok": False, "ma_loi": "dang_chay", "ma_viec": cu.get("ma"),
+                "cau": (f"Đã có việc theo dõi '{ma}' chưa xong (mã {cu.get('ma')}) — không tạo "
+                        "thêm để khỏi quét trùng nguồn. Gõ /viec để xem tiến độ.")}
+    kh = ke_hoach(ma, moi_nguon=moi_nguon)
     if kh.get("loi"):
-        return kh["loi"]
+        return {"ok": False, "ma_loi": kh.get("ma_loi") or "loi", "cau": kh["loi"]}
+    if lich is not None and kh["con_thang"] < 0.01:
+        # Lịch tự động KHÔNG chạy khi tháng của dự án đã hết (chat vẫn chạy được phần miễn phí).
+        return {"ok": False, "ma_loi": "het_ngan_sach",
+                "cau": (f"hết ngân sách tháng của dự án ({_usd(kh['da_tieu'])}/"
+                        f"{_usd(kh['tran_thang'])} USD)")}
     import quet_lon
     import viec_nen
     phan = chia_phan(kh["nguon"])
@@ -273,13 +328,22 @@ def lenh_theodoi(doi_so: str) -> str:
     bl_uoc = round(max(0.0, min(bl_uoc, ns_apify - tong)), 2)
     tong = round(tong + bl_uoc, 2)
     if tong > ns_apify + 1e-9:
-        return (f"Chưa chạy: lượt này ước tính {_usd(tong)} USD mà ngân sách Apify còn dùng được "
-                f"cho việc nền là {_usd(ns_apify)} USD (trần console hoặc hạn mức tháng của tài "
-                "khoản). Giảm số nguồn/số bài mỗi lần trên dashboard hoặc đợi tháng sau.")
+        return {"ok": False, "ma_loi": "het_ngan_sach_apify", "cau": (
+            f"Chưa chạy: lượt này ước tính {_usd(tong)} USD mà ngân sách Apify còn dùng được "
+            f"cho việc nền là {_usd(ns_apify)} USD (trần console hoặc hạn mức tháng của tài "
+            "khoản). Giảm số nguồn/số bài mỗi lần trên dashboard hoặc đợi tháng sau.")}
     ngan_sach = round(min(kh["con_thang"], ns_apify, max(tong, 0.01) * _HE_SO_TRAN), 2)
+    tham_so: dict = {"du_an": ma, "ngay": _hom_nay(),
+                     "nguon": sorted(int(n["id"]) for n in kh["nguon"])}
+    if moi_nguon:
+        tham_so["moi_nguon"] = True
+    if lich is not None:
+        # Mốc của lịch nằm trong tham số: khoá chống trùng của sổ việc nền (6 giờ) phân biệt
+        # từng mốc — lượt mỗi giờ không bị coi là "việc cũ", còn cùng một mốc lỡ nhận hai lần
+        # thì trả lại đúng việc cũ.
+        tham_so.update(lich_id=int(lich["id"]), moc=str(lich.get("moc") or ""))
     kq = viec_nen.tao_viec(
-        "theo_doi",
-        {"du_an": ma, "ngay": _hom_nay(), "nguon": sorted(int(n["id"]) for n in kh["nguon"])},
+        "theo_doi", tham_so,
         {p: {"phan": cac} for p, cac in phan.items()}, {"usd": tong,
                                                          "phut": max(3, len(kh["nguon"]) // 4)
                                                          + (3 if bl_uoc else 0)
@@ -287,7 +351,9 @@ def lenh_theodoi(doi_so: str) -> str:
         ngan_sach, [f"bỏ qua {len(kh['bo_qua'])} nguồn"] if kh["bo_qua"] else [],
         con_lai_thang=(hm or {}).get("con_lai"))
     if kq.get("tu_choi") or kq.get("da_xong_truoc"):
-        return str(kq.get("ket_qua") or kq.get("note") or "Không tạo được việc theo dõi.")
+        return {"ok": False, "ma_loi": "tu_choi" if kq.get("tu_choi") else "trung",
+                "ma_viec": kq.get("ma_viec"),
+                "cau": str(kq.get("ket_qua") or kq.get("note") or "Không tạo được việc theo dõi.")}
     dem: dict[str, int] = {}
     for n in kh["nguon"]:
         dem[n["nen_tang"]] = dem.get(n["nen_tang"], 0) + 1
@@ -304,7 +370,8 @@ def lenh_theodoi(doi_so: str) -> str:
     if kh["bo_qua"]:
         ly = sorted({x[1] for x in kh["bo_qua"]})
         cau += f" Bỏ qua {len(kh['bo_qua'])} nguồn: {'; '.join(ly)[:300]}."
-    return cau
+    return {"ok": True, "ma_viec": kq.get("ma_viec"), "cau": cau, "uoc_usd": tong,
+            "so_nguon": len(kh["nguon"]), "bo_qua": len(kh["bo_qua"])}
 
 
 # ───────────────────────────── đọc bài của một phần ─────────────────────────────
@@ -550,8 +617,21 @@ def chay_viec(v) -> tuple[str, str]:
     """Runner của `viec_nen` cho loại `theo_doi`. -> (trạng thái việc, câu nhắn kết quả).
 
     Chạy trong BẢN SAO ngữ cảnh: các cờ Apify (`_NEN`, `_HUY`, `_HAN_CHOT`, `_NEN_TANG`,
-    `_KHI_CO_RUN`) đặt ở đây không rò sang lượt khác dùng chung luồng."""
-    return contextvars.copy_context().run(_chay_viec, v)
+    `_KHI_CO_RUN`) đặt ở đây không rò sang lượt khác dùng chung luồng. Việc do lịch quét tự
+    động giao (`tham_so.lich_id`) thì báo kết quả cuối về lịch (`quet_tu_dong.ket_thuc_viec`)."""
+    kq = contextvars.copy_context().run(_chay_viec, v)
+    ts = v.d.get("tham_so") or {}
+    lid = ts.get("lich_id")
+    if lid:
+        try:
+            import quet_tu_dong
+            quet_tu_dong.ket_thuc_viec(
+                int(lid), v.ma, v.d.get("luot_id"), kq[0], kq[1],
+                chi_phi_usd=float((v.d.get("chi_phi") or {}).get("usd") or 0),
+                du_an=str(ts.get("du_an") or ""), moc=str(ts.get("moc") or ""))
+        except Exception as e:  # noqa: BLE001 — báo lịch hỏng không làm hỏng việc đã xong
+            print(f"[theo_doi] không báo được lịch #{lid}: {type(e).__name__}", flush=True)
+    return kq
 
 
 def _ghi_phan(v, p: str, ph: dict, kq: dict[int, list], loi: dict[int, str]) -> None:
@@ -1284,11 +1364,13 @@ def _chay_viec(v) -> tuple[str, str]:
     if not du_an:
         return "loi", f"Việc theo dõi {v.ma}: dự án '{ma}' không còn trong kho."
     luot = v.d.get("luot_id")
+    lich_id = ts.get("lich_id")
     if not luot:
         # Ghi id lượt vào sổ việc NGAY: bot khởi động lại thì chạy tiếp đúng lượt này, không
         # mở lượt thứ hai (lượt bỏ dở sẽ chặn lượt mới tới `GIO_BO_DO` giờ).
         luot = K.mo_luot(ma, "theo_doi", ma_viec=v.ma,
-                         job_id=str((v.d.get("kenh") or {}).get("job_id") or "") or None)
+                         job_id=str((v.d.get("kenh") or {}).get("job_id") or "") or None,
+                         **({"lich_id": int(lich_id)} if lich_id else {}))
         with v._khoa:
             v.d["luot_id"] = luot
             v.luu()
@@ -1309,7 +1391,8 @@ def _chay_viec(v) -> tuple[str, str]:
     try:
         # Đọc LẠI nguồn: nguồn đã tạm dừng/xoá sau khi tạo việc thì không quét. Nguồn đã quét
         # xong ở lần chạy trước khởi động lại (đã dời quet_cuoi) vẫn giữ để đọc lại bài từ đĩa.
-        nguon = {int(n["id"]): n for n in K.nguon_toi_han(ma) if int(n["id"]) in ids}
+        doc_nguon = K.nguon_dang_theo_doi if ts.get("moi_nguon") else K.nguon_toi_han
+        nguon = {int(n["id"]): n for n in doc_nguon(ma) if int(n["id"]) in ids}
         # Review 15/10: lượt chỉ ghi chi phí vào kho ở `finally` — khởi động lại giữa chừng thì
         # tiền các phần đã xong của việc này chưa nằm trong "đã tiêu tháng": trừ ở đây.
         da_xong = sum(float(ph.get("usd_so") or 0) for _, ph in v.cac_phan()
@@ -1403,7 +1486,8 @@ def _chay_viec(v) -> tuple[str, str]:
         # Tiền đã tiêu phải vào lượt dù có lỗi gì (review 14/10): không thì "đã tiêu tháng"
         # đếm thiếu và lượt sau quét lại, trả tiền lần nữa.
         if v.run_ids():
-            usd = float(v.chot_chi_phi([f"theo dõi {ma}"], sorted(
+            nhan = f"theo dõi {ma}" + (f" (lịch #{lich_id})" if lich_id else "")
+            usd = float(v.chot_chi_phi([nhan], sorted(
                 {p for p, _ in v.cac_phan() if p not in ("youtube", "binh_luan", "tu_khoa")}),
                 _hom_nay()).get("usd") or 0)
         trang_thai = ("da_huy" if v.da_huy() else "loi" if loi_chung or not ok and nguon

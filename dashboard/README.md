@@ -12,8 +12,9 @@ Dashboard **chỉ gồm**:
 4. **Người xem** (`/nguoi-xem`, chỉ quản lý): ai được vào, vai trò, nhật ký thay đổi.
 5. **Chi tiết + bình luận** (đợt 2b, 15/10/2026): bấm vào điểm/cột/dòng bất kỳ trên trang Chỉ số mở khung các bài làm nên con số đó (`/api/bai`), mỗi bài mở được bình luận Mark đã cào (`/api/binh-luan`). Khối "Bình luận đã đọc" đếm sắc thái/chủ đề bình luận của khách (bình luận của thương hiệu không tính). Số bài × số bình luận mỗi lượt đặt ở trang Ngân sách.
 6. **BigQuery** (`/bigquery`): trạng thái đồng bộ kho lên BigQuery; quản lý bấm "Đồng bộ ngay".
+7. **Lịch quét** (`/lich-quet`, chủ dự án chốt 15/10/2026 "Dashboard + Mark tự chạy"): lịch quét tự động mỗi dự án — mỗi N giờ trong khung giờ, hằng ngày (giờ cụ thể), hằng tuần (ngày + giờ), chiến dịch (từ lúc → tới lúc, mỗi 30 phút – 7 ngày, dài ≤ 92 ngày, bắt đầu trong 365 ngày tới, mặc định quét mọi nguồn; đang diễn ra thì lịch thường nhường, hết khung tự dừng). Biểu mẫu có xem trước 10 lần chạy tới (giờ VN) và chi phí tối đa so với trần tháng, tính ở máy chủ trong threadpool (`/api/lich-quet/xem-truoc`, đúng hàm Mark dùng — `lich_quet.py`; kỳ của lịch đang gõ chỉ đếm mốc của chính nó). Mark (`quet_tu_dong.py`, nhịp 30 giây trên VPS, không qua hàng đợi job platform) tự chạy `/theodoi` đúng mốc, báo mỗi lượt lên platform bằng trace; kết quả hiện ở đây, không nhắn Lark. Trang Ngân sách nhân theo số lượt của lịch đang bật (không còn giả định 1 lượt/ngày).
 
-Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần mỗi lượt hay lịch chạy của Mark — những thứ đó vẫn ở console platform (chủ dự án: "mark vẫn phải theo luật của platform như trước không đổi … dashboard chỉ gồm những chỉ số và quản lý nguồn cũng như ngân sách"). **Lịch quét đặt trên console platform:** tab Lịch chạy, kiểu Giao việc, nội dung `/theodoi <mã dự án>` (xem `deploy/lang-nghe/README.md` mục 5).
+Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần mỗi lượt hay lịch "Giao việc" của Mark — những thứ đó vẫn ở console platform (chủ dự án: "mark vẫn phải theo luật của platform như trước không đổi … dashboard chỉ gồm những chỉ số và quản lý nguồn cũng như ngân sách"). Lịch console (tab Lịch chạy, kiểu Giao việc, nội dung `/theodoi <mã dự án>` — `deploy/lang-nghe/README.md` mục 5) vẫn chạy song song với lịch quét tự động.
 
 ## Cấu trúc
 
@@ -23,6 +24,8 @@ Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần
 | `kho.py` | module DUY NHẤT có SQL (psycopg 3, role `lang_nghe_web`); mỗi thao tác sửa ghi `nhat_ky` cùng giao dịch |
 | `chi_so.py` | phép đếm chỉ số, thuần Python |
 | `chi_phi.py` | dự báo chi phí theo dõi tháng (thuần Python; hằng số chép từ Mark, có bài đối chiếu) |
+| `lich_quet.py` | lịch quét tự động: kiểm cấu hình, tính mốc (giờ VN), quyết định nhịp — thuần, Mark import chung |
+| `trang_lich.py` | dựng danh sách lịch + bản xem trước (mốc + chi phí) cho trang Lịch quét |
 | `nhap_lieu.py` | kiểm biểu mẫu, chuẩn hoá định danh nguồn đúng dạng Mark dùng khi quét |
 | `dang_nhap.py` | đăng nhập Lark (OAuth), phiên cookie ký HMAC, CSRF |
 | `dong_bo_bq.py` | đồng bộ kho → BigQuery (gắn vào hook `app.state.sau_cap_nhat`) |

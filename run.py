@@ -300,6 +300,16 @@ def main() -> None:
     except Exception as e:  # noqa: BLE001
         print(f"  Việc nền:   ❌ {type(e).__name__}: {e}")
 
+    # Lịch quét tự động (chủ dự án 15/10/2026: "Dashboard + Mark tự chạy"): lịch đặt trên
+    # dashboard (bảng lich_quet), nhịp 30 giây tạo việc /theodoi như lệnh gõ tay. Sau việc nền:
+    # chỉ tiến trình giữ quyền chủ việc nền mới nhận lịch.
+    try:
+        import quet_tu_dong
+
+        print(f"  {quet_tu_dong.khoi_dong()}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  Lịch quét:  ❌ {type(e).__name__}: {e}")
+
     # Nhịp nền theo dõi nguồn Wiki: quét định kỳ và BÁO, chỉ nhập khi chủ agent bấm
     # "Nhập ngay" trên console. Trước đây giao diện hứa "agent sẽ quét ở lượt kiểm
     # nguồn kế tiếp" mà không có lượt nào — dán link xong ngồi đợi mãi.

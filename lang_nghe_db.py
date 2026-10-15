@@ -4,7 +4,8 @@
 nằm trong MỘT DB riêng trên VPS, dùng chung với dashboard `social.hapas.vn`. Dashboard quản
 lý dự án/nguồn/ngân sách; Mark chỉ ĐỌC cấu hình và GHI kết quả (quyền DB tách bằng role, xem
 `deploy/lang-nghe/schema.sql`). Kỹ năng, công tắc, trần mỗi lượt và lịch của Mark vẫn ở console
-platform — module này không đọc/ghi gì của platform.
+platform — module này không đọc/ghi gì của platform. Riêng lịch quét TỰ ĐỘNG (chủ dự án chốt
+15/10/2026) đặt trên dashboard, bảng `lich_quet`: Mark đọc lịch, chỉ ghi cột trạng thái chạy.
 
 Kết nối: Unix socket + peer (user hệ điều hành `mark` = role `mark`), không mật khẩu. Đổi bằng
 `LANG_NGHE_DSN` (vd khi thử trên máy khác). Lỗi KHÔNG bao giờ in DSN — chỉ tên loại lỗi.
@@ -96,6 +97,16 @@ def nguon_toi_han(ma: str) -> list[dict]:
             (ma, GIO_DUNG_SAI)).fetchall()
 
 
+def nguon_dang_theo_doi(ma: str) -> list[dict]:
+    """MỌI nguồn đang theo dõi, không xét chu kỳ — lượt theo lịch có `quet_moi_nguon` (chiến
+    dịch, 15/10/2026) quét hết mỗi lượt. Nguồn lâu chưa quét đi trước (trần `TOI_DA_NGUON`)."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT id, nen_tang, dinh_danh, ten, link, loai, so_bai_moi_lan, chu_ky_ngay, "
+            "quet_cuoi FROM nguon WHERE du_an = %s AND trang_thai = 'dang_theo_doi' "
+            "ORDER BY quet_cuoi NULLS FIRST, id", (ma,)).fetchall()
+
+
 def dem_nguon(ma: str) -> dict:
     """{'dang_theo_doi': n, 'tam_dung': m} — để câu trả lời nói rõ vì sao không có gì quét."""
     with ket_noi() as c:
@@ -127,17 +138,25 @@ def luot_dang_chay(ma: str) -> dict | None:
 
 
 def mo_luot(ma: str, kieu: str, *, ma_viec: str | None = None,
-            job_id: str | None = None) -> int:
-    """Mở lượt mới; đóng luôn các lượt cùng dự án bị bỏ dở quá `GIO_BO_DO` giờ."""
+            job_id: str | None = None, lich_id: int | None = None) -> int:
+    """Mở lượt mới; đóng luôn các lượt cùng dự án bị bỏ dở quá `GIO_BO_DO` giờ. `lich_id`: lượt
+    do lịch quét tự động (bảng `lich_quet`) giao — chỉ ghi cột này khi có (lịch bị xoá giữa
+    chừng thì thành NULL, không hỏng khoá ngoại)."""
     with ket_noi() as c:
         c.execute(
             "UPDATE luot_quet SET trang_thai = 'loi', ket_thuc = now(), "
             "loi = COALESCE(loi, 'bỏ dở (bot dừng giữa chừng)') WHERE du_an = %s AND "
             "kieu = %s AND trang_thai = 'dang_chay' AND bat_dau <= now() - "
             "make_interval(hours => %s)", (ma, kieu, GIO_BO_DO))
-        r = c.execute(
-            "INSERT INTO luot_quet (du_an, kieu, ma_viec, job_id) VALUES (%s, %s, %s, %s) "
-            "RETURNING id", (ma, kieu, ma_viec, job_id)).fetchone()
+        if lich_id:
+            r = c.execute(
+                "INSERT INTO luot_quet (du_an, kieu, ma_viec, job_id, lich_id) VALUES "
+                "(%s, %s, %s, %s, (SELECT id FROM lich_quet WHERE id = %s)) RETURNING id",
+                (ma, kieu, ma_viec, job_id, int(lich_id))).fetchone()
+        else:
+            r = c.execute(
+                "INSERT INTO luot_quet (du_an, kieu, ma_viec, job_id) VALUES (%s, %s, %s, %s) "
+                "RETURNING id", (ma, kieu, ma_viec, job_id)).fetchone()
     return int(r["id"])
 
 
@@ -421,3 +440,67 @@ def ghi_de_xuat(ma: str, cac: list[dict]) -> int:
                  int(x.get("so_bai") or 0), int(x.get("thao_luan") or 0))).fetchone()
             moi += 1 if r and r["moi"] else 0
     return moi
+
+
+# ───────────────────────────── lịch quét tự động (15/10/2026) ─────────────────────────────
+# Dashboard đặt lịch (bảng `lich_quet`); Mark chỉ ĐỌC lịch và GHI các cột trạng thái chạy
+# (lan_chay_ke, lan_chay_cuoi, ket_qua_cuoi, so_lan_chay) — GRANT trong schema.sql.
+_COT_LICH = ("id, du_an, ten, kieu, cau_hinh, bat, quet_moi_nguon, lan_chay_ke, lan_chay_cuoi, "
+             "ket_qua_cuoi, so_lan_chay")
+
+
+def lich_dang_bat() -> list[dict]:
+    """Mọi lịch đang bật (kể cả chưa tới hạn) — để biết dự án nào đang có chiến dịch."""
+    with ket_noi() as c:
+        return c.execute(f"SELECT {_COT_LICH} FROM lich_quet WHERE bat ORDER BY id").fetchall()
+
+
+def doc_lich(lid: int) -> dict | None:
+    with ket_noi() as c:
+        return c.execute(f"SELECT {_COT_LICH} FROM lich_quet WHERE id = %s", (lid,)).fetchone()
+
+
+def nhan_lich_den_han(bay_gio, quyet, toi_da: int = 20) -> list[tuple[dict, dict]]:
+    """NHẬN các lịch tới hạn (`lan_chay_ke` ≤ `bay_gio`) trong MỘT giao dịch:
+
+    • `SELECT … FOR UPDATE SKIP LOCKED`: hai tiến trình Mark (lỡ chạy hai bản) không nhận cùng
+      một dòng — bản thứ hai bỏ qua dòng đang bị khoá, sau commit thì dòng đã có mốc kế mới.
+    • `quyet(dòng)` (thuần, không gọi mạng) -> {"lan_chay_ke", tuỳ chọn "lan_chay_cuoi",
+      "ket_qua_cuoi"}; mốc kế GHI và COMMIT trước khi bên gọi bắt đầu lượt quét — chết giữa
+      chừng thì lỡ một lượt, không bao giờ chạy một mốc hai lần.
+    -> [(dòng cũ, quyết định)]."""
+    import json
+    with ket_noi() as c:
+        rows = c.execute(
+            f"SELECT {_COT_LICH} FROM lich_quet WHERE bat AND lan_chay_ke IS NOT NULL AND "
+            "lan_chay_ke <= %s ORDER BY lan_chay_ke, id LIMIT %s FOR UPDATE SKIP LOCKED",
+            (bay_gio, int(toi_da))).fetchall()
+        ra = []
+        for r in rows:
+            q = quyet(dict(r))
+            kq = q.get("ket_qua_cuoi")
+            c.execute(
+                "UPDATE lich_quet SET lan_chay_ke = %s, lan_chay_cuoi = COALESCE(%s, "
+                "lan_chay_cuoi), ket_qua_cuoi = COALESCE(%s::jsonb, ket_qua_cuoi) WHERE id = %s",
+                (q.get("lan_chay_ke"), q.get("lan_chay_cuoi"),
+                 json.dumps(kq, ensure_ascii=False, default=str) if kq is not None else None,
+                 r["id"]))
+            ra.append((dict(r), q))
+    return ra
+
+
+def ghi_ket_qua_lich(lid: int, ket_qua: dict, *, lan_chay_cuoi=None, tang_so_lan: bool = False,
+                     chi_khi_ma_viec: str | None = None) -> bool:
+    """Ghi kết quả gần nhất của một lịch. `chi_khi_ma_viec`: chỉ ghi khi kết quả đang lưu là của
+    đúng việc đó, hoặc việc đó còn chờ báo xong (`viec_cho` — lượt sau bị bỏ vì nó còn chạy).
+    Việc nền xong muộn không đè kết quả của việc khác. -> có ghi không."""
+    import json
+    sql = ("UPDATE lich_quet SET ket_qua_cuoi = %s::jsonb, lan_chay_cuoi = COALESCE(%s, "
+           "lan_chay_cuoi), so_lan_chay = so_lan_chay + %s WHERE id = %s")
+    ts = [json.dumps(ket_qua, ensure_ascii=False, default=str), lan_chay_cuoi,
+          1 if tang_so_lan else 0, int(lid)]
+    if chi_khi_ma_viec:
+        sql += (" AND (ket_qua_cuoi->>'ma_viec' = %s OR ket_qua_cuoi->>'viec_cho' = %s)")
+        ts += [chi_khi_ma_viec, chi_khi_ma_viec]
+    with ket_noi() as c:
+        return bool(c.execute(sql + " RETURNING id", ts).fetchone())

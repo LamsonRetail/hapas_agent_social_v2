@@ -207,6 +207,58 @@ class GiaKho:
     def luot_xong_moi_nhat(self):
         return self.luot_moi_nhat
 
+    # ── lịch quét tự động (15/10/2026) — cùng tên hàm với dashboard/kho.py ──
+    lich: dict = None                   # {id: dòng lich_quet}; tạo lười để mọi bộ thử cũ không đổi
+
+    def _lich(self) -> dict:
+        if self.lich is None:
+            self.lich = {}
+        return self.lich
+
+    def cac_lich(self, du_an):
+        ra = []
+        for x in sorted(self._lich().values(), key=lambda x: x["id"]):
+            if x["du_an"] != du_an:
+                continue
+            lq = next((r for r in reversed(self.luot) if r.get("lich_id") == x["id"]), None) or {}
+            ra.append({**x, "luot_id": lq.get("id"), "luot_ma_viec": lq.get("ma_viec"),
+                       "luot_trang_thai": lq.get("trang_thai"), "luot_bat_dau": lq.get("bat_dau"),
+                       "luot_ket_thuc": lq.get("ket_thuc"), "luot_bai_moi": lq.get("bai_moi"),
+                       "luot_bai_cap_nhat": lq.get("bai_cap_nhat"),
+                       "luot_chi_phi": lq.get("chi_phi_usd"), "luot_loi": lq.get("loi")})
+        return ra
+
+    def doc_lich(self, lid):
+        return dict(self._lich()[lid]) if lid in self._lich() else None
+
+    def them_lich(self, ai, du_an, d):
+        if sum(1 for x in self._lich().values() if x["du_an"] == du_an) >= 20:
+            raise LoiDuLieu("Mỗi dự án tối đa 20 lịch — xoá bớt lịch cũ trước.")
+        lid = max(self._lich(), default=0) + 1
+        self._lich()[lid] = {"id": lid, "du_an": du_an, **d, "lan_chay_cuoi": None,
+                             "ket_qua_cuoi": None, "so_lan_chay": 0, "tao_luc": None,
+                             "tao_boi": ai, "sua_luc": None, "sua_boi": ai}
+        self._ghi(ai, "them_lich", f"lich_quet:{lid}")
+        return lid
+
+    def sua_lich(self, ai, lid, d):
+        if lid not in self._lich():
+            raise LoiDuLieu("Không còn lịch này.")
+        self._lich()[lid].update(d, sua_boi=ai)
+        self._ghi(ai, "sua_lich", f"lich_quet:{lid}")
+
+    def bat_tat_lich(self, ai, lid, bat, lan_chay_ke):
+        if lid not in self._lich():
+            raise LoiDuLieu("Không còn lịch này.")
+        self._lich()[lid].update(bat=bat, lan_chay_ke=lan_chay_ke if bat else None, sua_boi=ai)
+        self._ghi(ai, "bat_lich" if bat else "tat_lich", f"lich_quet:{lid}")
+
+    def xoa_lich(self, ai, lid):
+        if lid not in self._lich():
+            raise LoiDuLieu("Không còn lịch này.")
+        del self._lich()[lid]
+        self._ghi(ai, "xoa_lich", f"lich_quet:{lid}")
+
     def cac_nguoi_xem(self):
         return [{"email": e, "vai_tro": v, "them_boi": None, "them_luc": None}
                 for e, v in sorted(self.nguoi.items())]
@@ -314,7 +366,8 @@ CONG_KHAI = {"/suc-khoe", "/dang-nhap", "/dang-nhap/lark", "/dang-nhap/xong", "/
 
 
 def _duong(route: APIRoute) -> str:
-    return route.path.replace("{ma}", "hapas").replace("{nid}", "1").replace("{did}", "5")
+    return (route.path.replace("{ma}", "hapas").replace("{nid}", "1").replace("{did}", "5")
+            .replace("{lid}", "1"))
 
 
 # ───────────────────────────── công khai + đăng nhập bắt buộc ─────────────────────────────
@@ -622,11 +675,12 @@ def test_cac_trang_hien_dung_va_thoat_chu():
     _co_nguon(kho)
     kho.nguon[1]["link"] = "javascript:alert(2)"
     dang_nhap(c, XEM)
-    for p in ("/", "/nguon", "/ngan-sach", "/bigquery"):
+    for p in ("/", "/nguon", "/ngan-sach", "/bigquery", "/lich-quet"):
         r = c.get(p)
         assert r.status_code == 200, p
         assert "<script>alert(1)</script>" not in r.text, p
-        assert "Lịch quét đặt ở console platform" in r.text, p
+        assert "Quét tự động: tab Lịch quét" in r.text, p           # chân trang trỏ tab mới
+        assert 'href="/lich-quet"' in r.text, p                     # mục điều hướng
         # Tệp tĩnh có mã phiên bản (băm nội dung): deploy đổi tệp là đổi link — trình duyệt
         # không chạy JS cũ trên HTML mới (lỗi thật 15/10/2026).
         assert re.search(r'href="/tinh/giao_dien\.css\?v=[0-9a-f]{10}"', r.text), p
@@ -675,11 +729,16 @@ def test_trang_chi_so_giu_du_khoi_va_an_toan_csp():
 
 
 def test_khong_co_trang_ky_nang_hay_cong_tac_cua_mark():
-    """Phạm vi chủ dự án chốt: dashboard KHÔNG quản lý kỹ năng/persona/công tắc/lịch của Mark."""
+    """Phạm vi chủ dự án chốt: dashboard KHÔNG quản lý kỹ năng/persona/công tắc/lịch Giao việc của
+    Mark. Ngoại lệ chủ dự án chốt 15/10/2026 ("Dashboard + Mark tự chạy"): lịch quét TỰ ĐỘNG của
+    /theodoi (`/lich-quet`) — lịch console (schedule) vẫn không có ở đây."""
     app, _, _ = tao()
     duong = {r.path for r in app.routes if isinstance(r, APIRoute)}
-    for cam in ("ky-nang", "skill", "persona", "cong-tac", "lich", "schedule", "tran-luot"):
+    for cam in ("ky-nang", "skill", "persona", "cong-tac", "schedule", "tran-luot"):
         assert not any(cam in p for p in duong), cam
+    assert {p for p in duong if "lich" in p} == {
+        "/lich-quet", "/api/lich-quet/xem-truoc", "/lich-quet/them", "/lich-quet/{lid}/sua",
+        "/lich-quet/{lid}/bat-tat", "/lich-quet/{lid}/xoa"}
 
 
 # ───────────────────────────── BigQuery ─────────────────────────────
@@ -1643,4 +1702,212 @@ def test_trang_chi_so_co_thanh_loc_chung():
                 'setAttribute("inert"',                  # lượt lỗi: khối số cũ không bấm được
                 "so_sanh_lech"):                         # lọc tương tác: không so kỳ trước
         assert can in js, can
+
+
+# ───────────────────────────── lịch quét tự động (15/10/2026) ─────────────────────────────
+# Chủ dự án chốt "Dashboard + Mark tự chạy". Đồng hồ cố định 15/10/2026 12:00 giờ VN (giua_thang).
+LICH_2GIO = {"kieu": "moi_n_gio", "moi_gio": "2", "tu": "07:00", "den": "23:00", "bat": "1"}
+
+
+def _vn(*a):
+    return datetime.datetime(*a, tzinfo=VN)
+
+
+def _them_lich(kho, kieu="hang_ngay", ch=None, bat=True, ke=None, moi=False, ten="Sáng"):
+    return kho.them_lich(QL, "hapas", {"ten": ten, "kieu": kieu,
+                                       "cau_hinh": ch or {"gio": ["08:00"], "thu": []},
+                                       "bat": bat, "quet_moi_nguon": moi, "lan_chay_ke": ke})
+
+
+def test_lich_quet_tao_tinh_moc_ke_va_ghi_nhat_ky(giua_thang):
+    _, c, kho = tao()
+    csrf = dang_nhap(c, QL)
+    r = c.post("/lich-quet/them", data={"csrf": csrf, "du_an": "hapas", **LICH_2GIO,
+                                        "ten": "Giờ hành chính"})
+    t = thong_bao(c, r)
+    assert "Đã tạo lịch #1" in t and "Lần chạy đầu: Hôm nay 13:00 (còn 1 giờ)" in t
+    x = kho.lich[1]
+    assert x["cau_hinh"] == {"moi_gio": 2, "tu": "07:00", "den": "23:00", "thu": []}
+    assert x["lan_chay_ke"] == _vn(2026, 10, 15, 13) and x["bat"] and not x["quet_moi_nguon"]
+    assert kho.nk == [(QL, "them_lich", "lich_quet:1")]
+    assert "Giờ hành chính" in t and "Đang bật" in t and "Mỗi 2 giờ, 07:00–23:00, mọi ngày" in t
+    assert 'aria-current="page">Lịch quét' in t
+
+
+def test_lich_quet_sai_thi_ve_lai_bieu_mau_giu_chu(giua_thang):
+    _, c, kho = tao()
+    csrf = dang_nhap(c, QL)
+    r = c.post("/lich-quet/them", data={"csrf": csrf, "du_an": "hapas", "kieu": "hang_ngay",
+                                        "gio": "7h sáng, 12:00", "thu_3": "1"})
+    assert r.status_code == 400 and "HH:MM" in r.text
+    assert 'value="7h sáng, 12:00"' in r.text and 'name="thu_3" value="1" checked' in r.text
+    assert not kho.lich and kho.nk == []
+    r = c.post("/lich-quet/them", data={"csrf": csrf, "du_an": "khong", **LICH_2GIO})
+    assert r.status_code == 400 and "Không có dự án này" in r.text
+
+
+def test_lich_quet_sua_bat_tat_xoa(giua_thang):
+    _, c, kho = tao()
+    csrf = dang_nhap(c, QL)
+    c.post("/lich-quet/them", data={"csrf": csrf, "du_an": "hapas", **LICH_2GIO})
+    assert "Sửa lịch #1" in c.get("/lich-quet?du_an=hapas&sua=1").text
+    r = c.post("/lich-quet/1/sua", data={"csrf": csrf, "kieu": "chien_dich",
+                                         "tu_luc": "2026-10-20T08:00", "den_luc": "2026-10-22T22:00",
+                                         "moi": "30", "don_vi": "phut", "quet_moi_nguon": "1",
+                                         "bat": "1"})
+    assert "Đã lưu lịch #1" in thong_bao(c, r)
+    x = kho.lich[1]
+    assert x["kieu"] == "chien_dich" and x["quet_moi_nguon"] and x["cau_hinh"]["moi_phut"] == 30
+    assert x["lan_chay_ke"] == _vn(2026, 10, 20, 8)
+    r = c.post("/lich-quet/1/bat-tat", data={"csrf": csrf, "bat": "0"})
+    assert "Đã tắt lịch #1" in thong_bao(c, r)
+    assert not kho.lich[1]["bat"] and kho.lich[1]["lan_chay_ke"] is None
+    r = c.post("/lich-quet/1/bat-tat", data={"csrf": csrf, "bat": "1"})
+    assert "Đã bật lịch #1" in thong_bao(c, r) and kho.lich[1]["lan_chay_ke"] == _vn(2026, 10, 20, 8)
+    # chiến dịch đã qua: không bật lại được, trang hiện "Đã kết thúc"
+    kho.lich[1].update(bat=False, cau_hinh={"tu_luc": "2026-10-01T08:00",
+                                            "den_luc": "2026-10-02T08:00", "moi_phut": 60})
+    r = c.post("/lich-quet/1/bat-tat", data={"csrf": csrf, "bat": "1"})
+    assert "không còn mốc chạy" in thong_bao(c, r) and not kho.lich[1]["bat"]
+    assert "Đã kết thúc" in c.get("/lich-quet?du_an=hapas").text
+    r = c.post("/lich-quet/1/xoa", data={"csrf": csrf})
+    assert "Đã xoá lịch #1" in thong_bao(c, r) and 1 not in kho.lich
+    assert [x[1] for x in kho.nk] == ["them_lich", "sua_lich", "tat_lich", "bat_lich", "xoa_lich"]
+    assert c.post("/lich-quet/1/xoa", data={"csrf": csrf}).status_code == 404
+
+
+def test_lich_quet_nguoi_xem_chi_xem_va_khong_thay_loi_tho(giua_thang):
+    _, c, kho = tao()
+    _them_lich(kho, ke=_vn(2026, 10, 16, 8))
+    kho.lich[1].update(lan_chay_cuoi=_vn(2026, 10, 15, 8, 0, 20), ket_qua_cuoi={
+        "trang_thai": "loi", "ma_loi": "loi", "ly_do": "KeyError: /opt/mark/bi-mat"})
+    kho.nk.clear()
+    csrf = dang_nhap(c, XEM)
+    t = c.get("/lich-quet").text
+    assert "Sáng" in t and "Mai 08:00" in t and "Tạo lịch" not in t and "/lich-quet/1/xoa" not in t
+    assert "/opt/mark/bi-mat" not in t and A.LOI_CHUNG in t
+    for duong, form in (("/lich-quet/them", {"du_an": "hapas", **LICH_2GIO}),
+                        ("/lich-quet/1/sua", LICH_2GIO), ("/lich-quet/1/bat-tat", {"bat": "0"}),
+                        ("/lich-quet/1/xoa", {})):
+        r = c.post(duong, data={"csrf": csrf, **form})
+        assert r.status_code == 403 and "Chỉ người quản lý" in r.text, duong
+    assert kho.nk == [] and len(kho.lich) == 1 and kho.lich[1]["bat"]
+    # xem trước chỉ đọc: người xem gọi được
+    assert c.get("/api/lich-quet/xem-truoc", params={"du_an": "hapas", **LICH_2GIO}).status_code == 200
+    dang_nhap(c, QL)
+    assert "/opt/mark/bi-mat" in c.get("/lich-quet").text            # quản lý: chữ lỗi thật
+
+
+def test_lich_quet_ket_qua_lay_so_that_tu_luot(giua_thang):
+    _, c, kho = tao()
+    _them_lich(kho, ke=_vn(2026, 10, 16, 8))
+    kho.lich[1].update(lan_chay_cuoi=_vn(2026, 10, 15, 8, 0, 20), so_lan_chay=4,
+                       ket_qua_cuoi={"trang_thai": "da_tao", "ma_viec": "t1015-a"})
+    kho.luot = [{"id": 9, "du_an": "hapas", "lich_id": 1, "ma_viec": "t1015-a", "trang_thai": "xong",
+                 "bat_dau": None, "ket_thuc": None, "bai_moi": 12, "bai_cap_nhat": 3,
+                 "chi_phi_usd": 0.0421, "loi": None}]
+    dang_nhap(c, XEM)
+    t = c.get("/lich-quet").text
+    assert "12 bài mới · 0,0421 USD" in t and "đã chạy 4 lượt" in t
+    kho.lich[1]["ket_qua_cuoi"] = {"trang_thai": "bo_qua", "ma_loi": "dang_chay",
+                                   "ly_do": "Lượt trước còn chạy (mã t1)"}
+    assert "lượt trước còn chạy" in c.get("/lich-quet").text
+
+
+def test_api_xem_truoc_lich(giua_thang):
+    kho = _kho_co_nguon_ton()
+    kho.du_an["hapas"].update(tk_bat=True, tk_so_bai=10)
+    _, c, _ = tao(kho)
+    dang_nhap(c, QL)
+    r = c.get("/api/lich-quet/xem-truoc", params={"du_an": "hapas", **LICH_2GIO})
+    d = r.json()
+    assert r.status_code == 200 and len(d["moc"]) == 10
+    assert [m["chu"] for m in d["moc"][:2]] == ["Hôm nay 13:00", "Hôm nay 15:00"]
+    assert d["moc"][0]["con"] == "còn 1 giờ" and d["mo_ta"] == "Mỗi 2 giờ, 07:00–23:00, mọi ngày"
+    assert d["tan_suat"] == "9 lượt/ngày"
+    assert [x["nhan"] for x in d["chi_phi"]] == ["Mỗi lượt (tối đa)", "30 ngày tới",
+                                                 "Còn lại tháng 10/2026"]
+    assert d["chi_phi"][1]["phu"] == "270 lượt" and d["chi_phi"][2]["phu"] == "150 lượt"
+    assert d["vuot"] and "vượt" in d["ket_luan"]
+    assert any("Facebook tìm theo từ khoá" in x for x in d["canh_bao"])
+    # chiến dịch đang bật trùng giờ: mốc của lịch thường hiện "nhường"
+    _them_lich(kho, "chien_dich", {"tu_luc": "2026-10-15T14:00", "den_luc": "2026-10-15T18:00",
+                                   "moi_phut": 60}, ke=_vn(2026, 10, 15, 14))
+    d = c.get("/api/lich-quet/xem-truoc", params={"du_an": "hapas", **LICH_2GIO}).json()
+    assert [m["nhuong"] for m in d["moc"][:4]] == [False, True, True, False]
+    assert any("chiến dịch #1" in x for x in d["canh_bao"])
+    # sửa chính lịch đó (lid) thì không tự nhường mình
+    d = c.get("/api/lich-quet/xem-truoc", params={"du_an": "hapas", "lid": "1", **LICH_2GIO}).json()
+    assert not any(m["nhuong"] for m in d["moc"])
+    r = c.get("/api/lich-quet/xem-truoc", params={
+        "du_an": "hapas", "kieu": "chien_dich", "tu_luc": "2026-10-20T08:00",
+        "den_luc": "2026-10-21T08:00", "moi": "10", "don_vi": "phut"})
+    assert r.status_code == 400 and "tối thiểu 30 phút" in r.json()["loi"]
+    assert c.get("/api/lich-quet/xem-truoc",
+                 params={"du_an": "khong", **LICH_2GIO}).status_code == 404
+
+
+def test_trang_lich_quet_an_toan_csp(giua_thang):
+    _, c, _ = tao()
+    dang_nhap(c, QL)
+    t = c.get("/lich-quet").text
+    assert re.search(r'src="/tinh/lich_quet\.js\?v=[0-9a-f]{10}"', t)
+    assert re.search(r'href="/tinh/lich_quet\.css\?v=[0-9a-f]{10}"', t)
+    for m in re.finditer(r"<script([^>]*)>(.*?)</script>", t, re.DOTALL):
+        assert "src=" in m.group(1) or 'type="application/json"' in m.group(1), m.group(0)[:80]
+    assert not re.search(r"\son[a-z]+=", t)
+    assert 'id="lq-form"' in t and 'id="lq-xem"' in t and "10 lần chạy tới" in t
+    assert t.count("<li") >= 10 and 'name="csrf"' in t and "Hôm nay 13:00" in t
+    js = (A.THU_MUC / "static" / "lich_quet.js").read_text(encoding="utf-8")
+    for cam in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(",
+                "new Function"):
+        assert cam not in js, cam
+
+
+def test_ngan_sach_du_bao_theo_lich_quet(giua_thang):
+    """Có lịch tự động đang bật: dự báo cả tháng nhân theo số lượt của lịch, không 1 lượt/ngày."""
+    kho = _kho_co_nguon_ton()
+    _them_lich(kho, "moi_n_gio", {"moi_gio": 2, "tu": "07:00", "den": "23:00", "thu": []})
+    _, c, _ = tao(kho)
+    dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert "150 lượt theo lịch" in t and "270 lượt" in t
+    d = json.loads(re.search(r'id="ns-du-lieu">(.*?)</script>', t, re.DOTALL).group(1))
+    assert d["co_lich"] is True and d["luot_con_lai"] == 150 and d["luot_30"] == 270
+    kho.lich[1]["bat"] = False                                          # tắt: về giả định cũ
+    assert "16,5 ngày ×" in c.get("/ngan-sach").text
+
+
+def test_xem_truoc_tinh_trong_threadpool_va_chan_chien_dich_qua_xa(giua_thang, monkeypatch):
+    """Review 15/10 (M2): đếm mốc + chi phí chạy trong threadpool (không chặn vòng sự kiện của
+    cả dashboard); chiến dịch bắt đầu quá 365 ngày tới (vd năm 2100) bị từ chối trước khi đếm."""
+    goi: list[str] = []
+    goc = A.run_in_threadpool
+
+    async def ghi(fn, *a, **k):
+        goi.append(getattr(fn, "__name__", ""))
+        return await goc(fn, *a, **k)
+    monkeypatch.setattr(A, "run_in_threadpool", ghi)
+    _, c, _ = tao()
+    dang_nhap(c, XEM)
+    assert c.get("/api/lich-quet/xem-truoc", params={"du_an": "hapas", **LICH_2GIO}).status_code == 200
+    assert "chuan_hoa" in goi and "xem_truoc" in goi
+    goi.clear()
+    dang_nhap(c, QL)
+    assert c.get("/lich-quet").status_code == 200 and "dung" in goi      # trang: dựng trong pool
+    r = c.get("/api/lich-quet/xem-truoc", params={
+        "du_an": "hapas", "kieu": "chien_dich", "tu_luc": "2100-01-01T08:00",
+        "den_luc": "2100-01-02T08:00", "moi": "30", "don_vi": "phut"})
+    assert r.status_code == 400 and "365 ngày" in r.json()["loi"]
+
+
+def test_lich_quet_luot_bi_bo_van_hien_ket_qua_viec_truoc(giua_thang):
+    """L1: lượt bị bỏ vì việc trước còn chạy; việc đó xong sau — dòng lịch nói cả hai."""
+    _, c, kho = tao()
+    _them_lich(kho, ke=_vn(2026, 10, 16, 8))
+    kho.lich[1].update(lan_chay_cuoi=_vn(2026, 10, 15, 11), ket_qua_cuoi={
+        "trang_thai": "bo_qua", "ma_loi": "dang_chay", "ly_do": "Lượt trước còn chạy (mã t1)",
+        "viec_cuoi": {"ma_viec": "t1", "trang_thai": "loi"}})
+    dang_nhap(c, XEM)
+    assert "lượt trước còn chạy · việc t1: lỗi" in c.get("/lich-quet").text
 
