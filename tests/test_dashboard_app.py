@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import json
+import re
 import threading
 from decimal import Decimal
 from urllib.parse import parse_qs, urlsplit
@@ -616,7 +617,13 @@ def test_cac_trang_hien_dung_va_thoat_chu():
         assert r.status_code == 200, p
         assert "<script>alert(1)</script>" not in r.text, p
         assert "Lịch quét đặt ở console platform" in r.text, p
+        # Tệp tĩnh có mã phiên bản (băm nội dung): deploy đổi tệp là đổi link — trình duyệt
+        # không chạy JS cũ trên HTML mới (lỗi thật 15/10/2026).
+        assert re.search(r'href="/tinh/giao_dien\.css\?v=[0-9a-f]{10}"', r.text), p
         assert "content-security-policy" in r.headers and r.headers["cache-control"] == "no-store"
+    v = re.search(r'/tinh/chi_so\.js\?v=([0-9a-f]{10})', c.get("/").text).group(1)
+    assert "immutable" in c.get(f"/tinh/chi_so.js?v={v}").headers["cache-control"]
+    assert c.get("/tinh/chi_so.js").headers["cache-control"] == "no-cache"   # link trần: hỏi lại
     t = c.get("/").text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in t
     assert f'src="/tinh/echarts.min.js" integrity="{A.ECHARTS_SRI}"' in t
@@ -641,7 +648,8 @@ def test_trang_chi_so_giu_du_khoi_va_an_toan_csp():
     _, c, _ = tao()
     dang_nhap(c, XEM)
     t = c.get("/").text
-    assert 'href="/tinh/chi_so.css"' in t and c.get("/tinh/chi_so.css").status_code == 200
+    assert re.search(r'href="/tinh/chi_so\.css\?v=[0-9a-f]{10}"', t)
+    assert c.get("/tinh/chi_so.css").status_code == 200
     for ma in ("kpi", "ky-truoc", "bd-xu-huong", "bd-sac-thai", "bd-sac-thai-tg", "tk-may", "tk-bang",
                "chu-de", "nen-tang", "loai-nguon", "tab-nen-tang", "top-nguon", "top-bai", "khoi-bl",
                "kpi-bl", "loai-bl", "bl-tim", "bl-truong", "bl-sap-xep", "bl-ds", "chi-tiet",
@@ -1160,7 +1168,7 @@ def test_trang_nguon_hien_uoc_tinh_moi_nguon(giua_thang):
     assert "≈ 0,051 USD/tháng theo bài + phí khởi động actor chung 0,0208 USD" in t   # Instagram
     assert "≈ 0,000 USD/tháng theo bài" in t                       # YouTube miễn phí
     assert '<script type="application/json" id="chi-phi-hang-so">' in t and '"he_so": 1.3' in t
-    assert 'src="/tinh/nguon.js"' in t and t.count("data-uoc-tinh") == 6   # 5 sửa + 1 thêm
+    assert 'src="/tinh/nguon.js?v=' in t and t.count("data-uoc-tinh") == 6   # 5 sửa + 1 thêm
 
 
 # ───────────────────────────── chi tiết + bình luận (đợt 2b) ─────────────────────────────
@@ -1348,7 +1356,7 @@ def test_ngan_sach_ma_tran_cau_hinh_mot_bieu_mau():
     # (40 × 0,00259 + 0,00005) × 1,3 = 0,1347; gói FREE chỉ là ghi chú trên dòng Facebook
     assert 'data-o="tk-facebook" data-usd="0.1347"' in t
     assert "Gói Apify FREE: thực tế tối đa 20 bài/lượt" in t
-    assert '<script type="application/json" id="ns-du-lieu">' in t and 'src="/tinh/ngan_sach.js"' in t
+    assert '<script type="application/json" id="ns-du-lieu">' in t and 'src="/tinh/ngan_sach.js?v=' in t
     dang_nhap(c, XEM)
     t = c.get("/ngan-sach").text
     assert "Tìm theo từ khoá" in t and "Cào bình luận" in t and 'data-usd="0.1347"' in t
