@@ -42,7 +42,7 @@
       <label class="o rong">Từ khoá (cách nhau bằng dấu phẩy) <input type="text" name="tu_khoa" value="{{ du_an.tu_khoa|join(', ') }}" required></label>
       <label class="o rong">Từ loại trừ (bài có từ này bị bỏ, không qua AI) <input type="text" name="tu_loai_tru" value="{{ du_an.tu_loai_tru|join(', ') }}"></label>
       <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000">{{ du_an.boi_canh }}</textarea></label>
-      <label class="o"><span><input type="checkbox" name="dang_bat" value="1"{% if du_an.dang_bat %} checked{% endif %}> Đang bật (tắt thì /theodoi không quét)</span></label>
+      <label class="o"><span><input type="checkbox" name="dang_bat" value="1"{% if du_an.dang_bat %} checked{% endif %}> Đang bật (tắt thì /theodoi và Lịch quét không quét)</span></label>
       <div><button class="nut" type="submit">Lưu dự án</button></div>
     </form>
   </details>
@@ -51,7 +51,7 @@
 
 <section class="the-khoi cach-duoi">
   <div class="tieu-de-khoi"><h2>Nguồn đang có ({{ nguon|length }})</h2>
-    <span class="mo nho">Tới chu kỳ thì quét, mỗi lần lấy tối đa "Bài/lần" bài mới nhất.</span></div>
+    <span class="mo nho">Tới chu kỳ thì quét, mỗi lần lấy tối đa "Bài/lần" bài mới nhất. Giờ quét đặt ở <a href="/lich-quet?du_an={{ du_an.ma|urlencode }}">Lịch quét</a>.</span></div>
   {% if nguon %}
   <div class="cuon-ngang">
   <table>

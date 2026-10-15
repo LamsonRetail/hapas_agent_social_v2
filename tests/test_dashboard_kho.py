@@ -66,6 +66,8 @@ NGUON = {"nen_tang": "tiktok", "dinh_danh": "kola", "ten": "KOL A",
          "so_bai_moi_lan": 5}
 DU_AN = {"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas"], "tu_loai_tru": [],
          "boi_canh": "", "thi_truong": "VN", "dang_bat": True}
+LICH = {"ten": "Sáng", "kieu": "hang_ngay", "cau_hinh": {"gio": ["08:00"], "thu": []},
+        "bat": True, "quet_moi_nguon": False, "lan_chay_ke": None}
 
 THAO_TAC = [
     ("them_du_an", lambda: K.them_du_an(AI, DU_AN)),
@@ -81,7 +83,14 @@ THAO_TAC = [
     ("xoa_nguoi_xem", lambda: K.xoa_nguoi_xem(AI, "xem@hapas.vn")),
     ("dong_bo_bq", lambda: K.ghi_nhat_ky(AI, "dong_bo_bq", "bigquery", {"kieu": "bam_tay"})),
     ("dang_nhap_lan_dau", lambda: K.ghi_dang_nhap_lan_dau(AI, "ou_123")),
+    ("them_lich", lambda: K.them_lich(AI, "hapas", LICH)),
+    ("sua_lich", lambda: K.sua_lich(AI, 3, LICH)),
+    ("tat_lich", lambda: K.bat_tat_lich(AI, 3, False, None)),
+    ("bat_lich", lambda: K.bat_tat_lich(AI, 3, True, "2026-10-16T08:00:00+07:00")),
+    ("xoa_lich", lambda: K.xoa_lich(AI, 3)),
 ]
+LICH_DONG = {"du_an": "hapas", "ten": "Sáng", "kieu": "hang_ngay", "cau_hinh": {}, "bat": True,
+             "quet_moi_nguon": False}
 
 
 @pytest.mark.parametrize("hanh_dong, goi", THAO_TAC, ids=[t[0] for t in THAO_TAC])
@@ -95,6 +104,10 @@ def test_moi_thao_tac_ghi_nhat_ky_cung_giao_dich(gia, hanh_dong, goi):
         r"tran_usd_thang::float AS v": [{"v": 5.0}],
         r"SELECT vai_tro FROM nguoi_xem": [{"vai_tro": "xem"}],
         r"count\(\*\)": [{"n": 1}],
+        r"SELECT 1 AS co FROM du_an": [{"co": 1}],
+        r"FROM lich_quet WHERE id = %s FOR UPDATE": [LICH_DONG],
+        r"^UPDATE lich_quet .*RETURNING du_an": [{"du_an": "hapas"}],
+        r"^DELETE FROM lich_quet": [LICH_DONG],
     })
     goi()
     assert len(gia.gd) == 1, "phải là MỘT giao dịch"
@@ -182,14 +195,36 @@ def test_cot_doc_co_trong_schema():
     for cot, bang in ((K._COT_NGUON, "nguon"), (K._COT_DE_XUAT, "de_xuat")):
         assert {c.strip() for c in cot.split(",")} <= _cot(bang)
     assert {re.split(r"[\s:]", c.strip())[0] for c in K._COT_DU_AN.split(",")} <= _cot("du_an")
+    assert {c.strip().removeprefix("l.") for c in K._COT_LICH.split(",")} <= _cot("lich_quet")
+
+
+def test_them_lich_khoa_du_an_va_chan_qua_toi_da(gia):
+    """Khoá dòng dự án TRƯỚC khi đếm: hai người cùng tạo không vượt LICH_TOI_DA."""
+    gia.tra.update({r"SELECT 1 AS co FROM du_an": [{"co": 1}],
+                    r"count\(\*\)": [{"n": K.LICH_TOI_DA}]})
+    with pytest.raises(K.LoiDuLieu, match="tối đa"):
+        K.them_lich(AI, "hapas", LICH)
+    sql = [s for s, _ in gia.gd[0].lenh]
+    assert "FOR UPDATE" in sql[0] and not any(s.startswith("INSERT") for s in sql)
+    gia.tra.pop(r"SELECT 1 AS co FROM du_an")
+    with pytest.raises(K.LoiDuLieu, match="Không còn dự án"):
+        K.them_lich(AI, "khong", LICH)
+
+
+def test_cac_lich_kem_luot_gan_nhat_cua_lich(gia):
+    K.cac_lich("hapas")
+    sql, ts = gia.gd[0].lenh[0]
+    assert "LEFT JOIN LATERAL" in sql and "WHERE lich_id = l.id ORDER BY id DESC LIMIT 1" in sql
+    assert ts == ("hapas",)
 
 
 def test_chi_ghi_bang_role_lang_nghe_web_duoc_ghi():
-    """Quyền theo schema.sql: INSERT/UPDATE/DELETE du_an, nguon, nguoi_xem; UPDATE 3 cột của
-    de_xuat; INSERT nhat_ky. Dashboard KHÔNG ghi bai/luot_quet/chi_so_ngay (phần của Mark)."""
+    """Quyền theo schema.sql: INSERT/UPDATE/DELETE du_an, nguon, nguoi_xem, lich_quet; UPDATE 3 cột
+    của de_xuat; INSERT nhat_ky. Dashboard KHÔNG ghi bai/luot_quet/chi_so_ngay (phần của Mark)."""
     src = (GOC / "dashboard" / "kho.py").read_text(encoding="utf-8")
     ghi = set(re.findall(r"(?:INSERT INTO|UPDATE|DELETE FROM) ([a-z_]+)", src))
-    assert ghi <= {"du_an", "nguon", "nguoi_xem", "nhat_ky", "de_xuat"}
+    assert ghi <= {"du_an", "nguon", "nguoi_xem", "nhat_ky", "de_xuat", "lich_quet"}
+    assert "GRANT INSERT, UPDATE, DELETE ON lich_quet TO lang_nghe_web;" in SCHEMA
     for m in re.finditer(r"UPDATE de_xuat SET (.*?) WHERE", src, re.DOTALL):
         cot = {x.replace('"', " ").split()[0] for x in m.group(1).split(",")
                if x.replace('"', " ").strip()}

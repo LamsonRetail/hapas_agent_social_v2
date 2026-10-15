@@ -160,7 +160,10 @@ _TOOLING_NOTE = "\n".join(
         "` cua_toi=co` khi họ nói 'việc của tôi/em'); chưa có link đúng bảng thì xin link "
         "trước. Nhờ 'theo dõi nguồn / quét danh sách nguồn của <dự án> mỗi ngày' → mode=run, "
         "recurrence=daily, message=`/theodoi <mã dự án>` (danh sách nguồn + ngân sách tháng "
-        "sửa trên dashboard social.hapas.vn, KHÔNG sửa qua chat). "
+        "sửa trên dashboard social.hapas.vn, KHÔNG sửa qua chat). Muốn quét mỗi N giờ, nhiều "
+        "giờ trong ngày hay liên tục trong ngày chiến dịch → chỉ họ tab Lịch quét trên dashboard "
+        "social.hapas.vn (Mark tự chạy, kết quả xem trên dashboard; Mark không đặt/sửa lịch đó "
+        "qua chat). "
         "Đặt xong báo id + giờ chạy kế và nói họ xem/sửa/xoá được trên console "
         "(agent → Lịch chạy). Tool báo lỗi thì nói nguyên lý do, KHÔNG nói đã đặt; tool báo "
         "`da_co_san` thì nói lịch đó đã có, không đặt lại.",

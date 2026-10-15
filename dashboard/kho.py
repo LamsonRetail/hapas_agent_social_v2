@@ -2,7 +2,7 @@
 
 Kết nối bằng role `lang_nghe_web` qua Unix socket + peer (user hệ điều hành của dịch vụ), không
 mật khẩu; đổi bằng `LANG_NGHE_WEB_DSN` khi thử ở máy khác. Quyền của role (xem
-`deploy/lang-nghe/schema.sql`): đọc mọi bảng; ghi `du_an`, `nguon`, `nguoi_xem`; chỉ đổi trạng
+`deploy/lang-nghe/schema.sql`): đọc mọi bảng; ghi `du_an`, `nguon`, `nguoi_xem`, `lich_quet`; chỉ đổi trạng
 thái `de_xuat`; chỉ THÊM `nhat_ky`. Dashboard KHÔNG ghi `bai`, `luot_quet`, `chi_so_ngay` — đó là
 phần của Mark.
 
@@ -436,6 +436,93 @@ def luot_xong_moi_nhat() -> dict | None:
     with ket_noi() as c:
         return c.execute("SELECT id, du_an, ket_thuc FROM luot_quet WHERE ket_thuc IS NOT NULL "
                          "ORDER BY ket_thuc DESC, id DESC LIMIT 1").fetchone()
+
+
+# ───────────────────────────── lịch quét tự động (15/10/2026) ─────────────────────────────
+# Chủ dự án chốt "Dashboard + Mark tự chạy": người quản lý đặt lịch ở đây, Mark (quet_tu_dong.py)
+# tự chạy /theodoi đúng mốc và chỉ ghi các cột trạng thái chạy. Dashboard tính `lan_chay_ke`
+# (dashboard/lich_quet.py) mỗi lần lưu/bật lại để Mark không chạy một mốc cũ.
+LICH_TOI_DA = 20
+_COT_LICH = ("l.id, l.du_an, l.ten, l.kieu, l.cau_hinh, l.bat, l.quet_moi_nguon, l.lan_chay_ke, "
+             "l.lan_chay_cuoi, l.ket_qua_cuoi, l.so_lan_chay, l.tao_luc, l.tao_boi, l.sua_luc, "
+             "l.sua_boi")
+
+
+def cac_lich(du_an: str) -> list[dict]:
+    """Lịch của dự án, kèm lượt GẦN NHẤT do lịch giao (kết quả thật: trạng thái, bài, chi phí)."""
+    with ket_noi() as c:
+        return c.execute(
+            f"SELECT {_COT_LICH}, lq.id AS luot_id, lq.ma_viec AS luot_ma_viec, "
+            "lq.trang_thai AS luot_trang_thai, "
+            "lq.bat_dau AS luot_bat_dau, lq.ket_thuc AS luot_ket_thuc, lq.bai_moi AS luot_bai_moi, "
+            "lq.bai_cap_nhat AS luot_bai_cap_nhat, lq.chi_phi_usd::float AS luot_chi_phi, "
+            "lq.loi AS luot_loi FROM lich_quet l LEFT JOIN LATERAL (SELECT id, ma_viec, trang_thai, "
+            "bat_dau, ket_thuc, bai_moi, bai_cap_nhat, chi_phi_usd, loi FROM luot_quet "
+            "WHERE lich_id = l.id ORDER BY id DESC LIMIT 1) lq ON TRUE "
+            "WHERE l.du_an = %s ORDER BY l.id", (du_an,)).fetchall()
+
+
+def doc_lich(lid: int) -> dict | None:
+    with ket_noi() as c:
+        return c.execute(f"SELECT {_COT_LICH} FROM lich_quet l WHERE l.id = %s",
+                         (lid,)).fetchone()
+
+
+def _gia_tri_lich(d: dict) -> tuple:
+    return (d["ten"], d["kieu"], json.dumps(d["cau_hinh"], ensure_ascii=False), bool(d["bat"]),
+            bool(d["quet_moi_nguon"]), d.get("lan_chay_ke"))
+
+
+def them_lich(ai: str, du_an: str, d: dict) -> int:
+    """`d` = lịch đã kiểm ở app (`lich_quet.chuan_hoa`) + `lan_chay_ke`. Khoá dòng dự án để hai
+    người cùng tạo không vượt `LICH_TOI_DA`."""
+    with ket_noi() as c:
+        if not c.execute("SELECT 1 AS co FROM du_an WHERE ma = %s FOR UPDATE", (du_an,)).fetchone():
+            raise LoiDuLieu("Không còn dự án này.")
+        n = c.execute("SELECT count(*) AS n FROM lich_quet WHERE du_an = %s",
+                      (du_an,)).fetchone()["n"]
+        if int(n) >= LICH_TOI_DA:
+            raise LoiDuLieu(f"Mỗi dự án tối đa {LICH_TOI_DA} lịch — xoá bớt lịch cũ trước.")
+        r = c.execute("INSERT INTO lich_quet (du_an, ten, kieu, cau_hinh, bat, quet_moi_nguon, "
+                      "lan_chay_ke, tao_boi, sua_boi) VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, "
+                      "%s, %s) RETURNING id", (du_an, *_gia_tri_lich(d), ai, ai)).fetchone()
+        _nhat_ky(c, ai, "them_lich", f"lich_quet:{r['id']}", {"du_an": du_an, **d})
+    return int(r["id"])
+
+
+def sua_lich(ai: str, lid: int, d: dict) -> None:
+    with ket_noi() as c:
+        cu = c.execute("SELECT du_an, ten, kieu, cau_hinh, bat, quet_moi_nguon FROM lich_quet "
+                       "WHERE id = %s FOR UPDATE", (lid,)).fetchone()
+        if not cu:
+            raise LoiDuLieu("Không còn lịch này.")
+        c.execute("UPDATE lich_quet SET ten = %s, kieu = %s, cau_hinh = %s::jsonb, bat = %s, "
+                  "quet_moi_nguon = %s, lan_chay_ke = %s, sua_luc = now(), sua_boi = %s "
+                  "WHERE id = %s", (*_gia_tri_lich(d), ai, lid))
+        _nhat_ky(c, ai, "sua_lich", f"lich_quet:{lid}",
+                 {"du_an": cu["du_an"], "truoc": dict(cu), "sau": d})
+
+
+def bat_tat_lich(ai: str, lid: int, bat: bool, lan_chay_ke) -> None:
+    """Bật (kèm mốc kế mới tính từ bây giờ — không chạy bù mốc cũ) hoặc tắt (mốc kế NULL)."""
+    with ket_noi() as c:
+        r = c.execute("UPDATE lich_quet SET bat = %s, lan_chay_ke = %s, sua_luc = now(), "
+                      "sua_boi = %s WHERE id = %s RETURNING du_an",
+                      (bool(bat), lan_chay_ke if bat else None, ai, lid)).fetchone()
+        if not r:
+            raise LoiDuLieu("Không còn lịch này.")
+        _nhat_ky(c, ai, "bat_lich" if bat else "tat_lich", f"lich_quet:{lid}",
+                 {"du_an": r["du_an"], "lan_chay_ke": lan_chay_ke if bat else None})
+
+
+def xoa_lich(ai: str, lid: int) -> None:
+    """Xoá lịch. Lượt đã chạy theo lịch VẪN giữ (`luot_quet.lich_id` ON DELETE SET NULL)."""
+    with ket_noi() as c:
+        r = c.execute("DELETE FROM lich_quet WHERE id = %s RETURNING du_an, ten, kieu, cau_hinh",
+                      (lid,)).fetchone()
+        if not r:
+            raise LoiDuLieu("Không còn lịch này.")
+        _nhat_ky(c, ai, "xoa_lich", f"lich_quet:{lid}", dict(r))
 
 
 # ───────────────────────────── người xem + nhật ký ─────────────────────────────

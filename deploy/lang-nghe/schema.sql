@@ -6,12 +6,15 @@
 -- Vì sao DB riêng trên VPS mà không để trên platform: quyết định 0008 của platform (platform chỉ
 -- giữ control + audit; dữ liệu xử lý nằm ở làn của agent) — chủ dự án chốt "mark vẫn phải theo
 -- luật của platform như trước không đổi". Kỹ năng, công tắc, trần mỗi lượt, lịch của Mark VẪN ở
--- console platform; DB này chỉ giữ dự án, nguồn theo dõi, ngân sách tháng, bài đã quét.
+-- console platform; DB này chỉ giữ dự án, nguồn theo dõi, ngân sách tháng, bài đã quét. Từ
+-- 15/10/2026 thêm lịch quét TỰ ĐỘNG (bảng lich_quet, chủ dự án chốt "Dashboard + Mark tự chạy");
+-- lịch Giao việc trên console vẫn chạy song song.
 --
 -- Ba role, đăng nhập bằng Unix socket + peer (không mật khẩu, không mở cổng):
 --   lang_nghe_chu  — sở hữu bảng (NOLOGIN), chỉ dùng để chạy file này.
---   mark           — user hệ điều hành của bot: ĐỌC dự án/nguồn, GHI bài/lượt quét/đề xuất.
---   lang_nghe_web  — user hệ điều hành của dashboard: quản lý dự án/nguồn/người xem, đọc mọi thứ.
+--   mark           — user hệ điều hành của bot: ĐỌC dự án/nguồn/lịch, GHI bài/lượt quét/đề xuất
+--                    và cột trạng thái chạy của lịch.
+--   lang_nghe_web  — user hệ điều hành của dashboard: quản lý dự án/nguồn/lịch/người xem, đọc mọi thứ.
 
 \set ON_ERROR_STOP on
 
@@ -282,6 +285,32 @@ CREATE TABLE IF NOT EXISTS dong_bo_bq (
   loi             TEXT
 );
 
+-- Lịch quét TỰ ĐỘNG (chủ dự án chốt 15/10/2026: "Dashboard + Mark tự chạy"): đặt trên dashboard,
+-- Mark (quet_tu_dong.py) tự chạy /theodoi đúng mốc. Cách tính mốc: dashboard/lich_quet.py.
+CREATE TABLE IF NOT EXISTS lich_quet (
+  id              BIGSERIAL PRIMARY KEY,
+  du_an           TEXT NOT NULL REFERENCES du_an(ma) ON UPDATE CASCADE,
+  ten             TEXT NOT NULL DEFAULT '' CHECK (length(ten) <= 200),
+  kieu            TEXT NOT NULL CHECK (kieu IN ('moi_n_gio', 'hang_ngay', 'hang_tuan', 'chien_dich')),
+  cau_hinh        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  bat             BOOLEAN NOT NULL DEFAULT TRUE,
+  quet_moi_nguon  BOOLEAN NOT NULL DEFAULT FALSE,
+  lan_chay_ke     TIMESTAMPTZ,
+  lan_chay_cuoi   TIMESTAMPTZ,
+  ket_qua_cuoi    JSONB,
+  so_lan_chay     INT NOT NULL DEFAULT 0 CHECK (so_lan_chay >= 0),
+  tao_luc         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  tao_boi         TEXT,
+  sua_luc         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sua_boi         TEXT
+);
+CREATE INDEX IF NOT EXISTS lich_quet_den_han ON lich_quet (lan_chay_ke) WHERE bat;
+CREATE INDEX IF NOT EXISTS lich_quet_du_an ON lich_quet (du_an);
+-- Lượt nào do lịch nào giao (NULL: lượt gõ tay / lịch console). Xoá lịch thì lượt giữ, cột NULL.
+ALTER TABLE luot_quet ADD COLUMN IF NOT EXISTS lich_id BIGINT
+  REFERENCES lich_quet(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS luot_quet_lich ON luot_quet (lich_id) WHERE lich_id IS NOT NULL;
+
 -- ───────────── Mô tả bảng + cột theo quy chuẩn BI (task t280613, skill lsr-bq-description-standard) ─────────────
 -- Chủ dự án 14/10/2026: DB mới cũng theo rule mô tả của BI (11 nhãn bảng, mô tả mọi cột). Ghi
 -- ngay trong file build (COMMENT ON chạy lại không mất), có bài canh tests/test_theo_doi.py.
@@ -289,7 +318,7 @@ CREATE TABLE IF NOT EXISTS dong_bo_bq (
 COMMENT ON TABLE du_an IS $$[Lớp] Raw
 [Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc (từ khoá, từ loại trừ, trần chi phí theo dõi mỗi tháng).
 [Grain] 1 dòng = 1 dự án
-[Khoá] PK: ma | Join: ma → nguon.du_an, bai.du_an, chi_so_ngay.du_an, luot_quet.du_an, de_xuat.du_an
+[Khoá] PK: ma | Join: ma → nguon.du_an, bai.du_an, chi_so_ngay.du_an, luot_quet.du_an, de_xuat.du_an, lich_quet.du_an
 [Nguồn] Người quản lý nhập trên dashboard social.hapas.vn (role lang_nghe_web); Mark chỉ đọc
 [Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Mã dự án chữ thường; thị trường 2 chữ in hoa; trần tháng ≥ 0 USD (ràng buộc CHECK)
@@ -372,7 +401,7 @@ COMMENT ON COLUMN de_xuat.xu_ly_luc IS 'Thời điểm duyệt/từ chối (UTC)
 COMMENT ON TABLE luot_quet IS $$[Lớp] Raw
 [Mục đích] Lịch sử các lượt quét: bao nhiêu nguồn, bao nhiêu bài, tốn bao nhiêu tiền thật, lỗi gì.
 [Grain] 1 dòng = 1 lượt quét
-[Khoá] PK: id | Join: du_an → du_an.ma; id → bai.luot_dau, bai.luot_cuoi
+[Khoá] PK: id | Join: du_an → du_an.ma; id → bai.luot_dau, bai.luot_cuoi; lich_id → lich_quet.id
 [Nguồn] Mark mở lượt khi bắt đầu, đóng khi xong (cả khi lỗi); chi phí = tổng usageTotalUsd đúng các run Apify của lượt
 [Phạm vi] Mọi dự án | Kênh: Không có | Từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Không xử lý
@@ -395,6 +424,7 @@ COMMENT ON COLUMN luot_quet.chi_phi_usd IS 'Chi phí Apify THẬT của lượt,
 COMMENT ON COLUMN luot_quet.trang_thai IS 'Giá trị: dang_chay, xong, mot_phan (một số nguồn lỗi), loi, da_huy.';
 COMMENT ON COLUMN luot_quet.loi IS 'Tóm tắt lỗi, tối đa 500 ký tự. NULL khi không lỗi.';
 COMMENT ON COLUMN luot_quet.ghi_chu IS 'Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt). NULL khi không có.';
+COMMENT ON COLUMN luot_quet.lich_id IS 'Lịch quét tự động đã giao lượt này. FK → lich_quet.id. NULL khi lượt gõ tay /theodoi, lịch Giao việc trên console, lượt tu_khoa, hoặc lịch đã bị xoá.';
 
 COMMENT ON TABLE bai IS $$[Lớp] Raw
 [Mục đích] Bài mạng xã hội liên quan tới dự án mà Mark đã giữ, kèm nhãn AI và tương tác mới nhất.
@@ -540,6 +570,33 @@ COMMENT ON COLUMN dong_bo_bq.lan_cuoi IS 'Thời điểm lượt đồng bộ g�
 COMMENT ON COLUMN dong_bo_bq.so_dong IS 'Số dòng đã đẩy ở lượt gần nhất, dòng.';
 COMMENT ON COLUMN dong_bo_bq.loi IS 'Lỗi lượt gần nhất (đã bỏ URL, tối đa 200 ký tự). NULL khi thành công.';
 
+COMMENT ON TABLE lich_quet IS $$[Lớp] Raw
+[Mục đích] Lịch quét tự động của từng dự án (mỗi N giờ, hằng ngày, hằng tuần, chiến dịch) để Mark tự chạy /theodoi đúng mốc, kèm trạng thái lần chạy gần nhất.
+[Grain] 1 dòng = 1 lịch quét của 1 dự án
+[Khoá] PK: id | Join: du_an → du_an.ma; id → luot_quet.lich_id
+[Nguồn] Người quản lý đặt trên dashboard social.hapas.vn (tab Lịch quét); Mark chỉ ghi lan_chay_ke, lan_chay_cuoi, ket_qua_cuoi, so_lan_chay
+[Phạm vi] Mọi dự án | Kênh: Không có | Từ khi bật lịch quét tự động (sau 15/10/2026)
+[Đã xử lý] Cấu hình đã kiểm trên dashboard (giờ HH:MM, khoảng ≥ 30 phút, ≤ 96 lượt/ngày, kết thúc chiến dịch sau bắt đầu); giờ là giờ Việt Nam UTC+7
+[Refresh] Ghi tức thời khi người quản lý sửa (mỗi lần sửa ghi nhat_ky); Mark cập nhật cột chạy mỗi nhịp 30 giây khi lịch tới hạn
+[Dùng khi] Biết dự án nào đang quét tự động, mốc chạy kế, lần chạy gần nhất và lý do bỏ qua
+[Không dùng khi] Kết quả + chi phí từng lượt → dùng luot_quet (lọc lich_id); lịch Giao việc trên console platform → xem console
+[Lưu ý] Lịch console (Giao việc /theodoi) vẫn chạy song song và không nằm ở đây. Chiến dịch đang diễn ra thì lịch thường cùng dự án nhường. Không đẩy lên BigQuery.$$;
+COMMENT ON COLUMN lich_quet.id IS 'Mã lịch tự tăng. PK. Join: → luot_quet.lich_id.';
+COMMENT ON COLUMN lich_quet.du_an IS 'Dự án được quét theo lịch. FK → du_an.ma.';
+COMMENT ON COLUMN lich_quet.ten IS 'Tên lịch hiển thị (≤ 200 ký tự); bỏ trống trên dashboard thì lấy mô tả tự sinh (vd "Mỗi 2 giờ, 07:00–23:00, mọi ngày").';
+COMMENT ON COLUMN lich_quet.kieu IS 'Kiểu lịch. Giá trị: moi_n_gio (mỗi N giờ trong khung giờ), hang_ngay (giờ cụ thể mỗi ngày), hang_tuan (ngày trong tuần + giờ), chien_dich (từ lúc → tới lúc, mỗi N phút ≥ 30).';
+COMMENT ON COLUMN lich_quet.cau_hinh IS 'Cấu hình mốc theo kiểu (JSON, giờ VN): moi_n_gio {"moi_gio": 1|2|3|4|6|8|12, "tu": "HH:MM", "den": "HH:MM", "thu": [1–7]}; hang_ngay/hang_tuan {"gio": ["HH:MM", …], "thu": [1–7]}; chien_dich {"tu_luc": "YYYY-MM-DDTHH:MM", "den_luc": …, "moi_phut": ≥ 30}. thu: 1 = Thứ 2 … 7 = Chủ nhật; [] = mọi ngày (hang_tuan bắt buộc có).';
+COMMENT ON COLUMN lich_quet.bat IS 'TRUE: lịch đang bật, Mark chạy khi tới mốc. FALSE: tắt, Mark bỏ qua (lan_chay_ke NULL).';
+COMMENT ON COLUMN lich_quet.quet_moi_nguon IS 'TRUE: mỗi lượt quét MỌI nguồn đang theo dõi, không xét chu kỳ của nguồn (mặc định của chiến dịch). FALSE: nguồn chỉ quét khi tới chu kỳ (nguon.chu_ky_ngay); tìm theo từ khoá và cào bình luận chạy mỗi lượt như /theodoi.';
+COMMENT ON COLUMN lich_quet.lan_chay_ke IS 'Mốc chạy kế tiếp (UTC; giờ VN = lan_chay_ke AT TIME ZONE ''Asia/Ho_Chi_Minh''). Dashboard đặt khi lưu; Mark dời sang mốc sau TRƯỚC khi chạy. NULL khi lịch tắt hoặc chiến dịch đã kết thúc.';
+COMMENT ON COLUMN lich_quet.lan_chay_cuoi IS 'Lần Mark xử lý lịch gần nhất (đã giao việc hoặc bỏ qua), UTC. NULL khi chưa tới mốc nào.';
+COMMENT ON COLUMN lich_quet.ket_qua_cuoi IS 'Kết quả lần xử lý gần nhất (JSON): trang_thai (da_tao, bo_qua, loi, rồi xong/mot_phan/loi/da_huy khi việc chạy xong), ma_loi, ly_do, ma_viec, luot_id, moc, luc, canh_bao (ngày đã gửi cảnh báo theo loại). NULL khi chưa xử lý lần nào.';
+COMMENT ON COLUMN lich_quet.so_lan_chay IS 'Số lượt Mark đã giao việc theo lịch này (không tính lượt bỏ qua), lượt, ≥ 0.';
+COMMENT ON COLUMN lich_quet.tao_luc IS 'Thời điểm tạo lịch (UTC).';
+COMMENT ON COLUMN lich_quet.tao_boi IS 'Email người tạo lịch trên dashboard. Email nội bộ — không đẩy lên BigQuery.';
+COMMENT ON COLUMN lich_quet.sua_luc IS 'Thời điểm sửa cấu hình gần nhất (UTC).';
+COMMENT ON COLUMN lich_quet.sua_boi IS 'Email người sửa gần nhất. Email nội bộ — không đẩy lên BigQuery.';
+
 RESET ROLE;
 
 -- Quyền của bot: đọc cấu hình, ghi kết quả. Không sửa dự án, không thêm/xoá nguồn.
@@ -549,6 +606,10 @@ GRANT SELECT, INSERT, UPDATE ON bai, chi_so_ngay, luot_quet, binh_luan TO mark;
 GRANT SELECT, INSERT ON de_xuat TO mark;
 GRANT UPDATE (ten, link, ly_do, so_bai, thao_luan) ON de_xuat TO mark;
 GRANT USAGE ON SEQUENCE luot_quet_id_seq, de_xuat_id_seq TO mark;
+-- Lịch quét tự động (15/10/2026): Mark đọc lịch, chỉ ghi cột trạng thái chạy (FOR UPDATE cần
+-- quyền UPDATE trên ít nhất một cột — đủ ở đây). Không tạo/xoá/sửa cấu hình lịch.
+GRANT SELECT ON lich_quet TO mark;
+GRANT UPDATE (lan_chay_ke, lan_chay_cuoi, ket_qua_cuoi, so_lan_chay) ON lich_quet TO mark;
 
 -- Quyền của dashboard: quản lý cấu hình + người xem, đọc mọi thứ, ghi nhật ký và mốc đồng bộ.
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO lang_nghe_web;
@@ -557,3 +618,5 @@ GRANT UPDATE (trang_thai, xu_ly_boi, xu_ly_luc) ON de_xuat TO lang_nghe_web;
 GRANT INSERT ON nhat_ky TO lang_nghe_web;
 GRANT INSERT, UPDATE ON dong_bo_bq TO lang_nghe_web;
 GRANT USAGE ON SEQUENCE nguon_id_seq, nhat_ky_id_seq TO lang_nghe_web;
+GRANT INSERT, UPDATE, DELETE ON lich_quet TO lang_nghe_web;
+GRANT USAGE ON SEQUENCE lich_quet_id_seq TO lang_nghe_web;

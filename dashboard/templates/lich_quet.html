@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block tieu_de %}Lịch quét tự động{% endblock %}
+{% block dau %}
+<link rel="stylesheet" href="{{ tinh('lich_quet.css') }}">
+<script src="{{ tinh('lich_quet.js') }}" defer></script>
+{% endblock %}
+{% block noi_dung %}
+{% set ql = nguoi.vai_tro == 'quan_ly' %}
+<div class="lq-dau">
+  <div>
+    <h1>Lịch quét tự động{% if du_an %} — {{ du_an.ten }}{% endif %}</h1>
+    <p class="lq-tom">Mark tự chạy /theodoi đúng các mốc dưới đây (giờ Việt Nam), kết quả hiện trên dashboard — không nhắn Lark. Vẫn theo công tắc console và trần tháng của dự án.</p>
+  </div>
+  {% if du_an_ds|length > 1 %}
+  <form method="get" action="/lich-quet" class="hang">
+    <label class="o">Dự án
+      <select name="du_an">
+        {% for x in du_an_ds %}<option value="{{ x.ma }}"{% if du_an and x.ma == du_an.ma %} selected{% endif %}>{{ x.ten }} ({{ x.ma }})</option>{% endfor %}
+      </select>
+    </label>
+    <button class="nut nut--nhe" type="submit">Xem</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if loi_bm and not (du_an and ql and bm) %}<div class="thong-bao thong-bao--loi" role="alert">{{ loi_bm }}</div>{% endif %}
+{% if not du_an %}
+<section class="the-khoi"><p class="trong">Chưa có dự án nào — thêm dự án ở <a href="/nguon">trang Nguồn</a>.</p></section>
+{% else %}
+{% if not du_an.dang_bat %}
+<div class="thong-bao thong-bao--loi" role="status">Dự án {{ du_an.ten }} đang tắt — các lịch dưới đây không chạy cho tới khi <a href="/nguon?du_an={{ du_an.ma|urlencode }}">bật dự án</a>.</div>
+{% endif %}
+
+<section class="the-khoi cach-duoi" aria-labelledby="lq-ds-td">
+  <div class="tieu-de-khoi">
+    <h2 id="lq-ds-td">Lịch của dự án <span class="mo">({{ lich|length }})</span></h2>
+    {% if tong and tong.co_lich %}
+    <span class="lq-tong{% if tong.vuot %} lq-tong--canh{% endif %}">Tháng này còn <b>{{ tong.luot|so_vn }}</b> lượt theo lịch · cả tháng tối đa ≈ <b>{{ tong.tong|usd_vn }}</b> / {{ tong.tran|usd_vn }} USD trần{% if tong.vuot %} — có thể vượt, Mark dừng khi chạm trần{% endif %}</span>
+    {% endif %}
+  </div>
+  {% if lich %}
+  <div class="cuon-ngang">
+  <table class="lq-bang">
+    <thead><tr><th>Lịch</th><th>Trạng thái</th><th>Lần chạy kế</th><th>Lần chạy cuối</th><th class="so">≈ USD/30 ngày</th>{% if ql %}<th>Thao tác</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for x in lich %}
+      <tr class="lq-dong lq-dong--{{ x.tt }}"{% if sua and sua.id == x.id %} aria-current="true"{% endif %}>
+        <td data-nhan="Lịch">
+          <div class="lq-ten"><span class="mo">#{{ x.id }}</span> {{ x.ten }}</div>
+          <div class="nho mo">{{ x.mo_ta }}{% if x.quet_moi_nguon %} · <span class="lq-nhan-moi">quét mọi nguồn</span>{% endif %}</div>
+        </td>
+        <td data-nhan="Trạng thái"><span class="the {{ x.tt_lop }}">{{ x.tt_nhan }}</span></td>
+        <td data-nhan="Lần chạy kế">
+          {% if x.tre %}<span class="chu-loi" title="Mốc đã qua mà Mark chưa dời sang mốc sau — Mark có đang chạy?">{{ x.ke_chu }} · trễ</span>
+          {% else %}{{ x.ke_chu }}{% if x.ke_con %}<div class="mo nho">{{ x.ke_con }}</div>{% endif %}{% endif %}
+        </td>
+        <td data-nhan="Lần chạy cuối">
+          {% if x.kq %}<span class="the {{ x.kq.lop }}" title="{{ x.kq.title }}">{{ x.kq.nhan }}</span> <span class="nho">{{ x.kq.chi_tiet }}</span>
+          <div class="mo nho">{{ x.kq.luc|gio_vn }}{% if x.so_lan_chay %} · đã chạy {{ x.so_lan_chay|so_vn }} lượt{% endif %}</div>
+          {% else %}<span class="mo">chưa chạy</span>{% endif %}
+        </td>
+        <td class="so" data-nhan="≈ USD/30 ngày">
+          {% if x.bat and x.tt != 'ket_thuc' %}{{ x.usd_30|usd_vn }}<div class="mo nho">{{ x.luot_30|so_vn }} lượt × {{ x.moi_luot|usd_vn(3) }}</div>
+          {% else %}<span class="mo">0</span>{% endif %}
+        </td>
+        {% if ql %}
+        <td class="lq-thao-tac">
+          <div class="cum-nut">
+            <form method="post" action="/lich-quet/{{ x.id }}/bat-tat">
+              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+              <input type="hidden" name="bat" value="{{ '0' if x.bat else '1' }}">
+              <button class="nut nut--nhe nut--nho" type="submit">{{ 'Tắt' if x.bat else 'Bật' }}</button>
+            </form>
+            <a class="nut nut--nhe nut--nho" href="/lich-quet?du_an={{ du_an.ma|urlencode }}&amp;sua={{ x.id }}#bieu-mau">Sửa</a>
+            <form method="post" action="/lich-quet/{{ x.id }}/xoa" data-xac-nhan="Xoá lịch #{{ x.id }} “{{ x.ten }}”? Lượt đã chạy vẫn giữ trong lịch sử.">
+              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+              <button class="nut nut--loi nut--nho" type="submit">Xoá</button>
+            </form>
+          </div>
+        </td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="trong">Chưa có lịch nào.{% if ql %} Tạo lịch đầu tiên ở dưới — vd mỗi 2 giờ trong ngày, hoặc một chiến dịch 3 ngày.{% else %} Nhờ người quản lý đặt lịch.{% endif %}</p>
+  {% endif %}
+  <p class="ghi-chu">Lịch console (Lịch chạy → Giao việc “/theodoi {{ du_an.ma }}”) vẫn chạy song song. Chiến dịch đang diễn ra thì lịch thường nhường; lượt trước chưa xong thì lượt sau bỏ qua và ghi lý do.</p>
+</section>
+
+{% if ql and bm %}
+<section class="the-khoi cach-duoi lq-bm" id="bieu-mau" aria-labelledby="lq-bm-td">
+  <div class="tieu-de-khoi">
+    <h2 id="lq-bm-td">{% if sua %}Sửa lịch #{{ sua.id }}{% else %}Tạo lịch mới{% endif %}</h2>
+    {% if sua %}<a class="nho" href="/lich-quet?du_an={{ du_an.ma|urlencode }}#bieu-mau">Huỷ sửa — tạo lịch mới</a>{% endif %}
+  </div>
+  {% if loi_bm %}<div class="thong-bao thong-bao--loi" role="alert">{{ loi_bm }}</div>{% endif %}
+  <div class="lq-luoi">
+  <form method="post" action="{{ '/lich-quet/%d/sua'|format(sua.id) if sua else '/lich-quet/them' }}" id="lq-form" class="lq-form" data-du-an="{{ du_an.ma }}" data-lid="{{ sua.id if sua else '' }}">
+    <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+    <input type="hidden" name="du_an" value="{{ du_an.ma }}">
+
+    <fieldset class="lq-kieu">
+      <legend>Kiểu lịch</legend>
+      <div class="lq-kieu__ds">
+      {% set phu_kieu = {'moi_n_gio': 'cứ N giờ một lần trong khung giờ', 'hang_ngay': 'các giờ cụ thể mỗi ngày', 'hang_tuan': 'chọn ngày trong tuần + giờ', 'chien_dich': 'từ lúc → tới lúc, quét liên tục'} %}
+      {% for k, ten in KIEU_LICH.items() %}
+        <label class="lq-kieu__o"><input type="radio" name="kieu" value="{{ k }}"{% if bm.kieu == k %} checked{% endif %}>
+          <span class="lq-kieu__ten">{{ ten }}</span><span class="lq-kieu__phu">{{ phu_kieu[k] }}</span></label>
+      {% endfor %}
+      </div>
+    </fieldset>
+
+    <fieldset class="lq-nhom" data-cho="moi_n_gio">
+      <legend>Mỗi N giờ trong khung giờ</legend>
+      <p class="lq-goi-y">Chạy đúng giờ bắt đầu, rồi cứ N giờ một lần tới hết khung (cùng một ngày).</p>
+      <div class="lq-hang">
+        <label class="o">Mỗi
+          <select name="moi_gio">{% for n in MOI_GIO %}<option value="{{ n }}"{% if bm.moi_gio|string == n|string %} selected{% endif %}>{{ n }} giờ</option>{% endfor %}</select></label>
+        <label class="o">Từ <input type="time" name="tu" value="{{ bm.tu }}" step="60"></label>
+        <label class="o">Đến <input type="time" name="den" value="{{ bm.den }}" step="60"></label>
+      </div>
+    </fieldset>
+
+    <fieldset class="lq-nhom" data-cho="hang_ngay hang_tuan">
+      <legend>Giờ chạy</legend>
+      <p class="lq-goi-y">Các giờ cụ thể (HH:MM), cách nhau dấu phẩy — tối đa 96 giờ mỗi ngày.</p>
+      <label class="o lq-rong">Giờ chạy <input type="text" name="gio" value="{{ bm.gio }}" maxlength="600" placeholder="vd 07:00, 12:00, 19:30" autocomplete="off" spellcheck="false"></label>
+      <div class="lq-nhanh" hidden>
+        <span class="mo nho">Mẫu:</span>
+        <button type="button" class="nut nut--nhe nut--nho" data-dat-gio="08:00, 20:00">Sáng + tối</button>
+        <button type="button" class="nut nut--nhe nut--nho" data-dat-gio="07:00, 12:00, 19:00">Sáng, trưa, tối</button>
+        <button type="button" class="nut nut--nhe nut--nho" data-dat-gio="09:00, 11:00, 14:00, 16:00, 18:00">Giờ hành chính</button>
+      </div>
+    </fieldset>
+
+    <fieldset class="lq-nhom" data-cho="moi_n_gio hang_ngay hang_tuan">
+      <legend>Ngày trong tuần</legend>
+      <p class="lq-goi-y" data-goi-y-thu>Bỏ trống = mọi ngày. Hằng tuần: chọn ít nhất một ngày.</p>
+      <div class="lq-thu" role="group" aria-label="Ngày chạy">
+        {% for i, t in THU.items() %}<label class="lq-thu__o"><input type="checkbox" name="thu_{{ i }}" value="1"{% if i in bm.thu %} checked{% endif %}><span>{{ t }}</span></label>{% endfor %}
+      </div>
+      <div class="lq-nhanh" hidden>
+        <button type="button" class="nut nut--nhe nut--nho" data-dat-thu="">Mọi ngày</button>
+        <button type="button" class="nut nut--nhe nut--nho" data-dat-thu="1,2,3,4,5">T2–T6</button>
+        <button type="button" class="nut nut--nhe nut--nho" data-dat-thu="6,7">T7, CN</button>
+      </div>
+    </fieldset>
+
+    <fieldset class="lq-nhom" data-cho="chien_dich">
+      <legend>Khung chiến dịch</legend>
+      <p class="lq-goi-y">Quét liên tục từ lúc bắt đầu tới lúc kết thúc, hết khung thì tự dừng; lịch thường của dự án nhường trong khung này.</p>
+      <div class="lq-hang">
+        <label class="o">Bắt đầu <input type="datetime-local" name="tu_luc" value="{{ bm.tu_luc }}" step="60"></label>
+        <label class="o">Kết thúc <input type="datetime-local" name="den_luc" value="{{ bm.den_luc }}" step="60"></label>
+        <label class="o">Mỗi
+          <span class="lq-ghep"><input type="number" name="moi" value="{{ bm.moi }}" min="1" max="10080" step="1" inputmode="numeric" aria-label="Khoảng cách giữa hai lượt">
+          <select name="don_vi" aria-label="Đơn vị"><option value="phut"{% if bm.don_vi == 'phut' %} selected{% endif %}>phút</option><option value="gio"{% if bm.don_vi == 'gio' %} selected{% endif %}>giờ</option></select></span></label>
+      </div>
+      <p class="ghi-chu">Tối thiểu {{ PHUT_TOI_THIEU }} phút một lượt (một lượt thường mất 5–20 phút); chiến dịch dài tối đa 92 ngày.</p>
+    </fieldset>
+
+    <fieldset class="lq-nhom">
+      <legend>Tuỳ chọn</legend>
+      <label class="o lq-rong">Tên lịch (tuỳ chọn) <input type="text" name="ten" value="{{ bm.ten }}" maxlength="100" placeholder="bỏ trống = tự đặt theo mốc"></label>
+      <label class="lq-chon"><input type="checkbox" name="quet_moi_nguon" value="1"{% if bm.quet_moi_nguon %} checked{% endif %}>
+        <span><b>Quét mọi nguồn mỗi lượt</b><span class="mo nho">Bỏ qua chu kỳ của nguồn — nên bật cho chiến dịch; tốn thêm theo số nguồn.</span></span></label>
+      <label class="lq-chon"><input type="checkbox" name="bat" value="1"{% if bm.bat %} checked{% endif %}>
+        <span><b>Bật lịch</b><span class="mo nho">Tắt thì lịch được lưu nhưng Mark không chạy.</span></span></label>
+    </fieldset>
+
+    <div class="lq-luu">
+      {% if sua %}<a class="nut nut--nhe" href="/lich-quet?du_an={{ du_an.ma|urlencode }}">Huỷ</a>{% endif %}
+      <button class="nut" type="submit" data-o="nut-luu">{{ 'Lưu lịch' if sua else 'Tạo lịch' }}</button>
+    </div>
+  </form>
+
+  <aside class="lq-xem" id="lq-xem" aria-labelledby="lq-xem-td">
+    <div class="lq-xem__dau"><h3 id="lq-xem-td">Xem trước</h3><span class="mo nho" data-o="dang-tinh" aria-live="polite"></span></div>
+    <div class="thong-bao thong-bao--loi lq-xem__loi" data-o="loi" role="alert"{% if not xt.loi %} hidden{% endif %}>{{ xt.loi }}</div>
+    <div data-o="than"{% if xt.loi %} hidden{% endif %}>
+      <p class="lq-mo-ta"><b data-o="mo_ta">{{ xt.mo_ta }}</b><span class="mo nho" data-o="tan_suat">{{ xt.tan_suat }}</span></p>
+      <h4>10 lần chạy tới <span class="mo">(giờ VN)</span></h4>
+      <ol class="lq-moc" data-o="moc">{% for m in xt.moc %}<li{% if m.nhuong %} class="lq-moc--nhuong"{% endif %}><span>{{ m.chu }}</span><span class="mo nho">{{ 'nhường chiến dịch' if m.nhuong else (m.con if loop.first else '') }}</span></li>{% endfor %}</ol>
+      <p class="ghi-chu" data-o="ghi_moc"{% if not xt.ghi_moc %} hidden{% endif %}>{{ xt.ghi_moc }}</p>
+      <h4>Chi phí tối đa <span class="mo">(nếu mọi lượt dùng hết)</span></h4>
+      <dl class="lq-cp" data-o="chi_phi">{% for c in xt.chi_phi %}<div><dt>{{ c.nhan }}</dt><dd><b>{{ c.gia_tri }}</b><span class="mo nho">{{ c.phu }}</span></dd></div>{% endfor %}</dl>
+      <p class="lq-ket{% if xt.vuot %} lq-ket--canh{% endif %}" data-o="ket_luan">{{ xt.ket_luan }}</p>
+      <p class="mo nho lq-cong-thuc" data-o="cong_thuc">{{ xt.cong_thuc }}</p>
+      <ul class="lq-canh" data-o="canh_bao"{% if not xt.canh_bao %} hidden{% endif %}>{% for c in xt.canh_bao %}<li>{{ c }}</li>{% endfor %}</ul>
+    </div>
+  </aside>
+  </div>
+</section>
+{% elif not ql %}
+<p class="ghi-chu">Chỉ người quản lý tạo/sửa được lịch.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

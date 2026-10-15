@@ -27,7 +27,7 @@ Mô tả bảng và cột theo quy chuẩn BI (task Lark t280613, skill `lsr-bq-
 
 ```bash
 sudo -u postgres psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
-sudo -u postgres psql -d lang_nghe -c '\dt'        # 9 bảng
+sudo -u postgres psql -d lang_nghe -c '\dt'        # 11 bảng (có lich_quet từ 15/10/2026)
 ```
 
 Lệnh trên tạo:
@@ -42,10 +42,10 @@ Chạy lại file này nhiều lần không hỏng gì.
 
 Quyền của Mark:
 
-- **Đọc:** `du_an`, `nguon`.
+- **Đọc:** `du_an`, `nguon`, `lich_quet`.
 - **Ghi:** `bai`, `chi_so_ngay`, `luot_quet`, `de_xuat`.
-- **Chỉ sửa:** cột lần quét và lỗi của `nguon`.
-- **Không được:** thêm hay xoá nguồn, sửa dự án, sửa ngân sách.
+- **Chỉ sửa:** cột lần quét và lỗi của `nguon`; cột trạng thái chạy của `lich_quet` (`lan_chay_ke`, `lan_chay_cuoi`, `ket_qua_cuoi`, `so_lan_chay`).
+- **Không được:** thêm hay xoá nguồn, sửa dự án, sửa ngân sách, tạo/sửa/xoá lịch.
 
 ## 2. Thư viện cho Mark
 
@@ -99,6 +99,18 @@ Lệnh chạy được với các điều kiện sau:
 - Phải đang bật công tắc **Soi tài khoản**.
 - Mỗi nền tảng phải đang bật trong **Năng lực → Quét mạng xã hội**. Nền tảng nào tắt thì nguồn của nền tảng đó được bỏ qua và Mark có nói rõ.
 - Mỗi lượt bị giới hạn bởi trần USD trên console, cộng thêm trần tháng của dự án (mặc định 5 USD).
+
+### 5b. Lịch quét tự động (dashboard, từ 15/10/2026)
+
+Chủ dự án chốt "Dashboard + Mark tự chạy". Ngoài lịch console ở trên, người quản lý đặt lịch linh hoạt ở tab **Lịch quét** trên dashboard: mỗi N giờ trong khung giờ, hằng ngày, hằng tuần, hoặc chiến dịch (từ lúc → tới lúc, mỗi ≥ 30 phút).
+
+- Mark chạy nhịp 30 giây (`quet_tu_dong.py`, khởi động trong `run.py` sau việc nền). Tới mốc thì tạo đúng việc `/theodoi` như lệnh gõ tay, cùng các điều kiện ở trên. Kết quả chỉ hiện trên dashboard, không nhắn Lark.
+- Bỏ qua và ghi lý do vào lịch khi: lượt trước còn chạy, hết trần tháng của dự án, công tắc tắt, hoặc lỡ mốc quá 30 phút (Mark tắt). Mốc lỡ dưới 30 phút thì chạy bù một lần.
+- Chiến dịch đang diễn ra thì lịch thường của cùng dự án nhường. Hết khung thì chiến dịch tự dừng.
+- Tuỳ chọn trong `.env` của Mark:
+  - `MARK_LICH_QUET_BAO_LOI=oc_…` (hoặc `ou_…`): nhận một tin cảnh báo cho mỗi lịch, mỗi loại (lỗi / hết ngân sách), mỗi ngày.
+  - `MARK_LICH_QUET=0`: tắt hẳn nhịp.
+- Kiểm: `sudo -u mark psql -d lang_nghe -c "select id, du_an, kieu, bat, lan_chay_ke, lan_chay_cuoi, ket_qua_cuoi->>'trang_thai' from lich_quet order by id"`.
 
 ## 6. Kiểm sau khi bật
 

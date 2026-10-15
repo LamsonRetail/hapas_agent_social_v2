@@ -88,7 +88,8 @@ LENH_TOOL_TU_DO: dict[str, str] = {
 #: `/viec` (02/10/2026): xem việc quét nền của cuộc chat — đọc thẳng sổ `viec_nen`, không
 #: gọi model, nên tiến độ/link/chi phí là số thật, không phải model kể lại.
 #: `/theodoi` (14/10/2026, đợt 2): quét nguồn theo dõi của một dự án trong kho `lang_nghe`
-#: — chạy nền, trả lời ngay mã việc; đặt lịch hằng ngày trên console (Giao việc).
+#: — chạy nền, trả lời ngay mã việc; lịch hằng ngày trên console (Giao việc), lịch tự động linh
+#: hoạt (giờ/ngày/tuần/chiến dịch) trên dashboard — tab Lịch quét, `quet_tu_dong.py` (15/10).
 LENH_TIEN_ICH = ("/help", "/nangluc", "/viec", "/tiendo", "/theodoi")
 
 _CU_PHAP = re.compile(r"^\s*(/[a-zA-Z][a-zA-Z0-9_-]*)\s*(.*)$", re.S)
@@ -211,8 +212,9 @@ def _van_help() -> str:
         "sheet, chi phí thật. /viec <mã> để xem một việc.",
         "  /theodoi <mã dự án>",
         "      Quét các nguồn đang theo dõi của dự án (danh sách + ngân sách tháng sửa trên "
-        "dashboard social.hapas.vn), chạy nền. Đặt hằng ngày: console → Lịch chạy → Giao "
-        "việc, nội dung /theodoi hapas. Tuân công tắc Soi tài khoản.",
+        "dashboard social.hapas.vn), chạy nền. Quét tự động theo giờ/ngày/tuần/chiến dịch: "
+        "tab Lịch quét trên dashboard (Mark tự chạy, kết quả xem trên dashboard). Lịch console "
+        "(Lịch chạy → Giao việc, nội dung /theodoi hapas) vẫn chạy. Tuân công tắc Soi tài khoản.",
         "",
         "Ví dụ: /search áo thun nam 7 ngày tiktok",
         "Muốn biết kỹ một việc làm gì, ra kết quả gì thì hỏi bằng lời thường, không gõ "

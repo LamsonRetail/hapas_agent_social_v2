@@ -222,12 +222,15 @@
     ghi("tong-bl", soVn(kq.uoc_bl, 3), kq.uoc_bl);
     ghi("tong-dong", soVn(kq.tong, 3), kq.tong);
     ghi("tong-luot", soVn(kq.tong, 3), kq.tong);
-    ghi("tong-30", soVn(kq.tong * hs.ngay, 2), r4(kq.tong * hs.ngay));
+    // Lịch quét tự động: có lịch đang bật thì nhân theo số lượt của lịch (máy chủ đếm), không thì
+    // giả định 1 lượt/ngày như trước.
+    var luot30 = D.co_lich ? (D.luot_30 || 0) : hs.ngay;
+    ghi("tong-30", soVn(kq.tong * luot30, 2), r4(kq.tong * luot30));
 
-    // cả tháng nếu mỗi lượt dùng hết = đã tiêu + nguồn còn lại + ngày còn lại × tổng mỗi lượt
+    // cả tháng nếu mỗi lượt dùng hết = đã tiêu + nguồn còn lại + số lượt còn lại × tổng mỗi lượt
     var tranDa = soTien(docForm.gt("tran_usd_thang"), D.tran_da);
     var tran = D.tran_platform == null ? tranDa : Math.min(tranDa, D.tran_platform);
-    var ngay = D.ngay_con_lai || 0;
+    var ngay = D.co_lich ? (D.luot_con_lai || 0) : (D.ngay_con_lai || 0);
     var toiDa = D.da_tieu + D.nguon_con_lai + ngay * kq.tong;
     var vuot = toiDa > tran + 1e-9;
     var duLuot = ngay > 0 ? (tran - D.da_tieu - D.nguon_con_lai) / ngay : 0;
@@ -238,7 +241,8 @@
         (duLuot > 0 ? "vừa trần khi ≤ " + soVn(duLuot, 3) + " USD/lượt." : "riêng nguồn theo dõi đã chạm trần.")
       : "trong trần, còn dư " + soVn(tran - toiDa, 2) + " USD.");
     ghi("thang-cong-thuc", "= đã tiêu " + soVn(D.da_tieu, 2) + " + nguồn " + soVn(D.nguon_con_lai, 2) +
-      " + " + soVn(ngay, 1) + " ngày × " + soVn(kq.tong, 3));
+      " + " + (D.co_lich ? soVn(ngay, 0) + " lượt theo lịch" : soVn(ngay, 1) + " ngày") + " × " +
+      soVn(kq.tong, 3));
     var hop = o("thang-hop");
     if (hop) hop.classList.toggle("ns-du-kien__thang--canh", vuot);
 
