@@ -108,6 +108,321 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
             and (not loai_nguon or loai(r) == loai_nguon)]
 
 
+# ───────────────────────── bộ lọc chung (đợt 2f, 15/10/2026) ─────────────────────────
+# Chủ dự án 15/10: "tôi muốn có thêm filter để lọc thông minh và các table sẽ liên kết với bộ lọc
+# đó (gợi ý: lọc kênh nhà và listening bên ngoài…)". MỘT bộ lọc cho MỌI khối trang Chỉ số (KPI,
+# biểu đồ, bảng, mây từ, chủ đề, nguồn, bài, bình luận, khung chi tiết) và cả kỳ trước. Các chiều
+# AND với nhau; nhiều giá trị trong MỘT chiều là OR. Áp lên bài / bình luận như sau:
+#   pham_vi    kenh_nha = nguồn loại `kenh_nha`; ben_ngoai = mọi thứ khác (kể cả bài tìm theo từ
+#              khoá). Bình luận theo BÀI của nó (dòng bình luận mang sẵn nguồn của bài).
+#   nen_tang, loai, nguon, anh_huong, tuong_tac, kieu_quet   cấp BÀI; bình luận theo bài của nó.
+#   sac_thai   bài theo sắc thái BÀI (bài kênh nhà không mang tiếng khách → không khớp); bình luận
+#              theo sắc thái của CHÍNH nó (chỉ bình luận hợp lệ có sắc thái).
+#   chu_de     bài và bình luận có HAI bộ nhãn khác nhau (13 chủ đề bài, 7 chủ đề bình luận của
+#              Mark). Mỗi nhãn lọc đúng loại mục mang nhãn đó: chọn toàn chủ đề bình luận thì phần
+#              bài không bị lọc theo chủ đề (và ngược lại); "Khác", "chưa phân loại" lọc cả hai.
+#   q          chữ tìm bỏ dấu: bài khớp khi nội dung + hashtag chứa chữ; bình luận khớp khi CHÍNH
+#              nó chứa chữ HOẶC bài của nó khớp (thảo luận dưới bài nói về chữ đó).
+CHIEU_LOC = ("pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong",
+             "tuong_tac", "q", "kieu_quet")
+_BIT = {k: 1 << i for i, k in enumerate(CHIEU_LOC)}
+PHAM_VI = {"tat_ca": "Tất cả", "kenh_nha": "Kênh nhà", "ben_ngoai": "Bên ngoài"}
+#: Mã sắc thái trên URL (gọn, không dấu) -> nhãn lưu trong kho.
+MA_SAC = {"tich_cuc": TC, "tieu_cuc": TI, "trung_lap": TL, "chua_phan_loai": CHUA}
+SAC_MA = {v: k for k, v in MA_SAC.items()}
+#: Bậc ảnh hưởng theo followers của tài khoản đăng (mốc quen thuộc của nghề influencer).
+ANH_HUONG = {"nano": "Nano · dưới 10N", "micro": "Micro · 10N–100N", "macro": "Macro · 100N–1Tr",
+             "mega": "Mega · từ 1Tr", "khong_ro": "Không rõ follower"}
+TUONG_TAC_MUC = (100, 1_000, 10_000)
+KIEU_QUET = {"theo_doi": "Quét nguồn theo dõi", "tu_khoa": "Tìm theo từ khoá"}
+# Bản sao nhãn chủ đề của Mark (`phan_loai.CHU_DE_BAI` / `phan_loai.CHU_DE`) — dashboard không
+# import module của Mark; bài thử đối chiếu. Dùng để biết nhãn nào là của bài, nhãn nào của bình luận.
+CHU_DE_BAI = ("Chiến dịch & quảng cáo", "Giá cả & khuyến mãi", "Chất lượng sản phẩm",
+              "Hình ảnh & mẫu mã", "Trải nghiệm mua sắm", "Dịch vụ khách hàng", "Giao hàng",
+              "So sánh thương hiệu", "Nguồn gốc & chính hãng", "Cửa hàng & vận hành",
+              "Tuyển dụng", "Doanh nghiệp & truyền thông", "Khác")
+CHU_DE_BL = ("Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua", "KOL/nội dung",
+             "Giao hàng/dịch vụ", "Đối thủ", "Tag bạn bè", "Khác")
+_TOI_DA_GIA_TRI = {"nen_tang": 4, "loai": 7, "nguon": 50, "sac_thai": 4, "chu_de": 40,
+                   "anh_huong": 5}
+_RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube):")
+
+#: Bộ lọc nhanh (chip trên trang) — DỮ LIỆU: thêm/bớt một mục ở đây là đủ, trang tự hiện. `loc`
+#: dùng đúng tham số URL (bài thử kiểm từng mục đọc được bằng `doc_bo_loc`); `so_ngay` (tuỳ chọn)
+#: đặt khoảng N ngày tính tới HÔM NAY. Bấm chip = thay toàn bộ bộ lọc (giữ ngày nếu không có so_ngay).
+BO_LOC_NHANH = (
+    {"ma": "kenh_nha", "ten": "Kênh nhà",
+     "mo_ta": "Chỉ bài trên kênh của chính thương hiệu và bình luận khách dưới các bài đó.",
+     "loc": {"pham_vi": "kenh_nha"}},
+    {"ma": "ben_ngoai", "ten": "Listening bên ngoài",
+     "mo_ta": "Mọi thứ ngoài kênh nhà: KOL, trang, nhóm, báo và bài Mark tìm theo từ khoá.",
+     "loc": {"pham_vi": "ben_ngoai"}},
+    {"ma": "kol", "ten": "KOL/KOC nói về thương hiệu",
+     "mo_ta": "Bài của các nguồn KOL/KOC đang theo dõi (bên ngoài).",
+     "loc": {"pham_vi": "ben_ngoai", "loai": "kol"}},
+    {"ma": "khung_hoang", "ten": "Cảnh báo khủng hoảng",
+     "mo_ta": "Tiêu cực trên bài có từ 1.000 tương tác — thứ lan nhanh nhất, kể cả trên kênh nhà.",
+     "loc": {"sac_thai": "tieu_cuc", "tuong_tac": "1000"}},
+    {"ma": "hoi_mua", "ten": "Khách hỏi mua",
+     "mo_ta": "Bình luận hỏi giá / hỏi chỗ mua / muốn mua (chủ đề bình luận của Mark).",
+     "loc": {"chu_de": "Giá/mua ở đâu/ý định mua"}},
+    {"ma": "can_xu_ly", "ten": "Tiêu cực cần xử lý",
+     "mo_ta": "Bình luận tiêu cực trên kênh nhà 7 ngày gần nhất (tính cả hôm nay) — cần trả lời.",
+     "loc": {"pham_vi": "kenh_nha", "sac_thai": "tieu_cuc"}, "so_ngay": 7},
+    {"ma": "lan_toa", "ten": "Lan toả mạnh", "mo_ta": "Bài có từ 10.000 tương tác.",
+     "loc": {"tuong_tac": "10000"}},
+    {"ma": "khen", "ten": "Khen từ bên ngoài",
+     "mo_ta": "Bài bên ngoài tích cực — UGC để cảm ơn, xin đăng lại.",
+     "loc": {"pham_vi": "ben_ngoai", "sac_thai": "tich_cuc"}},
+    {"ma": "ngoai_theo_doi", "ten": "Ngoài danh sách theo dõi",
+     "mo_ta": "Bài Mark tìm theo từ khoá từ tài khoản chưa theo dõi — nguồn mới nên xem.",
+     "loc": {"loai": KHONG_NGUON}},
+)
+
+
+class LoiBoLoc(ValueError):
+    """Giá trị bộ lọc sai. Câu thông báo trả thẳng cho người dùng (API 400)."""
+
+
+def muc_anh_huong(r: dict) -> str:
+    """Bậc ảnh hưởng của tài khoản đăng bài. followers NULL hoặc 0 = không rõ: nhiều actor
+    (Instagram, Facebook tìm từ khoá) ghi 0 khi KHÔNG trả follower, nên 0 không phải "nano"."""
+    f = so(r.get("followers"))
+    if f <= 0:
+        return "khong_ro"
+    return "mega" if f >= 1_000_000 else "macro" if f >= 100_000 else \
+        "micro" if f >= 10_000 else "nano"
+
+
+def tuong_tac_bai(r: dict) -> int:
+    return so(r.get("thich")) + so(r.get("binh_luan")) + so(r.get("chia_se"))
+
+
+def kieu_quet_bai(r: dict) -> str:
+    """theo_doi | tu_khoa. Dòng không có cột (dữ liệu cũ) thì suy từ nguồn."""
+    x = r.get("kieu_quet")
+    if x in KIEU_QUET:
+        return x
+    return KHONG_NGUON if r.get("nguon_id") is None else "theo_doi"
+
+
+def nhom_chu_de(cd: str) -> str:
+    """Nhãn chủ đề thuộc bài ("bai"), bình luận ("bl") hay cả hai ("chung"). Nhãn lạ (nhãn bài
+    cũ — bộ nhãn bình luận của Mark cố định) coi là của bài."""
+    if cd == CHUA or (cd in CHU_DE_BAI and cd in CHU_DE_BL):
+        return "chung"
+    return "bl" if cd in CHU_DE_BL else "bai"
+
+
+def _chu_de(r: dict) -> str:
+    return str(r.get("chu_de") or "").strip() or CHUA
+
+
+def _tach_nguon(s: str) -> list[str]:
+    """Khoá nguồn cách nhau bằng dấu phẩy; tên tác giả có dấu phẩy thì mảnh sau không bắt đầu
+    bằng tiền tố khoá (n:, tiktok:, link:…) — ghép lại vào khoá trước."""
+    ra: list[str] = []
+    for p in str(s or "").split(","):
+        if ra and not _RE_DAU_NGUON.match(p.strip()):
+            ra[-1] += "," + p
+        elif p.strip():
+            ra.append(p.strip())
+    return ra
+
+
+def doc_bo_loc(q) -> dict:
+    """Tham số URL (`q.get(tên)` -> chuỗi) -> bộ lọc chuẩn: chiều nhiều giá trị là tuple đã sắp
+    (dùng thẳng làm khoá bộ nhớ đệm). Nhiều giá trị cách nhau bằng dấu phẩy; `nen_tang` / `loai`
+    một giá trị kiểu cũ vẫn đọc được. Sai -> LoiBoLoc."""
+    def nhieu(k: str, hop_le=None) -> tuple:
+        ds = _tach_nguon(q.get(k)) if k == "nguon" else \
+            [x.strip() for x in str(q.get(k) or "").split(",") if x.strip()]
+        ds = list(dict.fromkeys(ds))
+        if len(ds) > _TOI_DA_GIA_TRI[k]:
+            raise LoiBoLoc(f"Bộ lọc “{k}”: chọn tối đa {_TOI_DA_GIA_TRI[k]} giá trị.")
+        for x in ds:
+            if (hop_le is not None and x not in hop_le) or len(x) > 300:
+                raise LoiBoLoc("Bộ lọc không hợp lệ.")
+        return tuple(sorted(ds))
+
+    pv = str(q.get("pham_vi") or "tat_ca")
+    if pv not in PHAM_VI:
+        raise LoiBoLoc("Bộ lọc không hợp lệ.")
+    sac_ds = []
+    for x in nhieu("sac_thai", (*MA_SAC, *MA_SAC.values())):
+        sac_ds.append(MA_SAC.get(x, x))
+    chu_de = nhieu("chu_de")
+    if any(len(x) > 100 for x in chu_de):
+        raise LoiBoLoc("Chủ đề quá dài.")
+    tt = str(q.get("tuong_tac") or "").replace(".", "").strip()
+    if tt and tt not in {str(m) for m in TUONG_TAC_MUC}:
+        raise LoiBoLoc("Mức tương tác không hợp lệ.")
+    tim = " ".join(str(q.get("q") or "").split())
+    if len(tim) > 100:
+        raise LoiBoLoc("Chữ tìm tối đa 100 ký tự.")
+    kq = str(q.get("kieu_quet") or "")
+    if kq and kq not in KIEU_QUET:
+        raise LoiBoLoc("Bộ lọc không hợp lệ.")
+    return {"pham_vi": pv, "nen_tang": nhieu("nen_tang", TEN_NEN_TANG),
+            "loai": nhieu("loai", TEN_LOAI), "nguon": nhieu("nguon"),
+            "sac_thai": tuple(sorted(set(sac_ds))), "chu_de": chu_de,
+            "anh_huong": nhieu("anh_huong", ANH_HUONG), "tuong_tac": int(tt) if tt else 0,
+            "q": tim, "kieu_quet": kq}
+
+
+def khoa_bo_loc(bo_loc: dict | None) -> tuple:
+    """Khoá băm được (bộ nhớ đệm /api/chi-so)."""
+    b = bo_loc or {}
+    return tuple((k, b.get(k)) for k in CHIEU_LOC)
+
+
+def bo_loc_json(bo_loc: dict | None) -> dict:
+    """Bộ lọc cho trình duyệt: danh sách thay tuple, sắc thái dạng mã URL."""
+    b = doc_bo_loc({}) | dict(bo_loc or {})
+    ra = {k: ([SAC_MA.get(x, x) for x in b[k]] if k == "sac_thai" else
+              list(b[k]) if isinstance(b[k], tuple) else b[k]) for k in CHIEU_LOC}
+    ra["tuong_tac"] = str(b["tuong_tac"]) if b["tuong_tac"] else ""     # giống tham số URL
+    return ra
+
+
+def _gop(bo_loc, nen_tang: str | None = None, loai_nguon: str | None = None):
+    """Bộ lọc + hai tham số một giá trị kiểu cũ (`nen_tang`, `loai_nguon`) của các hàm tổng hợp.
+    Không có tham số cũ thì trả nguyên `bo_loc` (có thể là `_Loc` đã dịch)."""
+    if not (nen_tang or loai_nguon):
+        return bo_loc
+    b = dict(bo_loc or {})
+    if nen_tang:
+        b["nen_tang"] = (nen_tang,)
+    if loai_nguon:
+        b["loai"] = (loai_nguon,)
+    return b
+
+
+class _Loc:
+    """Bộ lọc đã "dịch" sẵn cho vòng lặp: mỗi dòng -> mặt nạ bit các chiều TRƯỢT (0 = khớp)."""
+
+    def __init__(self, bo_loc: dict | None):
+        b = bo_loc or {}
+        self.pv = b.get("pham_vi") or "tat_ca"
+        self.nt, self.lo, self.ng = (set(b.get(k) or ()) for k in ("nen_tang", "loai", "nguon"))
+        self.sac = set(b.get("sac_thai") or ())
+        cd = set(b.get("chu_de") or ())
+        self.cd_bai = {x for x in cd if nhom_chu_de(x) != "bl"}
+        self.cd_bl = {x for x in cd if nhom_chu_de(x) != "bai"}
+        self.ah = set(b.get("anh_huong") or ())
+        self.tt = int(b.get("tuong_tac") or 0)
+        self.kq = b.get("kieu_quet") or ""
+        self.q = " ".join(_bo_dau(b.get("q") or "").split())
+        self._q_bai: dict[int, bool] = {}
+        self.rong = not (self.pv != "tat_ca" or self.nt or self.lo or self.ng or self.sac or cd
+                         or self.ah or self.tt or self.kq or self.q)
+        # Bình luận cần tra BÀI gốc khi lọc theo thứ dòng bình luận không mang.
+        self.can_bai = bool(self.ah or self.tt or self.kq or self.q or
+                            any(not k.startswith("n:") for k in self.ng))
+
+    def _chu(self, s) -> bool:
+        return self.q in " ".join(_bo_dau(s).split())
+
+    def khop_q_bai(self, r: dict) -> bool:
+        k = id(r)                          # dòng sống suốt lượt tính: nhớ để khỏi bỏ dấu lại
+        x = self._q_bai.get(k)
+        if x is None:
+            x = self._q_bai[k] = self._chu(f"{r.get('noi_dung') or ''} {r.get('hashtag') or ''}")
+        return x
+
+    def _pham_vi(self, kn: bool) -> bool:
+        return self.pv == "tat_ca" or (self.pv == "kenh_nha") == kn
+
+    def hong_bai(self, r: dict) -> int:
+        if self.rong:
+            return 0
+        m, kn = 0, la_kenh_nha(r)
+        if not self._pham_vi(kn):
+            m |= _BIT["pham_vi"]
+        if self.nt and r.get("nen_tang") not in self.nt:
+            m |= _BIT["nen_tang"]
+        if self.lo and loai(r) not in self.lo:
+            m |= _BIT["loai"]
+        if self.ng and khoa_nguon_chu(r) not in self.ng:
+            m |= _BIT["nguon"]
+        if self.sac and (kn or sac(r) not in self.sac):
+            m |= _BIT["sac_thai"]
+        if self.cd_bai and (kn or _chu_de(r) not in self.cd_bai):
+            m |= _BIT["chu_de"]
+        if self.ah and muc_anh_huong(r) not in self.ah:
+            m |= _BIT["anh_huong"]
+        if self.tt and tuong_tac_bai(r) < self.tt:
+            m |= _BIT["tuong_tac"]
+        if self.q and not self.khop_q_bai(r):
+            m |= _BIT["q"]
+        if self.kq and kieu_quet_bai(r) != self.kq:
+            m |= _BIT["kieu_quet"]
+        return m
+
+    def hong_bl(self, c: dict, bai: dict | None = None) -> int:
+        """Như `hong_bai` cho MỘT bình luận; `bai` = dòng bài gốc (cần khi `can_bai`; thiếu bài
+        thì các chiều cấp bài coi như trượt — không đoán)."""
+        if self.rong:
+            return 0
+        m, kn = 0, la_kenh_nha(c)
+        if not self._pham_vi(kn):
+            m |= _BIT["pham_vi"]
+        if self.nt and c.get("nen_tang") not in self.nt:
+            m |= _BIT["nen_tang"]
+        if self.lo and loai(c) not in self.lo:
+            m |= _BIT["loai"]
+        if self.ng:
+            k = f"n:{c['nguon_id']}" if c.get("nguon_id") is not None else \
+                (khoa_nguon_chu(bai) if bai else None)
+            if k not in self.ng:
+                m |= _BIT["nguon"]
+        hop_le = loai_bl(c) == "hop_le"
+        if self.sac and not (hop_le and sac_bl(c) in self.sac):
+            m |= _BIT["sac_thai"]
+        if self.cd_bl and not (hop_le and _chu_de(c) in self.cd_bl):
+            m |= _BIT["chu_de"]
+        if self.ah and (bai is None or muc_anh_huong(bai) not in self.ah):
+            m |= _BIT["anh_huong"]
+        if self.tt and (bai is None or tuong_tac_bai(bai) < self.tt):
+            m |= _BIT["tuong_tac"]
+        if self.q and not (self._chu(c.get("noi_dung")) or (bai is not None and self.khop_q_bai(bai))):
+            m |= _BIT["q"]
+        if self.kq and (bai is None or kieu_quet_bai(bai) != self.kq):
+            m |= _BIT["kieu_quet"]
+        return m
+
+
+def bien_dich(bo_loc) -> _Loc:
+    return bo_loc if isinstance(bo_loc, _Loc) else _Loc(bo_loc)
+
+
+def can_tra_bai(bo_loc) -> bool:
+    """Lọc bình luận theo bộ lọc này có cần dòng bài gốc không (app đọc bài thiếu theo khoá)."""
+    return bien_dich(bo_loc).can_bai
+
+
+def chi_muc_bai(rows: list[dict]) -> dict[str, dict]:
+    return {r["khoa"]: r for r in rows if r.get("khoa")}
+
+
+def khoa_bai_thieu(bl: list[dict], chi_muc: dict) -> list[str]:
+    """Khoá bài của các bình luận mà `chi_muc` chưa có (bài đăng trước khoảng đã đọc)."""
+    return list(dict.fromkeys(k for c in bl if (k := c.get("khoa_bai")) and k not in chi_muc))
+
+
+def loc_bai(rows: list[dict], bo_loc=None) -> list[dict]:
+    f = bien_dich(bo_loc)
+    return rows if f.rong else [r for r in rows if not f.hong_bai(r)]
+
+
+def loc_bl(rows: list[dict], bo_loc=None, bai_theo_khoa: dict | None = None) -> list[dict]:
+    f = bien_dich(bo_loc)
+    if f.rong:
+        return rows
+    tra = (bai_theo_khoa or {}).get
+    return [c for c in rows if not f.hong_bl(c, tra(c.get("khoa_bai")))]
+
+
 def trong_khoang(rows: list[dict], tu: datetime.date, den: datetime.date) -> list[dict]:
     ra = []
     for r in rows:
@@ -388,11 +703,13 @@ def tu_khoa(rows: list[dict], tu_khoa_du_an: list[str] | tuple = (),
 # ───────────────────────── gộp ─────────────────────────
 def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
              tu_khoa_du_an: list[str] | tuple = (), nen_tang: str | None = None,
-             loai_nguon: str | None = None, hom_nay: datetime.date | None = None) -> dict:
+             loai_nguon: str | None = None, hom_nay: datetime.date | None = None,
+             bo_loc=None) -> dict:
     """Mọi khối của trang Chỉ số. `rows` gồm bài của CẢ kỳ này lẫn kỳ trước (kho đọc một lần
-    từ đầu kỳ trước); hàm tự chia. -> dict thuần JSON (ngày dạng ISO)."""
+    từ đầu kỳ trước); hàm tự chia. `bo_loc` (bộ lọc chung) áp cho CẢ hai kỳ — so sánh cùng một
+    tập. -> dict thuần JSON (ngày dạng ISO)."""
     hom_nay = hom_nay or datetime.datetime.now(VN).date()
-    rows = loc(rows, nen_tang, loai_nguon)
+    rows = loc_bai(rows, _gop(bo_loc, nen_tang, loai_nguon))
     tu_truoc, den_truoc = khoang_truoc(tu, den)
     nay = trong_khoang(rows, tu, den)
     truoc = trong_khoang(rows, tu_truoc, den_truoc)
@@ -449,10 +766,11 @@ def _trang(ds: list, trang: int, moi_trang: int = MOI_TRANG) -> tuple[list, int,
 
 
 def chi_tiet_bai(rows: list[dict], tu: datetime.date, den: datetime.date, *,
-                 trang: int = 1, **dk) -> dict:
-    """Bài trong [tu, den] khớp điều kiện `dk` (ngay_tu, ngay_den, sac_thai, chu_de, nen_tang,
-    loai_nguon, nguon, cum), nhiều thảo luận trước. -> {tong, thao_luan, trang, so_trang, bai}."""
-    ds = [r for r in trong_khoang(rows, tu, den)
+                 trang: int = 1, bo_loc=None, **dk) -> dict:
+    """Bài trong [tu, den] khớp bộ lọc chung `bo_loc` VÀ điều kiện `dk` của điểm/cột vừa bấm
+    (ngay_tu, ngay_den, sac_thai, chu_de, nen_tang, loai_nguon, nguon, cum), nhiều thảo luận
+    trước. -> {tong, thao_luan, trang, so_trang, bai}."""
+    ds = [r for r in loc_bai(trong_khoang(rows, tu, den), bo_loc)
           if _khop(r, ngay_vn(r.get("dang_luc")), kenh_nha=la_kenh_nha(r), **dk)]
     ds.sort(key=lambda r: (-thao_luan(r), -so(r.get("xem")), str(r.get("link") or "")))
     tl = sum(thao_luan(r) for r in ds)
@@ -523,12 +841,14 @@ def the_bl(c: dict) -> dict:
 
 def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
                 nen_tang: str | None = None, loai_nguon: str | None = None,
-                hom_nay: datetime.date | None = None) -> dict:
+                hom_nay: datetime.date | None = None, bo_loc=None,
+                bai_theo_khoa: dict | None = None) -> dict:
     """Bình luận đã cào trong kỳ: số, sắc thái (chỉ của khách), xu hướng, chủ đề × sắc thái.
-    Đây là MẪU bình luận Mark đọc được, không phải toàn bộ bình luận nền tảng báo."""
+    Đây là MẪU bình luận Mark đọc được, không phải toàn bộ bình luận nền tảng báo. `bo_loc` +
+    `bai_theo_khoa` (bài gốc theo khoá, khi `can_tra_bai`): xem phần "bộ lọc chung"."""
     hom_nay = hom_nay or datetime.datetime.now(VN).date()
-    rows = [c for c in loc(rows, nen_tang, loai_nguon)
-            if (n := _ngay_bl(c)) is not None and tu <= n <= den]
+    rows = loc_bl([c for c in rows if (n := _ngay_bl(c)) is not None and tu <= n <= den],
+                  _gop(bo_loc, nen_tang, loai_nguon), bai_theo_khoa)
     theo_loai = collections.Counter(loai_bl(c) for c in rows)
     # Chỉ bình luận HỢP LỆ (đã lọc spam/rác/trùng/seeding/thương hiệu) vào sắc thái, chủ đề.
     khach = [c for c in rows if loai_bl(c) == "hop_le"]
@@ -632,22 +952,28 @@ def _gia_tri_bl(c: dict, truong: str) -> str:
 def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
                 trang: int = 1, ngay_tu=None, ngay_den=None, sac_thai=None, chu_de=None,
                 nen_tang=None, loai_nguon=None, loai=None, nguon=None, q=None,
-                sap_xep: str = "thich", moi_trang: int = MOI_TRANG) -> dict:
+                sap_xep: str = "thich", moi_trang: int = MOI_TRANG, bo_loc=None,
+                bai_theo_khoa: dict | None = None) -> dict:
     """Luồng bình luận lọc theo các trường (kiểu Kompa): nền tảng, nguồn, sắc thái, chủ đề,
-    nhãn lọc, chữ tìm (bỏ dấu), khoảng ngày; sắp xếp nhiều thích / mới / cũ.
+    nhãn lọc, chữ tìm (bỏ dấu, nội dung + tác giả), khoảng ngày; sắp xếp nhiều thích / mới / cũ
+    — AND với bộ lọc chung `bo_loc` (xem phần "bộ lọc chung").
     -> {tong, trang, so_trang, binh_luan, facets}. `facets` = {trường: [{gia_tri, ten, so}]}
     đếm trên các dòng khớp MỌI điều kiện TRỪ chính trường đó (chọn tiếp được giá trị khác)."""
     chu = _bo_dau(q).strip() if q else ""
     dk = {"nen_tang": nen_tang, "nguon": nguon, "sac_thai": sac_thai, "chu_de": chu_de,
           "loai": loai}
+    f = bien_dich(_gop(bo_loc, None, loai_nguon))
+    tra = (bai_theo_khoa or {}).get
     co_so: list[dict] = []
-    for c in loc(rows, None, loai_nguon):
+    for c in rows:
         n = _ngay_bl(c)
         if n is None or not tu <= n <= den:
             continue
         if (ngay_tu and n < ngay_tu) or (ngay_den and n > ngay_den):
             continue
         if chu and chu not in _bo_dau(f"{c.get('noi_dung') or ''} {c.get('tac_gia') or ''}"):
+            continue
+        if not f.rong and f.hong_bl(c, tra(c.get("khoa_bai"))):
             continue
         co_so.append(c)
 
@@ -685,13 +1011,129 @@ def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
 
 def tu_khoa_thao_luan(bai: list[dict], bl: list[dict], tu: datetime.date, den: datetime.date, *,
                       nen_tang: str | None = None, loai_nguon: str | None = None,
-                      tu_khoa_du_an: list[str] | tuple = ()) -> dict:
+                      tu_khoa_du_an: list[str] | tuple = (), bo_loc=None,
+                      bai_theo_khoa: dict | None = None) -> dict:
     """Từ khoá nổi bật kiểu Kompa: đếm trên THẢO LUẬN = bài (không phải kênh nhà) + bình luận
-    hợp lệ trong kỳ. -> {"tu_khoa": [{tu, so_bai (= số thảo luận nhắc), sắc thái…}], "tong"}."""
-    b = trong_khoang(loc(bai, nen_tang, loai_nguon), tu, den)
-    c = [x for x in loc(bl, nen_tang, loai_nguon) if loai_bl(x) == "hop_le"
-         and (n := _ngay_bl(x)) is not None and tu <= n <= den]
+    hợp lệ trong kỳ, cùng bộ lọc chung. -> {"tu_khoa": [{tu, so_bai (= số thảo luận nhắc),
+    sắc thái…}], "tong"}."""
+    f = bien_dich(_gop(bo_loc, nen_tang, loai_nguon))
+    b = loc_bai(trong_khoang(bai, tu, den), f)
+    c = loc_bl([x for x in bl if loai_bl(x) == "hop_le"
+                and (n := _ngay_bl(x)) is not None and tu <= n <= den], f, bai_theo_khoa)
     # Bình luận: chỉ chữ + sắc thái (không gắn nguồn — bình luận dưới bài kênh nhà là tiếng khách).
     dong = b + [{"noi_dung": x.get("noi_dung") or "", "sac_thai": x.get("sac_thai")} for x in c]
     return {"tu_khoa": tu_khoa(dong, tu_khoa_du_an),
             "tong": sum(not la_kenh_nha(r) for r in b) + len(c)}
+
+
+# ───────────────────────── đếm cho ô lọc + kênh nhà vs bên ngoài ─────────────────────────
+NGUON_TOI_DA_DEM = 80
+
+
+def _phia() -> dict:
+    return {"bai": 0, "thao_luan": 0, "bl": 0, "bl_hop_le": 0,
+            "sac_bai": dict.fromkeys(MA_SAC, 0), "sac_bl": dict.fromkeys(MA_SAC, 0)}
+
+
+def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datetime.date,
+                  bo_loc=None, bai_theo_khoa: dict | None = None) -> dict:
+    """Trên kỳ [tu, den]: số đếm cho từng ô của thanh lọc (`bo_loc_dem`) + khối "Kênh nhà vs Bên
+    ngoài" (`nha_ngoai`).
+
+    Đếm kiểu ô chọn nhiều giá trị: số của MỘT chiều tính trên các mục khớp mọi chiều KHÁC (bỏ qua
+    chính chiều đó) — đang chọn TikTok vẫn thấy số của Facebook để chọn thêm. Một lượt duyệt: mỗi
+    mục có mặt nạ các chiều trượt; trượt 0 chiều thì vào mọi ô, trượt đúng 1 chiều thì chỉ vào ô
+    của chiều đó. Đơn vị: BÀI cho các chiều cấp bài; sắc thái / chủ đề đếm cả bài lẫn bình luận
+    hợp lệ. `nha_ngoai` = mục khớp mọi chiều TRỪ phạm vi, chia kênh nhà / bên ngoài: bài, thảo
+    luận, bình luận đã cào, sắc thái bài (chỉ bên ngoài có) và sắc thái bình luận hợp lệ."""
+    f = bien_dich(bo_loc)
+    dem: dict[str, collections.Counter] = {k: collections.Counter() for k in CHIEU_LOC}
+    cd_bl: collections.Counter = collections.Counter()
+    sac_bl_dem: collections.Counter = collections.Counter()
+    ten_nguon: dict[str, dict] = {}
+    nha = {"kenh_nha": _phia(), "ben_ngoai": _phia()}
+    pv = _BIT["pham_vi"]
+    for r in trong_khoang(bai, tu, den):
+        m = f.hong_bai(r)
+        if m & (m - 1):                       # trượt từ 2 chiều: không vào ô nào
+            continue
+        kn = la_kenh_nha(r)
+        if m in (0, pv):
+            o = nha["kenh_nha" if kn else "ben_ngoai"]
+            o["bai"] += 1
+            o["thao_luan"] += thao_luan(r)
+            if not kn:
+                o["sac_bai"][SAC_MA[sac(r)]] += 1
+        if m in (0, pv):
+            dem["pham_vi"]["kenh_nha" if kn else "ben_ngoai"] += 1
+        if m in (0, _BIT["nen_tang"]):
+            dem["nen_tang"][r.get("nen_tang") or "?"] += 1
+        if m in (0, _BIT["loai"]):
+            dem["loai"][loai(r)] += 1
+        if m in (0, _BIT["nguon"]):
+            k = khoa_nguon_chu(r)
+            dem["nguon"][k] += 1
+            if k not in ten_nguon:
+                ten_nguon[k] = {"ten": r.get("nguon_ten") or r.get("tac_gia") or r.get("tai_khoan")
+                                or "?", "nen_tang": r.get("nen_tang") or "", "loai": loai(r)}
+        if m in (0, _BIT["sac_thai"]) and not kn:
+            dem["sac_thai"][SAC_MA[sac(r)]] += 1
+        if m in (0, _BIT["chu_de"]) and not kn:
+            dem["chu_de"][_chu_de(r)] += 1
+        if m in (0, _BIT["anh_huong"]):
+            dem["anh_huong"][muc_anh_huong(r)] += 1
+        if m in (0, _BIT["tuong_tac"]):
+            t = tuong_tac_bai(r)
+            for muc in TUONG_TAC_MUC:
+                if t >= muc:
+                    dem["tuong_tac"][str(muc)] += 1
+        if m in (0, _BIT["kieu_quet"]):
+            dem["kieu_quet"][kieu_quet_bai(r)] += 1
+    tra = (bai_theo_khoa or {}).get
+    for c in bl:
+        n = _ngay_bl(c)
+        if n is None or not tu <= n <= den:
+            continue
+        m = f.hong_bl(c, tra(c.get("khoa_bai")))
+        if m & (m - 1):
+            continue
+        hop_le = loai_bl(c) == "hop_le"
+        if m in (0, pv):
+            o = nha["kenh_nha" if la_kenh_nha(c) else "ben_ngoai"]
+            o["bl"] += 1
+            if hop_le:
+                o["bl_hop_le"] += 1
+                o["sac_bl"][SAC_MA[sac_bl(c)]] += 1
+        if hop_le and m in (0, _BIT["sac_thai"]):
+            sac_bl_dem[SAC_MA[sac_bl(c)]] += 1
+        if hop_le and m in (0, _BIT["chu_de"]):
+            cd_bl[_chu_de(c)] += 1
+    # Nguồn: nhiều bài trước; nguồn đang chọn luôn có mặt (kể cả 0 bài) để hiện tên trên chip.
+    chon = set(f.ng)
+    nguon = [{"gia_tri": k, **ten_nguon[k], "so": n}
+             for k, n in sorted(dem["nguon"].items(), key=lambda x: (-x[1], x[0]))
+             [:NGUON_TOI_DA_DEM]]
+    co = {x["gia_tri"] for x in nguon}
+    nguon += [{"gia_tri": k, **ten_nguon.get(k, {"ten": k, "nen_tang": "", "loai": ""}),
+               "so": dem["nguon"][k]} for k in sorted(chon - co)]
+    cac_cd = set(dem["chu_de"]) | set(cd_bl) | set(f.cd_bai) | set(f.cd_bl)
+    chu_de = sorted(({"gia_tri": x, "nhom": nhom_chu_de(x), "so_bai": dem["chu_de"][x],
+                      "so_bl": cd_bl[x]} for x in cac_cd),
+                    key=lambda g: (g["gia_tri"] == CHUA, -(g["so_bai"] + g["so_bl"]),
+                                   g["gia_tri"]))
+    don = {k: dict(dem[k]) for k in ("pham_vi", "nen_tang", "loai", "anh_huong", "tuong_tac",
+                                    "kieu_quet")}
+    return {"bo_loc_dem": {**don, "sac_thai": {k: {"bai": dem["sac_thai"][k],
+                                                   "bl": sac_bl_dem[k]} for k in MA_SAC},
+                           "chu_de": chu_de, "nguon": nguon},
+            "nha_ngoai": nha}
+
+
+#: Nhãn + giá trị của thanh lọc cho trình duyệt (một nguồn sự thật với phần kiểm ở máy chủ).
+NHAN_BO_LOC = {
+    "pham_vi": PHAM_VI, "nen_tang": TEN_NEN_TANG, "loai": TEN_LOAI,
+    "sac_thai": {k: v[0].upper() + v[1:] for k, v in MA_SAC.items()},
+    "anh_huong": ANH_HUONG, "kieu_quet": KIEU_QUET,
+    "tuong_tac": [{"gia_tri": str(m), "ten": f"Từ {m:,}".replace(",", ".") + " tương tác"}
+                  for m in TUONG_TAC_MUC],
+}

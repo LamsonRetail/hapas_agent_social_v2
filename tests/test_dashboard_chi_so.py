@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import datetime
 
+import pytest
+
 from dashboard import chi_so as CS
 
 D = datetime.date
@@ -278,3 +280,214 @@ def test_top_bai_theo_thao_luan_roi_luot_xem():
     assert [b["link"] for b in top] == ["https://a/3", "https://a/2", "https://a/1"]
     assert top[2]["noi_dung"] == "một hai" and top[0]["thao_luan"] == 8
     assert top[0]["dang_luc"] == "2026-10-10T09:00+07:00"
+
+
+# ───────────────────────── bộ lọc chung (đợt 2f) ─────────────────────────
+def test_doc_bo_loc_chuan_hoa_va_tu_choi():
+    rong = CS.doc_bo_loc({})
+    assert rong == {"pham_vi": "tat_ca", "nen_tang": (), "loai": (), "nguon": (), "sac_thai": (),
+                    "chu_de": (), "anh_huong": (), "tuong_tac": 0, "q": "", "kieu_quet": ""}
+    b = CS.doc_bo_loc({"nen_tang": "tiktok,facebook,tiktok", "sac_thai": "tieu_cuc,Tích cực",
+                       "tuong_tac": "1.000", "q": "  túi   xách ",
+                       "nguon": "n:1,tiktok:khach, a,n:2", "loai": "kol"})
+    assert b["nen_tang"] == ("facebook", "tiktok") and b["loai"] == ("kol",)
+    assert b["sac_thai"] == ("Tiêu cực", "Tích cực")          # mã URL hay nhãn đều về nhãn kho
+    assert b["tuong_tac"] == 1000 and b["q"] == "túi xách"
+    assert b["nguon"] == ("n:1", "n:2", "tiktok:khach, a")     # tên có dấu phẩy không bị cắt
+    for sai in ({"pham_vi": "nha"}, {"nen_tang": "threads"}, {"loai": "vip"},
+                {"sac_thai": "vui"}, {"tuong_tac": "50"}, {"kieu_quet": "x"}, {"q": "x" * 101},
+                {"anh_huong": "khong_lo"}, {"nguon": ",".join(f"n:{i}" for i in range(51))},
+                {"chu_de": "x" * 101}):
+        with pytest.raises(CS.LoiBoLoc):
+            CS.doc_bo_loc(sai)
+    # JSON cho trình duyệt -> tham số URL -> đọc lại: không đổi.
+    j = CS.bo_loc_json(b)
+    assert j["sac_thai"] == ["tieu_cuc", "tich_cuc"] and j["tuong_tac"] == "1000"
+    assert CS.bo_loc_json(rong)["tuong_tac"] == ""
+    url = {k: ",".join(v) if isinstance(v, list) else v for k, v in j.items()}
+    assert CS.doc_bo_loc(url) == b
+    assert CS.khoa_bo_loc(b) != CS.khoa_bo_loc(rong)
+    # Bộ lọc nhanh là DỮ LIỆU: mục nào cũng đọc được, mã không trùng.
+    assert len({p["ma"] for p in CS.BO_LOC_NHANH}) == len(CS.BO_LOC_NHANH) >= 6
+    for p in CS.BO_LOC_NHANH:
+        assert CS.doc_bo_loc(p["loc"]) != rong, p["ma"]
+    hoi_mua = next(p for p in CS.BO_LOC_NHANH if p["ma"] == "hoi_mua")
+    assert hoi_mua["loc"]["chu_de"] in CS.CHU_DE_BL
+
+
+def test_nhan_chu_de_khop_mark():
+    import phan_loai
+    assert CS.CHU_DE_BAI == tuple(phan_loai.CHU_DE_BAI.values())
+    assert CS.CHU_DE_BL == tuple(phan_loai.CHU_DE.values())
+    assert CS.nhom_chu_de("Giá/mua ở đâu/ý định mua") == "bl"
+    assert CS.nhom_chu_de("Giá cả & khuyến mãi") == "bai"
+    assert CS.nhom_chu_de("Khác") == CS.nhom_chu_de(CS.CHUA) == "chung"
+    assert CS.nhom_chu_de("Nhãn cũ lạ") == "bai"
+
+
+def _bon_bai():
+    a = bai("2026-10-10T09:00+07:00", nid=1, bl=30, thich=50, cs=30, sac="Tích cực",
+            cd="Giá cả & khuyến mãi", tk="kol_a", nd="Túi xách HAPAS đẹp")     # tương tác 110
+    a["followers"] = 5_000                                                         # nano
+    b = bai("2026-10-10T10:00+07:00", p="facebook", nid=2, loai="kenh_nha", thich=20_000,
+            sac="Tiêu cực", cd="Khác", tk="hapas")                                 # 20.000
+    b["followers"] = 2_000_000                                                     # mega
+    c = bai("2026-10-10T11:00+07:00", nid=None, bl=2, thich=3, sac="Tiêu cực", cd="Khác",
+            tk="khach_c", nd="giá hơi cao", ht="tuixach")                          # 5, không rõ
+    d = bai("2026-10-10T12:00+07:00", p="youtube", nid=3, loai="page", bl=500, thich=1000,
+            tk="kenh_d")                                                           # 1.500
+    d.update(followers=150_000, kieu_quet="tu_khoa")       # tài khoản theo dõi, tìm qua từ khoá
+    return [a, b, c, d]
+
+
+def test_bo_loc_moi_chieu_tren_bai():
+    rows = _bon_bai()
+
+    def L(**q):
+        return [r["tai_khoan"] for r in CS.loc_bai(rows, CS.doc_bo_loc(q))]
+    assert L() == ["kol_a", "hapas", "khach_c", "kenh_d"]
+    assert L(pham_vi="kenh_nha") == ["hapas"]
+    assert L(pham_vi="ben_ngoai") == ["kol_a", "khach_c", "kenh_d"]   # gồm bài tìm theo từ khoá
+    assert L(nen_tang="tiktok,youtube") == ["kol_a", "khach_c", "kenh_d"]
+    assert L(nen_tang="facebook") == ["hapas"]                          # kiểu cũ một giá trị
+    assert L(loai="tu_khoa,kenh_nha") == ["hapas", "khach_c"]
+    assert L(nguon="n:1,tiktok:khach_c") == ["kol_a", "khach_c"]
+    # Sắc thái: bài kênh nhà không mang tiếng khách — "Tiêu cực" của nó không khớp.
+    assert L(sac_thai="tieu_cuc") == L(sac_thai="Tiêu cực") == ["khach_c"]
+    assert L(sac_thai="chua_phan_loai") == ["kenh_d"]
+    # Chủ đề: nhãn bài lọc bài; nhãn chỉ của bình luận để phần bài nguyên.
+    assert L(chu_de="Giá cả & khuyến mãi") == ["kol_a"]
+    assert L(chu_de="Khác") == ["khach_c"]
+    assert L(chu_de="chưa phân loại") == ["kenh_d"]
+    assert L(chu_de="Giá/mua ở đâu/ý định mua") == L()
+    assert L(anh_huong="nano,khong_ro") == ["kol_a", "khach_c"]
+    assert (L(anh_huong="mega"), L(anh_huong="macro")) == (["hapas"], ["kenh_d"])
+    assert L(tuong_tac="100") == ["kol_a", "hapas", "kenh_d"]
+    assert L(tuong_tac="1000") == ["hapas", "kenh_d"] and L(tuong_tac="10000") == ["hapas"]
+    assert L(kieu_quet="tu_khoa") == ["khach_c", "kenh_d"]
+    assert L(kieu_quet="theo_doi") == ["kol_a", "hapas"]
+    assert L(q="tuixach") == ["khach_c"]                                # hashtag
+    assert L(q="TUI XACH") == ["kol_a"] and L(q="gia hoi") == ["khach_c"]   # bỏ dấu, không hoa
+    assert L(pham_vi="ben_ngoai", nen_tang="tiktok", sac_thai="tieu_cuc") == ["khach_c"]  # AND
+    for f, muc in ((None, "khong_ro"), (0, "khong_ro"), (9_999, "nano"), (10_000, "micro"),
+                   (999_999, "macro"), (1_000_000, "mega")):
+        assert CS.muc_anh_huong({"followers": f}) == muc, f
+
+
+def _ba_bai_nam_bl():
+    p1 = bai("2026-10-09T09:00+07:00", nid=1, thich=1500, bl=400, tk="kol_a", nd="Review túi mới")
+    p1["followers"] = 50_000                                     # micro, tương tác 1.900
+    p2 = bai("2026-10-09T10:00+07:00", p="facebook", nid=2, loai="kenh_nha", thich=40, bl=10,
+             tk="hapas", nd="Ra mắt bộ sưu tập")                 # không rõ follower, 50
+    p3 = bai("2026-10-09T11:00+07:00", nid=None, thich=5, bl=5, tk="khach", nd="đẹp ghê")  # 10
+
+    def c(ma, p, **kw):
+        x = bl("2026-10-10T09:00+07:00", ma, p=p["nen_tang"], nid=p["nguon_id"],
+               loai_nguon=p["nguon_loai"] or "kol", **kw)
+        x["khoa_bai"] = p["khoa"]
+        return x
+    cs = [c("c1", p1, sac="Tiêu cực", cd="Giao hàng/dịch vụ", nd="ship chậm"),
+          c("c2", p1, sac="Tích cực", cd="Giá/mua ở đâu/ý định mua", nd="giá bao nhiêu"),
+          c("c3", p2, sac="Tiêu cực", cd="Sản phẩm/chất lượng", nd="hàng lỗi"),
+          c("c4", p2, lb="spam", sac="Tiêu cực", nd="link rẻ"),
+          c("c5", p3, sac="Trung lập", cd="Khác", nd="xinh")]
+    return [p1, p2, p3], cs
+
+
+def test_bo_loc_tren_binh_luan_theo_bai_va_theo_chinh_no():
+    bai_ds, cs = _ba_bai_nam_bl()
+    idx = CS.chi_muc_bai(bai_ds)
+
+    def M(_idx=idx, **q):
+        return [x["ma"] for x in CS.loc_bl(cs, CS.doc_bo_loc(q), _idx)]
+    assert M(pham_vi="kenh_nha") == ["c3", "c4"]                  # theo phạm vi của BÀI
+    assert M(pham_vi="ben_ngoai") == ["c1", "c2", "c5"]
+    assert M(nen_tang="facebook") == ["c3", "c4"] and M(loai="tu_khoa") == ["c5"]
+    assert M(sac_thai="tieu_cuc") == ["c1", "c3"]                 # sắc thái CỦA bình luận; spam loại
+    assert M(chu_de="Giá/mua ở đâu/ý định mua") == ["c2"]
+    assert M(chu_de="Giá cả & khuyến mãi") == ["c1", "c2", "c3", "c4", "c5"]   # nhãn bài: không lọc
+    assert M(chu_de="Khác") == ["c5"]
+    assert M(anh_huong="micro") == ["c1", "c2"] and M(anh_huong="khong_ro") == ["c3", "c4", "c5"]
+    assert M(tuong_tac="1000") == M(tuong_tac="100") == ["c1", "c2"]
+    assert M(kieu_quet="tu_khoa") == ["c5"]
+    assert M(nguon="tiktok:khach") == ["c5"]
+    assert M(nguon="n:2") == M(None, nguon="n:2") == ["c3", "c4"]   # nguồn theo dõi: không cần bài
+    # Chữ tìm: bình luận khớp khi chính nó HOẶC bài của nó chứa chữ.
+    assert M(q="review") == ["c1", "c2"] and M(q="hang loi") == ["c3"]
+    assert M(q="ra mat") == ["c3", "c4"]
+    assert M(None, anh_huong="micro") == []                       # thiếu bài gốc: không đoán
+    assert CS.can_tra_bai(CS.doc_bo_loc({"anh_huong": "micro"}))
+    assert CS.can_tra_bai(CS.doc_bo_loc({"nguon": "tiktok:khach"}))
+    assert CS.can_tra_bai(CS.doc_bo_loc({"q": "x"}))
+    assert not CS.can_tra_bai(CS.doc_bo_loc({"pham_vi": "kenh_nha", "sac_thai": "tieu_cuc",
+                                             "nguon": "n:1"}))
+    assert CS.khoa_bai_thieu(cs, CS.chi_muc_bai(bai_ds[:1])) == [bai_ds[1]["khoa"],
+                                                                bai_ds[2]["khoa"]]
+
+
+def test_bo_loc_ap_ca_ky_truoc_va_khung_chi_tiet():
+    rows = [bai("2026-10-10T09:00+07:00", nid=7, loai="kenh_nha", bl=4, tk="nha1"),
+            bai("2026-10-11T09:00+07:00", nid=1, bl=1, tk="ngoai1"),
+            bai("2026-10-02T09:00+07:00", nid=7, loai="kenh_nha", tk="nha2"),      # kỳ trước
+            bai("2026-10-03T09:00+07:00", nid=7, loai="kenh_nha", tk="nha3")]      # kỳ trước
+    a, b = D(2026, 10, 8), D(2026, 10, 14)
+    th = CS.tong_hop(rows, a, b, hom_nay=b, bo_loc=CS.doc_bo_loc({"pham_vi": "kenh_nha"}))
+    assert th["kpi"]["bai"] == 1 and th["kpi"]["thao_luan"] == 5
+    assert th["so_sanh"]["bai"] == {"nay": 1, "truoc": 2, "doi_pt": -50.0}
+    assert [n["khoa_nguon"] for g in th["top_nguon"] for n in g["nguon"]] == ["n:7"]
+    ngoai = CS.tong_hop(rows, a, b, hom_nay=b, bo_loc=CS.doc_bo_loc({"pham_vi": "ben_ngoai"}))
+    assert ngoai["so_sanh"]["bai"] == {"nay": 1, "truoc": 0, "doi_pt": None}
+    # Khung chi tiết: bộ lọc chung AND điều kiện của điểm vừa bấm.
+    bon = _bon_bai()
+    d = D(2026, 10, 10)
+    x = CS.chi_tiet_bai(bon, d, d, bo_loc=CS.doc_bo_loc({"pham_vi": "ben_ngoai"}),
+                        sac_thai="Tiêu cực")
+    assert x["tong"] == 1 and x["bai"][0]["khoa"] == bon[2]["khoa"]
+    bai_ds, cs = _ba_bai_nam_bl()
+    y = CS.chi_tiet_bl(cs, d, d, bo_loc=CS.doc_bo_loc({"pham_vi": "kenh_nha"}),
+                       bai_theo_khoa=CS.chi_muc_bai(bai_ds))
+    assert y["tong"] == 2
+    assert {g["gia_tri"]: g["so"] for g in y["facets"]["loai"]} == {"hop_le": 1, "spam": 1}
+    assert CS.chi_tiet_bl(cs, d, d, loai="hop_le",
+                          bo_loc=CS.doc_bo_loc({"pham_vi": "kenh_nha"}))["tong"] == 1
+    # Mây từ khoá + khối bình luận cùng bộ lọc.
+    tk = CS.tu_khoa_thao_luan(bai_ds, cs, D(2026, 10, 9), d,
+                              bo_loc=CS.doc_bo_loc({"pham_vi": "ben_ngoai"}))
+    assert tk["tong"] == 2 + 3                       # p1, p3 + c1, c2, c5 (hợp lệ, bên ngoài)
+    k = CS.tong_hop_bl(cs, d, d, hom_nay=d, bo_loc=CS.doc_bo_loc({"sac_thai": "tieu_cuc"}))["kpi"]
+    assert (k["so"], k["tieu_cuc"], k["tich_cuc"]) == (2, 2, 0)
+
+
+def test_dem_o_loc_bo_qua_chinh_chieu_va_kenh_nha_vs_ben_ngoai():
+    a = bai("2026-10-10T09:00+07:00", nid=1, bl=2, sac="Tích cực", tk="a")              # 3 TL
+    c = bai("2026-10-10T09:00+07:00", nid=None, sac="Tiêu cực", tk="c")                 # 1
+    d = bai("2026-10-10T09:00+07:00", p="facebook", nid=4, bl=1, sac="Trung lập", tk="d")
+    e = bai("2026-10-10T09:00+07:00", nid=7, loai="kenh_nha", bl=5, tk="e")             # 6
+    b = bai("2026-10-10T09:00+07:00", p="facebook", nid=2, loai="kenh_nha", tk="b")
+
+    def cmt(ma, p, **kw):
+        x = bl("2026-10-10T10:00+07:00", ma, p=p["nen_tang"], nid=p["nguon_id"],
+               loai_nguon=p["nguon_loai"] or "kol", **kw)
+        x["khoa_bai"] = p["khoa"]
+        return x
+    cs = [cmt("k1", e, sac="Tiêu cực"), cmt("k2", e, sac="Tích cực"), cmt("k3", a),
+          cmt("k4", d, lb="spam")]
+    dd = D(2026, 10, 10)
+    kq = CS.tong_quan_loc([a, c, d, e, b], cs, dd, dd,
+                          CS.doc_bo_loc({"nen_tang": "tiktok", "pham_vi": "ben_ngoai"}))
+    dem = kq["bo_loc_dem"]
+    # Ô nền tảng bỏ qua CHÍNH nó (vẫn thấy Facebook để chọn thêm) nhưng giữ phạm vi bên ngoài.
+    assert dem["nen_tang"] == {"tiktok": 2, "facebook": 1}
+    assert dem["pham_vi"] == {"ben_ngoai": 2, "kenh_nha": 1}         # b trượt 2 chiều: không đếm
+    assert dem["loai"] == {"kol": 1, "tu_khoa": 1}
+    assert dem["kieu_quet"] == {"theo_doi": 1, "tu_khoa": 1}
+    assert dem["sac_thai"]["tich_cuc"] == {"bai": 1, "bl": 1}
+    assert dem["sac_thai"]["tieu_cuc"] == {"bai": 1, "bl": 0}        # k1 ở kênh nhà: trượt phạm vi
+    assert sorted((x["gia_tri"], x["so"]) for x in dem["nguon"]) == [("n:1", 1), ("tiktok:c", 1)]
+    nha, ngoai = kq["nha_ngoai"]["kenh_nha"], kq["nha_ngoai"]["ben_ngoai"]
+    assert (nha["bai"], nha["thao_luan"], nha["bl"], nha["bl_hop_le"]) == (1, 6, 2, 2)
+    assert (nha["sac_bl"]["tieu_cuc"], nha["sac_bl"]["tich_cuc"]) == (1, 1)
+    assert nha["sac_bai"] == dict.fromkeys(CS.MA_SAC, 0)               # bài thương hiệu: không tính
+    assert (ngoai["bai"], ngoai["thao_luan"], ngoai["bl"]) == (2, 4, 1)
+    assert (ngoai["sac_bai"]["tich_cuc"], ngoai["sac_bai"]["tieu_cuc"]) == (1, 1)
+    assert ngoai["sac_bl"]["tich_cuc"] == 1

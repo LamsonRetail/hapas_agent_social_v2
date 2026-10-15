@@ -121,6 +121,20 @@ def test_doc_bai_gon_va_giu_bai_moi_nhat_khi_cat(gia):
     assert "left(b.noi_dung, 1000)" in sql and "b.*" not in sql
     # Đợt 2b: khoá bài cần cho khung chi tiết (mở bình luận của bài) — chỉ khoá, không cột dài.
     assert "b.khoa," in sql and "b.bl_da_lay" in sql
+    assert "b.kieu_quet" in sql                                 # đợt 2f: bộ lọc "kiểu quét"
+
+
+def test_doc_bai_theo_khoa_cung_cot_tung_lo(gia):
+    """Đợt 2f: bài gốc của bình luận (đăng trước khoảng) đọc theo khoá, cùng cột hẹp, từng lô."""
+    assert K.bai_theo_khoa("hapas", []) == [] and gia.gd == []
+    gia.tra[r"FROM bai b"] = [{"khoa": "x"}]
+    khoa = [f"k{i}" for i in range(12_000)] + ["k1", ""]       # trùng + rỗng bị bỏ
+    assert len(K.bai_theo_khoa("hapas", khoa)) == 3            # 3 lô: 5.000 + 5.000 + 2.000
+    lenh = gia.gd[0].lenh
+    assert [len(p[1]) for _, p in lenh] == [5000, 5000, 2000]
+    assert all("b.khoa = ANY(%s)" in s and K._COT_BAI_CS in s for s, _ in lenh)
+    cot = set(re.findall(r"\bb\.([a-z_]+)", K._COT_BAI_CS))
+    assert "kieu_quet" in cot and cot <= _cot("bai")
 
 
 def test_duyet_de_xuat_them_nguon_qua_de_xuat(gia):

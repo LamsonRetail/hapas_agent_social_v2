@@ -58,6 +58,7 @@ class GiaKho:
         self.goi_bai: list[tuple] = []
         self.bl: list[dict] = []
         self.goi_bl: list[tuple] = []
+        self.goi_bai_khoa: list[tuple] = []
         self.loi_kiem = False
 
     def _ghi(self, ai, hanh_dong, doi_tuong):
@@ -161,6 +162,10 @@ class GiaKho:
 
     def binh_luan_cua_bai(self, du_an, khoa, toi_da=300):
         return [dict(c) for c in self.bl if c["khoa_bai"] == khoa][:toi_da]
+
+    def bai_theo_khoa(self, du_an, khoa):
+        self.goi_bai_khoa.append(tuple(khoa))
+        return [b for b in self.bai if b["khoa"] in set(khoa)]
 
     def dat_tim_tu_khoa(self, ai, ma, bat, so_bai):
         self.du_an[ma].update(tk_bat=bat, tk_so_bai=so_bai)
@@ -1192,7 +1197,10 @@ def test_api_bai_loc_theo_cot_vua_bam():
     assert d["tong"] == 2 and d["thao_luan"] == 53
     assert [b["khoa"] for b in d["bai"]] == ["tiktok:1", "tiktok:2"]     # nhiều thảo luận trước
     assert c.get(q + "&sac_thai=Tiêu cực").json()["tong"] == 1
-    assert [b["khoa"] for b in c.get(q + "&sac_thai=kênh nhà").json()["bai"]] == ["tiktok:3"]
+    # Đợt 2f: `sac_thai` là bộ lọc CHUNG; sắc thái riêng của điểm vừa bấm (gồm "kênh nhà") là
+    # `ct_sac_thai` — AND với bộ lọc chung.
+    assert [b["khoa"] for b in c.get(q + "&ct_sac_thai=kênh nhà").json()["bai"]] == ["tiktok:3"]
+    assert c.get(q + "&sac_thai=kênh nhà").status_code == 400
     assert c.get(q + "&nguon=n:1").json()["tong"] == 3
     assert c.get(q + "&sac_thai=<script>").status_code == 400
     assert c.get(q + "&ngay_tu=2026-13-01").status_code == 400
@@ -1414,4 +1422,131 @@ def test_cau_hinh_cao_het_binh_luan():
 def test_loai_binh_luan_khop_mark():
     import loc_rac
     assert A.CS.LOAI_BL == loc_rac.LOAI and A.CS.TEN_LOAI_BL == loc_rac.TEN_LOAI
+
+
+# ───────────────────────────── bộ lọc chung (đợt 2f) ─────────────────────────────
+Q_LOC = "&tu=2026-10-08&den=2026-10-14"
+
+
+def _kho_loc():
+    _, c, kho = tao()
+    luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    kho.bai = [_bai(luc, khoa="tiktok:1", binh_luan=4),                               # KOL
+               _bai(luc, khoa="facebook:2", nen_tang="facebook", nguon_id=2, binh_luan=1,
+                    nguon_loai="kenh_nha", sac_thai=None),                           # kênh nhà
+               _bai(luc, khoa="tiktok:3", nguon_id=None, nguon_loai=None, thich=2000,
+                    kieu_quet="tu_khoa", sac_thai="Tiêu cực"),                        # từ khoá
+               # Bài CŨ (trước cả kỳ trước) có bình luận mới trong kỳ: chỉ đọc theo khoá khi cần.
+               _bai(datetime.datetime(2026, 7, 1, 9, 0, tzinfo=VN), khoa="tiktok:cu",
+                    followers=2_000_000)]
+    kho.bl = [_bl("tiktok:1", "a", luc), _bl("tiktok:1", "b", luc, sac="Tiêu cực"),
+              dict(_bl("facebook:2", "c", luc, sac="Tiêu cực"), nen_tang="facebook",
+                   nguon_id=2, nguon_loai="kenh_nha"),
+              _bl("tiktok:cu", "d", luc, sac="Tiêu cực")]
+    dang_nhap(c, XEM)
+    return c, kho
+
+
+def test_api_chi_so_bo_loc_moi_khoi_va_khoa_nho_rieng():
+    c, kho = _kho_loc()
+    app = c.app
+
+    def lay(q=""):
+        r = c.get("/api/chi-so?du_an=hapas" + Q_LOC + q)
+        assert r.status_code == 200, q
+        return r.json()
+    d = lay("&pham_vi=kenh_nha")
+    assert d["kpi"]["bai"] == 1 and d["binh_luan_da_cao"]["kpi"]["so"] == 1
+    assert d["bo_loc"]["pham_vi"] == "kenh_nha"
+    assert d["bo_loc_dem"]["pham_vi"] == {"kenh_nha": 1, "ben_ngoai": 2}   # bỏ qua chính chiều
+    nn = d["nha_ngoai"]
+    assert (nn["kenh_nha"]["bai"], nn["ben_ngoai"]["bai"]) == (1, 2)
+    assert (nn["kenh_nha"]["bl"], nn["ben_ngoai"]["bl"]) == (1, 3)
+    d = lay("&sac_thai=tieu_cuc")
+    assert d["kpi"]["bai"] == 1                                      # bài tiêu cực (từ khoá)
+    assert d["binh_luan_da_cao"]["kpi"]["tieu_cuc"] == 3             # b, c, d — sắc thái của BL
+    assert kho.goi_bai_khoa == []                                    # không cần bài gốc
+    # Ảnh hưởng là chiều cấp BÀI: bình luận "d" theo bài cũ 2 triệu follower -> kho đọc đúng
+    # MỘT bài thiếu theo khoá (không đọc lại cả khoảng).
+    d = lay("&anh_huong=mega")
+    assert d["kpi"]["bai"] == 0 and d["binh_luan_da_cao"]["kpi"]["so"] == 1
+    assert kho.goi_bai_khoa == [("tiktok:cu",)]
+    d = lay("&tuong_tac=1000")
+    assert d["kpi"]["bai"] == 1 and d["top_bai"][0]["khoa"] == "tiktok:3"
+    # Mỗi bộ lọc một khoá nhớ /api/chi-so; dòng thô đọc MỘT lần cho cả khoảng.
+    so_khoa = len(app.state.nho_chi_so)
+    assert so_khoa == 4
+    lay("&nen_tang=tiktok,facebook")
+    lay("&nen_tang=facebook,tiktok")                                 # cùng bộ lọc, khác thứ tự
+    assert len(app.state.nho_chi_so) == so_khoa + 1
+    assert len(kho.goi_bai) == 1 and len(kho.goi_bl) == 1
+
+
+@pytest.mark.parametrize("duong", ["chi-so", "bai", "binh-luan"])
+@pytest.mark.parametrize("sai", ["pham_vi=nha", "nen_tang=threads", "loai=vip", "sac_thai=vui",
+                                 "chu_de=" + "x" * 101, "anh_huong=khong_lo", "tuong_tac=5",
+                                 "kieu_quet=x", "q=" + "x" * 101, "nen_tang=tiktok,myspace"])
+def test_api_bo_loc_sai_thi_400(duong, sai):
+    c, _ = _kho_loc()
+    r = c.get(f"/api/{duong}?du_an=hapas{Q_LOC}&{sai}")
+    assert r.status_code == 400 and r.json()["loi"], (duong, sai)
+
+
+def test_api_bai_va_binh_luan_theo_bo_loc_chung():
+    c, _ = _kho_loc()
+    qb = "/api/bai?du_an=hapas" + Q_LOC
+    assert c.get(qb + "&pham_vi=ben_ngoai").json()["tong"] == 2
+    # điều kiện của điểm vừa bấm (ct_*) AND bộ lọc chung
+    d = c.get(qb + "&pham_vi=ben_ngoai&ct_sac_thai=Tiêu cực").json()
+    assert [b["khoa"] for b in d["bai"]] == ["tiktok:3"]
+    assert c.get(qb + "&pham_vi=kenh_nha&ct_nen_tang=tiktok").json()["tong"] == 0
+    assert c.get(qb + "&ct_nen_tang=threads").status_code == 400
+    ql = "/api/binh-luan?du_an=hapas" + Q_LOC
+    assert [x["ma"] for x in c.get(ql + "&pham_vi=kenh_nha").json()["binh_luan"]] == ["c"]
+    d = c.get(ql + "&sac_thai=tieu_cuc").json()
+    assert d["tong"] == 3
+    # Facets của luồng tính SAU bộ lọc chung; trường riêng (_bl) AND thêm.
+    assert {g["gia_tri"]: g["so"] for g in d["facets"]["nen_tang"]} == {"tiktok": 2, "facebook": 1}
+    assert c.get(ql + "&sac_thai=tieu_cuc&nen_tang_bl=facebook").json()["tong"] == 1
+    assert [x["ma"] for x in c.get(ql + "&anh_huong=mega").json()["binh_luan"]] == ["d"]
+    # Chữ tìm chung: bình luận khớp khi bài của nó khớp ("túi xách" là nội dung mọi bài mẫu).
+    assert c.get(ql + "&q=TUI XACH").json()["tong"] == 4
+    assert c.get(ql + "&q_bl=zzz").json()["tong"] == 0               # ô tìm riêng của luồng
+    assert c.get(ql + "&sac_thai_bl=Tiêu cực&pham_vi=ben_ngoai").json()["tong"] == 2
+
+
+def test_trang_chi_so_co_thanh_loc_chung():
+    _, c, _ = tao()
+    dang_nhap(c, XEM)
+
+    def cau_hinh(t):
+        m = re.search(r'<script type="application/json" id="cau-hinh-chi-so">(.*?)</script>', t,
+                      re.DOTALL)
+        return json.loads(m.group(1))
+    t = c.get("/").text
+    for ma in ("bo-loc", "loc-nhanh", "loc-form", "loc-du-an", "loc-tu", "loc-den", "loc-ky",
+               "loc-pham-vi", "loc-q", "loc-truong", "loc-dang", "loc-tom", "loc-mo-tam",
+               "loc-tam", "loc-tam-xem", "khoi-nha-ngoai", "nha-ngoai", "chua-tron"):
+        assert f'id="{ma}"' in t, ma
+    assert 'class="the-khoi cs-bo-loc"' in t and 'name="nen_tang"' not in t   # select cũ đã bỏ
+    cfg = cau_hinh(t)
+    assert cfg["bo_loc"]["pham_vi"] == "tat_ca" and cfg["mac_dinh"]["den"] == cfg["den"]
+    assert [p["ten"] for p in cfg["nhanh"]][:2] == ["Kênh nhà", "Listening bên ngoài"]
+    assert {"Khách hỏi mua", "Cảnh báo khủng hoảng", "Tiêu cực cần xử lý",
+            "KOL/KOC nói về thương hiệu"} <= {p["ten"] for p in cfg["nhanh"]}
+    assert set(cfg["nhan"]["pham_vi"]) == {"tat_ca", "kenh_nha", "ben_ngoai"}
+    # Link chia sẻ: trang mở đúng bộ lọc trong URL; link cũ một giá trị vẫn đọc được.
+    cfg = cau_hinh(c.get("/?pham_vi=kenh_nha&nen_tang=tiktok,facebook&sac_thai=tieu_cuc"
+                         "&q=túi").text)
+    assert cfg["bo_loc"]["pham_vi"] == "kenh_nha" and cfg["bo_loc"]["q"] == "túi"
+    assert cfg["bo_loc"]["nen_tang"] == ["facebook", "tiktok"]
+    assert cfg["bo_loc"]["sac_thai"] == ["tieu_cuc"]
+    assert cau_hinh(c.get("/?nen_tang=facebook&loai=kol").text)["bo_loc"]["loai"] == ["kol"]
+    r = c.get("/?pham_vi=xau")
+    assert r.status_code == 200 and "Đã bỏ bộ lọc" in r.text
+    assert cau_hinh(r.text)["bo_loc"]["pham_vi"] == "tat_ca"
+    js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
+    for can in ("history.pushState", "popstate", "AbortController", "ct_sac_thai", "sac_thai_bl",
+                "showModal"):
+        assert can in js, can
 

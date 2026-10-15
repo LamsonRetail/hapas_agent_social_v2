@@ -19,33 +19,64 @@
   <span class="cs-cap-nhat"><span class="cs-cham-song" id="cham-song" aria-hidden="true"></span><span id="cap-nhat-luc" aria-live="polite">Đang tải…</span></span>
 </div>
 
-<form class="the-khoi hang cach-duoi cs-loc" method="get" action="/">
-  <label class="o cs-loc__du-an">Dự án
-    <select name="du_an">
-      {% for d in du_an_ds %}<option value="{{ d.ma }}"{% if d.ma == du_an.ma %} selected{% endif %}>{{ d.ten }}{% if not d.dang_bat %} (đang tắt){% endif %}</option>{% endfor %}
-    </select>
-  </label>
-  <label class="o">Từ ngày <input type="date" name="tu" value="{{ loc.tu }}"></label>
-  <label class="o">Đến ngày <input type="date" name="den" value="{{ loc.den }}"></label>
-  <label class="o">Nền tảng
-    <select name="nen_tang">
-      <option value="">Tất cả</option>
-      {% for k, v in TEN_NEN_TANG.items() %}<option value="{{ k }}"{% if loc.nen_tang == k %} selected{% endif %}>{{ v }}</option>{% endfor %}
-    </select>
-  </label>
-  <label class="o">Loại nguồn
-    <select name="loai">
-      <option value="">Tất cả</option>
-      {% for k, v in TEN_LOAI.items() %}<option value="{{ k }}"{% if loc.loai == k %} selected{% endif %}>{{ v }}</option>{% endfor %}
-    </select>
-  </label>
-  <button class="nut" type="submit">Xem</button>
-</form>
-{% if loi_loc %}<div class="thong-bao thong-bao--loi">{{ loi_loc }} Đang hiện 30 ngày trọn gần nhất.</div>{% endif %}
-<p class="ghi-chu sat-tren cach-duoi">Mặc định: 30 ngày trọn tới hết hôm qua (giờ VN), so với 30 ngày liền trước.{% if chua_tron %} <b>Khoảng có hôm nay — ngày chưa hết nên số cuối còn thấp.</b>{% endif %}</p>
+<div class="cs-nhanh" id="loc-nhanh" role="group" aria-label="Lọc nhanh"></div>
+
+{# Thanh lọc CHUNG (đợt 2f): mọi khối bên dưới + khung chi tiết cùng theo một bộ lọc; URL luôn
+   khớp bộ lọc (gửi link là người nhận thấy đúng như mình). Không JS thì biểu mẫu vẫn đổi được
+   dự án / ngày. Điện thoại: thanh gọn "Bộ lọc (n)" mở tấm lọc (dialog). #}
+<section class="the-khoi cs-bo-loc" id="bo-loc" aria-label="Bộ lọc chung">
+  <div class="cs-bo-loc__gon">
+    <button type="button" class="nut nut--nhe cs-bo-loc__mo" id="loc-mo-tam" aria-haspopup="dialog" aria-controls="loc-tam">Bộ lọc<span class="cs-bo-loc__so" id="loc-so"></span></button>
+    <p class="cs-bo-loc__tom-gon" id="loc-tom-gon" aria-live="polite"></p>
+  </div>
+  <div class="cs-bo-loc__cho" id="loc-cho">
+    <div class="cs-bo-loc__than" id="loc-than">
+      <form class="cs-bo-loc__hang" id="loc-form" method="get" action="/">
+        <label class="cs-o-loc cs-o-loc--du-an"><span>Dự án</span>
+          <select name="du_an" id="loc-du-an">
+            {% for d in du_an_ds %}<option value="{{ d.ma }}"{% if d.ma == du_an.ma %} selected{% endif %}>{{ d.ten }}{% if not d.dang_bat %} (đang tắt){% endif %}</option>{% endfor %}
+          </select>
+        </label>
+        <div class="cs-o-loc" role="group" aria-labelledby="loc-ngay-nhan">
+          <span id="loc-ngay-nhan">Khoảng ngày</span>
+          <span class="cs-ngay"><input type="date" name="tu" id="loc-tu" value="{{ loc.tu }}" aria-label="Từ ngày"><span class="cs-ngay__den" aria-hidden="true">→</span><input type="date" name="den" id="loc-den" value="{{ loc.den }}" aria-label="Đến ngày"></span>
+        </div>
+        <div class="cs-phan cs-bo-loc__ky" id="loc-ky" aria-label="Khoảng nhanh"></div>
+        <div class="cs-phan cs-bo-loc__pv" id="loc-pham-vi" aria-label="Phạm vi"></div>
+        <label class="cs-tim cs-bo-loc__tim" id="loc-tim-khung"><span class="cs-an">Tìm trong bài và bình luận</span><input type="search" name="q" id="loc-q" maxlength="100" value="{{ loc.bo_loc.q }}" placeholder="Tìm trong bài + bình luận…" autocomplete="off"></label>
+        <button class="nut nut--nho" type="submit" id="loc-xem">Xem</button>
+      </form>
+      <div class="cs-truong-ds cs-bo-loc__truong" id="loc-truong" aria-label="Lọc theo trường"></div>
+      <div class="cs-bo-loc__duoi">
+        <p class="cs-bo-loc__tom" id="loc-tom" aria-live="polite"></p>
+        <div class="cs-dang-loc__ds cs-bo-loc__dang" id="loc-dang"></div>
+      </div>
+      <p class="cs-bo-loc__goi-y" id="loc-goi-y" hidden></p>
+      <p class="cs-bo-loc__loi" id="loc-loi" role="alert" hidden></p>
+    </div>
+  </div>
+  <div class="cs-bo-loc__tien" id="loc-tien" hidden></div>
+</section>
+<dialog class="cs-tam" id="loc-tam" aria-labelledby="loc-tam-tieu-de">
+  <div class="cs-tam__dau"><h2 id="loc-tam-tieu-de">Bộ lọc</h2><button class="nut nut--nhe nut--nho" type="button" id="loc-tam-dong">Đóng ✕</button></div>
+  <div class="cs-tam__than" id="loc-tam-than"></div>
+  <div class="cs-tam__chan"><button class="nut nut--nhe" type="button" id="loc-tam-xoa">Xoá lọc</button><button class="nut" type="button" id="loc-tam-xem">Xem kết quả</button></div>
+</dialog>
+
+{% if loi_loc %}<div class="thong-bao thong-bao--loi">{{ loi_loc }}</div>{% endif %}
+<p class="ghi-chu sat-tren cach-duoi">Mặc định: 30 ngày trọn tới hết hôm qua (giờ VN), so với 30 ngày liền trước. <b id="chua-tron"{% if not chua_tron %} hidden{% endif %}>Khoảng có hôm nay — ngày chưa hết nên số cuối còn thấp.</b></p>
 <div class="thong-bao thong-bao--loi" id="loi-tai" role="alert" hidden></div>
 <div class="thong-bao thong-bao--loi" id="canh-bao" hidden>Quá nhiều bài: chỉ tính 20.000 bài mới nhất nên % so với kỳ trước không đáng tin — hãy chọn khoảng ngắn hơn.</div>
 <div class="thong-bao thong-bao--loi" id="canh-bao-bl" hidden>Quá nhiều bình luận: chỉ tính 50.000 bình luận mới nhất — hãy chọn khoảng ngắn hơn.</div>
+
+<section class="the-khoi cach-duoi cs-nn" id="khoi-nha-ngoai" aria-labelledby="nn-tieu-de">
+  <div class="cs-the__dau">
+    <div class="cs-the__tieu-de"><h2 id="nn-tieu-de">Kênh nhà vs Bên ngoài</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Kênh nhà = nguồn loại Kênh nhà (fanpage, kênh TikTok… của chính thương hiệu) — Mark quét đủ. Bên ngoài = KOL, trang, nhóm, báo và bài tìm theo từ khoá. Hai bên cùng theo mọi bộ lọc khác. Sắc thái kênh nhà là sắc thái bình luận của khách (bài của thương hiệu không tính). Bấm một bên để chỉ xem bên đó.">i</button></div>
+    <span class="mo nho" id="nn-phu"></span>
+  </div>
+  <div class="cs-nn__ty" id="nn-ty"></div>
+  <div class="cs-nn__luoi" id="nha-ngoai"><div class="cs-khung-cho cs-khung-cho--nn"></div><div class="cs-khung-cho cs-khung-cho--nn"></div></div>
+</section>
 
 <div class="luoi luoi--kpi" id="kpi" aria-live="polite">
   {% for i in range(9) %}<div class="cs-khung-cho cs-khung-cho--kpi"></div>{% endfor %}

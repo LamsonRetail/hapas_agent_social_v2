@@ -479,6 +479,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     # — người xem bấm liên tục khoảng 400 ngày không làm cạn bộ nhớ dịch vụ) + bộ nhớ đệm ngắn.
     app.state.ban = threading.Semaphore(TINH_SONG_SONG)
     app.state.nho_dong = collections.OrderedDict()
+    app.state.nho_bai_thieu = collections.OrderedDict()
     app.state.nho_chi_so = collections.OrderedDict()
     app.state.nho_suc_khoe = (0.0, False)
     # Hook sau mỗi `cap-nhat`: danh sách hàm (du_an, luot), chạy NỀN sau khi đã đẩy sự kiện
@@ -605,18 +606,27 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         try:
             tu, den = _doc_khoang(q)
         except NL.LoiNhap as e:
-            loi = str(e)
+            loi = str(e) + " Đang hiện 30 ngày trọn gần nhất."
             tu, den = _doc_khoang({})
-        nen_tang = q.get("nen_tang") if q.get("nen_tang") in NL.NEN_TANG else ""
-        loai = q.get("loai") if q.get("loai") in CS.TEN_LOAI else ""
+        try:
+            bo_loc = CS.doc_bo_loc(q)
+        except CS.LoiBoLoc as e:
+            loi = (loi + " " if loi else "") + str(e) + " Đã bỏ bộ lọc."
+            bo_loc = CS.doc_bo_loc({})
+        mac_dinh = _doc_khoang({})
+        hom_nay = _hom_nay()
+        # Thanh lọc chung (đợt 2f): trạng thái đầu + nhãn + bộ lọc nhanh — JS đọc qua JSON nhúng.
         loc = {"du_an": du_an["ma"] if du_an else "", "tu": tu.isoformat(),
-               "den": den.isoformat(), "nen_tang": nen_tang, "loai": loai}
+               "den": den.isoformat(), "bo_loc": CS.bo_loc_json(bo_loc),
+               "mac_dinh": {"tu": mac_dinh[0].isoformat(), "den": mac_dinh[1].isoformat()},
+               "hom_nay": hom_nay.isoformat(), "toi_da_ngay": KHOANG_TOI_DA_NGAY,
+               "nhan": CS.NHAN_BO_LOC, "nhanh": list(CS.BO_LOC_NHANH)}
         return _trang(request, "chi_so.html", nguoi, "chi_so", du_an_ds=ds, du_an=du_an,
-                      loc=loc, loi_loc=loi, chua_tron=den >= _hom_nay())
+                      loc=loc, loi_loc=loi, chua_tron=den >= hom_nay)
 
     async def _loc_api(request: Request):
-        """Bộ lọc chung của các API số liệu. -> (dự án, từ, đến, nền tảng, loại) hoặc
-        JSONResponse lỗi."""
+        """Bộ lọc chung của các API số liệu. -> (dự án, từ, đến, bộ lọc `CS.doc_bo_loc`) hoặc
+        JSONResponse lỗi (400 khi giá trị lọc sai)."""
         await _nguoi(request)
         q = request.query_params
         du_an = await _k(app.state.kho.doc_du_an, q.get("du_an") or "")
@@ -631,57 +641,106 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         if (den - tu).days + 1 > KHOANG_TOI_DA_NGAY:
             return JSONResponse({"loi": f"Khoảng tối đa {KHOANG_TOI_DA_NGAY} ngày."},
                                 status_code=400)
-        nen_tang = q.get("nen_tang") or None
-        loai = q.get("loai") or None
-        if (nen_tang and nen_tang not in NL.NEN_TANG) or (loai and loai not in CS.TEN_LOAI):
-            return JSONResponse({"loi": "Bộ lọc không hợp lệ."}, status_code=400)
-        return du_an, tu, den, nen_tang, loai
+        try:
+            bo_loc = CS.doc_bo_loc(q)
+        except CS.LoiBoLoc as e:
+            return JSONResponse({"loi": str(e)}, status_code=400)
+        return du_an, tu, den, bo_loc
 
     def _moc_ngay(tu: datetime.date, den: datetime.date) -> tuple:
         return (datetime.datetime.combine(tu, datetime.time(0), VN),
                 datetime.datetime.combine(den + datetime.timedelta(days=1), datetime.time(0), VN))
 
-    async def _dong_nho(loai_dong: str, du_an: str, tu, den):
-        """Dòng bài / bình luận của [tu, den] cho khung chi tiết, nhớ `NHO_CHI_SO_GIAY` giây
-        theo mốc lượt quét mới nhất (bấm liên tiếp nhiều cột không đọc lại kho mỗi lần).
-        -> None khi máy chủ đang bận."""
+    async def _kq_nho(loai_dong: str, du_an: str, tu, den, *, da_giu: bool = False):
+        """{rows, bi_cat} bài / bình luận của [tu, den] (CHƯA lọc), nhớ `NHO_CHI_SO_GIAY` giây
+        theo mốc lượt quét mới nhất: đổi bộ lọc, bấm liên tiếp nhiều cột, lật trang bình luận
+        không đọc lại kho. Bài luôn đọc từ đầu KỲ TRƯỚC (`/api/chi-so` cần so sánh; khung chi
+        tiết tự cắt về kỳ này) nên mọi API dùng chung một bộ dòng mỗi khoảng. `da_giu`: bên gọi
+        đã giữ suất tính (`app.state.ban`). -> None khi máy chủ đang bận."""
+        if loai_dong == "bai":
+            tu = CS.khoang_truoc(tu, den)[0]
         moc = await _k(app.state.kho.luot_xong_moi_nhat) or {}
         khoa = (loai_dong, du_an, tu, den, moc.get("id"), str(moc.get("ket_thuc")))
         nho = app.state.nho_dong
         x = nho.get(khoa)
         if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
+            nho.move_to_end(khoa)
             return x[1]
-        if not app.state.ban.acquire(blocking=False):
+        if not da_giu and not app.state.ban.acquire(blocking=False):
             return None
         try:
             bd, kt = _moc_ngay(tu, den)
             fn = (app.state.kho.bai_trong_khoang if loai_dong == "bai"
                   else app.state.kho.binh_luan_trong_khoang)
-            rows = (await _k(fn, du_an, bd, kt))["rows"]
+            kq = await _k(fn, du_an, bd, kt)
+            kq = {"rows": kq["rows"], "bi_cat": bool(kq["bi_cat"])}
         finally:
-            app.state.ban.release()
-        nho[khoa] = (time.monotonic(), rows)
+            if not da_giu:
+                app.state.ban.release()
+        nho[khoa] = (time.monotonic(), kq)
         while len(nho) > NHO_DONG_TOI_DA:
             nho.popitem(last=False)
-        return rows
+        return kq
+
+    async def _dong_nho(loai_dong: str, du_an: str, tu, den):
+        kq = await _kq_nho(loai_dong, du_an, tu, den)
+        return None if kq is None else kq["rows"]
+
+    async def _bai_cho_bl(du_an: str, bai: list, bl: list, khoa_nho: tuple, *,
+                          da_giu: bool = False):
+        """Bài gốc theo khoá cho các bình luận, khi bộ lọc có điều kiện cấp bài mà dòng bình luận
+        không mang (ảnh hưởng, tương tác, kiểu quét, nguồn tìm theo từ khoá, chữ tìm). Bài đã đọc
+        của khoảng dùng lại; bài đăng TRƯỚC khoảng (bình luận mới dưới bài cũ) đọc thêm theo
+        khoá — chỉ cột hẹp, chỉ các bài thiếu — và nhớ như `_kq_nho`. -> None khi bận."""
+        ds = CS.chi_muc_bai(bai)
+        thieu = CS.khoa_bai_thieu(bl, ds)
+        if not thieu:
+            return ds
+        nho = app.state.nho_bai_thieu
+        x = nho.get(khoa_nho)
+        if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
+            them = x[1]
+        else:
+            if not da_giu and not app.state.ban.acquire(blocking=False):
+                return None
+            try:
+                them = await _k(app.state.kho.bai_theo_khoa, du_an, thieu)
+            finally:
+                if not da_giu:
+                    app.state.ban.release()
+            nho[khoa_nho] = (time.monotonic(), them)
+            while len(nho) > NHO_DONG_TOI_DA:
+                nho.popitem(last=False)
+        ds.update(CS.chi_muc_bai(them))
+        return ds
 
     def _dk_chi_tiet(q) -> dict:
-        """Điều kiện của khung chi tiết (cột/điểm vừa bấm). Ném NL.LoiNhap khi rác."""
+        """Điều kiện RIÊNG của khung chi tiết bài (cột/điểm vừa bấm), AND với bộ lọc chung. Tên
+        có tiền tố `ct_` để không trùng tham số của bộ lọc chung. Ném NL.LoiNhap khi rác."""
         dk: dict = {}
         for k in ("ngay_tu", "ngay_den"):
             if q.get(k):
                 dk[k] = NL.ngay(q.get(k), _hom_nay())
-        s = q.get("sac_thai") or ""
+        s = q.get("ct_sac_thai") or ""
         if s:
             if s not in (*CS.SAC_THAI, CS.CHUA, "kênh nhà"):
                 raise NL.LoiNhap("Sắc thái không hợp lệ.")
             dk["sac_thai"] = s
-        for k, dai in (("chu_de", 100), ("nguon", 300), ("cum", 100)):
+        if q.get("ct_nen_tang"):
+            if q.get("ct_nen_tang") not in NL.NEN_TANG:
+                raise NL.LoiNhap("Nền tảng không hợp lệ.")
+            dk["nen_tang"] = q.get("ct_nen_tang")
+        if q.get("ct_loai"):
+            if q.get("ct_loai") not in CS.TEN_LOAI:
+                raise NL.LoiNhap("Loại nguồn không hợp lệ.")
+            dk["loai_nguon"] = q.get("ct_loai")
+        for k, ra, dai in (("ct_chu_de", "chu_de", 100), ("ct_nguon", "nguon", 300),
+                           ("cum", "cum", 100)):
             v = (q.get(k) or "").strip()
             if v:
                 if len(v) > dai:
                     raise NL.LoiNhap("Điều kiện quá dài.")
-                dk[k] = v
+                dk[ra] = v
         return dk
 
     def _ban():
@@ -693,7 +752,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         x = await _loc_api(request)
         if isinstance(x, JSONResponse):
             return x
-        du_an, tu, den, nen_tang, loai = x
+        du_an, tu, den, bo_loc = x
         q = request.query_params
         try:
             dk = _dk_chi_tiet(q)
@@ -703,18 +762,53 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         if rows is None:
             return _ban()
         kq = await _k(CS.chi_tiet_bai, rows, tu, den, trang=_so_trang(q.get("trang")),
-                      **{"nen_tang": nen_tang, "loai_nguon": loai, **dk})
+                      bo_loc=bo_loc, **dk)
         return JSONResponse(kq)
+
+    def _dk_bl(q) -> dict:
+        """Điều kiện RIÊNG của luồng bình luận / khung chi tiết bình luận (hậu tố `_bl`), AND với
+        bộ lọc chung. Ném NL.LoiNhap khi rác."""
+        dk: dict = {}
+        for k in ("ngay_tu", "ngay_den"):
+            if q.get(k):
+                dk[k] = NL.ngay(q.get(k), _hom_nay())
+        s = q.get("sac_thai_bl") or ""
+        if s:
+            if s not in (*CS.SAC_BL, CS.CHUA):
+                raise NL.LoiNhap("Sắc thái không hợp lệ.")
+            dk["sac_thai"] = s
+        if q.get("loai_bl"):
+            if q.get("loai_bl") not in CS.LOAI_BL:
+                raise NL.LoiNhap("Nhãn lọc không hợp lệ.")
+            dk["loai"] = q.get("loai_bl")
+        for k, ra, dai in (("q_bl", "q", 100), ("nguon_bl", "nguon", 300),
+                           ("chu_de_bl", "chu_de", 100)):
+            v = (q.get(k) or "").strip()
+            if len(v) > dai:
+                raise NL.LoiNhap("Điều kiện quá dài.")
+            if v:
+                dk[ra] = v
+        sx = q.get("sap_xep") or "thich"
+        if sx not in CS.SAP_XEP_BL:
+            raise NL.LoiNhap("Cách sắp xếp không hợp lệ.")
+        dk["sap_xep"] = sx
+        if q.get("nen_tang_bl"):
+            if q.get("nen_tang_bl") not in NL.NEN_TANG:
+                raise NL.LoiNhap("Nền tảng không hợp lệ.")
+            dk["nen_tang"] = q.get("nen_tang_bl")
+        return dk
 
     @app.get("/api/binh-luan")
     async def api_binh_luan(request: Request):
         x = await _loc_api(request)
         if isinstance(x, JSONResponse):
             return x
-        du_an, tu, den, nen_tang, loai = x
+        du_an, tu, den, bo_loc = x
         q = request.query_params
         khoa = (q.get("khoa") or "").strip()
         if khoa:
+            # Chuỗi bình luận của MỘT bài (bài đã khớp bộ lọc mới được bấm): giữ đủ cả chuỗi —
+            # lọc theo sắc thái/chữ ở đây làm đứt mạch trả lời.
             if len(khoa) > 200:
                 return JSONResponse({"loi": "Khoá bài không hợp lệ."}, status_code=400)
             ds = await _k(app.state.kho.binh_luan_cua_bai, du_an["ma"], khoa)
@@ -725,34 +819,25 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             return JSONResponse({"tong": len(ds), "trang": trang, "so_trang": so_trang,
                                  "binh_luan": [CS.the_bl(c) for c in mot]})
         try:
-            dk = _dk_chi_tiet(q)
+            dk = _dk_bl(q)
         except NL.LoiNhap as e:
             return JSONResponse({"loi": str(e)}, status_code=400)
-        if dk.get("sac_thai") == "kênh nhà" or dk.get("nguon") or dk.get("cum"):
-            return JSONResponse({"loi": "Điều kiện không hợp lệ cho bình luận."}, status_code=400)
-        if q.get("loai_bl"):
-            if q.get("loai_bl") not in CS.LOAI_BL:
-                return JSONResponse({"loi": "Nhãn lọc không hợp lệ."}, status_code=400)
-            dk["loai"] = q.get("loai_bl")
-        for k, dai in (("q", 100), ("nguon_bl", 300)):
-            v = (q.get(k) or "").strip()
-            if len(v) > dai:
-                return JSONResponse({"loi": "Điều kiện quá dài."}, status_code=400)
-            if v:
-                dk["q" if k == "q" else "nguon"] = v
-        sx = q.get("sap_xep") or "thich"
-        if sx not in CS.SAP_XEP_BL:
-            return JSONResponse({"loi": "Cách sắp xếp không hợp lệ."}, status_code=400)
-        dk["sap_xep"] = sx
-        if q.get("nen_tang_bl"):
-            if q.get("nen_tang_bl") not in NL.NEN_TANG:
-                return JSONResponse({"loi": "Nền tảng không hợp lệ."}, status_code=400)
-            dk["nen_tang"] = q.get("nen_tang_bl")
         rows = await _dong_nho("bl", du_an["ma"], tu, den)
         if rows is None:
             return _ban()
+        bai_khoa = None
+        if CS.can_tra_bai(bo_loc):
+            bai = await _dong_nho("bai", du_an["ma"], tu, den)
+            if bai is None:
+                return _ban()
+            moc = await _k(app.state.kho.luot_xong_moi_nhat) or {}
+            bai_khoa = await _bai_cho_bl(du_an["ma"], bai, rows,
+                                         (du_an["ma"], tu, den, moc.get("id"),
+                                          str(moc.get("ket_thuc"))))
+            if bai_khoa is None:
+                return _ban()
         kq = await _k(CS.chi_tiet_bl, rows, tu, den, trang=_so_trang(q.get("trang")),
-                      **{"nen_tang": nen_tang, "loai_nguon": loai, **dk})
+                      bo_loc=bo_loc, bai_theo_khoa=bai_khoa, **dk)
         # Link + đoạn nội dung bài chỉ đọc cho bình luận của trang này (không cho cả khoảng).
         nc = await _k(app.state.kho.ngu_canh_bai, du_an["ma"],
                       [x["khoa_bai"] for x in kq["binh_luan"]])
@@ -764,13 +849,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         x = await _loc_api(request)
         if isinstance(x, JSONResponse):
             return x
-        du_an, tu, den, nen_tang, loai = x
+        du_an, tu, den, bo_loc = x
         hom_nay = _hom_nay()
-        # Bộ nhớ đệm: khoá gồm mốc lượt quét vừa xong — có lượt mới là tính lại ngay, không có
-        # thì nhiều người mở cùng bộ lọc trong NHO_CHI_SO_GIAY giây chỉ tốn một lần đọc kho.
+        # Bộ nhớ đệm: khoá gồm BỘ LỌC + mốc lượt quét vừa xong — có lượt mới là tính lại ngay,
+        # không có thì nhiều người mở cùng bộ lọc trong NHO_CHI_SO_GIAY giây chỉ tính một lần.
+        # Dòng thô (chưa lọc) nhớ riêng theo khoảng (`_kq_nho`): đổi bộ lọc không đọc lại kho.
         moc = await _k(app.state.kho.luot_xong_moi_nhat) or {}
-        khoa = (du_an["ma"], tu, den, nen_tang, loai, hom_nay, tuple(du_an["tu_khoa"] or []),
-                moc.get("id"), str(moc.get("ket_thuc")))
+        khoa = (du_an["ma"], tu, den, CS.khoa_bo_loc(bo_loc), hom_nay,
+                tuple(du_an["tu_khoa"] or []), moc.get("id"), str(moc.get("ket_thuc")))
         nho = app.state.nho_chi_so
         x = nho.get(khoa)
         if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
@@ -780,27 +866,33 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 return JSONResponse({"loi": "Máy chủ đang bận tính số liệu — thử lại sau ít giây."},
                                     status_code=503, headers={"Retry-After": "5"})
             try:
-                tu_truoc, _ = CS.khoang_truoc(tu, den)
-                bat_dau = datetime.datetime.combine(tu_truoc, datetime.time(0), VN)
-                ket_thuc = datetime.datetime.combine(den + datetime.timedelta(days=1),
-                                                     datetime.time(0), VN)
-                kq = await _k(app.state.kho.bai_trong_khoang, du_an["ma"], bat_dau, ket_thuc)
-                data = await _k(CS.tong_hop, kq["rows"], tu, den,
-                                tu_khoa_du_an=du_an["tu_khoa"] or [], nen_tang=nen_tang,
-                                loai_nguon=loai, hom_nay=hom_nay)
-                data["bi_cat"] = bool(kq["bi_cat"])
-                bd, kt = _moc_ngay(tu, den)
-                kb = await _k(app.state.kho.binh_luan_trong_khoang, du_an["ma"], bd, kt)
-                tk = await _k(CS.tu_khoa_thao_luan, kq["rows"], kb["rows"], tu, den,
-                              nen_tang=nen_tang, loai_nguon=loai,
-                              tu_khoa_du_an=du_an["tu_khoa"] or [])
-                data["tu_khoa"], data["tu_khoa_tong"] = tk["tu_khoa"], tk["tong"]
-                del kq
-                data["binh_luan_da_cao"] = await _k(CS.tong_hop_bl, kb["rows"], tu, den,
-                                                    nen_tang=nen_tang, loai_nguon=loai,
-                                                    hom_nay=hom_nay)
-                data["bl_bi_cat"] = bool(kb["bi_cat"])
-                del kb
+                kq = await _kq_nho("bai", du_an["ma"], tu, den, da_giu=True)
+                kb = await _kq_nho("bl", du_an["ma"], tu, den, da_giu=True)
+                bai_khoa = None
+                if CS.can_tra_bai(bo_loc):
+                    bai_khoa = await _bai_cho_bl(
+                        du_an["ma"], kq["rows"], kb["rows"],
+                        (du_an["ma"], tu, den, moc.get("id"), str(moc.get("ket_thuc"))),
+                        da_giu=True)
+                tu_khoa_da = du_an["tu_khoa"] or []
+
+                def tinh() -> dict:
+                    # MỘT bộ lọc đã dịch cho mọi khối: chữ tìm chỉ bỏ dấu mỗi dòng một lần.
+                    f = CS.bien_dich(bo_loc)
+                    d = CS.tong_hop(kq["rows"], tu, den, tu_khoa_du_an=tu_khoa_da,
+                                    hom_nay=hom_nay, bo_loc=f)
+                    tk = CS.tu_khoa_thao_luan(kq["rows"], kb["rows"], tu, den,
+                                              tu_khoa_du_an=tu_khoa_da, bo_loc=f,
+                                              bai_theo_khoa=bai_khoa)
+                    d["tu_khoa"], d["tu_khoa_tong"] = tk["tu_khoa"], tk["tong"]
+                    d["binh_luan_da_cao"] = CS.tong_hop_bl(kb["rows"], tu, den, hom_nay=hom_nay,
+                                                           bo_loc=f, bai_theo_khoa=bai_khoa)
+                    d.update(CS.tong_quan_loc(kq["rows"], kb["rows"], tu, den, f, bai_khoa))
+                    d["bo_loc"] = CS.bo_loc_json(bo_loc)
+                    d["bi_cat"], d["bl_bi_cat"] = kq["bi_cat"], kb["bi_cat"]
+                    return d
+                data = await _k(tinh)
+                del kq, kb, bai_khoa
             finally:
                 app.state.ban.release()
             nho[khoa] = (time.monotonic(), data)

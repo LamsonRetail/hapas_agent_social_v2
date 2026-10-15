@@ -257,16 +257,37 @@ def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) 
     kỳ trước, và trang báo rõ bằng cờ `bi_cat` — không lặng lẽ mất bài mới nhất."""
     with ket_noi() as c:
         rows = c.execute(
-            "SELECT b.khoa, b.nen_tang, b.nguon_id, left(b.link, 500) AS link, b.bl_da_lay, "
-            "b.ma_noi_dung, "
-            "left(b.tac_gia, 200) AS tac_gia, left(b.tai_khoan, 200) AS tai_khoan, b.followers, "
-            "b.dang_luc, left(b.noi_dung, 1000) AS noi_dung, left(b.hashtag, 500) AS hashtag, "
-            "b.sac_thai, left(b.chu_de, 100) AS chu_de, b.xem, b.thich, b.binh_luan, b.chia_se, "
-            "n.loai AS nguon_loai, n.ten AS nguon_ten, n.dinh_danh AS nguon_dinh_danh, "
-            "n.link AS nguon_link FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
+            f"SELECT {_COT_BAI_CS} FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
             "WHERE b.du_an = %s AND b.dang_luc >= %s AND b.dang_luc < %s "
             "ORDER BY b.dang_luc DESC LIMIT %s", (du_an, tu, den, BAI_TOI_DA + 1)).fetchall()
     return {"rows": rows[:BAI_TOI_DA], "bi_cat": len(rows) > BAI_TOI_DA}
+
+
+# Cột bài trang Chỉ số dùng (chữ dài cắt ngay trong SQL). `kieu_quet` (đợt 2f): bộ lọc "kiểu quét".
+_COT_BAI_CS = (
+    "b.khoa, b.nen_tang, b.nguon_id, b.kieu_quet, left(b.link, 500) AS link, b.bl_da_lay, "
+    "b.ma_noi_dung, "
+    "left(b.tac_gia, 200) AS tac_gia, left(b.tai_khoan, 200) AS tai_khoan, b.followers, "
+    "b.dang_luc, left(b.noi_dung, 1000) AS noi_dung, left(b.hashtag, 500) AS hashtag, "
+    "b.sac_thai, left(b.chu_de, 100) AS chu_de, b.xem, b.thich, b.binh_luan, b.chia_se, "
+    "n.loai AS nguon_loai, n.ten AS nguon_ten, n.dinh_danh AS nguon_dinh_danh, "
+    "n.link AS nguon_link")
+
+
+def bai_theo_khoa(du_an: str, khoa: list[str]) -> list[dict]:
+    """Bài theo khoá, cùng cột `bai_trong_khoang` — bài gốc của bình luận trong khoảng mà bài
+    đăng TRƯỚC khoảng đã đọc, chỉ khi bộ lọc chung có điều kiện cấp bài (đợt 2f). Tối đa
+    `BL_TOI_DA` khoá (= số bình luận tối đa của một khoảng), đọc từng lô 5.000."""
+    khoa = list(dict.fromkeys(k for k in khoa if k))[:BL_TOI_DA]
+    rows: list[dict] = []
+    if not khoa:
+        return rows
+    with ket_noi() as c:
+        for i in range(0, len(khoa), 5000):
+            rows += c.execute(
+                f"SELECT {_COT_BAI_CS} FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
+                "WHERE b.du_an = %s AND b.khoa = ANY(%s)", (du_an, khoa[i:i + 5000])).fetchall()
+    return rows
 
 
 # ───────────────────────────── bình luận (đợt 2b, chỉ đọc + cấu hình) ─────────────────────────────
