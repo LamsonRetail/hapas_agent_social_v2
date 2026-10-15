@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block tieu_de %}Chỉ số{% endblock %}
 {% block dau %}
-<link rel="stylesheet" href="/tinh/chi_so.css">
+<link rel="stylesheet" href="{{ tinh('chi_so.css') }}">
 <script src="{{ ECHARTS }}" integrity="{{ ECHARTS_SRI }}" defer></script>
-<script src="/tinh/chi_so.js" defer></script>
+<script src="{{ tinh('chi_so.js') }}" defer></script>
 {% endblock %}
 {% block noi_dung %}
 {% if not du_an %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block tieu_de %}Nguồn theo dõi{% endblock %}
-{% block dau %}<script src="/tinh/nguon.js" defer></script>{% endblock %}
+{% block dau %}<script src="{{ tinh('nguon.js') }}" defer></script>{% endblock %}
 {% block noi_dung %}
 {% macro uoc_tinh(nen_tang, usd) %}≈ {{ usd|usd_vn(3) }} USD/tháng theo bài{% if phi_khoi_dong.get(nen_tang) %} + phí khởi động actor chung {{ phi_khoi_dong[nen_tang]|usd_vn(4) }} USD mỗi ngày quét{% endif %}{% endmacro %}
 {% set ql = nguoi.vai_tro == 'quan_ly' %}

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block tieu_de %}Ngân sách theo dõi{% endblock %}
 {% block dau %}
-<link rel="stylesheet" href="/tinh/ngan_sach.css">
-<script src="/tinh/ngan_sach.js" defer></script>
+<link rel="stylesheet" href="{{ tinh('ngan_sach.css') }}">
+<script src="{{ tinh('ngan_sach.js') }}" defer></script>
 {% endblock %}
 {% block noi_dung %}
 {% set ql = nguoi.vai_tro == 'quan_ly' %}

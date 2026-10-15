@@ -21,6 +21,7 @@ import asyncio
 import collections
 import contextlib
 import datetime
+import hashlib
 import hmac
 import inspect
 import json
@@ -188,6 +189,7 @@ class _TieuDeAnToan:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         tinh = scope.get("path", "").startswith("/tinh/")
+        co_phien_ban = b"v=" in scope.get("query_string", b"")
 
         async def gui(msg):
             if msg["type"] == "http.response.start":
@@ -196,6 +198,12 @@ class _TieuDeAnToan:
                     h.setdefault(k, v)
                 if not tinh:
                     h.setdefault("cache-control", "no-store")   # trang có dữ liệu nội bộ
+                else:
+                    # 15/10/2026: trình duyệt giữ chi_so.js CŨ (không có cache-control → tự đoán
+                    # hạn) chạy trên HTML MỚI → trang hỏng. Link có ?v=<băm nội dung> thì giữ
+                    # lâu (đổi tệp là đổi link); link trần thì luôn hỏi lại máy chủ (304).
+                    h.setdefault("cache-control", "public, max-age=31536000, immutable"
+                                 if co_phien_ban else "no-cache")
                 if self.hsts:
                     h.setdefault("strict-transport-security", "max-age=31536000")
             await send(msg)
@@ -236,9 +244,19 @@ def json_script(obj) -> Markup:
     return Markup(s.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
 
 
+def _phien_ban_tinh() -> dict[str, str]:
+    """Băm nội dung từng tệp tĩnh lúc khởi động → `tinh("chi_so.js")` = "/tinh/chi_so.js?v=…":
+    deploy đổi tệp là đổi link, trình duyệt không thể dùng lại bản cũ."""
+    thu_muc = THU_MUC / "static"
+    return {f.name: hashlib.sha256(f.read_bytes()).hexdigest()[:10]
+            for f in thu_muc.iterdir() if f.is_file()} if thu_muc.is_dir() else {}
+
+
 def _tao_mau() -> Jinja2Templates:
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(THU_MUC / "templates")),
                              autoescape=True, trim_blocks=True, lstrip_blocks=True)
+    pb = _phien_ban_tinh()
+    env.globals["tinh"] = lambda ten: f"/tinh/{ten}?v={pb[ten]}" if ten in pb else f"/tinh/{ten}"
     env.filters.update(so_vn=so_vn, pt_vn=pt_vn, usd_vn=usd_vn, gio_vn=gio_vn,
                        json_script=json_script, link_an_toan=NL.link_an_toan,
                        ten_nen_tang=lambda p: NL.TEN_NEN_TANG.get(p, p),
