@@ -402,7 +402,8 @@ def test_tran_lo_theo_uoc_tinh_va_san_actor():
     assert D._tran_lo("tiktok", 0.4375, 0.5) == 0.5, "không quá trần tool"
     assert D._tran_lo("tiktok", 0.01, 0.5) == 0.1, "không dưới sàn 0,1 của `_call`"
     assert D._tran_lo("youtube", 0.02, 0.5) == 0.5, "YouTube đòi tối thiểu 0,5"
-    assert D._tran_lo("facebook", 0.026, 2.0) == 0.5
+    # Facebook chỉ đòi 0,0017 (API Apify, kiểm 15/10/2026) → sàn 0,1 của `_call`, không 0,5.
+    assert D._tran_lo("facebook", 0.026, 2.0) == 0.1
 
 
 def test_gia_lech_thi_dung_lo_sau_khi_cham_ngan_sach_luot(moi_truong, monkeypatch):
@@ -472,7 +473,9 @@ def test_ba_lo_song_song_gia_gap_doi_tong_tran_gui_apify_khong_vuot(moi_truong, 
     kq = json.loads(D._handle({"post_urls": urls}))
     assert len(goi) == 3 and kq["so_bai_cham_ngan_sach"] == 0, "ước tính vừa trần thì không chặn"
     assert sum(t for _, t in goi) <= 1.1 + 1e-9
-    assert sorted(t for _, t in goi) == [0.1, 0.5, 0.5], "mỗi lô đúng sàn của nó, vừa khít trần"
+    # TikTok sàn 0,1; Facebook theo ước tính × 1,5 (không còn sàn 0,5 — API Apify 15/10/2026);
+    # YouTube actor đòi 0,5.
+    assert sorted(t for _, t in goi) == [0.1, 0.19, 0.5], "mỗi lô đúng phần của nó, không vượt trần"
 
 
 def test_san_youtube_tinh_vao_tran_cung(moi_truong):

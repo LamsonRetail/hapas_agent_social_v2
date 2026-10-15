@@ -116,8 +116,10 @@ _ACTORS_DU_PHONG = {
     "threads": "fetch_cat~threads-replies-scraper",
     "instagram": "apidojo~instagram-comments-scraper-api",
 }
-# Actor YouTube từ chối chạy nếu trần chi phí < 0.50 (đo thật).
-_MIN_CHARGE = {"youtube": 0.5, "facebook": 0.5}
+# Actor YouTube từ chối chạy nếu trần chi phí < 0.50 (đo thật). Facebook KHÔNG đòi 0,5: API
+# Apify ghi minimalMaxTotalChargeUsd = 0,0017 (kiểm 15/10/2026) — sàn 0,5 cũ làm bỏ qua lô
+# bình luận Facebook khi phần ngân sách còn lại < 0,5 USD; nay chỉ còn sàn 0,1 của `_call`.
+_MIN_CHARGE = {"youtube": 0.5}
 # Giá gói FREE (Apify, 01/10/2026). Ước tính dùng giá này nên CAO hơn gói trả tiền.
 _GIA = {"tiktok": 0.00125, "youtube": 0.002, "facebook": 0.0025,
         "threads": 0.0025, "instagram": 0.0026}
@@ -448,7 +450,7 @@ def _map_youtube(raw: list) -> tuple[list[dict], int]:
 
 def _fetch_facebook(urls: list[str], per: int, tran_usd: float) -> tuple[list[dict], int]:
     raw = _call(_ACTORS["facebook"], _payload("facebook", urls, per),
-                per * len(urls), min_charge=_MIN_CHARGE["facebook"], tran_usd=tran_usd)
+                per * len(urls), min_charge=_MIN_CHARGE.get("facebook", 0.0), tran_usd=tran_usd)
     return _map_facebook(raw)
 
 

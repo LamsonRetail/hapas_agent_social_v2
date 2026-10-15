@@ -291,9 +291,10 @@ def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
             "WHERE b.du_an = %s AND b.nen_tang = ANY(%s) AND COALESCE(b.binh_luan, 0) > 0 "
             "AND b.link <> '' AND b.dang_luc >= now() - make_interval(days => %s) "
             "AND (b.bl_lay_luc IS NULL "
-            # Cào hết mà lần trước chưa đủ (chạm trần chi phí / actor dừng sớm): cào bù — tối đa
-            # 2 lần liên tiếp không đủ (review 15/10: Instagram chưa đăng nhập, bài ẩn bình luận
-            # không bao giờ đủ — không trả tiền mỗi ngày cho cùng bình luận).
+            # Cào hết mà lần trước chưa đủ (chạm trần chi phí / actor dừng sớm): cào bù tới khi
+            # đủ, miễn mỗi lần còn lấy THÊM được bình luận; dừng sau 2 lần liên tiếp không thêm
+            # gì (review 15/10: Instagram chưa đăng nhập, bài ẩn bình luận không bao giờ đủ —
+            # không trả tiền mỗi ngày cho cùng bình luận).
             " OR (%s AND b.nen_tang <> 'instagram' AND b.bl_lan_thieu < 2 AND "
             "     b.bl_lay_luc < now() - interval '20 hours' AND "
             "     COALESCE(b.bl_da_lay, 0) < COALESCE(b.bl_lay_khi_co, 0) * %s) "
@@ -352,14 +353,19 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 cu += 1
         for khoa, (n, co) in da_lay.items():
             # bl_da_lay = TỔNG bình luận đã có của bài trong kho (lượt sau có thể chỉ lấy phần
-            # mới — Facebook theo ngày), không phải số của riêng lượt này.
-            c.execute("UPDATE bai SET bl_lay_luc = now(), bl_lay_khi_co = COALESCE(%s, binh_luan), "
-                      "bl_da_lay = GREATEST(%s, (SELECT count(*) FROM binh_luan b WHERE "
-                      "b.du_an = bai.du_an AND b.khoa_bai = bai.khoa)) "
-                      "WHERE du_an = %s AND khoa = %s", (co, n, ma, khoa))
-            c.execute("UPDATE bai SET bl_lan_thieu = CASE WHEN bl_da_lay < "
-                      "COALESCE(bl_lay_khi_co, 0) * %s THEN bl_lan_thieu + 1 ELSE 0 END "
-                      "WHERE du_an = %s AND khoa = %s", (BL_DU_TOI_THIEU, ma, khoa))
+            # mới — Facebook theo ngày), không phải số của riêng lượt này. bl_lan_thieu đếm số
+            # lần LIÊN TIẾP chưa đủ mà KHÔNG thêm được bình luận nào (vế phải của SET đọc giá
+            # trị CŨ của dòng): còn thêm được thì về 0 để lượt sau cào tiếp — "cào hết".
+            c.execute(
+                "UPDATE bai SET bl_lay_luc = now(), bl_lay_khi_co = COALESCE(%s, binh_luan), "
+                "bl_da_lay = t.moi, bl_lan_thieu = CASE "
+                "  WHEN t.moi >= COALESCE(%s, bai.binh_luan, 0) * %s THEN 0 "
+                "  WHEN t.moi > COALESCE(bai.bl_da_lay, 0) THEN 0 "
+                "  ELSE bai.bl_lan_thieu + 1 END "
+                "FROM (SELECT GREATEST(%s, (SELECT count(*) FROM binh_luan b WHERE "
+                "      b.du_an = %s AND b.khoa_bai = %s)) AS moi) t "
+                "WHERE bai.du_an = %s AND bai.khoa = %s",
+                (co, co, BL_DU_TOI_THIEU, n, ma, khoa, ma, khoa))
         _danh_dau_seeding(c, ma, [r.get("ma_noi_dung") for r in rows])
     return moi, cu
 
