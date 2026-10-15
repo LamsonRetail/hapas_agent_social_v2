@@ -492,14 +492,15 @@ def nhan_lich_den_han(bay_gio, quyet, toi_da: int = 20) -> list[tuple[dict, dict
 def ghi_ket_qua_lich(lid: int, ket_qua: dict, *, lan_chay_cuoi=None, tang_so_lan: bool = False,
                      chi_khi_ma_viec: str | None = None) -> bool:
     """Ghi kết quả gần nhất của một lịch. `chi_khi_ma_viec`: chỉ ghi khi kết quả đang lưu là của
-    đúng việc đó (việc nền xong muộn không đè kết quả của lượt mới hơn). -> có ghi không."""
+    đúng việc đó, hoặc việc đó còn chờ báo xong (`viec_cho` — lượt sau bị bỏ vì nó còn chạy).
+    Việc nền xong muộn không đè kết quả của việc khác. -> có ghi không."""
     import json
     sql = ("UPDATE lich_quet SET ket_qua_cuoi = %s::jsonb, lan_chay_cuoi = COALESCE(%s, "
            "lan_chay_cuoi), so_lan_chay = so_lan_chay + %s WHERE id = %s")
     ts = [json.dumps(ket_qua, ensure_ascii=False, default=str), lan_chay_cuoi,
           1 if tang_so_lan else 0, int(lid)]
     if chi_khi_ma_viec:
-        sql += " AND ket_qua_cuoi->>'ma_viec' = %s"
-        ts.append(chi_khi_ma_viec)
+        sql += (" AND (ket_qua_cuoi->>'ma_viec' = %s OR ket_qua_cuoi->>'viec_cho' = %s)")
+        ts += [chi_khi_ma_viec, chi_khi_ma_viec]
     with ket_noi() as c:
         return bool(c.execute(sql + " RETURNING id", ts).fetchone())

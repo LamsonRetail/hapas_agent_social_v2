@@ -18,6 +18,11 @@ Vì sao không chạy một mốc hai lần, không kẹt:
   • Mark tắt rồi bật lại: mốc lỡ chưa quá 30 phút thì chạy bù MỘT lần, quá thì bỏ (ghi lý do).
   • Chiến dịch đang diễn ra thì lịch thường cùng dự án nhường (không quét chồng).
   • Lượt trước còn chạy / hết tháng / công tắc tắt: không chạy, ghi lý do vào `ket_qua_cuoi`.
+  • Chưa đọc được danh bạ platform (công tắc) lần nào từ lúc khởi động: chưa chạy — không để
+    công tắc "mở vì không biết" (review 15/10). Dòng lịch sai giới hạn (ghi ngoài dashboard):
+    lịch ngủ chờ sửa. Cùng dự án thì tạo việc tuần tự (`theo_doi._khoa_tao`).
+  • Mỗi lượt (giao việc, bỏ qua, xong + chi phí thật) báo platform bằng trace có sẵn
+    (`lsr_platform.bao_luot`) — lượt theo lịch dashboard không qua hàng đợi job của platform.
   • Nhịp không bao giờ ném ra ngoài; lỗi chỉ ghi log (mỗi loại một lần).
 KHÔNG nhắn Lark mỗi lượt — kết quả xem trên dashboard. Tuỳ chọn `MARK_LICH_QUET_BAO_LOI` = mã
 nhóm `oc_…` (hoặc `lark:<app>:oc_…`) hay open_id `ou_…`: nhận MỘT tin cảnh báo mỗi lịch, mỗi
@@ -76,24 +81,79 @@ def _duoc_chay() -> tuple[bool, str]:
     return lenh_cung._duoc_khong("soi_tai_khoan")
 
 
+def _danh_ba_da_doc() -> bool:
+    """Đã đọc được danh bạ platform (công tắc Năng lực) ít nhất một lần chưa. Khởi động nguội mà
+    platform chưa trả lời thì `lsr_policy.nang_luc_bat()` coi như "chưa khai công tắc" — mọi công
+    tắc thành MỞ. Người gõ /theodoi còn thấy câu trả lời, còn lịch tự động thì không ai thấy, nên
+    lịch KHÔNG chạy tới khi đọc được danh bạ (review 15/10, L3): đóng khi không biết."""
+    try:
+        import lsr_policy
+        lsr_policy.nang_luc_bat()
+        return lsr_policy._nho_nl.get("bat") is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _iso(x) -> str | None:
     return x.astimezone(VN).isoformat(timespec="seconds") if x else None
 
 
 def _ket_qua(row: dict, trang_thai: str, ly_do: str, bay_gio, **them) -> dict:
-    """`ket_qua_cuoi` mới; mang theo dấu cảnh báo đã gửi của kết quả cũ (khỏi gửi lại trong ngày)."""
+    """`ket_qua_cuoi` mới; mang theo dấu cảnh báo đã gửi (khỏi gửi lại trong ngày) và `viec_cho`
+    — việc do lịch giao mà CHƯA báo kết quả cuối (review 15/10, L1): lượt sau bị bỏ vì việc đó
+    còn chạy, hay bị nhường/lỡ, thì kết quả cuối + cảnh báo lỗi của việc đó vẫn ghi về được."""
     cu = row.get("ket_qua_cuoi") if isinstance(row.get("ket_qua_cuoi"), dict) else {}
     kq = {"trang_thai": trang_thai, "ly_do": str(ly_do or "")[:300], "luc": _iso(bay_gio),
           **{k: v for k, v in them.items() if v is not None}}
     if isinstance(cu.get("canh_bao"), dict):
         kq["canh_bao"] = dict(cu["canh_bao"])
+    if cu.get("viec_cho") and "viec_cho" not in kq:
+        kq["viec_cho"] = cu["viec_cho"]
     return kq
+
+
+def _moc_gon(moc) -> str:
+    return re.sub(r"\D", "", str(moc or ""))[:12] or "x"
+
+
+def _bao_platform(row: dict, moc, ket: dict, *, run_id: str = "",
+                  chi_phi_usd: float | None = None) -> None:
+    """Báo platform MỖI lượt lịch (giao việc, bỏ qua, xong) bằng trace có sẵn
+    (`lsr_platform.bao_luot`: ghi WAL rồi gửi nền, thiếu cấu hình thì không làm gì). Vì sao: lịch
+    đặt trên dashboard, lượt không qua hàng đợi job của platform — không báo thì platform không
+    thấy Mark tự quét lúc nào, tiêu bao nhiêu. Không bao giờ ném."""
+    try:
+        import json
+
+        import lsr_platform
+        tt = str(ket.get("trang_thai") or "")
+        lid = row.get("id")
+        tom = {"loai": "lich_quet_tu_dong", "lich_id": lid, "du_an": row.get("du_an"),
+               "moc": moc if isinstance(moc, str) else _iso(moc), "ket_qua": tt,
+               "ma_loi": ket.get("ma_loi"), "ma_viec": ket.get("ma_viec"),
+               "luot_id": ket.get("luot_id"),
+               "chi_phi_usd": round(float(chi_phi_usd or 0), 4),
+               "ly_do": str(ket.get("ly_do") or "")[:200]}
+        lsr_platform.bao_luot(
+            run_id or f"lich-{lid}-{_moc_gon(tom['moc'])}", "",
+            json.dumps(tom, ensure_ascii=False), ok=tt != "loi",
+            audit_record={"tool": [{"ten": "lich_quet_tu_dong", "co_ket_qua": tt != "bo_qua",
+                                    "loi": tom["ly_do"] if tt == "loi" else ""}]})
+    except Exception as e:  # noqa: BLE001 — báo platform hỏng không làm hỏng lịch
+        _bao_mot_lan(f"pf-{type(e).__name__}", f"không báo được platform: {type(e).__name__}")
 
 
 # ───────────────────────────── quyết định (thuần) ─────────────────────────────
 def quyet(row: dict, bay_gio: datetime.datetime, chien_dich: dict[str, dict]) -> dict:
     """Quyết định cho MỘT lịch tới hạn — chạy trong giao dịch nhận lịch, không gọi mạng.
     -> {"lan_chay_ke", "hanh_dong": chay|lo|nhuong|loi, [moc], [lan_chay_cuoi, ket_qua_cuoi]}."""
+    loi = LQ.loi_cau_hinh(row.get("kieu") or "", row.get("cau_hinh"))
+    if loi:
+        # Dòng ghi ngoài dashboard (psql, bản cũ) sai giới hạn: lịch NGỦ (mốc kế NULL), không
+        # đoán, không chạy mỗi phút (review 15/10, M3). Sửa trên dashboard là chạy lại.
+        return {"lan_chay_ke": None, "lan_chay_cuoi": bay_gio, "hanh_dong": "loi",
+                "ket_qua_cuoi": _ket_qua(row, "loi", f"cấu hình lịch không hợp lệ ({loi}) — "
+                                         "sửa lịch trên dashboard", bay_gio, ma_loi="loi")}
     try:
         chay, lo, ke = LQ.quyet_dinh(row.get("kieu") or "", row.get("cau_hinh") or {},
                                      row.get("lan_chay_ke"), bay_gio)
@@ -129,11 +189,15 @@ def _gui(dich: str, van: str, uid: str) -> None:
         scheduler._gui(dich, van, uid)
 
 
-def _canh_bao(row: dict, kq: dict, bay_gio) -> dict:
+def _canh_bao(row: dict, kq: dict, bay_gio, loai: str | None = None,
+              ly_do: str | None = None) -> dict:
     """Lỗi / hết ngân sách + có nơi nhận: gửi MỘT tin mỗi lịch mỗi loại mỗi ngày (ghi dấu ngày
-    vào kq["canh_bao"]). Không có nơi nhận thì chỉ ghi kết quả. Không bao giờ ném."""
-    loai = "loi" if kq.get("trang_thai") == "loi" else (
-        "het_ngan_sach" if kq.get("ma_loi") in ("het_ngan_sach", "het_ngan_sach_apify") else "")
+    vào kq["canh_bao"]). Không có nơi nhận thì chỉ ghi kết quả. Không bao giờ ném. `loai`,
+    `ly_do`: cảnh báo cho việc khác với kết quả chính (việc chờ báo xong — L1)."""
+    if loai is None:
+        loai = "loi" if kq.get("trang_thai") == "loi" else (
+            "het_ngan_sach" if kq.get("ma_loi") in ("het_ngan_sach", "het_ngan_sach_apify")
+            else "")
     dich = _dich_canh_bao()
     if not loai or not dich:
         return kq
@@ -143,7 +207,7 @@ def _canh_bao(row: dict, kq: dict, bay_gio) -> dict:
         return kq
     du_an = str(row.get("du_an") or "")
     van = (f"Lịch quét #{row.get('id')} ({row.get('ten') or LQ.KIEU.get(row.get('kieu'), '')}) "
-           f"của dự án {du_an}: {CANH_BAO[loai]} — {kq.get('ly_do') or ''}. Xem/sửa: "
+           f"của dự án {du_an}: {CANH_BAO[loai]} — {ly_do or kq.get('ly_do') or ''}. Xem/sửa: "
            f"social.hapas.vn/lich-quet?du_an={du_an}")[:900]
     try:
         _gui(dich, van, f"lichq-{row.get('id')}-{loai}-{ngay.replace('-', '')}"[:50])
@@ -157,20 +221,23 @@ def _canh_bao(row: dict, kq: dict, bay_gio) -> dict:
 def _chay(row: dict, moc: datetime.datetime, bay_gio: datetime.datetime) -> dict:
     """Tạo việc `/theodoi` cho một mốc đã nhận; ghi kết quả vào lịch. -> tóm tắt cho log/test."""
     lid, ma = int(row["id"]), str(row["du_an"])
-    cho, ly = _duoc_chay()
-    if not cho:
-        kq = {"ok": False, "ma_loi": "nang_luc_tat",
-              "cau": f"công tắc Soi tài khoản không cho chạy: {ly or 'đang tắt'}"}
-    else:
-        try:
+    try:
+        # Công tắc NẰM TRONG try (review 15/10, L2): hỏi công tắc lỗi thì lịch ghi "lỗi" có lý
+        # do, không thoát ra nhịp mà không để lại dấu vết.
+        cho, ly = _duoc_chay()
+        if not cho:
+            kq = {"ok": False, "ma_loi": "nang_luc_tat",
+                  "cau": f"công tắc Soi tài khoản không cho chạy: {ly or 'đang tắt'}"}
+        else:
             import theo_doi
             kq = theo_doi.tao_luot(ma, moi_nguon=bool(row.get("quet_moi_nguon")),
                                    lich={"id": lid, "moc": _iso(moc)})
-        except Exception as e:  # noqa: BLE001 — một lịch hỏng không làm hỏng nhịp
-            kq = {"ok": False, "ma_loi": "loi", "cau": f"lỗi khi tạo việc ({type(e).__name__})"}
+    except Exception as e:  # noqa: BLE001 — một lịch hỏng không làm hỏng nhịp
+        kq = {"ok": False, "ma_loi": "loi", "cau": f"lỗi khi tạo việc ({type(e).__name__})"}
     if kq.get("ok"):
         ket = _ket_qua(row, "da_tao", kq.get("cau") or "", bay_gio, ma_viec=kq.get("ma_viec"),
-                       moc=_iso(moc), uoc_usd=kq.get("uoc_usd"), so_nguon=kq.get("so_nguon"))
+                       viec_cho=kq.get("ma_viec"), moc=_iso(moc), uoc_usd=kq.get("uoc_usd"),
+                       so_nguon=kq.get("so_nguon"))
     else:
         ma_loi = str(kq.get("ma_loi") or "loi")
         ket = _ket_qua(row, "bo_qua" if ma_loi in BO_QUA else "loi", kq.get("cau") or "",
@@ -180,6 +247,7 @@ def _chay(row: dict, moc: datetime.datetime, bay_gio: datetime.datetime) -> dict
         K.ghi_ket_qua_lich(lid, ket, lan_chay_cuoi=bay_gio, tang_so_lan=bool(kq.get("ok")))
     except K.LoiKho as e:
         _bao_mot_lan(f"ghi-{type(e).__name__}", f"không ghi được kết quả lịch: {e}")
+    _bao_platform(row, moc, ket)
     print(f"[lich_quet] #{lid} {ma} mốc {moc.astimezone(VN):%d/%m %H:%M}: {ket['trang_thai']}"
           + (f" {kq.get('ma_viec')}" if kq.get("ok") else f" ({ket.get('ma_loi')})"), flush=True)
     return {"id": lid, "hanh_dong": ket["trang_thai"], "ma_loi": ket.get("ma_loi"),
@@ -192,6 +260,11 @@ def mot_nhip(bay_gio: datetime.datetime | None = None) -> list[dict]:
     ra: list[dict] = []
     try:
         if not bat() or not _co_quyen():
+            return ra
+        if not _danh_ba_da_doc():
+            # Mốc chưa bị nhận nên không mất: đọc được danh bạ trong 30 phút thì vẫn chạy bù.
+            _bao_mot_lan("danh-ba", "chưa đọc được danh bạ platform (công tắc Năng lực) — lịch "
+                         "tự động tạm chưa chạy tới khi đọc được")
             return ra
         bay_gio = bay_gio or _bay_gio()
         theo_du_an: dict[str, list[dict]] = {}
@@ -208,6 +281,7 @@ def mot_nhip(bay_gio: datetime.datetime | None = None) -> list[dict]:
             kq = q.get("ket_qua_cuoi") or {}
             print(f"[lich_quet] #{row.get('id')} {row.get('du_an')}: bỏ qua — "
                   f"{kq.get('ly_do', '')}", flush=True)
+            _bao_platform(row, kq.get("moc") or _iso(row.get("lan_chay_ke")), kq)
             ra.append({"id": row.get("id"), "hanh_dong": q.get("hanh_dong"),
                        "ma_loi": kq.get("ma_loi")})
     except K.LoiKho as e:
@@ -217,22 +291,37 @@ def mot_nhip(bay_gio: datetime.datetime | None = None) -> list[dict]:
     return ra
 
 
-def ket_thuc_viec(lid: int, ma_viec: str, luot_id, trang_thai: str, van_ban: str) -> None:
-    """Gọi khi việc theo dõi do lịch giao chạy xong (`theo_doi.chay_viec`): ghi trạng thái cuối
-    (chỉ khi kết quả đang lưu vẫn là của việc này) và cảnh báo nếu lỗi. Không bao giờ ném."""
+def ket_thuc_viec(lid: int, ma_viec: str, luot_id, trang_thai: str, van_ban: str, *,
+                  chi_phi_usd: float = 0.0, du_an: str = "", moc: str = "") -> None:
+    """Gọi khi việc theo dõi do lịch giao chạy xong (`theo_doi.chay_viec`): ghi trạng thái cuối,
+    cảnh báo nếu lỗi, báo platform (kèm chi phí thật). Kết quả đang lưu vẫn là của việc này thì
+    ghi đè trạng thái; đã có kết quả mới hơn (lượt sau bị bỏ vì việc này còn chạy, nhường, lỡ)
+    mà việc này còn trong `viec_cho` thì giữ kết quả mới, ghi việc này vào `viec_cuoi` (L1).
+    Không bao giờ ném."""
     try:
         row = K.doc_lich(int(lid))
         cu = (row or {}).get("ket_qua_cuoi") if isinstance((row or {}).get("ket_qua_cuoi"),
                                                            dict) else None
-        if not row or not cu or cu.get("ma_viec") != ma_viec:
+        if not row or not cu or ma_viec not in (cu.get("ma_viec"), cu.get("viec_cho")):
             return
         tt = {"xong_mot_phan": "mot_phan"}.get(trang_thai, trang_thai)
         bay_gio = _bay_gio()
-        kq = {**cu, "trang_thai": tt, "luot_id": luot_id, "xong_luc": _iso(bay_gio)}
-        if tt == "loi":
-            kq.update(ly_do=str(van_ban or "")[:300], ma_loi="loi")
-            kq = _canh_bao(row, kq, bay_gio)
+        ly = str(van_ban or "")[:300] if tt == "loi" else ""
+        xong = {"ma_viec": ma_viec, "trang_thai": tt, "luot_id": luot_id,
+                "xong_luc": _iso(bay_gio), "chi_phi_usd": round(float(chi_phi_usd or 0), 4)}
+        if cu.get("ma_viec") == ma_viec:
+            kq = {**cu, **xong}
+            if ly:
+                kq.update(ly_do=ly, ma_loi="loi")
+        else:
+            kq = {**cu, "viec_cuoi": {**xong, **({"ly_do": ly} if ly else {})}}
+        kq.pop("viec_cho", None)
+        if ly:
+            kq = _canh_bao(row, kq, bay_gio, loai="loi", ly_do=ly)
         K.ghi_ket_qua_lich(int(lid), kq, chi_khi_ma_viec=ma_viec)
+        _bao_platform({**row, "du_an": row.get("du_an") or du_an}, moc,
+                      {**xong, "ly_do": ly}, run_id=f"lich-{lid}-{ma_viec}-xong",
+                      chi_phi_usd=chi_phi_usd)
     except Exception as e:  # noqa: BLE001
         _bao_mot_lan(f"xong-{type(e).__name__}", f"không ghi được kết quả cuối của lịch: "
                      f"{type(e).__name__}")

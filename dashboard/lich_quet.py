@@ -38,6 +38,9 @@ LUOT_NGAY_TOI_DA = 96          # mốc mỗi ngày tối đa của một lịch
 PHUT_TOI_THIEU = 30            # chiến dịch: tối thiểu 30 phút một lượt
 PHUT_TOI_DA = 7 * 24 * 60      # chiến dịch: tối đa một lượt mỗi tuần
 CHIEN_DICH_NGAY_TOI_DA = 92    # chiến dịch dài nhất ~ một quý
+#: Chiến dịch phải bắt đầu trong chừng này ngày tới (review 15/10: chặn xem trước một chiến dịch
+#: năm 2100 làm máy chủ đếm mốc hàng chục năm).
+CHIEN_DICH_BAT_DAU_TOI_DA = 365
 TRE_TOI_DA = dt.timedelta(minutes=30)   # mốc lỡ (Mark tắt) còn chạy bù nếu lỡ chưa quá 30 phút
 GAN_QUA = dt.timedelta(minutes=30)      # hai mốc gần hơn thế: lượt sau thường bị bỏ (lượt trước chưa xong)
 TEN_TOI_DA = 100
@@ -111,6 +114,8 @@ def _cac_gio(s) -> list[dt.time]:
 def _cac_thu(v) -> list[int]:
     """Ngày trong tuần (1 = T2 … 7 = CN) đã kiểm, sắp, bỏ trùng; số lạ thì bỏ."""
     ra = set()
+    if isinstance(v, (str, bytes, int, float, dict)):
+        return []                     # cấu hình hỏng (không phải danh sách)
     for x in v or []:
         try:
             n = int(x)
@@ -161,6 +166,9 @@ def chuan_hoa(form: dict, bay_gio: dt.datetime) -> dict:
                           "nhiều chiến dịch hoặc dùng lịch hằng ngày.")
         if den <= _vn(bay_gio):
             raise LoiLich("Chiến dịch đã kết thúc — chọn thời điểm kết thúc trong tương lai.")
+        if tu > _vn(bay_gio) + dt.timedelta(days=CHIEN_DICH_BAT_DAU_TOI_DA):
+            raise LoiLich(f"Chiến dịch phải bắt đầu trong vòng {CHIEN_DICH_BAT_DAU_TOI_DA} ngày "
+                          "tới.")
         try:
             moi = int(str(form.get("moi") or "").strip())
         except ValueError:
@@ -254,14 +262,45 @@ def _gio_trong_ngay(kieu: str, ch: dict) -> list[dt.time]:
 
 
 def _khung_chien_dich(ch: dict) -> tuple[dt.datetime, dt.datetime, int] | None:
+    """(từ, tới, phút) của chiến dịch; None khi cấu hình hỏng HOẶC vượt giới hạn mà dashboard
+    kiểm — review 15/10: dòng ghi ngoài dashboard (psql, bản cũ) với moi_phut = 1 thì Mark phải
+    ngủ yên, không chạy mỗi phút."""
     try:
         tu, den = _luc(ch.get("tu_luc"), "Bắt đầu"), _luc(ch.get("den_luc"), "Kết thúc")
-        phut = int(ch.get("moi_phut") or 0)
+        phut = ch.get("moi_phut")
+        if isinstance(phut, bool) or not isinstance(phut, (int, float, str)):
+            return None
+        phut = int(phut)
     except (LoiLich, TypeError, ValueError, AttributeError):
         return None
-    if phut < 1 or den < tu:
+    if (not PHUT_TOI_THIEU <= phut <= PHUT_TOI_DA or den <= tu
+            or den - tu > dt.timedelta(days=CHIEN_DICH_NGAY_TOI_DA)):
         return None
     return tu, den, phut
+
+
+def loi_cau_hinh(kieu: str, ch) -> str:
+    """"" khi cấu hình lịch dùng được; ngược lại câu lý do. Mark kiểm trước khi chạy một dòng
+    lịch (có thể ghi ngoài dashboard): sai thì lịch ngủ (mốc kế NULL) chờ sửa, không đoán."""
+    if kieu not in KIEU:
+        return "kiểu lịch không hợp lệ"
+    if not isinstance(ch, dict):
+        return "cấu hình không phải JSON object"
+    if kieu == "chien_dich":
+        return "" if _khung_chien_dich(ch) else (
+            f"chiến dịch sai giới hạn (khoảng {PHUT_TOI_THIEU}–{PHUT_TOI_DA} phút, dài ≤ "
+            f"{CHIEN_DICH_NGAY_TOI_DA} ngày, kết thúc sau bắt đầu)")
+    gio = _gio_trong_ngay(kieu, ch)
+    thu_goc = ch.get("thu") or []
+    if not isinstance(thu_goc, list):
+        return "ngày trong tuần không hợp lệ"
+    if not gio:
+        return "không có giờ chạy hợp lệ"
+    if len(gio) > LUOT_NGAY_TOI_DA:
+        return f"quá {LUOT_NGAY_TOI_DA} lượt/ngày"
+    if (thu_goc and not _cac_thu(thu_goc)) or (kieu == "hang_tuan" and not _cac_thu(thu_goc)):
+        return "ngày trong tuần không hợp lệ"
+    return ""
 
 
 def lap_moc(kieu: str, ch: dict, sau: dt.datetime) -> Iterator[dt.datetime]:

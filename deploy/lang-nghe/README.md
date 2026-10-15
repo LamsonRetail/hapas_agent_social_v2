@@ -4,8 +4,10 @@ Chủ dự án chốt 14/10/2026:
 
 - **Dữ liệu ở VPS của Mark.** Danh sách nguồn theo dõi, ngân sách theo dõi hằng tháng và các bài đã quét nằm trong một DB Postgres riêng trên VPS này, không nằm trên platform.
   - Lý do: quyết định 0008 của platform. Platform chỉ giữ phần điều khiển và kiểm tra; dữ liệu xử lý nằm ở phía agent.
-- **Mark vẫn theo luật platform như trước.** Kỹ năng, công tắc Năng lực, trần mỗi lượt và lịch chạy vẫn ở console platform.
-  - Lượt theo dõi đến từ một lịch `run` đặt trên console.
+- **Mark vẫn theo luật platform như trước.** Kỹ năng, công tắc Năng lực và trần mỗi lượt vẫn ở console platform.
+  - Lượt theo dõi đến từ hai đường lịch, cộng với lệnh gõ tay:
+    - lịch `run` (Giao việc) đặt trên console, đi qua hàng đợi job của platform;
+    - từ 15/10/2026, **lịch quét tự động** đặt trên dashboard (mục 5b): Mark tự chạy bằng một nhịp riêng trên VPS (`quet_tu_dong.py`) và báo mỗi lượt lên platform bằng trace.
 - **Quản lý qua dashboard `social.hapas.vn`.** Dự án, nguồn, ngân sách và người xem được sửa ở đây (xem `dashboard/README.md`).
 
 **Mọi bước dưới đây cần người duyệt trước khi chạy trên VPS.**
@@ -26,9 +28,14 @@ Mô tả bảng và cột theo quy chuẩn BI (task Lark t280613, skill `lsr-bq-
 ## 1. Tạo DB, role, bảng
 
 ```bash
-sudo -u postgres psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
+sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
 sudo -u postgres psql -d lang_nghe -c '\dt'        # 11 bảng (có lich_quet từ 15/10/2026)
 ```
+
+`lock_timeout=5s` cần khi DB đang chạy. Lệnh `ALTER TABLE` (ví dụ thêm `luot_quet.lich_id`) xin khoá độc quyền trên bảng.
+
+- Mark hoặc dashboard đang giữ khoá đó thì lệnh tự dừng sau 5 giây và báo lỗi. Chạy lại là được.
+- Không đặt `lock_timeout` thì lệnh đứng chờ khoá, và mọi truy vấn đến sau trên bảng đó xếp hàng phía sau nó, nên Mark và dashboard treo theo.
 
 Lệnh trên tạo:
 
@@ -42,7 +49,7 @@ Chạy lại file này nhiều lần không hỏng gì.
 
 Quyền của Mark:
 
-- **Đọc:** `du_an`, `nguon`, `lich_quet`.
+- **Đọc:** `du_an`, `nguon`; `lich_quet` chỉ các cột Mark dùng (không đọc email người tạo/sửa).
 - **Ghi:** `bai`, `chi_so_ngay`, `luot_quet`, `de_xuat`.
 - **Chỉ sửa:** cột lần quét và lỗi của `nguon`; cột trạng thái chạy của `lich_quet` (`lan_chay_ke`, `lan_chay_cuoi`, `ket_qua_cuoi`, `so_lan_chay`).
 - **Không được:** thêm hay xoá nguồn, sửa dự án, sửa ngân sách, tạo/sửa/xoá lịch.
@@ -107,6 +114,9 @@ Chủ dự án chốt "Dashboard + Mark tự chạy". Ngoài lịch console ở 
 - Mark chạy nhịp 30 giây (`quet_tu_dong.py`, khởi động trong `run.py` sau việc nền). Tới mốc thì tạo đúng việc `/theodoi` như lệnh gõ tay, cùng các điều kiện ở trên. Kết quả chỉ hiện trên dashboard, không nhắn Lark.
 - Bỏ qua và ghi lý do vào lịch khi: lượt trước còn chạy, hết trần tháng của dự án, công tắc tắt, hoặc lỡ mốc quá 30 phút (Mark tắt). Mốc lỡ dưới 30 phút thì chạy bù một lần.
 - Chiến dịch đang diễn ra thì lịch thường của cùng dự án nhường. Hết khung thì chiến dịch tự dừng.
+- Mark chưa chạy lịch nào cho tới khi đọc được danh bạ platform (công tắc Năng lực) ít nhất một lần từ lúc khởi động. Máy thiếu cấu hình `LSR_*` thì lịch không chạy.
+- Lịch sai giới hạn (ví dụ ghi thẳng bằng psql với khoảng dưới 30 phút) thì ngủ, ghi lỗi, chờ sửa trên dashboard. DB còn chặn thêm bằng ràng buộc `lich_quet_chien_dich_check`.
+- Mỗi lượt báo platform một trace qua collector (`lsr_platform.bao_luot`), cả lượt bỏ qua, gồm `lich_id`, `du_an`, mốc, kết quả. Khi việc chạy xong có thêm một trace với chi phí thật. Lượt theo lịch dashboard không qua hàng đợi job của platform, nên đây là dấu vết duy nhất platform thấy.
 - Tuỳ chọn trong `.env` của Mark:
   - `MARK_LICH_QUET_BAO_LOI=oc_…` (hoặc `ou_…`): nhận một tin cảnh báo cho mỗi lịch, mỗi loại (lỗi / hết ngân sách), mỗi ngày.
   - `MARK_LICH_QUET=0`: tắt hẳn nhịp.

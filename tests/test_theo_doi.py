@@ -156,6 +156,7 @@ class GiaViec:
 
     def chot_chi_phi(self, q, p, r):
         self.chot.append((list(q), list(p), r))
+        self.d["chi_phi"] = {"usd": 0.0123, "da_ghi_so": True}       # như Viec thật: ghi sổ việc
         return {"usd": 0.0123}
 
 
@@ -420,6 +421,54 @@ def test_tao_luot_ma_loi_viec_cu_va_so_tu_choi(mo):
     assert T.tao_luot("hapas", lich={"id": 1, "moc": "x"})["ma_loi"] == "het_ngan_sach_apify"
 
 
+def _dua_hai_luong(mo):
+    """Hai luồng cùng gọi tao_luot cho CÙNG dự án đúng một lúc (lịch console qua luồng job + lịch
+    dashboard qua luồng nhịp). `tao_viec` giả ghi sổ chậm 0,2 giây — cửa sổ đua."""
+    import quet_lon
+    import viec_nen
+    GiaKho(nguon=[_nguon(1, "tiktok", "a")]).cai(mo)
+    mo.setattr(quet_lon, "tran_usd_nen", lambda: 20.0)
+    mo.setattr(quet_lon, "ngan_sach", lambda tran: (8.0, {"con_lai": 9.0}, ""))
+    so: list[dict] = []
+
+    def tao(loai, tham_so, *a, **k):
+        time.sleep(0.2)
+        so.append({"ma": f"t{len(so) + 1}", "loai": "theo_doi", "tham_so": tham_so,
+                   "trang_thai": "xep_hang"})
+        return {"dang_chay_nen": True, "ma_viec": so[-1]["ma"]}
+    mo.setattr(viec_nen, "tao_viec", tao)
+    mo.setattr(viec_nen, "tat_ca", lambda: list(so))
+    cung_luc = threading.Barrier(2)
+    ra: list[dict] = []
+
+    def chay(lich):
+        cung_luc.wait()
+        ra.append(T.tao_luot("hapas", lich=lich))
+    luong = [threading.Thread(target=chay, args=(x,)) for x in (None, {"id": 3, "moc": "m"})]
+    for t in luong:
+        t.start()
+    for t in luong:
+        t.join(10)
+    return so, ra
+
+
+def test_tao_luot_cung_du_an_dong_thoi_chi_tao_mot_viec(mo):
+    """Review 15/10 (M1): kiểm việc dở → ghi sổ là MỘT bước dưới khoá theo dự án — chỉ một việc,
+    bên kia nhận dang_chay (lịch ghi bỏ qua có lý do), không quét trùng, không trả tiền hai lần."""
+    so, ra = _dua_hai_luong(mo)
+    assert len(so) == 1
+    assert sorted(x["ok"] for x in ra) == [False, True]
+    assert next(x for x in ra if not x["ok"])["ma_loi"] == "dang_chay"
+
+
+def test_bai_thu_dua_bat_duoc_loi_khi_khong_co_khoa(mo):
+    """Chứng minh bài thử trên bắt được lỗi thật: bỏ khoá thì hai việc cùng được tạo."""
+    import contextlib
+    mo.setattr(T, "_khoa_tao", lambda ma: contextlib.nullcontext())
+    so, _ = _dua_hai_luong(mo)
+    assert len(so) == 2
+
+
 # ───────────────────────────── lọc + nhãn ─────────────────────────────
 def _dong(link, text, ngay, kenh="KOL A", views=100, p="tiktok"):
     return ({"platform": p, "kenh": kenh, "username": "kola", "views": views,
@@ -610,7 +659,7 @@ def test_chay_viec_theo_lich_quet_moi_nguon_ghi_lich_id_va_bao_lich(mo):
     kho.chua_toi_han = {1}
     ap = GiaApify(mo, [_tt("kola", 21, "túi hapas")])
     bao = []
-    mo.setattr(quet_tu_dong, "ket_thuc_viec", lambda *a: bao.append(a))
+    mo.setattr(quet_tu_dong, "ket_thuc_viec", lambda *a, **k: bao.append((a, k)))
     v = _viec(kho.nguon)
     v.d["tham_so"].update(lich_id=7, moc="2026-10-15T09:00:00+07:00", moi_nguon=True)
     trang_thai, _ = T.chay_viec(v)
@@ -618,7 +667,10 @@ def test_chay_viec_theo_lich_quet_moi_nguon_ghi_lich_id_va_bao_lich(mo):
     luot = v.d["luot_id"]
     assert kho.luot[luot]["lich_id"] == 7
     assert v.chot[0][0] == ["theo dõi hapas (lịch #7)"]
-    assert bao == [(7, v.ma, luot, "xong", bao[0][4])]
+    ((a, k),) = bao
+    assert a[:4] == (7, v.ma, luot, "xong")
+    # chi phí THẬT (đã chốt theo run id) + dự án + mốc đi kèm để báo platform
+    assert k == {"chi_phi_usd": 0.0123, "du_an": "hapas", "moc": "2026-10-15T09:00:00+07:00"}
     # Việc gõ tay: không mở lượt kèm lich_id, không báo lịch.
     bao.clear()
     v2 = _viec([_nguon(2, "tiktok", "kolb")])
@@ -859,7 +911,18 @@ def test_quyen_lich_quet_va_cot_mark_ghi():
     mà `lang_nghe_db` ghi (lệch thì lỗi quyền chỉ lộ trên VPS). DDL chạy lại được."""
     sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
         encoding="utf-8")
-    assert "GRANT SELECT ON lich_quet TO mark;" in sql
+    # Review 15/10 (L4): Mark đọc ĐÚNG các cột nó dùng (không email tao_boi/sua_boi) — quyền theo
+    # cột, thu quyền cả bảng của bản nháp trước khi cấp.
+    assert "GRANT SELECT ON lich_quet TO mark;" not in sql
+    assert sql.index("REVOKE SELECT ON lich_quet FROM mark;") < sql.index(
+        "GRANT SELECT (id,")
+    m = re.search(r"GRANT SELECT \(([^)]*)\) ON lich_quet TO mark;", sql)
+    doc = {re.sub(r"\s+", "", c) for c in m.group(1).split(",")}
+    assert doc == {c.strip() for c in K._COT_LICH.split(",")}
+    assert not doc & {"tao_boi", "sua_boi", "tao_luc", "sua_luc"}
+    # M3: lớp chặn thứ hai ở DB cho khoảng chiến dịch; DDL chạy lại được.
+    assert "DROP CONSTRAINT IF EXISTS lich_quet_chien_dich_check" in sql
+    assert "BETWEEN 30 AND 10080" in sql and "PGOPTIONS='-c lock_timeout=5s'" in sql
     m = re.search(r"GRANT UPDATE \(([^)]*)\) ON lich_quet TO mark;", sql)
     cot_mark = {c.strip() for c in m.group(1).split(",")}
     assert cot_mark == {"lan_chay_ke", "lan_chay_cuoi", "ket_qua_cuoi", "so_lan_chay"}

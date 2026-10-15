@@ -1877,3 +1877,37 @@ def test_ngan_sach_du_bao_theo_lich_quet(giua_thang):
     kho.lich[1]["bat"] = False                                          # tắt: về giả định cũ
     assert "16,5 ngày ×" in c.get("/ngan-sach").text
 
+
+def test_xem_truoc_tinh_trong_threadpool_va_chan_chien_dich_qua_xa(giua_thang, monkeypatch):
+    """Review 15/10 (M2): đếm mốc + chi phí chạy trong threadpool (không chặn vòng sự kiện của
+    cả dashboard); chiến dịch bắt đầu quá 365 ngày tới (vd năm 2100) bị từ chối trước khi đếm."""
+    goi: list[str] = []
+    goc = A.run_in_threadpool
+
+    async def ghi(fn, *a, **k):
+        goi.append(getattr(fn, "__name__", ""))
+        return await goc(fn, *a, **k)
+    monkeypatch.setattr(A, "run_in_threadpool", ghi)
+    _, c, _ = tao()
+    dang_nhap(c, XEM)
+    assert c.get("/api/lich-quet/xem-truoc", params={"du_an": "hapas", **LICH_2GIO}).status_code == 200
+    assert "chuan_hoa" in goi and "xem_truoc" in goi
+    goi.clear()
+    dang_nhap(c, QL)
+    assert c.get("/lich-quet").status_code == 200 and "dung" in goi      # trang: dựng trong pool
+    r = c.get("/api/lich-quet/xem-truoc", params={
+        "du_an": "hapas", "kieu": "chien_dich", "tu_luc": "2100-01-01T08:00",
+        "den_luc": "2100-01-02T08:00", "moi": "30", "don_vi": "phut"})
+    assert r.status_code == 400 and "365 ngày" in r.json()["loi"]
+
+
+def test_lich_quet_luot_bi_bo_van_hien_ket_qua_viec_truoc(giua_thang):
+    """L1: lượt bị bỏ vì việc trước còn chạy; việc đó xong sau — dòng lịch nói cả hai."""
+    _, c, kho = tao()
+    _them_lich(kho, ke=_vn(2026, 10, 16, 8))
+    kho.lich[1].update(lan_chay_cuoi=_vn(2026, 10, 15, 11), ket_qua_cuoi={
+        "trang_thai": "bo_qua", "ma_loi": "dang_chay", "ly_do": "Lượt trước còn chạy (mã t1)",
+        "viec_cuoi": {"ma_viec": "t1", "trang_thai": "loi"}})
+    dang_nhap(c, XEM)
+    assert "lượt trước còn chạy · việc t1: lỗi" in c.get("/lich-quet").text
+

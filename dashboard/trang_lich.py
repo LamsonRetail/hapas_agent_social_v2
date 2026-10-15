@@ -63,8 +63,11 @@ def ket_qua_hien(x: dict, quan_ly: bool, loi_chung: str) -> dict | None:
         return {**ra, "nhan": nhan, "lop": lop, "chi_tiet": ma_viec or "",
                 "title": ly if quan_ly or tt != "loi" else loi_chung}
     if tt == "bo_qua":
-        return {**ra, "nhan": "bỏ qua", "lop": "",
-                "chi_tiet": LQ.NHAN_MA_LOI.get(kq.get("ma_loi"), kq.get("ma_loi") or ""),
+        ct = LQ.NHAN_MA_LOI.get(kq.get("ma_loi"), kq.get("ma_loi") or "")
+        vc = kq.get("viec_cuoi") if isinstance(kq.get("viec_cuoi"), dict) else None
+        if vc:      # việc trước của lịch (chạy chồng lên lượt bị bỏ) đã xong: nói kết quả của nó
+            ct += f" · việc {vc.get('ma_viec')}: {TT_LUOT.get(vc.get('trang_thai'), ('?',))[0]}"
+        return {**ra, "nhan": "bỏ qua", "lop": "", "chi_tiet": ct,
                 "title": kq.get("ly_do") or ""}
     ly = kq.get("ly_do") or ""
     return {**ra, "nhan": "lỗi", "lop": "the--loi",
@@ -135,11 +138,16 @@ def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_
     # ── chi phí ──
     bang = CP.bang_cau_hinh(du_an)
     u = CP.uoc_lich(d, bang, nguon)
+    khung = LQ.khung_chien_dich(ung_vien) if kieu == "chien_dich" else None
     if kieu == "chien_dich":
-        ky_den, ky_nhan = LQ.khung_chien_dich(ung_vien)[1], "Cả chiến dịch"
+        ky_den, ky_nhan = (khung[1] if khung else bay_gio), "Cả chiến dịch"
     else:
         ky_den, ky_nhan = bay_gio + dt.timedelta(days=30), "30 ngày tới"
-    luot_ky = LQ.dem_luot_du_an(tat_ca, bay_gio, ky_den).get(toi, 0)
+    # Review 15/10 (M2): kỳ của ứng viên (tới 92 ngày, bắt đầu ≤ 365 ngày tới) chỉ đếm mốc của
+    # CHÍNH ứng viên — đếm mọi lịch khác tới hết chiến dịch là đường cho người xem làm treo CPU.
+    # Phần tháng (≤ 31 ngày) vẫn đếm đủ mọi lịch để so trần.
+    tru = [] if kieu == "chien_dich" else [k for _, k in khung_cd]
+    luot_ky = LQ.dem_moc(kieu, ch, bay_gio, ky_den, tru)
     thang = LQ.dem_luot_du_an(tat_ca, bay_gio, _ket_thuc_thang(bay_gio))
     luot_thang = thang.get(toi, 0)
     usd_khac = sum(thang.get(x.get("id"), 0) * CP.uoc_lich(x, bang, nguon)["moi_luot"]
@@ -178,8 +186,8 @@ def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_
     if nhuong:
         cb.append(f"Một số mốc rơi vào chiến dịch #{', #'.join(str(i) for i in nhuong)} — lịch "
                   "này nhường, không quét chồng.")
-    if kieu == "chien_dich":
-        tu, den = LQ.khung_chien_dich(ung_vien)
+    if kieu == "chien_dich" and khung:
+        tu, den = khung
         trung = [i for i, (a, b) in khung_cd if a <= den and tu <= b]
         if trung:
             cb.append(f"Trùng khung với chiến dịch #{', #'.join(str(i) for i in trung)}: lượt nào "

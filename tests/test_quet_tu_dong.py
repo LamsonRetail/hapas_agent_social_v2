@@ -78,8 +78,9 @@ class GiaKhoLich:
     def ghi_ket_qua_lich(self, lid, ket_qua, *, lan_chay_cuoi=None, tang_so_lan=False,
                          chi_khi_ma_viec=None):
         x = self.lich.get(lid)
-        if not x or (chi_khi_ma_viec and (x.get("ket_qua_cuoi") or {}).get("ma_viec")
-                     != chi_khi_ma_viec):
+        cu = x.get("ket_qua_cuoi") or {} if x else {}
+        if not x or (chi_khi_ma_viec and chi_khi_ma_viec not in (cu.get("ma_viec"),
+                                                                  cu.get("viec_cho"))):
             return False
         x["ket_qua_cuoi"] = ket_qua
         if lan_chay_cuoi is not None:
@@ -91,13 +92,18 @@ class GiaKhoLich:
 @pytest.fixture
 def mt(monkeypatch):
     """Tiến trình giữ quyền chủ việc nền, công tắc Soi tài khoản bật, không nơi nhận cảnh báo."""
+    import lsr_platform
     monkeypatch.setattr(QT, "_co_quyen", lambda: True)
     monkeypatch.setattr(QT, "_duoc_chay", lambda: (True, ""))
+    monkeypatch.setattr(QT, "_danh_ba_da_doc", lambda: True)
     monkeypatch.delenv("MARK_LICH_QUET_BAO_LOI", raising=False)
     monkeypatch.delenv("MARK_LICH_QUET", raising=False)
     gui: list[tuple] = []
     monkeypatch.setattr(QT, "_gui", lambda dich, van, uid: gui.append((dich, van, uid)))
     monkeypatch.gui = gui
+    trace: list[tuple] = []
+    monkeypatch.setattr(lsr_platform, "bao_luot", lambda *a, **k: trace.append((a, k)))
+    monkeypatch.trace = trace
     return monkeypatch
 
 
@@ -150,17 +156,59 @@ def test_hai_tien_trinh_mot_mot_moc_chi_mot_ban_nhan(mt):
 
 
 def test_chet_giua_luc_tao_viec_khong_chay_lai_moc(mt):
-    """Mốc kế commit TRƯỚC: lỗi bất ngờ khi tạo việc thì lỡ đúng một lượt, không chạy lại."""
+    """Mốc kế commit TRƯỚC: tiến trình chết ngay sau khi nhận lịch (trước/khi tạo việc) thì lỡ
+    đúng một lượt, không chạy lại mốc đó."""
     kho = GiaKhoLich(_lich()).cai(mt)
 
-    def no():
+    def chet(*a):
         raise RuntimeError("tiến trình chết")
-    mt.setattr(QT, "_duoc_chay", no)
+    goc = QT._chay
+    mt.setattr(QT, "_chay", chet)
     goi = _tao_luot(mt, kho)
     assert QT.mot_nhip(vn(2026, 10, 15, 9, 0, 5)) == []        # không ném ra ngoài
     assert kho.lich[1]["lan_chay_ke"] == vn(2026, 10, 15, 11)
-    mt.setattr(QT, "_duoc_chay", lambda: (True, ""))
+    mt.setattr(QT, "_chay", goc)
     assert QT.mot_nhip(vn(2026, 10, 15, 9, 1)) == [] and goi == []
+
+
+def test_hoi_cong_tac_loi_thi_ghi_loi_co_ly_do(mt):
+    """Review 15/10 (L2): hỏi công tắc ném lỗi nằm TRONG try — lịch ghi "lỗi" có lý do, không
+    thoát ra nhịp mà không để lại dấu vết."""
+    kho = GiaKhoLich(_lich()).cai(mt)
+
+    def no():
+        raise RuntimeError("danh bạ hỏng")
+    mt.setattr(QT, "_duoc_chay", no)
+    goi = _tao_luot(mt, kho)
+    ra = QT.mot_nhip(vn(2026, 10, 15, 9, 0, 5))
+    assert ra == [{"id": 1, "hanh_dong": "loi", "ma_loi": "loi", "ma_viec": None}] and goi == []
+    assert "RuntimeError" in kho.lich[1]["ket_qua_cuoi"]["ly_do"]
+
+
+def test_chua_doc_duoc_danh_ba_platform_thi_chua_chay(mt):
+    """Review 15/10 (L3): khởi động nguội chưa đọc được công tắc thì KHÔNG chạy (không mở vì không
+    biết); mốc chưa bị nhận nên đọc được danh bạ trong 30 phút thì vẫn chạy bù."""
+    kho = GiaKhoLich(_lich()).cai(mt)
+    goi = _tao_luot(mt, kho)
+    mt.setattr(QT, "_danh_ba_da_doc", lambda: False)
+    assert QT.mot_nhip(vn(2026, 10, 15, 9, 0, 5)) == [] and goi == []
+    assert kho.lich[1]["lan_chay_ke"] == vn(2026, 10, 15, 9)
+    mt.setattr(QT, "_danh_ba_da_doc", lambda: True)
+    QT.mot_nhip(vn(2026, 10, 15, 9, 10))
+    assert [g["lich"]["moc"] for g in goi] == ["2026-10-15T09:00:00+07:00"]
+
+
+def test_danh_ba_da_doc_theo_bo_nho_lsr_policy(monkeypatch):
+    import lsr_policy
+    monkeypatch.setitem(lsr_policy._nho_nl, "bat", None)
+    monkeypatch.setitem(lsr_policy._nho_nl, "luc", 0.0)
+    monkeypatch.setattr(lsr_policy, "_nang_luc_tu_danh_ba", lambda: None)      # platform im
+    assert QT._danh_ba_da_doc() is False
+    monkeypatch.setattr(lsr_policy, "_nang_luc_tu_danh_ba", lambda: {"soi_tai_khoan"})
+    assert QT._danh_ba_da_doc() is True
+    monkeypatch.setattr(lsr_policy, "_nang_luc_tu_danh_ba", lambda: None)      # mất mạng sau đó
+    monkeypatch.setitem(lsr_policy._nho_nl, "luc", 0.0)
+    assert QT._danh_ba_da_doc() is True                    # đã đọc được một lần: dùng bản nhớ
 
 
 def test_khong_giu_quyen_chu_viec_nen_thi_khong_nhan_lich(mt):
@@ -284,6 +332,24 @@ def test_cau_hinh_hong_dung_lich_cho_sua(mt, monkeypatch):
     assert "cấu hình lịch hỏng" in kho.lich[1]["ket_qua_cuoi"]["ly_do"]
 
 
+@pytest.mark.parametrize("ch", [
+    {"tu_luc": "2026-10-15T08:00", "den_luc": "2026-10-15T12:00", "moi_phut": 1},     # mỗi phút
+    {"tu_luc": "2026-10-15T08:00", "den_luc": "2026-10-15T12:00", "moi_phut": 20000},
+    {"tu_luc": "2026-10-15T08:00", "den_luc": "2027-03-01T12:00", "moi_phut": 60},    # > 92 ngày
+    {"tu_luc": "2026-10-15T08:00", "den_luc": "2026-10-15T12:00", "moi_phut": "rác"},
+    {"tu_luc": "2026-10-15T08:00", "den_luc": "2026-10-15T12:00", "moi_phut": True},
+])
+def test_chien_dich_ghi_ngoai_dashboard_sai_gioi_han_thi_ngu(mt, ch):
+    """Review 15/10 (M3): dòng ghi thẳng bằng psql với moi_phut = 1 phải NGỦ (mốc kế NULL, ghi lỗi),
+    không chạy mỗi phút."""
+    kho = GiaKhoLich(_lich(kieu="chien_dich", ch=ch)).cai(mt)
+    goi = _tao_luot(mt, kho)
+    ra = QT.mot_nhip(vn(2026, 10, 15, 9, 0, 5))
+    assert ra[0]["hanh_dong"] == "loi" and goi == [] and kho.lich[1]["lan_chay_ke"] is None
+    assert "không hợp lệ" in kho.lich[1]["ket_qua_cuoi"]["ly_do"]
+    assert QT.mot_nhip(vn(2026, 10, 15, 9, 1, 5)) == []
+
+
 def test_kho_loi_nhip_khong_nem(mt):
     kho = GiaKhoLich(_lich()).cai(mt)
     kho.hong = True
@@ -305,6 +371,54 @@ def test_ket_thuc_viec_ghi_trang_thai_cuoi_va_canh_bao_loi(mt):
     assert kq["trang_thai"] == "loi" and "KeyError" in kq["ly_do"]
     assert len(mt.gui) == 1 and mt.gui[0][0] == "ou_chuagent" and "LỖI" in mt.gui[0][1]
     QT.ket_thuc_viec(99, "t1", 1, "xong", "")                 # lịch đã xoá: im lặng
+
+
+def test_luot_bi_bo_vi_viec_truoc_con_chay_van_nhan_ket_qua_cuoi_cua_viec_do(mt):
+    """Review 15/10 (L1): 09:00 giao t1; 11:00 bị bỏ vì t1 còn chạy (ghi đè kết quả); t1 lỗi lúc
+    11:20 — kết quả cuối + cảnh báo lỗi của t1 vẫn về lịch (qua `viec_cho`), không mất."""
+    mt.setenv("MARK_LICH_QUET_BAO_LOI", "oc_vanhanh")
+    kho = GiaKhoLich(_lich()).cai(mt)
+    _tao_luot(mt, kho)
+    QT.mot_nhip(vn(2026, 10, 15, 9, 0, 5))
+    assert kho.lich[1]["ket_qua_cuoi"]["viec_cho"] == "t1"
+    _tao_luot(mt, kho, {"ok": False, "ma_loi": "dang_chay", "ma_viec": "t1",
+                        "cau": "Đã có việc theo dõi 'hapas' chưa xong (mã t1)."})
+    QT.mot_nhip(vn(2026, 10, 15, 11, 0, 5))
+    kq = kho.lich[1]["ket_qua_cuoi"]
+    assert kq["trang_thai"] == "bo_qua" and kq["viec_cho"] == "t1" and kq["ma_viec_cu"] == "t1"
+    QT.ket_thuc_viec(1, "t1", 7, "loi", "Theo dõi HAPAS (t1) dừng vì lỗi: KeyError",
+                     chi_phi_usd=0.42, du_an="hapas", moc="2026-10-15T09:00:00+07:00")
+    kq = kho.lich[1]["ket_qua_cuoi"]
+    assert kq["trang_thai"] == "bo_qua"                     # kết quả mới nhất vẫn là lượt bị bỏ
+    assert kq["viec_cuoi"]["ma_viec"] == "t1" and kq["viec_cuoi"]["trang_thai"] == "loi"
+    assert kq["viec_cuoi"]["chi_phi_usd"] == 0.42 and "viec_cho" not in kq
+    assert len(mt.gui) == 1 and "LỖI" in mt.gui[0][1] and "KeyError" in mt.gui[0][1]
+    # báo lần hai (việc đã báo xong rồi): không khớp nữa, không ghi đè
+    QT.ket_thuc_viec(1, "t1", 7, "xong", "")
+    assert kho.lich[1]["ket_qua_cuoi"]["viec_cuoi"]["trang_thai"] == "loi"
+
+
+def test_moi_luot_bao_platform_bang_trace(mt):
+    """Governance: lượt theo lịch dashboard không qua hàng đợi job platform — mỗi lượt (giao
+    việc, bỏ qua, xong + chi phí thật) báo bằng trace có sẵn `lsr_platform.bao_luot`."""
+    import json
+    ch = {"moi_gio": 1, "tu": "00:00", "den": "23:59", "thu": []}
+    kho = GiaKhoLich(_lich(ch=ch)).cai(mt)
+    _tao_luot(mt, kho)
+    QT.mot_nhip(vn(2026, 10, 15, 9, 0, 5))                      # giao t1
+    kho.lich[1]["lan_chay_ke"] = vn(2026, 10, 15, 9)
+    QT.mot_nhip(vn(2026, 10, 15, 9, 45))                        # lỡ mốc → bỏ qua
+    QT.ket_thuc_viec(1, "t1", 8, "xong", "", chi_phi_usd=0.1234, du_an="hapas",
+                     moc="2026-10-15T09:00:00+07:00")
+    ds = [(a[0], json.loads(a[2]), k) for a, k in mt.trace]
+    assert [d["ket_qua"] for _, d, _ in ds] == ["da_tao", "bo_qua", "xong"]
+    rid, d, k = ds[0]
+    assert rid == "lich-1-202610150900" and k["ok"] is True
+    assert d["lich_id"] == 1 and d["du_an"] == "hapas" and d["ma_viec"] == "t1"
+    assert d["moc"] == "2026-10-15T09:00:00+07:00" and d["chi_phi_usd"] == 0
+    assert ds[1][1]["ma_loi"] == "lo"
+    rid, d, _ = ds[2]
+    assert rid == "lich-1-t1-xong" and d["chi_phi_usd"] == 0.1234 and d["luot_id"] == 8
 
 
 def test_dich_canh_bao_chi_nhan_ma_hop_le(monkeypatch):
@@ -363,7 +477,9 @@ def test_ghi_ket_qua_lich_chi_de_dung_viec_va_mo_luot_kem_lich(sql):
     lenh, tra = sql
     K.ghi_ket_qua_lich(4, {"trang_thai": "xong"}, chi_khi_ma_viec="t5")
     s, ts = lenh[0]
-    assert s.endswith("AND ket_qua_cuoi->>'ma_viec' = %s RETURNING id") and ts[-1] == "t5"
+    # khớp việc của kết quả hiện tại HOẶC việc còn chờ báo xong (`viec_cho`, review 15/10 L1)
+    assert s.endswith("AND (ket_qua_cuoi->>'ma_viec' = %s OR ket_qua_cuoi->>'viec_cho' = %s) "
+                      "RETURNING id") and ts[-2:] == ("t5", "t5")
     tra[r"RETURNING id"] = [{"id": 31}]
     assert K.mo_luot("hapas", "theo_doi", ma_viec="t5", lich_id=4) == 31
     ins = next(s for s, _ in lenh if s.startswith("INSERT INTO luot_quet"))

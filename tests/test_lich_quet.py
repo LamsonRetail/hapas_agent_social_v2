@@ -306,3 +306,68 @@ def test_chu_moc_va_khoang():
     assert LQ.chu_con(vn(2026, 10, 18, 8, 30), b) == "còn 3 ngày"
     assert LQ.moc_gan_qua("hang_ngay", {"gio": ["07:00", "07:20"]})
     assert not LQ.moc_gan_qua("moi_n_gio", NAM_HAI)
+
+
+# ───────────────────────────── review 15/10 ─────────────────────────────
+@pytest.mark.parametrize("ch, ok", [
+    ({**CD, "moi_phut": 30}, True), ({**CD, "moi_phut": 10080}, True),
+    ({**CD, "moi_phut": "60"}, True),
+    ({**CD, "moi_phut": 29}, False), ({**CD, "moi_phut": 10081}, False),
+    ({**CD, "moi_phut": True}, False), ({**CD, "moi_phut": [60]}, False),
+    ({**CD, "den_luc": "2027-01-21T08:00"}, False),               # > 92 ngày
+    ({**CD, "den_luc": CD["tu_luc"]}, False),                      # kết thúc = bắt đầu
+])
+def test_chien_dich_ghi_ngoai_dashboard_sai_gioi_han_thi_khong_co_moc(ch, ok):
+    """M3: giới hạn chiến dịch áp cả ở phía Mark — dòng sai (psql) không có mốc nào, lịch ngủ."""
+    assert (LQ.moc_ke("chien_dich", ch, vn(2026, 10, 15)) is not None) is ok
+    assert (LQ.loi_cau_hinh("chien_dich", ch) == "") is ok
+
+
+@pytest.mark.parametrize("kieu, ch, ok", [
+    ("moi_n_gio", NAM_HAI, True), ("hang_ngay", {"gio": ["07:00"]}, True),
+    ("hang_tuan", {"gio": ["07:00"], "thu": [2]}, True),
+    ("hang_tuan", {"gio": ["07:00"], "thu": []}, False),
+    ("hang_ngay", {"gio": ["07:00"], "thu": [8]}, False),
+    ("hang_ngay", {"gio": ["07:00"], "thu": 3}, False),
+    ("hang_ngay", {"gio": []}, False), ("moi_n_gio", {**NAM_HAI, "moi_gio": 5}, False),
+    ("la", {}, False), ("hang_ngay", "rác", False),
+])
+def test_loi_cau_hinh(kieu, ch, ok):
+    assert (LQ.loi_cau_hinh(kieu, ch) == "") is ok
+    if not ok and isinstance(ch, dict) and kieu in LQ.KIEU:
+        assert LQ.moc_ke(kieu, ch, vn(2026, 10, 15)) is None     # sai thì không có mốc nào
+
+
+def test_chien_dich_phai_bat_dau_trong_365_ngay():
+    """M2: chặn xem trước một chiến dịch năm 2100 (máy chủ đếm mốc hàng chục năm)."""
+    f = {"kieu": "chien_dich", "moi": "1", "don_vi": "gio"}
+    assert LQ.chuan_hoa({**f, "tu_luc": "2027-10-14T08:00", "den_luc": "2027-10-15T08:00"},
+                        BAY_GIO)["kieu"] == "chien_dich"
+    for tu in ("2027-10-16T08:00", "2099-12-01T08:00"):
+        den = tu.replace("T08", "T20")
+        with pytest.raises(LQ.LoiLich, match="trong vòng 365 ngày"):
+            LQ.chuan_hoa({**f, "tu_luc": tu, "den_luc": den}, BAY_GIO)
+
+
+def test_xem_truoc_chi_dem_ung_vien_trong_ky(monkeypatch):
+    """M2: kỳ của ứng viên (tới hết chiến dịch) đếm mốc của CHÍNH nó; mọi lần đếm "mọi lịch" chỉ
+    tới hết tháng — 20 lịch mỗi giờ + chiến dịch 3 tháng không làm máy chủ đếm hàng triệu mốc."""
+    from dashboard import trang_lich as TL
+    het_thang = vn(2026, 11, 1) - dt.timedelta(microseconds=1)
+    goc = LQ.dem_luot_du_an
+    den: list = []
+
+    def ghi(cac, tu, d):
+        den.append(d)
+        return goc(cac, tu, d)
+    monkeypatch.setattr(LQ, "dem_luot_du_an", ghi)
+    khac = [{"id": i, "kieu": "moi_n_gio", "bat": True, "quet_moi_nguon": False,
+             "cau_hinh": {"moi_gio": 1, "tu": "00:00", "den": "23:59", "thu": []}}
+            for i in range(1, 21)]
+    d = LQ.chuan_hoa({"kieu": "chien_dich", "tu_luc": "2027-09-01T08:00",
+                      "den_luc": "2027-11-30T08:00", "moi": "30", "don_vi": "phut"}, BAY_GIO)
+    du_an = {"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas"], "tran_usd_thang": 5.0,
+             "dang_bat": True, "tk_so_bai": 0, "bl_so_bai": 0}
+    xt = TL.xem_truoc(d, khac, du_an, [], 0.0, None, BAY_GIO)
+    assert den and all(x <= het_thang for x in den)
+    assert xt["chi_phi"][1]["nhan"] == "Cả chiến dịch" and xt["chi_phi"][1]["phu"] == "4.321 lượt"

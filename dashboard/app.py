@@ -61,8 +61,10 @@ VN = CS.VN
 # thì sửa cả hai dòng dưới (trình duyệt từ chối chạy tệp lệch `integrity`).
 ECHARTS = "/tinh/echarts.min.js"
 ECHARTS_SRI = "sha256-6EJwvQzVvfYP78JtAMKjkcsugfTSanqe4WGFpUdzo88="
-LICH_CHAY = ("Quét tự động: tab Lịch quét (Mark tự chạy theo giờ/ngày/tuần/chiến dịch). Lịch "
-             "console “/theodoi <mã dự án>” vẫn chạy song song.")
+#: Chân trang (15/10/2026): lịch quét đặt ở tab Lịch quét — Mark tự chạy; lịch Giao việc trên
+#: console vẫn chạy song song (không còn câu "lịch chỉ đặt trên console").
+LICH_CHAY = ("Quét tự động: tab Lịch quét (Mark tự chạy theo giờ/ngày/tuần/chiến dịch, kết quả "
+             "hiện ở đây). Lịch Giao việc “/theodoi <mã dự án>” trên console vẫn chạy song song.")
 CHU_KY_KIEM = 30.0          # giây; vòng kiểm lượt quét mới khi Mark không báo được
 SSE_TOI_DA_KET_NOI = 200    # trình duyệt mở cùng lúc; quá thì từ chối, khỏi cạn bộ nhớ
 SSE_MOI_EMAIL = 5           # mỗi người tối đa ngần này tab nghe sự kiện
@@ -1250,18 +1252,26 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                      "xt": None, "sua": None, "loi_bm": loi}
         if du_an:
             cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an["ma"])
-            ctx["lich"] = TL.dong_lich(cac, du_an, nguon, bay_gio, ql, LOI_CHUNG)
-            ctx["tong"] = TL.tong_quan(cac, du_an, nguon, da_tieu, tran_pf, bay_gio)
+            sua = (next((x for x in cac if str(x["id"]) == str(sua_id)), None)
+                   if ql and sua_id else None)
             if ql:
-                sua = next((x for x in cac if str(x["id"]) == str(sua_id)), None) if sua_id else None
                 bm = bm or (LQ.tu_form(sua, bay_gio) if sua else LQ.tu_form_mac_dinh(bay_gio))
-                try:
-                    d = LQ.chuan_hoa(LQ.bieu_mau(bm), bay_gio)
-                    xt = TL.xem_truoc(d, cac, du_an, nguon, da_tieu, tran_pf, bay_gio,
-                                      sua["id"] if sua else None)
-                except LQ.LoiLich as e:
-                    xt = {"loi": str(e)}
-                ctx.update(sua=sua, bm=bm, xt=xt)
+
+            def dung() -> dict:
+                """Đếm mốc + chi phí (thuần, có thể vài chục nghìn vòng): chạy trong threadpool,
+                không chặn vòng sự kiện (review 15/10, M2)."""
+                ra = {"lich": TL.dong_lich(cac, du_an, nguon, bay_gio, ql, LOI_CHUNG),
+                      "tong": TL.tong_quan(cac, du_an, nguon, da_tieu, tran_pf, bay_gio)}
+                if ql:
+                    try:
+                        d = LQ.chuan_hoa(LQ.bieu_mau(bm), bay_gio)
+                        ra["xt"] = TL.xem_truoc(d, cac, du_an, nguon, da_tieu, tran_pf, bay_gio,
+                                                sua["id"] if sua else None)
+                    except LQ.LoiLich as e:
+                        ra["xt"] = {"loi": str(e)}
+                    ra.update(sua=sua, bm=bm)
+                return ra
+            ctx.update(await _k(dung))
         return _trang(request, "lich_quet.html", nguoi, "lich_quet", ma=ma_http, KIEU_LICH=LQ.KIEU,
                       THU=LQ.THU, MOI_GIO=LQ.MOI_GIO, PHUT_TOI_THIEU=LQ.PHUT_TOI_THIEU, **ctx)
 
@@ -1285,12 +1295,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         lid = q.get("lid") or ""
         bay_gio = _bay_gio()
         try:
-            d = LQ.chuan_hoa(dict(q), bay_gio)
+            d = await _k(LQ.chuan_hoa, dict(q), bay_gio)
         except LQ.LoiLich as e:
             return JSONResponse({"loi": str(e)}, status_code=400)
         cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an["ma"])
-        return JSONResponse(TL.xem_truoc(d, cac, du_an, nguon, da_tieu, tran_pf, bay_gio,
-                                         int(lid) if lid.isdigit() else None))
+        # Đếm mốc trong threadpool (review 15/10, M2): không chặn vòng sự kiện của cả dashboard.
+        return JSONResponse(await _k(TL.xem_truoc, d, cac, du_an, nguon, da_tieu, tran_pf,
+                                     bay_gio, int(lid) if lid.isdigit() and len(lid) < 19
+                                     else None))
 
     async def _lich_phai_co(lid: int) -> dict:
         x = await _k(app.state.kho.doc_lich, lid)

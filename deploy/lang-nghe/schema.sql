@@ -1,7 +1,11 @@
 -- Kho dữ liệu lắng nghe MXH (đợt 2, chủ dự án chốt 14/10/2026): DB `lang_nghe` trên Postgres 16
 -- của VPS Mark. Chạy lại nhiều lần không hỏng (IF NOT EXISTS / DO $$ … $$).
 --
---   sudo -u postgres psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
+--   sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 \
+--     -f deploy/lang-nghe/schema.sql
+--
+-- lock_timeout: ALTER TABLE (vd thêm luot_quet.lich_id) xin khoá ACCESS EXCLUSIVE; Mark/dashboard
+-- đang giữ khoá thì lệnh dừng sau 5 giây và báo lỗi (chạy lại sau), không treo mọi truy vấn khác.
 --
 -- Vì sao DB riêng trên VPS mà không để trên platform: quyết định 0008 của platform (platform chỉ
 -- giữ control + audit; dữ liệu xử lý nằm ở làn của agent) — chủ dự án chốt "mark vẫn phải theo
@@ -306,6 +310,13 @@ CREATE TABLE IF NOT EXISTS lich_quet (
 );
 CREATE INDEX IF NOT EXISTS lich_quet_den_han ON lich_quet (lan_chay_ke) WHERE bat;
 CREATE INDEX IF NOT EXISTS lich_quet_du_an ON lich_quet (du_an);
+-- Chiến dịch: khoảng 30 phút – 7 ngày một lượt, kể cả dòng ghi ngoài dashboard (psql) — lớp chặn
+-- thứ hai sau `dashboard/lich_quet.py` (Mark cũng tự cho lịch sai giới hạn ngủ). CASE giữ thứ tự
+-- đánh giá: moi_phut không phải số thì không ép kiểu.
+ALTER TABLE lich_quet DROP CONSTRAINT IF EXISTS lich_quet_chien_dich_check;
+ALTER TABLE lich_quet ADD CONSTRAINT lich_quet_chien_dich_check CHECK (
+  kieu <> 'chien_dich' OR CASE WHEN jsonb_typeof(cau_hinh->'moi_phut') = 'number'
+    THEN (cau_hinh->>'moi_phut')::numeric BETWEEN 30 AND 10080 ELSE false END);
 -- Lượt nào do lịch nào giao (NULL: lượt gõ tay / lịch console). Xoá lịch thì lượt giữ, cột NULL.
 ALTER TABLE luot_quet ADD COLUMN IF NOT EXISTS lich_id BIGINT
   REFERENCES lich_quet(id) ON DELETE SET NULL;
@@ -606,9 +617,13 @@ GRANT SELECT, INSERT, UPDATE ON bai, chi_so_ngay, luot_quet, binh_luan TO mark;
 GRANT SELECT, INSERT ON de_xuat TO mark;
 GRANT UPDATE (ten, link, ly_do, so_bai, thao_luan) ON de_xuat TO mark;
 GRANT USAGE ON SEQUENCE luot_quet_id_seq, de_xuat_id_seq TO mark;
--- Lịch quét tự động (15/10/2026): Mark đọc lịch, chỉ ghi cột trạng thái chạy (FOR UPDATE cần
--- quyền UPDATE trên ít nhất một cột — đủ ở đây). Không tạo/xoá/sửa cấu hình lịch.
-GRANT SELECT ON lich_quet TO mark;
+-- Lịch quét tự động (15/10/2026): Mark đọc ĐÚNG các cột nó dùng (`lang_nghe_db._COT_LICH`; không
+-- đọc email tao_boi/sua_boi), chỉ ghi cột trạng thái chạy (FOR UPDATE cần quyền UPDATE trên ít
+-- nhất một cột — đủ ở đây). Không tạo/xoá/sửa cấu hình lịch. REVOKE trước: bản nháp cũ cấp SELECT
+-- cả bảng; thu quyền bảng là thu luôn quyền cột, rồi cấp lại theo cột.
+REVOKE SELECT ON lich_quet FROM mark;
+GRANT SELECT (id, du_an, ten, kieu, cau_hinh, bat, quet_moi_nguon, lan_chay_ke, lan_chay_cuoi,
+              ket_qua_cuoi, so_lan_chay) ON lich_quet TO mark;
 GRANT UPDATE (lan_chay_ke, lan_chay_cuoi, ket_qua_cuoi, so_lan_chay) ON lich_quet TO mark;
 
 -- Quyền của dashboard: quản lý cấu hình + người xem, đọc mọi thứ, ghi nhật ký và mốc đồng bộ.

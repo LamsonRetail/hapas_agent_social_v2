@@ -6,11 +6,14 @@ hỏi; Kompa theo dõi sẵn danh sách nguồn và cộng dồn mỗi ngày. L�
 sách nguồn và ngân sách tháng quản lý trên dashboard (`social.hapas.vn`), Mark quét theo lịch.
 
 Mark VẪN theo luật platform như trước (chủ dự án chốt 14/10/2026 — "không đổi"):
-  • Lượt chạy đến từ LỊCH `run` đặt trên console platform (nội dung `/theodoi hapas`), đi qua
-    hàng đợi job + audit như mọi việc khác. Từ 15/10/2026 (chủ dự án chốt "Dashboard + Mark tự
-    chạy") có thêm LỊCH QUÉT TỰ ĐỘNG đặt trên dashboard (bảng `lich_quet`, nhịp 30 giây trong
-    `quet_tu_dong.py`): cùng đường `tao_luot` này, cùng công tắc + trần; kết quả chỉ lên
-    dashboard, không nhắn Lark.
+  • Lượt chạy đến từ HAI đường lịch (và lệnh gõ tay):
+      1. Lịch `run` trên console platform (nội dung `/theodoi hapas`) — đi qua hàng đợi job +
+         audit của platform như mọi việc khác.
+      2. Từ 15/10/2026 (chủ dự án chốt "Dashboard + Mark tự chạy"): LỊCH QUÉT TỰ ĐỘNG đặt trên
+         dashboard (bảng `lich_quet`). Đây LÀ một nhịp riêng trên VPS (`quet_tu_dong.py`, 30
+         giây, trong tiến trình Mark) — không qua hàng đợi job của platform, nên mỗi lượt báo
+         platform bằng trace (`lsr_platform.bao_luot`). Cùng đường `tao_luot`, cùng công tắc +
+         trần; kết quả chỉ lên dashboard, không nhắn Lark.
   • Cần công tắc `soi_tai_khoan` (cùng actor theo tài khoản) đang bật — kiểm ở `lenh_cung`.
   • Mỗi nền tảng tôn trọng công tắc + trần USD mỗi lượt ở "Năng lực → Quét mạng xã hội".
   • Trần tháng của dự án (dashboard) chỉ THU HẸP thêm: mỗi lượt actor mang trần USD =
@@ -31,6 +34,7 @@ import contextvars
 import datetime
 import hashlib
 import re
+import threading
 import time
 
 import apify_tool as A
@@ -267,14 +271,33 @@ def lenh_theodoi(doi_so: str) -> str:
     return tao_luot(ma)["cau"]
 
 
+#: Khoá tạo việc theo dự án (review 15/10, M1): lịch console (luồng job) và lịch dashboard (luồng
+#: nhịp) cùng phút cùng dự án thì cả hai đều qua `_viec_dang_do` trước khi bên kia kịp ghi sổ —
+#: hai việc quét trùng nguồn, trả tiền hai lần. Giữ khoá từ lúc kiểm việc dở tới lúc ghi việc vào
+#: sổ. Hai TIẾN TRÌNH thì đã có quyền chủ việc nền (`viec_nen`): bản không giữ quyền không tạo việc.
+_KHOA_TAO: dict[str, threading.Lock] = {}
+_KHOA_TAO_SO = threading.Lock()
+
+
+def _khoa_tao(ma: str) -> threading.Lock:
+    with _KHOA_TAO_SO:
+        return _KHOA_TAO.setdefault(ma, threading.Lock())
+
+
 def tao_luot(ma: str, *, moi_nguon: bool = False, lich: dict | None = None) -> dict:
     """Tạo MỘT việc nền theo dõi dự án `ma` — đường chung của `/theodoi` (chat, lịch console)
-    và lịch quét tự động trên dashboard (`quet_tu_dong`, `lich` = {"id", "moc"}).
+    và lịch quét tự động trên dashboard (`quet_tu_dong`, `lich` = {"id", "moc"}). Cùng dự án thì
+    chạy tuần tự (`_khoa_tao`): kiểm việc dở → kế hoạch → ghi sổ việc là MỘT bước.
 
     -> {"ok": True, "ma_viec", "cau"} hoặc {"ok": False, "ma_loi", "cau"}; `cau` là câu trả
     lời chat. Mã lỗi: các mã của `ke_hoach`, cùng dang_chay (việc cũ chưa xong), het_ngan_sach
     (lịch: tháng của dự án đã hết), het_ngan_sach_apify (ngân sách việc nền của tài khoản),
     tu_choi (sổ việc nền từ chối — hàng đợi đầy, tiến trình khác giữ quyền)."""
+    with _khoa_tao(ma):
+        return _tao_luot(ma, moi_nguon=moi_nguon, lich=lich)
+
+
+def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
     cu = _viec_dang_do(ma)
     if cu:
         return {"ok": False, "ma_loi": "dang_chay", "ma_viec": cu.get("ma"),
@@ -597,11 +620,15 @@ def chay_viec(v) -> tuple[str, str]:
     `_KHI_CO_RUN`) đặt ở đây không rò sang lượt khác dùng chung luồng. Việc do lịch quét tự
     động giao (`tham_so.lich_id`) thì báo kết quả cuối về lịch (`quet_tu_dong.ket_thuc_viec`)."""
     kq = contextvars.copy_context().run(_chay_viec, v)
-    lid = (v.d.get("tham_so") or {}).get("lich_id")
+    ts = v.d.get("tham_so") or {}
+    lid = ts.get("lich_id")
     if lid:
         try:
             import quet_tu_dong
-            quet_tu_dong.ket_thuc_viec(int(lid), v.ma, v.d.get("luot_id"), kq[0], kq[1])
+            quet_tu_dong.ket_thuc_viec(
+                int(lid), v.ma, v.d.get("luot_id"), kq[0], kq[1],
+                chi_phi_usd=float((v.d.get("chi_phi") or {}).get("usd") or 0),
+                du_an=str(ts.get("du_an") or ""), moc=str(ts.get("moc") or ""))
         except Exception as e:  # noqa: BLE001 — báo lịch hỏng không làm hỏng việc đã xong
             print(f"[theo_doi] không báo được lịch #{lid}: {type(e).__name__}", flush=True)
     return kq
