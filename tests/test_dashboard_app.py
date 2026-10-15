@@ -169,6 +169,18 @@ class GiaKho:
         self.du_an[ma].update(bl_bat=bat, bl_so_bai=so_bai, bl_moi_bai=moi_bai)
         self._ghi(ai, "sua_binh_luan", f"du_an:{ma}")
 
+    def ngu_canh_bai(self, du_an, khoa):
+        return {b["khoa"]: {"khoa": b["khoa"], "bai_link": b.get("link"),
+                            "bai_noi_dung": b.get("noi_dung"), "bai_dang_luc": b.get("dang_luc")}
+                for b in self.bai if b["khoa"] in set(khoa)}
+
+    def dat_cau_hinh(self, ai, ma, cau_hinh):
+        self.du_an[ma].update(
+            cau_hinh=cau_hinh,
+            tk_bat=any(v.get("bat") is True for v in cau_hinh["tu_khoa"].values()),
+            bl_bat=any(v.get("bat") is True for v in cau_hinh["binh_luan"].values()))
+        self._ghi(ai, "sua_cau_hinh", f"du_an:{ma}")
+
     def da_tieu_thang(self):
         return {"hapas": 1.25}
 
@@ -481,8 +493,8 @@ def test_them_va_sua_du_an():
 
 
 # ───────────────────────────── ngân sách ─────────────────────────────
-@pytest.mark.parametrize("vao", ["150", "100.5", "-1", "abc", ""])
-def test_tran_thang_ngoai_0_100_bi_tu_choi(vao):
+@pytest.mark.parametrize("vao", ["-1", "abc", "", "1e9"])
+def test_tran_thang_am_hoac_rac_bi_tu_choi(vao):
     _, c, kho = tao()
     csrf = dang_nhap(c, QL)
     r = c.post("/ngan-sach/hapas", data={"csrf": csrf, "tran_usd_thang": vao})
@@ -491,8 +503,9 @@ def test_tran_thang_ngoai_0_100_bi_tu_choi(vao):
 
 
 @pytest.mark.parametrize("vao, ra", [("12,5", Decimal("12.50")), ("0", Decimal("0.00")),
-                                     ("100", Decimal("100.00"))])
+                                     ("100", Decimal("100.00")), ("150", Decimal("150.00"))])
 def test_tran_thang_hop_le(vao, ra):
+    """Chủ dự án 15/10: "không có giới hạn" — trần tháng không còn trần trên 100 USD."""
     _, c, kho = tao()
     csrf = dang_nhap(c, QL)
     r = c.post("/ngan-sach/hapas", data={"csrf": csrf, "tran_usd_thang": vao})
@@ -602,7 +615,7 @@ def test_cac_trang_hien_dung_va_thoat_chu():
         r = c.get(p)
         assert r.status_code == 200, p
         assert "<script>alert(1)</script>" not in r.text, p
-        assert "Lịch quét không đặt ở đây" in r.text, p      # lịch chạy ở console platform
+        assert "Lịch quét đặt ở console platform" in r.text, p
         assert "content-security-policy" in r.headers and r.headers["cache-control"] == "no-store"
     t = c.get("/").text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in t
@@ -617,6 +630,30 @@ def test_cac_trang_hien_dung_va_thoat_chu():
     t = c.get("/nguon").text
     assert "Thêm nguồn" in t and "Duyệt" in t and "Thêm dự án mới" in t
     assert 'href="/nguoi-xem"' in c.get("/").text
+
+
+def test_trang_chi_so_giu_du_khoi_va_an_toan_csp():
+    """Trang Chỉ số thiết kế lại (15/10/2026): CSS riêng, giữ đủ mọi khối (KPI, thảo luận, sắc thái,
+    từ khoá, chủ đề, nền tảng, loại nguồn, nguồn/bài nổi bật, luồng bình luận, ngăn chi tiết);
+    không script nội dòng / on*= (CSP script-src 'self'); JS không chèn HTML từ dữ liệu MXH và
+    chỉ nhận link http(s)."""
+    import re
+    _, c, _ = tao()
+    dang_nhap(c, XEM)
+    t = c.get("/").text
+    assert 'href="/tinh/chi_so.css"' in t and c.get("/tinh/chi_so.css").status_code == 200
+    for ma in ("kpi", "ky-truoc", "bd-xu-huong", "bd-sac-thai", "bd-sac-thai-tg", "tk-may", "tk-bang",
+               "chu-de", "nen-tang", "loai-nguon", "tab-nen-tang", "top-nguon", "top-bai", "khoi-bl",
+               "kpi-bl", "loai-bl", "bl-tim", "bl-truong", "bl-sap-xep", "bl-ds", "chi-tiet",
+               "loi-tai", "canh-bao", "canh-bao-bl"):
+        assert f'id="{ma}"' in t, ma
+    for m in re.finditer(r"<script([^>]*)>(.*?)</script>", t, re.S):
+        assert "src=" in m.group(1) or 'type="application/json"' in m.group(1), m.group(0)[:80]
+    assert not re.search(r"\son[a-z]+=", t)
+    js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
+    for cam in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"):
+        assert cam not in js, cam
+    assert "/^https?:\\/\\//i" in js and 'a.rel = "noopener noreferrer"' in js
 
 
 def test_khong_co_trang_ky_nang_hay_cong_tac_cua_mark():
@@ -1193,6 +1230,27 @@ def test_api_binh_luan_theo_bai_va_theo_cot():
     assert c.get(q + "&khoa=" + "x" * 300).status_code == 400
 
 
+def test_api_binh_luan_bo_loc_kieu_kompa():
+    """Đợt 2e: luồng bình luận lọc theo trường (nền tảng, nguồn, nhãn, chữ) + đếm facets."""
+    _, c, kho = tao()
+    luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    kho.bl = [dict(_bl("tiktok:1", "a", luc, thich=1), noi_dung="Giá bao nhiêu"),
+              dict(_bl("tiktok:1", "b", luc, thich=9), nen_tang="facebook", nguon_id=2),
+              dict(_bl("tiktok:1", "c", luc), loai="spam")]
+    dang_nhap(c, XEM)
+    q = "/api/binh-luan?du_an=hapas&tu=2026-10-08&den=2026-10-14"
+    d = c.get(q).json()
+    assert {g["gia_tri"] for g in d["facets"]["nen_tang"]} == {"tiktok", "facebook"}
+    assert {g["gia_tri"]: g["so"] for g in d["facets"]["nguon"]} == {"n:1": 2, "n:2": 1}
+    assert c.get(q + "&nen_tang_bl=facebook").json()["tong"] == 1
+    assert c.get(q + "&nguon_bl=n:1&loai_bl=hop_le").json()["tong"] == 1
+    assert [x["ma"] for x in c.get(q + "&q=gia bao").json()["binh_luan"]] == ["a"]
+    assert c.get(q + "&sap_xep=moi").status_code == 200
+    for sai in ("&sap_xep=xau", "&nen_tang_bl=myspace", "&loai_bl=xau", "&q=" + "x" * 101,
+                "&nguon_bl=" + "x" * 301):
+        assert c.get(q + sai).status_code == 400, sai
+
+
 def test_cau_hinh_binh_luan_chi_quan_ly_va_kiem_so():
     _, c, kho = tao()
     csrf = dang_nhap(c, XEM)
@@ -1204,9 +1262,13 @@ def test_cau_hinh_binh_luan_chi_quan_ly_va_kiem_so():
                data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "5", "bl_moi_bai": "30"})
     assert "Đã lưu: cào bình luận tối đa 5 bài mỗi lượt, mỗi bài 30 bình luận" in thong_bao(c, r)
     assert kho.du_an["hapas"]["bl_so_bai"] == 5 and kho.nk[-1][1] == "sua_binh_luan"
+    # Không trần trên (chủ dự án 15/10): 500 bài hợp lệ; số âm vẫn bị từ chối.
     r = c.post("/ngan-sach/hapas/binh-luan",
                data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "500", "bl_moi_bai": "30"})
-    assert kho.du_an["hapas"]["bl_so_bai"] == 5 and "0" in thong_bao(c, r)
+    assert kho.du_an["hapas"]["bl_so_bai"] == 500
+    r = c.post("/ngan-sach/hapas/binh-luan",
+               data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "-1", "bl_moi_bai": "30"})
+    assert kho.du_an["hapas"]["bl_so_bai"] == 500 and "từ 0 trở lên" in thong_bao(c, r)
     r = c.post("/ngan-sach/hapas/binh-luan", data={"csrf": csrf, "bl_so_bai": "5", "bl_moi_bai": "30"})
     assert "Đã tắt cào bình luận" in thong_bao(c, r) and kho.du_an["hapas"]["bl_bat"] is False
     assert "Cào bình luận" in c.get("/ngan-sach").text
@@ -1225,6 +1287,84 @@ def test_cau_hinh_tim_tu_khoa():
     csrf = dang_nhap(c, XEM)
     assert c.post("/ngan-sach/hapas/tu-khoa",
                   data={"csrf": csrf, "tk_bat": "1", "tk_so_bai": "5"}).status_code == 403
+
+
+def test_cau_hinh_thu_thap_tung_nen_tang():
+    """Đợt 2e: một biểu mẫu cấu hình từng nền tảng (tìm từ khoá + bình luận) + trần tháng."""
+    _, c, kho = tao()
+    kho.du_an["hapas"].update(tk_bat=True, tk_so_bai=15)
+    csrf = dang_nhap(c, XEM)
+    assert c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf}).status_code == 403
+    csrf = dang_nhap(c, QL)
+    form = {"csrf": csrf, "tk_tiktok_bat": "1", "tk_tiktok_so_bai": "40",
+            "tk_facebook_bat": "1", "tk_facebook_so_bai": "", "tk_instagram_so_tu": "4",
+            "bl_tiktok_bat": "1", "bl_tiktok_so_bai": "30", "bl_tiktok_moi_bai": "0",
+            "bl_youtube_bat": "1", "bl_youtube_moi_bai": "200", "tran_usd_thang": "8"}
+    r = c.post("/ngan-sach/hapas/cau-hinh", data=form)
+    assert "Đã lưu cấu hình thu thập" in thong_bao(c, r)
+    ch = kho.du_an["hapas"]["cau_hinh"]
+    assert ch["tu_khoa"]["tiktok"] == {"bat": True, "so_bai": 40}
+    assert ch["tu_khoa"]["facebook"] == {"bat": True}            # ô trống = theo mặc định chung
+    assert ch["tu_khoa"]["instagram"] == {"bat": False, "so_tu": 4}
+    assert ch["binh_luan"]["tiktok"] == {"bat": True, "so_bai": 30, "moi_bai": 0}
+    assert ch["binh_luan"]["youtube"] == {"bat": True, "moi_bai": 200}
+    assert ch["binh_luan"]["facebook"] == {"bat": False}
+    assert kho.du_an["hapas"]["tran_usd_thang"] == 8.0
+    assert [h for _, h, _ in kho.nk[-2:]] == ["sua_cau_hinh", "dat_tran_thang"]
+    for sai, loi in (({"bl_tiktok_moi_bai": "3"}, "0 (cào hết) hoặc từ 5"),
+                     ({"tk_tiktok_so_bai": "-1"}, "TikTok"),
+                     ({"tk_tiktok_so_bai": "1000001"}, "quá lớn"),
+                     ({"tk_instagram_so_tu": "0"}, "Instagram")):
+        r = c.post("/ngan-sach/hapas/cau-hinh", data={**form, **sai})
+        assert loi in thong_bao(c, r)
+    assert kho.du_an["hapas"]["cau_hinh"] == ch                  # lỗi: không ghi gì
+    t = c.get("/ngan-sach").text
+    assert "/ngan-sach/hapas/cau-hinh" in t
+
+
+def test_ngan_sach_ma_tran_cau_hinh_mot_bieu_mau():
+    """Trang Ngân sách (UX 15/10): MỘT biểu mẫu ma trận nền tảng × (tìm từ khoá, bình luận) + trần
+    tháng thay các biểu mẫu cũ; ô trống = mặc định dự án (placeholder), ô đặt riêng giữ giá trị;
+    ước tính USD/lượt dựng sẵn từ `bang_cau_hinh`; người xem chỉ thấy bảng đọc, không có ô sửa."""
+    import re
+    kho = GiaKho()
+    kho.du_an["hapas"].update(tk_bat=True, tk_so_bai=15,
+                              cau_hinh={"tu_khoa": {"facebook": {"bat": True, "so_bai": 40}},
+                                        "binh_luan": {"youtube": {"bat": False}}})
+    _, c, _ = tao(kho)
+    dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert t.count('action="/ngan-sach/hapas/cau-hinh"') == 1
+    assert 'action="/ngan-sach/hapas/tu-khoa"' not in t and 'action="/ngan-sach/hapas/binh-luan"' not in t
+    for p in ("tiktok", "facebook", "instagram", "youtube"):
+        for o in ("tk_{}_bat", "tk_{}_so_bai", "bl_{}_bat", "bl_{}_so_bai", "bl_{}_moi_bai"):
+            assert f'name="{o.format(p)}"' in t, o.format(p)
+    assert 'name="tk_instagram_so_tu"' in t and 'name="tran_usd_thang"' in t
+    assert re.search(r'name="tk_tiktok_so_bai" min="0" max="1000000"[^>]*placeholder="15" value=""', t)
+    assert re.search(r'name="tk_facebook_so_bai"[^>]*value="40"', t)            # đặt riêng
+    assert re.search(r'name="tk_facebook_bat" value="1"[^>]*checked', t)
+    assert re.search(r'name="bl_youtube_bat" value="1" aria-label="[^"]*">', t)  # tắt: không checked
+    # Facebook 40 bài: ước tính KHÔNG kẹp ở 20 (dashboard không biết gói Apify) —
+    # (40 × 0,00259 + 0,00005) × 1,3 = 0,1347; gói FREE chỉ là ghi chú trên dòng Facebook
+    assert 'data-o="tk-facebook" data-usd="0.1347"' in t
+    assert "Gói Apify FREE: thực tế tối đa 20 bài/lượt" in t
+    assert '<script type="application/json" id="ns-du-lieu">' in t and 'src="/tinh/ngan_sach.js"' in t
+    dang_nhap(c, XEM)
+    t = c.get("/ngan-sach").text
+    assert "Tìm theo từ khoá" in t and "Cào bình luận" in t and 'data-usd="0.1347"' in t
+    assert "ns-du-lieu" not in t and 'name="tk_' not in t and "/cau-hinh" not in t
+
+
+def test_ngan_sach_nhieu_du_an_co_bang_tong_quan():
+    kho = GiaKho()
+    kho.du_an["moi"] = {**kho.du_an["hapas"], "ma": "moi", "ten": "Dự án mới", "tran_usd_thang": 0.0}
+    _, c, _ = tao(kho)
+    dang_nhap(c, XEM)
+    t = c.get("/ngan-sach?du_an=hapas").text
+    assert "Tất cả dự án" in t and 'href="/ngan-sach?du_an=moi"' in t
+    assert t.count('aria-current="true"') == 1 and t.count("ns-tong__than") == 1   # chi tiết: dự án chọn
+    t = c.get("/ngan-sach?du_an=khong-co").text
+    assert "Tất cả dự án" in t and "ns-tong__than" not in t and "Lịch sử lượt quét" not in t
 
 
 def test_binh_luan_so_sach_va_loc_theo_loai():

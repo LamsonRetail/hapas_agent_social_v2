@@ -27,7 +27,10 @@ TEN_NEN_TANG = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTub
 LOAI_NGUON = {"kol": "KOL/KOC", "page": "Trang/fanpage", "group": "Nhóm", "bao": "Báo/tin tức",
               "kenh_nha": "Kênh nhà", "khac": "Khác"}
 VAI_TRO = {"xem": "Chỉ xem", "quan_ly": "Quản lý"}
-TRAN_USD_TOI_DA = Decimal(100)       # khớp CHECK của du_an.tran_usd_thang
+# Chủ dự án 15/10: "không có giới hạn" — hai mức dưới chỉ chặn số rác / tràn cột (NUMERIC(8,2),
+# INT), KHÔNG phải trần nghiệp vụ. Tiền vẫn chặn bằng trần tháng do người dùng đặt.
+TRAN_USD_TOI_DA = Decimal("999999.99")
+SO_TOI_DA = 1_000_000
 
 _MIEN = {"tiktok": ("tiktok.com",), "instagram": ("instagram.com", "instagr.am"),
          "youtube": ("youtube.com", "youtu.be"), "facebook": ("facebook.com", "fb.com", "fb.me")}
@@ -71,25 +74,31 @@ def danh_sach(s, toi_da: int = 50, dai_toi_da: int = 100) -> list[str]:
     return ra
 
 
-def so_nguyen(s, ten: str, nho: int, lon: int) -> int:
+def so_nguyen(s, ten: str, nho: int, lon: int = SO_TOI_DA) -> int:
+    """Số nguyên trong [nho, lon]. `lon` = SO_TOI_DA nghĩa là không trần trên nghiệp vụ."""
+    khoang = f"từ {nho} trở lên" if lon >= SO_TOI_DA else f"từ {nho} đến {lon}"
     try:
         n = int(str(s or "").strip())
     except ValueError:
-        raise LoiNhap(f"{ten} phải là số nguyên từ {nho} đến {lon}.") from None
-    if not nho <= n <= lon:
-        raise LoiNhap(f"{ten} phải từ {nho} đến {lon}.")
+        raise LoiNhap(f"{ten} phải là số nguyên {khoang}.") from None
+    if n < nho:
+        raise LoiNhap(f"{ten} phải {khoang}.")
+    if n > lon:
+        raise LoiNhap(f"{ten} quá lớn (tối đa {lon:,})." if lon >= SO_TOI_DA
+                      else f"{ten} phải {khoang}.")
     return n
 
 
 def tran_usd(s) -> Decimal:
-    """Trần USD tháng: 0–100, nhận cả "5,5" kiểu Việt. Decimal để khỏi lệch 0.1+0.2."""
+    """Trần USD tháng: ≥ 0 (không trần trên), nhận cả "5,5" kiểu Việt. Decimal để khỏi lệch
+    0.1+0.2."""
     t = str(s or "").strip().replace(" ", "").replace(",", ".")
     try:
         x = Decimal(t)
     except InvalidOperation:
-        raise LoiNhap("Trần tháng phải là số USD từ 0 đến 100.") from None
+        raise LoiNhap("Trần tháng phải là số USD từ 0 trở lên.") from None
     if not x.is_finite() or x < 0 or x > TRAN_USD_TOI_DA:
-        raise LoiNhap("Trần tháng phải từ 0 đến 100 USD.")
+        raise LoiNhap("Trần tháng phải là số USD từ 0 trở lên (dưới 1.000.000).")
     return x.quantize(Decimal("0.01"))
 
 
@@ -309,5 +318,5 @@ def nguon(form: dict) -> dict:
         "ten": sach(form.get("ten"), 200) or dinh_danh.rsplit("/", 1)[-1],
         "loai": loai, "nhan": danh_sach(form.get("nhan"), 20, 50),
         "chu_ky_ngay": so_nguyen(form.get("chu_ky_ngay") or 1, "Chu kỳ quét (ngày)", 1, 30),
-        "so_bai_moi_lan": so_nguyen(form.get("so_bai_moi_lan") or 5, "Số bài mỗi lần", 1, 30),
+        "so_bai_moi_lan": so_nguyen(form.get("so_bai_moi_lan") or 5, "Số bài mỗi lần", 1),
     }

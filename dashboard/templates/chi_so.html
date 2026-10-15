@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block tieu_de %}Chỉ số{% endblock %}
 {% block dau %}
+<link rel="stylesheet" href="/tinh/chi_so.css">
 <script src="{{ ECHARTS }}" integrity="{{ ECHARTS_SRI }}" defer></script>
 <script src="/tinh/chi_so.js" defer></script>
 {% endblock %}
@@ -12,13 +13,14 @@
 </div>
 {% else %}
 <script type="application/json" id="cau-hinh-chi-so">{{ loc|json_script }}</script>
-<div class="tieu-de-khoi">
+<div class="cs-trang dang-tai" id="cs-trang">
+<div class="tieu-de-khoi cs-dau">
   <h1>Chỉ số — {{ du_an.ten }}</h1>
-  <span class="mo nho" id="cap-nhat-luc" aria-live="polite">Đang tải…</span>
+  <span class="cs-cap-nhat"><span class="cs-cham-song" id="cham-song" aria-hidden="true"></span><span id="cap-nhat-luc" aria-live="polite">Đang tải…</span></span>
 </div>
 
-<form class="the-khoi hang cach-duoi" method="get" action="/">
-  <label class="o">Dự án
+<form class="the-khoi hang cach-duoi cs-loc" method="get" action="/">
+  <label class="o cs-loc__du-an">Dự án
     <select name="du_an">
       {% for d in du_an_ds %}<option value="{{ d.ma }}"{% if d.ma == du_an.ma %} selected{% endif %}>{{ d.ten }}{% if not d.dang_bat %} (đang tắt){% endif %}</option>{% endfor %}
     </select>
@@ -40,85 +42,144 @@
   <button class="nut" type="submit">Xem</button>
 </form>
 {% if loi_loc %}<div class="thong-bao thong-bao--loi">{{ loi_loc }} Đang hiện 30 ngày trọn gần nhất.</div>{% endif %}
-<p class="ghi-chu sat-tren cach-duoi">Mặc định: 30 ngày trọn tới hết hôm qua (giờ VN), so với 30 ngày liền trước.
-  {% if chua_tron %}<b>Khoảng đang chọn có hôm nay — ngày chưa hết nên số ngày cuối và % so với kỳ trước còn thấp hơn thực tế.</b>{% endif %}</p>
-<div class="thong-bao thong-bao--loi" id="loi-tai" hidden></div>
-<div class="thong-bao thong-bao--loi" id="canh-bao" hidden>Khoảng này có quá nhiều bài — chỉ tính 20.000 bài MỚI NHẤT; đầu khoảng và kỳ trước bị thiếu nên % so sánh không đáng tin. Chọn khoảng ngắn hơn.</div>
+<p class="ghi-chu sat-tren cach-duoi">Mặc định: 30 ngày trọn tới hết hôm qua (giờ VN), so với 30 ngày liền trước.{% if chua_tron %} <b>Khoảng có hôm nay — ngày chưa hết nên số cuối còn thấp.</b>{% endif %}</p>
+<div class="thong-bao thong-bao--loi" id="loi-tai" role="alert" hidden></div>
+<div class="thong-bao thong-bao--loi" id="canh-bao" hidden>Quá nhiều bài: chỉ tính 20.000 bài mới nhất nên % so với kỳ trước không đáng tin — hãy chọn khoảng ngắn hơn.</div>
+<div class="thong-bao thong-bao--loi" id="canh-bao-bl" hidden>Quá nhiều bình luận: chỉ tính 50.000 bình luận mới nhất — hãy chọn khoảng ngắn hơn.</div>
 
-<div class="luoi luoi--kpi" id="kpi" aria-live="polite"></div>
-<p class="ghi-chu" id="ky-truoc"></p>
+<div class="luoi luoi--kpi" id="kpi" aria-live="polite">
+  {% for i in range(9) %}<div class="cs-khung-cho cs-khung-cho--kpi"></div>{% endfor %}
+</div>
+<p class="ghi-chu cs-ky-truoc" id="ky-truoc"></p>
 
-<section class="the-khoi cach-doc">
-  <div class="tieu-de-khoi"><h2>Thảo luận</h2><span class="mo nho" id="don-vi-xu-huong"></span></div>
-  <p class="ghi-chu sat-tren">Thảo luận = số bài + số bình luận nền tảng báo trên các bài đó (cách tính của Kompa). Bấm vào một điểm, cột hay dòng bất kỳ trên trang để xem các bài làm nên con số đó.</p>
-  <div class="bieu-do" id="bd-xu-huong" role="img" aria-label="Biểu đồ thảo luận theo thời gian"></div>
-</section>
-
-<section class="the-khoi cach-duoi">
-  <h2>Bài đăng theo sắc thái</h2>
-  <div class="bieu-do" id="bd-bai-ngay" role="img" aria-label="Biểu đồ số bài theo sắc thái theo thời gian"></div>
-</section>
-
-<div class="luoi luoi--2">
+<div class="luoi cs-luoi-2-1">
   <section class="the-khoi">
-    <h2>Sắc thái</h2>
-    <div class="bieu-do bieu-do--thap" id="bd-sac-thai" role="img" aria-label="Biểu đồ sắc thái"></div>
+    <div class="cs-the__dau">
+      <div class="cs-the__tieu-de"><h2>Thảo luận</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Thảo luận = số bài + số bình luận nền tảng báo trên các bài đó (cách tính của Kompa). Bấm vào biểu đồ để xem bài.">i</button></div>
+      <div class="cs-phan" id="che-xu-huong" aria-label="Gom theo"></div>
+    </div>
+    <p class="cs-phu-de" id="dinh-xu-huong">&nbsp;</p>
+    <div class="bieu-do" id="bd-xu-huong" role="img" aria-label="Biểu đồ thảo luận theo thời gian"></div>
+  </section>
+  <section class="the-khoi">
+    <div class="cs-the__dau">
+      <div class="cs-the__tieu-de"><h2>Sắc thái</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Bài kênh nhà và bình luận bị lọc không vào sắc thái. % tính trên phần đã phân loại.">i</button></div>
+      <div class="cs-phan" id="nguon-sac-thai" aria-label="Dữ liệu"></div>
+    </div>
+    <div class="cs-sac">
+      <div class="cs-sac__vong" id="bd-sac-thai" role="img" aria-label="Biểu đồ sắc thái"></div>
+      <div class="cs-cg" id="chu-giai-sac-thai"></div>
+    </div>
     <p class="ghi-chu" id="ghi-chu-sac-thai"></p>
   </section>
+</div>
+
+<section class="the-khoi cach-duoi">
+  <div class="cs-the__dau">
+    <div class="cs-the__tieu-de"><h2>Sắc thái theo thời gian</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Bấm vào một điểm trên đường để xem đúng bài / bình luận của ngày và sắc thái đó.">i</button></div>
+    <div class="cs-the__nut">
+      <div class="cs-phan" id="nguon-sac-thai-tg" aria-label="Dữ liệu"></div>
+      <div class="cs-phan" id="che-sac-thai-tg" aria-label="Gom theo"></div>
+    </div>
+  </div>
+  <div class="bieu-do" id="bd-sac-thai-tg" role="img" aria-label="Biểu đồ sắc thái theo thời gian"></div>
+</section>
+
+<div class="luoi luoi--2">
   <section class="the-khoi">
-    <h2>Chủ đề × sắc thái</h2>
-    <div class="bieu-do" id="bd-chu-de" role="img" aria-label="Biểu đồ chủ đề theo sắc thái"></div>
-    <p class="trong" id="trong-chu-de" hidden>Chưa có bài được gán chủ đề.</p>
+    <div class="cs-the__dau">
+      <div>
+        <div class="cs-the__tieu-de"><h2>Từ khoá nổi bật</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Hashtag và cụm hai chữ trong bài + bình luận hợp lệ; đã bỏ từ khoá của dự án và bài kênh nhà. Cỡ chữ theo số thảo luận, màu theo sắc thái chính.">i</button></div>
+        <p class="cs-phu-de" id="tk-tom-tat">&nbsp;</p>
+      </div>
+      <div class="cs-phan" id="tk-che" aria-label="Kiểu xem"></div>
+    </div>
+    <div class="cs-may" id="tk-may"><div class="cs-khung-cho cs-khung-cho--may"></div></div>
+    <ol class="cs-bang-tu" id="tk-bang" hidden></ol>
+    <div class="cs-may__duoi">
+      <span class="cs-cg-ngang"><span class="cs-chip cs-chip--tc"><span class="cs-chip__cham"></span>Tích cực</span><span class="cs-chip cs-chip--ti"><span class="cs-chip__cham"></span>Tiêu cực</span><span class="cs-chip cs-chip--tl"><span class="cs-chip__cham"></span>Trung lập / chưa rõ</span></span>
+      <span class="mo nho" id="tk-ghi-chu"></span>
+    </div>
+  </section>
+  <section class="the-khoi">
+    <div class="cs-the__dau">
+      <div>
+        <div class="cs-the__tieu-de"><h2>Sắc thái thảo luận theo chủ đề</h2></div>
+        <p class="cs-phu-de" id="cd-tom-tat">&nbsp;</p>
+      </div>
+      <div class="cs-phan" id="nguon-chu-de" aria-label="Dữ liệu"></div>
+    </div>
+    <div class="cs-cg-ngang cach-duoi"><span class="cs-chip cs-chip--tc"><span class="cs-chip__cham"></span>Tích cực</span><span class="cs-chip cs-chip--ti"><span class="cs-chip__cham"></span>Tiêu cực</span><span class="cs-chip cs-chip--tl"><span class="cs-chip__cham"></span>Trung lập</span><span class="cs-chip cs-chip--chua"><span class="cs-chip__cham"></span>Chưa phân loại</span></div>
+    <div class="cs-cd" id="chu-de"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
   </section>
 </div>
 
 <div class="luoi luoi--2">
   <section class="the-khoi">
-    <h2>Theo nền tảng</h2>
-    <div class="bieu-do bieu-do--thap" id="bd-nen-tang" role="img" aria-label="Thảo luận theo nền tảng"></div>
+    <div class="cs-the__dau"><h2>Theo nền tảng</h2><span class="mo nho">thảo luận · bài</span></div>
+    <div class="cs-ds-thanh" id="nen-tang"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
   </section>
   <section class="the-khoi">
-    <h2>Theo loại nguồn</h2>
-    <div class="bieu-do bieu-do--thap" id="bd-loai-nguon" role="img" aria-label="Thảo luận theo loại nguồn"></div>
+    <div class="cs-the__dau"><h2>Theo loại nguồn</h2><span class="mo nho">thảo luận · bài</span></div>
+    <div class="cs-ds-thanh" id="loai-nguon"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
   </section>
 </div>
 
-<section class="the-khoi cach-duoi" id="khoi-bl">
-  <div class="tieu-de-khoi"><h2>Bình luận đã đọc</h2><span class="mo nho" id="don-vi-bl"></span></div>
-  <p class="ghi-chu sat-tren">Bình luận Mark cào dưới các bài (mỗi bài cào hết, cấu hình ở trang Ngân sách), LỌC trước khi tính: spam, ít nội dung (".", emoji, tag), trùng lặp, seeding (cùng nội dung ≥ 3 tài khoản) và bình luận của thương hiệu không vào sắc thái. Độ phủ = đã cào / số nền tảng báo của các bài đã cào. Bấm vào cột để đọc từng bình luận.</p>
-  <div class="luoi luoi--kpi" id="kpi-bl" aria-live="polite"></div>
-  <p class="ghi-chu sat-tren">Đã lọc theo loại (bấm để xem): <span class="tu-khoa" id="loai-bl"></span></p>
-  <div class="luoi luoi--2">
-    <div><h3>Theo ngày đăng bình luận</h3><div class="bieu-do" id="bd-bl-ngay" role="img" aria-label="Bình luận theo sắc thái theo thời gian"></div></div>
-    <div><h3>Chủ đề × sắc thái</h3><div class="bieu-do" id="bd-bl-chu-de" role="img" aria-label="Chủ đề bình luận theo sắc thái"></div></div>
-  </div>
-  <p class="trong" id="trong-bl" hidden>Chưa có bình luận nào được cào trong khoảng này.</p>
-</section>
-
 <section class="the-khoi cach-duoi">
-  <h2>Nguồn nổi bật</h2>
-  <div class="tab" id="tab-nen-tang" role="tablist" aria-label="Nền tảng"></div>
+  <div class="cs-the__dau"><h2>Nguồn nổi bật</h2><span class="mo nho">top 10 mỗi nền tảng theo thảo luận</span></div>
+  <div class="tab cs-tab-nt" id="tab-nen-tang" role="tablist" aria-label="Nền tảng"></div>
   <div id="top-nguon"></div>
 </section>
 
 <section class="the-khoi cach-duoi">
-  <h2>Từ khoá nổi bật</h2>
-  <p class="ghi-chu sat-tren">Hashtag và cụm hai chữ, đếm theo số bài nhắc; đã bỏ chính từ khoá của dự án và bài kênh nhà.</p>
-  <div class="tu-khoa" id="tu-khoa"></div>
-</section>
-
-<section class="the-khoi">
-  <h2>Bài nổi bật</h2>
+  <div class="cs-the__dau"><h2>Bài nổi bật</h2><span class="mo nho">nhiều thảo luận nhất</span></div>
   <div id="top-bai"></div>
 </section>
-<dialog class="chi-tiet" id="chi-tiet" aria-labelledby="chi-tiet-tieu-de">
+
+<section class="the-khoi cach-duoi cs-khoi-bl" id="khoi-bl" aria-labelledby="bl-tieu-de">
+  <div class="cs-the__dau">
+    <div class="cs-the__tieu-de"><h2 id="bl-tieu-de" tabindex="-1">Bình luận</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Bình luận Mark đọc dưới các bài. Chỉ bình luận hợp lệ vào sắc thái; spam, ít nội dung, trùng lặp, seeding và phản hồi của thương hiệu được tách riêng. Độ phủ = đã cào / số bình luận nền tảng báo.">i</button></div>
+    <span class="mo nho" id="don-vi-bl"></span>
+  </div>
+  <p class="trong" id="trong-bl" hidden>Chưa có bình luận nào được cào trong khoảng này.</p>
+  <div class="cs-bl-luoi">
+    <aside class="cs-bl-ben" aria-label="Tổng quan bình luận">
+      <div class="cs-bl-kpi" id="kpi-bl"></div>
+      <div class="cs-loai">
+        <h3>Nhãn lọc</h3>
+        <div class="cs-loai__thanh" id="loai-bl-thanh"></div>
+        <div class="cs-loai__ds" id="loai-bl"></div>
+      </div>
+    </aside>
+    <div class="cs-bl-chinh">
+      <div class="cs-cong-cu" role="search" aria-label="Lọc bình luận">
+        <label class="cs-tim" id="bl-tim-khung"><span class="cs-an">Tìm trong bình luận</span><input type="search" id="bl-tim" maxlength="100" placeholder="Tìm nội dung hoặc tác giả…" autocomplete="off"></label>
+        <div class="cs-truong-ds" id="bl-truong"></div>
+        <label class="cs-sap-xep">Sắp xếp
+          <select id="bl-sap-xep">
+            <option value="thich">Nhiều thích</option>
+            <option value="moi">Mới nhất</option>
+            <option value="cu">Cũ nhất</option>
+          </select>
+        </label>
+      </div>
+      <div class="cs-dang-loc"><div class="cs-dang-loc__ds" id="bl-dang-loc"></div><span class="cs-dem" id="bl-dem" aria-live="polite"></span></div>
+      <div class="cs-ds-bl" id="bl-ds"></div>
+      <div class="cs-bl-them" id="bl-them-khoi"></div>
+    </div>
+  </div>
+</section>
+
+<dialog class="chi-tiet cs-ngan" id="chi-tiet" aria-labelledby="chi-tiet-tieu-de">
   <div class="chi-tiet__dau">
-    <h2 id="chi-tiet-tieu-de">Chi tiết</h2>
+    <div class="cs-ngan__dau-chu"><p class="cs-ngan__loai" id="chi-tiet-loai"></p><h2 id="chi-tiet-tieu-de">Chi tiết</h2></div>
     <button class="nut nut--nhe nut--nho" type="button" id="chi-tiet-dong" aria-label="Đóng">Đóng ✕</button>
   </div>
   <p class="mo nho" id="chi-tiet-mo-ta"></p>
+  <div class="cs-phan cs-ngan__tab" id="chi-tiet-tab" role="tablist" aria-label="Loại kết quả" hidden></div>
   <div class="chi-tiet__than" id="chi-tiet-than"></div>
   <div class="phan-trang" id="chi-tiet-trang"></div>
 </dialog>
+</div>
 {% endif %}
 {% endblock %}

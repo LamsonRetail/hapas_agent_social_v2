@@ -20,6 +20,7 @@ Dự báo cấp tháng:
 from __future__ import annotations
 
 import datetime
+import unicodedata
 
 VN = datetime.timezone(datetime.timedelta(hours=7))
 
@@ -195,6 +196,105 @@ def du_bao(nguon: list[dict], da_tieu: float, tran_du_an: float, tran_platform: 
     }
 
 
+# ───── cấu hình theo nền tảng (bản sao `theo_doi.cau_hinh` — đợt 2e, bài thử đối chiếu) ─────
+NEN_TANG = ("tiktok", "facebook", "instagram", "youtube")
+SO_TOI_DA = 1_000_000        # chỉ chặn số rác — chủ dự án 15/10: "không có giới hạn"
+GIOI_HAN = {"tk_so_bai": (0, SO_TOI_DA), "tk_so_tu": (1, 50), "bl_so_bai": (0, SO_TOI_DA),
+            "bl_moi_bai": (0, SO_TOI_DA)}
+
+
+def _kep(v, lo: int, hi: int, md: int) -> int:
+    try:
+        return max(lo, min(hi, int(v)))
+    except (TypeError, ValueError):
+        return md
+
+
+def _so_rieng(v, lo: int, hi: int, md: int) -> int:
+    if isinstance(v, bool):
+        return md
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return md
+    return md if n < lo else min(hi, n)
+
+
+def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
+    """Cấu hình HIỆU LỰC của một nền tảng — y hệt `theo_doi.cau_hinh` của Mark (cột tk_bat /
+    bl_bat là công tắc tổng; số bỏ trống/rác lấy cột chung, áp cho TỪNG nền tảng)."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    nh = goc.get(nhom) if isinstance(goc.get(nhom), dict) else {}
+    rieng = nh.get(p) if isinstance(nh.get(p), dict) else {}
+    if nhom == "tu_khoa":
+        chung = _kep(du_an.get("tk_so_bai") or 0, *GIOI_HAN["tk_so_bai"], 0)
+        so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["tk_so_bai"], chung)
+        return {"bat": bool(du_an.get("tk_bat", True)) and rieng.get("bat", True) is True
+                and so > 0,
+                "so_bai": so,
+                "so_tu": _so_rieng(rieng.get("so_tu"), *GIOI_HAN["tk_so_tu"], TK_IG_TOI_DA_TU)}
+    chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
+    so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
+    moi_chung = _kep(du_an.get("bl_moi_bai") or 0, *GIOI_HAN["bl_moi_bai"], 0)
+    moi = _so_rieng(rieng.get("moi_bai"), *GIOI_HAN["bl_moi_bai"], moi_chung)
+    return {"bat": bool(du_an.get("bl_bat", True)) and rieng.get("bat", True) is True and so > 0,
+            "so_bai": so, "moi_bai": 5 if 0 < moi < 5 else moi}
+
+
+def _norm(s: str) -> str:
+    """Bản sao `apify_tool._norm`: bỏ dấu (kể cả đ) + thường hoá."""
+    s = unicodedata.normalize("NFD", (s or "").replace("đ", "d").replace("Đ", "D"))
+    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
+
+
+def tu_tim(du_an: dict) -> list[str]:
+    """Bản sao `theo_doi.tu_tim`: từ khoá tìm (bỏ trùng, giữ thứ tự, tối đa 12)."""
+    ra: list[str] = []
+    for x in du_an.get("tu_khoa") or [du_an.get("ten") or ""]:
+        x = " ".join(str(x).split())
+        if x and _norm(x) not in {_norm(y) for y in ra}:
+            ra.append(x)
+    return ra[:GIOI_HAN["tk_so_tu"][1]]
+
+
+def _tu_ig(tu: list[str], so_tu: int) -> list[str]:
+    return [t for t in tu if " " not in t][:so_tu]
+
+
+def uoc_tk_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU,
+                    fb_toi_da: int = TK_FB_TOI_DA) -> float:
+    """Bản sao `theo_doi.uoc_tu_khoa_nen_tang`."""
+    q = _tu_ig(tu, so_tu) if p == "instagram" else tu
+    gia = TK_GIA.get(p, 0.0)
+    if not q or not gia or so_bai <= 0:
+        return 0.0
+    if p == "instagram":
+        return round(len(q) * (TK_KHOI["instagram"] + so_bai * gia) * HE_SO_UOC, 4)
+    n = min(so_bai, fb_toi_da) if p == "facebook" else so_bai
+    return round((n * gia + TK_KHOI.get(p, 0.0)) * HE_SO_UOC, 4)
+
+
+def bang_cau_hinh(du_an: dict) -> dict:
+    """Cấu hình hiệu lực + ước tính USD/lượt từng nền tảng cho trang Ngân sách. Dashboard không
+    biết gói Apify nên Facebook tính theo đúng số bài cấu hình (mức TRẦN; gói Free thực tế chỉ
+    lấy tối đa `TK_FB_TOI_DA` bài) — báo cao hơn còn hơn báo thiếu."""
+    tu = tu_tim(du_an)
+    tk = {p: {**cau_hinh(du_an, "tu_khoa", p)} for p in NEN_TANG}
+    bl = {p: {**cau_hinh(du_an, "binh_luan", p)} for p in NEN_TANG}
+    for p in NEN_TANG:
+        tk[p]["uoc"] = (uoc_tk_nen_tang(p, tk[p]["so_bai"], tu, tk[p]["so_tu"],
+                                        fb_toi_da=GIOI_HAN["tk_so_bai"][1])
+                        if tk[p]["bat"] else 0.0)
+        bl[p]["uoc"] = (uoc_binh_luan_luot(bl[p]["so_bai"], bl[p]["moi_bai"], p)
+                        if bl[p]["bat"] else 0.0)
+    return {"tu_khoa": tk, "binh_luan": bl, "so_tu_khoa": len(tu),
+            "uoc_tk": round(sum(x["uoc"] for x in tk.values()), 4),
+            "uoc_bl": round(sum(x["uoc"] for x in bl.values()), 4)}
+
+
 def hang_so_cho_trinh_duyet() -> dict:
-    """Hằng số cho phép tính lại ngay trên trình duyệt khi sửa số bài / chu kỳ (trang Nguồn)."""
-    return {"gia": GIA, "he_so": HE_SO_UOC, "start": START_COST, "ngay": NGAY_THANG_CAU_HINH}
+    """Hằng số cho phép tính lại ngay trên trình duyệt khi sửa số bài / chu kỳ / cấu hình."""
+    return {"gia": GIA, "he_so": HE_SO_UOC, "start": START_COST, "ngay": NGAY_THANG_CAU_HINH,
+            "tk_gia": TK_GIA, "tk_khoi": TK_KHOI, "tk_fb_toi_da": TK_FB_TOI_DA,
+            "tk_ig_so_tu": TK_IG_TOI_DA_TU, "bl_gia": BL_GIA, "bl_khoi": BL_KHOI_DONG,
+            "bl_uoc_moi_bai": BL_UOC_MOI_BAI, "gioi_han": GIOI_HAN, "nen_tang": NEN_TANG}

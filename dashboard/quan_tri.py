@@ -19,7 +19,7 @@ from dashboard import nhap_lieu as NL
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m dashboard.quan_tri",
-                                description="Quản trị dashboard lắng nghe MXH")
+                                description="Quản trị dashboard Social Listening")
     sub = p.add_subparsers(dest="lenh", required=True)
     t = sub.add_parser("them-nguoi", help="thêm người xem hoặc đổi vai trò")
     t.add_argument("email")

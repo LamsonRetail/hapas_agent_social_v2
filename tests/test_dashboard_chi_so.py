@@ -179,6 +179,97 @@ def test_loc_nen_tang_loai_nguon_va_phan_bo():
         ("page", 6), ("kol", 2), ("tu_khoa", 1)]
 
 
+def bl(luc: str, ma: str, *, p="tiktok", nid: int | None = 1, loai_nguon="kol", lb="hop_le",
+       sac="Tích cực", cd="Giá", thich=0, nd="ok", tg="Khách", ten=None, bai_tg="KOL A",
+       ma_cha=None):
+    dt = datetime.datetime.fromisoformat(luc.replace("Z", "+00:00"))
+    return {"khoa_bai": f"{p}:1", "ma": ma, "nen_tang": p, "tac_gia": tg, "noi_dung": nd,
+            "thich": thich, "tra_loi": 0, "la_tra_loi": bool(ma_cha), "ma_cha": ma_cha,
+            "cua_thuong_hieu": lb == "thuong_hieu", "dang_luc": dt, "luc": dt, "sac_thai": sac,
+            "chu_de": cd, "loai": lb, "ly_do_loc": None, "link": f"https://x.vn/c/{ma}",
+            "nguon_loai": loai_nguon if nid else None, "nguon_id": nid,
+            "nguon_ten": ten if nid else None, "bai_link": "https://x.vn/b/1",
+            "bai_tac_gia": bai_tg, "bai_noi_dung": "Bài  gốc\n dài", "bai_dang_luc": dt}
+
+
+def test_the_bl_co_link_bai_nguon_va_cha():
+    c = CS.the_bl(bl("2026-10-10T09:00+07:00", "c2", ma_cha="c1", ten="Kênh A"))
+    assert c["link"] == "https://x.vn/c/c2" and c["ma_cha"] == "c1" and c["la_tra_loi"]
+    assert c["bai"] == {"link": "https://x.vn/b/1", "tac_gia": "KOL A", "noi_dung": "Bài gốc dài",
+                        "dang_luc": "2026-10-10T09:00+07:00"}
+    assert c["nguon"] == {"khoa": "n:1", "ten": "Kênh A", "loai": "KOL/KOC"}
+    # Bài tìm theo từ khoá (không nguồn theo dõi): nguồn = tác giả bài, khoá không phân biệt hoa.
+    k = CS.the_bl(bl("2026-10-10T09:00+07:00", "c3", nid=None, bai_tg="Bé Na"))["nguon"]
+    assert k["khoa"] == "t:bé na" and k["ten"] == "Bé Na"
+    assert CS.khoa_nguon_bl({"bai_tac_gia": " "}) == ("t:?", "Không rõ nguồn")
+
+
+def test_chi_tiet_bl_loc_theo_truong_va_facets():
+    rows = [bl("2026-10-10T09:00+07:00", "a", thich=5, nd="Giá bao nhiêu"),
+            bl("2026-10-10T10:00+07:00", "b", sac="Tiêu cực", cd="Giao hàng", thich=1,
+               nd="Ship lâu"),
+            bl("2026-10-11T09:00+07:00", "c", p="facebook", nid=2, ten="Page B", thich=9),
+            bl("2026-10-11T10:00+07:00", "d", lb="spam", thich=50, nd="link bit.ly"),
+            bl("2026-10-20T10:00+07:00", "e")]                       # ngoài kỳ
+    a, b = D(2026, 10, 10), D(2026, 10, 12)
+    x = CS.chi_tiet_bl(rows, a, b)
+    assert x["tong"] == 4 and [c["ma"] for c in x["binh_luan"]] == ["d", "c", "a", "b"]
+    f = {k: {g["gia_tri"]: g["so"] for g in v} for k, v in x["facets"].items()}
+    assert f["nen_tang"] == {"tiktok": 3, "facebook": 1} and f["loai"] == {"hop_le": 3, "spam": 1}
+    assert f["sac_thai"] == {"Tích cực": 2, "Tiêu cực": 1}          # spam không có sắc thái
+    assert {g["gia_tri"]: g["ten"] for g in x["facets"]["nguon"]} == {"n:1": "KOL A",
+                                                                      "n:2": "Page B"}
+    # Lọc một trường: facet của CHÍNH trường đó vẫn đếm đủ để chọn sang giá trị khác.
+    y = CS.chi_tiet_bl(rows, a, b, nen_tang="tiktok", loai="hop_le", sap_xep="moi")
+    assert [c["ma"] for c in y["binh_luan"]] == ["b", "a"]
+    fy = {k: {g["gia_tri"]: g["so"] for g in v} for k, v in y["facets"].items()}
+    assert fy["nen_tang"] == {"tiktok": 2, "facebook": 1} and fy["loai"] == {"hop_le": 2, "spam": 1}
+    assert [c["ma"] for c in CS.chi_tiet_bl(rows, a, b, q="gia BAO", sap_xep="cu")["binh_luan"]] \
+        == ["a"]                                                      # tìm bỏ dấu, không hoa
+    assert CS.chi_tiet_bl(rows, a, b, nguon="n:2")["tong"] == 1
+    assert CS.chi_tiet_bl(rows, a, b, chu_de="Giao hàng")["binh_luan"][0]["ma"] == "b"
+    z = CS.chi_tiet_bl(rows, a, b, moi_trang=3, trang=9)
+    assert (z["trang"], z["so_trang"], len(z["binh_luan"])) == (2, 2, 1)
+
+
+def test_xep_theo_luong_tra_loi_ngay_duoi_cha():
+    rows = [bl("2026-10-10T09:00+07:00", "g1", thich=5),
+            bl("2026-10-10T09:05+07:00", "g2", thich=9),
+            bl("2026-10-10T10:00+07:00", "r1b", ma_cha="g1"),
+            bl("2026-10-10T09:30+07:00", "r1a", ma_cha="g1"),
+            bl("2026-10-10T11:00+07:00", "r1a1", ma_cha="r1a"),
+            bl("2026-10-10T12:00+07:00", "mo_coi", ma_cha="khong_co", thich=1),
+            bl("2026-10-10T12:00+07:00", "vong_a", ma_cha="vong_b"),
+            bl("2026-10-10T12:00+07:00", "vong_b", ma_cha="vong_a")]
+    ra = [c["ma"] for c in CS.xep_theo_luong(rows)]
+    assert ra[:6] == ["g2", "g1", "r1a", "r1a1", "r1b", "mo_coi"]
+    assert sorted(ra) == sorted(c["ma"] for c in rows)           # vòng cha-con lỗi: không mất
+
+
+def test_gan_ngu_canh_bai_chi_cho_dong_da_chon():
+    c = bl("2026-10-10T09:00+07:00", "a")
+    for k in ("bai_link", "bai_noi_dung", "bai_dang_luc"):
+        c.pop(k)
+    ds = [CS.the_bl(c)]
+    assert ds[0]["bai"]["link"] == ""
+    dt = datetime.datetime(2026, 10, 9, 8, 0, tzinfo=UTC)
+    CS.gan_ngu_canh_bai(ds, {"tiktok:1": {"bai_link": "https://x.vn/b/9",
+                                          "bai_noi_dung": " Bài\n mới ", "bai_dang_luc": dt}})
+    assert ds[0]["bai"] == {"link": "https://x.vn/b/9", "tac_gia": "KOL A", "noi_dung": "Bài mới",
+                            "dang_luc": "2026-10-09T15:00+07:00"}
+
+
+def test_tu_khoa_thao_luan_gom_bai_va_bl_hop_le():
+    a = D(2026, 10, 10)
+    b_ = [bai("2026-10-10T09:00+07:00", nd="nước hoa thơm"),
+          bai("2026-10-10T09:00+07:00", nd="nước hoa", nid=9, loai="kenh_nha")]
+    c = [bl("2026-10-10T10:00+07:00", "a", nd="nước hoa đẹp"),
+         bl("2026-10-10T10:00+07:00", "b", nd="nước hoa rẻ", lb="spam")]
+    r = CS.tu_khoa_thao_luan(b_, c, a, a)
+    assert r["tong"] == 2                       # 1 bài khách + 1 bình luận hợp lệ
+    assert [(g["tu"], g["so_bai"]) for g in r["tu_khoa"]] == [("nước hoa", 2)]
+
+
 def test_top_bai_theo_thao_luan_roi_luot_xem():
     rows = [bai("2026-10-10T09:00+07:00", bl=5, xem=1, link="https://a/1", nd="  một\n hai "),
             bai("2026-10-10T09:00+07:00", bl=5, xem=9, link="https://a/2"),

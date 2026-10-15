@@ -2,7 +2,7 @@
 {% block tieu_de %}Kết nối BigQuery{% endblock %}
 {% block noi_dung %}
 <h1>Kết nối BigQuery</h1>
-<p class="ghi-chu sat-tren cach-duoi">Dashboard đẩy kho lắng nghe lên BigQuery sau mỗi lượt quét và 6 giờ một lần (MERGE theo khoá, không nhân đôi). KHÔNG đẩy: người xem, nhật ký, đề xuất nguồn, cột email (người sửa/người thêm). Báo cáo BI đọc các bảng của dataset dưới đây — bảng và cột đã có mô tả theo quy chuẩn 11 nhãn (xem <code>deploy/lang-nghe/bigquery.sql</code>).</p>
+<p class="ghi-chu sat-tren cach-duoi">Tự đẩy sau mỗi lượt quét và 6 giờ/lần, không nhân đôi. Bảng đã mô tả theo quy chuẩn BI 11 nhãn. Không đẩy người xem, nhật ký, đề xuất nguồn, email.</p>
 
 {% if loi_tt %}<div class="thong-bao thong-bao--loi">{{ loi_tt }}</div>{% endif %}
 
@@ -37,6 +37,6 @@
     </tbody>
   </table>
   </div>
-  <p class="ghi-chu">Bảng nhỏ (du_an, nguon) nạp lại toàn bộ mỗi lần; bảng lớn (luot_quet, bai, chi_so_ngay, binh_luan) chỉ đẩy dòng mới/sửa sau mốc.</p>
+  <p class="ghi-chu">Bảng nhỏ nạp lại toàn bộ; bảng lớn chỉ đẩy dòng mới/sửa sau mốc.</p>
 </section>
 {% endblock %}

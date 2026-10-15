@@ -445,6 +445,32 @@ def test_lay_youtube_theo_handle_va_id(monkeypatch):
     assert not any(r == "search" for r, _ in goi)      # không đốt quota search (100 đơn vị)
 
 
+def test_youtube_nguon_lat_trang_khi_hon_50_video(monkeypatch):
+    """Chủ dự án 15/10 "không có giới hạn": 120 video/lần = 3 trang playlistItems (50+50+20)."""
+    goi = []
+
+    def get(res, params, timeout=None):
+        goi.append((res, dict(params)))
+        if res == "channels":
+            return {"items": [{"id": "UCabcdefghijklmnopqrstuv", "snippet": {"title": "K"},
+                               "statistics": {}, "contentDetails": {
+                                   "relatedPlaylists": {"uploads": "UU9"}}}]}
+        if res == "playlistItems":
+            dau = int(params.get("pageToken") or 0)
+            n = params["maxResults"]
+            return {"items": [{"contentDetails": {"videoId": f"v{dau + i:010d}"}} for i in range(n)],
+                    "nextPageToken": str(dau + n)}
+        if res == "videos":
+            return {"items": [{"id": i, "snippet": {"title": "t", "description": "",
+                                                    "publishedAt": "2026-10-12T03:00:00Z"},
+                               "statistics": {}} for i in params["id"].split(",")]}
+        raise AssertionError(res)
+    monkeypatch.setattr(A, "_youtube_get", get)
+    ra, loi = T._lay_youtube([_nguon(1, "youtube", "UCabcdefghijklmnopqrstuv", so_bai=120)])
+    assert not loi and len(ra[1]) == 120
+    assert [p["maxResults"] for r, p in goi if r == "playlistItems"] == [50, 50, 20]
+
+
 # ───────────────────────────── chạy nền ─────────────────────────────
 def _viec(nguon):
     phan = T.chia_phan(nguon)
@@ -777,7 +803,8 @@ def test_binh_luan_tiktok_ghi_kho_nhan_va_tach_thuong_hieu(mo, nhan_gia):
     v = GiaViec({}, [])
     du_an = dict(DU_AN, bl_bat=True, bl_so_bai=10, bl_moi_bai=20)
     tk = _lay_bl(v, du_an, 7, 5.0, time.monotonic() + 300)
-    assert kho.hoi == [("hapas", ["youtube", "tiktok", "instagram", "facebook"], 10)]
+    # đợt 2e: hỏi từng nền tảng theo cấu hình riêng
+    assert kho.hoi == [("hapas", [p], 10) for p in ("youtube", "tiktok", "instagram", "facebook")]
     g = ap.gui[0]
     assert g["actor"] == "clockworks~tiktok-comments-scraper" and g["nen_tang"] == "tiktok"
     assert g["payload"]["postURLs"] == [b["link"] for b in kho.bai]
@@ -1003,9 +1030,10 @@ def test_cao_het_xin_du_so_nen_tang_bao_va_chia_lo_theo_tran(mo):
     lo = T._chia_lo_bl("facebook", [_fb("a", 291), _fb("b", 1200), _fb("c", 30), _fb("d", 5000)], 0)
     can = [[T._can_bl(b, 0) for b in x] for x, _ in lo]
     assert T._can_bl(_fb("a", 291), 0) == int(291 * 1.15) + 10
-    assert T._can_bl(_fb("d", 5000), 0) == T.BL_TRAN_BAI
+    # Không trần mỗi bài (chủ dự án 15/10: "không có giới hạn"); bài to hơn trần lượt đi một mình.
+    assert T._can_bl(_fb("d", 5000), 0) == int(5000 * 1.15) + 10
     assert all(sum(c) <= 1384 or len(c) == 1 for c in can)
-    assert sorted(x for c in can for x in c) == sorted([344, 1390, 44, 3000])
+    assert sorted(x for c in can for x in c) == sorted([344, 1390, 44, 5760])
     v = GiaViec({}, [])
     T._tao_cac_phan_bl(v, [_fb("a", 291)], 0)
     ph = v.d["nen_tang"]["binh_luan"]["phan"][0]
@@ -1079,4 +1107,67 @@ def test_cao_lai_khong_gui_lai_ai_binh_luan_da_co_nhan(mo, nhan_gia):
     _lay_bl(GiaViec({}, []), dict(DU_AN, bl_so_bai=10, bl_moi_bai=0), 1, 5.0, time.monotonic() + 300)
     assert nhan_gia == [["giá sao"]]
     assert kho.hoi[0][2] == 10
+
+
+def test_cau_hinh_theo_nen_tang_ghi_de_cot_chung():
+    """Đợt 2e: mọi giới hạn tuỳ chỉnh từng nền tảng; khoá thiếu dùng cột chung; số rác bị kẹp."""
+    da = dict(DU_AN, tk_bat=True, tk_so_bai=15, bl_bat=True, bl_so_bai=10, bl_moi_bai=0,
+              cau_hinh={"tu_khoa": {"facebook": {"so_bai": 50}, "instagram": {"bat": False},
+                                    "tiktok": {"so_bai": "rác"}},
+                        "binh_luan": {"tiktok": {"so_bai": 40, "moi_bai": 3},
+                                      "youtube": {"so_bai": 9999}}})
+    assert T.cau_hinh(da, "tu_khoa", "facebook") == {"bat": True, "so_bai": 50, "so_tu": 2}
+    assert T.cau_hinh(da, "tu_khoa", "instagram")["bat"] is False
+    assert T.cau_hinh(da, "tu_khoa", "tiktok")["so_bai"] == 15            # rác → cột chung
+    assert T.cau_hinh(da, "tu_khoa", "youtube") == {"bat": True, "so_bai": 15, "so_tu": 2}
+    assert T.cau_hinh(da, "binh_luan", "tiktok") == {"bat": True, "so_bai": 40, "moi_bai": 5}
+    assert T.cau_hinh(da, "binh_luan", "youtube")["so_bai"] == 9999       # không trần trên
+    assert T.cau_hinh(da, "binh_luan", "facebook") == {"bat": True, "so_bai": 10, "moi_bai": 0}
+    # Facebook không còn cứng 20 khi gói trả phí
+    assert T.uoc_tu_khoa_nen_tang("facebook", 50, ["hapas"], fb_toi_da=10**6) > \
+        T.uoc_tu_khoa_nen_tang("facebook", 50, ["hapas"])
+    # Số mỗi bài âm / null trong JSONB KHÔNG thành 0 (= cào hết, đắt nhất): lấy cột chung.
+    da2 = dict(da, bl_moi_bai=40, cau_hinh={"binh_luan": {"tiktok": {"moi_bai": -1},
+                                                          "facebook": {"moi_bai": None}}})
+    assert [T.cau_hinh(da2, "binh_luan", p)["moi_bai"] for p in ("tiktok", "facebook")] == [40, 40]
+    # Chỉ True mới là bật; cột tk_bat / bl_bat là công tắc tổng.
+    da3 = dict(da, cau_hinh={"tu_khoa": {"tiktok": {"bat": "false"}}})
+    assert T.cau_hinh(da3, "tu_khoa", "tiktok")["bat"] is False
+    tat = dict(da, tk_bat=False, bl_bat=False)
+    assert not T.tk_co_bat(tat) and not T.cau_hinh(tat, "binh_luan", "tiktok")["bat"]
+    assert T.tk_co_bat(dict(da, tk_so_bai=0))                             # Facebook 50 vẫn bật
+    assert not T.tk_co_bat(dict(da, tk_so_bai=0, cau_hinh={}))
+
+
+def test_tim_tu_khoa_theo_cau_hinh_tung_nen_tang(mo):
+    GiaKhoTk(mo)
+    goi = {}
+
+    def tim(p):
+        def f(q, limit, *a):
+            goi[p] = (list(q), limit)
+            return []
+        return f
+    mo.setattr(A, "_FETCH", {p: tim(p) for p in ("tiktok", "facebook", "instagram", "youtube")})
+    mo.setattr(A, "_goi_apify", lambda: "STARTER")
+    da = dict(DU_AN, tu_khoa=["hapas", "yeutudieunhonhat", "hahahapas"], tk_bat=True, tk_so_bai=15,
+              cau_hinh={"tu_khoa": {"facebook": {"so_bai": 60}, "tiktok": {"bat": False},
+                                    "instagram": {"so_tu": 3}}})
+    import contextvars
+    contextvars.copy_context().run(T._tim_tu_khoa, GiaViec({}, []), da, 1, 50.0,
+                                   time.monotonic() + 600)
+    assert "tiktok" not in goi and goi["facebook"][1] == 60       # gói trả phí: không kẹp 20
+    assert goi["instagram"][0] == ["hapas", "yeutudieunhonhat", "hahahapas"]
+    assert goi["youtube"][1] == 15
+
+
+def test_binh_luan_link_va_ma_cha():
+    b = {"khoa": "youtube:abcDEF12345", "nen_tang": "youtube", "tai_khoan": "", "tac_gia": ""}
+    r = {"kenh": "A", "text": "hay", "link": "https://www.youtube.com/watch?v=abcDEF12345",
+         "__goc": {"id": "Ugx1", "snippet": {"parentId": "Ugx0"}}}
+    d = T._dong_bl(r, b, ["hapas"])
+    assert d["link"].endswith("&lc=Ugx1") and d["ma_cha"] == "Ugx0"
+    t = T._dong_bl({"kenh": "k", "text": "x", "__goc": {"cid": "c2", "repliesToId": "c1"}},
+                   dict(b, nen_tang="tiktok", khoa="tiktok:1"), [])
+    assert t["ma_cha"] == "c1" and t["link"] is None
 
