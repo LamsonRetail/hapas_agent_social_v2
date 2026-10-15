@@ -169,7 +169,7 @@ def danh_dau_nguon(da_quet: list[int], loi: dict[int, str]) -> None:
 # ───────────────────────────── bài ─────────────────────────────
 _COT_BAI = ("khoa", "nen_tang", "nguon_id", "link", "tac_gia", "tai_khoan", "followers",
             "dang_luc", "noi_dung", "hashtag", "khop_tu_khoa", "sac_thai", "chu_de", "ly_do_giu",
-            "xem", "thich", "binh_luan", "chia_se")
+            "xem", "thich", "binh_luan", "chia_se", "ma_noi_dung")
 _SO = ("xem", "thich", "binh_luan", "chia_se")
 
 
@@ -185,9 +185,12 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
     # xoá thành NULL, không làm hỏng khoá ngoại (và rollback) cả lô bài đã trả tiền.
     dat = ", ".join("(SELECT id FROM nguon WHERE id = %s)" if k == "nguon_id" else "%s"
                     for k in _COT_BAI)
+    import loc_rac
     moi = cu = 0
     with ket_noi() as c:
         for r in rows:
+            r = {**r, "ma_noi_dung": r.get("ma_noi_dung") or loc_rac.ma_noi_dung(
+                r.get("noi_dung") or "", loc_rac.BAI_TRUNG_TOI_THIEU_CHU)}
             gia_tri = [r.get(k) for k in _COT_BAI]
             x = c.execute(
                 f"INSERT INTO bai (du_an, kieu_quet, luot_dau, luot_cuoi, {cot}) "
@@ -200,6 +203,7 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                 "sac_thai = COALESCE(EXCLUDED.sac_thai, bai.sac_thai), "
                 "chu_de = COALESCE(EXCLUDED.chu_de, bai.chu_de), "
                 "nguon_id = COALESCE(bai.nguon_id, EXCLUDED.nguon_id), "
+                "ma_noi_dung = COALESCE(EXCLUDED.ma_noi_dung, bai.ma_noi_dung), "
                 "kieu_quet = CASE WHEN bai.kieu_quet = 'theo_doi' THEN 'theo_doi' "
                 "ELSE EXCLUDED.kieu_quet END, "
                 "cap_nhat_cuoi = now(), luot_cuoi = EXCLUDED.luot_cuoi "
@@ -267,11 +271,14 @@ def co_bai_tu_khoa(ma: str) -> bool:
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
 #: Bài đã cào được cào lại khi số bình luận nền tảng báo tăng ≥ 20% (và ≥ 5) — bài cũ ít đổi
 #: thì không trả tiền đọc lại cùng bình luận.
-BL_TANG_TOI_THIEU = 1.2
+BL_TANG_TOI_THIEU = 1.1
+#: Đã cào dưới 80% số nền tảng báo lúc cào = chưa đủ → lượt sau cào tiếp (đợt 2d: cào HẾT).
+BL_DU_TOI_THIEU = 0.8
 BL_NGAY = 35
 
 
-def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int) -> list[dict]:
+def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
+                          cao_het: bool = False) -> list[dict]:
     """Bài nên cào bình luận lượt này: đăng trong `BL_NGAY` ngày, nền tảng báo có bình luận,
     chưa cào hoặc bình luận tăng đủ nhiều. Bài chưa cào đi trước, rồi bài nhiều bình luận."""
     if toi_da <= 0 or not nen_tang:
@@ -279,17 +286,31 @@ def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int) -> list[dic
     with ket_noi() as c:
         return c.execute(
             "SELECT b.khoa, b.nen_tang, b.link, b.tai_khoan, b.tac_gia, b.binh_luan, "
-            "b.bl_lay_luc, n.loai AS nguon_loai FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
+            "b.bl_lay_luc, b.bl_da_lay, b.bl_lay_khi_co, n.loai AS nguon_loai "
+            "FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
             "WHERE b.du_an = %s AND b.nen_tang = ANY(%s) AND COALESCE(b.binh_luan, 0) > 0 "
             "AND b.link <> '' AND b.dang_luc >= now() - make_interval(days => %s) "
-            "AND (b.bl_lay_luc IS NULL OR (b.bl_lay_luc < now() - interval '20 hours' AND "
-            " b.binh_luan >= COALESCE(b.bl_lay_khi_co, 0) * %s + 5)) "
-            "ORDER BY (b.bl_lay_luc IS NULL) DESC, b.binh_luan DESC LIMIT %s",
-            (ma, list(nen_tang), BL_NGAY, BL_TANG_TOI_THIEU, toi_da)).fetchall()
+            "AND (b.bl_lay_luc IS NULL "
+            # Cào hết mà lần trước chưa đủ (chạm trần chi phí / actor dừng sớm): cào bù — tối đa
+            # 2 lần liên tiếp không đủ (review 15/10: Instagram chưa đăng nhập, bài ẩn bình luận
+            # không bao giờ đủ — không trả tiền mỗi ngày cho cùng bình luận).
+            " OR (%s AND b.nen_tang <> 'instagram' AND b.bl_lan_thieu < 2 AND "
+            "     b.bl_lay_luc < now() - interval '20 hours' AND "
+            "     COALESCE(b.bl_da_lay, 0) < COALESCE(b.bl_lay_khi_co, 0) * %s) "
+            # Có thêm bình luận đáng kể: ≥ 20 hoặc ≥ 10% (+3) so với lúc cào.
+            " OR (b.bl_lay_luc < now() - interval '20 hours' AND "
+            "     b.binh_luan > COALESCE(b.bl_lay_khi_co, 0) AND "
+            "     (b.binh_luan - COALESCE(b.bl_lay_khi_co, 0) >= 20 OR "
+            "      b.binh_luan >= COALESCE(b.bl_lay_khi_co, 0) * %s + 3))) "
+            "ORDER BY (b.bl_lay_luc IS NULL) DESC, "
+            "b.binh_luan - COALESCE(b.bl_da_lay, 0) DESC LIMIT %s",
+            (ma, list(nen_tang), BL_NGAY, bool(cao_het), BL_DU_TOI_THIEU, BL_TANG_TOI_THIEU,
+             toi_da)).fetchall()
 
 
 _COT_BL = ("ma", "nen_tang", "tac_gia", "noi_dung", "thich", "tra_loi", "la_tra_loi",
-           "cua_thuong_hieu", "dang_luc", "sac_thai", "chu_de")
+           "cua_thuong_hieu", "dang_luc", "sac_thai", "chu_de", "loai", "ly_do_loc",
+           "ma_noi_dung")
 
 
 def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
@@ -311,6 +332,12 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "tra_loi = COALESCE(EXCLUDED.tra_loi, binh_luan.tra_loi), "
                 "sac_thai = COALESCE(EXCLUDED.sac_thai, binh_luan.sac_thai), "
                 "chu_de = COALESCE(EXCLUDED.chu_de, binh_luan.chu_de), "
+                # Đã là seeding (xét trên lịch sử) thì lượt sau không hạ về hop_le.
+                "loai = CASE WHEN binh_luan.loai = 'seeding' AND EXCLUDED.loai = 'hop_le' "
+                "THEN 'seeding' ELSE EXCLUDED.loai END, "
+                "ly_do_loc = CASE WHEN binh_luan.loai = 'seeding' AND EXCLUDED.loai = 'hop_le' "
+                "THEN binh_luan.ly_do_loc ELSE EXCLUDED.ly_do_loc END, "
+                "ma_noi_dung = EXCLUDED.ma_noi_dung, "
                 "luot_id = EXCLUDED.luot_id, cap_nhat_cuoi = now() "
                 "RETURNING (xmax = 0) AS moi",
                 [ma, r["khoa_bai"], luot_id, *[r.get(k) for k in _COT_BL],
@@ -322,10 +349,45 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
             else:
                 cu += 1
         for khoa, (n, co) in da_lay.items():
-            c.execute("UPDATE bai SET bl_lay_luc = now(), bl_da_lay = %s, "
-                      "bl_lay_khi_co = COALESCE(%s, binh_luan) WHERE du_an = %s AND khoa = %s",
-                      (n, co, ma, khoa))
+            # bl_da_lay = TỔNG bình luận đã có của bài trong kho (lượt sau có thể chỉ lấy phần
+            # mới — Facebook theo ngày), không phải số của riêng lượt này.
+            c.execute("UPDATE bai SET bl_lay_luc = now(), bl_lay_khi_co = COALESCE(%s, binh_luan), "
+                      "bl_da_lay = GREATEST(%s, (SELECT count(*) FROM binh_luan b WHERE "
+                      "b.du_an = bai.du_an AND b.khoa_bai = bai.khoa)) "
+                      "WHERE du_an = %s AND khoa = %s", (co, n, ma, khoa))
+            c.execute("UPDATE bai SET bl_lan_thieu = CASE WHEN bl_da_lay < "
+                      "COALESCE(bl_lay_khi_co, 0) * %s THEN bl_lan_thieu + 1 ELSE 0 END "
+                      "WHERE du_an = %s AND khoa = %s", (BL_DU_TOI_THIEU, ma, khoa))
+        _danh_dau_seeding(c, ma, [r.get("ma_noi_dung") for r in rows])
     return moi, cu
+
+
+def _danh_dau_seeding(c, ma: str, cac_ma: list) -> int:
+    """Cùng nội dung (≥ 15 ký tự) từ ≥ `SEEDING_TAC_GIA` tài khoản trong `SEEDING_NGAY` ngày →
+    `seeding` (chỉ hạ bình luận đang hop_le; spam/thương hiệu giữ nhãn của nó)."""
+    import loc_rac
+    ds = sorted({x for x in cac_ma if x})
+    if not ds:
+        return 0
+    return c.execute(
+        "WITH nhom AS (SELECT ma_noi_dung FROM binh_luan WHERE du_an = %s AND ma_noi_dung = ANY(%s) "
+        "AND COALESCE(dang_luc, thay_lan_dau) >= now() - make_interval(days => %s) "
+        "AND loai IN ('hop_le', 'seeding') GROUP BY ma_noi_dung "
+        "HAVING count(DISTINCT lower(tac_gia)) >= %s AND count(DISTINCT khoa_bai) >= 2) "
+        "UPDATE binh_luan b SET loai = 'seeding', "
+        "ly_do_loc = 'cung_noi_dung_nhieu_tai_khoan', sac_thai = NULL, chu_de = NULL "
+        "FROM nhom WHERE b.du_an = %s AND b.ma_noi_dung = nhom.ma_noi_dung AND b.loai = 'hop_le'",
+        (ma, ds, loc_rac.SEEDING_NGAY, loc_rac.SEEDING_TAC_GIA, ma)).rowcount or 0
+
+
+def da_gan_nhan(ma: str, khoa_bai: list[str]) -> set[tuple[str, str]]:
+    """(khoá bài, mã bình luận) đã có sắc thái — cào lại không gửi lại AI (review 15/10)."""
+    if not khoa_bai:
+        return set()
+    with ket_noi() as c:
+        rows = c.execute("SELECT khoa_bai, ma FROM binh_luan WHERE du_an = %s AND "
+                         "khoa_bai = ANY(%s) AND sac_thai IS NOT NULL", (ma, list(khoa_bai)))
+        return {(r["khoa_bai"], r["ma"]) for r in rows.fetchall()}
 
 
 def ghi_de_xuat(ma: str, cac: list[dict]) -> int:

@@ -258,6 +258,7 @@ def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) 
     with ket_noi() as c:
         rows = c.execute(
             "SELECT b.khoa, b.nen_tang, b.nguon_id, left(b.link, 500) AS link, b.bl_da_lay, "
+            "b.ma_noi_dung, "
             "left(b.tac_gia, 200) AS tac_gia, left(b.tai_khoan, 200) AS tai_khoan, b.followers, "
             "b.dang_luc, left(b.noi_dung, 1000) AS noi_dung, left(b.hashtag, 500) AS hashtag, "
             "b.sac_thai, left(b.chu_de, 100) AS chu_de, b.xem, b.thich, b.binh_luan, b.chia_se, "
@@ -272,7 +273,7 @@ def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) 
 BL_TOI_DA = 50_000
 _COT_BL = ("b.khoa_bai, b.ma, b.nen_tang, left(b.tac_gia, 200) AS tac_gia, "
            "left(b.noi_dung, 1000) AS noi_dung, b.thich, b.tra_loi, b.la_tra_loi, "
-           "b.cua_thuong_hieu, b.dang_luc, b.sac_thai, b.chu_de")
+           "b.cua_thuong_hieu, b.dang_luc, b.sac_thai, b.chu_de, b.loai, b.ly_do_loc")
 
 
 def binh_luan_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) -> dict:
@@ -291,7 +292,7 @@ def binh_luan_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.date
     return {"rows": rows[:BL_TOI_DA], "bi_cat": len(rows) > BL_TOI_DA}
 
 
-def binh_luan_cua_bai(du_an: str, khoa: str, toi_da: int = 300) -> list[dict]:
+def binh_luan_cua_bai(du_an: str, khoa: str, toi_da: int = 3000) -> list[dict]:
     """Bình luận đã cào của MỘT bài, nhiều thích trước."""
     with ket_noi() as c:
         return c.execute(

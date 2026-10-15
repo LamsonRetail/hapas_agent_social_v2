@@ -71,7 +71,8 @@ BANG: dict[str, dict] = {
                 ("khop_tu_khoa", "BOOL"), ("sac_thai", "STRING"), ("chu_de", "STRING"),
                 ("ly_do_giu", "STRING"), ("xem", "INT64"), ("thich", "INT64"),
                 ("binh_luan", "INT64"), ("chia_se", "INT64"), ("thay_lan_dau", "TIMESTAMP"),
-                ("cap_nhat_cuoi", "TIMESTAMP"), ("luot_dau", "INT64"), ("luot_cuoi", "INT64")],
+                ("cap_nhat_cuoi", "TIMESTAMP"), ("luot_dau", "INT64"), ("luot_cuoi", "INT64"),
+                ("ma_noi_dung", "STRING")],
     },
     "chi_so_ngay": {
         "khoa": ["du_an", "khoa", "ngay"], "kieu": "theo_ngay", "moc": "ngay",
@@ -87,7 +88,8 @@ BANG: dict[str, dict] = {
                 ("thich", "INT64"), ("tra_loi", "INT64"), ("la_tra_loi", "BOOL"),
                 ("cua_thuong_hieu", "BOOL"), ("dang_luc", "TIMESTAMP"), ("sac_thai", "STRING"),
                 ("chu_de", "STRING"), ("luot_id", "INT64"), ("thay_lan_dau", "TIMESTAMP"),
-                ("cap_nhat_cuoi", "TIMESTAMP")],
+                ("cap_nhat_cuoi", "TIMESTAMP"), ("loai", "STRING"), ("ly_do_loc", "STRING"),
+                ("ma_noi_dung", "STRING")],
     },
 }
 THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan")   # cha trước con

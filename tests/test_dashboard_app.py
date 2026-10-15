@@ -1202,7 +1202,7 @@ def test_cau_hinh_binh_luan_chi_quan_ly_va_kiem_so():
     csrf = dang_nhap(c, QL)
     r = c.post("/ngan-sach/hapas/binh-luan",
                data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "5", "bl_moi_bai": "30"})
-    assert "Đã lưu: cào bình luận tối đa 5 bài × 30 bình luận" in thong_bao(c, r)
+    assert "Đã lưu: cào bình luận tối đa 5 bài mỗi lượt, mỗi bài 30 bình luận" in thong_bao(c, r)
     assert kho.du_an["hapas"]["bl_so_bai"] == 5 and kho.nk[-1][1] == "sua_binh_luan"
     r = c.post("/ngan-sach/hapas/binh-luan",
                data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "500", "bl_moi_bai": "30"})
@@ -1225,4 +1225,45 @@ def test_cau_hinh_tim_tu_khoa():
     csrf = dang_nhap(c, XEM)
     assert c.post("/ngan-sach/hapas/tu-khoa",
                   data={"csrf": csrf, "tk_bat": "1", "tk_so_bai": "5"}).status_code == 403
+
+
+def test_binh_luan_so_sach_va_loc_theo_loai():
+    _, c, kho = tao()
+    luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    kho.bai = [_bai(luc, khoa="tiktok:1", bl_da_lay=4, binh_luan=8, ma_noi_dung="m1"),
+               _bai(luc, khoa="tiktok:2", ma_noi_dung="m1"), _bai(luc, khoa="tiktok:3")]
+    kho.bl = [dict(_bl("tiktok:1", "a", luc), loai="hop_le"),
+              dict(_bl("tiktok:1", "b", luc, sac="Tiêu cực"), loai="spam", ly_do_loc="vay_tien"),
+              dict(_bl("tiktok:1", "c", luc), loai="it_noi_dung"),
+              dict(_bl("tiktok:1", "d", luc, nha=True), loai="thuong_hieu")]
+    dang_nhap(c, XEM)
+    d = c.get("/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14").json()
+    k = d["binh_luan_da_cao"]["kpi"]
+    assert k["so"] == 4 and k["sach"] == 1 and k["da_loc"] == 2 and k["thuong_hieu"] == 1
+    assert k["tieu_cuc"] == 0 and k["tich_cuc"] == 1                  # spam không vào sắc thái
+    assert {x["loai"] for x in d["binh_luan_da_cao"]["loai"]} == {"hop_le", "spam", "it_noi_dung",
+                                                                 "thuong_hieu"}
+    assert d["kpi"]["bai_khu_trung"] == 2 and d["kpi"]["bl_da_cao"] == 4
+    q = "/api/binh-luan?du_an=hapas&tu=2026-10-08&den=2026-10-14"
+    x = c.get(q + "&loai_bl=spam").json()
+    assert x["tong"] == 1 and x["binh_luan"][0]["ten_loai"] == "Spam"
+    assert x["binh_luan"][0]["ly_do_loc"] == "vay_tien"
+    assert c.get(q + "&loai_bl=xau").status_code == 400
+    assert c.get(q + "&sac_thai=Tiêu cực").json()["tong"] == 0         # spam bị loại khỏi sắc thái
+
+
+def test_cau_hinh_cao_het_binh_luan():
+    _, c, kho = tao()
+    csrf = dang_nhap(c, QL)
+    r = c.post("/ngan-sach/hapas/binh-luan",
+               data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "10", "bl_moi_bai": "0"})
+    assert "mỗi bài cào HẾT bình luận" in thong_bao(c, r) and kho.du_an["hapas"]["bl_moi_bai"] == 0
+    r = c.post("/ngan-sach/hapas/binh-luan",
+               data={"csrf": csrf, "bl_bat": "1", "bl_so_bai": "10", "bl_moi_bai": "3"})
+    assert "0 (cào hết) hoặc từ 5" in thong_bao(c, r)
+
+
+def test_loai_binh_luan_khop_mark():
+    import loc_rac
+    assert A.CS.LOAI_BL == loc_rac.LOAI and A.CS.TEN_LOAI_BL == loc_rac.TEN_LOAI
 

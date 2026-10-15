@@ -132,6 +132,11 @@ def kpi(rows: list[dict]) -> dict:
         "tuong_tac": sum(so(r.get("thich")) + so(r.get("binh_luan")) + so(r.get("chia_se"))
                          for r in rows),
         "nguon_co_bai": len({_khoa_nguon(r) for r in rows}),
+        # Đợt 2d: bài cùng nội dung (đăng lại nhiều trang/seeding) đếm một lần.
+        "bai_khu_trung": len({r.get("ma_noi_dung") or ("k", r.get("khoa") or id(r)) for r in rows}),
+        "bl_da_cao": sum(so(r.get("bl_da_lay")) for r in rows),
+        "bl_nen_tang_bao_bai_da_cao": sum(so(r.get("binh_luan")) for r in rows
+                                          if r.get("bl_da_lay") is not None),
         "bai_kenh_nha": len(rows) - len(khach),
         "da_phan_loai": da, "chua_phan_loai": len(khach) - da,
         "tich_cuc": dem[TC], "tieu_cuc": dem[TI], "trung_lap": dem[TL],
@@ -466,17 +471,33 @@ def _ngay_bl(c: dict) -> datetime.date | None:
     return ngay_vn(c.get("luc") or c.get("dang_luc"))
 
 
+# Bản sao `loc_rac.LOAI` / `TEN_LOAI` của Mark (dashboard cài riêng, không import module Mark —
+# bài thử đối chiếu). Chỉ `hop_le` vào thảo luận sạch + sắc thái.
+LOAI_BL = ("hop_le", "it_noi_dung", "spam", "trung", "seeding", "thuong_hieu")
+TEN_LOAI_BL = {"hop_le": "Hợp lệ", "it_noi_dung": "Ít nội dung", "spam": "Spam",
+               "trung": "Trùng lặp", "seeding": "Seeding", "thuong_hieu": "Thương hiệu"}
+
+
+def loai_bl(c: dict) -> str:
+    x = c.get("loai")
+    if x in LOAI_BL:
+        return x
+    return "thuong_hieu" if c.get("cua_thuong_hieu") else "hop_le"
+
+
 def the_bl(c: dict) -> dict:
     dt = c.get("dang_luc")
+    lb = loai_bl(c)
     return {"tac_gia": c.get("tac_gia") or "", "noi_dung": str(c.get("noi_dung") or "")[:1000],
             "thich": so(c.get("thich")), "tra_loi": so(c.get("tra_loi")),
             "la_tra_loi": bool(c.get("la_tra_loi")),
             "cua_thuong_hieu": bool(c.get("cua_thuong_hieu")),
             "dang_luc": (dt.astimezone(VN).isoformat(timespec="minutes")
                          if isinstance(dt, datetime.datetime) and dt.tzinfo else None),
-            "sac_thai": "thương hiệu" if c.get("cua_thuong_hieu") else sac_bl(c),
+            "sac_thai": sac_bl(c) if lb == "hop_le" else TEN_LOAI_BL[lb].lower(),
             "chu_de": c.get("chu_de") or "", "khoa_bai": c.get("khoa_bai") or "",
-            "nen_tang": c.get("nen_tang") or ""}
+            "nen_tang": c.get("nen_tang") or "", "loai": lb, "ten_loai": TEN_LOAI_BL[lb],
+            "ly_do_loc": c.get("ly_do_loc") or ""}
 
 
 def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
@@ -487,7 +508,9 @@ def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     hom_nay = hom_nay or datetime.datetime.now(VN).date()
     rows = [c for c in loc(rows, nen_tang, loai_nguon)
             if (n := _ngay_bl(c)) is not None and tu <= n <= den]
-    khach = [c for c in rows if not c.get("cua_thuong_hieu")]
+    theo_loai = collections.Counter(loai_bl(c) for c in rows)
+    # Chỉ bình luận HỢP LỆ (đã lọc spam/rác/trùng/seeding/thương hiệu) vào sắc thái, chủ đề.
+    khach = [c for c in rows if loai_bl(c) == "hop_le"]
     dem = collections.Counter(sac_bl(c) for c in khach)
     da = sum(dem[s] for s in SAC_BL)
     theo_tuan = (den - tu).days + 1 > NGAY_TOI_DA_THEO_NGAY
@@ -510,7 +533,11 @@ def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     def pt(x: str) -> float | None:
         return round(100.0 * dem[x] / da, 1) if da else None
     return {
-        "kpi": {"so": len(rows), "khach": len(khach), "thuong_hieu": len(rows) - len(khach),
+        "loai": [{"loai": k, "ten": TEN_LOAI_BL[k], "so": theo_loai[k]} for k in LOAI_BL
+                 if theo_loai[k]],
+        "kpi": {"so": len(rows), "khach": len(khach), "sach": len(khach),
+                "da_loc": len(rows) - len(khach) - theo_loai["thuong_hieu"],
+                "thuong_hieu": theo_loai["thuong_hieu"],
                 "so_bai": len({c.get("khoa_bai") for c in rows}), "da_phan_loai": da,
                 "tich_cuc": dem[TC], "tieu_cuc": dem[TI], "trung_lap": dem[TL],
                 "chua_phan_loai": dem[CHUA], "tich_cuc_pt": pt(TC), "tieu_cuc_pt": pt(TI),
@@ -523,7 +550,7 @@ def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
 
 def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
                 trang: int = 1, ngay_tu=None, ngay_den=None, sac_thai=None, chu_de=None,
-                nen_tang=None, loai_nguon=None) -> dict:
+                nen_tang=None, loai_nguon=None, loai=None) -> dict:
     """Bình luận khớp điều kiện (sắc thái/chủ đề chỉ xét bình luận của khách), nhiều thích
     trước. -> {tong, trang, so_trang, binh_luan}."""
     ds = []
@@ -533,10 +560,13 @@ def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
             continue
         if (ngay_tu and n < ngay_tu) or (ngay_den and n > ngay_den):
             continue
-        nha = bool(c.get("cua_thuong_hieu"))
-        if sac_thai and (nha or sac_bl(c) != sac_thai):
+        lb = loai_bl(c)
+        if loai and lb != loai:
             continue
-        if chu_de and (nha or (str(c.get("chu_de") or "").strip() or CHUA) != chu_de):
+        sach = lb == "hop_le"
+        if sac_thai and (not sach or sac_bl(c) != sac_thai):
+            continue
+        if chu_de and (not sach or (str(c.get("chu_de") or "").strip() or CHUA) != chu_de):
             continue
         ds.append(c)
     ds.sort(key=lambda c: (-so(c.get("thich")), str(c.get("khoa_bai") or "")))
