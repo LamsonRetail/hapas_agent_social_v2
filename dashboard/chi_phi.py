@@ -34,6 +34,8 @@ START_COST = {"instagram": 0.016, "threads": 0.02, "facebook": 0.00005}
 #: `theo_doi._BL_GIA` / `_BL_KHOI_DONG` — giá cào BÌNH LUẬN mỗi bình luận (gói FREE, 15/10/2026).
 BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0}
 BL_KHOI_DONG = {"facebook": 0.001}
+#: `theo_doi._BL_UOC_MOI_BAI` — giữ chỗ mỗi bài khi cào hết (bl_moi_bai = 0).
+BL_UOC_MOI_BAI = 60
 
 NGAY_THANG_CAU_HINH = 30     # "theo cấu hình": tháng chuẩn 30 ngày (để so sánh tháng với tháng)
 
@@ -63,6 +65,7 @@ def uoc_tu_khoa_luot(so_bai: int, tu: list[str]) -> float:
 def uoc_binh_luan_luot(so_bai: int, moi_bai: int, p: str = "facebook") -> float:
     """Bản sao `theo_doi.uoc_binh_luan`: USD TỐI ĐA cào bình luận một lượt (giá Facebook khi
     chưa biết bài nào — thực tế thấp hơn: chỉ bài có bình luận mới/tăng mới được cào lại)."""
+    moi_bai = moi_bai or BL_UOC_MOI_BAI
     if not so_bai or not BL_GIA.get(p):
         return 0.0
     return round((so_bai * moi_bai * BL_GIA[p] + BL_KHOI_DONG.get(p, 0.0)) * HE_SO_UOC, 4)

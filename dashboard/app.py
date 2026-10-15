@@ -701,14 +701,21 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             if len(khoa) > 200:
                 return JSONResponse({"loi": "Khoá bài không hợp lệ."}, status_code=400)
             ds = await _k(app.state.kho.binh_luan_cua_bai, du_an["ma"], khoa)
-            return JSONResponse({"tong": len(ds), "trang": 1, "so_trang": 1,
-                                 "binh_luan": [CS.the_bl(c) for c in ds]})
+            if q.get("loai_bl") in CS.LOAI_BL:
+                ds = [c for c in ds if CS.loai_bl(c) == q.get("loai_bl")]
+            mot, trang, so_trang = CS._trang(ds, _so_trang(q.get("trang")), 50)
+            return JSONResponse({"tong": len(ds), "trang": trang, "so_trang": so_trang,
+                                 "binh_luan": [CS.the_bl(c) for c in mot]})
         try:
             dk = _dk_chi_tiet(q)
         except NL.LoiNhap as e:
             return JSONResponse({"loi": str(e)}, status_code=400)
         if dk.get("sac_thai") == "kênh nhà" or dk.get("nguon") or dk.get("cum"):
             return JSONResponse({"loi": "Điều kiện không hợp lệ cho bình luận."}, status_code=400)
+        if q.get("loai_bl"):
+            if q.get("loai_bl") not in CS.LOAI_BL:
+                return JSONResponse({"loi": "Nhãn lọc không hợp lệ."}, status_code=400)
+            dk["loai"] = q.get("loai_bl")
         rows = await _dong_nho("bl", du_an["ma"], tu, den)
         if rows is None:
             return _ban()
@@ -932,7 +939,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             tran = db["tran"]
             tk_uoc = (CP.uoc_tu_khoa_luot(int(d.get("tk_so_bai") or 0), list(d.get("tu_khoa") or []))
                       if d.get("tk_bat", True) else 0.0)
-            bl_uoc = (CP.uoc_binh_luan_luot(int(d.get("bl_so_bai") or 0), int(d.get("bl_moi_bai") or 20))
+            bl_uoc = (CP.uoc_binh_luan_luot(int(d.get("bl_so_bai") or 0), int(d.get("bl_moi_bai") or 0))
                       if d.get("bl_bat", True) else 0.0)
             dong.append({**d, "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
                          "bl_uoc": bl_uoc, "tk_uoc": tk_uoc,
@@ -982,13 +989,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             await _du_an_phai_co(ma)
             bat = form.get("bl_bat") == "1"
             so_bai = NL.so_nguyen(form.get("bl_so_bai"), "Số bài cào bình luận mỗi lượt", 0, 100)
-            moi_bai = NL.so_nguyen(form.get("bl_moi_bai"), "Số bình luận mỗi bài", 5, 200)
+            moi_bai = NL.so_nguyen(form.get("bl_moi_bai"), "Số bình luận mỗi bài", 0, 5000)
+            if 0 < moi_bai < 5:
+                raise NL.LoiNhap("Số bình luận mỗi bài: 0 (cào hết) hoặc từ 5 trở lên.")
             await _k(app.state.kho.dat_binh_luan, nguoi["email"], ma, bat, so_bai, moi_bai)
         except (NL.LoiNhap, LoiDuLieu) as e:
             return _chuyen(request, ve, "loi", str(e))
         return _chuyen(request, ve, "ok",
-                       (f"Đã lưu: cào bình luận tối đa {so_bai} bài × {moi_bai} bình luận mỗi "
-                        f"lượt (tối đa ≈ {usd_vn(CP.uoc_binh_luan_luot(so_bai, moi_bai))} USD/lượt)."
+                       (f"Đã lưu: cào bình luận tối đa {so_bai} bài mỗi lượt, "
+                        + ("mỗi bài cào HẾT bình luận" if not moi_bai else f"mỗi bài {moi_bai} bình luận")
+                        + f" (ước ≈ {usd_vn(CP.uoc_binh_luan_luot(so_bai, moi_bai))} USD/lượt)."
                         if bat else "Đã tắt cào bình luận."))
 
     # ─── người xem ───

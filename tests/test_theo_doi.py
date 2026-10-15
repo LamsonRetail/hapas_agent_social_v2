@@ -741,8 +741,10 @@ class GiaKhoBl:
         self.bai, self.hoi, self.ghi = bai, [], []
         mp.setattr(K, "bai_can_lay_binh_luan", self.can)
         mp.setattr(K, "ghi_binh_luan", self.ghi_bl)
+        self.da_nhan: set = set()
+        mp.setattr(K, "da_gan_nhan", lambda ma, ks: set(self.da_nhan))
 
-    def can(self, ma, nen_tang, toi_da):
+    def can(self, ma, nen_tang, toi_da, cao_het=False):
         self.hoi.append((ma, list(nen_tang), toi_da))
         return [b for b in self.bai if b["nen_tang"] in nen_tang][:toi_da]
 
@@ -985,4 +987,96 @@ def test_ke_hoach_chua_nguon_toi_han_van_tim_tu_khoa(mo):
     assert "loi" not in kh and kh["nguon"] == [] and kh["con_thang"] == 5.0
     GiaKho(du_an={"hapas": dict(DU_AN, tk_bat=False, tk_so_bai=15)}).cai(mo)
     assert "tới hạn" in T.ke_hoach("hapas")["loi"]
+
+
+# ───────────────────────────── cào hết + lọc (đợt 2d) ─────────────────────────────
+def _fb(khoa, so_bl, **kw):
+    return {"khoa": f"facebook:{khoa}", "nen_tang": "facebook", "binh_luan": so_bl,
+            "link": f"https://www.facebook.com/hapas/posts/{khoa}", "tai_khoan": "", "tac_gia": "HAPAS",
+            "nguon_loai": "kenh_nha", "bl_lay_luc": None, "bl_da_lay": None, "bl_lay_khi_co": None,
+            **kw}
+
+
+def test_cao_het_xin_du_so_nen_tang_bao_va_chia_lo_theo_tran(mo):
+    """bl_moi_bai = 0: mỗi bài xin số nền tảng báo +15% +10; lô vừa ~90% trần console (5 USD
+    trong fixture → ≈1.384 bình luận Facebook); bài to hơn trần một mình một lô."""
+    lo = T._chia_lo_bl("facebook", [_fb("a", 291), _fb("b", 1200), _fb("c", 30), _fb("d", 5000)], 0)
+    can = [[T._can_bl(b, 0) for b in x] for x, _ in lo]
+    assert T._can_bl(_fb("a", 291), 0) == int(291 * 1.15) + 10
+    assert T._can_bl(_fb("d", 5000), 0) == T.BL_TRAN_BAI
+    assert all(sum(c) <= 1384 or len(c) == 1 for c in can)
+    assert sorted(x for c in can for x in c) == sorted([344, 1390, 44, 3000])
+    v = GiaViec({}, [])
+    T._tao_cac_phan_bl(v, [_fb("a", 291)], 0)
+    ph = v.d["nen_tang"]["binh_luan"]["phan"][0]
+    assert ph["payload"]["includeNestedComments"] is True
+    assert ph["payload"]["viewOption"] == "RANKED_UNFILTERED" and ph["payload"]["resultsLimit"] == 344
+    assert ph["uoc_usd"] == pytest.approx((344 * 0.0025 + 0.001) * 1.3, abs=1e-4)
+
+
+def test_facebook_da_cao_du_lan_sau_chi_lay_binh_luan_moi(mo):
+    luc = datetime.datetime(2026, 10, 14, 23, 50, tzinfo=_VN)
+    b = _fb("a", 330, bl_lay_luc=luc, bl_da_lay=280, bl_lay_khi_co=291)
+    assert T._tang_dan(b) and T._can_bl(b, 0) == int(39 * 1.15) + 20
+    v = GiaViec({}, [])
+    T._tao_cac_phan_bl(v, [b], 0)
+    pl = v.d["nen_tang"]["binh_luan"]["phan"][0]["payload"]
+    assert pl["viewOption"] == "RECENT_ACTIVITY" and pl["onlyCommentsNewerThan"] == "2026-10-13"
+    # Chưa cào đủ (actor dừng ở trần): cào lại cả bài, không lọc theo ngày.
+    assert not T._tang_dan(_fb("b", 330, bl_lay_luc=luc, bl_da_lay=100, bl_lay_khi_co=291))
+
+
+def test_tiktok_cao_het_lay_ca_tra_loi(mo):
+    v = GiaViec({}, [])
+    T._tao_cac_phan_bl(v, [_bai_bl("1", 122)], 0)
+    pl = v.d["nen_tang"]["binh_luan"]["phan"][0]["payload"]
+    assert pl["commentsPerPost"] == int(122 * 1.15) + 10 and pl["maxRepliesPerComment"] == 100
+
+
+def test_loc_truoc_khi_gan_nhan_chi_hop_le_di_ai(mo, nhan_gia):
+    kho = GiaKhoBl(mo, [_bai_bl("111", 30)])
+    GiaApify(mo, items=[
+        _bl_tt("c1", "111", "khach1", "Ib"),
+        _bl_tt("c2", "111", "khach2", "."),
+        _bl_tt("c3", "111", "shopx", "Việc nhẹ lương cao 500k/ngày inbox"),
+        _bl_tt("c4", "111", "khach1", "Ib"),
+        _bl_tt("c5", "111", "khach3", "túi đẹp quá")])
+    tk = _lay_bl(GiaViec({}, []), dict(DU_AN, bl_so_bai=10, bl_moi_bai=0), 1, 5.0,
+                 time.monotonic() + 300)
+    theo = {r["ma"]: r for r in kho.ghi[0][2]}
+    assert [theo[m]["loai"] for m in ("c1", "c2", "c3", "c4", "c5")] == \
+        ["hop_le", "it_noi_dung", "spam", "trung", "hop_le"]
+    assert theo["c3"]["ly_do_loc"] == "viec_lam_mmo"
+    assert nhan_gia == [["Ib", "túi đẹp quá"]]                       # chỉ hợp lệ đi gán nhãn
+    assert theo["c2"]["sac_thai"] is None and theo["c1"]["sac_thai"] == "Tích cực"
+    assert tk["loc"] == {"hop_le": 2, "it_noi_dung": 1, "spam": 1, "trung": 1}
+    assert "đã lọc: 1 it_noi_dung, 1 spam, 1 trung" in T._cau_bl(tk)[0]
+
+
+def test_seeding_danh_dau_tren_kho():
+    """Cùng nội dung từ ≥ 3 tài khoản trong 7 ngày → seeding (SQL chạy trong cùng giao dịch)."""
+    class C:
+        def __init__(self):
+            self.sql = []
+            self.rowcount = 2
+
+        def execute(self, q, ts=()):
+            self.sql.append((q, ts))
+            return self
+    c = C()
+    assert K._danh_dau_seeding(c, "hapas", ["h1", None, "h1", "h2"]) == 2
+    q, ts = c.sql[0]
+    assert "HAVING count(DISTINCT lower(tac_gia)) >= %s" in q and "loai = 'seeding'" in q
+    assert ts == ("hapas", ["h1", "h2"], 7, 3, "hapas")
+    assert "count(DISTINCT khoa_bai) >= 2" in q
+    assert K._danh_dau_seeding(c, "hapas", [None]) == 0 and len(c.sql) == 1
+
+
+def test_cao_lai_khong_gui_lai_ai_binh_luan_da_co_nhan(mo, nhan_gia):
+    kho = GiaKhoBl(mo, [_bai_bl("111", 30)])
+    kho.da_nhan = {("tiktok:111", "c1")}
+    GiaApify(mo, items=[_bl_tt("c1", "111", "khach1", "đẹp quá"), _bl_tt("c2", "111", "k2", "giá sao")])
+    _lay_bl(GiaViec({}, []), dict(DU_AN, bl_so_bai=10, bl_moi_bai=0), 1, 5.0, time.monotonic() + 300)
+    assert nhan_gia == [["giá sao"]]
+    assert kho.hoi[0][2] == 10
 

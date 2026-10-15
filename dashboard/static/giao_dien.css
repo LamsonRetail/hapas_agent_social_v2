@@ -219,6 +219,7 @@ dialog.chi-tiet .phan-trang { padding: 0 18px 14px; }
 .the-bai__bl { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .the-bl { border-left: 3px solid var(--truc); padding: 6px 10px; background: var(--be-mat-2); border-radius: 0 8px 8px 0; }
 .the-bl--tra-loi { margin-left: 18px; }
+.the-bl--da-loc { opacity: .7; border-left-color: var(--chu-mo); }
 .khoi-bl { margin: 10px 0; padding-top: 8px; border-top: 1px dashed var(--vien); }
 .khoi-bl h3 { margin: 0 0 4px; font-size: 14px; }
 

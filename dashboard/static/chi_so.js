@@ -134,6 +134,9 @@
     el.appendChild(theKpi("Bài đăng", so(k.bai), ss.bai));
     el.appendChild(theKpi("Thảo luận", so(k.thao_luan), ss.thao_luan));
     el.appendChild(theKpi("Nguồn có bài", so(k.nguon_co_bai), ss.nguon_co_bai));
+    if (k.bai_khu_trung != null && k.bai_khu_trung < k.bai) {
+      el.appendChild(theKpi("Bài (khử trùng nội dung)", so(k.bai_khu_trung), null, so(k.bai - k.bai_khu_trung) + " bài đăng lại cùng nội dung"));
+    }
     el.appendChild(theKpi("Lượt xem", so(k.xem), ss.xem));
     el.appendChild(theKpi("Tương tác", so(k.tuong_tac), ss.tuong_tac));
     el.appendChild(theKpi("Tích cực", pt(k.tich_cuc_pt), null, so(k.tich_cuc) + " bài"));
@@ -373,13 +376,27 @@
     if (!b || !el) return;
     var k = b.kpi;
     xoa(el);
-    el.appendChild(theKpi("Bình luận đã đọc", so(k.so), null, "trên " + so(k.so_bai) + " bài"));
-    el.appendChild(theKpi("Của khách", so(k.khach), null, k.thuong_hieu ? "+ " + so(k.thuong_hieu) + " của thương hiệu" : "bình luận"));
+    var kp = d.kpi;
+    var phu = kp.bl_nen_tang_bao_bai_da_cao ? Math.min(100, Math.round(1000 * kp.bl_da_cao / kp.bl_nen_tang_bao_bai_da_cao) / 10) : null;
+    el.appendChild(theKpi("Bình luận đã cào (thô)", so(k.so), null, "trên " + so(k.so_bai) + " bài" + (phu != null ? " · độ phủ " + pt(phu) : "")));
+    el.appendChild(theKpi("Thảo luận sạch", so(k.sach), null, "đã lọc " + so(k.da_loc) + (k.thuong_hieu ? " · " + so(k.thuong_hieu) + " của thương hiệu" : "")));
     el.appendChild(theKpi("Tích cực", pt(k.tich_cuc_pt), null, so(k.tich_cuc) + " bình luận"));
     el.appendChild(theKpi("Tiêu cực", pt(k.tieu_cuc_pt), null, so(k.tieu_cuc) + " bình luận"));
     el.appendChild(theKpi("Trung lập", pt(k.trung_lap_pt), null, so(k.trung_lap) + " bình luận"));
     el.appendChild(theKpi("Chưa phân loại", so(k.chua_phan_loai), null, "bình luận"));
     $("trong-bl").hidden = k.so > 0;
+    var lo = $("loai-bl");
+    if (lo) {
+      xoa(lo);
+      (b.loai || []).forEach(function (x) {
+        var nut = tao("button", "", x.ten);
+        nut.type = "button";
+        nut.appendChild(tao("b", "", so(x.so)));
+        nut.title = "Bấm để xem các bình luận " + x.ten.toLowerCase();
+        nut.addEventListener("click", function () { moChiTiet("binh-luan", { loai_bl: x.loai }, x.ten); });
+        lo.appendChild(nut);
+      });
+    }
     var x = b.xu_huong, nhan = x.moc.map(x.don_vi === "tuần" ? function (s) { return "từ " + ngayNgan(s); } : ngayNgan);
     $("don-vi-bl").textContent = "theo " + x.don_vi + " đăng bình luận (giờ VN)";
     var o = coBan(m);
@@ -459,8 +476,14 @@
     o.appendChild(dau);
     o.appendChild(tao("p", "the-bl__chu", c.noi_dung || ""));
     var nh = tao("div", "the-bl__nhan");
-    nh.appendChild(nhanThe(c.sac_thai, lopSac(c.sac_thai)));
-    if (c.chu_de) nh.appendChild(nhanThe(c.chu_de, "the--nhan"));
+    if (c.loai && c.loai !== "hop_le") {
+      var t = nhanThe("Đã lọc: " + c.ten_loai + (c.ly_do_loc ? " (" + c.ly_do_loc.replace(/_/g, " ") + ")" : ""), c.loai === "spam" || c.loai === "seeding" ? "the--loi" : "");
+      nh.appendChild(t);
+      o.className += " the-bl--da-loc";
+    } else {
+      nh.appendChild(nhanThe(c.sac_thai, lopSac(c.sac_thai)));
+      if (c.chu_de) nh.appendChild(nhanThe(c.chu_de, "the--nhan"));
+    }
     o.appendChild(nh);
     return o;
   }
@@ -489,6 +512,7 @@
         nut.disabled = true;
         goiApi("binh-luan", { khoa: r.khoa }).then(function (j) {
           j.binh_luan.forEach(function (c) { ds.appendChild(theBinhLuan(c)); });
+          if (j.so_trang > 1) ds.appendChild(tao("div", "mo nho", "Đang hiện " + so(j.binh_luan.length) + "/" + so(j.tong) + " bình luận (nhiều thích trước)."));
           if (!j.binh_luan.length) ds.appendChild(tao("div", "trong", "Chưa có bình luận đã đọc."));
           nut.textContent = "Ẩn bình luận";
         }).catch(function (e) { ds.appendChild(tao("div", "thong-bao thong-bao--loi", e.message)); })

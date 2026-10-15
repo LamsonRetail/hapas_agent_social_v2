@@ -50,13 +50,14 @@
   <div class="khoi-bl">
     <h3>Cào bình luận</h3>
     <p class="ghi-chu sat-tren">Sau mỗi lượt /theodoi, Mark cào bình luận của các bài nhiều bình luận nhất (bài chưa cào trước, rồi bài có bình luận tăng ≥ 20%), gán sắc thái + chủ đề, để bấm vào biểu đồ đọc được từng bình luận. Tiền tính vào trần tháng ở trên. Giá mỗi bình luận: TikTok 0,00125 · Facebook 0,0025 · Instagram 0,0026 USD · YouTube miễn phí.
-      {% if d.bl_bat %}Hiện: tối đa <b>{{ d.bl_so_bai }}</b> bài × <b>{{ d.bl_moi_bai }}</b> bình luận mỗi lượt — tối đa ≈ <b>{{ d.bl_uoc|usd_vn }}</b> USD/lượt.{% else %}Hiện: <b>đang tắt</b>.{% endif %}</p>
+      Bình luận được LỌC trước khi tính: spam (link/zalo/vay/cờ bạc/việc nhẹ lương cao), ít nội dung (".", emoji, tag), trùng lặp, seeding (cùng nội dung ≥ 3 tài khoản) — chỉ phần hợp lệ vào thảo luận sạch và sắc thái.
+      {% if d.bl_bat %}Hiện: tối đa <b>{{ d.bl_so_bai }}</b> bài mỗi lượt, {% if d.bl_moi_bai %}mỗi bài <b>{{ d.bl_moi_bai }}</b> bình luận{% else %}mỗi bài <b>cào hết</b> bình luận + trả lời{% endif %} — ước ≈ <b>{{ d.bl_uoc|usd_vn }}</b> USD/lượt (chặn bởi trần console mỗi lượt và trần tháng).{% else %}Hiện: <b>đang tắt</b>.{% endif %}</p>
     {% if ql %}
     <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/binh-luan" class="hang">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <label class="o"><span><input type="checkbox" name="bl_bat" value="1"{% if d.bl_bat %} checked{% endif %}> Bật cào bình luận</span></label>
       <label class="o">Số bài mỗi lượt (0–100) <input type="number" name="bl_so_bai" min="0" max="100" value="{{ d.bl_so_bai }}" required></label>
-      <label class="o">Bình luận mỗi bài (5–200) <input type="number" name="bl_moi_bai" min="5" max="200" value="{{ d.bl_moi_bai }}" required></label>
+      <label class="o">Bình luận mỗi bài (0 = cào hết; 5–5000) <input type="number" name="bl_moi_bai" min="0" max="5000" value="{{ d.bl_moi_bai }}" required></label>
       <button class="nut nut--nho" type="submit">Lưu</button>
     </form>
     {% endif %}

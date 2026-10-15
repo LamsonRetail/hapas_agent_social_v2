@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS du_an (
   sua_boi         TEXT,
   bl_bat          BOOLEAN NOT NULL DEFAULT TRUE,
   bl_so_bai       INT NOT NULL DEFAULT 10 CHECK (bl_so_bai BETWEEN 0 AND 100),
-  bl_moi_bai      INT NOT NULL DEFAULT 20 CHECK (bl_moi_bai BETWEEN 5 AND 200),
+  bl_moi_bai      INT NOT NULL DEFAULT 0 CHECK (bl_moi_bai = 0 OR bl_moi_bai BETWEEN 5 AND 5000),
   tk_bat          BOOLEAN NOT NULL DEFAULT TRUE,
   tk_so_bai       INT NOT NULL DEFAULT 15 CHECK (tk_so_bai BETWEEN 0 AND 100)
 );
@@ -64,8 +64,12 @@ CREATE TABLE IF NOT EXISTS du_an (
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_bat BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_so_bai INT NOT NULL DEFAULT 10
   CHECK (bl_so_bai BETWEEN 0 AND 100);
-ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_moi_bai INT NOT NULL DEFAULT 20
-  CHECK (bl_moi_bai BETWEEN 5 AND 200);
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_moi_bai INT NOT NULL DEFAULT 0;
+-- Đợt 2d (15/10/2026): 0 = cào HẾT bình luận của bài (chủ dự án). Đổi ràng buộc cũ (5–200).
+ALTER TABLE du_an DROP CONSTRAINT IF EXISTS du_an_bl_moi_bai_check;
+ALTER TABLE du_an ADD CONSTRAINT du_an_bl_moi_bai_check
+  CHECK (bl_moi_bai = 0 OR bl_moi_bai BETWEEN 5 AND 5000);
+ALTER TABLE du_an ALTER COLUMN bl_moi_bai SET DEFAULT 0;
 -- Đợt 2c (15/10/2026): tìm theo từ khoá trong mỗi lượt /theodoi.
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS tk_bat BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS tk_so_bai INT NOT NULL DEFAULT 15
@@ -167,6 +171,8 @@ CREATE TABLE IF NOT EXISTS bai (
   bl_lay_luc      TIMESTAMPTZ,
   bl_da_lay       INT,
   bl_lay_khi_co   BIGINT,
+  ma_noi_dung     TEXT,
+  bl_lan_thieu    INT NOT NULL DEFAULT 0,
   PRIMARY KEY (du_an, khoa)
 );
 CREATE INDEX IF NOT EXISTS bai_du_an_dang_luc ON bai (du_an, dang_luc);
@@ -174,6 +180,9 @@ CREATE INDEX IF NOT EXISTS bai_nguon ON bai (nguon_id);
 ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_lay_luc TIMESTAMPTZ;
 ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_da_lay INT;
 ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_lay_khi_co BIGINT;
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS ma_noi_dung TEXT;
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_lan_thieu INT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS bai_ma_noi_dung ON bai (du_an, ma_noi_dung);
 
 -- 1 dòng = 1 bình luận (hoặc trả lời) Mark đã cào của một bài đã giữ. Đợt 2b (15/10/2026):
 -- Kompa đếm "thảo luận" chủ yếu từ bình luận dưới bài của các trang — đọc được nội dung mới
@@ -196,11 +205,21 @@ CREATE TABLE IF NOT EXISTS binh_luan (
   luot_id         BIGINT REFERENCES luot_quet(id) ON DELETE SET NULL,
   thay_lan_dau    TIMESTAMPTZ NOT NULL DEFAULT now(),
   cap_nhat_cuoi   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  loai            TEXT NOT NULL DEFAULT 'hop_le'
+                  CHECK (loai IN ('hop_le', 'it_noi_dung', 'spam', 'trung', 'seeding', 'thuong_hieu')),
+  ly_do_loc       TEXT,
+  ma_noi_dung     TEXT,
   PRIMARY KEY (du_an, khoa_bai, ma),
   FOREIGN KEY (du_an, khoa_bai) REFERENCES bai (du_an, khoa) ON UPDATE CASCADE ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS binh_luan_du_an_dang_luc ON binh_luan (du_an, dang_luc);
 CREATE INDEX IF NOT EXISTS binh_luan_cap_nhat ON binh_luan (cap_nhat_cuoi);
+-- Đợt 2d (15/10/2026): nhãn lọc spam/rác/trùng (loc_rac.py) — DB đã tạo trước thì thêm cột.
+ALTER TABLE binh_luan ADD COLUMN IF NOT EXISTS loai TEXT NOT NULL DEFAULT 'hop_le'
+  CHECK (loai IN ('hop_le', 'it_noi_dung', 'spam', 'trung', 'seeding', 'thuong_hieu'));
+ALTER TABLE binh_luan ADD COLUMN IF NOT EXISTS ly_do_loc TEXT;
+ALTER TABLE binh_luan ADD COLUMN IF NOT EXISTS ma_noi_dung TEXT;
+CREATE INDEX IF NOT EXISTS binh_luan_ma_noi_dung ON binh_luan (du_an, ma_noi_dung);
 
 -- 1 dòng = 1 bài × 1 dự án × 1 ngày (giờ VN): số đọc được lần cuối trong ngày đó.
 CREATE TABLE IF NOT EXISTS chi_so_ngay (
@@ -269,7 +288,7 @@ COMMENT ON COLUMN du_an.tao_luc IS 'Thời điểm tạo dự án (TIMESTAMPTZ, 
 COMMENT ON COLUMN du_an.sua_luc IS 'Thời điểm sửa dự án gần nhất (TIMESTAMPTZ, lưu UTC).';
 COMMENT ON COLUMN du_an.bl_bat IS 'TRUE: mỗi lượt /theodoi cào thêm bình luận của các bài nhiều bình luận nhất (tính vào trần tháng). FALSE: không cào bình luận.';
 COMMENT ON COLUMN du_an.bl_so_bai IS 'Số bài tối đa được cào bình luận mỗi lượt, bài, 0–100. 0 = không cào. Ưu tiên bài chưa cào, rồi bài có số bình luận tăng ≥ 20%.';
-COMMENT ON COLUMN du_an.bl_moi_bai IS 'Số bình luận tối đa cào mỗi bài mỗi lượt, bình luận, 5–200. Actor tính tiền theo bình luận (TikTok 0,00125, Facebook 0,0025, Instagram 0,0026 USD; YouTube miễn phí).';
+COMMENT ON COLUMN du_an.bl_moi_bai IS 'Số bình luận tối đa cào mỗi bài mỗi lượt, bình luận. 0 (mặc định) = cào HẾT bình luận + trả lời của bài (trần an toàn 3.000/bài, Facebook lần sau chỉ lấy bình luận mới); 5–5.000 = giới hạn. Actor tính tiền theo bình luận (TikTok 0,00125, Facebook 0,0025, Instagram 0,0026 USD; YouTube miễn phí).';
 COMMENT ON COLUMN du_an.tk_bat IS 'TRUE: mỗi lượt /theodoi còn TÌM theo từ khoá dự án trên TikTok, Facebook, Instagram, YouTube để bắt bài của mọi tài khoản (tính vào trần tháng). FALSE: chỉ quét nguồn đã theo dõi.';
 COMMENT ON COLUMN du_an.tk_so_bai IS 'Số bài tối đa lấy mỗi nền tảng mỗi lượt khi tìm theo từ khoá, bài, 0–100 (Facebook gói Free tối đa 20 bài, 1 lượt/24h). 0 = không tìm.';
 COMMENT ON COLUMN du_an.sua_boi IS 'Email người sửa gần nhất trên dashboard. NULL khi tạo bằng lệnh cài đặt. Email nội bộ — không đẩy lên BigQuery.';
@@ -392,6 +411,8 @@ COMMENT ON COLUMN bai.luot_dau IS 'Lượt ghi bài lần đầu. FK → luot_qu
 COMMENT ON COLUMN bai.luot_cuoi IS 'Lượt cập nhật bài gần nhất. FK → luot_quet.id.';
 COMMENT ON COLUMN bai.bl_lay_luc IS 'Lần cào bình luận gần nhất (UTC). NULL khi chưa cào bình luận của bài.';
 COMMENT ON COLUMN bai.bl_da_lay IS 'Số bình luận lấy được ở lần cào gần nhất, bình luận. NULL khi chưa cào.';
+COMMENT ON COLUMN bai.bl_lan_thieu IS 'Số lần cào bình luận liên tiếp vẫn chưa đủ 80% số nền tảng báo (Instagram chưa đăng nhập, bài bị ẩn, chạm trần). Từ 2 lần thì thôi cào bù, chỉ cào lại khi bình luận tăng. 0 khi đã đủ.';
+COMMENT ON COLUMN bai.ma_noi_dung IS 'Băm 16 ký tự của nội dung đã chuẩn hoá (bỏ dấu, link, emoji, số → 0) khi nội dung ≥ 30 ký tự — các bài cùng mã là cùng nội dung (đăng lại trên nhiều trang, seeding). NULL khi nội dung quá ngắn.';
 COMMENT ON COLUMN bai.bl_lay_khi_co IS 'Số bình luận nền tảng báo lúc cào gần nhất, bình luận — để biết bài có thêm bình luận đáng cào lại không. NULL khi chưa cào.';
 
 COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
@@ -399,12 +420,12 @@ COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
 [Grain] 1 dòng = 1 bình luận × 1 bài × 1 dự án
 [Khoá] PK: du_an + khoa_bai + ma | Join: (du_an, khoa_bai) → bai.(du_an, khoa); luot_id → luot_quet.id
 [Nguồn] Mark cào sau mỗi lượt /theodoi: Apify (TikTok, Facebook, Instagram comments scraper), YouTube Data API
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; tối đa bl_so_bai bài × bl_moi_bai bình luận mỗi lượt; từ 15/10/2026
-[Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; bình luận của chính thương hiệu đánh dấu cua_thuong_hieu và không gán nhãn
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; tối đa bl_so_bai bài mỗi lượt, mỗi bài cào hết (bl_moi_bai = 0) hoặc tới bl_moi_bai bình luận; từ 15/10/2026
+[Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng gắn nhãn lọc loai (hop_le/it_noi_dung/spam/trung/seeding/thuong_hieu) — chỉ hop_le được gán sắc thái/chủ đề
 [Refresh] Upsert tức thời sau mỗi lượt quét (bài được cào lại khi số bình luận tăng ≥ 20%)
-[Dùng khi] Đọc từng bình luận, sắc thái/chủ đề bình luận, đếm bình luận đã đọc theo ngày
+[Dùng khi] Đọc từng bình luận; thảo luận sạch (loai = 'hop_le'); sắc thái/chủ đề bình luận; tỷ lệ spam/seeding
 [Không dùng khi] Tổng bình luận nền tảng báo → dùng bai.binh_luan; bản cho BI → dùng ganesha-381907.SOCIAL_LISTENING.binh_luan
-[Lưu ý] MẪU bình luận (bài nhiều bình luận nhất, tối đa bl_moi_bai mỗi bài), không phải toàn bộ; Instagram/Facebook chưa đăng nhập chỉ trả một phần.$$;
+[Lưu ý] Đếm thảo luận sạch phải lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, Facebook/TikTok bài rất lớn có thể thiếu (so bai.bl_da_lay với bai.binh_luan để biết độ phủ).$$;
 COMMENT ON COLUMN binh_luan.du_an IS 'Dự án. Một phần PK. FK (cùng khoa_bai) → bai.';
 COMMENT ON COLUMN binh_luan.khoa_bai IS 'Khoá bài chứa bình luận. Một phần PK. FK (cùng du_an) → bai.khoa.';
 COMMENT ON COLUMN binh_luan.ma IS 'Mã bình luận trên nền tảng; không có thì "h" + 16 ký tự băm SHA-1 (tác giả, nội dung, thời điểm). Một phần PK.';
@@ -421,6 +442,9 @@ COMMENT ON COLUMN binh_luan.chu_de IS 'Chủ đề bình luận theo 7 nhóm c�
 COMMENT ON COLUMN binh_luan.luot_id IS 'Lượt quét cào bình luận gần nhất. FK → luot_quet.id.';
 COMMENT ON COLUMN binh_luan.thay_lan_dau IS 'Thời điểm ghi bình luận lần đầu (UTC).';
 COMMENT ON COLUMN binh_luan.cap_nhat_cuoi IS 'Thời điểm cập nhật gần nhất (UTC). Mốc đồng bộ BigQuery.';
+COMMENT ON COLUMN binh_luan.loai IS 'Nhãn lọc (loc_rac.py). Giá trị: hop_le (tính vào thảo luận sạch, có sắc thái), it_noi_dung (chỉ dấu chấm/emoji/tag/"chấm" — tương tác nhưng không có ý), spam (quảng cáo/lừa đảo/kéo khách), trung (cùng người cùng nội dung cùng bài, giữ bản đầu), seeding (cùng nội dung ≥ 40 ký tự từ ≥ 3 tài khoản trên ≥ 2 bài trong 7 ngày), thuong_hieu (chính thương hiệu viết).';
+COMMENT ON COLUMN binh_luan.ly_do_loc IS 'Lý do lọc khi loai không phải hop_le (vd lien_ket_quang_cao, keo_khach, vay_tien, co_bac, viec_lam_mmo, ban_hang_khac, so_dien_thoai_quang_cao, cung_nguoi_cung_noi_dung, cung_noi_dung_nhieu_tai_khoan). NULL khi hợp lệ.';
+COMMENT ON COLUMN binh_luan.ma_noi_dung IS 'Băm 16 ký tự nội dung đã chuẩn hoá khi nội dung ≥ 40 ký tự — để phát hiện seeding (cùng mã, ≥ 3 tài khoản, ≥ 2 bài, 7 ngày). NULL khi quá ngắn.';
 
 COMMENT ON TABLE chi_so_ngay IS $$[Lớp] Raw
 [Mục đích] Tương tác lũy kế của từng bài theo ngày đọc, để vẽ tăng trưởng và tính phần tăng trong kỳ.

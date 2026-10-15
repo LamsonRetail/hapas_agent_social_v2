@@ -263,7 +263,7 @@ def lenh_theodoi(doi_so: str) -> str:
     da = kh["du_an"]
     # Bình luận (đợt 2b): chưa biết bài nào sẽ được cào nên giữ chỗ theo trần cấu hình, giá
     # Facebook; tiền thật vẫn chốt theo run id.
-    bl_uoc = round(uoc_binh_luan(int(da.get("bl_so_bai") or 0), int(da.get("bl_moi_bai") or 20))
+    bl_uoc = round(uoc_binh_luan(int(da.get("bl_so_bai") or 0), int(da.get("bl_moi_bai") or 0))
                    if da.get("bl_bat", True) else 0.0, 2)
     ns_apify, hm, _ = quet_lon.ngan_sach(quet_lon.tran_usd_nen())
     # Tìm theo từ khoá rồi bình luận chỉ dùng phần ngân sách việc nền còn lại sau phần bài — lúc
@@ -767,6 +767,7 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
                  tk: dict) -> None:
     """Phân xử AI (như social_listen): AI giữ thì giữ; AI không phán được thì giữ khi bài
     THỰC SỰ nhắc từ khoá. Từ loại trừ bỏ cứng trước AI."""
+    import loc_rac
     ma = du_an["ma"]
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
     cho, thay = [], set()
@@ -774,6 +775,9 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
         khoa = _khoa_bai(d["platform"], d["link"], {"id": goc.get("id")})
         if khoa in thay or A._tu_loai_tru_khop(d, loai_tru):
+            continue
+        if loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}"):
+            tk["spam"] = tk.get("spam", 0) + 1            # đợt 2d: bỏ cứng trước bước AI
             continue
         thay.add(khoa)
         d["_khoa"] = khoa
@@ -823,6 +827,7 @@ def _cau_tk(tk: dict) -> list[str]:
         return list((tk or {}).get("ghi_chu") or [])
     cau = (f"tìm theo {len(tk['tu'])} từ khoá: lấy {tk.get('lay', 0)} bài, giữ "
            f"{tk.get('giu', 0)} ({tk.get('moi', 0)} mới), {tk.get('de_xuat', 0)} đề xuất nguồn, "
+           + (f"bỏ {tk['spam']} bài spam, " if tk.get('spam') else "") + f""
            f"{_usd(tk.get('usd') or 0)} USD")
     return [cau, *(tk.get("ghi_chu") or [])]
 
@@ -837,11 +842,21 @@ BL_NEN_TANG = ("youtube", "tiktok", "instagram", "facebook")
 _BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0}
 _BL_KHOI_DONG = {"facebook": 0.001}
 _BL_LO = 25                       # bài mỗi lượt actor bình luận
+# Đợt 2d (chủ dự án 15/10): "1 bài thì phải cào hết tất cả thảo luận". bl_moi_bai = 0 → mỗi bài
+# xin đủ số nền tảng báo (+15% + 10 dư cho trả lời mới), trần an toàn `BL_TRAN_BAI`. Facebook
+# lấy cả trả lời (includeNestedComments); bài đã cào đủ thì lần sau chỉ lấy bình luận MỚI
+# (RECENT_ACTIVITY + onlyCommentsNewerThan, +0,002 USD/bài). TikTok trả lời tới 100/bình luận.
+BL_TRAN_BAI = 3000
+_BL_LO_DAY_DU = 10                # bài mỗi lượt actor khi cào hết (số bình luận chênh nhiều)
+_BL_UOC_MOI_BAI = 60              # giữ chỗ ngân sách khi chưa biết bài nào (cào hết)
+_BL_FB_LOC_NGAY = 0.002           # phụ phí mỗi bài khi Facebook lọc theo ngày
 
 
 def uoc_binh_luan(so_bai: int, moi_bai: int, p: str = "facebook") -> float:
     """USD ước tính cào `moi_bai` bình luận × `so_bai` bài trên nền tảng `p` (mặc định giá
-    Facebook — đắt nhất trừ Instagram, dùng để giữ chỗ ngân sách khi chưa biết bài nào)."""
+    Facebook — đắt nhất trừ Instagram, dùng để giữ chỗ ngân sách khi chưa biết bài nào).
+    `moi_bai` = 0 (cào hết): giữ chỗ `_BL_UOC_MOI_BAI` bình luận mỗi bài."""
+    moi_bai = moi_bai or _BL_UOC_MOI_BAI
     if not so_bai or not _BL_GIA.get(p):
         return 0.0
     return round((so_bai * moi_bai * _BL_GIA[p] + _BL_KHOI_DONG.get(p, 0.0)) * _HE_SO_UOC, 4)
@@ -875,9 +890,46 @@ def _dong_bl(r: dict, bai: dict, thuong_hieu: list[str]) -> dict:
     return {"khoa_bai": bai["khoa"], "ma": _ma_bl(r), "nen_tang": bai["nen_tang"],
             "tac_gia": str(r.get("kenh") or "")[:200], "noi_dung": str(r.get("text") or "")[:1000],
             "thich": _so_hay_none(r.get("likes")), "tra_loi": _so_hay_none(r.get("replies")),
-            "la_tra_loi": bool(r.get("cha")), "cua_thuong_hieu": nha,
+            "la_tra_loi": _la_tra_loi(r), "cua_thuong_hieu": nha,
             "dang_luc": _gio_bl(r.get("thoi_gian")), "sac_thai": None, "chu_de": None,
             "likes": r.get("likes"), "text": r.get("text")}
+
+
+def _la_tra_loi(r: dict) -> bool:
+    g = r.get("__goc") if isinstance(r.get("__goc"), dict) else {}
+    return bool(r.get("cha") or g.get("replyToCommentId") or g.get("parentCommentId")
+                or g.get("repliesToId") or int(g.get("threadingDepth") or 0) > 0)
+
+
+def _can_bl(b: dict, moi_bai: int) -> int:
+    """Số bình luận xin cho một bài. Cào hết: số nền tảng báo +15% +10 (trần `BL_TRAN_BAI`);
+    lần sau của bài đã cào đủ (Facebook lọc theo ngày): phần tăng + 20."""
+    if moi_bai:
+        return moi_bai
+    co = int(b.get("binh_luan") or 0)
+    if _tang_dan(b):
+        co = max(0, co - int(b.get("bl_lay_khi_co") or 0))
+    return max(10, min(BL_TRAN_BAI, int(co * 1.15) + (20 if _tang_dan(b) else 10)))
+
+
+def _tang_dan(b: dict) -> bool:
+    """Bài Facebook đã cào ĐỦ trước đó → lần này chỉ lấy bình luận mới theo ngày."""
+    return (b.get("nen_tang") == "facebook" and b.get("bl_lay_luc") is not None
+            and int(b.get("bl_da_lay") or 0) >= 0.8 * int(b.get("bl_lay_khi_co") or 0) > 0)
+
+
+def _payload_bl(p: str, urls: list[str], per: int, day_du: bool, moc_moi=None) -> dict:
+    import deep_dive_tool as D
+    if p == "facebook" and day_du:
+        x = {"startUrls": [{"url": u} for u in urls], "resultsLimit": per,
+             "includeNestedComments": True, "viewOption": "RANKED_UNFILTERED"}
+        if moc_moi is not None:
+            x.update(viewOption="RECENT_ACTIVITY",
+                     onlyCommentsNewerThan=moc_moi.strftime("%Y-%m-%d"))
+        return x
+    if p == "tiktok" and day_du:
+        return {"postURLs": urls, "commentsPerPost": per, "maxRepliesPerComment": 100}
+    return D._payload(p, urls, per)
 
 
 def _phan_bl(v) -> list[dict]:
@@ -895,25 +947,65 @@ def _tao_cac_phan_bl(v, ds: list[dict], per: int) -> None:
     """Lập MỌI phần bình luận rồi lưu sổ một lần — bot tắt giữa chừng thì hoặc chưa có phần
     nào (lần sau chọn lại), hoặc có đủ (không lặng lẽ bỏ nền tảng còn lại)."""
     import deep_dive_tool as D
+    day_du = not per
     cac = []
     for p in BL_NEN_TANG:
-        bp = [b for b in ds if b["nen_tang"] == p]
-        for i in range(0, len(bp), _BL_LO):
-            lo = bp[i:i + _BL_LO]
+        for lo, moc in _chia_lo_bl(p, [b for b in ds if b["nen_tang"] == p], per):
             urls = [b["link"] for b in lo]
+            can = [_can_bl(b, per) for b in lo]
+            per_lo = max(can)
+            gia = _BL_GIA.get(p, 0.0)
+            uoc = round((sum(can) * gia + _BL_KHOI_DONG.get(p, 0.0)
+                         + (_BL_FB_LOC_NGAY * len(lo) if moc is not None else 0.0)) * _HE_SO_UOC, 4)
             ph = {"id": f"bl-{p}-{len(_phan_bl(v)) + len(cac)}", "nen_tang": p, "trang_thai": "cho",
                   "bai": [{k: b.get(k) for k in ("khoa", "link", "nen_tang", "tai_khoan",
                                                  "tac_gia", "binh_luan", "nguon_loai")}
                           for b in lo],
-                  "per": per, "gia": _BL_GIA.get(p, 0.0), "uoc_usd": uoc_binh_luan(len(lo), per, p)}
+                  "per": per_lo, "gia": gia, "uoc_usd": uoc if gia else 0.0,
+                  "day_du": day_du, "tang_dan": moc is not None}
             if p != "youtube":
-                ph.update(actor=D._ACTORS[p], payload=D._payload(p, urls, per),
-                          limit=D._limit(p, urls, per))
+                ph.update(actor=D._ACTORS[p], payload=_payload_bl(p, urls, per_lo, day_du, moc),
+                          limit=D._limit(p, urls, per_lo))
             cac.append(ph)
     if cac:
         with v._khoa:
             _phan_bl(v).extend(cac)
             v.luu()
+
+
+def _chia_lo_bl(p: str, ds: list[dict], per: int) -> list[tuple[list[dict], object]]:
+    """Chia bài thành lô cho actor. Cào hết: Facebook tách bài cào lần đầu với bài chỉ lấy phần
+    mới (khác tham số); mỗi lô ≤ `_BL_LO_DAY_DU` bài và tổng bình luận xin vừa ~90% trần
+    console của nền tảng (một bài to hơn trần thì một mình một lô — actor dừng ở trần, lượt sau
+    cào tiếp vì bài còn thiếu). -> [(lô, mốc ngày lấy phần mới | None)]."""
+    if not ds:
+        return []
+    if per:
+        return [(ds[i:i + _BL_LO], None) for i in range(0, len(ds), _BL_LO)]
+    gia = _BL_GIA.get(p, 0.0)
+    tran = A._tran_nen_tang(p, nen=True)[1] if gia else 0.0
+    toi_da_bl = int(0.9 * tran / (gia * _HE_SO_UOC)) if gia else 10 ** 9
+    nhom: dict = {}
+    for b in sorted(ds, key=lambda b: _can_bl(b, 0)):
+        moc = None
+        if _tang_dan(b):
+            moc = (b["bl_lay_luc"] - datetime.timedelta(days=1)).date()
+        nhom.setdefault(moc is not None, []).append((b, moc))
+    ra = []
+    for _, cac in sorted(nhom.items()):
+        lo, tong, moc_lo = [], 0, None
+        for b, moc in cac:
+            can = _can_bl(b, 0)
+            if lo and (len(lo) >= _BL_LO_DAY_DU or tong + can > toi_da_bl):
+                ra.append((lo, moc_lo))
+                lo, tong, moc_lo = [], 0, None
+            lo.append(b)
+            tong += can
+            if moc is not None:
+                moc_lo = moc if moc_lo is None else min(moc_lo, moc)
+        if lo:
+            ra.append((lo, moc_lo))
+    return ra
 
 
 def _con_viec(v) -> float:
@@ -959,12 +1051,13 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
           "nhan": ""}
     if not du_an.get("bl_bat", True) or int(du_an.get("bl_so_bai") or 0) <= 0:
         return tk
-    per = max(5, min(200, int(du_an.get("bl_moi_bai") or 20)))
+    per = int(du_an.get("bl_moi_bai") or 0)
+    per = 0 if per <= 0 else max(5, min(5000, per))       # 0 = cào hết
     thuong_hieu = [du_an["ten"], *(du_an.get("tu_khoa") or [])]
     if not _phan_bl(v):
         dung = [p for p in BL_NEN_TANG if p == "youtube" and A._youtube_co_key()
                 or p != "youtube" and _nen_tang_dung_duoc(p)[0]]
-        ds = K.bai_can_lay_binh_luan(ma, dung, int(du_an["bl_so_bai"]))
+        ds = K.bai_can_lay_binh_luan(ma, dung, int(du_an["bl_so_bai"]), cao_het=not per)
         _tao_cac_phan_bl(v, ds, per)
     for ph in list(_phan_bl(v)):
         p = ph["nen_tang"]
@@ -974,7 +1067,7 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         tk["bai"] += len(bai)
         rows: list[dict] = []
         if p == "youtube":
-            kq = D._yt_api_lo([b["link"] for b in bai], per, han)
+            kq = D._yt_api_lo([b["link"] for b in bai], int(ph.get("per") or per or 100), han)
             rows = kq["binh_luan"]
             if kq["loi"]:
                 tk["ghi_chu"].append(f"bình luận YouTube: {A._che_token(kq['loi'])[:120]}")
@@ -1044,8 +1137,15 @@ def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: lis
             dong.append(d)
         if thay or day_du:
             da_lay[b["khoa"]] = (len(thay), _so_hay_none(b.get("binh_luan")))
-    khach = [d for d in dong if not d["cua_thuong_hieu"] and str(d.get("text") or "").strip()]
-    tk["nha"] += len(dong) - len(khach)
+    import loc_rac
+    loc_rac.phan_loai(dong, thuong_hieu)
+    for d in dong:
+        tk.setdefault("loc", {})[d["loai"]] = tk.get("loc", {}).get(d["loai"], 0) + 1
+    # Cào lại (bài thêm bình luận): bình luận đã có sắc thái không gửi AI lần nữa.
+    da = K.da_gan_nhan(ma, sorted({d["khoa_bai"] for d in dong})) if dong else set()
+    khach = [d for d in dong if d["loai"] in loc_rac.SACH and str(d.get("text") or "").strip()
+             and (d["khoa_bai"], d["ma"]) not in da]
+    tk["nha"] += sum(1 for d in dong if d["cua_thuong_hieu"])
     if khach:
         tt: dict = {}
         nhan = phan_loai.phan_loai_binh_luan(
@@ -1242,6 +1342,8 @@ def _cau_bl(bl: dict) -> list[str]:
         ra.append(f"bình luận: đọc {bl.get('lay', 0)} bình luận của {bl['bai']} bài "
                   f"({bl.get('moi', 0)} mới"
                   + (f", {bl['nha']} của chính thương hiệu" if bl.get("nha") else "")
+                  + (f"; đã lọc: {', '.join(f'{v} {k}' for k, v in sorted(bl['loc'].items()) if k != 'hop_le')}"
+                     if any(k != "hop_le" for k in (bl.get("loc") or {})) else "")
                   + f"), {_usd(bl.get('usd') or 0)} USD"
                   + (f", gán nhãn: {bl['nhan']}" if bl.get("nhan") else ""))
     return ra + list(bl.get("ghi_chu") or [])

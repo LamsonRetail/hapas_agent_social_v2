@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.bai`
   cap_nhat_cuoi   TIMESTAMP OPTIONS(description='Thời điểm Mark cập nhật bài gần nhất (số liệu hoặc nhãn), UTC. Mốc đồng bộ của bảng này.'),
   luot_dau        INT64     OPTIONS(description='Lượt quét ghi bài lần đầu. FK → luot_quet.id. NULL khi lượt đó đã bị xoá ở nguồn.'),
   luot_cuoi       INT64     OPTIONS(description='Lượt quét cập nhật bài gần nhất. FK → luot_quet.id.'),
+  ma_noi_dung     STRING    OPTIONS(description='Băm 16 ký tự nội dung đã chuẩn hoá khi ≥ 30 ký tự — các bài cùng mã là cùng nội dung (đăng lại nhiều trang, seeding); đếm bài khử trùng = COUNT(DISTINCT COALESCE(ma_noi_dung, khoa)). NULL khi quá ngắn.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 CLUSTER BY du_an, nen_tang
@@ -188,6 +189,9 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.binh_luan`
   luot_id         INT64     OPTIONS(description='Lượt quét cào bình luận gần nhất. FK → luot_quet.id.'),
   thay_lan_dau    TIMESTAMP OPTIONS(description='Thời điểm Mark ghi bình luận lần đầu, UTC.'),
   cap_nhat_cuoi   TIMESTAMP OPTIONS(description='Thời điểm cập nhật gần nhất ở DB nguồn, UTC. Mốc đồng bộ.'),
+  loai            STRING    OPTIONS(description='Nhãn lọc. Giá trị: hop_le (thảo luận sạch, có sắc thái), it_noi_dung (chỉ dấu chấm/emoji/tag), spam (quảng cáo/lừa đảo/kéo khách), trung (cùng người cùng nội dung cùng bài), seeding (cùng nội dung từ ≥ 3 tài khoản trong 7 ngày), thuong_hieu (thương hiệu viết). Đếm thảo luận sạch: loai = hop_le.'),
+  ly_do_loc       STRING    OPTIONS(description='Lý do lọc khi loai không phải hop_le (vd lien_ket_quang_cao, keo_khach, vay_tien, co_bac, viec_lam_mmo, cung_nguoi_cung_noi_dung, cung_noi_dung_nhieu_tai_khoan). NULL khi hợp lệ.'),
+  ma_noi_dung     STRING    OPTIONS(description='Băm 16 ký tự nội dung đã chuẩn hoá khi ≥ 15 ký tự — cùng mã từ nhiều tài khoản là seeding. NULL khi quá ngắn.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 CLUSTER BY du_an, nen_tang
@@ -197,11 +201,11 @@ OPTIONS(description='''[Lớp] Raw
 [Khoá] PK: du_an + khoa_bai + ma | Join: (du_an, khoa_bai) → bai.(du_an, khoa); luot_id → luot_quet.id
 [Nguồn] Postgres lang_nghe.public.binh_luan trên VPS Mark; Mark cào sau mỗi lượt /theodoi (Apify comments scraper TikTok/Facebook/Instagram, YouTube Data API)
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; tối đa bl_so_bai bài × bl_moi_bai bình luận mỗi lượt; từ 15/10/2026
-[Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; bình luận của thương hiệu đánh dấu cua_thuong_hieu, không gán nhãn
+[Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng có nhãn lọc loai (spam/rác/trùng/seeding/thương hiệu) — chỉ hop_le được gán sắc thái/chủ đề
 [Refresh] MERGE theo du_an + khoa_bai + ma các dòng có cap_nhat_cuoi mới, sau mỗi lượt quét và 6 giờ một lần
 [Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày
 [Không dùng khi] Tổng bình luận nền tảng báo của bài → dùng SOCIAL_LISTENING.bai.binh_luan
-[Lưu ý] MẪU bình luận (bài nhiều bình luận nhất, tối đa bl_moi_bai mỗi bài), không phải toàn bộ; Instagram/Facebook chưa đăng nhập chỉ trả một phần; lọc cua_thuong_hieu = FALSE khi tính sắc thái.''');
+[Lưu ý] Thảo luận sạch / sắc thái: lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, bài rất lớn có thể thiếu (so bai.binh_luan để biết độ phủ).''');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`
