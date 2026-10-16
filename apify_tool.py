@@ -2534,14 +2534,40 @@ def _fetch_facebook(q: list[str], limit: int, country: str, d_from, d_to) -> lis
     return _chuan_facebook(raw)
 
 
-def _fetch_youtube(q: list[str], limit: int, country: str, d_from, d_to) -> list[tuple]:
+def _fetch_youtube(q: list[str], limit: int, country: str, d_from, d_to,
+                   toi_da_trang: int | None = None) -> list[tuple]:
     """YouTube Data API v3: search -> batch video stats -> batch channel stats.
 
     `publishedAfter`/`publishedBefore` lọc ngày server-side thật. Các keyword
     được nối bằng toán tử OR (`|`) để một trang kết quả chỉ tốn MỘT lượt trong
     bucket `search.list` 100 lượt/ngày, thay vì một lượt cho từng keyword.
+    `toi_da_trang`: trần số trang search của lượt này (`/theodoi` truyền phần quota còn lại).
     """
-    return _youtube_tim(q, limit, country, d_from, d_to)[0]
+    return _youtube_tim(q, limit, country, d_from, d_to, toi_da_trang)[0]
+
+
+def _cau_tim_youtube(q: list[str]) -> str:
+    """Câu tìm YouTube từ danh sách từ khoá: nối OR bằng `|`.
+
+    Chẩn đoán 16/10/2026 (YouTube trả 0 video ở cả 3 lượt `/theodoi`): trong câu tìm YouTube
+    dấu cách là AND, nên `hapas|túi hapas|yêu từ điều nhỏ nhất` bị hiểu kiểu "(hapas OR túi) AND
+    … AND yêu AND từ AND điều…" — gần như không video nào khớp. Nay cụm nhiều chữ đặt trong
+    ngoặc kép (tìm đúng cụm); cụm có chứa một từ đơn đã nằm trong danh sách thì bỏ (OR với từ
+    đơn đó đã bao trọn cụm). Bỏ trùng hoa/thường/dấu; ký tự `"` `|` trong từ khoá thành dấu
+    cách để không phá cú pháp; "-" đầu từ khoá (toán tử LOẠI TRỪ của YouTube) bị bỏ."""
+    sach: list[str] = []
+    for x in q:
+        t = " ".join(str(x or "").replace('"', " ").replace("|", " ").split()).lstrip("-").strip()
+        if t and " ".join(_tokens(t)) not in {" ".join(_tokens(s)) for s in sach}:
+            sach.append(t)
+    don = {_tokens(t)[0] for t in sach if " " not in t and len(_tokens(t)) == 1}
+    ra = []
+    for t in sach:
+        if " " not in t:
+            ra.append(t)
+        elif not any(w in don for w in _tokens(t)):
+            ra.append(f'"{t}"')
+    return "|".join(ra)
 
 
 def _youtube_tim(q: list[str], limit: int, country: str, d_from, d_to,
@@ -2552,8 +2578,10 @@ def _youtube_tim(q: list[str], limit: int, country: str, d_from, d_to,
     search_items: list[dict] = []
     seen_ids: set[str] = set()
     page_token = ""
-    query = "|".join(x for x in q if x)
+    query = _cau_tim_youtube(q)
     so_trang, bi_cat = 0, False
+    if not query:                      # từ khoá chỉ toàn ký tự bị bỏ: tìm rỗng = video bất kỳ
+        return [], 0, False
     while len(search_items) < limit:
         if toi_da_trang is not None and so_trang >= toi_da_trang:
             bi_cat = True

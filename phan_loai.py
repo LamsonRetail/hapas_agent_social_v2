@@ -36,6 +36,10 @@ CHU_DE = {
     "DV": "Giao hàng/dịch vụ",
     "DT": "Đối thủ",
     "TAG": "Tag bạn bè",
+    # Chẩn đoán 16/10/2026: 120 bình luận dự thi minigame 20/10 (lời chúc gửi mẹ/chị em) chiếm
+    # 29/50 cụm của mây từ khoá như thể đó là cảm nhận về brand. Tách chủ đề riêng để dashboard
+    # ẩn được khỏi mây (nhãn này dashboard so đúng từng chữ — đổi thì báo bên dashboard).
+    "MG": "Minigame/bài dự thi",
     "KHAC": "Khác",
 }
 CHUA = "chưa phân loại"
@@ -107,8 +111,9 @@ SẮC THÁI = thái độ của NGƯỜI VIẾT với sản phẩm, brand hoặc
       tim/mắt tim (❤️😍🥰) không kèm chê.
   "-" có lời CHÊ rõ: phàn nàn, thất vọng, lỗi hàng, giao chậm, nghi hàng nhái, chê giá
       đắt, mỉa mai.
-  "=" KHÔNG có khen/chê rõ: câu hỏi (giá, size, còn hàng, mua ở đâu), tag bạn, thông
-      tin, đùa/cười/cảm thán về video không kèm khen chê, hoặc không hiểu được ý.
+  "=" KHÔNG có khen/chê rõ: câu hỏi (giá, size, còn hàng, mua ở đâu) không kèm khen chê,
+      tag bạn, thông tin, đùa/cười/cảm thán về video không kèm khen chê, hoặc không hiểu
+      được ý.
 CÂU VỪA KHEN VỪA CHÊ: chọn vế NẶNG hơn (lỗi hàng, đắt, thất vọng nặng hơn lời khen chung
 chung; thường là vế sau "nhưng"/"mà"); hai vế ngang nhau thì "=".
 CHỦ ĐỀ:
@@ -118,10 +123,22 @@ CHỦ ĐỀ:
   DV   giao hàng, đóng gói, shop trả lời, đổi trả, bảo hành
   DT   nhắc/so sánh brand đối thủ
   TAG  chủ yếu là tag bạn bè vào xem
+  MG   bài dự thi minigame / lời chúc viết theo đề bài của brand
   KHAC còn lại
 
 QUY TẮC:
-- Hỏi giá / hỏi mua ở đâu / xin link = "=" với GIA (là ý định mua, không phải khen chê).
+- CHỈ hỏi giá / hỏi mua ở đâu / xin link, không kèm khen chê → "=" với GIA.
+- VỪA khen rõ VỪA hỏi giá/mua ("đẹp quá giá bn ạ", "xinh thế mua ở đâu") → "+" với GIA:
+  ý định mua đã ghi ở chủ đề GIA, KHÔNG bỏ lời khen. VỪA chê VỪA hỏi ("đắt thế, có giảm
+  không") → "-" với GIA.
+- BÀI DỰ THI / MINIGAME: bình luận mở đầu bằng số dự thi ("271 – …", "110: …") hoặc là lời
+  chúc gửi mẹ/vợ/chị em viết theo đề bài của brand → chủ đề MG. Sắc thái chấm theo thái độ
+  với BRAND/SẢN PHẨM, KHÔNG theo giọng của lời chúc: có khen / cảm ơn / chúc brand ("chúc
+  HAPAS ngày càng phát triển", "túi HAPAS đẹp, mong được nhận") → "+"; chỉ chúc người thân
+  → "="; chê brand → "-".
+- Lời của CHÍNH shop/brand trả lời khách (tự xưng "HAPAS"/"shop", "đã gửi tin nhắn tư
+  vấn", "vui lòng kiểm tra tin nhắn", báo giá, mời inbox) → "=" với DV. Khách gọi "shop ơi…"
+  để hỏi thì KHÔNG thuộc loại này.
 - Khen/chê KOL hoặc nội dung video mà không nói về sản phẩm → ND, đừng tính là cảm xúc
   về sản phẩm.
 - MỈA MAI: lời khen đi cùng dấu hiệu mỉa ("đẹp thật đấy 🙂", "chất lượng ghê ha",
@@ -133,6 +150,8 @@ QUY TẮC:
 - "=" CHỈ dùng khi thật sự không có khen/chê như định nghĩa trên — câu ngắn, viết tắt hay
   teen code mà có khen/chê rõ thì vẫn "+"/"-". Cùng một câu luôn ra cùng một nhãn, bất kể
   thứ tự hay các bình luận khác trong lô.
+- EMOJI cuối câu KHÔNG đổi sắc thái khi lời đã rõ ý: cùng một lời chúc kết bằng 🥰 hay 😂
+  vẫn cùng một nhãn. Emoji chỉ quyết định khi câu không có lời khen/chê nào.
 
 VÍ DỤ (dạng "bình luận" → [sắc thái, chủ đề]):
   "đẹp quá" → ["+","SP"]            "xinh ghê" → ["+","SP"]
@@ -143,6 +162,10 @@ VÍ DỤ (dạng "bình luận" → [sắc thái, chủ đề]):
   "túi đẹp nhưng quai mau bong" → ["-","SP"]  (lỗi hàng nặng hơn lời khen)
   "màu xinh mà form hơi nhỏ" → ["=","SP"]     (hai vế ngang nhau)
   "trời ơi ngại giùm luôn =)))" → ["=","ND"]  (đùa về video, không khen chê)
+  "đẹp quá, giá bn ạ" → ["+","GIA"]           (khen rõ + hỏi giá: giữ lời khen)
+  "271 – Con chúc mẹ luôn hạnh phúc, mạnh khỏe" → ["=","MG"]   (chỉ chúc người thân)
+  "110: Chúc chị em luôn xinh đẹp. Chúc HAPAS ngày càng phát triển" → ["+","MG"]
+  "Dạ HAPAS đã gửi tin nhắn tư vấn, chị vui lòng kiểm tra tin nhắn ạ" → ["=","DV"]
 
 CHỈ trả JSON một dòng, khoá là số i của thẻ, ví dụ {"0":["+","SP"],"1":["=","GIA"]}.
 Không giải thích.
@@ -366,10 +389,14 @@ def la_tai_khoan_nha(tac_gia, thuong_hieu=(), chu_bai: str = "") -> bool:
     t = _ten(tac_gia)
     if not t:
         return False
-    if chu_bai and t == _ten(chu_bai):
+    g = _gon(t)
+    # Chẩn đoán 16/10/2026: bài fanpage lưu chủ bài dạng slug ("hapaschinhhanggiatot"), bình
+    # luận lưu tên hiển thị ("HAPAS - Chính Hãng Giá Tốt") → so `_ten` lệch, 35 câu trả lời mẫu
+    # của fanpage nhà lọt `hop_le`. So thêm dạng gọn (chỉ chữ + số); dạng gọn phải ≥ 3 ký tự
+    # để tên quá ngắn không trùng bừa. Khách có chữ "hapas" trong tên vẫn khác chủ bài.
+    if chu_bai and (t == _ten(chu_bai) or (len(g) >= 3 and g == _gon(chu_bai))):
         return True
     nha = tai_khoan_nha()
-    g = _gon(t)
     if t in nha or (g and g in {_gon(x) for x in nha}):
         return True
     if isinstance(thuong_hieu, str):
@@ -379,6 +406,22 @@ def la_tai_khoan_nha(tac_gia, thuong_hieu=(), chu_bai: str = "") -> bool:
         if len(bb) >= 3 and g in {bb + d for d in _DUOI_CHINH_CHU}:
             return True
     return False
+
+
+def thuong_hieu_du_an(du_an: dict) -> list[str]:
+    """Tên + từ khoá của một dự án lắng nghe (`lang_nghe.du_an`) — danh sách `thuong_hieu`
+    truyền cho `la_tai_khoan_nha` / `loc_rac.phan_loai`."""
+    return [du_an["ten"], *(du_an.get("tu_khoa") or [])]
+
+
+def la_binh_luan_nha(tac_gia, bai: dict, thuong_hieu=(), cua_chu: bool = False) -> bool:
+    """Bình luận của `tac_gia` dưới `bai` (dict có `nguon_loai`, `tai_khoan`, `tac_gia`) có
+    phải tiếng của CHÍNH thương hiệu không. Chủ bài trả lời = tiếng thương hiệu CHỈ khi bài ở
+    kênh nhà; trên bài KOL/đối thủ, chủ bài trả lời không phải HAPAS (review 15/10). Dùng
+    chung cho lượt cào (`theo_doi._dong_bl`) và `scripts/lang_nghe_gan_lai.py`."""
+    chu = ([x for x in (bai.get("tai_khoan"), bai.get("tac_gia")) if x]
+           if bai.get("nguon_loai") == "kenh_nha" else [])
+    return bool(cua_chu) or any(la_tai_khoan_nha(tac_gia, thuong_hieu, c) for c in chu or [""])
 
 
 # ───────────────────────── đếm ─────────────────────────

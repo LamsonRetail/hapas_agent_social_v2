@@ -355,15 +355,21 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "thich = COALESCE(EXCLUDED.thich, binh_luan.thich), "
                 "tra_loi = COALESCE(EXCLUDED.tra_loi, binh_luan.tra_loi), "
                 # Nhãn xét trên KHO (seeding, spam affiliate hàng loạt — `_NHAN_KHO`) thì lượt sau
-                # không đưa về hop_le, và không mang lại sắc thái/chủ đề.
-                f"sac_thai = CASE WHEN {_GIU_NHAN_KHO} THEN NULL "
+                # không đưa về hop_le, và không mang lại sắc thái/chủ đề. Lượt này thấy KHÔNG còn
+                # hop_le (spam, trả lời của brand…) thì cũng xoá sắc thái/chủ đề cũ: chỉ dòng
+                # hop_le mang nhãn AI (mô tả cột sac_thai).
+                f"sac_thai = CASE WHEN {_GIU_NHAN_KHO} OR EXCLUDED.loai <> 'hop_le' THEN NULL "
                 "ELSE COALESCE(EXCLUDED.sac_thai, binh_luan.sac_thai) END, "
-                f"chu_de = CASE WHEN {_GIU_NHAN_KHO} THEN NULL "
+                f"chu_de = CASE WHEN {_GIU_NHAN_KHO} OR EXCLUDED.loai <> 'hop_le' THEN NULL "
                 "ELSE COALESCE(EXCLUDED.chu_de, binh_luan.chu_de) END, "
                 f"loai = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.loai ELSE EXCLUDED.loai END, "
                 f"ly_do_loc = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.ly_do_loc "
                 "ELSE EXCLUDED.ly_do_loc END, "
                 "ma_noi_dung = EXCLUDED.ma_noi_dung, "
+                # 16/10: nhận ra trả lời của fanpage muộn hơn (so tên gọn với chủ bài) thì bật cờ
+                # cho dòng cũ — cờ chỉ bật, không tắt; `loai` thì vẫn theo lượt này.
+                "cua_thuong_hieu = binh_luan.cua_thuong_hieu "
+                "OR COALESCE(EXCLUDED.cua_thuong_hieu, false), "
                 "link = COALESCE(EXCLUDED.link, binh_luan.link), "
                 "ma_cha = COALESCE(EXCLUDED.ma_cha, binh_luan.ma_cha), "
                 "luot_id = EXCLUDED.luot_id, cap_nhat_cuoi = now() "

@@ -34,6 +34,41 @@ def test_nhan_ra_tai_khoan_nha(monkeypatch):
     assert not P.la_tai_khoan_nha("nguoi.xem", chu_bai="koc.linh")
 
 
+def test_fanpage_slug_khop_ten_hien_thi_bang_dang_gon(monkeypatch):
+    """Chẩn đoán 16/10/2026: bài lưu chủ bài dạng slug, bình luận lưu tên hiển thị — 35 trả lời
+    mẫu của fanpage "HAPAS - Chính Hãng Giá Tốt" lọt `hop_le`. So thêm dạng gọn (chữ + số)."""
+    monkeypatch.delenv("SOCIAL_TAI_KHOAN_NHA", raising=False)
+    th = ["HAPAS", "hapas", "túi hapas"]
+    assert P.la_tai_khoan_nha("HAPAS - Chính Hãng Giá Tốt", th, "hapaschinhhanggiatot")
+    assert P.la_tai_khoan_nha("hapaschinhhanggiatot", th, "HAPAS - Chính Hãng Giá Tốt")
+    # Khách có chữ "hapas" trong tên KHÔNG phải brand, kể cả dưới bài fanpage nhà.
+    for khach in ("Lan Hapas Lover", "Nguyễn Hapas", "hapas fan club", "Chính Hãng Giá Tốt",
+                  "HAPAS - Chính Hãng"):
+        assert not P.la_tai_khoan_nha(khach, th, "hapaschinhhanggiatot"), khach
+    # Dạng gọn quá ngắn (< 3 ký tự) không đủ để kết luận trùng chủ bài.
+    assert not P.la_tai_khoan_nha("A.B", (), "ab")
+
+
+def test_tra_loi_fanpage_nha_thanh_thuong_hieu_qua_luot_cao(monkeypatch):
+    import theo_doi as T
+    monkeypatch.delenv("SOCIAL_TAI_KHOAN_NHA", raising=False)
+    th = P.thuong_hieu_du_an({"ten": "HAPAS", "tu_khoa": ["hapas", "túi hapas"]})
+    nha = {"nguon_loai": "kenh_nha", "tai_khoan": "hapaschinhhanggiatot",
+           "tac_gia": "hapaschinhhanggiatot"}
+    assert P.la_binh_luan_nha("HAPAS - Chính Hãng Giá Tốt", nha, th)
+    assert not P.la_binh_luan_nha("Thu Hapas Nguyễn", nha, th)
+    # Trên bài KOL, chủ bài trả lời không phải tiếng HAPAS dù dạng gọn trùng.
+    kol = {"nguon_loai": "kol", "tai_khoan": "kol.a", "tac_gia": "Kol A"}
+    assert not P.la_binh_luan_nha("Kol A", kol, th)
+    r = {"kenh": "HAPAS - Chính Hãng Giá Tốt", "text": "Dạ HAPAS đã gửi tin nhắn tư vấn ạ",
+         "__goc": {"id": "c1"}}
+    d = T._dong_bl(r, dict(nha, khoa="facebook:1", nen_tang="facebook"), th)
+    assert d["cua_thuong_hieu"] is True
+    import loc_rac
+    loc_rac.phan_loai([d], th)
+    assert d["loai"] == "thuong_hieu"
+
+
 def test_danh_sach_handle_doi_duoc_bang_env(monkeypatch):
     monkeypatch.setenv("SOCIAL_TAI_KHOAN_NHA", "brand.x, brand.y")
     assert P.la_tai_khoan_nha("brand.y")

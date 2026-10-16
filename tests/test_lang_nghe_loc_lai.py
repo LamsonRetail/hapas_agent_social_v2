@@ -101,8 +101,9 @@ def test_ghi_binh_luan_giu_nhan_kho_va_chay_luat_cap_bai(monkeypatch):
     # lại sắc thái/chủ đề.
     giu = "(EXCLUDED.loai = 'hop_le' AND (binh_luan.loai = 'seeding' OR " \
           "binh_luan.ly_do_loc = 'affiliate_hang_loat'))"
+    # Lượt này thấy không còn hop_le (spam, của brand…) thì cũng xoá sắc thái/chủ đề cũ.
     for cot in ("sac_thai", "chu_de"):
-        assert f"{cot} = CASE WHEN {giu} THEN NULL" in ins
+        assert f"{cot} = CASE WHEN {giu} OR EXCLUDED.loai <> 'hop_le' THEN NULL" in ins
     assert f"loai = CASE WHEN {giu} THEN binh_luan.loai ELSE EXCLUDED.loai END" in ins
     assert ins.count("sac_thai =") == 1                                   # không gán hai lần
     assert any(q.startswith("SELECT khoa_bai, ma, tac_gia") and "ly_do_loc = ANY" in q
