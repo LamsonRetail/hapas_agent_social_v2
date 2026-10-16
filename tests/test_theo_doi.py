@@ -980,7 +980,9 @@ class GiaKhoBl:
 
 @pytest.fixture
 def nhan_gia(monkeypatch):
+    """Đường gán nhãn NGAY trong lượt (MARK_GAN_NHAN_NEN=0); đường nền: bài thử riêng bên dưới."""
     import phan_loai
+    monkeypatch.setenv("MARK_GAN_NHAN_NEN", "0")
     goi = []
 
     def gan(rows, han, tt=None, song_song=None):
@@ -1024,6 +1026,37 @@ def test_binh_luan_tiktok_ghi_kho_nhan_va_tach_thuong_hieu(mo, nhan_gia):
     assert ph["run_id"] == "r1" and ph["trang_thai"] == "xong"     # run id vào sổ → chốt chi phí
     assert tk["lay"] == 3 and tk["nha"] == 1 and tk["usd"] > 0
     assert "đọc 3 bình luận của 2 bài" in T._cau_bl(tk)[0]
+
+
+def test_gan_nhan_nen_luot_chi_gan_luat_con_lai_de_trong(mo, monkeypatch):
+    """17/10/2026: lượt 7 chạy 54 phút vì gán nhãn trong lượt. Mặc định (nền bật) lượt KHÔNG gọi
+    model: chỉ gán phần luật (dòng chỉ @tag/emoji — thường đã bị `loc_rac` tách khỏi hop_le), dòng
+    còn lại để trống cho `gan_nhan_nen`."""
+    import phan_loai
+    monkeypatch.delenv("MARK_GAN_NHAN_NEN", raising=False)
+    monkeypatch.setattr(phan_loai, "phan_loai_binh_luan",
+                        lambda *a, **k: pytest.fail("lượt quét không được gọi model gán nhãn"))
+    kho = GiaKhoBl(mo, [_bai_bl("111", 30)])
+    GiaApify(mo, items=[_bl_tt("c1", "111", "khach1", "túi đẹp quá"),
+                        _bl_tt("c3", "111", "khach3", "giá sao shop")], usd=0.01)
+    tk = _lay_bl(GiaViec({}, []), dict(DU_AN, bl_so_bai=10, bl_moi_bai=0), 1, 5.0,
+                 time.monotonic() + 300)
+    theo = {r["ma"]: r for r in kho.ghi[0][2]}
+    assert theo["c1"].get("sac_thai") is None and theo["c3"].get("chu_de") is None
+    assert tk["cho_nen"] == 2 and "2 bình luận chờ gán nhãn nền" in T._cau_bl(tk)[0]
+    import phan_loai as P
+    d = [{"text": "@lan @mai"}, {"text": "giá sao"}]
+    T._gan_nhan_bl(d, time.monotonic() + 300, tk)
+    assert d[0]["sac_thai"] == "Trung lập" and "sac_thai" not in d[1] and tk["cho_nen"] == 3
+    assert P.CHUA not in (d[0]["sac_thai"], d[0]["chu_de"])
+
+
+def test_bai_web_de_nen_cham_lai_bai_mxh_giu_nhan_phan_xu(monkeypatch):
+    monkeypatch.delenv("MARK_GAN_NHAN_NEN", raising=False)
+    assert T._nhan_bai_ngay({"platform": "web"}, "Trung lập", "Khác") == (None, None)
+    assert T._nhan_bai_ngay({"platform": "tiktok"}, "Tích cực", "Khác") == ("Tích cực", "Khác")
+    monkeypatch.setenv("MARK_GAN_NHAN_NEN", "0")
+    assert T._nhan_bai_ngay({"platform": "web"}, "Trung lập", "Khác") == ("Trung lập", "Khác")
 
 
 def test_binh_luan_facebook_tran_con_duoi_muc_actor_doi_thi_khong_chay(mo, nhan_gia):

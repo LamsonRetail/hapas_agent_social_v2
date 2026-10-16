@@ -108,6 +108,16 @@ MIEN_BAO = (
 MIEN_DIEN_DAN = ("voz.vn", "tinhte.vn", "otofun.net", "webtretho.com", "lamchame.com",
                  "reddit.com", "quora.com")
 MIEN_MXH_KHAC = ("linkedin.com", "x.com", "twitter.com", "lemon8-app.com", "pinterest.com")
+#: Trang TUYỂN DỤNG / hồ sơ cá nhân — không phải tiếng nói về brand (16/10/2026: hồ sơ LinkedIn
+#: "Talent Acquisition Intern HAPAS" và tin tuyển dụng lọt vào Báo & Web). Luật URL thuần, chắc
+#: chắn: sàn việc làm theo miền; LinkedIn theo đường dẫn (hồ sơ /in/, việc /jobs/, trang việc của
+#: công ty). Bài đăng LinkedIn (/posts/, /pulse/) vẫn giữ — đó là bài viết công khai.
+MIEN_VIEC_LAM = ("topcv.vn", "vietnamworks.com", "careerviet.vn", "careerlink.vn", "itviec.com",
+                 "joboko.com", "timviec365.vn", "vieclam24h.vn", "jobstreet.vn", "jobstreet.com",
+                 "glints.com", "indeed.com", "glassdoor.com", "1900.com.vn", "jobsgo.vn",
+                 "mywork.com.vn", "jobokovn.com", "careerbuilder.vn", "tuyendung.vn")
+_DUONG_VIEC_LINKEDIN = re.compile(r"^/(in|jobs|talent|school)(/|$)|^/company/[^/]+/(jobs|life|people)(/|$)",
+                                  re.IGNORECASE)
 _DUOI_TEP = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip")
 _THAM_SO_BO = re.compile(r"^(utm_\w+|srsltid|fbclid|gclid|gad_source|gbraid|wbraid|_gl|mc_cid|"
                          r"mc_eid|igshid|zarsrc|ref|refer|source|si)$", re.IGNORECASE)
@@ -198,6 +208,9 @@ def _ly_do_bo_url(url: str, nha: list[str]) -> str:
         return "tmdt"
     if _thuoc(m, nha):
         return "nha"
+    if _thuoc(m, MIEN_VIEC_LAM) or (_thuoc(m, ("linkedin.com",))
+                                    and _DUONG_VIEC_LINKEDIN.search(_tach(url).path or "/")):
+        return "tuyen_dung"
     if not url_chuan(url):
         return "url_hong"
     if (_tach(url).path or "").lower().endswith(_DUOI_TEP):
@@ -876,7 +889,8 @@ def thanh_dong(d: dict, dt: datetime.datetime, sac_thai: str | None = None,
 
 
 def _pheu_moi() -> dict:
-    return {k: 0 for k in ("serp", "trung", "mxh", "tmdt", "nha", "tep", "url_hong", "da_co",
+    return {k: 0 for k in ("serp", "trung", "mxh", "tmdt", "nha", "tuyen_dung", "tep", "url_hong",
+                           "da_co",
                            "da_loai_truoc", "robots_chan", "tai_loi", "boc_du_phong",
                            "boc_duoc", "da_boc_truoc", "chi_trich", "khong_ngay", "qua_cu",
                            "khong_nhac", "loai_tru", "spam", "trang_hong", "giu")}

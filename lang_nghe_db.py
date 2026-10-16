@@ -596,3 +596,84 @@ def ghi_ket_qua_lich(lid: int, ket_qua: dict, *, lan_chay_cuoi=None, tang_so_lan
         ts += [chi_khi_ma_viec, chi_khi_ma_viec]
     with ket_noi() as c:
         return bool(c.execute(sql + " RETURNING id", ts).fetchone())
+
+
+# ───────────────────────────── gán nhãn nền (17/10/2026, `gan_nhan_nen`) ─────────────────────────────
+# Kho LÀ hàng đợi: dòng cần AI = bình luận `hop_le` (không của thương hiệu, có chữ) chưa có sắc
+# thái, và bài chưa có sắc thái/chủ đề. Không có cột trạng thái riêng — khởi động lại giữa chừng
+# thì nhịp sau đọc lại đúng các dòng còn trống. `bo` = khoá các dòng đã thử quá số lần (sổ của
+# `gan_nhan_nen`), để một dòng model luôn bỏ sót không chặn hàng đợi.
+_SQL_BL_CHO = (
+    "FROM binh_luan WHERE du_an = %s AND loai = 'hop_le' AND NOT cua_thuong_hieu AND "
+    "sac_thai IS NULL AND btrim(noi_dung) <> ''")
+_SQL_BAI_CHO = (
+    "FROM bai b WHERE b.du_an = %s AND (b.sac_thai IS NULL OR b.chu_de IS NULL) AND "
+    "btrim(b.noi_dung || ' ' || COALESCE(b.hashtag, '')) <> ''")
+
+
+def bl_cho_gan_nhan(ma: str, toi_da: int, bo: list[str] | tuple = ()) -> list[dict]:
+    """Bình luận chờ AI, nhiều like trước (như `phan_loai`: hết giờ thì thiếu phần ít like).
+    `bo` = khoá "<khoa_bai>\x1f<ma>" bỏ qua."""
+    with ket_noi() as c:
+        return c.execute(
+            f"SELECT khoa_bai, ma, noi_dung, thich {_SQL_BL_CHO} "
+            "AND NOT ((khoa_bai || chr(31) || ma) = ANY(%s)) "
+            "ORDER BY COALESCE(thich, 0) DESC, COALESCE(dang_luc, thay_lan_dau) DESC LIMIT %s",
+            (ma, list(bo), int(toi_da))).fetchall()
+
+
+def ghi_nhan_bl(ma: str, nhan: list[tuple]) -> int:
+    """`nhan` = [(khoa_bai, ma, noi_dung đã đọc, sắc thái, chủ đề)]. Chỉ ghi dòng CÒN chờ và
+    CÙNG chữ lúc đọc: lượt quét chen giữa hạ dòng thành seeding/spam (xoá nhãn) hay sửa nội dung
+    thì không đè; hai tiến trình cùng gán thì dòng chỉ nhận nhãn một lần. `cap_nhat_cuoi` để
+    đồng bộ BigQuery lấy lại dòng. -> số dòng đã ghi."""
+    n = 0
+    if not nhan:
+        return 0
+    with ket_noi() as c:
+        for kb, m, nd, s, cd in nhan:
+            n += c.execute(
+                "UPDATE binh_luan SET sac_thai = %s, chu_de = %s, cap_nhat_cuoi = now() "
+                "WHERE du_an = %s AND khoa_bai = %s AND ma = %s AND sac_thai IS NULL AND "
+                "loai = 'hop_le' AND NOT cua_thuong_hieu AND noi_dung = %s",
+                (s, cd, ma, kb, m, nd)).rowcount or 0
+    return n
+
+
+def bai_cho_gan_nhan(ma: str, toi_da: int, bo: list[str] | tuple = ()) -> list[dict]:
+    """Bài chờ AI gán sắc thái/chủ đề (phân xử hết giờ/"không rõ", bài Báo & Web), mới trước."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT b.khoa, b.nen_tang, b.tai_khoan, b.tac_gia, b.noi_dung, b.hashtag, "
+            "b.sac_thai, b.chu_de, (n.loai = 'kenh_nha') AS kenh_nha "
+            f"{_SQL_BAI_CHO.replace('FROM bai b', 'FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id')} "
+            "AND NOT (b.khoa = ANY(%s)) ORDER BY b.dang_luc DESC NULLS LAST LIMIT %s",
+            (ma, list(bo), int(toi_da))).fetchall()
+
+
+def ghi_nhan_bai(ma: str, nhan: list[tuple]) -> int:
+    """`nhan` = [(khoa, noi_dung đã đọc, sắc thái, chủ đề)] — chỉ điền ô CÒN trống, cùng chữ lúc
+    đọc. `cap_nhat_cuoi` (mốc BigQuery) chỉ dời khi không làm lỡ lượt làm mới số theo ngày: bài
+    TikTok/YouTube chưa cập nhật hôm nay giữ mốc cũ (`bai_can_lam_moi` đọc mốc này), đồng bộ lấy
+    nhãn ở lần làm mới số kế tiếp. -> số bài đã ghi."""
+    n = 0
+    if not nhan:
+        return 0
+    with ket_noi() as c:
+        for k, nd, s, cd in nhan:
+            n += c.execute(
+                "UPDATE bai SET sac_thai = COALESCE(sac_thai, %s), chu_de = COALESCE(chu_de, %s), "
+                "cap_nhat_cuoi = CASE WHEN nen_tang NOT IN ('tiktok', 'youtube') OR cap_nhat_cuoi "
+                ">= (date_trunc('day', now() AT TIME ZONE %s) AT TIME ZONE %s) THEN now() "
+                "ELSE cap_nhat_cuoi END "
+                "WHERE du_an = %s AND khoa = %s AND (sac_thai IS NULL OR chu_de IS NULL) AND "
+                "noi_dung = %s", (s, cd, _TZ, _TZ, ma, k, nd)).rowcount or 0
+    return n
+
+
+def dem_cho_gan_nhan(ma: str) -> dict:
+    """{'bl': n, 'bai': m} còn chờ AI (cả dòng đã thử quá số lần) — trạng thái cho log/lượt."""
+    with ket_noi() as c:
+        bl = c.execute(f"SELECT count(*) AS n {_SQL_BL_CHO}", (ma,)).fetchone()
+        bai = c.execute(f"SELECT count(*) AS n {_SQL_BAI_CHO}", (ma,)).fetchone()
+    return {"bl": int(bl["n"]), "bai": int(bai["n"])}

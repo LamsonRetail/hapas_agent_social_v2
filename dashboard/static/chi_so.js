@@ -574,21 +574,22 @@
     o.appendChild(dungSvg(BIEU_TUONG[ten], "bt"));
     return o;
   }
-  // ─── so với kỳ trước: MỘT luật cho mọi thẻ (17/10/2026 — "▲ 13.950,0%" vô nghĩa khi kỳ trước gần
-  // như trống). Kỳ trước 0 / không so được (lọc tương tác, bị cắt) → không hiện gì. Tăng quá 999%:
-  // kỳ trước dưới CO_SO_NHO → "▲ mới", không thì "▲ ×N" (gấp N lần). Còn lại ▲/▼/■ + pt() (từ 100%
-  // làm tròn). ▲ xanh · ▼ đỏ · ■ xám. Kỳ so sánh nói một lần ở ⓘ cạnh khoảng ngày (#ky-truoc); title
-  // của từng nhãn ghi "kỳ trước → kỳ này".
-  var CO_SO_NHO = 10, kyTruocChu = "";
+  // ─── so với kỳ trước: MỘT luật cho mọi thẻ. Chủ dự án 17/10/2026: "hiển thị theo %, không theo
+  // x lần" — luôn ▲/▼/■ + pt() (từ 100% làm tròn số nguyên, có dấu chấm nghìn: "▲ 13.950%"). Kỳ trước
+  // = 0 mà kỳ này có số → "▲ mới" (chia cho 0 không ra %), chỉ khi kỳ trước CÓ dữ liệu ở thẻ khác —
+  // dự án mới chưa có kỳ trước thì không hiện gì. Không so được (lọc tương tác, bị cắt) → không hiện.
+  // ▲ xanh · ▼ đỏ · ■ xám. Kỳ so sánh nói một lần ở ⓘ cạnh khoảng ngày (#ky-truoc); title của từng
+  // nhãn ghi "kỳ trước → kỳ này".
+  var kyTruocChu = "", kyTruocCoSo = false;
   function nhanDoi(nay, truoc, doiPt) {
+    var t = "So với kỳ trước" + (kyTruocChu ? " " + kyTruocChu : "") + ": ";
+    if (truoc === 0) {
+      if (!kyTruocCoSo || !(nay > 0)) return null;
+      return { chu: "▲ mới", lop: "tang", doc: "mới (kỳ trước là 0)", title: t + "0 → " + so(nay) };
+    }
     if (doiPt == null || !truoc) return null;
     if (nay == null) nay = Math.round(truoc * (1 + doiPt / 100));
-    var t = "So với kỳ trước" + (kyTruocChu ? " " + kyTruocChu : "") + ": " + so(truoc) + " → " + so(nay);
-    if (doiPt > 999) {
-      if (truoc < CO_SO_NHO) return { chu: "▲ mới", lop: "tang", doc: "mới (kỳ trước gần như trống)", title: t };
-      var gap = soTruc(Math.round(nay / truoc));
-      return { chu: "▲ ×" + gap, lop: "tang", doc: "gấp " + gap + " lần kỳ trước", title: t };
-    }
+    t += so(truoc) + " → " + so(nay);
     var lop = doiPt > 0 ? "tang" : doiPt < 0 ? "giam" : "bang";
     var mui = doiPt > 0 ? "▲ " : doiPt < 0 ? "▼ " : "■ ";
     var doc = (doiPt > 0 ? "tăng " + pt(doiPt) : doiPt < 0 ? "giảm " + pt(-doiPt) : "không đổi") + " so với kỳ trước";
@@ -869,8 +870,17 @@
     if (gy) {
       if (!GOC_GOI_Y.sac) GOC_GOI_Y.sac = gy.getAttribute("data-goi-y") || "";
       datGoiY(gy, GOC_GOI_Y.sac + (!tong ? " Chưa có dữ liệu sắc thái." : " % trên " + so(daPhan) +
-        (laBl ? " bình luận hợp lệ đã phân loại." : " bài đã phân loại.")));
+        (laBl ? " bình luận hợp lệ đã phân loại." : " bài đã phân loại.")) + chuGanNhan(d.gan_nhan));
     }
+  }
+  // Gán nhãn AI chạy nền (17/10/2026): lượt quét ghi kho trước, Mark gán nhãn sau — "Chưa phân
+  // loại" giảm dần. Nói ở ⓘ của khối Sắc thái, không thêm dòng chữ trên trang.
+  function chuGanNhan(g) {
+    if (!g || !(g.cho_bl || g.cho_bai)) return "";
+    var s = " Mark đang gán nhãn nền: còn " + so(g.cho_bl) + " bình luận" +
+      (g.cho_bai ? " và " + so(g.cho_bai) + " bài" : "") + " chờ AI";
+    if (g.luot && g.tong) s += " (lượt quét #" + g.luot + ": đã gán " + so(g.da) + "/" + so(g.tong) + " bình luận)";
+    return s + " — phần này đang tính là “Chưa phân loại”.";
   }
 
   // ─── sắc thái theo thời gian (đường kiểu Kompa) ───
@@ -2922,6 +2932,7 @@
     if (!duLieu) return;
     var d = duLieu, m = mau();
     kyTruocChu = ngayDu(d.khoang.ky_truoc.tu) + " – " + ngayDu(d.khoang.ky_truoc.den);
+    kyTruocCoSo = coKyTruoc(d);
     chay("bộ lọc", veThanhLocChung);
     chay("internal vs external channel", function () { veNhaNgoai(d); });
     chay("KPI", function () { veKpi(d); });
@@ -2941,7 +2952,7 @@
       if (GOC_GOI_Y.ky == null) GOC_GOI_Y.ky = kt.getAttribute("data-goi-y") || "";
       datGoiY(kt, GOC_GOI_Y.ky + " " + (d.so_sanh_lech === "tuong_tac"
         ? "Đang lọc theo mức tương tác: không so với kỳ trước — tương tác cộng dồn theo tuổi bài nên bài kỳ trước (" + kyTruocChu + ") luôn được lợi."
-        : coKyTruoc(d) ? "▲/▼ trên thẻ: so với kỳ trước " + kyTruocChu + ". Tăng quá 999% ghi “×N” (gấp N lần); kỳ trước gần như trống ghi “mới”."
+        : coKyTruoc(d) ? "▲/▼ trên thẻ: % thay đổi so với kỳ trước " + kyTruocChu + " (tăng gấp 3 lần ghi ▲ 200%). Kỳ trước bằng 0 ghi “mới”."
           : "Kỳ trước (" + kyTruocChu + ") chưa có dữ liệu để so sánh."));
     }
     $("canh-bao").hidden = !d.bi_cat;

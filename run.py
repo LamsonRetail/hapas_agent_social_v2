@@ -310,6 +310,15 @@ def main() -> None:
     except Exception as e:  # noqa: BLE001
         print(f"  Lịch quét:  ❌ {type(e).__name__}: {e}")
 
+    # Gán nhãn AI chạy nền (17/10/2026): /theodoi chỉ cào + lọc + ghi kho; bình luận/bài chưa
+    # phân loại được gán dần ở đây (kho là hàng đợi). Sau việc nền: chỉ bản giữ quyền chủ chạy.
+    try:
+        import gan_nhan_nen
+
+        print(f"  {gan_nhan_nen.khoi_dong()}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  Gán nhãn nền: ❌ {type(e).__name__}: {e}")
+
     # Nhịp nền theo dõi nguồn Wiki: quét định kỳ và BÁO, chỉ nhập khi chủ agent bấm
     # "Nhập ngay" trên console. Trước đây giao diện hứa "agent sẽ quét ở lượt kiểm
     # nguồn kế tiếp" mà không có lượt nào — dán link xong ngồi đợi mãi.

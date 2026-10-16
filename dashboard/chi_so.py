@@ -134,7 +134,7 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
 #              trống. Bình luận theo bài của nó.
 #   sac_thai   bài theo sắc thái BÀI (bài kênh nhà không mang tiếng khách → không khớp); bình luận
 #              theo sắc thái của CHÍNH nó (chỉ bình luận hợp lệ có sắc thái).
-#   chu_de     bài và bình luận có HAI bộ nhãn khác nhau (13 chủ đề bài, 7 chủ đề bình luận của
+#   chu_de     bài và bình luận có HAI bộ nhãn khác nhau (13 chủ đề bài, 8 chủ đề bình luận của
 #              Mark). Mỗi nhãn lọc đúng loại mục mang nhãn đó: chọn toàn chủ đề bình luận thì phần
 #              bài không bị lọc theo chủ đề (và ngược lại); "Khác", "chưa phân loại" lọc cả hai.
 #   q          chữ tìm bỏ dấu (+ teen code, chữ kiểu cách — `chuan_chu.khoa`): bài khớp khi nội
@@ -1440,12 +1440,14 @@ _RE_CHI_GIA = re.compile(r"\W*gia\W*")                 # cả bình luận chỉ
 
 
 def la_y_dinh_mua(c: dict) -> bool:
-    """Bình luận có Ý ĐỊNH MUA: hợp lệ VÀ (chủ đề AI "Giá/mua ở đâu/ý định mua" HOẶC câu hỏi
-    giá/mua: hỏi/xin giá, giá bao nhiêu/bn, ib/inbox, mua ở đâu, xin link, còn hàng/size, ship,
+    """Bình luận có Ý ĐỊNH MUA: hợp lệ VÀ (chủ đề AI "Giá/mua ở đâu/ý định mua" mà không Tiêu cực,
+    HOẶC câu hỏi giá/mua: hỏi/xin giá, giá bao nhiêu/bn, ib/inbox, mua ở đâu, xin link, còn hàng/size, ship,
     đặt hàng…). Thuần, không gọi mạng."""
     if loai_bl(c) != "hop_le":
         return False
-    if _chu_de(c) == CHU_DE_MUA:
+    # Chủ đề "Giá/mua…" gộp cả lời CHÊ giá ("hợp kim mà giá cỡ đấy :)))", "nhìn giá và lặng lẽ
+    # rời đi" — tập đánh giá 17/10/2026): bình luận Tiêu cực chỉ tính khi có câu hỏi giá/mua.
+    if _chu_de(c) == CHU_DE_MUA and sac_bl(c) != TI:
         return True
     k = CC.khoa(c.get("noi_dung"))
     return bool(_RE_Y_DINH_MUA.search(k)) or _RE_CHI_GIA.fullmatch(k) is not None

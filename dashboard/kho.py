@@ -452,6 +452,28 @@ def cac_luot(du_an: str, trang: int = 1, moi_trang: int = 20) -> tuple[list[dict
     return rows, int(tong)
 
 
+def tien_do_gan_nhan(du_an: str) -> dict:
+    """Gán nhãn AI chạy nền của Mark (17/10/2026, `gan_nhan_nen.py`): kho là hàng đợi nên đếm
+    thẳng ở đây. -> {cho_bl, cho_bai (còn chờ AI, cả dự án), luot (lượt theo dõi gần nhất có
+    bình luận), da, tong (bình luận hợp lệ có chữ của lượt đó: đã có nhãn / tất cả)}."""
+    with ket_noi() as c:
+        cho = c.execute(
+            "SELECT (SELECT count(*) FROM binh_luan WHERE du_an = %s AND loai = 'hop_le' AND NOT "
+            "cua_thuong_hieu AND sac_thai IS NULL AND btrim(noi_dung) <> '') AS cho_bl, "
+            "(SELECT count(*) FROM bai WHERE du_an = %s AND (sac_thai IS NULL OR chu_de IS NULL) "
+            "AND btrim(noi_dung || ' ' || COALESCE(hashtag, '')) <> '') AS cho_bai",
+            (du_an, du_an)).fetchone()
+        luot = c.execute(
+            "SELECT b.luot_id AS luot, count(*) FILTER (WHERE b.sac_thai IS NOT NULL) AS da, "
+            "count(*) AS tong FROM binh_luan b WHERE b.du_an = %s AND b.luot_id = (SELECT "
+            "max(luot_id) FROM binh_luan WHERE du_an = %s) AND b.loai = 'hop_le' AND NOT "
+            "b.cua_thuong_hieu AND btrim(b.noi_dung) <> '' GROUP BY b.luot_id",
+            (du_an, du_an)).fetchone() or {}
+    return {"cho_bl": int(cho["cho_bl"] or 0), "cho_bai": int(cho["cho_bai"] or 0),
+            "luot": luot.get("luot"), "da": int(luot.get("da") or 0),
+            "tong": int(luot.get("tong") or 0)}
+
+
 def luot_xong_moi_nhat() -> dict | None:
     """Lượt vừa kết thúc gần nhất (mọi dự án) — vòng kiểm 30 giây so mốc này để biết có dữ liệu
     mới khi Mark không báo được (dashboard tắt lúc Mark báo, lỗi mạng nội bộ…)."""
