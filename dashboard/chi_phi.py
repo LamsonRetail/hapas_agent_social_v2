@@ -22,14 +22,16 @@ Dự báo cấp tháng:
 from __future__ import annotations
 
 import datetime
+import math
 import unicodedata
 
 VN = datetime.timezone(datetime.timedelta(hours=7))
 
 # ─── chép từ Mark (bài thử đối chiếu; đổi bên Mark thì đổi ở đây) ───
-#: `theo_doi._GIA` — giá đo thật 25/09/2026: TikTok/Facebook theo bài, Instagram theo tài khoản;
-#: Threads (16/10/2026) theo bài, tối thiểu `TH_TOI_THIEU_BAI` bài mỗi tài khoản.
-GIA = {"tiktok": 0.003, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0,
+#: `theo_doi._GIA` — giá đo thật: Facebook theo bài, Instagram theo tài khoản (25/09/2026);
+#: Threads (16/10/2026) theo bài, tối thiểu `TH_TOI_THIEU_BAI` bài mỗi tài khoản; TikTok qua TikTok
+#: API (16/10/2026) 0,0008/bài (nguồn 5 bài = 2 yêu cầu × 0,002 USD).
+GIA = {"tiktok": 0.0008, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0,
        "threads": 0.0025}
 #: `theo_doi._HE_SO_UOC` — ước tính chừa hao hụt (bài ghim, phí lẻ…).
 HE_SO_UOC = 1.3
@@ -42,8 +44,8 @@ TH_TOI_THIEU_BAI = 10
 TH_TOI_DA_MOI_LUOT = 20
 
 #: `theo_doi._BL_GIA` / `_BL_KHOI_DONG` — giá cào BÌNH LUẬN mỗi bình luận (gói FREE, 15/10/2026;
-#: Threads 16/10/2026: actor trả lời 1 GB = 0,02 USD khởi động).
-BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
+#: Threads 16/10/2026: actor trả lời 1 GB = 0,02 USD khởi động; TikTok qua TikTok API 16/10/2026).
+BL_GIA = {"tiktok": 0.0005, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
           "threads": 0.0025}
 BL_KHOI_DONG = {"facebook": 0.001, "threads": 0.02}
 #: `theo_doi._BL_UOC_MOI_BAI` — giữ chỗ mỗi bài khi cào hết (bl_moi_bai = 0).
@@ -53,11 +55,15 @@ NGAY_THANG_CAU_HINH = 30     # "theo cấu hình": tháng chuẩn 30 ngày (đ�
 
 
 #: `theo_doi._TK_GIA` / `_TK_KHOI` / `TK_*` — tìm theo từ khoá (actor của social_listen).
-TK_GIA = {"tiktok": 0.003, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0,
+TK_GIA = {"tiktok": 0.0001, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0,
           "threads": 0.0025}
 TK_KHOI = {"instagram": 0.016, "facebook": 0.00005, "threads": 0.08}
 TK_IG_TOI_DA_TU = 2
 TK_FB_TOI_DA = 20
+#: TikTok tìm theo từ khoá tính theo YÊU CẦU (`theo_doi.TK_TT_*`, `theo_doi_api.LAM_MOI_TOI_DA`).
+TK_TT_YEU_CAU = 0.002
+TK_TT_MOI_TRANG = 30
+TK_LAM_MOI = 10
 
 
 def uoc_tu_khoa_luot(so_bai: int, tu: list[str]) -> float:
@@ -310,6 +316,9 @@ def uoc_tk_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_D
         return 0.0
     if p == "instagram":
         return round(len(q) * (TK_KHOI["instagram"] + so_bai * gia) * HE_SO_UOC, 4)
+    if p == "tiktok":
+        trang = 2 * math.ceil(math.ceil(so_bai / len(q)) / TK_TT_MOI_TRANG) + 1
+        return round((len(q) * trang + TK_LAM_MOI) * TK_TT_YEU_CAU * HE_SO_UOC, 4)
     n = (min(so_bai, fb_toi_da) if p == "facebook"
          else max(so_bai, TH_TOI_THIEU_BAI) if p == "threads" else so_bai)
     return round((n * gia + TK_KHOI.get(p, 0.0)) * HE_SO_UOC, 4)

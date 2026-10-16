@@ -126,3 +126,19 @@ def _xoa_dem_bo_loc(monkeypatch):
     except BaseException:
         pass
     yield
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "tiktok_api: bài thử đường TikTok API (`tiktok_api`, scraptik) — mặc định tắt")
+
+
+@pytest.fixture(autouse=True)
+def _tiktok_api_mac_dinh_tat(request, monkeypatch):
+    """TikTok đi TikTok API (scraptik) từ 16/10/2026, actor cũ (apidojo/clockworks) thành DỰ
+    PHÒNG. Bài cũ canh đường actor cũ (giả `_call` theo tên actor) → mặc định tắt API để chúng
+    thử đúng đường dự phòng; bài của đường API đánh dấu `@pytest.mark.tiktok_api`."""
+    if request.node.get_closest_marker("tiktok_api") is None:
+        import tiktok_api
+        monkeypatch.setattr(tiktok_api, "dung_api", lambda viec: False)
+    yield

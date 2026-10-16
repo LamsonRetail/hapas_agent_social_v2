@@ -44,7 +44,7 @@ def _nguon(i, p, so_bai, chu_ky, tt="dang_theo_doi"):
             "so_bai_moi_lan": so_bai, "chu_ky_ngay": chu_ky, "trang_thai": tt}
 
 
-NGUON = [_nguon(1, "tiktok", 10, 1),            # 10×0,003×1,3 = 0,039/lượt
+NGUON = [_nguon(1, "tiktok", 10, 1),            # 10×0,0008×1,3 = 0,0104/lượt
          _nguon(2, "instagram", 30, 2),         # 1 tài khoản×0,0026×1,3 = 0,00338/lượt
          _nguon(3, "youtube", 5, 1),            # miễn phí
          _nguon(4, "facebook", 5, 3, "tam_dung"),   # tạm dừng: không tính
@@ -53,26 +53,26 @@ GIUA_THANG = datetime.datetime(2026, 10, 15, 12, 0, tzinfo=VN)   # còn 16,5 ng�
 
 
 def test_du_bao_tinh_tay():
-    db = CP.du_bao(NGUON, da_tieu=1.2, tran_du_an=2.0, tran_platform=None, bay_gio=GIUA_THANG)
+    db = CP.du_bao(NGUON, da_tieu=1.2, tran_du_an=1.5, tran_platform=None, bay_gio=GIUA_THANG)
     assert db["ngay_con_lai"] == 16.5
-    # còn lại: TikTok 16,5×0,039 = 0,6435; Instagram 8,25×0,00338 = 0,027885 + khởi động
+    # còn lại: TikTok 16,5×0,0104 = 0,1716; Instagram 8,25×0,00338 = 0,027885 + khởi động
     # 8,25×(0,016×1,3) = 0,1716; Facebook 5,5×0,026 = 0,143 + 5,5×(0,00005×1,3) = 0,0003575
     nt = {x["nen_tang"]: x for x in db["nen_tang"]}
-    assert [x["nen_tang"] for x in db["nen_tang"]] == ["tiktok", "instagram", "facebook", "youtube"]
-    assert nt["tiktok"]["con_lai"] == pytest.approx(0.6435, **XAP_XI)
+    assert [x["nen_tang"] for x in db["nen_tang"]][2:] == ["facebook", "youtube"]
+    assert nt["tiktok"]["con_lai"] == pytest.approx(0.1716, **XAP_XI)
     assert nt["instagram"]["nguon_con_lai"] == pytest.approx(0.027885, **XAP_XI)
     assert nt["instagram"]["khoi_dong_con_lai"] == pytest.approx(0.1716, **XAP_XI)
     assert nt["facebook"]["con_lai"] == pytest.approx(0.1433575, **XAP_XI)
     assert nt["facebook"]["so_nguon"] == 1                       # nguồn 4 tạm dừng
     assert nt["youtube"]["con_lai"] == 0 and nt["youtube"]["thang_cau_hinh"] == 0
-    assert db["con_lai"] == pytest.approx(0.9863, abs=1e-4)
-    assert db["du_bao_thang"] == pytest.approx(2.1863, abs=1e-4)
-    # 30 ngày theo cấu hình: 1,17 + (0,0507 + 0,312) + (0,26 + 0,00065) = 1,79335
-    assert db["thang_cau_hinh"] == pytest.approx(1.79335, abs=1e-4)
-    assert db["tran"] == 2.0 and db["vuot"] is True
-    assert db["vuot_usd"] == pytest.approx(0.1863, abs=1e-4)
+    assert db["con_lai"] == pytest.approx(0.5144, abs=1e-4)
+    assert db["du_bao_thang"] == pytest.approx(1.7144, abs=1e-4)
+    # 30 ngày theo cấu hình: 0,312 + (0,0507 + 0,312) + (0,26 + 0,00065) = 0,93535
+    assert db["thang_cau_hinh"] == pytest.approx(0.93535, abs=1e-4)
+    assert db["tran"] == 1.5 and db["vuot"] is True
+    assert db["vuot_usd"] == pytest.approx(0.2144, abs=1e-4)
     assert [(x["id"], x["thang_usd"]) for x in db["top_ton"]] == [
-        (1, pytest.approx(1.17)), (5, pytest.approx(0.26)), (2, pytest.approx(0.0507))]
+        (1, pytest.approx(0.312)), (5, pytest.approx(0.26)), (2, pytest.approx(0.0507))]
     assert 4 not in [x["id"] for x in db["nguon"]] and 3 not in [x["id"] for x in db["top_ton"]]
 
 

@@ -199,9 +199,9 @@ def test_free_tier_dataset_rong_la_het_luot_24h(api):
 
 
 def test_free_tier_co_du_lieu_van_ok_kem_gioi_han(api):
-    api.run["statusMessage"] = "Free tier: up to 20 results per run, 1 run per 24h."
+    api.run["statusMessage"] = "Free tier: up to 5 results per run. Upgrade your plan"
     items, meta = A._run_actor("scrapeforge~facebook-search-posts", {}, 20, deadline=1000 + 120)
-    assert items and meta["ma"] == "OK" and "20 bài/lượt" in meta["gioi_han_goi"]
+    assert items and meta["ma"] == "OK" and "up to 5 results per run" in meta["gioi_han_goi"]
 
 
 def test_token_khong_bao_gio_nam_trong_chuoi_loi(api):
@@ -283,43 +283,41 @@ def _fb_get(lan_chay_cach_day_gio: float | None, goi="FREE", runs_ok=True):
     return khac, bat_dau
 
 
-def test_fb_free_da_dung_luot_thi_khong_chay_va_noi_gio_mo_lai(api, monkeypatch):
+def test_fb_free_lan_chay_gan_day_khong_con_chan(api, monkeypatch):
+    """Đo lại 16/10/2026: gói Free của actor Facebook là "up to 5 results per run", KHÔNG còn
+    1 lượt/24h (hai lượt cách 4 phút đều trả 5 bài) — run 3 giờ trước không được chặn nữa."""
     monkeypatch.setenv("APIFY_KIEM_TRUOC", "1")
-    api.khac, bat_dau = _fb_get(3)
-    monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
-    monkeypatch.setattr(A.chi_phi_tool, "ghi", lambda **k: {})
-    kq = json.loads(A._handle({"queries": ["hapas", "matemade"], "platforms": ["fb"],
-                               "date_from": f"{NOW:%Y-%m-%d}", "date_to": f"{NOW:%Y-%m-%d}"}))
-    assert api.post_urls == [], "đã dùng lượt 24h thì KHÔNG được khởi chạy run"
-    fb = kq["per_platform"]["facebook"]
-    mo_lai = (bat_dau + datetime.timedelta(hours=24)).astimezone(A._VN_TZ)
-    dung = bat_dau.astimezone(A._VN_TZ)
-    assert fb["status"] == "HET_LUOT_24H"
-    assert (f"Facebook (gói Free): đã dùng lượt 24h lúc {dung:%H:%M %d/%m}, mở lại lúc "
-            f"{mo_lai:%H:%M %d/%m}, tối đa 20 bài/lượt") in fb["ly_do"]
-    assert fb["goi_y"] and kq["platforms_failed"] == ["facebook"]
-    assert kq["note"].startswith("NGUỒN KHÔNG LẤY ĐƯỢC DỮ LIỆU")
-    assert "như thể đầy đủ" in kq["note"]
+    api.khac, _ = _fb_get(3)
+    goi = []
+    monkeypatch.setattr(A, "_call", lambda actor, payload, limit, **k:
+                        goi.append((payload["query"], payload["max_results"])) or [])
+    A._fetch_facebook(["hapas"], 100, "VN", NOW, NOW)
+    assert goi == [("hapas", 5)]
 
 
-@pytest.mark.parametrize("cach_day, runs_ok", [(30, True), (None, True), (3, False)])
-def test_fb_free_con_luot_chi_quet_mot_tu_khoa_va_noi_ro(api, monkeypatch, cach_day, runs_ok):
-    """Còn lượt (hoặc không đọc được lịch sử run) mà gói FREE: dồn vào MỘT từ khoá."""
+@pytest.mark.parametrize("tu, quet, con", [
+    (["hapas", "#HAPAS", "matemade"], ["hapas", "matemade"], []),
+    (["a1", "a2", "a3", "a4", "a5", "a6"], ["a1", "a2", "a3", "a4"], ["a5", "a6"])])
+def test_fb_free_moi_tu_khoa_5_bai_toi_da_20(api, monkeypatch, tu, quet, con):
+    """Gói FREE: mỗi từ khoá một lượt 5 bài, tối đa 20 bài (4 từ); từ chưa quét phải nói rõ."""
     monkeypatch.setenv("APIFY_KIEM_TRUOC", "1")
-    api.khac, _ = _fb_get(cach_day, runs_ok=runs_ok)
+    api.khac, _ = _fb_get(None)
     goi = []
     monkeypatch.setattr(A, "_call", lambda actor, payload, limit, **k:
                         goi.append((payload, limit)) or [])
     so: list = []
     tok = A._SO_RUN.set(so)
     try:
-        A._fetch_facebook(["hapas", "#HAPAS", "matemade"], 100, "VN", NOW, NOW)
+        A._fetch_facebook(tu, 100, "VN", NOW, NOW)
     finally:
         A._SO_RUN.reset(tok)
-    assert [p["query"] for p, _ in goi] == ["hapas"]
-    assert goi[0][1] == 20 and goi[0][0]["max_results"] == 20
-    assert "'hapas'" in so[0]["ghi_chu"] and "'matemade'" in so[0]["ghi_chu"]
-    assert "'#HAPAS'" not in so[0]["ghi_chu"], "bản trùng sau chuẩn hoá không tính là bỏ sót"
+    assert sorted(x["query"] for x, _ in goi) == sorted(quet)
+    assert all(x["max_results"] == 5 and lim == 5 for x, lim in goi)
+    ghi = [x["ghi_chu"] for x in so if "ghi_chu" in x]
+    if con:
+        assert all(f"'{k}'" in ghi[0] for k in con) and "5 bài mỗi lượt" in ghi[0]
+    else:
+        assert not ghi, "bản trùng sau chuẩn hoá không tính là bỏ sót"
 
 
 def test_fb_khong_biet_goi_thi_chay_nhu_cu(api, monkeypatch):
@@ -408,8 +406,9 @@ def test_het_ngan_sach_thang_thi_bo_nguon_tra_tien_giu_youtube(api, monkeypatch)
     monkeypatch.setenv("APIFY_KIEM_TRUOC", "1")
     api.khac = lambda url, params: R(200, {"data": {
         "monthlyUsageCycle": {"endAt": "2026-10-25T23:59:59.999Z"},
-        "limits": {"maxMonthlyUsageUsd": 5}, "current": {"monthlyUsageUsd": 4.9}}})
+        "limits": {"maxMonthlyUsageUsd": 5}, "current": {"monthlyUsageUsd": 4.99}}})
     goi = []
+    # TikTok API 16/10/2026: 100 video ước ~0,02 USD — còn 0,01 USD thì vẫn không đủ.
     monkeypatch.setitem(A._FETCH, "tiktok", lambda *a: goi.append("tiktok") or [])
     monkeypatch.setitem(A._FETCH, "youtube", lambda *a: goi.append("youtube") or [])
     monkeypatch.setattr(A, "_chi_phi_thuc", lambda *a, **k: None)
@@ -419,7 +418,7 @@ def test_het_ngan_sach_thang_thi_bo_nguon_tra_tien_giu_youtube(api, monkeypatch)
     assert goi == ["youtube"]
     tt = kq["per_platform"]["tiktok"]
     assert tt["status"] == "HET_TIEN_THANG"
-    assert "Tài khoản Apify đã dùng $4.90/$5 tháng này, reset ngày 26/10" in tt["ly_do"]
+    assert "Tài khoản Apify đã dùng $4.99/$5 tháng này, reset ngày 26/10" in tt["ly_do"]
     assert kq["per_platform"]["youtube"]["status"] == "OK"
     assert kq["nguon_loi"][0]["nen_tang"] == "tiktok"
 

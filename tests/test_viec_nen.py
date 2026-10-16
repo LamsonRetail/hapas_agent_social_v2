@@ -318,13 +318,16 @@ def test_threads_chia_cua_so_ngay_va_noi_that_khi_khong_kip():
                                 for c in kh["nen_tang"]["threads"]["chua_phu"])
 
 
-def test_facebook_free_chi_mot_tu_khoa_20_bai():
-    kh = Q.ke_hoach(["hapas", "matemade"], ["facebook"], {"facebook": 5000}, _ts(), 45,
-                    {"goi": "FREE"})
+def test_facebook_free_5_bai_moi_tu_khoa_toi_da_20_bai():
+    """Gói Free đo lại 16/10/2026: 5 bài/lượt, không còn 1 lượt/24h → mỗi từ khoá một lượt 5
+    bài, tối đa 4 từ (20 bài); từ thứ 5 trở đi nói rõ là chưa quét."""
+    tu = ["hapas", "matemade", "edoris", "pnj", "juno"]
+    kh = Q.ke_hoach(tu, ["facebook"], {"facebook": 5000}, _ts(), 45, {"goi": "FREE"})
     x = kh["nen_tang"]["facebook"]
-    assert len(x["phan"]) == 1 and x["phan"][0]["limit"] == 20
-    assert x["phan"][0]["payload"]["query"] == "hapas"
-    assert any("20 bài" in c and "matemade" in c for c in x["chua_phu"])
+    assert [p["payload"]["query"] for p in x["phan"]] == tu[:4]
+    assert all(p["limit"] == 5 for p in x["phan"])
+    assert any("5 bài mỗi lượt" in c and "'juno'" in c for c in x["chua_phu"])
+    # Dấu vết cũ (`fb_luot` do bên gọi đưa vào) vẫn chặn được — production không còn đặt nó.
     luot = (NOW, NOW + datetime.timedelta(hours=24))
     kh = Q.ke_hoach(["hapas"], ["facebook"], {"facebook": 5000}, _ts(), 45,
                     {"goi": "FREE", "fb_luot": luot})
@@ -813,7 +816,7 @@ def test_deep_dive_nho_van_chay_tai_cho(nen, monkeypatch):
 
 
 def test_nam_nen_tang_mot_viec_chuan_hoa_dung(nen, monkeypatch):
-    """Mỗi nền tảng một tab; Facebook gói Free chỉ 20 bài; YouTube không tốn tiền Apify."""
+    """Mỗi nền tảng một tab; Facebook gói Free 5 bài/từ khoá; YouTube không tốn tiền Apify."""
     def yt(q, lim, country, tu, den, toi_da_trang=None):
         return ([({"kenh": f"y{i}", "text": f"hapas review túi {i}", "views": 9,
                    "link": f"https://www.youtube.com/watch?v=v{tu:%d}{i:05d}"}, NOW)
@@ -825,7 +828,7 @@ def test_nam_nen_tang_mot_viec_chuan_hoa_dung(nen, monkeypatch):
     d = V.chay_ngay(kq["ma_viec"])
     per = d["ket_qua"]["per"]
     assert set(per) == {"tiktok", "instagram", "facebook", "threads", "youtube"}
-    assert per["facebook"]["scraped"] == 20 and per["youtube"]["scraped"] == 700
+    assert per["facebook"]["scraped"] == 5 and per["youtube"]["scraped"] == 700
     assert per["instagram"]["giu"] > 0 and per["threads"]["giu"] > 0
     tab = {b["requests"][0]["addSheet"]["properties"]["title"]
            for m, p, b, q in nen.lark.goi

@@ -182,9 +182,10 @@ def test_tim_tu_khoa_threads_phieu_moc_de_xuat_va_tien(mo):
                                                                      "nguoi_mau_b": 9}
     f = tk["pheu"]["threads"]
     assert (f["ve"], f["cua_so"], f["khong_nhac"], f["giu"]) == (3, 3, 1, 2)
-    assert any(c.startswith("phễu tìm Threads (30 ngày") for c in T._cau_tk(tk))
+    assert any(c.startswith("phễu tìm Threads (xin 30 ngày") for c in T._cau_tk(tk))
     assert set(T.doc_moc_tk("hapas")) == {"threads"}
-    assert tk["usd"] == pytest.approx(3 * 0.0025 + 0.08)
+    # + 1 yêu cầu TikTok API (run giả ở trên, 0,002 USD) dù TikTok trả 0 bài — 16/10/2026.
+    assert tk["usd"] == pytest.approx(3 * 0.0025 + 0.08 + 0.002)
 
 
 def test_tim_tu_khoa_threads_0_bai_van_tru_phi_khoi_dong(mo):
