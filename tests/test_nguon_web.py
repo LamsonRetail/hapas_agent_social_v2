@@ -358,3 +358,64 @@ def test_thu_thap_truyen_tran_va_payload():
                chay_actor=actor, bay_gio=BAY_GIO, con_usd=3.0)
     assert seen["tran"] == 0.1 and seen["lim"] == 4
     assert seen["p"]["tbs"] == "cdr:1,cd_min:10/9/2026,cd_max:10/16/2026"
+
+
+# ───────── đọc dự phòng, đã biết, khẩu hiệu (tích hợp 16/10) ─────────
+def test_so_cau_tim_va_cau_truy_van_nhom_4_tu():
+    assert W.so_cau_tim(DU_AN["tu_khoa"]) == 1
+    tu = [f"brand{i}" for i in range(9)]
+    assert W.so_cau_tim(tu) == 3 and len(W.cau_truy_van({"ten": "x", "tu_khoa": tu})) == 3
+    assert W.so_cau_tim([f"b{i}x" for i in range(40)]) == W.TOI_DA_TRUY_VAN
+    assert W.so_cau_tim([]) == 0
+    q = W.cau_truy_van(DU_AN, them_tu=["Do anything for love"])
+    assert q[0].startswith('(hapas OR "yêu từ điều nhỏ nhất" OR "Do anything for love")')
+
+
+def test_doc_du_phong_trang_bi_chan_co_tran_va_so_tien():
+    items = _serp(("https://chan.vd.vn/a", "HAPAS", "túi hapas", "1 ngày trước"),
+                  ("https://chan.vd.vn/b", "Khác", "", "1 ngày trước"),
+                  ("https://chan.vd.vn/c", "Khác 2", "", "1 ngày trước"))
+    goi = []
+
+    def boc(urls, han, tran):
+        goi.append((urls, tran))
+        than = "<p>" + "Nội dung dài. " * 20 + "Túi HAPAS bền.</p>"
+        return [{"url": urls[0], "crawl": {"httpStatusCode": 200}, "html": _bai("Bài A", than)},
+                {"url": urls[1], "crawl": {"httpStatusCode": 403}}], {"run_id": "rb", "giay": 10}
+    hits, tk, _ = _chay(items, {}, boc=boc, boc_toi_da=2, con_usd=1.0)
+    assert goi == [(["https://chan.vd.vn/a", "https://chan.vd.vn/b"], 0.1)]   # brand trước, ≤ 2
+    assert tk["run_ids"] == ["r1", "rb"] and tk["pheu"]["boc_duoc"] == 1
+    assert tk["usd_boc"] == round(2 * W.GIA_BOC, 4) and tk["usd_tim"] == W.GIA_TRANG
+    a = next(d for d, _ in hits if d["link"] == "https://chan.vd.vn/a")
+    assert not a["_web"]["chi_trich"] and "HAPAS bền" in a["text"]
+
+
+def test_doc_du_phong_loi_tinh_nguyen_tran_va_robots_cam_khong_doc():
+    items = _serp(("https://chan.vd.vn/a", "HAPAS", "hapas", "1 ngày trước"))
+    from apify_tool import LoiApify
+
+    def hong(urls, han, tran):
+        raise LoiApify("QUA_GIO", "hết giờ", {"run_id": "rb"})
+    hits, tk, _ = _chay(items, {}, boc=hong, boc_toi_da=5, con_usd=1.0)
+    assert tk["usd_boc"] == 0.1 and "rb" in tk["run_ids"] and hits[0][0]["_web"]["chi_trich"]
+    g = _Gia({})
+    g.tai = lambda u: (200, "User-agent: *\nDisallow: /\n", u) if u.endswith("robots.txt") \
+        else pytest.fail("không được tải")
+    hits, tk = W.thu_thap(DU_AN, tu=datetime.date(2026, 10, 1), den=datetime.date(2026, 10, 16),
+                          chay_actor=lambda *a: (items, {}), tai=g.tai, bay_gio=BAY_GIO,
+                          boc=lambda *a: pytest.fail("robots cấm: không đọc dự phòng"),
+                          boc_toi_da=5, tu_dong_ho=g.dong_ho, han=1e9, ngu=g.ngu_)
+    assert tk["pheu"]["robots_chan"] == 1 and hits[0][0]["_web"]["chi_trich"]
+
+
+def test_da_biet_khong_tai_lai_va_tu_giu():
+    items = _serp(("https://bao.vd.vn/co.htm", "HAPAS", "hapas", "1 ngày trước"),
+                  ("https://bao.vd.vn/loai.htm", "HAPAS", "hapas", "1 ngày trước"),
+                  ("https://bao.vd.vn/cu.htm", "HAPAS", "hapas", "20 ngày trước"))
+    biet = {W.khoa_web("https://bao.vd.vn/co.htm"): "da_co",
+            W.khoa_web("https://bao.vd.vn/loai.htm"): "da_loai_truoc"}
+    hits, tk, g = _chay(items, {}, da_biet=lambda ks: {k: biet[k] for k in ks if k in biet},
+                        tu_giu=BAY_GIO - datetime.timedelta(days=30))
+    assert (tk["pheu"]["da_co"], tk["pheu"]["da_loai_truoc"]) == (1, 1)
+    assert not any("co.htm" in u or "loai.htm" in u for u in g.goi)
+    assert [d["link"] for d, _ in hits] == ["https://bao.vd.vn/cu.htm"]      # 20 ngày: trong phạm vi

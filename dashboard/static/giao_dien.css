@@ -46,6 +46,7 @@
   --nt-instagram: #d62976;
   --nt-youtube: #e62117;
   --nt-threads: #3f3f46; --nt-threads-chu: #ffffff;
+  --nt-web: #4f46e5; --nt-web-chu: #ffffff;          /* Báo & Web (16/10/2026) */
   --bong: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .05);
   --bong-noi: 0 12px 32px rgba(16, 24, 40, .14), 0 2px 6px rgba(16, 24, 40, .08);
   --bo: 12px;
@@ -91,6 +92,7 @@
     --tieu-de: #c9d6ff;
     --nt-tiktok: #e8edf8; --nt-tiktok-chu: #0b1120;
     --nt-threads: #c4c4cc; --nt-threads-chu: #0b1120;
+    --nt-web: #a5b4fc; --nt-web-chu: #0b1120;
     --bong: none;
     --bong-noi: 0 12px 32px rgba(0, 0, 0, .55), 0 2px 6px rgba(0, 0, 0, .4);
   }
@@ -258,7 +260,7 @@ tbody tr:hover > td, tbody tr:hover > th { background: color-mix(in srgb, var(--
 /* nhãn nền tảng: tô nhạt theo màu thương hiệu */
 .the--nt-tiktok { --nt: var(--nt-tiktok); } .the--nt-facebook { --nt: var(--nt-facebook); }
 .the--nt-instagram { --nt: var(--nt-instagram); } .the--nt-youtube { --nt: var(--nt-youtube); }
-.the--nt-threads { --nt: var(--nt-threads); }
+.the--nt-threads { --nt: var(--nt-threads); } .the--nt-web { --nt: var(--nt-web); }
 [class*="the--nt-"] {
   background: color-mix(in srgb, var(--nt) 11%, var(--be-mat)); color: color-mix(in srgb, var(--nt) 78%, var(--chu));
 }

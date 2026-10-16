@@ -111,7 +111,8 @@
   }
   function goi() {
     var q = new URLSearchParams();
-    new FormData(form).forEach(function (v, k) { if (k !== "csrf") q.append(k, String(v)); });
+    // từ khoá chiến dịch không đổi mốc chạy: không gửi (URL khỏi dài quá 4.000 ký tự)
+    new FormData(form).forEach(function (v, k) { if (k !== "csrf" && k !== "tu_khoa_them") q.append(k, String(v)); });
     q.set("du_an", form.getAttribute("data-du-an") || "");
     var lid = form.getAttribute("data-lid");
     if (lid) q.set("lid", lid);

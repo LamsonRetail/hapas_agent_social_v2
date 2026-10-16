@@ -304,7 +304,8 @@ def test_dashboard_chi_phi_khop_mark_threads():
     assert b["tu_khoa"]["threads"]["so_tu_gui"] == 1 and b["tu_khoa"]["tiktok"]["so_tu_gui"] == 3
     assert b["tu_khoa"]["threads"]["uoc"] == T.uoc_tu_khoa_nen_tang("threads", 15, tu)
     hs = CP.hang_so_cho_trinh_duyet()
-    assert hs["nen_tang"][-1] == "threads" and hs["mac_dinh_tat"] == ("threads",)
+    # Báo & Web (16/10) xếp sau Threads; chỉ Threads mặc định tắt.
+    assert list(hs["nen_tang"])[-2:] == ["threads", "web"] and hs["mac_dinh_tat"] == ("threads",)
     assert hs["th_toi_thieu_bai"] == 10
 
 
@@ -331,7 +332,7 @@ def test_schema_cho_phep_threads_va_mo_ta_dung():
     dong = next(x for x in sql.splitlines() if x.startswith("COMMENT ON COLUMN du_an.cau_hinh IS"))
     assert "TRỪ threads" in dong
     bq = (GOC / "deploy" / "lang-nghe" / "bigquery.sql").read_text(encoding="utf-8")
-    assert bq.count("ALTER COLUMN nen_tang SET OPTIONS") == 3
+    assert bq.count("ALTER COLUMN nen_tang SET OPTIONS") == 4      # + bai của Báo & Web
     assert "tiktok, instagram, youtube, facebook, threads (từ 16/10/2026).'" in bq
 
 

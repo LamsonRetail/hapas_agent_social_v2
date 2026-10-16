@@ -39,19 +39,67 @@
   var TU = tuTim(D.tu_khoa, D.ten);
   var TU_IG = TU.filter(function (t) { return t.indexOf(" ") < 0; });
 
+  // <web> Báo & Web (16/10/2026) — bản sao chi_phi.rut_gon_web / so_cau_web / uoc_web (bài thử
+  // tests/test_dashboard_web.py::test_ngan_sach_js_rut_gon_khop_python chạy khối này bằng node).
+  var HW = hs.web || {};
+  // = chi_phi._bo_dau_web: bỏ dấu + thường hoá TỪNG ký tự (đ/Đ -> d)
+  function boDauWeb(s) {
+    var ra = "";
+    Array.from(String(s || "")).forEach(function (c) {
+      if (c === "đ" || c === "Đ") { ra += "d"; return; }
+      var g = c.normalize("NFD"), d = Array.from(g)[0];
+      ra += (d && !/\p{Mn}/u.test(d) ? d : c).toLowerCase().slice(0, 1) || c;
+    });
+    return ra;
+  }
+  // = chi_phi._tu_web: các chữ/số của một từ khoá (bỏ dấu)
+  function tuWeb(s) { return boDauWeb(s).match(/[\p{L}\p{N}]+/gu) || []; }
+  function laTapConThat(a, b) {      // tập a ⊂ b (thật sự)
+    var A = {}, B = {}, na = 0, nb = 0;
+    a.forEach(function (x) { if (!A[x]) { A[x] = 1; na++; } });
+    b.forEach(function (x) { if (!B[x]) { B[x] = 1; nb++; } });
+    if (na >= nb) return false;
+    return Object.keys(A).every(function (x) { return B[x]; });
+  }
+  // = chi_phi.rut_gon_web: bỏ rỗng, bỏ trùng (hoa thường), bỏ từ khoá đã được từ khoá khác phủ
+  function rutGonWeb(ds) {
+    var sach = [];
+    (ds || []).forEach(function (t) {
+      t = String(t).trim();
+      var th = t.toLowerCase();
+      if (t && tuWeb(t).length && !sach.some(function (x) { return x.toLowerCase() === th; })) sach.push(t);
+    });
+    return sach.filter(function (t, i) {
+      var ti = tuWeb(t);
+      return !sach.some(function (x, j) { return j !== i && laTapConThat(tuWeb(x), ti); });
+    });
+  }
+  function soCauWeb(ds) {            // = chi_phi.so_cau_web
+    var n = rutGonWeb(ds).length;
+    return n ? Math.min(HW.toi_da_cau, Math.ceil(n / HW.tu_moi_cau)) : 0;
+  }
+  function uocWeb(so, ds, boc) {     // = chi_phi.uoc_web
+    var cau = soCauWeb(ds);
+    if (so <= 0 || cau <= 0) return 0;
+    var trang = Math.max(1, Math.ceil(Math.max(0, so) / HW.kq_moi_trang));
+    return r4((cau * trang * HW.gia_trang + Math.max(0, boc) * HW.gia_boc) * hs.he_so);
+  }
+  // </web>
+
   // Mẫu nhanh: [bật, số bài, (Instagram) số từ] cho tìm từ khoá; [bật, số bài, bình luận/bài] cho
   // bình luận (0 = cào hết). Chỉ ĐIỀN ô — người dùng xem số ước tính rồi mới bấm Lưu.
   var MAU = {
     tiet_kiem: {
-      tk: { tiktok: [1, 10], facebook: [1, 10], instagram: [1, 5, 1], youtube: [1, 20], threads: [0, 10] },
+      // web: [bật, kết quả mỗi câu, trang đọc dự phòng tối đa]; web không cào bình luận
+      tk: { tiktok: [1, 10], facebook: [1, 10], instagram: [1, 5, 1], youtube: [1, 20], threads: [0, 10], web: [1, 10, 2] },
       bl: { tiktok: [1, 3, 20], facebook: [1, 3, 20], instagram: [0, 3, 20], youtube: [1, 10, 100], threads: [0, 3, 20] }
     },
     can_bang: {
-      tk: { tiktok: [1, 30], facebook: [1, 20], instagram: [1, 10, 2], youtube: [1, 30], threads: [0, 10] },
+      tk: { tiktok: [1, 30], facebook: [1, 20], instagram: [1, 10, 2], youtube: [1, 30], threads: [0, 10], web: [1, 20, 5] },
       bl: { tiktok: [1, 5, 50], facebook: [1, 5, 50], instagram: [1, 3, 30], youtube: [1, 20, 200], threads: [0, 5, 50] }
     },
     day_du: {
-      tk: { tiktok: [1, 100], facebook: [1, 20], instagram: [1, 30, 4], youtube: [1, 100], threads: [0, 20] },
+      tk: { tiktok: [1, 100], facebook: [1, 20], instagram: [1, 30, 4], youtube: [1, 100], threads: [0, 20], web: [1, 30, 10] },
       bl: { tiktok: [1, 20, 0], facebook: [1, 20, 0], instagram: [1, 10, 0], youtube: [1, 50, 0], threads: [0, 10, 0] }
     }
   };
@@ -79,10 +127,15 @@
       var o = doc.gt("tk_" + p + "_so_bai");
       var so = kep(o !== "" ? o : (MD.tk_so_bai || 0), GH.tk_so_bai[0], GH.tk_so_bai[1], 0);
       var t = p === "instagram" ? doc.gt("tk_instagram_so_tu") : "";
-      return {
+      var c = {
         y: doc.bat("tk_" + p + "_bat"), bat: doc.bat("tk_" + p + "_bat") && so > 0, so_bai: so,
         so_tu: kep(t !== "" ? t : IG_MD, GH.tk_so_tu[0], GH.tk_so_tu[1], IG_MD)
       };
+      if (p === "web") {               // trần trang đọc dự phòng: ô trống = mặc định của Mark, 0 = tắt
+        var bo = doc.gt("tk_web_boc");
+        c.boc = kep(bo !== "" ? bo : HW.boc_mac_dinh, 0, GH.tk_so_bai[1], HW.boc_mac_dinh);
+      }
+      return c;
     }
     var ob = doc.gt("bl_" + p + "_so_bai");
     var om = doc.gt("bl_" + p + "_moi_bai");
@@ -95,7 +148,8 @@
   }
   // = chi_phi.uoc_tk_nen_tang như bang_cau_hinh gọi: KHÔNG kẹp Facebook ở tk_fb_toi_da — dashboard
   // không biết gói Apify, nên báo mức trần thận trọng theo đúng số bài đã đặt.
-  function uocTk(p, so, soTu) {
+  function uocTk(p, so, soTu, boc) {
+    if (p === "web") return uocWeb(so, TU, boc);
     // Threads (= chi_phi.tu_gui): chỉ `so // 10` từ đầu (≥ 1, ≤ 20) — actor lấy ≥ 10 bài mỗi từ.
     var thMin = hs.th_toi_thieu_bai || 10;
     var q = p === "instagram" ? TU_IG.slice(0, soTu)
@@ -124,7 +178,7 @@
     NT.forEach(function (p) {
       var a = cauHinh(doc, "tk", p);
       var b = cauHinh(doc, "bl", p);
-      a.uoc = a.bat ? uocTk(p, a.so_bai, a.so_tu) : 0;
+      a.uoc = a.bat ? uocTk(p, a.so_bai, a.so_tu, a.boc) : 0;
       b.uoc = b.bat ? uocBl(p, b.so_bai, b.moi_bai) : 0;
       kq.tk[p] = a;
       kq.bl[p] = b;
@@ -134,6 +188,8 @@
     kq.uoc_tk = r4(stk);
     kq.uoc_bl = r4(sbl);
     kq.tong = r4(kq.uoc_tk + kq.uoc_bl);
+    kq.web = kq.tk.web ? kq.tk.web.uoc : 0;          // = bang_cau_hinh["uoc_web"]
+    kq.khac = Math.max(0, r4(kq.tong - kq.web));
     return kq;
   }
 
@@ -151,6 +207,7 @@
       f["tk_" + p + "_bat"] = !!a[0];
       f["tk_" + p + "_so_bai"] = String(a[1]);
       if (p === "instagram") f.tk_instagram_so_tu = String(a[2]);
+      if (p === "web") { f.tk_web_boc = String(a[2]); return; }   // web: không có bình luận
       f["bl_" + p + "_bat"] = !!b[0];
       f["bl_" + p + "_so_bai"] = String(b[1]);
       f["bl_" + p + "_moi_bai"] = String(b[2]);
@@ -223,7 +280,7 @@
     NT.forEach(function (p) {
       var a = kq.tk[p];
       var b = kq.bl[p];
-      oUsd("tk-" + p, a, (hs.tk_gia || {})[p]);
+      oUsd("tk-" + p, a, p === "web" ? HW.gia_trang : (hs.tk_gia || {})[p]);
       oUsd("bl-" + p, b, (hs.bl_gia || {})[p]);
       ghi("dong-" + p, soVn(r4(a.uoc + b.uoc), 3), r4(a.uoc + b.uoc));
       moNhom(p, "tk", a.y);
@@ -240,16 +297,22 @@
     ghi("tong-luot", soVn(kq.tong, 3), kq.tong);
     // Lịch quét tự động: có lịch đang bật thì nhân theo số lượt của lịch (máy chủ đếm), không thì
     // giả định 1 lượt/ngày như trước.
+    // Báo & Web: số lượt web riêng (ngoài chiến dịch ≤ 1 lượt/ngày — máy chủ đếm theo lịch).
     var luot30 = D.co_lich ? (D.luot_30 || 0) : hs.ngay;
-    ghi("tong-30", soVn(kq.tong * luot30, 2), r4(kq.tong * luot30));
+    var web30 = D.luot_web_30 != null ? D.luot_web_30 : luot30;
+    var tien30 = kq.khac * luot30 + kq.web * web30;
+    ghi("tong-30", soVn(tien30, 2), r4(tien30));
 
     // cả tháng nếu mỗi lượt dùng hết = đã tiêu + nguồn còn lại + số lượt còn lại × tổng mỗi lượt
+    // (trừ web) + số lượt web còn lại × USD một lượt web
     var tranDa = soTien(docForm.gt("tran_usd_thang"), D.tran_da);
     var tran = D.tran_platform == null ? tranDa : Math.min(tranDa, D.tran_platform);
     var ngay = D.co_lich ? (D.luot_con_lai || 0) : (D.ngay_con_lai || 0);
-    var toiDa = D.da_tieu + D.nguon_con_lai + ngay * kq.tong;
+    var luotWeb = D.luot_web_con_lai != null ? D.luot_web_con_lai : ngay;
+    var webCon = luotWeb * kq.web;
+    var toiDa = D.da_tieu + D.nguon_con_lai + ngay * kq.khac + webCon;
     var vuot = toiDa > tran + 1e-9;
-    var duLuot = ngay > 0 ? (tran - D.da_tieu - D.nguon_con_lai) / ngay : 0;
+    var duLuot = ngay > 0 ? (tran - D.da_tieu - D.nguon_con_lai - webCon) / ngay : 0;
     ghi("thang-so", soVn(toiDa, 2), r4(toiDa));
     ghi("thang-tran", soVn(tran, 2), tran);
     ghi("thang-ket-luan", vuot
@@ -258,7 +321,8 @@
       : "trong trần, còn dư " + soVn(tran - toiDa, 2) + " USD.");
     ghiGoiY("thang-cong-thuc", "= đã tiêu " + soVn(D.da_tieu, 2) + " + nguồn " + soVn(D.nguon_con_lai, 2) +
       " + " + (D.co_lich ? soVn(ngay, 0) + " lượt theo lịch" : soVn(ngay, 1) + " ngày") + " × " +
-      soVn(kq.tong, 3));
+      soVn(kq.khac, 3) + " + Báo & Web " + soVn(luotWeb, luotWeb % 1 ? 1 : 0) + " lượt × " + soVn(kq.web, 3) +
+      " (ngoài chiến dịch ≤ 1 lượt/ngày)");
     var hop = o("thang-hop");
     if (hop) hop.classList.toggle("ns-du-kien__thang--canh", vuot);
 
@@ -282,6 +346,7 @@
   }
 
   ghiGoiY("ghi-ig", "Chỉ từ không dấu cách (" + TU_IG.length + " từ)");
+  ghi("web-so-tu", rutGonWeb(TU).length + " → " + soCauWeb(TU) + " câu");
 
   // giá mỗi mẫu nhanh (chỉ phụ thuộc từ khoá dự án) — ghi ngay trên nút
   Object.keys(MAU).forEach(function (k) {

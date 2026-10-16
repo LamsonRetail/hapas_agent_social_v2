@@ -228,3 +228,85 @@ với bài web.
   - danh sách báo theo dõi (`nguon.nen_tang='web'` theo tên miền);
   - xếp hạng mức ảnh hưởng của trang.
   - Làm sau 2–4 tuần có dữ liệu.
+
+## Đã tích hợp (16/10/2026, nhánh feat/web-lang-nghe)
+
+**Chạy SQL TRƯỚC khi merge/deploy** (VPS, theo thứ tự; chạy lại được):
+1. `deploy/lang-nghe/schema.sql`: thêm `bai.kieu_trang`, `bai.muc_nhac`, `bai.la_pr`, hai CHECK
+   `NOT VALID` và COMMENT. Cột NULL được, không ghi lại bảng.
+2. `deploy/lang-nghe/du-lieu-hapas-web-2026-10-16.sql`: dữ liệu riêng của HAPAS.
+   - Thêm từ loại trừ "kota hapas", "hapa", "guitar", "sushi", "brewing".
+   - Thêm miền nhà `hapas.co` vào `du_an.cau_hinh.web.mien_nha`.
+   - Ghi nhật ký; trong file có sẵn câu hoàn tác.
+3. BigQuery, khối "Báo & Web" trong `deploy/lang-nghe/bigquery.sql`: ADD COLUMN + mô tả theo quy
+   chuẩn BI. Chạy trước khi bật đồng bộ bản mới.
+
+Bài mạng xã hội vẫn ghi đúng câu lệnh cũ: `lang_nghe_db.ghi_bai` chỉ đưa 3 cột web vào câu ghi
+khi dòng có giá trị. DB chưa chạy bước 1 thì chỉ bài web lỗi, bài mạng xã hội không ảnh hưởng.
+
+**Mark** (`theo_doi.py`):
+- **Vị trí trong lượt:** `web` là nền tảng thứ 6 của `TK_NEN_TANG`. Phần `tk-web` chạy sau
+  mạng xã hội trong cùng lượt tìm theo từ khoá, cùng công tắc tổng `tk_bat`, công tắc console
+  `bat_web`, trần console, trần tháng dự án, mốc và phễu.
+- **Bật mặc định:** web không nằm trong `MAC_DINH_TAT` vì chủ dự án đã bật.
+- **Nhịp quét:**
+  - Ngoài chiến dịch: tối đa 1 lượt mỗi 20 giờ (`WEB_GIO_GIAN`). Các lượt khác trong ngày ghi
+    "CHUA_TOI_LUOT" và không tốn tiền.
+  - Trong chiến dịch (`lich_quet` kiểu chien_dich đang chạy): lượt nào cũng tìm web.
+  - Cửa sổ ngày gửi Google tính từ lượt web thành công trước, lùi 2 ngày (`WEB_NGAY_CHONG`).
+  - Bài được giữ trong cả phạm vi theo dõi (`theo_doi_api.pham_vi`).
+- **Khẩu hiệu chiến dịch:** ghi ở `lich_quet.cau_hinh.tu_khoa_them` của lịch chiến dịch (ô "Từ
+  khoá chiến dịch" trên trang Lịch). Lý do chọn chỗ này:
+  - khẩu hiệu sống đúng bằng khung chiến dịch, hết chiến dịch thì tự thôi, không phải nhớ gỡ
+    khỏi từ khoá dự án;
+  - chỉ web dùng khẩu hiệu (0,0005 USD/trang), lượt tìm mạng xã hội không đắt thêm.
+- **Sổ "đã loại" riêng cho web** (`<mã>:web`):
+  - từ khoá web có thể kèm khẩu hiệu nên có dấu riêng, không đè sổ của mạng xã hội;
+  - bài web đã có trong kho hoặc đã bị loại thì không tải lại, không đọc dự phòng lại.
+- **AI:** đọc 400 ký tự với bài web (`apify_tool._CHU_AI`), các nền tảng khác giữ 200.
+- **Từ loại trừ một chữ dài ≤ 4 ký tự** chỉ khớp NGUYÊN từ: "hapa" loại "Hapa's Brewing" nhưng
+  không loại "túi hapas". Từ loại trừ ngắn hoặc nằm trong từ khoá không đưa lên câu tìm Google.
+
+**Tiền** (theo các quy tắc an toàn tiền đã review cho Apify):
+- **Actor tìm Google:**
+  - mỗi lượt có `maxTotalChargeUsd` (ước tính × 1,5, ≥ 0,1, ≤ phần tháng còn lại);
+  - sổ trong lượt = số trang về × 0,0005 USD (giá thật).
+- **Actor đọc dự phòng** (`apify~website-content-crawler`, chủ dự án BẬT):
+  - chỉ đọc trang robots.txt cho phép mà HTTP thường bị chặn hoặc lỗi;
+  - tối đa `boc` trang mỗi lượt (mặc định 10, sửa trên Ngân sách, 0 = tắt), trang Google thấy
+    nhắc brand đi trước;
+  - trần = min(số trang × 0,0135; phần còn lại), không thấp hơn 0,1, nếu không đủ thì không chạy;
+  - actor này tính tiền theo tài nguyên nên `maxTotalChargeUsd` không chặn được. Trần thật là
+    THỜI GIAN chạy = trần ÷ 0,00026 USD/giây (đo được ở 4 GB);
+  - sổ = max(số trang về × 0,009; số giây × 0,00026); actor lỗi thì tính nguyên trần.
+- Mọi run được ghi phần có run id ngay khi tạo, nên `Viec.chot_chi_phi` chốt đúng tiền thật.
+
+**Chi phí dự kiến hằng tháng (HAPAS: 2 từ khoá sau rút gọn → 1 câu tìm, 15 kết quả → 2 trang):**
+- **Tìm Google:** 30 lượt × 2 trang × 0,0005 ≈ **0,03 USD/tháng**.
+- **Đọc dự phòng:** chỉ chạy khi có trang MỚI bị chặn (lượt thử: 1–2 trang trên 72 link). Mỗi lần
+  khoảng 0,01–0,02 USD (khởi động trình duyệt). Thường **0–0,4 USD/tháng**.
+- **Chiến dịch 6 giờ/lượt trong 2 tuần:** thêm khoảng 56 lượt × 0,001–0,0015 ≈ 0,08 USD, cộng
+  phần đọc dự phòng nếu có.
+- **Trần lý thuyết:** 30 lượt × (0,0013 + 0,135) ≈ 4,1 USD/tháng nếu ngày nào cũng có 10 trang
+  mới bị chặn. Trần tháng của dự án vẫn chặn trên cùng; muốn chắc hơn thì hạ `boc` xuống 2–3.
+
+**Dashboard:**
+- **Hiển thị:**
+  - "Báo & Web" là nền tảng `web`, đi qua bảng `NEN_TANG` của chi_so.js và token màu `--nt-web`.
+  - Thêm bộ lọc "Loại trang" (Báo, Diễn đàn, Blog, MXH khác, Web khác); ô này chỉ hiện khi kỳ có
+    bài web.
+  - Thẻ KPI "Báo & Web": số bài là số chính; số miền, % bài PR, % nhắc ở tiêu đề nằm trong ⓘ.
+  - Thẻ bài web có chip loại trang, PR, mức nhắc.
+  - Xem / thích / chia sẻ NULL hiện trống, không hiện 0.
+- **Ngân sách:**
+  - Dòng "Báo & Web": bật/tắt, số kết quả mỗi câu tìm, "từ khoá → câu", ≈ USD, trần trang đọc
+    dự phòng.
+  - `chi_phi.uoc_web` và `ngan_sach.js` chép đúng `theo_doi.uoc_web`; có bài thử đối chiếu, gồm
+    cả bài chạy bằng node.
+  - Số lượt web tính riêng: ngoài chiến dịch ≤ 1 lượt/ngày, trong chiến dịch mọi lượt.
+- **Lịch:** lịch chiến dịch có ô "Từ khoá chiến dịch" (`tu_khoa_them`).
+- **Sửa lỗi:**
+  - Lưu trang Ngân sách giờ giữ các khoá khác của `du_an.cau_hinh` (vd `web.mien_nha`), không ghi
+    đè cả khối.
+  - `/api/bai` nhận nền tảng `web`.
+- **BigQuery:** dong_bo_bq đồng bộ thêm 3 cột mới.

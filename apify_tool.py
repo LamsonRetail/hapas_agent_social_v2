@@ -1818,6 +1818,11 @@ Không giải thích.
 """
 
 
+#: Số ký tự nội dung bài đưa cho AI phân xử. Bài web (`nguon_web`) dài, nhắc brand có thể ở
+#: giữa: `text` đã là tiêu đề + đoạn quanh chỗ nhắc — cho đọc 400 thay 200 (16/10/2026).
+_CHU_AI = {"web": 400}
+
+
 def _boc_bai(i: int, d: dict) -> str:
     """Một bài trong thẻ <p>. Chữ do người lạ viết đi qua `_khong_the`, kẻo nó tự đóng thẻ
     rồi chèn "lệnh" ra ngoài (cùng cách phan_loai._boc)."""
@@ -1825,8 +1830,9 @@ def _boc_bai(i: int, d: dict) -> str:
         return _khong_the(s)[:n]
     kenh = sach(d.get("kenh"), 40) + (f"/{sach(d.get('username'), 30)}"
                                        if d.get("username") else "")
+    chu = _CHU_AI.get(d.get("platform"), 200)
     return (f'<p i="{i}">[{d.get("platform") or "?"}] {kenh} | '
-            f'{sach(d.get("hashtags"), 60)} | {sach(d.get("text"), 200)} | '
+            f'{sach(d.get("hashtags"), 60)} | {sach(d.get("text"), chu)} | '
             f'khớp từ khoá: {"có" if d.get("_khop") else "không"} | '
             f'thị trường: {d.get("_thi_truong") or "không rõ"}</p>')
 
@@ -2013,9 +2019,28 @@ def _tu_loai_tru_khop(d: dict, loai_tru: list[str]) -> str:
     """Từ loại trừ đầu tiên bài chứa (để ghi LÝ DO vào tab Bị loại), "" nếu không."""
     if not loai_tru:
         return ""
-    hay = _norm(f"{d.get('text','')} {d.get('hashtags','')} {d.get('kenh','')} "
-                f"{d.get('username') or ''}")
-    return next((x for x in loai_tru if x and _norm(x) in hay), "")
+    goc = (f"{d.get('text','')} {d.get('hashtags','')} {d.get('kenh','')} "
+           f"{d.get('username') or ''}")
+    hay = _norm(goc)
+    tok: set[str] | None = None
+    for x in loai_tru:
+        n = _norm(str(x or "")).strip()
+        if not n:
+            continue
+        if len(n) <= _LOAI_TRU_NGUYEN_TU and " " not in n:
+            # Từ ngắn phải trùng NGUYÊN một từ (16/10/2026, HAPAS loại trừ "hapa" — Hapa's
+            # Brewing, Hapa Sushi): khớp chuỗi con thì "hapa" nằm trong "hapas" và loại sạch
+            # bài của chính brand.
+            tok = set(_tokens(goc)) if tok is None else tok
+            if n in tok:
+                return x
+        elif n in hay:
+            return x
+    return ""
+
+
+#: Từ loại trừ một chữ dài ≤ chừng này ký tự (đã bỏ dấu) chỉ khớp nguyên từ.
+_LOAI_TRU_NGUYEN_TU = 4
 
 
 def _ngoai_thi_truong(d: dict, country: str) -> bool:

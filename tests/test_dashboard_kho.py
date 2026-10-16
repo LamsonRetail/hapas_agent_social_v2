@@ -150,7 +150,8 @@ def test_doc_bai_theo_khoa_cung_cot_tung_lo(gia):
     assert not any(c in lenh[0][0] for c in ("noi_dung", "hashtag", "b.xem", "sac_thai"))
     cot = set(re.findall(r"\bb\.([a-z_]+)", K._COT_BAI_GOC))
     assert cot == {"khoa", "nen_tang", "nguon_id", "tai_khoan", "tac_gia", "followers", "thich",
-                   "binh_luan", "chia_se", "kieu_quet", "link"} and cot <= _cot("bai")
+                   "binh_luan", "chia_se", "kieu_quet", "kieu_trang", "link"} \
+        and cot <= _cot("bai")
     assert "n.loai AS nguon_loai" in K._COT_BAI_GOC
     K.bai_theo_khoa("hapas", ["k1"], co_chu=True)               # đang lọc chữ: thêm nội dung
     sql = gia.gd[1].lenh[0][0]

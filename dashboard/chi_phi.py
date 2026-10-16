@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import datetime
 import math
+import re
 import unicodedata
 
 VN = datetime.timezone(datetime.timedelta(hours=7))
@@ -64,6 +65,70 @@ TK_FB_TOI_DA = 20
 TK_TT_YEU_CAU = 0.002
 TK_TT_MOI_TRANG = 30
 TK_LAM_MOI = 10
+
+#: Báo & Web (16/10/2026, `theo_doi.WEB_*` = `nguon_web`): Google tìm qua actor SERP tính theo TRANG
+#: kết quả (10 link), đọc bài bằng HTTP thường 0 USD; trang bị chặn đọc qua website-content-crawler
+#: tính theo trang, có trần `boc` trang mỗi lượt (thực tế thường 0–2 trang). Từ khoá gộp OR
+#: `WEB_TU_MOI_CAU` từ một câu, tối đa `WEB_TOI_DA_CAU` câu mỗi lượt.
+WEB_GIA_TRANG = 0.0005
+WEB_GIA_BOC = 0.009
+WEB_TU_MOI_CAU = 4
+WEB_TOI_DA_CAU = 4
+WEB_KQ_MOI_TRANG = 10
+WEB_BOC_MAC_DINH = 10
+#: `theo_doi.WEB_GIO_GIAN` — ngoài chiến dịch Mark chạy web tối đa một lượt / 20 giờ (≈ 1 lượt mỗi
+#: ngày có lượt quét); trong khung chiến dịch thì MỌI lượt.
+WEB_GIO_GIAN = 20
+
+
+def _bo_dau_web(s: str) -> str:
+    """Bản sao `nguon_web._bo_dau`: bỏ dấu + thường hoá TỪNG ký tự (đ/Đ -> d)."""
+    ra = []
+    for c in s or "":
+        if c in "đĐ":
+            ra.append("d")
+            continue
+        g = unicodedata.normalize("NFD", c)
+        ra.append((g[0] if g and unicodedata.category(g[0]) != "Mn" else c).lower()[:1] or c)
+    return "".join(ra)
+
+
+def _tu_web(s: str) -> list[str]:
+    """Bản sao `nguon_web._tu`: các chữ/số (bỏ dấu) của một từ khoá."""
+    return re.findall(r"[^\W_]+", _bo_dau_web(s))
+
+
+def rut_gon_web(tu_khoa: list[str]) -> list[str]:
+    """Bản sao `nguon_web.rut_gon_tu_khoa`: bỏ rỗng, bỏ trùng (không phân biệt hoa thường, giữ
+    bản gặp trước), bỏ từ khoá đã được từ khoá khác phủ — có "hapas" thì "túi hapas", "hapas.vn"
+    thừa (tập chữ của từ khoá kia là tập con THẬT SỰ)."""
+    sach: list[str] = []
+    for t in tu_khoa or []:
+        t = str(t).strip()
+        if t and _tu_web(t) and t.lower() not in (x.lower() for x in sach):
+            sach.append(t)
+    ra = []
+    for t in sach:
+        ti = set(_tu_web(t))
+        if not any(x is not t and set(_tu_web(x)) < ti for x in sach):
+            ra.append(t)
+    return ra
+
+
+def so_cau_web(tu: list[str]) -> int:
+    """Bản sao `nguon_web.so_cau_tim`: ⌈từ khoá rút gọn / 4⌉ câu tìm, tối đa 4."""
+    n = len(rut_gon_web(tu))
+    return min(WEB_TOI_DA_CAU, math.ceil(n / WEB_TU_MOI_CAU)) if n else 0
+
+
+def uoc_web(so_bai: int, tu: list[str], boc: int = WEB_BOC_MAC_DINH) -> float:
+    """Bản sao `theo_doi.uoc_web`: USD TỐI ĐA một lượt Báo & Web = (câu × ⌈số kết quả / 10⌉ trang
+    × 0,0005 + `boc` trang đọc dự phòng × 0,009) × 1,3; 0 khi không có câu tìm hoặc số bài ≤ 0."""
+    cau = so_cau_web(tu)
+    if so_bai <= 0 or cau <= 0:
+        return 0.0
+    trang = max(1, math.ceil(max(0, int(so_bai)) / WEB_KQ_MOI_TRANG))
+    return round((cau * trang * WEB_GIA_TRANG + max(0, int(boc)) * WEB_GIA_BOC) * HE_SO_UOC, 4)
 
 
 def uoc_tu_khoa_luot(so_bai: int, tu: list[str]) -> float:
@@ -213,7 +278,8 @@ def du_bao(nguon: list[dict], da_tieu: float, tran_du_an: float, tran_platform: 
 
 
 # ───── cấu hình theo nền tảng (bản sao `theo_doi.cau_hinh` — đợt 2e, bài thử đối chiếu) ─────
-NEN_TANG = ("tiktok", "facebook", "instagram", "youtube", "threads")
+#: "web" (Báo & Web, 16/10/2026): chỉ tìm theo từ khoá — không cào bình luận (giá bình luận 0).
+NEN_TANG = ("tiktok", "facebook", "instagram", "youtube", "threads", "web")
 #: `theo_doi.MAC_DINH_TAT` — nền tảng TẮT khi `du_an.cau_hinh` chưa ghi `bat` (Threads, 16/10/2026:
 #: deploy không tự tiêu tiền; chủ dự án bật trên trang này).
 MAC_DINH_TAT = ("threads",)
@@ -250,9 +316,15 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
     if nhom == "tu_khoa":
         chung = _kep(du_an.get("tk_so_bai") or 0, *GIOI_HAN["tk_so_bai"], 0)
         so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["tk_so_bai"], chung)
-        return {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and so > 0,
-                "so_bai": so,
-                "so_tu": _so_rieng(rieng.get("so_tu"), *GIOI_HAN["tk_so_tu"], TK_IG_TOI_DA_TU)}
+        ra = {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and so > 0,
+              "so_bai": so,
+              "so_tu": _so_rieng(rieng.get("so_tu"), *GIOI_HAN["tk_so_tu"], TK_IG_TOI_DA_TU)}
+        if p == "web":
+            # Trần trang đọc dự phòng mỗi lượt: 0 = tắt (hợp lệ, không rơi về mặc định).
+            b = rieng.get("boc")
+            ra["boc"] = (WEB_BOC_MAC_DINH if isinstance(b, bool) or b is None
+                         else _kep(b, 0, SO_TOI_DA, WEB_BOC_MAC_DINH))
+        return ra
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
     moi_chung = _kep(du_an.get("bl_moi_bai") or 0, *GIOI_HAN["bl_moi_bai"], 0)
@@ -308,8 +380,10 @@ def tu_gui(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU, so_bai: int = 0)
 
 
 def uoc_tk_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU,
-                    fb_toi_da: int = TK_FB_TOI_DA) -> float:
-    """Bản sao `theo_doi.uoc_tu_khoa_nen_tang`."""
+                    fb_toi_da: int = TK_FB_TOI_DA, boc: int = WEB_BOC_MAC_DINH) -> float:
+    """Bản sao `theo_doi.uoc_tu_khoa_nen_tang` (web: `uoc_web` với trần đọc dự phòng `boc`)."""
+    if p == "web":
+        return uoc_web(so_bai, tu, boc)
     q = tu_gui(p, tu, so_tu, so_bai)
     gia = TK_GIA.get(p, 0.0)
     if not q or not gia or so_bai <= 0:
@@ -328,19 +402,26 @@ def bang_cau_hinh(du_an: dict) -> dict:
     """Cấu hình hiệu lực + ước tính USD/lượt từng nền tảng cho trang Ngân sách. Dashboard không
     biết gói Apify nên Facebook tính theo đúng số bài cấu hình (mức TRẦN; gói Free thực tế chỉ
     lấy tối đa `TK_FB_TOI_DA` bài) — báo cao hơn còn hơn báo thiếu. `tu_khoa[p]["so_tu_gui"]`:
-    số từ khoá THẬT SỰ tìm của nền tảng (Threads ít hơn khi số bài < 10 × số từ)."""
+    số từ khoá THẬT SỰ tìm của nền tảng (Threads ít hơn khi số bài < 10 × số từ; web: số từ khoá
+    sau rút gọn, kèm `so_cau` câu tìm). `uoc_web` = phần Báo & Web của `uoc_tk` (ngoài chiến dịch
+    chạy ≤ 1 lượt/ngày — `luot_web_thuong`), `uoc_tk_mxh` = phần còn lại (chạy mọi lượt)."""
     tu = tu_tim(du_an)
     tk = {p: {**cau_hinh(du_an, "tu_khoa", p)} for p in NEN_TANG}
     bl = {p: {**cau_hinh(du_an, "binh_luan", p)} for p in NEN_TANG}
     for p in NEN_TANG:
         tk[p]["uoc"] = (uoc_tk_nen_tang(p, tk[p]["so_bai"], tu, tk[p]["so_tu"],
-                                        fb_toi_da=GIOI_HAN["tk_so_bai"][1])
+                                        fb_toi_da=GIOI_HAN["tk_so_bai"][1],
+                                        boc=tk[p].get("boc", WEB_BOC_MAC_DINH))
                         if tk[p]["bat"] else 0.0)
-        tk[p]["so_tu_gui"] = len(tu_gui(p, tu, tk[p]["so_tu"], tk[p]["so_bai"]))
+        tk[p]["so_tu_gui"] = (len(rut_gon_web(tu)) if p == "web"
+                              else len(tu_gui(p, tu, tk[p]["so_tu"], tk[p]["so_bai"])))
         bl[p]["uoc"] = (uoc_binh_luan_luot(bl[p]["so_bai"], bl[p]["moi_bai"], p)
                         if bl[p]["bat"] else 0.0)
+    tk["web"]["so_cau"] = so_cau_web(tu)
+    uoc_tk = round(sum(x["uoc"] for x in tk.values()), 4)
     return {"tu_khoa": tk, "binh_luan": bl, "so_tu_khoa": len(tu),
-            "uoc_tk": round(sum(x["uoc"] for x in tk.values()), 4),
+            "uoc_tk": uoc_tk, "uoc_web": tk["web"]["uoc"],
+            "uoc_tk_mxh": round(uoc_tk - tk["web"]["uoc"], 4),
             "uoc_bl": round(sum(x["uoc"] for x in bl.values()), 4)}
 
 
@@ -367,10 +448,37 @@ def nguon_moi_luot(nguon: list[dict]) -> float:
 def uoc_lich(lich: dict, bang: dict, nguon: list[dict]) -> dict:
     """USD TỐI ĐA một lượt của một lịch: tìm theo từ khoá + cào bình luận (`bang_cau_hinh` — chạy
     mỗi lượt) + phần nguồn khi lịch quét mọi nguồn. Lịch thường: nguồn tốn theo CHU KỲ của nguồn
-    (đã nằm trong `du_bao`), không nhân theo số lượt."""
-    tk_bl = round(float(bang.get("uoc_tk") or 0) + float(bang.get("uoc_bl") or 0), 4)
+    (đã nằm trong `du_bao`), không nhân theo số lượt.
+    Báo & Web (`web` = USD một lượt web): lịch chiến dịch chạy web MỌI lượt nên nằm trong
+    `tk_bl` / `moi_luot`; lịch thường chỉ ≤ 1 lượt web mỗi ngày (`WEB_GIO_GIAN`) nên KHÔNG nằm
+    trong `moi_luot` — tính riêng theo `luot_web_thuong` (`du_bao_lich`)."""
+    web = round(float(bang.get("uoc_web") or 0), 4)
+    cd = lich.get("kieu") == "chien_dich"
+    tk = float(bang.get("uoc_tk") or 0) - (0.0 if cd else web)
+    tk_bl = round(max(0.0, tk) + float(bang.get("uoc_bl") or 0), 4)
     ng = nguon_moi_luot(nguon) if lich.get("quet_moi_nguon") else 0.0
-    return {"tk_bl": tk_bl, "nguon": ng, "moi_luot": round(tk_bl + ng, 4)}
+    return {"tk_bl": tk_bl, "nguon": ng, "moi_luot": round(tk_bl + ng, 4), "web": web,
+            "web_moi_luot": cd}
+
+
+def luot_web_thuong(cac_lich: list[dict], tu: datetime.datetime, den: datetime.datetime) -> int:
+    """Số lượt Báo & Web của các LỊCH THƯỜNG đang bật trong (tu, den]: ngoài chiến dịch Mark chạy
+    web tối đa một lượt / `WEB_GIO_GIAN` giờ -> đếm số NGÀY (giờ VN) có ít nhất một mốc lịch
+    thường ngoài khung chiến dịch (≤ min(số lượt, số ngày)). Lượt chiến dịch đã tính web trong
+    `uoc_lich` nên không đếm ở đây."""
+    from dashboard import lich_quet as LQ
+    khung = [k for x in cac_lich if x.get("bat") and (k := LQ.khung_chien_dich(x))]
+    ngay: set = set()
+    for x in cac_lich:
+        if not x.get("bat") or x.get("kieu") == "chien_dich":
+            continue
+        for m in LQ.lap_moc(x.get("kieu") or "", x.get("cau_hinh") or {}, tu):
+            if m > den:
+                break
+            d = m.astimezone(VN).date()
+            if d not in ngay and not any(a <= m <= b for a, b in khung):
+                ngay.add(d)
+    return len(ngay)
 
 
 def du_bao_lich(cac_lich: list[dict], bang: dict, nguon: list[dict],
@@ -379,7 +487,11 @@ def du_bao_lich(cac_lich: list[dict], bang: dict, nguon: list[dict],
     VN) và trong 30 ngày tới (mốc lịch thường trong khung chiến dịch không tính — nhường), cùng
     phần nguồn thêm của lịch quét mọi nguồn. Không có lịch đang bật -> {"co_lich": False}
     (trang Ngân sách giữ giả định cũ: 1 lượt/ngày từ lịch console).
-    -> {co_lich, luot_con_lai, luot_30, nguon_them, nguon_them_30, theo_lich: {id: lượt tháng}}."""
+    Báo & Web: `luot_web_con_lai` / `luot_web_30` = số lượt web (≤ 1/ngày theo lịch thường —
+    `luot_web_thuong` — + mọi lượt chiến dịch); `web_them` / `web_them_30` = USD web của lịch
+    thường (phần chiến dịch đã nằm trong `moi_luot` của lịch đó).
+    -> {co_lich, luot_con_lai, luot_30, nguon_them, nguon_them_30, theo_lich: {id: lượt tháng},
+        luot_web_con_lai, luot_web_30, web_them, web_them_30}."""
     from dashboard import lich_quet as LQ
     if not any(x.get("bat") for x in cac_lich):
         return {"co_lich": False}
@@ -389,7 +501,14 @@ def du_bao_lich(cac_lich: list[dict], bang: dict, nguon: list[dict],
     ba_muoi = LQ.dem_luot_du_an(cac_lich, bay_gio, bay_gio + datetime.timedelta(days=30))
     ng = nguon_moi_luot(nguon)
     moi = {x.get("id") for x in cac_lich if x.get("bat") and x.get("quet_moi_nguon")}
+    cd = {x.get("id") for x in cac_lich if x.get("bat") and x.get("kieu") == "chien_dich"}
+    w_thang = luot_web_thuong(cac_lich, bay_gio, het)
+    w_30 = luot_web_thuong(cac_lich, bay_gio, bay_gio + datetime.timedelta(days=30))
+    web = float(bang.get("uoc_web") or 0)
     return {"co_lich": True, "luot_con_lai": sum(thang.values()),
+            "luot_web_con_lai": w_thang + sum(n for i, n in thang.items() if i in cd),
+            "luot_web_30": w_30 + sum(n for i, n in ba_muoi.items() if i in cd),
+            "web_them": round(w_thang * web, 4), "web_them_30": round(w_30 * web, 4),
             "luot_30": sum(ba_muoi.values()),
             "nguon_them": round(sum(n * ng for i, n in thang.items() if i in moi), 4),
             "nguon_them_30": round(sum(n * ng for i, n in ba_muoi.items() if i in moi), 4),
@@ -407,4 +526,8 @@ def hang_so_cho_trinh_duyet() -> dict:
             "mac_dinh_tat": MAC_DINH_TAT,
             # TikTok tìm theo từ khoá tính theo yêu cầu (16/10/2026) — `uoc_tk_nen_tang`.
             "tk_tt_yeu_cau": TK_TT_YEU_CAU, "tk_tt_moi_trang": TK_TT_MOI_TRANG,
-            "tk_lam_moi": TK_LAM_MOI}
+            "tk_lam_moi": TK_LAM_MOI,
+            # Báo & Web (16/10/2026) — `uoc_web`, `rut_gon_web`.
+            "web": {"gia_trang": WEB_GIA_TRANG, "gia_boc": WEB_GIA_BOC,
+                    "tu_moi_cau": WEB_TU_MOI_CAU, "toi_da_cau": WEB_TOI_DA_CAU,
+                    "kq_moi_trang": WEB_KQ_MOI_TRANG, "boc_mac_dinh": WEB_BOC_MAC_DINH}}

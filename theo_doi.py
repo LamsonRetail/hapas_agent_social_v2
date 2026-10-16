@@ -42,6 +42,7 @@ import time
 
 import apify_tool as A
 import lang_nghe_db as K
+import nguon_web as W
 import theo_doi_api as TDA
 
 _VN = datetime.timezone(datetime.timedelta(hours=7))
@@ -49,7 +50,7 @@ _VN = datetime.timezone(datetime.timedelta(hours=7))
 #: Threads cuối: phí khởi động mỗi lượt actor cao nhất (0,08 USD, gói FREE).
 THU_TU = ("youtube", "instagram", "tiktok", "facebook", "threads")
 _TEN = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok", "facebook": "Facebook",
-        "threads": "Threads"}
+        "threads": "Threads", "web": "Báo & Web"}
 #: Giá đo thật 25/09/2026 (`account_tool._GIA`): Facebook theo bài, Instagram theo tài khoản
 #: (actor trả 12 bài mới nhất). YouTube Data API miễn phí. Threads (16/10/2026, chế độ "user" của
 #: `apify_tool._ACTORS["threads"]`): 0,0025 USD/bài = `apify_tool._UNIT_COST`. TikTok từ
@@ -797,7 +798,7 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
 # Threads (16/10/2026): cùng bộ tìm `_FETCH["threads"]`, đứng cuối (phí khởi động cao nhất); mỗi
 # từ khoá actor lấy ≥ 10 bài nên lượt chỉ tìm `so_bai // 10` từ ĐẦU (≥ 1) — tổng bài ≤ số bài đặt,
 # ước tính (n × giá + phí khởi động) × 1,3 như nền tảng khác (`_tu_cho`).
-TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram", "threads")
+TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram", "threads", "web")
 #: Threads = `apify_tool._UNIT_COST` / `_START_COST` (4 GB × 0,02 USD, gói FREE).
 # TikTok từ 16/10/2026: TikTok API, tính theo YÊU CẦU (0,002 USD / trang ≤30 bài, mỗi từ khoá
 # ≥1 trang) — `_TK_GIA["tiktok"]` chỉ là sổ tạm theo bài; ước tính dùng `uoc_tu_khoa_nen_tang`.
@@ -824,6 +825,21 @@ TK_NGAY_TOI_DA = 30
 TK_NGAY_TOI_THIEU = 3
 TK_NGAY_CHONG = 1
 TK_YT_MOI_TRANG = 50         # search.list trả tối đa 50 video mỗi trang (100 đơn vị quota)
+# Báo & Web (16/10/2026, `nguon_web.py`, thiết kế ở docs/lang-nghe-web.md). Chủ dự án 16/10: BẬT
+# cho HAPAS, quét MỘT lượt/ngày (cửa sổ lùi 2 ngày); trong chiến dịch (`lich_quet` kiểu
+# chien_dich đang chạy) MỌI lượt đều tìm web, thêm khẩu hiệu chiến dịch làm từ khoá. Mặc định
+# BẬT (không nằm trong `MAC_DINH_TAT`) vì chủ dự án đã bật; vẫn dưới công tắc tổng `tk_bat`, trần
+# tháng dự án và trần console. `so_bai` = số kết quả Google mỗi câu tìm (10/trang); `boc` = trần
+# trang đọc lại qua actor dự phòng mỗi lượt (0 = tắt). Giá chép sang `dashboard/chi_phi.py`.
+WEB_GIA_TRANG = W.GIA_TRANG          # 0,0005 USD / trang kết quả Google (10 link)
+WEB_GIA_BOC = W.GIA_BOC              # 0,009 USD / trang đọc qua website-content-crawler
+WEB_TU_MOI_CAU = W.TU_MOI_CAU        # 4 từ khoá gộp OR mỗi câu tìm
+WEB_TOI_DA_CAU = W.TOI_DA_TRUY_VAN   # 4 câu tìm mỗi lượt
+WEB_KQ_MOI_TRANG = W.KQ_MOI_TRANG    # 10
+WEB_BOC_MAC_DINH = W.BOC_MAC_DINH    # 10 trang
+WEB_GIO_GIAN = 20                    # giờ tối thiểu giữa hai lượt web ngoài chiến dịch
+WEB_NGAY_CHONG = 2                   # cửa sổ ngày lùi 2 ngày (báo lên Google chậm 1–24 giờ)
+WEB_CHUA_GIAY_AI = 150               # giây chừa cho AI + ghi kho sau khi đọc trang
 
 # ───────────────────────────── cấu hình theo nền tảng (đợt 2e, 15/10/2026) ─────────────────────────────
 # Chủ dự án 15/10: "không có giới hạn" — mọi số thu thập TUỲ CHỈNH được trên dashboard (không
@@ -871,9 +887,15 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
     if nhom == "tu_khoa":
         chung = _kep(du_an.get("tk_so_bai") or 0, *GIOI_HAN["tk_so_bai"], 0)
         so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["tk_so_bai"], chung)
-        return {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and so > 0,
-                "so_bai": so,
-                "so_tu": _so_rieng(rieng.get("so_tu"), *GIOI_HAN["tk_so_tu"], TK_IG_TOI_DA_TU)}
+        ra = {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and so > 0,
+              "so_bai": so,
+              "so_tu": _so_rieng(rieng.get("so_tu"), *GIOI_HAN["tk_so_tu"], TK_IG_TOI_DA_TU)}
+        if p == "web":
+            # 0 = tắt đọc dự phòng (khác số bài: 0 ở đây là giá trị hợp lệ, không rơi về mặc định).
+            b = rieng.get("boc")
+            ra["boc"] = (WEB_BOC_MAC_DINH if isinstance(b, bool) or b is None
+                         else _kep(b, 0, SO_TOI_DA, WEB_BOC_MAC_DINH))
+        return ra
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
     moi_chung = _kep(du_an.get("bl_moi_bai") or 0, *GIOI_HAN["bl_moi_bai"], 0)
@@ -919,8 +941,16 @@ def _tu_cho(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU, so_bai: int = 0
     return tu
 
 
+def uoc_web(so_bai: int, tu: list[str], boc: int = WEB_BOC_MAC_DINH) -> float:
+    """USD TỐI ĐA một lượt Báo & Web: ⌈từ khoá rút gọn / 4⌉ câu (≤ 4) × ⌈số kết quả / 10⌉ trang ×
+    0,0005 + `boc` trang dự phòng × 0,009, nhân 1,3 (= `nguon_web.uoc_tu_khoa`). Đọc HTTP: 0."""
+    return W.uoc_tu_khoa(tu, so_bai, boc)
+
+
 def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU,
                          fb_toi_da: int = TK_FB_TOI_DA) -> float:
+    if p == "web":
+        return uoc_web(so_bai, tu)
     q = _tu_cho(p, tu, so_tu, so_bai)
     if not q or not _TK_GIA.get(p) or so_bai <= 0:
         return 0.0
@@ -945,7 +975,9 @@ def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA) -> float:
     tong = 0.0
     for p in TK_NEN_TANG:
         c = cau_hinh(du_an, "tu_khoa", p)
-        if c["bat"]:
+        if c["bat"] and p == "web":
+            tong += uoc_web(c["so_bai"], tu, c["boc"])
+        elif c["bat"]:
             tong += uoc_tu_khoa_nen_tang(p, c["so_bai"], tu, c["so_tu"], fb_toi_da)
     return round(tong, 4)
 
@@ -1025,8 +1057,8 @@ def dau_tk(q: list[str], lim: int) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
 
 
-def cua_so_tk(moc: dict | None, dau: str,
-              bay_gio: datetime.datetime) -> tuple[datetime.datetime, int, str]:
+def cua_so_tk(moc: dict | None, dau: str, bay_gio: datetime.datetime,
+              chong: float = TK_NGAY_CHONG) -> tuple[datetime.datetime, int, str]:
     """Cửa sổ ngày của lượt tìm một nền tảng. -> (từ lúc — 0 giờ của ngày đó, số ngày, lý do).
 
     Có mốc cùng dấu: số ngày = ceil(khoảng từ lượt tìm thành công trước + `TK_NGAY_CHONG`), kẹp
@@ -1047,7 +1079,7 @@ def cua_so_tk(moc: dict | None, dau: str,
     if luc is None:
         ngay = TK_NGAY_TOI_DA
     else:
-        ngay = math.ceil((bay_gio - luc).total_seconds() / 86400 + TK_NGAY_CHONG)
+        ngay = math.ceil((bay_gio - luc).total_seconds() / 86400 + chong)
         ngay = max(TK_NGAY_TOI_THIEU, min(TK_NGAY_TOI_DA, ngay))
     d_from = (bay_gio - datetime.timedelta(days=ngay)).replace(hour=0, minute=0, second=0,
                                                                microsecond=0)
@@ -1090,6 +1122,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     da_xong = {ph["nen_tang"] for ph in phan if ph.get("loai") == "moc"}
     co_run = {ph["nen_tang"] for ph in phan if ph.get("run_id")}
     hits: list[tuple] = []
+    web_cho: list[tuple] = []        # (hits web, từ khoá web, đã loại) — sau mạng xã hội
     try:
         for p in TK_NEN_TANG:
             if p in da_xong or not cfg[p]["bat"]:
@@ -1111,12 +1144,24 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             dung = A._youtube_co_key() if p == "youtube" else _nen_tang_dung_duoc(p)[0]
             if not dung:
                 continue
-            uoc = uoc_tu_khoa_nen_tang(p, so_bai, tu, cfg[p]["so_tu"], fb_toi_da)
+            uoc = (uoc_web(so_bai, tu, cfg[p]["boc"]) if p == "web"
+                   else uoc_tu_khoa_nen_tang(p, so_bai, tu, cfg[p]["so_tu"], fb_toi_da))
+            if p == "web":
+                # Trần trang dự phòng là TRẦN, không phải tiền chắc tiêu: chỉ cần đủ cho phần
+                # tìm Google; phần đọc dự phòng tự co theo phần còn lại (`nguon_web.thu_thap`).
+                uoc = uoc_web(so_bai, tu, 0)
             if uoc > min(con, _con_viec(v)) + 1e-9 or v.con_giay() < _CHUA_GIAY_CUOI + 60:
                 ly = "hết giờ" if v.con_giay() < _CHUA_GIAY_CUOI + 60 else "hết ngân sách"
                 tk["ghi_chu"].append(f"tìm {_TEN[p]}: bỏ qua ({ly})")
                 _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p,
                                   "trang_thai": "loi", "ma": "NGAN_SACH", "usd_so": 0.0})
+                continue
+            if p == "web":
+                tien, web_hits = _tim_web(v, du_an, luot, cfg[p], tu, min(con, _con_viec(v)),
+                                          han, tk, bay_gio, moc_cu.get(p), moc_moi, tu_pv)
+                con = max(0.0, con - tien)
+                tk["usd"] += tien
+                web_cho.append(web_hits)
                 continue
             lim_cfg = min(so_bai, fb_toi_da) if p == "facebook" else so_bai
             dau = dau_tk(q, lim_cfg)
@@ -1199,9 +1244,19 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                               "luot": luot, "xin": lim, "ve": len(got)}
                 if xoay is not None:
                     moc_moi[p]["xoay"] = xoay
-        tk["lay"] = len(hits)
+        tk["lay"] = len(hits) + sum(len(x[0]) for x in web_cho)
         if hits:
             _tach_va_giu(du_an, luot, hits, tu, han, tk)
+        for h, tu_web, bo in web_cho:
+            # Từ khoá web có thể thêm khẩu hiệu chiến dịch -> sổ "đã loại" RIÊNG ("<mã>:web"),
+            # không đè sổ của mạng xã hội (`theo_doi_api.ghi_loai` giữ một dấu mỗi khoá dự án).
+            # Bài `nguon_web` loại theo luật (không nhắc, từ loại trừ, spam) vào cùng sổ.
+            tk["_bi_loai"] = list(bo)
+            if h:
+                _tach_va_giu(du_an, luot, h, tu_web, han, tk, ma_loai=f"{ma}:web")
+            con_lai = tk.pop("_bi_loai", None)
+            if con_lai:
+                TDA.ghi_loai(f"{ma}:web", TDA.dau_loai(du_an, tu_web), con_lai, tu_pv)
         for p, m in moc_moi.items():
             f = tk["pheu"].get(p) or {}
             m["huu_ich"] = int(f.get("moi", 0)) + int(f.get("cap_nhat", 0))
@@ -1250,8 +1305,138 @@ def _tien_tim_tiktok(phan_moi: list[dict], got: list, loi, tran_du_phong) -> flo
 TT_ACTOR = "scraptik~tiktok-api"     # = tiktok_api.ACTOR (bài thử đối chiếu)
 
 
+# ───────────────────────────── Báo & Web (16/10/2026) ─────────────────────────────
+def _cot_web(d: dict) -> dict:
+    """Cột riêng của bài web (`bai.kieu_trang/muc_nhac/la_pr`); bài mạng xã hội: NULL."""
+    w = d.get("_web") if isinstance(d.get("_web"), dict) else {}
+    return {"kieu_trang": w.get("kieu_trang") or None, "muc_nhac": w.get("muc_nhac") or None,
+            "la_pr": bool(w["la_pr"]) if "la_pr" in w else None}
+
+
+def khau_hieu_chien_dich(ma: str, bay_gio: datetime.datetime) -> tuple[dict | None, list[str]]:
+    """(lịch chiến dịch ĐANG CHẠY của dự án, khẩu hiệu của nó). Khẩu hiệu ghi ở
+    `lich_quet.cau_hinh.tu_khoa_them` của lịch chiến dịch — gắn với đúng khung chiến dịch nên tự
+    thôi khi chiến dịch hết, không phải nhớ gỡ khỏi từ khoá dự án (và không làm đắt lượt tìm
+    mạng xã hội: chỉ web dùng, mỗi câu tìm 0,0005 USD/trang). Lịch hỏng: (None, [])."""
+    try:
+        from dashboard import lich_quet as LQ
+        cd = LQ.chien_dich_dang_chay(K.lich_chien_dich(ma), bay_gio)
+    except Exception as e:      # lịch hỏng không chặn lượt tìm
+        if type(e).__name__ == "MatQuyen":
+            raise
+        print(f"[theo_doi] web: không đọc được lịch chiến dịch: {type(e).__name__}", flush=True)
+        return None, []
+    if not cd:
+        return None, []
+    ch = cd.get("cau_hinh") if isinstance(cd.get("cau_hinh"), dict) else {}
+    ra: list[str] = []
+    for x in ch.get("tu_khoa_them") or [] if isinstance(ch.get("tu_khoa_them"), list) else []:
+        x = " ".join(str(x).split())[:80]
+        if x and A._norm(x) not in {A._norm(y) for y in ra}:
+            ra.append(x)
+    return cd, ra[:10]
+
+
+def _da_biet_web(ma: str, du_an: dict, tu_web: list[str], tu_pv: datetime.datetime):
+    """Hàm cho `nguon_web.thu_thap`: khoá bài web đã có trong kho / đã bị loại (sổ riêng của web)
+    -> không tải lại, không đọc dự phòng lại (đỡ tiền mỗi ngày)."""
+    da_loai = TDA.doc_loai(f"{ma}:web", TDA.dau_loai(du_an, tu_web), tu_pv)
+
+    def hoi(khoa: list[str]) -> dict[str, str]:
+        ra = {k: "da_loai_truoc" for k in khoa if k in da_loai}
+        try:
+            ra.update({k: "da_co" for k in K.khoa_da_co(ma, khoa)})
+        except Exception as e:  # kho hỏng: coi như chưa biết (tải lại, không mất bài)
+            if type(e).__name__ == "MatQuyen":
+                raise
+            print(f"[theo_doi] web: không đọc được kho ({type(e).__name__})", flush=True)
+        return ra
+    return hoi
+
+
+def _tim_web(v, du_an: dict, luot: int, cfg: dict, tu: list[str], con: float, han: float,
+             tk: dict, bay_gio: datetime.datetime, moc: dict | None, moc_moi: dict,
+             tu_pv: datetime.datetime) -> tuple[float, tuple[list, list[str], list]]:
+    """Phần `tk-web` của lượt tìm. -> (USD theo sổ, (hits đã lọc luật, từ khoá web, bài
+    `nguon_web` loại theo luật — ghi sổ "đã loại" của web)).
+
+    Nhịp: ngoài chiến dịch tối đa MỘT lượt / `WEB_GIO_GIAN` giờ (chủ dự án 16/10: hằng ngày);
+    trong chiến dịch mọi lượt. Cửa sổ ngày gửi Google = từ lượt web thành công trước lùi
+    `WEB_NGAY_CHONG` ngày (lần đầu / đổi từ khoá: 30 ngày); bài giữ trong cả PHẠM VI theo dõi.
+    Tiền: mỗi run Apify ghi phần có run id ngay khi tạo (`_KHI_CO_RUN`, chốt tiền thật theo run
+    id); sổ trong lượt = trang Google về × 0,0005 + trang dự phòng (giá đo, không thấp hơn thời
+    gian chạy × giá giây) — cả hai có `maxTotalChargeUsd`, phần dự phòng kẹp trong phần còn."""
+    ma = du_an["ma"]
+    cd, khau_hieu = khau_hieu_chien_dich(ma, bay_gio)
+    tu_web = W.rut_gon_tu_khoa([*tu, *khau_hieu]) or tu
+    if khau_hieu:
+        tk["ghi_chu"].append(f"tìm Báo & Web: chiến dịch #{cd.get('id')} thêm khẩu hiệu "
+                             f"{', '.join(khau_hieu)[:80]}")
+    luc_truoc = None
+    try:
+        luc_truoc = datetime.datetime.fromisoformat(str((moc or {}).get("luc") or ""))
+    except ValueError:
+        pass
+    if luc_truoc is not None and not cd and luc_truoc.tzinfo \
+            and bay_gio - luc_truoc < datetime.timedelta(hours=WEB_GIO_GIAN):
+        _them_phan_tk(v, {"id": "tk-web", "loai": "moc", "nen_tang": "web", "trang_thai": "xong",
+                          "ma": "CHUA_TOI_LUOT", "usd_so": 0.0})
+        tk["ghi_chu"].append(f"tìm Báo & Web: đã quét lúc {luc_truoc.astimezone(_VN):%d/%m %H:%M}"
+                             f" — một lượt mỗi ngày ngoài chiến dịch")
+        return 0.0, ([], tu_web, [])
+    han_web = han - WEB_CHUA_GIAY_AI - _CHUA_GIAY_CUOI
+    if han_web - time.monotonic() < 60:
+        tk["ghi_chu"].append("tìm Báo & Web: bỏ qua (hết giờ)")
+        _them_phan_tk(v, {"id": "tk-web", "loai": "moc", "nen_tang": "web", "trang_thai": "loi",
+                          "ma": "QUA_GIO", "usd_so": 0.0})
+        return 0.0, ([], tu_web, [])
+    so_trang = W.so_trang_cua(cfg["so_bai"])
+    dau = dau_tk(tu_web, cfg["so_bai"])
+    d_from, ngay, ly_cs = cua_so_tk(moc, dau, bay_gio, chong=WEB_NGAY_CHONG)
+    A._NEN_TANG.set("web")
+    A._HAN_CHOT.set(han_web)
+    A._KHI_CO_RUN.set(lambda run, meta: _them_phan_tk(v, {
+        "id": f"tk-web-{run.get('id')}", "nen_tang": "web", "run_id": run.get("id"),
+        "actor": (meta or {}).get("actor"), "trang_thai": "dang_chay"}))
+    try:
+        hits, wk = W.thu_thap(
+            {**du_an, "tu_khoa": tu}, tu=d_from.date(), den=bay_gio.astimezone(_VN).date(),
+            so_trang=so_trang, con_usd=con, han=han_web, bay_gio=bay_gio, them_tu=khau_hieu,
+            tu_giu=tu_pv, da_biet=_da_biet_web(ma, du_an, tu_web, tu_pv),
+            boc_toi_da=int(cfg.get("boc") or 0))
+    finally:
+        A._KHI_CO_RUN.set(None)
+    loi = wk.get("loi") or None
+    for ph in _phan_tk(v):
+        if ph.get("nen_tang") == "web" and ph.get("run_id") and ph.get("trang_thai") == "dang_chay":
+            v.cap_nhat_phan(ph, trang_thai="xong" if loi is None else "loi")
+    tien = round(float(wk.get("usd_tim") or 0) + float(wk.get("usd_boc") or 0), 4)
+    _them_phan_tk(v, {"id": "tk-web", "loai": "moc", "nen_tang": "web",
+                      "trang_thai": "xong" if loi is None else "loi", "usd_so": tien,
+                      "so_item": int(wk["pheu"].get("serp") or 0),
+                      "cua_so": {"tu": d_from.isoformat(timespec="minutes"), "ngay": ngay,
+                                 "ly_do": ly_cs}})
+    tk["ghi_chu"].extend(f"tìm Báo & Web: {x}" for x in wk.get("ghi_chu") or [])
+    if loi is not None:
+        tk["ghi_chu"].append(f"tìm Báo & Web: {loi}")
+        return tien, ([], tu_web, [])
+    w = wk["pheu"]
+    ph_p = tk["pheu"]["web"] = _pheu_moi(ngay, ly_cs)
+    ph_p.update(ve=w["serp"], xin=cfg["so_bai"], xin_ly_do=f"{len(wk['truy_van'])} câu tìm",
+                pham_vi=len(hits), ngoai_pham_vi=w["qua_cu"] + w["khong_ngay"],
+                da_loai_truoc=w["da_loai_truoc"], loai_tru=w["loai_tru"], spam=w["spam"],
+                khong_nhac=w["khong_nhac"], trung=w["trung"], cap_nhat=w["da_co"],
+                web={k: w[k] for k in ("mxh", "tmdt", "nha", "robots_chan", "tai_loi",
+                                       "boc_du_phong", "boc_duoc", "chi_trich")})
+    # Mốc dời cả khi Google trả 0 kết quả (cửa sổ 2–3 ngày không có bài là chuyện thường của báo
+    # với một brand) — nếu không, lịch mỗi giờ sẽ tìm web mỗi giờ. Lỗi actor thì không dời.
+    moc_moi["web"] = {"luc": bay_gio.isoformat(timespec="seconds"), "dau": dau,
+                      "luot": luot, "xin": cfg["so_bai"], "ve": w["serp"]}
+    return tien, (hits, tu_web, wk.get("bi_loai") or [])
+
+
 def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
-                 tk: dict) -> None:
+                 tk: dict, ma_loai: str | None = None) -> None:
     """Bài trong phạm vi: ĐÃ CÓ trong kho → cập nhật số liệu + ảnh chụp ngày (`chi_so_ngay`);
     MỚI → `_giu_tu_khoa` (lọc + AI). Xem `theo_doi_api.tach_da_biet`."""
     cap_nhat, hits_moi, trung = TDA.tach_da_biet(
@@ -1266,7 +1451,8 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     tu_pv = datetime.datetime.fromisoformat((tk.get("pham_vi") or {}).get("tu")
                                             or datetime.datetime.now(_VN).isoformat())
     dau = TDA.dau_loai(du_an, tu)
-    da_loai = TDA.doc_loai(du_an["ma"], dau, tu_pv)
+    ma_loai = ma_loai or du_an["ma"]
+    da_loai = TDA.doc_loai(ma_loai, dau, tu_pv)
     if da_loai:
         con = []
         for d, dt in hits_moi:
@@ -1281,7 +1467,7 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         try:
             _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk)
         finally:
-            TDA.ghi_loai(du_an["ma"], dau, tk.pop("_bi_loai", []), tu_pv)
+            TDA.ghi_loai(ma_loai, dau, tk.pop("_bi_loai", []), tu_pv)
 
 
 def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
@@ -1358,6 +1544,7 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
             "binh_luan": _so_hay_none(d.get("comments")),
             "chia_se": _so_hay_none(d.get("shares")),
+            **_cot_web(d),
         })
         ban.append((d, dt))
     tk["giu"] = len(rows)
@@ -1389,7 +1576,18 @@ def _cau_pheu(p: str, f: dict) -> str:
             f"spam {f.get('spam', 0)}, "
             f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
             + (f", không nhắc từ khoá {f['khong_nhac']}" if f.get("khong_nhac") else "")
-            + f" → giữ {f.get('giu', 0)} ({f.get('moi', 0)} mới)")
+            + f" → giữ {f.get('giu', 0)} ({f.get('moi', 0)} mới)"
+            + _cau_web(f.get("web")))
+
+
+def _cau_web(w) -> str:
+    """Phần riêng của phễu Báo & Web: trang bỏ qua / bị chặn / đọc dự phòng."""
+    if not isinstance(w, dict):
+        return ""
+    return (f"; trang: bỏ MXH {w.get('mxh', 0)}, sàn {w.get('tmdt', 0)}, miền nhà "
+            f"{w.get('nha', 0)}, robots cấm {w.get('robots_chan', 0)}, bị chặn "
+            f"{w.get('tai_loi', 0)}, đọc dự phòng {w.get('boc_duoc', 0)}/"
+            f"{w.get('boc_du_phong', 0)}, chỉ đoạn trích {w.get('chi_trich', 0)}")
 
 
 def _cau_tk(tk: dict) -> list[str]:

@@ -155,6 +155,11 @@
           <span class="lq-ghep"><input type="number" name="moi" value="{{ bm.moi }}" min="1" max="10080" step="1" inputmode="numeric" aria-label="Khoảng cách giữa hai lượt">
           <select name="don_vi" aria-label="Đơn vị"><option value="phut"{% if bm.don_vi == 'phut' %} selected{% endif %}>phút</option><option value="gio"{% if bm.don_vi == 'gio' %} selected{% endif %}>giờ</option></select></span></label>
       </div>
+      <div class="lq-o-goi-y">
+        <label class="o lq-rong">Từ khoá chiến dịch (tuỳ chọn)
+          <textarea name="tu_khoa_them" rows="2" maxlength="1200" placeholder="vd yêu từ điều nhỏ nhất, do anything for love" autocomplete="off" spellcheck="false">{{ bm.tu_khoa_them }}</textarea></label>
+        <button type="button" class="goi-y" data-goi-y="Chỉ dùng cho tìm Báo &amp; Web trong khung chiến dịch. Cách nhau dấu phẩy hoặc xuống dòng; tối đa {{ TU_KHOA_THEM_TOI_DA }} mục, mỗi mục ≤ {{ TU_KHOA_THEM_DAI }} ký tự.">i</button>
+      </div>
     </fieldset>
 
     <fieldset class="lq-nhom">

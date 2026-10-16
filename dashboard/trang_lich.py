@@ -109,7 +109,7 @@ def tong_quan(cac_lich: list[dict], du_an: dict, nguon: list[dict], da_tieu: flo
         return {"co_lich": False, "tran": db["tran"], "da_tieu": float(da_tieu or 0)}
     theo = dl["theo_lich"]
     usd = sum(theo.get(x.get("id"), 0) * CP.uoc_lich(x, bang, nguon)["moi_luot"]
-              for x in cac_lich if x.get("bat"))
+              for x in cac_lich if x.get("bat")) + dl["web_them"]   # + web lịch thường ≤ 1/ngày
     tong = float(da_tieu or 0) + db["con_lai"] + usd
     return {"co_lich": True, "luot": dl["luot_con_lai"], "usd_lich": round(usd, 4),
             "nguon_chu_ky": db["con_lai"], "da_tieu": float(da_tieu or 0), "tong": round(tong, 4),
@@ -153,24 +153,37 @@ def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_
     usd_khac = sum(thang.get(x.get("id"), 0) * CP.uoc_lich(x, bang, nguon)["moi_luot"]
                    for x in khac if x.get("bat"))
     db = CP.du_bao(nguon, da_tieu, float(du_an.get("tran_usd_thang") or 0), tran_pf, bay_gio)
+    # Báo & Web (16/10/2026): lịch thường chạy web ≤ 1 lượt/ngày (`CP.luot_web_thuong`, cả dự án —
+    # hai lịch cùng ngày vẫn một lượt web); lịch chiến dịch đã gồm web trong `moi_luot`.
+    het_thang = _ket_thuc_thang(bay_gio)
+    web_thang = CP.luot_web_thuong(tat_ca, bay_gio, het_thang) * u["web"]
+    rieng = [x for x in khac if x.get("kieu") == "chien_dich"] + [ung_vien]
+    web_ky = web_nay = 0.0
+    if not u["web_moi_luot"] and u["web"]:
+        web_ky = CP.luot_web_thuong(rieng, bay_gio, ky_den) * u["web"]
+        web_nay = CP.luot_web_thuong(rieng, bay_gio, het_thang) * u["web"]
     usd_thang = luot_thang * u["moi_luot"]
-    tong = float(da_tieu or 0) + db["con_lai"] + usd_khac + usd_thang
+    tong = float(da_tieu or 0) + db["con_lai"] + usd_khac + usd_thang + web_thang
     tran = db["tran"]
     vuot = tong > tran + 1e-9
+    ghi_web = (f" · Báo & Web {_usd(u['web'], 3)} tối đa 1 lượt/ngày"
+               if u["web"] and not u["web_moi_luot"] else "")
     chi_phi = [
         {"nhan": "Mỗi lượt (tối đa)", "gia_tri": f"{_usd(u['moi_luot'], 3)} USD",
          "phu": f"tìm từ khoá + bình luận {_usd(u['tk_bl'], 3)}"
-                + (f" + quét mọi nguồn {_usd(u['nguon'], 3)}" if d.get("quet_moi_nguon") else "")},
-        {"nhan": ky_nhan, "gia_tri": f"≈ {_usd(luot_ky * u['moi_luot'])} USD",
+                + (f" + quét mọi nguồn {_usd(u['nguon'], 3)}" if d.get("quet_moi_nguon") else "")
+                + ghi_web},
+        {"nhan": ky_nhan, "gia_tri": f"≈ {_usd(luot_ky * u['moi_luot'] + web_ky)} USD",
          "phu": f"{_so(luot_ky)} lượt"},
         {"nhan": f"Còn lại tháng {bay_gio.astimezone(LQ.VN):%m/%Y}",
-         "gia_tri": f"≈ {_usd(usd_thang)} USD", "phu": f"{_so(luot_thang)} lượt"},
+         "gia_tri": f"≈ {_usd(usd_thang + web_nay)} USD", "phu": f"{_so(luot_thang)} lượt"},
     ]
     ket_luan = (f"Cả tháng tối đa ≈ {_usd(tong)} / {_usd(tran)} USD trần — "
                 + (f"vượt {_usd(tong - tran)} USD, Mark dừng quét khi chạm trần." if vuot
                    else f"trong trần, còn dư {_usd(tran - tong)} USD."))
     cong_thuc = (f"= đã tiêu {_usd(da_tieu)} + nguồn theo chu kỳ {_usd(db['con_lai'])} + lịch "
-                 f"khác {_usd(usd_khac)} + lịch này {_usd(usd_thang)}")
+                 f"khác {_usd(usd_khac)} + lịch này {_usd(usd_thang)}"
+                 + (f" + Báo & Web ngoài chiến dịch {_usd(web_thang)}" if web_thang else ""))
     # ── cảnh báo ──
     cb = []
     if not du_an.get("dang_bat"):

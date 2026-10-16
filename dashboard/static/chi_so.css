@@ -222,6 +222,9 @@ dialog.cs-tam::backdrop { background: rgba(10, 18, 40, .45); }
 .cs-chip--chu-de { background: var(--nhan-nen); color: var(--nhan-dam); }
 .cs-chip--loc { background: transparent; border: 1px dashed var(--truc); color: var(--chu-mo); cursor: help; }
 .cs-chip--nguon { background: transparent; border-color: var(--ke); color: var(--chu-phu); }
+/* Báo & Web (16/10/2026): loại trang + bài PR */
+.cs-chip--web { background: color-mix(in srgb, var(--nt-web) 12%, var(--be-mat)); color: color-mix(in srgb, var(--nt-web) 80%, var(--chu)); }
+.cs-chip--pr { background: var(--cam-nhat); color: var(--cam-chu); font-weight: 700; cursor: help; }
 .cs-chip--dang { background: var(--be-mat); border-color: color-mix(in srgb, var(--nhan) 35%, transparent); color: var(--nhan-dam); padding-right: 2px; font-weight: 650; }
 .cs-chip__x {
   display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0;
@@ -243,6 +246,7 @@ dialog.cs-tam::backdrop { background: rgba(10, 18, 40, .45); }
 .cs-nt--instagram .cs-nt__o { background: var(--nt-instagram); }
 .cs-nt--youtube .cs-nt__o { background: var(--nt-youtube); }
 .cs-nt--threads .cs-nt__o { background: var(--nt-threads); color: var(--nt-threads-chu); }
+.cs-nt--web .cs-nt__o { background: var(--nt-web); color: var(--nt-web-chu); }
 .cs-nt--khac .cs-nt__o { background: var(--chu-mo); }
 .cs-nt__chu { font-size: 12px; color: var(--chu-phu); white-space: nowrap; }
 

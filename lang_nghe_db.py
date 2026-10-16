@@ -190,6 +190,9 @@ _COT_BAI = ("khoa", "nen_tang", "nguon_id", "link", "tac_gia", "tai_khoan", "fol
             "dang_luc", "noi_dung", "hashtag", "khop_tu_khoa", "sac_thai", "chu_de", "ly_do_giu",
             "xem", "thich", "binh_luan", "chia_se", "ma_noi_dung")
 _SO = ("xem", "thich", "binh_luan", "chia_se")
+#: Cột riêng của bài Báo & Web (16/10/2026, `nguon_web`): chỉ đưa vào câu ghi khi dòng có giá trị
+#: — bài mạng xã hội ghi đúng câu lệnh cũ, DB chưa chạy bản schema mới vẫn ghi được bài MXH.
+_COT_WEB = ("kieu_trang", "muc_nhac", "la_pr")
 
 
 def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, int]:
@@ -199,18 +202,21 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
     bài từng vào bằng `theo_doi` thì giữ nguyên kiểu đó (quét từ khoá về sau không hạ cấp)."""
     if not rows:
         return 0, 0
-    cot = ", ".join(_COT_BAI)
-    # Nguồn có thể bị xoá trên dashboard giữa lượt quét: lấy id qua truy vấn con để nguồn đã
-    # xoá thành NULL, không làm hỏng khoá ngoại (và rollback) cả lô bài đã trả tiền.
-    dat = ", ".join("(SELECT id FROM nguon WHERE id = %s)" if k == "nguon_id" else "%s"
-                    for k in _COT_BAI)
     import loc_rac
     moi = cu = 0
     with ket_noi() as c:
         for r in rows:
             r = {**r, "ma_noi_dung": r.get("ma_noi_dung") or loc_rac.ma_noi_dung(
                 r.get("noi_dung") or "", loc_rac.BAI_TRUNG_TOI_THIEU_CHU)}
-            gia_tri = [r.get(k) for k in _COT_BAI]
+            cac = _COT_BAI + tuple(k for k in _COT_WEB if r.get(k) is not None)
+            cot = ", ".join(cac)
+            # Nguồn có thể bị xoá trên dashboard giữa lượt quét: lấy id qua truy vấn con để nguồn
+            # đã xoá thành NULL, không làm hỏng khoá ngoại (và rollback) cả lô bài đã trả tiền.
+            dat = ", ".join("(SELECT id FROM nguon WHERE id = %s)" if k == "nguon_id" else "%s"
+                            for k in cac)
+            them = "".join(f"{k} = COALESCE(EXCLUDED.{k}, bai.{k}), " for k in cac
+                           if k in _COT_WEB)
+            gia_tri = [r.get(k) for k in cac]
             x = c.execute(
                 f"INSERT INTO bai (du_an, kieu_quet, luot_dau, luot_cuoi, {cot}) "
                 f"VALUES (%s, %s, %s, %s, {dat}) "
@@ -223,6 +229,7 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                 "chu_de = COALESCE(EXCLUDED.chu_de, bai.chu_de), "
                 "nguon_id = COALESCE(bai.nguon_id, EXCLUDED.nguon_id), "
                 "ma_noi_dung = COALESCE(EXCLUDED.ma_noi_dung, bai.ma_noi_dung), "
+                f"{them}"
                 "kieu_quet = CASE WHEN bai.kieu_quet = 'theo_doi' THEN 'theo_doi' "
                 "ELSE EXCLUDED.kieu_quet END, "
                 "cap_nhat_cuoi = now(), luot_cuoi = EXCLUDED.luot_cuoi "

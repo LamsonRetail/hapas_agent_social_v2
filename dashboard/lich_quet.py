@@ -17,9 +17,12 @@ Bốn kiểu (giờ Việt Nam UTC+7, không có giờ mùa hè), `cau_hinh` JSO
                mốc tu, tu+N giờ… tới hết `den`, trong các ngày `thu` ([] = mọi ngày).
   • hang_ngay  {"gio": ["07:00", "19:30"], "thu": [...]}   giờ cụ thể, ngày tuỳ chọn.
   • hang_tuan  {"gio": ["09:00"], "thu": [2, 4, 6]}       ngày trong tuần (bắt buộc) + giờ.
-  • chien_dich {"tu_luc": "2026-10-20T08:00", "den_luc": "2026-10-22T22:00", "moi_phut": 60}
+  • chien_dich {"tu_luc": "2026-10-20T08:00", "den_luc": "2026-10-22T22:00", "moi_phut": 60,
+                "tu_khoa_them": ["yêu từ điều nhỏ nhất"]}
                từ lúc → tới lúc, mỗi N phút (≥ 30). Đang diễn ra thì các lịch thường của cùng dự
                án NHƯỜNG (không chạy chồng); qua `den_luc` thì tự hết (mốc kế = None).
+               `tu_khoa_them` (tuỳ chọn, 16/10/2026): khẩu hiệu / hashtag chiến dịch — Mark CHỈ
+               thêm vào tìm Báo & Web trong khung chiến dịch; không có thì không ghi khoá.
 `thu` theo `isoweekday`: 1 = Thứ 2 … 7 = Chủ nhật.
 """
 from __future__ import annotations
@@ -44,6 +47,9 @@ CHIEN_DICH_BAT_DAU_TOI_DA = 365
 TRE_TOI_DA = dt.timedelta(minutes=30)   # mốc lỡ (Mark tắt) còn chạy bù nếu lỡ chưa quá 30 phút
 GAN_QUA = dt.timedelta(minutes=30)      # hai mốc gần hơn thế: lượt sau thường bị bỏ (lượt trước chưa xong)
 TEN_TOI_DA = 100
+#: Từ khoá chiến dịch (`tu_khoa_them`): tối đa chừng này mục, mỗi mục tối đa chừng này ký tự.
+TU_KHOA_THEM_TOI_DA = 10
+TU_KHOA_THEM_DAI = 80
 _NAM_TOI_DA = 2100             # chặn vòng lặp vô hạn / tràn năm với cấu hình hỏng
 _RE_GIO = re.compile(r"(\d{1,2}):(\d{2})")
 _RE_LUC = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::\d{2})?")
@@ -131,12 +137,36 @@ def _bat(v) -> bool:
     return str(v or "").strip().lower() in ("1", "on", "true", "co")
 
 
+def tu_khoa_them(v) -> list[str]:
+    """Ô "Từ khoá chiến dịch" (chuỗi cách nhau dấu phẩy / xuống dòng, hoặc danh sách) -> danh
+    sách đã gọn khoảng trắng, bỏ rỗng, bỏ trùng không phân biệt hoa thường (giữ bản gặp trước).
+    Quá `TU_KHOA_THEM_TOI_DA` mục hoặc mục dài hơn `TU_KHOA_THEM_DAI` ký tự -> LoiLich."""
+    if isinstance(v, (list, tuple)):
+        manh = [str(x) for x in v]
+    else:
+        manh = re.split(r"[,\n]", str(v or ""))
+    ra: list[str] = []
+    da: set[str] = set()
+    for x in manh:
+        x = " ".join(x.split())
+        if not x or x.casefold() in da:
+            continue
+        if len(x) > TU_KHOA_THEM_DAI:
+            raise LoiLich(f"Từ khoá chiến dịch “{x[:30]}…” dài quá {TU_KHOA_THEM_DAI} ký tự.")
+        da.add(x.casefold())
+        ra.append(x)
+    if len(ra) > TU_KHOA_THEM_TOI_DA:
+        raise LoiLich(f"Từ khoá chiến dịch: tối đa {TU_KHOA_THEM_TOI_DA} mục (đang có {len(ra)}).")
+    return ra
+
+
 def chuan_hoa(form: dict, bay_gio: dt.datetime) -> dict:
     """Biểu mẫu (hoặc query xem trước) -> {"kieu", "ten", "cau_hinh", "quet_moi_nguon", "bat"}.
     Ném `LoiLich` với câu dễ hiểu. Chỉ đọc các ô của đúng kiểu đã chọn.
 
     Ô: kieu; ten; bat; quet_moi_nguon; thu_1…thu_7 (ô đánh dấu); moi_gio, tu, den (mỗi N giờ);
-    gio (giờ cụ thể, cách nhau dấu phẩy); tu_luc, den_luc, moi, don_vi = phut|gio (chiến dịch)."""
+    gio (giờ cụ thể, cách nhau dấu phẩy); tu_luc, den_luc, moi, don_vi = phut|gio, tu_khoa_them
+    (chiến dịch)."""
     kieu = str(form.get("kieu") or "").strip()
     if kieu not in KIEU:
         raise LoiLich("Chọn kiểu lịch: mỗi N giờ, hằng ngày, hằng tuần hoặc chiến dịch.")
@@ -183,6 +213,9 @@ def chuan_hoa(form: dict, bay_gio: dt.datetime) -> dict:
         if phut > PHUT_TOI_DA:
             raise LoiLich("Chiến dịch: tối đa 7 ngày một lượt.")
         ch = {"tu_luc": chu_luc(tu), "den_luc": chu_luc(den), "moi_phut": phut}
+        them = tu_khoa_them(form.get("tu_khoa_them"))
+        if them:
+            ch["tu_khoa_them"] = them
     if luot_moi_ngay(kieu, ch) > LUOT_NGAY_TOI_DA:
         raise LoiLich(f"Tối đa {LUOT_NGAY_TOI_DA} lượt mỗi ngày.")
     if moc_ke(kieu, ch, bay_gio) is None:
@@ -199,7 +232,7 @@ def tu_form_mac_dinh(bay_gio: dt.datetime) -> dict:
     return {"kieu": "moi_n_gio", "ten": "", "bat": True, "quet_moi_nguon": False,
             "moi_gio": 2, "tu": "07:00", "den": "23:00", "gio": "08:00, 20:00", "thu": [],
             "tu_luc": chu_luc(tu), "den_luc": chu_luc(tu + dt.timedelta(days=3)),
-            "moi": 1, "don_vi": "gio"}
+            "moi": 1, "don_vi": "gio", "tu_khoa_them": ""}
 
 
 def tu_form(lich: dict, bay_gio: dt.datetime) -> dict:
@@ -219,15 +252,19 @@ def tu_form(lich: dict, bay_gio: dt.datetime) -> dict:
         f.update(tu_luc=ch.get("tu_luc") or f["tu_luc"], den_luc=ch.get("den_luc") or f["den_luc"],
                  moi=phut // 60 if phut % 60 == 0 else phut,
                  don_vi="gio" if phut % 60 == 0 else "phut")
+        them = ch.get("tu_khoa_them")
+        if isinstance(them, list):
+            f["tu_khoa_them"] = "\n".join(str(x) for x in them)
     return f
 
 
 def gia_tri_tu_form(form: dict, bay_gio: dt.datetime) -> dict:
     """Biểu mẫu vừa gửi (có thể sai) -> giá trị ô để vẽ lại biểu mẫu kèm lỗi, không mất chữ đã gõ."""
     f = tu_form_mac_dinh(bay_gio)
-    for k in ("kieu", "ten", "moi_gio", "tu", "den", "gio", "tu_luc", "den_luc", "moi", "don_vi"):
+    for k in ("kieu", "ten", "moi_gio", "tu", "den", "gio", "tu_luc", "den_luc", "moi", "don_vi",
+              "tu_khoa_them"):
         if k in form:
-            f[k] = str(form.get(k) or "")[:600]
+            f[k] = str(form.get(k) or "")[:1200 if k == "tu_khoa_them" else 600]
     f.update(thu=[i for i in range(1, 8) if _bat(form.get(f"thu_{i}"))],
              bat=_bat(form.get("bat")), quet_moi_nguon=_bat(form.get("quet_moi_nguon")))
     return f

@@ -310,7 +310,8 @@ def _tao_mau() -> Jinja2Templates:
     env.globals["tinh"] = lambda ten: f"/tinh/{ten}?v={pb[ten]}" if ten in pb else f"/tinh/{ten}"
     env.filters.update(so_vn=so_vn, pt_vn=pt_vn, usd_vn=usd_vn, gio_vn=gio_vn,
                        json_script=json_script, link_an_toan=NL.link_an_toan,
-                       ten_nen_tang=lambda p: NL.TEN_NEN_TANG.get(p, p),
+                       # "web" (Báo & Web) không phải nguồn theo dõi được (NL) nhưng có tên hiển thị.
+                       ten_nen_tang=lambda p: NL.TEN_NEN_TANG.get(p) or CS.TEN_NEN_TANG.get(p, p),
                        ten_loai=lambda x: CS.TEN_LOAI.get(x, x))
     env.globals.update(TEN_NEN_TANG=NL.TEN_NEN_TANG, LOAI_NGUON=NL.LOAI_NGUON,
                        VAI_TRO=NL.VAI_TRO, TEN_LOAI=CS.TEN_LOAI, LICH_CHAY=LICH_CHAY,
@@ -782,7 +783,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 raise NL.LoiNhap("Sắc thái không hợp lệ.")
             dk["sac_thai"] = s
         if q.get("ct_nen_tang"):
-            if q.get("ct_nen_tang") not in NL.NEN_TANG:
+            # CS (mọi nền tảng có bài, gồm "web"), không phải NL (nền tảng theo dõi nguồn được)
+            if q.get("ct_nen_tang") not in CS.TEN_NEN_TANG:
                 raise NL.LoiNhap("Nền tảng không hợp lệ.")
             dk["nen_tang"] = q.get("ct_nen_tang")
         if q.get("ct_loai"):
@@ -1194,7 +1196,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 if p == "instagram" and (form.get("tk_instagram_so_tu") or "").strip():
                     tk["so_tu"] = NL.so_nguyen(form.get("tk_instagram_so_tu"),
                                                "Instagram: số từ khoá", *CP.GIOI_HAN["tk_so_tu"])
+                if p == "web" and (form.get("tk_web_boc") or "").strip():
+                    tk["boc"] = NL.so_nguyen(form.get("tk_web_boc"),
+                                             "Báo & Web: số trang đọc dự phòng", 0,
+                                             CP.SO_TOI_DA)
                 ch["tu_khoa"][p] = tk
+                if p == "web":             # web không cào bình luận (giai đoạn 1)
+                    continue
                 bl = {"bat": form.get(f"bl_{p}_bat") == "1"}
                 if (form.get(f"bl_{p}_so_bai") or "").strip():
                     bl["so_bai"] = NL.so_nguyen(form.get(f"bl_{p}_so_bai"),
@@ -1298,7 +1306,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 return ra
             ctx.update(await _k(dung))
         return _trang(request, "lich_quet.html", nguoi, "lich_quet", ma=ma_http, KIEU_LICH=LQ.KIEU,
-                      THU=LQ.THU, MOI_GIO=LQ.MOI_GIO, PHUT_TOI_THIEU=LQ.PHUT_TOI_THIEU, **ctx)
+                      THU=LQ.THU, MOI_GIO=LQ.MOI_GIO, PHUT_TOI_THIEU=LQ.PHUT_TOI_THIEU,
+                      TU_KHOA_THEM_TOI_DA=LQ.TU_KHOA_THEM_TOI_DA,
+                      TU_KHOA_THEM_DAI=LQ.TU_KHOA_THEM_DAI, **ctx)
 
     @app.get("/lich-quet")
     async def trang_lich_quet(request: Request):
