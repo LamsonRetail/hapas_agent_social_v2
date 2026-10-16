@@ -334,20 +334,24 @@ def test_fb_khong_biet_goi_thi_chay_nhu_cu(api, monkeypatch):
 
 # ───────────────────────────── Threads ─────────────────────────────
 
-@pytest.mark.parametrize("q, limit, tu, max_posts", [
-    (["HAPAS", "#HAPAS", "hapas", "Túi xách", "tui-xach"], 100, ["HAPAS", "Túi xách"], 50),
-    (["hapas"], 30, ["hapas"], 30),
-    (["hapas", "matemade", "pnj"], 100, ["hapas", "matemade", "pnj"], 34),
-    (["hapas", "matemade"], 5, ["hapas", "matemade"], 10),       # actor đòi ≥10
+@pytest.mark.parametrize("q, limit, tu, max_posts, doc", [
+    (["HAPAS", "#HAPAS", "hapas", "Túi xách", "tui-xach"], 100, ["HAPAS", "Túi xách"], 50, 100),
+    (["hapas"], 30, ["hapas"], 30, 30),
+    # 16/10/2026: chia phần NGUYÊN — tổng không vượt limit (actor không dừng ở maxItems).
+    (["hapas", "matemade", "pnj"], 100, ["hapas", "matemade", "pnj"], 33, 100),
+    # actor đòi ≥10 bài mỗi từ: 2 × 10 bài đã trả tiền thì đọc đủ 20, không bỏ lại dataset.
+    (["hapas", "matemade"], 5, ["hapas", "matemade"], 10, 20),
 ])
-def test_threads_bo_trung_va_chia_max_posts_theo_tu_khoa(monkeypatch, q, limit, tu, max_posts):
+def test_threads_bo_trung_va_chia_max_posts_theo_tu_khoa(monkeypatch, q, limit, tu, max_posts,
+                                                          doc):
     goi = []
     monkeypatch.setattr(A, "_call", lambda actor, payload, lim, mem=None, **k:
                         goi.append((payload, lim, mem)) or [])
     A._fetch_threads(q, limit, "VN", NOW, NOW)
     payload, lim, mem = goi[0]
     assert payload["keywords"] == tu and payload["max_posts"] == max_posts
-    assert payload["search_filter"] == "recent" and lim == limit and mem == 1024
+    assert payload["search_filter"] == "recent" and lim == doc and mem == 1024
+    assert payload["mode"] == "search" and len(tu) * max_posts <= doc
 
 
 # ───────────────────────────── hạn chót thật ─────────────────────────────

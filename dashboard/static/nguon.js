@@ -14,7 +14,7 @@
     var soBai = Math.max(1, parseInt((form.elements.so_bai_moi_lan || {}).value, 10) || 5);
     var chuKy = Math.max(1, parseInt((form.elements.chu_ky_ngay || {}).value, 10) || 1);
     var gia = (hs.gia || {})[p] || 0;
-    var donVi = !gia ? 0 : (p === "instagram" ? 1 : soBai);
+    var donVi = !gia ? 0 : (p === "instagram" ? 1 : p === "threads" ? Math.max(soBai, hs.th_toi_thieu_bai || 10) : soBai);
     var thang = hs.ngay / chuKy * donVi * gia * hs.he_so;
     var chu = "≈ " + usd(thang, 3) + " USD/tháng theo bài";
     var kd = gia ? ((hs.start || {})[p] || 0) * hs.he_so : 0;

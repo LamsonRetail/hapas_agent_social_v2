@@ -779,7 +779,9 @@ def test_de_xuat_nguong_bo_nguon_da_co_va_xep_theo_thao_luan():
                               _hit("tiktok", "dacodanh", 5), _hit("tiktok", "dacodanh", 6),
                               _hit("threads", "th", 7, binh_luan=900)])
     dx = T._de_xuat_tu(ban, {("tiktok", "dacodanh")}, ["hapas"])
-    assert [x["dinh_danh"] for x in dx] == ["quynhphaken", "me4con"]   # "le" dưới ngưỡng
+    # "le" dưới ngưỡng; Threads theo dõi được từ 16/10/2026 nên cũng thành đề xuất.
+    assert [x["dinh_danh"] for x in dx] == ["quynhphaken", "th", "me4con"]
+    assert dx[1]["nen_tang"] == "threads" and dx[1]["link"] == "https://www.threads.com/@th"
     assert dx[0]["thao_luan"] == 6643 and dx[0]["link"] == "https://www.tiktok.com/@quynhphaken"
     assert "1 bài, 6643 thảo luận" in dx[0]["ly_do"]
 

@@ -823,7 +823,10 @@ _CAU_KHONG_KIEM = ("không kiểm được run cũ trên Apify — KHÔNG chạy
 
 def _so_tien(p: str, ph: dict, items: list, meta: dict) -> float:
     gia = ph.get("gia") or (_GIA_DO if ph.get("kieu") == "do" else _GIA.get(p, 0.0))
-    uoc = len(items or []) * float(gia) + (A._START_COST.get(p, 0.0) if items else 0.0)
+    # `khoi`: phí khởi động riêng của phần khi actor KHÁC actor tìm bài của nền tảng (vd trả lời
+    # Threads 1 GB = 0,02 USD, còn actor bài Threads 4 GB = 0,08 USD).
+    khoi = float(ph["khoi"]) if ph.get("khoi") is not None else A._START_COST.get(p, 0.0)
+    uoc = len(items or []) * float(gia) + (khoi if items else 0.0)
     return round(max(float(meta.get("usd") or 0), uoc), 4)
 
 

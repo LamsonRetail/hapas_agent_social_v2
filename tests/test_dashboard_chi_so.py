@@ -296,7 +296,7 @@ def test_doc_bo_loc_chuan_hoa_va_tu_choi():
     assert b["sac_thai"] == ("Tiêu cực", "Tích cực")          # mã URL hay nhãn đều về nhãn kho
     assert b["tuong_tac"] == 1000 and b["q"] == "túi xách"
     assert b["nguon"] == ("n:1", "n:2", "tiktok:khach, a")     # tên có dấu phẩy không bị cắt
-    for sai in ({"pham_vi": "nha"}, {"nen_tang": "threads"}, {"loai": "vip"},
+    for sai in ({"pham_vi": "nha"}, {"nen_tang": "twitter"}, {"loai": "vip"},
                 {"sac_thai": "vui"}, {"tuong_tac": "50"}, {"kieu_quet": "x"}, {"q": "x" * 101},
                 {"anh_huong": "khong_lo"}, {"nguon": ",".join(f"n:{i}" for i in range(51))},
                 {"chu_de": "x" * 101}, {"y_dinh": "2"}, {"gom_mg": "co"}):

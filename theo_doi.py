@@ -45,11 +45,23 @@ import lang_nghe_db as K
 
 _VN = datetime.timezone(datetime.timedelta(hours=7))
 #: Nền tảng theo thứ tự chạy: miễn phí trước, để hết giờ/hết tiền thì phần mất là phần tốn tiền.
-THU_TU = ("youtube", "instagram", "tiktok", "facebook")
-_TEN = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok", "facebook": "Facebook"}
+#: Threads cuối: phí khởi động mỗi lượt actor cao nhất (0,08 USD, gói FREE).
+THU_TU = ("youtube", "instagram", "tiktok", "facebook", "threads")
+_TEN = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok", "facebook": "Facebook",
+        "threads": "Threads"}
 #: Giá đo thật 25/09/2026 (`account_tool._GIA`): TikTok/Facebook theo bài, Instagram theo tài
-#: khoản (actor trả 12 bài mới nhất). YouTube Data API miễn phí.
-_GIA = {"tiktok": 0.003, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0}
+#: khoản (actor trả 12 bài mới nhất). YouTube Data API miễn phí. Threads (16/10/2026, chế độ
+#: "user" của `apify_tool._ACTORS["threads"]`): 0,0025 USD/bài = `apify_tool._UNIT_COST`.
+_GIA = {"tiktok": 0.003, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0,
+        "threads": 0.0025}
+# Threads (chủ dự án 16/10/2026: "thêm listening threads"). Actor futurizerush~meta-threads-scraper
+# — đọc input schema + chạy thử 16/10/2026: chế độ "search" (từ khoá, ≤ 20 từ/lượt, lọc ngày
+# start_date/end_date phía actor, "recent" bài mới trước) và "user" (bài mới nhất của ≤ 20 tài
+# khoản/lượt, KHÔNG lọc ngày); `max_posts` là trần MỖI từ/tài khoản, tối thiểu 10; actor không dừng
+# ở `maxItems`, chỉ trần USD chặn được. Bình luận (trả lời cấp 1) qua actor riêng của
+# `deep_dive_tool` (futurizerush~threads-replies-scraper, ≤ 20 bài/lượt, 10–300 trả lời/bài).
+TH_TOI_THIEU_BAI = 10        # max_posts tối thiểu của actor: mỗi tài khoản/từ khoá trả tiền ≥ 10 bài
+TH_TOI_DA_MOI_LUOT = 20      # tài khoản (chế độ "user") hoặc từ khoá (chế độ "search") mỗi lượt
 _HE_SO_UOC = 1.3          # ước tính chừa hao hụt (bài ghim, phí lẻ…)
 _HE_SO_TRAN = 1.5         # trần USD của một lượt actor = ước tính × hệ số này (rồi kẹp)
 _TRAN_TOI_THIEU = 0.1     # `_run_actor` kẹp trần ≥ 0,1 USD: tháng còn ít hơn thì không chạy
@@ -80,11 +92,16 @@ def _chuan_dinh_danh(p: str, s: str) -> str:
     if p == "facebook":
         s = re.sub(r"^https?://(www\.|m\.|web\.)?", "", s)
         s = s.replace("fb.com/", "facebook.com/")
+    if p == "threads":                     # link hồ sơ threads.net / threads.com -> username
+        s = re.sub(r"^(https?://)?(www\.)?threads\.(net|com)/", "", s)
     return s.lstrip("@")
 
 
 def _khoa_bai(p: str, link: str, goc: dict | None = None) -> str:
-    """"<nền tảng>:<id bài>" — id lấy từ link; không bóc được thì băm link (vẫn ổn định)."""
+    """"<nền tảng>:<id bài>" — id lấy từ link; không bóc được thì băm link (vẫn ổn định).
+
+    Threads CỐ Ý không bóc mã bài: bài Threads đã vào kho từ lượt social_listen (`luu_tu_khoa`)
+    bằng khoá băm link `post_url` — đổi sang mã bài thì cùng một bài thành hai dòng."""
     link = link or ""
     mau = {"tiktok": r"/video/(\d+)", "instagram": r"/(?:p|reel|reels|tv)/([\w-]+)",
            "youtube": r"(?:v=|youtu\.be/|/shorts/)([\w-]{11})",
@@ -110,43 +127,62 @@ def _so_hay_none(v) -> int | None:
 # ───────────────────────────── ước tính + phần ─────────────────────────────
 def _uoc_phan(p: str, so_nguon: int, n: int) -> float:
     """USD ước tính của MỘT lượt actor: `so_nguon` nguồn, mỗi nguồn `n` bài (Instagram tính theo
-    tài khoản), cộng phí khởi động của actor, nhân hệ số hao hụt."""
+    tài khoản; Threads tối thiểu `TH_TOI_THIEU_BAI` bài/tài khoản), cộng phí khởi động của actor,
+    nhân hệ số hao hụt."""
     gia = _GIA.get(p, 0.0)
     if not gia or not so_nguon:
         return 0.0
+    if p == "threads":
+        n = max(TH_TOI_THIEU_BAI, n)
     don_vi = so_nguon if p == "instagram" else so_nguon * n
     return round((don_vi * gia + A._START_COST.get(p, 0.0)) * _HE_SO_UOC, 4)
+
+
+def _so_bai_nguon(x: dict) -> int:
+    """Số bài mỗi lần THẬT SỰ lấy (và trả tiền) của một nguồn: Threads tối thiểu 10."""
+    n = int(x.get("so_bai_moi_lan") or 5)
+    return max(TH_TOI_THIEU_BAI, n) if x.get("nen_tang") == "threads" else n
 
 
 def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
     """Nguồn -> các phần (lượt actor). Nguồn cùng nền tảng VÀ cùng số bài mỗi lần đi chung một
     lượt — mỗi nguồn trả đúng số bài của nó (review 14/10: gộp theo số bài lớn nhất thì nguồn
-    5 bài cũng bị lấy 30 bài và tốn tiền ngoài ước tính). YouTube một phần (API miễn phí)."""
+    5 bài cũng bị lấy 30 bài và tốn tiền ngoài ước tính). YouTube một phần (API miễn phí).
+    Threads: chế độ "user" của actor, tối đa `TH_TOI_DA_MOI_LUOT` tài khoản mỗi lượt."""
     import account_tool
     nhom: dict[tuple[str, int], list[dict]] = {}
     for x in nguon:
         p = x["nen_tang"]
-        n = 0 if p in ("youtube", "instagram") else int(x.get("so_bai_moi_lan") or 5)
+        n = 0 if p in ("youtube", "instagram") else _so_bai_nguon(x)
         nhom.setdefault((p, n), []).append(x)
     ra: dict[str, list[dict]] = {}
-    for (p, n), ds in sorted(nhom.items()):
-        ids = [int(x["id"]) for x in ds]
-        ph = {"id": f"{p}-{n or 'tat_ca'}", "nen_tang": p, "nguon": ids, "trang_thai": "cho",
-              "n": n, "gia": _GIA.get(p, 0.0)}
-        if p == "youtube":
-            ph.update(actor="youtube", uoc_usd=0.0)
-        else:
-            ten = [x["dinh_danh"].lstrip("@") for x in ds]
-            if p == "tiktok":
-                payload, limit = account_tool._payload_tiktok(ten, n), n * len(ten)
-            elif p == "instagram":
-                payload, limit = account_tool._payload_instagram(ten), len(ten)
+    for (p, n), tat_ca in sorted(nhom.items()):
+        lo_nguon = ([tat_ca[i:i + TH_TOI_DA_MOI_LUOT]
+                     for i in range(0, len(tat_ca), TH_TOI_DA_MOI_LUOT)]
+                    if p == "threads" else [tat_ca])
+        for k, ds in enumerate(lo_nguon):
+            ids = [int(x["id"]) for x in ds]
+            ph = {"id": f"{p}-{n or 'tat_ca'}" + (f"-{k + 1}" if k else ""), "nen_tang": p,
+                  "nguon": ids, "trang_thai": "cho", "n": n, "gia": _GIA.get(p, 0.0)}
+            if p == "youtube":
+                ph.update(actor="youtube", uoc_usd=0.0)
+            elif p == "threads":
+                ten = [_chuan_dinh_danh(p, x["dinh_danh"]) for x in ds]
+                ph.update(actor=A._ACTORS["threads"], mem=A._MEMORY.get("threads"),
+                          payload={"mode": "user", "usernames": ten, "max_posts": n},
+                          limit=n * len(ten), uoc_usd=_uoc_phan(p, len(ds), n))
             else:
-                payload = account_tool._payload_facebook([x["dinh_danh"] for x in ds], n)
-                limit = n * len(ds)
-            ph.update(actor=account_tool._ACTOR[p], payload=payload, limit=limit,
-                      uoc_usd=_uoc_phan(p, len(ds), n))
-        ra.setdefault(p, []).append(ph)
+                ten = [x["dinh_danh"].lstrip("@") for x in ds]
+                if p == "tiktok":
+                    payload, limit = account_tool._payload_tiktok(ten, n), n * len(ten)
+                elif p == "instagram":
+                    payload, limit = account_tool._payload_instagram(ten), len(ten)
+                else:
+                    payload = account_tool._payload_facebook([x["dinh_danh"] for x in ds], n)
+                    limit = n * len(ds)
+                ph.update(actor=account_tool._ACTOR[p], payload=payload, limit=limit,
+                          uoc_usd=_uoc_phan(p, len(ds), n))
+            ra.setdefault(p, []).append(ph)
     return ra
 
 
@@ -419,7 +455,7 @@ def ghep_nguon(p: str, ket: dict[str, dict], nguon: list[dict]) -> tuple[dict[in
             continue
         if tk.get("ghi_chu") and not dong:
             loi[int(n["id"])] = str(tk["ghi_chu"])[:200]
-        ra[int(n["id"])].extend(dong[:int(n.get("so_bai_moi_lan") or 5)])
+        ra[int(n["id"])].extend(dong[:_so_bai_nguon(dict(n, nen_tang=p))])
     for nid, dong in ra.items():
         if not dong and nid not in loi:
             loi[nid] = "không lấy được bài nào (tài khoản riêng tư, đổi tên hoặc sai định danh?)"
@@ -432,7 +468,33 @@ def _doc_ket_qua(p: str, items: list, n: int) -> dict[str, dict]:
         return account_tool._doc_tiktok(items)
     if p == "instagram":
         return account_tool._doc_instagram(items, 12)
+    if p == "threads":
+        return _doc_threads(items)
     return account_tool._doc_facebook(items)
+
+
+def _doc_threads(items: list) -> dict[str, dict]:
+    """Item chế độ "user" của actor Threads -> {tài khoản đã xin: hồ sơ + bài} cùng dạng
+    `account_tool._doc_*` (để `_dong_tu_tai_khoan` dùng chung). Bộ đọc từng bài là
+    `apify_tool._chuan_threads` của social_listen; khoá là `requested_username` (đúng chữ Mark
+    gửi — tài khoản đổi tên thì `username` khác) rồi mới tới `username`."""
+    ra: dict[str, dict] = {}
+    for d, dt in A._chuan_threads([it for it in items if isinstance(it, dict)
+                                   and it.get("record_type", "post") == "post"]):
+        g = d["__goc"]
+        k = _chuan_dinh_danh("threads", str(g.get("requested_username") or d["username"] or ""))
+        if not k:
+            continue
+        tk = ra.setdefault(k, {"ho_so": {
+            "ten": d["kenh"] or k, "tai_khoan": d["username"] or k, "followers": d["followers"],
+            "link": str(g.get("profile_url") or f"https://www.threads.com/@{k}")},
+            "bai": [], "ghi_chu": ""})
+        tk["bai"].append({
+            "ngay": dt, "view": d["views"], "like": d["likes"], "binh_luan": d["comments"],
+            "share": d["shares"], "noi_dung": d["text"], "link": d["link"],
+            "hashtag": [t.strip() for t in str(d["hashtags"] or "").split(",") if t.strip()],
+            "_goc": g})
+    return ra
 
 
 def _lay_youtube(nguon: list[dict]) -> tuple[dict[int, list], dict[int, str]]:
@@ -679,8 +741,10 @@ def _chay_actor(v, p: str, ph: dict, cap: float, han: float,
             else:
                 v.cap_nhat_phan(ph, trang_thai="dang_gui", tran_usd=cap,
                                 moc_gui=datetime.datetime.now(_VN).isoformat())
-                items, meta = A._run_actor(actor, ph["payload"], int(ph["limit"]), None, han,
-                                           min_charge, tran_usd=cap, mot_phan=True, nen_tang=p)
+                # `mem`: RAM ghim của actor tính phí khởi động theo GB (Threads).
+                items, meta = A._run_actor(actor, ph["payload"], int(ph["limit"]), ph.get("mem"),
+                                           han, min_charge, tran_usd=cap, mot_phan=True,
+                                           nen_tang=p)
     except A.LoiApify as e:
         loi, meta = e, e.meta
     except Exception as e:
@@ -721,9 +785,18 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
 # bộ tìm của social_listen (`apify_tool._FETCH`, đã đo thật) + bước AI phân xử giữ/loại; bài giữ
 # ghi kho với kieu_quet 'tu_khoa' (tài khoản đã theo dõi thì gắn nguồn). Tài khoản nổi chưa theo
 # dõi thành ĐỀ XUẤT trên dashboard. Tiền: run id vào phần "tu_khoa" của việc → chốt chung lượt.
-TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram")
-_TK_GIA = {"tiktok": 0.003, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0}
-_TK_KHOI = {"instagram": 0.016, "facebook": 0.00005}
+# Threads (16/10/2026): cùng bộ tìm `_FETCH["threads"]`, đứng cuối (phí khởi động cao nhất); mỗi
+# từ khoá actor lấy ≥ 10 bài nên lượt chỉ tìm `so_bai // 10` từ ĐẦU (≥ 1) — tổng bài ≤ số bài đặt,
+# ước tính (n × giá + phí khởi động) × 1,3 như nền tảng khác (`_tu_cho`).
+TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram", "threads")
+#: Threads = `apify_tool._UNIT_COST` / `_START_COST` (4 GB × 0,02 USD, gói FREE).
+_TK_GIA = {"tiktok": 0.003, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0,
+           "threads": 0.0025}
+_TK_KHOI = {"instagram": 0.016, "facebook": 0.00005, "threads": 0.08}
+#: Nền tảng TẮT khi `du_an.cau_hinh` chưa ghi `bat` cho nó (cả tìm từ khoá lẫn bình luận): thêm
+#: nền tảng mới không tự tiêu tiền khi deploy — chủ dự án bật trên trang Ngân sách. Nền tảng cũ
+#: vẫn mặc định BẬT như trước (theo cột tk_bat / bl_bat).
+MAC_DINH_TAT = ("threads",)
 TK_IG_TOI_DA_TU = 2          # actor Instagram chạy MỘT lượt mỗi từ (phí khởi động mỗi lượt)
 TK_FB_TOI_DA = 20            # actor Facebook gói Free: 20 bài, 1 lượt/24h
 TK_TOI_DA_TU = 50           # = số mục tối đa của ô từ khoá trên dashboard (không cắt thêm)
@@ -775,23 +848,24 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
     """Cấu hình HIỆU LỰC của một nền tảng. `nhom`: "tu_khoa" | "binh_luan".
 
     Cột `tk_bat` / `bl_bat` là CÔNG TẮC TỔNG: tắt thì mọi nền tảng tắt dù JSONB ghi gì. Trong
-    JSONB chỉ `bat` đúng bằng True mới là bật (chuỗi "false" không phải bật). Số bỏ trống/rác
-    lấy cột chung — số bài cột chung áp cho TỪNG nền tảng."""
+    JSONB chỉ `bat` đúng bằng True mới là bật (chuỗi "false" không phải bật); thiếu `bat` thì
+    bật, trừ nền tảng trong `MAC_DINH_TAT` (Threads) — phải bật rõ. Số bỏ trống/rác lấy cột
+    chung — số bài cột chung áp cho TỪNG nền tảng."""
     goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
     nh = goc.get(nhom) if isinstance(goc.get(nhom), dict) else {}
     rieng = nh.get(p) if isinstance(nh.get(p), dict) else {}
+    bat_rieng = rieng.get("bat", p not in MAC_DINH_TAT) is True
     if nhom == "tu_khoa":
         chung = _kep(du_an.get("tk_so_bai") or 0, *GIOI_HAN["tk_so_bai"], 0)
         so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["tk_so_bai"], chung)
-        return {"bat": bool(du_an.get("tk_bat", True)) and rieng.get("bat", True) is True
-                and so > 0,
+        return {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and so > 0,
                 "so_bai": so,
                 "so_tu": _so_rieng(rieng.get("so_tu"), *GIOI_HAN["tk_so_tu"], TK_IG_TOI_DA_TU)}
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
     moi_chung = _kep(du_an.get("bl_moi_bai") or 0, *GIOI_HAN["bl_moi_bai"], 0)
     moi = _so_rieng(rieng.get("moi_bai"), *GIOI_HAN["bl_moi_bai"], moi_chung)
-    return {"bat": bool(du_an.get("bl_bat", True)) and rieng.get("bat", True) is True and so > 0,
+    return {"bat": bool(du_an.get("bl_bat", True)) and bat_rieng and so > 0,
             "so_bai": so, "moi_bai": 5 if 0 < moi < 5 else moi}
 
 
@@ -820,20 +894,27 @@ def tu_tim(du_an: dict) -> list[str]:
     return ra[:TK_TOI_DA_TU]
 
 
-def _tu_cho(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU) -> list[str]:
+def _tu_cho(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU, so_bai: int = 0) -> list[str]:
+    """Từ khoá THẬT SỰ gửi actor của nền tảng `p`."""
     if p == "instagram":                 # actor tìm theo hashtag: chỉ từ không có dấu cách
         return [t for t in tu if " " not in t][:so_tu]
+    if p == "threads":
+        # Mỗi từ actor lấy (và tính tiền) ≥ 10 bài: chỉ tìm `so_bai // 10` từ đầu (≥ 1, ≤ 20)
+        # để tổng bài không vượt số bài đặt trên dashboard (`apify_tool._fetch_threads` chia
+        # đều phần nguyên). Muốn tìm đủ N từ: đặt số bài Threads ≥ 10 × N.
+        return tu[:max(1, min(TH_TOI_DA_MOI_LUOT, so_bai // TH_TOI_THIEU_BAI))]
     return tu
 
 
 def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU,
                          fb_toi_da: int = TK_FB_TOI_DA) -> float:
-    q = _tu_cho(p, tu, so_tu)
+    q = _tu_cho(p, tu, so_tu, so_bai)
     if not q or not _TK_GIA.get(p) or so_bai <= 0:
         return 0.0
     if p == "instagram":
         return round(len(q) * (_TK_KHOI["instagram"] + so_bai * _TK_GIA[p]) * _HE_SO_UOC, 4)
-    n = min(so_bai, fb_toi_da) if p == "facebook" else so_bai
+    n = (min(so_bai, fb_toi_da) if p == "facebook"
+         else max(so_bai, TH_TOI_THIEU_BAI) if p == "threads" else so_bai)
     return round((n * _TK_GIA[p] + _TK_KHOI.get(p, 0.0)) * _HE_SO_UOC, 4)
 
 
@@ -992,9 +1073,14 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             if p in da_xong or not cfg[p]["bat"]:
                 continue
             so_bai = cfg[p]["so_bai"]
-            q = _tu_cho(p, tu, cfg[p]["so_tu"])
+            q = _tu_cho(p, tu, cfg[p]["so_tu"], so_bai)
             if not q:
                 continue
+            if p == "threads" and len(q) < min(len(tu), TH_TOI_DA_MOI_LUOT):
+                tk["ghi_chu"].append(
+                    f"tìm Threads: {len(q)}/{len(tu)} từ khoá đầu ({', '.join(q)[:80]}) — actor "
+                    f"lấy ≥ {TH_TOI_THIEU_BAI} bài mỗi từ; đặt số bài Threads ≥ "
+                    f"{TH_TOI_THIEU_BAI * min(len(tu), TH_TOI_DA_MOI_LUOT)} để tìm đủ")
             if p in co_run:
                 tk["ghi_chu"].append(f"tìm {_TEN[p]}: bot khởi động lại giữa lượt tìm — không gửi lại")
                 _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p,
@@ -1041,9 +1127,11 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 tk["ghi_chu"].append(f"tìm {_TEN[p]}: {loi}")
             finally:
                 A._KHI_CO_RUN.set(None)
+            # Threads: phí khởi động 0,08 USD mất cả khi actor trả 0 bài — vẫn trừ vào phần còn.
+            co_khoi = bool(got) or (p == "threads" and loi is None)
             tien = round(len(got) * _TK_GIA.get(p, 0.0)
                          + (_TK_KHOI.get(p, 0.0) * (len(q) if p == "instagram" else 1)
-                            if _TK_GIA.get(p) and got else 0.0), 4)
+                            if _TK_GIA.get(p) and co_khoi else 0.0), 4)
             for ph in _phan_tk(v):
                 if (ph.get("nen_tang") == p and ph.get("run_id")
                         and ph.get("trang_thai") == "dang_chay"):
@@ -1196,10 +1284,14 @@ def _cau_tk(tk: dict) -> list[str]:
 # bình luận mỗi bài. Dùng lại actor + bộ đọc của `deep_dive_tool` (đã đo thật) và bộ gán nhãn
 # bình luận `phan_loai`. YouTube qua Data API miễn phí. Tiền đi chung lượt (run id trong phần
 # "binh_luan" của việc → `chot_chi_phi`), nên tính vào trần tháng của dự án.
-BL_NEN_TANG = ("youtube", "tiktok", "instagram", "facebook")
-_BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0}
-_BL_KHOI_DONG = {"facebook": 0.001}
-_BL_LO = 25                       # bài mỗi lượt actor bình luận
+# Threads (16/10/2026): actor trả lời của `deep_dive_tool` (futurizerush~threads-replies-scraper,
+# 1 GB): chỉ trả lời CẤP 1 công khai (không đăng nhập), ≤ 20 bài/lượt, 10–300 trả lời/bài; actor
+# tính tiền cả dòng bài gốc (0,0025/bài) — cộng vào ước tính của phần.
+BL_NEN_TANG = ("youtube", "tiktok", "instagram", "facebook", "threads")
+_BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
+           "threads": 0.0025}
+_BL_KHOI_DONG = {"facebook": 0.001, "threads": 0.02}
+_BL_LO = 25                       # bài mỗi lượt actor bình luận (Threads: ≤ 20, `_lo_bl`)
 # Đợt 2d (chủ dự án 15/10): "1 bài thì phải cào hết tất cả thảo luận". bl_moi_bai = 0 → mỗi bài
 # xin đủ số nền tảng báo (+15% + 10 dư cho trả lời mới) — KHÔNG trần mỗi bài (chủ dự án 15/10:
 # "không có giới hạn"); bài to hơn trần mỗi lượt thì actor dừng ở trần, lượt sau cào tiếp
@@ -1223,7 +1315,8 @@ def uoc_binh_luan(so_bai: int, moi_bai: int, p: str = "facebook") -> float:
 
 def _ma_bl(r: dict) -> str:
     g = r.get("__goc") or {}
-    m = g.get("cid") or g.get("id") or g.get("commentId") if isinstance(g, dict) else None
+    m = (g.get("cid") or g.get("id") or g.get("commentId") or g.get("reply_id")
+         if isinstance(g, dict) else None)
     if m:
         return str(m)[:120]
     s = f"{r.get('kenh')}|{r.get('text')}|{r.get('thoi_gian')}"
@@ -1246,7 +1339,7 @@ def _dong_bl(r: dict, bai: dict, thuong_hieu: list[str]) -> dict:
     sn = g.get("snippet") if isinstance(g.get("snippet"), dict) else {}
     cha = (g.get("repliesToId") or g.get("replyToCommentId") or g.get("parentCommentId")
            or sn.get("parentId"))
-    link = str(g.get("commentUrl") or "") or None
+    link = str(g.get("commentUrl") or g.get("reply_url") or "") or None    # Threads: reply_url
     if not link and bai["nen_tang"] == "youtube" and r.get("link"):
         link = f"{r['link']}&lc={ma}"            # YouTube mở thẳng tới bình luận
     return {"khoa_bai": bai["khoa"], "ma": ma, "nen_tang": bai["nen_tang"],
@@ -1318,9 +1411,13 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
         for lo, moc in _chia_lo_bl(p, [b for b in ds if b["nen_tang"] == p], per):
             urls = [b["link"] for b in lo]
             can = [_can_bl(b, per) for b in lo]
+            khoang = D._PER_KHOANG.get(p)          # Threads: actor chỉ nhận 10–300 trả lời/bài
+            if khoang:
+                can = [max(khoang[0], min(khoang[1], c)) for c in can]
             per_lo = max(can)
             gia = _BL_GIA.get(p, 0.0)
             uoc = round((sum(can) * gia + _BL_KHOI_DONG.get(p, 0.0)
+                         + D._GIA_MOI_BAI.get(p, 0.0) * len(lo)     # Threads: dòng bài gốc
                          + (_BL_FB_LOC_NGAY * len(lo) if moc is not None else 0.0)) * _HE_SO_UOC, 4)
             ph = {"id": f"bl-{p}-{len(_phan_bl(v)) + len(cac)}", "nen_tang": p, "trang_thai": "cho",
                   "bai": [{k: b.get(k) for k in ("khoa", "link", "nen_tang", "tai_khoan",
@@ -1331,6 +1428,8 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
             if p != "youtube":
                 ph.update(actor=D._ACTORS[p], payload=_payload_bl(p, urls, per_lo, day_du, moc),
                           limit=D._limit(p, urls, per_lo))
+                if D._RAM.get(p):                  # phí khởi động Threads tính theo GB RAM
+                    ph.update(mem=D._RAM[p], khoi=_BL_KHOI_DONG.get(p, 0.0))
             cac.append(ph)
     if cac:
         with v._khoa:
@@ -1346,7 +1445,9 @@ def _chia_lo_bl(p: str, ds: list[dict], per: int) -> list[tuple[list[dict], obje
     if not ds:
         return []
     if per:
-        return [(ds[i:i + _BL_LO], None) for i in range(0, len(ds), _BL_LO)]
+        import deep_dive_tool as D
+        n = min(_BL_LO, D._BAI_MOI_LO.get(p, _BL_LO))      # Threads: ≤ 20 bài mỗi lượt actor
+        return [(ds[i:i + n], None) for i in range(0, len(ds), n)]
     gia = _BL_GIA.get(p, 0.0)
     tran = A._tran_nen_tang(p, nen=True)[1] if gia else 0.0
     toi_da_bl = int(0.9 * tran / (gia * _HE_SO_UOC)) if gia else 10 ** 9
@@ -1389,7 +1490,7 @@ def _con_viec(v) -> float:
 def _doc_bl(p: str, items: list) -> list[dict]:
     import deep_dive_tool as D
     rows, _ = {"tiktok": D._map_tiktok, "facebook": D._map_facebook,
-               "instagram": D._map_instagram}[p](items)
+               "instagram": D._map_instagram, "threads": D._map_threads}[p](items)
     return rows
 
 
@@ -1773,14 +1874,17 @@ DE_XUAT_TOI_THIEU_THAO_LUAN = 50
 
 def _dinh_danh_tai_khoan(d: dict) -> tuple[str, str, str] | None:
     """(nền tảng, định danh nguồn, link) của tài khoản đăng bài; None khi không đủ để thành
-    nguồn theo dõi (Facebook: actor tìm kiếm không trả URL trang ổn định; Threads chưa hỗ
-    trợ theo dõi)."""
+    nguồn theo dõi (Facebook: actor tìm kiếm không trả URL trang ổn định). Threads (16/10/2026):
+    username như `nguon.dinh_danh` — bài của tài khoản đang theo dõi (vd kênh nhà @hapas.vn)
+    gắn đúng nguồn, tài khoản nổi chưa theo dõi thành đề xuất."""
     p = str(d.get("platform") or "")
     u = str(d.get("username") or "").strip().lstrip("@").lower()
     if p == "tiktok" and u:
         return p, u, f"https://www.tiktok.com/@{u}"
     if p == "instagram" and u:
         return p, u, f"https://www.instagram.com/{u}/"
+    if p == "threads" and u:
+        return p, u, f"https://www.threads.com/@{u}"
     if p == "youtube":
         cid = str(d.get("_kenh_id") or "")
         if re.fullmatch(r"UC[\w-]{22}", cid):

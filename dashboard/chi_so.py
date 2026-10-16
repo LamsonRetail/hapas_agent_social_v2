@@ -38,7 +38,7 @@ TEN_KENH_NHA, TEN_BEN_NGOAI = "Internal channel", "External channel"
 TEN_LOAI = {"kol": "KOL/KOC", "page": "Trang/fanpage", "group": "Nhóm", "bao": "Báo/tin tức",
             "kenh_nha": TEN_KENH_NHA, "khac": "Khác", KHONG_NGUON: "Tìm theo từ khoá"}
 TEN_NEN_TANG = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTube",
-                "facebook": "Facebook"}
+                "facebook": "Facebook", "threads": "Threads"}
 
 NGAY_TOI_DA_THEO_NGAY = 92      # khoảng dài hơn thì gom theo tuần (biểu đồ khỏi vài trăm cột)
 TOP_NGUON = 10                  # mỗi nền tảng
@@ -160,9 +160,9 @@ CHU_DE_BAI = ("Chiến dịch & quảng cáo", "Giá cả & khuyến mãi", "Ch�
 CHU_DE_MINIGAME = "Minigame/bài dự thi"
 CHU_DE_BL = ("Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua", "KOL/nội dung",
              "Giao hàng/dịch vụ", "Đối thủ", "Tag bạn bè", CHU_DE_MINIGAME, "Khác")
-_TOI_DA_GIA_TRI = {"nen_tang": 4, "loai": 7, "nguon": 50, "sac_thai": 4, "chu_de": 40,
-                   "anh_huong": 5}
-_RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube):")
+_TOI_DA_GIA_TRI = {"nen_tang": len(TEN_NEN_TANG), "loai": 7, "nguon": 50, "sac_thai": 4,
+                   "chu_de": 40, "anh_huong": 5}
+_RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube|threads):")
 #: Khoá nguồn dài nhất: "link:" + link bài (kho cắt 500 ký tự) — bài không có tác giả/tài khoản.
 NGUON_TOI_DA_KY_TU = 520
 

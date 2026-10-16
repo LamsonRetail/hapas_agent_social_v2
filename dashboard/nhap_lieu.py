@@ -12,6 +12,8 @@ Dạng lưu (khớp chú thích bảng `nguon` trong `deploy/lang-nghe/schema.sq
     chữ thường (Mark gọi `channels?forHandle=`).
   • Facebook: URL đầy đủ `https://www.facebook.com/<trang>` chữ thường, không tham số — actor
     Facebook nhận startUrls là URL, Mark so khớp sau khi bỏ scheme/www.
+  • Threads (16/10/2026): username chữ thường, không '@' (cùng handle Instagram); link hồ sơ
+    threads.com/@ten hoặc threads.net/@ten đều được, link BÀI (/post/…) thì báo dán lại.
 """
 from __future__ import annotations
 
@@ -21,9 +23,9 @@ import unicodedata
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urlsplit
 
-NEN_TANG = ("tiktok", "instagram", "youtube", "facebook")
+NEN_TANG = ("tiktok", "instagram", "youtube", "facebook", "threads")
 TEN_NEN_TANG = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTube",
-                "facebook": "Facebook"}
+                "facebook": "Facebook", "threads": "Threads"}
 # Nhãn hiển thị "Internal channel" (chủ dự án 16/10/2026); giá trị lưu vẫn là `kenh_nha`.
 LOAI_NGUON = {"kol": "KOL/KOC", "page": "Trang/fanpage", "group": "Nhóm", "bao": "Báo/tin tức",
               "kenh_nha": "Internal channel", "khac": "Khác"}
@@ -34,7 +36,8 @@ TRAN_USD_TOI_DA = Decimal("999999.99")
 SO_TOI_DA = 1_000_000
 
 _MIEN = {"tiktok": ("tiktok.com",), "instagram": ("instagram.com", "instagr.am"),
-         "youtube": ("youtube.com", "youtu.be"), "facebook": ("facebook.com", "fb.com", "fb.me")}
+         "youtube": ("youtube.com", "youtu.be"), "facebook": ("facebook.com", "fb.com", "fb.me"),
+         "threads": ("threads.com", "threads.net")}
 _RE_UC = re.compile(r"UC[\w-]{22}")
 _RE_TEN_TK = re.compile(r"[a-z0-9._]{2,30}")
 _RE_HANDLE_YT = re.compile(r"@[\w.\-]{3,30}")
@@ -186,14 +189,14 @@ def _tach_link(nen_tang: str, s: str):
 def chuan_dinh_danh(nen_tang: str, chuoi: str) -> tuple[str, str]:
     """Username / link trang người dùng dán -> (định danh lưu kho, link trang chuẩn)."""
     if nen_tang not in NEN_TANG:
-        raise LoiNhap("Nền tảng phải là TikTok, Instagram, YouTube hoặc Facebook.")
+        raise LoiNhap("Nền tảng phải là TikTok, Instagram, YouTube, Facebook hoặc Threads.")
     s = str(chuoi or "").strip()
     if not s:
         raise LoiNhap("Chưa nhập tài khoản / link trang.")
     if len(s) > 500:
         raise LoiNhap("Link quá dài.")
     return {"tiktok": _tiktok, "instagram": _instagram, "youtube": _youtube,
-            "facebook": _facebook}[nen_tang](s)
+            "facebook": _facebook, "threads": _threads}[nen_tang](s)
 
 
 def _tiktok(s: str) -> tuple[str, str]:
@@ -226,6 +229,19 @@ def _instagram(s: str) -> tuple[str, str]:
     if not _RE_TEN_TK.fullmatch(ten):
         raise LoiNhap("Tên tài khoản Instagram chỉ gồm chữ, số, '.' và '_' (2–30 ký tự).")
     return ten, f"https://www.instagram.com/{ten}/"
+
+
+def _threads(s: str) -> tuple[str, str]:
+    if _la_link(s):
+        _, doan, _ = _tach_link("threads", s)
+        if not doan or not doan[0].startswith("@") or len(doan) > 1:
+            raise LoiNhap("Đây không phải link trang cá nhân Threads — dán link dạng "
+                          "threads.com/@ten (không phải link bài /post/…).")
+        s = doan[0]
+    ten = s.strip().lstrip("@").lower()
+    if not _RE_TEN_TK.fullmatch(ten):
+        raise LoiNhap("Tên tài khoản Threads chỉ gồm chữ, số, '.' và '_' (2–30 ký tự).")
+    return ten, f"https://www.threads.com/@{ten}"
 
 
 def _youtube(s: str) -> tuple[str, str]:

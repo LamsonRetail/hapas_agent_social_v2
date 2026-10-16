@@ -43,15 +43,15 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.nguon`
 (
   id              INT64     OPTIONS(description='Mã nguồn tự tăng ở DB nguồn. PK. Join: → bai.nguon_id. Không NULL.'),
   du_an           STRING    OPTIONS(description='Dự án của nguồn. FK → du_an.ma. Không NULL.'),
-  nen_tang        STRING    OPTIONS(description='Nền tảng của nguồn. Giá trị (ràng buộc nguồn): tiktok, instagram, youtube, facebook.'),
-  dinh_danh       STRING    OPTIONS(description='Định danh nguồn đã chuẩn hoá: username TikTok/Instagram (chữ thường, không @), id kênh YouTube (UC…, giữ hoa thường) hoặc @handle, URL trang Facebook. Duy nhất trong cặp (du_an, nen_tang).'),
+  nen_tang        STRING    OPTIONS(description='Nền tảng của nguồn. Giá trị (ràng buộc nguồn): tiktok, instagram, youtube, facebook, threads (từ 16/10/2026).'),
+  dinh_danh       STRING    OPTIONS(description='Định danh nguồn đã chuẩn hoá: username TikTok/Instagram/Threads (chữ thường, không @), id kênh YouTube (UC…, giữ hoa thường) hoặc @handle, URL trang Facebook. Duy nhất trong cặp (du_an, nen_tang).'),
   ten             STRING    OPTIONS(description='Tên hiển thị của nguồn do người quản lý nhập. Chuỗi rỗng khi chưa nhập.'),
   link            STRING    OPTIONS(description='Link hồ sơ/kênh/trang của nguồn. Chuỗi rỗng khi chưa nhập.'),
   loai            STRING    OPTIONS(description='Loại nguồn. Giá trị (ràng buộc nguồn): kol (người ảnh hưởng), page (trang/fanpage), group (nhóm), bao (báo/trang tin), kenh_nha (kênh của chính brand — giữ mọi bài), khac.'),
   nhan            ARRAY<STRING> OPTIONS(description='Nhãn tự do người quản lý gắn để lọc (vd đối thủ, top Kompa). Mảng rỗng khi không gắn.'),
   trang_thai      STRING    OPTIONS(description='Giá trị: dang_theo_doi (được quét khi tới hạn), tam_dung (bỏ qua).'),
   chu_ky_ngay     INT64     OPTIONS(description='Chu kỳ quét, số ngày (1–30, ràng buộc nguồn). Nguồn tới hạn khi lần quét cuối cách đây ít nhất chu kỳ trừ 3 giờ.'),
-  so_bai_moi_lan  INT64     OPTIONS(description='Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram luôn trả tối đa 12 bài mới nhất (giới hạn của actor hồ sơ).'),
+  so_bai_moi_lan  INT64     OPTIONS(description='Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram luôn trả tối đa 12 bài mới nhất (giới hạn của actor hồ sơ). Threads: actor lấy (và tính tiền) tối thiểu 10 bài mỗi tài khoản.'),
   them_qua        STRING    OPTIONS(description='Nguồn vào danh sách bằng cách nào. Giá trị: dashboard (người quản lý thêm), de_xuat (duyệt từ đề xuất của Mark), nhap_file.'),
   them_luc        TIMESTAMP OPTIONS(description='Thời điểm thêm nguồn, UTC.'),
   quet_cuoi       TIMESTAMP OPTIONS(description='Thời điểm quét thành công gần nhất, UTC. NULL khi chưa quét thành công lần nào.'),
@@ -65,7 +65,7 @@ OPTIONS(description='''[Lớp] Raw
 [Grain] 1 dòng = 1 nguồn (1 tài khoản/kênh/trang trên 1 nền tảng) của 1 dự án
 [Khoá] PK: id | Join: du_an → du_an.ma; id → bai.nguon_id
 [Nguồn] Postgres lang_nghe.public.nguon trên VPS Mark (người quản lý sửa trên dashboard; Mark chỉ ghi quet_cuoi, loi_cuoi, loi_luc)
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Bỏ cột them_boi (email người thêm); thêm dong_bo_luc; nguồn xoá ở nguồn thì xoá ở đây khi đồng bộ
 [Refresh] Nạp lại toàn bảng bằng MERGE (có xoá dòng không còn ở nguồn) sau mỗi lượt quét và 6 giờ một lần
 [Dùng khi] Đếm nguồn theo dõi theo dự án/nền tảng/loại; tìm nguồn lỗi hoặc lâu chưa quét; gắn loại nguồn cho bài
@@ -76,12 +76,12 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.bai`
 (
   du_an           STRING    OPTIONS(description='Dự án bài thuộc về. Một phần PK (cùng khoa). FK → du_an.ma. Không NULL.'),
   khoa            STRING    OPTIONS(description='Khoá bài "<nền tảng>:<id bài>" (id lấy từ link; không bóc được id thì "h" + 16 ký tự băm SHA-1 của link). Một phần PK. Join: → chi_so_ngay.khoa (cùng du_an).'),
-  nen_tang        STRING    OPTIONS(description='Nền tảng của bài. Giá trị: tiktok, instagram, youtube, facebook (lượt theo dõi); lượt tìm theo từ khoá có thể thêm threads.'),
+  nen_tang        STRING    OPTIONS(description='Nền tảng của bài. Giá trị: tiktok, instagram, youtube, facebook, threads (Threads cả lượt theo dõi lẫn tìm theo từ khoá từ 16/10/2026).'),
   nguon_id        INT64     OPTIONS(description='Nguồn theo dõi đã cho ra bài. FK → nguon.id. NULL khi bài đến từ tìm theo từ khoá hoặc nguồn đã bị xoá.'),
   kieu_quet       STRING    OPTIONS(description='Bài vào kho bằng đường nào. Giá trị: theo_doi (lượt /theodoi quét nguồn), tu_khoa (lượt tìm theo từ khoá). Bài đã từng là theo_doi thì giữ theo_doi.'),
   link            STRING    OPTIONS(description='Link bài gốc trên nền tảng. Không NULL.'),
   tac_gia         STRING    OPTIONS(description='Tên hiển thị kênh/tài khoản đăng bài. Chuỗi rỗng khi nền tảng không trả.'),
-  tai_khoan       STRING    OPTIONS(description='Username của tài khoản đăng (TikTok, Instagram). Chuỗi rỗng với YouTube và khi không có.'),
+  tai_khoan       STRING    OPTIONS(description='Username của tài khoản đăng (TikTok, Instagram, Threads). Chuỗi rỗng với YouTube và khi không có.'),
   followers       INT64     OPTIONS(description='Số người theo dõi tài khoản đăng lúc quét gần nhất, người. NULL khi nền tảng không trả (trang Facebook).'),
   dang_luc        TIMESTAMP OPTIONS(description='Thời điểm bài được đăng, UTC; giờ VN = DATETIME(dang_luc, "Asia/Ho_Chi_Minh"). Lượt theo dõi chỉ ghi bài đăng trong 35 ngày trước lúc quét.'),
   noi_dung        STRING    OPTIONS(description='Nội dung/caption bài (YouTube: tiêu đề — mô tả), cắt tối đa 1.000 ký tự. Chuỗi rỗng khi bài không có chữ.'),
@@ -107,7 +107,7 @@ OPTIONS(description='''[Lớp] Raw
 [Grain] 1 dòng = 1 bài × 1 dự án
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook (Threads nếu từ tìm theo từ khoá) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; khử trùng theo khoa; nội dung cắt 1.000 ký tự
 [Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
@@ -132,7 +132,7 @@ OPTIONS(description='''[Lớp] Raw
 [Grain] 1 dòng = 1 bài × 1 dự án × 1 ngày đọc (giờ VN)
 [Khoá] PK: du_an + khoa + ngay | Join: (du_an, khoa) → bai.(du_an, khoa)
 [Nguồn] Postgres lang_nghe.public.chi_so_ngay trên VPS Mark; Mark ghi mỗi lần đọc số của bài (ghi đè trong cùng ngày)
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads | Từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Không xử lý; bản sao các cột số liệu
 [Refresh] MERGE theo du_an + khoa + ngay các dòng có ngày từ (mốc lần trước − 1 ngày), sau mỗi lượt quét và 6 giờ một lần
 [Dùng khi] Tăng trưởng lượt xem/bình luận theo ngày; phần tăng trong kỳ = giá trị ngày cuối − ngày đầu của bài
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.binh_luan`
   du_an           STRING    OPTIONS(description='Dự án. Một phần PK. FK (cùng khoa_bai) → bai.du_an.'),
   khoa_bai        STRING    OPTIONS(description='Khoá bài chứa bình luận "<nền tảng>:<id bài>". Một phần PK. FK (cùng du_an) → bai.khoa.'),
   ma              STRING    OPTIONS(description='Mã bình luận trên nền tảng; không có thì "h" + 16 ký tự băm SHA-1 (tác giả, nội dung, thời điểm). Một phần PK.'),
-  nen_tang        STRING    OPTIONS(description='Nền tảng. Giá trị: tiktok, instagram, youtube, facebook.'),
+  nen_tang        STRING    OPTIONS(description='Nền tảng. Giá trị: tiktok, instagram, youtube, facebook, threads.'),
   tac_gia         STRING    OPTIONS(description='Tên/username công khai của người bình luận trên nền tảng. Chuỗi rỗng khi không có.'),
   noi_dung        STRING    OPTIONS(description='Nội dung bình luận, tối đa 1.000 ký tự.'),
   thich           INT64     OPTIONS(description='Lượt thích bình luận lúc cào, lượt. NULL khi nền tảng không trả.'),
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.binh_luan`
   loai            STRING    OPTIONS(description='Nhãn lọc. Giá trị: hop_le (thảo luận sạch, có sắc thái), it_noi_dung (chỉ dấu chấm/emoji/tag), spam (quảng cáo/lừa đảo/kéo khách, gồm spam affiliate dán mã), trung (cùng người cùng nội dung cùng bài), seeding (cùng nội dung từ ≥ 3 tài khoản trong 7 ngày), thuong_hieu (thương hiệu viết). Đếm thảo luận sạch: loai = hop_le.'),
   ly_do_loc       STRING    OPTIONS(description='Lý do lọc khi loai không phải hop_le (vd lien_ket_quang_cao, keo_khach, vay_tien, co_bac, viec_lam_mmo, cung_nguoi_cung_noi_dung, cung_noi_dung_nhieu_tai_khoan; affiliate_dan_ma, affiliate_hang_loat = spam mời dán mã giới thiệu vào Shopee). NULL khi hợp lệ.'),
   ma_noi_dung     STRING    OPTIONS(description='Băm 16 ký tự nội dung đã chuẩn hoá khi ≥ 40 ký tự — cùng mã từ ≥ 3 tài khoản trên ≥ 2 bài là seeding. NULL khi quá ngắn.'),
-  link            STRING    OPTIONS(description='Link mở thẳng tới bình luận khi nền tảng có (Facebook, Instagram, YouTube); NULL thì dùng bai.link.'),
+  link            STRING    OPTIONS(description='Link mở thẳng tới bình luận khi nền tảng có (Facebook, Instagram, Threads, YouTube); NULL thì dùng bai.link.'),
   ma_cha          STRING    OPTIONS(description='Mã bình luận cha khi dòng là trả lời (cùng khoa_bai). NULL với bình luận gốc.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
@@ -201,23 +201,88 @@ OPTIONS(description='''[Lớp] Raw
 [Mục đích] Bình luận (và trả lời) dưới các bài đã giữ của dự án, kèm sắc thái và chủ đề AI gán — tiếng khách hàng.
 [Grain] 1 dòng = 1 bình luận × 1 bài × 1 dự án
 [Khoá] PK: du_an + khoa_bai + ma | Join: (du_an, khoa_bai) → bai.(du_an, khoa); luot_id → luot_quet.id
-[Nguồn] Postgres lang_nghe.public.binh_luan trên VPS Mark; Mark cào sau mỗi lượt /theodoi (Apify comments scraper TikTok/Facebook/Instagram, YouTube Data API)
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; số bài và số bình luận mỗi bài theo cấu hình từng nền tảng (du_an.cau_hinh trên Postgres, 0 = cào hết); từ 15/10/2026
+[Nguồn] Postgres lang_nghe.public.binh_luan trên VPS Mark; Mark cào sau mỗi lượt /theodoi (Apify comments scraper TikTok/Facebook/Instagram, Threads replies scraper, YouTube Data API)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Bài đăng trong 35 ngày; số bài và số bình luận mỗi bài theo cấu hình từng nền tảng (du_an.cau_hinh trên Postgres, 0 = cào hết); từ 15/10/2026
 [Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng có nhãn lọc loai (spam/rác/trùng/seeding/thương hiệu) — chỉ hop_le được gán sắc thái/chủ đề
 [Refresh] MERGE theo du_an + khoa_bai + ma các dòng có cap_nhat_cuoi mới, sau mỗi lượt quét và 6 giờ một lần
 [Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày
 [Không dùng khi] Tổng bình luận nền tảng báo của bài → dùng SOCIAL_LISTENING.bai.binh_luan
-[Lưu ý] Thảo luận sạch / sắc thái: lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, bài rất lớn có thể thiếu (so bai.binh_luan để biết độ phủ).''');
+[Lưu ý] Thảo luận sạch / sắc thái: lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, Threads chỉ trả lời cấp 1 (10–300 mỗi bài), bài rất lớn có thể thiếu (so bai.binh_luan để biết độ phủ).''');
 
 -- Nâng cấp bảng đã tạo TRƯỚC đợt 2e (15/10/2026): CREATE … IF NOT EXISTS không thêm cột vào bảng
 -- có sẵn, mà dong_bo_bq MERGE cả link + ma_cha — chạy khối này trước khi bật đồng bộ bản mới.
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
-  ADD COLUMN IF NOT EXISTS link STRING OPTIONS(description='Link mở thẳng tới bình luận khi nền tảng có (Facebook, Instagram, YouTube); NULL thì dùng bai.link.'),
+  ADD COLUMN IF NOT EXISTS link STRING OPTIONS(description='Link mở thẳng tới bình luận khi nền tảng có (Facebook, Instagram, Threads, YouTube); NULL thì dùng bai.link.'),
   ADD COLUMN IF NOT EXISTS ma_cha STRING OPTIONS(description='Mã bình luận cha khi dòng là trả lời (cùng khoa_bai). NULL với bình luận gốc.');
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.nguon`
-  ALTER COLUMN so_bai_moi_lan SET OPTIONS(description='Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram luôn trả tối đa 12 bài mới nhất (giới hạn của actor hồ sơ).');
+  ALTER COLUMN so_bai_moi_lan SET OPTIONS(description='Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram luôn trả tối đa 12 bài mới nhất (giới hạn của actor hồ sơ). Threads: actor lấy (và tính tiền) tối thiểu 10 bài mỗi tài khoản.');
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.du_an`
   ALTER COLUMN tran_usd_thang SET OPTIONS(description='Trần chi phí theo dõi mỗi tháng, USD (tiền Apify, không VAT). ≥ 0, không trần trên (ràng buộc nguồn), mặc định 5. Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng.');
+
+-- Threads (16/10/2026): bảng đã tạo trước thì CREATE … IF NOT EXISTS không đổi mô tả — cập nhật
+-- mô tả bảng/cột có nhắc nền tảng (quy chuẩn BI: mô tả luôn đúng dữ liệu).
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.nguon`
+  ALTER COLUMN nen_tang SET OPTIONS(description='Nền tảng của nguồn. Giá trị (ràng buộc nguồn): tiktok, instagram, youtube, facebook, threads (từ 16/10/2026).');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.nguon`
+  ALTER COLUMN dinh_danh SET OPTIONS(description='Định danh nguồn đã chuẩn hoá: username TikTok/Instagram/Threads (chữ thường, không @), id kênh YouTube (UC…, giữ hoa thường) hoặc @handle, URL trang Facebook. Duy nhất trong cặp (du_an, nen_tang).');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.nguon`
+  ALTER COLUMN so_bai_moi_lan SET OPTIONS(description='Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram luôn trả tối đa 12 bài mới nhất (giới hạn của actor hồ sơ). Threads: actor lấy (và tính tiền) tối thiểu 10 bài mỗi tài khoản.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  ALTER COLUMN nen_tang SET OPTIONS(description='Nền tảng của bài. Giá trị: tiktok, instagram, youtube, facebook, threads (Threads cả lượt theo dõi lẫn tìm theo từ khoá từ 16/10/2026).');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  ALTER COLUMN tai_khoan SET OPTIONS(description='Username của tài khoản đăng (TikTok, Instagram, Threads). Chuỗi rỗng với YouTube và khi không có.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
+  ALTER COLUMN nen_tang SET OPTIONS(description='Nền tảng. Giá trị: tiktok, instagram, youtube, facebook, threads.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
+  ALTER COLUMN link SET OPTIONS(description='Link mở thẳng tới bình luận khi nền tảng có (Facebook, Instagram, Threads, YouTube); NULL thì dùng bai.link.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.nguon`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Danh sách nguồn mạng xã hội đang theo dõi của từng dự án, kèm chu kỳ quét và tình trạng quét gần nhất.
+[Grain] 1 dòng = 1 nguồn (1 tài khoản/kênh/trang trên 1 nền tảng) của 1 dự án
+[Khoá] PK: id | Join: du_an → du_an.ma; id → bai.nguon_id
+[Nguồn] Postgres lang_nghe.public.nguon trên VPS Mark (người quản lý sửa trên dashboard; Mark chỉ ghi quet_cuoi, loi_cuoi, loi_luc)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026)
+[Đã xử lý] Bỏ cột them_boi (email người thêm); thêm dong_bo_luc; nguồn xoá ở nguồn thì xoá ở đây khi đồng bộ
+[Refresh] Nạp lại toàn bảng bằng MERGE (có xoá dòng không còn ở nguồn) sau mỗi lượt quét và 6 giờ một lần
+[Dùng khi] Đếm nguồn theo dõi theo dự án/nền tảng/loại; tìm nguồn lỗi hoặc lâu chưa quét; gắn loại nguồn cho bài
+[Không dùng khi] Bài và tương tác của nguồn → dùng SOCIAL_LISTENING.bai; nguồn Mark đề xuất chưa duyệt → không có trên BigQuery, xem dashboard
+[Lưu ý] Bài tìm theo từ khoá (bai.kieu_quet = tu_khoa) có thể không có nguồn (bai.nguon_id NULL).''');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Bài mạng xã hội liên quan tới dự án mà Mark đã giữ, kèm nhãn AI và tương tác mới nhất, để đếm thảo luận, nguồn nổi bật, sắc thái, chủ đề.
+[Grain] 1 dòng = 1 bài × 1 dự án
+[Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
+[Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
+[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; khử trùng theo khoa; nội dung cắt 1.000 ký tự
+[Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
+[Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
+[Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet
+[Lưu ý] Số liệu là lần đọc gần nhất, không phải cuối kỳ; bài YouTube được đọc lại số mỗi ngày trong 14 ngày đầu, nền tảng khác chỉ khi bài còn nằm trong N bài mới nhất của nguồn. Đây là mẫu theo nguồn đã chọn, không phải toàn bộ thảo luận trên mạng.''');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.chi_so_ngay`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Tương tác lũy kế của từng bài theo ngày đọc, để vẽ tăng trưởng và tính phần tăng trong kỳ.
+[Grain] 1 dòng = 1 bài × 1 dự án × 1 ngày đọc (giờ VN)
+[Khoá] PK: du_an + khoa + ngay | Join: (du_an, khoa) → bai.(du_an, khoa)
+[Nguồn] Postgres lang_nghe.public.chi_so_ngay trên VPS Mark; Mark ghi mỗi lần đọc số của bài (ghi đè trong cùng ngày)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads | Từ khi bật đợt 2 (sau 14/10/2026)
+[Đã xử lý] Không xử lý; bản sao các cột số liệu
+[Refresh] MERGE theo du_an + khoa + ngay các dòng có ngày từ (mốc lần trước − 1 ngày), sau mỗi lượt quét và 6 giờ một lần
+[Dùng khi] Tăng trưởng lượt xem/bình luận theo ngày; phần tăng trong kỳ = giá trị ngày cuối − ngày đầu của bài
+[Không dùng khi] Số liệu mới nhất của bài, nội dung, nhãn → dùng SOCIAL_LISTENING.bai
+[Lưu ý] Số là LŨY KẾ, không phải phát sinh trong ngày; bài không được đọc ngày nào thì thiếu dòng ngày đó (không có dòng 0).''');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Bình luận (và trả lời) dưới các bài đã giữ của dự án, kèm sắc thái và chủ đề AI gán — tiếng khách hàng.
+[Grain] 1 dòng = 1 bình luận × 1 bài × 1 dự án
+[Khoá] PK: du_an + khoa_bai + ma | Join: (du_an, khoa_bai) → bai.(du_an, khoa); luot_id → luot_quet.id
+[Nguồn] Postgres lang_nghe.public.binh_luan trên VPS Mark; Mark cào sau mỗi lượt /theodoi (Apify comments scraper TikTok/Facebook/Instagram, Threads replies scraper, YouTube Data API)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Bài đăng trong 35 ngày; số bài và số bình luận mỗi bài theo cấu hình từng nền tảng (du_an.cau_hinh trên Postgres, 0 = cào hết); từ 15/10/2026
+[Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng có nhãn lọc loai (spam/rác/trùng/seeding/thương hiệu) — chỉ hop_le được gán sắc thái/chủ đề
+[Refresh] MERGE theo du_an + khoa_bai + ma các dòng có cap_nhat_cuoi mới, sau mỗi lượt quét và 6 giờ một lần
+[Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày
+[Không dùng khi] Tổng bình luận nền tảng báo của bài → dùng SOCIAL_LISTENING.bai.binh_luan
+[Lưu ý] Thảo luận sạch / sắc thái: lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, Threads chỉ trả lời cấp 1 (10–300 mỗi bài), bài rất lớn có thể thiếu (so bai.binh_luan để biết độ phủ).''');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`

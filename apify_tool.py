@@ -274,6 +274,9 @@ _ACTORS = {
 # RAM ghim cho từng actor (MB). Phí "Actor Start" của Threads tính THEO GB
 # ($0.02/GB) nên để mặc định 4GB là mất $0.08 trước khi trả về item nào — đo
 # thật 26/08/2026: run bị abort sau 3 giây vì chạm trần chi phí, dataset rỗng.
+# Đo lại 16/10/2026: actor đã đặt minMemoryMbytes = maxMemoryMbytes = 4096 (build
+# 10/2026) — Apify tự nâng 1024 lên 4096, mỗi run tính 4 lần phí khởi động. Vẫn
+# xin 1024: actor hạ lại mức tối thiểu thì tự rẻ lại, không phải sửa code.
 _MEMORY = {"threads": 1024}
 
 # Giá Apify mỗi item (USD) — YouTube Data API chính thức không tính tiền.
@@ -285,6 +288,10 @@ _MEMORY = {"threads": 1024}
 _UNIT_COST = {"tiktok": 0.003, "instagram": 0.0004, "facebook": 0.00259,
               "youtube": 0.0, "threads": 0.0025}
 _START_COST = {"instagram": 0.016, "threads": 0.02, "facebook": 0.00005}
+# Threads (futurizerush~meta-threads-scraper), đo thật 16/10/2026 với token mới (gói FREE):
+# run ép 4096 MB nên phí khởi động = 4 × 0,02 = 0,08 USD (gói trả phí 4 × 0,005 = 0,02); run
+# tìm 2 từ khoá trả 8 bài tốn đúng 0,08 + 8 × 0,0025 = 0,10 USD. Ước tính lấy mức gói FREE.
+_START_COST["threads"] = 0.08
 
 # Số post quét mặc định KHI KHÔNG chỉ định nền tảng (quét rộng - nông).
 # Người dùng gọi đích danh nền tảng nào thì nền tảng đó dùng nguyên `limit`
@@ -2717,18 +2724,21 @@ def _chuan_threads(raw: list) -> list[tuple]:
 def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list[tuple]:
     # `max_posts` là trần MỖI TỪ KHOÁ (input schema actor, đọc 01/10/2026: "A cap per user
     # or per keyword, not a total for the run"). Bản cũ đặt = limit nên 2 từ khoá đòi gấp
-    # đôi, chạy ~227s, vượt hạn và bị tính tiền mà không trả gì. `maxItems`=limit trên URL
-    # vẫn chặn tổng. "recent" (cùng schema: 'top' | 'recent') ưu tiên bài MỚI — đúng với
+    # đôi, chạy ~227s, vượt hạn và bị tính tiền mà không trả gì. "recent" (cùng schema:
+    # 'top' | 'recent') ưu tiên bài MỚI — đúng với
     # quét theo khoảng ngày; 'top' mặc định trả bài nổi bật của mọi thời điểm.
+    # Đo 16/10/2026: actor KHÔNG dừng ở `maxItems` (xin 6, trả và tính tiền 8 — chỉ trần USD
+    # chặn được), nên chia `limit` theo phần NGUYÊN (tổng ≤ limit khi mỗi từ ≥ 10 bài) và đọc
+    # đủ số bài actor có thể trả: bài đã trả tiền không bị bỏ lại trong dataset.
     q = _bo_trung_tu_khoa(q)
+    moi_tu = max(10, limit // max(1, len(q)))          # actor từ chối max_posts < 10
     raw = _call(_ACTORS["threads"], {
         "mode": "search", "keywords": q,
-        # actor từ chối max_posts < 10
-        "max_posts": max(10, math.ceil(limit / max(1, len(q)))),
+        "max_posts": moi_tu,
         "search_filter": "recent",
         "start_date": d_from.strftime("%Y-%m-%d"),
         "end_date": d_to.strftime("%Y-%m-%d"),
-    }, limit, mem=_MEMORY.get("threads"))
+    }, max(limit, moi_tu * len(q)), mem=_MEMORY.get("threads"))
     return _chuan_threads(raw)
 
 
