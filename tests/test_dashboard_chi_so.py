@@ -355,11 +355,10 @@ def test_loc_theo_tuong_tac_khong_so_phan_tram_ky_truoc():
 def test_nhan_chu_de_khop_mark():
     import phan_loai
     assert CS.CHU_DE_BAI == tuple(phan_loai.CHU_DE_BAI.values())
-    # Chủ đề MG ("Minigame/bài dự thi") do một nhánh khác thêm vào `phan_loai` (16/10/2026): khớp
-    # cả trước lẫn sau khi nhánh đó vào — ngoài MG, hai bên phải trùng nhau.
-    mg = {CS.CHU_DE_MINIGAME}
-    assert set(phan_loai.CHU_DE.values()) - mg == set(CS.CHU_DE_BL) - mg
-    assert CS.CHU_DE_MINIGAME in CS.CHU_DE_BL and CS.nhom_chu_de(CS.CHU_DE_MINIGAME) == "bl"
+    # Chủ đề MG ("Minigame/bài dự thi", 16/10/2026) có ở cả Mark lẫn dashboard: khớp đúng từng chữ
+    # và đúng thứ tự — dashboard ẩn minigame khỏi mây theo đúng nhãn này.
+    assert CS.CHU_DE_BL == tuple(phan_loai.CHU_DE.values())
+    assert phan_loai.CHU_DE["MG"] == CS.CHU_DE_MINIGAME and CS.nhom_chu_de(CS.CHU_DE_MINIGAME) == "bl"
     assert CS.nhom_chu_de("Giá/mua ở đâu/ý định mua") == "bl"
     assert CS.nhom_chu_de("Giá cả & khuyến mãi") == "bai"
     assert CS.nhom_chu_de("Khác") == CS.nhom_chu_de(CS.CHUA) == "chung"

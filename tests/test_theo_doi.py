@@ -1138,8 +1138,8 @@ def test_tim_tu_khoa_giu_bai_nhac_hapas_gan_nguon_va_ghi_tien(mo):
     goi = {}
 
     def tim(p):
-        def f(q, limit, country, d_from, d_to):
-            goi[p] = (list(q), limit, (d_to - d_from).days)
+        def f(q, limit, country, d_from, d_to, **k):
+            goi[p] = (list(q), limit, (d_to - d_from).days, k)
             fn = A._KHI_CO_RUN.get()
             if fn:
                 fn({"id": f"run-{p}"}, {})
@@ -1161,6 +1161,7 @@ def test_tim_tu_khoa_giu_bai_nhac_hapas_gan_nguon_va_ghi_tien(mo):
     assert goi["tiktok"][0] == ["hapas", "túi hapas", "yeutudieunhonhat"]   # bỏ trùng hoa/thường
     assert goi["instagram"][0] == ["hapas", "yeutudieunhonhat"]            # không dấu cách
     assert goi["facebook"][1] == 15 and goi["tiktok"][2] >= 30           # lần đầu lùi 30 ngày
+    assert goi["youtube"][3] == {"toi_da_trang": 1} and goi["tiktok"][3] == {}   # trần trang YT
     kieu, rows = kho.bai[0]
     assert kieu == "tu_khoa"
     theo = {r["khoa"]: r for r in rows}
@@ -1342,7 +1343,7 @@ def test_tim_tu_khoa_theo_cau_hinh_tung_nen_tang(mo):
     goi = {}
 
     def tim(p):
-        def f(q, limit, *a):
+        def f(q, limit, *a, **k):
             goi[p] = (list(q), limit)
             return []
         return f
@@ -1357,6 +1358,160 @@ def test_tim_tu_khoa_theo_cau_hinh_tung_nen_tang(mo):
     assert "tiktok" not in goi and goi["facebook"][1] == 60       # gói trả phí: không kẹp 20
     assert goi["instagram"][0] == ["hapas", "yeutudieunhonhat", "hahahapas"]
     assert goi["youtube"][1] == 15
+
+
+# ───────────── cửa sổ tìm theo mốc + phễu + trần trang YouTube (chẩn đoán 16/10) ─────────────
+def _chay_tk(du_an, v=None, luot=3):
+    import contextvars
+    return contextvars.copy_context().run(T._tim_tu_khoa, v or GiaViec({}, []), du_an, luot,
+                                          5.0, time.monotonic() + 600)
+
+
+def test_cua_so_tk_tu_moc_thanh_cong_gan_nhat():
+    bay = datetime.datetime(2026, 10, 20, 9, 30, tzinfo=_VN)
+    dau = T.dau_tk(["hapas", "túi hapas"], 300)
+    tu, n, ly = T.cua_so_tk(None, dau, bay)
+    assert (n, ly) == (30, "chưa có mốc") and tu == datetime.datetime(2026, 9, 20, tzinfo=_VN)
+    moc = {"luc": "2026-10-16T09:20:00+07:00", "dau": dau}
+    tu, n, ly = T.cua_so_tk(moc, dau, bay)       # cách 4 ngày 10 phút + 1 ngày chồng → 6
+    assert n == 6 and tu == datetime.datetime(2026, 10, 14, tzinfo=_VN) and "16/10 09:20" in ly
+    assert tu <= datetime.datetime(2026, 10, 15, 9, 20, tzinfo=_VN), "chồng mép ≥ 1 ngày"
+    assert T.cua_so_tk(dict(moc, luc="2026-10-20T08:00:00+07:00"), dau, bay)[1] == 3
+    assert T.cua_so_tk(dict(moc, luc="2026-08-01T08:00:00+07:00"), dau, bay)[1] == 30
+    # Đổi từ khoá hoặc số bài của nền tảng → lùi tối đa; hoa/thường, dấu cách thừa không tính.
+    assert T.cua_so_tk(moc, T.dau_tk(["hapas"], 300), bay)[1:] == (30, "đổi từ khoá/số bài")
+    assert T.cua_so_tk(moc, T.dau_tk(["hapas", "túi hapas"], 150), bay)[1] == 30
+    assert T.dau_tk(["Hapas", "Túi  HAPAS"], 300) == dau
+    assert T.cua_so_tk(dict(moc, luc="rác"), dau, bay)[1:] == (30, "mốc hỏng")
+
+
+def test_tim_tu_khoa_cua_so_theo_moc_tung_nen_tang(mo):
+    GiaKhoTk(mo)
+    goi: dict[str, list] = {}
+
+    def tim(p):
+        def f(q, limit, country, d_from, d_to, **k):
+            goi.setdefault(p, []).append((d_to - d_from).days)
+            if p == "tiktok":
+                return [_tt_tim("kol.b", "21", "review túi hapas",
+                                datetime.datetime.now(_VN) - datetime.timedelta(days=8))]
+            return []
+        return f
+    mo.setattr(A, "_FETCH", {p: tim(p) for p in ("tiktok", "facebook", "instagram", "youtube")})
+    da = dict(DU_AN, tu_khoa=["hapas"], tk_bat=True, tk_so_bai=15)
+    tk = _chay_tk(da)
+    assert goi["tiktok"][-1] >= 30 and tk["giu"] == 1      # chưa có mốc: 30 ngày
+    moc = T.doc_moc_tk("hapas")
+    assert set(moc) == {"tiktok"}, "nền tảng trả 0 item không dời mốc"
+    assert moc["tiktok"]["luot"] == 3 and moc["tiktok"]["dau"] == T.dau_tk(["hapas"], 15)
+    # Ngay sau đó: TikTok đã tìm thành công → cửa sổ tối thiểu 3 ngày; YouTube vẫn 30.
+    tk = _chay_tk(da)
+    assert goi["tiktok"][-1] == 3 and goi["youtube"][-1] >= 30
+    assert tk["pheu"]["tiktok"]["cua_so"] == 0, "video 8 ngày nằm ngoài cửa sổ 3 ngày"
+    # Mốc cách 10 ngày (lượt cách quãng): cửa sổ 10 + 1 ngày chồng → bắt lại video 8 ngày.
+    luc = datetime.datetime.now(_VN) - datetime.timedelta(days=10)
+    T.ghi_moc_tk("hapas", {"tiktok": dict(moc["tiktok"], luc=luc.isoformat())})
+    tk = _chay_tk(da)
+    assert goi["tiktok"][-1] in (11, 12) and tk["pheu"]["tiktok"]["cua_so"] == 1
+    # Đổi số bài TikTok trên dashboard → lùi 30 ngày lại.
+    _chay_tk(dict(da, cau_hinh={"tu_khoa": {"tiktok": {"so_bai": 300}}}))
+    assert goi["tiktok"][-1] >= 30
+
+
+def test_tim_tu_khoa_ghi_kho_hong_thi_khong_doi_moc(mo):
+    GiaKhoTk(mo)
+
+    def hong(*a):
+        raise K.LoiKho("kho lắng nghe báo lỗi (OperationalError: 08006)")
+    mo.setattr(K, "ghi_bai", hong)
+    mo.setattr(A, "_FETCH", {p: (lambda *a, p=p, **k: [_tt_tim("kol.b", "2", "review túi hapas")]
+                                 if p == "tiktok" else [])
+                             for p in ("tiktok", "facebook", "instagram", "youtube")})
+    v = GiaViec({}, [])
+    with pytest.raises(K.LoiKho):
+        _chay_tk(dict(DU_AN, tk_bat=True, tk_so_bai=15), v)
+    assert T.doc_moc_tk("hapas") == {}, "bài chưa vào kho thì lượt sau phải tìm lại khoảng đó"
+    assert v.d["pheu_tu_khoa"]["tiktok"]["ve"] == 1, "phễu vẫn vào sổ việc"
+
+
+def test_tim_tu_khoa_pheu_tung_buoc(mo):
+    GiaKhoTk(mo)
+    cu = datetime.datetime.now(_VN) - datetime.timedelta(days=60)
+    bai = [_tt_tim("a", "1", "túi hapas đẹp"),                    # giữ
+           _tt_tim("a", "1", "túi hapas đẹp"),                    # trùng
+           _tt_tim("b", "2", "hapas guitar đỉnh"),                # từ loại trừ
+           _tt_tim("c", "3", "hapas vay nhanh không thế chấp"),   # spam
+           _tt_tim("d", "4", "hapas lạc đề"),                     # AI loại: lac_de
+           _tt_tim("e", "5", "hapas trùng tên"),                  # AI loại: trung_ten
+           _tt_tim("f", "6", "hôm nay ăn phở"),                   # AI không phán, không nhắc
+           _tt_tim("g", "7", "hapas cũ", cu)]                     # ngoài cửa sổ
+
+    def ai(cho, *a, **k):
+        px = {}
+        for i, (d, _) in enumerate(cho):
+            if "lạc đề" in d["text"]:
+                px[i] = (False, "lac_de")
+            elif "trùng tên" in d["text"]:
+                px[i] = (False, "trung_ten")
+        return px, {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"}
+    mo.setattr(A, "_phan_xu_ai", ai)
+    mo.setattr(A, "_FETCH", {p: (lambda *a, p=p, **k: [(dict(d), dt) for d, dt in bai]
+                                 if p == "tiktok" else [])
+                             for p in ("tiktok", "facebook", "instagram", "youtube")})
+    v = GiaViec({}, [])
+    tk = _chay_tk(dict(DU_AN, tk_bat=True, tk_so_bai=15), v)
+    f = tk["pheu"]["tiktok"]
+    assert (f["ve"], f["cua_so"], f["trung"], f["loai_tru"], f["spam"], f["khong_nhac"],
+            f["giu"], f["moi"]) == (8, 7, 1, 1, 1, 1, 1, 1)
+    assert f["ai_loai"] == {"lac_de": 1, "trung_ten": 1}
+    assert tk["pheu"]["youtube"]["ve"] == 0 and "facebook" in tk["pheu"]
+    dong = next(c for c in T._cau_tk(tk) if c.startswith("phễu tìm TikTok"))
+    assert "(30 ngày, chưa có mốc): về 8 → trong cửa sổ 7 → trùng 1" in dong
+    assert "AI loại 2 (lạc đề 1, trùng tên 1), không nhắc từ khoá 1 → giữ 1 (1 mới)" in dong
+    assert v.d["pheu_tu_khoa"]["tiktok"] == f
+    ph = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-tiktok")
+    assert ph["cua_so"]["ngay"] == 30 and ph["so_item"] == 8
+
+
+def test_youtube_cau_tim_dat_cum_trong_ngoac_kep():
+    """Dấu cách trong câu tìm YouTube là AND: cụm nhiều chữ phải trong ngoặc kép; cụm đã có từ
+    đơn bao trọn thì bỏ (chẩn đoán 16/10/2026: YouTube 0 video ở cả 3 lượt)."""
+    q = ["hapas", "túi hapas", "Hapas", "yêu từ điều nhỏ nhất", "hapas.vn", 'ví "x"|y', ""]
+    assert A._cau_tim_youtube(q) == 'hapas|"yêu từ điều nhỏ nhất"|hapas.vn|"ví x y"'
+    assert A._cau_tim_youtube(["túi hapas", "ví hapas"]) == '"túi hapas"|"ví hapas"'
+    assert A._cau_tim_youtube(["#hapas", "túi hapas"]) == "#hapas"
+
+
+def test_youtube_tim_gui_cau_da_dat_ngoac(monkeypatch):
+    monkeypatch.setenv("YOUTUBE_DATA_API_KEY", "AIzaTHU")
+    gui = []
+
+    class Y:
+        status_code = 200
+
+        def json(self):
+            return {"items": []}
+    monkeypatch.setattr(A.requests, "get", lambda url, params=None, **k: gui.append(params) or Y())
+    A._youtube_tim(["hapas", "túi hapas", "yêu từ điều nhỏ nhất"], 15, "VN",
+                   BAY_GIO - datetime.timedelta(days=3), BAY_GIO, 1)
+    assert gui[0]["q"] == 'hapas|"yêu từ điều nhỏ nhất"'
+
+
+def test_tim_tu_khoa_youtube_tran_trang_theo_quota(mo):
+    GiaKhoTk(mo)
+    goi = {}
+    mo.setattr(A, "_FETCH", {p: (lambda q, lim, *a, p=p, **k: goi.__setitem__(p, (lim, k)) or [])
+                             for p in ("tiktok", "facebook", "instagram", "youtube")})
+    da = dict(DU_AN, tk_bat=True, tk_so_bai=15,
+              cau_hinh={"tu_khoa": {"youtube": {"so_bai": 500}}})
+    mo.setenv("YOUTUBE_SEARCH_NEN", "2")
+    _chay_tk(da)
+    assert goi["youtube"] == (500, {"toi_da_trang": 2}), "10 trang cần, quota việc nền còn 2"
+    mo.setenv("YOUTUBE_SEARCH_NEN", "0")
+    goi.clear()
+    tk = _chay_tk(da)
+    assert "youtube" not in goi and "tiktok" in goi
+    assert any("YouTube: bỏ qua (hết quota" in x for x in tk["ghi_chu"])
 
 
 def test_binh_luan_link_va_ma_cha():
