@@ -34,7 +34,7 @@
 {% if dong|length > 1 or (dong and not chon) %}
 <section class="the-khoi cach-duoi" aria-labelledby="ns-cac-du-an">
   {% set muc.so = muc.so + 1 %}
-  <div class="muc"><span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span><h2 class="muc__ten" id="ns-cac-du-an">Tất cả dự án</h2></div>
+  <div class="muc"><span class="muc__so" aria-hidden="true">{{ muc.so }}</span><h2 class="muc__ten" id="ns-cac-du-an">Tất cả dự án</h2></div>
   <div class="cuon-ngang">
   <table class="ns-cac-du-an">
     <thead><tr><th>Dự án</th><th class="so">Trần hiệu lực</th><th class="so">Đã tiêu</th><th class="so">Dự báo cả tháng</th><th>Tình trạng</th></tr></thead>
@@ -66,7 +66,7 @@
 <section class="the-khoi cach-duoi ns-tong" aria-labelledby="ns-tong-tieu-de">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
-    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten" id="ns-tong-tieu-de">{{ d.ten }}</h2><span class="the">{{ d.ma }}</span>{% if not d.dang_bat %} <span class="the">đang tắt</span>{% endif %}
     <span class="muc__phai">{% if db.vuot %}<span class="the the--loi ns-pill">Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD</span>
     {% else %}<span class="the the--tot ns-pill">Trong trần</span>{% endif %}</span>
@@ -154,7 +154,7 @@
   {% set muc.so = muc.so + 1 %}
   <div class="ns-ch__dau">
     <div class="muc ns-ch__muc">
-      <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+      <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
       <h2 class="muc__ten" id="ns-ch-tieu-de">Thu thập mỗi lượt /theodoi</h2>
       <button type="button" class="goi-y" data-goi-y="{% if ql %}Ô trống, viền đứt = theo mặc định dự án; bình luận mỗi bài 0 = cào hết. USD là mức tối đa mỗi lượt.{% else %}USD là mức tối đa mỗi lượt; chỉ người quản lý sửa được.{% endif %}">i</button>
     </div>
@@ -277,7 +277,7 @@
   <section class="the-khoi" aria-labelledby="ns-pt-tieu-de">
     {% set muc.so = muc.so + 1 %}
     <div class="muc">
-      <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+      <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
       <h2 class="muc__ten" id="ns-pt-tieu-de">Dự báo theo nền tảng</h2>
       <button type="button" class="goi-y" data-goi-y="Nguồn đang theo dõi. Phí khởi động ≈ 1 lần/nền tảng/ngày quét; giá đo 25/09/2026, đã nhân hệ số 1,3 như Mark.">i</button>
     </div>
@@ -302,7 +302,7 @@
   <section class="the-khoi" aria-labelledby="ns-ton-tieu-de">
     {% set muc.so = muc.so + 1 %}
     <div class="muc">
-      <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+      <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
       <h2 class="muc__ten" id="ns-ton-tieu-de">Nguồn tốn nhất</h2>
       <a class="muc__phai nho" href="/nguon?du_an={{ d.ma|urlencode }}">Sửa nguồn →</a>
     </div>
@@ -328,7 +328,7 @@
 <section class="the-khoi" aria-labelledby="ns-ls-tieu-de">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
-    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten" id="ns-ls-tieu-de">Lịch sử lượt quét — {{ du_an.ten }}</h2>
     <span class="muc__phai muc__phu">{{ tong|so_vn }} lượt</span>
   </div>

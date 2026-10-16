@@ -93,7 +93,7 @@
 {% if ql and bm %}
 <section class="the-khoi cach-duoi lq-bm" id="bieu-mau" aria-labelledby="lq-bm-td">
   <div class="muc">
-    <span class="muc__so muc__so--2" aria-hidden="true">2</span>
+    <span class="muc__so" aria-hidden="true">2</span>
     <h2 class="muc__ten" id="lq-bm-td">{% if sua %}Sửa lịch #{{ sua.id }}{% else %}Tạo lịch mới{% endif %}</h2>
     {% if sua %}<a class="muc__phai nho" href="/lich-quet?du_an={{ du_an.ma|urlencode }}#bieu-mau">Huỷ sửa — tạo lịch mới</a>{% endif %}
   </div>
