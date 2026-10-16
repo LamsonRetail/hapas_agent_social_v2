@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex, nofollow">
 <title>{% block tieu_de %}Social Listening{% endblock %} · HAPAS</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232d6fe6'/%3E%3Cpath d='M16 7a9 9 0 0 0-7.8 13.5L7 25l4.6-1.2A9 9 0 1 0 16 7z' fill='none' stroke='white' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="{{ tinh('giao_dien.css') }}">
 <script src="{{ tinh('chung.js') }}" defer></script>
 {% block dau %}{% endblock %}
@@ -13,19 +14,20 @@
 <body>
 <header class="dau-trang">
   <div class="khung dau-trang__trong">
-    <a class="ten-trang" href="/">Social Listening</a>
+    <a class="ten-trang" href="/"><span class="ten-trang__dau" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><path d="M12 4a8 8 0 0 0-6.9 12L4 20l4.1-1.1A8 8 0 1 0 12 4z"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/></svg></span><span class="ten-trang__chu">Social Listening</span></a>
     {% if nguoi %}
     <nav class="dieu-huong" aria-label="Điều hướng chính">
-      <a href="/"{% if trang_hien == 'chi_so' %} aria-current="page"{% endif %}>Chỉ số</a>
-      <a href="/nguon"{% if trang_hien == 'nguon' %} aria-current="page"{% endif %}>Nguồn</a>
-      <a href="/ngan-sach"{% if trang_hien == 'ngan_sach' %} aria-current="page"{% endif %}>Ngân sách</a>
-      <a href="/lich-quet"{% if trang_hien == 'lich_quet' %} aria-current="page"{% endif %}>Lịch quét</a>
-      <a href="/bigquery"{% if trang_hien == 'bigquery' %} aria-current="page"{% endif %}>BigQuery</a>
+      <a href="/"{% if trang_hien == 'chi_so' %} aria-current="page"{% endif %}>Chỉ số<svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M6 20v-7M11 20V6M16 20v-9M20 20V9"/></svg></a>
+      <a href="/nguon"{% if trang_hien == 'nguon' %} aria-current="page"{% endif %}>Nguồn<svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg></a>
+      <a href="/ngan-sach"{% if trang_hien == 'ngan_sach' %} aria-current="page"{% endif %}>Ngân sách<svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5.5" width="18" height="14" rx="2.5"/><path d="M3 10h18M15.5 15h2"/></svg></a>
+      <a href="/lich-quet"{% if trang_hien == 'lich_quet' %} aria-current="page"{% endif %}>Lịch quét<svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></a>
+      <a href="/bigquery"{% if trang_hien == 'bigquery' %} aria-current="page"{% endif %}>BigQuery<svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="2.8"/><path d="M5 6v12c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8V6M5 12c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8"/></svg></a>
       {% if nguoi.vai_tro == 'quan_ly' %}
-      <a href="/nguoi-xem"{% if trang_hien == 'nguoi_xem' %} aria-current="page"{% endif %}>Người xem</a>
+      <a href="/nguoi-xem"{% if trang_hien == 'nguoi_xem' %} aria-current="page"{% endif %}>Người xem<svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M17.8 14.2A6.5 6.5 0 0 1 21.5 20"/></svg></a>
       {% endif %}
     </nav>
     <div class="tai-khoan">
+      <span class="tai-khoan__av" aria-hidden="true">{{ nguoi.email[:1]|upper }}</span>
       <span class="email" title="{{ nguoi.email }}">{{ nguoi.email }}</span>
       <span class="the">{{ VAI_TRO[nguoi.vai_tro] }}</span>
       <form method="post" action="/dang-xuat">
@@ -43,7 +45,8 @@
   {% block noi_dung %}{% endblock %}
 </main>
 <footer class="khung chan-trang">
-  Social Listening · HAPAS — {{ LICH_CHAY }}
+  <span>Social Listening · HAPAS</span>
+  <button type="button" class="goi-y" data-goi-y="{{ LICH_CHAY }}" aria-label="Lịch quét tự động">i</button>
 </footer>
 </body>
 </html>

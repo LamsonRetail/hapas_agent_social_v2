@@ -1,12 +1,19 @@
 {% extends "base.html" %}
 {% block tieu_de %}Người xem{% endblock %}
 {% block noi_dung %}
-<h1>Người xem dashboard</h1>
-<p class="ghi-chu sat-tren cach-duoi"><b>Chỉ xem</b>: xem số liệu. <b>Quản lý</b>: sửa dự án, nguồn, ngân sách, người xem (luôn còn ≥ 1 quản lý).</p>
+<div class="dau-muc">
+  <div class="dau-muc__chu">
+    <div class="dau-muc__tieu-de"><h1>Người xem dashboard</h1><button type="button" class="goi-y" data-goi-y="Chỉ xem: xem số liệu. Quản lý: sửa dự án, nguồn, ngân sách, người xem (luôn còn ≥ 1 quản lý).">i</button></div>
+  </div>
+</div>
 
-<div class="luoi luoi--2">
+<div class="luoi nx-luoi">
   <section class="the-khoi">
-    <h2>Danh sách ({{ ds|length }})</h2>
+    <div class="muc">
+      <span class="muc__so" aria-hidden="true">1</span>
+      <h2 class="muc__ten">Danh sách ({{ ds|length }})</h2>
+      <span class="muc__phai muc__phu">{{ so_quan_ly }} quản lý</span>
+    </div>
     <div class="cuon-ngang">
     <table>
       <thead><tr><th>Email</th><th>Vai trò</th><th>Thêm bởi</th><th>Thêm lúc</th><th></th></tr></thead>
@@ -14,7 +21,7 @@
       {% for x in ds %}
         <tr>
           <td>{{ x.email }}{% if x.email == nguoi.email %} <span class="the the--nhan">bạn</span>{% endif %}</td>
-          <td>{{ VAI_TRO.get(x.vai_tro, x.vai_tro) }}</td>
+          <td class="o-mau o-mau--{{ 'tim' if x.vai_tro == 'quan_ly' else 'xanh' }}">{{ VAI_TRO.get(x.vai_tro, x.vai_tro) }}</td>
           <td class="nho">{{ x.them_boi or '—' }}</td>
           <td class="nho">{{ x.them_luc|gio_vn }}</td>
           <td>
@@ -32,7 +39,11 @@
     </div>
   </section>
   <section class="the-khoi">
-    <h2>Thêm hoặc đổi vai trò</h2>
+    <div class="muc">
+      <span class="muc__so muc__so--2" aria-hidden="true">2</span>
+      <h2 class="muc__ten">Thêm hoặc đổi vai trò</h2>
+      <button type="button" class="goi-y" data-goi-y="Email đã có thì chỉ đổi vai trò.">i</button>
+    </div>
     <form method="post" action="/nguoi-xem/them" class="luoi-form">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <label class="o rong">Email Lark <input type="email" name="email" required maxlength="254" placeholder="ten@hapas.vn"></label>
@@ -40,12 +51,15 @@
         <select name="vai_tro">{% for k, v in VAI_TRO.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
       <div><button class="nut" type="submit">Lưu</button></div>
     </form>
-    <p class="ghi-chu">Email đã có thì chỉ đổi vai trò.</p>
   </section>
 </div>
 
-<section class="the-khoi cach-doc">
-  <h2>Nhật ký thay đổi (100 dòng mới nhất)</h2>
+<section class="the-khoi cach-duoi">
+  <div class="muc">
+    <span class="muc__so muc__so--3" aria-hidden="true">3</span>
+    <h2 class="muc__ten">Nhật ký thay đổi</h2>
+    <span class="muc__phai muc__phu">100 dòng mới nhất</span>
+  </div>
   {% if nhat_ky %}
   <div class="cuon-ngang">
   <table>
@@ -55,7 +69,7 @@
       <tr>
         <td class="nho">{{ x.luc|gio_vn }}</td>
         <td class="nho">{{ x.ai }}</td>
-        <td>{{ x.hanh_dong }}</td>
+        <td><span class="the">{{ x.hanh_dong }}</span></td>
         <td class="nho">{{ x.doi_tuong }}</td>
         <td class="nho"><div class="cat-chu" title="{{ x.chi_tiet_chu }}">{{ x.chi_tiet_chu }}</div></td>
       </tr>

@@ -1,23 +1,28 @@
 {% extends "base.html" %}
 {% block tieu_de %}Kết nối BigQuery{% endblock %}
 {% block noi_dung %}
-<h1>Kết nối BigQuery</h1>
-<p class="ghi-chu sat-tren cach-duoi">Tự đẩy sau mỗi lượt quét và 6 giờ/lần, không nhân đôi. Bảng đã mô tả theo quy chuẩn BI 11 nhãn. Không đẩy người xem, nhật ký, đề xuất nguồn, email.</p>
+<div class="dau-muc">
+  <div class="dau-muc__chu">
+    <div class="dau-muc__tieu-de"><h1>Kết nối BigQuery</h1><button type="button" class="goi-y" data-goi-y="Tự đẩy sau mỗi lượt quét và 6 giờ/lần, không nhân đôi. Bảng đã mô tả theo quy chuẩn BI 11 nhãn. Không đẩy người xem, nhật ký, đề xuất nguồn, email.">i</button></div>
+  </div>
+  {% if nguoi.vai_tro == 'quan_ly' %}
+  <form method="post" action="/bigquery/dong-bo">
+    <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+    <button class="nut" type="submit"{% if not tt.da_bat %} disabled title="Chưa bật đồng bộ"{% endif %}><svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>Đồng bộ ngay</button>
+  </form>
+  {% endif %}
+</div>
 
 {% if loi_tt %}<div class="thong-bao thong-bao--loi">{{ loi_tt }}</div>{% endif %}
 
 <section class="the-khoi cach-duoi">
-  <div class="tieu-de-khoi">
-    <h2>Dataset:
-      {% if tt.da_bat %}<code>{{ tt.dataset }}</code> <span class="the the--tot">Đang bật</span>
-      {% else %}<span class="the">chưa bật — thiếu BQ_DATASET</span>{% endif %}
-    </h2>
-    {% if nguoi.vai_tro == 'quan_ly' %}
-    <form method="post" action="/bigquery/dong-bo">
-      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <button class="nut" type="submit"{% if not tt.da_bat %} disabled title="Chưa bật đồng bộ"{% endif %}>Đồng bộ ngay</button>
-    </form>
-    {% endif %}
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">1</span>
+    <h2 class="muc__ten">Dataset</h2>
+    {% if tt.da_bat %}<code>{{ tt.dataset }}</code> <span class="the the--tot the--cham">Đang bật</span>
+    {% else %}<span class="the the--cham">chưa bật — thiếu BQ_DATASET</span>{% endif %}
+    <button type="button" class="goi-y" data-goi-y="Bảng nhỏ nạp lại toàn bộ; bảng lớn chỉ đẩy dòng mới/sửa sau mốc.">i</button>
+    <span class="muc__phai muc__phu">{{ tt.bang|length }} bảng</span>
   </div>
   <div class="cuon-ngang">
   <table>
@@ -37,6 +42,5 @@
     </tbody>
   </table>
   </div>
-  <p class="ghi-chu">Bảng nhỏ nạp lại toàn bộ; bảng lớn chỉ đẩy dòng mới/sửa sau mốc.</p>
 </section>
 {% endblock %}

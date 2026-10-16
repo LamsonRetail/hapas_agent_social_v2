@@ -6,10 +6,9 @@
 {% endblock %}
 {% block noi_dung %}
 {% set ql = nguoi.vai_tro == 'quan_ly' %}
-<div class="lq-dau">
-  <div>
-    <h1>Lịch quét tự động{% if du_an %} — {{ du_an.ten }}{% endif %}</h1>
-    <p class="lq-tom">Mark tự chạy /theodoi đúng các mốc dưới đây (giờ Việt Nam), kết quả hiện trên dashboard — không nhắn Lark. Vẫn theo công tắc console và trần tháng của dự án.</p>
+<div class="dau-muc">
+  <div class="dau-muc__chu">
+    <div class="dau-muc__tieu-de"><h1>Lịch quét tự động{% if du_an %} — {{ du_an.ten }}{% endif %}</h1><button type="button" class="goi-y" data-goi-y="Mark tự chạy /theodoi đúng các mốc dưới đây (giờ Việt Nam), kết quả hiện trên dashboard — không nhắn Lark. Vẫn theo công tắc console và trần tháng của dự án.">i</button></div>
   </div>
   {% if du_an_ds|length > 1 %}
   <form method="get" action="/lich-quet" class="hang">
@@ -32,10 +31,12 @@
 {% endif %}
 
 <section class="the-khoi cach-duoi" aria-labelledby="lq-ds-td">
-  <div class="tieu-de-khoi">
-    <h2 id="lq-ds-td">Lịch của dự án <span class="mo">({{ lich|length }})</span></h2>
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">1</span>
+    <h2 class="muc__ten" id="lq-ds-td">Lịch của dự án ({{ lich|length }})</h2>
+    <button type="button" class="goi-y" data-goi-y="Lịch console (Lịch chạy → Giao việc “/theodoi {{ du_an.ma }}”) vẫn chạy song song. Chiến dịch đang diễn ra thì lịch thường nhường; lượt trước chưa xong thì lượt sau bỏ qua và ghi lý do.">i</button>
     {% if tong and tong.co_lich %}
-    <span class="lq-tong{% if tong.vuot %} lq-tong--canh{% endif %}">Tháng này còn <b>{{ tong.luot|so_vn }}</b> lượt theo lịch · cả tháng tối đa ≈ <b>{{ tong.tong|usd_vn }}</b> / {{ tong.tran|usd_vn }} USD trần{% if tong.vuot %} — có thể vượt, Mark dừng khi chạm trần{% endif %}</span>
+    <span class="muc__phai lq-tong{% if tong.vuot %} lq-tong--canh{% endif %}">Tháng này còn <b>{{ tong.luot|so_vn }}</b> lượt theo lịch · cả tháng tối đa ≈ <b>{{ tong.tong|usd_vn }}</b> / {{ tong.tran|usd_vn }} USD trần{% if tong.vuot %} — có thể vượt, Mark dừng khi chạm trần{% endif %}</span>
     {% endif %}
   </div>
   {% if lich %}
@@ -87,14 +88,14 @@
   {% else %}
   <p class="trong">Chưa có lịch nào.{% if ql %} Tạo lịch đầu tiên ở dưới — vd mỗi 2 giờ trong ngày, hoặc một chiến dịch 3 ngày.{% else %} Nhờ người quản lý đặt lịch.{% endif %}</p>
   {% endif %}
-  <p class="ghi-chu">Lịch console (Lịch chạy → Giao việc “/theodoi {{ du_an.ma }}”) vẫn chạy song song. Chiến dịch đang diễn ra thì lịch thường nhường; lượt trước chưa xong thì lượt sau bỏ qua và ghi lý do.</p>
 </section>
 
 {% if ql and bm %}
 <section class="the-khoi cach-duoi lq-bm" id="bieu-mau" aria-labelledby="lq-bm-td">
-  <div class="tieu-de-khoi">
-    <h2 id="lq-bm-td">{% if sua %}Sửa lịch #{{ sua.id }}{% else %}Tạo lịch mới{% endif %}</h2>
-    {% if sua %}<a class="nho" href="/lich-quet?du_an={{ du_an.ma|urlencode }}#bieu-mau">Huỷ sửa — tạo lịch mới</a>{% endif %}
+  <div class="muc">
+    <span class="muc__so muc__so--2" aria-hidden="true">2</span>
+    <h2 class="muc__ten" id="lq-bm-td">{% if sua %}Sửa lịch #{{ sua.id }}{% else %}Tạo lịch mới{% endif %}</h2>
+    {% if sua %}<a class="muc__phai nho" href="/lich-quet?du_an={{ du_an.ma|urlencode }}#bieu-mau">Huỷ sửa — tạo lịch mới</a>{% endif %}
   </div>
   {% if loi_bm %}<div class="thong-bao thong-bao--loi" role="alert">{{ loi_bm }}</div>{% endif %}
   <div class="lq-luoi">
@@ -114,8 +115,7 @@
     </fieldset>
 
     <fieldset class="lq-nhom" data-cho="moi_n_gio">
-      <legend>Mỗi N giờ trong khung giờ</legend>
-      <p class="lq-goi-y">Chạy đúng giờ bắt đầu, rồi cứ N giờ một lần tới hết khung (cùng một ngày).</p>
+      <legend>Mỗi N giờ trong khung giờ <button type="button" class="goi-y" data-goi-y="Chạy đúng giờ bắt đầu, rồi cứ N giờ một lần tới hết khung (cùng một ngày).">i</button></legend>
       <div class="lq-hang">
         <label class="o">Mỗi
           <select name="moi_gio">{% for n in MOI_GIO %}<option value="{{ n }}"{% if bm.moi_gio|string == n|string %} selected{% endif %}>{{ n }} giờ</option>{% endfor %}</select></label>
@@ -125,8 +125,7 @@
     </fieldset>
 
     <fieldset class="lq-nhom" data-cho="hang_ngay hang_tuan">
-      <legend>Giờ chạy</legend>
-      <p class="lq-goi-y">Các giờ cụ thể (HH:MM), cách nhau dấu phẩy — tối đa 96 giờ mỗi ngày.</p>
+      <legend>Giờ chạy <button type="button" class="goi-y" data-goi-y="Các giờ cụ thể (HH:MM), cách nhau dấu phẩy — tối đa 96 giờ mỗi ngày.">i</button></legend>
       <label class="o lq-rong">Giờ chạy <input type="text" name="gio" value="{{ bm.gio }}" maxlength="600" placeholder="vd 07:00, 12:00, 19:30" autocomplete="off" spellcheck="false"></label>
       <div class="lq-nhanh" hidden>
         <span class="mo nho">Mẫu:</span>
@@ -150,8 +149,7 @@
     </fieldset>
 
     <fieldset class="lq-nhom" data-cho="chien_dich">
-      <legend>Khung chiến dịch</legend>
-      <p class="lq-goi-y">Quét liên tục từ lúc bắt đầu tới lúc kết thúc, hết khung thì tự dừng; lịch thường của dự án nhường trong khung này.</p>
+      <legend>Khung chiến dịch <button type="button" class="goi-y" data-goi-y="Quét liên tục từ lúc bắt đầu tới lúc kết thúc, hết khung thì tự dừng; lịch thường của dự án nhường trong khung này. Tối thiểu {{ PHUT_TOI_THIEU }} phút một lượt (một lượt thường mất 5–20 phút); chiến dịch dài tối đa 92 ngày.">i</button></legend>
       <div class="lq-hang">
         <label class="o">Bắt đầu <input type="datetime-local" name="tu_luc" value="{{ bm.tu_luc }}" step="60"></label>
         <label class="o">Kết thúc <input type="datetime-local" name="den_luc" value="{{ bm.den_luc }}" step="60"></label>
@@ -159,7 +157,6 @@
           <span class="lq-ghep"><input type="number" name="moi" value="{{ bm.moi }}" min="1" max="10080" step="1" inputmode="numeric" aria-label="Khoảng cách giữa hai lượt">
           <select name="don_vi" aria-label="Đơn vị"><option value="phut"{% if bm.don_vi == 'phut' %} selected{% endif %}>phút</option><option value="gio"{% if bm.don_vi == 'gio' %} selected{% endif %}>giờ</option></select></span></label>
       </div>
-      <p class="ghi-chu">Tối thiểu {{ PHUT_TOI_THIEU }} phút một lượt (một lượt thường mất 5–20 phút); chiến dịch dài tối đa 92 ngày.</p>
     </fieldset>
 
     <fieldset class="lq-nhom">
