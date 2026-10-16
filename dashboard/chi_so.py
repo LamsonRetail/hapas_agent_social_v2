@@ -134,7 +134,7 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
 #              trống. Bình luận theo bài của nó.
 #   sac_thai   bài theo sắc thái BÀI (bài kênh nhà không mang tiếng khách → không khớp); bình luận
 #              theo sắc thái của CHÍNH nó (chỉ bình luận hợp lệ có sắc thái).
-#   chu_de     bài và bình luận có HAI bộ nhãn khác nhau (13 chủ đề bài, 7 chủ đề bình luận của
+#   chu_de     bài và bình luận có HAI bộ nhãn khác nhau (13 chủ đề bài, 8 chủ đề bình luận của
 #              Mark). Mỗi nhãn lọc đúng loại mục mang nhãn đó: chọn toàn chủ đề bình luận thì phần
 #              bài không bị lọc theo chủ đề (và ngược lại); "Khác", "chưa phân loại" lọc cả hai.
 #   q          chữ tìm bỏ dấu (+ teen code, chữ kiểu cách — `chuan_chu.khoa`): bài khớp khi nội
@@ -545,7 +545,10 @@ def doi_pt(nay: float, truoc: float) -> float | None:
 
 
 def so_sanh(nay: dict, truoc: dict) -> dict:
-    return {k: {"nay": nay[k], "truoc": truoc[k], "doi_pt": doi_pt(nay[k], truoc[k])}
+    """`moi` = so được và kỳ trước bằng 0 mà kỳ này có số (% không tính được — trang ghi "mới");
+    chỉ máy chủ biết khi nào so sánh bị tắt (`so_sanh_lech`, dữ liệu bị cắt)."""
+    return {k: {"nay": nay[k], "truoc": truoc[k], "doi_pt": doi_pt(nay[k], truoc[k]),
+                "moi": not truoc[k] and bool(nay[k])}
             for k in ("bai", "thao_luan", "binh_luan", "nguon_co_bai", "xem", "tuong_tac")}
 
 
@@ -1074,7 +1077,7 @@ def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     lech = "tuong_tac" if f.tt else None
     if lech:
         for v in ss.values():
-            v["doi_pt"] = None
+            v["doi_pt"], v["moi"] = None, False
     return {
         "khoang": {"tu": tu.isoformat(), "den": den.isoformat(),
                    "so_ngay": (den - tu).days + 1,
@@ -1440,12 +1443,14 @@ _RE_CHI_GIA = re.compile(r"\W*gia\W*")                 # cả bình luận chỉ
 
 
 def la_y_dinh_mua(c: dict) -> bool:
-    """Bình luận có Ý ĐỊNH MUA: hợp lệ VÀ (chủ đề AI "Giá/mua ở đâu/ý định mua" HOẶC câu hỏi
-    giá/mua: hỏi/xin giá, giá bao nhiêu/bn, ib/inbox, mua ở đâu, xin link, còn hàng/size, ship,
+    """Bình luận có Ý ĐỊNH MUA: hợp lệ VÀ (chủ đề AI "Giá/mua ở đâu/ý định mua" mà không Tiêu cực,
+    HOẶC câu hỏi giá/mua: hỏi/xin giá, giá bao nhiêu/bn, ib/inbox, mua ở đâu, xin link, còn hàng/size, ship,
     đặt hàng…). Thuần, không gọi mạng."""
     if loai_bl(c) != "hop_le":
         return False
-    if _chu_de(c) == CHU_DE_MUA:
+    # Chủ đề "Giá/mua…" gộp cả lời CHÊ giá ("hợp kim mà giá cỡ đấy :)))", "nhìn giá và lặng lẽ
+    # rời đi" — tập đánh giá 17/10/2026): bình luận Tiêu cực chỉ tính khi có câu hỏi giá/mua.
+    if _chu_de(c) == CHU_DE_MUA and sac_bl(c) != TI:
         return True
     k = CC.khoa(c.get("noi_dung"))
     return bool(_RE_Y_DINH_MUA.search(k)) or _RE_CHI_GIA.fullmatch(k) is not None
@@ -1505,6 +1510,7 @@ def y_dinh_mua(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     return {"so": len(yd), "sach": len(nay),
             "pt": round(100.0 * len(yd) / len(nay), 1) if nay else None,
             "truoc": truoc, "doi_pt": doi_pt(len(yd), truoc) if so_sanh_duoc else None,
+            "moi": bool(so_sanh_duoc and not truoc and yd),
             "theo_chu_de": theo_cd, "theo_cau": len(yd) - theo_cd,
             "xu_huong": {"don_vi": "tuần" if theo_tuan else "ngày",
                          "moc": [m.isoformat() for m in moc], **cot},

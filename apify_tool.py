@@ -1780,31 +1780,7 @@ KHÔNG CHẮC thì dùng mã khong_ro (hệ thống tự xét bài đó bằng l
 Mã: brand, ad, product, ugc, other_market (đi với "k") | lac_de, trung_ten,
 nguoi_noi_tieng_khac, spam (đi với "l") | khong_ro (với "k" hoặc "l").
 
-SẮC THÁI của MỖI bài: cảm nhận của người đăng về brand, sản phẩm, quảng cáo hay chiến
-dịch của brand.
-  tich_cuc  khen, thích, khoe đã mua, muốn mua, hào hứng với quảng cáo / bộ sưu tập
-  tieu_cuc  chê, phàn nàn (chất lượng, giá, giao hàng, dịch vụ), tố hàng giả, chê quảng
-            cáo; MỈA MAI (lời khen kèm dấu hiệu mỉa như "đẹp thật đấy 🙂", "=))" kèm ý chê)
-  trung_lap đưa tin, hỏi giá / hỏi mua ở đâu, review không nghiêng bên nào, bài đăng bán
-            hay quảng cáo của CHÍNH brand / shop (tiếng của brand, không phải cảm nhận
-            người dùng), không rõ
-Không chắc thì trung_lap.
-
-CHỦ ĐỀ của MỖI bài: ý CHÍNH của bài, chọn MỘT mã.
-  chien_dich   quảng cáo, campaign, TVC, KOL/KOC hợp tác, minigame, sự kiện của brand
-  gia_ca       giá, sale, khuyến mãi, voucher, đắt/rẻ
-  chat_luong   chất lượng, chất liệu, độ bền, lỗi hàng
-  mau_ma       kiểu dáng, màu, thiết kế, khoe/phối đồ, bộ sưu tập mới
-  trai_nghiem  đi mua, mở hộp, dùng thử, cảm nhận khi dùng
-  dich_vu      tư vấn, thái độ nhân viên, đổi trả, bảo hành
-  giao_hang    giao hàng, đóng gói, vận chuyển
-  so_sanh      so sánh / nhắc thương hiệu khác
-  nguon_goc    xuất xứ, chính hãng, hàng giả / hàng nhái
-  van_hanh     cửa hàng, khai trương, website / app, hệ thống bán
-  tuyen_dung   tuyển dụng, việc làm ở brand
-  doanh_nghiep tin doanh nghiệp: lãnh đạo, gọi vốn, doanh thu, chiến lược
-  khac         còn lại
-Không chắc thì khac.
+""" + phan_loai.DINH_NGHIA_BAI + """Không chắc thì trung_lap (sắc thái) và khac (chủ đề).
 
 CHỈ trả JSON một dòng, khoá là số i của thẻ, giá trị là
 [quyết định, mã, sắc thái, chủ đề, ghi chú tuỳ chọn], ví dụ

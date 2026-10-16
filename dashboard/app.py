@@ -906,6 +906,18 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         CS.gan_ngu_canh_bai(kq["binh_luan"], nc)
         return JSONResponse(kq)
 
+    async def _tien_do_gan_nhan(ma: str) -> dict | None:
+        """Tiến độ gán nhãn nền của Mark — đọc thẳng kho mỗi lần (không nhớ đệm: số đổi theo
+        phút). Kho cũ / lỗi: None, trang chỉ không hiện dòng tiến độ."""
+        ham = getattr(app.state.kho, "tien_do_gan_nhan", None)
+        if ham is None:
+            return None
+        try:
+            return await _k(ham, ma)
+        except Exception as e:  # noqa: BLE001 — chỉ là dòng phụ, không làm hỏng trang
+            print(f"[chi_so] không đọc được tiến độ gán nhãn: {type(e).__name__}", flush=True)
+            return None
+
     @app.get("/api/chi-so")
     async def api_chi_so(request: Request):
         x = await _loc_api(request)
@@ -976,6 +988,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 nho.popitem(last=False)
             data = dict(data)
         luot, _ = await _k(app.state.kho.cac_luot, du_an["ma"], 1, 1)
+        data["gan_nhan"] = await _tien_do_gan_nhan(du_an["ma"])
         data.update(du_an={"ma": du_an["ma"], "ten": du_an["ten"]},
                     ngay_cuoi_chua_tron=den >= hom_nay,
                     luot_gan_nhat=_luot_json(luot[0] if luot else None),

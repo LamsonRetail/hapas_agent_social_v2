@@ -1443,9 +1443,9 @@ def _tim_web(v, du_an: dict, luot: int, cfg: dict, tu: list[str], con: float, ha
                 pham_vi=len(hits), ngoai_pham_vi=w["qua_cu"] + w["khong_ngay"],
                 da_loai_truoc=w["da_loai_truoc"], loai_tru=w["loai_tru"], spam=w["spam"],
                 khong_nhac=w["khong_nhac"], trung=w["trung"], cap_nhat=w["da_co"],
-                web={k: w[k] for k in ("mxh", "tmdt", "nha", "robots_chan", "tai_loi",
-                                       "boc_du_phong", "boc_duoc", "da_boc_truoc",
-                                       "chi_trich", "trang_hong")})
+                web={k: w.get(k, 0) for k in ("mxh", "tmdt", "nha", "tuyen_dung", "robots_chan",
+                                              "tai_loi", "boc_du_phong", "boc_duoc",
+                                              "da_boc_truoc", "chi_trich", "trang_hong")})
     # Mốc dời cả khi Google trả 0 kết quả (cửa sổ 2–3 ngày không có bài là chuyện thường của báo
     # với một brand) — nếu không, lịch mỗi giờ sẽ tìm web mỗi giờ. Lỗi actor thì không dời.
     moc_moi["web"] = {"luc": bay_gio.isoformat(timespec="seconds"), "dau": dau,
@@ -1606,7 +1606,8 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             "followers": _so_hay_none(d.get("followers")), "dang_luc": dt,
             "noi_dung": str(d.get("text") or "")[:1000],
             "hashtag": str(d.get("hashtags") or "")[:500], "khop_tu_khoa": bool(d["_khop"]),
-            "sac_thai": tt["_sac_thai"].get(i), "chu_de": tt["_chu_de"].get(i),
+            **dict(zip(("sac_thai", "chu_de"), _nhan_bai_ngay(
+                d, tt["_sac_thai"].get(i), tt["_chu_de"].get(i)))),
             "ly_do_giu": str(px[1] if px else "khop_tu_khoa")[:60],
             "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
             "binh_luan": _so_hay_none(d.get("comments")),
@@ -1652,7 +1653,9 @@ def _cau_web(w) -> str:
     if not isinstance(w, dict):
         return ""
     return (f"; trang: bỏ MXH {w.get('mxh', 0)}, sàn {w.get('tmdt', 0)}, miền nhà "
-            f"{w.get('nha', 0)}, robots cấm {w.get('robots_chan', 0)}, bị chặn "
+            f"{w.get('nha', 0)}"
+            + (f", tuyển dụng/hồ sơ {w['tuyen_dung']}" if w.get("tuyen_dung") else "")
+            + f", robots cấm {w.get('robots_chan', 0)}, bị chặn "
             f"{w.get('tai_loi', 0)}, đọc dự phòng {w.get('boc_duoc', 0)}/"
             f"{w.get('boc_du_phong', 0)} (đã thử trước {w.get('da_boc_truoc', 0)}), chỉ đoạn "
             f"trích {w.get('chi_trich', 0)}, trang hỏng {w.get('trang_hong', 0)}")
@@ -1992,7 +1995,6 @@ def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: lis
                 han: float, tk: dict, day_du: bool = True) -> None:
     """`day_du`=False (lỗi, huỷ, hết giờ, hết quota): chỉ bài CÓ bình luận trả về được đánh dấu
     đã cào — bài 0 dòng vì lỗi không bị gạch khỏi lượt sau (review 15/10)."""
-    import phan_loai
     bai = ph["bai"]
     theo = _quy_bl(rows, bai)
     dong: list[dict] = []
@@ -2018,19 +2020,49 @@ def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: lis
              and (d["khoa_bai"], d["ma"]) not in da]
     tk["nha"] += sum(1 for d in dong if d["cua_thuong_hieu"])
     if khach:
-        tt: dict = {}
-        nhan = phan_loai.phan_loai_binh_luan(
-            khach, max(0.0, min(120.0, han - time.monotonic() - 20)), tt, song_song=2)
-        for d, (s, c) in zip(khach, nhan):
-            if s != phan_loai.CHUA:
-                d["sac_thai"] = s
-            if c != phan_loai.CHUA:
-                d["chu_de"] = c
-        tk["nhan"] = tt.get("trang_thai") or tk["nhan"]
+        _gan_nhan_bl(khach, han, tk)
     moi, cu = K.ghi_binh_luan(ma, luot, dong, da_lay)
     tk["lay"] += len(dong)
     tk["moi"] += moi
     tk["cu"] += cu
+
+
+# ───────────────────────────── gán nhãn: ngay hay để nền (17/10/2026) ─────────────────────────────
+# Lượt 7 (16/10) chạy 54 phút > hạn 45 phút vì gán nhãn ~2.400 bình luận ngay trong việc. Nay
+# (`gan_nhan_nen` bật — mặc định) việc chỉ gán phần LUẬT; phần cần model để trống ("chưa phân loại")
+# và nhịp nền gán dần. Bài Báo & Web: nhãn của bước phân xử (chỉ 400 ký tự đầu) không dùng —
+# nhịp nền chấm lại theo mọi đoạn nhắc brand (`phan_loai.phan_loai_bai`). Tắt nền hoặc luồng nền
+# không chạy trong tiến trình này (`gan_nhan_nen.dang_chay`): gán ngay như cũ.
+def _gan_nhan_bl(khach: list[dict], han: float, tk: dict) -> None:
+    """Điền sắc thái/chủ đề cho bình luận khách sắp ghi kho; `tk["nhan"]`/`tk["cho_nen"]` ghi
+    chuyện đã xảy ra."""
+    import gan_nhan_nen
+    import phan_loai
+    if gan_nhan_nen.dang_chay():
+        nhan = phan_loai.gan_theo_luat(khach)
+        for d, x in zip(khach, nhan):
+            if x and x[0] != phan_loai.CHUA:
+                d["sac_thai"], d["chu_de"] = x
+        tk["cho_nen"] = tk.get("cho_nen", 0) + sum(1 for x in nhan if x is None)
+        tk["nhan"] = "để nền"
+        return
+    tt: dict = {}
+    nhan = phan_loai.phan_loai_binh_luan(
+        khach, max(0.0, min(120.0, han - time.monotonic() - 20)), tt, song_song=2)
+    for d, (s, c) in zip(khach, nhan):
+        if s != phan_loai.CHUA:
+            d["sac_thai"] = s
+        if c != phan_loai.CHUA:
+            d["chu_de"] = c
+    tk["nhan"] = tt.get("trang_thai") or tk["nhan"]
+
+
+def _nhan_bai_ngay(d: dict, sac, cd) -> tuple:
+    """(sắc thái, chủ đề) ghi kho ngay cho bài vừa giữ: bài web để nhịp nền chấm lại."""
+    import gan_nhan_nen
+    if d.get("platform") == W.NEN_TANG and gan_nhan_nen.dang_chay():
+        return None, None
+    return sac, cd
 
 
 def _chay_viec(v) -> tuple[str, str]:
@@ -2220,7 +2252,8 @@ def _cau_bl(bl: dict) -> list[str]:
                   + (f"; đã lọc: {', '.join(f'{v} {k}' for k, v in sorted(bl['loc'].items()) if k != 'hop_le')}"
                      if any(k != "hop_le" for k in (bl.get("loc") or {})) else "")
                   + f"), {_usd(bl.get('usd') or 0)} USD"
-                  + (f", gán nhãn: {bl['nhan']}" if bl.get("nhan") else ""))
+                  + (f", {bl['cho_nen']} bình luận chờ gán nhãn nền" if bl.get("cho_nen")
+                     else f", gán nhãn: {bl['nhan']}" if bl.get("nhan") else ""))
     return ra + list(bl.get("ghi_chu") or [])
 
 
