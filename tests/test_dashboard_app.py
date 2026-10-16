@@ -1725,7 +1725,7 @@ def test_api_may_tu_an_minigame_theo_url():
     luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
     for i in range(3):
         kho.bl.append(dict(_bl("tiktok:1", f"mg{i}", luc, chu_de="Minigame/bài dự thi"),
-                           noi_dung=f"{270 + i} chúc mẹ luôn hạnh phúc"))
+                           noi_dung=f"{270 + i} chúc mẹ luôn hạnh phúc", tac_gia=f"khach {i}"))
     d = c.get("/api/chi-so?du_an=hapas" + Q_LOC).json()
     assert d["tu_khoa_an_mg"] == 3 and "chúc mẹ" not in {x["tu"] for x in d["tu_khoa"]}
     d = c.get("/api/chi-so?du_an=hapas&gom_mg=1" + Q_LOC).json()

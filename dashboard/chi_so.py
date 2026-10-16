@@ -23,6 +23,7 @@ import itertools
 import re
 
 from dashboard import chuan_chu as CC
+from dashboard import tu_ghep as TG
 
 VN =datetime.timezone(datetime.timedelta(hours=7))
 TC, TI, TL = "Tích cực", "Tiêu cực", "Trung lập"
@@ -676,9 +677,26 @@ def top_bai(rows: list[dict], toi_da: int = TOP_BAI) -> list[dict]:
 
 
 # ───────────────────────── từ khoá nổi bật ─────────────────────────
-# Hư từ / đại từ / từ đệm hay gặp trên MXH Việt + tiếng Anh (chép từ `tong_hop_lang_nghe._STOP`
-# — dashboard không import module của Mark). Cụm hai chữ có một chữ ở đây thì bỏ: "rất đẹp",
-# "của hàng" không phải từ khoá. Cố ý ngắn; thiếu vài từ chỉ làm lọt cụm vô nghĩa ở cuối bảng.
+# Chủ dự án 16/10/2026: "phần từ khoá nổi bật đang lấy các bình luận spam và lấy key word đang lỗi".
+# Rà ảnh chụp kho 16/10 (External channel, 50 cụm đầu): 6 cụm từ spam affiliate chưa gắn nhãn
+# ("dán max", "max cuối", "dán cam", "sàn cam", "dán sàn", "fpg xóa" — mảnh của mã CKZ-VD88S-FPG);
+# 9 cụm do MỘT người viết lặp ("hỗ trợ", "kênh bên" — tài khoản bán hàng trả lời 5 lần; "both
+# pure"; "nữ aura", "xách nữ" — 3 bài cùng một tài khoản); mảnh cắt ngang ranh giới từ ("xách nữ",
+# "túi màu", "hề diễn"); nhãn dán TikTok "[cười chảy nước mắt]" ra "cười chảy", "chảy nước"; mảnh câu
+# hỏi giá "giá set", "set giá". Cách làm (người làm social listening lâu năm vẫn làm thế):
+#   1. Tách TỪ trước khi ghép cụm (`tu_ghep`: danh sách từ ghép + so khớp dài nhất): cụm là MỘT từ
+#      ghép ("túi xách", "nước mắt") hoặc HAI từ đơn liền nhau ("túi đẹp", "ví xinh"); cặp âm tiết
+#      cắt ngang một từ ghép không còn là cụm.
+#   2. Bỏ thứ không phải chữ: mã/số/chữ dính số ("a88ah", "20/10"), chữ nối gạch ("sộp-pii"), nhãn
+#      dán TikTok "[…]", hashtag có số (thẻ mùa vụ/ngày như #quatang2010, #sale1111).
+#   3. Bình luận mang dấu hiệu rác quảng cáo (mã giới thiệu, lời dặn dán mã) không vào mây dù nhãn
+#      còn là hợp lệ (`la_rac_quang_cao`) — lớp phòng hờ khi luật spam của Mark sót.
+#   4. Một người viết lặp không phải xu hướng: cụm cần ≥ `NGUOI_TOI_THIEU` người viết khác nhau và
+#      người viết nhiều nhất góp không quá `MOT_NGUOI_TOI_DA` số thảo luận của cụm.
+# Hư từ / đại từ / từ đệm hay gặp trên MXH Việt + tiếng Anh (gốc chép từ
+# `tong_hop_lang_nghe._STOP` — dashboard không import module của Mark). Cặp hai từ đơn có một chữ ở
+# đây thì bỏ: "rất đẹp", "của hàng" không phải từ khoá. Hư từ GHÉP ("cảm ơn", "thật sự") ở
+# `tu_ghep.TU_HU`.
 _STOP_CHU = """
 và của là có cho với các những một này đó thì mà được đã đang sẽ không chưa cũng rất quá
 lắm nhé nha ạ à ơi nhỉ vậy thế như để khi từ trong ngoài trên dưới ra vào lên xuống đi
@@ -692,31 +710,69 @@ the a an and or of to in on for with is are was were be been my your our their i
 he she it we they this that these those at by from as so if not no yes me us them its
 just very really all any can will would should do does did have has had get got more
 xin ak ah mk mik mjk mh bn
+ông bà cô chú bác dì cậu mợ ổng bả thằng đứa ny mn mng ae ad
+chiếc món quả tấm bức hề ghê xỉu thiệt thật lun lém wá qá vãi vl vkl vcl z dị zậy nhen nhe
+hen nghen há hà ui ôi chắc lẻ bnh bnhiu bnhieu nhiu
+both let too oh omg wow lol hi hello pls plz thanks thank thx okay
 """
 _STOP = set(_STOP_CHU.split())
 # Khách gõ KHÔNG DẤU ("shop oi", "dep qua"): chữ thuần ASCII trùng bản bỏ dấu của một hư từ cũng là
-# hư từ — trừ các chữ hay là tên hàng/màu/chất liệu khi bỏ dấu (da, đen, ví, váy, vàng, dây…).
-_MO_HO = {"da", "nhung", "den", "vi", "to", "day", "dung", "dang", "vang", "de", "vay", "may",
-          "len", "nam", "mau"}
+# hư từ — trừ các chữ hay là tên hàng/màu/chất liệu khi bỏ dấu (da, đen, ví, vàng, dây, vải…).
+# "vay" (16/10) coi là "vậy": "gia sao vay shop" gặp nhiều hơn hẳn "váy" gõ không dấu.
+_MO_HO = {"da", "nhung", "den", "vi", "to", "day", "dung", "dang", "vang", "de", "may",
+          "len", "nam", "mau", "vai"}
 _STOP_KHONG_DAU = {CC.bo_dau(x) for x in _STOP} - _MO_HO
-# Mảnh câu HỎI GIÁ ("giá shop", "giá bao…", "báo giá") là ý định mua, không phải chủ đề bàn tán: đã
-# đếm riêng ở khối Ý định mua nên không vào mây từ ("giá" so mặt chữ, chữ đi kèm so bản bỏ dấu).
-# "xin", "ib", "ạ"… là hư từ
-# ở trên. Chọn BỎ CỤM chứ không bỏ cả bình luận hỏi mua: "xin giá set túi trắng" vẫn góp "set túi",
-# "túi trắng" — khách hỏi mua món nào cũng là tín hiệu về sản phẩm (45% bình luận sạch là hỏi mua).
-_DI_VOI_GIA = {"shop", "sp", "bao", "nhieu", "nhiu", "sao", "may", "ntn", "the", "nao", "bnh"}
+# Mảnh câu HỎI GIÁ ("giá shop", "giá set", "set giá bao nhiêu", "báo giá") là ý định mua, không phải
+# chủ đề bàn tán: đã đếm riêng ở khối Ý định mua nên không vào mây. Cặp có "giá" đứng SAU luôn bỏ;
+# "giá" đứng TRƯỚC chỉ giữ khi chữ sau là lời đánh giá giá ("giá tốt", "giá rẻ", "giá cao" — đó là
+# cảm nhận về giá). Chọn BỎ CỤM chứ không bỏ cả bình luận hỏi mua: "xin giá set túi trắng" vẫn góp
+# "set túi", "túi trắng" — khách hỏi mua món nào cũng là tín hiệu về sản phẩm.
+_GIA_DANH_GIA = {"tot", "re", "cao", "mem", "hoi", "on", "dat", "chat", "mac", "dep", "yeu", "soc"}
 #: "giá" so trên MẶT CHỮ (có dấu, hoặc gõ không dấu "gia") — bản bỏ dấu thì "giả" (hàng giả) cũng
 #: thành "gia" và "sp giả", "shop giả" bị bỏ nhầm (review 16/10).
 _GIA = {"giá", "gia"}
+#: Chữ chỉ BỔ NGHĨA cho từ đứng trước ("túi xách nữ", "áo nam"), không mở đầu một cụm: "nữ aura",
+#: "nam đẹp" là mảnh cắt ngang (so bản bỏ dấu; "phụ nữ", "nam tính" là từ ghép nên không bị chặn).
+_KHONG_MO_DAU = {"nu", "nam"}
+#: Chữ đứng CUỐI cặp gần như luôn là lời gọi người bán ("đẹp quá shop", "bao nhiêu vậy shop").
+_KHONG_KET_THUC = {"shop", "sop"}
 # Hashtag "đẩy đề xuất" ai cũng gắn, không nói gì về brand.
 _HASHTAG_CHUNG = {"fyp", "foryou", "foryoupage", "xuhuong", "xuhướng", "viral", "trending",
                   "trend", "tiktok", "reels", "reel", "capcut", "fypシ", "fy", "explore",
-                  "viralvideo", "tiktokvietnam", "vairal", "thinhhanh", "learnontiktok"}
+                  "viralvideo", "tiktokvietnam", "vairal", "thinhhanh", "learnontiktok",
+                  "tiktokshop", "xuhuongtiktok", "trendingtiktok", "viraltiktok", "fypviral"}
 _HASHTAG_CHUNG_KD = {CC.bo_dau(x) for x in _HASHTAG_CHUNG}
 _RE_URL = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
-_RE_TAG_NGUOI = re.compile(r"@[\w.\-]+")
+#: Tag "@tài_khoản", kèm tên hiển thị nhiều chữ ("@Trần Mai Anh xem nè"): bỏ cả các chữ VIẾT HOA
+#: liền sau "@…" (tối đa 3) — tên người được tag không phải lời bình luận (`_bo_tag_ten`).
+_RE_TAG_TEN = re.compile(r"@[\w.\-]+(?:[^\S\n]+[^\W\d_][\w.\-]*){0,3}")
 _RE_HASHTAG = re.compile(r"#(\w+)")
 _RE_DOAN = re.compile(r"[^\w\s]+|\d+|_+")
+#: Nhãn dán / biểu tượng cảm xúc TikTok xuất ra thành chữ trong ngoặc vuông: "[cười chảy nước mắt]",
+#: "[ấm lòng]" — không phải lời khách viết.
+_RE_NHAN_DAN = re.compile(r"\[[^\[\]\n]{1,40}\]")
+#: Chữ dính số hoặc nối bằng gạch/chấm/xuyệt ("a88ah", "vd88s-fpg", "sộp-pii", "20/10", "8k") là
+#: mã, số, tên miền — không phải chữ: thay bằng ranh giới để mảnh của nó không ghép với chữ bên cạnh.
+_RE_CHU_MA = re.compile(r"\S*(?:\d|\w[-./–—]\w)\S*")
+_RE_KEO_DAI = re.compile(r"([^\W\d_])\1{2,}")              # "đẹppppp" → "đẹp"
+#: Chữ dài hơn mức này mà không phải từ đã biết là chuỗi gõ bừa / cười ("hahahahaha").
+_CHU_DAI_NHAT = 15
+#: Dấu hiệu rác quảng cáo — bản rút gọn hai dấu hiệu MẠNH của `loc_rac.dau_hieu_affiliate` (Mark;
+#: dashboard không import module của Mark, bài thử đối chiếu hai bên): mã giới thiệu ≥ 3 khúc IN
+#: HOA/số nối gạch, ≥ 2 khúc có chữ cái (AHS-WCM-DQN, CKZ-VD88S-FPG); lời dặn dán mã ("dán max",
+#: "zán cam", "săn cam", "xóa 88 rồi"). Ở mây từ CHỈ CẦN MỘT dấu hiệu là bỏ dòng (nhãn spam của
+#: Mark cần hai): mây không phán spam, chỉ không để chữ của rác lên làm "từ khoá nổi bật" — bình
+#: luận thật nhắc mã sản phẩm mất khỏi mây là cái giá nhỏ.
+_RE_MA_GIOI_THIEU = re.compile(r"(?<![A-Za-z0-9\-–—])[A-Z0-9]{3,6}(?:[-–—][A-Z0-9]{2,6}){2,}"
+                               r"(?![A-Za-z0-9\-–—])")
+_RE_LOI_DAN_MA = re.compile(r"(?<!\w)(?:(?:dán|zán|zan) (?:mã|max|vào|cam|code)|săn cam"
+                            r"|(?:xóa|xoá|xoa) \d+ (?:rồi|r|đi|là))(?!\w)")
+_RE_KHUC_CO = re.compile(r"^\d{0,2}X{0,4}[SML]$|^\d{1,3}$")    # khúc là cỡ (XXL, 3XL) hoặc số
+#: Cụm cần ít nhất chừng này NGƯỜI VIẾT khác nhau, và người viết nhiều nhất góp không quá tỉ lệ này
+#: số thảo luận của cụm: tài khoản bán hàng trả lời cùng một câu mẫu 5 lần, một người dán cùng câu
+#: tiếng Anh 2 lần, một KOC đăng 3 bài cùng chú thích — không phải xu hướng.
+NGUOI_TOI_THIEU = 2
+MOT_NGUOI_TOI_DA = 2 / 3
 
 
 @functools.lru_cache(maxsize=65536)
@@ -729,13 +785,98 @@ def _hu_tu(tu: str) -> bool:
     return tu in _STOP or (tu.isascii() and tu in _STOP_KHONG_DAU)
 
 
+def la_rac_quang_cao(s) -> bool:
+    """Bình luận có mã giới thiệu hoặc lời dặn dán mã (xem `_RE_MA_GIOI_THIEU`) — không vào mây từ,
+    kể cả khi nhãn còn là hợp lệ (luật spam của Mark sót / chưa chạy lại trên dữ liệu cũ)."""
+    raw = str(s or "")
+    if not raw:
+        return False
+    if _RE_LOI_DAN_MA.search(CC.thuong(raw)):
+        return True
+    for m in _RE_MA_GIOI_THIEU.finditer(CC.nfkc(_RE_URL.sub(" ", raw))):
+        khuc = re.split("[-–—]", m.group())
+        if (sum(any(c.isalpha() for c in k) for k in khuc) >= 2
+                and not all(_RE_KHUC_CO.match(k) for k in khuc)):
+            return True
+    return False
+
+
+#: Cách viết khác của một chữ trong danh sách từ ghép ("túi mầu đen").
+_BIEN_THE = {"mầu": "màu"}
+
+
+def _tu_trong_ds(chu: list[str], khoa: str) -> bool | None:
+    """Các chữ liền nhau `chu` (khoá bỏ dấu `khoa`) là một từ trong `tu_ghep`? True = từ ghép có
+    nghĩa, False = hư từ, None = không. So CÓ dấu (chữ gõ không dấu khớp mọi dạng): "cơ thể" ≠
+    "có thể", "váy mà" ≠ "vậy mà"."""
+    for mau, la_ghep in TG.DANG.get(khoa) or ():
+        if all(w == x or w.isascii() or _BIEN_THE.get(w) == x for w, x in zip(chu, mau)):
+            return la_ghep
+    return None
+
+
+def _bo_tag_ten(s: str) -> str:
+    """Bỏ "@tài_khoản" và tên hiển thị viết hoa liền sau (xem `_RE_TAG_TEN`), để lại ranh giới."""
+    def thay(m: re.Match) -> str:
+        tu = m.group().split()
+        i = 1
+        while i < len(tu) and tu[i][:1].isupper():
+            i += 1
+        return " . " + " ".join(tu[i:]) + " "
+    return _RE_TAG_TEN.sub(thay, s)
+
+
+def _tach_don_vi(chu: list[str]) -> list[tuple[int, int, bool]]:
+    """Tách một đoạn chữ thành TỪ: so khớp dài nhất từ trái sang với `tu_ghep` (`_tu_trong_ds`),
+    không khớp thì là từ một âm tiết. -> [(đầu, cuối, là từ ghép có nghĩa)] theo chỉ số `chu`."""
+    kd = [_kd(w) for w in chu]
+    ra: list[tuple[int, int, bool]] = []
+    i, n = 0, len(chu)
+    while i < n:
+        d = min(TG.DAI_NHAT, n - i) if kd[i] in TG.DAU else 1    # âm tiết không mở đầu từ nào
+        la_ghep = None
+        while d > 1:
+            la_ghep = _tu_trong_ds(chu[i:i + d], " ".join(kd[i:i + d]))
+            if la_ghep is not None:
+                break
+            d -= 1
+        ra.append((i, i + d, bool(la_ghep)))
+        i += d
+    return ra
+
+
+def _la_am_tiet(w: str) -> bool:
+    """Chữ dùng được khi tách từ: toàn chữ cái, tối đa `_CHU_DAI_NHAT` ký tự (dài hơn là chuỗi gõ
+    bừa), không có ba chữ cái liền giống nhau khi bỏ dấu ("ạaa"). Chữ MỘT ký tự vẫn tách được
+    ("ý" trong "ý nghĩa") nhưng không ghép cặp (`_cap_duoc`: "e", "t", "a" là đại từ viết tắt)."""
+    return (w.isalpha() and len(w) <= _CHU_DAI_NHAT
+            and not _RE_KEO_DAI.search(_kd(w)))
+
+
+def _cap_duoc(a: str, b: str) -> bool:
+    """Hai từ ĐƠN liền nhau có thành cụm không: mỗi chữ ≥ 2 ký tự, không hư từ, không lặp, không
+    mảnh câu hỏi giá, chữ đầu không phải chữ chỉ bổ nghĩa cho từ trước (`_KHONG_MO_DAU`), chữ cuối
+    không phải lời gọi người bán (`_KHONG_KET_THUC`)."""
+    if len(a) < 2 or len(b) < 2 or _hu_tu(a) or _hu_tu(b):
+        return False
+    ka, kb = _kd(a), _kd(b)
+    if ka == kb or ka in _KHONG_MO_DAU or kb in _KHONG_KET_THUC or b in _GIA:
+        return False
+    return not (a in _GIA and kb not in _GIA_DANH_GIA)
+
+
 def _tach_cum(r: dict) -> dict[str, str]:
-    """{khoá bỏ dấu: mặt chữ} các cụm của MỘT bài / bình luận: hashtag ('#tên', từ cột `hashtag`
-    nối bằng dấu phẩy và từ nội dung) + cặp chữ liền nhau không vượt dấu câu/số, không chứa hư từ,
-    không phải mảnh câu hỏi giá. Chữ đã chuẩn hoá (`chuan_chu.chuan_hoa`: NFKC — chữ kiểu cách
-    "𝐜𝐮𝐨̂́𝐢" không còn bị dấu rời cắt thành "cuo" —, teen code "mk" → "mình"). Khoá bỏ dấu gộp
-    "xin giá" với "xin gia"; mỗi khoá một lần mỗi bài."""
-    text = _RE_TAG_NGUOI.sub(" ", _RE_URL.sub(" ", CC.chuan_hoa(r.get("noi_dung"))))
+    """{khoá bỏ dấu: mặt chữ} các cụm của MỘT bài / bình luận, mỗi khoá một lần:
+      * hashtag (cột `hashtag` nối bằng dấu phẩy + "#…" trong nội dung): bỏ thẻ đẩy đề xuất
+        (`_HASHTAG_CHUNG`), thẻ có số (#quatang2010, #sale1111 — thẻ mùa vụ/ngày/mã), thẻ < 3 ký
+        tự; thẻ viết liền đúng một từ ghép ("#tuixach") đếm chung với từ đó ("túi xách");
+      * từ ghép có nghĩa (`tu_ghep.GHEP`, sau khi tách từ bằng `_tach_don_vi`);
+      * cặp hai từ ĐƠN liền nhau (`_cap_duoc`) — cặp âm tiết cắt ngang một từ ghép không tính.
+    Chữ đã chuẩn hoá (`chuan_chu.chuan_hoa`: NFKC — chữ kiểu cách "𝐜𝐮𝐨̂́𝐢" không bị dấu rời cắt
+    thành "cuo" —, teen code "mk" → "mình"), bỏ link, @tên, nhãn dán TikTok, chữ dính số; chữ kéo dài
+    "đẹppp" về "đẹp". Khoá bỏ dấu gộp "màu đen" với "mau den"."""
+    text = CC.chuan_hoa(_bo_tag_ten(_RE_URL.sub(" ", CC.nfkc(r.get("noi_dung")))))
+    text = _RE_NHAN_DAN.sub(" . ", text)
     tags = set(_RE_HASHTAG.findall(text))
     # Thẻ YouTube có thể nhiều chữ ("túi xách nữ"): tách theo khoảng trắng sẽ ra hashtag giả —
     # chỉ tách theo dấu phẩy/chấm phẩy/#, bỏ thẻ có khoảng trắng.
@@ -744,19 +885,29 @@ def _tach_cum(r: dict) -> dict[str, str]:
     ra: dict[str, str] = {}
     for t in sorted(tags):
         k = _kd(t)
-        if len(t) >= 3 and not t.isdigit() and k not in _HASHTAG_CHUNG_KD:
+        if len(k) < 3 or any(ch.isdigit() for ch in k) or k in _HASHTAG_CHUNG_KD:
+            continue
+        lien = TG.LIEN.get(k.replace("_", ""))
+        if lien is None:
             ra.setdefault("#" + k, "#" + t)
-    text = _RE_HASHTAG.sub(" ", text)
+        elif lien in TG.GHEP and lien not in TG.HU:
+            ra.setdefault(lien, TG.GHEP[lien])
+    text = _RE_KEO_DAI.sub(r"\1", _RE_CHU_MA.sub(" . ", _RE_HASHTAG.sub(" ", text)))
     for doan in _RE_DOAN.split(text):
-        chu = doan.split()
-        for a, b in itertools.pairwise(chu):          # cặp chữ liền nhau
-            if (len(a) < 2 or len(b) < 2 or not a.isalpha() or not b.isalpha()
-                    or _hu_tu(a) or _hu_tu(b)):
+        # Đoạn liền nhau của những chữ dùng được; chữ không dùng được là ranh giới.
+        for la, nhom in itertools.groupby(doan.split(), _la_am_tiet):
+            if not la:
                 continue
-            ka, kb = _kd(a), _kd(b)
-            if ka == kb or (a in _GIA and kb in _DI_VOI_GIA) or (b in _GIA and ka in _DI_VOI_GIA):
-                continue
-            ra.setdefault(f"{ka} {kb}", f"{a} {b}")
+            chu = list(nhom)
+            dv = _tach_don_vi(chu)
+            for i, (a, b, la_ghep) in enumerate(dv):
+                if b - a > 1:                          # một từ trong danh sách
+                    if la_ghep:
+                        ra.setdefault(" ".join(_kd(w) for w in chu[a:b]), " ".join(chu[a:b]))
+                elif i + 1 < len(dv) and dv[i + 1][1] - dv[i + 1][0] == 1:
+                    x, y = chu[a], chu[a + 1]          # hai từ đơn liền nhau
+                    if _cap_duoc(x, y):
+                        ra.setdefault(f"{_kd(x)} {_kd(y)}", f"{x} {y}")
     return ra
 
 
@@ -797,23 +948,37 @@ def sac_noi_troi(g: dict) -> str:
     return "tl"
 
 
+def _nguoi_viet(r: dict) -> tuple:
+    """Người viết một dòng của mây từ: dòng bình luận (`tu_khoa_thao_luan` gắn `tac_gia_bl`) theo
+    tên tác giả (chữ thường, bỏ @); bài theo nguồn / tài khoản đăng (`_khoa_nguon`). Không rõ thì
+    coi mỗi dòng là một người — thiếu dữ liệu không được làm mất cụm."""
+    if "tac_gia_bl" in r:
+        t = " ".join(CC.thuong(r.get("tac_gia_bl")).split()).lstrip("@")
+        return ("bl", t) if t else ("dong", id(r))
+    k = _khoa_nguon(r)
+    return k if k[0] != "link" or k[1] else ("dong", id(r))
+
+
 def tu_khoa(rows: list[dict], tu_khoa_du_an: list[str] | tuple = (),
             toi_da: int = TOP_TU_KHOA) -> list[dict]:
-    """Top cụm từ / hashtag theo SỐ BÀI nhắc (bài không của kênh nhà), bỏ cụm chứa chính từ
-    khoá của dự án (theo dõi "hapas" thì "túi hapas", "#hapasvn" không phải phát hiện gì). So
-    trên dạng bỏ dấu + bỏ khoảng trắng; từ khoá < 3 ký tự thì không dùng để bỏ. Biến thể có/không
-    dấu gộp một nhóm (đếm chung), hiện bằng mặt chữ gặp nhiều nhất. Mỗi cụm kèm `mau` (sắc thái
-    nổi trội, `sac_noi_troi`) và `mot_bai_pt` khi một bài góp ≥ 60% (dòng bình luận mang
-    `khoa_bai`; bài tự là một bài)."""
+    """Top cụm từ / hashtag (`_tach_cum`) theo SỐ THẢO LUẬN nhắc (bài không của kênh nhà), bỏ cụm
+    chứa chính từ khoá của dự án (theo dõi "hapas" thì "túi hapas", "#hapasvn" không phải phát hiện
+    gì). So trên dạng bỏ dấu + bỏ khoảng trắng; từ khoá < 3 ký tự thì không dùng để bỏ. Biến thể
+    có/không dấu gộp một nhóm (đếm chung), hiện bằng mặt chữ gặp nhiều nhất. Cụm phải có ≥ 2 thảo
+    luận từ ≥ `NGUOI_TOI_THIEU` người viết (`_nguoi_viet`), người nhiều nhất góp ≤ `MOT_NGUOI_TOI_DA`.
+    Mỗi cụm kèm `mau` (sắc thái nổi trội, `sac_noi_troi`) và `mot_bai_pt` khi một bài góp ≥ 60%
+    (dòng bình luận mang `khoa_bai`; bài tự là một bài)."""
     bo = {x for x in (re.sub(r"[\s#]+", "", _bo_dau(q)) for q in tu_khoa_du_an) if len(x) >= 3}
     dem: dict[str, dict] = {}
     mat: dict[str, collections.Counter] = {}
     theo_bai: dict[str, collections.Counter] = {}
+    theo_nguoi: dict[str, collections.Counter] = {}
     for r in rows:
         if la_kenh_nha(r):
             continue
         s = sac(r)
         kb = r.get("khoa_bai") or r.get("khoa") or id(r)
+        ng = _nguoi_viet(r)
         for k, c in _tach_cum(r).items():
             gon = re.sub(r"[\s#]+", "", k)
             if any(b in gon for b in bo):
@@ -823,9 +988,12 @@ def tu_khoa(rows: list[dict], tu_khoa_du_an: list[str] | tuple = (),
             g[s] += 1
             mat.setdefault(k, collections.Counter())[c] += 1
             theo_bai.setdefault(k, collections.Counter())[kb] += 1
+            theo_nguoi.setdefault(k, collections.Counter())[ng] += 1
     ds = []
     for k, g in dem.items():
-        if g["so_bai"] < TU_KHOA_TOI_THIEU_BAI:
+        ng = theo_nguoi[k]
+        if (g["so_bai"] < TU_KHOA_TOI_THIEU_BAI or len(ng) < NGUOI_TOI_THIEU
+                or max(ng.values()) > MOT_NGUOI_TOI_DA * g["so_bai"]):
             continue
         g["tu"] = _mat_chu(mat[k])
         g["mau"] = sac_noi_troi(g)
@@ -1127,8 +1295,9 @@ def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
         if chu and not CC.chua(chu, f"{c.get('noi_dung') or ''} {c.get('tac_gia') or ''}"):
             continue
         if kc and (kc not in _tach_cum({"noi_dung": c.get("noi_dung")}) or
-                   (not f.gom_mg and _chu_de(c) == CHU_DE_MINIGAME)):
-            continue                                   # như mây: minigame ẩn trừ khi gom_mg=1
+                   (not f.gom_mg and _chu_de(c) == CHU_DE_MINIGAME) or
+                   la_rac_quang_cao(c.get("noi_dung"))):
+            continue                       # như mây: minigame ẩn trừ khi gom_mg=1; rác quảng cáo bỏ
         if y_dinh and not la_y_dinh_mua(c):
             continue
         if not f.rong and f.hong_bl(c, tra(c.get("khoa_bai"))):
@@ -1174,7 +1343,8 @@ def tu_khoa_thao_luan(bai: list[dict], bl: list[dict], tu: datetime.date, den: d
     """Từ khoá nổi bật kiểu Kompa: đếm trên THẢO LUẬN = bài (không phải kênh nhà) + bình luận
     hợp lệ (không spam, không của thương hiệu) trong kỳ, cùng bộ lọc chung. Bình luận chủ đề
     minigame (`CHU_DE_MINIGAME`) mặc định KHÔNG vào mây — lời chúc dự thi không phải cảm nhận về
-    brand; bộ lọc `gom_mg=1` gồm lại. -> {"tu_khoa": [{tu, so_bai (= số thảo luận nhắc),
+    brand; bộ lọc `gom_mg=1` gồm lại. Bình luận mang dấu hiệu rác quảng cáo (`la_rac_quang_cao`)
+    không vào mây và không vào `tong`. -> {"tu_khoa": [{tu, so_bai (= số thảo luận nhắc),
     sắc thái…, mau, mot_bai_pt?}], "tong", "an_minigame"}."""
     f = bien_dich(_gop(bo_loc, nen_tang, loai_nguon))
     b = loc_bai(trong_khoang(bai, tu, den), f)
@@ -1184,10 +1354,11 @@ def tu_khoa_thao_luan(bai: list[dict], bl: list[dict], tu: datetime.date, den: d
     if not f.gom_mg:
         con = [x for x in c if _chu_de(x) != CHU_DE_MINIGAME]
         an_mg, c = len(c) - len(con), con
-    # Bình luận: chữ + sắc thái + bài của nó (cảnh báo tập trung) — không gắn nguồn: bình luận dưới
-    # bài kênh nhà là tiếng khách.
+    c = [x for x in c if not la_rac_quang_cao(x.get("noi_dung"))]
+    # Bình luận: chữ + sắc thái + bài của nó (cảnh báo tập trung) + người viết (cụm một người viết
+    # lặp không lên mây) — không gắn nguồn: bình luận dưới bài kênh nhà là tiếng khách.
     dong = b + [{"noi_dung": x.get("noi_dung") or "", "sac_thai": x.get("sac_thai"),
-                 "khoa_bai": x.get("khoa_bai")} for x in c]
+                 "khoa_bai": x.get("khoa_bai"), "tac_gia_bl": x.get("tac_gia") or ""} for x in c]
     return {"tu_khoa": tu_khoa(dong, tu_khoa_du_an),
             "tong": sum(not la_kenh_nha(r) for r in b) + len(c), "an_minigame": an_mg}
 

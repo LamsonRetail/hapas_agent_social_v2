@@ -154,17 +154,18 @@ def test_sac_thai_theo_chu_de():
 
 def test_tu_khoa_bo_chinh_tu_khoa_du_an():
     rows = [bai("2026-10-10T09:00+07:00", nd="Túi xách HAPAS mới về #tuixach",
-                ht="hapasvn, tuixach"),
-            bai("2026-10-10T10:00+07:00", nd="túi xách hapas quá xinh", ht="tuixach, fyp"),
-            bai("2026-10-10T11:00+07:00", nd="Nước hoa thơm lâu", ht=""),
+                ht="hapasvn, tuixach", tk="kol_a", nid=1),
+            bai("2026-10-10T10:00+07:00", nd="túi xách hapas quá xinh", ht="hapasvn, fyp",
+                tk="kol_b", nid=2),
+            bai("2026-10-10T11:00+07:00", nd="Nước hoa thơm lâu", ht="", tk="kol_c", nid=3),
             bai("2026-10-10T12:00+07:00", nd="túi xách nước hoa", nid=9, loai="kenh_nha")]
     tk = CS.tu_khoa(rows, ["Hapas"])
-    # '#hapasvn', 'xách hapas', 'hapas mới' chứa từ khoá dự án -> bỏ; 'mới về', 'quá xinh' có
-    # hư từ -> bỏ; '#fyp' là hashtag đẩy đề xuất; 'nước hoa' chỉ 1 bài khách (bài kênh nhà không
-    # tính) -> dưới ngưỡng 2 bài.
-    assert [(g["tu"], g["so_bai"]) for g in tk] == [("#tuixach", 2), ("túi xách", 2)]
-    assert CS.tu_khoa(rows, [])[0]["tu"] == "#tuixach"
-    assert any(g["tu"] == "xách hapas" for g in CS.tu_khoa(rows, []))
+    # '#hapasvn' chứa từ khoá dự án -> bỏ; 'mới về', 'quá xinh' có hư từ -> bỏ; '#fyp' là hashtag
+    # đẩy đề xuất; '#tuixach' viết liền đúng từ ghép -> đếm chung với "túi xách" (không thành hai
+    # mục); 'nước hoa' chỉ 1 bài khách (bài kênh nhà không tính) -> dưới ngưỡng 2 bài.
+    assert [(g["tu"], g["so_bai"]) for g in tk] == [("túi xách", 2)]
+    assert [(g["tu"], g["so_bai"]) for g in CS.tu_khoa(rows, [])] == [("#hapasvn", 2),
+                                                                      ("túi xách", 2)]
 
 
 def test_loc_nen_tang_loai_nguon_va_phan_bo():
@@ -545,25 +546,27 @@ def test_tu_khoa_gop_bien_the_teen_code_va_bo_cau_hoi_gia():
     a = D(2026, 10, 10)
     nd = ["Mk xin giá ak, giá sét túi trắng", "xin gia set tui trang", "giá bn shop, set túi trắng",
           "xin giá shop ơi", "Xin giá set túi trắng", "giá shop ạ"]
-    c = [bl("2026-10-10T10:00+07:00", f"c{i}", nd=t) for i, t in enumerate(nd)]
+    c = [bl("2026-10-10T10:00+07:00", f"c{i}", nd=t, tg=f"Khách {i}") for i, t in enumerate(nd)]
     tk = {g["tu"]: g["so_bai"] for g in CS.tu_khoa_thao_luan([], c, a, a)["tu_khoa"]}
-    # Mảnh câu hỏi giá (đã đếm ở Ý định mua) không lên mây; "mk xin" = "mình xin" là hư từ.
+    # Mảnh câu hỏi giá (đã đếm ở Ý định mua) không lên mây; "mk xin" = "mình xin" là hư từ. Chủ dự
+    # án 16/10: "giá set", "set giá" cũng là mảnh câu hỏi giá — "giá" chỉ ghép với lời đánh giá.
     assert not {"xin giá", "xin gia", "giá ak", "giá ạ", "giá bn", "giá shop", "mk xin",
-                "mình xin", "giá bao"} & set(tk)
+                "mình xin", "giá bao", "giá set", "giá sét", "gia set"} & set(tk)
     # Biến thể có/không dấu + "sét"/"set" gộp một nhóm, hiện bằng mặt chữ gặp nhiều nhất.
-    assert tk["set túi"] == 3 and tk["túi trắng"] == 3
-    assert tk["giá set"] == 3 and "giá sét" not in tk and "gia set" not in tk
-    m = [bl("2026-10-10T10:00+07:00", f"m{i}", nd=t)
+    assert tk["set túi"] == 3 and tk["túi trắng"] == 3      # "tui" gõ không dấu là đại từ "tui"
+    assert CS._cum({"noi_dung": "set giá bao nhiêu, giá rẻ mà giá tốt"}) == {"giá rẻ", "giá tốt"}
+    m = [bl("2026-10-10T10:00+07:00", f"m{i}", nd=t, tg=f"Khách {i}")
          for i, t in enumerate(("màu đen đẹp", "mau den sang", "Màu đen nha"))]
     tk = {g["tu"]: g["so_bai"] for g in CS.tu_khoa_thao_luan([], m, a, a)["tu_khoa"]}
     assert tk == {"màu đen": 3}                    # "mau den" (không dấu) vào cùng nhóm
     # Khách gõ không dấu: "shop oi" là hư từ như "shop ơi".
     assert CS._cum({"noi_dung": "dep qua shop oi"}) == set()
-    assert CS._cum({"noi_dung": "túi da thật"}) == {"túi da", "da thật"}   # "da" không phải hư từ
+    assert CS._cum({"noi_dung": "túi da mềm"}) == {"túi da", "da mềm"}   # "da" không phải hư từ
     # Review 16/10: "giá" so trên mặt chữ — "giả" (hàng giả) không bị bỏ như "giá".
     assert CS._cum({"noi_dung": "sp giả, shop giả"}) == {"sp giả", "shop giả"}
     assert CS._cum({"noi_dung": "báo giá, giá shop, gia sp"}) == set()
-    g = [bl("2026-10-10T10:00+07:00", f"g{i}", nd="sp giả nhiều quá") for i in range(2)]
+    g = [bl("2026-10-10T10:00+07:00", f"g{i}", nd="sp giả nhiều quá", tg=f"Khách {i}")
+         for i in range(2)]
     assert {x["tu"] for x in CS.tu_khoa_thao_luan([], g, a, a)["tu_khoa"]} >= {"sp giả"}
 
 
@@ -571,8 +574,8 @@ def test_ngan_tu_khoa_dem_binh_luan_nhu_may_tu():
     """Ngăn từ khoá (cum) khớp đúng như mây đếm: theo cụm, KHÔNG theo tên tác giả, gộp có/không dấu.
     Trước đây ngăn tìm chữ (q_bl) trên cả tên tác giả: "xin gia" 6 trên mây, 190 trong ngăn."""
     a = D(2026, 10, 10)
-    c = [bl("2026-10-10T10:00+07:00", "c1", nd="set túi trắng đẹp"),
-         bl("2026-10-10T10:00+07:00", "c2", nd="SET TÚI trang"),
+    c = [bl("2026-10-10T10:00+07:00", "c1", nd="set túi trắng đẹp", tg="Lan"),
+         bl("2026-10-10T10:00+07:00", "c2", nd="SET TÚI trang", tg="Hoa"),
          bl("2026-10-10T10:00+07:00", "c3", nd="túi trắng", tg="Set Túi Store"),   # chỉ tên
          bl("2026-10-10T10:00+07:00", "c4", nd="set túi", lb="spam")]
     tk = {g["tu"]: g["so_bai"] for g in CS.tu_khoa_thao_luan([], c, a, a)["tu_khoa"]}
@@ -663,7 +666,8 @@ def test_nhan_hien_thi_internal_external_channel():
 
 # ───────────────── mây từ: minigame, màu theo ngưỡng, tập trung (chẩn đoán 16/10/2026) ─────────────────
 def _bl_mg(ma, nd, khoa="tiktok:mg", cd=None, sac="Trung lập"):
-    r = bl("2026-10-10T10:00+07:00", ma, nd=nd, cd=cd or CS.CHU_DE_MINIGAME, sac=sac)
+    r = bl("2026-10-10T10:00+07:00", ma, nd=nd, cd=cd or CS.CHU_DE_MINIGAME, sac=sac,
+           tg=f"Khách {ma}")                       # mỗi bình luận một người (mây cần ≥ 2 người)
     r["khoa_bai"] = khoa
     return r
 
@@ -715,3 +719,141 @@ def test_mau_may_tu_theo_nguong_va_canh_bao_tap_trung():
     tk = {x["tu"]: x for x in CS.tu_khoa_thao_luan([], c, a, a)["tu_khoa"]}
     assert tk["video viral"]["mau"] == "tc" and tk["video viral"]["mot_bai_pt"] == 75
     assert tk["túi đẹp"]["mau"] == "tl" and "mot_bai_pt" not in tk["túi đẹp"]
+
+
+# ───────────── mây từ: tách từ, rác quảng cáo, người viết (chủ dự án 16/10/2026) ─────────────
+# "Phần từ khoá nổi bật đang lấy các bình luận spam và lấy key word đang lỗi". Mẫu tự đặt (không
+# chép bình luận thật), dựng theo các lỗi đã rà trên ảnh chụp kho.
+def test_tach_tu_khong_cat_ngang_tu_ghep():
+    """Cặp âm tiết cắt ngang một từ ghép ("xách nữ", "nữ tuyệt", "hề diễn", "túi màu") không còn
+    là cụm; từ ghép là MỘT cụm; hư từ ghép ("vui lòng", "kiểm tra", "cảm ơn") không lên mây."""
+    def k(nd):
+        return set(CS._tach_cum({"noi_dung": nd}))
+    assert k("Túi xách nữ Luna màu đen") == {"tui xach", "mau den"}
+    assert k("Phụ nữ tuyệt vời") == {"phu nu", "tuyet voi"}
+    assert k("vai này diễn viên không hề diễn, đúng chất") == {"dien vien"}
+    assert k("shop ơi túi mầu đen còn không") == {"mau den"}          # "mầu" viết khác của "màu"
+    assert k("Vui lòng kiểm tra tin nhắn để được tư vấn, cảm ơn chị") == set()
+    assert k("mua tặng mẹ, túi đẹp và ý nghĩa") == {"mua tang", "tang me", "tui dep", "y nghia"}
+    # Tách từ so CÓ dấu: bỏ dấu thì "có thể"/"cơ thể", "vậy mà"/"váy mà", "ông bà"/"ổng bả" trùng.
+    assert k("mai em có thể ghé") == set() and k("cơ thể khỏe") == {"co the"}
+    assert k("hôm qua mặc váy mà vui") == {"mac vay"}
+    assert k("hai ông bà dễ thương") == {"ong ba", "de thuong"} and k("ổng bả tới rồi") == set()
+    # Gõ không dấu vẫn tách được; mặt chữ trên mây là bản gặp nhiều nhất.
+    assert k("nuoc hoa thom lau") == {"nuoc hoa", "thom lau"}
+
+
+def test_tach_cum_bo_ma_so_nhan_dan_tag_va_chu_keo_dai():
+    def k(nd, ht=""):
+        return set(CS._tach_cum({"noi_dung": nd, "hashtag": ht}))
+    # Mảnh mã giới thiệu ("fpg" của CKZ-VD88S-FPG) không ghép với chữ bên cạnh.
+    assert "fpg xoa" not in k("CKZ-VD88S-FPG xóa 88 rồi")
+    assert k("túi a88ah đẹp, sale 20/10 giá 299k") == set()
+    # Nhãn dán TikTok "[…]" không phải lời khách viết.
+    assert k("mua tặng mẹ [cười chảy nước mắt][ấm lòng]") == {"mua tang", "tang me"}
+    # Tên người được tag (viết hoa sau "@") không thành cụm.
+    assert k("@Trần Mai Anh vào xem túi đẹp nè") == {"tui dep"}
+    assert k("đẹppppp quá, túi xinhhhh") == {"tui xinh"}
+    # Hashtag: thẻ có số (mùa vụ/ngày/mã) bỏ; thẻ viết liền đúng một từ ghép đếm chung với từ đó.
+    assert k("Quà 20/10 #quatang2010 #tuixach", ht="quatang20_10, fyp, quatangme, nuochoa") == \
+        {"tui xach", "nuoc hoa", "#quatangme"}
+
+
+def test_rac_quang_cao_khong_vao_may_tong_va_ngan():
+    """Spam affiliate còn nhãn hợp lệ (luật Mark sót / chưa lọc lại) không đưa chữ lên mây, không
+    vào `tong`; ngăn từ khoá trả đúng các bình luận đã đếm."""
+    a = D(2026, 10, 10)
+    nd = ["𝐃𝐚́𝐧 𝐦𝐚𝐱 𝐜𝐮𝐨̂́𝐢 𝐯𝐚̀𝐨 𝐬𝐨̣̂𝐩-𝐩𝐢𝐢 𝐥𝐚̀ 𝐫𝐚 𝐦𝐚̂̃𝐮 túi xinh AHS-WCM-DQN",
+          "dán sàn cam là có nha bạn, túi xinh. CAP-RSJ-JCG", "zán cam ah túi xinh",
+          "KQX-77A-PLM túi xinh", "túi xinh quá", "túi xinh ghê", "Túi xinh xỉu"]
+    c = [bl("2026-10-10T10:00+07:00", f"c{i}", nd=t, tg=f"Khách {i}") for i, t in enumerate(nd)]
+    r = CS.tu_khoa_thao_luan([], c, a, a)
+    tk = {g["tu"]: g["so_bai"] for g in r["tu_khoa"]}
+    assert r["tong"] == 3 and tk == {"túi xinh": 3}
+    x = CS.chi_tiet_bl(c, a, a, cum="túi xinh", loai="hop_le")
+    assert x["tong"] == 3 and {b["ma"] for b in x["binh_luan"]} == {"c4", "c5", "c6"}
+    assert not CS.la_rac_quang_cao("Có ship về 0912-345-678 không, đơn ORD-2410-0001 ngày 2026-10-15")
+    assert not CS.la_rac_quang_cao("size XXL-3XL-4XL còn không") and not CS.la_rac_quang_cao("")
+    # Ở mây, mã sản phẩm ≥ 2 khúc chữ cũng bỏ dòng (cái giá nhỏ để không lọt mã giới thiệu).
+    assert CS.la_rac_quang_cao("Mẫu AURA-01-BLK còn không")
+
+
+def test_rac_quang_cao_bat_moi_dong_affiliate_cua_loc_rac():
+    """Mây phòng hờ: mọi bình luận `loc_rac.la_affiliate` gắn spam thì `la_rac_quang_cao` cũng bỏ."""
+    import loc_rac
+    mau = ["𝐃𝐚́𝐧 𝐦𝐚𝐱 𝐜𝐮𝐨̂́𝐢 𝐯𝐚̀𝐨 𝐬𝐨̣̂𝐩-𝐩𝐢𝐢 𝐥𝐚̀ 𝐫𝐚 𝐦𝐚̂̃𝐮 𝐯𝐚̀ 𝐠𝐢𝐚́ AHS-WCM-DQN",
+           "CJW-UJK-A88AH xóa 88 rồi zán cam ah", "KQX-77A-PLM dán vào shopee nhé",
+           "AHS-WCM-DQN sộp-pii", "𝐳𝐚́𝐧 𝐜𝐚𝐦 𝐧𝐡𝐞́", "Túi đẹp quá", "có bán trên shopee không"]
+    for s in mau:
+        if loc_rac.la_affiliate(s):
+            assert CS.la_rac_quang_cao(s), s
+    assert sum(loc_rac.la_affiliate(s) for s in mau) == 5
+    assert not CS.la_rac_quang_cao("Túi đẹp quá") and not CS.la_rac_quang_cao(mau[-1])
+
+
+def test_may_tu_mot_nguoi_viet_lap_khong_phai_xu_huong():
+    """Cụm cần ≥ 2 người viết và người viết nhiều nhất góp ≤ 2/3: tài khoản bán hàng trả lời cùng
+    câu 5 lần, một người dán một câu 3 lần — không lên mây; không rõ tác giả thì mỗi dòng một người."""
+    a = D(2026, 10, 10)
+    c = [bl("2026-10-10T10:00+07:00", f"s{i}", nd="Mẫu ví này có sẵn màu kem nha",
+            tg="Shop Bán Hàng") for i in range(5)]
+    c += [bl("2026-10-10T10:00+07:00", "o1", nd="màu kem đẹp", tg="Lan")]       # 5 + 1: không
+    c += [bl("2026-10-10T10:00+07:00", f"v{i}", nd="ví xinh ghê", tg="Hoa") for i in range(2)]
+    c += [bl("2026-10-10T10:00+07:00", "v9", nd="ví xinh thật", tg="Mai")]          # 2 + 1: được
+    c += [bl("2026-10-10T10:00+07:00", f"d{i}", nd="dây đeo chắc", tg="Huệ") for i in range(3)]
+    c += [bl("2026-10-10T10:00+07:00", "d9", nd="dây đeo chắc", tg="Cúc")]          # 3 + 1: không
+    tk = {g["tu"]: g["so_bai"] for g in CS.tu_khoa_thao_luan([], c, a, a)["tu_khoa"]}
+    assert tk == {"ví xinh": 3}
+    vo_danh = [dict(bl("2026-10-10T10:00+07:00", f"x{i}", nd="túi trắng"), tac_gia=None)
+               for i in range(2)]
+    assert {g["tu"] for g in CS.tu_khoa_thao_luan([], vo_danh, a, a)["tu_khoa"]} == {"túi trắng"}
+    # Bài: người viết = nguồn / tài khoản đăng — một KOC đăng 3 bài cùng chú thích không lên mây.
+    b = [bai(f"2026-10-10T0{i}:00+07:00", nd="Túi xách nữ Luna xách tay", tk="koc_a", nid=None)
+         for i in range(3)]
+    assert CS.tu_khoa(b) == []
+    them = [bai(f"2026-10-10T0{5 + i}:00+07:00", nd="túi xách tay", tk=f"koc_{i}", nid=None)
+            for i in range(2)]
+    assert CS.tu_khoa(b + them[:1]) == []                                     # 3 + 1: không
+    assert [(g["tu"], g["so_bai"]) for g in CS.tu_khoa(b + them)] == [("túi xách", 5)]
+
+
+def test_ngan_tu_khoa_bai_cong_binh_luan_bang_so_tren_may():
+    """Thẻ "bài" (`chi_tiet_bai` cum) + thẻ "bình luận" (`chi_tiet_bl` cum, hop_le) của MỌI cụm
+    đang hiện cộng lại đúng `so_bai` trên mây — kể cả hashtag gộp vào từ ghép, rác quảng cáo, bình
+    luận minigame, bài kênh nhà, chữ không dấu."""
+    a = D(2026, 10, 10)
+    bs = [bai("2026-10-10T09:00+07:00", nd="Túi xách da thật, màu đen sang", ht="tuixach",
+              tk="koc_a", nid=None),
+          bai("2026-10-10T09:30+07:00", nd="quà tặng mẹ #tuixach", tk="koc_b", nid=None),
+          bai("2026-10-10T10:00+07:00", nd="túi xách nước hoa", nid=9, loai="kenh_nha", tk="nha")]
+    nd = [("tui xach dep qua", "Lan"), ("Túi xách màu đen còn không", "Hoa"),
+          ("màu đen sang ghê", "Mai"), ("dán mã túi xách KQX-77A-PLM", "Spam"),
+          ("chúc mẹ túi xách đẹp", "MG"), ("quà tặng mẹ ý nghĩa", "Cúc"),
+          ("tặng mẹ luôn", "Đào")]
+    cs = []
+    for i, (t, tg) in enumerate(nd):
+        x = bl("2026-10-10T11:00+07:00", f"c{i}", nd=t, tg=tg,
+               cd=CS.CHU_DE_MINIGAME if tg == "MG" else "Khác")
+        x["khoa_bai"] = bs[i % 2]["khoa"]
+        cs.append(x)
+    for gom in ("", "1"):
+        f = CS.doc_bo_loc({"gom_mg": gom} if gom else {})
+        may = CS.tu_khoa_thao_luan(bs, cs, a, a, bo_loc=f)["tu_khoa"]
+        assert {"túi xách", "màu đen", "quà tặng"} <= {g["tu"] for g in may}
+        for g in may:
+            n_bai = CS.chi_tiet_bai(bs, a, a, cum=g["tu"], bo_loc=f)["tong"]
+            n_bl = CS.chi_tiet_bl(cs, a, a, cum=g["tu"], loai="hop_le", bo_loc=f)["tong"]
+            assert n_bai + n_bl == g["so_bai"], (gom, g["tu"])
+    tk = {g["tu"]: g["so_bai"] for g in may}
+    assert tk["túi xách"] == 2 + 3                     # 2 bài khách + c0, c1, c4 (MG khi gom_mg)
+
+
+def test_tu_ghep_danh_sach_hop_le():
+    """Danh sách từ ghép: mỗi mục 2–4 âm tiết, không mục nào nằm ở cả hai nhóm; khoá bỏ dấu trùng
+    giữa hai nhóm chỉ là các cặp khác dấu đã biết (tách từ so có dấu)."""
+    from dashboard import tu_ghep as TG
+    dang = [f for v in TG.DANG.values() for f in v]
+    assert all(2 <= len(f) <= 4 for f, _ in dang) and TG.DAI_NHAT <= 4
+    assert len({f for f, _ in dang}) == len(dang)
+    assert TG.HU & set(TG.GHEP) <= {"ban than", "co the", "do do"}
+    assert TG.LIEN["tuixach"] == "tui xach" and TG.GHEP["tui xach"] == "túi xách"
