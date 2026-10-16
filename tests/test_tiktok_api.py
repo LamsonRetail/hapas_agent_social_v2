@@ -132,7 +132,7 @@ def test_tim_dung_khi_het_trang_va_theo_tran_yeu_cau(api):
     assert len(api.goi) == 1, "has_more=0 thì không hỏi thêm"
     api.goi.clear()
     api.tim.update({(k, 0): ([_aweme(k)], 1) for k in ("b", "c", "d")})
-    TT.tim(["b", "c", "d"], 30, None, None, tran_usd=0.004)    # trần 0,004 = 2 yêu cầu
+    TT.tim(["b", "c", "d"], 30, None, None, tran_usd=2 * TT.GIA_YEU_CAU)   # trần = 2 yêu cầu
     assert len(api.goi) == 2
 
 
@@ -303,7 +303,7 @@ def test_tim_trang_sau_loi_giu_trang_truoc(api):
 def test_uoc_tai_cho_tiktok_theo_yeu_cau():
     """MEDIUM 4: ≥ 1 yêu cầu mỗi từ khoá, tối đa 2×(trang cần)+1 — như /theodoi."""
     est, luot = A._uoc_tai_cho(["tiktok"], {"tiktok": 100}, ["a", "b", "A"])
-    assert est == pytest.approx(TT.so_yeu_cau_tim(2, 50) * TT.GIA_YEU_CAU)    # 10 × 0,002
+    assert est == pytest.approx(TT.so_yeu_cau_tim(2, 50) * TT.GIA_YEU_CAU)    # 10 × 0,003
     assert luot["tiktok"] == TT.GIA_YEU_CAU
     assert A._uoc_tai_cho(["tiktok"], {"tiktok": 5}, ["k" + str(i) for i in range(21)])[0] == \
-        pytest.approx(21 * 3 * 0.002)
+        pytest.approx(21 * 3 * TT.GIA_YEU_CAU)

@@ -235,7 +235,7 @@ def test_chia_phan_moi_nguon_dung_so_bai_cua_no():
     assert ph["instagram"][0]["payload"] == {"usernames": ["d"]}
     assert ph["youtube"][0]["actor"] == "youtube" and ph["youtube"][0]["uoc_usd"] == 0
     assert ph["facebook"][0]["payload"]["resultsLimit"] == 3
-    assert tt["tiktok-5"]["uoc_usd"] == pytest.approx(10 * 0.0008 * 1.3, abs=1e-4)
+    assert tt["tiktok-5"]["uoc_usd"] == pytest.approx(10 * 0.0012 * 1.3, abs=1e-4)
     assert ph["instagram"][0]["uoc_usd"] == pytest.approx((0.0026 + 0.016) * 1.3, abs=1e-4)
 
 
@@ -1222,8 +1222,8 @@ def test_tim_tu_khoa_giu_bai_nhac_hapas_gan_nguon_va_ghi_tien(mo):
     assert theo["tiktok:1"]["nguon_id"] == 7 and theo["tiktok:2"]["nguon_id"] is None
     assert [ph["run_id"] for ph in v.d["nen_tang"]["tu_khoa"]["phan"] if ph.get("run_id")] \
         == ["run-youtube", "run-tiktok", "run-facebook", "run-instagram"]
-    # TikTok API tính theo yêu cầu: 1 run (giả) × 0,002 USD > 5 bài × 0,0001 sổ tạm.
-    assert tk["giu"] == 2 and tk["usd"] == pytest.approx(0.002, abs=1e-6)
+    # TikTok API tính theo yêu cầu: 1 run (giả) × 0,003 USD > 5 bài × 0,0001 sổ tạm.
+    assert tk["giu"] == 2 and tk["usd"] == pytest.approx(T.TK_TT_YEU_CAU, abs=1e-6)
     assert ("tìm theo 3 từ khoá: lấy 4 bài trong phạm vi 30 ngày, cập nhật số liệu 0 bài đã có, "
             "giữ 2") in T._cau_tk(tk)[0]
 
