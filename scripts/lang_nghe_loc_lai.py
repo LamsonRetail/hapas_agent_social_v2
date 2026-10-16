@@ -86,7 +86,22 @@ def ke_hoach(rows: list[dict], thuong_hieu: list[str] | tuple = (),
     for kb, m in loc_rac.affiliate_hang_loat(tam, ha_duoc=HA_DUOC, thuong_hieu=thuong_hieu,
                                              noi_dung_bai=noi_dung_bai):
         doi[(kb, m)] = {**_tom(theo[(kb, m)]), "ly_do": "affiliate_hang_loat"}
+    mb = loc_rac.ma_cua_brand(rows, thuong_hieu, noi_dung_bai)
+    for x in doi.values():
+        x["doc_tay"] = _vi_sao_doc_tay(x, thuong_hieu, mb.get(x["khoa_bai"], set()))
     return list(doi.values())
+
+
+def _vi_sao_doc_tay(x: dict, thuong_hieu, ma_brand: set) -> str:
+    """Phần dễ nhầm nhất, in riêng để người duyệt đọc tay trước khi --ap-dung ("" = mẫu thường):
+    hàng loạt mà không có mã riêng (chỉ chữ kiểu cách / mã của brand), hoặc từng bình luận chỉ có mã
+    + tên sàn mà không lời dặn dán mã (có thể là khách hỏi mua theo mã sản phẩm)."""
+    nd = x["noi_dung"]
+    if x["ly_do"] == "affiliate_hang_loat" and not loc_rac.ma_gioi_thieu(nd, thuong_hieu) - ma_brand:
+        return "hàng loạt, không có mã riêng"
+    if x["ly_do"] == "affiliate_dan_ma" and "cum" not in loc_rac.dau_hieu_affiliate(nd, thuong_hieu):
+        return "mã + tên sàn, không lời dặn"
+    return ""
 
 
 def _tom(r: dict) -> dict:
@@ -104,7 +119,8 @@ def che_tac_gia(ten: str) -> str:
 
 def _dong_mau(x: dict) -> str:
     nd = " ".join(x["noi_dung"].split())
-    return (f"    [{x['ly_do']}] {che_tac_gia(x['tac_gia'])} · {x['khoa_bai'][:40]} · "
+    nhan = x["ly_do"] + (f" · {x['doc_tay']}" if x.get("doc_tay") else "")
+    return (f"    [{nhan}] {che_tac_gia(x['tac_gia'])} · {x['khoa_bai'][:40]} · "
             f"\"{nd[:90]}{'…' if len(nd) > 90 else ''}\"")
 
 
@@ -122,18 +138,16 @@ def bao_cao(ma: str, so_xet: int, doi: list[dict], mau: int) -> list[str]:
               f"\"{CHU_DE_MUA}\"")
     if not mau:
         return ra
-    # Hàng loạt mà KHÔNG có mã in hoa nối gạch (chỉ chữ kiểu cách) là phần dễ nhầm nhất: in riêng
-    # để người duyệt đọc tay trước khi --ap-dung.
-    khong_ma = [x for x in doi if x["ly_do"] == "affiliate_hang_loat"
-                and not loc_rac.ma_gioi_thieu(x["noi_dung"])]
-    con = [x for x in doi if x not in khong_ma]
+    # Phần dễ nhầm (`_vi_sao_doc_tay`) in riêng để người duyệt đọc tay trước khi --ap-dung.
+    doc_tay = [x for x in doi if x.get("doc_tay")]
+    con = [x for x in doi if not x.get("doc_tay")]
     if con:
         ra.append(f"  Mẫu ({min(mau, len(con))}/{len(con)}, tác giả đã che):")
         ra += [_dong_mau(x) for x in con[:mau]]
-    if khong_ma:
-        ra.append(f"  CẦN ĐỌC TAY — hàng loạt không có mã nối gạch "
-                  f"({min(mau, len(khong_ma))}/{len(khong_ma)}):")
-        ra += [_dong_mau(x) for x in khong_ma[:mau]]
+    if doc_tay:
+        ra.append(f"  CẦN ĐỌC TAY — hàng loạt không có mã riêng, hoặc chỉ mã + tên sàn "
+                  f"({min(mau, len(doc_tay))}/{len(doc_tay)}):")
+        ra += [_dong_mau(x) for x in doc_tay[:mau]]
     return ra
 
 

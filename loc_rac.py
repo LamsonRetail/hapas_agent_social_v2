@@ -90,8 +90,10 @@ _IT_CHU = re.compile(r"^(cham|cham cham|hong|up|upp|ok|oke|e|a|o|in)$")
 #   san   nhắc sàn "shopee", "sộp-pii" — khách thật cũng hỏi "có bán trên shopee không" nên đây là
 #         dấu hiệu YẾU;
 #   font  ≥ 30% chữ cái (và ≥ 4 chữ) là chữ kiểu cách U+1D400–1D7FF — cách né bộ lọc từ khoá.
-# MỘT bình luận là spam (`affiliate_dan_ma`) khi: MÃ + (lời dặn hoặc tên sàn), hoặc CHỮ KIỂU CÁCH +
-# lời dặn. Chữ kiểu cách + tên sàn KHÔNG đủ (khách gõ bằng bàn phím kiểu "có bán trên shopee không").
+# MỘT bình luận là spam (`affiliate_dan_ma`) khi: MÃ + lời dặn, MÃ ĐẬM (mọi khúc có chữ, không khúc
+# nào là cỡ) + tên sàn, hoặc CHỮ KIỂU CÁCH + lời dặn. Chữ kiểu cách + tên sàn KHÔNG đủ (khách gõ bằng
+# bàn phím kiểu "có bán trên shopee không"); mã thường + tên sàn cũng không ("Mẫu AURA-01-BLK còn
+# trên shopee không").
 # Cấp BÀI (`affiliate_hang_loat`, chạy ở kho): ≥ `AFF_TAC_GIA` tài khoản khác nhau cùng có MÃ, hoặc
 # chữ kiểu cách + (lời dặn | tên sàn), dưới MỘT bài trong `AFF_GIO` giờ (theo giờ ĐĂNG thật) → cả
 # loạt là spam (bắt bản chỉ có mã, không lời). Mã có trong bài/bình luận của chính thương hiệu
@@ -106,9 +108,21 @@ _RE_CUM_AFF = re.compile(r"(?<!\w)(?:(?:dán|zán|zan) (?:mã|max|vào|cam|code)
 _RE_SAN_AFF = re.compile(r"\b(?:sh?op+e+|sh?op+[\s.\-]*pi+)\b")
 
 
+def _ten_brand(thuong_hieu) -> set[str]:
+    """Tên/từ khoá brand để nhận mã của chính brand: cả cụm viết liền ("hapasofficial") và từng từ
+    ≥ 4 chữ ("hapas") — "HAPAS-SALE-50" là mã brand dù dự án chỉ có tên "HAPAS Official"."""
+    ra: set[str] = set()
+    for x in thuong_hieu:
+        t = CC.bo_dau(x).strip()
+        if len(t) >= 3:
+            ra.add(t.replace(" ", ""))
+            ra.update(w for w in t.split() if len(w) >= 4)
+    return ra
+
+
 def ma_gioi_thieu(s: str, thuong_hieu: list[str] | tuple = ()) -> set[str]:
     """Các mã giới thiệu (in hoa, gạch thường) trong chuỗi — xem dấu hiệu `ma` ở trên."""
-    brand = [CC.bo_dau(x).replace(" ", "") for x in thuong_hieu if len(str(x).strip()) >= 3]
+    brand = _ten_brand(thuong_hieu)
     ra = set()
     for m in _RE_MA_AFF.finditer(CC.nfkc(_RE_URL.sub(" ", str(s or "")))):
         khuc = re.split("[-–—]", m.group())
@@ -138,10 +152,21 @@ def dau_hieu_affiliate(s: str, thuong_hieu: list[str] | tuple = ()) -> set[str]:
     return ra
 
 
+def ma_dam(ma: str) -> bool:
+    """Mã "đậm" giới thiệu: MỌI khúc có chữ cái và không khúc nào là cỡ (AHS-WCM-DQN, KQX-77A-PLM,
+    CJW-UJK-A88AH). Mã sản phẩm hay có khúc toàn số / cỡ (AURA-01-BLK, TUI-BLK-XL)."""
+    return all(any(c.isalpha() for c in k) and not _RE_KHUC_CO.match(k) for k in ma.split("-"))
+
+
 def la_affiliate(s: str, thuong_hieu: list[str] | tuple = ()) -> bool:
-    """Spam affiliate ngay ở MỘT bình luận: mã + (lời dặn | tên sàn), hoặc chữ kiểu cách + lời dặn."""
+    """Spam affiliate ngay ở MỘT bình luận: mã + lời dặn; mã ĐẬM (`ma_dam`) + tên sàn; hoặc chữ kiểu
+    cách + lời dặn. Mã thường + tên sàn là khách hỏi "Mẫu AURA-01-BLK còn trên shopee không"."""
     d = dau_hieu_affiliate(s, thuong_hieu)
-    return ("ma" in d and bool(d & {"cum", "san"})) or {"font", "cum"} <= d
+    if "ma" in d and "cum" in d:
+        return True
+    if "ma" in d and "san" in d and any(ma_dam(m) for m in ma_gioi_thieu(s, thuong_hieu)):
+        return True
+    return {"font", "cum"} <= d
 
 
 def khoa_tac_gia(s) -> str:
@@ -161,6 +186,19 @@ def co_dau_hieu_hang_loat(s: str, thuong_hieu: list[str] | tuple = (),
     return "font" in d and bool(d & {"cum", "san"})
 
 
+def ma_cua_brand(rows: list[dict], thuong_hieu: list[str] | tuple = (),
+                 noi_dung_bai: dict | None = None) -> dict:
+    """{khoá bài: các mã có trong nội dung bài và bình luận của thương hiệu} — minigame, voucher."""
+    ra: dict = {}
+    for k, nd in (noi_dung_bai or {}).items():
+        ra.setdefault(k, set()).update(ma_gioi_thieu(nd, thuong_hieu))
+    for r in rows:
+        if r.get("cua_thuong_hieu") or r.get("loai") == "thuong_hieu":
+            ra.setdefault(r.get("khoa_bai"), set()).update(
+                ma_gioi_thieu(r.get("noi_dung"), thuong_hieu))
+    return ra
+
+
 def affiliate_hang_loat(rows: list[dict], ha_duoc: tuple = ("hop_le",), *,
                         thuong_hieu: list[str] | tuple = (),
                         noi_dung_bai: dict | None = None) -> list[tuple]:
@@ -171,13 +209,7 @@ def affiliate_hang_loat(rows: list[dict], ha_duoc: tuple = ("hop_le",), *,
     thương hiệu và `noi_dung_bai` ({khoá bài: nội dung bài}) chỉ dùng để biết mã nào là của brand.
     Dòng spam affiliate sẵn có vẫn được đếm (cùng một đợt). Chỉ trả các dòng đang ở nhãn `ha_duoc`
     (không bao giờ nâng nhãn). -> [(khoa_bai, ma)] cần hạ thành spam."""
-    ma_brand: dict = {}
-    for k, nd in (noi_dung_bai or {}).items():
-        ma_brand.setdefault(k, set()).update(ma_gioi_thieu(nd, thuong_hieu))
-    for r in rows:
-        if r.get("cua_thuong_hieu") or r.get("loai") == "thuong_hieu":
-            ma_brand.setdefault(r.get("khoa_bai"), set()).update(
-                ma_gioi_thieu(r.get("noi_dung"), thuong_hieu))
+    ma_brand = ma_cua_brand(rows, thuong_hieu, noi_dung_bai)
     theo_bai: dict = {}
     for r in rows:
         if r.get("cua_thuong_hieu") or r.get("loai") == "thuong_hieu" or r.get("luc") is None:

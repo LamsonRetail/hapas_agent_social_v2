@@ -159,6 +159,25 @@ def test_spam_affiliate_review_khong_bat_nham():
     assert r[0]["loai"] == "hop_le"
 
 
+def test_spam_affiliate_ma_san_pham_cung_san_la_khach():
+    """Re-review 16/10: mã thường + tên sàn là khách hỏi mua — chỉ mã ĐẬM (mọi khúc có chữ, không
+    khúc nào là cỡ) + sàn mới là spam; mã + lời dặn vẫn là spam."""
+    for t in ("Mẫu túi AURA-01-BLK còn trên shopee không", "Túi TUI-BLK-XL có trên shopee không ạ"):
+        assert _mot(t) == ("hop_le", None), t
+    assert L.la_affiliate("AURA-01-BLK dán mã vào shopee")
+    for ma in ("AHS-WCM-DQN", "CJW-UJK-A88AH", "KQX-77A-PLM", "ZZT-81P-QWE"):   # mẫu thật trong kho
+        assert L.ma_dam(ma) and L.la_affiliate(f"{ma} sộp-pii"), ma
+    assert not L.ma_dam("AURA-01-BLK") and not L.ma_dam("TUI-BLK-XL")
+
+
+def test_ma_brand_nhan_tung_tu_cua_ten_nhieu_chu():
+    """Dự án tên "HAPAS Official" (không có từ khoá "hapas" đứng riêng): HAPAS-SALE-50 vẫn là mã
+    của brand."""
+    assert L.ma_gioi_thieu("HAPAS-SALE-50 nha", ["HAPAS Official"]) == set()
+    assert L.ly_do_spam("HAPAS-SALE-50 dán vào shopee", ["HAPAS Official"]) == ""
+    assert L.ma_gioi_thieu("AHS-WCM-DQN", ["HAPAS Official"]) == {"AHS-WCM-DQN"}
+
+
 def test_affiliate_hang_loat_gio_dang_that_va_ma_cua_brand():
     rows = [_bl_aff(f"c{i}", f"Acc {i}", i, nd="QUA-TANG-2710") for i in range(5)]
     assert len(L.affiliate_hang_loat(rows)) == 5

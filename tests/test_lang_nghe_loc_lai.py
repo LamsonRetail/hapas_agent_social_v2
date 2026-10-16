@@ -159,7 +159,20 @@ def test_bao_cao_tach_mau_hang_loat_khong_co_ma():
     doi = S.ke_hoach(rows)
     assert {x["ly_do"] for x in doi} == {"affiliate_hang_loat"} and len(doi) == 5
     chu = "\n".join(S.bao_cao("hapas", 5, doi, 2))
-    assert "Mẫu (1/1" in chu and "CẦN ĐỌC TAY — hàng loạt không có mã nối gạch (2/4)" in chu
+    assert "Mẫu (1/1" in chu and "CẦN ĐỌC TAY — hàng loạt không có mã riêng, hoặc chỉ mã + tên sàn " \
+                                 "(2/4)" in chu
+    assert "affiliate_hang_loat · hàng loạt, không có mã riêng" in chu
+
+
+def test_bao_cao_doc_tay_ma_cung_san_khong_loi_dan():
+    """Re-review 16/10: mã đậm + tên sàn (không lời dặn) vẫn hạ, nhưng in vào nhóm đọc tay — có thể
+    là khách hỏi theo mã sản phẩm. Mã + lời dặn là mẫu thường."""
+    rows = [_dong("a1", "acc1", 0, "KQX-77A-PLM shopee"),
+            _dong("a2", "acc2", 1, "CJW-UJK-A88AH xóa 88 rồi zán cam ah")]
+    doi = {x["ma"]: x for x in S.ke_hoach(rows)}
+    assert doi["a1"]["doc_tay"] == "mã + tên sàn, không lời dặn" and doi["a2"]["doc_tay"] == ""
+    chu = "\n".join(S.bao_cao("hapas", 2, list(doi.values()), 5))
+    assert "Mẫu (1/1" in chu and "CẦN ĐỌC TAY" in chu and "(1/1):" in chu
 
 
 def _ket_noi_gia(monkeypatch, rows, **kw):

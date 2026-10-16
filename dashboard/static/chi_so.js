@@ -934,12 +934,15 @@
     o.appendChild(tao("div", "cs-noi__tieu-de", "“" + x.tu + "”"));
     o.appendChild(tao("div", "cs-noi__so", so(x.so_bai) + " thảo luận nhắc tới · bấm để xem"));
     o.appendChild(thanhTron(x));
+    // % trên số ĐÃ phân loại — cùng mẫu số với luật tô màu (lopTu), nên "≥ 25%" ở chú giải khớp
+    // con số ở đây; dòng chưa phân loại chỉ ghi số.
+    var da = (x[TC] || 0) + (x[TI] || 0) + (x[TL] || 0);
     SAC4.forEach(function (s) {
       if (!x[s]) return;
       var d = tao("div", "cs-noi__dong");
       d.appendChild(tao("span", "cs-chip__cham cs-nen-" + LOP_SAC[s]));
       d.appendChild(chuNode(TEN_SAC[s]));
-      d.appendChild(tao("span", "so", so(x[s]) + " · " + ptCua(x[s], x.so_bai)));
+      d.appendChild(tao("span", "so", s === CHUA ? so(x[s]) : so(x[s]) + " · " + ptCua(x[s], da)));
       o.appendChild(d);
     });
     // Cảnh báo tập trung: một bài góp ≥ 60% số thảo luận của cụm (vd minigame, một video viral).

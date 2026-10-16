@@ -1737,7 +1737,7 @@ def test_api_may_tu_an_minigame_theo_url():
     assert c.get("/api/chi-so?du_an=hapas&gom_mg=x" + Q_LOC).status_code == 400
     t = c.get("/").text
     assert 'id="tk-gom-mg"' in t and "Gồm cả bình luận minigame" in t
-    assert "Màu = sắc thái nổi trội (xanh khi ≥ 25% tích cực và gấp đôi tiêu cực)" in t
+    assert "xanh khi ≥ 25% tích cực và gấp đôi tiêu cực; đỏ khi ≥ 25% tiêu cực" in t
     js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
     assert "% từ 1 bài" in js and "gom_mg" in js and "x.mau" in js
 
