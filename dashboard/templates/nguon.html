@@ -4,9 +4,13 @@
 {% block noi_dung %}
 {% macro uoc_tinh(nen_tang, usd) %}≈ {{ usd|usd_vn(3) }} USD/tháng theo bài{% if phi_khoi_dong.get(nen_tang) %} + phí khởi động actor chung {{ phi_khoi_dong[nen_tang]|usd_vn(4) }} USD mỗi ngày quét{% endif %}{% endmacro %}
 {% set ql = nguoi.vai_tro == 'quan_ly' %}
+{% set O_LOAI = {'kenh_nha': 'tim', 'kol': 'hong', 'page': 'xanh', 'group': 'la', 'bao': 'cam', 'khac': 'xam'} %}
+{% set muc = namespace(so=0) %}
 <script type="application/json" id="chi-phi-hang-so">{{ chi_phi_js|json_script }}</script>
-<div class="tieu-de-khoi">
-  <h1>Dự án &amp; nguồn theo dõi{% if du_an %} — {{ du_an.ten }}{% endif %}</h1>
+<div class="dau-muc">
+  <div class="dau-muc__chu">
+    <h1>Dự án &amp; nguồn theo dõi{% if du_an %} — {{ du_an.ten }}{% endif %}</h1>
+  </div>
   {% if du_an_ds %}
   <form class="hang" method="get" action="/nguon">
     <label class="o">Dự án
@@ -20,20 +24,35 @@
 </div>
 
 {% if du_an %}
+{% set dang = nguon|selectattr('trang_thai', 'equalto', 'dang_theo_doi')|list %}
+<div class="luoi luoi-kpi">
+  <div class="the-khoi kpi kpi--xanh"><span class="kpi__icon" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg></span>
+    <div class="kpi__than"><div class="kpi__nhan">Nguồn</div><div class="kpi__so">{{ nguon|length }}</div><div class="kpi__doi">trong dự án</div></div></div>
+  <div class="the-khoi kpi kpi--la"><span class="kpi__icon" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+    <div class="kpi__than"><div class="kpi__nhan">Đang theo dõi</div><div class="kpi__so">{{ dang|length }}</div><div class="kpi__doi">{{ nguon|length - dang|length }} tạm dừng</div></div></div>
+  <div class="the-khoi kpi kpi--hong"><span class="kpi__icon" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.2M12 17h.01"/></svg></span>
+    <div class="kpi__than"><div class="kpi__nhan">Lỗi lần quét cuối</div><div class="kpi__so">{{ nguon|selectattr('loi_cuoi')|list|length }}</div><div class="kpi__doi">nguồn</div></div></div>
+  <div class="the-khoi kpi kpi--cam"><span class="kpi__icon" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M3.5 12h4M16.5 12h4"/><circle cx="12" cy="12" r="3.2"/></svg></span>
+    <div class="kpi__than"><div class="kpi__nhan">Đề xuất chờ duyệt</div><div class="kpi__so">{{ de_xuat|length }}</div><div class="kpi__doi">nguồn mới nổi lên</div></div></div>
+</div>
+
 <section class="the-khoi cach-duoi">
-  <div class="tieu-de-khoi">
-    <h2>Dự án {{ du_an.ten }} <span class="the">{{ du_an.ma }}</span>
-      {% if du_an.dang_bat %}<span class="the the--tot">Đang bật</span>{% else %}<span class="the the--loi">Đang tắt</span>{% endif %}</h2>
-    <span class="mo nho">Sửa lần cuối {{ du_an.sua_luc|gio_vn }}{% if du_an.sua_boi %} bởi {{ du_an.sua_boi }}{% endif %}</span>
+  {% set muc.so = muc.so + 1 %}
+  <div class="muc">
+    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <h2 class="muc__ten">Dự án {{ du_an.ten }}</h2>
+    <span class="the">{{ du_an.ma }}</span>
+    {% if du_an.dang_bat %}<span class="the the--tot the--cham">Đang bật</span>{% else %}<span class="the the--loi the--cham">Đang tắt</span>{% endif %}
+    <span class="muc__phai muc__phu">Sửa lần cuối {{ du_an.sua_luc|gio_vn }}{% if du_an.sua_boi %} bởi {{ du_an.sua_boi }}{% endif %}</span>
   </div>
-  <div class="luoi luoi--3">
-    <div><h3>Từ khoá</h3>{% for x in du_an.tu_khoa %}<span class="the the--nhan">{{ x }}</span> {% else %}<span class="mo">—</span>{% endfor %}</div>
-    <div><h3>Từ loại trừ</h3>{% for x in du_an.tu_loai_tru %}<span class="the">{{ x }}</span> {% else %}<span class="mo">—</span>{% endfor %}</div>
-    <div><h3>Thị trường · trần tháng</h3>{{ du_an.thi_truong }} · {{ du_an.tran_usd_thang|usd_vn }} USD <a class="nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}">(sửa ở Ngân sách)</a></div>
+  <div class="luoi luoi--3 ng-du-an">
+    <div class="ng-o"><h3>Từ khoá</h3><div class="ng-the">{% for x in du_an.tu_khoa %}<span class="the the--nhan">{{ x }}</span>{% else %}<span class="mo">—</span>{% endfor %}</div></div>
+    <div class="ng-o"><h3>Từ loại trừ</h3><div class="ng-the">{% for x in du_an.tu_loai_tru %}<span class="the">{{ x }}</span>{% else %}<span class="mo">—</span>{% endfor %}</div></div>
+    <div class="ng-o"><h3>Thị trường · trần tháng</h3><div><b>{{ du_an.thi_truong }}</b> · <b>{{ du_an.tran_usd_thang|usd_vn }}</b> USD <a class="nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}">sửa ở Ngân sách →</a></div></div>
   </div>
-  {% if du_an.boi_canh %}<p class="ghi-chu">Bối cảnh cho bước AI: {{ du_an.boi_canh }}</p>{% endif %}
+  {% if du_an.boi_canh %}<p class="ghi-chu"><b>Bối cảnh cho bước AI:</b> {{ du_an.boi_canh }}</p>{% endif %}
   {% if ql %}
-  <details>
+  <details class="cach-tren">
     <summary>Sửa dự án</summary>
     <form method="post" action="/du-an/{{ du_an.ma|urlencode }}/sua" class="luoi-form">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
@@ -50,11 +69,16 @@
 </section>
 
 <section class="the-khoi cach-duoi">
-  <div class="tieu-de-khoi"><h2>Nguồn đang có ({{ nguon|length }})</h2>
-    <span class="mo nho">Tới chu kỳ thì quét, mỗi lần lấy tối đa "Bài/lần" bài mới nhất. Giờ quét đặt ở <a href="/lich-quet?du_an={{ du_an.ma|urlencode }}">Lịch quét</a>.</span></div>
+  {% set muc.so = muc.so + 1 %}
+  <div class="muc">
+    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <h2 class="muc__ten">Nguồn đang có ({{ nguon|length }})</h2>
+    <button type="button" class="goi-y" data-goi-y="Tới chu kỳ thì quét, mỗi lần lấy tối đa “Bài/lần” bài mới nhất. Giờ quét đặt ở trang Lịch quét. ≈ USD/tháng: theo cấu hình, 30 ngày, chưa gồm phí khởi động actor dùng chung.">i</button>
+    <a class="muc__phai nho" href="/lich-quet?du_an={{ du_an.ma|urlencode }}">Lịch quét →</a>
+  </div>
   {% if nguon %}
   <div class="cuon-ngang">
-  <table>
+  <table class="ng-bang">
     <thead><tr>
       <th>Nguồn</th><th>Loại</th><th>Nhãn</th><th>Trạng thái</th><th class="so">Chu kỳ</th><th class="so">Bài/lần</th>
       <th class="so" title="Theo cấu hình, 30 ngày, chưa gồm phí khởi động actor dùng chung">≈ USD/tháng</th>
@@ -63,12 +87,12 @@
     <tbody>
     {% for n in nguon %}
       <tr>
-        <td><span class="the">{{ n.nen_tang|ten_nen_tang }}</span>
-          {% set lk = n.link|link_an_toan %}{% if lk %}<a href="{{ lk }}" target="_blank" rel="noopener noreferrer">{{ n.ten or n.dinh_danh }}</a>{% else %}{{ n.ten or n.dinh_danh }}{% endif %}
-          <div class="mo nho">{{ n.dinh_danh }}</div></td>
-        <td>{{ LOAI_NGUON.get(n.loai, n.loai) }}</td>
+        <td><div class="ng-nguon"><span class="the the--nt-{{ n.nen_tang }}">{{ n.nen_tang|ten_nen_tang }}</span>
+          <div class="ng-nguon__chu">{% set lk = n.link|link_an_toan %}{% if lk %}<a href="{{ lk }}" target="_blank" rel="noopener noreferrer">{{ n.ten or n.dinh_danh }}</a>{% else %}<b>{{ n.ten or n.dinh_danh }}</b>{% endif %}
+          <div class="mo nho">{{ n.dinh_danh }}</div></div></div></td>
+        <td class="o-mau o-mau--{{ O_LOAI.get(n.loai, 'xam') }}">{{ LOAI_NGUON.get(n.loai, n.loai) }}</td>
         <td>{% for x in n.nhan %}<span class="the">{{ x }}</span> {% endfor %}</td>
-        <td>{% if n.trang_thai == 'dang_theo_doi' %}<span class="the the--tot">Đang theo dõi</span>{% else %}<span class="the">Tạm dừng</span>{% endif %}</td>
+        <td>{% if n.trang_thai == 'dang_theo_doi' %}<span class="the the--tot the--cham">Đang theo dõi</span>{% else %}<span class="the the--cham">Tạm dừng</span>{% endif %}</td>
         <td class="so">{{ n.chu_ky_ngay }} ngày</td>
         <td class="so">{{ n.so_bai_moi_lan }}</td>
         <td class="so">{% if n.trang_thai == 'dang_theo_doi' %}{{ n.usd_thang|usd_vn(3) }}{% else %}<span class="mo" title="Tạm dừng: không tốn tiền; tiếp tục thì ≈ {{ n.usd_thang|usd_vn(3) }}">0</span>{% endif %}</td>
@@ -88,7 +112,7 @@
               <button class="nut nut--loi nut--nho" type="submit">Xoá</button>
             </form>
           </div>
-          <details>
+          <details class="ng-sua">
             <summary class="nho">Sửa</summary>
             <form method="post" action="/nguon/{{ n.id }}/sua" class="luoi-form" data-uoc-tinh>
               <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
@@ -119,7 +143,12 @@
 
 {% if ql %}
 <section class="the-khoi cach-duoi">
-  <h2>Thêm nguồn</h2>
+  {% set muc.so = muc.so + 1 %}
+  <div class="muc">
+    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <h2 class="muc__ten">Thêm nguồn</h2>
+    <button type="button" class="goi-y" data-goi-y="Internal channel (kênh của chính thương hiệu): giữ mọi bài. Nguồn khác: chỉ giữ bài nhắc từ khoá dự án.">i</button>
+  </div>
   <form method="post" action="/nguon/them" class="luoi-form" data-uoc-tinh>
     <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
     <input type="hidden" name="du_an" value="{{ du_an.ma }}">
@@ -135,13 +164,16 @@
     <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh('tiktok', 30 * 5 * chi_phi_js.gia.tiktok * chi_phi_js.he_so) }}</output>
     <div><button class="nut" type="submit">Thêm nguồn</button></div>
   </form>
-  <p class="ghi-chu">Internal channel (kênh của chính thương hiệu): giữ mọi bài. Nguồn khác: chỉ giữ bài nhắc từ khoá dự án.</p>
 </section>
 {% endif %}
 
 <section class="the-khoi cach-duoi">
-  <h2>Đề xuất nguồn chờ duyệt ({{ de_xuat|length }})</h2>
-  <p class="ghi-chu sat-tren">Nguồn nổi lên khi quét nhưng chưa được theo dõi — chỉ thêm khi quản lý duyệt.</p>
+  {% set muc.so = muc.so + 1 %}
+  <div class="muc">
+    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <h2 class="muc__ten">Đề xuất nguồn chờ duyệt ({{ de_xuat|length }})</h2>
+    <button type="button" class="goi-y" data-goi-y="Nguồn nổi lên khi quét nhưng chưa được theo dõi — chỉ thêm khi quản lý duyệt.">i</button>
+  </div>
   {% if de_xuat %}
   <div class="cuon-ngang">
   <table>
@@ -149,9 +181,9 @@
     <tbody>
     {% for x in de_xuat %}
       <tr>
-        <td><span class="the">{{ x.nen_tang|ten_nen_tang }}</span>
-          {% set lk = x.link|link_an_toan %}{% if lk %}<a href="{{ lk }}" target="_blank" rel="noopener noreferrer">{{ x.ten or x.dinh_danh }}</a>{% else %}{{ x.ten or x.dinh_danh }}{% endif %}
-          <div class="mo nho">{{ x.dinh_danh }}</div></td>
+        <td><div class="ng-nguon"><span class="the the--nt-{{ x.nen_tang }}">{{ x.nen_tang|ten_nen_tang }}</span>
+          <div class="ng-nguon__chu">{% set lk = x.link|link_an_toan %}{% if lk %}<a href="{{ lk }}" target="_blank" rel="noopener noreferrer">{{ x.ten or x.dinh_danh }}</a>{% else %}<b>{{ x.ten or x.dinh_danh }}</b>{% endif %}
+          <div class="mo nho">{{ x.dinh_danh }}</div></div></div></td>
         <td class="nho">{{ x.ly_do }}</td>
         <td class="so">{{ x.so_bai|so_vn }}</td>
         <td class="so">{{ x.thao_luan|so_vn }}</td>
@@ -159,7 +191,7 @@
         {% if ql %}
         <td>
           <div class="cum-nut">
-            <form method="post" action="/de-xuat/{{ x.id }}/duyet" class="hang">
+            <form method="post" action="/de-xuat/{{ x.id }}/duyet" class="hang ng-duyet">
               <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
               <select name="loai" aria-label="Loại nguồn">{% for k, v in LOAI_NGUON.items() %}<option value="{{ k }}"{% if k == 'kol' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select>
               <button class="nut nut--nho" type="submit">Duyệt</button>
@@ -181,7 +213,7 @@
   {% endif %}
 </section>
 {% else %}
-<div class="the-khoi cach-duoi"><p>Chưa có dự án nào.{% if not ql %} Nhờ người quản lý thêm dự án.{% endif %}</p></div>
+<div class="the-khoi cach-duoi"><p class="trong">Chưa có dự án nào.{% if not ql %} Nhờ người quản lý thêm dự án.{% endif %}</p></div>
 {% endif %}
 
 {% if ql %}
@@ -197,9 +229,8 @@
       <label class="o rong">Từ loại trừ (tuỳ chọn) <input type="text" name="tu_loai_tru"></label>
       <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000" placeholder="vd HAPAS — thương hiệu túi xách, trang sức Việt Nam"></textarea></label>
       <label class="o"><span><input type="checkbox" name="dang_bat" value="1" checked> Bật ngay</span></label>
-      <div><button class="nut" type="submit">Thêm dự án</button></div>
+      <div class="cum-nut"><button class="nut" type="submit">Thêm dự án</button><button type="button" class="goi-y" data-goi-y="Trần tháng mặc định 5 USD — đổi ở trang Ngân sách.">i</button></div>
     </form>
-    <p class="ghi-chu">Trần tháng mặc định 5 USD — đổi ở trang Ngân sách.</p>
   </details>
 </section>
 {% endif %}

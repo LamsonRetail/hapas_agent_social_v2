@@ -10,10 +10,10 @@
 {% macro o_usd(uoc, y_dinh, so_bai, gia) %}{% if not y_dinh %}tắt{% elif not so_bai %}tắt (0 bài){% elif not gia %}miễn phí{% else %}{{ uoc|usd_vn(3) }}{% endif %}{% endmacro %}
 {% macro lop_usd(y_dinh, so_bai, gia) %}{% if not y_dinh or not so_bai %} ns-tat-chu{% elif not gia %} ns-mien-phi{% endif %}{% endmacro %}
 
-<div class="ns-dau">
-  <div>
-    <h1>Ngân sách theo dõi — tháng {{ thang }}</h1>
-    <p class="ns-tom">Mark áp trần thấp hơn giữa trần dự án và trần platform, chạm trần thì dừng quét. Đã tiêu là tiền Apify thật tháng này; dự báo giữ nguyên cấu hình. YouTube miễn phí, trần mỗi lượt đặt ở console platform.</p>
+{% set muc = namespace(so=0) %}
+<div class="dau-muc">
+  <div class="dau-muc__chu">
+    <div class="dau-muc__tieu-de"><h1>Ngân sách theo dõi — tháng {{ thang }}</h1><button type="button" class="goi-y" data-goi-y="Mark áp trần thấp hơn giữa trần dự án và trần platform, chạm trần thì dừng quét. Đã tiêu là tiền Apify thật tháng này; dự báo giữ nguyên cấu hình. YouTube miễn phí, trần mỗi lượt đặt ở console platform.">i</button></div>
   </div>
   {% if dong|length > 1 %}
   <form method="get" action="/ngan-sach" class="hang">
@@ -33,7 +33,8 @@
 
 {% if dong|length > 1 or (dong and not chon) %}
 <section class="the-khoi cach-duoi" aria-labelledby="ns-cac-du-an">
-  <div class="tieu-de-khoi"><h2 id="ns-cac-du-an">Tất cả dự án</h2><span class="mo nho">Bấm tên để xem chi tiết và cấu hình.</span></div>
+  {% set muc.so = muc.so + 1 %}
+  <div class="muc"><span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span><h2 class="muc__ten" id="ns-cac-du-an">Tất cả dự án</h2></div>
   <div class="cuon-ngang">
   <table class="ns-cac-du-an">
     <thead><tr><th>Dự án</th><th class="so">Trần hiệu lực</th><th class="so">Đã tiêu</th><th class="so">Dự báo cả tháng</th><th>Tình trạng</th></tr></thead>
@@ -63,10 +64,12 @@
 {% set w_du_bao = 100.0 * db.du_bao_thang / thang_do %}
 {% set w_tran = 100.0 * db.tran / thang_do %}
 <section class="the-khoi cach-duoi ns-tong" aria-labelledby="ns-tong-tieu-de">
-  <div class="ns-tong__dau">
-    <h2 id="ns-tong-tieu-de">{{ d.ten }} <span class="mo nho">{{ d.ma }}</span>{% if not d.dang_bat %} <span class="the">đang tắt</span>{% endif %}</h2>
-    {% if db.vuot %}<span class="the the--loi ns-pill">Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD</span>
-    {% else %}<span class="the the--tot ns-pill">Trong trần</span>{% endif %}
+  {% set muc.so = muc.so + 1 %}
+  <div class="muc">
+    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <h2 class="muc__ten" id="ns-tong-tieu-de">{{ d.ten }}</h2><span class="the">{{ d.ma }}</span>{% if not d.dang_bat %} <span class="the">đang tắt</span>{% endif %}
+    <span class="muc__phai">{% if db.vuot %}<span class="the the--loi ns-pill">Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD</span>
+    {% else %}<span class="the the--tot ns-pill">Trong trần</span>{% endif %}</span>
   </div>
   <div class="ns-tong__than">
     <div>
@@ -148,8 +151,13 @@
   <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/cau-hinh" id="ns-form">
   <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
   {% endif %}
+  {% set muc.so = muc.so + 1 %}
   <div class="ns-ch__dau">
-    <h2 id="ns-ch-tieu-de">Thu thập mỗi lượt /theodoi</h2>
+    <div class="muc ns-ch__muc">
+      <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+      <h2 class="muc__ten" id="ns-ch-tieu-de">Thu thập mỗi lượt /theodoi</h2>
+      <button type="button" class="goi-y" data-goi-y="{% if ql %}Ô trống, viền đứt = theo mặc định dự án; bình luận mỗi bài 0 = cào hết. USD là mức tối đa mỗi lượt.{% else %}USD là mức tối đa mỗi lượt; chỉ người quản lý sửa được.{% endif %}">i</button>
+    </div>
     {% if ql %}
     <div class="ns-mau" role="group" aria-label="Mẫu cấu hình nhanh">
       <span class="mo nho">Mẫu nhanh</span>
@@ -159,7 +167,7 @@
     </div>
     {% endif %}
   </div>
-  <p class="ghi-chu ns-ch__tom">{% if ql %}<span class="ns-vd" aria-hidden="true"></span> Ô trống, viền đứt = theo mặc định dự án; bình luận mỗi bài 0 = cào hết. USD là mức tối đa mỗi lượt.{% else %}USD là mức tối đa mỗi lượt; chỉ người quản lý sửa được.{% endif %}{% if not d.tu_khoa %} Dự án chưa có từ khoá nên đang tìm theo tên dự án — <a href="/nguon?du_an={{ d.ma|urlencode }}">thêm từ khoá ở trang Nguồn</a>.{% endif %}</p>
+  {% if ql or not d.tu_khoa %}<p class="ghi-chu ns-ch__tom">{% if ql %}<span class="ns-vd" aria-hidden="true"></span> = mặc định dự án{% endif %}{% if not d.tu_khoa %}<span class="the the--canh">Dự án chưa có từ khoá nên đang tìm theo tên dự án — <a href="/nguon?du_an={{ d.ma|urlencode }}">thêm từ khoá ở trang Nguồn</a></span>{% endif %}</p>{% endif %}
 
   <div class="ns-bang-boc">
   <table class="ns-bang">
@@ -267,7 +275,12 @@
 {% set ton = (db.nguon|selectattr('thang_usd', 'gt', 0)|list)[:5] %}
 <div class="ns-hai">
   <section class="the-khoi" aria-labelledby="ns-pt-tieu-de">
-    <div class="tieu-de-khoi"><h2 id="ns-pt-tieu-de">Dự báo theo nền tảng</h2><span class="mo nho">nguồn đang theo dõi</span></div>
+    {% set muc.so = muc.so + 1 %}
+    <div class="muc">
+      <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+      <h2 class="muc__ten" id="ns-pt-tieu-de">Dự báo theo nền tảng</h2>
+      <button type="button" class="goi-y" data-goi-y="Nguồn đang theo dõi. Phí khởi động ≈ 1 lần/nền tảng/ngày quét; giá đo 25/09/2026, đã nhân hệ số 1,3 như Mark.">i</button>
+    </div>
     {% if db.nen_tang %}
     <div class="cuon-ngang">
     <table class="ns-bang-pt">
@@ -282,13 +295,17 @@
       <tfoot><tr><th>Tổng</th><td class="so">{{ db.nen_tang|sum(attribute='so_nguon') }}</td><td class="so"><b>{{ db.con_lai|usd_vn(4) }}</b></td><td class="so">{{ db.thang_cau_hinh|usd_vn(4) }}</td><td></td><td></td></tr></tfoot>
     </table>
     </div>
-    <p class="ghi-chu">Phí khởi động ≈ 1 lần/nền tảng/ngày quét; giá đo 25/09/2026, đã nhân hệ số 1,3 như Mark.</p>
     {% else %}
     <p class="trong">Không có nguồn nào đang theo dõi — dự báo phần còn lại 0 USD.</p>
     {% endif %}
   </section>
   <section class="the-khoi" aria-labelledby="ns-ton-tieu-de">
-    <div class="tieu-de-khoi"><h2 id="ns-ton-tieu-de">Nguồn tốn nhất</h2><a class="nho" href="/nguon?du_an={{ d.ma|urlencode }}">Sửa nguồn →</a></div>
+    {% set muc.so = muc.so + 1 %}
+    <div class="muc">
+      <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+      <h2 class="muc__ten" id="ns-ton-tieu-de">Nguồn tốn nhất</h2>
+      <a class="muc__phai nho" href="/nguon?du_an={{ d.ma|urlencode }}">Sửa nguồn →</a>
+    </div>
     {% if ton %}
     <ul class="ns-top">
       {% for x in ton %}
@@ -309,7 +326,12 @@
 
 {% if du_an %}
 <section class="the-khoi" aria-labelledby="ns-ls-tieu-de">
-  <div class="tieu-de-khoi"><h2 id="ns-ls-tieu-de">Lịch sử lượt quét — {{ du_an.ten }}</h2><span class="mo nho">{{ tong|so_vn }} lượt</span></div>
+  {% set muc.so = muc.so + 1 %}
+  <div class="muc">
+    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <h2 class="muc__ten" id="ns-ls-tieu-de">Lịch sử lượt quét — {{ du_an.ten }}</h2>
+    <span class="muc__phai muc__phu">{{ tong|so_vn }} lượt</span>
+  </div>
   {% if luot %}
   <div class="cuon-ngang">
   <table class="ns-ls">

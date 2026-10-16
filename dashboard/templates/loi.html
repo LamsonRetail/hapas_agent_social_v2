@@ -3,12 +3,13 @@
 {% block noi_dung %}
 <div class="trang-dang-nhap">
   <div class="the-khoi">
+    <span class="trang-dang-nhap__dau trang-dang-nhap__dau--loi" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.2M12 17h.01"/></svg></span>
     <h1>{{ tieu_de }}</h1>
     <p>{{ thong_diep }}</p>
     {% if dang_nhap_lai %}
     <p><a class="nut" href="/dang-nhap">Đăng nhập lại</a></p>
     {% else %}
-    <p><a href="/">Về trang Chỉ số</a></p>
+    <p><a class="nut nut--nhe" href="/">Về trang Chỉ số</a></p>
     {% endif %}
   </div>
 </div>
