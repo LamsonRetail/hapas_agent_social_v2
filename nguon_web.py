@@ -73,6 +73,10 @@ BOC_MAC_DINH = 10          # trang tối đa đọc qua actor dự phòng mỗi 
 BOC_BO_NHO = 4096
 BOC_USD_MOI_GIAY = 0.00026
 BOC_GIAY_TOI_THIEU = 90
+BOC_HE_SO_AN_TOAN = 1.5
+#: Trang đã thử đọc qua actor dự phòng: không thử lại trong chừng này ngày (review 16/10 — trang
+#: bị loại vì không ngày / quá cũ / đọc hỏng không vào sổ "đã loại", sẽ bị đọc trả tiền mỗi lượt).
+BOC_NHO_NGAY = 14
 TOI_DA_TU_GOOGLE = 32      # Google bỏ qua từ thứ 33 trở đi của câu tìm
 TOI_DA_TAI = 60            # trang tải mỗi lượt
 NGAY_GIU = 35              # như `theo_doi.NGAY_GIU`
@@ -83,6 +87,7 @@ UA = "Mozilla/5.0 (compatible; HapasListeningBot/0.1; +https://social.hapas.vn)"
 UA_ROBOTS = "HapasListeningBot"
 BYTE_TOI_DA = 3_000_000
 GIAY_KET_NOI, GIAY_DOC = 5, 15
+GIAY_TRANG_TOI_DA = 25     # đồng hồ tối đa cho MỘT trang (cả chuyển hướng + đọc thân)
 NGHI_MOI_MIEN = 1.5        # giây giữa hai lần tải cùng một miền
 _CHUA_GIAY = 10.0          # còn ít hơn thì thôi tải trang, dùng đoạn trích Google
 
@@ -110,9 +115,21 @@ _DUONG_DIEN_DAN = re.compile(r"/(threads?|t|topic|f|forums?|dien-dan|showthread)
 
 
 # ───────────────────────────── URL ─────────────────────────────
+def _tach(url) -> urllib.parse.SplitResult | None:
+    """`urlsplit` không ném: URL hỏng ("http://[x", ký tự lạ) -> None (review 16/10: một link
+    hỏng từ Google không được làm vỡ cả lượt)."""
+    try:
+        p = urllib.parse.urlsplit(str(url or "").strip())
+        p.hostname  # noqa: B018 — ép kiểm phần máy chủ (IPv6 hỏng ném ở đây)
+        return p
+    except ValueError:
+        return None
+
+
 def mien(url: str) -> str:
-    """Tên miền chuẩn: chữ thường, bỏ www./m./amp. ở đầu."""
-    h = (urllib.parse.urlsplit(url or "").hostname or "").lower().rstrip(".")
+    """Tên miền chuẩn: chữ thường, bỏ www./m./amp. ở đầu. URL hỏng -> ""."""
+    p = _tach(url)
+    h = ((p.hostname if p else "") or "").lower().rstrip(".")
     return re.sub(r"^(www\d?|m|amp|mobile)\.", "", h)
 
 
@@ -123,8 +140,8 @@ def _thuoc(m: str, ds) -> bool:
 def url_chuan(url: str) -> str:
     """URL chuẩn để chống trùng: https, miền chuẩn, bỏ tham số theo dõi/fragment, bỏ '/' cuối.
     m.cafef.vn/x?utm_source=a và https://cafef.vn/x/ là MỘT bài."""
-    p = urllib.parse.urlsplit((url or "").strip())
-    if p.scheme not in ("http", "https") or not p.hostname:
+    p = _tach(url)
+    if p is None or p.scheme not in ("http", "https") or not p.hostname:
         return ""
     q = sorted((k, v) for k, v in urllib.parse.parse_qsl(p.query, keep_blank_values=True)
                if not _THAM_SO_BO.match(k))
@@ -148,8 +165,9 @@ def kieu_trang(url: str, kieu_ld: str = "") -> str:
     m = mien(url)
     if _thuoc(m, MIEN_BAO):
         return "bao"
+    p = _tach(url)
     if _thuoc(m, MIEN_DIEN_DAN) or kieu_ld == "DiscussionForumPosting" \
-            or _DUONG_DIEN_DAN.search(urllib.parse.urlsplit(url).path + "/"):
+            or _DUONG_DIEN_DAN.search((p.path if p else "") + "/"):
         return "dien_dan"
     if _thuoc(m, MIEN_MXH_KHAC):
         return "mxh_khac"
@@ -180,7 +198,9 @@ def _ly_do_bo_url(url: str, nha: list[str]) -> str:
         return "tmdt"
     if _thuoc(m, nha):
         return "nha"
-    if urllib.parse.urlsplit(url).path.lower().endswith(_DUOI_TEP):
+    if not url_chuan(url):
+        return "url_hong"
+    if (_tach(url).path or "").lower().endswith(_DUOI_TEP):
         return "tep"
     return ""
 
@@ -392,10 +412,13 @@ def doc_serp(items: list, bay_gio: datetime.datetime | None = None) -> list[dict
             link = str(r.get("link") or r.get("url") or "")
             if not link.startswith(("http://", "https://")):
                 continue
-            ra.append({"link": link, "tieu_de": str(r.get("title") or "")[:300],
-                       "trich": str(r.get("snippet") or r.get("description") or "")[:500],
-                       "ngay": ngay_serp(r.get("date") or r.get("published"), bay_gio),
-                       "truy_van": q[:200], "vi_tri": r.get("position")})
+            try:                         # dòng hỏng (ngày lạ, kiểu lạ) bỏ riêng dòng đó
+                ra.append({"link": link, "tieu_de": str(r.get("title") or "")[:300],
+                           "trich": str(r.get("snippet") or r.get("description") or "")[:500],
+                           "ngay": ngay_serp(r.get("date") or r.get("published"), bay_gio),
+                           "truy_van": q[:200], "vi_tri": r.get("position")})
+            except (ValueError, TypeError, OverflowError):
+                continue
     return ra
 
 
@@ -553,7 +576,7 @@ def boc_trang(html_text: str, url: str = "") -> dict:
     for raw in p.ld:
         try:
             _duyet_ld(json.loads(raw.strip(), strict=False), ld)
-        except ValueError:
+        except (ValueError, RecursionError):     # JSON-LD hỏng / lồng quá sâu
             continue
     o = ld[0] if ld else {}
     kieu = o.get("@type")
@@ -575,14 +598,24 @@ def boc_trang(html_text: str, url: str = "") -> dict:
     sua = ngay_iso(o.get("dateModified") or m.get("article:modified_time")
                    or m.get("datemodified"))
     tieu_de = str(o.get("headline") or m.get("og:title") or p.title or "").strip()
-    can = p.canonical if mien(p.canonical) == mien(url) else ""
+    # Canonical khác miền (giả mạo) hoặc trỏ về TRANG CHỦ (nhiều CMS đặt sai) thì bỏ.
+    pc = _tach(p.canonical)
+    can = (p.canonical if pc and mien(p.canonical) == mien(url)
+           and (pc.path or "/").strip("/") else "")
     return {"tieu_de": re.sub(r"\s+", " ", tieu_de)[:300], "noi_dung": than,
             "dang_luc": dang, "sua_luc": sua,
             "tac_gia": (_ten(o.get("author")) or _ten(m.get("author"))
                         or _ten(m.get("article:author")))[:200],
             "ten_trang": (m.get("og:site_name") or _ten(o.get("publisher")) or mien(url))[:200],
             "kieu_ld": kieu, "so_binh_luan": _so_bl(o) if o else None, "canonical": can,
-            "lien_ket_chinh": [urllib.parse.urljoin(url, h) for h, c in p.lien_ket if c]}
+            "lien_ket_chinh": [x for x in (_noi(url, h) for h, c in p.lien_ket if c) if x]}
+
+
+def _noi(goc: str, h: str) -> str:
+    try:
+        return urllib.parse.urljoin(goc, h)
+    except ValueError:
+        return ""
 
 
 # ───────────────────────────── nhắc brand ─────────────────────────────
@@ -647,10 +680,15 @@ def _ip_noi_bo(ip: str) -> bool:
 def url_an_toan(url: str, phan_giai=None) -> bool:
     """Chỉ http/https, cổng mặc định, miền phân giải ra IP công khai — URL do Google trả về
     không được dẫn bot vào mạng nội bộ của VPS."""
-    p = urllib.parse.urlsplit(url or "")
-    if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password:
+    p = _tach(url)
+    if p is None or p.scheme not in ("http", "https") or not p.hostname or p.username \
+            or p.password:
         return False
-    if p.port not in (None, 80, 443):
+    try:
+        cong = p.port                    # ":99999" ném ValueError
+    except ValueError:
+        return False
+    if cong not in (None, 80, 443):
         return False
     h = p.hostname
     try:
@@ -669,6 +707,9 @@ def tai_http(url: str, han: float | None = None) -> tuple[int, str, str]:
     """GET một trang -> (mã HTTP | 0 khi lỗi mạng | -1 khi URL không an toàn, html, url cuối).
     Tự theo ≤4 lần chuyển hướng, kiểm an toàn từng bước; chỉ đọc text/html, ≤3 MB."""
     import requests
+    het = time.monotonic() + GIAY_TRANG_TOI_DA
+    if han is not None:
+        het = min(het, han)
     cur = url
     for _ in range(5):
         if not url_an_toan(cur):
@@ -682,7 +723,9 @@ def tai_http(url: str, han: float | None = None) -> tuple[int, str, str]:
             return 0, "", cur
         with r:
             if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
-                cur = urllib.parse.urljoin(cur, r.headers["location"])
+                cur = _noi(cur, r.headers["location"])
+                if not cur:
+                    return -1, "", url
                 continue
             loai = r.headers.get("content-type", "").lower()
             if r.status_code != 200 or ("html" not in loai and "text/plain" not in loai):
@@ -694,6 +737,10 @@ def tai_http(url: str, han: float | None = None) -> tuple[int, str, str]:
                     n += len(ch)
                     if n >= BYTE_TOI_DA:
                         break
+                    if time.monotonic() > het:
+                        # Máy chủ nhỏ giọt (mỗi khối kịp trước timeout đọc): hạn đồng hồ của
+                        # trang và của lượt, không đợi tới 3 MB.
+                        return 0, "", cur
             except requests.RequestException:
                 return 0, "", cur
             m = re.search(r"charset=([\w-]+)", loai)
@@ -712,7 +759,9 @@ class Robots:
         self.tai, self.nho = tai, {}
 
     def cho_phep(self, url: str) -> bool:
-        p = urllib.parse.urlsplit(url)
+        p = _tach(url)
+        if p is None or not p.netloc:
+            return False
         goc = f"{p.scheme}://{p.netloc}"
         if goc not in self.nho:
             ma, txt, _ = self.tai(goc + "/robots.txt")
@@ -743,8 +792,9 @@ def payload_boc(urls: list[str]) -> dict:
 
 
 def giay_boc(tran: float) -> float:
-    """Thời gian chạy tối đa của actor dự phòng để tiền (theo tài nguyên) không vượt `tran`."""
-    return tran / BOC_USD_MOI_GIAY
+    """Thời gian chạy tối đa của actor dự phòng để tiền (theo tài nguyên) không vượt `tran`:
+    chia thêm hệ số an toàn `BOC_HE_SO_AN_TOAN` (giá giây đo một lần, proxy/khởi động dao động)."""
+    return tran / (BOC_USD_MOI_GIAY * BOC_HE_SO_AN_TOAN)
 
 
 def _boc_mac_dinh(urls: list[str], han: float, tran: float):
@@ -756,6 +806,13 @@ def _boc_mac_dinh(urls: list[str], han: float, tran: float):
 
 def trang_tu_boc(it: dict) -> tuple[str, dict | None]:
     """Một item của actor dự phòng -> (URL chuẩn, trang đã bóc | None khi trang vẫn hỏng)."""
+    try:
+        return _trang_tu_boc(it)
+    except Exception:  # noqa: BLE001 — một item hỏng không làm mất cả lô đã trả tiền
+        return url_chuan(str(it.get("url") or "")), None
+
+
+def _trang_tu_boc(it: dict) -> tuple[str, dict | None]:
     url = str(it.get("url") or (it.get("crawl") or {}).get("loadedUrl") or "")
     ma = (it.get("crawl") or {}).get("httpStatusCode")
     if not url or (ma is not None and ma != 200):
@@ -821,8 +878,8 @@ def thanh_dong(d: dict, dt: datetime.datetime, sac_thai: str | None = None,
 def _pheu_moi() -> dict:
     return {k: 0 for k in ("serp", "trung", "mxh", "tmdt", "nha", "tep", "url_hong", "da_co",
                            "da_loai_truoc", "robots_chan", "tai_loi", "boc_du_phong",
-                           "boc_duoc", "chi_trich", "khong_ngay", "qua_cu", "khong_nhac",
-                           "loai_tru", "spam", "giu")}
+                           "boc_duoc", "da_boc_truoc", "chi_trich", "khong_ngay", "qua_cu",
+                           "khong_nhac", "loai_tru", "spam", "trang_hong", "giu")}
 
 
 def thu_thap(du_an: dict, *, tu: datetime.date | None = None, den: datetime.date | None = None,
@@ -831,20 +888,28 @@ def thu_thap(du_an: dict, *, tu: datetime.date | None = None, den: datetime.date
              ngu=time.sleep, bay_gio: datetime.datetime | None = None,
              tu_dong_ho=time.monotonic, them_tu: list[str] | None = None,
              tu_giu: datetime.datetime | None = None, da_biet=None,
-             boc=None, boc_toi_da: int = 0) -> tuple[list, dict]:
+             boc=None, boc_toi_da: int = 0, da_boc: set[str] | None = None,
+             so: dict | None = None) -> tuple[list, dict]:
     """MỘT lượt web của dự án -> (hits `(d, dt)` đã qua lọc luật, thống kê phễu).
 
     Bước: câu tìm (từ khoá + `them_tu`) -> actor Google (trần USD) -> chống trùng URL chuẩn ->
     bỏ MXH/sàn/miền nhà -> `da_biet(khoá)` (bài đã có trong kho / đã bị loại: không tải lại) ->
-    robots.txt -> tải + bóc trang (nghỉ giữa hai lần cùng miền) -> trang không đọc được (403,
-    lỗi mạng) mà robots CHO PHÉP: đọc lại qua actor dự phòng (≤ `boc_toi_da` trang, trần trong
-    phần ngân sách còn lại) -> vẫn không được thì đoạn trích Google -> ngày (trang > Google) từ
-    `tu_giu` (mặc định `NGAY_GIU` ngày) -> nhắc từ khoá ở tiêu đề/thân -> từ loại trừ + spam.
-    Bước AI + ghi kho để `theo_doi._giu_tu_khoa` làm (như mọi nền tảng).
+    robots.txt -> tải + bóc trang (nghỉ giữa hai lần cùng miền; chuyển hướng sang miền khác thì
+    kiểm robots của miền mới) -> trang không đọc được (403, lỗi mạng) mà robots CHO PHÉP và chưa
+    thử đọc dự phòng trong `BOC_NHO_NGAY` ngày (`da_boc`): đọc lại qua actor dự phòng (≤
+    `boc_toi_da` trang, trần trong phần ngân sách còn lại) -> vẫn không được thì đoạn trích
+    Google -> ngày (trang > Google) từ `tu_giu` (mặc định `NGAY_GIU` ngày) -> nhắc từ khoá + từ
+    loại trừ xét trên TIÊU ĐỀ + ĐOẠN quanh chỗ nhắc (không xét cả thân bài) -> spam. Bước AI +
+    ghi kho để `theo_doi._giu_tu_khoa` làm (như mọi nền tảng).
 
-    `tk["usd_tim"]`, `tk["usd_boc"]`: tiền theo sổ (giá thật × đơn vị về) của hai actor;
-    `tk["run_ids"]`: run id để chốt tiền thật. `chay_actor`/`boc`/`tai`/`tai_robots`/`ngu`/
-    `da_biet` tiêm được để thử không cần mạng."""
+    Một trang hỏng (URL lạ, HTML/JSON-LD hỏng) chỉ mất trang đó (`pheu.trang_hong`), không làm
+    vỡ lượt. `so`: dict của bên gọi để nhận thống kê NGAY KHI có (tiền, run id) — kể cả khi hàm
+    vẫn ném lỗi bất ngờ, bên gọi vẫn chốt được tiền đã tiêu.
+
+    `tk["usd_tim"]`, `tk["usd_boc"]`: tiền theo sổ (giá thật × trang Google về; actor dự phòng
+    tính nguyên trần tới khi chốt theo run id); `tk["run_ids"]`; `tk["da_boc_moi"]`: khoá trang
+    vừa gửi actor dự phòng (bên gọi ghi sổ `BOC_NHO_NGAY` ngày); `tk["bi_loai"]`: (khoá, lý do,
+    ngày) bị loại theo luật — gồm cả khoá URL Google lẫn khoá canonical khi khác nhau."""
     import apify_tool as A
     import loc_rac
     bay_gio = bay_gio or datetime.datetime.now(_VN)
@@ -853,10 +918,12 @@ def thu_thap(du_an: dict, *, tu: datetime.date | None = None, den: datetime.date
     han = han if han is not None else tu_dong_ho() + 600
     tai = tai or (lambda u: tai_http(u, han))
     robots = Robots(tai_robots or tai)
-    tk: dict = {"truy_van": [], "uoc_usd": 0.0, "tran_usd": 0.0, "run_id": None, "run_ids": [],
-                "usd_tim": 0.0, "usd_boc": 0.0, "trang_thai": "", "loi": "", "ghi_chu": [],
-                "bi_loai": [], "pheu": _pheu_moi()}
+    tk: dict = so if so is not None else {}
+    tk.update({"truy_van": [], "uoc_usd": 0.0, "tran_usd": 0.0, "run_id": None, "run_ids": [],
+               "usd_tim": 0.0, "usd_boc": 0.0, "trang_thai": "", "loi": "", "ghi_chu": [],
+               "bi_loai": [], "da_boc_moi": [], "pheu": _pheu_moi()})
     ph = tk["pheu"]
+    da_boc = set(da_boc or ())
     goc_tu = [str(x) for x in du_an.get("tu_khoa") or [] if str(x).strip()] or [du_an["ten"]]
     tu_khoa = rut_gon_tu_khoa([*goc_tu, *(them_tu or [])]) or goc_tu
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
@@ -867,6 +934,7 @@ def thu_thap(du_an: dict, *, tu: datetime.date | None = None, den: datetime.date
     tran = tran_luot(tk["uoc_usd"], con_usd)
     tk["tran_usd"] = tran
     if not q or not tran:
+        # Không chạy gì: trạng thái "bo_qua" — bên gọi KHÔNG dời mốc web (review 16/10, L4).
         tk["trang_thai"] = "bo_qua: " + ("không có từ khoá" if not q else "hết ngân sách tháng")
         return [], tk
     try:
@@ -876,66 +944,103 @@ def thu_thap(du_an: dict, *, tu: datetime.date | None = None, den: datetime.date
         tk["run_id"] = (meta or {}).get("run_id")
     except Exception as e:  # noqa: BLE001 — lỗi actor: báo trong phễu, không làm hỏng lượt lớn
         tk["trang_thai"], tk["loi"] = "loi", _che(f"{getattr(e, 'ma', type(e).__name__)}: {e}")
+        em = getattr(e, "meta", None) or {}
+        if em.get("run_id"):             # run đã tạo rồi mới hỏng: tiền chưa biết -> nguyên trần
+            tk["run_ids"].append(em["run_id"])
+            tk["usd_tim"] = tran
         return [], tk
     if tk["run_id"]:
         tk["run_ids"].append(tk["run_id"])
     # Sổ theo GIÁ THẬT: actor tính 0,0005 USD mỗi item (= một trang kết quả) đã về.
-    tk["usd_tim"] = round(sum(1 for it in items or [] if isinstance(it, dict)) * GIA_TRANG, 4)
+    items = items if isinstance(items, list) else []
+    tk["usd_tim"] = round(sum(1 for it in items if isinstance(it, dict)) * GIA_TRANG, 4)
     serp = doc_serp(items, bay_gio)
     ph["serp"] = len(serp)
     moc = tu_giu or max(datetime.datetime.combine(tu, datetime.time(), _VN),
                         bay_gio - datetime.timedelta(days=NGAY_GIU))
     het = datetime.datetime.combine(den + datetime.timedelta(days=1), datetime.time(), _VN)
 
+    def hong(g, e) -> None:
+        ph["trang_hong"] += 1
+        if len(tk["ghi_chu"]) < 5:
+            tk["ghi_chu"].append(_che(f"trang hỏng ({mien(g.get('link')) or '?'}): "
+                                      f"{type(e).__name__}"))
+
+    def hoi_biet(khoa: list[str]) -> dict:
+        if not da_biet or not khoa:
+            return {}
+        try:
+            return da_biet(khoa) or {}
+        except Exception as e:  # noqa: BLE001 — không hỏi được: coi như chưa biết
+            tk["ghi_chu"].append(_che(f"không đọc được sổ bài đã biết: {type(e).__name__}"))
+            return {}
+
     # 1) lọc URL + chống trùng (trước mọi lần tải)
     cho: list[dict] = []
     thay: set[str] = set()
     for g in serp:
-        ly = _ly_do_bo_url(g["link"], nha)
-        if ly:
-            ph[ly] += 1
+        try:
+            ly = _ly_do_bo_url(g["link"], nha)
+            if ly:
+                ph[ly] += 1
+                continue
+            k = ma_web(g["link"])
+        except Exception as e:  # noqa: BLE001
+            hong(g, e)
             continue
-        k = ma_web(g["link"])
         if k in thay:
             ph["trung"] += 1
             continue
         thay.add(k)
         cho.append(g)
-    biet = da_biet([f"{NEN_TANG}:{ma_web(g['link'])}" for g in cho]) if (da_biet and cho) else {}
+    biet = hoi_biet([khoa_web(g["link"]) for g in cho])
     con_lai = []
     for g in cho:
-        ly = biet.get(f"{NEN_TANG}:{ma_web(g['link'])}")
+        ly = biet.get(khoa_web(g["link"]))
         if ly in ("da_co", "da_loai_truoc"):
             ph[ly] += 1                  # đã có / đã loại: không tải lại, không trả tiền đọc
         else:
             con_lai.append(g)
 
-    # 2) tải HTTP thường
+    # 2) tải HTTP thường — mỗi trang trong try riêng
     lan_cuoi: dict[str, float] = {}
     da_tai = 0
     doc: list[list] = []             # [kết quả Google, trang | None, ứng viên đọc dự phòng?]
     for g in con_lai:
         trang, ung_vien = None, False
-        if tu_dong_ho() < han - _CHUA_GIAY and da_tai < TOI_DA_TAI:
-            if not robots.cho_phep(g["link"]):
-                ph["robots_chan"] += 1
-            else:
-                m = mien(g["link"])
-                nghi = NGHI_MOI_MIEN - (tu_dong_ho() - lan_cuoi.get(m, -1e9))
-                if nghi > 0:
-                    ngu(nghi)
-                ma, h, cuoi = tai(g["link"])
-                lan_cuoi[m] = tu_dong_ho()
-                da_tai += 1
-                if ma == 200 and h:
-                    trang = boc_trang(h, cuoi)
-                elif ma != -1:           # -1: URL không an toàn — không đọc bằng đường nào
-                    ph["tai_loi"] += 1
-                    ung_vien = True      # robots cho phép, chỉ bị chặn/lỗi
+        try:
+            if tu_dong_ho() < han - _CHUA_GIAY and da_tai < TOI_DA_TAI:
+                if not robots.cho_phep(g["link"]):
+                    ph["robots_chan"] += 1
+                else:
+                    m = mien(g["link"])
+                    nghi = NGHI_MOI_MIEN - (tu_dong_ho() - lan_cuoi.get(m, -1e9))
+                    if nghi > 0:
+                        ngu(nghi)
+                    ma, h, cuoi = tai(g["link"])
+                    lan_cuoi[m] = tu_dong_ho()
+                    da_tai += 1
+                    if ma == 200 and h and mien(cuoi) != m and not robots.cho_phep(cuoi):
+                        ph["robots_chan"] += 1   # chuyển hướng sang miền khác cấm bot (L2)
+                    elif ma == 200 and h:
+                        trang = boc_trang(h, cuoi)
+                    elif ma != -1:       # -1: URL không an toàn — không đọc bằng đường nào
+                        ph["tai_loi"] += 1
+                        ung_vien = True  # robots cho phép, chỉ bị chặn/lỗi
+        except Exception as e:  # noqa: BLE001 — trang hỏng: giữ đoạn trích Google
+            hong(g, e)
+            trang, ung_vien = None, False
         doc.append([g, trang, ung_vien])
 
-    # 3) actor dự phòng cho trang bị chặn — ưu tiên trang mà Google đã thấy nhắc brand
-    ung = [x for x in doc if x[2]]
+    # 3) actor dự phòng cho trang bị chặn — ưu tiên trang mà Google đã thấy nhắc brand; bỏ trang
+    #    đã thử đọc dự phòng trong `BOC_NHO_NGAY` ngày (đọc lại cũng chặn/hỏng như cũ, tốn tiền).
+    ung = []
+    for x in doc:
+        if x[2]:
+            if khoa_web(x[0]["link"]) in da_boc:
+                ph["da_boc_truoc"] += 1
+            else:
+                ung.append(x)
     ung.sort(key=lambda x: not A._khop_tu_khoa(
         {"text": f"{x[0]['tieu_de']} {x[0]['trich']}"}, tu_khoa))
     ung = ung[:max(0, boc_toi_da)]
@@ -949,72 +1054,105 @@ def thu_thap(du_an: dict, *, tu: datetime.date | None = None, den: datetime.date
         ung = []
     if ung:
         ph["boc_du_phong"] = len(ung)
+        tk["da_boc_moi"] = [khoa_web(x[0]["link"]) for x in ung]
         theo: dict = {}
         try:
+            # Actor tính theo tài nguyên: sổ giữ NGUYÊN TRẦN tới khi chốt theo run id (M5).
+            tk["usd_boc"] = tran_boc
             items_b, meta_b = (boc or _boc_mac_dinh)([x[0]["link"] for x in ung], han, tran_boc)
             rid = (meta_b or {}).get("run_id")
             if rid:
                 tk["run_ids"].append(rid)
-            theo = dict(trang_tu_boc(it) for it in items_b or [] if isinstance(it, dict))
-            # Sổ: giá đo theo trang về, không thấp hơn thời gian chạy thật × giá theo giây.
-            tk["usd_boc"] = round(min(tran_boc, max(
-                len(items_b or []) * GIA_BOC,
-                float((meta_b or {}).get("giay") or 0) * BOC_USD_MOI_GIAY)), 4)
+            for it in items_b or []:
+                if isinstance(it, dict):
+                    k_b, t_b = trang_tu_boc(it)
+                    if k_b:
+                        theo[k_b] = t_b
         except Exception as e:  # noqa: BLE001 — dự phòng hỏng: về đoạn trích Google
             tk["ghi_chu"].append(_che(f"đọc dự phòng lỗi: {getattr(e, 'ma', type(e).__name__)}"
                                       f": {e}"))
             em = getattr(e, "meta", None) or {}
             if em.get("run_id"):
                 tk["run_ids"].append(em["run_id"])
-                tk["usd_boc"] = tran_boc         # không biết đã tiêu bao nhiêu: tính nguyên trần
         for x in ung:
             x[1] = theo.get(url_chuan(x[0]["link"]))
         ph["boc_duoc"] = sum(1 for x in ung if x[1] is not None)
 
-    # 4) xét từng bài
+    # 4) xét từng bài — khoá canonical cũng hỏi sổ "đã biết"
+    can_moi = {}
+    for g, trang, _u in doc:
+        try:
+            if trang is not None and trang.get("canonical"):
+                k2 = khoa_web(trang["canonical"])
+                if k2 != khoa_web(g["link"]):
+                    can_moi[k2] = None
+        except Exception:  # noqa: BLE001, S112 — canonical hỏng: bỏ qua canonical
+            continue
+    biet2 = hoi_biet(list(can_moi))
     hits: list = []
     for g, trang, _u in doc:
-        if trang is not None and trang.get("canonical"):
-            k2 = ma_web(trang["canonical"])
-            if k2 != ma_web(g["link"]) and k2 in thay:
-                ph["trung"] += 1
-                continue
-            thay.add(k2)
-            g = {**g, "link": url_chuan(trang["canonical"])}
-        if trang is None:
-            ph["chi_trich"] += 1
-            trang_xet = {"tieu_de": g["tieu_de"], "noi_dung": g["trich"]}
-        else:
-            trang_xet = trang
-        dt = trang_xet.get("dang_luc") if trang else None
-        if trang and kieu_trang(g["link"], trang.get("kieu_ld") or "") == "dien_dan":
-            dt = max([x for x in (dt, trang.get("sua_luc")) if x], default=None)
-        dt = dt or g.get("ngay")
-        if not dt:
-            ph["khong_ngay"] += 1
+        try:
+            x = _xet_bai(g, trang, tk, thay, biet2, moc, het, tu_khoa, loai_tru, nha, A, loc_rac)
+        except Exception as e:  # noqa: BLE001 — một bài hỏng không làm mất cả lượt
+            hong(g, e)
             continue
-        if not (moc <= dt < het):
-            ph["qua_cu"] += 1
-            continue
-        hay = {"text": f"{trang_xet.get('tieu_de') or ''}\n{trang_xet.get('noi_dung') or ''}"}
-        khoa = khoa_web(g["link"])
-        # Bị loại theo luật -> `tk["bi_loai"]` (bên gọi ghi sổ "đã loại"): lượt sau không tải lại,
-        # nhất là không trả tiền đọc dự phòng lại mỗi ngày cho cùng một trang bị chặn.
-        if not A._khop_tu_khoa(hay, tu_khoa):
-            ph["khong_nhac"] += 1
-            tk["bi_loai"].append((khoa, "khong_nhac", dt))
-            continue
-        if A._tu_loai_tru_khop(hay, loai_tru):
-            ph["loai_tru"] += 1
-            tk["bi_loai"].append((khoa, "loai_tru", dt))
-            continue
-        nhac = danh_gia_nhac(trang_xet, tu_khoa, nha)
-        d, dt = thanh_hit(g, trang, nhac, tu_khoa, dt)
-        if loc_rac.bai_spam(d["text"]):
-            ph["spam"] += 1
-            tk["bi_loai"].append((khoa, "spam", dt))
-            continue
-        hits.append((d, dt))
+        if x is not None:
+            hits.append(x)
     ph["giu"] = len(hits)
     tk["trang_thai"] = "xong"
     return hits, tk
+
+
+def _xet_bai(g, trang, tk, thay, biet2, moc, het, tu_khoa, loai_tru, nha, A, loc_rac):
+    """Một bài -> hit `(d, dt)` hoặc None (đã đếm vào phễu)."""
+    ph = tk["pheu"]
+    khoa_g = khoa_web(g["link"])
+    if trang is not None and trang.get("canonical"):
+        k2 = khoa_web(trang["canonical"])
+        if k2 != khoa_g:
+            if biet2.get(k2) in ("da_co", "da_loai_truoc"):
+                ph[biet2[k2]] += 1
+                return None
+            if ma_web(trang["canonical"]) in thay:
+                ph["trung"] += 1
+                return None
+            thay.add(ma_web(trang["canonical"]))
+            g = {**g, "link": url_chuan(trang["canonical"])}
+    khoa = khoa_web(g["link"])
+    cac_khoa = [khoa] + ([khoa_g] if khoa_g != khoa else [])
+    if trang is None:
+        ph["chi_trich"] += 1
+        trang_xet = {"tieu_de": g["tieu_de"], "noi_dung": g["trich"]}
+    else:
+        trang_xet = trang
+    dt = trang_xet.get("dang_luc") if trang else None
+    if trang and kieu_trang(g["link"], trang.get("kieu_ld") or "") == "dien_dan":
+        dt = max([x for x in (dt, trang.get("sua_luc")) if x], default=None)
+    dt = dt or g.get("ngay")
+    if not dt:
+        ph["khong_ngay"] += 1
+        return None
+    if not (moc <= dt < het):
+        ph["qua_cu"] += 1
+        return None
+    # Nhắc từ khoá + từ loại trừ xét trên TIÊU ĐỀ + ĐOẠN quanh chỗ nhắc (review 16/10, M3): cả
+    # thân bài thì từ khoá nhiều chữ "đủ mọi chữ" khớp bừa qua các đoạn xa nhau, và một chữ
+    # "guitar" ở cuối bài dài loại oan bài nhắc brand đàng hoàng.
+    than = trang_xet.get("noi_dung") or ""
+    doan = doan_trich(than, vi_tri_nhac(than, tu_khoa), truoc=120, sau=200, toi_da=5)
+    hay = {"text": f"{trang_xet.get('tieu_de') or ''}\n" + "\n".join(doan)}
+    if not A._khop_tu_khoa(hay, tu_khoa):
+        ph["khong_nhac"] += 1
+        tk["bi_loai"].extend((k, "khong_nhac", dt) for k in cac_khoa)
+        return None
+    if A._tu_loai_tru_khop(hay, loai_tru):
+        ph["loai_tru"] += 1
+        tk["bi_loai"].extend((k, "loai_tru", dt) for k in cac_khoa)
+        return None
+    nhac = danh_gia_nhac(trang_xet, tu_khoa, nha)
+    d, dt = thanh_hit(g, trang, nhac, tu_khoa, dt)
+    if loc_rac.bai_spam(d["text"]):
+        ph["spam"] += 1
+        tk["bi_loai"].extend((k, "spam", dt) for k in cac_khoa)
+        return None
+    return d, dt

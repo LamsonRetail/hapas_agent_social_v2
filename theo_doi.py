@@ -810,7 +810,9 @@ TK_TT_MOI_TRANG = 30         # = tiktok_api.TIM_MOI_TRANG
 #: Nền tảng TẮT khi `du_an.cau_hinh` chưa ghi `bat` cho nó (cả tìm từ khoá lẫn bình luận): thêm
 #: nền tảng mới không tự tiêu tiền khi deploy — chủ dự án bật trên trang Ngân sách. Nền tảng cũ
 #: vẫn mặc định BẬT như trước (theo cột tk_bat / bl_bat).
-MAC_DINH_TAT = ("threads",)
+#: Báo & Web (review 16/10, M2): chủ dự án duyệt cho RIÊNG HAPAS -> mặc định TẮT với mọi dự án;
+#: HAPAS bật bằng `du_an.cau_hinh.tu_khoa.web.bat = true` (deploy/lang-nghe/du-lieu-hapas-web-…).
+MAC_DINH_TAT = ("threads", "web")
 TK_IG_TOI_DA_TU = 2          # actor Instagram chạy MỘT lượt mỗi từ (phí khởi động mỗi lượt)
 TK_FB_TOI_DA = 20            # actor Facebook gói Free: 5 bài/lượt, mỗi từ một lượt, ≤20 bài
 TK_TOI_DA_TU = 50           # = số mục tối đa của ô từ khoá trên dashboard (không cắt thêm)
@@ -828,8 +830,8 @@ TK_YT_MOI_TRANG = 50         # search.list trả tối đa 50 video mỗi trang 
 # Báo & Web (16/10/2026, `nguon_web.py`, thiết kế ở docs/lang-nghe-web.md). Chủ dự án 16/10: BẬT
 # cho HAPAS, quét MỘT lượt/ngày (cửa sổ lùi 2 ngày); trong chiến dịch (`lich_quet` kiểu
 # chien_dich đang chạy) MỌI lượt đều tìm web, thêm khẩu hiệu chiến dịch làm từ khoá. Mặc định
-# BẬT (không nằm trong `MAC_DINH_TAT`) vì chủ dự án đã bật; vẫn dưới công tắc tổng `tk_bat`, trần
-# tháng dự án và trần console. `so_bai` = số kết quả Google mỗi câu tìm (10/trang); `boc` = trần
+# TẮT (`MAC_DINH_TAT`) — chủ dự án chỉ duyệt cho HAPAS (bật rõ trong cau_hinh); vẫn dưới công
+# tắc tổng `tk_bat`, trần tháng dự án và trần console. `so_bai` = số kết quả Google mỗi câu tìm (10/trang); `boc` = trần
 # trang đọc lại qua actor dự phòng mỗi lượt (0 = tắt). Giá chép sang `dashboard/chi_phi.py`.
 WEB_GIA_TRANG = W.GIA_TRANG          # 0,0005 USD / trang kết quả Google (10 link)
 WEB_GIA_BOC = W.GIA_BOC              # 0,009 USD / trang đọc qua website-content-crawler
@@ -1398,27 +1400,42 @@ def _tim_web(v, du_an: dict, luot: int, cfg: dict, tu: list[str], con: float, ha
     A._KHI_CO_RUN.set(lambda run, meta: _them_phan_tk(v, {
         "id": f"tk-web-{run.get('id')}", "nen_tang": "web", "run_id": run.get("id"),
         "actor": (meta or {}).get("actor"), "trang_thai": "dang_chay"}))
+    wk: dict = {}                    # `thu_thap` điền dần — lỗi bất ngờ vẫn đọc được tiền đã tiêu
+    hits: list = []
     try:
         hits, wk = W.thu_thap(
             {**du_an, "tu_khoa": tu}, tu=d_from.date(), den=bay_gio.astimezone(_VN).date(),
             so_trang=so_trang, con_usd=con, han=han_web, bay_gio=bay_gio, them_tu=khau_hieu,
             tu_giu=tu_pv, da_biet=_da_biet_web(ma, du_an, tu_web, tu_pv),
-            boc_toi_da=int(cfg.get("boc") or 0))
+            boc_toi_da=int(cfg.get("boc") or 0), da_boc=doc_da_boc(ma, bay_gio), so=wk)
+    except Exception as e:
+        # Review 16/10 (H1): lỗi bất ngờ của phần web KHÔNG được làm mất bài mạng xã hội đã trả
+        # tiền trong cùng lượt (chưa ghi kho, chưa dời mốc). Web ghi lỗi + tiền đã tiêu tới đó.
+        if type(e).__name__ == "MatQuyen":
+            raise
+        hits = []
+        wk.setdefault("pheu", W._pheu_moi())
+        wk["loi"] = A._che_token(f"lỗi bất ngờ {type(e).__name__}: {e}")[:150]
+        print(f"[theo_doi] web: {wk['loi']}", flush=True)
     finally:
         A._KHI_CO_RUN.set(None)
+        ghi_da_boc(ma, wk.get("da_boc_moi") or [], bay_gio)
     loi = wk.get("loi") or None
+    bo_qua = str(wk.get("trang_thai") or "").startswith("bo_qua")
     for ph in _phan_tk(v):
         if ph.get("nen_tang") == "web" and ph.get("run_id") and ph.get("trang_thai") == "dang_chay":
             v.cap_nhat_phan(ph, trang_thai="xong" if loi is None else "loi")
     tien = round(float(wk.get("usd_tim") or 0) + float(wk.get("usd_boc") or 0), 4)
     _them_phan_tk(v, {"id": "tk-web", "loai": "moc", "nen_tang": "web",
-                      "trang_thai": "xong" if loi is None else "loi", "usd_so": tien,
-                      "so_item": int(wk["pheu"].get("serp") or 0),
+                      "trang_thai": "loi" if (loi is not None or bo_qua) else "xong",
+                      **({"ma": "NGAN_SACH"} if bo_qua else {}), "usd_so": tien,
+                      "so_item": int((wk.get("pheu") or {}).get("serp") or 0),
                       "cua_so": {"tu": d_from.isoformat(timespec="minutes"), "ngay": ngay,
                                  "ly_do": ly_cs}})
     tk["ghi_chu"].extend(f"tìm Báo & Web: {x}" for x in wk.get("ghi_chu") or [])
-    if loi is not None:
-        tk["ghi_chu"].append(f"tìm Báo & Web: {loi}")
+    if loi is not None or bo_qua:
+        # Lỗi / hết ngân sách: KHÔNG dời mốc web (L4) — lượt sau tìm lại đúng khoảng này.
+        tk["ghi_chu"].append(f"tìm Báo & Web: {loi or wk.get('trang_thai')}")
         return tien, ([], tu_web, [])
     w = wk["pheu"]
     ph_p = tk["pheu"]["web"] = _pheu_moi(ngay, ly_cs)
@@ -1427,12 +1444,62 @@ def _tim_web(v, du_an: dict, luot: int, cfg: dict, tu: list[str], con: float, ha
                 da_loai_truoc=w["da_loai_truoc"], loai_tru=w["loai_tru"], spam=w["spam"],
                 khong_nhac=w["khong_nhac"], trung=w["trung"], cap_nhat=w["da_co"],
                 web={k: w[k] for k in ("mxh", "tmdt", "nha", "robots_chan", "tai_loi",
-                                       "boc_du_phong", "boc_duoc", "chi_trich")})
+                                       "boc_du_phong", "boc_duoc", "da_boc_truoc",
+                                       "chi_trich", "trang_hong")})
     # Mốc dời cả khi Google trả 0 kết quả (cửa sổ 2–3 ngày không có bài là chuyện thường của báo
     # với một brand) — nếu không, lịch mỗi giờ sẽ tìm web mỗi giờ. Lỗi actor thì không dời.
     moc_moi["web"] = {"luc": bay_gio.isoformat(timespec="seconds"), "dau": dau,
                       "luot": luot, "xin": cfg["so_bai"], "ve": w["serp"]}
     return tien, (hits, tu_web, wk.get("bi_loai") or [])
+
+
+# Sổ "đã đọc dự phòng" của Báo & Web (review 16/10, M1): trang đã gửi actor dự phòng (trả tiền)
+# không gửi lại trong `nguon_web.BOC_NHO_NGAY` ngày — trang bị loại vì không có ngày / quá cũ /
+# đọc vẫn hỏng không vào sổ "đã loại" nên không có sổ này thì bị đọc trả tiền MỖI lượt (chiến
+# dịch 30 phút/lượt). File JSON cạnh sổ mốc (không đổi schema kho), ghi nguyên tử.
+_KHOA_DA_BOC = threading.Lock()
+
+
+def _duong_da_boc():
+    return A._thu_muc_nen() / ".web-da-boc.json"
+
+
+def _doc_so_da_boc() -> dict:
+    try:
+        d = json.loads(_duong_da_boc().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) and isinstance(d.get("du_an"), dict) else {}
+
+
+def doc_da_boc(ma: str, bay_gio: datetime.datetime) -> set[str]:
+    """Khoá trang web của dự án đã thử đọc dự phòng trong `BOC_NHO_NGAY` ngày."""
+    moc = (bay_gio - datetime.timedelta(days=W.BOC_NHO_NGAY)).astimezone(_VN).date().isoformat()
+    x = (_doc_so_da_boc().get("du_an") or {}).get(ma)
+    return {k for k, v in (x or {}).items() if isinstance(v, str) and v >= moc} \
+        if isinstance(x, dict) else set()
+
+
+def ghi_da_boc(ma: str, khoa: list[str], bay_gio: datetime.datetime) -> None:
+    """Thêm khoá vừa đọc dự phòng (ngày hôm nay), bỏ khoá quá hạn; không ghi được thì chỉ báo."""
+    if not khoa:
+        return
+    with _KHOA_DA_BOC:
+        d = _doc_so_da_boc() or {"du_an": {}}
+        con_han = doc_da_boc(ma, bay_gio)
+        goc = d["du_an"].get(ma) if isinstance(d["du_an"].get(ma), dict) else {}
+        cu = {k: v for k, v in goc.items() if k in con_han}
+        cu.update({str(k): bay_gio.astimezone(_VN).date().isoformat() for k in khoa})
+        d["du_an"][ma] = cu
+        f = _duong_da_boc()
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError as e:
+            print(f"[theo_doi] web: không ghi được sổ đã đọc dự phòng: {type(e).__name__}",
+                  flush=True)
 
 
 def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
@@ -1587,7 +1654,8 @@ def _cau_web(w) -> str:
     return (f"; trang: bỏ MXH {w.get('mxh', 0)}, sàn {w.get('tmdt', 0)}, miền nhà "
             f"{w.get('nha', 0)}, robots cấm {w.get('robots_chan', 0)}, bị chặn "
             f"{w.get('tai_loi', 0)}, đọc dự phòng {w.get('boc_duoc', 0)}/"
-            f"{w.get('boc_du_phong', 0)}, chỉ đoạn trích {w.get('chi_trich', 0)}")
+            f"{w.get('boc_du_phong', 0)} (đã thử trước {w.get('da_boc_truoc', 0)}), chỉ đoạn "
+            f"trích {w.get('chi_trich', 0)}, trang hỏng {w.get('trang_hong', 0)}")
 
 
 def _cau_tk(tk: dict) -> list[str]:

@@ -385,7 +385,7 @@ def test_doc_du_phong_trang_bi_chan_co_tran_va_so_tien():
     hits, tk, _ = _chay(items, {}, boc=boc, boc_toi_da=2, con_usd=1.0)
     assert goi == [(["https://chan.vd.vn/a", "https://chan.vd.vn/b"], 0.1)]   # brand trước, ≤ 2
     assert tk["run_ids"] == ["r1", "rb"] and tk["pheu"]["boc_duoc"] == 1
-    assert tk["usd_boc"] == round(2 * W.GIA_BOC, 4) and tk["usd_tim"] == W.GIA_TRANG
+    assert tk["usd_boc"] == 0.1 and tk["usd_tim"] == W.GIA_TRANG       # dự phòng: nguyên trần
     a = next(d for d, _ in hits if d["link"] == "https://chan.vd.vn/a")
     assert not a["_web"]["chi_trich"] and "HAPAS bền" in a["text"]
 

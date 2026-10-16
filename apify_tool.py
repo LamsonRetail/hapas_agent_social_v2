@@ -2027,7 +2027,9 @@ def _tu_loai_tru_khop(d: dict, loai_tru: list[str]) -> str:
         n = _norm(str(x or "")).strip()
         if not n:
             continue
-        if len(n) <= _LOAI_TRU_NGUYEN_TU and " " not in n:
+        if len(n) <= _LOAI_TRU_NGUYEN_TU and re.fullmatch(r"[^\W_]+", n):
+            # (chỉ từ toàn chữ/số; "#ad", "@abc" vẫn khớp chuỗi con như trước — danh sách cũ
+            # của các dự án không đổi nghĩa)
             # Từ ngắn phải trùng NGUYÊN một từ (16/10/2026, HAPAS loại trừ "hapa" — Hapa's
             # Brewing, Hapa Sushi): khớp chuỗi con thì "hapa" nằm trong "hapas" và loại sạch
             # bài của chính brand.

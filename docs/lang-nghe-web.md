@@ -248,7 +248,7 @@ khi dòng có giá trị. DB chưa chạy bước 1 thì chỉ bài web lỗi, b
 - **Vị trí trong lượt:** `web` là nền tảng thứ 6 của `TK_NEN_TANG`. Phần `tk-web` chạy sau
   mạng xã hội trong cùng lượt tìm theo từ khoá, cùng công tắc tổng `tk_bat`, công tắc console
   `bat_web`, trần console, trần tháng dự án, mốc và phễu.
-- **Bật mặc định:** web không nằm trong `MAC_DINH_TAT` vì chủ dự án đã bật.
+- **Mặc định TẮT** với mọi dự án (`MAC_DINH_TAT`); HAPAS bật rõ trong file dữ liệu SQL.
 - **Nhịp quét:**
   - Ngoài chiến dịch: tối đa 1 lượt mỗi 20 giờ (`WEB_GIO_GIAN`). Các lượt khác trong ngày ghi
     "CHUA_TOI_LUOT" và không tốn tiền.
@@ -310,3 +310,25 @@ khi dòng có giá trị. DB chưa chạy bước 1 thì chỉ bài web lỗi, b
     đè cả khối.
   - `/api/bai` nhận nền tảng `web`.
 - **BigQuery:** dong_bo_bq đồng bộ thêm 3 cột mới.
+
+**Rà soát độc lập (16/10, sửa sau c812fff):**
+- **H1 – lỗi trong phần web không làm vỡ lượt:**
+  - URL hỏng (`http://[x`, cổng `:99999`), JSON-LD lồng quá sâu, dòng kết quả Google lạ, trang ném
+    lỗi: chỉ bỏ trang đó (phễu `trang_hong`).
+  - Lỗi bất ngờ của cả phần web: bài mạng xã hội vẫn ghi kho và vẫn dời mốc; phần web ghi `loi`
+    kèm số tiền đã tiêu tới lúc đó (`thu_thap(so=…)`).
+- **M1 – sổ "đã đọc dự phòng" (`.web-da-boc.json`):**
+  - Mỗi dự án một sổ, giữ 14 ngày (`BOC_NHO_NGAY`). Trang đã gửi actor dự phòng không gửi lại.
+  - Sổ "đã biết / đã loại" hỏi cả khoá URL Google lẫn khoá canonical; ghi cả hai khi khác nhau.
+- **M2 – web mặc định TẮT với mọi dự án** (`MAC_DINH_TAT` ở Mark và dashboard):
+  - HAPAS bật bằng `cau_hinh.tu_khoa.web.bat = true` trong file dữ liệu SQL.
+  - Mẫu nhanh trên trang Ngân sách không đổi công tắc web.
+- **M3:** từ khoá và từ loại trừ chỉ xét trên tiêu đề + đoạn quanh chỗ nhắc, không xét cả thân bài.
+- **M4:** đọc một trang có hạn đồng hồ 25 giây, và không vượt hạn của lượt.
+- **M5 – đọc dự phòng:**
+  - Thời gian chạy tối đa = trần ÷ (0,00026 × 1,5).
+  - Sổ trong lượt tính NGUYÊN TRẦN tới khi chốt theo run id.
+- **L2:** chuyển hướng sang miền khác thì kiểm robots.txt của miền mới.
+- **L3:** từ loại trừ có dấu câu (`#ad`, `@abc`) vẫn khớp chuỗi con như trước.
+- **L4:** hết ngân sách / lỗi không dời mốc web.
+- **L6:** canonical trỏ về trang chủ thì bỏ qua.

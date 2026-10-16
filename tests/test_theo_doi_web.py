@@ -32,15 +32,19 @@ def _hom_qua():
 
 
 # ───────────────────────────── cấu hình + ước tính ─────────────────────────────
-def test_web_mac_dinh_bat_duoi_cong_tac_tong_va_boc():
+def test_web_mac_dinh_tat_chi_bat_ro_va_boc():
+    # Review 16/10 (M2): chủ dự án duyệt web cho RIÊNG HAPAS -> mọi dự án mặc định TẮT.
     c = T.cau_hinh(dict(DU_AN, tk_bat=True, tk_so_bai=15), "tu_khoa", "web")
-    assert c["bat"] and c["so_bai"] == 15 and c["boc"] == T.WEB_BOC_MAC_DINH == 10
-    assert not T.cau_hinh(dict(DU_AN, tk_bat=False, tk_so_bai=15), "tu_khoa", "web")["bat"]
+    assert not c["bat"] and c["boc"] == T.WEB_BOC_MAC_DINH == 10
+    bat = dict(DU_AN, tk_bat=True, tk_so_bai=15, cau_hinh={"tu_khoa": {"web": {"bat": True}}})
+    c = T.cau_hinh(bat, "tu_khoa", "web")
+    assert c["bat"] and c["so_bai"] == 15
+    assert not T.cau_hinh(dict(bat, tk_bat=False), "tu_khoa", "web")["bat"]
     da = dict(DU_AN, tk_bat=True, tk_so_bai=15, cau_hinh={"tu_khoa": {"web": {"boc": 0}}})
     assert T.cau_hinh(da, "tu_khoa", "web")["boc"] == 0                    # 0 = tắt dự phòng
     da = dict(DU_AN, tk_bat=True, tk_so_bai=15, cau_hinh={"tu_khoa": {"web": {"boc": "x"}}})
     assert T.cau_hinh(da, "tu_khoa", "web")["boc"] == 10
-    assert "web" not in T.MAC_DINH_TAT and "web" in T.TK_NEN_TANG
+    assert "web" in T.MAC_DINH_TAT and "web" in T.TK_NEN_TANG
 
 
 def test_uoc_web_dung_cong_thuc():
@@ -180,8 +184,8 @@ def test_luot_web_ghi_kho_tien_phan_moc_va_nhip_mot_ngay(mo):
     assert (a["kieu_trang"], a["muc_nhac"], a["xem"], a["tai_khoan"]) == ("bao", "thoang", None,
                                                                           "bao.vd.vn")
     assert a["khoa"] == W.khoa_web("https://bao.vd.vn/a.htm") and a["nguon_id"] is None
-    # Sổ tiền theo giá thật: 1 trang Google + trang dự phòng (max(1 × 0,009, 40 s × giá giây)).
-    assert tk["usd"] == pytest.approx(0.0005 + max(0.009, 40 * W.BOC_USD_MOI_GIAY))
+    # Sổ: 1 trang Google theo giá thật + actor dự phòng NGUYÊN TRẦN (0,1) tới khi chốt run id.
+    assert tk["usd"] == pytest.approx(0.0005 + 0.1)
     phan = v.d["nen_tang"]["tu_khoa"]["phan"]
     assert {p.get("run_id") for p in phan if p.get("run_id")} == {"run-tim", "run-boc"}
     assert all(p["trang_thai"] == "xong" for p in phan if p.get("run_id"))

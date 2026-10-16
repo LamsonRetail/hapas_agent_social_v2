@@ -149,7 +149,8 @@ def test_chi_phi_web_khop_mark():
         T.WEB_GIA_TRANG, T.WEB_GIA_BOC, T.WEB_TU_MOI_CAU, T.WEB_TOI_DA_CAU,
         T.WEB_KQ_MOI_TRANG, T.WEB_BOC_MAC_DINH, T._HE_SO_UOC)
     assert CP.WEB_GIO_GIAN == T.WEB_GIO_GIAN
-    assert "web" in T.TK_NEN_TANG and "web" not in T.MAC_DINH_TAT and "web" not in CP.MAC_DINH_TAT
+    # Review 16/10 (M2): web chỉ duyệt cho HAPAS -> mặc định TẮT ở cả Mark lẫn dashboard.
+    assert "web" in T.TK_NEN_TANG and "web" in T.MAC_DINH_TAT and CP.MAC_DINH_TAT == T.MAC_DINH_TAT
     bo = [TU_VD, ["hapas"], [], ["Túi XÁCH", "túi xách nữ", "ví", "Ví da", "đồng hồ", "dong ho",
                                  "a.b", "x-y z", "ÁO", "ao"] + [f"k{i}" for i in range(12)],
           ["hapas", "hapas"], ["  ", "!!", "ĐĐ"]]
@@ -176,7 +177,8 @@ def test_chi_phi_web_khop_mark():
 
 def test_bang_cau_hinh_web():
     da = {"tk_bat": True, "tk_so_bai": 15, "tu_khoa": TU_VD,
-          "cau_hinh": {"tu_khoa": {"web": {"boc": 2}}}}
+          "cau_hinh": {"tu_khoa": {"web": {"boc": 2, "bat": True}}}}
+    assert not CP.bang_cau_hinh({**da, "cau_hinh": {}})["tu_khoa"]["web"]["bat"]   # mặc định tắt
     b = CP.bang_cau_hinh(da)
     w = b["tu_khoa"]["web"]
     assert w["bat"] and w["boc"] == 2 and w["so_tu_gui"] == 2 and w["so_cau"] == 1
@@ -297,7 +299,12 @@ def test_trang_ngan_sach_dong_bao_web_va_luu_boc():
     csrf = dang_nhap(c, QL)
     t = c.get("/ngan-sach").text
     assert 'data-nt="web"' in t and ">Báo &amp; Web" in t
-    assert re.search(r'name="tk_web_bat" value="1"[^>]*checked', t)          # mặc định BẬT
+    # Review 16/10 (M2): dự án chưa bật rõ -> ô web KHÔNG đánh dấu (mặc định tắt).
+    assert re.search(r'name="tk_web_bat" value="1"', t)
+    assert not re.search(r'name="tk_web_bat" value="1"[^>]*checked', t)
+    kho.du_an["hapas"]["cau_hinh"] = {"tu_khoa": {"web": {"bat": True}}}       # như HAPAS
+    t = c.get("/ngan-sach").text
+    assert re.search(r'name="tk_web_bat" value="1"[^>]*checked', t)
     assert 'name="tk_web_boc"' in t and 'name="bl_web_bat"' not in t
     assert "0,0005 USD/trang" in t and "0–2 trang" in t                      # ghi chú trong ⓘ
     assert 'data-o="tk-web" data-usd="0.1183"' in t and "2 → 1 câu" in t

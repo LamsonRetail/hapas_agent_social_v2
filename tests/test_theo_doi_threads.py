@@ -84,7 +84,8 @@ def test_dashboard_cau_hinh_hien_thi_dien_tat_cho_threads():
     assert ra["binh_luan"]["threads"] == {"bat": False} and ra["tu_khoa"]["tiktok"] == {"bat": True}
     assert "bat" not in goc["tu_khoa"]["threads"]                   # không sửa dict gốc
     assert CP.cau_hinh_hien_thi(BAT_TH)["tu_khoa"]["threads"] == {"bat": True}
-    assert CP.cau_hinh_hien_thi(None)["tu_khoa"] == {"threads": {"bat": False}}
+    assert CP.cau_hinh_hien_thi(None)["tu_khoa"] == {"threads": {"bat": False},
+                                                      "web": {"bat": False}}   # web: chỉ HAPAS
 
 
 # ───────────────────────────── nguồn Threads (chế độ "user") ─────────────────────────────
@@ -305,7 +306,7 @@ def test_dashboard_chi_phi_khop_mark_threads():
     assert b["tu_khoa"]["threads"]["uoc"] == T.uoc_tu_khoa_nen_tang("threads", 15, tu)
     hs = CP.hang_so_cho_trinh_duyet()
     # Báo & Web (16/10) xếp sau Threads; chỉ Threads mặc định tắt.
-    assert list(hs["nen_tang"])[-2:] == ["threads", "web"] and hs["mac_dinh_tat"] == ("threads",)
+    assert list(hs["nen_tang"])[-2:] == ["threads", "web"] and hs["mac_dinh_tat"] == ("threads", "web")
     assert hs["th_toi_thieu_bai"] == 10
 
 

@@ -282,7 +282,7 @@ def du_bao(nguon: list[dict], da_tieu: float, tran_du_an: float, tran_platform: 
 NEN_TANG = ("tiktok", "facebook", "instagram", "youtube", "threads", "web")
 #: `theo_doi.MAC_DINH_TAT` — nền tảng TẮT khi `du_an.cau_hinh` chưa ghi `bat` (Threads, 16/10/2026:
 #: deploy không tự tiêu tiền; chủ dự án bật trên trang này).
-MAC_DINH_TAT = ("threads",)
+MAC_DINH_TAT = ("threads", "web")   # web: chỉ HAPAS bật (16/10)
 SO_TOI_DA = 1_000_000        # chỉ chặn số rác — chủ dự án 15/10: "không có giới hạn"
 GIOI_HAN = {"tk_so_bai": (0, SO_TOI_DA), "tk_so_tu": (1, 50), "bl_so_bai": (0, SO_TOI_DA),
             "bl_moi_bai": (0, SO_TOI_DA)}

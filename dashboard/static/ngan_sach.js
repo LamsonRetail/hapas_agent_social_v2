@@ -204,10 +204,12 @@
     NT.forEach(function (p) {
       var a = m.tk[p];
       var b = m.bl[p];
-      f["tk_" + p + "_bat"] = !!a[0];
+      // Báo & Web chỉ bật theo duyệt của chủ dự án (mặc định TẮT): mẫu nhanh KHÔNG đổi công tắc
+      // web, chỉ đổi số; web không có bình luận.
+      if (p !== "web") f["tk_" + p + "_bat"] = !!a[0];
       f["tk_" + p + "_so_bai"] = String(a[1]);
       if (p === "instagram") f.tk_instagram_so_tu = String(a[2]);
-      if (p === "web") { f.tk_web_boc = String(a[2]); return; }   // web: không có bình luận
+      if (p === "web") { f.tk_web_boc = String(a[2]); return; }
       f["bl_" + p + "_bat"] = !!b[0];
       f["bl_" + p + "_so_bai"] = String(b[1]);
       f["bl_" + p + "_moi_bai"] = String(b[2]);
