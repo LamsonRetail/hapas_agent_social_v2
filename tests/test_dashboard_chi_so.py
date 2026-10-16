@@ -557,6 +557,11 @@ def test_tu_khoa_gop_bien_the_teen_code_va_bo_cau_hoi_gia():
     # Khách gõ không dấu: "shop oi" là hư từ như "shop ơi".
     assert CS._cum({"noi_dung": "dep qua shop oi"}) == set()
     assert CS._cum({"noi_dung": "túi da thật"}) == {"túi da", "da thật"}   # "da" không phải hư từ
+    # Review 16/10: "giá" so trên mặt chữ — "giả" (hàng giả) không bị bỏ như "giá".
+    assert CS._cum({"noi_dung": "sp giả, shop giả"}) == {"sp giả", "shop giả"}
+    assert CS._cum({"noi_dung": "báo giá, giá shop, gia sp"}) == set()
+    g = [bl("2026-10-10T10:00+07:00", f"g{i}", nd="sp giả nhiều quá") for i in range(2)]
+    assert {x["tu"] for x in CS.tu_khoa_thao_luan([], g, a, a)["tu_khoa"]} >= {"sp giả"}
 
 
 def test_ngan_tu_khoa_dem_binh_luan_nhu_may_tu():
@@ -618,6 +623,14 @@ def test_y_dinh_mua_kpi_ky_truoc_top_bai_va_bo_loc():
     # Kỳ trước 0 → không bịa %; kỳ trước bị cắt dòng / lọc tương tác → không so.
     assert CS.y_dinh_mua(nay, a, b, rows_truoc=[], hom_nay=b)["doi_pt"] is None
     assert CS.y_dinh_mua(nay, a, b, rows_truoc=truoc, truoc_bi_cat=True, hom_nay=b)["doi_pt"] is None
+    assert CS.y_dinh_mua(nay, a, b, rows_truoc=truoc, nay_bi_cat=True, hom_nay=b)["doi_pt"] is None
+    # Review 16/10: đang lọc y_dinh=1 thì mẫu số vẫn là MỌI bình luận sạch (không luôn 100%).
+    yy = CS.y_dinh_mua(nay, a, b, rows_truoc=truoc, hom_nay=b,
+                       bo_loc=CS.doc_bo_loc({"y_dinh": "1"}))
+    assert (yy["so"], yy["sach"], yy["pt"]) == (3, 4, 75.0) and yy["pt"] < 100
+    assert yy["top_bai"][0]["sach"] == 3 and yy["xu_huong"]["sach"][2:5] == [2, 1, 1]
+    f_yd = CS.bien_dich(CS.doc_bo_loc({"y_dinh": "1"}))
+    assert not f_yd.rong and f_yd.bo_y_dinh().rong and f_yd.yd                # bản sao, gốc giữ
     # Theo bộ lọc chung (cả kỳ trước): chỉ Facebook.
     f = CS.doc_bo_loc({"nen_tang": "facebook"})
     yf = CS.y_dinh_mua(nay, a, b, rows_truoc=truoc, hom_nay=b, bo_loc=f)

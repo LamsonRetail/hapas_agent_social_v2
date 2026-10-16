@@ -928,10 +928,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             try:
                 kq = await _kq_nho("bai", du_an["ma"], tu, den, moc, da_giu=True)
                 kb = await _kq_nho("bl", du_an["ma"], tu, den, moc, da_giu=True)
-                # Bình luận kỳ TRƯỚC: chỉ để so "Ý định mua" với kỳ liền trước (nhớ riêng theo
-                # khoảng, lùi một kỳ trên trang là dùng lại).
-                kbt = await _kq_nho("bl", du_an["ma"], *CS.khoang_truoc(tu, den), moc,
-                                    da_giu=True)
+                # Bình luận kỳ TRƯỚC: chỉ để so "Ý định mua" với kỳ liền trước — chỉ hop_le, cột
+                # hẹp, KHÔNG vào bộ nhớ dòng (review 16/10: gấp đôi bộ nhớ khi khoảng chạm trần).
+                kbt = await _k(app.state.kho.binh_luan_hop_le_gon, du_an["ma"],
+                               *_moc_ngay(*CS.khoang_truoc(tu, den)))
                 bai_khoa = None
                 if CS.can_tra_bai(bo_loc):
                     bai_khoa = await _bai_cho_bl(du_an["ma"], kq["rows"],
@@ -951,8 +951,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     d["binh_luan_da_cao"] = CS.tong_hop_bl(kb["rows"], tu, den, hom_nay=hom_nay,
                                                            bo_loc=f, bai_theo_khoa=bai_khoa)
                     d["y_dinh_mua"] = CS.y_dinh_mua(kb["rows"], tu, den, rows_truoc=kbt["rows"],
-                                                    truoc_bi_cat=kbt["bi_cat"], hom_nay=hom_nay,
-                                                    bo_loc=f, bai_theo_khoa=bai_khoa)
+                                                    truoc_bi_cat=bool(kbt["bi_cat"]),
+                                                    nay_bi_cat=bool(kb["bi_cat"]),
+                                                    hom_nay=hom_nay, bo_loc=f,
+                                                    bai_theo_khoa=bai_khoa)
                     d.update(CS.tong_quan_loc(kq["rows"], kb["rows"], tu, den, f, bai_khoa))
                     d["bo_loc"] = CS.bo_loc_json(bo_loc)
                     d["bi_cat"], d["bl_bi_cat"] = kq["bi_cat"], kb["bi_cat"]

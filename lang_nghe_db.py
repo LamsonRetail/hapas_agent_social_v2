@@ -421,19 +421,26 @@ _LY_DO_AFF = ("affiliate_dan_ma", "affiliate_hang_loat")
 
 def _danh_dau_affiliate(c, ma: str, khoa_bai: list) -> int:
     """Luật cấp BÀI của spam affiliate (`loc_rac.affiliate_hang_loat`, 16/10/2026): dưới cùng một
-    bài, ≥ 5 tài khoản có mã giới thiệu / chữ kiểu cách trong 48 giờ → `spam`
-    (`affiliate_hang_loat`). Chỉ hạ bình luận đang hop_le, xoá sắc thái/chủ đề như seeding. Mỗi
-    tài khoản một mã nên luật seeding (cùng nội dung) không bắt được. -> số dòng đã hạ."""
+    bài, ≥ 5 tài khoản có mã giới thiệu (hoặc chữ kiểu cách + lời dặn/tên sàn) trong 48 giờ theo
+    giờ ĐĂNG → `spam` (`affiliate_hang_loat`). Chỉ hạ bình luận đang hop_le, xoá sắc thái/chủ đề
+    như seeding. Mỗi tài khoản một mã nên luật seeding (cùng nội dung) không bắt được. Mã có trong
+    bài / bình luận của chính thương hiệu (minigame, voucher) không tính. -> số dòng đã hạ."""
     import loc_rac
     ds = sorted({k for k in khoa_bai if k})
     if not ds:
         return 0
+    da = c.execute("SELECT ten, tu_khoa FROM du_an WHERE ma = %s", (ma,)).fetchone() or {}
+    thuong_hieu = [da.get("ten") or "", *(da.get("tu_khoa") or [])]
+    bai = {r["khoa"]: r["noi_dung"] for r in c.execute(
+        "SELECT khoa, noi_dung FROM bai WHERE du_an = %s AND khoa = ANY(%s)", (ma, ds)).fetchall()}
+    # Bình luận không có giờ đăng (luc NULL) bị bỏ qua: giờ cào không nói chúng cách nhau bao lâu.
     rows = c.execute(
-        "SELECT khoa_bai, ma, tac_gia, noi_dung, COALESCE(dang_luc, thay_lan_dau) AS luc, loai, "
-        "cua_thuong_hieu FROM binh_luan WHERE du_an = %s AND khoa_bai = ANY(%s) AND "
-        "(loai = 'hop_le' OR ly_do_loc = ANY(%s))", (ma, ds, list(_LY_DO_AFF))).fetchall()
+        "SELECT khoa_bai, ma, tac_gia, noi_dung, dang_luc AS luc, loai, cua_thuong_hieu "
+        "FROM binh_luan WHERE du_an = %s AND khoa_bai = ANY(%s) AND (loai = 'hop_le' OR "
+        "ly_do_loc = ANY(%s) OR loai = 'thuong_hieu' OR cua_thuong_hieu)",
+        (ma, ds, list(_LY_DO_AFF))).fetchall()
     ha: dict[str, list[str]] = {}
-    for kb, m in loc_rac.affiliate_hang_loat(rows):
+    for kb, m in loc_rac.affiliate_hang_loat(rows, thuong_hieu=thuong_hieu, noi_dung_bai=bai):
         ha.setdefault(kb, []).append(m)
     n = 0
     for kb, cac in ha.items():

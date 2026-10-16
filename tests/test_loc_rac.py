@@ -126,9 +126,47 @@ def test_affiliate_hang_loat_cap_bai():
             _bl_aff("t1", "Acc 1", 1, loai="trung"),
             *[_bl_aff(f"c{i}", f"Acc {i}", i) for i in (2, 3, 4)],
             _bl_aff("k", "Khách", 5, nd="xin giá set túi trắng"),
-            _bl_aff("h", "HAPAS", 6, cua_thuong_hieu=True, loai="thuong_hieu")]
+            _bl_aff("h", "HAPAS", 6, nd="Cảm ơn bạn", cua_thuong_hieu=True, loai="thuong_hieu")]
     assert sorted(L.affiliate_hang_loat(tron)) == [("tiktok:1", "c2"), ("tiktok:1", "c3"),
                                                    ("tiktok:1", "c4")]
     assert ("tiktok:1", "t1") in L.affiliate_hang_loat(tron, ha_duoc=("hop_le", "trung"))
-    # Dấu hiệu cấp bài: mã HOẶC chữ kiểu cách; "shopee" một mình không phải.
-    assert L.co_dau_hieu_hang_loat("𝐠𝐢𝐚́ 𝐫𝐞̉ 𝐪𝐮𝐚́ 𝐧𝐞̀") and not L.co_dau_hieu_hang_loat("mua shopee")
+    # Dấu hiệu cấp bài (review 16/10): MÃ, hoặc chữ kiểu cách + (lời dặn | tên sàn). Chữ kiểu
+    # cách một mình (khách gõ bằng bàn phím kiểu) hay "shopee" một mình không phải.
+    assert not L.co_dau_hieu_hang_loat("𝐠𝐢𝐚́ 𝐫𝐞̉ 𝐪𝐮𝐚́ 𝐧𝐞̀")
+    assert not L.co_dau_hieu_hang_loat("mua shopee")
+    assert L.co_dau_hieu_hang_loat("𝐜𝐨́ 𝐭𝐫𝐞̂𝐧 𝐬𝐡𝐨𝐩𝐞𝐞 𝐧𝐞̀")
+    assert L.co_dau_hieu_hang_loat("AHS-WCM-DQN")
+
+
+def test_spam_affiliate_review_khong_bat_nham():
+    """Review 16/10: mã sản phẩm / cỡ / mã đơn + "shopee", chữ kiểu cách + "shopee" là KHÁCH."""
+    for t in ("Mẫu HP-2024-01-BLK còn trên shopee không ạ",       # mã bắt đầu giữa một mã dài
+              "Size XXL-3XL-4XL có trên shopee không shop",        # khúc là cỡ
+              "Đơn ORD-2410-0001 đặt trên shopee chưa giao ạ",     # chữ chỉ ở MỘT khúc
+              "𝐂𝐨́ 𝐛𝐚́𝐧 𝐭𝐫𝐞̂𝐧 𝐬𝐡𝐨𝐩𝐞𝐞 𝐤𝐡𝐨̂𝐧𝐠 𝐬𝐡𝐨𝐩"):                  # chữ kiểu cách + sàn
+        assert _mot(t) == ("hop_le", None), t
+    assert L.ma_gioi_thieu("Mẫu HP-2024-01-BLK") == set() and L.ma_gioi_thieu("XXL-3XL-4XL") == set()
+    # Lời dặn so CÓ dấu: bỏ dấu thì "dẫn vào", "người dân mà", "sẵn cam" khớp nhầm.
+    for t in ("KQX-77A-PLM dẫn vào trang", "KQX-77A-PLM người dân mà", "KQX-77A-PLM sẵn cam"):
+        assert "cum" not in L.dau_hieu_affiliate(t) and not L.la_affiliate(t), t
+    assert "cum" in L.dau_hieu_affiliate("DÁN MÃ vào đây") and "cum" in L.dau_hieu_affiliate("săn cam")
+    # Tổ hợp hợp lệ: mã + (lời dặn | sàn); chữ kiểu cách + lời dặn. Mã một mình chưa đủ.
+    assert L.la_affiliate("KQX-77A-PLM shopee") and L.la_affiliate("KQX-77A-PLM xóa 77 rồi dán")
+    assert L.la_affiliate("𝐝𝐚́𝐧 𝐦𝐚𝐱 𝐯𝐚̀𝐨 𝐝𝐚̂𝐲") and not L.la_affiliate("KQX-77A-PLM")
+    # Mã có tên thương hiệu (voucher của chính brand) không tính.
+    r = [{"khoa_bai": "b", "tac_gia": "x", "noi_dung": "HAPAS-SS27-GIFT dán mã trên shopee nha"}]
+    L.phan_loai(r, ["HAPAS", "hapas"])
+    assert r[0]["loai"] == "hop_le"
+
+
+def test_affiliate_hang_loat_gio_dang_that_va_ma_cua_brand():
+    rows = [_bl_aff(f"c{i}", f"Acc {i}", i, nd="QUA-TANG-2710") for i in range(5)]
+    assert len(L.affiliate_hang_loat(rows)) == 5
+    # Minigame: mã có trong BÀI hoặc bình luận của thương hiệu → khách chép lại không phải spam.
+    assert L.affiliate_hang_loat(rows, noi_dung_bai={"tiktok:1": "Bình luận QUA-TANG-2710 nhé"}) == []
+    brand = _bl_aff("h", "HAPAS", 0, nd="Mã QUA-TANG-2710 nha cả nhà", cua_thuong_hieu=True,
+                    loai="thuong_hieu")
+    assert L.affiliate_hang_loat([brand, *rows]) == []
+    # Không có giờ đăng (luc None): bỏ qua, không đoán theo giờ cào.
+    thieu = [dict(r, luc=None) if i < 2 else r for i, r in enumerate(rows)]
+    assert L.affiliate_hang_loat(thieu) == []

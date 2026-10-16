@@ -65,22 +65,26 @@ _SET_TRUOC = {"giá", "gia", "mua", "lấy", "lay", "bộ", "cả", "đặt", "d
 _RE_TU_TRUOC = re.compile(r"(\w+)\W*$")
 _RE_TU_SAU = re.compile(r"\W*(\w+)")
 _RE_HET_CAU = re.compile(r"\s*(?:[^\w\s]|$)")
+#: Ngữ cảnh chữ trước/sau chỉ xét trong khung ngắn quanh từ: tra từ đầu chuỗi mỗi lần khớp là
+#: O(n²) (review 16/10: chuỗi 50.000 ký tự mất ~8 giây).
+_KHUNG = 40
 
 
 def _thay(m: re.Match) -> str:
     t, s = m.group(1), m.string
     if t in _TEEN_CO_DINH:
         return _TEEN_CO_DINH[t]
-    truoc = _RE_TU_TRUOC.search(s, 0, m.start())
+    a, b = m.start(), m.end()
+    truoc = _RE_TU_TRUOC.search(s, max(0, a - _KHUNG), a)
     truoc = truoc.group(1) if truoc else ""
-    sau = _RE_TU_SAU.match(s, m.end())
+    sau = _RE_TU_SAU.match(s, b, b + _KHUNG)
     sau = sau.group(1) if sau else ""
     if t in ("ak", "ah"):                      # tiểu từ cuối câu ("giá ak", "zán cam ah") = "ạ"
-        return "ạ" if _RE_HET_CAU.match(s, m.end()) else t
+        return "ạ" if _RE_HET_CAU.match(s, b) else t
     if t == "bn":
         return "bạn" if sau in _BAN_SAU or truoc in _BAN_TRUOC else "bao nhiêu"
     if t == "k":                               # "299 k" là nghìn đồng, không phải "không"
-        return t if s[:m.start()].rstrip()[-1:].isdigit() else "không"
+        return t if s[max(0, a - _KHUNG):a].rstrip()[-1:].isdigit() else "không"
     if t == "sét":
         return "set" if (sau in _SET_SAU or sau.isdigit() or truoc in _SET_TRUOC) else t
     return t

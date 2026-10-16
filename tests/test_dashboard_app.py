@@ -161,6 +161,18 @@ class GiaKho:
         self.goi_bl.append((du_an, tu, den))
         return {"rows": [c for c in self.bl if tu <= c["luc"] < den], "bi_cat": False}
 
+    goi_bl_gon: list = None             # tạo lười: mọi bộ thử cũ không đổi
+
+    def binh_luan_hop_le_gon(self, du_an, tu, den):
+        """Như kho thật: chỉ hop_le, cột hẹp (kỳ trước của Ý định mua)."""
+        self.goi_bl_gon = (self.goi_bl_gon or []) + [(du_an, tu, den)]
+        cot = ("khoa_bai", "nen_tang", "noi_dung", "loai", "cua_thuong_hieu", "sac_thai", "chu_de",
+               "luc", "nguon_loai", "nguon_id")
+        return {"rows": [{k: c.get(k) for k in cot} for c in self.bl if tu <= c["luc"] < den
+                         and (c.get("loai") or ("thuong_hieu" if c.get("cua_thuong_hieu")
+                                                else "hop_le")) == "hop_le"],
+                "bi_cat": False}
+
     def binh_luan_cua_bai(self, du_an, khoa, toi_da=300):
         return [dict(c) for c in self.bl if c["khoa_bai"] == khoa][:toi_da]
 
@@ -1543,8 +1555,12 @@ def test_api_chi_so_bo_loc_moi_khoi_va_khoa_nho_rieng():
     lay("&nen_tang=tiktok,facebook")
     lay("&nen_tang=facebook,tiktok")                                 # cùng bộ lọc, khác thứ tự
     assert len(app.state.nho_chi_so) == so_khoa + 1
-    # Bình luận đọc hai khoảng: kỳ này + kỳ trước (so "Ý định mua" với kỳ trước, 16/10/2026).
-    assert len(kho.goi_bai) == 1 and len(kho.goi_bl) == 2
+    # Bình luận kỳ này đọc MỘT lần (nhớ); kỳ trước (so "Ý định mua") đọc cột hẹp, KHÔNG nhớ dòng —
+    # mỗi lần tính /api/chi-so một lần (kết quả /api/chi-so đã nhớ theo bộ lọc).
+    assert len(kho.goi_bai) == 1 and len(kho.goi_bl) == 1
+    assert len(kho.goi_bl_gon) == so_khoa + 1
+    assert not any(k[0] == "bl" and k[2] != datetime.date(2026, 10, 8)
+                   for k in app.state.nho_dong._d)
 
 
 @pytest.mark.parametrize("duong", ["chi-so", "bai", "binh-luan"])

@@ -37,3 +37,17 @@ def test_khoa_va_tim():
     assert CC.chua(CC.khoa_tim(""), "bất kỳ")
     # Chữ tìm còn 1 ký tự sau teen code ("ak" → "a") thì không khớp mọi thứ.
     assert CC.khoa_tim("ak") == "ak" and not CC.chua("ak", "túi đẹp")
+
+
+def test_teen_code_tuyen_tinh_tren_chuoi_dai():
+    """Review 16/10: ngữ cảnh chữ trước/sau chỉ xét khung ngắn — trước đây tra từ đầu chuỗi mỗi lần
+    khớp (O(n²): 50.000 ký tự mất ~8 giây)."""
+    import time
+    s = "đẹp k giá bn mk " * 320                          # ~5.000 ký tự, ~960 từ teen code
+    t = time.perf_counter()
+    for _ in range(5):
+        r = CC.chuan_hoa(s)
+    assert time.perf_counter() - t < 0.5
+    assert r.count("không") == r.count("bao nhiêu") == r.count("mình") == 320
+    assert CC.chuan_hoa("x" * 100 + " 299 k").endswith("299 k")           # khung vẫn thấy số
+    assert CC.chuan_hoa("cảm ơn bn").endswith("bạn") and CC.chuan_hoa(" " * 60 + "bn") == " " * 60 + "bao nhiêu"

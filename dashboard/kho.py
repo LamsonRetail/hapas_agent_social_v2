@@ -331,6 +331,22 @@ def binh_luan_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.date
     return {"rows": rows[:BL_TOI_DA], "bi_cat": len(rows) > BL_TOI_DA}
 
 
+def binh_luan_hop_le_gon(du_an: str, tu: datetime.datetime, den: datetime.datetime) -> dict:
+    """Bình luận HỢP LỆ của [tu, den), cột HẸP (đủ cho bộ lọc chung + ý định mua; nội dung cắt như
+    `binh_luan_trong_khoang` để định nghĩa hai kỳ giống nhau) — chỉ để so "Ý định mua" với kỳ trước
+    (16/10/2026). App không nhớ đệm bộ này; kết quả /api/chi-so đã nhớ. -> {"rows", "bi_cat"}."""
+    with ket_noi() as c:
+        rows = c.execute(
+            "SELECT b.khoa_bai, b.nen_tang, left(b.noi_dung, 1000) AS noi_dung, b.loai, "
+            "b.cua_thuong_hieu, b.sac_thai, b.chu_de, COALESCE(b.dang_luc, b.thay_lan_dau) AS luc, "
+            f"n.loai AS nguon_loai, bai.nguon_id {_TU_BL}"
+            "WHERE b.du_an = %s AND b.loai = 'hop_le' AND COALESCE(b.dang_luc, b.thay_lan_dau) >= %s "
+            "AND COALESCE(b.dang_luc, b.thay_lan_dau) < %s "
+            "ORDER BY COALESCE(b.dang_luc, b.thay_lan_dau) DESC LIMIT %s",
+            (du_an, tu, den, BL_TOI_DA + 1)).fetchall()
+    return {"rows": rows[:BL_TOI_DA], "bi_cat": len(rows) > BL_TOI_DA}
+
+
 def binh_luan_cua_bai(du_an: str, khoa: str, toi_da: int = 3000) -> list[dict]:
     """Bình luận đã cào của MỘT bài, nhiều thích trước (app xếp lại theo luồng trả lời)."""
     with ket_noi() as c:

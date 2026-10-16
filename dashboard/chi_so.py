@@ -16,6 +16,7 @@ nhãn lạ = "chưa phân loại". Chủ đề (`chu_de`) giữ nguyên chữ đ
 from __future__ import annotations
 
 import collections
+import copy
 import datetime
 import functools
 import itertools
@@ -335,11 +336,24 @@ class _Loc:
         self.q = CC.khoa_tim(b.get("q")) if b.get("q") else ""
         self.yd = b.get("y_dinh") == "1"
         self._q_bai: dict[int, bool] = {}
-        self.rong = not (self.pv != "tat_ca" or self.nt or self.lo or self.ng or self.sac or cd
-                         or self.ah or self.tt or self.kq or self.q or self.yd)
+        self.rong = self._tinh_rong()
         # Bình luận cần tra BÀI gốc khi lọc theo thứ dòng bình luận không mang.
         self.can_bai = bool(self.ah or self.tt or self.kq or self.q or
                             any(not k.startswith("n:") for k in self.ng))
+
+    def _tinh_rong(self) -> bool:
+        return not (self.pv != "tat_ca" or self.nt or self.lo or self.ng or self.sac or self.cd_bai
+                    or self.cd_bl or self.ah or self.tt or self.kq or self.q or self.yd)
+
+    def bo_y_dinh(self) -> _Loc:
+        """Bản sao KHÔNG có chiều y_dinh — mẫu số "% bình luận sạch" của Ý định mua: đang lọc
+        y_dinh=1 mà chia cho chính các bình luận ý định mua thì luôn ra 100% (review 16/10)."""
+        if not self.yd:
+            return self
+        ban = copy.copy(self)
+        ban.yd = False
+        ban.rong = ban._tinh_rong()
+        return ban
 
     def _chu(self, s) -> bool:
         return CC.chua(self.q, s)
@@ -676,10 +690,14 @@ _MO_HO = {"da", "nhung", "den", "vi", "to", "day", "dung", "dang", "vang", "de",
           "len", "nam", "mau"}
 _STOP_KHONG_DAU = {CC.bo_dau(x) for x in _STOP} - _MO_HO
 # Mảnh câu HỎI GIÁ ("giá shop", "giá bao…", "báo giá") là ý định mua, không phải chủ đề bàn tán: đã
-# đếm riêng ở khối Ý định mua nên không vào mây từ (so trên bản bỏ dấu). "xin", "ib", "ạ"… là hư từ
+# đếm riêng ở khối Ý định mua nên không vào mây từ ("giá" so mặt chữ, chữ đi kèm so bản bỏ dấu).
+# "xin", "ib", "ạ"… là hư từ
 # ở trên. Chọn BỎ CỤM chứ không bỏ cả bình luận hỏi mua: "xin giá set túi trắng" vẫn góp "set túi",
 # "túi trắng" — khách hỏi mua món nào cũng là tín hiệu về sản phẩm (45% bình luận sạch là hỏi mua).
 _DI_VOI_GIA = {"shop", "sp", "bao", "nhieu", "nhiu", "sao", "may", "ntn", "the", "nao", "bnh"}
+#: "giá" so trên MẶT CHỮ (có dấu, hoặc gõ không dấu "gia") — bản bỏ dấu thì "giả" (hàng giả) cũng
+#: thành "gia" và "sp giả", "shop giả" bị bỏ nhầm (review 16/10).
+_GIA = {"giá", "gia"}
 # Hashtag "đẩy đề xuất" ai cũng gắn, không nói gì về brand.
 _HASHTAG_CHUNG = {"fyp", "foryou", "foryoupage", "xuhuong", "xuhướng", "viral", "trending",
                   "trend", "tiktok", "reels", "reel", "capcut", "fypシ", "fy", "explore",
@@ -726,7 +744,7 @@ def _tach_cum(r: dict) -> dict[str, str]:
                     or _hu_tu(a) or _hu_tu(b)):
                 continue
             ka, kb = _kd(a), _kd(b)
-            if ka == kb or ("gia" in (ka, kb) and ({ka, kb} - {"gia"}) <= _DI_VOI_GIA):
+            if ka == kb or (a in _GIA and kb in _DI_VOI_GIA) or (b in _GIA and ka in _DI_VOI_GIA):
                 continue
             ra.setdefault(f"{ka} {kb}", f"{a} {b}")
     return ra
@@ -1167,16 +1185,17 @@ def la_y_dinh_mua(c: dict) -> bool:
 
 def y_dinh_mua(rows: list[dict], tu: datetime.date, den: datetime.date, *,
                rows_truoc: list[dict] | None = None, truoc_bi_cat: bool = False,
-               hom_nay: datetime.date | None = None, bo_loc=None,
+               nay_bi_cat: bool = False, hom_nay: datetime.date | None = None, bo_loc=None,
                bai_theo_khoa: dict | None = None, toi_da: int = TOP_BAI_Y_DINH) -> dict:
     """Khối "Ý định mua" của trang Chỉ số, theo bộ lọc chung `bo_loc` (cả kỳ trước).
 
     `rows` = bình luận của [tu, den]; `rows_truoc` = bình luận của kỳ liền trước cùng độ dài
-    (None: không so). % so với kỳ trước không hiện khi kỳ trước 0, khi kỳ trước bị cắt bớt dòng
-    (`truoc_bi_cat`) hoặc khi lọc theo mức tương tác (tương tác cộng dồn theo tuổi bài).
+    (None: không so). % so với kỳ trước không hiện khi kỳ trước 0, khi kỳ này / kỳ trước bị cắt
+    bớt dòng (`nay_bi_cat`, `truoc_bi_cat`) hoặc khi lọc theo mức tương tác (tương tác cộng dồn
+    theo tuổi bài). Mẫu số "bình luận sạch" bỏ chiều y_dinh của bộ lọc (không thì luôn 100%).
     -> {so, sach, pt, truoc, doi_pt, theo_chu_de, theo_cau, xu_huong, top_bai}."""
     hom_nay = hom_nay or datetime.datetime.now(VN).date()
-    f = bien_dich(bo_loc)
+    f = bien_dich(bo_loc).bo_y_dinh()
 
     def sach(ds: list[dict], a: datetime.date, b: datetime.date) -> list[dict]:
         return loc_bl([c for c in ds if loai_bl(c) == "hop_le"
@@ -1187,7 +1206,7 @@ def y_dinh_mua(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     if rows_truoc is not None:
         a, b = khoang_truoc(tu, den)
         truoc = sum(1 for c in sach(rows_truoc, a, b) if la_y_dinh_mua(c))
-    so_sanh_duoc = truoc is not None and not truoc_bi_cat and not f.tt
+    so_sanh_duoc = truoc is not None and not (truoc_bi_cat or nay_bi_cat or f.tt)
     theo_tuan = (den - tu).days + 1 > NGAY_TOI_DA_THEO_NGAY
     cuoi = max(tu, min(den, hom_nay))
     moc = _cac_moc(tu, cuoi, theo_tuan)
