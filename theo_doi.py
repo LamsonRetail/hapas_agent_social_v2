@@ -1060,7 +1060,8 @@ def _pheu_moi(ngay: int, ly: str) -> dict:
     nhật số liệu; bài MỚI: trùng / từ loại trừ / spam / AI loại (theo mã lý do) / không nhắc từ
     khoá → giữ (mới). `cua_so` = số bài nằm trong cửa sổ tăng dần (chỉ để đối chiếu)."""
     return {"ngay": ngay, "ly_do": ly, "ve": 0, "cua_so": 0, "pham_vi": 0, "ngoai_pham_vi": 0,
-            "cap_nhat": 0, "trung": 0, "loai_tru": 0, "spam": 0, "ai_loai": {},
+            "cap_nhat": 0, "da_loai_truoc": 0, "trung": 0, "loai_tru": 0, "spam": 0,
+            "ai_loai": {},
             "khong_nhac": 0, "giu": 0, "moi": 0, "xin": 0, "xin_ly_do": ""}
 
 
@@ -1124,6 +1125,10 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             # quyết định GIỮ gì — xem `theo_doi_api`.
             lim, ly_xin = TDA.so_xin(lim_cfg, moc_cu.get(p),
                                      (moc_cu.get(p) or {}).get("dau") == dau)
+            q_gui, xoay = q, None
+            if p == "facebook" and fb_toi_da < 10 ** 6:
+                q_gui, xoay, lim = TDA.xoay_fb(q, lim, lim_cfg, moc_cu.get(p),
+                                               (moc_cu.get(p) or {}).get("dau") == dau)
             them: dict = {}
             if p == "youtube":
                 # Rủi ro R7 cũ: lượt tìm YouTube của /theodoi không có trần trang search — nay
@@ -1136,17 +1141,20 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                                       "trang_thai": "loi", "ma": "HET_QUOTA", "usd_so": 0.0})
                     continue
                 them["toi_da_trang"] = trang
+            if p == "tiktok":
+                # Review 16/10: chuỗi dự phòng (tính tiền theo VIDEO) chỉ được tiêu phần ngân
+                # sách còn lại sau khi trừ ước tính API — không chỉ trần console.
+                them["tran_du_phong"] = round(max(0.0, min(con, _con_viec(v)) - uoc), 2)
             A._NEN_TANG.set(p)
             A._HAN_CHOT.set(han)
             A._KHI_CO_RUN.set(lambda run, meta, p=p: _them_phan_tk(v, {
                 "id": f"tk-{p}-{run.get('id')}", "nen_tang": p, "run_id": run.get("id"),
-                "trang_thai": "dang_chay"}))
+                "actor": (meta or {}).get("actor"), "trang_thai": "dang_chay"}))
             got: list = []
             loi = None
-            so_run_truoc = sum(1 for x in _phan_tk(v) if x.get("nen_tang") == p
-                               and x.get("run_id"))
+            so_run_truoc = len(_phan_tk(v))
             try:
-                got = A._FETCH[p](q, lim, "VN", d_from, bay_gio, **them) or []
+                got = A._FETCH[p](q_gui, lim, "VN", d_from, bay_gio, **them) or []
             except Exception as e:
                 if type(e).__name__ == "MatQuyen":
                     raise
@@ -1159,10 +1167,9 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             tien = round(len(got) * _TK_GIA.get(p, 0.0)
                          + (_TK_KHOI.get(p, 0.0) * (len(q) if p == "instagram" else 1)
                             if _TK_GIA.get(p) and co_khoi else 0.0), 4)
-            if p == "tiktok":                # TikTok API tính theo yêu cầu (mỗi run một yêu cầu)
-                so_run = sum(1 for x in _phan_tk(v) if x.get("nen_tang") == p
-                             and x.get("run_id")) - so_run_truoc
-                tien = round(max(tien, so_run * TK_TT_YEU_CAU), 4)
+            if p == "tiktok":
+                tien = _tien_tim_tiktok(_phan_tk(v)[so_run_truoc:], got, loi,
+                                        them.get("tran_du_phong"))
             for ph in _phan_tk(v):
                 if (ph.get("nen_tang") == p and ph.get("run_id")
                         and ph.get("trang_thai") == "dang_chay"):
@@ -1190,6 +1197,8 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             if got:
                 moc_moi[p] = {"luc": bay_gio.isoformat(timespec="seconds"), "dau": dau,
                               "luot": luot, "xin": lim, "ve": len(got)}
+                if xoay is not None:
+                    moc_moi[p]["xoay"] = xoay
         tk["lay"] = len(hits)
         if hits:
             _tach_va_giu(du_an, luot, hits, tu, han, tk)
@@ -1219,6 +1228,28 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     return tk
 
 
+def _tien_tim_tiktok(phan_moi: list[dict], got: list, loi, tran_du_phong) -> float:
+    """Sổ tiền một lượt tìm TikTok theo GIÁ THẬT từng actor (review 16/10): TikTok API 0,002 USD
+    mỗi run (= một yêu cầu); dự phòng apidojo/clockworks theo video về (nguồn ghi ở `_nguon`
+    từng dòng); dự phòng lỗi không biết tiêu bao nhiêu thì tính nguyên trần của nó."""
+    run = [x for x in phan_moi if x.get("run_id")]
+    api = sum(1 for x in run if x.get("actor") == TT_ACTOR)
+    du_phong = [x for x in run if x.get("actor") != TT_ACTOR]
+    tien = api * TK_TT_YEU_CAU
+    for d, _ in got:
+        nguon = str(d.get("_nguon") or "")
+        if nguon.startswith("clockworks"):
+            tien += A._GIA_TT_DU_PHONG["clockworks"]
+        elif nguon.startswith("apidojo"):
+            tien += A._GIA_TT_DU_PHONG["apidojo"]
+    if du_phong and loi is not None and tran_du_phong:
+        tien = max(tien, api * TK_TT_YEU_CAU + float(tran_du_phong))
+    return round(tien, 4)
+
+
+TT_ACTOR = "scraptik~tiktok-api"     # = tiktok_api.ACTOR (bài thử đối chiếu)
+
+
 def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
                  tk: dict) -> None:
     """Bài trong phạm vi: ĐÃ CÓ trong kho → cập nhật số liệu + ảnh chụp ngày (`chi_so_ngay`);
@@ -1232,8 +1263,25 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         tk["cap_nhat"] = tk.get("cap_nhat", 0) + K.cap_nhat_so_lieu(du_an["ma"], luot, cap_nhat)
         for r in cap_nhat:
             tk["pheu"].setdefault(r["nen_tang"], _pheu_moi(0, ""))["cap_nhat"] += 1
+    tu_pv = datetime.datetime.fromisoformat((tk.get("pham_vi") or {}).get("tu")
+                                            or datetime.datetime.now(_VN).isoformat())
+    dau = TDA.dau_loai(du_an, tu)
+    da_loai = TDA.doc_loai(du_an["ma"], dau, tu_pv)
+    if da_loai:
+        con = []
+        for d, dt in hits_moi:
+            k = _khoa_bai(d["platform"], d["link"], {
+                "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")})
+            if k in da_loai:
+                tk["pheu"].setdefault(d["platform"], _pheu_moi(0, ""))["da_loai_truoc"] += 1
+            else:
+                con.append((d, dt))
+        hits_moi = con
     if hits_moi:
-        _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk)
+        try:
+            _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk)
+        finally:
+            TDA.ghi_loai(du_an["ma"], dau, tk.pop("_bi_loai", []), tu_pv)
 
 
 def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
@@ -1248,6 +1296,9 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
 
     def ph(d: dict) -> dict:
         return pheu.setdefault(d["platform"], _pheu_moi(0, ""))
+    # Bài bị loại lượt này → sổ "đã loại" (`theo_doi_api.ghi_loai`, review 16/10): trong phạm vi
+    # 30–92 ngày cùng bài về mỗi lượt, không gửi AI xét lại (tốn + kết quả có thể đổi).
+    bi_loai = tk.setdefault("_bi_loai", [])
     cho, thay = [], set()
     for d, dt in hits:
         goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
@@ -1258,10 +1309,12 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         thay.add(khoa)
         if A._tu_loai_tru_khop(d, loai_tru):
             ph(d)["loai_tru"] += 1
+            bi_loai.append((khoa, "loai_tru", dt))
             continue
         if loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}"):
             tk["spam"] = tk.get("spam", 0) + 1            # đợt 2d: bỏ cứng trước bước AI
             ph(d)["spam"] += 1
+            bi_loai.append((khoa, "spam", dt))
             continue
         d["_khoa"] = khoa
         d["_khop"] = A._khop_tu_khoa(d, tu)
@@ -1284,9 +1337,12 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         if px and not px[0]:
             lo = ph(d)["ai_loai"]
             lo[str(px[1])] = lo.get(str(px[1]), 0) + 1
+            bi_loai.append((d["_khoa"], f"ai:{px[1]}", dt))
             continue
         if not px and not d["_khop"]:
             ph(d)["khong_nhac"] += 1
+            if i in px_all:              # AI đã xét (không rõ) — chưa xét thì lượt sau xét lại
+                bi_loai.append((d["_khoa"], "khong_nhac", dt))
             continue
         dd = _dinh_danh_tai_khoan(d)
         rows.append({
@@ -1328,7 +1384,8 @@ def _cau_pheu(p: str, f: dict) -> str:
             + (f"; {f['xin_ly_do']}" if f.get("xin_ly_do") else "") + "): "
             f"về {f.get('ve', 0)} → trong phạm vi {f.get('pham_vi', 0)} (ngoài phạm vi "
             f"{f.get('ngoai_pham_vi', 0)}) → cập nhật {f.get('cap_nhat', 0)} bài đã có; bài mới: "
-            f"trùng {f.get('trung', 0)}, từ loại trừ {f.get('loai_tru', 0)}, "
+            + (f"đã loại trước {f['da_loai_truoc']}, " if f.get("da_loai_truoc") else "")
+            + f"trùng {f.get('trung', 0)}, từ loại trừ {f.get('loai_tru', 0)}, "
             f"spam {f.get('spam', 0)}, "
             f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
             + (f", không nhắc từ khoá {f['khong_nhac']}" if f.get("khong_nhac") else "")

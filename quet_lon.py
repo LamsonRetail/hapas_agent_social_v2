@@ -583,13 +583,8 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
                             A._tran_nen_tang(p, nen=nen)[:2])) for p in plats}
                if any(A._khoa_rieng(p) for p in plats) else None)
     if not nen:
-        so_luot = {p: (len(queries) if p in ("instagram", "facebook") else 1) for p in plats}
-        est_tai_cho = sum(
-            A._START_COST.get(p, 0.0) * so_luot[p]
-            + A._UNIT_COST.get(p, 0.0) * lims[p] for p in plats)
-        rieng_usd = A._cau_tran_rieng(plats, None, {
-            p: A._START_COST.get(p, 0.0) + A._UNIT_COST.get(p, 0.0) * lims[p] / so_luot[p]
-            for p in plats}, nen=False)
+        est_tai_cho, est_luot = A._uoc_tai_cho(plats, lims, queries)
+        rieng_usd = A._cau_tran_rieng(plats, None, est_luot, nen=False)
         return tool_result(
             success=True, chi_uoc_tinh=True, se_chay_nen=False, queries=queries,
             platforms=plats, limit=lims, uoc_tinh_usd=round(est_tai_cho, 2),

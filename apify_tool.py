@@ -281,10 +281,10 @@ _ACTORS = {
 _MEMORY = {"threads": 1024}
 
 # Giá Apify mỗi item (USD) — YouTube Data API chính thức không tính tiền.
-# TikTok (16/10/2026): nguồn chính là TikTok API (`tiktok_api`, 0,002 USD mỗi trang 25–30
-# bài ≈ 0,00008/bài) — để 0,0002 (gấp ~2,5) cho phần trang lẻ và trang chồng nhau. Ước tính
-# CAO hơn thực tế thì người dùng chỉ ngạc nhiên dễ chịu. Khi API hỏng mới xuống chuỗi cũ
-# (clockworks 0,003/bài) — khi đó tiền thật vẫn chốt theo run, trần console vẫn chặn.
+# TikTok (16/10/2026): nguồn chính là TikTok API (`tiktok_api`) tính theo YÊU CẦU — ước tính
+# của social_listen dùng `tiktok_api.so_yeu_cau_tim` (mỗi từ ≥ 1 yêu cầu × 0,002 USD); số ở
+# đây (0,0002/bài) chỉ còn cho chỗ cần giá theo bài (`quet_lon` có giá riêng của actor cũ).
+# Khi API hỏng mới xuống chuỗi cũ (clockworks 0,003/bài) — tiền thật vẫn chốt theo run.
 _UNIT_COST = {"tiktok": 0.0002, "instagram": 0.0004, "facebook": 0.00259,
               "youtube": 0.0, "threads": 0.0025}
 _START_COST = {"instagram": 0.016, "threads": 0.02, "facebook": 0.00005}
@@ -2356,7 +2356,27 @@ def _cau_loai_video_tiktok(ds: list[dict], noi: str = "sheet") -> str:
     return s + f"; lọc theo cột '{_COT_LOAI_VIDEO}'."
 
 
-def _fetch_tiktok_fallback(q: list[str], limit: int) -> list[dict]:
+def _uoc_tai_cho(plats: list[str], lims: dict, queries: list[str]) -> tuple[float, dict]:
+    """(USD ước tính cả lượt, {nền tảng: USD mỗi lượt actor}) của social_listen tại chỗ.
+    Instagram/Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ. TikTok qua
+    TikTok API tính theo YÊU CẦU (review 16/10): mỗi từ khoá ≥ 1 yêu cầu, tối đa 2×(trang
+    cần)+1 trang — như `theo_doi.uoc_tu_khoa_nen_tang`; mỗi yêu cầu là một run."""
+    import tiktok_api
+    so_run = {p: (len(queries) if p in ("instagram", "facebook") else 1) for p in plats}
+    est = sum(_START_COST.get(p, 0.0) * so_run[p] + _UNIT_COST.get(p, 0.0) * lims[p]
+              for p in plats if p != "tiktok")
+    est_luot = {p: _START_COST.get(p, 0.0) + _UNIT_COST.get(p, 0.0) * lims[p] / so_run[p]
+                for p in plats}
+    if "tiktok" in plats:
+        q = _bo_trung_tu_khoa(queries) or [""]
+        est += tiktok_api.so_yeu_cau_tim(
+            len(q), math.ceil(lims["tiktok"] / len(q))) * tiktok_api.GIA_YEU_CAU
+        est_luot["tiktok"] = tiktok_api.GIA_YEU_CAU
+    return est, est_luot
+
+
+def _fetch_tiktok_fallback(q: list[str], limit: int,
+                           tran_usd: float | None = None) -> list[dict]:
     """clockworks/tiktok-hashtag-scraper -> đổi về đúng shape của apidojo.
 
     Chỉ nhận HASHTAG (không keyword search, không lọc ngày/quốc gia) nhưng bù
@@ -2371,7 +2391,7 @@ def _fetch_tiktok_fallback(q: list[str], limit: int) -> list[dict]:
     per = max(1, limit // max(1, len(tags)))
     try:
         raw = _call(_ACTORS["tiktok_fallback"],
-                    {"hashtags": tags, "resultsPerPage": per}, limit)
+                    {"hashtags": tags, "resultsPerPage": per}, limit, tran_usd=tran_usd)
     except Exception as e:  # noqa: BLE001
         print(f"[social_listen] tiktok fallback lỗi: {_che_token(e)}")
         return []
@@ -2407,29 +2427,38 @@ def _chuan_tiktok(raw: list) -> list[tuple]:
     return out
 
 
-def _fetch_tiktok(q: list[str], limit: int, country: str, d_from, d_to) -> list[tuple]:
-    # Nguồn CHÍNH từ 16/10/2026: TikTok API (scraptik) — lọc ngày phía server, 0,002 USD mỗi
-    # trang 30 bài, ~130 lần rẻ hơn mỗi bài dùng được (đo thật, xem `tiktok_api`). Lỗi hoặc
-    # không trả gì thì xuống chuỗi cũ bên dưới (apidojo → clockworks hashtag).
+_GIA_TT_DU_PHONG = {"apidojo": 0.0003, "clockworks": 0.003}   # USD/video, gói FREE
+
+
+def _fetch_tiktok(q: list[str], limit: int, country: str, d_from, d_to,
+                  tran_du_phong: float | None = None) -> list[tuple]:
+    """Nguồn CHÍNH từ 16/10/2026: TikTok API (scraptik) — lọc ngày phía server, 0,002 USD mỗi
+    trang 30 bài, ~130 lần rẻ hơn mỗi bài dùng được (đo thật, xem `tiktok_api`).
+
+    Chuỗi cũ (apidojo → clockworks hashtag, tính tiền THEO VIDEO) chỉ chạy khi API LỖI / không
+    dùng được — KHÔNG chạy khi API tìm thành công mà 0 bài (review 16/10: từ khoá hẹp với lọc 7
+    ngày hay ra 0, dự phòng thì đốt tới ~0,6 USD mỗi lượt). `tran_du_phong` (USD, `/theodoi`
+    truyền phần ngân sách còn lại): trần của CẢ chuỗi dự phòng; dưới sàn 0,1 USD thì không
+    chạy dự phòng."""
     import tiktok_api
     if tiktok_api.dung_api("tiktok_tim"):
         try:
-            raw = tiktok_api.tim(q, limit, d_from, d_to, vung=country or "VN")
+            return _chuan_tiktok(_chuan_clockworks(
+                tiktok_api.tim(q, limit, d_from, d_to, vung=country or "VN")))
         except LoiApify as e:
             if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
                 raise
             print(f"[social_listen] TikTok API lỗi, dùng nguồn cũ: {e.ma} {_che_token(e)}")
-            raw = []
         except Exception as e:  # noqa: BLE001 — shape lạ/lỗi khác: vẫn còn chuỗi cũ
             print(f"[social_listen] TikTok API lỗi, dùng nguồn cũ: {_che_token(e)}")
-            raw = []
-        if raw:
-            return _chuan_tiktok(_chuan_clockworks(raw))
+    if tran_du_phong is not None and tran_du_phong < _TRAN_USD_KHOANG[0]:
+        print("[social_listen] không chạy dự phòng TikTok: ngân sách còn dưới sàn 0,1 USD")
+        return []
     raw = _call(_ACTORS["tiktok"], {
         "keywords": q, "maxItems": limit, "location": country,
         "sortType": "DATE_POSTED", "dateRange": _tiktok_enum(d_from),
         "includeSearchKeywords": True,
-    }, limit)
+    }, limit, tran_usd=tran_du_phong)
     # Actor trả sentinel {"noResults": true} khi TikTok search không ra gì. Nếu
     # đếm chúng như dữ liệu thì báo cáo thành "cào 10 -> giữ 0", người đọc tưởng
     # bộ lọc ngày loại hết, trong khi thực tế nguồn KHÔNG trả gì. Phải loại sớm
@@ -2454,8 +2483,14 @@ def _fetch_tiktok(q: list[str], limit: int, country: str, d_from, d_to) -> list[
     # nhận, vì báo cáo sai về thị trường đắt hơn nhiều so với tiền một lần chạy.
     # Chi phí vẫn bị chặn bởi `limit` của người dùng, và được báo ra ở `nguon`.
     thieu = len(raw) < min(limit, _TIKTOK_NGUONG_LEO_THANG)
+    lim_cw = limit
+    if thieu and tran_du_phong is not None:
+        con = tran_du_phong - len(raw) * _GIA_TT_DU_PHONG["apidojo"]
+        lim_cw = min(limit, int(con / _GIA_TT_DU_PHONG["clockworks"]))
+        thieu = con >= _TRAN_USD_KHOANG[0] and lim_cw > 0
     if thieu:
-        them = _fetch_tiktok_fallback(q, limit)
+        them = _fetch_tiktok_fallback(q, lim_cw, None if tran_du_phong is None else round(
+            tran_du_phong - len(raw) * _GIA_TT_DU_PHONG["apidojo"], 2))
         if them:
             co = {str(x.get("postPage") or "") for x in raw}
             raw = raw + [x for x in them if str(x.get("postPage") or "") not in co]
@@ -2555,7 +2590,9 @@ def _fetch_facebook(q: list[str], limit: int, country: str, d_from, d_to) -> lis
     # Actor chỉ nhận MỘT query (string); có lọc ngày server-side thật.
     q = _bo_trung_tu_khoa(q)
     so = _SO_RUN.get()
-    if _goi_apify() == "FREE":
+    # Không biết gói (token phạm vi hẹp: /users/me 404) thì coi như Free — như `quet_lon` và
+    # `/theodoi`; gói trả phí thì đặt `APIFY_GOI`.
+    if _goi_apify() in ("FREE", ""):
         chon = _fb_tu_free(q, limit)
         if len(q) > len(chon) and so is not None:
             so.append({"ghi_chu": (
@@ -3646,13 +3683,9 @@ def _handle(args: dict, **kwargs) -> str:
     if tra_ngay is not None:
         return tra_ngay
     # Instagram/Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ khoá.
-    so_run = {p: (len(queries) if p in ("instagram", "facebook") else 1) for p in plats}
-    est = sum(_START_COST.get(p, 0.0) * so_run[p] + _UNIT_COST.get(p, 0.0) * lims[p]
-              for p in plats)
-    # Ước tính MỖI LƯỢT chạy actor của từng nền tảng — so với `tran_usd_<p>` để nói ra
-    # khi trần riêng trói (Apify dừng ở trần, có thể thiếu bài).
-    est_luot = {p: _START_COST.get(p, 0.0) + _UNIT_COST.get(p, 0.0) * lims[p] / so_run[p]
-                for p in plats}
+    # Ước tính MỖI LƯỢT chạy actor của từng nền tảng (`est_luot`) — so với `tran_usd_<p>` để
+    # nói ra khi trần riêng trói (Apify dừng ở trần, có thể thiếu bài).
+    est, est_luot = _uoc_tai_cho(plats, lims, queries)
     cau_bai_rieng = _cau_tran_rieng(plats, limit_xin)
     cau_usd_rieng = _cau_tran_rieng(plats, None, est_luot)
     # Lùi vài giây để đồng hồ máy lệch với Apify không làm sót run đầu tiên.

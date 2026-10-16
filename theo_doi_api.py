@@ -61,13 +61,12 @@ def tien_phan(p: str, ph: dict, items: list, meta: dict) -> float:
     return quet_lon._so_tien(p, ph, items, meta)
 
 
-def _thieu(ph: dict, items: list) -> list[str]:
-    if ph["bo_chuyen"] == "tiktok_ho_so":
-        co = {str((it.get("authorMeta") or {}).get("name") or it.get("input") or "").lower()
-              for it in items if it.get("webVideoUrl")}
-        return [t for t in ph["ten"] if t.lstrip("@").lower() not in co]
-    co = {it.get("videoWebUrl") for it in items}
-    return [u for u in ph["urls"] if u not in co]
+def _thieu(ph: dict, loi_ra: list) -> list[str]:
+    """Tài khoản / video API báo LỖI (không phải "đọc được mà rỗng" — review 16/10: tài khoản 0
+    video, video 0 bình luận không chạy dự phòng mỗi lượt), mà dự phòng có thể cứu được."""
+    loi = {str(k).lstrip("@").lower() for k, ma, _ in loi_ra if ma not in _KHONG_DU_PHONG}
+    ds = ph["ten"] if ph["bo_chuyen"] == "tiktok_ho_so" else ph["urls"]
+    return [x for x in ds if str(x).lstrip("@").lower() in loi]
 
 
 def _bo_cua(ph: dict, items: list, thieu: list[str]) -> list:
@@ -110,13 +109,14 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
     items: list = []
     loi = None
     usd_dp = 0.0
+    loi_ra: list = []
     try:
         try:
             if ph["bo_chuyen"] == "tiktok_ho_so":
-                items = TT.ho_so(ph["ten"], int(ph.get("n") or 5), tran_usd=cap)
+                items = TT.ho_so(ph["ten"], int(ph.get("n") or 5), tran_usd=cap, loi_ra=loi_ra)
             else:
                 items = TT.binh_luan(ph["urls"], int(ph.get("per") or 20),
-                                     int(ph.get("tra_loi") or 0), tran_usd=cap)
+                                     int(ph.get("tra_loi") or 0), tran_usd=cap, loi_ra=loi_ra)
         except A.LoiApify as e:
             loi = e
         except Exception as e:
@@ -124,18 +124,24 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
                 raise
             loi = A.LoiApify("LOI", A._che_token(f"{type(e).__name__}: {e}")[:250])
         usd = sum(TT.GIA_YEU_CAU for m in so if isinstance(m, dict) and m.get("run_id"))
-        thieu = _thieu(ph, items)
+        thieu = _thieu(ph, loi_ra)
         con = cap - usd
+        if loi is None and loi_ra and not thieu:
+            loi = A.LoiApify(loi_ra[0][1], f"TikTok API: {loi_ra[0][2]}")
         if (thieu and ph.get("du_phong") and getattr(loi, "ma", "LOI") not in _KHONG_DU_PHONG
                 and con >= A._TRAN_USD_KHOANG[0] and han - time.monotonic() > 30):
+            tran_dp = math.floor(con * 100) / 100       # dự phòng chỉ tiêu PHẦN CÒN của trần
             try:
-                dp, mdp = _du_phong(ph, thieu, round(con, 2), han, p)
-                usd_dp = float(mdp.get("usd") or 0) or len(dp) * ph["du_phong"]["gia"]
+                dp, mdp = _du_phong(ph, thieu, tran_dp, han, p)
+                # Sổ theo giá thật của actor cũ (Apify ghi tiền chậm: lấy số lớn hơn).
+                usd_dp = max(float(mdp.get("usd") or 0), len(dp) * ph["du_phong"]["gia"])
                 if dp:
                     items = _bo_cua(ph, items, thieu) + dp
-                    loi = None if not _thieu(ph, items) else loi
+                else:
+                    loi = loi or A.LoiApify(loi_ra[0][1], f"TikTok API: {loi_ra[0][2]}")
             except A.LoiApify as e:
-                usd_dp = float(e.meta.get("usd") or 0)
+                # Không biết dự phòng đã tiêu bao nhiêu: tính nguyên trần của nó.
+                usd_dp = float(e.meta.get("usd") or tran_dp)
                 loi = loi or e
     finally:
         for bien, t in reversed(moc):
@@ -192,6 +198,21 @@ def so_xin(cau_hinh: int, moc: dict | None, cung_dau: bool) -> tuple[int, str]:
     return n, f"lượt trước về {ve}/{xin} → xin {n}"
 
 
+def xoay_fb(q: list[str], lim: int, lim_cfg: int, moc: dict | None,
+            cung_dau: bool) -> tuple[list[str], int, int]:
+    """Facebook gói Free (5 bài/lượt, mỗi từ một lượt, ≤20 bài — `apify_tool._fb_tu_free`):
+    review 16/10 — co cỡ xin xuống 10 thì chỉ 2 từ đầu được quét, từ sau đói mãi. Nay: không co
+    dưới 5 × số từ (tới trần cấu hình), và XOAY điểm bắt đầu qua các lượt (mốc `xoay`) để mọi
+    từ khoá lần lượt được quét. -> (từ khoá theo thứ tự gửi, điểm xoay lượt sau, cỡ xin)."""
+    import apify_tool
+    moi_luot = apify_tool._FB_FREE_MOI_LUOT
+    lim = max(lim, min(lim_cfg, moi_luot * len(q)))
+    bat_dau = int((moc or {}).get("xoay") or 0) % len(q) if cung_dau and q else 0
+    q_gui = q[bat_dau:] + q[:bat_dau]
+    so_quet = len(apify_tool._fb_tu_free(q_gui, lim))
+    return q_gui, (bat_dau + so_quet) % len(q) if q else 0, lim
+
+
 def tach_da_biet(ma: str, hits: list[tuple], khoa_cua) -> tuple[list[dict], list[tuple], dict]:
     """Bài trong phạm vi → (dòng cập nhật số liệu của bài ĐÃ CÓ trong kho, bài mới cần lọc,
     {nền tảng: số dòng trùng trong lượt}). `khoa_cua(d)` → khoá bài."""
@@ -210,6 +231,73 @@ def tach_da_biet(ma: str, hits: list[tuple], khoa_cua) -> tuple[list[dict], list
                 for k, (d, _) in thay.items() if k in da]
     moi = [x for k, x in thay.items() if k not in da]
     return cap_nhat, moi, trung
+
+
+# ── Sổ "đã loại" của tìm theo từ khoá (review 16/10) ──
+# Vì sao file JSON cạnh `.moc-tu-khoa.json` mà không phải bảng: không đổi schema kho (vai `mark`
+# không có quyền DDL, bảng mới phải qua platform duyệt — KDLA), cùng kiểu sổ mốc đã có (ghi
+# nguyên tử, khởi động lại vẫn còn), cỡ tự chặn vì chỉ giữ bài trong phạm vi ≤ 92 ngày. Dấu
+# `dau` = từ loại trừ + bối cảnh + thị trường + từ khoá: đổi một trong số đó thì sổ cũ bỏ (bài
+# bị loại theo luật cũ được xét lại).
+_KHOA_LOAI = threading.Lock()
+LOAI_TOI_DA = 20000           # dòng mỗi dự án (an toàn; phạm vi ≤ 92 ngày)
+
+
+def _duong_loai():
+    return A._thu_muc_nen() / ".loai-tu-khoa.json"
+
+
+def dau_loai(du_an: dict, tu: list[str]) -> str:
+    import hashlib
+    import json
+    s = json.dumps([sorted(A._norm(str(x)) for x in du_an.get("tu_loai_tru") or []),
+                    str(du_an.get("boi_canh") or du_an.get("ten") or ""),
+                    str(du_an.get("thi_truong") or "VN"), sorted(A._norm(x) for x in tu)],
+                   ensure_ascii=False)
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
+
+
+def _doc_so_loai() -> dict:
+    import json
+    try:
+        d = json.loads(_duong_loai().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) and isinstance(d.get("du_an"), dict) else {}
+
+
+def doc_loai(ma: str, dau: str, tu: datetime.datetime) -> dict[str, list]:
+    """{khoá bài: [lý do, ngày đăng]} đã loại của dự án, cùng dấu luật, đăng từ `tu`."""
+    x = (_doc_so_loai().get("du_an") or {}).get(ma)
+    if not isinstance(x, dict) or x.get("dau") != dau:
+        return {}
+    moc = tu.astimezone(_VN).date().isoformat()
+    return {k: v for k, v in (x.get("bai") or {}).items()
+            if isinstance(v, list) and len(v) == 2 and str(v[1]) >= moc}
+
+
+def ghi_loai(ma: str, dau: str, moi: list[tuple], tu: datetime.datetime) -> None:
+    """Gộp bài bị loại lượt này vào sổ, bỏ bài đã ra khỏi phạm vi; ghi nguyên tử. Không ghi
+    được thì chỉ báo (lượt sau xét lại — tốn AI, không mất bài)."""
+    import json
+    import os
+    with _KHOA_LOAI:
+        d = _doc_so_loai() or {"du_an": {}}
+        cu = doc_loai(ma, dau, tu)
+        for khoa, ly, dt in moi:
+            if khoa and dt:
+                cu[str(khoa)] = [str(ly)[:40], dt.astimezone(_VN).date().isoformat()]
+        if len(cu) > LOAI_TOI_DA:
+            cu = dict(sorted(cu.items(), key=lambda kv: kv[1][1])[-LOAI_TOI_DA:])
+        d["du_an"][ma] = {"dau": dau, "bai": cu}
+        f = _duong_loai()
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError as e:
+            print(f"[theo_doi] không ghi được sổ bài đã loại: {type(e).__name__}", flush=True)
 
 
 def _so(v):

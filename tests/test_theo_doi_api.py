@@ -234,3 +234,85 @@ def test_phan_binh_luan_qua_api_va_viec_nen_cong_run_phu(monkeypatch, tmp_path):
     import threading
     vn._khoa = threading.RLock()
     assert set(vn.run_ids()) == {"r9", *ph["run_phu"]}
+
+
+# ───────────────────────────── review 16/10 ─────────────────────────────
+def test_so_tien_tim_tiktok_theo_gia_that_tung_actor():
+    """HIGH 1: run TikTok API 0,002; dự phòng theo video về (clockworks 0,003/video); dự phòng
+    lỗi thì tính nguyên trần của nó."""
+    phan = [{"run_id": "r1", "actor": T.TT_ACTOR}, {"run_id": "r2", "actor": T.TT_ACTOR},
+            {"run_id": "r3", "actor": "clockworks~tiktok-hashtag-scraper"}, {"loai": "moc"}]
+    got = [({"_nguon": "clockworks (dự phòng)"}, None)] * 3 + [({"_nguon": "TikTok API"}, None)]
+    assert T._tien_tim_tiktok(phan, got, None, 0.5) == pytest.approx(0.004 + 0.009)
+    assert T._tien_tim_tiktok(phan, [], "LOI: x", 0.5) == pytest.approx(0.504)
+    assert T.TT_ACTOR == TT.ACTOR
+
+
+def test_so_da_loai_khong_xet_lai_va_doi_luat_thi_xet_lai(mo):  # noqa: F811
+    """MEDIUM 3: bài bị loại (AI, từ loại trừ…) trong phạm vi không gửi AI lại lượt sau; đổi từ
+    loại trừ / bối cảnh / từ khoá thì sổ cũ bỏ."""
+    GiaKhoTk(mo)
+    ngay = datetime.datetime.now(_VN)
+    bai = [_tt_tim("kol.a", "1", "hapas lạc đề", ngay - datetime.timedelta(days=5)),
+           _tt_tim("kol.b", "2", "hapas guitar", ngay - datetime.timedelta(days=5))]
+    mo.setattr(A, "_FETCH", _fetch(bai))
+    xet: list = []
+
+    def ai(cho, *a, **k):
+        xet.extend(d["text"] for d, _ in cho)
+        return ({i: (False, "lac_de") for i, (d, _) in enumerate(cho) if "lạc đề" in d["text"]},
+                {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"})
+    mo.setattr(A, "_phan_xu_ai", ai)
+    da = dict(DU_AN, tk_bat=True, tk_so_bai=15)
+    _chay_tk(da)
+    assert xet == ["hapas lạc đề"]
+    tk = _chay_tk(da)
+    assert xet == ["hapas lạc đề"], "lượt 2: bài đã loại không gửi AI lại"
+    f = tk["pheu"]["tiktok"]
+    assert f["da_loai_truoc"] == 2 and "đã loại trước 2" in next(
+        c for c in T._cau_tk(tk) if c.startswith("phễu tìm TikTok"))
+    _chay_tk(dict(da, tu_loai_tru=["khác"]))
+    assert xet.count("hapas lạc đề") == 2, "đổi từ loại trừ: xét lại theo luật mới"
+
+
+def test_facebook_free_xoay_tu_khoa_qua_cac_luot():
+    """MEDIUM 5: gói Free không co dưới 5 × số từ (≤ 20) và xoay điểm bắt đầu."""
+    q = [f"k{i}" for i in range(6)]
+    gui, xoay, lim = TDA.xoay_fb(q, 10, 20, None, True)
+    assert lim == 20 and gui[:4] == q[:4] and xoay == 4
+    gui, xoay, lim = TDA.xoay_fb(q, 10, 20, {"xoay": 4}, True)
+    assert gui[:4] == ["k4", "k5", "k0", "k1"] and xoay == 2
+    assert TDA.xoay_fb(q, 10, 20, {"xoay": 4}, False)[0][0] == "k0", "đổi từ khoá: từ đầu"
+    assert TDA.xoay_fb(["a"], 5, 20, None, True)[2] == 5
+
+
+def test_phan_binh_luan_video_rong_khong_chay_du_phong_video_loi_thi_chay(monkeypatch):
+    """MEDIUM 2 + LOW: video 0 bình luận (API đọc được) không chạy clockworks; video lỗi thì chạy
+    cho ĐÚNG video đó, trong phần trần còn lại."""
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
+    u1, u2 = "https://www.tiktok.com/@a/video/70000001", "https://www.tiktok.com/@a/video/70000002"
+    ph = {"id": "bl-tiktok-0", "nen_tang": "tiktok", "per": 20, "day_du": False,
+          "actor": "clockworks~tiktok-comments-scraper"}
+    TDA.gan_binh_luan(ph, [u1, u2], 20)
+
+    def tra(actor, p):
+        if actor != TT.ACTOR:
+            return [{"cid": "x", "text": "dp", "videoWebUrl": u2}]
+        if p.get("listComments_awemeId") == "70000002":
+            raise A.LoiApify("LOI", "giả lỗi")
+        return [{"status_code": 0, "has_more": 0, "comments": []}]
+    r = GiaRun(monkeypatch, tra)
+    goc = r.run
+
+    def run(actor, payload, *a, **k):
+        try:
+            return goc(actor, payload, *a, **k)
+        except A.LoiApify as e:
+            e.meta.update(run_id="loi")
+            raise
+    monkeypatch.setattr(A, "_run_actor", run)
+    _v, (items, meta, loi, _) = _chay_phan(ph)
+    du_phong = [(a, p) for a, p, _ in r.goi if a != TT.ACTOR]
+    assert len(du_phong) == 1 and du_phong[0][1]["postURLs"] == [u2]
+    assert [x["text"] for x in items] == ["dp"] and loi is None
+    assert meta["usd"] == pytest.approx(2 * 0.002 + 0.003)   # giả báo 0,003/video

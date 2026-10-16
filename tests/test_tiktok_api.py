@@ -241,3 +241,69 @@ def test_goi_apify_dat_tay_qua_env(monkeypatch):
     assert A._goi_apify() == "STARTER"
     monkeypatch.delenv("APIFY_GOI")
     assert A._goi_apify() == ""          # bộ thử tắt hỏi trước (APIFY_KIEM_TRUOC=0)
+
+
+# ───────────── review 16/10: dự phòng, lỗi từng mục, ước tính theo yêu cầu ─────────────
+def test_tim_thanh_cong_ma_rong_thi_khong_chay_du_phong(api):
+    """HIGH 1: API tìm THÀNH CÔNG mà 0 bài (từ khoá hẹp + lọc 7 ngày) không được đẩy sang
+    clockworks (tính theo video) — giả `_run_actor` chỉ nhận actor TikTok API, gọi actor cũ là
+    bài thử đỏ."""
+    assert A._fetch_tiktok(["tu_hiem"], 30, "VN", NOW - datetime.timedelta(days=3), NOW) == []
+    assert [g.get("searchPosts_keyword") for g in api.goi] == ["tu_hiem"]
+
+
+def test_du_phong_chi_tieu_phan_ngan_sach_con_lai(monkeypatch):
+    def hong(*a, **k):
+        raise A.LoiApify("LOI", "API hỏng")
+    monkeypatch.setattr(TT, "tim", hong)
+    goi = []
+    monkeypatch.setattr(A, "_call", lambda actor, payload, limit, **k: (
+        goi.append((actor, limit, k.get("tran_usd"))), [])[1])
+    d3 = NOW - datetime.timedelta(days=3)
+    assert A._fetch_tiktok(["a"], 100, "VN", d3, NOW, tran_du_phong=0.05) == []
+    assert goi == [], "dưới sàn 0,1 USD: không chạy dự phòng"
+    A._fetch_tiktok(["a"], 100, "VN", d3, NOW, tran_du_phong=0.15)
+    assert goi[0] == (A._ACTORS["tiktok"], 100, 0.15)
+    # clockworks: 0,15 USD / 0,003 = 50 video tối đa, trần đúng phần còn.
+    assert goi[1] == (A._ACTORS["tiktok_fallback"], 50, 0.15)
+
+
+def test_loi_mot_tai_khoan_mot_video_khong_bo_ca_lo(api):
+    """MEDIUM 2: lỗi API của MỘT tài khoản / video ghi vào `loi_ra`, phần còn lại giữ."""
+    api.ho_so["kenh_a"] = {"uid": "u1", "unique_id": "kenh_a"}
+    api.bai["0"] = ([_aweme(1)], 0, "")
+    goc = api._tra
+
+    def tra(p):
+        if p.get("profile_username") == "kenh_loi" or p.get("listComments_awemeId") == "70000002":
+            raise A.LoiApify("LOI", "giả lỗi")
+        return goc(p)
+    api._tra = tra
+    loi: list = []
+    ra = TT.ho_so(["kenh_a", "kenh_loi", "khong_co"], 5, loi_ra=loi)
+    assert any(x.get("webVideoUrl") for x in ra if x.get("input") == "kenh_a")
+    assert sorted((k, ma) for k, ma, _ in loi) == [("kenh_loi", "LOI"), ("khong_co", "KHONG_THAY")]
+    api.bl[("70000001", 0)] = ([{"cid": "c1", "text": "x", "reply_comment_total": 0,
+                                 "reply_id": "0", "user": {"unique_id": "k"}}], 0)
+    loi = []
+    u1, u2 = (f"https://www.tiktok.com/@a/video/7000000{i}" for i in (1, 2))
+    ra = TT.binh_luan([u1, u2, "https://vt.tiktok.com/x/"], 20, loi_ra=loi)
+    assert [r["videoWebUrl"] for r in ra] == [u1]
+    assert sorted(k for k, _, _ in loi) == sorted([u2, "https://vt.tiktok.com/x/"])
+
+
+def test_tim_trang_sau_loi_giu_trang_truoc(api):
+    api.tim[("a", 0)] = ([_aweme(i) for i in range(30)], 1)
+    goc = api._tra
+    api._tra = lambda p: (_ for _ in ()).throw(A.LoiApify("LOI", "trang 2 hỏng")) \
+        if p.get("searchPosts_offset") else goc(p)
+    assert len(TT.tim(["a"], 60, None, None)) == 30
+
+
+def test_uoc_tai_cho_tiktok_theo_yeu_cau():
+    """MEDIUM 4: ≥ 1 yêu cầu mỗi từ khoá, tối đa 2×(trang cần)+1 — như /theodoi."""
+    est, luot = A._uoc_tai_cho(["tiktok"], {"tiktok": 100}, ["a", "b", "A"])
+    assert est == pytest.approx(TT.so_yeu_cau_tim(2, 50) * TT.GIA_YEU_CAU)    # 10 × 0,002
+    assert luot["tiktok"] == TT.GIA_YEU_CAU
+    assert A._uoc_tai_cho(["tiktok"], {"tiktok": 5}, ["k" + str(i) for i in range(21)])[0] == \
+        pytest.approx(21 * 3 * 0.002)

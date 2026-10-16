@@ -1155,7 +1155,7 @@ def test_tim_tu_khoa_giu_bai_nhac_hapas_gan_nguon_va_ghi_tien(mo):
             goi[p] = (list(q), limit, (d_to - d_from).days, k)
             fn = A._KHI_CO_RUN.get()
             if fn:
-                fn({"id": f"run-{p}"}, {})
+                fn({"id": f"run-{p}"}, {"actor": T.TT_ACTOR} if p == "tiktok" else {})
             if p == "tiktok":
                 return [_tt_tim("hapas.official", "1", "túi hapas mới về"),
                         _tt_tim("kol.b", "2", "review túi HAPAS xinh"),
@@ -1174,7 +1174,10 @@ def test_tim_tu_khoa_giu_bai_nhac_hapas_gan_nguon_va_ghi_tien(mo):
     assert goi["tiktok"][0] == ["hapas", "túi hapas", "yeutudieunhonhat"]   # bỏ trùng hoa/thường
     assert goi["instagram"][0] == ["hapas", "yeutudieunhonhat"]            # không dấu cách
     assert goi["facebook"][1] == 15 and goi["tiktok"][2] >= 30           # lần đầu lùi 30 ngày
-    assert goi["youtube"][3] == {"toi_da_trang": 1} and goi["tiktok"][3] == {}   # trần trang YT
+    assert goi["youtube"][3] == {"toi_da_trang": 1}                       # trần trang YT
+    # Dự phòng TikTok (tính theo video) chỉ được tiêu phần còn lại: 5 USD − ước tính API.
+    assert goi["tiktok"][3] == {"tran_du_phong": round(5.0 - T.uoc_tu_khoa_nen_tang(
+        "tiktok", 15, ["hapas", "túi hapas", "yeutudieunhonhat"]), 2)}
     kieu, rows = kho.bai[0]
     assert kieu == "tu_khoa"
     theo = {r["khoa"]: r for r in rows}

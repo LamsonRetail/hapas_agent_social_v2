@@ -320,14 +320,20 @@ def test_fb_free_moi_tu_khoa_5_bai_toi_da_20(api, monkeypatch, tu, quet, con):
         assert not ghi, "bản trùng sau chuẩn hoá không tính là bỏ sót"
 
 
-def test_fb_khong_biet_goi_thi_chay_nhu_cu(api, monkeypatch):
+def test_fb_khong_biet_goi_thi_coi_nhu_free(api, monkeypatch):
+    """Token phạm vi hẹp (/users/me lỗi): coi như Free — 5 bài mỗi từ, ≤ 20 bài; gói trả phí
+    thì `APIFY_GOI` mở hết."""
     monkeypatch.setenv("APIFY_KIEM_TRUOC", "1")
     api.khac = lambda url, params: R(500, {})
     goi = []
     monkeypatch.setattr(A, "_call", lambda actor, payload, limit, **k:
-                        goi.append(payload["query"]) or [])
+                        goi.append((payload["query"], payload["max_results"])) or [])
     A._fetch_facebook(["hapas", "matemade"], 100, "VN", NOW, NOW)
-    assert sorted(goi) == ["hapas", "matemade"]
+    assert sorted(goi) == [("hapas", 5), ("matemade", 5)]
+    goi.clear()
+    monkeypatch.setenv("APIFY_GOI", "STARTER")
+    A._fetch_facebook(["hapas", "matemade"], 100, "VN", NOW, NOW)
+    assert sorted(goi) == [("hapas", 50), ("matemade", 50)]
 
 
 # ───────────────────────────── Threads ─────────────────────────────

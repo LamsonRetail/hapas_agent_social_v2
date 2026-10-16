@@ -404,4 +404,7 @@ def hang_so_cho_trinh_duyet() -> dict:
             "bl_uoc_moi_bai": BL_UOC_MOI_BAI, "gioi_han": GIOI_HAN, "nen_tang": NEN_TANG,
             # Threads (16/10/2026): ≥ 10 bài mỗi tài khoản / từ khoá, ≤ 20 mỗi lượt; mặc định tắt.
             "th_toi_thieu_bai": TH_TOI_THIEU_BAI, "th_toi_da_moi_luot": TH_TOI_DA_MOI_LUOT,
-            "mac_dinh_tat": MAC_DINH_TAT}
+            "mac_dinh_tat": MAC_DINH_TAT,
+            # TikTok tìm theo từ khoá tính theo yêu cầu (16/10/2026) — `uoc_tk_nen_tang`.
+            "tk_tt_yeu_cau": TK_TT_YEU_CAU, "tk_tt_moi_trang": TK_TT_MOI_TRANG,
+            "tk_lam_moi": TK_LAM_MOI}

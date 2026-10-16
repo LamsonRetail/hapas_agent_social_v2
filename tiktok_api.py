@@ -236,7 +236,7 @@ def tim(q: list[str], limit: int, d_from=None, d_to=None, vung: str = "VN",
             return _tim_mot(kw, per, moc, (vung or "VN").upper(), d_from, ngan)
         except A.LoiApify as e:
             loi.append(e)
-            if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
+            if e.ma in _DUNG_HAN:
                 raise
             return []
 
@@ -257,9 +257,15 @@ def _tim_mot(kw: str, per: int, moc: int, vung: str, d_from, ngan: _Ngan) -> lis
     trong = 0
     off = 0
     for _ in range(2 * math.ceil(per / TIM_MOI_TRANG) + 1):
-        it = _goi({"searchPosts_keyword": kw, "searchPosts_count": TIM_MOI_TRANG,
-                   "searchPosts_offset": off, "searchPosts_region": vung,
-                   "searchPosts_publishTime": moc, "searchPosts_sortType": 0}, ngan)
+        try:
+            it = _goi({"searchPosts_keyword": kw, "searchPosts_count": TIM_MOI_TRANG,
+                       "searchPosts_offset": off, "searchPosts_region": vung,
+                       "searchPosts_publishTime": moc, "searchPosts_sortType": 0}, ngan)
+        except A.LoiApify as e:
+            # Review 16/10: trang sau lỗi thì GIỮ các trang trước (đã trả tiền).
+            if e.ma in _DUNG_HAN or not ra:
+                raise
+            break
         if it is None:
             break
         moi = 0
@@ -283,26 +289,44 @@ def _tim_mot(kw: str, per: int, moc: int, vung: str, d_from, ngan: _Ngan) -> lis
     return ra
 
 
+# Lỗi làm dừng CẢ lượt (không phải lỗi riêng một tài khoản / video / từ khoá).
+_DUNG_HAN = ("HET_TIEN_THANG", "DA_HUY")
+
+
+def _ghi_loi(loi_ra: list | None, khoa: str, e: Exception) -> None:
+    if loi_ra is not None:
+        loi_ra.append((khoa, getattr(e, "ma", "LOI"), str(e)[:200]))
+
+
 # ───────────────────────────── hồ sơ tài khoản ─────────────────────────────
-def ho_so(ten: list[str], n: int, tran_usd: float | None = None) -> list[dict]:
+def ho_so(ten: list[str], n: int, tran_usd: float | None = None,
+          loi_ra: list | None = None) -> list[dict]:
     """Bài MỚI NHẤT của từng tài khoản (item kiểu clockworks~tiktok-profile-scraper, bỏ bài
     ghim như `excludePinnedPosts`). Không đọc được thì một item {"input", "note"} như actor
-    cũ (`account_tool._doc_tiktok` ghi thành ghi chú của nguồn)."""
+    cũ (`account_tool._doc_tiktok` ghi thành ghi chú của nguồn). Lỗi API của MỘT tài khoản
+    không ném ra (review 16/10: ném là bỏ cả lô): ghi `(tên, mã, lý do)` vào `loi_ra` — bên
+    gọi chỉ chạy dự phòng cho đúng các tài khoản đó. Tài khoản đọc được mà KHÔNG có video thì
+    không phải lỗi (không chạy dự phòng mỗi lượt)."""
     ngan = _Ngan(tran_usd)
-    return [x for ds in _song_song(lambda t: _ho_so_mot(t, n, ngan),
+    return [x for ds in _song_song(lambda t: _ho_so_mot(t, n, ngan, loi_ra),
                                     [str(t).lstrip("@") for t in ten if str(t).strip()])
             for x in ds]
 
 
-def _ho_so_mot(ten: str, n: int, ngan: _Ngan) -> list[dict]:
+def _ho_so_mot(ten: str, n: int, ngan: _Ngan, loi_ra: list | None = None) -> list[dict]:
     try:
         it = _goi({"profile_username": ten, "profile_region": "VN"}, ngan)
     except A.LoiApify as e:
-        if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
+        if e.ma in _DUNG_HAN:
             raise
+        _ghi_loi(loi_ra, ten, e)
         return [{"input": ten, "note": f"TikTok API: {e}"[:200]}]
     u = (it or {}).get("user") or {}
     if not u.get("uid"):
+        # Không thấy tài khoản: actor cũ có thể vẫn đọc được → ghi lỗi để chạy dự phòng (khác
+        # tài khoản ĐỌC ĐƯỢC mà 0 video — không phải lỗi).
+        _ghi_loi(loi_ra, ten, A.LoiApify("NGAN_SACH", "chạm trần chi phí của lượt")
+                 if it is None else A.LoiApify("KHONG_THAY", "TikTok API không thấy tài khoản"))
         return [{"input": ten, "note": "TikTok API không thấy tài khoản này"
                  if it is not None else "chạm trần chi phí của lượt"}]
     am = _tac_gia(u)
@@ -315,8 +339,11 @@ def _ho_so_mot(ten: str, n: int, ngan: _Ngan) -> list[dict]:
                        "userPosts_count": BAI_MOI_TRANG, "userPosts_region": "VN",
                        "userPosts_maxCursor": con_tro}, ngan)
         except A.LoiApify as e:
-            if e.ma in ("HET_TIEN_THANG", "DA_HUY") or not bai:
+            if e.ma in _DUNG_HAN:
                 raise
+            if not bai:
+                _ghi_loi(loi_ra, ten, e)
+                return [{"input": ten, "authorMeta": am, "note": f"TikTok API: {e}"[:200]}]
             break
         if it is None:
             break
@@ -344,19 +371,25 @@ def id_video(url: str) -> str | None:
 
 
 def binh_luan(urls: list[str], per: int, tra_loi: int = 20,
-              tran_usd: float | None = None) -> list[dict]:
+              tran_usd: float | None = None, loi_ra: list | None = None) -> list[dict]:
     """Bình luận của từng video (item kiểu clockworks~tiktok-comments-scraper). Mỗi video tối
     đa `per` dòng (gốc + trả lời, như `maxItems` = per × số bài của actor cũ): bình luận gốc
     trước (50/yêu cầu), rồi trả lời của các luồng nhiều trả lời nhất (tối đa `tra_loi` mỗi
-    luồng, 1 yêu cầu/luồng). Link không bóc được id video (link rút gọn) thì bỏ qua — bên gọi
-    chạy dự phòng cho bài thiếu."""
+    luồng, 1 yêu cầu/luồng). Link không bóc được id video (link rút gọn) và video lỗi API ghi
+    vào `loi_ra` (không ném — review 16/10) — bên gọi chạy dự phòng cho đúng các video đó.
+    Video đọc được mà 0 bình luận KHÔNG phải lỗi."""
     ngan = _Ngan(tran_usd)
     cac = [(u, id_video(u)) for u in urls]
-    ra = _song_song(lambda x: _bl_mot(x[0], x[1], per, tra_loi, ngan) if x[1] else [], cac)
+    for u, vid in cac:
+        if not vid:
+            _ghi_loi(loi_ra, u, A.LoiApify("LOI", "link không có id video (link rút gọn?)"))
+    ra = _song_song(lambda x: _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra) if x[1] else [],
+                    cac)
     return [r for ds in ra for r in ds]
 
 
-def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan) -> list[dict]:
+def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
+            loi_ra: list | None = None) -> list[dict]:
     goc: list[dict] = []
     thay: set[str] = set()
     con_tro = 0
@@ -376,8 +409,11 @@ def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan) -> list[dic
                 break
             con_tro = max(con_tro + BL_MOI_TRANG, _so(it.get("cursor")) or 0)
     except A.LoiApify as e:
-        if e.ma in ("HET_TIEN_THANG", "DA_HUY") or not goc:
+        if e.ma in _DUNG_HAN:
             raise
+        if not goc:
+            _ghi_loi(loi_ra, url, e)
+            return []
     goc = goc[:per]
     ra = list(goc)
     if tra_loi > 0:
@@ -389,7 +425,7 @@ def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan) -> list[dic
                 it = _goi({"commentReplies_commentId": c["cid"], "commentReplies_awemeId": vid,
                            "commentReplies_count": min(TRA_LOI_MOI_TRANG, tra_loi)}, ngan)
             except A.LoiApify as e:
-                if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
+                if e.ma in _DUNG_HAN:
                     raise
                 break
             if it is None:
@@ -417,7 +453,7 @@ def so_lieu_bai(urls: list[str], tran_usd: float | None = None) -> list[dict]:
         try:
             it = _goi({"post_awemeId": vid, "post_region": "VN"}, ngan)
         except A.LoiApify as e:
-            if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
+            if e.ma in _DUNG_HAN:
                 raise
             return []
         a = (it or {}).get("aweme_detail")

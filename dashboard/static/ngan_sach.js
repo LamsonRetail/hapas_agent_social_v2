@@ -104,6 +104,10 @@
     var gia = (hs.tk_gia || {})[p] || 0;
     if (!q.length || !gia || so <= 0) return 0;
     if (p === "instagram") return r4(q.length * (hs.tk_khoi.instagram + so * gia) * hs.he_so);
+    if (p === "tiktok") {            // TikTok API tính theo YÊU CẦU (= chi_phi.uoc_tk_nen_tang)
+      var trang = 2 * Math.ceil(Math.ceil(so / q.length) / (hs.tk_tt_moi_trang || 30)) + 1;
+      return r4((q.length * trang + (hs.tk_lam_moi || 0)) * (hs.tk_tt_yeu_cau || 0) * hs.he_so);
+    }
     var n = p === "threads" ? Math.max(so, thMin) : so;
     return r4((n * gia + ((hs.tk_khoi || {})[p] || 0)) * hs.he_so);
   }
