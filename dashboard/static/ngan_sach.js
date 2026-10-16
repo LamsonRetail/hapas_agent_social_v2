@@ -163,6 +163,13 @@
     if (e.textContent !== chu) e.textContent = chu;
     if (so != null) e.setAttribute("data-usd", String(so));
   }
+  // Ghi chú nằm trong nút ⓘ (17/10/2026): đổi chữ của bóng nổi, không đổi chữ "i" trên nút.
+  function ghiGoiY(khoa, chu) {
+    var e = o(khoa);
+    if (!e || e.getAttribute("data-goi-y") === chu) return;
+    e.setAttribute("data-goi-y", chu);
+    e.setAttribute("aria-label", "Giải thích: " + chu);
+  }
   function oUsd(khoa, c, gia) {
     var e = o(khoa);
     if (!e) return;
@@ -216,7 +223,7 @@
     var fb = o("ghi-fb");             // gói FREE: đặt quá tk_fb_toi_da thì làm nổi ghi chú
     if (fb) {
       var vuotFb = kq.tk.facebook && kq.tk.facebook.bat && kq.tk.facebook.so_bai > hs.tk_fb_toi_da;
-      fb.classList.toggle("ns-ghi--bat", !!vuotFb);
+      fb.classList.toggle("goi-y--canh", !!vuotFb);
     }
     ghi("tong-tk", soVn(kq.uoc_tk, 3), kq.uoc_tk);
     ghi("tong-bl", soVn(kq.uoc_bl, 3), kq.uoc_bl);
@@ -240,7 +247,7 @@
       ? "vượt trần " + soVn(toiDa - tran, 2) + " USD, Mark dừng quét khi chạm trần; " +
         (duLuot > 0 ? "vừa trần khi ≤ " + soVn(duLuot, 3) + " USD/lượt." : "riêng nguồn theo dõi đã chạm trần.")
       : "trong trần, còn dư " + soVn(tran - toiDa, 2) + " USD.");
-    ghi("thang-cong-thuc", "= đã tiêu " + soVn(D.da_tieu, 2) + " + nguồn " + soVn(D.nguon_con_lai, 2) +
+    ghiGoiY("thang-cong-thuc", "= đã tiêu " + soVn(D.da_tieu, 2) + " + nguồn " + soVn(D.nguon_con_lai, 2) +
       " + " + (D.co_lich ? soVn(ngay, 0) + " lượt theo lịch" : soVn(ngay, 1) + " ngày") + " × " +
       soVn(kq.tong, 3));
     var hop = o("thang-hop");
@@ -265,7 +272,7 @@
     if (ht) ht.disabled = !ban;
   }
 
-  ghi("ghi-ig", "Chỉ từ không dấu cách (" + TU_IG.length + " từ)");
+  ghiGoiY("ghi-ig", "Chỉ từ không dấu cách (" + TU_IG.length + " từ)");
 
   // giá mỗi mẫu nhanh (chỉ phụ thuộc từ khoá dự án) — ghi ngay trên nút
   Object.keys(MAU).forEach(function (k) {

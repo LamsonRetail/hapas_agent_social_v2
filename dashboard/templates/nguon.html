@@ -27,13 +27,13 @@
 {% set dang = nguon|selectattr('trang_thai', 'equalto', 'dang_theo_doi')|list %}
 <div class="luoi luoi-kpi">
   <div class="the-khoi kpi kpi--xanh"><span class="kpi__icon" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg></span>
-    <div class="kpi__than"><div class="kpi__nhan">Nguồn</div><div class="kpi__so">{{ nguon|length }}</div><div class="kpi__doi">trong dự án</div></div></div>
+    <div class="kpi__than"><div class="kpi__nhan">Nguồn</div><div class="kpi__so">{{ nguon|length }}</div></div></div>
   <div class="the-khoi kpi kpi--la"><span class="kpi__icon" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
-    <div class="kpi__than"><div class="kpi__nhan">Đang theo dõi</div><div class="kpi__so">{{ dang|length }}</div><div class="kpi__doi">{{ nguon|length - dang|length }} tạm dừng</div></div></div>
+    <div class="kpi__than"><div class="kpi__nhan">Đang theo dõi</div><div class="kpi__so">{{ dang|length }}</div><div class="kpi__phu">{{ nguon|length - dang|length }} tạm dừng</div></div></div>
   <div class="the-khoi kpi kpi--hong"><span class="kpi__icon" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.2M12 17h.01"/></svg></span>
-    <div class="kpi__than"><div class="kpi__nhan">Lỗi lần quét cuối</div><div class="kpi__so">{{ nguon|selectattr('loi_cuoi')|list|length }}</div><div class="kpi__doi">nguồn</div></div></div>
+    <div class="kpi__than"><div class="kpi__nhan">Lỗi lần quét cuối</div><div class="kpi__so">{{ nguon|selectattr('loi_cuoi')|list|length }}</div></div></div>
   <div class="the-khoi kpi kpi--cam"><span class="kpi__icon" aria-hidden="true"><svg class="bt" viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M3.5 12h4M16.5 12h4"/><circle cx="12" cy="12" r="3.2"/></svg></span>
-    <div class="kpi__than"><div class="kpi__nhan">Đề xuất chờ duyệt</div><div class="kpi__so">{{ de_xuat|length }}</div><div class="kpi__doi">nguồn mới nổi lên</div></div></div>
+    <div class="kpi__than"><div class="kpi__nhan">Đề xuất chờ duyệt <button type="button" class="goi-y" data-goi-y="Nguồn mới nổi lên khi quét, chờ quản lý duyệt (mục 4).">i</button></div><div class="kpi__so">{{ de_xuat|length }}</div></div></div>
 </div>
 
 <section class="the-khoi cach-duoi">
