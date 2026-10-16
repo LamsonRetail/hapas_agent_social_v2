@@ -353,3 +353,67 @@ def lam_moi_tiktok(v, ma: str, luot: int, tu: datetime.datetime, con: float,
     if rows:
         tk["cap_nhat"] = K.cap_nhat_so_lieu(ma, luot, rows)
     return tk
+
+
+# ── Lượt "nổi" của tìm theo từ khoá TikTok (17/10/2026) ──
+# Chủ dự án 16/10: "không cào được các bài rất viral như trong kompa". Chẩn đoán trên 16 nguồn
+# TikTok top thảo luận của Kompa (HAPAS, 16/09–16/10): KOL đăng MỘT video seeding (#HAPAS
+# #LAMMOIDIEUVIYEU #QUATANG2010, 30/09–04/10, 750–5.000 bình luận mỗi video) — lượt tìm thường
+# sắp theo LIÊN QUAN, xin ~15 bài mỗi từ (1 trang 30 bài) và từ lượt thứ hai chỉ xin "tuần này"
+# (cửa sổ tăng dần), nên video viral cũ hơn một tuần không bao giờ lọt trang đầu. Đo thật 17/10
+# (21 từ khoá, 30 ngày, 1 trang mỗi từ — cùng giá 0,042 USD): sắp "nhiều thích" bắt 12/14 nhà
+# sáng tạo (90% số thảo luận Kompa), "liên quan" 9/14 (53%); 2 trang "nhiều thích" 13/14 (94%).
+# Hashtag (challengePosts) chỉ lật được ~100 video/tag và bắt 7/14 (27%) — không dùng.
+# Nên: mỗi `NOI_GIO_GIAN` giờ một lượt sắp "nhiều thích" trên 30 ngày gần nhất, `NOI_TRANG`
+# trang mỗi từ khoá; bài về đi CÙNG phễu (bài đã có → cập nhật số bình luận/xem như Kompa; bài
+# mới → lọc + AI). Tiền nằm TRONG ước tính TikTok sẵn có (2×trang cần + 1 trang mỗi từ — lượt
+# thường hầu như chỉ dùng 1 trang): trần = phần ước tính chưa dùng, kẹp phần còn của tháng/việc.
+NOI_GIO_GIAN = 20            # giờ tối thiểu giữa hai lượt nổi (≈ 1 lượt/ngày có lượt quét)
+NOI_TRANG = 2                # trang (30 bài) mỗi từ khoá
+NOI_NGAY = 30                # bộ lọc ngày phía server: "tháng này"
+KHOA_MOC_NOI = "tiktok_noi"  # khoá trong sổ mốc tìm theo từ khoá (`theo_doi.ghi_moc_tk`)
+
+
+def den_luot_noi(moc: dict | None, bay_gio: datetime.datetime) -> tuple[bool, str]:
+    """Lượt này có chạy lượt nổi TikTok không. -> (có, lý do)."""
+    try:
+        luc = datetime.datetime.fromisoformat(str((moc or {}).get("luc") or ""))
+    except ValueError:
+        return True, "chưa có lượt nổi"
+    luc = luc if luc.tzinfo else luc.replace(tzinfo=_VN)
+    cach = bay_gio - luc
+    if cach < datetime.timedelta(hours=NOI_GIO_GIAN):
+        return False, f"lượt nổi gần nhất {luc.astimezone(_VN):%d/%m %H:%M} (< {NOI_GIO_GIAN} giờ)"
+    return True, f"lượt nổi trước {luc.astimezone(_VN):%d/%m %H:%M}"
+
+
+def tran_noi(so_tu: int, uoc_tiktok: float, da_tieu: float, con: float) -> float:
+    """Trần USD của lượt nổi: đủ `NOI_TRANG` trang mỗi từ, nhưng không vượt phần ước tính TikTok
+    CHƯA dùng (chừa `LAM_MOI_TOI_DA` yêu cầu làm mới) và phần còn của tháng/việc."""
+    du = so_tu * NOI_TRANG * TT.GIA_YEU_CAU
+    du_uoc = uoc_tiktok - da_tieu - LAM_MOI_TOI_DA * TT.GIA_YEU_CAU
+    return round(max(0.0, min(du, du_uoc, con - da_tieu)), 4)
+
+
+def tim_noi_tiktok(q: list[str], bay_gio: datetime.datetime, tran: float) -> list[tuple]:
+    """Bài TikTok nhiều thích nhất 30 ngày của từng từ khoá -> [(dòng, ngày VN)] như
+    `apify_tool._FETCH["tiktok"]`. Chỉ TikTok API: lỗi thì trả [] (KHÔNG xuống chuỗi dự phòng
+    tính tiền theo video — lượt nổi là phần thêm). Run id đi qua `apify_tool._KHI_CO_RUN` của
+    bên gọi (sổ tiền chung của lượt tìm TikTok)."""
+    so_yc = int(tran / TT.GIA_YEU_CAU + 1e-9)
+    if not q or so_yc <= 0 or not TT.dung_api("tiktok_tim"):
+        return []
+    try:
+        items = TT.tim(q, len(q) * NOI_TRANG * TT.TIM_MOI_TRANG,
+                       bay_gio - datetime.timedelta(days=NOI_NGAY), bay_gio,
+                       tran_usd=so_yc * TT.GIA_YEU_CAU, sap=TT.SAP_NHIEU_THICH,
+                       trang_toi_da=NOI_TRANG)
+    except A.LoiApify as e:
+        if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
+            raise
+        print(f"[theo_doi] lượt nổi TikTok lỗi: {e.ma} {A._che_token(str(e))[:120]}", flush=True)
+        return []
+    ra = A._chuan_tiktok(A._chuan_clockworks(items))
+    for d, _ in ra:
+        d["_noi"] = True
+    return ra

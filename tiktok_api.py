@@ -62,6 +62,12 @@ BL_MOI_TRANG = 50
 TRA_LOI_MOI_TRANG = 50
 _TRAN_LUOT = 0.1             # trần USD gửi Apify cho MỘT yêu cầu (sàn của `_run_actor`)
 _MOC_NGAY = (7, 30, 90, 180)  # searchPosts_publishTime; 1 ("hôm qua") bỏ — chỉ ra 8 bài
+#: `searchPosts_sortType` (input schema scraptik): 0 = liên quan, 1 = nhiều thích nhất, 3 = ngày.
+#: Đo 17/10/2026 (21 từ khoá HAPAS, 30 ngày, 1 trang/từ, cùng 0,042 USD): "nhiều thích" bắt
+#: 12/14 nhà sáng tạo top thảo luận của Kompa (90% số thảo luận), "liên quan" chỉ 9/14 (53%).
+#: Mỗi câu tìm chỉ lật được ~3–4 trang (≈ 80–110 bài) dù sắp kiểu nào — không thể "lật hết".
+SAP_LIEN_QUAN = 0
+SAP_NHIEU_THICH = 1
 _SONG_SONG = 3               # video/tài khoản chạy song song (chừa chỗ cho việc khác)
 
 # ── Bảng chọn actor: MỘT chỗ quyết định nguồn chính + dự phòng cho từng việc ──
@@ -217,12 +223,16 @@ def _song_song(fn, cac: list) -> list:
 
 # ───────────────────────────── tìm theo từ khoá ─────────────────────────────
 def tim(q: list[str], limit: int, d_from=None, d_to=None, vung: str = "VN",
-        tran_usd: float | None = None) -> list[dict]:
+        tran_usd: float | None = None, sap: int = SAP_LIEN_QUAN,
+        trang_toi_da: int | None = None) -> list[dict]:
     """Bài TikTok theo từ khoá (item kiểu clockworks). Mỗi từ khoá xin ~`limit`/số từ bài
     TRONG `d_from`..: lật trang (30 bài/yêu cầu) tới đủ, hết trang, hoặc tối đa
     2×(trang cần)+1 trang. Trả MỌI bài đã trả tiền (kể cả ngoài `d_from` — bên gọi tự lọc:
     `/theodoi` dùng chúng để cập nhật số liệu bài đã biết). Lỗi một từ khoá không làm hỏng từ
-    khác; mọi từ khoá đều lỗi thì ném lỗi cuối."""
+    khác; mọi từ khoá đều lỗi thì ném lỗi cuối.
+
+    `sap`: thứ tự của TikTok (`SAP_LIEN_QUAN` mặc định, `SAP_NHIEU_THICH` cho lượt nổi —
+    `theo_doi_api.tim_noi_tiktok`); `trang_toi_da`: trần trang MỖI từ khoá (None = theo `limit`)."""
     q = A._bo_trung_tu_khoa(q)
     if not q or limit <= 0:
         return []
@@ -233,7 +243,8 @@ def tim(q: list[str], limit: int, d_from=None, d_to=None, vung: str = "VN",
 
     def mot(kw: str) -> list[dict]:
         try:
-            return _tim_mot(kw, per, moc, (vung or "VN").upper(), d_from, ngan)
+            return _tim_mot(kw, per, moc, (vung or "VN").upper(), d_from, ngan, sap,
+                            trang_toi_da)
         except A.LoiApify as e:
             loi.append(e)
             if e.ma in _DUNG_HAN:
@@ -251,16 +262,20 @@ def tim(q: list[str], limit: int, d_from=None, d_to=None, vung: str = "VN",
     return ra
 
 
-def _tim_mot(kw: str, per: int, moc: int, vung: str, d_from, ngan: _Ngan) -> list[dict]:
+def _tim_mot(kw: str, per: int, moc: int, vung: str, d_from, ngan: _Ngan,
+             sap: int = 0, trang_toi_da: int | None = None) -> list[dict]:
     ra: list[dict] = []
     thay: set[str] = set()
     trong = 0
     off = 0
-    for _ in range(2 * math.ceil(per / TIM_MOI_TRANG) + 1):
+    so_trang = 2 * math.ceil(per / TIM_MOI_TRANG) + 1
+    if trang_toi_da is not None:
+        so_trang = min(so_trang, max(0, int(trang_toi_da)))
+    for _ in range(so_trang):
         try:
             it = _goi({"searchPosts_keyword": kw, "searchPosts_count": TIM_MOI_TRANG,
                        "searchPosts_offset": off, "searchPosts_region": vung,
-                       "searchPosts_publishTime": moc, "searchPosts_sortType": 0}, ngan)
+                       "searchPosts_publishTime": moc, "searchPosts_sortType": sap}, ngan)
         except A.LoiApify as e:
             # Review 16/10: trang sau lỗi thì GIỮ các trang trước (đã trả tiền).
             if e.ma in _DUNG_HAN or not ra:

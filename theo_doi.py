@@ -1143,8 +1143,12 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p,
                                   "trang_thai": "loi", "ma": "KHONG_KIEM_DUOC", "usd_so": 0.0})
                 continue
-            dung = A._youtube_co_key() if p == "youtube" else _nen_tang_dung_duoc(p)[0]
+            dung, ly_tat = ((A._youtube_co_key(), "máy chạy Mark chưa có YOUTUBE_DATA_API_KEY")
+                            if p == "youtube" else _nen_tang_dung_duoc(p))
             if not dung:
+                # Review 17/10 (lượt 8: Threads bật trên dashboard mà không có dấu vết nào):
+                # nền tảng BẬT cho dự án nhưng không chạy thì phải để lại lý do.
+                _bo_qua_tk(v, tk, p, "TAT_CONSOLE", ly_tat)
                 continue
             uoc = (uoc_web(so_bai, tu, cfg[p]["boc"]) if p == "web"
                    else uoc_tu_khoa_nen_tang(p, so_bai, tu, cfg[p]["so_tu"], fb_toi_da))
@@ -1152,11 +1156,19 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # Trần trang dự phòng là TRẦN, không phải tiền chắc tiêu: chỉ cần đủ cho phần
                 # tìm Google; phần đọc dự phòng tự co theo phần còn lại (`nguon_web.thu_thap`).
                 uoc = uoc_web(so_bai, tu, 0)
+            if p == "threads" and uoc > min(con, _con_viec(v)) + 1e-9:
+                co = _co_threads(tu, so_bai, min(con, _con_viec(v)))
+                if co:
+                    q, so_bai, uoc = co
+                    tk["ghi_chu"].append(
+                        f"tìm Threads: ngân sách còn {_usd(min(con, _con_viec(v)))} USD — co còn "
+                        f"{len(q)} từ khoá đầu × {TH_TOI_THIEU_BAI} bài (ước tính {_usd(uoc)} USD)")
             if uoc > min(con, _con_viec(v)) + 1e-9 or v.con_giay() < _CHUA_GIAY_CUOI + 60:
-                ly = "hết giờ" if v.con_giay() < _CHUA_GIAY_CUOI + 60 else "hết ngân sách"
-                tk["ghi_chu"].append(f"tìm {_TEN[p]}: bỏ qua ({ly})")
-                _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p,
-                                  "trang_thai": "loi", "ma": "NGAN_SACH", "usd_so": 0.0})
+                het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
+                _bo_qua_tk(v, tk, p, "QUA_GIO" if het_gio else "NGAN_SACH",
+                           "hết giờ" if het_gio else "hết ngân sách",
+                           "" if het_gio else f"ước tính {_usd(uoc)} USD, còn "
+                           f"{_usd(min(con, _con_viec(v)))} USD")
                 continue
             if p == "web":
                 tien, web_hits = _tim_web(v, du_an, luot, cfg[p], tu, min(con, _con_viec(v)),
@@ -1200,8 +1212,14 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             got: list = []
             loi = None
             so_run_truoc = len(_phan_tk(v))
+            ve_thuong = 0
+            noi: dict = {}
             try:
                 got = A._FETCH[p](q_gui, lim, "VN", d_from, bay_gio, **them) or []
+                ve_thuong = len(got)
+                if p == "tiktok":
+                    got, noi = _them_luot_noi(v, q, got, moc_cu, bay_gio, uoc, con,
+                                              _phan_tk(v)[so_run_truoc:])
             except Exception as e:
                 if type(e).__name__ == "MatQuyen":
                     raise
@@ -1232,6 +1250,11 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 continue
             ph_p = tk["pheu"][p] = _pheu_moi(ngay, ly_cs)
             ph_p.update(ve=len(got), xin=lim, xin_ly_do=ly_xin)
+            if noi:
+                ph_p["noi"] = noi
+                if noi.get("ve"):
+                    moc_moi[TDA.KHOA_MOC_NOI] = {"luc": bay_gio.isoformat(timespec="seconds"),
+                                                 "luot": luot, "ve": noi["ve"]}
             for d, dt in got:
                 # Giữ MỌI bài trong PHẠM VI theo dõi (chủ dự án 16/10), không chỉ cửa sổ tăng dần.
                 if dt and tu_pv <= dt <= bay_gio + datetime.timedelta(hours=1) and d.get("link"):
@@ -1242,8 +1265,9 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 else:
                     ph_p["ngoai_pham_vi"] += 1
             if got:
+                # `ve` = bài của lượt THƯỜNG (`so_xin` co giãn theo nó) — không tính lượt nổi.
                 moc_moi[p] = {"luc": bay_gio.isoformat(timespec="seconds"), "dau": dau,
-                              "luot": luot, "xin": lim, "ve": len(got)}
+                              "luot": luot, "xin": lim, "ve": ve_thuong}
                 if xoay is not None:
                     moc_moi[p]["xoay"] = xoay
         tk["lay"] = len(hits) + sum(len(x[0]) for x in web_cho)
@@ -1283,6 +1307,55 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 v.luu()
     tk["usd"] = round(tk["usd"], 4)
     return tk
+
+
+def _bo_qua_tk(v, tk: dict, p: str, ma: str, ly: str, chi_tiet: str = "") -> None:
+    """Nền tảng BẬT cho dự án mà lượt này không tìm: phần "moc" (mã `ma`) + câu ghi chú + phễu
+    `{"bo_qua": ly}` — sổ việc (`pheu_tu_khoa`) và `luot_quet.ghi_chu` đều thấy lý do.
+    Chẩn đoán 17/10: Threads của HAPAS bật mà lượt 8 không có dòng phễu nào — nhánh công tắc
+    console tắt bỏ qua im lặng, còn câu "bỏ qua (hết ngân sách)" nằm SAU các dòng phễu dài nên
+    bị cắt mất ở 2.000 ký tự của `luot_quet.ghi_chu`."""
+    tk["ghi_chu"].append(f"tìm {_TEN.get(p, p)}: bỏ qua ({ly})"
+                         + (f" — {chi_tiet}" if chi_tiet else ""))
+    ly = f"{ly} — {chi_tiet}" if chi_tiet else ly
+    tk["pheu"][p] = {**_pheu_moi(0, ly), "bo_qua": ly}
+    _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p, "trang_thai": "loi",
+                      "ma": ma, "usd_so": 0.0, "ly_do": ly[:200]})
+
+
+def _co_threads(tu: list[str], so_bai: int, con: float) -> tuple[list[str], int, float] | None:
+    """Threads không đủ tiền cho số bài cấu hình: co về số từ khoá ĐẦU nhiều nhất còn vừa phần
+    còn lại (mỗi từ `TH_TOI_THIEU_BAI` bài — mức actor tính tối thiểu) thay vì bỏ cả nền tảng.
+    Phí khởi động 0,08 USD/lượt là cố định nên tìm 1 từ (từ khoá chính đứng đầu) vẫn đáng.
+    -> (từ khoá, số bài, ước tính) hoặc None khi 1 từ cũng không vừa."""
+    for n in range(min(len(_tu_cho("threads", tu, so_bai=so_bai)), TH_TOI_DA_MOI_LUOT), 0, -1):
+        sb = n * TH_TOI_THIEU_BAI
+        u = uoc_tu_khoa_nen_tang("threads", sb, tu)
+        if u <= con + 1e-9:
+            return _tu_cho("threads", tu, so_bai=sb), sb, u
+    return None
+
+
+def _them_luot_noi(v, q: list[str], got: list, moc_cu: dict, bay_gio: datetime.datetime,
+                   uoc: float, con: float, phan_moi: list[dict]) -> tuple[list, dict]:
+    """Lượt "nổi" TikTok (`theo_doi_api.tim_noi_tiktok`) ngay sau lượt tìm thường, cùng từ khoá,
+    cùng móc ghi run id (tiền vào `_tien_tim_tiktok`). -> (bài thường + bài nổi chưa trùng, thống
+    kê {"ve", "moi", "usd", "ly_do"}); {} khi lượt này không tới nhịp."""
+    if not TDA.TT.dung_api("tiktok_tim"):
+        return got, {}                    # chỉ đi TikTok API (dự phòng tính tiền theo video)
+    den, ly = TDA.den_luot_noi(moc_cu.get(TDA.KHOA_MOC_NOI), bay_gio)
+    if not den:
+        return got, {}
+    da = sum(TK_TT_YEU_CAU for x in phan_moi if x.get("actor") == TT_ACTOR)
+    tran = TDA.tran_noi(len(q), uoc, da, min(con, _con_viec(v)))
+    if tran < TK_TT_YEU_CAU:
+        return got, {"ve": 0, "moi": 0, "usd": 0.0, "ly_do": f"{ly}; không còn ngân sách"}
+    truoc = len(_phan_tk(v))
+    ve = TDA.tim_noi_tiktok(q, bay_gio, tran)
+    co = {d.get("link") for d, _ in got}
+    them = [(d, dt) for d, dt in ve if d.get("link") and d["link"] not in co]
+    usd = round(sum(TK_TT_YEU_CAU for x in _phan_tk(v)[truoc:] if x.get("actor") == TT_ACTOR), 4)
+    return got + them, {"ve": len(ve), "moi": len(them), "usd": usd, "ly_do": ly}
 
 
 def _tien_tim_tiktok(phan_moi: list[dict], got: list, loi, tran_du_phong) -> float:
@@ -1645,7 +1718,16 @@ def _cau_pheu(p: str, f: dict) -> str:
             f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
             + (f", không nhắc từ khoá {f['khong_nhac']}" if f.get("khong_nhac") else "")
             + f" → giữ {f.get('giu', 0)} ({f.get('moi', 0)} mới)"
+            + _cau_noi(f.get("noi"))
             + _cau_web(f.get("web")))
+
+
+def _cau_noi(n) -> str:
+    """Phần lượt "nổi" TikTok (sắp nhiều thích, 30 ngày) trong phễu."""
+    if not isinstance(n, dict):
+        return ""
+    return (f"; lượt nổi (nhiều thích 30 ngày, {n.get('ly_do') or '?'}): về {n.get('ve', 0)}, "
+            f"thêm {n.get('moi', 0)} bài chưa có trong lượt thường, {_usd(n.get('usd') or 0)} USD")
 
 
 def _cau_web(w) -> str:
@@ -1674,8 +1756,11 @@ def _cau_tk(tk: dict) -> list[str]:
            + (f"bỏ {tk['spam']} bài spam, " if tk.get('spam') else "") + f""
            f"{_usd(tk.get('usd') or 0)} USD")
     pheu = tk.get("pheu") or {}
-    return [cau, *(_cau_pheu(p, pheu[p]) for p in TK_NEN_TANG if p in pheu),
-            *(tk.get("ghi_chu") or [])]
+    # Ghi chú (bỏ qua / lỗi / co ngân sách) đứng TRƯỚC các dòng phễu dài: `luot_quet.ghi_chu`
+    # cắt ở 2.000 ký tự, phần mất (nếu có) phải là chi tiết phễu, không phải lý do bỏ qua.
+    return [cau, *(tk.get("ghi_chu") or []),
+            *(_cau_pheu(p, pheu[p]) for p in TK_NEN_TANG
+              if p in pheu and not pheu[p].get("bo_qua"))]
 
 
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
