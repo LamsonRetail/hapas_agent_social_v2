@@ -142,3 +142,17 @@ def _tiktok_api_mac_dinh_tat(request, monkeypatch):
         import tiktok_api
         monkeypatch.setattr(tiktok_api, "dung_api", lambda viec: False)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _web_khong_goi_apify_that(monkeypatch):
+    """Báo & Web mặc định BẬT (16/10/2026) nên mọi bài chạy `_tim_tu_khoa` đều đi qua phần web:
+    actor Google / actor dự phòng mặc định của `nguon_web` báo lỗi ngay (không POST Apify, không
+    ngủ chờ thử lại). Bài của đường web tự tiêm actor giả vào `nguon_web.thu_thap`."""
+    import nguon_web
+
+    def chan(*a, **k):
+        raise RuntimeError("bộ thử chặn Apify thật của Báo & Web")
+    monkeypatch.setattr(nguon_web, "_chay_actor_mac_dinh", chan)
+    monkeypatch.setattr(nguon_web, "_boc_mac_dinh", chan)
+    yield

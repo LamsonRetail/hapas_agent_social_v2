@@ -37,8 +37,15 @@ KHONG_NGUON = "tu_khoa"
 TEN_KENH_NHA, TEN_BEN_NGOAI = "Internal channel", "External channel"
 TEN_LOAI = {"kol": "KOL/KOC", "page": "Trang/fanpage", "group": "Nhóm", "bao": "Báo/tin tức",
             "kenh_nha": TEN_KENH_NHA, "khac": "Khác", KHONG_NGUON: "Tìm theo từ khoá"}
+# "web" (16/10/2026): báo, diễn đàn, blog Mark tìm qua Google theo từ khoá — `tai_khoan` = tên miền,
+# xem / thích / chia sẻ luôn NULL (không có số), `binh_luan` = số trả lời diễn đàn hoặc NULL.
 TEN_NEN_TANG = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTube",
-                "facebook": "Facebook", "threads": "Threads"}
+                "facebook": "Facebook", "threads": "Threads", "web": "Báo & Web"}
+#: Loại trang của bài web (`bai.kieu_trang`, Mark gán theo danh sách miền — `nguon_web`).
+KIEU_TRANG = {"bao": "Báo", "dien_dan": "Diễn đàn", "blog": "Blog", "mxh_khac": "MXH khác",
+              "khac": "Web khác"}
+#: Mức nhắc brand trong bài web (`bai.muc_nhac`).
+MUC_NHAC = {"tieu_de": "nhắc ở tiêu đề", "chinh": "nhắc trong bài", "thoang": "nhắc lướt"}
 
 NGAY_TOI_DA_THEO_NGAY = 92      # khoảng dài hơn thì gom theo tuần (biểu đồ khỏi vài trăm cột)
 TOP_NGUON = 10                  # mỗi nền tảng
@@ -123,6 +130,8 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
 #   pham_vi    kenh_nha = nguồn loại `kenh_nha`; ben_ngoai = mọi thứ khác (kể cả bài tìm theo từ
 #              khoá). Bình luận theo BÀI của nó (dòng bình luận mang sẵn nguồn của bài).
 #   nen_tang, loai, nguon, anh_huong, tuong_tac, kieu_quet   cấp BÀI; bình luận theo bài của nó.
+#   kieu_trang loại trang của bài web (báo, diễn đàn…); bài MXH không có nên chỉ khớp khi chiều này
+#              trống. Bình luận theo bài của nó.
 #   sac_thai   bài theo sắc thái BÀI (bài kênh nhà không mang tiếng khách → không khớp); bình luận
 #              theo sắc thái của CHÍNH nó (chỉ bình luận hợp lệ có sắc thái).
 #   chu_de     bài và bình luận có HAI bộ nhãn khác nhau (13 chủ đề bài, 7 chủ đề bình luận của
@@ -136,7 +145,7 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
 #   gom_mg     "1" = mây từ khoá GỒM cả bình luận minigame (mặc định ẩn). KHÔNG lọc khối nào khác —
 #              chỉ là tuỳ chọn hiển thị của mây + ngăn từ khoá, nằm đây để theo URL và khoá nhớ.
 CHIEU_LOC = ("pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong",
-             "tuong_tac", "q", "kieu_quet", "y_dinh", "gom_mg")
+             "tuong_tac", "q", "kieu_quet", "kieu_trang", "y_dinh", "gom_mg")
 _BIT = {k: 1 << i for i, k in enumerate(CHIEU_LOC)}
 PHAM_VI = {"tat_ca": "Tất cả", "kenh_nha": TEN_KENH_NHA, "ben_ngoai": TEN_BEN_NGOAI}
 #: Mã sắc thái trên URL (gọn, không dấu) -> nhãn lưu trong kho.
@@ -161,8 +170,8 @@ CHU_DE_MINIGAME = "Minigame/bài dự thi"
 CHU_DE_BL = ("Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua", "KOL/nội dung",
              "Giao hàng/dịch vụ", "Đối thủ", "Tag bạn bè", CHU_DE_MINIGAME, "Khác")
 _TOI_DA_GIA_TRI = {"nen_tang": len(TEN_NEN_TANG), "loai": 7, "nguon": 50, "sac_thai": 4,
-                   "chu_de": 40, "anh_huong": 5}
-_RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube|threads):")
+                   "chu_de": 40, "anh_huong": 5, "kieu_trang": len(KIEU_TRANG)}
+_RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube|threads|web):")
 #: Khoá nguồn dài nhất: "link:" + link bài (kho cắt 500 ký tự) — bài không có tác giả/tài khoản.
 NGUON_TOI_DA_KY_TU = 520
 
@@ -298,7 +307,8 @@ def doc_bo_loc(q) -> dict:
             "loai": nhieu("loai", TEN_LOAI), "nguon": nhieu("nguon"),
             "sac_thai": tuple(sorted(set(sac_ds))), "chu_de": chu_de,
             "anh_huong": nhieu("anh_huong", ANH_HUONG), "tuong_tac": int(tt) if tt else 0,
-            "q": tim, "kieu_quet": kq, "y_dinh": yd, "gom_mg": mg}
+            "q": tim, "kieu_quet": kq, "kieu_trang": nhieu("kieu_trang", KIEU_TRANG),
+            "y_dinh": yd, "gom_mg": mg}
 
 
 def khoa_bo_loc(bo_loc: dict | None) -> tuple:
@@ -341,6 +351,7 @@ class _Loc:
         self.cd_bai = {x for x in cd if nhom_chu_de(x) != "bl"}
         self.cd_bl = {x for x in cd if nhom_chu_de(x) != "bai"}
         self.ah = set(b.get("anh_huong") or ())
+        self.kt = set(b.get("kieu_trang") or ())
         self.tt = int(b.get("tuong_tac") or 0)
         self.kq = b.get("kieu_quet") or ""
         self.q = CC.khoa_tim(b.get("q")) if b.get("q") else ""
@@ -349,12 +360,12 @@ class _Loc:
         self._q_bai: dict[int, bool] = {}
         self.rong = self._tinh_rong()
         # Bình luận cần tra BÀI gốc khi lọc theo thứ dòng bình luận không mang.
-        self.can_bai = bool(self.ah or self.tt or self.kq or self.q or
+        self.can_bai = bool(self.ah or self.tt or self.kq or self.q or self.kt or
                             any(not k.startswith("n:") for k in self.ng))
 
     def _tinh_rong(self) -> bool:
         return not (self.pv != "tat_ca" or self.nt or self.lo or self.ng or self.sac or self.cd_bai
-                    or self.cd_bl or self.ah or self.tt or self.kq or self.q or self.yd)
+                    or self.cd_bl or self.ah or self.tt or self.kq or self.q or self.kt or self.yd)
 
     def bo_y_dinh(self) -> _Loc:
         """Bản sao KHÔNG có chiều y_dinh — mẫu số "% bình luận sạch" của Ý định mua: đang lọc
@@ -403,6 +414,8 @@ class _Loc:
             m |= _BIT["q"]
         if self.kq and kieu_quet_bai(r) != self.kq:
             m |= _BIT["kieu_quet"]
+        if self.kt and r.get("kieu_trang") not in self.kt:
+            m |= _BIT["kieu_trang"]
         return m
 
     def hong_bl(self, c: dict, bai: dict | None = None) -> int:
@@ -435,6 +448,8 @@ class _Loc:
             m |= _BIT["q"]
         if self.kq and (bai is None or kieu_quet_bai(bai) != self.kq):
             m |= _BIT["kieu_quet"]
+        if self.kt and (bai is None or bai.get("kieu_trang") not in self.kt):
+            m |= _BIT["kieu_trang"]
         if self.yd and not la_y_dinh_mua(c):
             m |= _BIT["y_dinh"]
         return m
@@ -504,7 +519,25 @@ def kpi(rows: list[dict]) -> dict:
         "da_phan_loai": da, "chua_phan_loai": len(khach) - da,
         "tich_cuc": dem[TC], "tieu_cuc": dem[TI], "trung_lap": dem[TL],
         "tich_cuc_pt": pt(TC), "tieu_cuc_pt": pt(TI), "trung_lap_pt": pt(TL),
+        "web": kpi_web(rows),
     }
+
+
+def kpi_web(rows: list[dict]) -> dict | None:
+    """Báo & Web không có xem/thích/chia sẻ: đếm số bài, số miền, % bài PR (`la_pr`), % nhắc ở
+    tiêu đề (`muc_nhac`) — % trên bài CÓ giá trị (NULL không vào mẫu số). Không có bài web -> None."""
+    web = [r for r in rows if r.get("nen_tang") == "web"]
+    if not web:
+        return None
+    pr = [r["la_pr"] for r in web if r.get("la_pr") is not None]
+    mn = [r["muc_nhac"] for r in web if r.get("muc_nhac") in MUC_NHAC]
+    return {"bai": len(web), "mien": len({_khoa_nguon(r) for r in web}),
+            "pr": sum(1 for x in pr if x), "pr_pt": round(100.0 * sum(1 for x in pr if x) / len(pr), 1)
+            if pr else None,
+            "tieu_de": mn.count("tieu_de"),
+            "tieu_de_pt": round(100.0 * mn.count("tieu_de") / len(mn), 1) if mn else None,
+            "theo_kieu": {k: n for k in KIEU_TRANG
+                          if (n := sum(1 for r in web if r.get("kieu_trang") == k))}}
 
 
 def doi_pt(nay: float, truoc: float) -> float | None:
@@ -616,11 +649,12 @@ def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON) -> list[dict]:
                 "loai": loai(r), "ten_loai": TEN_LOAI.get(loai(r), loai(r)),
                 "khoa_nguon": khoa_nguon_chu(r),
                 "link": r.get("nguon_link") or "", "bai": 0, "binh_luan": 0, "thao_luan": 0,
-                "xem": 0, "followers": 0}
+                "xem": None, "followers": 0}
         g["bai"] += 1
         g["binh_luan"] += so(r.get("binh_luan"))
         g["thao_luan"] += thao_luan(r)
-        g["xem"] += so(r.get("xem"))
+        if r.get("xem") is not None:        # nguồn chỉ có bài không có số xem (web): "—", không 0
+            g["xem"] = (g["xem"] or 0) + so(r.get("xem"))
         g["followers"] = max(g["followers"], so(r.get("followers")))
     theo: dict[str, list] = collections.defaultdict(list)
     for (p, _), g in gom.items():
@@ -628,7 +662,7 @@ def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON) -> list[dict]:
     tong = {p: sum(g["thao_luan"] for g in ds) for p, ds in theo.items()}
     ra = []
     for p in sorted(theo, key=lambda p: (-tong[p], p)):
-        ds = sorted(theo[p], key=lambda g: (-g["thao_luan"], -g["bai"], -g["xem"], g["ten"]))
+        ds = sorted(theo[p], key=lambda g: (-g["thao_luan"], -g["bai"], -(g["xem"] or 0), g["ten"]))
         ra.append({"nen_tang": p, "ten_nen_tang": TEN_NEN_TANG.get(p, p),
                    "so_nguon": len(ds), "nguon": ds[:toi_da]})
     return ra
@@ -640,9 +674,22 @@ def khoa_nguon_chu(r: dict) -> str:
     return f"{k[0]}:{k[1]}"
 
 
+def so_co(v) -> int | None:
+    """Số hiển thị của một chỉ số bài: NULL (nền tảng không có số — bài web không có xem / thích /
+    chia sẻ) -> None để trang hiện "—", KHÔNG hiện 0."""
+    return None if v is None else so(v)
+
+
+def _web_bai(r: dict) -> dict:
+    """Trường riêng của bài web cho thẻ bài (bài MXH: None)."""
+    return {"kieu_trang": r.get("kieu_trang") if r.get("kieu_trang") in KIEU_TRANG else None,
+            "muc_nhac": r.get("muc_nhac") if r.get("muc_nhac") in MUC_NHAC else None,
+            "la_pr": r.get("la_pr") if isinstance(r.get("la_pr"), bool) else None}
+
+
 def _the_bai(r: dict) -> dict:
     dt = r.get("dang_luc")
-    return {
+    return {**_web_bai(r),
         "khoa": r.get("khoa") or "", "bl_da_lay": so(r.get("bl_da_lay")),
         "link": r.get("link") or "", "nen_tang": r.get("nen_tang") or "",
         "tac_gia": r.get("tac_gia") or r.get("tai_khoan") or "",
@@ -651,8 +698,8 @@ def _the_bai(r: dict) -> dict:
         "noi_dung": " ".join(str(r.get("noi_dung") or "").split())[:500],
         "sac_thai": "kênh nhà" if la_kenh_nha(r) else sac(r),
         "chu_de": r.get("chu_de") or "", "loai": TEN_LOAI.get(loai(r), loai(r)),
-        "xem": so(r.get("xem")), "thich": so(r.get("thich")),
-        "binh_luan": so(r.get("binh_luan")), "chia_se": so(r.get("chia_se")),
+        "xem": so_co(r.get("xem")), "thich": so_co(r.get("thich")),
+        "binh_luan": so_co(r.get("binh_luan")), "chia_se": so_co(r.get("chia_se")),
         "thao_luan": thao_luan(r)}
 
 
@@ -662,6 +709,7 @@ def top_bai(rows: list[dict], toi_da: int = TOP_BAI) -> list[dict]:
     for r in ds[:toi_da]:
         dt = r.get("dang_luc")
         ra.append({
+            **_web_bai(r),
             "khoa": r.get("khoa") or "", "bl_da_lay": so(r.get("bl_da_lay")),
             "link": r.get("link") or "", "nen_tang": r.get("nen_tang") or "",
             "tac_gia": r.get("tac_gia") or r.get("tai_khoan") or "",
@@ -670,8 +718,8 @@ def top_bai(rows: list[dict], toi_da: int = TOP_BAI) -> list[dict]:
             "noi_dung": " ".join(str(r.get("noi_dung") or "").split())[:200],
             "sac_thai": "kênh nhà" if la_kenh_nha(r) else sac(r),
             "chu_de": r.get("chu_de") or "", "loai": TEN_LOAI.get(loai(r), loai(r)),
-            "xem": so(r.get("xem")), "thich": so(r.get("thich")),
-            "binh_luan": so(r.get("binh_luan")), "chia_se": so(r.get("chia_se")),
+            "xem": so_co(r.get("xem")), "thich": so_co(r.get("thich")),
+            "binh_luan": so_co(r.get("binh_luan")), "chia_se": so_co(r.get("chia_se")),
             "thao_luan": thao_luan(r)})
     return ra
 
@@ -1535,6 +1583,8 @@ def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datet
                     dem["tuong_tac"][str(muc)] += 1
         if m in (0, _BIT["kieu_quet"]):
             dem["kieu_quet"][kieu_quet_bai(r)] += 1
+        if m in (0, _BIT["kieu_trang"]) and r.get("kieu_trang") in KIEU_TRANG:
+            dem["kieu_trang"][r["kieu_trang"]] += 1
     tra = (bai_theo_khoa or {}).get
     for c in bl:
         n = _ngay_bl(c)
@@ -1568,7 +1618,7 @@ def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datet
                     key=lambda g: (g["gia_tri"] == CHUA, -(g["so_bai"] + g["so_bl"]),
                                    g["gia_tri"]))
     don = {k: dict(dem[k]) for k in ("pham_vi", "nen_tang", "loai", "anh_huong", "tuong_tac",
-                                    "kieu_quet")}
+                                    "kieu_quet", "kieu_trang")}
     return {"bo_loc_dem": {**don, "sac_thai": {k: {"bai": dem["sac_thai"][k],
                                                    "bl": sac_bl_dem[k]} for k in MA_SAC},
                            "chu_de": chu_de, "nguon": nguon},
@@ -1579,7 +1629,7 @@ def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datet
 NHAN_BO_LOC = {
     "pham_vi": PHAM_VI, "nen_tang": TEN_NEN_TANG, "loai": TEN_LOAI,
     "sac_thai": {k: v[0].upper() + v[1:] for k, v in MA_SAC.items()},
-    "anh_huong": ANH_HUONG, "kieu_quet": KIEU_QUET, "y_dinh": Y_DINH,
+    "anh_huong": ANH_HUONG, "kieu_quet": KIEU_QUET, "kieu_trang": KIEU_TRANG, "y_dinh": Y_DINH,
     "tuong_tac": [{"gia_tri": str(m), "ten": f"Từ {m:,}".replace(",", ".") + " tương tác"}
                   for m in TUONG_TAC_MUC],
 }

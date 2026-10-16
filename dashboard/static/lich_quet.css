@@ -25,6 +25,10 @@
 .lq-rong { width: 100%; }
 .lq-rong input { width: 100%; }
 .lq-ghep { display: inline-flex; gap: 6px; }
+/* Từ khoá chiến dịch (16/10/2026): ô chữ + nút ⓘ cùng hàng */
+.lq-o-goi-y { display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; min-width: 0; }
+.lq-o-goi-y .lq-rong { flex: 1 1 auto; min-width: 0; }
+.lq-o-goi-y .goi-y { margin-bottom: 10px; }
 .lq-ghep input[type="number"] { width: 84px; }
 .lq-nhanh { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
 

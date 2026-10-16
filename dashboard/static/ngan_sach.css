@@ -95,6 +95,8 @@
 .ns-so-tu { color: var(--chu-mo); font-variant-numeric: tabular-nums; }
 td.ns-mo > *:not(.ns-cong) { opacity: .45; }
 .ns-bang .ns-o-cong { white-space: nowrap; }
+/* Báo & Web (16/10/2026): nhóm "Cào bình luận" của dòng web = trần trang đọc dự phòng */
+.ns-web-boc__o { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--chu-phu); font-size: 13px; }
 
 /* công tắc bật/tắt = checkbox thật (bàn phím: Tab + Space) */
 .ns-cong {
@@ -172,8 +174,12 @@ form[data-ban="1"] .ns-luu .nut:not(.nut--nhe) { box-shadow: 0 0 0 3px var(--nha
   .ns-bang tbody > tr > :nth-child(8) { grid-area: blm; }
   .ns-bang tbody > tr > :nth-child(9) { grid-area: blu; }
   .ns-bang tbody > tr > :nth-child(10) { grid-area: tong; align-self: start; }
+  .ns-bang tbody > tr.ns-dong-web { grid-template-areas: "ten ten ten tong" "tkb tks tkt tku" "boc boc boc boc"; }
+  .ns-bang tbody > tr.ns-dong-web > :nth-child(6) { grid-area: boc; }
+  .ns-bang tbody > tr.ns-dong-web > :nth-child(7) { grid-area: tong; align-self: start; }
   .ns-bang tbody th { font-size: 14px; }
   .ns-bang input[type="number"] { width: 100%; min-width: 0; }
+  .ns-bang .ns-web-boc input[type="number"] { width: 84px; }
   .ns-bang .ns-usd, .ns-bang .ns-tong-dong { text-align: right; }
   .ns-bang tfoot tr { grid-template-areas: "ten tku blu tong"; border-bottom: 0; border-top: 2px solid var(--ke); }
   .ns-bang tfoot th, .ns-bang tfoot td { border: 0; }

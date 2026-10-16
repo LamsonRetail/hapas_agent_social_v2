@@ -193,6 +193,9 @@ CREATE TABLE IF NOT EXISTS bai (
   bl_lay_khi_co   BIGINT,
   ma_noi_dung     TEXT,
   bl_lan_thieu    INT NOT NULL DEFAULT 0,
+  kieu_trang      TEXT,
+  muc_nhac        TEXT,
+  la_pr           BOOLEAN,
   PRIMARY KEY (du_an, khoa)
 );
 CREATE INDEX IF NOT EXISTS bai_du_an_dang_luc ON bai (du_an, dang_luc);
@@ -203,6 +206,18 @@ ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_lay_khi_co BIGINT;
 ALTER TABLE bai ADD COLUMN IF NOT EXISTS ma_noi_dung TEXT;
 ALTER TABLE bai ADD COLUMN IF NOT EXISTS bl_lan_thieu INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS bai_ma_noi_dung ON bai (du_an, ma_noi_dung);
+-- Báo & Web (16/10/2026, nguon_web.py): bài web là dòng `bai` với nen_tang = 'web' (cột không có
+-- CHECK nên không phải sửa). Ba cột riêng của bài web, NULL với bài mạng xã hội — thêm cột NULL
+-- được là thao tác chỉ đổi danh mục (không ghi lại bảng), chạy nhanh dưới lock_timeout.
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS kieu_trang TEXT;
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS muc_nhac TEXT;
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS la_pr BOOLEAN;
+ALTER TABLE bai DROP CONSTRAINT IF EXISTS bai_kieu_trang_check;
+ALTER TABLE bai ADD CONSTRAINT bai_kieu_trang_check CHECK (kieu_trang IS NULL OR kieu_trang IN
+  ('bao', 'dien_dan', 'blog', 'mxh_khac', 'khac')) NOT VALID;
+ALTER TABLE bai DROP CONSTRAINT IF EXISTS bai_muc_nhac_check;
+ALTER TABLE bai ADD CONSTRAINT bai_muc_nhac_check CHECK (muc_nhac IS NULL OR muc_nhac IN
+  ('tieu_de', 'chinh', 'thoang')) NOT VALID;
 
 -- 1 dòng = 1 bình luận (hoặc trả lời) Mark đã cào của một bài đã giữ. Đợt 2b (15/10/2026):
 -- Kompa đếm "thảo luận" chủ yếu từ bình luận dưới bài của các trang — đọc được nội dung mới
@@ -447,7 +462,7 @@ COMMENT ON TABLE bai IS $$[Lớp] Raw
 [Grain] 1 dòng = 1 bài × 1 dự án
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay, binh_luan; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá (/theodoi, social_listen)
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen) | Bài đăng trong 35 ngày trước lượt theo dõi, từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước lượt theo dõi, từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Chỉ bài liên quan (nhắc từ khoá trừ kênh nhà, không chứa từ loại trừ, không bị AI loại); khử trùng theo khoa; nội dung cắt 1.000 ký tự
 [Refresh] Upsert tức thời sau mỗi lượt quét; video YouTube được đọc lại số mỗi ngày trong 14 ngày đầu
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề
@@ -455,21 +470,21 @@ COMMENT ON TABLE bai IS $$[Lớp] Raw
 [Lưu ý] Số là lần đọc gần nhất, không phải cuối kỳ. Mẫu theo nguồn đã chọn + lượt tìm, không phải toàn bộ thảo luận trên mạng.$$;
 COMMENT ON COLUMN bai.du_an IS 'Dự án. Một phần PK. FK → du_an.ma.';
 COMMENT ON COLUMN bai.khoa IS 'Khoá bài "<nền tảng>:<id bài>" (không bóc được id thì "h" + 16 ký tự băm SHA-1 của link). Một phần PK.';
-COMMENT ON COLUMN bai.nen_tang IS 'Nền tảng. Giá trị: tiktok, instagram, youtube, facebook, threads.';
+COMMENT ON COLUMN bai.nen_tang IS 'Nền tảng. Giá trị: tiktok, instagram, youtube, facebook, threads, web (Báo & Web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026).';
 COMMENT ON COLUMN bai.nguon_id IS 'Nguồn theo dõi cho ra bài. FK → nguon.id. NULL khi bài từ tìm theo từ khoá (tài khoản chưa theo dõi) hoặc nguồn đã bị xoá.';
 COMMENT ON COLUMN bai.kieu_quet IS 'Giá trị: theo_doi, tu_khoa. Bài từng là theo_doi thì giữ theo_doi.';
 COMMENT ON COLUMN bai.link IS 'Link bài gốc. Không NULL.';
 COMMENT ON COLUMN bai.tac_gia IS 'Tên hiển thị kênh/tài khoản đăng. Chuỗi rỗng khi không có.';
-COMMENT ON COLUMN bai.tai_khoan IS 'Username tài khoản đăng (TikTok, Instagram, Threads). Chuỗi rỗng với YouTube.';
+COMMENT ON COLUMN bai.tai_khoan IS 'Username tài khoản đăng (TikTok, Instagram, Threads); tên miền trang với web (vd cafef.vn). Chuỗi rỗng với YouTube.';
 COMMENT ON COLUMN bai.followers IS 'Người theo dõi tài khoản đăng lúc đọc gần nhất, người. NULL khi nền tảng không trả.';
 COMMENT ON COLUMN bai.dang_luc IS 'Thời điểm đăng bài (UTC; giờ VN = dang_luc AT TIME ZONE ''Asia/Ho_Chi_Minh'').';
-COMMENT ON COLUMN bai.noi_dung IS 'Nội dung/caption (YouTube: tiêu đề — mô tả), tối đa 1.000 ký tự.';
+COMMENT ON COLUMN bai.noi_dung IS 'Nội dung/caption (YouTube: tiêu đề — mô tả; web: tiêu đề | tối đa 3 đoạn quanh chỗ nhắc brand, không lưu toàn văn), tối đa 1.000 ký tự.';
 COMMENT ON COLUMN bai.hashtag IS 'Hashtag không có #, phân cách ", ", tối đa 500 ký tự.';
 COMMENT ON COLUMN bai.khop_tu_khoa IS 'TRUE: nhắc ít nhất một từ khoá dự án. FALSE: không nhắc (chỉ giữ khi nguồn là kenh_nha).';
 COMMENT ON COLUMN bai.sac_thai IS 'Sắc thái do AI gán. Giá trị: Tích cực, Tiêu cực, Trung lập. NULL khi AI chưa gán.';
 COMMENT ON COLUMN bai.chu_de IS 'Chủ đề do AI gán theo 13 chủ đề của Mark. NULL khi AI chưa gán.';
 COMMENT ON COLUMN bai.ly_do_giu IS 'Vì sao giữ: mã AI (brand, ad, product, ugc, other_market) hoặc kenh_nha / khop_tu_khoa.';
-COMMENT ON COLUMN bai.xem IS 'Lượt xem lần đọc gần nhất, lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN bai.xem IS 'Lượt xem lần đọc gần nhất, lượt. NULL khi nền tảng không trả (luôn NULL với web).';
 COMMENT ON COLUMN bai.thich IS 'Lượt thích lần đọc gần nhất, lượt. NULL khi không đọc được.';
 COMMENT ON COLUMN bai.binh_luan IS 'Số bình luận nền tảng báo lần đọc gần nhất, bình luận (không phải số đã cào). NULL khi không đọc được.';
 COMMENT ON COLUMN bai.chia_se IS 'Lượt chia sẻ lần đọc gần nhất, lượt. NULL với YouTube, Instagram.';
@@ -482,6 +497,9 @@ COMMENT ON COLUMN bai.bl_da_lay IS 'Số bình luận lấy được ở lần c
 COMMENT ON COLUMN bai.bl_lan_thieu IS 'Số lần cào bình luận liên tiếp vẫn chưa đủ 80% số nền tảng báo (Instagram chưa đăng nhập, bài bị ẩn, chạm trần). Từ 2 lần thì thôi cào bù, chỉ cào lại khi bình luận tăng. 0 khi đã đủ.';
 COMMENT ON COLUMN bai.ma_noi_dung IS 'Băm 16 ký tự của nội dung đã chuẩn hoá (bỏ dấu, link, emoji, số → 0) khi nội dung ≥ 30 ký tự — các bài cùng mã là cùng nội dung (đăng lại trên nhiều trang, seeding). NULL khi nội dung quá ngắn.';
 COMMENT ON COLUMN bai.bl_lay_khi_co IS 'Số bình luận nền tảng báo lúc cào gần nhất, bình luận — để biết bài có thêm bình luận đáng cào lại không. NULL khi chưa cào.';
+COMMENT ON COLUMN bai.kieu_trang IS 'Loại trang của bài web. Giá trị: bao (báo/tạp chí), dien_dan (diễn đàn), blog, mxh_khac (LinkedIn, X, Lemon8…), khac (trang khác). NULL với bài mạng xã hội (nen_tang khác web).';
+COMMENT ON COLUMN bai.muc_nhac IS 'Mức nhắc brand trong bài web. Giá trị: tieu_de (từ khoá ở tiêu đề), chinh (≥ 3 lần trong thân bài), thoang (nhắc lướt 1–2 lần, vd bài liệt kê nhiều brand). NULL với bài mạng xã hội.';
+COMMENT ON COLUMN bai.la_pr IS 'TRUE: bài web có dấu hiệu bài đặt/PR (thân bài dẫn link về miền của brand hoặc ghi "Ảnh/Nguồn: <brand>"). FALSE: không thấy dấu hiệu. NULL với bài mạng xã hội.';
 
 COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
 [Mục đích] Bình luận (và trả lời) dưới các bài đã giữ của dự án, kèm sắc thái và chủ đề AI gán — tiếng khách hàng.

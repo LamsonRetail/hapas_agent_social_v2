@@ -139,14 +139,22 @@
 {% set so_luot = ll.luot_con_lai if co_lich else db.ngay_con_lai %}
 {% set nguon_con = db.con_lai + (ll.nguon_them or 0) %}
 {% set luot_30 = ll.luot_30 if co_lich else hang_so.ngay %}
-{% set toi_da = d.da_tieu + nguon_con + so_luot * tong_luot %}
-{% set du_luot = ((db.tran - d.da_tieu - nguon_con) / so_luot) if so_luot > 0 else 0 %}
+{# Báo & Web (16/10/2026): ngoài chiến dịch ≤ 1 lượt/ngày, trong chiến dịch mọi lượt — số lượt web
+   riêng (chi_phi.du_bao_lich); không có lịch thì 1 lượt/ngày như mọi phần khác. #}
+{% set web_luot = b.uoc_web or 0 %}
+{% set khac_luot = [tong_luot - web_luot, 0]|max %}
+{% set luot_web = ll.luot_web_con_lai if co_lich else db.ngay_con_lai %}
+{% set luot_web_30 = ll.luot_web_30 if co_lich else hang_so.ngay %}
+{% set web_con = luot_web * web_luot %}
+{% set toi_da = d.da_tieu + nguon_con + so_luot * khac_luot + web_con %}
+{% set du_luot = ((db.tran - d.da_tieu - nguon_con - web_con) / so_luot) if so_luot > 0 else 0 %}
 <section class="the-khoi cach-duoi ns-ch" aria-labelledby="ns-ch-tieu-de">
   {% if ql %}
   <script type="application/json" id="ns-du-lieu">{{ {"hang_so": hang_so, "tu_khoa": d.tu_khoa or [], "ten": d.ten,
     "mac_dinh": {"tk_so_bai": d.tk_so_bai or 0, "bl_so_bai": d.bl_so_bai or 0, "bl_moi_bai": d.bl_moi_bai or 0},
     "da_tieu": d.da_tieu, "nguon_con_lai": nguon_con, "ngay_con_lai": db.ngay_con_lai,
     "co_lich": co_lich, "luot_con_lai": so_luot, "luot_30": luot_30,
+    "luot_web_con_lai": luot_web, "luot_web_30": luot_web_30,
     "tran_platform": db.tran_platform, "tran_da": d.tran_usd_thang|float}|json_script }}</script>
   <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/cau-hinh" id="ns-form">
   <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
@@ -193,6 +201,37 @@
       {% set g_tk_tu = hang_so.tk_ig_so_tu if 'so_tu' in r_tk else tk.so_tu %}
       {% set g_bl_so = bl_md if 'so_bai' in r_bl else bl.so_bai %}
       {% set g_bl_moi = bl_moi_md if 'moi_bai' in r_bl else bl.moi_bai %}
+      {% if p == 'web' %}
+      {# Báo & Web (16/10/2026): chỉ tìm theo từ khoá; nhóm "Cào bình luận" thay bằng trần trang đọc
+         dự phòng (`boc`, 0 = tắt). #}
+      {% set g_boc = hang_so.web.boc_mac_dinh if 'boc' in r_tk else tk.boc %}
+      <tr data-nt="web" class="ns-dong-web">
+        <th scope="row">{{ ten }}
+          <button type="button" class="goi-y" data-o="ghi-web" data-goi-y="Google 0,0005 USD/trang kết quả (10 link); đọc bài bằng HTTP thường 0 USD. Trang bị chặn đọc qua dự phòng 0,009 USD/trang — số trang là TRẦN mỗi lượt, thực tế thường 0–2 trang. Ngoài chiến dịch tối đa 1 lượt/ngày, trong chiến dịch mọi lượt; vẫn trong trần tháng dự án. Từ khoá rút gọn: {{ tk.so_tu_gui }} từ → {{ tk.so_cau }} câu tìm.">i</button>
+        </th>
+        <td class="ns-o-cong ns-ranh" data-nhan="Tìm từ khoá">
+          {% if ql %}<input type="checkbox" class="ns-cong" role="switch" name="tk_web_bat" value="1" aria-label="{{ ten }}: bật tìm báo, diễn đàn, blog"{% if y_tk %} checked{% endif %}>
+          {% else %}<span class="the{% if tk.bat %} the--tot{% endif %}">{{ 'bật' if tk.bat else 'tắt' }}</span>{% endif %}
+        </td>
+        <td data-nhan="Kết quả/câu" data-nhom="tk"{% if ql and not y_tk %} class="ns-mo"{% endif %}>
+          {% if ql %}<input type="number" name="tk_web_so_bai" min="{{ hang_so.gioi_han.tk_so_bai[0] }}" max="{{ hang_so.gioi_han.tk_so_bai[1] }}" step="1" inputmode="numeric" placeholder="{{ g_tk_so }}" value="{{ r_tk.get('so_bai') if 'so_bai' in r_tk else '' }}" aria-label="{{ ten }}: số kết quả Google mỗi câu tìm (trống = {{ g_tk_so }})">
+          {% else %}<span class="so">{{ tk.so_bai }}</span>{% endif %}
+        </td>
+        <td data-nhan="Số từ" data-nhom="tk"{% if ql and not y_tk %} class="ns-mo"{% endif %}>
+          <span class="ns-so-tu" data-o="web-so-tu" title="Từ khoá sau rút gọn → số câu tìm">{{ tk.so_tu_gui }} → {{ tk.so_cau }} câu</span>
+        </td>
+        <td class="ns-usd" data-nhan="≈ USD">
+          <output class="{{ lop_usd(y_tk, tk.so_bai, hang_so.web.gia_trang)|trim }}" data-o="tk-web" data-usd="{{ tk.uoc }}">{{ o_usd(tk.uoc, y_tk, tk.so_bai, hang_so.web.gia_trang) }}</output>
+        </td>
+        <td colspan="4" class="ns-ranh ns-web-boc{% if ql and not y_tk %} ns-mo{% endif %}" data-nhan="Đọc dự phòng" data-nhom="tk">
+          {% if ql %}<label class="ns-web-boc__o">Đọc trang bị chặn tối đa
+            <input type="number" name="tk_web_boc" min="0" max="{{ hang_so.gioi_han.tk_so_bai[1] }}" step="1" inputmode="numeric" placeholder="{{ g_boc }}" value="{{ r_tk.get('boc') if 'boc' in r_tk else '' }}" aria-label="{{ ten }}: số trang đọc dự phòng tối đa mỗi lượt, 0 = tắt (trống = {{ g_boc }})">
+            trang/lượt</label>
+          {% else %}<span class="mo">Đọc trang bị chặn tối đa {{ tk.boc }} trang/lượt</span>{% endif %}
+        </td>
+        <td class="ns-tong-dong ns-ranh" data-nhan="Tổng/lượt"><output data-o="dong-web">{{ tk.uoc|usd_vn(3) }}</output></td>
+      </tr>
+      {% else %}
       <tr data-nt="{{ p }}">
         <th scope="row">{{ ten }}
           {% if p == 'facebook' %}<button type="button" class="goi-y{% if tk.bat and tk.so_bai > hang_so.tk_fb_toi_da %} goi-y--canh{% endif %}" data-o="ghi-fb" data-goi-y="Gói Apify FREE: thực tế tối đa {{ hang_so.tk_fb_toi_da }} bài/lượt">i</button>
@@ -232,6 +271,7 @@
         </td>
         <td class="ns-tong-dong ns-ranh" data-nhan="Tổng/lượt"><output data-o="dong-{{ p }}">{{ (tk.uoc + bl.uoc)|usd_vn(3) }}</output></td>
       </tr>
+      {% endif %}
     {% endfor %}
     </tbody>
     <tfoot>
@@ -253,11 +293,11 @@
       <input type="number" name="tran_usd_thang" min="0" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(d.tran_usd_thang|float) }}" required></label>
     {% endif %}
     <div class="ns-du-kien">
-      <div>Tìm + bình luận tối đa <b data-o="tong-luot">{{ tong_luot|usd_vn(3) }}</b> USD/lượt · ≈ <b data-o="tong-30">{{ (tong_luot * luot_30)|usd_vn }}</b> USD/30 ngày {% if co_lich %}(theo <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a>: {{ luot_30|so_vn }} lượt){% else %}(1 lượt/ngày — không có <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a> nào bật){% endif %}</div>
+      <div>Tìm + bình luận tối đa <b data-o="tong-luot">{{ tong_luot|usd_vn(3) }}</b> USD/lượt · ≈ <b data-o="tong-30">{{ (khac_luot * luot_30 + web_luot * luot_web_30)|usd_vn }}</b> USD/30 ngày {% if co_lich %}(theo <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a>: {{ luot_30|so_vn }} lượt){% else %}(1 lượt/ngày — không có <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a> nào bật){% endif %}</div>
       <div class="ns-du-kien__thang{% if toi_da > db.tran + 1e-9 %} ns-du-kien__thang--canh{% endif %}" data-o="thang-hop">
         Cả tháng nếu mỗi lượt dùng hết: <b data-o="thang-so">{{ toi_da|usd_vn }}</b> / <span data-o="thang-tran">{{ db.tran|usd_vn }}</span> USD —
         <span data-o="thang-ket-luan" aria-live="polite">{% if toi_da > db.tran + 1e-9 %}vượt trần {{ (toi_da - db.tran)|usd_vn }} USD, Mark dừng quét khi chạm trần; {% if du_luot > 0 %}vừa trần khi ≤ {{ du_luot|usd_vn(3) }} USD/lượt.{% else %}riêng nguồn theo dõi đã chạm trần.{% endif %}{% else %}trong trần, còn dư {{ (db.tran - toi_da)|usd_vn }} USD.{% endif %}</span>
-        <button type="button" class="goi-y" data-o="thang-cong-thuc" data-goi-y="= đã tiêu {{ d.da_tieu|usd_vn }} + nguồn {{ nguon_con|usd_vn }} + {% if co_lich %}{{ so_luot|so_vn }} lượt theo lịch{% else %}{{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày{% endif %} × {{ tong_luot|usd_vn(3) }}">i</button>
+        <button type="button" class="goi-y" data-o="thang-cong-thuc" data-goi-y="= đã tiêu {{ d.da_tieu|usd_vn }} + nguồn {{ nguon_con|usd_vn }} + {% if co_lich %}{{ so_luot|so_vn }} lượt theo lịch{% else %}{{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày{% endif %} × {{ khac_luot|usd_vn(3) }} + Báo &amp; Web {{ '%.1f'|format(luot_web)|replace('.', ',')|replace(',0', '') }} lượt × {{ web_luot|usd_vn(3) }} (ngoài chiến dịch ≤ 1 lượt/ngày)">i</button>
       </div>
     </div>
     {% if ql %}

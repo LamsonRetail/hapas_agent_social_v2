@@ -76,12 +76,12 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.bai`
 (
   du_an           STRING    OPTIONS(description='Dự án bài thuộc về. Một phần PK (cùng khoa). FK → du_an.ma. Không NULL.'),
   khoa            STRING    OPTIONS(description='Khoá bài "<nền tảng>:<id bài>" (id lấy từ link; không bóc được id thì "h" + 16 ký tự băm SHA-1 của link). Một phần PK. Join: → chi_so_ngay.khoa (cùng du_an).'),
-  nen_tang        STRING    OPTIONS(description='Nền tảng của bài. Giá trị: tiktok, instagram, youtube, facebook, threads (Threads cả lượt theo dõi lẫn tìm theo từ khoá từ 16/10/2026).'),
+  nen_tang        STRING    OPTIONS(description='Nền tảng của bài. Giá trị: tiktok, instagram, youtube, facebook, threads (Threads cả lượt theo dõi lẫn tìm theo từ khoá từ 16/10/2026), web (Báo & Web — báo, diễn đàn, blog tìm qua Google, từ 16/10/2026).'),
   nguon_id        INT64     OPTIONS(description='Nguồn theo dõi đã cho ra bài. FK → nguon.id. NULL khi bài đến từ tìm theo từ khoá hoặc nguồn đã bị xoá.'),
   kieu_quet       STRING    OPTIONS(description='Bài vào kho bằng đường nào. Giá trị: theo_doi (lượt /theodoi quét nguồn), tu_khoa (lượt tìm theo từ khoá). Bài đã từng là theo_doi thì giữ theo_doi.'),
   link            STRING    OPTIONS(description='Link bài gốc trên nền tảng. Không NULL.'),
   tac_gia         STRING    OPTIONS(description='Tên hiển thị kênh/tài khoản đăng bài. Chuỗi rỗng khi nền tảng không trả.'),
-  tai_khoan       STRING    OPTIONS(description='Username của tài khoản đăng (TikTok, Instagram, Threads). Chuỗi rỗng với YouTube và khi không có.'),
+  tai_khoan       STRING    OPTIONS(description='Username của tài khoản đăng (TikTok, Instagram, Threads); tên miền trang với web (vd cafef.vn). Chuỗi rỗng với YouTube và khi không có.'),
   followers       INT64     OPTIONS(description='Số người theo dõi tài khoản đăng lúc quét gần nhất, người. NULL khi nền tảng không trả (trang Facebook).'),
   dang_luc        TIMESTAMP OPTIONS(description='Thời điểm bài được đăng, UTC; giờ VN = DATETIME(dang_luc, "Asia/Ho_Chi_Minh"). Lượt theo dõi chỉ ghi bài đăng trong 35 ngày trước lúc quét.'),
   noi_dung        STRING    OPTIONS(description='Nội dung/caption bài (YouTube: tiêu đề — mô tả), cắt tối đa 1.000 ký tự. Chuỗi rỗng khi bài không có chữ.'),
@@ -99,6 +99,9 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.bai`
   luot_dau        INT64     OPTIONS(description='Lượt quét ghi bài lần đầu. FK → luot_quet.id. NULL khi lượt đó đã bị xoá ở nguồn.'),
   luot_cuoi       INT64     OPTIONS(description='Lượt quét cập nhật bài gần nhất. FK → luot_quet.id.'),
   ma_noi_dung     STRING    OPTIONS(description='Băm 16 ký tự nội dung đã chuẩn hoá khi ≥ 30 ký tự — các bài cùng mã là cùng nội dung (đăng lại nhiều trang, seeding); đếm bài khử trùng = COUNT(DISTINCT COALESCE(ma_noi_dung, khoa)). NULL khi quá ngắn.'),
+  kieu_trang      STRING    OPTIONS(description='Loại trang của bài web. Giá trị: bao (báo/tạp chí), dien_dan (diễn đàn), blog, mxh_khac (LinkedIn, X, Lemon8…), khac (trang khác). NULL với bài mạng xã hội (nen_tang khác web).'),
+  muc_nhac        STRING    OPTIONS(description='Mức nhắc brand trong bài web. Giá trị: tieu_de (từ khoá ở tiêu đề), chinh (≥ 3 lần trong thân bài), thoang (nhắc lướt 1–2 lần, vd bài liệt kê nhiều brand). NULL với bài mạng xã hội.'),
+  la_pr           BOOL      OPTIONS(description='TRUE: bài web có dấu hiệu bài đặt/PR (thân bài dẫn link về miền của brand hoặc ghi "Ảnh/Nguồn: <brand>"). FALSE: không thấy dấu hiệu. NULL với bài mạng xã hội.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 CLUSTER BY du_an, nen_tang
@@ -107,7 +110,7 @@ OPTIONS(description='''[Lớp] Raw
 [Grain] 1 dòng = 1 bài × 1 dự án
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; khử trùng theo khoa; nội dung cắt 1.000 ký tự
 [Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
@@ -231,6 +234,28 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
   ALTER COLUMN nen_tang SET OPTIONS(description='Nền tảng của bài. Giá trị: tiktok, instagram, youtube, facebook, threads (Threads cả lượt theo dõi lẫn tìm theo từ khoá từ 16/10/2026).');
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
   ALTER COLUMN tai_khoan SET OPTIONS(description='Username của tài khoản đăng (TikTok, Instagram, Threads). Chuỗi rỗng với YouTube và khi không có.');
+-- Báo & Web (16/10/2026): bảng đã tạo trước thì thêm 3 cột + cập nhật mô tả (dong_bo_bq MERGE
+-- cả ba cột — chạy khối này TRƯỚC khi bật đồng bộ bản mới).
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  ADD COLUMN IF NOT EXISTS kieu_trang STRING OPTIONS(description='Loại trang của bài web. Giá trị: bao (báo/tạp chí), dien_dan (diễn đàn), blog, mxh_khac (LinkedIn, X, Lemon8…), khac (trang khác). NULL với bài mạng xã hội (nen_tang khác web).'),
+  ADD COLUMN IF NOT EXISTS muc_nhac STRING OPTIONS(description='Mức nhắc brand trong bài web. Giá trị: tieu_de (từ khoá ở tiêu đề), chinh (≥ 3 lần trong thân bài), thoang (nhắc lướt 1–2 lần, vd bài liệt kê nhiều brand). NULL với bài mạng xã hội.'),
+  ADD COLUMN IF NOT EXISTS la_pr BOOL OPTIONS(description='TRUE: bài web có dấu hiệu bài đặt/PR (thân bài dẫn link về miền của brand hoặc ghi "Ảnh/Nguồn: <brand>"). FALSE: không thấy dấu hiệu. NULL với bài mạng xã hội.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  ALTER COLUMN nen_tang SET OPTIONS(description='Nền tảng của bài. Giá trị: tiktok, instagram, youtube, facebook, threads (Threads cả lượt theo dõi lẫn tìm theo từ khoá từ 16/10/2026), web (Báo & Web — báo, diễn đàn, blog tìm qua Google, từ 16/10/2026).');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  ALTER COLUMN tai_khoan SET OPTIONS(description='Username của tài khoản đăng (TikTok, Instagram, Threads); tên miền trang với web (vd cafef.vn). Chuỗi rỗng với YouTube và khi không có.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Bài mạng xã hội liên quan tới dự án mà Mark đã giữ, kèm nhãn AI và tương tác mới nhất, để đếm thảo luận, nguồn nổi bật, sắc thái, chủ đề.
+[Grain] 1 dòng = 1 bài × 1 dự án
+[Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
+[Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
+[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; khử trùng theo khoa; nội dung cắt 1.000 ký tự
+[Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
+[Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
+[Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet
+[Lưu ý] Số liệu là lần đọc gần nhất, không phải cuối kỳ; bài YouTube được đọc lại số mỗi ngày trong 14 ngày đầu, nền tảng khác chỉ khi bài còn nằm trong N bài mới nhất của nguồn. Đây là mẫu theo nguồn đã chọn, không phải toàn bộ thảo luận trên mạng.''');
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
   ALTER COLUMN nen_tang SET OPTIONS(description='Nền tảng. Giá trị: tiktok, instagram, youtube, facebook, threads.');
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`

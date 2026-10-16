@@ -41,8 +41,17 @@
     threads: { ten: "Threads", glyph: [
       ["circle", { cx: 12, cy: 12, r: 3.6, fill: "none", stroke: "currentColor", "stroke-width": 2.3 }],
       ["path", { d: "M15.6 8.6v4.3a2.7 2.7 0 0 0 5.4 0V12a9 9 0 1 0-3.5 7.1", fill: "none", stroke: "currentColor",
-                 "stroke-width": 2.3, "stroke-linecap": "round" }]] }
+                 "stroke-width": 2.3, "stroke-linecap": "round" }]] },
+    // Báo & Web (16/10/2026): glyph tờ báo — khung + ô ảnh + hai dòng chữ (vẽ nét như Threads)
+    web: { ten: "Báo & Web", glyph: [
+      ["path", { d: "M4.5 5h11.5v13.2a1.8 1.8 0 0 0 1.8 1.8H6.3a1.8 1.8 0 0 1-1.8-1.8zM16 9h3.5v9.2a1.75 1.75 0 0 1-3.5 0",
+                 fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }],
+      ["rect", { x: 7.2, y: 7.8, width: 6.1, height: 3.6, rx: 0.6 }],
+      ["path", { d: "M7.2 14.3h6.1M7.2 17.2h6.1", fill: "none", stroke: "currentColor", "stroke-width": 1.7,
+                 "stroke-linecap": "round" }]] }
   };
+  // Bài web (16/10/2026): loại trang + mức nhắc (nhãn từ máy chủ — cfg.nhan.kieu_trang, chi_so.MUC_NHAC).
+  var TEN_MUC_NHAC = { tieu_de: "Nhắc ở tiêu đề", chinh: "Nhắc trong bài", thoang: "Nhắc lướt" };
   var TEN_NT = {};
   Object.keys(NEN_TANG).forEach(function (k) { TEN_NT[k] = NEN_TANG[k].ten; });
   function mauNT(k) { return NEN_TANG[k] ? "var(--nt-" + k + ")" : "var(--chu-mo)"; }
@@ -66,20 +75,20 @@
   // y_dinh (16/10/2026): "1" = chỉ bình luận ý định mua — đặt bằng bộ lọc nhanh / khối Ý định mua.
   // gom_mg: tuỳ chọn của MÂY TỪ (gồm bình luận minigame) — theo URL như bộ lọc nhưng không lọc khối
   // nào khác, nên không hiện chip / không đếm là "đang lọc" / bộ lọc nhanh và "Xoá lọc" giữ nguyên.
-  var CHIEU = ["pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong", "tuong_tac", "q", "kieu_quet", "y_dinh", "gom_mg"];
+  var CHIEU = ["pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong", "tuong_tac", "q", "kieu_quet", "kieu_trang", "y_dinh", "gom_mg"];
   var CHIEU_LOC_THAT = CHIEU.filter(function (k) { return k !== "gom_mg"; });
-  var NHIEU = { nen_tang: 1, loai: 1, nguon: 1, sac_thai: 1, chu_de: 1, anh_huong: 1 };
+  var NHIEU = { nen_tang: 1, loai: 1, nguon: 1, sac_thai: 1, chu_de: 1, anh_huong: 1, kieu_trang: 1 };
   var TEN_CHIEU = { pham_vi: "Phạm vi", nen_tang: "Nền tảng", loai: "Loại nguồn", nguon: "Nguồn", sac_thai: "Sắc thái",
-                    chu_de: "Chủ đề", anh_huong: "Ảnh hưởng", tuong_tac: "Tương tác", q: "Tìm", kieu_quet: "Kiểu quét",
+                    chu_de: "Chủ đề", anh_huong: "Ảnh hưởng", tuong_tac: "Tương tác", q: "Tìm", kieu_quet: "Kiểu quét", kieu_trang: "Loại trang",
                     y_dinh: "Ý định mua", gom_mg: "Mây từ" };
   var MA_SAC = { "Tích cực": "tich_cuc", "Tiêu cực": "tieu_cuc", "Trung lập": "trung_lap", "chưa phân loại": "chua_phan_loai" };
   var LOP_MA_SAC = { tich_cuc: "tc", tieu_cuc: "ti", trung_lap: "tl", chua_phan_loai: "chua" };
-  var RE_DAU_NGUON = /^(n|t|link|\?|tiktok|facebook|instagram|youtube):/;
+  var RE_DAU_NGUON = /^(n|t|link|\?|tiktok|facebook|instagram|youtube|threads|web):/;
   var MAC = cfg.mac_dinh || { tu: cfg.tu, den: cfg.den };
   var tenNguonDaBiet = {};
   function locRong() {
     return { pham_vi: "tat_ca", nen_tang: [], loai: [], nguon: [], sac_thai: [], chu_de: [], anh_huong: [],
-             tuong_tac: "", q: "", kieu_quet: "", y_dinh: "", gom_mg: "" };
+             tuong_tac: "", q: "", kieu_quet: "", kieu_trang: [], y_dinh: "", gom_mg: "" };
   }
   // "a,b" -> ["a","b"]; khoá nguồn có thể chứa dấu phẩy (tên tác giả) — ghép như máy chủ.
   function tachGiaTri(k, s) {
@@ -241,7 +250,9 @@
     ban_sao: [["rect", { x: 8.5, y: 8.5, width: 11, height: 11, rx: 2 }], ["path", { d: "M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" }]],
     mat_cuoi: [["circle", { cx: 12, cy: 12, r: 8.5 }], ["path", { d: "M8.5 14a4.2 4.2 0 0 0 7 0M9.2 9.8h.01M14.8 9.8h.01" }]],
     nha: [["path", { d: "M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5H15V15h-6v5.5H5.5A1.5 1.5 0 0 1 4 19z" }]],
-    the_gioi: [["circle", { cx: 12, cy: 12, r: 8.5 }], ["path", { d: "M3.5 12h17M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5S9.7 5.9 12 3.5z" }]]
+    the_gioi: [["circle", { cx: 12, cy: 12, r: 8.5 }], ["path", { d: "M3.5 12h17M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5S9.7 5.9 12 3.5z" }]],
+    bao: [["path", { d: "M4.5 5h11.5v13.2a1.8 1.8 0 0 0 1.8 1.8H6.3a1.8 1.8 0 0 1-1.8-1.8zM16 9h3.5v9.2a1.75 1.75 0 0 1-3.5 0" }],
+          ["path", { d: "M7.5 8.3h5v3h-5zM7.5 14.4h5M7.5 17.2h5" }]]
   };
   function dungSvg(ds, lop) {
     var s = document.createElementNS(SVG, "svg");
@@ -314,6 +325,14 @@
     c.appendChild(tao("span", "cs-chip__chu", chu));
     if (title) c.title = title;
     return c;
+  }
+  // Bài web: loại trang + "PR" + mức nhắc — chip nhỏ, nghĩa nằm ở title (không chú thích tại chỗ).
+  function theWeb(r) {
+    var ds = [];
+    if (r.kieu_trang) ds.push(chip(tenG("kieu_trang", r.kieu_trang), "web", "Loại trang của bài Báo & Web"));
+    if (r.la_pr) ds.push(chip("PR", "pr", "Bài PR: thân bài dẫn link về trang của thương hiệu hoặc ghi nguồn/ảnh từ thương hiệu"));
+    if (r.muc_nhac) ds.push(chip(TEN_MUC_NHAC[r.muc_nhac] || r.muc_nhac, "nguon", "Mức nhắc thương hiệu trong bài"));
+    return ds;
   }
   function chipSac(s) {
     var k = LOP_SAC[s];
@@ -648,12 +667,22 @@
                             "Bài đăng sau khi gộp các bản đăng lại cùng nội dung (khử trùng): " +
                             so(k.bai - k.bai_khu_trung) + " trong " + so(k.bai) + " bài là bản đăng lại."));
     }
-    var LAN_QUET = "Cộng từ số của từng bài tính tới lần quét gần nhất — bài trong chiến dịch được cập nhật dần mỗi lần quét lại.";
+    var LAN_QUET = "Cộng từ số của từng bài tính tới lần quét gần nhất — bài trong chiến dịch được cập nhật dần mỗi lần quét lại." +
+      (k.web ? " Bài Báo & Web không có lượt xem / thích / chia sẻ nên không góp vào số này." : "");
     el.appendChild(theKpi("Lượt xem", k.xem, ss.xem, "la", "mat", LAN_QUET));
     el.appendChild(theKpi("Tương tác", k.tuong_tac, ss.tuong_tac, "cam", "tim_dac", "Thích + bình luận + chia sẻ. " + LAN_QUET));
+    if (k.web) el.appendChild(theKpi("Báo & Web", k.web.bai, null, "xanh", "bao", moTaWeb(k.web)));
     if (d.y_dinh_mua) el.appendChild(theYDinhKpi(d.y_dinh_mua, lech));
     el.appendChild(theSacKpi(k));
     chiaCotKpi();
+  }
+  // Thẻ Báo & Web: số bài là số chính; số miền / % PR / % nhắc ở tiêu đề nằm trong ⓘ.
+  function moTaWeb(w) {
+    var theo = Object.keys(w.theo_kieu || {}).map(function (k) { return tenG("kieu_trang", k) + " " + so(w.theo_kieu[k]); });
+    return so(w.bai) + " bài từ " + so(w.mien) + " trang (tên miền)" + (theo.length ? " — " + theo.join(", ") : "") + ". " +
+      "Bài PR: " + (w.pr_pt == null ? "chưa rõ" : pt(w.pr_pt) + " (" + so(w.pr) + " bài)") + ". " +
+      "Nhắc ở tiêu đề: " + (w.tieu_de_pt == null ? "chưa rõ" : pt(w.tieu_de_pt) + " (" + so(w.tieu_de) + " bài)") + ". " +
+      "Đã gồm trong Bài đăng và Thảo luận; không có lượt xem / tương tác.";
   }
   // Kỳ trước có số không (ít nhất một chỉ số khác 0) — không thì nói một lần dưới hàng KPI.
   function coKyTruoc(d) {
@@ -1400,7 +1429,8 @@
         var c = tao("div", "cs-o-bai__chu");
         c.appendChild(linkAnToan(r.link, r.noi_dung || r.link || "(không có chữ)"));
         c.appendChild(tao("div", "cs-o-bai__phu", (r.tac_gia || "?") + " · " + (TEN_NT[r.nen_tang] || r.nen_tang) +
-                          " · " + ngayDu(r.dang_luc) + (r.loai ? " · " + r.loai : "")));
+                          " · " + ngayDu(r.dang_luc) + (r.loai ? " · " + r.loai : "") +
+                          (r.kieu_trang ? " · " + tenG("kieu_trang", r.kieu_trang) : "") + (r.la_pr ? " · PR" : "")));
         w.appendChild(c);
         return w; } },
       { ten: "Sắc thái", lopO: function (r) { return O_SAC[LOP_SAC[r.sac_thai]] ? "o-mau o-mau--" + O_SAC[LOP_SAC[r.sac_thai]] : "cs-o-chua"; },
@@ -1783,6 +1813,8 @@
 
   // ─── thẻ bình luận: trông như một bình luận thật ───
   function soLieu(bt, n, nhan) {
+    // null = nền tảng không có số này (bài Báo & Web: không có xem/thích/chia sẻ) — không vẽ "0".
+    if (n === null) return document.createDocumentFragment();
     var s = tao("span", "cs-so-lieu");
     s.title = so(n || 0) + " " + nhan;
     s.appendChild(bieuTuong(bt));
@@ -1955,9 +1987,12 @@
     var nh = tao("div", "cs-bai__the");
     nh.appendChild(chipSac(r.sac_thai));
     if (r.chu_de) nh.appendChild(chip(r.chu_de, "chu-de"));
+    theWeb(r).forEach(function (c) { nh.appendChild(c); });
     o.appendChild(nh);
     var sl = tao("div", "cs-bai__so");
-    var SO_LIEU_BAI = "Số xem / thích / chia sẻ / bình luận tính tới lần quét gần nhất của từng bài — bài trong chiến dịch được cập nhật dần mỗi lần quét lại.";
+    var SO_LIEU_BAI = r.nen_tang === "web"
+      ? "Báo & Web không có lượt xem / thích / chia sẻ; thảo luận = 1 bài + số trả lời (diễn đàn) tính tới lần quét gần nhất."
+      : "Số xem / thích / chia sẻ / bình luận tính tới lần quét gần nhất của từng bài — bài trong chiến dịch được cập nhật dần mỗi lần quét lại.";
     var tl = tao("span", "");
     tl.appendChild(tao("b", "", so(r.thao_luan)));
     tl.appendChild(chuNode(" thảo luận"));
@@ -2338,7 +2373,9 @@
   var TRUONG_G = [
     { k: "nen_tang", ten: "Nền tảng" }, { k: "loai", ten: "Loại nguồn" }, { k: "nguon", ten: "Nguồn", tim: true },
     { k: "sac_thai", ten: "Sắc thái" }, { k: "chu_de", ten: "Chủ đề", tim: true }, { k: "anh_huong", ten: "Ảnh hưởng" },
-    { k: "tuong_tac", ten: "Tương tác" }, { k: "kieu_quet", ten: "Kiểu quét" }
+    { k: "tuong_tac", ten: "Tương tác" }, { k: "kieu_quet", ten: "Kiểu quét" },
+    // Báo & Web (16/10/2026): chỉ hiện khi kỳ có bài web hoặc đang lọc (bài MXH không có loại trang)
+    { k: "kieu_trang", ten: "Loại trang", chiKhiCo: true }
   ];
   var GHI_CHU_G = {
     nguon: "Bình luận theo nguồn của bài. Số = bài trong kỳ.",
@@ -2346,7 +2383,8 @@
     chu_de: "Chủ đề bài lọc bài, chủ đề bình luận lọc bình luận.",
     anh_huong: "Theo follower của tài khoản đăng bài; bình luận theo bài.",
     tuong_tac: "Thích + bình luận + chia sẻ của bài; bình luận theo bài.",
-    kieu_quet: "Bài vào kho bằng đường nào; bình luận theo bài."
+    kieu_quet: "Bài vào kho bằng đường nào; bình luận theo bài.",
+    kieu_trang: "Chỉ bài Báo & Web có loại trang — chọn thì bài mạng xã hội không khớp; bình luận theo bài."
   };
   var TEN_NHOM_CD = { bai: "Chủ đề bài", bl: "Chủ đề bình luận", chung: "Dùng chung" };
   var nutG = {}, popG = null;
@@ -2382,6 +2420,10 @@
       x.gt.textContent = !n ? "Tất cả" : (NHIEU[t.k] && n > 1) ? n + " đã chọn" : (NHIEU[t.k] ? tenG(t.k, v[0]) : tenG(t.k, v));
       x.b.classList.toggle("cs-truong__nut--dang", !!n);
       x.b.title = n ? t.ten + ": " + moTaChieu(t.k) : "Lọc theo " + t.ten.toLowerCase();
+      if (t.chiKhiCo) {                 // không có bài web trong kỳ và không lọc: ẩn ô cho gọn thanh
+        var dem = ((duLieu && duLieu.bo_loc_dem) || {})[t.k] || {};
+        x.bo.hidden = !n && !Object.keys(dem).length;
+      }
     });
   }
   function luaChonG(k) {

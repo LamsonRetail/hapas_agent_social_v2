@@ -264,12 +264,14 @@ def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) 
 
 
 # Cột bài trang Chỉ số dùng (chữ dài cắt ngay trong SQL). `kieu_quet` (đợt 2f): bộ lọc "kiểu quét".
+# `kieu_trang`, `muc_nhac`, `la_pr` (lắng nghe web, 16/10/2026): chỉ bài web có, bài MXH NULL.
 _COT_BAI_CS = (
     "b.khoa, b.nen_tang, b.nguon_id, b.kieu_quet, left(b.link, 500) AS link, b.bl_da_lay, "
     "b.ma_noi_dung, "
     "left(b.tac_gia, 200) AS tac_gia, left(b.tai_khoan, 200) AS tai_khoan, b.followers, "
     "b.dang_luc, left(b.noi_dung, 1000) AS noi_dung, left(b.hashtag, 500) AS hashtag, "
     "b.sac_thai, left(b.chu_de, 100) AS chu_de, b.xem, b.thich, b.binh_luan, b.chia_se, "
+    "b.kieu_trang, b.muc_nhac, b.la_pr, "
     "n.loai AS nguon_loai, n.ten AS nguon_ten, n.dinh_danh AS nguon_dinh_danh, "
     "n.link AS nguon_link")
 
@@ -279,7 +281,7 @@ _COT_BAI_CS = (
 _COT_BAI_GOC = (
     "b.khoa, b.nen_tang, b.nguon_id, n.loai AS nguon_loai, left(b.tai_khoan, 200) AS tai_khoan, "
     "left(b.tac_gia, 200) AS tac_gia, b.followers, b.thich, b.binh_luan, b.chia_se, "
-    "b.kieu_quet, left(b.link, 500) AS link")
+    "b.kieu_quet, b.kieu_trang, left(b.link, 500) AS link")
 _COT_BAI_GOC_CHU = ", left(b.noi_dung, 1000) AS noi_dung, left(b.hashtag, 500) AS hashtag"
 
 
@@ -378,6 +380,10 @@ def dat_cau_hinh(ai: str, ma: str, cau_hinh: dict) -> None:
         cu = c.execute("SELECT cau_hinh FROM du_an WHERE ma = %s FOR UPDATE", (ma,)).fetchone()
         if not cu:
             raise LoiDuLieu("Không còn dự án này.")
+        # Chỉ thay các nhóm biểu mẫu gửi (tu_khoa, binh_luan); nhóm khác trong JSONB (vd `web`:
+        # miền nhà của lắng nghe web, 16/10/2026) giữ nguyên — lưu Ngân sách không xoá mất.
+        goc = cu["cau_hinh"] if isinstance(cu["cau_hinh"], dict) else {}
+        cau_hinh = {**goc, **cau_hinh}
         c.execute("UPDATE du_an SET cau_hinh = %s::jsonb, tk_bat = %s, bl_bat = %s, "
                   "sua_luc = now(), sua_boi = %s WHERE ma = %s",
                   (json.dumps(cau_hinh, ensure_ascii=False), tk_bat, bl_bat, ai, ma))

@@ -72,7 +72,9 @@ BANG: dict[str, dict] = {
                 ("ly_do_giu", "STRING"), ("xem", "INT64"), ("thich", "INT64"),
                 ("binh_luan", "INT64"), ("chia_se", "INT64"), ("thay_lan_dau", "TIMESTAMP"),
                 ("cap_nhat_cuoi", "TIMESTAMP"), ("luot_dau", "INT64"), ("luot_cuoi", "INT64"),
-                ("ma_noi_dung", "STRING")],
+                ("ma_noi_dung", "STRING"),
+                # Lắng nghe web (16/10/2026): chỉ bài nen_tang = 'web' có, bài MXH NULL.
+                ("kieu_trang", "STRING"), ("muc_nhac", "STRING"), ("la_pr", "BOOL")],
     },
     "chi_so_ngay": {
         "khoa": ["du_an", "khoa", "ngay"], "kieu": "theo_ngay", "moc": "ngay",
