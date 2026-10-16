@@ -2554,10 +2554,10 @@ def _cau_tim_youtube(q: list[str]) -> str:
     … AND yêu AND từ AND điều…" — gần như không video nào khớp. Nay cụm nhiều chữ đặt trong
     ngoặc kép (tìm đúng cụm); cụm có chứa một từ đơn đã nằm trong danh sách thì bỏ (OR với từ
     đơn đó đã bao trọn cụm). Bỏ trùng hoa/thường/dấu; ký tự `"` `|` trong từ khoá thành dấu
-    cách để không phá cú pháp."""
+    cách để không phá cú pháp; "-" đầu từ khoá (toán tử LOẠI TRỪ của YouTube) bị bỏ."""
     sach: list[str] = []
     for x in q:
-        t = " ".join(str(x or "").replace('"', " ").replace("|", " ").split())
+        t = " ".join(str(x or "").replace('"', " ").replace("|", " ").split()).lstrip("-").strip()
         if t and " ".join(_tokens(t)) not in {" ".join(_tokens(s)) for s in sach}:
             sach.append(t)
     don = {_tokens(t)[0] for t in sach if " " not in t and len(_tokens(t)) == 1}
@@ -2580,6 +2580,8 @@ def _youtube_tim(q: list[str], limit: int, country: str, d_from, d_to,
     page_token = ""
     query = _cau_tim_youtube(q)
     so_trang, bi_cat = 0, False
+    if not query:                      # từ khoá chỉ toàn ký tự bị bỏ: tìm rỗng = video bất kỳ
+        return [], 0, False
     while len(search_items) < limit:
         if toi_da_trang is not None and so_trang >= toi_da_trang:
             bi_cat = True

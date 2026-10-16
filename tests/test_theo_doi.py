@@ -1480,6 +1480,17 @@ def test_youtube_cau_tim_dat_cum_trong_ngoac_kep():
     assert A._cau_tim_youtube(q) == 'hapas|"yêu từ điều nhỏ nhất"|hapas.vn|"ví x y"'
     assert A._cau_tim_youtube(["túi hapas", "ví hapas"]) == '"túi hapas"|"ví hapas"'
     assert A._cau_tim_youtube(["#hapas", "túi hapas"]) == "#hapas"
+    # "-" đầu từ khoá là toán tử LOẠI TRỪ của YouTube; từ khoá chỉ toàn ký tự bị bỏ → câu rỗng.
+    assert A._cau_tim_youtube(["-hapas", "- túi xách"]) == 'hapas|"túi xách"'
+    assert A._cau_tim_youtube(['"', "|", " "]) == ""
+
+
+def test_youtube_tim_cau_rong_khong_goi_api(monkeypatch):
+    """Câu tìm rỗng thì YouTube trả video bất kỳ và tốn quota — không gọi."""
+    goi = []
+    monkeypatch.setattr(A.requests, "get", lambda *a, **k: goi.append(a))
+    assert A._youtube_tim(['"', "|"], 50, "VN", None, None) == ([], 0, False)
+    assert goi == []
 
 
 def test_youtube_tim_gui_cau_da_dat_ngoac(monkeypatch):
