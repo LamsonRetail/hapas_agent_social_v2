@@ -836,13 +836,20 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             if q.get("loai_bl") not in CS.LOAI_BL:
                 raise NL.LoiNhap("Nhãn lọc không hợp lệ.")
             dk["loai"] = q.get("loai_bl")
+        # cum_bl: cụm của ngăn Từ khoá (đếm như mây từ); bai_bl: một bài (khối Ý định mua).
         for k, ra, dai in (("q_bl", "q", 100), ("nguon_bl", "nguon", 300),
-                           ("chu_de_bl", "chu_de", 100)):
+                           ("chu_de_bl", "chu_de", 100), ("cum_bl", "cum", 100),
+                           ("bai_bl", "khoa_bai", 200)):
             v = (q.get(k) or "").strip()
             if len(v) > dai:
                 raise NL.LoiNhap("Điều kiện quá dài.")
             if v:
                 dk[ra] = v
+        yd = q.get("y_dinh_bl") or ""
+        if yd not in ("", "1"):
+            raise NL.LoiNhap("Điều kiện ý định mua không hợp lệ.")
+        if yd:
+            dk["y_dinh"] = True
         sx = q.get("sap_xep") or "thich"
         if sx not in CS.SAP_XEP_BL:
             raise NL.LoiNhap("Cách sắp xếp không hợp lệ.")
@@ -921,9 +928,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             try:
                 kq = await _kq_nho("bai", du_an["ma"], tu, den, moc, da_giu=True)
                 kb = await _kq_nho("bl", du_an["ma"], tu, den, moc, da_giu=True)
+                # Bình luận kỳ TRƯỚC: chỉ để so "Ý định mua" với kỳ liền trước — chỉ hop_le, cột
+                # hẹp, KHÔNG vào bộ nhớ dòng (review 16/10: gấp đôi bộ nhớ khi khoảng chạm trần).
+                kbt = await _k(app.state.kho.binh_luan_hop_le_gon, du_an["ma"],
+                               *_moc_ngay(*CS.khoang_truoc(tu, den)))
                 bai_khoa = None
                 if CS.can_tra_bai(bo_loc):
-                    bai_khoa = await _bai_cho_bl(du_an["ma"], kq["rows"], kb["rows"], moc,
+                    bai_khoa = await _bai_cho_bl(du_an["ma"], kq["rows"],
+                                                 kb["rows"] + kbt["rows"], moc,
                                                  bool(bo_loc["q"]), da_giu=True)
                 tu_khoa_da = du_an["tu_khoa"] or []
 
@@ -936,14 +948,25 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                               tu_khoa_du_an=tu_khoa_da, bo_loc=f,
                                               bai_theo_khoa=bai_khoa)
                     d["tu_khoa"], d["tu_khoa_tong"] = tk["tu_khoa"], tk["tong"]
+                    d["tu_khoa_an_mg"] = tk["an_minigame"]
                     d["binh_luan_da_cao"] = CS.tong_hop_bl(kb["rows"], tu, den, hom_nay=hom_nay,
                                                            bo_loc=f, bai_theo_khoa=bai_khoa)
+                    d["y_dinh_mua"] = CS.y_dinh_mua(kb["rows"], tu, den, rows_truoc=kbt["rows"],
+                                                    truoc_bi_cat=bool(kbt["bi_cat"]),
+                                                    nay_bi_cat=bool(kb["bi_cat"]),
+                                                    hom_nay=hom_nay, bo_loc=f,
+                                                    bai_theo_khoa=bai_khoa)
                     d.update(CS.tong_quan_loc(kq["rows"], kb["rows"], tu, den, f, bai_khoa))
                     d["bo_loc"] = CS.bo_loc_json(bo_loc)
                     d["bi_cat"], d["bl_bi_cat"] = kq["bi_cat"], kb["bi_cat"]
                     return d
                 data = await _k(tinh)
-                del kq, kb, bai_khoa
+                del kq, kb, kbt, bai_khoa
+                # Link + đoạn nội dung chỉ cho các bài top ý định mua (≤ 20 khoá), không cả khoảng.
+                top = data["y_dinh_mua"]["top_bai"]
+                if top:
+                    CS.gan_ngu_canh_y_dinh(top, await _k(app.state.kho.ngu_canh_bai, du_an["ma"],
+                                                         [x["khoa_bai"] for x in top]))
             finally:
                 app.state.ban.release()
             nho[khoa] = (time.monotonic(), data)

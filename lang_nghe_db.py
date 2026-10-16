@@ -331,6 +331,10 @@ def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
 _COT_BL = ("ma", "nen_tang", "tac_gia", "noi_dung", "thich", "tra_loi", "la_tra_loi",
            "cua_thuong_hieu", "dang_luc", "sac_thai", "chu_de", "loai", "ly_do_loc",
            "ma_noi_dung", "link", "ma_cha")
+#: Nhãn chỉ xét được trên KHO (cần lịch sử nhiều tài khoản / nhiều bình luận), không phải từ một
+#: bình luận: cào lại thấy bình luận "hợp lệ" thì vẫn giữ nhãn kho, không gửi lại AI.
+_NHAN_KHO = "(binh_luan.loai = 'seeding' OR binh_luan.ly_do_loc = 'affiliate_hang_loat')"
+_GIU_NHAN_KHO = f"(EXCLUDED.loai = 'hop_le' AND {_NHAN_KHO})"
 
 
 def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
@@ -350,13 +354,15 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "ON CONFLICT (du_an, khoa_bai, ma) DO UPDATE SET "
                 "thich = COALESCE(EXCLUDED.thich, binh_luan.thich), "
                 "tra_loi = COALESCE(EXCLUDED.tra_loi, binh_luan.tra_loi), "
-                "sac_thai = COALESCE(EXCLUDED.sac_thai, binh_luan.sac_thai), "
-                "chu_de = COALESCE(EXCLUDED.chu_de, binh_luan.chu_de), "
-                # Đã là seeding (xét trên lịch sử) thì lượt sau không hạ về hop_le.
-                "loai = CASE WHEN binh_luan.loai = 'seeding' AND EXCLUDED.loai = 'hop_le' "
-                "THEN 'seeding' ELSE EXCLUDED.loai END, "
-                "ly_do_loc = CASE WHEN binh_luan.loai = 'seeding' AND EXCLUDED.loai = 'hop_le' "
-                "THEN binh_luan.ly_do_loc ELSE EXCLUDED.ly_do_loc END, "
+                # Nhãn xét trên KHO (seeding, spam affiliate hàng loạt — `_NHAN_KHO`) thì lượt sau
+                # không đưa về hop_le, và không mang lại sắc thái/chủ đề.
+                f"sac_thai = CASE WHEN {_GIU_NHAN_KHO} THEN NULL "
+                "ELSE COALESCE(EXCLUDED.sac_thai, binh_luan.sac_thai) END, "
+                f"chu_de = CASE WHEN {_GIU_NHAN_KHO} THEN NULL "
+                "ELSE COALESCE(EXCLUDED.chu_de, binh_luan.chu_de) END, "
+                f"loai = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.loai ELSE EXCLUDED.loai END, "
+                f"ly_do_loc = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.ly_do_loc "
+                "ELSE EXCLUDED.ly_do_loc END, "
                 "ma_noi_dung = EXCLUDED.ma_noi_dung, "
                 "link = COALESCE(EXCLUDED.link, binh_luan.link), "
                 "ma_cha = COALESCE(EXCLUDED.ma_cha, binh_luan.ma_cha), "
@@ -386,6 +392,7 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "WHERE bai.du_an = %s AND bai.khoa = %s",
                 (co, co, BL_DU_TOI_THIEU, n, ma, khoa, ma, khoa))
         _danh_dau_seeding(c, ma, [r.get("ma_noi_dung") for r in rows])
+        _danh_dau_affiliate(c, ma, [r.get("khoa_bai") for r in rows])
     return moi, cu
 
 
@@ -401,19 +408,59 @@ def _danh_dau_seeding(c, ma: str, cac_ma: list) -> int:
         "AND COALESCE(dang_luc, thay_lan_dau) >= now() - make_interval(days => %s) "
         "AND loai IN ('hop_le', 'seeding') GROUP BY ma_noi_dung "
         "HAVING count(DISTINCT lower(tac_gia)) >= %s AND count(DISTINCT khoa_bai) >= 2) "
+        # cap_nhat_cuoi: mốc đồng bộ BigQuery — dòng CŨ (bài khác) bị hạ nhãn cũng phải đẩy lại.
         "UPDATE binh_luan b SET loai = 'seeding', "
-        "ly_do_loc = 'cung_noi_dung_nhieu_tai_khoan', sac_thai = NULL, chu_de = NULL "
-        "FROM nhom WHERE b.du_an = %s AND b.ma_noi_dung = nhom.ma_noi_dung AND b.loai = 'hop_le'",
+        "ly_do_loc = 'cung_noi_dung_nhieu_tai_khoan', sac_thai = NULL, chu_de = NULL, "
+        "cap_nhat_cuoi = now() FROM nhom WHERE b.du_an = %s AND b.ma_noi_dung = nhom.ma_noi_dung AND b.loai = 'hop_le'",
         (ma, ds, loc_rac.SEEDING_NGAY, loc_rac.SEEDING_TAC_GIA, ma)).rowcount or 0
 
 
+#: Bình luận đã là spam affiliate vẫn đếm vào "cùng một đợt" của luật cấp bài.
+_LY_DO_AFF = ("affiliate_dan_ma", "affiliate_hang_loat")
+
+
+def _danh_dau_affiliate(c, ma: str, khoa_bai: list) -> int:
+    """Luật cấp BÀI của spam affiliate (`loc_rac.affiliate_hang_loat`, 16/10/2026): dưới cùng một
+    bài, ≥ 5 tài khoản có mã giới thiệu (hoặc chữ kiểu cách + lời dặn/tên sàn) trong 48 giờ theo
+    giờ ĐĂNG → `spam` (`affiliate_hang_loat`). Chỉ hạ bình luận đang hop_le, xoá sắc thái/chủ đề
+    như seeding. Mỗi tài khoản một mã nên luật seeding (cùng nội dung) không bắt được. Mã có trong
+    bài / bình luận của chính thương hiệu (minigame, voucher) không tính. -> số dòng đã hạ."""
+    import loc_rac
+    ds = sorted({k for k in khoa_bai if k})
+    if not ds:
+        return 0
+    da = c.execute("SELECT ten, tu_khoa FROM du_an WHERE ma = %s", (ma,)).fetchone() or {}
+    thuong_hieu = [da.get("ten") or "", *(da.get("tu_khoa") or [])]
+    bai = {r["khoa"]: r["noi_dung"] for r in c.execute(
+        "SELECT khoa, noi_dung FROM bai WHERE du_an = %s AND khoa = ANY(%s)", (ma, ds)).fetchall()}
+    # Bình luận không có giờ đăng (luc NULL) bị bỏ qua: giờ cào không nói chúng cách nhau bao lâu.
+    rows = c.execute(
+        "SELECT khoa_bai, ma, tac_gia, noi_dung, dang_luc AS luc, loai, cua_thuong_hieu "
+        "FROM binh_luan WHERE du_an = %s AND khoa_bai = ANY(%s) AND (loai = 'hop_le' OR "
+        "ly_do_loc = ANY(%s) OR loai = 'thuong_hieu' OR cua_thuong_hieu)",
+        (ma, ds, list(_LY_DO_AFF))).fetchall()
+    ha: dict[str, list[str]] = {}
+    for kb, m in loc_rac.affiliate_hang_loat(rows, thuong_hieu=thuong_hieu, noi_dung_bai=bai):
+        ha.setdefault(kb, []).append(m)
+    n = 0
+    for kb, cac in ha.items():
+        n += c.execute(
+            "UPDATE binh_luan SET loai = 'spam', ly_do_loc = 'affiliate_hang_loat', "
+            "sac_thai = NULL, chu_de = NULL, cap_nhat_cuoi = now() WHERE du_an = %s AND "
+            "khoa_bai = %s AND ma = ANY(%s) AND loai = 'hop_le'", (ma, kb, cac)).rowcount or 0
+    return n
+
+
 def da_gan_nhan(ma: str, khoa_bai: list[str]) -> set[tuple[str, str]]:
-    """(khoá bài, mã bình luận) đã có sắc thái — cào lại không gửi lại AI (review 15/10)."""
+    """(khoá bài, mã bình luận) đã có sắc thái — cào lại không gửi lại AI (review 15/10). Kể cả
+    bình luận mang nhãn KHO (seeding, spam affiliate hàng loạt): `ghi_binh_luan` giữ nhãn đó, gán
+    sắc thái cho nó chỉ tốn tiền AI."""
     if not khoa_bai:
         return set()
     with ket_noi() as c:
         rows = c.execute("SELECT khoa_bai, ma FROM binh_luan WHERE du_an = %s AND "
-                         "khoa_bai = ANY(%s) AND sac_thai IS NOT NULL", (ma, list(khoa_bai)))
+                         "khoa_bai = ANY(%s) AND (sac_thai IS NOT NULL OR loai = 'seeding' OR "
+                         "ly_do_loc = 'affiliate_hang_loat')", (ma, list(khoa_bai)))
         return {(r["khoa_bai"], r["ma"]) for r in rows.fetchall()}
 
 

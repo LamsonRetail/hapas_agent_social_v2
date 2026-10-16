@@ -24,8 +24,9 @@ from urllib.parse import parse_qs, urlsplit
 NEN_TANG = ("tiktok", "instagram", "youtube", "facebook")
 TEN_NEN_TANG = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTube",
                 "facebook": "Facebook"}
+# Nhãn hiển thị "Internal channel" (chủ dự án 16/10/2026); giá trị lưu vẫn là `kenh_nha`.
 LOAI_NGUON = {"kol": "KOL/KOC", "page": "Trang/fanpage", "group": "Nhóm", "bao": "Báo/tin tức",
-              "kenh_nha": "Kênh nhà", "khac": "Khác"}
+              "kenh_nha": "Internal channel", "khac": "Khác"}
 VAI_TRO = {"xem": "Chỉ xem", "quan_ly": "Quản lý"}
 # Chủ dự án 15/10: "không có giới hạn" — hai mức dưới chỉ chặn số rác / tràn cột (NUMERIC(8,2),
 # INT), KHÔNG phải trần nghiệp vụ. Tiền vẫn chặn bằng trần tháng do người dùng đặt.

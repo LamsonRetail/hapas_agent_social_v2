@@ -139,4 +139,13 @@ Thứ tự quét: YouTube trước vì miễn phí, rồi Instagram, TikTok, Fac
   sudo -u postgres pg_dump -Fc lang_nghe > /opt/lang-nghe/backup/lang_nghe-$(date +%F).dump
   ```
 - **Lượt bị bỏ dở:** lượt kẹt ở `dang_chay` quá 3 giờ (bot tắt giữa chừng) sẽ tự đóng thành `loi` ở lượt sau.
+- **Lọc lại bình luận cũ theo luật spam mới** (16/10/2026, spam affiliate "dán mã vào Shopee"): không gọi AI, chỉ hạ `hop_le`/`trung` → `spam`. Xem trước rồi mới ghi:
+  ```bash
+  cd /opt/mark/app
+  PY=/opt/mark/hermes-agent/venv/bin/python
+  sudo -u mark $PY scripts/lang_nghe_loc_lai.py --mau 10                  # xem trước, chỉ đọc, tác giả đã che
+  sudo -u mark $PY scripts/lang_nghe_loc_lai.py --ap-dung --sao-luu /opt/mark/loc_lai-$(date +%F).json
+  sudo -u mark $PY scripts/lang_nghe_loc_lai.py --hoan-tac /opt/mark/loc_lai-<ngày>.json   # nếu cần trả lại
+  ```
+  Đọc tay nhóm "CẦN ĐỌC TAY" (hàng loạt không có mã) trước khi ghi. `--ap-dung` ghi nhãn cũ vào tệp `--sao-luu` (không ghi đè tệp có sẵn) rồi mới sửa; `--hoan-tac` chỉ trả dòng còn đúng nhãn script đặt. Từ lượt quét sau, luật mới tự chạy (từng bình luận + cấp bài: ≥ 5 tài khoản / 48 giờ theo giờ đăng).
 - **Bot khởi động lại giữa lượt actor:** phần nền tảng đó không gửi lại, tránh trả tiền hai lần. Tiền vẫn tính theo run id, và nguồn của phần đó chờ lượt sau.

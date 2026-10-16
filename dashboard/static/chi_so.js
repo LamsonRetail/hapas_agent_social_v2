@@ -27,7 +27,7 @@
                    "chưa phân loại": "chua_phan_loai", "kênh nhà": "kenh_nha" };
   var LOP_SAC = { "Tích cực": "tc", "Tiêu cực": "ti", "Trung lập": "tl", "chưa phân loại": "chua", "kênh nhà": "nha" };
   var TEN_SAC = { "Tích cực": "Tích cực", "Tiêu cực": "Tiêu cực", "Trung lập": "Trung lập",
-                  "chưa phân loại": "Chưa phân loại", "kênh nhà": "Kênh nhà" };
+                  "chưa phân loại": "Chưa phân loại", "kênh nhà": "Internal channel" };
   var TEN_NT = { tiktok: "TikTok", facebook: "Facebook", youtube: "YouTube", instagram: "Instagram" };
   var TEN_LOAI_BL = { hop_le: "Hợp lệ", it_noi_dung: "Ít nội dung", spam: "Spam", trung: "Trùng lặp",
                       seeding: "Seeding", thuong_hieu: "Thương hiệu" };
@@ -40,10 +40,15 @@
   // Tham số giống hệt API (/api/chi-so, /api/bai, /api/binh-luan); điều kiện RIÊNG của khung chi
   // tiết dùng tên `ct_*`, của luồng bình luận dùng `*_bl` nên không bao giờ đè bộ lọc chung (AND).
   var NHAN = cfg.nhan || {};
-  var CHIEU = ["pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong", "tuong_tac", "q", "kieu_quet"];
+  // y_dinh (16/10/2026): "1" = chỉ bình luận ý định mua — đặt bằng bộ lọc nhanh / khối Ý định mua.
+  // gom_mg: tuỳ chọn của MÂY TỪ (gồm bình luận minigame) — theo URL như bộ lọc nhưng không lọc khối
+  // nào khác, nên không hiện chip / không đếm là "đang lọc" / bộ lọc nhanh và "Xoá lọc" giữ nguyên.
+  var CHIEU = ["pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong", "tuong_tac", "q", "kieu_quet", "y_dinh", "gom_mg"];
+  var CHIEU_LOC_THAT = CHIEU.filter(function (k) { return k !== "gom_mg"; });
   var NHIEU = { nen_tang: 1, loai: 1, nguon: 1, sac_thai: 1, chu_de: 1, anh_huong: 1 };
   var TEN_CHIEU = { pham_vi: "Phạm vi", nen_tang: "Nền tảng", loai: "Loại nguồn", nguon: "Nguồn", sac_thai: "Sắc thái",
-                    chu_de: "Chủ đề", anh_huong: "Ảnh hưởng", tuong_tac: "Tương tác", q: "Tìm", kieu_quet: "Kiểu quét" };
+                    chu_de: "Chủ đề", anh_huong: "Ảnh hưởng", tuong_tac: "Tương tác", q: "Tìm", kieu_quet: "Kiểu quét",
+                    y_dinh: "Ý định mua", gom_mg: "Mây từ" };
   var MA_SAC = { "Tích cực": "tich_cuc", "Tiêu cực": "tieu_cuc", "Trung lập": "trung_lap", "chưa phân loại": "chua_phan_loai" };
   var LOP_MA_SAC = { tich_cuc: "tc", tieu_cuc: "ti", trung_lap: "tl", chua_phan_loai: "chua" };
   var RE_DAU_NGUON = /^(n|t|link|\?|tiktok|facebook|instagram|youtube):/;
@@ -51,7 +56,7 @@
   var tenNguonDaBiet = {};
   function locRong() {
     return { pham_vi: "tat_ca", nen_tang: [], loai: [], nguon: [], sac_thai: [], chu_de: [], anh_huong: [],
-             tuong_tac: "", q: "", kieu_quet: "" };
+             tuong_tac: "", q: "", kieu_quet: "", y_dinh: "", gom_mg: "" };
   }
   // "a,b" -> ["a","b"]; khoá nguồn có thể chứa dấu phẩy (tên tác giả) — ghép như máy chủ.
   function tachGiaTri(k, s) {
@@ -86,7 +91,7 @@
     CHIEU.forEach(function (k) { if (dangLoc(l, k)) o[k] = NHIEU[k] ? l[k].join(",") : l[k]; });
     return o;
   }
-  function soChieuDang(l) { return CHIEU.filter(function (k) { return dangLoc(l, k); }).length; }
+  function soChieuDang(l) { return CHIEU_LOC_THAT.filter(function (k) { return dangLoc(l, k); }).length; }
   function giongLoc(a, b) { return JSON.stringify(thamSoLoc(a)) === JSON.stringify(thamSoLoc(b)); }
   var G = chuanLoc(cfg.bo_loc || {});
 
@@ -459,6 +464,7 @@
     var m = mau();
     giuTapTrung($("che-xu-huong"), function () { chay("thảo luận", function () { veXuHuong(duLieu, m); }); });
     giuTapTrung($("che-sac-thai-tg"), function () { chay("sắc thái theo thời gian", function () { veSacThaiTg(duLieu, m); }); });
+    chay("ý định mua", function () { veYDinh(duLieu, m); });
   }
   function nutNguon(coBl) {
     return [{ gt: "bai", chu: "Bài đăng" }, { gt: "bl", chu: "Bình luận", tat: coBl ? false : "Chưa có bình luận đã đọc" }];
@@ -501,14 +507,45 @@
     }
     el.appendChild(theKpi("Lượt xem", so(k.xem), ss.xem, ghi));
     el.appendChild(theKpi("Tương tác", so(k.tuong_tac), ss.tuong_tac, ghi));
+    if (d.y_dinh_mua) el.appendChild(theYDinhKpi(d.y_dinh_mua, lech));
     el.appendChild(theSacKpi(k));
+  }
+  // Ý định mua: số + % trên bình luận sạch + so kỳ trước (kỳ trước 0 thì không có % — chỉ ghi số).
+  // Cả thẻ là nút: mở ngăn với đúng các bình luận đã đếm.
+  function theYDinhKpi(y, lech) {
+    var o = nut("", "the-khoi kpi cs-kpi-yd", moYDinh);
+    var n = tao("span", "kpi__nhan");
+    var c = tao("span", "cs-kpi__cham");
+    c.style.background = "var(--cs-yd)";
+    n.appendChild(c);
+    n.appendChild(chuNode("Ý định mua"));
+    o.appendChild(n);
+    o.appendChild(tao("span", "kpi__so so", so(y.so)));
+    o.appendChild(tao("span", "kpi__doi", y.pt == null ? "chưa có bình luận sạch" : pt(y.pt) + " bình luận sạch"));
+    var d = tao("span", "kpi__doi");
+    if (lech) {
+      d.textContent = "không so kỳ trước";
+    } else if (y.doi_pt != null) {
+      var lop = y.doi_pt > 0 ? "tang" : y.doi_pt < 0 ? "giam" : "";
+      d.appendChild(tao("span", lop, (y.doi_pt > 0 ? "▲ +" : y.doi_pt < 0 ? "▼ " : "■ ") + pt(y.doi_pt)));
+      d.appendChild(chuNode(" so với kỳ trước"));
+    } else if (y.truoc != null) {
+      d.textContent = "kỳ trước " + so(y.truoc);
+    }
+    o.appendChild(d);
+    o.setAttribute("aria-label", "Ý định mua: " + so(y.so) + " bình luận" + (y.pt == null ? "" : ", " + pt(y.pt) + " bình luận sạch") +
+                   " — bấm để xem");
+    return o;
+  }
+  function moYDinh() {
+    moChiTiet("binh-luan", { y_dinh_bl: "1", loai_bl: "hop_le" }, "Ý định mua");
   }
   // Bốn chỉ số sắc thái của bài gộp vào MỘT thẻ rộng có thanh 100% (bấm ô → xem bài).
   function theSacKpi(k) {
     var o = tao("div", "the-khoi kpi cs-kpi-sac");
     var n = tao("div", "kpi__nhan");
     n.appendChild(chuNode("Sắc thái bài"));
-    if (k.bai_kenh_nha) n.appendChild(tao("span", "mo", "· không tính " + so(k.bai_kenh_nha) + " bài kênh nhà"));
+    if (k.bai_kenh_nha) n.appendChild(tao("span", "mo", "· không tính " + so(k.bai_kenh_nha) + " bài Internal channel"));
     o.appendChild(n);
     var dl = {};
     dl[TC] = k.tich_cuc; dl[TI] = k.tieu_cuc; dl[TL] = k.trung_lap; dl[CHUA] = k.chua_phan_loai;
@@ -517,7 +554,7 @@
     [[TC, pt(k.tich_cuc_pt), so(k.tich_cuc) + " bài", "var(--cs-tc)"],
      [TI, pt(k.tieu_cuc_pt), so(k.tieu_cuc) + " bài", "var(--cs-ti)"],
      [TL, pt(k.trung_lap_pt), so(k.trung_lap) + " bài", "var(--cs-tl)"],
-     [CHUA, so(k.chua_phan_loai), k.bai_kenh_nha ? "+ " + so(k.bai_kenh_nha) + " bài kênh nhà" : "bài", "var(--cs-chua)"]
+     [CHUA, so(k.chua_phan_loai), k.bai_kenh_nha ? "+ " + so(k.bai_kenh_nha) + " bài Internal channel" : "bài", "var(--cs-chua)"]
     ].forEach(function (x) {
       var b = nut("", "cs-kpi-sac__o", function () { moChiTiet("bai", { ct_sac_thai: x[0] }, "sắc thái " + TEN_SAC[x[0]]); });
       var nh = tao("span", "kpi__nhan");
@@ -646,7 +683,7 @@
     });
     $("ghi-chu-sac-thai").textContent = !tong ? "Chưa có dữ liệu sắc thái." : laBl
       ? "% trên " + so(daPhan) + " bình luận hợp lệ đã phân loại."
-      : "% trên " + so(daPhan) + " bài đã phân loại; không tính bài kênh nhà.";
+      : "% trên " + so(daPhan) + " bài đã phân loại; không tính bài Internal channel.";
   }
 
   // ─── sắc thái theo thời gian (đường kiểu Kompa) ───
@@ -695,6 +732,104 @@
     };
   }
 
+  // ─── ý định mua (16/10/2026): cột theo ngày/tuần/tháng + bài có nhiều câu hỏi mua nhất ───
+  var TEN_CHE = { ngay: "Theo ngày", tuan: "Theo tuần", thang: "Theo tháng" };
+  function veYDinh(d, m) {
+    var y = d.y_dinh_mua;
+    if (!y || !$("khoi-y-dinh")) return;
+    var tom = $("yd-tom-tat");
+    xoa(tom);
+    if (y.sach) {
+      tom.appendChild(tao("b", "", so(y.so)));
+      tom.appendChild(chuNode(" / " + so(y.sach) + " bình luận sạch hỏi giá, muốn mua (" + pt(y.pt) + ")"));
+      if (y.so) tom.appendChild(chuNode(" · " + so(y.theo_chu_de) + " theo chủ đề AI, " + so(y.theo_cau) + " theo câu hỏi"));
+    } else {
+      tom.textContent = "Chưa có bình luận hợp lệ trong khoảng này.";
+    }
+    var nutEl = $("yd-nut");
+    giuNut(nutEl, function () {
+      xoa(nutEl);
+      var xem = nut("Xem bình luận", "nut nut--nhe nut--nho", moYDinh);
+      xem.setAttribute("data-k", "xem");
+      xem.disabled = !y.so;
+      nutEl.appendChild(xem);
+      // Liên kết khối ↔ bộ lọc chung (như "Lọc" ở Nguồn nổi bật): lọc CẢ trang theo ý định mua.
+      var dang = G.y_dinh === "1";
+      var l = nut(dang ? "Bỏ lọc" : "Lọc cả trang", "nut nut--nhe nut--nho", function () {
+        datLocChung({ y_dinh: dang ? "" : "1" });
+      });
+      l.setAttribute("aria-pressed", dang ? "true" : "false");
+      l.setAttribute("data-k", "loc");
+      l.title = dang ? "Bỏ lọc ý định mua" : "Chỉ xem bình luận hỏi giá / muốn mua trên mọi khối";
+      nutEl.appendChild(l);
+    });
+    // Cột: cùng cách gom ngày/tuần/tháng với biểu đồ Thảo luận (tt.che).
+    var g = gom(y.xu_huong, ["so", "sach"], tt.che);
+    $("yd-bd-tieu-de").textContent = TEN_CHE[g.cd] || "Theo ngày";
+    var o = coBan(m);
+    o.legend.show = false;
+    o.grid.top = 16;
+    o.xAxis = trucDanhMuc(m, g.ten);
+    o.yAxis = trucSo(m);
+    o.tooltip.axisPointer = { type: "shadow", shadowStyle: { color: hexRgba(m.truc, 0.25) } };
+    o.tooltip.formatter = function (ps) {
+      var i = ps[0].dataIndex;
+      return g.ten[i] + "\n" + so(g.du.so[i]) + " bình luận hỏi mua\n" +
+             (g.du.sach[i] ? ptCua(g.du.so[i], g.du.sach[i]) + " của " + so(g.du.sach[i]) + " bình luận sạch" : "chưa có bình luận sạch");
+    };
+    var mauYd = bien("--cs-yd") || m.chinh;
+    o.series = [{ name: "Ý định mua", type: "bar", data: g.du.so, barMaxWidth: 26,
+                  itemStyle: { color: mauYd, borderRadius: [3, 3, 0, 0] },
+                  emphasis: { itemStyle: { color: hexRgba(mauYd, 0.85) } } }];
+    ve("bd-y-dinh", o);
+    xuLyBam["bd-y-dinh"] = function (p) {
+      var i = p.dataIndex;
+      if (!g.du.so[i]) return;
+      var kh = { ngay_tu: g.tu[i], ngay_den: g.den[i] };
+      moChiTiet("binh-luan", Object.assign({ y_dinh_bl: "1", loai_bl: "hop_le" }, kh),
+                "Ý định mua · " + moTaKhoang(kh));
+    };
+    veTopYDinh(y);
+  }
+  function veTopYDinh(y) {
+    var el = $("yd-top");
+    xoa(el);
+    var ds = y.top_bai || [];
+    if (!ds.length) { el.appendChild(tao("div", "trong", "Chưa có bình luận hỏi mua trong khoảng này.")); return; }
+    var GON = 5, max = ds[0].so || 1;
+    (tt.ydMo ? ds : ds.slice(0, GON)).forEach(function (x) {
+      var ten = (x.tac_gia || x.nguon || "Không rõ tác giả") + (x.noi_dung ? " · " + x.noi_dung : "");
+      var b = nut("", "cs-thanh cs-yd__bai", function () {
+        moChiTiet("binh-luan", { y_dinh_bl: "1", loai_bl: "hop_le", bai_bl: x.khoa_bai },
+                  "Ý định mua · " + (x.tac_gia || x.nguon || "một bài"));
+      });
+      var t = tao("span", "cs-thanh__ten");
+      t.appendChild(huyHieuNT(x.nen_tang, false, true));
+      t.appendChild(tao("span", "", ten));
+      b.appendChild(t);
+      var ray = tao("span", "cs-thanh__ray"), dac = tao("span", "cs-thanh__dac");
+      dac.style.width = (100 * x.so / max).toFixed(1) + "%";
+      dac.style.background = "var(--cs-yd)";
+      ray.appendChild(dac);
+      b.appendChild(ray);
+      var gt = tao("span", "cs-thanh__gt");
+      gt.appendChild(tao("b", "so", so(x.so)));
+      gt.appendChild(chuNode(" hỏi mua" + (x.sach ? " · " + ptCua(x.so, x.sach) + " BL sạch" : "")));
+      b.appendChild(gt);
+      b.title = ten;
+      b.setAttribute("aria-label", ten + ": " + so(x.so) + " bình luận hỏi mua — bấm để xem");
+      el.appendChild(b);
+    });
+    if (ds.length > GON) {
+      el.appendChild(nut(tt.ydMo ? "Thu gọn" : "Xem thêm " + (ds.length - GON) + " bài", "nut nut--nhe nut--nho cs-yd__them", function () {
+        tt.ydMo = !tt.ydMo;
+        veTopYDinh(y);
+        var t = $("yd-top").querySelector(".cs-yd__them");
+        if (t) t.focus();
+      }));
+    }
+  }
+
   // ─── sắc thái thảo luận theo chủ đề (hàng 100% kiểu Kompa) ───
   function veChuDe(d) {
     var b = d.binh_luan_da_cao, coBl = coBinhLuan(d);
@@ -714,7 +849,7 @@
       tom.appendChild(tao("b", "", so(ds.length)));
       tom.appendChild(chuNode(" chủ đề trên "));
       tom.appendChild(tao("b", "", so(tong)));
-      tom.appendChild(chuNode(" " + don + (laBl ? " hợp lệ" : " (không tính kênh nhà)")));
+      tom.appendChild(chuNode(" " + don + (laBl ? " hợp lệ" : " (không tính Internal channel)")));
     } else {
       tom.textContent = " ";
     }
@@ -775,10 +910,14 @@
 
   // ─── từ khoá nổi bật: mây từ tự xếp (xoắn ốc + va chạm hộp) ───
   var may = { ds: [], rong: 0 };
+  // Màu theo NGƯỠNG (16/10/2026, máy chủ tính `mau` — chi_so.sac_noi_troi): xanh khi TC ≥ 25% số đã
+  // phân loại và ≥ 2 × TI; đỏ đối xứng; còn lại xám. Không theo nhãn lớn nhất tuyệt đối.
   function lopTu(x) {
-    var tot = TL, v = -1;
-    SAC4.forEach(function (s) { if ((x[s] || 0) > v) { v = x[s] || 0; tot = s; } });
-    return tot === TC ? "tc" : tot === TI ? "ti" : "tl";
+    if (x.mau === "tc" || x.mau === "ti" || x.mau === "tl") return x.mau;
+    var tc = x[TC] || 0, ti = x[TI] || 0, da = tc + ti + (x[TL] || 0);
+    if (tc && tc >= 0.25 * da && tc >= 2 * ti) return "tc";
+    if (ti && ti >= 0.25 * da && ti >= 2 * tc) return "ti";
+    return "tl";
   }
   function thanhTron(x) {
     var t = tao("div", "cs-tron");
@@ -795,14 +934,19 @@
     o.appendChild(tao("div", "cs-noi__tieu-de", "“" + x.tu + "”"));
     o.appendChild(tao("div", "cs-noi__so", so(x.so_bai) + " thảo luận nhắc tới · bấm để xem"));
     o.appendChild(thanhTron(x));
+    // % trên số ĐÃ phân loại — cùng mẫu số với luật tô màu (lopTu), nên "≥ 25%" ở chú giải khớp
+    // con số ở đây; dòng chưa phân loại chỉ ghi số.
+    var da = (x[TC] || 0) + (x[TI] || 0) + (x[TL] || 0);
     SAC4.forEach(function (s) {
       if (!x[s]) return;
       var d = tao("div", "cs-noi__dong");
       d.appendChild(tao("span", "cs-chip__cham cs-nen-" + LOP_SAC[s]));
       d.appendChild(chuNode(TEN_SAC[s]));
-      d.appendChild(tao("span", "so", so(x[s]) + " · " + ptCua(x[s], x.so_bai)));
+      d.appendChild(tao("span", "so", s === CHUA ? so(x[s]) : so(x[s]) + " · " + ptCua(x[s], da)));
       o.appendChild(d);
     });
+    // Cảnh báo tập trung: một bài góp ≥ 60% số thảo luận của cụm (vd minigame, một video viral).
+    if (x.mot_bai_pt) o.appendChild(tao("div", "cs-noi__canh", "⚠ " + x.mot_bai_pt + "% từ 1 bài"));
   }
   function ganTu(b, x) {
     function hien() { hienNoi(b, function (o) { noiTu(o, x); }); }
@@ -829,6 +973,9 @@
     } else {
       tom.textContent = " ";
     }
+    if (d.tu_khoa_an_mg) tom.appendChild(chuNode(" · đã ẩn " + so(d.tu_khoa_an_mg) + " bình luận minigame"));
+    var mg = $("tk-gom-mg");
+    if (mg) mg.checked = G.gom_mg === "1";
     veKieuTu();
   }
   function veKieuTu() {
@@ -1850,7 +1997,9 @@
   function moTuKhoa(x) {
     if (!hop || soCu) return;
     var ctl = batDauNgan("Từ khoá", "“" + x.tu + "”");
-    var dk = { "binh-luan": { q_bl: x.tu.slice(0, 100), loai_bl: "hop_le" }, bai: { cum: x.tu } };
+    // 16/10/2026: bình luận cũng gửi CỤM (cum_bl), máy chủ tách cụm như mây từ — số hai thẻ cộng
+    // lại đúng bằng số trên mây (tìm chữ q_bl khớp cả tên tác giả, đếm lệch: "xin gia" 6 vs 190).
+    var dk = { "binh-luan": { cum_bl: x.tu.slice(0, 100), loai_bl: "hop_le" }, bai: { cum: x.tu } };
     var kq = {}, chon = "binh-luan", tab = $("chi-tiet-tab"), than = $("chi-tiet-than");
     var tom = so(x.so_bai) + " thảo luận nhắc tới — " + SAC4.filter(function (s) { return x[s]; })
       .map(function (s) { return TEN_SAC[s].toLowerCase() + " " + so(x[s]); }).join(" · ");
@@ -1928,7 +2077,7 @@
   }
   function moTaLoc() {
     var ds = [ngayNgan(cfg.tu) + " – " + ngayDu(cfg.den)];
-    CHIEU.forEach(function (k) {
+    CHIEU_LOC_THAT.forEach(function (k) {
       if (dangLoc(G, k)) ds.push((k === "tuong_tac" ? "tương tác " : k === "q" ? "tìm " : "") + moTaChieu(k));
     });
     return ds;
@@ -1975,7 +2124,7 @@
       el.appendChild(b);
     });
   }
-  function locNhanh(p) { return chuanLoc(p.loc || {}); }
+  function locNhanh(p) { return chuanLoc(Object.assign({}, p.loc || {}, { gom_mg: G.gom_mg })); }
   function ngayNhanh(p) { return p.so_ngay ? { tu: congNgay(cfg.hom_nay, 1 - p.so_ngay), den: cfg.hom_nay } : null; }
   function khopNhanh(p) {
     if (!giongLoc(G, locNhanh(p))) return false;
@@ -1991,7 +2140,7 @@
     (cfg.nhanh || []).forEach(function (p) {
       var dang = khopNhanh(p);
       var b = nut(p.ten, "cs-nhanh__chip", function () {
-        if (dang) datLocChung(Object.assign(locRong(), p.so_ngay ? { tu: MAC.tu, den: MAC.den } : {}));
+        if (dang) datLocChung(Object.assign(locRong(), { gom_mg: G.gom_mg }, p.so_ngay ? { tu: MAC.tu, den: MAC.den } : {}));
         else datLocChung(Object.assign(locNhanh(p), ngayNhanh(p) || {}));
       });
       b.setAttribute("aria-pressed", dang ? "true" : "false");
@@ -2010,7 +2159,7 @@
   ];
   var GHI_CHU_G = {
     nguon: "Bình luận theo nguồn của bài. Số = bài trong kỳ.",
-    sac_thai: "Bài theo sắc thái bài (bài kênh nhà không mang tiếng khách); bình luận theo sắc thái của chính nó.",
+    sac_thai: "Bài theo sắc thái bài (bài Internal channel không mang tiếng khách); bình luận theo sắc thái của chính nó.",
     chu_de: "Chủ đề bài lọc bài, chủ đề bình luận lọc bình luận.",
     anh_huong: "Theo follower của tài khoản đăng bài; bình luận theo bài.",
     tuong_tac: "Thích + bình luận + chia sẻ của bài; bình luận theo bài.",
@@ -2199,7 +2348,7 @@
     var el = $("loc-dang");
     var giu = el.contains(document.activeElement);
     xoa(el);
-    CHIEU.forEach(function (k) {
+    CHIEU_LOC_THAT.forEach(function (k) {
       if (!dangLoc(G, k)) return;
       el.appendChild(chipLoc(TEN_CHIEU[k] + ": " + moTaChieu(k), function () {
         var th = {};
@@ -2214,7 +2363,7 @@
     }
   }
   function xoaLocChung() {
-    datLocChung(locRong());
+    datLocChung(Object.assign(locRong(), { gom_mg: G.gom_mg }));
     $("loc-q").value = "";
   }
   function veTomTat() {
@@ -2236,7 +2385,7 @@
     // Gợi ý khi bộ lọc cho kết quả dễ hiểu lầm (tiếng khách nằm ở bình luận, không ở bài).
     var gy = [];
     if (G.sac_thai.length && G.pham_vi === "kenh_nha") {
-      gy.push("Bài kênh nhà là tiếng của thương hiệu, không mang sắc thái khách — xem bình luận tiêu cực/tích cực ở khối Bình luận.");
+      gy.push("Bài Internal channel là tiếng của thương hiệu, không mang sắc thái khách — xem bình luận tiêu cực/tích cực ở khối Bình luận.");
     }
     if (G.chu_de.length && duLieu && duLieu.bo_loc_dem) {
       var nhomCd = {};
@@ -2244,6 +2393,7 @@
       if (G.chu_de.every(function (c) { return nhomCd[c] === "bl"; })) gy.push("Chủ đề bình luận chỉ lọc bình luận; phần bài không lọc theo chủ đề.");
       else if (G.chu_de.every(function (c) { return nhomCd[c] === "bai"; })) gy.push("Chủ đề bài chỉ lọc bài; bình luận không lọc theo chủ đề.");
     }
+    if (G.y_dinh) gy.push("Ý định mua chỉ lọc bình luận; phần bài không đổi.");
     var g = $("loc-goi-y");
     g.textContent = gy.join(" ");
     g.hidden = !gy.length;
@@ -2270,7 +2420,7 @@
     if (popG) popG.veDs();
   }
 
-  // ─── Kênh nhà vs Bên ngoài (bấm một bên = áp phạm vi đó) ───
+  // ─── Internal vs External channel (bấm một bên = áp phạm vi đó; nhãn đổi 16/10/2026) ───
   function dongSacNN(nhan, s, don) {
     var dl = {};
     dl[TC] = s.tich_cuc; dl[TI] = s.tieu_cuc; dl[TL] = s.trung_lap; dl[CHUA] = s.chua_phan_loai;
@@ -2298,7 +2448,7 @@
     o.setAttribute("aria-pressed", dang ? "true" : "false");
     o.setAttribute("data-k", gt);
     var dau = tao("span", "cs-nn__dau");
-    dau.appendChild(tao("span", "cs-nn__ten", nha ? "Kênh nhà" : "Bên ngoài"));
+    dau.appendChild(tao("span", "cs-nn__ten", nha ? "Internal channel" : "External channel"));
     dau.appendChild(tao("span", "cs-nn__phu", nha ? "kênh của thương hiệu" : "KOL · trang · nhóm · báo · từ khoá"));
     dau.appendChild(tao("span", "cs-nn__hd", dang ? "Đang lọc · bấm để bỏ" : "Chỉ xem bên này →"));
     o.appendChild(dau);
@@ -2314,7 +2464,7 @@
     if (!nha) o.appendChild(dongSacNN("Sắc thái bài", x.sac_bai, "bài"));
     o.appendChild(dongSacNN(nha ? "Sắc thái bình luận khách" : "Sắc thái bình luận", x.sac_bl, "bình luận"));
     if (nha) o.appendChild(tao("span", "cs-nn__chu-y", "Bài của thương hiệu không tính sắc thái."));
-    o.setAttribute("aria-label", (nha ? "Kênh nhà" : "Bên ngoài") + ": " + so(x.bai) + " bài, " + so(x.thao_luan) +
+    o.setAttribute("aria-label", (nha ? "Internal channel" : "External channel") + ": " + so(x.bai) + " bài, " + so(x.thao_luan) +
                    " thảo luận — " + (dang ? "đang lọc, bấm để bỏ" : "bấm để chỉ xem bên này"));
     return o;
   }
@@ -2331,7 +2481,7 @@
     if (tong) {
       var t = tao("div", "cs-nn__thanh");
       t.setAttribute("role", "img");
-      t.setAttribute("aria-label", "Tỷ trọng thảo luận: kênh nhà " + ptCua(a.thao_luan, tong) + ", bên ngoài " + ptCua(b.thao_luan, tong));
+      t.setAttribute("aria-label", "Tỷ trọng thảo luận: Internal channel " + ptCua(a.thao_luan, tong) + ", External channel " + ptCua(b.thao_luan, tong));
       [["nha", a.thao_luan], ["ngoai", b.thao_luan]].forEach(function (p) {
         if (!p[1]) return;
         var s = tao("span", "cs-nn__phan cs-nn__phan--" + p[0]);
@@ -2531,11 +2681,12 @@
     if (!duLieu) return;
     var d = duLieu, m = mau();
     chay("bộ lọc", veThanhLocChung);
-    chay("kênh nhà vs bên ngoài", function () { veNhaNgoai(d); });
+    chay("internal vs external channel", function () { veNhaNgoai(d); });
     chay("KPI", function () { veKpi(d); });
     chay("thảo luận", function () { veXuHuong(d, m); });
     chay("sắc thái", function () { veSacThai(d, m); });
     chay("sắc thái theo thời gian", function () { veSacThaiTg(d, m); });
+    chay("ý định mua", function () { veYDinh(d, m); });
     chay("chủ đề", function () { veChuDe(d); });
     chay("từ khoá", function () { veTuKhoa(d); });
     chay("phân bố", function () { vePhanBo(d); });
@@ -2607,7 +2758,7 @@
         ketThucDoi();
         var chu = (e && e.message) || "Không tải được số liệu.";
         if (!duLieu || doiLoc) {
-          // Lượt đổi bộ lọc lỗi: KPI / kênh nhà-bên ngoài đang là khung xương -> báo trống; các khối
+          // Lượt đổi bộ lọc lỗi: KPI / internal-external channel đang là khung xương -> báo trống; các khối
           // còn lại vẫn là số của bộ lọc trước -> đánh dấu cũ + khoá bấm; luồng bình luận đang chờ
           // lượt này -> báo lỗi kèm Thử lại (không kẹt "Đang tải…").
           $("cs-trang").classList.remove("dang-tai");
@@ -2670,6 +2821,14 @@
     if (tam && tam.open && !laDienThoai()) tam.close();  // xoay/rộng ra: thanh lọc về chỗ cũ
     doDau();
   }, 150));
+
+  // Công tắc "Gồm cả bình luận minigame" (mặc định TẮT): theo URL như bộ lọc chung (gom_mg=1).
+  (function () {
+    var mg = $("tk-gom-mg");
+    if (!mg) return;
+    mg.checked = G.gom_mg === "1";
+    mg.addEventListener("change", function () { datLocChung({ gom_mg: mg.checked ? "1" : "" }); });
+  })();
 
   // ─── khởi tạo luồng bình luận ───
   (function () {

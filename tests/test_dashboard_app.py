@@ -161,6 +161,18 @@ class GiaKho:
         self.goi_bl.append((du_an, tu, den))
         return {"rows": [c for c in self.bl if tu <= c["luc"] < den], "bi_cat": False}
 
+    goi_bl_gon: list = None             # tạo lười: mọi bộ thử cũ không đổi
+
+    def binh_luan_hop_le_gon(self, du_an, tu, den):
+        """Như kho thật: chỉ hop_le, cột hẹp (kỳ trước của Ý định mua)."""
+        self.goi_bl_gon = (self.goi_bl_gon or []) + [(du_an, tu, den)]
+        cot = ("khoa_bai", "nen_tang", "noi_dung", "loai", "cua_thuong_hieu", "sac_thai", "chu_de",
+               "luc", "nguon_loai", "nguon_id")
+        return {"rows": [{k: c.get(k) for k in cot} for c in self.bl if tu <= c["luc"] < den
+                         and (c.get("loai") or ("thuong_hieu" if c.get("cua_thuong_hieu")
+                                                else "hop_le")) == "hop_le"],
+                "bi_cat": False}
+
     def binh_luan_cua_bai(self, du_an, khoa, toi_da=300):
         return [dict(c) for c in self.bl if c["khoa_bai"] == khoa][:toi_da]
 
@@ -1543,7 +1555,12 @@ def test_api_chi_so_bo_loc_moi_khoi_va_khoa_nho_rieng():
     lay("&nen_tang=tiktok,facebook")
     lay("&nen_tang=facebook,tiktok")                                 # cùng bộ lọc, khác thứ tự
     assert len(app.state.nho_chi_so) == so_khoa + 1
+    # Bình luận kỳ này đọc MỘT lần (nhớ); kỳ trước (so "Ý định mua") đọc cột hẹp, KHÔNG nhớ dòng —
+    # mỗi lần tính /api/chi-so một lần (kết quả /api/chi-so đã nhớ theo bộ lọc).
     assert len(kho.goi_bai) == 1 and len(kho.goi_bl) == 1
+    assert len(kho.goi_bl_gon) == so_khoa + 1
+    assert not any(k[0] == "bl" and k[2] != datetime.date(2026, 10, 8)
+                   for k in app.state.nho_dong._d)
 
 
 @pytest.mark.parametrize("duong", ["chi-so", "bai", "binh-luan"])
@@ -1665,6 +1682,66 @@ def test_api_khoa_nguon_dai_va_tim_trong_ngan_tu_khoa():
     assert "mk xin" in d["binh_luan"][0]["noi_dung"]
 
 
+def test_api_y_dinh_mua_va_ngan_tu_khoa_dem_nhu_may():
+    """16/10/2026: ô + khối Ý định mua trong /api/chi-so (theo bộ lọc chung, so kỳ trước, top bài có
+    link); /api/binh-luan nhận cum_bl (ngăn từ khoá), y_dinh_bl, bai_bl."""
+    c, kho = _kho_loc()
+    luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    for ma, nd, tg in (("g1", "Xin giá set túi trắng", "Lan"), ("g2", "giá bn ạ", "Set Túi Shop"),
+                       ("g3", "set túi trắng đẹp", "Hoa")):
+        kho.bl.append(dict(_bl("tiktok:1", ma, luc), noi_dung=nd, tac_gia=tg))
+    kho.bl.append(dict(_bl("tiktok:1", "t0", datetime.datetime(2026, 10, 3, 9, 0, tzinfo=VN)),
+                       noi_dung="mua ở đâu"))                                   # kỳ trước
+    y = c.get("/api/chi-so?du_an=hapas" + Q_LOC).json()["y_dinh_mua"]
+    assert (y["so"], y["truoc"], y["doi_pt"]) == (2, 1, 100.0)
+    assert y["top_bai"][0]["khoa_bai"] == "tiktok:1" and y["top_bai"][0]["so"] == 2
+    assert y["top_bai"][0]["link"].startswith("https://")                      # ngữ cảnh bài
+    assert c.get("/api/chi-so?du_an=hapas&nen_tang=facebook" + Q_LOC).json()["y_dinh_mua"]["so"] == 0
+    ql = "/api/binh-luan?du_an=hapas" + Q_LOC
+    d = c.get(ql + "&y_dinh_bl=1&loai_bl=hop_le").json()
+    assert sorted(x["ma"] for x in d["binh_luan"]) == ["g1", "g2"]
+    assert c.get(ql + "&y_dinh_bl=1&bai_bl=facebook:2").json()["tong"] == 0
+    assert c.get(ql + "&y_dinh_bl=2").status_code == 400
+    assert c.get(ql + "&y_dinh=1").json()["tong"] == 2                       # chiều lọc chung
+    # Ngăn từ khoá: cụm "set túi" — g1, g3 (KHÔNG g2: chỉ tên tác giả có chữ đó).
+    d = c.get(ql + "&cum_bl=set túi&loai_bl=hop_le").json()
+    assert sorted(x["ma"] for x in d["binh_luan"]) == ["g1", "g3"]
+    assert c.get(ql + "&q_bl=set túi").json()["tong"] == 3                   # ô tìm: cả tác giả
+    assert c.get(ql + "&cum_bl=" + "x" * 101).status_code == 400
+
+
+def test_trang_nguon_nhan_internal_channel():
+    _, c, _ = tao()
+    dang_nhap(c, QL)
+    t = c.get("/nguon?du_an=hapas").text
+    assert '<option value="kenh_nha"' in t and ">Internal channel</option>" in t
+    assert "Kênh nhà" not in t
+
+
+def test_api_may_tu_an_minigame_theo_url():
+    """Chẩn đoán 16/10: mây từ mặc định ẩn bình luận minigame; `gom_mg=1` (theo URL, khoá nhớ
+    riêng) gồm lại; ngăn từ khoá đếm cùng cách; trang có công tắc + chú giải màu."""
+    c, kho = _kho_loc()
+    luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    for i in range(3):
+        kho.bl.append(dict(_bl("tiktok:1", f"mg{i}", luc, chu_de="Minigame/bài dự thi"),
+                           noi_dung=f"{270 + i} chúc mẹ luôn hạnh phúc"))
+    d = c.get("/api/chi-so?du_an=hapas" + Q_LOC).json()
+    assert d["tu_khoa_an_mg"] == 3 and "chúc mẹ" not in {x["tu"] for x in d["tu_khoa"]}
+    d = c.get("/api/chi-so?du_an=hapas&gom_mg=1" + Q_LOC).json()
+    assert d["tu_khoa_an_mg"] == 0 and d["bo_loc"]["gom_mg"] == "1"
+    x = next(x for x in d["tu_khoa"] if x["tu"] == "chúc mẹ")
+    assert x["so_bai"] == 3 and x["mot_bai_pt"] == 100 and x["mau"] == "tc"   # mẫu _bl: Tích cực
+    ql = "/api/binh-luan?du_an=hapas&cum_bl=chúc mẹ&loai_bl=hop_le" + Q_LOC
+    assert c.get(ql).json()["tong"] == 0 and c.get(ql + "&gom_mg=1").json()["tong"] == 3
+    assert c.get("/api/chi-so?du_an=hapas&gom_mg=x" + Q_LOC).status_code == 400
+    t = c.get("/").text
+    assert 'id="tk-gom-mg"' in t and "Gồm cả bình luận minigame" in t
+    assert "xanh khi ≥ 25% tích cực và gấp đôi tiêu cực; đỏ khi ≥ 25% tiêu cực" in t
+    js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
+    assert "% từ 1 bài" in js and "gom_mg" in js and "x.mau" in js
+
+
 def test_trang_chi_so_co_thanh_loc_chung():
     _, c, _ = tao()
     dang_nhap(c, XEM)
@@ -1681,7 +1758,12 @@ def test_trang_chi_so_co_thanh_loc_chung():
     assert 'class="the-khoi cs-bo-loc"' in t and 'name="nen_tang"' not in t   # select cũ đã bỏ
     cfg = cau_hinh(t)
     assert cfg["bo_loc"]["pham_vi"] == "tat_ca" and cfg["mac_dinh"]["den"] == cfg["den"]
-    assert [p["ten"] for p in cfg["nhanh"]][:2] == ["Kênh nhà", "Listening bên ngoài"]
+    # Chủ dự án 16/10/2026: nhãn hiển thị tiếng Anh; giá trị URL vẫn kenh_nha / ben_ngoai.
+    assert [p["ten"] for p in cfg["nhanh"]][:2] == ["Internal channel", "External channel"]
+    assert [p["loc"]["pham_vi"] for p in cfg["nhanh"][:2]] == ["kenh_nha", "ben_ngoai"]
+    assert cfg["nhan"]["pham_vi"] == {"tat_ca": "Tất cả", "kenh_nha": "Internal channel",
+                                      "ben_ngoai": "External channel"}
+    assert "Internal vs External channel" in t and "Kênh nhà" not in t and "Bên ngoài" not in t
     assert {"Khách hỏi mua", "Cảnh báo khủng hoảng", "Tiêu cực cần xử lý",
             "KOL/KOC nói về thương hiệu"} <= {p["ten"] for p in cfg["nhanh"]}
     assert set(cfg["nhan"]["pham_vi"]) == {"tat_ca", "kenh_nha", "ben_ngoai"}
@@ -1700,8 +1782,11 @@ def test_trang_chi_so_co_thanh_loc_chung():
                 "showModal",
                 '"replaceState" : "pushState"',          # gõ ô tìm liên tiếp: sửa mục lịch sử
                 'setAttribute("inert"',                  # lượt lỗi: khối số cũ không bấm được
-                "so_sanh_lech"):                         # lọc tương tác: không so kỳ trước
+                "so_sanh_lech",                          # lọc tương tác: không so kỳ trước
+                "cum_bl:", "y_dinh_bl", "bai_bl"):       # 16/10: ngăn từ khoá + Ý định mua
         assert can in js, can
+    assert "q_bl: x.tu" not in js                        # ngăn từ khoá không còn tìm chữ
+    assert 'id="khoi-y-dinh"' in t and 'id="bd-y-dinh"' in t and 'id="yd-top"' in t
 
 
 # ───────────────────────────── lịch quét tự động (15/10/2026) ─────────────────────────────
