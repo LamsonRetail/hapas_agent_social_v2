@@ -112,9 +112,14 @@
     </div>
     <div class="bieu-do" id="bd-xu-huong" role="img" aria-label="Biểu đồ thảo luận theo thời gian"></div>
   </section>
-  <section class="the-khoi cs-o-nt" aria-labelledby="nt-tieu-de">
-    <div class="cs-the__dau"><h2 id="nt-tieu-de">Theo nền tảng</h2><span class="cs-cg-chu"><b>thảo luận</b> · bài · %</span></div>
-    <div class="cs-ds-thanh" id="nen-tang"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
+  {# Nền tảng + loại nguồn chung MỘT thẻ (17/10/2026): mỗi danh sách chỉ vài dòng — tách hai thẻ
+     thì thẻ nào cũng trống một mảng lớn. #}
+  <section class="the-khoi cs-o-pb" aria-labelledby="pb-tieu-de">
+    <div class="cs-the__dau"><h2 id="pb-tieu-de">Phân bố thảo luận</h2><span class="cs-cg-chu"><b>thảo luận</b> · bài · %</span></div>
+    <h3 class="cs-pb__h" id="nt-tieu-de">Theo nền tảng</h3>
+    <div class="cs-ds-thanh" id="nen-tang" aria-labelledby="nt-tieu-de"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
+    <h3 class="cs-pb__h" id="ln-tieu-de">Theo loại nguồn</h3>
+    <div class="cs-ds-thanh" id="loai-nguon" aria-labelledby="ln-tieu-de"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
   </section>
   <section class="the-khoi cs-o-tg" aria-labelledby="tg-tieu-de">
     <div class="cs-the__dau">
@@ -126,15 +131,11 @@
     </div>
     <div class="bieu-do" id="bd-sac-thai-tg" role="img" aria-label="Biểu đồ sắc thái theo thời gian"></div>
   </section>
-  <section class="the-khoi cs-o-ln" aria-labelledby="ln-tieu-de">
-    <div class="cs-the__dau"><h2 id="ln-tieu-de">Theo loại nguồn</h2><span class="cs-cg-chu"><b>thảo luận</b> · bài · %</span></div>
-    <div class="cs-ds-thanh" id="loai-nguon"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
-  </section>
 </div>
 
 <section class="the-khoi cach-duoi cs-nn" id="khoi-nha-ngoai" aria-labelledby="nn-tieu-de">
   <div class="muc">
-    <span class="muc__so muc__so--2" aria-hidden="true">2</span>
+    <span class="muc__so" aria-hidden="true">2</span>
     <h2 class="muc__ten" id="nn-tieu-de">Internal vs External channel</h2>
     <button type="button" class="goi-y cs-goi-y" data-goi-y="Internal channel = nguồn loại Internal channel (fanpage, kênh TikTok… của chính thương hiệu) — Mark quét đủ. External channel = KOL, trang, nhóm, báo và bài tìm theo từ khoá. Hai bên cùng theo mọi bộ lọc khác. Sắc thái Internal channel là sắc thái bình luận của khách (bài của thương hiệu không tính sắc thái). Bấm một bên để chỉ xem bên đó.">i</button>
     <span class="muc__phai muc__phu" id="nn-phu"></span>
@@ -146,7 +147,7 @@
 {# Ý định mua (16/10/2026): bình luận hợp lệ hỏi giá / muốn mua — tách khỏi "Trung lập" và mây từ. #}
 <section class="the-khoi cach-duoi cs-yd" id="khoi-y-dinh" aria-labelledby="yd-tieu-de">
   <div class="muc">
-    <span class="muc__so muc__so--3" aria-hidden="true">3</span>
+    <span class="muc__so" aria-hidden="true">3</span>
     <h2 class="muc__ten" id="yd-tieu-de">Ý định mua</h2>
     <button type="button" class="goi-y cs-goi-y" data-goi-y="Bình luận hợp lệ hỏi giá, hỏi chỗ mua, xin link, hỏi size/ship, muốn đặt hàng: AI gán chủ đề “Giá/mua ở đâu/ý định mua” hoặc câu có “xin giá”, “giá bn”, “ib”, “mua ở đâu”, “còn hàng”… (đã gộp teen code). Spam mời dán mã không tính. Các câu hỏi giá không vào mây từ khoá.">i</button>
     <div class="muc__phai" id="yd-nut"></div>
@@ -167,7 +168,7 @@
 <div class="luoi luoi--2">
   <section class="the-khoi cs-tk" aria-labelledby="tk-tieu-de">
     <div class="muc">
-      <span class="muc__so muc__so--4" aria-hidden="true">4</span>
+      <span class="muc__so" aria-hidden="true">4</span>
       <h2 class="muc__ten" id="tk-tieu-de">Từ khoá nổi bật</h2>
       <button type="button" class="goi-y cs-goi-y" data-goi-y="Hashtag và cụm hai chữ trong bài + bình luận hợp lệ; đã bỏ từ khoá của dự án, bài Internal channel, spam, lời của thương hiệu, mảnh câu hỏi giá (“xin giá”, “giá bn” — xem khối Ý định mua) và mặc định cả bình luận minigame (lời chúc dự thi). Bản có dấu và không dấu, teen code (mk = mình) gộp làm một. Cỡ chữ theo số thảo luận.">i</button>
       <div class="muc__phai"><div class="cs-phan" id="tk-che" aria-label="Kiểu xem"></div></div>
@@ -185,7 +186,7 @@
   </section>
   <section class="the-khoi cs-cdk" aria-labelledby="cd-tieu-de">
     <div class="muc">
-      <span class="muc__so muc__so--5" aria-hidden="true">5</span>
+      <span class="muc__so" aria-hidden="true">5</span>
       <h2 class="muc__ten" id="cd-tieu-de">Sắc thái thảo luận theo chủ đề</h2>
       <button type="button" class="goi-y cs-goi-y" data-goi-y="Bài đăng: không tính bài Internal channel. Bình luận: chỉ bình luận hợp lệ. Bấm một mảng màu để xem đúng bài / bình luận của chủ đề và sắc thái đó.">i</button>
       <div class="muc__phai"><div class="cs-phan" id="nguon-chu-de" aria-label="Dữ liệu"></div></div>
@@ -200,7 +201,7 @@
 
 <section class="the-khoi cach-duoi" aria-labelledby="tn-tieu-de">
   <div class="muc">
-    <span class="muc__so muc__so--6" aria-hidden="true">6</span>
+    <span class="muc__so" aria-hidden="true">6</span>
     <h2 class="muc__ten" id="tn-tieu-de">Nguồn nổi bật</h2>
     <span class="muc__phai muc__phu">Top 10 mỗi nền tảng theo thảo luận</span>
   </div>
@@ -210,7 +211,7 @@
 
 <section class="the-khoi cach-duoi" aria-labelledby="tb-tieu-de">
   <div class="muc">
-    <span class="muc__so muc__so--7" aria-hidden="true">7</span>
+    <span class="muc__so" aria-hidden="true">7</span>
     <h2 class="muc__ten" id="tb-tieu-de">Bài nổi bật</h2>
     <span class="muc__phai muc__phu">Nhiều thảo luận nhất</span>
   </div>
@@ -219,7 +220,7 @@
 
 <section class="the-khoi cach-duoi cs-khoi-bl" id="khoi-bl" aria-labelledby="bl-tieu-de">
   <div class="muc">
-    <span class="muc__so muc__so--8" aria-hidden="true">8</span>
+    <span class="muc__so" aria-hidden="true">8</span>
     <h2 class="muc__ten" id="bl-tieu-de" tabindex="-1">Bình luận</h2>
     <button type="button" class="goi-y cs-goi-y" data-goi-y="Bình luận Mark đọc dưới các bài. Chỉ bình luận hợp lệ vào sắc thái; spam, ít nội dung, trùng lặp, seeding và phản hồi của thương hiệu được tách riêng. Độ phủ = đã cào / số bình luận nền tảng báo.">i</button>
     <span class="muc__phai muc__phu" id="don-vi-bl"></span>

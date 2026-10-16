@@ -398,19 +398,33 @@
   }
   function trucSo(m) {
     return { type: "value", splitLine: { lineStyle: { color: m.ke, type: [4, 4] } }, minInterval: 1,
-             axisLabel: { color: m.mo, fontSize: 11, formatter: function (v) { return SO.format(v); } } };
+             axisLabel: { color: m.mo, fontSize: 11, formatter: function (v) { return soThe(v); } } };
   }
 
   // Bấm vào biểu đồ → ngăn chi tiết. Mỗi biểu đồ đặt hàm ở `xuLyBam[id]` (bấm vào mảng/cột) hoặc
   // `xuLyBam[id + ":nen"]` (bấm bất kỳ đâu trong lưới — dùng cho biểu đồ đường); sự kiện gắn MỘT
   // lần lúc khởi tạo nên vẽ lại không gắn trùng.
   var xuLyBam = {};
+  var choCoGian = {};
+  var coQuanSat = window.ResizeObserver ? new window.ResizeObserver(function (ds) {
+    ds.forEach(function (x) {
+      var id = x.target.id;
+      if (choCoGian[id]) return;
+      choCoGian[id] = true;                          // gom về một khung hình (không vòng lặp RO)
+      window.requestAnimationFrame(function () {
+        choCoGian[id] = false;
+        if (bieuDo[id]) bieuDo[id].resize();
+      });
+    });
+  }) : null;
   function ve(id, opt) {
     var el = $(id);
     if (!el || !window.echarts) return null;
     var bd = bieuDo[id];
     if (!bd) {
       bd = bieuDo[id] = window.echarts.init(el, null, { renderer: "canvas" });
+      // Khung biểu đồ giãn theo thẻ bên cạnh (hàng biểu đồ cao bằng nhau): đổi cỡ khung là vẽ lại.
+      if (coQuanSat) coQuanSat.observe(el);
       bd.on("click", function (p) {
         var f = xuLyBam[id];
         if (f && p.componentType === "series" && p.dataIndex != null) f(p);
@@ -506,65 +520,111 @@
     d.appendChild(chuNode(" "));
     d.appendChild(tao("span", "kpi__ky", "so với kỳ trước"));        // xuống dòng thì xuống cả cụm
   }
-  function theKpi(nhan, giaTri, doi, ghiChu, mau, bt) {
+  // Số trên thẻ KPI (17/10/2026, chủ dự án: "lòi cả số ra ngoài"): từ 1 triệu thì gọn "35,8 tr" /
+  // "1,2 tỷ" — số đầy đủ nằm ở title (rê chuột) và chữ ẩn cho trình đọc màn hình.
+  function soThe(n) {
+    if (n == null) return "—";
+    var a = Math.abs(n), dv = a >= 1e9 ? [1e9, " tỷ"] : a >= 1e6 ? [1e6, " tr"] : null;
+    if (!dv) return SO.format(n);
+    var x = n / dv[0];
+    return x.toLocaleString("vi-VN", { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : 1 }) + dv[1];
+  }
+  function oSoThe(n, lop) {
+    var s = tao("span", "kpi__so so" + (lop ? " " + lop : ""));
+    var gon = soThe(n), du = so(n);
+    var hien = tao("span", "", gon);
+    if (gon !== du) {
+      hien.setAttribute("aria-hidden", "true");
+      s.title = du;
+      s.appendChild(hien);
+      s.appendChild(tao("span", "cs-an", du));
+    } else {
+      s.appendChild(hien);
+    }
+    return s;
+  }
+  // Dòng so sánh: chỉ khi kỳ trước có số (kỳ trước 0 / chưa có dữ liệu thì để trống — "kỳ trước 0"
+  // dưới mọi thẻ chỉ là nhiễu; một dòng chung dưới hàng KPI nói kỳ trước chưa có dữ liệu).
+  function dongDoi(d, doi, lech) {
+    if (lech) { d.textContent = "không so kỳ trước"; return; }
+    if (!doi) return;
+    if (doi.doi_pt != null) dongSoSanh(d, doi.doi_pt);
+    else if (doi.truoc) d.textContent = "kỳ trước " + soThe(doi.truoc);   // không so % được (bị cắt)
+  }
+  function theKpi(nhan, n, doi, phu, mau, bt, lech) {
     var o = tao("div", "the-khoi kpi kpi--" + (mau || "xanh"));
     o.appendChild(oBieuTuong(bt || "tai_lieu"));
     var than = tao("div", "kpi__than");
     than.appendChild(tao("div", "kpi__nhan", nhan));
-    than.appendChild(tao("div", "kpi__so so", giaTri));
+    than.appendChild(oSoThe(n));
+    if (phu) than.appendChild(tao("div", "kpi__phu", phu));          // số phụ: luôn dòng riêng
     var d = tao("div", "kpi__doi");
-    if (doi) {
-      if (doi.doi_pt == null) d.textContent = "kỳ trước " + so(doi.truoc);
-      else dongSoSanh(d, doi.doi_pt);
-    } else if (ghiChu) {
-      d.textContent = ghiChu;
-    }
-    d.title = d.textContent;
-    than.appendChild(d);
+    dongDoi(d, doi, lech && !!doi);
+    if (d.childNodes.length) than.appendChild(d);
     o.appendChild(than);
     return o;
+  }
+  // Chia hàng KPI: mỗi thẻ ≥ KPI_TOI_THIEU px; không vừa một hàng thì chia đều nhiều hàng
+  // (7 thẻ → 4 + 3) và cho các thẻ của hàng ít thẻ giãn ra lấp đủ hàng (lưới 12 cột: span 3 / span 4)
+  // — không ép thẻ hẹp lại (số tràn), không chừa ô trống cuối hàng.
+  var KPI_TOI_THIEU = 200;
+  function bcnn(a, b) { var x = a, y = b; while (y) { var t = y; y = x % y; x = t; } return a / x * b; }
+  function chiaCotKpi() {
+    var el = $("kpi");
+    if (!el) return;
+    var the = Array.prototype.slice.call(el.querySelectorAll(":scope > .kpi:not(.cs-kpi-sac)"));
+    var n = the.length;
+    if (!n) return;
+    var w = el.clientWidth || 0, khe = 16;
+    var vua = Math.max(1, Math.floor((w + khe) / (KPI_TOI_THIEU + khe)));
+    var hang = Math.ceil(n / vua), dem = [], con = n;
+    for (var h = hang; h > 0; h--) { var k = Math.ceil(con / h); dem.push(k); con -= k; }
+    var L = dem.reduce(function (a, k) { return bcnn(a, k); }, 1), i = 0;
+    dem.forEach(function (k) {
+      for (var j = 0; j < k; j++) the[i++].style.gridColumn = "span " + (L / k);
+    });
+    el.style.setProperty("--so-kpi", String(L));
   }
   function veKpi(d) {
     var k = d.kpi, el = $("kpi");
     // Lọc theo mức tương tác: tương tác cộng dồn theo tuổi bài -> so với kỳ trước lệch, không hiện.
-    var lech = d.so_sanh_lech === "tuong_tac", ss = lech ? {} : d.so_sanh, ghi = lech ? "không so kỳ trước" : null;
+    var lech = d.so_sanh_lech === "tuong_tac", ss = lech ? {} : (d.so_sanh || {});
     xoa(el);
-    el.appendChild(theKpi("Bài đăng", so(k.bai), ss.bai, ghi, "hong", "tai_lieu"));
-    el.appendChild(theKpi("Thảo luận", so(k.thao_luan), ss.thao_luan, ghi, "tim", "tro_chuyen"));
-    el.appendChild(theKpi("Nguồn có bài", so(k.nguon_co_bai), ss.nguon_co_bai, ghi, "xanh", "phat_song"));
+    el.appendChild(theKpi("Bài đăng", k.bai, ss.bai, null, "hong", "tai_lieu", lech));
+    el.appendChild(theKpi("Thảo luận", k.thao_luan, ss.thao_luan, null, "tim", "tro_chuyen", lech));
+    el.appendChild(theKpi("Nguồn có bài", k.nguon_co_bai, ss.nguon_co_bai, null, "xanh", "phat_song", lech));
     if (k.bai_khu_trung != null && k.bai_khu_trung < k.bai) {
-      el.appendChild(theKpi("Bài (khử trùng nội dung)", so(k.bai_khu_trung), null,
+      el.appendChild(theKpi("Bài (khử trùng nội dung)", k.bai_khu_trung, null,
                             so(k.bai - k.bai_khu_trung) + " bài đăng lại cùng nội dung", "xam", "ban_sao"));
     }
-    el.appendChild(theKpi("Lượt xem", so(k.xem), ss.xem, ghi, "la", "mat"));
-    el.appendChild(theKpi("Tương tác", so(k.tuong_tac), ss.tuong_tac, ghi, "cam", "tim_dac"));
+    el.appendChild(theKpi("Lượt xem", k.xem, ss.xem, null, "la", "mat", lech));
+    el.appendChild(theKpi("Tương tác", k.tuong_tac, ss.tuong_tac, null, "cam", "tim_dac", lech));
     if (d.y_dinh_mua) el.appendChild(theYDinhKpi(d.y_dinh_mua, lech));
-    el.style.setProperty("--so-kpi", String(el.children.length));   // mọi thẻ chung một hàng
     el.appendChild(theSacKpi(k));
+    chiaCotKpi();
   }
-  // Ý định mua: số + % trên bình luận sạch + so kỳ trước (kỳ trước 0 thì không có % — chỉ ghi số).
+  // Kỳ trước có số không (ít nhất một chỉ số khác 0) — không thì nói một lần dưới hàng KPI.
+  function coKyTruoc(d) {
+    var ss = d.so_sanh || {};
+    return Object.keys(ss).some(function (k) { return ss[k] && ss[k].truoc; }) ||
+      !!(d.y_dinh_mua && d.y_dinh_mua.truoc);
+  }
+  // Ý định mua: số + % trên bình luận sạch (dòng riêng) + so kỳ trước khi kỳ trước có số.
   // Cả thẻ là nút: mở ngăn với đúng các bình luận đã đếm.
   function theYDinhKpi(y, lech) {
     var o = nut("", "the-khoi kpi kpi--ngoc cs-kpi-yd", moYDinh);
     o.appendChild(oBieuTuong("gio_hang"));
     var than = tao("span", "kpi__than");
     than.appendChild(tao("span", "kpi__nhan", "Ý định mua"));
-    var s = tao("span", "kpi__so so", so(y.so));
-    if (y.pt != null) s.appendChild(tao("span", "cs-kpi-yd__pt", pt(y.pt) + " BL sạch"));
-    than.appendChild(s);
+    than.appendChild(oSoThe(y.so));
+    var phu = y.pt == null ? "chưa có bình luận sạch" : pt(y.pt) + " bình luận sạch";
+    than.appendChild(tao("span", "kpi__phu", phu));
     var d = tao("span", "kpi__doi");
-    if (lech) {
-      d.textContent = "không so kỳ trước";
-    } else if (y.doi_pt != null) {
-      dongSoSanh(d, y.doi_pt);
-    } else if (y.truoc != null) {
-      d.textContent = "kỳ trước " + so(y.truoc);
-    }
-    if (y.pt == null) d.insertBefore(chuNode("chưa có bình luận sạch" + (d.textContent ? " · " : "")), d.firstChild);
-    than.appendChild(d);
+    dongDoi(d, y, lech);
+    if (d.childNodes.length) than.appendChild(d);
     o.appendChild(than);
-    o.title = (y.pt == null ? "" : pt(y.pt) + " bình luận sạch hỏi giá / muốn mua · ") + d.textContent;
-    o.setAttribute("aria-label", "Ý định mua: " + so(y.so) + " bình luận" + (y.pt == null ? "" : ", " + pt(y.pt) + " bình luận sạch") +
+    o.title = phu + (d.textContent ? " · " + d.textContent : "");
+    o.setAttribute("aria-label", "Ý định mua: " + so(y.so) + " bình luận, " + phu +
                    (d.textContent ? ", " + d.textContent : "") + " — bấm để xem");
     return o;
   }
@@ -644,7 +704,7 @@
         { offset: 0, color: hexRgba(m.chinh, 0.24) }, { offset: 1, color: hexRgba(m.chinh, 0.02) }]) },
       markPoint: imax >= 0 ? {
         symbol: "pin", symbolSize: 40, itemStyle: { color: m.chinh },
-        label: { color: "#fff", fontSize: 10, fontWeight: 600, formatter: function (p) { return soGon(p.value); } },
+        label: { color: "#fff", fontSize: 10, fontWeight: 600, formatter: function (p) { return p.value >= 1e6 ? soThe(p.value) : soGon(p.value); } },
         data: [{ type: "max", name: "Đỉnh" }] } : undefined
     }];
     ve("bd-xu-huong", o);
@@ -687,7 +747,7 @@
     var daPhan = x.ds.slice(0, 3).reduce(function (a, r) { return a + r[1]; }, 0);
     ve("bd-sac-thai", {
       animationDuration: 300,
-      title: { text: so(tong), subtext: "tổng " + x.don, left: "center", top: "middle", itemGap: 2,
+      title: { text: soThe(tong), subtext: "tổng " + x.don, left: "center", top: "middle", itemGap: 2,
                textStyle: { color: m.chu, fontSize: 21, fontWeight: 750, fontFamily: m.phong },
                subtextStyle: { color: m.mo, fontSize: 12, fontFamily: m.phong } },
       tooltip: { trigger: "item", renderMode: "richText", backgroundColor: m.mat, borderColor: m.ke, borderWidth: 1,
@@ -2758,7 +2818,8 @@
     var kyTruoc = ngayDu(d.khoang.ky_truoc.tu) + " – " + ngayDu(d.khoang.ky_truoc.den);
     $("ky-truoc").textContent = d.so_sanh_lech === "tuong_tac"
       ? "Lọc theo tương tác: không so với kỳ trước (" + kyTruoc + ")"
-      : "Kỳ trước: " + kyTruoc;
+      : coKyTruoc(d) ? "▲/▼ so với kỳ trước: " + kyTruoc
+        : "Kỳ trước (" + kyTruoc + ") chưa có dữ liệu để so sánh";
     $("ky-truoc").title = d.so_sanh_lech === "tuong_tac"
       ? "Tương tác cộng dồn theo tuổi bài nên bài kỳ trước luôn được lợi — không so %."
       : "Kỳ liền trước cùng độ dài, dùng cho mọi ▲/▼ %.";
@@ -2879,6 +2940,7 @@
   // Đổi cỡ: biểu đồ co giãn; mây từ xếp lại khi bề rộng đổi (chờ 150 ms cho khỏi xếp liên tục).
   window.addEventListener("resize", treo(function () {
     Object.keys(bieuDo).forEach(function (k) { bieuDo[k].resize(); });
+    chiaCotKpi();
     var el = $("tk-may");
     if (el && !el.hidden && el.clientWidth && Math.abs(el.clientWidth - may.rong) > 4) xepMay();
     if (popMo) kepPop(popMo.pop);                       // bàn phím ảo mở cũng là "resize": giữ popover

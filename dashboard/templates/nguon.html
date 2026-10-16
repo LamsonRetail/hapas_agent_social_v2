@@ -39,7 +39,7 @@
 <section class="the-khoi cach-duoi">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
-    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten">Dự án {{ du_an.ten }}</h2>
     <span class="the">{{ du_an.ma }}</span>
     {% if du_an.dang_bat %}<span class="the the--tot the--cham">Đang bật</span>{% else %}<span class="the the--loi the--cham">Đang tắt</span>{% endif %}
@@ -71,7 +71,7 @@
 <section class="the-khoi cach-duoi">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
-    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten">Nguồn đang có ({{ nguon|length }})</h2>
     <button type="button" class="goi-y" data-goi-y="Tới chu kỳ thì quét, mỗi lần lấy tối đa “Bài/lần” bài mới nhất. Giờ quét đặt ở trang Lịch quét. ≈ USD/tháng: theo cấu hình, 30 ngày, chưa gồm phí khởi động actor dùng chung.">i</button>
     <a class="muc__phai nho" href="/lich-quet?du_an={{ du_an.ma|urlencode }}">Lịch quét →</a>
@@ -145,7 +145,7 @@
 <section class="the-khoi cach-duoi">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
-    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten">Thêm nguồn</h2>
     <button type="button" class="goi-y" data-goi-y="Internal channel (kênh của chính thương hiệu): giữ mọi bài. Nguồn khác: chỉ giữ bài nhắc từ khoá dự án.">i</button>
   </div>
@@ -170,7 +170,7 @@
 <section class="the-khoi cach-duoi">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
-    <span class="muc__so muc__so--{{ muc.so }}" aria-hidden="true">{{ muc.so }}</span>
+    <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten">Đề xuất nguồn chờ duyệt ({{ de_xuat|length }})</h2>
     <button type="button" class="goi-y" data-goi-y="Nguồn nổi lên khi quét nhưng chưa được theo dõi — chỉ thêm khi quản lý duyệt.">i</button>
   </div>
