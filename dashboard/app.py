@@ -948,6 +948,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                               tu_khoa_du_an=tu_khoa_da, bo_loc=f,
                                               bai_theo_khoa=bai_khoa)
                     d["tu_khoa"], d["tu_khoa_tong"] = tk["tu_khoa"], tk["tong"]
+                    d["tu_khoa_an_mg"] = tk["an_minigame"]
                     d["binh_luan_da_cao"] = CS.tong_hop_bl(kb["rows"], tu, den, hom_nay=hom_nay,
                                                            bo_loc=f, bai_theo_khoa=bai_khoa)
                     d["y_dinh_mua"] = CS.y_dinh_mua(kb["rows"], tu, den, rows_truoc=kbt["rows"],

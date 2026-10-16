@@ -287,7 +287,7 @@ def test_doc_bo_loc_chuan_hoa_va_tu_choi():
     rong = CS.doc_bo_loc({})
     assert rong == {"pham_vi": "tat_ca", "nen_tang": (), "loai": (), "nguon": (), "sac_thai": (),
                     "chu_de": (), "anh_huong": (), "tuong_tac": 0, "q": "", "kieu_quet": "",
-                    "y_dinh": ""}
+                    "y_dinh": "", "gom_mg": ""}
     b = CS.doc_bo_loc({"nen_tang": "tiktok,facebook,tiktok", "sac_thai": "tieu_cuc,Tích cực",
                        "tuong_tac": "1.000", "q": "  túi   xách ",
                        "nguon": "n:1,tiktok:khach, a,n:2", "loai": "kol"})
@@ -298,7 +298,7 @@ def test_doc_bo_loc_chuan_hoa_va_tu_choi():
     for sai in ({"pham_vi": "nha"}, {"nen_tang": "threads"}, {"loai": "vip"},
                 {"sac_thai": "vui"}, {"tuong_tac": "50"}, {"kieu_quet": "x"}, {"q": "x" * 101},
                 {"anh_huong": "khong_lo"}, {"nguon": ",".join(f"n:{i}" for i in range(51))},
-                {"chu_de": "x" * 101}, {"y_dinh": "2"}):
+                {"chu_de": "x" * 101}, {"y_dinh": "2"}, {"gom_mg": "co"}):
         with pytest.raises(CS.LoiBoLoc):
             CS.doc_bo_loc(sai)
     # JSON cho trình duyệt -> tham số URL -> đọc lại: không đổi.
@@ -355,7 +355,11 @@ def test_loc_theo_tuong_tac_khong_so_phan_tram_ky_truoc():
 def test_nhan_chu_de_khop_mark():
     import phan_loai
     assert CS.CHU_DE_BAI == tuple(phan_loai.CHU_DE_BAI.values())
-    assert CS.CHU_DE_BL == tuple(phan_loai.CHU_DE.values())
+    # Chủ đề MG ("Minigame/bài dự thi") do một nhánh khác thêm vào `phan_loai` (16/10/2026): khớp
+    # cả trước lẫn sau khi nhánh đó vào — ngoài MG, hai bên phải trùng nhau.
+    mg = {CS.CHU_DE_MINIGAME}
+    assert set(phan_loai.CHU_DE.values()) - mg == set(CS.CHU_DE_BL) - mg
+    assert CS.CHU_DE_MINIGAME in CS.CHU_DE_BL and CS.nhom_chu_de(CS.CHU_DE_MINIGAME) == "bl"
     assert CS.nhom_chu_de("Giá/mua ở đâu/ý định mua") == "bl"
     assert CS.nhom_chu_de("Giá cả & khuyến mãi") == "bai"
     assert CS.nhom_chu_de("Khác") == CS.nhom_chu_de(CS.CHUA) == "chung"
@@ -656,3 +660,59 @@ def test_nhan_hien_thi_internal_external_channel():
     assert not any("kênh nhà" in (p["ten"] + p["mo_ta"]).lower() or
                    "bên ngoài" in (p["ten"] + p["mo_ta"]).lower() for p in CS.BO_LOC_NHANH)
     assert CS.doc_bo_loc({"pham_vi": "kenh_nha"})["pham_vi"] == "kenh_nha"
+
+
+# ───────────────── mây từ: minigame, màu theo ngưỡng, tập trung (chẩn đoán 16/10/2026) ─────────────────
+def _bl_mg(ma, nd, khoa="tiktok:mg", cd=None, sac="Trung lập"):
+    r = bl("2026-10-10T10:00+07:00", ma, nd=nd, cd=cd or CS.CHU_DE_MINIGAME, sac=sac)
+    r["khoa_bai"] = khoa
+    return r
+
+
+def test_may_tu_an_minigame_mac_dinh_va_ngan_dem_cung_cach():
+    """D1: 29/50 cụm là lời chúc dự thi dưới MỘT bài minigame — mặc định không vào mây; bật
+    `gom_mg=1` thì gồm. Ngăn từ khoá (cum) đếm đúng như mây ở cả hai chế độ."""
+    a = D(2026, 10, 10)
+    c = [_bl_mg(f"m{i}", "271 chúc mẹ luôn hạnh phúc, vui vẻ") for i in range(3)] + \
+        [_bl_mg("k1", "túi này hạnh phúc ghê", khoa="tiktok:k", cd="Sản phẩm/chất lượng",
+                sac="Tích cực"),
+         _bl_mg("k2", "mua xong thấy hạnh phúc", khoa="tiktok:k2", cd="Khác", sac="Tích cực")]
+    mac = CS.tu_khoa_thao_luan([], c, a, a)
+    tk = {g["tu"]: g for g in mac["tu_khoa"]}
+    assert mac["an_minigame"] == 3 and mac["tong"] == 2
+    assert "chúc mẹ" not in tk and "vui vẻ" not in tk
+    gom = CS.tu_khoa_thao_luan([], c, a, a, bo_loc=CS.doc_bo_loc({"gom_mg": "1"}))
+    tg = {g["tu"]: g for g in gom["tu_khoa"]}
+    assert gom["an_minigame"] == 0 and tg["chúc mẹ"]["so_bai"] == 3
+    # Ngăn: cùng cụm, cùng số với mây theo từng chế độ.
+    assert CS.chi_tiet_bl(c, a, a, cum="chúc mẹ", loai="hop_le")["tong"] == 0
+    assert CS.chi_tiet_bl(c, a, a, cum="chúc mẹ", loai="hop_le",
+                          bo_loc=CS.doc_bo_loc({"gom_mg": "1"}))["tong"] == 3
+    # Chỉ là tuỳ chọn của mây: không lọc khối nào khác (bộ lọc vẫn "rỗng").
+    assert CS.bien_dich(CS.doc_bo_loc({"gom_mg": "1"})).rong
+    assert len(CS.loc_bl(c, CS.doc_bo_loc({"gom_mg": ""}))) == 5
+    # Khối chủ đề bình luận hiện đúng chủ đề mới (gom theo chữ đã lưu).
+    cd = {g["chu_de"]: g["so"] for g in CS.tong_hop_bl(c, a, a, hom_nay=a)["chu_de"]}
+    assert cd[CS.CHU_DE_MINIGAME] == 3
+    assert CS.tong_quan_loc([], c, a, a)["bo_loc_dem"]["chu_de"][0]["nhom"] == "bl"
+
+
+def test_mau_may_tu_theo_nguong_va_canh_bao_tap_trung():
+    """D2: tô theo ngưỡng (TC ≥ 25% số đã phân loại và ≥ 2 × TI), không theo nhãn lớn nhất. D4:
+    một bài góp ≥ 60% số thảo luận của cụm → `mot_bai_pt`."""
+    def g(tc, ti, tl):
+        return {CS.TC: tc, CS.TI: ti, CS.TL: tl}
+    assert CS.sac_noi_troi(g(11, 0, 30)) == "tc"          # 27% TC, chẳng ai chê → xanh
+    assert CS.sac_noi_troi(g(4, 0, 46)) == "tl"           # 8% TC → xám
+    assert CS.sac_noi_troi(g(10, 6, 20)) == "tl"          # TC < 2 × TI → xám
+    assert CS.sac_noi_troi(g(2, 10, 20)) == "ti" and CS.sac_noi_troi(g(0, 0, 0)) == "tl"
+    assert CS.sac_noi_troi(g(5, 5, 0)) == "tl"            # hoà → xám
+    a = D(2026, 10, 10)
+    c = [_bl_mg(f"v{i}", "video viral quá", khoa="tiktok:v", cd="KOL/nội dung", sac="Tích cực")
+         for i in range(3)] + \
+        [_bl_mg("w", "video viral ghê", khoa="tiktok:w", cd="KOL/nội dung", sac="Tích cực"),
+         _bl_mg("x1", "túi đẹp", khoa="tiktok:x1", cd="Khác"),
+         _bl_mg("x2", "túi đẹp", khoa="tiktok:x2", cd="Khác")]
+    tk = {x["tu"]: x for x in CS.tu_khoa_thao_luan([], c, a, a)["tu_khoa"]}
+    assert tk["video viral"]["mau"] == "tc" and tk["video viral"]["mot_bai_pt"] == 75
+    assert tk["túi đẹp"]["mau"] == "tl" and "mot_bai_pt" not in tk["túi đẹp"]

@@ -1718,6 +1718,30 @@ def test_trang_nguon_nhan_internal_channel():
     assert "Kênh nhà" not in t
 
 
+def test_api_may_tu_an_minigame_theo_url():
+    """Chẩn đoán 16/10: mây từ mặc định ẩn bình luận minigame; `gom_mg=1` (theo URL, khoá nhớ
+    riêng) gồm lại; ngăn từ khoá đếm cùng cách; trang có công tắc + chú giải màu."""
+    c, kho = _kho_loc()
+    luc = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    for i in range(3):
+        kho.bl.append(dict(_bl("tiktok:1", f"mg{i}", luc, chu_de="Minigame/bài dự thi"),
+                           noi_dung=f"{270 + i} chúc mẹ luôn hạnh phúc"))
+    d = c.get("/api/chi-so?du_an=hapas" + Q_LOC).json()
+    assert d["tu_khoa_an_mg"] == 3 and "chúc mẹ" not in {x["tu"] for x in d["tu_khoa"]}
+    d = c.get("/api/chi-so?du_an=hapas&gom_mg=1" + Q_LOC).json()
+    assert d["tu_khoa_an_mg"] == 0 and d["bo_loc"]["gom_mg"] == "1"
+    x = next(x for x in d["tu_khoa"] if x["tu"] == "chúc mẹ")
+    assert x["so_bai"] == 3 and x["mot_bai_pt"] == 100 and x["mau"] == "tc"   # mẫu _bl: Tích cực
+    ql = "/api/binh-luan?du_an=hapas&cum_bl=chúc mẹ&loai_bl=hop_le" + Q_LOC
+    assert c.get(ql).json()["tong"] == 0 and c.get(ql + "&gom_mg=1").json()["tong"] == 3
+    assert c.get("/api/chi-so?du_an=hapas&gom_mg=x" + Q_LOC).status_code == 400
+    t = c.get("/").text
+    assert 'id="tk-gom-mg"' in t and "Gồm cả bình luận minigame" in t
+    assert "Màu = sắc thái nổi trội (xanh khi ≥ 25% tích cực và gấp đôi tiêu cực)" in t
+    js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
+    assert "% từ 1 bài" in js and "gom_mg" in js and "x.mau" in js
+
+
 def test_trang_chi_so_co_thanh_loc_chung():
     _, c, _ = tao()
     dang_nhap(c, XEM)

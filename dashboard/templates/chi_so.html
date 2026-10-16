@@ -141,10 +141,13 @@
   <section class="the-khoi">
     <div class="cs-the__dau">
       <div>
-        <div class="cs-the__tieu-de"><h2>Từ khoá nổi bật</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Hashtag và cụm hai chữ trong bài + bình luận hợp lệ; đã bỏ từ khoá của dự án, bài Internal channel và mảnh câu hỏi giá (“xin giá”, “giá bn” — xem khối Ý định mua). Bản có dấu và không dấu, teen code (mk = mình) gộp làm một. Cỡ chữ theo số thảo luận, màu theo sắc thái chính.">i</button></div>
+        <div class="cs-the__tieu-de"><h2>Từ khoá nổi bật</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Hashtag và cụm hai chữ trong bài + bình luận hợp lệ; đã bỏ từ khoá của dự án, bài Internal channel, spam, lời của thương hiệu, mảnh câu hỏi giá (“xin giá”, “giá bn” — xem khối Ý định mua) và mặc định cả bình luận minigame (lời chúc dự thi). Bản có dấu và không dấu, teen code (mk = mình) gộp làm một. Cỡ chữ theo số thảo luận.">i</button></div>
         <p class="cs-phu-de" id="tk-tom-tat">&nbsp;</p>
       </div>
-      <div class="cs-phan" id="tk-che" aria-label="Kiểu xem"></div>
+      <div class="cs-the__nut">
+        <label class="cs-tk-mg"><input type="checkbox" id="tk-gom-mg"> Gồm cả bình luận minigame</label>
+        <div class="cs-phan" id="tk-che" aria-label="Kiểu xem"></div>
+      </div>
     </div>
     <div class="cs-may" id="tk-may"><div class="cs-khung-cho cs-khung-cho--may"></div></div>
     <ol class="cs-bang-tu" id="tk-bang" hidden></ol>
@@ -152,6 +155,7 @@
       <span class="cs-cg-ngang"><span class="cs-chip cs-chip--tc"><span class="cs-chip__cham"></span>Tích cực</span><span class="cs-chip cs-chip--ti"><span class="cs-chip__cham"></span>Tiêu cực</span><span class="cs-chip cs-chip--tl"><span class="cs-chip__cham"></span>Trung lập / chưa rõ</span></span>
       <span class="mo nho" id="tk-ghi-chu"></span>
     </div>
+    <p class="ghi-chu cs-may__chu-giai" id="tk-chu-giai">Màu = sắc thái nổi trội (xanh khi ≥ 25% tích cực và gấp đôi tiêu cực); xám = trung lập, gồm hỏi giá. Rê chuột để xem tỉ lệ.</p>
   </section>
   <section class="the-khoi">
     <div class="cs-the__dau">

@@ -132,8 +132,10 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
 #              (thảo luận dưới bài nói về chữ đó).
 #   y_dinh     "1" = chỉ bình luận có Ý ĐỊNH MUA (`la_y_dinh_mua`, 16/10/2026). Như chủ đề bình
 #              luận: chỉ lọc bình luận, phần bài không đổi.
+#   gom_mg     "1" = mây từ khoá GỒM cả bình luận minigame (mặc định ẩn). KHÔNG lọc khối nào khác —
+#              chỉ là tuỳ chọn hiển thị của mây + ngăn từ khoá, nằm đây để theo URL và khoá nhớ.
 CHIEU_LOC = ("pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong",
-             "tuong_tac", "q", "kieu_quet", "y_dinh")
+             "tuong_tac", "q", "kieu_quet", "y_dinh", "gom_mg")
 _BIT = {k: 1 << i for i, k in enumerate(CHIEU_LOC)}
 PHAM_VI = {"tat_ca": "Tất cả", "kenh_nha": TEN_KENH_NHA, "ben_ngoai": TEN_BEN_NGOAI}
 #: Mã sắc thái trên URL (gọn, không dấu) -> nhãn lưu trong kho.
@@ -151,8 +153,12 @@ CHU_DE_BAI = ("Chiến dịch & quảng cáo", "Giá cả & khuyến mãi", "Ch�
               "Hình ảnh & mẫu mã", "Trải nghiệm mua sắm", "Dịch vụ khách hàng", "Giao hàng",
               "So sánh thương hiệu", "Nguồn gốc & chính hãng", "Cửa hàng & vận hành",
               "Tuyển dụng", "Doanh nghiệp & truyền thông", "Khác")
+#: Chủ đề bình luận MỚI của Mark (16/10/2026, `phan_loai.CHU_DE["MG"]`): lời dự thi minigame / lời
+#: chúc theo đề bài của brand. Rà kho: 29/50 cụm của mây từ là lời dự thi dưới MỘT bài minigame —
+#: không phải cảm nhận về brand, nên mặc định không vào mây (`tu_khoa_thao_luan`).
+CHU_DE_MINIGAME = "Minigame/bài dự thi"
 CHU_DE_BL = ("Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua", "KOL/nội dung",
-             "Giao hàng/dịch vụ", "Đối thủ", "Tag bạn bè", "Khác")
+             "Giao hàng/dịch vụ", "Đối thủ", "Tag bạn bè", CHU_DE_MINIGAME, "Khác")
 _TOI_DA_GIA_TRI = {"nen_tang": 4, "loai": 7, "nguon": 50, "sac_thai": 4, "chu_de": 40,
                    "anh_huong": 5}
 _RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube):")
@@ -284,11 +290,14 @@ def doc_bo_loc(q) -> dict:
     yd = str(q.get("y_dinh") or "")
     if yd and yd not in Y_DINH:
         raise LoiBoLoc("Bộ lọc không hợp lệ.")
+    mg = str(q.get("gom_mg") or "")
+    if mg not in ("", "1"):
+        raise LoiBoLoc("Bộ lọc không hợp lệ.")
     return {"pham_vi": pv, "nen_tang": nhieu("nen_tang", TEN_NEN_TANG),
             "loai": nhieu("loai", TEN_LOAI), "nguon": nhieu("nguon"),
             "sac_thai": tuple(sorted(set(sac_ds))), "chu_de": chu_de,
             "anh_huong": nhieu("anh_huong", ANH_HUONG), "tuong_tac": int(tt) if tt else 0,
-            "q": tim, "kieu_quet": kq, "y_dinh": yd}
+            "q": tim, "kieu_quet": kq, "y_dinh": yd, "gom_mg": mg}
 
 
 def khoa_bo_loc(bo_loc: dict | None) -> tuple:
@@ -335,6 +344,7 @@ class _Loc:
         self.kq = b.get("kieu_quet") or ""
         self.q = CC.khoa_tim(b.get("q")) if b.get("q") else ""
         self.yd = b.get("y_dinh") == "1"
+        self.gom_mg = b.get("gom_mg") == "1"           # tuỳ chọn mây từ, không phải chiều lọc
         self._q_bai: dict[int, bool] = {}
         self.rong = self._tinh_rong()
         # Bình luận cần tra BÀI gốc khi lọc theo thứ dòng bình luận không mang.
@@ -768,19 +778,42 @@ def _mat_chu(dem: collections.Counter) -> str:
     return min(dem, key=lambda x: (-dem[x], -sum(not ch.isascii() for ch in x), x))
 
 
+#: Màu mây từ theo NGƯỠNG (rà kho 16/10, luật "C2"): tô tích cực khi TC ≥ 25% số đã phân loại VÀ
+#: TC ≥ 2 × TI; tiêu cực đối xứng; còn lại trung lập. Lấy nhãn lớn nhất tuyệt đối thì "yêu thương"
+#: (TC 27%) vẫn xám dù chẳng ai chê.
+NGUONG_SAC = 0.25
+#: Một bài góp ≥ 60% số thảo luận của một cụm → hộp rê chuột cảnh báo "x% từ 1 bài".
+TAP_TRUNG_MOT_BAI = 0.6
+
+
+def sac_noi_troi(g: dict) -> str:
+    """"tc" | "ti" | "tl" — sắc thái nổi trội của một cụm (xem `NGUONG_SAC`)."""
+    tc, ti, tl = g.get(TC, 0), g.get(TI, 0), g.get(TL, 0)
+    da = tc + ti + tl
+    if tc and tc >= NGUONG_SAC * da and tc >= 2 * ti:
+        return "tc"
+    if ti and ti >= NGUONG_SAC * da and ti >= 2 * tc:
+        return "ti"
+    return "tl"
+
+
 def tu_khoa(rows: list[dict], tu_khoa_du_an: list[str] | tuple = (),
             toi_da: int = TOP_TU_KHOA) -> list[dict]:
     """Top cụm từ / hashtag theo SỐ BÀI nhắc (bài không của kênh nhà), bỏ cụm chứa chính từ
     khoá của dự án (theo dõi "hapas" thì "túi hapas", "#hapasvn" không phải phát hiện gì). So
     trên dạng bỏ dấu + bỏ khoảng trắng; từ khoá < 3 ký tự thì không dùng để bỏ. Biến thể có/không
-    dấu gộp một nhóm (đếm chung), hiện bằng mặt chữ gặp nhiều nhất."""
+    dấu gộp một nhóm (đếm chung), hiện bằng mặt chữ gặp nhiều nhất. Mỗi cụm kèm `mau` (sắc thái
+    nổi trội, `sac_noi_troi`) và `mot_bai_pt` khi một bài góp ≥ 60% (dòng bình luận mang
+    `khoa_bai`; bài tự là một bài)."""
     bo = {x for x in (re.sub(r"[\s#]+", "", _bo_dau(q)) for q in tu_khoa_du_an) if len(x) >= 3}
     dem: dict[str, dict] = {}
     mat: dict[str, collections.Counter] = {}
+    theo_bai: dict[str, collections.Counter] = {}
     for r in rows:
         if la_kenh_nha(r):
             continue
         s = sac(r)
+        kb = r.get("khoa_bai") or r.get("khoa") or id(r)
         for k, c in _tach_cum(r).items():
             gon = re.sub(r"[\s#]+", "", k)
             if any(b in gon for b in bo):
@@ -789,10 +822,17 @@ def tu_khoa(rows: list[dict], tu_khoa_du_an: list[str] | tuple = (),
             g["so_bai"] += 1
             g[s] += 1
             mat.setdefault(k, collections.Counter())[c] += 1
-    ds = [g for g in dem.values() if g["so_bai"] >= TU_KHOA_TOI_THIEU_BAI]
+            theo_bai.setdefault(k, collections.Counter())[kb] += 1
+    ds = []
     for k, g in dem.items():
-        if g["so_bai"] >= TU_KHOA_TOI_THIEU_BAI:
-            g["tu"] = _mat_chu(mat[k])
+        if g["so_bai"] < TU_KHOA_TOI_THIEU_BAI:
+            continue
+        g["tu"] = _mat_chu(mat[k])
+        g["mau"] = sac_noi_troi(g)
+        nhieu_nhat = max(theo_bai[k].values())
+        if nhieu_nhat >= TAP_TRUNG_MOT_BAI * g["so_bai"]:
+            g["mot_bai_pt"] = round(100 * nhieu_nhat / g["so_bai"])
+        ds.append(g)
     ds.sort(key=lambda g: (-g["so_bai"], g["tu"]))
     return ds[:toi_da]
 
@@ -1086,8 +1126,9 @@ def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
             continue
         if chu and not CC.chua(chu, f"{c.get('noi_dung') or ''} {c.get('tac_gia') or ''}"):
             continue
-        if kc and kc not in _tach_cum({"noi_dung": c.get("noi_dung")}):
-            continue
+        if kc and (kc not in _tach_cum({"noi_dung": c.get("noi_dung")}) or
+                   (not f.gom_mg and _chu_de(c) == CHU_DE_MINIGAME)):
+            continue                                   # như mây: minigame ẩn trừ khi gom_mg=1
         if y_dinh and not la_y_dinh_mua(c):
             continue
         if not f.rong and f.hong_bl(c, tra(c.get("khoa_bai"))):
@@ -1131,16 +1172,24 @@ def tu_khoa_thao_luan(bai: list[dict], bl: list[dict], tu: datetime.date, den: d
                       tu_khoa_du_an: list[str] | tuple = (), bo_loc=None,
                       bai_theo_khoa: dict | None = None) -> dict:
     """Từ khoá nổi bật kiểu Kompa: đếm trên THẢO LUẬN = bài (không phải kênh nhà) + bình luận
-    hợp lệ trong kỳ, cùng bộ lọc chung. -> {"tu_khoa": [{tu, so_bai (= số thảo luận nhắc),
-    sắc thái…}], "tong"}."""
+    hợp lệ (không spam, không của thương hiệu) trong kỳ, cùng bộ lọc chung. Bình luận chủ đề
+    minigame (`CHU_DE_MINIGAME`) mặc định KHÔNG vào mây — lời chúc dự thi không phải cảm nhận về
+    brand; bộ lọc `gom_mg=1` gồm lại. -> {"tu_khoa": [{tu, so_bai (= số thảo luận nhắc),
+    sắc thái…, mau, mot_bai_pt?}], "tong", "an_minigame"}."""
     f = bien_dich(_gop(bo_loc, nen_tang, loai_nguon))
     b = loc_bai(trong_khoang(bai, tu, den), f)
     c = loc_bl([x for x in bl if loai_bl(x) == "hop_le"
                 and (n := _ngay_bl(x)) is not None and tu <= n <= den], f, bai_theo_khoa)
-    # Bình luận: chỉ chữ + sắc thái (không gắn nguồn — bình luận dưới bài kênh nhà là tiếng khách).
-    dong = b + [{"noi_dung": x.get("noi_dung") or "", "sac_thai": x.get("sac_thai")} for x in c]
+    an_mg = 0
+    if not f.gom_mg:
+        con = [x for x in c if _chu_de(x) != CHU_DE_MINIGAME]
+        an_mg, c = len(c) - len(con), con
+    # Bình luận: chữ + sắc thái + bài của nó (cảnh báo tập trung) — không gắn nguồn: bình luận dưới
+    # bài kênh nhà là tiếng khách.
+    dong = b + [{"noi_dung": x.get("noi_dung") or "", "sac_thai": x.get("sac_thai"),
+                 "khoa_bai": x.get("khoa_bai")} for x in c]
     return {"tu_khoa": tu_khoa(dong, tu_khoa_du_an),
-            "tong": sum(not la_kenh_nha(r) for r in b) + len(c)}
+            "tong": sum(not la_kenh_nha(r) for r in b) + len(c), "an_minigame": an_mg}
 
 
 # ───────────────────────── ý định mua (16/10/2026) ─────────────────────────

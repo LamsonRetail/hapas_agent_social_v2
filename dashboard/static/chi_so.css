@@ -360,6 +360,11 @@ dialog.cs-tam::backdrop { background: rgba(0, 0, 0, .45); }
 .cs-thanh.cs-yd__bai .cs-thanh__gt { min-width: 0; }
 .cs-yd__bai .cs-nt { flex: none; }                    /* tên bài dài: huy hiệu không bị ép đè chữ */
 .cs-yd__them { margin-top: 8px; align-self: flex-start; }
+/* mây từ: công tắc minigame, chú giải màu, cảnh báo tập trung trong hộp rê chuột */
+.cs-tk-mg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--chu-phu); cursor: pointer; white-space: nowrap; }
+.cs-tk-mg input { margin: 0; }
+.cs-may__chu-giai { margin: 6px 0 0; }
+.cs-noi__canh { margin-top: 6px; color: var(--cs-ti-chu); font-weight: 600; }
 @media (max-width: 600px) { .cs-thanh.cs-yd__bai { grid-template-columns: minmax(0, 1fr) auto; } }
 
 /* ─── sắc thái (vòng) ─── */
