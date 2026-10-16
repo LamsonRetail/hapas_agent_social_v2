@@ -16,7 +16,8 @@ Nhãn bình luận (`binh_luan.loai`):
   hop_le       — tính vào thảo luận sạch, được gán sắc thái/chủ đề.
   it_noi_dung  — chỉ ".", "…", emoji, tag bạn bè, "chấm", "hóng": vẫn là tương tác (đếm vào
                  thảo luận thô) nhưng không gán sắc thái.
-  spam         — quảng cáo/lừa đảo/kéo khách (`ly_do_loc` nói rõ loại).
+  spam         — quảng cáo/lừa đảo/kéo khách (`ly_do_loc` nói rõ loại; `affiliate_dan_ma` /
+                 `affiliate_hang_loat` = mời dán mã giới thiệu vào Shopee, xem `dau_hieu_affiliate`).
   trung        — cùng người, cùng nội dung, cùng bài: giữ bản đầu, các bản sau là trùng.
   seeding      — cùng nội dung (≥ `SEEDING_TOI_THIEU_CHU` ký tự) từ ≥ `SEEDING_TAC_GIA` tài khoản
                  khác nhau trong `SEEDING_NGAY` ngày: dấu hiệu chiến dịch đăng hộ / bot.
@@ -28,8 +29,11 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from datetime import timedelta
 
-LOAI = ("hop_le", "it_noi_dung", "spam", "trung", "seeding", "thuong_hieu")
+from dashboard import chuan_chu as CC
+
+LOAI =("hop_le", "it_noi_dung", "spam", "trung", "seeding", "thuong_hieu")
 #: Nhãn được gán sắc thái + tính vào "thảo luận sạch".
 SACH = ("hop_le",)
 TEN_LOAI = {"hop_le": "Hợp lệ", "it_noi_dung": "Ít nội dung", "spam": "Spam",
@@ -72,6 +76,100 @@ _SPAM_RE = {k: re.compile(v[:-2] + r"(?!\w)" if v.endswith(r"\b") else v)
 _KHUYEN_MAI = re.compile(r"\b(giam|sale|khuyen mai|chinh hang|mua hang|freeship|hot|uu dai)\b")
 _IT_CHU = re.compile(r"^(cham|cham cham|hong|up|upp|ok|oke|e|a|o|in)$")
 
+# ───────────── spam affiliate "dán mã" (rà kho 15/10/2026) ─────────────
+# 119 bình luận / 28 tài khoản trên 2 bài TikTok: "𝐃𝐚́𝐧 𝐦𝐚𝐱 𝐜𝐮𝐨̂́𝐢 𝐯𝐚̀𝐨 𝐬𝐨̣̂𝐩-𝐩𝐢𝐢 𝐥𝐚̀ 𝐫𝐚 𝐦𝐚̂̃𝐮 𝐯𝐚̀ 𝐠𝐢𝐚́
+# AHS-WCM-DQN", "CJW-UJK-A88AH xóa 88 rồi zán cam ah" — mời dán mã giới thiệu vào Shopee. Mỗi tài
+# khoản một mã nên luật seeding (cùng nội dung) không bắt được: 34 bình luận lọt vào thảo luận sạch,
+# 28 bị đếm là "Giá/mua ở đâu/ý định mua". Bốn dấu hiệu:
+#   ma    mã giới thiệu: ≥ 3 khúc CHỮ IN HOA/số nối gạch, có ≥ 2 chữ cái (SĐT "0912-345-678", ngày
+#         "2026-10-15" toàn số nên không khớp); xét trên bản NFKC, đã bỏ link;
+#   cum   lời dặn dán mã, so trên bản NFKC + bỏ dấu: "dán mã/max/vào", "zán cam", "san cam",
+#         "xóa 88 rồi";
+#   san   nhắc sàn "shopee", "sộp-pii" — khách thật cũng hỏi "có bán trên shopee không" nên đây là
+#         dấu hiệu YẾU, không bao giờ đủ một mình;
+#   font  ≥ 30% chữ cái (và ≥ 4 chữ) là chữ kiểu cách U+1D400–1D7FF — cách né bộ lọc từ khoá.
+# MỘT bình luận là spam (`affiliate_dan_ma`) khi có MÃ hoặc CHỮ KIỂU CÁCH, cộng ít nhất một dấu hiệu
+# khác. Khách thật ("mã giảm giá ở đâu ạ", "mình mua trên shopee được không", "ib", "xin giá set túi
+# trắng") không viết mã nhiều khúc, không dùng chữ kiểu cách — bước này không bao giờ chạm tới họ.
+# Cấp BÀI (`affiliate_hang_loat`, chạy ở kho): ≥ `AFF_TAC_GIA` tài khoản khác nhau cùng có mã hoặc
+# chữ kiểu cách dưới MỘT bài trong `AFF_GIO` giờ → cả loạt là spam (bắt bản chỉ có mã, không lời).
+AFF_TAC_GIA = 5
+AFF_GIO = 48
+_RE_MA_AFF = re.compile(r"(?<![A-Za-z0-9])[A-Z0-9]{3,6}(?:[-–—][A-Z0-9]{2,6}){2,}(?![A-Za-z0-9])")
+_RE_CUM_AFF = re.compile(r"\b(?:[dz]an (?:ma|max|vao|cam|code)|san cam|xoa \d+ (?:roi|r|di|la))\b")
+_RE_SAN_AFF = re.compile(r"\b(?:sh?op+e+|sh?op+[\s.\-]*pi+)\b")
+
+
+def dau_hieu_affiliate(s: str) -> set[str]:
+    """Các dấu hiệu affiliate có trong bình luận: tập con của {"ma", "cum", "san", "font"}."""
+    raw = str(s or "")
+    ra: set[str] = set()
+    n = CC.nfkc(_RE_URL.sub(" ", raw))         # mã: bỏ link trước (đường dẫn có khúc in hoa)
+    if any(sum(c.isalpha() for c in m.group()) >= 2 for m in _RE_MA_AFF.finditer(n)):
+        ra.add("ma")
+    t = CC.bo_dau(raw)                          # lời dặn + tên sàn: cả trong link "shopee.vn"
+    if _RE_CUM_AFF.search(t):
+        ra.add("cum")
+    if _RE_SAN_AFF.search(t):
+        ra.add("san")
+    kieu, chu = CC.dem_chu_kieu(raw)
+    if kieu >= 4 and kieu >= 0.3 * chu:
+        ra.add("font")
+    return ra
+
+
+def la_affiliate(s: str) -> bool:
+    """Spam affiliate ngay ở MỘT bình luận: có mã hoặc chữ kiểu cách + ≥ 1 dấu hiệu khác."""
+    d = dau_hieu_affiliate(s)
+    return bool(d & {"ma", "font"}) and len(d) >= 2
+
+
+def khoa_tac_gia(s) -> str:
+    """Tài khoản để đếm "khác nhau": chữ thường, gộp khoảng trắng, bỏ @ — GIỮ số (khác `chuan`:
+    "user123" và "user456" là hai người)."""
+    return " ".join(CC.thuong(s).split()).lstrip("@")
+
+
+def co_dau_hieu_hang_loat(s: str) -> bool:
+    """Dấu hiệu cho luật cấp BÀI: có mã giới thiệu hoặc chữ kiểu cách (một mình chưa đủ là spam)."""
+    return bool(dau_hieu_affiliate(s) & {"ma", "font"})
+
+
+def affiliate_hang_loat(rows: list[dict], ha_duoc: tuple = ("hop_le",)) -> list[tuple]:
+    """Luật cấp BÀI: dưới cùng một bài, ≥ `AFF_TAC_GIA` tài khoản KHÁC NHAU có dấu hiệu
+    (`co_dau_hieu_hang_loat`) trong một khung `AFF_GIO` giờ → mọi bình luận có dấu hiệu trong khung
+    đó là spam. `rows`: dict có khoa_bai, ma, tac_gia, noi_dung, luc (datetime), loai,
+    cua_thuong_hieu. Dòng spam affiliate sẵn có vẫn được đếm (cùng một đợt). Chỉ trả các dòng đang
+    ở nhãn `ha_duoc` (không bao giờ nâng nhãn). -> [(khoa_bai, ma)] cần hạ thành spam."""
+    theo_bai: dict = {}
+    for r in rows:
+        if r.get("cua_thuong_hieu") or r.get("loai") == "thuong_hieu" or r.get("luc") is None:
+            continue
+        if co_dau_hieu_hang_loat(r.get("noi_dung")):
+            theo_bai.setdefault(r.get("khoa_bai"), []).append(r)
+    khung = timedelta(hours=AFF_GIO)
+    ra: list[tuple] = []
+    for ds in theo_bai.values():
+        ds.sort(key=lambda r: r["luc"])
+        tg = [khoa_tac_gia(r.get("tac_gia")) for r in ds]
+        trong: dict[str, int] = {}
+        dau = 0
+        trung: set[int] = set()
+        for cuoi, r in enumerate(ds):              # cửa sổ trượt [dau, cuoi] dài ≤ AFF_GIO giờ
+            if tg[cuoi]:
+                trong[tg[cuoi]] = trong.get(tg[cuoi], 0) + 1
+            while r["luc"] - ds[dau]["luc"] > khung:
+                if tg[dau]:
+                    trong[tg[dau]] -= 1
+                    if not trong[tg[dau]]:
+                        del trong[tg[dau]]
+                dau += 1
+            if len(trong) >= AFF_TAC_GIA:
+                trung.update(range(dau, cuoi + 1))
+        ra += [(ds[i].get("khoa_bai"), ds[i].get("ma")) for i in sorted(trung)
+               if ds[i].get("loai") in ha_duoc]
+    return ra
+
 
 def bo_dau(s: str) -> str:
     s = unicodedata.normalize("NFKD", str(s or "").replace("đ", "d").replace("Đ", "D"))
@@ -112,6 +210,8 @@ def ly_do_spam(s: str, thuong_hieu: list[str] | tuple = ()) -> str:
         return "lien_ket_quang_cao"       # link lạ + lời chào hàng (shop giả mạo)
     if _RE_SDT.search(raw) and co_link:
         return "so_dien_thoai_quang_cao"  # SĐT + link; SĐT đơn thuần = khách để lại số
+    if la_affiliate(raw):
+        return "affiliate_dan_ma"         # mã giới thiệu / chữ kiểu cách + lời dặn dán mã
     return ""
 
 

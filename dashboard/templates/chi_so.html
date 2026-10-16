@@ -71,7 +71,7 @@
 
 <section class="the-khoi cach-duoi cs-nn" id="khoi-nha-ngoai" aria-labelledby="nn-tieu-de">
   <div class="cs-the__dau">
-    <div class="cs-the__tieu-de"><h2 id="nn-tieu-de">Kênh nhà vs Bên ngoài</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Kênh nhà = nguồn loại Kênh nhà (fanpage, kênh TikTok… của chính thương hiệu) — Mark quét đủ. Bên ngoài = KOL, trang, nhóm, báo và bài tìm theo từ khoá. Hai bên cùng theo mọi bộ lọc khác. Sắc thái kênh nhà là sắc thái bình luận của khách (bài của thương hiệu không tính). Bấm một bên để chỉ xem bên đó.">i</button></div>
+    <div class="cs-the__tieu-de"><h2 id="nn-tieu-de">Internal vs External channel</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Internal channel = nguồn loại Internal channel (fanpage, kênh TikTok… của chính thương hiệu) — Mark quét đủ. External channel = KOL, trang, nhóm, báo và bài tìm theo từ khoá. Hai bên cùng theo mọi bộ lọc khác. Sắc thái Internal channel là sắc thái bình luận của khách (bài của thương hiệu không tính). Bấm một bên để chỉ xem bên đó.">i</button></div>
     <span class="mo nho" id="nn-phu"></span>
   </div>
   <div class="cs-nn__ty" id="nn-ty"></div>
@@ -79,7 +79,7 @@
 </section>
 
 <div class="luoi luoi--kpi" id="kpi" aria-live="polite">
-  {% for i in range(9) %}<div class="cs-khung-cho cs-khung-cho--kpi"></div>{% endfor %}
+  {% for i in range(10) %}<div class="cs-khung-cho cs-khung-cho--kpi"></div>{% endfor %}
 </div>
 <p class="ghi-chu cs-ky-truoc" id="ky-truoc"></p>
 
@@ -94,7 +94,7 @@
   </section>
   <section class="the-khoi">
     <div class="cs-the__dau">
-      <div class="cs-the__tieu-de"><h2>Sắc thái</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Bài kênh nhà và bình luận bị lọc không vào sắc thái. % tính trên phần đã phân loại.">i</button></div>
+      <div class="cs-the__tieu-de"><h2>Sắc thái</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Bài Internal channel và bình luận bị lọc không vào sắc thái. % tính trên phần đã phân loại.">i</button></div>
       <div class="cs-phan" id="nguon-sac-thai" aria-label="Dữ liệu"></div>
     </div>
     <div class="cs-sac">
@@ -116,11 +116,32 @@
   <div class="bieu-do" id="bd-sac-thai-tg" role="img" aria-label="Biểu đồ sắc thái theo thời gian"></div>
 </section>
 
+{# Ý định mua (16/10/2026): bình luận hợp lệ hỏi giá / muốn mua — tách khỏi "Trung lập" và mây từ. #}
+<section class="the-khoi cach-duoi cs-yd" id="khoi-y-dinh" aria-labelledby="yd-tieu-de">
+  <div class="cs-the__dau">
+    <div>
+      <div class="cs-the__tieu-de"><h2 id="yd-tieu-de">Ý định mua</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Bình luận hợp lệ hỏi giá, hỏi chỗ mua, xin link, hỏi size/ship, muốn đặt hàng: AI gán chủ đề “Giá/mua ở đâu/ý định mua” hoặc câu có “xin giá”, “giá bn”, “ib”, “mua ở đâu”, “còn hàng”… (đã gộp teen code). Spam mời dán mã không tính. Các câu hỏi giá không vào mây từ khoá.">i</button></div>
+      <p class="cs-phu-de" id="yd-tom-tat">&nbsp;</p>
+    </div>
+    <div class="cs-the__nut" id="yd-nut"></div>
+  </div>
+  <div class="cs-yd__luoi">
+    <div class="cs-yd__o">
+      <h3 class="cs-yd__h" id="yd-bd-tieu-de">Theo ngày</h3>
+      <div class="bieu-do bieu-do--thap" id="bd-y-dinh" role="img" aria-label="Biểu đồ bình luận ý định mua theo thời gian"></div>
+    </div>
+    <div class="cs-yd__o">
+      <h3 class="cs-yd__h">Bài có nhiều câu hỏi mua nhất</h3>
+      <div class="cs-ds-thanh" id="yd-top"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
+    </div>
+  </div>
+</section>
+
 <div class="luoi luoi--2">
   <section class="the-khoi">
     <div class="cs-the__dau">
       <div>
-        <div class="cs-the__tieu-de"><h2>Từ khoá nổi bật</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Hashtag và cụm hai chữ trong bài + bình luận hợp lệ; đã bỏ từ khoá của dự án và bài kênh nhà. Cỡ chữ theo số thảo luận, màu theo sắc thái chính.">i</button></div>
+        <div class="cs-the__tieu-de"><h2>Từ khoá nổi bật</h2><button type="button" class="cs-goi-y" aria-label="Giải thích" data-goi-y="Hashtag và cụm hai chữ trong bài + bình luận hợp lệ; đã bỏ từ khoá của dự án, bài Internal channel và mảnh câu hỏi giá (“xin giá”, “giá bn” — xem khối Ý định mua). Bản có dấu và không dấu, teen code (mk = mình) gộp làm một. Cỡ chữ theo số thảo luận, màu theo sắc thái chính.">i</button></div>
         <p class="cs-phu-de" id="tk-tom-tat">&nbsp;</p>
       </div>
       <div class="cs-phan" id="tk-che" aria-label="Kiểu xem"></div>

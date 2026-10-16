@@ -10,9 +10,11 @@
   --cs-cho-a: #eeede8; --cs-cho-b: #f7f6f2;
   --cs-o: 0 10px 30px rgba(11, 11, 11, 0.14), 0 1px 3px rgba(11, 11, 11, 0.08);
   --cs-nut-nen: #ffffff;
+  --cs-yd: #0e7c86;                       /* ý định mua — màu riêng, không trùng sắc thái/nhãn lọc */
 }
 @media (prefers-color-scheme: dark) {
   :root {
+    --cs-yd: #2bb3bf;
     --cs-tc: #199e70; --cs-ti: #e66767; --cs-tl: #7d7c76; --cs-chua: #45443f; --cs-nha: #9085e9;
     --cs-tc-chu: #45c99a; --cs-ti-chu: #f08585; --cs-tl-chu: #a9b8cc;
     --cs-tc-nen: #12271e; --cs-ti-nen: #331a1a; --cs-tl-nen: #2a2a28; --cs-nha-nen: #23203d;
@@ -102,7 +104,7 @@
 .cs-pop__chan { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 4px 2px; border-top: 1px solid var(--ke); }
 .cs-pop__chan .nut:only-child { margin-left: auto; }
 
-/* đang tải theo bộ lọc mới: các khối mờ đi (khung xương ở KPI + kênh nhà/bên ngoài) */
+/* đang tải theo bộ lọc mới: các khối mờ đi (khung xương ở KPI + internal/external channel) */
 .cs-trang.cs-dang-doi > .luoi, .cs-trang.cs-dang-doi > section.the-khoi:not(.cs-bo-loc), .cs-trang.cs-dang-doi > .cs-ky-truoc {
   opacity: .5; transition: opacity .15s; pointer-events: none;
 }
@@ -113,7 +115,7 @@
 }
 #kpi > .cs-trong-kpi { flex: 1 1 100%; padding: 18px 0; }
 
-/* ─── Kênh nhà vs Bên ngoài ─── */
+/* ─── Internal vs External channel ─── */
 .cs-nn__ty { margin: 2px 0 10px; }
 .cs-nn__thanh { display: flex; gap: 2px; height: 8px; border-radius: 999px; overflow: hidden; background: var(--be-mat-2); }
 .cs-nn__phan { display: block; min-width: 3px; }
@@ -343,6 +345,22 @@ dialog.cs-tam::backdrop { background: rgba(0, 0, 0, .45); }
 .cs-kpi-sac__o .kpi__doi { display: block; }
 .cs-kpi-sac__o .kpi__doi { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 480px) { .cs-kpi-sac__luoi { grid-template-columns: 1fr 1fr; } }
+/* thẻ Ý định mua: cả thẻ là nút (mở ngăn bình luận đã đếm) */
+.cs-kpi-yd { display: block; text-align: left; cursor: pointer; border-left: 3px solid var(--cs-yd); }
+.cs-kpi-yd:hover { background: var(--be-mat-2); }
+.cs-kpi-yd > span { display: block; }
+.cs-kpi-yd > .kpi__nhan { display: flex; }
+
+/* ─── ý định mua (khối) ─── */
+.cs-yd__luoi { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 24px; }
+@media (max-width: 900px) { .cs-yd__luoi { grid-template-columns: minmax(0, 1fr); } }
+.cs-yd__o { min-width: 0; }
+.cs-yd__h { margin: 4px 0 6px; font-size: 13px; font-weight: 600; color: var(--chu-phu); }
+.cs-thanh.cs-yd__bai { grid-template-columns: minmax(0, 1.7fr) minmax(48px, 1fr) auto; }
+.cs-thanh.cs-yd__bai .cs-thanh__gt { min-width: 0; }
+.cs-yd__bai .cs-nt { flex: none; }                    /* tên bài dài: huy hiệu không bị ép đè chữ */
+.cs-yd__them { margin-top: 8px; align-self: flex-start; }
+@media (max-width: 600px) { .cs-thanh.cs-yd__bai { grid-template-columns: minmax(0, 1fr) auto; } }
 
 /* ─── sắc thái (vòng) ─── */
 .cs-sac { display: grid; grid-template-columns: minmax(130px, 160px) minmax(0, 1fr); align-items: center; gap: 10px; margin-top: 18px; }
