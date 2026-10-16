@@ -21,6 +21,7 @@ import tiktok_api as TT
 
 _VN = datetime.timezone(datetime.timedelta(hours=7))
 BAT_TH = {"tu_khoa": {"threads": {"bat": True}}}
+G = TT.GIA_YEU_CAU             # 0,003 USD/yêu cầu (giá thật đo 17/10)
 TU = ["hapas", "túi hapas", "ví hapas", "yêu từ điều nhỏ nhất"]
 
 
@@ -80,7 +81,7 @@ def test_threads_thieu_tien_co_so_tu_thay_vi_bo_ca_nen_tang(mo):  # noqa: F811
               cau_hinh={"tu_khoa": {p: {"bat": p == "threads"} for p in T.TK_NEN_TANG}})
     tk = contextvars.copy_context().run(T._tim_tu_khoa, v, da, 3, 5.0, time.monotonic() + 600)
     assert goi["threads"] == (["hapas"], 10)
-    assert any("co còn 1 từ khoá đầu" in x for x in tk["ghi_chu"])
+    assert any("co còn 1/4 từ khoá đầu" in x for x in tk["ghi_chu"])
     assert tk["usd"] == pytest.approx(0.08), "0 bài vẫn tính phí khởi động"
     assert "threads" in tk["pheu"] and not tk["pheu"]["threads"].get("bo_qua")
     # 1 từ cũng không vừa → bỏ qua CÓ lý do (ước tính / còn lại).
@@ -124,10 +125,10 @@ def test_tim_sap_nhieu_thich_va_tran_trang_moi_tu():
 def test_tran_noi_nam_trong_uoc_tinh_tiktok():
     uoc = T.uoc_tu_khoa_nen_tang("tiktok", 300, ["k"] * 21)       # 3 trang/từ + 10 làm mới
     # Lượt thường dùng 1 trang/từ (21 yêu cầu) → còn đủ 2 trang/từ cho lượt nổi.
-    assert TDA.tran_noi(21, uoc, 21 * 0.002, 5.0) == pytest.approx(21 * 2 * 0.002)
+    assert TDA.tran_noi(21, uoc, 21 * G, 5.0) == pytest.approx(21 * 2 * G)
     # Lượt thường lật hết trần → lượt nổi chỉ còn phần chưa dùng (chừa làm mới).
-    assert TDA.tran_noi(21, uoc, 63 * 0.002, 5.0) == pytest.approx(
-        round(uoc - 63 * 0.002 - 10 * 0.002, 4))
+    assert TDA.tran_noi(21, uoc, 63 * G, 5.0) == pytest.approx(
+        round(uoc - 63 * G - 10 * G, 4))
     assert TDA.tran_noi(21, uoc, 0.0, 0.01) == pytest.approx(0.01)
     assert TDA.tran_noi(21, 0.0, 0.0, 5.0) == 0.0
 
@@ -169,7 +170,7 @@ def test_luot_noi_bat_video_viral_cu_cap_nhat_bai_da_co_va_theo_nhip(mo):  # noq
     sap = [g.get("searchPosts_sortType") for g in api.goi if "searchPosts_keyword" in g]
     assert sap == [0, 1], "lượt thường (liên quan) rồi lượt nổi (nhiều thích)"
     f = tk["pheu"]["tiktok"]
-    assert f["noi"]["ve"] == 3 and f["noi"]["moi"] == 2 and f["noi"]["usd"] == pytest.approx(0.002)
+    assert f["noi"]["ve"] == 3 and f["noi"]["moi"] == 2 and f["noi"]["usd"] == pytest.approx(G)
     assert f["ve"] == 3 and f["cap_nhat"] == 1
     assert kho.cap_nhat[0]["khoa"] == "tiktok:7000000002" and kho.cap_nhat[0]["binh_luan"] == 999
     giu = {r["khoa"]: r for _, rows in kho.bai for r in rows}
@@ -181,7 +182,7 @@ def test_luot_noi_bat_video_viral_cu_cap_nhat_bai_da_co_va_theo_nhip(mo):  # noq
     assert moc[TDA.KHOA_MOC_NOI]["ve"] == 3
     # Tiền: 2 yêu cầu API (thường + nổi) × 0,002 USD — cùng sổ `_tien_tim_tiktok` theo run id.
     tien = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-tiktok")
-    assert tien["usd_so"] == pytest.approx(0.004)
+    assert tien["usd_so"] == pytest.approx(2 * G)
     # Trong 20 giờ: không chạy lượt nổi nữa.
     api.goi.clear()
     tk2 = _chay_tk(da, GiaViec({}, []))
@@ -205,3 +206,120 @@ def test_luot_noi_khong_chay_khi_tiktok_di_duong_du_phong(mo):  # noqa: F811
     tk = _chay_tk(dict(DU_AN, tk_bat=True, tk_so_bai=15))
     assert "noi" not in tk["pheu"]["tiktok"]
     assert TDA.KHOA_MOC_NOI not in T.doc_moc_tk("hapas")
+
+
+# ───────────────────────────── review 17/10 (M1, M3, LOW) ─────────────────────────────
+def _kich_ban_api(mo, kho_da_co=()):  # noqa: F811
+    """Lượt thường qua TikTok API trả 1 bài mới (run có tên actor như thật)."""
+    kho = GiaKhoTk(mo)
+    kho.da_co = set(kho_da_co)
+    api = GiaApiCoActor(mo)
+    moi = _aweme(7000000001, user="kol.moi", ngay=1)
+    moi["desc"] = "review túi hapas"
+    api.tim[("hapas", 0)] = ([moi], 0)
+    da = dict(DU_AN, tk_bat=True, tk_so_bai=15,
+              cau_hinh={"tu_khoa": {p: {"bat": p == "tiktok"} for p in T.TK_NEN_TANG}})
+    return kho, api, da
+
+
+def _noi_gia(mo, so_run: int, loi: Exception | None = None, bai=()):  # noqa: F811
+    """Thay `tim_noi_tiktok`: báo `so_run` run TikTok API (đã trả tiền) rồi trả bài / ném lỗi."""
+    goi = []
+
+    def f(q, bay_gio, tran):
+        goi.append(tran)
+        for i in range(so_run):
+            A._KHI_CO_RUN.get()({"id": f"noi{i}"}, {"actor": TT.ACTOR})
+        if loi is not None:
+            raise loi
+        return list(bai)
+    mo.setattr(TDA, "tim_noi_tiktok", f)
+    return goi
+
+
+@pytest.mark.tiktok_api
+@pytest.mark.parametrize("loi", [A.LoiApify("HET_TIEN_THANG", "hết hạn mức tháng"),
+                                 RuntimeError("shape lạ")])
+def test_luot_noi_loi_khong_lam_mat_bai_luot_thuong(mo, loi):  # noqa: F811
+    """M1: lượt nổi ném lỗi (kể cả HET_TIEN_THANG) → bài lượt thường (đã trả tiền) vẫn vào phễu
+    + kho, phần TikTok "xong", lỗi nằm ở `noi.ly_do`, tiền gồm cả run của lượt nổi."""
+    kho, _api, da = _kich_ban_api(mo)
+    _noi_gia(mo, 1, loi)
+    v = GiaViec({}, [])
+    tk = _chay_tk(da, v)
+    f = tk["pheu"]["tiktok"]
+    assert f["ve"] == 1 and f["moi"] == 1 and kho.bai
+    assert "lỗi" in f["noi"]["ly_do"] and f["noi"]["usd"] == pytest.approx(G)
+    ph = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-tiktok")
+    assert ph["trang_thai"] == "xong" and ph["usd_so"] == pytest.approx(2 * G)
+    assert not any(x.startswith("tìm TikTok:") for x in tk["ghi_chu"])
+    # M3: đã trả tiền (dù lỗi) → ghi mốc nhịp ngay, lượt sau không chạy lại.
+    assert T.doc_moc_tk("hapas")[TDA.KHOA_MOC_NOI]["usd"] == pytest.approx(G)
+
+
+@pytest.mark.tiktok_api
+def test_luot_noi_tra_0_bai_van_ghi_moc_nhip(mo):  # noqa: F811
+    """M3: lượt nổi trả tiền mà 0 bài → vẫn ghi mốc; lượt sau trong 20 giờ không trả tiền lại."""
+    _kho, _api, da = _kich_ban_api(mo)
+    goi = _noi_gia(mo, 2)
+    _chay_tk(da, GiaViec({}, []))
+    assert len(goi) == 1 and T.doc_moc_tk("hapas")[TDA.KHOA_MOC_NOI]["ve"] == 0
+    _chay_tk(da, GiaViec({}, []))
+    assert len(goi) == 1, "trong NOI_GIO_GIAN không chạy lại"
+
+
+@pytest.mark.tiktok_api
+def test_luot_noi_khong_ton_tien_thi_khong_ghi_moc(mo):  # noqa: F811
+    _kho, _api, da = _kich_ban_api(mo)
+    goi = _noi_gia(mo, 0)
+    _chay_tk(da, GiaViec({}, []))
+    _chay_tk(da, GiaViec({}, []))
+    assert len(goi) == 2 and TDA.KHOA_MOC_NOI not in T.doc_moc_tk("hapas")
+
+
+@pytest.mark.tiktok_api
+def test_luot_noi_chi_chay_khi_luot_thuong_qua_api_va_con_gio(mo):  # noqa: F811
+    """LOW: lượt thường xuống dự phòng (run actor khác) hoặc gần hết giờ → không lượt nổi."""
+    _kho, _api, _da = _kich_ban_api(mo)
+    goi = _noi_gia(mo, 1)
+    phan_du_phong = [{"run_id": "a", "actor": TT.ACTOR},
+                     {"run_id": "b", "actor": "apidojo~tiktok-scraper"}]
+    v = GiaViec({}, [])
+    bay = datetime.datetime.now(_VN)
+    assert T._them_luot_noi(v, "hapas", 1, ["hapas"], [], {}, bay, 1.0, 5.0,
+                            phan_du_phong) == ([], {})
+    assert T._them_luot_noi(v, "hapas", 1, ["hapas"], [], {}, bay, 1.0, 5.0, []) == ([], {})
+    v_het = GiaViec({}, [], con=T._CHUA_GIAY_CUOI + 100)
+    _, noi = T._them_luot_noi(v_het, "hapas", 1, ["hapas"], [], {}, bay, 1.0, 5.0,
+                              [{"run_id": "a", "actor": TT.ACTOR}])
+    assert "hết giờ" in noi["ly_do"] and not goi
+
+
+def test_threads_mot_cau_ghi_chu_sau_khi_co(mo):  # noqa: F811
+    """LOW: Threads co theo ngân sách → chỉ câu "co còn …", không kèm câu "x/y từ khoá đầu"
+    tính trên số bài TRƯỚC khi co."""
+    GiaKhoTk(mo)
+    mo.setattr(A, "_FETCH", _fetch_ghi({}))
+    v = GiaViec({}, [])
+    v.d["ngan_sach_usd"] = 0.15
+    da = dict(DU_AN, tu_khoa=TU, tk_bat=True, tk_so_bai=20,
+              cau_hinh={"tu_khoa": {p: {"bat": p == "threads"} for p in T.TK_NEN_TANG}})
+    tk = contextvars.copy_context().run(T._tim_tu_khoa, v, da, 3, 5.0, time.monotonic() + 600)
+    cau = [x for x in tk["ghi_chu"] if x.startswith("tìm Threads")]
+    assert len(cau) == 1 and "co còn 1/4" in cau[0]
+    # Đủ tiền mà số bài < 10 × số từ: vẫn một câu "x/y từ khoá đầu".
+    tk = _chay_tk(dict(da, tk_so_bai=20))
+    cau = [x for x in tk["ghi_chu"] if x.startswith("tìm Threads")]
+    assert len(cau) == 1 and "2/4 từ khoá đầu" in cau[0]
+
+
+def test_youtube_thieu_key_khong_ghi_cau_moi_luot(mo):  # noqa: F811
+    """LOW: YouTube thiếu key (chuyện của máy chạy) → phễu + phần THIEU_KEY, không câu ghi chú."""
+    GiaKhoTk(mo)
+    mo.setattr(A, "_FETCH", _fetch_ghi({}))
+    mo.setattr(A, "_youtube_co_key", lambda: False)
+    v = GiaViec({}, [])
+    tk = _chay_tk(dict(DU_AN, tk_bat=True, tk_so_bai=15), v)
+    assert tk["pheu"]["youtube"]["bo_qua"] and not any("YouTube" in x for x in tk["ghi_chu"])
+    ph = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-youtube")
+    assert ph["ma"] == "THIEU_KEY"

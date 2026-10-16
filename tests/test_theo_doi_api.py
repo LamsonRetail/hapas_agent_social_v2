@@ -128,7 +128,7 @@ def test_lam_moi_so_lieu_bai_tiktok_noi(mo):  # noqa: F811
     assert goi and goi[0][1] == pytest.approx(TDA.LAM_MOI_TOI_DA * TT.GIA_YEU_CAU)
     assert kho.cap_nhat == [{"khoa": "tiktok:70000001", "xem": 50, "thich": 4, "binh_luan": 2,
                              "chia_se": 1}]
-    assert tk["lam_moi"]["bai"] == 2 and tk["lam_moi"]["usd"] == pytest.approx(0.004)
+    assert tk["lam_moi"]["bai"] == 2 and tk["lam_moi"]["usd"] == pytest.approx(2 * TT.GIA_YEU_CAU)
     ids = {ph.get("run_id") for ph in v.d["nen_tang"]["tu_khoa"]["phan"]}
     assert {"lm0", "lm1"} <= ids, "run id vào sổ việc để chốt tiền thật"
     # Khởi động lại: đã có mốc làm mới thì không làm lại.
@@ -204,7 +204,7 @@ def test_phan_ho_so_qua_api_thieu_tai_khoan_thi_chay_clockworks(monkeypatch):
     assert {(x.get("authorMeta") or {}).get("name") for x in items} == {"kenh_a", "kenh_b"}
     assert [a for a, p, _ in r.goi if a != TT.ACTOR] == ["clockworks~tiktok-profile-scraper"]
     assert r.goi[-1][1]["profiles"] == ["kenh_b"], "dự phòng chỉ cho tài khoản thiếu"
-    assert meta["usd"] == pytest.approx(3 * 0.002 + 0.003)
+    assert meta["usd"] == pytest.approx(3 * TT.GIA_YEU_CAU + 0.003)
     assert len(ph["run_phu"]) == 4 and ph["trang_thai"] == "dang_chay"
     assert TDA.tien_phan("tiktok", ph, items, meta) == meta["usd"]
     rows = T._doc_ket_qua("tiktok", items, 5)
@@ -238,13 +238,14 @@ def test_phan_binh_luan_qua_api_va_viec_nen_cong_run_phu(monkeypatch, tmp_path):
 
 # ───────────────────────────── review 16/10 ─────────────────────────────
 def test_so_tien_tim_tiktok_theo_gia_that_tung_actor():
-    """HIGH 1: run TikTok API 0,002; dự phòng theo video về (clockworks 0,003/video); dự phòng
+    """HIGH 1: run TikTok API `GIA_YEU_CAU` (0,003 từ 17/10);
+    dự phòng theo video về (clockworks 0,003/video); dự phòng
     lỗi thì tính nguyên trần của nó."""
     phan = [{"run_id": "r1", "actor": T.TT_ACTOR}, {"run_id": "r2", "actor": T.TT_ACTOR},
             {"run_id": "r3", "actor": "clockworks~tiktok-hashtag-scraper"}, {"loai": "moc"}]
     got = [({"_nguon": "clockworks (dự phòng)"}, None)] * 3 + [({"_nguon": "TikTok API"}, None)]
-    assert T._tien_tim_tiktok(phan, got, None, 0.5) == pytest.approx(0.004 + 0.009)
-    assert T._tien_tim_tiktok(phan, [], "LOI: x", 0.5) == pytest.approx(0.504)
+    assert T._tien_tim_tiktok(phan, got, None, 0.5) == pytest.approx(2 * TT.GIA_YEU_CAU + 0.009)
+    assert T._tien_tim_tiktok(phan, [], "LOI: x", 0.5) == pytest.approx(2 * TT.GIA_YEU_CAU + 0.5)
     assert T.TT_ACTOR == TT.ACTOR
 
 
@@ -315,4 +316,4 @@ def test_phan_binh_luan_video_rong_khong_chay_du_phong_video_loi_thi_chay(monkey
     du_phong = [(a, p) for a, p, _ in r.goi if a != TT.ACTOR]
     assert len(du_phong) == 1 and du_phong[0][1]["postURLs"] == [u2]
     assert [x["text"] for x in items] == ["dp"] and loi is None
-    assert meta["usd"] == pytest.approx(2 * 0.002 + 0.003)   # giả báo 0,003/video
+    assert meta["usd"] == pytest.approx(2 * TT.GIA_YEU_CAU + 0.003)   # giả báo 0,003/video

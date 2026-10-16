@@ -55,7 +55,11 @@ import apify_tool as A
 
 ACTOR = "scraptik~tiktok-api"
 NHAN = "TikTok API (scraptik)"
-GIA_YEU_CAU = 0.002          # USD mỗi yêu cầu (sự kiện "request"), không phí khởi động
+# USD mỗi yêu cầu. Bảng giá actor: 0,002 (sự kiện "request", không phí khởi động) nhưng đo THẬT
+# 17/10/2026 trên tài khoản FREE (GET /users/me/limits trước/sau): 85 yêu cầu 0,19 USD, 42 yêu cầu
+# 0,143 USD → 0,0023–0,0034 USD/yêu cầu (phí nền tảng mỗi run). Ước tính/trần/sổ dùng 0,003 cho
+# khỏi báo thiếu; tiền thật vẫn chốt theo run id (`viec_nen.chot_chi_phi`).
+GIA_YEU_CAU = 0.003
 TIM_MOI_TRANG = 30           # searchPosts_count tối đa thật sự trả bài (50 → 0 bài)
 BAI_MOI_TRANG = 10           # userPosts trả 10 bài/yêu cầu dù xin 30
 BL_MOI_TRANG = 50
