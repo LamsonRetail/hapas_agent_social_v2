@@ -27,8 +27,11 @@
       fs.disabled = !co;
     });
     var gy = form.querySelector("[data-goi-y-thu]");
-    if (gy) gy.textContent = k === "hang_tuan" ? "Chọn ít nhất một ngày chạy."
-      : "Bỏ trống = mọi ngày.";
+    if (gy) {
+      var chuGy = k === "hang_tuan" ? "Chọn ít nhất một ngày chạy." : "Bỏ trống = mọi ngày.";
+      gy.setAttribute("data-goi-y", chuGy);                  // ghi chú nằm trong nút ⓘ
+      gy.setAttribute("aria-label", "Giải thích: " + chuGy);
+    }
     // chiến dịch mặc định quét mọi nguồn; về lịch thường thì theo chu kỳ nguồn
     if (moiNguon && !daCham && k !== kieuTruoc) moiNguon.checked = k === "chien_dich";
     kieuTruoc = k;
@@ -97,7 +100,10 @@
     });
     chu(o("ket_luan"), d.ket_luan || "");
     o("ket_luan").classList.toggle("lq-ket--canh", !!d.vuot);
-    chu(o("cong_thuc"), d.cong_thuc || "");
+    var ct = o("cong_thuc");                                 // công thức nằm trong nút ⓘ
+    ct.setAttribute("data-goi-y", d.cong_thuc || "");
+    ct.setAttribute("aria-label", "Giải thích: " + (d.cong_thuc || ""));
+    ct.hidden = !d.cong_thuc;
     var ul = o("canh_bao");
     ul.replaceChildren();
     (d.canh_bao || []).forEach(function (c) { ul.append(the("li", "", c)); });

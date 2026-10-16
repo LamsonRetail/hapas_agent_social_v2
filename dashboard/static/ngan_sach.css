@@ -81,6 +81,7 @@
 .ns-bang thead tr:first-child th.ns-nhom:nth-child(2) { background: var(--xanh-nhat); color: var(--xanh-chu); }
 .ns-bang thead tr:first-child th.ns-nhom:nth-child(3) { background: var(--tim-nhat); color: var(--tim-chu); }
 .ns-bang tbody th { font-weight: 650; white-space: nowrap; }
+.ns-bang tbody th .goi-y { margin-left: 6px; }
 .ns-bang input[type="number"] { width: 84px; min-height: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 /* ô trống = theo mặc định dự án: viền đứt để phân biệt với số đã đặt riêng */
 .ns-bang input[type="number"]:placeholder-shown { border-style: dashed; background: transparent; }
@@ -91,8 +92,6 @@
 .ns-bang tfoot .ns-usd { color: var(--chu); }
 .ns-mien-phi { color: var(--tot); font-size: 12px; font-weight: 600; }
 .ns-tat-chu { color: var(--chu-mo); font-size: 12px; }
-.ns-ghi { display: block; font-weight: 400; font-size: 11.5px; color: var(--chu-mo); white-space: normal; max-width: 250px; }
-.ns-ghi--bat { color: var(--canh); font-weight: 650; }
 .ns-so-tu { color: var(--chu-mo); font-variant-numeric: tabular-nums; }
 td.ns-mo > *:not(.ns-cong) { opacity: .45; }
 .ns-bang .ns-o-cong { white-space: nowrap; }
@@ -174,7 +173,6 @@ form[data-ban="1"] .ns-luu .nut:not(.nut--nhe) { box-shadow: 0 0 0 3px var(--nha
   .ns-bang tbody > tr > :nth-child(9) { grid-area: blu; }
   .ns-bang tbody > tr > :nth-child(10) { grid-area: tong; align-self: start; }
   .ns-bang tbody th { font-size: 14px; }
-  .ns-bang .ns-ghi { display: inline; margin-left: 6px; max-width: none; }
   .ns-bang input[type="number"] { width: 100%; min-width: 0; }
   .ns-bang .ns-usd, .ns-bang .ns-tong-dong { text-align: right; }
   .ns-bang tfoot tr { grid-template-areas: "ten tku blu tong"; border-bottom: 0; border-top: 2px solid var(--ke); }

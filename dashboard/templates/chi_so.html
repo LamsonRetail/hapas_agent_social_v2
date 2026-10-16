@@ -30,10 +30,10 @@
       <span class="cs-ngay__den" aria-hidden="true">–</span>
       <input type="date" name="den" id="loc-den" form="loc-form" value="{{ loc.den }}" aria-label="Đến ngày">
     </span>
-    <button type="button" class="goi-y cs-goi-y" data-goi-y="Mặc định: 30 ngày trọn tới hết hôm qua (giờ VN), so với 30 ngày liền trước cùng độ dài.">i</button>
+    <button type="button" class="goi-y cs-goi-y" id="ky-truoc" data-goi-y="Mặc định: 30 ngày trọn tới hết hôm qua (giờ VN), so với 30 ngày liền trước cùng độ dài.">i</button>
+    <button type="button" class="goi-y goi-y--canh cs-goi-y" id="chua-tron" data-goi-y="Khoảng có hôm nay — ngày chưa hết nên số cuối còn thấp."{% if not chua_tron %} hidden{% endif %}>!</button>
   </div>
 </div>
-<p class="cs-chua-tron" id="chua-tron"{% if not chua_tron %} hidden{% endif %}>Khoảng có hôm nay — ngày chưa hết nên số cuối còn thấp.</p>
 
 <div class="cs-nhanh" id="loc-nhanh" role="group" aria-label="Lọc nhanh"></div>
 
@@ -64,9 +64,9 @@
       </form>
       <div class="cs-bo-loc__duoi">
         <p class="cs-bo-loc__tom" id="loc-tom" aria-live="polite"></p>
+        <button type="button" class="goi-y goi-y--canh cs-goi-y" id="loc-goi-y" data-goi-y="" hidden>!</button>
         <div class="cs-dang-loc__ds cs-bo-loc__dang" id="loc-dang"></div>
       </div>
-      <p class="cs-bo-loc__goi-y" id="loc-goi-y" hidden></p>
       <p class="cs-bo-loc__loi" id="loc-loi" role="alert" hidden></p>
     </div>
   </div>
@@ -87,20 +87,18 @@
 <div class="luoi cs-kpi" id="kpi" aria-live="polite">
   {% for i in range(7) %}<div class="cs-khung-cho cs-khung-cho--kpi"></div>{% endfor %}
 </div>
-<p class="cs-ky-truoc" id="ky-truoc"></p>
 
 {# Hàng biểu đồ như mẫu: vòng có tổng ở giữa + chú giải số/%, đường thảo luận, thanh ngang #}
 <div class="luoi cs-luoi-bd">
   <section class="the-khoi cs-o-sac" aria-labelledby="sac-tieu-de">
     <div class="cs-the__dau">
-      <div class="cs-the__tieu-de"><h2 id="sac-tieu-de">Sắc thái</h2><button type="button" class="goi-y cs-goi-y" data-goi-y="Bài Internal channel và bình luận bị lọc (spam, trùng…) không vào sắc thái. % tính trên phần đã phân loại.">i</button></div>
+      <div class="cs-the__tieu-de"><h2 id="sac-tieu-de">Sắc thái</h2><button type="button" class="goi-y cs-goi-y" id="sac-goi-y" data-goi-y="Bài Internal channel và bình luận bị lọc (spam, trùng…) không vào sắc thái. % tính trên phần đã phân loại.">i</button></div>
       <div class="cs-phan" id="nguon-sac-thai" aria-label="Dữ liệu"></div>
     </div>
     <div class="cs-sac">
       <div class="cs-sac__vong" id="bd-sac-thai" role="img" aria-label="Biểu đồ sắc thái"></div>
       <div class="cs-cg" id="chu-giai-sac-thai"></div>
     </div>
-    <p class="cs-phu-de cs-sac__chu" id="ghi-chu-sac-thai"></p>
   </section>
   <section class="the-khoi cs-o-xh" aria-labelledby="xh-tieu-de">
     <div class="cs-the__dau">
@@ -115,7 +113,7 @@
   {# Nền tảng + loại nguồn chung MỘT thẻ (17/10/2026): mỗi danh sách chỉ vài dòng — tách hai thẻ
      thì thẻ nào cũng trống một mảng lớn. #}
   <section class="the-khoi cs-o-pb" aria-labelledby="pb-tieu-de">
-    <div class="cs-the__dau"><h2 id="pb-tieu-de">Phân bố thảo luận</h2><span class="cs-cg-chu"><b>thảo luận</b> · bài · %</span></div>
+    <div class="cs-the__dau"><div class="cs-the__tieu-de"><h2 id="pb-tieu-de">Phân bố thảo luận</h2><button type="button" class="goi-y cs-goi-y" data-goi-y="Mỗi dòng: số thảo luận (đậm) · số bài · % trên tổng thảo luận. Bấm một dòng để xem bài.">i</button></div></div>
     <h3 class="cs-pb__h" id="nt-tieu-de">Theo nền tảng</h3>
     <div class="cs-ds-thanh" id="nen-tang" aria-labelledby="nt-tieu-de"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
     <h3 class="cs-pb__h" id="ln-tieu-de">Theo loại nguồn</h3>
@@ -175,7 +173,7 @@
     </div>
     <div class="cs-tk__thanh">
       <p class="cs-phu-de" id="tk-tom-tat">&nbsp;</p>
-      <label class="cs-cong-tac cs-tk-mg"><input type="checkbox" id="tk-gom-mg" role="switch"><span class="cs-cong-tac__nut" aria-hidden="true"></span>Gồm cả bình luận minigame</label>
+      <label class="cs-cong-tac cs-tk-mg"><input type="checkbox" id="tk-gom-mg" role="switch"><span class="cs-cong-tac__nut" aria-hidden="true"></span>Gồm cả bình luận minigame<span class="cs-tk-mg__so" id="tk-mg-so" hidden></span></label>
     </div>
     <div class="cs-may" id="tk-may"><div class="cs-khung-cho cs-khung-cho--may"></div></div>
     <ol class="cs-bang-tu" id="tk-bang" hidden></ol>
@@ -203,7 +201,7 @@
   <div class="muc">
     <span class="muc__so" aria-hidden="true">6</span>
     <h2 class="muc__ten" id="tn-tieu-de">Nguồn nổi bật</h2>
-    <span class="muc__phai muc__phu">Top 10 mỗi nền tảng theo thảo luận</span>
+    <button type="button" class="goi-y cs-goi-y" data-goi-y="Top 10 nguồn mỗi nền tảng, xếp theo thảo luận. “Lọc” áp nguồn đó cho cả trang. Số của bài tính tới lần quét gần nhất.">i</button>
   </div>
   <div class="tab cs-tab-nt" id="tab-nen-tang" role="tablist" aria-label="Nền tảng"></div>
   <div id="top-nguon"></div>
@@ -213,7 +211,7 @@
   <div class="muc">
     <span class="muc__so" aria-hidden="true">7</span>
     <h2 class="muc__ten" id="tb-tieu-de">Bài nổi bật</h2>
-    <span class="muc__phai muc__phu">Nhiều thảo luận nhất</span>
+    <button type="button" class="goi-y cs-goi-y" data-goi-y="Bài có nhiều thảo luận nhất (bài + bình luận nền tảng báo). Nút bình luận mở chuỗi bình luận đã đọc của bài. Số xem / thích / chia sẻ / bình luận tính tới lần quét gần nhất của từng bài — bài trong chiến dịch được cập nhật dần mỗi lần quét lại.">i</button>
   </div>
   <div id="top-bai"></div>
 </section>

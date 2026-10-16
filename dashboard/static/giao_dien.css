@@ -39,6 +39,13 @@
   --cam: #fba94c; --cam-2: #f08a1c; --cam-nhat: #fff1e6; --cam-chu: #c2410c;
   --ngoc: #2cc3c9; --ngoc-2: #129ca3; --ngoc-nhat: #e0f6f7; --ngoc-chu: #0b6f78;
   --xam-nhat: #eef1f5; --xam-chu: #475569;
+  /* nền tảng: MỘT màu mỗi nền tảng cho cả dashboard (ô biểu tượng, thanh, nhãn) — thêm nền tảng =
+     thêm một token ở đây + một dòng trong bảng NEN_TANG của chi_so.js. *-chu: màu glyph trên ô. */
+  --nt-tiktok: #111827; --nt-tiktok-chu: #ffffff;
+  --nt-facebook: #1877f2;
+  --nt-instagram: #d62976;
+  --nt-youtube: #e62117;
+  --nt-threads: #3f3f46; --nt-threads-chu: #ffffff;
   --bong: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .05);
   --bong-noi: 0 12px 32px rgba(16, 24, 40, .14), 0 2px 6px rgba(16, 24, 40, .08);
   --bo: 12px;
@@ -82,6 +89,8 @@
     --ngoc-nhat: #0f3036; --ngoc-chu: #6fdde3;
     --xam-nhat: #222b40; --xam-chu: #b4bdd3;
     --tieu-de: #c9d6ff;
+    --nt-tiktok: #e8edf8; --nt-tiktok-chu: #0b1120;
+    --nt-threads: #c4c4cc; --nt-threads-chu: #0b1120;
     --bong: none;
     --bong-noi: 0 12px 32px rgba(0, 0, 0, .55), 0 2px 6px rgba(0, 0, 0, .4);
   }
@@ -159,12 +168,12 @@ main.khung { padding-top: 22px; padding-bottom: 28px; }
 @media (max-width: 900px) { .luoi--2, .luoi--3 { grid-template-columns: minmax(0, 1fr); } }
 
 /* ─── đầu mục có số tròn (1, 2, 3…) — như mẫu; 17/10: một màu, nền nhạt (bớt màu cạnh tranh) ─── */
-.muc { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; margin-bottom: 14px; min-width: 0; }
+.muc { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; margin-bottom: 12px; min-width: 0; min-height: 30px; }
 .muc__so {
   display: inline-flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px;
   border-radius: 50%; background: var(--nhan-nen); color: var(--nhan-dam); font-weight: 750; font-size: 13px; line-height: 1;
 }
-.muc__ten { margin: 0; font-size: 17px; font-weight: 750; color: var(--tieu-de); letter-spacing: -.01em; }
+.muc__ten { margin: 0; font-size: 16px; line-height: 1.4; font-weight: 750; color: var(--tieu-de); }
 .muc__phai { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .muc__phu { font-size: 12.5px; color: var(--chu-mo); }
 
@@ -201,10 +210,9 @@ main.khung { padding-top: 22px; padding-bottom: 28px; }
   color: var(--chu); font-variant-numeric: tabular-nums; white-space: nowrap; margin-top: 2px;
 }
 .kpi__phu { font-size: 12.5px; line-height: 1.35; font-weight: 600; color: var(--chu-phu); margin-top: 1px; }
-.kpi__doi { font-size: 12.5px; line-height: 1.4; color: var(--chu-mo); margin-top: 2px; }
-.kpi__doi .tang { color: var(--tot); font-weight: 650; }
-.kpi__ky { white-space: nowrap; }
-.kpi__doi .giam { color: var(--loi); font-weight: 650; }
+.kpi__doi { font-size: 12.5px; line-height: 1.4; font-weight: 650; color: var(--chu-mo); margin-top: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kpi__doi--tang { color: var(--tot); }
+.kpi__doi--giam { color: var(--loi); }
 
 /* hàng thẻ KPI dùng chung các trang phụ (Nguồn, Lịch quét, BigQuery, Người xem) */
 .luoi-kpi { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
@@ -248,15 +256,11 @@ tbody tr:hover > td, tbody tr:hover > th { background: color-mix(in srgb, var(--
 .the--canh { background: var(--canh-nen); color: var(--canh); }
 .the--cham::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 /* nhãn nền tảng: tô nhạt theo màu thương hiệu */
-.the--nt-facebook { background: #e7f0fe; color: #0b5bd3; }
-.the--nt-tiktok { background: #e9ebf0; color: #111827; }
-.the--nt-instagram { background: #fce7f1; color: #b0215f; }
-.the--nt-youtube { background: #fde8e7; color: #b8170e; }
-@media (prefers-color-scheme: dark) {
-  .the--nt-facebook { background: #172a4a; color: #8fb8ff; }
-  .the--nt-tiktok { background: #262f44; color: #e8edf8; }
-  .the--nt-instagram { background: #3a1a2b; color: #f59ac6; }
-  .the--nt-youtube { background: #3a1a1a; color: #ff9b94; }
+.the--nt-tiktok { --nt: var(--nt-tiktok); } .the--nt-facebook { --nt: var(--nt-facebook); }
+.the--nt-instagram { --nt: var(--nt-instagram); } .the--nt-youtube { --nt: var(--nt-youtube); }
+.the--nt-threads { --nt: var(--nt-threads); }
+[class*="the--nt-"] {
+  background: color-mix(in srgb, var(--nt) 11%, var(--be-mat)); color: color-mix(in srgb, var(--nt) 78%, var(--chu));
 }
 
 /* ─── biểu mẫu ─── */
@@ -314,6 +318,7 @@ details[open] > summary { margin-bottom: 12px; }
 }
 /* 20px: đạt WCAG 2.5.8 nhờ khoảng trống quanh nút (không vùng chạm giả lòi ra ngoài khung) */
 .goi-y:hover, .goi-y[aria-expanded="true"] { color: var(--nhan); border-color: var(--nhan); }
+.goi-y--canh, .goi-y--canh:hover, .goi-y--canh[aria-expanded="true"] { color: var(--canh); border-color: color-mix(in srgb, var(--canh) 55%, transparent); background: var(--canh-nen); }
 .noi {
   position: fixed; z-index: 60; left: 0; top: 0; max-width: min(320px, calc(100vw - 24px));
   padding: 10px 12px; border-radius: 10px; background: var(--be-mat); color: var(--chu);
@@ -361,6 +366,7 @@ details[open] > summary { margin-bottom: 12px; }
 .trang-dang-nhap h1 { font-size: 22px; margin: 14px 0 8px; }
 .trang-dang-nhap p { margin: 0 0 14px; }
 .trang-dang-nhap .nut { min-width: 220px; min-height: 42px; }
+.trang-dang-nhap__nut { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .trang-dang-nhap__dau {
   display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 15px;
   color: #fff; background: linear-gradient(135deg, var(--xanh), var(--tim-2)); box-shadow: 0 10px 20px -10px rgba(45, 111, 230, .8);
@@ -406,7 +412,6 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
   .kpi__icon .bt { width: 19px; height: 19px; }
   .luoi-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .bieu-do { height: 260px; }
-  .muc__ten { font-size: 16px; }
 }
 @media (max-width: 480px) {
   .ten-trang__chu { display: none; }

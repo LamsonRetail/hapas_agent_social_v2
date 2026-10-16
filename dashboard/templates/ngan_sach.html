@@ -91,11 +91,11 @@
     </div>
     <dl class="ns-o-so">
       <div><dt>Còn trước trần</dt><dd class="ns-gia-tri">{{ d.con_lai|usd_vn }}</dd><dd class="ns-phu">USD tháng này</dd></div>
-      <div><dt>Trần dự án (dashboard)</dt><dd class="ns-gia-tri">{{ d.tran_usd_thang|usd_vn }}</dd><dd class="ns-phu">USD/tháng{% if ql %} · sửa ở dưới{% endif %}</dd></div>
-      <div><dt>Trần do platform đặt</dt>
-        {% if db.tran_platform is none %}<dd class="ns-gia-tri mo">chưa có</dd><dd class="ns-phu">chờ KDLA (platform PR #101)</dd>
-        {% else %}<dd class="ns-gia-tri">{{ db.tran_platform|usd_vn }}</dd><dd class="ns-phu">USD/tháng, cấp cửa hàng</dd>{% endif %}</div>
-      <div><dt>Theo cấu hình, 30 ngày</dt><dd class="ns-gia-tri">{{ db.thang_cau_hinh|usd_vn }}</dd><dd class="ns-phu">nguồn theo dõi, tháng trọn</dd></div>
+      <div><dt>Trần dự án (dashboard){% if ql %} <button type="button" class="goi-y" data-goi-y="Sửa ở ô “Trần tháng dự án” bên dưới.">i</button>{% endif %}</dt><dd class="ns-gia-tri">{{ d.tran_usd_thang|usd_vn }}</dd><dd class="ns-phu">USD/tháng</dd></div>
+      <div><dt>Trần do platform đặt <button type="button" class="goi-y" data-goi-y="{% if db.tran_platform is none %}Platform chưa đặt trần — chờ KDLA (platform PR #101).{% else %}Trần cấp cửa hàng do platform đặt; Mark áp trần thấp hơn giữa trần này và trần dự án.{% endif %}">i</button></dt>
+        {% if db.tran_platform is none %}<dd class="ns-gia-tri mo">chưa có</dd>
+        {% else %}<dd class="ns-gia-tri">{{ db.tran_platform|usd_vn }}</dd><dd class="ns-phu">USD/tháng</dd>{% endif %}</div>
+      <div><dt>Theo cấu hình, 30 ngày <button type="button" class="goi-y" data-goi-y="Chi phí các nguồn đang theo dõi cho một tháng trọn 30 ngày theo cấu hình hiện tại.">i</button></dt><dd class="ns-gia-tri">{{ db.thang_cau_hinh|usd_vn }}</dd><dd class="ns-phu">USD</dd></div>
     </dl>
   </div>
 
@@ -195,9 +195,9 @@
       {% set g_bl_moi = bl_moi_md if 'moi_bai' in r_bl else bl.moi_bai %}
       <tr data-nt="{{ p }}">
         <th scope="row">{{ ten }}
-          {% if p == 'facebook' %}<span class="ns-ghi{% if tk.bat and tk.so_bai > hang_so.tk_fb_toi_da %} ns-ghi--bat{% endif %}" data-o="ghi-fb">Gói Apify FREE: thực tế tối đa {{ hang_so.tk_fb_toi_da }} bài/lượt</span>
-          {% elif p == 'instagram' %}<span class="ns-ghi" data-o="ghi-ig">Chỉ từ không dấu cách ({{ dem.ig }} từ)</span>
-          {% elif p == 'youtube' %}<span class="ns-ghi">Miễn phí (API YouTube)</span>{% endif %}
+          {% if p == 'facebook' %}<button type="button" class="goi-y{% if tk.bat and tk.so_bai > hang_so.tk_fb_toi_da %} goi-y--canh{% endif %}" data-o="ghi-fb" data-goi-y="Gói Apify FREE: thực tế tối đa {{ hang_so.tk_fb_toi_da }} bài/lượt">i</button>
+          {% elif p == 'instagram' %}<button type="button" class="goi-y" data-o="ghi-ig" data-goi-y="Chỉ từ không dấu cách ({{ dem.ig }} từ)">i</button>
+          {% elif p == 'youtube' %}<button type="button" class="goi-y" data-goi-y="Miễn phí (API YouTube)">i</button>{% endif %}
         </th>
         <td class="ns-o-cong ns-ranh" data-nhan="Tìm từ khoá">
           {% if ql %}<input type="checkbox" class="ns-cong" role="switch" name="tk_{{ p }}_bat" value="1" aria-label="{{ ten }}: bật tìm theo từ khoá"{% if y_tk %} checked{% endif %}>
@@ -257,7 +257,7 @@
       <div class="ns-du-kien__thang{% if toi_da > db.tran + 1e-9 %} ns-du-kien__thang--canh{% endif %}" data-o="thang-hop">
         Cả tháng nếu mỗi lượt dùng hết: <b data-o="thang-so">{{ toi_da|usd_vn }}</b> / <span data-o="thang-tran">{{ db.tran|usd_vn }}</span> USD —
         <span data-o="thang-ket-luan" aria-live="polite">{% if toi_da > db.tran + 1e-9 %}vượt trần {{ (toi_da - db.tran)|usd_vn }} USD, Mark dừng quét khi chạm trần; {% if du_luot > 0 %}vừa trần khi ≤ {{ du_luot|usd_vn(3) }} USD/lượt.{% else %}riêng nguồn theo dõi đã chạm trần.{% endif %}{% else %}trong trần, còn dư {{ (db.tran - toi_da)|usd_vn }} USD.{% endif %}</span>
-        <div class="nho mo" data-o="thang-cong-thuc">= đã tiêu {{ d.da_tieu|usd_vn }} + nguồn {{ nguon_con|usd_vn }} + {% if co_lich %}{{ so_luot|so_vn }} lượt theo lịch{% else %}{{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày{% endif %} × {{ tong_luot|usd_vn(3) }}</div>
+        <button type="button" class="goi-y" data-o="thang-cong-thuc" data-goi-y="= đã tiêu {{ d.da_tieu|usd_vn }} + nguồn {{ nguon_con|usd_vn }} + {% if co_lich %}{{ so_luot|so_vn }} lượt theo lịch{% else %}{{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày{% endif %} × {{ tong_luot|usd_vn(3) }}">i</button>
       </div>
     </div>
     {% if ql %}

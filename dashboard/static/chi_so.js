@@ -14,7 +14,6 @@
   if (!cfg.du_an) return;
 
   var SO = new Intl.NumberFormat("vi-VN");
-  var SO_GON = new Intl.NumberFormat("vi-VN", { notation: "compact", maximumFractionDigits: 1 });
   var bieuDo = {};
   var duLieu = null;
   var henGio = null;
@@ -28,7 +27,25 @@
   var LOP_SAC = { "Tích cực": "tc", "Tiêu cực": "ti", "Trung lập": "tl", "chưa phân loại": "chua", "kênh nhà": "nha" };
   var TEN_SAC = { "Tích cực": "Tích cực", "Tiêu cực": "Tiêu cực", "Trung lập": "Trung lập",
                   "chưa phân loại": "Chưa phân loại", "kênh nhà": "Internal channel" };
-  var TEN_NT = { tiktok: "TikTok", facebook: "Facebook", youtube: "YouTube", instagram: "Instagram" };
+  // Nền tảng (17/10/2026): MỘT bảng cho tên + glyph; màu ở token CSS --nt-<mã> (giao_dien.css).
+  // Thêm nền tảng = một dòng ở đây + một token màu — huy hiệu, thanh phân bố, ô chọn tự theo.
+  var NEN_TANG = {
+    tiktok: { ten: "TikTok", glyph: [["path", { d: "M16.6 5.8A4.3 4.3 0 0 1 15.5 3h-3.1v12.4a2.6 2.6 0 1 1-1.8-2.5V9.7a5.7 5.7 0 1 0 4.9 5.6V9a7.3 7.3 0 0 0 4.3 1.4V7.3a4.3 4.3 0 0 1-3.2-1.5z" }]] },
+    facebook: { ten: "Facebook", glyph: [["path", { d: "M13.4 21v-7.6h2.6l.4-3h-3V8.5c0-.9.3-1.5 1.5-1.5h1.6V4.3a21 21 0 0 0-2.3-.1c-2.3 0-3.9 1.4-3.9 4v2.2H7.7v3h2.6V21z" }]] },
+    instagram: { ten: "Instagram", glyph: [
+      ["rect", { x: 4.5, y: 4.5, width: 15, height: 15, rx: 4.2, fill: "none", stroke: "currentColor", "stroke-width": 2.1 }],
+      ["circle", { cx: 12, cy: 12, r: 3.4, fill: "none", stroke: "currentColor", "stroke-width": 2.1 }],
+      ["circle", { cx: 16.6, cy: 7.4, r: 1.15 }]] },
+    youtube: { ten: "YouTube", glyph: [["path", { d: "M9.5 7.8v8.4l7-4.2z" }]] },
+    // Threads: glyph "@" đen như logo (vẽ nét, không tô)
+    threads: { ten: "Threads", glyph: [
+      ["circle", { cx: 12, cy: 12, r: 3.6, fill: "none", stroke: "currentColor", "stroke-width": 2.3 }],
+      ["path", { d: "M15.6 8.6v4.3a2.7 2.7 0 0 0 5.4 0V12a9 9 0 1 0-3.5 7.1", fill: "none", stroke: "currentColor",
+                 "stroke-width": 2.3, "stroke-linecap": "round" }]] }
+  };
+  var TEN_NT = {};
+  Object.keys(NEN_TANG).forEach(function (k) { TEN_NT[k] = NEN_TANG[k].ten; });
+  function mauNT(k) { return NEN_TANG[k] ? "var(--nt-" + k + ")" : "var(--chu-mo)"; }
   var TEN_LOAI_BL = { hop_le: "Hợp lệ", it_noi_dung: "Ít nội dung", spam: "Spam", trung: "Trùng lặp",
                       seeding: "Seeding", thuong_hieu: "Thương hiệu" };
   var MAU_LOAI_BL = { hop_le: "--s1", it_noi_dung: "--trung-lap", spam: "--s2", trung: "--s4",
@@ -103,10 +120,30 @@
 
   // ─── tiện ích ───
   function $(id) { return document.getElementById(id); }
+  // ─── định dạng số: MỘT bộ cho cả trang (17/10/2026) ───
+  // so: số đủ, chấm nghìn "1.234.567" (bảng, chú giải, tooltip)
+  // soThe: giá trị lớn trên thẻ / giữa vòng — từ 1 triệu gọn "35,8 tr", "1,2 tỷ" (số đủ ở title)
+  // soTruc: trục, nhãn đỉnh, số đếm trong nút — thêm "N" (nghìn) từ 10.000: "25 N", "3,2 tr"
+  // pt: % một chữ số lẻ dưới 100, từ 100 trở lên làm tròn ("245%")
   function so(n) { return n == null ? "—" : SO.format(n); }
-  function soGon(n) { return n == null ? "—" : (n >= 10000 ? SO_GON.format(n) : SO.format(n)); }
+  function soThe(n) {
+    if (n == null) return "—";
+    var a = Math.abs(n), dv = a >= 1e9 ? [1e9, " tỷ"] : a >= 1e6 ? [1e6, " tr"] : null;
+    if (!dv) return SO.format(n);
+    var x = n / dv[0];
+    return x.toLocaleString("vi-VN", { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : 1 }) + dv[1];
+  }
+  function soTruc(n) {
+    if (n == null) return "—";
+    var a = Math.abs(n);
+    if (a >= 1e6) return soThe(n);
+    if (a >= 1e4) return (n / 1e3).toLocaleString("vi-VN", { maximumFractionDigits: a >= 1e5 ? 0 : 1 }) + " N";
+    return SO.format(n);
+  }
   function pt(x) {
-    return x == null ? "—" : x.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+    if (x == null) return "—";
+    var le = Math.abs(x) >= 100 ? 0 : 1;
+    return x.toLocaleString("vi-VN", { minimumFractionDigits: le, maximumFractionDigits: le }) + "%";
   }
   function ptCua(v, tong) { return tong ? pt(Math.round(1000 * v / tong) / 10) : "—"; }
   function ngayNgan(iso) { var p = String(iso).split("-"); return p[2] + "/" + p[1]; }
@@ -206,14 +243,6 @@
     nha: [["path", { d: "M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5H15V15h-6v5.5H5.5A1.5 1.5 0 0 1 4 19z" }]],
     the_gioi: [["circle", { cx: 12, cy: 12, r: 8.5 }], ["path", { d: "M3.5 12h17M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5S9.7 5.9 12 3.5z" }]]
   };
-  var GLYPH_NT = {
-    tiktok: [["path", { d: "M16.6 5.8A4.3 4.3 0 0 1 15.5 3h-3.1v12.4a2.6 2.6 0 1 1-1.8-2.5V9.7a5.7 5.7 0 1 0 4.9 5.6V9a7.3 7.3 0 0 0 4.3 1.4V7.3a4.3 4.3 0 0 1-3.2-1.5z" }]],
-    facebook: [["path", { d: "M13.4 21v-7.6h2.6l.4-3h-3V8.5c0-.9.3-1.5 1.5-1.5h1.6V4.3a21 21 0 0 0-2.3-.1c-2.3 0-3.9 1.4-3.9 4v2.2H7.7v3h2.6V21z" }]],
-    youtube: [["path", { d: "M9.5 7.8v8.4l7-4.2z" }]],
-    instagram: [["rect", { x: 4.5, y: 4.5, width: 15, height: 15, rx: 4.2, fill: "none", stroke: "currentColor", "stroke-width": 2.1 }],
-                ["circle", { cx: 12, cy: 12, r: 3.4, fill: "none", stroke: "currentColor", "stroke-width": 2.1 }],
-                ["circle", { cx: 16.6, cy: 7.4, r: 1.15 }]]
-  };
   function dungSvg(ds, lop) {
     var s = document.createElementNS(SVG, "svg");
     s.setAttribute("viewBox", "0 0 24 24");
@@ -231,10 +260,10 @@
 
   // Huy hiệu nền tảng: ô màu thương hiệu + glyph; `coChu` thêm tên; `trangTri` = ẩn với trình đọc.
   function huyHieuNT(nt, coChu, trangTri) {
-    var co = !!GLYPH_NT[nt];
+    var co = !!NEN_TANG[nt];
     var o = tao("span", "cs-nt cs-nt--" + (co ? nt : "khac"));
     var hop = tao("span", "cs-nt__o");
-    if (co) hop.appendChild(dungSvg(GLYPH_NT[nt]));
+    if (co) hop.appendChild(dungSvg(NEN_TANG[nt].glyph));
     else hop.textContent = String(TEN_NT[nt] || nt || "?").charAt(0).toUpperCase();
     o.appendChild(hop);
     var ten = TEN_NT[nt] || nt || "?";
@@ -318,14 +347,28 @@
   }
   window.addEventListener("scroll", function () { anNoi(); }, { passive: true });
 
-  function ganGoiY(b) {
-    var chu = b.getAttribute("data-goi-y") || "";
-    var vuaHien = 0;
+  // ⓘ: chữ đọc lúc hiện (datGoiY đổi được theo số liệu); nutGoiY dựng nút từ JS (đã gắn sẵn).
+  var GOC_GOI_Y = {};                                  // chữ gốc trong HTML của ⓘ có phần động
+  function datGoiY(b, chu) {
+    if (!b) return;
+    b.setAttribute("data-goi-y", chu);
     b.setAttribute("aria-label", "Giải thích: " + chu);
+    if (noiCua === b && noi && !noi.hidden) { xoa(noi); noi.appendChild(chuNode(chu)); }
+  }
+  function nutGoiY(chu, lop) {
+    var b = tao("button", "goi-y cs-goi-y" + (lop ? " " + lop : ""), lop === "goi-y--canh" ? "!" : "i");
+    b.type = "button";
+    b.setAttribute("data-goi-y", chu);
+    ganGoiY(b);
+    return b;
+  }
+  function ganGoiY(b) {
+    var vuaHien = 0;
+    b.setAttribute("aria-label", "Giải thích: " + (b.getAttribute("data-goi-y") || ""));
     b.setAttribute("aria-expanded", "false");
     function hien() {
       vuaHien = Date.now();
-      hienNoi(b, function (o) { o.appendChild(chuNode(chu)); });
+      hienNoi(b, function (o) { o.appendChild(chuNode(b.getAttribute("data-goi-y") || "")); });
       b.setAttribute("aria-expanded", "true");
     }
     function an() { anNoi(b); b.setAttribute("aria-expanded", "false"); }
@@ -398,7 +441,7 @@
   }
   function trucSo(m) {
     return { type: "value", splitLine: { lineStyle: { color: m.ke, type: [4, 4] } }, minInterval: 1,
-             axisLabel: { color: m.mo, fontSize: 11, formatter: function (v) { return soThe(v); } } };
+             axisLabel: { color: m.mo, fontSize: 11, formatter: function (v) { return soTruc(v); } } };
   }
 
   // Bấm vào biểu đồ → ngăn chi tiết. Mỗi biểu đồ đặt hàm ở `xuLyBam[id]` (bấm vào mảng/cột) hoặc
@@ -512,22 +555,36 @@
     o.appendChild(dungSvg(BIEU_TUONG[ten], "bt"));
     return o;
   }
-  // "▲ 12,3%" xanh / "▼ 4,1%" đỏ / "■ 0,0%" — mũi tên đã nói chiều nên không thêm dấu +/−.
-  function dongSoSanh(d, doiPt) {
-    var lop = doiPt > 0 ? "tang" : doiPt < 0 ? "giam" : "";
+  // ─── so với kỳ trước: MỘT luật cho mọi thẻ (17/10/2026 — "▲ 13.950,0%" vô nghĩa khi kỳ trước gần
+  // như trống). Kỳ trước 0 / không so được (lọc tương tác, bị cắt) → không hiện gì. Tăng quá 999%:
+  // kỳ trước dưới CO_SO_NHO → "▲ mới", không thì "▲ ×N" (gấp N lần). Còn lại ▲/▼/■ + pt() (từ 100%
+  // làm tròn). ▲ xanh · ▼ đỏ · ■ xám. Kỳ so sánh nói một lần ở ⓘ cạnh khoảng ngày (#ky-truoc); title
+  // của từng nhãn ghi "kỳ trước → kỳ này".
+  var CO_SO_NHO = 10, kyTruocChu = "";
+  function nhanDoi(nay, truoc, doiPt) {
+    if (doiPt == null || !truoc) return null;
+    if (nay == null) nay = Math.round(truoc * (1 + doiPt / 100));
+    var t = "So với kỳ trước" + (kyTruocChu ? " " + kyTruocChu : "") + ": " + so(truoc) + " → " + so(nay);
+    if (doiPt > 999) {
+      if (truoc < CO_SO_NHO) return { chu: "▲ mới", lop: "tang", doc: "mới (kỳ trước gần như trống)", title: t };
+      var gap = soTruc(Math.round(nay / truoc));
+      return { chu: "▲ ×" + gap, lop: "tang", doc: "gấp " + gap + " lần kỳ trước", title: t };
+    }
+    var lop = doiPt > 0 ? "tang" : doiPt < 0 ? "giam" : "bang";
     var mui = doiPt > 0 ? "▲ " : doiPt < 0 ? "▼ " : "■ ";
-    d.appendChild(tao("span", lop, mui + pt(Math.abs(doiPt))));
-    d.appendChild(chuNode(" "));
-    d.appendChild(tao("span", "kpi__ky", "so với kỳ trước"));        // xuống dòng thì xuống cả cụm
+    var doc = (doiPt > 0 ? "tăng " + pt(doiPt) : doiPt < 0 ? "giảm " + pt(-doiPt) : "không đổi") + " so với kỳ trước";
+    return { chu: mui + pt(Math.abs(doiPt)), lop: lop, doc: doc, title: t };
   }
-  // Số trên thẻ KPI (17/10/2026, chủ dự án: "lòi cả số ra ngoài"): từ 1 triệu thì gọn "35,8 tr" /
-  // "1,2 tỷ" — số đầy đủ nằm ở title (rê chuột) và chữ ẩn cho trình đọc màn hình.
-  function soThe(n) {
-    if (n == null) return "—";
-    var a = Math.abs(n), dv = a >= 1e9 ? [1e9, " tỷ"] : a >= 1e6 ? [1e6, " tr"] : null;
-    if (!dv) return SO.format(n);
-    var x = n / dv[0];
-    return x.toLocaleString("vi-VN", { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : 1 }) + dv[1];
+  function oDoi(nay, truoc, doiPt, the) {
+    var x = nhanDoi(nay, truoc, doiPt);
+    if (!x) return null;
+    var s = tao(the || "div", "kpi__doi kpi__doi--" + x.lop);
+    s.title = x.title;
+    var hien = tao("span", "", x.chu);
+    hien.setAttribute("aria-hidden", "true");
+    s.appendChild(hien);
+    s.appendChild(tao("span", "cs-an", x.doc));
+    return s;
   }
   function oSoThe(n, lop) {
     var s = tao("span", "kpi__so so" + (lop ? " " + lop : ""));
@@ -543,24 +600,17 @@
     }
     return s;
   }
-  // Dòng so sánh: chỉ khi kỳ trước có số (kỳ trước 0 / chưa có dữ liệu thì để trống — "kỳ trước 0"
-  // dưới mọi thẻ chỉ là nhiễu; một dòng chung dưới hàng KPI nói kỳ trước chưa có dữ liệu).
-  function dongDoi(d, doi, lech) {
-    if (lech) { d.textContent = "không so kỳ trước"; return; }
-    if (!doi) return;
-    if (doi.doi_pt != null) dongSoSanh(d, doi.doi_pt);
-    else if (doi.truoc) d.textContent = "kỳ trước " + soThe(doi.truoc);   // không so % được (bị cắt)
-  }
-  function theKpi(nhan, n, doi, phu, mau, bt, lech) {
+  // Thẻ KPI: chỉ nhãn + số + ▲/▼ (17/10/2026: "ghi chú để chữ i, không tràn ra giao diện").
+  function theKpi(nhan, n, doi, mau, bt, goiY) {
     var o = tao("div", "the-khoi kpi kpi--" + (mau || "xanh"));
     o.appendChild(oBieuTuong(bt || "tai_lieu"));
     var than = tao("div", "kpi__than");
-    than.appendChild(tao("div", "kpi__nhan", nhan));
+    var nh = tao("div", "kpi__nhan", nhan);
+    if (goiY) { nh.appendChild(chuNode(" ")); nh.appendChild(nutGoiY(goiY)); }
+    than.appendChild(nh);
     than.appendChild(oSoThe(n));
-    if (phu) than.appendChild(tao("div", "kpi__phu", phu));          // số phụ: luôn dòng riêng
-    var d = tao("div", "kpi__doi");
-    dongDoi(d, doi, lech && !!doi);
-    if (d.childNodes.length) than.appendChild(d);
+    var d = doi ? oDoi(doi.nay, doi.truoc, doi.doi_pt) : null;
+    if (d) than.appendChild(d);
     o.appendChild(than);
     return o;
   }
@@ -590,15 +640,17 @@
     // Lọc theo mức tương tác: tương tác cộng dồn theo tuổi bài -> so với kỳ trước lệch, không hiện.
     var lech = d.so_sanh_lech === "tuong_tac", ss = lech ? {} : (d.so_sanh || {});
     xoa(el);
-    el.appendChild(theKpi("Bài đăng", k.bai, ss.bai, null, "hong", "tai_lieu", lech));
-    el.appendChild(theKpi("Thảo luận", k.thao_luan, ss.thao_luan, null, "tim", "tro_chuyen", lech));
-    el.appendChild(theKpi("Nguồn có bài", k.nguon_co_bai, ss.nguon_co_bai, null, "xanh", "phat_song", lech));
+    el.appendChild(theKpi("Bài đăng", k.bai, ss.bai, "hong", "tai_lieu"));
+    el.appendChild(theKpi("Thảo luận", k.thao_luan, ss.thao_luan, "tim", "tro_chuyen"));
+    el.appendChild(theKpi("Nguồn có bài", k.nguon_co_bai, ss.nguon_co_bai, "xanh", "phat_song"));
     if (k.bai_khu_trung != null && k.bai_khu_trung < k.bai) {
-      el.appendChild(theKpi("Bài (khử trùng nội dung)", k.bai_khu_trung, null,
-                            so(k.bai - k.bai_khu_trung) + " bài đăng lại cùng nội dung", "xam", "ban_sao"));
+      el.appendChild(theKpi("Bài gốc", k.bai_khu_trung, null, "xam", "ban_sao",
+                            "Bài đăng sau khi gộp các bản đăng lại cùng nội dung (khử trùng): " +
+                            so(k.bai - k.bai_khu_trung) + " trong " + so(k.bai) + " bài là bản đăng lại."));
     }
-    el.appendChild(theKpi("Lượt xem", k.xem, ss.xem, null, "la", "mat", lech));
-    el.appendChild(theKpi("Tương tác", k.tuong_tac, ss.tuong_tac, null, "cam", "tim_dac", lech));
+    var LAN_QUET = "Cộng từ số của từng bài tính tới lần quét gần nhất — bài trong chiến dịch được cập nhật dần mỗi lần quét lại.";
+    el.appendChild(theKpi("Lượt xem", k.xem, ss.xem, "la", "mat", LAN_QUET));
+    el.appendChild(theKpi("Tương tác", k.tuong_tac, ss.tuong_tac, "cam", "tim_dac", "Thích + bình luận + chia sẻ. " + LAN_QUET));
     if (d.y_dinh_mua) el.appendChild(theYDinhKpi(d.y_dinh_mua, lech));
     el.appendChild(theSacKpi(k));
     chiaCotKpi();
@@ -617,15 +669,15 @@
     var than = tao("span", "kpi__than");
     than.appendChild(tao("span", "kpi__nhan", "Ý định mua"));
     than.appendChild(oSoThe(y.so));
-    var phu = y.pt == null ? "chưa có bình luận sạch" : pt(y.pt) + " bình luận sạch";
+    var phu = y.pt == null ? "—" : pt(y.pt) + " bình luận sạch";
     than.appendChild(tao("span", "kpi__phu", phu));
-    var d = tao("span", "kpi__doi");
-    dongDoi(d, y, lech);
-    if (d.childNodes.length) than.appendChild(d);
+    var x = lech ? null : nhanDoi(y.so, y.truoc, y.doi_pt);
+    var d = lech ? null : oDoi(y.so, y.truoc, y.doi_pt, "span");
+    if (d) than.appendChild(d);
     o.appendChild(than);
-    o.title = phu + (d.textContent ? " · " + d.textContent : "");
-    o.setAttribute("aria-label", "Ý định mua: " + so(y.so) + " bình luận, " + phu +
-                   (d.textContent ? ", " + d.textContent : "") + " — bấm để xem");
+    o.title = "Bình luận hỏi giá / muốn mua · " + (y.pt == null ? "chưa có bình luận sạch" : phu) + (x ? " · " + x.title : "");
+    o.setAttribute("aria-label", "Ý định mua: " + so(y.so) + " bình luận, " + (y.pt == null ? "chưa có bình luận sạch" : phu) +
+                   (x ? ", " + x.doc : "") + " — bấm để xem");
     return o;
   }
   function moYDinh() {
@@ -637,8 +689,11 @@
     var dau = tao("div", "cs-kpi-sac__dau");
     dau.appendChild(oBieuTuong("mat_cuoi"));
     var n = tao("div", "kpi__than");
-    n.appendChild(tao("div", "kpi__nhan", "Sắc thái bài"));
-    n.appendChild(tao("div", "kpi__doi", k.bai_kenh_nha ? "không tính " + so(k.bai_kenh_nha) + " bài Internal channel" : "bài đã phân loại"));
+    var nh = tao("div", "kpi__nhan", "Sắc thái bài ");
+    var daPl = (k.tich_cuc || 0) + (k.tieu_cuc || 0) + (k.trung_lap || 0);
+    nh.appendChild(nutGoiY("Sắc thái của bài đăng; % trên " + so(daPl) + " bài đã phân loại." +
+      (k.bai_kenh_nha ? " Không tính " + so(k.bai_kenh_nha) + " bài Internal channel — bài của thương hiệu không mang sắc thái khách." : "")));
+    n.appendChild(nh);
     dau.appendChild(n);
     o.appendChild(dau);
     var phai = tao("div", "cs-kpi-sac__phai");
@@ -650,7 +705,7 @@
     [[TC, pt(k.tich_cuc_pt), so(k.tich_cuc) + " bài", "var(--cs-tc)"],
      [TI, pt(k.tieu_cuc_pt), so(k.tieu_cuc) + " bài", "var(--cs-ti)"],
      [TL, pt(k.trung_lap_pt), so(k.trung_lap) + " bài", "var(--cs-tl)"],
-     [CHUA, so(k.chua_phan_loai), k.bai_kenh_nha ? "+ " + so(k.bai_kenh_nha) + " bài Internal channel" : "bài", "var(--cs-chua)"]
+     [CHUA, so(k.chua_phan_loai), "bài", "var(--cs-chua)"]
     ].forEach(function (x) {
       var b = nut("", "cs-kpi-sac__o", function () { moChiTiet("bai", { ct_sac_thai: x[0] }, "sắc thái " + TEN_SAC[x[0]]); });
       var nh = tao("span", "kpi__nhan");
@@ -703,8 +758,11 @@
       areaStyle: { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [
         { offset: 0, color: hexRgba(m.chinh, 0.24) }, { offset: 1, color: hexRgba(m.chinh, 0.02) }]) },
       markPoint: imax >= 0 ? {
-        symbol: "pin", symbolSize: 40, itemStyle: { color: m.chinh },
-        label: { color: "#fff", fontSize: 10, fontWeight: 600, formatter: function (p) { return p.value >= 1e6 ? soThe(p.value) : soGon(p.value); } },
+        // nhãn đỉnh: viên chữ phía trên điểm (ghim cũ cắt chữ dài như "11,7 tr")
+        symbol: "circle", symbolSize: 9, itemStyle: { color: m.chinh, borderColor: m.mat, borderWidth: 2 },
+        label: { show: true, position: "top", distance: 8, color: m.chu, fontSize: 11, fontWeight: 700, fontFamily: m.phong,
+                 backgroundColor: m.mat, borderColor: m.chinh, borderWidth: 1, borderRadius: 5, padding: [3, 7],
+                 formatter: function (p) { return soTruc(p.value); } },
         data: [{ type: "max", name: "Đỉnh" }] } : undefined
     }];
     ve("bd-xu-huong", o);
@@ -778,9 +836,12 @@
       b.setAttribute("aria-label", TEN_SAC[r[0]] + ": " + so(r[1]) + " " + x.don + " — bấm để xem");
       cg.appendChild(b);
     });
-    $("ghi-chu-sac-thai").textContent = !tong ? "Chưa có dữ liệu sắc thái." : laBl
-      ? "% trên " + so(daPhan) + " bình luận hợp lệ đã phân loại"
-      : "% trên " + so(daPhan) + " bài đã phân loại";
+    var gy = $("sac-goi-y");
+    if (gy) {
+      if (!GOC_GOI_Y.sac) GOC_GOI_Y.sac = gy.getAttribute("data-goi-y") || "";
+      datGoiY(gy, GOC_GOI_Y.sac + (!tong ? " Chưa có dữ liệu sắc thái." : " % trên " + so(daPhan) +
+        (laBl ? " bình luận hợp lệ đã phân loại." : " bài đã phân loại.")));
+    }
   }
 
   // ─── sắc thái theo thời gian (đường kiểu Kompa) ───
@@ -838,8 +899,14 @@
     xoa(tom);
     if (y.sach) {
       tom.appendChild(tao("b", "", so(y.so)));
-      tom.appendChild(chuNode(" / " + so(y.sach) + " bình luận sạch hỏi giá, muốn mua (" + pt(y.pt) + ")"));
-      if (y.so) tom.appendChild(chuNode(" · " + so(y.theo_chu_de) + " theo chủ đề AI, " + so(y.theo_cau) + " theo câu hỏi"));
+      tom.appendChild(chuNode(" / " + so(y.sach) + " bình luận sạch · "));
+      tom.appendChild(tao("b", "", pt(y.pt)));
+      if (y.so) {
+        tom.appendChild(chuNode(" · AI "));
+        tom.appendChild(tao("b", "", so(y.theo_chu_de)));
+        tom.appendChild(chuNode(" · câu hỏi "));
+        tom.appendChild(tao("b", "", so(y.theo_cau)));
+      }
     } else {
       tom.textContent = "Chưa có bình luận hợp lệ trong khoảng này.";
     }
@@ -1059,18 +1126,19 @@
     var tom = $("tk-tom-tat");
     xoa(tom);
     if (may.ds.length) {
-      tom.appendChild(chuNode("Top "));
       tom.appendChild(tao("b", "", so(may.ds.length)));
       tom.appendChild(chuNode(" từ khoá"));
       if (d.tu_khoa_tong != null) {
-        tom.appendChild(chuNode(" trên tổng "));
+        tom.appendChild(chuNode(" · "));
         tom.appendChild(tao("b", "", so(d.tu_khoa_tong)));
         tom.appendChild(chuNode(" thảo luận"));
       }
     } else {
       tom.textContent = " ";
     }
-    if (d.tu_khoa_an_mg) tom.appendChild(chuNode(" · đã ẩn " + so(d.tu_khoa_an_mg) + " bình luận minigame"));
+    // số bình luận minigame đang ẩn: nằm ngay ở công tắc (đúng chỗ người xem cần)
+    var mgSo = $("tk-mg-so");
+    if (mgSo) { mgSo.textContent = d.tu_khoa_an_mg ? "ẩn " + so(d.tu_khoa_an_mg) : ""; mgSo.hidden = !d.tu_khoa_an_mg; }
     var mg = $("tk-gom-mg");
     if (mg) mg.checked = G.gom_mg === "1";
     veKieuTu();
@@ -1164,7 +1232,10 @@
     }
     xep();
     for (var lanXep = 0; an && lanXep < 4; lanXep++) { coChu(0.88); xep(); }
-    if (an) $("tk-ghi-chu").textContent = "Hiện " + (ds.length - an) + "/" + ds.length + " từ — xem đủ ở dạng Bảng.";
+    if (an) {
+      $("tk-ghi-chu").textContent = (ds.length - an) + "/" + ds.length + " từ";
+      $("tk-ghi-chu").title = "Mây chỉ vừa " + (ds.length - an) + " từ — xem đủ " + ds.length + " từ ở dạng Bảng.";
+    }
     if (window.requestAnimationFrame && !giamDong) {
       window.requestAnimationFrame(function () { el.classList.add("cs-may--san"); });
     } else {
@@ -1220,8 +1291,10 @@
     });
   }
   function vePhanBo(d) {
-    dsThanh($("nen-tang"), d.nen_tang || [], function (x) { return huyHieuNT(x.nen_tang, false, true); },
-            function (x) { moChiTiet("bai", { ct_nen_tang: x.nen_tang }, x.ten); });
+    var nt = (d.nen_tang || []).map(function (x) { return Object.assign({}, x, { ten: TEN_NT[x.nen_tang] || x.ten }); });
+    dsThanh($("nen-tang"), nt, function (x) { return huyHieuNT(x.nen_tang, false, true); },
+            function (x) { moChiTiet("bai", { ct_nen_tang: x.nen_tang }, x.ten); },
+            function (x) { return mauNT(x.nen_tang); });
     // Màu đi theo loại (cùng màu ô "Loại" ở bảng Nguồn nổi bật; Internal channel tím như khối 2).
     dsThanh($("loai-nguon"), d.loai_nguon || [], function (x) {
       var c = tao("span", "cs-o-mau");
@@ -1272,7 +1345,7 @@
         if (t) t.focus();
       });
       b.appendChild(huyHieuNT(g.nen_tang, false, true));
-      b.appendChild(chuNode(g.ten_nen_tang + " · " + so(g.so_nguon)));
+      b.appendChild(chuNode((TEN_NT[g.nen_tang] || g.ten_nen_tang) + " · " + so(g.so_nguon)));
       b.setAttribute("role", "tab");
       b.setAttribute("aria-selected", g.nen_tang === nenTangChon ? "true" : "false");
       tabs.appendChild(b);
@@ -1884,6 +1957,7 @@
     if (r.chu_de) nh.appendChild(chip(r.chu_de, "chu-de"));
     o.appendChild(nh);
     var sl = tao("div", "cs-bai__so");
+    var SO_LIEU_BAI = "Số xem / thích / chia sẻ / bình luận tính tới lần quét gần nhất của từng bài — bài trong chiến dịch được cập nhật dần mỗi lần quét lại.";
     var tl = tao("span", "");
     tl.appendChild(tao("b", "", so(r.thao_luan)));
     tl.appendChild(chuNode(" thảo luận"));
@@ -1892,6 +1966,7 @@
     sl.appendChild(soLieu("mat", r.xem, "lượt xem"));
     sl.appendChild(soLieu("tim", r.thich, "lượt thích"));
     sl.appendChild(soLieu("chia", r.chia_se, "lượt chia sẻ"));
+    sl.appendChild(nutGoiY(SO_LIEU_BAI));                // số của bài: tính tới lần quét gần nhất
     o.appendChild(sl);
     var hd = tao("div", "cs-bai__hd");
     if (urlHopLe(r.link)) hd.appendChild(linkMo(r.link, "Mở bài gốc"));
@@ -2176,6 +2251,7 @@
     if (k === "chu_de") return v === CHUA ? "Chưa phân loại" : v;
     if (k === "tuong_tac") return "từ " + SO.format(+v);
     if (k === "q") return "“" + v + "”";
+    if (k === "nen_tang" && TEN_NT[v]) return TEN_NT[v];      // tên nền tảng: bảng NEN_TANG
     return (NHAN[k] || {})[v] || v;
   }
   function moTaChieu(k) {
@@ -2210,7 +2286,7 @@
       b.appendChild(chuNode(NHAN.pham_vi[gt]));
       if (dem && !dangDoi) {
         var n = gt === "tat_ca" ? (dem.kenh_nha || 0) + (dem.ben_ngoai || 0) : dem[gt] || 0;
-        b.appendChild(tao("span", "cs-phan__so", soGon(n)));
+        b.appendChild(tao("span", "cs-phan__so", soTruc(n)));
         b.title = NHAN.pham_vi[gt] + ": " + so(n) + " bài (theo các bộ lọc khác)";
       }
       b.setAttribute("aria-pressed", G.pham_vi === gt ? "true" : "false");
@@ -2335,7 +2411,7 @@
       ds.sort(function (a, b) { return thu[a.nhom] - thu[b.nhom] || a.i - b.i; });
     } else {
       if (!NHIEU[k]) ds.push({ gt: "", ten: "Tất cả", so: null });
-      Object.keys(NHAN[k] || {}).forEach(function (gt) { ds.push({ gt: gt, ten: NHAN[k][gt], so: (dem[k] || {})[gt] || 0 }); });
+      Object.keys(NHAN[k] || {}).forEach(function (gt) { ds.push({ gt: gt, ten: tenG(k, gt), so: (dem[k] || {})[gt] || 0 }); });
     }
     return ds;
   }
@@ -2398,8 +2474,8 @@
       if (!co) dsEl.appendChild(tao("div", "cs-pop__trong", q ? "Không tìm thấy “" + o.loc.trim() + "”." : "Chưa có giá trị nào trong khoảng này."));
     };
     o.veDs();
-    if (GHI_CHU_G[t.k]) pop.appendChild(tao("p", "cs-pop__ghi", GHI_CHU_G[t.k]));
     var chan = tao("div", "cs-pop__chan");
+    if (GHI_CHU_G[t.k]) chan.appendChild(nutGoiY(GHI_CHU_G[t.k]));
     if (NHIEU[t.k]) {
       chan.appendChild(nut("Bỏ chọn", "cs-nut-chu", function () {
         var th = {};
@@ -2508,7 +2584,7 @@
     }
     if (G.y_dinh) gy.push("Ý định mua chỉ lọc bình luận; phần bài không đổi.");
     var g = $("loc-goi-y");
-    g.textContent = gy.join(" ");
+    datGoiY(g, gy.join(" "));
     g.hidden = !gy.length;
   }
   function baoLoiLoc(chu) {
@@ -2568,16 +2644,17 @@
     dau.appendChild(ic);
     var ten = tao("span", "cs-nn__ten-khoi");
     ten.appendChild(tao("span", "cs-nn__ten", nha ? "Internal channel" : "External channel"));
-    ten.appendChild(tao("span", "cs-nn__phu", nha ? "kênh của thương hiệu" : "KOL · trang · nhóm · báo · từ khoá"));
     dau.appendChild(ten);
     dau.appendChild(tao("span", "cs-nn__hd", dang ? "Đang lọc · bỏ" : "Xem riêng →"));
     o.appendChild(dau);
     var s3 = tao("span", "cs-nn__so");
-    [["Bài", so(x.bai)], ["Thảo luận", so(x.thao_luan)], ["Tỷ trọng", tong ? ptCua(x.thao_luan, tong) : "—"],
-     ["Bình luận đã cào", so(x.bl)]].forEach(function (c) {
+    [["Bài", x.bai], ["Thảo luận", x.thao_luan], ["Tỷ trọng", tong ? ptCua(x.thao_luan, tong) : "—"],
+     ["Bình luận đã cào", x.bl]].forEach(function (c) {
       var o1 = tao("span", "cs-nn__o");
       o1.appendChild(tao("span", "cs-nn__nhan", c[0]));
-      o1.appendChild(tao("b", "so", c[1]));
+      var v = tao("b", "so", typeof c[1] === "number" ? soThe(c[1]) : c[1]);
+      if (typeof c[1] === "number" && c[1] >= 1e6) v.title = so(c[1]);
+      o1.appendChild(v);
       s3.appendChild(o1);
     });
     o.appendChild(s3);
@@ -2610,7 +2687,8 @@
       ty.appendChild(t);
     }
     var phu = soChieuDang(Object.assign({}, G, { pham_vi: "tat_ca" }));
-    $("nn-phu").textContent = "Tỷ trọng thảo luận" + (phu ? " · theo " + phu + " bộ lọc khác" : "");
+    $("nn-phu").textContent = "Tỷ trọng thảo luận";
+    $("nn-phu").title = phu ? "Theo " + phu + " bộ lọc khác đang chọn" : "Toàn bộ dữ liệu kỳ này";
   }
 
   // ─── đổi bộ lọc: URL, chờ (khung xương), một AbortController cho mọi khối ───
@@ -2632,7 +2710,7 @@
   // Số liệu đang hiện là của bộ lọc TRƯỚC (lượt đổi lỗi): mờ + `inert` các khối (không bấm xem
   // chi tiết được — tránh trộn bộ lọc mới với số cũ), tới khi tải được.
   var soCu = false;
-  var CHON_KHOI_CU = "#cs-trang > .luoi, #cs-trang > .cs-ky-truoc, " +
+  var CHON_KHOI_CU = "#cs-trang > .luoi, " +
     "#cs-trang > section.the-khoi:not(.cs-bo-loc):not(#khoi-bl), #khoi-bl .cs-bl-ben";
   function khoiCu(cu) {
     soCu = cu;
@@ -2801,6 +2879,7 @@
   function veTatCa() {
     if (!duLieu) return;
     var d = duLieu, m = mau();
+    kyTruocChu = ngayDu(d.khoang.ky_truoc.tu) + " – " + ngayDu(d.khoang.ky_truoc.den);
     chay("bộ lọc", veThanhLocChung);
     chay("internal vs external channel", function () { veNhaNgoai(d); });
     chay("KPI", function () { veKpi(d); });
@@ -2814,15 +2893,15 @@
     chay("nguồn nổi bật", function () { veTopNguon(d); });
     chay("bài nổi bật", function () { veTopBai(d); });
     chay("bình luận", function () { veBinhLuan(d); });
-    // Ghi chú tối thiểu (16/10/2026): một dòng ngắn; lý do dài nằm ở title (rê chuột).
-    var kyTruoc = ngayDu(d.khoang.ky_truoc.tu) + " – " + ngayDu(d.khoang.ky_truoc.den);
-    $("ky-truoc").textContent = d.so_sanh_lech === "tuong_tac"
-      ? "Lọc theo tương tác: không so với kỳ trước (" + kyTruoc + ")"
-      : coKyTruoc(d) ? "▲/▼ so với kỳ trước: " + kyTruoc
-        : "Kỳ trước (" + kyTruoc + ") chưa có dữ liệu để so sánh";
-    $("ky-truoc").title = d.so_sanh_lech === "tuong_tac"
-      ? "Tương tác cộng dồn theo tuổi bài nên bài kỳ trước luôn được lợi — không so %."
-      : "Kỳ liền trước cùng độ dài, dùng cho mọi ▲/▼ %.";
+    // Kỳ so sánh: nói MỘT lần ở ⓘ cạnh khoảng ngày (17/10/2026), thẻ KPI chỉ còn "▲ x%".
+    var kt = $("ky-truoc");
+    if (kt) {
+      if (GOC_GOI_Y.ky == null) GOC_GOI_Y.ky = kt.getAttribute("data-goi-y") || "";
+      datGoiY(kt, GOC_GOI_Y.ky + " " + (d.so_sanh_lech === "tuong_tac"
+        ? "Đang lọc theo mức tương tác: không so với kỳ trước — tương tác cộng dồn theo tuổi bài nên bài kỳ trước (" + kyTruocChu + ") luôn được lợi."
+        : coKyTruoc(d) ? "▲/▼ trên thẻ: so với kỳ trước " + kyTruocChu + ". Tăng quá 999% ghi “×N” (gấp N lần); kỳ trước gần như trống ghi “mới”."
+          : "Kỳ trước (" + kyTruocChu + ") chưa có dữ liệu để so sánh."));
+    }
     $("canh-bao").hidden = !d.bi_cat;
     $("canh-bao-bl").hidden = !d.bl_bi_cat;
     $("chua-tron").hidden = !d.ngay_cuoi_chua_tron;
