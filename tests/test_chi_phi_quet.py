@@ -99,7 +99,7 @@ def test_chi_youtube_thi_mien_phi():
 
 def test_du_phong_tiktok_chia_limit_theo_hashtag(monkeypatch):
     goi = []
-    monkeypatch.setattr(A, "_call", lambda actor, payload, limit, mem=None:
+    monkeypatch.setattr(A, "_call", lambda actor, payload, limit, mem=None, **k:
                         goi.append((payload, limit)) or [])
     A._fetch_tiktok_fallback(["xuhuong", "trend", "viral", "fyp", "tiktokvn"], 100)
     payload, _ = goi[0]

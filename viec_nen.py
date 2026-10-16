@@ -618,6 +618,9 @@ class Viec:
     def run_ids(self) -> list[str]:
         with self._khoa:
             ids = [ph["run_id"] for _, ph in self.cac_phan() if ph.get("run_id")]
+            # Phần đi qua bộ chuyển nhiều yêu cầu (`tiktok_api`, 16/10/2026): MỘT phần nhiều
+            # run, id nằm ở `run_phu` — vẫn phải cộng vào tiền thật của việc.
+            ids += [r for _, ph in self.cac_phan() for r in ph.get("run_phu") or [] if r]
             return list(dict.fromkeys(ids + list(self.d.get("run_muon") or [])))
 
     def _tinh(self) -> dict:

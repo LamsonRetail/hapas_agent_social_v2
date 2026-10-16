@@ -280,6 +280,38 @@ def bai_youtube_can_lam_moi(ma: str, ngay: int = 14, toi_da: int = 200) -> list[
             "ORDER BY dang_luc DESC LIMIT %s", (ma, ngay, _TZ, _TZ, toi_da)).fetchall()
 
 
+def khoa_da_co(ma: str, khoa: list[str]) -> set[str]:
+    """Khoá bài nào trong `khoa` đã có trong kho của dự án (tìm theo từ khoá: bài đã biết thì
+    chỉ cập nhật số liệu, không lọc/AI lại — `theo_doi_api.tach_da_biet`)."""
+    if not khoa:
+        return set()
+    with ket_noi() as c:
+        return {r["khoa"] for r in c.execute(
+            "SELECT khoa FROM bai WHERE du_an = %s AND khoa = ANY(%s)",
+            (ma, list(khoa))).fetchall()}
+
+
+def bai_can_lam_moi(ma: str, nen_tang: str, tu, toi_da: int) -> list[dict]:
+    """Bài của nền tảng đăng từ `tu`, CHƯA cập nhật số hôm nay (giờ VN), nhiều tương tác nhất
+    trước — làm mới số liệu theo link (`theo_doi_api.lam_moi_tiktok`)."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT khoa, link FROM bai WHERE du_an = %s AND nen_tang = %s AND link <> '' AND "
+            "dang_luc >= %s AND "
+            "cap_nhat_cuoi < (date_trunc('day', now() AT TIME ZONE %s) AT TIME ZONE %s) "
+            "ORDER BY COALESCE(thich, 0) + COALESCE(binh_luan, 0) + COALESCE(chia_se, 0) DESC, "
+            "COALESCE(xem, 0) DESC LIMIT %s",
+            (ma, nen_tang, tu, _TZ, _TZ, toi_da)).fetchall()
+
+
+def lich_chien_dich(ma: str) -> list[dict]:
+    """Mọi lịch kiểu chiến dịch của dự án (bật hay tắt) — nới phạm vi theo dõi theo khung
+    chiến dịch (`theo_doi_api.pham_vi`)."""
+    with ket_noi() as c:
+        return c.execute(f"SELECT {_COT_LICH} FROM lich_quet WHERE du_an = %s AND "
+                         "kieu = 'chien_dich' ORDER BY id", (ma,)).fetchall()
+
+
 def co_bai_tu_khoa(ma: str) -> bool:
     """Dự án đã từng có bài tìm theo từ khoá chưa (lần đầu thì lùi xa hơn)."""
     with ket_noi() as c:

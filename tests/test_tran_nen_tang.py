@@ -194,18 +194,20 @@ def test_handle_tat_het_thi_tu_choi_khong_goi_apify(cau_hinh, monkeypatch):
 
 
 def test_handle_bao_tran_usd_rieng_khi_trui(cau_hinh, chay):
-    cau_hinh({"tran_usd_tiktok": 0.1})
-    kq, _ = chay(platforms=["tiktok"], limit=100)       # ~0,3 USD > 0,1
-    assert "trần console của TikTok là 0,1 USD/lượt" in kq["tran_rieng_rang_buoc"]
-    assert "Trần riêng: trần console của TikTok là 0,1 USD/lượt" in kq["note"]
+    # TikTok API (16/10/2026) chỉ ~0,0002 USD/video: ≤500 video không chạm sàn trần 0,1 USD
+    # nữa — thử bằng Facebook (0,00259/bài).
+    cau_hinh({"tran_usd_facebook": 0.1})
+    kq, _ = chay(platforms=["facebook"], limit=100)     # ~0,26 USD > 0,1
+    assert "trần console của Facebook là 0,1 USD/lượt" in kq["tran_rieng_rang_buoc"]
+    assert "Trần riêng: trần console của Facebook là 0,1 USD/lượt" in kq["note"]
 
 
 def test_uoc_tinh_tai_cho_noi_tran_rieng(cau_hinh, chay):
-    cau_hinh({"tran_bai": 300, "tran_bai_tiktok": 100, "tran_usd_tiktok": 0.1})
-    kq, nhan = chay(platforms=["tiktok"], limit=400, chi_uoc_tinh=True)
+    cau_hinh({"tran_bai": 300, "tran_bai_tiktok": 100, "tran_usd_facebook": 0.1})
+    kq, nhan = chay(platforms=["tiktok", "facebook"], limit=400, chi_uoc_tinh=True)
     assert not nhan and kq["chi_uoc_tinh"] and kq["se_chay_nen"] is False
     assert "đang trói: trần console của TikTok là 100 bài" in kq["note"]
-    assert "trần console của TikTok là 0,1 USD/lượt" in kq["note"]
+    assert "trần console của Facebook là 0,1 USD/lượt" in kq["note"]
 
 
 # ───────────────────────────── việc nền ─────────────────────────────

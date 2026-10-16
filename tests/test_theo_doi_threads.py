@@ -182,8 +182,9 @@ def test_tim_tu_khoa_threads_phieu_moc_de_xuat_va_tien(mo):
                                                                      "nguoi_mau_b": 9}
     f = tk["pheu"]["threads"]
     assert (f["ve"], f["cua_so"], f["khong_nhac"], f["giu"]) == (3, 3, 1, 2)
-    assert any(c.startswith("phễu tìm Threads (30 ngày") for c in T._cau_tk(tk))
+    assert any(c.startswith("phễu tìm Threads (xin 30 ngày") for c in T._cau_tk(tk))
     assert set(T.doc_moc_tk("hapas")) == {"threads"}
+    # Run TikTok giả ở trên không mang tên actor TikTok API → sổ theo video về (0 bài = 0 USD).
     assert tk["usd"] == pytest.approx(3 * 0.0025 + 0.08)
 
 

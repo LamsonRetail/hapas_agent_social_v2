@@ -103,7 +103,24 @@ def _payload_tiktok(ten: list[str], n: int) -> dict:
 
 
 def _lay_tiktok(ten: list[str], n: int) -> dict[str, dict]:
-    return _doc_tiktok(A._call(_ACTOR["tiktok"], _payload_tiktok(ten, n), n * len(ten)))
+    """TikTok API (`tiktok_api.ho_so`, 16/10/2026: đọc được @hapas.official mà clockworks báo
+    "Profile has no videos", ~10 lần rẻ hơn) trước; tài khoản API không ra bài thì clockworks."""
+    import tiktok_api
+    raw: list = []
+    if tiktok_api.dung_api("tiktok_ho_so"):
+        try:
+            raw = tiktok_api.ho_so(ten, n)
+        except A.LoiApify as e:
+            if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
+                raise
+            raw = []
+    co_bai = {str((it.get("authorMeta") or {}).get("name") or it.get("input") or "").lower()
+              for it in raw if it.get("webVideoUrl")}
+    thieu = [t for t in ten if t.lstrip("@").lower() not in co_bai]
+    if thieu:
+        raw = [it for it in raw if it.get("webVideoUrl")] + A._call(
+            _ACTOR["tiktok"], _payload_tiktok(thieu, n), n * len(thieu))
+    return _doc_tiktok(raw)
 
 
 def _doc_tiktok(raw: list) -> dict[str, dict]:

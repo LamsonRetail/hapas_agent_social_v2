@@ -9,7 +9,7 @@ ghi run id xuống sổ việc (viec_nen) ngay khi có, dòng chuẩn hoá tràn
 tiếp được sau khi khởi động lại.
 
 Nguồn thật có giới hạn — không giấu (`chua_phu`):
-- Facebook gói FREE: 1 từ khoá, 20 bài, 1 lượt/24 giờ — quét nền cũng không vượt được.
+- Facebook gói FREE: 5 bài mỗi lượt, mỗi từ khoá một lượt, tối đa 20 bài (đo 16/10/2026).
 - Threads ~0,9 bài/giây: 10.000 bài không vừa hạn 45 phút; kế hoạch tự cắt cho vừa hạn
   và nói rõ phần không kịp.
 - YouTube: quota 100 trang search/ngày (giờ PT); việc nền chỉ dùng tới 80 trang.
@@ -258,13 +258,16 @@ def _ke_facebook(q, lim, ts, ctx) -> dict:
                 f"Facebook gói Free đã dùng lượt 24h lúc {luot[0]:%H:%M %d/%m}, mở lại lúc "
                 f"{luot[1]:%H:%M %d/%m} — việc này KHÔNG quét Facebook.")
             return ra
-        ra["phan"].append({"actor": A._ACTORS["facebook"], "tu_khoa": q[0],
-                           "limit": min(20, lim), "tu": tu, "den": den,
-                           "nhan": f"từ khoá '{q[0]}' (gói Free)"})
+        chon = A._fb_tu_free(q, lim)
+        for k in chon:
+            ra["phan"].append({"actor": A._ACTORS["facebook"], "tu_khoa": k,
+                               "limit": A._FB_FREE_MOI_LUOT, "tu": tu, "den": den,
+                               "nhan": f"từ khoá '{k}' (gói Free)"})
         ra["chua_phu"].append(
-            "Facebook gói Free: chỉ 1 từ khoá, tối đa 20 bài, 1 lượt/24 giờ — chạy nền cũng "
-            "không vượt được" + (f"; chưa quét: {', '.join(repr(x) for x in q[1:])}"
-                                 if len(q) > 1 else "")
+            f"Facebook gói Free: {A._FB_FREE_MOI_LUOT} bài mỗi lượt, tối đa "
+            f"{A._FB_FREE_TOI_DA} bài — chạy nền cũng không vượt được"
+            + (f"; chưa quét: {', '.join(repr(x) for x in q[len(chon):])}"
+               if len(q) > len(chon) else "")
             + (" (không kiểm được gói Apify, coi như Free)." if not ctx.get("goi") else "."))
         return ra
     per = math.ceil(lim / max(1, len(q)))
@@ -460,8 +463,8 @@ def _ctx_nguon(plats: list[str]) -> dict:
     ctx: dict = {}
     if "facebook" in plats:
         ctx["goi"] = A._goi_apify()
-        ctx["fb_luot"] = A._fb_luot_24h() if ctx["goi"] in ("FREE", "") and \
-            A._kiem_truoc_bat() else None
+        # Luật 1 lượt/24h của gói Free không còn (đo 16/10/2026) — không hỏi lịch sử run nữa.
+        ctx["fb_luot"] = None
     if "youtube" in plats:
         ctx["yt_con"] = A._youtube_con_trang(nen=True)
     return ctx
@@ -580,13 +583,8 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
                             A._tran_nen_tang(p, nen=nen)[:2])) for p in plats}
                if any(A._khoa_rieng(p) for p in plats) else None)
     if not nen:
-        so_luot = {p: (len(queries) if p in ("instagram", "facebook") else 1) for p in plats}
-        est_tai_cho = sum(
-            A._START_COST.get(p, 0.0) * so_luot[p]
-            + A._UNIT_COST.get(p, 0.0) * lims[p] for p in plats)
-        rieng_usd = A._cau_tran_rieng(plats, None, {
-            p: A._START_COST.get(p, 0.0) + A._UNIT_COST.get(p, 0.0) * lims[p] / so_luot[p]
-            for p in plats}, nen=False)
+        est_tai_cho, est_luot = A._uoc_tai_cho(plats, lims, queries)
+        rieng_usd = A._cau_tran_rieng(plats, None, est_luot, nen=False)
         return tool_result(
             success=True, chi_uoc_tinh=True, se_chay_nen=False, queries=queries,
             platforms=plats, limit=lims, uoc_tinh_usd=round(est_tai_cho, 2),
