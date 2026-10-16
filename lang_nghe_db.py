@@ -606,8 +606,10 @@ def ghi_ket_qua_lich(lid: int, ket_qua: dict, *, lan_chay_cuoi=None, tang_so_lan
 _SQL_BL_CHO = (
     "FROM binh_luan WHERE du_an = %s AND loai = 'hop_le' AND NOT cua_thuong_hieu AND "
     "sac_thai IS NULL AND btrim(noi_dung) <> ''")
+# Bài kênh nhà không vào hàng: dashboard không tính sắc thái/chủ đề của bài thương hiệu.
 _SQL_BAI_CHO = (
-    "FROM bai b WHERE b.du_an = %s AND (b.sac_thai IS NULL OR b.chu_de IS NULL) AND "
+    "FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id WHERE b.du_an = %s AND "
+    "(b.sac_thai IS NULL OR b.chu_de IS NULL) AND n.loai IS DISTINCT FROM 'kenh_nha' AND "
     "btrim(b.noi_dung || ' ' || COALESCE(b.hashtag, '')) <> ''")
 
 
@@ -641,21 +643,30 @@ def ghi_nhan_bl(ma: str, nhan: list[tuple]) -> int:
 
 
 def bai_cho_gan_nhan(ma: str, toi_da: int, bo: list[str] | tuple = ()) -> list[dict]:
-    """Bài chờ AI gán sắc thái/chủ đề (phân xử hết giờ/"không rõ", bài Báo & Web), mới trước."""
+    """Bài chờ AI gán sắc thái/chủ đề (phân xử hết giờ/"không rõ", bài Báo & Web), mới trước.
+    `kieu_trang` (cột của Báo & Web, schema 16/10) đưa loại trang vào prompt."""
     with ket_noi() as c:
         return c.execute(
             "SELECT b.khoa, b.nen_tang, b.tai_khoan, b.tac_gia, b.noi_dung, b.hashtag, "
-            "b.sac_thai, b.chu_de, (n.loai = 'kenh_nha') AS kenh_nha "
-            f"{_SQL_BAI_CHO.replace('FROM bai b', 'FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id')} "
+            f"b.kieu_trang, b.sac_thai, b.chu_de {_SQL_BAI_CHO} "
             "AND NOT (b.khoa = ANY(%s)) ORDER BY b.dang_luc DESC NULLS LAST LIMIT %s",
             (ma, list(bo), int(toi_da))).fetchall()
 
 
+#: Biểu thức SQL mốc mới của `bai.cap_nhat_cuoi` khi CHỈ đổi nhãn (gán nền, script gán lại).
+DOI_MOC_BAI_SQL = (
+    "CASE WHEN nen_tang = 'youtube' AND dang_luc >= now() - interval '14 days' AND cap_nhat_cuoi "
+    "< (date_trunc('day', now() AT TIME ZONE 'Asia/Ho_Chi_Minh') AT TIME ZONE 'Asia/Ho_Chi_Minh') "
+    "THEN cap_nhat_cuoi ELSE now() END")
+
+
 def ghi_nhan_bai(ma: str, nhan: list[tuple]) -> int:
     """`nhan` = [(khoa, noi_dung đã đọc, sắc thái, chủ đề)] — chỉ điền ô CÒN trống, cùng chữ lúc
-    đọc. `cap_nhat_cuoi` (mốc BigQuery) chỉ dời khi không làm lỡ lượt làm mới số theo ngày: bài
-    TikTok/YouTube chưa cập nhật hôm nay giữ mốc cũ (`bai_can_lam_moi` đọc mốc này), đồng bộ lấy
-    nhãn ở lần làm mới số kế tiếp. -> số bài đã ghi."""
+    đọc. -> số bài đã ghi. `cap_nhat_cuoi` = mốc đồng bộ BigQuery: dời (`DOI_MOC_BAI_SQL`) TRỪ bài
+    YouTube còn trong cửa sổ làm mới số MIỄN PHÍ hằng ngày (`bai_youtube_can_lam_moi`, ≤ 14 ngày)
+    mà hôm nay chưa đọc số — dời mốc thì lượt hôm nay bỏ qua bài đó; lượt làm mới (chắc chắn
+    trong ngày) tự dời mốc và đồng bộ mang nhãn đi. TikTok làm mới chỉ 10 bài nhiều tương tác
+    mỗi lượt (không chắc tới bài nào) nên luôn dời: cùng lắm bài đó lỡ làm mới số MỘT ngày."""
     n = 0
     if not nhan:
         return 0
@@ -663,11 +674,9 @@ def ghi_nhan_bai(ma: str, nhan: list[tuple]) -> int:
         for k, nd, s, cd in nhan:
             n += c.execute(
                 "UPDATE bai SET sac_thai = COALESCE(sac_thai, %s), chu_de = COALESCE(chu_de, %s), "
-                "cap_nhat_cuoi = CASE WHEN nen_tang NOT IN ('tiktok', 'youtube') OR cap_nhat_cuoi "
-                ">= (date_trunc('day', now() AT TIME ZONE %s) AT TIME ZONE %s) THEN now() "
-                "ELSE cap_nhat_cuoi END "
+                f"cap_nhat_cuoi = {DOI_MOC_BAI_SQL} "
                 "WHERE du_an = %s AND khoa = %s AND (sac_thai IS NULL OR chu_de IS NULL) AND "
-                "noi_dung = %s", (s, cd, _TZ, _TZ, ma, k, nd)).rowcount or 0
+                "noi_dung = %s", (s, cd, ma, k, nd)).rowcount or 0
     return n
 
 

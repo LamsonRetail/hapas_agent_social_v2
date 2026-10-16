@@ -460,8 +460,9 @@ def tien_do_gan_nhan(du_an: str) -> dict:
         cho = c.execute(
             "SELECT (SELECT count(*) FROM binh_luan WHERE du_an = %s AND loai = 'hop_le' AND NOT "
             "cua_thuong_hieu AND sac_thai IS NULL AND btrim(noi_dung) <> '') AS cho_bl, "
-            "(SELECT count(*) FROM bai WHERE du_an = %s AND (sac_thai IS NULL OR chu_de IS NULL) "
-            "AND btrim(noi_dung || ' ' || COALESCE(hashtag, '')) <> '') AS cho_bai",
+            "(SELECT count(*) FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id WHERE b.du_an = %s "
+            "AND (b.sac_thai IS NULL OR b.chu_de IS NULL) AND n.loai IS DISTINCT FROM 'kenh_nha' "
+            "AND btrim(b.noi_dung || ' ' || COALESCE(b.hashtag, '')) <> '') AS cho_bai",
             (du_an, du_an)).fetchone()
         luot = c.execute(
             "SELECT b.luot_id AS luot, count(*) FILTER (WHERE b.sac_thai IS NOT NULL) AS da, "

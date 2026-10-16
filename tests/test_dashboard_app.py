@@ -667,7 +667,8 @@ def test_api_chi_so():
     assert r.status_code == 200
     d = r.json()
     assert d["kpi"]["bai"] == 1 and d["kpi"]["thao_luan"] == 3
-    assert d["so_sanh"]["bai"] == {"nay": 1, "truoc": 1, "doi_pt": 0.0}
+    assert d["so_sanh"]["bai"] == {"nay": 1, "truoc": 1, "doi_pt": 0.0,
+                                       "moi": False}
     assert d["du_an"] == {"ma": "hapas", "ten": "HAPAS"} and d["bi_cat"] is False
     # kho đọc MỘT lần từ 0h ngày đầu kỳ trước tới 0h ngày sau kỳ này, giờ VN
     assert kho.goi_bai[-1] == ("hapas", datetime.datetime(2026, 10, 1, tzinfo=VN),

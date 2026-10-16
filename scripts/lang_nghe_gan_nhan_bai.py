@@ -13,8 +13,8 @@ An toàn (cùng cách `lang_nghe_gan_lai.py`):
   • Mặc định CHẠY THỬ: một giao dịch READ ONLY, không gọi model, không ghi; in số bài và ước tính
     số lượt gọi model (lô `phan_loai._LO_BAI`). `--thu N` gọi model cho tối đa N bài để xem trước.
   • `--ap-dung --sao-luu <tệp>`: ghi tệp hoàn tác TRƯỚC, rồi mỗi lô UPDATE trong một giao dịch, chỉ
-    sửa bài mà nhãn hiện tại còn y như lúc đọc. Bài web: `cap_nhat_cuoi = now()` (đồng bộ BigQuery
-    lấy lại); bài TikTok/YouTube giữ mốc nếu chưa làm mới số hôm nay (`lang_nghe_db.ghi_nhan_bai`).
+    sửa bài mà nhãn hiện tại còn y như lúc đọc. `cap_nhat_cuoi` dời để đồng bộ BigQuery lấy lại
+    (`lang_nghe_db.DOI_MOC_BAI_SQL`: trừ bài YouTube ≤ 14 ngày chưa làm mới số hôm nay).
   • `--hoan-tac <tệp>`: trả nhãn cũ cho bài CÒN mang đúng nhãn script đã ghi.
   • Gọi model TUẦN TỰ từng lô (quota dùng chung với bot chính).
 
@@ -45,6 +45,8 @@ from lang_nghe_gan_lai import _chuan_bi_model
 import lang_nghe_db as K
 import phan_loai as P
 
+# timezone.utc, không phải datetime.UTC: chạy được cả Python 3.10.
+UTC = datetime.timezone.utc  # noqa: UP017
 LO = P._LO_BAI
 HAN_LO_GIAY = 180.0
 COT = ("sac_thai", "chu_de")
@@ -53,13 +55,11 @@ SQL_CHI_DOC = "SET TRANSACTION READ ONLY"
 SQL_DU_AN = "/* nb:du_an */ SELECT ma, ten, tu_khoa FROM du_an WHERE ma = %s"
 SQL_BAI = (
     "/* nb:bai */ SELECT b.khoa, b.nen_tang, b.tai_khoan, b.tac_gia, b.noi_dung, b.hashtag, "
-    "b.sac_thai, b.chu_de, (n.loai = 'kenh_nha') AS kenh_nha FROM bai b "
+    "b.kieu_trang, b.sac_thai, b.chu_de, (n.loai = 'kenh_nha') AS kenh_nha FROM bai b "
     "LEFT JOIN nguon n ON n.id = b.nguon_id WHERE b.du_an = %s "
     "AND btrim(b.noi_dung || ' ' || COALESCE(b.hashtag, '')) <> '' ORDER BY b.khoa")
 SQL_SUA = (
-    "/* nb:sua */ UPDATE bai SET sac_thai = %s, chu_de = %s, cap_nhat_cuoi = CASE WHEN "
-    "nen_tang NOT IN ('tiktok', 'youtube') OR cap_nhat_cuoi >= (date_trunc('day', now() AT TIME "
-    "ZONE 'Asia/Ho_Chi_Minh') AT TIME ZONE 'Asia/Ho_Chi_Minh') THEN now() ELSE cap_nhat_cuoi END "
+    f"/* nb:sua */ UPDATE bai SET sac_thai = %s, chu_de = %s, cap_nhat_cuoi = {K.DOI_MOC_BAI_SQL} "
     "WHERE du_an = %s AND khoa = %s AND sac_thai IS NOT DISTINCT FROM %s "
     "AND chu_de IS NOT DISTINCT FROM %s")
 
@@ -192,7 +192,7 @@ def chay(ns, in_ra=print) -> int:
     with open(ns.sao_luu, "x", encoding="utf-8") as so_luu:
         so_luu.write(json.dumps({
             "loai_dong": "dau", "du_an": ma, "phien_ban": 1, "bang": "bai",
-            "luc": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+            "luc": datetime.datetime.now(UTC).isoformat(timespec="seconds"),
             "tat_ca": bool(ns.tat_ca)}, ensure_ascii=False) + "\n")
         so_luu.flush()
         _chuan_bi_model()

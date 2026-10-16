@@ -70,9 +70,9 @@ def test_so_voi_ky_truoc_cung_do_dai():
             bai("2026-09-30T23:59+07:00", bl=50)]       # ngoài cả hai kỳ
     th = CS.tong_hop(rows, D(2026, 10, 8), D(2026, 10, 14), hom_nay=D(2026, 10, 14))
     ss = th["so_sanh"]
-    assert ss["bai"] == {"nay": 2, "truoc": 2, "doi_pt": 0.0}
-    assert ss["thao_luan"] == {"nay": 6, "truoc": 3, "doi_pt": 100.0}
-    assert ss["binh_luan"] == {"nay": 4, "truoc": 1, "doi_pt": 300.0}
+    assert ss["bai"] == {"nay": 2, "truoc": 2, "doi_pt": 0.0, "moi": False}
+    assert ss["thao_luan"] == {"nay": 6, "truoc": 3, "doi_pt": 100.0, "moi": False}
+    assert ss["binh_luan"] == {"nay": 4, "truoc": 1, "doi_pt": 300.0, "moi": False}
     assert th["khoang"]["ky_truoc"] == {"tu": "2026-10-01", "den": "2026-10-07"}
     trong = CS.tong_hop(rows[:2], D(2026, 10, 8), D(2026, 10, 14), hom_nay=D(2026, 10, 14))
     assert trong["so_sanh"]["bai"]["doi_pt"] is None          # kỳ trước 0 bài: không có %
@@ -347,7 +347,8 @@ def test_loc_theo_tuong_tac_khong_so_phan_tram_ky_truoc():
     a, b = D(2026, 10, 8), D(2026, 10, 14)
     th = CS.tong_hop(rows, a, b, hom_nay=b, bo_loc=CS.doc_bo_loc({"tuong_tac": "100"}))
     assert th["so_sanh_lech"] == "tuong_tac"
-    assert th["so_sanh"]["bai"] == {"nay": 1, "truoc": 2, "doi_pt": None}
+    assert th["so_sanh"]["bai"] == {"nay": 1, "truoc": 2, "doi_pt": None,
+                                        "moi": False}
     assert all(v["doi_pt"] is None for v in th["so_sanh"].values())
     th = CS.tong_hop(rows, a, b, hom_nay=b)
     assert th["so_sanh_lech"] is None and th["so_sanh"]["bai"]["doi_pt"] == -50.0
@@ -474,10 +475,11 @@ def test_bo_loc_ap_ca_ky_truoc_va_khung_chi_tiet():
     a, b = D(2026, 10, 8), D(2026, 10, 14)
     th = CS.tong_hop(rows, a, b, hom_nay=b, bo_loc=CS.doc_bo_loc({"pham_vi": "kenh_nha"}))
     assert th["kpi"]["bai"] == 1 and th["kpi"]["thao_luan"] == 5
-    assert th["so_sanh"]["bai"] == {"nay": 1, "truoc": 2, "doi_pt": -50.0}
+    assert th["so_sanh"]["bai"] == {"nay": 1, "truoc": 2, "doi_pt": -50.0,
+                                        "moi": False}
     assert [n["khoa_nguon"] for g in th["top_nguon"] for n in g["nguon"]] == ["n:7"]
     ngoai = CS.tong_hop(rows, a, b, hom_nay=b, bo_loc=CS.doc_bo_loc({"pham_vi": "ben_ngoai"}))
-    assert ngoai["so_sanh"]["bai"] == {"nay": 1, "truoc": 0, "doi_pt": None}
+    assert ngoai["so_sanh"]["bai"] == {"nay": 1, "truoc": 0, "doi_pt": None, "moi": True}
     # Khung chi tiết: bộ lọc chung AND điều kiện của điểm vừa bấm.
     bon = _bon_bai()
     d = D(2026, 10, 10)

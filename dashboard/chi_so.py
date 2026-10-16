@@ -545,7 +545,10 @@ def doi_pt(nay: float, truoc: float) -> float | None:
 
 
 def so_sanh(nay: dict, truoc: dict) -> dict:
-    return {k: {"nay": nay[k], "truoc": truoc[k], "doi_pt": doi_pt(nay[k], truoc[k])}
+    """`moi` = so được và kỳ trước bằng 0 mà kỳ này có số (% không tính được — trang ghi "mới");
+    chỉ máy chủ biết khi nào so sánh bị tắt (`so_sanh_lech`, dữ liệu bị cắt)."""
+    return {k: {"nay": nay[k], "truoc": truoc[k], "doi_pt": doi_pt(nay[k], truoc[k]),
+                "moi": not truoc[k] and bool(nay[k])}
             for k in ("bai", "thao_luan", "binh_luan", "nguon_co_bai", "xem", "tuong_tac")}
 
 
@@ -1074,7 +1077,7 @@ def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     lech = "tuong_tac" if f.tt else None
     if lech:
         for v in ss.values():
-            v["doi_pt"] = None
+            v["doi_pt"], v["moi"] = None, False
     return {
         "khoang": {"tu": tu.isoformat(), "den": den.isoformat(),
                    "so_ngay": (den - tu).days + 1,
@@ -1507,6 +1510,7 @@ def y_dinh_mua(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     return {"so": len(yd), "sach": len(nay),
             "pt": round(100.0 * len(yd) / len(nay), 1) if nay else None,
             "truoc": truoc, "doi_pt": doi_pt(len(yd), truoc) if so_sanh_duoc else None,
+            "moi": bool(so_sanh_duoc and not truoc and yd),
             "theo_chu_de": theo_cd, "theo_cau": len(yd) - theo_cd,
             "xu_huong": {"don_vi": "tuần" if theo_tuan else "ngày",
                          "moc": [m.isoformat() for m in moc], **cot},

@@ -2031,13 +2031,14 @@ def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: lis
 # Lượt 7 (16/10) chạy 54 phút > hạn 45 phút vì gán nhãn ~2.400 bình luận ngay trong việc. Nay
 # (`gan_nhan_nen` bật — mặc định) việc chỉ gán phần LUẬT; phần cần model để trống ("chưa phân loại")
 # và nhịp nền gán dần. Bài Báo & Web: nhãn của bước phân xử (chỉ 400 ký tự đầu) không dùng —
-# nhịp nền chấm lại theo mọi đoạn nhắc brand (`phan_loai.phan_loai_bai`). Tắt nền: như cũ.
+# nhịp nền chấm lại theo mọi đoạn nhắc brand (`phan_loai.phan_loai_bai`). Tắt nền hoặc luồng nền
+# không chạy trong tiến trình này (`gan_nhan_nen.dang_chay`): gán ngay như cũ.
 def _gan_nhan_bl(khach: list[dict], han: float, tk: dict) -> None:
     """Điền sắc thái/chủ đề cho bình luận khách sắp ghi kho; `tk["nhan"]`/`tk["cho_nen"]` ghi
     chuyện đã xảy ra."""
     import gan_nhan_nen
     import phan_loai
-    if gan_nhan_nen.bat():
+    if gan_nhan_nen.dang_chay():
         nhan = phan_loai.gan_theo_luat(khach)
         for d, x in zip(khach, nhan):
             if x and x[0] != phan_loai.CHUA:
@@ -2059,7 +2060,7 @@ def _gan_nhan_bl(khach: list[dict], han: float, tk: dict) -> None:
 def _nhan_bai_ngay(d: dict, sac, cd) -> tuple:
     """(sắc thái, chủ đề) ghi kho ngay cho bài vừa giữ: bài web để nhịp nền chấm lại."""
     import gan_nhan_nen
-    if d.get("platform") == W.NEN_TANG and gan_nhan_nen.bat():
+    if d.get("platform") == W.NEN_TANG and gan_nhan_nen.dang_chay():
         return None, None
     return sac, cd
 

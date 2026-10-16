@@ -1033,7 +1033,9 @@ def test_gan_nhan_nen_luot_chi_gan_luat_con_lai_de_trong(mo, monkeypatch):
     model: chỉ gán phần luật (dòng chỉ @tag/emoji — thường đã bị `loc_rac` tách khỏi hop_le), dòng
     còn lại để trống cho `gan_nhan_nen`."""
     import phan_loai
+    import gan_nhan_nen
     monkeypatch.delenv("MARK_GAN_NHAN_NEN", raising=False)
+    monkeypatch.setattr(gan_nhan_nen, "dang_chay", gan_nhan_nen.bat)   # luồng nền đang sống
     monkeypatch.setattr(phan_loai, "phan_loai_binh_luan",
                         lambda *a, **k: pytest.fail("lượt quét không được gọi model gán nhãn"))
     kho = GiaKhoBl(mo, [_bai_bl("111", 30)])
@@ -1052,7 +1054,9 @@ def test_gan_nhan_nen_luot_chi_gan_luat_con_lai_de_trong(mo, monkeypatch):
 
 
 def test_bai_web_de_nen_cham_lai_bai_mxh_giu_nhan_phan_xu(monkeypatch):
+    import gan_nhan_nen
     monkeypatch.delenv("MARK_GAN_NHAN_NEN", raising=False)
+    monkeypatch.setattr(gan_nhan_nen, "dang_chay", gan_nhan_nen.bat)   # luồng nền đang sống
     assert T._nhan_bai_ngay({"platform": "web"}, "Trung lập", "Khác") == (None, None)
     assert T._nhan_bai_ngay({"platform": "tiktok"}, "Tích cực", "Khác") == ("Tích cực", "Khác")
     monkeypatch.setenv("MARK_GAN_NHAN_NEN", "0")

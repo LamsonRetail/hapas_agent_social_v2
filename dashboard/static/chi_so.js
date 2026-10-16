@@ -576,18 +576,18 @@
   }
   // ─── so với kỳ trước: MỘT luật cho mọi thẻ. Chủ dự án 17/10/2026: "hiển thị theo %, không theo
   // x lần" — luôn ▲/▼/■ + pt() (từ 100% làm tròn số nguyên, có dấu chấm nghìn: "▲ 13.950%"). Kỳ trước
-  // = 0 mà kỳ này có số → "▲ mới" (chia cho 0 không ra %), chỉ khi kỳ trước CÓ dữ liệu ở thẻ khác —
-  // dự án mới chưa có kỳ trước thì không hiện gì. Không so được (lọc tương tác, bị cắt) → không hiện.
+  // = 0 mà kỳ này có số → "▲ mới" (chia cho 0 không ra %): CHỈ khi máy chủ đánh dấu `moi` (so được)
+  // và kỳ trước CÓ dữ liệu ở thẻ khác — dự án mới chưa có kỳ trước thì không hiện gì. Không so được
+  // (lọc tương tác, dữ liệu bị cắt: máy chủ trả doi_pt null, moi false) → không hiện gì.
   // ▲ xanh · ▼ đỏ · ■ xám. Kỳ so sánh nói một lần ở ⓘ cạnh khoảng ngày (#ky-truoc); title của từng
   // nhãn ghi "kỳ trước → kỳ này".
   var kyTruocChu = "", kyTruocCoSo = false;
-  function nhanDoi(nay, truoc, doiPt) {
+  function nhanDoi(nay, truoc, doiPt, moi) {
     var t = "So với kỳ trước" + (kyTruocChu ? " " + kyTruocChu : "") + ": ";
-    if (truoc === 0) {
-      if (!kyTruocCoSo || !(nay > 0)) return null;
+    if (doiPt == null || !truoc) {
+      if (!moi || truoc !== 0 || !kyTruocCoSo || !(nay > 0)) return null;
       return { chu: "▲ mới", lop: "tang", doc: "mới (kỳ trước là 0)", title: t + "0 → " + so(nay) };
     }
-    if (doiPt == null || !truoc) return null;
     if (nay == null) nay = Math.round(truoc * (1 + doiPt / 100));
     t += so(truoc) + " → " + so(nay);
     var lop = doiPt > 0 ? "tang" : doiPt < 0 ? "giam" : "bang";
@@ -595,8 +595,8 @@
     var doc = (doiPt > 0 ? "tăng " + pt(doiPt) : doiPt < 0 ? "giảm " + pt(-doiPt) : "không đổi") + " so với kỳ trước";
     return { chu: mui + pt(Math.abs(doiPt)), lop: lop, doc: doc, title: t };
   }
-  function oDoi(nay, truoc, doiPt, the) {
-    var x = nhanDoi(nay, truoc, doiPt);
+  function oDoi(nay, truoc, doiPt, the, moi) {
+    var x = nhanDoi(nay, truoc, doiPt, moi);
     if (!x) return null;
     var s = tao(the || "div", "kpi__doi kpi__doi--" + x.lop);
     s.title = x.title;
@@ -629,7 +629,7 @@
     if (goiY) { nh.appendChild(chuNode(" ")); nh.appendChild(nutGoiY(goiY)); }
     than.appendChild(nh);
     than.appendChild(oSoThe(n));
-    var d = doi ? oDoi(doi.nay, doi.truoc, doi.doi_pt) : null;
+    var d = doi ? oDoi(doi.nay, doi.truoc, doi.doi_pt, null, doi.moi) : null;
     if (d) than.appendChild(d);
     o.appendChild(than);
     return o;
@@ -701,8 +701,8 @@
     than.appendChild(oSoThe(y.so));
     var phu = y.pt == null ? "—" : pt(y.pt) + " bình luận sạch";
     than.appendChild(tao("span", "kpi__phu", phu));
-    var x = lech ? null : nhanDoi(y.so, y.truoc, y.doi_pt);
-    var d = lech ? null : oDoi(y.so, y.truoc, y.doi_pt, "span");
+    var x = lech ? null : nhanDoi(y.so, y.truoc, y.doi_pt, y.moi);
+    var d = lech ? null : oDoi(y.so, y.truoc, y.doi_pt, "span", y.moi);
     if (d) than.appendChild(d);
     o.appendChild(than);
     o.title = "Bình luận hỏi giá / muốn mua · " + (y.pt == null ? "chưa có bình luận sạch" : phu) + (x ? " · " + x.title : "");
@@ -880,7 +880,7 @@
     var s = " Mark đang gán nhãn nền: còn " + so(g.cho_bl) + " bình luận" +
       (g.cho_bai ? " và " + so(g.cho_bai) + " bài" : "") + " chờ AI";
     if (g.luot && g.tong) s += " (lượt quét #" + g.luot + ": đã gán " + so(g.da) + "/" + so(g.tong) + " bình luận)";
-    return s + " — phần này đang tính là “Chưa phân loại”.";
+    return s + " — phần này đang tính là “Chưa phân loại” (gồm cả vài dòng Mark tạm bỏ qua vì gán hỏng nhiều lần, thử lại sau 7 ngày).";
   }
 
   // ─── sắc thái theo thời gian (đường kiểu Kompa) ───

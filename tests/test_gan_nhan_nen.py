@@ -136,6 +136,16 @@ class KhoGia:
         return n
 
 
+class DongHo:
+    """Đồng hồ giả (monotonic) — nhảy qua thời gian lùi mà không ngủ thật."""
+
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
 @pytest.fixture
 def nen(monkeypatch, tmp_path):
     import apify_tool as A
@@ -143,8 +153,8 @@ def nen(monkeypatch, tmp_path):
     monkeypatch.delenv("MARK_GAN_NHAN_NEN", raising=False)
     monkeypatch.setattr(A, "_thu_muc_nen", lambda: tmp_path)
     monkeypatch.setattr(G, "_co_quyen", lambda: True)
-    monkeypatch.setitem(G._TRANG, "nghi_toi", 0.0)
-    monkeypatch.setitem(G._TRANG, "loi_lien", 0)
+    monkeypatch.setitem(G._TRANG, "khoa", {})
+    monkeypatch.setitem(G._TRANG, "song_luc", None)
 
     def dung(kho):
         for ten in ("du_an_dang_bat", "doc_du_an", "bl_cho_gan_nhan", "ghi_nhan_bl",
@@ -154,9 +164,17 @@ def nen(monkeypatch, tmp_path):
     return dung
 
 
-def _bl(i, text, loai="hop_le"):
-    return {"khoa_bai": "tiktok:1", "ma": f"c{i}", "noi_dung": text, "thich": i, "loai": loai,
-            "sac_thai": None}
+def _bl(i, text, loai="hop_le", thich=None):
+    return {"khoa_bai": "tiktok:1", "ma": f"c{i}", "noi_dung": text,
+            "thich": i if thich is None else thich, "loai": loai, "sac_thai": None}
+
+
+def _nhip(dh, n=1):
+    kq = None
+    for _ in range(n):
+        kq = G.mot_nhip(ngu=lambda s: None, dong_ho=dh)
+        dh.t += 2000                         # qua hết mọi lần lùi
+    return kq
 
 
 def test_nhip_gan_binh_luan_roi_bai_va_nghi_giua_lo(nen, monkeypatch):
@@ -170,37 +188,100 @@ def test_nhip_gan_binh_luan_roi_bai_va_nghi_giua_lo(nen, monkeypatch):
         return _model_bl(nhac)
     monkeypatch.setattr(P, "_goi_model", model)
     ngu = []
-    kq = G.mot_nhip(ngu=ngu.append)
+    kq = G.mot_nhip(ngu=ngu.append, dong_ho=DongHo())
     assert kq["ghi_bl"] == 2 and kq["ghi_bai"] == 1 and kq["lo"] == 2 and not kq["loi"]
     assert kho.bl[0]["sac_thai"] == "Tích cực" and kho.bl[2]["sac_thai"] is None, "spam không gán"
     assert kho.bai[0]["sac_thai"] == "Tiêu cực", "cờ rủi ro → Tiêu cực"
     assert ngu == [G.NGHI_GIUA_LO], "nghỉ giữa hai lô — nhường lease model"
-    assert G.mot_nhip(ngu=ngu.append)["lo"] == 0, "hết hàng: nhịp sau không gọi model"
+    assert G.mot_nhip(ngu=ngu.append, dong_ho=DongHo())["lo"] == 0, "hết hàng: không gọi model"
 
 
-def test_dong_bi_bo_sot_qua_so_lan_thi_bo_qua(nen, monkeypatch):
-    kho = nen(KhoGia([_bl(1, "sot mãi")]))
+def test_bo_sot_mot_phan_ghi_lan_thu_va_het_han(nen, monkeypatch):
+    """Lô chạy được, model bỏ sót MỘT dòng (< 80%): dòng đó bị ghi một lần thử. Đủ lần thì bỏ qua
+    `HET_HAN_NGAY` ngày, có log; quá hạn thì thử lại."""
+    kho = nen(KhoGia([_bl(i, f"giá {i}") for i in range(1, 5)] + [_bl(9, "sot mãi", thich=0)]))
+    monkeypatch.setattr(P, "_goi_model", _model_bl)
+    _nhip(DongHo())
+    x = G.doc_so()["hapas"]["bl"]["tiktok:1\x1fc9"]
+    assert x["n"] == 1 and all(r["sac_thai"] for r in kho.bl if r["ma"] != "c9")
+    G.dem_bo_sot("hapas", "bl", ["tiktok:1\x1fc9"] * 2, [])
+    assert G.bo_qua("hapas", "bl") == ["tiktok:1\x1fc9"]
+    so = G.doc_so()
+    so["hapas"]["bl"]["tiktok:1\x1fc9"]["luc"] = "2026-01-01"
+    G._ghi_so(so)
+    assert G.bo_qua("hapas", "bl") == [], "quá hạn thì thử lại"
+
+
+def test_model_tra_json_rong_ca_lo_la_lo_hong_khong_phat_dong(nen, monkeypatch):
+    """Review M1: JSON hợp lệ mà không dòng nào dùng được (≥ 80% bỏ sót) — trước đây mọi dòng
+    bị ghi lần thử, ba lần là cả hàng đợi bị bỏ qua vĩnh viễn."""
+    kho = nen(KhoGia([_bl(i, f"giá {i}") for i in range(1, 30)]))
     goi = []
-    monkeypatch.setattr(P, "_goi_model", lambda n: goi.append(n) or _model_bl(n))
-    G.mot_nhip(ngu=lambda s: None)
-    assert len(goi) == G.TOI_DA_THU, "thử lại tới TOI_DA_THU lần rồi thôi, không chặn hàng"
-    assert G.bo_qua("hapas", "bl") == ["tiktok:1\x1fc1"] and kho.bl[0]["sac_thai"] is None
-    G.mot_nhip(ngu=lambda s: None)
-    assert len(goi) == G.TOI_DA_THU
+    monkeypatch.setattr(P, "_goi_model", lambda n: goi.append(n) or "{}")
+    dh = DongHo()
+    for _ in range(6):
+        kq = _nhip(dh)
+    assert kq["loi"] >= 1 and G.bo_qua("hapas", "bl") == []
+    assert G.doc_so().get("hapas", {}).get("bl", {}) == {}, "lô hỏng không phạt dòng nào"
+    assert all(r["sac_thai"] is None for r in kho.bl)
+    st = G._TRANG["khoa"][("hapas", "bl")]
+    assert st["nghi_toi"] > 0 and st["co"] < P._LO, "lùi + thu nhỏ lô"
+    assert len(goi) <= 2 * 6, "mỗi nhịp tối đa hai lượt khi model hỏng — không đốt quota"
 
 
-def test_model_hong_thi_lui_dan_va_dong_van_cho(nen, monkeypatch):
+def test_dong_doc_bi_khoanh_va_cac_dong_khac_van_duoc_gan(nen, monkeypatch):
+    """Review M2: một dòng làm hỏng MỌI lô chứa nó (thứ tự cố định, dòng nhiều like nhất) từng
+    chặn cả dự án. Nay lô nhỏ dần tới lô một dòng; dòng đó bị nghi, lô kế chạy được thì dòng đó
+    mới bị ghi lần thử — các dòng khác vẫn được gán."""
+    kho = nen(KhoGia([_bl(99, "độc")] + [_bl(i, f"đẹp {i}") for i in range(1, 8)]))
+    monkeypatch.setattr(P, "_LO", 8)
+
+    def model(nhac):
+        if "độc" in nhac:
+            raise RuntimeError("400 nội dung bị từ chối")
+        return _model_bl(nhac)
+    monkeypatch.setattr(P, "_goi_model", model)
+    _nhip(DongHo(), 6)
+    assert all(r["sac_thai"] for r in kho.bl if r["ma"] != "c99"), "dòng khác vẫn được gán"
+    assert G.doc_so()["hapas"]["bl"]["tiktok:1\x1fc99"]["n"] >= 1
+    assert kho.bl[0]["sac_thai"] is None
+
+
+def test_mot_du_an_hong_khong_chan_du_an_sau(nen, monkeypatch):
+    import lang_nghe_db as K
+    kho = nen(KhoGia([_bl(1, "đẹp quá")]))
+    monkeypatch.setattr(K, "du_an_dang_bat", lambda: [{"ma": "a"}, {"ma": "hapas"}])
+    goc = kho.bl_cho_gan_nhan
+
+    def doc(ma, toi_da, bo=()):
+        if ma == "a":
+            raise RuntimeError("kho của a hỏng")
+        return goc(ma, toi_da, bo)
+    monkeypatch.setattr(K, "bl_cho_gan_nhan", doc)
+    monkeypatch.setattr(P, "_goi_model", _model_bl)
+    kq = G.mot_nhip(ngu=lambda s: None, dong_ho=DongHo())
+    assert kq["ghi_bl"] == 1 and kho.bl[0]["sac_thai"] == "Tích cực"
+
+
+def test_model_hong_thi_lui_dan_va_hoi_phuc_quen_log(nen, monkeypatch):
     kho = nen(KhoGia([_bl(1, "đẹp quá")]))
 
     def hong(_):
         raise RuntimeError("429")
     monkeypatch.setattr(P, "_goi_model", hong)
-    t0 = time.monotonic()
-    kq = G.mot_nhip(ngu=lambda s: None)
-    assert kq["loi"] == 1 and kho.bl[0]["sac_thai"] is None
-    assert G._TRANG["nghi_toi"] >= t0 + G.LUI_GIAY[0] - 1
-    assert G.mot_nhip(ngu=lambda s: None)["bo_qua"] == "đang lùi sau lỗi"
+    dh = DongHo()
+    kq = G.mot_nhip(ngu=lambda s: None, dong_ho=dh)
+    st = G._TRANG["khoa"][("hapas", "bl")]
+    assert kq["loi"] >= 1 and kho.bl[0]["sac_thai"] is None
+    assert st["nghi_toi"] >= dh.t + G.LUI_GIAY[0] - 1
+    assert G.mot_nhip(ngu=lambda s: None, dong_ho=dh)["lo"] == 0, "đang lùi: không gọi model"
+    assert any(k.startswith("lui-hapas-bl") for k in G._DA_BAO)
     assert G.bo_qua("hapas", "bl") == [], "lô hỏng không phạt dòng"
+    monkeypatch.setattr(P, "_goi_model", _model_bl)
+    dh.t += 2000
+    G.mot_nhip(ngu=lambda s: None, dong_ho=dh)
+    assert kho.bl[0]["sac_thai"] == "Tích cực" and st["loi_lien"] == 0
+    assert not any(k.startswith("lui-hapas-bl") for k in G._DA_BAO), "hồi phục: quên log lùi"
 
 
 def test_dong_doi_giua_chung_khong_bi_de(nen, monkeypatch):
@@ -211,7 +292,7 @@ def test_dong_doi_giua_chung_khong_bi_de(nen, monkeypatch):
         kho.bl[0]["loai"] = "seeding"
         return _model_bl(nhac)
     monkeypatch.setattr(P, "_goi_model", model)
-    G.mot_nhip(ngu=lambda s: None)
+    G.mot_nhip(ngu=lambda s: None, dong_ho=DongHo())
     assert kho.bl[0]["sac_thai"] is None
 
 
@@ -222,6 +303,23 @@ def test_khong_giu_quyen_chu_hoac_tat_thi_khong_chay(nen, monkeypatch):
     assert G.mot_nhip()["bo_qua"] == "không giữ quyền chủ việc nền"
     monkeypatch.setenv("MARK_GAN_NHAN_NEN", "0")
     assert G.mot_nhip()["bo_qua"] == "tắt" and "tắt" in G.khoi_dong()
+    assert not G.dang_chay()
+
+
+def test_theo_doi_chi_de_nen_khi_luong_nen_dang_chay(monkeypatch):
+    """Review LOW: bật cờ mà luồng nền không chạy (vd khởi động lỗi) thì /theodoi gán ngay."""
+    import theo_doi as T
+    monkeypatch.delenv("MARK_GAN_NHAN_NEN", raising=False)
+    monkeypatch.setitem(G._LUONG, "t", None)
+    assert not G.dang_chay()
+    assert T._nhan_bai_ngay({"platform": "web"}, "Trung lập", "Khác") == ("Trung lập", "Khác")
+    goi = []
+    monkeypatch.setattr(P, "phan_loai_binh_luan",
+                        lambda rows, han, tt=None, song_song=None: goi.append(1)
+                        or [("Tích cực", "Sản phẩm/chất lượng")] * len(rows))
+    d, tk = [{"text": "đẹp quá"}], {"nhan": ""}
+    T._gan_nhan_bl(d, time.monotonic() + 300, tk)
+    assert goi and d[0]["sac_thai"] == "Tích cực" and "cho_nen" not in tk
 
 
 def test_lang_nghe_db_sql_hang_doi_chi_ghi_dong_con_trong():
@@ -231,8 +329,17 @@ def test_lang_nghe_db_sql_hang_doi_chi_ghi_dong_con_trong():
     src = inspect.getsource(K.ghi_nhan_bl)
     assert "sac_thai IS NULL" in src and "loai = 'hop_le'" in src and "noi_dung = %s" in src
     assert "cap_nhat_cuoi = now()" in src, "đồng bộ BigQuery lấy lại dòng đã gán"
-    src = inspect.getsource(K.ghi_nhan_bai)
-    assert "NOT IN ('tiktok', 'youtube')" in src, "không làm lỡ lượt làm mới số theo ngày"
+    assert "DOI_MOC_BAI_SQL" in inspect.getsource(K.ghi_nhan_bai)
+    # Review M4: chỉ bài YouTube còn trong cửa sổ làm mới số miễn phí 14 ngày mà hôm nay chưa đọc
+    # số giữ mốc cũ; mọi bài khác (TikTok, YouTube cũ, web) dời mốc để BigQuery lấy nhãn.
+    assert K.DOI_MOC_BAI_SQL.startswith(
+        "CASE WHEN nen_tang = 'youtube' AND dang_luc >= now() - interval '14 days'")
+    assert K.DOI_MOC_BAI_SQL.endswith("ELSE now() END")
+    assert "kenh_nha" in K._SQL_BAI_CHO and "b.kieu_trang" in inspect.getsource(K.bai_cho_gan_nhan)
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(G.__file__).parent / "scripts"))
+    import lang_nghe_gan_nhan_bai as S
+    assert K.DOI_MOC_BAI_SQL in S.SQL_SUA and "b.kieu_trang" in S.SQL_BAI
 
 
 # ───────────────────────────── lọc trang tuyển dụng / Ý định mua ─────────────────────────────
@@ -272,7 +379,7 @@ def _chay_nhan_doi(ca: list, co_so: bool = True) -> list:
     chay = ('var SO = new Intl.NumberFormat("vi-VN"); var kyTruocChu = "01/09 – 30/09";'
             f" var kyTruocCoSo = {json.dumps(co_so)};" + ham("so") + ham("pt") + ham("nhanDoi")
             + f"\nconsole.log(JSON.stringify({json.dumps(ca)}.map(function (c) "
-            "{ var x = nhanDoi(c[0], c[1], c[2]); return x && x.chu; })));")
+            "{ var x = nhanDoi(c[0], c[1], c[2], c[3]); return x && x.chu; })));")
     ra = subprocess.run([node, "-e", chay], capture_output=True, text=True, encoding="utf-8",
                         check=True, timeout=30).stdout
     return json.loads(ra)
@@ -281,9 +388,24 @@ def _chay_nhan_doi(ca: list, co_so: bool = True) -> list:
 def test_nhan_doi_luon_theo_phan_tram_khong_x_lan():
     """Chủ dự án 17/10: "phần hiển thị thì tôi muốn là để theo % chứ không để theo x lần"."""
     ra = _chay_nhan_doi([[1405, 10, 13950.0], [30, 10, 200.0], [9, 10, -10.0], [10, 10, 0.0],
-                         [11, 10, 12.5], [5, 0, None], [0, 0, None], [5, None, None]])
-    assert ra == ["▲ 13.950%", "▲ 200%", "▼ 10,0%", "■ 0,0%", "▲ 12,5%", "▲ mới", None, None]
-    assert _chay_nhan_doi([[5, 0, None]], co_so=False) == [None], "chưa có kỳ trước: không 'mới'"
+                         [11, 10, 12.5], [5, 0, None, True], [0, 0, None], [5, None, None],
+                         [5, 0, None, False], [5, 10, None, False]])
+    assert ra == ["▲ 13.950%", "▲ 200%", "▼ 10,0%", "■ 0,0%", "▲ 12,5%", "▲ mới", None, None,
+                  None, None]
+    # Review M3: máy chủ tắt so sánh (lọc tương tác, dữ liệu bị cắt: moi=false) → không "mới".
+    assert _chay_nhan_doi([[5, 0, None, True]], co_so=False) == [None], \
+        "chưa có kỳ trước: không 'mới'"
+    cot = ("bai", "thao_luan", "binh_luan", "nguon_co_bai", "xem", "tuong_tac")
+    kq = CS.so_sanh(dict.fromkeys(cot, 5), dict.fromkeys(cot, 0))
+    assert kq["bai"] == {"nay": 5, "truoc": 0, "doi_pt": None, "moi": True}
+    import datetime
+    a, b = datetime.date(2026, 10, 8), datetime.date(2026, 10, 14)
+    bl = [{"loai": "hop_le", "noi_dung": "xin giá", "dang_luc": datetime.datetime(
+        2026, 10, 10, 9, tzinfo=datetime.timezone(datetime.timedelta(hours=7)))}]
+    assert CS.y_dinh_mua(bl, a, b, rows_truoc=[], hom_nay=b)["moi"] is True
+    assert CS.y_dinh_mua(bl, a, b, rows_truoc=[], truoc_bi_cat=True, hom_nay=b)["moi"] is False
+    d = CS.tong_hop([], a, b, hom_nay=b, bo_loc=CS.doc_bo_loc({"tuong_tac": "1000"}))
+    assert all(v["moi"] is False and v["doi_pt"] is None for v in d["so_sanh"].values())
     import pathlib
     js = (pathlib.Path(CS.__file__).parent / "static" / "chi_so.js").read_text(encoding="utf-8")
     assert "▲ ×" not in js and "gấp \" + gap" not in js and "CO_SO_NHO" not in js
