@@ -7,13 +7,15 @@ chỉ TÍNH, thuần Python, không SQL, không import module nào của Mark (v
 
 Công thức chép từ Mark — PHẢI khớp, có bài thử đối chiếu (`tests/test_dashboard_chi_phi.py`):
   • Một lượt actor (`theo_doi._uoc_phan`): (đơn vị × giá + phí khởi động actor) × hệ số 1,3; đơn
-    vị = số bài mỗi lần (TikTok/Facebook) hoặc 1 tài khoản (Instagram); YouTube 0 (API miễn phí).
+    vị = số bài mỗi lần (TikTok/Facebook; Threads tối thiểu 10) hoặc 1 tài khoản (Instagram);
+    YouTube 0 (API miễn phí).
   • Giá `theo_doi._GIA`, hệ số `theo_doi._HE_SO_UOC`, phí khởi động `apify_tool._START_COST`.
 Dự báo cấp tháng:
   • Mỗi nguồn ĐANG theo dõi chạy (số ngày) / chu_ky_ngay lượt; phần tiền theo bài/tài khoản tính
     riêng từng nguồn.
-  • Phí khởi động actor tính GẦN ĐÚNG một lần mỗi nền tảng mỗi ngày quét; nền tảng có ngày quét
-    khi nguồn có chu kỳ ngắn nhất tới hạn -> (số ngày) / chu kỳ ngắn nhất của nền tảng.
+  • Phí khởi động actor tính GẦN ĐÚNG một lần mỗi nền tảng mỗi ngày quét (Threads: một lần mỗi lô
+    20 tài khoản); nền tảng có ngày quét khi nguồn có chu kỳ ngắn nhất tới hạn -> (số ngày) / chu
+    kỳ ngắn nhất của nền tảng.
   • "Còn lại của tháng" = thời gian thật từ bây giờ tới 0 giờ ngày 1 tháng sau (giờ VN), tính lẻ
     ngày: lịch chạy hằng ngày lúc nào trong ngày cũng không bị đếm hai lần hay bỏ sót có hệ thống.
 """
@@ -25,16 +27,25 @@ import unicodedata
 VN = datetime.timezone(datetime.timedelta(hours=7))
 
 # ─── chép từ Mark (bài thử đối chiếu; đổi bên Mark thì đổi ở đây) ───
-#: `theo_doi._GIA` — giá đo thật 25/09/2026: TikTok/Facebook theo bài, Instagram theo tài khoản.
-GIA = {"tiktok": 0.003, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0}
+#: `theo_doi._GIA` — giá đo thật 25/09/2026: TikTok/Facebook theo bài, Instagram theo tài khoản;
+#: Threads (16/10/2026) theo bài, tối thiểu `TH_TOI_THIEU_BAI` bài mỗi tài khoản.
+GIA = {"tiktok": 0.003, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0,
+       "threads": 0.0025}
 #: `theo_doi._HE_SO_UOC` — ước tính chừa hao hụt (bài ghim, phí lẻ…).
 HE_SO_UOC = 1.3
-#: `apify_tool._START_COST` — phí khởi động MỖI lượt actor.
-START_COST = {"instagram": 0.016, "threads": 0.02, "facebook": 0.00005}
+#: `apify_tool._START_COST` — phí khởi động MỖI lượt actor. Threads: actor ép 4 GB RAM, gói
+#: FREE 0,02 USD/GB = 0,08 USD (đo 16/10/2026).
+START_COST = {"instagram": 0.016, "threads": 0.08, "facebook": 0.00005}
+#: `theo_doi.TH_TOI_THIEU_BAI` / `TH_TOI_DA_MOI_LUOT` — actor Threads lấy (và tính tiền) ≥ 10 bài
+#: mỗi tài khoản / từ khoá; ≤ 20 tài khoản hoặc từ khoá mỗi lượt.
+TH_TOI_THIEU_BAI = 10
+TH_TOI_DA_MOI_LUOT = 20
 
-#: `theo_doi._BL_GIA` / `_BL_KHOI_DONG` — giá cào BÌNH LUẬN mỗi bình luận (gói FREE, 15/10/2026).
-BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0}
-BL_KHOI_DONG = {"facebook": 0.001}
+#: `theo_doi._BL_GIA` / `_BL_KHOI_DONG` — giá cào BÌNH LUẬN mỗi bình luận (gói FREE, 15/10/2026;
+#: Threads 16/10/2026: actor trả lời 1 GB = 0,02 USD khởi động).
+BL_GIA = {"tiktok": 0.00125, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
+          "threads": 0.0025}
+BL_KHOI_DONG = {"facebook": 0.001, "threads": 0.02}
 #: `theo_doi._BL_UOC_MOI_BAI` — giữ chỗ mỗi bài khi cào hết (bl_moi_bai = 0).
 BL_UOC_MOI_BAI = 60
 
@@ -42,25 +53,17 @@ NGAY_THANG_CAU_HINH = 30     # "theo cấu hình": tháng chuẩn 30 ngày (đ�
 
 
 #: `theo_doi._TK_GIA` / `_TK_KHOI` / `TK_*` — tìm theo từ khoá (actor của social_listen).
-TK_GIA = {"tiktok": 0.003, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0}
-TK_KHOI = {"instagram": 0.016, "facebook": 0.00005}
+TK_GIA = {"tiktok": 0.003, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0,
+          "threads": 0.0025}
+TK_KHOI = {"instagram": 0.016, "facebook": 0.00005, "threads": 0.08}
 TK_IG_TOI_DA_TU = 2
 TK_FB_TOI_DA = 20
 
 
 def uoc_tu_khoa_luot(so_bai: int, tu: list[str]) -> float:
-    """Bản sao `theo_doi.uoc_tu_khoa`: USD tối đa một lượt tìm theo từ khoá của dự án."""
-    tong = 0.0
-    for p, gia in TK_GIA.items():
-        q = [t for t in tu if " " not in t][:TK_IG_TOI_DA_TU] if p == "instagram" else tu
-        if not q or not gia or so_bai <= 0:
-            continue
-        if p == "instagram":
-            tong += round(len(q) * (TK_KHOI["instagram"] + so_bai * gia) * HE_SO_UOC, 4)
-        else:
-            n = min(so_bai, TK_FB_TOI_DA) if p == "facebook" else so_bai
-            tong += round((n * gia + TK_KHOI.get(p, 0.0)) * HE_SO_UOC, 4)
-    return round(tong, 4)
+    """Bản sao `theo_doi.uoc_tu_khoa`: USD tối đa một lượt tìm theo từ khoá của dự án (mọi nền
+    tảng bật, cùng số bài)."""
+    return round(sum(uoc_tk_nen_tang(p, so_bai, tu) for p in NEN_TANG), 4)
 
 
 def uoc_binh_luan_luot(so_bai: int, moi_bai: int, p: str = "facebook") -> float:
@@ -80,22 +83,27 @@ def _so(v, mac_dinh: int) -> int:
         return mac_dinh
 
 
+def _so_bai_th(p, so_bai: int) -> int:
+    """Bản sao `theo_doi._so_bai_nguon`: Threads lấy (và tính tiền) tối thiểu 10 bài/tài khoản."""
+    return max(TH_TOI_THIEU_BAI, so_bai) if p == "threads" else so_bai
+
+
 def don_vi(n: dict) -> int:
-    """Đơn vị tính tiền mỗi lượt của một nguồn: số bài (TikTok/Facebook), 1 tài khoản
-    (Instagram — actor trả 12 bài mới nhất bất kể số bài), 0 với YouTube."""
+    """Đơn vị tính tiền mỗi lượt của một nguồn: số bài (TikTok/Facebook; Threads ≥ 10), 1 tài
+    khoản (Instagram — actor trả 12 bài mới nhất bất kể số bài), 0 với YouTube."""
     p = n.get("nen_tang")
     if not GIA.get(p):
         return 0
-    return 1 if p == "instagram" else _so(n.get("so_bai_moi_lan"), 5)
+    return 1 if p == "instagram" else _so_bai_th(p, _so(n.get("so_bai_moi_lan"), 5))
 
 
 def uoc_mot_luot(p: str, so_nguon: int, so_bai: int) -> float:
     """Bản sao `theo_doi._uoc_phan`: USD một lượt actor gồm `so_nguon` nguồn, mỗi nguồn `so_bai`
-    bài (Instagram tính theo tài khoản), cộng phí khởi động, nhân hệ số. Dùng cho bài đối chiếu."""
+    bài (Instagram tính theo tài khoản; Threads ≥ 10 bài), cộng phí khởi động, nhân hệ số."""
     gia = GIA.get(p, 0.0)
     if not gia or not so_nguon:
         return 0.0
-    dv = so_nguon if p == "instagram" else so_nguon * so_bai
+    dv = so_nguon if p == "instagram" else so_nguon * _so_bai_th(p, so_bai)
     return round((dv * gia + START_COST.get(p, 0.0)) * HE_SO_UOC, 4)
 
 
@@ -170,6 +178,8 @@ def du_bao(nguon: list[dict], da_tieu: float, tran_du_an: float, tran_platform: 
         ds = [x for x in theo_nguon if x["nen_tang"] == p]
         ky_ngan = min(x["chu_ky_ngay"] for x in ds)
         kd_ngay = phi_khoi_dong_ngay(p)
+        if p == "threads":                 # ≤ 20 tài khoản mỗi lượt actor: mỗi lô một phí khởi động
+            kd_ngay *= -(-len(ds) // TH_TOI_DA_MOI_LUOT)
         nguon_con = sum(x["con_lai_usd"] for x in ds)
         kd_con = con / ky_ngan * kd_ngay
         nen_tang.append({
@@ -197,7 +207,10 @@ def du_bao(nguon: list[dict], da_tieu: float, tran_du_an: float, tran_platform: 
 
 
 # ───── cấu hình theo nền tảng (bản sao `theo_doi.cau_hinh` — đợt 2e, bài thử đối chiếu) ─────
-NEN_TANG = ("tiktok", "facebook", "instagram", "youtube")
+NEN_TANG = ("tiktok", "facebook", "instagram", "youtube", "threads")
+#: `theo_doi.MAC_DINH_TAT` — nền tảng TẮT khi `du_an.cau_hinh` chưa ghi `bat` (Threads, 16/10/2026:
+#: deploy không tự tiêu tiền; chủ dự án bật trên trang này).
+MAC_DINH_TAT = ("threads",)
 SO_TOI_DA = 1_000_000        # chỉ chặn số rác — chủ dự án 15/10: "không có giới hạn"
 GIOI_HAN = {"tk_so_bai": (0, SO_TOI_DA), "tk_so_tu": (1, 50), "bl_so_bai": (0, SO_TOI_DA),
             "bl_moi_bai": (0, SO_TOI_DA)}
@@ -222,23 +235,40 @@ def _so_rieng(v, lo: int, hi: int, md: int) -> int:
 
 def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
     """Cấu hình HIỆU LỰC của một nền tảng — y hệt `theo_doi.cau_hinh` của Mark (cột tk_bat /
-    bl_bat là công tắc tổng; số bỏ trống/rác lấy cột chung, áp cho TỪNG nền tảng)."""
+    bl_bat là công tắc tổng; thiếu `bat` thì bật trừ `MAC_DINH_TAT`; số bỏ trống/rác lấy cột
+    chung, áp cho TỪNG nền tảng)."""
     goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
     nh = goc.get(nhom) if isinstance(goc.get(nhom), dict) else {}
     rieng = nh.get(p) if isinstance(nh.get(p), dict) else {}
+    bat_rieng = rieng.get("bat", p not in MAC_DINH_TAT) is True
     if nhom == "tu_khoa":
         chung = _kep(du_an.get("tk_so_bai") or 0, *GIOI_HAN["tk_so_bai"], 0)
         so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["tk_so_bai"], chung)
-        return {"bat": bool(du_an.get("tk_bat", True)) and rieng.get("bat", True) is True
-                and so > 0,
+        return {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and so > 0,
                 "so_bai": so,
                 "so_tu": _so_rieng(rieng.get("so_tu"), *GIOI_HAN["tk_so_tu"], TK_IG_TOI_DA_TU)}
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
     moi_chung = _kep(du_an.get("bl_moi_bai") or 0, *GIOI_HAN["bl_moi_bai"], 0)
     moi = _so_rieng(rieng.get("moi_bai"), *GIOI_HAN["bl_moi_bai"], moi_chung)
-    return {"bat": bool(du_an.get("bl_bat", True)) and rieng.get("bat", True) is True and so > 0,
+    return {"bat": bool(du_an.get("bl_bat", True)) and bat_rieng and so > 0,
             "so_bai": so, "moi_bai": 5 if 0 < moi < 5 else moi}
+
+
+def cau_hinh_hien_thi(goc) -> dict:
+    """`du_an.cau_hinh` cho biểu mẫu trang Ngân sách: nền tảng `MAC_DINH_TAT` chưa ghi `bat` thì
+    điền `bat: False` — ô bật hiện ĐÚNG trạng thái hiệu lực (tắt), không theo cột tk_bat/bl_bat
+    (bấm Lưu mà không để ý thì Threads không tự bật). Không sửa dict gốc."""
+    goc = goc if isinstance(goc, dict) else {}
+    ra = dict(goc)
+    for nhom in ("tu_khoa", "binh_luan"):
+        nh = dict(goc.get(nhom)) if isinstance(goc.get(nhom), dict) else {}
+        for p in MAC_DINH_TAT:
+            rieng = dict(nh.get(p)) if isinstance(nh.get(p), dict) else {}
+            rieng.setdefault("bat", False)
+            nh[p] = rieng
+        ra[nhom] = nh
+    return ra
 
 
 def _norm(s: str) -> str:
@@ -261,23 +291,35 @@ def _tu_ig(tu: list[str], so_tu: int) -> list[str]:
     return [t for t in tu if " " not in t][:so_tu]
 
 
+def tu_gui(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU, so_bai: int = 0) -> list[str]:
+    """Bản sao `theo_doi._tu_cho`: từ khoá thật sự gửi actor. Instagram: `so_tu` từ không dấu
+    cách; Threads: `so_bai // 10` từ đầu (≥ 1, ≤ 20 — actor lấy ≥ 10 bài mỗi từ)."""
+    if p == "instagram":
+        return _tu_ig(tu, so_tu)
+    if p == "threads":
+        return tu[:max(1, min(TH_TOI_DA_MOI_LUOT, so_bai // TH_TOI_THIEU_BAI))]
+    return tu
+
+
 def uoc_tk_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU,
                     fb_toi_da: int = TK_FB_TOI_DA) -> float:
     """Bản sao `theo_doi.uoc_tu_khoa_nen_tang`."""
-    q = _tu_ig(tu, so_tu) if p == "instagram" else tu
+    q = tu_gui(p, tu, so_tu, so_bai)
     gia = TK_GIA.get(p, 0.0)
     if not q or not gia or so_bai <= 0:
         return 0.0
     if p == "instagram":
         return round(len(q) * (TK_KHOI["instagram"] + so_bai * gia) * HE_SO_UOC, 4)
-    n = min(so_bai, fb_toi_da) if p == "facebook" else so_bai
+    n = (min(so_bai, fb_toi_da) if p == "facebook"
+         else max(so_bai, TH_TOI_THIEU_BAI) if p == "threads" else so_bai)
     return round((n * gia + TK_KHOI.get(p, 0.0)) * HE_SO_UOC, 4)
 
 
 def bang_cau_hinh(du_an: dict) -> dict:
     """Cấu hình hiệu lực + ước tính USD/lượt từng nền tảng cho trang Ngân sách. Dashboard không
     biết gói Apify nên Facebook tính theo đúng số bài cấu hình (mức TRẦN; gói Free thực tế chỉ
-    lấy tối đa `TK_FB_TOI_DA` bài) — báo cao hơn còn hơn báo thiếu."""
+    lấy tối đa `TK_FB_TOI_DA` bài) — báo cao hơn còn hơn báo thiếu. `tu_khoa[p]["so_tu_gui"]`:
+    số từ khoá THẬT SỰ tìm của nền tảng (Threads ít hơn khi số bài < 10 × số từ)."""
     tu = tu_tim(du_an)
     tk = {p: {**cau_hinh(du_an, "tu_khoa", p)} for p in NEN_TANG}
     bl = {p: {**cau_hinh(du_an, "binh_luan", p)} for p in NEN_TANG}
@@ -285,6 +327,7 @@ def bang_cau_hinh(du_an: dict) -> dict:
         tk[p]["uoc"] = (uoc_tk_nen_tang(p, tk[p]["so_bai"], tu, tk[p]["so_tu"],
                                         fb_toi_da=GIOI_HAN["tk_so_bai"][1])
                         if tk[p]["bat"] else 0.0)
+        tk[p]["so_tu_gui"] = len(tu_gui(p, tu, tk[p]["so_tu"], tk[p]["so_bai"]))
         bl[p]["uoc"] = (uoc_binh_luan_luot(bl[p]["so_bai"], bl[p]["moi_bai"], p)
                         if bl[p]["bat"] else 0.0)
     return {"tu_khoa": tk, "binh_luan": bl, "so_tu_khoa": len(tu),
@@ -295,16 +338,21 @@ def bang_cau_hinh(du_an: dict) -> dict:
 # ───── lịch quét tự động (15/10/2026): chi phí theo TẦN SUẤT lịch, không còn giả định 1 lượt/ngày ─────
 def nguon_moi_luot(nguon: list[dict]) -> float:
     """USD TỐI ĐA phần NGUỒN của MỘT lượt quét mọi nguồn (lịch `quet_moi_nguon`): chia lượt actor
-    đúng như `theo_doi.chia_phan` — mỗi (nền tảng, số bài mỗi lần) một lượt, mỗi lượt =
-    (đơn vị × giá + phí khởi động) × 1,3 (`uoc_mot_luot`). Nguồn tạm dừng, YouTube: 0."""
+    đúng như `theo_doi.chia_phan` — mỗi (nền tảng, số bài mỗi lần) một lượt (Threads: số bài
+    ≥ 10, ≤ 20 tài khoản mỗi lượt), mỗi lượt = (đơn vị × giá + phí khởi động) × 1,3
+    (`uoc_mot_luot`). Nguồn tạm dừng, YouTube: 0."""
     nhom: dict[tuple[str, int], int] = {}
     for n in nguon:
         p = n.get("nen_tang")
         if (n.get("trang_thai") or "dang_theo_doi") != "dang_theo_doi" or not GIA.get(p):
             continue
-        k = (p, 0 if p == "instagram" else _so(n.get("so_bai_moi_lan"), 5))
+        k = (p, 0 if p == "instagram" else _so_bai_th(p, _so(n.get("so_bai_moi_lan"), 5)))
         nhom[k] = nhom.get(k, 0) + 1
-    return round(sum(uoc_mot_luot(p, so, bai) for (p, bai), so in nhom.items()), 4)
+    tong = 0.0
+    for (p, bai), so in nhom.items():
+        lo = TH_TOI_DA_MOI_LUOT if p == "threads" else so
+        tong += sum(uoc_mot_luot(p, min(lo, so - i), bai) for i in range(0, so, lo))
+    return round(tong, 4)
 
 
 def uoc_lich(lich: dict, bang: dict, nguon: list[dict]) -> dict:
@@ -344,4 +392,7 @@ def hang_so_cho_trinh_duyet() -> dict:
     return {"gia": GIA, "he_so": HE_SO_UOC, "start": START_COST, "ngay": NGAY_THANG_CAU_HINH,
             "tk_gia": TK_GIA, "tk_khoi": TK_KHOI, "tk_fb_toi_da": TK_FB_TOI_DA,
             "tk_ig_so_tu": TK_IG_TOI_DA_TU, "bl_gia": BL_GIA, "bl_khoi": BL_KHOI_DONG,
-            "bl_uoc_moi_bai": BL_UOC_MOI_BAI, "gioi_han": GIOI_HAN, "nen_tang": NEN_TANG}
+            "bl_uoc_moi_bai": BL_UOC_MOI_BAI, "gioi_han": GIOI_HAN, "nen_tang": NEN_TANG,
+            # Threads (16/10/2026): ≥ 10 bài mỗi tài khoản / từ khoá, ≤ 20 mỗi lượt; mặc định tắt.
+            "th_toi_thieu_bai": TH_TOI_THIEU_BAI, "th_toi_da_moi_luot": TH_TOI_DA_MOI_LUOT,
+            "mac_dinh_tat": MAC_DINH_TAT}

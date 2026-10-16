@@ -56,7 +56,7 @@ def test_chuan_dinh_danh_tu_link_dan(p, vao, ra):
     ("facebook", "https://www.facebook.com/profile.php", "thiếu id"),
     ("facebook", "https://www.tiktok.com/@hapas", "TikTok"),
     ("tiktok", "", "Chưa nhập"),
-    ("threads", "hapas", "Nền tảng"),
+    ("twitter", "hapas", "Nền tảng"),           # Threads hợp lệ từ 16/10/2026
     ("tiktok", "tên có dấu cách", "TikTok"),
 ])
 def test_chuan_dinh_danh_bao_loi_de_hieu(p, vao, chu):

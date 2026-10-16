@@ -1149,7 +1149,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 cac_lich = await _k(app.state.kho.cac_lich, d["ma"])
             except LoiKho:
                 cac_lich = []
-            dong.append({**d, "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
+            # `cau_hinh` hiển thị: Threads (MAC_DINH_TAT) chưa đặt thì ô bật hiện TẮT như hiệu lực.
+            dong.append({**d, "cau_hinh": CP.cau_hinh_hien_thi(d.get("cau_hinh")),
+                         "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
                          "bang": CP.bang_cau_hinh(d),
                          "lich": CP.du_bao_lich(cac_lich, CP.bang_cau_hinh(d), nguon, bay_gio),
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),

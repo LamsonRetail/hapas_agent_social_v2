@@ -677,7 +677,7 @@ def test_api_chi_so():
     for q, ma in (("du_an=khong", 404), ("du_an=hapas&tu=14-10-2026", 400),
                   ("du_an=hapas&tu=2026-10-15&den=2026-10-14", 400),
                   ("du_an=hapas&tu=2025-01-01&den=2026-10-14", 400),
-                  ("du_an=hapas&nen_tang=threads", 400), ("du_an=hapas&loai=vip", 400)):
+                  ("du_an=hapas&nen_tang=twitter", 400), ("du_an=hapas&loai=vip", 400)):
         assert c.get("/api/chi-so?" + q).status_code == ma, q
 
 
@@ -1564,7 +1564,7 @@ def test_api_chi_so_bo_loc_moi_khoi_va_khoa_nho_rieng():
 
 
 @pytest.mark.parametrize("duong", ["chi-so", "bai", "binh-luan"])
-@pytest.mark.parametrize("sai", ["pham_vi=nha", "nen_tang=threads", "loai=vip", "sac_thai=vui",
+@pytest.mark.parametrize("sai", ["pham_vi=nha", "nen_tang=twitter", "loai=vip", "sac_thai=vui",
                                  "chu_de=" + "x" * 101, "anh_huong=khong_lo", "tuong_tac=5",
                                  "kieu_quet=x", "q=" + "x" * 101, "nen_tang=tiktok,myspace"])
 def test_api_bo_loc_sai_thi_400(duong, sai):
@@ -1581,7 +1581,7 @@ def test_api_bai_va_binh_luan_theo_bo_loc_chung():
     d = c.get(qb + "&pham_vi=ben_ngoai&ct_sac_thai=Tiêu cực").json()
     assert [b["khoa"] for b in d["bai"]] == ["tiktok:3"]
     assert c.get(qb + "&pham_vi=kenh_nha&ct_nen_tang=tiktok").json()["tong"] == 0
-    assert c.get(qb + "&ct_nen_tang=threads").status_code == 400
+    assert c.get(qb + "&ct_nen_tang=twitter").status_code == 400
     ql = "/api/binh-luan?du_an=hapas" + Q_LOC
     assert [x["ma"] for x in c.get(ql + "&pham_vi=kenh_nha").json()["binh_luan"]] == ["c"]
     d = c.get(ql + "&sac_thai=tieu_cuc").json()

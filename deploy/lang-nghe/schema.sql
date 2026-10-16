@@ -95,12 +95,12 @@ ALTER TABLE du_an ADD CONSTRAINT du_an_tk_so_bai_check CHECK (tk_so_bai >= 0);
 ALTER TABLE du_an DROP CONSTRAINT IF EXISTS du_an_tran_usd_thang_check;
 ALTER TABLE du_an ADD CONSTRAINT du_an_tran_usd_thang_check CHECK (tran_usd_thang >= 0);
 
--- 1 dòng = 1 nguồn theo dõi. `dinh_danh`: username TikTok/Instagram, kênh YouTube (UC… hoặc
+-- 1 dòng = 1 nguồn theo dõi. `dinh_danh`: username TikTok/Instagram/Threads, kênh YouTube (UC… hoặc
 -- @handle), URL trang Facebook — đã chuẩn hoá chữ thường (trừ id kênh YouTube UC…).
 CREATE TABLE IF NOT EXISTS nguon (
   id              BIGSERIAL PRIMARY KEY,
   du_an           TEXT NOT NULL REFERENCES du_an(ma) ON UPDATE CASCADE,
-  nen_tang        TEXT NOT NULL CHECK (nen_tang IN ('tiktok', 'instagram', 'youtube', 'facebook')),
+  nen_tang        TEXT NOT NULL CHECK (nen_tang IN ('tiktok', 'instagram', 'youtube', 'facebook', 'threads')),
   dinh_danh       TEXT NOT NULL CHECK (length(dinh_danh) BETWEEN 2 AND 200),
   ten             TEXT NOT NULL DEFAULT '',
   link            TEXT NOT NULL DEFAULT '',
@@ -248,6 +248,11 @@ ALTER TABLE binh_luan ADD COLUMN IF NOT EXISTS ma_cha TEXT;
 -- Số bài mỗi lần của nguồn: bỏ trần trên (chủ dự án 15/10: "không có giới hạn").
 ALTER TABLE nguon DROP CONSTRAINT IF EXISTS nguon_so_bai_moi_lan_check;
 ALTER TABLE nguon ADD CONSTRAINT nguon_so_bai_moi_lan_check CHECK (so_bai_moi_lan >= 1);
+-- Threads (16/10/2026, chủ dự án: "thêm listening threads"): nguồn Threads theo dõi được. DB đã tạo
+-- trước đó giữ ràng buộc 4 nền tảng (tên tự sinh nguon_nen_tang_check) — đổi ở đây, chạy lại được.
+ALTER TABLE nguon DROP CONSTRAINT IF EXISTS nguon_nen_tang_check;
+ALTER TABLE nguon ADD CONSTRAINT nguon_nen_tang_check
+  CHECK (nen_tang IN ('tiktok', 'instagram', 'youtube', 'facebook', 'threads'));
 
 -- 1 dòng = 1 bài × 1 dự án × 1 ngày (giờ VN): số đọc được lần cuối trong ngày đó.
 CREATE TABLE IF NOT EXISTS chi_so_ngay (
@@ -349,10 +354,10 @@ COMMENT ON COLUMN du_an.tao_luc IS 'Thời điểm tạo dự án (TIMESTAMPTZ, 
 COMMENT ON COLUMN du_an.sua_luc IS 'Thời điểm sửa dự án gần nhất (TIMESTAMPTZ, lưu UTC).';
 COMMENT ON COLUMN du_an.bl_bat IS 'Công tắc TỔNG cào bình luận. TRUE: mỗi lượt /theodoi cào bình luận theo cấu hình từng nền tảng (cau_hinh.binh_luan; tính vào trần tháng). FALSE: không nền tảng nào cào, dù cau_hinh bật. Lưu cấu hình trên dashboard đặt = có ít nhất một nền tảng bật.';
 COMMENT ON COLUMN du_an.bl_so_bai IS 'Số bài mặc định được cào bình luận mỗi lượt cho TỪNG nền tảng (khi cau_hinh không ghi đè), bài, ≥ 0 (không trần trên). 0 = không cào. Ưu tiên bài chưa cào, rồi bài có số bình luận tăng ≥ 20%.';
-COMMENT ON COLUMN du_an.bl_moi_bai IS 'Số bình luận tối đa cào mỗi bài mỗi lượt, bình luận. 0 (mặc định) = cào HẾT bình luận + trả lời của bài (Facebook lần sau chỉ lấy bình luận mới; bài quá to cho trần mỗi lượt thì cào tiếp ở lượt sau); ≥ 5 = giới hạn. Actor tính tiền theo bình luận (TikTok 0,00125, Facebook 0,0025, Instagram 0,0026 USD; YouTube miễn phí).';
+COMMENT ON COLUMN du_an.bl_moi_bai IS 'Số bình luận tối đa cào mỗi bài mỗi lượt, bình luận. 0 (mặc định) = cào HẾT bình luận + trả lời của bài (Facebook lần sau chỉ lấy bình luận mới; bài quá to cho trần mỗi lượt thì cào tiếp ở lượt sau); ≥ 5 = giới hạn. Actor tính tiền theo bình luận (TikTok 0,00125, Facebook 0,0025, Instagram 0,0026, Threads 0,0025 USD + 0,02 khởi động; YouTube miễn phí). Threads chỉ nhận 10–300 trả lời mỗi bài.';
 COMMENT ON COLUMN du_an.tk_bat IS 'Công tắc TỔNG tìm theo từ khoá. TRUE: mỗi lượt /theodoi còn TÌM theo từ khoá dự án trên các nền tảng bật trong cau_hinh.tu_khoa để bắt bài của mọi tài khoản (tính vào trần tháng). FALSE: chỉ quét nguồn đã theo dõi, dù cau_hinh bật.';
-COMMENT ON COLUMN du_an.tk_so_bai IS 'Số bài mặc định lấy mỗi nền tảng mỗi lượt khi tìm theo từ khoá (khi cau_hinh không ghi đè), bài, ≥ 0 (không trần trên; Facebook gói Free thực tế tối đa 20 bài, 1 lượt/24h). 0 = không tìm.';
-COMMENT ON COLUMN du_an.cau_hinh IS 'Cấu hình thu thập theo từng nền tảng (JSON), sửa ở trang Ngân sách: {"tu_khoa": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "so_tu" ≥ 1}}, "binh_luan": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "moi_bai" 0 = hết hoặc ≥ 5}}} — không trần trên nghiệp vụ (chỉ chặn số rác > 1.000.000). Khoá thiếu/giá trị rác thì dùng cột chung tk_* / bl_*; chỉ bat = true là bật; cột tk_bat / bl_bat là công tắc tổng. {} = theo cột chung.';
+COMMENT ON COLUMN du_an.tk_so_bai IS 'Số bài mặc định lấy mỗi nền tảng mỗi lượt khi tìm theo từ khoá (khi cau_hinh không ghi đè), bài, ≥ 0 (không trần trên; Facebook gói Free thực tế tối đa 20 bài, 1 lượt/24h; Threads chỉ tìm số bài // 10 từ khoá đầu vì actor lấy ≥ 10 bài mỗi từ). 0 = không tìm.';
+COMMENT ON COLUMN du_an.cau_hinh IS 'Cấu hình thu thập theo từng nền tảng (JSON), sửa ở trang Ngân sách: {"tu_khoa": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "so_tu" ≥ 1}}, "binh_luan": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "moi_bai" 0 = hết hoặc ≥ 5}}} — không trần trên nghiệp vụ (chỉ chặn số rác > 1.000.000). Khoá thiếu/giá trị rác thì dùng cột chung tk_* / bl_*; chỉ bat = true là bật; thiếu bat thì bật theo cột chung, TRỪ threads (thiếu bat = tắt — chủ dự án bật trên trang Ngân sách, từ 16/10/2026); cột tk_bat / bl_bat là công tắc tổng. {} = theo cột chung (Threads tắt).';
 COMMENT ON COLUMN du_an.sua_boi IS 'Email người sửa gần nhất trên dashboard. NULL khi tạo bằng lệnh cài đặt. Email nội bộ — không đẩy lên BigQuery.';
 
 COMMENT ON TABLE nguon IS $$[Lớp] Raw
@@ -360,7 +365,7 @@ COMMENT ON TABLE nguon IS $$[Lớp] Raw
 [Grain] 1 dòng = 1 nguồn (1 tài khoản/kênh/trang trên 1 nền tảng) của 1 dự án
 [Khoá] PK: id | UNIQUE: du_an + nen_tang + dinh_danh | Join: du_an → du_an.ma; id → bai.nguon_id
 [Nguồn] Người quản lý thêm/sửa trên dashboard (hoặc duyệt từ de_xuat); Mark chỉ ghi quet_cuoi, loi_cuoi, loi_luc
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Định danh chuẩn hoá (chữ thường, bỏ @ và tham số URL; id kênh YouTube UC… giữ nguyên)
 [Refresh] Ghi tức thời khi người quản lý sửa; Mark cập nhật cột quét sau mỗi lượt /theodoi
 [Dùng khi] Nguồn nào đang theo dõi, tới hạn quét, lỗi gần nhất
@@ -368,15 +373,15 @@ COMMENT ON TABLE nguon IS $$[Lớp] Raw
 [Lưu ý] Xoá nguồn thì bài cũ giữ lại với nguon_id NULL; nên tạm dừng thay vì xoá.$$;
 COMMENT ON COLUMN nguon.id IS 'Mã nguồn tự tăng. PK. Join: → bai.nguon_id.';
 COMMENT ON COLUMN nguon.du_an IS 'Dự án của nguồn. FK → du_an.ma.';
-COMMENT ON COLUMN nguon.nen_tang IS 'Nền tảng. Giá trị: tiktok, instagram, youtube, facebook.';
-COMMENT ON COLUMN nguon.dinh_danh IS 'Định danh nguồn đã chuẩn hoá: username TikTok/Instagram, id kênh YouTube (UC…) hoặc @handle, URL trang Facebook. Duy nhất trong (du_an, nen_tang).';
+COMMENT ON COLUMN nguon.nen_tang IS 'Nền tảng. Giá trị: tiktok, instagram, youtube, facebook, threads (từ 16/10/2026).';
+COMMENT ON COLUMN nguon.dinh_danh IS 'Định danh nguồn đã chuẩn hoá: username TikTok/Instagram/Threads (chữ thường, không @), id kênh YouTube (UC…) hoặc @handle, URL trang Facebook. Duy nhất trong (du_an, nen_tang).';
 COMMENT ON COLUMN nguon.ten IS 'Tên hiển thị của nguồn. Chuỗi rỗng khi chưa nhập.';
 COMMENT ON COLUMN nguon.link IS 'Link hồ sơ/kênh/trang. Chuỗi rỗng khi chưa nhập.';
 COMMENT ON COLUMN nguon.loai IS 'Loại nguồn. Giá trị: kol, page, group, bao, kenh_nha (kênh của chính brand — giữ mọi bài), khac.';
 COMMENT ON COLUMN nguon.nhan IS 'Nhãn tự do để lọc (vd đối thủ, top Kompa). Mảng rỗng khi không gắn.';
 COMMENT ON COLUMN nguon.trang_thai IS 'Giá trị: dang_theo_doi (được quét khi tới hạn), tam_dung (bỏ qua).';
 COMMENT ON COLUMN nguon.chu_ky_ngay IS 'Chu kỳ quét, ngày (1–30). Tới hạn khi lần quét cuối cách ≥ chu kỳ trừ 3 giờ.';
-COMMENT ON COLUMN nguon.so_bai_moi_lan IS 'Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram: actor hồ sơ chỉ trả 12 bài mới nhất.';
+COMMENT ON COLUMN nguon.so_bai_moi_lan IS 'Số bài mới nhất lấy mỗi lần quét, bài (≥ 1, không trần trên). Instagram: actor hồ sơ chỉ trả 12 bài mới nhất. Threads: actor lấy (và tính tiền) tối thiểu 10 bài mỗi tài khoản.';
 COMMENT ON COLUMN nguon.them_qua IS 'Giá trị: dashboard (người quản lý thêm), de_xuat (duyệt từ đề xuất của Mark), nhap_file.';
 COMMENT ON COLUMN nguon.them_boi IS 'Email người thêm nguồn. NULL khi thêm bằng lệnh cài đặt. Email nội bộ — không đẩy lên BigQuery.';
 COMMENT ON COLUMN nguon.them_luc IS 'Thời điểm thêm nguồn (TIMESTAMPTZ, lưu UTC).';
@@ -389,7 +394,7 @@ COMMENT ON TABLE de_xuat IS $$[Lớp] Raw
 [Grain] 1 dòng = 1 tài khoản đề xuất của 1 dự án
 [Khoá] PK: id | UNIQUE: du_an + nen_tang + dinh_danh | Join: du_an → du_an.ma
 [Nguồn] Mark ghi sau mỗi lượt social_listen khớp từ khoá dự án; người quản lý duyệt/từ chối trên dashboard
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube | Từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Threads (từ 16/10/2026) | Từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Chỉ tài khoản ≥ 2 bài hoặc ≥ 50 thảo luận trong lượt; tối đa 10 mỗi lượt; bỏ nguồn đã có
 [Refresh] Mark upsert sau mỗi lượt tìm theo từ khoá (số liệu ghi đè lần mới nhất)
 [Dùng khi] Danh sách nguồn chờ duyệt và lý do đề xuất
@@ -397,7 +402,7 @@ COMMENT ON TABLE de_xuat IS $$[Lớp] Raw
 [Lưu ý] Mark không tự thêm nguồn; duyệt thì dashboard thêm dòng nguon với them_qua = de_xuat. Không đẩy lên BigQuery.$$;
 COMMENT ON COLUMN de_xuat.id IS 'Mã đề xuất tự tăng. PK.';
 COMMENT ON COLUMN de_xuat.du_an IS 'Dự án nhận đề xuất. FK → du_an.ma.';
-COMMENT ON COLUMN de_xuat.nen_tang IS 'Nền tảng của tài khoản. Giá trị: tiktok, instagram, youtube.';
+COMMENT ON COLUMN de_xuat.nen_tang IS 'Nền tảng của tài khoản. Giá trị: tiktok, instagram, youtube, threads.';
 COMMENT ON COLUMN de_xuat.dinh_danh IS 'Định danh tài khoản (username hoặc id kênh YouTube UC…), cùng dạng nguon.dinh_danh.';
 COMMENT ON COLUMN de_xuat.ten IS 'Tên hiển thị tài khoản lúc đề xuất.';
 COMMENT ON COLUMN de_xuat.link IS 'Link hồ sơ/kênh.';
@@ -441,8 +446,8 @@ COMMENT ON TABLE bai IS $$[Lớp] Raw
 [Mục đích] Bài mạng xã hội liên quan tới dự án mà Mark đã giữ, kèm nhãn AI và tương tác mới nhất.
 [Grain] 1 dòng = 1 bài × 1 dự án
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay, binh_luan; luot_dau, luot_cuoi → luot_quet.id
-[Nguồn] Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá (social_listen)
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook (Threads từ tìm theo từ khoá) | Bài đăng trong 35 ngày trước lượt theo dõi, từ khi bật đợt 2 (sau 14/10/2026)
+[Nguồn] Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá (/theodoi, social_listen)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen) | Bài đăng trong 35 ngày trước lượt theo dõi, từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Chỉ bài liên quan (nhắc từ khoá trừ kênh nhà, không chứa từ loại trừ, không bị AI loại); khử trùng theo khoa; nội dung cắt 1.000 ký tự
 [Refresh] Upsert tức thời sau mỗi lượt quét; video YouTube được đọc lại số mỗi ngày trong 14 ngày đầu
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề
@@ -450,12 +455,12 @@ COMMENT ON TABLE bai IS $$[Lớp] Raw
 [Lưu ý] Số là lần đọc gần nhất, không phải cuối kỳ. Mẫu theo nguồn đã chọn + lượt tìm, không phải toàn bộ thảo luận trên mạng.$$;
 COMMENT ON COLUMN bai.du_an IS 'Dự án. Một phần PK. FK → du_an.ma.';
 COMMENT ON COLUMN bai.khoa IS 'Khoá bài "<nền tảng>:<id bài>" (không bóc được id thì "h" + 16 ký tự băm SHA-1 của link). Một phần PK.';
-COMMENT ON COLUMN bai.nen_tang IS 'Nền tảng: tiktok, instagram, youtube, facebook; tìm theo từ khoá có thể thêm threads.';
+COMMENT ON COLUMN bai.nen_tang IS 'Nền tảng. Giá trị: tiktok, instagram, youtube, facebook, threads.';
 COMMENT ON COLUMN bai.nguon_id IS 'Nguồn theo dõi cho ra bài. FK → nguon.id. NULL khi bài từ tìm theo từ khoá (tài khoản chưa theo dõi) hoặc nguồn đã bị xoá.';
 COMMENT ON COLUMN bai.kieu_quet IS 'Giá trị: theo_doi, tu_khoa. Bài từng là theo_doi thì giữ theo_doi.';
 COMMENT ON COLUMN bai.link IS 'Link bài gốc. Không NULL.';
 COMMENT ON COLUMN bai.tac_gia IS 'Tên hiển thị kênh/tài khoản đăng. Chuỗi rỗng khi không có.';
-COMMENT ON COLUMN bai.tai_khoan IS 'Username tài khoản đăng (TikTok, Instagram). Chuỗi rỗng với YouTube.';
+COMMENT ON COLUMN bai.tai_khoan IS 'Username tài khoản đăng (TikTok, Instagram, Threads). Chuỗi rỗng với YouTube.';
 COMMENT ON COLUMN bai.followers IS 'Người theo dõi tài khoản đăng lúc đọc gần nhất, người. NULL khi nền tảng không trả.';
 COMMENT ON COLUMN bai.dang_luc IS 'Thời điểm đăng bài (UTC; giờ VN = dang_luc AT TIME ZONE ''Asia/Ho_Chi_Minh'').';
 COMMENT ON COLUMN bai.noi_dung IS 'Nội dung/caption (YouTube: tiêu đề — mô tả), tối đa 1.000 ký tự.';
@@ -482,17 +487,17 @@ COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
 [Mục đích] Bình luận (và trả lời) dưới các bài đã giữ của dự án, kèm sắc thái và chủ đề AI gán — tiếng khách hàng.
 [Grain] 1 dòng = 1 bình luận × 1 bài × 1 dự án
 [Khoá] PK: du_an + khoa_bai + ma | Join: (du_an, khoa_bai) → bai.(du_an, khoa); luot_id → luot_quet.id
-[Nguồn] Mark cào sau mỗi lượt /theodoi: Apify (TikTok, Facebook, Instagram comments scraper), YouTube Data API
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Bài đăng trong 35 ngày; tối đa bl_so_bai bài mỗi lượt, mỗi bài cào hết (bl_moi_bai = 0) hoặc tới bl_moi_bai bình luận; từ 15/10/2026
+[Nguồn] Mark cào sau mỗi lượt /theodoi: Apify (TikTok, Facebook, Instagram comments scraper; Threads replies scraper), YouTube Data API
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Bài đăng trong 35 ngày; tối đa bl_so_bai bài mỗi lượt, mỗi bài cào hết (bl_moi_bai = 0) hoặc tới bl_moi_bai bình luận; từ 15/10/2026
 [Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng gắn nhãn lọc loai (hop_le/it_noi_dung/spam/trung/seeding/thuong_hieu; spam gồm spam affiliate, lọc lại dữ liệu cũ bằng scripts/lang_nghe_loc_lai.py) — chỉ hop_le được gán sắc thái/chủ đề
 [Refresh] Upsert tức thời sau mỗi lượt quét (bài được cào lại khi số bình luận tăng ≥ 20%)
 [Dùng khi] Đọc từng bình luận; thảo luận sạch (loai = 'hop_le'); sắc thái/chủ đề bình luận; tỷ lệ spam/seeding
 [Không dùng khi] Tổng bình luận nền tảng báo → dùng bai.binh_luan; bản cho BI → dùng ganesha-381907.SOCIAL_LISTENING.binh_luan
-[Lưu ý] Đếm thảo luận sạch phải lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, Facebook/TikTok bài rất lớn có thể thiếu (so bai.bl_da_lay với bai.binh_luan để biết độ phủ).$$;
+[Lưu ý] Đếm thảo luận sạch phải lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, Threads chỉ trả lời cấp 1 (10–300 mỗi bài), Facebook/TikTok bài rất lớn có thể thiếu (so bai.bl_da_lay với bai.binh_luan để biết độ phủ).$$;
 COMMENT ON COLUMN binh_luan.du_an IS 'Dự án. Một phần PK. FK (cùng khoa_bai) → bai.';
 COMMENT ON COLUMN binh_luan.khoa_bai IS 'Khoá bài chứa bình luận. Một phần PK. FK (cùng du_an) → bai.khoa.';
 COMMENT ON COLUMN binh_luan.ma IS 'Mã bình luận trên nền tảng; không có thì "h" + 16 ký tự băm SHA-1 (tác giả, nội dung, thời điểm). Một phần PK.';
-COMMENT ON COLUMN binh_luan.nen_tang IS 'Nền tảng. Giá trị: tiktok, instagram, youtube, facebook.';
+COMMENT ON COLUMN binh_luan.nen_tang IS 'Nền tảng. Giá trị: tiktok, instagram, youtube, facebook, threads.';
 COMMENT ON COLUMN binh_luan.tac_gia IS 'Tên/username người bình luận (công khai trên nền tảng). Chuỗi rỗng khi không có.';
 COMMENT ON COLUMN binh_luan.noi_dung IS 'Nội dung bình luận, tối đa 1.000 ký tự.';
 COMMENT ON COLUMN binh_luan.thich IS 'Lượt thích bình luận lúc cào, lượt. NULL khi nền tảng không trả.';
@@ -506,7 +511,7 @@ COMMENT ON COLUMN binh_luan.luot_id IS 'Lượt quét cào bình luận gần nh
 COMMENT ON COLUMN binh_luan.thay_lan_dau IS 'Thời điểm ghi bình luận lần đầu (UTC).';
 COMMENT ON COLUMN binh_luan.cap_nhat_cuoi IS 'Thời điểm cập nhật gần nhất (UTC). Mốc đồng bộ BigQuery.';
 COMMENT ON COLUMN binh_luan.loai IS 'Nhãn lọc (loc_rac.py). Giá trị: hop_le (tính vào thảo luận sạch, có sắc thái), it_noi_dung (chỉ dấu chấm/emoji/tag/"chấm" — tương tác nhưng không có ý), spam (quảng cáo/lừa đảo/kéo khách, gồm spam affiliate mời dán mã giới thiệu vào Shopee), trung (cùng người cùng nội dung cùng bài, giữ bản đầu), seeding (cùng nội dung ≥ 40 ký tự từ ≥ 3 tài khoản trên ≥ 2 bài trong 7 ngày), thuong_hieu (chính thương hiệu viết).';
-COMMENT ON COLUMN binh_luan.link IS 'Link mở thẳng tới bình luận khi nền tảng có (Facebook/Instagram commentUrl, YouTube &lc=); NULL thì mở bài (bai.link).';
+COMMENT ON COLUMN binh_luan.link IS 'Link mở thẳng tới bình luận khi nền tảng có (Facebook/Instagram commentUrl, Threads reply_url, YouTube &lc=); NULL thì mở bài (bai.link).';
 COMMENT ON COLUMN binh_luan.ma_cha IS 'Mã bình luận cha khi dòng là trả lời (cùng khoa_bai). NULL với bình luận gốc hoặc nền tảng không trả.';
 COMMENT ON COLUMN binh_luan.ly_do_loc IS 'Lý do lọc khi loai không phải hop_le (vd lien_ket_quang_cao, keo_khach, vay_tien, co_bac, viec_lam_mmo, ban_hang_khac, so_dien_thoai_quang_cao, cung_nguoi_cung_noi_dung, cung_noi_dung_nhieu_tai_khoan; affiliate_dan_ma = một bình luận có mã giới thiệu nhiều khúc kèm lời dặn dán mã hoặc tên sàn, hoặc chữ kiểu cách kèm lời dặn; affiliate_hang_loat = ≥ 5 tài khoản có mã (hoặc chữ kiểu cách + lời dặn/tên sàn) dưới cùng một bài trong 48 giờ theo giờ đăng, trừ mã của chính thương hiệu). NULL khi hợp lệ.';
 COMMENT ON COLUMN binh_luan.ma_noi_dung IS 'Băm 16 ký tự nội dung đã chuẩn hoá khi nội dung ≥ 40 ký tự — để phát hiện seeding (cùng mã, ≥ 3 tài khoản, ≥ 2 bài, 7 ngày). NULL khi quá ngắn.';
@@ -516,7 +521,7 @@ COMMENT ON TABLE chi_so_ngay IS $$[Lớp] Raw
 [Grain] 1 dòng = 1 bài × 1 dự án × 1 ngày đọc (giờ VN)
 [Khoá] PK: du_an + khoa + ngay | Join: (du_an, khoa) → bai.(du_an, khoa)
 [Nguồn] Mark ghi mỗi lần đọc số của bài (ghi đè trong cùng ngày)
-[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook | Từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads | Từ khi bật đợt 2 (sau 14/10/2026)
 [Đã xử lý] Không xử lý
 [Refresh] Upsert tức thời mỗi lần Mark đọc số
 [Dùng khi] Tăng trưởng theo ngày; phần tăng trong kỳ = ngày cuối − ngày đầu
