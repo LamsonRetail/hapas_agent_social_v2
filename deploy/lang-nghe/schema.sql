@@ -501,7 +501,7 @@ COMMENT ON COLUMN binh_luan.la_tra_loi IS 'TRUE: dòng là trả lời của m�
 COMMENT ON COLUMN binh_luan.cua_thuong_hieu IS 'TRUE: do tài khoản của chính thương hiệu viết (không gán nhãn, không tính sắc thái). FALSE: khách.';
 COMMENT ON COLUMN binh_luan.dang_luc IS 'Thời điểm đăng bình luận (UTC). NULL khi nền tảng chỉ trả thời gian tương đối.';
 COMMENT ON COLUMN binh_luan.sac_thai IS 'Sắc thái AI/luật gán. Giá trị: Tích cực, Tiêu cực, Trung lập. NULL khi chưa gán hoặc bình luận của thương hiệu.';
-COMMENT ON COLUMN binh_luan.chu_de IS 'Chủ đề bình luận theo 7 nhóm của Mark (Sản phẩm/chất lượng, Giá/mua ở đâu/ý định mua, KOL/nội dung, Giao hàng/dịch vụ, Đối thủ, Tag bạn bè, Khác). NULL khi chưa gán.';
+COMMENT ON COLUMN binh_luan.chu_de IS 'Chủ đề bình luận theo 8 nhóm của Mark (Sản phẩm/chất lượng, Giá/mua ở đâu/ý định mua, KOL/nội dung, Giao hàng/dịch vụ, Đối thủ, Tag bạn bè, Minigame/bài dự thi, Khác). Minigame/bài dự thi = bài dự thi/lời chúc theo đề bài của brand, từ 16/10/2026; dashboard ẩn khỏi mây từ khoá. NULL khi chưa gán.';
 COMMENT ON COLUMN binh_luan.luot_id IS 'Lượt quét cào bình luận gần nhất. FK → luot_quet.id.';
 COMMENT ON COLUMN binh_luan.thay_lan_dau IS 'Thời điểm ghi bình luận lần đầu (UTC).';
 COMMENT ON COLUMN binh_luan.cap_nhat_cuoi IS 'Thời điểm cập nhật gần nhất (UTC). Mốc đồng bộ BigQuery.';

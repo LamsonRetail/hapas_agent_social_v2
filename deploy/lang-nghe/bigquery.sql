@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.binh_luan`
   cua_thuong_hieu BOOL      OPTIONS(description='TRUE: do tài khoản của chính thương hiệu viết — không gán nhãn, loại khỏi sắc thái. FALSE: khách.'),
   dang_luc        TIMESTAMP OPTIONS(description='Thời điểm đăng bình luận, UTC (giờ VN = +7). NULL khi nền tảng chỉ trả thời gian tương đối.'),
   sac_thai        STRING    OPTIONS(description='Sắc thái AI/luật gán. Giá trị: Tích cực, Tiêu cực, Trung lập. NULL khi chưa gán hoặc bình luận của thương hiệu.'),
-  chu_de          STRING    OPTIONS(description='Chủ đề bình luận (7 nhóm: Sản phẩm/chất lượng, Giá/mua ở đâu/ý định mua, KOL/nội dung, Giao hàng/dịch vụ, Đối thủ, Tag bạn bè, Khác). NULL khi chưa gán.'),
+  chu_de          STRING    OPTIONS(description='Chủ đề bình luận (8 nhóm: Sản phẩm/chất lượng, Giá/mua ở đâu/ý định mua, KOL/nội dung, Giao hàng/dịch vụ, Đối thủ, Tag bạn bè, Minigame/bài dự thi, Khác). Minigame/bài dự thi = bài dự thi/lời chúc theo đề bài của brand, từ 16/10/2026. NULL khi chưa gán.'),
   luot_id         INT64     OPTIONS(description='Lượt quét cào bình luận gần nhất. FK → luot_quet.id.'),
   thay_lan_dau    TIMESTAMP OPTIONS(description='Thời điểm Mark ghi bình luận lần đầu, UTC.'),
   cap_nhat_cuoi   TIMESTAMP OPTIONS(description='Thời điểm cập nhật gần nhất ở DB nguồn, UTC. Mốc đồng bộ.'),

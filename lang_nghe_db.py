@@ -364,6 +364,10 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 f"ly_do_loc = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.ly_do_loc "
                 "ELSE EXCLUDED.ly_do_loc END, "
                 "ma_noi_dung = EXCLUDED.ma_noi_dung, "
+                # 16/10: nhận ra trả lời của fanpage muộn hơn (so tên gọn với chủ bài) thì bật cờ
+                # cho dòng cũ — chỉ bật, không tắt (cờ đặt tay / script gán lại vẫn giữ).
+                "cua_thuong_hieu = binh_luan.cua_thuong_hieu "
+                "OR COALESCE(EXCLUDED.cua_thuong_hieu, false), "
                 "link = COALESCE(EXCLUDED.link, binh_luan.link), "
                 "ma_cha = COALESCE(EXCLUDED.ma_cha, binh_luan.ma_cha), "
                 "luot_id = EXCLUDED.luot_id, cap_nhat_cuoi = now() "
