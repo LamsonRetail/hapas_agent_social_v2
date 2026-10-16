@@ -204,3 +204,27 @@ với bài web.
 5. **Đánh giá sàn**: đồng ý đi API người bán (cần quyền app Shopee/Lazada/TikTok Shop của LSR)
    thay vì cào?
 6. Giai đoạn 2 (danh sách báo theo dõi, hạng miền) làm ngay hay chờ 2–4 tuần dữ liệu?
+
+## Quyết định của chủ dự án (16/10/2026)
+
+1. **BẬT lắng nghe web cho HAPAS:**
+   - quét hằng ngày, cửa sổ lùi 2 ngày;
+   - trong chiến dịch, quét 6 giờ/lần và thêm khẩu hiệu chiến dịch làm từ khoá phụ.
+2. **Thêm từ loại trừ** cho các bài nhiễu đã gặp:
+   - từ loại trừ: "kota hapas", "hapa", guitar, sushi, brewing;
+   - tên miền nhà: thêm `hapas.co`.
+3. **Trang chặn đọc thường** (403, hoặc chỉ có đoạn trích) được đọc bằng website-content-crawler, giá ≈ 0,009 USD/trang:
+   - có trần mỗi lượt;
+   - vẫn tôn trọng robots.txt.
+4. **Đánh giá Shopee / Lazada / TikTok Shop: để sau** (xem "Kế hoạch").
+
+## Kế hoạch (chưa làm)
+
+- **Đánh giá sàn (Shopee, Lazada, TikTok Shop):**
+  - lấy qua API người bán (LSR sở hữu shop): miễn phí, đầy đủ, hợp lệ;
+  - cần LSR cấp quyền ứng dụng;
+  - đánh giá đi vào luồng giống bình luận (sắc thái, chủ đề, ý định mua).
+- **Pha 2 web:**
+  - danh sách báo theo dõi (`nguon.nen_tang='web'` theo tên miền);
+  - xếp hạng mức ảnh hưởng của trang.
+  - Làm sau 2–4 tuần có dữ liệu.
