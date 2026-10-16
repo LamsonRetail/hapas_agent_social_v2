@@ -43,16 +43,16 @@
   // bình luận (0 = cào hết). Chỉ ĐIỀN ô — người dùng xem số ước tính rồi mới bấm Lưu.
   var MAU = {
     tiet_kiem: {
-      tk: { tiktok: [1, 10], facebook: [1, 10], instagram: [1, 5, 1], youtube: [1, 20] },
-      bl: { tiktok: [1, 3, 20], facebook: [1, 3, 20], instagram: [0, 3, 20], youtube: [1, 10, 100] }
+      tk: { tiktok: [1, 10], facebook: [1, 10], instagram: [1, 5, 1], youtube: [1, 20], threads: [0, 10] },
+      bl: { tiktok: [1, 3, 20], facebook: [1, 3, 20], instagram: [0, 3, 20], youtube: [1, 10, 100], threads: [0, 3, 20] }
     },
     can_bang: {
-      tk: { tiktok: [1, 30], facebook: [1, 20], instagram: [1, 10, 2], youtube: [1, 30] },
-      bl: { tiktok: [1, 5, 50], facebook: [1, 5, 50], instagram: [1, 3, 30], youtube: [1, 20, 200] }
+      tk: { tiktok: [1, 30], facebook: [1, 20], instagram: [1, 10, 2], youtube: [1, 30], threads: [0, 10] },
+      bl: { tiktok: [1, 5, 50], facebook: [1, 5, 50], instagram: [1, 3, 30], youtube: [1, 20, 200], threads: [0, 5, 50] }
     },
     day_du: {
-      tk: { tiktok: [1, 100], facebook: [1, 20], instagram: [1, 30, 4], youtube: [1, 100] },
-      bl: { tiktok: [1, 20, 0], facebook: [1, 20, 0], instagram: [1, 10, 0], youtube: [1, 50, 0] }
+      tk: { tiktok: [1, 100], facebook: [1, 20], instagram: [1, 30, 4], youtube: [1, 100], threads: [0, 20] },
+      bl: { tiktok: [1, 20, 0], facebook: [1, 20, 0], instagram: [1, 10, 0], youtube: [1, 50, 0], threads: [0, 10, 0] }
     }
   };
 
@@ -96,11 +96,16 @@
   // = chi_phi.uoc_tk_nen_tang như bang_cau_hinh gọi: KHÔNG kẹp Facebook ở tk_fb_toi_da — dashboard
   // không biết gói Apify, nên báo mức trần thận trọng theo đúng số bài đã đặt.
   function uocTk(p, so, soTu) {
-    var q = p === "instagram" ? TU_IG.slice(0, soTu) : TU;
+    // Threads (= chi_phi.tu_gui): chỉ `so // 10` từ đầu (≥ 1, ≤ 20) — actor lấy ≥ 10 bài mỗi từ.
+    var thMin = hs.th_toi_thieu_bai || 10;
+    var q = p === "instagram" ? TU_IG.slice(0, soTu)
+      : p === "threads" ? TU.slice(0, Math.max(1, Math.min(hs.th_toi_da_moi_luot || 20, Math.floor(so / thMin))))
+      : TU;
     var gia = (hs.tk_gia || {})[p] || 0;
     if (!q.length || !gia || so <= 0) return 0;
     if (p === "instagram") return r4(q.length * (hs.tk_khoi.instagram + so * gia) * hs.he_so);
-    return r4((so * gia + ((hs.tk_khoi || {})[p] || 0)) * hs.he_so);
+    var n = p === "threads" ? Math.max(so, thMin) : so;
+    return r4((n * gia + ((hs.tk_khoi || {})[p] || 0)) * hs.he_so);
   }
   function uocBl(p, so, moi) {       // = chi_phi.uoc_binh_luan_luot
     moi = moi || hs.bl_uoc_moi_bai;
