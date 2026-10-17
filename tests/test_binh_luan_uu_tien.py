@@ -228,6 +228,10 @@ def test_tran_lo_giu_cho_cac_lo_sau():
     assert T._tran_lo_bl(2.0, 5.0, 1.0, 0.0, 4.0) == 1.0              # lô cuối: dùng hết
     assert T._tran_lo_bl(2.0, 5.0, 1.0, 0.0, 0.01) == 0.1             # sàn 0,1 của Apify
     assert T._tran_lo_bl(0.66, 5.0, 1.0, 0.0, 4.0) == 0.66            # trần console nền tảng
+    # Soát 18/10/2026: tháng còn 0,5 < việc 1,0 — phần giữ tính trên min(tháng, việc) = 0,5:
+    # lô đầu 0,5 − min(0,8; 0,25) = 0,25 (bản cũ: 1,0 − 0,5 = 0,5 = cả phần còn của tháng).
+    assert T._tran_lo_bl(2.0, 0.5, 1.0, 0.8, 4.0) == 0.25
+    assert T._tran_lo_bl(2.0, 0.5, 1.0, 0.0, 4.0) == 0.5               # lô cuối: dùng hết
 
 
 def test_cau_pheu_uu_tien_va_doc_tiep():

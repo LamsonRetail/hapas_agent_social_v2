@@ -4003,12 +4003,15 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
 
 def _tran_lo_bl(tran_console: float, con: float, con_v: float, sau: float, uoc: float,
                 min_charge: float = 0.0) -> float:
-    """Trần USD một lô bình luận = min(trần console, phần còn của tháng, phần còn của việc trừ phần
-    giữ cho các lô SAU (`sau` = Σ ước tính lô sau, tối đa `BL_GIU_CHO_SAU` phần còn), ước tính ×
-    1,5). Vì sao giữ chỗ (18/10/2026): lô bài to đứng đầu theo ưu tiên (`_uu_tien_bl`) mà lấy hết
-    phần còn thì các bài sau lại đói như cũ; phần bài to chưa cào được lượt sau đọc tiếp."""
-    return round(min(tran_console, con, con_v,
-                     max(_TRAN_TOI_THIEU, con_v - min(sau, BL_GIU_CHO_SAU * con_v)),
+    """Trần USD một lô bình luận = min(trần console, phần còn P = min(tháng, việc) trừ phần giữ
+    cho các lô SAU (`sau` = Σ ước tính lô sau, tối đa `BL_GIU_CHO_SAU` × P), ước tính × 1,5). Vì
+    sao giữ chỗ (18/10/2026): lô bài to đứng đầu theo ưu tiên (`_uu_tien_bl`) mà lấy hết phần còn
+    thì các bài sau lại đói như cũ; phần bài to chưa cào được lượt sau đọc tiếp. Soát 18/10/2026:
+    phần giữ tính trên min(tháng, việc) — tính trên riêng việc thì khi tháng còn ít hơn việc, lô
+    đầu vẫn lấy hết phần còn của tháng."""
+    p = min(con, con_v)
+    return round(min(tran_console, p,
+                     max(_TRAN_TOI_THIEU, p - min(sau, BL_GIU_CHO_SAU * p)),
                      max(_TRAN_TOI_THIEU, min_charge, uoc * _HE_SO_TRAN)), 2)
 
 
