@@ -189,6 +189,18 @@ def brand_du_an(du_an: dict | None) -> str:
     return f"{ten} — {bc}" if ten and bc else ten or bc
 
 
+def mon_hoi_mua(r: dict, sac: str, cd: str, sp: str | None) -> str | None:
+    """Món model trả CHỈ được ghi cho bình luận HỎI MUA theo đúng luật của dashboard
+    (`dashboard.chi_so._hoi_mua` với nhãn vừa gán) — model lỡ trả phần tử thứ ba cho bình luận
+    khen/chê thì bỏ, không để món nằm trên dòng không phải ý định mua (review 17/10/2026)."""
+    if not sp:
+        return None
+    from dashboard import chi_so as CS
+    c = {"loai": "hop_le", "noi_dung": r.get("noi_dung") or "", "sac_thai": sac, "chu_de": cd,
+         "la_tra_loi": bool(r.get("la_tra_loi"))}
+    return sp if CS._hoi_mua(c) else None
+
+
 def gan_lo_bl(ma: str, rows: list[dict], brand: str = "") -> dict:
     """Gán + ghi một lô bình luận (đã đọc từ kho). -> {ghi, sot, loi, hong}. Lô hỏng không ghi
     lần thử nào vào sổ (bên gọi quyết định khi lô chỉ còn một dòng). Mỗi dòng kèm ngữ cảnh bài
@@ -200,7 +212,7 @@ def gan_lo_bl(ma: str, rows: list[dict], brand: str = "") -> dict:
         [{"text": r.get("noi_dung") or "", "likes": int(r.get("thich") or 0),
           "ngu_canh_bai": ngu_canh_bai(r)} for r in rows],
         HAN_LO, tt, song_song=1, brand=brand, kem_san_pham=True)
-    ghi = [(r["khoa_bai"], r["ma"], r.get("noi_dung") or "", s, c, sp)
+    ghi = [(r["khoa_bai"], r["ma"], r.get("noi_dung") or "", s, c, mon_hoi_mua(r, s, c, sp))
            for r, (s, c, sp) in zip(rows, nhan) if s != P.CHUA and c != P.CHUA]
     x = {"ghi": K.ghi_nhan_bl(ma, ghi), "sot": len(tt.get("khong_tra") or []),
          "loi": int(tt.get("lo_loi") or 0) + int(tt.get("lo_het_gio") or 0)}

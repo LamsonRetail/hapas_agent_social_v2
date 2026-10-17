@@ -189,7 +189,8 @@ def test_y_dinh_mua_chia_theo_mon_va_bo_do_ngoai_brand():
 
 def test_loc_theo_mon_tren_moi_khoi_va_ngan_binh_luan():
     ds = _mau()
-    assert sorted(c["ma"] for c in CS.loc_bl(ds, CS.doc_bo_loc({"y_dinh": "set_qua"}))) == ["a", "b"]
+    loc = CS.doc_bo_loc({"y_dinh": "set_qua"})
+    assert sorted(c["ma"] for c in CS.loc_bl(ds, loc)) == ["a", "b"]
     assert sorted(c["ma"] for c in CS.loc_bl(ds, CS.doc_bo_loc({"y_dinh": "chua_ro"}))) == ["d"]
     assert sorted(c["ma"] for c in CS.loc_bl(ds, CS.doc_bo_loc({"y_dinh": "1"}))) == [
         "a", "b", "c", "d", "g"]
@@ -248,7 +249,8 @@ class _KetNoi:
         if "/* sp:sua */" in sql:
             sp, _, kb, ma, nd = tham
             for r in self.kho.bl:
-                if (r["khoa_bai"], r["ma"], r["noi_dung"]) == (kb, ma, nd) and r["san_pham"] is None:
+                if (r["khoa_bai"], r["ma"], r["noi_dung"]) == (kb, ma, nd) \
+                        and r["san_pham"] is None:
                     r["san_pham"] = sp
                     n += 1
         elif "/* sp:hoan */" in sql:
@@ -342,3 +344,71 @@ def test_bn_ban_hay_bao_nhieu():
     for s in ("giá bn", "bn ạ", "set này bn", "bộ này bn vậy ah", "bn 1 set ạ"):
         assert "bao nhiêu" in CC.chuan_hoa(s), s
 
+
+
+# ───────────────────────────── review 17/10/2026 ─────────────────────────────
+def test_ky_truoc_doc_la_tra_loi_de_luoi_cau_chu_dung():
+    """M1: so kỳ trước dùng `binh_luan_hop_le_gon` — thiếu cột la_tra_loi thì trả lời của người
+    bán ("Nàng ib e nha") lại được tính ở kỳ trước, lệch % so kỳ."""
+    import inspect
+
+    from dashboard import kho
+    assert "b.la_tra_loi" in inspect.getsource(kho.binh_luan_hop_le_gon)
+    nay = [_c("a", "xin giá")]
+    truoc = [{**_c("t", "Ib e nhé", cd="Giao hàng/dịch vụ", ngay=3), "la_tra_loi": True},
+             _c("u", "xin giá", ngay=3)]
+    y = CS.y_dinh_mua(nay, D(2026, 10, 8), D(2026, 10, 14), rows_truoc=truoc,
+                      hom_nay=D(2026, 10, 14))
+    assert y["truoc"] == 1
+
+
+def test_nhac_lo_tran_so_bai_va_do_dai():
+    """M2: lô 100 bình luận rải trên 100 bài thì prompt không phình theo số bài."""
+    texts = [f"xin giá {i}" for i in range(100)]
+    bai = ["Bài nhiều bình luận nhất " + "x" * 400] * 5 + \
+          [f"Bài {i} " + "y" * 400 for i in range(95)]
+    p = P._nhac_lo(texts, bai, "HAPAS")
+    khoi = re.findall(r'<b k="\d+">(.*?)</b>', p.split("BÀI (ngữ cảnh")[1])
+    assert len(khoi) == P._TOI_DA_BAI_LO and all(len(k) <= P._TOI_DA_CHU_BAI for k in khoi)
+    assert khoi[0].startswith("Bài nhiều bình luận nhất"), "bài phục vụ nhiều bình luận nhất"
+    them = len(p) - len(P._nhac_lo(texts, None, "HAPAS"))
+    assert them < P._TOI_DA_BAI_LO * (P._TOI_DA_CHU_BAI + 20) + 400
+    du_lieu = p.split("BÌNH LUẬN:")[1]
+    assert du_lieu.count(' b="') == 5 + P._TOI_DA_BAI_LO - 1, "bài ngoài trần: không kèm bài"
+
+
+@pytest.mark.parametrize("nd", ["túi này a bn ạ", "anh bn tiền vậy", "e lấy 2 cái vs bn tiền",
+                                "set này của bn tiền"])
+def test_bn_hoi_gia_thang_ngu_canh_ban(nd):
+    from dashboard import chuan_chu as CC
+    assert "bao nhiêu" in CC.chuan_hoa(nd)
+    assert CS.la_y_dinh_mua(_r(nd, "Khác"))
+
+
+def test_bn_ban_sau_loi_cam_on_van_la_ban():
+    from dashboard import chuan_chu as CC
+    assert CC.chuan_hoa("cảm ơn bn ạ").startswith("cảm ơn bạn")
+
+
+@pytest.mark.parametrize("nd", ["sét đánh ngang tai luôn, giá bao nhiêu", "sấm sét quá giá bn"])
+def test_set_khong_khop_set_danh(nd):
+    assert CS.san_pham_tu_chu(nd) is None
+
+
+def test_chi_ghi_mon_cho_binh_luan_hoi_mua():
+    gia, sp, dv = CS.CHU_DE_MUA, "Sản phẩm/chất lượng", "Giao hàng/dịch vụ"
+    assert G.mon_hoi_mua({"noi_dung": "xin giá"}, "Trung lập", gia, "set_qua") == "set_qua"
+    assert G.mon_hoi_mua({"noi_dung": "túi đẹp quá"}, "Tích cực", sp, "tui") is None
+    assert G.mon_hoi_mua({"noi_dung": "có ship nghệ an ko"}, "Trung lập", dv, "tui") == "tui"
+    assert G.mon_hoi_mua({"noi_dung": "Nàng ib e nha", "la_tra_loi": True}, "Trung lập", dv,
+                         "set_qua") is None, "trả lời của người bán"
+    # Chip món chỉ trên bình luận hỏi mua, kể cả khi kho lỡ có món.
+    the = CS.the_bl({**_c("x", "đẹp quá", "ngoai_brand", cd=sp, sac="Tích cực")})
+    assert the["san_pham"] == ""
+
+
+def test_script_bo_tra_loi_va_khong_sua_dong_thuong_hieu():
+    assert "NOT b.la_tra_loi OR b.chu_de = 'Giá/mua ở đâu/ý định mua'" in S.SQL_BL
+    assert "b.la_tra_loi" in S.SQL_BL and "AND NOT cua_thuong_hieu AND" in S.SQL_SUA
+    assert S.chon([{**_c("r", "Ib e nhé", cd="Giao hàng/dịch vụ"), "la_tra_loi": True},
+                   _c("k", "xin giá")]) == [_c("k", "xin giá")]

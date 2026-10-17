@@ -1214,9 +1214,9 @@ def the_bl(c: dict) -> dict:
             "chu_de": c.get("chu_de") or "", "khoa_bai": c.get("khoa_bai") or "",
             "nen_tang": c.get("nen_tang") or "", "loai": lb, "ten_loai": TEN_LOAI_BL[lb],
             "ly_do_loc": c.get("ly_do_loc") or "",
-            # Món khách hỏi mua (17/10/2026) — chỉ bình luận hỏi mua; "" với bình luận khác.
-            "san_pham": (SAN_PHAM[san_pham_bl(c)] if lb == "hop_le" and (
-                la_y_dinh_mua(c) or c.get("san_pham") == SP_NGOAI) else "")}
+            # Món khách hỏi mua (17/10/2026) — chỉ bình luận HỎI MUA (kể cả hỏi đồ ngoài brand,
+            # để thấy vì sao không tính); "" với bình luận khác dù kho có món.
+            "san_pham": SAN_PHAM[san_pham_bl(c)] if lb == "hop_le" and _hoi_mua(c) else ""}
 
 
 def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
@@ -1512,7 +1512,8 @@ def la_y_dinh_mua(c: dict) -> bool:
 # (hashtag túi xách gắn cả bài set quà, bài KOL — đoán theo bài là lặp lại đúng lỗi), không bao giờ
 # ra `ngoai_brand` (cần biết brand bán gì). So trên chữ CÓ DẤU: "túi" khác "tui" (= tôi).
 _RE_SP_SET = re.compile(
-    r"(?<!\w)(?:s[eé]t(?! đồ)|combo|box|gift ?box|h[ộo]p qu[àa]|b[ộo] qu[àa])(?!\w)")
+    r"(?<!\w)(?:(?<!sấm )s[eé]t(?! (?:đồ|đánh))|combo|box|gift ?box|h[ộo]p qu[àa]|b[ộo] qu[àa])"
+    r"(?!\w)")
 _RE_SP = (
     ("tui", re.compile(r"(?<!\w)(?:túi|balo|ba lô|clutch|tote|tui xach)(?!\w)")),
     ("vi", re.compile(r"(?<!\w)(?:ví(?! dụ)|bóp)(?!\w)")),

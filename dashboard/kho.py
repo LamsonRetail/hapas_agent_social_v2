@@ -342,7 +342,7 @@ def binh_luan_hop_le_gon(du_an: str, tu: datetime.datetime, den: datetime.dateti
     with ket_noi() as c:
         rows = c.execute(
             "SELECT b.khoa_bai, b.nen_tang, left(b.noi_dung, 1000) AS noi_dung, b.loai, "
-            "b.cua_thuong_hieu, b.sac_thai, b.chu_de, b.san_pham, "
+            "b.cua_thuong_hieu, b.sac_thai, b.chu_de, b.san_pham, b.la_tra_loi, "
             "COALESCE(b.dang_luc, b.thay_lan_dau) AS luc, "
             f"n.loai AS nguon_loai, bai.nguon_id {_TU_BL}"
             "WHERE b.du_an = %s AND b.loai = 'hop_le' AND COALESCE(b.dang_luc, b.thay_lan_dau) >= %s "

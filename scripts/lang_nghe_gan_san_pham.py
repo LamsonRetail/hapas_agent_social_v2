@@ -61,15 +61,19 @@ SQL_CHI_DOC = "SET TRANSACTION READ ONLY"
 SQL_DU_AN = "/* sp:du_an */ SELECT ma, ten, tu_khoa, boi_canh FROM du_an WHERE ma = %s"
 SQL_BL = (
     "/* sp:bl */ SELECT b.khoa_bai, b.ma, b.tac_gia, b.noi_dung, b.thich, b.loai, b.sac_thai, "
-    "b.chu_de, b.cua_thuong_hieu, b.san_pham, left(p.noi_dung, 300) AS bai_noi_dung, "
+    "b.chu_de, b.cua_thuong_hieu, b.san_pham, b.la_tra_loi, "
+    "left(p.noi_dung, 300) AS bai_noi_dung, "
     "left(p.hashtag, 120) AS bai_hashtag "
     "FROM binh_luan b JOIN bai p ON p.du_an = b.du_an AND p.khoa = b.khoa_bai "
     "WHERE b.du_an = %s AND b.loai = 'hop_le' AND NOT b.cua_thuong_hieu AND b.san_pham IS NULL "
-    "AND btrim(b.noi_dung) <> '' ORDER BY b.khoa_bai, b.ma")
+    "AND btrim(b.noi_dung) <> '' "
+    # Trả lời chỉ là ý định mua khi AI gán "Giá/mua…" (`dashboard.chi_so._hoi_mua`).
+    "AND (NOT b.la_tra_loi OR b.chu_de = 'Giá/mua ở đâu/ý định mua') "
+    "ORDER BY b.khoa_bai, b.ma")
 SQL_SUA = (
     "/* sp:sua */ UPDATE binh_luan SET san_pham = %s, cap_nhat_cuoi = now() "
     "WHERE du_an = %s AND khoa_bai = %s AND ma = %s AND san_pham IS NULL AND loai = 'hop_le' "
-    "AND noi_dung = %s")
+    "AND NOT cua_thuong_hieu AND noi_dung = %s")
 SQL_HOAN = (
     "/* sp:hoan */ UPDATE binh_luan SET san_pham = NULL, cap_nhat_cuoi = now() "
     "WHERE du_an = %s AND khoa_bai = %s AND ma = %s AND san_pham = %s")

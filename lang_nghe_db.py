@@ -682,9 +682,9 @@ def bl_cho_gan_nhan(ma: str, toi_da: int, bo: list[str] | tuple = ()) -> list[di
     hộp quà là hỏi set quà, không phải hỏi túi)."""
     with ket_noi() as c:
         return c.execute(
-            "SELECT x.khoa_bai, x.ma, x.noi_dung, x.thich, "
+            "SELECT x.khoa_bai, x.ma, x.noi_dung, x.thich, x.la_tra_loi, "
             "left(p.noi_dung, 300) AS bai_noi_dung, left(p.hashtag, 120) AS bai_hashtag "
-            "FROM (SELECT du_an, khoa_bai, ma, noi_dung, thich, dang_luc, thay_lan_dau "
+            "FROM (SELECT du_an, khoa_bai, ma, noi_dung, thich, la_tra_loi, dang_luc, thay_lan_dau "
             f"{_SQL_BL_CHO} AND NOT ((khoa_bai || chr(31) || ma) = ANY(%s)) "
             "ORDER BY COALESCE(thich, 0) DESC, COALESCE(dang_luc, thay_lan_dau) DESC LIMIT %s) x "
             "LEFT JOIN bai p ON p.du_an = x.du_an AND p.khoa = x.khoa_bai "

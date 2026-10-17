@@ -59,8 +59,12 @@ _TEEN_CO_DINH = {"mk": "mình", "mik": "mình", "mjk": "mình", "mh": "mình", "
 #: hỏi giá): thêm "bạn thân/bạn ấy/bạn phải/bạn hiểu/bạn bè" và "bảo/anh/a/với/vs/của/cùng + bn".
 _BAN_SAU = {"ơi", "oi", "ê", "à", "thân", "than", "ấy", "pk", "phải", "phai", "hiểu", "hieu",
             "bè"}
-_BAN_TRUOC = {"ơn", "on", "chào", "chao", "các", "cac", "giúp", "giup", "bảo", "a", "anh",
-              "với", "vs", "của", "cùng"}
+_BAN_TRUOC = {"ơn", "on", "chào", "chao", "các", "cac", "giúp", "giup"}
+#: Ngữ cảnh "bạn" yếu hơn: thua chữ hỏi giá đứng sau ("túi này a bn ạ", "anh bn tiền vậy", "lấy 2
+#: cái vs bn tiền", "set này của bn tiền" là hỏi giá — review 17/10/2026).
+_BAN_TRUOC_YEU = {"bảo", "a", "anh", "với", "vs", "của", "cùng"}
+_BN_GIA_SAU = {"tiền", "tien", "k", "ạ", "nhiêu", "nhieu", "vậy", "vay", "v", "z", "thế", "the",
+               "nhỉ", "nhi", "shop", "sốp", "1", "2", "3"}
 #: "sét" là "set" (bộ sản phẩm) khi đứng cạnh từ chỉ hàng — tránh đổi "sét đánh".
 _SET_SAU = {"túi", "tui", "ví", "quà", "hộp", "hop", "đồ", "combo", "mini", "áo", "váy", "son",
             "nước", "này", "nay", "kia", "đó", "đấy", "gồm", "full"}
@@ -86,7 +90,11 @@ def _thay(m: re.Match) -> str:
     if t in ("ak", "ah"):                      # tiểu từ cuối câu ("giá ak", "zán cam ah") = "ạ"
         return "ạ" if _RE_HET_CAU.match(s, b) else t
     if t == "bn":
-        return "bạn" if sau in _BAN_SAU or truoc in _BAN_TRUOC else "bao nhiêu"
+        if truoc in _BAN_TRUOC:
+            return "bạn"
+        if sau in _BN_GIA_SAU:
+            return "bao nhiêu"
+        return "bạn" if sau in _BAN_SAU or truoc in _BAN_TRUOC_YEU else "bao nhiêu"
     if t == "k":                               # "299 k" là nghìn đồng, không phải "không"
         return t if s[max(0, a - _KHUNG):a].rstrip()[-1:].isdigit() else "không"
     if t == "sét":

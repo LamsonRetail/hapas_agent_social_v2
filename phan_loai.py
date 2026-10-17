@@ -122,7 +122,11 @@ CHỦ ĐỀ của MỖI bài: ý CHÍNH của bài, chọn MỘT mã.
 _LO = 100             # bình luận mỗi lượt gọi model
 _SONG_SONG = 3         # quota model dùng chung với bot chính — không mở nhiều hơn
 _TOI_DA_CHU = 200      # cắt mỗi bình luận: đủ hiểu ý, không phình prompt
-_TOI_DA_CHU_BAI = 220  # ngữ cảnh bài (đoán MÓN hỏi mua): đầu caption thường nói món gì
+# Ngữ cảnh bài (đoán MÓN hỏi mua): đầu caption thường nói món gì. Review 17/10/2026: lô 100 bình
+# luận có thể rải trên 100 bài → trần số bài mỗi lô + cắt ngắn, giữ prompt gần cỡ cũ (đo trên kho
+# 16/10 ở `tests/test_y_dinh_san_pham.py`); bài ngoài trần thì bình luận không kèm bài (chua_ro).
+_TOI_DA_CHU_BAI = 160
+_TOI_DA_BAI_LO = 20
 _TOI_THIEU_GIAY = 12   # ít hơn thế thì không kịp một lượt model, bỏ hẳn cho rõ ràng
 
 _TAG_RE = re.compile(r"@[\w.\-À-ỹ]+")
@@ -428,12 +432,14 @@ def _ket_qua(tra_loi: str, ra: dict) -> dict:
 
 def _nhac_lo(texts: list[str], bai: list[str] | None = None, brand: str = "") -> str:
     """Prompt một lô: hướng dẫn + (brand) + (bài chứa bình luận, mỗi bài MỘT lần) + bình luận."""
-    bai = bai or []
-    so_bai: dict[str, int] = {}
-    dong = []
-    for i, t in enumerate(texts):
-        b = " ".join(str(bai[i] or "").split()) if i < len(bai) else ""
-        dong.append(_boc(i, t, so_bai.setdefault(b, len(so_bai)) if b else None))
+    bai = [" ".join(str(b or "").split()) for b in (bai or [])]
+    bai += [""] * (len(texts) - len(bai))
+    # Tối đa `_TOI_DA_BAI_LO` bài mỗi lô: bài có NHIỀU bình luận trong lô trước (một bài ngữ cảnh
+    # phục vụ được nhiều bình luận nhất), hoà thì bài gặp trước.
+    dem = collections.Counter(b for b in bai if b)
+    giu = sorted(dem, key=lambda b: (-dem[b], bai.index(b)))[:_TOI_DA_BAI_LO]
+    so_bai: dict[str, int] = {b: k for k, b in enumerate(sorted(giu, key=bai.index))}
+    dong = [_boc(i, t, so_bai.get(bai[i])) for i, t in enumerate(texts)]
     dau = _NHAC
     brand = " ".join(str(brand or "").split())[:300]
     if brand:
