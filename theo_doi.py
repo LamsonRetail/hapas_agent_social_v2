@@ -1372,7 +1372,9 @@ TK_TAG_GIO = 20
 # giãn; lượt có bài mới ≥ ngưỡng thì về nhịp thường. Threads chỉ giãn ĐƯỜNG 1 (đường 2 rẻ, bắt bài
 # nổi). Cấu hình `du_an.cau_hinh.tu_khoa.<nền tảng>.gian` {"bat", "luot", "ty_le", "gio"}; lịch sử
 # (giờ, về, mới) trong sổ mốc khoá `KHOA_NHIP_TIM` = {nền tảng: {"lich_su": […]}} — tách khỏi mốc
-# cửa sổ của nền tảng (lượt về 0 bài vẫn không dời mốc cửa sổ).
+# cửa sổ của nền tảng (lượt về 0 bài vẫn không dời mốc cửa sổ). Soát 18/10/2026: về/mới chỉ của
+# ĐƯỜNG 1 vừa chạy; "mới" = bài CHƯA THẤY (chưa có trong kho, chưa trong sổ đã loại — kể cả bài lượt
+# này bị loại, `_dem_chua_thay`), không phải bài mới được giữ.
 KHOA_NHIP_TIM = "nhip_tim"
 TK_GIAN_NEN_TANG = ("instagram", "facebook", "threads")
 TK_GIAN_LUOT = 3
@@ -3232,8 +3234,10 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         return _khoa_bai(d["platform"], d["link"], {
             "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")})
     cu = _khoa_fb_cu(du_an["ma"], hits, khoa_hit)
-    cap_nhat, hits_moi, trung = TDA.tach_da_biet(
-        du_an["ma"], hits, lambda d: cu.get(khoa_hit(d), khoa_hit(d)))
+
+    def khoa_kho(d: dict) -> str:
+        return cu.get(khoa_hit(d), khoa_hit(d))
+    cap_nhat, hits_moi, trung = TDA.tach_da_biet(du_an["ma"], hits, khoa_kho)
     for p, n in trung.items():
         tk["pheu"].setdefault(p, _pheu_moi(0, ""))["trung"] += n
     if cap_nhat:
@@ -3260,11 +3264,30 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             else:
                 con.append((d, dt))
         hits_moi = con
+    _dem_chua_thay(tk, hits, {khoa_kho(d) for d, _ in hits_moi}, khoa_kho)
     if hits_moi:
         try:
             _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk)
         finally:
             TDA.ghi_loai(ma_loai, dau, tk.pop("_bi_loai", []), tu_pv)
+
+
+def _dem_chua_thay(tk: dict, hits: list, chua: set[str], khoa_kho) -> None:
+    """Số bài CHƯA THẤY của đường 1 mỗi nền tảng giãn nhịp (`tk["_nhip"]`, `gian_nhip`): chưa có
+    trong kho VÀ chưa nằm trong sổ "đã loại" — tính cả bài lượt này bị loại (từ loại trừ, spam, AI
+    lạc đề). Soát 18/10/2026: bản cũ đếm bài mới được GIỮ, nên một nguồn trả toàn bài mới mà bị
+    loại (trang đầu hashtag đầy bài lạc đề) bị coi là "không còn gì mới" và giãn oan; ngược lại bài
+    đã loại từ lượt trước về lại thì không phải mới. Mỗi khoá đếm một lần (bài trùng trong lượt)."""
+    nh = tk.get("_nhip") or {}
+    if not nh:
+        return
+    dem: dict[str, set[str]] = {}
+    for d, _ in hits:
+        p = d.get("_nhip")
+        if p in nh and (k := khoa_kho(d)) in chua:
+            dem.setdefault(p, set()).add(k)
+    for p, ks in dem.items():
+        nh[p]["moi"] += len(ks)
 
 
 def _khoa_loai_on_dinh(d: dict, dt) -> list[str]:
@@ -3400,11 +3423,6 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         })
         ban.append((d, dt))
     tk["giu"] = len(rows)
-    for d, _ in ban:
-        # Bài mới đường 1 của nền tảng giãn nhịp (`_nhip` gắn lúc vào `hits`).
-        x = (tk.get("_nhip") or {}).get(d.get("_nhip"))
-        if x is not None:
-            x["moi"] += 1
     n2_giu = sum(1 for d, _ in ban if d.get("_duong") == 2)
     _dem_duong_2(tk, "giu", n2_giu)
     _dem_duong_2(tk, "moi", n2_giu)          # bài vào bước này là bài CHƯA có trong kho

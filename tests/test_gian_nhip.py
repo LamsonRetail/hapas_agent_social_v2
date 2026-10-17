@@ -132,6 +132,33 @@ def test_lich_su_nhip_chi_dem_ve_moi_cua_duong_1(mo):  # noqa: F811
     assert "_nhip" not in tk, "sổ nhịp nội bộ không lọt ra kết quả lượt"
 
 
+def test_moi_cua_gian_nhip_la_bai_chua_thay_ke_ca_bi_loai(mo):  # noqa: F811
+    """Soát 18/10/2026: "mới" của giãn nhịp = bài CHƯA THẤY (chưa có trong kho, chưa trong sổ đã
+    loại), kể cả bài lượt này bị loại — không phải bài mới được GIỮ. Trang đầu toàn bài mới mà lạc
+    đề (bị loại) vẫn là "còn bài mới"; lượt sau chúng nằm trong sổ đã loại thì không còn mới."""
+    from test_duong_moi import _chay_tk_fb, _sf_tim
+    from test_theo_doi import GiaKhoTk
+    kho_co: set = {"facebook:1003"}
+    goc = GiaKhoTk.__init__
+
+    def init(self, mp, co_bai=False):
+        goc(self, mp, co_bai)
+        self.da_co = kho_co                       # khoá bài đã có trong kho
+    mo.setattr(GiaKhoTk, "__init__", init)
+    sf = [_sf_tim("shop.a", "1001", "túi hapas mới về"),
+          _sf_tim("shop.b", "1002", "hapas guitar điện"),           # từ loại trừ "guitar": loại
+          _sf_tim("shop.c", "1003", "túi hapas đã có trong kho")]
+    tk, _, _, _ = _chay_tk_fb(mo, sf, [])
+    f = tk["pheu"]["facebook"]
+    assert (f["loai_tru"], f["cap_nhat"], f["moi"]) == (1, 1, 1)
+    ls = T.doc_moc_tk("hapas")[T.KHOA_NHIP_TIM]["facebook"]["lich_su"]
+    assert ls[-1][1:] == [3, 2], "2 bài chưa thấy (gồm bài bị loại), bài đã có trong kho không tính"
+    # Lượt sau: 1001 đã vào kho, 1002 nằm trong sổ đã loại — không còn bài nào mới.
+    kho_co.add("facebook:1001")
+    _chay_tk_fb(mo, sf, [])
+    assert T.doc_moc_tk("hapas")[T.KHOA_NHIP_TIM]["facebook"]["lich_su"][-1][1:] == [3, 0]
+
+
 def test_threads_lich_su_khong_dem_bai_duong_2(mo):  # noqa: F811
     """Threads: đường 1 về 2 bài, đường 2 thêm 4 bài riêng — phễu Threads giữ 6 mới, lịch sử nhịp
     đường 1 chỉ (2, 2). Đường 1 bị giãn thì không thêm dòng (đường 2 vẫn chạy, vẫn giữ bài)."""
