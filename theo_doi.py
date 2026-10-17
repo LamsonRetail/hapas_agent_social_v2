@@ -1212,6 +1212,21 @@ def tag_tiktok(tu: list[str]) -> list[str]:
     return ra
 
 
+def hashtag_du_an(du_an: dict) -> list[str]:
+    """Hashtag RIÊNG của dự án (cột `du_an.hashtag`, chủ dự án 18/10/2026: "bỏ phần thị trường, thay
+    bằng phần hashtag"): bỏ '#', bỏ dấu, chữ thường, chỉ [a-z0-9_] (`apify_tool.hashtag_ig` — dashboard
+    đã chuẩn hoá khi lưu, chuẩn lại để dòng sửa tay trong DB không lọt dạng lạ), bỏ trùng, giữ thứ
+    tự, tối đa `TK_TOI_DA_TU`. Rỗng = dự án chưa đặt."""
+    return A.hashtag_ig_ds(list(du_an.get("hashtag") or []))[:TK_TOI_DA_TU]
+
+
+def nguon_tag(du_an: dict, tu: list[str]) -> list[str]:
+    """Danh sách Mark suy HASHTAG cho Instagram (`_tu_cho`) và feed TikTok (`tag_tiktok`): hashtag
+    riêng của dự án khi đã đặt (đã viết liền nên hai hàm chuẩn hoá giữ nguyên); chưa đặt thì từ
+    khoá như trước 18/10/2026 — Instagram mọi từ khoá viết liền, TikTok từ khoá một chữ."""
+    return hashtag_du_an(du_an) or tu
+
+
 def uoc_tag_tiktok(so_yeu_cau: int, so_tag: int) -> float:
     """USD TỐI ĐA một lượt feed hashtag TikTok: trần yêu cầu × 0,003 × 1,3 (0 khi không có tag)."""
     if so_yeu_cau <= 0 or so_tag <= 0:
@@ -1404,6 +1419,7 @@ def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA,
     đường 2 khi bật — `cau_hinh_th2`). `moc` = sổ mốc của dự án (`doc_moc_tk`): Threads hai đường
     tính theo sản lượng lượt trước thay vì trần (`san_luong_du_kien`)."""
     tu = tu_tim(du_an)
+    tag = nguon_tag(du_an, tu)          # hashtag riêng của dự án (18/10/2026) hoặc từ khoá
     m = moc if isinstance(moc, dict) else {}
     tong = uoc_th2(cau_hinh_th2(du_an), tu, m.get(TH2_KHOA))
     for p in TK_NEN_TANG:
@@ -1411,13 +1427,14 @@ def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA,
         if c["bat"] and p == "web":
             tong += uoc_web(c["so_bai"], tu, c["boc"])
         elif c["bat"]:
-            tong += uoc_tu_khoa_nen_tang(p, c["so_bai"], tu, c["so_tu"], fb_toi_da,
+            tong += uoc_tu_khoa_nen_tang(p, c["so_bai"], tag if p == "instagram" else tu,
+                                         c["so_tu"], fb_toi_da,
                                          moc=m.get(p) if p == "threads" else None)
         if p == "facebook" and c["duong2"]["bat"]:
             # Đường 2 (17/10/2026) tính TỐI ĐA mỗi lượt dù nhịp `gio` có thể bỏ lượt — giữ chỗ dư.
             tong += uoc_fb_duong2(len(tu_fb_duong2(du_an, tu)), c["duong2"]["so_bai_moi_tu"])
         if p == "tiktok" and c["hashtag"]["bat"]:
-            tong += uoc_tag_tiktok(c["hashtag"]["so_yeu_cau"], len(tag_tiktok(tu)))
+            tong += uoc_tag_tiktok(c["hashtag"]["so_yeu_cau"], len(tag_tiktok(tag)))
     return round(tong, 4)
 
 
@@ -1585,6 +1602,8 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     ma = du_an["ma"]
     tu = tu_tim(du_an)
     tk["tu"] = tu
+    # Hashtag riêng của dự án (18/10/2026) cho Instagram + feed TikTok; chưa đặt thì từ khoá.
+    tag = nguon_tag(du_an, tu)
     bay_gio = datetime.datetime.now(_VN)
     moc_cu = doc_moc_tk(ma)
     moc_moi: dict[str, dict] = {}
@@ -1612,7 +1631,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             if p in da_xong or not cfg[p]["bat"]:
                 continue
             so_bai = cfg[p]["so_bai"]
-            q = _tu_cho(p, tu, cfg[p]["so_tu"], so_bai)
+            q = _tu_cho(p, tag if p == "instagram" else tu, cfg[p]["so_tu"], so_bai)
             if not q:
                 continue
             if p in co_run:
@@ -1647,8 +1666,8 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             moc_th = (moc_cu.get(p) if isinstance(moc_cu.get(p), dict) else {}) \
                 if p == "threads" else None
             uoc = (uoc_web(so_bai, tu, cfg[p]["boc"]) if p == "web"
-                   else uoc_tu_khoa_nen_tang(p, so_bai, tu, cfg[p]["so_tu"], fb_toi_da,
-                                             moc=moc_th))
+                   else uoc_tu_khoa_nen_tang(p, so_bai, tag if p == "instagram" else tu,
+                                             cfg[p]["so_tu"], fb_toi_da, moc=moc_th))
             if p == "web":
                 # Trần trang dự phòng là TRẦN, không phải tiền chắc tiêu: chỉ cần đủ cho phần
                 # tìm Google; phần đọc dự phòng tự co theo phần còn lại (`nguon_web.thu_thap`).
@@ -1747,8 +1766,9 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                     got, noi = _them_luot_noi(v, ma, luot, q, got, moc_cu, bay_gio, uoc, con,
                                               _phan_tk(v)[so_run_truoc:],
                                               KDP.cau_hinh(du_an)["bat"])
-                    # Feed hashtag của từ khoá một chữ (17/10/2026) — phần thêm, tự bắt lỗi.
-                    got, tag_feed = _them_feed_tag(v, ma, luot, tu, got, moc_cu, bay_gio,
+                    # Feed hashtag (17/10/2026) — phần thêm, tự bắt lỗi. Tag: hashtag riêng của
+                    # dự án (18/10/2026), chưa đặt thì từ khoá một chữ như trước.
+                    got, tag_feed = _them_feed_tag(v, ma, luot, tag, got, moc_cu, bay_gio,
                                                    cfg[p]["hashtag"], con,
                                                    _phan_tk(v)[so_run_truoc:],
                                                    KDP.cau_hinh(du_an)["bat"])

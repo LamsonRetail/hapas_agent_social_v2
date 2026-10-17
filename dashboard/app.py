@@ -1315,6 +1315,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     lan_cuoi = None
             # `cau_hinh` hiển thị: Threads (MAC_DINH_TAT) chưa đặt thì ô bật hiện TẮT như hiệu lực.
             dong.append({**d, "cau_hinh": CP.cau_hinh_hien_thi(d.get("cau_hinh")),
+                         # Hashtag riêng của dự án đã chuẩn hoá (18/10/2026); [] = suy từ từ khoá.
+                         "hashtag_rieng": CP.nguon_tag(d, []),
                          "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
                          "bang": CP.bang_cau_hinh(d),
                          "lich": CP.du_bao_lich(cac_lich, CP.bang_cau_hinh(d), nguon, bay_gio),

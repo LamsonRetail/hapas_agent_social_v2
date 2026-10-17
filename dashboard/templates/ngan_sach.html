@@ -131,6 +131,10 @@
     {% set dem.ig = dem.ig + 1 %}
   {% endif %}
 {% endfor %}
+{# 18/10/2026: dự án đặt hashtag riêng (trang Nguồn) thì Instagram + feed TikTok dùng chúng, không suy từ
+   từ khoá (`chi_phi.nguon_tag`) — đã chuẩn hoá ở máy chủ nên đếm đúng. #}
+{% set tag_rieng = d.hashtag_rieng or [] %}
+{% if tag_rieng %}{% set dem.ig = tag_rieng|length %}{% endif %}
 {% set tong_luot = b.uoc_tk + b.uoc_bl %}
 {# Lịch quét tự động (15/10/2026): có lịch đang bật thì số lượt còn lại tháng này theo lịch (và phần
    nguồn của lịch "quét mọi nguồn"); không có thì giữ giả định 1 lượt/ngày của lịch console. #}
@@ -154,6 +158,7 @@
 <section class="the-khoi cach-duoi ns-ch" aria-labelledby="ns-ch-tieu-de">
   {% if ql %}
   <script type="application/json" id="ns-du-lieu">{{ {"hang_so": hang_so, "tu_khoa": d.tu_khoa or [], "ten": d.ten,
+    "hashtag_rieng": tag_rieng,
     "mac_dinh": {"tk_so_bai": d.tk_so_bai or 0, "bl_so_bai": d.bl_so_bai or 0, "bl_moi_bai": d.bl_moi_bai or 0},
     "da_tieu": d.da_tieu, "nguon_con_lai": nguon_con, "ngay_con_lai": db.ngay_con_lai,
     "co_lich": co_lich, "luot_con_lai": so_luot, "luot_30": luot_30,
@@ -240,7 +245,7 @@
       <tr data-nt="{{ p }}">
         <th scope="row">{{ ten }}
           {% if p == 'facebook' %}<button type="button" class="goi-y{% if tk.bat and tk.so_bai > hang_so.tk_fb_toi_da %} goi-y--canh{% endif %}" data-o="ghi-fb" data-goi-y="Gói Apify FREE: thực tế tối đa {{ hang_so.tk_fb_toi_da }} bài/lượt">i</button>
-          {% elif p == 'instagram' %}<button type="button" class="goi-y" data-o="ghi-ig" data-goi-y="Từ khoá viết liền thành hashtag, bỏ dấu ({{ dem.ig }} hashtag); tab bài + reels">i</button>
+          {% elif p == 'instagram' %}<button type="button" class="goi-y" data-o="ghi-ig" data-goi-y="{% if tag_rieng %}Tìm theo hashtag của dự án ({{ dem.ig }} hashtag){% else %}Từ khoá viết liền thành hashtag, bỏ dấu ({{ dem.ig }} hashtag){% endif %}; tab bài + reels">i</button>
           {% elif p == 'youtube' %}<button type="button" class="goi-y" data-goi-y="Miễn phí (API YouTube)">i</button>
           {% elif p == 'threads' and tk.duong2 is defined %}<button type="button" class="goi-y" data-o="ghi-th2" data-goi-y="Hai đường cùng lượt: futurizerush (có follower, lượt xem; 0,08 USD khởi động + 0,0025 USD/bài, mỗi từ ≥ 10 bài) và scrapersdelight (bài nổi; 0,001 USD/bài, không phí khởi động, mọi từ khoá). Đường 2 {{ 'bật' if tk.duong2.bat_rieng else 'tắt' }}: tối đa {{ tk.duong2.so_bai }} bài/lượt, {{ tk.duong2.so_bai_moi_tu }} bài/từ ≈ {{ tk.duong2.uoc_khi_bat|usd_vn(3) }} USD, đã cộng vào ô USD.">i</button>{% endif %}
         </th>
@@ -286,7 +291,7 @@
       {% set y_th = y_th if ql else th.bat %}
       <tr data-nt="tiktok_tag" class="ns-dong-web ns-dong-phu">
         <th scope="row">↳ TikTok feed hashtag
-          <button type="button" class="goi-y" data-goi-y="Đọc feed hashtag (TikTok API, {{ hang_so.tk_tt_yeu_cau|usd_vn(3) }} USD/yêu cầu, 20 bài/yêu cầu) của từ khoá một chữ ({{ th.tag|length }} tag{% if th.tag %}: #{{ th.tag|join(', #') }}{% endif %}) — bắt video chỉ gắn hashtag mà tìm theo từ khoá không trả về. Số là TRẦN yêu cầu mỗi lượt (tìm cid lần đầu + trang feed); tối đa 1 lượt mỗi {{ th.gio }} giờ; bài qua cùng bộ lọc + AI.">i</button>
+          <button type="button" class="goi-y" data-goi-y="Đọc feed hashtag (TikTok API, {{ hang_so.tk_tt_yeu_cau|usd_vn(3) }} USD/yêu cầu, 20 bài/yêu cầu) của {{ 'hashtag dự án' if tag_rieng else 'từ khoá một chữ' }} ({{ th.tag|length }} tag{% if th.tag %}: #{{ th.tag|join(', #') }}{% endif %}) — bắt video chỉ gắn hashtag mà tìm theo từ khoá không trả về. Số là TRẦN yêu cầu mỗi lượt (tìm cid lần đầu + trang feed); tối đa 1 lượt mỗi {{ th.gio }} giờ; bài qua cùng bộ lọc + AI.">i</button>
         </th>
         <td class="ns-o-cong ns-ranh" data-nhan="Feed hashtag">
           {% if ql %}<input type="checkbox" class="ns-cong" role="switch" name="tk_tiktok_tag_bat" value="1" aria-label="TikTok: bật đọc feed hashtag"{% if y_th %} checked{% endif %}>
@@ -297,7 +302,7 @@
           {% else %}<span class="so">{{ th.so_yeu_cau }}</span>{% endif %}
         </td>
         <td data-nhan="Số tag" data-nhom="tk"{% if ql and not (y_th and y_tk) %} class="ns-mo"{% endif %}>
-          <span class="ns-so-tu" data-o="tt-tag-so" title="Từ khoá một chữ thành hashtag">{{ th.tag|length }}</span>
+          <span class="ns-so-tu" data-o="tt-tag-so" title="{{ 'Hashtag của dự án' if tag_rieng else 'Từ khoá một chữ thành hashtag' }}">{{ th.tag|length }}</span>
         </td>
         <td class="ns-usd" data-nhan="≈ USD">
           <output class="{{ lop_usd(th.bat, th.so_yeu_cau, hang_so.tk_tt_yeu_cau)|trim }}" data-o="tk-tiktok_tag" data-usd="{{ th.uoc }}">{{ o_usd(th.uoc, th.bat, th.so_yeu_cau, hang_so.tk_tt_yeu_cau) }}</output>

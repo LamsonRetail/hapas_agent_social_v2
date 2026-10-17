@@ -57,13 +57,31 @@ def ket_noi():
 
 
 # ───────────────────────────── đọc cấu hình ─────────────────────────────
+_CO_HASHTAG: list[bool] = []
+
+
+def _co_hashtag(c) -> bool:
+    """DB đã có cột `du_an.hashtag` (18/10/2026) chưa — bản Mark mới lên VPS TRƯỚC khi chạy
+    schema.sql thì /theodoi vẫn đọc được dự án (thiếu cột là hỏng cả lượt), hashtag coi như rỗng
+    (suy từ từ khoá như trước). Có rồi thì nhớ trong tiến trình (như `_co_ma_so_fb`)."""
+    if _CO_HASHTAG:
+        return True
+    x = c.execute("SELECT 1 AS co FROM information_schema.columns WHERE table_schema = "
+                  "current_schema() AND table_name = 'du_an' AND column_name = 'hashtag'"
+                  ).fetchone()
+    if x:
+        _CO_HASHTAG.append(True)
+    return bool(x)
+
+
 def doc_du_an(ma: str) -> dict | None:
     with ket_noi() as c:
         return c.execute(
             "SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
             "tran_usd_thang::float AS tran_usd_thang, dang_bat, bl_bat, bl_so_bai, bl_moi_bai, "
-            "tk_bat, tk_so_bai, cau_hinh "
-            "FROM du_an WHERE ma = %s",
+            "tk_bat, tk_so_bai, cau_hinh, "
+            + ("hashtag " if _co_hashtag(c) else "'{}'::text[] AS hashtag ")
+            + "FROM du_an WHERE ma = %s",
             (ma,)).fetchone()
 
 

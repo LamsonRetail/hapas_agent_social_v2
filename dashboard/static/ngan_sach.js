@@ -40,6 +40,10 @@
     return ra.slice(0, GH.tk_so_tu[1]);
   }
   var TU = tuTim(D.tu_khoa, D.ten);
+  // Hashtag riêng của dự án (18/10/2026, = chi_phi.nguon_tag, máy chủ đã chuẩn hoá): có thì Instagram
+  // + feed TikTok dùng chúng, không thì suy từ từ khoá như trước. Chỉ đổi ĐẦU VÀO, công thức giữ nguyên.
+  var TAG_DA = D.hashtag_rieng || [];
+  var NGUON_TAG = TAG_DA.length ? TAG_DA : TU;
 
   // <web> Báo & Web (16/10/2026) — bản sao chi_phi.rut_gon_web / so_cau_web / uoc_web (bài thử
   // tests/test_dashboard_web.py::test_ngan_sach_js_rut_gon_khop_python chạy khối này bằng node).
@@ -180,6 +184,9 @@
     return r4((n * gia + ((hs.tk_khoi || {})[p] || 0)) * hs.he_so);
   }
   // </uoc_tk>
+  if (TAG_DA.length) {               // = chi_phi.tu_gui("instagram", nguon_tag(...))
+    TU_IG = NGUON_TAG.map(tagIg).filter(function (t, i, ds) { return t && ds.indexOf(t) === i; });
+  }
   function uocBl(p, so, moi) {       // = chi_phi.uoc_binh_luan_luot
     moi = moi || hs.bl_uoc_moi_bai;
     var gia = (hs.bl_gia || {})[p] || 0;
@@ -208,7 +215,7 @@
   // khoá MỘT chữ thành hashtag (bỏ '#', bỏ dấu, chỉ [0-9a-z], 3–40 ký tự), trần yêu cầu × giá × hệ số.
   var HTT = hs.tt_tag || {};
   var TAG_TT = [];
-  TU.forEach(function (kw) {
+  NGUON_TAG.forEach(function (kw) {
     if (String(kw).split(/\s+/).filter(Boolean).length !== 1) return;
     var t = norm(String(kw).replace(/^#+/, "")).replace(/[^0-9a-z]/g, "");
     if (t.length >= 3 && t.length <= 40 && TAG_TT.indexOf(t) < 0) TAG_TT.push(t);
@@ -434,8 +441,8 @@
     if (ht) ht.disabled = !ban;
   }
 
-  ghiGoiY("ghi-ig", "Từ khoá viết liền thành hashtag, bỏ dấu (" + TU_IG.length +
-    " hashtag); tab bài + reels, " + soVn((hs.tk_gia || {}).instagram || 0, 4) + " USD/bài");
+  ghiGoiY("ghi-ig", (TAG_DA.length ? "Tìm theo hashtag của dự án (" : "Từ khoá viết liền thành hashtag, bỏ dấu (") +
+    TU_IG.length + " hashtag); tab bài + reels, " + soVn((hs.tk_gia || {}).instagram || 0, 4) + " USD/bài");
   ghi("web-so-tu", rutGonWeb(TU).length + " → " + soCauWeb(TU) + " câu");
   ghi("fb2-so-cum", String(CUM_FB2.length));
   ghi("tt-tag-so", String(TAG_TT.length));

@@ -93,34 +93,76 @@ def vai_tro(email: str) -> str | None:
 _COT_DU_AN = ("ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
               "tran_usd_thang::float AS tran_usd_thang, dang_bat, tao_luc, sua_luc, sua_boi, "
               "bl_bat, bl_so_bai, bl_moi_bai, tk_bat, tk_so_bai, cau_hinh")
+#: Cột `du_an.hashtag` (18/10/2026) — chỉ đọc/ghi khi DB đã có (`_co_hashtag`).
+_CO_HASHTAG: list[bool] = []
+
+
+def _co_hashtag(c) -> bool:
+    """DB đã chạy bản schema có cột `du_an.hashtag` chưa. Bản dashboard mới lên VPS TRƯỚC khi chạy
+    schema.sql thì trang Nguồn/Ngân sách vẫn mở được (thiếu cột là lỗi CẢ trang) — chỉ không có ô
+    hashtag. Có rồi thì nhớ luôn trong tiến trình (giống `lang_nghe_db._co_ma_so_fb`)."""
+    if _CO_HASHTAG:
+        return True
+    x = c.execute("SELECT 1 AS co FROM information_schema.columns WHERE table_schema = "
+                  "current_schema() AND table_name = 'du_an' AND column_name = 'hashtag'"
+                  ).fetchone()
+    if x:
+        _CO_HASHTAG.append(True)
+    return bool(x)
+
+
+def _cot_du_an(c) -> str:
+    """Cột đọc dự án; DB chưa có cột hashtag thì trả mảng rỗng cùng tên (trang không phải rẽ nhánh)."""
+    return _COT_DU_AN + (", hashtag" if _co_hashtag(c) else ", '{}'::text[] AS hashtag")
 
 
 def cac_du_an() -> list[dict]:
     with ket_noi() as c:
-        return c.execute(f"SELECT {_COT_DU_AN} FROM du_an ORDER BY ma").fetchall()
+        return c.execute(f"SELECT {_cot_du_an(c)} FROM du_an ORDER BY ma").fetchall()
 
 
 def doc_du_an(ma: str) -> dict | None:
     with ket_noi() as c:
-        return c.execute(f"SELECT {_COT_DU_AN} FROM du_an WHERE ma = %s", (ma,)).fetchone()
+        return c.execute(f"SELECT {_cot_du_an(c)} FROM du_an WHERE ma = %s", (ma,)).fetchone()
+
+
+def _hashtag_ghi(c, d: dict) -> bool:
+    """Câu ghi có cột hashtag không. Người quản lý đặt hashtag mà DB chưa nâng cấp thì báo rõ — không
+    lặng lẽ bỏ chữ họ vừa gõ."""
+    if "hashtag" not in d:
+        return False
+    if _co_hashtag(c):
+        return True
+    if d["hashtag"]:
+        raise LoiDuLieu("Kho dữ liệu chưa có cột hashtag — nhờ kỹ thuật chạy bản schema mới "
+                        "(deploy/lang-nghe/schema.sql) rồi lưu lại.")
+    return False
 
 
 def them_du_an(ai: str, d: dict) -> None:
     with ket_noi(trung=f"Mã dự án '{d['ma']}' đã có.") as c:
+        co_tag = _hashtag_ghi(c, d)
         c.execute("INSERT INTO du_an (ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
-                  "dang_bat, sua_boi) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                  f"dang_bat, sua_boi{', hashtag' if co_tag else ''}) VALUES "
+                  f"(%s, %s, %s, %s, %s, %s, %s, %s{', %s::text[]' if co_tag else ''})",
                   (d["ma"], d["ten"], d["tu_khoa"], d["tu_loai_tru"], d["boi_canh"],
-                   d["thi_truong"], d["dang_bat"], ai))
+                   d.get("thi_truong") or "VN", d["dang_bat"], ai,
+                   *([d["hashtag"]] if co_tag else [])))
         _nhat_ky(c, ai, "them_du_an", f"du_an:{d['ma']}", d)
 
 
 def sua_du_an(ai: str, ma: str, d: dict) -> None:
+    """Sửa dự án. Thiếu khoá `thi_truong` / `hashtag` (biểu mẫu không có ô — 18/10/2026 bỏ ô thị
+    trường) thì giữ giá trị đang lưu: COALESCE với tham số NULL."""
     with ket_noi() as c:
+        co_tag = _hashtag_ghi(c, d)
         r = c.execute("UPDATE du_an SET ten = %s, tu_khoa = %s, tu_loai_tru = %s, boi_canh = %s, "
-                      "thi_truong = %s, dang_bat = %s, sua_luc = now(), sua_boi = %s "
-                      "WHERE ma = %s RETURNING ma",
-                      (d["ten"], d["tu_khoa"], d["tu_loai_tru"], d["boi_canh"], d["thi_truong"],
-                       d["dang_bat"], ai, ma)).fetchone()
+                      "thi_truong = COALESCE(%s, thi_truong), dang_bat = %s, "
+                      f"{'hashtag = %s::text[], ' if co_tag else ''}"
+                      "sua_luc = now(), sua_boi = %s WHERE ma = %s RETURNING ma",
+                      (d["ten"], d["tu_khoa"], d["tu_loai_tru"], d["boi_canh"],
+                       d.get("thi_truong"), d["dang_bat"],
+                       *([d["hashtag"]] if co_tag else []), ai, ma)).fetchone()
         if not r:
             raise LoiDuLieu("Không còn dự án này.")
         _nhat_ky(c, ai, "sua_du_an", f"du_an:{ma}", d)

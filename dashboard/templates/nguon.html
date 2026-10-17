@@ -48,7 +48,12 @@
   <div class="luoi luoi--3 ng-du-an">
     <div class="ng-o"><h3>Từ khoá</h3><div class="ng-the">{% for x in du_an.tu_khoa %}<span class="the the--nhan">{{ x }}</span>{% else %}<span class="mo">—</span>{% endfor %}</div></div>
     <div class="ng-o"><h3>Từ loại trừ</h3><div class="ng-the">{% for x in du_an.tu_loai_tru %}<span class="the">{{ x }}</span>{% else %}<span class="mo">—</span>{% endfor %}</div></div>
-    <div class="ng-o"><h3>Thị trường · trần tháng</h3><div><b>{{ du_an.thi_truong }}</b> · <b>{{ du_an.tran_usd_thang|usd_vn }}</b> USD <a class="nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}">sửa ở Ngân sách →</a></div></div>
+    {#- 18/10/2026 (chủ dự án: "bỏ phần thị trường, thay bằng phần hashtag"): thị trường vẫn lưu (mặc
+        định VN, cổng thị trường của Mark không đổi) nhưng không hiện; ô này là hashtag + trần tháng. #}
+    <div class="ng-o ng-o--tag"><h3>Hashtag <button type="button" class="goi-y" data-goi-y="Mark dùng các hashtag này để tìm bài Instagram và đọc thêm feed hashtag TikTok. Để trống: Mark tự lấy từ từ khoá (Instagram: mọi từ khoá viết liền, bỏ dấu; TikTok: từ khoá một chữ).">i</button></h3>
+      <div class="ng-the">{% for x in du_an.hashtag or [] %}<span class="the the--tag">#{{ x }}</span>{% else %}<span class="mo nho">Chưa đặt — Mark tự lấy từ từ khoá</span>{% endfor %}</div>
+      <div class="ng-o__chan"><span>Trần tháng <b>{{ du_an.tran_usd_thang|usd_vn }}</b> USD</span> <a class="nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}">sửa ở Ngân sách →</a></div>
+    </div>
   </div>
   {% if du_an.boi_canh %}<p class="ghi-chu"><b>Bối cảnh cho bước AI:</b> {{ du_an.boi_canh }}</p>{% endif %}
   {% if ql %}
@@ -57,8 +62,8 @@
     <form method="post" action="/du-an/{{ du_an.ma|urlencode }}/sua" class="luoi-form">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <label class="o">Tên dự án <input type="text" name="ten" value="{{ du_an.ten }}" required maxlength="200"></label>
-      <label class="o">Thị trường (mã 2 chữ) <input type="text" name="thi_truong" value="{{ du_an.thi_truong }}" maxlength="2" required></label>
       <label class="o rong">Từ khoá (cách nhau bằng dấu phẩy) <input type="text" name="tu_khoa" value="{{ du_an.tu_khoa|join(', ') }}" required></label>
+      <label class="o rong">Hashtag (cách nhau bằng dấu phẩy, có hoặc không có #; để trống = Mark tự lấy từ từ khoá) <input type="text" name="hashtag" value="{% for x in du_an.hashtag or [] %}#{{ x }}{% if not loop.last %}, {% endif %}{% endfor %}" maxlength="3000" placeholder="vd #hapas, #yeutudieunhonhat" autocomplete="off"></label>
       <label class="o rong">Từ loại trừ (bài có từ này bị bỏ, không qua AI) <input type="text" name="tu_loai_tru" value="{{ du_an.tu_loai_tru|join(', ') }}"></label>
       <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000">{{ du_an.boi_canh }}</textarea></label>
       <label class="o"><span><input type="checkbox" name="dang_bat" value="1"{% if du_an.dang_bat %} checked{% endif %}> Đang bật (tắt thì /theodoi và Lịch quét không quét)</span></label>
@@ -224,8 +229,8 @@
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <label class="o">Mã dự án (gõ sau /theodoi) <input type="text" name="ma" required maxlength="40" pattern="[a-z0-9][a-z0-9_\-]{1,39}" placeholder="vd hapas"></label>
       <label class="o">Tên dự án <input type="text" name="ten" required maxlength="200"></label>
-      <label class="o">Thị trường (mã 2 chữ) <input type="text" name="thi_truong" value="VN" maxlength="2" required></label>
       <label class="o rong">Từ khoá (cách nhau bằng dấu phẩy) <input type="text" name="tu_khoa" required placeholder="vd hapas, túi hapas"></label>
+      <label class="o rong">Hashtag (tuỳ chọn; để trống = Mark tự lấy từ từ khoá) <input type="text" name="hashtag" maxlength="3000" placeholder="vd #hapas, #yeutudieunhonhat" autocomplete="off"></label>
       <label class="o rong">Từ loại trừ (tuỳ chọn) <input type="text" name="tu_loai_tru"></label>
       <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000" placeholder="vd HAPAS — thương hiệu túi xách, trang sức Việt Nam"></textarea></label>
       <label class="o"><span><input type="checkbox" name="dang_bat" value="1" checked> Bật ngay</span></label>

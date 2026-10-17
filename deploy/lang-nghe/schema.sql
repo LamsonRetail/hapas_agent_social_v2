@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS du_an (
   bl_moi_bai      INT NOT NULL DEFAULT 0 CHECK (bl_moi_bai = 0 OR bl_moi_bai >= 5),
   tk_bat          BOOLEAN NOT NULL DEFAULT TRUE,
   tk_so_bai       INT NOT NULL DEFAULT 15 CHECK (tk_so_bai >= 0),
-  cau_hinh        JSONB NOT NULL DEFAULT '{}'::jsonb
+  cau_hinh        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  hashtag         TEXT[] NOT NULL DEFAULT '{}'    -- hashtag riêng (IG + feed TikTok), 18/10/2026
 );
 -- Đợt 2b (15/10/2026): cào bình luận — DB đã tạo trước đó thì thêm cột ở đây.
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_bat BOOLEAN NOT NULL DEFAULT TRUE;
@@ -98,6 +99,11 @@ ALTER TABLE du_an DROP CONSTRAINT IF EXISTS du_an_tk_so_bai_check;
 ALTER TABLE du_an ADD CONSTRAINT du_an_tk_so_bai_check CHECK (tk_so_bai >= 0);
 ALTER TABLE du_an DROP CONSTRAINT IF EXISTS du_an_tran_usd_thang_check;
 ALTER TABLE du_an ADD CONSTRAINT du_an_tran_usd_thang_check CHECK (tran_usd_thang >= 0);
+-- 18/10/2026 (chủ dự án: "bỏ phần thị trường, thay bằng phần hashtag"): hashtag riêng của dự án,
+-- sửa ở trang Nguồn. Mark dùng cho tìm hashtag Instagram + feed hashtag TikTok; mảng rỗng thì suy
+-- từ từ khoá như trước. Quyền: role mark đọc cả bảng (GRANT SELECT ON du_an), lang_nghe_web ghi
+-- cả bảng (GRANT INSERT, UPDATE ON du_an) — không có GRANT theo cột nào cần thêm.
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS hashtag TEXT[] NOT NULL DEFAULT '{}';
 
 -- 1 dòng = 1 nguồn theo dõi. `dinh_danh`: username TikTok/Instagram/Threads, kênh YouTube (UC… hoặc
 -- @handle), URL trang Facebook — đã chuẩn hoá chữ thường (trừ id kênh YouTube UC…).
@@ -420,12 +426,12 @@ CREATE INDEX IF NOT EXISTS kiem_do_phu_du_an_luc ON kiem_do_phu (du_an, luc DESC
 -- ngay trong file build (COMMENT ON chạy lại không mất), có bài canh tests/test_theo_doi.py.
 
 COMMENT ON TABLE du_an IS $$[Lớp] Raw
-[Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc (từ khoá, từ loại trừ, trần chi phí theo dõi mỗi tháng).
+[Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc + thu thập (từ khoá, từ loại trừ, hashtag riêng, trần chi phí theo dõi mỗi tháng).
 [Grain] 1 dòng = 1 dự án
 [Khoá] PK: ma | Join: ma → nguon.du_an, bai.du_an, chi_so_ngay.du_an, luot_quet.du_an, de_xuat.du_an, lich_quet.du_an
 [Nguồn] Người quản lý nhập trên dashboard social.hapas.vn (role lang_nghe_web); Mark chỉ đọc
-[Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026)
-[Đã xử lý] Mã dự án chữ thường; thị trường 2 chữ in hoa; trần tháng ≥ 0 USD (ràng buộc CHECK)
+[Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026); cột hashtag từ 18/10/2026
+[Đã xử lý] Mã dự án chữ thường; thị trường 2 chữ in hoa; hashtag bỏ #, bỏ dấu, chữ thường, chỉ a-z 0-9 _; trần tháng ≥ 0 USD (ràng buộc CHECK)
 [Refresh] Ghi tức thời khi người quản lý sửa trên dashboard (mỗi lần sửa ghi nhat_ky)
 [Dùng khi] Biết dự án nào đang bật, từ khoá lọc, trần chi phí tháng
 [Không dùng khi] Chi phí đã tiêu → dùng luot_quet; bài và tương tác → dùng bai; bản cho BI → dùng ganesha-381907.SOCIAL_LISTENING.du_an
@@ -435,7 +441,8 @@ COMMENT ON COLUMN du_an.ten IS 'Tên hiển thị của dự án (vd HAPAS). Kh�
 COMMENT ON COLUMN du_an.tu_khoa IS 'Từ khoá dự án; bài từ nguồn không phải kênh nhà phải nhắc ít nhất một từ (so khớp bỏ dấu, không phân biệt hoa thường). Mảng rỗng: Mark dùng tên dự án.';
 COMMENT ON COLUMN du_an.tu_loai_tru IS 'Từ loại trừ: bài chứa một từ này bị bỏ cứng trước bước AI. Mảng rỗng khi không đặt.';
 COMMENT ON COLUMN du_an.boi_canh IS 'Mô tả brand cho bước AI phân xử giữ/loại và gán sắc thái, chủ đề. Chuỗi rỗng khi chưa viết.';
-COMMENT ON COLUMN du_an.thi_truong IS 'Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN.';
+COMMENT ON COLUMN du_an.thi_truong IS 'Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN. Từ 18/10/2026 dashboard không còn ô sửa: dự án mới luôn VN, dự án cũ giữ giá trị đã lưu; Mark vẫn dùng cho cổng thị trường và bước AI.';
+COMMENT ON COLUMN du_an.hashtag IS 'Hashtag riêng của dự án, người quản lý nhập ở trang Nguồn (từ 18/10/2026): đã bỏ #, bỏ dấu (đ→d), chữ thường, chỉ a-z 0-9 _, bỏ trùng, giữ thứ tự gõ; tối đa 50 mục, mỗi mục ≤ 100 ký tự. Mark dùng cho lượt tìm hashtag Instagram (lấy cau_hinh.tu_khoa.instagram.so_tu hashtag đầu, mặc định 12) và feed hashtag TikTok (bỏ thêm dấu _, chỉ tag 3–40 ký tự). Mảng rỗng (mặc định; mọi dự án trước 18/10/2026): Mark suy hashtag từ tu_khoa như trước — Instagram: mọi từ khoá viết liền bỏ dấu, TikTok: từ khoá một chữ. Không dùng để lọc bài (bài vẫn lọc theo tu_khoa, tu_loai_tru).';
 COMMENT ON COLUMN du_an.tran_usd_thang IS 'Trần chi phí theo dõi mỗi tháng (giờ VN), USD tiền Apify, không VAT, ≥ 0 (không trần trên). Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng.';
 COMMENT ON COLUMN du_an.dang_bat IS 'TRUE: dự án bật, /theodoi được quét. FALSE: tắt, /theodoi từ chối.';
 COMMENT ON COLUMN du_an.tao_luc IS 'Thời điểm tạo dự án (TIMESTAMPTZ, hiển thị theo múi giờ phiên; lưu UTC).';

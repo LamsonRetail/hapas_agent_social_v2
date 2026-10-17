@@ -515,6 +515,14 @@ def _tu_ig(tu: list[str], so_tu: int) -> list[str]:
     return list(dict.fromkeys(t for t in (hashtag_ig(x) for x in tu) if t))[:so_tu]
 
 
+def nguon_tag(du_an: dict, tu: list[str]) -> list[str]:
+    """Bản sao `theo_doi.nguon_tag` (18/10/2026): hashtag riêng của dự án (`du_an.hashtag`, chuẩn
+    `hashtag_ig`, tối đa 50) khi đã đặt, không thì từ khoá — đầu vào hashtag Instagram (`tu_gui`)
+    và feed TikTok (`tag_tiktok`). Chỉ đổi ĐẦU VÀO, công thức ước tính giữ nguyên."""
+    rieng = _tu_ig(list(du_an.get("hashtag") or []), GIOI_HAN["tk_so_tu"][1])
+    return rieng or tu
+
+
 def tu_gui(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU, so_bai: int = 0) -> list[str]:
     """Bản sao `theo_doi._tu_cho`: từ khoá thật sự gửi actor. Instagram: `so_tu` hashtag đầu (mọi
     từ khoá viết liền, bỏ dấu — 17/10/2026); Threads: `so_bai // 10` từ đầu (≥ 1, ≤ 20 — actor lấy
@@ -555,15 +563,17 @@ def bang_cau_hinh(du_an: dict) -> dict:
     sau rút gọn, kèm `so_cau` câu tìm). `uoc_web` = phần Báo & Web của `uoc_tk` (ngoài chiến dịch
     chạy ≤ 1 lượt/ngày — `luot_web_thuong`), `uoc_tk_mxh` = phần còn lại (chạy mọi lượt)."""
     tu = tu_tim(du_an)
+    tag = nguon_tag(du_an, tu)          # 18/10/2026: hashtag riêng của dự án hoặc từ khoá
     tk = {p: {**cau_hinh(du_an, "tu_khoa", p)} for p in NEN_TANG}
     bl = {p: {**cau_hinh(du_an, "binh_luan", p)} for p in NEN_TANG}
     for p in NEN_TANG:
-        tk[p]["uoc"] = (uoc_tk_nen_tang(p, tk[p]["so_bai"], tu, tk[p]["so_tu"],
+        tu_p = tag if p == "instagram" else tu
+        tk[p]["uoc"] = (uoc_tk_nen_tang(p, tk[p]["so_bai"], tu_p, tk[p]["so_tu"],
                                         fb_toi_da=GIOI_HAN["tk_so_bai"][1],
                                         boc=tk[p].get("boc", WEB_BOC_MAC_DINH))
                         if tk[p]["bat"] else 0.0)
         tk[p]["so_tu_gui"] = (len(rut_gon_web(tu)) if p == "web"
-                              else len(tu_gui(p, tu, tk[p]["so_tu"], tk[p]["so_bai"])))
+                              else len(tu_gui(p, tu_p, tk[p]["so_tu"], tk[p]["so_bai"])))
         bl[p]["uoc"] = (uoc_binh_luan_luot(bl[p]["so_bai"], bl[p]["moi_bai"], p)
                         if bl[p]["bat"] else 0.0)
     # Đường 2 Threads (17/10/2026): cộng vào ô USD của Threads; biểu mẫu chưa có ô riêng nên cấu
@@ -580,7 +590,7 @@ def bang_cau_hinh(du_an: dict) -> dict:
     d2["uoc"] = uoc_fb_duong2(len(d2["cum"]), d2["so_bai_moi_tu"]) if d2["bat"] else 0.0
     # TikTok feed hashtag (17/10/2026): cũng một dòng phụ, cộng vào tổng.
     th = tk["tiktok"]["hashtag"]
-    th["tag"] = tag_tiktok(tu)
+    th["tag"] = tag_tiktok(tag)
     th["uoc"] = uoc_tag_tiktok(th["so_yeu_cau"], len(th["tag"])) if th["bat"] else 0.0
     uoc_tk = round(sum(x["uoc"] for x in tk.values()) + d2["uoc"] + th["uoc"], 4)
     return {"tu_khoa": tk, "binh_luan": bl, "so_tu_khoa": len(tu),
