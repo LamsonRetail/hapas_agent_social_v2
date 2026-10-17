@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import threading
 import time
 
 import pytest
@@ -28,10 +29,20 @@ def _iso(ts: float) -> str:
 @pytest.fixture
 def dong_ho(monkeypatch):
     """Đồng hồ giả chung cho `viec_nen` (`_bay_gio`, `_ngu`) và `apify_tool` (`_giay_tu`,
-    `time.sleep`)."""
+    `time.sleep`).
+
+    CHỈ luồng của bài thử dời được đồng hồ giả (soát 17/10/2026): `time.sleep` là của CẢ tiến
+    trình, luồng nền còn sống của bài thử trước (vòng lặp ngủ 0,2 giây) gọi vào đây thì ngủ THẬT
+    như cũ. Bản trước để chúng dời đồng hồ — đo được 'giay' 24.355 với hàng trăm lần ngủ 0,2 giây
+    không phải của bài thử, bài thử chập chờn khi chạy cả bộ."""
     t = {"giay": 0.0, "ngu": []}
+    ngu_that = time.sleep
+    luong_thu = threading.get_ident()
 
     def ngu(s):
+        if threading.get_ident() != luong_thu:
+            ngu_that(s)
+            return
         t["ngu"].append(s)
         t["giay"] += s
     monkeypatch.setattr(V, "_bay_gio", lambda: GOC + t["giay"])
@@ -40,6 +51,22 @@ def dong_ho(monkeypatch):
     monkeypatch.setattr(A, "_giay_tu", lambda moc: None if moc is None else round(
         GOC + t["giay"] - moc.timestamp(), 1))
     return t
+
+
+def test_dong_ho_gia_khong_bi_luong_nen_khac_doi(dong_ho):
+    """Luồng nền sót lại (của bài thử khác) gọi `time.sleep` trong lúc đồng hồ giả đang bật: ngủ
+    thật, không dời đồng hồ giả — nguyên nhân bài chập chờn khi chạy cả bộ (soát 17/10/2026)."""
+    xong = threading.Event()
+
+    def vong():
+        for _ in range(20):
+            time.sleep(0.001)
+        xong.set()
+    threading.Thread(target=vong, daemon=True).start()
+    assert xong.wait(5)
+    assert dong_ho["giay"] == 0 and dong_ho["ngu"] == []
+    time.sleep(7)                         # luồng của bài thử: dời đồng hồ giả, không ngủ thật
+    assert dong_ho["giay"] == 7 and dong_ho["ngu"] == [7]
 
 
 # ───────────────────────────── apify_tool ─────────────────────────────
