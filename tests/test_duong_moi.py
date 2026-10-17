@@ -18,6 +18,7 @@ import pytest
 import apify_tool as A
 import quet_lon as Q
 import theo_doi as T
+import theo_doi_api as TDA
 from dashboard import chi_phi as CP
 
 _VN = datetime.timezone(datetime.timedelta(hours=7))
@@ -432,3 +433,155 @@ def test_trang_ngan_sach_luu_duong2_facebook():
     # Biểu mẫu cũ (không có ô đường 2): khối duong2 giữ nguyên.
     c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "tk_facebook_bat": "1"})
     assert kho.du_an["hapas"]["cau_hinh"]["tu_khoa"]["facebook"]["duong2"] == d2
+
+
+# ───────────────── 3. theo dõi trang Facebook: thedoor~facebook-page-scraper + dự phòng ─────────────
+def _thedoor() -> list[dict]:
+    return _mau("mau_fb_thedoor.json")["items"]
+
+
+@pytest.mark.parametrize("dd", ["https://www.facebook.com/hapasglobal",
+                                "https://www.facebook.com/HapasGlobal/",
+                                "https://www.facebook.com/profile.php?id=100066634543565"])
+def test_doc_thedoor_theo_raw_that_va_ghep_nguon(dd):
+    items = _thedoor()
+    ket = TDA.doc_thedoor(items, ["https://www.facebook.com/khac", dd])
+    (tk,) = ket.values()
+    assert tk["ho_so"]["ten"] == "HAPAS" and len(tk["bai"]) == len(items)
+    for b, it in zip(tk["bai"], items):
+        eg = it["engagement"]
+        assert b["link"] == it["post"]["url"] and "/posts/" in b["link"]
+        assert b["ngay"] == datetime.datetime.fromtimestamp(it["created"]["timestamp"],
+                                                            datetime.timezone.utc)
+        assert (b["like"], b["binh_luan"], b["share"]) == (eg["reactions"], eg["comments"],
+                                                           eg["shares"])
+        assert b["view"] == (eg["views"] or None)
+        assert b["loai"] == ("video" if it["video"]["is_video"] else "bài")
+        assert b["_goc"]["postId"] == it["post"]["id"] and b["_goc"]["inputUrl"] == dd
+    assert any(b["view"] for b in tk["bai"]), "thedoor có view video (actor rẻ khác không có)"
+    nguon = [{"id": 6, "nen_tang": "facebook", "dinh_danh": dd, "so_bai_moi_lan": 20},
+             {"id": 7, "nen_tang": "facebook", "dinh_danh": "https://www.facebook.com/khac",
+              "so_bai_moi_lan": 20}]
+    kq, loi = T.ghep_nguon("facebook", ket, nguon)
+    assert len(kq[6]) == len(items) and kq[7] == [] and 7 in loi
+    for d, _ in kq[6]:
+        assert d["ma_so_fb"] and d["ma_so_fb"].isdigit() and d["_goc_id"] == d["ma_so_fb"]
+        assert T._khoa_bai("facebook", d["link"], {"id": d["_goc_id"]}) == \
+            f"facebook:{d['ma_so_fb']}"
+
+
+def test_gia_nguon_facebook_thedoor_khop_dashboard():
+    assert T._GIA["facebook"] == TDA.FB_TRANG_GIA == 0.0025
+    assert T._KHOI_NGUON["facebook"] == TDA.FB_TRANG_KHOI == 0.01
+    for so_nguon, n in ((1, 5), (6, 20), (3, 1)):
+        assert CP.uoc_mot_luot("facebook", so_nguon, n) == T._uoc_phan("facebook", so_nguon, n)
+    assert T._uoc_phan("facebook", 6, 20) == pytest.approx((6 * 20 * 0.0025 + 0.01) * 1.3,
+                                                           abs=1e-4)
+    assert CP.phi_khoi_dong_ngay("facebook") == pytest.approx(0.01 * 1.3)
+    assert CP.hang_so_cho_trinh_duyet()["khoi_nguon"] == {"facebook": 0.01}
+    import tiktok_api as TT
+    assert TT.CHON["facebook_theo_doi"] == {"chinh": TDA.FB_TRANG,
+                                            "du_phong": ("apify~facebook-posts-scraper",)}
+
+
+def _fb_cu(trang: str, i: int) -> dict:
+    """Item thật dạng apify~facebook-posts-scraper (actor dự phòng)."""
+    return {"pageName": trang, "inputUrl": f"https://www.facebook.com/{trang}",
+            "facebookUrl": f"https://www.facebook.com/{trang}", "postId": f"77{i:010d}",
+            "url": f"https://www.facebook.com/{trang}/posts/pfbid0Mau{i}",
+            "time": (datetime.datetime.now(datetime.timezone.utc)
+                     - datetime.timedelta(hours=i + 1)).isoformat(),
+            "likes": 5, "comments": 2, "shares": 0, "text": f"bài {i} của {trang}"}
+
+
+class _GiaChay:
+    """`A._run_actor` / `A._doc_tiep_run` giả theo actor; ghi mọi lượt gửi."""
+
+    def __init__(self, mp, tra: dict):
+        self.tra, self.gui, self.doc = tra, [], []
+        mp.setattr(A, "_run_actor", self.run)
+        mp.setattr(A, "_doc_tiep_run", self.doc_tiep)
+
+    def run(self, actor, payload, limit, mem=None, deadline=None, min_charge=0, *, tran_usd=None,
+            mot_phan=False, nen_tang=None):
+        self.gui.append({"actor": actor, "payload": payload, "limit": limit, "tran": tran_usd})
+        rid = f"r{len(self.gui)}"
+        fn = A._KHI_CO_RUN.get()
+        if fn:
+            fn({"id": rid}, {})
+        x = self.tra.get(actor)
+        if isinstance(x, Exception):
+            raise x
+        return list(x or []), {"run_id": rid, "ma": "OK", "usd": 0.0}
+
+    def doc_tiep(self, run_id, limit, deadline=None, mot_phan=True, actor=""):
+        self.doc.append(run_id)
+        return list(self.tra.get(actor) or []), {"run_id": run_id, "ma": "OK", "usd": 0.0}
+
+
+def _chay_phan(v, ph, ds, cap: float = 1.0):
+    """`theo_doi._chay_phan_apify` trong BẢN SAO ngữ cảnh như runner thật (`chay_viec`): cờ Apify
+    (`_NEN_TANG`, `_KHI_CO_RUN`…) không rò sang bài thử khác."""
+    import contextvars
+    return contextvars.copy_context().run(T._chay_phan_apify, v, "facebook", ph, ds, cap,
+                                          time.monotonic() + 300)
+
+
+def _phan_fb(urls: list[str], n: int = 5):
+    from test_theo_doi import GiaViec
+    ds = [{"id": i + 1, "nen_tang": "facebook", "dinh_danh": u, "ten": u, "link": "",
+           "loai": "kenh_nha", "so_bai_moi_lan": n, "chu_ky_ngay": 1, "quet_cuoi": None}
+          for i, u in enumerate(urls)]
+    (ph,) = T.chia_phan(ds)["facebook"]
+    v = GiaViec({"facebook": {"phan": [ph]}}, [x["id"] for x in ds])
+    return v, ph, ds
+
+
+def test_trang_thedoor_thieu_thi_chay_actor_cu_cho_dung_trang_do(monkeypatch):
+    urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/trang.khac"]
+    v, ph, ds = _phan_fb(urls)
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: _thedoor(),
+                                ph["du_phong"]["actor"]: [_fb_cu("trang.khac", i)
+                                                          for i in range(3)]})
+    tien = _chay_phan(v, ph, ds)
+    assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG, "apify~facebook-posts-scraper"]
+    assert ap.gui[0]["payload"] == {"pageUrls": urls, "postsToScrape": 5}
+    assert ap.gui[1]["payload"]["startUrls"] == [{"url": urls[1]}], "chỉ trang thedoor thiếu"
+    assert ap.gui[1]["tran"] <= 1.0 - (len(_thedoor()) * 0.0025 + 0.01) + 1e-9
+    assert ph["run_id"] == "r1" and ph["run_phu"] == ["r2"] and ph["du_phong_run"] == "r2"
+    dong = {}
+    for d, _ in v.doc_dong("facebook"):
+        dong.setdefault(d["_nguon_id"], []).append(d)
+    assert len(dong[1]) == len(_thedoor()) and len(dong[2]) == 3
+    assert all(d["ma_so_fb"] for x in dong.values() for d in x)
+    assert tien == pytest.approx(len(_thedoor()) * 0.0025 + 0.01 + 3 * 0.005 + 0.001, abs=1e-6)
+    assert ph["trang_thai"] == "xong" and not ph.get("loi_nguon")
+
+
+def test_thedoor_du_thi_khong_chay_du_phong_va_loi_dung_ca_luot_cung_khong(monkeypatch):
+    v, ph, ds = _phan_fb(["https://www.facebook.com/hapasglobal"])
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: _thedoor()})
+    _chay_phan(v, ph, ds)
+    assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG]
+    v, ph, ds = _phan_fb(["https://www.facebook.com/hapasglobal"])
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: A.LoiApify("HET_TIEN_THANG", "hết tiền")})
+    _chay_phan(v, ph, ds)
+    assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG] and ph["trang_thai"] == "loi"
+    # thedoor lỗi thường (actor hỏng) → dự phòng cứu cả trang.
+    v, ph, ds = _phan_fb(["https://www.facebook.com/hapasglobal"])
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: A.LoiApify("LOI", "actor hỏng"),
+                                "apify~facebook-posts-scraper": [_fb_cu("hapasglobal", 1)]})
+    _chay_phan(v, ph, ds)
+    assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG, "apify~facebook-posts-scraper"]
+    assert len(v.doc_dong("facebook")) == 1 and ph["trang_thai"] == "mot_phan"
+
+
+def test_khoi_dong_lai_doc_tiep_run_du_phong_khong_post_lai(monkeypatch):
+    urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/trang.khac"]
+    v, ph, ds = _phan_fb(urls)
+    ph.update(run_id="r-cu", trang_thai="dang_chay", du_phong_run="r-dp", run_phu=["r-dp"])
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: _thedoor(),
+                                "apify~facebook-posts-scraper": [_fb_cu("trang.khac", 1)]})
+    _chay_phan(v, ph, ds)
+    assert ap.gui == [] and ap.doc == ["r-cu", "r-dp"]
+    assert len(v.doc_dong("facebook")) == len(_thedoor()) + 1

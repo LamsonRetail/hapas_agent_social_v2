@@ -60,8 +60,15 @@ _TEN = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok", "fac
 #: 0,0012/bài (nhiều bài thì thực tế thấp
 #: hơn, ước tính dư). Đo @hapas.official 20 bài: 3 yêu cầu = 0,006 USD (clockworks cũ 0,06, báo
 #: "Profile has no videos"). Giữ dạng "giá × bài" để công thức trên trình duyệt vẫn khớp.
-_GIA = {"tiktok": 0.0012, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0,
+#: Facebook từ 17/10/2026 qua thedoor~facebook-page-scraper (`theo_doi_api.FB_TRANG`): 0,0025 USD/bài
+#: (gói FREE, cùng 20 bài với actor cũ 0,005, có view video) + phí khởi động 0,01 USD/run
+#: (`_KHOI_NGUON`; actor cũ còn làm dự phòng).
+_GIA = {"tiktok": 0.0012, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
         "threads": 0.0025}
+#: Phí khởi động actor THEO DÕI nguồn khác actor tìm theo từ khoá cùng nền tảng (`apify_tool.
+#: _START_COST` là của actor tìm): Facebook thedoor 0,01 USD/run (`apify-actor-start` 1 GB, thêm
+#: 15/10/2026). Nền tảng không có ở đây dùng `_START_COST`.
+_KHOI_NGUON = {"facebook": 0.01}
 # Threads (chủ dự án 16/10/2026: "thêm listening threads"). Actor futurizerush~meta-threads-scraper
 # — đọc input schema + chạy thử 16/10/2026: chế độ "search" (từ khoá, ≤ 20 từ/lượt, lọc ngày
 # start_date/end_date phía actor, "recent" bài mới trước) và "user" (bài mới nhất của ≤ 20 tài
@@ -143,7 +150,8 @@ def _uoc_phan(p: str, so_nguon: int, n: int) -> float:
     if p == "threads":
         n = max(TH_TOI_THIEU_BAI, n)
     don_vi = so_nguon if p == "instagram" else so_nguon * n
-    return round((don_vi * gia + A._START_COST.get(p, 0.0)) * _HE_SO_UOC, 4)
+    khoi = _KHOI_NGUON.get(p, A._START_COST.get(p, 0.0))
+    return round((don_vi * gia + khoi) * _HE_SO_UOC, 4)
 
 
 def _so_bai_nguon(x: dict) -> int:
@@ -192,6 +200,9 @@ def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
                           uoc_usd=_uoc_phan(p, len(ds), n))
                 if p == "tiktok":
                     TDA.gan_ho_so(ph, ten, n)
+                elif p == "facebook":
+                    # 17/10/2026: thedoor (rẻ nửa giá, có view video), actor cũ làm dự phòng.
+                    TDA.gan_fb_trang(ph, [x["dinh_danh"] for x in ds], n)
             ra.setdefault(p, []).append(ph)
     return ra
 
@@ -446,6 +457,10 @@ def _dong_tu_tai_khoan(p: str, tk: dict) -> list[tuple[dict, datetime.datetime |
                                                              or "") or None,
             "_goc_vao": str(goc.get("inputUrl") or goc.get("facebookUrl") or ""),
         }, b.get("ngay")))
+        if p == "facebook":
+            # Id bài SỐ (thedoor `post.id`, actor cũ `postId`) cho khoá chống trùng bài FB — pfbid
+            # trong link đổi giữa các lượt cào (đo 17/10/2026: 30% dòng hapasglobal là bản trùng).
+            ra[-1][0]["ma_so_fb"] = A.ma_so_fb(goc.get("postId") or goc.get("post_id"))
     return ra
 
 
@@ -478,7 +493,7 @@ def ghep_nguon(p: str, ket: dict[str, dict], nguon: list[dict]) -> tuple[dict[in
     return ra, loi
 
 
-def _doc_ket_qua(p: str, items: list, n: int) -> dict[str, dict]:
+def _doc_ket_qua(p: str, items: list, n: int, urls: list[str] | None = None) -> dict[str, dict]:
     import account_tool
     if p == "tiktok":
         return account_tool._doc_tiktok(items)
@@ -486,7 +501,8 @@ def _doc_ket_qua(p: str, items: list, n: int) -> dict[str, dict]:
         return account_tool._doc_instagram(items, 12)
     if p == "threads":
         return _doc_threads(items)
-    return account_tool._doc_facebook(items)
+    # Facebook (17/10/2026): bài thedoor và/hoặc actor cũ (dự phòng, phần lập trước khi đổi actor).
+    return TDA.doc_fb_trang(items, list(urls or []))
 
 
 def _doc_threads(items: list) -> dict[str, dict]:
@@ -783,7 +799,11 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
         v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
                         usd_so=khong_kiem, ly_do=quet_lon._CAU_KHONG_KIEM)
         return khong_kiem
-    kq, loi_nguon = ghep_nguon(p, _doc_ket_qua(p, items, int(ph.get("n") or 0)), ds)
+    if p == "facebook" and ph.get("du_phong"):
+        # Trang thedoor không ra bài → actor cũ cho đúng trang đó (`theo_doi_api.du_phong_fb`).
+        items, meta, loi = TDA.du_phong_fb(v, p, ph, items, meta, loi, cap, han)
+    kq, loi_nguon = ghep_nguon(p, _doc_ket_qua(p, items, int(ph.get("n") or 0),
+                                               [x["dinh_danh"] for x in ds]), ds)
     if loi is not None:
         for nid, dong in kq.items():
             if not dong:

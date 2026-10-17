@@ -237,7 +237,12 @@ def test_chia_phan_moi_nguon_dung_so_bai_cua_no():
     assert tt["tiktok-30"]["nguon"] == [3] and tt["tiktok-30"]["limit"] == 30
     assert ph["instagram"][0]["payload"] == {"usernames": ["d"]}
     assert ph["youtube"][0]["actor"] == "youtube" and ph["youtube"][0]["uoc_usd"] == 0
-    assert ph["facebook"][0]["payload"]["resultsLimit"] == 3
+    # Facebook (17/10/2026): thedoor, actor + payload cũ làm dự phòng.
+    assert ph["facebook"][0]["actor"] == "thedoor~facebook-page-scraper"
+    assert ph["facebook"][0]["payload"] == {"pageUrls": ["https://facebook.com/f"],
+                                            "postsToScrape": 3}
+    assert ph["facebook"][0]["du_phong"]["payload"]["resultsLimit"] == 3
+    assert ph["facebook"][0]["uoc_usd"] == pytest.approx((3 * 0.0025 + 0.01) * 1.3, abs=1e-4)
     assert tt["tiktok-5"]["uoc_usd"] == pytest.approx(10 * 0.0012 * 1.3, abs=1e-4)
     # Instagram: 0,0026/tài khoản, không phí khởi động (17/10/2026, `apify_tool._START_COST`).
     assert ph["instagram"][0]["uoc_usd"] == pytest.approx(0.0026 * 1.3, abs=1e-4)
