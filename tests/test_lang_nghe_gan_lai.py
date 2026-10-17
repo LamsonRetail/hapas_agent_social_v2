@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import datetime
 import importlib.util
 import json
 import re
@@ -57,13 +58,15 @@ class KhoGia:
         self.bl: dict[tuple, dict] = {}
         self.giao_dich: list[dict] = []
         self.tep_sao_luu: str | None = None
+        self.luot_bat_dau: dict[int, datetime.datetime] = {}     # bảng luot_quet (id → bat_dau)
 
-    def them(self, kb, ma, tac_gia, noi_dung, loai="hop_le", sac=TL, cd=CD["KHAC"], nha=False):
+    def them(self, kb, ma, tac_gia, noi_dung, loai="hop_le", sac=TL, cd=CD["KHAC"], nha=False,
+             luot=None, thay=None):
         self.bl[("hapas", kb, ma)] = {
             "khoa_bai": kb, "ma": ma, "tac_gia": tac_gia, "noi_dung": noi_dung, "thich": 1,
             "loai": loai, "ly_do_loc": None, "sac_thai": sac if loai == "hop_le" else None,
             "chu_de": cd if loai == "hop_le" else None, "cua_thuong_hieu": nha,
-            "cap_nhat_cuoi": "cu"}
+            "luot_id": luot, "thay_lan_dau": thay, "cap_nhat_cuoi": "cu"}
 
     @contextlib.contextmanager
     def ket_noi(self):
@@ -110,11 +113,16 @@ class _Conn:
                                "bai_tai_khoan": p["tai_khoan"], "bai_tac_gia": p["tac_gia"]})
             return _Cur(ra)
         if ten == "bl_hop_le":
+            assert "b.luot_id" in sql and "b.thay_lan_dau" in sql
             return _Cur([{**{c: r[c] for c in ("khoa_bai", "ma", "tac_gia", "noi_dung", "thich",
-                                               *S.COT)},
+                                               "luot_id", "thay_lan_dau", *S.COT)},
                           "bai_noi_dung": k.bai[kb]["noi_dung"]}
                          for (da, kb, _), r in sorted(k.bl.items())
                          if da == ts[0] and r["loai"] == "hop_le"])
+        if ten == "moc_luot":
+            assert self.gd["chi_doc"], "đọc mốc lượt trong cùng giao dịch chỉ đọc"
+            sau = [t for i, t in k.luot_bat_dau.items() if i > ts[0]]
+            return _Cur([{"bat_dau": min(sau) if sau else None}])
         if ten == "sua":
             if self.gd["chi_doc"]:
                 raise RuntimeError("ReadOnlySqlTransaction: không ghi trong giao dịch chỉ đọc")
@@ -314,3 +322,85 @@ def test_ap_dung_thieu_sao_luu_thi_dung(moi, capsys):
     assert "--sao-luu" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         S.main(["hapas", "--dry-run", "--ap-dung", "--sao-luu", "x"])
+
+
+# ───────────── --den-luot (17/10/2026): bỏ bình luận của lượt đã gán bằng prompt mới ─────────────
+_VN = datetime.timezone(datetime.timedelta(hours=7))
+_L9 = datetime.datetime(2026, 10, 17, 0, 51, tzinfo=_VN)      # lượt 9 bắt đầu (sau deploy PR #62)
+
+
+def _kho_luot() -> KhoGia:
+    k = KhoGia()
+    k.luot_bat_dau = {5: _L9 - datetime.timedelta(days=2), 8: _L9 - datetime.timedelta(hours=5),
+                      9: _L9, 10: _L9 + datetime.timedelta(hours=7)}
+    cu = _L9 - datetime.timedelta(days=1)
+    k.them("tiktok:kol", "o5", "khach1", "giá túi này bn vậy", luot=5, thay=cu)
+    k.them("tiktok:kol", "o8", "khach2", "túi đẹp quá", luot=8, thay=cu)
+    k.them("tiktok:kol", "on", "khach3", "ship tỉnh không shop", luot=None, thay=cu)  # lượt đã xoá
+    k.them("tiktok:kol", "n9", "khach4", "mua ở đâu vậy", luot=9, thay=_L9)
+    k.them("tiktok:kol", "n10", "khach5", "màu này còn không", luot=10,
+           thay=_L9 + datetime.timedelta(hours=7))
+    # Cào lại ở lượt 10 nhưng thấy lần đầu TRƯỚC lượt 9: luot_id mới, nhãn vẫn của prompt cũ.
+    k.them("tiktok:kol", "c10", "khach6", "dùng bền lắm", luot=10, thay=cu)
+    # Bài minigame: 5 bình luận dự thi của lượt 10 + 1 bình luận lượt 5 không mở đầu bằng số.
+    for i in range(1, 6):
+        k.them("tiktok:mg", f"m{i}", f"dt{i}", f"30{i} – Chúc mẹ vui", luot=10, thay=_L9)
+    k.them("tiktok:mg", "m0", "dt0", "con thương mẹ", luot=5, thay=cu)
+    return k
+
+
+@pytest.fixture
+def moi_luot(moi, monkeypatch):
+    _, goi = moi
+    k = _kho_luot()
+    k.khi_goi_model = None
+    monkeypatch.setattr(K, "ket_noi", k.ket_noi)
+    return k, goi
+
+
+def test_den_luot_chay_thu_in_bo_loc_va_chi_chon_luot_cu(moi_luot, capsys):
+    kho, goi = moi_luot
+    truoc = copy.deepcopy(kho.bl)
+    assert S.main(["hapas", "--buoc", "b", "--tat-ca", "--den-luot", "8"]) == 0
+    ra = capsys.readouterr().out
+    assert kho.bl == truoc and not kho.ghi() and goi == []
+    assert all(g["chi_doc"] for g in kho.giao_dich)
+    # o5, o8, on (NULL = cũ) + m0 (bài minigame xét trên MỌI bình luận của bài, kể cả lượt 10).
+    assert "(b) Gán lại nhãn: 4 dòng (tat_ca 2, khen_ma_trung_lap 1, bai_minigame 1)." in ra
+    assert ("Bộ lọc lượt (b): --den-luot 8 — chỉ bình luận có luot_id ≤ 8 (luot_id NULL — lượt "
+            "đã xoá — tính là cũ); bỏ 8 dòng của lượt > 8, trong đó 1 dòng thấy lần đầu TRƯỚC "
+            "lượt 9") in ra
+    assert ra.index("Bộ lọc lượt (b)") < ra.index("(b) Gán lại nhãn"), "bộ lọc in trước số dòng"
+    b = S.chon_gan_lai([dict(r, bai_noi_dung=kho.bai[r["khoa_bai"]]["noi_dung"])
+                        for r in kho.bl.values()], tat_ca=False, den_luot=8)
+    assert {d["ma"]: d["ly_do"] for d in b} == {"o8": "khen_ma_trung_lap", "m0": "bai_minigame"}
+
+
+def test_den_luot_khong_dat_thi_noi_ro_khong_loc(moi_luot, capsys):
+    assert S.main(["hapas", "--buoc", "b", "--tat-ca"]) == 0
+    ra = capsys.readouterr().out
+    assert "Bộ lọc lượt (b): KHÔNG — mọi lượt quét" in ra
+    assert "(b) Gán lại nhãn: 12 dòng" in ra
+    assert not any("moc_luot" in g["lenh"] for g in moi_luot[0].giao_dich), \
+        "không lọc thì không hỏi mốc lượt"
+
+
+def test_den_luot_ap_dung_chi_sua_luot_cu_va_ghi_vao_tep(moi_luot, tmp_path, capsys):
+    kho, goi = moi_luot
+    goc = _bang(kho)
+    tep = tmp_path / "gan-lai-den-8.jsonl"
+    kho.tep_sao_luu = str(tep)
+    assert S.main(["hapas", "--buoc", "b", "--tat-ca", "--den-luot", "8", "--ap-dung",
+                   "--sao-luu", str(tep)]) == 0
+    assert "Bộ lọc lượt (b): --den-luot 8" in capsys.readouterr().out
+    gui = {t for lo in goi for t in lo}
+    assert gui and gui <= {"giá túi này bn vậy", "túi đẹp quá", "ship tỉnh không shop",
+                           "con thương mẹ"}, "model chỉ nhận bình luận của lượt ≤ 8 (hoặc NULL)"
+    for m in ("n9", "n10", "c10", "m1", "m5"):        # lượt > 8: không một cột nào đổi
+        kb = "tiktok:mg" if m.startswith("m") else "tiktok:kol"
+        assert kho.bl[("hapas", kb, m)] == {**goc[("hapas", kb, m)], "cap_nhat_cuoi": "cu"}, m
+    dong = [json.loads(x) for x in tep.read_text(encoding="utf-8").splitlines()]
+    assert dong[0]["den_luot"] == 8 and dong[0]["tat_ca"] is True
+    assert {d["ma"] for d in dong[1:]} <= {"o5", "o8", "on", "m0"}
+    with pytest.raises(SystemExit):
+        S.main(["hapas", "--den-luot", "-1"])

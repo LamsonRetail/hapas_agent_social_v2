@@ -499,3 +499,39 @@ def test_script_gan_nhan_bai_chay_thu_ap_dung_hoan_tac(monkeypatch, tmp_path):
     assert S.chay(ns, out.append) == 2, "không ghi đè tệp hoàn tác cũ"
     assert S.chay(ns_(hoan_tac=tep), out.append) == 0
     assert kho.bai["web:1"]["sac_thai"] == "Trung lập" and "trả lại 1/1 bài" in out[-1]
+
+
+def test_script_gan_nhan_bai_den_luot_chi_bai_vao_kho_o_luot_cu(monkeypatch, tmp_path, capsys):
+    """`--den-luot N` (17/10/2026): chỉ bài có luot_dau ≤ N; luot_dau NULL (lượt đầu đã xoá) tính
+    là cũ; bộ lọc in rõ khi chạy thử; tệp hoàn tác ghi bộ lọc."""
+    import json as J
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(G.__file__).parent / "scripts"))
+    import lang_nghe_gan_nhan_bai as S
+
+    def bai(k, luot, nen="tiktok", nha=False):
+        return {"khoa": k, "nen_tang": nen, "noi_dung": f"bài {k} về HAPAS", "hashtag": "",
+                "sac_thai": "Trung lập", "chu_de": "Khác", "kenh_nha": nha, "luot_dau": luot}
+    kho = KhoScript([bai("tiktok:3", 3), bai("tiktok:8", 8), bai("tiktok:n", None),
+                     bai("tiktok:9", 9), bai("web:12", 12, "web"), bai("tiktok:nha", 2, nha=True)])
+    monkeypatch.setattr(S.K, "ket_noi", kho.ket_noi)
+    monkeypatch.setattr(S, "_chuan_bi_model", lambda: None)
+    goi = []
+    monkeypatch.setattr(P, "_goi_model", lambda n: goi.append(n) or J.dumps(
+        {str(i): ["tich_cuc", "chat_luong"] for i in range(10)}))
+    assert [r["khoa"] for r in S.chon(list(kho.bai.values()), True, 8)] == \
+        ["tiktok:3", "tiktok:8", "tiktok:n"]
+    assert [r["khoa"] for r in S.chon(list(kho.bai.values()), False, 8)] == [], "web lượt 12"
+    assert S.main(["hapas", "--tat-ca", "--den-luot", "8"]) == 0
+    ra = capsys.readouterr().out
+    assert "Gán lại nhãn 3 bài (mọi bài ngoài kênh nhà)" in ra and not kho.sua and not goi
+    assert ("Bộ lọc lượt: --den-luot 8 — chỉ bài có luot_dau ≤ 8 (luot_dau NULL — lượt đầu đã "
+            "xoá — tính là cũ); bỏ 2 bài vào kho ở lượt > 8.") in ra
+    assert S.main(["hapas", "--tat-ca"]) == 0
+    assert "Bộ lọc lượt: KHÔNG — mọi lượt" in capsys.readouterr().out
+    tep = tmp_path / "nb.jsonl"
+    assert S.main(["hapas", "--tat-ca", "--den-luot", "8", "--ap-dung", "--sao-luu", str(tep)]) == 0
+    assert sorted(kho.sua) == ["tiktok:3", "tiktok:8", "tiktok:n"]
+    assert kho.bai["tiktok:9"]["sac_thai"] == "Trung lập" == kho.bai["web:12"]["sac_thai"]
+    dau = J.loads(tep.read_text(encoding="utf-8").splitlines()[0])
+    assert dau["den_luot"] == 8 and dau["tat_ca"] is True

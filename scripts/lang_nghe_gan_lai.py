@@ -14,6 +14,15 @@ Vì sao cần: lượt `/theodoi` chỉ gán nhãn bình luận VỪA cào và b
         • đang "Trung lập" mà có lời khen rõ (đẹp, xinh, dễ thương, tuyệt vời…);
         • `--tat-ca`: MỌI bình luận `hop_le` của dự án.
       Lô model hỏng / hết giờ thì dòng đó GIỮ nhãn cũ (fail-open như lượt cào).
+      `--den-luot N` (17/10/2026): mọi bộ chọn của (b) chỉ lấy bình luận có `binh_luan.luot_id
+      ≤ N` — bình luận của lượt sau đã gán bằng prompt mới của PR #62 (deploy 17/10 00:46, lượt 9
+      bắt đầu 00:51): `--tat-ca` không lọc chọn 12.527 dòng / 126 lượt model, trong đó 7.202 dòng
+      của lượt ≥ 9. `luot_id` NULL (lượt đã bị xoá) không chứng minh được là prompt mới → coi là
+      CŨ, vẫn chọn. Bài minigame vẫn xét trên MỌI bình luận của bài (lọc lượt không làm lệch tỉ
+      lệ số dự thi). Bước (a) không lọc (luật, không gọi model).
+      Lưu ý: `luot_id` là lượt cào bình luận GẦN NHẤT — bình luận gán nhãn ở lượt ≤ N rồi được
+      cào lại ở lượt sau (đã có nhãn nên không gửi model lại) mang `luot_id` mới nên bị lọc dù
+      nhãn vẫn của prompt cũ; bản chạy thử in số dòng như vậy (`thay_lan_dau` trước lượt N+1).
 
 An toàn:
   • Mặc định CHẠY THỬ: mọi truy vấn trong MỘT giao dịch READ ONLY, không gọi model, không ghi
@@ -34,6 +43,9 @@ của Mark đã lên VPS: lượt quét chạy bản cũ sẽ ghi lại `loai = 
     PY=/opt/mark/hermes-agent/venv/bin/python
     sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas                 # chạy thử
     sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --thu 30        # xem trước nhãn mới
+    sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --buoc b --tat-ca --den-luot 8   # chạy thử
+    sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --buoc b --tat-ca --den-luot 8 \
+        --ap-dung --sao-luu .audit/gan-lai-1710-den-luot-8.jsonl
     sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --ap-dung --sao-luu .audit/gan-lai-1610.jsonl
     sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --hoan-tac .audit/gan-lai-1610.jsonl
 """
@@ -76,7 +88,8 @@ SQL_BL_NHA = (
     "ORDER BY b.khoa_bai, b.ma")
 SQL_BL_HOP_LE = (
     "/* gl:bl_hop_le */ SELECT b.khoa_bai, b.ma, b.tac_gia, b.noi_dung, b.thich, b.loai, "
-    "b.ly_do_loc, b.sac_thai, b.chu_de, b.cua_thuong_hieu, p.noi_dung AS bai_noi_dung "
+    "b.ly_do_loc, b.sac_thai, b.chu_de, b.cua_thuong_hieu, b.luot_id, b.thay_lan_dau, "
+    "p.noi_dung AS bai_noi_dung "
     "FROM binh_luan b JOIN bai p ON p.du_an = b.du_an AND p.khoa = b.khoa_bai "
     "WHERE b.du_an = %s AND b.loai = 'hop_le' ORDER BY b.khoa_bai, b.ma")
 # Một dòng, chỉ khi giá trị hiện tại còn đúng `cu` (khoá chính + so từng cột).
@@ -86,6 +99,9 @@ SQL_SUA = (
     "WHERE du_an = %s AND khoa_bai = %s AND ma = %s AND loai = %s "
     "AND ly_do_loc IS NOT DISTINCT FROM %s AND sac_thai IS NOT DISTINCT FROM %s "
     "AND chu_de IS NOT DISTINCT FROM %s AND cua_thuong_hieu = %s")
+# Giờ bắt đầu của lượt ĐẦU TIÊN sau `--den-luot N` (id lượt tăng chung mọi dự án/kiểu) — để đếm
+# bình luận bị lọc mà thấy lần đầu trước mốc đó (cào lại ở lượt sau, nhãn có thể còn cũ).
+SQL_MOC_LUOT = "/* gl:moc_luot */ SELECT min(bat_dau) AS bat_dau FROM luot_quet WHERE id > %s"
 
 # Số dự thi đầu câu: 1–4 chữ số, không phải ngày/số thập phân ("20/10", "8.3").
 _RE_SO_DU_THI = re.compile(r"^(?:#|s[ốo]\s*)?\d{1,4}(?!\d)(?![/.,:]\d)")
@@ -128,23 +144,38 @@ def co_loi_khen(text) -> bool:
 
 
 # ───────────────────────────── đọc + chọn ─────────────────────────────
-def doc_kho(ma: str) -> tuple[dict | None, list[dict], list[dict]]:
-    """(dự án, bình luận chưa là thương hiệu dưới bài kênh nhà, bình luận hop_le) — MỘT giao
-    dịch READ ONLY."""
+def doc_kho(ma: str, den_luot: int | None = None) -> tuple[dict | None, list[dict], list[dict],
+                                                          datetime.datetime | None]:
+    """(dự án, bình luận chưa là thương hiệu dưới bài kênh nhà, bình luận hop_le, giờ bắt đầu lượt
+    đầu tiên sau `den_luot` — None khi không lọc / chưa có lượt nào sau) — MỘT giao dịch READ
+    ONLY."""
     with K.ket_noi() as c:
         c.execute(SQL_CHI_DOC)
         du_an = c.execute(SQL_DU_AN, (ma,)).fetchone()
         if not du_an:
-            return None, [], []
+            return None, [], [], None
         nha = list(c.execute(SQL_BL_NHA, (ma,)).fetchall())
         hop_le = list(c.execute(SQL_BL_HOP_LE, (ma,)).fetchall())
-    return du_an, nha, hop_le
+        moc = None
+        if den_luot is not None:
+            moc = (c.execute(SQL_MOC_LUOT, (den_luot,)).fetchone() or {}).get("bat_dau")
+    return du_an, nha, hop_le, moc
+
+
+def trong_luot(r: dict, den_luot: int | None) -> bool:
+    """Dòng thuộc lượt ≤ `den_luot` (`--den-luot`); None = không lọc. `luot_id` NULL (lượt đã bị
+    xoá, ON DELETE SET NULL) không chứng minh được là đã gán bằng prompt mới → coi là cũ."""
+    if den_luot is None:
+        return True
+    x = r.get("luot_id")
+    return x is None or int(x) <= den_luot
 
 
 def _dong(r: dict, cu: dict, moi: dict, buoc: str, ly_do: str) -> dict:
     return {"khoa_bai": r["khoa_bai"], "ma": r["ma"], "tac_gia": r.get("tac_gia") or "",
             "noi_dung": r.get("noi_dung") or "", "thich": r.get("thich"), "cu": cu,
-            "moi": moi, "buoc": buoc, "ly_do": ly_do}
+            "moi": moi, "buoc": buoc, "ly_do": ly_do, "luot_id": r.get("luot_id"),
+            "thay_lan_dau": r.get("thay_lan_dau")}
 
 
 def chon_thuong_hieu(du_an: dict, rows: list[dict]) -> list[dict]:
@@ -165,9 +196,11 @@ def chon_thuong_hieu(du_an: dict, rows: list[dict]) -> list[dict]:
 
 
 def chon_gan_lai(rows: list[dict], tat_ca: bool = False,
-                 bo: set | None = None) -> list[dict]:
+                 bo: set | None = None, den_luot: int | None = None) -> list[dict]:
     """(b) Bình luận hop_le cần gán lại; `bo` = khoá (khoa_bai, ma) bước (a) đã chuyển thành
-    thương hiệu. `moi` để trống — điền sau khi gọi model."""
+    thương hiệu. `moi` để trống — điền sau khi gọi model. `den_luot`: mọi bộ chọn chỉ lấy dòng
+    `trong_luot` — bài minigame vẫn xét trên MỌI bình luận của bài (lọc trước thì bài có 20 bình
+    luận dự thi ở lượt mới + 1 bình luận cũ chỉ còn 1 dòng, dưới ngưỡng 5 — không nhận ra)."""
     bo = bo or set()
     rows = [r for r in rows if (r["khoa_bai"], r["ma"]) not in bo]
     theo_bai: dict[str, list[dict]] = {}
@@ -181,7 +214,7 @@ def chon_gan_lai(rows: list[dict], tat_ca: bool = False,
             bai_mg.add(kb)
     ra = []
     for r in rows:
-        if not str(r.get("noi_dung") or "").strip():
+        if not str(r.get("noi_dung") or "").strip() or not trong_luot(r, den_luot):
             continue
         if la_so_du_thi(r.get("noi_dung")):
             ly = "so_du_thi"
@@ -305,6 +338,22 @@ def _chuan_bi_model() -> None:
         sys.path.insert(0, config.hermes_agent_dir)
 
 
+def _cau_loc_luot(den: int | None, b_khong_loc: list[dict],
+                  moc: datetime.datetime | None) -> str:
+    """Dòng mô tả bộ lọc lượt của (b). `b_khong_loc`: các dòng bộ chọn lấy khi KHÔNG lọc."""
+    if den is None:
+        return ("Bộ lọc lượt (b): KHÔNG — mọi lượt quét (thêm --den-luot N để chỉ lấy bình luận "
+                "của lượt ≤ N).")
+    bi_loc = [d for d in b_khong_loc if not trong_luot(d, den)]
+    cu = [d for d in bi_loc if moc is not None and d.get("thay_lan_dau") is not None
+          and d["thay_lan_dau"] < moc]
+    return (f"Bộ lọc lượt (b): --den-luot {den} — chỉ bình luận có luot_id ≤ {den} (luot_id "
+            f"NULL — lượt đã xoá — tính là cũ); bỏ {len(bi_loc)} dòng của lượt > {den}"
+            + (f", trong đó {len(cu)} dòng thấy lần đầu TRƯỚC lượt {den + 1} (cào lại ở lượt "
+               "sau nên luot_id mới, nhãn có thể vẫn của prompt cũ — không gán lại)"
+               if cu else "") + ".")
+
+
 def chay(ns, in_ra=print) -> int:
     ma = ns.du_an.strip().lower()
     if ns.hoan_tac:
@@ -326,16 +375,22 @@ def chay(ns, in_ra=print) -> int:
     if ns.ap_dung and os.path.exists(ns.sao_luu):
         in_ra(f"Tệp {ns.sao_luu} đã có — chọn tên khác (không ghi đè tệp hoàn tác cũ).")
         return 2
-    du_an, nha, hop_le = doc_kho(ma)
+    den = getattr(ns, "den_luot", None)
+    du_an, nha, hop_le, moc = doc_kho(ma, den)
     if not du_an:
         in_ra(f"Không có dự án '{ma}' trong kho.")
         return 2
     a = chon_thuong_hieu(du_an, nha) if "a" in ns.buoc else []
-    b = (chon_gan_lai(hop_le, ns.tat_ca, {(d["khoa_bai"], d["ma"]) for d in a})
-         if "b" in ns.buoc else [])
+    bo = {(d["khoa_bai"], d["ma"]) for d in a}
+    b = chon_gan_lai(hop_le, ns.tat_ca, bo, den) if "b" in ns.buoc else []
     can, luot = uoc_luot_model(b)
     che_do = "ÁP DỤNG" if ns.ap_dung else "CHẠY THỬ (giao dịch chỉ đọc, không ghi gì)"
     in_ra(f"Dự án {ma} — {che_do}.")
+    if "b" in ns.buoc:
+        # In bộ lọc ĐANG áp trước mọi con số (17/10/2026): chạy nhầm không có --den-luot là gán
+        # lại cả 7.202 dòng đã có nhãn prompt mới — thấy ngay ở dòng này, trước khi --ap-dung.
+        in_ra(_cau_loc_luot(den, chon_gan_lai(hop_le, ns.tat_ca, bo) if den is not None
+                            else b, moc))
     doi_loai = sum(1 for d in a if d["moi"]["loai"] != d["cu"]["loai"])
     in_ra(f"(a) Trả lời của tài khoản nhà dưới bài kênh nhà: {len(a)} dòng thành của thương "
           f"hiệu ({doi_loai} hop_le → thuong_hieu, bỏ sắc thái/chủ đề; {len(a) - doi_loai} "
@@ -363,7 +418,8 @@ def chay(ns, in_ra=print) -> int:
         so_luu.write(json.dumps({
             "loai_dong": "dau", "du_an": ma, "phien_ban": 1,
             "luc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-            "buoc": ns.buoc, "tat_ca": bool(ns.tat_ca)}, ensure_ascii=False) + "\n")
+            "buoc": ns.buoc, "tat_ca": bool(ns.tat_ca), "den_luot": den},
+            ensure_ascii=False) + "\n")
         so_luu.flush()
         sua_a = bo_a = 0
         for i in range(0, len(a), LO):
@@ -400,8 +456,14 @@ def main(argv: list[str] | None = None) -> int:
                     help="a = trả lời fanpage nhà, b = gán lại nhãn (mặc định cả hai)")
     ap.add_argument("--thu", type=int, default=0, metavar="N",
                     help="chạy thử: gọi model cho tối đa N dòng (≤ 100) để xem trước, không ghi")
+    ap.add_argument("--den-luot", type=int, metavar="N",
+                    help="(b) chỉ bình luận có binh_luan.luot_id ≤ N (luot_id NULL tính là cũ); "
+                         "áp cho mọi bộ chọn của (b), kể cả --tat-ca. Vd --den-luot 8: bỏ bình "
+                         "luận lượt ≥ 9 đã gán bằng prompt mới")
     ap.add_argument("--mau", type=int, default=8, help="số dòng mẫu in ra mỗi bước")
     ns = ap.parse_args(argv)
+    if ns.den_luot is not None and ns.den_luot < 0:
+        ap.error("--den-luot phải ≥ 0")
     if ns.dry_run and (ns.ap_dung or ns.hoan_tac):
         ap.error("--dry-run không đi cùng --ap-dung / --hoan-tac")
     if ns.ap_dung and ns.hoan_tac:
