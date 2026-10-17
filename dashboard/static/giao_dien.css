@@ -365,6 +365,34 @@ details[open] > summary { margin-bottom: 12px; }
 .ng-bang td { vertical-align: middle; }
 .ng-bang td:last-child .cum-nut { flex-wrap: nowrap; }
 .ng-bang td.nho { min-width: 92px; }
+/* Đề xuất chờ duyệt (18/10/2026): lọc + chọn nhiều + thanh duyệt hàng loạt dính đáy khung nhìn */
+.dx-loc { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; margin-bottom: 10px; }
+.dx-o { flex-direction: row !important; align-items: center; gap: 8px !important; font-weight: 600; white-space: nowrap; }
+.dx-o select { min-height: 34px; padding-top: 4px; padding-bottom: 4px; }
+.dx-o input[type="number"] { width: 72px; min-height: 34px; padding-top: 4px; padding-bottom: 4px; text-align: right; }
+.dx-loc__dem { margin-left: auto; align-self: center; }
+.dx-bang td, .dx-bang th { vertical-align: middle; }
+.dx-bang .dx-o-chon { width: 40px; text-align: center; padding-left: 8px; padding-right: 8px; }
+.dx-bang .dx-o-chon input { width: 17px; height: 17px; margin: 0; vertical-align: middle; cursor: pointer; }
+.dx-bang td:nth-last-child(1) .cum-nut { flex-wrap: nowrap; }
+.dx-thanh {
+  position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+  margin: 12px -6px 0; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--vien);
+  background: var(--be-mat); box-shadow: 0 -6px 18px -10px rgba(16, 24, 40, .35);
+}
+.dx-thanh--co { border-color: color-mix(in srgb, var(--nhan) 45%, transparent); }
+.dx-thanh__chon { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.dx-thanh__so { font-size: 13.5px; color: var(--chu-phu); white-space: nowrap; }
+.dx-thanh__so b { color: var(--chu); font-size: 16px; font-variant-numeric: tabular-nums; }
+.dx-thanh__so-lieu { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.dx-thanh__uoc { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--chu); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dx-thanh__nut { margin-left: auto; }
+@media (max-width: 760px) {
+  .dx-loc__dem { margin-left: 0; flex-basis: 100%; }
+  .dx-thanh { margin: 12px 0 0; padding: 10px 12px; gap: 8px 12px; }
+  .dx-thanh__nut { margin-left: 0; width: 100%; }
+  .dx-thanh__nut .nut { flex: 1 1 0; }
+}
 
 /* ─── trang Người xem ─── */
 /* Người xem: bảng rộng (chức danh, trạng thái Lark, đăng nhập) — cuộn ngang trong khung trên điện thoại */

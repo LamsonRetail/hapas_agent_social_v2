@@ -550,6 +550,7 @@ SUA = [("/du-an/them", {"ma": "moi", "ten": "Mới", "tu_khoa": "moi"}),
        ("/nguon/1/xoa", {}),
        ("/de-xuat/5/duyet", {"loai": "kol"}),
        ("/de-xuat/6/tu-choi", {}),
+       ("/de-xuat/hang-loat", {"du_an": "hapas", "hanh_dong": "tu_choi", "ids": "5,6"}),
        ("/ngan-sach/hapas", {"tran_usd_thang": "7"}),
        ("/nguoi-xem/them", {"email": "moi@hapas.vn", "vai_tro": "xem"}),
        ("/nguoi-xem/xoa", {"email": XEM}),
@@ -667,6 +668,93 @@ def test_duyet_de_xuat_them_nguon_va_danh_dau():
     assert len(kho.nguon) == 1
     assert [x[1] for x in kho.nk] == ["duyet_de_xuat", "tu_choi_de_xuat"]
     assert c.post("/de-xuat/99/duyet", data={"csrf": csrf}).status_code == 404
+
+
+def _kho_nhieu_de_xuat(n: int = 8) -> GiaKho:
+    kho = GiaKho()
+    kho.de_xuat = {}
+    now = datetime.datetime(2026, 10, 18, 9, 0, tzinfo=VN)
+    for i in range(n):
+        p = ("tiktok", "instagram", "facebook", "youtube")[i % 4]
+        dd = f"kol.{i}" if p != "facebook" else f"facebook.com/kol{i}"
+        kho.de_xuat[100 + i] = {
+            "id": 100 + i, "du_an": "hapas", "nen_tang": p, "dinh_danh": dd, "ten": f"KOL {i}",
+            "link": "", "ly_do": f"{i} bài", "so_bai": i, "thao_luan": 10 * i, "trang_thai": "cho",
+            "de_xuat_luc": now, "xu_ly_boi": None, "xu_ly_luc": None}
+    return kho
+
+
+def test_duyet_hang_loat_moi_de_xuat_nhu_mot_dong_va_bo_qua_da_xu_ly():
+    """Chủ dự án 18/10/2026: chọn nhiều / chọn tất cả rồi duyệt một lần. Mỗi đề xuất qua đúng
+    `kho.duyet_de_xuat` (một nhật ký mỗi cái); đã xử lý / khác dự án / không còn thì bỏ qua + đếm."""
+    kho = _kho_nhieu_de_xuat()
+    kho.de_xuat[103]["trang_thai"] = "tu_choi"                      # đã xử lý trước
+    kho.du_an["khac"] = {**kho.du_an["hapas"], "ma": "khac"}
+    kho.de_xuat[200] = {**kho.de_xuat[100], "id": 200, "du_an": "khac"}
+    _co_nguon(kho)                                                   # kola đã theo dõi
+    kho.de_xuat[107].update(nen_tang="tiktok", dinh_danh="@KolA")
+    _, c, kho = tao(kho)
+    csrf = dang_nhap(c, QL)
+    r = c.post("/de-xuat/hang-loat", data={
+        "csrf": csrf, "du_an": "hapas", "hanh_dong": "duyet", "ids": "100,101,101 103,107,200,999",
+        "loai": "page", "chu_ky_ngay": "2", "so_bai_moi_lan": "7"})
+    assert r.headers["location"] == "/nguon?du_an=hapas#de-xuat"
+    t = thong_bao(c, r)
+    assert "Đã duyệt 3, từ chối 0, bỏ qua 3." in t and "1 nguồn đã có sẵn" in t
+    assert [kho.de_xuat[i]["trang_thai"] for i in (100, 101, 103, 107, 200)] == [
+        "da_duyet", "da_duyet", "tu_choi", "da_duyet", "cho"]
+    moi = [n for n in kho.nguon.values() if n["them_qua"] == "de_xuat"]
+    assert len(moi) == 2 and all((n["loai"], n["chu_ky_ngay"], n["so_bai_moi_lan"]) == ("page", 2, 7)
+                                 for n in moi)
+    assert [h for _, h, _ in kho.nk] == ["duyet_de_xuat"] * 3 and all(a == QL for a, _, _ in kho.nk)
+
+
+def test_tu_choi_hang_loat_va_loi_dau_vao():
+    kho = _kho_nhieu_de_xuat(5)
+    _, c, kho = tao(kho)
+    csrf = dang_nhap(c, QL)
+    ve = {"csrf": csrf, "du_an": "hapas"}
+    r = c.post("/de-xuat/hang-loat", data={**ve, "hanh_dong": "tu_choi", "ids": "100,101,102"})
+    assert "Đã duyệt 0, từ chối 3, bỏ qua 0." in thong_bao(c, r)
+    assert [kho.de_xuat[i]["trang_thai"] for i in range(100, 105)] == ["tu_choi"] * 3 + ["cho"] * 2
+    r = c.post("/de-xuat/hang-loat", data={**ve, "hanh_dong": "tu_choi", "ids": "100,103"})
+    assert "từ chối 1, bỏ qua 1" in thong_bao(c, r)                 # bấm lại: không lỗi
+    for form, loi in (({"hanh_dong": "duyet", "ids": ""}, "Chưa chọn đề xuất nào"),
+                      ({"hanh_dong": "xoa", "ids": "104"}, "Duyệt hoặc Từ chối"),
+                      ({"hanh_dong": "duyet", "ids": "104", "loai": "bua"}, "Loại nguồn"),
+                      ({"hanh_dong": "duyet", "ids": "104", "chu_ky_ngay": "99"}, "Chu kỳ quét"),
+                      ({"hanh_dong": "duyet", "ids": ",".join(str(i) for i in range(1, 502))},
+                       "tối đa 500")):
+        assert loi in thong_bao(c, c.post("/de-xuat/hang-loat", data={**ve, **form})), loi
+    r = c.post("/de-xuat/hang-loat", data={**ve, "du_an": "khong-co", "hanh_dong": "tu_choi",
+                                           "ids": "104"})
+    assert "Không có dự án này" in thong_bao(c, r)
+    assert kho.de_xuat[104]["trang_thai"] == "cho" and len(kho.nk) == 4
+
+
+def test_duyet_hang_loat_dinh_danh_hong_bao_rieng_khong_chan_ca_lo():
+    kho = _kho_nhieu_de_xuat(3)
+    kho.de_xuat[101].update(dinh_danh="https://www.instagram.com/p/Cxyz/", link="")
+    _, c, kho = tao(kho)
+    csrf = dang_nhap(c, QL)
+    t = thong_bao(c, c.post("/de-xuat/hang-loat", data={
+        "csrf": csrf, "du_an": "hapas", "hanh_dong": "duyet", "ids": "100,101,102"}))
+    assert "Đã duyệt 2, từ chối 0, bỏ qua 0." in t and "Không duyệt được 1" in t
+    assert "thong-bao--canh" in t and kho.de_xuat[101]["trang_thai"] == "cho"
+
+
+def test_trang_nguon_de_xuat_co_o_chon_va_thanh_hang_loat_chi_quan_ly():
+    _, c, _ = tao(_kho_nhieu_de_xuat(6))
+    dang_nhap(c, QL)
+    t = c.get("/nguon").text
+    assert t.count("data-dx-chon ") == 6 and "data-dx-chon-trang" in t
+    assert 'action="/de-xuat/hang-loat"' in t and 'name="ids"' in t
+    assert 'value="duyet" data-dx-nut disabled' in t and 'value="tu_choi" formnovalidate' in t
+    assert '<option value="tiktok">TikTok (2)</option>' in t and "Thảo luận nhiều nhất" in t
+    assert 'data-dx="105" data-nt="instagram" data-thao-luan="50"' in t    # nguon.js lọc/xếp
+    dang_nhap(c, XEM)
+    t = c.get("/nguon").text
+    assert "data-dx-chon" not in t and "/de-xuat/hang-loat" not in t and "data-dx-nen-tang" in t
 
 
 def test_them_va_sua_du_an():

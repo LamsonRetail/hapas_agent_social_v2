@@ -172,20 +172,38 @@
 </section>
 {% endif %}
 
-<section class="the-khoi cach-duoi">
+<section class="the-khoi cach-duoi" id="de-xuat">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
     <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten">Đề xuất nguồn chờ duyệt ({{ de_xuat|length }})</h2>
-    <button type="button" class="goi-y" data-goi-y="Nguồn nổi lên khi quét nhưng chưa được theo dõi — chỉ thêm khi quản lý duyệt.">i</button>
+    <button type="button" class="goi-y" data-goi-y="Nguồn nổi lên khi quét nhưng chưa được theo dõi — chỉ thêm khi quản lý duyệt.{% if ql %} Tích ô đầu dòng (hoặc ô “Chọn tất cả” trên đầu bảng) rồi duyệt / từ chối nhiều đề xuất một lần ở thanh dưới bảng.{% endif %}">i</button>
   </div>
   {% if de_xuat %}
+  {#- 18/10/2026 (chủ dự án: "chờ duyệt thì có thể là chọn nhiều người 1 lúc hoặc chọn tất cả chứ ko chọn
+      từng người 1 mất thời gian"): lọc theo nền tảng, sắp xếp, 50 dòng một trang, chọn nhiều + thanh
+      duyệt/từ chối hàng loạt (nguon.js). Không JS: bảng đủ dòng, nút từng dòng vẫn dùng được. #}
+  <div class="dx-loc" data-dx-loc hidden>
+    <label class="o dx-o">Nền tảng
+      <select data-dx-nen-tang>
+        <option value="">Tất cả ({{ de_xuat|length }})</option>
+        {% for g in de_xuat|groupby('nen_tang') %}<option value="{{ g.grouper }}">{{ g.grouper|ten_nen_tang }} ({{ g.list|length }})</option>{% endfor %}
+      </select></label>
+    <label class="o dx-o">Sắp xếp
+      <select data-dx-sap>
+        <option value="thao_luan">Thảo luận nhiều nhất</option>
+        <option value="so_bai">Nhiều bài nhắc nhất</option>
+        <option value="moi">Mới đề xuất nhất</option>
+      </select></label>
+    <span class="mo nho dx-loc__dem" data-dx-dem aria-live="polite"></span>
+  </div>
   <div class="cuon-ngang">
-  <table>
-    <thead><tr><th>Nguồn</th><th>Lý do</th><th class="so">Bài</th><th class="so">Thảo luận</th><th>Đề xuất lúc</th>{% if ql %}<th></th>{% endif %}</tr></thead>
-    <tbody>
+  <table class="dx-bang">
+    <thead><tr>{% if ql %}<th class="dx-o-chon" hidden><input type="checkbox" data-dx-chon-trang aria-label="Chọn tất cả đề xuất đang xem"></th>{% endif %}<th>Nguồn</th><th>Lý do</th><th class="so">Bài</th><th class="so">Thảo luận</th><th>Đề xuất lúc</th>{% if ql %}<th></th>{% endif %}</tr></thead>
+    <tbody data-dx-than>
     {% for x in de_xuat %}
-      <tr>
+      <tr data-dx="{{ x.id }}" data-nt="{{ x.nen_tang }}" data-thao-luan="{{ x.thao_luan or 0 }}" data-so-bai="{{ x.so_bai or 0 }}" data-luc="{{ x.de_xuat_luc.timestamp()|int if x.de_xuat_luc else 0 }}" data-thu-tu="{{ loop.index0 }}">
+        {% if ql %}<td class="dx-o-chon" hidden><input type="checkbox" data-dx-chon value="{{ x.id }}" aria-label="Chọn {{ x.ten or x.dinh_danh }}"></td>{% endif %}
         <td><div class="ng-nguon"><span class="the the--nt-{{ x.nen_tang }}">{{ x.nen_tang|ten_nen_tang }}</span>
           <div class="ng-nguon__chu">{% set lk = x.link|link_an_toan %}{% if lk %}<a href="{{ lk }}" target="_blank" rel="noopener noreferrer">{{ x.ten or x.dinh_danh }}</a>{% else %}<b>{{ x.ten or x.dinh_danh }}</b>{% endif %}
           <div class="mo nho">{{ x.dinh_danh }}</div></div></div></td>
@@ -213,6 +231,38 @@
     </tbody>
   </table>
   </div>
+  <div class="phan-trang" data-dx-trang hidden>
+    <button type="button" class="nut nut--nhe nut--nho" data-dx-lui>← Trước</button>
+    <span class="mo nho" data-dx-trang-so></span>
+    <button type="button" class="nut nut--nhe nut--nho" data-dx-toi>Sau →</button>
+  </div>
+  {% if ql %}
+  {#- Thanh hàng loạt: ô chọn không có `name` — nguon.js gom id đã chọn vào ô ẩn `ids` lúc gửi (một
+      trường, không vướng trần 200 trường của biểu mẫu). Máy chủ xử lý TỪNG đề xuất như nút một dòng
+      (`kho.duyet_de_xuat` / `tu_choi_de_xuat`, mỗi cái một dòng nhật ký); đề xuất đã xử lý thì bỏ qua. #}
+  <form method="post" action="/de-xuat/hang-loat" class="dx-thanh" data-dx-thanh hidden>
+    <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+    <input type="hidden" name="du_an" value="{{ du_an.ma }}">
+    <input type="hidden" name="ids" value="" data-dx-ids>
+    <div class="dx-thanh__chon">
+      <span class="dx-thanh__so"><b data-dx-so-chon>0</b> đề xuất đã chọn</span>
+      <button type="button" class="nut nut--nhe nut--nho" data-dx-chon-het hidden></button>
+      <button type="button" class="nut nut--nhe nut--nho" data-dx-bo-chon hidden>Bỏ chọn</button>
+    </div>
+    <div class="dx-thanh__so-lieu">
+      <label class="o dx-o">Loại nguồn
+        <select name="loai">{% for k, v in LOAI_NGUON.items() %}<option value="{{ k }}"{% if k == 'kol' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+      <label class="o dx-o">Chu kỳ quét (ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="1" required></label>
+      <label class="o dx-o">Bài mỗi lần <input type="number" name="so_bai_moi_lan" min="1" value="5" required></label>
+      <span class="dx-thanh__uoc"><output data-dx-uoc aria-live="polite">≈ 0 USD/tháng</output>
+        <button type="button" class="goi-y" data-goi-y="Tiền theo dõi thêm mỗi tháng (30 ngày) nếu duyệt các đề xuất đã chọn với chu kỳ + số bài ở đây, tính theo bài/tài khoản như cột ≈ USD/tháng của bảng Nguồn đang có — chưa gồm phí mở đầu dùng chung của mỗi lần quét. Đổi riêng từng nguồn sau ở bảng Nguồn đang có.">i</button></span>
+    </div>
+    <div class="cum-nut dx-thanh__nut">
+      <button class="nut" type="submit" name="hanh_dong" value="duyet" data-dx-nut disabled>Duyệt đã chọn</button>
+      <button class="nut nut--loi" type="submit" name="hanh_dong" value="tu_choi" formnovalidate data-dx-nut disabled>Từ chối đã chọn</button>
+    </div>
+  </form>
+  {% endif %}
   {% else %}
   <p class="trong">Không có đề xuất nào đang chờ.</p>
   {% endif %}
