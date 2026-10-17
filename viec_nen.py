@@ -79,7 +79,8 @@ TRAN_CHO_PHI_GIAY = 75.0
 NGHI_PHI_GIAY = 10.0
 CHO_LAI_GIAY = 90.0
 TRAN_CHO_LAI_GIAY = 300.0
-TINH_LAI_TOI_DA_LAN = 3     # kho hỏng khi nâng chi phí lượt: thử lại tối đa chừng này lần
+TINH_LAI_TOI_DA_LAN = 3     # GET run / kho hỏng khi chốt lại: thử tối đa chừng này lần
+NGHI_TINH_LAI_GIAY = 60.0   # nghỉ giữa hai lần thử chốt lại
 TINH_LAI_TRONG_GIAY = 2 * 86400   # khởi động lại: chỉ làm bù việc xong trong 2 ngày
 
 
@@ -775,10 +776,13 @@ class Viec:
                 print(f"[viec_nen] {self.ma}: báo chi phí chốt lại lỗi: {type(e).__name__}: "
                       f"{_che(e)}", flush=True)
                 bao = False
+        # Soát 17/10/2026: GET run hỏng (mất mạng, token đã đổi) thì tổng THIẾU — chưa phải số
+        # chốt lại; giữ cờ để thử lại (phần chênh đã ghi sổ thì không ghi lại: `usd_da_ghi_so`).
+        du = not kq.get("chua_doc") and not kq.get("con_song")
         with self._khoa:
             lan = int(self.d["chi_phi"].get("lan_tinh_lai") or 0) + 1
             self.d["chi_phi"].update(usd_sau=kq["usd"], usd_da_ghi_so=da_ghi, lan_tinh_lai=lan,
-                                     da_tinh_lai=bao or lan >= TINH_LAI_TOI_DA_LAN,
+                                     da_tinh_lai=(bao and du) or lan >= TINH_LAI_TOI_DA_LAN,
                                      lech_sau=round(max(0.0, kq["usd"] - float(
                                          cp.get("usd") or 0)), 4))
             self.luu()
@@ -864,6 +868,11 @@ def chay_ngay(ma: str) -> dict | None:
         if d["trang_thai"] in TRANG_THAI_XONG:
             tb = d.get("thong_bao") or {}
             if not tb.get("da_gui") and tb.get("ket_qua"):
+                # Soát 17/10/2026: việc xong từ tiến trình TRƯỚC mang số thế hệ cũ — `gui` gọi
+                # `kiem_quyen` sẽ ném MatQuyen, kết quả không bao giờ được gửi lại (và bước chốt
+                # lại chi phí phía sau cũng mất). Tiến trình này giữ khoá chủ: nhận việc về
+                # thế hệ hiện tại như nhánh chạy dưới đây.
+                d["the"] = the_cua_toi()
                 gui_lai = v
         elif v.da_huy() and d["trang_thai"] == "xep_hang":
             d.update(trang_thai="da_huy", xong_ts=_bay_gio(), the=the_cua_toi())
@@ -948,32 +957,45 @@ def _ket_thuc(v: Viec, trang_thai: str, van_ban: str) -> None:
 
 def _tinh_lai_nen(cac: list[Viec]) -> None:
     """Chốt lại chi phí (`Viec.tinh_lai_muon`, chờ ~90 giây sau run cuối) ở luồng RIÊNG: luồng
-    điều phối không đứng chờ, việc kế tiếp chạy ngay. Không tự dựng luồng
-    (SOCIAL_NEN_TU_CHAY=0: bộ thử, máy dev) thì chạy luôn tại chỗ."""
+    điều phối không đứng chờ, việc kế tiếp chạy ngay. Lần chốt lại chưa xong (GET run hỏng, kho
+    hỏng) thì thử lại sau `NGHI_TINH_LAI_GIAY`, tối đa `TINH_LAI_TOI_DA_LAN` lần. Không tự dựng
+    luồng (SOCIAL_NEN_TU_CHAY=0: bộ thử, máy dev) thì chạy luôn tại chỗ, một lần."""
+    luong = os.environ.get("SOCIAL_NEN_TU_CHAY", "1").strip() != "0"
+
     def chay():
         for v in cac:
-            try:
-                v.tinh_lai_muon()
-            except MatQuyen as e:
-                print(f"[viec_nen] dừng chốt lại chi phí — mất quyền chủ: {e}", flush=True)
-                return
-            except Exception as e:  # noqa: BLE001
-                print(f"[viec_nen] {v.ma}: tính lại chi phí muộn lỗi: {type(e).__name__}: "
-                      f"{_che(e)}", flush=True)
+            for lan in range(TINH_LAI_TOI_DA_LAN if luong else 1):
+                if lan:
+                    _ngu(NGHI_TINH_LAI_GIAY)
+                try:
+                    v.tinh_lai_muon()
+                except MatQuyen as e:
+                    print(f"[viec_nen] dừng chốt lại chi phí — mất quyền chủ: {e}", flush=True)
+                    return
+                except Exception as e:  # noqa: BLE001
+                    print(f"[viec_nen] {v.ma}: tính lại chi phí muộn lỗi: {type(e).__name__}: "
+                          f"{_che(e)}", flush=True)
+                if not _con_hen(v.d):
+                    break
     if not cac:
         return
-    if os.environ.get("SOCIAL_NEN_TU_CHAY", "1").strip() == "0":
+    if not luong:
         chay()
         return
     threading.Thread(target=chay, name="viec-nen-tinh-lai", daemon=True).start()
 
 
-def _can_tinh_lai(d: dict) -> bool:
-    """Việc ĐÃ xong, đã chốt chi phí, còn hẹn chốt lại (bot tắt trước khi kịp) — làm bù lúc
-    khởi động. Chỉ việc xong trong `TINH_LAI_TRONG_GIAY` (sổ đọc lại số run cũ vẫn đúng)."""
+def _con_hen(d: dict) -> bool:
+    """Việc đã chốt chi phí mà còn hẹn MỘT lần chốt lại chưa làm xong."""
     cp = d.get("chi_phi") or {}
-    return bool(d.get("trang_thai") in TRANG_THAI_XONG and cp.get("da_ghi_so")
-                and not cp.get("da_tinh_lai") and (cp.get("can_tinh_lai") or d.get("run_muon"))
+    return bool(cp.get("da_ghi_so") and not cp.get("da_tinh_lai")
+                and (cp.get("can_tinh_lai") or d.get("run_muon")))
+
+
+def _can_tinh_lai(d: dict) -> bool:
+    """Việc ĐÃ xong, còn hẹn chốt lại (bot tắt trước khi kịp) — làm bù lúc khởi động. Chỉ việc
+    xong trong `TINH_LAI_TRONG_GIAY` (sổ đọc lại số run cũ vẫn đúng)."""
+    return bool(d.get("trang_thai") in TRANG_THAI_XONG and _con_hen(d)
                 and _bay_gio() - float(d.get("xong_ts") or 0) <= TINH_LAI_TRONG_GIAY)
 
 

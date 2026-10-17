@@ -367,8 +367,10 @@ def test_ap_dung_roi_chay_lai_roi_hoan_tac(kho, tmp_path):
                        ("pfbidT", NGAY)}
     # Tệp hoàn tác: đủ dòng bài bị xoá + bình luận bị đổi / xoá.
     dong = [json.loads(x) for x in tep.read_text(encoding="utf-8").splitlines()]
-    assert dong[0]["loai_dong"] == "dau" and len(dong) == 3
-    nhom = next(x for x in dong[1:] if x["giu"] == "facebook:pfbidB")
+    assert dong[0]["loai_dong"] == "dau" and len(dong) == 5
+    assert [x["loai_dong"] for x in dong[1:]] == ["nhom", "da_ap", "nhom", "da_ap"], \
+        "dấu đã áp ghi SAU kế hoạch (sau commit)"
+    nhom = next(x for x in dong[1:] if x["loai_dong"] == "nhom" and x["giu"] == "facebook:pfbidB")
     assert {r["khoa"] for r in nhom["bai_bo"]} == {"facebook:pfbidA", "facebook:pfbidC"}
     assert all(set(r) == set(goc["bai"][("hapas", "facebook:pfbidA")]) for r in nhom["bai_bo"])
     assert len(nhom["bl_bo"]) == 4 and len(nhom["bl_chuyen"]) == 2
@@ -423,7 +425,47 @@ def test_loi_giua_nhom_tra_lai_ca_nhom_va_hoan_tac_bo_qua(kho, tmp_path):
     assert rc == 1 and "2 nhóm lỗi" in out and k.t == goc, "mỗi nhóm một giao dịch"
     k.loi_khi = None
     rc, out = _chay("hapas", "--hoan-tac", str(tep))
-    assert "2 nhóm bỏ qua" in out and k.t == goc, "nhóm chưa áp dụng thì hoàn tác không đụng"
+    assert "2 kế hoạch không có dấu đã áp" in out and k.t == goc, \
+        "nhóm chưa áp dụng thì hoàn tác không đụng"
+
+
+def test_hoan_tac_tep_cua_lan_loi_khong_dung_nhom_lan_sau_da_gop(kho, tmp_path):
+    """Soát 17/10/2026: lần 1 lỗi (tệp 1 có kế hoạch, không dấu) → lần 2 gộp thật (tệp 2) →
+    hoàn tác bằng tệp 1 KHÔNG được áp kế hoạch cũ lên nhóm lần 2 đã gộp."""
+    k = kho(loi_khi="xoa_bai")
+    _chay("hapas", "--ap-dung", "--sao-luu", str(tmp_path / "1.jsonl"))
+    k.loi_khi = None
+    assert _chay("hapas", "--ap-dung", "--sao-luu", str(tmp_path / "2.jsonl"))[0] == 0
+    sau_gop = copy.deepcopy(k.t)
+    rc, out = _chay("hapas", "--hoan-tac", str(tmp_path / "1.jsonl"))
+    assert rc == 0 and k.t == sau_gop and "trả lại 0/0 nhóm" in out
+    assert "trả lại 2/2 nhóm" in _chay("hapas", "--hoan-tac", str(tmp_path / "2.jsonl"))[1]
+
+
+def test_khong_gop_bac_cau_qua_ban_khong_id():
+    """X1 (id 111) ~ X3 (không id) ~ X2 (id 222): cùng chủ, phút, chữ — actor nói X1, X2 là hai bài
+    khác nhau → không gộp cả nhóm, in để xem tay."""
+    rows = [_bai("X1", ma_so_fb="1111111"), _bai("X3"), _bai("X2", ma_so_fb="2222222")]
+    nhom, khong = G.tim_nhom(rows)
+    assert nhom == []
+    assert [x["ly_do"] for x in khong if x["ly_do"] == "nhom_nhieu_id"] == ["nhom_nhieu_id"]
+    assert sorted(next(x for x in khong if x["ly_do"] == "nhom_nhieu_id")["khoa"]) == [
+        "facebook:X1", "facebook:X2", "facebook:X3"]
+    nhom, _ = G.tim_nhom([_bai("X1", ma_so_fb="1111111"), _bai("X3")])
+    assert len(nhom) == 1, "một id + bản không id: vẫn gộp"
+
+
+def test_tra_loi_mau_cua_trang_khong_ghep_theo_chu():
+    """Trang trả lời mẫu "cảm ơn bạn, check inbox nhé" cho nhiều khách cùng phút: nhiều bình luận
+    thật. Ghép theo chữ chỉ cho bình luận GỐC của hai bản bài KHÁC nhau."""
+    tl = {"tac_gia": "HAPAS", "noi_dung": "Cảm ơn bạn, check inbox nhé", "la_tra_loi": True}
+    bl = [_bl("D", "r1", ma_cha="k1", **tl), _bl("D", "r2", ma_cha="k2", **tl),
+          _bl("K", "r3", ma_cha="k3", **tl),
+          _bl("D", "g1", tac_gia="An", noi_dung="đẹp"), _bl("D", "g2", tac_gia="An", noi_dung="đẹp"),
+          _bl("K", "g3", tac_gia="An", noi_dung="đẹp")]
+    cum = sorted(sorted(b["ma"] for b in c) for c in G._cum_binh_luan(bl))
+    assert cum == [["g1", "g3"], ["g2"], ["r1"], ["r2"], ["r3"]], \
+        "trả lời không ghép theo chữ; một cụm không chứa hai mã của cùng một bản"
 
 
 def test_nhom_doi_tu_luc_chay_thu_thi_bo_qua(kho, tmp_path):

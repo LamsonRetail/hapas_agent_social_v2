@@ -49,9 +49,10 @@ An toàn (theo mẫu `scripts/lang_nghe_gan_lai.py`):
     dở dưới bản bỏ sẽ mất theo bài). Mỗi nhóm: khoá dòng (FOR UPDATE), ĐỌC LẠI, kiểm nhóm vẫn
     như lúc chạy thử, ghi tệp hoàn tác (đủ dòng bài bị xoá, dòng bình luận bị đổi hay xoá, dòng
     chi_so_ngay) + fsync TRƯỚC, rồi mới sửa, trong MỘT giao dịch. Tệp có sẵn thì dừng.
-  • `--hoan-tac <tệp>`: nhóm nào đã áp dụng (bản bỏ không còn trong kho) thì chèn lại bài + bình
-    luận + chỉ số đã xoá, chuyển bình luận về bản cũ, trả giá trị cũ cho các ô CÒN mang đúng giá
-    trị script đã ghi (lượt quét sau đã đổi số thì giữ số mới). Chạy lại được.
+  • `--hoan-tac <tệp>`: nhóm có dấu "đã áp" (ghi SAU khi giao dịch commit) mà bản bỏ không còn
+    trong kho thì chèn lại bài + bình luận + chỉ số đã xoá, chuyển bình luận về bản cũ, trả giá
+    trị cũ cho các ô CÒN mang đúng giá trị script đã ghi (lượt quét sau đã đổi số thì giữ số
+    mới). Kế hoạch không có dấu (giao dịch lỗi đã huỷ) thì không đụng. Chạy lại được.
   • Chạy lại script: nhóm đã gộp không còn là nhóm — chạy lại an toàn, chỉ xử lý phần còn lại.
 
 Quyền: role `mark` KHÔNG có DELETE trên `bai` (schema.sql — bot không xoá bài). Cấp TẠM cho lần
@@ -261,7 +262,19 @@ def tim_nhom(rows: list[dict]) -> tuple[list[list[dict]], list[dict]]:
     nhom: dict[int, list[dict]] = {}
     for i, r in enumerate(rows):
         nhom.setdefault(hop.goc(i), []).append(r)
-    return [g for g in nhom.values() if len(g) > 1], khong
+    ra = []
+    for g in nhom.values():
+        if len(g) < 2:
+            continue
+        # Soát 17/10/2026: nối BẮC CẦU qua một bản không id — X1 (id 111) ~ X3 ~ X2 (id 222) cùng
+        # chủ, phút, chữ — là gộp hai bài actor nói là khác nhau. Không gộp cả nhóm, in để xem tay.
+        if len({KT.la_so(r.get("ma_so_fb")) for r in g} - {None}) > 1:
+            khong.append({"phut": KT.phut(g[0].get("dang_luc")),
+                          "chu": min(set().union(*(KT.chu_bai(r) for r in g)) or {"?"}),
+                          "khoa": [r["khoa"] for r in g], "ly_do": "nhom_nhieu_id"})
+            continue
+        ra.append(g)
+    return ra, khong
 
 
 def chon_giu(nhom: list[dict]) -> dict:
@@ -277,24 +290,51 @@ def _co_nhan(b: dict) -> bool:
 
 
 def _cum_binh_luan(bl: list[dict]) -> list[list[dict]]:
-    """Bình luận cùng một nhóm bài -> các cụm TRÙNG (cùng `ma`, hoặc cùng tác giả + nội dung +
-    thời điểm đăng). Cụm 1 dòng cũng trả (bình luận không trùng)."""
-    hop = _Hop(len(bl))
+    """Bình luận cùng một nhóm bài -> các cụm TRÙNG. Cụm 1 dòng cũng trả (không trùng).
+
+    • Cùng `ma` → luôn là một bình luận (mã của nền tảng, hoặc băm tác giả + chữ + giờ).
+    • Cùng tác giả + nội dung + phút đăng → chỉ ghép bình luận GỐC (không phải trả lời) của hai
+      bản bài KHÁC nhau, và không bao giờ để một cụm chứa hai mã khác nhau của cùng một bản
+      (soát 17/10/2026: trang trả lời mẫu "cảm ơn bạn, check inbox nhé" cho nhiều khách trong
+      cùng phút là nhiều bình luận thật — ghép theo chữ là xoá nhầm và nối nhầm chuỗi trả lời)."""
+    cha = list(range(len(bl)))
+    cua: list[dict[str, set[str]]] = [{b["khoa_bai"]: {b["ma"]}} for b in bl]
+
+    def goc(i: int) -> int:
+        while cha[i] != i:
+            cha[i] = cha[cha[i]]
+            i = cha[i]
+        return i
+
+    def noi(i: int, j: int, kiem: bool) -> None:
+        a, b = goc(i), goc(j)
+        if a == b:
+            return
+        if kiem and any(len(cua[a][k] | cua[b][k]) > 1 for k in cua[a].keys() & cua[b].keys()):
+            return
+        a, b = min(a, b), max(a, b)
+        cha[b] = a
+        for k, ms in cua[b].items():
+            cua[a].setdefault(k, set()).update(ms)
     dau: dict = {}
     for i, b in enumerate(bl):
-        khoa = [("ma", b["ma"])]
+        if b["ma"] in dau:
+            noi(dau[b["ma"]], i, False)
+        else:
+            dau[b["ma"]] = i
+    theo_chu: dict = {}
+    for i, b in enumerate(bl):
         nd = " ".join(str(b.get("noi_dung") or "").split())
-        if b.get("dang_luc") is not None and nd:
-            khoa.append(("tg", str(b.get("tac_gia") or "").strip().lower(), nd,
-                         KT.phut(b["dang_luc"]) or b["dang_luc"]))
-        for k in khoa:
-            if k in dau:
-                hop.noi(dau[k], i)
-            else:
-                dau[k] = i
+        if b.get("dang_luc") is None or not nd or b.get("la_tra_loi") or b.get("ma_cha"):
+            continue
+        k = (str(b.get("tac_gia") or "").strip().lower(), nd, KT.phut(b["dang_luc"]))
+        for j in theo_chu.setdefault(k, []):
+            if bl[j]["khoa_bai"] != b["khoa_bai"]:
+                noi(j, i, True)
+        theo_chu[k].append(i)
     cum: dict[int, list[dict]] = {}
     for i, b in enumerate(bl):
-        cum.setdefault(hop.goc(i), []).append(b)
+        cum.setdefault(goc(i), []).append(b)
     return list(cum.values())
 
 
@@ -549,8 +589,23 @@ def hoan_tac_nhom(ma: str, kh: dict) -> str:
     return "da_tra"
 
 
-def doc_tep_hoan_tac(tep: str) -> tuple[dict, list[dict]]:
-    dau, nhom = {}, []
+def _dau_nhom(r: dict) -> tuple:
+    return (r.get("giu"), tuple(sorted(r.get("bo") or [])))
+
+
+def _ghi_da_ap(so_luu, ma: str, kh: dict) -> None:
+    """Dấu "đã áp" của một nhóm, ghi SAU khi giao dịch commit."""
+    so_luu.write(json.dumps({"loai_dong": "da_ap", "du_an": ma, "giu": kh["giu"],
+                             "bo": kh["bo"]}, ensure_ascii=False) + "\n")
+    so_luu.flush()
+    os.fsync(so_luu.fileno())
+
+
+def doc_tep_hoan_tac(tep: str) -> tuple[dict, list[dict], list[dict]]:
+    """-> (dòng đầu, kế hoạch CÓ dấu đã áp, kế hoạch KHÔNG có dấu). Kế hoạch ghi TRƯỚC khi sửa
+    kho; giao dịch lỗi (rollback) thì không có dấu — soát 17/10/2026: không lọc thì hoàn tác
+    bằng tệp của lần lỗi sẽ "trả lại" một nhóm mà lần chạy SAU mới gộp, theo kế hoạch cũ."""
+    dau, nhom, da_ap = {}, [], set()
     with open(tep, encoding="utf-8") as f:
         for i, x in enumerate(f):
             if not x.strip():
@@ -560,13 +615,18 @@ def doc_tep_hoan_tac(tep: str) -> tuple[dict, list[dict]]:
                 dau = r
             elif r.get("loai_dong") == "nhom" and r.get("giu") and r.get("bo"):
                 nhom.append(r)
-    return dau, nhom
+            elif r.get("loai_dong") == "da_ap":
+                da_ap.add(_dau_nhom(r))
+    return (dau, [r for r in nhom if _dau_nhom(r) in da_ap],
+            [r for r in nhom if _dau_nhom(r) not in da_ap])
 
 
 # ───────────────────────────── in ─────────────────────────────
 _LY_DO = {"khac_noi_dung": "khác nội dung (bài khác đăng cùng phút)",
           "khong_co_chu": "cả hai không có chữ (ảnh không chú thích — không chứng minh được trùng)",
-          "id_so_khac": "hai id số actor trả khác nhau"}
+          "id_so_khac": "hai id số actor trả khác nhau",
+          "nhom_nhieu_id": "nhóm nối qua bản không id nhưng mang ≥ 2 id số actor trả khác nhau "
+                           "— không gộp, xem tay"}
 
 
 def _in_ke_hoach(ma: str, kho: dict, cac: list[dict], mau: int, in_ra) -> None:
@@ -606,7 +666,7 @@ def _in_ke_hoach(ma: str, kho: dict, cac: list[dict], mau: int, in_ra) -> None:
 def chay(ns, in_ra=print) -> int:
     ma = ns.du_an.strip().lower()
     if ns.hoan_tac:
-        dau, nhom = doc_tep_hoan_tac(ns.hoan_tac)
+        dau, nhom, khong_dau = doc_tep_hoan_tac(ns.hoan_tac)
         if dau.get("du_an") and dau["du_an"] != ma:
             in_ra(f"Tệp hoàn tác của dự án '{dau['du_an']}', không phải '{ma}' — dừng.")
             return 2
@@ -617,7 +677,11 @@ def chay(ns, in_ra=print) -> int:
             else:
                 bo += 1
         in_ra(f"Hoàn tác {ma}: trả lại {tra}/{len(nhom)} nhóm; {bo} nhóm bỏ qua (bản bỏ còn "
-              "trong kho — nhóm chưa áp dụng hoặc đã hoàn tác).")
+              "trong kho — đã hoàn tác).")
+        if khong_dau:
+            in_ra(f"{len(khong_dau)} kế hoạch không có dấu đã áp (giao dịch lỗi đã huỷ, hoặc bot "
+                  "dừng ngay sau commit) — KHÔNG hoàn tác tự động: "
+                  + ", ".join(f"…{x['giu'][-12:]}" for x in khong_dau[:10]))
         return 0
     if ns.ap_dung and not ns.sao_luu:
         in_ra("--ap-dung cần --sao-luu <tệp> (tệp hoàn tác ghi TRƯỚC khi sửa kho).")
@@ -658,7 +722,7 @@ def chay(ns, in_ra=print) -> int:
         so_luu.flush()
         for j, kh in enumerate(cac, 1):
             try:
-                st, _ = ap_dung_nhom(ma, [kh["giu"], *kh["bo"]], so_luu)
+                st, da_ap = ap_dung_nhom(ma, [kh["giu"], *kh["bo"]], so_luu)
             except K.LoiKho as e:
                 loi += 1
                 in_ra(f"    nhóm {j}/{len(cac)} …{kh['giu'][-12:]}: lỗi, đã huỷ giao dịch ({e})")
@@ -669,6 +733,7 @@ def chay(ns, in_ra=print) -> int:
                 loi += 1
                 break
             if st == "da_gop":
+                _ghi_da_ap(so_luu, ma, da_ap)       # giao dịch của nhóm đã commit
                 gop += 1
             else:
                 doi += 1

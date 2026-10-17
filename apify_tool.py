@@ -1345,8 +1345,10 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
         tre = g is not None and g < _CP_ON_DINH_GIAY
         kq["on_dinh"] = _on_dinh(kq, truoc) and not tre
         if ids and (tre or kq["dang_chay"]):
+            # Còn run đang chạy: chưa biết lúc xong — đọc lại sau trọn `_CP_DOC_LAI_GIAY`.
+            g_tinh = 0.0 if kq["dang_chay"] or g is None else g
             kq["doc_lai"] = {"run_ids": ids, "sau_giay": round(max(
-                0.0, _CP_DOC_LAI_GIAY - (g if g is not None else 0.0)), 1)}
+                0.0, _CP_DOC_LAI_GIAY - g_tinh), 1)}
     return kq
 
 

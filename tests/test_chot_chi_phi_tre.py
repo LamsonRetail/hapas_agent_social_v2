@@ -198,6 +198,57 @@ def test_kho_hong_khi_nang_luot_thi_thu_lai_khong_ghi_so_hai_lan(nen, dong_ho, m
     assert len(lan) == V.TINH_LAI_TOI_DA_LAN and v.d["chi_phi"]["da_tinh_lai"] is True
 
 
+def test_chot_lai_khi_get_run_hong_thi_chua_xong(nen, dong_ho, monkeypatch):  # noqa: F811
+    """Soát 17/10/2026: GET run hỏng lúc chốt lại (mất mạng, APIFY_TOKEN vừa đổi) thì tổng THIẾU —
+    không được đánh dấu đã chốt lại (luot_quet sẽ thiếu vĩnh viễn)."""
+    monkeypatch.setattr(K, "nang_chi_phi_luot", lambda luot, usd: None)
+    v, _ = _viec_co_run(nen, dong_ho, sau=60)
+    v.d.update(loai="theo_doi", luot_id=17, tham_so={"du_an": "hapas"})
+    v.chot_chi_phi(["theo dõi hapas"], ["tiktok"], "")
+    goc = A._chi_phi_cac_run
+    monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {**goc(ids), "usd": 0.0, "so_run": 0,
+                                                             "chua_doc": len(ids)})
+    assert v.tinh_lai_muon() == 0.0 and v.d["chi_phi"]["da_tinh_lai"] is False
+    assert V._con_hen(v.d), "còn hẹn: luồng nền / lần khởi động sau thử lại"
+    monkeypatch.setattr(A, "_chi_phi_cac_run", goc)
+    assert v.tinh_lai_muon() == 0.03 and v.d["chi_phi"]["da_tinh_lai"] is True
+
+
+def test_viec_xong_tu_tien_trinh_truoc_van_gui_lai_va_chot_lai(nen, dong_ho, monkeypatch):  # noqa: F811
+    """Soát 17/10/2026 (lỗi có từ trước): việc xong mà chưa gửi được kết quả, bot khởi động lại —
+    sổ mang số thế hệ CŨ nên `gui` ném MatQuyen: kết quả không bao giờ tới, bước chốt lại chi
+    phí cũng mất."""
+    nang = []
+    monkeypatch.setattr(K, "nang_chi_phi_luot", lambda luot, usd: nang.append((luot, usd)) or 0.02)
+    monkeypatch.setattr(T, "_bao_dashboard", lambda ma, luot: None)
+    v, _ = _viec_co_run(nen, dong_ho, sau=60)
+    v.d.update(loai="theo_doi", luot_id=31, tham_so={"du_an": "hapas"})
+    v.chot_chi_phi(["theo dõi hapas"], ["tiktok"], "")
+    assert V._lay_quyen()
+    cu = V.the_cua_toi()
+    v.d.update(trang_thai="xong", xong_ts=V._bay_gio(), the=cu,
+               thong_bao={"ket_qua": "Theo dõi HAPAS xong", "lan_thu": 0, "da_gui": False})
+    V.luu(dict(v.d))
+    monkeypatch.setattr(V, "_QUYEN", {})                 # tiến trình mới: nhận khoá, thế hệ mới
+    assert V._lay_quyen() and V.the_cua_toi() > cu
+    d = V.chay_ngay(v.ma)
+    assert d["thong_bao"]["da_gui"] is True and d["the"] == V.the_cua_toi()
+    assert nang == [(31, 0.0501)] and V.doc(v.ma)["chi_phi"]["da_tinh_lai"] is True
+
+
+def test_doc_lai_cho_tron_90_giay_khi_con_run_dang_chay(monkeypatch, dong_ho):
+    items = [{"id": "r1", "startedAt": _iso(GOC - 300), "status": "SUCCEEDED",
+              "finishedAt": _iso(GOC - 200), "usageTotalUsd": 0.1},
+             {"id": "r2", "startedAt": _iso(GOC - 100), "status": "RUNNING", "finishedAt": None,
+              "usageTotalUsd": 0.05}]
+    monkeypatch.setenv("APIFY_TOKEN", "tok")
+    monkeypatch.setattr(A, "_tran", lambda: (500, 5.0))
+    monkeypatch.setattr(A.requests, "get", lambda url, **k: _R({"data": {"items": items}}))
+    thuc = A._chi_phi_thuc(["x~y"], TU)
+    assert thuc["dang_chay"] == 1 and thuc["doc_lai"] == {"run_ids": ["r1", "r2"],
+                                                          "sau_giay": A._CP_DOC_LAI_GIAY}
+
+
 def test_khoi_dong_lai_lam_bu_buoc_chot_lai(nen, dong_ho, monkeypatch):  # noqa: F811
     """Bot tắt sau khi lượt đã đóng (số tạm) mà trước bước chốt lại: lần khởi động sau làm bù từ
     run id trong sổ việc."""
