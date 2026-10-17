@@ -7,52 +7,54 @@
   </div>
 </div>
 
-<div class="luoi nx-luoi">
-  <section class="the-khoi">
-    <div class="muc">
-      <span class="muc__so" aria-hidden="true">1</span>
-      <h2 class="muc__ten">Danh sách ({{ ds|length }})</h2>
-      <span class="muc__phai muc__phu">{{ so_quan_ly }} quản lý</span>
-    </div>
-    <div class="cuon-ngang">
-    <table>
-      <thead><tr><th>Email</th><th>Vai trò</th><th>Thêm bởi</th><th>Thêm lúc</th><th></th></tr></thead>
-      <tbody>
-      {% for x in ds %}
-        <tr>
-          <td>{{ x.email }}{% if x.email == nguoi.email %} <span class="the the--nhan">bạn</span>{% endif %}</td>
-          <td class="o-mau o-mau--{{ 'tim' if x.vai_tro == 'quan_ly' else 'xanh' }}">{{ VAI_TRO.get(x.vai_tro, x.vai_tro) }}</td>
-          <td class="nho">{{ x.them_boi or '—' }}</td>
-          <td class="nho">{{ x.them_luc|gio_vn }}</td>
-          <td>
-            {% set cuoi = x.vai_tro == 'quan_ly' and so_quan_ly <= 1 %}
-            <form method="post" action="/nguoi-xem/xoa" data-xac-nhan="Xoá {{ x.email }} khỏi danh sách người xem?">
-              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-              <input type="hidden" name="email" value="{{ x.email }}">
-              <button class="nut nut--loi nut--nho" type="submit"{% if cuoi %} disabled title="Quản lý cuối cùng — thêm quản lý khác trước"{% endif %}>Xoá</button>
-            </form>
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  </section>
-  <section class="the-khoi">
-    <div class="muc">
-      <span class="muc__so" aria-hidden="true">2</span>
-      <h2 class="muc__ten">Thêm hoặc đổi vai trò</h2>
-      <button type="button" class="goi-y" data-goi-y="Email đã có thì chỉ đổi vai trò.">i</button>
-    </div>
-    <form method="post" action="/nguoi-xem/them" class="luoi-form">
-      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <label class="o rong">Email Lark <input type="email" name="email" required maxlength="254" placeholder="ten@hapas.vn"></label>
-      <label class="o">Vai trò
-        <select name="vai_tro">{% for k, v in VAI_TRO.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
-      <div><button class="nut" type="submit">Lưu</button></div>
-    </form>
-  </section>
-</div>
+<section class="the-khoi cach-duoi">
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">1</span>
+    <h2 class="muc__ten">Danh sách ({{ ds|length }})</h2>
+    <button type="button" class="goi-y" data-goi-y="Tên, chức danh, phòng ban và trạng thái đọc từ danh bạ Lark công ty, làm mới mỗi 12 giờ và ngay khi thêm email. Đăng nhập gần nhất: lượt đăng nhập dashboard thành công cuối cùng.">i</button>
+    <span class="muc__phai muc__phu">{{ so_quan_ly }} quản lý</span>
+  </div>
+  <div class="cuon-ngang">
+  <table class="nx-bang">
+    <thead><tr><th>Người xem</th><th>Trạng thái Lark</th><th>Chức danh</th><th>Đăng nhập gần nhất</th><th>Vai trò</th><th>Thêm bởi</th><th></th></tr></thead>
+    <tbody>
+    {% for x in ds %}
+      <tr>
+        <td>{{ x.email }}{% if x.email == nguoi.email %} <span class="the the--nhan">bạn</span>{% endif %}{% if x.ten_lark %}<span class="nx-dong2">{{ x.ten_lark }}</span>{% endif %}</td>
+        <td><span class="nx-o"><span class="the{% if x.o.mau %} the--{{ x.o.mau }}{% endif %}">{{ x.o.chu }}</span><button type="button" class="goi-y{% if x.o.canh %} goi-y--canh{% endif %}" data-goi-y="{{ x.o.goi_y }}" aria-label="Giải thích trạng thái Lark">i</button></span></td>
+        <td class="nx-cd">{{ x.chuc_danh or '—' }}{% if x.phong_ban %}<span class="nx-dong2">{{ x.phong_ban }}</span>{% endif %}</td>
+        <td class="nho">{% if x.dang_nhap_cuoi %}{{ x.dang_nhap_cuoi|gio_vn }}{% else %}<span class="phu">Chưa đăng nhập</span>{% endif %}</td>
+        <td class="o-mau o-mau--{{ 'tim' if x.vai_tro == 'quan_ly' else 'xanh' }}">{{ VAI_TRO.get(x.vai_tro, x.vai_tro) }}</td>
+        <td class="nho">{{ x.them_boi or '—' }}<span class="nx-dong2">{{ x.them_luc|gio_vn }}</span></td>
+        <td>
+          {% set cuoi = x.vai_tro == 'quan_ly' and so_quan_ly <= 1 %}
+          <form method="post" action="/nguoi-xem/xoa" data-xac-nhan="Xoá {{ x.email }} khỏi danh sách người xem?">
+            <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+            <input type="hidden" name="email" value="{{ x.email }}">
+            <button class="nut nut--loi nut--nho" type="submit"{% if cuoi %} disabled title="Quản lý cuối cùng — thêm quản lý khác trước"{% endif %}>Xoá</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="the-khoi cach-duoi">
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">2</span>
+    <h2 class="muc__ten">Thêm hoặc đổi vai trò</h2>
+    <button type="button" class="goi-y" data-goi-y="Email đã có thì chỉ đổi vai trò. Khi lưu, dashboard kiểm email với danh bạ Lark và cảnh báo nếu không có hoặc không hoạt động (vẫn lưu).">i</button>
+  </div>
+  <form method="post" action="/nguoi-xem/them" class="luoi-form">
+    <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+    <label class="o">Email Lark <input type="email" name="email" required maxlength="254" placeholder="ten@hapas.vn"></label>
+    <label class="o">Vai trò
+      <select name="vai_tro">{% for k, v in VAI_TRO.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+    <div><button class="nut" type="submit">Lưu</button></div>
+  </form>
+</section>
 
 <section class="the-khoi cach-duoi">
   <div class="muc">
