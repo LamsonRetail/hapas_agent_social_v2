@@ -180,6 +180,9 @@ class KhoGia:
             bang = re.search(r"INSERT INTO (\w+) \(([^)]*)\)", sql)
             cot = bang.group(2).split(", ")
             r = dict(zip(cot, ts))
+            if "now()" in sql.split(" VALUES ", 1)[1]:
+                assert cot[-1] == "cap_nhat_cuoi" and len(ts) == len(cot) - 1
+                r["cap_nhat_cuoi"] = "now"
             k = {"bai": ("du_an", "khoa"), "binh_luan": ("du_an", "khoa_bai", "ma"),
                  "chi_so_ngay": ("du_an", "khoa", "ngay")}[bang.group(1)]
             kk = tuple(r[x] for x in k)
@@ -380,6 +383,8 @@ def test_ap_dung_roi_chay_lai_roi_hoan_tac(kho, tmp_path):
         return {b: {k_: {c: v for c, v in r.items() if c != "cap_nhat_cuoi"}
                     for k_, r in rows.items()} for b, rows in t.items()}
     assert bo_moc(k.t) == bo_moc(goc)
+    assert k.t["bai"][("hapas", "facebook:pfbidA")]["cap_nhat_cuoi"] == "now", \
+        "dòng chèn lại mang mốc mới (đồng bộ BigQuery lấy lại)"
     rc, out = _chay("hapas", "--hoan-tac", str(tep))
     assert "trả lại 0/2 nhóm; 2 nhóm bỏ qua" in out, "hoàn tác hai lần không hỏng gì"
 

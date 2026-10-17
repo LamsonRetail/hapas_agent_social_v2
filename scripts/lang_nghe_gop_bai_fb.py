@@ -443,11 +443,14 @@ def _ke_hoach_tu_kho(kho: dict) -> list[dict]:
 
 # ───────────────────────────── ghi ─────────────────────────────
 def _chen(c, bang: str, r: dict, xung_dot: str) -> int:
-    cot = list(r)
+    """Chèn lại một dòng từ tệp hoàn tác (đã có thì thôi). `cap_nhat_cuoi` = now(): dòng trở
+    lại kho là dòng ĐỔI với đồng bộ BigQuery (theo mốc), không mang mốc cũ."""
+    cot = [k for k in r if k != "cap_nhat_cuoi"]
     dat = ", ".join(f"(SELECT id FROM {_FK_CON[k]} WHERE id = %s)" if k in _FK_CON else "%s"
                     for k in cot)
-    return int(c.execute(f"/* gop:hoan_{bang} */ INSERT INTO {bang} ({', '.join(cot)}) VALUES "
-                         f"({dat}) ON CONFLICT ({xung_dot}) DO NOTHING",
+    moc = ("", "") if "cap_nhat_cuoi" not in r else (", cap_nhat_cuoi", ", now()")
+    return int(c.execute(f"/* gop:hoan_{bang} */ INSERT INTO {bang} ({', '.join(cot)}{moc[0]}) "
+                         f"VALUES ({dat}{moc[1]}) ON CONFLICT ({xung_dot}) DO NOTHING",
                          [r[k] for k in cot]).rowcount or 0)
 
 
