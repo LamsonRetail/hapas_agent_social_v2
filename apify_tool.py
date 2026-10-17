@@ -656,6 +656,12 @@ def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None
     ds = run.get("defaultDatasetId")
     if not ds:
         return None
+    # `demo` do CHÍNH hàm này xin thêm (không có trong `fields` của bên gọi): soát 17/10/2026 (M2)
+    # — item mà mọi trường xin đều thiếu, nhưng actor mang `demo: false`, trả về thành
+    # `{"demo": False}`, không còn bị `_rong` bỏ như `{}` trước đây → bài ma được tính tiền
+    # (`quet_lon._so_tien`, `co_khoi` của `/theodoi`) và đếm vào số "về". Nên khoá tự thêm chỉ
+    # giữ khi đúng là True (để `_cho_run` nhận ra item mẫu), bỏ TRƯỚC khi xét `_rong`.
+    tu_them = bool(fields) and _TRUONG_DEMO not in fields
     out: list = []
     vi_tri = 0
     while not limit or len(out) < limit:
@@ -664,7 +670,7 @@ def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None
         if vi_tri:
             q["offset"] = vi_tri
         if fields:
-            q["fields"] = ",".join(dict.fromkeys((*fields, _TRUONG_DEMO)))
+            q["fields"] = ",".join((*fields, _TRUONG_DEMO) if tu_them else fields)
         trang = None
         for _ in range(2):
             try:
@@ -679,10 +685,19 @@ def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None
         if trang is None:
             return out if out else None
         vi_tri += n
+        if tu_them:
+            trang = [_bo_demo_tu_them(it) for it in trang]
         out.extend(it for it in trang if not _rong(it))
         if len(trang) < n:
             break
     return out[:limit] if limit else out
+
+
+def _bo_demo_tu_them(it):
+    """Bỏ khoá `demo` mà `_lay_items` tự xin thêm khi giá trị KHÁC True (xem `_lay_items`)."""
+    if isinstance(it, dict) and _TRUONG_DEMO in it and it[_TRUONG_DEMO] is not True:
+        return {k: v for k, v in it.items() if k != _TRUONG_DEMO}
+    return it
 
 
 def _huy_run(run_id: str, headers: dict) -> bool:

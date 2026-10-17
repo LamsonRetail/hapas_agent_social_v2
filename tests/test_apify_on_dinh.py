@@ -253,6 +253,41 @@ def test_run_lan_demo_va_that_giu_item_that(api):
     assert meta["so_item"] == 2
 
 
+@pytest.mark.parametrize("co_that", [True, False], ids=["lan_bai_that", "toan_rong"])
+def test_demo_false_tu_xin_them_khong_thanh_bai_ma(api, co_that):
+    """Soát 17/10/2026 (M2): `_lay_items` TỰ xin thêm `demo`; item mà mọi trường xin đều thiếu
+    nhưng actor mang `demo: false` từng ra `{"demo": False}` — không bị `_rong` bỏ, thành bài ma
+    tính tiền (`quet_lon._so_tien`) và đếm vào số "về"."""
+    import quet_lon
+    that = {"url": "https://www.instagram.com/p/A1/", "caption": "túi hapas", "likeCount": 2}
+    api.items = [{"demo": False, "error": "không có bài"} for _ in range(3)]
+    if co_that:
+        api.items.append(dict(that, demo=False))
+    tok = A._NEN.set(True)
+    try:
+        items, meta = A._run_actor(_IG, {}, 10, deadline=1000 + 120)
+    finally:
+        A._NEN.reset(tok)
+    assert items == ([that] if co_that else []), "khoá demo tự thêm không ở lại trong item"
+    assert meta["so_item"] == len(items) and "so_demo" not in meta and meta["ma"] == "OK"
+    assert quet_lon._so_tien("instagram", {}, items, {}) == (
+        quet_lon._so_tien("instagram", {}, [that], {}) if co_that else 0.0)
+
+
+def test_demo_do_ben_goi_xin_thi_giu_nguyen(monkeypatch):
+    """Bên gọi TỰ có `demo` trong `fields` thì giá trị nào cũng giữ — chỉ khoá do `_lay_items` xin
+    thêm mới bị bỏ."""
+    du_lieu = [{"url": "u1", "demo": False}, {"demo": False}, {"url": "u2"}]
+
+    def get(url, params=None, **k):
+        giu = params["fields"].split(",")
+        return R(200, [{c: it[c] for c in giu if c in it} for it in du_lieu])
+    monkeypatch.setattr(A.requests, "get", get)
+    assert A._lay_items({"defaultDatasetId": "d"}, 10, {}, fields=("url", "demo")) == du_lieu
+    assert A._lay_items({"defaultDatasetId": "d"}, 10, {}, fields=("url",)) == [
+        {"url": "u1"}, {"url": "u2"}]
+
+
 def test_la_demo_chi_khi_khong_co_du_lieu_that():
     assert A._la_demo({"demo": True}) and A._la_demo({"demo": True, "url": None, "tags": []})
     assert not A._la_demo({"demo": True, "url": "https://x"})
