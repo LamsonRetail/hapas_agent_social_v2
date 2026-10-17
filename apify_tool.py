@@ -642,7 +642,7 @@ def _la_demo(it) -> bool:
 
 
 def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None:
-    """Đọc dataset theo TRANG (offset/limit=1000) tới đủ `limit`.
+    """Đọc dataset theo TRANG (offset/limit=1000) tới đủ `limit` item thật (item mẫu không tính).
 
     Một GET `limit=10000` trả về cả chục MB trong một phản hồi, hỏng giữa chừng là mất cả.
     Trang nào đọc hỏng (2 lần) thì dừng: có trang trước thì trả phần đã đọc, chưa có gì
@@ -663,9 +663,15 @@ def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None
     # giữ khi đúng là True (để `_cho_run` nhận ra item mẫu), bỏ TRƯỚC khi xét `_rong`.
     tu_them = bool(fields) and _TRUONG_DEMO not in fields
     out: list = []
+    # `limit` đếm item THẬT (soát 17/10/2026, L1): item mẫu `_la_demo` vẫn trả cho `_cho_run` đếm
+    # và báo CHI_DEMO, nhưng không chiếm chỗ — dataset 10 mẫu đầu + bài thật phía sau với
+    # `limit=10` từng ra 10 mẫu, 0 bài. Trang lớn dần theo số mẫu đã gặp (không hỏi từng trang 10
+    # item qua cả nghìn mẫu); đọc tới `_TRANG_ITEM` mẫu thì thôi: gói Free trả chừng 10, nhiều hơn
+    # thế là dataset toàn mẫu, đọc tiếp chỉ tốn lượt hỏi.
+    so_that = so_mau = 0
     vi_tri = 0
-    while not limit or len(out) < limit:
-        n = min(_TRANG_ITEM, limit - len(out)) if limit else _TRANG_ITEM
+    while (not limit or so_that < limit) and so_mau < _TRANG_ITEM:
+        n = min(_TRANG_ITEM, limit - so_that + so_mau) if limit else _TRANG_ITEM
         q = {"skipHidden": 1, "limit": n, "format": "json"}
         if vi_tri:
             q["offset"] = vi_tri
@@ -687,10 +693,18 @@ def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None
         vi_tri += n
         if tu_them:
             trang = [_bo_demo_tu_them(it) for it in trang]
-        out.extend(it for it in trang if not _rong(it))
+        for it in trang:
+            if _rong(it):
+                continue
+            if _la_demo(it):
+                so_mau += 1
+                out.append(it)
+            elif not limit or so_that < limit:     # trang dài hơn số xin: không vượt `limit`
+                so_that += 1
+                out.append(it)
         if len(trang) < n:
             break
-    return out[:limit] if limit else out
+    return out
 
 
 def _bo_demo_tu_them(it):

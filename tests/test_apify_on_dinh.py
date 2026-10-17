@@ -70,12 +70,20 @@ class GiaApify:
             st = self.trang_thai.pop(0) if len(self.trang_thai) > 1 else self.trang_thai[0]
             return R(200, {"data": {**self.run, "status": st}})
         if "/datasets/" in url:
-            f = (params or {}).get("fields")
-            if f:           # như Apify: `fields=` chỉ giữ các trường xin, trường thiếu thì bỏ
-                giu = f.split(",")
-                return R(200, [{k: it[k] for k in giu if k in it} for it in self.items])
-            return R(200, list(self.items))
+            return R(200, _trang_ds(self.items, params))
         return self.khac(url, params)
+
+
+def _trang_ds(items: list, params: dict | None) -> list:
+    """Như Apify: `offset`/`limit` cắt trang (đọc theo trang mà fake trả cả dataset thì lặp mãi
+    với dataset toàn mẫu); `fields=` chỉ giữ các trường xin, trường thiếu thì bỏ."""
+    p = params or {}
+    o = int(p.get("offset") or 0)
+    ra = items[o:o + int(p["limit"])] if p.get("limit") else items[o:]
+    if p.get("fields"):
+        giu = p["fields"].split(",")
+        ra = [{k: it[k] for k in giu if k in it} for it in ra]
+    return list(ra)
 
 
 @pytest.fixture
@@ -288,6 +296,30 @@ def test_demo_do_ben_goi_xin_thi_giu_nguyen(monkeypatch):
         {"url": "u1"}, {"url": "u2"}]
 
 
+def test_item_mau_khong_chiem_cho_trong_limit(api):
+    """Soát 17/10/2026 (L1): 10 mẫu đầu + bài thật phía sau, `limit=10` — trước đây đọc đúng 10
+    vị trí đầu (toàn mẫu) rồi báo CHI_DEMO dù dataset có bài thật."""
+    that = [{"url": f"https://www.instagram.com/p/B{i}/", "caption": "hapas"} for i in range(15)]
+    api.items = [{"demo": True} for _ in range(10)] + that
+    tok = A._NEN.set(True)
+    try:
+        items, meta = A._run_actor(_IG, {}, 10, deadline=1000 + 120)
+    finally:
+        A._NEN.reset(tok)
+    assert items == that[:10] and meta["so_demo"] == 10 and meta["ma"] == "OK"
+    assert meta["so_item"] == 10
+    ds = [p for u, p in api.get_urls if "/datasets/" in u]
+    assert [(p.get("offset"), p["limit"]) for p in ds] == [(None, 10), (10, 20)]
+
+
+def test_dataset_toan_mau_lon_khong_hoi_tung_trang_nho(api):
+    api.items = [{"demo": True} for _ in range(3000)]
+    with pytest.raises(A.LoiApify) as e:
+        A._run_actor(_IG, {}, 5, deadline=1000 + 120)
+    assert e.value.ma == "CHI_DEMO"
+    assert len([u for u, _ in api.get_urls if "/datasets/" in u]) <= 10, "trang lớn dần"
+
+
 def test_la_demo_chi_khi_khong_co_du_lieu_that():
     assert A._la_demo({"demo": True}) and A._la_demo({"demo": True, "url": None, "tags": []})
     assert not A._la_demo({"demo": True, "url": "https://x"})
@@ -368,7 +400,7 @@ def _chuoi_tiktok(api, monkeypatch, ds_apidojo: list, ds_cw: list) -> None:
         for a, items in ds.items():
             if f"/datasets/ds-{a}/" in url:
                 api.get_urls.append((url, params))
-                return R(200, list(items))
+                return R(200, _trang_ds(items, params))
         return goc_get(url, params, **k)
     monkeypatch.setattr(A.requests, "post", post)
     monkeypatch.setattr(A.requests, "get", get)
