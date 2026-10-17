@@ -463,7 +463,8 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
     # chạy mỗi lượt actor vẫn bị kẹp theo trần console, phần còn của tháng và ngân sách việc.
     # Threads theo sản lượng lượt trước (17/10/2026, `san_luong_du_kien`): giữ chỗ theo trần cũ
     # (21 từ × 10 bài ≈ 0,79 USD) làm lượt bị từ chối / Threads bị co oan khi ngân sách chật.
-    tk_uoc = round(uoc_tu_khoa_du_an(da, _fb_toi_da(), doc_moc_tk(ma)), 2)
+    # Đường 1 giữ đúng trần run (`giu_cho_tu_khoa` → `tran_threads_1`) — cùng con số lúc chạy.
+    tk_uoc = round(giu_cho_tu_khoa(da, _fb_toi_da(), doc_moc_tk(ma)), 2)
     tk_uoc = round(max(0.0, min(tk_uoc, ns_apify - tong)), 2)
     tong = round(tong + tk_uoc, 2)
     bl_uoc = round(max(0.0, min(bl_uoc, ns_apify - tong)), 2)
@@ -1330,9 +1331,10 @@ def san_luong_du_kien(q: list[str], moi_tu: int, moc: dict | None,
       • chỉ có `ve` (sổ ghi trước 17/10): tổng bài lượt trước;
       • chưa có gì: trần (như cũ).
     rồi × `TH_HE_SO_SAN_LUONG` (bài về thất thường theo ngày), không dưới `TH_TOI_THIEU_BAI`, không
-    quá `tran`. Ước tính thấp KHÔNG nới tiền thật: trần USD gửi Apify vẫn là phần ngân sách còn lại
-    (`apify_tool._fetch_threads(tran_usd=…)`, `maxItems` của đường 2) — lượt bất ngờ nhiều bài thì
-    dừng ở trần đó và giữ bài đã trả tiền."""
+    quá `tran`. Tiền thật chặn ở trần USD gửi Apify: đường 1 = max(sàn, ước tính × 1,5) kẹp trần
+    console + phần còn của việc/tháng (`tran_threads_1` — soát 17/10/2026: bản trước gửi CẢ phần
+    tiền còn lại, run nhiều bài ăn luôn phần giữ cho bình luận / kiểm độ phủ / web); đường 2 =
+    `maxItems`. Lượt bất ngờ nhiều bài dừng ở trần đó và giữ bài đã trả tiền."""
     moc = moc if isinstance(moc, dict) else {}
     ve_tu = moc.get("ve_tu")
     if isinstance(ve_tu, dict) and ve_tu:
@@ -1402,6 +1404,38 @@ def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA,
             tong += uoc_fb_duong2(len(tu_fb_duong2(du_an, tu)), c["duong2"]["so_bai_moi_tu"])
         if p == "tiktok" and c["hashtag"]["bat"]:
             tong += uoc_tag_tiktok(c["hashtag"]["so_yeu_cau"], len(tag_tiktok(tu)))
+    return round(tong, 4)
+
+
+def tran_threads_1(uoc: float, con: float = float("inf")) -> float:
+    """Trần USD gửi Apify (`maxTotalChargeUsd`) của lượt tìm Threads ĐƯỜNG 1 (futurizerush):
+    min(trần console Threads, `con` = phần còn của việc/tháng, max(sàn 0,1, ước tính × 1,5)), làm
+    tròn XUỐNG tới cent. Actor không dừng ở `maxItems` — trần này là thứ duy nhất chặn tiền, nên
+    nó phải bám ước tính đã giữ chỗ (`giu_cho_tu_khoa`), không phải cả phần tiền còn lại."""
+    muc = min(A._tran_nen_tang("threads", nen=True)[1], con,
+              max(_TRAN_TOI_THIEU, float(uoc) * _HE_SO_TRAN))
+    return math.floor(muc * 100 + 1e-9) / 100
+
+
+def uoc_threads_1(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA, moc: dict | None = None) -> float:
+    """Ước tính lượt tìm Threads đường 1 với cấu hình hiệu lực — CÙNG con số `_tim_tu_khoa` dùng
+    lúc chạy (sổ mốc `moc` của dự án: theo sản lượng lượt trước). 0 khi Threads tắt."""
+    c = cau_hinh(du_an, "tu_khoa", "threads")
+    if not c["bat"]:
+        return 0.0
+    m = (moc or {}).get("threads") if isinstance(moc, dict) else None
+    return uoc_tu_khoa_nen_tang("threads", c["so_bai"], tu_tim(du_an), c["so_tu"], fb_toi_da,
+                                moc=m if isinstance(m, dict) else {})
+
+
+def giu_cho_tu_khoa(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA, moc: dict | None = None) -> float:
+    """USD giữ chỗ cho lượt tìm theo từ khoá lúc tạo việc (`_tao_luot`): ước tính mọi nền tảng
+    (`uoc_tu_khoa_du_an`), riêng Threads đường 1 giữ đúng TRẦN run (`tran_threads_1`, không kẹp
+    phần còn) thay cho ước tính — run được tiêu tới đâu thì việc đã giữ tới đó."""
+    tong = uoc_tu_khoa_du_an(du_an, fb_toi_da, moc)
+    u1 = uoc_threads_1(du_an, fb_toi_da, moc)
+    if u1 > 0:
+        tong += max(0.0, tran_threads_1(u1) - u1)
     return round(tong, 4)
 
 
@@ -1667,11 +1701,10 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # sách còn lại sau khi trừ ước tính API — không chỉ trần console.
                 them["tran_du_phong"] = round(max(0.0, min(con, _con_viec(v)) - uoc), 2)
             if p == "threads":
-                # Ước tính nay theo sản lượng (thấp hơn trần cũ): trần USD của run = phần ngân
-                # sách còn lại (≤ trần console) — một lượt bất ngờ nhiều bài dừng ở đó, giữ bài
-                # đã trả tiền, không tiêu quá phần tháng/việc còn lại.
-                them["tran_usd"] = math.floor(min(A._tran_nen_tang(p, nen=True)[1],
-                                                  min(con, _con_viec(v))) * 100) / 100
+                # Trần USD của run theo CÙNG ước tính đã giữ chỗ (`tran_threads_1`), không phải
+                # cả phần tiền còn lại: một lượt bất ngờ nhiều bài dừng ở trần, giữ bài đã trả
+                # tiền, không ăn phần đã giữ cho bình luận, kiểm độ phủ, web.
+                them["tran_usd"] = tran_threads_1(uoc, min(con, _con_viec(v)))
             A._NEN_TANG.set(p)
             A._HAN_CHOT.set(han)
             A._KHI_CO_RUN.set(lambda run, meta, p=p: _them_phan_tk(v, {

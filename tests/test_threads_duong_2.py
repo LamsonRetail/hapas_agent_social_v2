@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 import pytest
-from test_theo_doi import DU_AN, GiaKhoTk, GiaViec, _chay_tk, mo  # noqa: F401
+from test_theo_doi import DU_AN, GiaKho, GiaKhoTk, GiaViec, _chay_tk, mo  # noqa: F401
 
 import apify_tool as A
 import theo_doi as T
@@ -168,8 +168,10 @@ def test_hai_duong_gop_bo_trung_theo_ma_bai_phieu_va_moc_rieng(mo):  # noqa: F81
     _, q2, lim2, _, k2 = goi[0]
     assert q2 == TU and lim2 == 60
     assert k2 == {"moi_tu": 20, "so_luot": 2, "tran_usd": round(max(0.1, 60 * 0.001 * 1.5), 2)}
-    # Đường 1: trần USD = phần còn lại sau đường 2 (5 − 0,006), làm tròn XUỐNG, ≤ trần console.
-    assert goi[1][4] == {"tran_usd": 4.99}
+    # Đường 1 (soát 17/10/2026): trần USD = max(sàn, ước tính × 1,5), KHÔNG phải cả phần còn lại
+    # (5 − 0,006 = 4,99 ở bản trước) — ước 30 bài (30 × 0,0025 + 0,08) × 1,3 = 0,2015 → 0,30.
+    u1 = T.uoc_tu_khoa_nen_tang("threads", 30, TU, moc={})
+    assert goi[1][4] == {"tran_usd": 0.30} == {"tran_usd": T.tran_threads_1(u1)}
     rows = {r["link"]: r for _, cac in kho.bai for r in cac}
     assert len(rows) == 6, "2 bài chung chỉ một dòng + 4 bài riêng đường 2"
     chung = rows["https://www.threads.com/@nguoi_mau_01/post/MAU2000001X"]
@@ -334,13 +336,62 @@ def test_luot_11_threads_khong_con_bi_co_oan(mo):  # noqa: F811
     tk = contextvars.copy_context().run(T._tim_tu_khoa, v, da, 11, 5.0, time.monotonic() + 600)
     assert not any("co còn" in x for x in tk["ghi_chu"])
     (p, q, lim, _, k), = goi
-    assert p == "threads" and q == TU21[:20] and lim == 210 and k == {"tran_usd": 0.6}
+    # Trần run theo ước tính sản lượng (0,169 × 1,5 = 0,25), không phải cả 0,6 còn lại của việc.
+    assert p == "threads" and q == TU21[:20] and lim == 210 and k == {"tran_usd": 0.25}
     assert "dự kiến 20/210" in tk["pheu"]["threads"]["xin_ly_do"]
     # Ngân sách thật sự chật: co theo ước tính SẢN LƯỢNG (từ đầu ra bài nhiều nhất) — 1 từ vừa.
     assert T._co_threads(TU21, 210, 0.15, {"ve_tu": VE_TU21})[:2] == (TU21[:1], 10)
     # Lượt vừa chạy ghi sản lượng mới của từng từ (2 bài mẫu: "hapas" 1, "túi hapas" 1, còn 0).
     ve = T.doc_moc_tk("hapas")["threads"]["ve_tu"]
     assert (ve["hapas"], ve["tui hapas"], sum(ve.values()), len(ve)) == (1, 1, 2, 20)
+
+
+def test_tran_duong_1_bam_uoc_tinh_va_giu_cho_cung_con_so(mo):  # noqa: F811
+    """Soát 17/10/2026: ước tính đường 1 theo sản lượng (thấp) mà trần run là CẢ phần tiền còn lại
+    — một lượt nhiều bài ăn phần đã giữ cho bình luận / kiểm độ phủ / web. Nay trần = min(console,
+    phần còn, max(sàn, ước × 1,5)) và `_tao_luot` giữ đúng trần đó."""
+    da = dict(_da(duong2={"bat": False}), tu_khoa=TU21, tk_so_bai=210)
+    moc = {"threads": {"ve_tu": VE_TU21}}
+    u1 = T.uoc_threads_1(da, moc=moc)
+    assert u1 == T.uoc_tu_khoa_nen_tang("threads", 210, TU21, moc=moc["threads"])  # 0,169
+    assert T.tran_threads_1(u1) == 0.25 and T.tran_threads_1(u1, 0.2) == 0.2
+    assert T.tran_threads_1(0.01) == 0.1, "sàn 0,1"
+    mo.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 0.15, True))
+    assert T.tran_threads_1(u1) == 0.15, "trần console thắng"
+    mo.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 5.0, True))
+    # Giữ chỗ = ước tính các nền tảng, riêng đường 1 là trần run (0,25 thay vì 0,169).
+    assert T.giu_cho_tu_khoa(da, moc=moc) == pytest.approx(
+        T.uoc_tu_khoa_du_an(da, moc=moc) - u1 + 0.25, abs=1e-4)
+    assert T.giu_cho_tu_khoa(dict(da, cau_hinh={}), moc=moc) == T.uoc_tu_khoa_du_an(
+        dict(da, cau_hinh={}), moc=moc), "Threads tắt: không giữ thêm"
+    # Lượt chạy thật: run nhận trần 0,25 dù việc còn 5 USD.
+    GiaKhoTk(mo)
+    T.ghi_moc_tk("hapas", {"threads": {"luc": "2026-10-16T07:00:00+07:00", "dau": "khac",
+                                       "xin": 210, "ve": 15, "ve_tu": VE_TU21}})
+    goi: list = []
+    mo.setattr(A, "_FETCH", _fetch(goi, {"threads": _d1()}))
+    v = GiaViec({}, [])
+    v.d["ngan_sach_usd"] = 5.0
+    contextvars.copy_context().run(T._tim_tu_khoa, v, da, 12, 5.0, time.monotonic() + 600)
+    assert [(g[0], g[4]) for g in goi] == [("threads", {"tran_usd": 0.25})]
+
+
+def test_tao_luot_giu_cho_tran_duong_1(mo):  # noqa: F811
+    """`_tao_luot` giữ chỗ tìm theo từ khoá bằng `giu_cho_tu_khoa` (cùng con số trần run)."""
+    import quet_lon
+    import viec_nen
+    da = dict(_da(duong2={"bat": False}), tu_khoa=TU21, tk_so_bai=210, bl_bat=False)
+    GiaKho(du_an={"hapas": da}).cai(mo)
+    mo.setattr(quet_lon, "tran_usd_nen", lambda: 20.0)
+    mo.setattr(quet_lon, "ngan_sach", lambda tran: (8.0, {"con_lai": 9.0}, ""))
+    mo.setattr(T, "uoc_do_phu", lambda *a, **k: 0.0)
+    tao = []
+    mo.setattr(viec_nen, "tao_viec", lambda *a, **k: tao.append(a) or {"ma_viec": "t1"})
+    kq = T.tao_luot("hapas")
+    assert kq["ok"], kq
+    u1 = T.uoc_threads_1(da, moc={})                       # chưa có sổ mốc: 210 bài, 0,79 USD
+    tran = T.tran_threads_1(u1)
+    assert tran == 1.17 and tao[0][3]["usd"] == round(T.uoc_tu_khoa_du_an(da) - u1 + tran, 2)
 
 
 def test_giu_cho_luot_va_duong_2_theo_san_luong():
