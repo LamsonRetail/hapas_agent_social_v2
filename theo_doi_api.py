@@ -194,6 +194,17 @@ def _so_fb(v) -> int:
         return 0
 
 
+def _ten_trang(*urls) -> str:
+    """Tên trang Facebook trong link đầu tiên có tên ("facebook.com/hapasglobal" → "hapasglobal");
+    bỏ link id số / profile.php / đường dẫn chung (`khu_trung_fb._SLUG_CHUNG`). Không có → ""."""
+    import khu_trung_fb as KT
+    for u in urls:
+        m = re.search(r"facebook\.com/([^/?#]+)", str(u or ""), re.IGNORECASE)
+        if m and not m.group(1).isdigit() and m.group(1).lower() not in KT._SLUG_CHUNG:
+            return m.group(1)
+    return ""
+
+
 def doc_thedoor(items: list, urls: list[str]) -> dict[str, dict]:
     """Item thedoor -> {trang: {"ho_so", "bai", "ghi_chu"}} CÙNG dạng `account_tool._doc_facebook`
     để `theo_doi._dong_tu_tai_khoan` / `ghep_nguon` dùng nguyên. Trường theo run thật 17/10/2026:
@@ -216,8 +227,12 @@ def doc_thedoor(items: list, urls: list[str]) -> dict[str, dict]:
         if vao is None and len(urls) == 1:
             vao = urls[0]
         k = str(pg.get("name") or vao or "").lower()
+        # `tai_khoan` = tên trang trong link ("hapasglobal") như `pageName` của actor cũ, không
+        # phải tên hiển thị ("HAPAS"): kho nhận bản trùng bài pfbid cũ theo chủ bài + phút + nội
+        # dung (`khu_trung_fb.chu_bai`), mà link thedoor mang id SỐ của trang thay vì tên trang.
         tk = ra.setdefault(k, {"ho_so": {
-            "ten": pg.get("name") or k, "tai_khoan": pg.get("name") or k, "followers": None,
+            "ten": pg.get("name") or k,
+            "tai_khoan": _ten_trang(pg.get("url"), vao) or pg.get("name") or k, "followers": None,
             "link": pg.get("url") or vao or ""}, "bai": [], "ghi_chu": ""})
         eg = it.get("engagement") if isinstance(it.get("engagement"), dict) else {}
         vd = it.get("video") if isinstance(it.get("video"), dict) else {}
