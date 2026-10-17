@@ -37,8 +37,9 @@ GIA = {"tiktok": 0.0012, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0,
 #: `theo_doi._HE_SO_UOC` — ước tính chừa hao hụt (bài ghim, phí lẻ…).
 HE_SO_UOC = 1.3
 #: `apify_tool._START_COST` — phí khởi động MỖI lượt actor. Threads: actor ép 4 GB RAM, gói
-#: FREE 0,02 USD/GB = 0,08 USD (đo 16/10/2026).
-START_COST = {"instagram": 0.016, "threads": 0.08, "facebook": 0.00005}
+#: FREE 0,02 USD/GB = 0,08 USD (đo 16/10/2026). Instagram 0 (17/10/2026: actor hashtag và hồ sơ
+#: của Apify chỉ tính theo item / tài khoản).
+START_COST = {"instagram": 0.0, "threads": 0.08, "facebook": 0.00005}
 #: `theo_doi.TH_TOI_THIEU_BAI` / `TH_TOI_DA_MOI_LUOT` — actor Threads lấy (và tính tiền) ≥ 10 bài
 #: mỗi tài khoản / từ khoá; ≤ 20 tài khoản hoặc từ khoá mỗi lượt.
 TH_TOI_THIEU_BAI = 10
@@ -56,10 +57,13 @@ NGAY_THANG_CAU_HINH = 30     # "theo cấu hình": tháng chuẩn 30 ngày (đ�
 
 
 #: `theo_doi._TK_GIA` / `_TK_KHOI` / `TK_*` — tìm theo từ khoá (actor của social_listen).
-TK_GIA = {"tiktok": 0.0001, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0,
+#: Instagram (17/10/2026, `apify~instagram-hashtag-scraper`): 0,0026 USD/item, không phí khởi động,
+#: hai run mỗi lượt (`TK_IG_TAB`: tab bài + reels, mỗi run mọi hashtag); mặc định 12 hashtag.
+TK_GIA = {"tiktok": 0.0001, "facebook": 0.00259, "instagram": 0.0026, "youtube": 0.0,
           "threads": 0.0025}
-TK_KHOI = {"instagram": 0.016, "facebook": 0.00005, "threads": 0.08}
-TK_IG_TOI_DA_TU = 2
+TK_KHOI = {"instagram": 0.0, "facebook": 0.00005, "threads": 0.08}
+TK_IG_TOI_DA_TU = 12
+TK_IG_TAB = 2
 TK_FB_TOI_DA = 20
 #: TikTok tìm theo từ khoá tính theo YÊU CẦU (`theo_doi.TK_TT_*`, `theo_doi_api.LAM_MOI_TOI_DA`).
 TK_TT_YEU_CAU = 0.003
@@ -367,13 +371,20 @@ def tu_tim(du_an: dict) -> list[str]:
     return ra[:GIOI_HAN["tk_so_tu"][1]]
 
 
+def hashtag_ig(s: str) -> str:
+    """Bản sao `apify_tool.hashtag_ig`: bỏ dấu (đ→d), thường hoá, bỏ mọi ký tự ngoài [a-z0-9_]."""
+    return re.sub(r"[^a-z0-9_]", "", _norm(str(s or "")))
+
+
 def _tu_ig(tu: list[str], so_tu: int) -> list[str]:
-    return [t for t in tu if " " not in t][:so_tu]
+    """Bản sao `apify_tool.hashtag_ig_ds` + cắt `so_tu`: hashtag bỏ rỗng, bỏ trùng, giữ thứ tự."""
+    return list(dict.fromkeys(t for t in (hashtag_ig(x) for x in tu) if t))[:so_tu]
 
 
 def tu_gui(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU, so_bai: int = 0) -> list[str]:
-    """Bản sao `theo_doi._tu_cho`: từ khoá thật sự gửi actor. Instagram: `so_tu` từ không dấu
-    cách; Threads: `so_bai // 10` từ đầu (≥ 1, ≤ 20 — actor lấy ≥ 10 bài mỗi từ)."""
+    """Bản sao `theo_doi._tu_cho`: từ khoá thật sự gửi actor. Instagram: `so_tu` hashtag đầu (mọi
+    từ khoá viết liền, bỏ dấu — 17/10/2026); Threads: `so_bai // 10` từ đầu (≥ 1, ≤ 20 — actor lấy
+    ≥ 10 bài mỗi từ)."""
     if p == "instagram":
         return _tu_ig(tu, so_tu)
     if p == "threads":
@@ -391,7 +402,9 @@ def uoc_tk_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_D
     if not q or not gia or so_bai <= 0:
         return 0.0
     if p == "instagram":
-        return round(len(q) * (TK_KHOI["instagram"] + so_bai * gia) * HE_SO_UOC, 4)
+        per = max(1, math.ceil(so_bai / (TK_IG_TAB * len(q))))
+        return round((TK_IG_TAB * len(q) * per * gia + TK_IG_TAB * TK_KHOI["instagram"])
+                     * HE_SO_UOC, 4)
     if p == "tiktok":
         trang = 2 * math.ceil(math.ceil(so_bai / len(q)) / TK_TT_MOI_TRANG) + 1 + TK_TT_MOI_NHAT
         return round((len(q) * trang + TK_LAM_MOI) * TK_TT_YEU_CAU * HE_SO_UOC, 4)
@@ -573,7 +586,8 @@ def hang_so_cho_trinh_duyet() -> dict:
     """Hằng số cho phép tính lại ngay trên trình duyệt khi sửa số bài / chu kỳ / cấu hình."""
     return {"gia": GIA, "he_so": HE_SO_UOC, "start": START_COST, "ngay": NGAY_THANG_CAU_HINH,
             "tk_gia": TK_GIA, "tk_khoi": TK_KHOI, "tk_fb_toi_da": TK_FB_TOI_DA,
-            "tk_ig_so_tu": TK_IG_TOI_DA_TU, "bl_gia": BL_GIA, "bl_khoi": BL_KHOI_DONG,
+            "tk_ig_so_tu": TK_IG_TOI_DA_TU, "tk_ig_tab": TK_IG_TAB,
+            "bl_gia": BL_GIA, "bl_khoi": BL_KHOI_DONG,
             "bl_uoc_moi_bai": BL_UOC_MOI_BAI, "gioi_han": GIOI_HAN, "nen_tang": NEN_TANG,
             # Threads (16/10/2026): ≥ 10 bài mỗi tài khoản / từ khoá, ≤ 20 mỗi lượt; mặc định tắt.
             "th_toi_thieu_bai": TH_TOI_THIEU_BAI, "th_toi_da_moi_luot": TH_TOI_DA_MOI_LUOT,

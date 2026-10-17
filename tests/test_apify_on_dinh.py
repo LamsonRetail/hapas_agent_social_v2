@@ -218,7 +218,9 @@ def test_free_tier_co_du_lieu_van_ok_kem_gioi_han(api):
 
 
 # ──── actor chỉ trả dữ liệu DEMO (đo thật 17/10/2026: Instagram gói Free, 10 × {"demo": true}) ───
-_IG = "apidojo~instagram-hashtag-scraper"
+# Actor Instagram hiện hành (17/10/2026 đổi sang `apify~instagram-hashtag-scraper`): luật CHI_DEMO
+# áp cho MỌI actor, kiểm trên actor đang dùng để `_TRUONG_ACTOR` của nó luôn kèm `demo`.
+_IG = A._ACTORS["instagram"]
 _MSG_DEMO = ("Your run has finished. Please subscribe to a paid plan to get real results: "
              "https://console.apify.com/actors/xyz")
 
@@ -248,7 +250,7 @@ def test_run_succeeded_toan_demo_la_chi_demo(api, nen):
 
 
 def test_run_lan_demo_va_that_giu_item_that(api):
-    that = [{"url": "https://www.instagram.com/p/A1/", "caption": "túi hapas", "likeCount": 3},
+    that = [{"url": "https://www.instagram.com/p/A1/", "caption": "túi hapas", "likesCount": 3},
             {"url": "https://www.instagram.com/p/A2/", "caption": "hapas", "demo": True}]
     api.items = [{"demo": True}, that[0], {"demo": True, "caption": ""}, that[1]]
     tok = A._NEN.set(True)
@@ -267,7 +269,7 @@ def test_demo_false_tu_xin_them_khong_thanh_bai_ma(api, co_that):
     nhưng actor mang `demo: false` từng ra `{"demo": False}` — không bị `_rong` bỏ, thành bài ma
     tính tiền (`quet_lon._so_tien`) và đếm vào số "về"."""
     import quet_lon
-    that = {"url": "https://www.instagram.com/p/A1/", "caption": "túi hapas", "likeCount": 2}
+    that = {"url": "https://www.instagram.com/p/A1/", "caption": "túi hapas", "likesCount": 2}
     api.items = [{"demo": False, "error": "không có bài"} for _ in range(3)]
     if co_that:
         api.items.append(dict(that, demo=False))

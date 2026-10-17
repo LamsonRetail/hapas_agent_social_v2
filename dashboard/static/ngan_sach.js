@@ -37,7 +37,6 @@
     return ra.slice(0, GH.tk_so_tu[1]);
   }
   var TU = tuTim(D.tu_khoa, D.ten);
-  var TU_IG = TU.filter(function (t) { return t.indexOf(" ") < 0; });
 
   // <web> Báo & Web (16/10/2026) — bản sao chi_phi.rut_gon_web / so_cau_web / uoc_web (bài thử
   // tests/test_dashboard_web.py::test_ngan_sach_js_rut_gon_khop_python chạy khối này bằng node).
@@ -149,6 +148,13 @@
   // = chi_phi.uoc_tk_nen_tang như bang_cau_hinh gọi: KHÔNG kẹp Facebook ở tk_fb_toi_da — dashboard
   // không biết gói Apify, nên báo mức trần thận trọng theo đúng số bài đã đặt.
   // <uoc_tk> (bài thử tests/test_moi_nhat.py::test_ngan_sach_js_uoc_tk_khop_python chạy khối này)
+  // = chi_phi.hashtag_ig (17/10/2026): từ khoá -> hashtag Instagram viết liền, bỏ dấu (đ -> d),
+  // chỉ giữ [a-z0-9_]; _tu_ig: bỏ rỗng, bỏ trùng, giữ thứ tự.
+  function tagIg(s) {
+    return String(s || "").replace(/đ/g, "d").replace(/Đ/g, "D").normalize("NFD")
+      .replace(/\p{Mn}/gu, "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  }
+  var TU_IG = TU.map(tagIg).filter(function (t, i, ds) { return t && ds.indexOf(t) === i; });
   function uocTk(p, so, soTu, boc) {
     if (p === "web") return uocWeb(so, TU, boc);
     // Threads (= chi_phi.tu_gui): chỉ `so // 10` từ đầu (≥ 1, ≤ 20) — actor lấy ≥ 10 bài mỗi từ.
@@ -158,7 +164,11 @@
       : TU;
     var gia = (hs.tk_gia || {})[p] || 0;
     if (!q.length || !gia || so <= 0) return 0;
-    if (p === "instagram") return r4(q.length * (hs.tk_khoi.instagram + so * gia) * hs.he_so);
+    if (p === "instagram") {         // hai run (tab bài + reels), mỗi run mọi hashtag × trần mỗi tag
+      var tab = hs.tk_ig_tab || 2;
+      var per = Math.max(1, Math.ceil(so / (tab * q.length)));
+      return r4((tab * q.length * per * gia + tab * (hs.tk_khoi.instagram || 0)) * hs.he_so);
+    }
     if (p === "tiktok") {            // TikTok API tính theo YÊU CẦU (= chi_phi.uoc_tk_nen_tang)
       var trang = 2 * Math.ceil(Math.ceil(so / q.length) / (hs.tk_tt_moi_trang || 30)) + 1 + (hs.tk_tt_moi_nhat || 0);
       return r4((q.length * trang + (hs.tk_lam_moi || 0)) * (hs.tk_tt_yeu_cau || 0) * hs.he_so);
@@ -369,7 +379,8 @@
     if (ht) ht.disabled = !ban;
   }
 
-  ghiGoiY("ghi-ig", "Chỉ từ không dấu cách (" + TU_IG.length + " từ)");
+  ghiGoiY("ghi-ig", "Từ khoá viết liền thành hashtag, bỏ dấu (" + TU_IG.length +
+    " hashtag); tab bài + reels, " + soVn((hs.tk_gia || {}).instagram || 0, 4) + " USD/bài");
   ghi("web-so-tu", rutGonWeb(TU).length + " → " + soCauWeb(TU) + " câu");
 
   // giá mỗi mẫu nhanh (chỉ phụ thuộc từ khoá dự án) — ghi ngay trên nút

@@ -121,14 +121,14 @@
 {% set bl_md = [[(d.bl_so_bai or 0)|int, 0]|max, 500]|min %}
 {% set bl_moi_md0 = [[(d.bl_moi_bai or 0)|int, 0]|max, 5000]|min %}
 {% set bl_moi_md = 5 if 0 < bl_moi_md0 < 5 else bl_moi_md0 %}
-{# số từ Instagram dùng được (không dấu cách) — gần đúng chi_phi.tu_tim (Jinja không bỏ dấu được;
-   ngan_sach.js tính lại đúng và ghi đè) #}
+{# số hashtag Instagram (17/10/2026: mọi từ khoá viết liền, bỏ dấu) — gần đúng chi_phi._tu_ig (Jinja
+   không bỏ dấu được nên đếm từ khoá khác nhau; ngan_sach.js tính lại đúng và ghi đè) #}
 {% set dem = namespace(ig=0, da=[]) %}
 {% for x in (d.tu_khoa or [d.ten or '']) %}
   {% set t = (x|string).split()|join(' ') %}
   {% if t and (t|lower) not in dem.da and dem.da|length < hang_so.gioi_han.tk_so_tu[1] %}
     {% set dem.da = dem.da + [t|lower] %}
-    {% if ' ' not in t %}{% set dem.ig = dem.ig + 1 %}{% endif %}
+    {% set dem.ig = dem.ig + 1 %}
   {% endif %}
 {% endfor %}
 {% set tong_luot = b.uoc_tk + b.uoc_bl %}
@@ -239,7 +239,7 @@
       <tr data-nt="{{ p }}">
         <th scope="row">{{ ten }}
           {% if p == 'facebook' %}<button type="button" class="goi-y{% if tk.bat and tk.so_bai > hang_so.tk_fb_toi_da %} goi-y--canh{% endif %}" data-o="ghi-fb" data-goi-y="Gói Apify FREE: thực tế tối đa {{ hang_so.tk_fb_toi_da }} bài/lượt">i</button>
-          {% elif p == 'instagram' %}<button type="button" class="goi-y" data-o="ghi-ig" data-goi-y="Chỉ từ không dấu cách ({{ dem.ig }} từ)">i</button>
+          {% elif p == 'instagram' %}<button type="button" class="goi-y" data-o="ghi-ig" data-goi-y="Từ khoá viết liền thành hashtag, bỏ dấu ({{ dem.ig }} hashtag); tab bài + reels">i</button>
           {% elif p == 'youtube' %}<button type="button" class="goi-y" data-goi-y="Miễn phí (API YouTube)">i</button>{% endif %}
         </th>
         <td class="ns-o-cong ns-ranh" data-nhan="Tìm từ khoá">

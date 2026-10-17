@@ -811,9 +811,11 @@ TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram", "threads", "web")
 # TikTok từ 16/10/2026: TikTok API, tính theo YÊU CẦU (0,003 USD — giá thật đo 17/10 — mỗi trang
 # ≤30 bài, mỗi từ khoá ≥1 trang) — `_TK_GIA["tiktok"]` chỉ là sổ tạm theo bài;
 # ước tính dùng `uoc_tu_khoa_nen_tang`.
-_TK_GIA = {"tiktok": 0.0001, "facebook": 0.00259, "instagram": 0.0004, "youtube": 0.0,
+# Instagram (17/10/2026, `apify~instagram-hashtag-scraper`): 0,0026 USD mỗi item (gói FREE,
+# `pricingInfos`), không phí khởi động; hai run mỗi lượt (`apify_tool._IG_TAB`: tab bài + reels).
+_TK_GIA = {"tiktok": 0.0001, "facebook": 0.00259, "instagram": 0.0026, "youtube": 0.0,
            "threads": 0.0025}
-_TK_KHOI = {"instagram": 0.016, "facebook": 0.00005, "threads": 0.08}
+_TK_KHOI = {"instagram": 0.0, "facebook": 0.00005, "threads": 0.08}
 TK_TT_YEU_CAU = 0.003        # = tiktok_api.GIA_YEU_CAU (bài thử đối chiếu)
 TK_TT_MOI_TRANG = 30         # = tiktok_api.TIM_MOI_TRANG
 #: Nền tảng TẮT khi `du_an.cau_hinh` chưa ghi `bat` cho nó (cả tìm từ khoá lẫn bình luận): thêm
@@ -822,7 +824,11 @@ TK_TT_MOI_TRANG = 30         # = tiktok_api.TIM_MOI_TRANG
 #: Báo & Web (review 16/10, M2): chủ dự án duyệt cho RIÊNG HAPAS -> mặc định TẮT với mọi dự án;
 #: HAPAS bật bằng `du_an.cau_hinh.tu_khoa.web.bat = true` (deploy/lang-nghe/du-lieu-hapas-web-…).
 MAC_DINH_TAT = ("threads", "web")
-TK_IG_TOI_DA_TU = 2          # actor Instagram chạy MỘT lượt mỗi từ (phí khởi động mỗi lượt)
+# Số hashtag Instagram mỗi lượt khi dự án chưa đặt `so_tu` (17/10/2026). Trước là 2 vì actor cũ chạy
+# MỘT run mỗi từ, mỗi run 0,016 USD khởi động; actor mới một run nhận mọi hashtag, tiền chỉ theo
+# item, nên nhiều tag KHÔNG đắt hơn với cùng số bài — đo 17/10: 11 tag cho 44 bài nhắc HAPAS (gói
+# FREE chỉ trang đầu mỗi tag, nên phủ rộng nhiều tag mới bắt được bài mới). Chỉnh trên dashboard.
+TK_IG_TOI_DA_TU = 12
 TK_FB_TOI_DA = 20            # actor Facebook gói Free: 5 bài/lượt, mỗi từ một lượt, ≤20 bài
 TK_TOI_DA_TU = 50           # = số mục tối đa của ô từ khoá trên dashboard (không cắt thêm)
 # Cửa sổ ngày của lượt tìm (chẩn đoán 16/10/2026). Bản cũ: 30 ngày lần đầu, rồi CỐ ĐỊNH 3 ngày
@@ -942,8 +948,10 @@ def tu_tim(du_an: dict) -> list[str]:
 
 def _tu_cho(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU, so_bai: int = 0) -> list[str]:
     """Từ khoá THẬT SỰ gửi actor của nền tảng `p`."""
-    if p == "instagram":                 # actor tìm theo hashtag: chỉ từ không có dấu cách
-        return [t for t in tu if " " not in t][:so_tu]
+    if p == "instagram":
+        # Actor tìm theo HASHTAG (17/10/2026): mọi từ khoá viết liền, bỏ dấu (`hashtag_ig`), bỏ
+        # trùng — "túi hapas" thành #tuihapas thay vì bị bỏ như bản cũ (chỉ từ không dấu cách).
+        return A.hashtag_ig_ds(tu)[:so_tu]
     if p == "threads":
         # Mỗi từ actor lấy (và tính tiền) ≥ 10 bài: chỉ tìm `so_bai // 10` từ đầu (≥ 1, ≤ 20)
         # để tổng bài không vượt số bài đặt trên dashboard (`apify_tool._fetch_threads` chia
@@ -971,7 +979,11 @@ def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_
         trang = 2 * math.ceil(math.ceil(so_bai / len(q)) / TK_TT_MOI_TRANG) + 1 + TDA.MOI_TRANG
         return round((len(q) * trang + TDA.LAM_MOI_TOI_DA) * TK_TT_YEU_CAU * _HE_SO_UOC, 4)
     if p == "instagram":
-        return round(len(q) * (_TK_KHOI["instagram"] + so_bai * _TK_GIA[p]) * _HE_SO_UOC, 4)
+        # Hai run (tab bài + reels), mỗi run mọi hashtag × trần mỗi tag (`_fetch_instagram`).
+        tab = len(A._IG_TAB)
+        per = max(1, math.ceil(so_bai / (tab * len(q))))
+        return round((tab * len(q) * per * _TK_GIA[p] + tab * _TK_KHOI["instagram"])
+                     * _HE_SO_UOC, 4)
     n = (min(so_bai, fb_toi_da) if p == "facebook"
          else max(so_bai, TH_TOI_THIEU_BAI) if p == "threads" else so_bai)
     return round((n * _TK_GIA[p] + _TK_KHOI.get(p, 0.0)) * _HE_SO_UOC, 4)
@@ -1062,7 +1074,8 @@ def ghi_moc_tk(ma: str, moc: dict[str, dict]) -> None:
 
 def dau_tk(q: list[str], lim: int) -> str:
     """Dấu vân tay một lượt tìm của một nền tảng: từ khoá THẬT SỰ gửi đi (chuẩn hoá, giữ thứ tự
-    — Facebook gói Free chỉ tìm từ đầu, Instagram 2 từ đầu) + số bài gửi actor. Đổi một trong
+    — Facebook gói Free chỉ tìm từ đầu, Instagram `so_tu` hashtag đầu) + số bài gửi actor. Đổi một
+    trong
     hai thì mốc cũ không còn đúng → lùi tối đa (bài cũ chưa từng được tìm bằng bộ mới)."""
     s = json.dumps([[A._norm(" ".join(str(x).split())) for x in q], int(lim)],
                    ensure_ascii=False)
@@ -1267,7 +1280,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             # Threads: phí khởi động 0,08 USD mất cả khi actor trả 0 bài — vẫn trừ vào phần còn.
             co_khoi = bool(got) or (p == "threads" and loi is None)
             tien = round(len(got) * _TK_GIA.get(p, 0.0)
-                         + (_TK_KHOI.get(p, 0.0) * (len(q) if p == "instagram" else 1)
+                         + (_TK_KHOI.get(p, 0.0) * (len(A._IG_TAB) if p == "instagram" else 1)
                             if _TK_GIA.get(p) and co_khoi else 0.0), 4)
             if p == "tiktok":
                 tien = _tien_tim_tiktok(_phan_tk(v)[so_run_truoc:], got, loi,
