@@ -114,11 +114,12 @@ class KhoGia:
 
     def ghi_nhan_bl(self, ma, nhan):
         n = 0
-        for kb, m, nd, s, c in nhan:
+        for kb, m, nd, s, c, *sp in nhan:
             for r in self.bl:
                 if (r["khoa_bai"], r["ma"]) == (kb, m) and r.get("sac_thai") is None \
                         and r["loai"] == "hop_le" and r["noi_dung"] == nd:
                     r["sac_thai"], r["chu_de"] = s, c
+                    r["san_pham"] = sp[0] if sp else None
                     n += 1
         return n
 

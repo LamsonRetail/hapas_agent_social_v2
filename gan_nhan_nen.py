@@ -170,17 +170,50 @@ def _lo_hong(x: dict, n: int) -> bool:
     return bool(x["loi"]) or x["sot"] >= TI_LE_LO_HONG * n or (not x["ghi"] and not x["sot"])
 
 
-def gan_lo_bl(ma: str, rows: list[dict]) -> dict:
+def ngu_canh_bai(r: dict) -> str:
+    """Nội dung + hashtag của bài chứa bình luận (cột `bai_noi_dung`, `bai_hashtag` của
+    `lang_nghe_db.bl_cho_gan_nhan`) — để model đoán MÓN khách hỏi mua (17/10/2026)."""
+    nd = " ".join(str(r.get("bai_noi_dung") or "").split())
+    ht = " ".join(str(r.get("bai_hashtag") or "").split())
+    return f"{nd} | #{ht}" if nd and ht else nd or (f"#{ht}" if ht else "")
+
+
+def brand_du_an(du_an: dict | None) -> str:
+    """Tên + từ khoá + mô tả brand của dự án (cấu hình dashboard, tin cậy) — model cần biết brand
+    bán gì để tách "hỏi mua hàng của brand" khỏi "xin link váy KOL mặc" (17/10/2026)."""
+    import phan_loai as P
+    if not du_an:
+        return ""
+    ten = ", ".join(dict.fromkeys(str(x) for x in P.thuong_hieu_du_an(du_an) if str(x).strip()))
+    bc = " ".join(str(du_an.get("boi_canh") or "").split())
+    return f"{ten} — {bc}" if ten and bc else ten or bc
+
+
+def mon_hoi_mua(r: dict, sac: str, cd: str, sp: str | None) -> str | None:
+    """Món model trả CHỈ được ghi cho bình luận HỎI MUA theo đúng luật của dashboard
+    (`dashboard.chi_so._hoi_mua` với nhãn vừa gán) — model lỡ trả phần tử thứ ba cho bình luận
+    khen/chê thì bỏ, không để món nằm trên dòng không phải ý định mua (review 17/10/2026)."""
+    if not sp:
+        return None
+    from dashboard import chi_so as CS
+    c = {"loai": "hop_le", "noi_dung": r.get("noi_dung") or "", "sac_thai": sac, "chu_de": cd,
+         "la_tra_loi": bool(r.get("la_tra_loi"))}
+    return sp if CS._hoi_mua(c) else None
+
+
+def gan_lo_bl(ma: str, rows: list[dict], brand: str = "") -> dict:
     """Gán + ghi một lô bình luận (đã đọc từ kho). -> {ghi, sot, loi, hong}. Lô hỏng không ghi
-    lần thử nào vào sổ (bên gọi quyết định khi lô chỉ còn một dòng)."""
+    lần thử nào vào sổ (bên gọi quyết định khi lô chỉ còn một dòng). Mỗi dòng kèm ngữ cảnh bài
+    và ghi cả MÓN hỏi mua (`binh_luan.san_pham`)."""
     import lang_nghe_db as K
     import phan_loai as P
     tt: dict = {}
     nhan = P.phan_loai_binh_luan(
-        [{"text": r.get("noi_dung") or "", "likes": int(r.get("thich") or 0)} for r in rows],
-        HAN_LO, tt, song_song=1)
-    ghi = [(r["khoa_bai"], r["ma"], r.get("noi_dung") or "", s, c)
-           for r, (s, c) in zip(rows, nhan) if s != P.CHUA and c != P.CHUA]
+        [{"text": r.get("noi_dung") or "", "likes": int(r.get("thich") or 0),
+          "ngu_canh_bai": ngu_canh_bai(r)} for r in rows],
+        HAN_LO, tt, song_song=1, brand=brand, kem_san_pham=True)
+    ghi = [(r["khoa_bai"], r["ma"], r.get("noi_dung") or "", s, c, mon_hoi_mua(r, s, c, sp))
+           for r, (s, c, sp) in zip(rows, nhan) if s != P.CHUA and c != P.CHUA]
     x = {"ghi": K.ghi_nhan_bl(ma, ghi), "sot": len(tt.get("khong_tra") or []),
          "loi": int(tt.get("lo_loi") or 0) + int(tt.get("lo_het_gio") or 0)}
     x["hong"] = _lo_hong(x, len(rows))
@@ -266,11 +299,11 @@ def mot_nhip(ngu=time.sleep, dong_ho=time.monotonic) -> dict:
                     if kq["lo"]:
                         ngu(NGHI_GIUA_LO)
                     kq["lo"] += 1
+                    du_an = du_an or K.doc_du_an(ma) or {"ten": da.get("ten") or ma}
                     if loai == "bl":
-                        x = gan_lo_bl(ma, rows)
+                        x = gan_lo_bl(ma, rows, brand_du_an(du_an))
                         kq["ghi_bl"] += x["ghi"]
                     else:
-                        du_an = du_an or K.doc_du_an(ma) or {"ten": da.get("ten") or ma}
                         x = gan_lo_bai(ma, du_an, rows)
                         kq["ghi_bai"] += x["ghi"]
                 except Exception as e:  # noqa: BLE001 — nhịp không bao giờ ném ra ngoài

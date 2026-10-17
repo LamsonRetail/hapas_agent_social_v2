@@ -72,7 +72,8 @@
   // Tham số giống hệt API (/api/chi-so, /api/bai, /api/binh-luan); điều kiện RIÊNG của khung chi
   // tiết dùng tên `ct_*`, của luồng bình luận dùng `*_bl` nên không bao giờ đè bộ lọc chung (AND).
   var NHAN = cfg.nhan || {};
-  // y_dinh (16/10/2026): "1" = chỉ bình luận ý định mua — đặt bằng bộ lọc nhanh / khối Ý định mua.
+  // y_dinh (16/10/2026): "1" = chỉ bình luận ý định mua — đặt bằng bộ lọc nhanh / khối Ý định mua;
+  // mã món (17/10/2026, vd "set_qua") = chỉ bình luận hỏi mua món đó — chip món của khối Ý định mua.
   // gom_mg: tuỳ chọn của MÂY TỪ (gồm bình luận minigame) — theo URL như bộ lọc nhưng không lọc khối
   // nào khác, nên không hiện chip / không đếm là "đang lọc" / bộ lọc nhanh và "Xoá lọc" giữ nguyên.
   var CHIEU = ["pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong", "tuong_tac", "q", "kieu_quet", "kieu_trang", "y_dinh", "gom_mg"];
@@ -714,6 +715,8 @@
   function moYDinh() {
     moChiTiet("binh-luan", { y_dinh_bl: "1", loai_bl: "hop_le" }, "Ý định mua");
   }
+  // Mã y_dinh đang lọc (mọi món = "1") — ngăn bình luận của khối mở đúng món đang lọc.
+  function maYDinh() { return G.y_dinh || "1"; }
   // ─── Độ phủ (17/10/2026): kiểm 2 lần/tuần của Mark — trong một mẫu bài TikTok lấy bằng đường
   // KHÁC thu thập hằng ngày (hashtag brand/chiến dịch + bài mới nhất của nhà sáng tạo nổi), bao
   // nhiêu % (theo thảo luận) bài nhắc brand đã có trong kho. Không theo bộ lọc / khoảng ngày.
@@ -1060,15 +1063,18 @@
     } else {
       tom.textContent = "Chưa có bình luận hợp lệ trong khoảng này.";
     }
+    veMonYDinh(y);
     var nutEl = $("yd-nut");
     giuNut(nutEl, function () {
       xoa(nutEl);
-      var xem = nut("Xem bình luận", "nut nut--nhe nut--nho", moYDinh);
+      var xem = nut("Xem bình luận", "nut nut--nhe nut--nho", function () {
+        moChiTiet("binh-luan", { y_dinh_bl: maYDinh(), loai_bl: "hop_le" }, "Ý định mua" + tenMonLoc(y));
+      });
       xem.setAttribute("data-k", "xem");
       xem.disabled = !y.so;
       nutEl.appendChild(xem);
       // Liên kết khối ↔ bộ lọc chung (như "Lọc" ở Nguồn nổi bật): lọc CẢ trang theo ý định mua.
-      var dang = G.y_dinh === "1";
+      var dang = !!G.y_dinh;
       var l = nut(dang ? "Bỏ lọc" : "Lọc cả trang", "nut nut--nhe nut--nho", function () {
         datLocChung({ y_dinh: dang ? "" : "1" });
       });
@@ -1100,10 +1106,41 @@
       var i = p.dataIndex;
       if (!g.du.so[i]) return;
       var kh = { ngay_tu: g.tu[i], ngay_den: g.den[i] };
-      moChiTiet("binh-luan", Object.assign({ y_dinh_bl: "1", loai_bl: "hop_le" }, kh),
-                "Ý định mua · " + moTaKhoang(kh));
+      moChiTiet("binh-luan", Object.assign({ y_dinh_bl: maYDinh(), loai_bl: "hop_le" }, kh),
+                "Ý định mua" + tenMonLoc(y) + " · " + moTaKhoang(kh));
     };
     veTopYDinh(y);
+  }
+  function tenMonLoc(y) {
+    var x = (y.theo_san_pham || []).filter(function (m) { return m.ma === y.san_pham_loc; })[0];
+    return x ? " · " + x.ten : "";
+  }
+  // Món khách hỏi mua (17/10/2026): mỗi món một chip (số bình luận) — bấm = lọc CẢ trang theo món
+  // đó (bấm lại = bỏ). Chủ dự án: "hỏi mua những cái khác nhưng đang bị đánh vào hỏi mua túi".
+  function veMonYDinh(y) {
+    var el = $("yd-mon");
+    if (!el) return;
+    xoa(el);
+    var ds = y.theo_san_pham || [];
+    if (!ds.length) { el.hidden = true; return; }
+    el.hidden = false;
+    el.appendChild(tao("span", "cs-yd__mon-nhan", "Hỏi mua món gì"));
+    ds.forEach(function (x) {
+      var dang = G.y_dinh === x.ma;
+      var b = nut("", "cs-yd__mon" + (dang ? " dang" : "") + (x.ma === "chua_ro" ? " cs-yd__mon--mo" : ""), function () {
+        datLocChung({ y_dinh: dang ? "" : x.ma });
+      });
+      b.appendChild(tao("span", "", x.ten));
+      b.appendChild(tao("b", "so", so(x.so)));
+      b.setAttribute("aria-pressed", dang ? "true" : "false");
+      b.title = dang ? "Bỏ lọc " + x.ten : "Lọc cả trang: bình luận hỏi mua " + x.ten.toLowerCase() +
+        (x.ma === "chua_ro" ? " (bình luận không nói tên món và chưa được AI xếp món)" : "");
+      el.appendChild(b);
+    });
+    var ghi = [];
+    if (y.so || y.sp_ai) ghi.push("AI xếp món " + so(y.sp_ai) + "/" + so(ds.reduce(function (a, x) { return a + x.so; }, 0)) + ", còn lại theo chữ trong bình luận");
+    if (y.ngoai_brand) ghi.push("không tính " + so(y.ngoai_brand) + " câu hỏi mua đồ không phải của brand");
+    if (ghi.length) el.appendChild(tao("span", "cs-yd__mon-ghi", ghi.join(" · ")));
   }
   function veTopYDinh(y) {
     var el = $("yd-top");
@@ -1113,12 +1150,16 @@
     var GON = 5, max = ds[0].so || 1;
     (tt.ydMo ? ds : ds.slice(0, GON)).forEach(function (x) {
       var ten = (x.tac_gia || x.nguon || "Không rõ tác giả") + (x.noi_dung ? " · " + x.noi_dung : "");
+      // Món khách dưới bài hỏi nhiều nhất (17/10/2026) — không suy từ hashtag của bài (#tuixach… gắn
+      // cả bài set quà, bài KOL).
+      var mon = x.ten_san_pham && x.san_pham !== "chua_ro" ? x.ten_san_pham : "";
       var b = nut("", "cs-thanh cs-yd__bai", function () {
-        moChiTiet("binh-luan", { y_dinh_bl: "1", loai_bl: "hop_le", bai_bl: x.khoa_bai },
-                  "Ý định mua · " + (x.tac_gia || x.nguon || "một bài"));
+        moChiTiet("binh-luan", { y_dinh_bl: maYDinh(), loai_bl: "hop_le", bai_bl: x.khoa_bai },
+                  "Ý định mua" + tenMonLoc(y) + " · " + (x.tac_gia || x.nguon || "một bài"));
       });
       var t = tao("span", "cs-thanh__ten");
       t.appendChild(huyHieuNT(x.nen_tang, false, true));
+      if (mon) t.appendChild(chip(mon, "mon"));
       t.appendChild(tao("span", "", ten));
       b.appendChild(t);
       var ray = tao("span", "cs-thanh__ray"), dac = tao("span", "cs-thanh__dac");
@@ -1130,8 +1171,8 @@
       gt.appendChild(tao("b", "so", so(x.so)));
       gt.appendChild(chuNode(" hỏi mua" + (x.sach ? " · " + ptCua(x.so, x.sach) + " BL sạch" : "")));
       b.appendChild(gt);
-      b.title = ten;
-      b.setAttribute("aria-label", ten + ": " + so(x.so) + " bình luận hỏi mua — bấm để xem");
+      b.title = (mon ? "Chủ yếu hỏi " + mon.toLowerCase() + " (" + so(x.so_san_pham) + "/" + so(x.so) + ") · " : "") + ten;
+      b.setAttribute("aria-label", (mon ? mon + " · " : "") + ten + ": " + so(x.so) + " bình luận hỏi mua — bấm để xem");
       el.appendChild(b);
     });
     if (ds.length > GON) {
@@ -2045,6 +2086,8 @@
     } else if (!nha) {
       the.appendChild(chipSac(c.sac_thai));
       if (c.chu_de) the.appendChild(chip(c.chu_de, "chu-de"));
+      // Món khách hỏi mua (17/10/2026): đọc ngay "hỏi set quà", không mặc định là túi.
+      if (c.san_pham) the.appendChild(chip(c.san_pham, "mon", "Món khách hỏi mua"));
     }
     if (the.childNodes.length) chan.appendChild(the);
     noiDung.appendChild(chan);

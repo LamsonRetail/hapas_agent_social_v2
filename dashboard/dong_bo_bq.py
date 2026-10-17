@@ -91,7 +91,9 @@ BANG: dict[str, dict] = {
                 ("cua_thuong_hieu", "BOOL"), ("dang_luc", "TIMESTAMP"), ("sac_thai", "STRING"),
                 ("chu_de", "STRING"), ("luot_id", "INT64"), ("thay_lan_dau", "TIMESTAMP"),
                 ("cap_nhat_cuoi", "TIMESTAMP"), ("loai", "STRING"), ("ly_do_loc", "STRING"),
-                ("ma_noi_dung", "STRING"), ("link", "STRING"), ("ma_cha", "STRING")],
+                ("ma_noi_dung", "STRING"), ("link", "STRING"), ("ma_cha", "STRING"),
+                # 17/10/2026: món khách hỏi mua (ALTER … ADD COLUMN san_pham trước khi bật).
+                ("san_pham", "STRING")],
     },
 }
 THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan")   # cha trước con

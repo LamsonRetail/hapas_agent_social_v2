@@ -965,11 +965,12 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 raise NL.LoiNhap("Điều kiện quá dài.")
             if v:
                 dk[ra] = v
+        # "1" = mọi ý định mua; mã món (17/10/2026, `CS.SAN_PHAM`) = chỉ bình luận hỏi mua món đó.
         yd = q.get("y_dinh_bl") or ""
-        if yd not in ("", "1"):
+        if yd and yd not in CS.Y_DINH:
             raise NL.LoiNhap("Điều kiện ý định mua không hợp lệ.")
         if yd:
-            dk["y_dinh"] = True
+            dk["y_dinh"] = True if yd == "1" else yd
         sx = q.get("sap_xep") or "thich"
         if sx not in CS.SAP_XEP_BL:
             raise NL.LoiNhap("Cách sắp xếp không hợp lệ.")

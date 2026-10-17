@@ -96,6 +96,7 @@ def _kho_mau() -> GiaKho:
     bl[4]["noi_dung"] = "giá bao nhiêu vậy shop"
     bl[6]["noi_dung"] = "xin link mua với"
     bl[7]["noi_dung"] = "túi xách này còn size nhỏ không"
+    bl[3]["san_pham"] = "set_qua"            # món hỏi mua AI gán (17/10/2026)
     bl[5].update(nguon_loai="kenh_nha", nguon_id=2, nen_tang="instagram")
     kho.bl = bl
     return kho
@@ -110,6 +111,8 @@ QUERY = (
     "&q=túi xách",                       # lọc chữ: bình luận cần bài gốc (bai_theo_khoa có chữ)
     "&anh_huong=macro",                  # chiều cấp bài: bai_theo_khoa không chữ
     "&y_dinh=1",
+    "&y_dinh=set_qua",                   # lọc một món hỏi mua (AI gán)
+    "&y_dinh=tui",                       # món theo chữ trong bình luận (luật lùi)
     "&tuong_tac=1000",                   # so sánh bị tắt (so_sanh_lech)
     "&loai=tu_khoa&kieu_quet=tu_khoa",
     "&chu_de=Giá/mua ở đâu/ý định mua",

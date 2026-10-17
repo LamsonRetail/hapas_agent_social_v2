@@ -425,7 +425,7 @@ def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
 
 _COT_BL = ("ma", "nen_tang", "tac_gia", "noi_dung", "thich", "tra_loi", "la_tra_loi",
            "cua_thuong_hieu", "dang_luc", "sac_thai", "chu_de", "loai", "ly_do_loc",
-           "ma_noi_dung", "link", "ma_cha")
+           "ma_noi_dung", "link", "ma_cha", "san_pham")
 #: Nhãn chỉ xét được trên KHO (cần lịch sử nhiều tài khoản / nhiều bình luận), không phải từ một
 #: bình luận: cào lại thấy bình luận "hợp lệ" thì vẫn giữ nhãn kho, không gửi lại AI.
 _NHAN_KHO = "(binh_luan.loai = 'seeding' OR binh_luan.ly_do_loc = 'affiliate_hang_loat')"
@@ -457,6 +457,10 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "ELSE COALESCE(EXCLUDED.sac_thai, binh_luan.sac_thai) END, "
                 f"chu_de = CASE WHEN {_GIU_NHAN_KHO} OR EXCLUDED.loai <> 'hop_le' THEN NULL "
                 "ELSE COALESCE(EXCLUDED.chu_de, binh_luan.chu_de) END, "
+                # Món hỏi mua (17/10/2026): như chủ đề — lượt có món thì ghi, không thì giữ món
+                # cũ; dòng hết hop_le thì bỏ.
+                f"san_pham = CASE WHEN {_GIU_NHAN_KHO} OR EXCLUDED.loai <> 'hop_le' THEN NULL "
+                "ELSE COALESCE(EXCLUDED.san_pham, binh_luan.san_pham) END, "
                 f"loai = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.loai ELSE EXCLUDED.loai END, "
                 f"ly_do_loc = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.ly_do_loc "
                 "ELSE EXCLUDED.ly_do_loc END, "
@@ -512,6 +516,7 @@ def _danh_dau_seeding(c, ma: str, cac_ma: list) -> int:
         # cap_nhat_cuoi: mốc đồng bộ BigQuery — dòng CŨ (bài khác) bị hạ nhãn cũng phải đẩy lại.
         "UPDATE binh_luan b SET loai = 'seeding', "
         "ly_do_loc = 'cung_noi_dung_nhieu_tai_khoan', sac_thai = NULL, chu_de = NULL, "
+        "san_pham = NULL, "
         "cap_nhat_cuoi = now() FROM nhom WHERE b.du_an = %s AND b.ma_noi_dung = nhom.ma_noi_dung AND b.loai = 'hop_le'",
         (ma, ds, loc_rac.SEEDING_NGAY, loc_rac.SEEDING_TAC_GIA, ma)).rowcount or 0
 
@@ -547,7 +552,8 @@ def _danh_dau_affiliate(c, ma: str, khoa_bai: list) -> int:
     for kb, cac in ha.items():
         n += c.execute(
             "UPDATE binh_luan SET loai = 'spam', ly_do_loc = 'affiliate_hang_loat', "
-            "sac_thai = NULL, chu_de = NULL, cap_nhat_cuoi = now() WHERE du_an = %s AND "
+            "sac_thai = NULL, chu_de = NULL, san_pham = NULL, cap_nhat_cuoi = now() "
+            "WHERE du_an = %s AND "
             "khoa_bai = %s AND ma = ANY(%s) AND loai = 'hop_le'", (ma, kb, cac)).rowcount or 0
     return n
 
@@ -671,30 +677,38 @@ _SQL_BAI_CHO = (
 
 def bl_cho_gan_nhan(ma: str, toi_da: int, bo: list[str] | tuple = ()) -> list[dict]:
     """Bình luận chờ AI, nhiều like trước (như `phan_loai`: hết giờ thì thiếu phần ít like).
-    `bo` = khoá "<khoa_bai>\x1f<ma>" bỏ qua."""
+    `bo` = khoá "<khoa_bai>\x1f<ma>" bỏ qua. Kèm đầu nội dung + hashtag của BÀI (`bai_noi_dung`,
+    `bai_hashtag`, 17/10/2026): ngữ cảnh để model đoán MÓN khách hỏi mua ("xin giá" dưới bài
+    hộp quà là hỏi set quà, không phải hỏi túi)."""
     with ket_noi() as c:
         return c.execute(
-            f"SELECT khoa_bai, ma, noi_dung, thich {_SQL_BL_CHO} "
-            "AND NOT ((khoa_bai || chr(31) || ma) = ANY(%s)) "
-            "ORDER BY COALESCE(thich, 0) DESC, COALESCE(dang_luc, thay_lan_dau) DESC LIMIT %s",
+            "SELECT x.khoa_bai, x.ma, x.noi_dung, x.thich, x.la_tra_loi, "
+            "left(p.noi_dung, 300) AS bai_noi_dung, left(p.hashtag, 120) AS bai_hashtag "
+            "FROM (SELECT du_an, khoa_bai, ma, noi_dung, thich, la_tra_loi, dang_luc, thay_lan_dau "
+            f"{_SQL_BL_CHO} AND NOT ((khoa_bai || chr(31) || ma) = ANY(%s)) "
+            "ORDER BY COALESCE(thich, 0) DESC, COALESCE(dang_luc, thay_lan_dau) DESC LIMIT %s) x "
+            "LEFT JOIN bai p ON p.du_an = x.du_an AND p.khoa = x.khoa_bai "
+            "ORDER BY COALESCE(x.thich, 0) DESC, COALESCE(x.dang_luc, x.thay_lan_dau) DESC",
             (ma, list(bo), int(toi_da))).fetchall()
 
 
 def ghi_nhan_bl(ma: str, nhan: list[tuple]) -> int:
-    """`nhan` = [(khoa_bai, ma, noi_dung đã đọc, sắc thái, chủ đề)]. Chỉ ghi dòng CÒN chờ và
-    CÙNG chữ lúc đọc: lượt quét chen giữa hạ dòng thành seeding/spam (xoá nhãn) hay sửa nội dung
-    thì không đè; hai tiến trình cùng gán thì dòng chỉ nhận nhãn một lần. `cap_nhat_cuoi` để
-    đồng bộ BigQuery lấy lại dòng. -> số dòng đã ghi."""
+    """`nhan` = [(khoa_bai, ma, noi_dung đã đọc, sắc thái, chủ đề[, món hỏi mua])]. Chỉ ghi dòng
+    CÒN chờ và CÙNG chữ lúc đọc: lượt quét chen giữa hạ dòng thành seeding/spam (xoá nhãn) hay sửa
+    nội dung thì không đè; hai tiến trình cùng gán thì dòng chỉ nhận nhãn một lần. `cap_nhat_cuoi`
+    để đồng bộ BigQuery lấy lại dòng. Món (`san_pham`, 17/10/2026) NULL khi không phải bình luận
+    hỏi mua. -> số dòng đã ghi."""
     n = 0
     if not nhan:
         return 0
     with ket_noi() as c:
-        for kb, m, nd, s, cd in nhan:
+        for kb, m, nd, s, cd, *sp in nhan:
             n += c.execute(
-                "UPDATE binh_luan SET sac_thai = %s, chu_de = %s, cap_nhat_cuoi = now() "
+                "UPDATE binh_luan SET sac_thai = %s, chu_de = %s, san_pham = %s, "
+                "cap_nhat_cuoi = now() "
                 "WHERE du_an = %s AND khoa_bai = %s AND ma = %s AND sac_thai IS NULL AND "
                 "loai = 'hop_le' AND NOT cua_thuong_hieu AND noi_dung = %s",
-                (s, cd, ma, kb, m, nd)).rowcount or 0
+                (s, cd, sp[0] if sp else None, ma, kb, m, nd)).rowcount or 0
     return n
 
 

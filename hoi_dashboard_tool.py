@@ -80,7 +80,8 @@ PHAN = {
     "nguon": "nguồn nhiều thảo luận nhất từng nền tảng + phân bố nền tảng/loại nguồn",
     "bai": "bài nhiều thảo luận nhất (link, nguồn, sắc thái, chủ đề, số)",
     "binh_luan": "bình luận đã cào: hợp lệ/spam/seeding…, sắc thái, chủ đề",
-    "y_dinh_mua": "bình luận hỏi giá/muốn mua: số, %, so kỳ trước, bài nhiều nhất",
+    "y_dinh_mua": "bình luận hỏi giá/muốn mua: số, %, so kỳ trước, chia theo MÓN (túi, ví, "
+                  "nước hoa, set quà…), bài nhiều nhất",
     "web": "Báo & Web: số bài, số miền, % PR, % nhắc ở tiêu đề, theo loại trang",
     "nha_ngoai": "Internal channel vs External channel",
     "khung_hoang": "tín hiệu khủng hoảng: bài tiêu cực ≥ 1.000 tương tác, tiêu cực tăng",
@@ -137,8 +138,9 @@ SCHEMA = {
                     " chu_de: nhãn chủ đề; nguon: khoá nguồn (lấy từ phần bo_loc/nguon); "
                     "anh_huong: nano,micro,macro,mega,khong_ro; tuong_tac: 100|1000|10000; q: chữ "
                     "tìm; kieu_quet: theo_doi|tu_khoa; kieu_trang: bao,dien_dan,blog,mxh_khac,"
-                    "khac; y_dinh: \"1\" = chỉ bình luận hỏi mua; gom_mg: \"1\" = mây từ gồm "
-                    "minigame."),
+                    "khac; y_dinh: \"1\" = chỉ bình luận hỏi mua, hoặc mã món = chỉ bình luận "
+                    "hỏi mua món đó (" + ", ".join(k for k in CS.Y_DINH if k != "1") + "); "
+                    "gom_mg: \"1\" = mây từ gồm minigame."),
                 "additionalProperties": True,
             },
             "bo_loc_nhanh": {"type": "string",
@@ -572,11 +574,19 @@ def rut_gon(d: dict, phan: list[str], top: int) -> dict:
                                       "nền tảng báo; sắc thái/chủ đề chỉ trên bình luận hợp lệ."}
     if "y_dinh_mua" in phan:
         ra["y_dinh_mua"] = {**{x: yd[x] for x in ("so", "sach", "pt", "truoc", "doi_pt", "moi",
-                                                  "theo_chu_de", "theo_cau")},
+                                                  "theo_chu_de", "theo_cau", "ngoai_brand")},
+                            "theo_mon": [{"mon": x["ten"], "ma": x["ma"], "so": x["so"]}
+                                         for x in yd["theo_san_pham"]],
+                            "dang_loc_mon": yd["san_pham_loc"],
                             "top_bai": [{"link": x["link"], "tac_gia": x["tac_gia"],
                                          "nen_tang": x["nen_tang"], "so": x["so"],
-                                         "sach": x["sach"], "noi_dung": _chu(x["noi_dung"])}
-                                        for x in yd["top_bai"][:top]]}
+                                         "sach": x["sach"], "noi_dung": _chu(x["noi_dung"]),
+                                         "mon_hoi_nhieu": x["ten_san_pham"]}
+                                        for x in yd["top_bai"][:top]],
+                            "ghi_chu": "Món do AI xếp theo bình luận + nội dung bài; chưa xếp "
+                                       "thì theo tên món trong bình luận, không nói tên = Chưa "
+                                       "rõ món. KHÔNG mặc định khách hỏi túi. `ngoai_brand` = "
+                                       "số câu hỏi mua đồ không phải của brand (không tính)."}
     if "web" in phan:
         ra["web"] = k["web"] or {"bai": 0, "ghi_chu": "Không có bài Báo & Web trong kỳ/bộ lọc."}
     if "nha_ngoai" in phan:

@@ -614,7 +614,7 @@ def test_prompt_ca_bien_16_10_minigame_khen_hoi_gia_loi_shop_emoji():
     p = P._NHAC
     # A1: chỉ hỏi = "="; khen + hỏi = "+"; chê + hỏi = "-"; có ví dụ.
     assert "CHỈ hỏi giá" in p and "VỪA khen rõ VỪA hỏi giá/mua" in p and "VỪA chê VỪA hỏi" in p
-    assert '"đẹp quá, giá bn ạ" → ["+","GIA"]' in p
+    assert '"đẹp quá, giá bn ạ" → ["+","GIA","chua_ro"]' in p   # 17/10: + món hỏi mua
     # A2: chủ đề MG, sắc thái theo thái độ với brand, 2 ví dụ.
     assert P.CHU_DE["MG"] == "Minigame/bài dự thi" and "\n  MG   " in p
     assert "KHÔNG theo giọng của lời chúc" in p

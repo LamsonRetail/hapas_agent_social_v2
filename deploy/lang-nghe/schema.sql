@@ -247,6 +247,7 @@ CREATE TABLE IF NOT EXISTS binh_luan (
   ma_noi_dung     TEXT,
   link            TEXT,
   ma_cha          TEXT,
+  san_pham        TEXT,
   PRIMARY KEY (du_an, khoa_bai, ma),
   FOREIGN KEY (du_an, khoa_bai) REFERENCES bai (du_an, khoa) ON UPDATE CASCADE ON DELETE CASCADE
 );
@@ -261,6 +262,13 @@ CREATE INDEX IF NOT EXISTS binh_luan_ma_noi_dung ON binh_luan (du_an, ma_noi_dun
 -- Đợt 2e (15/10/2026): link tới bình luận + mã bình luận cha (hiện chuỗi trả lời như thật).
 ALTER TABLE binh_luan ADD COLUMN IF NOT EXISTS link TEXT;
 ALTER TABLE binh_luan ADD COLUMN IF NOT EXISTS ma_cha TEXT;
+-- 17/10/2026: món khách hỏi mua (chủ dự án: "hỏi mua những cái khác nhưng đang bị đánh vào hỏi
+-- mua túi"). Mã khớp phan_loai.SAN_PHAM / dashboard.chi_so.SAN_PHAM. NULL = không phải bình luận
+-- hỏi mua / chưa gán. Gán lại dữ liệu cũ: scripts/lang_nghe_gan_san_pham.py (chạy thử trước).
+ALTER TABLE binh_luan ADD COLUMN IF NOT EXISTS san_pham TEXT;
+ALTER TABLE binh_luan DROP CONSTRAINT IF EXISTS binh_luan_san_pham_check;
+ALTER TABLE binh_luan ADD CONSTRAINT binh_luan_san_pham_check CHECK (san_pham IS NULL OR san_pham IN
+  ('tui', 'vi', 'nuoc_hoa', 'trang_suc', 'set_qua', 'khac', 'ngoai_brand', 'chua_ro'));
 -- Số bài mỗi lần của nguồn: bỏ trần trên (chủ dự án 15/10: "không có giới hạn").
 ALTER TABLE nguon DROP CONSTRAINT IF EXISTS nguon_so_bai_moi_lan_check;
 ALTER TABLE nguon ADD CONSTRAINT nguon_so_bai_moi_lan_check CHECK (so_bai_moi_lan >= 1);
@@ -560,7 +568,7 @@ COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Bài đăng trong 35 ngày; tối đa bl_so_bai bài mỗi lượt, mỗi bài cào hết (bl_moi_bai = 0) hoặc tới bl_moi_bai bình luận; từ 15/10/2026
 [Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng gắn nhãn lọc loai (hop_le/it_noi_dung/spam/trung/seeding/thuong_hieu; spam gồm spam affiliate, lọc lại dữ liệu cũ bằng scripts/lang_nghe_loc_lai.py) — chỉ hop_le được gán sắc thái/chủ đề
 [Refresh] Upsert tức thời sau mỗi lượt quét (bài được cào lại khi số bình luận tăng ≥ 20%)
-[Dùng khi] Đọc từng bình luận; thảo luận sạch (loai = 'hop_le'); sắc thái/chủ đề bình luận; tỷ lệ spam/seeding
+[Dùng khi] Đọc từng bình luận; thảo luận sạch (loai = 'hop_le'); sắc thái/chủ đề bình luận; tỷ lệ spam/seeding; món khách hỏi mua (san_pham)
 [Không dùng khi] Tổng bình luận nền tảng báo → dùng bai.binh_luan; bản cho BI → dùng ganesha-381907.SOCIAL_LISTENING.binh_luan
 [Lưu ý] Đếm thảo luận sạch phải lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, Threads chỉ trả lời cấp 1 (10–300 mỗi bài), Facebook/TikTok bài rất lớn có thể thiếu (so bai.bl_da_lay với bai.binh_luan để biết độ phủ).$$;
 COMMENT ON COLUMN binh_luan.du_an IS 'Dự án. Một phần PK. FK (cùng khoa_bai) → bai.';
@@ -582,6 +590,7 @@ COMMENT ON COLUMN binh_luan.cap_nhat_cuoi IS 'Thời điểm cập nhật gần 
 COMMENT ON COLUMN binh_luan.loai IS 'Nhãn lọc (loc_rac.py). Giá trị: hop_le (tính vào thảo luận sạch, có sắc thái), it_noi_dung (chỉ dấu chấm/emoji/tag/"chấm" — tương tác nhưng không có ý), spam (quảng cáo/lừa đảo/kéo khách, gồm spam affiliate mời dán mã giới thiệu vào Shopee), trung (cùng người cùng nội dung cùng bài, giữ bản đầu), seeding (cùng nội dung ≥ 40 ký tự từ ≥ 3 tài khoản trên ≥ 2 bài trong 7 ngày), thuong_hieu (chính thương hiệu viết).';
 COMMENT ON COLUMN binh_luan.link IS 'Link mở thẳng tới bình luận khi nền tảng có (Facebook/Instagram commentUrl, Threads reply_url, YouTube &lc=); NULL thì mở bài (bai.link).';
 COMMENT ON COLUMN binh_luan.ma_cha IS 'Mã bình luận cha khi dòng là trả lời (cùng khoa_bai). NULL với bình luận gốc hoặc nền tảng không trả.';
+COMMENT ON COLUMN binh_luan.san_pham IS 'Món khách hỏi mua, chỉ có ở bình luận hỏi mua (AI gán cùng sắc thái/chủ đề, đọc cả nội dung bài; từ 17/10/2026). Giá trị: tui (túi xách, balo), vi (ví), nuoc_hoa (nước hoa), trang_suc (trang sức), set_qua (set/combo/hộp quà nhiều món), khac (món khác của brand), ngoai_brand (đồ không phải hàng của brand, vd quần áo người trong video mặc — dashboard không tính là ý định mua), chua_ro (không đoán được món). NULL khi không phải bình luận hỏi mua, chưa gán nhãn, gán trước 17/10/2026 chưa gán lại, hoặc loai khác hop_le.';
 COMMENT ON COLUMN binh_luan.ly_do_loc IS 'Lý do lọc khi loai không phải hop_le (vd lien_ket_quang_cao, keo_khach, vay_tien, co_bac, viec_lam_mmo, ban_hang_khac, so_dien_thoai_quang_cao, cung_nguoi_cung_noi_dung, cung_noi_dung_nhieu_tai_khoan; affiliate_dan_ma = một bình luận có mã giới thiệu nhiều khúc kèm lời dặn dán mã hoặc tên sàn, hoặc chữ kiểu cách kèm lời dặn; affiliate_hang_loat = ≥ 5 tài khoản có mã (hoặc chữ kiểu cách + lời dặn/tên sàn) dưới cùng một bài trong 48 giờ theo giờ đăng, trừ mã của chính thương hiệu). NULL khi hợp lệ.';
 COMMENT ON COLUMN binh_luan.ma_noi_dung IS 'Băm 16 ký tự nội dung đã chuẩn hoá khi nội dung ≥ 40 ký tự — để phát hiện seeding (cùng mã, ≥ 3 tài khoản, ≥ 2 bài, 7 ngày). NULL khi quá ngắn.';
 
