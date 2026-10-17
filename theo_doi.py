@@ -1228,10 +1228,14 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 "actor": (meta or {}).get("actor"), "trang_thai": "dang_chay"}))
             got: list = []
             loi = None
+            ma_loi = ""
             so_run_truoc = len(_phan_tk(v))
             ve_thuong = 0
             noi: dict = {}
             moi_nhat: dict = {}
+            # Lỗi từng từ khoá mà `_fanout` nuốt (IG/FB mỗi từ một run) — xem `_loi_tim`.
+            loi_tu: list = []
+            tok_loi = A._LOI_TU_KHOA.set(loi_tu)
             try:
                 got = A._FETCH[p](q_gui, lim, "VN", d_from, bay_gio, **them) or []
                 ve_thuong = len(got)
@@ -1247,10 +1251,19 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             except Exception as e:
                 if type(e).__name__ == "MatQuyen":
                     raise
-                loi = A._che_token(f"{getattr(e, 'ma', type(e).__name__)}: {e}")[:150]
-                tk["ghi_chu"].append(f"tìm {_TEN[p]}: {loi}")
+                ma_loi, loi = _loi_tim(getattr(e, "ma", "") or type(e).__name__, str(e))
             finally:
                 A._KHI_CO_RUN.set(None)
+                A._LOI_TU_KHOA.reset(tok_loi)
+            if loi is None and not got and loi_tu:
+                # Mọi từ khoá đều hỏng mà `_fanout` không ném: là LỖI của nền tảng (không dời mốc,
+                # nói lý do) chứ không phải "về 0" — mã nặng nhất thắng như `_tong_hop_nguon`.
+                x = max(loi_tu, key=lambda m: A._DO_NANG.get(m.get("ma"), 0))
+                ma_loi, loi = _loi_tim(x.get("ma") or "LOI", str(x.get("ly_do") or ""))
+            if loi is not None:
+                tk["ghi_chu"].append(f"tìm {_TEN[p]}: {loi}")
+                # Sổ việc (`pheu_tu_khoa`) giữ lý do như phễu bỏ qua; `_cau_tk` không lặp dòng.
+                tk["pheu"][p] = {**_pheu_moi(ngay, ly_cs), "loi": loi, "ma_loi": ma_loi}
             # Threads: phí khởi động 0,08 USD mất cả khi actor trả 0 bài — vẫn trừ vào phần còn.
             co_khoi = bool(got) or (p == "threads" and loi is None)
             tien = round(len(got) * _TK_GIA.get(p, 0.0)
@@ -1266,6 +1279,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             _them_phan_tk(v, {"id": f"tk-{p}", "loai": "moc", "nen_tang": p,
                               "trang_thai": "xong" if loi is None else "loi", "usd_so": tien,
                               "so_item": len(got),
+                              **({"ma": ma_loi, "ly_do": loi[:200]} if loi is not None else {}),
                               "cua_so": {"tu": d_from.isoformat(timespec="minutes"),
                                          "ngay": ngay, "ly_do": ly_cs}})
             con = max(0.0, con - tien)
@@ -1274,6 +1288,10 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 continue
             ph_p = tk["pheu"][p] = _pheu_moi(ngay, ly_cs)
             ph_p.update(ve=len(got), xin=lim, xin_ly_do=ly_xin)
+            if loi_tu:
+                # Có bài nhưng vài từ khoá hỏng: phễu nói từ nào, vì sao (mã → nhãn ngắn).
+                ph_p["loi_mot_phan"] = "; ".join(
+                    f"'{x.get('tu_khoa') or '?'}' {A.nhan_ma(x.get('ma'))}" for x in loi_tu)[:300]
             if moi_nhat:
                 ph_p["moi_nhat"] = moi_nhat   # mốc từng từ đã ghi ngay trong `_them_luot_moi`
             if noi:
@@ -1332,13 +1350,24 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     return tk
 
 
+def _loi_tim(ma: str, ly: str) -> tuple[str, str]:
+    """(mã, câu lỗi) của MỘT nền tảng trong lượt tìm — câu vào ghi chú lượt + phễu sổ việc.
+
+    CHI_DEMO (17/10/2026, Instagram gói Free trả `{"demo": true}`): nhãn đã đủ lý do và cách sửa;
+    lời Apify ("subscribe to a paid plan") chỉ làm dài. Mã khác giữ nguyên dạng "MÃ: lý do"."""
+    if ma == "CHI_DEMO":
+        return ma, f"{A.nhan_ma(ma)} — nâng gói Apify hoặc đổi actor"
+    return ma, A._che_token(f"{ma}: {ly}")[:150]
+
+
 def _bo_qua_tk(v, tk: dict, p: str, ma: str, ly: str, chi_tiet: str = "",
                ghi: bool = True) -> None:
     """Nền tảng BẬT cho dự án mà lượt này không tìm: phần "moc" (mã `ma`) + câu ghi chú + phễu
     `{"bo_qua": ly}` — sổ việc (`pheu_tu_khoa`) và `luot_quet.ghi_chu` đều thấy lý do.
     Chẩn đoán 17/10: Threads của HAPAS bật mà lượt 8 không có dòng phễu nào — nhánh công tắc
     console tắt bỏ qua im lặng, còn câu "bỏ qua (hết ngân sách)" nằm SAU các dòng phễu dài nên
-    bị cắt mất ở 2.000 ký tự của `luot_quet.ghi_chu`."""
+    bị cắt mất ở 2.000 ký tự của `luot_quet.ghi_chu` (trần cũ; từ 17/10/2026 là
+    `lang_nghe_db.GHI_CHU_TOI_DA`)."""
     if ghi:
         tk["ghi_chu"].append(f"tìm {_TEN.get(p, p)}: bỏ qua ({ly})"
                              + (f" — {chi_tiet}" if chi_tiet else ""))
@@ -1635,7 +1664,7 @@ def _xu_ly_mau(v, du_an: dict, luot: int, han: float, ctx: dict,
         bay_gio = datetime.datetime.now(_VN)
     ghi_chu: list[str] = []
     if tkm.get("dung"):
-        ghi_chu.append(f"kiểm độ phủ: dừng giữa chừng ({tkm['dung']})")
+        ghi_chu.append(f"kiểm độ phủ: dừng giữa chừng ({tkm['dung']}: {A.nhan_ma(tkm['dung'])})")
     cid = dict(moc_cu["cid"]) if isinstance(moc_cu.get("cid"), dict) else {}
     uid = dict(moc_cu["uid"]) if isinstance(moc_cu.get("uid"), dict) else {}
     for t, x in (tkm.get("tag") or {}).items():
@@ -2076,6 +2105,7 @@ def _cau_pheu(p: str, f: dict) -> str:
             f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
             + (f", không nhắc từ khoá {f['khong_nhac']}" if f.get("khong_nhac") else "")
             + f" → giữ {f.get('giu', 0)} ({f.get('moi', 0)} mới)"
+            + (f"; từ khoá lỗi: {f['loi_mot_phan']}" if f.get("loi_mot_phan") else "")
             + _cau_moi(f.get("moi_nhat"))
             + _cau_noi(f.get("noi"))
             + _cau_web(f.get("web")))
@@ -2125,11 +2155,12 @@ def _cau_tk(tk: dict) -> list[str]:
            + (f"bỏ {tk['spam']} bài spam, " if tk.get('spam') else "") + f""
            f"{_usd(tk.get('usd') or 0)} USD")
     pheu = tk.get("pheu") or {}
-    # Ghi chú (bỏ qua / lỗi / co ngân sách) đứng TRƯỚC các dòng phễu dài: `luot_quet.ghi_chu`
-    # cắt ở 2.000 ký tự, phần mất (nếu có) phải là chi tiết phễu, không phải lý do bỏ qua.
+    # Ghi chú (bỏ qua / lỗi / co ngân sách) đứng TRƯỚC các dòng phễu dài: `luot_quet.ghi_chu` có
+    # trần (`lang_nghe_db.GHI_CHU_TOI_DA`), phần mất (nếu có) phải là chi tiết phễu, không phải lý
+    # do. Phễu bỏ qua / lỗi đã có câu "tìm <nền tảng>: …" trong ghi chú — không lặp dòng phễu rỗng.
     return [cau, *(tk.get("ghi_chu") or []),
             *(_cau_pheu(p, pheu[p]) for p in TK_NEN_TANG
-              if p in pheu and not pheu[p].get("bo_qua"))]
+              if p in pheu and not pheu[p].get("bo_qua") and not pheu[p].get("loi"))]
 
 
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
@@ -2676,7 +2707,8 @@ def _chay_viec(v) -> tuple[str, str]:
                         bai_moi=moi + int(tkq.get("moi") or 0) + int(dp.get("bo_sung") or 0),
                         bai_cap_nhat=cu + lam_moi + int(tkq.get("cu") or 0)
                         + int(dp.get("cu") or 0), chi_phi_usd=usd,
-                        # Câu độ phủ đứng TRƯỚC các dòng phễu dài (ghi_chu cắt ở 2.000 ký tự).
+                        # Câu độ phủ đứng TRƯỚC các dòng phễu dài (ghi_chu có trần
+                        # `K.GHI_CHU_TOI_DA` — phần lỡ bị cắt là chi tiết phễu cuối).
                         ghi_chu="; ".join([*ghi_chu, *KDP.cau_ghi_chu(dp), *_cau_tk(tkq),
                                            *_cau_bl(bl)]) or None,
                         loi=(loi_chung or "; ".join(sorted(set(loi.values())))[:500] or None))

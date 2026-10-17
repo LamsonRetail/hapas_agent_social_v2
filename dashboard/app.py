@@ -37,7 +37,12 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import jinja2
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
@@ -1118,7 +1123,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             while len(nho) > NHO_CHI_SO_TOI_DA:
                 nho.popitem(last=False)
             data = dict(data)
-        luot, _ = await _k(app.state.kho.cac_luot, du_an["ma"], 1, 1)
+        # Chỉ cần trạng thái lượt gần nhất (`_luot_json`): không kéo ghi chú (tới 20.000 ký tự).
+        luot, _ = await _k(app.state.kho.cac_luot, du_an["ma"], 1, 1, ghi_chu=False)
         data["gan_nhan"] = await _tien_do_gan_nhan(du_an["ma"])
         data["do_phu"] = await _do_phu(du_an["ma"])
         data.update(du_an={"ma": du_an["ma"], "ten": du_an["ten"]},
@@ -1319,10 +1325,23 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                        else (100.0 if db["du_bao_thang"] else 0))})
         return _trang(request, "ngan_sach.html", nguoi, "ngan_sach",
                       dong=an_chi_tiet(nguoi, dong, ("sua_boi",)), du_an=du_an,
-                      luot=an_chi_tiet(nguoi, luot, ("ghi_chu",), ("loi",)), tong=tong,
+                      luot=an_chi_tiet(nguoi, luot, ("ghi_chu", "ghi_chu_dai"), ("loi",)),
+                      tong=tong,
                       trang=trang, so_trang=so_trang, thang=bay_gio.strftime("%m/%Y"),
                       so_ngay_thang=CP.so_ngay_thang(bay_gio),
                       hang_so=CP.hang_so_cho_trinh_duyet())
+
+    @app.get("/ngan-sach/luot/{luot_id}/ghi-chu")
+    async def ghi_chu_luot(request: Request, luot_id: int):
+        """Ghi chú ĐỦ của một lượt (soát 17/10/2026, L5): trang Ngân sách chỉ in phần đầu, bản đủ
+        (tới 20.000 ký tự) mở ở đây. Chữ thuần (`text/plain`, nosniff) — không qua HTML nên không
+        cần thoát ký tự. Chỉ quản lý: người xem không thấy ghi chú (`an_chi_tiet`)."""
+        await _chi_quan_ly(request)
+        ma = str(request.query_params.get("du_an") or "")
+        gc = await _k(app.state.kho.ghi_chu_luot, ma, luot_id) if ma else None
+        if gc is None:
+            raise _Cam("Không có ghi chú của lượt này.", 404)
+        return PlainTextResponse(gc)
 
     @app.post("/ngan-sach/{ma}")
     async def ngan_sach_luu(request: Request, ma: str):

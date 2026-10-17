@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.luot_quet`
   chi_phi_usd     NUMERIC   OPTIONS(description='Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt. 0 khi lượt chỉ dùng YouTube Data API (miễn phí). Không âm.'),
   trang_thai      STRING    OPTIONS(description='Giá trị: dang_chay, xong (mọi nguồn được), mot_phan (một số nguồn lỗi), loi (không nguồn nào được hoặc bot dừng giữa chừng), da_huy.'),
   loi             STRING    OPTIONS(description='Tóm tắt lỗi của các nguồn hỏng, tối đa 500 ký tự. NULL khi không có lỗi.'),
-  ghi_chu         STRING    OPTIONS(description='Ghi chú vận hành (vd nền tảng dừng vì hết giờ, bot khởi động lại giữa lượt). NULL khi không có.'),
+  ghi_chu         STRING    OPTIONS(description='Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt, nền tảng bỏ qua/lỗi kèm lý do) và phễu từng nền tảng của lượt tìm theo từ khoá, các câu nối bằng "; ". Tối đa 20.000 ký tự (từ 17/10/2026; trước đó 2.000 — lượt cũ có thể cụt), quá thì cắt và ghi dấu đã cắt ở cuối. NULL khi không có.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 CLUSTER BY du_an
@@ -314,6 +314,12 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
 -- chạy khối này TRƯỚC khi bật đồng bộ bản mới, cùng lúc chạy schema.sql trên Postgres).
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
   ADD COLUMN IF NOT EXISTS san_pham STRING OPTIONS(description='Món khách hỏi mua, chỉ có ở bình luận hỏi mua (AI gán cùng sắc thái/chủ đề, đọc cả nội dung bài; từ 17/10/2026). Giá trị: tui (túi xách, balo), vi (ví), nuoc_hoa (nước hoa), trang_suc (trang sức), set_qua (set/combo/hộp quà nhiều món), khac (món khác của brand), ngoai_brand (đồ không phải hàng của brand, vd quần áo người trong video mặc — dashboard không tính là ý định mua), chua_ro (không đoán được món). NULL khi không phải bình luận hỏi mua, chưa gán nhãn, gán trước 17/10/2026 chưa gán lại, hoặc loai khác hop_le.');
+
+-- Ghi chú lượt giữ tới 20.000 ký tự (17/10/2026, trước đó cắt ở 2.000): bảng đã tạo trước thì
+-- CREATE … IF NOT EXISTS không đổi mô tả — cập nhật cho khớp COMMENT luot_quet.ghi_chu bên Postgres
+-- (quy chuẩn BI: mô tả luôn đúng dữ liệu). Chỉ đổi mô tả, không đổi kiểu cột (STRING không trần).
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.luot_quet`
+  ALTER COLUMN ghi_chu SET OPTIONS(description='Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt, nền tảng bỏ qua/lỗi kèm lý do) và phễu từng nền tảng của lượt tìm theo từ khoá, các câu nối bằng "; ". Tối đa 20.000 ký tự (từ 17/10/2026; trước đó 2.000 — lượt cũ có thể cụt), quá thì cắt và ghi dấu đã cắt ở cuối. NULL khi không có.');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`

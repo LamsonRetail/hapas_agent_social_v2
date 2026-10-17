@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import threading
 import time
 
@@ -69,8 +70,20 @@ class GiaApify:
             st = self.trang_thai.pop(0) if len(self.trang_thai) > 1 else self.trang_thai[0]
             return R(200, {"data": {**self.run, "status": st}})
         if "/datasets/" in url:
-            return R(200, list(self.items))
+            return R(200, _trang_ds(self.items, params))
         return self.khac(url, params)
+
+
+def _trang_ds(items: list, params: dict | None) -> list:
+    """Như Apify: `offset`/`limit` cắt trang (đọc theo trang mà fake trả cả dataset thì lặp mãi
+    với dataset toàn mẫu); `fields=` chỉ giữ các trường xin, trường thiếu thì bỏ."""
+    p = params or {}
+    o = int(p.get("offset") or 0)
+    ra = items[o:o + int(p["limit"])] if p.get("limit") else items[o:]
+    if p.get("fields"):
+        giu = p["fields"].split(",")
+        ra = [{k: it[k] for k in giu if k in it} for it in ra]
+    return list(ra)
 
 
 @pytest.fixture
@@ -202,6 +215,237 @@ def test_free_tier_co_du_lieu_van_ok_kem_gioi_han(api):
     api.run["statusMessage"] = "Free tier: up to 5 results per run. Upgrade your plan"
     items, meta = A._run_actor("scrapeforge~facebook-search-posts", {}, 20, deadline=1000 + 120)
     assert items and meta["ma"] == "OK" and "up to 5 results per run" in meta["gioi_han_goi"]
+
+
+# ──── actor chỉ trả dữ liệu DEMO (đo thật 17/10/2026: Instagram gói Free, 10 × {"demo": true}) ───
+_IG = "apidojo~instagram-hashtag-scraper"
+_MSG_DEMO = ("Your run has finished. Please subscribe to a paid plan to get real results: "
+             "https://console.apify.com/actors/xyz")
+
+
+@pytest.mark.parametrize("nen", [False, True], ids=["tai_cho", "nen_fields"])
+def test_run_succeeded_toan_demo_la_chi_demo(api, nen):
+    """Đọc đủ trường (lượt tại chỗ) và đọc có `fields=` (việc nền) đều phải ra CHI_DEMO — bản cũ
+    đọc có `fields` thì item thành {} và bị bỏ im lặng: phễu "về 0"."""
+    api.run["statusMessage"] = _MSG_DEMO
+    api.items = [{"demo": True} for _ in range(10)]
+    tok = A._NEN.set(nen)
+    try:
+        with pytest.raises(A.LoiApify) as e:
+            A._run_actor(_IG, {"keyword": "hapas"}, 10, deadline=1000 + 120)
+    finally:
+        A._NEN.reset(tok)
+    assert e.value.ma == "CHI_DEMO" and e.value.meta["so_demo"] == 10
+    assert e.value.meta["so_item"] == 0 and e.value.meta["status"] == "SUCCEEDED"
+    assert "DEMO" in str(e.value) and "KHÔNG phải không có bài" in str(e.value)
+    assert "subscribe to a paid plan" in str(e.value)
+    ds = [p for u, p in api.get_urls if "/datasets/" in u]
+    if nen:
+        f = ds[0]["fields"].split(",")
+        assert "demo" in f and set(A._TRUONG_ACTOR[_IG]) <= set(f)
+    else:
+        assert "fields" not in ds[0]
+
+
+def test_run_lan_demo_va_that_giu_item_that(api):
+    that = [{"url": "https://www.instagram.com/p/A1/", "caption": "túi hapas", "likeCount": 3},
+            {"url": "https://www.instagram.com/p/A2/", "caption": "hapas", "demo": True}]
+    api.items = [{"demo": True}, that[0], {"demo": True, "caption": ""}, that[1]]
+    tok = A._NEN.set(True)
+    try:
+        items, meta = A._run_actor(_IG, {}, 10, deadline=1000 + 120)
+    finally:
+        A._NEN.reset(tok)
+    # Item mang `demo` mà CÓ dữ liệu thật thì vẫn là bài.
+    assert items == that and meta["ma"] == "OK" and meta["so_demo"] == 2
+    assert meta["so_item"] == 2
+
+
+@pytest.mark.parametrize("co_that", [True, False], ids=["lan_bai_that", "toan_rong"])
+def test_demo_false_tu_xin_them_khong_thanh_bai_ma(api, co_that):
+    """Soát 17/10/2026 (M2): `_lay_items` TỰ xin thêm `demo`; item mà mọi trường xin đều thiếu
+    nhưng actor mang `demo: false` từng ra `{"demo": False}` — không bị `_rong` bỏ, thành bài ma
+    tính tiền (`quet_lon._so_tien`) và đếm vào số "về"."""
+    import quet_lon
+    that = {"url": "https://www.instagram.com/p/A1/", "caption": "túi hapas", "likeCount": 2}
+    api.items = [{"demo": False, "error": "không có bài"} for _ in range(3)]
+    if co_that:
+        api.items.append(dict(that, demo=False))
+    tok = A._NEN.set(True)
+    try:
+        items, meta = A._run_actor(_IG, {}, 10, deadline=1000 + 120)
+    finally:
+        A._NEN.reset(tok)
+    assert items == ([that] if co_that else []), "khoá demo tự thêm không ở lại trong item"
+    assert meta["so_item"] == len(items) and "so_demo" not in meta and meta["ma"] == "OK"
+    assert quet_lon._so_tien("instagram", {}, items, {}) == (
+        quet_lon._so_tien("instagram", {}, [that], {}) if co_that else 0.0)
+
+
+def test_demo_do_ben_goi_xin_thi_giu_nguyen(monkeypatch):
+    """Bên gọi TỰ có `demo` trong `fields` thì giá trị nào cũng giữ — chỉ khoá do `_lay_items` xin
+    thêm mới bị bỏ."""
+    du_lieu = [{"url": "u1", "demo": False}, {"demo": False}, {"url": "u2"}]
+
+    def get(url, params=None, **k):
+        giu = params["fields"].split(",")
+        return R(200, [{c: it[c] for c in giu if c in it} for it in du_lieu])
+    monkeypatch.setattr(A.requests, "get", get)
+    assert A._lay_items({"defaultDatasetId": "d"}, 10, {}, fields=("url", "demo")) == du_lieu
+    assert A._lay_items({"defaultDatasetId": "d"}, 10, {}, fields=("url",)) == [
+        {"url": "u1"}, {"url": "u2"}]
+
+
+def test_item_mau_khong_chiem_cho_trong_limit(api):
+    """Soát 17/10/2026 (L1): 10 mẫu đầu + bài thật phía sau, `limit=10` — trước đây đọc đúng 10
+    vị trí đầu (toàn mẫu) rồi báo CHI_DEMO dù dataset có bài thật."""
+    that = [{"url": f"https://www.instagram.com/p/B{i}/", "caption": "hapas"} for i in range(15)]
+    api.items = [{"demo": True} for _ in range(10)] + that
+    tok = A._NEN.set(True)
+    try:
+        items, meta = A._run_actor(_IG, {}, 10, deadline=1000 + 120)
+    finally:
+        A._NEN.reset(tok)
+    assert items == that[:10] and meta["so_demo"] == 10 and meta["ma"] == "OK"
+    assert meta["so_item"] == 10
+    ds = [p for u, p in api.get_urls if "/datasets/" in u]
+    assert [(p.get("offset"), p["limit"]) for p in ds] == [(None, 10), (10, 20)]
+
+
+def test_dataset_toan_mau_lon_khong_hoi_tung_trang_nho(api):
+    api.items = [{"demo": True} for _ in range(3000)]
+    with pytest.raises(A.LoiApify) as e:
+        A._run_actor(_IG, {}, 5, deadline=1000 + 120)
+    assert e.value.ma == "CHI_DEMO"
+    assert len([u for u, _ in api.get_urls if "/datasets/" in u]) <= 10, "trang lớn dần"
+
+
+def test_la_demo_chi_khi_khong_co_du_lieu_that():
+    assert A._la_demo({"demo": True}) and A._la_demo({"demo": True, "url": None, "tags": []})
+    assert not A._la_demo({"demo": True, "url": "https://x"})
+    assert not A._la_demo({"demo": "true"}) and not A._la_demo({}) and not A._la_demo(None)
+
+
+def test_chi_demo_vao_per_platform_social_listen(quet, monkeypatch):
+    """Instagram 2 từ khoá, cả hai CHI_DEMO: `_fanout` nuốt lỗi từng từ khoá nhưng per_platform
+    phải mang CHI_DEMO + gợi ý, nguồn vào platforms_failed, cảnh báo nói chắc lý do."""
+    chay, _ = quet
+
+    def instagram(q, *a):
+        def mot(kw):
+            raise A.LoiApify("CHI_DEMO", f"Chỉ có dữ liệu DEMO ({kw})", {"tu_khoa": kw})
+        return A._fanout(mot, q)
+    monkeypatch.setitem(A._FETCH, "instagram", instagram)
+    kq = chay(queries=["hapas", "matemade"], platforms=["instagram"])
+    tt = kq["per_platform"]["instagram"]
+    assert tt["status"] == "CHI_DEMO" and tt["goi_y"] == A._GOI_Y["CHI_DEMO"]
+    assert "nâng gói Apify hoặc đổi actor" in tt["goi_y"] and tt["scraped"] == 0
+    assert "DEMO" in tt["canh_bao"] and "hết hạn mức" not in tt["canh_bao"]
+    assert kq["platforms_failed"] == ["instagram"]
+    assert "Instagram [CHI_DEMO]" in kq["note"]
+    # Một từ khoá: lỗi ném thẳng ra (không qua `_fanout`) — vẫn đúng mã.
+    assert A._tong_hop_nguon(A.LoiApify("CHI_DEMO", "x"), [])["status"] == "CHI_DEMO"
+
+
+def test_ma_nguon_dong_bo_moi_bang():
+    """Thêm mã mới (CHI_DEMO 17/10/2026) phải thêm ĐỦ: độ nặng, gợi ý, nhãn ngắn — thiếu một chỗ
+    là mã hiện thành "LOI" / gợi ý chung chung. Kho KHÔNG lưu mã Apify trong cột có CHECK; nếu
+    sau này có thì CHECK phải liệt kê đủ mọi mã."""
+    import pathlib
+    assert set(A._DO_NANG) == set(A._GOI_Y)
+    assert set(A._DO_NANG) | {"OK", "OK_MOT_PHAN"} == set(A._MA_NGUON)
+    assert set(A._MA_NGUON) - {"OK"} == set(A._NHAN_MA)
+    assert A._DO_NANG["HET_TIEN_THANG"] > A._DO_NANG["CHI_DEMO"] > A._DO_NANG["HET_LUOT_24H"]
+    assert A.nhan_ma("CHI_DEMO") == "actor chỉ trả dữ liệu demo cho gói Free (0 bài thật)"
+    assert A.nhan_ma("NGAN_SACH") == "NGAN_SACH"
+    # Tin nhắn kết quả quét nền: mã kèm nhãn, mã riêng của việc nền giữ nguyên.
+    import quet_lon
+    assert quet_lon._cau_ma("CHI_DEMO") == f"CHI_DEMO: {A.nhan_ma('CHI_DEMO')}"
+    assert quet_lon._cau_ma("NGAN_SACH") == "NGAN_SACH"
+    sql = (pathlib.Path(A.__file__).parent / "deploy" / "lang-nghe" / "schema.sql").read_text(
+        encoding="utf-8")
+    co = [m for m in A._MA_NGUON if m != "OK" and re.search(rf"\b{m}\b", sql)]
+    assert co in ([], [m for m in A._MA_NGUON if m != "OK"]), co
+
+
+# ─── soát 17/10/2026 (H1): apidojo CHI_DEMO không được chặn dự phòng clockworks của TikTok ───
+_CW = {"webVideoUrl": "https://www.tiktok.com/@kenh_a/video/71", "createTimeISO": NOW.isoformat(),
+       "authorMeta": {"name": "kenh_a", "fans": 5}, "text": "túi hapas", "playCount": 10}
+
+
+def _actor_post(url: str) -> str:
+    return url.split("/acts/", 1)[1].split("/runs", 1)[0]
+
+
+def _chuoi_tiktok(api, monkeypatch, ds_apidojo: list, ds_cw: list) -> None:
+    """TikTok API (scraptik) LỖI; mỗi POST là một run riêng, dataset riêng: apidojo trả
+    `ds_apidojo`, clockworks trả `ds_cw` — đi qua `_run_actor` / `_cho_run` thật."""
+    import tiktok_api as TT
+    monkeypatch.setattr(TT, "dung_api", lambda k: True)
+
+    def hong(*a, **k):
+        raise A.LoiApify("LOI", "scraptik hỏng")
+    monkeypatch.setattr(TT, "tim", hong)
+    ds = {A._ACTORS["tiktok"]: ds_apidojo, A._ACTORS["tiktok_fallback"]: ds_cw}
+    goc_post, goc_get = api.post, api.get
+
+    def post(url, json=None, **k):
+        if "/acts/" in url:
+            a = _actor_post(url)
+            api.start.append(R(201, {"data": {**api.run, "id": f"run-{a}", "status": "SUCCEEDED",
+                                              "defaultDatasetId": f"ds-{a}"}}))
+        return goc_post(url, json=json, **k)
+
+    def get(url, params=None, **k):
+        for a, items in ds.items():
+            if f"/datasets/ds-{a}/" in url:
+                api.get_urls.append((url, params))
+                return R(200, _trang_ds(items, params))
+        return goc_get(url, params, **k)
+    monkeypatch.setattr(A.requests, "post", post)
+    monkeypatch.setattr(A.requests, "get", get)
+
+
+def test_tiktok_api_loi_apidojo_demo_van_chay_clockworks(api, monkeypatch):
+    """Bản 0332db9: `_cho_run` ném CHI_DEMO mà lệnh gọi apidojo không có `try` — clockworks không
+    bao giờ chạy. Trước đó demo ra `raw` rỗng (dưới ngưỡng leo thang) và clockworks vẫn chạy."""
+    _chuoi_tiktok(api, monkeypatch, [{"demo": True} for _ in range(10)], [_CW])
+    ra = A._fetch_tiktok(["hapas"], 30, "VN", NOW - datetime.timedelta(days=3), NOW)
+    assert [_actor_post(u) for u in api.post_urls] == [A._ACTORS["tiktok"],
+                                                       A._ACTORS["tiktok_fallback"]]
+    assert [d["link"] for d, _ in ra] == [_CW["webVideoUrl"]]
+
+
+def test_tiktok_apidojo_demo_du_phong_rong_thi_bao_chi_demo(api, monkeypatch):
+    """Dự phòng cũng không ra bài: nói lý do của apidojo, không trả [] im lặng ("về 0")."""
+    _chuoi_tiktok(api, monkeypatch, [{"demo": True} for _ in range(10)], [])
+    with pytest.raises(A.LoiApify) as e:
+        A._fetch_tiktok(["hapas"], 30, "VN", NOW - datetime.timedelta(days=3), NOW)
+    assert e.value.ma == "CHI_DEMO" and len(api.post_urls) == 2
+
+
+@pytest.mark.parametrize("ma, du_phong", [("CHI_DEMO", True), ("LOI", True),
+                                          ("HET_TIEN_THANG", False), ("DA_HUY", False),
+                                          ("QUA_GIO", False), ("NGHEN_DONG_THOI", False)])
+def test_tiktok_ma_loi_apidojo_nao_thi_chay_du_phong(monkeypatch, ma, du_phong):
+    import tiktok_api as TT
+    monkeypatch.setattr(TT, "dung_api", lambda k: False)
+    goi = []
+
+    def call(actor, payload, limit, **k):
+        goi.append(actor)
+        if actor == A._ACTORS["tiktok"]:
+            raise A.LoiApify(ma, "giả lỗi apidojo")
+        return [_CW]
+    monkeypatch.setattr(A, "_call", call)
+    d3 = NOW - datetime.timedelta(days=3)
+    if du_phong:
+        assert len(A._fetch_tiktok(["hapas"], 30, "VN", d3, NOW)) == 1
+        assert goi == [A._ACTORS["tiktok"], A._ACTORS["tiktok_fallback"]]
+    else:
+        with pytest.raises(A.LoiApify) as e:
+            A._fetch_tiktok(["hapas"], 30, "VN", d3, NOW)
+        assert e.value.ma == ma and goi == [A._ACTORS["tiktok"]]
 
 
 def test_token_khong_bao_gio_nam_trong_chuoi_loi(api):

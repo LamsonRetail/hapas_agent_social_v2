@@ -216,9 +216,20 @@ class GiaKho:
     def tran_platform(self, du_an=None):
         return self.tran_pf
 
-    def cac_luot(self, du_an, trang=1, moi_trang=20):
-        ds = [x for x in self.luot if x["du_an"] == du_an]
+    def cac_luot(self, du_an, trang=1, moi_trang=20, ghi_chu=True):
+        # Như kho thật (soát 17/10/2026, L5): trang đọc phần đầu ghi chú + độ dài thật; API chỉ
+        # số (`ghi_chu=False`) không đọc cột.
+        self.goi_cac_luot = [*getattr(self, "goi_cac_luot", []), ghi_chu]
+
+        def doc(x):
+            gc = x.get("ghi_chu") if ghi_chu else None
+            return {**x, "ghi_chu": gc[:600] if gc else None, "ghi_chu_dai": len(gc) if gc else None}
+        ds = [doc(x) for x in self.luot if x["du_an"] == du_an]
         return ds[(trang - 1) * moi_trang: trang * moi_trang], len(ds)
+
+    def ghi_chu_luot(self, du_an, luot_id):
+        x = next((x for x in self.luot if x["du_an"] == du_an and x["id"] == int(luot_id)), None)
+        return x.get("ghi_chu") if x else None
 
     def luot_xong_moi_nhat(self):
         return self.luot_moi_nhat
@@ -486,7 +497,7 @@ CONG_KHAI = {"/suc-khoe", "/dang-nhap", "/dang-nhap/lark", "/dang-nhap/xong", "/
 
 def _duong(route: APIRoute) -> str:
     return (route.path.replace("{ma}", "hapas").replace("{nid}", "1").replace("{did}", "5")
-            .replace("{lid}", "1"))
+            .replace("{lid}", "1").replace("{luot_id}", "1"))
 
 
 # ───────────────────────────── công khai + đăng nhập bắt buộc ─────────────────────────────
@@ -710,6 +721,59 @@ def test_trang_ngan_sach_hien_da_tieu_va_lich_su():
     assert "14/10/2026 08:30" in t and "1.234" in t and "0,0123" in t   # giờ VN, số kiểu Việt
     assert "Trang 1/2" in t and "tran_usd_thang" not in t   # người xem: không có ô sửa trần
     assert "Trang 2/2" in c.get("/ngan-sach?du_an=hapas&trang=2").text
+
+
+def test_ghi_chu_luot_dai_cat_o_hien_thi_khong_cat_o_kho():
+    """17/10/2026: kho giữ ghi chú lượt tới 20.000 ký tự. Ô nhỏ + chú thích chuột chỉ hiện phần đầu;
+    đủ chữ mở bằng "Xem đủ ghi chú" (quản lý). Ghi chú ngắn: không có nút mở thêm. Soát L5: trang
+    KHÔNG in bản đủ (20 dòng × 20.000 ký tự mỗi lần mở) — bản đủ là chữ thuần ở đường riêng."""
+    import html as H
+    import re
+    _, c, kho = tao()
+    dai = ("<b>x</b> " + "; ".join(f"phễu tìm Instagram dòng {i}: về 0 → giữ 0"
+                                    for i in range(300)) + "; CUỐI-GHI-CHÚ-11")
+    ngan = "tìm Threads: bỏ qua (tắt trên console)"
+
+    def luot(i, gc):
+        return {"id": i, "du_an": "hapas", "kieu": "theo_doi", "ma_viec": f"V{i}",
+                "bat_dau": datetime.datetime(2026, 10, 17, 1, 0, tzinfo=datetime.timezone.utc),
+                "ket_thuc": None, "so_nguon": 3, "so_nguon_loi": 0, "bai_moi": 1,
+                "bai_cap_nhat": 0, "chi_phi_usd": 0.01, "trang_thai": "mot_phan", "loi": None,
+                "ghi_chu": gc}
+    kho.luot = [luot(11, dai), luot(10, ngan)]
+    dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert len(dai) > 10000
+    assert t.count('class="gc-du"') == 1, "chỉ ghi chú dài mới có nút mở thêm"
+    assert "CUỐI-GHI-CHÚ-11" not in t and "dòng 299" not in t, "trang không in bản đủ"
+    assert "<b>x</b>" not in t and "&lt;b&gt;x&lt;/b&gt;" in t, "autoescape vẫn giữ"
+    assert f"Xem đủ ghi chú ({len(dai):,} ký tự)".replace(",", ".") in t
+    assert 'href="/ngan-sach/luot/11/ghi-chu?du_an=hapas"' in t
+    tieu_de = [H.unescape(x) for x in re.findall(r'class="cat-chu" title="([^"]*)"', t)]
+    assert len(tieu_de) == 2 and all(len(x) <= 601 for x in tieu_de)
+    o = re.findall(r'class="cat-chu" title="[^"]*">(.*?)</div>', t, re.DOTALL)
+    assert len(H.unescape(o[0])) <= 401 and H.unescape(o[1]) == ngan
+    # Bản đủ: chữ thuần (không HTML — không cần thoát), phần cuối không mất.
+    r = c.get("/ngan-sach/luot/11/ghi-chu?du_an=hapas")
+    assert r.status_code == 200 and r.text == dai
+    assert r.headers["content-type"].startswith("text/plain")
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert c.get("/ngan-sach/luot/99/ghi-chu?du_an=hapas").status_code == 404
+    assert c.get("/ngan-sach/luot/11/ghi-chu?du_an=khac").status_code == 404
+    assert c.get("/ngan-sach/luot/11/ghi-chu").status_code == 404
+    # Người chỉ xem không thấy ghi chú (`an_chi_tiet`): không có nút, không mở được bản đủ.
+    dang_nhap(c, XEM)
+    assert 'class="gc-du"' not in c.get("/ngan-sach").text
+    assert c.get("/ngan-sach/luot/11/ghi-chu?du_an=hapas").status_code == 403
+
+
+def test_api_chi_so_khong_doc_ghi_chu_luot():
+    """Soát 17/10/2026 (L5): API chỉ số chỉ cần trạng thái lượt gần nhất — không kéo ghi chú
+    (tới 20.000 ký tự) mỗi lần dashboard làm mới."""
+    _, c, kho = tao()
+    dang_nhap(c, QL)
+    assert c.get("/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14").status_code == 200
+    assert kho.goi_cac_luot == [False]
 
 
 # ───────────────────────────── người xem ─────────────────────────────

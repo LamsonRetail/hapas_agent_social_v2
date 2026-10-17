@@ -118,8 +118,18 @@ def _lay_tiktok(ten: list[str], n: int) -> dict[str, dict]:
               for it in raw if it.get("webVideoUrl")}
     thieu = [t for t in ten if t.lstrip("@").lower() not in co_bai]
     if thieu:
-        raw = [it for it in raw if it.get("webVideoUrl")] + A._call(
-            _ACTOR["tiktok"], _payload_tiktok(thieu, n), n * len(thieu))
+        try:
+            them = A._call(_ACTOR["tiktok"], _payload_tiktok(thieu, n), n * len(thieu))
+        except A.LoiApify as e:
+            # Soát 17/10/2026: clockworks là mắt xích CUỐI — nó hỏng (vd CHI_DEMO, actor chỉ trả
+            # dữ liệu mẫu) thì bài TikTok API ĐÃ đọc được của các tài khoản khác vẫn giữ, tài
+            # khoản thiếu mang ghi chú lý do. Trước đây lỗi ném ra là mất cả nền tảng. Không có
+            # bài nào để giữ, hoặc lỗi dừng cả lượt, thì ném như cũ.
+            if e.ma in tiktok_api._DUNG_HAN or not co_bai:
+                raise
+            cau = f"TikTok API không ra bài, dự phòng lỗi {e.ma}: {A.nhan_ma(e.ma)}"
+            return _doc_tiktok(raw + [{"input": t.lstrip("@"), "note": cau} for t in thieu])
+        raw = [it for it in raw if it.get("webVideoUrl")] + them
     return _doc_tiktok(raw)
 
 
@@ -374,7 +384,9 @@ def _handle(args: dict, **_kwargs) -> str:
                 for tk in f.result(timeout=max(0.05, han - time.monotonic())).values():
                     ket_qua.append((p, tk))
             except Exception as e:  # noqa: BLE001
-                loi[p] = f"{type(e).__name__}: {e}"[:250]
+                # Lỗi Apify đã phân loại thì ghi MÃ (vd CHI_DEMO — actor chỉ trả dữ liệu mẫu,
+                # 17/10/2026) thay cho tên lớp "LoiApify" chẳng nói gì.
+                loi[p] = f"{getattr(e, 'ma', None) or type(e).__name__}: {e}"[:250]
     finally:
         ex.shutdown(wait=False, cancel_futures=True)
 

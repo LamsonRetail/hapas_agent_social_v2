@@ -4,10 +4,18 @@ Vì sao: tập đánh giá 17/10 (60 bài thật, nhãn chuẩn do người ch�
 ký tự đầu nên bài báo về quảng cáo GÂY TRANH CÃI ra "Trung lập" (0/2 tiêu cực), bài khen brand ra
 "Trung lập". Prompt mới (`phan_loai.phan_loai_bai`: đọc mọi đoạn nhắc brand, sắc thái hướng về
 brand, cờ rủi ro) chỉ tự áp cho bài MỚI; bài cũ cần chạy script này. Bình luận cũ gán lại bằng
-`scripts/lang_nghe_gan_lai.py <dự án> --buoc b --tat-ca` (đã dùng prompt bình luận mới).
+`scripts/lang_nghe_gan_lai.py <dự án> --buoc b --tat-ca --den-luot 8` (đã dùng prompt bình luận
+mới; `--den-luot` bỏ bình luận của lượt đã gán bằng prompt mới).
 
 Chọn bài: mặc định mọi bài web (`nen_tang = 'web'`); `--tat-ca`: mọi bài KHÔNG thuộc kênh nhà
 (bài kênh nhà không vào sắc thái/chủ đề của dashboard).
+`--den-luot N` (17/10/2026, như `lang_nghe_gan_lai.py`): chỉ bài có `bai.luot_dau ≤ N` — bài vào
+kho ở lượt sau đã được chấm bằng prompt mới, gán lại chỉ tốn lượt model. Áp cho cả hai bộ chọn.
+`luot_dau` NULL: mọi đường ghi bài (`lang_nghe_db.ghi_bai`) đều ghi lượt, nên NULL chỉ còn là bài
+mà lượt đầu đã bị xoá (ON DELETE SET NULL) — bài CŨ, không chứng minh được là prompt mới → VẪN
+chọn. Khác `binh_luan.luot_id` (lượt cào GẦN NHẤT), `luot_dau` không đổi khi bài được ghi lại:
+bài cũ được chấm lại bằng prompt mới ở lượt sau (nguồn theo dõi ghi lại bài, nhịp nền gán bài
+còn trống) vẫn bị chọn — chỉ tốn thêm lượt model, nhãn không lệch.
 
 An toàn (cùng cách `lang_nghe_gan_lai.py`):
   • Mặc định CHẠY THỬ: một giao dịch READ ONLY, không gọi model, không ghi; in số bài và ước tính
@@ -22,6 +30,7 @@ An toàn (cùng cách `lang_nghe_gan_lai.py`):
     PY=/opt/mark/hermes-agent/venv/bin/python
     sudo -u mark $PY scripts/lang_nghe_gan_nhan_bai.py hapas                 # chạy thử
     sudo -u mark $PY scripts/lang_nghe_gan_nhan_bai.py hapas --thu 14        # xem trước
+    sudo -u mark $PY scripts/lang_nghe_gan_nhan_bai.py hapas --tat-ca --den-luot 8   # chạy thử
     sudo -u mark $PY scripts/lang_nghe_gan_nhan_bai.py hapas --ap-dung --sao-luu .audit/nhan-bai-1710.jsonl
     sudo -u mark $PY scripts/lang_nghe_gan_nhan_bai.py hapas --hoan-tac .audit/nhan-bai-1710.jsonl
 """
@@ -55,7 +64,8 @@ SQL_CHI_DOC = "SET TRANSACTION READ ONLY"
 SQL_DU_AN = "/* nb:du_an */ SELECT ma, ten, tu_khoa FROM du_an WHERE ma = %s"
 SQL_BAI = (
     "/* nb:bai */ SELECT b.khoa, b.nen_tang, b.tai_khoan, b.tac_gia, b.noi_dung, b.hashtag, "
-    "b.kieu_trang, b.sac_thai, b.chu_de, (n.loai = 'kenh_nha') AS kenh_nha FROM bai b "
+    "b.kieu_trang, b.sac_thai, b.chu_de, b.luot_dau, (n.loai = 'kenh_nha') AS kenh_nha "
+    "FROM bai b "
     "LEFT JOIN nguon n ON n.id = b.nguon_id WHERE b.du_an = %s "
     "AND btrim(b.noi_dung || ' ' || COALESCE(b.hashtag, '')) <> '' ORDER BY b.khoa")
 SQL_SUA = (
@@ -87,9 +97,27 @@ def doc_kho(ma: str) -> tuple[dict | None, list[dict]]:
         return du_an, list(c.execute(SQL_BAI, (ma,)).fetchall())
 
 
-def chon(rows: list[dict], tat_ca: bool = False) -> list[dict]:
+def trong_luot(r: dict, den_luot: int | None) -> bool:
+    """Bài vào kho ở lượt ≤ `den_luot` (`--den-luot`); None = không lọc; `luot_dau` NULL (lượt đầu
+    đã bị xoá) coi là cũ — xem docstring đầu tệp."""
+    if den_luot is None:
+        return True
+    x = r.get("luot_dau")
+    return x is None or int(x) <= den_luot
+
+
+def chon(rows: list[dict], tat_ca: bool = False, den_luot: int | None = None) -> list[dict]:
     return [r for r in rows if not r.get("kenh_nha")
-            and (tat_ca or r.get("nen_tang") == "web")]
+            and (tat_ca or r.get("nen_tang") == "web") and trong_luot(r, den_luot)]
+
+
+def cau_loc(den_luot: int | None, so_bo: int) -> str:
+    """Dòng mô tả bộ lọc lượt — in cả khi chạy thử lẫn áp dụng."""
+    if den_luot is None:
+        return ("Bộ lọc lượt: KHÔNG — mọi lượt (thêm --den-luot N để chỉ lấy bài vào kho ở lượt "
+                "≤ N).")
+    return (f"Bộ lọc lượt: --den-luot {den_luot} — chỉ bài có luot_dau ≤ {den_luot} (luot_dau NULL "
+            f"— lượt đầu đã xoá — tính là cũ); bỏ {so_bo} bài vào kho ở lượt > {den_luot}.")
 
 
 def uoc_luot_model(rows: list[dict]) -> int:
@@ -173,10 +201,12 @@ def chay(ns, in_ra=print) -> int:
     if not du_an:
         in_ra(f"Không có dự án '{ma}' trong kho.")
         return 2
-    ds = chon(rows, ns.tat_ca)
+    den = getattr(ns, "den_luot", None)
+    ds = chon(rows, ns.tat_ca, den)
     in_ra(f"Dự án {ma} — {'ÁP DỤNG' if ns.ap_dung else 'CHẠY THỬ (giao dịch chỉ đọc, không ghi gì)'}.")
     in_ra(f"Gán lại nhãn {len(ds)} bài ({'mọi bài ngoài kênh nhà' if ns.tat_ca else 'bài web'}); "
           f"ước tính {uoc_luot_model(ds)} lượt gọi model (lô {LO}, tuần tự).")
+    in_ra(cau_loc(den, len(chon(rows, ns.tat_ca)) - len(ds)))
     if not ns.ap_dung:
         thu = ds[:min(max(0, ns.thu), LO)]
         if thu:
@@ -193,7 +223,7 @@ def chay(ns, in_ra=print) -> int:
         so_luu.write(json.dumps({
             "loai_dong": "dau", "du_an": ma, "phien_ban": 1, "bang": "bai",
             "luc": datetime.datetime.now(UTC).isoformat(timespec="seconds"),
-            "tat_ca": bool(ns.tat_ca)}, ensure_ascii=False) + "\n")
+            "tat_ca": bool(ns.tat_ca), "den_luot": den}, ensure_ascii=False) + "\n")
         so_luu.flush()
         _chuan_bi_model()
         sua = bo = chua = giu = 0
@@ -220,8 +250,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--tat-ca", action="store_true", help="mọi bài ngoài kênh nhà, không chỉ web")
     ap.add_argument("--thu", type=int, default=0, metavar="N",
                     help=f"chạy thử: gọi model cho tối đa N bài (≤ {LO}) để xem trước")
+    ap.add_argument("--den-luot", type=int, metavar="N",
+                    help="chỉ bài có bai.luot_dau ≤ N (luot_dau NULL — lượt đầu đã xoá — tính là "
+                         "cũ, vẫn chọn); áp cho cả bộ chọn mặc định lẫn --tat-ca")
     ap.add_argument("--mau", type=int, default=8, help="số bài mẫu in ra")
     ns = ap.parse_args(argv)
+    if ns.den_luot is not None and ns.den_luot < 0:
+        ap.error("--den-luot phải ≥ 0")
     if ns.dry_run and (ns.ap_dung or ns.hoan_tac):
         ap.error("--dry-run không đi cùng --ap-dung / --hoan-tac")
     if ns.ap_dung and ns.hoan_tac:

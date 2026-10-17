@@ -223,6 +223,32 @@ def test_soi_tai_khoan_api_khong_ra_bai_thi_chay_clockworks(api, monkeypatch):
     assert len(ra["kenh_a"]["bai"]) == 1 and len(ra["kenh_b"]["bai"]) == 1
 
 
+@pytest.mark.parametrize("ma, giu", [("CHI_DEMO", True), ("LOI", True),
+                                     ("HET_TIEN_THANG", False)])
+def test_soi_tai_khoan_du_phong_hong_van_giu_bai_api(api, monkeypatch, ma, giu):
+    """Soát 17/10/2026: clockworks (mắt xích cuối) ném CHI_DEMO thì bài TikTok API đã đọc được
+    của tài khoản khác không được mất theo; tài khoản thiếu mang ghi chú lý do."""
+    api.ho_so["kenh_a"] = {"uid": "u1", "unique_id": "kenh_a", "follower_count": 5}
+    api.bai["0"] = ([_aweme(1)], 0, "")
+    goc = A._call
+
+    def call(actor, payload, limit, **k):
+        if actor == TT.ACTOR:
+            return goc(actor, payload, limit, **k)
+        raise A.LoiApify(ma, "giả lỗi dự phòng")
+    monkeypatch.setattr(A, "_call", call)
+    if giu:
+        ra = account_tool._lay_tiktok(["kenh_a", "kenh_b"], 5)
+        assert len(ra["kenh_a"]["bai"]) == 1 and not ra["kenh_b"]["bai"]
+        assert f"dự phòng lỗi {ma}: {A.nhan_ma(ma)}" in ra["kenh_b"]["ghi_chu"]
+    else:
+        with pytest.raises(A.LoiApify):
+            account_tool._lay_tiktok(["kenh_a", "kenh_b"], 5)
+    # API không ra bài nào để giữ: lỗi dự phòng ném ra như cũ.
+    with pytest.raises(A.LoiApify):
+        account_tool._lay_tiktok(["kenh_b"], 5)
+
+
 def test_bang_chon_actor_khop_ten_actor_cu():
     import deep_dive_tool as D
     assert TT.CHON["tiktok_tim"]["du_phong"] == (A._ACTORS["tiktok"],

@@ -442,17 +442,37 @@ def tran_platform(du_an: str | None = None) -> float | None:
     return None
 
 
-def cac_luot(du_an: str, trang: int = 1, moi_trang: int = 20) -> tuple[list[dict], int]:
+#: Số ký tự đầu của `luot_quet.ghi_chu` mỗi dòng trang Ngân sách đọc sẵn (ô nhỏ 400 + chú thích
+#: chuột 600). Soát 17/10/2026 (L5): ghi chú giữ tới 20.000 ký tự — in đủ cả trang 20 dòng là vài
+#: trăm KB HTML mỗi lần mở; bản đủ đọc riêng (`ghi_chu_luot`) khi bấm "Xem đủ ghi chú".
+GHI_CHU_DAU = 600
+
+
+def cac_luot(du_an: str, trang: int = 1, moi_trang: int = 20,
+             ghi_chu: bool = True) -> tuple[list[dict], int]:
+    """Lượt quét mới nhất trước. `ghi_chu`: True = `GHI_CHU_DAU` ký tự đầu + độ dài thật
+    (`ghi_chu_dai`); False = không đọc cột (API chỉ số chỉ cần trạng thái lượt gần nhất)."""
     trang = max(1, int(trang))
+    cot_gc = (f"left(ghi_chu, {GHI_CHU_DAU}) AS ghi_chu, length(ghi_chu) AS ghi_chu_dai"
+              if ghi_chu else "NULL::text AS ghi_chu, NULL::int AS ghi_chu_dai")
     with ket_noi() as c:
         tong = c.execute("SELECT count(*) AS n FROM luot_quet WHERE du_an = %s",
                          (du_an,)).fetchone()["n"]
         rows = c.execute(
             "SELECT id, kieu, ma_viec, bat_dau, ket_thuc, so_nguon, so_nguon_loi, bai_moi, "
-            "bai_cap_nhat, chi_phi_usd::float AS chi_phi_usd, trang_thai, loi, ghi_chu "
+            f"bai_cap_nhat, chi_phi_usd::float AS chi_phi_usd, trang_thai, loi, {cot_gc} "
             "FROM luot_quet WHERE du_an = %s ORDER BY id DESC LIMIT %s OFFSET %s",
             (du_an, moi_trang, (trang - 1) * moi_trang)).fetchall()
     return rows, int(tong)
+
+
+def ghi_chu_luot(du_an: str, luot_id: int) -> str | None:
+    """Ghi chú ĐỦ của một lượt (nút "Xem đủ ghi chú" trang Ngân sách). None khi không có lượt
+    đó trong dự án hoặc lượt không có ghi chú."""
+    with ket_noi() as c:
+        r = c.execute("SELECT ghi_chu FROM luot_quet WHERE du_an = %s AND id = %s",
+                      (du_an, int(luot_id))).fetchone()
+    return r["ghi_chu"] if r else None
 
 
 def tien_do_gan_nhan(du_an: str) -> dict:

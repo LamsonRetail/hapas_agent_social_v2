@@ -226,6 +226,26 @@ def test_them_lich_khoa_du_an_va_chan_qua_toi_da(gia):
         K.them_lich(AI, "khong", LICH)
 
 
+def test_cac_luot_chi_doc_phan_dau_ghi_chu_ban_du_doc_rieng(gia):
+    """Soát 17/10/2026 (L5): ghi chú lượt giữ tới 20.000 ký tự — trang Ngân sách đọc
+    `GHI_CHU_DAU` ký tự đầu + độ dài thật, API chỉ số không đọc cột, bản đủ đọc từng lượt."""
+    gia.tra[r"count\(\*\)"] = [{"n": 3}]
+    K.cac_luot("hapas", 2, 20)
+    sql, ts = gia.gd[0].lenh[1]
+    assert f"left(ghi_chu, {K.GHI_CHU_DAU}) AS ghi_chu" in sql
+    assert "length(ghi_chu) AS ghi_chu_dai" in sql and ts == ("hapas", 20, 20)
+    K.cac_luot("hapas", 1, 1, ghi_chu=False)
+    sql, _ = gia.gd[1].lenh[1]
+    assert "NULL::text AS ghi_chu" in sql and "left(ghi_chu" not in sql
+    assert "length(ghi_chu" not in sql
+    gia.tra[r"SELECT ghi_chu FROM luot_quet"] = [{"ghi_chu": "đủ chữ"}]
+    assert K.ghi_chu_luot("hapas", "11") == "đủ chữ"
+    sql, ts = gia.gd[2].lenh[0]
+    assert "WHERE du_an = %s AND id = %s" in sql and ts == ("hapas", 11)
+    gia.tra.pop(r"SELECT ghi_chu FROM luot_quet")
+    assert K.ghi_chu_luot("hapas", 99) is None
+
+
 def test_cac_lich_kem_luot_gan_nhat_cua_lich(gia):
     K.cac_lich("hapas")
     sql, ts = gia.gd[0].lenh[0]
