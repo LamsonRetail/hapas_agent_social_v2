@@ -43,7 +43,10 @@ BANG: dict[str, dict] = {
         "cot": [("ma", "STRING"), ("ten", "STRING"), ("tu_khoa", "ARRAY<STRING>"),
                 ("tu_loai_tru", "ARRAY<STRING>"), ("boi_canh", "STRING"), ("thi_truong", "STRING"),
                 ("tran_usd_thang", "NUMERIC"), ("dang_bat", "BOOL"), ("tao_luc", "TIMESTAMP"),
-                ("sua_luc", "TIMESTAMP")],
+                ("sua_luc", "TIMESTAMP"),
+                # Hashtag riêng của dự án (18/10/2026): ALTER … ADD COLUMN hashtag trên BigQuery +
+                # schema.sql trên Postgres trước khi bật bản mới (mảng rỗng khi chưa đặt).
+                ("hashtag", "ARRAY<STRING>")],
     },
     "nguon": {
         "khoa": ["id"], "kieu": "toan_bo",

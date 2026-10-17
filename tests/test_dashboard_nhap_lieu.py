@@ -125,8 +125,10 @@ def test_email_vai_tro_ma_du_an():
 def test_bieu_mau_du_an_va_nguon():
     d = NL.du_an({"ma": "hapas", "ten": " HAPAS ", "tu_khoa": "hapas, Hapas,túi hapas\n",
                   "tu_loai_tru": "guitar", "thi_truong": "vn", "dang_bat": "1"}, moi=True)
+    # 18/10/2026: dự án mới có `hashtag` (ô bỏ trống = [] — Mark suy từ từ khoá).
     assert d == {"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas", "túi hapas"],
-                 "tu_loai_tru": ["guitar"], "boi_canh": "", "thi_truong": "VN", "dang_bat": True}
+                 "tu_loai_tru": ["guitar"], "boi_canh": "", "thi_truong": "VN", "dang_bat": True,
+                 "hashtag": []}
     with pytest.raises(NL.LoiNhap):
         NL.du_an({"ten": "X", "tu_khoa": ""}, moi=False)          # thiếu từ khoá
     n = NL.nguon({"nen_tang": "tiktok", "dinh_danh": "https://www.tiktok.com/@KolA",
