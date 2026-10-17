@@ -477,6 +477,18 @@ def tien_do_gan_nhan(du_an: str) -> dict:
             "tong": int(luot.get("tong") or 0)}
 
 
+def do_phu_gan_nhat(du_an: str, n: int = 2) -> list[dict]:
+    """`n` lượt kiểm độ phủ gần nhất của dự án (17/10/2026, Mark `kiem_do_phu.py`), mới nhất
+    trước — thẻ "Độ phủ" so lần mới với lần trước. Bảng chưa tạo thì `LoiKho` (bên gọi bỏ thẻ)."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT id, luot_id, luc, nen_tang, so_mau, so_nhac, so_da_co, so_da_loai, so_sot, "
+            "thao_luan_nhac, thao_luan_da_co, do_phu::float AS do_phu, "
+            "do_phu_tl::float AS do_phu_tl, bo_sung, so_yeu_cau, chi_phi_usd::float AS "
+            "chi_phi_usd, mau, bai_sot FROM kiem_do_phu WHERE du_an = %s ORDER BY luc DESC, "
+            "id DESC LIMIT %s", (du_an, max(1, int(n)))).fetchall()
+
+
 def luot_xong_moi_nhat() -> dict | None:
     """Lượt vừa kết thúc gần nhất (mọi dự án) — vòng kiểm 30 giây so mốc này để biết có dữ liệu
     mới khi Mark không báo được (dashboard tắt lúc Mark báo, lỗi mạng nội bộ…)."""

@@ -222,6 +222,12 @@ class GiaKho:
     def luot_xong_moi_nhat(self):
         return self.luot_moi_nhat
 
+    # ── kiểm độ phủ (17/10/2026, 2 lần/tuần) — mới nhất trước, như dashboard/kho.py ──
+    do_phu: list = ()
+
+    def do_phu_gan_nhat(self, du_an, n=2):
+        return [dict(x) for x in self.do_phu][:n]
+
     # ── lịch quét tự động (15/10/2026) — cùng tên hàm với dashboard/kho.py ──
     lich: dict = None                   # {id: dòng lich_quet}; tạo lười để mọi bộ thử cũ không đổi
 

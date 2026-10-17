@@ -1639,3 +1639,115 @@ NHAN_BO_LOC = {
     "tuong_tac": [{"gia_tri": str(m), "ten": f"Từ {m:,}".replace(",", ".") + " tương tác"}
                   for m in TUONG_TAC_MUC],
 }
+
+
+# ───────────────────────── độ phủ (kiểm 2 lần/tuần của Mark, 17/10/2026) ─────────────────────────
+#: Độ phủ theo thảo luận dưới ngưỡng này thì thẻ "Độ phủ" chuyển màu cảnh báo.
+NGUONG_DO_PHU = 80.0
+#: Lần kiểm gần nhất cũ hơn chừng này ngày (Mark kiểm hai lần mỗi tuần) — thẻ nói "đã cũ".
+DO_PHU_CU_NGAY = 7
+SOT_HIEN = 10
+
+
+def _url_an_toan(u) -> str:
+    u = str(u or "")
+    return u if re.match(r"https?://", u, re.I) else ""
+
+
+def _so_hay_none(v):
+    try:
+        return None if v is None else round(float(v), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def do_phu_json(rows: list[dict], bay_gio: datetime.datetime) -> dict | None:
+    """Thẻ "Độ phủ" từ `kho.do_phu_gan_nhat` (mới nhất trước). Không có lượt kiểm → None.
+
+    Số chính = độ phủ theo thảo luận (`do_phu_tl`); ▲/▼ = chênh ĐIỂM % với lần kiểm trước (không
+    phải % thay đổi); `canh_bao` khi dưới `NGUONG_DO_PHU`. Danh sách bài sót chỉ giữ trường cần
+    hiện, link không phải http(s) bỏ trống."""
+    if not rows:
+        return None
+    r, truoc = rows[0], (rows[1] if len(rows) > 1 else None)
+    tl = _so_hay_none(r.get("do_phu_tl"))
+    tl_truoc = _so_hay_none((truoc or {}).get("do_phu_tl"))
+    luc = r.get("luc")
+    mau = r.get("mau") if isinstance(r.get("mau"), dict) else {}
+    sot = []
+    for x in (r.get("bai_sot") if isinstance(r.get("bai_sot"), list) else [])[:SOT_HIEN]:
+        if not isinstance(x, dict):
+            continue
+        sot.append({"link": _url_an_toan(x.get("link")),
+                    "tai_khoan": str(x.get("tai_khoan") or "")[:100],
+                    "ten": str(x.get("ten") or "")[:120], "thao_luan": so(x.get("thao_luan")),
+                    "binh_luan": so(x.get("binh_luan")), "thich": so(x.get("thich")),
+                    "xem": so(x.get("xem")), "dang_luc": str(x.get("dang_luc") or "")[:25],
+                    "noi_dung": str(x.get("noi_dung") or "")[:200],
+                    "ly_do": [str(y)[:120] for y in (x.get("ly_do") or [])[:3]],
+                    "duong": [str(y)[:60] for y in (x.get("duong") or [])[:3]],
+                    "hanh_dong": [str(y)[:120] for y in (x.get("hanh_dong") or [])[:5]],
+                    "bo_sung": bool(x.get("bo_sung"))})
+
+    def ten(ds) -> list[str]:
+        return [str(x.get("ten") or "")[:60] for x in ds if isinstance(x, dict)][:10]
+    cu = bool(isinstance(luc, datetime.datetime)
+              and bay_gio - luc > datetime.timedelta(days=DO_PHU_CU_NGAY))
+    return {"luc": luc.isoformat(timespec="minutes") if isinstance(luc, datetime.datetime)
+            else (str(luc) if luc else None),
+            "nen_tang": r.get("nen_tang") or "tiktok", "do_phu_tl": tl,
+            "do_phu": _so_hay_none(r.get("do_phu")),
+            **{k: so(r.get(k)) for k in ("so_mau", "so_nhac", "so_da_co", "so_sot",
+                                         "so_da_loai", "bo_sung", "so_yeu_cau")},
+            "chi_phi_usd": _so_hay_none(r.get("chi_phi_usd")) or 0.0,
+            "truoc": None if truoc is None else {
+                "do_phu_tl": tl_truoc,
+                "luc": truoc["luc"].isoformat(timespec="minutes")
+                if isinstance(truoc.get("luc"), datetime.datetime) else None},
+            "doi_diem": None if tl is None or tl_truoc is None else round(tl - tl_truoc, 1),
+            "canh_bao": tl is not None and tl < NGUONG_DO_PHU, "nguong": NGUONG_DO_PHU,
+            "cu": cu, "tag": ten(mau.get("tag") or []), "tac_gia": ten(mau.get("tac_gia") or []),
+            "ngay_mau": so(mau.get("ngay")) or 30, "bai_sot": sot,
+            "tran_usd": _so_hay_none(mau.get("tran_usd")),
+            "ly_do": ly_do_tong(r.get("bai_sot")),
+            "hanh_dong": hanh_dong_json(r.get("hanh_dong"))}
+
+
+#: Nhãn ngắn của mã lý do sót (`kiem_do_phu.LY_DO`) cho dòng tóm tắt thẻ.
+LY_DO_NGAN = {"chi_hashtag": "chỉ có hashtag", "ngoai_cua_so": "ngoài cửa sổ tuần",
+              "it_thich": "ít thích", "tac_gia_moi": "nhà sáng tạo mới", "khac": "khác"}
+
+
+def ly_do_tong(sot) -> list[dict]:
+    """Đếm mã lý do trên các bài sót đã lưu (nhiều nhất trước)."""
+    dem: collections.Counter = collections.Counter()
+    for x in sot if isinstance(sot, list) else []:
+        for m in (x.get("ma_ly_do") or []) if isinstance(x, dict) else []:
+            dem[str(m)] += 1
+    return [{"ma": m, "ten": LY_DO_NGAN.get(m, m), "so": n}
+            for m, n in sorted(dem.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+def hanh_dong_json(hd) -> dict:
+    """Việc Mark đã tự làm (`kiem_do_phu.hanh_dong` tóm tắt) — chỉ trường hiển thị."""
+    hd = hd if isinstance(hd, dict) else {}
+    noi = hd.get("noi") if isinstance(hd.get("noi"), dict) else {}
+    return {"de_xuat": [{"dinh_danh": str(g.get("dinh_danh") or "")[:100],
+                         "so_bai": so(g.get("so_bai")), "thao_luan": so(g.get("thao_luan")),
+                         "uu_tien": bool(g.get("uu_tien"))}
+                        for g in (hd.get("de_xuat") or [])[:20] if isinstance(g, dict)],
+            "tag_them": [str(t)[:60] for t in (hd.get("tag_them") or [])[:10]],
+            "tag_noi": [str(t)[:60] for t in (hd.get("tag_noi") or [])[:10]],
+            "noi_ly_do": str(noi.get("ly_do") or "")[:200]}
+
+
+def noi_tu_hanh_dong(hd) -> dict:
+    """Cấu hình lượt nổi TikTok mà Mark đang dùng sau lần kiểm cuối (trang Ngân sách)."""
+    hd = hd if isinstance(hd, dict) else {}
+    noi = hd.get("noi") if isinstance(hd.get("noi"), dict) else {}
+
+    def sau(k):
+        x = noi.get(k)
+        return so(x[-1]) if isinstance(x, list) and x else None
+    return {"tag": [str(t)[:60] for t in (hd.get("tag_noi") or [])[:10]],
+            "trang": sau("trang"), "gio": sau("gio")}

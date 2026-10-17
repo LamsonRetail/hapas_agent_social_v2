@@ -117,6 +117,11 @@ td.ns-mo > *:not(.ns-cong) { opacity: .45; }
 /* chân biểu mẫu: trần tháng + dự kiến + lưu */
 .ns-chan { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px 20px; align-items: center; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ke); }
 .ns-chan label.o input { width: 140px; }
+.ns-chan__trai { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ns-dp { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; color: var(--chu-phu); }
+.ns-dp__nhan { font-weight: 600; color: var(--chu); }
+.ns-dp__tran { display: inline-flex; align-items: center; gap: 6px; }
+.ns-dp__tran input { width: 76px; }
 .ns-du-kien { font-size: 13px; color: var(--chu-phu); min-width: 0; }
 .ns-du-kien b { color: var(--chu); font-variant-numeric: tabular-nums; }
 .ns-du-kien__thang { margin-top: 4px; padding: 7px 12px; border-radius: 9px; background: var(--be-mat-2); border: 1px solid var(--ke); }

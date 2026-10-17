@@ -226,7 +226,7 @@ def _noi_gia(mo, so_run: int, loi: Exception | None = None, bai=()):  # noqa: F8
     """Thay `tim_noi_tiktok`: báo `so_run` run TikTok API (đã trả tiền) rồi trả bài / ném lỗi."""
     goi = []
 
-    def f(q, bay_gio, tran):
+    def f(q, bay_gio, tran, trang=2):
         goi.append(tran)
         for i in range(so_run):
             A._KHI_CO_RUN.get()({"id": f"noi{i}"}, {"actor": TT.ACTOR})

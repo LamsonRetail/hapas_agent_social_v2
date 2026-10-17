@@ -41,6 +41,7 @@ import threading
 import time
 
 import apify_tool as A
+import kiem_do_phu as KDP
 import lang_nghe_db as K
 import nguon_web as W
 import theo_doi_api as TDA
@@ -1362,18 +1363,34 @@ def _them_luot_noi(v, ma: str, luot: int, q: list[str], got: list, moc_cu: dict,
     api = [x for x in phan_moi if x.get("run_id") and x.get("actor") == TT_ACTOR]
     if not api or any(x.get("run_id") and x.get("actor") != TT_ACTOR for x in phan_moi):
         return got, {}                    # lượt thường không qua API / đã xuống dự phòng
-    den, ly = TDA.den_luot_noi(moc_cu.get(TDA.KHOA_MOC_NOI), bay_gio)
+    # Kiểm độ phủ (17/10/2026) có thể đã thêm hashtag chiến dịch / nới trang / dày nhịp cho lượt
+    # nổi của dự án (`kiem_do_phu.hanh_dong`) — vẫn trong trần `tran_noi`.
+    cfg = KDP.cau_hinh_noi(moc_cu.get(KDP.KHOA_NOI_CFG))
+    den, ly = TDA.den_luot_noi(moc_cu.get(TDA.KHOA_MOC_NOI), bay_gio, cfg["gio"])
     if not den:
         return got, {}
+    da = {TDA.TT.chuan_tag(t) for t in q}
+    tag = [t for t in cfg["tag"] if t not in da]
+    moc_dp = moc_cu.get(KDP.KHOA_MOC) if isinstance(moc_cu.get(KDP.KHOA_MOC), dict) else {}
+    cid = dict(moc_dp.get("cid") or {}) if isinstance(moc_dp.get("cid"), dict) else {}
+    if cfg["tag"] or cfg["trang"] != TDA.NOI_TRANG or cfg["gio"] != TDA.NOI_GIO_GIAN:
+        ly += (f"; theo kiểm độ phủ: {cfg['trang']} trang/từ, mỗi {cfg['gio']} giờ"
+               + (", #" + ", #".join(cfg["tag"]) if cfg["tag"] else ""))
     if v.con_giay() < _CHUA_GIAY_CUOI + 120:
         return got, {"ve": 0, "moi": 0, "usd": 0.0, "ly_do": f"{ly}; bỏ qua (hết giờ)"}
-    tran = TDA.tran_noi(len(q), uoc, len(api) * TK_TT_YEU_CAU, min(con, _con_viec(v)))
+    # Mỗi hashtag: 1 yêu cầu tìm cid (khi chưa nhớ) + `trang` trang feed — tính như một "từ".
+    tran = TDA.tran_noi(len(q) + len(tag), uoc, len(api) * TK_TT_YEU_CAU,
+                        min(con, _con_viec(v)), cfg["trang"])
     if tran < TK_TT_YEU_CAU:
         return got, {"ve": 0, "moi": 0, "usd": 0.0, "ly_do": f"{ly}; không còn ngân sách"}
     truoc = len(_phan_tk(v))
     ve: list = []
     try:
-        ve = TDA.tim_noi_tiktok(q, bay_gio, tran)
+        cid_truoc = dict(cid)
+        ve = (TDA.tim_noi_tiktok(q, bay_gio, tran, cfg["trang"], tag=tag, cid=cid) if tag
+              else TDA.tim_noi_tiktok(q, bay_gio, tran, cfg["trang"]))
+        if cid != cid_truoc:          # cid mới tìm được: nhớ vào mốc kiểm độ phủ (đỡ 1 yêu cầu)
+            ghi_moc_tk(ma, {KDP.KHOA_MOC: {**moc_dp, "cid": cid}})
     except Exception as e:  # lượt nổi là phần thêm, không làm hỏng lượt thường
         if type(e).__name__ == "MatQuyen":
             raise
@@ -1409,6 +1426,167 @@ def _tien_tim_tiktok(phan_moi: list[dict], got: list, loi, tran_du_phong) -> flo
 
 
 TT_ACTOR = "scraptik~tiktok-api"     # = tiktok_api.ACTOR (bài thử đối chiếu)
+
+
+# ───────────────────────────── kiểm độ phủ (17/10/2026, 2 lần/tuần) ─────────────────────────────
+DP_GIAY = 300                # giây tối thiểu còn lại (≈ 33 yêu cầu × 3 luồng + AI + ghi kho)
+
+
+def _phan_dp(v) -> list[dict]:
+    with v._khoa:
+        return v.d.setdefault("nen_tang", {}).setdefault("do_phu", {"phan": []})["phan"]
+
+
+def _them_phan_dp(v, ph: dict) -> dict:
+    with v._khoa:
+        _phan_dp(v).append(ph)
+        v.luu()
+    return ph
+
+
+def _kiem_do_phu(v, du_an: dict, luot: int, con: float, han: float) -> dict:
+    """Kiểm độ phủ (`kiem_do_phu`) trong lượt /theodoi, như lượt nổi: bên gọi bắt lỗi riêng, tự
+    kiểm giờ + tiền. -> {} khi chưa tới tuần / đã tắt; {"bo_qua": lý do} khi tới tuần mà không
+    kiểm được; còn lại {"usd", "so_yeu_cau", "so", "mau", "bo_sung", "cu", "ghi_chu"}. Run id
+    vào phần nhóm "do_phu" của sổ việc (tiền thật chốt theo run id)."""
+    cfg = KDP.cau_hinh(du_an)
+    if not cfg["bat"]:
+        return {}
+    phan = _phan_dp(v)
+    if any(ph.get("loai") == "moc" for ph in phan):
+        return dict(v.d.get("kiem_do_phu") or {})          # đã kiểm trong việc này
+    if any(ph.get("run_id") for ph in phan):
+        _them_phan_dp(v, {"id": "dp", "loai": "moc", "nen_tang": "do_phu", "trang_thai": "loi",
+                          "ma": "KHONG_KIEM_DUOC", "usd_so": 0.0})
+        return {"ghi_chu": ["kiểm độ phủ: bot khởi động lại giữa lượt kiểm — không gửi lại, "
+                            f"kiểm lại sau {KDP.GIO_GIAN} giờ"]}
+    ma = du_an["ma"]
+    bay_gio = datetime.datetime.now(_VN)
+    moc_cu = doc_moc_tk(ma).get(KDP.KHOA_MOC) or {}
+    den, ly = KDP.den_han(moc_cu, bay_gio)
+    if not den:
+        return {}
+    if not TDA.TT.dung_api("tiktok_tim") or not _nen_tang_dung_duoc("tiktok")[0]:
+        return {"bo_qua": "TikTok API / công tắc TikTok trên console đang tắt"}
+    if v.con_giay() < _CHUA_GIAY_CUOI + DP_GIAY:
+        return {"bo_qua": "hết giờ — lượt sau kiểm"}
+    tran = min(cfg["tran_usd"], con, _con_viec(v))
+    n = int(tran / TK_TT_YEU_CAU + 1e-9)
+    if n < KDP.YEU_CAU_TOI_THIEU:
+        return {"bo_qua": f"ngân sách còn {_usd(max(0.0, tran))} USD — cần ≥ "
+                          f"{KDP.YEU_CAU_TOI_THIEU * TK_TT_YEU_CAU:.3f} USD"}
+    tu = tu_tim(du_an)
+    tu_pv = TDA.pham_vi(ma, bay_gio)[0]
+    d_mau = bay_gio - datetime.timedelta(days=KDP.NGAY_MAU)
+    noi_bat = K.tac_gia_noi_bat(ma, "tiktok", d_mau, 500)
+    dang_theo = {_chuan_dinh_danh("tiktok", str(x.get("dinh_danh") or ""))
+                 for x in K.nguon_dang_theo_doi(ma) if x.get("nen_tang") == "tiktok"}
+    tag = KDP.chon_tag(tu, K.hashtag_gan_day(ma, "tiktok", d_mau))
+    tac_gia = KDP.chon_tac_gia(noi_bat, K.de_xuat_dang_xet(ma, "tiktok"), dang_theo)
+    cid = dict(moc_cu["cid"]) if isinstance(moc_cu.get("cid"), dict) else {}
+    uid = dict(moc_cu["uid"]) if isinstance(moc_cu.get("uid"), dict) else {}
+    trang_tag, trang_tg = KDP.chia_yeu_cau(n, tag, tac_gia, cid, uid)
+    if not trang_tag and not trang_tg:
+        return {"bo_qua": "chưa có hashtag / nhà sáng tạo nào để lấy mẫu"}
+    # Mốc tuần ghi TRƯỚC yêu cầu đầu: khởi động lại giữa chừng không trả tiền lần hai trong tuần.
+    ghi_moc_tk(ma, {KDP.KHOA_MOC: {**moc_cu, "luc": bay_gio.isoformat(timespec="seconds"),
+                                   "luot": luot, "dang_kiem": True}})
+    so: list = []
+    dat = [(A._NEN_TANG, "tiktok"), (A._HAN_CHOT, han), (A._SO_RUN, so),
+           (A._KHI_CO_RUN, lambda run, meta: _them_phan_dp(v, {
+               "id": f"dp-{run.get('id')}", "nen_tang": "do_phu", "run_id": run.get("id"),
+               "actor": (meta or {}).get("actor") or TT_ACTOR, "trang_thai": "xong"}))]
+    bien_cu = [(bien, bien.set(gt)) for bien, gt in dat]
+    items: list = []
+    tkm: dict = {}
+    ghi_chu: list[str] = []
+    try:
+        items, tkm = KDP.lay_mau(trang_tag, trang_tg, cid, uid,
+                                 TDA.TT.Ngan(n * TK_TT_YEU_CAU), d_mau)
+    finally:
+        for bien, t in reversed(bien_cu):
+            bien.reset(t)
+        so_yc = sum(1 for m in so if isinstance(m, dict) and m.get("run_id"))
+        usd = round(so_yc * TK_TT_YEU_CAU, 4)
+        _them_phan_dp(v, {"id": "dp", "loai": "moc", "nen_tang": "do_phu", "trang_thai": "xong",
+                          "usd_so": usd, "so_item": len(items)})
+        if not so_yc:
+            ghi_moc_tk(ma, {KDP.KHOA_MOC: moc_cu})      # chưa tiêu đồng nào: trả mốc cũ
+    if tkm.get("dung"):
+        ghi_chu.append(f"kiểm độ phủ: dừng giữa chừng ({tkm['dung']})")
+    for t, x in (tkm.get("tag") or {}).items():
+        if x.get("cid"):
+            cid[t] = x["cid"]
+    for u, x in (tkm.get("tac_gia") or {}).items():
+        if x.get("uid"):
+            uid[u] = x["uid"]
+
+    def khoa_cua(d: dict) -> str:
+        goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
+        return _khoa_bai("tiktok", d["link"], {"id": goc.get("id")})
+    mau = KDP.danh_dau(ma, items, du_an, tu, tu_pv, bay_gio, khoa_cua)
+    so_do = KDP.tinh_do_phu(mau)
+    theo_duong = {ten: KDP.tinh_do_phu([x for x in mau
+                                        if any(str(d).startswith(dau) for d in x["duong"])])
+                  for ten, dau in (("hashtag", "#"), ("tac_gia", "@"))}
+    # MỌI bài sót (hành động tự sửa xét hết; bảng chỉ lưu `SOT_TOI_DA` bài nhiều thảo luận nhất).
+    sot = KDP.bai_sot(mau, tu, {str(x.get("tai_khoan") or "") for x in noi_bat}, bay_gio,
+                      toi_da=None)
+    # Lấp lỗ: bài brand của mẫu đi cùng phễu tìm theo từ khoá (đã có → cập nhật số; mới → AI).
+    tk_dp = {"pheu": {}, "moi": 0, "cu": 0, "giu": 0, "de_xuat": 0, "cap_nhat": 0,
+             "pham_vi": {"tu": tu_pv.isoformat(timespec="minutes")}}
+    hits = [(x["d"], x["dt"]) for x in mau if x["nhac"] and not x["da_loai"]]
+    if hits:
+        try:
+            _tach_va_giu(du_an, luot, hits, tu, han, tk_dp)
+            if sot:
+                co = K.khoa_da_co(ma, [s["khoa"] for s in sot])
+                for s in sot:
+                    s["bo_sung"] = s["khoa"] in co
+                    s["hanh_dong"].append("đã ghi vào kho" if s["bo_sung"]
+                                          else "đã qua lọc + AI — không giữ")
+        except Exception as e:
+            if type(e).__name__ == "MatQuyen":
+                raise
+            ghi_chu.append("kiểm độ phủ: lấp bài sót lỗi "
+                           + A._che_token(f"{type(e).__name__}: {e}")[:120])
+    # Tự sửa đường thu thập theo lý do sót (chủ dự án 17/10: "không chỉ đo").
+    moc_noi = doc_moc_tk(ma).get(KDP.KHOA_NOI_CFG)
+    hd = KDP.hanh_dong(sot, tu, dang_theo, moc_noi, so_do["do_phu_tl"], bay_gio)
+    if hd["de_xuat"]:
+        try:
+            K.ghi_de_xuat(ma, hd["de_xuat"])
+        except K.LoiKho as e:
+            ghi_chu.append(f"kiểm độ phủ: không ghi được đề xuất nguồn ({e})"[:200])
+    if so_yc:
+        ghi_moc_tk(ma, {KDP.KHOA_NOI_CFG: hd["noi_cfg"]})
+    mau_tt = {"tag": [{"ten": f"#{t}", "trang": trang_tag[t],
+                       **{k: x for k, x in ((tkm.get("tag") or {}).get(t) or {}).items()
+                          if k != "cid"}} for t in trang_tag],
+              "tac_gia": [{"ten": f"@{u}", "trang": trang_tg[u],
+                           **{k: x for k, x in ((tkm.get("tac_gia") or {}).get(u) or {}).items()
+                              if k != "uid"}} for u in trang_tg],
+              "theo_duong": theo_duong, "ngay": KDP.NGAY_MAU, "tran_usd": cfg["tran_usd"]}
+    dp = {"usd": usd, "so_yeu_cau": so_yc, "so": so_do, "mau": mau_tt,
+          "bo_sung": int(tk_dp["moi"]), "cu": int(tk_dp["cu"]) + int(tk_dp["cap_nhat"]),
+          "hanh_dong": hd["tom"], "ghi_chu": ghi_chu}
+    try:
+        K.ghi_kiem_do_phu({"du_an": ma, "luot_id": luot, "nen_tang": "tiktok", **so_do,
+                           "bo_sung": dp["bo_sung"], "so_yeu_cau": so_yc, "chi_phi_usd": usd,
+                           "mau": mau_tt, "bai_sot": sot[:KDP.SOT_TOI_DA],
+                           "hanh_dong": hd["tom"]})
+    except K.LoiKho as e:
+        ghi_chu.append(f"kiểm độ phủ: không ghi được bảng kiem_do_phu ({e})"[:200])
+    if so_yc:
+        gon = {k: dict(list(x.items())[-KDP.BO_NHO_TOI_DA:]) for k, x in (("cid", cid),
+                                                                          ("uid", uid))}
+        ghi_moc_tk(ma, {KDP.KHOA_MOC: {"luc": bay_gio.isoformat(timespec="seconds"),
+                                       "luot": luot, "usd": usd, "so_nhac": so_do["so_nhac"],
+                                       "do_phu_tl": so_do["do_phu_tl"], **gon}})
+    with v._khoa:
+        v.d["kiem_do_phu"] = dict(dp)
+        v.luu()
+    return dp
 
 
 # ───────────────────────────── Báo & Web (16/10/2026) ─────────────────────────────
@@ -2211,6 +2389,7 @@ def _chay_viec(v) -> tuple[str, str]:
     moi = cu = lam_moi = 0
     bl: dict = {}
     tkq: dict = {}
+    dp: dict = {}
     ok: list[int] = []
     loi_chung = None
     usd = 0.0
@@ -2297,6 +2476,15 @@ def _chay_viec(v) -> tuple[str, str]:
                 raise
             tkq = {"ghi_chu": [f"tìm từ khoá lỗi: {A._che_token(f'{type(e).__name__}: {e}')[:150]}"]}
         try:
+            # Kiểm độ phủ (17/10/2026, 2 lần/tuần): sau tìm theo từ khoá (bài sót được lấp kịp
+            # vào lượt cào bình luận), tự bắt lỗi — hỏng không làm hỏng lượt bài.
+            dp = _kiem_do_phu(v, du_an, luot, con, han)
+            con = max(0.0, con - float(dp.get("usd") or 0))
+        except Exception as e:
+            if type(e).__name__ == "MatQuyen":
+                raise
+            dp = {"ghi_chu": [f"kiểm độ phủ lỗi: {A._che_token(f'{type(e).__name__}: {e}')[:150]}"]}
+        try:
             bl = _lay_binh_luan(v, du_an, luot, con, han)
         except Exception as e:  # bình luận hỏng không làm hỏng lượt bài
             if type(e).__name__ == "MatQuyen":
@@ -2314,15 +2502,19 @@ def _chay_viec(v) -> tuple[str, str]:
         if v.run_ids():
             nhan = f"theo dõi {ma}" + (f" (lịch #{lich_id})" if lich_id else "")
             usd = float(v.chot_chi_phi([nhan], sorted(
-                {p for p, _ in v.cac_phan() if p not in ("youtube", "binh_luan", "tu_khoa")}),
+                {p for p, _ in v.cac_phan()
+                 if p not in ("youtube", "binh_luan", "tu_khoa", "do_phu")}),
                 _hom_nay()).get("usd") or 0)
         trang_thai = ("da_huy" if v.da_huy() else "loi" if loi_chung or not ok and nguon
                       else "xong" if not loi and not ghi_chu else "mot_phan")
         try:
             K.dong_luot(luot, trang_thai=trang_thai, so_nguon=len(nguon), so_nguon_loi=len(loi),
-                        bai_moi=moi + int(tkq.get("moi") or 0),
-                        bai_cap_nhat=cu + lam_moi + int(tkq.get("cu") or 0), chi_phi_usd=usd,
-                        ghi_chu="; ".join([*ghi_chu, *_cau_tk(tkq), *_cau_bl(bl)]) or None,
+                        bai_moi=moi + int(tkq.get("moi") or 0) + int(dp.get("bo_sung") or 0),
+                        bai_cap_nhat=cu + lam_moi + int(tkq.get("cu") or 0)
+                        + int(dp.get("cu") or 0), chi_phi_usd=usd,
+                        # Câu độ phủ đứng TRƯỚC các dòng phễu dài (ghi_chu cắt ở 2.000 ký tự).
+                        ghi_chu="; ".join([*ghi_chu, *KDP.cau_ghi_chu(dp), *_cau_tk(tkq),
+                                           *_cau_bl(bl)]) or None,
                         loi=(loi_chung or "; ".join(sorted(set(loi.values())))[:500] or None))
         except K.LoiKho as e:
             print(f"[theo_doi] không đóng được lượt {luot}: {e}", flush=True)
@@ -2350,6 +2542,8 @@ def _chay_viec(v) -> tuple[str, str]:
         van_ban += f" {len(loi)} nguồn lỗi: " + "; ".join(sorted(set(loi.values())))[:300] + "."
     if ghi_chu:
         van_ban += " " + "; ".join(ghi_chu) + "."
+    if KDP.cau_ghi_chu(dp):
+        van_ban += " " + "; ".join(KDP.cau_ghi_chu(dp)) + "."
     if _cau_tk(tkq):
         van_ban += " " + "; ".join(_cau_tk(tkq)) + "."
     if _cau_bl(bl):

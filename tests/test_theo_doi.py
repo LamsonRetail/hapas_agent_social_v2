@@ -169,6 +169,9 @@ def mo(monkeypatch):
                                                                  "trang_thai": "đã chạy"}))
     import viec_nen
     monkeypatch.setattr(viec_nen, "tat_ca", list)
+    # Kiểm độ phủ (17/10/2026, 2 lần/tuần) có bài thử riêng (`test_kiem_do_phu.py`); các bài thử
+    # lượt /theodoi khác không lấy mẫu.
+    monkeypatch.setattr(T, "_kiem_do_phu", lambda *a, **k: {})
     return monkeypatch
 
 
@@ -879,7 +882,7 @@ def test_kho_theo_quy_chuan_mo_ta_bi():
     sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
         encoding="utf-8")
     bang = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", sql, re.DOTALL)
-    assert len(bang) == 11                       # + lich_quet (lịch quét tự động, 15/10/2026)
+    assert len(bang) == 12                       # + lich_quet (15/10), kiem_do_phu (17/10/2026)
     # Cột thêm bằng ALTER (không nằm trong khối CREATE) cũng phải có mô tả.
     assert re.search(r"COMMENT ON COLUMN luot_quet\.lich_id IS '.{10,}';", sql)
     for ten, khoi in bang:

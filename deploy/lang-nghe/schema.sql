@@ -356,6 +356,37 @@ ALTER TABLE luot_quet ADD COLUMN IF NOT EXISTS lich_id BIGINT
   REFERENCES lich_quet(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS luot_quet_lich ON luot_quet (lich_id) WHERE lich_id IS NOT NULL;
 
+-- Kiểm ĐỘ PHỦ (17/10/2026, chủ dự án duyệt hai lần/tuần, 0,20 USD/lần): mỗi lần Mark lấy một mẫu bài
+-- TikTok bằng đường KHÁC thu thập hằng ngày (hashtag brand/chiến dịch + bài mới nhất của nhà sáng
+-- tạo nổi), đo bao nhiêu bài nhắc brand đã có trong `bai` — lỗ hổng thu thập tự hiện trên
+-- dashboard — rồi tự sửa đường thu thập (đề xuất nguồn, hashtag + nhịp lượt nổi; cột hanh_dong). Vì sao bảng mà không phải sổ JSON trên đĩa của Mark: dashboard (user khác, tiến
+-- trình khác) cần LỊCH SỬ để so ▲/▼ với lần trước và danh sách bài sót; mốc nhịp tuần + bộ nhớ
+-- cid/uid vẫn ở sổ mốc của Mark (`.moc-tu-khoa.json`) nên bảng chưa tạo thì Mark không kiểm lại
+-- mỗi lượt (chỉ báo "không ghi được bảng" trong ghi chú lượt).
+CREATE TABLE IF NOT EXISTS kiem_do_phu (
+  id              BIGSERIAL PRIMARY KEY,
+  du_an           TEXT NOT NULL REFERENCES du_an(ma) ON UPDATE CASCADE,
+  luot_id         BIGINT REFERENCES luot_quet(id) ON DELETE SET NULL,
+  luc             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  nen_tang        TEXT NOT NULL DEFAULT 'tiktok',
+  so_mau          INT NOT NULL DEFAULT 0 CHECK (so_mau >= 0),
+  so_nhac         INT NOT NULL DEFAULT 0 CHECK (so_nhac >= 0),
+  so_da_co        INT NOT NULL DEFAULT 0 CHECK (so_da_co >= 0),
+  so_da_loai      INT NOT NULL DEFAULT 0 CHECK (so_da_loai >= 0),
+  so_sot          INT NOT NULL DEFAULT 0 CHECK (so_sot >= 0),
+  thao_luan_nhac  BIGINT NOT NULL DEFAULT 0,
+  thao_luan_da_co BIGINT NOT NULL DEFAULT 0,
+  do_phu          NUMERIC(5,2) CHECK (do_phu BETWEEN 0 AND 100),
+  do_phu_tl       NUMERIC(5,2) CHECK (do_phu_tl BETWEEN 0 AND 100),
+  bo_sung         INT NOT NULL DEFAULT 0 CHECK (bo_sung >= 0),
+  so_yeu_cau      INT NOT NULL DEFAULT 0 CHECK (so_yeu_cau >= 0),
+  chi_phi_usd     NUMERIC(10,4) NOT NULL DEFAULT 0 CHECK (chi_phi_usd >= 0),
+  mau             JSONB NOT NULL DEFAULT '{}'::jsonb,
+  bai_sot         JSONB NOT NULL DEFAULT '[]'::jsonb,
+  hanh_dong       JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS kiem_do_phu_du_an_luc ON kiem_do_phu (du_an, luc DESC);
+
 -- ───────────── Mô tả bảng + cột theo quy chuẩn BI (task t280613, skill lsr-bq-description-standard) ─────────────
 -- Chủ dự án 14/10/2026: DB mới cũng theo rule mô tả của BI (11 nhãn bảng, mô tả mọi cột). Ghi
 -- ngay trong file build (COMMENT ON chạy lại không mất), có bài canh tests/test_theo_doi.py.
@@ -652,6 +683,38 @@ COMMENT ON COLUMN lich_quet.tao_boi IS 'Email người tạo lịch trên dashbo
 COMMENT ON COLUMN lich_quet.sua_luc IS 'Thời điểm sửa cấu hình gần nhất (UTC).';
 COMMENT ON COLUMN lich_quet.sua_boi IS 'Email người sửa gần nhất. Email nội bộ — không đẩy lên BigQuery.';
 
+COMMENT ON TABLE kiem_do_phu IS $$[Lớp] Raw
+[Mục đích] Lịch sử kiểm độ phủ: trong một mẫu bài TikTok lấy bằng đường khác thu thập hằng ngày, bao nhiêu bài nhắc brand đã có trong kho, các bài bị sót và việc Mark đã tự làm để lấp.
+[Grain] 1 dòng = 1 lượt kiểm độ phủ của 1 dự án (tối đa 1 lượt mỗi 3,5 ngày)
+[Khoá] PK: id | Join: du_an → du_an.ma; luot_id → luot_quet.id; bai_sot[].khoa → bai.khoa (cùng du_an)
+[Nguồn] Mark (kiem_do_phu.py) trong lượt /theodoi: hashtag brand/chiến dịch + bài mới nhất của nhà sáng tạo nổi qua TikTok API (scraptik), đối chiếu bảng bai
+[Phạm vi] Mọi dự án bật kiểm độ phủ | Kênh: TikTok | Bài đăng trong 30 ngày trước lúc kiểm, từ 17/10/2026
+[Đã xử lý] Bài nhắc brand theo luật khớp từ khoá/hashtag của Mark, đã bỏ từ loại trừ và spam; bài AI đã loại trước không vào mẫu số; trùng bài giữa các đường gộp một
+[Refresh] Ghi một lần khi lượt kiểm xong (hai lần mỗi tuần mỗi dự án), không sửa lại
+[Dùng khi] Theo dõi độ phủ thu thập (do_phu_tl), so với lần trước, xem bài brand bị sót, lý do và Mark đã làm gì
+[Không dùng khi] Bài đã thu thập → dùng bai; chi phí cả lượt → dùng luot_quet
+[Lưu ý] Mẫu không phải toàn bộ TikTok: độ phủ là ước lượng trên mẫu (xem so_nhac). Bài sót đã được đưa qua phễu lọc + AI ngay trong lượt (bo_sung). Không đẩy lên BigQuery.$$;
+COMMENT ON COLUMN kiem_do_phu.id IS 'Mã lượt kiểm tự tăng. PK.';
+COMMENT ON COLUMN kiem_do_phu.du_an IS 'Dự án được kiểm. FK → du_an.ma.';
+COMMENT ON COLUMN kiem_do_phu.luot_id IS 'Lượt /theodoi chứa lượt kiểm. FK → luot_quet.id. NULL khi lượt đã bị xoá.';
+COMMENT ON COLUMN kiem_do_phu.luc IS 'Thời điểm ghi kết quả kiểm (UTC).';
+COMMENT ON COLUMN kiem_do_phu.nen_tang IS 'Nền tảng của mẫu. Giá trị: tiktok.';
+COMMENT ON COLUMN kiem_do_phu.so_mau IS 'Số bài mẫu đăng trong 30 ngày (sau khi gộp trùng), bài.';
+COMMENT ON COLUMN kiem_do_phu.so_nhac IS 'Số bài mẫu nhắc brand, trừ bài AI đã loại trước — mẫu số của độ phủ, bài.';
+COMMENT ON COLUMN kiem_do_phu.so_da_co IS 'Số bài nhắc brand đã có trong bai lúc kiểm (trước khi bổ sung), bài.';
+COMMENT ON COLUMN kiem_do_phu.so_da_loai IS 'Số bài nhắc brand mà Mark đã xét và AI loại trước đó (không tính là sót), bài.';
+COMMENT ON COLUMN kiem_do_phu.so_sot IS 'Số bài nhắc brand chưa có trong bai = so_nhac − so_da_co, bài.';
+COMMENT ON COLUMN kiem_do_phu.thao_luan_nhac IS 'Tổng thảo luận (1 + bình luận nền tảng báo) của các bài nhắc brand, thảo luận.';
+COMMENT ON COLUMN kiem_do_phu.thao_luan_da_co IS 'Tổng thảo luận của các bài nhắc brand đã có trong bai, thảo luận.';
+COMMENT ON COLUMN kiem_do_phu.do_phu IS 'Độ phủ theo số bài = 100 × so_da_co / so_nhac, %. NULL khi so_nhac = 0.';
+COMMENT ON COLUMN kiem_do_phu.do_phu_tl IS 'Độ phủ theo thảo luận = 100 × thao_luan_da_co / thao_luan_nhac, % — số chính trên dashboard (dưới 80% hiện cảnh báo). NULL khi không có bài nhắc brand.';
+COMMENT ON COLUMN kiem_do_phu.bo_sung IS 'Số bài sót đã qua lọc + AI và được ghi mới vào bai ngay trong lượt kiểm, bài.';
+COMMENT ON COLUMN kiem_do_phu.so_yeu_cau IS 'Số yêu cầu TikTok API đã gửi (mỗi yêu cầu một run Apify), yêu cầu.';
+COMMENT ON COLUMN kiem_do_phu.chi_phi_usd IS 'Chi phí theo sổ = so_yeu_cau × 0,003 USD (trần mặc định 0,20 USD/lần), không VAT; tiền thật đã cộng vào luot_quet.chi_phi_usd của lượt. Không âm.';
+COMMENT ON COLUMN kiem_do_phu.mau IS 'Thành phần mẫu (JSON): tag [{ten, trang, bai, loi}], tac_gia [{ten, trang, bai, loi}], theo_duong {hashtag, tac_gia: số đo riêng từng đường}, ngay (30), tran_usd.';
+COMMENT ON COLUMN kiem_do_phu.bai_sot IS 'Tối đa 10 bài sót nhiều thảo luận nhất (JSON): khoa, link, tai_khoan, ten, thao_luan, binh_luan, thich, xem, dang_luc, noi_dung (≤ 200 ký tự), duong, tag, ma_ly_do + ly_do (lý do có lẽ bị sót: chi_hashtag, ngoai_cua_so, it_thich, tac_gia_moi, khac), bo_sung (đã ghi vào bai chưa), hanh_dong (câu Mark đã làm cho bài này).';
+COMMENT ON COLUMN kiem_do_phu.hanh_dong IS 'Việc Mark tự làm sau lượt kiểm (JSON): de_xuat [{dinh_danh, so_bai, thao_luan, uu_tien}] (đề xuất nguồn ghi vào de_xuat), tag_noi (hashtag lượt nổi đang dùng), tag_them (hashtag vừa thêm), noi {trang: [trước, sau], gio: [trước, sau], ly_do} (nới/lùi lượt nổi). {} khi không có bài sót.';
+
 RESET ROLE;
 
 -- Quyền của bot: đọc cấu hình, ghi kết quả. Không sửa dự án, không thêm/xoá nguồn.
@@ -661,6 +724,9 @@ GRANT SELECT, INSERT, UPDATE ON bai, chi_so_ngay, luot_quet, binh_luan TO mark;
 GRANT SELECT, INSERT ON de_xuat TO mark;
 GRANT UPDATE (ten, link, ly_do, so_bai, thao_luan) ON de_xuat TO mark;
 GRANT USAGE ON SEQUENCE luot_quet_id_seq, de_xuat_id_seq TO mark;
+-- Kiểm độ phủ (17/10/2026): Mark chỉ thêm dòng + đọc lại; không sửa/xoá lịch sử.
+GRANT SELECT, INSERT ON kiem_do_phu TO mark;
+GRANT USAGE ON SEQUENCE kiem_do_phu_id_seq TO mark;
 -- Lịch quét tự động (15/10/2026): Mark đọc ĐÚNG các cột nó dùng (`lang_nghe_db._COT_LICH`; không
 -- đọc email tao_boi/sua_boi), chỉ ghi cột trạng thái chạy (FOR UPDATE cần quyền UPDATE trên ít
 -- nhất một cột — đủ ở đây). Không tạo/xoá/sửa cấu hình lịch. REVOKE trước: bản nháp cũ cấp SELECT

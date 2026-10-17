@@ -1023,6 +1023,18 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             print(f"[chi_so] không đọc được tiến độ gán nhãn: {type(e).__name__}", flush=True)
             return None
 
+    async def _do_phu(ma: str) -> dict | None:
+        """Thẻ "Độ phủ" (kiểm 2 lần/tuần của Mark, 17/10/2026) — không theo bộ lọc/khoảng ngày:
+        luôn là lần kiểm gần nhất. Bảng chưa tạo / lỗi: None, trang chỉ không hiện thẻ."""
+        ham = getattr(app.state.kho, "do_phu_gan_nhat", None)
+        if ham is None:
+            return None
+        try:
+            return CS.do_phu_json(await _k(ham, ma), _bay_gio())
+        except Exception as e:  # noqa: BLE001 — chỉ là thẻ phụ, không làm hỏng trang
+            print(f"[chi_so] không đọc được độ phủ: {type(e).__name__}", flush=True)
+            return None
+
     @app.get("/api/chi-so")
     async def api_chi_so(request: Request):
         x = await _loc_api(request)
@@ -1094,6 +1106,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             data = dict(data)
         luot, _ = await _k(app.state.kho.cac_luot, du_an["ma"], 1, 1)
         data["gan_nhan"] = await _tien_do_gan_nhan(du_an["ma"])
+        data["do_phu"] = await _do_phu(du_an["ma"])
         data.update(du_an={"ma": du_an["ma"], "ten": du_an["ten"]},
                     ngay_cuoi_chua_tron=den >= hom_nay,
                     luot_gan_nhat=_luot_json(luot[0] if luot else None),
@@ -1269,11 +1282,24 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 cac_lich = await _k(app.state.kho.cac_lich, d["ma"])
             except LoiKho:
                 cac_lich = []
+            # Kiểm độ phủ (17/10/2026, 2 lần/tuần): lần kiểm cuối quyết định lần tới. Bảng chưa tạo
+            # (schema chưa áp) thì coi như chưa kiểm lần nào.
+            lan_cuoi, hd_dp = None, {}
+            ham_dp = getattr(app.state.kho, "do_phu_gan_nhat", None)
+            if ham_dp is not None:
+                try:
+                    r_dp = await _k(ham_dp, d["ma"], 1)
+                    lan_cuoi = r_dp[0]["luc"] if r_dp else None
+                    hd_dp = (r_dp[0].get("hanh_dong") if r_dp else None) or {}
+                except LoiKho:
+                    lan_cuoi = None
             # `cau_hinh` hiển thị: Threads (MAC_DINH_TAT) chưa đặt thì ô bật hiện TẮT như hiệu lực.
             dong.append({**d, "cau_hinh": CP.cau_hinh_hien_thi(d.get("cau_hinh")),
                          "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
                          "bang": CP.bang_cau_hinh(d),
                          "lich": CP.du_bao_lich(cac_lich, CP.bang_cau_hinh(d), nguon, bay_gio),
+                         "do_phu": {**CP.du_bao_do_phu(d, lan_cuoi, bay_gio),
+                                    "noi": CS.noi_tu_hanh_dong(hd_dp)},
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
@@ -1334,6 +1360,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                         raise NL.LoiNhap("Số bình luận mỗi bài: 0 (cào hết) hoặc từ 5 trở lên.")
                     bl["moi_bai"] = mb
                 ch["binh_luan"][p] = bl
+            if "dp_tran" in form:
+                # Kiểm độ phủ (17/10/2026, 2 lần/tuần): công tắc + trần mỗi lần; ô trống = 0,20.
+                dp: dict = {"bat": form.get("dp_bat") == "1"}
+                if (form.get("dp_tran") or "").strip():
+                    t = NL.tran_usd(form.get("dp_tran"))
+                    if t > CP.DP_TRAN_TOI_DA:
+                        raise NL.LoiNhap("Kiểm độ phủ: trần tối đa "
+                                         f"{usd_vn(CP.DP_TRAN_TOI_DA)} USD mỗi lần.")
+                    dp["tran_usd"] = float(t)
+                ch["do_phu"] = dp
             tran = (NL.tran_usd(form.get("tran_usd_thang"))
                     if (form.get("tran_usd_thang") or "").strip() else None)
             await _k(app.state.kho.dat_cau_hinh, nguoi["email"], ma, ch)
