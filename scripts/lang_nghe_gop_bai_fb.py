@@ -9,10 +9,14 @@ bình luận bị cào lặp dưới nhiều bản (1.307 bình luận đang n�
 (`khu_trung_fb` + `lang_nghe_db.ghi_bai`) chỉ chặn bản trùng MỚI; script này gộp bản trùng CŨ.
 
 Nhóm trùng = các dòng `khu_trung_fb.cung_bai` nối với nhau: chung id số (cột `ma_so_fb`, khoá
-"facebook:<số>", id trong link), hoặc cùng chủ bài + cùng phút đăng + cùng nội dung. Chủ bài so
-dạng gọn của tai_khoan / tac_gia / tên trong link — bắt cả bản lượt tìm theo từ khoá ghi tác giả
-"HAPAS - Chính Hãng Giá Tốt" mà lượt theo dõi ghi "hapaschinhhanggiatot". Cùng chủ + cùng phút mà
-khác nội dung (hoặc chữ rỗng, hoặc hai id actor trả khác nhau): KHÔNG gộp, chạy thử in riêng.
+"facebook:<số>", id trong link), hoặc cùng chủ bài + cùng phút đăng + cùng nội dung — CÙNG luật
+với lúc ghi kho. Chủ bài (`khu_trung_fb.cung_chu`): theo tài khoản (tai_khoan / tên trang trong
+link — bản lượt tìm theo từ khoá ghi tác giả "HAPAS - Chính Hãng Giá Tốt" vẫn khớp nhờ tên trang
+trong link), tên hiển thị chỉ khi CẢ HAI bên không có tài khoản: hai trang khác nhau cùng tên
+"HAPAS" không bị gộp. Nội dung (`khu_trung_fb.chu_ky_noi_dung`, soát 17/10/2026): 200 ký tự đầu
+đã gộp khoảng trắng, NFKC, chữ thường, GIỮ chữ số và link — đúng cách đo (22/24 nhóm giống hệt
+200 ký tự đầu), bài cùng phút chỉ khác giá / mã / link không bị gộp. Cùng chủ + cùng phút mà khác
+nội dung (hoặc không có chữ, hoặc hai id actor trả khác nhau): KHÔNG gộp, chạy thử in riêng.
 
 Quy tắc gộp một nhóm (mỗi nhóm MỘT giao dịch):
   • Giữ bản có `bl_da_lay` lớn nhất (chưa cào = thấp nhất); hoà thì bản `thay_lan_dau` sớm nhất.
@@ -224,8 +228,7 @@ def _ly_do_khong_gop(a: dict, b: dict) -> str:
     sa, sb = KT.la_so(a.get("ma_so_fb")), KT.la_so(b.get("ma_so_fb"))
     if sa and sb and sa != sb:
         return "id_so_khac"
-    import loc_rac
-    if not loc_rac.chuan(a.get("noi_dung") or "") and not loc_rac.chuan(b.get("noi_dung") or ""):
+    if not KT.co_chu(a) and not KT.co_chu(b):
         return "khong_co_chu"
     return "khac_noi_dung"
 
@@ -254,9 +257,8 @@ def tim_nhom(rows: list[dict]) -> tuple[list[list[dict]], list[dict]]:
     for p, cac in theo_phut.items():
         for x, i in enumerate(cac):
             for j in cac[x + 1:]:
-                chung = KT.chu_bai(rows[i]) & KT.chu_bai(rows[j])
-                if chung and hop.goc(i) != hop.goc(j):
-                    khong.append({"phut": p, "chu": min(chung),
+                if KT.cung_chu(rows[i], rows[j]) and hop.goc(i) != hop.goc(j):
+                    khong.append({"phut": p, "chu": min(KT.chu_bai(rows[i]) or {"?"}),
                                   "khoa": [rows[i]["khoa"], rows[j]["khoa"]],
                                   "ly_do": _ly_do_khong_gop(rows[i], rows[j])})
     nhom: dict[int, list[dict]] = {}

@@ -73,10 +73,76 @@ def test_chu_bai_so_dang_gon_ten_hien_thi_va_ten_trang():
     theo từ khoá ghi tai_khoan rỗng + tac_gia "HAPAS - Chính Hãng Giá Tốt"."""
     a = _bai("pfbidA")
     b = _bai("pfbidB", tai_khoan="", tac_gia="HAPAS - Chính Hãng Giá Tốt")
-    assert KT.chu_bai(a) & KT.chu_bai(b)
+    assert KT.cung_chu(a, b), "tên trang trong link pfbid của chính bài"
     nhom = _bai("pfbidC", link="https://www.facebook.com/groups/700481333796092/posts/pfbidC",
                 tai_khoan="", tac_gia="Chën Dä")
-    assert KT.chu_bai(nhom) == {"chenda"}, "đoạn 'groups' của link không phải chủ bài"
+    assert KT.tai_khoan_bai(nhom) == set(), "đoạn 'groups' của link không phải chủ bài"
+    assert KT.chu_bai(nhom) == {"chenda"}, "không có tài khoản: in theo tên hiển thị"
+
+
+def test_hai_trang_khac_nhau_cung_ten_hien_thi_khong_gop():
+    """Soát 17/10/2026: bản trước so lẫn tên hiển thị — hai trang KHÁC nhau cùng tên "HAPAS" đăng
+    cùng phút cùng chữ bị gộp."""
+    a = _bai("pfbidA", tai_khoan="hapas.official", tac_gia="HAPAS",
+             link="https://www.facebook.com/hapas.official/posts/pfbidA")
+    b = _bai("pfbidB", tai_khoan="hapasglobal", tac_gia="HAPAS",
+             link="https://www.facebook.com/hapasglobal/posts/pfbidB")
+    assert not KT.cung_chu(a, b) and not KT.cung_bai(a, b)
+    # Cả hai đều không có tài khoản (link permalink.php, actor không trả tên trang): so tên hiển thị.
+    c = _bai("pfbidC", tai_khoan="", tac_gia="HAPAS",
+             link="https://www.facebook.com/permalink.php?story_fbid=pfbidC&id=1000")
+    d = _bai("pfbidD", tai_khoan="", tac_gia="HAPAS",
+             link="https://www.facebook.com/permalink.php?story_fbid=pfbidD&id=1000")
+    assert KT.cung_bai(c, d)
+    assert not KT.cung_bai(c, dict(d, tac_gia="HAPAS Store"))
+    # Một bên có tài khoản, bên kia chỉ có tên hiển thị: không chứng minh được cùng trang.
+    assert not KT.cung_chu(a, c) and not KT.cung_bai(b, c)
+    # thedoor (link mang id SỐ của trang) với actor cũ (link tên trang): cùng tai_khoan.
+    e = _bai("1461248806106257", tai_khoan="hapasglobal", tac_gia="HAPAS",
+             link="https://www.facebook.com/100066634543565/posts/1461248806106257")
+    assert KT.cung_chu(e, b) and KT.cung_bai(e, b)
+
+
+def test_noi_dung_chu_ky_chat_giu_so_ma_va_link():
+    """Soát 17/10/2026: `loc_rac.chuan` đổi số thành 0, bỏ link — bài KHÁC nhau cùng phút chỉ khác
+    giá / mã / link bị gộp. Chữ ký mới giữ chúng; chỉ bỏ khác biệt không phải nội dung."""
+    def hai(x, y):
+        return KT.cung_bai(_bai("pfbidA", noi_dung=x), _bai("pfbidB", noi_dung=y))
+    assert not hai("Túi HAPAS giá 299k, ship toàn quốc", "Túi HAPAS giá 399k, ship toàn quốc")
+    assert not hai("Nhập mã HAPAS10 giảm ngay", "Nhập mã HAPAS20 giảm ngay")
+    assert not hai(f"{CHU} https://hapas.vn/p/101", f"{CHU} https://hapas.vn/p/102")
+    # Khác biệt không phải nội dung: hoa thường, khoảng trắng / xuống dòng, chữ "đậm" Unicode,
+    # khoảng trắng không ngắt, ký tự chọn kiểu emoji (U+FE0F), zero-width.
+    assert hai("Túi  MỚI về\n\nHAPAS", "túi mới về hapas")
+    assert hai("Sale 𝐇𝐀𝐏𝐀𝐒\u00a0❤\ufe0f\u200b", "sale hapas ❤")
+    assert KT.chu_ky_noi_dung("A" * 250) == "a" * KT.KY_TU_NOI_DUNG
+    assert not hai("🌸🌸", "🌸🌸") and not KT.co_chu({"noi_dung": "📸 !!"})
+
+
+def test_luat_moi_van_gop_moi_cap_giong_het_theo_cach_do():
+    """Đo 17/10/2026 (DB production): 22/24 nhóm trùng có nội dung GIỐNG HỆT theo md5 200 ký tự đầu,
+    chỉ chuẩn hoá khoảng trắng. Chữ ký cắt 200 ký tự TRƯỚC mọi bước chuẩn hoá khác (cắt giống nhau
+    ở hai bên) nên MỌI cặp giống nhau theo cách đo vẫn khớp — kể cả khi actor cắt đuôi khác nhau."""
+    import hashlib
+    import random
+
+    def do(s: str) -> str:
+        return hashlib.md5(" ".join(s.split())[:200].encode("utf-8")).hexdigest()
+    ngau = random.Random(1710)
+    chu = list("aăâbcdđeêghiklmnoôơpqrstuưvxyAĐÊƠÚỳỹ0123456789 .,!?#%/:-😍❤\u200b\ufe0f")
+    dem = 0
+    for _ in range(400):
+        goc = "".join(ngau.choice(chu) for _ in range(ngau.randint(150, 400))) + " hapas"
+        x = goc.replace(" ", ngau.choice([" ", "  ", "\n", " \t"]), ngau.randint(0, 5))
+        y = goc + ngau.choice(["", " … Xem thêm", "\n#HAPAS #quatang"])
+        if do(x) != do(y):
+            continue
+        dem += 1
+        assert KT.cung_bai(_bai("pfbidA", noi_dung=x), _bai("pfbidB", noi_dung=y)), (x, y)
+    assert dem > 300
+    # Hai nhóm "cùng phút khác nội dung" của lần đo vẫn KHÔNG gộp.
+    assert not KT.cung_bai(_bai("pfbidA"), _bai("pfbidB", noi_dung="Minigame tháng 10: bình luận "
+                                                                    "để nhận quà từ HAPAS nhé"))
 
 
 def test_cung_bai_theo_chu_phut_noi_dung():
@@ -88,8 +154,12 @@ def test_cung_bai_theo_chu_phut_noi_dung():
                                    link="https://www.facebook.com/shop.khac/posts/pfbidB"))
     # Ảnh không chú thích cùng phút của một trang: thường là hai bài khác nhau.
     assert not KT.cung_bai(_bai("pfbidA", noi_dung="🌸🌸"), _bai("pfbidB", noi_dung="🌸🌸"))
-    # Bài ngắn (< 30 ký tự, không có mã nội dung): so nội dung chuẩn hoá.
-    assert KT.cung_bai(_bai("pfbidA", noi_dung="Túi mới!!"), _bai("pfbidB", noi_dung="túi mới"))
+    # Bài ngắn: so chữ ký (hoa thường, khoảng trắng); dấu câu là nội dung.
+    assert KT.cung_bai(_bai("pfbidA", noi_dung="Túi MỚI  về"), _bai("pfbidB", noi_dung="túi mới về"))
+    assert not KT.cung_bai(_bai("pfbidA", noi_dung="Túi mới!!"), _bai("pfbidB", noi_dung="túi mới"))
+    # `ma_noi_dung` của kho (băm `loc_rac`, số → 0) KHÔNG còn quyết định: giá khác là bài khác.
+    assert not KT.cung_bai(_bai("pfbidA", noi_dung="Giá 299k", ma_noi_dung="m1"),
+                           _bai("pfbidB", noi_dung="Giá 399k", ma_noi_dung="m1"))
     # Id số: chung id → cùng bài (dù khác phút); hai id actor trả khác nhau → khác bài.
     assert KT.cung_bai(_bai("pfbidA", ma_so_fb="1111111"),
                        _bai("pfbidB", ma_so_fb="1111111", dang_luc=None))

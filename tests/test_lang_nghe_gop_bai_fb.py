@@ -285,6 +285,26 @@ def test_tim_nhom_dung_luat_va_bao_cap_khong_gop():
                   ("facebook:pfbidP", "facebook:pfbidQ"): "khong_co_chu"}
 
 
+def test_tim_nhom_cung_luat_moi_hai_trang_cung_ten_va_chi_khac_gia():
+    """Soát 17/10/2026: script áp CÙNG luật với lúc ghi — hai trang khác nhau cùng tên "HAPAS"
+    không gộp (không cùng chủ nên cũng không vào danh sách "cùng chủ cùng phút"); bài cùng trang
+    chỉ khác giá là "khác nội dung"."""
+    rows = [
+        _bai("pfbidA", tai_khoan="hapas.official", tac_gia="HAPAS",
+             link="https://www.facebook.com/hapas.official/posts/pfbidA"),
+        _bai("pfbidB", tai_khoan="hapasglobal", tac_gia="HAPAS",
+             link="https://www.facebook.com/hapasglobal/posts/pfbidB"),
+        _bai("pfbidC", noi_dung="Túi HAPAS giá 299k"),
+        _bai("pfbidD", noi_dung="Túi HAPAS giá 399k"),
+        _bai("pfbidE", noi_dung="Túi  hapas GIÁ 299k"),
+    ]
+    nhom, khong = G.tim_nhom(rows)
+    assert [sorted(r["khoa"][9:] for r in g) for g in nhom] == [["pfbidC", "pfbidE"]]
+    ly = {tuple(sorted(x["khoa"])): x["ly_do"] for x in khong}
+    assert ly == {("facebook:pfbidC", "facebook:pfbidD"): "khac_noi_dung",
+                  ("facebook:pfbidD", "facebook:pfbidE"): "khac_noi_dung"}
+
+
 def test_chon_ban_giu_bl_da_lay_lon_nhat_hoa_thi_thay_som_nhat():
     a = _bai("a", bl_da_lay=94, thay_lan_dau=BAY_GIO)
     b = _bai("b", bl_da_lay=94, thay_lan_dau=BAY_GIO - datetime.timedelta(days=1))
