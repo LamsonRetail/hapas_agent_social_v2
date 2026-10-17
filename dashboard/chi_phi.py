@@ -311,6 +311,53 @@ def _so_rieng(v, lo: int, hi: int, md: int) -> int:
     return md if n < lo else min(hi, n)
 
 
+#: Facebook ĐƯỜNG 2 (17/10/2026, `theo_doi.TK_FB2_*`): mina_safwat~facebook-search-actor, 0,002 USD/bài
+#: + 0,00005 USD/run, mỗi cụm nhiều từ có tên brand một run; mặc định 12 bài mỗi cụm, nhịp 20 giờ
+#: (chiến dịch 6 giờ). Ước tính trang này là TỐI ĐA mỗi lượt (không trừ lượt bị nhịp bỏ qua).
+TK_FB2_MOI_TU = 12
+TK_FB2_GIO = 20
+TK_FB2_GIO_CD = 6
+TK_FB2_GIA = 0.002
+TK_FB2_KHOI = 0.00005
+
+
+def _cau_hinh_fb2(du_an: dict, rieng: dict, bat_rieng: bool, so_fb: int) -> dict:
+    """Bản sao `theo_doi._cau_hinh_fb2`: khối có `bat` thì chỉ True là bật (độc lập số bài đường
+    chính); thiếu `bat` thì theo đường chính (Facebook số bài > 0)."""
+    d2 = rieng.get("duong2") if isinstance(rieng.get("duong2"), dict) else {}
+    so = _so_rieng(d2.get("so_bai_moi_tu"), 0, SO_TOI_DA, TK_FB2_MOI_TU)
+    bat = d2["bat"] is True if "bat" in d2 else so_fb > 0
+    return {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and bat and so > 0,
+            "so_bai_moi_tu": so,
+            "gio": _so_rieng(d2.get("gio"), 0, 24 * 31, TK_FB2_GIO),
+            "gio_chien_dich": _so_rieng(d2.get("gio_chien_dich"), 0, 24 * 31, TK_FB2_GIO_CD)}
+
+
+def _tokens(s: str) -> list[str]:
+    """Bản sao `apify_tool._tokens`: bỏ dấu, thường hoá, tách theo ký tự không phải chữ/số."""
+    return re.findall(r"[^\W_]+", _norm(s))
+
+
+def tu_fb_duong2(du_an: dict, tu: list[str] | None = None) -> list[str]:
+    """Bản sao `theo_doi.tu_fb_duong2`: cụm ≥ 2 chữ có tên brand (mọi chữ của tên, hoặc tên viết
+    liền, là một chữ của cụm)."""
+    ten = _tokens(str(du_an.get("ten") or ""))
+    gon = "".join(ten)
+    ra = []
+    for kw in (tu if tu is not None else tu_tim(du_an)):
+        chu = _tokens(kw)
+        if len(str(kw).split()) >= 2 and ten and (all(t in chu for t in ten) or gon in chu):
+            ra.append(kw)
+    return ra
+
+
+def uoc_fb_duong2(so_cum: int, moi_cum: int) -> float:
+    """Bản sao `theo_doi.uoc_fb_duong2`."""
+    if so_cum <= 0 or moi_cum <= 0:
+        return 0.0
+    return round(so_cum * (moi_cum * TK_FB2_GIA + TK_FB2_KHOI) * HE_SO_UOC, 4)
+
+
 def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
     """Cấu hình HIỆU LỰC của một nền tảng — y hệt `theo_doi.cau_hinh` của Mark (cột tk_bat /
     bl_bat là công tắc tổng; thiếu `bat` thì bật trừ `MAC_DINH_TAT`; số bỏ trống/rác lấy cột
@@ -330,6 +377,8 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
             b = rieng.get("boc")
             ra["boc"] = (WEB_BOC_MAC_DINH if isinstance(b, bool) or b is None
                          else _kep(b, 0, SO_TOI_DA, WEB_BOC_MAC_DINH))
+        if p == "facebook":
+            ra["duong2"] = _cau_hinh_fb2(du_an, rieng, bat_rieng, so)
         return ra
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
@@ -433,7 +482,12 @@ def bang_cau_hinh(du_an: dict) -> dict:
         bl[p]["uoc"] = (uoc_binh_luan_luot(bl[p]["so_bai"], bl[p]["moi_bai"], p)
                         if bl[p]["bat"] else 0.0)
     tk["web"]["so_cau"] = so_cau_web(tu)
-    uoc_tk = round(sum(x["uoc"] for x in tk.values()), 4)
+    # Facebook đường 2 (17/10/2026): dòng riêng trên trang (`tk.facebook.duong2`), cộng vào tổng
+    # tìm theo từ khoá; `uoc` của Facebook vẫn chỉ là đường chính.
+    d2 = tk["facebook"]["duong2"]
+    d2["cum"] = tu_fb_duong2(du_an, tu)
+    d2["uoc"] = uoc_fb_duong2(len(d2["cum"]), d2["so_bai_moi_tu"]) if d2["bat"] else 0.0
+    uoc_tk = round(sum(x["uoc"] for x in tk.values()) + d2["uoc"], 4)
     return {"tu_khoa": tk, "binh_luan": bl, "so_tu_khoa": len(tu),
             "uoc_tk": uoc_tk, "uoc_web": tk["web"]["uoc"],
             "uoc_tk_mxh": round(uoc_tk - tk["web"]["uoc"], 4),
@@ -587,6 +641,7 @@ def hang_so_cho_trinh_duyet() -> dict:
     return {"gia": GIA, "he_so": HE_SO_UOC, "start": START_COST, "ngay": NGAY_THANG_CAU_HINH,
             "tk_gia": TK_GIA, "tk_khoi": TK_KHOI, "tk_fb_toi_da": TK_FB_TOI_DA,
             "tk_ig_so_tu": TK_IG_TOI_DA_TU, "tk_ig_tab": TK_IG_TAB,
+            "fb2": {"gia": TK_FB2_GIA, "khoi": TK_FB2_KHOI, "moi_tu": TK_FB2_MOI_TU},
             "bl_gia": BL_GIA, "bl_khoi": BL_KHOI_DONG,
             "bl_uoc_moi_bai": BL_UOC_MOI_BAI, "gioi_han": GIOI_HAN, "nen_tang": NEN_TANG,
             # Threads (16/10/2026): ≥ 10 bài mỗi tài khoản / từ khoá, ≤ 20 mỗi lượt; mặc định tắt.

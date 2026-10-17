@@ -2799,6 +2799,98 @@ def _fetch_facebook(q: list[str], limit: int, country: str, d_from, d_to) -> lis
     return _chuan_facebook(raw)
 
 
+# ── Facebook ĐƯỜNG THỨ HAI: mina_safwat~facebook-search-actor (17/10/2026) ──
+# Đo thật (6 run, gói FREE): "túi hapas" 14/25 bài liên quan, "quà tặng hapas" 23/25, "ví hapas"
+# 19/20, "nước hoa hapas" 19/20; "hapas" một chữ chỉ 3/30 (tiếng Swahili "hapa", Hapas Guitars)
+# → chỉ dùng cụm NHIỀU TỪ có tên brand (`theo_doi.tu_fb_duong2`). Với "túi hapas", mina và
+# scrapeforge chỉ trùng 1/14 bài liên quan — hai đường bổ sung nhau. Actor trả bài MỚI NHẤT trước
+# trong khoảng `startDate`..`endDate` (cả hai ngày tính trọn: run 17/10 có bài 15:24 cùng ngày);
+# `usePeriodFilter` + `period` HỎNG (xin 24 giờ ra bài từ 17/10/2025) nên không bao giờ dùng.
+# Giá `pricingInfos`: 0,002 USD/bài + 0,00005 USD khởi động mỗi run (1 GB), không bậc theo gói.
+_GIA_FB_DUONG2 = 0.002
+_KHOI_FB_DUONG2 = 0.00005
+_RE_FB_SO = re.compile(r"^\d{5,25}$")
+
+
+def ma_so_fb(v) -> str | None:
+    """Id bài Facebook dạng SỐ (post id / reel id) — chuỗi chữ số, hoặc None. pfbid (đổi giữa các
+    lượt cào, đo 17/10/2026) không phải id số."""
+    s = str(v or "").strip()
+    return s if _RE_FB_SO.match(s) else None
+
+
+def _slug_fb(url: str) -> str:
+    """Định danh chủ bài từ link hồ sơ: "facebook.com/diep.bao.1257" → "diep.bao.1257";
+    "profile.php?id=…" / "people/<tên>/<id>" → id số; không bóc được → ""."""
+    u = str(url or "")
+    m = re.search(r"[?&]id=(\d+)", u) or re.search(r"/people/[^/]+/(\d+)", u)
+    if m:
+        return m.group(1)
+    m = re.search(r"facebook\.com/([^/?#]+)", u)
+    return m.group(1) if m and m.group(1) not in ("profile.php", "people", "groups") else ""
+
+
+def _chuan_facebook_mina(raw: list, cum: str = "") -> list[tuple]:
+    """Item mina_safwat/facebook-search-actor -> [(dòng, ngày VN)] (trường theo run thật 17/10/2026).
+
+    Ngày: `video_details.publish_timestamp` (mili giây). Chủ bài: `owner_name` /
+    `video_details.owner.owner_as_page` {id, name, profile_url} (92% có link hồ sơ). Số:
+    `statistics.reaction_count.count`, `comment_count`, `shares_count`, `video_view_count` (chỉ
+    video/reel, 39%). `post_id` luôn là SỐ (180/180) → `ma_so_fb` cho khoá chống trùng bài FB (pfbid
+    trong link đổi giữa các lượt cào). Không có follower."""
+    out = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        vd = it.get("video_details") if isinstance(it.get("video_details"), dict) else {}
+        ow = ((vd.get("owner") or {}).get("owner_as_page")
+              or (vd.get("owner") or {}).get("owner_as_user") or {})
+        st = it.get("statistics") if isinstance(it.get("statistics"), dict) else {}
+        rc = st.get("reaction_count")
+        link = str(it.get("url") or it.get("permalink_url") or "")
+        if not link:
+            continue
+        txt = str(it.get("post_title") or (vd.get("title") or {}).get("text") or "")
+        ts = vd.get("publish_timestamp") or vd.get("publish_date")
+        try:
+            dt = _to_vn(float(ts) / 1000) if ts else None
+        except (TypeError, ValueError):
+            dt = None
+        chu = str(ow.get("profile_url") or "")
+        out.append(({
+            "kenh": it.get("owner_name") or ow.get("name") or "",
+            "username": _slug_fb(chu),
+            "link_chu": chu,
+            "followers": 0,           # actor KHÔNG trả follower
+            "views": int(st.get("video_view_count") or 0),
+            "likes": int((rc.get("count") if isinstance(rc, dict) else rc) or 0),
+            "comments": int(st.get("comment_count") or 0),
+            "shares": int(st.get("shares_count") or 0),
+            "hashtags": _tags_from(txt),
+            "text": txt[:1000],
+            "link": link,
+            "ma_so_fb": ma_so_fb(it.get("post_id") or it.get("id")),
+            "_duong": "mina", "_cum": cum,
+            "__goc": it,
+        }, dt))
+    return out
+
+
+def _fetch_facebook_duong2(q: list[str], per: int, d_from, d_to,
+                           tran_usd: float | None = None) -> list[tuple]:
+    """Đường thứ hai của Facebook: MỖI cụm một run (actor nhận một `query`), `limit` = `per` bài
+    mới nhất trong [`d_from`, `d_to`] (ngày tuyệt đối). Cụm lỗi vào sổ lỗi từ khoá (`_fanout`),
+    cụm khác vẫn về; mỗi run mang trần `tran_usd` (`maxTotalChargeUsd`, bên gọi tính từ trần
+    console, phần còn của tháng và ngân sách việc)."""
+    q = _bo_trung_tu_khoa(q)
+    if not q or per <= 0:
+        return []
+    tu, den = d_from.strftime("%Y-%m-%d"), d_to.strftime("%Y-%m-%d")
+    return _fanout(lambda kw: _chuan_facebook_mina(_call(_ACTORS["facebook_duong2"], {
+        "query": kw, "limit": per, "usePeriodFilter": False, "startDate": tu, "endDate": den,
+    }, per, tran_usd=tran_usd, nen_tang="facebook"), kw), q)
+
+
 def _fetch_youtube(q: list[str], limit: int, country: str, d_from, d_to,
                    toi_da_trang: int | None = None) -> list[tuple]:
     """YouTube Data API v3: search -> batch video stats -> batch channel stats.
@@ -3025,9 +3117,11 @@ def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list
     return _chuan_threads(raw)
 
 
+# "facebook_duong2" (17/10/2026): bộ tìm đường 2 của Facebook cho `/theodoi` (chữ ký riêng: cụm,
+# số bài mỗi cụm, khoảng ngày, trần mỗi run) — không phải nền tảng của social_listen.
 _FETCH = {"tiktok": _fetch_tiktok, "instagram": _fetch_instagram,
           "facebook": _fetch_facebook, "youtube": _fetch_youtube,
-          "threads": _fetch_threads}
+          "threads": _fetch_threads, "facebook_duong2": _fetch_facebook_duong2}
 
 
 # ───────────────────────── Lark Sheet ─────────────────────────

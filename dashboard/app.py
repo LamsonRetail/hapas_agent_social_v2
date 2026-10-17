@@ -1363,6 +1363,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         ve = _url("/ngan-sach", du_an=ma)
         try:
             await _du_an_phai_co(ma)
+            cu_du_an = await _k(app.state.kho.doc_du_an, ma) or {}
             ch: dict = {"tu_khoa": {}, "binh_luan": {}}
             for p in CP.NEN_TANG:
                 tk = {"bat": form.get(f"tk_{p}_bat") == "1"}
@@ -1377,6 +1378,23 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     tk["boc"] = NL.so_nguyen(form.get("tk_web_boc"),
                                              "Báo & Web: số trang đọc dự phòng", 0,
                                              CP.SO_TOI_DA)
+                if p == "facebook":
+                    # Đường 2 (17/10/2026): khối `duong2` thay CẢ nhóm tu_khoa khi lưu — biểu mẫu
+                    # không có ô (trang cũ) thì giữ nguyên khối đang có; khoá biểu mẫu không sửa
+                    # (gio, gio_chien_dich) luôn giữ.
+                    cu = cu_du_an.get("cau_hinh")
+                    for k in ("tu_khoa", "facebook", "duong2"):
+                        cu = cu.get(k) if isinstance(cu, dict) else None
+                    d2 = dict(cu) if isinstance(cu, dict) else {}
+                    if "tk_facebook_d2_so_bai" in form:
+                        d2["bat"] = form.get("tk_facebook_d2_bat") == "1"
+                        d2.pop("so_bai_moi_tu", None)
+                        if (form.get("tk_facebook_d2_so_bai") or "").strip():
+                            d2["so_bai_moi_tu"] = NL.so_nguyen(
+                                form.get("tk_facebook_d2_so_bai"),
+                                "Facebook đường 2: số bài mỗi cụm", 0, CP.SO_TOI_DA)
+                    if d2:
+                        tk["duong2"] = d2
                 ch["tu_khoa"][p] = tk
                 if p == "web":             # web không cào bình luận (giai đoạn 1)
                     continue

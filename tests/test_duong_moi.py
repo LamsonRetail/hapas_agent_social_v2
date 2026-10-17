@@ -11,6 +11,7 @@ import datetime
 import json
 import math
 import pathlib
+import time
 
 import pytest
 
@@ -21,6 +22,20 @@ from dashboard import chi_phi as CP
 
 _VN = datetime.timezone(datetime.timedelta(hours=7))
 _GOC = pathlib.Path(__file__).resolve().parent
+
+
+@pytest.fixture
+def mo(monkeypatch):
+    """Như `test_theo_doi.mo`: mọi nền tảng bật (trần console 5 USD/lượt), có key YouTube, AI
+    không phán gì, không lấy mẫu kiểm độ phủ."""
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 5.0, True))
+    monkeypatch.setattr(A, "_youtube_co_key", lambda: True)
+    monkeypatch.setattr(A, "_phan_xu_ai", lambda *a, **k: ({}, {"_sac_thai": {}, "_chu_de": {},
+                                                                 "trang_thai": "đã chạy"}))
+    import viec_nen
+    monkeypatch.setattr(viec_nen, "tat_ca", list)
+    monkeypatch.setattr(T, "_kiem_do_phu", lambda *a, **k: {})
+    return monkeypatch
 
 
 def _mau(ten: str) -> dict:
@@ -158,3 +173,262 @@ def test_quet_lon_instagram_hai_luot_con_moi_tag():
     # Kế hoạch cắt limit (thu_nho) rồi dựng lại payload: trần mỗi tag co theo.
     assert Q.dung_payload("instagram", dict(kh["phan"][0], limit=7), ts)["resultsLimit"] == 3
     assert A._ACTORS["instagram"] not in Q._RAM_NEN, "actor tính theo item: không ghim RAM"
+
+
+# ───────────────────────────── 2. Facebook đường 2: mina_safwat~facebook-search-actor ──────────────
+def _mina(lui_gio: float = 24) -> list[dict]:
+    """Item mina thật (cắt gọn) với giờ đăng dời về `lui_gio` giờ trước — bài thử không phụ thuộc
+    ngày chạy."""
+    items = _mau("mau_fb_mina.json")["items"]
+    goc = max(int(it["video_details"]["publish_timestamp"]) for it in items)
+    moi = (datetime.datetime.now(datetime.timezone.utc).timestamp() - lui_gio * 3600) * 1000
+    ra = json.loads(json.dumps(items))
+    for it in ra:
+        vd = it["video_details"]
+        vd["publish_timestamp"] = vd["publish_date"] = int(moi - (goc - vd["publish_timestamp"]))
+    return ra
+
+
+def test_chuan_facebook_mina_theo_raw_that():
+    items = _mau("mau_fb_mina.json")["items"]
+    rows = A._chuan_facebook_mina(items, "túi hapas")
+    assert len(rows) == len(items)
+    for (d, dt), it in zip(rows, items):
+        st, vd = it["statistics"], it["video_details"]
+        ow = vd["owner"]["owner_as_page"]
+        assert d["link"] == it["url"] and d["kenh"] == it["owner_name"]
+        assert d["likes"] == st["reaction_count"]["count"] and d["comments"] == st["comment_count"]
+        assert d["shares"] == st["shares_count"] and d["views"] == int(st["video_view_count"] or 0)
+        assert d["link_chu"] == ow["profile_url"] and d["username"]
+        assert dt == datetime.datetime.fromtimestamp(vd["publish_timestamp"] / 1000,
+                                                     datetime.timezone.utc)
+        assert d["ma_so_fb"] == it["post_id"] and d["ma_so_fb"].isdigit()
+        assert d["_duong"] == "mina" and d["_cum"] == "túi hapas" and d["followers"] == 0
+        assert d["text"] == it["post_title"]
+    assert {it["type"] for it in items} == {"post", "video"}
+    assert A._slug_fb("https://www.facebook.com/people/Ethan-Mike/61579321204843/") == \
+        "61579321204843"
+    assert A._slug_fb("https://www.facebook.com/profile.php?id=100012") == "100012"
+    assert A._slug_fb("https://www.facebook.com/hapasglobal") == "hapasglobal"
+    assert A.ma_so_fb("pfbid02J6wE8FxDkoHZX8oHmoAUJdYNZ66KYF") is None
+    assert A.ma_so_fb(122180995688977373) == "122180995688977373" and A.ma_so_fb("") is None
+
+
+def test_fetch_facebook_duong2_moi_cum_mot_run_ngay_tuyet_doi(monkeypatch):
+    goi = []
+
+    def call(actor, payload, limit, *a, tran_usd=None, nen_tang=None, **k):
+        goi.append((actor, dict(payload), limit, tran_usd, nen_tang))
+        return _mina()
+    monkeypatch.setattr(A, "_call", call)
+    tu = datetime.datetime(2026, 10, 14, tzinfo=_VN)
+    den = datetime.datetime(2026, 10, 17, 19, 0, tzinfo=_VN)
+    rows = A._fetch_facebook_duong2(["túi hapas", "Túi  HAPAS", "quà tặng hapas"], 12, tu, den,
+                                    tran_usd=0.1)
+    assert [g[1]["query"] for g in goi] == ["túi hapas", "quà tặng hapas"]   # bỏ trùng
+    for actor, p, lim, tran, nt in goi:
+        assert actor == "mina_safwat~facebook-search-actor" and lim == 12 and tran == 0.1
+        assert nt == "facebook"
+        assert p == {"query": p["query"], "limit": 12, "usePeriodFilter": False,
+                     "startDate": "2026-10-14", "endDate": "2026-10-17"}, "period HỎNG: không gửi"
+    assert {d["_cum"] for d, _ in rows} == {"túi hapas", "quà tặng hapas"}
+
+
+def test_tu_fb_duong2_chi_cum_nhieu_tu_co_ten_brand():
+    da = {"ten": "HAPAS", "tu_khoa": ["hapas", "túi hapas", "quatanghapas", "hapas.vn",
+                                       "quà tặng hapas", "yêu từ điều nhỏ nhất", "hapas perfume",
+                                       "Túi xách HAPAS", "túi hapa"]}
+    assert T.tu_fb_duong2(da) == ["túi hapas", "quà tặng hapas", "hapas perfume",
+                                  "Túi xách HAPAS"]
+    assert CP.tu_fb_duong2(da) == T.tu_fb_duong2(da)
+    mm = {"ten": "Mate Made", "tu_khoa": ["túi mate made", "túi matemade", "made in vn"]}
+    assert T.tu_fb_duong2(mm) == ["túi mate made", "túi matemade"] == CP.tu_fb_duong2(mm)
+
+
+@pytest.mark.parametrize("ch, bat, so", [
+    ({}, True, 12),
+    ({"tu_khoa": {"facebook": {"duong2": {"so_bai_moi_tu": 30}}}}, True, 30),
+    ({"tu_khoa": {"facebook": {"duong2": {"so_bai_moi_tu": 0}}}}, False, 0),
+    ({"tu_khoa": {"facebook": {"duong2": {"bat": "false"}}}}, False, 12),
+    ({"tu_khoa": {"facebook": {"duong2": {"bat": False, "so_bai_moi_tu": "rác"}}}}, False, 12),
+    ({"tu_khoa": {"facebook": {"bat": False}}}, False, 12),               # tắt Facebook = tắt cả
+    # Chưa lưu `bat`: theo đường chính; đã lưu bật rõ: 0 bài chỉ tắt scrapeforge.
+    ({"tu_khoa": {"facebook": {"so_bai": 0}}}, False, 12),
+    ({"tu_khoa": {"facebook": {"so_bai": 0, "duong2": {"bat": True}}}}, True, 12),
+])
+def test_cau_hinh_duong2_va_ban_sao_dashboard(ch, bat, so):
+    da = {"ten": "HAPAS", "tu_khoa": ["hapas", "túi hapas"], "tk_bat": True, "tk_so_bai": 15,
+          "cau_hinh": ch}
+    c2 = T.cau_hinh(da, "tu_khoa", "facebook")["duong2"]
+    assert (c2["bat"], c2["so_bai_moi_tu"]) == (bat, so)
+    assert c2["gio"] == T.TK_FB2_GIO and c2["gio_chien_dich"] == T.TK_FB2_GIO_CD
+    assert CP.cau_hinh(da, "tu_khoa", "facebook") == T.cau_hinh(da, "tu_khoa", "facebook")
+    assert not T.cau_hinh(dict(da, tk_bat=False), "tu_khoa", "facebook")["duong2"]["bat"]
+    assert T.tk_co_bat(da) is True
+
+
+def test_uoc_tinh_tinh_ca_duong2_va_khop_dashboard():
+    da = {"ten": "HAPAS", "tu_khoa": ["hapas", "túi hapas", "ví hapas", "quatanghapas"],
+          "tk_bat": True, "tk_so_bai": 15, "cau_hinh": {}}
+    # 2 cụm × (12 × 0,002 + 0,00005) × 1,3
+    assert T.uoc_fb_duong2(2, 12) == pytest.approx(2 * (12 * 0.002 + 0.00005) * 1.3, abs=1e-4)
+    assert CP.uoc_fb_duong2(2, 12) == T.uoc_fb_duong2(2, 12) and T.uoc_fb_duong2(0, 12) == 0
+    tat = dict(da, cau_hinh={"tu_khoa": {"facebook": {"duong2": {"bat": False}}}})
+    assert T.uoc_tu_khoa_du_an(da) == pytest.approx(
+        T.uoc_tu_khoa_du_an(tat) + T.uoc_fb_duong2(2, 12), abs=1e-4)
+    b = CP.bang_cau_hinh(da)
+    assert b["tu_khoa"]["facebook"]["duong2"]["cum"] == ["túi hapas", "ví hapas"]
+    assert b["tu_khoa"]["facebook"]["duong2"]["uoc"] == T.uoc_fb_duong2(2, 12)
+    assert b["uoc_tk"] == pytest.approx(CP.bang_cau_hinh(tat)["uoc_tk"] + T.uoc_fb_duong2(2, 12),
+                                        abs=1e-4)
+    assert (CP.TK_FB2_GIA, CP.TK_FB2_KHOI, CP.TK_FB2_MOI_TU) == (
+        T.TK_FB2_GIA, T.TK_FB2_KHOI, T.TK_FB2_MOI_TU)
+
+
+# ── lượt tìm /theodoi: hai đường Facebook chạy cùng lượt ──
+def _sf_tim(user: str, ma: str, text: str) -> tuple:
+    """Một dòng đã chuẩn hoá của scrapeforge (đường chính)."""
+    return ({"kenh": user, "username": "", "followers": 0, "views": 0, "likes": 3, "comments": 1,
+             "shares": 0, "hashtags": "", "text": text,
+             "link": f"https://www.facebook.com/{user}/posts/{ma}", "__goc": {}},
+            datetime.datetime.now(_VN) - datetime.timedelta(hours=5))
+
+
+def _chay_tk_fb(mo, sf, mina, du_an=None, v=None, con=5.0):
+    import contextvars
+
+    from test_theo_doi import DU_AN, GiaKhoTk, GiaViec
+    kho = GiaKhoTk(mo)
+    goi = {"facebook": [], T.TK_FB2: []}
+
+    def f_sf(q, limit, country, d_from, d_to, **k):
+        goi["facebook"].append(list(q))
+        if isinstance(sf, Exception):
+            raise sf
+        return [(dict(d), dt) for d, dt in sf]
+
+    def f_mina(q, per, d_from, d_to, tran_usd=None):
+        goi[T.TK_FB2].append((list(q), per, d_from, tran_usd))
+        fn = A._KHI_CO_RUN.get()
+        for i, _ in enumerate(q):
+            fn({"id": f"mina-{len(goi[T.TK_FB2])}-{i}"}, {})
+        if isinstance(mina, Exception):
+            raise mina
+        return A._chuan_facebook_mina(mina, q[0])
+    mo.setattr(A, "_FETCH", {"facebook": f_sf, T.TK_FB2: f_mina,
+                             **{p: (lambda *a, **k: []) for p in ("tiktok", "instagram",
+                                                                 "youtube")}})
+    da = du_an or dict(DU_AN, tu_khoa=["hapas", "túi hapas", "quà tặng hapas"], tk_bat=True,
+                       tk_so_bai=15)
+    v = v or GiaViec({}, [])
+    tk = contextvars.copy_context().run(T._tim_tu_khoa, v, da, 3, con, time.monotonic() + 600)
+    return tk, kho, goi, v
+
+
+def test_tim_tu_khoa_facebook_hai_duong_gop_bo_trung_pheu_rieng(mo):
+    mina = _mina()
+    trung = A._chuan_facebook_mina(mina[:1])[0][0]
+    sf = [_sf_tim("shop.a", "1001", "túi hapas mới về"),
+          ({**_sf_tim("x", "1", "x")[0], "link": trung["link"], "text": trung["text"]},
+           datetime.datetime.now(_VN) - datetime.timedelta(hours=3))]
+    tk, kho, goi, v = _chay_tk_fb(mo, sf, mina)
+    assert goi["facebook"] and goi[T.TK_FB2][0][0] == ["túi hapas", "quà tặng hapas"]
+    assert goi[T.TK_FB2][0][1] == T.TK_FB2_MOI_TU and goi[T.TK_FB2][0][3] >= 0.1
+    f = tk["pheu"]["facebook"]
+    assert f["ve"] == len(sf) + len(mina) and f["trung"] >= 1, "gộp rồi bỏ trùng theo khoá"
+    assert f["duong"]["scrapeforge"] == {"ve": len(sf)}
+    m = f["duong"]["mina"]
+    assert m["ve"] == len(mina) and m["cum"] == 2 and m["moi_cum"] == T.TK_FB2_MOI_TU
+    # Tiền đường 2: bài × 0,002 + run × 0,00005 (2 cụm = 2 run).
+    assert m["usd"] == pytest.approx(len(mina) * 0.002 + 2 * 0.00005, abs=1e-6)
+    ph = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == f"tk-{T.TK_FB2}")
+    assert ph["usd_so"] == m["usd"] and ph["trang_thai"] == "xong"
+    assert [x["run_id"] for x in v.d["nen_tang"]["tu_khoa"]["phan"]
+            if x.get("nen_tang") == T.TK_FB2 and x.get("run_id")] == ["mina-1-0", "mina-1-1"]
+    dong = next(c for c in T._cau_tk(tk) if c.startswith("phễu tìm Facebook"))
+    assert f"theo đường: scrapeforge về {len(sf)}; mina về {len(mina)} (2 cụm × 12 bài" in dong
+    ghi = [r for kieu, rows in kho.bai for r in rows]
+    link_mina = {d["link"] for d, _ in A._chuan_facebook_mina(mina)}
+    assert {r["nen_tang"] for r in ghi} == {"facebook"} and len(ghi) >= 4
+    assert any(r["link"] in link_mina for r in ghi) and any(r["link"].endswith("/1001")
+                                                            for r in ghi)
+    assert T.TK_FB2 in T.doc_moc_tk("hapas"), "đường 2 có mốc riêng (cửa sổ + nhịp)"
+
+
+def test_duong2_loi_khong_hong_duong_chinh(mo):
+    tk, _, _, _ = _chay_tk_fb(mo, [_sf_tim("shop.a", "1001", "túi hapas mới về")],
+                              A.LoiApify("LOI", "mina sập"))
+    f = tk["pheu"]["facebook"]
+    assert f["ve"] == 1 and f["duong"]["mina"]["loi"].startswith("LOI")
+    assert any(c.startswith("tìm Facebook (đường 2): LOI") for c in tk["ghi_chu"])
+    dong = next(c for c in T._cau_tk(tk) if c.startswith("phễu tìm Facebook"))
+    assert "mina lỗi (LOI: mina sập)" in dong and f["giu"] == 1
+    assert T.TK_FB2 not in T.doc_moc_tk("hapas") and "facebook" in T.doc_moc_tk("hapas")
+
+
+def test_duong_chinh_loi_duong2_van_giu_bai(mo):
+    tk, _, _, _ = _chay_tk_fb(mo, A.LoiApify("HET_LUOT_24H", "hết lượt"), _mina())
+    f = tk["pheu"]["facebook"]
+    assert "loi" not in f and f["ve"] == len(_mina()) and f["giu"] > 0
+    assert f["duong"]["scrapeforge"]["loi"].startswith("HET_LUOT_24H")
+    dong = next(c for c in T._cau_tk(tk) if c.startswith("phễu tìm Facebook"))
+    assert "scrapeforge lỗi (HET_LUOT_24H" in dong and "mina về" in dong
+    assert "facebook" not in T.doc_moc_tk("hapas") and T.TK_FB2 in T.doc_moc_tk("hapas")
+
+
+def test_duong2_nhip_gio_va_tat(mo):
+    _chay_tk_fb(mo, [], _mina())
+    tk, _, goi, _ = _chay_tk_fb(mo, [], _mina())                  # ngay sau: < 20 giờ
+    assert goi[T.TK_FB2] == [] and any("tìm Facebook (đường 2): bỏ qua (lượt trước" in c
+                                       for c in tk["ghi_chu"])
+    from test_theo_doi import DU_AN
+    tat = dict(DU_AN, tu_khoa=["hapas", "túi hapas"], tk_bat=True, tk_so_bai=15,
+               cau_hinh={"tu_khoa": {"facebook": {"duong2": {"bat": False}}}})
+    _, _, goi, _ = _chay_tk_fb(mo, [], _mina(), du_an=tat)
+    assert goi[T.TK_FB2] == [] and goi["facebook"]
+    chi_d2 = dict(tat, cau_hinh={"tu_khoa": {"facebook": {"so_bai": 0, "duong2": {
+        "gio": 0, "bat": True}}}})
+    tk, _, goi, _ = _chay_tk_fb(mo, [], _mina(), du_an=chi_d2)
+    assert goi["facebook"] == [] and goi[T.TK_FB2], "0 bài chỉ tắt scrapeforge, đường 2 vẫn chạy"
+    assert tk["pheu"]["facebook"]["duong"]["scrapeforge"] == {"tat": True}
+
+
+def test_duong2_co_con_theo_ngan_sach(mo):
+    from test_theo_doi import DU_AN, GiaViec
+    da = dict(DU_AN, tu_khoa=["túi hapas", "quà tặng hapas", "ví hapas"], tk_bat=True,
+              tk_so_bai=0, cau_hinh={"tu_khoa": {"facebook": {"duong2": {"gio": 0, "bat": True}}}})
+    v = GiaViec({}, [])
+    v.d["ngan_sach_usd"] = T.uoc_fb_duong2(2, 12) + 0.001
+    tk, _, goi, _ = _chay_tk_fb(mo, [], _mina(), du_an=da, v=v)
+    assert goi[T.TK_FB2][0][0] == ["túi hapas", "quà tặng hapas"]
+    assert any("co còn 2/3 cụm" in c for c in tk["ghi_chu"])
+    v2 = GiaViec({}, [])
+    v2.d["ngan_sach_usd"] = 0.01
+    tk, _, goi, _ = _chay_tk_fb(mo, [], _mina(), du_an=da, v=v2)
+    assert goi[T.TK_FB2] == [] and any("đường 2): bỏ qua (hết ngân sách" in c
+                                       for c in tk["ghi_chu"])
+
+
+def test_trang_ngan_sach_luu_duong2_facebook():
+    from test_dashboard_app import QL, dang_nhap, tao, thong_bao
+    _, c, kho = tao()
+    kho.du_an["hapas"].update(tk_bat=True, tk_so_bai=15,
+                              tu_khoa=["hapas", "túi hapas", "quà tặng hapas"],
+                              cau_hinh={"tu_khoa": {"facebook": {"duong2": {"gio": 8}}}})
+    csrf = dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert 'data-nt="facebook_d2"' in t and 'name="tk_facebook_d2_so_bai"' in t
+    assert 'data-o="fb2-so-cum" title="Cụm nhiều từ có tên brand">2<' in t
+    r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "tk_facebook_bat": "1",
+                                                   "tk_facebook_d2_so_bai": "20"})
+    assert "Đã lưu cấu hình thu thập" in thong_bao(c, r)
+    d2 = kho.du_an["hapas"]["cau_hinh"]["tu_khoa"]["facebook"]["duong2"]
+    assert d2 == {"gio": 8, "bat": False, "so_bai_moi_tu": 20}, "giữ khoá biểu mẫu không sửa"
+    r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "tk_facebook_bat": "1",
+                                                   "tk_facebook_d2_bat": "1",
+                                                   "tk_facebook_d2_so_bai": ""})
+    d2 = kho.du_an["hapas"]["cau_hinh"]["tu_khoa"]["facebook"]["duong2"]
+    assert d2 == {"gio": 8, "bat": True}
+    # Biểu mẫu cũ (không có ô đường 2): khối duong2 giữ nguyên.
+    c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "tk_facebook_bat": "1"})
+    assert kho.du_an["hapas"]["cau_hinh"]["tu_khoa"]["facebook"]["duong2"] == d2
