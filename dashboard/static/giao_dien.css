@@ -392,6 +392,8 @@ details[open] > summary { margin-bottom: 12px; }
   .dx-thanh { margin: 12px 0 0; padding: 10px 12px; gap: 8px 12px; }
   .dx-thanh__nut { margin-left: 0; width: 100%; }
   .dx-thanh__nut .nut { flex: 1 1 0; }
+  /* điện thoại: thanh dính đáy chiếm ít chỗ khi chưa chọn gì — thông số hiện khi đã chọn */
+  .dx-thanh:not(.dx-thanh--co) .dx-thanh__so-lieu { display: none; }
 }
 
 /* ─── trang Người xem ─── */
