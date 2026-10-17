@@ -84,6 +84,30 @@ NGHI_TINH_LAI_GIAY = 60.0   # nghỉ giữa hai lần thử chốt lại
 TINH_LAI_TRONG_GIAY = 2 * 86400   # khởi động lại: chỉ làm bù việc xong trong 2 ngày
 
 
+def cho_so_cuoi(ids: list[str], kq: dict | None = None, cho: float = CHO_PHI_GIAY,
+                tran: float = TRAN_CHO_PHI_GIAY) -> dict:
+    """Chờ tới SỐ CUỐI của tiền các run `ids` (`kq`: lần đọc đầu `A._chi_phi_cac_run`, None thì
+    tự đọc): mọi run đọc được, không run nào còn sống, run xong muộn nhất đã xong ≥ `cho` giây lúc
+    đọc (Apify không báo `finishedAt` thì tính từ lúc bắt đầu chờ). Trần `tran` giây chờ — hết trần
+    thì trả số mới nhất với `on_dinh` = False. Dùng chung cho chốt chi phí của việc nền
+    (`Viec._tinh_on_dinh`) và script chạy một lần (`scripts/lang_nghe_bu_ig.py`) — không còn luật
+    "hai lần đọc khớp nhau" (phí sự kiện ghi trễ cả khi hai lần đọc cách vài giây vẫn khớp)."""
+    kq = kq if kq is not None else (A._chi_phi_cac_run(ids) if ids else {})
+    da = 0.0
+    while ids:
+        g = kq.get("giay_tu_ket_thuc")
+        tre = da if g is None else max(float(g), 0.0)
+        if tre >= cho and not kq.get("chua_doc") and not kq.get("con_song"):
+            return {**kq, "on_dinh": True}
+        if da >= tran:
+            break
+        nghi = min(max(cho - tre, NGHI_PHI_GIAY), tran - da)
+        _ngu(nghi)
+        da += nghi
+        kq = A._chi_phi_cac_run(ids)
+    return {**kq, "on_dinh": not ids}
+
+
 class MatQuyen(RuntimeError):
     """Tiến trình này không còn là chủ (tiến trình khác giành khoá với số thế hệ lớn hơn)."""
 
@@ -660,25 +684,10 @@ class Viec:
         return kq
 
     def _tinh_on_dinh(self, cho: float = CHO_PHI_GIAY, tran: float = TRAN_CHO_PHI_GIAY) -> dict:
-        """`_tinh` rồi chờ tới SỐ CUỐI: mọi run đọc được, không run nào còn sống, run xong muộn
-        nhất đã xong ≥ `cho` giây lúc đọc (Apify không báo `finishedAt` thì tính từ lúc bắt đầu
-        chốt). Trần `tran` giây chờ — hết trần thì trả số mới nhất, `on_dinh` = False (bước
+        """`_tinh` rồi chờ tới SỐ CUỐI (`cho_so_cuoi`). Hết trần chờ thì `on_dinh` = False (bước
         chốt lại ở nền sẽ đọc lại)."""
         kq = self._tinh()
-        ids = self.run_ids()
-        da = 0.0
-        while ids:
-            g = kq.get("giay_tu_ket_thuc")
-            tre = da if g is None else max(float(g), 0.0)
-            if tre >= cho and not kq.get("chua_doc") and not kq.get("con_song"):
-                return {**kq, "on_dinh": True}
-            if da >= tran:
-                break
-            nghi = min(max(cho - tre, NGHI_PHI_GIAY), tran - da)
-            _ngu(nghi)
-            da += nghi
-            kq = A._chi_phi_cac_run(ids)
-        return {**kq, "on_dinh": not ids}
+        return cho_so_cuoi(self.run_ids(), kq, cho, tran)
 
     def chot_chi_phi(self, queries, platforms, date_range) -> dict:
         """Tiền THẬT của việc: Σ usageTotalUsd đúng các run id của việc (GET actor-runs) khi số

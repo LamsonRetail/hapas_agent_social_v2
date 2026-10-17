@@ -927,10 +927,10 @@ def test_bu_ig_chay_thu_khong_goi_actor_khong_ghi(monkeypatch):
 
 
 def test_bu_ig_ap_dung_ghi_dung_duong_nguon_kenh_nha(monkeypatch, mo):
+    import viec_nen as V
     m = _bu_ig()
     kho = _KhoBuIg(monkeypatch)
     monkeypatch.setenv("APIFY_TOKEN", "apify_api_gia")
-    monkeypatch.setattr(m, "_NGHI_GIAY", 0)
     gui = []
 
     def run(actor, payload, limit, mem=None, deadline=None, min_charge=0, *, tran_usd=None,
@@ -938,10 +938,16 @@ def test_bu_ig_ap_dung_ghi_dung_duong_nguon_kenh_nha(monkeypatch, mo):
         gui.append((actor, payload, limit, tran_usd, nen_tang))
         return _fz(), {"run_id": "rbu1", "status": "SUCCEEDED", "ma": "OK", "usd": 0.0}
     monkeypatch.setattr(A, "_run_actor", run)
-    monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {"usd": 0.0385, "so_run": len(ids),
-                                                            "chua_doc": 0, "con_song": []})
+    # Phí sự kiện ghi TRỄ (soát 17/10/2026): đọc ngay khi run vừa xong 5 giây còn thiếu, hai lần
+    # đọc liền nhau vẫn khớp (luật cũ chốt 0,0201); số cuối có khi run đã xong ≥ 90 giây.
+    ngu: list = []
+    monkeypatch.setattr(V, "_ngu", ngu.append)
+    monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {
+        "usd": 0.0385 if sum(ngu) + 5 >= 90 else 0.0201, "so_run": len(ids), "chua_doc": 0,
+        "con_song": [], "giay_tu_ket_thuc": 5 + sum(ngu)})
     ra = []
     assert m.chay(_ns(ap_dung=True), ra.append) == 0
+    assert ngu == [85.0], "chờ tới khi run đã xong 90 giây (mốc chốt lại), một lần"
     assert gui == [(m.ACTOR, gui[0][1], 40, 0.1, "instagram")]
     assert gui[0][1]["usernames"] == ["hapas.vn"] and gui[0][1]["maxPosts"] == 40
     (luot, kieu, rows), = kho.bai

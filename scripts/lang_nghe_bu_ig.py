@@ -17,7 +17,8 @@ Cách làm:
     đã có — bài trùng chỉ cập nhật số. Bài có bình luận nên lượt `/theodoi` sau tự cào bình luận
     (`lang_nghe_db.bai_can_lay_binh_luan`).
   • Tiền: mở MỘT lượt `theo_doi` riêng (`ma_viec` "bu-ig-…") và đóng với chi phí THẬT đọc lại theo
-    run id (`apify_tool._chi_phi_cac_run`) — tiền vào trần tháng của dự án như mọi lượt theo dõi.
+    run id khi phí sự kiện đã ghi xong (`viec_nen.cho_so_cuoi`, chờ tới ~90 giây sau khi run xong)
+    — tiền vào trần tháng của dự án như mọi lượt theo dõi.
     Không chạy khi dự án đang có lượt theo dõi khác hoặc phần còn của tháng thấp hơn trần.
 
 Chạy trên VPS bằng user `mark` (kho nối qua Unix socket + peer; `APIFY_TOKEN`, model đọc `.env`
@@ -116,24 +117,22 @@ def ke_hoach(ma: str, tai_khoan: list[str] | None, ngay: int, so_bai: int, tran:
 
 
 def _chi_phi_that(run_id: str | None, in_ra) -> float | None:
-    """`usageTotalUsd` THẬT của run (Apify ghi tiền chậm vài chục giây — đọc tới khi hai lần liền
-    khớp, tối đa ~60 giây). None khi không đọc được."""
-    import apify_tool as A
+    """`usageTotalUsd` THẬT của run, theo cách chốt chi phí mới của việc nền (`viec_nen.
+    cho_so_cuoi`). Soát 17/10/2026: phí SỰ KIỆN Apify ghi trễ sau khi run xong (0,1948 → 0,2397;
+    0,0201 → 0,0501) trong khi hai lần đọc cách 10 giây vẫn khớp nhau — luật "hai lần khớp" cũ
+    chốt số thiếu. Script một lần không có bước chốt lại ở nền, nên chờ thẳng tới mốc chốt lại
+    (run đã xong ≥ `viec_nen.CHO_LAI_GIAY` = 90 giây, trần `TRAN_CHO_LAI_GIAY`). None khi không đọc
+    được."""
+    import viec_nen as V
     if not run_id:
         return None
-    truoc = None
-    for _ in range(7):
-        kq = A._chi_phi_cac_run([run_id])
-        if kq.get("so_run") and not kq.get("con_song"):
-            if truoc is not None and abs(kq["usd"] - truoc) < 1e-9:
-                return kq["usd"]
-            truoc = kq["usd"]
-        time.sleep(_NGHI_GIAY)
-    in_ra("Chưa đọc được tiền ổn định từ Apify — lượt ghi số mới nhất đang có.")
-    return truoc
-
-
-_NGHI_GIAY = 10.0
+    kq = V.cho_so_cuoi([run_id], cho=V.CHO_LAI_GIAY, tran=V.TRAN_CHO_LAI_GIAY)
+    if not kq.get("so_run"):
+        return None
+    if not kq.get("on_dinh"):
+        in_ra("Chưa chắc là số cuối của Apify (hết giờ chờ phí ghi trễ) — lượt ghi số mới nhất; "
+              "đối chiếu lại run trên Apify nếu cần.")
+    return kq["usd"]
 
 
 def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
