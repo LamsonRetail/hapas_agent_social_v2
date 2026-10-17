@@ -1338,7 +1338,8 @@ def _bo_qua_tk(v, tk: dict, p: str, ma: str, ly: str, chi_tiet: str = "",
     `{"bo_qua": ly}` — sổ việc (`pheu_tu_khoa`) và `luot_quet.ghi_chu` đều thấy lý do.
     Chẩn đoán 17/10: Threads của HAPAS bật mà lượt 8 không có dòng phễu nào — nhánh công tắc
     console tắt bỏ qua im lặng, còn câu "bỏ qua (hết ngân sách)" nằm SAU các dòng phễu dài nên
-    bị cắt mất ở 2.000 ký tự của `luot_quet.ghi_chu`."""
+    bị cắt mất ở 2.000 ký tự của `luot_quet.ghi_chu` (trần cũ; từ 17/10/2026 là
+    `lang_nghe_db.GHI_CHU_TOI_DA`)."""
     if ghi:
         tk["ghi_chu"].append(f"tìm {_TEN.get(p, p)}: bỏ qua ({ly})"
                              + (f" — {chi_tiet}" if chi_tiet else ""))
@@ -2125,8 +2126,9 @@ def _cau_tk(tk: dict) -> list[str]:
            + (f"bỏ {tk['spam']} bài spam, " if tk.get('spam') else "") + f""
            f"{_usd(tk.get('usd') or 0)} USD")
     pheu = tk.get("pheu") or {}
-    # Ghi chú (bỏ qua / lỗi / co ngân sách) đứng TRƯỚC các dòng phễu dài: `luot_quet.ghi_chu`
-    # cắt ở 2.000 ký tự, phần mất (nếu có) phải là chi tiết phễu, không phải lý do bỏ qua.
+    # Ghi chú (bỏ qua / lỗi / co ngân sách) đứng TRƯỚC các dòng phễu dài: `luot_quet.ghi_chu` có
+    # trần (`lang_nghe_db.GHI_CHU_TOI_DA`), phần mất (nếu có) phải là chi tiết phễu, không phải lý
+    # do bỏ qua.
     return [cau, *(tk.get("ghi_chu") or []),
             *(_cau_pheu(p, pheu[p]) for p in TK_NEN_TANG
               if p in pheu and not pheu[p].get("bo_qua"))]
@@ -2676,7 +2678,8 @@ def _chay_viec(v) -> tuple[str, str]:
                         bai_moi=moi + int(tkq.get("moi") or 0) + int(dp.get("bo_sung") or 0),
                         bai_cap_nhat=cu + lam_moi + int(tkq.get("cu") or 0)
                         + int(dp.get("cu") or 0), chi_phi_usd=usd,
-                        # Câu độ phủ đứng TRƯỚC các dòng phễu dài (ghi_chu cắt ở 2.000 ký tự).
+                        # Câu độ phủ đứng TRƯỚC các dòng phễu dài (ghi_chu có trần
+                        # `K.GHI_CHU_TOI_DA` — phần lỡ bị cắt là chi tiết phễu cuối).
                         ghi_chu="; ".join([*ghi_chu, *KDP.cau_ghi_chu(dp), *_cau_tk(tkq),
                                            *_cau_bl(bl)]) or None,
                         loi=(loi_chung or "; ".join(sorted(set(loi.values())))[:500] or None))

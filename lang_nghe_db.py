@@ -160,6 +160,25 @@ def mo_luot(ma: str, kieu: str, *, ma_viec: str | None = None,
     return int(r["id"])
 
 
+#: Trần `luot_quet.ghi_chu` (cột TEXT) — chỉ để chặn rác, không phải cỡ hiển thị. Trần cũ 2.000:
+#: lượt 9, 10, 11 (17/10/2026) đều dài đúng 2.000 nên phần cuối phễu (Báo & Web, bình luận…) mất;
+#: một lượt đủ nền tảng + web + bình luận + kiểm độ phủ chừng 3–6 nghìn ký tự. Ô nhỏ trên dashboard
+#: tự cắt khi hiển thị (`dashboard/templates/ngan_sach.html`), kho giữ đủ.
+GHI_CHU_TOI_DA = 20_000
+_DUOI_CAT = " … (đã cắt ở trần ghi chú của lượt)"
+
+
+def cat_ghi_chu(ghi_chu) -> str | None:
+    """Ghi chú lượt sẵn sàng ghi: rỗng → None; quá `GHI_CHU_TOI_DA` thì cắt và ĐÁNH DẤU đã cắt
+    (đọc thấy câu cụt mà không biết là bị cắt thì tưởng phễu dừng ở đó)."""
+    s = str(ghi_chu or "")
+    if not s:
+        return None
+    if len(s) <= GHI_CHU_TOI_DA:
+        return s
+    return s[:GHI_CHU_TOI_DA - len(_DUOI_CAT)] + _DUOI_CAT
+
+
 def dong_luot(luot_id: int, *, trang_thai: str, so_nguon: int = 0, so_nguon_loi: int = 0,
               bai_moi: int = 0, bai_cap_nhat: int = 0, chi_phi_usd: float = 0.0,
               loi: str | None = None, ghi_chu: str | None = None) -> None:
@@ -170,7 +189,7 @@ def dong_luot(luot_id: int, *, trang_thai: str, so_nguon: int = 0, so_nguon_loi:
             "ghi_chu = %s WHERE id = %s",
             (trang_thai, so_nguon, so_nguon_loi, bai_moi, bai_cap_nhat,
              round(float(chi_phi_usd or 0), 4), (loi or None) and str(loi)[:500],
-             (ghi_chu or None) and str(ghi_chu)[:2000], luot_id))
+             cat_ghi_chu(ghi_chu), luot_id))
 
 
 def danh_dau_nguon(da_quet: list[int], loi: dict[int, str]) -> None:

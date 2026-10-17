@@ -872,6 +872,34 @@ def test_kho_thieu_psycopg_bao_ro(monkeypatch):
     assert "psycopg" in str(e.value)
 
 
+def test_dong_luot_giu_ghi_chu_dai_toi_tran(monkeypatch):
+    """17/10/2026: lượt 9–11 dài đúng 2.000 ký tự (trần cũ) — mất phễu Báo & Web, bình luận. Kho
+    giữ tới `GHI_CHU_TOI_DA`; quá trần thì cắt và ĐÁNH DẤU; COMMENT cột nói đúng trần."""
+    import contextlib
+    ghi: list[tuple] = []
+
+    class C:
+        def execute(self, sql, ts=()):
+            assert sql.startswith("UPDATE luot_quet SET")
+            ghi.append(ts)
+
+    monkeypatch.setattr(K, "ket_noi", lambda: contextlib.nullcontext(C()))
+    phieu = "; ".join(f"phễu tìm Instagram (dòng {i}): về 0 → trong phạm vi 0" for i in range(120))
+    assert 2000 < len(phieu) < K.GHI_CHU_TOI_DA
+    K.dong_luot(9, trang_thai="xong", ghi_chu=phieu)
+    assert ghi[-1][-2] == phieu, "không cắt ở 2.000 nữa"
+    K.dong_luot(9, trang_thai="xong", ghi_chu="x" * (K.GHI_CHU_TOI_DA + 500))
+    assert len(ghi[-1][-2]) == K.GHI_CHU_TOI_DA and ghi[-1][-2].endswith(K._DUOI_CAT)
+    K.dong_luot(9, trang_thai="xong", ghi_chu="")
+    assert ghi[-1][-2] is None
+    assert K.cat_ghi_chu("y" * K.GHI_CHU_TOI_DA) == "y" * K.GHI_CHU_TOI_DA
+    sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
+        encoding="utf-8")
+    m = re.search(r"COMMENT ON COLUMN luot_quet\.ghi_chu IS '([^']*)';", sql)
+    assert m and f"{K.GHI_CHU_TOI_DA:,}".replace(",", ".") in m.group(1)
+
+
+
 _NHAN_BI = ("[Lớp]", "[Mục đích]", "[Grain]", "[Khoá]", "[Nguồn]", "[Phạm vi]", "[Đã xử lý]",
             "[Refresh]", "[Dùng khi]", "[Không dùng khi]", "[Lưu ý]")
 

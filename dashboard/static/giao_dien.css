@@ -236,6 +236,10 @@ tbody tr:last-child > * { border-bottom: 0; }
 tfoot th, tfoot td { background: var(--be-mat-2); border-top: 1px solid var(--ke); border-bottom: 0; font-weight: 650; }
 tbody tr:hover > td, tbody tr:hover > th { background: color-mix(in srgb, var(--be-mat-2) 70%, transparent); }
 .cat-chu { max-width: 420px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* ghi chú lượt dài (tới 20.000 ký tự từ 17/10/2026): ô chỉ hiện 2 dòng, mở "Xem đủ" mới hiện hết */
+.gc-du { margin-top: 4px; max-width: 640px; }
+.gc-du > summary { cursor: pointer; color: var(--chu-mo); font-size: 12px; }
+.gc-du__chu { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; }
 /* ô tô màu theo loại (nguồn, sắc thái…) */
 .o-mau { font-weight: 600; }
 .o-mau--hong { background: var(--hong-nhat) !important; color: var(--hong-chu); }

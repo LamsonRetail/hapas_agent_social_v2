@@ -712,6 +712,34 @@ def test_trang_ngan_sach_hien_da_tieu_va_lich_su():
     assert "Trang 2/2" in c.get("/ngan-sach?du_an=hapas&trang=2").text
 
 
+def test_ghi_chu_luot_dai_cat_o_hien_thi_khong_cat_o_kho():
+    """17/10/2026: kho giữ ghi chú lượt tới 20.000 ký tự. Ô nhỏ + chú thích chuột chỉ hiện phần đầu;
+    đủ chữ nằm trong "Xem đủ ghi chú" (quản lý). Ghi chú ngắn: không có ô mở thêm."""
+    import html as H
+    import re
+    _, c, kho = tao()
+    dai = "; ".join(f"phễu tìm Instagram dòng {i}: về 0 → giữ 0" for i in range(300)) + "; HẾT"
+    ngan = "tìm Threads: bỏ qua (tắt trên console)"
+
+    def luot(i, gc):
+        return {"id": i, "du_an": "hapas", "kieu": "theo_doi", "ma_viec": f"V{i}",
+                "bat_dau": datetime.datetime(2026, 10, 17, 1, 0, tzinfo=datetime.timezone.utc),
+                "ket_thuc": None, "so_nguon": 3, "so_nguon_loi": 0, "bai_moi": 1,
+                "bai_cap_nhat": 0, "chi_phi_usd": 0.01, "trang_thai": "mot_phan", "loi": None,
+                "ghi_chu": gc}
+    kho.luot = [luot(11, dai), luot(10, ngan)]
+    dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert len(dai) > 10000
+    assert t.count('class="gc-du"') == 1, "chỉ ghi chú dài mới có ô mở thêm"
+    assert H.escape(dai, quote=False) in t and "HẾT" in t, "đủ chữ, phần cuối không mất"
+    assert f"Xem đủ ghi chú ({len(dai):,} ký tự)".replace(",", ".") in t
+    tieu_de = [H.unescape(x) for x in re.findall(r'class="cat-chu" title="([^"]*)"', t)]
+    assert len(tieu_de) == 2 and all(len(x) <= 601 for x in tieu_de)
+    o = re.findall(r'class="cat-chu" title="[^"]*">(.*?)</div>', t, re.DOTALL)
+    assert len(H.unescape(o[0])) <= 401 and H.unescape(o[1]) == ngan
+
+
 # ───────────────────────────── người xem ─────────────────────────────
 def test_khong_xoa_khong_ha_quan_ly_cuoi():
     _, c, kho = tao()

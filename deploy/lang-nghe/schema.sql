@@ -513,7 +513,7 @@ COMMENT ON COLUMN luot_quet.bai_cap_nhat IS 'Số bài đã có được cập n
 COMMENT ON COLUMN luot_quet.chi_phi_usd IS 'Chi phí Apify THẬT của lượt, USD, không VAT. 0 với lượt chỉ dùng YouTube Data API và lượt tu_khoa (chi phí đó ở sổ chi phí quét). Không âm.';
 COMMENT ON COLUMN luot_quet.trang_thai IS 'Giá trị: dang_chay, xong, mot_phan (một số nguồn lỗi), loi, da_huy.';
 COMMENT ON COLUMN luot_quet.loi IS 'Tóm tắt lỗi, tối đa 500 ký tự. NULL khi không lỗi.';
-COMMENT ON COLUMN luot_quet.ghi_chu IS 'Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt). NULL khi không có.';
+COMMENT ON COLUMN luot_quet.ghi_chu IS 'Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt, nền tảng bỏ qua/lỗi kèm lý do) và phễu từng nền tảng của lượt tìm theo từ khoá, các câu nối bằng "; ". Tối đa 20.000 ký tự (từ 17/10/2026; trước đó 2.000 — lượt cũ có thể cụt), quá thì cắt và ghi dấu đã cắt ở cuối. NULL khi không có.';
 COMMENT ON COLUMN luot_quet.lich_id IS 'Lịch quét tự động đã giao lượt này. FK → lich_quet.id. NULL khi lượt gõ tay /theodoi, lịch Giao việc trên console, lượt tu_khoa, hoặc lịch đã bị xoá.';
 
 COMMENT ON TABLE bai IS $$[Lớp] Raw
