@@ -379,7 +379,8 @@ def _co_gian_nguon(ma: str, du_an: dict, nguon: list[dict],
 
 
 def _ghi_co_gian(ma: str, v, nguon: dict[int, dict], theo_nguon: dict[int, list],
-                 bay_gio: datetime.datetime | None = None) -> list[str]:
+                 bay_gio: datetime.datetime | None = None,
+                 loi: dict[int, str] | None = None) -> list[str]:
     """Sau lượt: ghi sổ co giãn (lấy đủ → `day_du_luc`; co mà bài THÔ mới hơn lần quét trước ≥ số
     đã co − 1 → `bao_hoa`, lượt sau lấy đủ để không sót; số bài THÔ theo ngày đăng → `ngay_dang`,
     nhịp lượt sau) và trả câu phễu: co bao nhiêu bài, tiết kiệm bao nhiêu, nguồn nào làm mới đủ,
@@ -387,7 +388,11 @@ def _ghi_co_gian(ma: str, v, nguon: dict[int, dict], theo_nguon: dict[int, list]
 
     Bão hoà (soát 18/10/2026): bản cũ xét `min(ngày) > quet_cuoi` — MỘT bài ghim cũ (actor có thể
     trả; raw thedoor không có cờ ghim và thứ tự không xếp chặt theo giờ) là đủ để không bao giờ bão
-    hoà, nguồn bị co mãi dù đăng dồn. Nay đếm: chừa 1 bài cho bài ghim."""
+    hoà, nguồn bị co mãi dù đăng dồn. Nay đếm: chừa 1 bài cho bài ghim.
+
+    Chỉ nguồn CHẠY THÀNH CÔNG (soát 18/10/2026): nguồn lỗi (`loi` của lượt, `loi_nguon` của phần)
+    hoặc không về bài nào trong phần chạy MỘT PHẦN (hết giờ / trần giữa chừng — có thể chưa tới
+    lượt nó) giữ nguyên sổ — bản cũ ghi `day_du_luc` cho cả chúng nên 7 ngày sau mới lấy đủ lại."""
     from dashboard import chi_phi as CP
     bay_gio = bay_gio or datetime.datetime.now(_VN)
     try:
@@ -401,9 +406,11 @@ def _ghi_co_gian(ma: str, v, nguon: dict[int, dict], theo_nguon: dict[int, list]
                     or not ph.get("co_gian")):
                 continue
             dung = int(ph.get("n") or 0)
+            hong = {int(k) for k in (loi or {})} | {int(k) for k in ph.get("loi_nguon") or {}}
             for nid, (so_cfg, ly) in ph["co_gian"].items():
                 x = nguon.get(int(nid))
-                if x is None:
+                if x is None or int(nid) in hong or (ph.get("trang_thai") == "mot_phan"
+                                                     and not theo_nguon.get(int(nid))):
                     continue
                 ten = _ten_nguon(x)
                 st = dict(so.get(nid) or {})
@@ -4250,7 +4257,7 @@ def _chay_viec(v) -> tuple[str, str]:
                     loi.setdefault(int(i), str(ph.get("ly_do") or ph.get("ma") or "lỗi"))
         han_ai = time.monotonic() + max(0.0, min(150.0, v.con_giay() - 45))
         rows, tk = chon_bai(du_an, theo_nguon, nguon, han_ai)
-        cau_co = _ghi_co_gian(ma, v, nguon, theo_nguon)
+        cau_co = _ghi_co_gian(ma, v, nguon, theo_nguon, loi=loi)
         if rows:
             moi, cu = K.ghi_bai(ma, luot, "theo_doi", rows)
         lam_moi = _lam_moi_youtube(ma, luot)

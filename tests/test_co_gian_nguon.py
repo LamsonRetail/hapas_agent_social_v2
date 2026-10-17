@@ -215,6 +215,33 @@ def test_bao_hoa_bo_qua_bai_ghim_va_ghi_nhip_bai_tho():
     assert st["ngay_dang"][(BAY - datetime.timedelta(days=2)).date().isoformat()] == 1
 
 
+def test_ghi_so_co_gian_chi_nguon_chay_thanh_cong():
+    """Soát 18/10/2026: phần chạy MỘT PHẦN (hết giờ giữa chừng) — nguồn lỗi hoặc chưa về bài nào
+    không được ghi `day_du_luc` (bản cũ ghi cho cả phần → 7 ngày sau mới lấy đủ lại)."""
+    from test_theo_doi import GiaViec
+    qc = BAY - datetime.timedelta(days=1)
+    nguon = {i: _ng(i, f"https://www.facebook.com/trang{i}", qc=qc) for i in (1, 2, 3)}
+    cu = (BAY - datetime.timedelta(days=8)).isoformat(timespec="seconds")
+    T.ghi_moc_tk("hapas", {T.KHOA_CO_GIAN: {str(i): {"day_du_luc": cu} for i in (1, 2, 3)}})
+    v = GiaViec({"facebook": {"phan": [
+        {"id": "facebook-10", "nen_tang": "facebook", "nguon": [1, 2, 3], "n": 10,
+         "trang_thai": "mot_phan", "loi_nguon": {"2": "thedoor không ra bài"},
+         "co_gian": {str(i): [10, "làm mới đủ 10 bài (mỗi 7 ngày)"] for i in (1, 2, 3)}}]}}, [])
+    bai = [({}, BAY - datetime.timedelta(hours=h)) for h in (1, 30, 50)]
+    cau = T._ghi_co_gian("hapas", v, nguon, {1: bai, 2: bai}, BAY, loi={})
+    so = T.doc_moc_tk("hapas")[T.KHOA_CO_GIAN]
+    assert so["1"]["day_du_luc"] == BAY.isoformat(timespec="seconds")
+    assert so["2"] == {"day_du_luc": cu}, "nguồn lỗi: sổ giữ nguyên"
+    assert so["3"] == {"day_du_luc": cu}, "phần chạy dở, nguồn chưa về bài: sổ giữ nguyên"
+    assert cau == ["làm mới đủ số bài cấu hình (số liệu bài cũ): trang1"]
+    # Lỗi của lượt (`loi` — vd đánh lỗi sau khi đọc) cũng chặn, kể cả phần "xong".
+    v.d["nen_tang"]["facebook"]["phan"][0].update(trang_thai="xong", loi_nguon={})
+    T.ghi_moc_tk("hapas", {T.KHOA_CO_GIAN: {str(i): {"day_du_luc": cu} for i in (1, 2, 3)}})
+    T._ghi_co_gian("hapas", v, nguon, {1: bai, 2: bai, 3: bai}, BAY, loi={1: "lỗi"})
+    so = T.doc_moc_tk("hapas")[T.KHOA_CO_GIAN]
+    assert so["1"] == {"day_du_luc": cu} and so["3"]["day_du_luc"] != cu
+
+
 # ───────────────────────────── trang Nguồn ─────────────────────────────
 def test_trang_nguon_bao_so_bai_co(monkeypatch):
     from test_dashboard_app import QL, GiaKho, dang_nhap, tao
