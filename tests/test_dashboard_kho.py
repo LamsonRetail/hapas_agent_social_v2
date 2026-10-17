@@ -82,7 +82,7 @@ THAO_TAC = [
     ("luu_nguoi_xem", lambda: K.luu_nguoi_xem(AI, "moi@hapas.vn", "xem")),
     ("xoa_nguoi_xem", lambda: K.xoa_nguoi_xem(AI, "xem@hapas.vn")),
     ("dong_bo_bq", lambda: K.ghi_nhat_ky(AI, "dong_bo_bq", "bigquery", {"kieu": "bam_tay"})),
-    ("dang_nhap_lan_dau", lambda: K.ghi_dang_nhap_lan_dau(AI, "ou_123")),
+    ("dang_nhap_lan_dau", lambda: K.ghi_dang_nhap(AI, "ou_123")),
     ("them_lich", lambda: K.them_lich(AI, "hapas", LICH)),
     ("sua_lich", lambda: K.sua_lich(AI, 3, LICH)),
     ("tat_lich", lambda: K.bat_tat_lich(AI, 3, False, None)),
@@ -120,8 +120,11 @@ def test_moi_thao_tac_ghi_nhat_ky_cung_giao_dich(gia, hanh_dong, goi):
 
 def test_ghi_dang_nhap_lan_dau_chi_mot_lan(gia):
     gia.tra[r"FROM nhat_ky WHERE hanh_dong = 'dang_nhap_lan_dau'"] = [{"co": 1}]
-    assert K.ghi_dang_nhap_lan_dau(AI, "ou_123") is False
-    assert not any(s.startswith("INSERT") for s, _ in gia.gd[0].lenh)
+    assert K.ghi_dang_nhap(AI, "ou_123") is False
+    lenh = gia.gd[0].lenh
+    assert not any(s.startswith("INSERT") for s, _ in lenh)
+    # lượt đăng nhập nào cũng ghi lần cuối, kể cả khi không phải lần đầu
+    assert lenh[0] == ("UPDATE nguoi_xem SET dang_nhap_cuoi = now() WHERE email = %s", (AI,))
 
 
 def test_doc_bai_gon_va_giu_bai_moi_nhat_khi_cat(gia):
@@ -276,3 +279,39 @@ def test_thieu_psycopg_bao_loi_kho(monkeypatch):
     monkeypatch.setitem(sys.modules, "psycopg", None)
     with pytest.raises(K.LoiKho, match="psycopg"):
         K.kiem_tra()
+
+
+# ─────────────────── danh bạ Lark trong nguoi_xem (17/10/2026) ───────────────────
+COT_DANH_BA = ("ten_lark", "chuc_danh", "phong_ban", "trang_thai_lark", "danh_ba_loi",
+               "danh_ba_luc", "dang_nhap_cuoi")
+
+
+def test_cot_danh_ba_co_trong_schema_va_co_mo_ta():
+    """Cột mới thêm bằng ADD COLUMN IF NOT EXISTS (chạy lại schema.sql không hỏng) + mô tả cột
+    theo quy chuẩn description; `nguoi_xem` không đẩy BigQuery nên không có bản sao BQ."""
+    for cot in COT_DANH_BA:
+        assert f"ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS {cot} " in SCHEMA, cot
+        assert f"COMMENT ON COLUMN nguoi_xem.{cot} IS " in SCHEMA, cot
+    from dashboard import dong_bo_bq
+    assert "nguoi_xem" not in dong_bo_bq.BANG
+
+
+def test_cac_nguoi_xem_doc_cot_danh_ba_va_lan_dang_nhap(gia):
+    K.cac_nguoi_xem()
+    sql = gia.gd[0].lenh[0][0]
+    for cot in COT_DANH_BA:
+        assert cot in sql, cot
+    assert "COALESCE(n.dang_nhap_cuoi" in sql and "'dang_nhap_lan_dau'" in sql
+
+
+def test_ghi_danh_ba_khong_ghi_nhat_ky(gia):
+    K.ghi_danh_ba({"a@hapas.vn": {"trang_thai": "hoat_dong", "ten": "A", "chuc_danh": "CV",
+                                  "phong_ban": "MKT"},
+                   "b@hapas.vn": {"trang_thai": "khong_co", "ten": None, "chuc_danh": None,
+                                  "phong_ban": None}})
+    K.ghi_loi_danh_ba(["a@hapas.vn"], "thieu_quyen")
+    lenh = [x for g in gia.gd for x in g.lenh]
+    assert all(s.startswith("UPDATE nguoi_xem SET") for s, _ in lenh)
+    assert lenh[0][1] == ("hoat_dong", "A", "CV", "MKT", "a@hapas.vn")
+    assert "danh_ba_loi = NULL" in lenh[0][0]
+    assert lenh[-1][1] == ("thieu_quyen", ["a@hapas.vn"])

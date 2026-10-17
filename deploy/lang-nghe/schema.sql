@@ -289,6 +289,19 @@ CREATE TABLE IF NOT EXISTS nguoi_xem (
   them_boi        TEXT,
   them_luc        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Danh bạ Lark (17/10/2026, chủ dự án: "thêm title trong công ty… biết email có active thật
+-- không"): bản đệm đọc từ Lark contact API bằng app của dashboard (dashboard/danh_ba.py), làm
+-- mới ≤ 12 giờ/lần khi mở trang Người xem và ngay khi thêm email. `dang_nhap_cuoi` ghi mỗi lượt
+-- đăng nhập thành công. Không ghi nhật ký (bản đệm, không phải thao tác của người quản lý).
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS ten_lark TEXT;
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS chuc_danh TEXT;
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS phong_ban TEXT;
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS trang_thai_lark TEXT
+  CHECK (trang_thai_lark IN ('hoat_dong', 'chua_kich_hoat', 'tam_khoa', 'nghi_viec', 'khong_co'));
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS danh_ba_loi TEXT
+  CHECK (danh_ba_loi IN ('thieu_quyen', 'loi'));
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS danh_ba_luc TIMESTAMPTZ;
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS dang_nhap_cuoi TIMESTAMPTZ;
 
 -- Nhật ký mọi thay đổi làm trên dashboard (ai, lúc nào, sửa gì). Không đẩy lên BigQuery.
 CREATE TABLE IF NOT EXISTS nhat_ky (
@@ -557,10 +570,10 @@ COMMENT ON TABLE nguoi_xem IS $$[Lớp] Raw
 [Mục đích] Ai được vào dashboard social.hapas.vn và với vai trò gì.
 [Grain] 1 dòng = 1 email
 [Khoá] PK: email | Join: Không có
-[Nguồn] Người quản lý thêm/xoá trên dashboard; người quản lý đầu tiên thêm bằng lệnh quan_tri
+[Nguồn] Người quản lý thêm/xoá trên dashboard; người quản lý đầu tiên thêm bằng lệnh quan_tri; tên, chức danh, phòng ban, trạng thái đọc từ danh bạ Lark (contact API)
 [Phạm vi] Nhân viên HAPAS (tài khoản Lark của tổ chức) | Kênh: Không có | Từ khi cài dashboard
-[Đã xử lý] Email chữ thường
-[Refresh] Ghi tức thời khi người quản lý sửa
+[Đã xử lý] Email chữ thường; trạng thái Lark quy về 5 giá trị
+[Refresh] Ghi tức thời khi người quản lý sửa; cột danh bạ làm mới ≤ 12 giờ/lần khi mở trang Người xem và khi thêm email; dang_nhap_cuoi ghi mỗi lượt đăng nhập
 [Dùng khi] Kiểm quyền đăng nhập dashboard
 [Không dùng khi] Lịch sử thêm/xoá → dùng nhat_ky
 [Lưu ý] Email nội bộ — không đẩy lên BigQuery. Luôn phải còn ít nhất một quan_ly.$$;
@@ -568,6 +581,13 @@ COMMENT ON COLUMN nguoi_xem.email IS 'Email công ty (enterprise_email Lark), ch
 COMMENT ON COLUMN nguoi_xem.vai_tro IS 'Giá trị: xem (chỉ xem), quan_ly (sửa dự án, nguồn, ngân sách, người xem).';
 COMMENT ON COLUMN nguoi_xem.them_boi IS 'Email người thêm. NULL khi thêm bằng lệnh cài đặt.';
 COMMENT ON COLUMN nguoi_xem.them_luc IS 'Thời điểm thêm (UTC).';
+COMMENT ON COLUMN nguoi_xem.ten_lark IS 'Tên trong danh bạ Lark. NULL khi chưa đọc được hoặc không có trong danh bạ.';
+COMMENT ON COLUMN nguoi_xem.chuc_danh IS 'Chức danh (job_title) trong danh bạ Lark. NULL khi trống, chưa đọc được hoặc app thiếu quyền đọc trường này.';
+COMMENT ON COLUMN nguoi_xem.phong_ban IS 'Tên phòng ban trong danh bạ Lark, nhiều phòng nối bằng " · ". NULL khi chưa đọc được.';
+COMMENT ON COLUMN nguoi_xem.trang_thai_lark IS 'Giá trị: hoat_dong, chua_kich_hoat, tam_khoa, nghi_viec, khong_co (không tìm thấy email trong danh bạ). NULL khi chưa đọc được lần nào.';
+COMMENT ON COLUMN nguoi_xem.danh_ba_loi IS 'Lỗi lần đọc danh bạ gần nhất. Giá trị: thieu_quyen (app Lark chưa được cấp scope), loi (lỗi khác). NULL khi lần gần nhất đọc được.';
+COMMENT ON COLUMN nguoi_xem.danh_ba_luc IS 'Thời điểm đọc danh bạ Lark gần nhất, kể cả lần lỗi (UTC). NULL khi chưa đọc.';
+COMMENT ON COLUMN nguoi_xem.dang_nhap_cuoi IS 'Lần đăng nhập dashboard thành công gần nhất (UTC). NULL khi chưa đăng nhập kể từ khi có cột (lần đầu xem nhat_ky dang_nhap_lan_dau).';
 
 COMMENT ON TABLE nhat_ky IS $$[Lớp] Raw
 [Mục đích] Nhật ký mọi thay đổi làm trên dashboard: ai, lúc nào, sửa gì.

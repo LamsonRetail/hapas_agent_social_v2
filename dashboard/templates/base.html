@@ -40,7 +40,7 @@
 </header>
 <main class="khung">
   {% if tb %}
-  <div class="thong-bao thong-bao--{{ 'loi' if tb.loai == 'loi' else 'ok' }}" role="status">{{ tb.nd }}</div>
+  <div class="thong-bao thong-bao--{{ tb.loai if tb.loai in ('loi', 'canh') else 'ok' }}" role="status">{{ tb.nd }}</div>
   {% endif %}
   {% block noi_dung %}{% endblock %}
 </main>

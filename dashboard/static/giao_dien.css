@@ -331,6 +331,7 @@ details[open] > summary { margin-bottom: 12px; }
 .thong-bao { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; border: 1px solid transparent; font-size: 13.5px; }
 .thong-bao--ok { background: var(--tot-nen); color: var(--tot); border-color: color-mix(in srgb, var(--tot) 25%, transparent); }
 .thong-bao--loi { background: var(--loi-nen); color: var(--loi); border-color: color-mix(in srgb, var(--loi) 25%, transparent); }
+.thong-bao--canh { background: var(--canh-nen); color: var(--canh); border-color: color-mix(in srgb, var(--canh) 30%, transparent); }
 
 /* ─── tab nền tảng ─── */
 .tab { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -359,8 +360,13 @@ details[open] > summary { margin-bottom: 12px; }
 .ng-bang td.nho { min-width: 92px; }
 
 /* ─── trang Người xem ─── */
-.nx-luoi { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); align-items: start; }
-@media (max-width: 900px) { .nx-luoi { grid-template-columns: minmax(0, 1fr); } }
+/* Người xem: bảng rộng (chức danh, trạng thái Lark, đăng nhập) — cuộn ngang trong khung trên điện thoại */
+.nx-bang td { vertical-align: middle; }
+.nx-bang .nx-dong2 { display: block; font-size: 12px; color: var(--chu-phu); margin-top: 2px; }
+.nx-bang .nx-o { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.nx-bang td.nx-cd { min-width: 160px; }
+.nx-bang td.nho { white-space: nowrap; }
+@media (max-width: 600px) { .nx-bang td:first-child { min-width: 150px; max-width: 170px; overflow-wrap: anywhere; } }
 
 /* ─── đăng nhập / lỗi ─── */
 .trang-dang-nhap { max-width: 440px; margin: 9vh auto; text-align: center; }

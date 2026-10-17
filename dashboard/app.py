@@ -48,6 +48,7 @@ from starlette.datastructures import MutableHeaders
 from dashboard import chi_phi as CP
 from dashboard import chi_so as CS
 from dashboard import dang_nhap as DN
+from dashboard import danh_ba as DB
 from dashboard import lich_quet as LQ
 from dashboard import nhap_lieu as NL
 from dashboard import trang_lich as TL
@@ -79,6 +80,13 @@ NHO_CHI_SO_TOI_DA = 64
 # 4 bộ bình luận 50k dòng chữ dài là vượt MemoryMax 512M. Khoảng thứ hai mở thì khoảng cũ bị bỏ.
 NHO_DONG_TOI_DA_DONG = BAI_TOI_DA + BL_TOI_DA + 10_000
 SUC_KHOE_GIAY = 15.0        # /suc-khoe công khai: không mở kết nối DB mỗi lần gọi
+# Danh bạ Lark trên trang Người xem (danh_ba.py): bản đệm trong `nguoi_xem`, làm mới NỀN khi mở
+# trang (sau khi đã trả trang) nếu cũ hơn 12 giờ; lần lỗi thì 1 giờ sau mới thử lại. Thêm email:
+# đợi Lark tối đa 5 giây để báo ngay email không có/không hoạt động — quá thì lưu vẫn xong.
+DANH_BA_GIAY = 12 * 3600
+DANH_BA_LOI_GIAY = 3600
+DANH_BA_NEN_GIAY = 30.0
+DANH_BA_THEM_GIAY = 5.0
 _CHUA_KIEM = object()
 
 log = logging.getLogger("lang_nghe.dashboard")
@@ -483,8 +491,101 @@ def _chay_dong_bo_nen(chay) -> threading.Thread:
     return t
 
 
+# ───────────────────────────── danh bạ Lark (trang Người xem) ─────────────────────────────
+_MAU_TRANG_THAI = {"hoat_dong": "tot", "chua_kich_hoat": "canh", "tam_khoa": "canh",
+                   "nghi_viec": "loi", "khong_co": "loi"}
+_GOI_Y_TRANG_THAI = {
+    "hoat_dong": "Tài khoản Lark của công ty đang hoạt động.",
+    "chua_kich_hoat": "Tài khoản Lark đã tạo nhưng chưa kích hoạt — người này chưa đăng nhập "
+                      "được dashboard.",
+    "tam_khoa": "Tài khoản Lark đang bị tạm khoá — người này không đăng nhập được.",
+    "nghi_viec": "Tài khoản đã rời tổ chức Lark — nên xoá khỏi danh sách người xem.",
+    "khong_co": "Không tìm thấy email này trong danh bạ Lark công ty (sai chính tả, email cá "
+                "nhân, hoặc ngoài phạm vi danh bạ app được xem) — người này không đăng nhập được.",
+}
+GOI_Y_THIEU_QUYEN = (
+    "App Lark của dashboard chưa được cấp quyền đọc danh bạ. Cần bật trong Lark Developer → "
+    "Permissions & Scopes (quyền ứng dụng): contact:user.id:readonly, contact:user.base:readonly, "
+    "contact:user.employee:readonly (chức danh), contact:user.department:readonly, "
+    "contact:department.base:readonly; phạm vi danh bạ = toàn công ty; phát hành phiên bản mới. "
+    "Dashboard tự thử lại mỗi giờ.")
+GOI_Y_LOI_DANH_BA = "Lark lỗi hoặc quá thời gian khi đọc danh bạ — dashboard tự thử lại sau 1 giờ."
+
+
+def _can_doc_danh_ba(ds: list[dict], bay_gio: datetime.datetime) -> list[str]:
+    """Email cần đọc lại danh bạ: chưa đọc, đọc được đã cũ hơn 12 giờ, lỗi đã quá 1 giờ."""
+    ra = []
+    for x in ds:
+        luc = x.get("danh_ba_luc")
+        if not isinstance(luc, datetime.datetime):
+            ra.append(x["email"])
+            continue
+        if luc.tzinfo is None:
+            luc = luc.replace(tzinfo=datetime.UTC)
+        song = DANH_BA_LOI_GIAY if x.get("danh_ba_loi") else DANH_BA_GIAY
+        if (bay_gio - luc).total_seconds() >= song:
+            ra.append(x["email"])
+    return ra
+
+
+def _o_danh_ba(x: dict, dang_doc: bool) -> dict:
+    """Một dòng `nguoi_xem` -> ô Trạng thái: chữ, màu nhãn, câu ⓘ, ⓘ cảnh báo hay không."""
+    tt, loi = x.get("trang_thai_lark"), x.get("danh_ba_loi")
+    if tt in DB.TRANG_THAI:
+        goi_y = _GOI_Y_TRANG_THAI[tt]
+        if loi:
+            goi_y += " Lần đọc danh bạ gần nhất lỗi — đây là dữ liệu của lần đọc được trước đó."
+        return {"chu": DB.TRANG_THAI[tt], "mau": _MAU_TRANG_THAI[tt], "goi_y": goi_y,
+                "canh": bool(loi) or tt != "hoat_dong"}
+    if loi:
+        return {"chu": "Chưa đọc được danh bạ", "mau": "", "canh": True,
+                "goi_y": GOI_Y_THIEU_QUYEN if loi == "thieu_quyen" else GOI_Y_LOI_DANH_BA}
+    return {"chu": "Đang đọc danh bạ…" if dang_doc else "Chưa đọc danh bạ", "mau": "",
+            "canh": False, "goi_y": "Dashboard đang đọc danh bạ Lark — tải lại trang sau vài giây."}
+
+
+async def doc_danh_ba(app: FastAPI, emails: list[str], giay: float) -> dict[str, dict] | None:
+    """Đọc danh bạ cho `emails` (đợi tối đa `giay`) rồi ghi bản đệm. Hỏng thì ghi dấu lỗi vào
+    từng dòng (để 1 giờ sau mới thử lại) và trả None — KHÔNG ném lỗi ra ngoài."""
+    loai = "loi"
+    try:
+        kq = await asyncio.wait_for(app.state.danh_ba.tra_cuu(emails), giay)
+    except DB.LoiDanhBa as e:
+        log.warning("đọc danh bạ Lark lỗi: %s", e)
+        loai = e.loai
+    except TimeoutError:
+        log.warning("đọc danh bạ Lark quá %ss", giay)
+    except Exception as e:  # noqa: BLE001 — danh bạ chỉ là thông tin thêm
+        log.warning("đọc danh bạ Lark lỗi: %s", type(e).__name__)
+    else:
+        try:
+            await run_in_threadpool(app.state.kho.ghi_danh_ba, kq)
+        except (LoiKho, LoiDuLieu) as e:
+            log.warning("không ghi được danh bạ: %s", type(e).__name__)
+        return kq
+    try:
+        await run_in_threadpool(app.state.kho.ghi_loi_danh_ba, emails, loai)
+    except (LoiKho, LoiDuLieu) as e:
+        log.warning("không ghi được lỗi danh bạ: %s", type(e).__name__)
+    return None
+
+
+async def doc_danh_ba_nen(app: FastAPI, emails: list[str]) -> None:
+    """Chạy SAU khi trang đã trả (BackgroundTask). Mốc `danh_ba_doc_tu` đặt lúc lên lịch; việc
+    nền không chạy được (trình duyệt ngắt trước) thì mốc tự hết hạn, không kẹt mãi."""
+    try:
+        await doc_danh_ba(app, emails, DANH_BA_NEN_GIAY)
+    finally:
+        app.state.danh_ba_doc_tu = float("-inf")
+
+
+def _dang_doc_danh_ba(app: FastAPI) -> bool:
+    return time.monotonic() - app.state.danh_ba_doc_tu < DANH_BA_NEN_GIAY + 10
+
+
 # ───────────────────────────── nhà máy ứng dụng ─────────────────────────────
 def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=None,
+            danh_ba=None,
             chu_ky_kiem: float | None = CHU_KY_KIEM,
             sse_toi_da_su_kien: int | None = None,
             sse_kiem_quyen_giay: float = SSE_KIEM_QUYEN_GIAY) -> FastAPI:
@@ -493,12 +594,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
 
     Bộ thử truyền `kho` giả, `cau_hinh`, `lark` (LarkOAuth với httpx.MockTransport), `dong_bo`
     giả (trang_thai/chay/cai_vao không mở luồng), `chu_ky_kiem=None` (không vòng kiểm),
-    `sse_toi_da_su_kien` (luồng SSE tự đóng sau N sự kiện) và `sse_kiem_quyen_giay`."""
+    `sse_toi_da_su_kien` (luồng SSE tự đóng sau N sự kiện) và `sse_kiem_quyen_giay`;
+    `danh_ba` = DanhBaLark với httpx.MockTransport (mặc định: danh bạ Lark thật, cùng app)."""
     if kho is None:
         from dashboard import kho as kho_pg
         kho = kho_pg
     cau_hinh = cau_hinh or DN.CauHinh.tu_env()
     lark = lark or DN.LarkOAuth(cau_hinh)
+    danh_ba = danh_ba or DB.DanhBaLark(cau_hinh)
     if dong_bo is None:
         from dashboard import dong_bo_bq
         dong_bo = dong_bo_bq
@@ -520,6 +623,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     app.state.cau_hinh = cau_hinh
     app.state.lark = lark
     app.state.dong_bo = dong_bo
+    app.state.danh_ba = danh_ba
+    app.state.danh_ba_doc_tu = float("-inf")
     app.state.mau = _tao_mau()
     app.state.bang_tin = BangTin()
     app.state.moc_luot = _CHUA_KIEM
@@ -630,9 +735,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         if await _k(app.state.kho.vai_tro, email) not in NL.VAI_TRO:
             return loi(f"Bạn chưa có quyền xem — nhờ người quản lý thêm email {email}.", 403)
         try:
-            await _k(app.state.kho.ghi_dang_nhap_lan_dau, email, nd.get("open_id") or "")
+            await _k(app.state.kho.ghi_dang_nhap, email, nd.get("open_id") or "")
         except (LoiKho, LoiDuLieu) as e:   # chỉ là nhật ký — không chặn đăng nhập
-            log.warning("không ghi được lần đăng nhập đầu: %s", type(e).__name__)
+            log.warning("không ghi được lượt đăng nhập: %s", type(e).__name__)
         r = RedirectResponse(NL.duong_an_toan(st.get("sau")), status_code=303)
         _dat_cookie(request, r, DN.COOKIE_PHIEN, DN.tao_phien(email, cau_hinh.khoa_phien),
                     DN.PHIEN_GIAY)
@@ -1438,11 +1543,22 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         ds = await _k(app.state.kho.cac_nguoi_xem)
         nk = await _k(app.state.kho.nhat_ky, 100)
         so_ql = sum(1 for x in ds if x["vai_tro"] == "quan_ly")
-        return _trang(request, "nguoi_xem.html", nguoi, "nguoi_xem", ds=ds, so_quan_ly=so_ql,
-                      nhat_ky=[{**x, "chi_tiet_chu": json.dumps(x.get("chi_tiet") or {},
-                                                                ensure_ascii=False,
-                                                                default=str)[:400]}
-                               for x in nk])
+        # Danh bạ Lark: trả trang NGAY bằng bản đệm; dòng cũ thì đọc lại NỀN sau khi đã trả
+        # (một lượt đọc một lúc cho cả app — mở trang liên tục không bắn Lark liên tục).
+        can = _can_doc_danh_ba(ds, datetime.datetime.now(datetime.UTC))
+        nen = None
+        if can and not _dang_doc_danh_ba(app):
+            app.state.danh_ba_doc_tu = time.monotonic()
+            nen = BackgroundTask(doc_danh_ba_nen, app, can)
+        dang_doc = _dang_doc_danh_ba(app)
+        r = _trang(request, "nguoi_xem.html", nguoi, "nguoi_xem", so_quan_ly=so_ql,
+                   ds=[{**x, "o": _o_danh_ba(x, dang_doc)} for x in ds],
+                   nhat_ky=[{**x, "chi_tiet_chu": json.dumps(x.get("chi_tiet") or {},
+                                                             ensure_ascii=False,
+                                                             default=str)[:400]}
+                            for x in nk])
+        r.background = nen
+        return r
 
     async def _la_quan_ly_cuoi(email: str) -> bool:
         """Kiểm ở tầng app cho câu báo dễ hiểu; kho kiểm lại trong giao dịch có khoá bảng."""
@@ -1461,7 +1577,19 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             await _k(app.state.kho.luu_nguoi_xem, nguoi["email"], e, v)
         except (NL.LoiNhap, LoiDuLieu) as ex:
             return _chuyen(request, "/nguoi-xem", "loi", str(ex))
-        return _chuyen(request, "/nguoi-xem", "ok", f"Đã lưu {e} ({NL.VAI_TRO[v]}).")
+        # Kiểm email với danh bạ Lark: CHỈ cảnh báo, không chặn (danh bạ có thể chậm/thiếu quyền).
+        tin = f"Đã lưu {e} ({NL.VAI_TRO[v]})"
+        kq = (await doc_danh_ba(app, [e], DANH_BA_THEM_GIAY) or {}).get(e)
+        if not kq:
+            return _chuyen(request, "/nguoi-xem", "ok",
+                           tin + ". Chưa kiểm được với danh bạ Lark — xem cột Trạng thái sau.")
+        if kq["trang_thai"] != "hoat_dong":
+            return _chuyen(request, "/nguoi-xem", "canh",
+                           f"{tin}, nhưng trên Lark: {DB.TRANG_THAI[kq['trang_thai']]} — "
+                           "kiểm lại email, người này chưa đăng nhập được.")
+        ai = ", ".join(x for x in (kq.get("ten"), kq.get("chuc_danh")) if x)
+        return _chuyen(request, "/nguoi-xem", "ok",
+                       tin + (f" — {ai}" if ai else "") + ", tài khoản Lark đang hoạt động.")
 
     @app.post("/nguoi-xem/xoa")
     async def nguoi_xem_xoa(request: Request):

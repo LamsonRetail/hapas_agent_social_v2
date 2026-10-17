@@ -7,7 +7,9 @@ thái `de_xuat`; chỉ THÊM `nhat_ky`. Dashboard KHÔNG ghi `bai`, `luot_quet`,
 phần của Mark.
 
 Mỗi hàm sửa dữ liệu ghi thêm MỘT dòng `nhat_ky` (ai, hành động, đối tượng, chi tiết JSON) TRONG
-CÙNG giao dịch: sửa thành công thì chắc chắn có nhật ký, nhật ký lỗi thì không sửa gì.
+CÙNG giao dịch: sửa thành công thì chắc chắn có nhật ký, nhật ký lỗi thì không sửa gì. Ngoại lệ
+duy nhất: cột bản đệm của `nguoi_xem` (danh bạ Lark, lần đăng nhập cuối) — không phải thao tác
+của người quản lý.
 
 Lỗi: `LoiKho` (không dùng được kho — câu chỉ có tên loại lỗi, KHÔNG BAO GIỜ có DSN),
 `LoiDuLieu` (vi phạm luật dữ liệu: trùng, sai ràng buộc, xoá quản lý cuối — câu hiển thị được).
@@ -572,9 +574,35 @@ def xoa_lich(ai: str, lid: int) -> None:
 
 # ───────────────────────────── người xem + nhật ký ─────────────────────────────
 def cac_nguoi_xem() -> list[dict]:
+    """Người xem kèm bản đệm danh bạ Lark. `dang_nhap_cuoi`: cột mới (ghi mỗi lượt đăng nhập);
+    người chưa đăng nhập lại kể từ khi có cột thì lấy lần đăng nhập đầu trong nhật ký."""
     with ket_noi() as c:
-        return c.execute("SELECT email, vai_tro, them_boi, them_luc FROM nguoi_xem "
-                         "ORDER BY vai_tro DESC, email").fetchall()
+        return c.execute(
+            "SELECT n.email, n.vai_tro, n.them_boi, n.them_luc, n.ten_lark, n.chuc_danh, "
+            "n.phong_ban, n.trang_thai_lark, n.danh_ba_loi, n.danh_ba_luc, "
+            "COALESCE(n.dang_nhap_cuoi, (SELECT max(k.luc) FROM nhat_ky k "
+            "WHERE k.hanh_dong = 'dang_nhap_lan_dau' AND k.doi_tuong = 'nguoi_xem:' || n.email)"
+            ") AS dang_nhap_cuoi FROM nguoi_xem n ORDER BY n.vai_tro DESC, n.email").fetchall()
+
+
+def ghi_danh_ba(ket_qua: dict[str, dict]) -> None:
+    """Ghi bản đệm danh bạ Lark (email -> trang_thai, ten, chuc_danh, phong_ban). KHÔNG ghi nhật
+    ký: đây là bản sao danh bạ, không phải thao tác của người quản lý. Email đã bị xoá khỏi
+    `nguoi_xem` trong lúc đọc thì câu cập nhật không khớp dòng nào — bỏ qua."""
+    with ket_noi() as c:
+        for email, d in ket_qua.items():
+            c.execute("UPDATE nguoi_xem SET trang_thai_lark = %s, ten_lark = %s, chuc_danh = %s, "
+                      "phong_ban = %s, danh_ba_loi = NULL, danh_ba_luc = now() WHERE email = %s",
+                      (d.get("trang_thai"), d.get("ten"), d.get("chuc_danh"), d.get("phong_ban"),
+                       email))
+
+
+def ghi_loi_danh_ba(emails: list[str], loai: str) -> None:
+    """Lần đọc danh bạ hỏng: giữ dữ liệu cũ (nếu có), chỉ đánh dấu lỗi + thời điểm để không thử
+    lại liên tục."""
+    with ket_noi() as c:
+        c.execute("UPDATE nguoi_xem SET danh_ba_loi = %s, danh_ba_luc = now() "
+                  "WHERE email = ANY(%s)", (loai, list(emails)))
 
 
 def _khoa_nguoi_xem(c) -> None:
@@ -621,11 +649,13 @@ def ghi_nhat_ky(ai: str, hanh_dong: str, doi_tuong: str, chi_tiet: dict | None =
         _nhat_ky(c, ai, hanh_dong, doi_tuong, chi_tiet)
 
 
-def ghi_dang_nhap_lan_dau(email: str, open_id: str) -> bool:
-    """Lần ĐẦU email này đăng nhập thành công: ghi open_id Lark vào nhật ký (bảng `nguoi_xem`
-    không có cột cho nó) để sau tra được tài khoản Lark nào đã dùng email. -> có ghi hay không.
+def ghi_dang_nhap(email: str, open_id: str) -> bool:
+    """Mỗi lượt đăng nhập thành công: cập nhật `nguoi_xem.dang_nhap_cuoi` (không ghi nhật ký —
+    mỗi lượt một dòng thì nhật ký ngập). Lần ĐẦU email này đăng nhập: ghi thêm open_id Lark vào
+    nhật ký để sau tra được tài khoản Lark nào đã dùng email. -> có ghi lần đầu hay không.
     Chỉ ghi — không chặn khi open_id đổi (email cấp lại cho người khác là chuyện hợp lệ)."""
     with ket_noi() as c:
+        c.execute("UPDATE nguoi_xem SET dang_nhap_cuoi = now() WHERE email = %s", (email,))
         co = c.execute("SELECT 1 AS co FROM nhat_ky WHERE hanh_dong = 'dang_nhap_lan_dau' "
                        "AND doi_tuong = %s LIMIT 1", (f"nguoi_xem:{email}",)).fetchone()
         if co:
