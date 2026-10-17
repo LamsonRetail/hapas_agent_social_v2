@@ -186,8 +186,11 @@ def _kich_ban(mo):  # noqa: F811
             return _trang([], more=0)
         return goc(p)
     api._tra = tra
+    # Feed hashtag TikTok (17/10/2026) có bài thử riêng (`test_duong_moi.py`) — tắt ở đây để sổ
+    # tiền chỉ gồm thường + mới nhất + nổi.
     da = dict(DU_AN, tk_bat=True, tk_so_bai=15,
-              cau_hinh={"tu_khoa": {p: {"bat": p == "tiktok"} for p in T.TK_NEN_TANG}})
+              cau_hinh={"tu_khoa": {p: {"bat": p == "tiktok", "hashtag": {"bat": False}}
+                                    for p in T.TK_NEN_TANG}})
     return kho, api, da, it_thich
 
 

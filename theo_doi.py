@@ -908,6 +908,18 @@ TK_FB2_GIO_CD = 6
 TK_FB2_GIA = A._GIA_FB_DUONG2       # 0,002 USD/bài
 TK_FB2_KHOI = A._KHOI_FB_DUONG2     # 0,00005 USD/run
 
+# ───────────── TikTok: FEED HASHTAG trong lượt tìm hằng ngày (17/10/2026, scraptik) ─────────────
+# Đo vòng 1 (17/10/2026): kho phủ 70% video TikTok liên quan 10–17/10; 12 video sót tập trung ở
+# #hapassuperbrandday (5 video tối 16/10, 3 của kênh kho đã có 59 bài) và feed #hapas (3 video
+# 11–13/10 chỉ thấy qua feed hashtag) — tìm theo từ khoá không trả về chúng. Đọc feed hashtag
+# (`challengePosts`, 20 bài/yêu cầu, cid nhớ chung với kiểm độ phủ) của TỪ KHOÁ MỘT CHỮ của dự án,
+# sau lượt thường / mới nhất / nổi; bài về đi CÙNG phễu (phạm vi ngày, loại trừ, spam, AI). Cấu hình
+# `du_an.cau_hinh.tu_khoa.tiktok.hashtag` {"bat" (thiếu = theo TikTok), "so_yeu_cau" (trần yêu cầu
+# mỗi lượt, mặc định 5 ≈ 0,015 USD), "gio" (giờ tối thiểu giữa hai lượt, mặc định 20 ≈ 1/ngày)}.
+TK_TAG = "tiktok_tag"               # khoá mốc trong sổ mốc tìm theo từ khoá
+TK_TAG_YEU_CAU = 5
+TK_TAG_GIO = 20
+
 
 def _kep(v, lo: int, hi: int, md: int) -> int:
     try:
@@ -952,6 +964,8 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
                          else _kep(b, 0, SO_TOI_DA, WEB_BOC_MAC_DINH))
         if p == "facebook":
             ra["duong2"] = _cau_hinh_fb2(du_an, rieng, bat_rieng, so)
+        if p == "tiktok":
+            ra["hashtag"] = _cau_hinh_tag(du_an, rieng, bat_rieng, so)
         return ra
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
@@ -976,6 +990,35 @@ def _cau_hinh_fb2(du_an: dict, rieng: dict, bat_rieng: bool, so_fb: int) -> dict
             "so_bai_moi_tu": so,
             "gio": _so_rieng(d2.get("gio"), 0, 24 * 31, TK_FB2_GIO),
             "gio_chien_dich": _so_rieng(d2.get("gio_chien_dich"), 0, 24 * 31, TK_FB2_GIO_CD)}
+
+
+def _cau_hinh_tag(du_an: dict, rieng: dict, bat_rieng: bool, so_tt: int) -> dict:
+    """Cấu hình HIỆU LỰC của feed hashtag TikTok (khối `hashtag` trong cấu hình TikTok): cùng
+    luật bật như đường 2 Facebook (`_cau_hinh_fb2`) — khối có `bat` thì chỉ True là bật, thiếu thì
+    theo lượt tìm TikTok (số bài > 0); số yêu cầu 0 = tắt."""
+    x = rieng.get("hashtag") if isinstance(rieng.get("hashtag"), dict) else {}
+    so = _so_rieng(x.get("so_yeu_cau"), 0, SO_TOI_DA, TK_TAG_YEU_CAU)
+    bat = x["bat"] is True if "bat" in x else so_tt > 0
+    return {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and bat and so > 0,
+            "so_yeu_cau": so, "gio": _so_rieng(x.get("gio"), 0, 24 * 31, TK_TAG_GIO)}
+
+
+def tag_tiktok(tu: list[str]) -> list[str]:
+    """Hashtag của feed TikTok: từ khoá MỘT chữ (không dấu cách) chuẩn hoá như `tiktok_api.
+    chuan_tag` ("#HAPAS" → "hapas", "hapas.vn" → "hapasvn"), 3–40 ký tự, bỏ trùng, giữ thứ tự."""
+    ra: list[str] = []
+    for kw in tu:
+        t = TDA.TT.chuan_tag(kw) if len(str(kw).split()) == 1 else ""
+        if 3 <= len(t) <= 40 and t not in ra:
+            ra.append(t)
+    return ra
+
+
+def uoc_tag_tiktok(so_yeu_cau: int, so_tag: int) -> float:
+    """USD TỐI ĐA một lượt feed hashtag TikTok: trần yêu cầu × 0,003 × 1,3 (0 khi không có tag)."""
+    if so_yeu_cau <= 0 or so_tag <= 0:
+        return 0.0
+    return round(so_yeu_cau * TK_TT_YEU_CAU * _HE_SO_UOC, 4)
 
 
 def tu_fb_duong2(du_an: dict, tu: list[str] | None = None) -> list[str]:
@@ -1086,6 +1129,8 @@ def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA) -> float:
         if p == "facebook" and c["duong2"]["bat"]:
             # Đường 2 (17/10/2026) tính TỐI ĐA mỗi lượt dù nhịp `gio` có thể bỏ lượt — giữ chỗ dư.
             tong += uoc_fb_duong2(len(tu_fb_duong2(du_an, tu)), c["duong2"]["so_bai_moi_tu"])
+        if p == "tiktok" and c["hashtag"]["bat"]:
+            tong += uoc_tag_tiktok(c["hashtag"]["so_yeu_cau"], len(tag_tiktok(tu)))
     return round(tong, 4)
 
 
@@ -1341,6 +1386,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             ve_thuong = 0
             noi: dict = {}
             moi_nhat: dict = {}
+            tag_feed: dict = {}
             # Lỗi từng từ khoá mà `_fanout` nuốt (IG/FB mỗi từ một run) — xem `_loi_tim`.
             loi_tu: list = []
             tok_loi = A._LOI_TU_KHOA.set(loi_tu)
@@ -1356,6 +1402,11 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                     got, noi = _them_luot_noi(v, ma, luot, q, got, moc_cu, bay_gio, uoc, con,
                                               _phan_tk(v)[so_run_truoc:],
                                               KDP.cau_hinh(du_an)["bat"])
+                    # Feed hashtag của từ khoá một chữ (17/10/2026) — phần thêm, tự bắt lỗi.
+                    got, tag_feed = _them_feed_tag(v, ma, luot, tu, got, moc_cu, bay_gio,
+                                                   cfg[p]["hashtag"], con,
+                                                   _phan_tk(v)[so_run_truoc:],
+                                                   KDP.cau_hinh(du_an)["bat"])
             except Exception as e:
                 if type(e).__name__ == "MatQuyen":
                     raise
@@ -1404,6 +1455,8 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 ph_p["moi_nhat"] = moi_nhat   # mốc từng từ đã ghi ngay trong `_them_luot_moi`
             if noi:
                 ph_p["noi"] = noi             # mốc nhịp đã ghi ngay trong `_them_luot_noi`
+            if tag_feed:
+                ph_p["tag_feed"] = tag_feed   # mốc nhịp đã ghi ngay trong `_them_feed_tag`
             for d, dt in got:
                 # Giữ MỌI bài trong PHẠM VI theo dõi (chủ dự án 16/10), không chỉ cửa sổ tăng dần.
                 if dt and tu_pv <= dt <= bay_gio + datetime.timedelta(hours=1) and d.get("link"):
@@ -1747,6 +1800,92 @@ def _them_luot_noi(v, ma: str, luot: int, q: list[str], got: list, moc_cu: dict,
     co = {d.get("link") for d, _ in got}
     them = [(d, dt) for d, dt in ve if d.get("link") and d["link"] not in co]
     return got + them, {"ve": len(ve), "moi": len(them), "usd": usd, "ly_do": ly}
+
+
+def _them_feed_tag(v, ma: str, luot: int, tu: list[str], got: list, moc_cu: dict,
+                   bay_gio: datetime.datetime, ctag: dict, con: float, phan_moi: list[dict],
+                   dp_bat: bool = True) -> tuple[list, dict]:
+    """Feed HASHTAG TikTok (`challengePosts`) của từ khoá một chữ (`tag_tiktok`), ngay sau lượt nổi,
+    cùng móc ghi run id (tiền vào `_tien_tim_tiktok`). -> (bài thường + bài feed chưa trùng, thống kê
+    {"tag": {tag: {"trang", "bai", "loi"}}, "chua_toi", "yeu_cau", "ve", "moi", "usd", "ly_do"});
+    {} khi lượt này không chạy (tắt, chưa tới nhịp `gio`, lượt thường không đi TikTok API).
+
+    Trần = min(`so_yeu_cau` × 0,003 USD, phần còn của tháng/việc trừ tiền TikTok API đã tiêu trong
+    lượt). Yêu cầu chia theo `kiem_do_phu.chia_yeu_cau` (mỗi tag: tìm cid khi chưa nhớ + 1 trang, dư
+    thì thêm trang theo thứ tự từ khoá); tag lượt nổi đang đọc (kiểm độ phủ thêm) bỏ — không trả
+    tiền hai lần. KHÔNG ném lỗi (trừ MatQuyen); đã tiêu tiền thì ghi mốc nhịp NGAY."""
+    if not ctag.get("bat") or not TDA.TT.dung_api("tiktok_tim"):
+        return got, {}
+    api = [x for x in phan_moi if x.get("run_id") and x.get("actor") == TT_ACTOR]
+    if not api or any(x.get("run_id") and x.get("actor") != TT_ACTOR for x in phan_moi):
+        return got, {}                    # lượt thường không qua API / đã xuống dự phòng
+    noi = KDP.cau_hinh_noi(moc_cu.get(KDP.KHOA_NOI_CFG) if dp_bat else None)
+    tags = [t for t in tag_tiktok(tu) if t not in noi["tag"]]
+    if not tags:
+        return got, {}
+    moc = moc_cu.get(TK_TAG) if isinstance(moc_cu.get(TK_TAG), dict) else {}
+    luc = TDA._gio(moc.get("luc"))
+    gio = int(ctag.get("gio") or 0)
+    if luc is not None and gio > 0 and bay_gio - luc < datetime.timedelta(hours=gio):
+        return got, {}
+    ly = (f"lượt trước {luc.astimezone(_VN):%d/%m %H:%M}" if luc else "chưa có lượt feed hashtag")
+    if v.con_giay() < _CHUA_GIAY_CUOI + 120:
+        return got, {"ve": 0, "moi": 0, "usd": 0.0, "ly_do": f"{ly}; bỏ qua (hết giờ)"}
+    da = len(api) * TK_TT_YEU_CAU
+    tran = min(int(ctag["so_yeu_cau"]) * TK_TT_YEU_CAU, min(con, _con_viec(v)) - da)
+    n = int(tran / TK_TT_YEU_CAU + 1e-9) if tran > 0 else 0
+    if n < 1:
+        return got, {"ve": 0, "moi": 0, "usd": 0.0, "ly_do": f"{ly}; không còn ngân sách"}
+    moc_dp = (doc_moc_tk(ma).get(KDP.KHOA_MOC) or {})
+    cid = dict(moc_dp.get("cid") or {}) if isinstance(moc_dp.get("cid"), dict) else {}
+    trang, _ = KDP.chia_yeu_cau(n, tags, [], cid, {})
+    truoc = len(_phan_tk(v))
+    items: list = []
+    tkm: dict = {}
+    loi = ""
+    try:
+        items, tkm = KDP.lay_mau(trang, {}, cid, {}, TDA.TT.Ngan(n * TDA.TT.GIA_YEU_CAU), None)
+    except Exception as e:            # phần thêm, không làm hỏng lượt thường
+        if type(e).__name__ == "MatQuyen":
+            raise
+        loi = A._che_token(f"{getattr(e, 'ma', type(e).__name__)}: {e}")[:120]
+    usd = round(sum(TK_TT_YEU_CAU for x in _phan_tk(v)[truoc:]
+                    if x.get("run_id") and x.get("actor") == TT_ACTOR), 4)
+    moi_cid = {t: x["cid"] for t, x in (tkm.get("tag") or {}).items() if x.get("cid")}
+    if usd > 0:
+        ghi_moc_tk(ma, {TK_TAG: {"luc": bay_gio.isoformat(timespec="seconds"), "luot": luot,
+                                 "ve": len(items), "usd": usd, "tag": list(trang)}})
+        if any(cid.get(t) != c for t, c in moi_cid.items()):
+            # cid mới: nhớ vào mốc kiểm độ phủ (dùng chung với lượt nổi), đọc lại mốc mới nhất
+            # để không đè phần lượt nổi vừa ghi trong cùng lượt.
+            dp_moi = doc_moc_tk(ma).get(KDP.KHOA_MOC) or {}
+            gop = {**(dp_moi.get("cid") if isinstance(dp_moi.get("cid"), dict) else {}),
+                   **moi_cid}
+            ghi_moc_tk(ma, {KDP.KHOA_MOC: {**dp_moi, "cid": dict(
+                list(gop.items())[-KDP.BO_NHO_TOI_DA:])}})
+    ve: list = []
+    for it, duong in items:              # từng bài: một bài hỏng không làm mất bài đã trả tiền
+        try:
+            for d, dt in A._chuan_tiktok(A._chuan_clockworks([it])):
+                d["_tag_feed"] = duong
+                ve.append((d, dt))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            loi = (loi + "; bỏ 1 bài hỏng shape").lstrip("; ")
+    co = {d.get("link") for d, _ in got}
+    them = []
+    for d, dt in ve:
+        if d.get("link") and d["link"] not in co:
+            co.add(d["link"])
+            them.append((d, dt))
+    theo_tag = {t: {"trang": trang[t], "bai": int(((tkm.get("tag") or {}).get(t) or {})
+                                                     .get("bai") or 0),
+                    "loi": str(((tkm.get("tag") or {}).get(t) or {}).get("loi") or "")}
+                for t in trang}
+    if tkm.get("dung"):
+        loi = (loi + f"; dừng: {tkm['dung']}").lstrip("; ")
+    return got + them, {"tag": theo_tag, "chua_toi": [t for t in tags if t not in trang],
+                        "yeu_cau": n, "ve": len(ve), "moi": len(them), "usd": usd,
+                        "ly_do": ly, **({"loi": loi[:200]} if loi else {})}
 
 
 def _tien_tim_tiktok(phan_moi: list[dict], got: list, loi, tran_du_phong) -> float:
@@ -2351,6 +2490,7 @@ def _cau_pheu(p: str, f: dict) -> str:
             + _cau_duong(f.get("duong"))
             + _cau_moi(f.get("moi_nhat"))
             + _cau_noi(f.get("noi"))
+            + _cau_tag(f.get("tag_feed"))
             + _cau_web(f.get("web")))
 
 
@@ -2402,6 +2542,24 @@ def _cau_noi(n) -> str:
         return ""
     return (f"; lượt nổi (nhiều thích 30 ngày, {n.get('ly_do') or '?'}): về {n.get('ve', 0)}, "
             f"thêm {n.get('moi', 0)} bài chưa có trong lượt thường, {_usd(n.get('usd') or 0)} USD")
+
+
+def _cau_tag(n) -> str:
+    """Phần feed hashtag TikTok (17/10/2026, từ khoá một chữ) trong phễu."""
+    if not isinstance(n, dict):
+        return ""
+    tag = n.get("tag") or {}
+    s = (f"; feed hashtag ({n.get('ly_do') or '?'}; "
+         + (", ".join(f"#{t} {x.get('trang', 0)} trang" + (f" lỗi {x['loi']}" if x.get("loi")
+                                                            else "")
+                      for t, x in tag.items()) or "—")
+         + f"; {n.get('yeu_cau', 0)} yêu cầu): về {n.get('ve', 0)}, thêm {n.get('moi', 0)} bài "
+         f"chưa có trong lượt thường, {_usd(n.get('usd') or 0)} USD")
+    if n.get("chua_toi"):
+        s += "; chưa tới #" + ", #".join(n["chua_toi"])[:120] + " (tăng số yêu cầu)"
+    if n.get("loi"):
+        s += f"; {n['loi']}"
+    return s
 
 
 def _cau_web(w) -> str:

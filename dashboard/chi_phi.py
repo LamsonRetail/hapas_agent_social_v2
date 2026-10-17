@@ -344,6 +344,39 @@ def _cau_hinh_fb2(du_an: dict, rieng: dict, bat_rieng: bool, so_fb: int) -> dict
             "gio_chien_dich": _so_rieng(d2.get("gio_chien_dich"), 0, 24 * 31, TK_FB2_GIO_CD)}
 
 
+#: TikTok FEED HASHTAG (17/10/2026, `theo_doi.TK_TAG_*`): feed `challengePosts` của từ khoá một chữ,
+#: trần `so_yeu_cau` yêu cầu mỗi lượt (mặc định 5 × 0,003 USD), nhịp 20 giờ.
+TK_TAG_YEU_CAU = 5
+TK_TAG_GIO = 20
+
+
+def _cau_hinh_tag(du_an: dict, rieng: dict, bat_rieng: bool, so_tt: int) -> dict:
+    """Bản sao `theo_doi._cau_hinh_tag`."""
+    x = rieng.get("hashtag") if isinstance(rieng.get("hashtag"), dict) else {}
+    so = _so_rieng(x.get("so_yeu_cau"), 0, SO_TOI_DA, TK_TAG_YEU_CAU)
+    bat = x["bat"] is True if "bat" in x else so_tt > 0
+    return {"bat": bool(du_an.get("tk_bat", True)) and bat_rieng and bat and so > 0,
+            "so_yeu_cau": so, "gio": _so_rieng(x.get("gio"), 0, 24 * 31, TK_TAG_GIO)}
+
+
+def tag_tiktok(tu: list[str]) -> list[str]:
+    """Bản sao `theo_doi.tag_tiktok` (`tiktok_api.chuan_tag`: bỏ '#', bỏ dấu, chỉ [0-9a-z])."""
+    ra: list[str] = []
+    for kw in tu:
+        t = (re.sub(r"[^0-9a-z]", "", _norm(str(kw or "").lstrip("#")))
+             if len(str(kw).split()) == 1 else "")
+        if 3 <= len(t) <= 40 and t not in ra:
+            ra.append(t)
+    return ra
+
+
+def uoc_tag_tiktok(so_yeu_cau: int, so_tag: int) -> float:
+    """Bản sao `theo_doi.uoc_tag_tiktok`."""
+    if so_yeu_cau <= 0 or so_tag <= 0:
+        return 0.0
+    return round(so_yeu_cau * TK_TT_YEU_CAU * HE_SO_UOC, 4)
+
+
 def _tokens(s: str) -> list[str]:
     """Bản sao `apify_tool._tokens`: bỏ dấu, thường hoá, tách theo ký tự không phải chữ/số."""
     return re.findall(r"[^\W_]+", _norm(s))
@@ -390,6 +423,8 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
                          else _kep(b, 0, SO_TOI_DA, WEB_BOC_MAC_DINH))
         if p == "facebook":
             ra["duong2"] = _cau_hinh_fb2(du_an, rieng, bat_rieng, so)
+        if p == "tiktok":
+            ra["hashtag"] = _cau_hinh_tag(du_an, rieng, bat_rieng, so)
         return ra
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
@@ -498,7 +533,11 @@ def bang_cau_hinh(du_an: dict) -> dict:
     d2 = tk["facebook"]["duong2"]
     d2["cum"] = tu_fb_duong2(du_an, tu)
     d2["uoc"] = uoc_fb_duong2(len(d2["cum"]), d2["so_bai_moi_tu"]) if d2["bat"] else 0.0
-    uoc_tk = round(sum(x["uoc"] for x in tk.values()) + d2["uoc"], 4)
+    # TikTok feed hashtag (17/10/2026): cũng một dòng phụ, cộng vào tổng.
+    th = tk["tiktok"]["hashtag"]
+    th["tag"] = tag_tiktok(tu)
+    th["uoc"] = uoc_tag_tiktok(th["so_yeu_cau"], len(th["tag"])) if th["bat"] else 0.0
+    uoc_tk = round(sum(x["uoc"] for x in tk.values()) + d2["uoc"] + th["uoc"], 4)
     return {"tu_khoa": tk, "binh_luan": bl, "so_tu_khoa": len(tu),
             "uoc_tk": uoc_tk, "uoc_web": tk["web"]["uoc"],
             "uoc_tk_mxh": round(uoc_tk - tk["web"]["uoc"], 4),
@@ -654,6 +693,7 @@ def hang_so_cho_trinh_duyet() -> dict:
             "tk_gia": TK_GIA, "tk_khoi": TK_KHOI, "tk_fb_toi_da": TK_FB_TOI_DA,
             "tk_ig_so_tu": TK_IG_TOI_DA_TU, "tk_ig_tab": TK_IG_TAB,
             "fb2": {"gia": TK_FB2_GIA, "khoi": TK_FB2_KHOI, "moi_tu": TK_FB2_MOI_TU},
+            "tt_tag": {"yeu_cau": TK_TAG_YEU_CAU, "gio": TK_TAG_GIO},
             "bl_gia": BL_GIA, "bl_khoi": BL_KHOI_DONG,
             "bl_uoc_moi_bai": BL_UOC_MOI_BAI, "gioi_han": GIOI_HAN, "nen_tang": NEN_TANG,
             # Threads (16/10/2026): ≥ 10 bài mỗi tài khoản / từ khoá, ≤ 20 mỗi lượt; mặc định tắt.

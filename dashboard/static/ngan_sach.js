@@ -201,6 +201,23 @@
     c.uoc = c.bat && CUM_FB2.length ? r4(CUM_FB2.length * (so * HF2.gia + HF2.khoi) * hs.he_so) : 0;
     return c;
   }
+  // TikTok feed hashtag (17/10/2026) — = chi_phi._cau_hinh_tag / tag_tiktok / uoc_tag_tiktok: từ
+  // khoá MỘT chữ thành hashtag (bỏ '#', bỏ dấu, chỉ [0-9a-z], 3–40 ký tự), trần yêu cầu × giá × hệ số.
+  var HTT = hs.tt_tag || {};
+  var TAG_TT = [];
+  TU.forEach(function (kw) {
+    if (String(kw).split(/\s+/).filter(Boolean).length !== 1) return;
+    var t = norm(String(kw).replace(/^#+/, "")).replace(/[^0-9a-z]/g, "");
+    if (t.length >= 3 && t.length <= 40 && TAG_TT.indexOf(t) < 0) TAG_TT.push(t);
+  });
+  function cauHinhTag(doc, tt) {
+    var o = doc.gt("tk_tiktok_tag_so_yc");
+    var so = kep(o !== "" ? o : HTT.yeu_cau, 0, GH.tk_so_bai[1], HTT.yeu_cau);
+    var y = doc.bat("tk_tiktok_tag_bat") && !!tt.y;
+    var c = { y: y, bat: y && so > 0, so_bai: so };
+    c.uoc = c.bat && TAG_TT.length ? r4(so * (hs.tk_tt_yeu_cau || 0) * hs.he_so) : 0;
+    return c;
+  }
   function tinh(doc) {               // = chi_phi.bang_cau_hinh
     var kq = { tk: {}, bl: {} };
     var stk = 0;
@@ -217,6 +234,8 @@
     });
     kq.d2 = cauHinhD2(doc, kq.tk.facebook || {});
     stk += kq.d2.uoc;
+    kq.tag = cauHinhTag(doc, kq.tk.tiktok || {});
+    stk += kq.tag.uoc;
     kq.uoc_tk = r4(stk);
     kq.uoc_bl = r4(sbl);
     kq.tong = r4(kq.uoc_tk + kq.uoc_bl);
@@ -334,6 +353,11 @@
       moNhom(p, "tk", a.y);
       moNhom(p, "bl", b.y);
     });
+    if (o("tk-tiktok_tag")) {         // dòng phụ TikTok feed hashtag
+      oUsd("tk-tiktok_tag", kq.tag, hs.tk_tt_yeu_cau);
+      ghi("dong-tiktok_tag", soVn(kq.tag.uoc, 3), kq.tag.uoc);
+      moNhom("tiktok_tag", "tk", kq.tag.y);
+    }
     if (o("tk-facebook_d2")) {        // dòng phụ Facebook đường 2
       oUsd("tk-facebook_d2", kq.d2, HF2.gia);
       ghi("dong-facebook_d2", soVn(kq.d2.uoc, 3), kq.d2.uoc);
@@ -410,6 +434,7 @@
     " hashtag); tab bài + reels, " + soVn((hs.tk_gia || {}).instagram || 0, 4) + " USD/bài");
   ghi("web-so-tu", rutGonWeb(TU).length + " → " + soCauWeb(TU) + " câu");
   ghi("fb2-so-cum", String(CUM_FB2.length));
+  ghi("tt-tag-so", String(TAG_TT.length));
 
   // giá mỗi mẫu nhanh (chỉ phụ thuộc từ khoá dự án) — ghi ngay trên nút
   Object.keys(MAU).forEach(function (k) {

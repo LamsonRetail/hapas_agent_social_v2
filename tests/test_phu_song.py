@@ -165,7 +165,9 @@ def test_luot_noi_bat_video_viral_cu_cap_nhat_bai_da_co_va_theo_nhip(mo):  # noq
                                       "dau": T.dau_tk(["hapas"], 15), "luot": 2,
                                       "xin": 15, "ve": 1}})
     da = dict(DU_AN, tk_bat=True, tk_so_bai=15,
-              cau_hinh={"tu_khoa": {p: {"bat": p == "tiktok"} for p in T.TK_NEN_TANG}})
+              # Feed hashtag TikTok (17/10/2026) có bài thử riêng (test_duong_moi.py): tắt.
+              cau_hinh={"tu_khoa": {p: {"bat": p == "tiktok", "hashtag": {"bat": False}}
+                                    for p in T.TK_NEN_TANG}})
     v = GiaViec({}, [])
     tk = _chay_tk(da, v)
     sap = [g.get("searchPosts_sortType") for g in api.goi if "searchPosts_keyword" in g]
@@ -222,7 +224,9 @@ def _kich_ban_api(mo, kho_da_co=()):  # noqa: F811
     moi["desc"] = "review túi hapas"
     api.tim[("hapas", 0)] = ([moi], 0)
     da = dict(DU_AN, tk_bat=True, tk_so_bai=15,
-              cau_hinh={"tu_khoa": {p: {"bat": p == "tiktok"} for p in T.TK_NEN_TANG}})
+              # Feed hashtag TikTok (17/10/2026) có bài thử riêng (test_duong_moi.py): tắt.
+              cau_hinh={"tu_khoa": {p: {"bat": p == "tiktok", "hashtag": {"bat": False}}
+                                    for p in T.TK_NEN_TANG}})
     return kho, api, da
 
 

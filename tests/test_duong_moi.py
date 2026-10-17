@@ -16,6 +16,7 @@ import time
 import pytest
 
 import apify_tool as A
+import kiem_do_phu as KDP
 import quet_lon as Q
 import theo_doi as T
 import theo_doi_api as TDA
@@ -585,3 +586,164 @@ def test_khoi_dong_lai_doc_tiep_run_du_phong_khong_post_lai(monkeypatch):
     _chay_phan(v, ph, ds)
     assert ap.gui == [] and ap.doc == ["r-cu", "r-dp"]
     assert len(v.doc_dong("facebook")) == len(_thedoor()) + 1
+
+
+# ───────────────── 4. TikTok: feed hashtag của từ khoá một chữ trong lượt tìm hằng ngày ─────────────
+def test_tag_tiktok_tu_tu_khoa_mot_chu_va_ban_sao_dashboard():
+    tu = ["hapas", "túi hapas", "#HAPAS", "hapas.vn", "HapasSuperBrandDay", "ab", "Quà"]
+    assert T.tag_tiktok(tu) == ["hapas", "hapasvn", "hapassuperbrandday", "qua"]
+    assert CP.tag_tiktok(tu) == T.tag_tiktok(tu)
+    import tiktok_api as TT
+    assert all(TT.chuan_tag(x) == x for x in T.tag_tiktok(tu))
+
+
+@pytest.mark.parametrize("ch, bat, so", [
+    ({}, True, 5),
+    ({"tu_khoa": {"tiktok": {"hashtag": {"so_yeu_cau": 3}}}}, True, 3),
+    ({"tu_khoa": {"tiktok": {"hashtag": {"so_yeu_cau": 0}}}}, False, 0),
+    ({"tu_khoa": {"tiktok": {"hashtag": {"bat": "true"}}}}, False, 5),
+    ({"tu_khoa": {"tiktok": {"bat": False}}}, False, 5),
+    ({"tu_khoa": {"tiktok": {"so_bai": 0}}}, False, 5),
+    ({"tu_khoa": {"tiktok": {"so_bai": 0, "hashtag": {"bat": True}}}}, True, 5),
+])
+def test_cau_hinh_feed_hashtag_va_uoc_tinh(ch, bat, so):
+    da = {"ten": "HAPAS", "tu_khoa": ["hapas", "túi hapas", "hapassuperbrandday"],
+          "tk_bat": True, "tk_so_bai": 15, "cau_hinh": ch}
+    c = T.cau_hinh(da, "tu_khoa", "tiktok")
+    assert (c["hashtag"]["bat"], c["hashtag"]["so_yeu_cau"]) == (bat, so)
+    assert c["hashtag"]["gio"] == T.TK_TAG_GIO
+    assert CP.cau_hinh(da, "tu_khoa", "tiktok") == c
+    b = CP.bang_cau_hinh(da)
+    assert b["tu_khoa"]["tiktok"]["hashtag"]["tag"] == ["hapas", "hapassuperbrandday"]
+    u = T.uoc_tag_tiktok(so, 2) if bat else 0.0
+    assert b["tu_khoa"]["tiktok"]["hashtag"]["uoc"] == u
+    assert u == (round(so * 0.003 * 1.3, 4) if bat else 0.0)
+    tat = dict(da, cau_hinh={**ch, "tu_khoa": {**ch.get("tu_khoa", {}), "tiktok": {
+        **(ch.get("tu_khoa", {}).get("tiktok") or {}), "hashtag": {"bat": False}}}})
+    assert T.uoc_tu_khoa_du_an(da) == pytest.approx(T.uoc_tu_khoa_du_an(tat) + u, abs=1e-4)
+
+
+def _tt_clockworks(vid: str, user: str, text: str, gio: float = 30) -> dict:
+    """Item feed hashtag đã đổi sang shape clockworks (`tiktok_api.video`)."""
+    luc = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=gio)
+    return {"id": vid, "text": text, "createTimeISO": luc.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "authorMeta": {"name": user, "nickName": user, "fans": 10}, "playCount": 50,
+            "diggCount": 3, "commentCount": 1, "shareCount": 0,
+            "hashtags": [{"name": "hapassuperbrandday"}],
+            "webVideoUrl": f"https://www.tiktok.com/@{user}/video/{vid}",
+            "_nguon": "TikTok API (scraptik)"}
+
+
+def _gia_lay_mau(mo, feed=None) -> dict:
+    goi: dict = {"mau": []}
+
+    def lay_mau(trang_tag, trang_tg, cid, uid, ngan, d_from):
+        goi["mau"].append((dict(trang_tag), dict(cid)))
+        fn = A._KHI_CO_RUN.get()
+        for i in range(sum(trang_tag.values()) + sum(1 for t in trang_tag if not cid.get(t))):
+            fn({"id": f"tag-{len(goi['mau'])}-{i}"}, {"actor": T.TT_ACTOR})
+        return ([(it, "#hapassuperbrandday") for it in (feed or [])],
+                {"tag": {t: {"cid": cid.get(t) or f"cid-{t}", "bai": len(feed or []), "loi": ""}
+                         for t in trang_tag}})
+    mo.setattr(KDP, "lay_mau", lay_mau)
+    return goi
+
+
+def _chay_tk_tt(mo, du_an=None, feed=None, v=None, con=5.0):
+    import contextvars
+
+    from test_theo_doi import DU_AN, GiaKhoTk, GiaViec, _tt_tim
+    GiaKhoTk(mo)
+    goi = _gia_lay_mau(mo, feed)
+
+    def tim_tt(q, limit, country, d_from, d_to, **k):
+        A._KHI_CO_RUN.get()({"id": "run-tt"}, {"actor": T.TT_ACTOR})
+        return [_tt_tim("kol.a", "7000000000000000001", "túi hapas đẹp")]
+    mo.setattr(T, "_them_luot_moi", lambda v, ma, luot, q, got, *a, **k: (got, {}))
+    mo.setattr(T, "_them_luot_noi", lambda v, ma, luot, q, got, *a, **k: (got, {}))
+    mo.setattr(A, "_FETCH", {"tiktok": tim_tt, **{p: (lambda *a, **k: [])
+                                                  for p in ("facebook", "instagram", "youtube")}})
+    da = du_an or dict(DU_AN, tu_khoa=["hapas", "túi hapas", "hapassuperbrandday"], tk_bat=True,
+                       tk_so_bai=15)
+    v = v or GiaViec({}, [])
+    tk = contextvars.copy_context().run(T._tim_tu_khoa, v, da, 3, con, time.monotonic() + 600)
+    return tk, goi, v
+
+
+@pytest.mark.tiktok_api
+def test_feed_hashtag_trong_luot_tim_qua_cung_pheu(mo):
+    feed = [_tt_clockworks("7000000000000000001", "kol.a", "túi hapas đẹp"),     # trùng lượt thường
+            _tt_clockworks("7000000000000000002", "kol.b", "#hapassuperbrandday xinh"),
+            _tt_clockworks("7000000000000000003", "kol.c", "hapas cũ", gio=24 * 60)]
+    tk, goi, _ = _chay_tk_tt(mo, feed=feed)
+    # 5 yêu cầu, chưa nhớ cid: #hapas cid + 2 trang, #hapassuperbrandday cid + 1 trang.
+    assert goi["mau"] == [({"hapas": 2, "hapassuperbrandday": 1}, {})]
+    f = tk["pheu"]["tiktok"]
+    tf = f["tag_feed"]
+    assert (tf["ve"], tf["moi"], tf["yeu_cau"]) == (3, 2, 5) and tf["chua_toi"] == []
+    assert tf["usd"] == pytest.approx(5 * 0.003, abs=1e-9)
+    assert f["ve"] == 3 and f["ngoai_pham_vi"] == 1, "bài feed qua cùng cửa sổ phạm vi ngày"
+    assert tk["usd"] == pytest.approx(6 * 0.003, abs=1e-9), "1 yêu cầu thường + 5 feed"
+    dong = next(c for c in T._cau_tk(tk) if c.startswith("phễu tìm TikTok"))
+    assert "feed hashtag (chưa có lượt feed hashtag; #hapas 2 trang, #hapassuperbrandday 1 " \
+           "trang; 5 yêu cầu): về 3, thêm 2 bài" in dong
+    moc = T.doc_moc_tk("hapas")
+    assert moc[T.TK_TAG]["usd"] == pytest.approx(0.015) and moc[T.TK_TAG]["tag"] == [
+        "hapas", "hapassuperbrandday"]
+    assert moc[KDP.KHOA_MOC]["cid"] == {"hapas": "cid-hapas",
+                                        "hapassuperbrandday": "cid-hapassuperbrandday"}
+    # Lượt sau trong 20 giờ: không đọc feed lại.
+    _, goi2, _ = _chay_tk_tt(mo, feed=feed)
+    assert goi2["mau"] == []
+
+
+@pytest.mark.tiktok_api
+def test_feed_hashtag_tran_ngan_sach_tag_luot_noi_va_tat(mo):
+    import contextvars
+
+    from test_theo_doi import DU_AN, GiaViec
+    # Phần còn của tháng/việc chỉ đủ 1 yêu cầu thường (đã tiêu) + 2 feed → #hapas: cid + 1 trang.
+    goi = _gia_lay_mau(mo)
+    v = GiaViec({}, [])
+    ctx = contextvars.copy_context()
+    ctx.run(A._KHI_CO_RUN.set, lambda run, meta: T._them_phan_tk(v, {
+        "id": run["id"], "nen_tang": "tiktok", "run_id": run["id"], "actor": T.TT_ACTOR}))
+    _, tf = ctx.run(T._them_feed_tag, v, "hapas", 3, ["hapas", "hapassuperbrandday"], [], {},
+                    datetime.datetime.now(_VN), {"bat": True, "so_yeu_cau": 5, "gio": 20},
+                    3 * 0.003 + 0.0005, [{"run_id": "r0", "actor": T.TT_ACTOR}])
+    assert goi["mau"] == [({"hapas": 1}, {})]
+    assert tf["yeu_cau"] == 2 and tf["chua_toi"] == ["hapassuperbrandday"]
+    assert "chưa tới #hapassuperbrandday (tăng số yêu cầu)" in T._cau_tag(tf)
+    _, tf = ctx.run(T._them_feed_tag, v, "hapas", 3, ["hapas"], [], {},
+                    datetime.datetime.now(_VN), {"bat": True, "so_yeu_cau": 5, "gio": 20},
+                    0.004, [{"run_id": "r0", "actor": T.TT_ACTOR}])
+    assert "không còn ngân sách" in tf["ly_do"] and len(goi["mau"]) == 1
+    # Tag lượt nổi (kiểm độ phủ đã thêm) không đọc lại ở feed; cid đã nhớ thì không tìm lại.
+    T.ghi_moc_tk("hapas", {KDP.KHOA_NOI_CFG: {"tag": ["hapas"]}, T.TK_TAG: {},
+                           KDP.KHOA_MOC: {"cid": {"hapassuperbrandday": "c1"}}})
+    _, goi, _ = _chay_tk_tt(mo)
+    assert goi["mau"] == [({"hapassuperbrandday": 5}, {"hapassuperbrandday": "c1"})]
+    tat = dict(DU_AN, tu_khoa=["hapas", "hapassuperbrandday"], tk_bat=True, tk_so_bai=15,
+               cau_hinh={"tu_khoa": {"tiktok": {"hashtag": {"bat": False}}}})
+    T.ghi_moc_tk("hapas", {T.TK_TAG: {}})
+    _, goi, _ = _chay_tk_tt(mo, du_an=tat)
+    assert goi["mau"] == []
+
+
+def test_trang_ngan_sach_luu_feed_hashtag_tiktok():
+    from test_dashboard_app import QL, dang_nhap, tao, thong_bao
+    _, c, kho = tao()
+    kho.du_an["hapas"].update(tk_bat=True, tk_so_bai=15,
+                              tu_khoa=["hapas", "túi hapas", "hapassuperbrandday"])
+    csrf = dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert 'data-nt="tiktok_tag"' in t and 'name="tk_tiktok_tag_so_yc"' in t
+    assert 'data-o="tt-tag-so" title="Từ khoá một chữ thành hashtag">2<' in t
+    r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "tk_tiktok_bat": "1",
+                                                   "tk_tiktok_tag_bat": "1",
+                                                   "tk_tiktok_tag_so_yc": "3"})
+    assert "Đã lưu cấu hình thu thập" in thong_bao(c, r)
+    assert kho.du_an["hapas"]["cau_hinh"]["tu_khoa"]["tiktok"]["hashtag"] == {
+        "bat": True, "so_yeu_cau": 3}
+    assert CP.bang_cau_hinh(kho.du_an["hapas"])["tu_khoa"]["tiktok"]["hashtag"]["uoc"] == \
+        T.uoc_tag_tiktok(3, 2)
