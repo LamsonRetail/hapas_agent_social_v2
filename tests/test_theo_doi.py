@@ -897,6 +897,12 @@ def test_dong_luot_giu_ghi_chu_dai_toi_tran(monkeypatch):
         encoding="utf-8")
     m = re.search(r"COMMENT ON COLUMN luot_quet\.ghi_chu IS '([^']*)';", sql)
     assert m and f"{K.GHI_CHU_TOI_DA:,}".replace(",", ".") in m.group(1)
+    # Mô tả cột BigQuery (bảng mới lẫn khối ALTER cho bảng đã tạo) khớp COMMENT Postgres — soát
+    # 17/10/2026 (L4): bản cũ vẫn tả ghi chú như trước khi có phễu từ khoá và trần mới.
+    bq = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "bigquery.sql").read_text(
+        encoding="utf-8")
+    mo_ta = re.findall(r"\bghi_chu\s+(?:STRING\s+)?(?:SET\s+)?OPTIONS\(description='([^']*)'\)", bq)
+    assert len(mo_ta) == 2 and set(mo_ta) == {m.group(1)}, mo_ta
 
 
 _NHAN_BI = ("[Lớp]", "[Mục đích]", "[Grain]", "[Khoá]", "[Nguồn]", "[Phạm vi]", "[Đã xử lý]",
