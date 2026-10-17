@@ -337,10 +337,11 @@ def _so_rieng(v, lo: int, hi: int, md: int) -> int:
 
 #: Facebook ĐƯỜNG 2 (17/10/2026, `theo_doi.TK_FB2_*`): mina_safwat~facebook-search-actor, 0,002 USD/bài
 #: + 0,00005 USD/run, mỗi cụm nhiều từ có tên brand một run; mặc định 12 bài mỗi cụm, nhịp 20 giờ
-#: (chiến dịch 6 giờ). Ước tính trang này là TỐI ĐA mỗi lượt (không trừ lượt bị nhịp bỏ qua).
+#: (chiến dịch: mặc định CŨNG 20 giờ từ soát 17/10/2026 — 6 giờ cũ ≈ 25 USD/tháng/dự án; chủ dự án
+#: tự hạ `gio_chien_dich`). Ước tính trang này là TỐI ĐA mỗi lượt (không trừ lượt bị nhịp bỏ qua).
 TK_FB2_MOI_TU = 12
 TK_FB2_GIO = 20
-TK_FB2_GIO_CD = 6
+TK_FB2_GIO_CD = TK_FB2_GIO
 TK_FB2_GIA = 0.002
 TK_FB2_KHOI = 0.00005
 

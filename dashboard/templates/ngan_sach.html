@@ -316,7 +316,7 @@
       {% set y_d2 = y_d2 if ql else d2.bat %}
       <tr data-nt="facebook_d2" class="ns-dong-web ns-dong-phu">
         <th scope="row">↳ Facebook đường 2
-          <button type="button" class="goi-y" data-goi-y="Actor thứ hai (mina): {{ hang_so.fb2.gia|usd_vn(3) }} USD/bài + {{ hang_so.fb2.khoi|usd_vn(5) }} USD/run, mỗi cụm một run. Chỉ cụm NHIỀU TỪ có tên brand ({{ d2.cum|length }} cụm{% if d2.cum %}: {{ d2.cum|join(', ') }}{% endif %}); bài gộp với đường chính rồi qua cùng bộ lọc + AI. Nhịp tối đa 1 lượt mỗi {{ d2.gio }} giờ (chiến dịch: {{ d2.gio_chien_dich }} giờ) — USD là mức tối đa mỗi lượt. Tắt Facebook ở dòng trên thì đường 2 cũng tắt.">i</button>
+          <button type="button" class="goi-y" data-goi-y="Actor thứ hai (mina): {{ hang_so.fb2.gia|usd_vn(3) }} USD/bài + {{ hang_so.fb2.khoi|usd_vn(5) }} USD/run, mỗi cụm một run. Chỉ cụm NHIỀU TỪ có tên brand ({{ d2.cum|length }} cụm{% if d2.cum %}: {{ d2.cum|join(', ') }}{% endif %}); bài gộp với đường chính rồi qua cùng bộ lọc + AI. Nhịp tối đa 1 lượt mỗi {{ d2.gio }} giờ (chiến dịch: {{ d2.gio_chien_dich }} giờ — mặc định bằng nhịp thường; muốn dày hơn trong chiến dịch thì hạ duong2.gio_chien_dich trong cấu hình, vd 6 giờ ≈ 4 lượt/ngày, tới ~25 USD/tháng) — USD là mức tối đa mỗi lượt. Tắt Facebook ở dòng trên thì đường 2 cũng tắt.">i</button>
         </th>
         <td class="ns-o-cong ns-ranh" data-nhan="Đường 2">
           {% if ql %}<input type="checkbox" class="ns-cong" role="switch" name="tk_facebook_d2_bat" value="1" aria-label="Facebook: bật đường 2 (mina)"{% if y_d2 %} checked{% endif %}>

@@ -264,6 +264,8 @@ def test_cau_hinh_duong2_va_ban_sao_dashboard(ch, bat, so):
     c2 = T.cau_hinh(da, "tu_khoa", "facebook")["duong2"]
     assert (c2["bat"], c2["so_bai_moi_tu"]) == (bat, so)
     assert c2["gio"] == T.TK_FB2_GIO and c2["gio_chien_dich"] == T.TK_FB2_GIO_CD
+    # Soát 17/10/2026: chiến dịch mặc định CÙNG nhịp thường (6 giờ cũ ≈ 25 USD/tháng/dự án).
+    assert T.TK_FB2_GIO_CD == T.TK_FB2_GIO == CP.TK_FB2_GIO_CD == 20
     assert CP.cau_hinh(da, "tu_khoa", "facebook") == T.cau_hinh(da, "tu_khoa", "facebook")
     assert not T.cau_hinh(dict(da, tk_bat=False), "tu_khoa", "facebook")["duong2"]["bat"]
     assert T.tk_co_bat(da) is True

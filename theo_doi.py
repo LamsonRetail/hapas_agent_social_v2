@@ -1088,14 +1088,17 @@ GIOI_HAN = {"tk_so_bai": (0, SO_TOI_DA), "tk_so_tu": (1, TK_TOI_DA_TU),
 # spam, AI) và ghi kho. Cấu hình `du_an.cau_hinh.tu_khoa.facebook.duong2`:
 #   {"bat": bool (mặc định bật), "so_bai_moi_tu": bài mới nhất mỗi cụm (mặc định 12; 0 = tắt),
 #    "gio": giờ tối thiểu giữa hai lượt đường 2 ngoài chiến dịch (mặc định 20 ≈ 1 lượt/ngày),
-#    "gio_chien_dich": như trên khi đang có lịch chiến dịch (mặc định 6)}.
+#    "gio_chien_dich": như trên khi đang có lịch chiến dịch (mặc định = `gio`, 20 — xem TK_FB2_GIO_CD)}.
 # Nhịp `gio` vì sao: actor trả bài MỚI NHẤT trước; lịch chiến dịch chạy tới mỗi 30 phút thì mỗi lượt
 # trả tiền lại đúng chừng ấy bài (7 cụm × 12 bài ≈ 0,17 USD/lượt). Từ khoá: chỉ cụm NHIỀU TỪ có tên
 # brand (`tu_fb_duong2`) — "hapas" một chữ ra 3/30 bài liên quan ở mọi actor.
 TK_FB2 = "facebook_duong2"          # khoá mốc trong sổ mốc + `nen_tang` của phần run trong sổ việc
 TK_FB2_MOI_TU = 12
 TK_FB2_GIO = 20
-TK_FB2_GIO_CD = 6
+# Soát 17/10/2026: mặc định cũ 6 giờ trong chiến dịch = 4 lượt/ngày × ~0,2 USD (7 cụm × 12 bài) ≈ 25
+# USD/tháng/dự án chỉ cho đường 2 — tự tăng tiền mà chủ dự án không chọn. Nay mặc định BẰNG nhịp
+# thường; muốn quét dày hơn trong chiến dịch thì chủ dự án tự hạ `duong2.gio_chien_dich`.
+TK_FB2_GIO_CD = TK_FB2_GIO
 TK_FB2_GIA = A._GIA_FB_DUONG2       # 0,002 USD/bài
 TK_FB2_KHOI = A._KHOI_FB_DUONG2     # 0,00005 USD/run
 
