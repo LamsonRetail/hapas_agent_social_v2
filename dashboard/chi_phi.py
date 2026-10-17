@@ -13,12 +13,14 @@ Công thức chép từ Mark — PHẢI khớp, có bài thử đối chiếu (`
   • Giá `theo_doi._GIA`, hệ số `theo_doi._HE_SO_UOC`, phí khởi động `theo_doi._KHOI_NGUON` (actor
     theo dõi riêng từ 17/10/2026: Facebook thedoor, Threads hồ sơ), không có thì
     `apify_tool._START_COST`.
-Dự báo cấp tháng:
+Dự báo cấp tháng (18/10/2026: KỲ VỌNG, không nhân hệ số 1,3 — xem `chi_phi_luot_nguon`):
   • Mỗi nguồn ĐANG theo dõi chạy (số ngày) / chu_ky_ngay lượt; phần tiền theo bài/tài khoản tính
     riêng từng nguồn.
   • Phí khởi động actor tính GẦN ĐÚNG một lần mỗi nền tảng mỗi ngày quét (Threads: một lần mỗi lô
     20 tài khoản); nền tảng có ngày quét khi nguồn có chu kỳ ngắn nhất tới hạn -> (số ngày) / chu
     kỳ ngắn nhất của nền tảng.
+"Tối đa" (giữ chỗ / trần của Mark, lịch quét mọi nguồn — `uoc_mot_luot`, `nguon_moi_luot`) vẫn
+nhân 1,3 như `theo_doi._uoc_phan`.
   • "Còn lại của tháng" = thời gian thật từ bây giờ tới 0 giờ ngày 1 tháng sau (giờ VN), tính lẻ
     ngày: lịch chạy hằng ngày lúc nào trong ngày cũng không bị đếm hai lần hay bỏ sót có hệ thống.
 """
@@ -223,15 +225,33 @@ def _khoi_nguon(p: str) -> float:
     return KHOI_NGUON.get(p, START_COST.get(p, 0.0))
 
 
+def don_vi_ky_vong(p: str, so_bai: int) -> int:
+    """Đơn vị KỲ VỌNG của một nguồn mỗi lượt: như `don_vi_nguon`, riêng TikTok không cộng trang bù
+    bài ghim (đo @hapas.official 20 bài: 3 yêu cầu = 0,006 USD — trang bù chỉ có khi bài ghim lọt
+    vào các trang đầu)."""
+    if p == "tiktok":
+        return 1 + math.ceil(max(1, int(so_bai)) / TT_BAI_MOI_TRANG)
+    return don_vi_nguon(p, so_bai)
+
+
 def chi_phi_luot_nguon(n: dict) -> float:
-    """Phần tiền theo bài/tài khoản của MỘT nguồn trong một lượt (chưa gồm phí khởi động —
-    phí đó chung cho cả nền tảng, xem `phi_khoi_dong_ngay`)."""
-    return don_vi(n) * GIA.get(n.get("nen_tang"), 0.0) * HE_SO_UOC
+    """Phần tiền KỲ VỌNG theo bài/tài khoản/yêu cầu của MỘT nguồn trong một lượt (chưa gồm phí
+    khởi động — phí đó chung cho cả nền tảng, xem `phi_khoi_dong_ngay`).
+
+    Vì sao không nhân `HE_SO_UOC` (18/10/2026): actor theo dõi tính ĐÚNG số đơn vị, không hao hụt —
+    đo thật: thedoor `hapasglobal` 20 bài = 0,0600 USD = 0,01 + 20 × 0,0025; hồ sơ Instagram 0,0026;
+    hồ sơ Threads 0,0020; TikTok API 0,0020 mỗi yêu cầu. Nhân 1,3 làm trang Nguồn báo trang Facebook
+    10 bài 0,975 USD/tháng (thật 0,75 + phần phí khởi động chung). Hệ số chỉ còn ở mức TỐI ĐA."""
+    p = n.get("nen_tang")
+    if not GIA.get(p):
+        return 0.0
+    return don_vi_ky_vong(p, _so(n.get("so_bai_moi_lan"), 5)) * GIA[p]
 
 
 def phi_khoi_dong_ngay(p: str) -> float:
-    """Phí khởi động actor theo dõi nguồn một ngày quét của nền tảng (đã nhân hệ số)."""
-    return _khoi_nguon(p) * HE_SO_UOC if GIA.get(p) else 0.0
+    """Phí khởi động actor theo dõi nguồn một ngày quét của nền tảng (kỳ vọng, không nhân hệ số):
+    thedoor 0,01 USD/run chia chung mọi trang Facebook của run."""
+    return _khoi_nguon(p) if GIA.get(p) else 0.0
 
 
 def chi_phi_thang_nguon(n: dict, so_ngay: float = NGAY_THANG_CAU_HINH) -> float:

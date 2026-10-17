@@ -398,9 +398,10 @@ def test_du_bao_thang_threads_theo_tai_khoan_khong_phi_khoi_dong():
            "chu_ky_ngay": 1} for i in range(21)]
     db = CP.du_bao(ng, 0, 50, None, datetime.datetime(2026, 10, 15, 12, tzinfo=_VN))
     (th,) = db["nen_tang"]
-    # Actor hồ sơ (17/10/2026): 21 tài khoản × 0,002 × 1,3 mỗi ngày, không phí khởi động
-    # (chế độ "user" cũ: 21 × 10 × 0,0025 × 1,3 + 2 lô × 0,08 × 1,3 ≈ 0,89 USD/ngày).
-    assert th["thang_cau_hinh"] == pytest.approx(30 * 21 * 0.002 * 1.3)
+    # Actor hồ sơ (17/10/2026): 21 tài khoản × 0,002 mỗi ngày (kỳ vọng, 18/10/2026: không nhân
+    # 1,3 — run thật 0,0020/hồ sơ), không phí khởi động (chế độ "user" cũ: 21 × 10 × 0,0025 × 1,3
+    # + 2 lô × 0,08 × 1,3 ≈ 0,89 USD/ngày).
+    assert th["thang_cau_hinh"] == pytest.approx(30 * 21 * 0.002)
     assert th["khoi_dong_con_lai"] == 0
 
 

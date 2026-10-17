@@ -40,12 +40,74 @@ def test_mot_luot_khop_uoc_phan_cua_mark(p, so_nguon, so_bai):
     assert CP.uoc_mot_luot(p, so_nguon, so_bai) == T._uoc_phan(p, so_nguon, so_bai)
 
 
-@pytest.mark.parametrize("p, so_bai", [("tiktok", 10), ("instagram", 7), ("facebook", 4)])
-def test_mot_nguon_mot_ngay_bang_mot_luot_actor(p, so_bai):
-    """Phần theo bài + phí khởi động một ngày = đúng ước tính một lượt actor của Mark."""
+@pytest.mark.parametrize("p, so_bai, bu", [("tiktok", 10, 1), ("instagram", 7, 0),
+                                           ("facebook", 4, 0)])
+def test_ky_vong_nhan_he_so_bang_toi_da_cua_mark(p, so_bai, bu):
+    """(Phần theo đơn vị + phí khởi động một ngày) KỲ VỌNG × 1,3 = mức TỐI ĐA một lượt actor của
+    Mark (`_uoc_phan`); TikTok tối đa thêm `bu` trang bù bài ghim."""
     n = {"nen_tang": p, "so_bai_moi_lan": so_bai, "chu_ky_ngay": 1}
-    assert CP.chi_phi_luot_nguon(n) + CP.phi_khoi_dong_ngay(p) == pytest.approx(
-        T._uoc_phan(p, 1, so_bai), abs=1e-4)
+    assert (CP.chi_phi_luot_nguon(n) + bu * CP.GIA[p] + CP.phi_khoi_dong_ngay(p)) \
+        * CP.HE_SO_UOC == pytest.approx(T._uoc_phan(p, 1, so_bai), abs=1e-4)
+
+
+def test_ky_vong_neo_theo_so_do_that():
+    """Neo theo run Apify THẬT (đo 16–17/10/2026, đọc lại 18/10/2026) — trang Nguồn / dự báo báo
+    đúng tiền một lượt, không lố 30% (hệ số) hay 5 lần (TikTok theo bài):
+      • thedoor `hapasglobal` 20 bài: 0,0600 USD (1 sự kiện khởi động 0,01 + 20 × 0,0025);
+      • hồ sơ Threads scrapersdelight: 0,0020; hồ sơ Instagram apify: 0,0026 (`pricingInfos`);
+      • scraptik @hapas.official 20 bài: 3 yêu cầu = 0,006 USD."""
+    def mot(p, so_bai):
+        return CP.chi_phi_luot_nguon({"nen_tang": p, "so_bai_moi_lan": so_bai, "chu_ky_ngay": 1})
+    assert mot("facebook", 20) + CP.phi_khoi_dong_ngay("facebook") == pytest.approx(0.0600)
+    assert mot("threads", 10) == pytest.approx(0.0020)
+    assert mot("instagram", 12) == pytest.approx(0.0026)
+    assert mot("tiktok", 20) == pytest.approx(0.0060)
+    # Ảnh trang Nguồn chủ dự án gửi 18/10 (cấu hình thật HAPAS): FB 10 bài 0,975, TikTok 20 bài
+    # 0,936, Threads 0,078 USD/tháng → nay 0,75 (+ phí khởi động chung), 0,18, 0,06.
+    thang = {p: CP.chi_phi_thang_nguon({"nen_tang": p, "so_bai_moi_lan": b, "chu_ky_ngay": 1})
+             for p, b in (("facebook", 10), ("tiktok", 20), ("threads", 10))}
+    assert thang == pytest.approx({"facebook": 0.75, "tiktok": 0.18, "threads": 0.06})
+
+
+def test_nguon_js_khop_python(tmp_path):
+    """`dashboard/static/nguon.js` (ô "≈ USD/tháng" khi sửa nguồn) ra đúng số của
+    `chi_phi.chi_phi_thang_nguon` + `phi_khoi_dong_ngay` — chạy file thật bằng node, DOM giả."""
+    import json
+    import re
+    import shutil
+    import subprocess
+    from pathlib import Path
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("máy không có node")
+    js = (Path(__file__).resolve().parents[1] / "dashboard" / "static" / "nguon.js").read_text(
+        encoding="utf-8")
+    ca = [("tiktok", 20, 1), ("tiktok", 5, 2), ("tiktok", 31, 1), ("facebook", 10, 1),
+          ("facebook", 4, 3), ("instagram", 12, 1), ("threads", 10, 3), ("youtube", 10, 1)]
+    vo = (f"var hs = {json.dumps(CP.hang_so_cho_trinh_duyet())}, ca = {json.dumps(ca)}, ra = [];\n"
+          "var forms = ca.map(function (c) { var o = {textContent: ''}; ra.push(o); return {\n"
+          "  elements: {nen_tang: {value: c[0]}, so_bai_moi_lan: {value: String(c[1])},\n"
+          "             chu_ky_ngay: {value: String(c[2])}},\n"
+          "  querySelector: function () { return o; }, addEventListener: function () {}}; });\n"
+          "globalThis.document = {getElementById: function () {\n"
+          "  return {textContent: JSON.stringify(hs)}; },\n"
+          "  querySelectorAll: function () { return forms; }};\n"
+          + js + "\nconsole.log(JSON.stringify(ra.map(function (o) { return o.textContent; })));\n")
+    f = tmp_path / "nguon_thu.js"
+    f.write_text(vo, encoding="utf-8")
+    chu = json.loads(subprocess.run([node, str(f)], capture_output=True, text=True,
+                                    encoding="utf-8", check=True).stdout)
+
+    def so(s):
+        return float(s.replace(".", "").replace(",", "."))
+    for (p, b, k), c in zip(ca, chu):
+        n = {"nen_tang": p, "so_bai_moi_lan": b, "chu_ky_ngay": k}
+        thang = re.match(r"≈ ([\d.,]+) USD/tháng theo bài", c)
+        assert thang and so(thang.group(1)) == pytest.approx(
+            round(CP.chi_phi_thang_nguon(n), 3), abs=1e-9), (p, b, k, c)
+        kd = re.search(r"phí khởi động actor chung ([\d.,]+) USD", c)
+        assert (so(kd.group(1)) if kd else 0.0) == pytest.approx(
+            round(CP.phi_khoi_dong_ngay(p), 4), abs=1e-9), (p, c)
 
 
 def _nguon(i, p, so_bai, chu_ky, tt="dang_theo_doi"):
@@ -53,47 +115,46 @@ def _nguon(i, p, so_bai, chu_ky, tt="dang_theo_doi"):
             "so_bai_moi_lan": so_bai, "chu_ky_ngay": chu_ky, "trang_thai": tt}
 
 
-NGUON = [_nguon(1, "tiktok", 10, 1),            # 3 yêu cầu×0,002×1,3 = 0,0078/lượt
-         _nguon(2, "instagram", 30, 2),         # 1 tài khoản×0,0026×1,3 = 0,00338/lượt
+NGUON = [_nguon(1, "tiktok", 10, 1),            # 2 yêu cầu × 0,002 = 0,004/lượt
+         _nguon(2, "instagram", 30, 2),         # 1 tài khoản × 0,0026/lượt
          _nguon(3, "youtube", 5, 1),            # miễn phí
          _nguon(4, "facebook", 5, 3, "tam_dung"),   # tạm dừng: không tính
-         _nguon(5, "facebook", 4, 3)]           # 4×0,005×1,3 = 0,026/lượt
+         _nguon(5, "facebook", 4, 3)]           # 4 × 0,0025 = 0,01/lượt + 0,01 khởi động
 GIUA_THANG = datetime.datetime(2026, 10, 15, 12, 0, tzinfo=VN)   # còn 16,5 ngày
 
 
 def test_du_bao_tinh_tay():
-    db = CP.du_bao(NGUON, da_tieu=1.2, tran_du_an=1.4, tran_platform=None, bay_gio=GIUA_THANG)
+    db = CP.du_bao(NGUON, da_tieu=1.2, tran_du_an=1.3, tran_platform=None, bay_gio=GIUA_THANG)
     assert db["ngay_con_lai"] == 16.5
-    # còn lại: TikTok 16,5×0,0078 = 0,1287 (TikTok API theo yêu cầu: 1 hồ sơ + 1 trang + 1 trang
-    # bù bài ghim × 0,002, giá thật từng run 18/10/2026);
-    # Instagram 8,25×0,00338 = 0,027885, KHÔNG phí khởi động (17/10/2026: actor Apify chỉ tính
-    # theo item / tài khoản); Facebook (thedoor từ 17/10/2026: 0,0025/bài + 0,01/run)
-    # 5,5×(4×0,0025×1,3 = 0,013) = 0,0715 + 5,5×(0,01×1,3) = 0,0715 → 0,143
+    # Kỳ vọng (18/10/2026, không nhân 1,3). Còn lại: TikTok 16,5 × 0,004 = 0,066 (TikTok API theo
+    # yêu cầu: 1 hồ sơ + 1 trang × 0,002, giá thật từng run); Instagram 8,25 × 0,0026 = 0,02145,
+    # KHÔNG phí khởi động (17/10/2026: actor Apify chỉ tính theo tài khoản); Facebook (thedoor:
+    # 0,0025/bài + 0,01/run) 5,5 × 0,01 = 0,055 + 5,5 × 0,01 khởi động = 0,055 → 0,11.
     nt = {x["nen_tang"]: x for x in db["nen_tang"]}
     assert [x["nen_tang"] for x in db["nen_tang"]] == ["facebook", "tiktok", "instagram", "youtube"]
-    assert nt["tiktok"]["con_lai"] == pytest.approx(0.1287, **XAP_XI)
-    assert nt["instagram"]["nguon_con_lai"] == pytest.approx(0.027885, **XAP_XI)
+    assert nt["tiktok"]["con_lai"] == pytest.approx(0.066, **XAP_XI)
+    assert nt["instagram"]["nguon_con_lai"] == pytest.approx(0.02145, **XAP_XI)
     assert nt["instagram"]["khoi_dong_con_lai"] == 0
-    assert nt["facebook"]["con_lai"] == pytest.approx(0.143, **XAP_XI)
-    assert nt["facebook"]["khoi_dong_con_lai"] == pytest.approx(0.0715, **XAP_XI)
+    assert nt["facebook"]["con_lai"] == pytest.approx(0.11, **XAP_XI)
+    assert nt["facebook"]["khoi_dong_con_lai"] == pytest.approx(0.055, **XAP_XI)
     assert nt["facebook"]["so_nguon"] == 1                       # nguồn 4 tạm dừng
     assert nt["youtube"]["con_lai"] == 0 and nt["youtube"]["thang_cau_hinh"] == 0
-    assert db["con_lai"] == pytest.approx(0.2996, abs=1e-4)
-    assert db["du_bao_thang"] == pytest.approx(1.4996, abs=1e-4)
-    # 30 ngày theo cấu hình: 0,234 + 0,0507 + (0,13 + 0,13) = 0,5447
-    assert db["thang_cau_hinh"] == pytest.approx(0.5447, abs=1e-4)
-    assert db["tran"] == 1.4 and db["vuot"] is True
-    assert db["vuot_usd"] == pytest.approx(0.0996, abs=1e-4)
+    assert db["con_lai"] == pytest.approx(0.19745, abs=1e-4)
+    assert db["du_bao_thang"] == pytest.approx(1.39745, abs=1e-4)
+    # 30 ngày theo cấu hình: 0,12 + 0,039 + (0,1 + 0,1) = 0,359
+    assert db["thang_cau_hinh"] == pytest.approx(0.359, abs=1e-4)
+    assert db["tran"] == 1.3 and db["vuot"] is True
+    assert db["vuot_usd"] == pytest.approx(0.09745, abs=1e-4)
     assert [(x["id"], x["thang_usd"]) for x in db["top_ton"]] == [
-        (1, pytest.approx(0.234)), (5, pytest.approx(0.13)), (2, pytest.approx(0.0507))]
+        (1, pytest.approx(0.12)), (5, pytest.approx(0.1)), (2, pytest.approx(0.039))]
     assert 4 not in [x["id"] for x in db["nguon"]] and 3 not in [x["id"] for x in db["top_ton"]]
 
 
 def test_tran_hieu_luc_lay_tran_thap_hon():
     db = CP.du_bao(NGUON, 1.2, tran_du_an=5.0, tran_platform=None, bay_gio=GIUA_THANG)
     assert db["tran"] == 5.0 and db["vuot"] is False and db["vuot_usd"] == 0
-    db = CP.du_bao(NGUON, 1.2, tran_du_an=5.0, tran_platform=1.4, bay_gio=GIUA_THANG)
-    assert (db["tran"], db["tran_platform"], db["vuot"]) == (1.4, 1.4, True)
+    db = CP.du_bao(NGUON, 1.2, tran_du_an=5.0, tran_platform=1.3, bay_gio=GIUA_THANG)
+    assert (db["tran"], db["tran_platform"], db["vuot"]) == (1.3, 1.3, True)
     assert CP.tran_hieu_luc(1.0, 3.0) == 1.0 and CP.tran_hieu_luc(4.0, None) == 4.0
 
 

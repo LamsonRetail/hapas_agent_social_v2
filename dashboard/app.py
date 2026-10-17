@@ -1149,6 +1149,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                       nguon=an_chi_tiet(nguoi, nguon, ("them_boi",), ("loi_cuoi",)),
                       de_xuat=an_chi_tiet(nguoi, de_xuat, ("xu_ly_boi",)),
                       chi_phi_js=CP.hang_so_cho_trinh_duyet(),
+                      # Ô "thêm nguồn" (mặc định TikTok 5 bài, mỗi ngày) khi trình duyệt tắt JS.
+                      uoc_nguon_moi=CP.chi_phi_thang_nguon({"nen_tang": "tiktok",
+                                                            "so_bai_moi_lan": 5}),
                       phi_khoi_dong={p: CP.phi_khoi_dong_ngay(p) for p in NL.NEN_TANG})
 
     @app.post("/du-an/them")

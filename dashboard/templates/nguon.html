@@ -161,7 +161,7 @@
     <label class="o">Nhãn (dấu phẩy) <input type="text" name="nhan" maxlength="500"></label>
     <label class="o">Chu kỳ quét (1–30 ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="1" required></label>
     <label class="o">Số bài mỗi lần <input type="number" name="so_bai_moi_lan" min="1" value="5" required></label>
-    <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh('tiktok', 30 * 5 * chi_phi_js.gia.tiktok * chi_phi_js.he_so) }}</output>
+    <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh('tiktok', uoc_nguon_moi) }}</output>
     <div><button class="nut" type="submit">Thêm nguồn</button></div>
   </form>
 </section>

@@ -497,7 +497,8 @@ def test_gia_nguon_facebook_thedoor_khop_dashboard():
         assert CP.uoc_mot_luot("facebook", so_nguon, n) == T._uoc_phan("facebook", so_nguon, n)
     assert T._uoc_phan("facebook", 6, 20) == pytest.approx((6 * 20 * 0.0025 + 0.01) * 1.3,
                                                            abs=1e-4)
-    assert CP.phi_khoi_dong_ngay("facebook") == pytest.approx(0.01 * 1.3)
+    # Dự báo là KỲ VỌNG (18/10/2026): đúng phí khởi động thedoor 0,01 USD/run, không nhân 1,3.
+    assert CP.phi_khoi_dong_ngay("facebook") == pytest.approx(0.01)
     assert CP.hang_so_cho_trinh_duyet()["khoi_nguon"]["facebook"] == 0.01
     import tiktok_api as TT
     assert TT.CHON["facebook_theo_doi"] == {"chinh": TDA.FB_TRANG,
