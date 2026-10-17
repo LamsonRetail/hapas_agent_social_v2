@@ -672,6 +672,22 @@ def test_chay_viec_du_phong_fb_bi_bo_vao_ghi_chu_luot_va_loi_cuoi(mo):
                                       for x in loi.values())
 
 
+def test_khoi_dong_lai_doc_tiep_dung_cac_trang_du_phong_da_gui(monkeypatch):
+    """Run dự phòng chỉ gửi trang đầu (trần nhỏ) rồi bot khởi động lại: đọc tiếp đúng run đó cho
+    đúng trang đã gửi; trang còn lại mang lý do, không POST thêm."""
+    urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/trang.khac"]
+    v, ph, ds = _phan_fb(urls)
+    ph.update(run_id="r-cu", trang_thai="dang_chay", du_phong_run="r-dp", run_phu=["r-dp"],
+              du_phong_trang=urls[:1])
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: [],
+                                "apify~facebook-posts-scraper": [_fb_cu("hapasglobal", 1)]})
+    _chay_phan(v, ph, ds)
+    assert ap.gui == [] and ap.doc == ["r-cu", "r-dp"]
+    kq = ph["du_phong_kq"]
+    assert kq["trang"] == urls[:1] and kq["bo_qua_trang"] == urls[1:]
+    assert "bot khởi động lại giữa lượt" in ph["loi_nguon"]["2"] and "1" not in ph["loi_nguon"]
+
+
 def test_khoi_dong_lai_doc_tiep_run_du_phong_khong_post_lai(monkeypatch):
     urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/trang.khac"]
     v, ph, ds = _phan_fb(urls)

@@ -335,6 +335,8 @@ def du_phong_fb(v, p: str, ph: dict, items: list, meta: dict, loi, cap: float,
     kq: dict = {"actor": dp["actor"], "trang": [], "so_item": 0}
     if ph.get("du_phong_run"):
         gui = [u for u in (ph.get("du_phong_trang") or thieu) if u in thieu] or thieu
+        if len(gui) < len(thieu):
+            kq["bo_qua"] = "bot khởi động lại giữa lượt — chỉ đọc tiếp run dự phòng đã gửi"
     elif han - time.monotonic() < 30:
         gui, kq["bo_qua"] = [], "hết giờ"
     else:
