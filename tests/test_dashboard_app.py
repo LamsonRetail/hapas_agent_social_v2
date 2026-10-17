@@ -1922,6 +1922,70 @@ def test_ngan_sach_ma_tran_cau_hinh_mot_bieu_mau():
     assert "ns-du-lieu" not in t and 'name="tk_' not in t and "/cau-hinh" not in t
 
 
+def _kho_nang_cao() -> GiaKho:
+    kho = GiaKho()
+    kho.du_an["hapas"].update(
+        tk_bat=True, tk_so_bai=15, tu_khoa=["hapas", "túi hapas", "quà tặng hapas", "hapasvn"],
+        cau_hinh={"tu_khoa": {"threads": {"bat": True, "so_bai": 20,
+                                          "duong2": {"bat": False, "so_bai": 50}}}})
+    return kho
+
+
+def test_ngan_sach_moi_nen_tang_mot_dong_phan_mo_rong_vao_nang_cao():
+    """Chủ dự án 18/10/2026: phần "đường 2" làm bảng rối — mỗi nền tảng MỘT dòng (bật, số bài, USD);
+    phần mở rộng ở khối "Nâng cao" thu gọn mặc định, chữ thường ngày, không tên actor; USD của phần
+    mở rộng cộng vào dòng nền tảng nên tổng các dòng = Tổng mỗi lượt."""
+    from dashboard import chi_phi as CP
+    kho = _kho_nang_cao()
+    _, c, _ = tao(kho)
+    dang_nhap(c, QL)
+    t = c.get("/ngan-sach").text
+    assert t.count('<tr data-nt="') == 6, "một dòng mỗi nền tảng, không còn dòng phụ"
+    nc = t.index('<details class="ns-nc" id="ns-nang-cao">')        # thu gọn: không có `open`
+    for o in ('data-nt="facebook_d2"', 'name="tk_facebook_d2_so_bai"', 'data-nt="tiktok_tag"',
+              'name="tk_tiktok_tag_so_yc"', 'name="tk_threads_d2_bat"', 'name="tk_instagram_so_tu"',
+              'name="tk_web_boc"'):
+        assert t.index(o) > nc, o
+    # Chữ hiện ra + chữ ⓘ của bảng và Nâng cao: không "đường 2", không tên actor.
+    vung = t[t.index('<table class="ns-bang">'):t.index("</details>", nc)]
+    chu = (re.sub(r"<[^>]+>", " ", t) + " ".join(re.findall(r'data-goi-y="([^"]*)"', vung))).lower()
+    for cam in ("đường 2", "duong2", "mina", "scrapersdelight", "futurizerush", "scraptik",
+                "thedoor", "scrapeforge", "actor"):
+        assert cam not in chu, cam
+    b = CP.bang_cau_hinh(kho.du_an["hapas"])
+    usd = {k: float(v) for k, v in re.findall(r'data-o="((?:tk|bl)-\w+)" data-usd="([0-9.e-]+)"', t)}
+    tk = sum(usd[f"tk-{p}"] for p in CP.NEN_TANG)
+    bl = sum(usd.get(f"bl-{p}", 0.0) for p in CP.NEN_TANG)
+    assert tk == pytest.approx(b["uoc_tk"], abs=1e-4) and bl == pytest.approx(b["uoc_bl"], abs=1e-4)
+    d2, tag = b["tu_khoa"]["facebook"]["duong2"], b["tu_khoa"]["tiktok"]["hashtag"]
+    assert d2["uoc"] > 0 and tag["uoc"] > 0
+    assert usd["tk-facebook"] == pytest.approx(b["tu_khoa"]["facebook"]["uoc"] + d2["uoc"])
+    assert usd["tk-tiktok"] == pytest.approx(b["tu_khoa"]["tiktok"]["uoc"] + tag["uoc"])
+    nc_tong = float(re.search(r'data-o="nc-tong" data-usd="([0-9.e-]+)"', t).group(1))
+    assert nc_tong == pytest.approx(d2["uoc"] + tag["uoc"], abs=1e-4)       # Threads mở rộng tắt
+    assert "Tìm rộng hơn đang tắt" in t
+    d = json.loads(re.search(r'id="ns-du-lieu">(.*?)</script>', t, re.DOTALL).group(1))
+    assert d["th2"]["uoc_neu_bat"] == CP.uoc_th2({**d["th2"], "bat": True}, CP.tu_tim(
+        kho.du_an["hapas"])) > 0, "trình duyệt cộng ngay khi bật lại"
+    dang_nhap(c, XEM)
+    t = c.get("/ngan-sach").text
+    assert 'id="ns-nang-cao"' in t and 'name="tk_' not in t and "ns-nc__tt" in t
+
+
+def test_ngan_sach_cong_tac_tim_rong_hon_threads_chi_doi_bat():
+    kho = _kho_nang_cao()
+    _, c, _ = tao(kho)
+    csrf = dang_nhap(c, QL)
+    form = {"csrf": csrf, "tk_threads_bat": "1", "tk_threads_so_bai": "20", "tk_threads_d2": "1"}
+    r = c.post("/ngan-sach/hapas/cau-hinh", data={**form, "tk_threads_d2_bat": "1"})
+    assert "Đã lưu cấu hình thu thập" in thong_bao(c, r)
+    assert kho.du_an["hapas"]["cau_hinh"]["tu_khoa"]["threads"]["duong2"] == {
+        "bat": True, "so_bai": 50}, "giữ so_bai đang lưu"
+    c.post("/ngan-sach/hapas/cau-hinh", data=form)                  # công tắc bỏ chọn
+    assert kho.du_an["hapas"]["cau_hinh"]["tu_khoa"]["threads"]["duong2"] == {
+        "bat": False, "so_bai": 50}
+
+
 def test_ngan_sach_nhieu_du_an_co_bang_tong_quan():
     kho = GiaKho()
     kho.du_an["moi"] = {**kho.du_an["hapas"], "ma": "moi", "ten": "Dự án mới", "tran_usd_thang": 0.0}

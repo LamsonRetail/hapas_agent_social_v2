@@ -228,6 +228,16 @@
     c.uoc = c.bat && TAG_TT.length ? r4(so * (hs.tk_tt_yeu_cau || 0) * hs.he_so) : 0;
     return c;
   }
+  // Threads "Tìm rộng hơn" (= chi_phi.cau_hinh_th2 + uoc_th2, máy chủ tính sẵn trong D.th2). 18/10/2026
+  // có công tắc ở khối Nâng cao: bật thì cộng `uoc_neu_bat`; trang không có công tắc thì theo cấu hình
+  // đã lưu như trước (`bat_rieng` + `uoc_khi_bat`).
+  function cauHinhTh2(doc, th) {
+    var co = !!form.elements.namedItem("tk_threads_d2_bat");
+    var y = (co ? doc.bat("tk_threads_d2_bat") : !!TH2.bat_rieng) && !!th.y;
+    var c = { y: y, bat: y && !!th.bat };
+    c.uoc = c.bat ? (co ? (TH2.uoc_neu_bat || 0) : (TH2.uoc_khi_bat || 0)) : 0;
+    return c;
+  }
   function tinh(doc) {               // = chi_phi.bang_cau_hinh
     var kq = { tk: {}, bl: {} };
     var stk = 0;
@@ -236,7 +246,10 @@
       var a = cauHinh(doc, "tk", p);
       var b = cauHinh(doc, "bl", p);
       a.uoc = a.bat ? uocTk(p, a.so_bai, a.so_tu, a.boc) : 0;
-      if (p === "threads" && a.bat && TH2.bat_rieng) a.uoc = r4(a.uoc + (TH2.uoc_khi_bat || 0));
+      if (p === "threads") {
+        a.th2 = cauHinhTh2(doc, a);
+        a.uoc = r4(a.uoc + a.th2.uoc);
+      }
       b.uoc = b.bat ? uocBl(p, b.so_bai, b.moi_bai) : 0;
       kq.tk[p] = a;
       kq.bl[p] = b;
@@ -302,19 +315,35 @@
     e.setAttribute("data-goi-y", chu);
     e.setAttribute("aria-label", "Giải thích: " + chu);
   }
+  // Ô USD của một dòng. 18/10/2026: ô tìm theo từ khoá gồm cả phần mở rộng ở Nâng cao, nên "0 bài"
+  // hay "miễn phí" chỉ khi cả dòng thật sự 0 USD (= macro o_usd của ngan_sach.html).
   function oUsd(khoa, c, gia) {
     var e = o(khoa);
     if (!e) return;
-    var chu = !c.y ? "tắt" : !c.so_bai ? "tắt (0 bài)" : !gia ? "miễn phí" : soVn(c.uoc, 3);
+    var het = !c.so_bai && !c.uoc;
+    var chu = !c.y ? "tắt" : het ? "tắt (0 bài)" : !gia && !c.uoc ? "miễn phí" : soVn(c.uoc, 3);
     ghi(khoa, chu, c.uoc);
-    e.classList.toggle("ns-tat-chu", !c.y || !c.so_bai);
-    e.classList.toggle("ns-mien-phi", !!(c.y && c.so_bai && !gia));
+    e.classList.toggle("ns-tat-chu", !c.y || het);
+    e.classList.toggle("ns-mien-phi", !!(c.y && !het && !gia && !c.uoc));
+  }
+  // Ô USD của một mục Nâng cao (= macro o_nc): "tắt" hoặc "+x USD/lượt".
+  function oNc(khoa, c) {
+    var e = o(khoa);
+    if (!e || !c) return;
+    ghi(khoa, c.bat ? "+" + soVn(c.uoc, 3) + " USD/lượt" : "tắt", c.uoc);
+    e.classList.toggle("ns-tat-chu", !c.bat);
   }
   function moNhom(p, nhom, bat) {
     var dong = form.querySelector('tr[data-nt="' + p + '"]');
     if (!dong) return;
     dong.querySelectorAll('[data-nhom="' + nhom + '"]').forEach(function (td) {
       td.classList.toggle("ns-mo", !bat);
+    });
+  }
+  // Mục Nâng cao mờ đi khi nền tảng "cha" của nó tắt ở bảng trên.
+  function moMuc(p, bat) {
+    form.querySelectorAll('.ns-nc__muc[data-cha="' + p + '"]').forEach(function (m) {
+      m.classList.toggle("ns-mo", !bat);
     });
   }
   // <do_phu> (bài thử tests/test_kiem_do_phu.py::test_ngan_sach_js_do_phu_khop_python chạy khối này)
@@ -355,24 +384,31 @@
 
   function capNhat() {
     var kq = tinh(docForm);
+    // Phần mở rộng ở Nâng cao CỘNG vào ô của nền tảng nó thuộc (Threads: `tinh` đã cộng) — tổng
+    // các dòng luôn bằng "Tổng mỗi lượt".
+    var them = { facebook: kq.d2.uoc, tiktok: kq.tag.uoc };
     NT.forEach(function (p) {
       var a = kq.tk[p];
       var b = kq.bl[p];
-      oUsd("tk-" + p, a, p === "web" ? HW.gia_trang : (hs.tk_gia || {})[p]);
+      var dongTk = r4(a.uoc + (them[p] || 0));
+      oUsd("tk-" + p, { y: a.y, so_bai: a.so_bai, uoc: dongTk },
+        p === "web" ? HW.gia_trang : (hs.tk_gia || {})[p]);
       oUsd("bl-" + p, b, (hs.bl_gia || {})[p]);
-      ghi("dong-" + p, soVn(r4(a.uoc + b.uoc), 3), r4(a.uoc + b.uoc));
+      ghi("dong-" + p, soVn(r4(dongTk + b.uoc), 3), r4(dongTk + b.uoc));
       moNhom(p, "tk", a.y);
       moNhom(p, "bl", b.y);
+      moMuc(p, a.y);
     });
-    if (o("tk-tiktok_tag")) {         // dòng phụ TikTok feed hashtag
-      oUsd("tk-tiktok_tag", kq.tag, hs.tk_tt_yeu_cau);
-      ghi("dong-tiktok_tag", soVn(kq.tag.uoc, 3), kq.tag.uoc);
-      moNhom("tiktok_tag", "tk", kq.tag.y);
-    }
-    if (o("tk-facebook_d2")) {        // dòng phụ Facebook đường 2
-      oUsd("tk-facebook_d2", kq.d2, HF2.gia);
-      ghi("dong-facebook_d2", soVn(kq.d2.uoc, 3), kq.d2.uoc);
-      moNhom("facebook_d2", "tk", kq.d2.y);
+    var th2 = (kq.tk.threads || {}).th2;
+    oNc("tk-facebook_d2", kq.d2);
+    oNc("tk-tiktok_tag", kq.tag);
+    oNc("tk-threads_d2", th2);
+    var nc = r4(kq.d2.uoc + kq.tag.uoc + (th2 ? th2.uoc : 0));
+    ghi("nc-tong", soVn(nc, 3), nc);
+    var ig = kq.tk.instagram;         // hashtag Instagram thật sự gửi (số hashtag đặt ở Nâng cao)
+    if (ig) {
+      var igq = TU_IG.slice(0, ig.so_tu);
+      ghi("ig-tag", igq.length ? "#" + igq.join(" #") + " (" + igq.length + " hashtag)" : "chưa có hashtag nào");
     }
     var fb = o("ghi-fb");             // gói FREE: đặt quá tk_fb_toi_da thì làm nổi ghi chú
     if (fb) {
@@ -471,6 +507,12 @@
   form.addEventListener("reset", function () {
     window.setTimeout(function () { CAC_O.forEach(kiemO); capNhat(); }, 0);
   });
+  // Ô sai nằm trong khối "Nâng cao" đang thu gọn: mở khối để trình duyệt chỉ được vào ô đó (ô bị ẩn
+  // thì trình duyệt chặn gửi mà không báo gì).
+  form.addEventListener("invalid", function (e) {
+    var k = e.target && e.target.closest ? e.target.closest("details") : null;
+    if (k && !k.open) k.open = true;
+  }, true);
   form.addEventListener("submit", function () {
     dangLuu = true;
     var nut = o("nut-luu");

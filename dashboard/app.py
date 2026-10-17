@@ -1313,13 +1313,22 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     hd_dp = (r_dp[0].get("hanh_dong") if r_dp else None) or {}
                 except LoiKho:
                     lan_cuoi = None
+            bang = CP.bang_cau_hinh(d)
+            # Công tắc "Tìm rộng hơn" của Threads (Nâng cao, 18/10/2026): USD nếu bật — để trình
+            # duyệt cộng ngay khi người dùng bật lại phần đang tắt (cùng hàm `chi_phi.uoc_th2`).
+            th2 = bang["tu_khoa"]["threads"].get("duong2")
+            if isinstance(th2, dict):
+                th2["uoc_neu_bat"] = CP.uoc_th2({**th2, "bat": True}, CP.tu_tim(d))
             # `cau_hinh` hiển thị: Threads (MAC_DINH_TAT) chưa đặt thì ô bật hiện TẮT như hiệu lực.
             dong.append({**d, "cau_hinh": CP.cau_hinh_hien_thi(d.get("cau_hinh")),
                          # Hashtag riêng của dự án đã chuẩn hoá (18/10/2026); [] = suy từ từ khoá.
                          "hashtag_rieng": CP.nguon_tag(d, []),
+                         # Hashtag Instagram thật sự gửi mỗi lượt (khối Nâng cao hiện danh sách).
+                         "tag_ig": CP.tu_gui("instagram", CP.nguon_tag(d, CP.tu_tim(d)),
+                                             bang["tu_khoa"]["instagram"]["so_tu"]),
                          "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
-                         "bang": CP.bang_cau_hinh(d),
-                         "lich": CP.du_bao_lich(cac_lich, CP.bang_cau_hinh(d), nguon, bay_gio),
+                         "bang": bang,
+                         "lich": CP.du_bao_lich(cac_lich, bang, nguon, bay_gio),
                          "do_phu": {**CP.du_bao_do_phu(d, lan_cuoi, bay_gio),
                                     "noi": CS.noi_tu_hanh_dong(hd_dp)},
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
@@ -1438,6 +1447,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 th_cu = th_cu.get(k) if isinstance(th_cu, dict) else None
             if isinstance(th_cu, dict) and "threads" in ch["tu_khoa"]:
                 ch["tu_khoa"]["threads"]["duong2"] = dict(th_cu)
+            # 18/10/2026: khối "Nâng cao" có công tắc "Tìm rộng hơn" của Threads (ô ẩn
+            # `tk_threads_d2` báo biểu mẫu có công tắc): chỉ đổi `bat`, giữ mọi khoá khác đang lưu
+            # (so_bai, so_bai_moi_tu, so_luot). Biểu mẫu cũ không có ô ẩn thì giữ nguyên như trên.
+            if "tk_threads_d2" in form and "threads" in ch["tu_khoa"]:
+                th2 = dict(ch["tu_khoa"]["threads"].get("duong2") or {})
+                th2["bat"] = form.get("tk_threads_d2_bat") == "1"
+                ch["tu_khoa"]["threads"]["duong2"] = th2
             await _k(app.state.kho.dat_cau_hinh, nguoi["email"], ma, ch)
             if tran is not None:
                 await _k(app.state.kho.dat_tran_thang, nguoi["email"], ma, tran)

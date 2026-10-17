@@ -473,7 +473,8 @@ def test_trang_ngan_sach_cong_duong_2_va_luu_khong_mat_cau_hinh():
         "bat": True, "duong2": {"bat": False, "so_bai": 50}}}})
     csrf = dang_nhap(c, QL)
     t = c.get("/ngan-sach").text
-    assert 'data-o="ghi-th2"' in t and "Đường 2 tắt" in t and '"th2": {' in t
+    # 18/10/2026: phần mở rộng nằm ở khối "Nâng cao", chữ thường ngày (không "đường 2").
+    assert 'data-o="ghi-th2"' in t and "Tìm rộng hơn đang tắt" in t and '"th2": {' in t
     r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "tk_threads_bat": "1",
                                                    "tk_threads_so_bai": "40"})
     assert "Đã lưu cấu hình thu thập" in thong_bao(c, r)
