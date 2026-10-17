@@ -10,5 +10,9 @@ quét, bảng `lich_quet`); lịch Giao việc trên console vẫn ở console.
 
 Gói này chạy trong venv RIÊNG trên VPS (user hệ điều hành `lang_nghe_web`), không import module
 nào của Mark: chỉ thư viện chuẩn + fastapi/jinja2/httpx/psycopg. Chiều ngược lại thì được: Mark
-import `dashboard.lich_quet` (thuần, chỉ thư viện chuẩn) để tính mốc giống hệt dashboard.
+import `dashboard.lich_quet` (thuần, chỉ thư viện chuẩn) để tính mốc giống hệt dashboard; tool
+`hoi_dashboard` của Mark (17/10/2026) import `chi_so`, `chi_phi`, `trang_lich`, `nhap_lieu` và các
+hàm ĐỌC của `kho` để trả lời số liệu trong chat bằng đúng phép tính của trang — giữ các module đó
+thuần (không import FastAPI/`app`), và sửa `/api/chi-so` thì sửa cả `hoi_dashboard_tool.tinh_chi_so`
+(bài thử `test_hoi_dashboard.py` so từng khối).
 """

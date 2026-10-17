@@ -69,6 +69,7 @@ import tinh_tool  # noqa: E402,F401  (registers `tinh`: máy tính chính xác �
 import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_viec_base`: việc đã duyệt -> Base checklist)
 import tien_do  # noqa: E402  (registers `tra_tien_do`: việc quá hạn/sắp hạn do code so ngày; nhắc nhóm 08:30 nếu cấu hình)
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
+import hoi_dashboard_tool  # noqa: E402,F401  (registers `hoi_dashboard`: số liệu dashboard social.hapas.vn cho người xem)
 import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho bài học chiến dịch, tắt khi thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import execution_receipts  # noqa: E402  (bằng chứng tool bền vững theo chat)
@@ -168,6 +169,19 @@ _TOOLING_NOTE = "\n".join(
         "(agent → Lịch chạy). Tool báo lỗi thì nói nguyên lý do, KHÔNG nói đã đặt; tool báo "
         "`da_co_san` thì nói lịch đó đã có, không đặt lại.",
         "- `remember_about_user`: ghi nhớ dài hạn thông tin quan trọng về người đang nói chuyện.",
+        # 17/10: chủ dự án — "nối trực tiếp số liệu dashboard vào mark … hỏi đáp trực tiếp về toàn
+        # bộ dashboard". Quyền (chỉ người xem dashboard, chỉ chat riêng) do CODE của tool chặn;
+        # dưới đây chỉ là cách dùng.
+        "- SỐ LIỆU DASHBOARD LẮNG NGHE (social.hapas.vn — 'tuần này HAPAS bao nhiêu thảo luận', "
+        "'tiêu cực tăng không', 'nguồn/KOL nào nói nhiều', 'khách hỏi mua bao nhiêu', 'tháng này "
+        "quét hết bao nhiêu tiền', 'lịch quét chạy chưa'): gọi `hoi_dashboard` — đọc kho đã quét, "
+        "MIỄN PHÍ, số khớp dashboard; không cần hỏi \"Chạy nhé?\". KHÔNG quét mới bằng "
+        "`social_listen` để trả lời câu về dashboard. Kỳ mơ hồ ('đợt vừa rồi', 'dạo này', 'đợt "
+        "sale') thì hỏi lại MỘT câu ngắn (hoặc nói rõ đang dùng 30 ngày trọn gần nhất như "
+        "dashboard); dự án không rõ mà có nhiều dự án thì hỏi dự án. Trả lời tiếng Việt: kỳ + kỳ "
+        "so sánh, số và % CHÉP từ kết quả (cần phép tính khác thì `tinh`), lời đọc ngắn, cảnh báo "
+        "trong `canh_bao`, cuối cùng dán `link` để mở đúng màn hình. Tool từ chối vì quyền/nhóm "
+        "chat thì chuyển nguyên lời, không dùng đường khác để lấy số.",
         # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
         # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).
@@ -317,6 +331,8 @@ _TOOL_CAN_XET = {
              {"phep_tinh": {"vuot": "103 - 90"}}),
     "tra_tien_do": ("tra việc quá hạn và sắp tới hạn trên Base checklist dự án (code so "
                     "ngày; người hỏi cũng phải có quyền xem Base)", {}),
+    "hoi_dashboard": ("trả lời số liệu dashboard lắng nghe social.hapas.vn (chỉ cho người có "
+                      "quyền xem dashboard, trong chat riêng)", {}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",
                  {"args": ["wiki", "+search", "x"]}),

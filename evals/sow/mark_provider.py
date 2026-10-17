@@ -29,6 +29,9 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 CHU = os.environ.get("MARK_EVAL_SENDER", "ou_5b597bb7e77ee9e1721ff5ea8fe5be93")
+#: Như tin chat RIÊNG Lark thật (`run.py` dựng `kenh` từ sự kiện listener): tool cần danh tính đã
+#: xác thực (`hoi_dashboard`, `chi_so_ads`) đọc `channel` + `nguoi_gui` từ đây, không từ chữ.
+KENH = {"chat_type": "p2p", "channel": "lark", "nguoi_gui": CHU}
 _MOI_TRUONG: dict = {}
 
 
@@ -163,10 +166,10 @@ def call_api(prompt: str, options: dict, context: dict) -> dict:
         mt = _dung_moi_truong()
         brain, audit = mt["brain"], mt["audit"]
         for cau in luot_truoc:
-            brain.reply(cau, chat_id=phien, sender_open_id=CHU, kenh={"chat_type": "p2p"})
+            brain.reply(cau, chat_id=phien, sender_open_id=CHU, kenh=KENH)
             audit.lay_luot_vua_xong(phien)
         t0 = time.time()
-        dap = brain.reply(prompt, chat_id=phien, sender_open_id=CHU, kenh={"chat_type": "p2p"})
+        dap = brain.reply(prompt, chat_id=phien, sender_open_id=CHU, kenh=KENH)
         giay = round(time.time() - t0, 1)
     except Exception as e:  # noqa: BLE001 — báo lỗi cho Promptfoo, không làm sập worker
         return {"error": f"{type(e).__name__}: {e}"}

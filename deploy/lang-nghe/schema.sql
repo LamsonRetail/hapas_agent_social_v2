@@ -17,7 +17,8 @@
 -- Ba role, đăng nhập bằng Unix socket + peer (không mật khẩu, không mở cổng):
 --   lang_nghe_chu  — sở hữu bảng (NOLOGIN), chỉ dùng để chạy file này.
 --   mark           — user hệ điều hành của bot: ĐỌC dự án/nguồn/lịch, GHI bài/lượt quét/đề xuất
---                    và cột trạng thái chạy của lịch.
+--                    và cột trạng thái chạy của lịch; đọc email + vai trò người xem (hỏi đáp
+--                    số liệu dashboard trong chat chỉ cho người xem).
 --   lang_nghe_web  — user hệ điều hành của dashboard: quản lý dự án/nguồn/lịch/người xem, đọc mọi thứ.
 
 \set ON_ERROR_STOP on
@@ -668,6 +669,12 @@ REVOKE SELECT ON lich_quet FROM mark;
 GRANT SELECT (id, du_an, ten, kieu, cau_hinh, bat, quet_moi_nguon, lan_chay_ke, lan_chay_cuoi,
               ket_qua_cuoi, so_lan_chay) ON lich_quet TO mark;
 GRANT UPDATE (lan_chay_ke, lan_chay_cuoi, ket_qua_cuoi, so_lan_chay) ON lich_quet TO mark;
+-- Hỏi đáp số liệu dashboard trong chat (17/10/2026, `hoi_dashboard_tool.py`): Mark chỉ trả số cho
+-- người có tên trong `nguoi_xem`, nên đọc ĐÚNG hai cột email + vai_tro (không them_boi/them_luc).
+-- Các bảng còn lại tool đọc (du_an, nguon, bai, binh_luan, luot_quet, lich_quet theo cột) đã có
+-- quyền ở trên. Cột mới mà `dashboard.kho.vai_tro` đọc thêm thì cấp thêm ở đây (thiếu quyền thì
+-- tool ĐÓNG — không trả số cho ai). Chạy lại nhiều lần không sao (GRANT trùng không lỗi).
+GRANT SELECT (email, vai_tro) ON nguoi_xem TO mark;
 
 -- Quyền của dashboard: quản lý cấu hình + người xem, đọc mọi thứ, ghi nhật ký và mốc đồng bộ.
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO lang_nghe_web;

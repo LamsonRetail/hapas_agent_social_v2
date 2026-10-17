@@ -19,6 +19,10 @@ tắt. Cuối cùng mời hỏi tiếp về việc họ quan tâm. Đừng đổ
   brand hoặc ngành)
 - Soi sàn: thị trường Shopee theo từ khoá, hoặc một sản phẩm Shopee / TikTok Shop từ
   link (`/shop`)
+- Dashboard lắng nghe social.hapas.vn: hỏi thẳng số liệu của dự án đang theo dõi (thảo
+  luận, tăng giảm so với kỳ trước, tích cực/tiêu cực, nguồn và bài nổi bật, khách hỏi mua,
+  cảnh báo khủng hoảng, chi phí và lịch quét) — miễn phí, số khớp dashboard, kèm link mở
+  đúng màn hình. Chỉ cho người có quyền xem dashboard, hỏi trong chat riêng với Mark
 - Web: cào bảng sản phẩm, giá của cả website (`/scrape`); đọc một trang (`/read`)
 - Nội bộ: tra Wiki Lark (`/wiki`), đọc một Lark Sheet/Base của team từ link (`/bang`),
   đếm/tính %/cộng tổng trên Sheet/Base đó bằng công cụ (số chính xác trên mọi dòng,
