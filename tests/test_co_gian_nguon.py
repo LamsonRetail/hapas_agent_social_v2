@@ -58,7 +58,7 @@ def test_tiktok_co_theo_trang(so, max_ngay, ra):
 def test_lay_du_khi_lam_moi_chien_dich_bao_hoa_chua_co_lich_su_hoac_tat():
     for kw, chu in (({"day_du": True}, "làm mới đủ 10 bài (mỗi 7 ngày)"),
                     ({"chien_dich": True}, "đang chiến dịch"),
-                    ({"bao_hoa": True}, "lượt trước lấy đủ mà bài nào cũng mới")):
+                    ({"bao_hoa": True}, "lượt trước lấy đủ mà bài về đều mới")):
         m, ly = CP.so_bai_co_gian("facebook", 10, 1, 1.0, CFG, **kw)
         assert m == 10 and ly.startswith(chu)
     assert CP.so_bai_co_gian("facebook", 10, None, 1.0, CFG) == (10, "chưa có lịch sử đăng")
@@ -86,12 +86,18 @@ def test_ky_vong_thang_cua_nguon_da_co():
     """FB 10 bài/lần, nhịp ≤ 1 bài/ngày: 6 lượt × 4 bài + 1 lượt × 10 bài mỗi 7 ngày → 30 ngày
     ≈ 30 × 34/7 × 0,0025 = 0,364 USD (không co: 0,75)."""
     (n,) = CP.gan_co_gian([{"id": 1, "nen_tang": "facebook", "so_bai_moi_lan": 10,
-                            "chu_ky_ngay": 1}], {1: 1}, {})
+                            "chu_ky_ngay": 1, "loai": "kenh_nha"}], {1: 1}, {})
     assert n["so_bai_co_gian"] == 4 and n["ly_do_co_gian"].startswith("10→4 bài")
     assert CP.chi_phi_thang_nguon(n) == pytest.approx(30 * 34 / 7 * 0.0025)
     (k,) = CP.gan_co_gian([{"id": 2, "nen_tang": "facebook", "so_bai_moi_lan": 10,
-                            "chu_ky_ngay": 1}], {}, {})
+                            "chu_ky_ngay": 1, "loai": "kenh_nha"}], {}, {})
     assert k["so_bai_co_gian"] is None and CP.chi_phi_thang_nguon(k) == pytest.approx(0.75)
+    # Soát 18/10/2026: nguồn KHÔNG phải kênh nhà (hoặc thiếu loại) lấy đủ dù nhịp thấp — kho chỉ
+    # giữ bài nhắc từ khoá của nó, nhịp đếm trên kho thấp hơn nhịp đăng thật.
+    for loai in ("kol", "page", None):
+        (x,) = CP.gan_co_gian([{"id": 3, "nen_tang": "facebook", "so_bai_moi_lan": 10,
+                                "chu_ky_ngay": 1, "loai": loai}], {3: 1}, {})
+        assert x["so_bai_co_gian"] is None and CP.chi_phi_thang_nguon(x) == pytest.approx(0.75)
 
 
 # ───────────────────────────── Mark ─────────────────────────────
@@ -158,6 +164,55 @@ def test_mark_ghi_so_co_gian_va_pheu():
     # Bão hoà → lượt sau lấy đủ.
     m, ly = CP.so_bai_co_gian("facebook", 10, 1, 1.0, CFG, bao_hoa=so["2"]["bao_hoa"])
     assert m == 10 and "lượt trước lấy đủ" in ly
+
+
+def test_mark_chi_co_kenh_nha_va_nhip_theo_bai_tho(monkeypatch):
+    """Soát 18/10/2026: (1) chỉ kênh nhà được co — KOL chỉ có bài nhắc từ khoá trong kho nên nhịp
+    đếm trên kho thấp hơn nhịp đăng thật; (2) nhịp = số lớn hơn giữa kho và bài THÔ actor trả các
+    lượt trước (sổ `ngay_dang`, chỉ ngày trong 14 ngày)."""
+    kol = dict(_ng(2, "https://www.facebook.com/kol.a"), loai="kol")
+    ds = [_ng(1, "https://www.facebook.com/hapasglobal"), kol,
+          _ng(3, "https://www.facebook.com/hapasonlineshop")]
+    monkeypatch.setattr(K, "nhip_dang_nguon", lambda ma, ngay=14: {1: 1, 2: 1, 3: 1})
+    monkeypatch.setattr(K, "lich_chien_dich", lambda ma: [])
+    hom_qua = (BAY - datetime.timedelta(days=1)).isoformat()
+    ngay = (BAY - datetime.timedelta(days=2)).date().isoformat()
+    T.ghi_moc_tk("hapas", {T.KHOA_CO_GIAN: {
+        "1": {"day_du_luc": hom_qua}, "2": {"day_du_luc": hom_qua},
+        # Kho giữ 1 bài/ngày nhưng actor trả 4 bài ngày đó (3 bài bị loại); ngày ngoài 14 ngày bỏ.
+        "3": {"day_du_luc": hom_qua, "ngay_dang": {ngay: 4, "2026-09-01": 50}}}})
+    co = T._co_gian_nguon("hapas", {"ma": "hapas", "cau_hinh": {}}, ds, BAY)
+    # 1: ⌈1,5⌉ + 2 = 4; KOL: lấy đủ; 3: ⌈4 × 1,5⌉ + 2 = 8.
+    assert [x["so_bai_hieu_luc"] for x in co] == [4, 10, 8]
+    assert co[1]["ly_do_co_gian"] == ""
+    assert T._nhip_tho({"ngay_dang": {ngay: 4, "2026-09-01": 50, "rác": "x"}}, BAY) == 4
+    assert T._nhip_tho({}, BAY) is None
+
+
+def test_bao_hoa_bo_qua_bai_ghim_va_ghi_nhip_bai_tho():
+    """Soát 18/10/2026: bão hoà = bài THÔ mới hơn lần quét trước ≥ số đã co − 1. Bản cũ xét
+    `min(ngày) > quet_cuoi`: MỘT bài ghim cũ là đủ để nguồn không bao giờ bão hoà, bị co mãi."""
+    from test_theo_doi import GiaViec
+    qc = BAY - datetime.timedelta(days=1)
+    nguon = {2: _ng(2, "https://www.facebook.com/hapasonlineshop", qc=qc)}
+
+    def chay(dong):
+        v = GiaViec({"facebook": {"phan": [
+            {"id": "facebook-4", "nen_tang": "facebook", "nguon": [2], "n": 4,
+             "trang_thai": "xong", "co_gian": {"2": [10, "10→4 bài: …"]}}]}}, [])
+        T._ghi_co_gian("hapas", v, nguon, {2: dong}, BAY)
+        return T.doc_moc_tk("hapas")[T.KHOA_CO_GIAN]["2"]
+    ghim = ({}, BAY - datetime.timedelta(days=200))
+    moi = [({}, BAY - datetime.timedelta(hours=h)) for h in (1, 2, 3)]
+    st = chay([ghim, *moi])
+    assert st["bao_hoa"] is True and st["moi"] == 3, "bài ghim cũ không chặn bão hoà"
+    assert st["ngay_dang"] == {BAY.date().isoformat(): 3}, "bài ghim ngoài 14 ngày: không vào nhịp"
+    # Chỉ 2/4 bài mới: chưa bão hoà; số theo ngày giữ mức lớn nhất (không cộng dồn qua lượt).
+    cu = [({}, BAY - datetime.timedelta(days=d)) for d in (2, 3)]
+    st = chay([*moi[:2], *cu])
+    assert st["bao_hoa"] is False and st["moi"] == 2
+    assert st["ngay_dang"][BAY.date().isoformat()] == 3
+    assert st["ngay_dang"][(BAY - datetime.timedelta(days=2)).date().isoformat()] == 1
 
 
 # ───────────────────────────── trang Nguồn ─────────────────────────────

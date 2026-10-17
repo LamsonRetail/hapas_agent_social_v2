@@ -232,12 +232,14 @@ def _khoi_nguon(p: str) -> float:
 # trang trong 4–36 ngày). Phần lặp chỉ để làm mới số liệu bài cũ — tương tác trang dồn vào 1–3 ngày
 # đầu, nên co N theo nhịp đăng quan sát được và làm mới đủ N bài mỗi `CO_GIAN_NGAY_DAY_DU` ngày.
 #: Nền tảng co được: Facebook (thedoor tính theo bài), TikTok (theo trang 10 bài). Instagram /
-#: Threads tính theo TÀI KHOẢN — số bài không đổi tiền.
+#: Threads tính theo TÀI KHOẢN — số bài không đổi tiền. Chỉ co nguồn kênh nhà (`la_kenh_nha`).
 CO_GIAN_NEN_TANG = ("facebook", "tiktok")
 CO_GIAN_SAN = 3              # tối thiểu mỗi lượt (bài ghim / đăng dồn đột xuất)
 CO_GIAN_HE_SO = 1.5          # dư so với số bài/ngày cao nhất đã thấy
 CO_GIAN_DU = 2
-CO_GIAN_NGAY_NHIP = 14       # cửa sổ đo nhịp đăng (ngày đăng của bài đã giữ)
+#: Cửa sổ đo nhịp đăng: dashboard đếm ngày đăng của bài trong kho; Mark lấy số lớn hơn giữa nó và
+#: bài THÔ actor trả mỗi lượt (`theo_doi._ghi_co_gian`, sổ co giãn — dashboard không đọc được sổ).
+CO_GIAN_NGAY_NHIP = 14
 CO_GIAN_NGAY_DAY_DU = 7      # lấy đủ N bài cấu hình mỗi chừng này ngày (làm mới số bài cũ)
 
 
@@ -253,21 +255,23 @@ def cau_hinh_co_gian(du_an: dict) -> dict:
 
 def so_bai_co_gian(p: str, so_bai: int, max_ngay: int | None, khoang_ngay: float, cfg: dict,
                    *, day_du: bool = False, bao_hoa: bool = False,
-                   chien_dich: bool = False) -> tuple[int, str]:
+                   chien_dich: bool = False, kenh_nha: bool = True) -> tuple[int, str]:
     """Số bài THẬT SỰ lấy của một nguồn lượt này + lý do (rỗng = không co). `max_ngay`: số bài
     cao nhất nguồn đăng trong MỘT ngày (giờ VN) suốt `CO_GIAN_NGAY_NHIP` ngày qua (None = chưa
-    có bài nào đã giữ); `khoang_ngay`: số ngày từ lần quét trước (≥ chu kỳ). Lấy ĐỦ `so_bai` khi:
-    tắt co giãn, nền tảng tính theo tài khoản, đang chiến dịch, lượt trước BÃO HOÀ (lấy đủ mà bài
-    cũ nhất vẫn mới hơn lần quét trước — có thể còn bài sót), tới lượt làm mới đủ, chưa có lịch sử.
+    có bài nào); `khoang_ngay`: số ngày từ lần quét trước (≥ chu kỳ). Lấy ĐỦ `so_bai` khi: tắt co
+    giãn, nền tảng tính theo tài khoản, nguồn KHÔNG phải kênh nhà (soát 18/10/2026: kho chỉ giữ bài
+    nhắc từ khoá của nguồn đó nên nhịp đếm trên bài đã giữ thấp hơn nhịp đăng thật — co oan), đang
+    chiến dịch, lượt trước BÃO HOÀ (bài về gần hết đều mới hơn lần quét trước — có thể còn bài
+    sót), tới lượt làm mới đủ, chưa có lịch sử.
     Còn lại: min(so_bai, max(sàn, ⌈max_ngay × khoảng × 1,5⌉ + 2)); TikTok làm tròn lên bội số
     `TT_BAI_MOI_TRANG` (tính tiền theo trang)."""
     n = max(1, int(so_bai))
-    if not cfg.get("bat") or p not in CO_GIAN_NEN_TANG:
+    if not cfg.get("bat") or p not in CO_GIAN_NEN_TANG or not kenh_nha:
         return n, ""
     if chien_dich:
         return n, "đang chiến dịch — lấy đủ"
     if bao_hoa:
-        return n, "lượt trước lấy đủ mà bài nào cũng mới — lấy đủ để không sót"
+        return n, "lượt trước lấy đủ mà bài về đều mới (trừ ≤ 1 bài ghim) — lấy đủ để không sót"
     if day_du:
         return n, f"làm mới đủ {n} bài (mỗi {cfg['ngay_day_du']} ngày)"
     if max_ngay is None:
@@ -313,6 +317,13 @@ def nhom_fb(cac: list[tuple[int, object]], gia: float, khoi: float) -> list[tupl
     return ra[::-1]
 
 
+def la_kenh_nha(n: dict) -> bool:
+    """Nguồn được co theo nhịp đăng: chỉ kênh nhà (`loai` = "kenh_nha" — mọi bài của nguồn vào
+    kho nên nhịp đếm trên kho sát nhịp đăng thật). Thiếu `loai` thì không co (lấy đủ — không sót
+    bài); cột `nguon.loai` mặc định 'khac'."""
+    return n.get("loai") == "kenh_nha"
+
+
 def gan_co_gian(nguon: list[dict], nhip: dict, du_an: dict) -> list[dict]:
     """Bản sao nguồn kèm số bài co theo nhịp đăng cho dashboard (`so_bai_co_gian` — None khi lấy
     đủ, `ngay_day_du`, `ly_do_co_gian`, `nhip_dang` = số bài cao nhất một ngày trong 14 ngày).
@@ -322,7 +333,8 @@ def gan_co_gian(nguon: list[dict], nhip: dict, du_an: dict) -> list[dict]:
     for n in nguon:
         so = _so(n.get("so_bai_moi_lan"), 5)
         mx = nhip.get(n.get("id")) if isinstance(nhip, dict) else None
-        m, ly = so_bai_co_gian(n.get("nen_tang"), so, mx, _so(n.get("chu_ky_ngay"), 1), cfg)
+        m, ly = so_bai_co_gian(n.get("nen_tang"), so, mx, _so(n.get("chu_ky_ngay"), 1), cfg,
+                               kenh_nha=la_kenh_nha(n))
         ra.append({**n, "so_bai_co_gian": m if m < so else None,
                    "ngay_day_du": cfg["ngay_day_du"], "ly_do_co_gian": ly, "nhip_dang": mx,
                    "co_gian_bat": cfg["bat"], "co_gian_san": cfg["san"]})

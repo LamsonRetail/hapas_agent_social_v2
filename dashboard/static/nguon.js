@@ -42,7 +42,10 @@
     var soBai = Math.max(1, parseInt((form.elements.so_bai_moi_lan || {}).value, 10) || 5);
     var chuKy = Math.max(1, parseInt((form.elements.chu_ky_ngay || {}).value, 10) || 1);
     var gia = (hs.gia || {})[p] || 0;
-    var thang = thangTheoBai(p, soBai, chuKy, {
+    // = chi_phi.la_kenh_nha (soát 18/10/2026): chỉ kênh nhà được co theo nhịp đăng — nguồn khác
+    // chỉ có bài nhắc từ khoá trong kho nên nhịp đếm trên kho thấp hơn nhịp đăng thật.
+    var loai = (form.elements.loai || {}).value;
+    var thang = thangTheoBai(p, soBai, chuKy, loai !== "kenh_nha" ? null : {
       nhip: form.getAttribute("data-nhip"), k: form.getAttribute("data-ngay-day-du"),
       san: form.getAttribute("data-san")
     });

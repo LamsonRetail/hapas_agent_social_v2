@@ -82,20 +82,24 @@ def test_nguon_js_khop_python(tmp_path):
         pytest.skip("máy không có node")
     js = (Path(__file__).resolve().parents[1] / "dashboard" / "static" / "nguon.js").read_text(
         encoding="utf-8")
-    # (nền tảng, số bài, chu kỳ, nhịp đăng — số bài cao nhất một ngày trong 14 ngày | None)
-    ca = [("tiktok", 20, 1, None), ("tiktok", 5, 2, None), ("tiktok", 31, 1, None),
-          ("facebook", 10, 1, None), ("facebook", 4, 3, None), ("instagram", 12, 1, None),
-          ("threads", 10, 3, None), ("youtube", 10, 1, None),
+    # (nền tảng, số bài, chu kỳ, nhịp đăng — số bài cao nhất một ngày trong 14 ngày | None, loại)
+    kn = "kenh_nha"
+    ca = [("tiktok", 20, 1, None, kn), ("tiktok", 5, 2, None, kn), ("tiktok", 31, 1, None, kn),
+          ("facebook", 10, 1, None, kn), ("facebook", 4, 3, None, kn),
+          ("instagram", 12, 1, None, kn), ("threads", 10, 3, None, kn),
+          ("youtube", 10, 1, None, kn),
           # Co theo nhịp đăng (18/10/2026): FB trang đăng ≤ 1 bài/ngày → 4 bài/lần, 7 ngày lấy đủ.
-          ("facebook", 10, 1, 1), ("facebook", 10, 1, 6), ("tiktok", 20, 1, 2),
-          ("instagram", 12, 1, 1)]
+          ("facebook", 10, 1, 1, kn), ("facebook", 10, 1, 6, kn), ("tiktok", 20, 1, 2, kn),
+          ("tiktok", 35, 1, 1, kn), ("instagram", 12, 1, 1, kn),
+          # Soát 18/10/2026: chỉ kênh nhà được co — KOL / trang khác lấy đủ dù có nhịp.
+          ("facebook", 10, 1, 1, "kol"), ("tiktok", 30, 1, 1, "page")]
     vo = (f"var hs = {json.dumps(CP.hang_so_cho_trinh_duyet())}, ca = {json.dumps(ca)}, ra = [];\n"
           "var forms = ca.map(function (c) { var o = {textContent: ''}; ra.push(o);\n"
           "  var tt = c[3] == null ? {} : {'data-nhip': String(c[3]), 'data-ngay-day-du': '7',\n"
           "                               'data-san': '3'};\n"
           "  return {\n"
           "  elements: {nen_tang: {value: c[0]}, so_bai_moi_lan: {value: String(c[1])},\n"
-          "             chu_ky_ngay: {value: String(c[2])}},\n"
+          "             chu_ky_ngay: {value: String(c[2])}, loai: {value: c[4]}},\n"
           "  getAttribute: function (k) { return k in tt ? tt[k] : null; },\n"
           "  querySelector: function () { return o; }, addEventListener: function () {}}; });\n"
           "globalThis.document = {getElementById: function () {\n"
@@ -111,10 +115,12 @@ def test_nguon_js_khop_python(tmp_path):
 
     def so(s):
         return float(s.replace(".", "").replace(",", "."))
-    for (p, b, k, nh), c in zip(ca, chu):
-        n = {"id": 1, "nen_tang": p, "so_bai_moi_lan": b, "chu_ky_ngay": k}
+    for (p, b, k, nh, loai), c in zip(ca, chu):
+        n = {"id": 1, "nen_tang": p, "so_bai_moi_lan": b, "chu_ky_ngay": k, "loai": loai}
         if nh is not None:
             (n,) = CP.gan_co_gian([n], {1: nh}, {})
+            assert (n["so_bai_co_gian"] is not None) is ((p, b, nh, loai) in {
+                ("facebook", 10, 1, kn), ("tiktok", 20, 2, kn), ("tiktok", 35, 1, kn)}), (p, b, loai)
         thang = re.match(r"≈ ([\d.,]+) USD/tháng theo bài", c)
         assert thang and so(thang.group(1)) == pytest.approx(
             round(CP.chi_phi_thang_nguon(n), 3), abs=1e-9), (p, b, k, c)

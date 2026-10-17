@@ -285,8 +285,45 @@ def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
 
 
 #: Khoá sổ co giãn trong sổ mốc của dự án (`doc_moc_tk`): {id nguồn: {"day_du_luc": iso lần cuối
-#: lấy ĐỦ số bài cấu hình, "bao_hoa": lượt trước lấy đủ số đã co mà bài nào cũng mới}}.
+#: lấy ĐỦ số bài cấu hình, "bao_hoa": lượt trước bài về gần hết đều mới, "moi": số bài THÔ lượt
+#: trước mới hơn lần quét trước nữa, "ngay_dang": {ngày VN: số bài THÔ đăng ngày đó — lớn nhất qua
+#: các lượt, `CO_GIAN_NGAY_NHIP` ngày}}}.
 KHOA_CO_GIAN = "co_gian_nguon"
+
+
+def _ngay_dang_con_han(x, bay_gio: datetime.datetime) -> dict[str, int]:
+    """Phần `ngay_dang` của sổ còn trong cửa sổ nhịp (`CO_GIAN_NGAY_NHIP` ngày); khoá / số rác bỏ."""
+    from dashboard import chi_phi as CP
+    moc = (bay_gio - datetime.timedelta(days=CP.CO_GIAN_NGAY_NHIP)).astimezone(_VN).date()
+    ra: dict[str, int] = {}
+    for k, n in (x if isinstance(x, dict) else {}).items():
+        try:
+            ok = datetime.date.fromisoformat(str(k)) >= moc
+        except ValueError:
+            continue
+        if ok and isinstance(n, int) and not isinstance(n, bool) and n >= 0:
+            ra[str(k)] = n
+    return ra
+
+
+def _nhip_tho(st: dict, bay_gio: datetime.datetime) -> int | None:
+    """Số bài THÔ cao nhất nguồn đăng trong một ngày (giờ VN) suốt `CO_GIAN_NGAY_NHIP` ngày, theo
+    sổ co giãn (`ngay_dang`); None khi sổ chưa có ngày nào trong cửa sổ."""
+    so = _ngay_dang_con_han(st.get("ngay_dang"), bay_gio)
+    return max(so.values()) if so else None
+
+
+def _gop_ngay_dang(cu, dong: list, bay_gio: datetime.datetime) -> dict[str, int]:
+    """Gộp số bài THÔ theo ngày đăng (giờ VN) của lượt này vào sổ: mỗi ngày lấy số LỚN NHẤT qua
+    các lượt (cùng một bài về nhiều lượt — không cộng dồn), bỏ ngày ngoài cửa sổ nhịp."""
+    dem: dict[str, int] = {}
+    for dt in dong:
+        k = dt.astimezone(_VN).date().isoformat()
+        dem[k] = dem.get(k, 0) + 1
+    ra = _ngay_dang_con_han(cu, bay_gio)
+    for k, n in _ngay_dang_con_han(dem, bay_gio).items():
+        ra[k] = max(ra.get(k, 0), n)
+    return dict(sorted(ra.items()))
 
 
 def _gio_iso(s) -> datetime.datetime | None:
@@ -301,9 +338,14 @@ def _co_gian_nguon(ma: str, du_an: dict, nguon: list[dict],
                    bay_gio: datetime.datetime | None = None) -> list[dict]:
     """Bản sao nguồn kèm `so_bai_hieu_luc` + `ly_do_co_gian` (`dashboard.chi_phi.so_bai_co_gian`):
     co N bài mỗi lần theo nhịp đăng quan sát được (số bài cao nhất một ngày trong 14 ngày × số
-    ngày từ lần quét trước × 1,5 + 2, sàn 3, trần = số cấu hình). Lấy đủ khi: tắt, chiến dịch đang
-    chạy, lượt trước bão hoà, quá `ngay_day_du` ngày từ lần lấy đủ cuối (làm mới số liệu bài cũ),
-    chưa có bài. Không đo được nhịp (kho lỗi) thì giữ nguyên — lấy đủ như cũ."""
+    ngày từ lần quét trước × 1,5 + 2, sàn 3, trần = số cấu hình). Lấy đủ khi: tắt, nguồn không
+    phải kênh nhà, chiến dịch đang chạy, lượt trước bão hoà, quá `ngay_day_du` ngày từ lần lấy đủ
+    cuối (làm mới số liệu bài cũ), chưa có bài. Không đo được nhịp (kho lỗi) thì giữ nguyên — lấy
+    đủ như cũ.
+
+    Nhịp (soát 18/10/2026) = số LỚN HƠN giữa bài trong kho (`nhip_dang_nguon`, gồm cả bài tìm theo
+    từ khoá gắn về nguồn) và bài THÔ actor trả các lượt trước (`_nhip_tho`) — bài bị loại (từ loại
+    trừ, quá cũ) không còn làm nhịp thấp đi."""
     from dashboard import chi_phi as CP
     from dashboard import lich_quet as LQ
     cfg = CP.cau_hinh_co_gian(du_an)
@@ -327,18 +369,25 @@ def _co_gian_nguon(ma: str, du_an: dict, nguon: list[dict],
         qc = n.get("quet_cuoi")
         khoang = (max(ky, (bay_gio - qc).total_seconds() / 86400)
                   if isinstance(qc, datetime.datetime) else ky)
+        do = [x for x in (nhip.get(int(n["id"])), _nhip_tho(st, bay_gio)) if x is not None]
         m, ly = CP.so_bai_co_gian(n.get("nen_tang"), int(n.get("so_bai_moi_lan") or 5),
-                                  nhip.get(int(n["id"])), khoang, cfg, day_du=day_du,
-                                  bao_hoa=bool(st.get("bao_hoa")), chien_dich=cd)
+                                  max(do) if do else None, khoang, cfg, day_du=day_du,
+                                  bao_hoa=bool(st.get("bao_hoa")), chien_dich=cd,
+                                  kenh_nha=CP.la_kenh_nha(n))
         ra.append({**n, "so_bai_hieu_luc": m, "ly_do_co_gian": ly})
     return ra
 
 
 def _ghi_co_gian(ma: str, v, nguon: dict[int, dict], theo_nguon: dict[int, list],
                  bay_gio: datetime.datetime | None = None) -> list[str]:
-    """Sau lượt: ghi sổ co giãn (lấy đủ → `day_du_luc`; lấy đủ số đã co mà bài cũ nhất vẫn mới hơn
-    lần quét trước → `bao_hoa`, lượt sau lấy đủ để không sót) và trả câu phễu: co bao nhiêu bài,
-    tiết kiệm bao nhiêu, nguồn nào làm mới đủ, nguồn nào bão hoà. Không bao giờ ném."""
+    """Sau lượt: ghi sổ co giãn (lấy đủ → `day_du_luc`; co mà bài THÔ mới hơn lần quét trước ≥ số
+    đã co − 1 → `bao_hoa`, lượt sau lấy đủ để không sót; số bài THÔ theo ngày đăng → `ngay_dang`,
+    nhịp lượt sau) và trả câu phễu: co bao nhiêu bài, tiết kiệm bao nhiêu, nguồn nào làm mới đủ,
+    nguồn nào bão hoà. Không bao giờ ném.
+
+    Bão hoà (soát 18/10/2026): bản cũ xét `min(ngày) > quet_cuoi` — MỘT bài ghim cũ (actor có thể
+    trả; raw thedoor không có cờ ghim và thứ tự không xếp chặt theo giờ) là đủ để không bao giờ bão
+    hoà, nguồn bị co mãi dù đăng dồn. Nay đếm: chừa 1 bài cho bài ghim."""
     from dashboard import chi_phi as CP
     bay_gio = bay_gio or datetime.datetime.now(_VN)
     try:
@@ -358,16 +407,20 @@ def _ghi_co_gian(ma: str, v, nguon: dict[int, dict], theo_nguon: dict[int, list]
                     continue
                 ten = _ten_nguon(x)
                 st = dict(so.get(nid) or {})
+                # Bài THÔ actor trả cho nguồn (trước mọi bước lọc): nhịp + bão hoà đo trên đây.
+                dong = [dt for _, dt in theo_nguon.get(int(nid)) or [] if dt]
+                qc = x.get("quet_cuoi")
+                moi = sum(1 for dt in dong if not isinstance(qc, datetime.datetime) or dt > qc)
+                st["moi"] = moi
+                st["ngay_dang"] = _gop_ngay_dang(st.get("ngay_dang"), dong, bay_gio)
                 if dung >= int(so_cfg):
                     st["day_du_luc"] = bay_gio.isoformat(timespec="seconds")
                     st["bao_hoa"] = False
                     if ly.startswith("làm mới"):
                         du.append(ten)
                 else:
-                    dong = [dt for _, dt in theo_nguon.get(int(nid)) or [] if dt]
-                    qc = x.get("quet_cuoi")
-                    st["bao_hoa"] = bool(isinstance(qc, datetime.datetime) and dong
-                                         and len(dong) >= dung and min(dong) > qc)
+                    # Chưa quét lần nào (`quet_cuoi` trống) thì mọi bài về đều là mới.
+                    st["bao_hoa"] = moi >= max(1, dung - 1)
                     if st["bao_hoa"]:
                         bh.append(ten)
                     bot += int(so_cfg) - dung
@@ -388,8 +441,8 @@ def _ghi_co_gian(ma: str, v, nguon: dict[int, dict], theo_nguon: dict[int, list]
     if du:
         ra.append("làm mới đủ số bài cấu hình (số liệu bài cũ): " + ", ".join(du[:6]))
     if bh:
-        ra.append("nguồn bão hoà (lấy đủ số đã co mà bài nào cũng mới) — lượt sau lấy đủ: "
-                  + ", ".join(bh[:6]))
+        ra.append("nguồn bão hoà (lấy đủ số đã co mà bài về đều mới, trừ ≤ 1 bài ghim) — lượt sau "
+                  "lấy đủ: " + ", ".join(bh[:6]))
     return ra
 
 
