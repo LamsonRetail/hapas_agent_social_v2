@@ -10,7 +10,7 @@ phủ làm lỗ hổng TỰ HIỆN ra trên dashboard trước khi chủ dự á
 Cách làm — mỗi dự án tối đa một lượt mỗi `GIO_GIAN` giờ (mốc trong sổ mốc tìm theo từ khoá,
 khoá `KHOA_MOC`), trần `TRAN_MAC_DINH` USD (đặt riêng ở `du_an.cau_hinh.do_phu`, có công tắc):
   • MẪU ĐỐI CHIẾU lấy bằng đường KHÁC thu thập hằng ngày, chỉ TikTok qua TikTok API (scraptik,
-    0,003 USD/yêu cầu → 0,20 USD ≈ 66 yêu cầu):
+    0,002 USD/yêu cầu — giá thật từng run, đo 18/10/2026 → 0,20 USD = 100 yêu cầu):
       (a) bài của HASHTAG brand/chiến dịch (`challengePosts`, 20 bài/yêu cầu): tag lấy từ từ khoá
           dự án + tag hay đi cùng nhất trong bài đã giữ 30 ngày — ~4/5 số yêu cầu. Đường này bắt
           đúng ca seeding chỉ-hashtag, và mỗi yêu cầu ra ~10 bài trong 30 ngày (đo #hapas).
@@ -381,9 +381,11 @@ NOI_GIO_TOI_THIEU = 10
 MOI_TRANG_NOI_TOI_DA = 5     # trần trang "mới nhất" mỗi từ mà kiểm độ phủ được nới tới
 TUT_HANG_TOI_THIEU = 2       # ≥ 2 bài sót kiểu tụt hạng, hoặc ≥ 25% thảo luận sót
 TOT = 90.0                   # độ phủ theo thảo luận ≥ mức này HAI lần liền: lùi một nấc
-#: Giá THẬT một yêu cầu TikTok API (đo 17/10/2026 trên gói FREE: 0,0023–0,0034 USD, phí nền
-#: tảng mỗi run) — kiểm độ phủ chia số yêu cầu + ghi sổ theo mức cao này (review LOW).
-GIA_YEU_CAU_THAT = 0.0034
+#: Giá THẬT một yêu cầu TikTok API = giá bảng (`tiktok_api.GIA_YEU_CAU`). Đo lại 18/10/2026 theo
+#: từng run: 14/14 run scraptik 0,0020 USD, chỉ sự kiện "request" — số 0,0023–0,0034 ngày 17/10 là
+#: chênh mức TÀI KHOẢN khi agent khác chạy song song. Chia trần theo 0,0034 thì 0,20 USD chỉ gửi
+#: 58 yêu cầu (mẫu mỏng hơn 42%) và sổ `kiem_do_phu.chi_phi_usd` lố 70%.
+GIA_YEU_CAU_THAT = TT.GIA_YEU_CAU
 
 
 def cau_hinh_noi(cfg: dict | None) -> dict:

@@ -300,6 +300,24 @@ def test_chi_phi_lich_an_loi_tho_voi_nguoi_chi_xem(monkeypatch):
     assert kho.goi_bai == []                            # không đọc 20k bài khi chỉ hỏi chi phí
 
 
+def test_chi_phi_noi_ca_goi_apify(monkeypatch):
+    """18/10/2026: "ngân sách còn" phải nói cả gói Apify (trần THẬT của tài khoản) — như khối
+    "Gói Apify" trang Ngân sách (`chi_phi.goi_apify`, ảnh chụp Mark ghi ở `han_muc_apify`)."""
+    from test_goi_apify import LUC, _anh
+    kho = _kho_mau()
+    monkeypatch.setattr(HD, "email_cua", lambda oid: XEM)
+    cp = HD.tra_loi({"phan": ["chi_phi"]}, kho, open_id="ou_hoi", bay_gio=LUC)["phan"]["chi_phi"]
+    assert cp["goi_apify"] == {"co": False}                     # kho chưa có bảng / hàm
+    kho.han_muc_apify = lambda: _anh()
+    g = HD.tra_loi({"phan": ["chi_phi"]}, kho, open_id="ou_hoi",
+                   bay_gio=LUC)["phan"]["chi_phi"]["goi_apify"]
+    assert g["goi"] == "FREE" and g["tran_goi_usd"] == 10.0 and g["da_dung_usd"] == 4.5819
+    assert g["con_lai_goi_usd"] == pytest.approx(5.4181)
+    assert g["mark_dung_duoc_usd"] == pytest.approx(5.1181) and g["tran_moi_luot_usd"] == 2.0
+    assert g["dat_lai"].startswith("2026-11-16T07:00") and g["tran_noi_bo_vo_hieu"] is False
+    assert "han_muc_apify" in HD._HAM_KHO
+
+
 # ───────────────────────────── quyền ─────────────────────────────
 def test_nguoi_khong_co_trong_nguoi_xem_bi_tu_choi(monkeypatch):
     kho = _kho_mau()

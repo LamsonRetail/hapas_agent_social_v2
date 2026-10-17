@@ -193,7 +193,7 @@ def test_hai_duong_gop_bo_trung_theo_ma_bai_phieu_va_moc_rieng(mo):  # noqa: F81
     assert ph["tk-threads_2"]["usd_so"] == pytest.approx(0.006) and ph["tk-threads_2"]["so_item"] == 6
     assert ph["tk-threads_2-run-threads_2"]["trang_thai"] == "xong"
     moc = T.doc_moc_tk("hapas")
-    assert set(moc) == {"threads", T.TH2_KHOA}
+    assert set(moc) - {T.KHOA_NHIP_TIM} == {"threads", T.TH2_KHOA}
     # Sản lượng từng từ khoá (từ gửi mà 0 bài ghi 0) — ước tính lượt sau theo số thật.
     assert moc[T.TH2_KHOA]["ve"] == 6
     assert moc[T.TH2_KHOA]["ve_tu"] == {"hapas": 6, "tui hapas": 0, "qua tang hapas": 0}

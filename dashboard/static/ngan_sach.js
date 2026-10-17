@@ -442,6 +442,9 @@
         " USD/30 ngày" : "tắt", dpLan);
     }
     var toiDa = D.da_tieu + D.nguon_con_lai + ngay * kq.khac + webCon + dpCon;
+    // Trần việc nền trên console (18/10/2026, ảnh chụp gói của Mark): mỗi lượt không tiêu quá
+    // D.tran_luot USD — giữ chỗ 60 bình luận/bài không làm "cả tháng" lố hơn số đó × số lượt.
+    if (D.tran_luot != null && ngay > 0) toiDa = Math.min(toiDa, D.da_tieu + ngay * D.tran_luot);
     var vuot = toiDa > tran + 1e-9;
     var duLuot = ngay > 0 ? (tran - D.da_tieu - D.nguon_con_lai - webCon - dpCon) / ngay : 0;
     ghi("thang-so", soVn(toiDa, 2), r4(toiDa));

@@ -29,7 +29,7 @@ Mô tả bảng và cột theo quy chuẩn BI (task Lark t280613, skill `lsr-bq-
 
 ```bash
 sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
-sudo -u postgres psql -d lang_nghe -c '\dt'        # 12 bảng (lich_quet từ 15/10, kiem_do_phu từ 17/10/2026)
+sudo -u postgres psql -d lang_nghe -c '\dt'        # 13 bảng (lich_quet 15/10, kiem_do_phu 17/10, han_muc_apify 18/10/2026)
 ```
 
 `lock_timeout=5s` cần khi DB đang chạy. Lệnh `ALTER TABLE` (ví dụ thêm `luot_quet.lich_id`) xin khoá độc quyền trên bảng.
@@ -50,7 +50,7 @@ Chạy lại file này nhiều lần không hỏng gì.
 Quyền của Mark:
 
 - **Đọc:** `du_an`, `nguon`; `lich_quet` chỉ các cột Mark dùng (không đọc email người tạo/sửa).
-- **Ghi:** `bai`, `chi_so_ngay`, `luot_quet`, `de_xuat`; `kiem_do_phu` chỉ thêm dòng (kiểm độ phủ 2 lần/tuần, từ 17/10/2026).
+- **Ghi:** `bai`, `chi_so_ngay`, `luot_quet`, `de_xuat`; `kiem_do_phu` chỉ thêm dòng (kiểm độ phủ 2 lần/tuần, từ 17/10/2026); `han_muc_apify` chỉ thêm dòng (ảnh chụp hạn mức gói Apify cho trang Ngân sách sau mỗi lượt và mỗi 3 giờ, từ 18/10/2026 — dashboard không giữ token Apify).
 - **Chỉ sửa:** cột lần quét và lỗi của `nguon`; cột trạng thái chạy của `lich_quet` (`lan_chay_ke`, `lan_chay_cuoi`, `ket_qua_cuoi`, `so_lan_chay`).
 - **Không được:** thêm hay xoá nguồn, sửa dự án, sửa ngân sách, tạo/sửa/xoá lịch.
 

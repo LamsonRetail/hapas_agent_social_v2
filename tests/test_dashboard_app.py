@@ -1773,22 +1773,22 @@ def test_ngan_sach_du_bao_trong_tran(giua_thang):
     _, c, _ = tao(_kho_co_nguon_ton())
     dang_nhap(c, XEM)
     t = c.get("/ngan-sach").text
-    # đã tiêu 1,25 + còn lại 0,4286 (16,5 ngày) = 1,6786 ≤ trần 5 (TikTok 0,0012/bài từ 17/10;
-    # Instagram không còn phí khởi động từ 17/10)
-    assert "Dự báo cả tháng" in t and "1,68" in t and "0,43" in t and "16,5 ngày" in t
+    # đã tiêu 1,25 + còn lại 0,1975 (16,5 ngày, KỲ VỌNG — 18/10: TikTok theo yêu cầu 0,002,
+    # không nhân 1,3) = 1,4475 ≤ trần 5 (Instagram không còn phí khởi động từ 17/10)
+    assert "Dự báo cả tháng" in t and "1,45" in t and "0,20" in t and "16,5 ngày" in t
     assert "Trần do platform đặt" in t and "chưa có" in t and "chờ KDLA" in t
     assert "Dự báo vượt trần" not in t
-    assert "Dự báo theo nền tảng" in t and "0,2574" in t   # TikTok 16,5 × 0,0156
-    assert "0,78" in t                                                   # theo cấu hình 30 ngày
+    assert "Dự báo theo nền tảng" in t and "0,0660" in t   # TikTok 16,5 × 0,004
+    assert "0,36" in t                                                   # theo cấu hình 30 ngày
 
 
 def test_ngan_sach_canh_bao_vuot_tran_va_goi_y(giua_thang):
     kho = _kho_co_nguon_ton()
-    kho.du_an["hapas"]["tran_usd_thang"] = 1.5
+    kho.du_an["hapas"]["tran_usd_thang"] = 1.4
     _, c, _ = tao(kho)
     dang_nhap(c, QL)
     t = c.get("/ngan-sach").text
-    assert "Dự báo vượt trần 0,18 USD" in t and 'role="alert"' in t and "chu-loi" in t
+    assert "Dự báo vượt trần 0,05 USD" in t and 'role="alert"' in t and "chu-loi" in t
     i1, i5, i2 = t.index("<b>Nguồn 1</b>"), t.index("<b>Nguồn 5</b>"), t.index("<b>Nguồn 2</b>")
     assert i1 < i5 < i2                                       # 3 nguồn tốn nhất, tốn nhất trước
     assert "<b>Nguồn 3</b>" not in t and "<b>Nguồn 4</b>" not in t   # YouTube 0, tạm dừng
@@ -1803,7 +1803,7 @@ def test_ngan_sach_tran_platform_thap_hon_thi_ap_tran_platform(giua_thang):
     dang_nhap(c, QL)
     t = c.get("/ngan-sach").text
     assert "chưa có" not in t and "cấp cửa hàng" in t
-    assert "Dự báo vượt trần 0,68 USD" in t and "(1,68 / 1,00 USD)" in t
+    assert "Dự báo vượt trần 0,45 USD" in t and "(1,45 / 1,00 USD)" in t
     assert "đang bị trần platform giữ" in t
 
 
@@ -1812,10 +1812,15 @@ def test_trang_nguon_hien_uoc_tinh_moi_nguon(giua_thang):
     dang_nhap(c, QL)
     t = c.get("/nguon?du_an=hapas").text
     assert "≈ USD/tháng" in t
-    assert "≈ 0,468 USD/tháng theo bài" in t                       # TikTok 10 bài, mỗi ngày
-    # Instagram: không còn phí khởi động (17/10/2026) — chỉ tiền theo tài khoản.
-    assert "≈ 0,051 USD/tháng theo bài" in t
-    assert "0,051 USD/tháng theo bài + phí khởi động" not in t
+    assert "≈ 0,120 USD/tháng theo bài" in t           # TikTok 10 bài, mỗi ngày: 2 yêu cầu
+    # Instagram: không còn phí khởi động (17/10/2026) — chỉ tiền theo tài khoản, kỳ vọng
+    # 15 lượt × 0,0026 (18/10/2026: không nhân 1,3).
+    assert "≈ 0,039 USD/tháng theo bài" in t
+    assert "0,039 USD/tháng theo bài + phí khởi động" not in t
+    # Facebook 4 bài/3 ngày: 10 × 0,01; phí khởi động thedoor đúng 0,01 USD mỗi ngày quét.
+    assert "≈ 0,100 USD/tháng theo bài + phí khởi động actor chung 0,0100 USD" in t
+    # Ô thêm nguồn (mặc định TikTok 5 bài, mỗi ngày) khi tắt JS: 30 × 2 yêu cầu × 0,002.
+    assert "≈ 0,120 USD/tháng theo bài" in t.split('action="/nguon/them"')[1]
     assert "≈ 0,000 USD/tháng theo bài" in t                       # YouTube miễn phí
     assert '<script type="application/json" id="chi-phi-hang-so">' in t and '"he_so": 1.3' in t
     assert 'src="/tinh/nguon.js?v=' in t and t.count("data-uoc-tinh") == 6   # 5 sửa + 1 thêm

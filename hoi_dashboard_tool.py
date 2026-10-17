@@ -166,7 +166,7 @@ _KHOA_DSN = threading.Lock()
 _HAM_KHO = ("vai_tro", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_luan_trong_khoang",
             "binh_luan_hop_le_gon", "bai_theo_khoa", "ngu_canh_bai", "cac_nguon", "da_tieu_thang",
             "tran_platform", "cac_luot", "tien_do_gan_nhan", "luot_xong_moi_nhat",
-            "do_phu_gan_nhat")
+            "do_phu_gan_nhat", "han_muc_apify")
 
 
 class KhoMark:
@@ -639,7 +639,57 @@ def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
         cac_lich = []
     tq = TL.tong_quan(cac_lich, du_an, nguon, tieu, tran_pf, bay_gio)
     luot, tong = kho.cac_luot(ma, 1, min(top, LUOT_TOI_DA))
+    # Gói Apify (18/10/2026): trần THẬT của cả tài khoản — như khối "Gói Apify" trang Ngân sách
+    # (`chi_phi.goi_apify`); "ngân sách còn" phải nói cả phần còn của gói, không chỉ trần dự án.
+    goi = {"co": False}
+    ham_goi = getattr(kho, "han_muc_apify", None)
+    if ham_goi is not None:
+        try:
+            goi = CP.goi_apify(ham_goi(), db["tran"], bay_gio)
+        except Exception as e:
+            if not _loi_kho(e):
+                raise
+    # Dự báo theo CHI THẬT (18/10/2026) — như trang Ngân sách: trung vị ≤ 7 lượt gần nhất × số lượt
+    # còn lại (+ kiểm độ phủ), và tới lúc gói đặt lại.
+    luot_gan, _ = kho.cac_luot(ma, 1, 20, ghi_chu=False)
+    thuc = CP.chi_luot_thuc(luot_gan, bay_gio)
+    dl = CP.du_bao_lich(cac_lich, CP.bang_cau_hinh(du_an), nguon, bay_gio)
+    lan_cuoi = None
+    try:
+        r_dp = kho.do_phu_gan_nhat(ma, 1)
+        lan_cuoi = r_dp[0]["luc"] if r_dp else None
+    except Exception as e:
+        if not _loi_kho(e):
+            raise
+    dp = CP.du_bao_do_phu(du_an, lan_cuoi, bay_gio)
+    dbt = CP.du_bao_thuc(db, thuc, dl["luot_con_lai"] if dl.get("co_lich")
+                         else db["ngay_con_lai"], dp["con_lai"])
+    if goi.get("co") and goi.get("dat_lai"):
+        moc = (CP.cac_moc_du_an(cac_lich, bay_gio,
+                                goi["dat_lai"] - datetime.timedelta(microseconds=1))
+               if dl.get("co_lich") else
+               [m for i in range(1, 40)
+                if (m := bay_gio + datetime.timedelta(days=i)) < goi["dat_lai"]])
+        goi = CP.goi_du_bao(goi, [{"ten": du_an.get("ten"), "thuc": thuc, "moc": moc,
+                                   "dp_usd": CP.luot_do_phu(bay_gio, goi["dat_lai"], lan_cuoi)
+                                   * (dp["tran_usd"] if dp["bat"] else 0.0)}], bay_gio)
     return {
+        "du_bao_thuc": ({"du_bao_thang_usd": dbt["du_bao_thang"], "con_lai_usd": dbt["con_lai"],
+                         "so_luot_con": dbt["so_luot_con"],
+                         "trung_vi_luot_usd": thuc["trung_vi"], "so_luot_do": thuc["so_luot"],
+                         "thap_usd": thuc["thap"], "cao_usd": thuc["cao"],
+                         "vuot_tran": dbt["vuot"], "vuot_usd": dbt["vuot_usd"]}
+                        if dbt.get("theo") == "thuc" else {"co": False,
+                                                           "ly_do": "chưa đủ 3 lượt đo chi thật"}),
+        "goi_apify": ({"goi": goi["goi"], "da_dung_usd": goi["da_dung"], "tran_goi_usd": goi["tran"],
+                       "con_lai_goi_usd": goi["con_lai"], "mark_dung_duoc_usd": goi["dung_duoc"],
+                       "dat_lai": _gio(goi["dat_lai"]), "tran_moi_luot_usd": goi["tran_luot"],
+                       "tran_noi_bo_vo_hieu": goi["noi_bo_vo_hieu"], "canh_bao": goi["canh_bao"],
+                       **({"du_bao_toi_dat_lai_usd": goi["du_bao_chu_ky"],
+                           "so_luot_toi_dat_lai": goi["so_luot_chu_ky"],
+                           "goi_du_so_luot": goi["du_luot"], "het_goi_luc": _gio(goi["het_luc"])}
+                          if goi.get("du_bao_theo") == "thuc" else {})}
+                      if goi.get("co") else {"co": False}),
         "thang": bay_gio.strftime("%m/%Y"),
         "da_tieu_usd": round(tieu, 4), "tran_usd": db["tran"],
         "tran_du_an_usd": db["tran_du_an"], "tran_platform_usd": db["tran_platform"],
@@ -660,8 +710,11 @@ def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
             "chi_phi_usd": r.get("chi_phi_usd"),
             "loi": (r.get("loi") if quan_ly else (LOI_CHUNG if r.get("loi") else None))}
             for r in luot],
-        "ghi_chu": "Dự báo là mức TỐI ĐA nếu mọi lượt dùng hết phần giữ chỗ; tiền thật là "
-                   "`da_tieu_usd` (lượt theo dõi trong tháng, giờ VN).",
+        "ghi_chu": "`du_bao_thang_usd` chỉ gồm NGUỒN theo chu kỳ; dự báo sát thật là "
+                   "`du_bao_thuc` (số lượt còn lại × trung vị chi thật các lượt gần nhất). Tiền "
+                   "thật là `da_tieu_usd` (lượt theo dõi trong tháng, giờ VN). Gói Apify "
+                   "(`goi_apify`) là trần THẬT của cả tài khoản theo chu kỳ Apify: hết gói thì Mark "
+                   "dừng dù trần dự án còn.",
     }
 
 

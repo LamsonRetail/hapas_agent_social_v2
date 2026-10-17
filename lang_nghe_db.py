@@ -146,6 +146,16 @@ def da_tieu_thang(ma: str) -> float:
 
 
 # ───────────────────────────── lượt quét ─────────────────────────────
+def chi_luot_gan(ma: str, toi_da: int = 20) -> list[dict]:
+    """Chi phí thật các lượt /theodoi gần nhất (mới trước) — câu nhận việc nói chi THẬT bên cạnh
+    ước tính TỐI ĐA (18/10/2026, `dashboard.chi_phi.chi_luot_thuc`)."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT id, kieu, bat_dau, ket_thuc, trang_thai, chi_phi_usd::float AS chi_phi_usd "
+            "FROM luot_quet WHERE du_an = %s AND kieu = 'theo_doi' ORDER BY id DESC LIMIT %s",
+            (ma, max(1, int(toi_da)))).fetchall()
+
+
 def luot_dang_chay(ma: str) -> dict | None:
     """Lượt theo dõi khác của cùng dự án còn đang chạy (trong `GIO_BO_DO` giờ) — có thì
     không mở lượt mới, kẻo hai lượt cùng tiêu một phần ngân sách."""
@@ -495,6 +505,19 @@ def bai_can_lam_moi(ma: str, nen_tang: str, tu, toi_da: int) -> list[dict]:
             (ma, nen_tang, tu, _TZ, _TZ, toi_da)).fetchall()
 
 
+def nhip_dang_nguon(ma: str, ngay: int = 14) -> dict[int, int]:
+    """{id nguồn: số bài CAO NHẤT nguồn đăng trong MỘT ngày (giờ VN)} trên bài đã giữ đăng trong
+    `ngay` ngày qua — co số bài mỗi lần theo nhịp đăng (18/10/2026, `dashboard.chi_phi.
+    so_bai_co_gian`). Nguồn không có bài trong cửa sổ thì không có khoá."""
+    with ket_noi() as c:
+        rows = c.execute(
+            "SELECT nguon_id, max(n) AS n FROM (SELECT nguon_id, "
+            "(dang_luc AT TIME ZONE %s)::date AS d, count(*) AS n FROM bai WHERE du_an = %s "
+            "AND nguon_id IS NOT NULL AND dang_luc >= now() - make_interval(days => %s) "
+            "GROUP BY 1, 2) t GROUP BY 1", (_TZ, ma, int(ngay))).fetchall()
+    return {int(r["nguon_id"]): int(r["n"]) for r in rows}
+
+
 def lich_chien_dich(ma: str) -> list[dict]:
     """Mọi lịch kiểu chiến dịch của dự án (bật hay tắt) — nới phạm vi theo dõi theo khung
     chiến dịch (`theo_doi_api.pham_vi`)."""
@@ -576,6 +599,23 @@ def ghi_kiem_do_phu(r: dict) -> int:
     return int(x["id"])
 
 
+#: Cột của `han_muc_apify` Mark ghi (18/10/2026) — bài thử đối chiếu với schema.sql.
+_COT_HAN_MUC = ("goi", "da_dung_usd", "tran_usd", "chu_ky_tu", "chu_ky_den", "tran_luot_usd",
+                "du_tru_usd", "luot_id", "nguon_ghi")
+
+
+def ghi_han_muc(r: dict) -> int:
+    """Ghi MỘT ảnh chụp hạn mức gói Apify (bảng `han_muc_apify`) cho trang Ngân sách — dashboard
+    không giữ token Apify. `luot_id` không còn trong `luot_quet` thì ghi NULL. -> id."""
+    with ket_noi() as c:
+        x = c.execute(
+            f"INSERT INTO han_muc_apify ({', '.join(_COT_HAN_MUC)}) VALUES ("
+            + ", ".join("(SELECT id FROM luot_quet WHERE id = %s)" if k == "luot_id" else "%s"
+                        for k in _COT_HAN_MUC)
+            + ") RETURNING id", [r.get(k) for k in _COT_HAN_MUC]).fetchone()
+    return int(x["id"])
+
+
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
 #: Bài đã cào được cào lại khi số bình luận nền tảng báo tăng ≥ 20% (và ≥ 5) — bài cũ ít đổi
 #: thì không trả tiền đọc lại cùng bình luận.
@@ -588,13 +628,18 @@ BL_NGAY = 35
 def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
                           cao_het: bool = False) -> list[dict]:
     """Bài nên cào bình luận lượt này: đăng trong `BL_NGAY` ngày, nền tảng báo có bình luận,
-    chưa cào hoặc bình luận tăng đủ nhiều. Bài chưa cào đi trước, rồi bài nhiều bình luận."""
+    chưa cào hoặc bình luận tăng đủ nhiều. Bài chưa cào đi trước, rồi bài thiếu nhiều bình luận.
+    `bl_goc` (18/10/2026): số bình luận GỐC đã có trong kho — TikTok cào dở thì đọc tiếp từ đó
+    (`theo_doi._chia_lo_bl`, `tiktok_api.binh_luan(bat_dau=…)`); khoá chính (du_an, khoa_bai, ma)
+    phủ phép đếm."""
     if toi_da <= 0 or not nen_tang:
         return []
     with ket_noi() as c:
         return c.execute(
             "SELECT b.khoa, b.nen_tang, b.link, b.tai_khoan, b.tac_gia, b.binh_luan, "
-            "b.bl_lay_luc, b.bl_da_lay, b.bl_lay_khi_co, n.loai AS nguon_loai "
+            "b.bl_lay_luc, b.bl_da_lay, b.bl_lay_khi_co, n.loai AS nguon_loai, "
+            "(SELECT count(*) FROM binh_luan c WHERE c.du_an = b.du_an AND c.khoa_bai = b.khoa "
+            "AND NOT c.la_tra_loi) AS bl_goc "
             "FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
             "WHERE b.du_an = %s AND b.nen_tang = ANY(%s) AND COALESCE(b.binh_luan, 0) > 0 "
             "AND b.link <> '' AND b.dang_luc >= now() - make_interval(days => %s) "

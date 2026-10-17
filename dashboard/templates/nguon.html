@@ -99,7 +99,7 @@
         <td>{% for x in n.nhan %}<span class="the">{{ x }}</span> {% endfor %}</td>
         <td>{% if n.trang_thai == 'dang_theo_doi' %}<span class="the the--tot the--cham">Đang theo dõi</span>{% else %}<span class="the the--cham">Tạm dừng</span>{% endif %}</td>
         <td class="so">{{ n.chu_ky_ngay }} ngày</td>
-        <td class="so">{{ n.so_bai_moi_lan }}</td>
+        <td class="so">{{ n.so_bai_moi_lan }}{% if n.so_bai_co_gian %}<div class="mo nho" data-o="co-gian" title="Mark co số bài theo nhịp đăng: {{ n.ly_do_co_gian }}; lấy đủ {{ n.so_bai_moi_lan }} bài mỗi {{ n.ngay_day_du }} ngày (làm mới số liệu bài cũ) và khi đang chiến dịch.">co ~{{ n.so_bai_co_gian }}/lần</div>{% endif %}</td>
         <td class="so">{% if n.trang_thai == 'dang_theo_doi' %}{{ n.usd_thang|usd_vn(3) }}{% else %}<span class="mo" title="Tạm dừng: không tốn tiền; tiếp tục thì ≈ {{ n.usd_thang|usd_vn(3) }}">0</span>{% endif %}</td>
         <td class="nho">{{ n.quet_cuoi|gio_vn if n.quet_cuoi else 'chưa quét' }}</td>
         <td class="nho">{% if n.loi_cuoi %}<span class="the the--loi">lỗi</span> {{ n.loi_cuoi }}<div class="mo">{{ n.loi_luc|gio_vn }}</div>{% else %}<span class="mo">—</span>{% endif %}</td>
@@ -119,7 +119,7 @@
           </div>
           <details class="ng-sua">
             <summary class="nho">Sửa</summary>
-            <form method="post" action="/nguon/{{ n.id }}/sua" class="luoi-form" data-uoc-tinh>
+            <form method="post" action="/nguon/{{ n.id }}/sua" class="luoi-form" data-uoc-tinh{% if n.co_gian_bat and n.nhip_dang is not none %} data-nhip="{{ n.nhip_dang }}" data-ngay-day-du="{{ n.ngay_day_du }}" data-san="{{ n.co_gian_san }}"{% endif %}>
               <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
               <label class="o">Nền tảng
                 <select name="nen_tang">{% for k, v in TEN_NEN_TANG.items() %}<option value="{{ k }}"{% if n.nen_tang == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
@@ -166,7 +166,7 @@
     <label class="o">Nhãn (dấu phẩy) <input type="text" name="nhan" maxlength="500"></label>
     <label class="o">Chu kỳ quét (1–30 ngày) <input type="number" name="chu_ky_ngay" min="1" max="30" value="1" required></label>
     <label class="o">Số bài mỗi lần <input type="number" name="so_bai_moi_lan" min="1" value="5" required></label>
-    <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh('tiktok', 30 * 5 * chi_phi_js.gia.tiktok * chi_phi_js.he_so) }}</output>
+    <output class="o nho phu rong uoc-tinh" aria-live="polite">{{ uoc_tinh('tiktok', uoc_nguon_moi) }}</output>
     <div><button class="nut" type="submit">Thêm nguồn</button></div>
   </form>
 </section>

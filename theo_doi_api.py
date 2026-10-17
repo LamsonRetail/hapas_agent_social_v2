@@ -4,7 +4,7 @@ theo_doi ít đụng nhau. Hai việc:
 1. PHẦN NHIỀU YÊU CẦU qua TikTok API (`tiktok_api`): hồ sơ nguồn TikTok và bình luận TikTok.
    Một phần = nhiều run Apify (mỗi yêu cầu API một run); id nằm ở `run_phu` của phần
    (`viec_nen.run_ids` cộng vào tiền thật). Bot khởi động lại giữa phần thì CHẠY LẠI phần đó
-   (khác kỷ luật "không gửi lại" của actor thường: mỗi yêu cầu ~0,003 USD, chạy lại cả phần chỉ
+   (khác kỷ luật "không gửi lại" của actor thường: mỗi yêu cầu 0,002 USD, chạy lại cả phần chỉ
    vài cent; id run cũ vẫn nằm trong `run_phu` nên tiền cũ vẫn được chốt). Nguồn / video API
    không ra gì thì chạy actor cũ (clockworks) cho đúng phần thiếu, trong phần trần còn lại.
 
@@ -19,7 +19,7 @@ theo_doi ít đụng nhau. Hai việc:
    • Mốc tăng dần không còn quyết định GIỮ gì mà quyết định XIN bao nhiêu: cửa sổ ngày gửi bộ
      lọc ngày phía server (TikTok API, Facebook) và cỡ xin co giãn theo lượt trước (`so_xin`).
    • Bài quan trọng mà tìm không trả lại nữa: làm mới số liệu N bài TikTok nhiều tương tác nhất
-     trong phạm vi qua TikTok API theo link (0,003 USD/bài — `lam_moi_tiktok`).
+     trong phạm vi qua TikTok API theo link (0,002 USD/bài — `lam_moi_tiktok`).
 """
 from __future__ import annotations
 
@@ -46,12 +46,17 @@ def gan_ho_so(ph: dict, ten: list[str], n: int) -> None:
         ph.update(actor=TT.ACTOR, bo_chuyen="tiktok_ho_so", ten=list(ten))
 
 
-def gan_binh_luan(ph: dict, urls: list[str], tra_loi: int) -> None:
-    """Phần bình luận TikTok đi qua TikTok API (actor cũ của phần làm dự phòng)."""
+def gan_binh_luan(ph: dict, urls: list[str], tra_loi: int,
+                  bat_dau: dict[str, int] | None = None) -> None:
+    """Phần bình luận TikTok đi qua TikTok API (actor cũ của phần làm dự phòng). `bat_dau`
+    (18/10/2026): {link: vị trí bình luận gốc đọc tiếp} cho video cào dở (`tiktok_api.binh_luan`);
+    dự phòng clockworks không đọc tiếp được — chạy lại từ đầu như cũ."""
     if TT.dung_api("tiktok_binh_luan") and ph.get("actor"):
         ph["du_phong"] = {"actor": ph["actor"], "gia": _GIA_DU_PHONG["tiktok_binh_luan"]}
         ph.update(actor=TT.ACTOR, bo_chuyen="tiktok_binh_luan", urls=list(urls),
                   tra_loi=int(tra_loi))
+        if bat_dau:
+            ph["bat_dau"] = {u: int(n) for u, n in bat_dau.items() if u in urls and int(n) > 0}
 
 
 def tien_phan(p: str, ph: dict, items: list, meta: dict) -> float:
@@ -117,7 +122,8 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
                 items = TT.ho_so(ph["ten"], int(ph.get("n") or 5), tran_usd=cap, loi_ra=loi_ra)
             else:
                 items = TT.binh_luan(ph["urls"], int(ph.get("per") or 20),
-                                     int(ph.get("tra_loi") or 0), tran_usd=cap, loi_ra=loi_ra)
+                                     int(ph.get("tra_loi") or 0), tran_usd=cap, loi_ra=loi_ra,
+                                     bat_dau=ph.get("bat_dau"))
         except A.LoiApify as e:
             loi = e
         except Exception as e:
@@ -535,7 +541,7 @@ def _so(v):
         return None
 
 
-LAM_MOI_TOI_DA = 10          # bài TikTok làm mới số liệu mỗi lượt (0,003 USD/bài, `TT.GIA_YEU_CAU`)
+LAM_MOI_TOI_DA = 10          # bài TikTok làm mới số liệu mỗi lượt (0,002 USD/bài, `TT.GIA_YEU_CAU`)
 
 
 def lam_moi_tiktok(v, ma: str, luot: int, tu: datetime.datetime, con: float,

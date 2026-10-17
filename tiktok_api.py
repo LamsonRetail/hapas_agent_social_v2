@@ -56,13 +56,23 @@ import apify_tool as A
 
 ACTOR = "scraptik~tiktok-api"
 NHAN = "TikTok API (scraptik)"
-# USD mỗi yêu cầu. Bảng giá actor: 0,002 (sự kiện "request", không phí khởi động) nhưng đo THẬT
-# 17/10/2026 trên tài khoản FREE (GET /users/me/limits trước/sau): 85 yêu cầu 0,19 USD, 42 yêu cầu
-# 0,143 USD → 0,0023–0,0034 USD/yêu cầu (phí nền tảng mỗi run). Ước tính/trần/sổ dùng 0,003 cho
-# khỏi báo thiếu; tiền thật vẫn chốt theo run id (`viec_nen.chot_chi_phi`).
-GIA_YEU_CAU = 0.003
+# USD mỗi yêu cầu = giá bảng (sự kiện "request", không phí khởi động, `pricingInfos` từ
+# 01/01/2026). Đo lại 18/10/2026 theo TỪNG RUN (`usageTotalUsd` đọc sau ≥ 12 giờ, hết phí ghi trễ):
+# 14/14 run scraptik của tài khoản FREE mới đều 0,0020 USD, `chargedEventCounts` {"request": 1};
+# Σ 97 run của chu kỳ 4,5756 so với mức tài khoản 4,5819 (lệch 0,006 = lưu trữ, không phải phí
+# mỗi run). Số 0,0023–0,0034 đo 17/10 là CHÊNH MỨC TÀI KHOẢN trước/sau trong lúc agent khác chạy
+# actor Threads song song (0,155 USD/run) — không phải giá một yêu cầu. Dùng 0,003 thì ước tính,
+# trần đếm yêu cầu (`_Ngan`) và sổ đều lố 50%: kiểm độ phủ 0,20 USD chỉ gửi 58 thay vì 100 yêu cầu.
+GIA_YEU_CAU = 0.002
 TIM_MOI_TRANG = 30           # searchPosts_count tối đa thật sự trả bài (50 → 0 bài)
 BAI_MOI_TRANG = 10           # userPosts trả 10 bài/yêu cầu dù xin 30
+
+
+def so_yeu_cau_ho_so(n: int) -> int:
+    """Số yêu cầu TỐI ĐA đọc `n` bài mới nhất của MỘT tài khoản (`_ho_so_mot`): 1 hồ sơ + ⌈n/10⌉
+    trang + 1 trang bù bài ghim (bỏ `is_top`). @hapas.official 20 bài: 4 yêu cầu = 0,008 USD
+    (ước tính cũ 20 bài × 0,0012 × 1,3 = 0,031 — lố 4 lần)."""
+    return 2 + math.ceil(max(1, int(n)) / BAI_MOI_TRANG)
 BL_MOI_TRANG = 50
 TRA_LOI_MOI_TRANG = 50
 _TRAN_LUOT = 0.1             # trần USD gửi Apify cho MỘT yêu cầu (sàn của `_run_actor`)
@@ -404,28 +414,35 @@ def id_video(url: str) -> str | None:
 
 
 def binh_luan(urls: list[str], per: int, tra_loi: int = 20,
-              tran_usd: float | None = None, loi_ra: list | None = None) -> list[dict]:
+              tran_usd: float | None = None, loi_ra: list | None = None,
+              bat_dau: dict[str, int] | None = None) -> list[dict]:
     """Bình luận của từng video (item kiểu clockworks~tiktok-comments-scraper). Mỗi video tối
     đa `per` dòng (gốc + trả lời, như `maxItems` = per × số bài của actor cũ): bình luận gốc
     trước (50/yêu cầu), rồi trả lời của các luồng nhiều trả lời nhất (tối đa `tra_loi` mỗi
     luồng, 1 yêu cầu/luồng). Link không bóc được id video (link rút gọn) và video lỗi API ghi
     vào `loi_ra` (không ném — review 16/10) — bên gọi chạy dự phòng cho đúng các video đó.
-    Video đọc được mà 0 bình luận KHÔNG phải lỗi."""
+    Video đọc được mà 0 bình luận KHÔNG phải lỗi.
+
+    `bat_dau` (18/10/2026): {link: số bình luận GỐC đã có trong kho} — video cào dở lượt trước
+    đọc TIẾP từ vị trí đó (`listComments_cursor` là vị trí, 50/trang) thay vì trả tiền đọc lại
+    các trang đầu: video 5.181 bình luận cần ~70 trang gốc, mỗi lượt cào lại từ đầu tốn lại
+    đúng phần đã có. Trùng do thứ tự đổi chút giữa hai lượt thì kho gộp theo cid."""
     ngan = _Ngan(tran_usd)
+    tu = bat_dau or {}
     cac = [(u, id_video(u)) for u in urls]
     for u, vid in cac:
         if not vid:
             _ghi_loi(loi_ra, u, A.LoiApify("LOI", "link không có id video (link rút gọn?)"))
-    ra = _song_song(lambda x: _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra) if x[1] else [],
-                    cac)
+    ra = _song_song(lambda x: _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra,
+                                      int(tu.get(x[0]) or 0)) if x[1] else [], cac)
     return [r for ds in ra for r in ds]
 
 
 def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
-            loi_ra: list | None = None) -> list[dict]:
+            loi_ra: list | None = None, tu: int = 0) -> list[dict]:
     goc: list[dict] = []
     thay: set[str] = set()
-    con_tro = 0
+    con_tro = max(0, int(tu))
     try:
         for _ in range(math.ceil(max(1, per) / BL_MOI_TRANG) + 2):
             it = _goi({"listComments_awemeId": vid, "listComments_count": BL_MOI_TRANG,

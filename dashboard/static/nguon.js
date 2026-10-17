@@ -1,6 +1,7 @@
 // Trang Nguồn: tính lại ngay "≈ USD/tháng" khi đổi nền tảng / số bài / chu kỳ trong biểu mẫu
-// thêm/sửa nguồn. Hằng số (giá, hệ số, phí khởi động) do máy chủ phát từ dashboard/chi_phi.py —
-// cùng công thức trang Ngân sách và lệnh /theodoi của Mark; ở đây không tự đặt giá nào.
+// thêm/sửa nguồn. Hằng số (giá, phí khởi động) do máy chủ phát từ dashboard/chi_phi.py — cùng
+// công thức `chi_phi.chi_phi_thang_nguon` (KỲ VỌNG, 18/10/2026: không nhân hệ số 1,3 — actor theo
+// dõi tính đúng số đơn vị; hệ số chỉ còn ở mức tối đa của Mark); ở đây không tự đặt giá nào.
 "use strict";
 (function () {
   var el = document.getElementById("chi-phi-hang-so");
@@ -9,23 +10,44 @@
   function usd(x, so) {
     return x.toLocaleString("vi-VN", { minimumFractionDigits: so, maximumFractionDigits: so });
   }
-  // USD/tháng THEO BÀI của một nguồn (= chi_phi.chi_phi_thang_nguon, chưa gồm phí khởi động).
-  function thangTheoBai(p, soBai, chuKy) {
+  // = chi_phi.don_vi_ky_vong: Instagram, Threads (actor hồ sơ, 17/10/2026) tính theo TÀI KHOẢN;
+  // TikTok (TikTok API, 18/10/2026) theo YÊU CẦU: 1 hồ sơ + ⌈bài/10⌉ trang.
+  function donVi(p, n) {
     var gia = (hs.gia || {})[p] || 0;
-    // Instagram, Threads (actor hồ sơ, 17/10/2026) tính theo TÀI KHOẢN — = chi_phi.don_vi.
-    var donVi = !gia ? 0 : (p === "instagram" || p === "threads" ? 1 : soBai);
-    return (hs.ngay || 30) / chuKy * donVi * gia * (hs.he_so || 1);
+    return !gia ? 0 : (p === "instagram" || p === "threads" ? 1
+      : p === "tiktok" ? 1 + Math.ceil(n / (hs.tt_bai_moi_trang || 10)) : n);
+  }
+  // USD/tháng THEO BÀI (KỲ VỌNG) của một nguồn = chi_phi.chi_phi_thang_nguon, chưa gồm phí khởi
+  // động. Dùng cho ô "≈" khi sửa nguồn VÀ thanh duyệt đề xuất hàng loạt (18/10/2026).
+  // `co` (tuỳ chọn, = chi_phi.so_bai_co_gian + chi_phi_luot_nguon, 18/10/2026): nguồn có nhịp đăng
+  // đo được (nhip = số bài cao nhất một ngày trong 14 ngày) thì Mark co số bài; cứ k ngày lấy đủ
+  // một lần. Đề xuất mới chưa có nhịp đăng: không co.
+  function thangTheoBai(p, soBai, chuKy, co) {
+    var gia = (hs.gia || {})[p] || 0;
+    var dv = donVi(p, soBai);
+    var cg = hs.co_gian || {};
+    if (gia && co && co.nhip != null && (cg.nen_tang || []).indexOf(p) >= 0) {
+      var k = Math.max(1, parseInt(co.k, 10) || cg.ngay_day_du);
+      var san = parseInt(co.san, 10) || cg.san;
+      var m = Math.min(soBai, Math.max(san, Math.ceil(parseInt(co.nhip, 10) * chuKy * cg.he_so - 1e-9) + cg.du));
+      if (m < soBai) dv = ((k - 1) * donVi(p, m) + dv) / k;
+    }
+    return (hs.ngay || 30) / chuKy * dv * gia;
   }
   function tinh(form) {
     var p = (form.elements.nen_tang || {}).value;
     var soBai = Math.max(1, parseInt((form.elements.so_bai_moi_lan || {}).value, 10) || 5);
     var chuKy = Math.max(1, parseInt((form.elements.chu_ky_ngay || {}).value, 10) || 1);
     var gia = (hs.gia || {})[p] || 0;
-    var chu = "≈ " + usd(thangTheoBai(p, soBai, chuKy), 3) + " USD/tháng theo bài";
+    var thang = thangTheoBai(p, soBai, chuKy, {
+      nhip: form.getAttribute("data-nhip"), k: form.getAttribute("data-ngay-day-du"),
+      san: form.getAttribute("data-san")
+    });
+    var chu = "≈ " + usd(thang, 3) + " USD/tháng theo bài";
     // = chi_phi.phi_khoi_dong_ngay: actor theo dõi nguồn có phí khởi động riêng (khoi_nguon,
     // 17/10/2026: Facebook thedoor) thì dùng nó, không thì phí của actor tìm (start).
     var kn = hs.khoi_nguon || {};
-    var kd = gia ? (kn[p] != null ? kn[p] : ((hs.start || {})[p] || 0)) * hs.he_so : 0;
+    var kd = gia ? (kn[p] != null ? kn[p] : ((hs.start || {})[p] || 0)) : 0;
     if (kd) chu += " + phí khởi động actor chung " + usd(kd, 4) + " USD mỗi ngày quét";
     var out = form.querySelector(".uoc-tinh");
     if (out) out.textContent = chu;

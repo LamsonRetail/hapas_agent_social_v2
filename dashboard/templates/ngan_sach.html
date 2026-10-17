@@ -13,7 +13,7 @@
 {% set muc = namespace(so=0) %}
 <div class="dau-muc">
   <div class="dau-muc__chu">
-    <div class="dau-muc__tieu-de"><h1>Ngân sách theo dõi — tháng {{ thang }}</h1><button type="button" class="goi-y" data-goi-y="Mark áp trần thấp hơn giữa trần dự án và trần platform, chạm trần thì dừng quét. Đã tiêu là tiền Apify thật tháng này; dự báo giữ nguyên cấu hình. YouTube miễn phí, trần mỗi lượt đặt ở console platform.">i</button></div>
+    <div class="dau-muc__tieu-de"><h1>Ngân sách theo dõi — tháng {{ thang }}</h1><button type="button" class="goi-y" data-goi-y="Mark áp trần thấp hơn giữa trần dự án và trần platform, chạm trần thì dừng quét — và gói Apify của tài khoản (khối Gói Apify) chặn trước nếu nhỏ hơn. Đã tiêu là tiền Apify thật tháng này; dự báo = số lượt còn lại × trung vị chi thật các lượt gần nhất (chưa đủ 3 lượt thì chỉ phần nguồn). YouTube miễn phí, trần mỗi lượt đặt ở console platform.">i</button></div>
   </div>
   {% if dong|length > 1 %}
   <form method="get" action="/ngan-sach" class="hang">
@@ -85,7 +85,7 @@
       </div>
       <ul class="ns-chu-giai">
         <li><i class="ns-o ns-o--tieu" aria-hidden="true"></i>Đã tiêu <b>{{ d.da_tieu|usd_vn }}</b> USD ({{ d.pt|pt_vn }} trần)</li>
-        <li><i class="ns-o ns-o--bao" aria-hidden="true"></i>Dự báo thêm <b>{{ db.con_lai|usd_vn }}</b> USD trong {{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày còn lại</li>
+        <li><i class="ns-o ns-o--bao" aria-hidden="true"></i>Dự báo thêm <b>{{ db.con_lai|usd_vn }}</b> USD trong {{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày còn lại{% if db.theo == 'thuc' %} <span class="mo" data-o="du-bao-thuc">= {{ db.so_luot_con|so_vn }} lượt × {{ db.thuc.trung_vi|usd_vn }} USD (trung vị chi thật {{ db.thuc.so_luot }} lượt gần nhất, {{ db.thuc.thap|usd_vn }}–{{ db.thuc.cao|usd_vn }}){% if db.dp_con %} + kiểm độ phủ {{ db.dp_con|usd_vn }}{% endif %}</span>{% elif db.theo == 'nguon' %} <span class="mo" data-o="du-bao-thuc">(chỉ phần nguồn — chưa đủ 3 lượt đo chi thật; mức tối đa ở bảng dưới)</span>{% endif %}</li>
         <li><i class="ns-o ns-o--tran" aria-hidden="true"></i>Trần hiệu lực <b>{{ db.tran|usd_vn }}</b> USD</li>
       </ul>
     </div>
@@ -109,6 +109,23 @@
     </ol>
     {% endif %}
     <p>{% if ql %}Hoặc tăng trần dự án ở phần cấu hình bên dưới{% if db.tran_platform is not none and db.tran_platform < db.tran_du_an %} (đang bị trần platform giữ — tăng ở console platform){% endif %}. {% endif %}<a href="/nguon?du_an={{ d.ma|urlencode }}">Sửa nguồn</a></p>
+  </div>
+  {% endif %}
+  {# ── Gói Apify (18/10/2026): trần THẬT của cả tài khoản, ảnh chụp Mark ghi (chi_phi.goi_apify, bảng
+     han_muc_apify). Cuối khối tóm tắt dự án: sau cảnh báo vượt trần của dự án, trước bảng cấu hình
+     (một dòng mỗi nền tảng + Nâng cao); trần mỗi lượt của gói kẹp "Cả tháng nếu mỗi lượt dùng hết". ── #}
+  {% if goi and goi.co %}
+  <div class="ns-goi" role="group" aria-labelledby="ns-goi-tieu-de" data-o="goi-apify">
+    <div class="ns-nhan" id="ns-goi-tieu-de">Gói Apify{% if goi.goi %} {{ goi.goi }}{% endif %} — trần thật của cả tài khoản
+      <button type="button" class="goi-y" data-goi-y="Apify chặn mọi run khi tài khoản dùng hết trần gói trong chu kỳ, bất kể trần dự án. Số đã dùng là của CẢ tài khoản (mọi việc dùng chung token, gồm run thử), theo chu kỳ Apify chứ không theo tháng lịch. Mark chừa {{ goi.du_tru|usd_vn }} USD dự trữ. Ảnh chụp lúc {{ goi.luc|gio_vn }}.">i</button></div>
+    <dl class="ns-o-so ns-goi__so">
+      <div><dt>Đã dùng chu kỳ này</dt><dd class="ns-gia-tri">{{ goi.da_dung|usd_vn }}</dd><dd class="ns-phu">/ {{ goi.tran|usd_vn }} USD trần gói</dd></div>
+      <div><dt>Gói còn</dt><dd class="ns-gia-tri">{{ goi.con_lai|usd_vn }}</dd><dd class="ns-phu">USD · Mark dùng được {{ goi.dung_duoc|usd_vn }}</dd></div>
+      <div><dt>Đặt lại</dt><dd class="ns-gia-tri">{% if goi.dat_lai %}{{ goi.dat_lai.strftime('%d/%m') }}{% else %}—{% endif %}</dd><dd class="ns-phu">{% if goi.dat_lai %}{{ goi.dat_lai.strftime('%H:%M') }} · còn {{ '%.1f'|format(goi.ngay_con)|replace('.', ',') }} ngày{% else %}Apify chưa báo{% endif %}</dd></div>
+      {% if goi.du_bao_theo == 'thuc' %}<div><dt>Dự báo tới lúc đặt lại</dt><dd class="ns-gia-tri{% if goi.vuot_goi %} chu-loi{% endif %}">{{ goi.du_bao_chu_ky|usd_vn }}</dd><dd class="ns-phu">USD · {{ goi.so_luot_chu_ky|so_vn }} lượt theo lịch · gói đủ {{ goi.du_luot|so_vn }} lượt</dd></div>
+      {% elif goi.tran_luot is not none %}<div><dt>Trần mỗi lượt (console)</dt><dd class="ns-gia-tri">{{ goi.tran_luot|usd_vn }}</dd><dd class="ns-phu">USD — một lượt không tiêu quá</dd></div>{% endif %}
+    </dl>
+    {% for c in goi.canh_bao %}<p class="thong-bao thong-bao--canh ns-goi__canh" role="note">⚠ {{ c }}</p>{% endfor %}
   </div>
   {% endif %}
 </section>
@@ -154,6 +171,10 @@
 {% set dp = d.do_phu if d.do_phu is mapping else {} %}
 {% set dp_con = dp.con_lai or 0 %}
 {% set toi_da = d.da_tieu + nguon_con + so_luot * khac_luot + web_con + dp_con %}
+{# Trần mỗi lượt trên console (18/10/2026, ảnh chụp gói của Mark): một lượt không tiêu quá số này —
+   giữ chỗ 60 bình luận/bài làm "tối đa" 8,6 USD/lượt khi console chặn ở 2 USD. #}
+{% set tran_luot = goi.tran_luot if goi and goi.co and goi.tran_luot is not none else none %}
+{% if tran_luot is not none and so_luot > 0 %}{% set toi_da = [toi_da, d.da_tieu + so_luot * tran_luot]|min %}{% endif %}
 {% set du_luot = ((db.tran - d.da_tieu - nguon_con - web_con - dp_con) / so_luot) if so_luot > 0 else 0 %}
 <section class="the-khoi cach-duoi ns-ch" aria-labelledby="ns-ch-tieu-de">
   {% if ql %}
@@ -165,6 +186,7 @@
     "luot_web_con_lai": luot_web, "luot_web_30": luot_web_30,
     "dp": {"luot_con_lai": dp.luot_con_lai or 0, "luot_30": dp.luot_30 or 0},
     "th2": b.tu_khoa.threads.duong2 if b.tu_khoa.threads.duong2 is defined else {},
+    "tran_luot": tran_luot,
     "tran_platform": db.tran_platform, "tran_da": d.tran_usd_thang|float}|json_script }}</script>
   <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/cau-hinh" id="ns-form">
   <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
@@ -418,6 +440,8 @@
       <div data-o="dp-dong">Kiểm độ phủ (TikTok, 2 lần/tuần): <span data-o="dp-chu">{% if dp.bat %}tối đa <b>{{ dp.tran_usd|usd_vn }}</b> USD/lần · ≈ <b>{{ dp.usd_30|usd_vn }}</b> USD/30 ngày{% else %}tắt{% endif %}</span>
         <button type="button" class="goi-y" data-goi-y="Mỗi {{ hang_so.do_phu.gio_gian }} giờ Mark lấy mẫu bài TikTok bằng đường khác thu thập hằng ngày (hashtag brand/chiến dịch + bài mới nhất của nhà sáng tạo nổi), đo bao nhiêu bài brand đã có trong kho, bổ sung bài sót và tự sửa đường thu thập: đề xuất theo dõi nhà sáng tạo bị sót, thêm hashtag chiến dịch vào lượt nổi, nới lượt nổi khi bài bị tụt hạng, nới trang mới nhất khi sót bài ít thích. Lượt nổi TikTok hiện: {{ noi.trang or 2 }} trang/từ khoá, mỗi {{ noi.gio or 20 }} giờ{% if noi.tag %}, hashtag #{{ noi.tag|join(', #') }}{% endif %}; trang mới nhất mỗi ngày lật tới bài đã xem, tối đa {{ noi.moi_trang or 3 }} trang/từ khoá. Còn {{ dp.luot_con_lai or 0 }} lần kiểm tháng này{% if dp.lan_toi %}, lần tới từ {{ dp.lan_toi[8:10] }}/{{ dp.lan_toi[5:7] }}{% endif %}; tiền nằm trong trần tháng dự án.">i</button>{% if noi.tag %} <span class="mo nho ns-dp__tag">lượt nổi: #{{ noi.tag|join(' #') }}</span>{% endif %}</div>
       <div>Tìm + bình luận tối đa <b data-o="tong-luot">{{ tong_luot|usd_vn(3) }}</b> USD/lượt · ≈ <b data-o="tong-30">{{ (khac_luot * luot_30 + web_luot * luot_web_30)|usd_vn }}</b> USD/30 ngày {% if co_lich %}(theo <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a>: {{ luot_30|so_vn }} lượt){% else %}(1 lượt/ngày — không có <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a> nào bật){% endif %}</div>
+      {# Thật vs tối đa (18/10/2026): giữ chỗ cào hết bình luận (60/bài) làm mức tối đa lố; trần console chặn mỗi lượt. #}
+      {% if (db.thuc and db.thuc.co) or tran_luot is not none %}<div class="mo" data-o="thuc-luot">{% if db.thuc and db.thuc.co %}Thật: trung vị <b>{{ db.thuc.trung_vi|usd_vn }}</b> USD/lượt cả lượt ({{ db.thuc.so_luot }} lượt gần nhất, {{ db.thuc.thap|usd_vn }}–{{ db.thuc.cao|usd_vn }}){% endif %}{% if (db.thuc and db.thuc.co) and tran_luot is not none %} · {% endif %}{% if tran_luot is not none %}Mark không tiêu quá <b>{{ tran_luot|usd_vn }}</b> USD/lượt (trần việc nền trên console){% endif %}</div>{% endif %}
       <div class="ns-du-kien__thang{% if toi_da > db.tran + 1e-9 %} ns-du-kien__thang--canh{% endif %}" data-o="thang-hop">
         Cả tháng nếu mỗi lượt dùng hết: <b data-o="thang-so">{{ toi_da|usd_vn }}</b> / <span data-o="thang-tran">{{ db.tran|usd_vn }}</span> USD —
         <span data-o="thang-ket-luan" aria-live="polite">{% if toi_da > db.tran + 1e-9 %}vượt trần {{ (toi_da - db.tran)|usd_vn }} USD, Mark dừng quét khi chạm trần; {% if du_luot > 0 %}vừa trần khi ≤ {{ du_luot|usd_vn(3) }} USD/lượt.{% else %}riêng nguồn theo dõi đã chạm trần.{% endif %}{% else %}trong trần, còn dư {{ (db.tran - toi_da)|usd_vn }} USD.{% endif %}</span>
@@ -443,7 +467,7 @@
     <div class="muc">
       <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
       <h2 class="muc__ten" id="ns-pt-tieu-de">Dự báo theo nền tảng</h2>
-      <button type="button" class="goi-y" data-goi-y="Nguồn đang theo dõi. Phí khởi động ≈ 1 lần/nền tảng/ngày quét; giá đo 25/09/2026, đã nhân hệ số 1,3 như Mark.">i</button>
+      <button type="button" class="goi-y" data-goi-y="Nguồn đang theo dõi, mức kỳ vọng theo giá thật từng actor (đo lại 18/10/2026; không nhân hệ số 1,3 — hệ số chỉ dùng cho mức tối đa Mark giữ chỗ). Phí khởi động ≈ 1 lần/nền tảng/ngày quét, chia chung mọi nguồn của run.">i</button>
     </div>
     {% if db.nen_tang %}
     <div class="cuon-ngang">
