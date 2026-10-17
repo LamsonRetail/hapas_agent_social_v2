@@ -202,8 +202,9 @@ def _uoc_phan_user_threads(so_nguon: int, n: int) -> float:
 
 
 def _so_bai_nguon(x: dict) -> int:
-    """Số bài mỗi lần THẬT SỰ lấy (và trả tiền) của một nguồn: Threads tối thiểu 10."""
-    n = int(x.get("so_bai_moi_lan") or 5)
+    """Số bài mỗi lần THẬT SỰ lấy (và trả tiền) của một nguồn: số đã co theo nhịp đăng
+    (`so_bai_hieu_luc`, `_co_gian_nguon` — 18/10/2026) hoặc số cấu hình; Threads tối thiểu 10."""
+    n = int(x.get("so_bai_hieu_luc") or x.get("so_bai_moi_lan") or 5)
     return max(TH_TOI_THIEU_BAI, n) if x.get("nen_tang") == "threads" else n
 
 
@@ -213,11 +214,21 @@ def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
     5 bài cũng bị lấy 30 bài và tốn tiền ngoài ước tính). YouTube một phần (API miễn phí).
     Threads: chế độ "user" của actor, tối đa `TH_TOI_DA_MOI_LUOT` tài khoản mỗi lượt."""
     import account_tool
+    from dashboard import chi_phi as CP
     nhom: dict[tuple[str, int], list[dict]] = {}
+    fb: list[tuple[int, dict]] = []
     for x in nguon:
         p = x["nen_tang"]
+        if p == "facebook":
+            fb.append((_so_bai_nguon(x), x))
+            continue
         n = 0 if p in ("youtube", "instagram") else _so_bai_nguon(x)
         nhom.setdefault((p, n), []).append(x)
+    # Facebook (18/10/2026): thedoor nhận MỘT số bài cho mọi trang của run + 0,01 USD khởi động mỗi
+    # run — gom các nguồn (số bài đã co theo nhịp đăng khác nhau) thành các run rẻ nhất
+    # (`chi_phi.nhom_fb`); trang trong nhóm lấy theo số bài lớn nhất của nhóm, đã nằm trong ước tính.
+    for n, ds in CP.nhom_fb(fb, _GIA["facebook"], _KHOI_NGUON["facebook"]):
+        nhom.setdefault(("facebook", n), []).extend(ds)
     ra: dict[str, list[dict]] = {}
     for (p, n), tat_ca in sorted(nhom.items()):
         lo_nguon = ([tat_ca[i:i + TH_TOI_DA_MOI_LUOT]
@@ -227,6 +238,12 @@ def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
             ids = [int(x["id"]) for x in ds]
             ph = {"id": f"{p}-{n or 'tat_ca'}" + (f"-{k + 1}" if k else ""), "nen_tang": p,
                   "nguon": ids, "trang_thai": "cho", "n": n, "gia": _GIA.get(p, 0.0)}
+            # Co theo nhịp đăng (18/10/2026): {id nguồn: [số bài cấu hình, lý do]} — phễu lượt và
+            # sổ co giãn (`_ghi_co_gian`) đọc lại sau lượt.
+            co = {str(x["id"]): [int(x.get("so_bai_moi_lan") or 5), str(x.get("ly_do_co_gian") or "")]
+                  for x in ds if p in CP.CO_GIAN_NEN_TANG and ("so_bai_hieu_luc" in x)}
+            if co:
+                ph["co_gian"] = co
             if p == "youtube":
                 ph.update(actor="youtube", uoc_usd=0.0)
             elif p == "threads":
@@ -265,6 +282,122 @@ def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
                     TDA.gan_fb_trang(ph, [x["dinh_danh"] for x in ds], n)
             ra.setdefault(p, []).append(ph)
     return ra
+
+
+#: Khoá sổ co giãn trong sổ mốc của dự án (`doc_moc_tk`): {id nguồn: {"day_du_luc": iso lần cuối
+#: lấy ĐỦ số bài cấu hình, "bao_hoa": lượt trước lấy đủ số đã co mà bài nào cũng mới}}.
+KHOA_CO_GIAN = "co_gian_nguon"
+
+
+def _gio_iso(s) -> datetime.datetime | None:
+    try:
+        x = datetime.datetime.fromisoformat(str(s))
+    except (TypeError, ValueError):
+        return None
+    return x if x.tzinfo else x.replace(tzinfo=_VN)
+
+
+def _co_gian_nguon(ma: str, du_an: dict, nguon: list[dict],
+                   bay_gio: datetime.datetime | None = None) -> list[dict]:
+    """Bản sao nguồn kèm `so_bai_hieu_luc` + `ly_do_co_gian` (`dashboard.chi_phi.so_bai_co_gian`):
+    co N bài mỗi lần theo nhịp đăng quan sát được (số bài cao nhất một ngày trong 14 ngày × số
+    ngày từ lần quét trước × 1,5 + 2, sàn 3, trần = số cấu hình). Lấy đủ khi: tắt, chiến dịch đang
+    chạy, lượt trước bão hoà, quá `ngay_day_du` ngày từ lần lấy đủ cuối (làm mới số liệu bài cũ),
+    chưa có bài. Không đo được nhịp (kho lỗi) thì giữ nguyên — lấy đủ như cũ."""
+    from dashboard import chi_phi as CP
+    from dashboard import lich_quet as LQ
+    cfg = CP.cau_hinh_co_gian(du_an)
+    if not cfg["bat"] or not any(n.get("nen_tang") in CP.CO_GIAN_NEN_TANG for n in nguon):
+        return nguon
+    bay_gio = bay_gio or datetime.datetime.now(_VN)
+    try:
+        nhip = K.nhip_dang_nguon(ma, CP.CO_GIAN_NGAY_NHIP)
+        cd = LQ.chien_dich_dang_chay(K.lich_chien_dich(ma), bay_gio) is not None
+    except K.LoiKho:
+        return nguon
+    so = doc_moc_tk(ma).get(KHOA_CO_GIAN) or {}
+    ra = []
+    for n in nguon:
+        st = so.get(str(n["id"])) if isinstance(so.get(str(n["id"])), dict) else {}
+        dd = _gio_iso(st.get("day_du_luc"))
+        # Lịch hằng ngày lệch vài phút: còn dưới `GIO_DUNG_SAI` giờ thì coi như đã đủ ngày.
+        day_du = dd is None or (bay_gio - dd).total_seconds() >= (
+            cfg["ngay_day_du"] * 24 - K.GIO_DUNG_SAI) * 3600
+        ky = max(1, int(n.get("chu_ky_ngay") or 1))
+        qc = n.get("quet_cuoi")
+        khoang = (max(ky, (bay_gio - qc).total_seconds() / 86400)
+                  if isinstance(qc, datetime.datetime) else ky)
+        m, ly = CP.so_bai_co_gian(n.get("nen_tang"), int(n.get("so_bai_moi_lan") or 5),
+                                  nhip.get(int(n["id"])), khoang, cfg, day_du=day_du,
+                                  bao_hoa=bool(st.get("bao_hoa")), chien_dich=cd)
+        ra.append({**n, "so_bai_hieu_luc": m, "ly_do_co_gian": ly})
+    return ra
+
+
+def _ghi_co_gian(ma: str, v, nguon: dict[int, dict], theo_nguon: dict[int, list],
+                 bay_gio: datetime.datetime | None = None) -> list[str]:
+    """Sau lượt: ghi sổ co giãn (lấy đủ → `day_du_luc`; lấy đủ số đã co mà bài cũ nhất vẫn mới hơn
+    lần quét trước → `bao_hoa`, lượt sau lấy đủ để không sót) và trả câu phễu: co bao nhiêu bài,
+    tiết kiệm bao nhiêu, nguồn nào làm mới đủ, nguồn nào bão hoà. Không bao giờ ném."""
+    from dashboard import chi_phi as CP
+    bay_gio = bay_gio or datetime.datetime.now(_VN)
+    try:
+        so = dict(doc_moc_tk(ma).get(KHOA_CO_GIAN) or {})
+        bot = usd = 0.0
+        co: list[str] = []
+        du: list[str] = []
+        bh: list[str] = []
+        for p, ph in v.cac_phan():
+            if (p not in CP.CO_GIAN_NEN_TANG or ph.get("trang_thai") not in ("xong", "mot_phan")
+                    or not ph.get("co_gian")):
+                continue
+            dung = int(ph.get("n") or 0)
+            for nid, (so_cfg, ly) in ph["co_gian"].items():
+                x = nguon.get(int(nid))
+                if x is None:
+                    continue
+                ten = _ten_nguon(x)
+                st = dict(so.get(nid) or {})
+                if dung >= int(so_cfg):
+                    st["day_du_luc"] = bay_gio.isoformat(timespec="seconds")
+                    st["bao_hoa"] = False
+                    if ly.startswith("làm mới"):
+                        du.append(ten)
+                else:
+                    dong = [dt for _, dt in theo_nguon.get(int(nid)) or [] if dt]
+                    qc = x.get("quet_cuoi")
+                    st["bao_hoa"] = bool(isinstance(qc, datetime.datetime) and dong
+                                         and len(dong) >= dung and min(dong) > qc)
+                    if st["bao_hoa"]:
+                        bh.append(ten)
+                    bot += int(so_cfg) - dung
+                    usd += ((int(so_cfg) - dung) * _GIA["facebook"] if p == "facebook" else
+                            (math.ceil(int(so_cfg) / TDA.TT.BAI_MOI_TRANG)
+                             - math.ceil(dung / TDA.TT.BAI_MOI_TRANG)) * _GIA["tiktok"])
+                    co.append(f"{ten} {so_cfg}→{dung}")
+                so[nid] = st
+        ghi_moc_tk(ma, {KHOA_CO_GIAN: so})
+    except Exception as e:  # sổ co giãn hỏng không làm hỏng lượt (lượt sau lấy đủ)
+        if type(e).__name__ == "MatQuyen":
+            raise
+        return [f"co số bài theo nhịp đăng: không ghi được sổ ({type(e).__name__})"]
+    ra = []
+    if co:
+        ra.append(f"co số bài theo nhịp đăng: {len(co)} nguồn bớt {int(bot)} bài "
+                  f"(≈ {_usd3(usd)} USD) — " + ", ".join(co[:6]) + ("…" if len(co) > 6 else ""))
+    if du:
+        ra.append("làm mới đủ số bài cấu hình (số liệu bài cũ): " + ", ".join(du[:6]))
+    if bh:
+        ra.append("nguồn bão hoà (lấy đủ số đã co mà bài nào cũng mới) — lượt sau lấy đủ: "
+                  + ", ".join(bh[:6]))
+    return ra
+
+
+def _ten_nguon(x: dict) -> str:
+    """Tên ngắn của nguồn cho phễu: tên trang Facebook trong link, còn lại định danh."""
+    dd = str(x.get("dinh_danh") or x.get("ten") or x.get("id"))
+    m = re.search(r"facebook\.com/([^/?#]+)", dd, re.IGNORECASE)
+    return m.group(1) if m else dd.lstrip("@")
 
 
 def uoc_tinh(nguon: list[dict]) -> dict[str, float]:
@@ -395,6 +528,9 @@ def ke_hoach(ma: str, moi_nguon: bool = False) -> dict:
     for n in con_lai[TOI_DA_NGUON:]:
         bo_qua.append((n, f"quá {TOI_DA_NGUON} nguồn một lượt — để lượt sau"))
     con_lai = con_lai[:TOI_DA_NGUON]
+    # Co số bài mỗi lần theo nhịp đăng (18/10/2026) TRƯỚC khi cắt theo ngân sách: nguồn rẻ đi thì
+    # vừa ngân sách hơn.
+    con_lai = _co_gian_nguon(ma, du_an, con_lai)
     tran = float(du_an["tran_usd_thang"] or 0)
     con_thang = max(0.0, tran - da_tieu)
     giu, het_tien = _cat_theo_ngan_sach(con_lai, con_thang)
@@ -3712,6 +3848,7 @@ def _chay_viec(v) -> tuple[str, str]:
     tkq: dict = {}
     dp: dict = {}
     ok: list[int] = []
+    cau_co: list[str] = []          # phễu co số bài theo nhịp đăng (không phải lỗi của lượt)
     loi_chung = None
     usd = 0.0
     try:
@@ -3815,6 +3952,7 @@ def _chay_viec(v) -> tuple[str, str]:
                     loi.setdefault(int(i), str(ph.get("ly_do") or ph.get("ma") or "lỗi"))
         han_ai = time.monotonic() + max(0.0, min(150.0, v.con_giay() - 45))
         rows, tk = chon_bai(du_an, theo_nguon, nguon, han_ai)
+        cau_co = _ghi_co_gian(ma, v, nguon, theo_nguon)
         if rows:
             moi, cu = K.ghi_bai(ma, luot, "theo_doi", rows)
         lam_moi = _lam_moi_youtube(ma, luot)
@@ -3868,8 +4006,8 @@ def _chay_viec(v) -> tuple[str, str]:
                         + int(dp.get("cu") or 0), chi_phi_usd=usd,
                         # Câu độ phủ đứng TRƯỚC các dòng phễu dài (ghi_chu có trần
                         # `K.GHI_CHU_TOI_DA` — phần lỡ bị cắt là chi tiết phễu cuối).
-                        ghi_chu="; ".join([*ghi_chu, *KDP.cau_ghi_chu(dp), *_cau_tk(tkq),
-                                           *_cau_bl(bl)]) or None,
+                        ghi_chu="; ".join([*ghi_chu, *cau_co, *KDP.cau_ghi_chu(dp),
+                                           *_cau_tk(tkq), *_cau_bl(bl)]) or None,
                         loi=(loi_chung or "; ".join(sorted(set(loi.values())))[:500] or None))
         except K.LoiKho as e:
             print(f"[theo_doi] không đóng được lượt {luot}: {e}", flush=True)

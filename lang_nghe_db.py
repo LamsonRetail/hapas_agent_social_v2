@@ -487,6 +487,19 @@ def bai_can_lam_moi(ma: str, nen_tang: str, tu, toi_da: int) -> list[dict]:
             (ma, nen_tang, tu, _TZ, _TZ, toi_da)).fetchall()
 
 
+def nhip_dang_nguon(ma: str, ngay: int = 14) -> dict[int, int]:
+    """{id nguồn: số bài CAO NHẤT nguồn đăng trong MỘT ngày (giờ VN)} trên bài đã giữ đăng trong
+    `ngay` ngày qua — co số bài mỗi lần theo nhịp đăng (18/10/2026, `dashboard.chi_phi.
+    so_bai_co_gian`). Nguồn không có bài trong cửa sổ thì không có khoá."""
+    with ket_noi() as c:
+        rows = c.execute(
+            "SELECT nguon_id, max(n) AS n FROM (SELECT nguon_id, "
+            "(dang_luc AT TIME ZONE %s)::date AS d, count(*) AS n FROM bai WHERE du_an = %s "
+            "AND nguon_id IS NOT NULL AND dang_luc >= now() - make_interval(days => %s) "
+            "GROUP BY 1, 2) t GROUP BY 1", (_TZ, ma, int(ngay))).fetchall()
+    return {int(r["nguon_id"]): int(r["n"]) for r in rows}
+
+
 def lich_chien_dich(ma: str) -> list[dict]:
     """Mọi lịch kiểu chiến dịch của dự án (bật hay tắt) — nới phạm vi theo dõi theo khung
     chiến dịch (`theo_doi_api.pham_vi`)."""

@@ -1133,6 +1133,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     cap_nhat_luc=datetime.datetime.now(VN).isoformat(timespec="seconds"))
         return JSONResponse(data)
 
+    async def _nhip_dang(ma: str) -> dict:
+        """Nhịp đăng từng nguồn (`kho.nhip_dang`); kho giả cũ / bảng lỗi → {} (không co)."""
+        ham = getattr(app.state.kho, "nhip_dang", None)
+        if ham is None:
+            return {}
+        try:
+            return await _k(ham, ma)
+        except LoiKho:
+            return {}
+
     # ─── dự án + nguồn + đề xuất ───
     @app.get("/nguon")
     async def trang_nguon(request: Request):
@@ -1144,6 +1154,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         du_an = an_chi_tiet(nguoi, [du_an], ("sua_boi",))[0] if du_an else None
         # Ước tính tiền/tháng mỗi nguồn theo cấu hình (cùng công thức trang Ngân sách); trình
         # duyệt tính lại ngay khi sửa số bài/chu kỳ bằng chính các hằng số này (`chi_phi_js`).
+        # Co số bài theo nhịp đăng (18/10/2026): số bài Mark thật sự lấy, không phải số cấu hình.
+        if du_an:
+            nguon = CP.gan_co_gian(nguon, await _nhip_dang(du_an["ma"]), du_an)
         nguon = [{**n, "usd_thang": CP.chi_phi_thang_nguon(n)} for n in nguon]
         return _trang(request, "nguon.html", nguoi, "nguon", du_an_ds=ds, du_an=du_an,
                       nguon=an_chi_tiet(nguoi, nguon, ("them_boi",), ("loi_cuoi",)),
@@ -1308,6 +1321,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             tieu = float(da_tieu.get(d["ma"], 0.0))
             tran_pf = await _k(app.state.kho.tran_platform, d["ma"])
             nguon = await _k(app.state.kho.cac_nguon, d["ma"])
+            # Nguồn theo số bài Mark thật sự lấy sau khi co theo nhịp đăng (18/10/2026).
+            nguon = CP.gan_co_gian(nguon, await _nhip_dang(d["ma"]), d)
             db = CP.du_bao(nguon, tieu, tran_du_an, tran_pf, bay_gio)
             tran = db["tran"]
             # Chi THẬT mỗi lượt (18/10/2026): trung vị ≤ 7 lượt gần nhất — dự báo cả tháng và tới

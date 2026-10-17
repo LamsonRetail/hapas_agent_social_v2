@@ -225,6 +225,104 @@ def _khoi_nguon(p: str) -> float:
     return KHOI_NGUON.get(p, START_COST.get(p, 0.0))
 
 
+# ───── co số bài mỗi lần theo NHỊP ĐĂNG (18/10/2026) — Mark (`theo_doi.ke_hoach`) gọi đúng các hàm
+# này (thuần, không SQL), dashboard dùng để báo "≈ USD/tháng" theo số bài thật sự lấy ─────
+# Vì sao: nguồn theo dõi lấy N bài MỚI NHẤT mỗi lượt dù nguồn chỉ đăng 0,4–4 bài/ngày — HAPAS 6 trang
+# Facebook × 10 bài = 60 bài/lượt (0,15 USD) trong khi bài mới thật ~9/ngày (kho 18/10: 13–16 bài mỗi
+# trang trong 4–36 ngày). Phần lặp chỉ để làm mới số liệu bài cũ — tương tác trang dồn vào 1–3 ngày
+# đầu, nên co N theo nhịp đăng quan sát được và làm mới đủ N bài mỗi `CO_GIAN_NGAY_DAY_DU` ngày.
+#: Nền tảng co được: Facebook (thedoor tính theo bài), TikTok (theo trang 10 bài). Instagram /
+#: Threads tính theo TÀI KHOẢN — số bài không đổi tiền.
+CO_GIAN_NEN_TANG = ("facebook", "tiktok")
+CO_GIAN_SAN = 3              # tối thiểu mỗi lượt (bài ghim / đăng dồn đột xuất)
+CO_GIAN_HE_SO = 1.5          # dư so với số bài/ngày cao nhất đã thấy
+CO_GIAN_DU = 2
+CO_GIAN_NGAY_NHIP = 14       # cửa sổ đo nhịp đăng (ngày đăng của bài đã giữ)
+CO_GIAN_NGAY_DAY_DU = 7      # lấy đủ N bài cấu hình mỗi chừng này ngày (làm mới số bài cũ)
+
+
+def cau_hinh_co_gian(du_an: dict) -> dict:
+    """`du_an.cau_hinh.theo_doi` {"co_gian": bool, "san": int, "ngay_day_du": int}; thiếu → bật,
+    sàn 3, làm mới đủ mỗi 7 ngày; số rác → mặc định."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    x = goc.get("theo_doi") if isinstance(goc.get("theo_doi"), dict) else {}
+    return {"bat": x.get("co_gian", True) is not False,
+            "san": _so_rieng(x.get("san"), 1, SO_TOI_DA, CO_GIAN_SAN),
+            "ngay_day_du": _so_rieng(x.get("ngay_day_du"), 1, 60, CO_GIAN_NGAY_DAY_DU)}
+
+
+def so_bai_co_gian(p: str, so_bai: int, max_ngay: int | None, khoang_ngay: float, cfg: dict,
+                   *, day_du: bool = False, bao_hoa: bool = False,
+                   chien_dich: bool = False) -> tuple[int, str]:
+    """Số bài THẬT SỰ lấy của một nguồn lượt này + lý do (rỗng = không co). `max_ngay`: số bài
+    cao nhất nguồn đăng trong MỘT ngày (giờ VN) suốt `CO_GIAN_NGAY_NHIP` ngày qua (None = chưa
+    có bài nào đã giữ); `khoang_ngay`: số ngày từ lần quét trước (≥ chu kỳ). Lấy ĐỦ `so_bai` khi:
+    tắt co giãn, nền tảng tính theo tài khoản, đang chiến dịch, lượt trước BÃO HOÀ (lấy đủ mà bài
+    cũ nhất vẫn mới hơn lần quét trước — có thể còn bài sót), tới lượt làm mới đủ, chưa có lịch sử.
+    Còn lại: min(so_bai, max(sàn, ⌈max_ngay × khoảng × 1,5⌉ + 2))."""
+    n = max(1, int(so_bai))
+    if not cfg.get("bat") or p not in CO_GIAN_NEN_TANG:
+        return n, ""
+    if chien_dich:
+        return n, "đang chiến dịch — lấy đủ"
+    if bao_hoa:
+        return n, "lượt trước lấy đủ mà bài nào cũng mới — lấy đủ để không sót"
+    if day_du:
+        return n, f"làm mới đủ {n} bài (mỗi {cfg['ngay_day_du']} ngày)"
+    if max_ngay is None:
+        return n, "chưa có lịch sử đăng"
+    can = math.ceil(max(0, int(max_ngay)) * max(1.0, float(khoang_ngay)) * CO_GIAN_HE_SO
+                    - 1e-9) + CO_GIAN_DU
+    m = min(n, max(int(cfg.get("san") or CO_GIAN_SAN), can))
+    if m >= n:
+        return n, ""
+    return m, (f"{n}→{m} bài: đăng tối đa {int(max_ngay)} bài/ngày ({CO_GIAN_NGAY_NHIP} ngày), "
+               f"{float(khoang_ngay):.1f} ngày từ lần quét trước").replace(".", ",", 1)
+
+
+def nhom_fb(cac: list[tuple[int, object]], gia: float, khoi: float) -> list[tuple[int, list]]:
+    """Gom nguồn Facebook (mỗi nguồn một số bài) thành các run thedoor RẺ NHẤT. thedoor nhận MỘT
+    `postsToScrape` cho mọi trang của run (lấy số bài lớn nhất của nhóm) và tính 0,01 USD khởi động
+    mỗi run: chia mỗi số bài một run thì tốn phí khởi động, gộp hết thì trang nhỏ lấy theo trang
+    lớn. Quy hoạch động trên nguồn xếp theo số bài (nhóm liền kề, O(n²)). `cac`: [(số bài, nguồn)].
+    -> [(số bài của run, [nguồn])], số bài tăng dần. HAPAS 18/10 (10, 6, 6, 3, 3, 3): 3 run =
+    0,1075 USD thay vì 1 run × 10 bài = 0,16 USD."""
+    ds = sorted(cac, key=lambda t: t[0])
+    k = len(ds)
+    if not k:
+        return []
+    tot = [0.0] + [math.inf] * k
+    cat = [0] * (k + 1)
+    for j in range(1, k + 1):
+        for i in range(1, j + 1):
+            c = tot[i - 1] + khoi + (j - i + 1) * ds[j - 1][0] * gia
+            if c < tot[j] - 1e-12:
+                tot[j], cat[j] = c, i
+    ra = []
+    j = k
+    while j > 0:
+        i = cat[j]
+        ra.append((ds[j - 1][0], [x for _, x in ds[i - 1:j]]))
+        j = i - 1
+    return ra[::-1]
+
+
+def gan_co_gian(nguon: list[dict], nhip: dict, du_an: dict) -> list[dict]:
+    """Bản sao nguồn kèm số bài co theo nhịp đăng cho dashboard (`so_bai_co_gian` — None khi lấy
+    đủ, `ngay_day_du`, `ly_do_co_gian`, `nhip_dang` = số bài cao nhất một ngày trong 14 ngày).
+    Dashboard tính với khoảng = chu kỳ của nguồn (Mark dùng khoảng thật từ lần quét trước)."""
+    cfg = cau_hinh_co_gian(du_an or {})
+    ra = []
+    for n in nguon:
+        so = _so(n.get("so_bai_moi_lan"), 5)
+        mx = nhip.get(n.get("id")) if isinstance(nhip, dict) else None
+        m, ly = so_bai_co_gian(n.get("nen_tang"), so, mx, _so(n.get("chu_ky_ngay"), 1), cfg)
+        ra.append({**n, "so_bai_co_gian": m if m < so else None,
+                   "ngay_day_du": cfg["ngay_day_du"], "ly_do_co_gian": ly, "nhip_dang": mx,
+                   "co_gian_bat": cfg["bat"], "co_gian_san": cfg["san"]})
+    return ra
+
+
 def don_vi_ky_vong(p: str, so_bai: int) -> int:
     """Đơn vị KỲ VỌNG của một nguồn mỗi lượt: như `don_vi_nguon`, riêng TikTok không cộng trang bù
     bài ghim (đo @hapas.official 20 bài: 3 yêu cầu = 0,006 USD — trang bù chỉ có khi bài ghim lọt
@@ -245,7 +343,15 @@ def chi_phi_luot_nguon(n: dict) -> float:
     p = n.get("nen_tang")
     if not GIA.get(p):
         return 0.0
-    return don_vi_ky_vong(p, _so(n.get("so_bai_moi_lan"), 5)) * GIA[p]
+    so = _so(n.get("so_bai_moi_lan"), 5)
+    dv = don_vi_ky_vong(p, so)
+    m = n.get("so_bai_co_gian")
+    if m and int(m) < so:
+        # Co theo nhịp đăng (18/10/2026, `so_bai_co_gian`): (k − 1) lượt co + 1 lượt làm mới đủ
+        # mỗi k = `ngay_day_du` ngày.
+        k = max(1, int(n.get("ngay_day_du") or CO_GIAN_NGAY_DAY_DU))
+        dv = ((k - 1) * don_vi_ky_vong(p, int(m)) + dv) / k
+    return dv * GIA[p]
 
 
 def phi_khoi_dong_ngay(p: str) -> float:
@@ -631,9 +737,13 @@ def nguon_moi_luot(nguon: list[dict]) -> float:
     ≥ 10, ≤ 20 tài khoản mỗi lượt), mỗi lượt = (đơn vị × giá + phí khởi động) × 1,3
     (`uoc_mot_luot`). Nguồn tạm dừng, YouTube: 0."""
     nhom: dict[tuple[str, int], int] = {}
+    fb: list[tuple[int, dict]] = []
     for n in nguon:
         p = n.get("nen_tang")
         if (n.get("trang_thai") or "dang_theo_doi") != "dang_theo_doi" or not GIA.get(p):
+            continue
+        if p == "facebook":         # = `theo_doi.chia_phan`: run thedoor gom rẻ nhất (`nhom_fb`)
+            fb.append((_so(n.get("so_bai_moi_lan"), 5), n))
             continue
         k = (p, 0 if p == "instagram" else _so_bai_th(p, _so(n.get("so_bai_moi_lan"), 5)))
         nhom[k] = nhom.get(k, 0) + 1
@@ -641,6 +751,8 @@ def nguon_moi_luot(nguon: list[dict]) -> float:
     for (p, bai), so in nhom.items():
         lo = TH_TOI_DA_MOI_LUOT if p == "threads" else so
         tong += sum(uoc_mot_luot(p, min(lo, so - i), bai) for i in range(0, so, lo))
+    for bai, ds in nhom_fb(fb, GIA["facebook"], _khoi_nguon("facebook")):
+        tong += uoc_mot_luot("facebook", len(ds), bai)
     return round(tong, 4)
 
 
@@ -953,6 +1065,9 @@ def hang_so_cho_trinh_duyet() -> dict:
     # "khoi_nguon" trước, "start" cho trang đã nạp bản JS cũ); tìm theo từ khoá dùng "tk_khoi".
     return {"gia": GIA, "he_so": HE_SO_UOC, "start": KHOI_NGUON, "ngay": NGAY_THANG_CAU_HINH,
             "khoi_nguon": KHOI_NGUON, "tt_bai_moi_trang": TT_BAI_MOI_TRANG,
+            # Co số bài theo nhịp đăng (18/10/2026) — `so_bai_co_gian`, nguon.js tính lại khi sửa.
+            "co_gian": {"nen_tang": CO_GIAN_NEN_TANG, "san": CO_GIAN_SAN, "he_so": CO_GIAN_HE_SO,
+                        "du": CO_GIAN_DU, "ngay_day_du": CO_GIAN_NGAY_DAY_DU},
             "tk_gia": TK_GIA, "tk_khoi": TK_KHOI, "tk_fb_toi_da": TK_FB_TOI_DA,
             "tk_ig_so_tu": TK_IG_TOI_DA_TU, "tk_ig_tab": TK_IG_TAB,
             "fb2": {"gia": TK_FB2_GIA, "khoi": TK_FB2_KHOI, "moi_tu": TK_FB2_MOI_TU},

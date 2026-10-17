@@ -511,6 +511,19 @@ def do_phu_gan_nhat(du_an: str, n: int = 2) -> list[dict]:
             "id DESC LIMIT %s", (du_an, max(1, int(n)))).fetchall()
 
 
+def nhip_dang(du_an: str, ngay: int = 14) -> dict[int, int]:
+    """{id nguồn: số bài CAO NHẤT nguồn đăng trong MỘT ngày (giờ VN), 14 ngày qua} — cùng phép đếm
+    `lang_nghe_db.nhip_dang_nguon` của Mark: trang Nguồn / Ngân sách báo "≈ USD/tháng" theo số bài
+    Mark thật sự lấy sau khi co theo nhịp đăng (18/10/2026, `chi_phi.so_bai_co_gian`)."""
+    with ket_noi() as c:
+        rows = c.execute(
+            "SELECT nguon_id, max(n) AS n FROM (SELECT nguon_id, "
+            "(dang_luc AT TIME ZONE %s)::date AS d, count(*) AS n FROM bai WHERE du_an = %s "
+            "AND nguon_id IS NOT NULL AND dang_luc >= now() - make_interval(days => %s) "
+            "GROUP BY 1, 2) t GROUP BY 1", (_TZ, du_an, int(ngay))).fetchall()
+    return {int(r["nguon_id"]): int(r["n"]) for r in rows}
+
+
 def han_muc_apify() -> dict | None:
     """Ảnh chụp hạn mức gói Apify MỚI NHẤT Mark ghi (18/10/2026, `theo_doi.ghi_han_muc_goi`) —
     dashboard không giữ token Apify. None khi chưa có dòng nào; bảng chưa tạo thì `LoiKho` (bên
