@@ -473,6 +473,23 @@ def test_doc_thedoor_theo_raw_that_va_ghep_nguon(dd):
             f"facebook:{d['ma_so_fb']}"
 
 
+def test_doc_thedoor_hai_trang_cung_ten_khong_chung_ho_so():
+    """Soát 17/10/2026: gom theo tên hiển thị thì hai trang cùng tên "HAPAS" trong một run dùng
+    chung hồ sơ (tai_khoan, link) của trang đầu. Nay gom theo trang."""
+    a = _thedoor()[0]
+    b = {**a, "post": {**a["post"], "id": "999000111222333",
+                       "url": "https://www.facebook.com/100000000000001/posts/999000111222333"},
+         "page": {"id": "100000000000001", "name": "HAPAS",
+                  "url": "https://www.facebook.com/hapas.official"}}
+    urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/hapas.official"]
+    ket = TDA.doc_thedoor([a, b], urls)
+    assert len(ket) == 2
+    tk = {x["ho_so"]["tai_khoan"]: x for x in ket.values()}
+    assert set(tk) == {"hapasglobal", "hapas.official"}
+    assert [bai["_goc"]["inputUrl"] for bai in tk["hapas.official"]["bai"]] == [urls[1]]
+    assert tk["hapas.official"]["ho_so"]["link"] == "https://www.facebook.com/hapas.official"
+
+
 def test_gia_nguon_facebook_thedoor_khop_dashboard():
     assert T._GIA["facebook"] == TDA.FB_TRANG_GIA == 0.0025
     assert T._KHOI_NGUON["facebook"] == TDA.FB_TRANG_KHOI == 0.01

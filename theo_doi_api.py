@@ -229,7 +229,11 @@ def doc_thedoor(items: list, urls: list[str]) -> dict[str, dict]:
             vao = next((u for u in urls if str(pg["id"]) in u), None)
         if vao is None and len(urls) == 1:
             vao = urls[0]
-        k = str(pg.get("name") or vao or "").lower()
+        # Gom theo TRANG (URL nguồn đã ghép / URL trang / id trang), không theo tên hiển thị — soát
+        # 17/10/2026: hai trang khác nhau cùng tên "HAPAS" trong một run dùng chung hồ sơ (tên,
+        # link, tai_khoan của trang đầu) cho bài của cả hai.
+        k = (T._chuan_dinh_danh("facebook", vao or str(pg.get("url") or ""))
+             or str(pg.get("id") or pg.get("name") or "").lower())
         # `tai_khoan` = tên trang trong link ("hapasglobal") như `pageName` của actor cũ, không
         # phải tên hiển thị ("HAPAS"): kho nhận bản trùng bài pfbid cũ theo chủ bài + phút + nội
         # dung (`khu_trung_fb.chu_bai`), mà link thedoor mang id SỐ của trang thay vì tên trang.
