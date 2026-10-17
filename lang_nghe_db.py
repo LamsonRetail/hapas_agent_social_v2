@@ -425,7 +425,7 @@ def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
 
 _COT_BL = ("ma", "nen_tang", "tac_gia", "noi_dung", "thich", "tra_loi", "la_tra_loi",
            "cua_thuong_hieu", "dang_luc", "sac_thai", "chu_de", "loai", "ly_do_loc",
-           "ma_noi_dung", "link", "ma_cha")
+           "ma_noi_dung", "link", "ma_cha", "san_pham")
 #: Nhãn chỉ xét được trên KHO (cần lịch sử nhiều tài khoản / nhiều bình luận), không phải từ một
 #: bình luận: cào lại thấy bình luận "hợp lệ" thì vẫn giữ nhãn kho, không gửi lại AI.
 _NHAN_KHO = "(binh_luan.loai = 'seeding' OR binh_luan.ly_do_loc = 'affiliate_hang_loat')"
@@ -457,10 +457,10 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "ELSE COALESCE(EXCLUDED.sac_thai, binh_luan.sac_thai) END, "
                 f"chu_de = CASE WHEN {_GIU_NHAN_KHO} OR EXCLUDED.loai <> 'hop_le' THEN NULL "
                 "ELSE COALESCE(EXCLUDED.chu_de, binh_luan.chu_de) END, "
-                # Món hỏi mua (17/10/2026) chỉ việc nền / script gán lại ghi — lượt cào giữ món cũ,
-                # dòng hết hop_le thì bỏ như sắc thái/chủ đề.
+                # Món hỏi mua (17/10/2026): như chủ đề — lượt có món thì ghi, không thì giữ món
+                # cũ; dòng hết hop_le thì bỏ.
                 f"san_pham = CASE WHEN {_GIU_NHAN_KHO} OR EXCLUDED.loai <> 'hop_le' THEN NULL "
-                "ELSE binh_luan.san_pham END, "
+                "ELSE COALESCE(EXCLUDED.san_pham, binh_luan.san_pham) END, "
                 f"loai = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.loai ELSE EXCLUDED.loai END, "
                 f"ly_do_loc = CASE WHEN {_GIU_NHAN_KHO} THEN binh_luan.ly_do_loc "
                 "ELSE EXCLUDED.ly_do_loc END, "

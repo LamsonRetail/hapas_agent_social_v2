@@ -126,8 +126,10 @@ def test_sql_kho_mon_hoi_mua():
     src = inspect.getsource(K.bl_cho_gan_nhan)
     assert "bai_noi_dung" in src and "LEFT JOIN bai p" in src and "_SQL_BL_CHO" in src
     g = inspect.getsource(K.ghi_binh_luan)
-    assert "san_pham = CASE WHEN" in g and "ELSE binh_luan.san_pham END" in g, \
-        "cào lại giữ món; hết hop_le thì bỏ"
+    assert "san_pham = CASE WHEN" in g and \
+        "COALESCE(EXCLUDED.san_pham, binh_luan.san_pham)" in g, \
+        "cào lại không có món thì giữ món cũ; hết hop_le thì bỏ"
+    assert "san_pham" in K._COT_BL, "lượt cào có món thì ghi (theo_doi chưa gửi món)"
     assert "san_pham = NULL" in inspect.getsource(K._danh_dau_seeding)
     assert "san_pham = NULL" in inspect.getsource(K._danh_dau_affiliate)
     schema = (GOC / "deploy" / "lang-nghe" / "schema.sql").read_text(encoding="utf-8")
@@ -295,3 +297,48 @@ def test_script_ap_dung_chi_ghi_mon_roi_hoan_tac(kho_sp, monkeypatch, tmp_path):
     assert S.chay(_ns(ap_dung=True, sao_luu=str(tep)), lambda *_: None) == 2, "không ghi đè tệp"
     assert S.chay(_ns(hoan_tac=str(tep)), lambda *_: None) == 0
     assert all(r["san_pham"] is None for r in kho_sp.bl)
+
+
+# ───────────────── lưới câu chữ của ý định mua hẹp lại (17/10/2026) ─────────────────
+# Rà kho 16/10: 103 bình luận chỉ khớp câu chữ (AI không gán "Giá/mua…"), đọc tay 76 sai — lời
+# người bán ("Nàng ib e nha"), "bn" = bạn, câu về người trong video.
+def _r(nd, cd=None, sac="Trung lập", tra_loi=False):
+    return {"loai": "hop_le", "noi_dung": nd, "chu_de": cd, "sac_thai": sac,
+            "la_tra_loi": tra_loi}
+
+
+@pytest.mark.parametrize("c", [
+    _r("Nàng ib e nha", "Giao hàng/dịch vụ", tra_loi=True),
+    _r("Bạn inbox cho kênh bên mình hỗ trợ ạ", "Giao hàng/dịch vụ", tra_loi=True),
+    _r("Ib e nhé", "Giao hàng/dịch vụ"),                       # lời mời nhắn của shop
+    _r("xịn vậy, h còn k bạn ui", "Khác", tra_loi=True),        # trả lời: không tính
+    _r("Siêu Bn thân r"), _r("bn thân khác giới j mà đỉnh dữ v"), _r("Sao bảo bn mà nhìn"),
+    _r("Hapas nó bock a bn 😂", "Đối thủ"), _r("bn pk hiểu là từ n này ko nói"),
+    _r("chị cao m bao nhiêu v ạ", "KOL/nội dung"),
+    _r("210 ạ … chúc mẹ, bao nhiêu yêu thương", "Minigame/bài dự thi"),
+    _r("@Đao Ib xem nào", "Tag bạn bè"),
+])
+def test_luoi_cau_chu_khong_dem_loi_nguoi_ban_va_bn_ban(c):
+    assert not CS.la_y_dinh_mua(c)
+
+
+@pytest.mark.parametrize("c", [
+    _r("Bn ah", "Khác"), _r("Có ship ra nghệ an ko ạ", "Giao hàng/dịch vụ"),
+    _r("giá ship bn vậy ạ", "Giao hàng/dịch vụ"),
+    _r("Shop ơi check ib tui đặt set tặng cô giáo nha", "Giao hàng/dịch vụ"),
+    _r("Mình muốn đặt đồ ah. Ib giúp mik với", "Giao hàng/dịch vụ", sac="Tiêu cực"),
+    _r("Ib"), _r("ib ạ"), _r("xin giá"), _r("box này hợp quá, nma giá sao v"),
+    _r("Xin giá ạ", CS.CHU_DE_MUA, tra_loi=True),             # AI gán Giá/mua: luôn tính
+    _r("A cho e xin link đặt set quà đấy với. Check giá toàn 3,5 củ", CS.CHU_DE_MUA, "Tiêu cực"),
+])
+def test_luoi_cau_chu_van_bat_cau_hoi_mua_that(c):
+    assert CS.la_y_dinh_mua(c)
+
+
+def test_bn_ban_hay_bao_nhieu():
+    from dashboard import chuan_chu as CC
+    for s in ("siêu bn thân", "bn ấy", "bảo bn mà", "nó bock a bn", "cảm ơn bn", "bn ơi"):
+        assert "bạn" in CC.chuan_hoa(s) and "bao nhiêu" not in CC.chuan_hoa(s), s
+    for s in ("giá bn", "bn ạ", "set này bn", "bộ này bn vậy ah", "bn 1 set ạ"):
+        assert "bao nhiêu" in CC.chuan_hoa(s), s
+

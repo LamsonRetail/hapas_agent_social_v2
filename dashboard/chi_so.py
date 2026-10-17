@@ -1453,21 +1453,45 @@ _RE_Y_DINH_MUA = re.compile(
     r"|(?:co|duoc|nhan) ship|phi ship|ship (?:cod|ve|toi|den|ra|tinh|bao nhieu|khong|may ngay)"
     # "đặt hàng 5 ngày chưa nhận", "order rồi mà…" là phàn nàn sau khi mua, không phải ý định mua.
     r"|(?:dat hang|order)(?! (?:roi|r|xong|\d|ma|tu|lau|hom|bi|chua nhan))"
-    r"|dat mua|chot don|len don|muon mua|can mua"
+    r"|dat mua|dat (?:set|do|don)|chot don|len don|muon (?:mua|dat)|can mua"
     r")\b")
+#: "ib"/"inbox" đứng riêng: lời người bán ("Nàng ib e nha", "Bạn inbox cho kênh hỗ trợ") cũng có —
+#: không tính khi AI gán Giao hàng/dịch vụ (`_hoi_mua`).
+_RE_IB = re.compile(r"\b(?:ib|ibx|inb|inbox)\b")
+#: Chủ đề AI nói rõ bình luận nói chuyện khác (nội dung/KOL, minigame, tag bạn, đối thủ): câu chữ
+#: kiểu "bao nhiêu", "ib" không đủ để lật lại thành ý định mua.
+_CD_KHONG_MUA = frozenset({"KOL/nội dung", CHU_DE_MINIGAME, "Tag bạn bè", "Đối thủ"})
+_CD_DICH_VU = "Giao hàng/dịch vụ"
 _RE_CHI_GIA = re.compile(r"\W*gia\W*")                 # cả bình luận chỉ là "Giá?"
 
 
 def _hoi_mua(c: dict) -> bool:
-    """Bình luận hợp lệ mang dấu hiệu hỏi mua (chủ đề AI hoặc câu hỏi giá/mua) — CHƯA xét món."""
+    """Bình luận hợp lệ mang dấu hiệu hỏi mua (chủ đề AI hoặc câu hỏi giá/mua) — CHƯA xét món.
+
+    Chủ đề AI "Giá/mua…" (không Tiêu cực) là nguồn chính; câu chữ chỉ là lưới HẸP bắt phần AI
+    chưa gán / gán chủ đề khác. Rà kho 17/10/2026: 103 bình luận chỉ khớp câu chữ, đọc tay 76 sai
+    (≈ 74%) — lời người bán trả lời khách ("Nàng ib e nha", "Bạn inbox cho kênh hỗ trợ" — fanpage
+    phụ chưa nhận ra là thương hiệu), "bn" = bạn ("Siêu bn thân"), câu về người trong video. Nên:
+      • TRẢ LỜI (la_tra_loi) mà AI không gán "Giá/mua…": không tính (gần như toàn lời người bán /
+        người khác chỉ cách nhắn shop);
+      • AI gán nội dung/KOL, minigame, tag bạn, đối thủ: không tính;
+      • "ib"/"inbox" đứng riêng không tính khi AI gán Giao hàng/dịch vụ (lời mời nhắn của shop);
+      • "bn" = bạn theo ngữ cảnh (`chuan_chu`)."""
     if loai_bl(c) != "hop_le":
         return False
+    cd = _chu_de(c)
     # Chủ đề "Giá/mua…" gộp cả lời CHÊ giá ("hợp kim mà giá cỡ đấy :)))", "nhìn giá và lặng lẽ
     # rời đi" — tập đánh giá 17/10/2026): bình luận Tiêu cực chỉ tính khi có câu hỏi giá/mua.
-    if _chu_de(c) == CHU_DE_MUA and sac_bl(c) != TI:
+    if cd == CHU_DE_MUA and sac_bl(c) != TI:
         return True
+    if cd in _CD_KHONG_MUA or (c.get("la_tra_loi") and cd != CHU_DE_MUA):
+        return False
     k = CC.khoa(c.get("noi_dung"))
-    return bool(_RE_Y_DINH_MUA.search(k)) or _RE_CHI_GIA.fullmatch(k) is not None
+    if _RE_CHI_GIA.fullmatch(k):
+        return True
+    if cd == _CD_DICH_VU:
+        k = _RE_IB.sub(" ", k)
+    return bool(_RE_Y_DINH_MUA.search(k))
 
 
 def la_y_dinh_mua(c: dict) -> bool:
