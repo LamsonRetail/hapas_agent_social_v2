@@ -4,9 +4,22 @@ Chủ dự án (17/10/2026): "thêm mục title của họ trong công ty nữa 
 email được thêm vào có active thật không". Dùng CHÍNH ứng dụng Lark của dashboard
 (DASH_LARK_APP_ID/SECRET) với token TỔ CHỨC (tenant_access_token) — không cần ai đăng nhập.
 
-Ba bước, mỗi lô ≤ 50 email (giới hạn của Lark):
+Các bước, mỗi lô ≤ 50 (giới hạn của Lark):
+  0. Người đã đăng nhập dashboard: dùng thẳng `nguoi_xem.lark_open_id` (ghi lúc đăng nhập OAuth)
+     -> bước 2. Đăng nhập và token tổ chức dùng CÙNG một app (DASH_LARK_APP_ID) nên open_id —
+     vốn riêng cho từng app — dùng lại được; đổi app thì phải dùng union_id (đã lưu sẵn).
   1. email -> open_id: POST /contact/v3/users/batch_get_id (include_resigned) —
-     scope `contact:user.id:readonly`.
+     scope `contact:user.id:readonly`. LƯU Ý (tài liệu Lark, đối chiếu 17/10/2026): `emails`
+     CHỈ khớp trường `email` (email người dùng), "不支持企业邮箱" — KHÔNG khớp `enterprise_email`.
+     Email công ty @hapas.vn của người dùng là enterprise_email (lúc đăng nhập ta ưu tiên trường
+     này) thì bước này trả rỗng -> trước đây bị báo nhầm "khong_co".
+  1b. Email còn lại (chưa đăng nhập, bước 1 không khớp): dò cả danh bạ — GET
+     /contact/v3/departments/0/children (fetch_child) + GET /contact/v3/users/find_by_department
+     cho gốc và từng phòng ban — khớp `enterprise_email` hoặc `email`. Có trần số lần gọi; hỏng
+     (thiếu quyền, quá trần) thì bỏ qua, email đó giữ "khong_co". Cần scope đọc người theo phòng
+     ban (contact:contact.base:readonly hoặc tương đương) và `contact:user.employee:readonly`
+     để Lark trả `enterprise_email`. Tra theo số điện thoại (`mobiles`) nằm ngoài phạm vi:
+     dashboard không giữ số điện thoại.
   2. open_id -> người: GET /contact/v3/users/batch — scope `contact:user.base:readonly` (tên,
      trạng thái); trường `job_title` cần `contact:user.employee:readonly`, `department_ids` cần
      `contact:user.department:readonly` (thiếu quyền trường thì Lark trả THIẾU trường, không lỗi).
@@ -29,6 +42,10 @@ DUONG_TOKEN_TO_CHUC = "/auth/v3/tenant_access_token/internal"
 DUONG_EMAIL_RA_ID = "/contact/v3/users/batch_get_id"
 DUONG_NGUOI = "/contact/v3/users/batch"
 DUONG_PHONG_BAN = "/contact/v3/departments/batch"
+DUONG_PHONG_BAN_CON = "/contact/v3/departments/0/children"
+DUONG_NGUOI_THEO_PB = "/contact/v3/users/find_by_department"
+#: Trần số lần gọi Lark của một lượt dò cả danh bạ (bước 1b) — công ty vài trăm người dư sức.
+QUET_TOI_DA = 80
 LO = 50                     # Lark nhận tối đa 50 email / 50 open_id / 50 phòng ban mỗi lần
 GIAY_MOI_LAN_GOI = 8.0
 
@@ -111,20 +128,78 @@ class DanhBaLark:
         self._token = (tk, time.monotonic() + (int(het) if isinstance(het, int) else 3600))
         return tk
 
-    async def tra_cuu(self, emails: list[str]) -> dict[str, dict]:
-        """emails -> {email: {"trang_thai", "ten", "chuc_danh", "phong_ban"}}; email nào cũng có
-        mặt trong kết quả (không tìm thấy -> trang_thai "khong_co", các trường khác None)."""
+    async def _quet_ca_danh_ba(self, kh, h: dict, can: set[str]) -> dict[str, dict]:
+        """Bước 1b: dò mọi phòng ban, trả {email cần tìm: người Lark} khớp `enterprise_email`
+        hoặc `email`. Dừng sớm khi đã tìm đủ; quá QUET_TOI_DA lần gọi thì dừng với phần đã có."""
+        tim: dict[str, dict] = {}
+        so_goi = 0
+
+        async def trang(buoc: str, duong: str, params: list) -> list[dict]:
+            nonlocal so_goi
+            ra: list[dict] = []
+            tk = ""
+            while so_goi < QUET_TOI_DA:
+                so_goi += 1
+                d = await self._goi(kh, buoc, "GET", duong, headers=h,
+                                    params=[*params, ("page_size", "50"),
+                                            *([("page_token", tk)] if tk else [])])
+                dl = d.get("data") or {}
+                ra += [x for x in (dl.get("items") or []) if isinstance(x, dict)]
+                tk = str(dl.get("page_token") or "")
+                if not dl.get("has_more") or not tk:
+                    break
+            return ra
+
+        con = await trang("quet_phong_ban", DUONG_PHONG_BAN_CON,
+                          [("department_id_type", "open_department_id"), ("fetch_child", "true")])
+        pbs = ["0", *(str(p.get("open_department_id") or "") for p in con)]
+        for pb in dict.fromkeys(x for x in pbs if x):
+            if so_goi >= QUET_TOI_DA or len(tim) >= len(can):
+                break
+            for u in await trang("quet_nguoi", DUONG_NGUOI_THEO_PB,
+                                 [("department_id", pb), ("user_id_type", "open_id"),
+                                  ("department_id_type", "open_department_id")]):
+                for k in ("enterprise_email", "email"):
+                    e = str(u.get(k) or "").strip().lower()
+                    if e in can and u.get("open_id"):
+                        tim.setdefault(e, u)
+        return tim
+
+    async def tra_cuu(self, emails: list[str], open_id_cua: dict[str, str] | None = None,
+                      quet: bool = True) -> dict[str, dict]:
+        """emails -> {email: {"trang_thai", "ten", "chuc_danh", "phong_ban", "open_id"}}; email
+        nào cũng có mặt trong kết quả (không tìm thấy -> trang_thai "khong_co", còn lại None).
+        `open_id_cua`: email -> open_id đã biết (ghi lúc đăng nhập) — tra thẳng, không qua email.
+        `quet`: được dò cả danh bạ (bước 1b) khi email không khớp — tắt ở đường cần nhanh."""
         import httpx
         emails = sorted({str(e).strip().lower() for e in emails if e and "@" in str(e)})
         if not emails:
             return {}
+        biet = {str(k).strip().lower(): str(v) for k, v in (open_id_cua or {}).items() if v}
         async with httpx.AsyncClient(timeout=self.giay, transport=self.transport) as kh:
             tk = await self._token_to_chuc(kh)
             h = {"Authorization": f"Bearer {tk}"}
-            # 1. email -> open_id (+ trạng thái nếu Lark kèm theo)
-            id_cua: dict[str, str] = {}
+
+            async def doc_nguoi(ids: list[str]) -> dict[str, dict]:
+                ra: dict[str, dict] = {}
+                for lo in _lo(sorted(set(ids))):
+                    d = await self._goi(kh, "nguoi", "GET", DUONG_NGUOI, headers=h,
+                                        params=[("user_id_type", "open_id"),
+                                                ("department_id_type", "open_department_id"),
+                                                *[("user_ids", x) for x in lo]])
+                    for u in (d.get("data") or {}).get("items") or []:
+                        if u.get("open_id"):
+                            ra[str(u["open_id"])] = u
+                return ra
+
+            # 0. open_id đã biết từ lần đăng nhập -> người (Lark không trả thì rơi xuống bước 1)
+            id_cua: dict[str, str] = {e: biet[e] for e in emails if e in biet}
+            nguoi = await doc_nguoi(list(id_cua.values())) if id_cua else {}
+            id_cua = {e: o for e, o in id_cua.items() if o in nguoi}
+            # 1. email -> open_id (+ trạng thái nếu Lark kèm theo); chỉ khớp `email`, KHÔNG
+            #    khớp `enterprise_email` (xem đầu module)
             st_cua: dict[str, dict] = {}
-            for lo in _lo(emails):
+            for lo in _lo([e for e in emails if e not in id_cua]):
                 d = await self._goi(kh, "email", "POST", DUONG_EMAIL_RA_ID, headers=h,
                                     params={"user_id_type": "open_id"},
                                     json={"emails": lo, "include_resigned": True})
@@ -134,17 +209,19 @@ class DanhBaLark:
                         id_cua[e] = str(u["user_id"])
                         if isinstance(u.get("status"), dict):
                             st_cua[e] = u["status"]
-            # 2. open_id -> người
-            nguoi: dict[str, dict] = {}
-            ids = sorted(set(id_cua.values()))
-            for lo in _lo(ids):
-                d = await self._goi(kh, "nguoi", "GET", DUONG_NGUOI, headers=h,
-                                    params=[("user_id_type", "open_id"),
-                                            ("department_id_type", "open_department_id"),
-                                            *[("user_ids", x) for x in lo]])
-                for u in (d.get("data") or {}).get("items") or []:
-                    if u.get("open_id"):
-                        nguoi[str(u["open_id"])] = u
+            # 1b. còn sót -> dò cả danh bạ theo enterprise_email (hỏng thì bỏ qua)
+            con = {e for e in emails if e not in id_cua}
+            if con and quet:
+                try:
+                    for e, u in (await self._quet_ca_danh_ba(kh, h, con)).items():
+                        id_cua[e] = str(u["open_id"])
+                        nguoi.setdefault(str(u["open_id"]), u)
+                except LoiDanhBa:
+                    pass
+            # 2. open_id -> người (những ai chưa có thông tin)
+            thieu = [o for o in id_cua.values() if o not in nguoi]
+            if thieu:
+                nguoi.update(await doc_nguoi(thieu))
             # 3. phòng ban -> tên (hỏng thì bỏ qua, chỉ thiếu tên phòng ban)
             ten_pb: dict[str, str] = {}
             pbs = sorted({str(p) for u in nguoi.values() for p in (u.get("department_ids") or [])
@@ -165,12 +242,13 @@ class DanhBaLark:
             oid = id_cua.get(e)
             if not oid:
                 kq[e] = {"trang_thai": "khong_co", "ten": None, "chuc_danh": None,
-                         "phong_ban": None}
+                         "phong_ban": None, "open_id": None}
                 continue
             u = nguoi.get(oid) or {}
             pb = [ten_pb[str(p)] for p in (u.get("department_ids") or []) if str(p) in ten_pb]
             kq[e] = {"trang_thai": trang_thai(u.get("status") or st_cua.get(e)),
                      "ten": (str(u.get("name") or "").strip() or None),
                      "chuc_danh": (str(u.get("job_title") or "").strip()[:200] or None),
-                     "phong_ban": (" · ".join(pb)[:300] or None)}
+                     "phong_ban": (" · ".join(pb)[:300] or None),
+                     "open_id": oid[:100]}
         return kq

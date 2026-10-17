@@ -592,22 +592,25 @@ def cac_nguoi_xem() -> list[dict]:
     with ket_noi() as c:
         return c.execute(
             "SELECT n.email, n.vai_tro, n.them_boi, n.them_luc, n.ten_lark, n.chuc_danh, "
-            "n.phong_ban, n.trang_thai_lark, n.danh_ba_loi, n.danh_ba_luc, "
+            "n.phong_ban, n.trang_thai_lark, n.danh_ba_loi, n.danh_ba_luc, n.lark_open_id, "
             "COALESCE(n.dang_nhap_cuoi, (SELECT max(k.luc) FROM nhat_ky k "
             "WHERE k.hanh_dong = 'dang_nhap_lan_dau' AND k.doi_tuong = 'nguoi_xem:' || n.email)"
             ") AS dang_nhap_cuoi FROM nguoi_xem n ORDER BY n.vai_tro DESC, n.email").fetchall()
 
 
 def ghi_danh_ba(ket_qua: dict[str, dict]) -> None:
-    """Ghi bản đệm danh bạ Lark (email -> trang_thai, ten, chuc_danh, phong_ban). KHÔNG ghi nhật
-    ký: đây là bản sao danh bạ, không phải thao tác của người quản lý. Email đã bị xoá khỏi
-    `nguoi_xem` trong lúc đọc thì câu cập nhật không khớp dòng nào — bỏ qua."""
+    """Ghi bản đệm danh bạ Lark (email -> trang_thai, ten, chuc_danh, phong_ban, open_id). KHÔNG
+    ghi nhật ký: đây là bản sao danh bạ, không phải thao tác của người quản lý. Email đã bị xoá
+    khỏi `nguoi_xem` trong lúc đọc thì câu cập nhật không khớp dòng nào — bỏ qua. open_id tìm
+    được (qua email hay dò danh bạ) thì lưu để lần sau tra thẳng; không tìm được thì GIỮ open_id
+    cũ (ghi lúc đăng nhập)."""
     with ket_noi() as c:
         for email, d in ket_qua.items():
             c.execute("UPDATE nguoi_xem SET trang_thai_lark = %s, ten_lark = %s, chuc_danh = %s, "
-                      "phong_ban = %s, danh_ba_loi = NULL, danh_ba_luc = now() WHERE email = %s",
+                      "phong_ban = %s, lark_open_id = COALESCE(%s, lark_open_id), "
+                      "danh_ba_loi = NULL, danh_ba_luc = now() WHERE email = %s",
                       (d.get("trang_thai"), d.get("ten"), d.get("chuc_danh"), d.get("phong_ban"),
-                       email))
+                       d.get("open_id") or None, email))
 
 
 def ghi_loi_danh_ba(emails: list[str], loai: str) -> None:
@@ -662,13 +665,23 @@ def ghi_nhat_ky(ai: str, hanh_dong: str, doi_tuong: str, chi_tiet: dict | None =
         _nhat_ky(c, ai, hanh_dong, doi_tuong, chi_tiet)
 
 
-def ghi_dang_nhap(email: str, open_id: str) -> bool:
-    """Mỗi lượt đăng nhập thành công: cập nhật `nguoi_xem.dang_nhap_cuoi` (không ghi nhật ký —
-    mỗi lượt một dòng thì nhật ký ngập). Lần ĐẦU email này đăng nhập: ghi thêm open_id Lark vào
-    nhật ký để sau tra được tài khoản Lark nào đã dùng email. -> có ghi lần đầu hay không.
-    Chỉ ghi — không chặn khi open_id đổi (email cấp lại cho người khác là chuyện hợp lệ)."""
+def ghi_dang_nhap(email: str, open_id: str, union_id: str = "", user_id: str = "") -> bool:
+    """Mỗi lượt đăng nhập thành công: cập nhật `nguoi_xem.dang_nhap_cuoi` và mã Lark của tài khoản
+    vừa đăng nhập (open_id/union_id/user_id — rỗng thì giữ giá trị cũ) để đọc danh bạ tra thẳng
+    theo open_id, không phụ thuộc email (batch_get_id không khớp enterprise_email). open_id đổi
+    (lần đầu có, hoặc email cấp lại cho tài khoản khác) thì xoá mốc `danh_ba_luc` để lần mở trang
+    Người xem kế tiếp đọc lại ngay. Không ghi nhật ký mỗi lượt (nhật ký ngập); lần ĐẦU email
+    này đăng nhập thì ghi open_id vào nhật ký. -> có ghi lần đầu hay không. Chỉ ghi — không chặn
+    khi open_id đổi (email cấp lại cho người khác là chuyện hợp lệ)."""
+    oid, uid, usid = (str(x or "")[:100] for x in (open_id, union_id, user_id))
     with ket_noi() as c:
-        c.execute("UPDATE nguoi_xem SET dang_nhap_cuoi = now() WHERE email = %s", (email,))
+        c.execute("UPDATE nguoi_xem SET dang_nhap_cuoi = now(), "
+                  "danh_ba_luc = CASE WHEN %s <> '' AND lark_open_id IS DISTINCT FROM %s "
+                  "THEN NULL ELSE danh_ba_luc END, "
+                  "lark_open_id = COALESCE(NULLIF(%s, ''), lark_open_id), "
+                  "lark_union_id = COALESCE(NULLIF(%s, ''), lark_union_id), "
+                  "lark_user_id = COALESCE(NULLIF(%s, ''), lark_user_id) WHERE email = %s",
+                  (oid, oid, oid, uid, usid, email))
         co = c.execute("SELECT 1 AS co FROM nhat_ky WHERE hanh_dong = 'dang_nhap_lan_dau' "
                        "AND doi_tuong = %s LIMIT 1", (f"nguoi_xem:{email}",)).fetchone()
         if co:

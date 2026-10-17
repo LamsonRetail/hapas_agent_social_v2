@@ -214,7 +214,9 @@ class LarkOAuth:
         self.transport = transport
 
     async def lay_nguoi_dung(self, code: str) -> dict:
-        """code -> {"email", "open_id", "tenant_key"}. Email: `enterprise_email` (do tổ chức cấp)
+        """code -> {"email", "open_id", "union_id", "user_id", "tenant_key"}. Mã Lark: open_id
+        (riêng cho app dashboard — cũng là app đọc danh bạ), union_id (chung mọi app của nhà phát
+        triển), user_id (chỉ có khi app có scope contact:user.employee_id:readonly). Email: `enterprise_email` (do tổ chức cấp)
         nếu có; CHỈ khi trống mới lấy `email` (email người dùng tự khai, kém tin hơn). Chữ
         thường; không có email thì "". Bên gọi PHẢI so `tenant_key` với tổ chức HAPAS."""
         import httpx
@@ -246,6 +248,8 @@ class LarkOAuth:
                  or str(data.get("email") or "").strip()).lower()
         return {"email": email if "@" in email else "",
                 "open_id": str(data.get("open_id") or "")[:100],
+                "union_id": str(data.get("union_id") or "")[:100],
+                "user_id": str(data.get("user_id") or "")[:100],
                 "tenant_key": str(data.get("tenant_key") or "")}
 
 
