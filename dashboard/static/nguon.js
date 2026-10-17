@@ -14,10 +14,14 @@
     var soBai = Math.max(1, parseInt((form.elements.so_bai_moi_lan || {}).value, 10) || 5);
     var chuKy = Math.max(1, parseInt((form.elements.chu_ky_ngay || {}).value, 10) || 1);
     var gia = (hs.gia || {})[p] || 0;
-    var donVi = !gia ? 0 : (p === "instagram" ? 1 : p === "threads" ? Math.max(soBai, hs.th_toi_thieu_bai || 10) : soBai);
+    // Instagram, Threads (actor hồ sơ, 17/10/2026) tính theo TÀI KHOẢN — = chi_phi.don_vi.
+    var donVi = !gia ? 0 : (p === "instagram" || p === "threads" ? 1 : soBai);
     var thang = hs.ngay / chuKy * donVi * gia * hs.he_so;
     var chu = "≈ " + usd(thang, 3) + " USD/tháng theo bài";
-    var kd = gia ? ((hs.start || {})[p] || 0) * hs.he_so : 0;
+    // = chi_phi.phi_khoi_dong_ngay: actor theo dõi nguồn có phí khởi động riêng (khoi_nguon,
+    // 17/10/2026: Facebook thedoor) thì dùng nó, không thì phí của actor tìm (start).
+    var kn = hs.khoi_nguon || {};
+    var kd = gia ? (kn[p] != null ? kn[p] : ((hs.start || {})[p] || 0)) * hs.he_so : 0;
     if (kd) chu += " + phí khởi động actor chung " + usd(kd, 4) + " USD mỗi ngày quét";
     var out = form.querySelector(".uoc-tinh");
     if (out) out.textContent = chu;

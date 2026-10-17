@@ -97,6 +97,8 @@ td.ns-mo > *:not(.ns-cong) { opacity: .45; }
 .ns-bang .ns-o-cong { white-space: nowrap; }
 /* Báo & Web (16/10/2026): nhóm "Cào bình luận" của dòng web = trần trang đọc dự phòng */
 .ns-web-boc__o { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--chu-phu); font-size: 13px; }
+/* dòng phụ của một nền tảng (17/10/2026: Facebook đường 2, TikTok feed hashtag) — thụt vào dưới dòng chính */
+.ns-dong-phu > th { padding-left: 18px; font-weight: 500; color: var(--chu-phu); }
 
 /* công tắc bật/tắt = checkbox thật (bàn phím: Tab + Space) */
 .ns-cong {

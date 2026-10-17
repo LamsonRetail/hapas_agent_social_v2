@@ -15,6 +15,7 @@ Thời gian lưu TIMESTAMPTZ; "ngày" và "tháng" luôn tính theo giờ VN (`_
 from __future__ import annotations
 
 import contextlib
+import datetime
 import os
 
 _TZ = "Asia/Ho_Chi_Minh"
@@ -137,12 +138,31 @@ def luot_dang_chay(ma: str) -> dict | None:
             "ORDER BY id DESC LIMIT 1", (ma, GIO_BO_DO)).fetchone()
 
 
+#: Khoá advisory của việc MỞ lượt quét một dự án (17/10/2026): `mo_luot` và script gộp bài trùng
+#: (`scripts/lang_nghe_gop_bai_fb.py`, mỗi nhóm một giao dịch) cùng giữ khoá này trong giao dịch —
+#: lượt mở trong lúc script đang gộp một nhóm phải chờ nhóm đó commit, lượt mở trước thì câu kiểm
+#: "lượt đang chạy" của script (chạy SAU khi có khoá) thấy. Không cần quyền gì thêm trên bảng.
+_SQL_KHOA_LUOT = "SELECT pg_advisory_xact_lock(%s)"
+
+
+def so_khoa_luot(ma: str) -> int:
+    """Số khoá advisory (bigint có dấu, ổn định giữa các tiến trình / phiên bản Postgres — không
+    dùng `hashtext`) cho dự án `ma`."""
+    import hashlib
+    return int.from_bytes(hashlib.sha1(f"lang_nghe:mo_luot:{ma}".encode()).digest()[:8],
+                          "big", signed=True)
+
+
 def mo_luot(ma: str, kieu: str, *, ma_viec: str | None = None,
             job_id: str | None = None, lich_id: int | None = None) -> int:
     """Mở lượt mới; đóng luôn các lượt cùng dự án bị bỏ dở quá `GIO_BO_DO` giờ. `lich_id`: lượt
     do lịch quét tự động (bảng `lich_quet`) giao — chỉ ghi cột này khi có (lịch bị xoá giữa
-    chừng thì thành NULL, không hỏng khoá ngoại)."""
+    chừng thì thành NULL, không hỏng khoá ngoại). Giữ khoá `so_khoa_luot` tới hết giao dịch."""
     with ket_noi() as c:
+        # Chờ khoá có hạn (soát 17/10/2026): giao dịch của script gộp mà treo (vd FOR UPDATE chờ một
+        # phiên idle-in-transaction) thì lượt mở báo lỗi sau 30 giây, không kẹt luồng việc nền mãi.
+        c.execute("SET LOCAL lock_timeout = '30s'")
+        c.execute(_SQL_KHOA_LUOT, (so_khoa_luot(ma),))
         c.execute(
             "UPDATE luot_quet SET trang_thai = 'loi', ket_thuc = now(), "
             "loi = COALESCE(loi, 'bỏ dở (bot dừng giữa chừng)') WHERE du_an = %s AND "
@@ -192,6 +212,31 @@ def dong_luot(luot_id: int, *, trang_thai: str, so_nguon: int = 0, so_nguon_loi:
              cat_ghi_chu(ghi_chu), luot_id))
 
 
+def _usd_vn(x: float) -> str:
+    return f"{x:.4f}".replace(".", ",")
+
+
+def nang_chi_phi_luot(luot_id: int, usd: float) -> float | None:
+    """Chốt LẠI chi phí lượt đã đóng (17/10/2026, `viec_nen.Viec.tinh_lai_muon`): phí sự kiện
+    Apify ghi trễ sau khi run xong (0,1948 → 0,2397 USD; 0,0201 → 0,0501…). Chỉ NÂNG
+    `chi_phi_usd`, không bao giờ hạ — "đã tiêu tháng" (trần tháng) cộng cột này, đếm thiếu là
+    lượt sau tiêu lố. Ghi một câu vào ĐẦU ghi chú lượt (ghi chú dài bị cắt ở đuôi). -> số cũ khi
+    đã nâng, None khi không cần (số mới không cao hơn, hoặc không có lượt)."""
+    moi = round(float(usd or 0), 4)
+    with ket_noi() as c:
+        x = c.execute("SELECT chi_phi_usd::float AS usd, ghi_chu FROM luot_quet WHERE id = %s "
+                      "FOR UPDATE", (int(luot_id),)).fetchone()
+        if not x or moi <= round(float(x["usd"] or 0), 4):
+            return None
+        cu = float(x["usd"] or 0)
+        cau = (f"chi phí chốt lại {_usd_vn(cu)} → {_usd_vn(moi)} USD (phí sự kiện Apify ghi sau "
+               "khi run xong)")
+        c.execute("UPDATE luot_quet SET chi_phi_usd = %s, ghi_chu = %s WHERE id = %s",
+                  (moi, cat_ghi_chu(f"{cau}; {x['ghi_chu']}" if x.get("ghi_chu") else cau),
+                   int(luot_id)))
+    return cu
+
+
 def danh_dau_nguon(da_quet: list[int], loi: dict[int, str]) -> None:
     """Nguồn quét được: ghi `quet_cuoi`, xoá lỗi cũ. Nguồn lỗi: ghi lỗi, KHÔNG dời `quet_cuoi`
     (lượt sau thử lại)."""
@@ -212,22 +257,120 @@ _SO = ("xem", "thich", "binh_luan", "chia_se")
 #: Cột riêng của bài Báo & Web (16/10/2026, `nguon_web`): chỉ đưa vào câu ghi khi dòng có giá trị
 #: — bài mạng xã hội ghi đúng câu lệnh cũ, DB chưa chạy bản schema mới vẫn ghi được bài MXH.
 _COT_WEB = ("kieu_trang", "muc_nhac", "la_pr")
+#: Id số của bài Facebook (17/10/2026, `khu_trung_fb`): chỉ ghi khi DB đã có cột (`_co_ma_so_fb`).
+_COT_FB = ("ma_so_fb",)
+_CO_MA_SO_FB: list[bool] = []
+
+
+def _co_ma_so_fb(c) -> bool:
+    """DB đã chạy bản schema có cột `bai.ma_so_fb` chưa. Bản code mới lên VPS TRƯỚC khi chạy
+    schema.sql thì vẫn ghi được bài (không đọc/ghi cột chưa có — lỗi cột là hỏng CẢ lô bài đã
+    trả tiền). Có rồi thì nhớ luôn trong tiến trình."""
+    if _CO_MA_SO_FB:
+        return True
+    x = c.execute("SELECT 1 AS co FROM information_schema.columns WHERE table_schema = "
+                  "current_schema() AND table_name = 'bai' AND column_name = 'ma_so_fb'"
+                  ).fetchone()
+    if x:
+        _CO_MA_SO_FB.append(True)
+    return bool(x)
+
+
+#: Thứ tự chọn bản GIỮ khi nhiều bản trùng cũ cùng khớp — ĐÚNG thứ tự `chon_giu` của script gộp
+#: (`scripts/lang_nghe_gop_bai_fb.py`): `bl_da_lay` lớn nhất, chưa cào (NULL) = -1 thấp hơn cả 0
+#: (soát 17/10/2026: bản trước COALESCE về 0 nên NULL hoà với 0 — kho và script có thể giữ hai bản
+#: khác nhau); hoà thì `thay_lan_dau` sớm nhất (NULL cuối, như `datetime.max` của script), rồi khoá
+#: theo thứ tự mã ký tự (`COLLATE "C"` = so chuỗi Python, không theo collation của DB).
+_THU_TU_GIU = 'COALESCE(bl_da_lay, -1) DESC, thay_lan_dau, khoa COLLATE "C"'
+_SQL_FB_THEO_SO = (
+    "SELECT khoa FROM bai WHERE du_an = %s AND nen_tang = 'facebook' AND ({dk}) "
+    # Nhiều bản trùng cũ cùng khớp (chưa chạy script gộp): chọn đúng bản script sẽ GIỮ.
+    f"ORDER BY {_THU_TU_GIU} LIMIT 1")
+
+
+def _khoa_fb_cu(c, ma: str, r: dict, co_cot: bool) -> str | None:
+    """Khoá của bài Facebook ĐÃ CÓ trong kho mà dòng `r` là bản trùng (khoá khác, `khu_trung_fb`):
+    1. cùng id số (cột `ma_so_fb`, khoá "facebook:<số>"); 2. cùng chủ bài + phút + nội dung.
+    None khi khoá của `r` đã có (upsert thường) hoặc `r` là bài mới."""
+    import khu_trung_fb as KT
+    if c.execute("SELECT 1 AS co FROM bai WHERE du_an = %s AND khoa = %s",
+                 (ma, r["khoa"])).fetchone():
+        return None
+    ids = sorted(KT.cac_ma_so(r))
+    if ids:
+        khoa = [f"facebook:{x}" for x in ids]
+        dk, ts = ("ma_so_fb = ANY(%s) OR khoa = ANY(%s)", [ids, khoa]) if co_cot \
+            else ("khoa = ANY(%s)", [khoa])
+        x = c.execute(_SQL_FB_THEO_SO.format(dk=dk), [ma, *ts]).fetchone()
+        if x:
+            return x["khoa"]
+    p = KT.phut(r.get("dang_luc"))
+    if p is None or not KT.chu_bai(r):
+        return None
+    cot = "khoa, link, tai_khoan, tac_gia, noi_dung, ma_noi_dung, dang_luc" + (
+        ", ma_so_fb" if co_cot else "")
+    for x in c.execute(
+            f"SELECT {cot} FROM bai WHERE du_an = %s AND nen_tang = 'facebook' AND "
+            f"dang_luc >= %s AND dang_luc < %s ORDER BY {_THU_TU_GIU}",
+            (ma, p, p + datetime.timedelta(minutes=1))).fetchall():
+        if x["khoa"] != r["khoa"] and KT.cung_bai(r, x):
+            return x["khoa"]
+    return None
+
+
+def _chuan_fb(r: dict) -> dict:
+    """Dòng bài Facebook sẵn sàng tra trùng: `ma_so_fb` (bộ chuẩn hoá đã điền, hoặc bóc từ link)."""
+    import khu_trung_fb as KT
+    return {**r, "ma_so_fb": KT.ma_so_fb(r)}
+
+
+def khoa_fb_trung(ma: str, rows: list[dict]) -> dict[str, str]:
+    """{khoá của dòng: khoá bài ĐÃ CÓ} cho các dòng Facebook là bản trùng của bài trong kho (pfbid
+    đổi giữa các lượt cào) — tìm theo từ khoá tách bài đã biết TRƯỚC bước AI (`theo_doi`), để bài
+    cũ chỉ cập nhật số, không gửi AI lại. Chỉ đọc. Mỗi dòng cần khoa, link, tai_khoan, tac_gia,
+    dang_luc, noi_dung (+ ma_so_fb nếu có)."""
+    import loc_rac
+    fb = [r for r in rows if r.get("nen_tang") == "facebook" and r.get("khoa")]
+    if not fb:
+        return {}
+    ra: dict[str, str] = {}
+    with ket_noi() as c:
+        co_cot = _co_ma_so_fb(c)
+        for r in fb:
+            r = _chuan_fb({**r, "ma_noi_dung": r.get("ma_noi_dung") or loc_rac.ma_noi_dung(
+                r.get("noi_dung") or "", loc_rac.BAI_TRUNG_TOI_THIEU_CHU)})
+            k = _khoa_fb_cu(c, ma, r, co_cot)
+            if k:
+                ra[r["khoa"]] = k
+    return ra
 
 
 def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, int]:
     """Upsert bài đã giữ + số liệu của ngày hôm nay (giờ VN). -> (bài mới, bài cập nhật).
 
     Bài đã có: số liệu lấy bản mới; nhãn AI (sắc thái/chủ đề) chỉ đè khi lượt này có nhãn;
-    bài từng vào bằng `theo_doi` thì giữ nguyên kiểu đó (quét từ khoá về sau không hạ cấp)."""
+    bài từng vào bằng `theo_doi` thì giữ nguyên kiểu đó (quét từ khoá về sau không hạ cấp).
+    Bài Facebook (17/10/2026): bản trùng của bài đã có (pfbid đổi mỗi lượt cào — `khu_trung_fb`)
+    dùng lại KHOÁ CŨ: chỉ cập nhật số, không thêm bài; bình luận cào sau gắn vào khoá cũ (lượt cào
+    bình luận đọc bài từ kho)."""
     if not rows:
         return 0, 0
     import loc_rac
     moi = cu = 0
     with ket_noi() as c:
+        co_cot: bool | None = None
         for r in rows:
             r = {**r, "ma_noi_dung": r.get("ma_noi_dung") or loc_rac.ma_noi_dung(
                 r.get("noi_dung") or "", loc_rac.BAI_TRUNG_TOI_THIEU_CHU)}
-            cac = _COT_BAI + tuple(k for k in _COT_WEB if r.get(k) is not None)
+            if r.get("nen_tang") == "facebook":
+                if co_cot is None:
+                    co_cot = _co_ma_so_fb(c)
+                r = _chuan_fb(r)
+                khoa_cu = _khoa_fb_cu(c, ma, r, co_cot)
+                if khoa_cu:
+                    r["khoa"] = khoa_cu
+            cac = _COT_BAI + tuple(k for k in _COT_WEB if r.get(k) is not None) + tuple(
+                k for k in _COT_FB if co_cot and r.get(k) is not None)
             cot = ", ".join(cac)
             # Nguồn có thể bị xoá trên dashboard giữa lượt quét: lấy id qua truy vấn con để nguồn
             # đã xoá thành NULL, không làm hỏng khoá ngoại (và rollback) cả lô bài đã trả tiền.
@@ -235,6 +378,10 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                             for k in cac)
             them = "".join(f"{k} = COALESCE(EXCLUDED.{k}, bai.{k}), " for k in cac
                            if k in _COT_WEB)
+            # Id số: GIỮ id đã có (bản trùng tìm thấy qua phút + nội dung có thể mang id khác
+            # loại — id reel thay vì id bài); dòng cũ chưa có id thì điền.
+            them += "".join(f"{k} = COALESCE(bai.{k}, EXCLUDED.{k}), " for k in cac
+                            if k in _COT_FB)
             gia_tri = [r.get(k) for k in cac]
             x = c.execute(
                 f"INSERT INTO bai (du_an, kieu_quet, luot_dau, luot_cuoi, {cot}) "

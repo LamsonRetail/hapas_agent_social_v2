@@ -88,21 +88,26 @@ def test_dashboard_cau_hinh_hien_thi_dien_tat_cho_threads():
                                                       "web": {"bat": False}}   # web: chỉ HAPAS
 
 
-# ───────────────────────────── nguồn Threads (chế độ "user") ─────────────────────────────
-def test_chia_phan_threads_che_do_user_toi_thieu_10_bai_toi_da_20_tai_khoan():
+# ─────────────── nguồn Threads (actor hồ sơ từ 17/10/2026; chế độ "user" làm dự phòng) ───────────────
+def test_chia_phan_threads_actor_ho_so_du_phong_che_do_user_toi_da_20_tai_khoan():
     ds = [_nguon(i, "threads", f"https://www.threads.net/@Kenh{i}/", so_bai=5) for i in range(1, 23)]
     ds.append(_nguon(99, "threads", "@kol.x", so_bai=30))
     ph = {x["id"]: x for x in T.chia_phan(ds)["threads"]}
     assert set(ph) == {"threads-10", "threads-10-2", "threads-30"}
     a = ph["threads-10"]
-    assert a["actor"] == A._ACTORS["threads"] and a["mem"] == 1024
-    assert a["payload"] == {"mode": "user", "usernames": [f"kenh{i}" for i in range(1, 21)],
-                            "max_posts": 10}
-    assert a["limit"] == 200 and len(ph["threads-10-2"]["nguon"]) == 2
-    assert a["uoc_usd"] == pytest.approx((200 * 0.0025 + 0.08) * 1.3, abs=1e-4)
-    assert ph["threads-30"]["payload"]["usernames"] == ["kol.x"]
-    # 5 bài/lần vẫn trả tiền 10 bài: ước tính theo 10
-    assert T._uoc_phan("threads", 1, 5) == T._uoc_phan("threads", 1, 10)
+    ten = [f"kenh{i}" for i in range(1, 21)]
+    assert a["actor"] == A._ACTORS["threads_ho_so"] and not a.get("mem")
+    assert a["payload"] == {"profiles": ten, "includePosts": True}
+    assert (a["limit"], a["gia"], a["khoi"]) == (20, 0.002, 0.0) and len(ph["threads-10-2"]["nguon"]) == 2
+    assert a["uoc_usd"] == pytest.approx(20 * 0.002 * 1.3, abs=1e-4)      # 0,052 thay vì 0,754
+    dp = a["du_phong"]
+    assert dp["actor"] == A._ACTORS["threads"] and dp["mem"] == 1024
+    assert dp["payload"] == {"mode": "user", "usernames": ten, "max_posts": 10}
+    assert dp["limit"] == 200 and (dp["gia"], dp["khoi"]) == (0.0025, 0.08)
+    assert dp["uoc_usd"] == pytest.approx((200 * 0.0025 + 0.08) * 1.3, abs=1e-4)
+    assert ph["threads-30"]["payload"]["profiles"] == ["kol.x"]
+    # Actor hồ sơ tính theo TÀI KHOẢN: số bài mỗi lần không đổi tiền.
+    assert T._uoc_phan("threads", 1, 5) == T._uoc_phan("threads", 1, 30) == round(0.002 * 1.3, 4)
 
 
 def test_doc_threads_ghep_nguon_va_chon_bai_kenh_nha(mo):
@@ -123,20 +128,86 @@ def test_doc_threads_ghep_nguon_va_chon_bai_kenh_nha(mo):
     assert rows[0]["hashtag"] == "BST MẪU 20/10" and rows[1]["hashtag"] == "quatang"
 
 
-def test_chay_viec_quet_nguon_threads_ghi_kho_va_tran(mo):
+def test_chay_viec_du_phong_che_do_user_doc_dung_bai(mo):
+    """Actor hồ sơ trả 0 hồ sơ cả lượt → phần dự phòng futurizerush "user" (cùng lượt) đọc bài như
+    trước; nguồn KHÔNG bị đánh lỗi theo phần hồ sơ (17/10/2026)."""
     kho = GiaKho(nguon=[_nguon(1, "threads", "kenh_mau.vn", loai="kenh_nha")]).cai(mo)
-    ap = GiaApify(mo, items=_moi(MAU["nguoi_dung"]), usd=0.1)
+    ap = GiaApify(mo, items=[], usd=0.0)
+    mau = _moi(MAU["nguoi_dung"])
+    goc = ap.run_actor
+
+    def chay(actor, *a, **k):
+        ap.items = mau if actor == A._ACTORS["threads"] else []
+        return goc(actor, *a, **k)
+    mo.setattr(A, "_run_actor", chay)
     phan = T.chia_phan(kho.nguon)
     v = GiaViec({p: {"phan": c} for p, c in phan.items()}, [1])
     st, cau = contextvars.copy_context().run(T.chay_viec, v)
-    g = ap.gui[0]
-    assert g["actor"] == A._ACTORS["threads"] and g["nen_tang"] == "threads"
-    assert g["payload"]["mode"] == "user" and g["limit"] == 10
-    # trần = ước tính × 1,5 (ước tính đã gồm phí khởi động 0,08 của actor 4 GB)
+    assert [g["actor"] for g in ap.gui] == [A._ACTORS["threads_ho_so"], A._ACTORS["threads"]]
+    g = ap.gui[1]
+    assert g["payload"]["mode"] == "user" and g["limit"] == 10 and g["nen_tang"] == "threads"
+    # trần dự phòng = ước tính × 1,5 (ước tính gồm phí khởi động 0,08 của actor 4 GB)
     assert g["tran_usd"] == round((10 * 0.0025 + 0.08) * 1.3 * 1.5, 2)
     (_, _, kieu, rows), = kho.bai
-    assert kieu == "theo_doi" and len(rows) == 2 and kho.danh_dau[0][0] == [1]
-    assert "threads" in v.chot[0][1] and st == "xong", cau
+    assert kieu == "theo_doi" and len(rows) == 2 and kho.danh_dau[0] == ([1], {})
+    cac = v.d["nen_tang"]["threads"]["phan"]
+    assert [x["id"] for x in cac] == ["threads-10", "threads-10-du-phong"]
+    assert cac[0]["chuyen_du_phong"] == "threads-10-du-phong" and cac[1]["trang_thai"] == "xong"
+    assert "chạy dự phòng futurizerush cho 1 tài khoản" in cau and st == "xong_mot_phan", cau
+
+
+def test_tao_luot_giu_cho_ca_du_phong_threads(mo):
+    """Soát 17/10/2026: phần hồ sơ Threads ước 0,0026 USD/tài khoản nhưng dự phòng futurizerush
+    ~0,137 USD/lượt không nằm trong ước tính / giữ chỗ của việc. Nay giữ chỗ = trường hợp xấu
+    nhất của phần (`giu_cho_phan`)."""
+    import quet_lon
+    import viec_nen
+    kho = GiaKho(nguon=[_nguon(1, "threads", "kenh_mau.vn", loai="kenh_nha")]).cai(mo)
+    mo.setattr(quet_lon, "tran_usd_nen", lambda: 20.0)
+    mo.setattr(quet_lon, "ngan_sach", lambda tran: (8.0, {"con_lai": 9.0}, ""))
+    mo.setattr(T, "uoc_do_phu", lambda *a, **k: 0.0)
+    tao = []
+    mo.setattr(viec_nen, "tao_viec", lambda *a, **k: tao.append(a) or {"ma_viec": "t1"})
+    (ph,) = T.chia_phan(kho.nguon)["threads"]
+    assert T.giu_cho_phan(ph) == ph["du_phong"]["uoc_usd"] == round((10 * 0.0025 + 0.08) * 1.3, 4)
+    kq = T.tao_luot("hapas")
+    _, _, _, uoc, ngan_sach, _ = tao[0]
+    assert uoc["usd"] == 0.14 and ngan_sach == round(0.14 * 1.5, 2)
+    assert "gồm tới 0,14 USD dự phòng nếu actor chính hỏng" in kq["cau"]
+    # Phần không có dự phòng: giữ chỗ = ước tính như cũ.
+    assert T.giu_cho_phan({"uoc_usd": 0.05}) == 0.05
+
+
+def test_vong_phan_kep_ngan_sach_cua_viec_cho_du_phong_threads(mo):
+    """Vòng phần kẹp theo ngân sách CỦA VIỆC (không chỉ phần còn của tháng): việc giữ 0,10 USD thì
+    phần dự phòng futurizerush (ước 0,1365) bị bỏ CÓ lý do, nguồn không bị đánh lỗi; việc giữ
+    0,30 thì dự phòng chạy với trần ≤ phần còn của việc."""
+    kho = GiaKho(nguon=[_nguon(1, "threads", "kenh_mau.vn", loai="kenh_nha")]).cai(mo)
+    ap = GiaApify(mo, items=[], usd=0.0)
+    mau = _moi(MAU["nguoi_dung"])
+    goc = ap.run_actor
+
+    def chay(actor, *a, **k):
+        ap.items = mau if actor == A._ACTORS["threads"] else []
+        return goc(actor, *a, **k)
+    mo.setattr(A, "_run_actor", chay)
+    v = GiaViec({p: {"phan": c} for p, c in T.chia_phan(kho.nguon).items()}, [1])
+    v.d["ngan_sach_usd"] = 0.1
+    _, cau = contextvars.copy_context().run(T.chay_viec, v)
+    assert [g["actor"] for g in ap.gui] == [A._ACTORS["threads_ho_so"]]
+    assert ap.gui[0]["tran_usd"] == 0.1
+    dp = v.d["nen_tang"]["threads"]["phan"][1]
+    assert dp["id"] == "threads-10-du-phong" and dp["ma"] == "NGAN_SACH"
+    assert dp["ly_do"].startswith("hết ngân sách của lượt (còn 0,10 USD") and "0,14 USD" in dp["ly_do"]
+    assert "Threads: hết ngân sách của lượt" in cau and kho.danh_dau[0] == ([], {})
+    kho = GiaKho(nguon=[_nguon(1, "threads", "kenh_mau.vn", loai="kenh_nha")]).cai(mo)
+    ap.gui.clear()
+    v = GiaViec({p: {"phan": c} for p, c in T.chia_phan(kho.nguon).items()}, [1])
+    v.d["ngan_sach_usd"] = 0.3
+    contextvars.copy_context().run(T.chay_viec, v)
+    assert [g["actor"] for g in ap.gui] == [A._ACTORS["threads_ho_so"], A._ACTORS["threads"]]
+    assert ap.gui[1]["tran_usd"] == round((10 * 0.0025 + 0.08) * 1.3 * 1.5, 2) <= 0.3
+    assert kho.danh_dau[0] == ([1], {})
 
 
 def test_chuan_dinh_danh_threads_tu_link():
@@ -272,9 +343,13 @@ def test_dashboard_bo_loc_nhan_threads():
 
 def test_dashboard_chi_phi_khop_mark_threads():
     assert CP.GIA == T._GIA and CP.START_COST == A._START_COST and A._START_COST["threads"] == 0.08
+    assert CP.KHOI_NGUON == T._KHOI_NGUON and T._KHOI_NGUON["threads"] == 0.0
     assert CP.TK_GIA == T._TK_GIA and CP.TK_KHOI == T._TK_KHOI
     assert CP.BL_GIA == T._BL_GIA and CP.BL_KHOI_DONG == T._BL_KHOI_DONG
-    assert T._TK_GIA["threads"] == A._UNIT_COST["threads"] == T._GIA["threads"]
+    assert T._TK_GIA["threads"] == A._UNIT_COST["threads"] == 0.0025
+    assert T._GIA["threads"] == A.TH_HO_SO_GIA == 0.002          # nguồn: actor hồ sơ (17/10/2026)
+    assert (CP.TH2_GIA, CP.TH2_SO_BAI, CP.TH2_MOI_TU, CP.TH2_LUOT) == (
+        T.TH2_GIA, T.TH2_SO_BAI, T.TH2_MOI_TU, T.TH2_LUOT) and T.TH2_GIA == A.TH2_GIA
     assert T._TK_KHOI["threads"] == A._START_COST["threads"]
     assert T._BL_GIA["threads"] == D._GIA["threads"]
     assert T._BL_KHOI_DONG["threads"] == D._GIA_KHOI_DONG["threads"]
@@ -303,20 +378,26 @@ def test_dashboard_chi_phi_khop_mark_threads():
     b = CP.bang_cau_hinh({"ten": "HAPAS", "tu_khoa": tu, "tk_bat": True, "tk_so_bai": 15,
                           "bl_bat": True, "bl_so_bai": 10, "cau_hinh": BAT_TH})
     assert b["tu_khoa"]["threads"]["so_tu_gui"] == 1 and b["tu_khoa"]["tiktok"]["so_tu_gui"] == 3
-    assert b["tu_khoa"]["threads"]["uoc"] == T.uoc_tu_khoa_nen_tang("threads", 15, tu)
+    # Đường 2 (17/10/2026) cộng vào ô Threads: 60 bài (20/từ × 3 từ) × 0,001 × 1,3.
+    da_th = {"ten": "HAPAS", "tu_khoa": tu, "tk_bat": True, "tk_so_bai": 15, "cau_hinh": BAT_TH}
+    assert b["tu_khoa"]["threads"]["uoc"] == round(
+        T.uoc_tu_khoa_nen_tang("threads", 15, tu) + T.uoc_th2(T.cau_hinh_th2(da_th), tu), 4)
+    assert T.uoc_th2(T.cau_hinh_th2(da_th), tu) == round(60 * 0.001 * 1.3, 4)
     hs = CP.hang_so_cho_trinh_duyet()
     # Báo & Web (16/10) xếp sau Threads; chỉ Threads mặc định tắt.
     assert list(hs["nen_tang"])[-2:] == ["threads", "web"] and hs["mac_dinh_tat"] == ("threads", "web")
     assert hs["th_toi_thieu_bai"] == 10
 
 
-def test_du_bao_thang_threads_phi_khoi_dong_moi_lo_20():
+def test_du_bao_thang_threads_theo_tai_khoan_khong_phi_khoi_dong():
     ng = [{"id": i, "nen_tang": "threads", "dinh_danh": f"k{i}", "so_bai_moi_lan": 5,
            "chu_ky_ngay": 1} for i in range(21)]
     db = CP.du_bao(ng, 0, 50, None, datetime.datetime(2026, 10, 15, 12, tzinfo=_VN))
     (th,) = db["nen_tang"]
-    # 21 tài khoản × 10 bài × 0,0025 × 1,3 mỗi ngày + 2 lô × 0,08 × 1,3 khởi động
-    assert th["thang_cau_hinh"] == pytest.approx(30 * (21 * 10 * 0.0025 * 1.3 + 2 * 0.08 * 1.3))
+    # Actor hồ sơ (17/10/2026): 21 tài khoản × 0,002 × 1,3 mỗi ngày, không phí khởi động
+    # (chế độ "user" cũ: 21 × 10 × 0,0025 × 1,3 + 2 lô × 0,08 × 1,3 ≈ 0,89 USD/ngày).
+    assert th["thang_cau_hinh"] == pytest.approx(30 * 21 * 0.002 * 1.3)
+    assert th["khoi_dong_con_lai"] == 0
 
 
 # ───────────────────────────── schema ─────────────────────────────

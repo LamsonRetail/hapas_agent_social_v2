@@ -40,6 +40,9 @@ SELECT 'CREATE DATABASE lang_nghe OWNER lang_nghe_chu ENCODING ''UTF8'' TEMPLATE
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'lang_nghe') \gexec
 
 \connect lang_nghe
+-- lock_timeout dự phòng khi quên PGOPTIONS (lệnh chạy ở đầu file): 5 giây, chỉ khi phiên
+-- chưa đặt — PGOPTIONS đặt tay vẫn giữ nguyên.
+SELECT set_config('lock_timeout', '5s', false) WHERE current_setting('lock_timeout') = '0';
 
 REVOKE ALL ON DATABASE lang_nghe FROM PUBLIC;
 GRANT CONNECT ON DATABASE lang_nghe TO mark, lang_nghe_web;
@@ -197,6 +200,7 @@ CREATE TABLE IF NOT EXISTS bai (
   kieu_trang      TEXT,
   muc_nhac        TEXT,
   la_pr           BOOLEAN,
+  ma_so_fb        TEXT,
   PRIMARY KEY (du_an, khoa)
 );
 CREATE INDEX IF NOT EXISTS bai_du_an_dang_luc ON bai (du_an, dang_luc);
@@ -219,6 +223,16 @@ ALTER TABLE bai ADD CONSTRAINT bai_kieu_trang_check CHECK (kieu_trang IS NULL OR
 ALTER TABLE bai DROP CONSTRAINT IF EXISTS bai_muc_nhac_check;
 ALTER TABLE bai ADD CONSTRAINT bai_muc_nhac_check CHECK (muc_nhac IS NULL OR muc_nhac IN
   ('tieu_de', 'chinh', 'thoang')) NOT VALID;
+-- Khử trùng bài Facebook (17/10/2026, khu_trung_fb.py): đo thật DB production — mỗi lượt cào actor
+-- trả pfbid KHÁC cho cùng một bài, khoá theo pfbid nên 161 bài FB của hapas có 24 nhóm trùng (60
+-- dòng, thừa 36). Khoá bài giữ nguyên; id số của bài (ổn định) để Mark nhận ra bản trùng lúc ghi.
+-- Không UNIQUE: bản trùng cũ chưa gộp (scripts/lang_nghe_gop_bai_fb.py) vẫn mang cùng id, và một
+-- lỗi trùng khoá ở giữa lô là rollback CẢ lô bài đã trả tiền. Index một phần: chỉ dòng có id.
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS ma_so_fb TEXT;
+ALTER TABLE bai DROP CONSTRAINT IF EXISTS bai_ma_so_fb_check;
+ALTER TABLE bai ADD CONSTRAINT bai_ma_so_fb_check CHECK (ma_so_fb IS NULL OR ma_so_fb ~ '^[0-9]{5,25}$')
+  NOT VALID;
+CREATE INDEX IF NOT EXISTS bai_ma_so_fb ON bai (du_an, ma_so_fb) WHERE ma_so_fb IS NOT NULL;
 
 -- 1 dòng = 1 bình luận (hoặc trả lời) Mark đã cào của một bài đã giữ. Đợt 2b (15/10/2026):
 -- Kompa đếm "thảo luận" chủ yếu từ bình luận dưới bài của các trang — đọc được nội dung mới
@@ -431,7 +445,7 @@ COMMENT ON COLUMN du_an.bl_so_bai IS 'Số bài mặc định được cào bìn
 COMMENT ON COLUMN du_an.bl_moi_bai IS 'Số bình luận tối đa cào mỗi bài mỗi lượt, bình luận. 0 (mặc định) = cào HẾT bình luận + trả lời của bài (Facebook lần sau chỉ lấy bình luận mới; bài quá to cho trần mỗi lượt thì cào tiếp ở lượt sau); ≥ 5 = giới hạn. Actor tính tiền theo bình luận (TikTok 0,00125, Facebook 0,0025, Instagram 0,0026, Threads 0,0025 USD + 0,02 khởi động; YouTube miễn phí). Threads chỉ nhận 10–300 trả lời mỗi bài.';
 COMMENT ON COLUMN du_an.tk_bat IS 'Công tắc TỔNG tìm theo từ khoá. TRUE: mỗi lượt /theodoi còn TÌM theo từ khoá dự án trên các nền tảng bật trong cau_hinh.tu_khoa để bắt bài của mọi tài khoản (tính vào trần tháng). FALSE: chỉ quét nguồn đã theo dõi, dù cau_hinh bật.';
 COMMENT ON COLUMN du_an.tk_so_bai IS 'Số bài mặc định lấy mỗi nền tảng mỗi lượt khi tìm theo từ khoá (khi cau_hinh không ghi đè), bài, ≥ 0 (không trần trên; Facebook gói Free thực tế tối đa 20 bài, 1 lượt/24h; Threads chỉ tìm số bài // 10 từ khoá đầu vì actor lấy ≥ 10 bài mỗi từ). 0 = không tìm.';
-COMMENT ON COLUMN du_an.cau_hinh IS 'Cấu hình thu thập theo từng nền tảng (JSON), sửa ở trang Ngân sách: {"tu_khoa": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "so_tu" ≥ 1}}, "binh_luan": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "moi_bai" 0 = hết hoặc ≥ 5}}} — không trần trên nghiệp vụ (chỉ chặn số rác > 1.000.000). Khoá thiếu/giá trị rác thì dùng cột chung tk_* / bl_*; chỉ bat = true là bật; thiếu bat thì bật theo cột chung, TRỪ threads (thiếu bat = tắt — chủ dự án bật trên trang Ngân sách, từ 16/10/2026); cột tk_bat / bl_bat là công tắc tổng. {} = theo cột chung (Threads tắt).';
+COMMENT ON COLUMN du_an.cau_hinh IS 'Cấu hình thu thập theo từng nền tảng (JSON), sửa ở trang Ngân sách: {"tu_khoa": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "so_tu" ≥ 1}}, "binh_luan": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "moi_bai" 0 = hết hoặc ≥ 5}}} — không trần trên nghiệp vụ (chỉ chặn số rác > 1.000.000). Khoá thiếu/giá trị rác thì dùng cột chung tk_* / bl_*; chỉ bat = true là bật; thiếu bat thì bật theo cột chung, TRỪ threads (thiếu bat = tắt — chủ dự án bật trên trang Ngân sách, từ 16/10/2026); cột tk_bat / bl_bat là công tắc tổng. {} = theo cột chung (Threads tắt). Từ 17/10/2026 "tu_khoa"."threads" có thêm "duong2": {"bat", "so_bai" = trần bài cả lượt (0 = tắt, mặc định 100), "so_bai_moi_tu" (mặc định 20), "so_luot" 1–5 (mặc định 2)} cho đường 2 tìm Threads (scrapersdelight) — chỉ chạy khi Threads bật; thiếu bat = BẬT, false = tắt. Cũng từ 17/10/2026: "tu_khoa"."facebook" có "duong2": {"bat", "so_bai_moi_tu" (bài mới nhất mỗi cụm, mặc định 12, 0 = tắt), "gio" (giờ tối thiểu giữa hai lượt, mặc định 20), "gio_chien_dich" (giờ tối thiểu khi đang có lịch chiến dịch, mặc định = gio; hạ xuống thì quét dày hơn — 6 giờ ≈ 4 lượt/ngày, tới ~25 USD/tháng/dự án)} cho đường 2 tìm Facebook (mina, chỉ cụm nhiều chữ có tên brand) — thiếu bat thì theo Facebook (số bài > 0); "tu_khoa"."tiktok" có "hashtag": {"bat", "so_yeu_cau" (trần yêu cầu mỗi lượt, mặc định 5, 0 = tắt), "gio" (mặc định 20)} cho feed hashtag TikTok của từ khoá một chữ — thiếu bat thì theo TikTok; "so_tu" của instagram là số hashtag mỗi lượt (mặc định 12).';
 COMMENT ON COLUMN du_an.sua_boi IS 'Email người sửa gần nhất trên dashboard. NULL khi tạo bằng lệnh cài đặt. Email nội bộ — không đẩy lên BigQuery.';
 
 COMMENT ON TABLE nguon IS $$[Lớp] Raw
@@ -510,7 +524,7 @@ COMMENT ON COLUMN luot_quet.so_nguon IS 'Số nguồn lượt xét, nguồn.';
 COMMENT ON COLUMN luot_quet.so_nguon_loi IS 'Số nguồn không lấy được bài, nguồn.';
 COMMENT ON COLUMN luot_quet.bai_moi IS 'Số bài lần đầu vào kho trong lượt, bài.';
 COMMENT ON COLUMN luot_quet.bai_cap_nhat IS 'Số bài đã có được cập nhật trong lượt, bài.';
-COMMENT ON COLUMN luot_quet.chi_phi_usd IS 'Chi phí Apify THẬT của lượt, USD, không VAT. 0 với lượt chỉ dùng YouTube Data API và lượt tu_khoa (chi phí đó ở sổ chi phí quét). Không âm.';
+COMMENT ON COLUMN luot_quet.chi_phi_usd IS 'Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt, đọc khi run cuối đã xong ≥ 45 giây; Mark đọc lại ~90 giây sau run cuối và NÂNG số nếu Apify ghi thêm phí sự kiện (chỉ nâng, không hạ; từ 17/10/2026 — lượt cũ hơn có thể thiếu phí ghi trễ). 0 với lượt chỉ dùng YouTube Data API và lượt tu_khoa (chi phí đó ở sổ chi phí quét). Không âm.';
 COMMENT ON COLUMN luot_quet.trang_thai IS 'Giá trị: dang_chay, xong, mot_phan (một số nguồn lỗi), loi, da_huy.';
 COMMENT ON COLUMN luot_quet.loi IS 'Tóm tắt lỗi, tối đa 500 ký tự. NULL khi không lỗi.';
 COMMENT ON COLUMN luot_quet.ghi_chu IS 'Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt, nền tảng bỏ qua/lỗi kèm lý do) và phễu từng nền tảng của lượt tìm theo từ khoá, các câu nối bằng "; ". Tối đa 20.000 ký tự (từ 17/10/2026; trước đó 2.000 — lượt cũ có thể cụt), quá thì cắt và ghi dấu đã cắt ở cuối. NULL khi không có.';
@@ -522,7 +536,7 @@ COMMENT ON TABLE bai IS $$[Lớp] Raw
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay, binh_luan; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá (/theodoi, social_listen)
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước lượt theo dõi, từ khi bật đợt 2 (sau 14/10/2026)
-[Đã xử lý] Chỉ bài liên quan (nhắc từ khoá trừ kênh nhà, không chứa từ loại trừ, không bị AI loại); khử trùng theo khoa; nội dung cắt 1.000 ký tự
+[Đã xử lý] Chỉ bài liên quan (nhắc từ khoá trừ kênh nhà, không chứa từ loại trừ, không bị AI loại); khử trùng theo khoa; bài Facebook khử trùng thêm theo id số ma_so_fb, không có id thì theo chủ bài + phút đăng + nội dung (pfbid trong link đổi mỗi lượt cào, từ 17/10/2026; bản trùng cũ gộp bằng scripts/lang_nghe_gop_bai_fb.py); nội dung cắt 1.000 ký tự
 [Refresh] Upsert tức thời sau mỗi lượt quét; video YouTube được đọc lại số mỗi ngày trong 14 ngày đầu
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề
 [Không dùng khi] Tăng trưởng theo ngày → dùng chi_so_ngay; bản cho BI → dùng ganesha-381907.SOCIAL_LISTENING.bai
@@ -559,6 +573,7 @@ COMMENT ON COLUMN bai.bl_lay_khi_co IS 'Số bình luận nền tảng báo lúc
 COMMENT ON COLUMN bai.kieu_trang IS 'Loại trang của bài web. Giá trị: bao (báo/tạp chí), dien_dan (diễn đàn), blog, mxh_khac (LinkedIn, X, Lemon8…), khac (trang khác). NULL với bài mạng xã hội (nen_tang khác web).';
 COMMENT ON COLUMN bai.muc_nhac IS 'Mức nhắc brand trong bài web. Giá trị: tieu_de (từ khoá ở tiêu đề), chinh (≥ 3 lần trong thân bài), thoang (nhắc lướt 1–2 lần, vd bài liệt kê nhiều brand). NULL với bài mạng xã hội.';
 COMMENT ON COLUMN bai.la_pr IS 'TRUE: bài web có dấu hiệu bài đặt/PR (thân bài dẫn link về miền của brand hoặc ghi "Ảnh/Nguồn: <brand>"). FALSE: không thấy dấu hiệu. NULL với bài mạng xã hội.';
+COMMENT ON COLUMN bai.ma_so_fb IS 'Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không phải khoá (PK là du_an + khoa), không join bảng khác; không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026 chưa được quét lại (quét lại thì Mark điền), hoặc link pfbid mà actor không trả id.';
 
 COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
 [Mục đích] Bình luận (và trả lời) dưới các bài đã giữ của dự án, kèm sắc thái và chủ đề AI gán — tiếng khách hàng.

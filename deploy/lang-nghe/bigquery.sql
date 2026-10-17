@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.bai`
   kieu_trang      STRING    OPTIONS(description='Loại trang của bài web. Giá trị: bao (báo/tạp chí), dien_dan (diễn đàn), blog, mxh_khac (LinkedIn, X, Lemon8…), khac (trang khác). NULL với bài mạng xã hội (nen_tang khác web).'),
   muc_nhac        STRING    OPTIONS(description='Mức nhắc brand trong bài web. Giá trị: tieu_de (từ khoá ở tiêu đề), chinh (≥ 3 lần trong thân bài), thoang (nhắc lướt 1–2 lần, vd bài liệt kê nhiều brand). NULL với bài mạng xã hội.'),
   la_pr           BOOL      OPTIONS(description='TRUE: bài web có dấu hiệu bài đặt/PR (thân bài dẫn link về miền của brand hoặc ghi "Ảnh/Nguồn: <brand>"). FALSE: không thấy dấu hiệu. NULL với bài mạng xã hội.'),
+  ma_so_fb        STRING    OPTIONS(description='Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không phải khoá (PK là du_an + khoa), không join bảng khác; không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026 chưa được quét lại (quét lại thì Mark điền), hoặc link pfbid mà actor không trả id.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 CLUSTER BY du_an, nen_tang
@@ -111,7 +112,7 @@ OPTIONS(description='''[Lớp] Raw
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
-[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; khử trùng theo khoa; nội dung cắt 1.000 ký tự
+[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; khử trùng theo khoa; bài Facebook khử trùng thêm theo id số ma_so_fb, không có id thì theo chủ bài + phút đăng + nội dung (từ 17/10/2026); nội dung cắt 1.000 ký tự
 [Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
 [Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet
@@ -155,7 +156,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.luot_quet`
   so_nguon_loi    INT64     OPTIONS(description='Số nguồn không lấy được bài trong lượt, nguồn.'),
   bai_moi         INT64     OPTIONS(description='Số bài lần đầu vào kho trong lượt, bài.'),
   bai_cap_nhat    INT64     OPTIONS(description='Số bài đã có được cập nhật số liệu/nhãn trong lượt, bài.'),
-  chi_phi_usd     NUMERIC   OPTIONS(description='Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt. 0 khi lượt chỉ dùng YouTube Data API (miễn phí). Không âm.'),
+  chi_phi_usd     NUMERIC   OPTIONS(description='Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt, đọc khi run cuối đã xong ≥ 45 giây; Mark đọc lại ~90 giây sau run cuối và NÂNG số nếu Apify ghi thêm phí sự kiện (chỉ nâng, không hạ; từ 17/10/2026 — lượt cũ hơn có thể thiếu phí ghi trễ). 0 khi lượt chỉ dùng YouTube Data API (miễn phí). Không âm.'),
   trang_thai      STRING    OPTIONS(description='Giá trị: dang_chay, xong (mọi nguồn được), mot_phan (một số nguồn lỗi), loi (không nguồn nào được hoặc bot dừng giữa chừng), da_huy.'),
   loi             STRING    OPTIONS(description='Tóm tắt lỗi của các nguồn hỏng, tối đa 500 ký tự. NULL khi không có lỗi.'),
   ghi_chu         STRING    OPTIONS(description='Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt, nền tảng bỏ qua/lỗi kèm lý do) và phễu từng nền tảng của lượt tìm theo từ khoá, các câu nối bằng "; ". Tối đa 20.000 ký tự (từ 17/10/2026; trước đó 2.000 — lượt cũ có thể cụt), quá thì cắt và ghi dấu đã cắt ở cuối. NULL khi không có.'),
@@ -320,6 +321,32 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
 -- (quy chuẩn BI: mô tả luôn đúng dữ liệu). Chỉ đổi mô tả, không đổi kiểu cột (STRING không trần).
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.luot_quet`
   ALTER COLUMN ghi_chu SET OPTIONS(description='Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt, nền tảng bỏ qua/lỗi kèm lý do) và phễu từng nền tảng của lượt tìm theo từ khoá, các câu nối bằng "; ". Tối đa 20.000 ký tự (từ 17/10/2026; trước đó 2.000 — lượt cũ có thể cụt), quá thì cắt và ghi dấu đã cắt ở cuối. NULL khi không có.');
+
+-- Khử trùng bài Facebook (17/10/2026, khu_trung_fb.py): bảng đã tạo trước thì thêm cột ma_so_fb
+-- (dong_bo_bq MERGE cả cột này — chạy khối này TRƯỚC khi bật đồng bộ bản mới, cùng lúc chạy
+-- schema.sql trên Postgres) và đặt lại mô tả bảng. Khối này đứng CUỐI nên mô tả bảng sau cùng là
+-- bản đủ nhất (hai khối SET OPTIONS của bai phía trên chạy trước, khối 16/10 thiếu Báo & Web).
+-- Lưu ý: MERGE của bai không xoá dòng — bản trùng script gộp đã xoá ở Postgres phải xoá tay ở đây
+-- nếu đồng bộ đã bật trước khi gộp (17/10/2026: chưa bật, dong_bo_bq 0 dòng).
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  ADD COLUMN IF NOT EXISTS ma_so_fb STRING OPTIONS(description='Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không phải khoá (PK là du_an + khoa), không join bảng khác; không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026 chưa được quét lại (quét lại thì Mark điền), hoặc link pfbid mà actor không trả id.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Bài mạng xã hội liên quan tới dự án mà Mark đã giữ, kèm nhãn AI và tương tác mới nhất, để đếm thảo luận, nguồn nổi bật, sắc thái, chủ đề.
+[Grain] 1 dòng = 1 bài × 1 dự án
+[Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
+[Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
+[Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
+[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; khử trùng theo khoa; bài Facebook khử trùng thêm theo id số ma_so_fb, không có id thì theo chủ bài + phút đăng + nội dung (từ 17/10/2026); nội dung cắt 1.000 ký tự
+[Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
+[Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
+[Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet
+[Lưu ý] Số liệu là lần đọc gần nhất, không phải cuối kỳ; bài YouTube được đọc lại số mỗi ngày trong 14 ngày đầu, nền tảng khác chỉ khi bài còn nằm trong N bài mới nhất của nguồn. Đây là mẫu theo nguồn đã chọn, không phải toàn bộ thảo luận trên mạng.''');
+
+-- Chốt chi phí khi phí sự kiện Apify ghi trễ (17/10/2026): bảng đã tạo trước thì đổi mô tả cột cho
+-- khớp COMMENT luot_quet.chi_phi_usd bên Postgres. Chỉ đổi mô tả, không đổi kiểu cột.
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.luot_quet`
+  ALTER COLUMN chi_phi_usd SET OPTIONS(description='Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt, đọc khi run cuối đã xong ≥ 45 giây; Mark đọc lại ~90 giây sau run cuối và NÂNG số nếu Apify ghi thêm phí sự kiện (chỉ nâng, không hạ; từ 17/10/2026 — lượt cũ hơn có thể thiếu phí ghi trễ). 0 khi lượt chỉ dùng YouTube Data API (miễn phí). Không âm.');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`

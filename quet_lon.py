@@ -121,7 +121,9 @@ def giay_tai_cho(plats: list[str], lims: dict, queries: list[str]) -> float:
             g = math.ceil(n / 50) * 3.0
         elif p == "tiktok":
             g = 2 * _GIAY_TAI_CHO_KHOI_DONG + n / toc(A._ACTORS["tiktok_fallback"])
-        elif p in ("instagram", "facebook"):
+        elif p == "instagram":           # hai run song song (tab bài + reels), mỗi run mọi tag
+            g = _GIAY_TAI_CHO_KHOI_DONG + (n / len(A._IG_TAB)) / toc(A._ACTORS[p])
+        elif p == "facebook":
             g = _GIAY_TAI_CHO_KHOI_DONG + (n / k) / toc(A._ACTORS[p])
         else:
             g = _GIAY_TAI_CHO_KHOI_DONG + n / toc(A._ACTORS[p])
@@ -166,7 +168,9 @@ _YT_MOI_CUA_SO = 10       # trang/cửa sổ: search.list trả tối đa ~500 k
 # RAM ghim cho lượt con của việc nền (MB). Threads đã đo (phí "Actor Start" tính theo GB,
 # 26/08/2026). Ba actor còn lại CHƯA đo: ghim 2 GB để phí khởi động theo GB không nhân 4
 # như mặc định 4 GB — chậm hơn thì EWMA tốc độ tự thấy.
-_RAM_NEN = {A._ACTORS["threads"]: 1024, A._ACTORS["instagram"]: 2048,
+# Instagram (17/10/2026, actor hashtag của Apify) tính tiền theo item, không có phí khởi động theo
+# GB — không ghim RAM (để mặc định 256 MB của actor như run đo thật).
+_RAM_NEN = {A._ACTORS["threads"]: 1024,
             A._ACTORS["tiktok_fallback"]: 2048, A._ACTORS["facebook"]: 1024}
 
 
@@ -199,7 +203,10 @@ def dung_payload(p: str, ph: dict, ts: dict) -> dict:
     if p == "tiktok":
         return {"hashtags": [ph["the"]], "resultsPerPage": n}
     if p == "instagram":
-        return {"keyword": ph["tu_khoa"], "getPosts": True, "getReels": True, "maxItems": n}
+        # 17/10/2026: actor hashtag của Apify — mọi hashtag một run, `resultsLimit` là trần MỖI tag.
+        tags = list(ph["the"])
+        return {"hashtags": tags, "resultsType": ph["tab"],
+                "resultsLimit": max(1, n // max(1, len(tags)))}
     if p == "facebook":
         return {"query": ph["tu_khoa"], "search_type": "posts", "max_results": n,
                 "start_date": ph["tu"], "end_date": ph["den"]}
@@ -241,11 +248,21 @@ def _ke_tiktok(q, lim, ts, ctx) -> dict:
 
 
 def _ke_instagram(q, lim, ts, ctx) -> dict:
-    per = math.ceil(lim / max(1, len(q)))
-    return {"phan": [{"actor": A._ACTORS["instagram"], "tu_khoa": k, "limit": per,
-                      "nhan": f"từ khoá '{k}'"} for k in q],
-            "chua_phu": [], "ghi_chu": ["Instagram: không lọc ngày/quốc gia, không có "
-                                        "followers/share."]}
+    """17/10/2026 (`apify~instagram-hashtag-scraper`): từ khoá → hashtag (`A.hashtag_ig`), MỘT lượt
+    con mỗi tab (bài, reels), mỗi lượt mọi hashtag — ít run nhất; `limit` của lượt = tổng item."""
+    tags = A.hashtag_ig_ds(q)
+    ra = {"phan": [], "chua_phu": [], "ghi_chu": [
+        "Instagram: tìm theo hashtag (từ khoá viết liền, bỏ dấu) ở tab bài + reels; không lọc "
+        "ngày/quốc gia, không có followers. Gói Free của actor chỉ đọc trang đầu mỗi hashtag."]}
+    if not tags:
+        ra["chua_phu"].append("Instagram: không từ khoá nào thành được hashtag — không quét.")
+        return ra
+    per = max(1, math.ceil(lim / (len(A._IG_TAB) * len(tags))))
+    for tab in A._IG_TAB:
+        ra["phan"].append({"actor": A._ACTORS["instagram"], "the": tags, "tab": tab,
+                           "tu_khoa": ", ".join(f"#{t}" for t in tags), "limit": per * len(tags),
+                           "nhan": f"{A._IG_NHAN_TAB[tab]} #{', #'.join(tags)}"[:120]})
+    return ra
 
 
 def _ke_facebook(q, lim, ts, ctx) -> dict:

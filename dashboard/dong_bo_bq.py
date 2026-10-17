@@ -74,7 +74,10 @@ BANG: dict[str, dict] = {
                 ("cap_nhat_cuoi", "TIMESTAMP"), ("luot_dau", "INT64"), ("luot_cuoi", "INT64"),
                 ("ma_noi_dung", "STRING"),
                 # Lắng nghe web (16/10/2026): chỉ bài nen_tang = 'web' có, bài MXH NULL.
-                ("kieu_trang", "STRING"), ("muc_nhac", "STRING"), ("la_pr", "BOOL")],
+                ("kieu_trang", "STRING"), ("muc_nhac", "STRING"), ("la_pr", "BOOL"),
+                # Khử trùng Facebook (17/10/2026): id số của bài (ALTER … ADD COLUMN ma_so_fb
+                # trên BigQuery + schema.sql trên Postgres trước khi bật).
+                ("ma_so_fb", "STRING")],
     },
     "chi_so_ngay": {
         "khoa": ["du_an", "khoa", "ngay"], "kieu": "theo_ngay", "moc": "ngay",

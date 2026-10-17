@@ -1,0 +1,207 @@
+{
+ "nguon": "apify~instagram-hashtag-scraper, run thật 17/10/2026 (cắt gọn, ẩn danh)",
+ "items": [
+  {
+   "inputUrl": "https://www.instagram.com/explore/tags/tuixachhapas",
+   "id": "4000000000000000001",
+   "type": "Sidecar",
+   "shortCode": "MauIG001x",
+   "caption": "Dùng túi trắng là cứ phải nâng niu thế này ý, nhưng mà đẹp nên chấp nhận ạ 😝 \n#Hapas #tuixachhapas #ottd #mumm",
+   "hashtags": [
+    "Hapas",
+    "tuixachhapas",
+    "ottd",
+    "mummimdaily"
+   ],
+   "url": "https://www.instagram.com/p/MauIG001x/",
+   "commentsCount": 0,
+   "likesCount": 1,
+   "timestamp": "2026-08-25T04:53:29.000Z",
+   "ownerFullName": "Người dùng IG 1",
+   "ownerUsername": "nguoi_dung_ig_1",
+   "ownerId": "1000000001",
+   "productType": "carousel_container",
+   "isPinned": false,
+   "paidPartnership": false
+  },
+  {
+   "inputUrl": "https://www.instagram.com/explore/tags/tuixachhapas",
+   "id": "4000000000000000002",
+   "type": "Image",
+   "shortCode": "MauIG002x",
+   "caption": "Tính đi ngủ rồi, mà nghĩ nghĩ deal hời này mà k đăng thì có lỗi với hội chị em quá 😓\n\nThật sự luôn, đã rất lâu",
+   "hashtags": [
+    "691k",
+    "tuixachhapas",
+    "Hapas",
+    "tuixach"
+   ],
+   "url": "https://www.instagram.com/p/MauIG002x/",
+   "commentsCount": 0,
+   "likesCount": 0,
+   "timestamp": "2026-06-25T14:49:19.000Z",
+   "ownerFullName": "Người dùng IG 2",
+   "ownerUsername": "nguoi_dung_ig_2",
+   "ownerId": "1000000002",
+   "productType": "feed",
+   "isPinned": false,
+   "paidPartnership": false
+  },
+  {
+   "inputUrl": "https://www.instagram.com/explore/tags/hapas",
+   "id": "4000000000000000003",
+   "type": "Sidecar",
+   "shortCode": "MauIG003x",
+   "caption": "ขอบคุณค่ะสามี🙏🏻😍\n#HAPAS\n#แอบนอยด์ขนส่งทำให้เป็นรอย🥺",
+   "hashtags": [
+    "HAPAS",
+    "แอบนอยด์ขนส่งทำให้เป็นรอย"
+   ],
+   "url": "https://www.instagram.com/p/MauIG003x/",
+   "commentsCount": 0,
+   "likesCount": 0,
+   "timestamp": "2026-10-17T04:57:27.000Z",
+   "ownerFullName": "Người dùng IG 3",
+   "ownerUsername": "nguoi_dung_ig_3",
+   "ownerId": "1000000003",
+   "productType": "carousel_container",
+   "isPinned": false,
+   "paidPartnership": false
+  },
+  {
+   "inputUrl": "https://www.instagram.com/explore/tags/hapas",
+   "id": "4000000000000000004",
+   "type": "Image",
+   "shortCode": "MauIG004x",
+   "caption": "🔱🚩 जय माँ कालरात्रि! जय माता दी! 🚩🔱\n\nमाँ दुर्गा के सप्तम स्वरूप माँ कालरात्रि के पावन चरणों में कोटि-कोटि नमन ",
+   "hashtags": [
+    "जयमातादी",
+    "माँकालरात्रि",
+    "शुभनवरात्रि",
+    "hapas",
+    "laxmangarh"
+   ],
+   "url": "https://www.instagram.com/p/MauIG004x/",
+   "commentsCount": 0,
+   "likesCount": -1,
+   "timestamp": "2026-10-17T01:17:16.000Z",
+   "ownerFullName": "Người dùng IG 4",
+   "ownerUsername": "nguoi_dung_ig_4",
+   "ownerId": "1000000004",
+   "productType": "feed",
+   "isPinned": false,
+   "paidPartnership": false
+  },
+  {
+   "url": "https://www.instagram.com/explore/tags/hapasthudong2026",
+   "inputUrl": "https://www.instagram.com/explore/tags/hapasthudong2026",
+   "requestErrorMessages": [
+    "HTTP 200 undefined"
+   ],
+   "error": "no_items",
+   "errorDescription": "Empty or private data for provided input"
+  },
+  {
+   "inputUrl": "https://www.instagram.com/explore/tags/lammoidieuviyeu",
+   "id": "4000000000000000005",
+   "type": "Video",
+   "shortCode": "MauIG005x",
+   "caption": "Tuổi mới thêm xinh, Niềm vui lung linh, Mong em hạnh phúc, Mãi mãi tươi xinh.♥️ 🌹 \n#HAPAS #LAMMOIDIEUVIYEU\n#QU",
+   "hashtags": [
+    "HAPAS",
+    "LAMMOIDIEUVIYEU",
+    "QUATANG2010"
+   ],
+   "url": "https://www.instagram.com/p/MauIG005x/",
+   "commentsCount": 0,
+   "likesCount": 3,
+   "timestamp": "2026-09-30T11:02:12.000Z",
+   "ownerFullName": "Người dùng IG 5",
+   "ownerUsername": "nguoi_dung_ig_5",
+   "ownerId": "1000000005",
+   "productType": "clips",
+   "videoPlayCount": 322,
+   "igPlayCount": 322,
+   "isPinned": false,
+   "paidPartnership": false
+  },
+  {
+   "inputUrl": "https://www.instagram.com/explore/tags/lammoidieuviyeu",
+   "id": "4000000000000000006",
+   "type": "Video",
+   "shortCode": "MauIG006x",
+   "caption": "Hên là tui có chuẩn bị  #HAPAS  #LAMMOIDIEUVIYEU  #QUATANG2010",
+   "hashtags": [
+    "HAPAS",
+    "LAMMOIDIEUVIYEU",
+    "QUATANG2010"
+   ],
+   "url": "https://www.instagram.com/p/MauIG006x/",
+   "commentsCount": 0,
+   "likesCount": 66,
+   "timestamp": "2026-09-30T11:30:45.000Z",
+   "ownerFullName": "Người dùng IG 6",
+   "ownerUsername": "nguoi_dung_ig_6",
+   "ownerId": "1000000006",
+   "productType": "clips",
+   "videoPlayCount": 2349,
+   "igPlayCount": 2349,
+   "sharesCount": 4,
+   "isPinned": false,
+   "paidPartnership": false
+  },
+  {
+   "inputUrl": "https://www.instagram.com/explore/tags/lammoidieuviyeu",
+   "id": "4000000000000000007",
+   "type": "Video",
+   "shortCode": "MauIG007x",
+   "caption": "Nuôi ong tay áo, nuôi BOT giành đủ thứ\nPs: Lỡ tay bấm xoá 🥹\n#haiduacungxom #couple #HAPAS #LAMMOIDIEUVIYEU #QU",
+   "hashtags": [
+    "haiduacungxom",
+    "couple",
+    "HAPAS",
+    "LAMMOIDIEUVIYEU",
+    "QUATANG2010"
+   ],
+   "url": "https://www.instagram.com/p/MauIG007x/",
+   "commentsCount": 0,
+   "likesCount": -1,
+   "timestamp": "2026-10-05T10:43:45.000Z",
+   "ownerFullName": "Người dùng IG 7",
+   "ownerUsername": "nguoi_dung_ig_7",
+   "ownerId": "1000000007",
+   "productType": "clips",
+   "videoPlayCount": 806,
+   "igPlayCount": 806,
+   "sharesCount": 2,
+   "isPinned": false,
+   "paidPartnership": false
+  },
+  {
+   "inputUrl": "https://www.instagram.com/explore/tags/lammoidieuviyeu",
+   "id": "4000000000000000008",
+   "type": "Video",
+   "shortCode": "MauIG008x",
+   "caption": "Chỉ cần em đồng ý #HAPAS #LAMMOIDIEUVIYEU #QUATANG2010 #hapasxthom #hoptaccunghapas",
+   "hashtags": [
+    "HAPAS",
+    "LAMMOIDIEUVIYEU",
+    "QUATANG2010",
+    "hapasxthom",
+    "hoptaccunghapas"
+   ],
+   "url": "https://www.instagram.com/p/MauIG008x/",
+   "commentsCount": 0,
+   "likesCount": 2,
+   "timestamp": "2026-10-04T06:16:08.000Z",
+   "ownerFullName": "Người dùng IG 8",
+   "ownerUsername": "nguoi_dung_ig_8",
+   "ownerId": "1000000008",
+   "productType": "clips",
+   "videoPlayCount": 405,
+   "igPlayCount": 405,
+   "isPinned": false,
+   "paidPartnership": false
+  }
+ ]
+}

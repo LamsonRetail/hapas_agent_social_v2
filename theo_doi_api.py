@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import datetime
 import math
+import re
 import threading
 import time
 
@@ -154,6 +155,233 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
     if loi is not None and not items:
         meta.update(ma=loi.ma, ly_do=str(loi)[:300])
     return items, meta, (loi if not items else None), None
+
+
+# ─────────────── 1b. theo dõi TRANG Facebook: thedoor + actor cũ dự phòng (17/10/2026) ───────────────
+# Đo thật vòng 2 (17/10/2026, `hapasglobal`, 20 bài mới nhất, cùng đầu vào cho ba actor): thedoor trả
+# ĐÚNG 20 bài như actor đang dùng (apify~facebook-posts-scraper), CÓ lượt xem video (10/10 bài
+# video/reel, 4.359–448.884 view — hai actor rẻ hơn không có), hợp tác, id bài SỐ; giá 0,0025 USD/bài
+# (FREE; Starter 0,00199) so với 0,005 của apify; một run nhận NHIỀU trang (`pageUrls`). Rủi ro: phí
+# khởi động 0,01 USD/run mới thêm 15/10/2026 (`pricingInfos`) và 1,3k người dùng → giữ actor cũ làm
+# DỰ PHÒNG: trang nào thedoor lỗi / không ra bài thì chạy actor cũ cho đúng trang đó, trong phần
+# trần còn lại của phần (như dự phòng hồ sơ TikTok ở trên).
+FB_TRANG = "thedoor~facebook-page-scraper"
+FB_TRANG_GIA = 0.0025        # USD/bài, gói FREE (`apify-default-dataset-item`)
+FB_TRANG_KHOI = 0.01         # USD/run (`apify-actor-start`, 1 GB)
+FB_DU_PHONG_GIA = 0.005      # apify~facebook-posts-scraper, gói FREE (sự kiện "post")
+FB_DU_PHONG_KHOI = 0.001     # sự kiện "actor-start"
+
+
+def gan_fb_trang(ph: dict, urls: list[str], n: int) -> None:
+    """Phần theo dõi trang Facebook đi thedoor; actor + payload cũ của phần làm dự phòng. Cố ý
+    KHÔNG gửi `postsNewerThan`: như actor cũ, mỗi trang trả `n` bài MỚI NHẤT bất kể ngày — trang
+    0 bài khi đó mới đúng là lỗi (đáng chạy dự phòng), không lẫn với trang lâu không đăng.
+    `du_phong.uoc_usd` = dự phòng cho MỌI trang (thedoor hỏng cả run) — `theo_doi._tran_phan`
+    chừa chỗ cho nó trong trần phần (dự phòng chạy TRONG phần, tiêu phần trần còn lại)."""
+    ph["du_phong"] = {"actor": ph["actor"], "payload": ph["payload"], "gia": FB_DU_PHONG_GIA,
+                      "khoi": FB_DU_PHONG_KHOI}
+    ph["du_phong"]["uoc_usd"] = can_du_phong_fb(ph["du_phong"], len(urls), int(n))
+    ph.update(actor=FB_TRANG, gia=FB_TRANG_GIA, khoi=FB_TRANG_KHOI, urls=list(urls),
+              payload={"pageUrls": list(urls), "postsToScrape": int(n)})
+
+
+def la_thedoor(it) -> bool:
+    return isinstance(it, dict) and isinstance(it.get("post"), dict) \
+        and isinstance(it.get("page"), dict)
+
+
+def _so_fb(v) -> int:
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _ten_trang(*urls) -> str:
+    """Tên trang Facebook trong link đầu tiên có tên ("facebook.com/hapasglobal" → "hapasglobal");
+    bỏ link id số / profile.php / đường dẫn chung (`khu_trung_fb._SLUG_CHUNG`). Không có → ""."""
+    import khu_trung_fb as KT
+    for u in urls:
+        m = re.search(r"facebook\.com/([^/?#]+)", str(u or ""), re.IGNORECASE)
+        if m and not m.group(1).isdigit() and m.group(1).lower() not in KT._SLUG_CHUNG:
+            return m.group(1)
+    return ""
+
+
+def doc_thedoor(items: list, urls: list[str]) -> dict[str, dict]:
+    """Item thedoor -> {trang: {"ho_so", "bai", "ghi_chu"}} CÙNG dạng `account_tool._doc_facebook`
+    để `theo_doi._dong_tu_tai_khoan` / `ghep_nguon` dùng nguyên. Trường theo run thật 17/10/2026:
+    `post` {id SỐ, url `/<id trang>/posts/<id bài>`, text, hashtags}, `page` {id, name, url},
+    `created.timestamp` (giây), `engagement` {reactions, comments, shares, views (chỉ video)},
+    `video.is_video`, `partnership` {paid, collaborators}. Actor không có URL đầu vào trong item:
+    trang ghép về URL nguồn theo `page.url` (chuẩn hoá như định danh nguồn), rồi theo id trang có
+    trong URL nguồn, run một trang thì về trang đó. `_goc` thêm `postId` (id số, cho `_goc_id` /
+    `ma_so_fb`) và `inputUrl` (URL nguồn đã ghép)."""
+    import theo_doi as T
+    theo = {T._chuan_dinh_danh("facebook", u): u for u in urls}
+    ra: dict[str, dict] = {}
+    for it in items:
+        if not la_thedoor(it):
+            continue
+        po, pg = it["post"], it["page"]
+        vao = theo.get(T._chuan_dinh_danh("facebook", str(pg.get("url") or "")))
+        if vao is None and pg.get("id"):
+            vao = next((u for u in urls if str(pg["id"]) in u), None)
+        if vao is None and len(urls) == 1:
+            vao = urls[0]
+        # Gom theo TRANG (URL nguồn đã ghép / URL trang / id trang), không theo tên hiển thị — soát
+        # 17/10/2026: hai trang khác nhau cùng tên "HAPAS" trong một run dùng chung hồ sơ (tên,
+        # link, tai_khoan của trang đầu) cho bài của cả hai.
+        k = (T._chuan_dinh_danh("facebook", vao or str(pg.get("url") or ""))
+             or str(pg.get("id") or pg.get("name") or "").lower())
+        # `tai_khoan` = tên trang trong link ("hapasglobal") như `pageName` của actor cũ, không
+        # phải tên hiển thị ("HAPAS"): kho nhận bản trùng bài pfbid cũ theo chủ bài + phút + nội
+        # dung (`khu_trung_fb.chu_bai`), mà link thedoor mang id SỐ của trang thay vì tên trang.
+        tk = ra.setdefault(k, {"ho_so": {
+            "ten": pg.get("name") or k,
+            "tai_khoan": _ten_trang(pg.get("url"), vao) or pg.get("name") or k, "followers": None,
+            "link": pg.get("url") or vao or ""}, "bai": [], "ghi_chu": ""})
+        eg = it.get("engagement") if isinstance(it.get("engagement"), dict) else {}
+        vd = it.get("video") if isinstance(it.get("video"), dict) else {}
+        media = [m.get("__typename") for m in it.get("media") or [] if isinstance(m, dict)]
+        cr = it.get("created") if isinstance(it.get("created"), dict) else {}
+        hop = it.get("partnership") if isinstance(it.get("partnership"), dict) else {}
+        txt = str(po.get("text") or "")
+        tags = [str(h).lstrip("#") for h in po.get("hashtags") or [] if h]
+        tk["bai"].append({
+            "ngay": A._to_vn(cr.get("timestamp")),
+            "loai": "video" if vd.get("is_video") or "Video" in media else "bài",
+            "view": _so_fb(eg.get("views")) or None, "like": _so_fb(eg.get("reactions")),
+            "binh_luan": _so_fb(eg.get("comments")), "share": _so_fb(eg.get("shares")),
+            "noi_dung": txt, "link": str(po.get("url") or ""),
+            "hashtag": tags or re.findall(r"#(\w+)", txt),
+            "am_thanh": "", "tra_tien": bool(hop.get("paid")),
+            "dong_tac_gia": [c.get("name") for c in hop.get("collaborators") or []
+                             if isinstance(c, dict) and c.get("name")],
+            "_goc": {**it, "postId": str(po.get("id") or ""), "inputUrl": vao or ""},
+        })
+    return ra
+
+
+def doc_fb_trang(items: list, urls: list[str]) -> dict[str, dict]:
+    """Kết quả một phần trang Facebook (thedoor, có thể kèm bài của actor dự phòng) -> dạng
+    `account_tool._doc_facebook`. Item không mang shape của actor nào thì bỏ."""
+    import account_tool
+    ra = doc_thedoor([it for it in items if la_thedoor(it)], urls)
+    cu = [it for it in items if isinstance(it, dict) and not la_thedoor(it)
+          and (it.get("pageName") or it.get("facebookUrl") or it.get("postId"))]
+    for k, tk in account_tool._doc_facebook(cu).items():
+        if k in ra:
+            ra[k]["bai"].extend(tk["bai"])
+        else:
+            ra[k] = tk
+    return ra
+
+
+def can_du_phong_fb(dp: dict, so_trang: int, n: int) -> float:
+    """USD phải còn trong trần phần để chạy actor dự phòng cho `so_trang` trang × `n` bài: giá
+    thật của actor cũ (bài × 0,005 + khởi động 0,001) nhân hệ số ước tính. Soát 17/10/2026: bản
+    trước so phần còn với SÀN 0,1 USD của `_run_actor` — thedoor lỗi sau khi tạo run (đã tính
+    0,01 khởi động) thì phần dưới ~19 bài (trần 0,1) chỉ còn 0,09 < 0,1 và dự phòng KHÔNG BAO
+    GIỜ chạy, đúng lúc cần nhất. Sàn 0,1 chỉ là `maxTotalChargeUsd` gửi Apify; tiền thật của
+    actor cũ bị `maxItems` (= n × số trang) chặn, nên mức cần thật là con số này."""
+    import theo_doi as T
+    return round((so_trang * n * float(dp.get("gia") or FB_DU_PHONG_GIA)
+                  + float(dp.get("khoi") or 0)) * T._HE_SO_UOC, 4)
+
+
+def ly_do_trang_fb(u: str, kq: dict, loi=None) -> str | None:
+    """Lý do một trang Facebook không có bài sau thedoor + dự phòng (`kq` = `meta["du_phong"]`
+    của `du_phong_fb`) — đi vào `nguon.loi_cuoi`; None khi trang không thuộc diện dự phòng. Soát
+    17/10/2026: lý do bỏ / lỗi của dự phòng chỉ nằm trong meta (không lưu), nguồn chỉ hiện
+    "không lấy được bài nào" — chủ dự án không biết thedoor hỏng hay trang hỏng."""
+    if not kq or (u not in (kq.get("trang") or []) and u not in (kq.get("bo_qua_trang") or [])):
+        return None
+    dau = "thedoor không ra bài" + (f" ({A._che_token(str(loi))[:80]})" if loi else "")
+    ten = kq.get("actor") or "actor cũ"
+    if u in (kq.get("bo_qua_trang") or []):
+        return f"{dau}; dự phòng {ten} không chạy: {kq.get('bo_qua') or 'không rõ'}"[:200]
+    if kq.get("loi"):
+        return f"{dau}; dự phòng {ten} lỗi: {kq['loi']}"[:200]
+    return (f"{dau}; dự phòng {ten} cũng không ra bài (trang riêng tư, đổi tên hoặc sai "
+            "định danh?)")[:200]
+
+
+def du_phong_fb(v, p: str, ph: dict, items: list, meta: dict, loi, cap: float,
+                han: float) -> tuple[list, dict, object]:
+    """Trang Facebook thedoor KHÔNG ra bài (lỗi cả run, hoặc trang không có bài) → actor cũ cho
+    đúng các trang đó, trong phần trần còn lại. -> (items gộp, meta, lỗi). Run dự phòng ghi vào
+    `run_phu` (tiền thật chốt theo run id), `du_phong_run` + `du_phong_trang` (khởi động lại thì
+    ĐỌC TIẾP đúng run đó, không POST lại). Lỗi dừng cả lượt (hết tiền tháng, huỷ, hết giờ, nghẽn)
+    thì không chạy dự phòng.
+
+    Trần còn không đủ cho mọi trang thiếu (`can_du_phong_fb`): chạy cho số trang ĐẦU vừa phần còn
+    lại, phần còn lại ghi `bo_qua_trang` + `bo_qua` (lý do). `meta["du_phong"]` = {"actor",
+    "trang" (đã gửi dự phòng), "so_item", "bo_qua_trang", "bo_qua", "loi"} — bên gọi lưu vào phần
+    và đưa lý do vào lỗi nguồn (`ly_do_trang_fb`)."""
+    dp = ph.get("du_phong") or {}
+    urls = list(ph.get("urls") or (ph.get("payload") or {}).get("pageUrls") or [])
+    if not dp or not urls or getattr(loi, "ma", "") in _KHONG_DU_PHONG:
+        return items, meta, loi
+    co = {b["_goc"].get("inputUrl") for tk in doc_thedoor(items, urls).values()
+          for b in tk["bai"]}
+    thieu = [u for u in urls if u not in co]
+    if not thieu:
+        return items, meta, loi
+    da = max(float(meta.get("usd") or 0),
+             len(items) * FB_TRANG_GIA + (FB_TRANG_KHOI if meta.get("run_id") else 0.0))
+    con = math.floor((cap - da) * 100 + 1e-9) / 100
+    n = int(ph.get("n") or 5)
+    kq: dict = {"actor": dp["actor"], "trang": [], "so_item": 0}
+    if ph.get("du_phong_run"):
+        gui = [u for u in (ph.get("du_phong_trang") or thieu) if u in thieu] or thieu
+        if len(gui) < len(thieu):
+            kq["bo_qua"] = "bot khởi động lại giữa lượt — chỉ đọc tiếp run dự phòng đã gửi"
+    elif han - time.monotonic() < 30:
+        gui, kq["bo_qua"] = [], "hết giờ"
+    else:
+        k = len(thieu)
+        while k and can_du_phong_fb(dp, k, n) > con + 1e-9:
+            k -= 1
+        gui = thieu[:k]
+        if k < len(thieu):
+            kq["bo_qua"] = (f"trần phần còn {con:.2f} USD, dự phòng cần "
+                            f"{can_du_phong_fb(dp, k + 1, n):.4f} USD cho {k + 1} trang"
+                            ).replace(".", ",")
+    kq["trang"] = gui
+    if len(gui) < len(thieu):
+        kq["bo_qua_trang"] = [u for u in thieu if u not in gui]
+    if not gui:
+        return items, {**meta, "du_phong": kq}, loi
+    import account_tool
+    pl, lim = account_tool._payload_facebook(gui, n), n * len(gui)
+
+    def ghi_run(run, m):
+        v.cap_nhat_phan(ph, run_phu=[*(ph.get("run_phu") or []), run.get("id")],
+                        du_phong_run=run.get("id"), du_phong_trang=list(gui))
+    tok = A._KHI_CO_RUN.set(ghi_run)
+    them, mdp, loi_dp = [], {}, None
+    try:
+        if ph.get("du_phong_run"):
+            them, mdp = A._doc_tiep_run(ph["du_phong_run"], lim, han, True, dp["actor"])
+        else:
+            # `tran_usd` có thể < 0,1 (sàn của `_run_actor`): tiền thật vẫn ≤ `can_du_phong_fb`
+            # vì `maxItems` = n × số trang gửi.
+            them, mdp = A._run_actor(dp["actor"], pl, lim, None, han, 0, tran_usd=con,
+                                     mot_phan=True, nen_tang=p)
+    except A.LoiApify as e:
+        loi_dp, mdp = e, e.meta
+    finally:
+        A._KHI_CO_RUN.reset(tok)
+    usd_dp = max(float(mdp.get("usd") or 0),
+                 len(them or []) * dp["gia"] + (dp["khoi"] if ph.get("du_phong_run") else 0.0))
+    if loi_dp is not None and mdp.get("khong_kiem_duoc"):
+        usd_dp = con                      # POST mơ hồ, không kiểm được: coi như đã tiêu trần
+    kq["so_item"] = len(them or [])
+    if loi_dp is not None:
+        kq["loi"] = A._che_token(str(loi_dp))[:150]
+    meta = {**meta, "usd": round(da + usd_dp, 4), "du_phong": kq}
+    return list(items) + list(them or []), meta, loi
 
 
 # ───────────────────────────── 2. tìm theo từ khoá ─────────────────────────────

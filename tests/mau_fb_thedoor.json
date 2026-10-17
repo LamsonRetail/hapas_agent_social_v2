@@ -1,0 +1,204 @@
+{
+ "nguon": "thedoor~facebook-page-scraper, run thật 17/10/2026 (hapasglobal, cắt gọn)",
+ "input": {
+  "pageUrls": [
+   "https://www.facebook.com/hapasglobal"
+  ],
+  "postsToScrape": 20,
+  "postsNewerThan": "2026-10-01"
+ },
+ "items": [
+  {
+   "post": {
+    "id": "1825684048882067",
+    "type": "regular",
+    "url": "https://www.facebook.com/100066634543565/posts/1825684048882067",
+    "id_source": "post_id",
+    "text": "CÙNG HAPAS - LÀM MỌI ĐIỀU VÌ YÊU",
+    "hashtags": []
+   },
+   "page": {
+    "id": "100066634543565",
+    "name": "HAPAS",
+    "url": "https://www.facebook.com/hapasglobal"
+   },
+   "created": {
+    "time": "Sat, 17 Oct 2026 04:40:13 GMT",
+    "timestamp": 1792212013
+   },
+   "engagement": {
+    "reactions": 19,
+    "comments": 48,
+    "shares": 17,
+    "views": 4359,
+    "reaction_breakdown": {
+     "like": 14,
+     "love": 4,
+     "haha": null,
+     "wow": null,
+     "sad": null,
+     "angry": null,
+     "care": 1
+    }
+   },
+   "video": {
+    "is_video": true,
+    "transcript": null,
+    "music": null,
+    "live_viewer_count": 0
+   },
+   "partnership": {
+    "paid": false,
+    "collaborators": [
+     {
+      "__typename": "User",
+      "id": "100066634543565",
+      "name": "HAPAS",
+      "url": "https://www.facebook.com/hapasglobal"
+     }
+    ]
+   },
+   "media": [
+    {
+     "__typename": "Video",
+     "type": "Video",
+     "id": "1825684048882067"
+    }
+   ],
+   "comments": {
+    "top_comments": [],
+    "top_comment_text": null
+   }
+  },
+  {
+   "post": {
+    "id": "1461248806106257",
+    "type": "regular",
+    "url": "https://www.facebook.com/100066634543565/posts/1461248806106257",
+    "id_source": "post_id",
+    "text": "Một bó hoa, một món quà hay những chi tiết nhỏ trong không gian HAPAS đều mang theo tinh thần ấy,  sự chăm chút dành cho những người phụ nữ luôn xứng đáng được yêu thương.\n\nMùa 20.10 này, HAPAS khoác ",
+    "hashtags": [
+     "#HAPAS",
+     "#LAMMOIDIEUVIYEU",
+     "#QUATANG2010",
+     "#HAPASXTHOM"
+    ]
+   },
+   "page": {
+    "id": "100066634543565",
+    "name": "HAPAS",
+    "url": "https://www.facebook.com/hapasglobal"
+   },
+   "created": {
+    "time": "Fri, 16 Oct 2026 14:25:02 GMT",
+    "timestamp": 1792160702
+   },
+   "engagement": {
+    "reactions": 26,
+    "comments": 0,
+    "shares": 0,
+    "views": null,
+    "reaction_breakdown": {
+     "like": 22,
+     "love": 4,
+     "haha": null,
+     "wow": null,
+     "sad": null,
+     "angry": null,
+     "care": null
+    }
+   },
+   "video": {
+    "is_video": false,
+    "transcript": null,
+    "music": null,
+    "live_viewer_count": null
+   },
+   "partnership": {
+    "paid": false,
+    "collaborators": []
+   },
+   "media": [
+    {
+     "__typename": "Photo",
+     "type": "Photo",
+     "id": "1461245652773239"
+    },
+    {
+     "__typename": "Photo",
+     "type": "Photo",
+     "id": "1461245366106601"
+    }
+   ],
+   "comments": {
+    "top_comments": [],
+    "top_comment_text": null
+   }
+  },
+  {
+   "post": {
+    "id": "1461240539440417",
+    "type": "regular",
+    "url": "https://www.facebook.com/100066634543565/posts/1461240539440417",
+    "id_source": "post_id",
+    "text": "20.10 TẠI HAPAS | GHÉ STORE, NHẬN HOA XINH & SĂN QUÀ ĐẶC BIỆT 💐\n\nMùa 20.10 này, ghé HAPAS để chuẩn bị món quà dành cho người thương và mang về thêm những điều bất ngờ nhé!\n\n🌷 GHÉ STORE, NHẬN NGAY HOA ",
+    "hashtags": [
+     "#HAPAS",
+     "#LAMMOIDIEUVIYEU",
+     "#QUATANG2010",
+     "#HAPASXTHOM"
+    ]
+   },
+   "page": {
+    "id": "100066634543565",
+    "name": "HAPAS",
+    "url": "https://www.facebook.com/hapasglobal"
+   },
+   "created": {
+    "time": "Fri, 16 Oct 2026 14:16:12 GMT",
+    "timestamp": 1792160172
+   },
+   "engagement": {
+    "reactions": 13,
+    "comments": 1,
+    "shares": 2,
+    "views": null,
+    "reaction_breakdown": {
+     "like": 13,
+     "love": null,
+     "haha": null,
+     "wow": null,
+     "sad": null,
+     "angry": null,
+     "care": null
+    }
+   },
+   "video": {
+    "is_video": false,
+    "transcript": null,
+    "music": null,
+    "live_viewer_count": null
+   },
+   "partnership": {
+    "paid": false,
+    "collaborators": []
+   },
+   "media": [
+    {
+     "__typename": "Photo",
+     "type": "Photo",
+     "id": "1461249182772886"
+    },
+    {
+     "__typename": "Photo",
+     "type": "Photo",
+     "id": "1461241869440284"
+    }
+   ],
+   "comments": {
+    "top_comments": [],
+    "top_comment_text": null
+   }
+  }
+ ]
+}
