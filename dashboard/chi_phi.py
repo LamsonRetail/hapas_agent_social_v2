@@ -7,9 +7,9 @@ chỉ TÍNH, thuần Python, không SQL, không import module nào của Mark (v
 
 Công thức chép từ Mark — PHẢI khớp, có bài thử đối chiếu (`tests/test_dashboard_chi_phi.py`):
   • Một lượt actor (`theo_doi._uoc_phan`): (đơn vị × giá + phí khởi động actor) × hệ số 1,3; đơn
-    vị = số bài mỗi lần (TikTok/Facebook; Threads tối thiểu 10) hoặc 1 tài khoản (Instagram);
-    YouTube 0 (API miễn phí).
-  • Giá `theo_doi._GIA`, hệ số `theo_doi._HE_SO_UOC`, phí khởi động `apify_tool._START_COST`.
+    vị = số bài mỗi lần (TikTok/Facebook) hoặc 1 tài khoản (Instagram; Threads — actor hồ sơ từ
+    17/10/2026); YouTube 0 (API miễn phí).
+  • Giá `theo_doi._GIA`, hệ số `theo_doi._HE_SO_UOC`, phí khởi động `theo_doi._KHOI_NGUON`.
 Dự báo cấp tháng:
   • Mỗi nguồn ĐANG theo dõi chạy (số ngày) / chu_ky_ngay lượt; phần tiền theo bài/tài khoản tính
     riêng từng nguồn.
@@ -32,13 +32,18 @@ VN = datetime.timezone(datetime.timedelta(hours=7))
 #: `theo_doi._GIA` — giá đo thật: Facebook theo bài, Instagram theo tài khoản (25/09/2026);
 #: Threads (16/10/2026) theo bài, tối thiểu `TH_TOI_THIEU_BAI` bài mỗi tài khoản; TikTok qua TikTok
 #: API (16/10/2026) 0,0012/bài (nguồn 5 bài = 2 yêu cầu × 0,003 USD — giá thật đo 17/10/2026).
+#: Threads từ 17/10/2026: actor HỒ SƠ scrapersdelight, 0,002 USD mỗi TÀI KHOẢN (kèm 4–10 bài mới
+#: nhất, không phí khởi động) — như Instagram tính theo tài khoản.
 GIA = {"tiktok": 0.0012, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0,
-       "threads": 0.0025}
+       "threads": 0.002}
 #: `theo_doi._HE_SO_UOC` — ước tính chừa hao hụt (bài ghim, phí lẻ…).
 HE_SO_UOC = 1.3
-#: `apify_tool._START_COST` — phí khởi động MỖI lượt actor. Threads: actor ép 4 GB RAM, gói
+#: `apify_tool._START_COST` — phí khởi động MỖI lượt actor tìm bài. Threads: actor ép 4 GB RAM, gói
 #: FREE 0,02 USD/GB = 0,08 USD (đo 16/10/2026).
 START_COST = {"instagram": 0.016, "threads": 0.08, "facebook": 0.00005}
+#: `theo_doi._KHOI_NGUON` — phí khởi động mỗi lượt actor THEO DÕI NGUỒN: như trên, trừ Threads (actor
+#: hồ sơ không có phí khởi động, 17/10/2026).
+KHOI_NGUON = {**START_COST, "threads": 0.0}
 #: `theo_doi.TH_TOI_THIEU_BAI` / `TH_TOI_DA_MOI_LUOT` — actor Threads lấy (và tính tiền) ≥ 10 bài
 #: mỗi tài khoản / từ khoá; ≤ 20 tài khoản hoặc từ khoá mỗi lượt.
 TH_TOI_THIEU_BAI = 10
@@ -165,27 +170,29 @@ def _so(v, mac_dinh: int) -> int:
 
 
 def _so_bai_th(p, so_bai: int) -> int:
-    """Bản sao `theo_doi._so_bai_nguon`: Threads lấy (và tính tiền) tối thiểu 10 bài/tài khoản."""
+    """Bản sao `theo_doi._so_bai_nguon`: Threads gom lượt theo số bài ≥ 10 (mức của lượt dự phòng
+    futurizerush); tiền nguồn Threads tính theo tài khoản (`don_vi`)."""
     return max(TH_TOI_THIEU_BAI, so_bai) if p == "threads" else so_bai
 
 
 def don_vi(n: dict) -> int:
-    """Đơn vị tính tiền mỗi lượt của một nguồn: số bài (TikTok/Facebook; Threads ≥ 10), 1 tài
-    khoản (Instagram — actor trả 12 bài mới nhất bất kể số bài), 0 với YouTube."""
+    """Đơn vị tính tiền mỗi lượt của một nguồn: số bài (TikTok/Facebook), 1 tài khoản (Instagram —
+    actor trả 12 bài mới nhất; Threads — actor hồ sơ trả 4–10 bài mới nhất, 17/10/2026), 0 với
+    YouTube."""
     p = n.get("nen_tang")
     if not GIA.get(p):
         return 0
-    return 1 if p == "instagram" else _so_bai_th(p, _so(n.get("so_bai_moi_lan"), 5))
+    return 1 if p in ("instagram", "threads") else _so_bai_th(p, _so(n.get("so_bai_moi_lan"), 5))
 
 
 def uoc_mot_luot(p: str, so_nguon: int, so_bai: int) -> float:
     """Bản sao `theo_doi._uoc_phan`: USD một lượt actor gồm `so_nguon` nguồn, mỗi nguồn `so_bai`
-    bài (Instagram tính theo tài khoản; Threads ≥ 10 bài), cộng phí khởi động, nhân hệ số."""
+    bài (Instagram, Threads tính theo tài khoản), cộng phí khởi động (`KHOI_NGUON`), nhân hệ số."""
     gia = GIA.get(p, 0.0)
     if not gia or not so_nguon:
         return 0.0
-    dv = so_nguon if p == "instagram" else so_nguon * _so_bai_th(p, so_bai)
-    return round((dv * gia + START_COST.get(p, 0.0)) * HE_SO_UOC, 4)
+    dv = so_nguon if p in ("instagram", "threads") else so_nguon * _so_bai_th(p, so_bai)
+    return round((dv * gia + KHOI_NGUON.get(p, 0.0)) * HE_SO_UOC, 4)
 
 
 def chi_phi_luot_nguon(n: dict) -> float:
@@ -195,8 +202,8 @@ def chi_phi_luot_nguon(n: dict) -> float:
 
 
 def phi_khoi_dong_ngay(p: str) -> float:
-    """Phí khởi động actor một ngày quét của nền tảng (đã nhân hệ số)."""
-    return START_COST.get(p, 0.0) * HE_SO_UOC if GIA.get(p) else 0.0
+    """Phí khởi động actor theo dõi nguồn một ngày quét của nền tảng (đã nhân hệ số)."""
+    return KHOI_NGUON.get(p, 0.0) * HE_SO_UOC if GIA.get(p) else 0.0
 
 
 def chi_phi_thang_nguon(n: dict, so_ngay: float = NGAY_THANG_CAU_HINH) -> float:
@@ -610,7 +617,9 @@ def du_bao_do_phu(du_an: dict, lan_cuoi: datetime.datetime | None,
 
 def hang_so_cho_trinh_duyet() -> dict:
     """Hằng số cho phép tính lại ngay trên trình duyệt khi sửa số bài / chu kỳ / cấu hình."""
-    return {"gia": GIA, "he_so": HE_SO_UOC, "start": START_COST, "ngay": NGAY_THANG_CAU_HINH,
+    # "start": phí khởi động actor THEO DÕI NGUỒN (trang Nguồn — nguon.js); tìm theo từ khoá dùng
+    # "tk_khoi".
+    return {"gia": GIA, "he_so": HE_SO_UOC, "start": KHOI_NGUON, "ngay": NGAY_THANG_CAU_HINH,
             "tk_gia": TK_GIA, "tk_khoi": TK_KHOI, "tk_fb_toi_da": TK_FB_TOI_DA,
             "tk_ig_so_tu": TK_IG_TOI_DA_TU, "bl_gia": BL_GIA, "bl_khoi": BL_KHOI_DONG,
             "bl_uoc_moi_bai": BL_UOC_MOI_BAI, "gioi_han": GIOI_HAN, "nen_tang": NEN_TANG,

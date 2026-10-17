@@ -60,14 +60,23 @@ _TEN = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok", "fac
 #: 0,0012/bài (nhiều bài thì thực tế thấp
 #: hơn, ước tính dư). Đo @hapas.official 20 bài: 3 yêu cầu = 0,006 USD (clockworks cũ 0,06, báo
 #: "Profile has no videos"). Giữ dạng "giá × bài" để công thức trên trình duyệt vẫn khớp.
+#: Threads từ 17/10/2026: actor HỒ SƠ scrapersdelight (`A._ACTORS["threads_ho_so"]`) tính THEO TÀI
+#: KHOẢN như Instagram — 0,002 USD/hồ sơ kèm 4–10 bài mới nhất, không phí khởi động (đo @hapas.vn:
+#: 8.434 follower, 4 bài, 0,002 USD). Chế độ "user" của futurizerush ((10 × 0,0025 + 0,08) × 1,3 =
+#: 0,137 USD/tài khoản/lượt) chỉ còn làm DỰ PHÒNG khi actor hồ sơ hỏng cả lượt (`_du_phong_threads`).
 _GIA = {"tiktok": 0.0012, "facebook": 0.005, "instagram": 0.0026, "youtube": 0.0,
-        "threads": 0.0025}
+        "threads": A.TH_HO_SO_GIA}
+#: Phí khởi động MỖI lượt actor theo dõi nguồn: như `apify_tool._START_COST` (actor tìm bài),
+#: trừ Threads — actor hồ sơ không có phí khởi động (512 MB). Bản sao `dashboard.chi_phi.KHOI_NGUON`.
+_KHOI_NGUON = {**A._START_COST, "threads": 0.0}
 # Threads (chủ dự án 16/10/2026: "thêm listening threads"). Actor futurizerush~meta-threads-scraper
 # — đọc input schema + chạy thử 16/10/2026: chế độ "search" (từ khoá, ≤ 20 từ/lượt, lọc ngày
 # start_date/end_date phía actor, "recent" bài mới trước) và "user" (bài mới nhất của ≤ 20 tài
 # khoản/lượt, KHÔNG lọc ngày); `max_posts` là trần MỖI từ/tài khoản, tối thiểu 10; actor không dừng
 # ở `maxItems`, chỉ trần USD chặn được. Bình luận (trả lời cấp 1) qua actor riêng của
 # `deep_dive_tool` (futurizerush~threads-replies-scraper, ≤ 20 bài/lượt, 10–300 trả lời/bài).
+# Từ 17/10/2026 NGUỒN Threads (theo dõi tài khoản) đi actor hồ sơ scrapersdelight (`_GIA`); chế độ
+# "user" ở trên chỉ còn là lượt dự phòng (`_du_phong_threads`).
 TH_TOI_THIEU_BAI = 10        # max_posts tối thiểu của actor: mỗi tài khoản/từ khoá trả tiền ≥ 10 bài
 TH_TOI_DA_MOI_LUOT = 20      # tài khoản (chế độ "user") hoặc từ khoá (chế độ "search") mỗi lượt
 # Threads ĐƯỜNG 2 (17/10/2026, chủ dự án duyệt): scrapersdelight~threads-keyword-search-scraper chạy
@@ -159,16 +168,23 @@ def _so_hay_none(v) -> int | None:
 
 # ───────────────────────────── ước tính + phần ─────────────────────────────
 def _uoc_phan(p: str, so_nguon: int, n: int) -> float:
-    """USD ước tính của MỘT lượt actor: `so_nguon` nguồn, mỗi nguồn `n` bài (Instagram tính theo
-    tài khoản; Threads tối thiểu `TH_TOI_THIEU_BAI` bài/tài khoản), cộng phí khởi động của actor,
+    """USD ước tính của MỘT lượt actor: `so_nguon` nguồn, mỗi nguồn `n` bài (Instagram, Threads —
+    actor hồ sơ, 17/10/2026 — tính theo tài khoản), cộng phí khởi động của actor (`_KHOI_NGUON`),
     nhân hệ số hao hụt."""
     gia = _GIA.get(p, 0.0)
     if not gia or not so_nguon:
         return 0.0
-    if p == "threads":
-        n = max(TH_TOI_THIEU_BAI, n)
-    don_vi = so_nguon if p == "instagram" else so_nguon * n
-    return round((don_vi * gia + A._START_COST.get(p, 0.0)) * _HE_SO_UOC, 4)
+    don_vi = so_nguon if p in ("instagram", "threads") else so_nguon * n
+    return round((don_vi * gia + _KHOI_NGUON.get(p, 0.0)) * _HE_SO_UOC, 4)
+
+
+def _uoc_phan_user_threads(so_nguon: int, n: int) -> float:
+    """USD ước tính một lượt DỰ PHÒNG Threads (futurizerush chế độ "user"): mỗi tài khoản ≥ 10 bài
+    × 0,0025 + phí khởi động 0,08 (ép 4 GB, gói FREE), nhân hệ số."""
+    if not so_nguon:
+        return 0.0
+    return round((so_nguon * max(TH_TOI_THIEU_BAI, n) * A._UNIT_COST["threads"]
+                  + A._START_COST["threads"]) * _HE_SO_UOC, 4)
 
 
 def _so_bai_nguon(x: dict) -> int:
@@ -200,10 +216,18 @@ def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
             if p == "youtube":
                 ph.update(actor="youtube", uoc_usd=0.0)
             elif p == "threads":
+                # 17/10/2026: actor HỒ SƠ (0,002 USD/tài khoản, 4–10 bài mới nhất) thay chế độ
+                # "user" của futurizerush (0,137 USD/tài khoản/lượt); `du_phong` giữ đủ thông tin
+                # để `_du_phong_threads` dựng lượt futurizerush khi actor hồ sơ hỏng cả lượt.
                 ten = [_chuan_dinh_danh(p, x["dinh_danh"]) for x in ds]
-                ph.update(actor=A._ACTORS["threads"], mem=A._MEMORY.get("threads"),
-                          payload={"mode": "user", "usernames": ten, "max_posts": n},
-                          limit=n * len(ten), uoc_usd=_uoc_phan(p, len(ds), n))
+                ph.update(actor=A._ACTORS["threads_ho_so"],
+                          payload={"profiles": ten, "includePosts": True}, limit=len(ten),
+                          khoi=0.0, uoc_usd=_uoc_phan(p, len(ds), n),
+                          du_phong={"actor": A._ACTORS["threads"], "mem": A._MEMORY.get("threads"),
+                                    "payload": {"mode": "user", "usernames": ten, "max_posts": n},
+                                    "limit": n * len(ten), "gia": A._UNIT_COST["threads"],
+                                    "khoi": A._START_COST["threads"],
+                                    "uoc_usd": _uoc_phan_user_threads(len(ds), n)})
             else:
                 ten = [x["dinh_danh"].lstrip("@") for x in ds]
                 if p == "tiktok":
@@ -512,8 +536,33 @@ def _doc_ket_qua(p: str, items: list, n: int) -> dict[str, dict]:
     if p == "instagram":
         return account_tool._doc_instagram(items, 12)
     if p == "threads":
+        # Actor hồ sơ (dòng có `recent_posts`/`follower_count`) hoặc dự phòng futurizerush "user".
+        if any(isinstance(it, dict) and ("recent_posts" in it or "follower_count" in it)
+               for it in items):
+            return _doc_threads_ho_so(items)
         return _doc_threads(items)
     return account_tool._doc_facebook(items)
+
+
+def _doc_threads_ho_so(items: list) -> dict[str, dict]:
+    """Item scrapersdelight profile → {tài khoản: hồ sơ + bài} cùng dạng `_doc_threads` (để
+    `_dong_tu_tai_khoan` dùng chung). Link bài đúng dạng futurizerush (`apify_tool._link_threads`) —
+    khoá kho trùng với bài cùng tài khoản mà lượt tìm theo từ khoá đã ghi. Actor không có lượt xem:
+    `view` None (kho giữ số cũ). Hồ sơ riêng tư / chưa bật Threads → ghi chú, không bài."""
+    ra: dict[str, dict] = {}
+    for k, x in A.doc_ho_so_threads(items).items():
+        k = _chuan_dinh_danh("threads", k)
+        goc = next((it for it in items if isinstance(it, dict)
+                    and _chuan_dinh_danh("threads", str(it.get("username") or "")) == k), {})
+        ghi = ("tài khoản Threads riêng tư" if goc.get("is_private")
+               else "tài khoản chưa bật Threads" if goc.get("has_threads_profile") is False
+               else "")
+        ra[k] = {"ho_so": x["ho_so"], "ghi_chu": ghi, "bai": [{
+            "ngay": dt, "view": None, "like": d["likes"], "binh_luan": d["comments"],
+            "share": d["shares"], "noi_dung": d["text"], "link": d["link"],
+            "hashtag": [t.strip() for t in str(d["hashtags"] or "").split(",") if t.strip()],
+            "_goc": d["__goc"]} for d, dt in x["bai"]]}
+    return ra
 
 
 def _doc_threads(items: list) -> dict[str, dict]:
@@ -802,6 +851,29 @@ def _chay_actor(v, p: str, ph: dict, cap: float, han: float,
     return items or [], meta, loi, None
 
 
+def _du_phong_threads(v, ph: dict, ds: list[dict]) -> bool:
+    """Thêm phần DỰ PHÒNG futurizerush (chế độ "user") cho các nguồn của phần hồ sơ Threads `ph`
+    vào cuối danh sách phần Threads của việc — vòng phần của `_chay_viec` đi tiếp tới nó ngay trong
+    lượt này, cùng kỷ luật tiền (ghi run id, đọc tiếp khi khởi động lại, trần = ước tính × 1,5 kẹp
+    phần còn của tháng). Id cố định `<id>-du-phong`: khởi động lại không tạo lần hai. -> True khi
+    đã giao (nguồn không ghi lỗi ở phần hồ sơ)."""
+    dp = ph.get("du_phong") or {}
+    if not dp.get("actor") or not ds:
+        return False
+    ma = f"{ph['id']}-du-phong"
+    with v._khoa:
+        cac = v.d.setdefault("nen_tang", {}).setdefault("threads", {"phan": []})["phan"]
+        if not any(x.get("id") == ma for x in cac):
+            cac.append({"id": ma, "nen_tang": "threads", "nguon": [int(x["id"]) for x in ds],
+                        "trang_thai": "cho", "n": ph.get("n"), "gia": dp.get("gia"),
+                        "khoi": dp.get("khoi"), "actor": dp["actor"], "mem": dp.get("mem"),
+                        "payload": dp.get("payload"), "limit": dp.get("limit"),
+                        "uoc_usd": dp.get("uoc_usd"), "la_du_phong": ph["id"]})
+            v.luu()
+    v.cap_nhat_phan(ph, chuyen_du_phong=ma)
+    return True
+
+
 def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float) -> float:
     """Một lượt actor quét bài của một phần. -> USD theo sổ của phần."""
     import quet_lon
@@ -815,6 +887,14 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
         for nid, dong in kq.items():
             if not dong:
                 loi_nguon[nid] = A._che_token(str(loi))[:200]
+    # Actor hồ sơ Threads hỏng CẢ lượt (lỗi, hoặc 0 hồ sơ cho mọi tài khoản xin): giao các nguồn
+    # cho lượt dự phòng futurizerush — lỗi nguồn ghi ở lượt đó, không ghi ở đây (không thì nguồn bị
+    # đánh lỗi dù dự phòng lấy được bài). Chỉ vài tài khoản thiếu thì KHÔNG dự phòng: thường là tài
+    # khoản không có Threads / đổi tên — dự phòng mỗi ngày mất 0,137 USD vô ích.
+    if (p == "threads" and ph.get("du_phong") and not items
+            and getattr(loi, "ma", "") not in ("HET_TIEN_THANG", "DA_HUY")
+            and _du_phong_threads(v, ph, ds)):
+        loi_nguon = {}
     _ghi_phan(v, p, ph, kq, loi_nguon)
     tien = TDA.tien_phan(p, ph, items, meta)
     if loi is not None and meta.get("khong_kiem_duoc"):
@@ -3000,6 +3080,13 @@ def _chay_viec(v) -> tuple[str, str]:
         for _, ph in v.cac_phan():
             for k, x in (ph.get("loi_nguon") or {}).items():
                 loi[int(k)] = str(x)
+            if ph.get("chuyen_du_phong"):
+                # Phần hồ sơ Threads hỏng cả lượt đã giao nguồn cho phần dự phòng (17/10/2026):
+                # kết quả nguồn tính theo phần dự phòng, không đánh lỗi theo phần này.
+                ghi_chu.append(f"Threads: actor hồ sơ không trả hồ sơ nào "
+                               f"({ph.get('ma') or 'OK'}) — chạy dự phòng futurizerush cho "
+                               f"{len(ph.get('nguon') or [])} tài khoản")
+                continue
             if ph.get("trang_thai") in ("xong", "mot_phan"):
                 xong_ids.update(int(i) for i in ph.get("nguon") or [])
             elif ph.get("trang_thai") == "loi" and ph.get("ma") not in ("NGAN_SACH", "QUA_GIO"):

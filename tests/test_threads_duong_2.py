@@ -354,6 +354,66 @@ def test_giu_cho_luot_va_duong_2_theo_san_luong():
     assert T.uoc_th2(T.cau_hinh_th2(da), TU21, {"ve_tu": VE_TU21}) == round(23 * 0.0013, 4)
 
 
+# ───────────────────────────── nguồn Threads qua actor hồ sơ (mục 3) ─────────────────────────────
+def _ho_so(ngay=1):
+    hs = copy.deepcopy(MAU["ho_so"])
+    for x in hs:
+        x["recent_posts"] = _gan_ngay(x["recent_posts"], "posted_at", ngay)
+    return hs
+
+
+def test_doc_ho_so_threads_cung_dang_kho():
+    kq = T._doc_ket_qua("threads", _ho_so(), 10)
+    assert set(kq) == {"kenh_mau.vn"}
+    tk = kq["kenh_mau.vn"]
+    assert tk["ho_so"] == {"ten": "KÊNH MẪU", "tai_khoan": "kenh_mau.vn", "followers": 8434,
+                           "link": "https://www.threads.com/@kenh_mau.vn"} and not tk["ghi_chu"]
+    assert len(tk["bai"]) == 4
+    b = tk["bai"][0]
+    assert b["link"] == "https://www.threads.com/@kenh_mau.vn/post/MAUHS00000"
+    assert (b["view"], b["like"], b["binh_luan"], b["share"]) == (None, 694, 6, 46)
+    assert b["hashtag"] == ["quatang"] and b["ngay"].tzinfo
+    # Cùng bài mà đường tìm theo từ khoá (futurizerush) ghi → cùng khoá kho (băm link).
+    assert T._khoa_bai("threads", b["link"]) == T._khoa_bai(
+        "threads", A._link_threads("kenh_mau.vn", "MAUHS00000", ""))
+    rieng = [dict(MAU["ho_so"][0], username="kin.dao", is_private=True, recent_posts=[])]
+    assert T._doc_ket_qua("threads", rieng, 10)["kin.dao"]["ghi_chu"] == "tài khoản Threads riêng tư"
+
+
+def test_chay_viec_nguon_threads_qua_actor_ho_so(mo):  # noqa: F811
+    from test_theo_doi import GiaApify, GiaKho, _nguon
+    kho = GiaKho(nguon=[_nguon(1, "threads", "kenh_mau.vn", loai="kenh_nha"),
+                        _nguon(2, "threads", "khong.co.threads")]).cai(mo)
+    ap = GiaApify(mo, items=_ho_so(), usd=0.002)
+    v = GiaViec({p: {"phan": c} for p, c in T.chia_phan(kho.nguon).items()}, [1, 2])
+    st, cau = contextvars.copy_context().run(T.chay_viec, v)
+    (g,) = ap.gui                                   # một tài khoản thiếu: KHÔNG chạy dự phòng
+    assert g["actor"] == A._ACTORS["threads_ho_so"] and g["nen_tang"] == "threads"
+    assert g["payload"] == {"profiles": ["kenh_mau.vn", "khong.co.threads"], "includePosts": True}
+    assert g["limit"] == 2 and g["tran_usd"] == 0.1          # trần tối thiểu (ước 0,0052 × 1,5)
+    (_, _, kieu, rows), = kho.bai
+    assert kieu == "theo_doi" and len(rows) == 4 and {r["ly_do_giu"] for r in rows} == {"kenh_nha"}
+    assert {r["xem"] for r in rows} == {None} and {r["followers"] for r in rows} == {8434}
+    ok, loi = kho.danh_dau[0]
+    assert ok == [1] and "không lấy được bài" in loi[2]
+    ph = v.d["nen_tang"]["threads"]["phan"]
+    assert len(ph) == 1 and ph[0]["usd_so"] == pytest.approx(0.002)
+    assert st == "xong_mot_phan", cau
+
+
+def test_nhap_nguon_threads_hapas_vn_qua_dashboard():
+    """Người vận hành thêm `@hapas.vn` (Internal channel) trên trang Nguồn — định danh khớp Mark."""
+    from dashboard import nhap_lieu as NL
+    for vao in ("hapas.vn", "@hapas.vn", "https://www.threads.com/@hapas.vn",
+                "threads.net/@HAPAS.vn/"):
+        assert NL.chuan_dinh_danh("threads", vao) == ("hapas.vn", "https://www.threads.com/@hapas.vn")
+    assert T._chuan_dinh_danh("threads", "hapas.vn") == "hapas.vn" and "kenh_nha" in NL.LOAI_NGUON
+    ph = T.chia_phan([dict(DU_AN, id=7, nen_tang="threads", dinh_danh="hapas.vn", loai="kenh_nha",
+                           so_bai_moi_lan=5)])["threads"][0]
+    assert ph["payload"] == {"profiles": ["hapas.vn"], "includePosts": True}
+    assert ph["uoc_usd"] == round(0.002 * 1.3, 4) == CP.uoc_mot_luot("threads", 1, 5)
+
+
 # ───────────────────────────── dashboard ─────────────────────────────
 def test_trang_ngan_sach_cong_duong_2_va_luu_khong_mat_cau_hinh():
     from test_dashboard_app import QL, dang_nhap, tao, thong_bao

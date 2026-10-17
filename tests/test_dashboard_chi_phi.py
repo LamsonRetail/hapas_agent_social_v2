@@ -117,8 +117,10 @@ def test_ngay_con_lai_theo_thang_gio_vn(luc, con, so_ngay):
 
 def test_hang_so_cho_trinh_duyet():
     hs = CP.hang_so_cho_trinh_duyet()
+    # "start" = phí khởi động actor THEO DÕI NGUỒN (17/10/2026: Threads qua actor hồ sơ, 0 USD).
     assert {k: hs[k] for k in ("gia", "he_so", "start", "ngay")} == {
-        "gia": CP.GIA, "he_so": 1.3, "start": CP.START_COST, "ngay": 30}
+        "gia": CP.GIA, "he_so": 1.3, "start": CP.KHOI_NGUON, "ngay": 30}
+    assert CP.KHOI_NGUON == {**CP.START_COST, "threads": 0.0}
     # Đợt 2e: đủ hằng số để trang Ngân sách tính lại ước tính cấu hình ngay trên trình duyệt.
     assert hs["tk_gia"] == CP.TK_GIA and hs["bl_gia"] == CP.BL_GIA and hs["gioi_han"] == CP.GIOI_HAN
 
