@@ -73,7 +73,7 @@ def test_chon_tac_gia_bo_nguon_dang_theo_doi_va_trung():
 def test_chia_yeu_cau_khong_vuot_tran_va_phan_hashtag(cid, uid):
     tag, tg = ["t1", "t2", "t3", "t4"], [f"u{i}" for i in range(6)]
     n = int(KDP.TRAN_MAC_DINH / TT.GIA_YEU_CAU + 1e-9)
-    assert n == 66
+    assert n == 100          # 0,20 USD / 0,002 (giá thật từng run, 18/10/2026)
     ttag, ttg = KDP.chia_yeu_cau(n, tag, tg, cid, uid)
     dung = (sum(ttag.values()) + sum(0 if cid.get(t) else 1 for t in ttag)
             + sum(ttg.values()) + sum(0 if uid.get(u) else 1 for u in ttg))
@@ -216,7 +216,8 @@ def test_lay_mau_loi_mot_tag_khong_mat_phan_khac_het_tien_thi_khoa(monkeypatch):
 
 
 def test_tran_yeu_cau_chan_tong_so_run(monkeypatch):
-    """0,20 USD ⇒ ≤ 66 yêu cầu dù kế hoạch xin nhiều hơn (trần cứng ở bộ đếm)."""
+    """0,20 USD ⇒ ≤ 100 yêu cầu (0,002 USD/yêu cầu) dù kế hoạch xin nhiều hơn (trần cứng ở bộ
+    đếm)."""
     api = GiaApi(monkeypatch, lambda p: {"status_code": 0, "has_more": 1, "cursor": 999999,
                                          "max_cursor": "x", "aweme_list": [
                                              _aw(time.time_ns(), "kol", "#hapas", BAY)]})
@@ -225,7 +226,7 @@ def test_tran_yeu_cau_chan_tong_so_run(monkeypatch):
         KDP.lay_mau, {f"t{i}": 50 for i in range(4)}, {f"u{i}": 50 for i in range(6)},
         {f"t{i}": str(i) for i in range(4)}, {f"u{i}": str(i) for i in range(6)}, ngan,
         BAY - datetime.timedelta(days=3650))
-    assert len(api.goi) == ngan.da == 66
+    assert len(api.goi) == ngan.da == 100
 
 
 # ───────────────────────────── trong lượt /theodoi ─────────────────────────────
@@ -345,7 +346,7 @@ def test_kiem_do_phu_tat_het_tien_khoi_dong_lai(mo):  # noqa: F811
     KhoDp(mo)
     api = GiaApi(mo, _tra_mau(BAY))
     assert _chay_dp(GiaViec({}, []), dict(DU_AN, cau_hinh={"do_phu": {"bat": False}})) == {}
-    kq = _chay_dp(GiaViec({}, []), con=0.01)
+    kq = _chay_dp(GiaViec({}, []), con=0.008)          # 4 yêu cầu < tối thiểu 5
     assert "ngân sách còn 0,01 USD" in kq["bo_qua"] and not api.goi
     assert KDP.cau_ghi_chu(kq) == [f"kiểm độ phủ: bỏ qua ({kq['bo_qua']})"]
     v = GiaViec({}, [], con=200)
@@ -358,9 +359,9 @@ def test_kiem_do_phu_tat_het_tien_khoi_dong_lai(mo):  # noqa: F811
     # Review LOW: phần dừng giữa chừng mang tiền đã tiêu (2 run).
     assert moc["ma"] == "KHONG_KIEM_DUOC" and moc["usd_so"] == kq["usd"] == pytest.approx(
         2 * KDP.GIA_YEU_CAU_THAT)
-    # Trần riêng 0,03 USD ⇒ ≤ 8 yêu cầu theo giá thật 0,0034.
+    # Trần riêng 0,03 USD ⇒ ≤ 15 yêu cầu theo giá thật 0,002.
     kq = _chay_dp(GiaViec({}, []), dict(DU_AN, cau_hinh={"do_phu": {"tran_usd": 0.03}}))
-    assert 0 < len(api.goi) <= 8 and kq["usd"] <= 0.03 + 1e-9
+    assert 0 < len(api.goi) <= 15 and kq["usd"] <= 0.03 + 1e-9
 
 
 def test_kiem_do_phu_khong_tieu_dong_nao_thi_tra_moc_cu(mo):  # noqa: F811

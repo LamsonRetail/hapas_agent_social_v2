@@ -341,7 +341,11 @@ def test_dashboard_bo_loc_nhan_threads():
         CS.doc_bo_loc({"nen_tang": "twitter"})
 
 
-def test_dashboard_chi_phi_khop_mark_threads():
+def test_dashboard_chi_phi_khop_mark_threads(monkeypatch):
+    import tiktok_api as TT
+    # Dashboard tính nguồn TikTok theo đường TikTok API (production, 18/10/2026: theo yêu cầu);
+    # conftest tắt API → so cùng đường đó.
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
     assert CP.GIA == T._GIA and CP.START_COST == A._START_COST and A._START_COST["threads"] == 0.08
     assert CP.KHOI_NGUON == T._KHOI_NGUON and T._KHOI_NGUON["threads"] == 0.0
     assert CP.TK_GIA == T._TK_GIA and CP.TK_KHOI == T._TK_KHOI

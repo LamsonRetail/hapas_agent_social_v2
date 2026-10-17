@@ -7,8 +7,9 @@ chỉ TÍNH, thuần Python, không SQL, không import module nào của Mark (v
 
 Công thức chép từ Mark — PHẢI khớp, có bài thử đối chiếu (`tests/test_dashboard_chi_phi.py`):
   • Một lượt actor (`theo_doi._uoc_phan`): (đơn vị × giá + phí khởi động actor) × hệ số 1,3; đơn
-    vị = số bài mỗi lần (TikTok/Facebook) hoặc 1 tài khoản (Instagram; Threads — actor hồ sơ từ
-    17/10/2026); YouTube 0 (API miễn phí).
+    vị = số bài mỗi lần (Facebook), số YÊU CẦU (TikTok API, 18/10/2026: 1 hồ sơ + ⌈bài/10⌉ trang
+    + 1 trang bù bài ghim) hoặc 1 tài khoản (Instagram; Threads — actor hồ sơ từ 17/10/2026);
+    YouTube 0 (API miễn phí).
   • Giá `theo_doi._GIA`, hệ số `theo_doi._HE_SO_UOC`, phí khởi động `theo_doi._KHOI_NGUON` (actor
     theo dõi riêng từ 17/10/2026: Facebook thedoor, Threads hồ sơ), không có thì
     `apify_tool._START_COST`.
@@ -32,14 +33,16 @@ VN = datetime.timezone(datetime.timedelta(hours=7))
 
 # ─── chép từ Mark (bài thử đối chiếu; đổi bên Mark thì đổi ở đây) ───
 #: `theo_doi._GIA` — giá đo thật: Facebook theo bài, Instagram theo tài khoản (25/09/2026);
-#: Threads (16/10/2026) theo bài, tối thiểu `TH_TOI_THIEU_BAI` bài mỗi tài khoản; TikTok qua TikTok
-#: API (16/10/2026) 0,0012/bài (nguồn 5 bài = 2 yêu cầu × 0,003 USD — giá thật đo 17/10/2026).
+#: TikTok qua TikTok API theo YÊU CẦU: 0,002 USD = giá bảng = giá thật từng run (đo lại 18/10/2026:
+#: 14/14 run 0,0020, `tiktok_api.GIA_YEU_CAU`) — trước 0,0012/bài theo giả định 0,003/yêu cầu.
 #: Facebook 17/10/2026: thedoor~facebook-page-scraper 0,0025 USD/bài (FREE) + 0,01 USD/run khởi động
 #: (`KHOI_NGUON`); actor cũ (0,005/bài) chỉ còn làm dự phòng.
 #: Threads từ 17/10/2026: actor HỒ SƠ scrapersdelight, 0,002 USD mỗi TÀI KHOẢN (kèm 4–10 bài mới
 #: nhất, không phí khởi động) — như Instagram tính theo tài khoản.
-GIA = {"tiktok": 0.0012, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
+GIA = {"tiktok": 0.002, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
        "threads": 0.002}
+#: `tiktok_api.BAI_MOI_TRANG` — userPosts trả 10 bài mỗi yêu cầu.
+TT_BAI_MOI_TRANG = 10
 #: `theo_doi._HE_SO_UOC` — ước tính chừa hao hụt (bài ghim, phí lẻ…).
 HE_SO_UOC = 1.3
 #: `apify_tool._START_COST` — phí khởi động MỖI lượt actor tìm bài. Threads: actor ép 4 GB RAM, gói
@@ -61,8 +64,9 @@ TH2_MOI_TU = 20
 TH2_LUOT = 2
 
 #: `theo_doi._BL_GIA` / `_BL_KHOI_DONG` — giá cào BÌNH LUẬN mỗi bình luận (gói FREE, 15/10/2026;
-#: Threads 16/10/2026: actor trả lời 1 GB = 0,02 USD khởi động; TikTok qua TikTok API 16/10/2026).
-BL_GIA = {"tiktok": 0.00075, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
+#: Threads 16/10/2026: actor trả lời 1 GB = 0,02 USD khởi động; TikTok qua TikTok API: 0,0004 gồm
+#: trả lời — 50 gốc/yêu cầu 0,002 USD, đo 2 video 0,0002–0,0004, sửa 18/10/2026 từ 0,00075).
+BL_GIA = {"tiktok": 0.0004, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
           "threads": 0.0025}
 BL_KHOI_DONG = {"facebook": 0.001, "threads": 0.02}
 #: `theo_doi._BL_UOC_MOI_BAI` — giữ chỗ mỗi bài khi cào hết (bl_moi_bai = 0).
@@ -81,7 +85,7 @@ TK_IG_TOI_DA_TU = 12
 TK_IG_TAB = 2
 TK_FB_TOI_DA = 20
 #: TikTok tìm theo từ khoá tính theo YÊU CẦU (`theo_doi.TK_TT_*`, `theo_doi_api.LAM_MOI_TOI_DA`).
-TK_TT_YEU_CAU = 0.003
+TK_TT_YEU_CAU = 0.002
 TK_TT_MOI_TRANG = 30
 TK_LAM_MOI = 10
 #: `theo_doi_api.MOI_TRANG` — trang "mới nhất" mỗi từ khoá TikTok trong ước tính (17/10/2026).
@@ -183,23 +187,34 @@ def _so_bai_th(p, so_bai: int) -> int:
     return max(TH_TOI_THIEU_BAI, so_bai) if p == "threads" else so_bai
 
 
+def so_yeu_cau_ho_so(n: int) -> int:
+    """Bản sao `tiktok_api.so_yeu_cau_ho_so`: 1 hồ sơ + ⌈n/10⌉ trang + 1 trang bù bài ghim."""
+    return 2 + math.ceil(max(1, int(n)) / TT_BAI_MOI_TRANG)
+
+
+def don_vi_nguon(p: str, so_bai: int) -> int:
+    """Bản sao `theo_doi.don_vi_nguon`: bài (Facebook), yêu cầu (TikTok), 1 tài khoản (Instagram —
+    actor trả 12 bài mới nhất; Threads — actor hồ sơ trả 4–10 bài mới nhất, 17/10/2026)."""
+    if p in ("instagram", "threads"):
+        return 1
+    return so_yeu_cau_ho_so(so_bai) if p == "tiktok" else int(so_bai)
+
+
 def don_vi(n: dict) -> int:
-    """Đơn vị tính tiền mỗi lượt của một nguồn: số bài (TikTok/Facebook), 1 tài khoản (Instagram —
-    actor trả 12 bài mới nhất; Threads — actor hồ sơ trả 4–10 bài mới nhất, 17/10/2026), 0 với
-    YouTube."""
+    """Đơn vị tính tiền mỗi lượt của một nguồn (`don_vi_nguon`), 0 với YouTube."""
     p = n.get("nen_tang")
     if not GIA.get(p):
         return 0
-    return 1 if p in ("instagram", "threads") else _so_bai_th(p, _so(n.get("so_bai_moi_lan"), 5))
+    return don_vi_nguon(p, _so(n.get("so_bai_moi_lan"), 5))
 
 
 def uoc_mot_luot(p: str, so_nguon: int, so_bai: int) -> float:
-    """Bản sao `theo_doi._uoc_phan`: USD một lượt actor gồm `so_nguon` nguồn, mỗi nguồn `so_bai`
-    bài (Instagram, Threads tính theo tài khoản), cộng phí khởi động (`KHOI_NGUON`), nhân hệ số."""
+    """Bản sao `theo_doi._uoc_phan`: USD TỐI ĐA một lượt actor gồm `so_nguon` nguồn × đơn vị
+    (`don_vi_nguon`) × giá, cộng phí khởi động (`KHOI_NGUON`), nhân hệ số."""
     gia = GIA.get(p, 0.0)
     if not gia or not so_nguon:
         return 0.0
-    dv = so_nguon if p in ("instagram", "threads") else so_nguon * _so_bai_th(p, so_bai)
+    dv = so_nguon * don_vi_nguon(p, so_bai)
     return round((dv * gia + _khoi_nguon(p)) * HE_SO_UOC, 4)
 
 
@@ -359,7 +374,7 @@ def _cau_hinh_fb2(du_an: dict, rieng: dict, bat_rieng: bool, so_fb: int) -> dict
 
 
 #: TikTok FEED HASHTAG (17/10/2026, `theo_doi.TK_TAG_*`): feed `challengePosts` của từ khoá một chữ,
-#: trần `so_yeu_cau` yêu cầu mỗi lượt (mặc định 5 × 0,003 USD), nhịp 20 giờ.
+#: trần `so_yeu_cau` yêu cầu mỗi lượt (mặc định 5 × 0,002 USD), nhịp 20 giờ.
 TK_TAG_YEU_CAU = 5
 TK_TAG_GIO = 20
 
@@ -736,7 +751,7 @@ def hang_so_cho_trinh_duyet() -> dict:
     # "start" / "khoi_nguon": phí khởi động actor THEO DÕI NGUỒN (trang Nguồn — nguon.js đọc
     # "khoi_nguon" trước, "start" cho trang đã nạp bản JS cũ); tìm theo từ khoá dùng "tk_khoi".
     return {"gia": GIA, "he_so": HE_SO_UOC, "start": KHOI_NGUON, "ngay": NGAY_THANG_CAU_HINH,
-            "khoi_nguon": KHOI_NGUON,
+            "khoi_nguon": KHOI_NGUON, "tt_bai_moi_trang": TT_BAI_MOI_TRANG,
             "tk_gia": TK_GIA, "tk_khoi": TK_KHOI, "tk_fb_toi_da": TK_FB_TOI_DA,
             "tk_ig_so_tu": TK_IG_TOI_DA_TU, "tk_ig_tab": TK_IG_TAB,
             "fb2": {"gia": TK_FB2_GIA, "khoi": TK_FB2_KHOI, "moi_tu": TK_FB2_MOI_TU},

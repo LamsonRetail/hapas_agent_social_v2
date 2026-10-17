@@ -56,13 +56,23 @@ import apify_tool as A
 
 ACTOR = "scraptik~tiktok-api"
 NHAN = "TikTok API (scraptik)"
-# USD mỗi yêu cầu. Bảng giá actor: 0,002 (sự kiện "request", không phí khởi động) nhưng đo THẬT
-# 17/10/2026 trên tài khoản FREE (GET /users/me/limits trước/sau): 85 yêu cầu 0,19 USD, 42 yêu cầu
-# 0,143 USD → 0,0023–0,0034 USD/yêu cầu (phí nền tảng mỗi run). Ước tính/trần/sổ dùng 0,003 cho
-# khỏi báo thiếu; tiền thật vẫn chốt theo run id (`viec_nen.chot_chi_phi`).
-GIA_YEU_CAU = 0.003
+# USD mỗi yêu cầu = giá bảng (sự kiện "request", không phí khởi động, `pricingInfos` từ
+# 01/01/2026). Đo lại 18/10/2026 theo TỪNG RUN (`usageTotalUsd` đọc sau ≥ 12 giờ, hết phí ghi trễ):
+# 14/14 run scraptik của tài khoản FREE mới đều 0,0020 USD, `chargedEventCounts` {"request": 1};
+# Σ 97 run của chu kỳ 4,5756 so với mức tài khoản 4,5819 (lệch 0,006 = lưu trữ, không phải phí
+# mỗi run). Số 0,0023–0,0034 đo 17/10 là CHÊNH MỨC TÀI KHOẢN trước/sau trong lúc agent khác chạy
+# actor Threads song song (0,155 USD/run) — không phải giá một yêu cầu. Dùng 0,003 thì ước tính,
+# trần đếm yêu cầu (`_Ngan`) và sổ đều lố 50%: kiểm độ phủ 0,20 USD chỉ gửi 58 thay vì 100 yêu cầu.
+GIA_YEU_CAU = 0.002
 TIM_MOI_TRANG = 30           # searchPosts_count tối đa thật sự trả bài (50 → 0 bài)
 BAI_MOI_TRANG = 10           # userPosts trả 10 bài/yêu cầu dù xin 30
+
+
+def so_yeu_cau_ho_so(n: int) -> int:
+    """Số yêu cầu TỐI ĐA đọc `n` bài mới nhất của MỘT tài khoản (`_ho_so_mot`): 1 hồ sơ + ⌈n/10⌉
+    trang + 1 trang bù bài ghim (bỏ `is_top`). @hapas.official 20 bài: 4 yêu cầu = 0,008 USD
+    (ước tính cũ 20 bài × 0,0012 × 1,3 = 0,031 — lố 4 lần)."""
+    return 2 + math.ceil(max(1, int(n)) / BAI_MOI_TRANG)
 BL_MOI_TRANG = 50
 TRA_LOI_MOI_TRANG = 50
 _TRAN_LUOT = 0.1             # trần USD gửi Apify cho MỘT yêu cầu (sàn của `_run_actor`)

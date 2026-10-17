@@ -243,17 +243,37 @@ def test_chia_phan_moi_nguon_dung_so_bai_cua_no():
                                             "postsToScrape": 3}
     assert ph["facebook"][0]["du_phong"]["payload"]["resultsLimit"] == 3
     assert ph["facebook"][0]["uoc_usd"] == pytest.approx((3 * 0.0025 + 0.01) * 1.3, abs=1e-4)
-    assert tt["tiktok-5"]["uoc_usd"] == pytest.approx(10 * 0.0012 * 1.3, abs=1e-4)
+    # conftest tắt TikTok API → phần đi actor cũ clockworks, tính theo VIDEO (0,003/video).
+    assert tt["tiktok-5"]["uoc_usd"] == pytest.approx(10 * 0.003 * 1.3, abs=1e-4)
+    assert tt["tiktok-5"]["gia"] == 0.003
     # Instagram: 0,0026/tài khoản, không phí khởi động (17/10/2026, `apify_tool._START_COST`).
     assert ph["instagram"][0]["uoc_usd"] == pytest.approx(0.0026 * 1.3, abs=1e-4)
 
 
-def test_cat_theo_ngan_sach():
+def test_chia_phan_tiktok_api_tinh_theo_yeu_cau(monkeypatch):
+    """18/10/2026: nguồn TikTok qua TikTok API tính theo YÊU CẦU 0,002 USD (giá thật từng run:
+    14/14 run scraptik 0,0020, chỉ sự kiện "request"). @hapas.official 20 bài = 1 hồ sơ + 2 trang +
+    1 trang bù bài ghim = 4 yêu cầu — ước tính cũ 20 × 0,0012 × 1,3 = 0,0312 USD/lượt lố 3–5 lần
+    so với 3–4 yêu cầu thật (0,006–0,008)."""
+    import tiktok_api as TT
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
+    assert TT.GIA_YEU_CAU == T._GIA["tiktok"] == T.TK_TT_YEU_CAU == 0.002
+    assert [TT.so_yeu_cau_ho_so(n) for n in (1, 5, 10, 11, 20)] == [3, 3, 3, 4, 4]
+    ph = T.chia_phan([_nguon(1, "tiktok", "hapas.official", so_bai=20),
+                      _nguon(2, "tiktok", "khac", so_bai=20)])["tiktok"][0]
+    assert ph["bo_chuyen"] == "tiktok_ho_so" and ph["gia"] == 0.002
+    assert ph["uoc_usd"] == pytest.approx(2 * 4 * 0.002 * 1.3, abs=1e-6)
+    assert T._uoc_phan("tiktok", 1, 20) == pytest.approx(0.0104, abs=1e-6)
+
+
+def test_cat_theo_ngan_sach(monkeypatch):
+    import tiktok_api as TT
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
     ds = [_nguon(1, "tiktok", "a"), _nguon(2, "tiktok", "b"), _nguon(3, "youtube", "@c"),
           _nguon(4, "instagram", "d")]
     giu, bo = T._cat_theo_ngan_sach(ds, 0.008)
-    # TikTok đầu (0,0052) vừa; thêm TikTok thứ hai thì phần 0,0104 vượt; YouTube miễn phí luôn
-    # giữ; Instagram có phí khởi động nên vượt.
+    # TikTok đầu (3 yêu cầu × 0,002 × 1,3 = 0,0078) vừa; thêm TikTok thứ hai thì phần 0,0156 vượt;
+    # YouTube miễn phí luôn giữ; Instagram (0,0034) cộng vào thì vượt.
     assert [n["id"] for n in giu] == [1, 3] and [n["id"] for n in bo] == [2, 4]
 
 

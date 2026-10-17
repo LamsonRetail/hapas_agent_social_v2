@@ -56,11 +56,11 @@ _TEN = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok", "fac
 #: Giá đo thật 25/09/2026 (`account_tool._GIA`): Facebook theo bài, Instagram theo tài khoản
 #: (actor trả 12 bài mới nhất). YouTube Data API miễn phí. Threads (16/10/2026, chế độ "user" của
 #: `apify_tool._ACTORS["threads"]`): 0,0025 USD/bài = `apify_tool._UNIT_COST`. TikTok từ
-#: 16/10/2026 qua TikTok API (`tiktok_api.ho_so`): 0,003 USD mỗi yêu cầu (giá thật
-#: đo 17/10) = 1 yêu cầu hồ sơ + 1 yêu cầu mỗi 10 bài — nguồn 5 bài (mặc định) = 0,006 →
-#: 0,0012/bài (nhiều bài thì thực tế thấp
-#: hơn, ước tính dư). Đo @hapas.official 20 bài: 3 yêu cầu = 0,006 USD (clockworks cũ 0,06, báo
-#: "Profile has no videos"). Giữ dạng "giá × bài" để công thức trên trình duyệt vẫn khớp.
+#: 16/10/2026 qua TikTok API (`tiktok_api.ho_so`), từ 18/10/2026 tính theo YÊU CẦU (giá bảng
+#: 0,002 USD = giá thật từng run, `tiktok_api.GIA_YEU_CAU`): một nguồn n bài = 1 yêu cầu hồ sơ +
+#: ⌈n/10⌉ trang + 1 trang bù bài ghim (`tiktok_api.so_yeu_cau_ho_so`). Dạng cũ "0,0012 × bài"
+#: (0,006 USD cho 5 bài, giả định 0,003/yêu cầu) báo @hapas.official 20 bài 0,031 USD/lượt =
+#: 0,936 USD/tháng trên trang Nguồn, thật 3–4 yêu cầu = 0,006–0,008 USD/lượt.
 #: Facebook từ 17/10/2026 qua thedoor~facebook-page-scraper (`theo_doi_api.FB_TRANG`): 0,0025 USD/bài
 #: (gói FREE, cùng 20 bài với actor cũ 0,005, có view video) + phí khởi động 0,01 USD/run
 #: (`_KHOI_NGUON`; actor cũ còn làm dự phòng).
@@ -68,7 +68,7 @@ _TEN = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok", "fac
 #: KHOẢN như Instagram — 0,002 USD/hồ sơ kèm 4–10 bài mới nhất, không phí khởi động (đo @hapas.vn:
 #: 8.434 follower, 4 bài, 0,002 USD). Chế độ "user" của futurizerush ((10 × 0,0025 + 0,08) × 1,3 =
 #: 0,137 USD/tài khoản/lượt) chỉ còn làm DỰ PHÒNG khi actor hồ sơ hỏng cả lượt (`_du_phong_threads`).
-_GIA = {"tiktok": 0.0012, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
+_GIA = {"tiktok": TDA.TT.GIA_YEU_CAU, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
         "threads": A.TH_HO_SO_GIA}
 #: Phí khởi động MỖI lượt actor theo dõi nguồn: như `apify_tool._START_COST` (actor tìm bài), trừ
 #: actor theo dõi riêng — Facebook thedoor 0,01 USD/run (`apify-actor-start` 1 GB, thêm
@@ -173,14 +173,21 @@ def _so_hay_none(v) -> int | None:
 
 
 # ───────────────────────────── ước tính + phần ─────────────────────────────
+def don_vi_nguon(p: str, n: int) -> int:
+    """Đơn vị tính tiền của MỘT nguồn mỗi lượt: bài (Facebook), tài khoản (Instagram, Threads —
+    actor hồ sơ, 17/10/2026), YÊU CẦU (TikTok API, 18/10/2026 — `tiktok_api.so_yeu_cau_ho_so`)."""
+    if p in ("instagram", "threads"):
+        return 1
+    return TDA.TT.so_yeu_cau_ho_so(n) if p == "tiktok" else int(n)
+
+
 def _uoc_phan(p: str, so_nguon: int, n: int) -> float:
-    """USD ước tính của MỘT lượt actor: `so_nguon` nguồn, mỗi nguồn `n` bài (Instagram, Threads —
-    actor hồ sơ, 17/10/2026 — tính theo tài khoản), cộng phí khởi động của actor (`_KHOI_NGUON`),
-    nhân hệ số hao hụt."""
+    """USD ước tính TỐI ĐA của MỘT lượt actor: `so_nguon` nguồn × đơn vị (`don_vi_nguon`) × giá,
+    cộng phí khởi động của actor (`_KHOI_NGUON`), nhân hệ số hao hụt."""
     gia = _GIA.get(p, 0.0)
     if not gia or not so_nguon:
         return 0.0
-    don_vi = so_nguon if p in ("instagram", "threads") else so_nguon * n
+    don_vi = so_nguon * don_vi_nguon(p, n)
     khoi = _KHOI_NGUON.get(p, A._START_COST.get(p, 0.0))
     return round((don_vi * gia + khoi) * _HE_SO_UOC, 4)
 
@@ -248,6 +255,11 @@ def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
                           uoc_usd=_uoc_phan(p, len(ds), n))
                 if p == "tiktok":
                     TDA.gan_ho_so(ph, ten, n)
+                    if not ph.get("bo_chuyen"):
+                        # Bảng chọn đổi về actor cũ (clockworks): tính theo VIDEO, không theo yêu
+                        # cầu — sổ (`quet_lon._so_tien`) và ước tính theo giá của actor đó.
+                        g = TDA._GIA_DU_PHONG["tiktok_ho_so"]
+                        ph.update(gia=g, uoc_usd=round(len(ds) * n * g * _HE_SO_UOC, 4))
                 elif p == "facebook":
                     # 17/10/2026: thedoor (rẻ nửa giá, có view video), actor cũ làm dự phòng.
                     TDA.gan_fb_trang(ph, [x["dinh_danh"] for x in ds], n)
@@ -1023,15 +1035,15 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
 # phễu + mốc + tiền riêng, gộp bài và bỏ trùng theo mã bài (`_bo_trung_duong_2`).
 TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram", "threads", "web")
 #: Threads = `apify_tool._UNIT_COST` / `_START_COST` (4 GB × 0,02 USD, gói FREE).
-# TikTok từ 16/10/2026: TikTok API, tính theo YÊU CẦU (0,003 USD — giá thật đo 17/10 — mỗi trang
-# ≤30 bài, mỗi từ khoá ≥1 trang) — `_TK_GIA["tiktok"]` chỉ là sổ tạm theo bài;
-# ước tính dùng `uoc_tu_khoa_nen_tang`.
+# TikTok từ 16/10/2026: TikTok API, tính theo YÊU CẦU (0,002 USD = giá thật từng run, đo lại
+# 18/10/2026 — `tiktok_api.GIA_YEU_CAU`; mỗi trang ≤30 bài, mỗi từ khoá ≥1 trang) —
+# `_TK_GIA["tiktok"]` chỉ là sổ tạm theo bài; ước tính dùng `uoc_tu_khoa_nen_tang`.
 # Instagram (17/10/2026, `apify~instagram-hashtag-scraper`): 0,0026 USD mỗi item (gói FREE,
 # `pricingInfos`), không phí khởi động; hai run mỗi lượt (`apify_tool._IG_TAB`: tab bài + reels).
 _TK_GIA = {"tiktok": 0.0001, "facebook": 0.00259, "instagram": 0.0026, "youtube": 0.0,
            "threads": 0.0025}
 _TK_KHOI = {"instagram": 0.0, "facebook": 0.00005, "threads": 0.08}
-TK_TT_YEU_CAU = 0.003        # = tiktok_api.GIA_YEU_CAU (bài thử đối chiếu)
+TK_TT_YEU_CAU = 0.002        # = tiktok_api.GIA_YEU_CAU (bài thử đối chiếu)
 TK_TT_MOI_TRANG = 30         # = tiktok_api.TIM_MOI_TRANG
 #: Nền tảng TẮT khi `du_an.cau_hinh` chưa ghi `bat` cho nó (cả tìm từ khoá lẫn bình luận): thêm
 #: nền tảng mới không tự tiêu tiền khi deploy — chủ dự án bật trên trang Ngân sách. Nền tảng cũ
@@ -2409,7 +2421,7 @@ def _them_feed_tag(v, ma: str, luot: int, tu: list[str], got: list, moc_cu: dict
 
 
 def _tien_tim_tiktok(phan_moi: list[dict], got: list, loi, tran_du_phong) -> float:
-    """Sổ tiền một lượt tìm TikTok theo GIÁ THẬT từng actor (review 16/10): TikTok API 0,003 USD
+    """Sổ tiền một lượt tìm TikTok theo GIÁ THẬT từng actor (review 16/10): TikTok API 0,002 USD
     mỗi run (= một yêu cầu); dự phòng apidojo/clockworks theo video về (nguồn ghi ở `_nguon`
     từng dòng); dự phòng lỗi không biết tiêu bao nhiêu thì tính nguyên trần của nó."""
     run = [x for x in phan_moi if x.get("run_id")]
@@ -2431,7 +2443,7 @@ TT_ACTOR = "scraptik~tiktok-api"     # = tiktok_api.ACTOR (bài thử đối chi
 
 
 # ───────────────────────────── kiểm độ phủ (17/10/2026, 2 lần/tuần) ─────────────────────────────
-DP_GIAY = 300                # giây tối thiểu còn lại (≈ 58 yêu cầu × 3 luồng + AI + ghi kho)
+DP_GIAY = 300                # giây tối thiểu còn lại (≤ 100 yêu cầu / 3 luồng × ~5 giây + AI + kho)
 
 
 def uoc_do_phu(du_an: dict, bay_gio: datetime.datetime | None = None) -> float:
@@ -2496,8 +2508,8 @@ def _kiem_do_phu(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     if v.con_giay() < _CHUA_GIAY_CUOI + DP_GIAY:
         return {"bo_qua": "hết giờ — lượt sau kiểm"}
     tran = min(cfg["tran_usd"], con, _con_viec(v))
-    # Giá THẬT đo 17/10 ≈ 0,0034 USD/yêu cầu (gói FREE, phí nền tảng mỗi run): số yêu cầu chia
-    # theo giá đó để tiền thật không vượt trần (review LOW).
+    # Số yêu cầu chia theo giá THẬT một yêu cầu (`KDP.GIA_YEU_CAU_THAT` = 0,002, đo từng run
+    # 18/10/2026) để tiền thật không vượt trần (review LOW).
     n = int(tran / KDP.GIA_YEU_CAU_THAT + 1e-9)
     if n < KDP.YEU_CAU_TOI_THIEU:
         return {"bo_qua": f"ngân sách còn {_usd(max(0.0, tran))} USD — cần ≥ "
@@ -3187,11 +3199,11 @@ def _cau_duong_2(f: dict) -> str:
 # tính tiền cả dòng bài gốc (0,0025/bài) — cộng vào ước tính của phần.
 BL_NEN_TANG = ("youtube", "tiktok", "instagram", "facebook", "threads")
 # TikTok từ 16/10/2026 qua TikTok API (`tiktok_api.binh_luan`): 50 bình luận gốc / yêu cầu
-# 0,002 USD (giá bảng), trả lời 1 yêu cầu mỗi luồng —
-# đo 2 video HAPAS: 0,0002–0,0004 USD/bình luận (gồm trả
-# lời) theo giá bảng 0,002/yêu cầu; giá thật đo 17/10 ≈ 0,003/yêu cầu → 0,00075 (clockworks cũ
-# 0,00125, nay chỉ còn là dự phòng).
-_BL_GIA = {"tiktok": 0.00075, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
+# 0,002 USD (giá bảng = giá thật từng run, đo lại 18/10/2026), trả lời 1 yêu cầu mỗi luồng —
+# đo 2 video HAPAS: 0,0002–0,0004 USD/bình luận (gồm trả lời) → lấy mức cao 0,0004. Mức cũ
+# 0,00075 (giả định 0,003/yêu cầu + dư) làm video 5.181 bình luận "cần" 5,8 USD và cả lô bị bỏ
+# vì trần (clockworks cũ 0,00125, nay chỉ còn là dự phòng).
+_BL_GIA = {"tiktok": 0.0004, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
            "threads": 0.0025}
 _BL_KHOI_DONG = {"facebook": 0.001, "threads": 0.02}
 _BL_LO = 25                       # bài mỗi lượt actor bình luận (Threads: ≤ 20, `_lo_bl`)

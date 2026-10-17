@@ -14,8 +14,10 @@
     var soBai = Math.max(1, parseInt((form.elements.so_bai_moi_lan || {}).value, 10) || 5);
     var chuKy = Math.max(1, parseInt((form.elements.chu_ky_ngay || {}).value, 10) || 1);
     var gia = (hs.gia || {})[p] || 0;
-    // Instagram, Threads (actor hồ sơ, 17/10/2026) tính theo TÀI KHOẢN — = chi_phi.don_vi.
-    var donVi = !gia ? 0 : (p === "instagram" || p === "threads" ? 1 : soBai);
+    // = chi_phi.don_vi_nguon: Instagram, Threads (actor hồ sơ, 17/10/2026) tính theo TÀI KHOẢN;
+    // TikTok (TikTok API, 18/10/2026) theo YÊU CẦU: 1 hồ sơ + ⌈bài/10⌉ trang + 1 trang bù bài ghim.
+    var donVi = !gia ? 0 : (p === "instagram" || p === "threads" ? 1
+      : p === "tiktok" ? 2 + Math.ceil(soBai / (hs.tt_bai_moi_trang || 10)) : soBai);
     var thang = hs.ngay / chuKy * donVi * gia * hs.he_so;
     var chu = "≈ " + usd(thang, 3) + " USD/tháng theo bài";
     // = chi_phi.phi_khoi_dong_ngay: actor theo dõi nguồn có phí khởi động riêng (khoi_nguon,
