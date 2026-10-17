@@ -405,10 +405,13 @@
         <td class="so">{{ x.bai_cap_nhat|so_vn }}</td>
         <td class="so"><b>{{ '%.4f'|format(x.chi_phi_usd or 0)|replace('.', ',') }}</b></td>
         {#- Ghi chú lượt trong kho dài tới 20.000 ký tự (17/10/2026, lang_nghe_db.GHI_CHU_TOI_DA): ô nhỏ
-            và chú thích chuột chỉ hiện phần đầu — cắt ở HIỂN THỊ, không cắt ở kho; đủ chữ trong "Xem đủ". #}
+            và chú thích chuột chỉ hiện phần đầu — cắt ở HIỂN THỊ, không cắt ở kho. Kho chỉ đọc
+            sẵn kho.GHI_CHU_DAU ký tự đầu + độ dài thật (ghi_chu_dai); bản đủ mở bằng "Xem đủ"
+            (soát L5: in đủ 20 dòng × 20.000 ký tự là vài trăm KB mỗi lần mở trang). #}
         {% set gc = x.ghi_chu or '' %}
+        {% set gc_dai = x.ghi_chu_dai or gc|length %}
         <td class="nho"><div class="cat-chu" title="{{ ((x.loi or '') ~ ' ' ~ gc)|truncate(600, True, '…', 0) }}">{{ x.loi or '' }}{% if x.loi and gc %} · {% endif %}{{ gc|truncate(400, True, '…', 0) }}</div>
-          {%- if gc|length > 400 %}<details class="gc-du"><summary>Xem đủ ghi chú ({{ gc|length|so_vn }} ký tự)</summary><div class="gc-du__chu">{{ gc }}</div></details>{% endif %}</td>
+          {%- if gc_dai > 400 %}<a class="gc-du" href="/ngan-sach/luot/{{ x.id }}/ghi-chu?du_an={{ du_an.ma|urlencode }}" target="_blank" rel="noopener">Xem đủ ghi chú ({{ gc_dai|so_vn }} ký tự)</a>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
