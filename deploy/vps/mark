@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Điều khiển Mark trên VPS. Chạy bằng root (hoặc gọi từ PC: mark-vps.ps1 restart).
+#
+#   mark status            đang chạy không, từ bao giờ, vài dòng log cuối
+#   mark restart           khởi động lại và KIỂM là đã lên đúng một bản
+#   mark start | stop      bật / tắt (systemd vẫn tự chạy lại khi bot chết)
+#   mark logs [-f] [N]     xem log (mặc định 200 dòng; -f để theo dõi liên tục)
+#   mark check             kiểm môi trường khi CHƯA bật bot: Hermes, Lark, lease, test
+#   mark go-live [--yes]   bật bot lần đầu, SAU KHI đã tắt Mark trên PC
+#   mark off               tắt hẳn trên VPS (để quay về chạy trên PC)
+#   mark login-codex       đăng nhập Codex RIÊNG cho Mark trên VPS (dự phòng khi lease hỏng)
+set -uo pipefail
+
+APP=/opt/mark/app
+PY=/opt/mark/hermes-agent/venv/bin/python
+MARKER=/opt/mark/.pc-da-tat          # có file này = đã xác nhận Mark trên PC đã tắt
+SVC=mark
+
+chay_bang_mark() {
+  sudo -u mark env HOME=/opt/mark PYTHONUTF8=1 PYTHONIOENCODING=utf-8 \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/mark/ms-playwright "$@"
+}
+
+so_ban() { pgrep -u mark -fc "python.* run.py" || true; }
+
+trang_thai() {
+  local act en since
+  act=$(systemctl is-active $SVC 2>/dev/null); en=$(systemctl is-enabled $SVC 2>/dev/null)
+  since=$(systemctl show $SVC -p ActiveEnterTimestamp --value 2>/dev/null)
+  echo "Mark: $act (tự bật khi khởi động máy: $en) · từ: ${since:-—} · số tiến trình run.py: $(so_ban)"
+  [ -f "$MARKER" ] || echo "⚠ chưa go-live (chưa xác nhận Mark trên PC đã tắt)"
+}
+
+cho_len() {
+  # Đợi tối đa 45s: đang chạy + đúng 1 tiến trình + qua được bước lấy token Lark.
+  local i
+  for i in $(seq 1 15); do
+    sleep 3
+    if [ "$(systemctl is-active $SVC)" = active ] && [ "$(so_ban)" -ge 1 ] \
+       && journalctl -u $SVC --since "-60s" -o cat | grep -q "Bot creds:  ✅"; then
+      echo "✅ Mark đã lên"; trang_thai; return 0
+    fi
+  done
+  echo "❌ Mark chưa lên sau 45s — log gần nhất:"; journalctl -u $SVC -n 40 --no-pager -o cat
+  return 1
+}
+
+case "${1:-status}" in
+  status)
+    trang_thai
+    journalctl -u $SVC -n 8 --no-pager -o cat 2>/dev/null ;;
+  restart)
+    [ -f "$MARKER" ] || { echo "Chưa go-live — dùng: mark go-live"; exit 1; }
+    systemctl restart $SVC && cho_len ;;
+  start)
+    [ -f "$MARKER" ] || { echo "Chưa go-live — dùng: mark go-live"; exit 1; }
+    systemctl start $SVC && cho_len ;;
+  stop)
+    systemctl stop $SVC; trang_thai ;;
+  logs)
+    shift; f=""; n=200
+    for a in "$@"; do case "$a" in -f) f="-f";; *[0-9]*) n="$a";; esac; done
+    journalctl -u $SVC -n "$n" --no-pager -o short-iso $f ;;
+  check)
+    [ "$(systemctl is-active $SVC)" = active ] && echo "(bot đang chạy — check vẫn chỉ đọc)"
+    cd "$APP" || { echo "Chưa có code ở $APP — trên PC chạy: push-from-pc.sh code"; exit 1; }
+    [ -f "$APP/.env" ] || { echo "Chưa có $APP/.env — trên PC chạy: push-from-pc.sh env"; exit 1; }
+    echo "== Môi trường"
+    chay_bang_mark "$PY" -X utf8 - <<'PY'
+import os, shutil, traceback
+def ok(t, v=""): print(f"  ✅ {t}{(' — ' + str(v)) if v else ''}")
+def loi(t, e): print(f"  ❌ {t} — {type(e).__name__}: {str(e)[:200]}")
+try:
+    from config import config; ok("đọc .env", os.environ.get("LSR_AGENT_ID"))
+except Exception as e: loi("đọc .env", e); raise SystemExit(1)
+for ten, f in (("lark-cli", lambda: shutil.which("lark-cli") or (_ for _ in ()).throw(RuntimeError("không thấy"))),
+               ("Scrapling venv", lambda: __import__("web_tool")._PY.exists() or (_ for _ in ()).throw(RuntimeError("chưa cài")))):
+    try: ok(ten, f())
+    except Exception as e: loi(ten, e)
+try:
+    import brain; ok("nạp Hermes + bộ não Mark")
+except Exception as e: loi("nạp Hermes", e); traceback.print_exc()
+try:
+    import lark_client as lark; lark.get_tenant_token(); ok("token Lark (app bot)", lark.get_bot_open_id())
+except Exception as e: loi("token Lark", e)
+try:
+    import lsr_platform
+    lease, why = lsr_platform._xin_lease()
+    if lease: ok("lease tài khoản AI", f"{lease.get('mode')}/{lease.get('provider')}/{lease.get('credential_id')}"
+                 f" · có token: {bool(lease.get('secret'))}")
+    else: print(f"  ❌ lease — {lsr_platform._redact(why)[:200]}")
+except Exception as e: loi("lease", e)
+try:
+    import tai_khoan_ai
+    rt, model, nguon = tai_khoan_ai.chon_runtime()
+    d = tai_khoan_ai.mo_ta_runtime(rt, model, nguon)
+    ok("Mark sẽ chạy bằng", f"{d['ten']} · {d['provider']}/{d['model']}" + (f" · {d['ly_do']}" if d.get('ly_do') else ""))
+except Exception as e:
+    loi("chọn tài khoản AI (lease không dùng được VÀ máy chưa đăng nhập Codex)", e)
+PY
+    echo "== Test (không chạm mạng)"
+    chay_bang_mark "$PY" -X utf8 -m pytest -q -p no:cacheprovider --basetemp /tmp/mark-pytest tests 2>&1 | tail -3 ;;
+  go-live)
+    if [ "${2:-}" != "--yes" ]; then
+      echo "Mark trên PC (task LSR-Mark-Tran-Bot) PHẢI đã tắt — hai bản cùng chạy là giành job, trả lời hai lần."
+      read -r -p "Đã tắt Mark trên PC chưa? gõ 'da tat' để tiếp tục: " tl
+      [ "$tl" = "da tat" ] || { echo "Huỷ."; exit 1; }
+    fi
+    touch "$MARKER" && chown mark:mark "$MARKER"
+    systemctl enable $SVC >/dev/null 2>&1
+    systemctl restart $SVC && cho_len ;;
+  off)
+    systemctl disable --now $SVC >/dev/null 2>&1; rm -f "$MARKER"
+    echo "Đã tắt Mark trên VPS (không tự bật lại). Bật lại Mark trên PC nếu cần."; trang_thai ;;
+  login-codex)
+    # Token mới của riêng VPS — không chép auth.json từ PC (agent họp trên PC đang giữ nó;
+    # hai nơi cùng gia hạn một refresh_token là khoá chéo nhau).
+    chay_bang_mark env HERMES_HOME=/opt/mark/hermes-home       /opt/mark/hermes-agent/venv/bin/hermes auth add openai-codex ;;
+  guard)
+    [ -f "$MARKER" ] || { echo "mark guard: chưa go-live — từ chối khởi động" >&2; exit 1; }
+    [ -f "$APP/.env" ] || { echo "mark guard: thiếu $APP/.env" >&2; exit 1; } ;;
+  *)
+    sed -n '2,12p' "$0"; exit 2 ;;
+esac

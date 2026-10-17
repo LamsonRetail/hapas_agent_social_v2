@@ -1,0 +1,7 @@
+# venv Scrapling (Python 3.12) — chốt từ .venv-scrapling trên PC (02/10/2026).
+scrapling[fetchers]==0.4.15
+playwright==1.62.0
+patchright==1.62.1
+curl_cffi==0.16.2
+browserforge==1.2.4
+requests==2.34.2
