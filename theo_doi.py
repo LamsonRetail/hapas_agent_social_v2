@@ -453,7 +453,13 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
     import quet_lon
     import viec_nen
     phan = chia_phan(kh["nguon"])
-    tong = round(sum(ph["uoc_usd"] for cac in phan.values() for ph in cac), 2)
+    # Giữ chỗ phần theo dõi nguồn = TRƯỜNG HỢP XẤU NHẤT (`giu_cho_phan`), không chỉ ước tính đường
+    # chính (soát 17/10/2026): dự phòng Threads (futurizerush "user", ~0,137 USD/tài khoản) và
+    # Facebook (actor cũ, gấp đôi thedoor) không nằm trong ước tính — vòng phần kẹp theo ngân sách
+    # CỦA VIỆC (`_con_viec`) thì dự phòng không bao giờ đủ tiền, hoặc ăn vào phần giữ cho sau.
+    tong_uoc = round(sum(ph["uoc_usd"] for cac in phan.values() for ph in cac), 2)
+    tong = round(sum(giu_cho_phan(ph) for cac in phan.values() for ph in cac), 2)
+    dp_phan = round(max(0.0, tong - tong_uoc), 2)
     da = kh["du_an"]
     # Bình luận (đợt 2b): chưa biết bài nào sẽ được cào nên giữ chỗ theo trần cấu hình, giá
     # Facebook; tiền thật vẫn chốt theo run id.
@@ -509,6 +515,7 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
            + (f"{len(kh['nguon'])} nguồn ({ds})" if kh['nguon'] else
               "chưa nguồn nào tới hạn — lượt này chỉ tìm theo từ khoá")
            + f", ước tính tối đa {_usd(tong)} USD"
+           + (f" (gồm tới {_usd(dp_phan)} USD dự phòng nếu actor chính hỏng)" if dp_phan else "")
            + (f" (gồm tới {_usd(tk_uoc)} USD tìm theo từ khoá)" if tk_uoc else "")
            + (f" (gồm tới {_usd(bl_uoc)} USD cào bình luận)" if bl_uoc else "")
            + (f" (gồm tới {_usd(dp_uoc)} USD kiểm độ phủ)" if dp_uoc else "")
@@ -3627,11 +3634,27 @@ def _chay_viec(v) -> tuple[str, str]:
                 if dang_do:
                     cap = float(ph.get("tran_usd") or 0) or _TRAN_TOI_THIEU
                 else:
-                    cap = _tran_phan(p, ph, con)
-                    if con < max(_TRAN_TOI_THIEU, float(ph.get("uoc_usd") or 0)) - 1e-9:
+                    # Kẹp cả ngân sách CỦA VIỆC (soát 17/10/2026), không chỉ phần còn của tháng:
+                    # phần dự phòng Threads thêm giữa lượt (0,137 USD/tài khoản) không được tiêu
+                    # quá phần việc đã giữ chỗ — hai việc nền song song mới không cùng vượt hạn
+                    # mức tài khoản. Phần không vừa ước tính thì bỏ CÓ lý do, nguồn không bị đánh
+                    # lỗi (lượt sau quét lại). Trần < sàn 0,1 vẫn chạy: `_run_actor` nâng
+                    # `maxTotalChargeUsd` lên 0,1 nhưng actor theo nguồn bị `maxItems` chặn tiền,
+                    # còn futurizerush (không dừng ở `maxItems`) có ước tính ≥ 0,1.
+                    con_v = _con_viec(v)
+                    uoc_ph = float(ph.get("uoc_usd") or 0)
+                    cap = _tran_phan(p, ph, con, con_v)
+                    if con < max(_TRAN_TOI_THIEU, uoc_ph) - 1e-9:
                         ghi_chu.append(f"{_TEN[p]}: hết ngân sách tháng (còn {_usd(con)} USD)")
                         v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0,
                                         usd_so=0.0, ly_do="hết ngân sách tháng của dự án")
+                        continue
+                    if con_v < uoc_ph - 1e-9:
+                        ly = (f"hết ngân sách của lượt (còn {_usd(con_v)} USD, phần "
+                              f"{ph['id']} ước tính {_usd(uoc_ph)} USD)")
+                        ghi_chu.append(f"{_TEN[p]}: {ly}")
+                        v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0,
+                                        usd_so=0.0, ly_do=ly)
                         continue
                 con = max(0.0, con - _chay_phan_apify(v, p, ph, ds, cap, han))
         # Bài: đọc từ đĩa (kể cả phần đã xong trước khi bot khởi động lại).

@@ -156,6 +156,60 @@ def test_chay_viec_du_phong_che_do_user_doc_dung_bai(mo):
     assert "chạy dự phòng futurizerush cho 1 tài khoản" in cau and st == "xong_mot_phan", cau
 
 
+def test_tao_luot_giu_cho_ca_du_phong_threads(mo):
+    """Soát 17/10/2026: phần hồ sơ Threads ước 0,0026 USD/tài khoản nhưng dự phòng futurizerush
+    ~0,137 USD/lượt không nằm trong ước tính / giữ chỗ của việc. Nay giữ chỗ = trường hợp xấu
+    nhất của phần (`giu_cho_phan`)."""
+    import quet_lon
+    import viec_nen
+    kho = GiaKho(nguon=[_nguon(1, "threads", "kenh_mau.vn", loai="kenh_nha")]).cai(mo)
+    mo.setattr(quet_lon, "tran_usd_nen", lambda: 20.0)
+    mo.setattr(quet_lon, "ngan_sach", lambda tran: (8.0, {"con_lai": 9.0}, ""))
+    mo.setattr(T, "uoc_do_phu", lambda *a, **k: 0.0)
+    tao = []
+    mo.setattr(viec_nen, "tao_viec", lambda *a, **k: tao.append(a) or {"ma_viec": "t1"})
+    (ph,) = T.chia_phan(kho.nguon)["threads"]
+    assert T.giu_cho_phan(ph) == ph["du_phong"]["uoc_usd"] == round((10 * 0.0025 + 0.08) * 1.3, 4)
+    kq = T.tao_luot("hapas")
+    _, _, _, uoc, ngan_sach, _ = tao[0]
+    assert uoc["usd"] == 0.14 and ngan_sach == round(0.14 * 1.5, 2)
+    assert "gồm tới 0,14 USD dự phòng nếu actor chính hỏng" in kq["cau"]
+    # Phần không có dự phòng: giữ chỗ = ước tính như cũ.
+    assert T.giu_cho_phan({"uoc_usd": 0.05}) == 0.05
+
+
+def test_vong_phan_kep_ngan_sach_cua_viec_cho_du_phong_threads(mo):
+    """Vòng phần kẹp theo ngân sách CỦA VIỆC (không chỉ phần còn của tháng): việc giữ 0,10 USD thì
+    phần dự phòng futurizerush (ước 0,1365) bị bỏ CÓ lý do, nguồn không bị đánh lỗi; việc giữ
+    0,30 thì dự phòng chạy với trần ≤ phần còn của việc."""
+    kho = GiaKho(nguon=[_nguon(1, "threads", "kenh_mau.vn", loai="kenh_nha")]).cai(mo)
+    ap = GiaApify(mo, items=[], usd=0.0)
+    mau = _moi(MAU["nguoi_dung"])
+    goc = ap.run_actor
+
+    def chay(actor, *a, **k):
+        ap.items = mau if actor == A._ACTORS["threads"] else []
+        return goc(actor, *a, **k)
+    mo.setattr(A, "_run_actor", chay)
+    v = GiaViec({p: {"phan": c} for p, c in T.chia_phan(kho.nguon).items()}, [1])
+    v.d["ngan_sach_usd"] = 0.1
+    _, cau = contextvars.copy_context().run(T.chay_viec, v)
+    assert [g["actor"] for g in ap.gui] == [A._ACTORS["threads_ho_so"]]
+    assert ap.gui[0]["tran_usd"] == 0.1
+    dp = v.d["nen_tang"]["threads"]["phan"][1]
+    assert dp["id"] == "threads-10-du-phong" and dp["ma"] == "NGAN_SACH"
+    assert dp["ly_do"].startswith("hết ngân sách của lượt (còn 0,10 USD") and "0,14 USD" in dp["ly_do"]
+    assert "Threads: hết ngân sách của lượt" in cau and kho.danh_dau[0] == ([], {})
+    kho = GiaKho(nguon=[_nguon(1, "threads", "kenh_mau.vn", loai="kenh_nha")]).cai(mo)
+    ap.gui.clear()
+    v = GiaViec({p: {"phan": c} for p, c in T.chia_phan(kho.nguon).items()}, [1])
+    v.d["ngan_sach_usd"] = 0.3
+    contextvars.copy_context().run(T.chay_viec, v)
+    assert [g["actor"] for g in ap.gui] == [A._ACTORS["threads_ho_so"], A._ACTORS["threads"]]
+    assert ap.gui[1]["tran_usd"] == round((10 * 0.0025 + 0.08) * 1.3 * 1.5, 2) <= 0.3
+    assert kho.danh_dau[0] == ([1], {})
+
+
 def test_chuan_dinh_danh_threads_tu_link():
     assert T._chuan_dinh_danh("threads", "https://www.threads.net/@Hapas.VN/?x=1") == "hapas.vn"
     assert T._chuan_dinh_danh("threads", "threads.com/@hapas.vn") == "hapas.vn"
