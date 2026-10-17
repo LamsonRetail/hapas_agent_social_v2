@@ -1036,8 +1036,9 @@ class GiaKhoBl:
         self.hoi.append((ma, list(nen_tang), toi_da))
         return [b for b in self.bai if b["nen_tang"] in nen_tang][:toi_da]
 
-    def ghi_bl(self, ma, luot, rows, da_lay):
+    def ghi_bl(self, ma, luot, rows, da_lay, khong_tinh_thieu=None):
         self.ghi.append((ma, luot, [dict(r) for r in rows], dict(da_lay)))
+        self.khong_tinh = set(khong_tinh_thieu or ())
         return len(rows), 0
 
 

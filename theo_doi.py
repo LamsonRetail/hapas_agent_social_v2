@@ -3657,28 +3657,98 @@ def _uu_tien_bl(b: dict) -> tuple:
             -(int(b.get("binh_luan") or 0) - int(b.get("bl_da_lay") or 0)))
 
 
-def _doc_tiep_tiktok(b: dict) -> int:
-    """Vị trí bình luận GỐC đọc tiếp của video TikTok CÀO DỞ (đã cào, còn dưới 80% số nền tảng báo
-    lúc cào): số gốc đã có trong kho (`bl_goc`). 0 = đọc từ đầu (bài mới; bài đã đủ mà thêm bình
-    luận — thứ tự của TikTok đổi theo tương tác nên đọc lại cho đủ)."""
+def _cao_do_tiktok(b: dict) -> bool:
+    """Video TikTok CÀO DỞ: đã cào mà còn dưới 80% số bình luận nền tảng báo lúc cào."""
     if b.get("nen_tang") != "tiktok" or b.get("bl_lay_luc") is None:
-        return 0
+        return False
     co = int(b.get("bl_lay_khi_co") or 0)
-    if not co or int(b.get("bl_da_lay") or 0) >= K.BL_DU_TOI_THIEU * co:
+    return bool(co) and int(b.get("bl_da_lay") or 0) < K.BL_DU_TOI_THIEU * co
+
+
+def _doc_tiep_tiktok(b: dict) -> int:
+    """Vị trí bình luận GỐC đọc tiếp của video TikTok cào dở: số gốc đã có trong kho (`bl_goc`).
+    0 = đọc từ đầu (bài mới; bài đã đủ mà thêm bình luận — thứ tự của TikTok đổi theo tương tác
+    nên đọc lại cho đủ).
+
+    Soát 18/10/2026: chỉ đọc tiếp khi lần trước dừng GIỮA các trang gốc. Video bị cắt giữa phần
+    TRẢ LỜI (gốc đã đọc hết — `bl_het_goc`, sổ `KHOA_BL_TIKTOK`) mà đọc tiếp từ vị trí gốc thì chỉ
+    gặp trang rỗng: 0 bình luận mới mỗi lượt, sau 2 lần `bl_lan_thieu` = 2 và video bị bỏ hẳn. Video
+    đó lấy trả lời của các gốc còn thiếu (`bl_goc_thieu`) hoặc, không còn gốc nào thiếu, đọc lại từ
+    đầu để lấy bình luận mới."""
+    if not _cao_do_tiktok(b) or b.get("bl_het_goc"):
         return 0
     return max(0, int(b.get("bl_goc") or 0))
 
 
+#: Sổ đọc tiếp bình luận TikTok trong sổ mốc của dự án (soát 18/10/2026): {khoá bài: {"het_goc":
+#: lần cào trước đã đọc tới trang gốc cuối, "luc": iso}} — `tiktok_api.binh_luan(trang_thai=…)`.
+KHOA_BL_TIKTOK = "bl_tiktok"
+
+
+def _gan_doc_tiep_bl(ma: str, ds: list[dict]) -> None:
+    """Gắn vào video TikTok cào dở: `bl_het_goc` (sổ `KHOA_BL_TIKTOK`) và, khi gốc đã đọc hết,
+    `bl_goc_thieu` = các gốc trong kho còn thiếu trả lời (`lang_nghe_db.goc_thieu_tra_loi`). Kho
+    hỏng: không gắn gốc thiếu — video đọc lại từ đầu (không bỏ lượt)."""
+    do = [b for b in ds if _cao_do_tiktok(b)]
+    if not do:
+        return
+    so = doc_moc_tk(ma).get(KHOA_BL_TIKTOK) or {}
+    for b in do:
+        b["bl_het_goc"] = bool((so.get(b["khoa"]) or {}).get("het_goc")) \
+            if isinstance(so.get(b["khoa"]), dict) else False
+    het = [b["khoa"] for b in do if b["bl_het_goc"]]
+    if not het:
+        return
+    try:
+        # Cào hết: mỗi luồng tới 100 trả lời, một yêu cầu đọc tối đa `TRA_LOI_MOI_TRANG`.
+        goc = K.goc_thieu_tra_loi(ma, het, min(TDA.TT.TRA_LOI_MOI_TRANG, 100))
+    except K.LoiKho as e:
+        print(f"[theo_doi] không đọc được gốc thiếu trả lời: {e}", flush=True)
+        return
+    for b in do:
+        if b["bl_het_goc"] and goc.get(b["khoa"]):
+            b["bl_goc_thieu"] = [list(x) for x in goc[b["khoa"]]]
+
+
+def _ghi_so_bl_tiktok(ma: str, ph: dict, tiep: dict | None,
+                      bay_gio: datetime.datetime | None = None) -> set[str]:
+    """Sau một phần bình luận TikTok: ghi sổ `KHOA_BL_TIKTOK` theo `tiep` ({link: {"het_goc",
+    "rong"}}) và trả khoá bài mà lượt này KHÔNG tính là một lần thiếu (trang đọc tiếp rỗng — vị trí
+    sai của Mark, không phải bài hết bình luận). Không bao giờ ném."""
+    if not tiep:
+        return set()
+    bay_gio = bay_gio or datetime.datetime.now(_VN)
+    theo_link = {b.get("link"): b.get("khoa") for b in ph.get("bai") or []}
+    rong = {theo_link[u] for u, x in tiep.items() if x.get("rong") and theo_link.get(u)}
+    try:
+        so = dict(doc_moc_tk(ma).get(KHOA_BL_TIKTOK) or {})
+        han = bay_gio - datetime.timedelta(days=K.BL_NGAY + 7)
+        so = {k: x for k, x in so.items()
+              if isinstance(x, dict) and (_gio_iso(x.get("luc")) or han) > han}
+        for u, x in tiep.items():
+            if theo_link.get(u):
+                so[theo_link[u]] = {"het_goc": bool(x.get("het_goc")),
+                                    "luc": bay_gio.isoformat(timespec="seconds")}
+        ghi_moc_tk(ma, {KHOA_BL_TIKTOK: so})
+    except Exception as e:  # sổ hỏng: lượt sau đọc tiếp như cũ, gặp trang rỗng thì không tính
+        if type(e).__name__ == "MatQuyen":
+            raise
+        print(f"[theo_doi] không ghi được sổ đọc tiếp bình luận TikTok: {type(e).__name__}",
+              flush=True)
+    return rong
+
+
 def _can_bl(b: dict, moi_bai: int) -> int:
     """Số bình luận xin cho một bài. Cào hết: số nền tảng báo +15% +10 (không trần mỗi bài);
-    lần sau của bài đã cào đủ (Facebook lọc theo ngày): phần tăng + 20; video TikTok cào dở đọc
-    tiếp (18/10/2026): chỉ phần CÒN THIẾU +15% +10."""
+    lần sau của bài đã cào đủ (Facebook lọc theo ngày): phần tăng + 20; video TikTok cào dở
+    (18/10/2026, `_cao_do_tiktok`): chỉ phần CÒN THIẾU +15% +10."""
     if moi_bai:
         return moi_bai
     co = int(b.get("binh_luan") or 0)
     if _tang_dan(b):
         co = max(0, co - int(b.get("bl_lay_khi_co") or 0))
-    elif _doc_tiep_tiktok(b):
+    elif _cao_do_tiktok(b):
+        # Đọc tiếp, lấy trả lời của gốc còn thiếu hay đọc lại từ đầu: đều chỉ xin phần còn thiếu.
         co = max(0, co - int(b.get("bl_da_lay") or 0))
     return max(10, int(co * 1.15) + (20 if _tang_dan(b) else 10))
 
@@ -3748,7 +3818,9 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
             if p == "tiktok":
                 TDA.gan_binh_luan(ph, urls, 100 if day_du else min(D._TRA_LOI_TIKTOK, per_lo),
                                   {b["link"]: n for b in lo if (n := _doc_tiep_tiktok(b))}
-                                  if day_du else None)
+                                  if day_du else None,
+                                  {b["link"]: b["bl_goc_thieu"] for b in lo
+                                   if b.get("bl_goc_thieu")} if day_du else None)
             cac.append(ph)
     if cac:
         with v._khoa:
@@ -3849,6 +3921,7 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             dung = A._youtube_co_key() if p == "youtube" else _nen_tang_dung_duoc(p)[0]
             if c["bat"] and dung:
                 ds += K.bai_can_lay_binh_luan(ma, [p], c["so_bai"], cao_het=not c["moi_bai"])
+        _gan_doc_tiep_bl(ma, ds)
         _tao_cac_phan_bl(v, ds, {p: c["moi_bai"] for p, c in cfg.items()})
         tk["ghi_chu"] += _cau_uu_tien_bl(ds)
     cac_ph = list(_phan_bl(v))
@@ -3904,9 +3977,12 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         tk["usd"] += tien
         if loi is not None:
             tk["ghi_chu"].append(f"bình luận {_TEN[p]}: {A._che_token(str(loi))[:120]}")
+        # Video TikTok: đã đọc hết trang gốc chưa (lượt sau đọc tiếp hay lấy trả lời), trang đọc
+        # tiếp rỗng thì không tính là một lần thiếu (soát 18/10/2026).
+        rong = _ghi_so_bl_tiktok(ma, ph, meta.get("bl_tiep")) if p == "tiktok" else set()
         # Ghi kho TRƯỚC khi đánh dấu phần xong: khởi động lại giữa hai bước thì đọc lại run.
         _ghi_bl_kho(ma, luot, ph, rows, thuong_hieu, han, tk,
-                    day_du=loi is None and meta.get("ma", "OK") == "OK")
+                    day_du=loi is None and meta.get("ma", "OK") == "OK", khong_tinh_thieu=rong)
         quet_lon._ket_phan(v, ph, meta, len(items), loi, usd_so=tien)
     tk["usd"] = round(tk["usd"], 4)
     return tk
@@ -3933,6 +4009,7 @@ def _cau_uu_tien_bl(ds: list[dict]) -> list[str]:
     chua = sorted((b for b in ds if b.get("bl_lay_luc") is None),
                   key=lambda b: -int(b.get("binh_luan") or 0))
     tiep = [n for b in ds if (n := _doc_tiep_tiktok(b))]
+    tra_loi = [len(b["bl_goc_thieu"]) for b in ds if b.get("bl_goc_thieu")]
     ra = []
     if chua:
         ra.append(f"bình luận: ưu tiên {len(chua)} bài chưa cào thiếu nhiều nhất ("
@@ -3941,13 +4018,18 @@ def _cau_uu_tien_bl(ds: list[dict]) -> list[str]:
     if tiep:
         ra.append(f"bình luận TikTok: đọc tiếp {len(tiep)} video cào dở, bỏ {so(sum(tiep))} "
                   "bình luận gốc đã có")
+    if tra_loi:
+        ra.append(f"bình luận TikTok: {len(tra_loi)} video đã đọc hết gốc mà còn thiếu — lấy trả "
+                  f"lời của {so(sum(tra_loi))} gốc còn thiếu trả lời")
     return ra
 
 
 def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: list[str],
-                han: float, tk: dict, day_du: bool = True) -> None:
+                han: float, tk: dict, day_du: bool = True,
+                khong_tinh_thieu: set[str] | None = None) -> None:
     """`day_du`=False (lỗi, huỷ, hết giờ, hết quota): chỉ bài CÓ bình luận trả về được đánh dấu
-    đã cào — bài 0 dòng vì lỗi không bị gạch khỏi lượt sau (review 15/10)."""
+    đã cào — bài 0 dòng vì lỗi không bị gạch khỏi lượt sau (review 15/10). `khong_tinh_thieu`:
+    khoá bài không tính là một lần thiếu (`lang_nghe_db.ghi_binh_luan`)."""
     bai = ph["bai"]
     theo = _quy_bl(rows, bai)
     dong: list[dict] = []
@@ -3974,7 +4056,7 @@ def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: lis
     tk["nha"] += sum(1 for d in dong if d["cua_thuong_hieu"])
     if khach:
         _gan_nhan_bl(khach, han, tk)
-    moi, cu = K.ghi_binh_luan(ma, luot, dong, da_lay)
+    moi, cu = K.ghi_binh_luan(ma, luot, dong, da_lay, khong_tinh_thieu=khong_tinh_thieu or set())
     tk["lay"] += len(dong)
     tk["moi"] += moi
     tk["cu"] += cu

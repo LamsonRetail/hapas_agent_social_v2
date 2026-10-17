@@ -47,16 +47,22 @@ def gan_ho_so(ph: dict, ten: list[str], n: int) -> None:
 
 
 def gan_binh_luan(ph: dict, urls: list[str], tra_loi: int,
-                  bat_dau: dict[str, int] | None = None) -> None:
+                  bat_dau: dict[str, int] | None = None,
+                  tra_loi_cho: dict[str, list] | None = None) -> None:
     """Phần bình luận TikTok đi qua TikTok API (actor cũ của phần làm dự phòng). `bat_dau`
-    (18/10/2026): {link: vị trí bình luận gốc đọc tiếp} cho video cào dở (`tiktok_api.binh_luan`);
-    dự phòng clockworks không đọc tiếp được — chạy lại từ đầu như cũ."""
+    (18/10/2026): {link: vị trí bình luận gốc đọc tiếp} cho video cào dở GIỮA các trang gốc;
+    `tra_loi_cho` {link: [[cid gốc, số trả lời báo], …]} cho video đã đọc hết gốc mà còn thiếu —
+    chỉ lấy trả lời của các gốc đó (`tiktok_api.binh_luan`). Dự phòng clockworks không đọc tiếp
+    được — chạy lại từ đầu như cũ."""
     if TT.dung_api("tiktok_binh_luan") and ph.get("actor"):
         ph["du_phong"] = {"actor": ph["actor"], "gia": _GIA_DU_PHONG["tiktok_binh_luan"]}
         ph.update(actor=TT.ACTOR, bo_chuyen="tiktok_binh_luan", urls=list(urls),
                   tra_loi=int(tra_loi))
         if bat_dau:
             ph["bat_dau"] = {u: int(n) for u, n in bat_dau.items() if u in urls and int(n) > 0}
+        if tra_loi_cho:
+            ph["tra_loi_cho"] = {u: [[str(c), int(n)] for c, n in ds]
+                                 for u, ds in tra_loi_cho.items() if u in urls and ds}
 
 
 def tien_phan(p: str, ph: dict, items: list, meta: dict) -> float:
@@ -116,6 +122,7 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
     loi = None
     usd_dp = 0.0
     loi_ra: list = []
+    tiep: dict = {}                  # bình luận: {link: {"het_goc", "rong"}} — `theo_doi` ghi sổ
     try:
         try:
             if ph["bo_chuyen"] == "tiktok_ho_so":
@@ -123,7 +130,8 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
             else:
                 items = TT.binh_luan(ph["urls"], int(ph.get("per") or 20),
                                      int(ph.get("tra_loi") or 0), tran_usd=cap, loi_ra=loi_ra,
-                                     bat_dau=ph.get("bat_dau"))
+                                     bat_dau=ph.get("bat_dau"),
+                                     tra_loi_cho=ph.get("tra_loi_cho"), trang_thai=tiep)
         except A.LoiApify as e:
             loi = e
         except Exception as e:
@@ -158,6 +166,8 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
     meta = {"actor": TT.ACTOR, "ma": "OK_MOT_PHAN" if mot_phan else "OK", "run_id": None,
             "usd": round(usd + usd_dp, 4), "so_item": len(items),
             "giay": round(time.monotonic() - t0, 1)}
+    if tiep:
+        meta["bl_tiep"] = tiep
     if loi is not None and not items:
         meta.update(ma=loi.ma, ly_do=str(loi)[:300])
     return items, meta, (loi if not items else None), None

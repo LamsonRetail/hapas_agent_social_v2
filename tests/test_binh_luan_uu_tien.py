@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import datetime
 import inspect
+import time
 
 import pytest
+from test_theo_doi import mo, nhan_gia  # noqa: F401
 
 import apify_tool as A
 import lang_nghe_db as K
@@ -85,6 +87,138 @@ def test_tiktok_api_doc_tiep_tu_vi_tri_goc(monkeypatch):
     api.goi.clear()
     TT.binh_luan([u], 200, tra_loi=0)                                  # không có vị trí: từ đầu
     assert api.goi[0]["listComments_cursor"] == 0
+
+
+def _bl_api(cid, cha="0", n_tra_loi=0):
+    from test_tiktok_api import NOW
+    return {"cid": cid, "text": f"bl {cid}", "create_time": int(NOW.timestamp()), "digg_count": 0,
+            "reply_comment_total": n_tra_loi, "reply_id": cha,
+            "user": {"unique_id": f"khach_{cid}", "uid": f"u_{cid}"}}
+
+
+def test_tiktok_api_bao_het_goc_va_trang_doc_tiep_rong(monkeypatch):
+    """Soát 18/10/2026: `trang_thai` báo đã đọc tới trang gốc cuối chưa, và trang đọc tiếp đầu
+    tiên có rỗng không — bên gọi biết lượt sau đọc tiếp hay lấy trả lời."""
+    from test_tiktok_api import GiaApi
+    api = GiaApi(monkeypatch)
+    u = "https://www.tiktok.com/@kenh_a/video/70000666"
+    api.bl[("70000666", 0)] = ([_bl_api(f"c{i}") for i in range(50)], 1)
+    api.bl[("70000666", 50)] = ([_bl_api(f"c{i}") for i in range(50, 60)], 0)
+    tt: dict = {}
+    assert len(TT.binh_luan([u], 200, tra_loi=0, trang_thai=tt)) == 60
+    assert tt[u] == {"het_goc": True, "rong": False}
+    tt.clear()
+    TT.binh_luan([u], 30, tra_loi=0, trang_thai=tt)                  # dừng vì đủ `per`
+    assert tt[u] == {"het_goc": False, "rong": False}
+    api.goi.clear()
+    tt.clear()
+    # Video bị cắt giữa phần trả lời: 60 gốc đã có → đọc tiếp từ 60 chỉ gặp trang rỗng.
+    assert TT.binh_luan([u], 200, tra_loi=0, bat_dau={u: 60}, trang_thai=tt) == []
+    assert tt[u] == {"het_goc": True, "rong": True} and len(api.goi) == 1
+
+
+def test_tiktok_api_lay_tra_loi_cua_goc_trong_kho(monkeypatch):
+    from test_tiktok_api import GiaApi
+    api = GiaApi(monkeypatch)
+    u = "https://www.tiktok.com/@kenh_a/video/70000667"
+    api.tra_loi["g1"] = [_bl_api(f"r1{i}", "g1") for i in range(3)]
+    api.tra_loi["g2"] = [_bl_api("r20", "0")]                        # API không ghi reply_id
+    tt: dict = {}
+    ra = TT.binh_luan([u], 100, tra_loi=100, tra_loi_cho={u: [["g1", 30], ["g2", 5]]},
+                      trang_thai=tt)
+    assert not any("listComments_awemeId" in g for g in api.goi), "không đọc lại trang gốc"
+    assert [g["commentReplies_commentId"] for g in api.goi] == ["g1", "g2"]
+    assert [r["repliesToId"] for r in ra] == ["g1", "g1", "g1", "g2"]
+    assert tt[u]["het_goc"] is True and not tt[u]["rong"]
+    api.goi.clear()
+    assert len(TT.binh_luan([u], 2, tra_loi=100, tra_loi_cho={u: [["g1", 30], ["g2", 5]]})) == 2
+    assert len(api.goi) == 1, "đủ `per` thì dừng"
+
+
+def test_doc_tiep_chi_khi_dung_giua_trang_goc(monkeypatch):
+    """Đã đọc hết gốc (`bl_het_goc`): KHÔNG đọc tiếp từ vị trí gốc; có gốc thiếu trả lời trong
+    kho thì phần mang `tra_loi_cho`, không thì đọc lại từ đầu. Đều chỉ xin phần còn thiếu."""
+    from test_theo_doi import GiaViec
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 2.0, True))
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
+    het = dict(DS[2], khoa="het", link="https://www.tiktok.com/@k/video/70000901")
+    het2 = dict(DS[2], khoa="het2", link="https://www.tiktok.com/@k/video/70000902")
+    T.ghi_moc_tk("hapas", {T.KHOA_BL_TIKTOK: {"het": {"het_goc": True}, "het2": {"het_goc": True},
+                                               "do": {"het_goc": False}}})
+    hoi: list = []
+
+    def goc_thieu(ma, ks, tran, toi_da=200):
+        hoi.append((ma, sorted(ks), tran))
+        return {"het": [("g1", 30), ("g2", 5)]}
+    monkeypatch.setattr(K, "goc_thieu_tra_loi", goc_thieu)
+    ds = [dict(DS[2]), het, het2, dict(DS[1])]
+    T._gan_doc_tiep_bl("hapas", ds)
+    assert hoi == [("hapas", ["het", "het2"], 50)]
+    assert [b.get("bl_het_goc") for b in ds] == [False, True, True, None]
+    assert ds[1]["bl_goc_thieu"] == [["g1", 30], ["g2", 5]] and "bl_goc_thieu" not in ds[2]
+    assert [T._doc_tiep_tiktok(b) for b in ds] == [40, 0, 0, 0]
+    assert T._can_bl(ds[1], 0) == T._can_bl(ds[2], 0) == T._can_bl(ds[0], 0) == 124
+    v = GiaViec({}, [])
+    T._tao_cac_phan_bl(v, ds, {"tiktok": 0})
+    ph = next(x for x in T._phan_bl(v) if any(b["khoa"] == "het" for b in x["bai"]))
+    assert ph["tra_loi_cho"] == {het["link"]: [["g1", 30], ["g2", 5]]}
+    assert het["link"] not in (ph.get("bat_dau") or {}) and het2["link"] not in (
+        ph.get("bat_dau") or {})
+    assert any("lấy trả lời của 2 gốc còn thiếu" in c for c in T._cau_uu_tien_bl(ds))
+
+
+@pytest.mark.tiktok_api
+def test_video_cat_giua_tra_loi_khong_bi_bo(mo, nhan_gia, monkeypatch):  # noqa: F811
+    """Soát 18/10/2026 (MEDIUM): video bị cắt giữa phần trả lời (gốc đủ, tổng dưới 80%). Bản cũ:
+    mỗi lượt đọc tiếp một trang rỗng, 0 bình luận mới, sau 2 lần `bl_lan_thieu` = 2 → bỏ hẳn.
+    Nay: lượt 1 gặp trang rỗng → không tính là một lần thiếu, sổ ghi đã hết gốc; lượt 2 lấy trả
+    lời của các gốc còn thiếu trong kho."""
+    from test_theo_doi import DU_AN, GiaKhoBl, GiaViec, _lay_bl
+    from test_tiktok_api import GiaApi
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
+    api = GiaApi(monkeypatch)
+    u = "https://www.tiktok.com/@hapas.official/video/70000777"
+    b = dict(_bai("tiktok:70000777", 300, lay=LUC, da=100, khi_co=300, goc=60), link=u)
+    kho = GiaKhoBl(monkeypatch, [b])
+    du_an = dict(DU_AN, bl_bat=True, bl_so_bai=10, bl_moi_bai=0)
+    _lay_bl(GiaViec({}, []), du_an, 8, 5.0, time.monotonic() + 300)
+    assert [g.get("listComments_cursor") for g in api.goi] == [60]
+    assert kho.khong_tinh == {b["khoa"]}, "trang đọc tiếp rỗng: không tính một lần thiếu"
+    assert T.doc_moc_tk("hapas")[T.KHOA_BL_TIKTOK][b["khoa"]]["het_goc"] is True
+    monkeypatch.setattr(K, "goc_thieu_tra_loi",
+                        lambda ma, ks, tran, toi_da=200: {b["khoa"]: [("g1", 30), ("g2", 5)]})
+    api.goi.clear()
+    api.tra_loi["g1"] = [_bl_api(f"r1{i}", "g1") for i in range(3)]
+    api.tra_loi["g2"] = [_bl_api("r20", "g2")]
+    _lay_bl(GiaViec({}, []), du_an, 9, 5.0, time.monotonic() + 300)
+    assert not any("listComments_awemeId" in g for g in api.goi)
+    rows = kho.ghi[-1][2]
+    assert {r["ma_cha"] for r in rows} == {"g1", "g2"} and all(r["la_tra_loi"] for r in rows)
+    assert kho.khong_tinh == set()
+
+
+def test_ghi_binh_luan_khong_tinh_thieu_va_sql_goc_thieu(monkeypatch):
+    import contextlib
+
+    from test_lang_nghe_loc_lai import GiaCur
+    c = GiaCur(rows=[{"khoa_bai": "tiktok:1", "ma": "g1", "tra_loi": 30, "da_co": 2},
+                     {"khoa_bai": "tiktok:1", "ma": "g2", "tra_loi": 5, "da_co": 0}])
+
+    @contextlib.contextmanager
+    def ket_noi():
+        yield c
+    monkeypatch.setattr(K, "ket_noi", ket_noi)
+    assert K.goc_thieu_tra_loi("hapas", ["tiktok:1"], 50) == {"tiktok:1": [("g1", 30),
+                                                                            ("g2", 5)]}
+    q, ts = c.sql[-1]
+    assert "NOT g.la_tra_loi" in q and "HAVING count(r.ma) < LEAST(g.tra_loi, %s)" in q
+    assert ts == ("hapas", ["tiktok:1"], 50, 50) and K.goc_thieu_tra_loi("hapas", [], 50) == {}
+    c.sql.clear()
+    K.ghi_binh_luan("hapas", 7, [], {"tiktok:1": (0, 300), "tiktok:2": (0, 40)},
+                    khong_tinh_thieu={"tiktok:1"})
+    cap = [(q, ts) for q, ts in c.sql if q.startswith("UPDATE bai SET bl_lay_luc")]
+    assert "WHEN %s THEN bai.bl_lan_thieu" in cap[0][0]
+    assert [ts[3] for _, ts in cap] == [True, False]
 
 
 def test_tran_lo_giu_cho_cac_lo_sau():

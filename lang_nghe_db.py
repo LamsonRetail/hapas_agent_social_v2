@@ -671,11 +671,39 @@ _NHAN_KHO = "(binh_luan.loai = 'seeding' OR binh_luan.ly_do_loc = 'affiliate_han
 _GIU_NHAN_KHO = f"(EXCLUDED.loai = 'hop_le' AND {_NHAN_KHO})"
 
 
+def goc_thieu_tra_loi(ma: str, khoa_bai: list[str], tran_moi_goc: int,
+                      toi_da: int = 200) -> dict[str, list[tuple[str, int]]]:
+    """{khoá bài: [(mã bình luận gốc, số trả lời nền tảng báo), …]} — gốc ĐÃ có trong kho mà số
+    trả lời trong kho còn dưới min(số báo, `tran_moi_goc` — một yêu cầu trả lời đọc được tối đa
+    bấy nhiêu), thiếu nhiều trước, tối đa `toi_da` gốc mỗi bài (soát 18/10/2026: video TikTok đã đọc
+    hết trang gốc mà vẫn thiếu thì lấy trả lời cho các gốc này — `tiktok_api.binh_luan`)."""
+    if not khoa_bai:
+        return {}
+    with ket_noi() as c:
+        rows = c.execute(
+            "SELECT g.khoa_bai, g.ma, g.tra_loi, count(r.ma) AS da_co FROM binh_luan g "
+            "LEFT JOIN binh_luan r ON r.du_an = g.du_an AND r.khoa_bai = g.khoa_bai "
+            "AND r.ma_cha = g.ma WHERE g.du_an = %s AND g.khoa_bai = ANY(%s) "
+            "AND NOT g.la_tra_loi AND COALESCE(g.tra_loi, 0) > 0 "
+            "GROUP BY g.khoa_bai, g.ma, g.tra_loi HAVING count(r.ma) < LEAST(g.tra_loi, %s) "
+            "ORDER BY g.khoa_bai, LEAST(g.tra_loi, %s) - count(r.ma) DESC, g.ma",
+            (ma, list(khoa_bai), int(tran_moi_goc), int(tran_moi_goc))).fetchall()
+    ra: dict[str, list[tuple[str, int]]] = {}
+    for r in rows:
+        ds = ra.setdefault(r["khoa_bai"], [])
+        if len(ds) < toi_da:
+            ds.append((str(r["ma"]), int(r["tra_loi"])))
+    return ra
+
+
 def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
-                  da_lay: dict[str, tuple[int, int | None]]) -> tuple[int, int]:
+                  da_lay: dict[str, tuple[int, int | None]],
+                  khong_tinh_thieu: set[str] | None = None) -> tuple[int, int]:
     """Upsert bình luận (mỗi dòng có `khoa_bai` + `_COT_BL`) và đánh dấu bài đã cào
     (`da_lay` = {khoa bài: (số bình luận lấy được, số nền tảng báo lúc đó)}) trong CÙNG giao
-    dịch. Nhãn chỉ đè khi lượt này có nhãn. -> (mới, cập nhật)."""
+    dịch. Nhãn chỉ đè khi lượt này có nhãn. -> (mới, cập nhật). `khong_tinh_thieu` (soát
+    18/10/2026): khoá bài mà lượt này KHÔNG tính là một lần thiếu dù không thêm được gì (trang
+    đọc tiếp rỗng — lỗi vị trí của Mark, không phải bài hết bình luận): giữ `bl_lan_thieu`."""
     moi = cu = 0
     cot = ", ".join(_COT_BL)
     dat = ", ".join(["%s"] * len(_COT_BL))
@@ -730,11 +758,13 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "bl_da_lay = t.moi, bl_lan_thieu = CASE "
                 "  WHEN t.moi >= COALESCE(%s, bai.binh_luan, 0) * %s THEN 0 "
                 "  WHEN t.moi > COALESCE(bai.bl_da_lay, 0) THEN 0 "
+                "  WHEN %s THEN bai.bl_lan_thieu "
                 "  ELSE bai.bl_lan_thieu + 1 END "
                 "FROM (SELECT GREATEST(%s, (SELECT count(*) FROM binh_luan b WHERE "
                 "      b.du_an = %s AND b.khoa_bai = %s)) AS moi) t "
                 "WHERE bai.du_an = %s AND bai.khoa = %s",
-                (co, co, BL_DU_TOI_THIEU, n, ma, khoa, ma, khoa))
+                (co, co, BL_DU_TOI_THIEU, khoa in (khong_tinh_thieu or ()), n, ma, khoa, ma,
+                 khoa))
         _danh_dau_seeding(c, ma, [r.get("ma_noi_dung") for r in rows])
         _danh_dau_affiliate(c, ma, [r.get("khoa_bai") for r in rows])
     return moi, cu

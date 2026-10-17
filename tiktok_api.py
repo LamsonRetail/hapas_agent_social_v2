@@ -418,7 +418,9 @@ def id_video(url: str) -> str | None:
 
 def binh_luan(urls: list[str], per: int, tra_loi: int = 20,
               tran_usd: float | None = None, loi_ra: list | None = None,
-              bat_dau: dict[str, int] | None = None) -> list[dict]:
+              bat_dau: dict[str, int] | None = None,
+              tra_loi_cho: dict[str, list] | None = None,
+              trang_thai: dict | None = None) -> list[dict]:
     """Bình luận của từng video (item kiểu clockworks~tiktok-comments-scraper). Mỗi video tối
     đa `per` dòng (gốc + trả lời, như `maxItems` = per × số bài của actor cũ): bình luận gốc
     trước (50/yêu cầu), rồi trả lời của các luồng nhiều trả lời nhất (tối đa `tra_loi` mỗi
@@ -429,25 +431,70 @@ def binh_luan(urls: list[str], per: int, tra_loi: int = 20,
     `bat_dau` (18/10/2026): {link: số bình luận GỐC đã có trong kho} — video cào dở lượt trước
     đọc TIẾP từ vị trí đó (`listComments_cursor` là vị trí, 50/trang) thay vì trả tiền đọc lại
     các trang đầu: video 5.181 bình luận cần ~70 trang gốc, mỗi lượt cào lại từ đầu tốn lại
-    đúng phần đã có. Trùng do thứ tự đổi chút giữa hai lượt thì kho gộp theo cid."""
+    đúng phần đã có. Trùng do thứ tự đổi chút giữa hai lượt thì kho gộp theo cid.
+
+    Soát 18/10/2026 — video bị cắt GIỮA phần trả lời (gốc đã đọc hết, tổng vẫn dưới 80%): đọc
+    tiếp từ vị trí gốc chỉ gặp trang rỗng, mỗi lượt 0 bình luận mới rồi video bị bỏ hẳn.
+    `tra_loi_cho` {link: [(cid gốc, số trả lời nền tảng báo), …]}: video đó KHÔNG đọc trang gốc,
+    chỉ lấy trả lời của các gốc đã có trong kho mà chưa đủ trả lời (`lang_nghe_db.
+    goc_thieu_tra_loi`). `trang_thai` (dict bên gọi đưa vào) nhận {link: {"het_goc": đã đọc tới
+    trang gốc cuối (has_more = 0 / trang không có gì mới), "rong": trang đọc tiếp đầu tiên rỗng}}."""
     ngan = _Ngan(tran_usd)
     tu = bat_dau or {}
+    cho = tra_loi_cho or {}
     cac = [(u, id_video(u)) for u in urls]
     for u, vid in cac:
         if not vid:
             _ghi_loi(loi_ra, u, A.LoiApify("LOI", "link không có id video (link rút gọn?)"))
-    ra = _song_song(lambda x: _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra,
-                                      int(tu.get(x[0]) or 0)) if x[1] else [], cac)
+    ra = _song_song(lambda x: (_tra_loi_kho(x[0], x[1], per, tra_loi, ngan, cho[x[0]], loi_ra,
+                                            trang_thai) if cho.get(x[0])
+                               else _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra,
+                                            int(tu.get(x[0]) or 0), trang_thai))
+                    if x[1] else [], cac)
     return [r for ds in ra for r in ds]
 
 
+def _tra_loi_kho(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan, goc: list,
+                 loi_ra: list | None = None, trang_thai: dict | None = None) -> list[dict]:
+    """Trả lời của các gốc ĐÃ có trong kho (`goc` = [(cid, số trả lời báo), …], thiếu nhiều trước),
+    1 yêu cầu mỗi gốc, tới khi đủ `per` dòng. Không đọc trang gốc nào."""
+    ra: list[dict] = []
+    thay: set[str] = set()
+    for cid, _bao in goc:
+        if len(ra) >= per:
+            break
+        try:
+            it = _goi({"commentReplies_commentId": str(cid), "commentReplies_awemeId": vid,
+                       "commentReplies_count": min(TRA_LOI_MOI_TRANG, max(1, tra_loi))}, ngan)
+        except A.LoiApify as e:
+            if e.ma in _DUNG_HAN:
+                raise
+            if not ra:
+                _ghi_loi(loi_ra, url, e)
+            break
+        if it is None:
+            break
+        for r in (it.get("comments") or [])[:max(1, tra_loi)]:
+            if isinstance(r, dict) and r.get("cid") and str(r["cid"]) not in thay \
+                    and len(ra) < per:
+                thay.add(str(r["cid"]))
+                d = binh_luan_dong(r, url)
+                d["repliesToId"] = d["repliesToId"] or str(cid)
+                ra.append(d)
+    if trang_thai is not None:
+        trang_thai[url] = {"het_goc": True, "rong": False, "tra_loi_kho": len(goc)}
+    return ra
+
+
 def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
-            loi_ra: list | None = None, tu: int = 0) -> list[dict]:
+            loi_ra: list | None = None, tu: int = 0,
+            trang_thai: dict | None = None) -> list[dict]:
     goc: list[dict] = []
     thay: set[str] = set()
     con_tro = max(0, int(tu))
+    het_goc = rong = False
     try:
-        for _ in range(math.ceil(max(1, per) / BL_MOI_TRANG) + 2):
+        for i in range(math.ceil(max(1, per) / BL_MOI_TRANG) + 2):
             it = _goi({"listComments_awemeId": vid, "listComments_count": BL_MOI_TRANG,
                        "listComments_cursor": con_tro}, ngan)
             if it is None:
@@ -458,7 +505,11 @@ def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
                     thay.add(str(c["cid"]))
                     goc.append(binh_luan_dong(c, url))
                     moi += 1
-            if len(goc) >= per or not it.get("has_more") or not moi:
+            rong = rong or (i == 0 and con_tro > 0 and not moi)
+            if not it.get("has_more") or not moi:
+                het_goc = True            # trang gốc cuối (trang không có gì mới là đã hết)
+                break
+            if len(goc) >= per:
                 break
             con_tro = max(con_tro + BL_MOI_TRANG, _so(it.get("cursor")) or 0)
     except A.LoiApify as e:
@@ -467,6 +518,8 @@ def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
         if not goc:
             _ghi_loi(loi_ra, url, e)
             return []
+    if trang_thai is not None:
+        trang_thai[url] = {"het_goc": het_goc, "rong": rong}
     goc = goc[:per]
     ra = list(goc)
     if tra_loi > 0:
