@@ -259,7 +259,8 @@ def so_bai_co_gian(p: str, so_bai: int, max_ngay: int | None, khoang_ngay: float
     có bài nào đã giữ); `khoang_ngay`: số ngày từ lần quét trước (≥ chu kỳ). Lấy ĐỦ `so_bai` khi:
     tắt co giãn, nền tảng tính theo tài khoản, đang chiến dịch, lượt trước BÃO HOÀ (lấy đủ mà bài
     cũ nhất vẫn mới hơn lần quét trước — có thể còn bài sót), tới lượt làm mới đủ, chưa có lịch sử.
-    Còn lại: min(so_bai, max(sàn, ⌈max_ngay × khoảng × 1,5⌉ + 2))."""
+    Còn lại: min(so_bai, max(sàn, ⌈max_ngay × khoảng × 1,5⌉ + 2)); TikTok làm tròn lên bội số
+    `TT_BAI_MOI_TRANG` (tính tiền theo trang)."""
     n = max(1, int(so_bai))
     if not cfg.get("bat") or p not in CO_GIAN_NEN_TANG:
         return n, ""
@@ -274,6 +275,11 @@ def so_bai_co_gian(p: str, so_bai: int, max_ngay: int | None, khoang_ngay: float
     can = math.ceil(max(0, int(max_ngay)) * max(1.0, float(khoang_ngay)) * CO_GIAN_HE_SO
                     - 1e-9) + CO_GIAN_DU
     m = min(n, max(int(cfg.get("san") or CO_GIAN_SAN), can))
+    if p == "tiktok":
+        # TikTok API tính theo TRANG ~10 bài (soát 18/10/2026): co 10 → 4 vẫn tải đủ 1 trang mà
+        # chỉ giữ 4 bài — mất bài đã trả tiền, không bớt yêu cầu nào. Làm tròn LÊN bội số cỡ
+        # trang, không dưới một trang (`tiktok_api._ho_so_mot` giữ hết bài của trang đã tải).
+        m = min(n, max(1, math.ceil(m / TT_BAI_MOI_TRANG)) * TT_BAI_MOI_TRANG)
     if m >= n:
         return n, ""
     return m, (f"{n}→{m} bài: đăng tối đa {int(max_ngay)} bài/ngày ({CO_GIAN_NGAY_NHIP} ngày), "

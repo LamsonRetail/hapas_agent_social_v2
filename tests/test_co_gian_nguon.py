@@ -27,7 +27,7 @@ CFG = CP.cau_hinh_co_gian({})
     ("facebook", 4, 1.0, 8),          # ⌈6⌉ + 2
     ("facebook", 6, 1.0, 10),         # ⌈9⌉ + 2 = 11 ≥ 10: lấy đủ
     ("facebook", 1, 3.0, 7),          # Mark lỡ 2 ngày: ⌈4,5⌉ + 2
-    ("tiktok", 2, 1.0, 5),
+    ("tiktok", 2, 1.0, 10),           # 10 → 5 vẫn tải đủ 1 trang 10 bài: không co (tiền theo trang)
     ("instagram", 1, 1.0, 10),        # tính theo tài khoản: số bài không đổi tiền
     ("threads", 1, 1.0, 10),
 ])
@@ -36,6 +36,23 @@ def test_so_bai_co_gian(p, max_ngay, khoang, ra):
     assert m == ra and (bool(ly) is (ra < 10))
     if ra < 10:
         assert ly.startswith(f"10→{ra} bài: đăng tối đa {max_ngay} bài/ngày (14 ngày)")
+
+
+@pytest.mark.parametrize("so, max_ngay, ra", [
+    (20, 2, 10),       # ⌈3⌉ + 2 = 5 → tròn lên 1 trang (10 bài): bớt 1 trang, giữ đủ bài của trang
+    (25, 6, 20),       # ⌈9⌉ + 2 = 11 → 2 trang
+    (15, 0, 10),       # sàn 3 → 1 trang
+    (10, 0, 10),       # dưới một trang thì không co: 1 trang đằng nào cũng tải
+    (8, 0, 8),
+])
+def test_tiktok_co_theo_trang(so, max_ngay, ra):
+    """Soát 18/10/2026: TikTok API tính tiền theo TRANG ~10 bài — co dưới một trang mất bài mà không
+    bớt yêu cầu nào. Làm tròn LÊN bội số cỡ trang; trang đã tải thì giữ hết bài
+    (`tiktok_api._ho_so_mot` không cắt `bai[:n]`)."""
+    m, ly = CP.so_bai_co_gian("tiktok", so, max_ngay, 1.0, CFG)
+    assert m == ra and bool(ly) is (ra < so)
+    assert m == so or m % CP.TT_BAI_MOI_TRANG == 0
+    assert CP.don_vi_ky_vong("tiktok", m) <= CP.don_vi_ky_vong("tiktok", so)
 
 
 def test_lay_du_khi_lam_moi_chien_dich_bao_hoa_chua_co_lich_su_hoac_tat():
@@ -94,7 +111,8 @@ def test_mark_co_va_gom_run_trong_ke_hoach(monkeypatch):
     hom_qua = (BAY - datetime.timedelta(days=1)).isoformat()
     T.ghi_moc_tk("hapas", {T.KHOA_CO_GIAN: {str(i): {"day_du_luc": hom_qua} for i in range(1, 6)}})
     co = T._co_gian_nguon("hapas", {"ma": "hapas", "cau_hinh": {}}, ds, BAY)
-    assert [x["so_bai_hieu_luc"] for x in co] == [10, 4, 4, 5, 12]
+    # TikTok 20 bài, nhịp 2/ngày: 5 → tròn lên 1 trang = 10 (tiền theo trang, 18/10/2026).
+    assert [x["so_bai_hieu_luc"] for x in co] == [10, 4, 4, 10, 12]
     ph = T.chia_phan(co)
     fb = {x["id"]: x for x in ph["facebook"]}
     # thedoor: run 4 bài cho 2 trang nhỏ + run 10 bài cho hapasglobal (0,04 < 0,085 gộp một run).
@@ -102,7 +120,7 @@ def test_mark_co_va_gom_run_trong_ke_hoach(monkeypatch):
     assert fb["facebook-4"]["payload"]["postsToScrape"] == 4
     assert fb["facebook-4"]["co_gian"] == {"2": [10, co[1]["ly_do_co_gian"]],
                                            "3": [10, co[2]["ly_do_co_gian"]]}
-    assert ph["tiktok"][0]["n"] == 5
+    assert ph["tiktok"][0]["n"] == 10
     # Quá 7 ngày từ lần lấy đủ: lấy đủ để làm mới số liệu bài cũ.
     tuan = (BAY - datetime.timedelta(days=7, hours=1)).isoformat()
     T.ghi_moc_tk("hapas", {T.KHOA_CO_GIAN: {"2": {"day_du_luc": tuan}}})

@@ -30,6 +30,9 @@
       var k = Math.max(1, parseInt(co.k, 10) || cg.ngay_day_du);
       var san = parseInt(co.san, 10) || cg.san;
       var m = Math.min(soBai, Math.max(san, Math.ceil(parseInt(co.nhip, 10) * chuKy * cg.he_so - 1e-9) + cg.du));
+      // TikTok tính theo TRANG: tròn lên bội số cỡ trang, không dưới một trang (= so_bai_co_gian).
+      var tr = hs.tt_bai_moi_trang || 10;
+      if (p === "tiktok") m = Math.min(soBai, Math.max(1, Math.ceil(m / tr)) * tr);
       if (m < soBai) dv = ((k - 1) * donVi(p, m) + dv) / k;
     }
     return (hs.ngay || 30) / chuKy * dv * gia;

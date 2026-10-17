@@ -345,7 +345,8 @@ def _ghi_loi(loi_ra: list | None, khoa: str, e: Exception) -> None:
 def ho_so(ten: list[str], n: int, tran_usd: float | None = None,
           loi_ra: list | None = None) -> list[dict]:
     """Bài MỚI NHẤT của từng tài khoản (item kiểu clockworks~tiktok-profile-scraper, bỏ bài
-    ghim như `excludePinnedPosts`). Không đọc được thì một item {"input", "note"} như actor
+    ghim như `excludePinnedPosts`): ít nhất `n` bài khi tài khoản có đủ, và HẾT bài của các trang
+    đã tải (18/10/2026 — có thể hơn `n`). Không đọc được thì một item {"input", "note"} như actor
     cũ (`account_tool._doc_tiktok` ghi thành ghi chú của nguồn). Lỗi API của MỘT tài khoản
     không ném ra (review 16/10: ném là bỏ cả lô): ghi `(tên, mã, lý do)` vào `loi_ra` — bên
     gọi chỉ chạy dự phòng cho đúng các tài khoản đó. Tài khoản đọc được mà KHÔNG có video thì
@@ -401,7 +402,9 @@ def _ho_so_mot(ten: str, n: int, ngan: _Ngan, loi_ra: list | None = None) -> lis
     if not bai:
         return [{"input": ten, "authorMeta": am,
                  "note": "Tài khoản chưa có video công khai (TikTok API)"}]
-    return bai[:n]
+    # Giữ HẾT bài của các trang đã tải (soát 18/10/2026): tiền tính theo yêu cầu (trang ~10 bài),
+    # cắt `bai[:n]` là bỏ bài đã trả tiền — nhất là khi số bài đã co theo nhịp đăng.
+    return bai
 
 
 # ───────────────────────────── bình luận ─────────────────────────────
