@@ -96,5 +96,9 @@
   "sk_3024af9b4e": {
     "ten": "Ghi và nhớ bài học chiến dịch",
     "khi_nao_dung": "Khi lên kế hoạch, audit ads, rà ngân sách cần bài học chiến dịch cũ, hoặc khi được nhờ lưu kết quả đã đo thành bài học. Dấu hiệu: bài học, lần trước, rút kinh nghiệm."
+  },
+  "sk_1a01ce7c33": {
+    "ten": "Hỏi đáp số liệu dashboard lắng nghe",
+    "khi_nao_dung": "Khi được hỏi số liệu dự án trên dashboard social.hapas.vn: thảo luận, tăng giảm, sắc thái, nguồn, bài nổi, hỏi mua, khủng hoảng, chi phí, lịch quét. Không dùng để quét mới."
   }
 }

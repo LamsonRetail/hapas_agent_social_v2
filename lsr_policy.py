@@ -51,6 +51,10 @@ _SAFE_EXACT = {
     "tra_kho",
     # Đọc sổ việc quét nền (viec_nen.py) — chỉ việc của chính chat này / người hỏi này.
     "tra_viec_nen",
+    # Số liệu dashboard lắng nghe social.hapas.vn (hoi_dashboard_tool.py, 17/10/2026). Chỉ đọc kho
+    # lang_nghe, miễn phí; TỰ kiểm người hỏi có tên trong `nguoi_xem` của dashboard và chỉ trả
+    # trong chat riêng. Không công tắc console (chưa có dòng trong agentToolCapabilities.ts).
+    "hoi_dashboard",
     # Xem trước việc sẽ ghi vào Base checklist (viec_base_tool.py): đọc Base, chỉ ghi một
     # file bản xem trước ở máy. Vẫn có công tắc + cổng env bên dưới (đi cùng tool ghi).
     "xem_truoc_viec_base",
