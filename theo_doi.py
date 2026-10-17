@@ -41,6 +41,7 @@ import threading
 import time
 
 import apify_tool as A
+import khu_trung_fb as KT
 import kiem_do_phu as KDP
 import lang_nghe_db as K
 import nguon_web as W
@@ -445,6 +446,10 @@ def _dong_tu_tai_khoan(p: str, tk: dict) -> list[tuple[dict, datetime.datetime |
             "link": str(b.get("link") or ""), "_goc_id": str(goc.get("id") or goc.get("postId")
                                                              or "") or None,
             "_goc_vao": str(goc.get("inputUrl") or goc.get("facebookUrl") or ""),
+            # Id số ổn định của bài Facebook (17/10/2026): pfbid trong link đổi mỗi lượt cào —
+            # kho khớp bản trùng theo id này (`khu_trung_fb`). Ghi vào sổ dòng trên đĩa cùng bài
+            # nên khởi động lại vẫn còn.
+            **({"ma_so_fb": KT.ma_so_fb({**b, "_goc": goc})} if p == "facebook" else {}),
         }, b.get("ngay")))
     return ra
 
@@ -688,9 +693,18 @@ def chon_bai(du_an: dict, theo_nguon: dict[int, list], nguon: dict[int, dict],
             "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
             "binh_luan": _so_hay_none(d.get("comments")),
             "chia_se": _so_hay_none(d.get("shares")),
+            **_cot_fb(d),
         })
     tk["giu"] = len(ra)
     return ra, tk
+
+
+def _cot_fb(d: dict) -> dict:
+    """{"ma_so_fb": id số} cho dòng ghi kho của bài Facebook (`khu_trung_fb`); {} với nền tảng
+    khác — dòng TikTok/YouTube… giữ đúng các khoá cũ."""
+    if (d.get("platform") or d.get("nen_tang")) != "facebook":
+        return {}
+    return {"ma_so_fb": KT.ma_so_fb(d)}
 
 
 # ───────────────────────────── chạy nền ─────────────────────────────
@@ -1965,10 +1979,14 @@ def ghi_da_boc(ma: str, khoa: list[str], bay_gio: datetime.datetime) -> None:
 def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
                  tk: dict, ma_loai: str | None = None) -> None:
     """Bài trong phạm vi: ĐÃ CÓ trong kho → cập nhật số liệu + ảnh chụp ngày (`chi_so_ngay`);
-    MỚI → `_giu_tu_khoa` (lọc + AI). Xem `theo_doi_api.tach_da_biet`."""
+    MỚI → `_giu_tu_khoa` (lọc + AI). Xem `theo_doi_api.tach_da_biet`. Bài Facebook mang pfbid
+    mới mà là bản trùng của bài đã có (`lang_nghe_db.khoa_fb_trung`) đi đường ĐÃ CÓ với khoá cũ."""
+    def khoa_hit(d: dict) -> str:
+        return _khoa_bai(d["platform"], d["link"], {
+            "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")})
+    cu = _khoa_fb_cu(du_an["ma"], hits, khoa_hit)
     cap_nhat, hits_moi, trung = TDA.tach_da_biet(
-        du_an["ma"], hits, lambda d: _khoa_bai(d["platform"], d["link"], {
-            "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")}))
+        du_an["ma"], hits, lambda d: cu.get(khoa_hit(d), khoa_hit(d)))
     for p, n in trung.items():
         tk["pheu"].setdefault(p, _pheu_moi(0, ""))["trung"] += n
     if cap_nhat:
@@ -1995,6 +2013,30 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk)
         finally:
             TDA.ghi_loai(ma_loai, dau, tk.pop("_bi_loai", []), tu_pv)
+
+
+def _khoa_fb_cu(ma: str, hits: list, khoa_hit) -> dict[str, str]:
+    """{khoá pfbid của lượt này: khoá bài đã có} cho bài Facebook trong `hits` (17/10/2026: mỗi lượt
+    actor trả pfbid khác). Kho hỏng thì {} — `lang_nghe_db.ghi_bai` vẫn dùng lại khoá cũ lúc ghi,
+    chỉ tốn thêm lượt AI cho bài đó."""
+    import loc_rac
+    rows = []
+    for d, dt in hits:
+        if d.get("platform") != "facebook" or not d.get("link"):
+            continue
+        nd = str(d.get("text") or "")[:1000]
+        rows.append({"khoa": khoa_hit(d), "nen_tang": "facebook", "link": d["link"],
+                     "tai_khoan": str(d.get("username") or "")[:200],
+                     "tac_gia": str(d.get("kenh") or "")[:200], "dang_luc": dt, "noi_dung": nd,
+                     "ma_noi_dung": loc_rac.ma_noi_dung(nd, loc_rac.BAI_TRUNG_TOI_THIEU_CHU),
+                     **_cot_fb(d)})
+    if not rows:
+        return {}
+    try:
+        return K.khoa_fb_trung(ma, rows)
+    except K.LoiKho as e:
+        print(f"[theo_doi] không tra được bài Facebook trùng: {e}", flush=True)
+        return {}
 
 
 def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
@@ -2072,7 +2114,7 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
             "binh_luan": _so_hay_none(d.get("comments")),
             "chia_se": _so_hay_none(d.get("shares")),
-            **_cot_web(d),
+            **_cot_web(d), **_cot_fb(d),
         })
         ban.append((d, dt))
     tk["giu"] = len(rows)
@@ -2856,6 +2898,8 @@ def _ban_sao_tu_khoa(hits: list) -> list[tuple[dict, datetime.datetime]]:
             "_goc_id": goc.get("id") if isinstance(goc.get("id"), (str, int)) else None,
             "_sac_thai": None if not sac or sac == phan_loai.CHUA else sac,
             "_chu_de": None if not cd or cd == phan_loai.CHUA else cd,
+            # Bản sao bỏ `__goc`: chép id số của bài Facebook TRƯỚC (`khu_trung_fb`).
+            **_cot_fb(d),
         }, dt))
     return ra
 
@@ -2921,6 +2965,7 @@ def luu_tu_khoa(queries: list[str], ban: list) -> dict:
                 "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
                 "binh_luan": _so_hay_none(d.get("comments")),
                 "chia_se": _so_hay_none(d.get("shares")),
+                **_cot_fb(d),
             })
         luot = K.mo_luot(ma, "tu_khoa")
         try:

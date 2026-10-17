@@ -610,9 +610,11 @@ _TRUONG_ACTOR = {
                                           "hasTikTokShopProduct"),
     "apidojo~instagram-hashtag-scraper": ("createdAt", "owner", "video", "caption",
                                           "likeCount", "commentCount", "url"),
+    # `post_id` (17/10/2026): id số ổn định của bài — pfbid trong `url` đổi mỗi lượt cào, kho
+    # khớp bản trùng theo id này (`khu_trung_fb`).
     "scrapeforge~facebook-search-posts": ("timestamp", "author", "message",
                                           "video_view_count", "reactions_count",
-                                          "comments_count", "reshare_count", "url"),
+                                          "comments_count", "reshare_count", "url", "post_id"),
     "futurizerush~meta-threads-scraper": ("text_content", "display_name", "username",
                                           "followers_count", "view_count", "like_count",
                                           "reply_count", "repost_count", "share_count",
@@ -2661,7 +2663,9 @@ def _fb_luot_24h() -> tuple | None:
 
 
 def _chuan_facebook(raw: list) -> list[tuple]:
-    """Item scrapeforge/facebook-search-posts -> [(dòng, ngày VN)]."""
+    """Item scrapeforge/facebook-search-posts -> [(dòng, ngày VN)]. `ma_so_fb` (17/10/2026): id
+    số của bài (`post_id`, không có thì bóc từ link) — pfbid trong link đổi mỗi lượt cào."""
+    import khu_trung_fb
     out = []
     for it in raw:
         dt = _to_vn(it.get("timestamp"))
@@ -2677,6 +2681,7 @@ def _chuan_facebook(raw: list) -> list[tuple]:
             "hashtags": _tags_from(msg),
             "text": msg[:1000],
             "link": it.get("url") or "",
+            "ma_so_fb": khu_trung_fb.ma_so_tu_goc(it) or khu_trung_fb.ma_so_tu_link(it.get("url")),
             "__goc": it,
         }, dt))
     return out

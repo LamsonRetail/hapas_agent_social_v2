@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS bai (
   kieu_trang      TEXT,
   muc_nhac        TEXT,
   la_pr           BOOLEAN,
+  ma_so_fb        TEXT,
   PRIMARY KEY (du_an, khoa)
 );
 CREATE INDEX IF NOT EXISTS bai_du_an_dang_luc ON bai (du_an, dang_luc);
@@ -219,6 +220,16 @@ ALTER TABLE bai ADD CONSTRAINT bai_kieu_trang_check CHECK (kieu_trang IS NULL OR
 ALTER TABLE bai DROP CONSTRAINT IF EXISTS bai_muc_nhac_check;
 ALTER TABLE bai ADD CONSTRAINT bai_muc_nhac_check CHECK (muc_nhac IS NULL OR muc_nhac IN
   ('tieu_de', 'chinh', 'thoang')) NOT VALID;
+-- Khử trùng bài Facebook (17/10/2026, khu_trung_fb.py): đo thật DB production — mỗi lượt cào actor
+-- trả pfbid KHÁC cho cùng một bài, khoá theo pfbid nên 161 bài FB của hapas có 24 nhóm trùng (60
+-- dòng, thừa 36). Khoá bài giữ nguyên; id số của bài (ổn định) để Mark nhận ra bản trùng lúc ghi.
+-- Không UNIQUE: bản trùng cũ chưa gộp (scripts/lang_nghe_gop_bai_fb.py) vẫn mang cùng id, và một
+-- lỗi trùng khoá ở giữa lô là rollback CẢ lô bài đã trả tiền. Index một phần: chỉ dòng có id.
+ALTER TABLE bai ADD COLUMN IF NOT EXISTS ma_so_fb TEXT;
+ALTER TABLE bai DROP CONSTRAINT IF EXISTS bai_ma_so_fb_check;
+ALTER TABLE bai ADD CONSTRAINT bai_ma_so_fb_check CHECK (ma_so_fb IS NULL OR ma_so_fb ~ '^[0-9]{5,25}$')
+  NOT VALID;
+CREATE INDEX IF NOT EXISTS bai_ma_so_fb ON bai (du_an, ma_so_fb) WHERE ma_so_fb IS NOT NULL;
 
 -- 1 dòng = 1 bình luận (hoặc trả lời) Mark đã cào của một bài đã giữ. Đợt 2b (15/10/2026):
 -- Kompa đếm "thảo luận" chủ yếu từ bình luận dưới bài của các trang — đọc được nội dung mới
@@ -522,7 +533,7 @@ COMMENT ON TABLE bai IS $$[Lớp] Raw
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay, binh_luan; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá (/theodoi, social_listen)
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước lượt theo dõi, từ khi bật đợt 2 (sau 14/10/2026)
-[Đã xử lý] Chỉ bài liên quan (nhắc từ khoá trừ kênh nhà, không chứa từ loại trừ, không bị AI loại); khử trùng theo khoa; nội dung cắt 1.000 ký tự
+[Đã xử lý] Chỉ bài liên quan (nhắc từ khoá trừ kênh nhà, không chứa từ loại trừ, không bị AI loại); khử trùng theo khoa; bài Facebook khử trùng thêm theo id số ma_so_fb, không có id thì theo chủ bài + phút đăng + nội dung (pfbid trong link đổi mỗi lượt cào, từ 17/10/2026; bản trùng cũ gộp bằng scripts/lang_nghe_gop_bai_fb.py); nội dung cắt 1.000 ký tự
 [Refresh] Upsert tức thời sau mỗi lượt quét; video YouTube được đọc lại số mỗi ngày trong 14 ngày đầu
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề
 [Không dùng khi] Tăng trưởng theo ngày → dùng chi_so_ngay; bản cho BI → dùng ganesha-381907.SOCIAL_LISTENING.bai
@@ -559,6 +570,7 @@ COMMENT ON COLUMN bai.bl_lay_khi_co IS 'Số bình luận nền tảng báo lúc
 COMMENT ON COLUMN bai.kieu_trang IS 'Loại trang của bài web. Giá trị: bao (báo/tạp chí), dien_dan (diễn đàn), blog, mxh_khac (LinkedIn, X, Lemon8…), khac (trang khác). NULL với bài mạng xã hội (nen_tang khác web).';
 COMMENT ON COLUMN bai.muc_nhac IS 'Mức nhắc brand trong bài web. Giá trị: tieu_de (từ khoá ở tiêu đề), chinh (≥ 3 lần trong thân bài), thoang (nhắc lướt 1–2 lần, vd bài liệt kê nhiều brand). NULL với bài mạng xã hội.';
 COMMENT ON COLUMN bai.la_pr IS 'TRUE: bài web có dấu hiệu bài đặt/PR (thân bài dẫn link về miền của brand hoặc ghi "Ảnh/Nguồn: <brand>"). FALSE: không thấy dấu hiệu. NULL với bài mạng xã hội.';
+COMMENT ON COLUMN bai.ma_so_fb IS 'Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026, hoặc link pfbid mà actor không trả id.';
 
 COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
 [Mục đích] Bình luận (và trả lời) dưới các bài đã giữ của dự án, kèm sắc thái và chủ đề AI gán — tiếng khách hàng.
