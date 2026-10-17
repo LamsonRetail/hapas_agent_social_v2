@@ -47,8 +47,23 @@ BO_QUA = {"dang_chay", "du_an_tat", "khong_co_gi", "het_ngan_sach", "het_ngan_sa
           "nang_luc_tat", "khong_quet_duoc", "trung"}
 #: Loại cảnh báo gửi (khi có `MARK_LICH_QUET_BAO_LOI`): mã -> nhãn.
 CANH_BAO = {"loi": "LỖI", "het_ngan_sach": "HẾT NGÂN SÁCH"}
+#: Ảnh chụp hạn mức gói Apify cho trang Ngân sách (18/10/2026, `theo_doi.ghi_han_muc_goi`): ngoài
+#: lượt /theodoi thì mỗi `GOI_GIO` giờ một lần — gói dùng chung token với việc khác (soi tài khoản,
+#: run thử) và đặt lại theo chu kỳ Apify; không có lượt nào (vd hết ngân sách) thì dashboard vẫn
+#: thấy số mới. GET /users/me/limits miễn phí.
+GOI_GIO = 3
 _LUONG: dict = {}
 _DA_BAO: set[str] = set()
+_GOI_LUC: dict = {}
+
+
+def _anh_chup_goi() -> None:
+    bay = time.monotonic()
+    if bay - _GOI_LUC.get("luc", -1e18) < GOI_GIO * 3600:
+        return
+    _GOI_LUC["luc"] = bay
+    import theo_doi
+    theo_doi.ghi_han_muc_goi(None, "nhip")
 
 
 def _bay_gio() -> datetime.datetime:
@@ -284,6 +299,7 @@ def mot_nhip(bay_gio: datetime.datetime | None = None) -> list[dict]:
             _bao_platform(row, kq.get("moc") or _iso(row.get("lan_chay_ke")), kq)
             ra.append({"id": row.get("id"), "hanh_dong": q.get("hanh_dong"),
                        "ma_loi": kq.get("ma_loi")})
+        _anh_chup_goi()
     except K.LoiKho as e:
         _bao_mot_lan(f"kho-{e}", f"kho lắng nghe chưa dùng được, lịch tạm dừng: {e}")
     except Exception as e:  # noqa: BLE001 — nhịp không bao giờ làm chết Mark

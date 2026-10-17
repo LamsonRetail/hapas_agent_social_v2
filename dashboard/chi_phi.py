@@ -714,6 +714,72 @@ def du_bao_lich(cac_lich: list[dict], bang: dict, nguon: list[dict],
             "theo_lich": thang}
 
 
+# ───── gói Apify (18/10/2026): trần THẬT của cả tài khoản, ảnh chụp do Mark ghi ─────
+#: Ảnh chụp cũ hơn chừng này giờ thì nhắc (Mark ghi sau mỗi lượt + mỗi 3 giờ ở nhịp lịch quét).
+GOI_CU_GIO = 6
+
+
+def _vn(x) -> datetime.datetime | None:
+    if not isinstance(x, datetime.datetime):
+        return None
+    return (x if x.tzinfo else x.replace(tzinfo=datetime.timezone.utc)).astimezone(VN)
+
+
+def goi_apify(snap: dict | None, tran_noi_bo: float, bay_gio: datetime.datetime) -> dict:
+    """Khối "Gói Apify" trang Ngân sách từ ảnh chụp `GET /users/me/limits` Mark ghi
+    (`kho.han_muc_apify`; dashboard không giữ token Apify).
+
+    Vì sao (chủ dự án 18/10/2026: "ko bị lố so với thực tế gói"): trần THẬT là gói — FREE 10 USD
+    mỗi chu kỳ Apify (16/10–15/11), dùng chung với mọi việc khác của token; trần tháng dự án
+    (HAPAS 30 USD/tháng lịch) lớn hơn thì Mark dừng vì GÓI trước (`quet_lon.ngan_sach`: phần còn
+    − 0,30 dự trữ) và trần nội bộ không có tác dụng thật.
+
+    `tran_noi_bo`: tổng trần tháng hiệu lực của các dự án đang bật. -> {"co": False} khi chưa có
+    ảnh chụp; ngược lại {co, goi, da_dung, tran, con_lai, du_tru, dung_duoc, dat_lai (giờ VN),
+    ngay_con (ngày lẻ tới lúc đặt lại), chu_ky_tu, tran_luot, luc, cu (ảnh chụp > GOI_CU_GIO
+    giờ), qua_chu_ky (đã qua lúc đặt lại), tran_noi_bo, noi_bo_vo_hieu, canh_bao: [chữ]}."""
+    if not snap:
+        return {"co": False}
+    bay_gio = bay_gio if bay_gio.tzinfo else bay_gio.replace(tzinfo=datetime.timezone.utc)
+    tran = float(snap.get("tran_usd") or 0)
+    da = float(snap.get("da_dung_usd") or 0)
+    du_tru = float(snap.get("du_tru_usd") or 0)
+    dat_lai = _vn(snap.get("chu_ky_den"))
+    luc = _vn(snap.get("luc"))
+    qua = bool(dat_lai and dat_lai <= bay_gio)
+    con = max(0.0, tran - da)
+    ra = {"co": True, "goi": str(snap.get("goi") or ""), "da_dung": round(da, 4),
+          "tran": round(tran, 2), "con_lai": round(con, 4), "du_tru": round(du_tru, 2),
+          "dung_duoc": round(max(0.0, con - du_tru), 4), "dat_lai": dat_lai,
+          "ngay_con": (round(max(0.0, (dat_lai - bay_gio).total_seconds() / 86400), 2)
+                       if dat_lai else None),
+          "chu_ky_tu": _vn(snap.get("chu_ky_tu")),
+          "tran_luot": (None if snap.get("tran_luot_usd") is None
+                        else float(snap["tran_luot_usd"])),
+          "luc": luc, "cu": bool(luc and (bay_gio - luc).total_seconds() > GOI_CU_GIO * 3600),
+          "qua_chu_ky": qua, "tran_noi_bo": round(float(tran_noi_bo or 0), 2),
+          "noi_bo_vo_hieu": tran > 0 and float(tran_noi_bo or 0) > tran + 1e-9, "canh_bao": []}
+    if qua:
+        ra["canh_bao"].append(
+            f"Chu kỳ gói đã đặt lại lúc {dat_lai:%H:%M %d/%m/%Y}: số đã dùng ở đây là của chu "
+            "kỳ trước — Mark ghi số mới ở lượt kế hoặc trong ≤ 3 giờ.")
+    elif ra["noi_bo_vo_hieu"]:
+        ra["canh_bao"].append(
+            f"Trần nội bộ {_usd_chu(tran_noi_bo)} USD/tháng lớn hơn trần gói Apify "
+            f"{_usd_chu(tran)} USD/chu kỳ: trần nội bộ không có tác dụng thật — Mark dừng quét khi "
+            f"gói còn dưới {_usd_chu(du_tru)} USD dự trữ + ước tính lượt, trước khi chạm trần "
+            "nội bộ. Hạ trần dự án về ≤ phần gói dành cho dự án, hoặc nâng gói Apify.")
+    if ra["cu"] and not qua:
+        ra["canh_bao"].append(f"Ảnh chụp gói cũ hơn {GOI_CU_GIO} giờ ({luc:%H:%M %d/%m}) — Mark "
+                              "chưa ghi lại (bot tắt hoặc không đọc được Apify).")
+    return ra
+
+
+def _usd_chu(x) -> str:
+    """USD 2 chữ số lẻ kiểu Việt (giống bộ lọc `usd_vn` của app)."""
+    return f"{float(x or 0):,.2f}".replace(",", "\0").replace(".", ",").replace("\0", ".")
+
+
 # ───── kiểm độ phủ (17/10/2026, bản sao `kiem_do_phu` của Mark — bài thử đối chiếu) ─────
 #: `kiem_do_phu.TRAN_MAC_DINH` / `TRAN_TOI_DA` / `GIO_GIAN`: chủ dự án chốt hai lần mỗi tuần (mỗi
 #: 84 giờ), tối đa 0,20 USD mỗi lần; tiền thật nằm trong lượt /theodoi (trần tháng dự án).

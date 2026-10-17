@@ -62,6 +62,12 @@
 .ns-canh-bao li { margin: 2px 0; }
 .ns-canh-bao a { color: inherit; text-decoration: underline; font-weight: 650; }
 
+/* gói Apify (18/10/2026): khối riêng dưới tóm tắt dự án — trần thật của cả tài khoản */
+.ns-goi { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--ke); }
+.ns-goi .ns-nhan { margin-bottom: 8px; }
+.ns-goi__so { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.ns-goi__canh { margin: 10px 0 0; }
+
 /* ─── cấu hình thu thập ─── */
 .ns-ch__dau { display: flex; justify-content: space-between; align-items: center; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .ns-ch__muc { margin-bottom: 0; }

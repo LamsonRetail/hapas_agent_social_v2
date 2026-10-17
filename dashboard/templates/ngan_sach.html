@@ -111,6 +111,21 @@
     <p>{% if ql %}Hoặc tăng trần dự án ở phần cấu hình bên dưới{% if db.tran_platform is not none and db.tran_platform < db.tran_du_an %} (đang bị trần platform giữ — tăng ở console platform){% endif %}. {% endif %}<a href="/nguon?du_an={{ d.ma|urlencode }}">Sửa nguồn</a></p>
   </div>
   {% endif %}
+  {# ── Gói Apify (18/10/2026, khối riêng — bố cục trang do nhánh khác làm lại; giữ nguyên khối này):
+     trần THẬT của cả tài khoản, ảnh chụp Mark ghi (chi_phi.goi_apify, bảng han_muc_apify). ── #}
+  {% if goi and goi.co %}
+  <div class="ns-goi" role="group" aria-labelledby="ns-goi-tieu-de" data-o="goi-apify">
+    <div class="ns-nhan" id="ns-goi-tieu-de">Gói Apify{% if goi.goi %} {{ goi.goi }}{% endif %} — trần thật của cả tài khoản
+      <button type="button" class="goi-y" data-goi-y="Apify chặn mọi run khi tài khoản dùng hết trần gói trong chu kỳ, bất kể trần dự án. Số đã dùng là của CẢ tài khoản (mọi việc dùng chung token, gồm run thử), theo chu kỳ Apify chứ không theo tháng lịch. Mark chừa {{ goi.du_tru|usd_vn }} USD dự trữ. Ảnh chụp lúc {{ goi.luc|gio_vn }}.">i</button></div>
+    <dl class="ns-o-so ns-goi__so">
+      <div><dt>Đã dùng chu kỳ này</dt><dd class="ns-gia-tri">{{ goi.da_dung|usd_vn }}</dd><dd class="ns-phu">/ {{ goi.tran|usd_vn }} USD trần gói</dd></div>
+      <div><dt>Gói còn</dt><dd class="ns-gia-tri">{{ goi.con_lai|usd_vn }}</dd><dd class="ns-phu">USD · Mark dùng được {{ goi.dung_duoc|usd_vn }}</dd></div>
+      <div><dt>Đặt lại</dt><dd class="ns-gia-tri">{% if goi.dat_lai %}{{ goi.dat_lai.strftime('%d/%m') }}{% else %}—{% endif %}</dd><dd class="ns-phu">{% if goi.dat_lai %}{{ goi.dat_lai.strftime('%H:%M') }} · còn {{ '%.1f'|format(goi.ngay_con)|replace('.', ',') }} ngày{% else %}Apify chưa báo{% endif %}</dd></div>
+      {% if goi.tran_luot is not none %}<div><dt>Trần mỗi lượt (console)</dt><dd class="ns-gia-tri">{{ goi.tran_luot|usd_vn }}</dd><dd class="ns-phu">USD — một lượt không tiêu quá</dd></div>{% endif %}
+    </dl>
+    {% for c in goi.canh_bao %}<p class="thong-bao thong-bao--canh ns-goi__canh" role="note">⚠ {{ c }}</p>{% endfor %}
+  </div>
+  {% endif %}
 </section>
 
 {# ── cấu hình thu thập từng nền tảng ── #}

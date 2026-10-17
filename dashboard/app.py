@@ -1326,7 +1326,18 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
-        return _trang(request, "ngan_sach.html", nguoi, "ngan_sach",
+        # Gói Apify (18/10/2026): trần THẬT của cả tài khoản — ảnh chụp Mark ghi (`han_muc_apify`;
+        # dashboard không giữ token). Bảng chưa tạo / kho giả cũ: không có khối.
+        snap = None
+        ham_goi = getattr(app.state.kho, "han_muc_apify", None)
+        if ham_goi is not None:
+            try:
+                snap = await _k(ham_goi)
+            except LoiKho:
+                snap = None
+        goi = CP.goi_apify(snap, sum(x["du_bao"]["tran"] for x in dong if x.get("dang_bat")),
+                           bay_gio)
+        return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi,
                       dong=an_chi_tiet(nguoi, dong, ("sua_boi",)), du_an=du_an,
                       luot=an_chi_tiet(nguoi, luot, ("ghi_chu", "ghi_chu_dai"), ("loi",)),
                       tong=tong,

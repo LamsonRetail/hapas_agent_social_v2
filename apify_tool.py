@@ -563,9 +563,11 @@ def _han_muc_thang() -> dict | None:
         except (KeyError, TypeError, ValueError):
             return None
         het = _to_vn((d.get("monthlyUsageCycle") or {}).get("endAt"))
-        # endAt là 23:59:59.999Z ngày cuối chu kỳ -> +1 giây là đúng NGÀY reset.
+        # endAt là 23:59:59.999Z ngày cuối chu kỳ -> +1 giây là đúng NGÀY reset. `bat_dau`
+        # (18/10/2026): đầu chu kỳ, cho ảnh chụp gói trên dashboard (`theo_doi.ghi_han_muc_goi`).
         return {"dung": dung, "tran": tran, "con_lai": max(0.0, tran - dung),
-                "reset": het + datetime.timedelta(seconds=1) if het else None}
+                "reset": het + datetime.timedelta(seconds=1) if het else None,
+                "bat_dau": _to_vn((d.get("monthlyUsageCycle") or {}).get("startAt"))}
     return _nho("han_muc", 60, lay)
 
 

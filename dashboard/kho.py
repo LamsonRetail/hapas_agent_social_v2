@@ -511,6 +511,18 @@ def do_phu_gan_nhat(du_an: str, n: int = 2) -> list[dict]:
             "id DESC LIMIT %s", (du_an, max(1, int(n)))).fetchall()
 
 
+def han_muc_apify() -> dict | None:
+    """Ảnh chụp hạn mức gói Apify MỚI NHẤT Mark ghi (18/10/2026, `theo_doi.ghi_han_muc_goi`) —
+    dashboard không giữ token Apify. None khi chưa có dòng nào; bảng chưa tạo thì `LoiKho` (bên
+    gọi bỏ khối "Gói Apify")."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT luc, goi, da_dung_usd::float AS da_dung_usd, tran_usd::float AS tran_usd, "
+            "chu_ky_tu, chu_ky_den, tran_luot_usd::float AS tran_luot_usd, "
+            "du_tru_usd::float AS du_tru_usd, luot_id, nguon_ghi FROM han_muc_apify "
+            "ORDER BY luc DESC, id DESC LIMIT 1").fetchone()
+
+
 def luot_xong_moi_nhat() -> dict | None:
     """Lượt vừa kết thúc gần nhất (mọi dự án) — vòng kiểm 30 giây so mốc này để biết có dữ liệu
     mới khi Mark không báo được (dashboard tắt lúc Mark báo, lỗi mạng nội bộ…)."""

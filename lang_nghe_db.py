@@ -558,6 +558,23 @@ def ghi_kiem_do_phu(r: dict) -> int:
     return int(x["id"])
 
 
+#: Cột của `han_muc_apify` Mark ghi (18/10/2026) — bài thử đối chiếu với schema.sql.
+_COT_HAN_MUC = ("goi", "da_dung_usd", "tran_usd", "chu_ky_tu", "chu_ky_den", "tran_luot_usd",
+                "du_tru_usd", "luot_id", "nguon_ghi")
+
+
+def ghi_han_muc(r: dict) -> int:
+    """Ghi MỘT ảnh chụp hạn mức gói Apify (bảng `han_muc_apify`) cho trang Ngân sách — dashboard
+    không giữ token Apify. `luot_id` không còn trong `luot_quet` thì ghi NULL. -> id."""
+    with ket_noi() as c:
+        x = c.execute(
+            f"INSERT INTO han_muc_apify ({', '.join(_COT_HAN_MUC)}) VALUES ("
+            + ", ".join("(SELECT id FROM luot_quet WHERE id = %s)" if k == "luot_id" else "%s"
+                        for k in _COT_HAN_MUC)
+            + ") RETURNING id", [r.get(k) for k in _COT_HAN_MUC]).fetchone()
+    return int(x["id"])
+
+
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
 #: Bài đã cào được cào lại khi số bình luận nền tảng báo tăng ≥ 20% (và ≥ 5) — bài cũ ít đổi
 #: thì không trả tiền đọc lại cùng bình luận.

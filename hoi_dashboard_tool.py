@@ -166,7 +166,7 @@ _KHOA_DSN = threading.Lock()
 _HAM_KHO = ("vai_tro", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_luan_trong_khoang",
             "binh_luan_hop_le_gon", "bai_theo_khoa", "ngu_canh_bai", "cac_nguon", "da_tieu_thang",
             "tran_platform", "cac_luot", "tien_do_gan_nhan", "luot_xong_moi_nhat",
-            "do_phu_gan_nhat")
+            "do_phu_gan_nhat", "han_muc_apify")
 
 
 class KhoMark:
@@ -639,7 +639,22 @@ def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
         cac_lich = []
     tq = TL.tong_quan(cac_lich, du_an, nguon, tieu, tran_pf, bay_gio)
     luot, tong = kho.cac_luot(ma, 1, min(top, LUOT_TOI_DA))
+    # Gói Apify (18/10/2026): trần THẬT của cả tài khoản — như khối "Gói Apify" trang Ngân sách
+    # (`chi_phi.goi_apify`); "ngân sách còn" phải nói cả phần còn của gói, không chỉ trần dự án.
+    goi = {"co": False}
+    ham_goi = getattr(kho, "han_muc_apify", None)
+    if ham_goi is not None:
+        try:
+            goi = CP.goi_apify(ham_goi(), db["tran"], bay_gio)
+        except Exception as e:
+            if not _loi_kho(e):
+                raise
     return {
+        "goi_apify": ({"goi": goi["goi"], "da_dung_usd": goi["da_dung"], "tran_goi_usd": goi["tran"],
+                       "con_lai_goi_usd": goi["con_lai"], "mark_dung_duoc_usd": goi["dung_duoc"],
+                       "dat_lai": _gio(goi["dat_lai"]), "tran_moi_luot_usd": goi["tran_luot"],
+                       "tran_noi_bo_vo_hieu": goi["noi_bo_vo_hieu"], "canh_bao": goi["canh_bao"]}
+                      if goi.get("co") else {"co": False}),
         "thang": bay_gio.strftime("%m/%Y"),
         "da_tieu_usd": round(tieu, 4), "tran_usd": db["tran"],
         "tran_du_an_usd": db["tran_du_an"], "tran_platform_usd": db["tran_platform"],
@@ -661,7 +676,9 @@ def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
             "loi": (r.get("loi") if quan_ly else (LOI_CHUNG if r.get("loi") else None))}
             for r in luot],
         "ghi_chu": "Dự báo là mức TỐI ĐA nếu mọi lượt dùng hết phần giữ chỗ; tiền thật là "
-                   "`da_tieu_usd` (lượt theo dõi trong tháng, giờ VN).",
+                   "`da_tieu_usd` (lượt theo dõi trong tháng, giờ VN). Gói Apify (`goi_apify`) là "
+                   "trần THẬT của cả tài khoản theo chu kỳ Apify: hết gói thì Mark dừng dù trần "
+                   "dự án còn.",
     }
 
 

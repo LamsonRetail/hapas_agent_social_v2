@@ -536,13 +536,26 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
            + (f" (gồm tới {_usd(bl_uoc)} USD cào bình luận)" if bl_uoc else "")
            + (f" (gồm tới {_usd(dp_uoc)} USD kiểm độ phủ)" if dp_uoc else "")
            + "; ngân sách tháng "
-           f"của dự án còn {_usd(kh['con_thang'])}/{_usd(kh['tran_thang'])} USD. "
-           f"Xong Mark nhắn kết quả vào đây.")
+           f"của dự án còn {_usd(kh['con_thang'])}/{_usd(kh['tran_thang'])} USD"
+           # Gói Apify (18/10/2026): trần THẬT của cả tài khoản — trần dự án 30 USD mà gói FREE
+           # còn 5 USD thì câu cũ "còn 14,56/30" làm người đọc tưởng còn ~10 lượt.
+           + _cau_goi(hm) + ". Xong Mark nhắn kết quả vào đây.")
     if kh["bo_qua"]:
         ly = sorted({x[1] for x in kh["bo_qua"]})
         cau += f" Bỏ qua {len(kh['bo_qua'])} nguồn: {'; '.join(ly)[:300]}."
     return {"ok": True, "ma_viec": kq.get("ma_viec"), "cau": cau, "uoc_usd": tong,
             "so_nguon": len(kh["nguon"]), "bo_qua": len(kh["bo_qua"])}
+
+
+def _cau_goi(hm: dict | None) -> str:
+    """"; gói Apify còn X/Y USD tới DD/MM" từ hạn mức tháng (`quet_lon.ngan_sach`) — "" khi không
+    hỏi được Apify."""
+    if not isinstance(hm, dict) or hm.get("con_lai") is None:
+        return ""
+    tran = f"/{_usd(float(hm['tran']))}" if hm.get("tran") else ""
+    het = hm.get("reset")
+    return (f"; gói Apify còn {_usd(float(hm['con_lai']))}{tran} USD"
+            + (f" tới {het:%d/%m}" if isinstance(het, datetime.datetime) else ""))
 
 
 # ───────────────────────────── đọc bài của một phần ─────────────────────────────
@@ -885,6 +898,9 @@ def chot_lai_chi_phi(d: dict, usd: float) -> bool:
     except K.LoiKho as e:
         print(f"[theo_doi] không chốt lại được chi phí lượt {luot}: {e}", flush=True)
         return False
+    # Gói Apify sau khi phí ghi trễ đã vào (~90 giây sau run cuối, `A._han_muc_thang` nhớ 60 giây
+    # nên số mới) — khối "Gói Apify" trang Ngân sách đúng hơn ảnh chụp lúc đóng lượt.
+    ghi_han_muc_goi(int(luot), "chot_lai")
     if cu is not None:
         print(f"[theo_doi] lượt {luot}: chi phí chốt lại {_usd(cu)} → {_usd(usd)} USD",
               flush=True)
@@ -3768,6 +3784,7 @@ def _chay_viec(v) -> tuple[str, str]:
                         loi=(loi_chung or "; ".join(sorted(set(loi.values())))[:500] or None))
         except K.LoiKho as e:
             print(f"[theo_doi] không đóng được lượt {luot}: {e}", flush=True)
+    ghi_han_muc_goi(luot, "luot")
     _bao_dashboard(ma, luot)
     if loi_chung:
         return "loi", (f"Theo dõi {du_an['ten']} ({v.ma}) dừng vì lỗi: {loi_chung}. Chi phí thật "
@@ -3840,6 +3857,35 @@ def _lam_moi_youtube(ma: str, luot: int) -> int:
     except (A.LoiYouTube, K.LoiKho) as e:
         print(f"[theo_doi] làm mới YouTube lỗi: {A._che_token(str(e))[:120]}", flush=True)
         return 0
+
+
+def ghi_han_muc_goi(luot: int | None = None, nguon_ghi: str = "luot") -> bool:
+    """Ghi ảnh chụp hạn mức GÓI Apify (bảng `han_muc_apify`) cho khối "Gói Apify" trang Ngân sách
+    (18/10/2026). Vì sao Mark ghi mà dashboard không tự hỏi Apify: chỉ `.env` của Mark giữ
+    APIFY_TOKEN; GET /users/me/limits miễn phí và đã có sẵn (`apify_tool._han_muc_thang`, nhớ 60
+    giây). Gói FREE 10 USD/chu kỳ là trần THẬT (trần tháng dự án HAPAS 30 USD không bao giờ chạm
+    được) — thiếu số này trang Ngân sách báo "trong trần" trong khi gói còn đủ 3–4 lượt.
+    -> True khi đã ghi. Không bao giờ ném (kho / Apify lỗi thì thôi, lần sau ghi)."""
+    try:
+        hm = A._han_muc_thang()
+        if not hm:
+            return False
+        import quet_lon
+        try:
+            tran_luot = round(float(quet_lon.tran_usd_nen()), 2)
+        except Exception:  # noqa: BLE001 — console không đọc được: cột NULL
+            tran_luot = None
+        K.ghi_han_muc({"goi": A._goi_apify() or "", "da_dung_usd": round(float(hm["dung"]), 4),
+                       "tran_usd": round(float(hm["tran"]), 2), "chu_ky_tu": hm.get("bat_dau"),
+                       "chu_ky_den": hm.get("reset"), "tran_luot_usd": tran_luot,
+                       "du_tru_usd": quet_lon._DU_TRU_THANG, "luot_id": luot,
+                       "nguon_ghi": nguon_ghi})
+        return True
+    except Exception as e:  # ảnh chụp hỏng không làm hỏng lượt
+        if type(e).__name__ == "MatQuyen":
+            raise
+        print(f"[theo_doi] không ghi được hạn mức gói Apify: {type(e).__name__}", flush=True)
+        return False
 
 
 def _bao_dashboard(ma: str, luot: int) -> None:
