@@ -479,12 +479,15 @@ def _tran_phan(p: str, ph: dict, con: float, con_viec: float = float("inf")) -> 
     """Trần USD (`maxTotalChargeUsd`) của một phần theo dõi nguồn: min(trần console của nền tảng,
     phần còn của tháng `con`, phần còn của VIỆC `con_viec`, max(sàn 0,1, ước tính × 1,5)).
     Facebook: dự phòng (actor cũ) chạy TRONG phần, tiêu phần trần còn lại sau thedoor
-    (`theo_doi_api.du_phong_fb`) → mức trần chừa chỗ cho nó (`giu_cho_phan`). Soát 17/10/2026:
+    (`theo_doi_api.du_phong_fb`) → mức trần chừa chỗ cho nó (`giu_cho_phan`); hồ sơ TikTok qua
+    TikTok API cũng vậy (dự phòng clockworks, 18/10/2026). Soát 17/10/2026:
     trần cũ max(0,1; ước × 1,5) với 2 trang × 5 bài là 0,1 — thedoor lỗi sau khi tạo run còn 0,09,
     dự phòng bị bỏ đúng lúc thedoor hỏng hẳn. Threads: dự phòng là phần RIÊNG, có trần riêng."""
     uoc = float(ph.get("uoc_usd") or 0)
     muc = max(_TRAN_TOI_THIEU, uoc * _HE_SO_TRAN)
-    if p == "facebook":
+    if p == "facebook" or ph.get("bo_chuyen") == "tiktok_ho_so":
+        # TikTok (soát 18/10/2026): dự phòng clockworks (0,003 USD/video) chạy TRONG phần như
+        # Facebook, còn trần theo giá TikTok API (0,002 USD/yêu cầu) — phải chừa chỗ cho nó.
         # Làm tròn LÊN tới cent rồi cộng 0,02 (soát lại 17/10/2026): `du_phong_fb` làm tròn XUỐNG
         # phần còn (trần − đã tiêu) rồi so với giá dự phòng × hệ số ước — làm tròn xuống hai đầu ăn
         # hết khoảng dư 0,3 × 0,01, nên ~1/3 tổ hợp trang × bài (4×5, 8×5, 10×10…) bỏ oan trang
@@ -3587,6 +3590,15 @@ _BL_UOC_MOI_BAI = 60              # giữ chỗ ngân sách khi chưa biết bà
 _BL_FB_LOC_NGAY = 0.002           # phụ phí mỗi bài khi Facebook lọc theo ngày
 
 
+def _gia_bl(p: str) -> float:
+    """USD mỗi bình luận theo actor THẬT SỰ chạy lô. TikTok không đi TikTok API (bảng chọn
+    `tiktok_api.CHON` đổi về clockworks) thì tính giá clockworks 0,00125 — soát 18/10/2026: phần
+    lập theo giá API 0,0004 thì ước tính, trần lô và sổ đều hụt ~3 lần."""
+    if p == "tiktok" and not TDA.TT.dung_api("tiktok_binh_luan"):
+        return TDA._GIA_DU_PHONG["tiktok_binh_luan"]
+    return _BL_GIA.get(p, 0.0)
+
+
 def uoc_binh_luan(so_bai: int, moi_bai: int, p: str = "facebook") -> float:
     """USD ước tính cào `moi_bai` bình luận × `so_bai` bài trên nền tảng `p` (mặc định giá
     Facebook — đắt nhất trừ Instagram, dùng để giữ chỗ ngân sách khi chưa biết bài nào).
@@ -3800,7 +3812,7 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
             if khoang:
                 can = [max(khoang[0], min(khoang[1], c)) for c in can]
             per_lo = max(can)
-            gia = _BL_GIA.get(p, 0.0)
+            gia = _gia_bl(p)
             uoc = round((sum(can) * gia + _BL_KHOI_DONG.get(p, 0.0)
                          + D._GIA_MOI_BAI.get(p, 0.0) * len(lo)     # Threads: dòng bài gốc
                          + (_BL_FB_LOC_NGAY * len(lo) if moc is not None else 0.0)) * _HE_SO_UOC, 4)
@@ -3840,7 +3852,7 @@ def _chia_lo_bl(p: str, ds: list[dict], per: int) -> list[tuple[list[dict], obje
         n = min(_BL_LO, D._BAI_MOI_LO.get(p, _BL_LO))      # Threads: ≤ 20 bài mỗi lượt actor
         ds = sorted(ds, key=_uu_tien_bl)
         return [(ds[i:i + n], None) for i in range(0, len(ds), n)]
-    gia = _BL_GIA.get(p, 0.0)
+    gia = _gia_bl(p)
     tran = A._tran_nen_tang(p, nen=True)[1] if gia else 0.0
     toi_da_bl = int(0.9 * tran / (gia * _HE_SO_UOC)) if gia else 10 ** 9
     nhom: dict = {}
@@ -3951,8 +3963,9 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             tran_console = A._tran_nen_tang(p, nen=True)[1]
             sau = sum(float(x.get("uoc_usd") or 0) for x in cac_ph[i + 1:]
                       if x.get("trang_thai") not in _KET_PHAN)
-            cap = _tran_lo_bl(tran_console, con, _con_viec(v), sau, float(ph["uoc_usd"]),
-                              min_charge)
+            # `giu_cho_phan` (soát 18/10/2026): lô TikTok qua TikTok API chừa chỗ cho dự phòng
+            # clockworks 0,00125 USD/bình luận (gấp ~3 giá API) — như phần theo dõi nguồn.
+            cap = _tran_lo_bl(tran_console, con, _con_viec(v), sau, giu_cho_phan(ph), min_charge)
             het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
             if cap < max(min_charge, _TRAN_TOI_THIEU) - 1e-9 or het_gio:
                 ly = ("hết giờ" if het_gio else
