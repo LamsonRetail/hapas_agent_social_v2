@@ -193,6 +193,31 @@ def dong_luot(luot_id: int, *, trang_thai: str, so_nguon: int = 0, so_nguon_loi:
              cat_ghi_chu(ghi_chu), luot_id))
 
 
+def _usd_vn(x: float) -> str:
+    return f"{x:.4f}".replace(".", ",")
+
+
+def nang_chi_phi_luot(luot_id: int, usd: float) -> float | None:
+    """Chốt LẠI chi phí lượt đã đóng (17/10/2026, `viec_nen.Viec.tinh_lai_muon`): phí sự kiện
+    Apify ghi trễ sau khi run xong (0,1948 → 0,2397 USD; 0,0201 → 0,0501…). Chỉ NÂNG
+    `chi_phi_usd`, không bao giờ hạ — "đã tiêu tháng" (trần tháng) cộng cột này, đếm thiếu là
+    lượt sau tiêu lố. Ghi một câu vào ĐẦU ghi chú lượt (ghi chú dài bị cắt ở đuôi). -> số cũ khi
+    đã nâng, None khi không cần (số mới không cao hơn, hoặc không có lượt)."""
+    moi = round(float(usd or 0), 4)
+    with ket_noi() as c:
+        x = c.execute("SELECT chi_phi_usd::float AS usd, ghi_chu FROM luot_quet WHERE id = %s "
+                      "FOR UPDATE", (int(luot_id),)).fetchone()
+        if not x or moi <= round(float(x["usd"] or 0), 4):
+            return None
+        cu = float(x["usd"] or 0)
+        cau = (f"chi phí chốt lại {_usd_vn(cu)} → {_usd_vn(moi)} USD (phí sự kiện Apify ghi sau "
+               "khi run xong)")
+        c.execute("UPDATE luot_quet SET chi_phi_usd = %s, ghi_chu = %s WHERE id = %s",
+                  (moi, cat_ghi_chu(f"{cau}; {x['ghi_chu']}" if x.get("ghi_chu") else cau),
+                   int(luot_id)))
+    return cu
+
+
 def danh_dau_nguon(da_quet: list[int], loi: dict[int, str]) -> None:
     """Nguồn quét được: ghi `quet_cuoi`, xoá lỗi cũ. Nguồn lỗi: ghi lỗi, KHÔNG dời `quet_cuoi`
     (lượt sau thử lại)."""

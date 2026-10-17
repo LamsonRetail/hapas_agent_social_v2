@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.luot_quet`
   so_nguon_loi    INT64     OPTIONS(description='Số nguồn không lấy được bài trong lượt, nguồn.'),
   bai_moi         INT64     OPTIONS(description='Số bài lần đầu vào kho trong lượt, bài.'),
   bai_cap_nhat    INT64     OPTIONS(description='Số bài đã có được cập nhật số liệu/nhãn trong lượt, bài.'),
-  chi_phi_usd     NUMERIC   OPTIONS(description='Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt. 0 khi lượt chỉ dùng YouTube Data API (miễn phí). Không âm.'),
+  chi_phi_usd     NUMERIC   OPTIONS(description='Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt, đọc khi run cuối đã xong ≥ 45 giây; Mark đọc lại ~90 giây sau run cuối và NÂNG số nếu Apify ghi thêm phí sự kiện (chỉ nâng, không hạ; từ 17/10/2026 — lượt cũ hơn có thể thiếu phí ghi trễ). 0 khi lượt chỉ dùng YouTube Data API (miễn phí). Không âm.'),
   trang_thai      STRING    OPTIONS(description='Giá trị: dang_chay, xong (mọi nguồn được), mot_phan (một số nguồn lỗi), loi (không nguồn nào được hoặc bot dừng giữa chừng), da_huy.'),
   loi             STRING    OPTIONS(description='Tóm tắt lỗi của các nguồn hỏng, tối đa 500 ký tự. NULL khi không có lỗi.'),
   ghi_chu         STRING    OPTIONS(description='Ghi chú vận hành (vd hết ngân sách tháng, bot khởi động lại giữa lượt, nền tảng bỏ qua/lỗi kèm lý do) và phễu từng nền tảng của lượt tìm theo từ khoá, các câu nối bằng "; ". Tối đa 20.000 ký tự (từ 17/10/2026; trước đó 2.000 — lượt cũ có thể cụt), quá thì cắt và ghi dấu đã cắt ở cuối. NULL khi không có.'),
@@ -342,6 +342,11 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
 [Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet
 [Lưu ý] Số liệu là lần đọc gần nhất, không phải cuối kỳ; bài YouTube được đọc lại số mỗi ngày trong 14 ngày đầu, nền tảng khác chỉ khi bài còn nằm trong N bài mới nhất của nguồn. Đây là mẫu theo nguồn đã chọn, không phải toàn bộ thảo luận trên mạng.''');
+
+-- Chốt chi phí khi phí sự kiện Apify ghi trễ (17/10/2026): bảng đã tạo trước thì đổi mô tả cột cho
+-- khớp COMMENT luot_quet.chi_phi_usd bên Postgres. Chỉ đổi mô tả, không đổi kiểu cột.
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.luot_quet`
+  ALTER COLUMN chi_phi_usd SET OPTIONS(description='Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt, đọc khi run cuối đã xong ≥ 45 giây; Mark đọc lại ~90 giây sau run cuối và NÂNG số nếu Apify ghi thêm phí sự kiện (chỉ nâng, không hạ; từ 17/10/2026 — lượt cũ hơn có thể thiếu phí ghi trễ). 0 khi lượt chỉ dùng YouTube Data API (miễn phí). Không âm.');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`

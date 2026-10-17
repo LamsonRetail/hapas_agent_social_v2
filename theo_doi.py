@@ -729,6 +729,26 @@ def chay_viec(v) -> tuple[str, str]:
     return kq
 
 
+def chot_lai_chi_phi(d: dict, usd: float) -> bool:
+    """Bước chốt lại chi phí ở nền (`viec_nen.Viec.tinh_lai_muon`, ~90 giây sau run cuối) thấy
+    Apify tính thêm sau khi lượt đã đóng — phí sự kiện ghi trễ (đo 17/10/2026: 0,1948 → 0,2397
+    USD): nâng `luot_quet.chi_phi_usd` của lượt (chỉ nâng; "đã tiêu tháng" cộng cột này) rồi báo
+    dashboard. -> True khi xong hoặc không có lượt; False khi kho hỏng (lần sau thử lại)."""
+    luot = d.get("luot_id")
+    if not luot:
+        return True
+    try:
+        cu = K.nang_chi_phi_luot(int(luot), usd)
+    except K.LoiKho as e:
+        print(f"[theo_doi] không chốt lại được chi phí lượt {luot}: {e}", flush=True)
+        return False
+    if cu is not None:
+        print(f"[theo_doi] lượt {luot}: chi phí chốt lại {_usd(cu)} → {_usd(usd)} USD",
+              flush=True)
+        _bao_dashboard(str((d.get("tham_so") or {}).get("du_an") or ""), int(luot))
+    return True
+
+
 def _ghi_phan(v, p: str, ph: dict, kq: dict[int, list], loi: dict[int, str]) -> None:
     """Ghi bài của một phần xuống đĩa (kèm id nguồn) và lỗi từng nguồn vào sổ việc."""
     rows = []

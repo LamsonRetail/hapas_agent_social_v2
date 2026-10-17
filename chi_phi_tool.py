@@ -17,8 +17,10 @@ Mọi lỗi đều nuốt (fail-open) — sổ chi phí hỏng không được l
 """
 from __future__ import annotations
 
+import contextvars
 import datetime
 import json
+import os
 import sys
 import threading
 import time
@@ -102,7 +104,36 @@ def ghi(*, queries, platforms, date_range, thuc: dict | None, est: float,
         print(f"[chi_phi] ghi so loi (bo qua): {type(e).__name__}: {e}")
     if getattr(audit, "_DAY_LEN_BASE", False):
         threading.Thread(target=_day, args=(rec,), daemon=True).start()
+    dl = (thuc or {}).get("doc_lai")
+    if dl and dl.get("run_ids") and rec["chi_phi_thuc_usd"] is not None \
+            and (os.environ.get("SOCIAL_NEN_TU_CHAY") or "1").strip() != "0":
+        # Bộ thử (SOCIAL_NEN_TU_CHAY=0) không để luồng ngủ rồi ghi vào sổ sau khi bài đã xong.
+        threading.Thread(target=contextvars.copy_context().run, args=(doc_lai, rec, dl),
+                         name="chi-phi-doc-lai", daemon=True).start()
     return rec
+
+
+def doc_lai(rec: dict, dl: dict, ngu=time.sleep) -> float:
+    """Đọc lại tiền thật của ĐÚNG các run đã cộng vào `rec` sau `dl["sau_giay"]` giây (phí sự kiện
+    Apify ghi trễ — đo 17/10/2026: 0,1948 → 0,2397; 0,0201 → 0,0501; danek 0,0001 → 0,0251) và
+    ghi MỘT dòng điều chỉnh (phần chênh) — sổ cộng dồn nên không sửa dòng cũ. Theo run id, không
+    theo mốc giờ: run của người khác bắt đầu sau không bị cộng nhầm. -> USD chênh đã ghi."""
+    try:
+        ngu(max(0.0, float(dl.get("sau_giay") or 0)))
+        import apify_tool
+        kq = apify_tool._chi_phi_cac_run(list(dl.get("run_ids") or []))
+        lech = round(float(kq.get("usd") or 0) - float(rec.get("chi_phi_thuc_usd") or 0), 4)
+        if lech <= 0.0005 or kq.get("chua_doc"):
+            return 0.0
+        ghi(queries=["điều chỉnh: phí Apify ghi sau khi chạy xong", *(rec.get("tu_khoa") or [])],
+            platforms=rec.get("nen_tang") or [], date_range=rec.get("khoang_ngay") or "",
+            thuc={"usd": lech, "so_run": kq.get("so_run") or 0, "cham_tran": 0, "dang_chay": 0},
+            est=0.0, chat=rec.get("chat") or None, ma_viec=rec.get("ma_viec"),
+            nguoi=rec.get("nguoi") or None)
+        return lech
+    except Exception as e:  # noqa: BLE001 — sổ chi phí hỏng không được làm hỏng gì khác
+        print(f"[chi_phi] doc lai loi (bo qua): {type(e).__name__}")
+        return 0.0
 
 
 # ───────────────────────────── Base ─────────────────────────────

@@ -159,4 +159,5 @@ Thứ tự quét: YouTube trước vì miễn phí, rồi Instagram, TikTok, Fac
   sudo -u mark $PY scripts/lang_nghe_gop_bai_fb.py hapas --hoan-tac /opt/mark/gop-bai-fb-<ngày>.jsonl   # nếu cần trả lại
   ```
   Không chạy khi có lượt `/theodoi` đang chạy (script tự dừng). Quy tắc gộp và chọn số ghi ở đầu script.
+- **Chi phí lượt và phí Apify ghi trễ** (đo 17/10/2026: đọc ngay khi run xong 0,1948 → sau vài chục giây 0,2397 USD): `luot_quet.chi_phi_usd` chốt khi run cuối đã xong ≥ 45 giây (chờ tối đa 75 giây); khoảng 90 giây sau run cuối Mark đọc lại ở luồng riêng, Apify tính thêm thì ghi dòng "điều chỉnh" vào sổ chi phí và NÂNG số của lượt (ghi chú lượt có câu "chi phí chốt lại …"). Bot khởi động lại trước bước này thì làm bù lúc khởi động.
 - **Bot khởi động lại giữa lượt actor:** phần nền tảng đó không gửi lại, tránh trả tiền hai lần. Tiền vẫn tính theo run id, và nguồn của phần đó chờ lượt sau.

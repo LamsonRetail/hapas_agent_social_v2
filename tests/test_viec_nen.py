@@ -772,7 +772,8 @@ def test_chi_phi_cong_dung_run_cua_viec(nen):
     b = nen.tao_run("x~y", {}, [1] * 50, "SUCCEEDED")
     nen.tao_run("x~y", {}, [1] * 999, "SUCCEEDED")         # run của người khác cùng actor
     kq = A._chi_phi_cac_run([a, b, a])
-    assert kq == {"usd": 0.15, "so_run": 2, "chua_doc": 0, "con_song": []}
+    assert kq == {"usd": 0.15, "so_run": 2, "chua_doc": 0, "con_song": [],
+                  "ket_thuc_cuoi": None, "giay_tu_ket_thuc": None}   # run giả không báo finishedAt
 
 
 # ───────────────────────────── deep dive ─────────────────────────────
