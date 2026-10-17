@@ -128,6 +128,16 @@ def da_tieu_thang(ma: str) -> float:
 
 
 # ───────────────────────────── lượt quét ─────────────────────────────
+def chi_luot_gan(ma: str, toi_da: int = 20) -> list[dict]:
+    """Chi phí thật các lượt /theodoi gần nhất (mới trước) — câu nhận việc nói chi THẬT bên cạnh
+    ước tính TỐI ĐA (18/10/2026, `dashboard.chi_phi.chi_luot_thuc`)."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT id, kieu, bat_dau, ket_thuc, trang_thai, chi_phi_usd::float AS chi_phi_usd "
+            "FROM luot_quet WHERE du_an = %s AND kieu = 'theo_doi' ORDER BY id DESC LIMIT %s",
+            (ma, max(1, int(toi_da)))).fetchall()
+
+
 def luot_dang_chay(ma: str) -> dict | None:
     """Lượt theo dõi khác của cùng dự án còn đang chạy (trong `GIO_BO_DO` giờ) — có thì
     không mở lượt mới, kẻo hai lượt cùng tiêu một phần ngân sách."""

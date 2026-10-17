@@ -530,7 +530,7 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
     cau = (f"Đã nhận lượt theo dõi {kh['du_an']['ten']} (mã {kq.get('ma_viec')}): "
            + (f"{len(kh['nguon'])} nguồn ({ds})" if kh['nguon'] else
               "chưa nguồn nào tới hạn — lượt này chỉ tìm theo từ khoá")
-           + f", ước tính tối đa {_usd(tong)} USD"
+           + f", ước tính tối đa {_usd(tong)} USD" + _cau_chi_that(ma)
            + (f" (gồm tới {_usd(dp_phan)} USD dự phòng nếu actor chính hỏng)" if dp_phan else "")
            + (f" (gồm tới {_usd(tk_uoc)} USD tìm theo từ khoá)" if tk_uoc else "")
            + (f" (gồm tới {_usd(bl_uoc)} USD cào bình luận)" if bl_uoc else "")
@@ -545,6 +545,23 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
         cau += f" Bỏ qua {len(kh['bo_qua'])} nguồn: {'; '.join(ly)[:300]}."
     return {"ok": True, "ma_viec": kq.get("ma_viec"), "cau": cau, "uoc_usd": tong,
             "so_nguon": len(kh["nguon"]), "bo_qua": len(kh["bo_qua"])}
+
+
+def _cau_chi_that(ma: str, bay_gio: datetime.datetime | None = None) -> str:
+    """" (thật N lượt gần nhất: a–b, trung vị c USD)" — ước tính lúc nhận là mức TỐI ĐA (giữ chỗ
+    cào hết bình luận), chi thật 7 lượt 16–17/10 chỉ 30–100% số đó (18/10/2026). "" khi chưa đủ
+    lượt hay kho lỗi."""
+    try:
+        from dashboard import chi_phi as CP
+        t = CP.chi_luot_thuc(K.chi_luot_gan(ma), bay_gio or datetime.datetime.now(_VN))
+    except Exception as e:  # kho / dữ liệu lỗi: câu không có phần này
+        if type(e).__name__ == "MatQuyen":
+            raise
+        return ""
+    if not t.get("co"):
+        return ""
+    return (f" (thật {t['so_luot']} lượt gần nhất: {_usd(t['thap'])}–{_usd(t['cao'])}, "
+            f"trung vị {_usd(t['trung_vi'])} USD)")
 
 
 def _cau_goi(hm: dict | None) -> str:

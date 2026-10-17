@@ -36,7 +36,7 @@
     <h2 class="muc__ten" id="lq-ds-td">Lịch của dự án ({{ lich|length }})</h2>
     <button type="button" class="goi-y" data-goi-y="Lịch console (Lịch chạy → Giao việc “/theodoi {{ du_an.ma }}”) vẫn chạy song song. Chiến dịch đang diễn ra thì lịch thường nhường; lượt trước chưa xong thì lượt sau bỏ qua và ghi lý do.{% if not ql %} Chỉ người quản lý tạo/sửa được lịch.{% endif %}">i</button>
     {% if tong and tong.co_lich %}
-    <span class="muc__phai lq-tong{% if tong.vuot %} lq-tong--canh{% endif %}">Còn <b>{{ tong.luot|so_vn }}</b> lượt tháng này · tối đa ≈ <b>{{ tong.tong|usd_vn }}</b> / {{ tong.tran|usd_vn }} USD{% if tong.vuot %} <button type="button" class="goi-y goi-y--canh" data-goi-y="Cả tháng có thể vượt trần — Mark dừng quét khi chạm trần.">!</button>{% endif %}</span>
+    <span class="muc__phai lq-tong{% if tong.vuot %} lq-tong--canh{% endif %}">Còn <b>{{ tong.luot|so_vn }}</b> lượt tháng này ·{% if tong.tong_thuc is not none %} theo chi thật ≈ <b>{{ tong.tong_thuc|usd_vn }}</b> ·{% endif %} tối đa ≈ <b>{{ tong.tong|usd_vn }}</b> / {{ tong.tran|usd_vn }} USD{% if tong.vuot %} <button type="button" class="goi-y goi-y--canh" data-goi-y="Cả tháng có thể vượt trần — Mark dừng quét khi chạm trần.">!</button>{% endif %}</span>
     {% endif %}
   </div>
   {% if lich %}
@@ -61,7 +61,8 @@
           {% else %}<span class="mo">chưa chạy</span>{% endif %}
         </td>
         <td class="so" data-nhan="≈ USD/30 ngày">
-          {% if x.bat and x.tt != 'ket_thuc' %}{{ x.usd_30|usd_vn }}<div class="mo nho">{{ x.luot_30|so_vn }} lượt × {{ x.moi_luot|usd_vn(3) }}</div>
+          {% if x.bat and x.tt != 'ket_thuc' and x.usd_30_thuc is not none %}{{ x.usd_30_thuc|usd_vn }}<div class="mo nho">{{ x.luot_30|so_vn }} lượt × {{ x.moi_luot_thuc|usd_vn }} (chi thật) · tối đa {{ x.usd_30|usd_vn }}</div>
+          {% elif x.bat and x.tt != 'ket_thuc' %}{{ x.usd_30|usd_vn }}<div class="mo nho">{{ x.luot_30|so_vn }} lượt × {{ x.moi_luot|usd_vn(3) }}</div>
           {% else %}<span class="mo">0</span>{% endif %}
         </td>
         {% if ql %}

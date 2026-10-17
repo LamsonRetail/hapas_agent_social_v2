@@ -780,6 +780,121 @@ def _usd_chu(x) -> str:
     return f"{float(x or 0):,.2f}".replace(",", "\0").replace(".", ",").replace("\0", ".")
 
 
+# ───── dự báo theo CHI THẬT (18/10/2026) ─────
+# Vì sao: `du_bao` chỉ gồm NGUỒN theo chu kỳ (HAPAS: ≈ 0,25 USD/lượt) trong khi chi thật mỗi lượt
+# 7 lượt 16–17/10 là 0,60–2,00 USD (bình luận 0,23–1,71 + tìm từ khoá 0,13–0,77 + nguồn ~0,3) —
+# trang báo "trong trần" sai; còn mức TỐI ĐA theo cấu hình (giữ chỗ 60 bình luận/bài × 10 bài × 5
+# nền tảng = 6,5 USD bình luận, cả lượt 8,6 USD) thì lố ~6 lần. Chi thật đã chốt theo run id
+# (`luot_quet.chi_phi_usd`) là thước đo duy nhất không lệch theo cấu hình.
+#: ≤ 7 lượt /theodoi gần nhất trong 14 ngày, đã kết thúc, ≥ 0,05 USD (bỏ lượt chỉ YouTube và script
+#: bù lịch sử — vd lượt 12 bù IG 0,0385); cần ≥ 3 lượt mới dùng.
+THUC_LUOT_TOI_DA = 7
+THUC_NGAY = 14
+THUC_SAN_USD = 0.05
+THUC_TOI_THIEU = 3
+
+
+def chi_luot_thuc(luot: list[dict], bay_gio: datetime.datetime) -> dict:
+    """Chi THẬT mỗi lượt theo các lượt gần nhất (dòng `kho.cac_luot`): trung vị — bền với lượt có
+    kiểm độ phủ / lượt cào bù bình luận to — kèm thấp nhất, cao nhất.
+    -> {co (≥ THUC_TOI_THIEU lượt), so_luot, trung_vi, thap, cao, luot_id: [id]}."""
+    bay_gio = bay_gio if bay_gio.tzinfo else bay_gio.replace(tzinfo=datetime.timezone.utc)
+    moc = bay_gio - datetime.timedelta(days=THUC_NGAY)
+    ds = []
+    for x in luot or []:
+        bd = _vn(x.get("bat_dau"))
+        usd = float(x.get("chi_phi_usd") or 0)
+        if (x.get("kieu", "theo_doi") != "theo_doi" or x.get("trang_thai") == "dang_chay"
+                or not x.get("ket_thuc") or bd is None or bd < moc or usd < THUC_SAN_USD):
+            continue
+        ds.append((bd, usd, x.get("id")))
+    ds = sorted(ds, key=lambda t: t[0], reverse=True)[:THUC_LUOT_TOI_DA]
+    if not ds:
+        return {"co": False, "so_luot": 0}
+    tien = sorted(u for _, u, _ in ds)
+    g = len(tien) // 2
+    tv = tien[g] if len(tien) % 2 else (tien[g - 1] + tien[g]) / 2
+    return {"co": len(ds) >= THUC_TOI_THIEU, "so_luot": len(ds), "trung_vi": round(tv, 4),
+            "thap": round(tien[0], 4), "cao": round(tien[-1], 4),
+            "luot_id": [i for _, _, i in ds]}
+
+
+def du_bao_thuc(db: dict, thuc: dict, so_luot_con: float, dp_con: float = 0.0) -> dict:
+    """Dự báo cả tháng THEO CHI THẬT = đã tiêu + số lượt còn lại × trung vị chi thật mỗi lượt
+    (gồm mọi phần của lượt: nguồn tới hạn, tìm từ khoá, bình luận, web) + kiểm độ phủ còn lại
+    (2 lần/tuần — trung vị gần như không gồm nó). Chưa đủ lượt đo (`thuc.co` sai) thì trả `db`
+    (chỉ nguồn) kèm `theo` = "nguon". Không sửa `db`. -> bản sao `db` với du_bao_thang, con_lai,
+    vuot, vuot_usd theo chi thật + {theo, thuc, so_luot_con, dp_con, nguon_con_lai}."""
+    if not thuc or not thuc.get("co"):
+        return {**db, "theo": "nguon", "thuc": thuc or {"co": False}}
+    con = max(0.0, float(so_luot_con or 0)) * float(thuc["trung_vi"]) + float(dp_con or 0)
+    tong = float(db.get("da_tieu") or 0) + con
+    tran = float(db.get("tran") or 0)
+    return {**db, "theo": "thuc", "thuc": thuc, "so_luot_con": so_luot_con,
+            "dp_con": round(float(dp_con or 0), 4), "nguon_con_lai": db.get("con_lai"),
+            "con_lai": round(con, 4), "du_bao_thang": round(tong, 4),
+            "vuot": tong > tran + 1e-9, "vuot_usd": round(max(0.0, tong - tran), 4)}
+
+
+def cac_moc_du_an(cac_lich: list[dict], tu: datetime.datetime, den: datetime.datetime,
+                  toi_da: int = 3000) -> list[datetime.datetime]:
+    """Mọi mốc sẽ chạy trong (tu, den] của các lịch ĐANG BẬT của MỘT dự án, tăng dần — cùng luật
+    `lich_quet.dem_luot_du_an` (mốc lịch thường trong khung chiến dịch đang bật thì nhường)."""
+    from dashboard import lich_quet as LQ
+    khung = [k for x in cac_lich if x.get("bat") and (k := LQ.khung_chien_dich(x))]
+    ra: list[datetime.datetime] = []
+    for x in cac_lich:
+        if not x.get("bat"):
+            continue
+        tru = [] if x.get("kieu") == "chien_dich" else khung
+        for m in LQ.lap_moc(x.get("kieu") or "", x.get("cau_hinh") or {}, tu):
+            if m > den or len(ra) >= toi_da:
+                break
+            if not any(a <= m <= b for a, b in tru):
+                ra.append(m)
+    return sorted(ra)
+
+
+def goi_du_bao(goi: dict, phan: list[dict], bay_gio: datetime.datetime) -> dict:
+    """Thêm DỰ BÁO TỚI LÚC GÓI ĐẶT LẠI vào khối gói (`goi_apify`). `phan`: mỗi dự án đang bật
+    {"ten", "thuc" (`chi_luot_thuc`), "moc": [mốc lượt tới lúc đặt lại], "dp_usd": USD kiểm độ phủ
+    tới lúc đặt lại}. Gói dùng chung: mọi dự án tiêu vào cùng phần còn.
+    -> bản sao `goi` + {du_bao_chu_ky, so_luot_chu_ky, het_luc (mốc lượt đầu tiên KHÔNG đủ tiền),
+    du_luot (số lượt gói còn đủ), vuot_goi, du_bao_theo ("thuc" | "chua_du")}."""
+    if not goi.get("co") or goi.get("qua_chu_ky"):
+        return goi
+    ra = {**goi, "canh_bao": list(goi.get("canh_bao") or [])}
+    co = [x for x in phan if (x.get("thuc") or {}).get("co")]
+    if not co:
+        ra["du_bao_theo"] = "chua_du"
+        return ra
+    lan = sorted((m, float(x["thuc"]["trung_vi"])) for x in co for m in x.get("moc") or [])
+    dp = sum(float(x.get("dp_usd") or 0) for x in co)
+    tong = sum(u for _, u in lan) + dp
+    con = float(goi["dung_duoc"])
+    het, du, tich = None, 0, 0.0
+    for m, u in lan:
+        if tich + u > con + 1e-9:
+            het = m
+            break
+        tich += u
+        du += 1
+    ra.update(du_bao_theo="thuc", du_bao_chu_ky=round(tong, 4), so_luot_chu_ky=len(lan),
+              du_luot=du, het_luc=het, vuot_goi=tong > con + 1e-9)
+    if ra["vuot_goi"]:
+        tv = co[0]["thuc"]["trung_vi"] if len(co) == 1 else None
+        ra["canh_bao"].insert(0, (
+            f"Dự báo tới lúc gói đặt lại ({goi['dat_lai']:%d/%m}): {len(lan)} lượt"
+            + (f" × {_usd_chu(tv)} USD (trung vị chi thật)" if tv is not None else "")
+            + f" + kiểm độ phủ = {_usd_chu(tong)} USD > phần Mark dùng được của gói "
+            f"{_usd_chu(con)} USD — gói đủ {du} lượt như hiện nay"
+            + (f"; từ lượt {het:%H:%M %d/%m} Mark co tìm từ khoá/bình luận theo phần còn rồi "
+               f"dừng hẳn khi gói còn dưới {_usd_chu(goi.get('du_tru'))} USD dự trữ, tới "
+               f"{goi['dat_lai']:%d/%m}" if het else "")
+            + ". Giảm bình luận/tìm từ khoá ở bảng cấu hình, giãn lịch, hoặc nâng gói Apify."))
+    return ra
+
+
 # ───── kiểm độ phủ (17/10/2026, bản sao `kiem_do_phu` của Mark — bài thử đối chiếu) ─────
 #: `kiem_do_phu.TRAN_MAC_DINH` / `TRAN_TOI_DA` / `GIO_GIAN`: chủ dự án chốt hai lần mỗi tuần (mỗi
 #: 84 giờ), tối đa 0,20 USD mỗi lần; tiền thật nằm trong lượt /theodoi (trần tháng dự án).

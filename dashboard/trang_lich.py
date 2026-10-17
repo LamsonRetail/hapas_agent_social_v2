@@ -74,15 +74,33 @@ def ket_qua_hien(x: dict, quan_ly: bool, loi_chung: str) -> dict | None:
             "chi_tiet": (ly if quan_ly else loi_chung)[:120], "title": ly if quan_ly else ""}
 
 
+def _kep_luot(moi_luot: float, chi: dict | None) -> float:
+    """USD tối đa một lượt kẹp ở trần việc nền trên console (18/10/2026, `chi["tran_luot"]` từ ảnh
+    chụp gói Mark ghi): giữ chỗ cào hết bình luận (60/bài) làm "tối đa" HAPAS 8,6 USD/lượt trong
+    khi console chặn mỗi lượt ở 2 USD."""
+    tl = (chi or {}).get("tran_luot")
+    return round(min(float(moi_luot), float(tl)), 4) if tl is not None else float(moi_luot)
+
+
+def _trung_vi(chi: dict | None) -> float | None:
+    """Trung vị chi THẬT mỗi lượt (`chi_phi.chi_luot_thuc`) khi đủ lượt đo; None khi chưa."""
+    t = (chi or {}).get("thuc") or {}
+    return float(t["trung_vi"]) if t.get("co") else None
+
+
 def dong_lich(cac_lich: list[dict], du_an: dict, nguon: list[dict], bay_gio: dt.datetime,
-              quan_ly: bool, loi_chung: str) -> list[dict]:
-    """Mỗi lịch + trạng thái, mô tả, mốc kế (chữ), ≈ USD/30 ngày, kết quả gần nhất."""
+              quan_ly: bool, loi_chung: str, chi: dict | None = None) -> list[dict]:
+    """Mỗi lịch + trạng thái, mô tả, mốc kế (chữ), ≈ USD/30 ngày, kết quả gần nhất. `chi`
+    (18/10/2026): {"thuc": `chi_phi.chi_luot_thuc`, "tran_luot": trần console mỗi lượt} — mức tối
+    đa kẹp ở trần console, `usd_30_thuc` = lượt × trung vị chi thật."""
     bang = CP.bang_cau_hinh(du_an)
     ba_muoi = LQ.dem_luot_du_an(cac_lich, bay_gio, bay_gio + dt.timedelta(days=30))
+    tv = _trung_vi(chi)
     ra = []
     for x in cac_lich:
         ma_tt, nhan_tt = LQ.trang_thai(x, cac_lich, bay_gio)
         u = CP.uoc_lich(x, bang, nguon)
+        moi = _kep_luot(u["moi_luot"], chi)
         ke = x.get("lan_chay_ke") if x.get("bat") else None
         tre = bool(ke and ke < bay_gio - TRE_BAO)
         luot_30 = ba_muoi.get(x.get("id"), 0)
@@ -92,37 +110,49 @@ def dong_lich(cac_lich: list[dict], du_an: dict, nguon: list[dict], bay_gio: dt.
             "tt": ma_tt, "tt_nhan": nhan_tt, "tt_lop": LOP_TT.get(ma_tt, ""),
             "ke_chu": LQ.chu_moc(ke, bay_gio) if ke else "—",
             "ke_con": "" if not ke or tre else LQ.chu_con(ke, bay_gio), "tre": tre,
-            "luot_30": luot_30, "usd_30": round(luot_30 * u["moi_luot"], 4),
-            "moi_luot": u["moi_luot"], "kq": ket_qua_hien(x, quan_ly, loi_chung),
+            "luot_30": luot_30, "usd_30": round(luot_30 * moi, 4),
+            "moi_luot": moi, "moi_luot_thuc": tv,
+            "usd_30_thuc": None if tv is None else round(luot_30 * tv, 4),
+            "kq": ket_qua_hien(x, quan_ly, loi_chung),
             "tao_boi": x.get("tao_boi") if quan_ly else None,
             "sua_boi": x.get("sua_boi") if quan_ly else None})
     return ra
 
 
 def tong_quan(cac_lich: list[dict], du_an: dict, nguon: list[dict], da_tieu: float,
-              tran_pf: float | None, bay_gio: dt.datetime) -> dict:
-    """Tháng này theo các lịch đang bật: số lượt còn lại, USD tối đa của lịch, cả tháng so trần."""
+              tran_pf: float | None, bay_gio: dt.datetime, chi: dict | None = None) -> dict:
+    """Tháng này theo các lịch đang bật: số lượt còn lại, USD tối đa của lịch (mỗi lượt kẹp ở trần
+    console khi biết — `chi`), cả tháng so trần; `tong_thuc` = đã tiêu + lượt còn lại × trung vị
+    chi thật (18/10/2026)."""
     bang = CP.bang_cau_hinh(du_an)
     db = CP.du_bao(nguon, da_tieu, float(du_an.get("tran_usd_thang") or 0), tran_pf, bay_gio)
     dl = CP.du_bao_lich(cac_lich, bang, nguon, bay_gio)
     if not dl.get("co_lich"):
         return {"co_lich": False, "tran": db["tran"], "da_tieu": float(da_tieu or 0)}
     theo = dl["theo_lich"]
-    usd = sum(theo.get(x.get("id"), 0) * CP.uoc_lich(x, bang, nguon)["moi_luot"]
+    usd = sum(theo.get(x.get("id"), 0) * _kep_luot(CP.uoc_lich(x, bang, nguon)["moi_luot"], chi)
               for x in cac_lich if x.get("bat")) + dl["web_them"]   # + web lịch thường ≤ 1/ngày
     tong = float(da_tieu or 0) + db["con_lai"] + usd
+    tl = (chi or {}).get("tran_luot")
+    if tl is not None:          # mỗi lượt (gồm nguồn, web) không tiêu quá trần console
+        tong = min(tong, float(da_tieu or 0) + dl["luot_con_lai"] * float(tl))
+    tv = _trung_vi(chi)
     return {"co_lich": True, "luot": dl["luot_con_lai"], "usd_lich": round(usd, 4),
             "nguon_chu_ky": db["con_lai"], "da_tieu": float(da_tieu or 0), "tong": round(tong, 4),
             "tran": db["tran"], "vuot": tong > db["tran"] + 1e-9,
-            "chenh": round(abs(db["tran"] - tong), 4)}
+            "chenh": round(abs(db["tran"] - tong), 4),
+            "tong_thuc": (None if tv is None
+                          else round(float(da_tieu or 0) + dl["luot_con_lai"] * tv, 4))}
 
 
 # ───────────────────────────── xem trước biểu mẫu ─────────────────────────────
 def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_tieu: float,
-              tran_pf: float | None, bay_gio: dt.datetime, lid: int | None = None) -> dict:
+              tran_pf: float | None, bay_gio: dt.datetime, lid: int | None = None,
+              chi: dict | None = None) -> dict:
     """`d` = lịch đã kiểm (`LQ.chuan_hoa`), `cac_lich` = mọi lịch của dự án (lịch đang sửa `lid`
-    được thay bằng `d`). -> {mo_ta, tan_suat, moc: [{chu, con, nhuong}], ghi_moc, chi_phi:
-    [{nhan, gia_tri, phu}], ket_luan, cong_thuc, vuot, canh_bao: [chữ]}."""
+    được thay bằng `d`). `chi` (18/10/2026): như `dong_lich` — mức tối đa mỗi lượt kẹp ở trần
+    console, thêm chi thật trung vị. -> {mo_ta, tan_suat, moc: [{chu, con, nhuong}], ghi_moc,
+    chi_phi: [{nhan, gia_tri, phu}], ket_luan, cong_thuc, vuot, canh_bao: [chữ]}."""
     kieu, ch = d["kieu"], d["cau_hinh"]
     toi = lid if lid else -1
     khac = [x for x in cac_lich if x.get("id") != toi]
@@ -137,7 +167,10 @@ def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_
                else "")
     # ── chi phí ──
     bang = CP.bang_cau_hinh(du_an)
-    u = CP.uoc_lich(d, bang, nguon)
+    u = dict(CP.uoc_lich(d, bang, nguon))
+    u_goc = u["moi_luot"]
+    u["moi_luot"] = _kep_luot(u_goc, chi)
+    tv = _trung_vi(chi)
     khung = LQ.khung_chien_dich(ung_vien) if kieu == "chien_dich" else None
     if kieu == "chien_dich":
         ky_den, ky_nhan = (khung[1] if khung else bay_gio), "Cả chiến dịch"
@@ -150,7 +183,8 @@ def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_
     luot_ky = LQ.dem_moc(kieu, ch, bay_gio, ky_den, tru)
     thang = LQ.dem_luot_du_an(tat_ca, bay_gio, _ket_thuc_thang(bay_gio))
     luot_thang = thang.get(toi, 0)
-    usd_khac = sum(thang.get(x.get("id"), 0) * CP.uoc_lich(x, bang, nguon)["moi_luot"]
+    usd_khac = sum(thang.get(x.get("id"), 0)
+                   * _kep_luot(CP.uoc_lich(x, bang, nguon)["moi_luot"], chi)
                    for x in khac if x.get("bat"))
     db = CP.du_bao(nguon, da_tieu, float(du_an.get("tran_usd_thang") or 0), tran_pf, bay_gio)
     # Báo & Web (16/10/2026): lịch thường chạy web ≤ 1 lượt/ngày (`CP.luot_web_thuong`, cả dự án —
@@ -164,15 +198,22 @@ def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_
         web_nay = CP.luot_web_thuong(rieng, bay_gio, het_thang) * u["web"]
     usd_thang = luot_thang * u["moi_luot"]
     tong = float(da_tieu or 0) + db["con_lai"] + usd_khac + usd_thang + web_thang
+    if (chi or {}).get("tran_luot") is not None:     # mỗi lượt (gồm nguồn, web) ≤ trần console
+        tong = min(tong, float(da_tieu or 0) + sum(thang.values()) * float(chi["tran_luot"]))
     tran = db["tran"]
     vuot = tong > tran + 1e-9
     ghi_web = (f" · Báo & Web {_usd(u['web'], 3)} tối đa 1 lượt/ngày"
                if u["web"] and not u["web_moi_luot"] else "")
+    kep = u["moi_luot"] < u_goc - 1e-9
     chi_phi = [
         {"nhan": "Mỗi lượt (tối đa)", "gia_tri": f"{_usd(u['moi_luot'], 3)} USD",
-         "phu": f"tìm từ khoá + bình luận {_usd(u['tk_bl'], 3)}"
-                + (f" + quét mọi nguồn {_usd(u['nguon'], 3)}" if d.get("quet_moi_nguon") else "")
-                + ghi_web},
+         "phu": (f"trần console mỗi lượt (theo cấu hình {_usd(u_goc, 3)})" if kep else
+                 f"tìm từ khoá + bình luận {_usd(u['tk_bl'], 3)}"
+                 + (f" + quét mọi nguồn {_usd(u['nguon'], 3)}" if d.get("quet_moi_nguon") else "")
+                 + ghi_web)
+                + (f" · thật ≈ {_usd(tv, 2)} USD/lượt (trung vị "
+                   f"{(chi or {}).get('thuc', {}).get('so_luot')} lượt gần nhất)"
+                   if tv is not None else "")},
         {"nhan": ky_nhan, "gia_tri": f"≈ {_usd(luot_ky * u['moi_luot'] + web_ky)} USD",
          "phu": f"{_so(luot_ky)} lượt"},
         {"nhan": f"Còn lại tháng {bay_gio.astimezone(LQ.VN):%m/%Y}",
