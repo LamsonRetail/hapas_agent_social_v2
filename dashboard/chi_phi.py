@@ -65,6 +65,8 @@ TK_FB_TOI_DA = 20
 TK_TT_YEU_CAU = 0.003
 TK_TT_MOI_TRANG = 30
 TK_LAM_MOI = 10
+#: `theo_doi_api.MOI_TRANG` — trang "mới nhất" mỗi từ khoá TikTok trong ước tính (17/10/2026).
+TK_TT_MOI_NHAT = 1
 
 #: Báo & Web (16/10/2026, `theo_doi.WEB_*` = `nguon_web`): Google tìm qua actor SERP tính theo TRANG
 #: kết quả (10 link), đọc bài bằng HTTP thường 0 USD; trang bị chặn đọc qua website-content-crawler
@@ -391,7 +393,7 @@ def uoc_tk_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_D
     if p == "instagram":
         return round(len(q) * (TK_KHOI["instagram"] + so_bai * gia) * HE_SO_UOC, 4)
     if p == "tiktok":
-        trang = 2 * math.ceil(math.ceil(so_bai / len(q)) / TK_TT_MOI_TRANG) + 1
+        trang = 2 * math.ceil(math.ceil(so_bai / len(q)) / TK_TT_MOI_TRANG) + 1 + TK_TT_MOI_NHAT
         return round((len(q) * trang + TK_LAM_MOI) * TK_TT_YEU_CAU * HE_SO_UOC, 4)
     n = (min(so_bai, fb_toi_da) if p == "facebook"
          else max(so_bai, TH_TOI_THIEU_BAI) if p == "threads" else so_bai)
@@ -578,7 +580,7 @@ def hang_so_cho_trinh_duyet() -> dict:
             "mac_dinh_tat": MAC_DINH_TAT,
             # TikTok tìm theo từ khoá tính theo yêu cầu (16/10/2026) — `uoc_tk_nen_tang`.
             "tk_tt_yeu_cau": TK_TT_YEU_CAU, "tk_tt_moi_trang": TK_TT_MOI_TRANG,
-            "tk_lam_moi": TK_LAM_MOI,
+            "tk_lam_moi": TK_LAM_MOI, "tk_tt_moi_nhat": TK_TT_MOI_NHAT,
             # Báo & Web (16/10/2026) — `uoc_web`, `rut_gon_web`.
             # Kiểm độ phủ (17/10/2026, 2 lần/tuần) — `cau_hinh_do_phu`.
             "do_phu": {"tran_mac_dinh": DP_TRAN_MAC_DINH, "tran_toi_da": DP_TRAN_TOI_DA,

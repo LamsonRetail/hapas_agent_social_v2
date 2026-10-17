@@ -9,7 +9,8 @@ TikTok — tìm theo từ khoá (USD mỗi 100 bài về):
     (`searchPosts_publishTime` 7/30/90/180 ngày): xin 7 ngày → 30/30 bài trong 7 ngày, 13/30
     trong 3 ngày. 24/25 bài VN, có follower, view, like, bình luận, share, ngôn ngữ, nước, cờ
     giỏ TikTok Shop (anchor "*shop*"). `searchPosts_count` > 30 trả 0 bài; sắp theo ngày
-    (sortType 3) cắt còn 18 bài và hết trang — dùng sắp theo liên quan (0).
+    (sortType 3) với bộ lọc 7 ngày cắt còn 18–26 bài và hết trang — lượt thường dùng sắp theo
+    liên quan (0); trang "mới nhất" (17/10) dùng sortType 3 với bộ lọc 30 ngày (lật được).
   • apidojo (đang dùng, 0,0003/bài): trần cứng 10 bài cho 2 từ khoá — 0,03 nhưng thiếu bài.
   • clockworks hashtag (dự phòng, 0,003/bài): 0,30, KHÔNG lọc ngày: 10/20 bài trong 30 ngày.
     Lượt 6 thật (16/10): 252 bài về, 39 trong cửa sổ 3 ngày → ~0,0197 USD mỗi bài dùng được,
@@ -72,7 +73,15 @@ _MOC_NGAY = (7, 30, 90, 180)  # searchPosts_publishTime; 1 ("hôm qua") bỏ —
 #: Mỗi câu tìm chỉ lật được ~3–4 trang (≈ 80–110 bài) dù sắp kiểu nào — không thể "lật hết".
 SAP_LIEN_QUAN = 0
 SAP_NHIEU_THICH = 1
-_SONG_SONG = 3               # video/tài khoản chạy song song (chừa chỗ cho việc khác)
+#: Sắp "mới nhất" (sortType 3). Đo 17/10/2026 ("hapas", "túi hapas", bộ lọc 30 ngày): feed sắp
+#: ĐÚNG theo giờ đăng giảm dần, ~97% bài nhắc brand, lật được 3–4 trang; bắt 50/497 bài brand
+#: 30 ngày mà liên quan + nhiều thích + feed hashtag đều sót (độ phủ 89,7% → 99,8%). Đo lại cấu
+#: hình hằng ngày (cùng ngày, 2 từ): một trang mới nhất thêm 31 bài brand ngoài lượt thường + lượt
+#: nổi (hợp 191 bài: thường + nổi chỉ 83–84%). Bộ lọc 7 ngày + sortType 3 cắt còn 26 bài, hết
+#: trang (và trùng trang 30 ngày chỉ 16/26) — dùng bộ lọc 30 ngày (`MOI_NHAT_MOC_NGAY`).
+#: Dùng cho trang "mới nhất" hằng ngày (`tim_moi_nhat`, `theo_doi_api.tim_moi_tiktok`).
+SAP_MOI_NHAT = 3
+_SONG_SONG = 3              # video/tài khoản chạy song song (chừa chỗ cho việc khác)
 
 # ── Bảng chọn actor: MỘT chỗ quyết định nguồn chính + dự phòng cho từng việc ──
 # "chinh" = SCRAPTIK nghĩa là đi qua bộ chuyển ở module này; "du_phong" chạy khi nguồn chính
@@ -586,6 +595,91 @@ def bai_tai_khoan(ten: str, so_trang: int, ngan: _Ngan, uid: str | None = None,
         if cu or not it.get("has_more") or not con_tro:
             break
     return ra, uid
+
+
+#: Bộ lọc ngày phía server của trang "mới nhất": feed đã sắp theo giờ đăng nên bộ lọc chỉ chặn
+#: đuôi; dừng lật trang theo mốc lượt trước ở phía Mark (`tim_moi_nhat`).
+MOI_NHAT_MOC_NGAY = 30
+
+
+def tim_moi_nhat(viec: list[tuple[str, datetime.datetime | None]], so_trang: int, ngan: _Ngan,
+                 vung: str = "VN") -> dict[str, dict]:
+    """Trang MỚI NHẤT (`SAP_MOI_NHAT`) của từng (từ khoá, mốc), ≤ `so_trang` trang × 30 bài mỗi
+    từ. Feed sắp theo giờ đăng giảm dần: một từ XONG ("cham") khi trang chạm bài cũ hơn mốc (phần
+    sau đã thấy ở lượt trước), hết trang, hoặc trang không có bài mới. Mốc None = chỉ trang đầu.
+
+    Review 17/10 (M2): mọi từ dùng chung trần `ngan` — VÒNG 1 lấy trang đầu của MỌI từ, rồi các
+    vòng sau mỗi từ chưa xong thêm một trang (xoay vòng), để từ đứng sau không bị đói vì từ bận
+    đứng trước lật hết trần. -> {từ khoá: {"bai", "trang": số yêu cầu, "moi_hon_moc", "cham":
+    đã lật tới mốc / hết feed (M1: chưa chạm thì bên gọi KHÔNG dời mốc), "cu_nhat": giờ đăng
+    bài cũ nhất đã thấy, "loi"}}. KHÔNG ném lỗi Apify: lỗi một từ ghi vào `loi` của nó (trang đã
+    trả tiền giữ nguyên); HET_TIEN_THANG / DA_HUY thì khoá bộ đếm (`ngan.dung`) — từ khác dừng."""
+    kq: dict[str, dict] = {}
+    trang_thai: dict[str, dict] = {}
+    for kw, moc in viec:
+        kq[kw] = {"bai": [], "trang": 0, "moi_hon_moc": 0, "cham": False, "cu_nhat": None,
+                  "loi": ""}
+        trang_thai[kw] = {"moc": moc, "off": 0, "thay": set(), "xong": False,
+                          "toi_da": max(0, int(so_trang)) if moc is not None
+                          else min(1, int(so_trang))}
+
+    def mot_trang(kw: str) -> None:
+        r, t = kq[kw], trang_thai[kw]
+        try:
+            it = _goi({"searchPosts_keyword": kw, "searchPosts_count": TIM_MOI_TRANG,
+                       "searchPosts_offset": t["off"], "searchPosts_region": vung,
+                       "searchPosts_publishTime": MOI_NHAT_MOC_NGAY,
+                       "searchPosts_sortType": SAP_MOI_NHAT}, ngan)
+        except A.LoiApify as e:
+            r["loi"] = A._che_token(f"{e.ma}: {e}")[:120]
+            if e.ma in _DUNG_HAN:
+                ngan.dung, ngan.toi_da = e.ma, 0
+            t["xong"] = True
+            return
+        except Exception as e:               # lỗi lạ: giữ trang đã trả tiền của mọi từ
+            if type(e).__name__ == "MatQuyen":
+                raise
+            r["loi"] = A._che_token(f"{type(e).__name__}: {e}")[:120]
+            t["xong"] = True
+            return
+        if it is None:                       # hết trần: dừng, CHƯA chạm mốc
+            t["xong"] = True
+            return
+        r["trang"] += 1
+        moi = 0
+        for y in it.get("search_item_list") or []:
+            a = (y or {}).get("aweme_info") if isinstance(y, dict) else None
+            if not isinstance(a, dict) or not a.get("aweme_id"):
+                continue
+            try:
+                v = video(a)
+                dt = A._to_vn(v["createTimeISO"])
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue                     # một bài hỏng shape không làm mất cả trang đã trả
+            if v["id"] in t["thay"]:
+                continue
+            t["thay"].add(v["id"])
+            moi += 1
+            r["bai"].append(v)
+            if dt and (r["cu_nhat"] is None or dt < r["cu_nhat"]):
+                r["cu_nhat"] = dt
+            if t["moc"] is not None and dt and dt < t["moc"]:
+                r["cham"] = True
+            else:
+                r["moi_hon_moc"] += 1
+        if not it.get("has_more") or not moi:
+            r["cham"] = True                 # hết feed: không còn gì để lật
+        if r["cham"] or r["trang"] >= t["toi_da"]:
+            t["xong"] = True
+            return
+        t["off"] = max(t["off"] + TIM_MOI_TRANG, _so(it.get("cursor")) or 0)
+
+    while True:
+        con = [kw for kw, t in trang_thai.items() if not t["xong"] and t["toi_da"] > 0]
+        if not con or ngan.da >= ngan.toi_da:
+            break
+        _song_song(mot_trang, con)
+    return kq
 
 
 def so_yeu_cau_tim(so_tu: int, per: int) -> int:

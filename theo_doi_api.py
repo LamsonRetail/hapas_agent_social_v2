@@ -445,3 +445,145 @@ def tim_noi_tiktok(q: list[str], bay_gio: datetime.datetime, tran: float,
     for d, _ in ra:
         d["_noi"] = True
     return ra
+
+
+# ── Trang "mới nhất" của tìm theo từ khoá TikTok (17/10/2026) ──
+# Chủ dự án 17/10: "thêm trang: mới nhất vào lượt tìm tiktok hằng ngày". Đo thật 17/10 (HAPAS,
+# "hapas" + "túi hapas", 30 ngày): hợp mọi đường 497 bài nhắc brand; liên quan + nhiều thích +
+# feed hashtag bắt 446 (89,7%); feed sắp MỚI NHẤT (sortType 3) thêm 50 bài không đường nào có
+# (→ 99,8%) — chủ yếu bài ít thích của tài khoản nhỏ, liên quan/nhiều thích xếp thấp. Đo lại
+# đúng cấu hình hằng ngày (thường 1 trang 7 ngày + nổi 2 trang): một trang mới nhất mỗi từ thêm
+# 14–17 bài brand (≈ một nửa trang), thường + nổi chỉ phủ 83–84% hợp ba đường. Feed này
+# sắp đúng theo giờ đăng giảm dần, từ bận nhất ~4 bài/ngày (tối đa 13), nên MỘT trang 30 bài mỗi
+# ngày đủ phủ: lượt sau chỉ cần lật tới mốc lượt trước.
+# Cách chạy (cùng chỗ với lượt nổi, ngay sau lượt thường, chỉ khi lượt thường đi TikTok API):
+#   • tối đa một lượt mỗi `MOI_GIO_GIAN` giờ (lịch chiến dịch 6 giờ/lượt không trả tiền 4 lần);
+#   • mỗi từ khoá lật tới khi CHẠM mốc lượt trước của chính từ đó (lùi `MOI_GIO_CHONG` giờ) —
+#     thường 1 trang, từ đang bận tự lật thêm (≤ `MOI_TRANG_TOI_DA`, kiểm độ phủ nới được);
+#   • từ khoá "yên" (`MOI_YEN_SAU` lượt liền không có bài nào mới hơn mốc) chỉ chạy lại sau
+#     `MOI_GIO_YEN` giờ — mốc của từ đứng yên nên lượt sau vẫn lật tới đúng chỗ đã xem, không
+#     hở khoảng nào; có bài mới là về nhịp hằng ngày;
+#   • bài về đi CÙNG phễu (đã có → cập nhật số; mới → lọc + AI), tiền vào sổ lượt tìm TikTok
+#     (`theo_doi._tien_tim_tiktok` đếm mọi run TikTok API). Ước tính TikTok cộng 1 trang/từ.
+MOI_GIO_GIAN = 20            # giờ tối thiểu giữa hai lượt "mới nhất" (≈ 1 lượt/ngày)
+MOI_TRANG = 1                # trang/từ có trong ước tính (`theo_doi.uoc_tu_khoa_nen_tang`)
+MOI_TRANG_TOI_DA = 3         # trần lật trang mỗi từ khi chưa chạm mốc lượt trước
+MOI_GIO_CHONG = 24           # lùi mốc từng từ (bài lên chỉ mục tìm kiếm chậm vài giờ)
+MOI_YEN_SAU = 3              # lượt liền không có bài mới hơn mốc → từ "yên"
+MOI_GIO_YEN = 68             # từ yên chạy lại sau chừng này giờ (≈ 3 ngày)
+MOI_NGAY_LAN_DAU = 7         # từ chưa có mốc: lật tới bài 7 ngày trước (≤ `MOI_TRANG_TOI_DA` trang)
+KHOA_MOC_MOI = "tiktok_moi"  # khoá trong sổ mốc tìm theo từ khoá (`theo_doi.ghi_moc_tk`)
+
+
+def _gio(s) -> datetime.datetime | None:
+    try:
+        x = datetime.datetime.fromisoformat(str(s or ""))
+    except ValueError:
+        return None
+    return x if x.tzinfo else x.replace(tzinfo=_VN)
+
+
+def den_luot_moi(moc: dict | None, bay_gio: datetime.datetime,
+                 gio: int = MOI_GIO_GIAN) -> tuple[bool, str]:
+    """Lượt này có chạy trang mới nhất không. -> (có, lý do)."""
+    luc = _gio((moc or {}).get("luc"))
+    if luc is None:
+        return True, "chưa có lượt mới nhất"
+    if bay_gio - luc < datetime.timedelta(hours=gio):
+        return False, f"lượt mới nhất gần nhất {luc.astimezone(_VN):%d/%m %H:%M} (< {gio} giờ)"
+    return True, f"lượt mới nhất trước {luc.astimezone(_VN):%d/%m %H:%M}"
+
+
+def chon_tu_moi(q: list[str], moc: dict | None,
+                bay_gio: datetime.datetime) -> tuple[list[tuple[str, datetime.datetime]], list[str]]:
+    """(từ khoá chạy lượt này kèm mốc dừng lật trang, từ khoá đang nghỉ vì "yên"). Mốc của từ =
+    lần chạy trước của chính từ đó lùi `MOI_GIO_CHONG` giờ (kẹp ≤ 30 ngày); từ chưa chạy lần
+    nào: `MOI_NGAY_LAN_DAU` ngày."""
+    tu_cu = (moc or {}).get("tu") if isinstance((moc or {}).get("tu"), dict) else {}
+    san = bay_gio - datetime.timedelta(days=TT.MOI_NHAT_MOC_NGAY)
+    chay, nghi = [], []
+    for kw in q:
+        x = tu_cu.get(A._norm(kw)) if isinstance(tu_cu.get(A._norm(kw)), dict) else {}
+        luc = _gio(x.get("luc"))
+        if luc is None:
+            chay.append((kw, bay_gio - datetime.timedelta(days=MOI_NGAY_LAN_DAU)))
+            continue
+        yen = int(x.get("yen") or 0) if str(x.get("yen") or "0").isdigit() else 0
+        if yen >= MOI_YEN_SAU and bay_gio - luc < datetime.timedelta(hours=MOI_GIO_YEN):
+            nghi.append(kw)
+            continue
+        chay.append((kw, max(san, luc - datetime.timedelta(hours=MOI_GIO_CHONG))))
+    return chay, nghi
+
+
+def tran_moi(so_tu: int, uoc_tiktok: float, da_tieu: float, con: float, du_noi: float = 0.0,
+             trang_toi_da: int = MOI_TRANG_TOI_DA) -> float:
+    """Trần USD của lượt mới nhất: đủ `trang_toi_da` trang mỗi từ, nhưng phần vượt `MOI_TRANG`
+    trang/từ (đã có trong ước tính) chỉ lấy từ phần ước tính TikTok CHƯA dùng sau khi chừa làm
+    mới (`LAM_MOI_TOI_DA`) và lượt nổi tới hạn (`du_noi`); luôn kẹp phần còn của tháng/việc."""
+    co_ban = so_tu * MOI_TRANG * TT.GIA_YEU_CAU
+    du = so_tu * max(MOI_TRANG, trang_toi_da) * TT.GIA_YEU_CAU
+    du_uoc = uoc_tiktok - da_tieu - LAM_MOI_TOI_DA * TT.GIA_YEU_CAU - du_noi
+    return round(max(0.0, min(du, max(co_ban, du_uoc), con - da_tieu)), 4)
+
+
+def tim_moi_tiktok(q: list[str], moc: dict | None, bay_gio: datetime.datetime, tran: float,
+                   trang_toi_da: int = MOI_TRANG_TOI_DA) -> tuple[list[tuple], dict, dict]:
+    """Trang mới nhất của các từ khoá tới lượt -> ([(dòng, ngày VN)] như
+    `apify_tool._FETCH["tiktok"]`, thống kê {"tu", "nghi", "trang", "moi_hon_moc", "loi"}, mốc
+    mới {"luc", "tu": {từ chuẩn hoá: {"luc", "yen"}}}). Chỉ TikTok API, không xuống dự phòng.
+    Từ lỗi / chưa tới lượt (hết trần) giữ mốc cũ — lượt sau lật lại từ đó. KHÔNG ném lỗi Apify
+    (lượt mới nhất là phần thêm): bài đã trả tiền luôn trả về, `loi` ghi lỗi từng từ / mã dừng
+    (HET_TIEN_THANG / DA_HUY khoá bộ đếm — `tiktok_api.tim_moi_nhat`). Mốc chỉ giữ từ khoá
+    hiện có của dự án."""
+    chay, nghi = chon_tu_moi(q, moc, bay_gio)
+    tk = {"tu": len(chay), "nghi": len(nghi), "trang": 0, "moi_hon_moc": 0, "chua_cham": 0,
+          "loi": ""}
+    tu_cu = (moc or {}).get("tu") if isinstance((moc or {}).get("tu"), dict) else {}
+    hien = {A._norm(kw) for kw in q}
+    tu_moi = {k: dict(x) for k, x in tu_cu.items() if isinstance(x, dict) and k in hien}
+    so_yc = int(tran / TT.GIA_YEU_CAU + 1e-9)
+    if not chay or so_yc <= 0 or not TT.dung_api("tiktok_tim"):
+        return [], tk, {"luc": (moc or {}).get("luc"), "tu": tu_moi}
+    ngan = TT.Ngan(so_yc * TT.GIA_YEU_CAU)
+    kq = TT.tim_moi_nhat(chay, max(1, int(trang_toi_da)), ngan)
+    items: list = []
+    thay: set[str] = set()
+    loi = []
+    for kw, _ in chay:
+        r = kq.get(kw) or {}
+        for it in r.get("bai") or []:              # một video có thể về ở nhiều từ khoá
+            if str(it.get("id")) not in thay:
+                thay.add(str(it.get("id")))
+                items.append(it)
+        tk["trang"] += int(r.get("trang") or 0)
+        tk["moi_hon_moc"] += int(r.get("moi_hon_moc") or 0)
+        if r.get("loi"):
+            loi.append(f"{kw}: {r['loi']}")
+        if not r.get("trang") or r.get("loi"):
+            continue                    # chưa xem được trang nào / lỗi: giữ mốc cũ của từ
+        cu = tu_moi.get(A._norm(kw)) or {}
+        if not r.get("cham"):
+            # Review M1: dừng vì trần trang / trần tiền TRƯỚC khi lật tới mốc — dời mốc tới bây
+            # giờ thì phần giữa (mốc cũ .. bài cũ nhất đã thấy) mất hẳn. Có mốc cũ: giữ nguyên
+            # (lượt sau lật lại tới đó); chưa có: mốc = bài cũ nhất đã thấy (+ phần chồng mép).
+            tk["chua_cham"] += 1
+            if not cu.get("luc") and r.get("cu_nhat"):
+                tu_moi[A._norm(kw)] = {"luc": (r["cu_nhat"] + datetime.timedelta(
+                    hours=MOI_GIO_CHONG)).isoformat(timespec="seconds"), "yen": 0}
+            continue
+        yen_cu = str(cu.get("yen") or "0")
+        yen = 0 if r.get("moi_hon_moc") else (int(yen_cu) if yen_cu.isdigit() else 0) + 1
+        tu_moi[A._norm(kw)] = {"luc": bay_gio.isoformat(timespec="seconds"), "yen": yen}
+    if ngan.dung:
+        loi.append(f"dừng: {ngan.dung}")
+    tk["loi"] = "; ".join(loi)[:200]
+    ra: list[tuple] = []
+    for it in items:                    # từng bài: một bài hỏng không làm mất bài đã trả tiền
+        try:
+            ra += A._chuan_tiktok(A._chuan_clockworks([it]))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            tk["loi"] = (tk["loi"] + "; bỏ 1 bài hỏng shape").lstrip("; ")[:200]
+    for d, _ in ra:
+        d["_moi_nhat"] = True
+    return ra, tk, {"luc": bay_gio.isoformat(timespec="seconds"), "tu": tu_moi}

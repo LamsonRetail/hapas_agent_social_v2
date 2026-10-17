@@ -148,6 +148,7 @@
   }
   // = chi_phi.uoc_tk_nen_tang như bang_cau_hinh gọi: KHÔNG kẹp Facebook ở tk_fb_toi_da — dashboard
   // không biết gói Apify, nên báo mức trần thận trọng theo đúng số bài đã đặt.
+  // <uoc_tk> (bài thử tests/test_moi_nhat.py::test_ngan_sach_js_uoc_tk_khop_python chạy khối này)
   function uocTk(p, so, soTu, boc) {
     if (p === "web") return uocWeb(so, TU, boc);
     // Threads (= chi_phi.tu_gui): chỉ `so // 10` từ đầu (≥ 1, ≤ 20) — actor lấy ≥ 10 bài mỗi từ.
@@ -159,12 +160,13 @@
     if (!q.length || !gia || so <= 0) return 0;
     if (p === "instagram") return r4(q.length * (hs.tk_khoi.instagram + so * gia) * hs.he_so);
     if (p === "tiktok") {            // TikTok API tính theo YÊU CẦU (= chi_phi.uoc_tk_nen_tang)
-      var trang = 2 * Math.ceil(Math.ceil(so / q.length) / (hs.tk_tt_moi_trang || 30)) + 1;
+      var trang = 2 * Math.ceil(Math.ceil(so / q.length) / (hs.tk_tt_moi_trang || 30)) + 1 + (hs.tk_tt_moi_nhat || 0);
       return r4((q.length * trang + (hs.tk_lam_moi || 0)) * (hs.tk_tt_yeu_cau || 0) * hs.he_so);
     }
     var n = p === "threads" ? Math.max(so, thMin) : so;
     return r4((n * gia + ((hs.tk_khoi || {})[p] || 0)) * hs.he_so);
   }
+  // </uoc_tk>
   function uocBl(p, so, moi) {       // = chi_phi.uoc_binh_luan_luot
     moi = moi || hs.bl_uoc_moi_bai;
     var gia = (hs.bl_gia || {})[p] || 0;

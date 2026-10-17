@@ -2793,6 +2793,31 @@ def _chuan_threads(raw: list) -> list[tuple]:
     return out
 
 
+# Threads — so actor tìm theo từ khoá (đo thật 17/10/2026, tài khoản Apify mới gói FREE; "hapas"
+# + "túi hapas", ≤ 30 bài mỗi từ, 30 ngày; tiền = /users/me/limits trước/sau; hợp 56 bài nhắc
+# HAPAS trong 30 ngày của mọi actor):
+#   actor (giá niêm yết)                       USD/2 từ  bài  nhắc HAPAS  phủ hợp  follower view
+#   futurizerush~meta-threads-scraper (đang dùng,
+#     0,0025/bài + 0,08 khởi động vì ép 4 GB)    0,310    60     47%       50%      CÓ     CÓ
+#   scrapersdelight~threads-keyword-search
+#     (0,001/bài, không phí khởi động)           0,028    28     64%       32%      —      —
+#   getanyapi~threads-search-scraper (0,00108)   0,028    26     73%       34%      —      —
+#   lergassy~threads-search-scraper (0,002)      0,064    32     56%       32%      —      CÓ
+#   logical_scrapers~threads-search (0,00249)    0,077    31     55%       30%      —      —
+#   themineworks~threads-search (0,001+0,005)    0,064    56     52%       27%      —      —
+#   headply~threads-keyword-search (0,0018)      0,198   120     25%       32%      —      —
+#   sourabhbgp~threads-scraper (0,002)           0,120    60     20%       21%      —      —
+#   george.the.developer~threads-scraper: giá nay 0,10 USD/BÀI (đổi 14/08/2026, không còn
+#     0,004) — 1 bài thử 0,10 USD, bài 2 tháng trước không liên quan, like = 0, tác giả "search".
+#   donjuan_mime~threads-posts-scraper: chỉ nhận MỘT tài khoản (không tìm từ khoá), 0 bài cả với
+#     @zuck — hỏng. futurizerush~threads-user-posts-scraper-api: cần Threads session ID — loại
+#     theo chính sách an toàn (không đưa cookie/phiên đăng nhập tài khoản thật cho actor bên
+#     thứ ba: lộ phiên = chiếm được tài khoản, Meta có thể khoá tài khoản).
+# → GIỮ futurizerush: actor duy nhất có follower tác giả + lượt xem, lọc ngày phía server, phủ
+# cao nhất một mình (50%, 18 bài chỉ nó có). Actor rẻ chỉ đọc MỘT trang (20–25 bài) mỗi bề mặt
+# khi không đăng nhập; nhưng bề mặt "top" của chúng bắt 13 bài trong khoảng ngày futurizerush
+# "recent" đã quét mà nó vẫn sót (futurizerush "top" chỉ bắt 2/28) — futurizerush + scrapersdelight
+# phủ 73% (chờ chủ dự án duyệt làm đường thứ hai).
 def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list[tuple]:
     # `max_posts` là trần MỖI TỪ KHOÁ (input schema actor, đọc 01/10/2026: "A cap per user
     # or per keyword, not a total for the run"). Bản cũ đặt = limit nên 2 từ khoá đòi gấp

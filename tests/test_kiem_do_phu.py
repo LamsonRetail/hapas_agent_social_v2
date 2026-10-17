@@ -239,6 +239,8 @@ class KhoDp(GiaKhoTk):
             {"tai_khoan": "hapas.official", "thao_luan": 900, "so_bai": 9},
             {"tai_khoan": "kol.cu", "thao_luan": 300, "so_bai": 2}])
         mp.setattr(K, "de_xuat_dang_xet", lambda ma, p: [{"dinh_danh": "kol.dx", "thao_luan": 60}])
+        self.tu_choi: set[str] = set()
+        mp.setattr(K, "de_xuat_tu_choi_gan", lambda ma, p, ngay=60: set(self.tu_choi))
         mp.setattr(K, "nguon_dang_theo_doi", lambda ma: [
             {"id": 7, "nen_tang": "tiktok", "dinh_danh": "@hapas.official"}])
         mp.setattr(K, "ghi_kiem_do_phu", lambda r: (self.dong.append(r), 1)[1])
@@ -414,12 +416,15 @@ def _sot(u, tl, ma=("khac",), tag=()):
 
 
 def test_hanh_dong_de_xuat_gop_theo_nguoi_bo_nguon_dang_theo_doi():
-    sot = [_sot("kol.a", 300), _sot("kol.a", 250), _sot("kol.b", 40), _sot("hapas.official", 900)]
+    sot = [_sot("kol.a", 300), _sot("kol.a", 250), _sot("kol.b", 40), _sot("hapas.official", 900),
+           _sot("kol.c", 120), _sot("kol.c", 30)]
     hd = KDP.hanh_dong(sot, ["hapas"], {"hapas.official"}, None, 70.0, BAY)
+    # kol.b: 1 bài 40 thảo luận — dưới ngưỡng (review 17/10: lượt 10 ra 80 đề xuất).
     assert [(g["dinh_danh"], g["so_bai"], g["thao_luan"]) for g in hd["de_xuat"]] == [
-        ("kol.a", 2, 550), ("kol.b", 1, 40)]
+        ("kol.a", 2, 550), ("kol.c", 2, 150)]
     assert hd["tom"]["de_xuat"][0]["uu_tien"] and not hd["tom"]["de_xuat"][1]["uu_tien"]
     assert "uu_tien" not in hd["de_xuat"][0] and hd["de_xuat"][1]["ly_do"].startswith("kiểm độ phủ")
+    assert hd["tom"]["de_xuat_bo"] == 1 and sot[2]["hanh_dong"][0].startswith("chưa đề xuất @kol.b")
     assert sot[3]["hanh_dong"] == ["@hapas.official đã là nguồn theo dõi"]
     assert hd["tom"]["noi"]["ly_do"] == "", "sót không do tụt hạng: không nới lượt nổi"
 
@@ -454,8 +459,8 @@ def test_hanh_dong_noi_trang_roi_nhip_roi_lui_khi_tot():
     assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (4, 20)
     hd = KDP.hanh_dong([], ["hapas"], set(), {"trang": 4, "gio": 20}, 95.0, BAY, tl_truoc=92.0)
     assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (3, 20)
-    assert KDP.cau_hinh_noi({"trang": 99, "gio": 1, "tag": "rác"}) == {"trang": 4, "gio": 10,
-                                                                       "tag": []}
+    assert KDP.cau_hinh_noi({"trang": 99, "gio": 1, "tag": "rác", "moi_trang": 99}) == {
+        "trang": 4, "gio": 10, "tag": [], "moi_trang": KDP.MOI_TRANG_NOI_TOI_DA}
 
 
 def test_it_thich_khong_noi_luot_noi_va_lui_du_con_sot_it_thich():
@@ -592,7 +597,7 @@ def test_do_phu_json_doi_diem_canh_bao_link_an_toan():
     x = CS.do_phu_json([_dong_dp(85.0, bay - datetime.timedelta(days=8))], bay)
     assert not x["canh_bao"] and x["cu"] and x["doi_diem"] is None and x["truoc"] is None
     assert CS.noi_tu_hanh_dong(_dong_dp(1, bay)["hanh_dong"]) == {
-        "tag": ["lammoidieuviyeu"], "trang": 3, "gio": 20}
+        "tag": ["lammoidieuviyeu"], "trang": 3, "gio": 20, "moi_trang": None}
 
 
 def test_api_chi_so_co_the_do_phu_va_bang_chua_tao_thi_bo_the():
@@ -750,3 +755,39 @@ def test_m5_ngan_sach_viec_giu_cho_kiem_do_phu_khi_toi_han(mo):  # noqa: F811
     T.ghi_moc_tk("hapas", {KDP.KHOA_MOC: {"luc": datetime.datetime.now(_VN).isoformat()}})
     assert T.uoc_do_phu(DU_AN) == 0.0, "chưa tới 84 giờ: không giữ chỗ"
     assert T.uoc_do_phu(dict(DU_AN, cau_hinh={"do_phu": {"bat": False}})) == 0.0
+
+
+def test_de_xuat_nguong_tran_moi_va_tu_choi():
+    """Review 17/10: ≥ 2 bài brand HOẶC một bài ≥ 300 thảo luận; ≤ 10 đề xuất MỚI mỗi lần (nhiều
+    thảo luận trước; đang chờ không tính trần); người bị từ chối trong 60 ngày không đề xuất lại."""
+    sot = [_sot(f"lon{i}", 400 + i) for i in range(12)]          # 12 người, 1 bài ≥ 300
+    sot += [_sot("nho", 299), _sot("bi.tu.choi", 5000), _sot("dang.cho", 301)]
+    hd = KDP.hanh_dong(sot, ["hapas"], set(), None, 70.0, BAY, tu_choi={"bi.tu.choi"},
+                       dang_cho={"dang.cho"})
+    ten = [g["dinh_danh"] for g in hd["de_xuat"]]
+    assert ten[:10] == [f"lon{i}" for i in range(11, 1, -1)] and "dang.cho" in ten
+    assert len(ten) == 11 and "nho" not in ten and "bi.tu.choi" not in ten
+    assert hd["tom"]["de_xuat_bo"] == 4                       # lon0, lon1, nho, bi.tu.choi
+    lon0 = next(s for s in sot if s["tai_khoan"] == "lon0")
+    assert "quá trần 10" in lon0["hanh_dong"][0]
+    bi = next(s for s in sot if s["tai_khoan"] == "bi.tu.choi")
+    assert "từ chối trong 60 ngày" in bi["hanh_dong"][0]
+    assert "không đề xuất 4 người" in KDP.cau_hanh_dong(hd["tom"])
+
+
+def test_kiem_do_phu_khong_de_xuat_lai_nguoi_bi_tu_choi(mo):  # noqa: F811
+    """Cùng kịch bản lượt kiểm thật: kol.moi bị từ chối trong 60 ngày → không đề xuất lại."""
+    mo.setattr(T, "_kiem_do_phu", _KIEM_THAT)
+    mo.setattr(TT, "dung_api", lambda viec: True)
+    kho = KhoDp(mo)
+    kho.da_co = {"tiktok:70000002"}
+    kho.tu_choi = {"kol.moi"}
+    mo.setattr(K, "khoa_da_co", lambda ma, khoa: {k for k in khoa if k in kho.da_co | {
+        r["khoa"] for _, rows in kho.bai for r in rows}})
+    GiaApi(mo, _tra_mau(datetime.datetime.now(_VN) - datetime.timedelta(days=15)))
+    _chay_dp(GiaViec({}, []))
+    (dong,) = kho.dong
+    assert dong["hanh_dong"]["de_xuat"] == [] and dong["hanh_dong"]["de_xuat_bo"] == 1
+    # (đề xuất của phễu tìm theo từ khoá — luật riêng — không phải của kiểm độ phủ)
+    assert not any("kiểm độ phủ" in x["ly_do"] for d in kho.dx for x in d)
+    assert any("từ chối" in h for h in dong["bai_sot"][0]["hanh_dong"])
