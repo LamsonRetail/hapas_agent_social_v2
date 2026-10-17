@@ -577,6 +577,82 @@ def test_thedoor_du_thi_khong_chay_du_phong_va_loi_dung_ca_luot_cung_khong(monke
     assert len(v.doc_dong("facebook")) == 1 and ph["trang_thai"] == "mot_phan"
 
 
+def test_tran_phan_that_nho_thedoor_hong_ca_run_van_chay_du_phong_moi_trang(monkeypatch):
+    """Soát 17/10/2026: 2 trang × 5 bài → trần phần 0,1 USD; thedoor tạo run rồi lỗi (đã tính 0,01
+    khởi động) còn 0,09 < sàn 0,1 → bản cũ bỏ dự phòng đúng lúc thedoor hỏng hẳn. Trần lấy THẬT
+    từ `_tran_phan` (không đặt tay 1 USD như các bài trên)."""
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 5.0, True))
+    urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/trang.khac"]
+    v, ph, ds = _phan_fb(urls, 5)
+    cap = T._tran_phan("facebook", ph, 100.0)
+    assert cap == 0.1, "trần phần đã chừa chỗ cho dự phòng mọi trang (0,013 + 0,0663 < 0,1)"
+    assert T.giu_cho_phan(ph) == pytest.approx(0.01 * 1.3 + (10 * 0.005 + 0.001) * 1.3, abs=1e-4)
+    hong = A.LoiApify("LOI", "actor thedoor hỏng", {"run_id": "r1"})
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: hong, "apify~facebook-posts-scraper": [
+        _fb_cu("hapasglobal", 1), _fb_cu("trang.khac", 2)]})
+    tien = _chay_phan(v, ph, ds, cap)
+    assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG, "apify~facebook-posts-scraper"]
+    assert ap.gui[1]["payload"]["startUrls"] == [{"url": u} for u in urls]
+    assert ap.gui[1]["tran"] == 0.09 and ap.gui[1]["limit"] == 10
+    assert tien <= cap + 1e-9 and ph["du_phong_kq"]["trang"] == urls
+    assert not ph.get("loi_nguon") and len(v.doc_dong("facebook")) == 2
+
+
+def test_tran_khong_du_thi_du_phong_trang_dau_va_ly_do_toi_loi_nguon(monkeypatch):
+    """Trần còn chỉ đủ một trang: dự phòng chạy trang ĐẦU; trang còn lại mang lý do thật (thedoor
+    lỗi + dự phòng bỏ vì trần) vào lỗi nguồn — không còn câu chung "không lấy được bài nào"."""
+    urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/trang.khac"]
+    v, ph, ds = _phan_fb(urls, 5)
+    hong = A.LoiApify("LOI", "actor thedoor hỏng", {"run_id": "r1"})
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: hong,
+                                "apify~facebook-posts-scraper": [_fb_cu("hapasglobal", 1)]})
+    _chay_phan(v, ph, ds, 0.05)
+    assert ap.gui[1]["payload"]["startUrls"] == [{"url": urls[0]}] and ap.gui[1]["limit"] == 5
+    kq = ph["du_phong_kq"]
+    assert kq["trang"] == urls[:1] and kq["bo_qua_trang"] == urls[1:]
+    assert kq["bo_qua"] == "trần phần còn 0,04 USD, dự phòng cần 0,0663 USD cho 2 trang"
+    ly = ph["loi_nguon"]["2"]
+    assert "actor thedoor hỏng" in ly and "dự phòng apify~facebook-posts-scraper không chạy" in ly
+    assert "không lấy được bài nào" not in ly and "1" not in ph["loi_nguon"]
+    # Trần chỉ còn 0,01: không trang nào vừa → không gửi gì, cả hai trang có lý do.
+    v, ph, ds = _phan_fb(urls, 5)
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: A.LoiApify("LOI", "hỏng", {"run_id": "r1"})})
+    _chay_phan(v, ph, ds, 0.02)
+    assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG]
+    assert ph["du_phong_kq"]["bo_qua_trang"] == urls
+    assert all("dự phòng" in ph["loi_nguon"][k] for k in ("1", "2"))
+
+
+def test_du_phong_loi_toi_loi_nguon(monkeypatch):
+    urls = ["https://www.facebook.com/hapasglobal"]
+    v, ph, ds = _phan_fb(urls, 5)
+    _GiaChay(monkeypatch, {TDA.FB_TRANG: [],
+                           "apify~facebook-posts-scraper": A.LoiApify("LOI", "actor cũ sập")})
+    _chay_phan(v, ph, ds)
+    assert ph["du_phong_kq"]["loi"] and "dự phòng apify~facebook-posts-scraper lỗi: actor cũ sập" \
+        in ph["loi_nguon"]["1"]
+    assert TDA.ly_do_trang_fb("https://www.facebook.com/khac", ph["du_phong_kq"]) is None
+
+
+def test_chay_viec_du_phong_fb_bi_bo_vao_ghi_chu_luot_va_loi_cuoi(mo):
+    """Cả lượt `/theodoi`: dự phòng bị bỏ (trần console nhỏ) → ghi chú lượt + lỗi nguồn
+    (`danh_dau_nguon` → `nguon.loi_cuoi`) mang lý do, không chỉ "không lấy được bài nào"."""
+    from test_theo_doi import GiaKho, _nguon, _viec
+    kho = GiaKho(nguon=[_nguon(1, "facebook", "https://www.facebook.com/hapasglobal"),
+                        _nguon(2, "facebook", "https://www.facebook.com/trang.khac")]).cai(mo)
+    mo.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 0.03, True))
+    ap = _GiaChay(mo, {TDA.FB_TRANG: A.LoiApify("LOI", "actor thedoor hỏng", {"run_id": "r1"})})
+    v = _viec(kho.nguon)
+    T.chay_viec(v)
+    assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG] and ap.gui[0]["tran"] == 0.03
+    luot = kho.luot[v.d["luot_id"]]
+    assert "Facebook: thedoor thiếu 2 trang — dự phòng bỏ qua 2 trang (trần phần còn 0,02 USD" \
+        in luot["ghi_chu"]
+    _, loi = kho.danh_dau[0]
+    assert set(loi) == {1, 2} and all("dự phòng apify~facebook-posts-scraper không chạy" in x
+                                      for x in loi.values())
+
+
 def test_khoi_dong_lai_doc_tiep_run_du_phong_khong_post_lai(monkeypatch):
     urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/trang.khac"]
     v, ph, ds = _phan_fb(urls)

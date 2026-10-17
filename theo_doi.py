@@ -260,6 +260,37 @@ def uoc_tinh(nguon: list[dict]) -> dict[str, float]:
     return {p: round(sum(ph["uoc_usd"] for ph in cac), 4) for p, cac in chia_phan(nguon).items()}
 
 
+def giu_cho_phan(ph: dict) -> float:
+    """USD TRƯỜNG HỢP XẤU NHẤT của một phần theo dõi nguồn — ước tính đường chính, hoặc (phần có
+    dự phòng ghi `du_phong.uoc_usd`) phí khởi động đường chính (đã mất khi nó hỏng) + dự phòng cho
+    mọi nguồn của phần, lấy số lớn hơn. Dự phòng chỉ chạy khi đường chính KHÔNG ra bài (Facebook:
+    cho trang thiếu; Threads: cả lượt 0 hồ sơ), nên hai khoản không cộng đủ cùng lúc.
+
+    Vì sao (soát 17/10/2026): ước tính hiển thị theo giá đường chính (thedoor 0,0025 USD/bài, hồ
+    sơ Threads 0,002 USD/tài khoản), còn dự phòng đắt gấp 2 (Facebook) tới ~50 lần (futurizerush
+    0,137 USD/tài khoản) — giữ chỗ / trần chỉ theo đường chính thì dự phòng gần như không bao giờ
+    đủ tiền chạy, hoặc ăn vào phần đã giữ cho bình luận, kiểm độ phủ, web."""
+    uoc = float(ph.get("uoc_usd") or 0)
+    dp = ph.get("du_phong") if isinstance(ph.get("du_phong"), dict) else {}
+    if not dp.get("uoc_usd"):
+        return round(uoc, 4)
+    return round(max(uoc, float(ph.get("khoi") or 0) * _HE_SO_UOC + float(dp["uoc_usd"])), 4)
+
+
+def _tran_phan(p: str, ph: dict, con: float, con_viec: float = float("inf")) -> float:
+    """Trần USD (`maxTotalChargeUsd`) của một phần theo dõi nguồn: min(trần console của nền tảng,
+    phần còn của tháng `con`, phần còn của VIỆC `con_viec`, max(sàn 0,1, ước tính × 1,5)).
+    Facebook: dự phòng (actor cũ) chạy TRONG phần, tiêu phần trần còn lại sau thedoor
+    (`theo_doi_api.du_phong_fb`) → mức trần chừa chỗ cho nó (`giu_cho_phan`). Soát 17/10/2026:
+    trần cũ max(0,1; ước × 1,5) với 2 trang × 5 bài là 0,1 — thedoor lỗi sau khi tạo run còn 0,09,
+    dự phòng bị bỏ đúng lúc thedoor hỏng hẳn. Threads: dự phòng là phần RIÊNG, có trần riêng."""
+    uoc = float(ph.get("uoc_usd") or 0)
+    muc = max(_TRAN_TOI_THIEU, uoc * _HE_SO_TRAN)
+    if p == "facebook":
+        muc = max(muc, giu_cho_phan(ph))
+    return round(min(A._tran_nen_tang(p, nen=True)[1], con, con_viec, muc), 2)
+
+
 def _cat_theo_ngan_sach(nguon: list[dict], con_usd: float) -> tuple[list[dict], list[dict]]:
     """Giữ nguồn theo thứ tự (cũ nhất trước) tới khi ước tính vượt `con_usd`. Nguồn miễn phí
     (YouTube) luôn giữ. -> (giữ, để lượt sau)."""
@@ -928,15 +959,28 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
         v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
                         usd_so=khong_kiem, ly_do=quet_lon._CAU_KHONG_KIEM)
         return khong_kiem
+    kq_dp: dict = {}
     if p == "facebook" and ph.get("du_phong"):
         # Trang thedoor không ra bài → actor cũ cho đúng trang đó (`theo_doi_api.du_phong_fb`).
         items, meta, loi = TDA.du_phong_fb(v, p, ph, items, meta, loi, cap, han)
+        kq_dp = meta.get("du_phong") or {}
+        if kq_dp:
+            # `quet_lon._ket_phan` không giữ meta: kết quả dự phòng (trang đã gửi / bỏ qua + lý
+            # do / lỗi) nằm trong phần của sổ việc và vào ghi chú lượt (`_chay_viec`).
+            v.cap_nhat_phan(ph, du_phong_kq=kq_dp)
     kq, loi_nguon = ghep_nguon(p, _doc_ket_qua(p, items, int(ph.get("n") or 0),
                                                [x["dinh_danh"] for x in ds]), ds)
     if loi is not None:
         for nid, dong in kq.items():
             if not dong:
                 loi_nguon[nid] = A._che_token(str(loi))[:200]
+    if kq_dp:
+        # Trang vẫn 0 bài: lỗi nguồn (`nguon.loi_cuoi`) nói thedoor + dự phòng ra sao, thay câu
+        # chung "không lấy được bài nào".
+        for x in ds:
+            ly = TDA.ly_do_trang_fb(x["dinh_danh"], kq_dp, loi) if not kq[int(x["id"])] else None
+            if ly:
+                loi_nguon[int(x["id"])] = ly
     # Actor hồ sơ Threads hỏng CẢ lượt (lỗi, hoặc 0 hồ sơ cho mọi tài khoản xin): giao các nguồn
     # cho lượt dự phòng futurizerush — lỗi nguồn ghi ở lượt đó, không ghi ở đây (không thì nguồn bị
     # đánh lỗi dù dự phòng lấy được bài). Chỉ vài tài khoản thiếu thì KHÔNG dự phòng: thường là tài
@@ -3550,10 +3594,7 @@ def _chay_viec(v) -> tuple[str, str]:
                 if dang_do:
                     cap = float(ph.get("tran_usd") or 0) or _TRAN_TOI_THIEU
                 else:
-                    tran_console = A._tran_nen_tang(p, nen=True)[1]
-                    cap = round(min(tran_console, con,
-                                    max(_TRAN_TOI_THIEU, float(ph.get("uoc_usd") or 0)
-                                        * _HE_SO_TRAN)), 2)
+                    cap = _tran_phan(p, ph, con)
                     if con < max(_TRAN_TOI_THIEU, float(ph.get("uoc_usd") or 0)) - 1e-9:
                         ghi_chu.append(f"{_TEN[p]}: hết ngân sách tháng (còn {_usd(con)} USD)")
                         v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0,
@@ -3578,6 +3619,15 @@ def _chay_viec(v) -> tuple[str, str]:
                                f"({ph.get('ma') or 'OK'}) — chạy dự phòng futurizerush cho "
                                f"{len(ph.get('nguon') or [])} tài khoản")
                 continue
+            kdp = ph.get("du_phong_kq") if isinstance(ph.get("du_phong_kq"), dict) else {}
+            if kdp.get("bo_qua_trang") or kdp.get("loi"):
+                # Dự phòng Facebook bị bỏ / lỗi: ghi chú lượt nói rõ (lỗi từng trang ở nguồn).
+                ghi_chu.append(
+                    "Facebook: thedoor thiếu "
+                    f"{len(kdp.get('trang') or []) + len(kdp.get('bo_qua_trang') or [])} trang — "
+                    + (f"dự phòng {kdp.get('actor')} lỗi ({kdp['loi']})" if kdp.get("loi")
+                       else f"dự phòng bỏ qua {len(kdp['bo_qua_trang'])} trang "
+                            f"({kdp.get('bo_qua') or 'không rõ'})"))
             if ph.get("trang_thai") in ("xong", "mot_phan"):
                 xong_ids.update(int(i) for i in ph.get("nguon") or [])
             elif ph.get("trang_thai") == "loi" and ph.get("ma") not in ("NGAN_SACH", "QUA_GIO"):

@@ -175,9 +175,12 @@ FB_DU_PHONG_KHOI = 0.001     # sự kiện "actor-start"
 def gan_fb_trang(ph: dict, urls: list[str], n: int) -> None:
     """Phần theo dõi trang Facebook đi thedoor; actor + payload cũ của phần làm dự phòng. Cố ý
     KHÔNG gửi `postsNewerThan`: như actor cũ, mỗi trang trả `n` bài MỚI NHẤT bất kể ngày — trang
-    0 bài khi đó mới đúng là lỗi (đáng chạy dự phòng), không lẫn với trang lâu không đăng."""
+    0 bài khi đó mới đúng là lỗi (đáng chạy dự phòng), không lẫn với trang lâu không đăng.
+    `du_phong.uoc_usd` = dự phòng cho MỌI trang (thedoor hỏng cả run) — `theo_doi._tran_phan`
+    chừa chỗ cho nó trong trần phần (dự phòng chạy TRONG phần, tiêu phần trần còn lại)."""
     ph["du_phong"] = {"actor": ph["actor"], "payload": ph["payload"], "gia": FB_DU_PHONG_GIA,
                       "khoi": FB_DU_PHONG_KHOI}
+    ph["du_phong"]["uoc_usd"] = can_du_phong_fb(ph["du_phong"], len(urls), int(n))
     ph.update(actor=FB_TRANG, gia=FB_TRANG_GIA, khoi=FB_TRANG_KHOI, urls=list(urls),
               payload={"pageUrls": list(urls), "postsToScrape": int(n)})
 
@@ -271,12 +274,47 @@ def doc_fb_trang(items: list, urls: list[str]) -> dict[str, dict]:
     return ra
 
 
+def can_du_phong_fb(dp: dict, so_trang: int, n: int) -> float:
+    """USD phải còn trong trần phần để chạy actor dự phòng cho `so_trang` trang × `n` bài: giá
+    thật của actor cũ (bài × 0,005 + khởi động 0,001) nhân hệ số ước tính. Soát 17/10/2026: bản
+    trước so phần còn với SÀN 0,1 USD của `_run_actor` — thedoor lỗi sau khi tạo run (đã tính
+    0,01 khởi động) thì phần dưới ~19 bài (trần 0,1) chỉ còn 0,09 < 0,1 và dự phòng KHÔNG BAO
+    GIỜ chạy, đúng lúc cần nhất. Sàn 0,1 chỉ là `maxTotalChargeUsd` gửi Apify; tiền thật của
+    actor cũ bị `maxItems` (= n × số trang) chặn, nên mức cần thật là con số này."""
+    import theo_doi as T
+    return round((so_trang * n * float(dp.get("gia") or FB_DU_PHONG_GIA)
+                  + float(dp.get("khoi") or 0)) * T._HE_SO_UOC, 4)
+
+
+def ly_do_trang_fb(u: str, kq: dict, loi=None) -> str | None:
+    """Lý do một trang Facebook không có bài sau thedoor + dự phòng (`kq` = `meta["du_phong"]`
+    của `du_phong_fb`) — đi vào `nguon.loi_cuoi`; None khi trang không thuộc diện dự phòng. Soát
+    17/10/2026: lý do bỏ / lỗi của dự phòng chỉ nằm trong meta (không lưu), nguồn chỉ hiện
+    "không lấy được bài nào" — chủ dự án không biết thedoor hỏng hay trang hỏng."""
+    if not kq or (u not in (kq.get("trang") or []) and u not in (kq.get("bo_qua_trang") or [])):
+        return None
+    dau = "thedoor không ra bài" + (f" ({A._che_token(str(loi))[:80]})" if loi else "")
+    ten = kq.get("actor") or "actor cũ"
+    if u in (kq.get("bo_qua_trang") or []):
+        return f"{dau}; dự phòng {ten} không chạy: {kq.get('bo_qua') or 'không rõ'}"[:200]
+    if kq.get("loi"):
+        return f"{dau}; dự phòng {ten} lỗi: {kq['loi']}"[:200]
+    return (f"{dau}; dự phòng {ten} cũng không ra bài (trang riêng tư, đổi tên hoặc sai "
+            "định danh?)")[:200]
+
+
 def du_phong_fb(v, p: str, ph: dict, items: list, meta: dict, loi, cap: float,
                 han: float) -> tuple[list, dict, object]:
     """Trang Facebook thedoor KHÔNG ra bài (lỗi cả run, hoặc trang không có bài) → actor cũ cho
     đúng các trang đó, trong phần trần còn lại. -> (items gộp, meta, lỗi). Run dự phòng ghi vào
-    `run_phu` (tiền thật chốt theo run id) và `du_phong_run` (khởi động lại thì ĐỌC TIẾP, không
-    POST lại). Lỗi dừng cả lượt (hết tiền tháng, huỷ, hết giờ, nghẽn) thì không chạy dự phòng."""
+    `run_phu` (tiền thật chốt theo run id), `du_phong_run` + `du_phong_trang` (khởi động lại thì
+    ĐỌC TIẾP đúng run đó, không POST lại). Lỗi dừng cả lượt (hết tiền tháng, huỷ, hết giờ, nghẽn)
+    thì không chạy dự phòng.
+
+    Trần còn không đủ cho mọi trang thiếu (`can_du_phong_fb`): chạy cho số trang ĐẦU vừa phần còn
+    lại, phần còn lại ghi `bo_qua_trang` + `bo_qua` (lý do). `meta["du_phong"]` = {"actor",
+    "trang" (đã gửi dự phòng), "so_item", "bo_qua_trang", "bo_qua", "loi"} — bên gọi lưu vào phần
+    và đưa lý do vào lỗi nguồn (`ly_do_trang_fb`)."""
     dp = ph.get("du_phong") or {}
     urls = list(ph.get("urls") or (ph.get("payload") or {}).get("pageUrls") or [])
     if not dp or not urls or getattr(loi, "ma", "") in _KHONG_DU_PHONG:
@@ -288,25 +326,41 @@ def du_phong_fb(v, p: str, ph: dict, items: list, meta: dict, loi, cap: float,
         return items, meta, loi
     da = max(float(meta.get("usd") or 0),
              len(items) * FB_TRANG_GIA + (FB_TRANG_KHOI if meta.get("run_id") else 0.0))
-    con = math.floor((cap - da) * 100) / 100
-    if not ph.get("du_phong_run") and (con < A._TRAN_USD_KHOANG[0]
-                                       or han - time.monotonic() < 30):
-        meta = {**meta, "du_phong": {"trang": thieu, "bo_qua": (
-            f"trần còn {con:.2f} USD" if con < A._TRAN_USD_KHOANG[0] else "hết giờ")}}
-        return items, meta, loi
-    import account_tool
+    con = math.floor((cap - da) * 100 + 1e-9) / 100
     n = int(ph.get("n") or 5)
-    pl, lim = account_tool._payload_facebook(thieu, n), n * len(thieu)
+    kq: dict = {"actor": dp["actor"], "trang": [], "so_item": 0}
+    if ph.get("du_phong_run"):
+        gui = [u for u in (ph.get("du_phong_trang") or thieu) if u in thieu] or thieu
+    elif han - time.monotonic() < 30:
+        gui, kq["bo_qua"] = [], "hết giờ"
+    else:
+        k = len(thieu)
+        while k and can_du_phong_fb(dp, k, n) > con + 1e-9:
+            k -= 1
+        gui = thieu[:k]
+        if k < len(thieu):
+            kq["bo_qua"] = (f"trần phần còn {con:.2f} USD, dự phòng cần "
+                            f"{can_du_phong_fb(dp, k + 1, n):.4f} USD cho {k + 1} trang"
+                            ).replace(".", ",")
+    kq["trang"] = gui
+    if len(gui) < len(thieu):
+        kq["bo_qua_trang"] = [u for u in thieu if u not in gui]
+    if not gui:
+        return items, {**meta, "du_phong": kq}, loi
+    import account_tool
+    pl, lim = account_tool._payload_facebook(gui, n), n * len(gui)
 
     def ghi_run(run, m):
         v.cap_nhat_phan(ph, run_phu=[*(ph.get("run_phu") or []), run.get("id")],
-                        du_phong_run=run.get("id"))
+                        du_phong_run=run.get("id"), du_phong_trang=list(gui))
     tok = A._KHI_CO_RUN.set(ghi_run)
     them, mdp, loi_dp = [], {}, None
     try:
         if ph.get("du_phong_run"):
             them, mdp = A._doc_tiep_run(ph["du_phong_run"], lim, han, True, dp["actor"])
         else:
+            # `tran_usd` có thể < 0,1 (sàn của `_run_actor`): tiền thật vẫn ≤ `can_du_phong_fb`
+            # vì `maxItems` = n × số trang gửi.
             them, mdp = A._run_actor(dp["actor"], pl, lim, None, han, 0, tran_usd=con,
                                      mot_phan=True, nen_tang=p)
     except A.LoiApify as e:
@@ -317,9 +371,10 @@ def du_phong_fb(v, p: str, ph: dict, items: list, meta: dict, loi, cap: float,
                  len(them or []) * dp["gia"] + (dp["khoi"] if ph.get("du_phong_run") else 0.0))
     if loi_dp is not None and mdp.get("khong_kiem_duoc"):
         usd_dp = con                      # POST mơ hồ, không kiểm được: coi như đã tiêu trần
-    meta = {**meta, "usd": round(da + usd_dp, 4),
-            "du_phong": {"actor": dp["actor"], "trang": thieu, "so_item": len(them or []),
-                         **({"loi": A._che_token(str(loi_dp))[:150]} if loi_dp else {})}}
+    kq["so_item"] = len(them or [])
+    if loi_dp is not None:
+        kq["loi"] = A._che_token(str(loi_dp))[:150]
+    meta = {**meta, "usd": round(da + usd_dp, 4), "du_phong": kq}
     return list(items) + list(them or []), meta, loi
 
 
