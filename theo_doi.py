@@ -3162,7 +3162,7 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         for d, dt in hits_moi:
             k = _khoa_bai(d["platform"], d["link"], {
                 "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")})
-            if k in da_loai:
+            if k in da_loai or any(x in da_loai for x in _khoa_loai_on_dinh(d, dt)):
                 tk["pheu"].setdefault(d["platform"], _pheu_moi(0, ""))["da_loai_truoc"] += 1
                 if d.get("_duong") == 2:
                     _dem_duong_2(tk, "loai")
@@ -3174,6 +3174,28 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk)
         finally:
             TDA.ghi_loai(ma_loai, dau, tk.pop("_bi_loai", []), tu_pv)
+
+
+def _khoa_loai_on_dinh(d: dict, dt) -> list[str]:
+    """Khoá ỔN ĐỊNH của bài Facebook cho sổ "đã loại" (18/10/2026): id số (`khu_trung_fb.ma_so_fb`)
+    và chủ bài + phút đăng + chữ ký nội dung. Vì sao: khoá bài theo link mang pfbid — ĐỔI mỗi lượt
+    cào (đo vòng 1, 17/10) — nên bài Facebook bị loại (AI lạc đề 5–10 bài/lượt ở lượt 7–11, không
+    nhắc từ khoá, từ loại trừ) không bao giờ khớp lại sổ và bị gửi AI xét lại MỖI lượt. Nền tảng
+    khác khoá theo id ổn định (video, shortcode, băm link chuẩn) → []."""
+    if (d.get("platform") or d.get("nen_tang")) != "facebook":
+        return []
+    import hashlib
+    ra = []
+    so = KT.ma_so_fb(d)
+    if so:
+        ra.append(f"facebook:id:{so}")
+    r = {"tai_khoan": d.get("username") or d.get("tai_khoan"), "tac_gia": d.get("kenh"),
+         "link": d.get("link"), "noi_dung": str(d.get("text") or d.get("noi_dung") or "")[:1000]}
+    chu, ph = sorted(KT.chu_bai(r)), KT.phut(dt)
+    if chu and ph and KT.co_chu(r):
+        ky = hashlib.sha1(KT.chu_ky_noi_dung(r["noi_dung"]).encode("utf-8")).hexdigest()[:12]
+        ra.append(f"facebook:nd:{chu[0]}|{ph.isoformat()}|{ky}")
+    return ra
 
 
 def _khoa_fb_cu(ma: str, hits: list, khoa_hit) -> dict[str, str]:
@@ -3215,6 +3237,10 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     # Bài bị loại lượt này → sổ "đã loại" (`theo_doi_api.ghi_loai`, review 16/10): trong phạm vi
     # 30–92 ngày cùng bài về mỗi lượt, không gửi AI xét lại (tốn + kết quả có thể đổi).
     bi_loai = tk.setdefault("_bi_loai", [])
+
+    def loai(d: dict, khoa: str, ly: str, dt) -> None:
+        # Facebook (18/10/2026): kèm khoá ổn định — pfbid trong khoá đổi mỗi lượt.
+        bi_loai.extend((k, ly, dt) for k in (khoa, *_khoa_loai_on_dinh(d, dt)))
     # Phễu đường 2 Threads: bài riêng của đường 2 vào bước này → giữ / loại (gộp mọi lý do loại;
     # lý do chi tiết nằm ở phễu Threads chung).
     n2_vao = sum(1 for d, _ in hits if d.get("_duong") == 2)
@@ -3228,12 +3254,12 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         thay.add(khoa)
         if A._tu_loai_tru_khop(d, loai_tru):
             ph(d)["loai_tru"] += 1
-            bi_loai.append((khoa, "loai_tru", dt))
+            loai(d, khoa, "loai_tru", dt)
             continue
         if loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}"):
             tk["spam"] = tk.get("spam", 0) + 1            # đợt 2d: bỏ cứng trước bước AI
             ph(d)["spam"] += 1
-            bi_loai.append((khoa, "spam", dt))
+            loai(d, khoa, "spam", dt)
             continue
         d["_khoa"] = khoa
         d["_khop"] = A._khop_tu_khoa(d, tu)
@@ -3257,12 +3283,12 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         if px and not px[0]:
             lo = ph(d)["ai_loai"]
             lo[str(px[1])] = lo.get(str(px[1]), 0) + 1
-            bi_loai.append((d["_khoa"], f"ai:{px[1]}", dt))
+            loai(d, d["_khoa"], f"ai:{px[1]}", dt)
             continue
         if not px and not d["_khop"]:
             ph(d)["khong_nhac"] += 1
             if i in px_all:              # AI đã xét (không rõ) — chưa xét thì lượt sau xét lại
-                bi_loai.append((d["_khoa"], "khong_nhac", dt))
+                loai(d, d["_khoa"], "khong_nhac", dt)
             continue
         dd = _dinh_danh_tai_khoan(d)
         rows.append({
