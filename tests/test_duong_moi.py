@@ -747,3 +747,130 @@ def test_trang_ngan_sach_luu_feed_hashtag_tiktok():
         "bat": True, "so_yeu_cau": 3}
     assert CP.bang_cau_hinh(kho.du_an["hapas"])["tu_khoa"]["tiktok"]["hashtag"]["uoc"] == \
         T.uoc_tag_tiktok(3, 2)
+
+
+# ───────────────── 5. scripts/lang_nghe_bu_ig.py: bù lịch sử Instagram kênh nhà (một lần) ─────────────
+def _bu_ig():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lang_nghe_bu_ig",
+                                                  _GOC.parent / "scripts" / "lang_nghe_bu_ig.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def _fz(lui_ngay: float = 10) -> list[dict]:
+    """Item futurizerush thật (cắt gọn) với giờ đăng dời về `lui_ngay` ngày trước."""
+    items = json.loads(json.dumps(_mau("mau_ig_futurizerush_profile.json")["items"]))
+    for i, it in enumerate(items):
+        luc = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=lui_ngay + i)
+        it["timestamp"] = luc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return items
+
+
+class _KhoBuIg:
+    def __init__(self, mp, dang_chay=None, da_tieu=0.0):
+        import lang_nghe_db as K
+        self.bai, self.dong, self.mo = [], [], []
+        da = {"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas"], "tu_loai_tru": [],
+              "boi_canh": "HAPAS", "thi_truong": "VN", "tran_usd_thang": 5.0}
+        nguon = [{"id": 11, "nen_tang": "instagram", "dinh_danh": "hapas.vn", "loai": "kenh_nha",
+                  "ten": "HAPAS", "so_bai_moi_lan": 5, "chu_ky_ngay": 1},
+                 {"id": 12, "nen_tang": "instagram", "dinh_danh": "kol.x", "loai": "kol"},
+                 {"id": 13, "nen_tang": "tiktok", "dinh_danh": "hapas.official",
+                  "loai": "kenh_nha"}]
+        mp.setattr(K, "doc_du_an", lambda ma: dict(da) if ma == "hapas" else None)
+        mp.setattr(K, "nguon_dang_theo_doi", lambda ma: [dict(n) for n in nguon])
+        mp.setattr(K, "da_tieu_thang", lambda ma: da_tieu)
+        mp.setattr(K, "luot_dang_chay", lambda ma: dang_chay)
+        mp.setattr(K, "mo_luot", lambda ma, kieu, **kw: (self.mo.append((kieu, kw)), 99)[1])
+        mp.setattr(K, "ghi_bai", lambda ma, luot, kieu, rows: (
+            self.bai.append((luot, kieu, [dict(r) for r in rows])), (len(rows), 0))[1])
+        mp.setattr(K, "dong_luot", lambda luot, **kw: self.dong.append((luot, kw)))
+
+
+def _ns(**kw):
+    import argparse
+    m = _bu_ig()
+    return argparse.Namespace(**{"du_an": "hapas", "tai_khoan": None, "ngay": m.NGAY_MAC_DINH,
+                                 "so_bai": m.BAI_MAC_DINH, "tran": m.TRAN_TOI_DA,
+                                 "ap_dung": False, **kw})
+
+
+def test_bu_ig_doc_futurizerush_theo_raw_that():
+    m = _bu_ig()
+    items = _mau("mau_ig_futurizerush_profile.json")["items"]
+    (tk,) = m.doc_futurizerush(items).values()
+    assert tk["ho_so"]["tai_khoan"] == "hapas.vn" and len(tk["bai"]) == len(items)
+    for b, it in zip(tk["bai"], items):
+        assert b["link"] == it["postUrl"] and (b["like"], b["binh_luan"]) == (it["likes"],
+                                                                             it["comments"])
+        assert b["ngay"] == datetime.datetime.fromisoformat(it["timestamp"].replace("Z", "+00:00"))
+        assert b["hashtag"] == it["hashtags"]
+    (d, _), *_ = T._dong_tu_tai_khoan("instagram", tk)
+    assert T._khoa_bai("instagram", d["link"], {"id": d["_goc_id"]}) == \
+        f"instagram:{items[0]['shortcode']}"
+    assert m.ACTOR == "futurizerush~instagram-profile-posts-scraper"
+
+
+def test_bu_ig_chay_thu_khong_goi_actor_khong_ghi(monkeypatch):
+    m = _bu_ig()
+    kho = _KhoBuIg(monkeypatch)
+    monkeypatch.setattr(A, "_run_actor", lambda *a, **k: pytest.fail("chạy thử không gọi actor"))
+    ra = []
+    bay = datetime.datetime(2026, 10, 17, 20, 0, tzinfo=_VN)
+    assert m.chay(_ns(), ra.append, bay) == 0
+    van = "\n".join(ra)
+    assert "CHẠY THỬ" in van and "@hapas.vn (#11)" in van and "kol.x" not in van
+    assert "'usernames': ['hapas.vn'], 'maxPosts': 40, 'postsNewerThan': '2026-09-17'" in van
+    assert "Trần maxTotalChargeUsd 0.10 USD; ước tính tối đa 0.0700 USD" in van
+    assert kho.mo == [] and kho.bai == [] and kho.dong == []
+    # Trần không vượt 0,10 dù gõ lớn hơn.
+    ra.clear()
+    m.chay(_ns(tran=5), ra.append, bay)
+    assert "Trần maxTotalChargeUsd 0.10 USD" in "\n".join(ra)
+
+
+def test_bu_ig_ap_dung_ghi_dung_duong_nguon_kenh_nha(monkeypatch, mo):
+    m = _bu_ig()
+    kho = _KhoBuIg(monkeypatch)
+    monkeypatch.setenv("APIFY_TOKEN", "apify_api_gia")
+    monkeypatch.setattr(m, "_NGHI_GIAY", 0)
+    gui = []
+
+    def run(actor, payload, limit, mem=None, deadline=None, min_charge=0, *, tran_usd=None,
+            mot_phan=False, nen_tang=None):
+        gui.append((actor, payload, limit, tran_usd, nen_tang))
+        return _fz(), {"run_id": "rbu1", "status": "SUCCEEDED", "ma": "OK", "usd": 0.0}
+    monkeypatch.setattr(A, "_run_actor", run)
+    monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {"usd": 0.0385, "so_run": len(ids),
+                                                            "chua_doc": 0, "con_song": []})
+    ra = []
+    assert m.chay(_ns(ap_dung=True), ra.append) == 0
+    assert gui == [(m.ACTOR, gui[0][1], 40, 0.1, "instagram")]
+    assert gui[0][1]["usernames"] == ["hapas.vn"] and gui[0][1]["maxPosts"] == 40
+    (luot, kieu, rows), = kho.bai
+    assert luot == 99 and kieu == "theo_doi" and kho.mo[0][0] == "theo_doi"
+    assert kho.mo[0][1]["ma_viec"].startswith("bu-ig-")
+    items = _fz()
+    assert sorted(r["khoa"] for r in rows) == sorted(f"instagram:{x['shortcode']}" for x in items)
+    assert all(r["nguon_id"] == 11 and r["ly_do_giu"] == "kenh_nha" for r in rows)
+    assert {r["binh_luan"] for r in rows} == {x["comments"] for x in items}
+    (luot_d, kw), = kho.dong
+    assert luot_d == 99 and kw["chi_phi_usd"] == 0.0385 and kw["trang_thai"] == "xong"
+    assert kw["bai_moi"] == len(items) and "bình luận" in kw["ghi_chu"]
+    assert "Chi phí thật: 0.0385 USD" in "\n".join(ra)
+
+
+@pytest.mark.parametrize("dang, da_tieu, cau", [
+    ({"id": 7, "ma_viec": "t1"}, 0.0, "đang có lượt theo dõi t1"),
+    (None, 4.95, "phần còn của tháng (0.05 USD) thấp hơn trần"),
+])
+def test_bu_ig_ap_dung_dung_khi_dang_chay_hoac_het_thang(monkeypatch, dang, da_tieu, cau):
+    m = _bu_ig()
+    kho = _KhoBuIg(monkeypatch, dang_chay=dang, da_tieu=da_tieu)
+    monkeypatch.setenv("APIFY_TOKEN", "apify_api_gia")
+    monkeypatch.setattr(A, "_run_actor", lambda *a, **k: pytest.fail("không được gọi actor"))
+    ra = []
+    assert m.chay(_ns(ap_dung=True), ra.append) == 2
+    assert cau in "\n".join(ra) and kho.mo == []

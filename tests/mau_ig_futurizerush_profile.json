@@ -1,0 +1,79 @@
+{
+ "nguon": "futurizerush~instagram-profile-posts-scraper, run thật 17/10/2026 (hapas.vn)",
+ "input": {
+  "usernames": [
+   "hapas.vn"
+  ],
+  "maxPosts": 40,
+  "postsNewerThan": "2026-09-17"
+ },
+ "usageTotalUsd": 0.0385,
+ "chargedEventCounts": {
+  "apify-default-dataset-item": 19,
+  "apify-actor-start": 1
+ },
+ "items": [
+  {
+   "username": "hapas.vn",
+   "postUrl": "https://www.instagram.com/p/Dd6HzRyEpaB/",
+   "mediaType": "carousel",
+   "caption": "Có những món quà khiến người ta nhớ mãi không phải vì điều gì quá lớn lao, mà bởi khoảnh khắc mở ra, khẽ mỉm cười và nhận ra mình luôn được ai đó nghĩ đến. Vì yêu, ta vẫn thường muốn dành cho người mì",
+   "hashtags": [
+    "HAPAS",
+    "LAMMOIDIEUVIYEU",
+    "QUATANG2010",
+    "HAPASXTHOM"
+   ],
+   "author": "hapas.vn",
+   "shortcode": "Dd6HzRyEpaB",
+   "likes": 68,
+   "comments": 1,
+   "timestamp": "2026-09-30T10:29:15.000Z",
+   "isPinned": false,
+   "isVideo": false,
+   "videoViewCount": null,
+   "ownerId": "4726724862"
+  },
+  {
+   "username": "hapas.vn",
+   "postUrl": "https://www.instagram.com/p/Ddshk8vkiT2/",
+   "mediaType": "carousel",
+   "caption": "LÀM MỌI ĐIỀU VÌ YÊU | HAPAS X THƠM HOAPAS 20.10 COLLECTION Có những điều, nếu không vì yêu, có lẽ ta sẽ chẳng bao giờ làm. Từ việc nhớ một người thích gì, để tâm đến những điều nhỏ bé, đến dành thời g",
+   "hashtags": [
+    "HAPAS",
+    "LAMMOIDIEUVIYEU",
+    "QUATANG2010",
+    "HAPASXTHOM"
+   ],
+   "author": "hapas.vn",
+   "shortcode": "Ddshk8vkiT2",
+   "likes": 1025,
+   "comments": 33,
+   "timestamp": "2026-09-25T03:45:07.000Z",
+   "isPinned": false,
+   "isVideo": false,
+   "videoViewCount": null,
+   "ownerId": "4726724862"
+  },
+  {
+   "username": "hapas.vn",
+   "postUrl": "https://www.instagram.com/reel/DeBUkyfSEGe/",
+   "mediaType": "video",
+   "caption": "Một mùi hương có thể gọi tên những cảm xúc khó nói thành lời. Một món quà nhỏ, gửi trao những điều vẫn luôn muốn nói. Để mỗi lần hương thơm ở lại, một khoảnh khắc đẹp cũng được nhớ về. #HAPAS #NUOCHOA",
+   "hashtags": [
+    "HAPAS",
+    "NUOCHOAHAPAS",
+    "QUATANG2010"
+   ],
+   "author": "hapas.vn",
+   "shortcode": "DeBUkyfSEGe",
+   "likes": 10,
+   "comments": 0,
+   "timestamp": "2026-10-03T05:37:08.000Z",
+   "isPinned": false,
+   "isVideo": true,
+   "videoViewCount": 3589,
+   "ownerId": "4726724862"
+  }
+ ]
+}
