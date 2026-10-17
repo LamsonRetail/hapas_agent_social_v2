@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.bai`
   kieu_trang      STRING    OPTIONS(description='Loại trang của bài web. Giá trị: bao (báo/tạp chí), dien_dan (diễn đàn), blog, mxh_khac (LinkedIn, X, Lemon8…), khac (trang khác). NULL với bài mạng xã hội (nen_tang khác web).'),
   muc_nhac        STRING    OPTIONS(description='Mức nhắc brand trong bài web. Giá trị: tieu_de (từ khoá ở tiêu đề), chinh (≥ 3 lần trong thân bài), thoang (nhắc lướt 1–2 lần, vd bài liệt kê nhiều brand). NULL với bài mạng xã hội.'),
   la_pr           BOOL      OPTIONS(description='TRUE: bài web có dấu hiệu bài đặt/PR (thân bài dẫn link về miền của brand hoặc ghi "Ảnh/Nguồn: <brand>"). FALSE: không thấy dấu hiệu. NULL với bài mạng xã hội.'),
-  ma_so_fb        STRING    OPTIONS(description='Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026, hoặc link pfbid mà actor không trả id.'),
+  ma_so_fb        STRING    OPTIONS(description='Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không phải khoá (PK là du_an + khoa), không join bảng khác; không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026 chưa được quét lại (quét lại thì Mark điền), hoặc link pfbid mà actor không trả id.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 CLUSTER BY du_an, nen_tang
@@ -329,7 +329,7 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.luot_quet`
 -- Lưu ý: MERGE của bai không xoá dòng — bản trùng script gộp đã xoá ở Postgres phải xoá tay ở đây
 -- nếu đồng bộ đã bật trước khi gộp (17/10/2026: chưa bật, dong_bo_bq 0 dòng).
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
-  ADD COLUMN IF NOT EXISTS ma_so_fb STRING OPTIONS(description='Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026, hoặc link pfbid mà actor không trả id.');
+  ADD COLUMN IF NOT EXISTS ma_so_fb STRING OPTIONS(description='Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không phải khoá (PK là du_an + khoa), không join bảng khác; không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026 chưa được quét lại (quét lại thì Mark điền), hoặc link pfbid mà actor không trả id.');
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
   SET OPTIONS(description='''[Lớp] Raw
 [Mục đích] Bài mạng xã hội liên quan tới dự án mà Mark đã giữ, kèm nhãn AI và tương tác mới nhất, để đếm thảo luận, nguồn nổi bật, sắc thái, chủ đề.
