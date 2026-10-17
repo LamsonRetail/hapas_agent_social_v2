@@ -1427,6 +1427,15 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 ch["do_phu"] = dp
             tran = (NL.tran_usd(form.get("tran_usd_thang"))
                     if (form.get("tran_usd_thang") or "").strip() else None)
+            # Đường 2 Threads (17/10/2026, `tu_khoa.threads.duong2`): biểu mẫu chưa có ô riêng —
+            # GIỮ nguyên khối đang lưu, không thì bấm Lưu là mất cấu hình (vd người vận hành đã
+            # tắt đường 2 sau cảnh báo "về 0 bài 2 lượt liền" → lưu lại thành bật). Đọc chung bản
+            # dự án đã đọc cho các dòng phụ Facebook / TikTok ở trên.
+            th_cu = cu_du_an
+            for k in ("cau_hinh", "tu_khoa", "threads", "duong2"):
+                th_cu = th_cu.get(k) if isinstance(th_cu, dict) else None
+            if isinstance(th_cu, dict) and "threads" in ch["tu_khoa"]:
+                ch["tu_khoa"]["threads"]["duong2"] = dict(th_cu)
             await _k(app.state.kho.dat_cau_hinh, nguoi["email"], ma, ch)
             if tran is not None:
                 await _k(app.state.kho.dat_tran_thang, nguoi["email"], ma, tran)

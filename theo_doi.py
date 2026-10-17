@@ -64,20 +64,47 @@ _TEN = {"youtube": "YouTube", "instagram": "Instagram", "tiktok": "TikTok", "fac
 #: Facebook từ 17/10/2026 qua thedoor~facebook-page-scraper (`theo_doi_api.FB_TRANG`): 0,0025 USD/bài
 #: (gói FREE, cùng 20 bài với actor cũ 0,005, có view video) + phí khởi động 0,01 USD/run
 #: (`_KHOI_NGUON`; actor cũ còn làm dự phòng).
+#: Threads từ 17/10/2026: actor HỒ SƠ scrapersdelight (`A._ACTORS["threads_ho_so"]`) tính THEO TÀI
+#: KHOẢN như Instagram — 0,002 USD/hồ sơ kèm 4–10 bài mới nhất, không phí khởi động (đo @hapas.vn:
+#: 8.434 follower, 4 bài, 0,002 USD). Chế độ "user" của futurizerush ((10 × 0,0025 + 0,08) × 1,3 =
+#: 0,137 USD/tài khoản/lượt) chỉ còn làm DỰ PHÒNG khi actor hồ sơ hỏng cả lượt (`_du_phong_threads`).
 _GIA = {"tiktok": 0.0012, "facebook": 0.0025, "instagram": 0.0026, "youtube": 0.0,
-        "threads": 0.0025}
-#: Phí khởi động actor THEO DÕI nguồn khác actor tìm theo từ khoá cùng nền tảng (`apify_tool.
-#: _START_COST` là của actor tìm): Facebook thedoor 0,01 USD/run (`apify-actor-start` 1 GB, thêm
-#: 15/10/2026). Nền tảng không có ở đây dùng `_START_COST`.
-_KHOI_NGUON = {"facebook": 0.01}
+        "threads": A.TH_HO_SO_GIA}
+#: Phí khởi động MỖI lượt actor theo dõi nguồn: như `apify_tool._START_COST` (actor tìm bài), trừ
+#: actor theo dõi riêng — Facebook thedoor 0,01 USD/run (`apify-actor-start` 1 GB, thêm
+#: 15/10/2026), Threads hồ sơ không có phí khởi động (512 MB). Bản sao
+#: `dashboard.chi_phi.KHOI_NGUON`.
+_KHOI_NGUON = {**A._START_COST, "facebook": 0.01, "threads": 0.0}
 # Threads (chủ dự án 16/10/2026: "thêm listening threads"). Actor futurizerush~meta-threads-scraper
 # — đọc input schema + chạy thử 16/10/2026: chế độ "search" (từ khoá, ≤ 20 từ/lượt, lọc ngày
 # start_date/end_date phía actor, "recent" bài mới trước) và "user" (bài mới nhất của ≤ 20 tài
 # khoản/lượt, KHÔNG lọc ngày); `max_posts` là trần MỖI từ/tài khoản, tối thiểu 10; actor không dừng
 # ở `maxItems`, chỉ trần USD chặn được. Bình luận (trả lời cấp 1) qua actor riêng của
 # `deep_dive_tool` (futurizerush~threads-replies-scraper, ≤ 20 bài/lượt, 10–300 trả lời/bài).
+# Từ 17/10/2026 NGUỒN Threads (theo dõi tài khoản) đi actor hồ sơ scrapersdelight (`_GIA`); chế độ
+# "user" ở trên chỉ còn là lượt dự phòng (`_du_phong_threads`).
 TH_TOI_THIEU_BAI = 10        # max_posts tối thiểu của actor: mỗi tài khoản/từ khoá trả tiền ≥ 10 bài
 TH_TOI_DA_MOI_LUOT = 20      # tài khoản (chế độ "user") hoặc từ khoá (chế độ "search") mỗi lượt
+# Threads ĐƯỜNG 2 (17/10/2026, chủ dự án duyệt): scrapersdelight~threads-keyword-search-scraper chạy
+# CÙNG lượt tìm với futurizerush. Đo vòng 2 (bảng ở `apify_tool._fetch_threads`): hai actor bắt hai
+# tập khác nhau — 7 ngày, futurizerush 62% + scrapersdelight 62% → cùng nhau 86% (98% theo thảo
+# luận) — mà đường 2 chỉ 0,001 USD/bài, không phí khởi động (run 21 từ khoá × 7 ngày = 0,015 USD).
+# Cấu hình `du_an.cau_hinh.tu_khoa.threads.duong2` = {"bat", "so_bai" (trần bài CẢ lượt),
+# "so_bai_moi_tu", "so_luot"} — xem `cau_hinh_th2`. Mặc định BẬT (dưới công tắc Threads của dự án).
+TH2_KHOA = "threads_2"       # khoá: bộ tìm `A._FETCH`, sổ mốc, phần "moc" của việc, phễu
+TH2_GIA = A.TH2_GIA          # 0,001 USD / bài trả về
+# 100 bài/lượt = tối đa 0,10 USD (0,13 với hệ số ước tính): run 3 từ khoá × 30 ngày × 2 lượt trả 47
+# bài, lượt hằng ngày (cửa sổ 3 ngày) dự kiến ~10. 20 bài/từ: "hapas" 30 ngày được 29 bài.
+TH2_SO_BAI = 100
+TH2_MOI_TU = 20
+TH2_LUOT = 2                 # passesPerSurface: lượt thứ 3 trở đi gần như không thêm bài (đo 17/10)
+TH2_RONG_CANH_BAO = 2        # về 0 bài chừng này lượt liền → cảnh báo (actor 6 tuần tuổi, 81 người dùng)
+# Ước tính Threads theo sản lượng lượt trước (`san_luong_du_kien`) nhân hệ số này: số bài về mỗi
+# ngày thất thường (vd đợt 20/10), nhưng 1,5 × lượt trước vẫn sát hơn nhiều giả định "mỗi từ đủ trần".
+TH_HE_SO_SAN_LUONG = 1.5
+# Lỗi KHÔNG phải do actor (tài khoản hết tiền, nghẽn chỗ chạy, người dùng huỷ): không tính vào chuỗi
+# "về 0 bài" của cảnh báo đường 2.
+_TH2_LOI_KHONG_DEM = ("HET_TIEN_THANG", "NGHEN_DONG_THOI", "DA_HUY")
 _HE_SO_UOC = 1.3          # ước tính chừa hao hụt (bài ghim, phí lẻ…)
 _HE_SO_TRAN = 1.5         # trần USD của một lượt actor = ước tính × hệ số này (rồi kẹp)
 _TRAN_TOI_THIEU = 0.1     # `_run_actor` kẹp trần ≥ 0,1 USD: tháng còn ít hơn thì không chạy
@@ -96,6 +123,11 @@ def _hom_nay() -> str:
 
 def _usd(x: float) -> str:
     return f"{x:.2f}".replace(".", ",")
+
+
+def _usd3(x: float) -> str:
+    """USD 3 chữ số lẻ — tiền đường 2 Threads tính theo phần nghìn USD (0,001/bài)."""
+    return f"{float(x):.3f}".replace(".", ",")
 
 
 def _chuan_dinh_danh(p: str, s: str) -> str:
@@ -142,17 +174,24 @@ def _so_hay_none(v) -> int | None:
 
 # ───────────────────────────── ước tính + phần ─────────────────────────────
 def _uoc_phan(p: str, so_nguon: int, n: int) -> float:
-    """USD ước tính của MỘT lượt actor: `so_nguon` nguồn, mỗi nguồn `n` bài (Instagram tính theo
-    tài khoản; Threads tối thiểu `TH_TOI_THIEU_BAI` bài/tài khoản), cộng phí khởi động của actor,
+    """USD ước tính của MỘT lượt actor: `so_nguon` nguồn, mỗi nguồn `n` bài (Instagram, Threads —
+    actor hồ sơ, 17/10/2026 — tính theo tài khoản), cộng phí khởi động của actor (`_KHOI_NGUON`),
     nhân hệ số hao hụt."""
     gia = _GIA.get(p, 0.0)
     if not gia or not so_nguon:
         return 0.0
-    if p == "threads":
-        n = max(TH_TOI_THIEU_BAI, n)
-    don_vi = so_nguon if p == "instagram" else so_nguon * n
+    don_vi = so_nguon if p in ("instagram", "threads") else so_nguon * n
     khoi = _KHOI_NGUON.get(p, A._START_COST.get(p, 0.0))
     return round((don_vi * gia + khoi) * _HE_SO_UOC, 4)
+
+
+def _uoc_phan_user_threads(so_nguon: int, n: int) -> float:
+    """USD ước tính một lượt DỰ PHÒNG Threads (futurizerush chế độ "user"): mỗi tài khoản ≥ 10 bài
+    × 0,0025 + phí khởi động 0,08 (ép 4 GB, gói FREE), nhân hệ số."""
+    if not so_nguon:
+        return 0.0
+    return round((so_nguon * max(TH_TOI_THIEU_BAI, n) * A._UNIT_COST["threads"]
+                  + A._START_COST["threads"]) * _HE_SO_UOC, 4)
 
 
 def _so_bai_nguon(x: dict) -> int:
@@ -184,10 +223,18 @@ def chia_phan(nguon: list[dict]) -> dict[str, list[dict]]:
             if p == "youtube":
                 ph.update(actor="youtube", uoc_usd=0.0)
             elif p == "threads":
+                # 17/10/2026: actor HỒ SƠ (0,002 USD/tài khoản, 4–10 bài mới nhất) thay chế độ
+                # "user" của futurizerush (0,137 USD/tài khoản/lượt); `du_phong` giữ đủ thông tin
+                # để `_du_phong_threads` dựng lượt futurizerush khi actor hồ sơ hỏng cả lượt.
                 ten = [_chuan_dinh_danh(p, x["dinh_danh"]) for x in ds]
-                ph.update(actor=A._ACTORS["threads"], mem=A._MEMORY.get("threads"),
-                          payload={"mode": "user", "usernames": ten, "max_posts": n},
-                          limit=n * len(ten), uoc_usd=_uoc_phan(p, len(ds), n))
+                ph.update(actor=A._ACTORS["threads_ho_so"],
+                          payload={"profiles": ten, "includePosts": True}, limit=len(ten),
+                          khoi=0.0, uoc_usd=_uoc_phan(p, len(ds), n),
+                          du_phong={"actor": A._ACTORS["threads"], "mem": A._MEMORY.get("threads"),
+                                    "payload": {"mode": "user", "usernames": ten, "max_posts": n},
+                                    "limit": n * len(ten), "gia": A._UNIT_COST["threads"],
+                                    "khoi": A._START_COST["threads"],
+                                    "uoc_usd": _uoc_phan_user_threads(len(ds), n)})
             else:
                 ten = [x["dinh_danh"].lstrip("@") for x in ds]
                 if p == "tiktok":
@@ -383,7 +430,9 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
     ns_apify, hm, _ = quet_lon.ngan_sach(quet_lon.tran_usd_nen())
     # Tìm theo từ khoá rồi bình luận chỉ dùng phần ngân sách việc nền còn lại sau phần bài — lúc
     # chạy mỗi lượt actor vẫn bị kẹp theo trần console, phần còn của tháng và ngân sách việc.
-    tk_uoc = round(uoc_tu_khoa_du_an(da, _fb_toi_da()), 2)
+    # Threads theo sản lượng lượt trước (17/10/2026, `san_luong_du_kien`): giữ chỗ theo trần cũ
+    # (21 từ × 10 bài ≈ 0,79 USD) làm lượt bị từ chối / Threads bị co oan khi ngân sách chật.
+    tk_uoc = round(uoc_tu_khoa_du_an(da, _fb_toi_da(), doc_moc_tk(ma)), 2)
     tk_uoc = round(max(0.0, min(tk_uoc, ns_apify - tong)), 2)
     tong = round(tong + tk_uoc, 2)
     bl_uoc = round(max(0.0, min(bl_uoc, ns_apify - tong)), 2)
@@ -503,9 +552,34 @@ def _doc_ket_qua(p: str, items: list, n: int, urls: list[str] | None = None) -> 
     if p == "instagram":
         return account_tool._doc_instagram(items, 12)
     if p == "threads":
+        # Actor hồ sơ (dòng có `recent_posts`/`follower_count`) hoặc dự phòng futurizerush "user".
+        if any(isinstance(it, dict) and ("recent_posts" in it or "follower_count" in it)
+               for it in items):
+            return _doc_threads_ho_so(items)
         return _doc_threads(items)
     # Facebook (17/10/2026): bài thedoor và/hoặc actor cũ (dự phòng, phần lập trước khi đổi actor).
     return TDA.doc_fb_trang(items, list(urls or []))
+
+
+def _doc_threads_ho_so(items: list) -> dict[str, dict]:
+    """Item scrapersdelight profile → {tài khoản: hồ sơ + bài} cùng dạng `_doc_threads` (để
+    `_dong_tu_tai_khoan` dùng chung). Link bài đúng dạng futurizerush (`apify_tool._link_threads`) —
+    khoá kho trùng với bài cùng tài khoản mà lượt tìm theo từ khoá đã ghi. Actor không có lượt xem:
+    `view` None (kho giữ số cũ). Hồ sơ riêng tư / chưa bật Threads → ghi chú, không bài."""
+    ra: dict[str, dict] = {}
+    for k, x in A.doc_ho_so_threads(items).items():
+        k = _chuan_dinh_danh("threads", k)
+        goc = next((it for it in items if isinstance(it, dict)
+                    and _chuan_dinh_danh("threads", str(it.get("username") or "")) == k), {})
+        ghi = ("tài khoản Threads riêng tư" if goc.get("is_private")
+               else "tài khoản chưa bật Threads" if goc.get("has_threads_profile") is False
+               else "")
+        ra[k] = {"ho_so": x["ho_so"], "ghi_chu": ghi, "bai": [{
+            "ngay": dt, "view": None, "like": d["likes"], "binh_luan": d["comments"],
+            "share": d["shares"], "noi_dung": d["text"], "link": d["link"],
+            "hashtag": [t.strip() for t in str(d["hashtags"] or "").split(",") if t.strip()],
+            "_goc": d["__goc"]} for d, dt in x["bai"]]}
+    return ra
 
 
 def _doc_threads(items: list) -> dict[str, dict]:
@@ -823,6 +897,29 @@ def _chay_actor(v, p: str, ph: dict, cap: float, han: float,
     return items or [], meta, loi, None
 
 
+def _du_phong_threads(v, ph: dict, ds: list[dict]) -> bool:
+    """Thêm phần DỰ PHÒNG futurizerush (chế độ "user") cho các nguồn của phần hồ sơ Threads `ph`
+    vào cuối danh sách phần Threads của việc — vòng phần của `_chay_viec` đi tiếp tới nó ngay trong
+    lượt này, cùng kỷ luật tiền (ghi run id, đọc tiếp khi khởi động lại, trần = ước tính × 1,5 kẹp
+    phần còn của tháng). Id cố định `<id>-du-phong`: khởi động lại không tạo lần hai. -> True khi
+    đã giao (nguồn không ghi lỗi ở phần hồ sơ)."""
+    dp = ph.get("du_phong") or {}
+    if not dp.get("actor") or not ds:
+        return False
+    ma = f"{ph['id']}-du-phong"
+    with v._khoa:
+        cac = v.d.setdefault("nen_tang", {}).setdefault("threads", {"phan": []})["phan"]
+        if not any(x.get("id") == ma for x in cac):
+            cac.append({"id": ma, "nen_tang": "threads", "nguon": [int(x["id"]) for x in ds],
+                        "trang_thai": "cho", "n": ph.get("n"), "gia": dp.get("gia"),
+                        "khoi": dp.get("khoi"), "actor": dp["actor"], "mem": dp.get("mem"),
+                        "payload": dp.get("payload"), "limit": dp.get("limit"),
+                        "uoc_usd": dp.get("uoc_usd"), "la_du_phong": ph["id"]})
+            v.luu()
+    v.cap_nhat_phan(ph, chuyen_du_phong=ma)
+    return True
+
+
 def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float) -> float:
     """Một lượt actor quét bài của một phần. -> USD theo sổ của phần."""
     import quet_lon
@@ -840,6 +937,14 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
         for nid, dong in kq.items():
             if not dong:
                 loi_nguon[nid] = A._che_token(str(loi))[:200]
+    # Actor hồ sơ Threads hỏng CẢ lượt (lỗi, hoặc 0 hồ sơ cho mọi tài khoản xin): giao các nguồn
+    # cho lượt dự phòng futurizerush — lỗi nguồn ghi ở lượt đó, không ghi ở đây (không thì nguồn bị
+    # đánh lỗi dù dự phòng lấy được bài). Chỉ vài tài khoản thiếu thì KHÔNG dự phòng: thường là tài
+    # khoản không có Threads / đổi tên — dự phòng mỗi ngày mất 0,137 USD vô ích.
+    if (p == "threads" and ph.get("du_phong") and not items
+            and getattr(loi, "ma", "") not in ("HET_TIEN_THANG", "DA_HUY")
+            and _du_phong_threads(v, ph, ds)):
+        loi_nguon = {}
     _ghi_phan(v, p, ph, kq, loi_nguon)
     tien = TDA.tien_phan(p, ph, items, meta)
     if loi is not None and meta.get("khong_kiem_duoc"):
@@ -857,7 +962,9 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
 # dõi thành ĐỀ XUẤT trên dashboard. Tiền: run id vào phần "tu_khoa" của việc → chốt chung lượt.
 # Threads (16/10/2026): cùng bộ tìm `_FETCH["threads"]`, đứng cuối (phí khởi động cao nhất); mỗi
 # từ khoá actor lấy ≥ 10 bài nên lượt chỉ tìm `so_bai // 10` từ ĐẦU (≥ 1) — tổng bài ≤ số bài đặt,
-# ước tính (n × giá + phí khởi động) × 1,3 như nền tảng khác (`_tu_cho`).
+# ước tính (n × giá + phí khởi động) × 1,3 như nền tảng khác (`_tu_cho`). Từ 17/10/2026 thêm ĐƯỜNG 2
+# (`_FETCH["threads_2"]`, scrapersdelight, `_tim_threads_2`): chạy trước đường 1, mọi từ khoá,
+# phễu + mốc + tiền riêng, gộp bài và bỏ trùng theo mã bài (`_bo_trung_duong_2`).
 TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram", "threads", "web")
 #: Threads = `apify_tool._UNIT_COST` / `_START_COST` (4 GB × 0,02 USD, gói FREE).
 # TikTok từ 16/10/2026: TikTok API, tính theo YÊU CẦU (0,003 USD — giá thật đo 17/10 — mỗi trang
@@ -1081,6 +1188,46 @@ def tk_co_bat(du_an: dict) -> bool:
         or (cau_hinh(du_an, "tu_khoa", "facebook")["duong2"]["bat"] and bool(tu_fb_duong2(du_an)))
 
 
+def cau_hinh_th2(du_an: dict) -> dict:
+    """Cấu hình HIỆU LỰC của đường 2 Threads (`du_an.cau_hinh.tu_khoa.threads.duong2`).
+
+    Chỉ chạy khi Threads tìm theo từ khoá đang bật cho dự án (`cau_hinh(..., "threads")` — công
+    tắc tổng `tk_bat` vẫn thắng). Thiếu `bat` thì BẬT (chủ dự án duyệt 17/10/2026); như mọi khoá
+    JSONB khác, chỉ `bat` đúng bằng True mới là bật — tắt: `"bat": false`. Số rác/âm → mặc định;
+    `so_bai` 0 = tắt; `so_luot` kẹp 1–5 (giới hạn của actor)."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    nh = goc.get("tu_khoa") if isinstance(goc.get("tu_khoa"), dict) else {}
+    th = nh.get("threads") if isinstance(nh.get("threads"), dict) else {}
+    x = th.get("duong2") if isinstance(th.get("duong2"), dict) else {}
+    so = _so_rieng(x.get("so_bai"), 0, SO_TOI_DA, TH2_SO_BAI)
+    # `bat_rieng`: công tắc của RIÊNG đường 2 (trang Ngân sách cộng đường 2 khi bật Threads).
+    rieng = x.get("bat", True) is True and so > 0
+    return {"bat": cau_hinh(du_an, "tu_khoa", "threads")["bat"] and rieng, "bat_rieng": rieng,
+            "so_bai": so,
+            "so_bai_moi_tu": _so_rieng(x.get("so_bai_moi_tu"), 1, SO_TOI_DA, TH2_MOI_TU),
+            "so_luot": _so_rieng(x.get("so_luot"), 1, 5, TH2_LUOT)}
+
+
+def _tu_th2(tu: list[str]) -> list[str]:
+    """Từ khoá đường 2 gửi actor: MỌI từ khoá của dự án (≤ `TK_TOI_DA_TU`). Khác đường 1 (chỉ
+    `so_bai // 10` từ đầu): actor tính tiền theo bài TRẢ VỀ, từ khoá không ra bài không tốn đồng nào
+    (đo 17/10: 21 từ, 19 từ 0 bài, cả run 0,015 USD)."""
+    return list(tu[:TK_TOI_DA_TU])
+
+
+def uoc_th2(c2: dict, tu: list[str], moc: dict | None = None) -> float:
+    """USD một lượt đường 2: số bài × 0,001 × hệ số ước tính; 0 khi tắt / không có từ khoá. Không
+    `moc`: TỐI ĐA = trần bài min(`so_bai`, `so_bai_moi_tu` × số từ) — bản sao
+    `dashboard.chi_phi.uoc_th2`; có `moc` (sổ mốc `threads_2`): theo sản lượng lượt trước."""
+    q = _tu_th2(tu)
+    if not c2.get("bat") or not q:
+        return 0.0
+    n = min(c2["so_bai"], c2["so_bai_moi_tu"] * len(q))
+    if moc is not None:
+        n = san_luong_du_kien(q, c2["so_bai_moi_tu"], moc, n)[0]
+    return round(n * TH2_GIA * _HE_SO_UOC, 4)
+
+
 def _fb_toi_da() -> int:
     """Số bài tối đa một lượt tìm Facebook: 20 với gói Apify Free (hoặc chưa biết gói — an
     toàn), không giới hạn thêm với gói trả phí (chủ dự án 15/10: sẽ nâng gói)."""
@@ -1121,8 +1268,46 @@ def uoc_web(so_bai: int, tu: list[str], boc: int = WEB_BOC_MAC_DINH) -> float:
     return W.uoc_tu_khoa(tu, so_bai, boc)
 
 
+def _so_ve(v, md: int) -> int:
+    """Số bài đã về của một từ khoá trong sổ mốc; rác/âm/thiếu → `md` (coi như chưa đo)."""
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else md
+
+
+def san_luong_du_kien(q: list[str], moi_tu: int, moc: dict | None,
+                      tran: int) -> tuple[int, str]:
+    """Số bài Threads DỰ KIẾN actor trả (và tính tiền) lượt này. -> (số bài, lý do).
+
+    Vì sao (phễu lượt 11, 17/10/2026): ước tính cũ coi MỖI từ khoá về đủ trần (`max_posts` 10) nên
+    21 từ khoá ≈ 0,79 USD và Threads bị "co còn 15/21 từ khoá × 10 bài (ước 0,59 USD)" — trong khi
+    không đăng nhập chỉ "hapas" và "túi hapas" ra bài (19 cụm 0 bài, đo 17/10). Nay theo SẢN LƯỢNG
+    THẬT của lượt trước trong sổ mốc (`.moc-tu-khoa.json`, ghi ở `_tim_tu_khoa`):
+      • có `ve_tu` (bài về TỪNG từ khoá): Σ min(trần mỗi từ, số đã về); từ khoá mới chưa đo thì
+        tính đủ trần mỗi từ;
+      • chỉ có `ve` (sổ ghi trước 17/10): tổng bài lượt trước;
+      • chưa có gì: trần (như cũ).
+    rồi × `TH_HE_SO_SAN_LUONG` (bài về thất thường theo ngày), không dưới `TH_TOI_THIEU_BAI`, không
+    quá `tran`. Ước tính thấp KHÔNG nới tiền thật: trần USD gửi Apify vẫn là phần ngân sách còn lại
+    (`apify_tool._fetch_threads(tran_usd=…)`, `maxItems` của đường 2) — lượt bất ngờ nhiều bài thì
+    dừng ở trần đó và giữ bài đã trả tiền."""
+    moc = moc if isinstance(moc, dict) else {}
+    ve_tu = moc.get("ve_tu")
+    if isinstance(ve_tu, dict) and ve_tu:
+        tong = sum(min(moi_tu, _so_ve(ve_tu.get(A._norm(" ".join(str(t).split()))), moi_tu))
+                   for t in q)
+        ly = "theo bài về từng từ khoá lượt trước"
+    elif _so_ve(moc.get("ve"), -1) >= 0:
+        tong, ly = moc["ve"], "theo tổng bài lượt trước"
+    else:
+        return tran, f"chưa có sản lượng lượt trước — tính trần {tran} bài"
+    n = min(tran, max(TH_TOI_THIEU_BAI, math.ceil(tong * TH_HE_SO_SAN_LUONG)))
+    return n, f"{ly}: {tong} bài → dự kiến {n}/{tran}"
+
+
 def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU,
-                         fb_toi_da: int = TK_FB_TOI_DA) -> float:
+                         fb_toi_da: int = TK_FB_TOI_DA, moc: dict | None = None) -> float:
+    """USD một lượt tìm của nền tảng `p`. Threads + `moc` (sổ mốc của nền tảng, 17/10/2026):
+    số bài theo sản lượng lượt trước (`san_luong_du_kien`); không `moc` = mức TỐI ĐA theo cấu
+    hình (dashboard dùng — bản sao `dashboard.chi_phi.uoc_tk_nen_tang`)."""
     if p == "web":
         return uoc_web(so_bai, tu)
     q = _tu_cho(p, tu, so_tu, so_bai)
@@ -1141,23 +1326,33 @@ def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_
                      * _HE_SO_UOC, 4)
     n = (min(so_bai, fb_toi_da) if p == "facebook"
          else max(so_bai, TH_TOI_THIEU_BAI) if p == "threads" else so_bai)
+    if p == "threads" and moc is not None:
+        n = san_luong_du_kien(q, max(TH_TOI_THIEU_BAI, so_bai // len(q)), moc, n)[0]
     return round((n * _TK_GIA[p] + _TK_KHOI.get(p, 0.0)) * _HE_SO_UOC, 4)
 
 
 def uoc_tu_khoa(so_bai: int, tu: list[str]) -> float:
-    return round(sum(uoc_tu_khoa_nen_tang(p, so_bai, tu) for p in TK_NEN_TANG), 4)
+    """Mọi nền tảng cùng số bài; Threads gồm đường 2 theo mặc định (`TH2_*`, 17/10/2026)."""
+    th2 = {"bat": True, "so_bai": TH2_SO_BAI, "so_bai_moi_tu": TH2_MOI_TU, "so_luot": TH2_LUOT}
+    return round(sum(uoc_tu_khoa_nen_tang(p, so_bai, tu) for p in TK_NEN_TANG)
+                 + (uoc_th2(th2, tu) if so_bai > 0 else 0.0), 4)
 
 
-def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA) -> float:
-    """USD tối đa một lượt tìm theo từ khoá với cấu hình hiệu lực từng nền tảng."""
+def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA,
+                      moc: dict | None = None) -> float:
+    """USD tối đa một lượt tìm theo từ khoá với cấu hình hiệu lực từng nền tảng (Threads: cả
+    đường 2 khi bật — `cau_hinh_th2`). `moc` = sổ mốc của dự án (`doc_moc_tk`): Threads hai đường
+    tính theo sản lượng lượt trước thay vì trần (`san_luong_du_kien`)."""
     tu = tu_tim(du_an)
-    tong = 0.0
+    m = moc if isinstance(moc, dict) else {}
+    tong = uoc_th2(cau_hinh_th2(du_an), tu, m.get(TH2_KHOA))
     for p in TK_NEN_TANG:
         c = cau_hinh(du_an, "tu_khoa", p)
         if c["bat"] and p == "web":
             tong += uoc_web(c["so_bai"], tu, c["boc"])
         elif c["bat"]:
-            tong += uoc_tu_khoa_nen_tang(p, c["so_bai"], tu, c["so_tu"], fb_toi_da)
+            tong += uoc_tu_khoa_nen_tang(p, c["so_bai"], tu, c["so_tu"], fb_toi_da,
+                                         moc=m.get(p) if p == "threads" else None)
         if p == "facebook" and c["duong2"]["bat"]:
             # Đường 2 (17/10/2026) tính TỐI ĐA mỗi lượt dù nhịp `gio` có thể bỏ lượt — giữ chỗ dư.
             tong += uoc_fb_duong2(len(tu_fb_duong2(du_an, tu)), c["duong2"]["so_bai_moi_tu"])
@@ -1343,15 +1538,36 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 _bo_qua_tk(v, tk, p, "THIEU_KEY" if p == "youtube" else "TAT_CONSOLE", ly_tat,
                            ghi=p != "youtube")
                 continue
+            if p == "threads":
+                # Đường 2 chạy TRƯỚC đường 1 (17/10/2026): rẻ (0,001 USD/bài, không phí khởi
+                # động) mà phủ bài nổi — ngân sách/giờ chật thì đường đắt (futurizerush, 0,08 USD
+                # khởi động) là đường bị co/bỏ, không phải đường rẻ. Bài đường 2 vào `hits` ngay
+                # (gắn `_duong` = 2) để mọi nhánh `continue` của đường 1 bên dưới vẫn giữ chúng;
+                # đường 1 về thì bài trùng mã được bỏ khỏi `hits` (`_bo_trung_duong_2`).
+                tien2, hits2 = _tim_threads_2(v, du_an, luot, tu, bay_gio, moc_cu, moc_moi,
+                                              min(con, _con_viec(v)), han, tk, tu_pv)
+                con = max(0.0, con - tien2)
+                tk["usd"] += tien2
+                hits.extend(hits2)
+            # Threads (17/10/2026): ước tính theo SẢN LƯỢNG THẬT lượt trước (sổ mốc), không còn giả
+            # định mỗi từ khoá đủ 10 bài — `san_luong_du_kien`. Tiền thật vẫn chặn ở phần còn lại
+            # (`them["tran_usd"]` bên dưới).
+            moc_th = (moc_cu.get(p) if isinstance(moc_cu.get(p), dict) else {}) \
+                if p == "threads" else None
             uoc = (uoc_web(so_bai, tu, cfg[p]["boc"]) if p == "web"
-                   else uoc_tu_khoa_nen_tang(p, so_bai, tu, cfg[p]["so_tu"], fb_toi_da))
+                   else uoc_tu_khoa_nen_tang(p, so_bai, tu, cfg[p]["so_tu"], fb_toi_da,
+                                             moc=moc_th))
             if p == "web":
                 # Trần trang dự phòng là TRẦN, không phải tiền chắc tiêu: chỉ cần đủ cho phần
                 # tìm Google; phần đọc dự phòng tự co theo phần còn lại (`nguon_web.thu_thap`).
                 uoc = uoc_web(so_bai, tu, 0)
             co = None
             if p == "threads" and uoc > min(con, _con_viec(v)) + 1e-9:
-                co = _co_threads(tu, so_bai, min(con, _con_viec(v)))
+                # Thứ tự co khi chật (17/10/2026): đường 2 (rẻ) đã chạy ở trên và chỉ lấy phần của
+                # nó; đường 1 (phí khởi động 0,08) co về số từ khoá ĐẦU vừa phần còn lại — từ khoá
+                # đứng đầu là từ chính của dự án ("hapas"), cũng là từ ra bài nhiều nhất. Ước tính
+                # theo sản lượng nên từ khoá về 0 bài lượt trước không làm co oan.
+                co = _co_threads(tu, so_bai, min(con, _con_viec(v)), moc_th)
                 if co:
                     q, so_bai, uoc = co
                     tk["ghi_chu"].append(
@@ -1406,6 +1622,12 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # Review 16/10: chuỗi dự phòng (tính tiền theo VIDEO) chỉ được tiêu phần ngân
                 # sách còn lại sau khi trừ ước tính API — không chỉ trần console.
                 them["tran_du_phong"] = round(max(0.0, min(con, _con_viec(v)) - uoc), 2)
+            if p == "threads":
+                # Ước tính nay theo sản lượng (thấp hơn trần cũ): trần USD của run = phần ngân
+                # sách còn lại (≤ trần console) — một lượt bất ngờ nhiều bài dừng ở đó, giữ bài
+                # đã trả tiền, không tiêu quá phần tháng/việc còn lại.
+                them["tran_usd"] = math.floor(min(A._tran_nen_tang(p, nen=True)[1],
+                                                  min(con, _con_viec(v))) * 100) / 100
             A._NEN_TANG.set(p)
             A._HAN_CHOT.set(han)
             A._KHI_CO_RUN.set(lambda run, meta, p=p: _them_phan_tk(v, {
@@ -1479,6 +1701,12 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 continue
             ph_p = tk["pheu"][p] = _pheu_moi(ngay, ly_cs)
             ph_p.update(ve=len(got), xin=lim, xin_ly_do=ly_xin)
+            if p == "threads":
+                # Phễu nói ước tính dựa vào đâu (sản lượng lượt trước hay trần) — đối chiếu "co còn".
+                ph_p["xin_ly_do"] = (f"{ly_xin}; ước tính {_usd(uoc)} USD, " + san_luong_du_kien(
+                    q, max(TH_TOI_THIEU_BAI, so_bai // len(q)), moc_th,
+                    max(so_bai, TH_TOI_THIEU_BAI))[1])
+                _bo_trung_duong_2(hits, got, tk)
             if loi_tu:
                 # Có bài nhưng vài từ khoá hỏng: phễu nói từ nào, vì sao (mã → nhãn ngắn).
                 ph_p["loi_mot_phan"] = "; ".join(
@@ -1504,6 +1732,11 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                               "luot": luot, "xin": lim, "ve": ve_thuong}
                 if xoay is not None:
                     moc_moi[p]["xoay"] = xoay
+                if p == "threads":
+                    # Bài về TỪNG từ khoá (futurizerush `search_keyword`) — ước tính lượt sau theo
+                    # sản lượng thật (`san_luong_du_kien`). Từ khoá gửi mà 0 bài ghi 0: lượt sau
+                    # không tính nó đủ trần nữa.
+                    moc_moi[p]["ve_tu"] = _dem_ve_tu(q_gui, got, "search_keyword")
         tk["lay"] = len(hits) + sum(len(x[0]) for x in web_cho)
         if hits:
             _tach_va_giu(du_an, luot, hits, tu, han, tk)
@@ -1570,14 +1803,16 @@ def _bo_qua_tk(v, tk: dict, p: str, ma: str, ly: str, chi_tiet: str = "",
                       "ma": ma, "usd_so": 0.0, "ly_do": ly[:200]})
 
 
-def _co_threads(tu: list[str], so_bai: int, con: float) -> tuple[list[str], int, float] | None:
+def _co_threads(tu: list[str], so_bai: int, con: float,
+                moc: dict | None = None) -> tuple[list[str], int, float] | None:
     """Threads không đủ tiền cho số bài cấu hình: co về số từ khoá ĐẦU nhiều nhất còn vừa phần
     còn lại (mỗi từ `TH_TOI_THIEU_BAI` bài — mức actor tính tối thiểu) thay vì bỏ cả nền tảng.
     Phí khởi động 0,08 USD/lượt là cố định nên tìm 1 từ (từ khoá chính đứng đầu) vẫn đáng.
+    `moc` (17/10/2026): ước tính theo sản lượng lượt trước (`san_luong_du_kien`), như lượt chạy.
     -> (từ khoá, số bài, ước tính) hoặc None khi 1 từ cũng không vừa."""
     for n in range(min(len(_tu_cho("threads", tu, so_bai=so_bai)), TH_TOI_DA_MOI_LUOT), 0, -1):
         sb = n * TH_TOI_THIEU_BAI
-        u = uoc_tu_khoa_nen_tang("threads", sb, tu)
+        u = uoc_tu_khoa_nen_tang("threads", sb, tu, moc=moc)
         if u <= con + 1e-9:
             return _tu_cho("threads", tu, so_bai=sb), sb, u
     return None
@@ -1715,6 +1950,168 @@ def _tim_fb_duong2(v, du_an: dict, luot: int, c2: dict, tu: list[str], con: floa
         moc_moi[TK_FB2] = {"luc": bay_gio.isoformat(timespec="seconds"), "dau": dau, "luot": luot,
                            "xin": per, "ve": len(rows)}
     return tien
+
+
+def _tim_threads_2(v, du_an: dict, luot: int, tu: list[str], bay_gio: datetime.datetime,
+                   moc_cu: dict, moc_moi: dict, con: float, han: float, tk: dict,
+                   tu_pv: datetime.datetime) -> tuple[float, list]:
+    """Đường 2 của Threads trong lượt tìm theo từ khoá. -> (USD theo sổ, [(dòng, ngày)] trong phạm
+    vi theo dõi, đã gắn `platform` = "threads" và `_duong` = 2).
+
+    KHÔNG BAO GIỜ ném lỗi (trừ MatQuyen): đường 2 hỏng thì đường 1 vẫn chạy như trước. Phễu riêng
+    `tk["pheu"]["threads_2"]` (sổ việc giữ cùng `pheu_tu_khoa`), mốc riêng `threads_2` trong sổ mốc
+    (cửa sổ ngày, sản lượng, chuỗi lượt về 0 bài). Bot khởi động lại giữa đường 2 thì không gửi lại
+    (như mọi nền tảng — tiền vẫn chốt theo run id). Bộ thử thay `A._FETCH` mà không có bộ tìm đường
+    2 thì bỏ qua lặng lẽ (máy chạy thật luôn có — `apify_tool._FETCH`)."""
+    fn = A._FETCH.get(TH2_KHOA)
+    c2 = cau_hinh_th2(du_an)
+    q = _tu_th2(tu)
+    if fn is None or not c2["bat"] or not q:
+        return 0.0, []
+    phan = _phan_tk(v)
+    if any(ph.get("nen_tang") == TH2_KHOA and ph.get("loai") == "moc" for ph in phan):
+        return 0.0, []                                   # đã xong trước khi bot khởi động lại
+    if any(ph.get("nen_tang") == TH2_KHOA and ph.get("run_id") for ph in phan):
+        tk["ghi_chu"].append("tìm Threads đường 2: bot khởi động lại giữa lượt tìm — không gửi lại")
+        _them_phan_tk(v, {"id": f"tk-{TH2_KHOA}", "loai": "moc", "nen_tang": TH2_KHOA,
+                          "trang_thai": "loi", "ma": "KHONG_KIEM_DUOC", "usd_so": 0.0})
+        return 0.0, []
+    moc = moc_cu.get(TH2_KHOA) if isinstance(moc_cu.get(TH2_KHOA), dict) else {}
+    moi_tu = c2["so_bai_moi_tu"]
+    tran_bai = min(c2["so_bai"], moi_tu * len(q))
+    # Dấu gồm cả trần mỗi từ + số lượt: đổi chúng là đổi tập bài actor trả → lùi cửa sổ tối đa.
+    dau = dau_tk([*q, f"moi_tu:{moi_tu}", f"luot:{c2['so_luot']}"], tran_bai)
+    d_from, ngay, ly_cs = cua_so_tk(moc if moc.get("luc") else None, dau, bay_gio)
+    f2 = tk["pheu"][TH2_KHOA] = {**_pheu_moi(ngay, ly_cs), "actor": A._ACTORS[TH2_KHOA],
+                                 "trung_duong_1": 0, "usd": 0.0}
+    # Trần bài lượt này không vượt phần ngân sách còn lại: actor tính đúng theo bài nên `maxItems`
+    # là trần TIỀN cứng — kể cả khi `_run_actor` kẹp trần USD gửi Apify lên tối thiểu 0,1.
+    lim = (tran_bai if con >= tran_bai * TH2_GIA * _HE_SO_UOC
+           else int(con / (TH2_GIA * _HE_SO_UOC) + 1e-9))
+    het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
+    if het_gio or lim < min(TH_TOI_THIEU_BAI, tran_bai):
+        ly = "hết giờ" if het_gio else "hết ngân sách"
+        ct = "" if het_gio else (f"còn {_usd3(con)} USD, chưa đủ "
+                                 f"{min(TH_TOI_THIEU_BAI, tran_bai)} bài × {_usd3(TH2_GIA)} USD")
+        tk["ghi_chu"].append(f"tìm Threads đường 2: bỏ qua ({ly})" + (f" — {ct}" if ct else ""))
+        f2["bo_qua"] = f"{ly} — {ct}" if ct else ly
+        _them_phan_tk(v, {"id": f"tk-{TH2_KHOA}", "loai": "moc", "nen_tang": TH2_KHOA,
+                          "trang_thai": "loi", "ma": "QUA_GIO" if het_gio else "NGAN_SACH",
+                          "usd_so": 0.0, "ly_do": f2["bo_qua"][:200]})
+        return 0.0, []
+    f2.update(xin=lim, xin_ly_do=(f"trần {tran_bai} bài" if lim == tran_bai
+                                  else f"co còn {lim}/{tran_bai} bài theo ngân sách còn "
+                                       f"{_usd3(con)} USD")
+              + "; " + san_luong_du_kien(q, moi_tu, moc, lim)[1])
+    tran_usd = round(min(A._tran_nen_tang("threads", nen=True)[1],
+                         max(A._TRAN_USD_KHOANG[0], lim * TH2_GIA * _HE_SO_TRAN)), 2)
+    A._NEN_TANG.set("threads")
+    A._HAN_CHOT.set(han)
+    A._KHI_CO_RUN.set(lambda run, meta: _them_phan_tk(v, {
+        "id": f"tk-{TH2_KHOA}-{run.get('id')}", "nen_tang": TH2_KHOA, "run_id": run.get("id"),
+        "actor": (meta or {}).get("actor"), "trang_thai": "dang_chay"}))
+    got: list = []
+    loi = None
+    ma_loi = ""
+    try:
+        got = fn(q, lim, "VN", d_from, bay_gio, moi_tu=moi_tu, so_luot=c2["so_luot"],
+                 tran_usd=tran_usd) or []
+    except Exception as e:
+        if type(e).__name__ == "MatQuyen":
+            raise
+        ma_loi, loi = _loi_tim(getattr(e, "ma", "") or type(e).__name__, str(e))
+    finally:
+        A._KHI_CO_RUN.set(None)
+    tien = round(len(got) * TH2_GIA, 4)
+    for ph in _phan_tk(v):
+        if ph.get("nen_tang") == TH2_KHOA and ph.get("run_id") \
+                and ph.get("trang_thai") == "dang_chay":
+            v.cap_nhat_phan(ph, trang_thai="xong" if loi is None else "loi")
+    _them_phan_tk(v, {"id": f"tk-{TH2_KHOA}", "loai": "moc", "nen_tang": TH2_KHOA,
+                      "trang_thai": "xong" if loi is None else "loi", "usd_so": tien,
+                      "so_item": len(got),
+                      **({"ma": ma_loi, "ly_do": loi[:200]} if loi is not None else {}),
+                      "cua_so": {"tu": d_from.isoformat(timespec="minutes"), "ngay": ngay,
+                                 "ly_do": ly_cs}})
+    f2.update(ve=len(got), usd=tien)
+    # Chuỗi lượt về 0 bài (cảnh báo nên tắt): lỗi của actor cũng là "về 0"; lỗi không do actor
+    # (`_TH2_LOI_KHONG_DEM`) giữ nguyên chuỗi.
+    rong_cu = moc.get("rong_lien") if isinstance(moc.get("rong_lien"), int) else 0
+    rong = rong_cu
+    if not got and ma_loi not in _TH2_LOI_KHONG_DEM:
+        rong += 1
+    elif got:
+        rong = 0
+    f2["rong_lien"] = rong
+    if loi is not None:
+        f2.update(loi=loi, ma_loi=ma_loi)
+        tk["ghi_chu"].append(f"tìm Threads đường 2: {loi}")
+    if rong >= TH2_RONG_CANH_BAO:
+        f2["canh_bao"] = (f"đường 2 ({A._ACTORS[TH2_KHOA]}) về 0 bài {rong} lượt liền — actor "
+                          "có thể hỏng hoặc bị Threads chặn; xem log run trên Apify, nếu vẫn 0 thì "
+                          "tắt: du_an.cau_hinh.tu_khoa.threads.duong2.bat = false")
+        tk["ghi_chu"].append(f"tìm Threads: CẢNH BÁO {f2['canh_bao']}")
+    ra = []
+    for d, dt in got:
+        if dt and tu_pv <= dt <= bay_gio + datetime.timedelta(hours=1) and d.get("link"):
+            d["platform"], d["_duong"] = "threads", 2
+            ra.append((d, dt))
+            f2["pham_vi"] += 1
+            f2["cua_so"] += d_from <= dt
+        else:
+            f2["ngoai_pham_vi"] += 1
+    if got:
+        # Như đường 1: mốc chỉ dời khi về ≥ 1 bài và ghi SAU khi bài vào kho (`ghi_moc_tk` cuối
+        # `_tim_tu_khoa`). `ve_tu`: sản lượng từng từ khoá — ước tính lượt sau theo số thật.
+        moc_moi[TH2_KHOA] = {"luc": bay_gio.isoformat(timespec="seconds"), "dau": dau,
+                             "luot": luot, "xin": lim, "ve": len(got),
+                             "ve_tu": _dem_ve_tu(q, got, "searchKeyword"), "rong_lien": 0}
+    elif rong != rong_cu:
+        # 0 bài: KHÔNG dời mốc cửa sổ (giữ `luc`/`dau` cũ), chỉ ghi chuỗi lượt về 0.
+        moc_moi[TH2_KHOA] = {**moc, "luot": luot, "rong_lien": rong}
+    return tien, ra
+
+
+def _dem_ve_tu(q: list[str], got: list, truong: str) -> dict[str, int] | None:
+    """{từ khoá chuẩn hoá: số bài về} của một lượt Threads — mọi từ khoá ĐÃ GỬI đều có mặt (0 bài
+    ghi 0, để lượt sau không coi nó là "chưa đo" và tính đủ trần). Bài không gắn được từ khoá
+    (actor đổi tên trường `truong`) → None: ước tính lùi về tổng `ve`, không đoán sai từng từ."""
+    def chuan(s) -> str:
+        return A._norm(" ".join(str(s or "").split()))
+    ra = {chuan(t): 0 for t in q if chuan(t)}
+    for d, _ in got:
+        k = chuan((d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get(truong))
+        if not k:
+            return None
+        ra[k] = ra.get(k, 0) + 1
+    return ra
+
+
+def _bo_trung_duong_2(hits: list, got: list, tk: dict) -> None:
+    """Bỏ khỏi `hits` bài đường 2 mà đường 1 cũng về (cùng MÃ bài trong link). Giữ bản đường 1:
+    futurizerush có follower + lượt xem, scrapersdelight không. Khoá kho (băm link) của hai bản
+    trùng nhau (đo 17/10: 14/14 link trùng từng ký tự) — bỏ ở đây để phễu đếm đúng bài RIÊNG của
+    đường 2, không để `tach_da_biet` đếm thành "trùng"."""
+    ma1 = {A.ma_bai_threads(d.get("link") or "") for d, _ in got}
+    ma1.discard("")
+    if not ma1:
+        return
+    f2 = tk["pheu"].get(TH2_KHOA)
+    giu = []
+    for d, dt in hits:
+        if d.get("_duong") == 2 and A.ma_bai_threads(d.get("link") or "") in ma1:
+            if f2 is not None:
+                f2["trung_duong_1"] += 1
+            continue
+        giu.append((d, dt))
+    hits[:] = giu
+
+
+def _dem_duong_2(tk: dict, truong: str, n: int = 1) -> None:
+    """Cộng `n` vào trường của phễu đường 2 (bài RIÊNG đường 2 qua các bước lọc sau)."""
+    f2 = tk.get("pheu", {}).get(TH2_KHOA)
+    if f2 is not None and n:
+        f2[truong] = int(f2.get(truong) or 0) + n
 
 
 def _them_luot_moi(v, ma: str, luot: int, q: list[str], got: list, moc_cu: dict,
@@ -2392,6 +2789,9 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         tk["cap_nhat"] = tk.get("cap_nhat", 0) + K.cap_nhat_so_lieu(du_an["ma"], luot, cap_nhat)
         for r in cap_nhat:
             tk["pheu"].setdefault(r["nen_tang"], _pheu_moi(0, ""))["cap_nhat"] += 1
+        # Phễu đường 2 Threads: bài RIÊNG của đường 2 đã có trong kho (chỉ cập nhật số liệu).
+        k2 = {_khoa_bai("threads", d["link"]) for d, _ in hits if d.get("_duong") == 2}
+        _dem_duong_2(tk, "cap_nhat", sum(1 for r in cap_nhat if r["khoa"] in k2))
     tu_pv = datetime.datetime.fromisoformat((tk.get("pham_vi") or {}).get("tu")
                                             or datetime.datetime.now(_VN).isoformat())
     dau = TDA.dau_loai(du_an, tu)
@@ -2404,6 +2804,8 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
                 "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")})
             if k in da_loai:
                 tk["pheu"].setdefault(d["platform"], _pheu_moi(0, ""))["da_loai_truoc"] += 1
+                if d.get("_duong") == 2:
+                    _dem_duong_2(tk, "loai")
             else:
                 con.append((d, dt))
         hits_moi = con
@@ -2453,6 +2855,9 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     # Bài bị loại lượt này → sổ "đã loại" (`theo_doi_api.ghi_loai`, review 16/10): trong phạm vi
     # 30–92 ngày cùng bài về mỗi lượt, không gửi AI xét lại (tốn + kết quả có thể đổi).
     bi_loai = tk.setdefault("_bi_loai", [])
+    # Phễu đường 2 Threads: bài riêng của đường 2 vào bước này → giữ / loại (gộp mọi lý do loại;
+    # lý do chi tiết nằm ở phễu Threads chung).
+    n2_vao = sum(1 for d, _ in hits if d.get("_duong") == 2)
     cho, thay = [], set()
     for d, dt in hits:
         goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
@@ -2475,6 +2880,7 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         d["_thi_truong"] = A._thi_truong(d, tu)
         cho.append((d, dt))
     if not cho:
+        _dem_duong_2(tk, "loai", n2_vao)
         return
     han_ai = time.monotonic() + max(0.0, min(150.0, han - time.monotonic() - 30))
     px_all, tt = A._phan_xu_ai(cho, tu, du_an.get("boi_canh") or du_an["ten"],
@@ -2517,6 +2923,10 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         })
         ban.append((d, dt))
     tk["giu"] = len(rows)
+    n2_giu = sum(1 for d, _ in ban if d.get("_duong") == 2)
+    _dem_duong_2(tk, "giu", n2_giu)
+    _dem_duong_2(tk, "moi", n2_giu)          # bài vào bước này là bài CHƯA có trong kho
+    _dem_duong_2(tk, "loai", n2_vao - n2_giu)
     if rows:
         # Ghi theo từng nền tảng để phễu biết bài MỚI của nền tảng nào (upsert theo khoá bài).
         theo_p: dict[str, list[dict]] = {}
@@ -2651,9 +3061,28 @@ def _cau_tk(tk: dict) -> list[str]:
     # Ghi chú (bỏ qua / lỗi / co ngân sách) đứng TRƯỚC các dòng phễu dài: `luot_quet.ghi_chu` có
     # trần (`lang_nghe_db.GHI_CHU_TOI_DA`), phần mất (nếu có) phải là chi tiết phễu, không phải lý
     # do. Phễu bỏ qua / lỗi đã có câu "tìm <nền tảng>: …" trong ghi chú — không lặp dòng phễu rỗng.
+    f2 = pheu.get(TH2_KHOA)
+    th2 = ([_cau_duong_2(f2)] if isinstance(f2, dict) and not f2.get("bo_qua")
+           and not f2.get("loi") else [])
     return [cau, *(tk.get("ghi_chu") or []),
-            *(_cau_pheu(p, pheu[p]) for p in TK_NEN_TANG
-              if p in pheu and not pheu[p].get("bo_qua") and not pheu[p].get("loi"))]
+            *(x for p in TK_NEN_TANG for x in (
+                ([_cau_pheu(p, pheu[p])] if p in pheu and not pheu[p].get("bo_qua")
+                 and not pheu[p].get("loi") else []) + (th2 if p == "threads" else [])))]
+
+
+def _cau_duong_2(f: dict) -> str:
+    """Dòng phễu RIÊNG của đường 2 Threads (scrapersdelight), ngay sau dòng phễu Threads chung:
+    về → trong phạm vi → trùng đường 1 (bỏ, giữ bản futurizerush) → bài riêng: cập nhật bài đã có /
+    giữ mới / loại. Cảnh báo "về 0 bài N lượt liền" nằm ở ghi chú (đứng trước, không bị cắt)."""
+    rieng = f.get("pham_vi", 0) - f.get("trung_duong_1", 0)
+    usd = _usd3(f.get("usd") or 0)
+    return (f"phễu tìm Threads đường 2 (scrapersdelight, xin {f.get('ngay', 0)} ngày, "
+            f"{f.get('ly_do') or '?'}; {f.get('xin_ly_do') or '?'}): về {f.get('ve', 0)} → trong "
+            f"phạm vi {f.get('pham_vi', 0)} (ngoài phạm vi {f.get('ngoai_pham_vi', 0)}) → trùng "
+            f"đường 1 {f.get('trung_duong_1', 0)} → riêng {rieng}: cập nhật "
+            f"{f.get('cap_nhat', 0)} bài đã có, giữ {f.get('giu', 0)} mới, loại "
+            f"{f.get('loai', 0)}; {usd} USD"
+            + (f"; {f.get('rong_lien')} lượt liền về 0 bài" if f.get("rong_lien") else ""))
 
 
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
@@ -3142,6 +3571,13 @@ def _chay_viec(v) -> tuple[str, str]:
         for _, ph in v.cac_phan():
             for k, x in (ph.get("loi_nguon") or {}).items():
                 loi[int(k)] = str(x)
+            if ph.get("chuyen_du_phong"):
+                # Phần hồ sơ Threads hỏng cả lượt đã giao nguồn cho phần dự phòng (17/10/2026):
+                # kết quả nguồn tính theo phần dự phòng, không đánh lỗi theo phần này.
+                ghi_chu.append(f"Threads: actor hồ sơ không trả hồ sơ nào "
+                               f"({ph.get('ma') or 'OK'}) — chạy dự phòng futurizerush cho "
+                               f"{len(ph.get('nguon') or [])} tài khoản")
+                continue
             if ph.get("trang_thai") in ("xong", "mot_phan"):
                 xong_ids.update(int(i) for i in ph.get("nguon") or [])
             elif ph.get("trang_thai") == "loi" and ph.get("ma") not in ("NGAN_SACH", "QUA_GIO"):

@@ -479,7 +479,7 @@ def test_gia_nguon_facebook_thedoor_khop_dashboard():
     assert T._uoc_phan("facebook", 6, 20) == pytest.approx((6 * 20 * 0.0025 + 0.01) * 1.3,
                                                            abs=1e-4)
     assert CP.phi_khoi_dong_ngay("facebook") == pytest.approx(0.01 * 1.3)
-    assert CP.hang_so_cho_trinh_duyet()["khoi_nguon"] == {"facebook": 0.01}
+    assert CP.hang_so_cho_trinh_duyet()["khoi_nguon"]["facebook"] == 0.01
     import tiktok_api as TT
     assert TT.CHON["facebook_theo_doi"] == {"chinh": TDA.FB_TRANG,
                                             "du_phong": ("apify~facebook-posts-scraper",)}

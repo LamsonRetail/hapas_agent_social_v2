@@ -1,0 +1,352 @@
+{
+ "_ghi_chu": "Rút từ output THẬT vòng 2 (17/10/2026, gói FREE): scrapersdelight~threads-keyword-search-scraper (run 3 từ khoá, both, 2 lượt, 30 ngày), futurizerush~meta-threads-scraper (cùng 3 từ khoá, recent, 30 ngày) và scrapersdelight~threads-profile-scraper (hồ sơ kênh nhà). Đã làm sạch: username, tên, id, mã bài, nội dung thay bằng chữ mẫu; hai bài đầu của `tim_kiem_2` là bài cả hai actor cùng bắt (`tim_kiem_1` cùng mã, link y hệt — đo thật 14/14 bài chung có link trùng từng ký tự). Tên trường, kiểu, số tương tác, ngày, bề mặt giữ nguyên.",
+ "do_that": {
+  "duong2_run_3_tu": {
+   "input": {
+    "keywords": [
+     "hapas",
+     "túi hapas",
+     "quà tặng hapas"
+    ],
+    "searchType": "both",
+    "passesPerSurface": 2,
+    "maxPostsPerKeyword": 50,
+    "maxItems": 150,
+    "postedWithinDays": 30
+   },
+   "statusMessage": "47 post(s) delivered and charged across 2 term(s) · hapas 29, túi hapas 18",
+   "usd": 0.047,
+   "su_kien": {
+    "post-scraped": 47
+   },
+   "giay": 27.559,
+   "memoryMbytes": 512
+  },
+  "duong2_run_21_tu": {
+   "so_tu": 21,
+   "input_khac": {
+    "searchType": "both",
+    "passesPerSurface": 1,
+    "maxPostsPerKeyword": 40,
+    "maxItems": 300,
+    "postedWithinDays": 7
+   },
+   "statusMessage": "15 post(s) delivered and charged across 2 term(s) · túi hapas 12, hapas 3",
+   "usd": 0.015,
+   "su_kien": {
+    "post-scraped": 15
+   },
+   "giay": 52.009
+  },
+  "duong1_run_3_tu": {
+   "input": {
+    "mode": "search",
+    "keywords": [
+     "hapas",
+     "túi hapas",
+     "quà tặng hapas"
+    ],
+    "max_posts": 20,
+    "search_filter": "recent",
+    "start_date": "2026-09-17",
+    "end_date": "2026-10-17"
+   },
+   "usd": 0.18,
+   "su_kien": {
+    "apify-default-dataset-item": 40,
+    "apify-actor-start": 4
+   },
+   "memoryMbytes": 4096
+  },
+  "ho_so": {
+   "input": {
+    "profiles": [
+     "hapas.vn",
+     "hapas.official"
+    ],
+    "includePosts": true
+   },
+   "usd": 0.002,
+   "su_kien": {
+    "profile-scraped": 1
+   },
+   "giay": 85.527
+  }
+ },
+ "tim_kiem_1": [
+  {
+   "record_type": "post",
+   "post_url": "https://www.threads.com/@nguoi_mau_01/post/MAU2000001X",
+   "post_code": "MAU2000001X",
+   "text_content": "Review ví hapas sau 3 tháng dùng #hapas",
+   "created_at": "2026-10-12T14:30:31+00:00",
+   "created_at_timestamp": 1791815431,
+   "like_count": 138,
+   "reply_count": 33,
+   "repost_count": 6,
+   "quote_count": 0,
+   "share_count": 174,
+   "view_count": 20235,
+   "username": "nguoi_mau_01",
+   "display_name": "Người mẫu 01",
+   "followers_count": 104,
+   "profile_url": "https://www.threads.com/@nguoi_mau_01",
+   "is_reply": false,
+   "topic_tag": "",
+   "hashtags": [],
+   "search_keyword": "hapas",
+   "search_keywords": [
+    "hapas"
+   ],
+   "keyword_match": true
+  },
+  {
+   "record_type": "post",
+   "post_url": "https://www.threads.com/@nguoi_mau_02/post/MAU2000002X",
+   "post_code": "MAU2000002X",
+   "text_content": "Hapas ra mẫu mới đẹp quá trời",
+   "created_at": "2026-10-06T09:14:14+00:00",
+   "created_at_timestamp": 1791278054,
+   "like_count": 10,
+   "reply_count": 6,
+   "repost_count": 0,
+   "quote_count": 0,
+   "share_count": 1,
+   "view_count": 1419,
+   "username": "nguoi_mau_02",
+   "display_name": "Người mẫu 02",
+   "followers_count": 0,
+   "profile_url": "https://www.threads.com/@nguoi_mau_02",
+   "is_reply": false,
+   "topic_tag": "",
+   "hashtags": [],
+   "search_keyword": "túi hapas",
+   "search_keywords": [
+    "túi hapas"
+   ],
+   "keyword_match": true
+  }
+ ],
+ "tim_kiem_2": [
+  {
+   "searchKeyword": "hapas",
+   "searchSurface": "top",
+   "postId": "9000000000000000001",
+   "postCode": "MAU2000001X",
+   "postUrl": "https://www.threads.com/@nguoi_mau_01/post/MAU2000001X",
+   "text": "Review ví hapas sau 3 tháng dùng #hapas",
+   "hashtags": [
+    "hapas"
+   ],
+   "postedAt": "2026-10-12T14:30:31.000Z",
+   "likeCount": 138,
+   "replyCount": 33,
+   "repostCount": 6,
+   "quoteCount": 0,
+   "mediaType": "image",
+   "isReply": false,
+   "authorUsername": "nguoi_mau_01",
+   "authorFullName": "Người mẫu 01",
+   "authorId": "10000000001",
+   "authorProfileUrl": "https://www.threads.com/@nguoi_mau_01",
+   "authorIsVerified": false,
+   "authorIsPrivate": false
+  },
+  {
+   "searchKeyword": "hapas",
+   "searchSurface": "top",
+   "postId": "9000000000000000002",
+   "postCode": "MAU2000002X",
+   "postUrl": "https://www.threads.com/@nguoi_mau_02/post/MAU2000002X",
+   "text": "Hapas ra mẫu mới đẹp quá trời",
+   "hashtags": [],
+   "postedAt": "2026-10-06T09:14:14.000Z",
+   "likeCount": 10,
+   "replyCount": 6,
+   "repostCount": 0,
+   "quoteCount": 0,
+   "mediaType": "text",
+   "isReply": false,
+   "authorUsername": "nguoi_mau_02",
+   "authorFullName": "Người mẫu 02",
+   "authorId": "10000000002",
+   "authorProfileUrl": "https://www.threads.com/@nguoi_mau_02",
+   "authorIsVerified": false,
+   "authorIsPrivate": false
+  },
+  {
+   "searchKeyword": "hapas",
+   "searchSurface": "top",
+   "postId": "9000000000000000003",
+   "postCode": "MAU2000003X",
+   "postUrl": "https://www.threads.com/@nguoi_mau_03/post/MAU2000003X",
+   "text": "Có ai từng đổi size bên hapas chưa ạ",
+   "hashtags": [],
+   "postedAt": "2026-10-01T05:03:11.000Z",
+   "likeCount": 4159,
+   "replyCount": 109,
+   "repostCount": 312,
+   "quoteCount": 21,
+   "mediaType": "video",
+   "isReply": false,
+   "authorUsername": "nguoi_mau_03",
+   "authorFullName": "Người mẫu 03",
+   "authorId": "10000000003",
+   "authorProfileUrl": "https://www.threads.com/@nguoi_mau_03",
+   "authorIsVerified": false,
+   "authorIsPrivate": false
+  },
+  {
+   "searchKeyword": "hapas",
+   "searchSurface": "top",
+   "postId": "9000000000000000004",
+   "postCode": "MAU2000004X",
+   "postUrl": "https://www.threads.com/@nguoi_mau_04/post/MAU2000004X",
+   "text": "Hôm nay ghé cửa hàng hapas, nhân viên dễ thương",
+   "hashtags": [],
+   "postedAt": "2026-09-25T15:14:57.000Z",
+   "likeCount": 5073,
+   "replyCount": 155,
+   "repostCount": 478,
+   "quoteCount": 1,
+   "mediaType": "image",
+   "isReply": false,
+   "authorUsername": "nguoi_mau_04",
+   "authorFullName": "Người mẫu 04",
+   "authorId": "10000000004",
+   "authorProfileUrl": "https://www.threads.com/@nguoi_mau_04",
+   "authorIsVerified": false,
+   "authorIsPrivate": false
+  },
+  {
+   "searchKeyword": "hapas",
+   "searchSurface": "tags",
+   "postId": "9000000000000000005",
+   "postCode": "MAU2000005X",
+   "postUrl": "https://www.threads.com/@nguoi_mau_05/post/MAU2000005X",
+   "text": "Quà tặng hapas cho mẹ nhân 20/10",
+   "hashtags": [],
+   "postedAt": "2026-10-04T18:06:03.000Z",
+   "likeCount": 381,
+   "replyCount": 9,
+   "repostCount": 29,
+   "quoteCount": 0,
+   "mediaType": "carousel",
+   "isReply": false,
+   "authorUsername": "nguoi_mau_05",
+   "authorFullName": "Người mẫu 05",
+   "authorId": "10000000005",
+   "authorProfileUrl": "https://www.threads.com/@nguoi_mau_05",
+   "authorIsVerified": false,
+   "authorIsPrivate": false
+  },
+  {
+   "searchKeyword": "hapas",
+   "searchSurface": "top",
+   "postId": "9000000000000000006",
+   "postCode": "MAU2000006X",
+   "postUrl": "https://www.threads.com/@nguoi_mau_06/post/MAU2000006X",
+   "text": "Mọi người thấy túi hapas dạo này thế nào, đáng mua không?",
+   "hashtags": [],
+   "postedAt": "2026-10-02T15:47:16.000Z",
+   "likeCount": 803,
+   "replyCount": 20,
+   "repostCount": 0,
+   "quoteCount": 0,
+   "mediaType": "image",
+   "isReply": true,
+   "authorUsername": "nguoi_mau_06",
+   "authorFullName": "Người mẫu 06",
+   "authorId": "10000000006",
+   "authorProfileUrl": "https://www.threads.com/@nguoi_mau_06",
+   "authorIsVerified": false,
+   "authorIsPrivate": false
+  }
+ ],
+ "ho_so": [
+  {
+   "username": "kenh_mau.vn",
+   "user_id": "10000000001",
+   "full_name": "KÊNH MẪU",
+   "profile_url": "https://www.threads.com/@kenh_mau.vn",
+   "follower_count": 8434,
+   "is_verified": false,
+   "is_private": false,
+   "has_threads_profile": true,
+   "total_threads_approx": 178,
+   "recent_post_count": 4,
+   "last_post_at": "2026-10-12T15:07:20.000Z",
+   "days_since_last_post": 4,
+   "recent_posts": [
+    {
+     "post_id": "8000000000000000000",
+     "post_code": "MAUHS00000",
+     "post_url": "https://www.threads.com/@kenh_mau.vn/post/MAUHS00000",
+     "author_username": "kenh_mau.vn",
+     "text": "Bài mẫu kênh nhà #quatang",
+     "posted_at": "2026-10-12T15:07:20.000Z",
+     "like_count": 694,
+     "reply_count": 6,
+     "repost_count": 46,
+     "quote_count": 1,
+     "post_type": "carousel",
+     "counts_hidden": false,
+     "mentions": [],
+     "links": []
+    },
+    {
+     "post_id": "8000000000000000001",
+     "post_code": "MAUHS00001",
+     "post_url": "https://www.threads.com/@kenh_mau.vn/post/MAUHS00001",
+     "author_username": "kenh_mau.vn",
+     "text": "Bài mẫu 2 của kênh",
+     "posted_at": "2026-10-12T04:40:57.000Z",
+     "like_count": 68,
+     "reply_count": 6,
+     "repost_count": 2,
+     "quote_count": 0,
+     "post_type": "image",
+     "counts_hidden": false,
+     "mentions": [],
+     "links": []
+    },
+    {
+     "post_id": "8000000000000000002",
+     "post_code": "MAUHS00002",
+     "post_url": "https://www.threads.com/@kenh_mau.vn/post/MAUHS00002",
+     "author_username": "kenh_mau.vn",
+     "text": "Bài mẫu 3",
+     "posted_at": "2026-10-10T11:12:20.000Z",
+     "like_count": 271,
+     "reply_count": 2,
+     "repost_count": 35,
+     "quote_count": 1,
+     "post_type": "video",
+     "counts_hidden": false,
+     "mentions": [],
+     "links": []
+    },
+    {
+     "post_id": "8000000000000000003",
+     "post_code": "MAUHS00003",
+     "post_url": "https://www.threads.com/@kenh_mau.vn/post/MAUHS00003",
+     "author_username": "kenh_mau.vn",
+     "text": "Bài mẫu 4 BST 20/10",
+     "posted_at": "2026-10-10T09:05:33.000Z",
+     "like_count": 1689,
+     "reply_count": 27,
+     "repost_count": 272,
+     "quote_count": 5,
+     "post_type": "carousel",
+     "counts_hidden": false,
+     "mentions": [],
+     "links": []
+    }
+   ],
+   "recent_avg_likes": 680.5,
+   "recent_avg_replies": 10.25,
+   "recent_avg_reposts": 88.75,
+   "recent_engagement_rate": 0.080685
+  }
+ ]
+}
