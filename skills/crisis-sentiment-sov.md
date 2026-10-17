@@ -21,6 +21,9 @@ số, không tự đếm tay, không ước lượng "khoảng 60% tích cực".
   trên sheet. "Thảo luận" chỉ là bài + bình luận trên các bài đã quét; so sánh chỉ là 7
   ngày cuối với 7 ngày liền trước trong khoảng đã quét, không có số "tháng trước"
 - Đừng trộn hai loại số: % bài tiêu cực không phải % bình luận tiêu cực
+- Cần dashboard/Sheet thống kê (tỉ lệ theo sắc thái, nền tảng, chủ đề) từ Sheet đã xuất
+  hoặc từ dòng Mark gán nhãn: `tao_sheet_thong_ke` tự tạo Sheet mới, số do code đếm — không
+  nói không tạo được Sheet
 - Bài và phản hồi của CHÍNH thương hiệu không phải tiếng khách: tool đã loại khỏi số
   đếm và % (cột Nguồn = "thương hiệu", đếm riêng ở `cua_thuong_hieu`). Chép nguyên câu
   "N bài/phản hồi của chính thương hiệu (không tính)", không tự cộng lại

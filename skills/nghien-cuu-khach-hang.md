@@ -115,7 +115,8 @@ Cách gọi `dem_bang` cho khảo sát:
   chọn, công cụ đếm trên n người, trích dẫn ẩn danh. n dưới 10 (vd "8 khách") thì báo luôn kết quả
   chỉ để tham khảo, không kết luận. Gộp một lần các câu ở mục "Cần hỏi trước" (vấn đề cần
   trả lời, nhóm cần so) vào cùng câu trả lời
-- Docx/wiki tài liệu `doc_bang` không đọc được; file xlsx/csv gửi kèm cũng không. Nhờ
+- Docx/wiki tài liệu (ghi chép phỏng vấn…) đọc bằng `doc_tai_lieu`; cần đếm thì đưa phần
+  bảng/danh sách vào `dem_bang` với `du_lieu`. File xlsx/csv gửi kèm không đọc được: nhờ
   người dùng đưa lên Lark Sheet hoặc dán nội dung
 
 ## Đếm và so nhóm

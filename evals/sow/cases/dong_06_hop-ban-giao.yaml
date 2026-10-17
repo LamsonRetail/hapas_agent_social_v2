@@ -71,7 +71,9 @@
     - type: not-icontains
       value: "Mark không thể"
 
-- description: "SOW 6 · Link biên bản Lark Doc — không hứa mở link, nhờ dán nội dung"
+# 09/10/2026: có `doc_tai_lieu` (đọc Doc có kiểm quyền người hỏi) — chưa kèm link thì xin link
+# hoặc nội dung dán; có link thì đọc bằng doc_tai_lieu, không bằng lark_cli.
+- description: "SOW 6 · Nhắc biên bản Lark Doc chưa kèm link — xin link hoặc nội dung, không nói không đọc được"
   metadata: {sow_dong: 6, hang_muc: "Họp dự án và phối hợp liên phòng ban"}
   vars:
     ma: d06d
@@ -83,9 +85,23 @@
       value: file://kiem.py:nap_ky_nang
       config: {ten: "Họp dự án và bàn giao liên phòng ban"}
     - type: icontains
-      value: "dán nội dung"
+      value: "link"
     - type: not-icontains
-      value: "gửi link"
+      value: "chưa có đường đọc"
+
+- description: "SOW 6 · Dán link biên bản Lark Doc — đọc bằng doc_tai_lieu"
+  metadata: {sow_dong: 6, hang_muc: "Họp dự án và phối hợp liên phòng ban"}
+  vars:
+    ma: d06f
+    hoi: |-
+      Biên bản họp hôm qua đây https://o4pvcegwn6b.sg.larksuite.com/docx/BbbTestDoc00000000001 Mark tách việc giúp mình nhé
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "doc_tai_lieu"}
+    - type: not-icontains
+      value: "chưa có đường đọc"
 
 # người chấm: chỉ đọc bảng và trả lời việc quá hạn; không tự nhắc ai, không sửa Base; lỗi quyền thì nói lỗi.
 # Từ 07/10/2026 câu hỏi trễ hạn đi tra_tien_do (code so ngày) thay vì doc_bang.
