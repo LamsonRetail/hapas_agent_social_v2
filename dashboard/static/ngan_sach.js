@@ -15,6 +15,9 @@
   var GH = hs.gioi_han || {};
   var IG_MD = hs.tk_ig_so_tu;
   var MD = D.mac_dinh || {};
+  // Đường 2 Threads (17/10/2026, = chi_phi.bang_cau_hinh tu_khoa.threads.duong2): biểu mẫu chưa có
+  // ô riêng, máy chủ phát cấu hình hiệu lực + USD khi Threads bật — cộng vào ô Threads.
+  var TH2 = D.th2 || {};
 
   // = chi_phi._norm: bỏ dấu (kể cả đ) + thường hoá
   function norm(s) {
@@ -181,6 +184,7 @@
       var a = cauHinh(doc, "tk", p);
       var b = cauHinh(doc, "bl", p);
       a.uoc = a.bat ? uocTk(p, a.so_bai, a.so_tu, a.boc) : 0;
+      if (p === "threads" && a.bat && TH2.bat_rieng) a.uoc = r4(a.uoc + (TH2.uoc_khi_bat || 0));
       b.uoc = b.bat ? uocBl(p, b.so_bai, b.moi_bai) : 0;
       kq.tk[p] = a;
       kq.bl[p] = b;

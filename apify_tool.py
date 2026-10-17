@@ -2924,7 +2924,32 @@ def _chuan_threads(raw: list) -> list[tuple]:
 # khi không đăng nhập; nhưng bề mặt "top" của chúng bắt 13 bài trong khoảng ngày futurizerush
 # "recent" đã quét mà nó vẫn sót (futurizerush "top" chỉ bắt 2/28) — futurizerush + scrapersdelight
 # phủ 73% (chờ chủ dự án duyệt làm đường thứ hai).
-def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list[tuple]:
+#
+# Vòng 2 (đo thật 17/10/2026 chiều, gói FREE; mẫu số = hợp mọi bài liên quan HAPAS VN mà 5 actor
+# tìm được, kèm bài của kho; khoá so là MÃ bài trong link `/post/<mã>`):
+#   tổ hợp                             phủ 7 ngày theo bài (theo thảo luận)   chi đo được
+#   kho hiện tại (futurizerush/ngày)        65% (80%)                         —
+#   futurizerush một mình                   62% (62%)                         0,180 / 3 từ, 30 ngày
+#   scrapersdelight một mình                62% (80%)                         0,047 / 3 từ, 2 lượt
+#   futurizerush + scrapersdelight          86% (98%)                         —
+#   kho + scrapersdelight                   85% (91%)                         +0,015 / 21 từ, 7 ngày
+#   watcher.data / alexabc / igview         21% / 3% / 3%                     0,008–0,02 / bài: loại
+# • Hai actor bắt HAI TẬP KHÁC NHAU (mỗi bên 18 bài trong 7 ngày, chỉ trùng 11): scrapersdelight
+#   bắt bài NỔI ở bề mặt top/tags (418, 109, 56 trả lời), futurizerush "recent" bắt bài mới, có
+#   follower + view. Bề mặt `tags` cho 8 bài mà `top` không có (7 bài futurizerush cũng sót).
+# • Không đăng nhập thì chỉ "hapas" và "túi hapas" ra bài: run 21 từ khoá × 7 ngày của
+#   scrapersdelight trả 15 bài (19 cụm còn lại 0 bài), tốn 0,015 USD — tiền Threads gần như KHÔNG
+#   đổi theo số từ khoá; futurizerush cũng báo "quà tặng hapas" `no_results`.
+# • Thêm lượt (`passesPerSurface`) gần như không thêm bài: 2 lượt cho 35 bài, 5 lượt cho 26; hợp
+#   3 run chỉ thêm 3 bài (trang kết quả không đăng nhập xoay vòng nhưng bão hoà nhanh).
+# • Link: 14/14 bài cả hai actor cùng bắt có `postUrl` trùng `post_url` TỪNG KÝ TỰ — khoá kho
+#   (băm link, `theo_doi._khoa_bai`) của cùng một bài trùng nhau, không thành hai dòng.
+# • Rủi ro scrapersdelight: tạo 02/09/2026, 81 người dùng, chưa có đánh giá (2.579/2.579 run
+#   thành công trong 30 ngày) → `theo_doi` cảnh báo khi đường 2 về 0 bài 2 lượt liền.
+# → /theodoi chạy CẢ HAI (chủ dự án duyệt 17/10/2026: "threads cũng rất quan trọng"):
+#   `_fetch_threads` (đường 1) + `_fetch_threads_2` (đường 2), gộp, bỏ trùng theo mã bài.
+def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to, *,
+                   tran_usd: float | None = None) -> list[tuple]:
     # `max_posts` là trần MỖI TỪ KHOÁ (input schema actor, đọc 01/10/2026: "A cap per user
     # or per keyword, not a total for the run"). Bản cũ đặt = limit nên 2 từ khoá đòi gấp
     # đôi, chạy ~227s, vượt hạn và bị tính tiền mà không trả gì. "recent" (cùng schema:
@@ -2933,6 +2958,9 @@ def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list
     # Đo 16/10/2026: actor KHÔNG dừng ở `maxItems` (xin 6, trả và tính tiền 8 — chỉ trần USD
     # chặn được), nên chia `limit` theo phần NGUYÊN (tổng ≤ limit khi mỗi từ ≥ 10 bài) và đọc
     # đủ số bài actor có thể trả: bài đã trả tiền không bị bỏ lại trong dataset.
+    # `tran_usd` (17/10/2026, /theodoi): ước tính nay theo SẢN LƯỢNG THẬT của lượt trước (thấp hơn
+    # trần cũ nhiều) nên trần USD gửi Apify phải là phần ngân sách còn lại của lượt — không phải
+    # trần console — để một lượt bất ngờ nhiều bài không tiêu quá phần còn của tháng.
     q = _bo_trung_tu_khoa(q)
     moi_tu = max(10, limit // max(1, len(q)))          # actor từ chối max_posts < 10
     raw = _call(_ACTORS["threads"], {
@@ -2941,13 +2969,144 @@ def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list
         "search_filter": "recent",
         "start_date": d_from.strftime("%Y-%m-%d"),
         "end_date": d_to.strftime("%Y-%m-%d"),
-    }, max(limit, moi_tu * len(q)), mem=_MEMORY.get("threads"))
+    }, max(limit, moi_tu * len(q)), mem=_MEMORY.get("threads"), tran_usd=tran_usd)
     return _chuan_threads(raw)
+
+
+# ── Threads ĐƯỜNG 2 + hồ sơ (17/10/2026; số đo ở bảng trên và `tests/mau_threads_duong2.json`) ──
+# Cả hai actor của scrapersdelight: không đăng nhập, không cookie, KHÔNG phí khởi động (512 MB),
+# tính tiền theo bài/hồ sơ TRẢ VỀ (bài bị `postedWithinDays` lọc và từ khoá Threads từ chối phục vụ
+# không tính tiền — log run 17/10: 57 bài đọc, bị lọc, không thu).
+_ACTORS["threads_2"] = "scrapersdelight~threads-keyword-search-scraper"
+_ACTORS["threads_ho_so"] = "scrapersdelight~threads-profile-scraper"
+TH2_GIA = 0.001          # USD / bài (pricingInfos 17/10/2026, sự kiện "post-scraped")
+TH_HO_SO_GIA = 0.002     # USD / hồ sơ kèm 4–10 bài mới nhất ("profile-scraped")
+# Việc nền đọc dataset có `fields=` (`_lay_items`): trường bộ đọc dùng phải có trong danh sách. Thêm
+# cho futurizerush các trường `theo_doi` đọc mà danh sách cũ thiếu: `search_keyword` (sản lượng
+# từng từ khoá — ước tính theo lượt trước), `record_type` + `requested_username` + `profile_url`
+# (`theo_doi._doc_threads`, chế độ "user": thiếu `record_type` thì dòng hồ sơ bị đọc như một bài).
+_TRUONG_ACTOR[_ACTORS["threads"]] = (*_TRUONG_ACTOR[_ACTORS["threads"]], "search_keyword",
+                                     "post_code", "record_type", "requested_username",
+                                     "profile_url")
+_TRUONG_ACTOR[_ACTORS["threads_2"]] = ("postCode", "postUrl", "text", "hashtags", "postedAt",
+                                       "likeCount", "replyCount", "repostCount", "quoteCount",
+                                       "isReply", "authorUsername", "authorFullName",
+                                       "searchKeyword", "searchSurface")
+_TRUONG_ACTOR[_ACTORS["threads_ho_so"]] = ("username", "full_name", "profile_url",
+                                           "follower_count", "is_private",
+                                           "has_threads_profile", "recent_posts")
+_RE_LINK_TH = re.compile(r"https://www\.threads\.com/@[\w.]+/post/[\w-]+")
+_RE_MA_TH = re.compile(r"/post/([\w-]+)")
+
+
+def ma_bai_threads(link: str) -> str:
+    """Mã bài Threads trong link (`/post/<mã>`) — khoá bỏ trùng giữa hai đường; '' nếu không có."""
+    m = _RE_MA_TH.search(str(link or ""))
+    return m.group(1) if m else ""
+
+
+def _link_threads(user, ma, url) -> str:
+    """Link bài ĐÚNG dạng futurizerush (`https://www.threads.com/@<user>/post/<mã>`). Khoá kho của
+    bài Threads là băm link (`theo_doi._khoa_bai`): lệch một ký tự là cùng một bài thành hai dòng.
+    Link đúng dạng thì giữ nguyên (đo 17/10: 14/14 bài chung trùng từng ký tự); không thì dựng lại
+    từ tài khoản + mã bài; cùng lắm đổi miền threads.net → threads.com."""
+    u = str(url or "").strip()
+    if _RE_LINK_TH.fullmatch(u):
+        return u
+    user, ma = str(user or "").strip().lstrip("@").lower(), str(ma or "").strip()
+    if user and ma:
+        return f"https://www.threads.com/@{user}/post/{ma}"
+    return re.sub(r"^https?://(www\.)?threads\.net/", "https://www.threads.com/", u)
+
+
+def _chuan_threads_2(raw: list) -> list[tuple]:
+    """Item scrapersdelight keyword-search -> [(dòng, ngày VN)] cùng dạng `_chuan_threads`.
+
+    Actor KHÔNG trả follower, lượt xem: để None ("không biết"), không phải 0 — kho giữ số cũ
+    (`COALESCE`), còn 0 thì đè mất lượt xem futurizerush đã ghi cho cùng bài."""
+    out = []
+    for it in raw or []:
+        if not isinstance(it, dict):
+            continue
+        user = str(it.get("authorUsername") or "")
+        link = _link_threads(user, it.get("postCode"), it.get("postUrl"))
+        if not link:
+            continue
+        txt = str(it.get("text") or "")
+        out.append(({
+            "kenh": it.get("authorFullName") or user,
+            "username": user,
+            "followers": None,
+            "views": None,
+            "likes": int(it.get("likeCount") or 0),
+            "comments": int(it.get("replyCount") or 0),
+            "shares": int(it.get("repostCount") or 0),
+            "hashtags": _tags_from(txt) or _join(it.get("hashtags")),
+            "text": txt[:1000],
+            "link": link,
+            "__goc": it,
+        }, _to_vn(it.get("postedAt"))))
+    return out
+
+
+def _fetch_threads_2(q: list[str], limit: int, country: str, d_from, d_to, *,
+                     moi_tu: int = 20, so_luot: int = 2,
+                     tran_usd: float | None = None) -> list[tuple]:
+    """Đường 2 của Threads: scrapersdelight tìm theo từ khoá, bề mặt `both` (top + tags).
+
+    `limit` = trần bài CẢ LƯỢT (gửi cả `maxItems` của actor lẫn của Apify), `moi_tu` = trần mỗi từ
+    khoá (`maxPostsPerKeyword`), `so_luot` = `passesPerSurface` (1–5; đo 17/10: lượt thứ 3 trở đi
+    gần như không thêm bài). Lọc ngày phía actor bằng `postedWithinDays` = số ngày của cửa sổ tìm
+    (làm tròn LÊN, bao trọn 0 giờ ngày đầu). Actor không có lọc nước: `country` không dùng — bước
+    lọc thị trường + AI của `theo_doi` lo phần đó, như đường 1."""
+    q = _bo_trung_tu_khoa(q)
+    if not q or limit <= 0:
+        return []
+    ngay = max(1, math.ceil((d_to - d_from).total_seconds() / 86400))
+    raw = _call(_ACTORS["threads_2"], {
+        "keywords": q, "searchType": "both",
+        "passesPerSurface": max(1, min(5, int(so_luot))),
+        "maxPostsPerKeyword": max(1, int(moi_tu)), "maxItems": int(limit),
+        "postedWithinDays": ngay,
+    }, int(limit), tran_usd=tran_usd, nen_tang="threads")
+    return _chuan_threads_2(raw)
+
+
+def doc_ho_so_threads(items: list) -> dict[str, dict]:
+    """Item scrapersdelight profile -> {username: {"ho_so", "bai"}} — dạng thô cho
+    `theo_doi._doc_threads` (đọc bài bằng cùng `_link_threads`, ngày giờ VN). Hồ sơ không có
+    trường `recent_posts` (tắt includePosts) thì `bai` rỗng."""
+    ra: dict[str, dict] = {}
+    for it in items or []:
+        if not isinstance(it, dict) or not it.get("username"):
+            continue
+        u = str(it["username"]).strip().lstrip("@").lower()
+        bai = []
+        for b in it.get("recent_posts") or []:
+            if not isinstance(b, dict):
+                continue
+            tac_gia = str(b.get("author_username") or u)
+            link = _link_threads(tac_gia, b.get("post_code"), b.get("post_url"))
+            if not link:
+                continue
+            txt = str(b.get("text") or "")
+            bai.append(({"likes": int(b.get("like_count") or 0),
+                         "comments": int(b.get("reply_count") or 0),
+                         "shares": int(b.get("repost_count") or 0),
+                         "hashtags": _tags_from(txt), "text": txt[:1000], "link": link,
+                         "__goc": b}, _to_vn(b.get("posted_at"))))
+        ra[u] = {"ho_so": {"ten": str(it.get("full_name") or u), "tai_khoan": u,
+                           "followers": it.get("follower_count"),
+                           "link": str(it.get("profile_url") or f"https://www.threads.com/@{u}")},
+                 "bai": bai}
+    return ra
 
 
 _FETCH = {"tiktok": _fetch_tiktok, "instagram": _fetch_instagram,
           "facebook": _fetch_facebook, "youtube": _fetch_youtube,
-          "threads": _fetch_threads}
+          "threads": _fetch_threads,
+          # Không phải nền tảng (không nằm trong `_ALL`): bộ tìm đường 2 của Threads cho /theodoi.
+          "threads_2": _fetch_threads_2}
 
 
 # ───────────────────────── Lark Sheet ─────────────────────────

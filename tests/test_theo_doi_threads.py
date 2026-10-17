@@ -303,7 +303,11 @@ def test_dashboard_chi_phi_khop_mark_threads():
     b = CP.bang_cau_hinh({"ten": "HAPAS", "tu_khoa": tu, "tk_bat": True, "tk_so_bai": 15,
                           "bl_bat": True, "bl_so_bai": 10, "cau_hinh": BAT_TH})
     assert b["tu_khoa"]["threads"]["so_tu_gui"] == 1 and b["tu_khoa"]["tiktok"]["so_tu_gui"] == 3
-    assert b["tu_khoa"]["threads"]["uoc"] == T.uoc_tu_khoa_nen_tang("threads", 15, tu)
+    # Đường 2 (17/10/2026) cộng vào ô Threads: 60 bài (20/từ × 3 từ) × 0,001 × 1,3.
+    da_th = {"ten": "HAPAS", "tu_khoa": tu, "tk_bat": True, "tk_so_bai": 15, "cau_hinh": BAT_TH}
+    assert b["tu_khoa"]["threads"]["uoc"] == round(
+        T.uoc_tu_khoa_nen_tang("threads", 15, tu) + T.uoc_th2(T.cau_hinh_th2(da_th), tu), 4)
+    assert T.uoc_th2(T.cau_hinh_th2(da_th), tu) == round(60 * 0.001 * 1.3, 4)
     hs = CP.hang_so_cho_trinh_duyet()
     # Báo & Web (16/10) xếp sau Threads; chỉ Threads mặc định tắt.
     assert list(hs["nen_tang"])[-2:] == ["threads", "web"] and hs["mac_dinh_tat"] == ("threads", "web")

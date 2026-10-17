@@ -43,6 +43,12 @@ START_COST = {"instagram": 0.016, "threads": 0.08, "facebook": 0.00005}
 #: mỗi tài khoản / từ khoá; ≤ 20 tài khoản hoặc từ khoá mỗi lượt.
 TH_TOI_THIEU_BAI = 10
 TH_TOI_DA_MOI_LUOT = 20
+#: `theo_doi.TH2_*` — đường 2 Threads (17/10/2026, scrapersdelight tìm theo từ khoá): 0,001 USD/bài
+#: trả về, không phí khởi động; mặc định BẬT, trần 100 bài/lượt, 20 bài/từ, 2 lượt/bề mặt.
+TH2_GIA = 0.001
+TH2_SO_BAI = 100
+TH2_MOI_TU = 20
+TH2_LUOT = 2
 
 #: `theo_doi._BL_GIA` / `_BL_KHOI_DONG` — giá cào BÌNH LUẬN mỗi bình luận (gói FREE, 15/10/2026;
 #: Threads 16/10/2026: actor trả lời 1 GB = 0,02 USD khởi động; TikTok qua TikTok API 16/10/2026).
@@ -135,8 +141,10 @@ def uoc_web(so_bai: int, tu: list[str], boc: int = WEB_BOC_MAC_DINH) -> float:
 
 def uoc_tu_khoa_luot(so_bai: int, tu: list[str]) -> float:
     """Bản sao `theo_doi.uoc_tu_khoa`: USD tối đa một lượt tìm theo từ khoá của dự án (mọi nền
-    tảng bật, cùng số bài)."""
-    return round(sum(uoc_tk_nen_tang(p, so_bai, tu) for p in NEN_TANG), 4)
+    tảng bật, cùng số bài; Threads gồm đường 2 theo mặc định)."""
+    th2 = {"bat": True, "so_bai": TH2_SO_BAI, "so_bai_moi_tu": TH2_MOI_TU, "so_luot": TH2_LUOT}
+    return round(sum(uoc_tk_nen_tang(p, so_bai, tu) for p in NEN_TANG)
+                 + (uoc_th2(th2, tu) if so_bai > 0 else 0.0), 4)
 
 
 def uoc_binh_luan_luot(so_bai: int, moi_bai: int, p: str = "facebook") -> float:
@@ -335,6 +343,31 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
             "so_bai": so, "moi_bai": 5 if 0 < moi < 5 else moi}
 
 
+def cau_hinh_th2(du_an: dict) -> dict:
+    """Bản sao `theo_doi.cau_hinh_th2`: đường 2 Threads (`cau_hinh.tu_khoa.threads.duong2`) —
+    chỉ chạy khi Threads tìm từ khoá bật; thiếu `bat` thì bật, chỉ True mới là bật; `so_bai` 0 =
+    tắt; số rác → mặc định; `so_luot` kẹp 1–5."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    nh = goc.get("tu_khoa") if isinstance(goc.get("tu_khoa"), dict) else {}
+    th = nh.get("threads") if isinstance(nh.get("threads"), dict) else {}
+    x = th.get("duong2") if isinstance(th.get("duong2"), dict) else {}
+    so = _so_rieng(x.get("so_bai"), 0, SO_TOI_DA, TH2_SO_BAI)
+    rieng = x.get("bat", True) is True and so > 0
+    return {"bat": cau_hinh(du_an, "tu_khoa", "threads")["bat"] and rieng, "bat_rieng": rieng,
+            "so_bai": so,
+            "so_bai_moi_tu": _so_rieng(x.get("so_bai_moi_tu"), 1, SO_TOI_DA, TH2_MOI_TU),
+            "so_luot": _so_rieng(x.get("so_luot"), 1, 5, TH2_LUOT)}
+
+
+def uoc_th2(c2: dict, tu: list[str]) -> float:
+    """Bản sao `theo_doi.uoc_th2`: USD tối đa một lượt đường 2 = min(trần bài, bài/từ × số từ —
+    MỌI từ khoá, tối đa `tk_so_tu[1]`) × 0,001 × hệ số."""
+    q = list(tu[:GIOI_HAN["tk_so_tu"][1]])
+    if not c2.get("bat") or not q:
+        return 0.0
+    return round(min(c2["so_bai"], c2["so_bai_moi_tu"] * len(q)) * TH2_GIA * HE_SO_UOC, 4)
+
+
 def cau_hinh_hien_thi(goc) -> dict:
     """`du_an.cau_hinh` cho biểu mẫu trang Ngân sách: nền tảng `MAC_DINH_TAT` chưa ghi `bat` thì
     điền `bat: False` — ô bật hiện ĐÚNG trạng thái hiệu lực (tắt), không theo cột tk_bat/bl_bat
@@ -419,6 +452,12 @@ def bang_cau_hinh(du_an: dict) -> dict:
                               else len(tu_gui(p, tu, tk[p]["so_tu"], tk[p]["so_bai"])))
         bl[p]["uoc"] = (uoc_binh_luan_luot(bl[p]["so_bai"], bl[p]["moi_bai"], p)
                         if bl[p]["bat"] else 0.0)
+    # Đường 2 Threads (17/10/2026): cộng vào ô USD của Threads; biểu mẫu chưa có ô riêng nên cấu
+    # hình hiệu lực phát kèm (`duong2`) cho trình duyệt cộng đúng số máy chủ đã tính.
+    c2 = cau_hinh_th2(du_an)
+    tk["threads"]["duong2"] = {**c2, "uoc": uoc_th2(c2, tu),
+                               "uoc_khi_bat": uoc_th2({**c2, "bat": c2["bat_rieng"]}, tu)}
+    tk["threads"]["uoc"] = round(tk["threads"]["uoc"] + tk["threads"]["duong2"]["uoc"], 4)
     tk["web"]["so_cau"] = so_cau_web(tu)
     uoc_tk = round(sum(x["uoc"] for x in tk.values()), 4)
     return {"tu_khoa": tk, "binh_luan": bl, "so_tu_khoa": len(tu),

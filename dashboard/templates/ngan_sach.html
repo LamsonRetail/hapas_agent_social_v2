@@ -159,6 +159,7 @@
     "co_lich": co_lich, "luot_con_lai": so_luot, "luot_30": luot_30,
     "luot_web_con_lai": luot_web, "luot_web_30": luot_web_30,
     "dp": {"luot_con_lai": dp.luot_con_lai or 0, "luot_30": dp.luot_30 or 0},
+    "th2": b.tu_khoa.threads.duong2 if b.tu_khoa.threads.duong2 is defined else {},
     "tran_platform": db.tran_platform, "tran_da": d.tran_usd_thang|float}|json_script }}</script>
   <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/cau-hinh" id="ns-form">
   <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
@@ -240,7 +241,8 @@
         <th scope="row">{{ ten }}
           {% if p == 'facebook' %}<button type="button" class="goi-y{% if tk.bat and tk.so_bai > hang_so.tk_fb_toi_da %} goi-y--canh{% endif %}" data-o="ghi-fb" data-goi-y="Gói Apify FREE: thực tế tối đa {{ hang_so.tk_fb_toi_da }} bài/lượt">i</button>
           {% elif p == 'instagram' %}<button type="button" class="goi-y" data-o="ghi-ig" data-goi-y="Chỉ từ không dấu cách ({{ dem.ig }} từ)">i</button>
-          {% elif p == 'youtube' %}<button type="button" class="goi-y" data-goi-y="Miễn phí (API YouTube)">i</button>{% endif %}
+          {% elif p == 'youtube' %}<button type="button" class="goi-y" data-goi-y="Miễn phí (API YouTube)">i</button>
+          {% elif p == 'threads' and tk.duong2 is defined %}<button type="button" class="goi-y" data-o="ghi-th2" data-goi-y="Hai đường cùng lượt: futurizerush (có follower, lượt xem; 0,08 USD khởi động + 0,0025 USD/bài, mỗi từ ≥ 10 bài) và scrapersdelight (bài nổi; 0,001 USD/bài, không phí khởi động, mọi từ khoá). Đường 2 {{ 'bật' if tk.duong2.bat_rieng else 'tắt' }}: tối đa {{ tk.duong2.so_bai }} bài/lượt, {{ tk.duong2.so_bai_moi_tu }} bài/từ ≈ {{ tk.duong2.uoc_khi_bat|usd_vn(3) }} USD, đã cộng vào ô USD.">i</button>{% endif %}
         </th>
         <td class="ns-o-cong ns-ranh" data-nhan="Tìm từ khoá">
           {% if ql %}<input type="checkbox" class="ns-cong" role="switch" name="tk_{{ p }}_bat" value="1" aria-label="{{ ten }}: bật tìm theo từ khoá"{% if y_tk %} checked{% endif %}>
