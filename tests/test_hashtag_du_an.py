@@ -44,8 +44,14 @@ def mo(monkeypatch):
 @pytest.mark.parametrize("vao, ra", [
     ("#hapas, #YeuTuDieuNhoNhat", ["hapas", "yeutudieunhonhat"]),
     ("#hapas #hapassuperbrandday", ["hapas", "hapassuperbrandday"]),      # dán từ caption
-    ("Túi HAPAS; quà_tặng\n#hapas, HAPAS", ["tuihapas", "qua_tang", "hapas"]),
-    ("Đồng hồ 20/10", ["dongho2010"]),
+    ("TúiHAPAS; quà_tặng\n#hapas, HAPAS", ["tuihapas", "qua_tang", "hapas"]),
+    # Soát 18/10/2026: cách nhau bằng dấu cách / tab là NHIỀU tag (bản cũ gộp thành một)...
+    ("hapas yeutudieunhonhat\thapasvn  #quatanghapas", ["hapas", "yeutudieunhonhat", "hapasvn",
+                                                       "quatanghapas"]),
+    ("Túi HAPAS", ["tui", "hapas"]),
+    # ... trừ cụm đứng ngay sau '#': khẩu hiệu có dấu cách là MỘT tag.
+    ("#Yêu từ điều nhỏ nhất, hapas vn", ["yeutudieunhonhat", "hapas", "vn"]),
+    ("#Đồng hồ 20/10", ["dongho2010"]),
     ("🥰, , #", []),
     ("", []),
 ])

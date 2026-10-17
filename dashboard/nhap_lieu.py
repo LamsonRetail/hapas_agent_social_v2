@@ -146,11 +146,19 @@ def hashtag(s) -> list[str]:
     trường, thay bằng phần hashtag").
 
     Tách theo dấu phẩy / chấm phẩy / xuống dòng / dấu '#' (dán nguyên "#hapas #yeutudieunhonhat"
-    từ caption vẫn ra 2 tag); mỗi mục bỏ dấu (đ→d), chữ thường, chỉ giữ [a-z0-9_] — đúng dạng Mark
-    gửi actor Instagram (`apify_tool.hashtag_ig`), nên "Túi HAPAS" thành "tuihapas" (hashtag không có
-    khoảng trắng). Mục không còn chữ/số nào (emoji…) bỏ qua; bỏ trùng, giữ thứ tự gõ."""
+    từ caption vẫn ra 2 tag) và theo DẤU CÁCH / tab ở phần chữ không đứng sau '#' — soát
+    18/10/2026: bản cũ không tách dấu cách nên "hapas yeutudieunhonhat" gộp thành MỘT tag
+    "hapasyeutudieunhonhat" không ai dùng. Cụm đứng NGAY sau '#' tới dấu tách kế tiếp là MỘT tag
+    (chủ dự án gõ khẩu hiệu "#Yêu từ điều nhỏ nhất" = #yeutudieunhonhat — tách theo dấu cách thì
+    ra 5 tag rác "yeu", "tu"… chiếm chỗ tag thật). Mỗi tag bỏ dấu (đ→d), chữ thường, chỉ giữ
+    [a-z0-9_] — đúng dạng Mark gửi actor Instagram (`apify_tool.hashtag_ig`). Tag không còn chữ/số
+    nào (emoji…) bỏ qua; bỏ trùng, giữ thứ tự gõ."""
+    cac: list[str] = []
+    for muc in re.split(r"[,;\r\n]+", str(s or "")):
+        dau, *sau_thang = muc.split("#")
+        cac += dau.split() + sau_thang
     ra: list[str] = []
-    for x in re.split(r"[,;\n#]+", str(s or "")):
+    for x in cac:
         g = unicodedata.normalize("NFD", x.replace("đ", "d").replace("Đ", "D"))
         t = re.sub(r"[^a-z0-9_]", "", "".join(c for c in g if unicodedata.category(c) != "Mn")
                    .lower())
