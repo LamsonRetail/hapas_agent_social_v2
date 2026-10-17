@@ -255,7 +255,7 @@ def test_tim_tu_khoa_threads_phieu_moc_de_xuat_va_tien(mo):
     f = tk["pheu"]["threads"]
     assert (f["ve"], f["cua_so"], f["khong_nhac"], f["giu"]) == (3, 3, 1, 2)
     assert any(c.startswith("phễu tìm Threads (xin 30 ngày") for c in T._cau_tk(tk))
-    assert set(T.doc_moc_tk("hapas")) == {"threads"}
+    assert set(T.doc_moc_tk("hapas")) - {T.KHOA_NHIP_TIM} == {"threads"}
     # Run TikTok giả ở trên không mang tên actor TikTok API → sổ theo video về (0 bài = 0 USD).
     assert tk["usd"] == pytest.approx(3 * 0.0025 + 0.08)
 
@@ -265,7 +265,10 @@ def test_tim_tu_khoa_threads_0_bai_van_tru_phi_khoi_dong(mo):
     mo.setattr(A, "_FETCH", {p: (lambda *a, **k: []) for p in T.TK_NEN_TANG})
     tk = _chay_tk(dict(DU_AN, tk_bat=True, tk_so_bai=15, cau_hinh=BAT_TH))
     assert tk["usd"] == pytest.approx(0.08) and tk["pheu"]["threads"]["ve"] == 0
-    assert T.doc_moc_tk("hapas") == {}, "0 bài không dời mốc"
+    moc = T.doc_moc_tk("hapas")
+    assert set(moc) - {T.KHOA_NHIP_TIM} == set(), "0 bài không dời mốc"
+    # Lịch sử nhịp (18/10/2026) có lượt về 0 bài — đường 1 Threads giãn nhịp khi lặp nhiều lượt.
+    assert moc[T.KHOA_NHIP_TIM]["threads"]["lich_su"][-1][1:] == [0, 0]
 
 
 # ───────────────────────────── bình luận Threads ─────────────────────────────

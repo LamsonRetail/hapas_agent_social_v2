@@ -1525,7 +1525,9 @@ def test_tim_tu_khoa_cua_so_theo_moc_tung_nen_tang(mo):
     tk = _chay_tk(da)
     assert goi["tiktok"][-1] >= 30 and tk["giu"] == 1      # chưa có mốc: 30 ngày
     moc = T.doc_moc_tk("hapas")
-    assert set(moc) == {"tiktok"}, "nền tảng trả 0 item không dời mốc"
+    # Lịch sử nhịp (`KHOA_NHIP_TIM`, 18/10/2026) ghi cả lượt về 0 bài — không phải mốc cửa sổ.
+    assert set(moc) - {T.KHOA_NHIP_TIM} == {"tiktok"}, "nền tảng trả 0 item không dời mốc"
+    assert moc[T.KHOA_NHIP_TIM]["instagram"]["lich_su"][-1][1:] == [0, 0]
     assert moc["tiktok"]["luot"] == 3 and moc["tiktok"]["dau"] == T.dau_tk(["hapas"], 15)
     # Ngay sau đó: TikTok đã tìm thành công → cửa sổ tối thiểu 3 ngày; YouTube vẫn 30.
     tk = _chay_tk(da)

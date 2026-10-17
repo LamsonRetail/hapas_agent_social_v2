@@ -557,6 +557,30 @@ def uoc_fb_duong2(so_cum: int, moi_cum: int) -> float:
     return round(so_cum * (moi_cum * TK_FB2_GIA + TK_FB2_KHOI) * HE_SO_UOC, 4)
 
 
+#: `theo_doi.TK_GIAN_*` (18/10/2026): giãn nhịp đường tìm ít bài mới — 3 lượt liền bài mới < 5%
+#: bài về thì 44 giờ mới tìm lại; khối `gian` của nền tảng.
+TK_GIAN_NEN_TANG = ("instagram", "facebook", "threads")
+TK_GIAN_LUOT = 3
+TK_GIAN_TY_LE = 0.05
+TK_GIAN_GIO = 44
+TK_GIAN_LICH_SU = 6
+
+
+def _cau_hinh_gian(rieng: dict) -> dict:
+    """Bản sao `theo_doi._cau_hinh_gian`."""
+    x = rieng.get("gian") if isinstance(rieng.get("gian"), dict) else {}
+    t = x.get("ty_le", TK_GIAN_TY_LE)
+    try:
+        ty = TK_GIAN_TY_LE if isinstance(t, bool) else float(t)
+    except (TypeError, ValueError):
+        ty = TK_GIAN_TY_LE
+    if not math.isfinite(ty) or not 0 <= ty <= 1:
+        ty = TK_GIAN_TY_LE
+    return {"bat": x.get("bat", True) is not False,
+            "luot": _so_rieng(x.get("luot"), 1, TK_GIAN_LICH_SU, TK_GIAN_LUOT), "ty_le": ty,
+            "gio": _so_rieng(x.get("gio"), 1, 24 * 14, TK_GIAN_GIO)}
+
+
 def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
     """Cấu hình HIỆU LỰC của một nền tảng — y hệt `theo_doi.cau_hinh` của Mark (cột tk_bat /
     bl_bat là công tắc tổng; thiếu `bat` thì bật trừ `MAC_DINH_TAT`; số bỏ trống/rác lấy cột
@@ -580,6 +604,8 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
             ra["duong2"] = _cau_hinh_fb2(du_an, rieng, bat_rieng, so)
         if p == "tiktok":
             ra["hashtag"] = _cau_hinh_tag(du_an, rieng, bat_rieng, so)
+        if p in TK_GIAN_NEN_TANG:
+            ra["gian"] = _cau_hinh_gian(rieng)
         return ra
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)

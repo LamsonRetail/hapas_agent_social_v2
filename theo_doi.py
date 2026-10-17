@@ -1300,11 +1300,70 @@ TK_TAG_YEU_CAU = 5
 TK_TAG_GIO = 20
 
 
+# ───────────── GIÃN NHỊP đường tìm ít bài mới (18/10/2026) ─────────────
+# Chủ dự án 18/10: "các luồng cào để tối ưu output nhất có thể". Instagram hashtag gói FREE chỉ đọc
+# TRANG ĐẦU (~6 bài mới nhất mỗi hashtag mỗi tab) nên ngày nào cũng trả phần lớn bài đã có (lượt 7–9:
+# về 14/14/7, mới 2/0/0); Threads đường 1 mất 0,08 USD khởi động kể cả về 0 bài. Nền tảng trong
+# `TK_GIAN_NEN_TANG` mà `luot` lượt tìm LIỀN có bài mới < `ty_le` × bài về (hoặc về 0) thì chỉ tìm
+# lại sau `gio` giờ từ lượt tìm trước (mặc định 44 ≈ 2 ngày/lần); chiến dịch đang chạy thì không
+# giãn; lượt có bài mới ≥ ngưỡng thì về nhịp thường. Threads chỉ giãn ĐƯỜNG 1 (đường 2 rẻ, bắt bài
+# nổi). Cấu hình `du_an.cau_hinh.tu_khoa.<nền tảng>.gian` {"bat", "luot", "ty_le", "gio"}; lịch sử
+# (giờ, về, mới) trong sổ mốc khoá `KHOA_NHIP_TIM` = {nền tảng: {"lich_su": […]}} — tách khỏi mốc
+# cửa sổ của nền tảng (lượt về 0 bài vẫn không dời mốc cửa sổ).
+KHOA_NHIP_TIM = "nhip_tim"
+TK_GIAN_NEN_TANG = ("instagram", "facebook", "threads")
+TK_GIAN_LUOT = 3
+TK_GIAN_TY_LE = 0.05
+TK_GIAN_GIO = 44
+TK_GIAN_LICH_SU = 6
+
+
 def _kep(v, lo: int, hi: int, md: int) -> int:
     try:
         return max(lo, min(hi, int(v)))
     except (TypeError, ValueError):
         return md
+
+
+def _cau_hinh_gian(rieng: dict) -> dict:
+    """Cấu hình giãn nhịp hiệu lực (khối `gian` của nền tảng): thiếu → bật, 3 lượt, 5%, 44 giờ;
+    rác → mặc định."""
+    x = rieng.get("gian") if isinstance(rieng.get("gian"), dict) else {}
+    t = x.get("ty_le", TK_GIAN_TY_LE)
+    try:
+        ty = TK_GIAN_TY_LE if isinstance(t, bool) else float(t)
+    except (TypeError, ValueError):
+        ty = TK_GIAN_TY_LE
+    if not math.isfinite(ty) or not 0 <= ty <= 1:
+        ty = TK_GIAN_TY_LE
+    return {"bat": x.get("bat", True) is not False,
+            "luot": _so_rieng(x.get("luot"), 1, TK_GIAN_LICH_SU, TK_GIAN_LUOT), "ty_le": ty,
+            "gio": _so_rieng(x.get("gio"), 1, 24 * 14, TK_GIAN_GIO)}
+
+
+def gian_nhip(cfg: dict | None, nhip: dict | None, bay_gio: datetime.datetime,
+              chien_dich: bool = False) -> tuple[bool, str]:
+    """(bỏ lượt tìm này?, lý do). Bỏ khi `cfg.luot` lượt tìm GẦN NHẤT đều có bài mới < `ty_le` ×
+    bài về (hoặc về 0) và chưa đủ `gio` giờ (trừ `GIO_DUNG_SAI`) từ lượt tìm cuối. `nhip` =
+    `doc_moc_tk(ma)[KHOA_NHIP_TIM][nền tảng]` {"lich_su": [[giờ ISO, về, mới], …]}."""
+    if not cfg or not cfg.get("bat") or chien_dich:
+        return False, ""
+    ls = [x for x in (nhip or {}).get("lich_su") or [] if isinstance(x, list) and len(x) >= 3]
+    k = int(cfg["luot"])
+    if len(ls) < k:
+        return False, ""
+    gan = ls[-k:]
+    if not all(int(ve) == 0 or int(m) < cfg["ty_le"] * int(ve) for _, ve, m in gan):
+        return False, ""
+    cuoi = _gio_iso(gan[-1][0])
+    if cuoi is None:
+        return False, ""
+    ke = cuoi + datetime.timedelta(hours=int(cfg["gio"]))
+    if bay_gio >= ke - datetime.timedelta(hours=K.GIO_DUNG_SAI):
+        return False, ""
+    chu = ", ".join(f"{int(m)}/{int(ve)}" for _, ve, m in gan)
+    return True, (f"giãn nhịp: {k} lượt liền bài mới dưới {cfg['ty_le'] * 100:g}% bài về (mới/về:"
+                  f" {chu}) — tìm lại từ {ke.astimezone(_VN):%H:%M %d/%m}")
 
 
 def _so_rieng(v, lo: int, hi: int, md: int) -> int:
@@ -1345,6 +1404,8 @@ def cau_hinh(du_an: dict, nhom: str, p: str) -> dict:
             ra["duong2"] = _cau_hinh_fb2(du_an, rieng, bat_rieng, so)
         if p == "tiktok":
             ra["hashtag"] = _cau_hinh_tag(du_an, rieng, bat_rieng, so)
+        if p in TK_GIAN_NEN_TANG:
+            ra["gian"] = _cau_hinh_gian(rieng)
         return ra
     chung = _kep(du_an.get("bl_so_bai") or 0, *GIOI_HAN["bl_so_bai"], 0)
     so = _so_rieng(rieng.get("so_bai"), *GIOI_HAN["bl_so_bai"], chung)
@@ -1774,6 +1835,12 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     phan = _phan_tk(v)
     da_xong = {ph["nen_tang"] for ph in phan if ph.get("loai") == "moc"}
     co_run = {ph["nen_tang"] for ph in phan if ph.get("run_id")}
+    # Giãn nhịp đường tìm ít bài mới (18/10/2026, `gian_nhip`): chiến dịch đang chạy thì không giãn.
+    try:
+        from dashboard import lich_quet as LQ
+        cd_dang = LQ.chien_dich_dang_chay(K.lich_chien_dich(ma), bay_gio) is not None
+    except K.LoiKho:
+        cd_dang = False
     hits: list[tuple] = []
     web_cho: list[tuple] = []        # (hits web, từ khoá web, đã loại) — sau mạng xã hội
     try:
@@ -1822,6 +1889,13 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 con = max(0.0, con - tien2)
                 tk["usd"] += tien2
                 hits.extend(hits2)
+            if p in TK_GIAN_NEN_TANG:
+                # Giãn nhịp (18/10/2026): nhiều lượt liền gần như không ra bài mới → 2 ngày/lần.
+                bo, ly_gian = gian_nhip(cfg[p].get("gian"),
+                                        (moc_cu.get(KHOA_NHIP_TIM) or {}).get(p), bay_gio, cd_dang)
+                if bo:
+                    _bo_qua_tk(v, tk, p, "GIAN_NHIP", ly_gian)
+                    continue
             # Threads (17/10/2026): ước tính theo SẢN LƯỢNG THẬT lượt trước (sổ mốc), không còn giả
             # định mỗi từ khoá đủ 10 bài — `san_luong_du_kien`. Tiền thật vẫn chặn ở phần còn lại
             # (`them["tran_usd"]` bên dưới).
@@ -2025,6 +2099,20 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         for p, m in moc_moi.items():
             f = tk["pheu"].get(p) or {}
             m["huu_ich"] = int(f.get("moi", 0)) + int(f.get("cap_nhat", 0))
+        # Lịch sử (giờ, về, mới) của lượt tìm vừa chạy xong, không lỗi — kể cả về 0 bài (mốc tăng
+        # dần thì không ghi khi về 0) — cho `gian_nhip` lượt sau.
+        nhip = dict(moc_cu.get(KHOA_NHIP_TIM) or {})
+        for p in TK_GIAN_NEN_TANG:
+            f = tk["pheu"].get(p)
+            if not f or f.get("bo_qua") or f.get("loi") or p in da_xong:
+                continue
+            ls = list(((nhip.get(p) if isinstance(nhip.get(p), dict) else {}).get("lich_su"))
+                      or [])
+            ls.append([bay_gio.isoformat(timespec="seconds"), int(f.get("ve") or 0),
+                       int(f.get("moi") or 0)])
+            nhip[p] = {"lich_su": ls[-TK_GIAN_LICH_SU:]}
+        if nhip:
+            moc_moi[KHOA_NHIP_TIM] = nhip
         ghi_moc_tk(ma, moc_moi)
         if cfg["tiktok"]["bat"] and "tiktok_lam_moi" not in da_xong \
                 and _nen_tang_dung_duoc("tiktok")[0]:
