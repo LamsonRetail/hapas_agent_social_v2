@@ -485,7 +485,8 @@ def do_phu_gan_nhat(du_an: str, n: int = 2) -> list[dict]:
             "SELECT id, luot_id, luc, nen_tang, so_mau, so_nhac, so_da_co, so_da_loai, so_sot, "
             "thao_luan_nhac, thao_luan_da_co, do_phu::float AS do_phu, "
             "do_phu_tl::float AS do_phu_tl, bo_sung, so_yeu_cau, chi_phi_usd::float AS "
-            "chi_phi_usd, mau, bai_sot FROM kiem_do_phu WHERE du_an = %s ORDER BY luc DESC, "
+            "chi_phi_usd, mau, bai_sot, hanh_dong FROM kiem_do_phu WHERE du_an = %s "
+            "ORDER BY luc DESC, "
             "id DESC LIMIT %s", (du_an, max(1, int(n)))).fetchall()
 
 

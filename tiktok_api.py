@@ -101,6 +101,7 @@ class _Ngan:
         self.toi_da = (10 ** 6 if tran_usd is None
                        else max(0, math.floor(float(tran_usd) / GIA_YEU_CAU + 1e-9)))
         self.da = 0
+        self.dung: str | None = None     # mã lỗi dừng cả lượt (hết tiền / huỷ) đã gặp
         self._k = threading.Lock()
 
     def xin(self) -> bool:
@@ -529,10 +530,12 @@ def bai_hashtag(cid: str, so_trang: int, ngan: _Ngan) -> list[dict]:
         try:
             it = _goi({"challengePosts_cid": str(cid), "challengePosts_count": TAG_MOI_TRANG,
                        "challengePosts_cursor": con_tro}, ngan)
-        except A.LoiApify:
+        except A.LoiApify as e:
             if not ra:
                 raise
-            break                   # trang sau lỗi (kể cả hết tiền / huỷ): giữ trang đã trả tiền
+            if e.ma in _DUNG_HAN:   # giữ trang đã trả tiền, nhưng khoá bộ đếm: luồng khác dừng
+                ngan.dung, ngan.toi_da = e.ma, 0
+            break
         if it is None:
             break
         moi = 0
@@ -564,10 +567,12 @@ def bai_tai_khoan(ten: str, so_trang: int, ngan: _Ngan, uid: str | None = None,
         try:
             it = _goi({"userPosts_userId": str(uid), "userPosts_count": BAI_MOI_TRANG,
                        "userPosts_region": "VN", "userPosts_maxCursor": con_tro}, ngan)
-        except A.LoiApify:
+        except A.LoiApify as e:
             if not ra:
                 raise
-            break                   # trang sau lỗi (kể cả hết tiền / huỷ): giữ trang đã trả tiền
+            if e.ma in _DUNG_HAN:   # giữ trang đã trả tiền, nhưng khoá bộ đếm: luồng khác dừng
+                ngan.dung, ngan.toi_da = e.ma, 0
+            break
         if it is None:
             break
         cu = False

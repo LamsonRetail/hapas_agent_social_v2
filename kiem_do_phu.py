@@ -79,7 +79,7 @@ TAG_CHUNG = frozenset({
 
 # ───────────────────────────── cấu hình + nhịp ─────────────────────────────
 def cau_hinh(du_an: dict) -> dict:
-    """{"bat", "tran_usd"} hiệu lực: `du_an.cau_hinh.do_phu`; thiếu → bật, 0,10 USD. Trần rác
+    """{"bat", "tran_usd"} hiệu lực: `du_an.cau_hinh.do_phu`; thiếu → bật, 0,20 USD. Trần rác
     (không phải số, âm) → mặc định; kẹp [0, `TRAN_TOI_DA`]; 0 = tắt."""
     goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
     x = goc.get("do_phu") if isinstance(goc.get("do_phu"), dict) else {}
@@ -200,8 +200,10 @@ LY_DO = {"chi_hashtag": "chỉ nhắc brand qua hashtag — tìm theo từ khoá
          "it_thich": "ít lượt thích — lượt nổi (nhiều thích) không với tới",
          "tac_gia_moi": "nhà sáng tạo chưa có bài nào trong kho",
          "khac": "tìm theo từ khoá không trả về bài này"}
-#: Lý do kiểu "tụt hạng" (tìm có thể trả về nhưng bài nằm quá sâu) → nới lượt nổi.
-LY_DO_TUT_HANG = ("chi_hashtag", "ngoai_cua_so", "it_thich")
+#: Lý do kiểu "tụt hạng" (tìm có thể trả về nhưng bài nằm quá sâu) → nới lượt nổi. KHÔNG gồm
+#: `it_thich` (review M3): thêm trang "nhiều thích" không với tới bài ít thích — bài đó chỉ lấp
+#: được qua feed hashtag (hashtag lượt nổi) hoặc tìm theo ngày, nên không đẩy lượt nổi lên mãi.
+LY_DO_TUT_HANG = ("chi_hashtag", "ngoai_cua_so")
 
 
 def ma_ly_do(d: dict, dt: datetime.datetime | None, tu: list[str], tac_gia_kho: set[str],
@@ -254,6 +256,7 @@ def lay_mau(trang_tag: dict[str, int], trang_tg: dict[str, int], cid: dict, uid:
         x["loi"] = A._che_token(f"{getattr(e, 'ma', type(e).__name__)}: {e}")[:120]
         if getattr(e, "ma", "") in TT._DUNG_HAN:
             tk["dung"] = e.ma
+            ngan.dung = e.ma
             ngan.toi_da = 0
 
     def mot_tag(t: str) -> list[tuple[dict, str]]:
@@ -285,6 +288,8 @@ def lay_mau(trang_tag: dict[str, int], trang_tg: dict[str, int], cid: dict, uid:
 
     ra = [y for ds in TT._song_song(mot_tag, list(trang_tag)) for y in ds]
     ra += [y for ds in TT._song_song(mot_nguoi, list(trang_tg)) for y in ds]
+    if getattr(ngan, "dung", None) and not tk.get("dung"):
+        tk["dung"] = ngan.dung              # trang sau gặp hết tiền / huỷ (đã khoá bộ đếm)
     return ra, tk
 
 
@@ -358,7 +363,10 @@ TAG_NOI_TOI_DA = 4
 NOI_TRANG_TOI_DA = 4
 NOI_GIO_TOI_THIEU = 10
 TUT_HANG_TOI_THIEU = 2       # ≥ 2 bài sót kiểu tụt hạng, hoặc ≥ 25% thảo luận sót
-TOT = 90.0                   # độ phủ theo thảo luận từ mức này: lùi một nấc lượt nổi
+TOT = 90.0                   # độ phủ theo thảo luận ≥ mức này HAI lần liền: lùi một nấc
+#: Giá THẬT một yêu cầu TikTok API (đo 17/10/2026 trên gói FREE: 0,0023–0,0034 USD, phí nền
+#: tảng mỗi run) — kiểm độ phủ chia số yêu cầu + ghi sổ theo mức cao này (review LOW).
+GIA_YEU_CAU_THAT = 0.0034
 
 
 def cau_hinh_noi(cfg: dict | None) -> dict:
@@ -379,10 +387,12 @@ def cau_hinh_noi(cfg: dict | None) -> dict:
 
 
 def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: dict | None,
-              do_phu_tl: float | None, bay_gio: datetime.datetime) -> dict:
+              do_phu_tl: float | None, bay_gio: datetime.datetime,
+              tl_truoc: float | None = None) -> dict:
     """Việc Mark tự làm cho các bài sót (TẤT CẢ, không chỉ 10 bài hiện); ghi câu vào `hanh_dong`
-    của từng bài. -> {"de_xuat": [dòng cho `lang_nghe_db.ghi_de_xuat`], "noi_cfg": cấu hình lượt
-    nổi mới, "tom": bản tóm tắt lưu bảng}."""
+    của từng bài. `tl_truoc`: độ phủ theo thảo luận của lần kiểm trước (lùi nấc lượt nổi khi
+    HAI lần liền ≥ `TOT`). -> {"de_xuat": [dòng cho `lang_nghe_db.ghi_de_xuat`], "noi_cfg": cấu
+    hình lượt nổi mới, "tom": bản tóm tắt lưu bảng}."""
     import theo_doi_api as TDA
     ngay = bay_gio.astimezone(_VN).strftime("%d/%m")
     # 1. Nhà sáng tạo chưa theo dõi → đề xuất (gộp theo người).
@@ -417,26 +427,29 @@ def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: 
             if dem[t] >= 2 or diem[t] >= DE_XUAT_MANH or any(g in t for g in goc)]
     tag_moi = list(dict.fromkeys(nhan + cu["tag"]))[:TAG_NOI_TOI_DA]
     them_tag = [t for t in tag_moi if t not in cu["tag"]]
-    # 3. Tụt hạng → nới lượt nổi; tốt và hết tụt hạng → lùi một nấc.
+    # 3. Hai lần kiểm liền tốt (≥ `TOT`) → lùi một nấc (review M3: không chờ hết sót); còn tụt
+    #    hạng đáng kể → nới lượt nổi.
     tut = [s for s in sot if set(s.get("ma_ly_do") or []) & set(LY_DO_TUT_HANG)]
     tl_sot = sum(int(s.get("thao_luan") or 0) for s in sot)
     tl_tut = sum(int(s.get("thao_luan") or 0) for s in tut)
     trang, gio = cu["trang"], cu["gio"]
     ly = ""
-    if tut and (len(tut) >= TUT_HANG_TOI_THIEU or tl_tut >= 0.25 * max(1, tl_sot)):
+    tot = (do_phu_tl is not None and do_phu_tl >= TOT and tl_truoc is not None
+           and float(tl_truoc) >= TOT)
+    if tot and (trang > TDA.NOI_TRANG or gio < TDA.NOI_GIO_GIAN):
+        if gio < TDA.NOI_GIO_GIAN:
+            gio = min(TDA.NOI_GIO_GIAN, gio * 2)
+        else:
+            trang -= 1
+        ly = f"độ phủ tốt hai lần liền — lùi lượt nổi về {trang} trang/từ khoá, mỗi {gio} giờ"
+    elif not tot and tut and (len(tut) >= TUT_HANG_TOI_THIEU
+                              or tl_tut >= 0.25 * max(1, tl_sot)):
         if trang < NOI_TRANG_TOI_DA:
             trang += 1
             ly = f"nới lượt nổi lên {trang} trang/từ khoá ({len(tut)} bài sót do tụt hạng)"
         elif gio > NOI_GIO_TOI_THIEU:
             gio = max(NOI_GIO_TOI_THIEU, gio // 2)
             ly = f"lượt nổi dày lên mỗi {gio} giờ ({len(tut)} bài sót do tụt hạng)"
-    elif not tut and do_phu_tl is not None and do_phu_tl >= TOT and (
-            trang > TDA.NOI_TRANG or gio < TDA.NOI_GIO_GIAN):
-        if gio < TDA.NOI_GIO_GIAN:
-            gio = min(TDA.NOI_GIO_GIAN, gio * 2)
-        else:
-            trang -= 1
-        ly = f"độ phủ tốt — lùi lượt nổi về {trang} trang/từ khoá, mỗi {gio} giờ"
     noi_moi = {"trang": trang, "gio": gio, "tag": tag_moi,
                "luc": bay_gio.isoformat(timespec="seconds"), "ly_do": ly}
     doi_noi = trang != cu["trang"] or gio != cu["gio"]

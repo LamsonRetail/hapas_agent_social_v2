@@ -761,7 +761,7 @@
     if (canh || x.cu) {
       nh.appendChild(chuNode(" "));
       nh.appendChild(nutGoiY(canh ? "Độ phủ theo thảo luận " + pt(x.do_phu_tl) + " — dưới " + pt(x.nguong) +
-        ": nhiều bài brand chưa được thu thập. Bấm “bài sót” để xem." : "Lần kiểm gần nhất " + ngayDu(x.luc) + " đã quá 14 ngày.", "goi-y--canh"));
+        ": nhiều bài brand chưa được thu thập. Bấm “bài sót” để xem." : "Lần kiểm gần nhất " + ngayDu(x.luc) + " đã quá " + so(x.cu_ngay || 7) + " ngày.", "goi-y--canh"));
     }
     than.appendChild(nh);
     var s = tao("span", "kpi__so so", pt(x.do_phu_tl));

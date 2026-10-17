@@ -117,7 +117,9 @@ QUERY = (
     "&gom_mg=1",
 )
 #: Khoá của /api/chi-so mà tool không tính (thông tin phiên/lượt, không phải số của bộ lọc).
-KHONG_TINH = {"gan_nhan", "du_an", "ngay_cuoi_chua_tron", "luot_gan_nhat", "cap_nhat_luc"}
+#: `do_phu` (kiểm độ phủ, 17/10/2026): lần kiểm gần nhất, không theo bộ lọc/khoảng ngày.
+KHONG_TINH = {"gan_nhan", "du_an", "ngay_cuoi_chua_tron", "luot_gan_nhat", "cap_nhat_luc",
+              "do_phu"}
 
 
 def _json(x):

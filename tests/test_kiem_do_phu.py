@@ -70,7 +70,7 @@ def test_chon_tac_gia_bo_nguon_dang_theo_doi_va_trung():
 
 @pytest.mark.parametrize("cid, uid", [({}, {}), ({"t1": "1", "t2": "2", "t3": "3", "t4": "4"},
                                                 {f"u{i}": str(i) for i in range(6)})])
-def test_chia_yeu_cau_khong_vuot_tran_va_2_3_cho_hashtag(cid, uid):
+def test_chia_yeu_cau_khong_vuot_tran_va_phan_hashtag(cid, uid):
     tag, tg = ["t1", "t2", "t3", "t4"], [f"u{i}" for i in range(6)]
     n = int(KDP.TRAN_MAC_DINH / TT.GIA_YEU_CAU + 1e-9)
     assert n == 66
@@ -187,7 +187,10 @@ def test_trang_sau_loi_giu_trang_truoc_trang_dau_loi_thi_nem(monkeypatch):
         return {"status_code": 0, "cursor": 20, "has_more": 1,
                 "aweme_list": [_aw(5, "kol", "#hapas", BAY)]}
     GiaApi(monkeypatch, tra)
-    assert [x["id"] for x in TT.bai_hashtag("1", 3, TT.Ngan(1))] == ["5"]
+    ngan = TT.Ngan(1)
+    assert [x["id"] for x in TT.bai_hashtag("1", 3, ngan)] == ["5"]
+    # Review LOW: hết tiền ở trang sau → giữ trang đã trả tiền NHƯNG khoá bộ đếm (luồng khác dừng).
+    assert ngan.dung == "HET_TIEN_THANG" and ngan.toi_da == 0 and not ngan.xin()
     GiaApi(monkeypatch, lambda p: A.LoiApify("LOI", "hỏng"))
     with pytest.raises(A.LoiApify):
         TT.bai_hashtag("1", 3, TT.Ngan(1))
@@ -302,7 +305,8 @@ def test_kiem_do_phu_do_sot_lap_lo_ghi_bang_va_tien(mo):  # noqa: F811
     # dõi hapas.official).
     ids = [ph["run_id"] for ph in v.d["nen_tang"]["do_phu"]["phan"] if ph.get("run_id")]
     assert len(ids) == len(api.goi) == kq["so_yeu_cau"] <= 66
-    assert kq["usd"] == pytest.approx(len(api.goi) * TT.GIA_YEU_CAU) == dong["chi_phi_usd"]
+    # Sổ theo giá THẬT đo 17/10 (0,0034 USD/yêu cầu — review LOW).
+    assert kq["usd"] == pytest.approx(len(api.goi) * KDP.GIA_YEU_CAU_THAT) == dong["chi_phi_usd"]
     assert {t["ten"] for t in dong["mau"]["tag"]} == {"#hapas", "#lammoidieuviyeu"}
     assert {t["ten"] for t in dong["mau"]["tac_gia"]} == {"@kol.cu", "@kol.dx"}
     assert not any(p.get("profile_username") == "hapas.official" for p in api.goi)
@@ -344,13 +348,17 @@ def test_kiem_do_phu_tat_het_tien_khoi_dong_lai(mo):  # noqa: F811
     assert KDP.cau_ghi_chu(kq) == [f"kiểm độ phủ: bỏ qua ({kq['bo_qua']})"]
     v = GiaViec({}, [], con=200)
     assert "hết giờ" in _chay_dp(v)["bo_qua"] and not api.goi
-    v = GiaViec({"do_phu": {"phan": [{"id": "dp-r1", "run_id": "r1", "nen_tang": "do_phu"}]}}, [])
+    v = GiaViec({"do_phu": {"phan": [{"id": "dp-r1", "run_id": "r1", "nen_tang": "do_phu"},
+                                     {"id": "dp-r2", "run_id": "r2", "nen_tang": "do_phu"}]}}, [])
     kq = _chay_dp(v)
     assert "khởi động lại" in kq["ghi_chu"][0] and not api.goi
-    assert v.d["nen_tang"]["do_phu"]["phan"][-1]["ma"] == "KHONG_KIEM_DUOC"
-    # Trần riêng 0,03 USD ⇒ ≤ 10 yêu cầu.
+    moc = v.d["nen_tang"]["do_phu"]["phan"][-1]
+    # Review LOW: phần dừng giữa chừng mang tiền đã tiêu (2 run).
+    assert moc["ma"] == "KHONG_KIEM_DUOC" and moc["usd_so"] == kq["usd"] == pytest.approx(
+        2 * KDP.GIA_YEU_CAU_THAT)
+    # Trần riêng 0,03 USD ⇒ ≤ 8 yêu cầu theo giá thật 0,0034.
     kq = _chay_dp(GiaViec({}, []), dict(DU_AN, cau_hinh={"do_phu": {"tran_usd": 0.03}}))
-    assert 0 < len(api.goi) <= 10 and kq["usd"] <= 0.03 + 1e-9
+    assert 0 < len(api.goi) <= 8 and kq["usd"] <= 0.03 + 1e-9
 
 
 def test_kiem_do_phu_khong_tieu_dong_nao_thi_tra_moc_cu(mo):  # noqa: F811
@@ -428,7 +436,7 @@ def test_hanh_dong_tag_luot_noi_chi_tag_chien_dich_va_tran_4():
 
 
 def test_hanh_dong_noi_trang_roi_nhip_roi_lui_khi_tot():
-    tut = [_sot("a", 5, ("ngoai_cua_so",)), _sot("b", 5, ("it_thich",))]
+    tut = [_sot("a", 5, ("ngoai_cua_so",)), _sot("b", 5, ("chi_hashtag",))]
     hd = KDP.hanh_dong(tut, ["hapas"], set(), None, 50.0, BAY)
     assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (3, 20)
     hd = KDP.hanh_dong(tut, ["hapas"], set(), {"trang": 4, "gio": 20}, 50.0, BAY)
@@ -436,16 +444,29 @@ def test_hanh_dong_noi_trang_roi_nhip_roi_lui_khi_tot():
     hd = KDP.hanh_dong(tut, ["hapas"], set(), {"trang": 4, "gio": 10}, 50.0, BAY)
     assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (4, 10), "đã tối đa"
     # Một bài tụt hạng nhỏ (< 25% thảo luận sót) không đủ để nới.
-    hd = KDP.hanh_dong([_sot("a", 1, ("it_thich",)), _sot("b", 99)], ["hapas"], set(), None,
-                       50.0, BAY)
+    hd = KDP.hanh_dong([_sot("a", 1, ("ngoai_cua_so",)), _sot("b", 99)], ["hapas"], set(),
+                       None, 50.0, BAY)
     assert hd["noi_cfg"]["trang"] == 2
-    # Độ phủ tốt, không còn tụt hạng: lùi một nấc (nhịp trước, rồi trang).
-    hd = KDP.hanh_dong([], ["hapas"], set(), {"trang": 4, "gio": 10}, 95.0, BAY)
+    # Hai lần kiểm liền ≥ 90%: lùi một nấc (nhịp trước, rồi trang); một lần thì chưa.
+    assert KDP.hanh_dong([], ["hapas"], set(), {"trang": 4, "gio": 10}, 95.0, BAY,
+                         tl_truoc=None)["noi_cfg"]["gio"] == 10
+    hd = KDP.hanh_dong([], ["hapas"], set(), {"trang": 4, "gio": 10}, 95.0, BAY, tl_truoc=92.0)
     assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (4, 20)
-    hd = KDP.hanh_dong([], ["hapas"], set(), {"trang": 4, "gio": 20}, 95.0, BAY)
+    hd = KDP.hanh_dong([], ["hapas"], set(), {"trang": 4, "gio": 20}, 95.0, BAY, tl_truoc=92.0)
     assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (3, 20)
     assert KDP.cau_hinh_noi({"trang": 99, "gio": 1, "tag": "rác"}) == {"trang": 4, "gio": 10,
                                                                        "tag": []}
+
+
+def test_it_thich_khong_noi_luot_noi_va_lui_du_con_sot_it_thich():
+    """Review M3: thêm trang "nhiều thích" không với tới bài ít thích → `it_thich` không nới lượt
+    nổi; hai lần kiểm liền tốt thì lùi nấc DÙ còn bài sót ít thích."""
+    it = [_sot("a", 50, ("it_thich",)), _sot("b", 50, ("it_thich", "tac_gia_moi"))]
+    hd = KDP.hanh_dong(it, ["hapas"], set(), None, 40.0, BAY)
+    assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (2, 20)
+    hd = KDP.hanh_dong(it, ["hapas"], set(), {"trang": 4, "gio": 20}, 91.0, BAY, tl_truoc=90.0)
+    assert hd["noi_cfg"]["trang"] == 3 and "hai lần liền" in hd["tom"]["noi"]["ly_do"]
+    assert "it_thich" not in KDP.LY_DO_TUT_HANG
 
 
 def test_luot_noi_dung_tag_va_trang_tu_kiem_do_phu_trong_tran(mo):  # noqa: F811
@@ -615,3 +636,117 @@ def test_trang_ngan_sach_kiem_do_phu_luu_cong_tac_va_tran():
     dang_nhap(c, XEM)
     t = c.get("/ngan-sach").text
     assert 'name="dp_tran"' not in t and "Kiểm độ phủ (TikTok, 2 lần/tuần)" in t
+
+
+# ───────────────────────────── review 17/10 (M1–M5) ─────────────────────────────
+def _mo_dp(mo):  # noqa: F811
+    mo.setattr(T, "_kiem_do_phu", _KIEM_THAT)
+    mo.setattr(TT, "dung_api", lambda viec: True)
+    kho = KhoDp(mo)
+    kho.da_co = {"tiktok:70000002"}
+    mo.setattr(K, "khoa_da_co", lambda ma, khoa: {k for k in khoa if k in kho.da_co | {
+        r["khoa"] for _, rows in kho.bai for r in rows}})
+    api = GiaApi(mo, _tra_mau(datetime.datetime.now(_VN) - datetime.timedelta(days=15)))
+    return kho, api
+
+
+def test_m1_sql_do_phu_gan_nhat_doc_du_cot_ma_the_dung():
+    """Kho giả che mất lỗi: SQL thật phải SELECT mọi cột `do_phu_json` đọc (gồm hanh_dong)."""
+    import inspect
+    from dashboard import kho as KHO
+    sql = inspect.getsource(KHO.do_phu_gan_nhat)
+    cot = set(re.findall(r"\b([a-z_]+)\b", sql.split("FROM kiem_do_phu")[0].split("SELECT")[1]))
+    can = {"luc", "nen_tang", "so_mau", "so_nhac", "so_da_co", "so_sot", "so_da_loai",
+           "bo_sung", "so_yeu_cau", "chi_phi_usd", "do_phu", "do_phu_tl", "mau", "bai_sot",
+           "hanh_dong"}
+    assert can <= cot, can - cot
+    assert set(K._COT_DO_PHU) - {"du_an", "luot_id"} <= cot | {"thao_luan_nhac",
+                                                               "thao_luan_da_co"}
+
+
+def test_m2_bai_ai_loai_luc_lap_khong_tinh_la_sot_va_khong_tu_sua(mo):  # noqa: F811
+    kho, _api = _mo_dp(mo)
+    mo.setattr(A, "_phan_xu_ai", lambda cho, *a, **k: (
+        {i: (False, "khong_lien_quan") for i in range(len(cho))},
+        {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"}))
+    kq = _chay_dp(GiaViec({}, []))
+    so = kq["so"]
+    assert (so["so_nhac"], so["so_da_co"], so["so_sot"], so["so_da_loai"]) == (1, 1, 0, 1)
+    assert so["do_phu"] == 100.0 and kq["mau"]["sau_ai"] is True
+    (dong,) = kho.dong
+    assert dong["bai_sot"] == [] and dong["hanh_dong"]["de_xuat"] == []
+    assert dong["hanh_dong"]["tag_them"] == [] and dong["hanh_dong"]["noi"]["ly_do"] == ""
+    assert not kho.dx or all(x["dinh_danh"] != "kol.moi" or "kiểm độ phủ" not in x["ly_do"]
+                             for d in kho.dx for x in d)
+
+
+def test_m3_tat_kiem_do_phu_tra_luot_noi_ve_mac_dinh(mo):  # noqa: F811
+    mo.setattr(T, "_kiem_do_phu", _KIEM_THAT)
+    T.ghi_moc_tk("hapas", {KDP.KHOA_NOI_CFG: {"trang": 4, "gio": 10, "tag": ["x1"]}})
+    tat = dict(DU_AN, cau_hinh={"do_phu": {"bat": False}})
+    assert _chay_dp(GiaViec({}, []), tat) == {}
+    assert not T.doc_moc_tk("hapas").get(KDP.KHOA_NOI_CFG)
+    # Lượt nổi của dự án tắt kiểm độ phủ không dùng cấu hình đã nới (kể cả trước khi xoá).
+    mo.setattr(TT, "dung_api", lambda viec: True)
+    goi = {}
+    mo.setattr(T.TDA, "tim_noi_tiktok", lambda q, b, tran, trang=2, **k: goi.update(
+        trang=trang, tag=k.get("tag")) or [])
+    moc = {KDP.KHOA_NOI_CFG: {"trang": 4, "gio": 10, "tag": ["x1"]}}
+    T._them_luot_noi(GiaViec({}, []), "hapas", 3, ["hapas"], [], moc,
+                     datetime.datetime.now(_VN), 5.0, 1.0,
+                     [{"run_id": "r1", "actor": T.TT_ACTOR}], dp_bat=False)
+    assert goi == {"trang": 2, "tag": None}
+
+
+def test_m4_loi_sau_khi_lay_mau_van_tru_tien_va_xu_ly_tiep_tu_dia(mo):  # noqa: F811
+    kho, api = _mo_dp(mo)
+    that = KDP.danh_dau
+
+    def hong(*a, **k):
+        raise RuntimeError("hỏng giữa chừng")
+    mo.setattr(KDP, "danh_dau", hong)
+    v = GiaViec({}, [])
+    with pytest.raises(RuntimeError):
+        _chay_dp(v)
+    n = len(api.goi)
+    ctx = v.d["kiem_do_phu"]
+    assert ctx["usd"] == pytest.approx(n * KDP.GIA_YEU_CAU_THAT) and ctx["cho_xu_ly"]
+    assert v.dia.get("do_phu"), "mẫu thô đã trả tiền nằm trong sổ việc"
+    # Bot khởi động lại: xử lý tiếp từ đĩa, KHÔNG gọi API lại.
+    mo.setattr(KDP, "danh_dau", that)
+    kq = _chay_dp(v)
+    assert len(api.goi) == n and kq["so"]["so_sot"] == 1 and len(kho.dong) == 1
+    # Trong lượt /theodoi: lỗi kiểm độ phủ vẫn trừ tiền đã tiêu khỏi phần còn của tháng.
+    from test_theo_doi import GiaKho
+    GiaKho().cai(mo)
+    mo.setattr(T, "_tim_tu_khoa", lambda *a, **k: {})
+    con = []
+    mo.setattr(T, "_lay_binh_luan", lambda v, d, luot, c, han: con.append(c) or {})
+
+    def kiem(v, *a):
+        v.d["kiem_do_phu"] = {"usd": 0.05}
+        raise RuntimeError("x")
+    mo.setattr(T, "_kiem_do_phu", kiem)
+    T.chay_viec(GiaViec({}, []))
+    assert con[0] == pytest.approx(5.0 - 0.05)
+
+
+def test_m5_ngan_sach_viec_giu_cho_kiem_do_phu_khi_toi_han(mo):  # noqa: F811
+    import quet_lon
+    import viec_nen
+    from test_theo_doi import GiaKho, _nguon
+    GiaKho(nguon=[_nguon(1, "youtube", "@b")]).cai(mo)
+    mo.setattr(quet_lon, "tran_usd_nen", lambda: 20.0)
+    mo.setattr(quet_lon, "ngan_sach", lambda tran: (8.0, {"con_lai": 9.0}, ""))
+    goi = {}
+
+    def tao(loai, tham_so, nen_tang, uoc, ngan_sach, ghi_chu=None, **kw):
+        goi.update(uoc=uoc, ns=ngan_sach)
+        return {"dang_chay_nen": True, "ma_viec": "t1"}
+    mo.setattr(viec_nen, "tao_viec", tao)
+    s = T.lenh_theodoi("hapas")
+    assert goi["uoc"]["usd"] == pytest.approx(0.2) and "0,20 USD kiểm độ phủ" in s
+    assert T.uoc_do_phu(DU_AN) == 0.2
+    T.ghi_moc_tk("hapas", {KDP.KHOA_MOC: {"luc": datetime.datetime.now(_VN).isoformat()}})
+    assert T.uoc_do_phu(DU_AN) == 0.0, "chưa tới 84 giờ: không giữ chỗ"
+    assert T.uoc_do_phu(dict(DU_AN, cau_hinh={"do_phu": {"bat": False}})) == 0.0
