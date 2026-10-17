@@ -318,6 +318,94 @@ def test_chi_phi_noi_ca_goi_apify(monkeypatch):
     assert "han_muc_apify" in HD._HAM_KHO
 
 
+def _kho_ngan_sach():
+    """HAPAS 18/10 01:00 như `test_du_bao_thuc` (12 lượt thật, lịch 07:00, gói FREE, trần console
+    2 USD/lượt) + một trang Facebook kênh nhà 10 bài đăng ≤ 1 bài/ngày (co còn 4) + một dự án
+    thứ hai đang bật (gói dùng chung)."""
+    from test_du_bao_thuc import DP_CUOI, DU_AN_HAPAS, LICH_07, LUOT_THAT
+    from test_goi_apify import _anh
+    kho = GiaKho()
+    kho.du_an["hapas"].update({k: DU_AN_HAPAS[k] for k in (
+        "tu_khoa", "bl_bat", "bl_so_bai", "bl_moi_bai", "tk_bat", "tk_so_bai", "cau_hinh",
+        "tran_usd_thang")})
+    kho.du_an["khac"] = {**kho.du_an["hapas"], "ma": "khac", "ten": "Khác",
+                         "tran_usd_thang": 10.0, "cau_hinh": {}}
+    for i, (ma, loai) in enumerate((("hapas", "kenh_nha"), ("hapas", "kol"),
+                                    ("khac", "kenh_nha")), 1):
+        kho.nguon[i] = {"id": i, "du_an": ma, "nen_tang": "facebook",
+                        "dinh_danh": f"https://www.facebook.com/trang{i}", "ten": f"T{i}",
+                        "link": "", "loai": loai, "nhan": [], "trang_thai": "dang_theo_doi",
+                        "chu_ky_ngay": 1, "so_bai_moi_lan": 10, "them_qua": "dashboard",
+                        "them_boi": None, "them_luc": None, "quet_cuoi": None,
+                        "loi_cuoi": None, "loi_luc": None}
+    kho.nhip_dang = lambda du_an, ngay=14: {1: 1, 2: 1, 3: 1}
+    kho.luot = [dict(x) for x in LUOT_THAT] + [dict(x, du_an="khac", id=100 + x["id"])
+                                               for x in LUOT_THAT[1:6]]
+    kho._lich()[6] = dict(LICH_07)
+    kho.da_tieu_thang = lambda: {"hapas": 15.44, "khac": 2.0}
+    kho.do_phu = [{"luc": DP_CUOI, "hanh_dong": {}}]
+    kho.han_muc_apify = lambda: _anh()
+    return kho
+
+
+def test_chi_phi_va_lich_khop_trang_tung_khoi(monkeypatch):
+    """Soát 18/10/2026: Mark trả lời số chi phí KHÁC dashboard — không co số bài nguồn (trang co
+    theo nhịp đăng), `tong_quan`/`dong_lich` không truyền `chi` (mức tối đa 8,6 USD/lượt chưa kẹp ở
+    trần console 2 USD), trần nội bộ của gói chỉ của một dự án (trang: tổng dự án đang bật). Nay
+    cùng hàm, cùng tham số: so TỪNG KHỐI tool với khối trang tính ra trên CÙNG kho giả."""
+    from test_du_bao_thuc import BAY
+
+    from dashboard import chi_phi as CP
+    from dashboard import trang_lich as TL
+    ghi: dict = {}
+
+    def nghe(mod, ten):
+        goc = getattr(mod, ten)
+
+        def boc(*a, **kw):
+            ra = goc(*a, **kw)
+            ghi.setdefault(ten, []).append(_json(ra))
+            return ra
+        monkeypatch.setattr(mod, ten, boc)
+    for mod, ten in ((CP, "khoi_ngan_sach"), (CP, "goi_ngan_sach"), (TL, "tong_quan"),
+                     (TL, "dong_lich")):
+        nghe(mod, ten)
+    monkeypatch.setattr(A, "_bay_gio", lambda: BAY)
+    _, c, kho = tao(_kho_ngan_sach())
+    dang_nhap(c, QL)
+    assert c.get("/ngan-sach?du_an=hapas").status_code == 200
+    assert c.get("/lich-quet?du_an=hapas").status_code == 200
+    trang = {k: list(v) for k, v in ghi.items()}
+    ghi.clear()
+    monkeypatch.setattr(HD, "email_cua", lambda oid: QL)
+    ra = HD.tra_loi({"du_an": "hapas", "phan": ["chi_phi", "lich"]}, kho, open_id="ou_hoi",
+                    bay_gio=BAY)["phan"]
+    tool = ghi
+    # Khối dự án: Ngân sách (hapas + khác cho gói) — cùng đầu vào thì cùng mọi số.
+    k_trang = {x["du_bao"]["tran"]: x for x in trang["khoi_ngan_sach"]}
+    assert tool["khoi_ngan_sach"][0] == trang["khoi_ngan_sach"][0]          # hapas
+    assert sorted(_json(x)["du_bao"]["tran"] for x in tool["khoi_ngan_sach"]) == sorted(k_trang)
+    assert tool["goi_ngan_sach"] == trang["goi_ngan_sach"]
+    # Lịch: `tong_quan` (trang Lịch + `theo_lich` của chi phí) và `dong_lich`.
+    assert all(x == trang["tong_quan"][0] for x in tool["tong_quan"])
+    assert tool["dong_lich"] == trang["dong_lich"]
+    # Số tool nói ra = số trang hiện.
+    k, g, tq, dl = (trang["khoi_ngan_sach"][0], trang["goi_ngan_sach"][0],
+                    trang["tong_quan"][0], trang["dong_lich"][0][0])
+    cp = ra["chi_phi"]
+    assert cp["con_lai_theo_nguon_usd"] == k["db"]["con_lai"]
+    assert cp["du_bao_thuc"]["du_bao_thang_usd"] == k["du_bao"]["du_bao_thang"]
+    assert cp["goi_apify"]["du_bao_toi_dat_lai_usd"] == g["du_bao_chu_ky"]
+    assert cp["theo_lich"]["tong"] == tq["tong"] and cp["theo_lich"]["tong_thuc"] == tq["tong_thuc"]
+    assert ra["lich"]["tong_quan_thang"]["tong"] == tq["tong"]
+    assert ra["lich"]["lich"][0]["usd_30_ngay"] == dl["usd_30"]
+    # Đúng các lỗi cũ: kênh nhà co còn 4 bài, KOL lấy đủ; mỗi lượt kẹp 2 USD; trần nội bộ 30 + 10.
+    co = {n["id"]: n["so_bai_co_gian"] for n in k["nguon"]}
+    assert co == {1: 4, 2: None}
+    assert dl["moi_luot"] == 2.0 and ra["lich"]["lich"][0]["moi_luot_toi_da_usd"] == 2.0
+    assert g["tran_noi_bo"] == 40.0 and cp["goi_apify"]["tran_noi_bo_vo_hieu"] is True
+
+
 # ───────────────────────────── quyền ─────────────────────────────
 def test_nguoi_khong_co_trong_nguoi_xem_bi_tu_choi(monkeypatch):
     kho = _kho_mau()

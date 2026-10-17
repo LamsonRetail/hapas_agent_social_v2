@@ -1061,6 +1061,57 @@ def goi_du_bao(goi: dict, phan: list[dict], bay_gio: datetime.datetime) -> dict:
     return ra
 
 
+# ───── khối Ngân sách của MỘT dự án (soát 18/10/2026): trang Ngân sách / Lịch quét VÀ Mark
+# (`hoi_dashboard_tool`) gọi ĐÚNG các hàm này với cùng tham số — Mark từng báo mức tối đa chưa kẹp
+# (8,6 USD/lượt), tiền nguồn theo số bài cấu hình (chưa co) và trần gói của riêng một dự án, khác
+# số trên trang. Thuần, không SQL: bên gọi đọc kho rồi đưa vào. ─────
+def khoi_ngan_sach(d: dict, tieu: float, tran_pf: float | None, nguon: list[dict], nhip: dict,
+                   luot_gan: list[dict], cac_lich: list[dict], lan_cuoi: datetime.datetime | None,
+                   dat_lai: datetime.datetime | None, bay_gio: datetime.datetime) -> dict:
+    """Mọi số của một dự án trên trang Ngân sách. `nguon`: `kho.cac_nguon` (chưa co); `nhip`:
+    `kho.nhip_dang`; `luot_gan`: `kho.cac_luot(ma, 1, 20)`; `lan_cuoi`: lần kiểm độ phủ cuối;
+    `dat_lai`: lúc gói Apify đặt lại (None khi chưa có ảnh chụp gói).
+    -> {nguon (đã co), db (`du_bao` — chỉ nguồn), du_bao (`du_bao_thuc`), thuc, bang, lich, do_phu,
+    phan_goi (phần của dự án trong dự báo gói tới lúc đặt lại — None khi dự án tắt / chưa có gói)}."""
+    nguon = gan_co_gian(nguon, nhip or {}, d)
+    db = du_bao(nguon, tieu, float(d.get("tran_usd_thang") or 0), tran_pf, bay_gio)
+    thuc = chi_luot_thuc(luot_gan, bay_gio)
+    bang = bang_cau_hinh(d)
+    dl = du_bao_lich(cac_lich, bang, nguon, bay_gio)
+    dp = du_bao_do_phu(d, lan_cuoi, bay_gio)
+    dbt = du_bao_thuc(db, thuc, dl["luot_con_lai"] if dl.get("co_lich") else db["ngay_con_lai"],
+                      dp["con_lai"])
+    phan = None
+    if d.get("dang_bat") and dat_lai:
+        # Lượt tới lúc gói đặt lại: theo lịch đang bật; không có lịch thì 1 lượt/ngày (lịch
+        # console) từ ngày mai cùng giờ. Mốc đúng lúc đặt lại thuộc chu kỳ mới: (bây giờ, đặt lại).
+        moc = (cac_moc_du_an(cac_lich, bay_gio, dat_lai - datetime.timedelta(microseconds=1))
+               if dl.get("co_lich") else
+               [m for i in range(1, 40) if (m := bay_gio + datetime.timedelta(days=i)) < dat_lai])
+        phan = {"ten": d.get("ten"), "thuc": thuc, "moc": moc,
+                "dp_usd": luot_do_phu(bay_gio, dat_lai, lan_cuoi)
+                * (dp["tran_usd"] if dp["bat"] else 0.0)}
+    return {"nguon": nguon, "db": db, "du_bao": dbt, "thuc": thuc, "bang": bang, "lich": dl,
+            "do_phu": dp, "phan_goi": phan}
+
+
+def goi_ngan_sach(snap: dict | None, khoi: list[tuple[dict, dict]],
+                  bay_gio: datetime.datetime) -> dict:
+    """Khối "Gói Apify" của trang Ngân sách: trần nội bộ = TỔNG trần các dự án ĐANG BẬT, dự báo tới
+    lúc đặt lại gộp phần của mọi dự án đang bật (gói dùng chung). `khoi`: [(dự án,
+    `khoi_ngan_sach`)] của MỌI dự án."""
+    return goi_du_bao(goi_apify(snap, sum(k["db"]["tran"] for d, k in khoi if d.get("dang_bat")),
+                                bay_gio),
+                      [k["phan_goi"] for _, k in khoi if k.get("phan_goi")], bay_gio)
+
+
+def chi_lich(luot_gan: list[dict], snap: dict | None, bay_gio: datetime.datetime) -> dict:
+    """`chi` của trang Lịch quét (`trang_lich.dong_lich` / `tong_quan` / `xem_truoc`): chi THẬT các
+    lượt gần nhất + trần console mỗi lượt từ ảnh chụp gói Mark ghi (None khi chưa có)."""
+    return {"thuc": chi_luot_thuc(luot_gan, bay_gio),
+            "tran_luot": (snap or {}).get("tran_luot_usd")}
+
+
 # ───── kiểm độ phủ (17/10/2026, bản sao `kiem_do_phu` của Mark — bài thử đối chiếu) ─────
 #: `kiem_do_phu.TRAN_MAC_DINH` / `TRAN_TOI_DA` / `GIO_GIAN`: chủ dự án chốt hai lần mỗi tuần (mỗi
 #: 84 giờ), tối đa 0,20 USD mỗi lần; tiền thật nằm trong lượt /theodoi (trần tháng dự án).

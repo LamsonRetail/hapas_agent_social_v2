@@ -166,7 +166,7 @@ _KHOA_DSN = threading.Lock()
 _HAM_KHO = ("vai_tro", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_luan_trong_khoang",
             "binh_luan_hop_le_gon", "bai_theo_khoa", "ngu_canh_bai", "cac_nguon", "da_tieu_thang",
             "tran_platform", "cac_luot", "tien_do_gan_nhan", "luot_xong_moi_nhat",
-            "do_phu_gan_nhat", "han_muc_apify")
+            "do_phu_gan_nhat", "han_muc_apify", "nhip_dang")
 
 
 class KhoMark:
@@ -624,55 +624,90 @@ def so_vn(n) -> str:
     return f"{int(n or 0):,}".replace(",", ".")
 
 
-def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
-    """Như trang Ngân sách (`app.trang_ngan_sach`) cho MỘT dự án + các lượt quét gần nhất."""
-    ma = du_an["ma"]
-    tieu = float((kho.da_tieu_thang() or {}).get(ma, 0.0))
-    tran_pf = kho.tran_platform(ma)
-    nguon = kho.cac_nguon(ma)
-    db = CP.du_bao(nguon, tieu, float(du_an.get("tran_usd_thang") or 0), tran_pf, bay_gio)
+def _goi_snap(kho) -> dict | None:
+    """Ảnh chụp gói Apify Mark ghi (`kho.han_muc_apify`); kho chưa có bảng / hàm → None."""
+    ham = getattr(kho, "han_muc_apify", None)
+    if ham is None:
+        return None
     try:
-        cac_lich = kho.cac_lich(ma)
-    except Exception as e:      # bảng lịch chưa có: như trang, coi như không có lịch
-        if not _loi_kho(e):
-            raise
-        cac_lich = []
-    tq = TL.tong_quan(cac_lich, du_an, nguon, tieu, tran_pf, bay_gio)
-    luot, tong = kho.cac_luot(ma, 1, min(top, LUOT_TOI_DA))
-    # Gói Apify (18/10/2026): trần THẬT của cả tài khoản — như khối "Gói Apify" trang Ngân sách
-    # (`chi_phi.goi_apify`); "ngân sách còn" phải nói cả phần còn của gói, không chỉ trần dự án.
-    goi = {"co": False}
-    ham_goi = getattr(kho, "han_muc_apify", None)
-    if ham_goi is not None:
-        try:
-            goi = CP.goi_apify(ham_goi(), db["tran"], bay_gio)
-        except Exception as e:
-            if not _loi_kho(e):
-                raise
-    # Dự báo theo CHI THẬT (18/10/2026) — như trang Ngân sách: trung vị ≤ 7 lượt gần nhất × số lượt
-    # còn lại (+ kiểm độ phủ), và tới lúc gói đặt lại.
-    luot_gan, _ = kho.cac_luot(ma, 1, 20, ghi_chu=False)
-    thuc = CP.chi_luot_thuc(luot_gan, bay_gio)
-    dl = CP.du_bao_lich(cac_lich, CP.bang_cau_hinh(du_an), nguon, bay_gio)
-    lan_cuoi = None
-    try:
-        r_dp = kho.do_phu_gan_nhat(ma, 1)
-        lan_cuoi = r_dp[0]["luc"] if r_dp else None
+        return ham()
     except Exception as e:
         if not _loi_kho(e):
             raise
-    dp = CP.du_bao_do_phu(du_an, lan_cuoi, bay_gio)
-    dbt = CP.du_bao_thuc(db, thuc, dl["luot_con_lai"] if dl.get("co_lich")
-                         else db["ngay_con_lai"], dp["con_lai"])
-    if goi.get("co") and goi.get("dat_lai"):
-        moc = (CP.cac_moc_du_an(cac_lich, bay_gio,
-                                goi["dat_lai"] - datetime.timedelta(microseconds=1))
-               if dl.get("co_lich") else
-               [m for i in range(1, 40)
-                if (m := bay_gio + datetime.timedelta(days=i)) < goi["dat_lai"]])
-        goi = CP.goi_du_bao(goi, [{"ten": du_an.get("ten"), "thuc": thuc, "moc": moc,
-                                   "dp_usd": CP.luot_do_phu(bay_gio, goi["dat_lai"], lan_cuoi)
-                                   * (dp["tran_usd"] if dp["bat"] else 0.0)}], bay_gio)
+        return None
+
+
+def _nhip(kho, ma: str) -> dict:
+    """Nhịp đăng từng nguồn (`kho.nhip_dang`) như trang (`app._nhip_dang`): lỗi kho → {}."""
+    ham = getattr(kho, "nhip_dang", None)
+    if ham is None:
+        return {}
+    try:
+        return ham(ma) or {}
+    except Exception as e:
+        if not _loi_kho(e):
+            raise
+        return {}
+
+
+def _lich_du_an(kho, ma: str) -> list[dict]:
+    try:
+        return kho.cac_lich(ma)
+    except Exception as e:      # bảng lịch chưa có: như trang, coi như không có lịch
+        if not _loi_kho(e):
+            raise
+        return []
+
+
+def _khoi_ngan_sach(kho, d: dict, da_tieu: dict, dat_lai, bay_gio) -> tuple[dict, list, list]:
+    """`chi_phi.khoi_ngan_sach` của MỘT dự án với ĐÚNG các đầu vào trang Ngân sách đọc
+    (`app.trang_ngan_sach`). -> (khối, lịch, lượt gần nhất)."""
+    ma = d["ma"]
+    luot_gan, _ = kho.cac_luot(ma, 1, 20, ghi_chu=False)
+    cac_lich = _lich_du_an(kho, ma)
+    lan_cuoi = None
+    ham_dp = getattr(kho, "do_phu_gan_nhat", None)
+    if ham_dp is not None:
+        try:
+            r_dp = ham_dp(ma, 1)
+            lan_cuoi = r_dp[0]["luc"] if r_dp else None
+        except Exception as e:
+            if not _loi_kho(e):
+                raise
+    k = CP.khoi_ngan_sach(d, float(da_tieu.get(ma, 0.0)), kho.tran_platform(ma),
+                          kho.cac_nguon(ma), _nhip(kho, ma), luot_gan, cac_lich, lan_cuoi,
+                          dat_lai, bay_gio)
+    return k, cac_lich, luot_gan
+
+
+def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
+    """Như trang Ngân sách (`app.trang_ngan_sach`) cho MỘT dự án + các lượt quét gần nhất.
+
+    Soát 18/10/2026: cùng hàm, cùng tham số với trang (`chi_phi.khoi_ngan_sach`, `goi_ngan_sach`,
+    `chi_lich`) — trước đó Mark báo tiền nguồn theo số bài CẤU HÌNH (trang: đã co theo nhịp đăng),
+    "theo lịch" theo mức tối đa chưa kẹp ở trần console (8,6 USD/lượt) và trần nội bộ của gói chỉ
+    của một dự án (trang: tổng các dự án đang bật)."""
+    ma = du_an["ma"]
+    da_tieu = kho.da_tieu_thang() or {}
+    tieu = float(da_tieu.get(ma, 0.0))
+    snap = _goi_snap(kho)
+    dat_lai = CP._vn((snap or {}).get("chu_ky_den"))
+    k, cac_lich, luot_gan = _khoi_ngan_sach(kho, du_an, da_tieu, dat_lai, bay_gio)
+    db, dbt, thuc = k["db"], k["du_bao"], k["thuc"]
+    # Như trang Lịch quét: nguồn đã co, mức tối đa mỗi lượt kẹp ở trần console, chi thật trung vị.
+    tq = TL.tong_quan(cac_lich, du_an, k["nguon"], tieu, kho.tran_platform(ma), bay_gio,
+                      CP.chi_lich(luot_gan, snap, bay_gio))
+    luot, tong = kho.cac_luot(ma, 1, min(top, LUOT_TOI_DA))
+    # Gói Apify (18/10/2026): trần THẬT của cả tài khoản — như khối "Gói Apify" trang Ngân sách:
+    # trần nội bộ = tổng trần các dự án ĐANG BẬT, dự báo tới lúc đặt lại gộp mọi dự án đang bật.
+    goi = {"co": False}
+    if snap:
+        khoi = [(du_an, k) if d["ma"] == ma else (d, _khoi_ngan_sach(kho, d, da_tieu, dat_lai,
+                                                                     bay_gio)[0])
+                for d in kho.cac_du_an()]
+        if not any(d["ma"] == ma for d, _ in khoi):
+            khoi.append((du_an, k))
+        goi = CP.goi_ngan_sach(snap, khoi, bay_gio)
     return {
         "du_bao_thuc": ({"du_bao_thang_usd": dbt["du_bao_thang"], "con_lai_usd": dbt["con_lai"],
                          "so_luot_con": dbt["so_luot_con"],
@@ -698,8 +733,10 @@ def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
         "pt_da_tieu": round(min(100.0, 100.0 * tieu / db["tran"]), 1) if db["tran"] else None,
         "nguon_ton_nhat": [{x: n[x] for x in ("ten", "nen_tang", "chu_ky_ngay", "thang_usd")}
                            for n in db["top_ton"]],
-        # Có lịch quét tự động đang bật: cả tháng = đã tiêu + nguồn theo chu kỳ + lịch (tab Lịch).
-        "theo_lich": ({x: tq[x] for x in ("luot", "usd_lich", "tong", "tran", "vuot", "chenh")}
+        # Có lịch quét tự động đang bật: cả tháng = đã tiêu + nguồn theo chu kỳ + lịch (tab Lịch),
+        # mỗi lượt kẹp ở trần console; `tong_thuc` theo chi thật trung vị.
+        "theo_lich": ({x: tq[x] for x in ("luot", "usd_lich", "tong", "tong_thuc", "tran",
+                                          "vuot", "chenh")}
                       if tq.get("co_lich") else {"co_lich": False}),
         "tong_luot_quet": tong,
         "luot_gan_nhat": [{
@@ -727,15 +764,21 @@ def _lich(kho, du_an: dict, quan_ly: bool, bay_gio) -> dict:
         if not _loi_kho(e):
             raise
         return {"co_lich": False, "ghi_chu": "Chưa đọc được bảng lịch quét."}
-    nguon = kho.cac_nguon(ma)
+    # Như trang Lịch quét (`app._du_lieu_lich` / `_chi_lich`, soát 18/10/2026): nguồn đã co theo
+    # nhịp đăng, `chi` = chi thật + trần console mỗi lượt (`chi_phi.chi_lich`).
+    nguon = CP.gan_co_gian(kho.cac_nguon(ma), _nhip(kho, ma), du_an)
     tieu = float((kho.da_tieu_thang() or {}).get(ma, 0.0))
-    ds = TL.dong_lich(cac, du_an, nguon, bay_gio, quan_ly, LOI_CHUNG)
-    tq = TL.tong_quan(cac, du_an, nguon, tieu, kho.tran_platform(ma), bay_gio)
+    luot_gan, _ = kho.cac_luot(ma, 1, 20, ghi_chu=False)
+    chi = CP.chi_lich(luot_gan, _goi_snap(kho), bay_gio)
+    ds = TL.dong_lich(cac, du_an, nguon, bay_gio, quan_ly, LOI_CHUNG, chi)
+    tq = TL.tong_quan(cac, du_an, nguon, tieu, kho.tran_platform(ma), bay_gio, chi)
     return {"tong_quan_thang": tq, "lich": [{
         "id": x.get("id"), "ten": x.get("ten") or x.get("mo_ta"), "kieu": x.get("kieu_ten"),
         "mo_ta": x.get("mo_ta"), "trang_thai": x.get("tt_nhan"), "moc_ke": x.get("ke_chu"),
         "con": x.get("ke_con"), "tre": x.get("tre"), "luot_30_ngay": x.get("luot_30"),
-        "usd_30_ngay": x.get("usd_30"), "so_lan_chay": x.get("so_lan_chay"),
+        "usd_30_ngay": x.get("usd_30"), "moi_luot_toi_da_usd": x.get("moi_luot"),
+        "moi_luot_thuc_usd": x.get("moi_luot_thuc"), "usd_30_ngay_thuc": x.get("usd_30_thuc"),
+        "so_lan_chay": x.get("so_lan_chay"),
         "ket_qua_gan_nhat": ({y: (x["kq"].get(y) if y != "luc" else _gio(x["kq"].get(y)))
                               for y in ("nhan", "chi_tiet", "luc")} if x.get("kq") else None)}
         for x in ds]}

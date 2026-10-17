@@ -1405,21 +1405,15 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             except LoiKho:
                 snap = None
         dat_lai = CP._vn((snap or {}).get("chu_ky_den"))
-        phan_goi = []
+        khoi = []
         dong = []
         for d in ds:
-            tran_du_an = float(d.get("tran_usd_thang") or 0)
             tieu = float(da_tieu.get(d["ma"], 0.0))
             tran_pf = await _k(app.state.kho.tran_platform, d["ma"])
             nguon = await _k(app.state.kho.cac_nguon, d["ma"])
-            # Nguồn theo số bài Mark thật sự lấy sau khi co theo nhịp đăng (18/10/2026).
-            nguon = CP.gan_co_gian(nguon, await _nhip_dang(d["ma"]), d)
-            db = CP.du_bao(nguon, tieu, tran_du_an, tran_pf, bay_gio)
-            tran = db["tran"]
             # Chi THẬT mỗi lượt (18/10/2026): trung vị ≤ 7 lượt gần nhất — dự báo cả tháng và tới
             # lúc gói đặt lại theo số này, không theo riêng nguồn (hụt) hay mức tối đa (lố).
             luot_gan, _ = await _k(app.state.kho.cac_luot, d["ma"], 1, 20, ghi_chu=False)
-            thuc = CP.chi_luot_thuc(luot_gan, bay_gio)
             # Lịch quét tự động (15/10/2026): số lượt còn lại tháng này theo lịch đang bật thay cho
             # giả định 1 lượt/ngày. Bảng lich_quet chưa có (schema chưa áp) thì giữ giả định cũ.
             try:
@@ -1437,28 +1431,18 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     hd_dp = (r_dp[0].get("hanh_dong") if r_dp else None) or {}
                 except LoiKho:
                     lan_cuoi = None
-            bang = CP.bang_cau_hinh(d)
+            # Mọi số của dự án — Mark (`hoi_dashboard_tool._chi_phi`) gọi đúng hàm này. Nguồn theo
+            # số bài Mark thật sự lấy sau khi co theo nhịp đăng (18/10/2026).
+            k = CP.khoi_ngan_sach(d, tieu, tran_pf, nguon, await _nhip_dang(d["ma"]), luot_gan,
+                                  cac_lich, lan_cuoi, dat_lai, bay_gio)
+            khoi.append((d, k))
+            db, bang, dl, dp = k["du_bao"], k["bang"], k["lich"], k["do_phu"]
+            tran = db["tran"]
             # Công tắc "Tìm rộng hơn" của Threads (Nâng cao, 18/10/2026): USD nếu bật — để trình
             # duyệt cộng ngay khi người dùng bật lại phần đang tắt (cùng hàm `chi_phi.uoc_th2`).
             th2 = bang["tu_khoa"]["threads"].get("duong2")
             if isinstance(th2, dict):
                 th2["uoc_neu_bat"] = CP.uoc_th2({**th2, "bat": True}, CP.tu_tim(d))
-            dl = CP.du_bao_lich(cac_lich, bang, nguon, bay_gio)
-            dp = CP.du_bao_do_phu(d, lan_cuoi, bay_gio)
-            db = CP.du_bao_thuc(db, thuc, dl["luot_con_lai"] if dl.get("co_lich")
-                                else db["ngay_con_lai"], dp["con_lai"])
-            if d.get("dang_bat") and dat_lai:
-                # Lượt tới lúc gói đặt lại: theo lịch đang bật; không có lịch thì 1 lượt/ngày (lịch
-                # console) từ ngày mai cùng giờ.
-                # Mốc đúng lúc đặt lại thuộc chu kỳ mới: (bây giờ, đặt lại).
-                moc = (CP.cac_moc_du_an(cac_lich, bay_gio,
-                                        dat_lai - datetime.timedelta(microseconds=1))
-                       if dl.get("co_lich") else
-                       [m for i in range(1, 40)
-                        if (m := bay_gio + datetime.timedelta(days=i)) < dat_lai])
-                phan_goi.append({"ten": d.get("ten"), "thuc": thuc, "moc": moc,
-                                 "dp_usd": CP.luot_do_phu(bay_gio, dat_lai, lan_cuoi)
-                                 * (dp["tran_usd"] if dp["bat"] else 0.0)})
             # `cau_hinh` hiển thị: Threads (MAC_DINH_TAT) chưa đặt thì ô bật hiện TẮT như hiệu lực.
             dong.append({**d, "cau_hinh": CP.cau_hinh_hien_thi(d.get("cau_hinh")),
                          # Hashtag riêng của dự án đã chuẩn hoá (18/10/2026); [] = suy từ từ khoá.
@@ -1472,9 +1456,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
-        goi = CP.goi_du_bao(
-            CP.goi_apify(snap, sum(x["du_bao"]["tran"] for x in dong if x.get("dang_bat")),
-                         bay_gio), phan_goi, bay_gio)
+        goi = CP.goi_ngan_sach(snap, khoi, bay_gio)
         return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi,
                       dong=an_chi_tiet(nguoi, dong, ("sua_boi",)), du_an=du_an,
                       luot=an_chi_tiet(nguoi, luot, ("ghi_chu", "ghi_chu_dai"), ("loi",)),
@@ -1645,25 +1627,28 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                         if bat else "Đã tắt cào bình luận."))
 
     # ─── lịch quét tự động (chủ dự án chốt 15/10/2026: "Dashboard + Mark tự chạy") ───
-    async def _du_lieu_lich(ma: str):
-        """(lịch, nguồn, đã tiêu tháng, trần platform) của một dự án — đủ cho trang + xem trước."""
-        kho = app.state.kho
-        return (await _k(kho.cac_lich, ma), await _k(kho.cac_nguon, ma),
+    async def _du_lieu_lich(du_an: dict):
+        """(lịch, nguồn, đã tiêu tháng, trần platform) của một dự án — đủ cho trang + xem trước.
+        Nguồn theo số bài Mark thật sự lấy sau khi co theo nhịp đăng (soát 18/10/2026: như trang
+        Ngân sách — `tong_quan` cộng phần nguồn theo chu kỳ)."""
+        kho, ma = app.state.kho, du_an["ma"]
+        cac, nguon = await _k(kho.cac_lich, ma), await _k(kho.cac_nguon, ma)
+        return (cac, CP.gan_co_gian(nguon, await _nhip_dang(ma), du_an),
                 float((await _k(kho.da_tieu_thang)).get(ma, 0.0)), await _k(kho.tran_platform, ma))
 
     async def _chi_lich(ma: str) -> dict:
-        """Chi thật + trần console mỗi lượt cho trang Lịch quét (18/10/2026, `trang_lich._kep_luot`):
-        {"thuc": `chi_phi.chi_luot_thuc`, "tran_luot": từ ảnh chụp gói Mark ghi | None}."""
+        """Chi thật + trần console mỗi lượt cho trang Lịch quét (18/10/2026, `trang_lich._kep_luot`)
+        — `chi_phi.chi_lich`, Mark gọi đúng hàm đó."""
         kho = app.state.kho
         luot_gan, _ = await _k(kho.cac_luot, ma, 1, 20, ghi_chu=False)
-        tran_luot = None
+        snap = None
         ham_goi = getattr(kho, "han_muc_apify", None)
         if ham_goi is not None:
             try:
-                tran_luot = (await _k(ham_goi) or {}).get("tran_luot_usd")
+                snap = await _k(ham_goi)
             except LoiKho:
-                tran_luot = None
-        return {"thuc": CP.chi_luot_thuc(luot_gan, _bay_gio()), "tran_luot": tran_luot}
+                snap = None
+        return CP.chi_lich(luot_gan, snap, _bay_gio())
 
     async def _trang_lich(request: Request, nguoi: dict, ma: str | None, sua_id: str = "",
                           bm: dict | None = None, loi: str = "", ma_http: int = 200):
@@ -1675,9 +1660,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         ctx: dict = {"du_an_ds": ds, "du_an": du_an, "lich": [], "tong": None, "bm": None,
                      "xt": None, "sua": None, "loi_bm": loi}
         if du_an:
-            cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an["ma"])
+            cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an)
             chi = await _chi_lich(du_an["ma"])
-            sua = (next((x for x in cac if str(x["id"]) == str(sua_id)), None)
+            sua =(next((x for x in cac if str(x["id"]) == str(sua_id)), None)
                    if ql and sua_id else None)
             if ql:
                 bm = bm or (LQ.tu_form(sua, bay_gio) if sua else LQ.tu_form_mac_dinh(bay_gio))
@@ -1725,7 +1710,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             d = await _k(LQ.chuan_hoa, dict(q), bay_gio)
         except LQ.LoiLich as e:
             return JSONResponse({"loi": str(e)}, status_code=400)
-        cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an["ma"])
+        cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an)
         chi = await _chi_lich(du_an["ma"])
         # Đếm mốc trong threadpool (review 15/10, M2): không chặn vòng sự kiện của cả dashboard.
         return JSONResponse(await _k(TL.xem_truoc, d, cac, du_an, nguon, da_tieu, tran_pf,
