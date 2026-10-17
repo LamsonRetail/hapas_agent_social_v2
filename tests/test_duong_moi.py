@@ -604,7 +604,7 @@ def test_tran_phan_that_nho_thedoor_hong_ca_run_van_chay_du_phong_moi_trang(monk
     urls = ["https://www.facebook.com/hapasglobal", "https://www.facebook.com/trang.khac"]
     v, ph, ds = _phan_fb(urls, 5)
     cap = T._tran_phan("facebook", ph, 100.0)
-    assert cap == 0.1, "trần phần đã chừa chỗ cho dự phòng mọi trang (0,013 + 0,0663 < 0,1)"
+    assert cap == 0.12, "sàn 0,1 (đã chừa dự phòng 0,013 + 0,0663) + khoảng dư làm tròn 0,02"
     assert T.giu_cho_phan(ph) == pytest.approx(0.01 * 1.3 + (10 * 0.005 + 0.001) * 1.3, abs=1e-4)
     hong = A.LoiApify("LOI", "actor thedoor hỏng", {"run_id": "r1"})
     ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: hong, "apify~facebook-posts-scraper": [
@@ -612,9 +612,28 @@ def test_tran_phan_that_nho_thedoor_hong_ca_run_van_chay_du_phong_moi_trang(monk
     tien = _chay_phan(v, ph, ds, cap)
     assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG, "apify~facebook-posts-scraper"]
     assert ap.gui[1]["payload"]["startUrls"] == [{"url": u} for u in urls]
-    assert ap.gui[1]["tran"] == 0.09 and ap.gui[1]["limit"] == 10
+    assert ap.gui[1]["tran"] == 0.11 and ap.gui[1]["limit"] == 10
     assert tien <= cap + 1e-9 and ph["du_phong_kq"]["trang"] == urls
     assert not ph.get("loi_nguon") and len(v.doc_dong("facebook")) == 2
+
+
+@pytest.mark.parametrize("so_trang, n", [(4, 5), (8, 5), (10, 10), (2, 10), (20, 5), (2, 5)])
+def test_tran_phan_lam_tron_khong_bo_oan_trang_cuoi(monkeypatch, so_trang, n):
+    """Soát lại 17/10/2026: `_tran_phan` làm tròn trần tới cent, `du_phong_fb` làm tròn XUỐNG phần
+    còn — khoảng dư chỉ 0,3 × 0,01 nên 4×5, 8×5, 10×10, 2×10, 20×5 bỏ oan trang cuối khi thedoor
+    hỏng cả run, dù tháng/việc còn nhiều. Trần lấy THẬT từ `_tran_phan`."""
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 50.0, True))
+    urls = [f"https://www.facebook.com/trang.so{i}" for i in range(so_trang)]
+    v, ph, ds = _phan_fb(urls, n)
+    cap = T._tran_phan("facebook", ph, 100.0)
+    hong = A.LoiApify("LOI", "actor thedoor hỏng", {"run_id": "r1"})
+    ap = _GiaChay(monkeypatch, {TDA.FB_TRANG: hong, "apify~facebook-posts-scraper": [
+        _fb_cu(f"trang.so{i}", i + 1) for i in range(so_trang)]})
+    _chay_phan(v, ph, ds, cap)
+    assert [g["actor"] for g in ap.gui] == [TDA.FB_TRANG, "apify~facebook-posts-scraper"]
+    assert ph["du_phong_kq"]["trang"] == urls, "mọi trang thiếu đều vào dự phòng"
+    assert not ph["du_phong_kq"].get("bo_qua_trang")
+    assert ap.gui[1]["tran"] <= cap + 1e-9
 
 
 def test_tran_khong_du_thi_du_phong_trang_dau_va_ly_do_toi_loi_nguon(monkeypatch):

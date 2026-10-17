@@ -159,6 +159,9 @@ def mo_luot(ma: str, kieu: str, *, ma_viec: str | None = None,
     do lịch quét tự động (bảng `lich_quet`) giao — chỉ ghi cột này khi có (lịch bị xoá giữa
     chừng thì thành NULL, không hỏng khoá ngoại). Giữ khoá `so_khoa_luot` tới hết giao dịch."""
     with ket_noi() as c:
+        # Chờ khoá có hạn (soát 17/10/2026): giao dịch của script gộp mà treo (vd FOR UPDATE chờ một
+        # phiên idle-in-transaction) thì lượt mở báo lỗi sau 30 giây, không kẹt luồng việc nền mãi.
+        c.execute("SET LOCAL lock_timeout = '30s'")
         c.execute(_SQL_KHOA_LUOT, (so_khoa_luot(ma),))
         c.execute(
             "UPDATE luot_quet SET trang_thai = 'loi', ket_thuc = now(), "

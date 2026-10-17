@@ -287,7 +287,11 @@ def _tran_phan(p: str, ph: dict, con: float, con_viec: float = float("inf")) -> 
     uoc = float(ph.get("uoc_usd") or 0)
     muc = max(_TRAN_TOI_THIEU, uoc * _HE_SO_TRAN)
     if p == "facebook":
-        muc = max(muc, giu_cho_phan(ph))
+        # Làm tròn LÊN tới cent rồi cộng 0,02 (soát lại 17/10/2026): `du_phong_fb` làm tròn XUỐNG
+        # phần còn (trần − đã tiêu) rồi so với giá dự phòng × hệ số ước — làm tròn xuống hai đầu ăn
+        # hết khoảng dư 0,3 × 0,01, nên ~1/3 tổ hợp trang × bài (4×5, 8×5, 10×10…) bỏ oan trang
+        # cuối dù tháng và việc còn nhiều tiền. Vẫn kẹp bởi trần console / tháng / việc bên dưới.
+        muc = math.ceil(max(muc, giu_cho_phan(ph)) * 100 - 1e-9) / 100 + 0.02
     return round(min(A._tran_nen_tang(p, nen=True)[1], con, con_viec, muc), 2)
 
 

@@ -483,7 +483,8 @@ def test_mo_luot_giu_cung_khoa_advisory_voi_script(monkeypatch):
         yield Conn()
     monkeypatch.setattr(K, "ket_noi", ket_noi)
     assert K.mo_luot("hapas", "theo_doi", ma_viec="t1") == 7
-    assert cau[0] == (K._SQL_KHOA_LUOT, (K.so_khoa_luot("hapas"),)), "khoá TRƯỚC khi mở lượt"
+    assert cau[0][0].startswith("SET LOCAL lock_timeout"), "chờ khoá có hạn, không kẹt mãi"
+    assert cau[1] == (K._SQL_KHOA_LUOT, (K.so_khoa_luot("hapas"),)), "khoá TRƯỚC khi mở lượt"
     assert G.SQL_KHOA_LUOT.endswith(K._SQL_KHOA_LUOT)
     assert K.so_khoa_luot("hapas") == K.so_khoa_luot("hapas") != K.so_khoa_luot("khac")
     assert -2 ** 63 <= K.so_khoa_luot("hapas") < 2 ** 63
