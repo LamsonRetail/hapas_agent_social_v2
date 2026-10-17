@@ -48,9 +48,9 @@ def _item(actor: str, i: int, tag: str = "hapas") -> dict:
         return {"text_content": txt, "username": f"t{i}", "view_count": 3,
                 "post_url": f"https://www.threads.net/@t/post/{tag}{i}",
                 "created_at": NOW.isoformat()}
-    if actor == A._ACTORS["instagram"]:
-        return {"createdAt": NOW.isoformat(), "owner": {"username": f"i{i}"}, "caption": txt,
-                "url": f"https://www.instagram.com/p/{tag}{i}/"}
+    if actor == A._ACTORS["instagram"]:          # apify~instagram-hashtag-scraper (17/10/2026)
+        return {"timestamp": NOW.isoformat(), "ownerUsername": f"i{i}", "caption": txt,
+                "shortCode": f"{tag}{i}", "url": f"https://www.instagram.com/p/{tag}{i}/"}
     if actor == A._ACTORS["facebook"]:
         return {"timestamp": NOW.isoformat(), "author": {"name": f"f{i}"}, "message": txt,
                 "url": f"https://www.facebook.com/x/posts/{i}"}

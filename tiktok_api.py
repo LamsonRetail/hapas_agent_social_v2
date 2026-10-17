@@ -94,6 +94,10 @@ CHON = {
     "tiktok_so_bai": {"chinh": ACTOR, "du_phong": ()},
     "facebook_tim": {"chinh": "scrapeforge~facebook-search-posts", "du_phong": ()},
     "facebook_trang": {"chinh": "apify~facebook-posts-scraper", "du_phong": ()},
+    # Theo dõi trang Facebook của `/theodoi` (17/10/2026, `theo_doi_api.FB_TRANG`): thedoor rẻ nửa
+    # giá, có view video; actor cũ làm dự phòng. `soi_tai_khoan` vẫn `facebook_trang` ở trên.
+    "facebook_theo_doi": {"chinh": "thedoor~facebook-page-scraper",
+                          "du_phong": ("apify~facebook-posts-scraper",)},
     "facebook_binh_luan": {"chinh": "apify~facebook-comments-scraper", "du_phong": ()},
 }
 

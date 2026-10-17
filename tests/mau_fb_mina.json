@@ -1,0 +1,293 @@
+{
+ "nguon": "mina_safwat~facebook-search-actor, run thật 17/10/2026 (cắt gọn, ẩn danh)",
+ "items": [
+  {
+   "url": "https://www.facebook.com/groups/1234567890/posts/800000000000001/",
+   "owner_name": "Người dùng FB 1",
+   "statistics": {
+    "reaction_count": {
+     "count": 0,
+     "is_empty": false
+    },
+    "comment_count": 1,
+    "shares_count": 0,
+    "video_view_count": null
+   },
+   "post_id": "800000000000001",
+   "id": "800000000000001",
+   "type": "post",
+   "permalink_url": "https://www.facebook.com/groups/1234567890/posts/800000000000001/",
+   "video_details": {
+    "owner": {
+     "owner_as_page": {
+      "id": "90000000000001",
+      "name": "Người dùng FB 1",
+      "profile_url": "https://www.facebook.com/nguoi.dung.fb.1",
+      "avatar": "https://scontent.example/avatar.jpg"
+     }
+    },
+    "title": {
+     "text": "pass full 700k"
+    },
+    "publish_timestamp": 1792225675000,
+    "publish_date": 1792225675000
+   },
+   "scrape_date": "2026-10-17 08:30:49.581330",
+   "post_title": "pass full 700k",
+   "images": [],
+   "videos": []
+  },
+  {
+   "url": "https://www.facebook.com/groups/1234567890/posts/800000000000002/",
+   "owner_name": "Người dùng FB 2",
+   "statistics": {
+    "reaction_count": {
+     "count": 0,
+     "is_empty": false
+    },
+    "comment_count": 0,
+    "shares_count": 0,
+    "video_view_count": null
+   },
+   "post_id": "800000000000002",
+   "id": "800000000000002",
+   "type": "post",
+   "permalink_url": "https://www.facebook.com/groups/1234567890/posts/800000000000002/",
+   "video_details": {
+    "owner": {
+     "owner_as_page": {
+      "id": "90000000000002",
+      "name": "Người dùng FB 2",
+      "profile_url": "https://www.facebook.com/nguoi.dung.fb.2",
+      "avatar": "https://scontent.example/avatar.jpg"
+     }
+    },
+    "title": {
+     "text": "E pass sz 20 350k new full box có cod ko cọc"
+    },
+    "publish_timestamp": 1792225176000,
+    "publish_date": 1792225176000
+   },
+   "scrape_date": "2026-10-17 08:30:49.669616",
+   "post_title": "E pass sz 20 350k new full box có cod ko cọc",
+   "images": [],
+   "videos": []
+  },
+  {
+   "url": "https://www.facebook.com/reel/800000000000003/",
+   "owner_name": "Người dùng FB 3",
+   "statistics": {
+    "reaction_count": {
+     "count": 0,
+     "is_empty": false
+    },
+    "comment_count": 1,
+    "shares_count": 0,
+    "video_view_count": 0
+   },
+   "post_id": "800000000000003",
+   "id": "800000000000003",
+   "type": "video",
+   "permalink_url": "https://www.facebook.com/reel/800000000000003/",
+   "video_details": {
+    "owner": {
+     "owner_as_page": {
+      "id": "90000000000003",
+      "name": "Người dùng FB 3",
+      "profile_url": "https://www.facebook.com/nguoi.dung.fb.3",
+      "avatar": "https://scontent.example/avatar.jpg"
+     }
+    },
+    "title": {
+     "text": "👜 TÚI ĐEO VAI CROSS HAPAS – NHỎ XINH, SANG XỊN 💕\n\n✨ Thiết kế thời trang, thanh lịch, dễ phối với mọi outfit\n💗 Đi làm, đi"
+    },
+    "publish_timestamp": 1792221729000,
+    "publish_date": 1792221729000
+   },
+   "scrape_date": "2026-10-17 08:30:49.728925",
+   "post_title": "👜 TÚI ĐEO VAI CROSS HAPAS – NHỎ XINH, SANG XỊN 💕\n\n✨ Thiết kế thời trang, thanh lịch, dễ phối với mọi outfit\n💗 Đi làm, đi",
+   "images": [],
+   "videos": []
+  },
+  {
+   "url": "https://www.facebook.com/reel/800000000000004/",
+   "owner_name": "Người dùng FB 4",
+   "statistics": {
+    "reaction_count": {
+     "count": 0,
+     "is_empty": false
+    },
+    "comment_count": 0,
+    "shares_count": 0,
+    "video_view_count": 0
+   },
+   "post_id": "800000000000004",
+   "id": "800000000000004",
+   "type": "video",
+   "permalink_url": "https://www.facebook.com/reel/800000000000004/",
+   "video_details": {
+    "owner": {
+     "owner_as_page": {
+      "id": "90000000000004",
+      "name": "Người dùng FB 4",
+      "profile_url": "https://www.facebook.com/nguoi.dung.fb.4",
+      "avatar": "https://scontent.example/avatar.jpg"
+     }
+    },
+    "title": {
+     "text": "🤎 LOCK CHIC – NÂU CAMEL 🤎\n\nNhẹ nhàng, thanh lịch nhưng vẫn đủ nổi bật ✨\nGam nâu camel thời thượng, dễ phối đồ – từ nàng "
+    },
+    "publish_timestamp": 1792224021000,
+    "publish_date": 1792224021000
+   },
+   "scrape_date": "2026-10-17 08:30:49.765228",
+   "post_title": "🤎 LOCK CHIC – NÂU CAMEL 🤎\n\nNhẹ nhàng, thanh lịch nhưng vẫn đủ nổi bật ✨\nGam nâu camel thời thượng, dễ phối đồ – từ nàng ",
+   "images": [],
+   "videos": []
+  },
+  {
+   "url": "https://www.facebook.com/nguoi.dung.fb.5/posts/pfbid0MauGia5xyz",
+   "owner_name": "Người dùng FB 5",
+   "statistics": {
+    "reaction_count": {
+     "count": 2,
+     "is_empty": false
+    },
+    "comment_count": 1,
+    "shares_count": 0,
+    "video_view_count": null
+   },
+   "post_id": "800000000000005",
+   "id": "800000000000005",
+   "type": "post",
+   "permalink_url": "https://www.facebook.com/nguoi.dung.fb.5/posts/pfbid0MauGia5xyz",
+   "video_details": {
+    "owner": {
+     "owner_as_page": {
+      "id": "90000000000005",
+      "name": "Người dùng FB 5",
+      "profile_url": "https://www.facebook.com/nguoi.dung.fb.5",
+      "avatar": "https://scontent.example/avatar.jpg"
+     }
+    },
+    "title": {
+     "text": "Bộ Quà Tặng \"Dịu Dàng\" Túi Xách Elent HAPAS - Món Quà Tặng Mẹ, Người Yêu Ý Nghĩa Dịp 20/10"
+    },
+    "publish_timestamp": 1792219819000,
+    "publish_date": 1792219819000
+   },
+   "scrape_date": "2026-10-17 08:31:51.067114",
+   "post_title": "Bộ Quà Tặng \"Dịu Dàng\" Túi Xách Elent HAPAS - Món Quà Tặng Mẹ, Người Yêu Ý Nghĩa Dịp 20/10",
+   "images": [],
+   "videos": []
+  },
+  {
+   "url": "https://www.facebook.com/nguoi.dung.fb.6/posts/pfbid0MauGia6xyz",
+   "owner_name": "Người dùng FB 6",
+   "statistics": {
+    "reaction_count": {
+     "count": 23,
+     "is_empty": false
+    },
+    "comment_count": 10,
+    "shares_count": 0,
+    "video_view_count": null
+   },
+   "post_id": "800000000000006",
+   "id": "800000000000006",
+   "type": "post",
+   "permalink_url": "https://www.facebook.com/nguoi.dung.fb.6/posts/pfbid0MauGia6xyz",
+   "video_details": {
+    "owner": {
+     "owner_as_page": {
+      "id": "90000000000006",
+      "name": "Người dùng FB 6",
+      "profile_url": "https://www.facebook.com/nguoi.dung.fb.6",
+      "avatar": "https://scontent.example/avatar.jpg"
+     }
+    },
+    "title": {
+     "text": "Quà 20/10 sớm của  con zai  lớn 🥰\n#QUÀ\n#tang\n#HAPAS"
+    },
+    "publish_timestamp": 1792210963000,
+    "publish_date": 1792210963000
+   },
+   "scrape_date": "2026-10-17 08:31:51.148027",
+   "post_title": "Quà 20/10 sớm của  con zai  lớn 🥰\n#QUÀ\n#tang\n#HAPAS",
+   "images": [],
+   "videos": []
+  },
+  {
+   "url": "https://www.facebook.com/reel/800000000000007/",
+   "owner_name": "Người dùng FB 7",
+   "statistics": {
+    "reaction_count": {
+     "count": 1,
+     "is_empty": false
+    },
+    "comment_count": 0,
+    "shares_count": 0,
+    "video_view_count": 2
+   },
+   "post_id": "800000000000007",
+   "id": "800000000000007",
+   "type": "video",
+   "permalink_url": "https://www.facebook.com/reel/800000000000007/",
+   "video_details": {
+    "owner": {
+     "owner_as_page": {
+      "id": "90000000000007",
+      "name": "Người dùng FB 7",
+      "profile_url": "https://www.facebook.com/nguoi.dung.fb.7",
+      "avatar": "https://scontent.example/avatar.jpg"
+     }
+    },
+    "title": {
+     "text": "Túi Xách Nữ Cao Cấp Elent HAPAS Sz 24 - Quà Tặng Ý Nghĩa\n#tuixachnucaocap\n#quatangynghia"
+    },
+    "publish_timestamp": 1792219115000,
+    "publish_date": 1792219115000
+   },
+   "scrape_date": "2026-10-17 08:31:55.455019",
+   "post_title": "Túi Xách Nữ Cao Cấp Elent HAPAS Sz 24 - Quà Tặng Ý Nghĩa\n#tuixachnucaocap\n#quatangynghia",
+   "images": [],
+   "videos": []
+  },
+  {
+   "url": "https://www.facebook.com/reel/800000000000008/",
+   "owner_name": "Người dùng FB 8",
+   "statistics": {
+    "reaction_count": {
+     "count": 6,
+     "is_empty": false
+    },
+    "comment_count": 2,
+    "shares_count": 0,
+    "video_view_count": 117
+   },
+   "post_id": "800000000000008",
+   "id": "800000000000008",
+   "type": "video",
+   "permalink_url": "https://www.facebook.com/reel/800000000000008/",
+   "video_details": {
+    "owner": {
+     "owner_as_page": {
+      "id": "90000000000008",
+      "name": "Người dùng FB 8",
+      "profile_url": "https://www.facebook.com/nguoi.dung.fb.8",
+      "avatar": "https://scontent.example/avatar.jpg"
+     }
+    },
+    "title": {
+     "text": "Sét quà tặng Hapas  #setquatang  #xuhuong  #fyp  #virial  link mua dưới bình luận"
+    },
+    "publish_timestamp": 1792143803000,
+    "publish_date": 1792143803000
+   },
+   "scrape_date": "2026-10-17 08:32:02.137180",
+   "post_title": "Sét quà tặng Hapas  #setquatang  #xuhuong  #fyp  #virial  link mua dưới bình luận",
+   "images": [],
+   "videos": []
+  }
+ ]
+}

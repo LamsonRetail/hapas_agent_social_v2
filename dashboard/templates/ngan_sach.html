@@ -121,14 +121,14 @@
 {% set bl_md = [[(d.bl_so_bai or 0)|int, 0]|max, 500]|min %}
 {% set bl_moi_md0 = [[(d.bl_moi_bai or 0)|int, 0]|max, 5000]|min %}
 {% set bl_moi_md = 5 if 0 < bl_moi_md0 < 5 else bl_moi_md0 %}
-{# số từ Instagram dùng được (không dấu cách) — gần đúng chi_phi.tu_tim (Jinja không bỏ dấu được;
-   ngan_sach.js tính lại đúng và ghi đè) #}
+{# số hashtag Instagram (17/10/2026: mọi từ khoá viết liền, bỏ dấu) — gần đúng chi_phi._tu_ig (Jinja
+   không bỏ dấu được nên đếm từ khoá khác nhau; ngan_sach.js tính lại đúng và ghi đè) #}
 {% set dem = namespace(ig=0, da=[]) %}
 {% for x in (d.tu_khoa or [d.ten or '']) %}
   {% set t = (x|string).split()|join(' ') %}
   {% if t and (t|lower) not in dem.da and dem.da|length < hang_so.gioi_han.tk_so_tu[1] %}
     {% set dem.da = dem.da + [t|lower] %}
-    {% if ' ' not in t %}{% set dem.ig = dem.ig + 1 %}{% endif %}
+    {% set dem.ig = dem.ig + 1 %}
   {% endif %}
 {% endfor %}
 {% set tong_luot = b.uoc_tk + b.uoc_bl %}
@@ -239,7 +239,7 @@
       <tr data-nt="{{ p }}">
         <th scope="row">{{ ten }}
           {% if p == 'facebook' %}<button type="button" class="goi-y{% if tk.bat and tk.so_bai > hang_so.tk_fb_toi_da %} goi-y--canh{% endif %}" data-o="ghi-fb" data-goi-y="Gói Apify FREE: thực tế tối đa {{ hang_so.tk_fb_toi_da }} bài/lượt">i</button>
-          {% elif p == 'instagram' %}<button type="button" class="goi-y" data-o="ghi-ig" data-goi-y="Chỉ từ không dấu cách ({{ dem.ig }} từ)">i</button>
+          {% elif p == 'instagram' %}<button type="button" class="goi-y" data-o="ghi-ig" data-goi-y="Từ khoá viết liền thành hashtag, bỏ dấu ({{ dem.ig }} hashtag); tab bài + reels">i</button>
           {% elif p == 'youtube' %}<button type="button" class="goi-y" data-goi-y="Miễn phí (API YouTube)">i</button>{% endif %}
         </th>
         <td class="ns-o-cong ns-ranh" data-nhan="Tìm từ khoá">
@@ -275,6 +275,65 @@
         </td>
         <td class="ns-tong-dong ns-ranh" data-nhan="Tổng/lượt"><output data-o="dong-{{ p }}">{{ (tk.uoc + bl.uoc)|usd_vn(3) }}</output></td>
       </tr>
+      {% if p == 'tiktok' and tk.hashtag is defined %}
+      {# TikTok feed hashtag (17/10/2026, scraptik `challengePosts`): từ khoá MỘT chữ, trần yêu cầu mỗi
+         lượt — cấu hình `tu_khoa.tiktok.hashtag` {bat, so_yeu_cau}. #}
+      {% set th = tk.hashtag %}
+      {% set r_th = r_tk.get('hashtag') if r_tk.get('hashtag') is mapping else {} %}
+      {% set y_th = (r_th.get('bat') is sameas true) if 'bat' in r_th else (tk.so_bai > 0) %}
+      {% set y_th = y_th if ql else th.bat %}
+      <tr data-nt="tiktok_tag" class="ns-dong-web ns-dong-phu">
+        <th scope="row">↳ TikTok feed hashtag
+          <button type="button" class="goi-y" data-goi-y="Đọc feed hashtag (TikTok API, {{ hang_so.tk_tt_yeu_cau|usd_vn(3) }} USD/yêu cầu, 20 bài/yêu cầu) của từ khoá một chữ ({{ th.tag|length }} tag{% if th.tag %}: #{{ th.tag|join(', #') }}{% endif %}) — bắt video chỉ gắn hashtag mà tìm theo từ khoá không trả về. Số là TRẦN yêu cầu mỗi lượt (tìm cid lần đầu + trang feed); tối đa 1 lượt mỗi {{ th.gio }} giờ; bài qua cùng bộ lọc + AI.">i</button>
+        </th>
+        <td class="ns-o-cong ns-ranh" data-nhan="Feed hashtag">
+          {% if ql %}<input type="checkbox" class="ns-cong" role="switch" name="tk_tiktok_tag_bat" value="1" aria-label="TikTok: bật đọc feed hashtag"{% if y_th %} checked{% endif %}>
+          {% else %}<span class="the{% if th.bat %} the--tot{% endif %}">{{ 'bật' if th.bat else 'tắt' }}</span>{% endif %}
+        </td>
+        <td data-nhan="Yêu cầu/lượt" data-nhom="tk"{% if ql and not (y_th and y_tk) %} class="ns-mo"{% endif %}>
+          {% if ql %}<input type="number" name="tk_tiktok_tag_so_yc" min="0" max="{{ hang_so.gioi_han.tk_so_bai[1] }}" step="1" inputmode="numeric" placeholder="{{ hang_so.tt_tag.yeu_cau }}" value="{{ r_th.get('so_yeu_cau') if 'so_yeu_cau' in r_th else '' }}" aria-label="TikTok feed hashtag: số yêu cầu tối đa mỗi lượt, 0 = tắt (trống = {{ hang_so.tt_tag.yeu_cau }})">
+          {% else %}<span class="so">{{ th.so_yeu_cau }}</span>{% endif %}
+        </td>
+        <td data-nhan="Số tag" data-nhom="tk"{% if ql and not (y_th and y_tk) %} class="ns-mo"{% endif %}>
+          <span class="ns-so-tu" data-o="tt-tag-so" title="Từ khoá một chữ thành hashtag">{{ th.tag|length }}</span>
+        </td>
+        <td class="ns-usd" data-nhan="≈ USD">
+          <output class="{{ lop_usd(th.bat, th.so_yeu_cau, hang_so.tk_tt_yeu_cau)|trim }}" data-o="tk-tiktok_tag" data-usd="{{ th.uoc }}">{{ o_usd(th.uoc, th.bat, th.so_yeu_cau, hang_so.tk_tt_yeu_cau) }}</output>
+        </td>
+        <td colspan="4" class="ns-ranh mo nho" data-nhan="Bình luận">bình luận đi chung dòng TikTok</td>
+        <td class="ns-tong-dong ns-ranh" data-nhan="Tổng/lượt"><output data-o="dong-tiktok_tag">{{ th.uoc|usd_vn(3) }}</output></td>
+      </tr>
+      {% endif %}
+      {% if p == 'facebook' and tk.duong2 is defined %}
+      {# Facebook đường 2 (17/10/2026, mina_safwat~facebook-search-actor): chỉ tìm theo từ khoá, mỗi cụm
+         nhiều từ có tên brand một run — cấu hình `tu_khoa.facebook.duong2` {bat, so_bai_moi_tu}. #}
+      {% set d2 = tk.duong2 %}
+      {% set r_d2 = r_tk.get('duong2') if r_tk.get('duong2') is mapping else {} %}
+      {# chưa lưu `bat` lần nào: theo đường chính (Facebook có số bài > 0) — chi_phi._cau_hinh_fb2 #}
+      {% set y_d2 = (r_d2.get('bat') is sameas true) if 'bat' in r_d2 else (tk.so_bai > 0) %}
+      {% set y_d2 = y_d2 if ql else d2.bat %}
+      <tr data-nt="facebook_d2" class="ns-dong-web ns-dong-phu">
+        <th scope="row">↳ Facebook đường 2
+          <button type="button" class="goi-y" data-goi-y="Actor thứ hai (mina): {{ hang_so.fb2.gia|usd_vn(3) }} USD/bài + {{ hang_so.fb2.khoi|usd_vn(5) }} USD/run, mỗi cụm một run. Chỉ cụm NHIỀU TỪ có tên brand ({{ d2.cum|length }} cụm{% if d2.cum %}: {{ d2.cum|join(', ') }}{% endif %}); bài gộp với đường chính rồi qua cùng bộ lọc + AI. Nhịp tối đa 1 lượt mỗi {{ d2.gio }} giờ (chiến dịch: {{ d2.gio_chien_dich }} giờ) — USD là mức tối đa mỗi lượt. Tắt Facebook ở dòng trên thì đường 2 cũng tắt.">i</button>
+        </th>
+        <td class="ns-o-cong ns-ranh" data-nhan="Đường 2">
+          {% if ql %}<input type="checkbox" class="ns-cong" role="switch" name="tk_facebook_d2_bat" value="1" aria-label="Facebook: bật đường 2 (mina)"{% if y_d2 %} checked{% endif %}>
+          {% else %}<span class="the{% if d2.bat %} the--tot{% endif %}">{{ 'bật' if d2.bat else 'tắt' }}</span>{% endif %}
+        </td>
+        <td data-nhan="Bài/cụm" data-nhom="tk"{% if ql and not (y_d2 and y_tk) %} class="ns-mo"{% endif %}>
+          {% if ql %}<input type="number" name="tk_facebook_d2_so_bai" min="0" max="{{ hang_so.gioi_han.tk_so_bai[1] }}" step="1" inputmode="numeric" placeholder="{{ hang_so.fb2.moi_tu }}" value="{{ r_d2.get('so_bai_moi_tu') if 'so_bai_moi_tu' in r_d2 else '' }}" aria-label="Facebook đường 2: số bài mới nhất mỗi cụm, 0 = tắt (trống = {{ hang_so.fb2.moi_tu }})">
+          {% else %}<span class="so">{{ d2.so_bai_moi_tu }}</span>{% endif %}
+        </td>
+        <td data-nhan="Số cụm" data-nhom="tk"{% if ql and not (y_d2 and y_tk) %} class="ns-mo"{% endif %}>
+          <span class="ns-so-tu" data-o="fb2-so-cum" title="Cụm nhiều từ có tên brand">{{ d2.cum|length }}</span>
+        </td>
+        <td class="ns-usd" data-nhan="≈ USD">
+          <output class="{{ lop_usd(d2.bat, d2.so_bai_moi_tu, hang_so.fb2.gia)|trim }}" data-o="tk-facebook_d2" data-usd="{{ d2.uoc }}">{{ o_usd(d2.uoc, d2.bat, d2.so_bai_moi_tu, hang_so.fb2.gia) }}</output>
+        </td>
+        <td colspan="4" class="ns-ranh mo nho" data-nhan="Bình luận">bình luận đi chung dòng Facebook</td>
+        <td class="ns-tong-dong ns-ranh" data-nhan="Tổng/lượt"><output data-o="dong-facebook_d2">{{ d2.uoc|usd_vn(3) }}</output></td>
+      </tr>
+      {% endif %}
       {% endif %}
     {% endfor %}
     </tbody>

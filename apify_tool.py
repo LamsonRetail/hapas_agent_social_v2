@@ -27,9 +27,10 @@ Chất lượng từng nguồn — đo thật ngày 26/08/2026, đừng kỳ v�
 -----------------------------------------------------------------------
 - TikTok  (apidojo/tiktok-scraper, 4.65*): tốt nhất. Có followers, views, shares,
   lọc theo quốc gia. Rẻ nhất (~$0.30/1K post).
-- Instagram (apidojo/instagram-hashtag-scraper, 4.02*): KHÔNG có followers,
-  KHÔNG có shares, KHÔNG lọc được quốc gia -> kết quả toàn cầu, nhiễu nặng
-  (tra "hapas" ra #hapasguitars của hãng đàn guitar và post tiếng Thái).
+- Instagram (apify/instagram-hashtag-scraper từ 17/10/2026, thay apidojo chỉ trả demo cho gói
+  Free): tìm theo HASHTAG (từ khoá viết liền, bỏ dấu), tab bài + reels. Có username, tên, like,
+  bình luận, view reels; KHÔNG có followers, KHÔNG lọc ngày/quốc gia -> nhiễu (#hapasguitars,
+  bài tiếng Thái), lọc tại chỗ.
 - Facebook (scrapeforge/facebook-search-posts, 3.63*): yếu nhất. Khớp từ khoá
   lỏng (tra "hapas" ra "Happy Animals", "Happy.craft.studio"), engagement hay
   trả 0, KHÔNG có followers. GÓI FREE CHỈ CHO 20 KẾT QUẢ VÀ 1 LẦN CHẠY / 24 GIỜ.
@@ -262,8 +263,17 @@ _TIKTOK_NGUONG_LEO_THANG = 20
 
 _ACTORS = {
     "tiktok": "apidojo~tiktok-scraper",
-    "instagram": "apidojo~instagram-hashtag-scraper",
+    # Instagram 17/10/2026: apidojo~instagram-hashtag-scraper trên gói FREE chỉ trả 10 item
+    # `{"demo": true}` (CHI_DEMO, PR #70) — 0 bài thật. Đo thật cùng ngày (5 run, 11 hashtag, tab
+    # bài + reels): `apify~instagram-hashtag-scraper` trả 121 item, 44 bài nhắc HAPAS (39 kho chưa
+    # có), 0,3146 USD = 0,0026 USD/bài (FREE; Starter 0,0023), không phí khởi động, một run nhận
+    # NHIỀU hashtag. Gói FREE chỉ đọc TRANG ĐẦU mỗi hashtag (~6 bài tab bài, 6–9 reels).
+    "instagram": "apify~instagram-hashtag-scraper",
     "facebook": "scrapeforge~facebook-search-posts",
+    # Facebook ĐƯỜNG THỨ HAI (17/10/2026, chỉ cụm nhiều từ có tên brand — `theo_doi`): đo 6 run,
+    # 180 bài, 107 bài nhắc HAPAS, 99 kho chưa có; 0,002 USD/bài + 0,00005/run; lọc ngày phía
+    # actor bằng `startDate`/`endDate` tuyệt đối (`period` tương đối HỎNG: trả bài từ 2025).
+    "facebook_duong2": "mina_safwat~facebook-search-actor",
     "threads": "futurizerush~meta-threads-scraper",
     # Dự phòng cho TikTok. Đo thật 26/08/2026: apidojo chạy tốt cả buổi sáng rồi
     # đột ngột trả {"noResults": true} cho MỌI truy vấn (kể cả từ khoá phổ thông
@@ -285,9 +295,13 @@ _MEMORY = {"threads": 1024}
 # của social_listen dùng `tiktok_api.so_yeu_cau_tim` (mỗi từ ≥ 1 yêu cầu × 0,002 USD); số ở
 # đây (0,0002/bài) chỉ còn cho chỗ cần giá theo bài (`quet_lon` có giá riêng của actor cũ).
 # Khi API hỏng mới xuống chuỗi cũ (clockworks 0,003/bài) — tiền thật vẫn chốt theo run.
-_UNIT_COST = {"tiktok": 0.0002, "instagram": 0.0004, "facebook": 0.00259,
+# Instagram (17/10/2026, `apify~instagram-hashtag-scraper`): `pricingInfos` gói FREE 0,0026 USD mỗi
+# item (BRONZE 0,0023), KHÔNG có sự kiện khởi động — run thật 30 item = 0,078 USD. Phí khởi động
+# 0,0 cũng đúng cho actor theo dõi tài khoản IG (`apify~instagram-profile-scraper`, 0,0026/tài
+# khoản) mà `theo_doi._uoc_phan` dùng chung khoá này.
+_UNIT_COST = {"tiktok": 0.0002, "instagram": 0.0026, "facebook": 0.00259,
               "youtube": 0.0, "threads": 0.0025}
-_START_COST = {"instagram": 0.016, "threads": 0.02, "facebook": 0.00005}
+_START_COST = {"instagram": 0.0, "threads": 0.02, "facebook": 0.00005}
 # Threads (futurizerush~meta-threads-scraper), đo thật 16/10/2026 với token mới (gói FREE):
 # run ép 4096 MB nên phí khởi động = 4 × 0,02 = 0,08 USD (gói trả phí 4 × 0,005 = 0,02); run
 # tìm 2 từ khoá trả 8 bài tốn đúng 0,08 + 8 × 0,0025 = 0,10 USD. Ước tính lấy mức gói FREE.
@@ -608,8 +622,16 @@ _TRUONG_ACTOR = {
                                           "diggCount", "commentCount", "shareCount",
                                           "hashtags", "text", "webVideoUrl", "textLanguage",
                                           "hasTikTokShopProduct"),
-    "apidojo~instagram-hashtag-scraper": ("createdAt", "owner", "video", "caption",
-                                          "likeCount", "commentCount", "url"),
+    # Trường thật của run 17/10/2026 (`raw_ig_apify_*`). Item lỗi của hashtag rỗng (`error:
+    # "no_items"`) đọc qua `fields` chỉ còn url TRANG TAG — bộ chuẩn hoá bỏ vì không có shortcode.
+    "apify~instagram-hashtag-scraper": ("id", "shortCode", "url", "timestamp", "caption",
+                                        "hashtags", "ownerUsername", "ownerFullName",
+                                        "likesCount", "commentsCount", "videoViewCount",
+                                        "videoPlayCount", "sharesCount", "type", "productType",
+                                        "inputUrl"),
+    "mina_safwat~facebook-search-actor": ("post_id", "id", "type", "url", "permalink_url",
+                                          "owner_name", "statistics", "video_details",
+                                          "post_title"),
     # `post_id` (17/10/2026): id số ổn định của bài — pfbid trong `url` đổi mỗi lượt cào, kho
     # khớp bản trùng theo id này (`khu_trung_fb`).
     "scrapeforge~facebook-search-posts": ("timestamp", "author", "message",
@@ -2493,11 +2515,14 @@ def _cau_loai_video_tiktok(ds: list[dict], noi: str = "sheet") -> str:
 
 def _uoc_tai_cho(plats: list[str], lims: dict, queries: list[str]) -> tuple[float, dict]:
     """(USD ước tính cả lượt, {nền tảng: USD mỗi lượt actor}) của social_listen tại chỗ.
-    Instagram/Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ. TikTok qua
+    Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ; Instagram hai run (tab
+    bài + reels, mỗi run mọi hashtag). TikTok qua
     TikTok API tính theo YÊU CẦU (review 16/10): mỗi từ khoá ≥ 1 yêu cầu, tối đa 2×(trang
     cần)+1 trang — như `theo_doi.uoc_tu_khoa_nen_tang`; mỗi yêu cầu là một run."""
     import tiktok_api
-    so_run = {p: (len(queries) if p in ("instagram", "facebook") else 1) for p in plats}
+    # Instagram (17/10/2026): một run nhận mọi hashtag, hai run (tab bài + reels) mỗi lượt.
+    so_run = {p: (len(queries) if p == "facebook" else len(_IG_TAB) if p == "instagram" else 1)
+              for p in plats}
     est = sum(_START_COST.get(p, 0.0) * so_run[p] + _UNIT_COST.get(p, 0.0) * lims[p]
               for p in plats if p != "tiktok")
     est_luot = {p: _START_COST.get(p, 0.0) + _UNIT_COST.get(p, 0.0) * lims[p] / so_run[p]
@@ -2653,35 +2678,90 @@ def _fetch_tiktok(q: list[str], limit: int, country: str, d_from, d_to,
     return _chuan_tiktok(raw)
 
 
+def hashtag_ig(s) -> str:
+    """Từ khoá -> hashtag Instagram (17/10/2026): bỏ dấu (đ→d), chữ thường, bỏ '#', khoảng trắng,
+    dấu chấm và mọi ký tự ngoài [a-z0-9_] — "Túi xách HAPAS" → "tuixachhapas", "hapas.vn" →
+    "hapasvn". Rỗng khi không còn chữ/số nào (emoji…). Vì sao viết liền: input schema của actor
+    ghi "mỗi dòng là MỘT hashtag" và gộp chữ cách nhau thành một tag; người Việt cũng gắn tag
+    viết liền (#tuixachhapas, #quatanghapas — thấy trong caption thật)."""
+    return re.sub(r"[^a-z0-9_]", "", _norm(str(s or "")))
+
+
+def hashtag_ig_ds(q: list[str]) -> list[str]:
+    """Danh sách từ khoá -> hashtag Instagram, bỏ rỗng + bỏ trùng, giữ thứ tự gặp đầu."""
+    return list(dict.fromkeys(t for t in (hashtag_ig(x) for x in q or []) if t))
+
+
+#: Tab của actor Instagram (`resultsType`) chạy mỗi lượt, theo thứ tự. Đo 17/10/2026: reels của
+#: hashtag chiến dịch ra nhiều bài MỚI nhất (5 tag chiến dịch: tab bài 2 bài mới, reels 19).
+_IG_TAB = ("posts", "reels")
+_IG_NHAN_TAB = {"posts": "tab bài", "reels": "tab reels"}
+_RE_IG_BAI = re.compile(r"instagram\.com/(?:[\w.]+/)?(?:p|reel|reels|tv)/([\w-]+)")
+
+
+def _so_ig(v) -> int:
+    """Số của actor Instagram: thiếu / rác / −1 (actor trả −1 khi chủ bài ẨN số thích, đo
+    17/10/2026: 16% bài) -> 0."""
+    try:
+        return max(0, int(v or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _chuan_instagram(raw: list) -> list[tuple]:
-    """Item apidojo/instagram-hashtag-scraper -> [(dòng, ngày VN)]."""
+    """Item apify/instagram-hashtag-scraper -> [(dòng, ngày VN)].
+
+    Trường theo run thật 17/10/2026: `timestamp` ISO UTC, `ownerUsername` / `ownerFullName`,
+    `likesCount` (−1 khi ẩn → 0), `commentsCount`, `videoPlayCount` (reels; `videoViewCount` ở bài
+    video tab bài), `sharesCount` (chỉ reels), `caption`, `hashtags`, `url`, `shortCode`. Item lỗi
+    của hashtag rỗng (`error: "no_items"`, url là trang tag) không phải bài — bỏ. Link luôn dạng
+    `/p/<shortCode>/` khi actor thiếu url: khoá bài IG vẫn là shortcode như cũ
+    (`theo_doi._khoa_bai`), không sinh dòng trùng với bài đã có trong kho."""
     out = []
     for it in raw:
-        dt = _to_vn(it.get("createdAt"))
-        ow = it.get("owner") or {}
-        vid = it.get("video") or {}
+        if not isinstance(it, dict) or it.get("error"):
+            continue
+        sc = str(it.get("shortCode") or "").strip()
+        link = str(it.get("url") or "")
+        if not _RE_IG_BAI.search(link):
+            link = f"https://www.instagram.com/p/{sc}/" if sc else ""
+        if not link:
+            continue
         cap = str(it.get("caption") or "")
+        tags = [str(t).lstrip("#") for t in it.get("hashtags") or [] if t]
         out.append(({
-            "kenh": ow.get("username") or ow.get("fullName") or "",
+            "kenh": it.get("ownerFullName") or it.get("ownerUsername") or "",
+            "username": str(it.get("ownerUsername") or ""),
             "followers": 0,           # actor KHÔNG trả follower
-            "views": int(vid.get("playCount") or 0),
-            "likes": int(it.get("likeCount") or 0),
-            "comments": int(it.get("commentCount") or 0),
-            "shares": 0,              # actor KHÔNG trả share
-            "hashtags": _tags_from(cap),
+            "views": _so_ig(it.get("videoPlayCount") or it.get("videoViewCount")),
+            "likes": _so_ig(it.get("likesCount")),
+            "comments": _so_ig(it.get("commentsCount")),
+            "shares": _so_ig(it.get("sharesCount")),
+            "hashtags": _join(tags) or _tags_from(cap),
             "text": cap[:1000],
-            "link": it.get("url") or "",
+            "link": link,
             "__goc": it,
-        }, dt))
+        }, _to_vn(it.get("timestamp"))))
     return out
 
 
 def _fetch_instagram(q: list[str], limit: int, country: str, d_from, d_to) -> list[tuple]:
-    # Actor chỉ nhận MỘT keyword (string) -> chạy lần lượt từng từ khoá.
-    per = max(1, limit // max(1, len(q)))
-    raw = _fanout(lambda kw: _call(_ACTORS["instagram"], {
-        "keyword": kw, "getPosts": True, "getReels": True, "maxItems": per,
-    }, per), q)
+    """Instagram theo HASHTAG (17/10/2026, `apify~instagram-hashtag-scraper`).
+
+    Từ khoá đổi thành hashtag (`hashtag_ig`); ÍT run nhất: MỘT run mỗi tab (`_IG_TAB`: bài, reels),
+    mỗi run nhận MỌI hashtag. `resultsLimit` là trần MỖI hashtag (input schema) nên chia `limit`
+    cho (số tab × số tag), tối thiểu 1 — tổng ≤ ⌈limit⌉ làm tròn lên theo tag. `maxItems` của run =
+    trần mỗi tag × số tag (actor tính tiền theo item). Actor KHÔNG lọc ngày, không lọc nước: bên
+    gọi lọc ngày tại chỗ (`_NO_SERVER_DATE`; `/theodoi` giữ bài trong phạm vi theo dõi). Tab lỗi
+    vào sổ lỗi từ khoá (`_fanout`) — tab kia vẫn về."""
+    tags = hashtag_ig_ds(q)
+    if not tags or limit <= 0:
+        return []
+    per = max(1, math.ceil(limit / (len(_IG_TAB) * len(tags))))
+    nhan = {_IG_NHAN_TAB[t]: t for t in _IG_TAB}
+    raw = _fanout(lambda k: _call(_ACTORS["instagram"], {
+        "hashtags": tags, "resultsType": nhan[k], "resultsLimit": per,
+    }, per * len(tags)), list(nhan))
     return _chuan_instagram(raw)
 
 
@@ -2767,6 +2847,101 @@ def _fetch_facebook(q: list[str], limit: int, country: str, d_from, d_to) -> lis
         "end_date": d_to.strftime("%Y-%m-%d"),
     }, per), q)
     return _chuan_facebook(raw)
+
+
+# ── Facebook ĐƯỜNG THỨ HAI: mina_safwat~facebook-search-actor (17/10/2026) ──
+# Đo thật (6 run, gói FREE): "túi hapas" 14/25 bài liên quan, "quà tặng hapas" 23/25, "ví hapas"
+# 19/20, "nước hoa hapas" 19/20; "hapas" một chữ chỉ 3/30 (tiếng Swahili "hapa", Hapas Guitars)
+# → chỉ dùng cụm NHIỀU TỪ có tên brand (`theo_doi.tu_fb_duong2`). Với "túi hapas", mina và
+# scrapeforge chỉ trùng 1/14 bài liên quan — hai đường bổ sung nhau. Actor trả bài MỚI NHẤT trước
+# trong khoảng `startDate`..`endDate` (cả hai ngày tính trọn: run 17/10 có bài 15:24 cùng ngày);
+# `usePeriodFilter` + `period` HỎNG (xin 24 giờ ra bài từ 17/10/2025) nên không bao giờ dùng.
+# Giá `pricingInfos`: 0,002 USD/bài + 0,00005 USD khởi động mỗi run (1 GB), không bậc theo gói.
+_GIA_FB_DUONG2 = 0.002
+_KHOI_FB_DUONG2 = 0.00005
+
+
+def ma_so_fb(v) -> str | None:
+    """Id bài Facebook dạng SỐ (post id / reel id) — chuỗi 5–25 chữ số, hoặc None. pfbid (đổi giữa
+    các lượt cào, đo 17/10/2026) không phải id số. Một luật chung với kho: `khu_trung_fb.la_so`."""
+    import khu_trung_fb
+    return khu_trung_fb.la_so(v)
+
+
+def _slug_fb(url: str) -> str:
+    """Định danh chủ bài từ link hồ sơ: "facebook.com/diep.bao.1257" → "diep.bao.1257";
+    "profile.php?id=…" / "people/<tên>/<id>" → id số; không bóc được → ""."""
+    u = str(url or "")
+    m = re.search(r"[?&]id=(\d+)", u) or re.search(r"/people/[^/]+/(\d+)", u)
+    if m:
+        return m.group(1)
+    m = re.search(r"facebook\.com/([^/?#]+)", u)
+    return m.group(1) if m and m.group(1) not in ("profile.php", "people", "groups") else ""
+
+
+def _chuan_facebook_mina(raw: list, cum: str = "") -> list[tuple]:
+    """Item mina_safwat/facebook-search-actor -> [(dòng, ngày VN)] (trường theo run thật 17/10/2026).
+
+    Ngày: `video_details.publish_timestamp` (mili giây). Chủ bài: `owner_name` /
+    `video_details.owner.owner_as_page` {id, name, profile_url} (92% có link hồ sơ). Số:
+    `statistics.reaction_count.count`, `comment_count`, `shares_count`, `video_view_count` (chỉ
+    video/reel, 39%). `post_id` luôn là SỐ (180/180) → `ma_so_fb` cho khoá chống trùng bài FB (pfbid
+    trong link đổi giữa các lượt cào). Không có follower."""
+    import khu_trung_fb
+    out = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        vd = it.get("video_details") if isinstance(it.get("video_details"), dict) else {}
+        ow = ((vd.get("owner") or {}).get("owner_as_page")
+              or (vd.get("owner") or {}).get("owner_as_user") or {})
+        st = it.get("statistics") if isinstance(it.get("statistics"), dict) else {}
+        rc = st.get("reaction_count")
+        link = str(it.get("url") or it.get("permalink_url") or "")
+        if not link:
+            continue
+        txt = str(it.get("post_title") or (vd.get("title") or {}).get("text") or "")
+        ts = vd.get("publish_timestamp") or vd.get("publish_date")
+        try:
+            dt = _to_vn(float(ts) / 1000) if ts else None
+        except (TypeError, ValueError):
+            dt = None
+        chu = str(ow.get("profile_url") or "")
+        out.append(({
+            "kenh": it.get("owner_name") or ow.get("name") or "",
+            "username": _slug_fb(chu),
+            "link_chu": chu,
+            "followers": 0,           # actor KHÔNG trả follower
+            "views": int(st.get("video_view_count") or 0),
+            "likes": int((rc.get("count") if isinstance(rc, dict) else rc) or 0),
+            "comments": int(st.get("comment_count") or 0),
+            "shares": int(st.get("shares_count") or 0),
+            "hashtags": _tags_from(txt),
+            "text": txt[:1000],
+            "link": link,
+            # `post_id` (luôn là số, 180/180), `id` mina trả cùng giá trị; link `/posts/<số>`
+            # là lưới cuối (`khu_trung_fb.ma_so_tu_link`; link pfbid thì không có id).
+            "ma_so_fb": (ma_so_fb(it.get("post_id")) or ma_so_fb(it.get("id"))
+                         or khu_trung_fb.ma_so_tu_link(link)),
+            "_duong": "mina", "_cum": cum,
+            "__goc": it,
+        }, dt))
+    return out
+
+
+def _fetch_facebook_duong2(q: list[str], per: int, d_from, d_to,
+                           tran_usd: float | None = None) -> list[tuple]:
+    """Đường thứ hai của Facebook: MỖI cụm một run (actor nhận một `query`), `limit` = `per` bài
+    mới nhất trong [`d_from`, `d_to`] (ngày tuyệt đối). Cụm lỗi vào sổ lỗi từ khoá (`_fanout`),
+    cụm khác vẫn về; mỗi run mang trần `tran_usd` (`maxTotalChargeUsd`, bên gọi tính từ trần
+    console, phần còn của tháng và ngân sách việc)."""
+    q = _bo_trung_tu_khoa(q)
+    if not q or per <= 0:
+        return []
+    tu, den = d_from.strftime("%Y-%m-%d"), d_to.strftime("%Y-%m-%d")
+    return _fanout(lambda kw: _chuan_facebook_mina(_call(_ACTORS["facebook_duong2"], {
+        "query": kw, "limit": per, "usePeriodFilter": False, "startDate": tu, "endDate": den,
+    }, per, tran_usd=tran_usd, nen_tang="facebook"), kw), q)
 
 
 def _fetch_youtube(q: list[str], limit: int, country: str, d_from, d_to,
@@ -2995,9 +3170,11 @@ def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to) -> list
     return _chuan_threads(raw)
 
 
+# "facebook_duong2" (17/10/2026): bộ tìm đường 2 của Facebook cho `/theodoi` (chữ ký riêng: cụm,
+# số bài mỗi cụm, khoảng ngày, trần mỗi run) — không phải nền tảng của social_listen.
 _FETCH = {"tiktok": _fetch_tiktok, "instagram": _fetch_instagram,
           "facebook": _fetch_facebook, "youtube": _fetch_youtube,
-          "threads": _fetch_threads}
+          "threads": _fetch_threads, "facebook_duong2": _fetch_facebook_duong2}
 
 
 # ───────────────────────── Lark Sheet ─────────────────────────
@@ -3509,8 +3686,10 @@ SCHEMA = {
         "số tiền).\n"
         "- Chất lượng nguồn KHÔNG bằng nhau, phải nhắc khi liên quan: Instagram và "
         "Facebook KHÔNG có followers; Instagram không lọc được quốc gia nên nhiễu quốc "
-        "tế; Facebook khớp từ khoá lỏng và gói free chỉ 20 kết quả + 1 lần chạy/24h (nên "
-        "chỉ quét từ khoá ĐẦU TIÊN).\n"
+        "tế; Instagram tìm theo HASHTAG (từ khoá viết liền, bỏ dấu: 'túi hapas' → "
+        "#tuihapas), tab bài + reels, gói Free của actor chỉ đọc trang đầu mỗi hashtag "
+        "(khoảng 6 bài + 6–9 reels); Facebook khớp từ khoá lỏng và gói free chỉ 20 kết "
+        "quả + 1 lần chạy/24h (nên chỉ quét từ khoá ĐẦU TIÊN).\n"
         "- Tool TỐN TIỀN. Xác nhận từ khoá + khoảng ngày + nền tảng TRƯỚC khi gọi.\n"
         "- Gửi NGUYÊN `sheet_url` cho người dùng. `granted`=false thì phải báo họ có thể "
         "mở không được."
@@ -3867,7 +4046,8 @@ def _handle(args: dict, **kwargs) -> str:
         not_yet=not_yet, limit_xin=limit_xin, tran_bai=tran_bai, tat=tat)
     if tra_ngay is not None:
         return tra_ngay
-    # Instagram/Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ khoá.
+    # Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ khoá (Instagram từ
+    # 17/10/2026: hai run, mỗi run mọi hashtag — `_uoc_tai_cho`).
     # Ước tính MỖI LƯỢT chạy actor của từng nền tảng (`est_luot`) — so với `tran_usd_<p>` để
     # nói ra khi trần riêng trói (Apify dừng ở trần, có thể thiếu bài).
     est, est_luot = _uoc_tai_cho(plats, lims, queries)

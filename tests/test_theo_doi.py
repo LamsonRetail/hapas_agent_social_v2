@@ -237,9 +237,15 @@ def test_chia_phan_moi_nguon_dung_so_bai_cua_no():
     assert tt["tiktok-30"]["nguon"] == [3] and tt["tiktok-30"]["limit"] == 30
     assert ph["instagram"][0]["payload"] == {"usernames": ["d"]}
     assert ph["youtube"][0]["actor"] == "youtube" and ph["youtube"][0]["uoc_usd"] == 0
-    assert ph["facebook"][0]["payload"]["resultsLimit"] == 3
+    # Facebook (17/10/2026): thedoor, actor + payload cũ làm dự phòng.
+    assert ph["facebook"][0]["actor"] == "thedoor~facebook-page-scraper"
+    assert ph["facebook"][0]["payload"] == {"pageUrls": ["https://facebook.com/f"],
+                                            "postsToScrape": 3}
+    assert ph["facebook"][0]["du_phong"]["payload"]["resultsLimit"] == 3
+    assert ph["facebook"][0]["uoc_usd"] == pytest.approx((3 * 0.0025 + 0.01) * 1.3, abs=1e-4)
     assert tt["tiktok-5"]["uoc_usd"] == pytest.approx(10 * 0.0012 * 1.3, abs=1e-4)
-    assert ph["instagram"][0]["uoc_usd"] == pytest.approx((0.0026 + 0.016) * 1.3, abs=1e-4)
+    # Instagram: 0,0026/tài khoản, không phí khởi động (17/10/2026, `apify_tool._START_COST`).
+    assert ph["instagram"][0]["uoc_usd"] == pytest.approx(0.0026 * 1.3, abs=1e-4)
 
 
 def test_cat_theo_ngan_sach():
@@ -1245,7 +1251,8 @@ def test_tim_tu_khoa_giu_bai_nhac_hapas_gan_nguon_va_ghi_tien(mo):
     import contextvars
     tk = contextvars.copy_context().run(T._tim_tu_khoa, v, du_an, 3, 5.0, time.monotonic() + 600)
     assert goi["tiktok"][0] == ["hapas", "túi hapas", "yeutudieunhonhat"]   # bỏ trùng hoa/thường
-    assert goi["instagram"][0] == ["hapas", "yeutudieunhonhat"]            # không dấu cách
+    # Instagram tìm theo hashtag (17/10/2026): mọi từ khoá viết liền, bỏ dấu, bỏ trùng.
+    assert goi["instagram"][0] == ["hapas", "tuihapas", "yeutudieunhonhat"]
     assert goi["facebook"][1] == 15 and goi["tiktok"][2] >= 30           # lần đầu lùi 30 ngày
     assert goi["youtube"][3] == {"toi_da_trang": 1}                       # trần trang YT
     # Dự phòng TikTok (tính theo video) chỉ được tiêu phần còn lại: 5 USD − ước tính API.
@@ -1274,11 +1281,12 @@ def test_tim_tu_khoa_khoi_dong_lai_khong_gui_lai_va_ngan_sach(mo):
                                        {"id": "tk-youtube", "loai": "moc", "nen_tang": "youtube",
                                         "trang_thai": "xong"}]}}, [])
     v.d["ngan_sach_usd"] = 0.04
-    du_an = dict(DU_AN, tu_khoa=["hapas"], tk_bat=True, tk_so_bai=15)
+    du_an = dict(DU_AN, tu_khoa=["hapas"], tk_bat=True, tk_so_bai=15,
+                 cau_hinh={"tu_khoa": {"instagram": {"so_bai": 4}}})
     import contextvars
     tk = contextvars.copy_context().run(T._tim_tu_khoa, v, du_an, 3, 5.0, time.monotonic() + 600)
     # TikTok có run dở: không gửi lại; YouTube đã xong; FB (≈0,051) vượt ngân sách việc 0,04;
-    # Instagram (≈0,029) vừa.
+    # Instagram 4 bài (2 tab × 2 bài × 0,0026 × 1,3 ≈ 0,0135) vừa.
     assert goi == ["instagram"]
     assert any("không gửi lại" in x for x in tk["ghi_chu"])
     assert any("Facebook: bỏ qua (hết ngân sách)" in x for x in tk["ghi_chu"])
@@ -1406,10 +1414,13 @@ def test_cau_hinh_theo_nen_tang_ghi_de_cot_chung():
                                     "tiktok": {"so_bai": "rác"}},
                         "binh_luan": {"tiktok": {"so_bai": 40, "moi_bai": 3},
                                       "youtube": {"so_bai": 9999}}})
-    assert T.cau_hinh(da, "tu_khoa", "facebook") == {"bat": True, "so_bai": 50, "so_tu": 2}
+    assert T.cau_hinh(da, "tu_khoa", "facebook")["bat"] is True
+    assert T.cau_hinh(da, "tu_khoa", "facebook")["so_bai"] == 50
+    assert T.cau_hinh(da, "tu_khoa", "facebook")["so_tu"] == T.TK_IG_TOI_DA_TU
     assert T.cau_hinh(da, "tu_khoa", "instagram")["bat"] is False
     assert T.cau_hinh(da, "tu_khoa", "tiktok")["so_bai"] == 15            # rác → cột chung
-    assert T.cau_hinh(da, "tu_khoa", "youtube") == {"bat": True, "so_bai": 15, "so_tu": 2}
+    assert T.cau_hinh(da, "tu_khoa", "youtube") == {"bat": True, "so_bai": 15,
+                                                     "so_tu": T.TK_IG_TOI_DA_TU}
     assert T.cau_hinh(da, "binh_luan", "tiktok") == {"bat": True, "so_bai": 40, "moi_bai": 5}
     assert T.cau_hinh(da, "binh_luan", "youtube")["so_bai"] == 9999       # không trần trên
     assert T.cau_hinh(da, "binh_luan", "facebook") == {"bat": True, "so_bai": 10, "moi_bai": 0}

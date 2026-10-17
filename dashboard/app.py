@@ -1363,6 +1363,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         ve = _url("/ngan-sach", du_an=ma)
         try:
             await _du_an_phai_co(ma)
+            cu_du_an = await _k(app.state.kho.doc_du_an, ma) or {}
             ch: dict = {"tu_khoa": {}, "binh_luan": {}}
             for p in CP.NEN_TANG:
                 tk = {"bat": form.get(f"tk_{p}_bat") == "1"}
@@ -1377,6 +1378,27 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     tk["boc"] = NL.so_nguyen(form.get("tk_web_boc"),
                                              "Báo & Web: số trang đọc dự phòng", 0,
                                              CP.SO_TOI_DA)
+                # Dòng phụ (17/10/2026): Facebook đường 2 (`duong2`), TikTok feed hashtag
+                # (`hashtag`). Khối thay CẢ nhóm tu_khoa khi lưu — biểu mẫu không có ô (trang cũ)
+                # thì giữ nguyên khối đang có; khoá biểu mẫu không sửa (gio…) luôn giữ.
+                for p_phu, khoi, o_bat, o_so, k_so, nhan in (
+                        ("facebook", "duong2", "tk_facebook_d2_bat", "tk_facebook_d2_so_bai",
+                         "so_bai_moi_tu", "Facebook đường 2: số bài mỗi cụm"),
+                        ("tiktok", "hashtag", "tk_tiktok_tag_bat", "tk_tiktok_tag_so_yc",
+                         "so_yeu_cau", "TikTok feed hashtag: số yêu cầu mỗi lượt")):
+                    if p != p_phu:
+                        continue
+                    cu = cu_du_an.get("cau_hinh")
+                    for k in ("tu_khoa", p, khoi):
+                        cu = cu.get(k) if isinstance(cu, dict) else None
+                    x = dict(cu) if isinstance(cu, dict) else {}
+                    if o_so in form:
+                        x["bat"] = form.get(o_bat) == "1"
+                        x.pop(k_so, None)
+                        if (form.get(o_so) or "").strip():
+                            x[k_so] = NL.so_nguyen(form.get(o_so), nhan, 0, CP.SO_TOI_DA)
+                    if x:
+                        tk[khoi] = x
                 ch["tu_khoa"][p] = tk
                 if p == "web":             # web không cào bình luận (giai đoạn 1)
                     continue
