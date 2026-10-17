@@ -604,55 +604,81 @@ MOI_NHAT_MOC_NGAY = 30
 
 def tim_moi_nhat(viec: list[tuple[str, datetime.datetime | None]], so_trang: int, ngan: _Ngan,
                  vung: str = "VN") -> dict[str, dict]:
-    """Trang MỚI NHẤT (`SAP_MOI_NHAT`) của từng (từ khoá, mốc): lật tối đa `so_trang` trang × 30
-    bài, DỪNG khi trang đã chạm bài cũ hơn mốc (feed sắp theo giờ đăng giảm dần — phần sau đã
-    thấy ở lượt trước), hết trang, hoặc trang không có bài mới. Mốc None = chỉ trang đầu.
-    -> {từ khoá: {"bai": [item kiểu clockworks], "trang": số yêu cầu, "moi_hon_moc": số bài
-    mới hơn mốc, "loi": ""}}. KHÔNG ném lỗi Apify: lỗi một từ ghi vào `loi` của nó (trang đã trả
-    tiền giữ nguyên); HET_TIEN_THANG / DA_HUY thì khoá bộ đếm (`ngan.dung`) — từ khác dừng."""
+    """Trang MỚI NHẤT (`SAP_MOI_NHAT`) của từng (từ khoá, mốc), ≤ `so_trang` trang × 30 bài mỗi
+    từ. Feed sắp theo giờ đăng giảm dần: một từ XONG ("cham") khi trang chạm bài cũ hơn mốc (phần
+    sau đã thấy ở lượt trước), hết trang, hoặc trang không có bài mới. Mốc None = chỉ trang đầu.
+
+    Review 17/10 (M2): mọi từ dùng chung trần `ngan` — VÒNG 1 lấy trang đầu của MỌI từ, rồi các
+    vòng sau mỗi từ chưa xong thêm một trang (xoay vòng), để từ đứng sau không bị đói vì từ bận
+    đứng trước lật hết trần. -> {từ khoá: {"bai", "trang": số yêu cầu, "moi_hon_moc", "cham":
+    đã lật tới mốc / hết feed (M1: chưa chạm thì bên gọi KHÔNG dời mốc), "cu_nhat": giờ đăng
+    bài cũ nhất đã thấy, "loi"}}. KHÔNG ném lỗi Apify: lỗi một từ ghi vào `loi` của nó (trang đã
+    trả tiền giữ nguyên); HET_TIEN_THANG / DA_HUY thì khoá bộ đếm (`ngan.dung`) — từ khác dừng."""
     kq: dict[str, dict] = {}
+    trang_thai: dict[str, dict] = {}
+    for kw, moc in viec:
+        kq[kw] = {"bai": [], "trang": 0, "moi_hon_moc": 0, "cham": False, "cu_nhat": None,
+                  "loi": ""}
+        trang_thai[kw] = {"moc": moc, "off": 0, "thay": set(), "xong": False,
+                          "toi_da": max(0, int(so_trang)) if moc is not None
+                          else min(1, int(so_trang))}
 
-    def mot(x: tuple[str, datetime.datetime | None]) -> None:
-        kw, moc = x
-        r = kq[kw] = {"bai": [], "trang": 0, "moi_hon_moc": 0, "loi": ""}
-        thay: set[str] = set()
-        off = 0
-        for i in range(max(0, int(so_trang)) if moc is not None else min(1, int(so_trang))):
+    def mot_trang(kw: str) -> None:
+        r, t = kq[kw], trang_thai[kw]
+        try:
+            it = _goi({"searchPosts_keyword": kw, "searchPosts_count": TIM_MOI_TRANG,
+                       "searchPosts_offset": t["off"], "searchPosts_region": vung,
+                       "searchPosts_publishTime": MOI_NHAT_MOC_NGAY,
+                       "searchPosts_sortType": SAP_MOI_NHAT}, ngan)
+        except A.LoiApify as e:
+            r["loi"] = A._che_token(f"{e.ma}: {e}")[:120]
+            if e.ma in _DUNG_HAN:
+                ngan.dung, ngan.toi_da = e.ma, 0
+            t["xong"] = True
+            return
+        except Exception as e:               # lỗi lạ: giữ trang đã trả tiền của mọi từ
+            if type(e).__name__ == "MatQuyen":
+                raise
+            r["loi"] = A._che_token(f"{type(e).__name__}: {e}")[:120]
+            t["xong"] = True
+            return
+        if it is None:                       # hết trần: dừng, CHƯA chạm mốc
+            t["xong"] = True
+            return
+        r["trang"] += 1
+        moi = 0
+        for y in it.get("search_item_list") or []:
+            a = (y or {}).get("aweme_info") if isinstance(y, dict) else None
+            if not isinstance(a, dict) or not a.get("aweme_id"):
+                continue
             try:
-                it = _goi({"searchPosts_keyword": kw, "searchPosts_count": TIM_MOI_TRANG,
-                           "searchPosts_offset": off, "searchPosts_region": vung,
-                           "searchPosts_publishTime": MOI_NHAT_MOC_NGAY,
-                           "searchPosts_sortType": SAP_MOI_NHAT}, ngan)
-            except A.LoiApify as e:
-                r["loi"] = A._che_token(f"{e.ma}: {e}")[:120]
-                if e.ma in _DUNG_HAN:
-                    ngan.dung, ngan.toi_da = e.ma, 0
-                return
-            if it is None:
-                return
-            r["trang"] += 1
-            moi = 0
-            cham = False
-            for y in it.get("search_item_list") or []:
-                a = (y or {}).get("aweme_info") if isinstance(y, dict) else None
-                if not isinstance(a, dict) or not a.get("aweme_id"):
-                    continue
                 v = video(a)
-                if v["id"] in thay:
-                    continue
-                thay.add(v["id"])
-                moi += 1
-                r["bai"].append(v)
                 dt = A._to_vn(v["createTimeISO"])
-                if moc is not None and dt and dt < moc:
-                    cham = True
-                else:
-                    r["moi_hon_moc"] += 1
-            if cham or not it.get("has_more") or not moi:
-                return
-            off = max(off + TIM_MOI_TRANG, _so(it.get("cursor")) or 0)
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue                     # một bài hỏng shape không làm mất cả trang đã trả
+            if v["id"] in t["thay"]:
+                continue
+            t["thay"].add(v["id"])
+            moi += 1
+            r["bai"].append(v)
+            if dt and (r["cu_nhat"] is None or dt < r["cu_nhat"]):
+                r["cu_nhat"] = dt
+            if t["moc"] is not None and dt and dt < t["moc"]:
+                r["cham"] = True
+            else:
+                r["moi_hon_moc"] += 1
+        if not it.get("has_more") or not moi:
+            r["cham"] = True                 # hết feed: không còn gì để lật
+        if r["cham"] or r["trang"] >= t["toi_da"]:
+            t["xong"] = True
+            return
+        t["off"] = max(t["off"] + TIM_MOI_TRANG, _so(it.get("cursor")) or 0)
 
-    _song_song(mot, list(viec))
+    while True:
+        con = [kw for kw, t in trang_thai.items() if not t["xong"] and t["toi_da"] > 0]
+        if not con or ngan.da >= ngan.toi_da:
+            break
+        _song_song(mot_trang, con)
     return kq
 
 

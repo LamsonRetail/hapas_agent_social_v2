@@ -366,6 +366,15 @@ def bai_sot(mau: list[dict], tu: list[str], tac_gia_kho: set[str],
 #     vẫn là `theo_doi_api.tran_moi` (phần ước tính chưa dùng, phần còn của tháng/việc).
 KHOA_NOI_CFG = "tiktok_noi_cfg"   # khoá trong sổ mốc tìm theo từ khoá
 DE_XUAT_MANH = 500           # thảo luận sót của một người → đề xuất ưu tiên
+#: Ngưỡng đề xuất (review 17/10 — lần kiểm thật đầu tiên, lượt 10, ra 80 đề xuất: quá nhiều để
+#: duyệt): chỉ nhà sáng tạo có ≥ `DE_XUAT_TOI_THIEU_BAI` bài brand sót trong mẫu HOẶC một bài
+#: brand ≥ `DE_XUAT_TOI_THIEU_TL` thảo luận; tối đa `DE_XUAT_MOI_TOI_DA` đề xuất MỚI mỗi lần
+#: (nhiều thảo luận trước — đề xuất đang chờ chỉ cập nhật số, không tính); người bị từ chối
+#: trong `DE_XUAT_NGAY_TU_CHOI` ngày không đề xuất lại.
+DE_XUAT_TOI_THIEU_BAI = 2
+DE_XUAT_TOI_THIEU_TL = 300
+DE_XUAT_MOI_TOI_DA = 10
+DE_XUAT_NGAY_TU_CHOI = 60
 TAG_NOI_TOI_DA = 4
 NOI_TRANG_TOI_DA = 4
 NOI_GIO_TOI_THIEU = 10
@@ -396,13 +405,41 @@ def cau_hinh_noi(cfg: dict | None) -> dict:
                             MOI_TRANG_NOI_TOI_DA)}
 
 
+def chon_de_xuat(nguoi: list[dict], tu_choi: set[str],
+                 dang_cho: set[str]) -> tuple[list[dict], dict[str, str]]:
+    """Lọc nhà sáng tạo bị sót thành đề xuất (ngưỡng `DE_XUAT_*`). `nguoi`: [{dinh_danh, so_bai,
+    thao_luan, _max (thảo luận bài lớn nhất)}]. -> (đề xuất nhiều thảo luận trước, {tài khoản:
+    lý do không đề xuất})."""
+    ra: list[dict] = []
+    bo: dict[str, str] = {}
+    moi = 0
+    for g in sorted(nguoi, key=lambda g: (-g["thao_luan"], g["dinh_danh"])):
+        u = g["dinh_danh"]
+        if u in tu_choi:
+            bo[u] = f"đã bị từ chối trong {DE_XUAT_NGAY_TU_CHOI} ngày"
+        elif g["so_bai"] < DE_XUAT_TOI_THIEU_BAI and g.get("_max", 0) < DE_XUAT_TOI_THIEU_TL:
+            bo[u] = (f"dưới ngưỡng: {g['so_bai']} bài, bài lớn nhất "
+                     f"{g.get('_max', 0)} thảo luận")
+        elif u in dang_cho:
+            ra.append(g)                 # đang chờ duyệt: cập nhật số, không tính trần
+        elif moi >= DE_XUAT_MOI_TOI_DA:
+            bo[u] = f"quá trần {DE_XUAT_MOI_TOI_DA} đề xuất mới mỗi lần kiểm"
+        else:
+            ra.append(g)
+            moi += 1
+    return ra, bo
+
+
 def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: dict | None,
               do_phu_tl: float | None, bay_gio: datetime.datetime,
-              tl_truoc: float | None = None) -> dict:
+              tl_truoc: float | None = None, tu_choi: set[str] | None = None,
+              dang_cho: set[str] | None = None) -> dict:
     """Việc Mark tự làm cho các bài sót (TẤT CẢ, không chỉ 10 bài hiện); ghi câu vào `hanh_dong`
     của từng bài. `tl_truoc`: độ phủ theo thảo luận của lần kiểm trước (lùi nấc lượt nổi khi
-    HAI lần liền ≥ `TOT`). -> {"de_xuat": [dòng cho `lang_nghe_db.ghi_de_xuat`], "noi_cfg": cấu
-    hình lượt nổi mới, "tom": bản tóm tắt lưu bảng}."""
+    HAI lần liền ≥ `TOT`). `tu_choi`: tài khoản bị từ chối trong `DE_XUAT_NGAY_TU_CHOI` ngày
+    (không đề xuất lại); `dang_cho`: đề xuất đang chờ / đã duyệt (cập nhật số, không tính vào
+    trần `DE_XUAT_MOI_TOI_DA`). -> {"de_xuat": [dòng cho `lang_nghe_db.ghi_de_xuat`],
+    "noi_cfg": cấu hình lượt nổi mới, "tom": bản tóm tắt lưu bảng}."""
     import theo_doi_api as TDA
     ngay = bay_gio.astimezone(_VN).strftime("%d/%m")
     # 1. Nhà sáng tạo chưa theo dõi → đề xuất (gộp theo người).
@@ -416,7 +453,10 @@ def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: 
                                  "ten": str(s.get("ten") or u)[:200], "so_bai": 0, "thao_luan": 0})
         g["so_bai"] += 1
         g["thao_luan"] += int(s.get("thao_luan") or 0)
-    de_xuat = sorted(nguoi.values(), key=lambda g: (-g["thao_luan"], g["dinh_danh"]))
+        g["_max"] = max(g.get("_max", 0), int(s.get("thao_luan") or 0))
+    de_xuat, bo = chon_de_xuat(list(nguoi.values()), tu_choi or set(), dang_cho or set())
+    for g in de_xuat:
+        g.pop("_max", None)
     for g in de_xuat:
         g["uu_tien"] = g["thao_luan"] >= DE_XUAT_MANH
         g["ly_do"] = (("ƯU TIÊN theo dõi — " if g["uu_tien"] else "")
@@ -482,7 +522,9 @@ def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: 
     for s in sot:
         u = str(s.get("tai_khoan") or "").strip().lstrip("@").lower()
         hd = s.setdefault("hanh_dong", [])
-        if u in nguoi:
+        if u in bo:
+            hd.append(f"chưa đề xuất @{u} ({bo[u]})")
+        elif u in nguoi:
             hd.append(f"đề xuất theo dõi @{u}" + (" (ưu tiên)" if nguoi[u]["uu_tien"] else ""))
         elif u:
             hd.append(f"@{u} đã là nguồn theo dõi")
@@ -495,6 +537,7 @@ def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: 
             hd.append(ly_moi.split(" (")[0])
     tom = {"de_xuat": [{k: g[k] for k in ("dinh_danh", "so_bai", "thao_luan", "uu_tien")}
                        for g in de_xuat],
+           "de_xuat_bo": len(bo),
            "tag_noi": tag_moi, "tag_them": them_tag,
            "noi": {"trang": [cu["trang"], trang], "gio": [cu["gio"], gio],
                    "moi_trang": [cu["moi_trang"], moi_trang], "ly_do": ly}}
@@ -511,6 +554,8 @@ def cau_hanh_dong(tom: dict | None) -> str:
     if dx:
         ut = sum(1 for g in dx if g.get("uu_tien"))
         ra.append(f"đề xuất theo dõi {len(dx)} nhà sáng tạo" + (f" ({ut} ưu tiên)" if ut else ""))
+    if tom.get("de_xuat_bo"):
+        ra.append(f"không đề xuất {tom['de_xuat_bo']} người dưới ngưỡng / đã từ chối / quá trần")
     if tom.get("tag_them"):
         ra.append("thêm #" + ", #".join(tom["tag_them"]) + " vào lượt nổi")
     if (tom.get("noi") or {}).get("ly_do"):

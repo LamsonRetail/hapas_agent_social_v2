@@ -537,7 +537,8 @@ def tim_moi_tiktok(q: list[str], moc: dict | None, bay_gio: datetime.datetime, t
     (HET_TIEN_THANG / DA_HUY khoá bộ đếm — `tiktok_api.tim_moi_nhat`). Mốc chỉ giữ từ khoá
     hiện có của dự án."""
     chay, nghi = chon_tu_moi(q, moc, bay_gio)
-    tk = {"tu": len(chay), "nghi": len(nghi), "trang": 0, "moi_hon_moc": 0, "loi": ""}
+    tk = {"tu": len(chay), "nghi": len(nghi), "trang": 0, "moi_hon_moc": 0, "chua_cham": 0,
+          "loi": ""}
     tu_cu = (moc or {}).get("tu") if isinstance((moc or {}).get("tu"), dict) else {}
     hien = {A._norm(kw) for kw in q}
     tu_moi = {k: dict(x) for k, x in tu_cu.items() if isinstance(x, dict) and k in hien}
@@ -562,12 +563,27 @@ def tim_moi_tiktok(q: list[str], moc: dict | None, bay_gio: datetime.datetime, t
         if not r.get("trang") or r.get("loi"):
             continue                    # chưa xem được trang nào / lỗi: giữ mốc cũ của từ
         cu = tu_moi.get(A._norm(kw)) or {}
-        yen = 0 if r.get("moi_hon_moc") else int(cu.get("yen") or 0) + 1
+        if not r.get("cham"):
+            # Review M1: dừng vì trần trang / trần tiền TRƯỚC khi lật tới mốc — dời mốc tới bây
+            # giờ thì phần giữa (mốc cũ .. bài cũ nhất đã thấy) mất hẳn. Có mốc cũ: giữ nguyên
+            # (lượt sau lật lại tới đó); chưa có: mốc = bài cũ nhất đã thấy (+ phần chồng mép).
+            tk["chua_cham"] += 1
+            if not cu.get("luc") and r.get("cu_nhat"):
+                tu_moi[A._norm(kw)] = {"luc": (r["cu_nhat"] + datetime.timedelta(
+                    hours=MOI_GIO_CHONG)).isoformat(timespec="seconds"), "yen": 0}
+            continue
+        yen_cu = str(cu.get("yen") or "0")
+        yen = 0 if r.get("moi_hon_moc") else (int(yen_cu) if yen_cu.isdigit() else 0) + 1
         tu_moi[A._norm(kw)] = {"luc": bay_gio.isoformat(timespec="seconds"), "yen": yen}
     if ngan.dung:
         loi.append(f"dừng: {ngan.dung}")
     tk["loi"] = "; ".join(loi)[:200]
-    ra = A._chuan_tiktok(A._chuan_clockworks(items))
+    ra: list[tuple] = []
+    for it in items:                    # từng bài: một bài hỏng không làm mất bài đã trả tiền
+        try:
+            ra += A._chuan_tiktok(A._chuan_clockworks([it]))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            tk["loi"] = (tk["loi"] + "; bỏ 1 bài hỏng shape").lstrip("; ")[:200]
     for d, _ in ra:
         d["_moi_nhat"] = True
     return ra, tk, {"luc": bay_gio.isoformat(timespec="seconds"), "tu": tu_moi}

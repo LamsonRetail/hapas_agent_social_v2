@@ -142,8 +142,8 @@ def test_tim_moi_tiktok_cap_nhat_moc_yen_va_giu_moc_tu_loi(monkeypatch):
         assert so_trang == 3 and {k for k, _ in viec} == {"hapas", "túi hapas", "lỗi"}
         a = TT.video(_aweme(7000000001, ngay=0.2))
         b = TT.video(_aweme(7000000002, ngay=6))
-        return {"hapas": {"bai": [a, b], "trang": 1, "moi_hon_moc": 1, "loi": ""},
-                "túi hapas": {"bai": [b], "trang": 1, "moi_hon_moc": 0, "loi": ""},
+        return {"hapas": {"bai": [a, b], "trang": 1, "moi_hon_moc": 1, "cham": True, "loi": ""},
+                "túi hapas": {"bai": [b], "trang": 1, "moi_hon_moc": 0, "cham": True, "loi": ""},
                 "lỗi": {"bai": [], "trang": 0, "moi_hon_moc": 0, "loi": "LOI: giả"}}
     monkeypatch.setattr(TT, "tim_moi_nhat", gia)
     ra, tk, m = TDA.tim_moi_tiktok(["hapas", "túi hapas", "lỗi"], moc, BAY, 1.0)
@@ -231,8 +231,9 @@ def test_trang_moi_nhat_loi_khong_lam_mat_bai_luot_thuong(mo):  # noqa: F811
     f = tk["pheu"]["tiktok"]
     assert f["moi"] == 1 and kho.bai and "lỗi" in f["moi_nhat"]["ly_do"]
     assert f["moi_nhat"]["usd"] == pytest.approx(G)
-    # Lỗi trước khi có mốc mới: không ghi mốc (lượt sau chạy lại), tiền vẫn vào sổ.
-    assert TDA.KHOA_MOC_MOI not in T.doc_moc_tk("hapas")
+    # Review LOW: đã trả tiền thì vẫn ghi nhịp 20 giờ (mốc từng từ giữ nguyên — không có "tu").
+    m = T.doc_moc_tk("hapas")[TDA.KHOA_MOC_MOI]
+    assert m["usd"] == pytest.approx(G) and not m.get("tu")
     ph = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-tiktok")
     assert ph["trang_thai"] == "xong" and ph["usd_so"] == pytest.approx(3 * G)
 
@@ -338,3 +339,81 @@ def test_ngan_sach_js_uoc_tk_khop_python(tmp_path):
                                    encoding="utf-8", check=True, timeout=30).stdout)
     assert ra == [CP.uoc_tk_nen_tang(p, so, TU_VD, 2, fb_toi_da=CP.GIOI_HAN["tk_so_bai"][1])
                   for p, so in ca]
+
+
+# ───────────────────────────── review 17/10 (M1, M2, LOW) ─────────────────────────────
+def test_tim_moi_nhat_bao_cham_moc(monkeypatch):
+    """M1: dừng vì trần trang trước khi chạm mốc → cham=False (+ giờ bài cũ nhất đã thấy);
+    chạm mốc hoặc hết feed → cham=True."""
+    now = datetime.datetime.now(_VN)
+    _goi_gia(monkeypatch, {
+        ("ban", 0): _trang([(i, 0.1) for i in range(1, 31)]),
+        ("ban", 30): _trang([(i, 0.2) for i in range(31, 61)], cursor=60),
+        ("het", 0): _trang([(100, 0.1)], more=0),
+        ("cham", 0): _trang([(200, 0.1), (201, 9)]),
+    })
+    moc = now - datetime.timedelta(days=5)
+    kq = TT.tim_moi_nhat([("ban", moc), ("het", moc), ("cham", moc)], 2, TT.Ngan(1.0))
+    assert not kq["ban"]["cham"] and kq["ban"]["trang"] == 2
+    assert kq["ban"]["cu_nhat"] < now - datetime.timedelta(hours=4)
+    assert kq["het"]["cham"] and kq["cham"]["cham"]
+
+
+def test_tim_moi_nhat_trang_dau_cho_moi_tu_truoc(monkeypatch):
+    """M2: trần chung 3 yêu cầu, từ đầu rất bận — vẫn đủ trang đầu cho cả 3 từ (không đói)."""
+    now = datetime.datetime.now(_VN)
+    ban = {("a", off): _trang([(off + i + 1, 0.01) for i in range(30)], cursor=off + 30)
+           for off in (0, 30, 60)}
+    goi = _goi_gia(monkeypatch, {**ban, ("b", 0): _trang([(500, 0.1)], more=0),
+                                 ("c", 0): _trang([(600, 0.1)], more=0)})
+    kq = TT.tim_moi_nhat([("a", now - datetime.timedelta(days=9)), ("b", now), ("c", now)], 3,
+                         TT.Ngan(3 * G))
+    assert sorted((g["searchPosts_keyword"], g["searchPosts_offset"]) for g in goi) == [
+        ("a", 0), ("b", 0), ("c", 0)]
+    assert kq["b"]["trang"] == kq["c"]["trang"] == 1 and not kq["a"]["cham"]
+    # Còn tiền: vòng sau chỉ từ chưa xong ("a") lật tiếp.
+    goi.clear()
+    kq = TT.tim_moi_nhat([("a", now - datetime.timedelta(days=9)), ("b", now)], 3, TT.Ngan(1.0))
+    assert [(g["searchPosts_keyword"], g["searchPosts_offset"]) for g in goi].count(("b", 0)) == 1
+    assert kq["a"]["trang"] == 3
+
+
+def test_tim_moi_tiktok_chua_cham_moc_khong_doi_moc(monkeypatch):
+    """M1: từ chưa lật tới mốc giữ mốc cũ; từ chưa có mốc thì mốc = bài cũ nhất đã thấy + 24 giờ
+    (lượt sau lật tới đúng đó — không hở khoảng)."""
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
+    cu = BAY - datetime.timedelta(hours=30)
+    moc = {"luc": "2026-10-16T08:00:00+07:00", "tu": {
+        "hapas": {"luc": "2026-10-16T08:00:00+07:00", "yen": "rác"}}}
+    monkeypatch.setattr(TT, "tim_moi_nhat", lambda viec, so_trang, ngan, vung="VN": {
+        "hapas": {"bai": [], "trang": 3, "moi_hon_moc": 90, "cham": False, "cu_nhat": cu,
+                  "loi": ""},
+        "mới": {"bai": [], "trang": 3, "moi_hon_moc": 90, "cham": False, "cu_nhat": cu,
+                "loi": ""}})
+    _, tk, m = TDA.tim_moi_tiktok(["hapas", "mới"], moc, BAY, 1.0)
+    assert m["tu"]["hapas"] == moc["tu"]["hapas"] and tk["chua_cham"] == 2
+    assert m["tu"]["moi"]["luc"] == (cu + datetime.timedelta(hours=24)).isoformat(
+        timespec="seconds")
+    # yen rác + chạm mốc → coi như 0 (không ném lỗi).
+    monkeypatch.setattr(TT, "tim_moi_nhat", lambda viec, so_trang, ngan, vung="VN": {
+        "hapas": {"bai": [], "trang": 1, "moi_hon_moc": 0, "cham": True, "loi": ""}})
+    _, _, m = TDA.tim_moi_tiktok(["hapas"], moc, BAY, 1.0)
+    assert m["tu"]["hapas"]["yen"] == 1
+
+
+def test_tim_moi_tiktok_bai_hong_shape_khong_mat_bai_khac(monkeypatch):
+    """LOW: một item hỏng không làm mất các bài đã trả tiền khác."""
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
+    tot = TT.video(_aweme(7000000001, ngay=0.2))
+    monkeypatch.setattr(TT, "tim_moi_nhat", lambda viec, so_trang, ngan, vung="VN": {
+        "hapas": {"bai": [tot, {"id": "x", "createTimeISO": None, "authorMeta": 5}], "trang": 1,
+                  "moi_hon_moc": 1, "cham": True, "loi": ""}})
+    goc = A._chuan_clockworks
+
+    def chuan(items):
+        if any(it.get("id") == "x" for it in items):
+            raise TypeError("shape lạ")
+        return goc(items)
+    monkeypatch.setattr(A, "_chuan_clockworks", chuan)
+    ra, tk, _ = TDA.tim_moi_tiktok(["hapas"], None, BAY, 1.0)
+    assert len(ra) == 1 and "hỏng shape" in tk["loi"]

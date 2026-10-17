@@ -1404,8 +1404,11 @@ def _them_luot_moi(v, ma: str, luot: int, q: list[str], got: list, moc_cu: dict,
         ly = f"{ly}; lỗi " + A._che_token(f"{getattr(e, 'ma', type(e).__name__)}: {e}")[:120]
     usd = round(sum(TK_TT_YEU_CAU for x in _phan_tk(v)[truoc:]
                     if x.get("run_id") and x.get("actor") == TT_ACTOR), 4)
-    if usd > 0 and moc_moi:
-        ghi_moc_tk(ma, {TDA.KHOA_MOC_MOI: {**moc_moi, "luot": luot, "ve": len(ve), "usd": usd}})
+    if usd > 0:
+        # Review LOW: đã trả tiền thì LUÔN ghi nhịp 20 giờ — kể cả khi lỗi trước lúc có mốc mới
+        # (giữ mốc từng từ cũ: lượt sau lật lại đúng chỗ, không mất khoảng nào).
+        moc_ghi = moc_moi or {**moc, "luc": bay_gio.isoformat(timespec="seconds")}
+        ghi_moc_tk(ma, {TDA.KHOA_MOC_MOI: {**moc_ghi, "luot": luot, "ve": len(ve), "usd": usd}})
     if tkm.get("loi"):
         ly = f"{ly}; {tkm['loi']}"
     co = {d.get("link") for d, _ in got}
@@ -1686,8 +1689,18 @@ def _xu_ly_mau(v, du_an: dict, luot: int, han: float, ctx: dict,
                               else "đã qua lọc + AI — chưa giữ" if sau_ai
                               else "chưa qua AI (lấp lỗi)")
     # Tự sửa đường thu thập theo lý do sót (chủ dự án 17/10: "không chỉ đo").
+    # Review 17/10 (lượt 10 ra 80 đề xuất): không đề xuất lại người bị từ chối gần đây; đề xuất
+    # đang chờ không tính vào trần đề xuất mới. Đọc kho lỗi → coi như rỗng (trần 10 vẫn chặn).
+    try:
+        tu_choi = K.de_xuat_tu_choi_gan(ma, "tiktok", KDP.DE_XUAT_NGAY_TU_CHOI)
+        cho = {str(x.get("dinh_danh") or "").lower() for x in K.de_xuat_dang_xet(ma, "tiktok")}
+    except Exception as e:  # noqa: BLE001 — kho lỗi không chặn kiểm độ phủ
+        if type(e).__name__ == "MatQuyen":
+            raise
+        tu_choi, cho = set(), set()
     hd = KDP.hanh_dong(sot, tu, dang_theo, doc_moc_tk(ma).get(KDP.KHOA_NOI_CFG),
-                       so_do["do_phu_tl"], bay_gio, tl_truoc=moc_cu.get("do_phu_tl"))
+                       so_do["do_phu_tl"], bay_gio, tl_truoc=moc_cu.get("do_phu_tl"),
+                       tu_choi=tu_choi, dang_cho=cho)
     if hd["de_xuat"]:
         try:
             K.ghi_de_xuat(ma, hd["de_xuat"])

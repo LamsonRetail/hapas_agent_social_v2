@@ -357,6 +357,16 @@ def de_xuat_dang_xet(ma: str, nen_tang: str) -> list[dict]:
             (ma, nen_tang)).fetchall()
 
 
+def de_xuat_tu_choi_gan(ma: str, nen_tang: str, ngay: int = 60) -> set[str]:
+    """Tài khoản bị từ chối đề xuất trong `ngay` ngày gần nhất (kiểm độ phủ không đề xuất lại)."""
+    with ket_noi() as c:
+        rows = c.execute(
+            "SELECT dinh_danh FROM de_xuat WHERE du_an = %s AND nen_tang = %s AND "
+            "trang_thai = 'tu_choi' AND COALESCE(xu_ly_luc, de_xuat_luc) >= "
+            "now() - make_interval(days => %s)", (ma, nen_tang, int(ngay))).fetchall()
+    return {str(r["dinh_danh"]).lower() for r in rows}
+
+
 _COT_DO_PHU = ("du_an", "luot_id", "nen_tang", "so_mau", "so_nhac", "so_da_co", "so_da_loai",
                "so_sot", "thao_luan_nhac", "thao_luan_da_co", "do_phu", "do_phu_tl", "bo_sung",
                "so_yeu_cau", "chi_phi_usd", "mau", "bai_sot", "hanh_dong")
