@@ -50,13 +50,16 @@ An toàn (theo mẫu `scripts/lang_nghe_gan_lai.py`):
   • Mặc định CHẠY THỬ: mọi truy vấn trong MỘT giao dịch READ ONLY; in số nhóm, số bài bỏ, số bình
     luận chuyển / bỏ trùng, ngày chỉ số, kèm mẫu (tác giả bình luận đã băm). Không ghi gì.
   • `--ap-dung --sao-luu <tệp>`: không chạy khi dự án có lượt `/theodoi` đang chạy (bình luận cào
-    dở dưới bản bỏ sẽ mất theo bài). Mỗi nhóm: khoá dòng (FOR UPDATE), ĐỌC LẠI, kiểm nhóm vẫn
+    dở dưới bản bỏ sẽ mất theo bài). Mỗi nhóm: giữ khoá advisory mở lượt (CÙNG khoá
+    `lang_nghe_db.mo_luot`: lượt mới chờ nhóm commit) rồi kiểm lại lượt đang chạy NGAY trong giao
+    dịch, khoá dòng (FOR UPDATE), ĐỌC LẠI, kiểm nhóm vẫn
     như lúc chạy thử, ghi tệp hoàn tác (đủ dòng bài bị xoá, dòng bình luận bị đổi hay xoá, dòng
     chi_so_ngay) + fsync TRƯỚC, rồi mới sửa, trong MỘT giao dịch. Tệp có sẵn thì dừng.
   • `--hoan-tac <tệp>`: nhóm có dấu "đã áp" (ghi SAU khi giao dịch commit) mà bản bỏ không còn
     trong kho thì chèn lại bài + bình luận + chỉ số đã xoá, chuyển bình luận về bản cũ, trả giá
     trị cũ cho các ô CÒN mang đúng giá trị script đã ghi (lượt quét sau đã đổi số thì giữ số
-    mới). Kế hoạch không có dấu (giao dịch lỗi đã huỷ) thì không đụng. Chạy lại được.
+    mới). Kế hoạch không có dấu (giao dịch lỗi đã huỷ) thì không đụng. Chạy lại được. Nhóm bị bỏ
+    qua (bản bỏ còn trong kho) được in TỪNG nhóm, nói rõ còn đủ hay chỉ một phần (xem tay).
   • Chạy lại script: nhóm đã gộp không còn là nhóm — chạy lại an toàn, chỉ xử lý phần còn lại.
 
 Quyền: role `mark` KHÔNG có DELETE trên `bai` (schema.sql — bot không xoá bài). Cấp TẠM cho lần
@@ -124,8 +127,10 @@ SQL_LUOT_CHAY = ("/* gop:luot_chay */ SELECT id FROM luot_quet WHERE du_an = %s 
 SQL_KDP = ("/* gop:kdp */ SELECT count(*) AS n FROM kiem_do_phu WHERE du_an = %s AND "
            "position('\"facebook:' in bai_sot::text) > 0")
 SQL_DONG_BO = "/* gop:dong_bo */ SELECT count(*) AS n FROM dong_bo_bq"
-# Ghi (mỗi nhóm một giao dịch): khoá dòng trước, đọc lại, rồi sửa.
-SQL_KHOA_BAI = ("/* gop:khoa_bai */ SELECT * FROM bai WHERE du_an = %s AND khoa = ANY(%s) "
+# Ghi (mỗi nhóm một giao dịch): khoá mở lượt (cùng khoá `lang_nghe_db.mo_luot`), khoá dòng, đọc
+# lại, rồi sửa.
+SQL_KHOA_LUOT = "/* gop:khoa_luot */ " + K._SQL_KHOA_LUOT
+SQL_KHOA_BAI =("/* gop:khoa_bai */ SELECT * FROM bai WHERE du_an = %s AND khoa = ANY(%s) "
                 "ORDER BY khoa FOR UPDATE")
 SQL_KHOA_BL = ("/* gop:khoa_bl */ SELECT * FROM binh_luan WHERE du_an = %s AND "
                "khoa_bai = ANY(%s) ORDER BY khoa_bai, ma FOR UPDATE")
@@ -280,7 +285,9 @@ def tim_nhom(rows: list[dict]) -> tuple[list[list[dict]], list[dict]]:
 
 
 def chon_giu(nhom: list[dict]) -> dict:
-    """Bản GIỮ: `bl_da_lay` lớn nhất (chưa cào = thấp nhất), hoà thì `thay_lan_dau` sớm nhất."""
+    """Bản GIỮ: `bl_da_lay` lớn nhất (chưa cào — NULL — thấp hơn cả 0), hoà thì `thay_lan_dau`
+    sớm nhất (NULL cuối), rồi khoá. CÙNG thứ tự với lúc ghi kho (`lang_nghe_db._THU_TU_GIU`), để
+    bản trùng mới ghi vào đúng bản script sẽ giữ."""
     xa = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
     return min(nhom, key=lambda r: (-(r["bl_da_lay"] if r.get("bl_da_lay") is not None else -1),
                                     r.get("thay_lan_dau") or xa, r["khoa"]))
@@ -504,11 +511,16 @@ def _ghi_tep(so_luu, ma: str, kh: dict) -> None:
 
 
 def ap_dung_nhom(ma: str, khoa: list[str], so_luu) -> tuple[str, dict | None]:
-    """Gộp MỘT nhóm trong MỘT giao dịch: khoá dòng, đọc lại, kiểm nhóm còn nguyên, ghi tệp hoàn
-    tác (fsync), rồi sửa. -> (trạng thái, kế hoạch đã áp). Trạng thái: "da_gop", "doi" (nhóm
-    đổi từ lúc chạy thử — bỏ qua, chạy lại script), "dang_quet" (lượt /theodoi vừa bắt đầu —
-    dừng cả lượt gộp: bình luận cào dở dưới bản bỏ sẽ mất theo bài)."""
+    """Gộp MỘT nhóm trong MỘT giao dịch: khoá mở lượt, kiểm lượt đang quét, khoá dòng, đọc lại,
+    kiểm nhóm còn nguyên, ghi tệp hoàn tác (fsync), rồi sửa. -> (trạng thái, kế hoạch đã áp).
+    Trạng thái: "da_gop", "doi" (nhóm đổi từ lúc chạy thử — bỏ qua, chạy lại script), "dang_quet"
+    (lượt /theodoi vừa bắt đầu — dừng cả lượt gộp: bình luận cào dở dưới bản bỏ sẽ mất theo bài).
+
+    Soát 17/10/2026: kiểm lượt đang quét chỉ ở ĐẦU giao dịch thì lượt mở ngay sau câu kiểm vẫn
+    chạy song song với phần sửa. Nay giữ khoá advisory `lang_nghe_db.so_khoa_luot` (CÙNG khoá
+    `mo_luot` giữ khi mở lượt) suốt giao dịch: lượt mới phải chờ nhóm này commit."""
     with K.ket_noi() as c:
+        c.execute(SQL_KHOA_LUOT, (K.so_khoa_luot(ma),))
         if c.execute(SQL_LUOT_CHAY, (ma, K.GIO_BO_DO)).fetchall():
             return "dang_quet", None
         bai = [dict(r) for r in c.execute(SQL_KHOA_BAI, (ma, khoa)).fetchall()]
@@ -542,14 +554,15 @@ def ap_dung_nhom(ma: str, khoa: list[str], so_luu) -> tuple[str, dict | None]:
     return "da_gop", kh
 
 
-def hoan_tac_nhom(ma: str, kh: dict) -> str:
-    """Trả lại MỘT nhóm (một giao dịch). -> "da_tra" | "bo_qua" (bản bỏ còn trong kho: nhóm chưa
-    áp dụng, hoặc đã hoàn tác)."""
+def hoan_tac_nhom(ma: str, kh: dict) -> tuple[str, int]:
+    """Trả lại MỘT nhóm (một giao dịch). -> ("da_tra", 0) | ("bo_qua", số bản bỏ còn trong kho):
+    còn đủ = nhóm chưa áp dụng hoặc đã hoàn tác; còn MỘT PHẦN = khoá cũ đã được ghi lại sau khi
+    gộp (lượt quét sau) — không đoán, bên gọi in ra để xem tay."""
     g = kh["giu"]
     with K.ket_noi() as c:
         n = int((c.execute(SQL_HOAN_KIEM, (ma, kh["bo"])).fetchone() or {}).get("n") or 0)
         if n:
-            return "bo_qua"
+            return "bo_qua", n
         for r in kh["bai_bo"]:
             _chen(c, "bai", _tu_json(r), "du_an, khoa")
         cu, moi = _tu_json(kh["bai_giu"]["cu"]), _tu_json(kh["bai_giu"]["moi"])
@@ -588,7 +601,7 @@ def hoan_tac_nhom(ma: str, kh: dict) -> str:
                       [*ts, ma, g, x["ma"]])
         for b in kh["bl_bo"]:
             _chen(c, "binh_luan", _tu_json(b), "du_an, khoa_bai, ma")
-    return "da_tra"
+    return "da_tra", 0
 
 
 def _dau_nhom(r: dict) -> tuple:
@@ -672,14 +685,24 @@ def chay(ns, in_ra=print) -> int:
         if dau.get("du_an") and dau["du_an"] != ma:
             in_ra(f"Tệp hoàn tác của dự án '{dau['du_an']}', không phải '{ma}' — dừng.")
             return 2
-        tra = bo = 0
+        tra, bo = 0, []
         for kh in reversed([x for x in nhom if x.get("du_an", ma) == ma]):
-            if hoan_tac_nhom(ma, kh) == "da_tra":
+            st, con = hoan_tac_nhom(ma, kh)
+            if st == "da_tra":
                 tra += 1
             else:
-                bo += 1
-        in_ra(f"Hoàn tác {ma}: trả lại {tra}/{len(nhom)} nhóm; {bo} nhóm bỏ qua (bản bỏ còn "
-              "trong kho — đã hoàn tác).")
+                bo.append((kh, con))
+        in_ra(f"Hoàn tác {ma}: trả lại {tra}/{len(nhom)} nhóm; {len(bo)} nhóm bỏ qua"
+              + (" (bản bỏ còn trong kho):" if bo else "."))
+        # Soát 17/10/2026: in TỪNG nhóm bỏ qua — còn đủ bản bỏ là đã hoàn tác / chưa áp; còn
+        # một phần là khoá cũ bị ghi lại sau khi gộp, phải xem tay (script không đoán).
+        for kh, con in bo[:50]:
+            in_ra(f"  bỏ qua …{kh['giu'][-12:]}: còn {con}/{len(kh['bo'])} bản bỏ trong kho — "
+                  + ("đã hoàn tác hoặc chưa áp" if con >= len(kh["bo"]) else
+                     "chỉ MỘT PHẦN có lại (lượt quét sau ghi lại khoá cũ?) — KHÔNG hoàn tác, "
+                     "xem tay: " + ", ".join(f"…{x[-12:]}" for x in kh["bo"])))
+        if len(bo) > 50:
+            in_ra(f"  … và {len(bo) - 50} nhóm nữa")
         if khong_dau:
             in_ra(f"{len(khong_dau)} kế hoạch không có dấu đã áp (giao dịch lỗi đã huỷ, hoặc bot "
                   "dừng ngay sau commit) — KHÔNG hoàn tác tự động: "

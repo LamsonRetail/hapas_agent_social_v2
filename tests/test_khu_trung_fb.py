@@ -214,7 +214,9 @@ class KhoGia:
 
     @staticmethod
     def _xep(cac):
-        return sorted(cac, key=lambda r: (-(r.get("bl_da_lay") or 0), r.get("thay", 0), r["khoa"]))
+        # = `lang_nghe_db._THU_TU_GIU`: chưa cào (NULL) = -1, thấp hơn 0.
+        return sorted(cac, key=lambda r: (-(r["bl_da_lay"] if r.get("bl_da_lay") is not None
+                                            else -1), r.get("thay", 0), r["khoa"]))
 
     def execute(self, sql, ts=()):
         self.cau.append(sql)
@@ -309,6 +311,11 @@ def test_nhieu_ban_cu_chon_ban_script_gop_se_giu(kho):
              _bai("pfbidC", bl_da_lay=93)])
     K.ghi_bai("hapas", 9, "theo_doi", [_bai("pfbidD")])
     assert k.so == ["facebook:pfbidB"]
+    # Chưa cào (NULL) thấp hơn đã cào 0 bình luận — đúng bản `chon_giu` của script giữ.
+    k = kho([_bai("pfbidA", bl_da_lay=None), _bai("pfbidB", bl_da_lay=0)])
+    K.ghi_bai("hapas", 9, "theo_doi", [_bai("pfbidD")])
+    assert k.so == ["facebook:pfbidB"]
+    assert any(K._THU_TU_GIU in c for c in k.cau if c.startswith("SELECT khoa, link"))
 
 
 def test_db_chua_co_cot_van_ghi_duoc(kho):

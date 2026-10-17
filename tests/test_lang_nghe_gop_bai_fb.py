@@ -61,11 +61,16 @@ def _cs(khoa, ngay, **kw):
 class KhoGia:
     """`bai`, `binh_luan`, `chi_so_ngay`, `luot_quet`, `kiem_do_phu` trong bộ nhớ."""
 
-    def __init__(self, bai=(), bl=(), cs=(), quyen_xoa=True, luot_chay=(), loi_khi=None):
+    def __init__(self, bai=(), bl=(), cs=(), quyen_xoa=True, luot_chay=(), loi_khi=None,
+                 luot_mo_truoc_khoa=()):
         self.t = {"bai": {(r["du_an"], r["khoa"]): dict(r) for r in bai},
                   "binh_luan": {(r["du_an"], r["khoa_bai"], r["ma"]): dict(r) for r in bl},
                   "chi_so_ngay": {(r["du_an"], r["khoa"], r["ngay"]): dict(r) for r in cs}}
         self.quyen_xoa, self.luot_chay, self.loi_khi = quyen_xoa, list(luot_chay), loi_khi
+        # Lượt /theodoi mở (commit) ngay TRƯỚC khi nhóm lấy được khoá mở lượt — câu kiểm sau
+        # khoá phải thấy nó.
+        self.luot_mo_truoc_khoa = list(luot_mo_truoc_khoa)
+        self.khoa_luot: list = []
         self.chi_doc = False
         self.ghi: list[str] = []
 
@@ -107,11 +112,17 @@ class KhoGia:
         if self.loi_khi and the == self.loi_khi:
             raise K.LoiKho("kho lắng nghe báo lỗi (DeadlockDetected: 40P01)")
         doc = the in ("du_an", "bai", "bl", "cs", "dem_bl", "quyen", "luot_chay", "kdp",
-                      "dong_bo", "khoa_bai", "khoa_bl", "khoa_cs", "hoan_kiem")
+                      "dong_bo", "khoa_bai", "khoa_bl", "khoa_cs", "hoan_kiem", "khoa_luot")
         if not doc:
             assert not self.chi_doc, f"ghi ({the}) trong giao dịch chỉ đọc"
             self.ghi.append(the)
         b = self.t["bai"]
+        if the == "khoa_luot":
+            assert sql.endswith(K._SQL_KHOA_LUOT) and ts == [K.so_khoa_luot("hapas")]
+            self.khoa_luot.append(ts[0])
+            self.luot_chay += self.luot_mo_truoc_khoa
+            self.luot_mo_truoc_khoa = []
+            return self._tra()
         if the == "du_an":
             return self._tra([{"ma": "hapas"}] if ts[0] == "hapas" else [])
         if the == "bai":
@@ -310,6 +321,11 @@ def test_chon_ban_giu_bl_da_lay_lon_nhat_hoa_thi_thay_som_nhat():
     b = _bai("b", bl_da_lay=94, thay_lan_dau=BAY_GIO - datetime.timedelta(days=1))
     assert G.chon_giu([a, b])["khoa"] == "facebook:b"
     assert G.chon_giu([_bai("x", bl_da_lay=None), _bai("y", bl_da_lay=0)])["khoa"] == "facebook:y"
+    assert G.chon_giu([_bai("x", thay_lan_dau=None), _bai("y")])["khoa"] == "facebook:y"
+    assert G.chon_giu([_bai("a"), _bai("Z")])["khoa"] == "facebook:Z", "theo mã ký tự"
+    # Lúc ghi kho chọn bản giữ cùng thứ tự (soát 17/10/2026: NULL từng hoà với 0).
+    assert K._THU_TU_GIU == 'COALESCE(bl_da_lay, -1) DESC, thay_lan_dau, khoa COLLATE "C"'
+    assert f"ORDER BY {K._THU_TU_GIU} LIMIT 1" in K._SQL_FB_THEO_SO
 
 
 def test_ke_hoach_gop_so_nhan_binh_luan():
@@ -435,6 +451,57 @@ def test_ap_dung_can_sao_luu_quyen_va_khong_luot_dang_chay(kho, tmp_path):
     rc, out = _chay("hapas", "--ap-dung", "--sao-luu", str(tmp_path / "b.jsonl"))
     assert rc == 2 and "đang chạy" in out and k.ghi == []
     assert _chay("khac")[0] == 2
+
+
+def test_luot_mo_sau_lan_kiem_dau_van_bi_chan_trong_giao_dich(kho, tmp_path):
+    """Soát 17/10/2026: kiểm lượt đang quét chỉ ở đầu thì lượt mở ngay sau đó chạy song song với
+    phần sửa. Nay mỗi nhóm giữ khoá advisory CÙNG khoá `mo_luot` rồi mới kiểm lại: lượt đã mở
+    trước khi có khoá thì thấy và dừng, không ghi gì."""
+    k = kho(luot_mo_truoc_khoa=[13])
+    goc = copy.deepcopy(k.t)
+    rc, out = _chay("hapas", "--ap-dung", "--sao-luu", str(tmp_path / "g.jsonl"))
+    assert rc == 1 and "lượt /theodoi vừa bắt đầu — DỪNG" in out, out
+    assert k.t == goc and k.ghi == [] and len(k.khoa_luot) == 1
+    assert "Đã gộp 0/2 nhóm" in out
+
+
+def test_mo_luot_giu_cung_khoa_advisory_voi_script(monkeypatch):
+    cau: list = []
+
+    class Conn:
+        def execute(self, s, ts=()):
+            cau.append((s, tuple(ts)))
+            return self
+
+        def fetchone(self):
+            return {"id": 7}
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def ket_noi():
+        yield Conn()
+    monkeypatch.setattr(K, "ket_noi", ket_noi)
+    assert K.mo_luot("hapas", "theo_doi", ma_viec="t1") == 7
+    assert cau[0] == (K._SQL_KHOA_LUOT, (K.so_khoa_luot("hapas"),)), "khoá TRƯỚC khi mở lượt"
+    assert G.SQL_KHOA_LUOT.endswith(K._SQL_KHOA_LUOT)
+    assert K.so_khoa_luot("hapas") == K.so_khoa_luot("hapas") != K.so_khoa_luot("khac")
+    assert -2 ** 63 <= K.so_khoa_luot("hapas") < 2 ** 63
+
+
+def test_hoan_tac_in_tung_nhom_bo_qua_va_ca_mot_phan(kho, tmp_path):
+    k = kho()
+    tep = tmp_path / "gop.jsonl"
+    _chay("hapas", "--ap-dung", "--sao-luu", str(tep))
+    # Lượt quét sau ghi lại MỘT khoá cũ của nhóm pfbidB (bản bỏ A) — nhóm chỉ còn một phần.
+    a = _bai("pfbidA")
+    k.t["bai"][("hapas", a["khoa"])] = a
+    rc, out = _chay("hapas", "--hoan-tac", str(tep))
+    assert rc == 0 and "trả lại 1/2 nhóm; 1 nhóm bỏ qua (bản bỏ còn trong kho):" in out, out
+    assert "bỏ qua …ebook:pfbidB: còn 1/2 bản bỏ trong kho — chỉ MỘT PHẦN có lại" in out
+    assert "…ebook:pfbidA" in out and "…ebook:pfbidC" in out
+    rc, out = _chay("hapas", "--hoan-tac", str(tep))
+    assert "còn 1/1 bản bỏ trong kho — đã hoàn tác hoặc chưa áp" in out
 
 
 def test_loi_giua_nhom_tra_lai_ca_nhom_va_hoan_tac_bo_qua(kho, tmp_path):

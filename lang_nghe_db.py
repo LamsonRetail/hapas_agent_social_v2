@@ -138,12 +138,28 @@ def luot_dang_chay(ma: str) -> dict | None:
             "ORDER BY id DESC LIMIT 1", (ma, GIO_BO_DO)).fetchone()
 
 
+#: Khoá advisory của việc MỞ lượt quét một dự án (17/10/2026): `mo_luot` và script gộp bài trùng
+#: (`scripts/lang_nghe_gop_bai_fb.py`, mỗi nhóm một giao dịch) cùng giữ khoá này trong giao dịch —
+#: lượt mở trong lúc script đang gộp một nhóm phải chờ nhóm đó commit, lượt mở trước thì câu kiểm
+#: "lượt đang chạy" của script (chạy SAU khi có khoá) thấy. Không cần quyền gì thêm trên bảng.
+_SQL_KHOA_LUOT = "SELECT pg_advisory_xact_lock(%s)"
+
+
+def so_khoa_luot(ma: str) -> int:
+    """Số khoá advisory (bigint có dấu, ổn định giữa các tiến trình / phiên bản Postgres — không
+    dùng `hashtext`) cho dự án `ma`."""
+    import hashlib
+    return int.from_bytes(hashlib.sha1(f"lang_nghe:mo_luot:{ma}".encode()).digest()[:8],
+                          "big", signed=True)
+
+
 def mo_luot(ma: str, kieu: str, *, ma_viec: str | None = None,
             job_id: str | None = None, lich_id: int | None = None) -> int:
     """Mở lượt mới; đóng luôn các lượt cùng dự án bị bỏ dở quá `GIO_BO_DO` giờ. `lich_id`: lượt
     do lịch quét tự động (bảng `lich_quet`) giao — chỉ ghi cột này khi có (lịch bị xoá giữa
-    chừng thì thành NULL, không hỏng khoá ngoại)."""
+    chừng thì thành NULL, không hỏng khoá ngoại). Giữ khoá `so_khoa_luot` tới hết giao dịch."""
     with ket_noi() as c:
+        c.execute(_SQL_KHOA_LUOT, (so_khoa_luot(ma),))
         c.execute(
             "UPDATE luot_quet SET trang_thai = 'loi', ket_thuc = now(), "
             "loi = COALESCE(loi, 'bỏ dở (bot dừng giữa chừng)') WHERE du_an = %s AND "
@@ -257,10 +273,16 @@ def _co_ma_so_fb(c) -> bool:
     return bool(x)
 
 
+#: Thứ tự chọn bản GIỮ khi nhiều bản trùng cũ cùng khớp — ĐÚNG thứ tự `chon_giu` của script gộp
+#: (`scripts/lang_nghe_gop_bai_fb.py`): `bl_da_lay` lớn nhất, chưa cào (NULL) = -1 thấp hơn cả 0
+#: (soát 17/10/2026: bản trước COALESCE về 0 nên NULL hoà với 0 — kho và script có thể giữ hai bản
+#: khác nhau); hoà thì `thay_lan_dau` sớm nhất (NULL cuối, như `datetime.max` của script), rồi khoá
+#: theo thứ tự mã ký tự (`COLLATE "C"` = so chuỗi Python, không theo collation của DB).
+_THU_TU_GIU = 'COALESCE(bl_da_lay, -1) DESC, thay_lan_dau, khoa COLLATE "C"'
 _SQL_FB_THEO_SO = (
     "SELECT khoa FROM bai WHERE du_an = %s AND nen_tang = 'facebook' AND ({dk}) "
     # Nhiều bản trùng cũ cùng khớp (chưa chạy script gộp): chọn đúng bản script sẽ GIỮ.
-    "ORDER BY COALESCE(bl_da_lay, 0) DESC, thay_lan_dau, khoa LIMIT 1")
+    f"ORDER BY {_THU_TU_GIU} LIMIT 1")
 
 
 def _khoa_fb_cu(c, ma: str, r: dict, co_cot: bool) -> str | None:
@@ -286,8 +308,8 @@ def _khoa_fb_cu(c, ma: str, r: dict, co_cot: bool) -> str | None:
         ", ma_so_fb" if co_cot else "")
     for x in c.execute(
             f"SELECT {cot} FROM bai WHERE du_an = %s AND nen_tang = 'facebook' AND "
-            "dang_luc >= %s AND dang_luc < %s ORDER BY COALESCE(bl_da_lay, 0) DESC, "
-            "thay_lan_dau, khoa", (ma, p, p + datetime.timedelta(minutes=1))).fetchall():
+            f"dang_luc >= %s AND dang_luc < %s ORDER BY {_THU_TU_GIU}",
+            (ma, p, p + datetime.timedelta(minutes=1))).fetchall():
         if x["khoa"] != r["khoa"] and KT.cung_bai(r, x):
             return x["khoa"]
     return None
