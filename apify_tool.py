@@ -610,9 +610,11 @@ _TRUONG_ACTOR = {
                                           "hasTikTokShopProduct"),
     "apidojo~instagram-hashtag-scraper": ("createdAt", "owner", "video", "caption",
                                           "likeCount", "commentCount", "url"),
+    # `post_id` (17/10/2026): id số ổn định của bài — pfbid trong `url` đổi mỗi lượt cào, kho
+    # khớp bản trùng theo id này (`khu_trung_fb`).
     "scrapeforge~facebook-search-posts": ("timestamp", "author", "message",
                                           "video_view_count", "reactions_count",
-                                          "comments_count", "reshare_count", "url"),
+                                          "comments_count", "reshare_count", "url", "post_id"),
     "futurizerush~meta-threads-scraper": ("text_content", "display_name", "username",
                                           "followers_count", "view_count", "like_count",
                                           "reply_count", "repost_count", "share_count",
@@ -1198,14 +1200,26 @@ def _doc_tiep_run(run_id: str, limit: int, deadline: float | None = None,
             raise
 
 
+def _giay_tu(moc: datetime.datetime | None) -> float | None:
+    """Giây từ `moc` tới bây giờ (None khi không có mốc)."""
+    if moc is None:
+        return None
+    return round((datetime.datetime.now(_VN_TZ) - moc).total_seconds(), 1)
+
+
 def _chi_phi_cac_run(run_ids: list[str]) -> dict:
-    """{usd, so_run, chua_doc} — cộng `usageTotalUsd` của ĐÚNG các run id của một việc.
+    """{usd, so_run, chua_doc, con_song, ket_thuc_cuoi, giay_tu_ket_thuc} — cộng `usageTotalUsd`
+    của ĐÚNG các run id của một việc.
 
     Khác `_chi_phi_thuc` (cộng mọi run của actor từ một mốc giờ): việc nền chạy 45 phút
     song song với câu hỏi của người khác, cộng theo mốc giờ là tính nhầm tiền của họ vào
-    việc này."""
+    việc này. `ket_thuc_cuoi` (ISO) / `giay_tu_ket_thuc`: `finishedAt` muộn nhất của các run đã
+    xong — phí SỰ KIỆN Apify ghi trễ sau khi run xong (đo 17/10/2026: đọc ngay 0,1948 → sau vài
+    chục giây 0,2397; 0,0201 → 0,0501; danek 0,0001 → 0,0251), bên gọi dùng để biết số đã đủ
+    lâu để là số cuối chưa. None khi chưa run nào báo giờ xong."""
     token = os.environ.get("APIFY_TOKEN", "").strip()
     tong, so, chua, song = 0.0, 0, 0, []
+    cuoi: datetime.datetime | None = None
     for rid in dict.fromkeys(x for x in run_ids if x):
         u = d = None
         if token:
@@ -1219,12 +1233,17 @@ def _chi_phi_cac_run(run_ids: list[str]) -> dict:
                 u = None
         if d and d.get("status") not in _KET_THUC:
             song.append(rid)
+        elif d:
+            xong = _to_vn(d.get("finishedAt"))
+            if xong is not None and (cuoi is None or xong > cuoi):
+                cuoi = xong
         if u is None:
             chua += 1
             continue
         tong += float(u or 0)
         so += 1
-    return {"usd": round(tong, 4), "so_run": so, "chua_doc": chua, "con_song": song}
+    return {"usd": round(tong, 4), "so_run": so, "chua_doc": chua, "con_song": song,
+            "ket_thuc_cuoi": cuoi.isoformat() if cuoi else None, "giay_tu_ket_thuc": _giay_tu(cuoi)}
 
 
 # Hỏi lại tiền thật tới khi SỐ CUỐI: mọi run đã kết thúc VÀ tổng giữ nguyên qua hai lần
@@ -1232,6 +1251,14 @@ def _chi_phi_cac_run(run_ids: list[str]) -> dict:
 # hỏi khi số đã ≥ 50% ước tính, lúc Apify còn đang ghi tiền.
 _CP_NGHI = 3.0          # giây giữa hai lần hỏi
 _CP_LAN_TOI_DA = 6      # lần hỏi lại tối đa (~18 giây) khi bên gọi không đưa hạn chót
+# Phí SỰ KIỆN ghi trễ (đo 17/10/2026): `usageTotalUsd` đọc ngay khi run xong còn thiếu — 0,1948
+# → 0,2397; 0,0201 → 0,0501; danek 0,0001 → 0,0251 sau vài chục giây — trong khi hai lần đọc cách
+# 3 giây vẫn khớp nhau. Nên chỉ coi là SỐ CUỐI (`on_dinh`) khi run xong muộn nhất đã xong ≥ 45
+# giây lúc đọc. Lượt TẠI CHỖ (trả lời chat ~135 giây) không đứng chờ thêm: kết quả mang `doc_lai`
+# (đúng các run id đã cộng) để sổ chi phí đọc lại ở nền ≥ 90 giây sau run cuối và ghi dòng điều
+# chỉnh (`chi_phi_tool.ghi`). Việc nền chờ tại chỗ được: `viec_nen.Viec.chot_chi_phi`.
+_CP_ON_DINH_GIAY = 45.0
+_CP_DOC_LAI_GIAY = 90.0
 
 
 def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
@@ -1244,7 +1271,9 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
 
     `han` (time.monotonic): hạn chót của bên gọi — không bắt đầu lần chờ nào vượt hạn,
     trả số mới nhất đang có. Kết quả có `on_dinh`=True khi số đã là số cuối (run xong,
-    hai lần đọc khớp nhau)."""
+    hai lần đọc khớp nhau, run xong muộn nhất đã xong ≥ `_CP_ON_DINH_GIAY` giây — phí sự
+    kiện ghi trễ; run không báo `finishedAt` thì như trước). Run vừa xong hoặc còn chạy: thêm
+    `doc_lai` = {run_ids, sau_giay} để đọc lại đúng các run đó ở nền (`chi_phi_tool.ghi`)."""
     token = os.environ.get("APIFY_TOKEN", "").strip()
     if not token or not actors:
         return None
@@ -1260,6 +1289,7 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
 
     def _mot_luot() -> dict | None:
         tong, so_run, cham_tran, dang_chay = 0.0, 0, 0, 0
+        cuoi, ids = None, []
         # Không `with`: nó chờ mọi luồng xong nên `timeout=15` vô nghĩa (xem `_handle`).
         ex = ThreadPoolExecutor(max_workers=len(actors))
         try:
@@ -1278,8 +1308,14 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
                 so_run += 1
                 cham_tran += u >= 0.95 * tran_usd
                 dang_chay += it.get("status") not in _KET_THUC
+                xong = _to_vn(it.get("finishedAt"))
+                if xong is not None and (cuoi is None or xong > cuoi):
+                    cuoi = xong
+                if it.get("id"):
+                    ids.append(str(it["id"]))
         return {"usd": round(tong, 3), "so_run": so_run,
-                "cham_tran": cham_tran, "dang_chay": dang_chay}
+                "cham_tran": cham_tran, "dang_chay": dang_chay, "_giay": _giay_tu(cuoi),
+                "_ids": ids}
 
     def _on_dinh(moi: dict | None, cu: dict | None) -> bool:
         return bool(moi and cu and not moi["dang_chay"] and moi["so_run"] == cu["so_run"]
@@ -1304,7 +1340,15 @@ def _chi_phi_thuc(actors: list[str], tu: datetime.datetime,
         truoc = kq or truoc
         kq = _mot_luot() or kq
     if kq:
-        kq = {**kq, "on_dinh": _on_dinh(kq, truoc)}
+        kq = dict(kq)
+        g, ids = kq.pop("_giay", None), kq.pop("_ids", [])
+        tre = g is not None and g < _CP_ON_DINH_GIAY
+        kq["on_dinh"] = _on_dinh(kq, truoc) and not tre
+        if ids and (tre or kq["dang_chay"]):
+            # Còn run đang chạy: chưa biết lúc xong — đọc lại sau trọn `_CP_DOC_LAI_GIAY`.
+            g_tinh = 0.0 if kq["dang_chay"] or g is None else g
+            kq["doc_lai"] = {"run_ids": ids, "sau_giay": round(max(
+                0.0, _CP_DOC_LAI_GIAY - g_tinh), 1)}
     return kq
 
 
@@ -1324,6 +1368,9 @@ def _dong_chi_phi(thuc: dict | None, est: float) -> str:
               f"giữa chừng — kết quả có thể thiếu.")
     if thuc["dang_chay"]:
         s += " Một số lượt vẫn đang chạy trên Apify nên số có thể còn tăng."
+    elif thuc.get("doc_lai"):
+        s += (" Apify còn ghi thêm phí sự kiện khoảng một phút sau khi chạy xong — sổ chi phí "
+              "tự ghi phần chênh nếu có.")
     return s
 
 
@@ -2661,7 +2708,9 @@ def _fb_luot_24h() -> tuple | None:
 
 
 def _chuan_facebook(raw: list) -> list[tuple]:
-    """Item scrapeforge/facebook-search-posts -> [(dòng, ngày VN)]."""
+    """Item scrapeforge/facebook-search-posts -> [(dòng, ngày VN)]. `ma_so_fb` (17/10/2026): id
+    số của bài (`post_id`, không có thì bóc từ link) — pfbid trong link đổi mỗi lượt cào."""
+    import khu_trung_fb
     out = []
     for it in raw:
         dt = _to_vn(it.get("timestamp"))
@@ -2677,6 +2726,7 @@ def _chuan_facebook(raw: list) -> list[tuple]:
             "hashtags": _tags_from(msg),
             "text": msg[:1000],
             "link": it.get("url") or "",
+            "ma_so_fb": khu_trung_fb.ma_so_tu_goc(it) or khu_trung_fb.ma_so_tu_link(it.get("url")),
             "__goc": it,
         }, dt))
     return out
