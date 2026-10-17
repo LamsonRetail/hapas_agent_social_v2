@@ -374,7 +374,9 @@ def _handle(args: dict, **_kwargs) -> str:
                 for tk in f.result(timeout=max(0.05, han - time.monotonic())).values():
                     ket_qua.append((p, tk))
             except Exception as e:  # noqa: BLE001
-                loi[p] = f"{type(e).__name__}: {e}"[:250]
+                # Lỗi Apify đã phân loại thì ghi MÃ (vd CHI_DEMO — actor chỉ trả dữ liệu mẫu,
+                # 17/10/2026) thay cho tên lớp "LoiApify" chẳng nói gì.
+                loi[p] = f"{getattr(e, 'ma', None) or type(e).__name__}: {e}"[:250]
     finally:
         ex.shutdown(wait=False, cancel_futures=True)
 

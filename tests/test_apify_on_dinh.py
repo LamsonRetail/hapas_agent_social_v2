@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import threading
 import time
 
@@ -69,6 +70,10 @@ class GiaApify:
             st = self.trang_thai.pop(0) if len(self.trang_thai) > 1 else self.trang_thai[0]
             return R(200, {"data": {**self.run, "status": st}})
         if "/datasets/" in url:
+            f = (params or {}).get("fields")
+            if f:           # như Apify: `fields=` chỉ giữ các trường xin, trường thiếu thì bỏ
+                giu = f.split(",")
+                return R(200, [{k: it[k] for k in giu if k in it} for it in self.items])
             return R(200, list(self.items))
         return self.khac(url, params)
 
@@ -202,6 +207,98 @@ def test_free_tier_co_du_lieu_van_ok_kem_gioi_han(api):
     api.run["statusMessage"] = "Free tier: up to 5 results per run. Upgrade your plan"
     items, meta = A._run_actor("scrapeforge~facebook-search-posts", {}, 20, deadline=1000 + 120)
     assert items and meta["ma"] == "OK" and "up to 5 results per run" in meta["gioi_han_goi"]
+
+
+# ──── actor chỉ trả dữ liệu DEMO (đo thật 17/10/2026: Instagram gói Free, 10 × {"demo": true}) ───
+_IG = "apidojo~instagram-hashtag-scraper"
+_MSG_DEMO = ("Your run has finished. Please subscribe to a paid plan to get real results: "
+             "https://console.apify.com/actors/xyz")
+
+
+@pytest.mark.parametrize("nen", [False, True], ids=["tai_cho", "nen_fields"])
+def test_run_succeeded_toan_demo_la_chi_demo(api, nen):
+    """Đọc đủ trường (lượt tại chỗ) và đọc có `fields=` (việc nền) đều phải ra CHI_DEMO — bản cũ
+    đọc có `fields` thì item thành {} và bị bỏ im lặng: phễu "về 0"."""
+    api.run["statusMessage"] = _MSG_DEMO
+    api.items = [{"demo": True} for _ in range(10)]
+    tok = A._NEN.set(nen)
+    try:
+        with pytest.raises(A.LoiApify) as e:
+            A._run_actor(_IG, {"keyword": "hapas"}, 10, deadline=1000 + 120)
+    finally:
+        A._NEN.reset(tok)
+    assert e.value.ma == "CHI_DEMO" and e.value.meta["so_demo"] == 10
+    assert e.value.meta["so_item"] == 0 and e.value.meta["status"] == "SUCCEEDED"
+    assert "DEMO" in str(e.value) and "KHÔNG phải không có bài" in str(e.value)
+    assert "subscribe to a paid plan" in str(e.value)
+    ds = [p for u, p in api.get_urls if "/datasets/" in u]
+    if nen:
+        f = ds[0]["fields"].split(",")
+        assert "demo" in f and set(A._TRUONG_ACTOR[_IG]) <= set(f)
+    else:
+        assert "fields" not in ds[0]
+
+
+def test_run_lan_demo_va_that_giu_item_that(api):
+    that = [{"url": "https://www.instagram.com/p/A1/", "caption": "túi hapas", "likeCount": 3},
+            {"url": "https://www.instagram.com/p/A2/", "caption": "hapas", "demo": True}]
+    api.items = [{"demo": True}, that[0], {"demo": True, "caption": ""}, that[1]]
+    tok = A._NEN.set(True)
+    try:
+        items, meta = A._run_actor(_IG, {}, 10, deadline=1000 + 120)
+    finally:
+        A._NEN.reset(tok)
+    # Item mang `demo` mà CÓ dữ liệu thật thì vẫn là bài.
+    assert items == that and meta["ma"] == "OK" and meta["so_demo"] == 2
+    assert meta["so_item"] == 2
+
+
+def test_la_demo_chi_khi_khong_co_du_lieu_that():
+    assert A._la_demo({"demo": True}) and A._la_demo({"demo": True, "url": None, "tags": []})
+    assert not A._la_demo({"demo": True, "url": "https://x"})
+    assert not A._la_demo({"demo": "true"}) and not A._la_demo({}) and not A._la_demo(None)
+
+
+def test_chi_demo_vao_per_platform_social_listen(quet, monkeypatch):
+    """Instagram 2 từ khoá, cả hai CHI_DEMO: `_fanout` nuốt lỗi từng từ khoá nhưng per_platform
+    phải mang CHI_DEMO + gợi ý, nguồn vào platforms_failed, cảnh báo nói chắc lý do."""
+    chay, _ = quet
+
+    def instagram(q, *a):
+        def mot(kw):
+            raise A.LoiApify("CHI_DEMO", f"Chỉ có dữ liệu DEMO ({kw})", {"tu_khoa": kw})
+        return A._fanout(mot, q)
+    monkeypatch.setitem(A._FETCH, "instagram", instagram)
+    kq = chay(queries=["hapas", "matemade"], platforms=["instagram"])
+    tt = kq["per_platform"]["instagram"]
+    assert tt["status"] == "CHI_DEMO" and tt["goi_y"] == A._GOI_Y["CHI_DEMO"]
+    assert "nâng gói Apify hoặc đổi actor" in tt["goi_y"] and tt["scraped"] == 0
+    assert "DEMO" in tt["canh_bao"] and "hết hạn mức" not in tt["canh_bao"]
+    assert kq["platforms_failed"] == ["instagram"]
+    assert "Instagram [CHI_DEMO]" in kq["note"]
+    # Một từ khoá: lỗi ném thẳng ra (không qua `_fanout`) — vẫn đúng mã.
+    assert A._tong_hop_nguon(A.LoiApify("CHI_DEMO", "x"), [])["status"] == "CHI_DEMO"
+
+
+def test_ma_nguon_dong_bo_moi_bang():
+    """Thêm mã mới (CHI_DEMO 17/10/2026) phải thêm ĐỦ: độ nặng, gợi ý, nhãn ngắn — thiếu một chỗ
+    là mã hiện thành "LOI" / gợi ý chung chung. Kho KHÔNG lưu mã Apify trong cột có CHECK; nếu
+    sau này có thì CHECK phải liệt kê đủ mọi mã."""
+    import pathlib
+    assert set(A._DO_NANG) == set(A._GOI_Y)
+    assert set(A._DO_NANG) | {"OK", "OK_MOT_PHAN"} == set(A._MA_NGUON)
+    assert set(A._MA_NGUON) - {"OK"} == set(A._NHAN_MA)
+    assert A._DO_NANG["HET_TIEN_THANG"] > A._DO_NANG["CHI_DEMO"] > A._DO_NANG["HET_LUOT_24H"]
+    assert A.nhan_ma("CHI_DEMO") == "actor chỉ trả dữ liệu demo cho gói Free (0 bài thật)"
+    assert A.nhan_ma("NGAN_SACH") == "NGAN_SACH"
+    # Tin nhắn kết quả quét nền: mã kèm nhãn, mã riêng của việc nền giữ nguyên.
+    import quet_lon
+    assert quet_lon._cau_ma("CHI_DEMO") == f"CHI_DEMO: {A.nhan_ma('CHI_DEMO')}"
+    assert quet_lon._cau_ma("NGAN_SACH") == "NGAN_SACH"
+    sql = (pathlib.Path(A.__file__).parent / "deploy" / "lang-nghe" / "schema.sql").read_text(
+        encoding="utf-8")
+    co = [m for m in A._MA_NGUON if m != "OK" and re.search(rf"\b{m}\b", sql)]
+    assert co in ([], [m for m in A._MA_NGUON if m != "OK"]), co
 
 
 def test_token_khong_bao_gio_nam_trong_chuoi_loi(api):

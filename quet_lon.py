@@ -1596,6 +1596,11 @@ def _usd(x) -> str:
     return f"{float(x or 0):.2f}".replace(".", ",")
 
 
+def _cau_ma(ma) -> str:
+    ma = str(ma)
+    return f"{ma}: {A.nhan_ma(ma)}" if ma in A._NHAN_MA else ma
+
+
 def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list[str]) -> str:
     dau = {"xong": "XONG", "xong_mot_phan": "XONG MỘT PHẦN", "da_huy": "ĐÃ HUỶ"}.get(
         trang_thai, trang_thai.upper())
@@ -1614,8 +1619,10 @@ def _tin_nhan(v, ts, ket: dict, cp: dict, url: str, trang_thai: str, ly_do: list
         s = (f"- {_ten_tab(p)}: cào {x['scraped']}, trong khoảng {x['trong_khoang']}, giữ "
              f"{x['giu']}, loại {x['loai']}")
         if loi:
+            # Mã kèm nhãn ngắn (17/10/2026): "CHI_DEMO" trơn thì người đọc không biết là actor
+            # chỉ trả dữ liệu mẫu cho gói Free. Mã riêng của việc nền (NGAN_SACH…) giữ nguyên.
             s += f" · {len(loi)}/{len(v.d['nen_tang'][p]['phan'])} lượt hỏng/không chạy (" + \
-                 "; ".join(sorted({str(ph.get('ma')) for ph in loi})) + ")"
+                 "; ".join(sorted({_cau_ma(ph.get("ma")) for ph in loi})) + ")"
         d.append(s)
     cau_khac = _cau_nuoc_khac(ts, ket)
     if cau_khac:

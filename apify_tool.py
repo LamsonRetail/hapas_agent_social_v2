@@ -432,6 +432,11 @@ _DU_PHONG_HUY = 8.0       # giây chừa sau hạn run để lấy item dở dan
 _HAN_CHOT: contextvars.ContextVar = contextvars.ContextVar("apify_han_chot", default=None)
 _SO_RUN: contextvars.ContextVar = contextvars.ContextVar("apify_so_run", default=None)
 _TU_KHOA: contextvars.ContextVar = contextvars.ContextVar("apify_tu_khoa", default=None)
+# list: lỗi TỪNG từ khoá mà `_fanout` bỏ qua (IG/FB mỗi từ một run) — cho bên gọi không đặt
+# `_SO_RUN` (tìm theo từ khoá của `/theodoi`). 17/10/2026: Instagram 2 từ khoá đều CHI_DEMO thì
+# `_fanout` trả [] không lỗi, phễu ghi "về 0" — bên gọi phải thấy được lý do.
+_LOI_TU_KHOA: contextvars.ContextVar = contextvars.ContextVar("apify_loi_tu_khoa",
+                                                              default=None)
 # Nền tảng của lượt `_call` đang chạy (`_handle._chay_nguon` đặt): trần USD gửi Apify lấy
 # theo `tran_usd_<p>` của nền tảng đó thay vì trần chung.
 _NEN_TANG: contextvars.ContextVar = contextvars.ContextVar("apify_nen_tang", default=None)
@@ -441,13 +446,17 @@ _ngu = time.sleep
 
 # Trạng thái MỖI NGUỒN trả cho model (per_platform[p]["status"]).
 _MA_NGUON = ("OK", "OK_MOT_PHAN", "HET_LUOT_24H", "HET_TIEN_THANG", "QUA_GIO",
-             "NGHEN_DONG_THOI", "LOI", "DA_HUY")
+             "NGHEN_DONG_THOI", "LOI", "DA_HUY", "CHI_DEMO")
 # Lỗi nặng hơn thắng khi một nguồn có nhiều run hỏng khác nhau. DA_HUY (người dùng huỷ
-# việc nền) nặng nhất: lý do thật của phần thiếu là huỷ, không phải lỗi nguồn.
-_DO_NANG = {"DA_HUY": 6, "HET_TIEN_THANG": 5, "HET_LUOT_24H": 4, "NGHEN_DONG_THOI": 3,
-            "QUA_GIO": 2, "LOI": 1}
+# việc nền) nặng nhất: lý do thật của phần thiếu là huỷ, không phải lỗi nguồn. CHI_DEMO
+# (17/10/2026) xếp trên HET_LUOT_24H: hết lượt 24 giờ tự mở lại, còn actor chỉ trả dữ liệu
+# mẫu thì MỌI lượt sau vẫn 0 bài thật tới khi nâng gói / đổi actor.
+_DO_NANG = {"DA_HUY": 7, "HET_TIEN_THANG": 6, "CHI_DEMO": 5, "HET_LUOT_24H": 4,
+            "NGHEN_DONG_THOI": 3, "QUA_GIO": 2, "LOI": 1}
 _GOI_Y = {
     "DA_HUY": "Người dùng đã huỷ việc quét; phần lấy được trước lúc huỷ vẫn được giữ.",
+    "CHI_DEMO": ("Actor chỉ trả dữ liệu mẫu cho gói Free — 0 bài thật; nâng gói Apify hoặc "
+                 "đổi actor."),
     "HET_LUOT_24H": ("Gói Free của actor Facebook chỉ cho 1 lượt chạy mỗi 24 giờ, tối đa 20 "
                      "bài/lượt. Đợi tới giờ mở lại, hoặc chủ tài khoản nâng gói Apify."),
     "HET_TIEN_THANG": ("Hết ngân sách Apify của tháng: mọi nguồn trả tiền (TikTok, Facebook, "
@@ -458,6 +467,23 @@ _GOI_Y = {
                         "đang quét). Thử lại sau 1–2 phút."),
     "LOI": "Thử lại sau ít phút; lặp lại thì báo người vận hành bot.",
 }
+# Nhãn NGẮN của mã cho dòng phễu / ghi chú lượt / tin nhắn kết quả (17/10/2026): mã thô như
+# "CHI_DEMO" người đọc không hiểu, còn `ly_do` đầy đủ thì dài và lẫn lời Apify tiếng Anh.
+_NHAN_MA = {
+    "OK_MOT_PHAN": "chỉ lấy được một phần",
+    "HET_LUOT_24H": "gói Free của actor đã hết lượt 24 giờ",
+    "HET_TIEN_THANG": "tài khoản Apify hết ngân sách tháng",
+    "QUA_GIO": "quá giờ",
+    "NGHEN_DONG_THOI": "Apify đang chạy đủ số lượt cùng lúc",
+    "LOI": "lỗi",
+    "DA_HUY": "đã huỷ",
+    "CHI_DEMO": "actor chỉ trả dữ liệu demo cho gói Free (0 bài thật)",
+}
+
+
+def nhan_ma(ma) -> str:
+    """Nhãn ngắn tiếng Việt của một mã (`_NHAN_MA`); mã lạ thì trả nguyên mã."""
+    return _NHAN_MA.get(str(ma or ""), str(ma or "lỗi"))
 
 
 class LoiApify(RuntimeError):
@@ -572,7 +598,8 @@ _TRANG_ITEM = 1000          # item mỗi trang khi đọc dataset
 # Trường TOP-LEVEL mỗi actor mà bộ chuẩn hoá thật sự đọc (`fields=` của Apify). Chỉ dùng
 # cho việc NỀN: 10.000 item đủ trường của clockworks/Threads là hàng trăm MB JSON trong
 # RAM, trong khi chuẩn hoá chỉ cần mười mấy trường. Lượt tại chỗ (≤600 item) giữ nguyên
-# đọc đủ trường — một trường thiếu trong danh sách này là mất dữ liệu IM LẶNG.
+# đọc đủ trường — một trường thiếu trong danh sách này là mất dữ liệu IM LẶNG. `_lay_items`
+# luôn xin thêm `demo` (`_TRUONG_DEMO`) để nhận ra actor chỉ trả dữ liệu mẫu.
 _TRUONG_ACTOR = {
     "apidojo~tiktok-scraper": ("uploadedAtFormatted", "channel", "views", "likes",
                                "comments", "shares", "hashtags", "title", "postPage",
@@ -598,6 +625,22 @@ def _rong(it) -> bool:
     return it is None or (isinstance(it, dict) and not it)
 
 
+# Đo thật 17/10/2026: `apidojo~instagram-hashtag-scraper` trên gói FREE trả SUCCEEDED, 10 item,
+# item nào cũng đúng `{"demo": true}` (statusMessage "…Please subscribe to a paid plan…"). Đọc
+# có `fields=` (việc nền) mà danh sách không có "demo" thì item thành `{}`, bị `_rong` bỏ, và
+# phễu `/theodoi` ghi "Instagram về 0" — chủ dự án không biết đường Instagram đã chết. Nên mọi
+# lần đọc có `fields` đều xin thêm `_TRUONG_DEMO` (không phải nhớ thêm vào từng actor).
+_TRUONG_DEMO = "demo"
+_RONG_GIA_TRI = (None, "", [], {})
+
+
+def _la_demo(it) -> bool:
+    """Item MẪU của gói Free: dict có `demo` là True và không có trường dữ liệu thật nào (trường
+    khác, nếu có, đều rỗng). Item thật lỡ mang `demo` kèm dữ liệu thì KHÔNG tính là mẫu."""
+    return (isinstance(it, dict) and it.get(_TRUONG_DEMO) is True
+            and all(v in _RONG_GIA_TRI for k, v in it.items() if k != _TRUONG_DEMO))
+
+
 def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None:
     """Đọc dataset theo TRANG (offset/limit=1000) tới đủ `limit`.
 
@@ -621,7 +664,7 @@ def _lay_items(run: dict, limit: int, headers: dict, fields=None) -> list | None
         if vi_tri:
             q["offset"] = vi_tri
         if fields:
-            q["fields"] = ",".join(fields)
+            q["fields"] = ",".join(dict.fromkeys((*fields, _TRUONG_DEMO)))
         trang = None
         for _ in range(2):
             try:
@@ -982,8 +1025,21 @@ def _cho_run(run, h, token, limit, meta, t0, con, mot_phan):
         meta["da_huy"] = _huy_run(run["id"], h)
     items = _lay_items(run, limit, h,
                        fields=_TRUONG_ACTOR.get(meta.get("actor")) if _NEN.get() else None)
+    # Item mẫu của gói Free (`_la_demo`) KHÔNG phải bài: bỏ trước mọi nhánh dưới, đếm vào meta.
+    so_demo = sum(1 for it in items or [] if _la_demo(it))
+    if so_demo:
+        items = [it for it in items if not _la_demo(it)]
+        meta["so_demo"] = so_demo
     meta.update(giay=round(_dong_ho() - t0, 1), so_item=len(items or []),
                 usd=run.get("usageTotalUsd"))
+    if so_demo and not items and not da_huy_viec:
+        # MỌI item đều là mẫu: báo đúng lý do thay vì "0 bài" (SUCCEEDED) hay QUA_GIO / LOI —
+        # chạy lại hay chờ thêm cũng chỉ ra dữ liệu mẫu. Người dùng huỷ thì giữ lý do huỷ.
+        raise LoiApify(
+            "CHI_DEMO",
+            f"Chỉ có dữ liệu DEMO: actor {meta.get('actor') or '?'} trả {so_demo} item mẫu "
+            "({\"demo\": true}) cho gói Free, 0 bài thật — KHÔNG phải không có bài."
+            + (f" Apify: {msg[:150]}" if msg else ""), meta)
     if da_huy_viec:
         n = len(items or [])
         ma = _ma_dung(huy)
@@ -2243,8 +2299,8 @@ def _fanout(fn, keys: list[str], loi_ra: list | None = None) -> list[dict]:
     thì 6 từ khoá = 6 lần gọi nối đuôi, cộng với các nền tảng khác là vượt trần
     trả lời 180s của run.py (đã xảy ra thật 26/08/2026). Từ khoá nào lỗi thì bỏ
     qua từ khoá đó, không làm hỏng cả nguồn — nhưng lỗi KHÔNG còn chỉ in ra log:
-    nó vào sổ `_SO_RUN` (và `loi_ra` nếu truyền) để `_handle` báo đúng nguồn chỉ có
-    MỘT PHẦN. Trước 01/10/2026 Facebook 3 từ khoá hỏng 2 vẫn hiện "OK".
+    nó vào sổ `_SO_RUN` (và `loi_ra` nếu truyền, `_LOI_TU_KHOA` nếu bên gọi đặt) để `_handle`
+    báo đúng nguồn chỉ có MỘT PHẦN. Trước 01/10/2026 Facebook 3 từ khoá hỏng 2 vẫn hiện "OK".
 
     Hạn chót: chờ tới `_HAN_CHOT` + `_DU_PHONG_HUY` rồi thôi; luồng chưa xong bỏ lại
     (run của nó tự bị huỷ khi tới hạn trong `_run_actor`).
@@ -2252,10 +2308,10 @@ def _fanout(fn, keys: list[str], loi_ra: list | None = None) -> list[dict]:
     keys = _bo_trung_tu_khoa(keys)
     if len(keys) <= 1:
         return fn(keys[0]) if keys else []
-    so, het = _SO_RUN.get(), _HAN_CHOT.get()
+    so, het, them = _SO_RUN.get(), _HAN_CHOT.get(), _LOI_TU_KHOA.get()
 
     def ghi(x: dict) -> None:
-        for dich in (so, loi_ra):
+        for dich in (so, loi_ra, them):
             if dich is not None and x not in dich:
                 dich.append(x)
 
@@ -3278,8 +3334,9 @@ SCHEMA = {
         "- `per_platform[nguồn].status`: OK | OK_MOT_PHAN (chỉ có MỘT PHẦN — nói thiếu gì) | "
         "HET_LUOT_24H (Facebook gói Free đã dùng lượt 24h) | HET_TIEN_THANG (tài khoản Apify "
         "hết ngân sách tháng) | QUA_GIO | NGHEN_DONG_THOI (đang có lượt quét khác chiếm chỗ) "
-        "| LOI. Nguồn KHÔNG phải OK: nói ĐẦU câu trả lời, dùng đúng `ly_do` + `goi_y` (có giờ mở "
-        "lại / số tiền / ngày reset) — KHÔNG nói chung chung 'hết token', 'bị chặn'. "
+        "| CHI_DEMO (actor chỉ trả dữ liệu mẫu cho gói Free — 0 bài thật, KHÔNG phải không có "
+        "bài) | LOI. Nguồn KHÔNG phải OK: nói ĐẦU câu trả lời, dùng đúng `ly_do` + `goi_y` "
+        "(có giờ mở lại / số tiền / ngày reset) — KHÔNG nói chung chung 'hết token', 'bị chặn'. "
         "`note` đã xếp nguồn hỏng lên trước; `ghi_chu_quet` (vd Facebook chỉ quét 1 từ khoá) "
         "cũng phải nói ra.\n"
         "- Nói cả hai con số: `scraped` (số post CÀO) và `in_range` (số nằm trong khoảng).\n"
@@ -3830,6 +3887,12 @@ def _handle(args: dict, **kwargs) -> str:
                 per_platform[p]["canh_bao"] = (
                     "YouTube Data API trả 0 video. KHÔNG chắc thị trường không có bài — "
                     "có thể truy vấn/khoảng ngày/quốc gia quá hẹp. Nói rõ sự mơ hồ này."
+                )
+            elif tt_nguon["status"] == "CHI_DEMO":
+                # Lý do đã CHẮC (17/10/2026): không để câu "có thể hết hạn mức / bị chặn" làm mờ.
+                per_platform[p]["canh_bao"] = (
+                    "Actor chỉ trả dữ liệu DEMO cho gói Free — 0 bài thật. Đây KHÔNG phải nguồn "
+                    "không có bài; nói rõ và gợi ý nâng gói Apify hoặc đổi actor."
                 )
             else:
                 per_platform[p]["canh_bao"] = (

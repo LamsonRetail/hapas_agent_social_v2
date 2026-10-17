@@ -899,7 +899,6 @@ def test_dong_luot_giu_ghi_chu_dai_toi_tran(monkeypatch):
     assert m and f"{K.GHI_CHU_TOI_DA:,}".replace(",", ".") in m.group(1)
 
 
-
 _NHAN_BI = ("[Lớp]", "[Mục đích]", "[Grain]", "[Khoá]", "[Nguồn]", "[Phạm vi]", "[Đã xử lý]",
             "[Refresh]", "[Dùng khi]", "[Không dùng khi]", "[Lưu ý]")
 
@@ -1558,6 +1557,67 @@ def test_tim_tu_khoa_pheu_tung_buoc(mo):
     assert v.d["pheu_tu_khoa"]["tiktok"] == f
     ph = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-tiktok")
     assert ph["cua_so"]["ngay"] == 30 and ph["so_item"] == 8
+
+
+# ───── Instagram gói Free chỉ trả {"demo": true} (đo thật 17/10/2026): phễu phải nói lý do ─────
+_NHAN_DEMO = "actor chỉ trả dữ liệu demo cho gói Free (0 bài thật)"
+
+
+def _ig_tim(user, code, text):
+    ngay = datetime.datetime.now(_VN) - datetime.timedelta(days=1)
+    return ({"kenh": user, "username": user, "followers": 10, "views": 0, "likes": 5,
+             "comments": 1, "shares": 0, "hashtags": "", "text": text,
+             "link": f"https://www.instagram.com/p/{code}/", "__goc": {"id": code}}, ngay)
+
+
+def _fetch_ig_demo(that: dict | None = None):
+    """`_FETCH["instagram"]` thật đi qua `_fanout` (mỗi từ khoá một run): từ khoá không có trong
+    `that` thì run đó chỉ ra item mẫu → LoiApify CHI_DEMO như `_cho_run`."""
+    that = that or {}
+
+    def f(q, limit, *a, **k):
+        def mot(kw):
+            if kw in that:
+                return [that[kw]]
+            raise A.LoiApify("CHI_DEMO", "Chỉ có dữ liệu DEMO: actor apidojo~instagram-hashtag-"
+                                         "scraper trả 10 item mẫu", {"tu_khoa": kw})
+        return A._fanout(mot, list(q))
+    return f
+
+
+@pytest.mark.parametrize("tu", [["hapas", "yeutudieunhonhat"], ["hapas"]],
+                         ids=["nhieu_tu_fanout_nuot_loi", "mot_tu_nem_thang"])
+def test_tim_tu_khoa_instagram_chi_demo_noi_ly_do_khong_ve_0(mo, tu):
+    GiaKhoTk(mo)
+    mo.setattr(A, "_FETCH", {**{p: (lambda *a, **k: []) for p in ("tiktok", "facebook",
+                                                                    "youtube")},
+                             "instagram": _fetch_ig_demo()})
+    v = GiaViec({}, [])
+    tk = _chay_tk(dict(DU_AN, tu_khoa=tu, tk_bat=True, tk_so_bai=15), v)
+    cau = T._cau_tk(tk)
+    assert f"tìm Instagram: {_NHAN_DEMO} — nâng gói Apify hoặc đổi actor" in cau
+    assert not any(c.startswith("phễu tìm Instagram") for c in cau), "không còn dòng 'về 0'"
+    f = tk["pheu"]["instagram"]
+    assert f["ma_loi"] == "CHI_DEMO" and f["loi"].startswith(_NHAN_DEMO)
+    assert v.d["pheu_tu_khoa"]["instagram"]["ma_loi"] == "CHI_DEMO", "sổ việc giữ lý do"
+    ph = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-instagram")
+    assert ph["trang_thai"] == "loi" and ph["ma"] == "CHI_DEMO" and ph["usd_so"] == 0
+    assert "instagram" not in T.doc_moc_tk("hapas"), "lỗi nguồn không dời mốc"
+    assert A._LOI_TU_KHOA.get() is None, "sổ lỗi từ khoá trả lại sau lượt"
+
+
+def test_tim_tu_khoa_instagram_mot_tu_demo_van_giu_bai_va_noi_tu_loi(mo):
+    GiaKhoTk(mo)
+    mo.setattr(A, "_FETCH", {**{p: (lambda *a, **k: []) for p in ("tiktok", "facebook",
+                                                                    "youtube")},
+                             "instagram": _fetch_ig_demo(
+                                 {"hapas": _ig_tim("kol.ig", "IG1", "túi hapas xinh")})})
+    tk = _chay_tk(dict(DU_AN, tu_khoa=["hapas", "yeutudieunhonhat"], tk_bat=True, tk_so_bai=15))
+    f = tk["pheu"]["instagram"]
+    assert f["ve"] == 1 and f["giu"] == 1 and "loi" not in f
+    dong = next(c for c in T._cau_tk(tk) if c.startswith("phễu tìm Instagram"))
+    assert f"từ khoá lỗi: 'yeutudieunhonhat' {_NHAN_DEMO}" in dong
+    assert "instagram" in T.doc_moc_tk("hapas")
 
 
 def test_youtube_cau_tim_dat_cum_trong_ngoac_kep():
