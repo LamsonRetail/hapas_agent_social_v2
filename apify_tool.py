@@ -2946,6 +2946,10 @@ def _chuan_threads(raw: list) -> list[tuple]:
 #   (băm link, `theo_doi._khoa_bai`) của cùng một bài trùng nhau, không thành hai dòng.
 # • Rủi ro scrapersdelight: tạo 02/09/2026, 81 người dùng, chưa có đánh giá (2.579/2.579 run
 #   thành công trong 30 ngày) → `theo_doi` cảnh báo khi đường 2 về 0 bài 2 lượt liền.
+# • Chạy thử THẬT sau khi nối (17/10/2026 tối, qua đúng `_fetch_threads_2` / `doc_ho_so_threads`):
+#   "hapas" + "túi hapas", cửa sổ 3 ngày, 1 lượt, maxItems 10 → 10 bài (túi hapas 7, hapas 3), mọi
+#   bài đăng 14–17/10 (`postedWithinDays` + `maxItems` đúng), 0,010 USD, 16,5 s, 512 MB. Hồ sơ
+#   @hapas.vn: 8.434 follower, 4 bài mới nhất (10–12/10), 0,002 USD, 6,5 s. Tài khoản tăng 0,012.
 # → /theodoi chạy CẢ HAI (chủ dự án duyệt 17/10/2026: "threads cũng rất quan trọng"):
 #   `_fetch_threads` (đường 1) + `_fetch_threads_2` (đường 2), gộp, bỏ trùng theo mã bài.
 def _fetch_threads(q: list[str], limit: int, country: str, d_from, d_to, *,
