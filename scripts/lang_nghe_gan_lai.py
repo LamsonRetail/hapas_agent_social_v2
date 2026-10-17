@@ -14,15 +14,18 @@ Vì sao cần: lượt `/theodoi` chỉ gán nhãn bình luận VỪA cào và b
         • đang "Trung lập" mà có lời khen rõ (đẹp, xinh, dễ thương, tuyệt vời…);
         • `--tat-ca`: MỌI bình luận `hop_le` của dự án.
       Lô model hỏng / hết giờ thì dòng đó GIỮ nhãn cũ (fail-open như lượt cào).
-      `--den-luot N` (17/10/2026): mọi bộ chọn của (b) chỉ lấy bình luận có `binh_luan.luot_id
-      ≤ N` — bình luận của lượt sau đã gán bằng prompt mới của PR #62 (deploy 17/10 00:46, lượt 9
-      bắt đầu 00:51): `--tat-ca` không lọc chọn 12.527 dòng / 126 lượt model, trong đó 7.202 dòng
-      của lượt ≥ 9. `luot_id` NULL (lượt đã bị xoá) không chứng minh được là prompt mới → coi là
-      CŨ, vẫn chọn. Bài minigame vẫn xét trên MỌI bình luận của bài (lọc lượt không làm lệch tỉ
-      lệ số dự thi). Bước (a) không lọc (luật, không gọi model).
-      Lưu ý: `luot_id` là lượt cào bình luận GẦN NHẤT — bình luận gán nhãn ở lượt ≤ N rồi được
-      cào lại ở lượt sau (đã có nhãn nên không gửi model lại) mang `luot_id` mới nên bị lọc dù
-      nhãn vẫn của prompt cũ; bản chạy thử in số dòng như vậy (`thay_lan_dau` trước lượt N+1).
+      `--den-luot N` (17/10/2026): mọi bộ chọn của (b) chỉ lấy bình luận CÓ THỂ còn nhãn của
+      prompt cũ — bình luận thấy lần đầu từ lượt N+1 đã gán bằng prompt mới của PR #62 (deploy
+      17/10 00:46, lượt 9 bắt đầu 00:51): `--tat-ca` không lọc chọn 12.527 dòng / 126 lượt
+      model, trong đó 7.202 dòng của lượt ≥ 9. Chọn khi MỘT trong ba nhánh đúng (`nhanh_luot`):
+        • `luot_id ≤ N`;
+        • `luot_id` NULL (lượt đã bị xoá) — không chứng minh được là prompt mới → coi là CŨ;
+        • `thay_lan_dau` TRƯỚC giờ bắt đầu lượt N+1 (`SQL_MOC_LUOT`). Soát 17/10/2026 (M1):
+          `luot_id` là lượt cào GẦN NHẤT (upsert ghi `EXCLUDED.luot_id`), còn `/theodoi` không
+          gửi model lại bình luận đã có nhãn — bình luận gán ở lượt ≤ N rồi cào lại ở lượt sau
+          mang `luot_id` mới mà nhãn vẫn của prompt cũ. Bản đầu chỉ ĐẾM nhóm này rồi bỏ sót.
+      Chạy thử in số dòng của từng nhánh. Bài minigame vẫn xét trên MỌI bình luận của bài (lọc
+      lượt không làm lệch tỉ lệ số dự thi). Bước (a) không lọc (luật, không gọi model).
 
 An toàn:
   • Mặc định CHẠY THỬ: mọi truy vấn trong MỘT giao dịch READ ONLY, không gọi model, không ghi
@@ -99,8 +102,8 @@ SQL_SUA = (
     "WHERE du_an = %s AND khoa_bai = %s AND ma = %s AND loai = %s "
     "AND ly_do_loc IS NOT DISTINCT FROM %s AND sac_thai IS NOT DISTINCT FROM %s "
     "AND chu_de IS NOT DISTINCT FROM %s AND cua_thuong_hieu = %s")
-# Giờ bắt đầu của lượt ĐẦU TIÊN sau `--den-luot N` (id lượt tăng chung mọi dự án/kiểu) — để đếm
-# bình luận bị lọc mà thấy lần đầu trước mốc đó (cào lại ở lượt sau, nhãn có thể còn cũ).
+# Giờ bắt đầu của lượt ĐẦU TIÊN sau `--den-luot N` (id lượt tăng chung mọi dự án/kiểu) — bình
+# luận thấy lần đầu trước mốc đó vẫn được chọn dù `luot_id > N` (cào lại ở lượt sau, nhãn còn cũ).
 SQL_MOC_LUOT = "/* gl:moc_luot */ SELECT min(bat_dau) AS bat_dau FROM luot_quet WHERE id > %s"
 
 # Số dự thi đầu câu: 1–4 chữ số, không phải ngày/số thập phân ("20/10", "8.3").
@@ -162,13 +165,28 @@ def doc_kho(ma: str, den_luot: int | None = None) -> tuple[dict | None, list[dic
     return du_an, nha, hop_le, moc
 
 
-def trong_luot(r: dict, den_luot: int | None) -> bool:
-    """Dòng thuộc lượt ≤ `den_luot` (`--den-luot`); None = không lọc. `luot_id` NULL (lượt đã bị
-    xoá, ON DELETE SET NULL) không chứng minh được là đã gán bằng prompt mới → coi là cũ."""
-    if den_luot is None:
-        return True
+def nhanh_luot(r: dict, den_luot: int, moc: datetime.datetime | None) -> str | None:
+    """Nhánh làm dòng được chọn dưới `--den-luot` ("luot_cu" | "luot_null" | "thay_truoc"); None =
+    bỏ (thấy lần đầu từ lượt N+1, đã gán bằng prompt mới). `moc`: giờ bắt đầu lượt N+1 — None khi
+    chưa có lượt nào sau N (khi đó không thể có `luot_id > N`). `luot_id` NULL: lượt đã bị xoá
+    (ON DELETE SET NULL), không chứng minh được là prompt mới → coi là cũ."""
     x = r.get("luot_id")
-    return x is None or int(x) <= den_luot
+    if x is None:
+        return "luot_null"
+    if int(x) <= den_luot:
+        return "luot_cu"
+    # `luot_id` là lượt cào GẦN NHẤT, không phải lượt gán nhãn: bình luận gán ở lượt ≤ N rồi được
+    # cào lại sau vẫn còn nhãn cũ (`/theodoi` không gửi model lại dòng đã có nhãn) — nhận ra nhờ
+    # giờ thấy lần đầu (soát 17/10/2026, M1).
+    t = r.get("thay_lan_dau")
+    if moc is not None and t is not None and t < moc:
+        return "thay_truoc"
+    return None
+
+
+def trong_luot(r: dict, den_luot: int | None, moc: datetime.datetime | None = None) -> bool:
+    """Dòng có thể còn nhãn của prompt cũ dưới `--den-luot` (`nhanh_luot`); None = không lọc."""
+    return den_luot is None or nhanh_luot(r, den_luot, moc) is not None
 
 
 def _dong(r: dict, cu: dict, moi: dict, buoc: str, ly_do: str) -> dict:
@@ -195,12 +213,14 @@ def chon_thuong_hieu(du_an: dict, rows: list[dict]) -> list[dict]:
     return ra
 
 
-def chon_gan_lai(rows: list[dict], tat_ca: bool = False,
-                 bo: set | None = None, den_luot: int | None = None) -> list[dict]:
+def chon_gan_lai(rows: list[dict], tat_ca: bool = False, bo: set | None = None,
+                 den_luot: int | None = None,
+                 moc: datetime.datetime | None = None) -> list[dict]:
     """(b) Bình luận hop_le cần gán lại; `bo` = khoá (khoa_bai, ma) bước (a) đã chuyển thành
-    thương hiệu. `moi` để trống — điền sau khi gọi model. `den_luot`: mọi bộ chọn chỉ lấy dòng
-    `trong_luot` — bài minigame vẫn xét trên MỌI bình luận của bài (lọc trước thì bài có 20 bình
-    luận dự thi ở lượt mới + 1 bình luận cũ chỉ còn 1 dòng, dưới ngưỡng 5 — không nhận ra)."""
+    thương hiệu. `moi` để trống — điền sau khi gọi model. `den_luot` (+ `moc` = giờ bắt đầu lượt
+    N+1): mọi bộ chọn chỉ lấy dòng `trong_luot` — bài minigame vẫn xét trên MỌI bình luận của bài
+    (lọc trước thì bài có 20 bình luận dự thi ở lượt mới + 1 bình luận cũ chỉ còn 1 dòng, dưới
+    ngưỡng 5 — không nhận ra)."""
     bo = bo or set()
     rows = [r for r in rows if (r["khoa_bai"], r["ma"]) not in bo]
     theo_bai: dict[str, list[dict]] = {}
@@ -214,7 +234,7 @@ def chon_gan_lai(rows: list[dict], tat_ca: bool = False,
             bai_mg.add(kb)
     ra = []
     for r in rows:
-        if not str(r.get("noi_dung") or "").strip() or not trong_luot(r, den_luot):
+        if not str(r.get("noi_dung") or "").strip() or not trong_luot(r, den_luot, moc):
             continue
         if la_so_du_thi(r.get("noi_dung")):
             ly = "so_du_thi"
@@ -340,18 +360,23 @@ def _chuan_bi_model() -> None:
 
 def _cau_loc_luot(den: int | None, b_khong_loc: list[dict],
                   moc: datetime.datetime | None) -> str:
-    """Dòng mô tả bộ lọc lượt của (b). `b_khong_loc`: các dòng bộ chọn lấy khi KHÔNG lọc."""
+    """Dòng mô tả bộ lọc lượt của (b) kèm số dòng từng nhánh của `nhanh_luot`. `b_khong_loc`: các
+    dòng bộ chọn lấy khi KHÔNG lọc."""
     if den is None:
         return ("Bộ lọc lượt (b): KHÔNG — mọi lượt quét (thêm --den-luot N để chỉ lấy bình luận "
                 "của lượt ≤ N).")
-    bi_loc = [d for d in b_khong_loc if not trong_luot(d, den)]
-    cu = [d for d in bi_loc if moc is not None and d.get("thay_lan_dau") is not None
-          and d["thay_lan_dau"] < moc]
-    return (f"Bộ lọc lượt (b): --den-luot {den} — chỉ bình luận có luot_id ≤ {den} (luot_id "
-            f"NULL — lượt đã xoá — tính là cũ); bỏ {len(bi_loc)} dòng của lượt > {den}"
-            + (f", trong đó {len(cu)} dòng thấy lần đầu TRƯỚC lượt {den + 1} (cào lại ở lượt "
-               "sau nên luot_id mới, nhãn có thể vẫn của prompt cũ — không gán lại)"
-               if cu else "") + ".")
+    dem = {"luot_cu": 0, "luot_null": 0, "thay_truoc": 0, None: 0}
+    for d in b_khong_loc:
+        dem[nhanh_luot(d, den, moc)] += 1
+    # Số dòng TỪNG nhánh (soát 17/10/2026): người chạy thấy ngay nhánh "cào lại" lớn cỡ nào trước
+    # khi --ap-dung, thay vì một con số gộp.
+    moc_s = (f"lượt {den + 1} bắt đầu {moc.isoformat(timespec='minutes')}" if moc is not None
+             else f"chưa có lượt nào sau lượt {den}")
+    return (f"Bộ lọc lượt (b): --den-luot {den} — chọn {len(b_khong_loc) - dem[None]} dòng có thể "
+            f"còn nhãn prompt cũ: luot_id ≤ {den}: {dem['luot_cu']}; luot_id NULL (lượt đã xoá, "
+            f"tính là cũ): {dem['luot_null']}; luot_id > {den} nhưng thấy lần đầu TRƯỚC lượt "
+            f"{den + 1} (cào lại ở lượt sau, nhãn vẫn cũ): {dem['thay_truoc']} ({moc_s}). Bỏ "
+            f"{dem[None]} dòng thấy lần đầu từ lượt {den + 1} (đã gán bằng prompt mới).")
 
 
 def chay(ns, in_ra=print) -> int:
@@ -382,7 +407,7 @@ def chay(ns, in_ra=print) -> int:
         return 2
     a = chon_thuong_hieu(du_an, nha) if "a" in ns.buoc else []
     bo = {(d["khoa_bai"], d["ma"]) for d in a}
-    b = chon_gan_lai(hop_le, ns.tat_ca, bo, den) if "b" in ns.buoc else []
+    b = chon_gan_lai(hop_le, ns.tat_ca, bo, den, moc) if "b" in ns.buoc else []
     can, luot = uoc_luot_model(b)
     che_do = "ÁP DỤNG" if ns.ap_dung else "CHẠY THỬ (giao dịch chỉ đọc, không ghi gì)"
     in_ra(f"Dự án {ma} — {che_do}.")
@@ -457,9 +482,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--thu", type=int, default=0, metavar="N",
                     help="chạy thử: gọi model cho tối đa N dòng (≤ 100) để xem trước, không ghi")
     ap.add_argument("--den-luot", type=int, metavar="N",
-                    help="(b) chỉ bình luận có binh_luan.luot_id ≤ N (luot_id NULL tính là cũ); "
-                         "áp cho mọi bộ chọn của (b), kể cả --tat-ca. Vd --den-luot 8: bỏ bình "
-                         "luận lượt ≥ 9 đã gán bằng prompt mới")
+                    help="(b) chỉ bình luận có binh_luan.luot_id ≤ N, luot_id NULL (tính là cũ) "
+                         "hoặc thấy lần đầu trước lượt N+1 (cào lại sau, nhãn còn cũ); áp cho mọi "
+                         "bộ chọn của (b), kể cả --tat-ca. Vd --den-luot 8: bỏ bình luận thấy lần "
+                         "đầu từ lượt 9, đã gán bằng prompt mới")
     ap.add_argument("--mau", type=int, default=8, help="số dòng mẫu in ra mỗi bước")
     ns = ap.parse_args(argv)
     if ns.den_luot is not None and ns.den_luot < 0:

@@ -340,8 +340,9 @@ def _kho_luot() -> KhoGia:
     k.them("tiktok:kol", "n9", "khach4", "mua ở đâu vậy", luot=9, thay=_L9)
     k.them("tiktok:kol", "n10", "khach5", "màu này còn không", luot=10,
            thay=_L9 + datetime.timedelta(hours=7))
-    # Cào lại ở lượt 10 nhưng thấy lần đầu TRƯỚC lượt 9: luot_id mới, nhãn vẫn của prompt cũ.
-    k.them("tiktok:kol", "c10", "khach6", "dùng bền lắm", luot=10, thay=cu)
+    # Cào lại ở lượt 10 nhưng thấy lần đầu TRƯỚC lượt 9: luot_id mới, nhãn vẫn của prompt cũ
+    # (prompt cũ chấm "Tích cực"; model giả — prompt mới — ra "Trung lập": phải được ghi).
+    k.them("tiktok:kol", "c10", "khach6", "dùng bền lắm", luot=10, thay=cu, sac=TC)
     # Bài minigame: 5 bình luận dự thi của lượt 10 + 1 bình luận lượt 5 không mở đầu bằng số.
     for i in range(1, 6):
         k.them("tiktok:mg", f"m{i}", f"dt{i}", f"30{i} – Chúc mẹ vui", luot=10, thay=_L9)
@@ -365,15 +366,34 @@ def test_den_luot_chay_thu_in_bo_loc_va_chi_chon_luot_cu(moi_luot, capsys):
     ra = capsys.readouterr().out
     assert kho.bl == truoc and not kho.ghi() and goi == []
     assert all(g["chi_doc"] for g in kho.giao_dich)
-    # o5, o8, on (NULL = cũ) + m0 (bài minigame xét trên MỌI bình luận của bài, kể cả lượt 10).
-    assert "(b) Gán lại nhãn: 4 dòng (tat_ca 2, khen_ma_trung_lap 1, bai_minigame 1)." in ra
-    assert ("Bộ lọc lượt (b): --den-luot 8 — chỉ bình luận có luot_id ≤ 8 (luot_id NULL — lượt "
-            "đã xoá — tính là cũ); bỏ 8 dòng của lượt > 8, trong đó 1 dòng thấy lần đầu TRƯỚC "
-            "lượt 9") in ra
+    # o5, o8, on (NULL = cũ), c10 (cào lại ở lượt 10, thấy lần đầu trước lượt 9 — soát M1) + m0
+    # (bài minigame xét trên MỌI bình luận của bài, kể cả lượt 10).
+    assert "(b) Gán lại nhãn: 5 dòng (tat_ca 3, khen_ma_trung_lap 1, bai_minigame 1)." in ra
+    assert ("Bộ lọc lượt (b): --den-luot 8 — chọn 5 dòng có thể còn nhãn prompt cũ: luot_id ≤ 8: "
+            "3; luot_id NULL (lượt đã xoá, tính là cũ): 1; luot_id > 8 nhưng thấy lần đầu TRƯỚC "
+            "lượt 9 (cào lại ở lượt sau, nhãn vẫn cũ): 1 (lượt 9 bắt đầu 2026-10-17T00:51+07:00). "
+            "Bỏ 7 dòng thấy lần đầu từ lượt 9 (đã gán bằng prompt mới).") in ra
     assert ra.index("Bộ lọc lượt (b)") < ra.index("(b) Gán lại nhãn"), "bộ lọc in trước số dòng"
-    b = S.chon_gan_lai([dict(r, bai_noi_dung=kho.bai[r["khoa_bai"]]["noi_dung"])
-                        for r in kho.bl.values()], tat_ca=False, den_luot=8)
+    rows = [dict(r, bai_noi_dung=kho.bai[r["khoa_bai"]]["noi_dung"]) for r in kho.bl.values()]
+    b = S.chon_gan_lai(rows, tat_ca=False, den_luot=8, moc=_L9)
     assert {d["ma"]: d["ly_do"] for d in b} == {"o8": "khen_ma_trung_lap", "m0": "bai_minigame"}
+    assert {d["ma"] for d in S.chon_gan_lai(rows, True, den_luot=8, moc=_L9)} == \
+        {"o5", "o8", "on", "c10", "m0"}
+
+
+def test_nhanh_luot_ba_nhanh_va_khong_co_moc():
+    """Soát 17/10/2026 (M1): `luot_id` là lượt cào GẦN NHẤT — dòng thấy lần đầu trước lượt N+1
+    vẫn được chọn dù `luot_id > N`. Chưa có lượt nào sau N (`moc` None) / thiếu `thay_lan_dau`:
+    chỉ hai nhánh theo `luot_id`."""
+    cu, moi = _L9 - datetime.timedelta(days=1), _L9 + datetime.timedelta(minutes=1)
+    assert S.nhanh_luot({"luot_id": 8, "thay_lan_dau": moi}, 8, _L9) == "luot_cu"
+    assert S.nhanh_luot({"luot_id": None, "thay_lan_dau": moi}, 8, _L9) == "luot_null"
+    assert S.nhanh_luot({"luot_id": 12, "thay_lan_dau": cu}, 8, _L9) == "thay_truoc"
+    assert S.nhanh_luot({"luot_id": 12, "thay_lan_dau": _L9}, 8, _L9) is None, "đúng mốc = mới"
+    assert S.nhanh_luot({"luot_id": 12, "thay_lan_dau": cu}, 8, None) is None
+    assert S.nhanh_luot({"luot_id": 12, "thay_lan_dau": None}, 8, _L9) is None
+    assert S.trong_luot({"luot_id": 12}, None) and not S.trong_luot({"luot_id": 12}, 8)
+    assert "chưa có lượt nào sau lượt 8" in S._cau_loc_luot(8, [{"luot_id": 3}], None)
 
 
 def test_den_luot_khong_dat_thi_noi_ro_khong_loc(moi_luot, capsys):
@@ -394,13 +414,15 @@ def test_den_luot_ap_dung_chi_sua_luot_cu_va_ghi_vao_tep(moi_luot, tmp_path, cap
                    "--sao-luu", str(tep)]) == 0
     assert "Bộ lọc lượt (b): --den-luot 8" in capsys.readouterr().out
     gui = {t for lo in goi for t in lo}
-    assert gui and gui <= {"giá túi này bn vậy", "túi đẹp quá", "ship tỉnh không shop",
-                           "con thương mẹ"}, "model chỉ nhận bình luận của lượt ≤ 8 (hoặc NULL)"
-    for m in ("n9", "n10", "c10", "m1", "m5"):        # lượt > 8: không một cột nào đổi
+    assert "dùng bền lắm" in gui, "cào lại ở lượt 10 mà thấy lần đầu trước lượt 9: phải gán lại"
+    assert gui <= {"giá túi này bn vậy", "túi đẹp quá", "ship tỉnh không shop", "con thương mẹ",
+                   "dùng bền lắm"}, "model chỉ nhận bình luận có thể còn nhãn prompt cũ"
+    for m in ("n9", "n10", "m1", "m5"):     # thấy lần đầu từ lượt 9: không một cột nào đổi
         kb = "tiktok:mg" if m.startswith("m") else "tiktok:kol"
         assert kho.bl[("hapas", kb, m)] == {**goc[("hapas", kb, m)], "cap_nhat_cuoi": "cu"}, m
+    assert kho.bl[("hapas", "tiktok:kol", "c10")]["sac_thai"] == TL
     dong = [json.loads(x) for x in tep.read_text(encoding="utf-8").splitlines()]
     assert dong[0]["den_luot"] == 8 and dong[0]["tat_ca"] is True
-    assert {d["ma"] for d in dong[1:]} <= {"o5", "o8", "on", "m0"}
+    assert "c10" in {d["ma"] for d in dong[1:]} <= {"o5", "o8", "on", "c10", "m0"}
     with pytest.raises(SystemExit):
         S.main(["hapas", "--den-luot", "-1"])
