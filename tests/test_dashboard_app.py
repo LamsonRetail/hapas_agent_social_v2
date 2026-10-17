@@ -54,6 +54,7 @@ class GiaKho:
         self.nguoi = {QL: "quan_ly", XEM: "xem"}
         self.danh_ba: dict[str, dict] = {}       # bản đệm danh bạ Lark theo email
         self.dang_nhap_cuoi: dict[str, datetime.datetime] = {}
+        self.ma_lark: dict[str, dict] = {}       # email -> {open_id, union_id, user_id}
         self.nk: list[tuple] = []
         self.bai: list[dict] = []
         self.luot: list[dict] = []
@@ -284,7 +285,8 @@ class GiaKho:
         return [{"email": e, "vai_tro": v, "them_boi": None, "them_luc": None,
                  "ten_lark": None, "chuc_danh": None, "phong_ban": None, "trang_thai_lark": None,
                  "danh_ba_loi": None, "danh_ba_luc": None,
-                 "dang_nhap_cuoi": self.dang_nhap_cuoi.get(e), **self.danh_ba.get(e, {})}
+                 "dang_nhap_cuoi": self.dang_nhap_cuoi.get(e), **self.danh_ba.get(e, {}),
+                 "lark_open_id": self.ma_lark.get(e, {}).get("open_id")}
                 for e, v in sorted(self.nguoi.items())]
 
     def ghi_danh_ba(self, ket_qua):
@@ -294,6 +296,8 @@ class GiaKho:
                 self.danh_ba[e] = {"trang_thai_lark": d["trang_thai"], "ten_lark": d["ten"],
                                    "chuc_danh": d["chuc_danh"], "phong_ban": d["phong_ban"],
                                    "danh_ba_loi": None, "danh_ba_luc": luc}
+                if d.get("open_id"):
+                    self.ma_lark.setdefault(e, {})["open_id"] = d["open_id"]
 
     def ghi_loi_danh_ba(self, emails, loai):
         luc = datetime.datetime.now(datetime.UTC)
@@ -309,8 +313,14 @@ class GiaKho:
         del self.nguoi[email]
         self._ghi(ai, "xoa_nguoi_xem", f"nguoi_xem:{email}")
 
-    def ghi_dang_nhap(self, email, open_id):
+    def ghi_dang_nhap(self, email, open_id, union_id="", user_id=""):
         self.dang_nhap_cuoi[email] = datetime.datetime.now(datetime.UTC)
+        ma = self.ma_lark.setdefault(email, {})
+        if open_id and ma.get("open_id") != open_id and email in self.danh_ba:
+            self.danh_ba[email]["danh_ba_luc"] = None      # như kho thật: đọc lại ngay
+        for k, v in (("open_id", open_id), ("union_id", union_id), ("user_id", user_id)):
+            if v:
+                ma[k] = v
         if any(h == "dang_nhap_lan_dau" and d == f"nguoi_xem:{email}" for _, h, d in self.nk):
             return False
         self._ghi(email, "dang_nhap_lan_dau", f"nguoi_xem:{email}")
@@ -360,7 +370,8 @@ class GiaDongBo:
         app.state.sau_cap_nhat.append(lambda du_an=None, luot=None: None)
 
 
-def lark_gia(email_tra=QL, *, ma_token=0, ghi=None, tenant=TENANT, email_dn=""):
+def lark_gia(email_tra=QL, *, ma_token=0, ghi=None, tenant=TENANT, email_dn="",
+             open_id="ou_thu_1"):
     """LarkOAuth thật với HTTP giả: ghi lại yêu cầu để kiểm tham số gửi Lark. `email_tra` là
     email người dùng tự khai, `email_dn` là enterprise_email do tổ chức cấp."""
     ghi = ghi if ghi is not None else []
@@ -375,7 +386,8 @@ def lark_gia(email_tra=QL, *, ma_token=0, ghi=None, tenant=TENANT, email_dn=""):
         if req.url.path.endswith("/authen/v1/user_info"):
             return httpx.Response(200, json={"code": 0, "msg": "ok", "data": {
                 "name": "Người Thử", "email": email_tra.upper(), "enterprise_email": email_dn,
-                "open_id": "ou_thu_1", "tenant_key": tenant}})
+                "open_id": open_id, "union_id": "on_thu_1", "user_id": "u_thu_1",
+                "tenant_key": tenant}})
         return httpx.Response(404)
     return DN.LarkOAuth(CFG, transport=httpx.MockTransport(xu_ly))
 
@@ -390,13 +402,22 @@ NGUOI_LARK = {
 PHONG_BAN = {"od_mkt": "Marketing", "od_nd": "Nội dung"}
 
 
-def danh_ba_gia(nguoi=None, *, loi_buoc="", ma_loi=99991672, ghi=None, cham=0.0):
-    """DanhBaLark thật với HTTP giả. `nguoi`: email -> người Lark (mặc định NGUOI_LARK);
-    `loi_buoc` ("token"/"email"/"nguoi"/"phong_ban") trả mã lỗi `ma_loi` ở bước đó; `cham` giây
-    làm Lark trả chậm (thử timeout)."""
+def danh_ba_gia(nguoi=None, *, loi_buoc="", ma_loi=99991672, ghi=None, cham=0.0, trang=50):
+    """DanhBaLark thật với HTTP giả. `nguoi`: email dashboard lưu -> người Lark (mặc định
+    NGUOI_LARK). batch_get_id chỉ khớp trường `email` của người (mặc định = khoá) — như Lark
+    thật, KHÔNG khớp `enterprise_email`. `loi_buoc` ("token"/"email"/"nguoi"/"phong_ban"/
+    "quet_phong_ban"/"quet_nguoi") trả mã lỗi `ma_loi` ở bước đó; `cham` giây làm Lark trả chậm
+    (thử timeout); `trang` cỡ trang giả của bước dò danh bạ (thử phân trang)."""
     nguoi = NGUOI_LARK if nguoi is None else nguoi
     ghi = ghi if ghi is not None else []
     theo_id = {u["open_id"]: u for u in nguoi.values()}
+    theo_email = {str(u.get("email", k)).lower(): u for k, u in nguoi.items()}
+
+    def phan_trang(ds, req):
+        i = int(req.url.params.get("page_token") or 0)
+        con = i + trang < len(ds)
+        return {"items": ds[i:i + trang], "has_more": con,
+                **({"page_token": str(i + trang)} if con else {})}
 
     async def xu_ly(req: httpx.Request):
         ghi.append(req)
@@ -406,7 +427,9 @@ def danh_ba_gia(nguoi=None, *, loi_buoc="", ma_loi=99991672, ghi=None, cham=0.0)
         buoc = ("token" if duong.endswith(DB.DUONG_TOKEN_TO_CHUC) else
                 "email" if duong.endswith(DB.DUONG_EMAIL_RA_ID) else
                 "nguoi" if duong.endswith(DB.DUONG_NGUOI) else
-                "phong_ban" if duong.endswith(DB.DUONG_PHONG_BAN) else "")
+                "phong_ban" if duong.endswith(DB.DUONG_PHONG_BAN) else
+                "quet_phong_ban" if duong.endswith(DB.DUONG_PHONG_BAN_CON) else
+                "quet_nguoi" if duong.endswith(DB.DUONG_NGUOI_THEO_PB) else "")
         if buoc and buoc == loi_buoc:
             return httpx.Response(400, json={"code": ma_loi, "msg": "Access denied"})
         if buoc == "token":
@@ -415,7 +438,7 @@ def danh_ba_gia(nguoi=None, *, loi_buoc="", ma_loi=99991672, ghi=None, cham=0.0)
         if buoc == "email":
             ds = json.loads(req.content)["emails"]
             return httpx.Response(200, json={"code": 0, "data": {"user_list": [
-                {"email": e, **({"user_id": nguoi[e]["open_id"]} if e in nguoi else {})}
+                {"email": e, **({"user_id": theo_email[e]["open_id"]} if e in theo_email else {})}
                 for e in ds]}})
         if buoc == "nguoi":
             ids = req.url.params.get_list("user_ids")
@@ -425,6 +448,14 @@ def danh_ba_gia(nguoi=None, *, loi_buoc="", ma_loi=99991672, ghi=None, cham=0.0)
             ids = req.url.params.get_list("department_ids")
             return httpx.Response(200, json={"code": 0, "data": {"items": [
                 {"open_department_id": i, "name": PHONG_BAN[i]} for i in ids if i in PHONG_BAN]}})
+        if buoc == "quet_phong_ban":
+            assert req.url.params["fetch_child"] == "true"
+            return httpx.Response(200, json={"code": 0, "data": phan_trang(
+                [{"open_department_id": i, "name": t} for i, t in PHONG_BAN.items()], req)})
+        if buoc == "quet_nguoi":
+            pb = req.url.params["department_id"]
+            ds = [u for u in nguoi.values() if pb in (u.get("department_ids") or ["0"])]
+            return httpx.Response(200, json={"code": 0, "data": phan_trang(ds, req)})
         return httpx.Response(404)
     return DB.DanhBaLark(CFG, transport=httpx.MockTransport(xu_ly))
 
@@ -711,6 +742,10 @@ def _tra_cuu(db, emails):
     return asyncio.run(db.tra_cuu(emails))
 
 
+def _tra_cuu_id(db, emails, open_id_cua):
+    return asyncio.run(db.tra_cuu(emails, open_id_cua=open_id_cua))
+
+
 @pytest.mark.parametrize("st, ra", [
     ({"is_activated": True}, "hoat_dong"),
     ({"is_activated": False}, "chua_kich_hoat"),
@@ -731,12 +766,13 @@ def test_tra_cuu_danh_ba_doc_chuc_danh_phong_ban_va_trang_thai():
     db = danh_ba_gia(nguoi, ghi=ghi)
     kq = _tra_cuu(db, [QL.upper(), XEM, "nghi@hapas.vn", "la@hapas.vn", "khong-phai-email"])
     assert kq[QL] == {"trang_thai": "hoat_dong", "ten": "Trần Quản",
-                      "chuc_danh": "Trưởng phòng Marketing", "phong_ban": "Marketing"}
+                      "chuc_danh": "Trưởng phòng Marketing", "phong_ban": "Marketing",
+                      "open_id": "ou_ql"}
     assert kq[XEM]["phong_ban"] == "Marketing · Nội dung"
     assert kq["nghi@hapas.vn"]["trang_thai"] == "nghi_viec"
     assert kq["nghi@hapas.vn"]["chuc_danh"] is None
     assert kq["la@hapas.vn"] == {"trang_thai": "khong_co", "ten": None, "chuc_danh": None,
-                                 "phong_ban": None}
+                                 "phong_ban": None, "open_id": None}
     assert set(kq) == {QL, XEM, "nghi@hapas.vn", "la@hapas.vn"}
     # dùng token TỔ CHỨC của chính app dashboard; secret chỉ đi ở bước lấy token
     tk = [r for r in ghi if r.url.path.endswith(DB.DUONG_TOKEN_TO_CHUC)]
@@ -850,10 +886,15 @@ def test_them_nguoi_xem_canh_bao_khi_khong_co_trong_danh_ba():
     csrf = dang_nhap(c, QL)
     r = c.post("/nguoi-xem/them", data={"csrf": csrf, "email": "go-sai@hapas.vn",
                                         "vai_tro": "xem"})
+    # đường thêm (nhanh, không dò cả danh bạ) KHÔNG ghi "khong_co" — chưa chắc vì Lark không
+    # khớp enterprise_email; lượt đọc nền khi mở trang (có dò) mới ghi
+    assert "go-sai@hapas.vn" not in kho.danh_ba
     t = thong_bao(c, r)
-    assert "thong-bao--canh" in t and "Không có trong danh bạ" in t
+    assert "thong-bao--canh" in t and "Lark chưa khớp email này" in t
     assert kho.nguoi["go-sai@hapas.vn"] == "xem"           # cảnh báo, KHÔNG chặn
     assert kho.danh_ba["go-sai@hapas.vn"]["trang_thai_lark"] == "khong_co"
+    t = c.get("/nguoi-xem").text
+    assert "Không có trong danh bạ" in t and "chưa đăng nhập dashboard lần nào" in t
 
 
 def test_them_nguoi_xem_canh_bao_khi_da_nghi_viec():
@@ -886,6 +927,104 @@ def test_them_nguoi_xem_lark_hong_hoac_cham_van_luu(monkeypatch, kw):
     assert "thong-bao--ok" in t and "Chưa kiểm được với danh bạ Lark" in t
     assert kho.nguoi["moi@hapas.vn"] == "xem"
     assert kho.danh_ba["moi@hapas.vn"]["danh_ba_loi"] in ("thieu_quyen", "loi")
+
+
+#: Quản lý có email công ty @hapas.vn là `enterprise_email`; trường `email` là email cá nhân —
+#: batch_get_id (chỉ khớp `email`) không thấy, đúng như sự cố 17/10/2026.
+GIAM_DOC = "giamdoc@hapas.vn"
+NGUOI_DN = {**NGUOI_LARK, GIAM_DOC: {
+    "open_id": "ou_gd", "name": "Phạm Giám Đốc", "job_title": "Giám đốc", "email": "gd@gmail.com",
+    "enterprise_email": GIAM_DOC.upper(), "department_ids": ["od_nd"],
+    "status": {"is_activated": True}}}
+
+
+def _duong_goi(ghi, duong):
+    return [r for r in ghi if r.url.path.endswith(duong)]
+
+
+def test_tra_cuu_email_doanh_nghiep_tim_qua_do_ca_danh_ba():
+    ghi: list = []
+    kq = _tra_cuu(danh_ba_gia(NGUOI_DN, ghi=ghi, trang=1), [GIAM_DOC, QL, "la@hapas.vn"])
+    assert kq[GIAM_DOC] == {"trang_thai": "hoat_dong", "ten": "Phạm Giám Đốc",
+                            "chuc_danh": "Giám đốc", "phong_ban": "Nội dung", "open_id": "ou_gd"}
+    assert kq[QL]["open_id"] == "ou_ql" and kq["la@hapas.vn"]["trang_thai"] == "khong_co"
+    # batch_get_id hỏi cả 3 nhưng chỉ QL khớp; phần còn lại dò danh bạ, có phân trang
+    em = _duong_goi(ghi, DB.DUONG_EMAIL_RA_ID)
+    assert sorted(json.loads(em[0].content)["emails"]) == sorted([GIAM_DOC, QL, "la@hapas.vn"])
+    pb = _duong_goi(ghi, DB.DUONG_PHONG_BAN_CON)
+    assert len(pb) == 2 and pb[1].url.params["page_token"] == "1"
+    assert {r.url.params["department_id"] for r in _duong_goi(ghi, DB.DUONG_NGUOI_THEO_PB)} \
+        == {"0", "od_mkt", "od_nd"}
+    assert all(r.headers["authorization"] == "Bearer t-gia"
+               for r in _duong_goi(ghi, DB.DUONG_NGUOI_THEO_PB))
+
+
+def test_tra_cuu_theo_open_id_khong_qua_email():
+    ghi: list = []
+    kq = _tra_cuu_id(danh_ba_gia(NGUOI_DN, ghi=ghi), [GIAM_DOC], {GIAM_DOC: "ou_gd"})
+    assert kq[GIAM_DOC]["chuc_danh"] == "Giám đốc" and kq[GIAM_DOC]["open_id"] == "ou_gd"
+    assert not _duong_goi(ghi, DB.DUONG_EMAIL_RA_ID)
+    assert not _duong_goi(ghi, DB.DUONG_NGUOI_THEO_PB)
+    ng = _duong_goi(ghi, DB.DUONG_NGUOI)
+    assert len(ng) == 1 and ng[0].url.params.get_list("user_ids") == ["ou_gd"]
+    assert ng[0].url.params["user_id_type"] == "open_id"
+
+
+def test_tra_cuu_open_id_cu_khong_con_thi_tra_lai_theo_email():
+    ghi: list = []
+    kq = _tra_cuu_id(danh_ba_gia(ghi=ghi), [QL], {QL: "ou_da_xoa"})
+    assert kq[QL]["open_id"] == "ou_ql" and kq[QL]["trang_thai"] == "hoat_dong"
+    assert len(_duong_goi(ghi, DB.DUONG_EMAIL_RA_ID)) == 1
+
+
+@pytest.mark.parametrize("buoc", ["quet_phong_ban", "quet_nguoi"])
+def test_tra_cuu_do_danh_ba_thieu_quyen_thi_bo_qua(buoc):
+    kq = _tra_cuu(danh_ba_gia(NGUOI_DN, loi_buoc=buoc), [GIAM_DOC, QL])
+    assert kq[GIAM_DOC]["trang_thai"] == "khong_co" and kq[QL]["trang_thai"] == "hoat_dong"
+
+
+def test_tra_cuu_khong_quet_khi_tat_va_co_tran_so_lan_goi(monkeypatch):
+    ghi: list = []
+    kq = asyncio.run(danh_ba_gia(NGUOI_DN, ghi=ghi).tra_cuu([GIAM_DOC], quet=False))
+    assert kq[GIAM_DOC]["trang_thai"] == "khong_co"
+    assert not _duong_goi(ghi, DB.DUONG_PHONG_BAN_CON)
+    monkeypatch.setattr(DB, "QUET_TOI_DA", 3)
+    ghi.clear()
+    _tra_cuu(danh_ba_gia(NGUOI_DN, ghi=ghi, trang=1), ["la@hapas.vn"])
+    assert len(_duong_goi(ghi, DB.DUONG_PHONG_BAN_CON)
+               + _duong_goi(ghi, DB.DUONG_NGUOI_THEO_PB)) == 3
+
+
+def test_dang_nhap_luu_open_id_roi_trang_nguoi_xem_doc_theo_open_id():
+    """Sự cố 17/10/2026: quản lý email công ty bị báo "khong_co". Đăng nhập một lần -> lưu
+    open_id, xoá mốc đọc -> trang Người xem đọc lại theo open_id và hiện đúng chức danh."""
+    ghi: list = []
+    kho = GiaKho()
+    kho.nguoi[GIAM_DOC] = "quan_ly"
+    kho.danh_ba[GIAM_DOC] = {"trang_thai_lark": "khong_co", "ten_lark": None, "chuc_danh": None,
+                             "phong_ban": None, "danh_ba_loi": None,
+                             "danh_ba_luc": datetime.datetime.now(datetime.UTC)}
+    _, c, kho = tao(kho, lark=lark_gia("gd@gmail.com", email_dn=GIAM_DOC, open_id="ou_gd"),
+                    danh_ba=danh_ba_gia(NGUOI_DN, ghi=ghi, loi_buoc="quet_phong_ban"))
+    assert c.get("/dang-nhap/xong", params={"code": "x", "state": _bat_dau(c)}).status_code == 303
+    assert kho.ma_lark[GIAM_DOC]["open_id"] == "ou_gd"
+    assert kho.danh_ba[GIAM_DOC]["danh_ba_luc"] is None
+    c.get("/nguoi-xem")                    # đọc nền: GIAM_DOC tra thẳng theo open_id
+    assert kho.danh_ba[GIAM_DOC]["trang_thai_lark"] == "hoat_dong"
+    em = _duong_goi(ghi, DB.DUONG_EMAIL_RA_ID)
+    assert all(GIAM_DOC not in json.loads(r.content)["emails"] for r in em)
+    t = c.get("/nguoi-xem").text
+    assert "Giám đốc" in t and "Phạm Giám Đốc" in t
+
+
+def test_trang_nguoi_xem_do_ca_danh_ba_cho_email_doanh_nghiep_chua_dang_nhap():
+    kho = GiaKho()
+    kho.nguoi[GIAM_DOC] = "xem"
+    _, c, kho = tao(kho, danh_ba=danh_ba_gia(NGUOI_DN))
+    dang_nhap(c, QL)
+    c.get("/nguoi-xem")
+    assert kho.danh_ba[GIAM_DOC]["chuc_danh"] == "Giám đốc"
+    assert kho.ma_lark[GIAM_DOC]["open_id"] == "ou_gd"     # lưu để lần sau tra thẳng
 
 
 def test_danh_ba_khong_ghi_nhat_ky():
@@ -1307,6 +1446,8 @@ def test_dang_nhap_uu_tien_email_doanh_nghiep_va_ghi_lan_dau():
         assert r.status_code == 303
         assert DN.doc_phien(c.cookies.get(DN.COOKIE_PHIEN), KHOA)["email"] == XEM
     assert kho.nk == [(XEM, "dang_nhap_lan_dau", f"nguoi_xem:{XEM}")] and kho.open_id == "ou_thu_1"
+    assert kho.ma_lark[XEM] == {"open_id": "ou_thu_1", "union_id": "on_thu_1",
+                                "user_id": "u_thu_1"}
     assert set(kho.dang_nhap_cuoi) == {XEM}          # mỗi lượt đăng nhập ghi lần cuối
 
 

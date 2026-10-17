@@ -303,6 +303,12 @@ ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS danh_ba_loi TEXT
   CHECK (danh_ba_loi IN ('thieu_quyen', 'loi'));
 ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS danh_ba_luc TIMESTAMPTZ;
 ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS dang_nhap_cuoi TIMESTAMPTZ;
+-- Mã tài khoản Lark (17/10/2026): ghi lúc đăng nhập OAuth. Lark batch_get_id KHÔNG khớp
+-- enterprise_email (email công ty) -> quản lý dùng email @hapas.vn bị báo nhầm "không có trong
+-- danh bạ"; có open_id thì đọc danh bạ tra thẳng theo mã, không qua email.
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS lark_open_id TEXT;
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS lark_union_id TEXT;
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS lark_user_id TEXT;
 
 -- Nhật ký mọi thay đổi làm trên dashboard (ai, lúc nào, sửa gì). Không đẩy lên BigQuery.
 CREATE TABLE IF NOT EXISTS nhat_ky (
@@ -605,7 +611,7 @@ COMMENT ON TABLE nguoi_xem IS $$[Lớp] Raw
 [Nguồn] Người quản lý thêm/xoá trên dashboard; người quản lý đầu tiên thêm bằng lệnh quan_tri; tên, chức danh, phòng ban, trạng thái đọc từ danh bạ Lark (contact API)
 [Phạm vi] Nhân viên HAPAS (tài khoản Lark của tổ chức) | Kênh: Không có | Từ khi cài dashboard
 [Đã xử lý] Email chữ thường; trạng thái Lark quy về 5 giá trị
-[Refresh] Ghi tức thời khi người quản lý sửa; cột danh bạ làm mới ≤ 12 giờ/lần khi mở trang Người xem và khi thêm email; dang_nhap_cuoi ghi mỗi lượt đăng nhập
+[Refresh] Ghi tức thời khi người quản lý sửa; cột danh bạ làm mới ≤ 12 giờ/lần khi mở trang Người xem và khi thêm email; dang_nhap_cuoi, lark_open_id, lark_union_id, lark_user_id ghi mỗi lượt đăng nhập
 [Dùng khi] Kiểm quyền đăng nhập dashboard
 [Không dùng khi] Lịch sử thêm/xoá → dùng nhat_ky
 [Lưu ý] Email nội bộ — không đẩy lên BigQuery. Luôn phải còn ít nhất một quan_ly.$$;
@@ -620,6 +626,9 @@ COMMENT ON COLUMN nguoi_xem.trang_thai_lark IS 'Giá trị: hoat_dong, chua_kich
 COMMENT ON COLUMN nguoi_xem.danh_ba_loi IS 'Lỗi lần đọc danh bạ gần nhất. Giá trị: thieu_quyen (app Lark chưa được cấp scope), loi (lỗi khác). NULL khi lần gần nhất đọc được.';
 COMMENT ON COLUMN nguoi_xem.danh_ba_luc IS 'Thời điểm đọc danh bạ Lark gần nhất, kể cả lần lỗi (UTC). NULL khi chưa đọc.';
 COMMENT ON COLUMN nguoi_xem.dang_nhap_cuoi IS 'Lần đăng nhập dashboard thành công gần nhất (UTC). NULL khi chưa đăng nhập kể từ khi có cột (lần đầu xem nhat_ky dang_nhap_lan_dau).';
+COMMENT ON COLUMN nguoi_xem.lark_open_id IS 'open_id Lark của tài khoản (riêng cho app dashboard DASH_LARK_APP_ID). Ghi lúc đăng nhập, hoặc khi đọc danh bạ tìm được. NULL khi chưa đăng nhập và danh bạ chưa tìm thấy.';
+COMMENT ON COLUMN nguoi_xem.lark_union_id IS 'union_id Lark của tài khoản (chung mọi app của cùng nhà phát triển; dùng khi đổi app Lark). Ghi lúc đăng nhập. NULL khi chưa đăng nhập.';
+COMMENT ON COLUMN nguoi_xem.lark_user_id IS 'user_id Lark (mã nhân viên trong tổ chức). Ghi lúc đăng nhập. NULL khi chưa đăng nhập hoặc app thiếu scope contact:user.employee_id:readonly.';
 
 COMMENT ON TABLE nhat_ky IS $$[Lớp] Raw
 [Mục đích] Nhật ký mọi thay đổi làm trên dashboard: ai, lúc nào, sửa gì.

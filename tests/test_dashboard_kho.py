@@ -123,8 +123,19 @@ def test_ghi_dang_nhap_lan_dau_chi_mot_lan(gia):
     assert K.ghi_dang_nhap(AI, "ou_123") is False
     lenh = gia.gd[0].lenh
     assert not any(s.startswith("INSERT") for s, _ in lenh)
-    # lượt đăng nhập nào cũng ghi lần cuối, kể cả khi không phải lần đầu
-    assert lenh[0] == ("UPDATE nguoi_xem SET dang_nhap_cuoi = now() WHERE email = %s", (AI,))
+    # lượt đăng nhập nào cũng ghi lần cuối + mã Lark, kể cả khi không phải lần đầu
+    assert lenh[0][0].startswith("UPDATE nguoi_xem SET dang_nhap_cuoi = now(), ")
+    assert lenh[0][1] == ("ou_123", "ou_123", "ou_123", "", "", AI)
+
+
+def test_ghi_dang_nhap_luu_ma_lark_va_doc_lai_danh_ba_khi_doi(gia):
+    K.ghi_dang_nhap(AI, "ou_moi", "on_1", "u_1")
+    sql, tham_so = gia.gd[0].lenh[0]
+    assert tham_so == ("ou_moi", "ou_moi", "ou_moi", "on_1", "u_1", AI)
+    # open_id đổi -> xoá mốc đọc danh bạ; mã rỗng không xoá mã cũ
+    assert "danh_ba_luc = CASE WHEN %s <> '' AND lark_open_id IS DISTINCT FROM %s" in sql
+    for cot in ("lark_open_id", "lark_union_id", "lark_user_id"):
+        assert f"{cot} = COALESCE(NULLIF(%s, ''), {cot})" in sql
 
 
 def test_doc_bai_gon_va_giu_bai_moi_nhat_khi_cat(gia):
@@ -283,7 +294,7 @@ def test_thieu_psycopg_bao_loi_kho(monkeypatch):
 
 # ─────────────────── danh bạ Lark trong nguoi_xem (17/10/2026) ───────────────────
 COT_DANH_BA = ("ten_lark", "chuc_danh", "phong_ban", "trang_thai_lark", "danh_ba_loi",
-               "danh_ba_luc", "dang_nhap_cuoi")
+               "danh_ba_luc", "dang_nhap_cuoi", "lark_open_id", "lark_union_id", "lark_user_id")
 
 
 def test_cot_danh_ba_co_trong_schema_va_co_mo_ta():
@@ -299,7 +310,7 @@ def test_cot_danh_ba_co_trong_schema_va_co_mo_ta():
 def test_cac_nguoi_xem_doc_cot_danh_ba_va_lan_dang_nhap(gia):
     K.cac_nguoi_xem()
     sql = gia.gd[0].lenh[0][0]
-    for cot in COT_DANH_BA:
+    for cot in COT_DANH_BA[:-2]:          # union_id/user_id chỉ lưu, trang không cần đọc
         assert cot in sql, cot
     assert "COALESCE(n.dang_nhap_cuoi" in sql and "'dang_nhap_lan_dau'" in sql
 
@@ -312,6 +323,7 @@ def test_ghi_danh_ba_khong_ghi_nhat_ky(gia):
     K.ghi_loi_danh_ba(["a@hapas.vn"], "thieu_quyen")
     lenh = [x for g in gia.gd for x in g.lenh]
     assert all(s.startswith("UPDATE nguoi_xem SET") for s, _ in lenh)
-    assert lenh[0][1] == ("hoat_dong", "A", "CV", "MKT", "a@hapas.vn")
+    assert lenh[0][1] == ("hoat_dong", "A", "CV", "MKT", None, "a@hapas.vn")
+    assert "lark_open_id = COALESCE(%s, lark_open_id)" in lenh[0][0]
     assert "danh_ba_loi = NULL" in lenh[0][0]
     assert lenh[-1][1] == ("thieu_quyen", ["a@hapas.vn"])
