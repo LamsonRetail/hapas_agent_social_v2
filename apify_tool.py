@@ -3633,8 +3633,10 @@ SCHEMA = {
         "số tiền).\n"
         "- Chất lượng nguồn KHÔNG bằng nhau, phải nhắc khi liên quan: Instagram và "
         "Facebook KHÔNG có followers; Instagram không lọc được quốc gia nên nhiễu quốc "
-        "tế; Facebook khớp từ khoá lỏng và gói free chỉ 20 kết quả + 1 lần chạy/24h (nên "
-        "chỉ quét từ khoá ĐẦU TIÊN).\n"
+        "tế; Instagram tìm theo HASHTAG (từ khoá viết liền, bỏ dấu: 'túi hapas' → "
+        "#tuihapas), tab bài + reels, gói Free của actor chỉ đọc trang đầu mỗi hashtag "
+        "(khoảng 6 bài + 6–9 reels); Facebook khớp từ khoá lỏng và gói free chỉ 20 kết "
+        "quả + 1 lần chạy/24h (nên chỉ quét từ khoá ĐẦU TIÊN).\n"
         "- Tool TỐN TIỀN. Xác nhận từ khoá + khoảng ngày + nền tảng TRƯỚC khi gọi.\n"
         "- Gửi NGUYÊN `sheet_url` cho người dùng. `granted`=false thì phải báo họ có thể "
         "mở không được."
@@ -3991,7 +3993,8 @@ def _handle(args: dict, **kwargs) -> str:
         not_yet=not_yet, limit_xin=limit_xin, tran_bai=tran_bai, tat=tat)
     if tra_ngay is not None:
         return tra_ngay
-    # Instagram/Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ khoá.
+    # Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ khoá (Instagram từ
+    # 17/10/2026: hai run, mỗi run mọi hashtag — `_uoc_tai_cho`).
     # Ước tính MỖI LƯỢT chạy actor của từng nền tảng (`est_luot`) — so với `tran_usd_<p>` để
     # nói ra khi trần riêng trói (Apify dừng ở trần, có thể thiếu bài).
     est, est_luot = _uoc_tai_cho(plats, lims, queries)
