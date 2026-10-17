@@ -1840,6 +1840,8 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     cfg = {p: cau_hinh(du_an, "tu_khoa", p) for p in TK_NEN_TANG}
     if not any(c["bat"] for c in cfg.values()) and not cfg["facebook"]["duong2"]["bat"]:
         return tk
+    # {nền tảng giãn nhịp: {"ve", "moi"}} của ĐƯỜNG 1 lượt này — chỉ có khi đường 1 chạy không lỗi.
+    tk["_nhip"] = {}
     fb_toi_da = _fb_toi_da()
     ma = du_an["ma"]
     tu = tu_tim(du_an)
@@ -2067,6 +2069,10 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 continue
             ph_p = tk["pheu"][p] = _pheu_moi(ngay, ly_cs)
             ph_p.update(ve=len(got), xin=lim, xin_ly_do=ly_xin)
+            if p in TK_GIAN_NEN_TANG:
+                # Nhịp của ĐÚNG đường này (sửa 18/10/2026): về/mới chỉ của đường 1 vừa chạy — phễu
+                # Facebook gộp cả đường 2 (mina), phễu Threads đếm cả bài đường 2.
+                tk["_nhip"][p] = {"ve": len(got), "moi": 0}
             if p == "threads":
                 # Phễu nói ước tính dựa vào đâu (sản lượng lượt trước hay trần) — đối chiếu "co còn".
                 ph_p["xin_ly_do"] = (f"{ly_xin}; ước tính {_usd(uoc)} USD, " + san_luong_du_kien(
@@ -2087,6 +2093,8 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # Giữ MỌI bài trong PHẠM VI theo dõi (chủ dự án 16/10), không chỉ cửa sổ tăng dần.
                 if dt and tu_pv <= dt <= bay_gio + datetime.timedelta(hours=1) and d.get("link"):
                     d["platform"] = p
+                    if p in TK_GIAN_NEN_TANG:
+                        d["_nhip"] = p           # bài đường 1: đếm vào nhịp tìm của nền tảng
                     hits.append((d, dt))
                     ph_p["pham_vi"] += 1
                     ph_p["cua_so"] += d_from <= dt
@@ -2119,17 +2127,16 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         for p, m in moc_moi.items():
             f = tk["pheu"].get(p) or {}
             m["huu_ich"] = int(f.get("moi", 0)) + int(f.get("cap_nhat", 0))
-        # Lịch sử (giờ, về, mới) của lượt tìm vừa chạy xong, không lỗi — kể cả về 0 bài (mốc tăng
-        # dần thì không ghi khi về 0) — cho `gian_nhip` lượt sau.
+        # Lịch sử (giờ, về, mới) của lượt tìm ĐƯỜNG 1 vừa chạy xong, không lỗi — kể cả về 0 bài
+        # (mốc tăng dần thì không ghi khi về 0) — cho `gian_nhip` lượt sau. Chỉ đường đã thật sự
+        # chạy (`tk["_nhip"]`), không đọc phễu (sửa 18/10/2026): đường 1 Facebook bị giãn mà đường 2
+        # chạy thì `_duong_fb` dựng lại phễu không còn `bo_qua` → cũ ghi một dòng mang giờ của
+        # chính lượt bị bỏ với số của đường 2 → mốc "lượt tìm cuối" dời mãi, đường 1 không chạy lại.
         nhip = dict(moc_cu.get(KHOA_NHIP_TIM) or {})
-        for p in TK_GIAN_NEN_TANG:
-            f = tk["pheu"].get(p)
-            if not f or f.get("bo_qua") or f.get("loi") or p in da_xong:
-                continue
+        for p, x in tk["_nhip"].items():
             ls = list(((nhip.get(p) if isinstance(nhip.get(p), dict) else {}).get("lich_su"))
                       or [])
-            ls.append([bay_gio.isoformat(timespec="seconds"), int(f.get("ve") or 0),
-                       int(f.get("moi") or 0)])
+            ls.append([bay_gio.isoformat(timespec="seconds"), int(x["ve"]), int(x["moi"])])
             nhip[p] = {"lich_su": ls[-TK_GIAN_LICH_SU:]}
         if nhip:
             moc_moi[KHOA_NHIP_TIM] = nhip
@@ -2152,6 +2159,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             with v._khoa:
                 v.d.setdefault("pheu_tu_khoa", {}).update(tk["pheu"])
                 v.luu()
+    tk.pop("_nhip", None)
     tk["usd"] = round(tk["usd"], 4)
     return tk
 
@@ -3329,6 +3337,11 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         })
         ban.append((d, dt))
     tk["giu"] = len(rows)
+    for d, _ in ban:
+        # Bài mới đường 1 của nền tảng giãn nhịp (`_nhip` gắn lúc vào `hits`).
+        x = (tk.get("_nhip") or {}).get(d.get("_nhip"))
+        if x is not None:
+            x["moi"] += 1
     n2_giu = sum(1 for d, _ in ban if d.get("_duong") == 2)
     _dem_duong_2(tk, "giu", n2_giu)
     _dem_duong_2(tk, "moi", n2_giu)          # bài vào bước này là bài CHƯA có trong kho

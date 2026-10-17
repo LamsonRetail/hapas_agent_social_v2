@@ -92,6 +92,63 @@ def test_luot_tim_bo_instagram_ghi_ly_do_va_lich_su(mo):  # noqa: F811
     assert "instagram" in goi
 
 
+def _lich_su_gan(p: str, ve: int = 7, lui_gio: float = 2) -> list:
+    """3 lượt liền về `ve` mới 0, lượt cuối cách đây `lui_gio` giờ → lượt này bị giãn."""
+    gan = datetime.datetime.now(VN) - datetime.timedelta(hours=lui_gio)
+    T.ghi_moc_tk("hapas", {T.KHOA_NHIP_TIM: {p: {"lich_su": [
+        [(gan - datetime.timedelta(days=d)).isoformat(timespec="seconds"), ve, 0]
+        for d in (2, 1, 0)]}}})
+    return T.doc_moc_tk("hapas")[T.KHOA_NHIP_TIM][p]["lich_su"]
+
+
+def test_fb_duong_1_gian_duong_2_chay_khong_doi_lich_su_roi_chay_lai(mo):  # noqa: F811
+    """Soát 18/10/2026 (HIGH): đường 1 Facebook bị giãn mà đường 2 (mina) vẫn chạy → `_duong_fb`
+    dựng lại phễu Facebook không còn `bo_qua` → bản cũ ghi thêm một dòng mang giờ CỦA CHÍNH LƯỢT
+    BỊ BỎ với số của đường 2 → mốc "lượt tìm cuối" dời theo mãi, đường 1 không bao giờ chạy lại."""
+    from test_duong_moi import _chay_tk_fb, _mina
+    da = dict(DU_AN, tu_khoa=["hapas", "túi hapas"], tk_bat=True, tk_so_bai=15)
+    cu = _lich_su_gan("facebook")
+    tk, _, goi, _ = _chay_tk_fb(mo, [], _mina(), du_an=da)
+    assert goi["facebook"] == [] and goi[T.TK_FB2], "đường 1 bị giãn, đường 2 vẫn chạy"
+    assert tk["pheu"]["facebook"]["duong"]["scrapeforge"]["bo_qua"].startswith("giãn nhịp")
+    ls = T.doc_moc_tk("hapas")[T.KHOA_NHIP_TIM]["facebook"]["lich_su"]
+    assert ls == cu, "lượt đường 1 bị bỏ: không thêm dòng lịch sử"
+    bay = datetime.datetime.fromisoformat(cu[-1][0]) + datetime.timedelta(hours=T.TK_GIAN_GIO)
+    assert T.gian_nhip(CFG, {"lich_su": ls}, bay) == (False, ""), "đủ cửa sổ thì chạy lại"
+    # Giả lập đã qua cửa sổ 44 giờ: lượt sau đường 1 chạy, lịch sử thêm đúng một dòng của nó.
+    _lich_su_gan("facebook", lui_gio=T.TK_GIAN_GIO + 1)
+    _, _, goi, _ = _chay_tk_fb(mo, [], _mina(), du_an=da)
+    assert goi["facebook"], "đủ cửa sổ: đường 1 chạy lại"
+    assert len(T.doc_moc_tk("hapas")[T.KHOA_NHIP_TIM]["facebook"]["lich_su"]) == 4
+
+
+def test_lich_su_nhip_chi_dem_ve_moi_cua_duong_1(mo):  # noqa: F811
+    """Facebook: đường 2 về nhiều bài mới mà đường 1 về 1 bài → lịch sử ghi (1, 1), không phải
+    tổng hai đường (phễu Facebook gộp cả mina)."""
+    from test_duong_moi import _chay_tk_fb, _mina, _sf_tim
+    tk, _, _, _ = _chay_tk_fb(mo, [_sf_tim("shop.a", "1001", "túi hapas mới về")], _mina())
+    assert tk["pheu"]["facebook"]["ve"] == 1 + len(_mina()) and tk["pheu"]["facebook"]["moi"] > 1
+    assert T.doc_moc_tk("hapas")[T.KHOA_NHIP_TIM]["facebook"]["lich_su"][-1][1:] == [1, 1]
+    assert "_nhip" not in tk, "sổ nhịp nội bộ không lọt ra kết quả lượt"
+
+
+def test_threads_lich_su_khong_dem_bai_duong_2(mo):  # noqa: F811
+    """Threads: đường 1 về 2 bài, đường 2 thêm 4 bài riêng — phễu Threads giữ 6 mới, lịch sử nhịp
+    đường 1 chỉ (2, 2). Đường 1 bị giãn thì không thêm dòng (đường 2 vẫn chạy, vẫn giữ bài)."""
+    from test_threads_duong_2 import _d1, _d2, _da, _fetch
+    GiaKhoTk(mo)
+    goi: list = []
+    mo.setattr(A, "_FETCH", _fetch(goi, {"threads": _d1(), T.TH2_KHOA: _d2()}))
+    tk = _chay_tk(_da())
+    assert tk["pheu"]["threads"]["moi"] == 6
+    assert T.doc_moc_tk("hapas")[T.KHOA_NHIP_TIM]["threads"]["lich_su"][-1][1:] == [2, 2]
+    cu = _lich_su_gan("threads")
+    goi.clear()
+    tk = _chay_tk(_da())
+    assert [g[0] for g in goi] == [T.TH2_KHOA] and tk["pheu"]["threads"]["bo_qua"]
+    assert T.doc_moc_tk("hapas")[T.KHOA_NHIP_TIM]["threads"]["lich_su"] == cu
+
+
 @pytest.mark.parametrize("lich_su, ra", [
     ([[None, 0, 0]] * 3, False),             # mốc giờ hỏng: không giãn
     ([["2026-10-17T00:00:00+07:00", 0, 0]] * 3, True),
