@@ -1805,7 +1805,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             return _chuyen(request, "/nguoi-xem", "canh",
                            f"{tin}, nhưng trên Lark: {DB.TRANG_THAI[kq['trang_thai']]} — "
                            "kiểm lại email, người này chưa đăng nhập được.")
-        ai = ", ".join(x for x in (kq.get("ten"), kq.get("chuc_danh")) if x)
+        # 18/10/2026: trang Người xem bỏ chức danh (chủ dự án) — câu báo chỉ còn tên Lark.
+        ai = kq.get("ten") or ""
         return _chuyen(request, "/nguoi-xem", "ok",
                        tin + (f" — {ai}" if ai else "") + ", tài khoản Lark đang hoạt động.")
 

@@ -969,16 +969,19 @@ def test_tra_cuu_danh_ba_thieu_quyen_phong_ban_van_co_chuc_danh():
     assert kq[QL]["chuc_danh"] == "Trưởng phòng Marketing" and kq[QL]["phong_ban"] is None
 
 
-def test_trang_nguoi_xem_doc_danh_ba_nen_roi_hien_chuc_danh():
+def test_trang_nguoi_xem_doc_danh_ba_nen_roi_hien_ten_phong_ban():
     ghi: list = []
     _, c, kho = tao(danh_ba=danh_ba_gia(ghi=ghi))
     dang_nhap(c, QL)
     t = c.get("/nguoi-xem").text           # trang trả ngay bằng bản đệm (trống) ...
-    assert "Đang đọc danh bạ" in t and "Trưởng phòng Marketing" not in t
-    assert kho.danh_ba[QL]["chuc_danh"] == "Trưởng phòng Marketing"   # ... rồi đọc nền
+    assert "Đang đọc danh bạ" in t and "Trần Quản" not in t
+    assert kho.danh_ba[QL]["chuc_danh"] == "Trưởng phòng Marketing"   # ... rồi đọc nền (kho giữ)
     t = c.get("/nguoi-xem").text
-    assert "Trưởng phòng Marketing" in t and "Chuyên viên nội dung" in t
-    assert "Marketing · Nội dung" in t and "Trần Quản" in t
+    # 18/10/2026 (chủ dự án): bỏ cột Chức danh; phòng ban vẫn hiện dưới tên Lark.
+    assert "Chức danh" not in t and "Trưởng phòng Marketing" not in t
+    assert "Chuyên viên nội dung" not in t and "chức danh" not in t
+    assert '<span class="nx-dong2">Trần Quản</span><span class="nx-dong2 nx-pb">Marketing</span>' in t
+    assert "Marketing · Nội dung" in t
     assert t.count("Đang hoạt động") == 2 and "Đang đọc danh bạ" not in t
     so_goi = len(ghi)
     c.get("/nguoi-xem")                    # bản đệm còn mới (< 12 giờ): không gọi Lark
@@ -1013,7 +1016,7 @@ def test_trang_nguoi_xem_giu_du_lieu_cu_khi_lan_doc_sau_loi():
     c.get("/nguoi-xem")
     kho.ghi_loi_danh_ba([QL], "loi")
     t = c.get("/nguoi-xem").text
-    assert "Trưởng phòng Marketing" in t and "Lần đọc danh bạ gần nhất lỗi" in t
+    assert "Trần Quản" in t and "Lần đọc danh bạ gần nhất lỗi" in t
 
 
 def test_trang_nguoi_xem_khong_cho_lark_cham(monkeypatch):
@@ -1059,14 +1062,14 @@ def test_them_nguoi_xem_canh_bao_khi_da_nghi_viec():
     assert "thong-bao--canh" in t and "Đã nghỉ việc" in t and "nghi@hapas.vn" in kho.nguoi
 
 
-def test_them_nguoi_xem_dang_hoat_dong_bao_ten_chuc_danh():
+def test_them_nguoi_xem_dang_hoat_dong_bao_ten():
     _, c, kho = tao()
     del kho.nguoi[XEM]
     csrf = dang_nhap(c, QL)
     t = thong_bao(c, c.post("/nguoi-xem/them", data={"csrf": csrf, "email": XEM,
                                                     "vai_tro": "xem"}))
-    assert "thong-bao--ok" in t and "Lê Xem, Chuyên viên nội dung" in t
-    assert "đang hoạt động" in t
+    assert "thong-bao--ok" in t and "— Lê Xem, tài khoản Lark đang hoạt động" in t
+    assert "Chuyên viên nội dung" not in t, "18/10/2026: không hiện chức danh"
 
 
 @pytest.mark.parametrize("kw", [{"loi_buoc": "email"}, {"cham": 2}])
@@ -1149,7 +1152,8 @@ def test_tra_cuu_khong_quet_khi_tat_va_co_tran_so_lan_goi(monkeypatch):
 
 def test_dang_nhap_luu_open_id_roi_trang_nguoi_xem_doc_theo_open_id():
     """Sự cố 17/10/2026: quản lý email công ty bị báo "khong_co". Đăng nhập một lần -> lưu
-    open_id, xoá mốc đọc -> trang Người xem đọc lại theo open_id và hiện đúng chức danh."""
+    open_id, xoá mốc đọc -> trang Người xem đọc lại theo open_id và hiện đúng tên, phòng ban
+    (chức danh vẫn đọc vào kho nhưng trang không hiện từ 18/10/2026)."""
     ghi: list = []
     kho = GiaKho()
     kho.nguoi[GIAM_DOC] = "quan_ly"
@@ -1166,7 +1170,9 @@ def test_dang_nhap_luu_open_id_roi_trang_nguoi_xem_doc_theo_open_id():
     em = _duong_goi(ghi, DB.DUONG_EMAIL_RA_ID)
     assert all(GIAM_DOC not in json.loads(r.content)["emails"] for r in em)
     t = c.get("/nguoi-xem").text
-    assert "Giám đốc" in t and "Phạm Giám Đốc" in t
+    assert kho.danh_ba[GIAM_DOC]["chuc_danh"] == "Giám đốc"
+    assert "Phạm Giám Đốc" in t and '<span class="nx-dong2 nx-pb">Nội dung</span>' in t
+    assert "Giám đốc" not in t
 
 
 def test_trang_nguoi_xem_do_ca_danh_ba_cho_email_doanh_nghiep_chua_dang_nhap():

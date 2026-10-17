@@ -395,11 +395,12 @@ details[open] > summary { margin-bottom: 12px; }
 }
 
 /* ─── trang Người xem ─── */
-/* Người xem: bảng rộng (chức danh, trạng thái Lark, đăng nhập) — cuộn ngang trong khung trên điện thoại */
+/* Người xem: bảng rộng (trạng thái Lark, đăng nhập) — cuộn ngang trong khung trên điện thoại.
+   18/10/2026 bỏ cột chức danh; phòng ban là dòng mờ dưới tên Lark. */
 .nx-bang td { vertical-align: middle; }
 .nx-bang .nx-dong2 { display: block; font-size: 12px; color: var(--chu-phu); margin-top: 2px; }
+.nx-bang .nx-pb { color: var(--chu-mo); margin-top: 0; }
 .nx-bang .nx-o { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.nx-bang td.nx-cd { min-width: 160px; }
 .nx-bang td.nho { white-space: nowrap; }
 @media (max-width: 600px) { .nx-bang td:first-child { min-width: 150px; max-width: 170px; overflow-wrap: anywhere; } }
 

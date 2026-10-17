@@ -11,18 +11,19 @@
   <div class="muc">
     <span class="muc__so" aria-hidden="true">1</span>
     <h2 class="muc__ten">Danh sách ({{ ds|length }})</h2>
-    <button type="button" class="goi-y" data-goi-y="Tên, chức danh, phòng ban và trạng thái đọc từ danh bạ Lark công ty, làm mới mỗi 12 giờ và ngay khi thêm email. Đăng nhập gần nhất: lượt đăng nhập dashboard thành công cuối cùng.">i</button>
+    <button type="button" class="goi-y" data-goi-y="Tên, phòng ban và trạng thái đọc từ danh bạ Lark công ty, làm mới mỗi 12 giờ và ngay khi thêm email. Đăng nhập gần nhất: lượt đăng nhập dashboard thành công cuối cùng.">i</button>
     <span class="muc__phai muc__phu">{{ so_quan_ly }} quản lý</span>
   </div>
   <div class="cuon-ngang">
   <table class="nx-bang">
-    <thead><tr><th>Người xem</th><th>Trạng thái Lark</th><th>Chức danh</th><th>Đăng nhập gần nhất</th><th>Vai trò</th><th>Thêm bởi</th><th></th></tr></thead>
+    {#- 18/10/2026 (chủ dự án: "bỏ phần chức danh trong người xem dashboard đi còn lại giữ nguyên"): bỏ
+        cột Chức danh; phòng ban vẫn hiện, dưới tên Lark. Cột nguoi_xem.chuc_danh vẫn giữ trong kho. #}
+    <thead><tr><th>Người xem</th><th>Trạng thái Lark</th><th>Đăng nhập gần nhất</th><th>Vai trò</th><th>Thêm bởi</th><th></th></tr></thead>
     <tbody>
     {% for x in ds %}
       <tr>
-        <td>{{ x.email }}{% if x.email == nguoi.email %} <span class="the the--nhan">bạn</span>{% endif %}{% if x.ten_lark %}<span class="nx-dong2">{{ x.ten_lark }}</span>{% endif %}</td>
+        <td>{{ x.email }}{% if x.email == nguoi.email %} <span class="the the--nhan">bạn</span>{% endif %}{% if x.ten_lark %}<span class="nx-dong2">{{ x.ten_lark }}</span>{% endif %}{% if x.phong_ban %}<span class="nx-dong2 nx-pb">{{ x.phong_ban }}</span>{% endif %}</td>
         <td><span class="nx-o"><span class="the{% if x.o.mau %} the--{{ x.o.mau }}{% endif %}">{{ x.o.chu }}</span><button type="button" class="goi-y{% if x.o.canh %} goi-y--canh{% endif %}" data-goi-y="{{ x.o.goi_y }}" aria-label="Giải thích trạng thái Lark">i</button></span></td>
-        <td class="nx-cd">{{ x.chuc_danh or '—' }}{% if x.phong_ban %}<span class="nx-dong2">{{ x.phong_ban }}</span>{% endif %}</td>
         <td class="nho">{% if x.dang_nhap_cuoi %}{{ x.dang_nhap_cuoi|gio_vn }}{% else %}<span class="phu">Chưa đăng nhập</span>{% endif %}</td>
         <td class="o-mau o-mau--{{ 'tim' if x.vai_tro == 'quan_ly' else 'xanh' }}">{{ VAI_TRO.get(x.vai_tro, x.vai_tro) }}</td>
         <td class="nho">{{ x.them_boi or '—' }}<span class="nx-dong2">{{ x.them_luc|gio_vn }}</span></td>
