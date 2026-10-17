@@ -18,8 +18,9 @@ khoá `KHOA_MOC`), trần `TRAN_MAC_DINH` USD (đặt riêng ở `du_an.cau_hinh
           chờ/đã duyệt mà chưa theo dõi), ≤ 2 trang × 10 bài, dừng sớm khi gặp bài cũ hơn 30
           ngày — ~1/5 số yêu cầu: kiểm theo NGƯỜI (bài brand thứ hai của cùng KOL), ít bài brand
           mỗi yêu cầu hơn nên phần nhỏ hơn (`PHAN_TAG`).
-      (c) "tìm nhiều bình luận nhất": TikTok API chỉ sắp liên quan / nhiều thích / ngày (đã dùng
-          ở lượt thường + lượt nổi) — không có đường độc lập thứ ba, bỏ.
+      (c) "tìm nhiều bình luận nhất": TikTok API chỉ sắp liên quan / nhiều thích / mới nhất (cả
+          ba đã dùng hằng ngày: lượt thường, lượt nổi, trang mới nhất) — không có đường độc lập
+          thứ ba, bỏ.
     Nguồn đang theo dõi KHÔNG vào mẫu (đó là đường thu thập hằng ngày).
   • ĐỘ PHỦ = bài mẫu nhắc brand (cùng luật khớp từ khoá/hashtag `apify_tool._khop_tu_khoa`, bỏ từ
     loại trừ + spam + bài AI đã loại trước — không gọi AI cho số đo) đã có trong `bai` / tổng bài
@@ -27,7 +28,8 @@ khoá `KHOA_MOC`), trần `TRAN_MAC_DINH` USD (đặt riêng ở `du_an.cau_hinh
     luận của Kompa). Kèm danh sách bài sót nhiều thảo luận nhất + lý do có lẽ bị sót.
   • Bài brand trong mẫu đi CÙNG phễu của tìm theo từ khoá (`theo_doi._tach_va_giu`: bài đã có →
     cập nhật số; bài mới → spam → AI → ghi kho), nên kiểm xong là lỗ đã được lấp; rồi Mark sửa
-    đường thu thập theo lý do sót (đề xuất nguồn, hashtag lượt nổi, nới lượt nổi — `hanh_dong`).
+    đường thu thập theo lý do sót (đề xuất nguồn, hashtag lượt nổi, nới lượt nổi, nới trang mới
+    nhất — `hanh_dong`).
 Tiền: mỗi yêu cầu một run Apify (`maxTotalChargeUsd` của `tiktok_api._goi`), run id ghi vào sổ
 việc ngay khi Apify trả (`them_phan`) → `chot_chi_phi` tính tiền thật; tổng yêu cầu chặn bởi
 `tiktok_api.Ngan` = min(trần độ phủ, phần còn của tháng, phần còn của việc). Mốc nhịp ghi TRƯỚC
@@ -197,7 +199,8 @@ def _thao_luan(d: dict) -> int:
 #: Mã lý do sót → câu hiện cho người xem. Mã quyết định Mark tự sửa gì (`hanh_dong`).
 LY_DO = {"chi_hashtag": "chỉ nhắc brand qua hashtag — tìm theo từ khoá xếp thấp",
          "ngoai_cua_so": "đăng {ngay} ngày trước — ngoài cửa sổ 'tuần này' của lượt tìm",
-         "it_thich": "ít lượt thích — lượt nổi (nhiều thích) không với tới",
+         "it_thich": "ít lượt thích — lượt nổi (nhiều thích) không với tới; trang mới nhất "
+                     "chưa lật tới",
          "tac_gia_moi": "nhà sáng tạo chưa có bài nào trong kho",
          "khac": "tìm theo từ khoá không trả về bài này"}
 #: Lý do kiểu "tụt hạng" (tìm có thể trả về nhưng bài nằm quá sâu) → nới lượt nổi. KHÔNG gồm
@@ -357,11 +360,16 @@ def bai_sot(mau: list[dict], tu: list[str], tac_gia_kho: set[str],
 #   • tụt hạng (chỉ hashtag / ngoài cửa sổ tuần / ít thích) → nới lượt nổi: thêm trang mỗi từ, đã
 #     tối đa thì dày nhịp — vẫn trong trần lượt nổi (phần ước tính TikTok chưa dùng, phần còn của
 #     tháng: `theo_doi_api.tran_noi`). Lần kiểm sau tốt (≥ `TOT`) và hết tụt hạng thì lùi một nấc.
+#   • ít thích (17/10/2026, trang mới nhất): bài ít thích chỉ trang "mới nhất" với tới — sót loại
+#     này đáng kể nghĩa là feed mới nhất bận hơn số trang đang lật tới mốc → nới trần trang mới nhất
+#     (`moi_trang`, ≤ `MOI_TRANG_NOI_TOI_DA`); hai lần kiểm liền tốt thì lùi về mặc định. Trần tiền
+#     vẫn là `theo_doi_api.tran_moi` (phần ước tính chưa dùng, phần còn của tháng/việc).
 KHOA_NOI_CFG = "tiktok_noi_cfg"   # khoá trong sổ mốc tìm theo từ khoá
 DE_XUAT_MANH = 500           # thảo luận sót của một người → đề xuất ưu tiên
 TAG_NOI_TOI_DA = 4
 NOI_TRANG_TOI_DA = 4
 NOI_GIO_TOI_THIEU = 10
+MOI_TRANG_NOI_TOI_DA = 5     # trần trang "mới nhất" mỗi từ mà kiểm độ phủ được nới tới
 TUT_HANG_TOI_THIEU = 2       # ≥ 2 bài sót kiểu tụt hạng, hoặc ≥ 25% thảo luận sót
 TOT = 90.0                   # độ phủ theo thảo luận ≥ mức này HAI lần liền: lùi một nấc
 #: Giá THẬT một yêu cầu TikTok API (đo 17/10/2026 trên gói FREE: 0,0023–0,0034 USD, phí nền
@@ -383,7 +391,9 @@ def cau_hinh_noi(cfg: dict | None) -> dict:
            if isinstance(x.get("tag"), list) else [])
     return {"trang": so("trang", TDA.NOI_TRANG, TDA.NOI_TRANG, NOI_TRANG_TOI_DA),
             "gio": so("gio", TDA.NOI_GIO_GIAN, NOI_GIO_TOI_THIEU, TDA.NOI_GIO_GIAN),
-            "tag": list(dict.fromkeys(tag))[:TAG_NOI_TOI_DA]}
+            "tag": list(dict.fromkeys(tag))[:TAG_NOI_TOI_DA],
+            "moi_trang": so("moi_trang", TDA.MOI_TRANG_TOI_DA, TDA.MOI_TRANG_TOI_DA,
+                            MOI_TRANG_NOI_TOI_DA)}
 
 
 def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: dict | None,
@@ -450,9 +460,24 @@ def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: 
         elif gio > NOI_GIO_TOI_THIEU:
             gio = max(NOI_GIO_TOI_THIEU, gio // 2)
             ly = f"lượt nổi dày lên mỗi {gio} giờ ({len(tut)} bài sót do tụt hạng)"
-    noi_moi = {"trang": trang, "gio": gio, "tag": tag_moi,
+    # 4. Ít thích (17/10/2026): chỉ trang "mới nhất" với tới → nới trần trang của nó; hai lần
+    #    kiểm liền tốt → lùi một nấc về mặc định.
+    it = [s for s in sot if "it_thich" in (s.get("ma_ly_do") or [])]
+    tl_it = sum(int(s.get("thao_luan") or 0) for s in it)
+    moi_trang, ly_moi = cu["moi_trang"], ""
+    if tot and moi_trang > TDA.MOI_TRANG_TOI_DA:
+        moi_trang -= 1
+        ly_moi = f"độ phủ tốt hai lần liền — trang mới nhất lùi về ≤ {moi_trang} trang/từ khoá"
+    elif not tot and it and moi_trang < MOI_TRANG_NOI_TOI_DA and (
+            len(it) >= TUT_HANG_TOI_THIEU or tl_it >= 0.25 * max(1, tl_sot)):
+        moi_trang += 1
+        ly_moi = f"nới trang mới nhất lên ≤ {moi_trang} trang/từ khoá ({len(it)} bài sót ít thích)"
+    ly_noi = ly
+    ly = "; ".join(x for x in (ly_noi, ly_moi) if x)
+    noi_moi = {"trang": trang, "gio": gio, "tag": tag_moi, "moi_trang": moi_trang,
                "luc": bay_gio.isoformat(timespec="seconds"), "ly_do": ly}
     doi_noi = trang != cu["trang"] or gio != cu["gio"]
+    doi_moi = moi_trang != cu["moi_trang"]
     # Câu "Mark đã làm gì" trên từng bài.
     for s in sot:
         u = str(s.get("tai_khoan") or "").strip().lstrip("@").lower()
@@ -465,11 +490,14 @@ def hanh_dong(sot: list[dict], tu: list[str], dang_theo_doi: set[str], noi_cfg: 
         if tg:
             hd.append("tìm #" + ", #".join(tg[:2]) + " trong lượt nổi")
         if doi_noi and any(s is x for x in tut):
-            hd.append(ly.split(" (")[0])
+            hd.append(ly_noi.split(" (")[0])
+        if doi_moi and any(s is x for x in it):
+            hd.append(ly_moi.split(" (")[0])
     tom = {"de_xuat": [{k: g[k] for k in ("dinh_danh", "so_bai", "thao_luan", "uu_tien")}
                        for g in de_xuat],
            "tag_noi": tag_moi, "tag_them": them_tag,
-           "noi": {"trang": [cu["trang"], trang], "gio": [cu["gio"], gio], "ly_do": ly}}
+           "noi": {"trang": [cu["trang"], trang], "gio": [cu["gio"], gio],
+                   "moi_trang": [cu["moi_trang"], moi_trang], "ly_do": ly}}
     return {"de_xuat": [{k: v for k, v in g.items() if k != "uu_tien"} for g in de_xuat],
             "noi_cfg": noi_moi, "tom": tom}
 

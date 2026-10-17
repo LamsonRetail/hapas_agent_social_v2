@@ -1858,7 +1858,8 @@ def hanh_dong_json(hd) -> dict:
 
 
 def noi_tu_hanh_dong(hd) -> dict:
-    """Cấu hình lượt nổi TikTok mà Mark đang dùng sau lần kiểm cuối (trang Ngân sách)."""
+    """Cấu hình lượt nổi + trần trang "mới nhất" TikTok mà Mark đang dùng sau lần kiểm cuối
+    (trang Ngân sách)."""
     hd = hd if isinstance(hd, dict) else {}
     noi = hd.get("noi") if isinstance(hd.get("noi"), dict) else {}
 
@@ -1866,4 +1867,4 @@ def noi_tu_hanh_dong(hd) -> dict:
         x = noi.get(k)
         return so(x[-1]) if isinstance(x, list) and x else None
     return {"tag": [str(t)[:60] for t in (hd.get("tag_noi") or [])[:10]],
-            "trang": sau("trang"), "gio": sau("gio")}
+            "trang": sau("trang"), "gio": sau("gio"), "moi_trang": sau("moi_trang")}

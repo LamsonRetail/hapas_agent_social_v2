@@ -123,12 +123,13 @@ def test_tim_sap_nhieu_thich_va_tran_trang_moi_tu():
 
 
 def test_tran_noi_nam_trong_uoc_tinh_tiktok():
-    uoc = T.uoc_tu_khoa_nen_tang("tiktok", 300, ["k"] * 21)       # 3 trang/từ + 10 làm mới
-    # Lượt thường dùng 1 trang/từ (21 yêu cầu) → còn đủ 2 trang/từ cho lượt nổi.
-    assert TDA.tran_noi(21, uoc, 21 * G, 5.0) == pytest.approx(21 * 2 * G)
+    # 3 trang/từ + 1 trang "mới nhất" + 10 làm mới
+    uoc = T.uoc_tu_khoa_nen_tang("tiktok", 300, ["k"] * 21)
+    # Lượt thường + mới nhất dùng 2 trang/từ (42 yêu cầu) → còn đủ 2 trang/từ cho lượt nổi.
+    assert TDA.tran_noi(21, uoc, 42 * G, 5.0) == pytest.approx(21 * 2 * G)
     # Lượt thường lật hết trần → lượt nổi chỉ còn phần chưa dùng (chừa làm mới).
-    assert TDA.tran_noi(21, uoc, 63 * G, 5.0) == pytest.approx(
-        round(uoc - 63 * G - 10 * G, 4))
+    assert TDA.tran_noi(21, uoc, 84 * G, 5.0) == pytest.approx(
+        round(uoc - 84 * G - 10 * G, 4))
     assert TDA.tran_noi(21, uoc, 0.0, 0.01) == pytest.approx(0.01)
     assert TDA.tran_noi(21, 0.0, 0.0, 5.0) == 0.0
 
@@ -168,9 +169,12 @@ def test_luot_noi_bat_video_viral_cu_cap_nhat_bai_da_co_va_theo_nhip(mo):  # noq
     v = GiaViec({}, [])
     tk = _chay_tk(da, v)
     sap = [g.get("searchPosts_sortType") for g in api.goi if "searchPosts_keyword" in g]
-    assert sap == [0, 1], "lượt thường (liên quan) rồi lượt nổi (nhiều thích)"
+    assert sap == [0, 3, 1], "lượt thường (liên quan), trang mới nhất, rồi lượt nổi (nhiều thích)"
     f = tk["pheu"]["tiktok"]
     assert f["noi"]["ve"] == 3 and f["noi"]["moi"] == 2 and f["noi"]["usd"] == pytest.approx(G)
+    # Bộ giả trả lại bài lượt thường cho trang mới nhất: về 1, không thêm bài, 1 yêu cầu.
+    assert (f["moi_nhat"]["ve"], f["moi_nhat"]["moi"]) == (1, 0)
+    assert f["moi_nhat"]["usd"] == pytest.approx(G) and f["moi_nhat"]["tu"] == 1
     assert f["ve"] == 3 and f["cap_nhat"] == 1
     assert kho.cap_nhat[0]["khoa"] == "tiktok:7000000002" and kho.cap_nhat[0]["binh_luan"] == 999
     giu = {r["khoa"]: r for _, rows in kho.bai for r in rows}
@@ -180,10 +184,10 @@ def test_luot_noi_bat_video_viral_cu_cap_nhat_bai_da_co_va_theo_nhip(mo):  # noq
     moc = T.doc_moc_tk("hapas")
     assert moc["tiktok"]["ve"] == 1, "mốc lượt thường không đếm bài lượt nổi (so_xin)"
     assert moc[TDA.KHOA_MOC_NOI]["ve"] == 3
-    # Tiền: 2 yêu cầu API (thường + nổi) × 0,002 USD — cùng sổ `_tien_tim_tiktok` theo run id.
+    # Tiền: 3 yêu cầu API (thường + mới nhất + nổi) — cùng sổ `_tien_tim_tiktok` theo run id.
     tien = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-tiktok")
-    assert tien["usd_so"] == pytest.approx(2 * G)
-    # Trong 20 giờ: không chạy lượt nổi nữa.
+    assert tien["usd_so"] == pytest.approx(3 * G)
+    # Trong 20 giờ: không chạy lượt nổi (và trang mới nhất) nữa.
     api.goi.clear()
     tk2 = _chay_tk(da, GiaViec({}, []))
     assert [g.get("searchPosts_sortType") for g in api.goi if "searchPosts_keyword" in g] == [0]
@@ -251,7 +255,8 @@ def test_luot_noi_loi_khong_lam_mat_bai_luot_thuong(mo, loi):  # noqa: F811
     assert f["ve"] == 1 and f["moi"] == 1 and kho.bai
     assert "lỗi" in f["noi"]["ly_do"] and f["noi"]["usd"] == pytest.approx(G)
     ph = next(x for x in v.d["nen_tang"]["tu_khoa"]["phan"] if x["id"] == "tk-tiktok")
-    assert ph["trang_thai"] == "xong" and ph["usd_so"] == pytest.approx(2 * G)
+    # thường + trang mới nhất (bộ giả trả lại bài lượt thường) + run của lượt nổi
+    assert ph["trang_thai"] == "xong" and ph["usd_so"] == pytest.approx(3 * G)
     assert not any(x.startswith("tìm TikTok:") for x in tk["ghi_chu"])
     # M3: đã trả tiền (dù lỗi) → ghi mốc nhịp ngay, lượt sau không chạy lại.
     assert T.doc_moc_tk("hapas")[TDA.KHOA_MOC_NOI]["usd"] == pytest.approx(G)

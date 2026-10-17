@@ -966,8 +966,9 @@ def uoc_tu_khoa_nen_tang(p: str, so_bai: int, tu: list[str], so_tu: int = TK_IG_
     if not q or not _TK_GIA.get(p) or so_bai <= 0:
         return 0.0
     if p == "tiktok":
-        # Tối đa 2×(trang cần)+1 trang mỗi từ khoá + làm mới số liệu bài nổi (`theo_doi_api`).
-        trang = 2 * math.ceil(math.ceil(so_bai / len(q)) / TK_TT_MOI_TRANG) + 1
+        # Tối đa 2×(trang cần)+1 trang mỗi từ khoá (lượt thường + lượt nổi) + `MOI_TRANG`
+        # trang "mới nhất" (17/10/2026) + làm mới số liệu bài nổi (`theo_doi_api`).
+        trang = 2 * math.ceil(math.ceil(so_bai / len(q)) / TK_TT_MOI_TRANG) + 1 + TDA.MOI_TRANG
         return round((len(q) * trang + TDA.LAM_MOI_TOI_DA) * TK_TT_YEU_CAU * _HE_SO_UOC, 4)
     if p == "instagram":
         return round(len(q) * (_TK_KHOI["instagram"] + so_bai * _TK_GIA[p]) * _HE_SO_UOC, 4)
@@ -1230,12 +1231,16 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             so_run_truoc = len(_phan_tk(v))
             ve_thuong = 0
             noi: dict = {}
+            moi_nhat: dict = {}
             try:
                 got = A._FETCH[p](q_gui, lim, "VN", d_from, bay_gio, **them) or []
                 ve_thuong = len(got)
                 if p == "tiktok":
-                    # Lượt nổi tự bắt lỗi của nó (review 17/10, M1): bài lượt thường đã trả
-                    # tiền luôn vào phễu dù lượt nổi hỏng.
+                    # Trang "mới nhất" rồi lượt nổi — cả hai tự bắt lỗi của mình (review 17/10,
+                    # M1): bài lượt thường đã trả tiền luôn vào phễu dù phần thêm hỏng.
+                    got, moi_nhat = _them_luot_moi(v, ma, luot, q, got, moc_cu, bay_gio, uoc,
+                                                   con, _phan_tk(v)[so_run_truoc:],
+                                                   KDP.cau_hinh(du_an)["bat"])
                     got, noi = _them_luot_noi(v, ma, luot, q, got, moc_cu, bay_gio, uoc, con,
                                               _phan_tk(v)[so_run_truoc:],
                                               KDP.cau_hinh(du_an)["bat"])
@@ -1269,6 +1274,8 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 continue
             ph_p = tk["pheu"][p] = _pheu_moi(ngay, ly_cs)
             ph_p.update(ve=len(got), xin=lim, xin_ly_do=ly_xin)
+            if moi_nhat:
+                ph_p["moi_nhat"] = moi_nhat   # mốc từng từ đã ghi ngay trong `_them_luot_moi`
             if noi:
                 ph_p["noi"] = noi             # mốc nhịp đã ghi ngay trong `_them_luot_noi`
             for d, dt in got:
@@ -1352,6 +1359,60 @@ def _co_threads(tu: list[str], so_bai: int, con: float) -> tuple[list[str], int,
         if u <= con + 1e-9:
             return _tu_cho("threads", tu, so_bai=sb), sb, u
     return None
+
+
+def _them_luot_moi(v, ma: str, luot: int, q: list[str], got: list, moc_cu: dict,
+                   bay_gio: datetime.datetime, uoc: float, con: float,
+                   phan_moi: list[dict], dp_bat: bool = True) -> tuple[list, dict]:
+    """Trang "mới nhất" TikTok (`theo_doi_api.tim_moi_tiktok`, 17/10/2026) ngay sau lượt tìm
+    thường, cùng từ khoá, cùng móc ghi run id (tiền vào `_tien_tim_tiktok`). -> (bài thường +
+    bài mới nhất chưa trùng, thống kê {"ve", "moi", "usd", "tu", "nghi", "trang", "ly_do"});
+    {} khi lượt này không chạy. Như lượt nổi: KHÔNG ném lỗi (trừ MatQuyen), chỉ chạy khi lượt
+    thường đi TikTok API và không xuống dự phòng, còn đủ giờ. Đã tiêu tiền thì ghi mốc ngay
+    (nhịp + mốc từng từ khoá) — lượt sau không lật lại phần đã xem."""
+    if not TDA.TT.dung_api("tiktok_tim"):
+        return got, {}
+    api = [x for x in phan_moi if x.get("run_id") and x.get("actor") == TT_ACTOR]
+    if not api or any(x.get("run_id") and x.get("actor") != TT_ACTOR for x in phan_moi):
+        return got, {}
+    moc = moc_cu.get(TDA.KHOA_MOC_MOI) if isinstance(moc_cu.get(TDA.KHOA_MOC_MOI), dict) else {}
+    den, ly = TDA.den_luot_moi(moc, bay_gio)
+    if not den:
+        return got, {}
+    # Kiểm độ phủ có thể nới trần trang mỗi từ (`kiem_do_phu.hanh_dong`); tắt thì về mặc định.
+    cfg = KDP.cau_hinh_noi(moc_cu.get(KDP.KHOA_NOI_CFG) if dp_bat else None)
+    if cfg["moi_trang"] != TDA.MOI_TRANG_TOI_DA:
+        ly += f"; theo kiểm độ phủ: tối đa {cfg['moi_trang']} trang/từ"
+    if v.con_giay() < _CHUA_GIAY_CUOI + 120:
+        return got, {"ve": 0, "moi": 0, "usd": 0.0, "ly_do": f"{ly}; bỏ qua (hết giờ)"}
+    # Chừa phần lượt nổi nếu nó cũng tới hạn lượt này (nó chạy ngay sau).
+    den_noi = TDA.den_luot_noi(moc_cu.get(TDA.KHOA_MOC_NOI), bay_gio, cfg["gio"])[0]
+    du_noi = ((len(q) + len(cfg["tag"])) * cfg["trang"] * TK_TT_YEU_CAU) if den_noi else 0.0
+    tran = TDA.tran_moi(len(q), uoc, len(api) * TK_TT_YEU_CAU, min(con, _con_viec(v)), du_noi,
+                        cfg["moi_trang"])
+    if tran < TK_TT_YEU_CAU:
+        return got, {"ve": 0, "moi": 0, "usd": 0.0, "ly_do": f"{ly}; không còn ngân sách"}
+    truoc = len(_phan_tk(v))
+    ve: list = []
+    tkm: dict = {}
+    moc_moi: dict = {}
+    try:
+        ve, tkm, moc_moi = TDA.tim_moi_tiktok(q, moc, bay_gio, tran, cfg["moi_trang"])
+    except Exception as e:  # phần thêm, không làm hỏng lượt thường
+        if type(e).__name__ == "MatQuyen":
+            raise
+        ly = f"{ly}; lỗi " + A._che_token(f"{getattr(e, 'ma', type(e).__name__)}: {e}")[:120]
+    usd = round(sum(TK_TT_YEU_CAU for x in _phan_tk(v)[truoc:]
+                    if x.get("run_id") and x.get("actor") == TT_ACTOR), 4)
+    if usd > 0 and moc_moi:
+        ghi_moc_tk(ma, {TDA.KHOA_MOC_MOI: {**moc_moi, "luot": luot, "ve": len(ve), "usd": usd}})
+    if tkm.get("loi"):
+        ly = f"{ly}; {tkm['loi']}"
+    co = {d.get("link") for d, _ in got}
+    them = [(d, dt) for d, dt in ve if d.get("link") and d["link"] not in co]
+    return got + them, {"ve": len(ve), "moi": len(them), "usd": usd,
+                        "tu": int(tkm.get("tu") or 0), "nghi": int(tkm.get("nghi") or 0),
+                        "trang": int(tkm.get("trang") or 0), "ly_do": ly}
 
 
 def _them_luot_noi(v, ma: str, luot: int, q: list[str], got: list, moc_cu: dict,
@@ -2002,8 +2063,19 @@ def _cau_pheu(p: str, f: dict) -> str:
             f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
             + (f", không nhắc từ khoá {f['khong_nhac']}" if f.get("khong_nhac") else "")
             + f" → giữ {f.get('giu', 0)} ({f.get('moi', 0)} mới)"
+            + _cau_moi(f.get("moi_nhat"))
             + _cau_noi(f.get("noi"))
             + _cau_web(f.get("web")))
+
+
+def _cau_moi(n) -> str:
+    """Phần trang "mới nhất" TikTok (sắp theo giờ đăng, lật tới mốc lượt trước) trong phễu."""
+    if not isinstance(n, dict):
+        return ""
+    return (f"; mới nhất ({n.get('ly_do') or '?'}; {n.get('tu', 0)} từ, {n.get('trang', 0)} "
+            f"trang" + (f", {n['nghi']} từ yên nghỉ" if n.get("nghi") else "")
+            + f"): về {n.get('ve', 0)}, thêm {n.get('moi', 0)} bài chưa có trong lượt thường, "
+            f"{_usd(n.get('usd') or 0)} USD")
 
 
 def _cau_noi(n) -> str:

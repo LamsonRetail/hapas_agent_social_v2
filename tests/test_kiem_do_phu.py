@@ -454,8 +454,8 @@ def test_hanh_dong_noi_trang_roi_nhip_roi_lui_khi_tot():
     assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (4, 20)
     hd = KDP.hanh_dong([], ["hapas"], set(), {"trang": 4, "gio": 20}, 95.0, BAY, tl_truoc=92.0)
     assert (hd["noi_cfg"]["trang"], hd["noi_cfg"]["gio"]) == (3, 20)
-    assert KDP.cau_hinh_noi({"trang": 99, "gio": 1, "tag": "rác"}) == {"trang": 4, "gio": 10,
-                                                                       "tag": []}
+    assert KDP.cau_hinh_noi({"trang": 99, "gio": 1, "tag": "rác", "moi_trang": 99}) == {
+        "trang": 4, "gio": 10, "tag": [], "moi_trang": KDP.MOI_TRANG_NOI_TOI_DA}
 
 
 def test_it_thich_khong_noi_luot_noi_va_lui_du_con_sot_it_thich():
@@ -592,7 +592,7 @@ def test_do_phu_json_doi_diem_canh_bao_link_an_toan():
     x = CS.do_phu_json([_dong_dp(85.0, bay - datetime.timedelta(days=8))], bay)
     assert not x["canh_bao"] and x["cu"] and x["doi_diem"] is None and x["truoc"] is None
     assert CS.noi_tu_hanh_dong(_dong_dp(1, bay)["hanh_dong"]) == {
-        "tag": ["lammoidieuviyeu"], "trang": 3, "gio": 20}
+        "tag": ["lammoidieuviyeu"], "trang": 3, "gio": 20, "moi_trang": None}
 
 
 def test_api_chi_so_co_the_do_phu_va_bang_chua_tao_thi_bo_the():
