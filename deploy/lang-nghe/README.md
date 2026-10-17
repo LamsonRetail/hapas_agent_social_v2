@@ -148,4 +148,15 @@ Thứ tự quét: YouTube trước vì miễn phí, rồi Instagram, TikTok, Fac
   sudo -u mark $PY scripts/lang_nghe_loc_lai.py --hoan-tac /opt/mark/loc_lai-<ngày>.json   # nếu cần trả lại
   ```
   Đọc tay nhóm "CẦN ĐỌC TAY" (hàng loạt không có mã) trước khi ghi. `--ap-dung` ghi nhãn cũ vào tệp `--sao-luu` (không ghi đè tệp có sẵn) rồi mới sửa; `--hoan-tac` chỉ trả dòng còn đúng nhãn script đặt. Từ lượt quét sau, luật mới tự chạy (từng bình luận + cấp bài: ≥ 5 tài khoản / 48 giờ theo giờ đăng).
+- **Gộp bài Facebook trùng** (17/10/2026: pfbid đổi mỗi lượt cào, 161 bài FB của hapas có 24 nhóm trùng, thừa 36 dòng). Chạy SAU khi code mới + `schema.sql` (cột `bai.ma_so_fb`) đã lên VPS; mark không có DELETE trên `bai` nên cấp tạm rồi thu lại:
+  ```bash
+  cd /opt/mark/app
+  PY=/opt/mark/hermes-agent/venv/bin/python
+  sudo -u mark $PY scripts/lang_nghe_gop_bai_fb.py hapas                      # xem trước, chỉ đọc
+  sudo -u postgres psql -d lang_nghe -c 'GRANT DELETE ON bai TO mark'
+  sudo -u mark $PY scripts/lang_nghe_gop_bai_fb.py hapas --ap-dung --sao-luu /opt/mark/gop-bai-fb-$(date +%F).jsonl
+  sudo -u postgres psql -d lang_nghe -c 'REVOKE DELETE ON bai FROM mark'
+  sudo -u mark $PY scripts/lang_nghe_gop_bai_fb.py hapas --hoan-tac /opt/mark/gop-bai-fb-<ngày>.jsonl   # nếu cần trả lại
+  ```
+  Không chạy khi có lượt `/theodoi` đang chạy (script tự dừng). Quy tắc gộp và chọn số ghi ở đầu script.
 - **Bot khởi động lại giữa lượt actor:** phần nền tảng đó không gửi lại, tránh trả tiền hai lần. Tiền vẫn tính theo run id, và nguồn của phần đó chờ lượt sau.
