@@ -101,6 +101,7 @@ class _Ngan:
         self.toi_da = (10 ** 6 if tran_usd is None
                        else max(0, math.floor(float(tran_usd) / GIA_YEU_CAU + 1e-9)))
         self.da = 0
+        self.dung: str | None = None     # mã lỗi dừng cả lượt (hết tiền / huỷ) đã gặp
         self._k = threading.Lock()
 
     def xin(self) -> bool:
@@ -478,6 +479,113 @@ def so_lieu_bai(urls: list[str], tran_usd: float | None = None) -> list[dict]:
         a = (it or {}).get("aweme_detail")
         return [video(a)] if isinstance(a, dict) and a.get("aweme_id") else []
     return [x for ds in _song_song(mot, list(dict.fromkeys(urls))) for x in ds]
+
+
+# ───────────────── hashtag + bài mới nhất của tài khoản (kiểm độ phủ, 17/10/2026) ─────────────────
+# Đo thật 17/10/2026 (tài khoản FREE, 4 yêu cầu 0,008 USD): `searchHashtags_keyword` trả
+# `challenge_list[].challenge_info` {cid, cha_name, user_count, view_count}; `challengePosts_cid`
+# trả `aweme_list` 20 bài/yêu cầu dù xin 30, `cursor` + `has_more` (thứ tự trộn nổi + mới: #hapas
+# trang 1 có 11/20 bài trong 30 ngày, gồm video seeding chỉ có hashtag); `userPosts_userId` chạy
+# được KHÔNG cần secUserId — lưu uid là lần sau khỏi gọi hồ sơ.
+TAG_MOI_TRANG = 20           # challengePosts_count > 20 vẫn chỉ trả 20
+
+
+def Ngan(tran_usd: float | None) -> _Ngan:  # noqa: N802 — tên công khai của `_Ngan`
+    """Bộ đếm yêu cầu có trần USD (dùng chung cho nhiều lời gọi của một lượt)."""
+    return _Ngan(tran_usd)
+
+
+def chuan_tag(s: str) -> str:
+    """Tên hashtag để so: bỏ '#', bỏ dấu, chỉ chữ thường + số ("#HAPAS🥰" → "hapas")."""
+    return re.sub(r"[^0-9a-z]", "", A._norm(str(s or "").lstrip("#")))
+
+
+def tim_cid(ten: str, ngan: _Ngan) -> str | None:
+    """cid của hashtag `ten` (1 yêu cầu `searchHashtags`): chỉ nhận tag TRÙNG tên sau khi chuẩn
+    hoá (`chuan_tag`), nhiều tag cùng tên thì lấy tag nhiều người dùng nhất. None khi không thấy
+    hoặc đã chạm trần."""
+    goc = chuan_tag(ten)
+    if not goc:
+        return None
+    it = _goi({"searchHashtags_keyword": goc, "searchHashtags_count": 10,
+               "searchHashtags_region": "VN", "searchHashtags_cursor": 0}, ngan)
+    tot = None
+    for x in (it or {}).get("challenge_list") or []:
+        ci = (x or {}).get("challenge_info") if isinstance(x, dict) else None
+        if not isinstance(ci, dict) or not ci.get("cid") or chuan_tag(ci.get("cha_name")) != goc:
+            continue
+        n = _so(ci.get("user_count")) or 0
+        if tot is None or n > tot[0]:
+            tot = (n, str(ci["cid"]))
+    return tot[1] if tot else None
+
+
+def bai_hashtag(cid: str, so_trang: int, ngan: _Ngan) -> list[dict]:
+    """Bài của một hashtag (item kiểu clockworks), tối đa `so_trang` trang × 20 bài. Trang sau
+    lỗi thì GIỮ các trang trước (đã trả tiền); trang đầu lỗi thì ném."""
+    ra: list[dict] = []
+    thay: set[str] = set()
+    con_tro = 0
+    for _ in range(max(0, int(so_trang))):
+        try:
+            it = _goi({"challengePosts_cid": str(cid), "challengePosts_count": TAG_MOI_TRANG,
+                       "challengePosts_cursor": con_tro}, ngan)
+        except A.LoiApify as e:
+            if not ra:
+                raise
+            if e.ma in _DUNG_HAN:   # giữ trang đã trả tiền, nhưng khoá bộ đếm: luồng khác dừng
+                ngan.dung, ngan.toi_da = e.ma, 0
+            break
+        if it is None:
+            break
+        moi = 0
+        for a in it.get("aweme_list") or []:
+            if isinstance(a, dict) and a.get("aweme_id") and str(a["aweme_id"]) not in thay:
+                thay.add(str(a["aweme_id"]))
+                ra.append(video(a))
+                moi += 1
+        sau = _so(it.get("cursor")) or 0
+        if not it.get("has_more") or not moi or sau <= con_tro:
+            break
+        con_tro = sau
+    return ra
+
+
+def bai_tai_khoan(ten: str, so_trang: int, ngan: _Ngan, uid: str | None = None,
+                  d_from: datetime.datetime | None = None) -> tuple[list[dict], str | None]:
+    """Bài MỚI NHẤT của một tài khoản (bỏ bài ghim), tối đa `so_trang` trang × 10 bài; dừng sớm
+    khi trang đã có bài cũ hơn `d_from`. `uid` đã biết thì bỏ yêu cầu hồ sơ. -> (bài, uid).
+    Trang sau lỗi thì giữ các trang trước; trang đầu / hồ sơ lỗi thì ném."""
+    if not uid:
+        it = _goi({"profile_username": str(ten).lstrip("@"), "profile_region": "VN"}, ngan)
+        uid = str(((it or {}).get("user") or {}).get("uid") or "") or None
+        if not uid:
+            return [], None
+    ra: list[dict] = []
+    con_tro = "0"
+    for _ in range(max(0, int(so_trang))):
+        try:
+            it = _goi({"userPosts_userId": str(uid), "userPosts_count": BAI_MOI_TRANG,
+                       "userPosts_region": "VN", "userPosts_maxCursor": con_tro}, ngan)
+        except A.LoiApify as e:
+            if not ra:
+                raise
+            if e.ma in _DUNG_HAN:   # giữ trang đã trả tiền, nhưng khoá bộ đếm: luồng khác dừng
+                ngan.dung, ngan.toi_da = e.ma, 0
+            break
+        if it is None:
+            break
+        cu = False
+        for a in it.get("aweme_list") or []:
+            if isinstance(a, dict) and a.get("aweme_id") and not a.get("is_top"):
+                v = video(a)
+                ra.append(v)
+                dt = A._to_vn(v["createTimeISO"])
+                cu = cu or bool(d_from and dt and dt < d_from)
+        con_tro = str(it.get("max_cursor") or "")
+        if cu or not it.get("has_more") or not con_tro:
+            break
+    return ra, uid
 
 
 def so_yeu_cau_tim(so_tu: int, per: int) -> int:

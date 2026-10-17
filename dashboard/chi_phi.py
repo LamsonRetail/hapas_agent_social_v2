@@ -515,6 +515,58 @@ def du_bao_lich(cac_lich: list[dict], bang: dict, nguon: list[dict],
             "theo_lich": thang}
 
 
+# ───── kiểm độ phủ (17/10/2026, bản sao `kiem_do_phu` của Mark — bài thử đối chiếu) ─────
+#: `kiem_do_phu.TRAN_MAC_DINH` / `TRAN_TOI_DA` / `GIO_GIAN`: chủ dự án chốt hai lần mỗi tuần (mỗi
+#: 84 giờ), tối đa 0,20 USD mỗi lần; tiền thật nằm trong lượt /theodoi (trần tháng dự án).
+DP_TRAN_MAC_DINH = 0.20
+DP_TRAN_TOI_DA = 1.0
+DP_GIO_GIAN = 84
+
+
+def cau_hinh_do_phu(du_an: dict) -> dict:
+    """Bản sao `kiem_do_phu.cau_hinh`: `du_an.cau_hinh.do_phu` {"bat", "tran_usd"}; thiếu → bật,
+    0,20 USD; trần rác/âm → mặc định; kẹp [0, 1]; trần 0 = tắt."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    x = goc.get("do_phu") if isinstance(goc.get("do_phu"), dict) else {}
+    t = x.get("tran_usd", DP_TRAN_MAC_DINH)
+    try:
+        tran = DP_TRAN_MAC_DINH if isinstance(t, bool) else float(t)
+    except (TypeError, ValueError):
+        tran = DP_TRAN_MAC_DINH
+    if not math.isfinite(tran) or tran < 0:
+        tran = DP_TRAN_MAC_DINH
+    tran = round(min(DP_TRAN_TOI_DA, tran), 2)
+    return {"bat": x.get("bat", True) is not False and tran > 0, "tran_usd": tran}
+
+
+def luot_do_phu(bay_gio: datetime.datetime, den: datetime.datetime,
+                lan_cuoi: datetime.datetime | None) -> int:
+    """Số lần kiểm độ phủ TỐI ĐA trong [bây giờ, `den`]: lần kế = max(bây giờ, lần cuối + 84
+    giờ), rồi mỗi 84 giờ (giả định lượt /theodoi đủ dày — lịch hằng ngày)."""
+    ke = bay_gio if lan_cuoi is None else max(
+        bay_gio, lan_cuoi + datetime.timedelta(hours=DP_GIO_GIAN))
+    if ke > den:
+        return 0
+    return 1 + int((den - ke).total_seconds() // (DP_GIO_GIAN * 3600))
+
+
+def du_bao_do_phu(du_an: dict, lan_cuoi: datetime.datetime | None,
+                  bay_gio: datetime.datetime) -> dict:
+    """Kiểm độ phủ cho trang Ngân sách. -> {bat, tran_usd, luot_con_lai (tới hết tháng giờ VN),
+    con_lai (USD tối đa), luot_30, usd_30, lan_toi (ISO, None khi tắt)}."""
+    bay_gio = bay_gio if bay_gio.tzinfo else bay_gio.replace(tzinfo=datetime.timezone.utc)
+    ch = cau_hinh_do_phu(du_an)
+    het = _dau_thang_sau(bay_gio) - datetime.timedelta(microseconds=1)
+    luot = luot_do_phu(bay_gio, het, lan_cuoi)
+    luot_30 = luot_do_phu(bay_gio, bay_gio + datetime.timedelta(days=30), lan_cuoi)
+    usd = ch["tran_usd"] if ch["bat"] else 0.0
+    ke = bay_gio if lan_cuoi is None else max(
+        bay_gio, lan_cuoi + datetime.timedelta(hours=DP_GIO_GIAN))
+    return {**ch, "luot_con_lai": luot, "con_lai": round(luot * usd, 4), "luot_30": luot_30,
+            "usd_30": round(luot_30 * usd, 4),
+            "lan_toi": ke.astimezone(VN).isoformat(timespec="minutes") if ch["bat"] else None}
+
+
 def hang_so_cho_trinh_duyet() -> dict:
     """Hằng số cho phép tính lại ngay trên trình duyệt khi sửa số bài / chu kỳ / cấu hình."""
     return {"gia": GIA, "he_so": HE_SO_UOC, "start": START_COST, "ngay": NGAY_THANG_CAU_HINH,
@@ -528,6 +580,9 @@ def hang_so_cho_trinh_duyet() -> dict:
             "tk_tt_yeu_cau": TK_TT_YEU_CAU, "tk_tt_moi_trang": TK_TT_MOI_TRANG,
             "tk_lam_moi": TK_LAM_MOI,
             # Báo & Web (16/10/2026) — `uoc_web`, `rut_gon_web`.
+            # Kiểm độ phủ (17/10/2026, 2 lần/tuần) — `cau_hinh_do_phu`.
+            "do_phu": {"tran_mac_dinh": DP_TRAN_MAC_DINH, "tran_toi_da": DP_TRAN_TOI_DA,
+                       "gio_gian": DP_GIO_GIAN},
             "web": {"gia_trang": WEB_GIA_TRANG, "gia_boc": WEB_GIA_BOC,
                     "tu_moi_cau": WEB_TU_MOI_CAU, "toi_da_cau": WEB_TOI_DA_CAU,
                     "kq_moi_trang": WEB_KQ_MOI_TRANG, "boc_mac_dinh": WEB_BOC_MAC_DINH}}

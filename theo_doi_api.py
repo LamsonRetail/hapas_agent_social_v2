@@ -374,45 +374,73 @@ NOI_NGAY = 30                # bộ lọc ngày phía server: "tháng này"
 KHOA_MOC_NOI = "tiktok_noi"  # khoá trong sổ mốc tìm theo từ khoá (`theo_doi.ghi_moc_tk`)
 
 
-def den_luot_noi(moc: dict | None, bay_gio: datetime.datetime) -> tuple[bool, str]:
-    """Lượt này có chạy lượt nổi TikTok không. -> (có, lý do)."""
+def den_luot_noi(moc: dict | None, bay_gio: datetime.datetime,
+                 gio: int = NOI_GIO_GIAN) -> tuple[bool, str]:
+    """Lượt này có chạy lượt nổi TikTok không (`gio`: nhịp — kiểm độ phủ có thể dày lên,
+    `kiem_do_phu.hanh_dong`). -> (có, lý do)."""
     try:
         luc = datetime.datetime.fromisoformat(str((moc or {}).get("luc") or ""))
     except ValueError:
         return True, "chưa có lượt nổi"
     luc = luc if luc.tzinfo else luc.replace(tzinfo=_VN)
     cach = bay_gio - luc
-    if cach < datetime.timedelta(hours=NOI_GIO_GIAN):
-        return False, f"lượt nổi gần nhất {luc.astimezone(_VN):%d/%m %H:%M} (< {NOI_GIO_GIAN} giờ)"
+    if cach < datetime.timedelta(hours=gio):
+        return False, f"lượt nổi gần nhất {luc.astimezone(_VN):%d/%m %H:%M} (< {gio} giờ)"
     return True, f"lượt nổi trước {luc.astimezone(_VN):%d/%m %H:%M}"
 
 
-def tran_noi(so_tu: int, uoc_tiktok: float, da_tieu: float, con: float) -> float:
-    """Trần USD của lượt nổi: đủ `NOI_TRANG` trang mỗi từ, nhưng không vượt phần ước tính TikTok
-    CHƯA dùng (chừa `LAM_MOI_TOI_DA` yêu cầu làm mới) và phần còn của tháng/việc."""
-    du = so_tu * NOI_TRANG * TT.GIA_YEU_CAU
+def tran_noi(so_tu: int, uoc_tiktok: float, da_tieu: float, con: float,
+             trang: int = NOI_TRANG) -> float:
+    """Trần USD của lượt nổi: đủ `trang` trang mỗi từ, nhưng không vượt phần ước tính TikTok
+    CHƯA dùng (chừa `LAM_MOI_TOI_DA` yêu cầu làm mới) và phần còn của tháng/việc — kiểm độ phủ
+    nới trang / thêm hashtag cũng không thể vượt trần này."""
+    du = so_tu * trang * TT.GIA_YEU_CAU
     du_uoc = uoc_tiktok - da_tieu - LAM_MOI_TOI_DA * TT.GIA_YEU_CAU
     return round(max(0.0, min(du, du_uoc, con - da_tieu)), 4)
 
 
-def tim_noi_tiktok(q: list[str], bay_gio: datetime.datetime, tran: float) -> list[tuple]:
+def tim_noi_tiktok(q: list[str], bay_gio: datetime.datetime, tran: float,
+                   trang: int = NOI_TRANG, tag: list[str] | None = None,
+                   cid: dict | None = None) -> list[tuple]:
     """Bài TikTok nhiều thích nhất 30 ngày của từng từ khoá -> [(dòng, ngày VN)] như
     `apify_tool._FETCH["tiktok"]`. Chỉ TikTok API: lỗi thì trả [] (KHÔNG xuống chuỗi dự phòng
     tính tiền theo video — lượt nổi là phần thêm). Run id đi qua `apify_tool._KHI_CO_RUN` của
-    bên gọi (sổ tiền chung của lượt tìm TikTok)."""
+    bên gọi (sổ tiền chung của lượt tìm TikTok).
+
+    `tag` (17/10/2026, kiểm độ phủ tự thêm — `kiem_do_phu.hanh_dong`): đọc FEED hashtag
+    (`challengePosts`, `trang` trang × 20 bài mỗi tag) bằng phần trần còn lại sau từ khoá. Đo thật
+    17/10: tìm "lammoidieuviyeu" như từ khoá (nhiều thích) chỉ trùng 17/94 bài 30 ngày của feed
+    #lammoidieuviyeu — phải đọc feed. `cid` {tag: cid} dùng lại và được bổ sung tại chỗ."""
     so_yc = int(tran / TT.GIA_YEU_CAU + 1e-9)
-    if not q or so_yc <= 0 or not TT.dung_api("tiktok_tim"):
+    if not (q or tag) or so_yc <= 0 or not TT.dung_api("tiktok_tim"):
         return []
+    items: list = []
+    yc_tu = min(so_yc, len(q) * trang)
     try:
-        items = TT.tim(q, len(q) * NOI_TRANG * TT.TIM_MOI_TRANG,
-                       bay_gio - datetime.timedelta(days=NOI_NGAY), bay_gio,
-                       tran_usd=so_yc * TT.GIA_YEU_CAU, sap=TT.SAP_NHIEU_THICH,
-                       trang_toi_da=NOI_TRANG)
+        if q and yc_tu:
+            items = TT.tim(q, len(q) * trang * TT.TIM_MOI_TRANG,
+                           bay_gio - datetime.timedelta(days=NOI_NGAY), bay_gio,
+                           tran_usd=yc_tu * TT.GIA_YEU_CAU, sap=TT.SAP_NHIEU_THICH,
+                           trang_toi_da=trang)
     except A.LoiApify as e:
         if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
             raise
         print(f"[theo_doi] lượt nổi TikTok lỗi: {e.ma} {A._che_token(str(e))[:120]}", flush=True)
-        return []
+    if tag and so_yc > yc_tu:
+        ngan = TT.Ngan((so_yc - yc_tu) * TT.GIA_YEU_CAU)
+        cid = cid if cid is not None else {}
+        for t in tag:
+            try:
+                if not cid.get(t):
+                    c = TT.tim_cid(t, ngan)
+                    if not c:
+                        continue
+                    cid[t] = c
+                items += TT.bai_hashtag(cid[t], trang, ngan)
+            except A.LoiApify as e:
+                if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
+                    raise
+                print(f"[theo_doi] lượt nổi #{t} lỗi: {e.ma}", flush=True)
     ra = A._chuan_tiktok(A._chuan_clockworks(items))
     for d, _ in ra:
         d["_noi"] = True

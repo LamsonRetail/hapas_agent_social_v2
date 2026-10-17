@@ -326,6 +326,62 @@ def co_bai_tu_khoa(ma: str) -> bool:
                               "kieu_quet = 'tu_khoa') AS co", (ma,)).fetchone()["co"])
 
 
+# ───────────────────────────── kiểm độ phủ 2 lần/tuần (17/10/2026) ─────────────────────────────
+def hashtag_gan_day(ma: str, nen_tang: str, tu, toi_da: int = 3000) -> list[str]:
+    """Cột `hashtag` của bài nền tảng `nen_tang` đăng từ `tu` (mới nhất trước) — đếm hashtag
+    chiến dịch hay đi cùng brand (`kiem_do_phu.chon_tag`)."""
+    with ket_noi() as c:
+        return [r["hashtag"] for r in c.execute(
+            "SELECT hashtag FROM bai WHERE du_an = %s AND nen_tang = %s AND dang_luc >= %s AND "
+            "btrim(COALESCE(hashtag, '')) <> '' ORDER BY dang_luc DESC LIMIT %s",
+            (ma, nen_tang, tu, toi_da)).fetchall()]
+
+
+def tac_gia_noi_bat(ma: str, nen_tang: str, tu, toi_da: int = 20) -> list[dict]:
+    """Tài khoản đăng bài nhiều thảo luận nhất (Σ 1 + bình luận) từ `tu`. -> [{tai_khoan,
+    thao_luan, so_bai}]."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT lower(tai_khoan) AS tai_khoan, sum(1 + COALESCE(binh_luan, 0))::bigint AS "
+            "thao_luan, count(*) AS so_bai FROM bai WHERE du_an = %s AND nen_tang = %s AND "
+            "dang_luc >= %s AND btrim(tai_khoan) <> '' GROUP BY lower(tai_khoan) "
+            "ORDER BY thao_luan DESC, so_bai DESC LIMIT %s", (ma, nen_tang, tu, toi_da)).fetchall()
+
+
+def de_xuat_dang_xet(ma: str, nen_tang: str) -> list[dict]:
+    """Đề xuất nguồn đang chờ hoặc đã duyệt của nền tảng (nhiều thảo luận trước)."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT dinh_danh, thao_luan, trang_thai FROM de_xuat WHERE du_an = %s AND "
+            "nen_tang = %s AND trang_thai IN ('cho', 'da_duyet') ORDER BY thao_luan DESC, id",
+            (ma, nen_tang)).fetchall()
+
+
+_COT_DO_PHU = ("du_an", "luot_id", "nen_tang", "so_mau", "so_nhac", "so_da_co", "so_da_loai",
+               "so_sot", "thao_luan_nhac", "thao_luan_da_co", "do_phu", "do_phu_tl", "bo_sung",
+               "so_yeu_cau", "chi_phi_usd", "mau", "bai_sot", "hanh_dong")
+
+
+_JSON_DO_PHU = ("mau", "bai_sot", "hanh_dong")
+
+
+def ghi_kiem_do_phu(r: dict) -> int:
+    """Ghi MỘT lượt kiểm độ phủ (bảng `kiem_do_phu`). -> id. `mau`, `bai_sot`, `hanh_dong` là
+    JSON."""
+    import json
+    gt = [json.dumps(r.get(k) if r.get(k) is not None else ([] if k == "bai_sot" else {}),
+                     ensure_ascii=False) if k in _JSON_DO_PHU else r.get(k)
+          for k in _COT_DO_PHU]
+    with ket_noi() as c:
+        x = c.execute(
+            f"INSERT INTO kiem_do_phu ({', '.join(_COT_DO_PHU)}) VALUES ("
+            + ", ".join("(SELECT id FROM luot_quet WHERE id = %s)" if k == "luot_id"
+                        else "%s::jsonb" if k in _JSON_DO_PHU else "%s"
+                        for k in _COT_DO_PHU)
+            + ") RETURNING id", gt).fetchone()
+    return int(x["id"])
+
+
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
 #: Bài đã cào được cào lại khi số bình luận nền tảng báo tăng ≥ 20% (và ≥ 5) — bài cũ ít đổi
 #: thì không trả tiền đọc lại cùng bình luận.

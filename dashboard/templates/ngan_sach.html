@@ -146,8 +146,11 @@
 {% set luot_web = ll.luot_web_con_lai if co_lich else db.ngay_con_lai %}
 {% set luot_web_30 = ll.luot_web_30 if co_lich else hang_so.ngay %}
 {% set web_con = luot_web * web_luot %}
-{% set toi_da = d.da_tieu + nguon_con + so_luot * khac_luot + web_con %}
-{% set du_luot = ((db.tran - d.da_tieu - nguon_con - web_con) / so_luot) if so_luot > 0 else 0 %}
+{# Kiểm độ phủ (17/10/2026, 2 lần/tuần): tối đa tran_usd mỗi lần, một lần mỗi 84 giờ (chi_phi.du_bao_do_phu). #}
+{% set dp = d.do_phu if d.do_phu is mapping else {} %}
+{% set dp_con = dp.con_lai or 0 %}
+{% set toi_da = d.da_tieu + nguon_con + so_luot * khac_luot + web_con + dp_con %}
+{% set du_luot = ((db.tran - d.da_tieu - nguon_con - web_con - dp_con) / so_luot) if so_luot > 0 else 0 %}
 <section class="the-khoi cach-duoi ns-ch" aria-labelledby="ns-ch-tieu-de">
   {% if ql %}
   <script type="application/json" id="ns-du-lieu">{{ {"hang_so": hang_so, "tu_khoa": d.tu_khoa or [], "ten": d.ten,
@@ -155,6 +158,7 @@
     "da_tieu": d.da_tieu, "nguon_con_lai": nguon_con, "ngay_con_lai": db.ngay_con_lai,
     "co_lich": co_lich, "luot_con_lai": so_luot, "luot_30": luot_30,
     "luot_web_con_lai": luot_web, "luot_web_30": luot_web_30,
+    "dp": {"luot_con_lai": dp.luot_con_lai or 0, "luot_30": dp.luot_30 or 0},
     "tran_platform": db.tran_platform, "tran_da": d.tran_usd_thang|float}|json_script }}</script>
   <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/cau-hinh" id="ns-form">
   <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
@@ -289,15 +293,26 @@
 
   <div class="ns-chan">
     {% if ql %}
+    <div class="ns-chan__trai">
     <label class="o">Trần tháng dự án (USD)
       <input type="number" name="tran_usd_thang" min="0" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(d.tran_usd_thang|float) }}" required></label>
+    {% set g_dp = goc.get('do_phu') if goc.get('do_phu') is mapping else {} %}
+    <div class="ns-dp" role="group" aria-labelledby="ns-dp-nhan">
+      <span class="ns-dp__nhan" id="ns-dp-nhan">Kiểm độ phủ (2 lần/tuần)</span>
+      <input type="checkbox" class="ns-cong" role="switch" name="dp_bat" value="1" aria-label="Bật kiểm độ phủ 2 lần mỗi tuần"{% if g_dp.get('bat', true) is not false %} checked{% endif %}>
+      <label class="ns-dp__tran">trần <input type="number" name="dp_tran" min="0" max="{{ hang_so.do_phu.tran_toi_da }}" step="0.01" inputmode="decimal" placeholder="{{ '%.2f'|format(hang_so.do_phu.tran_mac_dinh) }}" value="{{ '%.2f'|format(g_dp.get('tran_usd')|float) if g_dp.get('tran_usd') is number else '' }}" aria-label="Trần USD mỗi lần kiểm độ phủ (trống = {{ hang_so.do_phu.tran_mac_dinh }})"> USD/lần</label>
+    </div>
+    </div>
     {% endif %}
     <div class="ns-du-kien">
+      {% set noi = dp.noi if dp.noi is mapping else {} %}
+      <div data-o="dp-dong">Kiểm độ phủ (TikTok, 2 lần/tuần): <span data-o="dp-chu">{% if dp.bat %}tối đa <b>{{ dp.tran_usd|usd_vn }}</b> USD/lần · ≈ <b>{{ dp.usd_30|usd_vn }}</b> USD/30 ngày{% else %}tắt{% endif %}</span>
+        <button type="button" class="goi-y" data-goi-y="Mỗi {{ hang_so.do_phu.gio_gian }} giờ Mark lấy mẫu bài TikTok bằng đường khác thu thập hằng ngày (hashtag brand/chiến dịch + bài mới nhất của nhà sáng tạo nổi), đo bao nhiêu bài brand đã có trong kho, bổ sung bài sót và tự sửa đường thu thập: đề xuất theo dõi nhà sáng tạo bị sót, thêm hashtag chiến dịch vào lượt nổi, nới lượt nổi khi bài bị tụt hạng. Lượt nổi TikTok hiện: {{ noi.trang or 2 }} trang/từ khoá, mỗi {{ noi.gio or 20 }} giờ{% if noi.tag %}, hashtag #{{ noi.tag|join(', #') }}{% endif %}. Còn {{ dp.luot_con_lai or 0 }} lần kiểm tháng này{% if dp.lan_toi %}, lần tới từ {{ dp.lan_toi[8:10] }}/{{ dp.lan_toi[5:7] }}{% endif %}; tiền nằm trong trần tháng dự án.">i</button>{% if noi.tag %} <span class="mo nho ns-dp__tag">lượt nổi: #{{ noi.tag|join(' #') }}</span>{% endif %}</div>
       <div>Tìm + bình luận tối đa <b data-o="tong-luot">{{ tong_luot|usd_vn(3) }}</b> USD/lượt · ≈ <b data-o="tong-30">{{ (khac_luot * luot_30 + web_luot * luot_web_30)|usd_vn }}</b> USD/30 ngày {% if co_lich %}(theo <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a>: {{ luot_30|so_vn }} lượt){% else %}(1 lượt/ngày — không có <a href="/lich-quet?du_an={{ d.ma|urlencode }}">Lịch quét</a> nào bật){% endif %}</div>
       <div class="ns-du-kien__thang{% if toi_da > db.tran + 1e-9 %} ns-du-kien__thang--canh{% endif %}" data-o="thang-hop">
         Cả tháng nếu mỗi lượt dùng hết: <b data-o="thang-so">{{ toi_da|usd_vn }}</b> / <span data-o="thang-tran">{{ db.tran|usd_vn }}</span> USD —
         <span data-o="thang-ket-luan" aria-live="polite">{% if toi_da > db.tran + 1e-9 %}vượt trần {{ (toi_da - db.tran)|usd_vn }} USD, Mark dừng quét khi chạm trần; {% if du_luot > 0 %}vừa trần khi ≤ {{ du_luot|usd_vn(3) }} USD/lượt.{% else %}riêng nguồn theo dõi đã chạm trần.{% endif %}{% else %}trong trần, còn dư {{ (db.tran - toi_da)|usd_vn }} USD.{% endif %}</span>
-        <button type="button" class="goi-y" data-o="thang-cong-thuc" data-goi-y="= đã tiêu {{ d.da_tieu|usd_vn }} + nguồn {{ nguon_con|usd_vn }} + {% if co_lich %}{{ so_luot|so_vn }} lượt theo lịch{% else %}{{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày{% endif %} × {{ khac_luot|usd_vn(3) }} + Báo &amp; Web {{ '%.1f'|format(luot_web)|replace('.', ',')|replace(',0', '') }} lượt × {{ web_luot|usd_vn(3) }} (ngoài chiến dịch ≤ 1 lượt/ngày)">i</button>
+        <button type="button" class="goi-y" data-o="thang-cong-thuc" data-goi-y="= đã tiêu {{ d.da_tieu|usd_vn }} + nguồn {{ nguon_con|usd_vn }} + {% if co_lich %}{{ so_luot|so_vn }} lượt theo lịch{% else %}{{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày{% endif %} × {{ khac_luot|usd_vn(3) }} + Báo &amp; Web {{ '%.1f'|format(luot_web)|replace('.', ',')|replace(',0', '') }} lượt × {{ web_luot|usd_vn(3) }} (ngoài chiến dịch ≤ 1 lượt/ngày) + kiểm độ phủ {{ dp.luot_con_lai or 0 }} lần × {{ (dp.tran_usd if dp.bat else 0)|usd_vn }}">i</button>
       </div>
     </div>
     {% if ql %}

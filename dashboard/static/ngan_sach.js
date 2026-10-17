@@ -253,10 +253,22 @@
       td.classList.toggle("ns-mo", !bat);
     });
   }
+  // <do_phu> (bài thử tests/test_kiem_do_phu.py::test_ngan_sach_js_do_phu_khop_python chạy khối này)
   function soTien(s, md) {           // ô trần tháng: nhận cả "5,5"
     var x = parseFloat(String(s || "").replace(/\s/g, "").replace(",", "."));
     return isFinite(x) ? x : md;
   }
+  // Kiểm độ phủ (17/10/2026, 2 lần/tuần) — = chi_phi.cau_hinh_do_phu: ô trống / rác / âm → mặc định,
+  // kẹp [0, trần tối đa], trần 0 = tắt. -> USD tối đa mỗi lần (0 khi tắt).
+  var HDP = hs.do_phu || {};
+  function dpUsd(doc) {
+    if (!doc.bat("dp_bat")) return 0;
+    var o = doc.gt("dp_tran");
+    var t = o === "" ? HDP.tran_mac_dinh : soTien(o, HDP.tran_mac_dinh);
+    if (!isFinite(t) || t < 0) t = HDP.tran_mac_dinh;
+    return Math.round(Math.min(HDP.tran_toi_da, t) * 100) / 100;
+  }
+  // </do_phu>
 
   // ── trạng thái chưa lưu ──
   var CAC_O = Array.prototype.filter.call(form.elements, function (e) {
@@ -312,9 +324,16 @@
     var ngay = D.co_lich ? (D.luot_con_lai || 0) : (D.ngay_con_lai || 0);
     var luotWeb = D.luot_web_con_lai != null ? D.luot_web_con_lai : ngay;
     var webCon = luotWeb * kq.web;
-    var toiDa = D.da_tieu + D.nguon_con_lai + ngay * kq.khac + webCon;
+    var dp = D.dp || {};
+    var dpLan = form.elements.namedItem("dp_tran") ? dpUsd(docForm) : null;
+    var dpCon = dpLan == null ? 0 : (dp.luot_con_lai || 0) * dpLan;
+    if (dpLan != null) {
+      ghi("dp-chu", dpLan > 0 ? "tối đa " + soVn(dpLan, 2) + " USD/lần · ≈ " + soVn((dp.luot_30 || 0) * dpLan, 2) +
+        " USD/30 ngày" : "tắt", dpLan);
+    }
+    var toiDa = D.da_tieu + D.nguon_con_lai + ngay * kq.khac + webCon + dpCon;
     var vuot = toiDa > tran + 1e-9;
-    var duLuot = ngay > 0 ? (tran - D.da_tieu - D.nguon_con_lai - webCon) / ngay : 0;
+    var duLuot = ngay > 0 ? (tran - D.da_tieu - D.nguon_con_lai - webCon - dpCon) / ngay : 0;
     ghi("thang-so", soVn(toiDa, 2), r4(toiDa));
     ghi("thang-tran", soVn(tran, 2), tran);
     ghi("thang-ket-luan", vuot
@@ -324,7 +343,8 @@
     ghiGoiY("thang-cong-thuc", "= đã tiêu " + soVn(D.da_tieu, 2) + " + nguồn " + soVn(D.nguon_con_lai, 2) +
       " + " + (D.co_lich ? soVn(ngay, 0) + " lượt theo lịch" : soVn(ngay, 1) + " ngày") + " × " +
       soVn(kq.khac, 3) + " + Báo & Web " + soVn(luotWeb, luotWeb % 1 ? 1 : 0) + " lượt × " + soVn(kq.web, 3) +
-      " (ngoài chiến dịch ≤ 1 lượt/ngày)");
+      " (ngoài chiến dịch ≤ 1 lượt/ngày) + kiểm độ phủ " + soVn(dp.luot_con_lai || 0, 0) + " lần × " +
+      soVn(dpLan || 0, 2));
     var hop = o("thang-hop");
     if (hop) hop.classList.toggle("ns-du-kien__thang--canh", vuot);
 
