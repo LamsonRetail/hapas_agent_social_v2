@@ -300,6 +300,17 @@ def main() -> None:
     except Exception as e:  # noqa: BLE001
         print(f"  Việc nền:   ❌ {type(e).__name__}: {e}")
 
+    # Sổ chi phí (17/10/2026): lượt TẠI CHỖ còn hẹn đọc lại phí Apify ghi trễ (~90 giây sau run
+    # cuối) mà bot tắt trước khi kịp — làm bù theo run id đã ghi trong sổ (`chi_phi_tool`).
+    try:
+        import chi_phi_tool
+
+        n_bu = len(chi_phi_tool.bu_doc_lai())
+        if n_bu:
+            print(f"  Sổ chi phí: đọc lại bù {n_bu} lượt tại chỗ (phí Apify ghi trễ)")
+    except Exception as e:  # noqa: BLE001
+        print(f"  Sổ chi phí: ❌ {type(e).__name__}: {e}")
+
     # Lịch quét tự động (chủ dự án 15/10/2026: "Dashboard + Mark tự chạy"): lịch đặt trên
     # dashboard (bảng lich_quet), nhịp 30 giây tạo việc /theodoi như lệnh gõ tay. Sau việc nền:
     # chỉ tiến trình giữ quyền chủ việc nền mới nhận lịch.

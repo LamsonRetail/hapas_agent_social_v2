@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import time
 
 import pytest
 from test_viec_nen import _quet, nen  # noqa: F401
@@ -120,10 +121,47 @@ def test_so_chi_phi_doc_lai_ghi_phan_chenh(monkeypatch, tmp_path):
     dong = [json.loads(x) for x in (tmp_path / "so.jsonl").read_text(encoding="utf-8").splitlines()]
     assert ngu == [85.0] and dong[-1]["chi_phi_thuc_usd"] == 0.0301
     assert dong[-1]["tu_khoa"][0].startswith("điều chỉnh") and dong[-1]["uoc_tinh_usd"] == 0
+    assert dong[0]["doc_lai"]["run_ids"] == ["r1"] and dong[-1]["dieu_chinh_cho"] == dong[0]["id"]
     monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {"usd": 0.0201, "so_run": 1,
                                                              "chua_doc": 0, "con_song": []})
     assert C.doc_lai(rec, {"run_ids": ["r1"], "sau_giay": 0}, ngu=ngu.append) == 0.0, \
         "không cao hơn thì không ghi"
+
+
+def test_so_chi_phi_khoi_dong_lai_lam_bu_doc_lai(monkeypatch, tmp_path):
+    """Soát 17/10/2026: luồng đọc lại của lượt TẠI CHỖ chỉ sống trong RAM — Mark khởi động lại
+    trong 90 giây là mất phần chênh. Nay hẹn nằm trên đĩa; `bu_doc_lai` (run.py) làm bù."""
+    import chi_phi_tool as C
+    monkeypatch.setattr(C, "_SO", tmp_path / "so.jsonl")
+    thuc = {"usd": 0.02, "so_run": 1, "cham_tran": 0, "dang_chay": 0,
+            "doc_lai": {"run_ids": ["r1"], "sau_giay": 85.0}}
+    rec = C.ghi(queries=["hapas"], platforms=["facebook"], date_range="7 ngày", thuc=thuc,
+                est=0.05)
+    C.ghi(queries=["khac"], platforms=["tiktok"], date_range="", thuc={"usd": 0.1, "so_run": 1},
+          est=0.1)                                              # không hẹn đọc lại
+    # Bot tắt trước khi luồng đọc lại chạy: lần khởi động sau tìm thấy đúng bản ghi đó.
+    cac = C.bu_doc_lai()
+    assert [r["id"] for r in cac] == [rec["id"]] and cac[0]["doc_lai"]["luc"] == round(
+        rec["ts"] + 85.0, 1)
+    monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {"usd": 0.0, "so_run": 0,
+                                                             "chua_doc": 1, "con_song": []})
+    assert C._lam_bu(cac, ngu=lambda s: None) == 0.0
+    assert len(C.bu_doc_lai()) == 1, "GET hỏng: không đánh dấu, lần sau thử lại"
+    monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {"usd": 0.0501, "so_run": 1,
+                                                             "chua_doc": 0, "con_song": []})
+    assert C._lam_bu(C.bu_doc_lai(), ngu=lambda s: None) == 0.0301
+    assert C.bu_doc_lai() == [], "làm bù một lần"
+    # Không chênh: một dòng dấu "đã đọc lại", không dòng tiền nào.
+    rec2 = C.ghi(queries=["x"], platforms=["facebook"], date_range="", thuc=thuc, est=0.0)
+    monkeypatch.setattr(A, "_chi_phi_cac_run", lambda ids: {"usd": 0.02, "so_run": 1,
+                                                             "chua_doc": 0, "con_song": []})
+    assert C._lam_bu(C.bu_doc_lai(), ngu=lambda s: None) == 0.0 and C.bu_doc_lai() == []
+    dong = [json.loads(x) for x in (tmp_path / "so.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert dong[-1] == {"loai": "da_doc_lai", "cho": rec2["id"], "ts": dong[-1]["ts"]}
+    assert all("loai" not in r for r in C.doc_so("", 50)), "dòng dấu không thành lần quét"
+    # Hẹn quá cũ (> 2 ngày): không làm bù.
+    C.ghi(queries=["cu"], platforms=["facebook"], date_range="", thuc=thuc, est=0.0)
+    assert C.bu_doc_lai(bay_gio=time.time() + C.DOC_LAI_TRONG_GIAY + 60) == []
 
 
 # ───────────────────────────── viec_nen ─────────────────────────────

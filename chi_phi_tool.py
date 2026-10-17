@@ -24,6 +24,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 import audit
@@ -72,13 +73,23 @@ def _luot_hien_tai() -> dict:
         return {"turn_id": "", "chat": "", "nguoi": ""}
 
 
+#: Lượt TẠI CHỖ đọc lại tiền ở luồng nền ~90 giây sau run cuối (`doc_lai`, phí sự kiện Apify ghi
+#: trễ). Luồng chỉ sống trong RAM — soát 17/10/2026: Mark khởi động lại trong khoảng chờ thì phần
+#: chênh mất hẳn. Nên bản ghi hẹn đọc lại mang `id` + `doc_lai` {run_ids, luc} xuống sổ; đọc xong
+#: thì dòng điều chỉnh mang `dieu_chinh_cho` = id, không chênh thì một dòng dấu {"loai":
+#: "da_doc_lai", "cho": id}. Lúc khởi động (`run.py` → `bu_doc_lai`) làm bù bản ghi chưa có dấu,
+#: trong `DOC_LAI_TRONG_GIAY` (run cũ hơn thì Apify vẫn trả số, nhưng sổ đã quá xa để đối chiếu).
+DOC_LAI_TRONG_GIAY = 2 * 86400
+
+
 def ghi(*, queries, platforms, date_range, thuc: dict | None, est: float,
         chat: str | None = None, ma_viec: str | None = None,
-        nguoi: str | None = None) -> dict:
+        nguoi: str | None = None, them: dict | None = None) -> dict:
     """Ghi một lần quét vào sổ cục bộ rồi đẩy lên Base ở thread nền. Trả bản ghi.
 
     `ma_viec`: việc quét NỀN (viec_nen) — chạy ngoài lượt trả lời nên không có turn audit;
-    `chat`/`nguoi` lấy từ sổ việc thay cho lượt đang chạy."""
+    `chat`/`nguoi` lấy từ sổ việc thay cho lượt đang chạy. `them`: trường thêm của bản ghi
+    (dòng điều chỉnh mang `dieu_chinh_cho`)."""
     luot = _luot_hien_tai()
     rec = {
         "ts": time.time(),
@@ -96,21 +107,36 @@ def ghi(*, queries, platforms, date_range, thuc: dict | None, est: float,
         rec["ma_viec"] = ma_viec
     elif not rec["turn_id"]:
         rec["nguon"] = _nguon_ngoai_luot()
+    rec.update(them or {})
+    dl = (thuc or {}).get("doc_lai")
+    hen = bool(dl and dl.get("run_ids") and rec["chi_phi_thuc_usd"] is not None)
+    if hen:
+        # Hẹn đọc lại nằm TRÊN ĐĨA cùng bản ghi (xem `DOC_LAI_TRONG_GIAY`).
+        rec["id"] = uuid.uuid4().hex[:16]
+        rec["doc_lai"] = {"run_ids": list(dl["run_ids"]),
+                          "luc": round(rec["ts"] + max(0.0, float(dl.get("sau_giay") or 0)), 1)}
+    _ghi_dong(rec)
+    if getattr(audit, "_DAY_LEN_BASE", False):
+        threading.Thread(target=_day, args=(rec,), daemon=True).start()
+    if hen and _tu_chay():
+        threading.Thread(target=contextvars.copy_context().run, args=(doc_lai, rec, dl),
+                         name="chi-phi-doc-lai", daemon=True).start()
+    return rec
+
+
+def _tu_chay() -> bool:
+    """Bộ thử / máy dev (SOCIAL_NEN_TU_CHAY=0) không dựng luồng ngủ rồi ghi vào sổ sau khi bài
+    thử đã xong."""
+    return (os.environ.get("SOCIAL_NEN_TU_CHAY") or "1").strip() != "0"
+
+
+def _ghi_dong(rec: dict) -> None:
     try:
         _SO.parent.mkdir(parents=True, exist_ok=True)
         with _khoa, open(_SO, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception as e:  # noqa: BLE001
         print(f"[chi_phi] ghi so loi (bo qua): {type(e).__name__}: {e}")
-    if getattr(audit, "_DAY_LEN_BASE", False):
-        threading.Thread(target=_day, args=(rec,), daemon=True).start()
-    dl = (thuc or {}).get("doc_lai")
-    if dl and dl.get("run_ids") and rec["chi_phi_thuc_usd"] is not None \
-            and (os.environ.get("SOCIAL_NEN_TU_CHAY") or "1").strip() != "0":
-        # Bộ thử (SOCIAL_NEN_TU_CHAY=0) không để luồng ngủ rồi ghi vào sổ sau khi bài đã xong.
-        threading.Thread(target=contextvars.copy_context().run, args=(doc_lai, rec, dl),
-                         name="chi-phi-doc-lai", daemon=True).start()
-    return rec
 
 
 def doc_lai(rec: dict, dl: dict, ngu=time.sleep) -> float:
@@ -122,18 +148,66 @@ def doc_lai(rec: dict, dl: dict, ngu=time.sleep) -> float:
         ngu(max(0.0, float(dl.get("sau_giay") or 0)))
         import apify_tool
         kq = apify_tool._chi_phi_cac_run(list(dl.get("run_ids") or []))
+        if kq.get("chua_doc"):
+            return 0.0           # GET hỏng: KHÔNG đánh dấu — lần khởi động sau thử lại
         lech = round(float(kq.get("usd") or 0) - float(rec.get("chi_phi_thuc_usd") or 0), 4)
-        if lech <= 0.0005 or kq.get("chua_doc"):
+        if lech <= 0.0005:
+            if rec.get("id"):
+                _ghi_dong({"loai": "da_doc_lai", "cho": rec["id"], "ts": time.time()})
             return 0.0
         ghi(queries=["điều chỉnh: phí Apify ghi sau khi chạy xong", *(rec.get("tu_khoa") or [])],
             platforms=rec.get("nen_tang") or [], date_range=rec.get("khoang_ngay") or "",
             thuc={"usd": lech, "so_run": kq.get("so_run") or 0, "cham_tran": 0, "dang_chay": 0},
             est=0.0, chat=rec.get("chat") or None, ma_viec=rec.get("ma_viec"),
-            nguoi=rec.get("nguoi") or None)
+            nguoi=rec.get("nguoi") or None,
+            them={"dieu_chinh_cho": rec["id"]} if rec.get("id") else None)
         return lech
     except Exception as e:  # noqa: BLE001 — sổ chi phí hỏng không được làm hỏng gì khác
         print(f"[chi_phi] doc lai loi (bo qua): {type(e).__name__}")
         return 0.0
+
+
+def bu_doc_lai(trong_giay: float = DOC_LAI_TRONG_GIAY, bay_gio: float | None = None) -> list[dict]:
+    """Bản ghi tại chỗ còn hẹn đọc lại mà chưa có dấu xong (bot khởi động lại trong khoảng chờ):
+    -> danh sách; trừ bộ thử, dựng MỘT luồng làm bù lần lượt (chờ tới đúng mốc `luc` nếu chưa
+    tới). Gọi một lần lúc khởi động (`run.py`). Sổ hỏng / chưa có: []."""
+    now = time.time() if bay_gio is None else bay_gio
+    try:
+        dong = _SO.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    hen: dict[str, dict] = {}
+    xong: set = set()
+    for x in dong:
+        try:
+            r = json.loads(x)
+        except ValueError:
+            continue
+        if not isinstance(r, dict):
+            continue
+        if r.get("loai") == "da_doc_lai":
+            xong.add(r.get("cho"))
+            continue
+        if r.get("dieu_chinh_cho"):
+            xong.add(r["dieu_chinh_cho"])
+        if r.get("id") and isinstance(r.get("doc_lai"), dict) \
+                and now - float(r.get("ts") or 0) <= trong_giay:
+            hen[r["id"]] = r
+    cac = [r for k, r in hen.items() if k not in xong]
+    if cac and _tu_chay():
+        threading.Thread(target=_lam_bu, args=(cac,), name="chi-phi-doc-lai-bu",
+                         daemon=True).start()
+    return cac
+
+
+def _lam_bu(cac: list[dict], ngu=time.sleep) -> float:
+    """Đọc lại lần lượt các bản ghi `bu_doc_lai` tìm thấy. -> tổng USD chênh đã ghi."""
+    tong = 0.0
+    for r in cac:
+        dl = r.get("doc_lai") or {}
+        tong += doc_lai(r, {"run_ids": dl.get("run_ids") or [],
+                            "sau_giay": max(0.0, float(dl.get("luc") or 0) - time.time())}, ngu)
+    return round(tong, 4)
 
 
 # ───────────────────────────── Base ─────────────────────────────
