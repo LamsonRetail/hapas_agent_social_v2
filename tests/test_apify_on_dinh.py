@@ -301,6 +301,86 @@ def test_ma_nguon_dong_bo_moi_bang():
     assert co in ([], [m for m in A._MA_NGUON if m != "OK"]), co
 
 
+# ─── soát 17/10/2026 (H1): apidojo CHI_DEMO không được chặn dự phòng clockworks của TikTok ───
+_CW = {"webVideoUrl": "https://www.tiktok.com/@kenh_a/video/71", "createTimeISO": NOW.isoformat(),
+       "authorMeta": {"name": "kenh_a", "fans": 5}, "text": "túi hapas", "playCount": 10}
+
+
+def _actor_post(url: str) -> str:
+    return url.split("/acts/", 1)[1].split("/runs", 1)[0]
+
+
+def _chuoi_tiktok(api, monkeypatch, ds_apidojo: list, ds_cw: list) -> None:
+    """TikTok API (scraptik) LỖI; mỗi POST là một run riêng, dataset riêng: apidojo trả
+    `ds_apidojo`, clockworks trả `ds_cw` — đi qua `_run_actor` / `_cho_run` thật."""
+    import tiktok_api as TT
+    monkeypatch.setattr(TT, "dung_api", lambda k: True)
+
+    def hong(*a, **k):
+        raise A.LoiApify("LOI", "scraptik hỏng")
+    monkeypatch.setattr(TT, "tim", hong)
+    ds = {A._ACTORS["tiktok"]: ds_apidojo, A._ACTORS["tiktok_fallback"]: ds_cw}
+    goc_post, goc_get = api.post, api.get
+
+    def post(url, json=None, **k):
+        if "/acts/" in url:
+            a = _actor_post(url)
+            api.start.append(R(201, {"data": {**api.run, "id": f"run-{a}", "status": "SUCCEEDED",
+                                              "defaultDatasetId": f"ds-{a}"}}))
+        return goc_post(url, json=json, **k)
+
+    def get(url, params=None, **k):
+        for a, items in ds.items():
+            if f"/datasets/ds-{a}/" in url:
+                api.get_urls.append((url, params))
+                return R(200, list(items))
+        return goc_get(url, params, **k)
+    monkeypatch.setattr(A.requests, "post", post)
+    monkeypatch.setattr(A.requests, "get", get)
+
+
+def test_tiktok_api_loi_apidojo_demo_van_chay_clockworks(api, monkeypatch):
+    """Bản 0332db9: `_cho_run` ném CHI_DEMO mà lệnh gọi apidojo không có `try` — clockworks không
+    bao giờ chạy. Trước đó demo ra `raw` rỗng (dưới ngưỡng leo thang) và clockworks vẫn chạy."""
+    _chuoi_tiktok(api, monkeypatch, [{"demo": True} for _ in range(10)], [_CW])
+    ra = A._fetch_tiktok(["hapas"], 30, "VN", NOW - datetime.timedelta(days=3), NOW)
+    assert [_actor_post(u) for u in api.post_urls] == [A._ACTORS["tiktok"],
+                                                       A._ACTORS["tiktok_fallback"]]
+    assert [d["link"] for d, _ in ra] == [_CW["webVideoUrl"]]
+
+
+def test_tiktok_apidojo_demo_du_phong_rong_thi_bao_chi_demo(api, monkeypatch):
+    """Dự phòng cũng không ra bài: nói lý do của apidojo, không trả [] im lặng ("về 0")."""
+    _chuoi_tiktok(api, monkeypatch, [{"demo": True} for _ in range(10)], [])
+    with pytest.raises(A.LoiApify) as e:
+        A._fetch_tiktok(["hapas"], 30, "VN", NOW - datetime.timedelta(days=3), NOW)
+    assert e.value.ma == "CHI_DEMO" and len(api.post_urls) == 2
+
+
+@pytest.mark.parametrize("ma, du_phong", [("CHI_DEMO", True), ("LOI", True),
+                                          ("HET_TIEN_THANG", False), ("DA_HUY", False),
+                                          ("QUA_GIO", False), ("NGHEN_DONG_THOI", False)])
+def test_tiktok_ma_loi_apidojo_nao_thi_chay_du_phong(monkeypatch, ma, du_phong):
+    import tiktok_api as TT
+    monkeypatch.setattr(TT, "dung_api", lambda k: False)
+    goi = []
+
+    def call(actor, payload, limit, **k):
+        goi.append(actor)
+        if actor == A._ACTORS["tiktok"]:
+            raise A.LoiApify(ma, "giả lỗi apidojo")
+        return [_CW]
+    monkeypatch.setattr(A, "_call", call)
+    d3 = NOW - datetime.timedelta(days=3)
+    if du_phong:
+        assert len(A._fetch_tiktok(["hapas"], 30, "VN", d3, NOW)) == 1
+        assert goi == [A._ACTORS["tiktok"], A._ACTORS["tiktok_fallback"]]
+    else:
+        with pytest.raises(A.LoiApify) as e:
+            A._fetch_tiktok(["hapas"], 30, "VN", d3, NOW)
+        assert e.value.ma == ma and goi == [A._ACTORS["tiktok"]]
+
+
 def test_token_khong_bao_gio_nam_trong_chuoi_loi(api):
     api.start = [A.requests.ConnectionError(f"Max retries with url /v2/acts?token={BI_MAT}")] * 2
     with pytest.raises(A.LoiApify) as e:

@@ -2487,6 +2487,10 @@ def _chuan_tiktok(raw: list) -> list[tuple]:
 
 
 _GIA_TT_DU_PHONG = {"apidojo": 0.0003, "clockworks": 0.003}   # USD/video, gói FREE
+# Lỗi của apidojo mà clockworks KHÔNG cứu được nên vẫn ném ra như trước 17/10/2026: hai mã dừng
+# cả lượt (`tiktok_api._DUNG_HAN`), cộng hết giờ / nghẽn chỗ chạy — chạy thêm một run lúc đã hết
+# hạn chỉ mất phí khởi động rồi bị huỷ ngay (cùng tập với `theo_doi_api._KHONG_DU_PHONG`).
+_TT_KHONG_DU_PHONG = ("HET_TIEN_THANG", "DA_HUY", "QUA_GIO", "NGHEN_DONG_THOI")
 
 
 def _fetch_tiktok(q: list[str], limit: int, country: str, d_from, d_to,
@@ -2513,11 +2517,24 @@ def _fetch_tiktok(q: list[str], limit: int, country: str, d_from, d_to,
     if tran_du_phong is not None and tran_du_phong < _TRAN_USD_KHOANG[0]:
         print("[social_listen] không chạy dự phòng TikTok: ngân sách còn dưới sàn 0,1 USD")
         return []
-    raw = _call(_ACTORS["tiktok"], {
-        "keywords": q, "maxItems": limit, "location": country,
-        "sortType": "DATE_POSTED", "dateRange": _tiktok_enum(d_from),
-        "includeSearchKeywords": True,
-    }, limit, tran_usd=tran_du_phong)
+    # Soát 17/10/2026 (H1): lệnh gọi này từng KHÔNG có `try`. Khi item mẫu `{"demo": true}` còn
+    # ra `raw` rỗng (dưới ngưỡng leo thang) thì clockworks vẫn chạy; từ lúc `_cho_run` ném
+    # CHI_DEMO thì lỗi bay thẳng ra và dự phòng KHÔNG BAO GIỜ chạy. Lỗi riêng của apidojo
+    # (CHI_DEMO, LOI…) nay tính như 0 bài để đi tiếp dự phòng; dự phòng cũng không ra bài thì mới
+    # ném lại lỗi đó (cuối hàm) — trả [] im lặng là phễu ghi "về 0" thay cho lý do thật.
+    loi_chinh: LoiApify | None = None
+    try:
+        raw = _call(_ACTORS["tiktok"], {
+            "keywords": q, "maxItems": limit, "location": country,
+            "sortType": "DATE_POSTED", "dateRange": _tiktok_enum(d_from),
+            "includeSearchKeywords": True,
+        }, limit, tran_usd=tran_du_phong)
+    except LoiApify as e:
+        if e.ma in _TT_KHONG_DU_PHONG:
+            raise
+        print(f"[social_listen] apidojo TikTok lỗi, chạy dự phòng clockworks: {e.ma} "
+              f"{_che_token(e)}")
+        loi_chinh, raw = e, []
     # Actor trả sentinel {"noResults": true} khi TikTok search không ra gì. Nếu
     # đếm chúng như dữ liệu thì báo cáo thành "cào 10 -> giữ 0", người đọc tưởng
     # bộ lọc ngày loại hết, trong khi thực tế nguồn KHÔNG trả gì. Phải loại sớm
@@ -2553,6 +2570,10 @@ def _fetch_tiktok(q: list[str], limit: int, country: str, d_from, d_to,
         if them:
             co = {str(x.get("postPage") or "") for x in raw}
             raw = raw + [x for x in them if str(x.get("postPage") or "") not in co]
+    if loi_chinh is not None and not raw:
+        # apidojo hỏng mà dự phòng không ra bài (lỗi / 0 bài / ngân sách không đủ để chạy): báo
+        # lỗi của apidojo như trước khi có `try` ở trên.
+        raise loi_chinh
     return _chuan_tiktok(raw)
 
 
