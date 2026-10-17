@@ -46,12 +46,17 @@ def gan_ho_so(ph: dict, ten: list[str], n: int) -> None:
         ph.update(actor=TT.ACTOR, bo_chuyen="tiktok_ho_so", ten=list(ten))
 
 
-def gan_binh_luan(ph: dict, urls: list[str], tra_loi: int) -> None:
-    """Phần bình luận TikTok đi qua TikTok API (actor cũ của phần làm dự phòng)."""
+def gan_binh_luan(ph: dict, urls: list[str], tra_loi: int,
+                  bat_dau: dict[str, int] | None = None) -> None:
+    """Phần bình luận TikTok đi qua TikTok API (actor cũ của phần làm dự phòng). `bat_dau`
+    (18/10/2026): {link: vị trí bình luận gốc đọc tiếp} cho video cào dở (`tiktok_api.binh_luan`);
+    dự phòng clockworks không đọc tiếp được — chạy lại từ đầu như cũ."""
     if TT.dung_api("tiktok_binh_luan") and ph.get("actor"):
         ph["du_phong"] = {"actor": ph["actor"], "gia": _GIA_DU_PHONG["tiktok_binh_luan"]}
         ph.update(actor=TT.ACTOR, bo_chuyen="tiktok_binh_luan", urls=list(urls),
                   tra_loi=int(tra_loi))
+        if bat_dau:
+            ph["bat_dau"] = {u: int(n) for u, n in bat_dau.items() if u in urls and int(n) > 0}
 
 
 def tien_phan(p: str, ph: dict, items: list, meta: dict) -> float:
@@ -117,7 +122,8 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
                 items = TT.ho_so(ph["ten"], int(ph.get("n") or 5), tran_usd=cap, loi_ra=loi_ra)
             else:
                 items = TT.binh_luan(ph["urls"], int(ph.get("per") or 20),
-                                     int(ph.get("tra_loi") or 0), tran_usd=cap, loi_ra=loi_ra)
+                                     int(ph.get("tra_loi") or 0), tran_usd=cap, loi_ra=loi_ra,
+                                     bat_dau=ph.get("bat_dau"))
         except A.LoiApify as e:
             loi = e
         except Exception as e:

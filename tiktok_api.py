@@ -414,28 +414,35 @@ def id_video(url: str) -> str | None:
 
 
 def binh_luan(urls: list[str], per: int, tra_loi: int = 20,
-              tran_usd: float | None = None, loi_ra: list | None = None) -> list[dict]:
+              tran_usd: float | None = None, loi_ra: list | None = None,
+              bat_dau: dict[str, int] | None = None) -> list[dict]:
     """Bình luận của từng video (item kiểu clockworks~tiktok-comments-scraper). Mỗi video tối
     đa `per` dòng (gốc + trả lời, như `maxItems` = per × số bài của actor cũ): bình luận gốc
     trước (50/yêu cầu), rồi trả lời của các luồng nhiều trả lời nhất (tối đa `tra_loi` mỗi
     luồng, 1 yêu cầu/luồng). Link không bóc được id video (link rút gọn) và video lỗi API ghi
     vào `loi_ra` (không ném — review 16/10) — bên gọi chạy dự phòng cho đúng các video đó.
-    Video đọc được mà 0 bình luận KHÔNG phải lỗi."""
+    Video đọc được mà 0 bình luận KHÔNG phải lỗi.
+
+    `bat_dau` (18/10/2026): {link: số bình luận GỐC đã có trong kho} — video cào dở lượt trước
+    đọc TIẾP từ vị trí đó (`listComments_cursor` là vị trí, 50/trang) thay vì trả tiền đọc lại
+    các trang đầu: video 5.181 bình luận cần ~70 trang gốc, mỗi lượt cào lại từ đầu tốn lại
+    đúng phần đã có. Trùng do thứ tự đổi chút giữa hai lượt thì kho gộp theo cid."""
     ngan = _Ngan(tran_usd)
+    tu = bat_dau or {}
     cac = [(u, id_video(u)) for u in urls]
     for u, vid in cac:
         if not vid:
             _ghi_loi(loi_ra, u, A.LoiApify("LOI", "link không có id video (link rút gọn?)"))
-    ra = _song_song(lambda x: _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra) if x[1] else [],
-                    cac)
+    ra = _song_song(lambda x: _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra,
+                                      int(tu.get(x[0]) or 0)) if x[1] else [], cac)
     return [r for ds in ra for r in ds]
 
 
 def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
-            loi_ra: list | None = None) -> list[dict]:
+            loi_ra: list | None = None, tu: int = 0) -> list[dict]:
     goc: list[dict] = []
     thay: set[str] = set()
-    con_tro = 0
+    con_tro = max(0, int(tu))
     try:
         for _ in range(math.ceil(max(1, per) / BL_MOI_TRANG) + 2):
             it = _goi({"listComments_awemeId": vid, "listComments_count": BL_MOI_TRANG,

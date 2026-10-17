@@ -597,13 +597,18 @@ BL_NGAY = 35
 def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
                           cao_het: bool = False) -> list[dict]:
     """Bài nên cào bình luận lượt này: đăng trong `BL_NGAY` ngày, nền tảng báo có bình luận,
-    chưa cào hoặc bình luận tăng đủ nhiều. Bài chưa cào đi trước, rồi bài nhiều bình luận."""
+    chưa cào hoặc bình luận tăng đủ nhiều. Bài chưa cào đi trước, rồi bài thiếu nhiều bình luận.
+    `bl_goc` (18/10/2026): số bình luận GỐC đã có trong kho — TikTok cào dở thì đọc tiếp từ đó
+    (`theo_doi._chia_lo_bl`, `tiktok_api.binh_luan(bat_dau=…)`); khoá chính (du_an, khoa_bai, ma)
+    phủ phép đếm."""
     if toi_da <= 0 or not nen_tang:
         return []
     with ket_noi() as c:
         return c.execute(
             "SELECT b.khoa, b.nen_tang, b.link, b.tai_khoan, b.tac_gia, b.binh_luan, "
-            "b.bl_lay_luc, b.bl_da_lay, b.bl_lay_khi_co, n.loai AS nguon_loai "
+            "b.bl_lay_luc, b.bl_da_lay, b.bl_lay_khi_co, n.loai AS nguon_loai, "
+            "(SELECT count(*) FROM binh_luan c WHERE c.du_an = b.du_an AND c.khoa_bai = b.khoa "
+            "AND NOT c.la_tra_loi) AS bl_goc "
             "FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
             "WHERE b.du_an = %s AND b.nen_tang = ANY(%s) AND COALESCE(b.binh_luan, 0) > 0 "
             "AND b.link <> '' AND b.dang_luc >= now() - make_interval(days => %s) "

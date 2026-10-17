@@ -3305,14 +3305,45 @@ def _la_tra_loi(r: dict) -> bool:
                 or g.get("repliesToId") or int(g.get("threadingDepth") or 0) > 0)
 
 
+#: Bình luận (18/10/2026): một lô chỉ tiêu tới phần còn của việc TRỪ phần giữ cho các lô SAU (tối
+#: đa `BL_GIU_CHO_SAU` phần còn) — lô bài to đi trước (`_uu_tien_bl`) không ăn hết tiền của các bài
+#: sau; phần chưa cào của bài to thì lượt sau đọc tiếp (`_doc_tiep_tiktok`).
+BL_GIU_CHO_SAU = 0.5
+
+
+def _uu_tien_bl(b: dict) -> tuple:
+    """Khoá xếp bài cào bình luận (18/10/2026, chủ dự án: ưu tiên bài nhiều bình luận nền tảng báo
+    mà chưa cào — đầu vào sắc thái/chủ đề): bài CHƯA cào lần nào trước, rồi bài THIẾU nhiều bình
+    luận nhất (nền tảng báo − đã có). Trước đây lô xếp theo cỡ TĂNG dần → bài to luôn đứng cuối,
+    hết tiền thì bị bỏ (`bl_lay_luc` vẫn NULL), lượt sau chọn lại đúng nó rồi lại bỏ: 2 video
+    5.181 và 4.752 bình luận chưa cào dòng nào, TikTok chỉ có ~30% bình luận."""
+    return (b.get("bl_lay_luc") is not None,
+            -(int(b.get("binh_luan") or 0) - int(b.get("bl_da_lay") or 0)))
+
+
+def _doc_tiep_tiktok(b: dict) -> int:
+    """Vị trí bình luận GỐC đọc tiếp của video TikTok CÀO DỞ (đã cào, còn dưới 80% số nền tảng báo
+    lúc cào): số gốc đã có trong kho (`bl_goc`). 0 = đọc từ đầu (bài mới; bài đã đủ mà thêm bình
+    luận — thứ tự của TikTok đổi theo tương tác nên đọc lại cho đủ)."""
+    if b.get("nen_tang") != "tiktok" or b.get("bl_lay_luc") is None:
+        return 0
+    co = int(b.get("bl_lay_khi_co") or 0)
+    if not co or int(b.get("bl_da_lay") or 0) >= K.BL_DU_TOI_THIEU * co:
+        return 0
+    return max(0, int(b.get("bl_goc") or 0))
+
+
 def _can_bl(b: dict, moi_bai: int) -> int:
     """Số bình luận xin cho một bài. Cào hết: số nền tảng báo +15% +10 (không trần mỗi bài);
-    lần sau của bài đã cào đủ (Facebook lọc theo ngày): phần tăng + 20."""
+    lần sau của bài đã cào đủ (Facebook lọc theo ngày): phần tăng + 20; video TikTok cào dở đọc
+    tiếp (18/10/2026): chỉ phần CÒN THIẾU +15% +10."""
     if moi_bai:
         return moi_bai
     co = int(b.get("binh_luan") or 0)
     if _tang_dan(b):
         co = max(0, co - int(b.get("bl_lay_khi_co") or 0))
+    elif _doc_tiep_tiktok(b):
+        co = max(0, co - int(b.get("bl_da_lay") or 0))
     return max(10, int(co * 1.15) + (20 if _tang_dan(b) else 10))
 
 
@@ -3379,7 +3410,9 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
                 if D._RAM.get(p):                  # phí khởi động Threads tính theo GB RAM
                     ph.update(mem=D._RAM[p], khoi=_BL_KHOI_DONG.get(p, 0.0))
             if p == "tiktok":
-                TDA.gan_binh_luan(ph, urls, 100 if day_du else min(D._TRA_LOI_TIKTOK, per_lo))
+                TDA.gan_binh_luan(ph, urls, 100 if day_du else min(D._TRA_LOI_TIKTOK, per_lo),
+                                  {b["link"]: n for b in lo if (n := _doc_tiep_tiktok(b))}
+                                  if day_du else None)
             cac.append(ph)
     if cac:
         with v._khoa:
@@ -3397,12 +3430,15 @@ def _chia_lo_bl(p: str, ds: list[dict], per: int) -> list[tuple[list[dict], obje
     if per:
         import deep_dive_tool as D
         n = min(_BL_LO, D._BAI_MOI_LO.get(p, _BL_LO))      # Threads: ≤ 20 bài mỗi lượt actor
+        ds = sorted(ds, key=_uu_tien_bl)
         return [(ds[i:i + n], None) for i in range(0, len(ds), n)]
     gia = _BL_GIA.get(p, 0.0)
     tran = A._tran_nen_tang(p, nen=True)[1] if gia else 0.0
     toi_da_bl = int(0.9 * tran / (gia * _HE_SO_UOC)) if gia else 10 ** 9
     nhom: dict = {}
-    for b in sorted(ds, key=lambda b: _can_bl(b, 0)):
+    # Ưu tiên bài chưa cào / thiếu nhiều bình luận nhất (18/10/2026, `_uu_tien_bl`) — trước đây
+    # xếp theo cỡ tăng dần nên bài to luôn đứng cuối và bị bỏ khi hết tiền.
+    for b in sorted(ds, key=_uu_tien_bl):
         moc = None
         if _tang_dan(b):
             moc = (b["bl_lay_luc"] - datetime.timedelta(days=1)).date()
@@ -3478,7 +3514,9 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             if c["bat"] and dung:
                 ds += K.bai_can_lay_binh_luan(ma, [p], c["so_bai"], cao_het=not c["moi_bai"])
         _tao_cac_phan_bl(v, ds, {p: c["moi_bai"] for p, c in cfg.items()})
-    for ph in list(_phan_bl(v)):
+        tk["ghi_chu"] += _cau_uu_tien_bl(ds)
+    cac_ph = list(_phan_bl(v))
+    for i, ph in enumerate(cac_ph):
         p = ph["nen_tang"]
         if ph.get("trang_thai") in _KET_PHAN:
             continue
@@ -3502,8 +3540,10 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             cap = float(ph.get("tran_usd") or 0) or _TRAN_TOI_THIEU
         else:
             tran_console = A._tran_nen_tang(p, nen=True)[1]
-            cap = round(min(tran_console, con, _con_viec(v), max(
-                _TRAN_TOI_THIEU, min_charge, float(ph["uoc_usd"]) * _HE_SO_TRAN)), 2)
+            sau = sum(float(x.get("uoc_usd") or 0) for x in cac_ph[i + 1:]
+                      if x.get("trang_thai") not in _KET_PHAN)
+            cap = _tran_lo_bl(tran_console, con, _con_viec(v), sau, float(ph["uoc_usd"]),
+                              min_charge)
             het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
             if cap < max(min_charge, _TRAN_TOI_THIEU) - 1e-9 or het_gio:
                 ly = ("hết giờ" if het_gio else
@@ -3534,6 +3574,38 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         quet_lon._ket_phan(v, ph, meta, len(items), loi, usd_so=tien)
     tk["usd"] = round(tk["usd"], 4)
     return tk
+
+
+def _tran_lo_bl(tran_console: float, con: float, con_v: float, sau: float, uoc: float,
+                min_charge: float = 0.0) -> float:
+    """Trần USD một lô bình luận = min(trần console, phần còn của tháng, phần còn của việc trừ phần
+    giữ cho các lô SAU (`sau` = Σ ước tính lô sau, tối đa `BL_GIU_CHO_SAU` phần còn), ước tính ×
+    1,5). Vì sao giữ chỗ (18/10/2026): lô bài to đứng đầu theo ưu tiên (`_uu_tien_bl`) mà lấy hết
+    phần còn thì các bài sau lại đói như cũ; phần bài to chưa cào được lượt sau đọc tiếp."""
+    return round(min(tran_console, con, con_v,
+                     max(_TRAN_TOI_THIEU, con_v - min(sau, BL_GIU_CHO_SAU * con_v)),
+                     max(_TRAN_TOI_THIEU, min_charge, uoc * _HE_SO_TRAN)), 2)
+
+
+def _cau_uu_tien_bl(ds: list[dict]) -> list[str]:
+    """Câu phễu bình luận (18/10/2026): đã ưu tiên bài nào, đọc tiếp bao nhiêu video TikTok cào dở
+    (bỏ bao nhiêu bình luận gốc đã có — không trả tiền đọc lại)."""
+    if not ds:
+        return []
+    def so(n) -> str:
+        return f"{int(n or 0):,}".replace(",", ".")
+    chua = sorted((b for b in ds if b.get("bl_lay_luc") is None),
+                  key=lambda b: -int(b.get("binh_luan") or 0))
+    tiep = [n for b in ds if (n := _doc_tiep_tiktok(b))]
+    ra = []
+    if chua:
+        ra.append(f"bình luận: ưu tiên {len(chua)} bài chưa cào thiếu nhiều nhất ("
+                  + ", ".join(f"{_TEN.get(b.get('nen_tang'), b.get('nen_tang'))} "
+                              f"{so(b.get('binh_luan'))}" for b in chua[:3]) + ")")
+    if tiep:
+        ra.append(f"bình luận TikTok: đọc tiếp {len(tiep)} video cào dở, bỏ {so(sum(tiep))} "
+                  "bình luận gốc đã có")
+    return ra
 
 
 def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: list[str],
