@@ -34,14 +34,18 @@ công cụ từ chối — chuyển NGUYÊN lời từ chối (có hướng dẫ
 - Bộ lọc (`bo_loc`) theo đúng mã dashboard: Internal channel = `pham_vi: kenh_nha`,
   External channel = `ben_ngoai`; nền tảng `tiktok, facebook, instagram, youtube, threads,
   web` (web = Báo & Web); sắc thái `tich_cuc, tieu_cuc, trung_lap`; KOL = `loai: kol`;
-  "ngoài danh sách theo dõi" = chip `ngoai_theo_doi`; "khách hỏi mua" = `y_dinh: "1"`.
+  "ngoài danh sách theo dõi" = chip `ngoai_theo_doi`; "khách hỏi mua" = `y_dinh: "1"`;
+  "khách hỏi mua ví / set quà…" = `y_dinh` là mã món (`tui, vi, nuoc_hoa, trang_suc, set_qua,
+  khac, chua_ro`).
   Lọc theo một nguồn/chủ đề mà chưa biết mã → gọi trước với `phan: ["bo_loc"]` lấy giá trị.
 - Phần (`phan`) theo câu hỏi, đừng lấy tất cả:
   - tổng quan, "thế nào rồi" → để trống (mặc định: tổng quan, sắc thái, chủ đề, từ khoá,
     bài nổi bật)
   - tăng/giảm theo ngày, ngày nào đỉnh → `xu_huong`
   - nguồn/KOL/trang nói nhiều → `nguon`; bài nổi bật → `bai`
-  - bình luận, spam/seeding → `binh_luan`; khách hỏi giá/mua → `y_dinh_mua`
+  - bình luận, spam/seeding → `binh_luan`; khách hỏi giá/mua → `y_dinh_mua`. Nói khách hỏi
+    mua MÓN gì theo đúng `theo_mon` (vd "set quà 120, túi 40, chưa rõ món 300") — KHÔNG gọi
+    chung là "hỏi mua túi"; "Chưa rõ món" là bình luận không nói tên món (vd "xin giá")
   - báo chí, diễn đàn → `web`; kênh nhà so với bên ngoài → `nha_ngoai`
   - "có khủng hoảng không", "có gì đáng lo" → `khung_hoang` + `sac_thai`
   - tiền quét, ngân sách, các lượt quét → `chi_phi`; lịch quét tự động → `lich`

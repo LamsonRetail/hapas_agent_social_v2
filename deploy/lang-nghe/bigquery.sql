@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.binh_luan`
   ma_noi_dung     STRING    OPTIONS(description='Băm 16 ký tự nội dung đã chuẩn hoá khi ≥ 40 ký tự — cùng mã từ ≥ 3 tài khoản trên ≥ 2 bài là seeding. NULL khi quá ngắn.'),
   link            STRING    OPTIONS(description='Link mở thẳng tới bình luận khi nền tảng có (Facebook, Instagram, Threads, YouTube); NULL thì dùng bai.link.'),
   ma_cha          STRING    OPTIONS(description='Mã bình luận cha khi dòng là trả lời (cùng khoa_bai). NULL với bình luận gốc.'),
+  san_pham        STRING    OPTIONS(description='Món khách hỏi mua, chỉ có ở bình luận hỏi mua (AI gán cùng sắc thái/chủ đề, đọc cả nội dung bài; từ 17/10/2026). Giá trị: tui (túi xách, balo), vi (ví), nuoc_hoa (nước hoa), trang_suc (trang sức), set_qua (set/combo/hộp quà nhiều món), khac (món khác của brand), ngoai_brand (đồ không phải hàng của brand, vd quần áo người trong video mặc — dashboard không tính là ý định mua), chua_ro (không đoán được món). NULL khi không phải bình luận hỏi mua, chưa gán nhãn, gán trước 17/10/2026 chưa gán lại, hoặc loai khác hop_le.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 CLUSTER BY du_an, nen_tang
@@ -208,7 +209,7 @@ OPTIONS(description='''[Lớp] Raw
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Bài đăng trong 35 ngày; số bài và số bình luận mỗi bài theo cấu hình từng nền tảng (du_an.cau_hinh trên Postgres, 0 = cào hết); từ 15/10/2026
 [Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng có nhãn lọc loai (spam/rác/trùng/seeding/thương hiệu) — chỉ hop_le được gán sắc thái/chủ đề
 [Refresh] MERGE theo du_an + khoa_bai + ma các dòng có cap_nhat_cuoi mới, sau mỗi lượt quét và 6 giờ một lần
-[Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày
+[Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày; món khách hỏi mua (san_pham)
 [Không dùng khi] Tổng bình luận nền tảng báo của bài → dùng SOCIAL_LISTENING.bai.binh_luan
 [Lưu ý] Thảo luận sạch / sắc thái: lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, Threads chỉ trả lời cấp 1 (10–300 mỗi bài), bài rất lớn có thể thiếu (so bai.binh_luan để biết độ phủ).''');
 
@@ -305,9 +306,14 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (từ 16/10/2026) | Bài đăng trong 35 ngày; số bài và số bình luận mỗi bài theo cấu hình từng nền tảng (du_an.cau_hinh trên Postgres, 0 = cào hết); từ 15/10/2026
 [Đã xử lý] Khử trùng theo ma; nội dung cắt 1.000 ký tự; mỗi dòng có nhãn lọc loai (spam/rác/trùng/seeding/thương hiệu) — chỉ hop_le được gán sắc thái/chủ đề
 [Refresh] MERGE theo du_an + khoa_bai + ma các dòng có cap_nhat_cuoi mới, sau mỗi lượt quét và 6 giờ một lần
-[Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày
+[Dùng khi] Đọc từng bình luận; tỷ lệ sắc thái, chủ đề bình luận của khách theo ngày; món khách hỏi mua (san_pham)
 [Không dùng khi] Tổng bình luận nền tảng báo của bài → dùng SOCIAL_LISTENING.bai.binh_luan
 [Lưu ý] Thảo luận sạch / sắc thái: lọc loai = 'hop_le'; Instagram chưa đăng nhập chỉ trả một phần, Threads chỉ trả lời cấp 1 (10–300 mỗi bài), bài rất lớn có thể thiếu (so bai.binh_luan để biết độ phủ).''');
+
+-- Món khách hỏi mua (17/10/2026): bảng đã tạo trước thì thêm cột (dong_bo_bq MERGE cả san_pham —
+-- chạy khối này TRƯỚC khi bật đồng bộ bản mới, cùng lúc chạy schema.sql trên Postgres).
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.binh_luan`
+  ADD COLUMN IF NOT EXISTS san_pham STRING OPTIONS(description='Món khách hỏi mua, chỉ có ở bình luận hỏi mua (AI gán cùng sắc thái/chủ đề, đọc cả nội dung bài; từ 17/10/2026). Giá trị: tui (túi xách, balo), vi (ví), nuoc_hoa (nước hoa), trang_suc (trang sức), set_qua (set/combo/hộp quà nhiều món), khac (món khác của brand), ngoai_brand (đồ không phải hàng của brand, vd quần áo người trong video mặc — dashboard không tính là ý định mua), chua_ro (không đoán được món). NULL khi không phải bình luận hỏi mua, chưa gán nhãn, gán trước 17/10/2026 chưa gán lại, hoặc loai khác hop_le.');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`

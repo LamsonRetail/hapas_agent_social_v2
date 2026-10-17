@@ -21,6 +21,7 @@ import datetime
 import functools
 import itertools
 import re
+import unicodedata
 
 from dashboard import chuan_chu as CC
 from dashboard import tu_ghep as TG
@@ -140,8 +141,9 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
 #   q          chữ tìm bỏ dấu (+ teen code, chữ kiểu cách — `chuan_chu.khoa`): bài khớp khi nội
 #              dung + hashtag chứa chữ; bình luận khớp khi CHÍNH nó chứa chữ HOẶC bài của nó khớp
 #              (thảo luận dưới bài nói về chữ đó).
-#   y_dinh     "1" = chỉ bình luận có Ý ĐỊNH MUA (`la_y_dinh_mua`, 16/10/2026). Như chủ đề bình
-#              luận: chỉ lọc bình luận, phần bài không đổi.
+#   y_dinh     "1" = chỉ bình luận có Ý ĐỊNH MUA (`la_y_dinh_mua`, 16/10/2026); mã MÓN (`SAN_PHAM`,
+#              vd "set_qua", 17/10/2026) = chỉ bình luận hỏi mua món đó (`san_pham_bl`). Như chủ đề
+#              bình luận: chỉ lọc bình luận, phần bài không đổi.
 #   gom_mg     "1" = mây từ khoá GỒM cả bình luận minigame (mặc định ẩn). KHÔNG lọc khối nào khác —
 #              chỉ là tuỳ chọn hiển thị của mây + ngăn từ khoá, nằm đây để theo URL và khoá nhớ.
 CHIEU_LOC = ("pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong",
@@ -156,7 +158,16 @@ ANH_HUONG = {"nano": "Nano · dưới 10N", "micro": "Micro · 10N–100N", "mac
              "mega": "Mega · từ 1Tr", "khong_ro": "Không rõ follower"}
 TUONG_TAC_MUC = (100, 1_000, 10_000)
 KIEU_QUET = {"theo_doi": "Quét nguồn theo dõi", "tu_khoa": "Tìm theo từ khoá"}
-Y_DINH = {"1": "bình luận hỏi giá / muốn mua"}
+#: MÓN khách hỏi mua (17/10/2026) — bản sao `phan_loai.SAN_PHAM` (mã lưu ở `binh_luan.san_pham`;
+#: bài thử đối chiếu). Thứ tự = thứ tự hiện trên khối Ý định mua khi bằng số.
+SAN_PHAM = {"tui": "Túi xách", "vi": "Ví", "nuoc_hoa": "Nước hoa", "trang_suc": "Trang sức",
+            "set_qua": "Set quà / combo", "khac": "Món khác",
+            "ngoai_brand": "Đồ không phải của brand", "chua_ro": "Chưa rõ món"}
+#: Hỏi mua đồ KHÔNG phải của brand (váy KOL mặc, đồ may đo, "link nồi") không tính là ý định mua.
+SP_NGOAI = "ngoai_brand"
+SP_CHUA_RO = "chua_ro"
+Y_DINH = {"1": "bình luận hỏi giá / muốn mua",
+          **{k: f"hỏi mua: {v}" for k, v in SAN_PHAM.items() if k != SP_NGOAI}}
 # Bản sao nhãn chủ đề của Mark (`phan_loai.CHU_DE_BAI` / `phan_loai.CHU_DE`) — dashboard không
 # import module của Mark; bài thử đối chiếu. Dùng để biết nhãn nào là của bài, nhãn nào của bình luận.
 CHU_DE_BAI = ("Chiến dịch & quảng cáo", "Giá cả & khuyến mãi", "Chất lượng sản phẩm",
@@ -194,8 +205,9 @@ BO_LOC_NHANH = (
     # 16/10/2026: cùng định nghĩa với ô "Ý định mua" (chủ đề AI hoặc câu hỏi giá/mua), không còn
     # chỉ theo chủ đề — link cũ `chu_de=Giá/mua…` vẫn lọc theo chủ đề như trước.
     {"ma": "hoi_mua", "ten": "Khách hỏi mua",
-     "mo_ta": "Bình luận hỏi giá, hỏi chỗ mua, xin link, hỏi size/ship, muốn đặt — đúng các "
-              "bình luận đếm ở ô Ý định mua.",
+     "mo_ta": "Bình luận hỏi giá, hỏi chỗ mua, xin link, hỏi size/ship, muốn đặt — MỌI món "
+              "(túi, ví, nước hoa, set quà…; khối Ý định mua tách theo món), đúng các bình luận "
+              "đếm ở ô Ý định mua. Hỏi mua đồ không phải của brand không tính.",
      "loc": {"y_dinh": "1"}},
     {"ma": "can_xu_ly", "ten": "Tiêu cực cần xử lý",
      "mo_ta": "Bình luận tiêu cực trên Internal channel 7 ngày gần nhất (tính cả hôm nay) — cần trả lời.",
@@ -355,7 +367,7 @@ class _Loc:
         self.tt = int(b.get("tuong_tac") or 0)
         self.kq = b.get("kieu_quet") or ""
         self.q = CC.khoa_tim(b.get("q")) if b.get("q") else ""
-        self.yd = b.get("y_dinh") == "1"
+        self.yd = str(b.get("y_dinh") or "")          # "1" | mã món | "" (không lọc)
         self.gom_mg = b.get("gom_mg") == "1"           # tuỳ chọn mây từ, không phải chiều lọc
         self._q_bai: dict[int, bool] = {}
         self.rong = self._tinh_rong()
@@ -373,7 +385,7 @@ class _Loc:
         if not self.yd:
             return self
         ban = copy.copy(self)
-        ban.yd = False
+        ban.yd = ""
         ban.rong = ban._tinh_rong()
         return ban
 
@@ -450,7 +462,7 @@ class _Loc:
             m |= _BIT["kieu_quet"]
         if self.kt and (bai is None or bai.get("kieu_trang") not in self.kt):
             m |= _BIT["kieu_trang"]
-        if self.yd and not la_y_dinh_mua(c):
+        if self.yd and not khop_y_dinh(c, self.yd):
             m |= _BIT["y_dinh"]
         return m
 
@@ -1201,7 +1213,10 @@ def the_bl(c: dict) -> dict:
             "sac_thai": sac_bl(c) if lb == "hop_le" else TEN_LOAI_BL[lb].lower(),
             "chu_de": c.get("chu_de") or "", "khoa_bai": c.get("khoa_bai") or "",
             "nen_tang": c.get("nen_tang") or "", "loai": lb, "ten_loai": TEN_LOAI_BL[lb],
-            "ly_do_loc": c.get("ly_do_loc") or ""}
+            "ly_do_loc": c.get("ly_do_loc") or "",
+            # Món khách hỏi mua (17/10/2026) — chỉ bình luận hỏi mua; "" với bình luận khác.
+            "san_pham": (SAN_PHAM[san_pham_bl(c)] if lb == "hop_le" and (
+                la_y_dinh_mua(c) or c.get("san_pham") == SP_NGOAI) else "")}
 
 
 def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
@@ -1317,15 +1332,16 @@ def _gia_tri_bl(c: dict, truong: str) -> str:
 def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
                 trang: int = 1, ngay_tu=None, ngay_den=None, sac_thai=None, chu_de=None,
                 nen_tang=None, loai_nguon=None, loai=None, nguon=None, q=None, cum=None,
-                y_dinh: bool = False, khoa_bai: str | None = None,
+                y_dinh: bool | str = False, khoa_bai: str | None = None,
                 sap_xep: str = "thich", moi_trang: int = MOI_TRANG, bo_loc=None,
                 bai_theo_khoa: dict | None = None) -> dict:
     """Luồng bình luận lọc theo các trường (kiểu Kompa): nền tảng, nguồn, sắc thái, chủ đề,
     nhãn lọc, chữ tìm (`chuan_chu.khoa`: bỏ dấu, teen code, chữ kiểu cách — nội dung + tác giả),
     khoảng ngày; sắp xếp nhiều thích / mới / cũ — AND với bộ lọc chung `bo_loc` (xem phần "bộ
     lọc chung"). Ngăn từ khoá gửi `cum`: khớp đúng như mây từ đếm (`_tach_cum` trên nội dung, KHÔNG
-    xét tên tác giả) để số trong ngăn bằng số trên mây. `y_dinh`: chỉ bình luận ý định mua;
-    `khoa_bai`: chỉ bình luận của một bài (khối Ý định mua).
+    xét tên tác giả) để số trong ngăn bằng số trên mây. `y_dinh`: chỉ bình luận ý định mua
+    (True / "1") hoặc chỉ bình luận hỏi mua MỘT món (mã `SAN_PHAM`); `khoa_bai`: chỉ bình luận
+    của một bài (khối Ý định mua).
     -> {tong, trang, so_trang, binh_luan, facets}. `facets` = {trường: [{gia_tri, ten, so}]}
     đếm trên các dòng khớp MỌI điều kiện TRỪ chính trường đó (chọn tiếp được giá trị khác)."""
     chu = CC.khoa_tim(q) if q else ""
@@ -1349,7 +1365,7 @@ def chi_tiet_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
                    (not f.gom_mg and _chu_de(c) == CHU_DE_MINIGAME) or
                    la_rac_quang_cao(c.get("noi_dung"))):
             continue                       # như mây: minigame ẩn trừ khi gom_mg=1; rác quảng cáo bỏ
-        if y_dinh and not la_y_dinh_mua(c):
+        if y_dinh and not khop_y_dinh(c, "1" if y_dinh is True else str(y_dinh)):
             continue
         if not f.rong and f.hong_bl(c, tra(c.get("khoa_bai"))):
             continue
@@ -1442,10 +1458,8 @@ _RE_Y_DINH_MUA = re.compile(
 _RE_CHI_GIA = re.compile(r"\W*gia\W*")                 # cả bình luận chỉ là "Giá?"
 
 
-def la_y_dinh_mua(c: dict) -> bool:
-    """Bình luận có Ý ĐỊNH MUA: hợp lệ VÀ (chủ đề AI "Giá/mua ở đâu/ý định mua" mà không Tiêu cực,
-    HOẶC câu hỏi giá/mua: hỏi/xin giá, giá bao nhiêu/bn, ib/inbox, mua ở đâu, xin link, còn hàng/size, ship,
-    đặt hàng…). Thuần, không gọi mạng."""
+def _hoi_mua(c: dict) -> bool:
+    """Bình luận hợp lệ mang dấu hiệu hỏi mua (chủ đề AI hoặc câu hỏi giá/mua) — CHƯA xét món."""
     if loai_bl(c) != "hop_le":
         return False
     # Chủ đề "Giá/mua…" gộp cả lời CHÊ giá ("hợp kim mà giá cỡ đấy :)))", "nhìn giá và lặng lẽ
@@ -1454,6 +1468,61 @@ def la_y_dinh_mua(c: dict) -> bool:
         return True
     k = CC.khoa(c.get("noi_dung"))
     return bool(_RE_Y_DINH_MUA.search(k)) or _RE_CHI_GIA.fullmatch(k) is not None
+
+
+def la_y_dinh_mua(c: dict) -> bool:
+    """Bình luận có Ý ĐỊNH MUA: hợp lệ VÀ (chủ đề AI "Giá/mua ở đâu/ý định mua" mà không Tiêu cực,
+    HOẶC câu hỏi giá/mua: hỏi/xin giá, giá bao nhiêu/bn, ib/inbox, mua ở đâu, xin link, còn
+    hàng/size, ship, đặt hàng…) VÀ AI không nói món là đồ KHÔNG phải của brand (`SP_NGOAI`,
+    17/10/2026: "xin link chân váy chị mặc" dưới bài KOL không phải khách hỏi mua hàng của
+    brand). Thuần, không gọi mạng."""
+    return c.get("san_pham") != SP_NGOAI and _hoi_mua(c)
+
+
+# ── MÓN khách hỏi mua (17/10/2026) ──
+# Chủ dự án: "đôi khi người dùng hỏi mua những cái khác nhưng đang bị đánh vào hỏi mua túi". Kho
+# 16/10: 1.798 bình luận ý định mua, 1.456 không nói tên món — món nằm ở BÀI (hộp quà 20/10 gồm túi
+# + ví + nước hoa, gắn #tuixachhapas); 244 hỏi set/combo, ~55 nói "túi". AI gán món khi gán nhãn
+# (`binh_luan.san_pham`, đọc cả bài). Dòng chưa có món (gán trước 17/10, hoặc lượt cào gán ngay) lùi
+# về CHỮ trong chính bình luận — luật an toàn: chỉ khi bình luận nói tên món; không đoán theo bài
+# (hashtag túi xách gắn cả bài set quà, bài KOL — đoán theo bài là lặp lại đúng lỗi), không bao giờ
+# ra `ngoai_brand` (cần biết brand bán gì). So trên chữ CÓ DẤU: "túi" khác "tui" (= tôi).
+_RE_SP_SET = re.compile(
+    r"(?<!\w)(?:s[eé]t(?! đồ)|combo|box|gift ?box|h[ộo]p qu[àa]|b[ộo] qu[àa])(?!\w)")
+_RE_SP = (
+    ("tui", re.compile(r"(?<!\w)(?:túi|balo|ba lô|clutch|tote|tui xach)(?!\w)")),
+    ("vi", re.compile(r"(?<!\w)(?:ví(?! dụ)|bóp)(?!\w)")),
+    ("nuoc_hoa", re.compile(r"(?<!\w)(?:nước hoa|nuoc hoa|perfume)(?!\w)")),
+    ("trang_suc", re.compile(
+        r"(?<!\w)(?:dây chuyền|day chuyen|vòng cổ|vòng tay|lắc tay|lắc chân|nhẫn|bông tai|"
+        r"khuyên tai|trang sức|trang suc|charm)(?!\w)")),
+    ("khac", re.compile(
+        r"(?<!\w)(?:váy|đầm|áo|quần|giày|dép|thắt lưng|dây lưng|khăn|mũ|nón|kính|băng đô|"
+        r"móc khoá|móc khóa|son|đồng hồ|set đồ)(?!\w)")),
+)
+
+
+def san_pham_tu_chu(text) -> str | None:
+    """Món nói THẲNG trong bình luận (luật lùi khi AI chưa gán món), None khi không nói tên. Có
+    set/combo/hộp quà → set quà ("xin giá set túi trắng" hỏi cả set); còn lại món nhắc trước."""
+    t = unicodedata.normalize("NFC", " ".join(str(text or "").split())).lower()
+    if _RE_SP_SET.search(t):
+        return "set_qua"
+    gap = [(m.start(), ma) for ma, r in _RE_SP if (m := r.search(t))]
+    return min(gap)[1] if gap else None
+
+
+def san_pham_bl(c: dict) -> str:
+    """Mã MÓN của một bình luận hỏi mua: AI gán (`san_pham`) → chữ trong bình luận → chưa rõ."""
+    sp = c.get("san_pham")
+    if sp in SAN_PHAM:
+        return sp
+    return san_pham_tu_chu(c.get("noi_dung")) or SP_CHUA_RO
+
+
+def khop_y_dinh(c: dict, gt: str) -> bool:
+    """Giá trị lọc `y_dinh`: "1" = mọi ý định mua; mã món = ý định mua của món đó."""
+    return la_y_dinh_mua(c) and (gt == "1" or san_pham_bl(c) == gt)
 
 
 def y_dinh_mua(rows: list[dict], tu: datetime.date, den: datetime.date, *,
@@ -1466,19 +1535,25 @@ def y_dinh_mua(rows: list[dict], tu: datetime.date, den: datetime.date, *,
     (None: không so). % so với kỳ trước không hiện khi kỳ trước 0, khi kỳ này / kỳ trước bị cắt
     bớt dòng (`nay_bi_cat`, `truoc_bi_cat`) hoặc khi lọc theo mức tương tác (tương tác cộng dồn
     theo tuổi bài). Mẫu số "bình luận sạch" bỏ chiều y_dinh của bộ lọc (không thì luôn 100%).
-    -> {so, sach, pt, truoc, doi_pt, theo_chu_de, theo_cau, xu_huong, top_bai}."""
+    Đang lọc MỘT món (y_dinh = mã món) thì số / cột / top bài chỉ đếm món đó; `theo_san_pham`
+    luôn chia MỌI ý định mua theo món (17/10/2026) để thấy khách hỏi món gì.
+    -> {so, sach, pt, truoc, doi_pt, theo_chu_de, theo_cau, xu_huong, top_bai, theo_san_pham,
+    san_pham_loc, sp_ai, ngoai_brand}."""
     hom_nay = hom_nay or datetime.datetime.now(VN).date()
-    f = bien_dich(bo_loc).bo_y_dinh()
+    goc = bien_dich(bo_loc)
+    gt = goc.yd or "1"
+    f = goc.bo_y_dinh()
 
     def sach(ds: list[dict], a: datetime.date, b: datetime.date) -> list[dict]:
         return loc_bl([c for c in ds if loai_bl(c) == "hop_le"
                        and (n := _ngay_bl(c)) is not None and a <= n <= b], f, bai_theo_khoa)
     nay = sach(rows, tu, den)
-    yd = [c for c in nay if la_y_dinh_mua(c)]
+    tat = [c for c in nay if la_y_dinh_mua(c)]
+    yd = tat if gt == "1" else [c for c in tat if san_pham_bl(c) == gt]
     truoc = None
     if rows_truoc is not None:
         a, b = khoang_truoc(tu, den)
-        truoc = sum(1 for c in sach(rows_truoc, a, b) if la_y_dinh_mua(c))
+        truoc = sum(1 for c in sach(rows_truoc, a, b) if khop_y_dinh(c, gt))
     so_sanh_duoc = truoc is not None and not (truoc_bi_cat or nay_bi_cat or f.tt)
     theo_tuan = (den - tu).days + 1 > NGAY_TOI_DA_THEO_NGAY
     cuoi = max(tu, min(den, hom_nay))
@@ -1497,16 +1572,28 @@ def y_dinh_mua(rows: list[dict], tu: datetime.date, den: datetime.date, *,
             cot["so"][chi[max(tu, n - datetime.timedelta(days=n.weekday())) if theo_tuan else n]] += 1
     sach_bai = collections.Counter(c.get("khoa_bai") for c in nay)
     dem_bai = collections.Counter(c.get("khoa_bai") for c in yd)
-    mau = {}
+    mau: dict = {}
+    sp_bai: dict = {}
     for c in yd:
         mau.setdefault(c.get("khoa_bai"), c)
+        sp_bai.setdefault(c.get("khoa_bai"), collections.Counter())[san_pham_bl(c)] += 1
     top = []
     for k, n in sorted(dem_bai.items(), key=lambda x: (-x[1], str(x[0])))[:toi_da]:
         c = mau[k]
+        # Món khách dưới bài này hỏi NHIỀU nhất (bỏ "chưa rõ" nếu có món rõ) — đọc nhanh "bài
+        # này khách hỏi set quà", không phải đoán theo hashtag của bài.
+        ro = [(-v, ma) for ma, v in sp_bai[k].items() if ma != SP_CHUA_RO]
+        sp = min(ro)[1] if ro else SP_CHUA_RO
         top.append({"khoa_bai": k or "", "so": n, "sach": sach_bai[k],
                     "nen_tang": c.get("nen_tang") or "", "tac_gia": c.get("bai_tac_gia") or "",
-                    "nguon": khoa_nguon_bl(c)[1], "link": "", "noi_dung": "", "dang_luc": None})
+                    "nguon": khoa_nguon_bl(c)[1], "link": "", "noi_dung": "", "dang_luc": None,
+                    "san_pham": sp, "ten_san_pham": SAN_PHAM[sp], "so_san_pham": sp_bai[k][sp]})
     theo_cd = sum(1 for c in yd if _chu_de(c) == CHU_DE_MUA)
+    dem_sp = collections.Counter(san_pham_bl(c) for c in tat)
+    thu_tu = list(SAN_PHAM)
+    theo_sp = [{"ma": ma, "ten": SAN_PHAM[ma], "so": v}
+               for ma, v in sorted(dem_sp.items(), key=lambda x: (
+                   x[0] == SP_CHUA_RO, -x[1], thu_tu.index(x[0])))]
     return {"so": len(yd), "sach": len(nay),
             "pt": round(100.0 * len(yd) / len(nay), 1) if nay else None,
             "truoc": truoc, "doi_pt": doi_pt(len(yd), truoc) if so_sanh_duoc else None,
@@ -1514,7 +1601,10 @@ def y_dinh_mua(rows: list[dict], tu: datetime.date, den: datetime.date, *,
             "theo_chu_de": theo_cd, "theo_cau": len(yd) - theo_cd,
             "xu_huong": {"don_vi": "tuần" if theo_tuan else "ngày",
                          "moc": [m.isoformat() for m in moc], **cot},
-            "top_bai": top}
+            "top_bai": top,
+            "theo_san_pham": theo_sp, "san_pham_loc": "" if gt == "1" else gt,
+            "sp_ai": sum(1 for c in tat if c.get("san_pham") in SAN_PHAM),
+            "ngoai_brand": sum(1 for c in nay if c.get("san_pham") == SP_NGOAI and _hoi_mua(c))}
 
 
 def gan_ngu_canh_y_dinh(top: list[dict], ngu_canh: dict[str, dict]) -> None:
