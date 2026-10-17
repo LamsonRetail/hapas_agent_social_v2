@@ -234,6 +234,8 @@ form[data-ban="1"] .ns-luu .nut:not(.nut--nhe) { box-shadow: 0 0 0 3px var(--nha
   .ns-o-so .ns-gia-tri { font-size: 18px; }
   .ns-o-so > div { padding: 54px 12px 10px; }                     /* điện thoại: biểu tượng lên trên */
   .ns-o-so > div::before { left: 12px; top: 12px; width: 34px; height: 34px; border-radius: 10px; }
+  /* Gói Apify (gộp 18/10/2026): cùng lưới 2 cột như thẻ tóm tắt dự án — 4 thẻ một cột dài ~700 px */
+  .ns-goi__so { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ns-mau { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .ns-mau > span { grid-column: 1 / -1; }
   .ns-mau__nut { padding: 4px 8px; }

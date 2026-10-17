@@ -102,7 +102,8 @@
   .lq-bang tr { padding: 12px 0; border-bottom: 1px solid var(--ke); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; }
   .lq-bang td { padding: 0; border: 0 !important; min-width: 0; }
   .lq-bang td:first-child, .lq-bang td.lq-thao-tac { grid-column: 1 / -1; }
-  .lq-bang td.so { text-align: left; }
+  /* xuống dòng (18/10/2026): dòng phụ "lượt × chi thật · tối đa" dài hơn nửa thẻ 390 px — td.so nowrap bị cắt */
+  .lq-bang td.so { text-align: left; white-space: normal; }
   .lq-bang td[data-nhan]::before { content: attr(data-nhan); display: block; font-size: 11px; color: var(--chu-mo); margin-bottom: 2px; }
   .lq-bang td:first-child::before { display: none; }
   .lq-thao-tac .cum-nut { flex-wrap: wrap; }
