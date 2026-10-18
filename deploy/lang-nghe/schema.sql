@@ -750,7 +750,7 @@ COMMENT ON TABLE kiem_do_phu IS $$[Lớp] Raw
 [Khoá] PK: id | Join: du_an → du_an.ma; luot_id → luot_quet.id; bai_sot[].khoa → bai.khoa (cùng du_an)
 [Nguồn] Mark (kiem_do_phu.py) trong lượt /theodoi: hashtag brand/chiến dịch + bài mới nhất của nhà sáng tạo nổi qua TikTok API (scraptik), đối chiếu bảng bai
 [Phạm vi] Mọi dự án bật kiểm độ phủ | Kênh: TikTok | Bài đăng trong 30 ngày trước lúc kiểm, từ 17/10/2026
-[Đã xử lý] Bài nhắc brand theo luật khớp từ khoá/hashtag của Mark, đã bỏ từ loại trừ và spam; bài AI đã loại trước không vào mẫu số; trùng bài giữa các đường gộp một
+[Đã xử lý] Bài nhắc brand theo luật khớp từ khoá/hashtag của Mark, đã bỏ từ loại trừ và spam; bài đã loại trước (AI, hoặc luật seeding affiliate / thị trường / cổng brand — từ 18/10/2026 tính cả sổ seeding) không vào mẫu số; trùng bài giữa các đường gộp một
 [Refresh] Ghi một lần khi lượt kiểm xong (hai lần mỗi tuần mỗi dự án), không sửa lại
 [Dùng khi] Theo dõi độ phủ thu thập (do_phu_tl), so với lần trước, xem bài brand bị sót, lý do và Mark đã làm gì
 [Không dùng khi] Bài đã thu thập → dùng bai; chi phí cả lượt → dùng luot_quet
@@ -761,9 +761,9 @@ COMMENT ON COLUMN kiem_do_phu.luot_id IS 'Lượt /theodoi chứa lượt kiểm
 COMMENT ON COLUMN kiem_do_phu.luc IS 'Thời điểm ghi kết quả kiểm (UTC).';
 COMMENT ON COLUMN kiem_do_phu.nen_tang IS 'Nền tảng của mẫu. Giá trị: tiktok.';
 COMMENT ON COLUMN kiem_do_phu.so_mau IS 'Số bài mẫu đăng trong 30 ngày (sau khi gộp trùng), bài.';
-COMMENT ON COLUMN kiem_do_phu.so_nhac IS 'Số bài mẫu nhắc brand, trừ bài AI đã loại trước — mẫu số của độ phủ, bài.';
+COMMENT ON COLUMN kiem_do_phu.so_nhac IS 'Số bài mẫu nhắc brand, trừ bài đã loại trước (AI hoặc luật, gồm bài seeding affiliate) — mẫu số của độ phủ, bài.';
 COMMENT ON COLUMN kiem_do_phu.so_da_co IS 'Số bài nhắc brand đã có trong bai lúc kiểm (trước khi bổ sung), bài.';
-COMMENT ON COLUMN kiem_do_phu.so_da_loai IS 'Số bài nhắc brand mà Mark đã xét và AI loại trước đó (không tính là sót), bài.';
+COMMENT ON COLUMN kiem_do_phu.so_da_loai IS 'Số bài nhắc brand mà Mark đã xét và loại trước đó — AI loại, hoặc luật seeding affiliate / thị trường / cổng brand (từ 18/10/2026 tính cả sổ seeding) — không tính là sót, bài.';
 COMMENT ON COLUMN kiem_do_phu.so_sot IS 'Số bài nhắc brand chưa có trong bai = so_nhac − so_da_co, bài.';
 COMMENT ON COLUMN kiem_do_phu.thao_luan_nhac IS 'Tổng thảo luận (1 + bình luận nền tảng báo) của các bài nhắc brand, thảo luận.';
 COMMENT ON COLUMN kiem_do_phu.thao_luan_da_co IS 'Tổng thảo luận của các bài nhắc brand đã có trong bai, thảo luận.';

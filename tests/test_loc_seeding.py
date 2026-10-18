@@ -214,10 +214,15 @@ def test_luot_tim_bo_seeding_truoc_ai_ghi_so_va_luot_sau_van_nho(monkeypatch, ai
     assert len(TDA.doc_seeding("hapas")) == 8
     assert "seeding affiliate 8" in T._cau_pheu("tiktok", f)
     assert "bỏ 8 bài seeding affiliate của 1 tài khoản (@aff_mau 8 bài ngày" in T._cau_seeding_tk(tk)
-    # Gặp lại bài đã loại (cùng dấu luật): "đã loại trước", không xét lại, không tới AI.
+    # Gặp lại bài đã loại (cùng dấu luật, soát 18/10/2026 H1): sổ KHÔNG chặn vĩnh viễn lý do
+    # seeding — luật hiện hành xét lại (vẫn seeding: bỏ lại), không tới AI, không ghi kho; bài vẫn
+    # là bài đã biết (không đếm "chưa thấy" của nhịp giãn).
     tk2 = _tk()
     T._tach_va_giu(DU_AN, 8, _hits("seeding"), ["hapas"], 1e12, tk2)
-    assert tk2["pheu"]["tiktok"]["da_loai_truoc"] == 8 and not tk2["pheu"]["tiktok"]["seeding"]
+    f2 = tk2["pheu"]["tiktok"]
+    assert (f2["da_loai_truoc"], f2["xet_lai"], f2["seeding"]) == (0, 8, 8)
+    assert len(ai) == 1 and len(kho.ghi) == 1
+    assert "xét lại theo luật 8 bài đã loại" in T._cau_pheu("tiktok", f2)
     # Lượt sau, ĐỔI từ khoá (dấu luật khác → phần "bai" của sổ làm lại từ đầu): MỘT video mới của
     # cùng tài khoản (ngày khác) + 8 bài cũ. Kho không có bài nào của tài khoản, nhưng sổ seeding nhớ
     # nhịp 8 bài/ngày → vẫn bỏ cả 9, không bài nào tới AI.
@@ -229,6 +234,52 @@ def test_luot_tim_bo_seeding_truoc_ai_ghi_so_va_luot_sau_van_nho(monkeypatch, ai
                    ["hapas", "túi hapas"], 1e12, tk3)
     assert tk3["pheu"]["tiktok"]["seeding"] == 9 and len(ai) == 1 and len(kho.ghi) == 1
     assert len(TDA.doc_seeding("hapas")) == 9
+
+
+def _hits_bl(n: int) -> list:
+    """8 bài của tài khoản seeding mẫu, mỗi bài `n` bình luận (lần đọc sau)."""
+    hits = _hits("seeding")
+    for d, _ in hits:
+        d["comments"] = n
+    return hits
+
+
+def test_bai_seeding_len_binh_luan_hom_sau_duoc_xet_lai_va_giu(monkeypatch, ai):
+    """Soát 18/10/2026 (H1): lượt 07:00 thấy 8 video gần 0 bình luận → loại cả 8. Hôm sau mỗi video
+    40 bình luận: sổ không chặn, luật xét lại trên SỐ MỚI (trung vị 40 > 2, mỗi bài ≥ 10) → cả 8 tới
+    AI và vào kho; sổ seeding nhận số mới."""
+    kho = KhoGia().cai(monkeypatch)
+    T._tach_va_giu(DU_AN, 7, _hits("seeding"), ["hapas"], 1e12, _tk())
+    assert ai == [] and {x["bl"] for x in TDA.doc_seeding("hapas")} == {0}
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 8, _hits_bl(40), ["hapas"], 1e12, tk)
+    f = tk["pheu"]["tiktok"]
+    assert (f["xet_lai"], f["seeding"], f["da_loai_truoc"]) == (8, 0, 0)
+    assert len(ai) == 1 and len(ai[0]) == 8 and [r["binh_luan"] for r in kho.ghi[0]] == [40] * 8
+    assert {x["bl"] for x in TDA.doc_seeding("hapas")} == {40}, "sổ seeding nhận số mới"
+    # Số luỹ kế: một lần đọc cũ hơn (ít bình luận hơn) không hạ số trong sổ.
+    TDA.ghi_seeding("hapas", [T._dong_so_seeding(d, dt) for d, dt in _hits_bl(3)])
+    assert {x["bl"] for x in TDA.doc_seeding("hapas")} == {40}
+
+
+def test_tat_luat_doi_nguong_hay_thanh_kenh_nha_thi_bai_da_loai_duoc_xet_lai(monkeypatch, ai):
+    """Bài đã loại vì seeding: tắt luật, nâng ngưỡng hay duyệt tài khoản thành kênh nhà thì lượt sau
+    bài đi tiếp (dấu luật `dau_loai` không tính `cau_hinh`, nên sổ không được chặn)."""
+    kho = KhoGia().cai(monkeypatch)
+    T._tach_va_giu(DU_AN, 7, _hits("seeding"), ["hapas"], 1e12, _tk())
+    assert ai == []
+    for i, da in enumerate((
+            {**DU_AN, "cau_hinh": {"seeding": {"bat": False}}},
+            {**DU_AN, "cau_hinh": {"seeding": {"bai_mot_ngay": 9, "bai_bay_ngay": 50}}})):
+        tk = _tk()
+        T._tach_va_giu(da, 8 + i, _hits("seeding"), ["hapas"], 1e12, tk)
+        assert len(ai) == i + 1 and len(ai[-1]) == 8 and not tk["pheu"]["tiktok"]["seeding"]
+        assert tk["pheu"]["tiktok"]["xet_lai"] == 8
+        kho.bai.clear()                       # bài vừa giữ ra khỏi kho: lần sau vẫn là bài mới
+    kho.nguon = [{"id": 1, "nen_tang": "tiktok", "dinh_danh": "aff_mau", "loai": "kenh_nha"}]
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 10, _hits("seeding"), ["hapas"], 1e12, tk)
+    assert len(ai) == 3 and len(ai[-1]) == 8 and not tk["pheu"]["tiktok"]["seeding"]
 
 
 def test_tat_luat_seeding_thi_bai_di_tiep_toi_ai(monkeypatch, ai):

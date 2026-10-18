@@ -107,6 +107,30 @@ def test_ly_do_sot():
         "tìm theo từ khoá không trả về bài này"]
 
 
+def test_danh_dau_doc_so_seeding_bai_seeding_khong_la_sot_va_duoc_xet_lai(monkeypatch):
+    """Soát 18/10/2026 (H1): bài seeding đã loại chỉ còn ở sổ seeding (đổi từ khoá đã làm lại phần
+    "bai" của sổ) không phải bài "sót"; bài loại theo luật được đưa qua phễu xét lại, bài AI loại
+    thì không."""
+    import theo_doi_api as TDA
+    monkeypatch.setattr(K, "khoa_da_co", lambda ma, khoa: set())
+    luc = datetime.datetime.now(_VN) - datetime.timedelta(days=2)
+    tu_pv = luc - datetime.timedelta(days=10)
+    tu = ["hapas"]
+    items = [(TT.video(_aw(v, u, desc, luc, bl=0)), "#hapas")
+             for v, u, desc in ((71, "aff.x", "#hapas"), (72, "aff.x", "#hapas xinh"),
+                                (73, "kol.y", "túi hapas"))]
+    TDA.ghi_seeding("hapas", [{"khoa": "tiktok:71", "nen_tang": "tiktok", "tai_khoan": "aff.x",
+                               "dang_luc": luc, "bl": 0, "xem": 10}])
+    TDA.ghi_loai("hapas", TDA.dau_loai(DU_AN, tu), [("tiktok:72", "ai:lac_de", luc)], tu_pv)
+    mau = KDP.danh_dau("hapas", items, DU_AN, tu, tu_pv, luc + datetime.timedelta(hours=1),
+                       lambda d: T._khoa_bai("tiktok", d["link"]))
+    x = {m["khoa"]: (m["da_loai"], m["xet_lai"]) for m in mau}
+    assert x == {"tiktok:71": (True, True), "tiktok:72": (True, False),
+                 "tiktok:73": (False, False)}
+    so = KDP.tinh_do_phu(mau)
+    assert (so["so_nhac"], so["so_sot"], so["so_da_loai"]) == (1, 1, 2)
+
+
 # ───────────────────────────── tiktok_api: hashtag + tài khoản ─────────────────────────────
 class GiaApi:
     """Giả `apify_tool._call` cho scraptik: mỗi lời gọi một run (ghi `_SO_RUN`, báo

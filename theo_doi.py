@@ -1948,10 +1948,12 @@ def _pheu_moi(ngay: int, ly: str) -> dict:
     chủ dự án không thấy tiền đi đâu): về → trong phạm vi (ngoài phạm vi bỏ) → bài ĐÃ CÓ: cập
     nhật số liệu; bài MỚI: trùng / từ loại trừ / ngoài thị trường VN / spam / đường hashtag không
     nhắc brand (`khong_brand`) / seeding affiliate (18/10/2026) / AI loại (theo mã lý do) / không
-    nhắc từ khoá → giữ (mới). `cua_so` = số bài nằm trong cửa sổ tăng dần (chỉ để đối chiếu)."""
+    nhắc từ khoá → giữ (mới). `cua_so` = số bài nằm trong cửa sổ tăng dần (chỉ để đối chiếu).
+    `xet_lai` (soát 18/10/2026): bài nằm trong sổ "đã loại" với lý do LUẬT không tốn AI
+    (`LY_DO_XET_LAI`) được xét lại lượt này — đếm thêm vào bước nó rơi lại."""
     return {"ngay": ngay, "ly_do": ly, "ve": 0, "cua_so": 0, "pham_vi": 0, "ngoai_pham_vi": 0,
-            "cap_nhat": 0, "da_loai_truoc": 0, "trung": 0, "loai_tru": 0, "thi_truong": 0,
-            "spam": 0, "khong_brand": 0, "seeding": 0, "ai_loai": {},
+            "cap_nhat": 0, "da_loai_truoc": 0, "xet_lai": 0, "trung": 0, "loai_tru": 0,
+            "thi_truong": 0, "spam": 0, "khong_brand": 0, "seeding": 0, "ai_loai": {},
             "khong_nhac": 0, "giu": 0, "moi": 0, "xin": 0, "xin_ly_do": ""}
 
 
@@ -3025,7 +3027,10 @@ def _xu_ly_mau(v, du_an: dict, luot: int, han: float, ctx: dict,
     # Lấp lỗ: bài brand của mẫu đi cùng phễu tìm theo từ khoá (đã có → cập nhật số; mới → AI).
     tk_dp = {"pheu": {}, "moi": 0, "cu": 0, "giu": 0, "de_xuat": 0, "cap_nhat": 0,
              "pham_vi": {"tu": tu_pv.isoformat(timespec="minutes")}}
-    hits = [(x["d"], x["dt"]) for x in mau if x["nhac"] and not x["da_loai"]]
+    # Bài đã loại theo luật không tốn AI (`xet_lai`, soát 18/10/2026) cũng đi phễu: luật hiện hành
+    # xét lại như lượt tìm (`_con_chan`).
+    hits = [(x["d"], x["dt"]) for x in mau
+            if x["nhac"] and (not x["da_loai"] or x.get("xet_lai"))]
     for x in mau:
         # Bài mẫu CHỈ từ feed hashtag (mọi đường "#tag", không có đường "@người") đi cổng brand.
         if x["duong"] and all(str(y).startswith("#") for y in x["duong"]):
@@ -3035,11 +3040,18 @@ def _xu_ly_mau(v, du_an: dict, luot: int, han: float, ctx: dict,
     if hits:
         try:
             _tach_va_giu(du_an, luot, hits, tu, han, tk_dp)
-            cho = [x["khoa"] for x in mau if x["nhac"] and not x["da_co"] and not x["da_loai"]]
+            cho = [x["khoa"] for x in mau if x["nhac"] and not x["da_co"]
+                   and (not x["da_loai"] or x.get("xet_lai"))]
             giu = K.khoa_da_co(ma, cho) if cho else set()
             loai = TDA.doc_loai(ma, TDA.dau_loai(du_an, tu), tu_pv)
+            seed = {y["khoa"] for y in TDA.doc_seeding(ma, tu_pv)}
             for x in mau:
-                if x["khoa"] in cho and x["khoa"] not in giu and x["khoa"] in loai:
+                if x["khoa"] not in cho:
+                    continue
+                if x["khoa"] in giu and x["da_loai"]:
+                    # Đã thấy và loại trước, lượt này xét lại thì giữ: không phải lỗ thu thập.
+                    x["da_loai"], x["da_co"] = False, True
+                elif x["khoa"] not in giu and (x["khoa"] in loai or x["khoa"] in seed):
                     x["da_loai"] = True          # phễu/AI loại ngay lúc lấp: không phải sót
         except Exception as e:
             if type(e).__name__ == "MatQuyen":
@@ -3339,21 +3351,29 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     dau = TDA.dau_loai(du_an, tu)
     ma_loai = ma_loai or du_an["ma"]
     da_loai = TDA.doc_loai(ma_loai, dau, tu_pv)
+    # Bài đã nằm trong sổ (mọi lý do) không phải bài "chưa thấy" của nhịp giãn — kể cả bài lượt này
+    # được xét lại theo luật (soát 18/10/2026, H1), kẻo nguồn chỉ trả bài seeding cũ không bao giờ giãn.
+    biet: set[str] = set()
     if da_loai:
         cong = cau_hinh_hashtag_brand(du_an)
         con = []
         for d, dt in hits_moi:
             k = _khoa_bai(d["platform"], d["link"], {
                 "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")})
-            if any(x in da_loai and _con_chan(da_loai[x], d, cong)
-                   for x in (k, *_khoa_loai_on_dinh(d, dt))):
+            dong = [da_loai[x] for x in (k, *_khoa_loai_on_dinh(d, dt)) if x in da_loai]
+            if dong:
+                biet.add(khoa_kho(d))
+            if any(_con_chan(x, d, cong) for x in dong):
                 tk["pheu"].setdefault(d["platform"], _pheu_moi(0, ""))["da_loai_truoc"] += 1
                 if d.get("_duong") == 2:
                     _dem_duong_2(tk, "loai")
             else:
+                if dong:
+                    f = tk["pheu"].setdefault(d["platform"], _pheu_moi(0, ""))
+                    f["xet_lai"] = f.get("xet_lai", 0) + 1
                 con.append((d, dt))
         hits_moi = con
-    _dem_chua_thay(tk, hits, {khoa_kho(d) for d, _ in hits_moi}, khoa_kho)
+    _dem_chua_thay(tk, hits, {khoa_kho(d) for d, _ in hits_moi} - biet, khoa_kho)
     if hits_moi:
         try:
             _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk, **giu_kw)
@@ -3480,8 +3500,8 @@ def _loc_seeding(du_an: dict, cho: list, tu: datetime.datetime, nguon: list[dict
     except K.LoiKho as e:
         print(f"[theo_doi] seeding: không đọc được lịch sử kho ({e}) — tính trên sổ + lô",
               flush=True)
-    rows += [{"tk": loc_rac.khoa_tai_khoan(x["nen_tang"], x["tai_khoan"]), **x}
-             for x in TDA.doc_seeding(ma, tu)]
+    so = TDA.doc_seeding(ma, tu)
+    rows += [{"tk": loc_rac.khoa_tai_khoan(x["nen_tang"], x["tai_khoan"]), **x} for x in so]
     rows += list(them)
     rows += [x for d, dt, x in lo if d.get("_khop") and dt and dt >= tu]
     seed = loc_rac.tai_khoan_seeding(rows, cfg, _kenh_nha(nguon),
@@ -3493,18 +3513,30 @@ def _loc_seeding(du_an: dict, cho: list, tu: datetime.datetime, nguon: list[dict
             ra[x["tk"]] = seed[x["tk"]]
         else:
             giu.append((d, dt))
+    # Bài được giữ lượt này mà sổ seeding còn dòng cũ (soát 18/10/2026, H1): sổ nhận số mới —
+    # lượt sau tính nhịp + trung vị trên số này, không trên số của lần thấy đầu.
+    trong_so = {x["khoa"] for x in so}
+    bo_id = {id(d) for d, _ in bo}
+    thay_lai = [_dong_so_seeding(d, dt) for d, dt, x in lo
+                if dt and x["khoa"] in trong_so and id(d) not in bo_id]
+    if thay_lai:
+        TDA.cap_nhat_seeding(ma, thay_lai)
     return giu, bo, ra
 
 
+def _dong_so_seeding(d: dict, dt) -> dict:
+    """Một bài dưới dạng dòng sổ seeding (`theo_doi_api.ghi_seeding`)."""
+    return {"khoa": _dong_seeding(d, dt)["khoa"], "nen_tang": d.get("platform"),
+            "tai_khoan": str(d.get("username") or "").strip().lstrip("@").lower(),
+            "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views")}
+
+
 def _ghi_so_seeding(ma: str, bo: list, seed: dict, tk: dict) -> None:
-    """Bài seeding vừa loại → sổ seeding (nhịp đăng cho lượt sau) + đếm/ghi chú vào thống kê `tk`
-    (`seeding`, `_tk_seeding` = tài khoản nặng nhất cho câu phễu)."""
+    """Bài seeding vừa loại → sổ seeding (nhịp đăng cho lượt sau; bài đã có trong sổ nhận số mới)
+    + đếm/ghi chú vào thống kê `tk` (`seeding`, `_tk_seeding` = tài khoản nặng nhất cho câu phễu)."""
     if not bo:
         return
-    TDA.ghi_seeding(ma, [{"khoa": _dong_seeding(d, dt)["khoa"], "nen_tang": d.get("platform"),
-                          "tai_khoan": str(d.get("username") or "").strip().lstrip("@").lower(),
-                          "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views")}
-                         for d, dt in bo if dt])
+    TDA.ghi_seeding(ma, [_dong_so_seeding(d, dt) for d, dt in bo if dt])
     tk["seeding"] = tk.get("seeding", 0) + len(bo)
     tk.setdefault("_tk_seeding", {}).update(seed)
 
@@ -3568,12 +3600,26 @@ def nhac_brand(d: dict, ten: list[str]) -> bool:
     return bool(tag) and A._khop_tu_khoa({"hashtags": tag}, ten)
 
 
+#: Lý do loại theo LUẬT không tốn AI mà sổ "đã loại" KHÔNG chặn vĩnh viễn (soát 18/10/2026, H1):
+#: bài gặp lại được xét lại bằng luật + cấu hình HIỆN HÀNH mỗi lượt (`_con_chan`). Seeding: luật đọc
+#: số bình luận / xem của lần thấy đầu — KOL đăng 5 video lúc 07:00 (trung vị 1 bình luận) bị loại cả
+#: 5, hôm sau mỗi video 40 bình luận mà vẫn "đã loại trước", luật "giữ bài ≥ 10 bình luận" không
+#: bao giờ xét lại; tắt luật, đổi ngưỡng, tài khoản thành kênh nhà cũng không gỡ được (dấu luật
+#: `dau_loai` không tính `cau_hinh`). Xét lại rẻ: không gửi AI, không cào bình luận (bài không vào
+#: `bai`), chỉ một câu đọc lịch sử tài khoản.
+LY_DO_XET_LAI = frozenset({"seeding_affiliate"})          # = loc_rac.LY_DO_SEEDING_BAI
+
+
 def _con_chan(v, d: dict, cong: dict) -> bool:
-    """Dòng sổ "đã loại" `v` ([lý do, ngày]) còn chặn bài `d` lượt này không. Lý do
-    `LY_DO_HASHTAG_BRAND` gắn với ĐƯỜNG về, không với bài: chỉ chặn khi cổng còn bật VÀ bài lần
-    này cũng chỉ đến từ đường hashtag — tắt cổng hay bài về qua đường từ khoá thì xét lại, kết quả
-    không tuỳ đường nào thấy bài trước."""
-    if isinstance(v, list) and v and v[0] == LY_DO_HASHTAG_BRAND:
+    """Dòng sổ "đã loại" `v` ([lý do, ngày]) còn chặn bài `d` lượt này không. Lý do trong
+    `LY_DO_XET_LAI`: không chặn — bài đi lại các bước luật như bài mới. Lý do `LY_DO_HASHTAG_BRAND`
+    gắn với ĐƯỜNG về, không với bài: chỉ chặn khi cổng còn bật VÀ bài lần này cũng chỉ đến từ đường
+    hashtag — tắt cổng hay bài về qua đường từ khoá thì xét lại, kết quả không tuỳ đường nào thấy
+    bài trước. Lý do khác (AI, từ loại trừ, spam…) chặn tới khi dấu luật đổi."""
+    ly = v[0] if isinstance(v, list) and v else None
+    if ly in LY_DO_XET_LAI:
+        return False
+    if ly == LY_DO_HASHTAG_BRAND:
         return bool(cong["bat"] and TDA.duong_hashtag(d))
     return True
 
@@ -3727,6 +3773,7 @@ def _cau_pheu(p: str, f: dict) -> str:
             f"về {f.get('ve', 0)} → trong phạm vi {f.get('pham_vi', 0)} (ngoài phạm vi "
             f"{f.get('ngoai_pham_vi', 0)}) → cập nhật {f.get('cap_nhat', 0)} bài đã có; bài mới: "
             + (f"đã loại trước {f['da_loai_truoc']}, " if f.get("da_loai_truoc") else "")
+            + (f"xét lại theo luật {f['xet_lai']} bài đã loại, " if f.get("xet_lai") else "")
             + f"trùng {f.get('trung', 0)}, từ loại trừ {f.get('loai_tru', 0)}, "
             + (f"ngoài thị trường VN {f['thi_truong']}, " if f.get("thi_truong") else "")
             + f"spam {f.get('spam', 0)}, "

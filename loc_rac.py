@@ -360,8 +360,11 @@ def bai_spam(text: str) -> str:
 # 26/09 của thuytrang.lee: 69 bình luận, 1,5 triệu xem). Kênh nhà (`nguon.loai = kenh_nha`) và tài
 # khoản mang tên brand ở định danh hoặc tên hiển thị (cửa hàng hapasgigamall, hapas.aeonth,
 # hapasperfume; trang Facebook id số "HAPAS SÀI GÒN" 7 bài/ngày, "HAPAS Vincom Đà Nẵng" 5 bài/ngày
-# — `mien_ten_brand`) không bao giờ là seeding. Bài bị loại KHÔNG vào `bai` (không đếm), nằm ở sổ "đã loại" với lý do
-# `LY_DO_SEEDING_BAI`: lượt sau không trả tiền cào bình luận, không gửi AI lại.
+# — `mien_ten_brand`) không bao giờ là seeding. Bài bị loại KHÔNG vào `bai` (không đếm), nằm ở sổ
+# "đã loại" với lý do `LY_DO_SEEDING_BAI` + sổ seeding (nhịp đăng). Soát 18/10/2026 (H1): sổ KHÔNG
+# chặn vĩnh viễn — mỗi lượt gặp lại, bài được xét lại bằng luật hiện hành với số mới (không tốn AI,
+# không cào bình luận): bài lên ≥ `giu_bl_tu` bình luận, trung vị tài khoản tăng, tắt luật / đổi
+# ngưỡng, tài khoản thành kênh nhà thì bài đi tiếp tới AI như bài mới.
 SEEDING_BAI = {"bat": True, "bai_mot_ngay": 5, "bai_bay_ngay": 20, "trung_vi_bl": 2,
                "trung_vi_xem": 15000, "giu_bl_tu": 10, "ngay": 35, "mien_ten_brand": True}
 #: Khoảng hợp lệ của từng ngưỡng (ngoài khoảng / rác / bool → mặc định). 0 ở `trung_vi_xem`,
@@ -436,7 +439,7 @@ def tai_khoan_seeding(bai: list[dict], cfg: dict, mien: set | frozenset = frozen
     """THUẦN. Tài khoản seeding affiliate theo luật ở đầu mục. `bai` = bài liên quan (lịch sử kho,
     sổ seeding, lô đang xử lý): [{"tk": (nền tảng, tài khoản) | None, "khoa", "dang_luc"
     (datetime có múi giờ), "bl", "xem", tuỳ chọn "ten" (tên hiển thị)}] — trùng khoá chỉ đếm một
-    lần (dòng đầu thắng; số liệu thiếu thì lấy dòng sau). `mien` = tập (nền tảng, tài khoản) kênh
+    lần (ngày theo dòng đầu; bình luận / xem lấy số lớn nhất). `mien` = tập (nền tảng, tài khoản) kênh
     nhà. Tài khoản mang tên brand ở định danh HOẶC tên hiển thị (trang Facebook của cửa hàng có
     định danh là id số: "HAPAS SÀI GÒN", "HAPAS Vincom Đà Nẵng" — đo raw 17/10) được miễn. ->
     {tài khoản: {"so_bai", "max_ngay", "ngay", "max_7", "tv_bl", "tv_xem"}} — CHỈ tài khoản bị
@@ -463,9 +466,12 @@ def tai_khoan_seeding(bai: list[dict], cfg: dict, mien: set | frozenset = frozen
                                    "bl": _so_hay_none(r.get("bl")),
                                    "xem": _so_hay_none(r.get("xem"))}
         else:
+            # Số luỹ kế (soát 18/10/2026, H1): giữ số LỚN NHẤT của các lần đọc — sổ seeding có thể
+            # còn số của lần thấy đầu, lô đang xử lý mang số mới.
             for k in ("bl", "xem"):
-                if cu[k] is None:
-                    cu[k] = _so_hay_none(r.get(k))
+                v = _so_hay_none(r.get(k))
+                if v is not None and (cu[k] is None or v > cu[k]):
+                    cu[k] = v
     ra: dict[tuple[str, str], dict] = {}
     for tk, cac in theo.items():
         if tk in brand:                   # một dòng bất kỳ mang tên brand là đủ miễn

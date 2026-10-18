@@ -13,8 +13,10 @@ thiếu = mặc định `loc_rac.SEEDING_BAI`), trên bài đã giữ đăng t�
 `ngay` ngày gần nhất) + sổ seeding. Kênh nhà và tài khoản mang tên brand không bao giờ bị bắt; bài
 của tài khoản seeding mà tự có ≥ `giu_bl_tu` bình luận được giữ. Bài bị dọn chuyển sang sổ "đã loại"
 của lượt tìm theo từ khoá (`.loai-tu-khoa.json`, lý do `seeding_affiliate`) + sổ seeding — lượt sau
-gặp lại bài đó thì không ghi, không gửi AI, không cào bình luận — rồi DELETE khỏi `bai` (bình luận +
-chi_so_ngay xoá theo FK ON DELETE CASCADE).
+gặp lại bài đó thì luật seeding xét lại trên số mới (vẫn seeding: không ghi, không gửi AI, không cào
+bình luận; lên ≥ `giu_bl_tu` bình luận hay tài khoản hết đủ luật thì bài vào lại như bài mới —
+`theo_doi.LY_DO_XET_LAI`) — rồi DELETE khỏi `bai` (bình luận + chi_so_ngay xoá theo FK ON DELETE
+CASCADE).
 
 An toàn (theo mẫu `scripts/lang_nghe_gop_bai_fb.py`):
   • Mặc định CHẠY THỬ: đọc trong MỘT giao dịch READ ONLY; in số tài khoản, bài, thảo luận, bình luận

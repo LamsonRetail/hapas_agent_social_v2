@@ -683,9 +683,20 @@ def doc_seeding(ma: str, tu: datetime.datetime | None = None) -> list[dict]:
     return ra
 
 
-def ghi_seeding(ma: str, moi: list[dict], bay_gio: datetime.datetime | None = None) -> None:
+def _so_lon(a, b):
+    """Số luỹ kế của hai lần đọc (bình luận, lượt xem chỉ tăng): lấy số lớn hơn; thiếu một bên thì
+    lấy bên còn lại."""
+    a, b = _so(a), _so(b)
+    return b if a is None else a if b is None else max(a, b)
+
+
+def ghi_seeding(ma: str, moi: list[dict], bay_gio: datetime.datetime | None = None, *,
+                chi_cap_nhat: bool = False) -> None:
     """Gộp bài seeding vừa loại (`moi` = [{khoa, nen_tang, tai_khoan, dang_luc, bl, xem}]) vào sổ;
-    bỏ bài đăng trước `NGAY_PHAM_VI_TOI_DA` ngày; ghi nguyên tử."""
+    bỏ bài đăng trước `NGAY_PHAM_VI_TOI_DA` ngày; ghi nguyên tử. Bài đã có trong sổ (soát
+    18/10/2026, H1): số bình luận / xem cập nhật theo lần đọc mới (giữ số lớn hơn — số luỹ kế), để
+    luật không mãi tính trên số của lần thấy đầu. `chi_cap_nhat`: chỉ cập nhật số của khoá ĐÃ có
+    (bài lượt này được giữ mà sổ còn dòng cũ), không thêm khoá mới; không đổi gì thì không ghi."""
     if not moi:
         return
     san = (bay_gio or datetime.datetime.now(_VN)) - datetime.timedelta(days=NGAY_PHAM_VI_TOI_DA)
@@ -694,16 +705,35 @@ def ghi_seeding(ma: str, moi: list[dict], bay_gio: datetime.datetime | None = No
         x = d["du_an"].get(ma) if isinstance(d["du_an"].get(ma), dict) else {}
         s = {k: v for k, v in (x.get("seeding") or {}).items()
              if isinstance(v, list) and len(v) >= 5 and (_gio_so(v[2]) or san) >= san}
+        doi = len(s) != len(x.get("seeding") or {})
         for r in moi:
             luc = r.get("dang_luc")
-            if r.get("khoa") and isinstance(luc, datetime.datetime) and luc >= san:
-                s[str(r["khoa"])] = [str(r.get("nen_tang") or ""), str(r.get("tai_khoan") or ""),
-                                     luc.astimezone(_VN).isoformat(timespec="minutes"),
-                                     _so(r.get("bl")), _so(r.get("xem"))]
+            k = str(r.get("khoa") or "")
+            if not k or not isinstance(luc, datetime.datetime) or luc < san:
+                continue
+            cu = s.get(k)
+            if cu is None and chi_cap_nhat:
+                continue
+            moi_dong = [str(r.get("nen_tang") or ""), str(r.get("tai_khoan") or ""),
+                        luc.astimezone(_VN).isoformat(timespec="minutes"),
+                        _so_lon(cu[3] if cu else None, r.get("bl")),
+                        _so_lon(cu[4] if cu else None, r.get("xem"))]
+            if cu is not None and chi_cap_nhat:
+                moi_dong[:3] = cu[:3]
+            if moi_dong != (cu[:5] if cu else None):
+                s[k] = moi_dong
+                doi = True
+        if not doi:
+            return
         if len(s) > LOAI_TOI_DA:
             s = dict(sorted(s.items(), key=lambda kv: kv[1][2])[-LOAI_TOI_DA:])
         d["du_an"][ma] = {**x, "seeding": s}
         _ghi_so_loai(d)
+
+
+def cap_nhat_seeding(ma: str, moi: list[dict]) -> None:
+    """Số mới của bài ĐÃ nằm trong sổ seeding mà lượt này được giữ (`ghi_seeding(chi_cap_nhat)`)."""
+    ghi_seeding(ma, moi, chi_cap_nhat=True)
 
 
 def bo_khoi_so(ma: str, khoa: list[str]) -> int:

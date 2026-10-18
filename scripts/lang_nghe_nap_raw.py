@@ -43,7 +43,8 @@ An toàn:
     seeding bị loại, bài đường hashtag không nhắc brand bị loại, bài đã có sẽ nâng số) và số lô AI.
   • `--ap-dung --sao-luu <tệp>`: AI tuần tự từng phần ≤ `apify_tool._AI_LO` bài, một lô model một
     lúc, nghỉ `gan_nhan_nen.NGHI_GIUA_LO` giây giữa hai phần (quota model dùng chung với bot) —
-    hỏng giữa chừng thì chạy lại: bài đã ghi thành "đã có", bài đã loại thành "đã loại trước".
+    hỏng giữa chừng thì chạy lại: bài đã ghi thành "đã có", bài đã loại thành "đã loại trước"
+    (lý do luật không tốn AI như seeding thì luật xét lại, không gọi AI — `theo_doi._con_chan`).
     Tệp hoàn tác: lượt, khoá bài thêm (= bài có `luot_dau` = lượt nạp), khoá sổ thêm.
   • `--hoan-tac <tệp>`: xoá đúng các bài lượt nạp đã thêm MÀ CHƯA BỊ ĐỤNG (lượt sau chưa cập nhật,
     chưa cào bình luận), gỡ khoá sổ đã thêm. Số đã nâng của bài cũ và ảnh chụp ngày đọc giữ nguyên
@@ -376,11 +377,13 @@ def che_do_chay_thu(ghi: dict):
         ghi["loai"] += len(moi)
         ghi["loai_ds"].extend(moi)              # (khoá, lý do, giờ đăng) — phễu chạy thử
 
-    def seeding(ma, moi, bay_gio=None):
-        ghi["seeding"].extend(moi)
+    def seeding(ma, moi, bay_gio=None, **k):
+        if not k.get("chi_cap_nhat"):
+            ghi["seeding"].extend(moi)
     thay = [(A, "_phan_xu_ai", ai), (K, "ghi_bai", ghi_bai), (K, "nang_so_lieu", nang),
             (K, "cap_nhat_so_lieu", nang), (K, "ghi_de_xuat", lambda ma, cac: 0),
             (TDA, "ghi_loai", loai), (TDA, "ghi_seeding", seeding),
+            (TDA, "cap_nhat_seeding", lambda ma, moi: None),
             (T, "ghi_da_boc", lambda *a, **k: None)]
     cu = [(m, ten, getattr(m, ten)) for m, ten, _ in thay]
     pg = os.environ.get("PGOPTIONS")

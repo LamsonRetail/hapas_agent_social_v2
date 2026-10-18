@@ -23,7 +23,8 @@ khoá `KHOA_MOC`), trần `TRAN_MAC_DINH` USD (đặt riêng ở `du_an.cau_hinh
           thứ ba, bỏ.
     Nguồn đang theo dõi KHÔNG vào mẫu (đó là đường thu thập hằng ngày).
   • ĐỘ PHỦ = bài mẫu nhắc brand (cùng luật khớp từ khoá/hashtag `apify_tool._khop_tu_khoa`, bỏ từ
-    loại trừ + spam + bài AI đã loại trước — không gọi AI cho số đo) đã có trong `bai` / tổng bài
+    loại trừ + spam + bài đã loại trước — sổ "đã loại" (AI, luật) và sổ seeding (18/10/2026) —
+    không gọi AI cho số đo) đã có trong `bai` / tổng bài
     nhắc brand; ĐỘ PHỦ THEO THẢO LUẬN như trên nhưng mỗi bài nặng 1 + số bình luận (cách đếm thảo
     luận của Kompa). Kèm danh sách bài sót nhiều thảo luận nhất + lý do có lẽ bị sót.
   • Bài brand trong mẫu đi CÙNG phễu của tìm theo từ khoá (`theo_doi._tach_va_giu`: bài đã có →
@@ -299,8 +300,13 @@ def lay_mau(trang_tag: dict[str, int], trang_tg: dict[str, int], cid: dict, uid:
 def danh_dau(ma: str, items: list[tuple[dict, str]], du_an: dict, tu: list[str],
              tu_pv: datetime.datetime, bay_gio: datetime.datetime, khoa_cua) -> list[dict]:
     """Item → bài mẫu (bỏ trùng theo khoá, gộp đường) trong `NGAY_MAU` ngày và trong phạm vi
-    theo dõi, đánh dấu nhắc brand / đã có trong kho / AI đã loại trước."""
+    theo dõi, đánh dấu nhắc brand / đã có trong kho / đã loại trước (`da_loai`: sổ "đã loại" cùng
+    dấu luật HOẶC sổ seeding — soát 18/10/2026, H1: bài seeding đã thấy và cố ý bỏ không phải bài
+    "sót", kể cả khi đổi từ khoá đã làm lại phần "bai" của sổ). `xet_lai`: bài đã loại theo luật
+    không tốn AI (`theo_doi.LY_DO_XET_LAI`, cổng brand đường hashtag, hoặc chỉ còn ở sổ seeding) —
+    phần lấp lỗ đưa nó qua phễu để luật hiện hành xét lại, như lượt tìm."""
     import loc_rac
+    import theo_doi as T
     import theo_doi_api as TDA
     moc = max(tu_pv, bay_gio - datetime.timedelta(days=NGAY_MAU))
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
@@ -319,12 +325,16 @@ def danh_dau(ma: str, items: list[tuple[dict, str]], du_an: dict, tu: list[str],
             nhac = (A._khop_tu_khoa(d, tu) and not A._tu_loai_tru_khop(d, loai_tru)
                     and not loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}"))
             theo[k] = {"khoa": k, "d": d, "dt": dt, "duong": [duong], "nhac": bool(nhac),
-                       "tl": _thao_luan(d), "da_co": False, "da_loai": False}
+                       "tl": _thao_luan(d), "da_co": False, "da_loai": False, "xet_lai": False}
     if theo:
         co = K.khoa_da_co(ma, list(theo))
         loai = TDA.doc_loai(ma, TDA.dau_loai(du_an, tu), tu_pv)
+        seed = {x["khoa"] for x in TDA.doc_seeding(ma, tu_pv)}
+        luat = T.LY_DO_XET_LAI | {T.LY_DO_HASHTAG_BRAND}
         for k, x in theo.items():
-            x["da_co"], x["da_loai"] = k in co, k in loai
+            ly = (loai.get(k) or [""])[0]
+            x["da_co"], x["da_loai"] = k in co, k in loai or k in seed
+            x["xet_lai"] = x["da_loai"] and (ly in luat or k not in loai)
     return list(theo.values())
 
 
@@ -584,7 +594,8 @@ def cau_ghi_chu(dp: dict) -> list[str]:
             f"{so.get('so_da_co', 0)}/{so.get('so_nhac', 0)} bài nhắc brand đã có "
             f"({pt(so.get('do_phu'))}), theo thảo luận {pt(so.get('do_phu_tl'))}; sót "
             f"{so.get('so_sot', 0)}, bổ sung {dp.get('bo_sung', 0)}"
-            + (f", AI đã loại trước {so['so_da_loai']}" if so.get("so_da_loai") else "")
+            + (f", đã loại trước (AI / luật seeding…) {so['so_da_loai']}"
+               if so.get("so_da_loai") else "")
             + (f"; Mark đã làm: {cau_hanh_dong(dp.get('hanh_dong'))}"
                if cau_hanh_dong(dp.get("hanh_dong")) else "")
             ] + list(dp.get("ghi_chu") or [])
