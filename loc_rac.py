@@ -29,7 +29,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from dashboard import chuan_chu as CC
 
@@ -324,3 +324,167 @@ def bai_spam(text: str) -> str:
         if _SPAM_RE[k].search(t):
             return k
     return ""
+
+
+# ───────────── seeding affiliate cấp BÀI (18/10/2026) ─────────────
+# Điều tra khoảng thiếu so với Kompa (18/10/2026, báo cáo `bao_cao_kompa.md` §4.1): khoảng 25 tài
+# khoản affiliate TikTok đăng 10–180 video HAPAS MỖI NGÀY, caption chỉ có hashtag (#HAPAS
+# #QUATANG2010 #HAPASsuperbrandday…), 0,03 bình luận/bài. Đọc đủ ngày 15/10: thuytrang.lee 177
+# video, hanngoc.store ≥ 120, _xiwiuu_ 62, minmetbay 45, anh1m66 44 — mười tài khoản ≥ 510 video,
+# kho có 50. Chủ dự án chốt 18/10/2026: KHÔNG đếm video seeding affiliate.
+#
+# Luật theo TÀI KHOẢN (một video seeding nhìn y như video thường — chỉ nhịp đăng của cả tài khoản
+# lộ ra nó), trên bài liên quan của tài khoản trong lịch sử kho + sổ seeding + lô đang xử lý:
+#   nhịp       ≥ `bai_mot_ngay` bài trong MỘT ngày (giờ VN) HOẶC ≥ `bai_bay_ngay` bài trong 7 ngày
+#              liền;
+#   VÀ ít tương tác: trung vị bình luận ≤ `trung_vi_bl` VÀ trung vị lượt xem ≤ `trung_vi_xem`.
+# Số đo chọn ngưỡng (18/10/2026, kho 17/10 ∪ raw Kompa 18/10, bài liên quan 17/09 → 18/10):
+#   • 16 tài khoản bị bắt, 15 nằm trong 25 tài khoản seeding của báo cáo: nhóm nặng 5–177
+#     bài/ngày, trung vị 0 bình luận, trung vị xem 209–11.516 (thuytrang.lee 372, hanngoc.store 213,
+#     phamxuan1992 5.913, duycom.real 11.516). Chỉ kho (lượt hằng ngày, trước khi dọn): 11 tài khoản.
+#   • 10 tài khoản còn lại của báo cáo đăng ≤ 4 bài/ngày (sei.review, nikko.daily…) — không phân
+#     biệt được với nhà sáng tạo / review thật đăng 1–3 bài/ngày, nên KHÔNG bắt. Hạ `bai_mot_ngay`
+#     xuống 4 thì bắt thêm 9 tài khoản, phần lớn là review nhỏ; nâng lên 6 thì sót 4 tài khoản seeding.
+#   • Có thảo luận thật thì không bị bắt dù đăng dày: hoangnhiennhien 5 bài/ngày, trung vị 38 bình
+#     luận; bossgirl.media 6 bài/ngày, trung vị 22.
+#   • `trung_vi_xem` 15.000 nằm giữa nhóm seeding (≤ 11.516) và người có khán giả thật: livestream
+#     bán hàng longphamdtest 12 bài/ngày, trung vị 1 bình luận nhưng 30.114 xem (video 2,4 triệu);
+#     KOL le_anh_nuoi (1,8 triệu follower) 6 bài/ngày, 18.373 xem. Bỏ điều kiện xem thì bắt thêm
+#     5 tài khoản như vậy.
+#   • `bai_bay_ngay` 20: không tài khoản nào trong số đo đổi kết quả giữa 15, 20 và 25. Ngưỡng này
+#     dành cho lượt hằng ngày, khi kho chỉ thấy vài bài mỗi ngày của một tài khoản seeding.
+# Raw Kompa: 1.210/2.123 bài liên quan kho chưa có là bài seeding (1.307/13.110 thảo luận); kho có
+# 377 bài seeding (494 thảo luận).
+# Bài của tài khoản seeding mà TỰ có ≥ `giu_bl_tu` bình luận vẫn giữ, vì có thảo luận thật (video
+# 26/09 của thuytrang.lee: 69 bình luận, 1,5 triệu xem). Kênh nhà (`nguon.loai = kenh_nha`) và tài
+# khoản mang tên brand (cửa hàng hapasgigamall, hapas.aeonth, hapasperfume — `mien_ten_brand`)
+# không bao giờ là seeding. Bài bị loại KHÔNG vào `bai` (không đếm), nằm ở sổ "đã loại" với lý do
+# `LY_DO_SEEDING_BAI`: lượt sau không trả tiền cào bình luận, không gửi AI lại.
+SEEDING_BAI = {"bat": True, "bai_mot_ngay": 5, "bai_bay_ngay": 20, "trung_vi_bl": 2,
+               "trung_vi_xem": 15000, "giu_bl_tu": 10, "ngay": 35, "mien_ten_brand": True}
+#: Khoảng hợp lệ của từng ngưỡng (ngoài khoảng / rác / bool → mặc định). 0 ở `trung_vi_xem`,
+#: `giu_bl_tu` = bỏ điều kiện đó.
+_GIOI_HAN_SEEDING = {"bai_mot_ngay": (2, 10_000), "bai_bay_ngay": (2, 100_000),
+                     "trung_vi_bl": (0, 1_000_000), "trung_vi_xem": (0, 10 ** 9),
+                     "giu_bl_tu": (0, 1_000_000), "ngay": (7, 92)}
+LY_DO_SEEDING_BAI = "seeding_affiliate"
+_VN = timezone(timedelta(hours=7))
+
+
+def cau_hinh_seeding(du_an: dict | None) -> dict:
+    """Cấu hình HIỆU LỰC của luật seeding affiliate cấp bài (`du_an.cau_hinh.seeding`). Thiếu khối /
+    thiếu `bat` = BẬT với ngưỡng mặc định (`SEEDING_BAI`); chỉ `bat` đúng bằng False là tắt (như
+    `kiem_do_phu.cau_hinh`). Số rác / bool / ngoài `_GIOI_HAN_SEEDING` → mặc định."""
+    goc = (du_an or {}).get("cau_hinh")
+    goc = goc if isinstance(goc, dict) else {}
+    x = goc.get("seeding") if isinstance(goc.get("seeding"), dict) else {}
+    ra = dict(SEEDING_BAI)
+    ra["bat"] = x.get("bat", True) is not False
+    ra["mien_ten_brand"] = x.get("mien_ten_brand", True) is not False
+    for k, (lo, hi) in _GIOI_HAN_SEEDING.items():
+        v = x.get(k)
+        if v is None or isinstance(v, bool):
+            continue
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if lo <= n <= hi:
+            ra[k] = n
+    return ra
+
+
+def khoa_tai_khoan(nen_tang, tai_khoan) -> tuple[str, str] | None:
+    """(nền tảng, tài khoản chữ thường, bỏ @) để gom bài theo người đăng; None khi không biết
+    tài khoản (YouTube, Facebook từ scrapeforge) hoặc là bài web (tên miền không phải người đăng)."""
+    p = str(nen_tang or "").strip().lower()
+    u = str(tai_khoan or "").strip().lstrip("@").lower()
+    if not p or not u or p == "web":
+        return None
+    return p, u
+
+
+def ten_brand_trong(tai_khoan: str, thuong_hieu) -> bool:
+    """Tài khoản mang tên brand (`thuong_hieu` = tên + mã dự án; so bỏ dấu, bỏ dấu câu): cửa hàng /
+    kênh phụ của chính brand ("hapas.aeonth", "hapasgigamall") — không xét seeding."""
+    u = re.sub(r"[^a-z0-9]", "", bo_dau(tai_khoan))
+    return bool(u) and any(b and b in u for b in _ten_brand(thuong_hieu))
+
+
+def _so_hay_none(v) -> int | None:
+    if v is None or isinstance(v, bool) or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trung_vi(xs: list[int]) -> float | None:
+    if not xs:
+        return None
+    s = sorted(xs)
+    g = len(s) // 2
+    return float(s[g]) if len(s) % 2 else (s[g - 1] + s[g]) / 2
+
+
+def tai_khoan_seeding(bai: list[dict], cfg: dict, mien: set | frozenset = frozenset(),
+                      thuong_hieu: list[str] | tuple = ()) -> dict[tuple[str, str], dict]:
+    """THUẦN. Tài khoản seeding affiliate theo luật ở đầu mục. `bai` = bài liên quan (lịch sử kho,
+    sổ seeding, lô đang xử lý): [{"tk": (nền tảng, tài khoản) | None, "khoa", "dang_luc"
+    (datetime có múi giờ), "bl", "xem"}] — trùng khoá chỉ đếm một lần (dòng đầu thắng; số liệu
+    thiếu thì lấy dòng sau). `mien` = tập (nền tảng, tài khoản) kênh nhà. -> {tài khoản: {"so_bai",
+    "max_ngay", "ngay", "max_7", "tv_bl", "tv_xem"}} — CHỈ tài khoản bị coi là seeding.
+
+    Trung vị chỉ tính trên số ĐỌC ĐƯỢC; tài khoản không có số bình luận nào thì không kết luận
+    (không bắt). Không có số xem nào thì bỏ điều kiện xem (bài Facebook ảnh không có lượt xem)."""
+    if not cfg.get("bat"):
+        return {}
+    theo: dict[tuple[str, str], dict[str, dict]] = {}
+    for r in bai:
+        tk = r.get("tk")
+        if not tk or not r.get("khoa") or r.get("dang_luc") is None or tk in mien:
+            continue
+        if cfg.get("mien_ten_brand", True) and ten_brand_trong(tk[1], thuong_hieu):
+            continue
+        cu = theo.setdefault(tk, {}).get(r["khoa"])
+        if cu is None:
+            theo[tk][r["khoa"]] = {"ngay": r["dang_luc"].astimezone(_VN).date(),
+                                   "bl": _so_hay_none(r.get("bl")),
+                                   "xem": _so_hay_none(r.get("xem"))}
+        else:
+            for k in ("bl", "xem"):
+                if cu[k] is None:
+                    cu[k] = _so_hay_none(r.get(k))
+    ra: dict[tuple[str, str], dict] = {}
+    for tk, cac in theo.items():
+        dem: dict = {}
+        for x in cac.values():
+            dem[x["ngay"]] = dem.get(x["ngay"], 0) + 1
+        ngay_dinh = max(sorted(dem), key=lambda d: dem[d])
+        max_7 = max(sum(n for d, n in dem.items() if 0 <= (d - d0).days < 7) for d0 in dem)
+        if dem[ngay_dinh] < cfg["bai_mot_ngay"] and max_7 < cfg["bai_bay_ngay"]:
+            continue
+        tv_bl = _trung_vi([x["bl"] for x in cac.values() if x["bl"] is not None])
+        if tv_bl is None or tv_bl > cfg["trung_vi_bl"]:
+            continue
+        tv_xem = _trung_vi([x["xem"] for x in cac.values() if x["xem"] is not None])
+        if cfg.get("trung_vi_xem") and tv_xem is not None and tv_xem > cfg["trung_vi_xem"]:
+            continue
+        ra[tk] = {"so_bai": len(cac), "max_ngay": dem[ngay_dinh], "ngay": ngay_dinh,
+                  "max_7": max_7, "tv_bl": tv_bl, "tv_xem": tv_xem}
+    return ra
+
+
+def giu_bai_seeding(bl, cfg: dict) -> bool:
+    """Bài của tài khoản seeding vẫn GIỮ khi tự có ≥ `giu_bl_tu` bình luận (có thảo luận thật)."""
+    n = _so_hay_none(bl)
+    return bool(cfg.get("giu_bl_tu")) and n is not None and n >= cfg["giu_bl_tu"]
+
+
+def cau_seeding(tk: tuple[str, str], x: dict) -> str:
+    """Một câu gọn về vì sao tài khoản bị coi là seeding (phễu, bản in của script)."""
+    xem = (", trung vị " + f"{int(x['tv_xem']):,}".replace(",", ".") + " xem"
+           if x.get("tv_xem") is not None else "")
+    return (f"{tk[0]} @{tk[1]}: {x['so_bai']} bài, cao nhất {x['max_ngay']} bài ngày "
+            f"{x['ngay']:%d/%m}, {x['max_7']} bài/7 ngày, trung vị {x['tv_bl']:g} bình luận{xem}")

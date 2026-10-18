@@ -97,10 +97,11 @@ def du_an_dang_bat() -> list[dict]:
 
 
 def nguon_cua_du_an(ma: str) -> list[dict]:
-    """Mọi nguồn của dự án (kể cả tạm dừng): để gắn bài tìm theo từ khoá về nguồn đã có và
-    không đề xuất lại nguồn đã nằm trong danh sách."""
+    """Mọi nguồn của dự án (kể cả tạm dừng): để gắn bài tìm theo từ khoá về nguồn đã có, không đề
+    xuất lại nguồn đã nằm trong danh sách, và (`loai`, 18/10/2026) để kênh nhà không bao giờ bị luật
+    seeding affiliate bắt."""
     with ket_noi() as c:
-        return c.execute("SELECT id, nen_tang, dinh_danh FROM nguon WHERE du_an = %s",
+        return c.execute("SELECT id, nen_tang, dinh_danh, loai FROM nguon WHERE du_an = %s",
                          (ma,)).fetchall()
 
 
@@ -468,6 +469,19 @@ def cap_nhat_so_lieu(ma: str, luot_id: int, rows: list[dict]) -> int:
                 "chia_se = EXCLUDED.chia_se",
                 [ma, r["khoa"], _TZ, *[r.get(k) for k in _SO]])
     return n
+
+
+def lich_su_tai_khoan(ma: str, tai_khoan: list[str], tu) -> list[dict]:
+    """Bài đã giữ của các tài khoản (`tai_khoan` chữ thường) đăng từ `tu` — lịch sử nhịp đăng cho
+    luật seeding affiliate (`loc_rac.tai_khoan_seeding`, 18/10/2026). Chỉ đọc."""
+    ds = sorted({str(x).strip().lstrip("@").lower() for x in tai_khoan if str(x or "").strip()})
+    if not ds:
+        return []
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT khoa, nen_tang, lower(tai_khoan) AS tai_khoan, dang_luc, binh_luan, xem "
+            "FROM bai WHERE du_an = %s AND lower(tai_khoan) = ANY(%s) AND dang_luc >= %s",
+            (ma, ds, tu)).fetchall()
 
 
 def bai_youtube_can_lam_moi(ma: str, ngay: int = 14, toi_da: int = 200) -> list[dict]:

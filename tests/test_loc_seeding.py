@@ -1,0 +1,328 @@
+"""Lọc seeding affiliate cấp BÀI (18/10/2026, `loc_rac.tai_khoan_seeding`, `theo_doi._loc_seeding`).
+
+Mẫu `mau_seeding_tiktok.json` cắt từ raw scraptik đã trả tiền của đợt điều tra Kompa (tài khoản, tên,
+id video đã thay): một tài khoản affiliate đăng 8 video chỉ có hashtag trong ngày 15/10 (thật: 177
+video), một người bán hàng livestream 6 bài/ngày nhưng 13–62 nghìn lượt xem, một tài khoản nhiều bình
+luận thật, một nhà sáng tạo review 1 bài/ngày. Bài đi qua ĐÚNG bộ chuẩn hoá TikTok của Mark
+(`tiktok_api.video` → `_chuan_clockworks` → `_chuan_tiktok`). Kho giả, không Postgres, không AI thật."""
+from __future__ import annotations
+
+import copy
+import datetime
+import json
+from pathlib import Path
+
+import pytest
+
+import apify_tool as A
+import lang_nghe_db as K
+import loc_rac as L
+import theo_doi as T
+import theo_doi_api as TDA
+import tiktok_api as TT
+
+_VN = datetime.timezone(datetime.timedelta(hours=7))
+MAU = json.loads((Path(__file__).parent / "mau_seeding_tiktok.json").read_text(encoding="utf-8"))
+DU_AN = {"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas"], "tu_loai_tru": ["guitar"],
+         "boi_canh": "HAPAS — thương hiệu túi xách Việt Nam", "thi_truong": "VN", "cau_hinh": {}}
+
+
+def _lech() -> int:
+    """Dời giờ đăng của mẫu để video mới nhất là HÔM QUA: bài thử không phụ thuộc ngày chạy (sổ
+    seeding chỉ giữ 92 ngày, phạm vi tính từ hôm nay)."""
+    cuoi = max(int(a["create_time"]) for k, xs in MAU.items() if not k.startswith("_") for a in xs)
+    dich = int((datetime.datetime.now(_VN) - datetime.timedelta(days=1)).timestamp()) - cuoi
+    return dich // 86400 * 86400              # trọn ngày: bài cùng ngày (giờ VN) vẫn cùng ngày
+
+
+def _hits(nhom: str, *, dich_ngay: int = 0, cung_ngay: bool = False, so_lan: int = 1) -> list:
+    """Bài của một nhóm mẫu qua bộ chuẩn hoá TikTok thật -> [(d, dt)]. `cung_ngay`: dồn mọi bài vào
+    ngày của bài đầu (giữ giờ); `so_lan`: nhân bản (id mới) để đủ nhịp."""
+    lech = _lech() + dich_ngay * 86400
+    goc = MAU[nhom]
+    items = []
+    for lan in range(so_lan):
+        for i, a in enumerate(goc):
+            a = copy.deepcopy(a)
+            t = int(a["create_time"]) + lech
+            if cung_ngay:
+                d0 = datetime.datetime.fromtimestamp(int(goc[0]["create_time"]) + lech, _VN)
+                d1 = datetime.datetime.fromtimestamp(t, _VN)
+                t = int(d1.replace(year=d0.year, month=d0.month, day=d0.day).timestamp())
+            a["create_time"] = t + lan * 60
+            a["aweme_id"] = str(int(a["aweme_id"]) + 1000 * lan)
+            items.append(TT.video(a))
+    ra = A._chuan_tiktok(A._chuan_clockworks(items))
+    for d, _ in ra:
+        d["platform"] = "tiktok"
+    return ra
+
+
+def _dong(hits: list) -> list[dict]:
+    return [{"tk": L.khoa_tai_khoan("tiktok", d["username"]), "khoa": d["link"], "dang_luc": dt,
+             "bl": d["comments"], "xem": d["views"]} for d, dt in hits]
+
+
+CFG = L.cau_hinh_seeding(DU_AN)
+
+
+# ───────────────────────────── luật thuần ─────────────────────────────
+def test_bat_tai_khoan_affiliate_khong_bat_nha_sang_tao_that():
+    """8 video chỉ hashtag trong một ngày, 0 bình luận, vài trăm lượt xem → seeding. Livestream 6
+    bài/ngày nhưng trung vị ~26 nghìn xem, tài khoản 5 bài/ngày trung vị 37 bình luận, review 1
+    bài/ngày → KHÔNG bắt (creator thật hay có tương tác thật)."""
+    rows = (_dong(_hits("seeding")) + _dong(_hits("livestream"))
+            + _dong(_hits("tuong_tac_that", cung_ngay=True) + _hits("tuong_tac_that",
+                                                                     cung_ngay=True)[:1])
+            + _dong(_hits("review")))
+    rows[-5]["khoa"] += "-ban-sao"                 # bản nhân của tài khoản tương tác: khoá khác
+    seed = L.tai_khoan_seeding(rows, CFG, set(), ["HAPAS", "hapas"])
+    assert set(seed) == {("tiktok", "aff_mau")}
+    x = seed[("tiktok", "aff_mau")]
+    assert (x["so_bai"], x["max_ngay"], x["tv_bl"]) == (8, 8, 0) and x["tv_xem"] < 1000
+    # Bỏ điều kiện lượt xem thì người livestream bị bắt nhầm — điều kiện này là cần.
+    seed0 = L.tai_khoan_seeding(rows, {**CFG, "trung_vi_xem": 0}, set(), ["HAPAS"])
+    assert ("tiktok", "live_mau") in seed0
+    assert "aff_mau: 8 bài, cao nhất 8 bài ngày" in L.cau_seeding(("tiktok", "aff_mau"), x)
+
+
+def test_nhip_7_ngay_va_nguong_mot_ngay():
+    """Không ngày nào ≥ 5 bài nhưng 3 bài/ngày suốt 7 ngày, 0 bình luận → 21 ≥ 20 → seeding; 2 bài/
+    ngày (14/7 ngày) hay 4 bài trong một ngày → không."""
+    goc = datetime.datetime(2026, 10, 1, 9, 0, tzinfo=_VN)
+
+    def tk(ten, moi_ngay, so_ngay):
+        return [{"tk": ("tiktok", ten), "khoa": f"{ten}:{n}:{i}", "bl": 0, "xem": 500,
+                 "dang_luc": goc + datetime.timedelta(days=n, minutes=i)}
+                for n in range(so_ngay) for i in range(moi_ngay)]
+    seed = L.tai_khoan_seeding(tk("ba", 3, 7) + tk("hai", 2, 7) + tk("bon", 4, 1), CFG)
+    assert set(seed) == {("tiktok", "ba")} and seed[("tiktok", "ba")]["max_7"] == 21
+
+
+def test_kenh_nha_va_tai_khoan_mang_ten_brand_khong_bao_gio_la_seeding():
+    hits = _hits("seeding")
+    rows = _dong(hits)
+    assert L.tai_khoan_seeding(rows, CFG, {("tiktok", "aff_mau")}, ["HAPAS"]) == {}
+    brand = [{**r, "tk": ("tiktok", "hapas.aeon_mau")} for r in rows]
+    assert L.tai_khoan_seeding(brand, CFG, set(), ["HAPAS", "hapas"]) == {}
+    assert L.tai_khoan_seeding(brand, {**CFG, "mien_ten_brand": False}, set(), ["HAPAS"])
+    # Facebook kênh nhà: định danh URL trang, bài lượt tìm mang slug trang.
+    nha = T._kenh_nha([{"nen_tang": "facebook", "loai": "kenh_nha",
+                        "dinh_danh": "https://www.facebook.com/HapasGlobal"},
+                       {"nen_tang": "tiktok", "loai": "kol", "dinh_danh": "aff_mau"}])
+    assert nha == {("facebook", "facebook.com/hapasglobal"), ("facebook", "hapasglobal")}
+
+
+def test_giu_bai_co_thao_luan_that_va_khong_ket_luan_khi_thieu_so():
+    assert L.giu_bai_seeding(10, CFG) and not L.giu_bai_seeding(9, CFG)
+    assert not L.giu_bai_seeding(None, CFG) and not L.giu_bai_seeding(50, {**CFG, "giu_bl_tu": 0})
+    rows = [{**r, "bl": None} for r in _dong(_hits("seeding"))]
+    assert L.tai_khoan_seeding(rows, CFG) == {}, "không có số bình luận nào: không kết luận"
+
+
+def test_cau_hinh_mac_dinh_bat_va_so_rac_ve_mac_dinh():
+    assert L.cau_hinh_seeding({}) == L.SEEDING_BAI and L.SEEDING_BAI["bat"] is True
+    assert L.cau_hinh_seeding({"cau_hinh": {"seeding": {"bat": False}}})["bat"] is False
+    assert L.cau_hinh_seeding({"cau_hinh": {"seeding": {"bat": "false"}}})["bat"] is True
+    c = L.cau_hinh_seeding({"cau_hinh": {"seeding": {"bai_mot_ngay": "abc", "bai_bay_ngay": True,
+                                                     "trung_vi_xem": 0, "giu_bl_tu": -3,
+                                                     "ngay": 500, "trung_vi_bl": 4}}})
+    assert (c["bai_mot_ngay"], c["bai_bay_ngay"], c["trung_vi_xem"], c["giu_bl_tu"], c["ngay"],
+            c["trung_vi_bl"]) == (5, 20, 0, 10, 35, 4)
+    assert L.tai_khoan_seeding(_dong(_hits("seeding")), {**CFG, "bat": False}) == {}
+
+
+# ───────────────────────────── tích hợp pipeline lượt tìm ─────────────────────────────
+class KhoGia:
+    def __init__(self, nguon=()):
+        self.bai: dict[str, dict] = {}
+        self.nguon = list(nguon)
+        self.ghi: list[list[dict]] = []
+
+    def cai(self, mp):
+        for ten in ("khoa_da_co", "cap_nhat_so_lieu", "nguon_cua_du_an", "lich_su_tai_khoan",
+                    "ghi_bai", "ghi_de_xuat", "khoa_fb_trung"):
+            mp.setattr(K, ten, getattr(self, ten))
+        return self
+
+    def khoa_da_co(self, ma, khoa):
+        return {k for k in khoa if k in self.bai}
+
+    def cap_nhat_so_lieu(self, ma, luot, rows):
+        return len(rows)
+
+    def nguon_cua_du_an(self, ma):
+        return list(self.nguon)
+
+    def lich_su_tai_khoan(self, ma, tai_khoan, tu):
+        return [{"khoa": r["khoa"], "nen_tang": r["nen_tang"], "tai_khoan": r["tai_khoan"].lower(),
+                 "dang_luc": r["dang_luc"], "binh_luan": r["binh_luan"], "xem": r["xem"]}
+                for r in self.bai.values() if r["tai_khoan"].lower() in tai_khoan
+                and r["dang_luc"] >= tu]
+
+    def ghi_bai(self, ma, luot, kieu, rows):
+        self.ghi.append([dict(r) for r in rows])
+        for r in rows:
+            self.bai[r["khoa"]] = dict(r)
+        return len(rows), 0
+
+    def ghi_de_xuat(self, ma, cac):
+        return 0
+
+    def khoa_fb_trung(self, ma, rows):
+        return {}
+
+
+@pytest.fixture
+def ai(monkeypatch):
+    """AI giả: ghi lại tài khoản của MỌI bài được gửi, không phán gì (bài giữ theo từ khoá)."""
+    goi: list[list[str]] = []
+
+    def phan_xu(rows, *a, **k):
+        goi.append([d["username"] for d, _ in rows])
+        return {}, {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"}
+    monkeypatch.setattr(A, "_phan_xu_ai", phan_xu)
+    return goi
+
+
+def _tk() -> dict:
+    tu = datetime.datetime.now(_VN) - datetime.timedelta(days=60)
+    return {"pheu": {}, "moi": 0, "cu": 0, "giu": 0, "de_xuat": 0, "cap_nhat": 0,
+            "pham_vi": {"tu": tu.isoformat(timespec="minutes")}}
+
+
+def test_luot_tim_bo_seeding_truoc_ai_ghi_so_va_luot_sau_van_nho(monkeypatch, ai):
+    kho = KhoGia().cai(monkeypatch)
+    hits = _hits("seeding") + _hits("review") + _hits("livestream")
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 7, hits, ["hapas"], 1e12, tk)
+    f = tk["pheu"]["tiktok"]
+    assert f["seeding"] == 8 and tk["seeding"] == 8
+    assert sorted(set(ai[0])) == ["live_mau", "review_mau"], "bài seeding không tới AI"
+    assert {r["tai_khoan"] for r in kho.ghi[0]} == {"live_mau", "review_mau"}
+    dau = TDA.dau_loai(DU_AN, ["hapas"])
+    so = TDA.doc_loai("hapas", dau, datetime.datetime.now(_VN) - datetime.timedelta(days=60))
+    seed_k = {T._khoa_bai("tiktok", d["link"], {"id": d["__goc"]["id"]}) for d, _ in hits[:8]}
+    assert {k for k, v in so.items() if v[0] == L.LY_DO_SEEDING_BAI} == seed_k
+    assert len(TDA.doc_seeding("hapas")) == 8
+    assert "seeding affiliate 8" in T._cau_pheu("tiktok", f)
+    assert "bỏ 8 bài seeding affiliate của 1 tài khoản (@aff_mau 8 bài ngày" in T._cau_seeding_tk(tk)
+    # Gặp lại bài đã loại (cùng dấu luật): "đã loại trước", không xét lại, không tới AI.
+    tk2 = _tk()
+    T._tach_va_giu(DU_AN, 8, _hits("seeding"), ["hapas"], 1e12, tk2)
+    assert tk2["pheu"]["tiktok"]["da_loai_truoc"] == 8 and not tk2["pheu"]["tiktok"]["seeding"]
+    # Lượt sau, ĐỔI từ khoá (dấu luật khác → phần "bai" của sổ làm lại từ đầu): MỘT video mới của
+    # cùng tài khoản (ngày khác) + 8 bài cũ. Kho không có bài nào của tài khoản, nhưng sổ seeding nhớ
+    # nhịp 8 bài/ngày → vẫn bỏ cả 9, không bài nào tới AI.
+    moi = _hits("seeding", dich_ngay=1)[:1]
+    moi[0][0]["link"] = moi[0][0]["link"].replace(moi[0][0]["__goc"]["id"], "7690000000000999999")
+    moi[0][0]["__goc"]["id"] = "7690000000000999999"
+    tk3 = _tk()
+    T._tach_va_giu({**DU_AN, "tu_khoa": ["hapas", "túi hapas"]}, 9, moi + _hits("seeding"),
+                   ["hapas", "túi hapas"], 1e12, tk3)
+    assert tk3["pheu"]["tiktok"]["seeding"] == 9 and len(ai) == 1 and len(kho.ghi) == 1
+    assert len(TDA.doc_seeding("hapas")) == 9
+
+
+def test_tat_luat_seeding_thi_bai_di_tiep_toi_ai(monkeypatch, ai):
+    KhoGia().cai(monkeypatch)
+    tk = _tk()
+    T._tach_va_giu({**DU_AN, "cau_hinh": {"seeding": {"bat": False}}}, 7, _hits("seeding"),
+                   ["hapas"], 1e12, tk)
+    assert not tk["pheu"]["tiktok"]["seeding"] and len(ai[0]) == 8
+
+
+def test_bai_seeding_co_thao_luan_that_van_giu(monkeypatch, ai):
+    kho = KhoGia().cai(monkeypatch)
+    hits = _hits("seeding")
+    hits[0][0]["comments"] = 69                       # như video 26/09: 69 bình luận, 1,5 triệu xem
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 7, hits, ["hapas"], 1e12, tk)
+    assert tk["pheu"]["tiktok"]["seeding"] == 7 and [r["binh_luan"] for r in kho.ghi[0]] == [69]
+
+
+def test_nguon_theo_doi_khong_phai_kenh_nha_cung_qua_luat(monkeypatch, ai):
+    """Tài khoản seeding lỡ được duyệt thành nguồn (kol): bài vẫn bị bỏ; nguồn kênh nhà cùng nhịp đăng
+    thì giữ hết."""
+    KhoGia().cai(monkeypatch)
+    nguon = {1: {"id": 1, "nen_tang": "tiktok", "dinh_danh": "aff_mau", "loai": "kol"},
+             2: {"id": 2, "nen_tang": "tiktok", "dinh_danh": "nha_mau", "loai": "kenh_nha"}}
+    nha = []
+    for d, dt in _hits("seeding"):
+        d2 = dict(d, username="nha_mau", link=d["link"].replace("aff_mau", "nha_mau")
+                  .replace("/video/769", "/video/869"))
+        nha.append((d2, dt))
+    rows, tk = T.chon_bai(DU_AN, {1: _hits("seeding"), 2: nha}, nguon, 1e12)
+    assert tk["seeding"] == 8 and {r["tai_khoan"] for r in rows} == {"nha_mau"} and len(rows) == 8
+    assert len(TDA.doc_seeding("hapas")) == 8
+
+
+def test_cong_thi_truong_vn_bo_bai_thai_truoc_ai(monkeypatch, ai):
+    """Bài chữ Thái và bài tài khoản "HAPAS THAILAND" không có dấu hiệu Việt bị bỏ TRƯỚC AI; bài VN
+    giữ. Trước đây AI nhận tín hiệu thị trường nhưng GIỮ bài brand nước khác (mã other_market)."""
+    kho = KhoGia().cai(monkeypatch)
+    luc = datetime.datetime.now(_VN) - datetime.timedelta(days=2)
+
+    def bai(i, user, kenh, text):
+        return ({"platform": "tiktok", "username": user, "kenh": kenh, "text": text,
+                 "hashtags": "hapas", "link": f"https://www.tiktok.com/@{user}/video/55{i}",
+                 "comments": 3, "views": 900, "likes": 1, "shares": 0}, luc)
+    hits = [bai(1, "hapasthailand", "HAPAS THAILAND", "New tote collection #hapas"),
+            bai(2, "shop_th", "ร้านกระเป๋า", "กระเป๋าใหม่ hapas สวยมาก ราคาพิเศษ วันนี้"),
+            bai(3, "khach_vn", "Khách", "túi hapas xinh quá trời")]
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 7, hits, ["hapas"], 1e12, tk)
+    assert tk["pheu"]["tiktok"]["thi_truong"] == 2 and ai == [["khach_vn"]]
+    assert [r["tai_khoan"] for r in kho.ghi[0]] == ["khach_vn"]
+    so = TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas"]), luc - datetime.timedelta(days=1))
+    assert sorted(v[0] for v in so.values()) == ["he_chu", "thi_truong"]
+    assert "ngoài thị trường VN 2" in T._cau_pheu("tiktok", tk["pheu"]["tiktok"])
+    # Dự án thị trường khác (TH): không áp cổng VN.
+    tk2 = _tk()
+    T._tach_va_giu({**DU_AN, "ma": "hapas_th", "thi_truong": "TH"}, 7, hits[:2], ["hapas"],
+                   1e12, tk2)
+    assert not tk2["pheu"]["tiktok"].get("thi_truong")
+
+
+# ───────────────────────────── sổ ─────────────────────────────
+def test_so_loai_giu_so_seeding_khi_doi_dau_luat_va_go_khi_hoan_tac():
+    luc = datetime.datetime.now(_VN) - datetime.timedelta(days=3)
+    tu = luc - datetime.timedelta(days=10)
+    TDA.ghi_seeding("hapas", [{"khoa": "tiktok:1", "nen_tang": "tiktok", "tai_khoan": "aff_mau",
+                               "dang_luc": luc, "bl": 0, "xem": 300}])
+    TDA.ghi_loai("hapas", "dau1", [("tiktok:1", L.LY_DO_SEEDING_BAI, luc)], tu)
+    TDA.ghi_loai("hapas", "dau2", [("tiktok:2", "spam", luc)], tu)       # đổi dấu: "bai" làm lại
+    assert set(TDA.doc_loai("hapas", "dau2", tu)) == {"tiktok:2"}
+    x = TDA.doc_seeding("hapas", tu)
+    assert [(r["khoa"], r["tai_khoan"], r["bl"], r["xem"]) for r in x] == [
+        ("tiktok:1", "aff_mau", 0, 300)]
+    assert x[0]["dang_luc"] == luc.replace(second=0, microsecond=0)
+    assert TDA.bo_khoi_so("hapas", ["tiktok:1", "tiktok:2", "khong_co"]) == 2
+    assert TDA.doc_seeding("hapas") == [] and TDA.doc_loai("hapas", "dau2", tu) == {}
+    # Bài quá 92 ngày không vào sổ seeding.
+    TDA.ghi_seeding("hapas", [{"khoa": "tiktok:3", "nen_tang": "tiktok", "tai_khoan": "a",
+                               "dang_luc": luc - datetime.timedelta(days=100), "bl": 0, "xem": 1}])
+    assert TDA.doc_seeding("hapas") == []
+
+
+def test_mo_ta_cau_hinh_seeding_trong_schema_khop_mac_dinh():
+    """COMMENT `du_an.cau_hinh` (quy chuẩn BI: mô tả đúng dữ liệu) nói đủ khoá + mặc định của luật."""
+    import re
+    sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
+        encoding="utf-8")
+    m = re.search(r"COMMENT ON COLUMN du_an\.cau_hinh IS '([^']*)';", sql).group(1)
+    for k, v in L.SEEDING_BAI.items():
+        assert f'"{k}"' in m, k
+        if not isinstance(v, bool):
+            assert re.search(rf'"{k}" \((mặc định )?{v}\b', m), k
+
+
+def test_kho_loi_khi_doc_lich_su_thi_tinh_tren_so_va_lo(monkeypatch, ai):
+    kho = KhoGia().cai(monkeypatch)
+
+    def hong(*a, **k):
+        raise K.LoiKho("không nối được kho lắng nghe (OperationalError)")
+    monkeypatch.setattr(K, "lich_su_tai_khoan", hong)
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 7, _hits("seeding"), ["hapas"], 1e12, tk)
+    assert tk["pheu"]["tiktok"]["seeding"] == 8 and not kho.ghi

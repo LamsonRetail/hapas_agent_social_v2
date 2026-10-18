@@ -1003,12 +1003,14 @@ def chon_bai(du_an: dict, theo_nguon: dict[int, list], nguon: dict[int, dict],
     • Bài cũ hơn `NGAY_GIU` ngày hoặc không có ngày: bỏ.
     • Có từ loại trừ của dự án: bỏ (luật cứng, không qua AI).
     • Nguồn `kenh_nha` (kênh của chính brand): giữ mọi bài; AI chỉ gán sắc thái/chủ đề.
-    • Nguồn khác: chỉ xét bài NHẮC từ khoá dự án; AI phán giữ/loại (trùng tên, lạc đề…).
-      AI hỏng/hết giờ/`khong_ro` thì giữ theo luật (đã nhắc từ khoá, nguồn do người chọn)."""
+    • Nguồn khác: chỉ xét bài NHẮC từ khoá dự án; tài khoản seeding affiliate (18/10/2026,
+      `_loc_seeding`) bỏ trước AI; AI phán giữ/loại (trùng tên, lạc đề…). AI hỏng/hết giờ/
+      `khong_ro` thì giữ theo luật (đã nhắc từ khoá, nguồn do người chọn)."""
     bay_gio = bay_gio or datetime.datetime.now(_VN)
     moc = bay_gio - datetime.timedelta(days=NGAY_GIU)
     tu_khoa = [str(x) for x in du_an.get("tu_khoa") or [] if str(x).strip()] or [du_an["ten"]]
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
+    # `seeding` (18/10/2026) chỉ có khi lượt bỏ ít nhất một bài seeding affiliate.
     tk = {"lay_duoc": 0, "qua_cu": 0, "khong_nhac": 0, "loai_tru": 0, "ai_loai": 0,
           "giu": 0, "ai": ""}
     cho: list[tuple[dict, datetime.datetime, dict]] = []
@@ -1036,6 +1038,15 @@ def chon_bai(du_an: dict, theo_nguon: dict[int, list], nguon: dict[int, dict],
                 continue
             d["_khoa"] = khoa
             cho.append((d, dt, n))
+    # Seeding affiliate (18/10/2026, `_loc_seeding`): nguồn KHÔNG phải kênh nhà cũng qua luật — bài
+    # của tài khoản seeding không đếm dù tài khoản lỡ được duyệt thành nguồn; bỏ trước AI.
+    ngoai = [(d, dt) for d, dt, n in cho if n.get("loai") != "kenh_nha"]
+    if ngoai:
+        _, bo, seed = _loc_seeding(du_an, ngoai, moc, list(nguon.values()))
+        if bo:
+            bo_id = {id(d) for d, _ in bo}
+            cho = [x for x in cho if id(x[0]) not in bo_id]
+            _ghi_so_seeding(du_an["ma"], bo, seed, tk)
     phan_xu: dict = {}
     tt: dict = {"_sac_thai": {}, "_chu_de": {}, "trang_thai": ""}
     if cho:
@@ -1885,11 +1896,12 @@ def cua_so_tk(moc: dict | None, dau: str, bay_gio: datetime.datetime,
 def _pheu_moi(ngay: int, ly: str) -> dict:
     """Phễu một nền tảng (chẩn đoán 16/10/2026: bài bị loại sau bước lọc ngày không ghi lý do —
     chủ dự án không thấy tiền đi đâu): về → trong phạm vi (ngoài phạm vi bỏ) → bài ĐÃ CÓ: cập
-    nhật số liệu; bài MỚI: trùng / từ loại trừ / spam / AI loại (theo mã lý do) / không nhắc từ
-    khoá → giữ (mới). `cua_so` = số bài nằm trong cửa sổ tăng dần (chỉ để đối chiếu)."""
+    nhật số liệu; bài MỚI: trùng / từ loại trừ / ngoài thị trường VN / spam / seeding affiliate
+    (18/10/2026) / AI loại (theo mã lý do) / không nhắc từ khoá → giữ (mới). `cua_so` = số bài nằm
+    trong cửa sổ tăng dần (chỉ để đối chiếu)."""
     return {"ngay": ngay, "ly_do": ly, "ve": 0, "cua_so": 0, "pham_vi": 0, "ngoai_pham_vi": 0,
-            "cap_nhat": 0, "da_loai_truoc": 0, "trung": 0, "loai_tru": 0, "spam": 0,
-            "ai_loai": {},
+            "cap_nhat": 0, "da_loai_truoc": 0, "trung": 0, "loai_tru": 0, "thi_truong": 0,
+            "spam": 0, "seeding": 0, "ai_loai": {},
             "khong_nhac": 0, "giu": 0, "moi": 0, "xin": 0, "xin_ly_do": ""}
 
 
@@ -3226,10 +3238,13 @@ def ghi_da_boc(ma: str, khoa: list[str], bay_gio: datetime.datetime) -> None:
 
 
 def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
-                 tk: dict, ma_loai: str | None = None) -> None:
+                 tk: dict, ma_loai: str | None = None, *, cap_nhat_so=None,
+                 **giu_kw) -> None:
     """Bài trong phạm vi: ĐÃ CÓ trong kho → cập nhật số liệu + ảnh chụp ngày (`chi_so_ngay`);
     MỚI → `_giu_tu_khoa` (lọc + AI). Xem `theo_doi_api.tach_da_biet`. Bài Facebook mang pfbid
-    mới mà là bản trùng của bài đã có (`lang_nghe_db.khoa_fb_trung`) đi đường ĐÃ CÓ với khoá cũ."""
+    mới mà là bản trùng của bài đã có (`lang_nghe_db.khoa_fb_trung`) đi đường ĐÃ CÓ với khoá cũ.
+    `cap_nhat_so(ma, luot, rows)`: thay `lang_nghe_db.cap_nhat_so_lieu` (script nạp raw: số của
+    lần đọc CŨ chỉ được nâng, ảnh chụp ghi đúng ngày đọc); `giu_kw` chuyển cho `_giu_tu_khoa`."""
     def khoa_hit(d: dict) -> str:
         return _khoa_bai(d["platform"], d["link"], {
             "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")})
@@ -3241,7 +3256,8 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     for p, n in trung.items():
         tk["pheu"].setdefault(p, _pheu_moi(0, ""))["trung"] += n
     if cap_nhat:
-        tk["cap_nhat"] = tk.get("cap_nhat", 0) + K.cap_nhat_so_lieu(du_an["ma"], luot, cap_nhat)
+        tk["cap_nhat"] = tk.get("cap_nhat", 0) + (cap_nhat_so or K.cap_nhat_so_lieu)(
+            du_an["ma"], luot, cap_nhat)
         for r in cap_nhat:
             tk["pheu"].setdefault(r["nen_tang"], _pheu_moi(0, ""))["cap_nhat"] += 1
         # Phễu đường 2 Threads: bài RIÊNG của đường 2 đã có trong kho (chỉ cập nhật số liệu).
@@ -3267,7 +3283,7 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     _dem_chua_thay(tk, hits, {khoa_kho(d) for d, _ in hits_moi}, khoa_kho)
     if hits_moi:
         try:
-            _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk)
+            _giu_tu_khoa(du_an, luot, hits_moi, tu, han, tk, **giu_kw)
         finally:
             TDA.ghi_loai(ma_loai, dau, tk.pop("_bi_loai", []), tu_pv)
 
@@ -3336,11 +3352,114 @@ def _khoa_fb_cu(ma: str, hits: list, khoa_hit) -> dict[str, str]:
         return {}
 
 
+def _kenh_nha(nguon: list[dict] | None) -> set[tuple[str, str]]:
+    """(nền tảng, tài khoản) của nguồn kênh nhà — luật seeding không bao giờ bắt. Facebook: định danh
+    là URL trang ("facebook.com/hapasglobal"), bài lượt tìm mang slug trang ("hapasglobal") — lấy cả
+    hai dạng."""
+    ra: set[tuple[str, str]] = set()
+    for n in nguon or []:
+        if n.get("loai") != "kenh_nha":
+            continue
+        p = str(n.get("nen_tang") or "")
+        dd = _chuan_dinh_danh(p, str(n.get("dinh_danh") or "")).lower()
+        if dd:
+            ra.add((p, dd))
+            if p == "facebook":
+                ra.add((p, dd.rsplit("/", 1)[-1]))
+    return ra
+
+
+def _dong_seeding(d: dict, dt) -> dict:
+    """Một bài của lô dưới dạng dòng lịch sử cho `loc_rac.tai_khoan_seeding`."""
+    import loc_rac
+    return {"tk": loc_rac.khoa_tai_khoan(d.get("platform"), d.get("username")),
+            "khoa": d.get("_khoa") or _khoa_bai(str(d.get("platform") or ""), d.get("link") or ""),
+            "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views")}
+
+
+def _loc_seeding(du_an: dict, cho: list, tu: datetime.datetime, nguon: list[dict] | None = None,
+                 them: list[dict] | tuple = ()) -> tuple[list, list, dict]:
+    """Luật seeding affiliate cấp BÀI (18/10/2026, `loc_rac.tai_khoan_seeding`) cho lô `cho` =
+    [(d, dt)] (d có `platform`, `username`, `comments`, `views`; `_khop` = nhắc từ khoá). -> (giữ,
+    bị loại, {tài khoản: số đo} của tài khoản có bài bị loại).
+
+    Lịch sử = bài đã giữ của các tài khoản trong lô (kho, đăng từ `tu` hoặc `ngay` ngày gần nhất —
+    mốc nào sớm hơn) + sổ seeding (`theo_doi_api.doc_seeding`) + `them` (dòng lịch sử thêm: script
+    nạp raw đưa CẢ lô raw để từng phần nhỏ gửi AI vẫn thấy đủ nhịp đăng) + bài NHẮC từ khoá của lô.
+    Kho đọc lỗi thì tính trên sổ + lô (báo ở log, không làm hỏng lượt)."""
+    import loc_rac
+    cfg = loc_rac.cau_hinh_seeding(du_an)
+    if not cfg["bat"] or not cho:
+        return list(cho), [], {}
+    ma = du_an["ma"]
+    tu = min(tu, datetime.datetime.now(_VN) - datetime.timedelta(days=cfg["ngay"]))
+    lo = [(d, dt, _dong_seeding(d, dt)) for d, dt in cho]
+    cac_tk = {x["tk"] for _, _, x in lo if x["tk"]}
+    if not cac_tk:
+        return list(cho), [], {}
+    rows: list[dict] = []
+    try:
+        rows += [{"tk": loc_rac.khoa_tai_khoan(r["nen_tang"], r["tai_khoan"]), "khoa": r["khoa"],
+                  "dang_luc": r["dang_luc"], "bl": r.get("binh_luan"), "xem": r.get("xem")}
+                 for r in K.lich_su_tai_khoan(ma, sorted(u for _, u in cac_tk), tu)]
+    except K.LoiKho as e:
+        print(f"[theo_doi] seeding: không đọc được lịch sử kho ({e}) — tính trên sổ + lô",
+              flush=True)
+    rows += [{"tk": loc_rac.khoa_tai_khoan(x["nen_tang"], x["tai_khoan"]), **x}
+             for x in TDA.doc_seeding(ma, tu)]
+    rows += list(them)
+    rows += [x for d, dt, x in lo if d.get("_khop") and dt and dt >= tu]
+    seed = loc_rac.tai_khoan_seeding(rows, cfg, _kenh_nha(nguon),
+                                     [str(du_an.get("ten") or ""), ma])
+    giu, bo, ra = [], [], {}
+    for d, dt, x in lo:
+        if x["tk"] in seed and not loc_rac.giu_bai_seeding(d.get("comments"), cfg):
+            bo.append((d, dt))
+            ra[x["tk"]] = seed[x["tk"]]
+        else:
+            giu.append((d, dt))
+    return giu, bo, ra
+
+
+def _ghi_so_seeding(ma: str, bo: list, seed: dict, tk: dict) -> None:
+    """Bài seeding vừa loại → sổ seeding (nhịp đăng cho lượt sau) + đếm/ghi chú vào thống kê `tk`
+    (`seeding`, `_tk_seeding` = tài khoản nặng nhất cho câu phễu)."""
+    if not bo:
+        return
+    TDA.ghi_seeding(ma, [{"khoa": _dong_seeding(d, dt)["khoa"], "nen_tang": d.get("platform"),
+                          "tai_khoan": str(d.get("username") or "").strip().lstrip("@").lower(),
+                          "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views")}
+                         for d, dt in bo if dt])
+    tk["seeding"] = tk.get("seeding", 0) + len(bo)
+    tk.setdefault("_tk_seeding", {}).update(seed)
+
+
+def _ngoai_vn(du_an: dict, d: dict, tu: list[str]) -> str:
+    """Cổng thị trường VN (18/10/2026) của lượt tìm theo từ khoá: ĐÚNG phần thị trường của luật dự
+    phòng social_listen (`apify_tool._ly_do_loai`) — dự án VN thì bài chữ ngoài VN (Thái, Hindi…)
+    và bài của tài khoản brand nước khác không có dấu hiệu Việt ("HAPAS THAILAND") bị bỏ TRƯỚC AI.
+    Trước đây lượt tìm chỉ đưa tín hiệu thị trường cho AI, mà AI GIỮ bài brand nước khác (mã
+    other_market) — bài HAPAS Thái lọt vào số của dự án VN. Bài web có cổng riêng (`nguon_web`).
+    -> mã lý do ("he_chu" | "thi_truong") hoặc ""."""
+    p = str(d.get("platform") or "")
+    if str(du_an.get("thi_truong") or "VN").upper() != "VN" or p == W.NEN_TANG:
+        return ""
+    if A._ngoai_thi_truong(d, "VN"):
+        return "he_chu"
+    if p in A._NEN_TANG_CONG_VN or p == "tiktok":
+        return "thi_truong" if A._ly_do_ngoai_vn(d, p, tu) else ""
+    return ""
+
+
 def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
-                 tk: dict) -> None:
+                 tk: dict, *, lich_su_seeding: list[dict] | tuple = (),
+                 ai: dict | None = None, de_xuat: bool = True) -> None:
     """Phân xử AI (như social_listen): AI giữ thì giữ; AI không phán được thì giữ khi bài
-    THỰC SỰ nhắc từ khoá. Trùng, từ loại trừ, spam bỏ cứng trước AI. Mỗi bước đếm vào phễu
-    của nền tảng (`tk["pheu"]`)."""
+    THỰC SỰ nhắc từ khoá. Trùng, từ loại trừ, thị trường ngoài VN, spam, seeding affiliate bỏ cứng
+    trước AI. Mỗi bước đếm vào phễu của nền tảng (`tk["pheu"]`). `lich_su_seeding`: dòng lịch sử
+    thêm cho luật seeding (`_loc_seeding`); `ai`: tham số thêm của `apify_tool._phan_xu_ai` (script
+    nạp raw: `song_song` 1 — một lô model một lúc như gán nhãn nền); `de_xuat` False: không ghi đề
+    xuất nguồn (nạp raw cả tháng không đổ hàng trăm đề xuất vào hàng chờ duyệt)."""
     import loc_rac
     ma = du_an["ma"]
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
@@ -3370,6 +3489,11 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             ph(d)["loai_tru"] += 1
             loai(d, khoa, "loai_tru", dt)
             continue
+        ly_tt = _ngoai_vn(du_an, d, tu)
+        if ly_tt:
+            ph(d)["thi_truong"] = ph(d).get("thi_truong", 0) + 1
+            loai(d, khoa, ly_tt, dt)
+            continue
         if loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}"):
             tk["spam"] = tk.get("spam", 0) + 1            # đợt 2d: bỏ cứng trước bước AI
             ph(d)["spam"] += 1
@@ -3379,14 +3503,23 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
         d["_khop"] = A._khop_tu_khoa(d, tu)
         d["_thi_truong"] = A._thi_truong(d, tu)
         cho.append((d, dt))
+    nguon = K.nguon_cua_du_an(ma) if cho else []
+    if cho:
+        # Seeding affiliate (18/10/2026): bỏ TRƯỚC AI — bài không vào `bai`, không tốn AI.
+        tu_pv = datetime.datetime.fromisoformat((tk.get("pham_vi") or {}).get("tu")
+                                                or datetime.datetime.now(_VN).isoformat())
+        cho, bo, seed = _loc_seeding(du_an, cho, tu_pv, nguon, lich_su_seeding)
+        for d, dt in bo:
+            ph(d)["seeding"] = ph(d).get("seeding", 0) + 1
+            loai(d, d["_khoa"], loc_rac.LY_DO_SEEDING_BAI, dt)
+        _ghi_so_seeding(ma, bo, seed, tk)
     if not cho:
         _dem_duong_2(tk, "loai", n2_vao)
         return
     han_ai = time.monotonic() + max(0.0, min(150.0, han - time.monotonic() - 30))
     px_all, tt = A._phan_xu_ai(cho, tu, du_an.get("boi_canh") or du_an["ten"],
-                               du_an.get("thi_truong") or "VN", han_ai)
+                               du_an.get("thi_truong") or "VN", han_ai, **(ai or {}))
     tk["ai"] = tt.get("trang_thai") or ""
-    nguon = K.nguon_cua_du_an(ma)
     theo = {(n["nen_tang"], _chuan_dinh_danh(n["nen_tang"], n["dinh_danh"])): int(n["id"])
             for n in nguon}
     rows, ban = [], []
@@ -3438,7 +3571,8 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             pheu[p]["giu"], pheu[p]["moi"] = len(cac), moi
             tk["moi"] += moi
             tk["cu"] += cu
-        tk["de_xuat"] = K.ghi_de_xuat(ma, _de_xuat_tu(ban, set(theo), tu))
+        if de_xuat:
+            tk["de_xuat"] = K.ghi_de_xuat(ma, _de_xuat_tu(ban, set(theo), tu))
 
 
 def _cau_pheu(p: str, f: dict) -> str:
@@ -3452,8 +3586,10 @@ def _cau_pheu(p: str, f: dict) -> str:
             f"{f.get('ngoai_pham_vi', 0)}) → cập nhật {f.get('cap_nhat', 0)} bài đã có; bài mới: "
             + (f"đã loại trước {f['da_loai_truoc']}, " if f.get("da_loai_truoc") else "")
             + f"trùng {f.get('trung', 0)}, từ loại trừ {f.get('loai_tru', 0)}, "
-            f"spam {f.get('spam', 0)}, "
-            f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
+            + (f"ngoài thị trường VN {f['thi_truong']}, " if f.get("thi_truong") else "")
+            + f"spam {f.get('spam', 0)}, "
+            + (f"seeding affiliate {f['seeding']}, " if f.get("seeding") else "")
+            + f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
             + (f", không nhắc từ khoá {f['khong_nhac']}" if f.get("khong_nhac") else "")
             + f" → giữ {f.get('giu', 0)} ({f.get('moi', 0)} mới)"
             + (f"; từ khoá lỗi: {f['loi_mot_phan']}" if f.get("loi_mot_phan") else "")
@@ -3545,6 +3681,17 @@ def _cau_web(w) -> str:
             f"trích {w.get('chi_trich', 0)}, trang hỏng {w.get('trang_hong', 0)}")
 
 
+def _cau_seeding_tk(tk: dict, toi_da: int = 3) -> str:
+    """"bỏ N bài seeding affiliate (@a 177 bài ngày 15/10, …), " — `_tk_seeding` của lượt (nhiều
+    bài trong một ngày nhất trước); "" khi không bỏ bài nào."""
+    if not tk.get("seeding"):
+        return ""
+    x = sorted((tk.get("_tk_seeding") or {}).items(), key=lambda kv: (-kv[1]["max_ngay"], kv[0]))
+    ten = ", ".join(f"@{t[1]} {v['max_ngay']} bài ngày {v['ngay']:%d/%m}" for t, v in x[:toi_da])
+    return (f"bỏ {tk['seeding']} bài seeding affiliate của {len(x)} tài khoản"
+            + (f" ({ten}{', …' if len(x) > toi_da else ''})" if ten else "") + ", ")
+
+
 def _cau_tk(tk: dict) -> list[str]:
     if not tk or not tk.get("tu"):
         return list((tk or {}).get("ghi_chu") or [])
@@ -3555,8 +3702,9 @@ def _cau_tk(tk: dict) -> list[str]:
            + (f"làm mới thêm {lm.get('cap_nhat', 0)}/{lm.get('bai', 0)} bài TikTok nổi, "
               if lm.get("bai") else "")
            + f"{tk.get('de_xuat', 0)} đề xuất nguồn, "
-           + (f"bỏ {tk['spam']} bài spam, " if tk.get('spam') else "") + f""
-           f"{_usd(tk.get('usd') or 0)} USD")
+           + (f"bỏ {tk['spam']} bài spam, " if tk.get('spam') else "")
+           + _cau_seeding_tk(tk)
+           + f"{_usd(tk.get('usd') or 0)} USD")
     pheu = tk.get("pheu") or {}
     # Ghi chú (bỏ qua / lỗi / co ngân sách) đứng TRƯỚC các dòng phễu dài: `luot_quet.ghi_chu` có
     # trần (`lang_nghe_db.GHI_CHU_TOI_DA`), phần mất (nếu có) phải là chi tiết phễu, không phải lý
@@ -4379,7 +4527,8 @@ def _chay_viec(v) -> tuple[str, str]:
         + (f"; cập nhật số {lam_moi} video YouTube cũ" if lam_moi else "") + "). "
         f"Bỏ: {tk['qua_cu']} bài cũ hơn {NGAY_GIU} ngày, {tk['khong_nhac']} bài không nhắc "
         "dự án" + (f", {tk['loai_tru']} bài chứa từ loại trừ" if tk["loai_tru"] else "")
-        + (f", {tk['ai_loai']} bài AI loại" if tk["ai_loai"] else "") + ". "
+        + (f", {tk['ai_loai']} bài AI loại" if tk["ai_loai"] else "")
+        + (f", {tk['seeding']} bài seeding affiliate" if tk.get("seeding") else "") + ". "
         f"Chi phí thật {_usd(usd)} USD; tháng này đã dùng {_usd(da_tieu)}/"
         f"{_usd(float(du_an['tran_usd_thang'] or 0))} USD. Xem chi tiết trên dashboard "
         "social.hapas.vn.")
@@ -4583,8 +4732,14 @@ def luu_tu_khoa(queries: list[str], ban: list) -> dict:
         nguon = K.nguon_cua_du_an(ma)
         theo = {(n["nen_tang"], _chuan_dinh_danh(n["nen_tang"], n["dinh_danh"])): int(n["id"])
                 for n in nguon}
+        # Seeding affiliate (18/10/2026): bài social_listen ghi vào kho cũng không đếm bài seeding
+        # — cùng luật, cùng sổ với /theodoi (`_loc_seeding`).
+        ban_da, bo, seed = _loc_seeding(K.doc_du_an(ma) or x, ban, datetime.datetime.now(_VN)
+                                        - datetime.timedelta(days=TDA.NGAY_PHAM_VI), nguon)
+        tk_s: dict = {}
+        _ghi_so_seeding(ma, bo, seed, tk_s)
         rows, thay = [], set()
-        for d, dt in ban:
+        for d, dt in ban_da:
             khoa = _khoa_bai(str(d["platform"]), str(d["link"]), {"id": d.get("_goc_id")})
             if khoa in thay:
                 continue
@@ -4608,11 +4763,11 @@ def luu_tu_khoa(queries: list[str], ban: list) -> dict:
         luot = K.mo_luot(ma, "tu_khoa")
         try:
             moi, cu = K.ghi_bai(ma, luot, "tu_khoa", rows)
-            dx = K.ghi_de_xuat(ma, _de_xuat_tu(ban, set(theo), queries))
+            dx = K.ghi_de_xuat(ma, _de_xuat_tu(ban_da, set(theo), queries))
             K.dong_luot(luot, trang_thai="xong", bai_moi=moi, bai_cap_nhat=cu,
                         ghi_chu=(f"tìm theo từ khoá '{', '.join(queries)[:150]}'; {dx} đề xuất "
-                                 "nguồn mới; chi phí ở sổ chi phí quét, không tính vào trần "
-                                 "theo dõi"))
+                                 "nguồn mới; " + _cau_seeding_tk(tk_s) + "chi phí ở sổ chi phí "
+                                 "quét, không tính vào trần theo dõi"))
         except K.LoiKho as e:
             K.dong_luot(luot, trang_thai="loi", loi=str(e))
             raise

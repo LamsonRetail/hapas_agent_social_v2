@@ -1,0 +1,788 @@
+{
+ "_ghi_chu": "Cắt từ raw scraptik đã trả tiền (18/10/2026, điều tra Kompa): tài khoản, tên, id video đã thay bằng tên/id mẫu; giữ nguyên caption, giờ đăng, số liệu. seeding = một tài khoản affiliate ngày 15/10 (177 video trong ngày, chỉ hashtag); livestream = người bán hàng livestream 12 bài/ngày, xem cao; tuong_tac_that = tài khoản có nhiều bình luận; review = nhà sáng tạo 1 bài/ngày.",
+ "seeding": [
+  {
+   "aweme_id": "7690000000000000001",
+   "desc": "#HAPAS #QUATANG2010 #QUATANGHAPAS #HAPASsuperbrandday #TuixachHAPAS ",
+   "create_time": 1792083556,
+   "desc_language": "un",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "aff_mau",
+    "nickname": "Mẫu aff_mau",
+    "follower_count": 40000
+   },
+   "statistics": {
+    "play_count": 629,
+    "digg_count": 2,
+    "comment_count": 0,
+    "share_count": 2
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000002",
+   "desc": "#HAPAS #QUATANG2010 #QUATANGHAPAS #HAPASsuperbrandday #TuixachHAPAS ",
+   "create_time": 1792083413,
+   "desc_language": "un",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "aff_mau",
+    "nickname": "Mẫu aff_mau",
+    "follower_count": 40000
+   },
+   "statistics": {
+    "play_count": 760,
+    "digg_count": 2,
+    "comment_count": 0,
+    "share_count": 2
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000003",
+   "desc": "#HAPAS #QUATANG2010 #QUATANGHAPAS #HAPASsuperbrandday #TuixachHAPAS ",
+   "create_time": 1792083223,
+   "desc_language": "un",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "aff_mau",
+    "nickname": "Mẫu aff_mau",
+    "follower_count": 40000
+   },
+   "statistics": {
+    "play_count": 819,
+    "digg_count": 2,
+    "comment_count": 0,
+    "share_count": 1
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000004",
+   "desc": "#HAPAS #QUATANG2010 #QUATANGHAPAS #HAPASsuperbrandday #TuixachHAPAS ",
+   "create_time": 1792083208,
+   "desc_language": "un",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "aff_mau",
+    "nickname": "Mẫu aff_mau",
+    "follower_count": 40000
+   },
+   "statistics": {
+    "play_count": 593,
+    "digg_count": 0,
+    "comment_count": 0,
+    "share_count": 1
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000005",
+   "desc": "#HAPAS #QUATANG2010 #QUATANGHAPAS #HAPASsuperbrandday #TrangsucHAPAS ",
+   "create_time": 1792082915,
+   "desc_language": "un",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "aff_mau",
+    "nickname": "Mẫu aff_mau",
+    "follower_count": 40000
+   },
+   "statistics": {
+    "play_count": 451,
+    "digg_count": 1,
+    "comment_count": 0,
+    "share_count": 0
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "trangsuchapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000006",
+   "desc": "#HAPAS #QUATANG2010 #QUATANGHAPAS #HAPASsuperbrandday #TrangsucHAPAS ",
+   "create_time": 1792082902,
+   "desc_language": "un",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "aff_mau",
+    "nickname": "Mẫu aff_mau",
+    "follower_count": 40000
+   },
+   "statistics": {
+    "play_count": 359,
+    "digg_count": 3,
+    "comment_count": 0,
+    "share_count": 0
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "trangsuchapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000007",
+   "desc": "#HAPAS #QUATANG2010 #QUATANGHAPAS #HAPASsuperbrandday #TuixachHAPAS ",
+   "create_time": 1792082875,
+   "desc_language": "un",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "aff_mau",
+    "nickname": "Mẫu aff_mau",
+    "follower_count": 40000
+   },
+   "statistics": {
+    "play_count": 408,
+    "digg_count": 0,
+    "comment_count": 0,
+    "share_count": 1
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000008",
+   "desc": "#HAPAS #QUATANG2010 #QUATANGHAPAS #HAPASsuperbrandday #TrangsucHAPAS ",
+   "create_time": 1792082836,
+   "desc_language": "un",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "aff_mau",
+    "nickname": "Mẫu aff_mau",
+    "follower_count": 40000
+   },
+   "statistics": {
+    "play_count": 242,
+    "digg_count": 0,
+    "comment_count": 0,
+    "share_count": 1
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "trangsuchapas"
+    }
+   ]
+  }
+ ],
+ "livestream": [
+  {
+   "aweme_id": "7690000000000000009",
+   "desc": "Kênh hỗ trợ tất cả các khách hàng ở nước ngoài , không có giỏ hàng , lỗi giỏ lên đơn túi xách , combo quà tặng 20/10 chính hãng Hapas ạ  Khách yêu cứ nhắn cho kênh là được hỗ trợ nha  #live_mau #HAPAS #hapassuperbrandday #TuixachHAPAS #QUATANG2010 ",
+   "create_time": 1791723531,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "live_mau",
+    "nickname": "Mẫu live_mau",
+    "follower_count": 176000
+   },
+   "statistics": {
+    "play_count": 28480,
+    "digg_count": 38,
+    "comment_count": 3,
+    "share_count": 3
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "live_mau"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000010",
+   "desc": "Túi xách , combo quà tặng 20/10 về nửa giá 50% 60% trong live đang phát  #live_mau #HAPAS #hapassuperbrandday #TuixachHAPAS #QUATANG2010 ",
+   "create_time": 1791718606,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "live_mau",
+    "nickname": "Mẫu live_mau",
+    "follower_count": 176000
+   },
+   "statistics": {
+    "play_count": 62215,
+    "digg_count": 70,
+    "comment_count": 1,
+    "share_count": 3
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "live_mau"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000011",
+   "desc": "tổng hợp tất cả set quà tặng mẹ , tặng vợ , tặng ny trong livestream độc quyền SUPER BRAND DAY 11-13/10 #live_mau #HAPAS #hapassuperbrandday #TuixachHAPAS #QUATANG2010 ",
+   "create_time": 1791715159,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "live_mau",
+    "nickname": "Mẫu live_mau",
+    "follower_count": 176000
+   },
+   "statistics": {
+    "play_count": 13726,
+    "digg_count": 19,
+    "comment_count": 0,
+    "share_count": 3
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "live_mau"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000012",
+   "desc": "Chưa bao giờ túi xách , combo quà tặng 20/10 chính hãng Hapas có giá tốt đến như vậy trên live #live_mau #HAPAS #hapassuperbrandday #hapassuperbrandday #TuixachHAPAS ",
+   "create_time": 1791699882,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "live_mau",
+    "nickname": "Mẫu live_mau",
+    "follower_count": 176000
+   },
+   "statistics": {
+    "play_count": 30074,
+    "digg_count": 30,
+    "comment_count": 0,
+    "share_count": 7
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "live_mau"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000013",
+   "desc": "cho vị khách hàng đầu tiên có đơn trên 4tr trong khoảng thời gian từ 12h tới 14h ngày 11/10 tại livetsream Long Phạm hôm nay  #live_mau #HAPAS #hapassuperbrandday #TuixachHAPAS #TuixachHAPAS ",
+   "create_time": 1791698275,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "live_mau",
+    "nickname": "Mẫu live_mau",
+    "follower_count": 176000
+   },
+   "statistics": {
+    "play_count": 23163,
+    "digg_count": 18,
+    "comment_count": 0,
+    "share_count": 1
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "live_mau"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000014",
+   "desc": "Top 2 conbo quà tặng Mẹ nhân dịp 20/10 sắp tới đang bán cực kỳ chạy trên kênh của Long  #live_mau #HAPAS #hapassuperbrandday #TuixachHAPAS #QUATANG2010   ",
+   "create_time": 1791696082,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "live_mau",
+    "nickname": "Mẫu live_mau",
+    "follower_count": 176000
+   },
+   "statistics": {
+    "play_count": 13314,
+    "digg_count": 23,
+    "comment_count": 3,
+    "share_count": 8
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "live_mau"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    }
+   ]
+  }
+ ],
+ "tuong_tac_that": [
+  {
+   "aweme_id": "7690000000000000015",
+   "desc": "Em ví ngoan xinh yêu này sẽ là của ai đây …#QUATANGHAPAS #QUATANG2010 #HAPAS #hapassuperbrandday #tuixachHAPAS ",
+   "create_time": 1791124316,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "tuongtac_mau",
+    "nickname": "Mẫu tuongtac_mau",
+    "follower_count": 0
+   },
+   "statistics": {
+    "play_count": 3016,
+    "digg_count": 44,
+    "comment_count": 32,
+    "share_count": 9
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000016",
+   "desc": "Một tình yêu…#QUATANGHAPAS #QUATANG2010 #HAPAS #hapassuperbrandday #tuixachHAPAS ",
+   "create_time": 1791269294,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "tuongtac_mau",
+    "nickname": "Mẫu tuongtac_mau",
+    "follower_count": 0
+   },
+   "statistics": {
+    "play_count": 1140,
+    "digg_count": 40,
+    "comment_count": 37,
+    "share_count": 6
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000017",
+   "desc": "Mê. Một món quà cho người thương.#QUATANGHAPAS #QUATANG2010 #HAPAS #hapassuperbrandday #tuixachHAPAS ",
+   "create_time": 1791333996,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "tuongtac_mau",
+    "nickname": "Mẫu tuongtac_mau",
+    "follower_count": 0
+   },
+   "statistics": {
+    "play_count": 2871,
+    "digg_count": 51,
+    "comment_count": 38,
+    "share_count": 7
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000018",
+   "desc": "Một món quà đầy bất ngờ …))#QUATANGHAPAS #QUATANG2010 #HAPAS #hapassuperbrandday #tuixachHAPAS ",
+   "create_time": 1791186758,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "tuongtac_mau",
+    "nickname": "Mẫu tuongtac_mau",
+    "follower_count": 0
+   },
+   "statistics": {
+    "play_count": 3684,
+    "digg_count": 55,
+    "comment_count": 39,
+    "share_count": 6
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  }
+ ],
+ "review": [
+  {
+   "aweme_id": "7690000000000000019",
+   "desc": "Ví Cầm Tay Darling HAPAS #QUATANG2010 #hapassuperbrandday #hapas #quatanghapas #vicamtay ",
+   "create_time": 1790518467,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "review_mau",
+    "nickname": "Mẫu review_mau",
+    "follower_count": 0
+   },
+   "statistics": {
+    "play_count": 28365,
+    "digg_count": 45,
+    "comment_count": 9,
+    "share_count": 13
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "vicamtay"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000020",
+   "desc": "Túi Xách Nữ Aura HAPAS full box #QUATANG2010 #HAPAS #hapassuperbrandday #quatanghapas #tuixachhapas ",
+   "create_time": 1791351586,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "review_mau",
+    "nickname": "Mẫu review_mau",
+    "follower_count": 0
+   },
+   "statistics": {
+    "play_count": 3600,
+    "digg_count": 9,
+    "comment_count": 8,
+    "share_count": 4
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  },
+  {
+   "aweme_id": "7690000000000000021",
+   "desc": "Túi Xách Nữ Lock Chic HAPAS #QUATANG2010 #HAPAS #hapassuperbrandday #quatanghapas #tuixachhapas ",
+   "create_time": 1791273717,
+   "desc_language": "vi",
+   "region": "VN",
+   "is_ads": false,
+   "is_top": 0,
+   "author": {
+    "unique_id": "review_mau",
+    "nickname": "Mẫu review_mau",
+    "follower_count": 0
+   },
+   "statistics": {
+    "play_count": 2035,
+    "digg_count": 12,
+    "comment_count": 5,
+    "share_count": 6
+   },
+   "text_extra": [
+    {
+     "hashtag_name": "quatang2010"
+    },
+    {
+     "hashtag_name": "hapas"
+    },
+    {
+     "hashtag_name": "hapassuperbrandday"
+    },
+    {
+     "hashtag_name": "quatanghapas"
+    },
+    {
+     "hashtag_name": "tuixachhapas"
+    }
+   ]
+  }
+ ]
+}

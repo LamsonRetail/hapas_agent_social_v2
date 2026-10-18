@@ -23,6 +23,7 @@ theo_doi ít đụng nhau. Hai việc:
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import math
 import re
@@ -549,12 +550,53 @@ def doc_loai(ma: str, dau: str, tu: datetime.datetime) -> dict[str, list]:
             if isinstance(v, list) and len(v) == 2 and str(v[1]) >= moc}
 
 
-def ghi_loai(ma: str, dau: str, moi: list[tuple], tu: datetime.datetime) -> None:
-    """Gộp bài bị loại lượt này vào sổ, bỏ bài đã ra khỏi phạm vi; ghi nguyên tử. Không ghi
-    được thì chỉ báo (lượt sau xét lại — tốn AI, không mất bài)."""
-    import json
+@contextlib.contextmanager
+def _khoa_so():
+    """Khoá sổ "đã loại": trong tiến trình (`_KHOA_LOAI`) VÀ giữa các tiến trình (18/10/2026 —
+    `flock` trên tệp `.lock` cạnh sổ, chỉ POSIX). Vì sao: script dọn seeding / nạp raw
+    (`scripts/lang_nghe_loc_seeding.py`, `lang_nghe_nap_raw.py`) chạy bằng user mark trong tiến
+    trình RIÊNG mà ghi cùng sổ với bot — đọc-sửa-ghi không liền một khối thì bên ghi sau đè mất
+    phần bên kia vừa thêm. Không khoá được tệp (Windows, thư mục chỉ đọc) thì chỉ khoá trong tiến
+    trình như trước."""
     import os
     with _KHOA_LOAI:
+        fd = None
+        try:
+            import fcntl
+            f = _duong_loai()
+            f.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(f"{f}.lock", os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            if fd is not None:
+                os.close(fd)
+            fd = None
+        try:
+            yield
+        finally:
+            if fd is not None:
+                os.close(fd)                 # đóng tệp = nhả flock
+
+
+def _ghi_so_loai(d: dict) -> None:
+    """Ghi NGUYÊN TỬ cả sổ (tệp tạm + `os.replace`). Không ghi được thì chỉ báo (lượt sau xét lại
+    — tốn AI, không mất bài)."""
+    import json
+    import os
+    f = _duong_loai()
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, f)
+    except OSError as e:
+        print(f"[theo_doi] không ghi được sổ bài đã loại: {type(e).__name__}", flush=True)
+
+
+def ghi_loai(ma: str, dau: str, moi: list[tuple], tu: datetime.datetime) -> None:
+    """Gộp bài bị loại lượt này vào sổ, bỏ bài đã ra khỏi phạm vi; ghi nguyên tử. Đổi dấu luật thì
+    phần "bai" làm lại từ đầu, các khoá khác của dự án (sổ seeding, 18/10/2026) giữ nguyên."""
+    with _khoa_so():
         d = _doc_so_loai() or {"du_an": {}}
         cu = doc_loai(ma, dau, tu)
         for khoa, ly, dt in moi:
@@ -562,15 +604,83 @@ def ghi_loai(ma: str, dau: str, moi: list[tuple], tu: datetime.datetime) -> None
                 cu[str(khoa)] = [str(ly)[:40], dt.astimezone(_VN).date().isoformat()]
         if len(cu) > LOAI_TOI_DA:
             cu = dict(sorted(cu.items(), key=lambda kv: kv[1][1])[-LOAI_TOI_DA:])
-        d["du_an"][ma] = {"dau": dau, "bai": cu}
-        f = _duong_loai()
-        try:
-            f.parent.mkdir(parents=True, exist_ok=True)
-            tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
-            tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, f)
-        except OSError as e:
-            print(f"[theo_doi] không ghi được sổ bài đã loại: {type(e).__name__}", flush=True)
+        x = d["du_an"].get(ma)
+        d["du_an"][ma] = {**(x if isinstance(x, dict) else {}), "dau": dau, "bai": cu}
+        _ghi_so_loai(d)
+
+
+# ── Sổ seeding affiliate (18/10/2026, `loc_rac.tai_khoan_seeding`) ──
+# Bài seeding bị loại KHÔNG vào `bai`, nên kho không còn thấy nhịp đăng của tài khoản đó: lượt sau
+# chỉ thấy vài bài mới mỗi ngày và thả lọt. Sổ này giữ (nền tảng, tài khoản, giờ đăng, bình luận,
+# xem) của từng bài seeding đã loại để luật tính trên "lịch sử kho + sổ + lô". Khác phần "bai":
+# KHÔNG theo dấu luật — đổi từ khoá (`dau_loai`) thì bài bị loại theo luật cũ được xét lại, nhưng
+# nhịp đăng của tài khoản vẫn còn. Cùng tệp `.loai-tu-khoa.json` (khoá "seeding" của dự án), giữ
+# bài đăng trong `NGAY_PHAM_VI_TOI_DA` ngày, trần `LOAI_TOI_DA` dòng.
+def _gio_so(s) -> datetime.datetime | None:
+    try:
+        t = datetime.datetime.fromisoformat(str(s))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=_VN)
+
+
+def doc_seeding(ma: str, tu: datetime.datetime | None = None) -> list[dict]:
+    """Bài seeding đã loại của dự án (đăng từ `tu`): [{khoa, nen_tang, tai_khoan, dang_luc, bl,
+    xem}]."""
+    x = (_doc_so_loai().get("du_an") or {}).get(ma)
+    s = x.get("seeding") if isinstance(x, dict) and isinstance(x.get("seeding"), dict) else {}
+    ra = []
+    for k, v in s.items():
+        luc = _gio_so(v[2]) if isinstance(v, list) and len(v) >= 5 else None
+        if luc is None or (tu is not None and luc < tu):
+            continue
+        ra.append({"khoa": k, "nen_tang": v[0], "tai_khoan": v[1], "dang_luc": luc,
+                   "bl": _so(v[3]), "xem": _so(v[4])})
+    return ra
+
+
+def ghi_seeding(ma: str, moi: list[dict], bay_gio: datetime.datetime | None = None) -> None:
+    """Gộp bài seeding vừa loại (`moi` = [{khoa, nen_tang, tai_khoan, dang_luc, bl, xem}]) vào sổ;
+    bỏ bài đăng trước `NGAY_PHAM_VI_TOI_DA` ngày; ghi nguyên tử."""
+    if not moi:
+        return
+    san = (bay_gio or datetime.datetime.now(_VN)) - datetime.timedelta(days=NGAY_PHAM_VI_TOI_DA)
+    with _khoa_so():
+        d = _doc_so_loai() or {"du_an": {}}
+        x = d["du_an"].get(ma) if isinstance(d["du_an"].get(ma), dict) else {}
+        s = {k: v for k, v in (x.get("seeding") or {}).items()
+             if isinstance(v, list) and len(v) >= 5 and (_gio_so(v[2]) or san) >= san}
+        for r in moi:
+            luc = r.get("dang_luc")
+            if r.get("khoa") and isinstance(luc, datetime.datetime) and luc >= san:
+                s[str(r["khoa"])] = [str(r.get("nen_tang") or ""), str(r.get("tai_khoan") or ""),
+                                     luc.astimezone(_VN).isoformat(timespec="minutes"),
+                                     _so(r.get("bl")), _so(r.get("xem"))]
+        if len(s) > LOAI_TOI_DA:
+            s = dict(sorted(s.items(), key=lambda kv: kv[1][2])[-LOAI_TOI_DA:])
+        d["du_an"][ma] = {**x, "seeding": s}
+        _ghi_so_loai(d)
+
+
+def bo_khoi_so(ma: str, khoa: list[str]) -> int:
+    """Gỡ các khoá bài khỏi sổ của dự án — cả phần "bai" (mọi lý do) lẫn sổ seeding — khi script
+    HOÀN TÁC đưa bài về lại `bai`. -> số dòng đã gỡ."""
+    ks = {str(k) for k in khoa if k}
+    if not ks:
+        return 0
+    with _khoa_so():
+        d = _doc_so_loai() or {"du_an": {}}
+        x = d["du_an"].get(ma)
+        if not isinstance(x, dict):
+            return 0
+        n = 0
+        for phan in ("bai", "seeding"):
+            s = x.get(phan) if isinstance(x.get(phan), dict) else {}
+            n += sum(1 for k in ks if k in s)
+            x[phan] = {k: v for k, v in s.items() if k not in ks}
+        if n:
+            _ghi_so_loai(d)
+        return n
 
 
 def _so(v):
