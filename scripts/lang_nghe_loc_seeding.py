@@ -26,8 +26,10 @@ An toàn (theo mẫu `scripts/lang_nghe_gop_bai_fb.py`):
     khoản này commit), kiểm lại lượt đang chạy, khoá dòng (FOR UPDATE), đọc lại (bài đã có thêm
     bình luận ≥ `giu_bl_tu` thì giữ), ghi tệp hoàn tác ĐỦ dòng bài + bình luận + chi_so_ngay (fsync)
     TRƯỚC, ghi sổ, rồi mới xoá. Dấu "đã áp" ghi SAU khi commit. Tệp có sẵn thì dừng.
-  • `--hoan-tac <tệp>`: chèn lại bài, chi_so_ngay, bình luận của các tài khoản có dấu "đã áp" (dòng
-    đã có lại thì để nguyên — ON CONFLICT DO NOTHING) và gỡ các khoá đó khỏi sổ. Chạy lại được.
+  • `--hoan-tac <tệp>`: chèn lại bài, chi_so_ngay, bình luận của MỌI tài khoản trong tệp — kể cả
+    tài khoản chưa có dấu "đã áp" (giao dịch huỷ: dòng còn nguyên; tiến trình dừng ngay sau commit:
+    dòng đã xoá) — dòng đã có lại thì để nguyên (ON CONFLICT DO NOTHING), và gỡ các khoá đó khỏi
+    sổ. Chạy lại được.
   • Chạy lại script: bài đã dọn không còn trong kho — chỉ xử lý phần còn lại.
 
 Quyền: role `mark` KHÔNG có DELETE trên `bai` (bot không xoá bài). Cấp TẠM cho lần chạy rồi thu lại;
@@ -357,15 +359,20 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
             in_ra(f"Tệp hoàn tác của dự án '{dau['du_an']}', không phải '{ma}' — dừng.")
             return 2
         tong = {"bai": 0, "chi_so_ngay": 0, "binh_luan": 0}
-        for x in [r for r in ds if r.get("du_an", ma) == ma]:
+        # Soát 18/10/2026 (LOW): tài khoản KHÔNG có dấu "đã áp" cũng hoàn tác — dòng tài khoản ghi
+        # TRƯỚC khi xoá, dấu ghi SAU commit, nên thiếu dấu là giao dịch đã huỷ (dòng còn nguyên trong
+        # kho: chèn lại không làm gì — ON CONFLICT DO NOTHING) HOẶC tiến trình dừng ngay sau commit
+        # (dòng đã xoá: chèn lại là cứu dữ liệu). Cả hai ca đều an toàn; sổ được gỡ khoá như nhau.
+        for x in [r for r in [*ds, *khong_dau] if r.get("du_an", ma) == ma]:
             for k, v in hoan_tac_tai_khoan(ma, x).items():
                 tong[k] += v
-        in_ra(f"Hoàn tác {ma}: {len(ds)} tài khoản — chèn lại {tong['bai']} bài, "
+        in_ra(f"Hoàn tác {ma}: {len(ds) + len(khong_dau)} tài khoản — chèn lại {tong['bai']} bài, "
               f"{tong['chi_so_ngay']} dòng chi_so_ngay, {tong['binh_luan']} bình luận (dòng đã có "
               "lại thì giữ); đã gỡ khỏi sổ đã loại + sổ seeding.")
         if khong_dau:
-            in_ra(f"{len(khong_dau)} tài khoản không có dấu đã áp (giao dịch lỗi đã huỷ) — KHÔNG "
-                  "hoàn tác tự động: " + ", ".join(f"@{x['tai_khoan'][1]}" for x in khong_dau[:10]))
+            in_ra(f"{len(khong_dau)} tài khoản không có dấu đã áp (giao dịch đã huỷ, hoặc tiến trình "
+                  "dừng ngay sau commit) — đã hoàn tác an toàn như trên (dòng còn trong kho giữ "
+                  "nguyên): " + ", ".join(f"@{x['tai_khoan'][1]}" for x in khong_dau[:10]))
         return 0
     if ns.ap_dung and not ns.sao_luu:
         in_ra("--ap-dung cần --sao-luu <tệp> (tệp hoàn tác ghi TRƯỚC khi sửa kho).")
@@ -428,6 +435,9 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
     in_ra(f"Đã dọn {don}/{len(kh['bo'])} tài khoản ({so_bai} bài); {khong_con} tài khoản không còn "
           f"bài cần dọn, {loi} lỗi (chạy lại script để xử lý phần còn lại). Tệp hoàn tác: "
           f"{ns.sao_luu}")
+    # Soát LOW: quyền DELETE chỉ cấp TẠM cho lần chạy — nhắc thu lại (hoàn tác chỉ cần INSERT).
+    in_ra("Xong: thu quyền xoá — sudo -u postgres psql -d lang_nghe -c 'REVOKE DELETE ON bai "
+          "FROM mark'.")
     return 0 if not loi else 1
 
 

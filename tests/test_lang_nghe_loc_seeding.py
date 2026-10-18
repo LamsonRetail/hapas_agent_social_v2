@@ -247,6 +247,23 @@ def test_ap_dung_chuyen_sang_so_xoa_kho_roi_hoan_tac(kho, tmp_path):
     assert "chèn lại 0 bài" in _chay(["hapas", "--hoan-tac", str(tep)])[1]
 
 
+def test_hoan_tac_ca_tai_khoan_chua_co_dau_da_ap_va_nhac_revoke(kho, tmp_path):
+    """Soát 18/10/2026 (LOW): tiến trình dừng NGAY sau commit (chưa kịp ghi dấu "đã áp") — dòng đã
+    xoá vẫn được chèn lại; giao dịch huỷ (dòng còn nguyên) — chèn lại không làm gì; sổ gỡ khoá."""
+    tep = tmp_path / "z.jsonl"
+    ma, out = _chay(["hapas", "--ap-dung", "--sao-luu", str(tep)])
+    assert ma == 0 and "REVOKE DELETE ON bai FROM mark" in out
+    dong = [x for x in tep.read_text(encoding="utf-8").splitlines()
+            if json.loads(x)["loai_dong"] != "da_ap"]
+    tep.write_text("\n".join(dong) + "\n", encoding="utf-8")
+    ma, out = _chay(["hapas", "--hoan-tac", str(tep)])
+    assert ma == 0 and "chèn lại 6 bài, 6 dòng chi_so_ngay, 2 bình luận" in out
+    assert "1 tài khoản không có dấu đã áp" in out and "đã hoàn tác an toàn" in out
+    assert len(kho.t["bai"]) == 23 and TDA.doc_seeding("hapas") == []
+    ma, out = _chay(["hapas", "--hoan-tac", str(tep)])
+    assert ma == 0 and "chèn lại 0 bài" in out, "dòng còn trong kho: không chèn trùng"
+
+
 def test_doc_lai_trong_giao_dich_bai_vua_co_binh_luan_thi_giu(kho, tmp_path):
     def them_bl(k):
         k.t["bai"][("hapas", "tiktok:aff_mau0")]["binh_luan"] = 12
