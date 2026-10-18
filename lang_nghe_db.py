@@ -511,15 +511,19 @@ def khoa_theo_luot_dau(ma: str, luot_id: int) -> list[dict]:
 
 def lich_su_tai_khoan(ma: str, tai_khoan: list[str], tu) -> list[dict]:
     """Bài đã giữ của các tài khoản (`tai_khoan` chữ thường) đăng từ `tu` — lịch sử nhịp đăng cho
-    luật seeding affiliate (`loc_rac.tai_khoan_seeding`, 18/10/2026). Chỉ đọc."""
+    luật seeding affiliate (`loc_rac.tai_khoan_seeding`, 18/10/2026). Soát M4: kèm thích / chia sẻ
+    (tín hiệu tương tác khi nền tảng không có lượt xem) và link / nội dung / id số Facebook (khoá
+    ổn định — pfbid đổi mỗi lượt, `theo_doi._khoa_loai_on_dinh`). Chỉ đọc."""
     ds = sorted({str(x).strip().lstrip("@").lower() for x in tai_khoan if str(x or "").strip()})
     if not ds:
         return []
     with ket_noi() as c:
+        so_fb = "ma_so_fb" if _co_ma_so_fb(c) else "NULL::text AS ma_so_fb"
         return c.execute(
             "SELECT khoa, nen_tang, lower(tai_khoan) AS tai_khoan, tac_gia, dang_luc, binh_luan, "
-            "xem FROM bai WHERE du_an = %s AND lower(tai_khoan) = ANY(%s) AND dang_luc >= %s",
-            (ma, ds, tu)).fetchall()
+            "xem, thich, chia_se, link, CASE WHEN nen_tang = 'facebook' THEN noi_dung END AS "
+            f"noi_dung, {so_fb} FROM bai WHERE du_an = %s AND lower(tai_khoan) = ANY(%s) "
+            "AND dang_luc >= %s", (ma, ds, tu)).fetchall()
 
 
 def bai_youtube_can_lam_moi(ma: str, ngay: int = 14, toi_da: int = 200) -> list[dict]:

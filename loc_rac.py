@@ -365,13 +365,26 @@ def bai_spam(text: str) -> str:
 # chặn vĩnh viễn — mỗi lượt gặp lại, bài được xét lại bằng luật hiện hành với số mới (không tốn AI,
 # không cào bình luận): bài lên ≥ `giu_bl_tu` bình luận, trung vị tài khoản tăng, tắt luật / đổi
 # ngưỡng, tài khoản thành kênh nhà thì bài đi tiếp tới AI như bài mới.
+#
+# Nền tảng (soát 18/10/2026, M4): số đo trên ĐÚNG TikTok (16/17 tài khoản bắt được là TikTok), nên
+# luật chỉ áp cho `nen_tang` (mặc định ["tiktok"]) — nền tảng khác phải bật trong cấu hình. Lượt
+# xem: TikTok / YouTube báo số thật (0 là 0); Facebook / Instagram / Threads trả 0 khi THIẾU lượt
+# xem (bài ảnh, actor không có trường) — trước đây 0 đó làm "trung vị ≤ 15.000 xem" luôn đúng. Nay
+# 0 ở các nền tảng đó là "không biết", và tài khoản không có số xem nào thì dùng tương tác (thích +
+# chia sẻ, trung vị ≤ `trung_vi_tuong_tac` — CHƯA hiệu chỉnh bằng số đo, chỉ dùng khi bật nền tảng
+# không có lượt xem); không có cả hai thì không kết luận (không bắt).
 SEEDING_BAI = {"bat": True, "bai_mot_ngay": 5, "bai_bay_ngay": 20, "trung_vi_bl": 2,
-               "trung_vi_xem": 15000, "giu_bl_tu": 10, "ngay": 35, "mien_ten_brand": True}
+               "trung_vi_xem": 15000, "trung_vi_tuong_tac": 300, "giu_bl_tu": 10, "ngay": 35,
+               "mien_ten_brand": True, "nen_tang": ["tiktok"]}
 #: Khoảng hợp lệ của từng ngưỡng (ngoài khoảng / rác / bool → mặc định). 0 ở `trung_vi_xem`,
-#: `giu_bl_tu` = bỏ điều kiện đó.
+#: `trung_vi_tuong_tac`, `giu_bl_tu` = bỏ điều kiện đó.
 _GIOI_HAN_SEEDING = {"bai_mot_ngay": (2, 10_000), "bai_bay_ngay": (2, 100_000),
                      "trung_vi_bl": (0, 1_000_000), "trung_vi_xem": (0, 10 ** 9),
-                     "giu_bl_tu": (0, 1_000_000), "ngay": (7, 92)}
+                     "trung_vi_tuong_tac": (0, 10 ** 9), "giu_bl_tu": (0, 1_000_000),
+                     "ngay": (7, 92)}
+#: Nền tảng luật seeding có thể bật (`nen_tang`); nền tảng có lượt xem THẬT (0 là số thật).
+NEN_TANG_SEEDING = ("tiktok", "youtube", "facebook", "instagram", "threads")
+NEN_TANG_CO_XEM = ("tiktok", "youtube")
 LY_DO_SEEDING_BAI = "seeding_affiliate"
 _VN = timezone(timedelta(hours=7))
 
@@ -379,13 +392,18 @@ _VN = timezone(timedelta(hours=7))
 def cau_hinh_seeding(du_an: dict | None) -> dict:
     """Cấu hình HIỆU LỰC của luật seeding affiliate cấp bài (`du_an.cau_hinh.seeding`). Thiếu khối /
     thiếu `bat` = BẬT với ngưỡng mặc định (`SEEDING_BAI`); chỉ `bat` đúng bằng False là tắt (như
-    `kiem_do_phu.cau_hinh`). Số rác / bool / ngoài `_GIOI_HAN_SEEDING` → mặc định."""
+    `kiem_do_phu.cau_hinh`). Số rác / bool / ngoài `_GIOI_HAN_SEEDING` → mặc định. `nen_tang`:
+    danh sách (trong `NEN_TANG_SEEDING`) thay mặc định ["tiktok"]; rỗng = không nền tảng nào."""
     goc = (du_an or {}).get("cau_hinh")
     goc = goc if isinstance(goc, dict) else {}
     x = goc.get("seeding") if isinstance(goc.get("seeding"), dict) else {}
     ra = dict(SEEDING_BAI)
     ra["bat"] = x.get("bat", True) is not False
     ra["mien_ten_brand"] = x.get("mien_ten_brand", True) is not False
+    ra["nen_tang"] = list(SEEDING_BAI["nen_tang"])
+    if isinstance(x.get("nen_tang"), list):
+        ra["nen_tang"] = [p for p in NEN_TANG_SEEDING
+                          if p in {str(v).strip().lower() for v in x["nen_tang"]}]
     for k, (lo, hi) in _GIOI_HAN_SEEDING.items():
         v = x.get(k)
         if v is None or isinstance(v, bool):
@@ -446,30 +464,44 @@ def tai_khoan_seeding(bai: list[dict], cfg: dict, mien: set | frozenset = frozen
     coi là seeding.
 
     Trung vị chỉ tính trên số ĐỌC ĐƯỢC; tài khoản không có số bình luận nào thì không kết luận
-    (không bắt). Không có số xem nào thì bỏ điều kiện xem (bài Facebook ảnh không có lượt xem)."""
+    (không bắt). Soát 18/10/2026 (M4): chỉ tài khoản của nền tảng trong `cfg["nen_tang"]`; lượt
+    xem 0 của nền tảng ngoài `NEN_TANG_CO_XEM` là "không biết"; không có số xem nào thì dùng trung
+    vị thích + chia sẻ (dòng có "tt") ≤ `trung_vi_tuong_tac`, không có cả hai thì không bắt. Dòng
+    có thể kèm "phu" (khoá phụ — id số / chữ ký nội dung Facebook): hai dòng chung MỘT khoá bất kỳ
+    là một bài (pfbid trong khoá đổi mỗi lượt đọc)."""
     if not cfg.get("bat"):
         return {}
+    nen_tang = set(cfg.get("nen_tang") if isinstance(cfg.get("nen_tang"), list)
+                   else SEEDING_BAI["nen_tang"])
     theo: dict[tuple[str, str], dict[str, dict]] = {}
+    bi_danh: dict[tuple[str, str], dict[str, str]] = {}
     brand: set[tuple[str, str]] = set()
     for r in bai:
         tk = r.get("tk")
-        if not tk or not r.get("khoa") or r.get("dang_luc") is None or tk in mien:
+        if not tk or not r.get("khoa") or r.get("dang_luc") is None or tk in mien \
+                or tk[0] not in nen_tang:
             continue
         if cfg.get("mien_ten_brand", True) and (ten_brand_trong(tk[1], thuong_hieu)
                                                 or ten_brand_trong(r.get("ten") or "",
                                                                    thuong_hieu)):
             brand.add(tk)
             continue
-        cu = theo.setdefault(tk, {}).get(r["khoa"])
+        xem = _so_hay_none(r.get("xem"))
+        if tk[0] not in NEN_TANG_CO_XEM and not xem:
+            xem = None                    # Facebook / Instagram / Threads: 0 = thiếu lượt xem
+        moi = {"bl": _so_hay_none(r.get("bl")), "xem": xem, "tt": _so_hay_none(r.get("tt"))}
+        khoa = [str(r["khoa"]), *(str(k) for k in r.get("phu") or () if k)]
+        bd = bi_danh.setdefault(tk, {})
+        goc = next((bd[k] for k in khoa if k in bd), khoa[0])
+        for k in khoa:
+            bd.setdefault(k, goc)
+        cu = theo.setdefault(tk, {}).get(goc)
         if cu is None:
-            theo[tk][r["khoa"]] = {"ngay": r["dang_luc"].astimezone(_VN).date(),
-                                   "bl": _so_hay_none(r.get("bl")),
-                                   "xem": _so_hay_none(r.get("xem"))}
+            theo[tk][goc] = {"ngay": r["dang_luc"].astimezone(_VN).date(), **moi}
         else:
             # Số luỹ kế (soát 18/10/2026, H1): giữ số LỚN NHẤT của các lần đọc — sổ seeding có thể
             # còn số của lần thấy đầu, lô đang xử lý mang số mới.
-            for k in ("bl", "xem"):
-                v = _so_hay_none(r.get(k))
+            for k, v in moi.items():
                 if v is not None and (cu[k] is None or v > cu[k]):
                     cu[k] = v
     ra: dict[tuple[str, str], dict] = {}
@@ -487,10 +519,17 @@ def tai_khoan_seeding(bai: list[dict], cfg: dict, mien: set | frozenset = frozen
         if tv_bl is None or tv_bl > cfg["trung_vi_bl"]:
             continue
         tv_xem = _trung_vi([x["xem"] for x in cac.values() if x["xem"] is not None])
-        if cfg.get("trung_vi_xem") and tv_xem is not None and tv_xem > cfg["trung_vi_xem"]:
-            continue
+        tv_tt = None
+        if tv_xem is not None:
+            if cfg.get("trung_vi_xem") and tv_xem > cfg["trung_vi_xem"]:
+                continue
+        else:
+            tv_tt = _trung_vi([x["tt"] for x in cac.values() if x["tt"] is not None])
+            if cfg.get("trung_vi_tuong_tac") and (tv_tt is None
+                                                  or tv_tt > cfg["trung_vi_tuong_tac"]):
+                continue                  # không có tín hiệu xem lẫn tương tác: không kết luận
         ra[tk] = {"so_bai": len(cac), "max_ngay": dem[ngay_dinh], "ngay": ngay_dinh,
-                  "max_7": max_7, "tv_bl": tv_bl, "tv_xem": tv_xem}
+                  "max_7": max_7, "tv_bl": tv_bl, "tv_xem": tv_xem, "tv_tt": tv_tt}
     return ra
 
 
@@ -503,6 +542,8 @@ def giu_bai_seeding(bl, cfg: dict) -> bool:
 def cau_seeding(tk: tuple[str, str], x: dict) -> str:
     """Một câu gọn về vì sao tài khoản bị coi là seeding (phễu, bản in của script)."""
     xem = (", trung vị " + f"{int(x['tv_xem']):,}".replace(",", ".") + " xem"
-           if x.get("tv_xem") is not None else "")
+           if x.get("tv_xem") is not None else
+           f", không có lượt xem, trung vị {x['tv_tt']:g} thích + chia sẻ"
+           if x.get("tv_tt") is not None else "")
     return (f"{tk[0]} @{tk[1]}: {x['so_bai']} bài, cao nhất {x['max_ngay']} bài ngày "
             f"{x['ngay']:%d/%m}, {x['max_7']} bài/7 ngày, trung vị {x['tv_bl']:g} bình luận{xem}")

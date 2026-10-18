@@ -77,7 +77,8 @@ SQL_DU_AN = ("/* seed:du_an */ SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, t
              "cau_hinh FROM du_an WHERE ma = %s")
 SQL_NGUON = "/* seed:nguon */ SELECT id, nen_tang, dinh_danh, loai FROM nguon WHERE du_an = %s"
 SQL_BAI = ("/* seed:bai */ SELECT khoa, nen_tang, nguon_id, link, tai_khoan, tac_gia, dang_luc, "
-           "binh_luan, xem FROM bai WHERE du_an = %s AND dang_luc >= %s AND "
+           "binh_luan, xem, thich, chia_se, CASE WHEN nen_tang = 'facebook' THEN noi_dung END AS "
+           "noi_dung FROM bai WHERE du_an = %s AND dang_luc >= %s AND "
            "btrim(tai_khoan) <> '' ORDER BY dang_luc, khoa")
 SQL_DEM_BL = ("/* seed:dem_bl */ SELECT khoa_bai, count(*) AS n FROM binh_luan WHERE du_an = %s "
               "AND khoa_bai = ANY(%s) GROUP BY khoa_bai")
@@ -151,10 +152,9 @@ def ke_hoach(du_an: dict, nguon: list[dict], bai: list[dict], so_seeding: list[d
     import theo_doi as T
     cfg = loc_rac.cau_hinh_seeding(du_an)
     th = [str(du_an.get("ten") or ""), str(du_an.get("ma") or "")]
-    rows = [{"tk": loc_rac.khoa_tai_khoan(r["nen_tang"], r["tai_khoan"]), "khoa": r["khoa"],
-             "dang_luc": r["dang_luc"], "bl": r.get("binh_luan"), "xem": r.get("xem"),
-             "ten": r.get("tac_gia") or ""}
-            for r in bai if r.get("dang_luc") is not None]
+    # Cùng dạng dòng với lượt quét (`theo_doi._dong_kho_seeding`, soát M4): thích + chia sẻ khi nền
+    # tảng không có lượt xem, khoá phụ ổn định cho bài Facebook.
+    rows = [T._dong_kho_seeding(r) for r in bai if r.get("dang_luc") is not None]
     rows += [{"tk": loc_rac.khoa_tai_khoan(x["nen_tang"], x["tai_khoan"]), **x}
              for x in so_seeding]
     seed = loc_rac.tai_khoan_seeding(rows, cfg, T._kenh_nha(nguon), th)
@@ -253,9 +253,12 @@ def ap_dung_tai_khoan(du_an: dict, tk: tuple, khoa: list[str], cfg: dict, dau: s
                            "bai": bai, "binh_luan": bl, "chi_so_ngay": cs,
                            "khoa_so": sorted({k for k, _, _ in loai})})
         TDA.ghi_loai(ma, dau, loai, tu_pv)
-        TDA.ghi_seeding(ma, [{"khoa": r["khoa"], "nen_tang": r["nen_tang"],
-                              "tai_khoan": tk[1], "dang_luc": r["dang_luc"],
-                              "bl": r.get("binh_luan"), "xem": r.get("xem")} for r in bai])
+        TDA.ghi_seeding(ma, [{"khoa": (T._dong_kho_seeding(r)["phu"] or [r["khoa"]])[0],
+                              "nen_tang": r["nen_tang"], "tai_khoan": tk[1],
+                              "dang_luc": r["dang_luc"], "bl": r.get("binh_luan"),
+                              "xem": r.get("xem"),
+                              "tt": T._tuong_tac(r.get("thich"), r.get("chia_se"))}
+                             for r in bai])
         n = int(c.execute(SQL_XOA_BAI, (ma, ks)).rowcount or 0)
         if n != len(ks):
             raise K.LoiKho(f"xoá {n}/{len(ks)} bài của @{tk[1]} — huỷ giao dịch")
@@ -314,9 +317,11 @@ def doc_tep_hoan_tac(tep: str) -> tuple[dict, list[dict], list[dict]]:
 def _in_ke_hoach(kho: dict, mau: int, in_ra) -> None:
     kh, cfg = kho["kh"], kho["kh"]["cfg"]
     ma = kho["du_an"]["ma"]
-    in_ra(f"Luật seeding hiệu lực: {'BẬT' if cfg['bat'] else 'TẮT'} — ≥ {cfg['bai_mot_ngay']} bài/"
+    in_ra(f"Luật seeding hiệu lực: {'BẬT' if cfg['bat'] else 'TẮT'} — nền tảng "
+          f"{', '.join(cfg['nen_tang']) or 'không có'}; ≥ {cfg['bai_mot_ngay']} bài/"
           f"ngày hoặc ≥ {cfg['bai_bay_ngay']} bài/7 ngày, trung vị ≤ {cfg['trung_vi_bl']} bình "
-          f"luận, trung vị ≤ {cfg['trung_vi_xem']} xem; giữ bài ≥ {cfg['giu_bl_tu']} bình luận.")
+          f"luận, trung vị ≤ {cfg['trung_vi_xem']} xem (không có lượt xem: ≤ "
+          f"{cfg['trung_vi_tuong_tac']} thích + chia sẻ); giữ bài ≥ {cfg['giu_bl_tu']} bình luận.")
     bo = [r for cac in kh["bo"].values() for r in cac]
     giu = [r for cac in kh["giu_bl"].values() for r in cac]
     tl = sum(1 + int(r.get("binh_luan") or 0) for r in bo)

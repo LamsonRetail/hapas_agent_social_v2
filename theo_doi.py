@@ -3473,13 +3473,38 @@ def _kenh_nha(nguon: list[dict] | None) -> set[tuple[str, str]]:
     return ra
 
 
+def _tuong_tac(thich, chia_se) -> int | None:
+    """Thích + chia sẻ (tín hiệu thay lượt xem của luật seeding, soát M4); thiếu cả hai → None."""
+    a, b = _so_hay_none(thich), _so_hay_none(chia_se)
+    return None if a is None and b is None else (a or 0) + (b or 0)
+
+
 def _dong_seeding(d: dict, dt) -> dict:
-    """Một bài của lô dưới dạng dòng lịch sử cho `loc_rac.tai_khoan_seeding`."""
+    """Một bài của lô dưới dạng dòng lịch sử cho `loc_rac.tai_khoan_seeding`. Facebook (soát
+    18/10/2026, M4): khoá = khoá ỔN ĐỊNH (`_khoa_loai_on_dinh`: id số, không có thì chủ bài + phút
+    + chữ ký nội dung), khoá pfbid và khoá ổn định còn lại vào "phu" — hai lần đọc cùng một bài
+    (pfbid khác) không bị đếm thành hai bài của nhịp đăng."""
     import loc_rac
+    k = d.get("_khoa") or _khoa_bai(str(d.get("platform") or ""), d.get("link") or "")
+    on = _khoa_loai_on_dinh(d, dt) if dt else []
     return {"tk": loc_rac.khoa_tai_khoan(d.get("platform"), d.get("username")),
-            "khoa": d.get("_khoa") or _khoa_bai(str(d.get("platform") or ""), d.get("link") or ""),
+            "khoa": on[0] if on else k, "phu": [k, *on[1:]] if on else [],
             "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views"),
-            "ten": str(d.get("kenh") or "")}
+            "tt": _tuong_tac(d.get("likes"), d.get("shares")), "ten": str(d.get("kenh") or "")}
+
+
+def _dong_kho_seeding(r: dict) -> dict:
+    """Một dòng `lang_nghe_db.lich_su_tai_khoan` dưới dạng dòng lịch sử (khoá phụ ổn định cho bài
+    Facebook, như `_dong_seeding`)."""
+    import loc_rac
+    on = _khoa_loai_on_dinh({"platform": r.get("nen_tang"), "username": r.get("tai_khoan"),
+                             "kenh": r.get("tac_gia"), "link": r.get("link"),
+                             "text": r.get("noi_dung"), "ma_so_fb": r.get("ma_so_fb")},
+                            r.get("dang_luc"))
+    return {"tk": loc_rac.khoa_tai_khoan(r.get("nen_tang"), r.get("tai_khoan")),
+            "khoa": r["khoa"], "phu": on, "dang_luc": r.get("dang_luc"),
+            "bl": r.get("binh_luan"), "xem": r.get("xem"),
+            "tt": _tuong_tac(r.get("thich"), r.get("chia_se")), "ten": r.get("tac_gia") or ""}
 
 
 def _loc_seeding(du_an: dict, cho: list, tu: datetime.datetime, nguon: list[dict] | None = None,
@@ -3499,14 +3524,13 @@ def _loc_seeding(du_an: dict, cho: list, tu: datetime.datetime, nguon: list[dict
     ma = du_an["ma"]
     tu = min(tu, datetime.datetime.now(_VN) - datetime.timedelta(days=cfg["ngay"]))
     lo = [(d, dt, _dong_seeding(d, dt)) for d, dt in cho]
-    cac_tk = {x["tk"] for _, _, x in lo if x["tk"]}
+    # Chỉ nền tảng luật đã bật (`cfg["nen_tang"]`, mặc định TikTok — soát M4).
+    cac_tk = {x["tk"] for _, _, x in lo if x["tk"] and x["tk"][0] in cfg["nen_tang"]}
     if not cac_tk:
         return list(cho), [], {}
     rows: list[dict] = []
     try:
-        rows += [{"tk": loc_rac.khoa_tai_khoan(r["nen_tang"], r["tai_khoan"]), "khoa": r["khoa"],
-                  "dang_luc": r["dang_luc"], "bl": r.get("binh_luan"), "xem": r.get("xem"),
-                  "ten": r.get("tac_gia") or ""}
+        rows += [_dong_kho_seeding(r)
                  for r in K.lich_su_tai_khoan(ma, sorted(u for _, u in cac_tk), tu)]
     except K.LoiKho as e:
         print(f"[theo_doi] seeding: không đọc được lịch sử kho ({e}) — tính trên sổ + lô",
@@ -3539,7 +3563,8 @@ def _dong_so_seeding(d: dict, dt) -> dict:
     """Một bài dưới dạng dòng sổ seeding (`theo_doi_api.ghi_seeding`)."""
     return {"khoa": _dong_seeding(d, dt)["khoa"], "nen_tang": d.get("platform"),
             "tai_khoan": str(d.get("username") or "").strip().lstrip("@").lower(),
-            "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views")}
+            "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views"),
+            "tt": _tuong_tac(d.get("likes"), d.get("shares"))}
 
 
 def _ghi_so_seeding(ma: str, bo: list, seed: dict, tk: dict) -> None:

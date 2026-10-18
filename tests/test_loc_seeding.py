@@ -108,16 +108,64 @@ def test_kenh_nha_va_tai_khoan_mang_ten_brand_khong_bao_gio_la_seeding():
     assert L.tai_khoan_seeding(brand, {**CFG, "mien_ten_brand": False}, set(), ["HAPAS"])
     # Trang Facebook của cửa hàng có định danh là id số, tên hiển thị mang tên brand (raw mina 17/10:
     # "HAPAS SÀI GÒN" 7 bài/ngày, 0 bình luận) — chỉ cần MỘT dòng có tên là miễn.
+    # (Facebook phải bật ở `nen_tang` — mặc định luật chỉ áp TikTok, soát M4.)
+    cfg_fb = {**CFG, "nen_tang": ["tiktok", "facebook"]}
     so = [{**r, "tk": ("facebook", "61594301968444")} for r in rows]
     so[0]["ten"] = "HAPAS SÀI GÒN"
-    assert L.tai_khoan_seeding(so, CFG, set(), ["HAPAS", "hapas"]) == {}
-    assert L.tai_khoan_seeding([{**r, "ten": "Phạm Mai Khanh"} for r in so[1:]], CFG, set(),
+    assert L.tai_khoan_seeding(so, cfg_fb, set(), ["HAPAS", "hapas"]) == {}
+    assert L.tai_khoan_seeding([{**r, "ten": "Phạm Mai Khanh"} for r in so[1:]], cfg_fb, set(),
                                ["HAPAS"]), "affiliate Shopee tên người: vẫn bắt"
     # Facebook kênh nhà: định danh URL trang, bài lượt tìm mang slug trang.
     nha = T._kenh_nha([{"nen_tang": "facebook", "loai": "kenh_nha",
                         "dinh_danh": "https://www.facebook.com/HapasGlobal"},
                        {"nen_tang": "tiktok", "loai": "kol", "dinh_danh": "aff_mau"}])
     assert nha == {("facebook", "facebook.com/hapasglobal"), ("facebook", "hapasglobal")}
+
+
+def test_chi_tiktok_mac_dinh_xem_0_facebook_la_thieu_va_dung_tuong_tac():
+    """Soát 18/10/2026 (M4): luật chỉ áp TikTok trừ khi bật thêm; Facebook / Instagram trả 0 khi
+    THIẾU lượt xem — 0 đó không phải "≤ 15.000 xem"; không có số xem thì dùng thích + chia sẻ."""
+    goc = datetime.datetime(2026, 10, 1, 9, 0, tzinfo=_VN)
+
+    def fb(ten, tt, p="facebook", xem=0):
+        return [{"tk": (p, ten), "khoa": f"{p}:{ten}:{i}", "bl": 0, "xem": xem, "tt": tt,
+                 "dang_luc": goc + datetime.timedelta(minutes=i)} for i in range(8)]
+    rows = fb("shop_dong", 5000) + fb("aff_fb", 3) + fb("ig_dong", 4000, "instagram")
+    assert L.tai_khoan_seeding(rows, CFG) == {}, "mặc định chỉ TikTok"
+    bat = {**CFG, "nen_tang": ["tiktok", "facebook", "instagram"]}
+    seed = L.tai_khoan_seeding(rows, bat)
+    assert set(seed) == {("facebook", "aff_fb")}, "xem 0 = thiếu; 5.000 thích + chia sẻ: không bắt"
+    assert seed[("facebook", "aff_fb")]["tv_xem"] is None and seed[("facebook", "aff_fb")]["tv_tt"] == 3
+    assert "không có lượt xem, trung vị 3 thích + chia sẻ" in L.cau_seeding(
+        ("facebook", "aff_fb"), seed[("facebook", "aff_fb")])
+    assert L.tai_khoan_seeding([{**r, "tt": None} for r in fb("aff_fb", 3)], bat) == {}, \
+        "không có cả số xem lẫn tương tác: không kết luận"
+    # Cấu hình: nen_tang lạ bỏ, rỗng = không nền tảng nào.
+    assert L.cau_hinh_seeding({"cau_hinh": {"seeding": {"nen_tang": ["Facebook", "x"]}}})[
+        "nen_tang"] == ["facebook"]
+    assert L.cau_hinh_seeding({"cau_hinh": {"seeding": {"nen_tang": []}}})["nen_tang"] == []
+
+
+def test_facebook_hai_lan_doc_khac_pfbid_dem_mot_bai():
+    """Khoá phụ ổn định ("phu" — id số / chữ ký nội dung): hai lần đọc cùng một bài Facebook (pfbid
+    khác) là MỘT bài của nhịp đăng (soát M4: lịch sử `them` của script nạp raw)."""
+    goc = datetime.datetime(2026, 10, 1, 9, 0, tzinfo=_VN)
+    bat = {**CFG, "nen_tang": ["facebook"], "trung_vi_tuong_tac": 0}
+    lan1 = [{"tk": ("facebook", "a"), "khoa": f"facebook:pfbidA{i}", "phu": [f"facebook:id:{i}"],
+             "bl": 0, "xem": None, "dang_luc": goc + datetime.timedelta(minutes=i)} for i in range(3)]
+    lan2 = [{**r, "khoa": r["khoa"].replace("pfbidA", "pfbidB")} for r in lan1]
+    assert L.tai_khoan_seeding(lan1 + lan2, bat) == {}, "3 bài, không phải 6"
+    d = {"platform": "facebook", "username": "a", "kenh": "A", "comments": 0, "likes": 2,
+         "shares": 1, "link": "https://www.facebook.com/a/posts/pfbid0xyz",
+         "text": "Túi HAPAS pass lại giá tốt", "__goc": {"post_id": "123456789012"}}
+    x = T._dong_seeding(d, goc)
+    assert x["khoa"] == "facebook:id:123456789012" and x["tt"] == 3 and x["phu"][0].startswith(
+        "facebook:")
+    k = T._dong_kho_seeding({"khoa": "facebook:pfbidcu", "nen_tang": "facebook", "tai_khoan": "a",
+                             "tac_gia": "A", "link": d["link"], "noi_dung": d["text"],
+                             "ma_so_fb": "123456789012", "dang_luc": goc, "binh_luan": 0,
+                             "xem": None, "thich": 2, "chia_se": 1})
+    assert "facebook:id:123456789012" in k["phu"] and k["tt"] == 3
 
 
 def test_giu_bai_co_thao_luan_that_va_khong_ket_luan_khi_thieu_so():
@@ -416,7 +464,9 @@ def test_mo_ta_cau_hinh_seeding_trong_schema_khop_mac_dinh():
     m = re.search(r"COMMENT ON COLUMN du_an\.cau_hinh IS '([^']*)';", sql).group(1)
     for k, v in L.SEEDING_BAI.items():
         assert f'"{k}"' in m, k
-        if not isinstance(v, bool):
+        if isinstance(v, list):
+            assert f'"{k}" (mặc định {json.dumps(v)}' in m, k
+        elif not isinstance(v, bool):
             assert re.search(rf'"{k}" \((mặc định )?{v}\b', m), k
 
 

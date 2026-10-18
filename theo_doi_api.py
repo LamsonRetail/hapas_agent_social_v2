@@ -670,7 +670,7 @@ def _gio_so(s) -> datetime.datetime | None:
 
 def doc_seeding(ma: str, tu: datetime.datetime | None = None) -> list[dict]:
     """Bài seeding đã loại của dự án (đăng từ `tu`): [{khoa, nen_tang, tai_khoan, dang_luc, bl,
-    xem}]."""
+    xem, tt}] (`tt` = thích + chia sẻ; dòng ghi trước 18/10/2026 tối không có → None)."""
     x = (_doc_so_loai().get("du_an") or {}).get(ma)
     s = x.get("seeding") if isinstance(x, dict) and isinstance(x.get("seeding"), dict) else {}
     ra = []
@@ -679,7 +679,7 @@ def doc_seeding(ma: str, tu: datetime.datetime | None = None) -> list[dict]:
         if luc is None or (tu is not None and luc < tu):
             continue
         ra.append({"khoa": k, "nen_tang": v[0], "tai_khoan": v[1], "dang_luc": luc,
-                   "bl": _so(v[3]), "xem": _so(v[4])})
+                   "bl": _so(v[3]), "xem": _so(v[4]), "tt": _so(v[5]) if len(v) > 5 else None})
     return ra
 
 
@@ -692,7 +692,8 @@ def _so_lon(a, b):
 
 def ghi_seeding(ma: str, moi: list[dict], bay_gio: datetime.datetime | None = None, *,
                 chi_cap_nhat: bool = False) -> None:
-    """Gộp bài seeding vừa loại (`moi` = [{khoa, nen_tang, tai_khoan, dang_luc, bl, xem}]) vào sổ;
+    """Gộp bài seeding vừa loại (`moi` = [{khoa, nen_tang, tai_khoan, dang_luc, bl, xem, tuỳ chọn
+    tt = thích + chia sẻ (soát M4)}]) vào sổ;
     bỏ bài đăng trước `NGAY_PHAM_VI_TOI_DA` ngày; ghi nguyên tử. Bài đã có trong sổ (soát
     18/10/2026, H1): số bình luận / xem cập nhật theo lần đọc mới (giữ số lớn hơn — số luỹ kế), để
     luật không mãi tính trên số của lần thấy đầu. `chi_cap_nhat`: chỉ cập nhật số của khoá ĐÃ có
@@ -717,10 +718,11 @@ def ghi_seeding(ma: str, moi: list[dict], bay_gio: datetime.datetime | None = No
             moi_dong = [str(r.get("nen_tang") or ""), str(r.get("tai_khoan") or ""),
                         luc.astimezone(_VN).isoformat(timespec="minutes"),
                         _so_lon(cu[3] if cu else None, r.get("bl")),
-                        _so_lon(cu[4] if cu else None, r.get("xem"))]
+                        _so_lon(cu[4] if cu else None, r.get("xem")),
+                        _so_lon(cu[5] if cu and len(cu) > 5 else None, r.get("tt"))]
             if cu is not None and chi_cap_nhat:
                 moi_dong[:3] = cu[:3]
-            if moi_dong != (cu[:5] if cu else None):
+            if moi_dong != (cu[:6] if cu else None):
                 s[k] = moi_dong
                 doi = True
         if not doi:
