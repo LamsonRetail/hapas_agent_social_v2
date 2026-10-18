@@ -75,8 +75,9 @@ _FK_CON = {"nguon_id": "nguon", "luot_dau": "luot_quet", "luot_cuoi": "luot_quet
 
 # Mọi câu SQL mang thẻ `/* seed:<tên> */` — bộ thử nhận diện câu theo thẻ (kho giả).
 SQL_CHI_DOC = "SET TRANSACTION READ ONLY"
+# `hashtag` qua to_jsonb: DB chưa chạy cột `du_an.hashtag` (18/10/2026) thì ra NULL, không lỗi cột.
 SQL_DU_AN = ("/* seed:du_an */ SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
-             "cau_hinh FROM du_an WHERE ma = %s")
+             "cau_hinh, to_jsonb(d) -> 'hashtag' AS hashtag FROM du_an d WHERE ma = %s")
 SQL_NGUON = "/* seed:nguon */ SELECT id, nen_tang, dinh_danh, loai FROM nguon WHERE du_an = %s"
 SQL_BAI = ("/* seed:bai */ SELECT khoa, nen_tang, nguon_id, link, tai_khoan, tac_gia, dang_luc, "
            "binh_luan, xem, thich, chia_se, CASE WHEN nen_tang = 'facebook' THEN noi_dung END AS "
@@ -146,14 +147,16 @@ def _mau_link(link: str) -> str:
 
 
 # ───────────────────────────── kế hoạch (thuần) ─────────────────────────────
-def ke_hoach(du_an: dict, nguon: list[dict], bai: list[dict], so_seeding: list[dict]) -> dict:
+def ke_hoach(du_an: dict, nguon: list[dict], bai: list[dict], so_seeding: list[dict],
+             thuong_hieu: list[str] | None = None) -> dict:
     """THUẦN. Bài đã giữ (khoa, nen_tang, link, tai_khoan, tac_gia, dang_luc, binh_luan, xem) + sổ
     seeding -> {"cfg", "tai_khoan": {tk: số đo}, "bo": {tk: [bài]}, "giu_bl": {tk: [bài]},
     "mien": {tk: số đo}}. `mien` = tài khoản ĐỦ luật nhưng là kênh nhà / mang tên brand (để người
-    chạy thấy)."""
+    chạy thấy). `thuong_hieu`: tên brand để miễn — `doc_kho` đưa `theo_doi.ten_brand` (cùng danh
+    sách với cổng brand và lượt quét, soát LOW); thiếu thì tên + mã + "ten" cấu hình."""
     import theo_doi as T
     cfg = loc_rac.cau_hinh_seeding(du_an)
-    th = [str(du_an.get("ten") or ""), str(du_an.get("ma") or "")]
+    th = thuong_hieu if thuong_hieu is not None else T.cau_hinh_hashtag_brand(du_an)["ten"]
     # Cùng dạng dòng với lượt quét (`theo_doi._dong_kho_seeding`, soát M4): thích + chia sẻ khi nền
     # tảng không có lượt xem, khoá phụ ổn định cho bài Facebook.
     rows = [T._dong_kho_seeding(r) for r in bai if r.get("dang_luc") is not None]
@@ -194,6 +197,7 @@ def moc_xet(du_an: dict, bay_gio: datetime.datetime) -> datetime.datetime:
 def doc_kho(ma: str, bay_gio: datetime.datetime) -> dict | None:
     """Dự án, nguồn, bài có tài khoản đăng từ mốc xét, số bình luận/chi_so_ngay đi theo, quyền,
     lượt đang chạy — MỘT giao dịch READ ONLY. None khi không có dự án."""
+    import theo_doi as T
     import theo_doi_api as TDA
     with K.ket_noi() as c:
         c.execute(SQL_CHI_DOC)
@@ -204,7 +208,7 @@ def doc_kho(ma: str, bay_gio: datetime.datetime) -> dict | None:
         tu = moc_xet(du_an, bay_gio)            # đọc lịch chiến dịch ở kết nối riêng
         nguon = [dict(r) for r in c.execute(SQL_NGUON, (ma,)).fetchall()]
         bai = [dict(r) for r in c.execute(SQL_BAI, (ma, tu)).fetchall()]
-        kh = ke_hoach(du_an, nguon, bai, TDA.doc_seeding(ma, tu))
+        kh = ke_hoach(du_an, nguon, bai, TDA.doc_seeding(ma, tu), T.ten_brand(du_an, bay_gio))
         khoa = sorted(r["khoa"] for cac in kh["bo"].values() for r in cac)
         bl = {r["khoa_bai"]: int(r["n"]) for r in c.execute(SQL_DEM_BL, (ma, khoa)).fetchall()} \
             if khoa else {}

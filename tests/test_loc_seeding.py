@@ -330,6 +330,22 @@ def test_tat_luat_doi_nguong_hay_thanh_kenh_nha_thi_bai_da_loai_duoc_xet_lai(mon
     assert len(ai) == 3 and len(ai[-1]) == 8 and not tk["pheu"]["tiktok"]["seeding"]
 
 
+def test_mien_ten_brand_dung_cung_danh_sach_ten_voi_cong_brand(monkeypatch, ai):
+    """Soát 18/10/2026 (LOW): tài khoản mang tên thương hiệu con khai ở cấu hình cổng brand
+    ("ten": ["Mate Made"]) hoặc tag chiến dịch của dự án được miễn luật seeding như tên dự án."""
+    KhoGia().cai(monkeypatch)
+    monkeypatch.setattr(T, "khau_hieu_chien_dich", lambda ma, bay_gio: (None, []))
+    hits = _hits("seeding")
+    for d, _ in hits:
+        d["username"] = "matemade.store"
+    T._tach_va_giu(DU_AN, 7, hits, ["hapas"], 1e12, tk := _tk())
+    assert tk["pheu"]["tiktok"]["seeding"] == 8 and ai == []
+    da = {**DU_AN, "cau_hinh": {"hashtag_can_nhac_brand": {"ten": ["Mate Made"]}}}
+    TDA.bo_khoi_so("hapas", [x["khoa"] for x in TDA.doc_seeding("hapas")])
+    T._tach_va_giu(da, 8, hits, ["hapas"], 1e12, tk2 := _tk())
+    assert not tk2["pheu"]["tiktok"]["seeding"] and len(ai) == 1 and len(ai[0]) == 8
+
+
 def test_tat_luat_seeding_thi_bai_di_tiep_toi_ai(monkeypatch, ai):
     KhoGia().cai(monkeypatch)
     tk = _tk()

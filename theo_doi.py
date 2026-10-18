@@ -3547,8 +3547,9 @@ def _loc_seeding(du_an: dict, cho: list, tu: datetime.datetime, nguon: list[dict
     rows += [{"tk": loc_rac.khoa_tai_khoan(x["nen_tang"], x["tai_khoan"]), **x} for x in so]
     rows += list(them)
     rows += [x for d, dt, x in lo if d.get("_khop") and dt and dt >= tu]
-    seed = loc_rac.tai_khoan_seeding(rows, cfg, _kenh_nha(nguon),
-                                     [str(du_an.get("ten") or ""), ma])
+    # Miễn tên brand: CÙNG danh sách tên với cổng brand (`ten_brand` — tên, mã, "ten" cấu hình, tag
+    # chiến dịch; soát 18/10/2026 LOW), chỉ đọc khi có tài khoản cần xét.
+    seed = loc_rac.tai_khoan_seeding(rows, cfg, _kenh_nha(nguon), ten_brand(du_an))
     giu, bo, ra = [], [], {}
     for d, dt, x in lo:
         if x["tk"] in seed and not loc_rac.giu_bai_seeding(d.get("comments"), cfg):
