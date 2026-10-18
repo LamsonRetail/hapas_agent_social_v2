@@ -49,7 +49,9 @@ An toàn:
     (số đọc thật). Cần GRANT DELETE tạm như `lang_nghe_gop_bai_fb.py`.
 
 VPS (user mark, venv Hermes, cwd /opt/mark/app — model đi đúng đường lease như /theodoi). Chép raw
-lên VPS trước, ví dụ `/opt/mark/raw-kompa-1810/` (quyền 700, chủ mark):
+lên VPS trước, ví dụ `/opt/mark/raw-kompa-1810/` (quyền 700, chủ mark), GIỮ giờ ghi tệp (`rsync -a`
+hoặc `scp -rp`): giờ ghi tệp là "lúc đọc raw" — ngày của ảnh chụp `chi_so_ngay` và mốc ngày tương
+đối của trang Google ("5 ngày trước"). Tệp mang giờ ghi hôm nay thì script cảnh báo.
 
     cd /opt/mark/app
     PY=/opt/mark/hermes-agent/venv/bin/python
@@ -609,6 +611,12 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None, nghi=time.sl
         loai_tep[loai][1] += n
     in_ra(f"Raw: {len({t for t, _, _ in raw['tep']})} tệp đọc được — " + "; ".join(
         f"{k} {v[0]} tệp/{v[1]} bài" for k, v in sorted(loai_tep.items())) + ".")
+    moi_chep = sorted({f.name for f in cac_tep(ns.duong)
+                       if _luc_doc(f).date() == bay_gio.astimezone(_VN).date()})
+    if moi_chep:
+        in_ra(f"CẢNH BÁO: {len(moi_chep)} tệp raw mang giờ ghi HÔM NAY ({', '.join(moi_chep[:3])}"
+              f"{' …' if len(moi_chep) > 3 else ''}) — chép lại bằng rsync -a / scp -rp để giữ giờ "
+              "đọc thật (ngày ảnh chụp chi_so_ngay theo giờ này).")
     if raw["bo_qua"]:
         in_ra(f"Bỏ qua {len(raw['bo_qua'])} tệp: " + "; ".join(
             f"{t} ({ly})" for t, ly in raw["bo_qua"][:12])

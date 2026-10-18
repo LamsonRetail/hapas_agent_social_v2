@@ -256,6 +256,7 @@ def test_chay_thu_khong_ai_khong_ghi_in_phieu_uoc_tinh(monkeypatch, tmp_path, ai
     m = re.search(r"ƯỚC TÍNH: sẽ nạp ≤ (\d+) bài mới", out)
     assert m and int(m.group(1)) == 3 + 6 + 2 + 2, out      # review + livestream + mina + kênh nhà
     assert "Bỏ qua 1 tệp" in out and "AI: " in out
+    assert "CẢNH BÁO: 5 tệp raw mang giờ ghi HÔM NAY" in out, "raw vừa ghi: nhắc giữ giờ đọc thật"
     assert TDA.doc_seeding("hapas") == [], "chạy thử không ghi sổ"
 
 
