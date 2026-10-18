@@ -375,7 +375,8 @@ def khoa_fb_trung(ma: str, rows: list[dict]) -> dict[str, str]:
 
 
 def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, int]:
-    """Upsert bài đã giữ + số liệu của ngày hôm nay (giờ VN). -> (bài mới, bài cập nhật).
+    """Upsert bài đã giữ + số liệu của ngày hôm nay (giờ VN) — dòng mang `_ngay_so` (script nạp
+    raw: ngày ĐỌC raw, soát 18/10/2026) thì ảnh chụp vào ngày đó. -> (bài mới, bài cập nhật).
 
     Bài đã có: số liệu lấy bản mới; nhãn AI (sắc thái/chủ đề) chỉ đè khi lượt này có nhãn;
     bài từng vào bằng `theo_doi` thì giữ nguyên kiểu đó (quét từ khoá về sau không hạ cấp).
@@ -412,13 +413,13 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
             them += "".join(f"{k} = COALESCE(bai.{k}, EXCLUDED.{k}), " for k in cac
                             if k in _COT_FB)
             gia_tri = [r.get(k) for k in cac]
+            # Lần đọc cũ (`_ngay_so`, nạp raw) trùng bài đã có (bản trùng Facebook): số chỉ NÂNG.
+            ham = "GREATEST" if r.get("_ngay_so") is not None else "COALESCE"
             x = c.execute(
                 f"INSERT INTO bai (du_an, kieu_quet, luot_dau, luot_cuoi, {cot}) "
                 f"VALUES (%s, %s, %s, %s, {dat}) "
                 "ON CONFLICT (du_an, khoa) DO UPDATE SET "
-                "xem = COALESCE(EXCLUDED.xem, bai.xem), thich = COALESCE(EXCLUDED.thich, bai.thich), "
-                "binh_luan = COALESCE(EXCLUDED.binh_luan, bai.binh_luan), "
-                "chia_se = COALESCE(EXCLUDED.chia_se, bai.chia_se), "
+                + "".join(f"{k} = {ham}(EXCLUDED.{k}, bai.{k}), " for k in _SO) +
                 "followers = COALESCE(EXCLUDED.followers, bai.followers), "
                 "sac_thai = COALESCE(EXCLUDED.sac_thai, bai.sac_thai), "
                 "chu_de = COALESCE(EXCLUDED.chu_de, bai.chu_de), "
@@ -434,7 +435,16 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                 moi += 1
             else:
                 cu += 1
-            if any(r.get(k) is not None for k in _SO):
+            if any(r.get(k) is not None for k in _SO) and r.get("_ngay_so") is not None:
+                # Lần đọc CŨ (script nạp raw, soát 18/10/2026): ảnh chụp vào đúng NGÀY ĐỌC, ngày đó
+                # đã có dòng thì giữ số lớn hơn từng cột (như `nang_so_lieu`).
+                c.execute(
+                    "INSERT INTO chi_so_ngay (du_an, khoa, ngay, xem, thich, binh_luan, chia_se) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (du_an, khoa, ngay) DO "
+                    "UPDATE SET " + ", ".join(f"{k} = GREATEST(EXCLUDED.{k}, chi_so_ngay.{k})"
+                                              for k in _SO),
+                    [ma, r["khoa"], r["_ngay_so"], *[r.get(k) for k in _SO]])
+            elif any(r.get(k) is not None for k in _SO):
                 c.execute(
                     "INSERT INTO chi_so_ngay (du_an, khoa, ngay, xem, thich, binh_luan, chia_se) "
                     "VALUES (%s, %s, (now() AT TIME ZONE %s)::date, %s, %s, %s, %s) "
@@ -477,7 +487,8 @@ def nang_so_lieu(ma: str, luot_id: int, rows: list[dict], ngay) -> int:
     đã ghi số lớn hơn thì giữ), `cap_nhat_cuoi`/`luot_cuoi` chỉ đổi khi có số tăng. Ảnh chụp ghi
     vào ĐÚNG ngày đọc `ngay` (không phải hôm nay): ngày đó đã có dòng thì giữ số lớn hơn từng cột.
     Khác `cap_nhat_so_lieu` (số MỚI NHẤT đè số cũ, ảnh chụp hôm nay) — dùng nó cho số cũ là hạ số
-    thật xuống và ghi nhầm ngày. -> số bài có ít nhất một số tăng."""
+    thật xuống và ghi nhầm ngày. Dòng mang `_ngay_so` (ngày đọc của CHÍNH lần đọc đó) thắng `ngay`
+    chung của phần. -> số bài có ít nhất một số tăng."""
     n = 0
     tang = " OR ".join(f"%s::bigint > COALESCE({k}, -1)" for k in _SO)
     with ket_noi() as c:
@@ -495,7 +506,7 @@ def nang_so_lieu(ma: str, luot_id: int, rows: list[dict], ngay) -> int:
                 "SELECT %s, %s, %s, %s, %s, %s, %s WHERE EXISTS (SELECT 1 FROM bai WHERE "
                 "du_an = %s AND khoa = %s) ON CONFLICT (du_an, khoa, ngay) DO UPDATE SET "
                 + ", ".join(f"{k} = GREATEST(EXCLUDED.{k}, chi_so_ngay.{k})" for k in _SO),
-                [ma, r["khoa"], ngay, *v, ma, r["khoa"]])
+                [ma, r["khoa"], r.get("_ngay_so") or ngay, *v, ma, r["khoa"]])
     return n
 
 

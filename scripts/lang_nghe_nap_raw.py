@@ -56,8 +56,10 @@ An toàn:
 
 VPS (user mark, venv Hermes, cwd /opt/mark/app — model đi đúng đường lease như /theodoi). Chép raw
 lên VPS trước, ví dụ `/opt/mark/raw-kompa-1810/` (quyền 700, chủ mark), GIỮ giờ ghi tệp (`rsync -a`
-hoặc `scp -rp`): giờ ghi tệp là "lúc đọc raw" — ngày của ảnh chụp `chi_so_ngay` và mốc ngày tương
-đối của trang Google ("5 ngày trước"). Tệp mang giờ ghi hôm nay thì script cảnh báo.
+hoặc `scp -rp`): "lúc đọc raw" = trường thời gian của item khi actor có (`scrapedAt`, `scraped_at`,
+`scrape_date`, `collectedAt` — `_luc_doc_item`), không thì giờ ghi tệp — ngày của ảnh chụp
+`chi_so_ngay` (cả bài đã có lẫn bài MỚI — `_ngay_so`, soát 18/10/2026) và mốc ngày tương đối của
+trang Google ("5 ngày trước"). Tệp lấy giờ ghi tệp mà giờ đó là hôm nay thì script cảnh báo.
 
     cd /opt/mark/app
     PY=/opt/mark/hermes-agent/venv/bin/python
@@ -127,6 +129,33 @@ SQL_XOA = ("/* nap:xoa */ DELETE FROM bai b WHERE b.du_an = %s AND b.khoa = ANY(
 def _luc_doc(f: pathlib.Path) -> datetime.datetime:
     """Lúc đọc raw = lúc ghi tệp (script đo ghi ngay sau khi run xong; tệp không có trường giờ)."""
     return datetime.datetime.fromtimestamp(f.stat().st_mtime, _VN)
+
+
+#: Trường "lúc actor đọc" có trong item thô (soi raw Kompa 18/10/2026): mina `scrape_date`
+#: ("2026-10-17 18:20:22.04", giờ máy actor = UTC), scrapersdelight / powerai `scrapedAt`,
+#: futurizerush `scraped_at` / `collectedAt` (ISO có múi giờ).
+_TRUONG_LUC_DOC = ("scrapedAt", "scraped_at", "scrape_date", "collectedAt")
+
+
+def _luc_doc_item(items: list) -> datetime.datetime | None:
+    """Lúc đọc theo TRƯỜNG THỜI GIAN của item (sớm nhất trong tệp — một run đọc trong vài phút);
+    None khi không item nào có. Giờ không múi giờ coi là UTC (máy Apify)."""
+    ra = None
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        for k in _TRUONG_LUC_DOC:
+            v = it.get(k)
+            if not isinstance(v, str) or not v.strip():
+                continue
+            try:
+                t = datetime.datetime.fromisoformat(v.strip().replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            t = t if t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)
+            ra = t if ra is None or t < ra else ra
+            break
+    return ra.astimezone(_VN) if ra else None
 
 
 def cac_tep(duong: list[str]) -> list[pathlib.Path]:
@@ -220,11 +249,21 @@ def _youtube(raw: dict, tu: datetime.datetime, den: datetime.datetime) -> list:
 def doc_raw(duong: list[str], tu: datetime.datetime, den: datetime.datetime) -> dict:
     """Mọi tệp raw → {"tim": [(d, dt)] đường từ khoá, "ho_so": [(d, dt)] TikTok userPosts,
     "trang_fb": [(items thedoor, giờ đọc)], "web": [(items, giờ đọc)], "tep": [(tên, loại, số
-    bài)], "bo_qua": [(tên, lý do)]}. Mỗi d có `platform` và `_luc_doc` (giờ đọc raw)."""
-    ra = {"tim": [], "ho_so": [], "trang_fb": [], "web": [], "tep": [], "bo_qua": []}
+    bài)], "bo_qua": [(tên, lý do)], "theo_gio_tep": {tên tệp lấy giờ đọc theo giờ ghi tệp}}. Mỗi
+    d có `platform` và `_luc_doc` (giờ đọc raw: trường thời gian của item khi có —
+    `_luc_doc_item`, không thì giờ ghi tệp; soát 18/10/2026 — ảnh chụp `chi_so_ngay` của bài nạp
+    ghi đúng ngày đọc, không theo now())."""
+    ra = {"tim": [], "ho_so": [], "trang_fb": [], "web": [], "tep": [], "bo_qua": [],
+          "theo_gio_tep": set()}
 
-    def them(f, loai, rows, ds):
-        luc = _luc_doc(f)
+    def luc_cua(f, items=None):
+        x = _luc_doc_item(items)
+        if x is None:
+            ra["theo_gio_tep"].add(f.name)
+        return x or _luc_doc(f)
+
+    def them(f, loai, rows, ds, luc=None):
+        luc = luc or luc_cua(f)
         for d, _ in rows:
             d["_luc_doc"] = luc
         ds.extend(rows)
@@ -255,12 +294,13 @@ def doc_raw(duong: list[str], tu: datetime.datetime, den: datetime.datetime) -> 
             ra["bo_qua"].append((f.name, f"actor {actor or '?'} không có bộ chuẩn hoá của Mark"))
             continue
         items = _chieu(actor, r.get("items") or [])
+        luc = luc_cua(f, r.get("items"))       # trường giờ đọc nằm ở item THÔ (trước khi chiếu)
         if kieu == "thedoor":
-            ra["trang_fb"].append((items, _luc_doc(f), f.name))
+            ra["trang_fb"].append((items, luc, f.name))
             ra["tep"].append((f.name, "thedoor trang Facebook", len(items)))
             continue
         if kieu == "web":
-            ra["web"].append((items, _luc_doc(f), f.name))
+            ra["web"].append((items, luc, f.name))
             ra["tep"].append((f.name, "Google (scraperlink)", len(items)))
             continue
         cum = str((r.get("input") or {}).get("query") or "")
@@ -284,7 +324,7 @@ def doc_raw(duong: list[str], tu: datetime.datetime, den: datetime.datetime) -> 
                 d["_tag_feed"] = ("" if tim_tu else "#") if t is None else t
                 if t is None and not tim_tu and tag_vao:
                     d["_tag_vao"] = tag_vao
-        them(f, actor, rows, ra["tim"])
+        them(f, actor, rows, ra["tim"], luc)
     return ra
 
 
@@ -731,8 +771,9 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None, nghi=time.sl
         loai_tep[loai][1] += n
     in_ra(f"Raw: {len({t for t, _, _ in raw['tep']})} tệp đọc được — " + "; ".join(
         f"{k} {v[0]} tệp/{v[1]} bài" for k, v in sorted(loai_tep.items())) + ".")
-    moi_chep = sorted({f.name for f in cac_tep(ns.duong)
-                       if _luc_doc(f).date() == bay_gio.astimezone(_VN).date()})
+    # Chỉ tệp lấy giờ đọc theo giờ ghi tệp (item không có trường thời gian — `_luc_doc_item`).
+    moi_chep = sorted({f.name for f in cac_tep(ns.duong) if f.name in raw["theo_gio_tep"]
+                       and _luc_doc(f).date() == bay_gio.astimezone(_VN).date()})
     if moi_chep:
         in_ra(f"CẢNH BÁO: {len(moi_chep)} tệp raw mang giờ ghi HÔM NAY ({', '.join(moi_chep[:3])}"
               f"{' …' if len(moi_chep) > 3 else ''}) — chép lại bằng rsync -a / scp -rp để giữ giờ "

@@ -232,6 +232,28 @@ def test_doc_raw_nhan_actor_chuan_hoa_dung_ham_cua_mark(tmp_path):
     assert [d["username"] for d in ho_so] == ["nha_mau", "nha_mau"], "video ghim bỏ như ho_so"
 
 
+def test_gio_doc_theo_truong_thoi_gian_cua_item_roi_moi_toi_gio_ghi_tep(tmp_path):
+    """Soát 18/10/2026: tệp chép lại mang giờ ghi hôm nay — giờ đọc lấy trường thời gian của item
+    (scrapedAt / scraped_at / scrape_date / collectedAt, sớm nhất; không múi giờ = UTC) khi có."""
+    assert N._luc_doc_item([{"scrapedAt": "2026-10-17T10:52:02.691Z"},
+                            {"scrape_date": "2026-10-16 18:20:22.043405"}, {"x": 1}]) == \
+        datetime.datetime(2026, 10, 17, 1, 20, 22, 43405, tzinfo=_VN)
+    assert N._luc_doc_item([{"scrape_date": "rác"}]) is None
+    luc = (BAY_GIO - datetime.timedelta(days=2)).astimezone(datetime.timezone.utc)
+    it = {"id": "S1", "shortCode": "S1", "url": "https://www.instagram.com/p/S1/",
+          "timestamp": luc.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "caption": "túi hapas",
+          "hashtags": ["hapas"], "ownerUsername": "kh", "likesCount": 1, "commentsCount": 0,
+          "inputUrl": "https://www.instagram.com/explore/tags/hapas",
+          "scrapedAt": "2026-10-10T03:00:00.000Z"}
+    (tmp_path / "raw_ig.json").write_text(json.dumps(
+        {"actor": "apify/instagram-hashtag-scraper", "input": {"hashtags": ["hapas"]},
+         "items": [it]}), encoding="utf-8")
+    raw = N.doc_raw([str(tmp_path)], BAY_GIO - datetime.timedelta(days=40), BAY_GIO)
+    ((d, _),) = raw["tim"]
+    assert d["_luc_doc"] == datetime.datetime(2026, 10, 10, 10, 0, tzinfo=_VN)
+    assert raw["theo_gio_tep"] == set()
+
+
 def test_loc_khung_bo_trung_giu_ban_nhieu_binh_luan_va_ban_ho_so():
     luc = BAY_GIO - datetime.timedelta(days=2)
 
@@ -258,7 +280,8 @@ def test_chay_thu_khong_ai_khong_ghi_in_phieu_uoc_tinh(monkeypatch, tmp_path, ai
     m = re.search(r"ƯỚC TÍNH: sẽ nạp (\d+) bài mới nhắc từ khoá", out)
     assert m and int(m.group(1)) == 3 + 6 + 2 + 2, out      # review + livestream + mina + kênh nhà
     assert "Bỏ qua 1 tệp" in out and "AI: " in out
-    assert "CẢNH BÁO: 5 tệp raw mang giờ ghi HÔM NAY" in out, "raw vừa ghi: nhắc giữ giờ đọc thật"
+    # 3 tệp scraptik + tệp mina (trường scrape_date rác) lấy giờ ghi tệp; tệp bỏ qua không tính.
+    assert "CẢNH BÁO: 4 tệp raw mang giờ ghi HÔM NAY" in out, "raw vừa ghi: nhắc giữ giờ đọc thật"
     assert TDA.doc_seeding("hapas") == [], "chạy thử không ghi sổ"
 
 
@@ -282,12 +305,16 @@ def test_ap_dung_qua_pipeline_ghi_luot_va_tep_hoan_tac(monkeypatch, tmp_path, ai
     assert {r["nguon_id"] for r in nha} == {1} and len(nha) == 2
     # Bài đã có: chỉ nâng số, ảnh chụp đúng ngày đọc raw (ngày ghi tệp), bản nhiều bình luận nhất.
     ((ngay, rows),) = kho.nang
-    assert ngay == datetime.datetime.fromtimestamp(
+    ngay_tep = datetime.datetime.fromtimestamp(
         (tmp_path / "raw" / "kompa" / "raw_tt_tim_1_hapas.jsonl").stat().st_mtime, _VN).date()
+    assert ngay == ngay_tep
     assert rows == [{"khoa": khoa_cu, "xem": review0["statistics"]["play_count"],
                      "thich": review0["statistics"]["digg_count"],
                      "binh_luan": review0["statistics"]["comment_count"] + 5,
-                     "chia_se": review0["statistics"]["share_count"], "nen_tang": "tiktok"}]
+                     "chia_se": review0["statistics"]["share_count"], "nen_tang": "tiktok",
+                     "_ngay_so": ngay_tep}]
+    # Bài MỚI cũng mang ngày đọc raw: ảnh chụp chi_so_ngay không theo now() (soát LOW).
+    assert all(r.get("_ngay_so") for _, rs in kho.ghi for r in rs)
     (luot, x), = kho.luot.items()
     assert x["kieu"] == "tu_khoa" and x["trang_thai"] == "xong" and x["chi_phi_usd"] == 0.0
     assert "phễu tìm TikTok" in x["ghi_chu"] and "seeding affiliate 8" in x["ghi_chu"]
@@ -392,7 +419,7 @@ def test_nang_so_lieu_chi_nang_va_ghi_dung_ngay(monkeypatch):
             return self
 
         def fetchone(self):
-            return {"khoa": "tiktok:1"}
+            return {"khoa": "tiktok:1", "moi": True}
     monkeypatch.setattr(K, "ket_noi", lambda: C())
     ngay = datetime.date(2026, 10, 18)
     n = K.nang_so_lieu("hapas", 9, [{"khoa": "tiktok:1", "xem": 10, "thich": None,
@@ -404,3 +431,19 @@ def test_nang_so_lieu_chi_nang_va_ghi_dung_ngay(monkeypatch):
     assert sua[1][:4] == [10, None, 3, 0] and "luot_cuoi = %s" in sua[0]
     assert "GREATEST(EXCLUDED.binh_luan, chi_so_ngay.binh_luan)" in anh[0]
     assert anh[1][2] == ngay, "ảnh chụp ghi ngày ĐỌC raw, không phải hôm nay"
+    # Dòng mang `_ngay_so` (ngày đọc của chính lần đọc đó) thắng ngày chung của phần.
+    cau.clear()
+    K.nang_so_lieu("hapas", 9, [{"khoa": "tiktok:1", "xem": 10, "_ngay_so": datetime.date(
+        2026, 10, 2)}], ngay)
+    assert cau[1][1][2] == datetime.date(2026, 10, 2)
+    # ghi_bai (bài MỚI của nạp raw): ảnh chụp vào ngày đọc, số chỉ nâng khi trùng bài đã có.
+    cau.clear()
+    K.ghi_bai("hapas", 9, "tu_khoa", [{"khoa": "tiktok:5", "nen_tang": "tiktok", "xem": 7,
+                                       "_ngay_so": datetime.date(2026, 10, 3)}])
+    bai, anh = cau
+    assert "xem = GREATEST(EXCLUDED.xem, bai.xem)" in bai[0]
+    assert "now()" not in anh[0] and anh[1][2] == datetime.date(2026, 10, 3)
+    assert "GREATEST(EXCLUDED.xem, chi_so_ngay.xem)" in anh[0]
+    cau.clear()
+    K.ghi_bai("hapas", 9, "tu_khoa", [{"khoa": "tiktok:6", "nen_tang": "tiktok", "xem": 7}])
+    assert "xem = COALESCE(EXCLUDED.xem, bai.xem)" in cau[0][0] and "now() AT TIME ZONE" in cau[1][0]

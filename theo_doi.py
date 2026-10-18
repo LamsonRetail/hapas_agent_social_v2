@@ -1082,10 +1082,18 @@ def chon_bai(du_an: dict, theo_nguon: dict[int, list], nguon: dict[int, dict],
             "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
             "binh_luan": _so_hay_none(d.get("comments")),
             "chia_se": _so_hay_none(d.get("shares")),
-            **_cot_fb(d),
+            **_cot_fb(d), **_ngay_so(d),
         })
     tk["giu"] = len(ra)
     return ra, tk
+
+
+def _ngay_so(d: dict) -> dict:
+    """{"_ngay_so": ngày đọc} cho dòng ghi kho của bài mang `_luc_doc` (script nạp raw, soát
+    18/10/2026): ảnh chụp `chi_so_ngay` ghi vào NGÀY ĐỌC raw, không phải hôm nay
+    (`lang_nghe_db.ghi_bai`). Bài lượt quét thật không có trường này → {}."""
+    luc = d.get("_luc_doc")
+    return {"_ngay_so": luc.astimezone(_VN).date()} if isinstance(luc, datetime.datetime) else {}
 
 
 def _cot_fb(d: dict) -> dict:
@@ -3935,7 +3943,7 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
             "binh_luan": _so_hay_none(d.get("comments")),
             "chia_se": _so_hay_none(d.get("shares")),
-            **_cot_web(d), **_cot_fb(d),
+            **_cot_web(d), **_cot_fb(d), **_ngay_so(d),
         })
         ban.append((d, dt))
     tk["giu"] = len(rows)

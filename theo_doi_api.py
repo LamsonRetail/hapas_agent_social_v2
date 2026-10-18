@@ -545,7 +545,10 @@ def tach_da_biet(ma: str, hits: list[tuple], khoa_cua) -> tuple[list[dict], list
     da = K.khoa_da_co(ma, list(thay)) if thay else set()
     cap_nhat = [{"khoa": k, "xem": _so(d.get("views")), "thich": _so(d.get("likes")),
                  "binh_luan": _so(d.get("comments")), "chia_se": _so(d.get("shares")),
-                 "nen_tang": d.get("platform")}
+                 "nen_tang": d.get("platform"),
+                 # Script nạp raw: ngày ĐỌC của lần đọc này (`lang_nghe_db.nang_so_lieu`).
+                 **({"_ngay_so": d["_luc_doc"].astimezone(_VN).date()}
+                    if isinstance(d.get("_luc_doc"), datetime.datetime) else {})}
                 for k, (d, _) in thay.items() if k in da]
     moi = [x for k, x in thay.items() if k not in da]
     return cap_nhat, moi, trung
