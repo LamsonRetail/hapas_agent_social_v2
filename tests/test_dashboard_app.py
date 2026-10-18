@@ -1333,6 +1333,26 @@ def test_trang_bigquery_nguoi_xem_thay_nhung_khong_bam_duoc():
     assert "Forbidden: &lt;b&gt;quyền&lt;/b&gt;" in c.get("/bigquery").text   # quản lý: chữ thô, đã thoát
 
 
+def test_trang_bigquery_canh_bao_khong_gan_nhan_loi():
+    """Soát 18/10/2026: cảnh báo của dong_bo_bq (bỏ cột tuỳ chọn còn thiếu — lượt vẫn xong, mốc
+    vẫn dời) hiện nhãn "cảnh báo", không gắn nhãn "lỗi" như lỗi thật."""
+    from dashboard import dong_bo_bq as DBQ
+    canh = "bỏ cột hashtag: BigQuery chưa có cột (chạy ALTER trong bigquery.sql)"
+
+    class CoCanhBao(GiaDongBo):
+        def trang_thai(self):
+            tt = super().trang_thai()
+            tt["bang"] = [DBQ.tach_canh_bao(dict(b, loi=DBQ.TIEN_TO_CANH_BAO + canh))
+                          if b["bang"] == "du_an" else b for b in tt["bang"]]
+            return tt
+    _, c, _ = tao(dong_bo=CoCanhBao())
+    for ai in (QL, XEM):
+        dang_nhap(c, ai)
+        t = c.get("/bigquery").text
+        assert '<span class="the the--canh">cảnh báo</span>' in t and canh in t
+        assert t.count('<span class="the the--loi">lỗi</span>') == 1, "chỉ dòng bai lỗi thật"
+
+
 def test_quan_ly_bam_dong_bo_chay_mot_lan():
     dong_bo = GiaDongBo()
     _, c, kho = tao(dong_bo=dong_bo)

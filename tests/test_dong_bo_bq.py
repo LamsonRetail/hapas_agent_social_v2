@@ -283,6 +283,21 @@ def test_thieu_cot_hashtag_bo_cot_canh_bao_khong_hong_bang(kho_thieu, bq_thieu, 
     assert kho.moc["du_an"]["loi"].startswith("cảnh báo: bỏ cột hashtag")
 
 
+def test_trang_thai_tach_canh_bao_khoi_loi():
+    """Soát 18/10/2026: cảnh báo đi chung cột `loi` (bảng chưa có cột riêng) nên trang Kết nối
+    BigQuery gắn nhãn "lỗi" cho một lượt XONG. `trang_thai` tách tiền tố "cảnh báo: " ra
+    `canh_bao`; lỗi thật giữ nguyên ở `loi`."""
+    kho = GiaKho(_du_an(), thieu_cot={"hashtag"})
+    D.dong_bo_bang("du_an", kho, GiaBQCot(), _tham_so)
+    D.dong_bo_bang("nguon", kho, GiaBQ(hong_lan=1), _tham_so)          # lỗi thật
+    theo = {b["bang"]: b for b in D.trang_thai(kho)["bang"]}
+    assert theo["du_an"]["loi"] is None and theo["du_an"]["so_dong"] == 1
+    assert theo["du_an"]["canh_bao"].startswith("bỏ cột hashtag: Postgres chưa có cột")
+    assert theo["nguon"]["loi"] == "RuntimeError: quota" and "canh_bao" not in theo["nguon"]
+    assert theo["bai"] == {"bang": "bai"}                               # chưa chạy lần nào
+    assert D.tach_canh_bao({"loi": "Lỗi: cảnh báo: x"})["loi"] == "Lỗi: cảnh báo: x"
+
+
 def test_du_cot_hashtag_thi_day_ca_hashtag():
     kho = GiaKho(_du_an())
     bq = GiaBQCot()

@@ -262,6 +262,13 @@ def _doc_moc(ket_noi, bang: str):
     return r["moc"] if r else None
 
 
+#: Tiền tố cảnh báo trong cột `dong_bo_bq.loi` (soát 18/10/2026): bảng chưa có cột cảnh báo riêng
+#: (thêm cột = đổi schema trên VPS), nên cảnh báo — lượt vẫn xong, mốc vẫn dời, vd bỏ cột tuỳ chọn
+#: còn thiếu — đi chung cột `loi` với tiền tố này; `trang_thai` tách ra `canh_bao` để trang
+#: "Kết nối BigQuery" hiện nhãn "cảnh báo" chứ không gắn nhãn "lỗi".
+TIEN_TO_CANH_BAO = "cảnh báo: "
+
+
 def _ghi_moc(ket_noi, bang: str, moc, so_dong: int, loi: str | None) -> None:
     """Ghi kết quả lượt; `moc` None = giữ mốc cũ (lỗi, hoặc bảng nạp lại toàn bộ)."""
     with ket_noi() as c:
@@ -331,7 +338,8 @@ def cot_hieu_luc(bang: str, ket_noi, bq) -> tuple[list[tuple[str, str]], str]:
 
 def dong_bo_bang(bang: str, ket_noi, bq, tham_so=_tham_so_bq) -> dict:
     """Đẩy một bảng. -> {"bang", "so_dong", "loi"} (+ "canh_bao" khi bỏ cột tuỳ chọn còn thiếu —
-    cảnh báo ghi vào `dong_bo_bq.loi` để trang "Kết nối BigQuery" thấy, mốc vẫn dời)."""
+    cảnh báo ghi vào `dong_bo_bq.loi` với tiền tố `TIEN_TO_CANH_BAO` để trang "Kết nối BigQuery"
+    thấy là CẢNH BÁO, mốc vẫn dời)."""
     b = BANG[bang]
     tong, moc_moi, loi, canh = 0, None, None, ""
     try:
@@ -354,7 +362,7 @@ def dong_bo_bang(bang: str, ket_noi, bq, tham_so=_tham_so_bq) -> dict:
         moc_moi = None
     if canh:
         print(f"[dong_bo_bq] {bang}: {canh}", flush=True)
-    _ghi_moc(ket_noi, bang, moc_moi, tong, loi or (f"cảnh báo: {canh}" if canh else None))
+    _ghi_moc(ket_noi, bang, moc_moi, tong, loi or (TIEN_TO_CANH_BAO + canh if canh else None))
     return {"bang": bang, "so_dong": tong, "loi": loi, **({"canh_bao": canh} if canh else {})}
 
 
@@ -373,13 +381,24 @@ def chay(ket_noi=ket_noi_kho, bq=None, tham_so=_tham_so_bq) -> dict:
         _KHOA.release()
 
 
+def tach_canh_bao(r: dict) -> dict:
+    """Bản sao một dòng `dong_bo_bq`: `loi` bắt đầu bằng `TIEN_TO_CANH_BAO` thì chuyển phần sau
+    sang `canh_bao` và `loi` = None (lượt đó KHÔNG lỗi)."""
+    r = dict(r)
+    loi = str(r.get("loi") or "")
+    if loi.startswith(TIEN_TO_CANH_BAO):
+        r.update(loi=None, canh_bao=loi[len(TIEN_TO_CANH_BAO):])
+    return r
+
+
 def trang_thai(ket_noi=ket_noi_kho) -> dict:
-    """Cho trang "Kết nối BigQuery" của dashboard: dataset, mốc, lần cuối, số dòng, lỗi."""
+    """Cho trang "Kết nối BigQuery" của dashboard: dataset, mốc, lần cuối, số dòng, lỗi, cảnh báo
+    (`tach_canh_bao`)."""
     with ket_noi() as c:
         rows = c.execute("SELECT bang, moc, lan_cuoi, so_dong, loi FROM dong_bo_bq").fetchall()
     theo = {r["bang"]: r for r in rows}
     return {"dataset": dataset(), "da_bat": da_bat(),
-            "bang": [dict(theo.get(b) or {"bang": b}) for b in THU_TU]}
+            "bang": [tach_canh_bao(theo.get(b) or {"bang": b}) for b in THU_TU]}
 
 
 def cai_vao(app) -> None:

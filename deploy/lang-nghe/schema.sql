@@ -715,7 +715,7 @@ COMMENT ON COLUMN dong_bo_bq.bang IS 'Tên bảng được đồng bộ. PK.';
 COMMENT ON COLUMN dong_bo_bq.moc IS 'Mốc đã đẩy xong (giá trị lớn nhất của cột mốc của bảng; với chi_so_ngay là ngày). NULL khi chưa đẩy lần nào hoặc bảng nạp lại toàn bộ.';
 COMMENT ON COLUMN dong_bo_bq.lan_cuoi IS 'Thời điểm lượt đồng bộ gần nhất (UTC).';
 COMMENT ON COLUMN dong_bo_bq.so_dong IS 'Số dòng đã đẩy ở lượt gần nhất, dòng.';
-COMMENT ON COLUMN dong_bo_bq.loi IS 'Lỗi lượt gần nhất (đã bỏ URL, tối đa 200 ký tự). NULL khi thành công.';
+COMMENT ON COLUMN dong_bo_bq.loi IS 'Lỗi lượt gần nhất (đã bỏ URL, tối đa 200 ký tự). Bắt đầu bằng "cảnh báo: " là CẢNH BÁO, không phải lỗi: lượt vẫn xong, mốc vẫn dời (vd bỏ cột tuỳ chọn chưa có ở Postgres hoặc BigQuery, từ 18/10/2026). NULL khi thành công không cảnh báo.';
 
 COMMENT ON TABLE lich_quet IS $$[Lớp] Raw
 [Mục đích] Lịch quét tự động của từng dự án (mỗi N giờ, hằng ngày, hằng tuần, chiến dịch) để Mark tự chạy /theodoi đúng mốc, kèm trạng thái lần chạy gần nhất.

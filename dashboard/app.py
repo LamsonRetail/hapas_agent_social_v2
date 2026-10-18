@@ -1883,6 +1883,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         except Exception as e:  # noqa: BLE001 — trang vẫn hiện, chỉ báo chưa đọc được
             loi = f"Chưa đọc được trạng thái đồng bộ ({type(e).__name__})."
             tt = {"dataset": "", "da_bat": False, "bang": []}
+        # `canh_bao` (soát 18/10/2026, `dong_bo_bq.tach_canh_bao`) không che: câu do dong_bo_bq tự
+        # soạn (tên cột, tên lỗi), không có chữ lỗi thô của Google như `loi`.
         tt = {**tt, "bang": an_chi_tiet(nguoi, list(tt.get("bang") or []), (), ("loi",))}
         return _trang(request, "bigquery.html", nguoi, "bigquery", tt=tt, loi_tt=loi)
 
