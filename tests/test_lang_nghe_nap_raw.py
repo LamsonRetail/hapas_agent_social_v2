@@ -359,6 +359,86 @@ def test_ap_dung_qua_pipeline_ghi_luot_va_tep_hoan_tac(monkeypatch, tmp_path, ai
     assert TDA.doc_seeding("hapas") == []
 
 
+FB_NHA = {"id": 2, "nen_tang": "facebook", "dinh_danh": "https://www.facebook.com/hapasglobal",
+          "loai": "kenh_nha"}
+
+
+class KhoFb(KhoGia):
+    def nguon_cua_du_an(self, ma):
+        return [dict(n) for n in NGUON] + [dict(FB_NHA)]
+
+
+def _raw_trang(goc: Path) -> list[dict]:
+    """Raw thedoor trang nhà (fixture run thật 17/10/2026, giờ đăng dời về 2 ngày trước) + một
+    tệp thedoor MỘT trang lạ nhắc brand — dự án chỉ có MỘT nguồn Facebook, đúng ca dự phòng "run
+    một trang thì về trang đó" của `doc_thedoor` kéo nhầm trang lạ về nguồn nhà."""
+    items = json.loads((GOC / "mau_fb_thedoor.json").read_text(encoding="utf-8"))["items"]
+    ts = int(BAY_GIO.timestamp()) - 2 * 86400
+    for i, it in enumerate(items):
+        it["created"]["timestamp"] = ts - i * 3600
+    la = copy.deepcopy(items[0])
+    la["page"] = {"id": "100000000000009", "name": "HAPAS",
+                  "url": "https://www.facebook.com/doithu"}
+    la["post"] = {**la["post"], "id": "990000000000001", "text": "review túi hapas",
+                  "url": "https://www.facebook.com/100000000000009/posts/990000000000001"}
+    goc.mkdir(parents=True, exist_ok=True)
+    for ten, its in (("raw_fb_trang_hapas.json", items), ("raw_fb_trang_la.json", [la])):
+        (goc / ten).write_text(json.dumps({"actor": "thedoor/facebook-page-scraper", "items": its},
+                                          ensure_ascii=False), encoding="utf-8")
+    return items
+
+
+def test_trang_nha_thedoor_chi_di_duong_nguon_gan_nguon_id(monkeypatch, tmp_path, ai):
+    """Soát 18/10/2026 (lượt nạp 14): bài trang nhà loại khỏi đường từ khoá theo `id()` của dict
+    tạo lại → đi CẢ HAI đường, đường từ khoá ghi trước với `nguon_id` NULL ("External channel").
+    Nay: bài trang nhà CHỈ ghi đường nguồn (`nguon_id`, `theo_doi`), trang lạ đi đường từ khoá."""
+    kho = KhoFb().cai(monkeypatch)
+    items = _raw_trang(tmp_path / "raw")
+    ma, out = _chay(["hapas", str(tmp_path / "raw"), "--tu", _tu(), "--ap-dung", "--sao-luu",
+                     str(tmp_path / "nap.jsonl")])
+    assert ma == 0, out
+    nha = {f"facebook:{it['post']['id']}" for it in items}
+    theo_kieu: dict[str, list] = {}
+    for kieu, rows in kho.ghi:
+        for r in rows:
+            theo_kieu.setdefault(r["khoa"], []).append((kieu, r.get("nguon_id")))
+    assert {k: v for k, v in theo_kieu.items() if k in nha} == {k: [("theo_doi", 2)] for k in nha}
+    assert theo_kieu["facebook:990000000000001"] == [("tu_khoa", None)], "trang lạ: đường từ khoá"
+    # Đường nguồn ghi TRƯỚC đường từ khoá.
+    assert [k for k, _ in kho.ghi][:1] == ["theo_doi"]
+    assert f"đường nguồn đang theo dõi {len(items)} bài" in out
+
+
+def test_bai_tim_cua_kenh_nha_sang_duong_nguon_va_bo_ban_trung():
+    """Bài đường từ khoá khớp ĐÚNG MỘT nguồn kênh nhà (tên trang / id trang / tài khoản) sang đường
+    nguồn; bản trùng (pfbid ↔ id số) nhận ra theo khoá ổn định, không theo `id()`."""
+    nguon = [FB_NHA, *NGUON, {"id": 3, "nen_tang": "facebook", "loai": "kol",
+                             "dinh_danh": "https://www.facebook.com/kol.a"}]
+
+    def fb(link, u="", **kw):
+        return ({"platform": "facebook", "link": link, "username": u, **kw}, BAY_GIO)
+    tim = [fb("https://www.facebook.com/hapasglobal/posts/pfbid0abc"),
+           fb("https://www.facebook.com/x/posts/1", "hapasglobal"),
+           fb("https://www.facebook.com/100066634543565/posts/2"),
+           fb("https://www.facebook.com/kol.a/posts/pfbid0kol"),           # nguồn không phải nhà
+           fb("https://www.facebook.com/khach/posts/pfbid0k", "HAPAS"),    # tên hiển thị: không
+           ({"platform": "tiktok", "link": "https://www.tiktok.com/@nha_mau/video/7", "username":
+             "nha_mau", "__goc": {"id": "7"}}, BAY_GIO)]
+    bang = N.bang_dau([{**FB_NHA, "dinh_danh": "facebook.com/profile.php?id=100066634543565"}])
+    assert N.nguon_khop("facebook", N.dau_chu_bai("facebook", "", tim[2][0]["link"]), bang) == [2]
+    con, sang = N.tach_kenh_nha(tim, nguon)
+    assert [d["link"] for d, _ in con] == [tim[2][0]["link"], tim[3][0]["link"], tim[4][0]["link"]]
+    assert {nid: len(ds) for nid, ds in sang.items()} == {2: 2, 1: 1}
+    assert sang[1][0][0]["_goc_id"] == "7"
+    # Bản trùng: cùng id số (ma_so_fb) với bài trang → chung khoá ổn định.
+    trang = {"platform": "facebook",
+             "link": "https://www.facebook.com/100066634543565/posts/1825684048882067"}
+    tim_ban = {"platform": "facebook", "link": "https://www.facebook.com/hapasglobal/posts/pfbid0z",
+               "ma_so_fb": "1825684048882067"}
+    assert N.khoa_on_dinh(trang) & N.khoa_on_dinh(tim_ban)
+    assert not N.khoa_on_dinh(trang) & N.khoa_on_dinh({**tim_ban, "ma_so_fb": "1825684048882068"})
+
+
 def test_so_them_ghi_sau_moi_phan_va_hoan_tac_go_ca_so_web(monkeypatch, tmp_path):
     """Soát LOW: khoá sổ lần nạp thêm (sổ dự án + sổ web `<mã>:web`) ghi vào tệp hoàn tác ngay sau
     mỗi phần, chỉ khoá của bài trong lô; `--hoan-tac` gỡ cả hai sổ (dòng "so" cũ = sổ dự án)."""
