@@ -671,28 +671,38 @@ _NHAN_KHO = "(binh_luan.loai = 'seeding' OR binh_luan.ly_do_loc = 'affiliate_han
 _GIU_NHAN_KHO = f"(EXCLUDED.loai = 'hop_le' AND {_NHAN_KHO})"
 
 
-def goc_thieu_tra_loi(ma: str, khoa_bai: list[str], tran_moi_goc: int,
-                      toi_da: int = 200) -> dict[str, list[tuple[str, int]]]:
-    """{khoá bài: [(mã bình luận gốc, số trả lời nền tảng báo), …]} — gốc ĐÃ có trong kho mà số
-    trả lời trong kho còn dưới min(số báo, `tran_moi_goc` — một yêu cầu trả lời đọc được tối đa
-    bấy nhiêu), thiếu nhiều trước, tối đa `toi_da` gốc mỗi bài (soát 18/10/2026: video TikTok đã đọc
-    hết trang gốc mà vẫn thiếu thì lấy trả lời cho các gốc này — `tiktok_api.binh_luan`)."""
+def goc_thieu_tra_loi(ma: str, khoa_bai: list[str], tran_moi_goc: int, toi_da: int = 200,
+                      bo: list[str] | tuple = ()) -> dict[str, list[tuple[str, int, int]]]:
+    """{khoá bài: [(mã bình luận gốc, số trả lời nền tảng báo, số trả lời kho đã có), …]} — gốc
+    ĐÃ có trong kho mà số trả lời trong kho còn dưới min(số báo, `tran_moi_goc` — một yêu cầu trả
+    lời đọc được tối đa bấy nhiêu), thiếu nhiều trước, tối đa `toi_da` gốc mỗi bài (soát 18/10/2026:
+    video TikTok đã đọc hết trang gốc mà vẫn thiếu thì lấy trả lời cho các gốc này —
+    `tiktok_api.binh_luan`).
+
+    `bo` = khoá "<khoa_bai>\\x1f<ma>" bỏ qua: gốc đã hỏi mà không thêm được trả lời nào (trả lời
+    bị ẩn / xoá — số báo không bao giờ đạt; `theo_doi._gan_doc_tiep_bl`). Giới hạn `toi_da` ngay
+    trong SQL (`row_number` theo bài): video lớn có hàng nghìn gốc thiếu thì không kéo hết về rồi
+    mới cắt ở Python."""
     if not khoa_bai:
         return {}
     with ket_noi() as c:
         rows = c.execute(
-            "SELECT g.khoa_bai, g.ma, g.tra_loi, count(r.ma) AS da_co FROM binh_luan g "
+            "SELECT khoa_bai, ma, tra_loi, da_co FROM ("
+            "SELECT g.khoa_bai, g.ma, g.tra_loi, count(r.ma) AS da_co, row_number() OVER ("
+            "PARTITION BY g.khoa_bai ORDER BY LEAST(g.tra_loi, %(tran)s) - count(r.ma) DESC, g.ma"
+            ") AS thu_tu FROM binh_luan g "
             "LEFT JOIN binh_luan r ON r.du_an = g.du_an AND r.khoa_bai = g.khoa_bai "
-            "AND r.ma_cha = g.ma WHERE g.du_an = %s AND g.khoa_bai = ANY(%s) "
+            "AND r.ma_cha = g.ma WHERE g.du_an = %(ma)s AND g.khoa_bai = ANY(%(khoa)s) "
             "AND NOT g.la_tra_loi AND COALESCE(g.tra_loi, 0) > 0 "
-            "GROUP BY g.khoa_bai, g.ma, g.tra_loi HAVING count(r.ma) < LEAST(g.tra_loi, %s) "
-            "ORDER BY g.khoa_bai, LEAST(g.tra_loi, %s) - count(r.ma) DESC, g.ma",
-            (ma, list(khoa_bai), int(tran_moi_goc), int(tran_moi_goc))).fetchall()
-    ra: dict[str, list[tuple[str, int]]] = {}
+            "AND NOT ((g.khoa_bai || chr(31) || g.ma) = ANY(%(bo)s)) "
+            "GROUP BY g.khoa_bai, g.ma, g.tra_loi HAVING count(r.ma) < LEAST(g.tra_loi, %(tran)s)"
+            ") x WHERE thu_tu <= %(toi_da)s ORDER BY khoa_bai, thu_tu",
+            {"ma": ma, "khoa": list(khoa_bai), "tran": int(tran_moi_goc), "bo": list(bo),
+             "toi_da": int(toi_da)}).fetchall()
+    ra: dict[str, list[tuple[str, int, int]]] = {}
     for r in rows:
-        ds = ra.setdefault(r["khoa_bai"], [])
-        if len(ds) < toi_da:
-            ds.append((str(r["ma"]), int(r["tra_loi"])))
+        ra.setdefault(r["khoa_bai"], []).append(
+            (str(r["ma"]), int(r["tra_loi"]), int(r["da_co"] or 0)))
     return ra
 
 

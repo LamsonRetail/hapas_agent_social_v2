@@ -3711,34 +3711,57 @@ def _doc_tiep_tiktok(b: dict) -> int:
     TRẢ LỜI (gốc đã đọc hết — `bl_het_goc`, sổ `KHOA_BL_TIKTOK`) mà đọc tiếp từ vị trí gốc thì chỉ
     gặp trang rỗng: 0 bình luận mới mỗi lượt, sau 2 lần `bl_lan_thieu` = 2 và video bị bỏ hẳn. Video
     đó lấy trả lời của các gốc còn thiếu (`bl_goc_thieu`) hoặc, không còn gốc nào thiếu, đọc lại từ
-    đầu để lấy bình luận mới."""
-    if not _cao_do_tiktok(b) or b.get("bl_het_goc"):
+    đầu để lấy bình luận mới. Lượt ngay SAU một lượt lấy trả lời (`bl_tu_dau`) cũng đọc lại từ đầu:
+    nhánh trả lời không đọc trang gốc nên phải có lượt lấy gốc mới và số trả lời mới của gốc."""
+    if not _cao_do_tiktok(b) or b.get("bl_het_goc") or b.get("bl_tu_dau"):
         return 0
     return max(0, int(b.get("bl_goc") or 0))
 
 
 #: Sổ đọc tiếp bình luận TikTok trong sổ mốc của dự án (soát 18/10/2026): {khoá bài: {"het_goc":
-#: lần cào trước đã đọc tới trang gốc cuối, "luc": iso}} — `tiktok_api.binh_luan(trang_thai=…)`.
+#: lần cào trước đã đọc tới trang gốc cuối, "tu_dau": lần trước đi nhánh trả lời → lượt này đọc gốc
+#: từ đầu, "goc_can": {cid gốc: iso} gốc đã hỏi mà không thêm được trả lời, "luc": iso}} —
+#: `tiktok_api.binh_luan(trang_thai=…)`.
 KHOA_BL_TIKTOK = "bl_tiktok"
+#: Gốc đã hỏi mà không thêm được trả lời nào (soát 18/10/2026: trả lời bị ẩn / xoá, số TikTok báo
+#: không bao giờ đạt) được bỏ khỏi `goc_thieu_tra_loi` bấy nhiêu ngày — không trả 0,002 USD mỗi gốc
+#: mỗi lượt cho cùng một câu trả lời; quá hạn thì hỏi lại một lần (có thể có trả lời mới).
+BL_GOC_CAN_NGAY = 7
 
 
-def _gan_doc_tiep_bl(ma: str, ds: list[dict]) -> None:
-    """Gắn vào video TikTok cào dở: `bl_het_goc` (sổ `KHOA_BL_TIKTOK`) và, khi gốc đã đọc hết,
-    `bl_goc_thieu` = các gốc trong kho còn thiếu trả lời (`lang_nghe_db.goc_thieu_tra_loi`). Kho
-    hỏng: không gắn gốc thiếu — video đọc lại từ đầu (không bỏ lượt)."""
+def _goc_can(x: dict, bay_gio: datetime.datetime) -> dict[str, str]:
+    """{cid gốc: iso} còn hạn `BL_GOC_CAN_NGAY` trong một mục sổ `KHOA_BL_TIKTOK`."""
+    ds = x.get("goc_can") if isinstance(x, dict) else None
+    han = bay_gio - datetime.timedelta(days=BL_GOC_CAN_NGAY)
+    return {str(c): str(luc) for c, luc in ds.items() if (_gio_iso(luc) or han) > han} \
+        if isinstance(ds, dict) else {}
+
+
+def _gan_doc_tiep_bl(ma: str, ds: list[dict],
+                     bay_gio: datetime.datetime | None = None) -> None:
+    """Gắn vào video TikTok cào dở: `bl_het_goc`, `bl_tu_dau` (sổ `KHOA_BL_TIKTOK`) và, khi gốc đã
+    đọc hết, `bl_goc_thieu` = các gốc trong kho còn thiếu trả lời (`lang_nghe_db.goc_thieu_tra_loi`)
+    trừ gốc đã hỏi mà không thêm được gì (`BL_GOC_CAN_NGAY`). Kho hỏng: không gắn gốc thiếu —
+    video đọc lại từ đầu (không bỏ lượt)."""
     do = [b for b in ds if _cao_do_tiktok(b)]
     if not do:
         return
+    bay_gio = bay_gio or datetime.datetime.now(_VN)
     so = doc_moc_tk(ma).get(KHOA_BL_TIKTOK) or {}
+    bo: list[str] = []
     for b in do:
-        b["bl_het_goc"] = bool((so.get(b["khoa"]) or {}).get("het_goc")) \
-            if isinstance(so.get(b["khoa"]), dict) else False
+        x = so.get(b["khoa"]) if isinstance(so.get(b["khoa"]), dict) else {}
+        b.pop("bl_goc_thieu", None)
+        b["bl_het_goc"] = bool(x.get("het_goc"))
+        b["bl_tu_dau"] = bool(x.get("tu_dau"))
+        if b["bl_het_goc"]:
+            bo += [f"{b['khoa']}\x1f{c}" for c in _goc_can(x, bay_gio)]
     het = [b["khoa"] for b in do if b["bl_het_goc"]]
     if not het:
         return
     try:
         # Cào hết: mỗi luồng tới 100 trả lời, một yêu cầu đọc tối đa `TRA_LOI_MOI_TRANG`.
-        goc = K.goc_thieu_tra_loi(ma, het, min(TDA.TT.TRA_LOI_MOI_TRANG, 100))
+        goc = K.goc_thieu_tra_loi(ma, het, min(TDA.TT.TRA_LOI_MOI_TRANG, 100), bo=bo)
     except K.LoiKho as e:
         print(f"[theo_doi] không đọc được gốc thiếu trả lời: {e}", flush=True)
         return
@@ -3750,11 +3773,13 @@ def _gan_doc_tiep_bl(ma: str, ds: list[dict]) -> None:
 def _ghi_so_bl_tiktok(ma: str, ph: dict, tiep: dict | None,
                       bay_gio: datetime.datetime | None = None) -> set[str]:
     """Sau một phần bình luận TikTok: ghi sổ `KHOA_BL_TIKTOK` theo `tiep` ({link: {"het_goc",
-    "rong"}}) và trả khoá bài mà lượt này KHÔNG tính là một lần thiếu (trang đọc tiếp rỗng — vị trí
-    sai của Mark, không phải bài hết bình luận). Không bao giờ ném."""
+    "rong", "tu_dau", "goc_can"}}) và trả khoá bài mà lượt này KHÔNG tính là một lần thiếu (trang
+    đọc tiếp rỗng — vị trí sai của Mark, không phải bài hết bình luận). Gốc "không thêm được trả
+    lời" của các lượt trước giữ tới hết `BL_GOC_CAN_NGAY` ngày. Không bao giờ ném."""
     if not tiep:
         return set()
     bay_gio = bay_gio or datetime.datetime.now(_VN)
+    luc = bay_gio.isoformat(timespec="seconds")
     theo_link = {b.get("link"): b.get("khoa") for b in ph.get("bai") or []}
     rong = {theo_link[u] for u, x in tiep.items() if x.get("rong") and theo_link.get(u)}
     try:
@@ -3763,9 +3788,14 @@ def _ghi_so_bl_tiktok(ma: str, ph: dict, tiep: dict | None,
         so = {k: x for k, x in so.items()
               if isinstance(x, dict) and (_gio_iso(x.get("luc")) or han) > han}
         for u, x in tiep.items():
-            if theo_link.get(u):
-                so[theo_link[u]] = {"het_goc": bool(x.get("het_goc")),
-                                    "luc": bay_gio.isoformat(timespec="seconds")}
+            k = theo_link.get(u)
+            if not k:
+                continue
+            can = {**_goc_can(so.get(k) or {}, bay_gio),
+                   **{str(c): luc for c in x.get("goc_can") or []}}
+            so[k] = {"het_goc": bool(x.get("het_goc")), "luc": luc,
+                     **({"tu_dau": True} if x.get("tu_dau") else {}),
+                     **({"goc_can": can} if can else {})}
         ghi_moc_tk(ma, {KHOA_BL_TIKTOK: so})
     except Exception as e:  # sổ hỏng: lượt sau đọc tiếp như cũ, gặp trang rỗng thì không tính
         if type(e).__name__ == "MatQuyen":

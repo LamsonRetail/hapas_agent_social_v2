@@ -54,9 +54,10 @@ def gan_binh_luan(ph: dict, urls: list[str], tra_loi: int,
                   tra_loi_cho: dict[str, list] | None = None) -> None:
     """Phần bình luận TikTok đi qua TikTok API (actor cũ của phần làm dự phòng). `bat_dau`
     (18/10/2026): {link: vị trí bình luận gốc đọc tiếp} cho video cào dở GIỮA các trang gốc;
-    `tra_loi_cho` {link: [[cid gốc, số trả lời báo], …]} cho video đã đọc hết gốc mà còn thiếu —
-    chỉ lấy trả lời của các gốc đó (`tiktok_api.binh_luan`). Dự phòng clockworks không đọc tiếp
-    được — chạy lại từ đầu như cũ."""
+    `tra_loi_cho` {link: [[cid gốc, số trả lời báo, số trả lời kho đã có], …]} cho video đã đọc
+    hết gốc mà còn thiếu — chỉ lấy trả lời của các gốc đó (`tiktok_api.binh_luan`; số kho đã có
+    để nhận ra gốc không thêm được trả lời nào, soát 18/10/2026). Dự phòng clockworks không đọc
+    tiếp được — chạy lại từ đầu như cũ."""
     if TT.dung_api("tiktok_binh_luan") and ph.get("actor"):
         ph["du_phong"] = {"actor": ph["actor"], "gia": _GIA_DU_PHONG["tiktok_binh_luan"]}
         ph.update(actor=TT.ACTOR, bo_chuyen="tiktok_binh_luan", urls=list(urls),
@@ -64,7 +65,7 @@ def gan_binh_luan(ph: dict, urls: list[str], tra_loi: int,
         if bat_dau:
             ph["bat_dau"] = {u: int(n) for u, n in bat_dau.items() if u in urls and int(n) > 0}
         if tra_loi_cho:
-            ph["tra_loi_cho"] = {u: [[str(c), int(n)] for c, n in ds]
+            ph["tra_loi_cho"] = {u: [[str(x[0]), *(int(n or 0) for n in x[1:3])] for x in ds]
                                  for u, ds in tra_loi_cho.items() if u in urls and ds}
         ph["du_phong"]["uoc_usd"] = can_du_phong_tt(ph, len(urls))
 
@@ -142,7 +143,7 @@ def chay(v, p: str, ph: dict, cap: float, han: float):
     loi = None
     usd_dp = 0.0
     loi_ra: list = []
-    tiep: dict = {}                  # bình luận: {link: {"het_goc", "rong"}} — `theo_doi` ghi sổ
+    tiep: dict = {}      # bình luận: {link: {"het_goc", "rong", …}} — `theo_doi` ghi sổ
     try:
         try:
             if ph["bo_chuyen"] == "tiktok_ho_so":

@@ -435,10 +435,12 @@ def binh_luan(urls: list[str], per: int, tra_loi: int = 20,
 
     Soát 18/10/2026 — video bị cắt GIỮA phần trả lời (gốc đã đọc hết, tổng vẫn dưới 80%): đọc
     tiếp từ vị trí gốc chỉ gặp trang rỗng, mỗi lượt 0 bình luận mới rồi video bị bỏ hẳn.
-    `tra_loi_cho` {link: [(cid gốc, số trả lời nền tảng báo), …]}: video đó KHÔNG đọc trang gốc,
-    chỉ lấy trả lời của các gốc đã có trong kho mà chưa đủ trả lời (`lang_nghe_db.
-    goc_thieu_tra_loi`). `trang_thai` (dict bên gọi đưa vào) nhận {link: {"het_goc": đã đọc tới
-    trang gốc cuối (has_more = 0 / trang không có gì mới), "rong": trang đọc tiếp đầu tiên rỗng}}."""
+    `tra_loi_cho` {link: [(cid gốc, số trả lời nền tảng báo[, số trả lời kho đã có]), …]}: video đó
+    KHÔNG đọc trang gốc, chỉ lấy trả lời của các gốc đã có trong kho mà chưa đủ trả lời
+    (`lang_nghe_db.goc_thieu_tra_loi`). `trang_thai` (dict bên gọi đưa vào) nhận {link:
+    {"het_goc": đã đọc tới trang gốc cuối (has_more = 0 / trang không có gì mới), "rong": trang
+    đọc tiếp đầu tiên rỗng}}; video đi nhánh trả lời thì thêm "tu_dau" và "goc_can"
+    (`_tra_loi_kho`)."""
     ngan = _Ngan(tran_usd)
     tu = bat_dau or {}
     cho = tra_loi_cho or {}
@@ -456,15 +458,25 @@ def binh_luan(urls: list[str], per: int, tra_loi: int = 20,
 
 def _tra_loi_kho(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan, goc: list,
                  loi_ra: list | None = None, trang_thai: dict | None = None) -> list[dict]:
-    """Trả lời của các gốc ĐÃ có trong kho (`goc` = [(cid, số trả lời báo), …], thiếu nhiều trước),
-    1 yêu cầu mỗi gốc, tới khi đủ `per` dòng. Không đọc trang gốc nào."""
+    """Trả lời của các gốc ĐÃ có trong kho (`goc` = [(cid, số trả lời báo[, số trả lời kho đã
+    có]), …], thiếu nhiều trước), 1 yêu cầu mỗi gốc, tới khi đủ `per` dòng. Không đọc trang gốc.
+
+    Soát 18/10/2026 (MEDIUM): gốc mà TikTok báo nhiều trả lời hơn số API trả (trả lời bị ẩn / xoá)
+    không bao giờ hết "thiếu"; nhánh này không đọc trang gốc nên số báo trong kho cũng không được
+    cập nhật — bản cũ ghi "het_goc" mãi, video cào dở đi nhánh trả lời mọi lượt (tới 200 gốc ×
+    0,002 = 0,40 USD/video/lượt) và bình luận GỐC mới bị sót tới hết cửa sổ 35 ngày. Nay
+    `trang_thai[url]` ghi "het_goc" = False + "tu_dau": lượt sau đọc trang gốc TỪ ĐẦU (gốc mới,
+    số trả lời mới); "goc_can" = gốc đã hỏi mà API trả KHÔNG nhiều hơn số kho đã có (không thêm
+    được trả lời nào) — bên gọi ghi sổ để bỏ qua gốc đó ở các lượt sau."""
     ra: list[dict] = []
     thay: set[str] = set()
-    for cid, _bao in goc:
+    can: list[str] = []
+    for x in goc:
+        cid, da_co = str(x[0]), (int(x[2] or 0) if len(x) > 2 else 0)
         if len(ra) >= per:
             break
         try:
-            it = _goi({"commentReplies_commentId": str(cid), "commentReplies_awemeId": vid,
+            it = _goi({"commentReplies_commentId": cid, "commentReplies_awemeId": vid,
                        "commentReplies_count": min(TRA_LOI_MOI_TRANG, max(1, tra_loi))}, ngan)
         except A.LoiApify as e:
             if e.ma in _DUNG_HAN:
@@ -474,15 +486,19 @@ def _tra_loi_kho(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan, goc: l
             break
         if it is None:
             break
-        for r in (it.get("comments") or [])[:max(1, tra_loi)]:
-            if isinstance(r, dict) and r.get("cid") and str(r["cid"]) not in thay \
-                    and len(ra) < per:
+        tra = [r for r in (it.get("comments") or [])[:max(1, tra_loi)]
+               if isinstance(r, dict) and r.get("cid")]
+        if len({str(r["cid"]) for r in tra}) <= da_co:
+            can.append(cid)
+        for r in tra:
+            if str(r["cid"]) not in thay and len(ra) < per:
                 thay.add(str(r["cid"]))
                 d = binh_luan_dong(r, url)
-                d["repliesToId"] = d["repliesToId"] or str(cid)
+                d["repliesToId"] = d["repliesToId"] or cid
                 ra.append(d)
     if trang_thai is not None:
-        trang_thai[url] = {"het_goc": True, "rong": False, "tra_loi_kho": len(goc)}
+        trang_thai[url] = {"het_goc": False, "tu_dau": True, "rong": False,
+                           "tra_loi_kho": len(goc), "goc_can": can}
     return ra
 
 
