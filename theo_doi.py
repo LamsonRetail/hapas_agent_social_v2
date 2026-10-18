@@ -1289,7 +1289,8 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
 # từ khoá actor lấy ≥ 10 bài nên lượt chỉ tìm `so_bai // 10` từ ĐẦU (≥ 1) — tổng bài ≤ số bài đặt,
 # ước tính (n × giá + phí khởi động) × 1,3 như nền tảng khác (`_tu_cho`). Từ 17/10/2026 thêm ĐƯỜNG 2
 # (`_FETCH["threads_2"]`, scrapersdelight, `_tim_threads_2`): chạy trước đường 1, mọi từ khoá,
-# phễu + mốc + tiền riêng, gộp bài và bỏ trùng theo mã bài (`_bo_trung_duong_2`).
+# phễu + mốc + tiền riêng, gộp bài và bỏ trùng theo mã bài (`_bo_trung_duong_2`). Từ 18/10/2026
+# đường 1 chỉ nhận từ khoá MỘT chữ có tên brand (`tu_threads_duong1`): cụm nhiều chữ chỉ đi đường 2.
 TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram", "threads", "web")
 #: Threads = `apify_tool._UNIT_COST` / `_START_COST` (4 GB × 0,02 USD, gói FREE).
 # TikTok từ 16/10/2026: TikTok API, tính theo YÊU CẦU (0,002 USD = giá thật từng run, đo lại
@@ -1691,6 +1692,94 @@ def tu_nen_tang(du_an: dict, p: str, tu: list[str]) -> list[str]:
     return [x for x in tu if _khoa_bo_tu(x) not in bo] if bo else list(tu)
 
 
+# ───────────── Từ khoá ĐƯỜNG 1 Threads (futurizerush) — 18/10/2026 ─────────────
+# Đo thật 18/10/2026: futurizerush~meta-threads-scraper tìm cụm NHIỀU chữ theo kiểu HOẶC từng chữ
+# ("túi hapas" ra bài chỉ có chữ "túi") — một run chỉ 4/88 bài liên quan mà vẫn trả 0,0025 USD/bài
+# + 0,08 phí khởi động. Chỉ "hapas" thì mỗi khung ngày chạm ~30–36 bài liên quan. Đường 2
+# (scrapersdelight, 0,001 USD/bài, không phí khởi động) khớp cụm đúng hơn và vẫn nhận MỌI từ khoá.
+# Nên đường 1 chỉ nhận từ khoá MỘT chữ có tên brand; cụm nhiều chữ chỉ gửi đường 2.
+# Ghi đè: `du_an.cau_hinh.tu_khoa.threads.duong1_tu` = danh sách từ khoá đường 1 (thay luật trên,
+# vẫn bỏ `bo_tu` của Threads). Sửa bằng jsonb_set như các khoá Nâng cao khác, vd:
+#   sudo -u postgres psql -d lang_nghe -c "UPDATE du_an SET cau_hinh = jsonb_set(cau_hinh,
+#     '{tu_khoa,threads,duong1_tu}', '[\"hapas\", \"hapasvn\"]'::jsonb) WHERE ma = 'hapas'"
+# (lưu trang Ngân sách giữ nguyên khoá này — khối tu_khoa.threads bắt đầu từ bản đang lưu).
+def _mot_chu_co_brand(kw: str, ten: list[str]) -> bool:
+    """`kw` là từ khoá MỘT chữ (không dấu cách sau khi bỏ '#') mà dạng viết liền (bỏ dấu, chỉ a-z0-9,
+    `_khoa_tag`) chứa một tên brand viết liền: với tên HAPAS thì "hapas", "#HAPAS", "hapas.vn",
+    "hapasvn", "quatanghapas" có; "túi hapas" (hai chữ), "yeutudieunhonhat" không. Tên ≤ 3 ký tự
+    ("PNJ") phải đứng ĐẦU từ như luật hashtag của `apify_tool._khop_mot_tu` ("pnj30nam" có)."""
+    if not A.tu_mot_chu(kw):
+        return False
+    k = _khoa_tag(kw)
+    for t in ten:
+        b = _khoa_tag(t)
+        if b and (b in k if len(b) > 3 else k.startswith(b)):
+            return True
+    return False
+
+
+def duong1_tu(du_an: dict) -> list[str] | None:
+    """Danh sách ghi đè `du_an.cau_hinh.tu_khoa.threads.duong1_tu` (chuẩn: bỏ mục không phải chữ /
+    rỗng, gộp khoảng trắng, bỏ trùng không dấu) — None khi thiếu hoặc không phải danh sách."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    nh = goc.get("tu_khoa") if isinstance(goc.get("tu_khoa"), dict) else {}
+    th = nh.get("threads") if isinstance(nh.get("threads"), dict) else {}
+    x = th.get("duong1_tu")
+    if not isinstance(x, list):
+        return None
+    ra: list[str] = []
+    for s in x:
+        s = " ".join(s.split()) if isinstance(s, str) else ""
+        if s and A._norm(s) not in {A._norm(y) for y in ra}:
+            ra.append(s)
+    return ra
+
+
+def tu_threads_duong1(du_an: dict, tu: list[str]) -> tuple[list[str], str]:
+    """Từ khoá ĐƯỜNG 1 Threads (futurizerush) từ `tu` = từ khoá TÌM của Threads (đã bỏ `bo_tu`).
+    -> (từ khoá, lý do cho phễu). Có `duong1_tu` thì dùng danh sách đó (bỏ `bo_tu`); không thì
+    chỉ từ MỘT chữ có tên brand (`_mot_chu_co_brand`; brand = tên + mã dự án + `ten` của
+    `hashtag_can_nhac_brand` — `cau_hinh_hashtag_brand`, như cổng brand và miễn seeding). Rỗng sau
+    khi lọc thì tìm tên brand (tên một chữ đầu tiên, không có thì tên viết liền). Tối đa
+    `TK_TOI_DA_TU`; `_tu_cho` cắt tiếp theo số bài."""
+    ten = cau_hinh_hashtag_brand(du_an)["ten"]
+    rieng = duong1_tu(du_an)
+    if rieng is not None:
+        ra, ly = tu_nen_tang(du_an, "threads", rieng), "theo cấu hình duong1_tu"
+    else:
+        ra, ly = [kw for kw in tu if _mot_chu_co_brand(kw, ten)], "từ một chữ có tên brand"
+    if not ra and ten:
+        ra = [next((t for t in ten if A.tu_mot_chu(t)), "") or _khoa_tag(ten[0])]
+        ly = ("duong1_tu rỗng" if rieng is not None else "không có từ một chữ có tên brand") \
+            + " — tìm tên brand"
+    # Bỏ trùng như actor nhận ("#HAPAS" = "hapas" — `apify_tool._bo_trung_tu_khoa`), để `_tu_cho`
+    # không tốn một suất `so_bai // 10` cho bản trùng.
+    da: set[str] = set()
+    gon = []
+    for x in ra:
+        k = _khoa_tu_th(x)
+        if x and k not in da:
+            da.add(k)
+            gon.append(x)
+    return gon[:TK_TOI_DA_TU], ly
+
+
+def _khoa_tu_th(x) -> str:
+    """Khoá bỏ trùng từ khoá Threads như actor nhận (`apify_tool._bo_trung_tu_khoa`)."""
+    return " ".join(A._tokens(str(x or ""))) or str(x or "").lower()
+
+
+def _chi_duong_2(tu_p: list[str], tu_1: list[str]) -> list[str]:
+    """Từ khoá TÌM của Threads không đi đường 1 (chỉ đường 2 nhận) — cho phễu."""
+    co = {_khoa_tu_th(x) for x in tu_1}
+    return [x for x in tu_p if _khoa_tu_th(x) not in co]
+
+
+def _tu_threads_1(du_an: dict, tu_p: list[str]) -> list[str]:
+    """Từ khoá đường 1 Threads cho ước tính — như lượt chạy: không có từ khoá TÌM nào thì rỗng."""
+    return tu_threads_duong1(du_an, tu_p)[0] if tu_p else []
+
+
 def tag_cua(du_an: dict, p: str, tu: list[str]) -> list[str]:
     """Đầu vào hashtag của đường tìm theo hashtag của nền tảng `p` (Instagram, feed hashtag TikTok):
     `nguon_tag` trên từ khoá ĐÃ bỏ `bo_tu`, rồi bỏ hashtag trùng một mục MỘT chữ của `bo_tu` ("#quatang2010",
@@ -1806,8 +1895,12 @@ def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA,
         if c["bat"] and p == "web":
             tong += uoc_web(c["so_bai"], tu_p, c["boc"])
         elif c["bat"]:
+            # Threads đường 1 (18/10/2026): chỉ từ một chữ có tên brand (`tu_threads_duong1`) —
+            # cùng danh sách lượt chạy gửi futurizerush, nên sản lượng lượt trước (`ve_tu`) khớp.
             tong += uoc_tu_khoa_nen_tang(p, c["so_bai"],
-                                         tag_cua(du_an, p, tu) if p == "instagram" else tu_p,
+                                         tag_cua(du_an, p, tu) if p == "instagram"
+                                         else _tu_threads_1(du_an, tu_p) if p == "threads"
+                                         else tu_p,
                                          c["so_tu"], fb_toi_da,
                                          moc=m.get(p) if p == "threads" else None)
         if p == "facebook" and c["duong2"]["bat"]:
@@ -1837,8 +1930,8 @@ def uoc_threads_1(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA, moc: dict | None =
         return 0.0
     m = (moc or {}).get("threads") if isinstance(moc, dict) else None
     return uoc_tu_khoa_nen_tang("threads", c["so_bai"],
-                                tu_nen_tang(du_an, "threads", tu_tim(du_an)), c["so_tu"],
-                                fb_toi_da, moc=m if isinstance(m, dict) else {})
+                                _tu_threads_1(du_an, tu_nen_tang(du_an, "threads", tu_tim(du_an))),
+                                c["so_tu"], fb_toi_da, moc=m if isinstance(m, dict) else {})
 
 
 def giu_cho_tu_khoa(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA, moc: dict | None = None) -> float:
@@ -2032,7 +2125,11 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             if bo_p:
                 tk["ghi_chu"].append(f"tìm {_TEN[p]}: không tìm {len(bo_p)} từ khoá theo cấu hình "
                                      f"({', '.join(bo_p)[:80]})")
-            q = _tu_cho(p, tag_p if p == "instagram" else tu_p, cfg[p]["so_tu"], so_bai)
+            # Từ khoá của ĐƯỜNG CHÍNH. Threads (18/10/2026): đường 1 futurizerush chỉ nhận từ một
+            # chữ có tên brand (`tu_threads_duong1`); đường 2 vẫn nhận mọi từ khoá `tu_p`.
+            tu_1, ly_1 = (tu_threads_duong1(du_an, tu_p) if p == "threads" and tu_p
+                          else (tu_p, ""))
+            q = _tu_cho(p, tag_p if p == "instagram" else tu_1, cfg[p]["so_tu"], so_bai)
             if not q:
                 continue
             if p in co_run:
@@ -2074,7 +2171,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             moc_th = (moc_cu.get(p) if isinstance(moc_cu.get(p), dict) else {}) \
                 if p == "threads" else None
             uoc = (uoc_web(so_bai, tu_p, cfg[p]["boc"]) if p == "web"
-                   else uoc_tu_khoa_nen_tang(p, so_bai, tag_p if p == "instagram" else tu_p,
+                   else uoc_tu_khoa_nen_tang(p, so_bai, tag_p if p == "instagram" else tu_1,
                                              cfg[p]["so_tu"], fb_toi_da, moc=moc_th))
             if p == "web":
                 # Trần trang dự phòng là TRẦN, không phải tiền chắc tiêu: chỉ cần đủ cho phần
@@ -2086,20 +2183,20 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # nó; đường 1 (phí khởi động 0,08) co về số từ khoá ĐẦU vừa phần còn lại — từ khoá
                 # đứng đầu là từ chính của dự án ("hapas"), cũng là từ ra bài nhiều nhất. Ước tính
                 # theo sản lượng nên từ khoá về 0 bài lượt trước không làm co oan.
-                co = _co_threads(tu_p, so_bai, min(con, _con_viec(v)), moc_th)
+                co = _co_threads(tu_1, so_bai, min(con, _con_viec(v)), moc_th)
                 if co:
                     q, so_bai, uoc = co
                     tk["ghi_chu"].append(
-                        f"tìm Threads: ngân sách còn {_usd(min(con, _con_viec(v)))} USD — co còn "
-                        f"{len(q)}/{len(tu_p)} từ khoá đầu × {TH_TOI_THIEU_BAI} bài (ước tính "
-                        f"{_usd(uoc)} USD)")
-            if p == "threads" and not co and len(q) < min(len(tu_p), TH_TOI_DA_MOI_LUOT) \
+                        f"tìm Threads đường 1: ngân sách còn {_usd(min(con, _con_viec(v)))} USD — "
+                        f"co còn {len(q)}/{len(tu_1)} từ khoá đầu × {TH_TOI_THIEU_BAI} bài (ước "
+                        f"tính {_usd(uoc)} USD)")
+            if p == "threads" and not co and len(q) < min(len(tu_1), TH_TOI_DA_MOI_LUOT) \
                     and uoc <= min(con, _con_viec(v)) + 1e-9:
                 # MỘT câu về số từ khoá Threads (câu co ngân sách ở trên thay câu này).
                 tk["ghi_chu"].append(
-                    f"tìm Threads: {len(q)}/{len(tu_p)} từ khoá đầu ({', '.join(q)[:80]}) — actor "
-                    f"lấy ≥ {TH_TOI_THIEU_BAI} bài mỗi từ; đặt số bài Threads ≥ "
-                    f"{TH_TOI_THIEU_BAI * min(len(tu_p), TH_TOI_DA_MOI_LUOT)} để tìm đủ")
+                    f"tìm Threads đường 1: {len(q)}/{len(tu_1)} từ khoá đầu ({', '.join(q)[:80]}) "
+                    f"— actor lấy ≥ {TH_TOI_THIEU_BAI} bài mỗi từ; đặt số bài Threads ≥ "
+                    f"{TH_TOI_THIEU_BAI * min(len(tu_1), TH_TOI_DA_MOI_LUOT)} để tìm đủ")
             if uoc > min(con, _con_viec(v)) + 1e-9 or v.con_giay() < _CHUA_GIAY_CUOI + 60:
                 het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
                 _bo_qua_tk(v, tk, p, "QUA_GIO" if het_gio else "NGAN_SACH",
@@ -2193,10 +2290,14 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # nói lý do) chứ không phải "về 0" — mã nặng nhất thắng như `_tong_hop_nguon`.
                 x = max(loi_tu, key=lambda m: A._DO_NANG.get(m.get("ma"), 0))
                 ma_loi, loi = _loi_tim(x.get("ma") or "LOI", str(x.get("ly_do") or ""))
+            # Threads (18/10/2026): phễu ghi đường 1 dùng từ nào, vì sao, cụm nào chỉ gửi đường 2.
+            duong1 = ({"tu": list(q_gui), "ly_do": ly_1, "chi_duong2": _chi_duong_2(tu_p, tu_1)}
+                      if p == "threads" else None)
             if loi is not None:
                 tk["ghi_chu"].append(f"tìm {_TEN[p]}: {loi}")
                 # Sổ việc (`pheu_tu_khoa`) giữ lý do như phễu bỏ qua; `_cau_tk` không lặp dòng.
-                tk["pheu"][p] = {**_pheu_moi(ngay, ly_cs), "loi": loi, "ma_loi": ma_loi}
+                tk["pheu"][p] = {**_pheu_moi(ngay, ly_cs), "loi": loi, "ma_loi": ma_loi,
+                                 **({"duong1": duong1} if duong1 else {})}
             # Threads: phí khởi động 0,08 USD mất cả khi actor trả 0 bài — vẫn trừ vào phần còn.
             co_khoi = bool(got) or (p == "threads" and loi is None)
             tien = round(len(got) * _TK_GIA.get(p, 0.0)
@@ -2230,6 +2331,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 ph_p["xin_ly_do"] = (f"{ly_xin}; ước tính {_usd(uoc)} USD, " + san_luong_du_kien(
                     q, max(TH_TOI_THIEU_BAI, so_bai // len(q)), moc_th,
                     max(so_bai, TH_TOI_THIEU_BAI))[1])
+                ph_p["duong1"] = duong1
                 _bo_trung_duong_2(hits, got, tk)
             if loi_tu:
                 # Có bài nhưng vài từ khoá hỏng: phễu nói từ nào, vì sao (mã → nhãn ngắn).
@@ -4038,7 +4140,8 @@ def _cau_pheu(p: str, f: dict) -> str:
     ly = ", ".join(f"{A._MA_AI.get(k, k)} {n}"
                    for k, n in sorted(ai.items(), key=lambda kv: (-kv[1], kv[0])))
     return (f"phễu tìm {_TEN.get(p, p)} (xin {f.get('ngay', 0)} ngày, {f.get('ly_do') or '?'}"
-            + (f"; {f['xin_ly_do']}" if f.get("xin_ly_do") else "") + "): "
+            + (f"; {f['xin_ly_do']}" if f.get("xin_ly_do") else "")
+            + _cau_duong_1(f.get("duong1")) + "): "
             f"về {f.get('ve', 0)} → trong phạm vi {f.get('pham_vi', 0)} (ngoài phạm vi "
             f"{f.get('ngoai_pham_vi', 0)}) → cập nhật {f.get('cap_nhat', 0)} bài đã có; bài mới: "
             + (f"đã loại trước {f['da_loai_truoc']}, " if f.get("da_loai_truoc") else "")
@@ -4060,6 +4163,18 @@ def _cau_pheu(p: str, f: dict) -> str:
             + _cau_noi(f.get("noi"))
             + _cau_tag(f.get("tag_feed"))
             + _cau_web(f.get("web")))
+
+
+def _cau_duong_1(d) -> str:
+    """Phần "đường 1 dùng từ nào" của phễu Threads (18/10/2026, `tu_threads_duong1`): từ khoá gửi
+    futurizerush, vì sao, và cụm chỉ gửi đường 2 (scrapersdelight)."""
+    if not isinstance(d, dict) or not d.get("tu"):
+        return ""
+    def ds(xs) -> str:
+        return ", ".join(f"'{x}'" for x in xs)[:100]
+    chi2 = d.get("chi_duong2") or []
+    return (f"; đường 1 futurizerush tìm {ds(d['tu'])} ({d.get('ly_do') or '?'}"
+            + (f"; {len(chi2)} từ khoá chỉ gửi đường 2: {ds(chi2)}" if chi2 else "") + ")")
 
 
 def _cau_duong(d) -> str:
@@ -4466,7 +4581,14 @@ def _tao_phan_bl(v, p: str, lo: list[dict], per: int) -> dict:
 def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
     """Lập MỌI phần bình luận rồi lưu sổ một lần — bot tắt giữa chừng thì hoặc chưa có phần
     nào (lần sau chọn lại), hoặc có đủ (không lặng lẽ bỏ nền tảng còn lại). `per_cfg`: số
-    bình luận mỗi bài (0 = cào hết) — một số chung, hoặc {nền tảng: số}."""
+    bình luận mỗi bài (0 = cào hết) — một số chung, hoặc {nền tảng: số}.
+
+    Thứ tự phần trong sổ = thứ tự CHẠY (soát 18/10/2026, lượt 17): xếp TOÀN CỤC giữa mọi nền
+    tảng theo bài ưu tiên nhất của lô (`_uu_tien_bl` — chưa cào trước, rồi thiếu nhiều nhất);
+    bằng nhau thì giữ thứ tự `BL_NEN_TANG`. Trước đây phần nối theo nền tảng: ghi chú báo "ưu tiên
+    Threads 966, Facebook 868, Threads 418" mà các lô Facebook chạy trước, tiêu 1,81 USD, mười
+    phần Threads sau đó đều "bỏ qua (trần còn 0,02 USD)" — Threads chưa từng được cào bình luận
+    trong lượt thường. Thứ tự nằm trong sổ việc nên bot khởi động lại đọc tiếp đúng thứ tự đó."""
     import deep_dive_tool as D
     cac = []
     for p in BL_NEN_TANG:
@@ -4483,12 +4605,15 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
             uoc = round((sum(can) * gia + _BL_KHOI_DONG.get(p, 0.0)
                          + D._GIA_MOI_BAI.get(p, 0.0) * len(lo)     # Threads: dòng bài gốc
                          + (_BL_FB_LOC_NGAY * len(lo) if moc is not None else 0.0)) * _HE_SO_UOC, 4)
-            ph = {"id": f"bl-{p}-{len(_phan_bl(v)) + len(cac)}", "nen_tang": p, "trang_thai": "cho",
+            dau = min(_uu_tien_bl(b) for b in lo)          # bài ưu tiên nhất của lô
+            ph = {"id": "", "nen_tang": p, "trang_thai": "cho",     # id: sau khi sắp
                   "bai": [{k: b.get(k) for k in ("khoa", "link", "nen_tang", "tai_khoan",
                                                  "tac_gia", "binh_luan", "nguon_loai")}
                           for b in lo],
                   "per": per_lo, "gia": gia, "uoc_usd": uoc if gia else 0.0,
-                  "day_du": day_du, "tang_dan": moc is not None}
+                  "day_du": day_du, "tang_dan": moc is not None,
+                  # Khoá xếp lô (`_uu_tien_bl` của bài đầu lô) — sổ giữ để phễu nói đúng lý do.
+                  "chua_cao": not dau[0], "thieu": max(0, -dau[1])}
             if p != "youtube":
                 ph.update(actor=D._ACTORS[p], payload=_payload_bl(p, urls, per_lo, day_du, moc),
                           limit=D._limit(p, urls, per_lo))
@@ -4501,8 +4626,13 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
                                   {b["link"]: b["bl_goc_thieu"] for b in lo
                                    if b.get("bl_goc_thieu")} if day_du else None)
             cac.append(ph)
+    # Sắp ổn định: cùng khoá thì giữ thứ tự nền tảng (`BL_NEN_TANG`) và thứ tự lô trong nền tảng.
+    cac.sort(key=lambda x: (not x["chua_cao"], -x["thieu"]))
     if cac:
         with v._khoa:
+            co = len(_phan_bl(v))
+            for i, ph in enumerate(cac):
+                ph["id"] = f"bl-{ph['nen_tang']}-{co + i}"
             _phan_bl(v).extend(cac)
             v.luu()
 
@@ -4603,11 +4733,20 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         _gan_doc_tiep_bl(ma, ds)
         _tao_cac_phan_bl(v, ds, {p: c["moi_bai"] for p, c in cfg.items()})
         tk["ghi_chu"] += _cau_uu_tien_bl(ds)
+    vi_tri_cau = len(tk["ghi_chu"])        # câu thứ tự chạy đứng ngay sau câu ưu tiên
     cac_ph = list(_phan_bl(v))
-    for i, ph in enumerate(cac_ph):
+    # Thứ tự chạy = thứ tự trong sổ (ưu tiên toàn cục, `_tao_cac_phan_bl`), trừ phần đang dở và
+    # phần được kéo lên vì sàn công bằng (`_chon_phan_bl`). Mỗi phần xét đúng MỘT lần: việc đã kết
+    # thúc thì `cap_nhat_phan` không đổi trạng thái, vòng lặp không được quay lại phần đó mãi.
+    xet: set[int] = set()
+    da_chay: list[str] = []
+    while True:
+        cho = [x for x in cac_ph if id(x) not in xet and x.get("trang_thai") not in _KET_PHAN]
+        if not cho:
+            break
+        ph, keo = _chon_phan_bl(cac_ph, cho, min(con, _con_viec(v)))
+        xet.add(id(ph))
         p = ph["nen_tang"]
-        if ph.get("trang_thai") in _KET_PHAN:
-            continue
         bai = ph["bai"]
         tk["bai"] += len(bai)
         rows: list[dict] = []
@@ -4621,6 +4760,7 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             v.cap_nhat_phan(ph, trang_thai="xong" if not kq["loi"] else "mot_phan",
                             ma="OK" if not kq["loi"] else "LOI", so_item=len(rows), usd_so=0.0,
                             ly_do=kq["loi"][:200])
+            da_chay.append(_nhan_lo_bl(ph))
             continue
         dang_do = ph.get("trang_thai") in ("dang_gui", "dang_chay")
         min_charge = float(D._MIN_CHARGE.get(p, 0.0))
@@ -4628,11 +4768,11 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             cap = float(ph.get("tran_usd") or 0) or _TRAN_TOI_THIEU
         else:
             tran_console = A._tran_nen_tang(p, nen=True)[1]
-            sau = sum(float(x.get("uoc_usd") or 0) for x in cac_ph[i + 1:]
-                      if x.get("trang_thai") not in _KET_PHAN)
+            sau = sum(float(x.get("uoc_usd") or 0) for x in cho if x is not ph)
             # `giu_cho_phan` (soát 18/10/2026): lô TikTok qua TikTok API chừa chỗ cho dự phòng
             # clockworks 0,00125 USD/bình luận (gấp ~3 giá API) — như phần theo dõi nguồn.
-            cap = _tran_lo_bl(tran_console, con, _con_viec(v), sau, giu_cho_phan(ph), min_charge)
+            cap = _tran_lo_bl(tran_console, con, _con_viec(v), sau, giu_cho_phan(ph), min_charge,
+                              sum(_san_bl(cac_ph, cho, p).values()))
             het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
             if cap < max(min_charge, _TRAN_TOI_THIEU) - 1e-9 or het_gio:
                 ly = ("hết giờ" if het_gio else
@@ -4642,6 +4782,7 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0, usd_so=0.0,
                                 ly_do=ly)
                 continue
+        da_chay.append(_nhan_lo_bl(ph) + (" (kéo lên: sàn công bằng)" if keo else ""))
         items, meta, loi, khong_kiem = _chay_actor(v, p, ph, cap, han, min_charge)
         if khong_kiem is not None:
             v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
@@ -4668,22 +4809,111 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         _ghi_bl_kho(ma, luot, ph, rows, thuong_hieu, han, tk,
                     day_du=loi is None and meta.get("ma", "OK") == "OK", khong_tinh_thieu=rong)
         quet_lon._ket_phan(v, ph, meta, len(items), loi, usd_so=tien)
+    cau = _cau_thu_tu_bl(da_chay)
+    if cau:
+        tk["ghi_chu"].insert(vi_tri_cau, cau)
     tk["usd"] = round(tk["usd"], 4)
     return tk
 
 
+def _can_lo_bl(p: str) -> float:
+    """USD tối thiểu một lô bình luận của nền tảng `p` cần để được gửi: mức actor đòi, không dưới
+    sàn 0,1 USD mà `_run_actor` kẹp trần."""
+    import deep_dive_tool as D
+    return max(_TRAN_TOI_THIEU, float(D._MIN_CHARGE.get(p, 0.0)))
+
+
+def _san_bl(cac_ph: list[dict], cho: list[dict], p: str) -> dict[str, float]:
+    """Sàn công bằng của bước bình luận (18/10/2026): {nền tảng: USD giữ} cho mỗi nền tảng TRẢ
+    TIỀN khác `p` còn phần chờ (`cho`) mà CHƯA phần nào của nó được xét trong việc (mọi phần còn
+    "cho") và trần console của nó đủ một lô — theo thứ tự lô đầu của nó trong sổ (ưu tiên cao
+    trước). Mức giữ = đúng mức một lô cần để được gửi (`_can_lo_bl`).
+
+    Vì sao sàn theo NỀN TẢNG mà không chỉ luật giữ 50% cho các lô sau (`BL_GIU_CHO_SAU`): mỗi lô
+    lấy tới nửa phần còn, nên sau k lô của cùng một nền tảng phần còn chỉ ~P/2^k — đủ lô của nền
+    tảng có bài ưu tiên cao là nền tảng xếp sau hết tiền (lượt 17: Threads còn 0,02 USD). Vì sao
+    giữ đúng mức tối thiểu mà không chia đều ngân sách theo nền tảng: chia đều làm lô ưu tiên cao
+    đói tiền vì nền tảng có ít bài đáng cào; luật 50% vẫn giữ phần lớn hơn cho các lô sau như cũ,
+    sàn chỉ bảo đảm mỗi nền tảng đang bật được chạy ít nhất một lô khi còn đủ tiền."""
+    da_co = {x.get("nen_tang") for x in cac_ph if x.get("trang_thai") != "cho"}
+    ra: dict[str, float] = {}
+    for x in cho:
+        q = x.get("nen_tang")
+        if q == p or q in ra or q in da_co or not float(x.get("gia") or 0):
+            continue
+        can = _can_lo_bl(q)
+        if A._tran_nen_tang(q, nen=True)[1] + 1e-9 >= can:
+            ra[q] = can
+    return ra
+
+
+def _chon_phan_bl(cac_ph: list[dict], cho: list[dict], con_p: float) -> tuple[dict, str | None]:
+    """Phần bình luận chạy TIẾP và nền tảng được kéo lên vì sàn công bằng (None: không kéo).
+
+    Phần đang dở (bot khởi động lại giữa run) trước — đã gửi Apify, chỉ đọc tiếp. Rồi phần đầu
+    `cho` (thứ tự ưu tiên toàn cục trong sổ). Riêng lô của nền tảng ĐÃ có phần được xét mà phần còn
+    `con_p` = min(tháng, việc) trừ sàn của các nền tảng chưa có lượt (`_san_bl`) không đủ một lô
+    của nó: lô đó NHƯỜNG — chạy trước lô đầu của nền tảng chưa có lượt có ưu tiên cao nhất, rồi
+    quay lại xét lô đó với phần còn lại. Lô đầu của một nền tảng không bao giờ nhường (sàn chỉ cắt
+    trần của nó xuống mức nó cần — `_tran_lo_bl`), nên mỗi vòng kết thúc ĐÚNG một phần và vòng
+    lặp luôn dừng. Ước tính đổi theo tiền đã tiêu nằm trong sổ, nên khởi động lại xét lại y vậy."""
+    dang = next((x for x in cho if x.get("trang_thai") in ("dang_gui", "dang_chay")), None)
+    if dang is not None:
+        return dang, None
+    ph = cho[0]
+    p = ph.get("nen_tang")
+    if not float(ph.get("gia") or 0):
+        return ph, None
+    san = _san_bl(cac_ph, cho, p)
+    da_luot = any(x.get("nen_tang") == p and x.get("trang_thai") != "cho" for x in cac_ph)
+    if san and da_luot and con_p - sum(san.values()) < _can_lo_bl(p) - 1e-9:
+        q = next(iter(san))
+        return next(x for x in cho if x.get("nen_tang") == q), q
+    return ph, None
+
+
+def _nhan_lo_bl(ph: dict) -> str:
+    """Nhãn một lô trong câu thứ tự chạy: nền tảng + số bình luận còn thiếu của bài đầu lô."""
+    n = ph.get("thieu")
+    if n is None:                                     # phần lập trước 18/10/2026
+        n = max((int(b.get("binh_luan") or 0) for b in ph.get("bai") or []), default=0)
+    p = ph.get("nen_tang")
+    return f"{_TEN.get(p, p)} {int(n):,}".replace(",", ".")
+
+
+#: Câu thứ tự chạy liệt kê tối đa chừng này lô (ghi chú lượt có trần `K.GHI_CHU_TOI_DA`).
+BL_THU_TU_TOI_DA = 6
+
+
+def _cau_thu_tu_bl(da_chay: list[str]) -> str:
+    """Câu phễu: các lô bình luận ĐÃ gửi actor / API theo đúng thứ tự đã chạy (≥ 2 lô)."""
+    if len(da_chay) < 2:
+        return ""
+    du = da_chay[:BL_THU_TU_TOI_DA]
+    them = len(da_chay) - len(du)
+    return ("bình luận: thứ tự chạy " + " → ".join(du)
+            + (f" → … (+{them} lô)" if them else ""))
+
+
 def _tran_lo_bl(tran_console: float, con: float, con_v: float, sau: float, uoc: float,
-                min_charge: float = 0.0) -> float:
+                min_charge: float = 0.0, san: float = 0.0) -> float:
     """Trần USD một lô bình luận = min(trần console, phần còn P = min(tháng, việc) trừ phần giữ
     cho các lô SAU (`sau` = Σ ước tính lô sau, tối đa `BL_GIU_CHO_SAU` × P), ước tính × 1,5). Vì
     sao giữ chỗ (18/10/2026): lô bài to đứng đầu theo ưu tiên (`_uu_tien_bl`) mà lấy hết phần còn
     thì các bài sau lại đói như cũ; phần bài to chưa cào được lượt sau đọc tiếp. Soát 18/10/2026:
     phần giữ tính trên min(tháng, việc) — tính trên riêng việc thì khi tháng còn ít hơn việc, lô
-    đầu vẫn lấy hết phần còn của tháng."""
+    đầu vẫn lấy hết phần còn của tháng.
+
+    `san` (18/10/2026, `_san_bl`): tổng sàn giữ cho các nền tảng chưa có lượt — trần không vượt
+    P − `san`, nhưng không bị cắt dưới mức lô này cần để được gửi (lô nào phải nhường thì
+    `_chon_phan_bl` quyết, không phải hàm này)."""
     p = min(con, con_v)
-    return round(min(tran_console, p,
-                     max(_TRAN_TOI_THIEU, p - min(sau, BL_GIU_CHO_SAU * p)),
-                     max(_TRAN_TOI_THIEU, min_charge, uoc * _HE_SO_TRAN)), 2)
+    can = max(_TRAN_TOI_THIEU, min_charge)
+    muc = min(tran_console, p, max(_TRAN_TOI_THIEU, p - min(sau, BL_GIU_CHO_SAU * p)),
+              max(can, uoc * _HE_SO_TRAN))
+    if san > 0:
+        muc = min(muc, max(can, p - san))
+    return round(muc, 2)
 
 
 def _cau_uu_tien_bl(ds: list[dict]) -> list[str]:

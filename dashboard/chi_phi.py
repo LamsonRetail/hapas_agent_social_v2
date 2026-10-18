@@ -736,6 +736,75 @@ def tu_nen_tang(du_an: dict, p: str, tu: list[str]) -> list[str]:
     return [x for x in tu if _khoa_bo_tu(x) not in bo] if bo else list(tu)
 
 
+def ten_brand(du_an: dict) -> list[str]:
+    """Bản sao `theo_doi.cau_hinh_hashtag_brand(du_an)["ten"]`: tên + mã dự án + `ten` thêm của
+    `cau_hinh.hashtag_can_nhac_brand` (bỏ rỗng, bỏ trùng, giữ thứ tự)."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    x = goc.get("hashtag_can_nhac_brand", True)
+    them = ([str(t).strip() for t in x["ten"] if isinstance(t, str) and t.strip()]
+            if isinstance(x, dict) and isinstance(x.get("ten"), list) else [])
+    ten = [str(du_an.get("ten") or "").strip(), str(du_an.get("ma") or "").strip(), *them]
+    return list(dict.fromkeys(t for t in ten if t))
+
+
+def _mot_chu(kw) -> bool:
+    """Bản sao `apify_tool.tu_mot_chu`: không có dấu cách sau khi bỏ '#'."""
+    return len(str(kw or "").replace("#", " ").split()) == 1
+
+
+def _mot_chu_co_brand(kw: str, ten: list[str]) -> bool:
+    """Bản sao `theo_doi._mot_chu_co_brand`: từ MỘT chữ mà dạng viết liền chứa một tên brand viết
+    liền (tên ≤ 3 ký tự phải đứng đầu từ)."""
+    if not _mot_chu(kw):
+        return False
+    k = _khoa_tag(kw)
+    for t in ten:
+        b = _khoa_tag(t)
+        if b and (b in k if len(b) > 3 else k.startswith(b)):
+            return True
+    return False
+
+
+def duong1_tu(du_an: dict) -> list[str] | None:
+    """Bản sao `theo_doi.duong1_tu`: danh sách ghi đè `cau_hinh.tu_khoa.threads.duong1_tu`."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    nh = goc.get("tu_khoa") if isinstance(goc.get("tu_khoa"), dict) else {}
+    th = nh.get("threads") if isinstance(nh.get("threads"), dict) else {}
+    x = th.get("duong1_tu")
+    if not isinstance(x, list):
+        return None
+    ra: list[str] = []
+    for s in x:
+        s = " ".join(s.split()) if isinstance(s, str) else ""
+        if s and _norm(s) not in {_norm(y) for y in ra}:
+            ra.append(s)
+    return ra
+
+
+def tu_threads_duong1(du_an: dict, tu: list[str]) -> tuple[list[str], str]:
+    """Bản sao `theo_doi.tu_threads_duong1` (18/10/2026): từ khoá ĐƯỜNG 1 Threads (futurizerush) —
+    `duong1_tu` nếu có, không thì chỉ từ MỘT chữ có tên brand (cụm nhiều chữ chỉ gửi đường 2);
+    rỗng thì tên brand. Ước tính đường 1 tính trên đúng danh sách này."""
+    ten = ten_brand(du_an)
+    rieng = duong1_tu(du_an)
+    if rieng is not None:
+        ra, ly = tu_nen_tang(du_an, "threads", rieng), "theo cấu hình duong1_tu"
+    else:
+        ra, ly = [kw for kw in tu if _mot_chu_co_brand(kw, ten)], "từ một chữ có tên brand"
+    if not ra and ten:
+        ra = [next((t for t in ten if _mot_chu(t)), "") or _khoa_tag(ten[0])]
+        ly = ("duong1_tu rỗng" if rieng is not None else "không có từ một chữ có tên brand") \
+            + " — tìm tên brand"
+    da: set[str] = set()
+    gon = []
+    for x in ra:                     # bỏ trùng như actor nhận ("#HAPAS" = "hapas")
+        k = " ".join(_tokens(str(x or ""))) or str(x or "").lower()
+        if x and k not in da:
+            da.add(k)
+            gon.append(x)
+    return gon[:GIOI_HAN["tk_so_tu"][1]], ly
+
+
 def tag_cua(du_an: dict, p: str, tu: list[str]) -> list[str]:
     """Bản sao `theo_doi.tag_cua`: hashtag của đường tìm theo hashtag (Instagram, feed TikTok) — `nguon_tag`
     trên từ khoá đã bỏ `bo_tu`, rồi bỏ hashtag trùng một mục MỘT chữ của `bo_tu`."""
@@ -790,8 +859,13 @@ def bang_cau_hinh(du_an: dict) -> dict:
     tu_nt = {p: tu_nen_tang(du_an, p, tu) for p in NEN_TANG}
     khoa_tu = {_khoa_bo_tu(x) for x in tu}
     khoa_tag = {_khoa_tag(t) for t in nguon_tag(du_an, tu)}
+    # Threads đường 1 (18/10/2026, `tu_threads_duong1`): chỉ từ một chữ có tên brand — ước tính và
+    # số từ gửi tính trên đúng danh sách Mark gửi futurizerush; đường 2 vẫn mọi từ khoá.
+    tu_d1 = tu_threads_duong1(du_an, tu_nt["threads"])[0] if tu_nt["threads"] else []
+    tk["threads"]["tu_duong1"] = tu_d1
     for p in NEN_TANG:
-        tu_p = tag_cua(du_an, p, tu) if p == "instagram" else tu_nt[p]
+        tu_p = (tag_cua(du_an, p, tu) if p == "instagram" else tu_d1 if p == "threads"
+                else tu_nt[p])
         tk[p]["bo_tu"] = bo_tu(du_an, p)
         tk[p]["so_tu_tim"] = len(tu_nt[p])
         # Mục không khớp từ khoá nào (hashtag một chữ với Instagram / TikTok) — gõ sai: trang nói rõ.

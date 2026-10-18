@@ -81,7 +81,10 @@ def test_threads_thieu_tien_co_so_tu_thay_vi_bo_ca_nen_tang(mo):  # noqa: F811
               cau_hinh={"tu_khoa": {p: {"bat": p == "threads"} for p in T.TK_NEN_TANG}})
     tk = contextvars.copy_context().run(T._tim_tu_khoa, v, da, 3, 5.0, time.monotonic() + 600)
     assert goi["threads"] == (["hapas"], 10)
-    assert any("co còn 1/4 từ khoá đầu" in x for x in tk["ghi_chu"])
+    # Đường 1 (18/10/2026) chỉ có "hapas" (một chữ có tên brand); 3 cụm còn lại chỉ đi đường 2.
+    assert any(x.startswith("tìm Threads đường 1:") and "co còn 1/1 từ khoá đầu" in x
+               for x in tk["ghi_chu"])
+    assert tk["pheu"]["threads"]["duong1"]["chi_duong2"] == TU[1:]
     assert tk["usd"] == pytest.approx(0.08), "0 bài vẫn tính phí khởi động"
     assert "threads" in tk["pheu"] and not tk["pheu"]["threads"].get("bo_qua")
     # 1 từ cũng không vừa → bỏ qua CÓ lý do (ước tính / còn lại).
@@ -311,7 +314,9 @@ def test_threads_mot_cau_ghi_chu_sau_khi_co(mo):  # noqa: F811
     mo.setattr(A, "_FETCH", _fetch_ghi({}))
     v = GiaViec({}, [])
     v.d["ngan_sach_usd"] = 0.15
-    da = dict(DU_AN, tu_khoa=TU, tk_bat=True, tk_so_bai=20,
+    # Đường 1 chỉ nhận từ một chữ có tên brand (18/10/2026): bốn từ như vậy.
+    tu1 = ["hapas", "hapasvn", "hapas.official", "quatanghapas"]
+    da = dict(DU_AN, tu_khoa=tu1, tk_bat=True, tk_so_bai=20,
               cau_hinh={"tu_khoa": {p: {"bat": p == "threads"} for p in T.TK_NEN_TANG}})
     tk = contextvars.copy_context().run(T._tim_tu_khoa, v, da, 3, 5.0, time.monotonic() + 600)
     cau = [x for x in tk["ghi_chu"] if x.startswith("tìm Threads")]
