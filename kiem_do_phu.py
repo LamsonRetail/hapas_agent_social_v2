@@ -120,19 +120,24 @@ def _tag_cua(chuoi: str) -> list[str]:
     return ra
 
 
-def chon_tag(tu: list[str], hashtag_bai: list[str]) -> list[str]:
+def chon_tag(tu: list[str], hashtag_bai: list[str], bo: list[str] | tuple = ()) -> list[str]:
     """Tag cho mẫu: (1) từ khoá dự án viết liền (≤ `TAG_TU_KHOA_TOI_DA`, từ một chữ trước), (2)
     tag hay đi cùng nhất trong bài đã giữ 30 ngày (≥ `TAG_TOI_THIEU_BAI` bài, bỏ tag chung
-    chung `TAG_CHUNG`), tag chứa tên brand đi trước. Tổng ≤ `TAG_TOI_DA`."""
+    chung `TAG_CHUNG`), tag chứa tên brand đi trước. Tổng ≤ `TAG_TOI_DA`. `bo` (soát 18/10/2026,
+    LOW — `theo_doi.bo_tu` của TikTok): mục MỘT chữ không lấy làm tag (như `theo_doi.tag_cua`);
+    bên gọi đã bỏ cụm nhiều chữ khỏi `tu` (`theo_doi.tu_nen_tang`). Mẫu vẫn lọc theo đủ từ khoá."""
+    bo_k = {TT.chuan_tag(x) for x in bo
+            if len(str(x).replace("#", " ").split()) == 1} - {""}
     ra: list[str] = []
     for t in sorted(tu, key=lambda x: (" " in str(x).strip(), len(str(x)))):
         g = TT.chuan_tag(t)
-        if 3 <= len(g) <= 40 and g not in ra and len(ra) < TAG_TU_KHOA_TOI_DA:
+        if 3 <= len(g) <= 40 and g not in ra and g not in bo_k and len(ra) < TAG_TU_KHOA_TOI_DA:
             ra.append(g)
     goc = [TT.chuan_tag(t) for t in tu if TT.chuan_tag(t)]
     dem = Counter(t for h in hashtag_bai for t in _tag_cua(h))
     ung = [(t, n) for t, n in dem.items()
-           if n >= TAG_TOI_THIEU_BAI and t not in TAG_CHUNG and t not in ra and 3 <= len(t) <= 40]
+           if n >= TAG_TOI_THIEU_BAI and t not in TAG_CHUNG and t not in ra and t not in bo_k
+           and 3 <= len(t) <= 40]
     ung.sort(key=lambda x: (not any(g in x[0] for g in goc), -x[1], x[0]))
     for t, _ in ung:
         if len(ra) >= TAG_TOI_DA:

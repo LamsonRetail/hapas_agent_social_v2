@@ -2964,7 +2964,10 @@ def _kiem_do_phu(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     noi_bat = K.tac_gia_noi_bat(ma, "tiktok", d_mau, 500)
     dang_theo = {_chuan_dinh_danh("tiktok", str(x.get("dinh_danh") or ""))
                  for x in K.nguon_dang_theo_doi(ma) if x.get("nen_tang") == "tiktok"}
-    tag = KDP.chon_tag(tu, K.hashtag_gan_day(ma, "tiktok", d_mau))
+    # Tag mẫu bỏ `bo_tu` của TikTok (soát 18/10/2026, LOW): người vận hành đã bỏ #quatang2010 khỏi
+    # tìm kiếm thì kiểm độ phủ không trả tiền lấy mẫu chính tag đó.
+    tag = KDP.chon_tag(tu_nen_tang(du_an, "tiktok", tu), K.hashtag_gan_day(ma, "tiktok", d_mau),
+                       bo=bo_tu(du_an, "tiktok"))
     tac_gia = KDP.chon_tac_gia(noi_bat, K.de_xuat_dang_xet(ma, "tiktok"), dang_theo)
     cid = dict(moc_cu["cid"]) if isinstance(moc_cu.get("cid"), dict) else {}
     uid = dict(moc_cu["uid"]) if isinstance(moc_cu.get("uid"), dict) else {}

@@ -58,6 +58,13 @@ def test_chon_tag_tu_khoa_roi_tag_chien_dich_bo_tag_chung():
         "hapas", "tuihapas", "hapasxthom", "lammoidieuviyeu"]
     assert KDP.chon_tag(["hapas"], []) == ["hapas"]
     assert len(KDP.chon_tag(["hapas", "a b c d"], bai * 3)) <= KDP.TAG_TOI_DA
+    # `bo_tu` (soát LOW): mục một chữ không thành tag mẫu, kể cả tag lấy từ bài đã giữ.
+    assert KDP.chon_tag(["hapas", "quatang2010"], bai, bo=["#QuaTang2010", "lammoi dieu"]) == [
+        "hapas", "hapasxthom", "lammoidieuviyeu"]
+    da = {**DU_AN, "tu_khoa": ["hapas", "quatang2010"],
+          "cau_hinh": {"tu_khoa": {"tiktok": {"bo_tu": ["quatang2010"]}}}}
+    assert "quatang2010" not in KDP.chon_tag(T.tu_nen_tang(da, "tiktok", T.tu_tim(da)),
+                                             ["quatang2010, x"] * 3, bo=T.bo_tu(da, "tiktok"))
 
 
 def test_chon_tac_gia_bo_nguon_dang_theo_doi_va_trung():
