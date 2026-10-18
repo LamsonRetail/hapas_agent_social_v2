@@ -408,6 +408,7 @@ def test_ap_dung_ai_khong_phan_thi_khong_ghi_va_bao_chay_lai(monkeypatch, tmp_pa
     ghi = [r["tai_khoan"] for _, rows in kho.ghi for r in rows]
     assert set(ghi) == {"nha_mau"}, "chỉ kênh nhà (AI chỉ gán nhãn) — bài AI chưa phán không ghi"
     assert "CHƯA XONG" in out and "AI chưa phán" in out
+    assert kho.luot[max(kho.luot)]["trang_thai"] == "mot_phan", "chưa phán đủ: không phải xong"
     so = TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas", "túi hapas"]),
                       BAY_GIO - datetime.timedelta(days=60))
     assert {v[0] for v in so.values()} <= {L.LY_DO_SEEDING_BAI}, "AI chưa phán: không vào sổ"
@@ -453,6 +454,74 @@ def test_gac_ai_tuan_tu_cho_lo_qua_han_va_tran_luot_goi():
     assert g.phan_xu([1, 2, 3])[1]["trang_thai"] == "đã chạy" and g.da_goi == 1
     px, tt = g.phan_xu([1, 2])
     assert px == {} and tt["trang_thai"] == "bỏ qua: đạt trần 1 lượt gọi AI" and g.vuot == 2
+
+
+def test_gac_ai_cho_lo_qua_han_co_gioi_han_roi_bo_qua_khi_model_treo():
+    """Soát 18/10/2026 (LOW): lô quá hạn chỉ được chờ thêm `cho_toi_da` giây (mặc định
+    `CHO_LO_TOI_DA`). Model vẫn chưa trả lời → TREO: phần sau trả "bỏ qua" ngay (không gọi model,
+    không chờ thêm — chạy lại script là nạp tiếp); luồng treo xong thì gửi lại bình thường."""
+    import threading
+    import time
+    nha = threading.Event()
+
+    def hoi_treo(nhac, ngan_sach):
+        nha.wait(5)
+        return f"ok {nhac}"
+    out: list[str] = []
+    assert N.GacAI(5).cho_toi_da == N.CHO_LO_TOI_DA
+    g = N.GacAI(5, out.append, cho_toi_da=0.1)
+    g._hoi_goc = hoi_treo
+    goi: list[int] = []
+    g._xu_goc = lambda rows, *a, **k: (goi.append(len(rows)) or {0: (True, "ugc", "")},
+                                       {"trang_thai": "đã chạy"})
+    with pytest.raises(A._FutTimeout):
+        g.hoi("a", 0.05)
+    t0 = time.monotonic()
+    px, tt = g.phan_xu([1, 2, 3])
+    assert px == {} and tt["trang_thai"].startswith("bỏ qua: model treo") and g.bo_treo == 3
+    assert g.treo and goi == [] and g.da_goi == 0 and time.monotonic() - t0 < 2
+    assert any("TREO" in x for x in out)
+    t0 = time.monotonic()
+    assert g.phan_xu([1])[0] == {} and g.bo_treo == 4 and time.monotonic() - t0 < 0.05, \
+        "đang treo: không chờ thêm"
+    with pytest.raises(A._FutTimeout):
+        g.hoi("b", 1)                       # lô trước còn treo: không gửi model song song
+    nha.set()
+    time.sleep(0.2)
+    assert g.phan_xu([1, 2])[1]["trang_thai"] == "đã chạy" and goi == [2] and not g.treo
+
+
+def test_ap_dung_ctrl_c_hay_loi_giua_chung_khong_dong_luot_xong(monkeypatch, tmp_path):
+    """Soát 18/10/2026 (LOW): bản trước khởi tạo "xong" và chỉ bắt `Exception` — Ctrl-C giữa chừng
+    vẫn đóng lượt "xong". Nay Ctrl-C → "mot_phan" (phần đã ghi giữ nguyên, tệp hoàn tác đủ khoá),
+    lỗi → "loi", AI chưa phán một phần → "mot_phan"; chỉ chạy hết và đủ mới "xong"."""
+    kho = KhoGia().cai(monkeypatch)
+    monkeypatch.setattr(N, "_chuan_bi_model", lambda: None)
+    raw = str(_tao_raw(tmp_path / "raw"))
+    goi = [0]
+
+    def ngat(rows, *a, **k):
+        goi[0] += 1
+        if goi[0] >= 2:
+            raise KeyboardInterrupt
+        return ({i: (True, "ugc", "") for i in range(len(rows))},
+                {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"})
+    monkeypatch.setattr(A, "_phan_xu_ai", ngat)
+    tep = tmp_path / "a.jsonl"
+    ma, out = _chay(["hapas", raw, "--tu", _tu(), "--ap-dung", "--sao-luu", str(tep)])
+    (x,) = kho.luot.values()
+    assert ma == 1 and x["trang_thai"] == "mot_phan" and "Ctrl-C" in x["loi"], out
+    assert "DỪNG: dừng giữa chừng (Ctrl-C)" in out
+    dong = [json.loads(s) for s in tep.read_text(encoding="utf-8").splitlines()]
+    assert dong[-1]["loai_dong"] == "bai_moi" and dong[-1]["khoa"], "phần đã ghi vẫn hoàn tác được"
+
+    def hong(rows, *a, **k):
+        raise RuntimeError("kho mất kết nối")
+    monkeypatch.setattr(A, "_phan_xu_ai", hong)
+    ma, out = _chay(["hapas", raw, "--tu", _tu(), "--ap-dung", "--sao-luu",
+                     str(tmp_path / "b.jsonl")])
+    x = kho.luot[max(kho.luot)]
+    assert ma == 1 and x["trang_thai"] == "loi" and "RuntimeError: kho mất kết nối" in x["loi"]
 
 
 def test_nang_so_lieu_chi_nang_va_ghi_dung_ngay(monkeypatch):

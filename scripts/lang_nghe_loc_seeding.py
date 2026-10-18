@@ -152,11 +152,12 @@ def ke_hoach(du_an: dict, nguon: list[dict], bai: list[dict], so_seeding: list[d
     """THUẦN. Bài đã giữ (khoa, nen_tang, link, tai_khoan, tac_gia, dang_luc, binh_luan, xem) + sổ
     seeding -> {"cfg", "tai_khoan": {tk: số đo}, "bo": {tk: [bài]}, "giu_bl": {tk: [bài]},
     "mien": {tk: số đo}}. `mien` = tài khoản ĐỦ luật nhưng là kênh nhà / mang tên brand (để người
-    chạy thấy). `thuong_hieu`: tên brand để miễn — `doc_kho` đưa `theo_doi.ten_brand` (cùng danh
-    sách với cổng brand và lượt quét, soát LOW); thiếu thì tên + mã + "ten" cấu hình."""
+    chạy thấy). `thuong_hieu`: tên brand để miễn — thiếu thì `theo_doi.ten_mien_seeding` (CÙNG
+    danh sách với lượt quét: tên, mã, "ten" cấu hình, `du_an.hashtag`; không gồm tag kiểm độ phủ tự
+    học của cổng brand — soát 18/10/2026 MEDIUM)."""
     import theo_doi as T
     cfg = loc_rac.cau_hinh_seeding(du_an)
-    th = thuong_hieu if thuong_hieu is not None else T.cau_hinh_hashtag_brand(du_an)["ten"]
+    th = thuong_hieu if thuong_hieu is not None else T.ten_mien_seeding(du_an)
     # Cùng dạng dòng với lượt quét (`theo_doi._dong_kho_seeding`, soát M4): thích + chia sẻ khi nền
     # tảng không có lượt xem, khoá phụ ổn định cho bài Facebook.
     rows = [T._dong_kho_seeding(r) for r in bai if r.get("dang_luc") is not None]
@@ -208,7 +209,7 @@ def doc_kho(ma: str, bay_gio: datetime.datetime) -> dict | None:
         tu = moc_xet(du_an, bay_gio)            # đọc lịch chiến dịch ở kết nối riêng
         nguon = [dict(r) for r in c.execute(SQL_NGUON, (ma,)).fetchall()]
         bai = [dict(r) for r in c.execute(SQL_BAI, (ma, tu)).fetchall()]
-        kh = ke_hoach(du_an, nguon, bai, TDA.doc_seeding(ma, tu), T.ten_brand(du_an, bay_gio))
+        kh = ke_hoach(du_an, nguon, bai, TDA.doc_seeding(ma, tu), T.ten_mien_seeding(du_an))
         khoa = sorted(r["khoa"] for cac in kh["bo"].values() for r in cac)
         bl = {r["khoa_bai"]: int(r["n"]) for r in c.execute(SQL_DEM_BL, (ma, khoa)).fetchall()} \
             if khoa else {}

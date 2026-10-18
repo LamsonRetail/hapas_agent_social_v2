@@ -50,17 +50,17 @@ def test_cau_hinh_mac_dinh_bat_chi_false_la_tat_va_ten_them():
 
 
 def test_ten_brand_gom_tag_chien_dich_bo_tag_rong(monkeypatch):
-    """Soát 18/10/2026 (M1): hashtag riêng của dự án, tag kiểm độ phủ đã thêm vào lượt nổi và khẩu
-    hiệu chiến dịch đang chạy là "tên brand" của cổng (dạng viết liền); #quatang2010 (tag rộng) và
-    tag chung chung thì không."""
+    """Soát 18/10/2026 (M1): hashtag riêng của dự án, tag kiểm độ phủ đã thêm vào lượt nổi (chỉ tag
+    chứa tên brand — soát MEDIUM) và khẩu hiệu chiến dịch đang chạy là "tên brand" của cổng (dạng
+    viết liền); #quatang2010 (tag rộng) và tag chung chung thì không."""
     monkeypatch.setattr(T, "khau_hieu_chien_dich", lambda ma, bay_gio: (
         {"id": 1}, ["Yêu từ điều nhỏ nhất"]))
-    T.ghi_moc_tk("hapas", {KDP.KHOA_NOI_CFG: {"tag": ["lammoidieuviyeu", "fyp"]}})
+    T.ghi_moc_tk("hapas", {KDP.KHOA_NOI_CFG: {"tag": ["lammoidieuviyeu", "fyp", "hapassale"]}})
     da = {**DU_AN, "hashtag": ["hapas", "quatang2010", "hapassuperbrandday"]}
-    assert T.ten_brand(da) == ["HAPAS", "hapas", "hapassuperbrandday", "lammoidieuviyeu",
-                               "yeutudieunhonhat"]
+    assert T.ten_brand(da) == ["HAPAS", "hapas", "hapassuperbrandday", "hapassale",
+                               "yeutudieunhonhat"], "tag học không mang tên brand: không tính"
     tat_dp = {**da, "cau_hinh": {"do_phu": {"bat": False}}}
-    assert "lammoidieuviyeu" not in T.ten_brand(tat_dp), "kiểm độ phủ tắt: lượt nổi mặc định"
+    assert "hapassale" not in T.ten_brand(tat_dp), "kiểm độ phủ tắt: lượt nổi mặc định"
     khong_rong = {**da, "cau_hinh": {"hashtag_can_nhac_brand": {"tag_rong": []}}}
     assert "quatang2010" in T.ten_brand(khong_rong)
     ten = T.ten_brand(da)
@@ -204,6 +204,29 @@ def test_bai_tag_chien_dich_giu_va_them_ten_thi_go_bai_da_loai(monkeypatch, ai):
     kho.nguon = [{"id": 1, "nen_tang": "tiktok", "dinh_danh": "shop_c", "loai": "kenh_nha"}]
     T._tach_va_giu(them, 9, hits[2:], da["tu_khoa"], 1e12, _tk())
     assert ai[-1] == ["shop_c"], "thành kênh nhà: sổ không chặn nữa"
+
+
+def test_tag_hoc_cua_kiem_do_phu_khong_mo_cong_cho_ca_feed(monkeypatch, ai):
+    """Soát 18/10/2026 (MEDIUM): kiểm độ phủ tự thêm #lammoidieuviyeu vào lượt nổi (chưa qua người
+    duyệt); lượt nổi đọc feed tag đó với nhãn `_tag_feed="#lammoidieuviyeu"`. Bản trước đưa mọi tag
+    học vào "tên brand", `nhac_brand` khớp chính tag feed (và hashtag của bài) → cổng mở cho MỌI bài
+    của feed. Nay tag học chỉ tính khi chứa tên brand: bài feed đó không gọi tên HAPAS bị bỏ trước
+    AI; feed #hapassale (tag học mang tên brand) vẫn mở cổng dù tag nằm ở bình luận đầu."""
+    KhoGia().cai(monkeypatch)
+    monkeypatch.setattr(T, "khau_hieu_chien_dich", lambda ma, bay_gio: (None, []))
+    T.ghi_moc_tk("hapas", {KDP.KHOA_NOI_CFG: {"tag": ["lammoidieuviyeu", "hapassale"]}})
+    hits = [_bai(1, "shop_qua", "Quà 20/10 cho mẹ #lammoidieuviyeu", "#lammoidieuviyeu"),
+            _bai(2, "kol_a", "Quà 20/10 cho mẹ", "#hapassale"),
+            _bai(3, "kol_b", "Túi HAPAS #lammoidieuviyeu", "#lammoidieuviyeu")]
+    hits[0][0]["hashtags"] = hits[2][0]["hashtags"] = "lammoidieuviyeu"
+    hits[1][0]["hashtags"] = ""
+    ten = T.ten_brand(DU_AN)
+    assert "lammoidieuviyeu" not in ten and "hapassale" in ten
+    assert not T.nhac_brand(hits[0][0], ten), "khớp chính tag feed học không đủ mở cổng"
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 7, hits, DU_AN["tu_khoa"], 1e12, tk)
+    assert ai == [["kol_a", "kol_b"]] and tk["pheu"]["tiktok"]["khong_brand"] == 1
+    assert {k: v[0] for k, v in _so().items()} == {"tiktok:771": LY}
 
 
 def test_ban_trung_tu_duong_tu_khoa_khong_bi_cong(monkeypatch, ai):

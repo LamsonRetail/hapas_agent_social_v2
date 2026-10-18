@@ -306,10 +306,10 @@ def danh_dau(ma: str, items: list[tuple[dict, str]], du_an: dict, tu: list[str],
              tu_pv: datetime.datetime, bay_gio: datetime.datetime, khoa_cua) -> list[dict]:
     """Item → bài mẫu (bỏ trùng theo khoá, gộp đường) trong `NGAY_MAU` ngày và trong phạm vi
     theo dõi, đánh dấu nhắc brand / đã có trong kho / đã loại trước (`da_loai`: sổ "đã loại" cùng
-    dấu luật HOẶC sổ seeding — soát 18/10/2026, H1: bài seeding đã thấy và cố ý bỏ không phải bài
-    "sót", kể cả khi đổi từ khoá đã làm lại phần "bai" của sổ). `xet_lai`: bài đã loại theo luật
-    không tốn AI (`theo_doi.LY_DO_XET_LAI`, cổng brand đường hashtag, hoặc chỉ còn ở sổ seeding) —
-    phần lấp lỗ đưa nó qua phễu để luật hiện hành xét lại, như lượt tìm."""
+    dấu luật HOẶC sổ seeding, và CHƯA có trong kho — soát 18/10/2026, H1: bài seeding đã thấy và
+    cố ý bỏ không phải bài "sót", kể cả khi đổi từ khoá đã làm lại phần "bai" của sổ). `xet_lai`:
+    bài đã loại theo luật không tốn AI (`theo_doi.LY_DO_XET_LAI`, cổng brand đường hashtag, hoặc
+    chỉ còn ở sổ seeding) — phần lấp lỗ đưa nó qua phễu để luật hiện hành xét lại, như lượt tìm."""
     import loc_rac
     import theo_doi as T
     import theo_doi_api as TDA
@@ -338,7 +338,11 @@ def danh_dau(ma: str, items: list[tuple[dict, str]], du_an: dict, tu: list[str],
         luat = T.LY_DO_XET_LAI | {T.LY_DO_HASHTAG_BRAND}
         for k, x in theo.items():
             ly = (loai.get(k) or [""])[0]
-            x["da_co"], x["da_loai"] = k in co, k in loai or k in seed
+            # Bài ĐÃ CÓ trong kho không phải bài "đã loại" dù sổ còn khoá cũ (soát 18/10/2026: bài
+            # seeding được xét lại và giữ trước bản gỡ khoá `theo_doi._tach_va_giu`) — bản trước
+            # đánh dấu cả hai, `tinh_do_phu` bỏ bài khỏi cả tử lẫn mẫu số.
+            x["da_co"] = k in co
+            x["da_loai"] = (k in loai or k in seed) and k not in co
             x["xet_lai"] = x["da_loai"] and (ly in luat or k not in loai)
     return list(theo.values())
 

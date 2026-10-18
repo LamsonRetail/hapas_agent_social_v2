@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 import apify_tool as A
+import kiem_do_phu as KDP
 import lang_nghe_db as K
 import loc_rac as L
 import theo_doi as T
@@ -304,35 +305,57 @@ def test_bai_seeding_len_binh_luan_hom_sau_duoc_xet_lai_va_giu(monkeypatch, ai):
     f = tk["pheu"]["tiktok"]
     assert (f["xet_lai"], f["seeding"], f["da_loai_truoc"]) == (8, 0, 0)
     assert len(ai) == 1 and len(ai[0]) == 8 and [r["binh_luan"] for r in kho.ghi[0]] == [40] * 8
-    assert {x["bl"] for x in TDA.doc_seeding("hapas")} == {40}, "sổ seeding nhận số mới"
+    # Bài đã vào kho: khoá gỡ khỏi sổ seeding + sổ "đã loại" (soát 18/10/2026) — nhịp đăng của
+    # tài khoản đọc từ kho; kiểm độ phủ không còn thấy bài vừa "đã có" vừa "đã loại".
+    assert TDA.doc_seeding("hapas") == []
+    assert TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas"]),
+                        datetime.datetime.now(_VN) - datetime.timedelta(days=60)) == {}
     # Số luỹ kế: một lần đọc cũ hơn (ít bình luận hơn) không hạ số trong sổ.
+    TDA.ghi_seeding("hapas", [T._dong_so_seeding(d, dt) for d, dt in _hits_bl(40)])
     TDA.ghi_seeding("hapas", [T._dong_so_seeding(d, dt) for d, dt in _hits_bl(3)])
     assert {x["bl"] for x in TDA.doc_seeding("hapas")} == {40}
+
+
+def test_bai_ai_loai_sau_xet_lai_van_o_so_seeding_voi_so_moi(monkeypatch):
+    """Bài seeding được xét lại (đủ bình luận) nhưng AI loại: KHÔNG vào kho, nên vẫn ở sổ seeding
+    với số mới (nhịp đăng của tài khoản cho lượt sau) và sổ "đã loại" ghi lý do AI."""
+    KhoGia().cai(monkeypatch)
+    monkeypatch.setattr(A, "_phan_xu_ai", lambda rows, *a, **k: (
+        {i: (False, "lac_de", "") for i in range(len(rows))},
+        {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"}))
+    T._tach_va_giu(DU_AN, 7, _hits("seeding"), ["hapas"], 1e12, _tk())
+    T._tach_va_giu(DU_AN, 8, _hits_bl(40), ["hapas"], 1e12, _tk())
+    so_seed = TDA.doc_seeding("hapas")
+    assert {x["bl"] for x in so_seed} == {40} and len(so_seed) == 8
+    so = TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas"]),
+                      datetime.datetime.now(_VN) - datetime.timedelta(days=60))
+    assert {v[0] for v in so.values()} == {"ai:lac_de"}
 
 
 def test_tat_luat_doi_nguong_hay_thanh_kenh_nha_thi_bai_da_loai_duoc_xet_lai(monkeypatch, ai):
     """Bài đã loại vì seeding: tắt luật, nâng ngưỡng hay duyệt tài khoản thành kênh nhà thì lượt sau
     bài đi tiếp (dấu luật `dau_loai` không tính `cau_hinh`, nên sổ không được chặn)."""
     kho = KhoGia().cai(monkeypatch)
-    T._tach_va_giu(DU_AN, 7, _hits("seeding"), ["hapas"], 1e12, _tk())
-    assert ai == []
-    for i, da in enumerate((
-            {**DU_AN, "cau_hinh": {"seeding": {"bat": False}}},
-            {**DU_AN, "cau_hinh": {"seeding": {"bai_mot_ngay": 9, "bai_bay_ngay": 50}}})):
+    nha = [{"id": 1, "nen_tang": "tiktok", "dinh_danh": "aff_mau", "loai": "kenh_nha"}]
+    for i, (da, nguon) in enumerate((
+            ({**DU_AN, "cau_hinh": {"seeding": {"bat": False}}}, []),
+            ({**DU_AN, "cau_hinh": {"seeding": {"bai_mot_ngay": 9, "bai_bay_ngay": 50}}}, []),
+            (DU_AN, nha))):
+        kho.bai.clear()                       # bài lần trước giữ ra khỏi kho: lần này là bài mới
+        kho.nguon = []
+        T._tach_va_giu(DU_AN, 7, _hits("seeding"), ["hapas"], 1e12, _tk())      # loại → sổ
+        assert len(ai) == i
+        kho.nguon = nguon
         tk = _tk()
         T._tach_va_giu(da, 8 + i, _hits("seeding"), ["hapas"], 1e12, tk)
         assert len(ai) == i + 1 and len(ai[-1]) == 8 and not tk["pheu"]["tiktok"]["seeding"]
         assert tk["pheu"]["tiktok"]["xet_lai"] == 8
-        kho.bai.clear()                       # bài vừa giữ ra khỏi kho: lần sau vẫn là bài mới
-    kho.nguon = [{"id": 1, "nen_tang": "tiktok", "dinh_danh": "aff_mau", "loai": "kenh_nha"}]
-    tk = _tk()
-    T._tach_va_giu(DU_AN, 10, _hits("seeding"), ["hapas"], 1e12, tk)
-    assert len(ai) == 3 and len(ai[-1]) == 8 and not tk["pheu"]["tiktok"]["seeding"]
+        assert TDA.doc_seeding("hapas") == [], "bài đã giữ: khoá gỡ khỏi sổ seeding"
 
 
 def test_mien_ten_brand_dung_cung_danh_sach_ten_voi_cong_brand(monkeypatch, ai):
     """Soát 18/10/2026 (LOW): tài khoản mang tên thương hiệu con khai ở cấu hình cổng brand
-    ("ten": ["Mate Made"]) hoặc tag chiến dịch của dự án được miễn luật seeding như tên dự án."""
+    ("ten": ["Mate Made"]) được miễn luật seeding như tên dự án."""
     KhoGia().cai(monkeypatch)
     monkeypatch.setattr(T, "khau_hieu_chien_dich", lambda ma, bay_gio: (None, []))
     hits = _hits("seeding")
@@ -344,6 +367,46 @@ def test_mien_ten_brand_dung_cung_danh_sach_ten_voi_cong_brand(monkeypatch, ai):
     TDA.bo_khoi_so("hapas", [x["khoa"] for x in TDA.doc_seeding("hapas")])
     T._tach_va_giu(da, 8, hits, ["hapas"], 1e12, tk2 := _tk())
     assert not tk2["pheu"]["tiktok"]["seeding"] and len(ai) == 1 and len(ai[0]) == 8
+
+
+def test_mien_seeding_khong_dung_tag_tu_hoc_va_so_nguyen_cum(monkeypatch, ai):
+    """Soát 18/10/2026 (MEDIUM): miễn seeding so CHUỖI CON trên định danh / tên hiển thị, nên chỉ
+    dùng tên NGƯỜI đặt (`ten_mien_seeding`: tên, mã, "ten" cấu hình, `du_an.hashtag`) — (b) tag kiểm
+    độ phủ tự học (#quatangxinh) không miễn shop affiliate "quatangxinh.shop", kể cả ở script dọn;
+    (c) "Mate Made" so nguyên cụm "matemade", không tách ra "made" để miễn mọi "handmade…"."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import lang_nghe_loc_seeding as S
+    KhoGia().cai(monkeypatch)
+    monkeypatch.setattr(T, "khau_hieu_chien_dich", lambda ma, bay_gio: (None, ["Quà tặng xinh"]))
+    T.ghi_moc_tk("hapas", {KDP.KHOA_NOI_CFG: {"tag": ["quatangxinh", "hapassale"]}})
+    da = {**DU_AN, "hashtag": ["hapas", "quatang2010", "yeutudieunhonhat"],
+          "cau_hinh": {"hashtag_can_nhac_brand": {"ten": ["Mate Made"]}}}
+    assert T.ten_mien_seeding(da) == ["HAPAS", "hapas", "Mate Made", "yeutudieunhonhat"]
+    assert "quatangxinh" in T.ten_brand(da), "cổng brand vẫn tính khẩu hiệu chiến dịch"
+    # (b) lượt quét: tài khoản mang tag học / khẩu hiệu không được miễn.
+    hits = _hits("seeding")
+    for d, _ in hits:
+        d["username"] = "quatangxinh.shop"
+    T._tach_va_giu(da, 7, hits, ["hapas"], 1e12, tk := _tk())
+    assert tk["pheu"]["tiktok"]["seeding"] == 8 and ai == []
+    # (b) script dọn: cùng danh sách (mặc định của `ke_hoach`).
+    bai = [{"khoa": f"tiktok:9{i}", "nen_tang": "tiktok", "link": d["link"],
+            "tai_khoan": "quatangxinh.shop", "tac_gia": "Quà Tặng Xinh", "dang_luc": dt,
+            "binh_luan": 0, "xem": 300, "thich": 1, "chia_se": 0}
+           for i, (d, dt) in enumerate(hits)]
+    assert set(S.ke_hoach(da, [], bai, [])["tai_khoan"]) == {("tiktok", "quatangxinh.shop")}
+    cd = [{**r, "tai_khoan": "yeutudieunhonhat.official"} for r in bai]
+    assert S.ke_hoach(da, [], cd, [])["tai_khoan"] == {}, "hashtag của dự án (người đặt): miễn"
+    # (c) so nguyên cụm.
+    rows = _dong(_hits("seeding"))
+    ten = T.ten_mien_seeding(da)
+    hand = [{**r, "tk": ("tiktok", "handmade.xinh")} for r in rows]
+    assert L.tai_khoan_seeding(hand, CFG, set(), ten), "'made' không phải tên brand"
+    assert not L.ten_brand_trong("handmade.xinh", ten) and not L.ten_brand_trong("Made in VN", ten)
+    assert L.ten_brand_trong("matemade.store", ten) and L.ten_brand_trong("Mate Made Official", ten)
+    assert L.tai_khoan_seeding([{**r, "tk": ("tiktok", "mate_made.hn")} for r in rows], CFG,
+                               set(), ten) == {}
 
 
 def test_tat_luat_seeding_thi_bai_di_tiep_toi_ai(monkeypatch, ai):
@@ -425,6 +488,40 @@ def test_cong_thi_truong_vn_chi_bo_chu_ngoai_trong_noi_dung_con_lai_de_ai(monkey
     T._tach_va_giu({**DU_AN, "ma": "hapas_th", "thi_truong": "TH"}, 7, hits[:2], ["hapas"],
                    1e12, tk2)
     assert not tk2["pheu"]["tiktok"].get("thi_truong") and not tk2["pheu"]["tiktok"]["ai_loai"]
+
+
+def test_ai_khong_phan_ma_thi_truong_khac_vn_thi_khong_giu_theo_tu_khoa(monkeypatch, ai):
+    """Soát 18/10/2026 (LOW): lượt bot, AI không phán (hết giờ / lỗi) → bài nhắc từ khoá được giữ
+    theo luật — trừ bài mà tín hiệu thị trường (`_thi_truong`) là nước khác và không có dấu hiệu
+    Việt ("HAPAS THAILAND" viết Latin, kênh khai ngôn ngữ Thái): không ghi, không vào sổ (lượt sau
+    AI xét lại). Review tiếng Việt trên kênh YouTube khai US vẫn giữ (dấu hiệu Việt thắng)."""
+    kho = KhoGia().cai(monkeypatch)
+    hits = [_bai_tt(1, "hapasthailand", "HAPAS THAILAND", "New tote collection #hapas"),
+            _bai_tt(2, "kenh_th", "Hapas TH", "Hapas new bag", _ngon_ngu="th"),
+            _bai_tt(3, "khach_vn", "Khách", "túi hapas xinh quá trời"),
+            _bai_tt(4, "kenh_us_vn", "Hapas Review", "Review túi Hapas mới nhất", p="youtube",
+                    _quoc_gia="US")]
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 7, hits, ["hapas"], 1e12, tk)
+    assert len(ai) == 1 and len(ai[0]) == 4, "cổng VN để AI quyết ca mơ hồ"
+    assert sorted(r["tai_khoan"] for g in kho.ghi for r in g) == ["kenh_us_vn", "khach_vn"]
+    f = tk["pheu"]["tiktok"]
+    assert f["chua_ai_ngoai_vn"] == 2 and not f["khong_nhac"]
+    assert "AI chưa phán mà thị trường khác VN 2 (chưa ghi" in T._cau_pheu("tiktok", f)
+    assert TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas"]),
+                        _LUC_TT - datetime.timedelta(days=1)) == {}, "không vào sổ: lượt sau xét"
+    # Dự án thị trường khác (TH): luật không áp — AI không phán thì giữ theo từ khoá như cũ.
+    tk2 = _tk()
+    T._tach_va_giu({**DU_AN, "ma": "hapas_th", "thi_truong": "TH"}, 8, hits[:1], ["hapas"],
+                   1e12, tk2)
+    assert not tk2["pheu"]["tiktok"].get("chua_ai_ngoai_vn") and tk2["pheu"]["tiktok"]["giu"] == 1
+    # Lượt sau AI phán được: bài được xét lại (AI giữ thì ghi).
+    monkeypatch.setattr(A, "_phan_xu_ai", lambda rows, *a, **k: (
+        {i: (True, "ugc", "VN") for i in range(len(rows))},
+        {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"}))
+    kho.bai.clear()
+    T._tach_va_giu(DU_AN, 9, hits[:2], ["hapas"], 1e12, tk3 := _tk())
+    assert tk3["pheu"]["tiktok"]["giu"] == 2 and not tk3["pheu"]["tiktok"].get("chua_ai_ngoai_vn")
 
 
 def test_cong_vn_khong_loai_chu_toan_hoc_ten_hien_thi_la_va_caption_khong_dau(monkeypatch, ai):

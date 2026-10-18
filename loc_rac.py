@@ -360,11 +360,12 @@ def bai_spam(text: str) -> str:
 # 26/09 của thuytrang.lee: 69 bình luận, 1,5 triệu xem). Kênh nhà (`nguon.loai = kenh_nha`) và tài
 # khoản mang tên brand ở định danh hoặc tên hiển thị (cửa hàng hapasgigamall, hapas.aeonth,
 # hapasperfume; trang Facebook id số "HAPAS SÀI GÒN" 7 bài/ngày, "HAPAS Vincom Đà Nẵng" 5 bài/ngày
-# — `mien_ten_brand`) không bao giờ là seeding. Bài bị loại KHÔNG vào `bai` (không đếm), nằm ở sổ
-# "đã loại" với lý do `LY_DO_SEEDING_BAI` + sổ seeding (nhịp đăng). Soát 18/10/2026 (H1): sổ KHÔNG
-# chặn vĩnh viễn — mỗi lượt gặp lại, bài được xét lại bằng luật hiện hành với số mới (không tốn AI,
-# không cào bình luận): bài lên ≥ `giu_bl_tu` bình luận, trung vị tài khoản tăng, tắt luật / đổi
-# ngưỡng, tài khoản thành kênh nhà thì bài đi tiếp tới AI như bài mới.
+# — `mien_ten_brand`; tên = `theo_doi.ten_mien_seeding`, so nguyên cụm) không bao giờ là seeding.
+# Bài bị loại KHÔNG vào `bai` (không đếm), nằm ở sổ "đã loại" với lý do `LY_DO_SEEDING_BAI` + sổ
+# seeding (nhịp đăng). Soát 18/10/2026 (H1): sổ KHÔNG chặn vĩnh viễn — mỗi lượt gặp lại, bài được
+# xét lại bằng luật hiện hành với số mới (không tốn AI, không cào bình luận): bài lên ≥ `giu_bl_tu`
+# bình luận, trung vị tài khoản tăng, tắt luật / đổi ngưỡng, tài khoản thành kênh nhà thì bài đi
+# tiếp tới AI như bài mới; bài được giữ thì khoá gỡ khỏi hai sổ (`theo_doi._tach_va_giu`).
 #
 # Nền tảng (soát 18/10/2026, M4): số đo trên ĐÚNG TikTok (16/17 tài khoản bắt được là TikTok), nên
 # luật chỉ áp cho `nen_tang` (mặc định ["tiktok"]) — nền tảng khác phải bật trong cấu hình. Lượt
@@ -427,12 +428,24 @@ def khoa_tai_khoan(nen_tang, tai_khoan) -> tuple[str, str] | None:
     return p, u
 
 
+def _cum_brand(thuong_hieu) -> set[str]:
+    """Tên brand dạng NGUYÊN cụm viết liền (bỏ dấu, chỉ a-z 0-9, ≥ 3 ký tự) cho miễn seeding."""
+    ra: set[str] = set()
+    for x in thuong_hieu:
+        t = re.sub(r"[^a-z0-9]", "", bo_dau(x))
+        if len(t) >= 3:
+            ra.add(t)
+    return ra
+
+
 def ten_brand_trong(tai_khoan: str, thuong_hieu) -> bool:
-    """Định danh / tên hiển thị mang tên brand (`thuong_hieu` = tên + mã dự án; so bỏ dấu, bỏ dấu
-    câu): cửa hàng / kênh phụ của chính brand ("hapas.aeonth", "hapasgigamall", "HAPAS SÀI GÒN") —
-    không xét seeding."""
+    """Định danh / tên hiển thị mang tên brand (`thuong_hieu` = `theo_doi.ten_mien_seeding`: tên
+    + mã dự án + "ten" cấu hình + hashtag của dự án; so bỏ dấu, bỏ dấu câu): cửa hàng / kênh phụ
+    của chính brand ("hapas.aeonth", "hapasgigamall", "HAPAS SÀI GÒN") — không xét seeding. Tên so
+    NGUYÊN cụm (soát 18/10/2026, MEDIUM): bản trước tách từ ≥ 4 chữ như `_ten_brand` (đúng cho mã
+    giới thiệu), nên "Mate Made" ra "made" và miễn mọi tài khoản "handmade…"."""
     u = re.sub(r"[^a-z0-9]", "", bo_dau(tai_khoan))
-    return bool(u) and any(b and b in u for b in _ten_brand(thuong_hieu))
+    return bool(u) and any(b in u for b in _cum_brand(thuong_hieu))
 
 
 def _so_hay_none(v) -> int | None:
