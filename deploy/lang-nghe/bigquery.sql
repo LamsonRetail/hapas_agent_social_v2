@@ -113,7 +113,7 @@ OPTIONS(description='''[Lớp] Raw
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
-[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; từ 18/10/2026 không có bài seeding affiliate (tài khoản không phải kênh nhà, không mang tên brand, đăng ≥ 5 bài/ngày hoặc ≥ 20 bài/7 ngày với trung vị ≤ 2 bình luận và ≤ 15.000 lượt xem; bài tự có ≥ 10 bình luận vẫn giữ) và bài tìm theo từ khoá ngoài thị trường VN; khử trùng theo khoa; bài Facebook khử trùng thêm theo id số ma_so_fb, không có id thì theo chủ bài + phút đăng + nội dung (từ 17/10/2026); nội dung cắt 1.000 ký tự
+[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; từ 18/10/2026 không có bài seeding affiliate (tài khoản không phải kênh nhà, không mang tên brand, đăng ≥ 5 bài/ngày hoặc ≥ 20 bài/7 ngày với trung vị ≤ 2 bình luận và ≤ 15.000 lượt xem; bài tự có ≥ 10 bình luận vẫn giữ), bài tìm theo từ khoá ngoài thị trường VN và bài chỉ đến từ đường hashtag (feed hashtag TikTok, Instagram hashtag) mà không gọi tên brand ở nội dung, hashtag, tên hay định danh chủ bài (trừ kênh nhà); khử trùng theo khoa; bài Facebook khử trùng thêm theo id số ma_so_fb, không có id thì theo chủ bài + phút đăng + nội dung (từ 17/10/2026); nội dung cắt 1.000 ký tự
 [Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
 [Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet
@@ -369,8 +369,9 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.du_an`
 [Không dùng khi] Số bài, thảo luận → dùng SOCIAL_LISTENING.bai; chi phí đã tiêu → dùng SOCIAL_LISTENING.luot_quet
 [Lưu ý] Bảng chứa cấu hình hiện hành, không giữ lịch sử thay đổi (lịch sử sửa nằm ở nhật ký trên VPS, không đẩy lên).''');
 
--- Seeding affiliate + cổng thị trường VN (18/10/2026): Mark không ghi bài seeding affiliate (tài
--- khoản đăng dày, ít tương tác) và bài tìm theo từ khoá ngoài thị trường VN; bài seeding cũ dọn ở
+-- Seeding affiliate + cổng thị trường VN + cổng brand đường hashtag (18/10/2026): Mark không ghi
+-- bài seeding affiliate (tài khoản đăng dày, ít tương tác), bài tìm theo từ khoá ngoài thị trường VN
+-- và bài chỉ đến từ đường hashtag mà không gọi tên brand; bài seeding cũ dọn ở
 -- Postgres bằng scripts/lang_nghe_loc_seeding.py. Bảng đã tạo trước thì đặt lại mô tả bảng (khối
 -- này đứng CUỐI nên là bản mới nhất). MERGE của bai không xoá dòng — nếu đồng bộ đã bật trước khi
 -- dọn thì xoá tay các khoá trong tệp hoàn tác của script.
@@ -381,7 +382,7 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
 [Khoá] PK: du_an + khoa | Join: du_an → du_an.ma; nguon_id → nguon.id; (du_an, khoa) → chi_so_ngay; luot_dau, luot_cuoi → luot_quet.id
 [Nguồn] Postgres lang_nghe.public.bai trên VPS Mark; Mark ghi sau mỗi lượt /theodoi (Apify theo tài khoản, YouTube Data API) và lượt tìm theo từ khoá
 [Phạm vi] Mọi dự án | Nền tảng TikTok, Instagram, YouTube, Facebook, Threads (nguồn theo dõi + tìm theo từ khoá từ 16/10/2026; trước đó chỉ từ social_listen), Báo & Web (nen_tang = web: báo, diễn đàn, blog tìm qua Google, từ 16/10/2026) | Bài đăng trong 35 ngày trước mỗi lượt quét, từ khi bật đợt 2 (sau 14/10/2026)
-[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; từ 18/10/2026 không có bài seeding affiliate (tài khoản không phải kênh nhà, không mang tên brand, đăng ≥ 5 bài/ngày hoặc ≥ 20 bài/7 ngày với trung vị ≤ 2 bình luận và ≤ 15.000 lượt xem; bài tự có ≥ 10 bình luận vẫn giữ) và bài tìm theo từ khoá ngoài thị trường VN; khử trùng theo khoa; bài Facebook khử trùng thêm theo id số ma_so_fb, không có id thì theo chủ bài + phút đăng + nội dung (từ 17/10/2026); nội dung cắt 1.000 ký tự
+[Đã xử lý] Chỉ bài liên quan: nhắc từ khoá dự án (trừ kênh nhà), không chứa từ loại trừ, không bị AI loại; từ 18/10/2026 không có bài seeding affiliate (tài khoản không phải kênh nhà, không mang tên brand, đăng ≥ 5 bài/ngày hoặc ≥ 20 bài/7 ngày với trung vị ≤ 2 bình luận và ≤ 15.000 lượt xem; bài tự có ≥ 10 bình luận vẫn giữ), bài tìm theo từ khoá ngoài thị trường VN và bài chỉ đến từ đường hashtag (feed hashtag TikTok, Instagram hashtag) mà không gọi tên brand ở nội dung, hashtag, tên hay định danh chủ bài (trừ kênh nhà); khử trùng theo khoa; bài Facebook khử trùng thêm theo id số ma_so_fb, không có id thì theo chủ bài + phút đăng + nội dung (từ 17/10/2026); nội dung cắt 1.000 ký tự
 [Refresh] MERGE theo du_an + khoa các dòng có cap_nhat_cuoi mới hơn mốc, sau mỗi lượt quét và 6 giờ một lần (lượt /theodoi theo lịch Giao việc trên console và theo Lịch quét tự động trên dashboard — mỗi N giờ, hằng ngày, hằng tuần hoặc liên tục trong chiến dịch, từ 15/10/2026)
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
 [Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet

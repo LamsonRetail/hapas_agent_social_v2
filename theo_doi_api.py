@@ -487,15 +487,59 @@ def xoay_fb(q: list[str], lim: int, lim_cfg: int, moc: dict | None,
     return q_gui, (bat_dau + so_quet) % len(q) if q else 0, lim
 
 
+# ── Đường HASHTAG của bài (18/10/2026, cổng "phải nhắc brand" — `theo_doi.nhac_brand`) ──
+# Bài đến CHỈ từ đường hashtag (feed `challengePosts` TikTok, Instagram hashtag, TikTok dự phòng
+# clockworks hashtag) vào feed vì gắn một tag — tag rộng (#quatang2010) kéo theo bài không nói về
+# brand. Nhãn đường nằm ở `_tag_feed` của bài ("#tag", nhiều tag cách nhau dấu cách; "#" = đường
+# hashtag không rõ tag; "" = đã biết KHÔNG phải bài chỉ-hashtag); thiếu nhãn thì suy từ nguồn.
+_RE_TAG_IG = re.compile(r"instagram\.com/explore/tags/([^/?#]+)", re.IGNORECASE)
+
+
+def tag_ig(d: dict) -> str | None:
+    """Hashtag nguồn của bài Instagram theo `inputUrl` (trang actor đọc, có trong `__goc`):
+    "#tag"; "" khi là trang tìm theo từ khoá (`keywordSearch`, "explore/search/keyword"); None
+    khi bài không mang `inputUrl`."""
+    goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
+    u = str(goc.get("inputUrl") or "")
+    if not u:
+        return None
+    m = _RE_TAG_IG.search(u)
+    return f"#{A.hashtag_ig(m.group(1))}" if m else ""
+
+
+def duong_hashtag(d: dict) -> str:
+    """Nhãn đường hashtag của bài (xem trên) hoặc "" khi bài không đến CHỈ từ đường hashtag."""
+    x = d.get("_tag_feed")
+    if x is not None:
+        return str(x)
+    p = d.get("platform")
+    if p == "instagram":
+        return tag_ig(d) or ""
+    if p == "tiktok" and str(d.get("_nguon") or "").startswith("clockworks"):
+        return "#"               # dự phòng clockworks~tiktok-hashtag-scraper: tìm theo hashtag
+    return ""
+
+
+def gop_duong(giu: dict, bo: dict) -> None:
+    """Hai bản của MỘT bài (bỏ trùng trong lượt): bài chỉ-hashtag khi MỌI bản từ đường hashtag
+    (tag gộp lại); một bản từ đường từ khoá / nguồn thì bản giữ không còn là bài chỉ-hashtag."""
+    a = duong_hashtag(giu)
+    if a:
+        b = duong_hashtag(bo)
+        giu["_tag_feed"] = " ".join(dict.fromkeys(f"{a} {b}".split())) if b else ""
+
+
 def tach_da_biet(ma: str, hits: list[tuple], khoa_cua) -> tuple[list[dict], list[tuple], dict]:
     """Bài trong phạm vi → (dòng cập nhật số liệu của bài ĐÃ CÓ trong kho, bài mới cần lọc,
-    {nền tảng: số dòng trùng trong lượt}). `khoa_cua(d)` → khoá bài."""
+    {nền tảng: số dòng trùng trong lượt}). `khoa_cua(d)` → khoá bài. Bản trùng gộp nhãn đường
+    hashtag vào bản giữ (`gop_duong`)."""
     thay: dict[str, tuple] = {}
     trung: dict[str, int] = {}
     for d, dt in hits:
         k = khoa_cua(d)
         if k in thay:
             trung[d.get("platform")] = trung.get(d.get("platform"), 0) + 1
+            gop_duong(thay[k][0], d)
             continue
         thay[k] = (d, dt)
     da = K.khoa_da_co(ma, list(thay)) if thay else set()
@@ -798,6 +842,7 @@ def tim_noi_tiktok(q: list[str], bay_gio: datetime.datetime, tran: float,
     if not (q or tag) or so_yc <= 0 or not TT.dung_api("tiktok_tim"):
         return []
     items: list = []
+    theo_tag: list[tuple[str, list]] = []      # bài feed hashtag: nhãn `_tag_feed` (cổng brand)
     yc_tu = min(so_yc, len(q) * trang)
     try:
         if q and yc_tu:
@@ -819,12 +864,17 @@ def tim_noi_tiktok(q: list[str], bay_gio: datetime.datetime, tran: float,
                     if not c:
                         continue
                     cid[t] = c
-                items += TT.bai_hashtag(cid[t], trang, ngan)
+                theo_tag.append((t, TT.bai_hashtag(cid[t], trang, ngan)))
             except A.LoiApify as e:
                 if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
                     raise
                 print(f"[theo_doi] lượt nổi #{t} lỗi: {e.ma}", flush=True)
+    # Bài feed mang nhãn đường hashtag; bản trùng với bài tìm theo từ khoá gộp ở `tach_da_biet`.
     ra = A._chuan_tiktok(A._chuan_clockworks(items))
+    for t, cac in theo_tag:
+        for d, dt in A._chuan_tiktok(A._chuan_clockworks(cac)):
+            d["_tag_feed"] = f"#{t}"
+            ra.append((d, dt))
     for d, _ in ra:
         d["_noi"] = True
     return ra

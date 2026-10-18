@@ -1366,7 +1366,8 @@ TK_FB2_KHOI = A._KHOI_FB_DUONG2     # 0,00005 USD/run
 # #hapassuperbrandday (5 video tối 16/10, 3 của kênh kho đã có 59 bài) và feed #hapas (3 video
 # 11–13/10 chỉ thấy qua feed hashtag) — tìm theo từ khoá không trả về chúng. Đọc feed hashtag
 # (`challengePosts`, 20 bài/yêu cầu, cid nhớ chung với kiểm độ phủ) của TỪ KHOÁ MỘT CHỮ của dự án,
-# sau lượt thường / mới nhất / nổi; bài về đi CÙNG phễu (phạm vi ngày, loại trừ, spam, AI). Cấu hình
+# sau lượt thường / mới nhất / nổi; bài về đi CÙNG phễu (phạm vi ngày, loại trừ, spam, AI) và cổng
+# brand đường hashtag (18/10/2026, `nhac_brand`: bài chỉ từ feed phải gọi tên brand). Cấu hình
 # `du_an.cau_hinh.tu_khoa.tiktok.hashtag` {"bat" (thiếu = theo TikTok), "so_yeu_cau" (trần yêu cầu
 # mỗi lượt, mặc định 5 ≈ 0,015 USD), "gio" (giờ tối thiểu giữa hai lượt, mặc định 20 ≈ 1/ngày)}.
 TK_TAG = "tiktok_tag"               # khoá mốc trong sổ mốc tìm theo từ khoá
@@ -1945,12 +1946,12 @@ def cua_so_tk(moc: dict | None, dau: str, bay_gio: datetime.datetime,
 def _pheu_moi(ngay: int, ly: str) -> dict:
     """Phễu một nền tảng (chẩn đoán 16/10/2026: bài bị loại sau bước lọc ngày không ghi lý do —
     chủ dự án không thấy tiền đi đâu): về → trong phạm vi (ngoài phạm vi bỏ) → bài ĐÃ CÓ: cập
-    nhật số liệu; bài MỚI: trùng / từ loại trừ / ngoài thị trường VN / spam / seeding affiliate
-    (18/10/2026) / AI loại (theo mã lý do) / không nhắc từ khoá → giữ (mới). `cua_so` = số bài nằm
-    trong cửa sổ tăng dần (chỉ để đối chiếu)."""
+    nhật số liệu; bài MỚI: trùng / từ loại trừ / ngoài thị trường VN / spam / đường hashtag không
+    nhắc brand (`khong_brand`) / seeding affiliate (18/10/2026) / AI loại (theo mã lý do) / không
+    nhắc từ khoá → giữ (mới). `cua_so` = số bài nằm trong cửa sổ tăng dần (chỉ để đối chiếu)."""
     return {"ngay": ngay, "ly_do": ly, "ve": 0, "cua_so": 0, "pham_vi": 0, "ngoai_pham_vi": 0,
             "cap_nhat": 0, "da_loai_truoc": 0, "trung": 0, "loai_tru": 0, "thi_truong": 0,
-            "spam": 0, "seeding": 0, "ai_loai": {},
+            "spam": 0, "khong_brand": 0, "seeding": 0, "ai_loai": {},
             "khong_nhac": 0, "giu": 0, "moi": 0, "xin": 0, "xin_ly_do": ""}
 
 
@@ -2228,6 +2229,10 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # Giữ MỌI bài trong PHẠM VI theo dõi (chủ dự án 16/10), không chỉ cửa sổ tăng dần.
                 if dt and tu_pv <= dt <= bay_gio + datetime.timedelta(hours=1) and d.get("link"):
                     d["platform"] = p
+                    if p == "instagram" and TDA.tag_ig(d) is None:
+                        # Instagram chỉ tìm theo hashtag (`_fetch_instagram`): thiếu `inputUrl`
+                        # vẫn là bài đường hashtag (cổng brand), chỉ không rõ tag.
+                        d.setdefault("_tag_feed", "#")
                     if p in TK_GIAN_NEN_TANG:
                         d["_nhip"] = p           # bài đường 1: đếm vào nhịp tìm của nền tảng
                     hits.append((d, dt))
@@ -3021,6 +3026,10 @@ def _xu_ly_mau(v, du_an: dict, luot: int, han: float, ctx: dict,
     tk_dp = {"pheu": {}, "moi": 0, "cu": 0, "giu": 0, "de_xuat": 0, "cap_nhat": 0,
              "pham_vi": {"tu": tu_pv.isoformat(timespec="minutes")}}
     hits = [(x["d"], x["dt"]) for x in mau if x["nhac"] and not x["da_loai"]]
+    for x in mau:
+        # Bài mẫu CHỈ từ feed hashtag (mọi đường "#tag", không có đường "@người") đi cổng brand.
+        if x["duong"] and all(str(y).startswith("#") for y in x["duong"]):
+            x["d"]["_tag_feed"] = " ".join(dict.fromkeys(str(y) for y in x["duong"]))
     sau_ai = True
     giu: set[str] = set()
     if hits:
@@ -3331,11 +3340,13 @@ def _tach_va_giu(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     ma_loai = ma_loai or du_an["ma"]
     da_loai = TDA.doc_loai(ma_loai, dau, tu_pv)
     if da_loai:
+        cong = cau_hinh_hashtag_brand(du_an)
         con = []
         for d, dt in hits_moi:
             k = _khoa_bai(d["platform"], d["link"], {
                 "id": (d.get("__goc") if isinstance(d.get("__goc"), dict) else {}).get("id")})
-            if k in da_loai or any(x in da_loai for x in _khoa_loai_on_dinh(d, dt)):
+            if any(x in da_loai and _con_chan(da_loai[x], d, cong)
+                   for x in (k, *_khoa_loai_on_dinh(d, dt))):
                 tk["pheu"].setdefault(d["platform"], _pheu_moi(0, ""))["da_loai_truoc"] += 1
                 if d.get("_duong") == 2:
                     _dem_duong_2(tk, "loai")
@@ -3515,13 +3526,66 @@ def _ngoai_vn(du_an: dict, d: dict, tu: list[str]) -> str:
     return ""
 
 
+# ───────────── Cổng "phải nhắc brand" cho bài từ ĐƯỜNG HASHTAG (18/10/2026) ─────────────
+# Vì sao: feed hashtag rộng như #quatang2010 (hashtag mùa 20/10 của mọi shop quà tặng) kéo về
+# 55/224 bài không gọi tên HAPAS (1.569 thảo luận), và AI được phép giữ chúng — bài "nhắc từ
+# khoá" quatang2010, AI thấy đúng chủ đề quà tặng. Bài vào feed hashtag chỉ vì gắn một tag, không
+# phải vì nói về brand. Nên bài CHỈ đến từ đường hashtag (`theo_doi_api.duong_hashtag`: feed
+# `challengePosts` TikTok — lượt feed, tag kiểm độ phủ của lượt nổi, mẫu hashtag của kiểm độ phủ —,
+# Instagram `apify~instagram-hashtag-scraper`, TikTok dự phòng clockworks hashtag) chỉ được giữ
+# khi nội dung, hashtag, tên hoặc định danh chủ bài — hoặc chính tag của feed — gọi tên brand.
+# Bỏ TRƯỚC AI (không tốn AI), vào sổ "đã loại" lý do `LY_DO_HASHTAG_BRAND`, đếm ở phễu
+# (`khong_brand`). Bài thấy ở CẢ đường từ khoá không phải bài chỉ-hashtag (`gop_duong`); kênh nhà
+# miễn. Brand = tên + mã dự án (như miễn tên brand của luật seeding) + `ten` thêm trong cấu hình, so
+# bằng `apify_tool._khop_tu_khoa` (bỏ dấu, không phân biệt hoa thường; hashtag dính
+# "#quatanghapas" vẫn khớp). Cấu hình `du_an.cau_hinh.hashtag_can_nhac_brand`: thiếu = BẬT;
+# false hoặc {"bat": false} = tắt; {"ten": [...]} thêm tên brand (thương hiệu con, tên viết khác).
+LY_DO_HASHTAG_BRAND = "hashtag_khong_nhac_brand"
+
+
+def cau_hinh_hashtag_brand(du_an: dict) -> dict:
+    """{"bat", "ten"} hiệu lực của cổng brand đường hashtag (xem trên). Rác → mặc định (bật)."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    x = goc.get("hashtag_can_nhac_brand", True)
+    them: list[str] = []
+    if isinstance(x, dict):
+        bat = x.get("bat", True) is not False
+        if isinstance(x.get("ten"), list):
+            them = [str(t).strip() for t in x["ten"] if isinstance(t, str) and t.strip()]
+    else:
+        bat = x is not False
+    ten = [str(du_an.get("ten") or "").strip(), str(du_an.get("ma") or "").strip(), *them]
+    return {"bat": bat, "ten": list(dict.fromkeys(t for t in ten if t))}
+
+
+def nhac_brand(d: dict, ten: list[str]) -> bool:
+    """Bài gọi tên brand: nội dung, hashtag, tên kênh, định danh — hoặc tag feed đã đưa bài về
+    (bài nằm trong feed #quatanghapas là bài gắn tag đó, kể cả khi tag ở bình luận đầu của chủ
+    bài). `ten` rỗng → True (không biết brand thì không bỏ bừa)."""
+    if A._khop_tu_khoa(d, ten):
+        return True
+    tag = TDA.duong_hashtag(d).replace("#", " ").strip()
+    return bool(tag) and A._khop_tu_khoa({"hashtags": tag}, ten)
+
+
+def _con_chan(v, d: dict, cong: dict) -> bool:
+    """Dòng sổ "đã loại" `v` ([lý do, ngày]) còn chặn bài `d` lượt này không. Lý do
+    `LY_DO_HASHTAG_BRAND` gắn với ĐƯỜNG về, không với bài: chỉ chặn khi cổng còn bật VÀ bài lần
+    này cũng chỉ đến từ đường hashtag — tắt cổng hay bài về qua đường từ khoá thì xét lại, kết quả
+    không tuỳ đường nào thấy bài trước."""
+    if isinstance(v, list) and v and v[0] == LY_DO_HASHTAG_BRAND:
+        return bool(cong["bat"] and TDA.duong_hashtag(d))
+    return True
+
+
 def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
                  tk: dict, *, lich_su_seeding: list[dict] | tuple = (),
                  ai: dict | None = None, de_xuat: bool = True) -> None:
     """Phân xử AI (như social_listen): AI giữ thì giữ; AI không phán được thì giữ khi bài
-    THỰC SỰ nhắc từ khoá. Trùng, từ loại trừ, thị trường ngoài VN, spam, seeding affiliate bỏ cứng
-    trước AI. Mỗi bước đếm vào phễu của nền tảng (`tk["pheu"]`). `lich_su_seeding`: dòng lịch sử
-    thêm cho luật seeding (`_loc_seeding`); `ai`: tham số thêm của `apify_tool._phan_xu_ai` (script
+    THỰC SỰ nhắc từ khoá. Trùng, từ loại trừ, thị trường ngoài VN, spam, bài đường hashtag không
+    nhắc brand (`nhac_brand`), seeding affiliate bỏ cứng trước AI. Mỗi bước đếm vào phễu của nền
+    tảng (`tk["pheu"]`). `lich_su_seeding`: dòng lịch sử thêm cho luật seeding (`_loc_seeding`);
+    `ai`: tham số thêm của `apify_tool._phan_xu_ai` (script
     nạp raw: `song_song` 1 — một lô model một lúc như gán nhãn nền); `de_xuat` False: không ghi đề
     xuất nguồn (nạp raw cả tháng không đổ hàng trăm đề xuất vào hàng chờ duyệt)."""
     import loc_rac
@@ -3541,6 +3605,10 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     # Phễu đường 2 Threads: bài riêng của đường 2 vào bước này → giữ / loại (gộp mọi lý do loại;
     # lý do chi tiết nằm ở phễu Threads chung).
     n2_vao = sum(1 for d, _ in hits if d.get("_duong") == 2)
+    # Cổng brand đường hashtag (18/10/2026): nguồn kênh nhà chỉ đọc khi có bài cần xét.
+    cong = cau_hinh_hashtag_brand(du_an)
+    nguon: list[dict] | None = None
+    nha: set = set()
     cho, thay = [], set()
     for d, dt in hits:
         goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
@@ -3563,11 +3631,21 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             ph(d)["spam"] += 1
             loai(d, khoa, "spam", dt)
             continue
+        if cong["bat"] and TDA.duong_hashtag(d) and not nhac_brand(d, cong["ten"]):
+            if nguon is None:
+                nguon = K.nguon_cua_du_an(ma)
+                nha = _kenh_nha(nguon)
+            if loc_rac.khoa_tai_khoan(d.get("platform"), d.get("username")) not in nha:
+                tk["khong_brand"] = tk.get("khong_brand", 0) + 1
+                ph(d)["khong_brand"] = ph(d).get("khong_brand", 0) + 1
+                loai(d, khoa, LY_DO_HASHTAG_BRAND, dt)
+                continue
         d["_khoa"] = khoa
         d["_khop"] = A._khop_tu_khoa(d, tu)
         d["_thi_truong"] = A._thi_truong(d, tu)
         cho.append((d, dt))
-    nguon = K.nguon_cua_du_an(ma) if cho else []
+    if nguon is None:
+        nguon = K.nguon_cua_du_an(ma) if cho else []
     if cho:
         # Seeding affiliate (18/10/2026): bỏ TRƯỚC AI — bài không vào `bai`, không tốn AI.
         tu_pv = datetime.datetime.fromisoformat((tk.get("pham_vi") or {}).get("tu")
@@ -3652,6 +3730,7 @@ def _cau_pheu(p: str, f: dict) -> str:
             + f"trùng {f.get('trung', 0)}, từ loại trừ {f.get('loai_tru', 0)}, "
             + (f"ngoài thị trường VN {f['thi_truong']}, " if f.get("thi_truong") else "")
             + f"spam {f.get('spam', 0)}, "
+            + (f"hashtag không nhắc brand {f['khong_brand']}, " if f.get("khong_brand") else "")
             + (f"seeding affiliate {f['seeding']}, " if f.get("seeding") else "")
             + f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
             + (f", không nhắc từ khoá {f['khong_nhac']}" if f.get("khong_nhac") else "")
@@ -3767,6 +3846,8 @@ def _cau_tk(tk: dict) -> list[str]:
               if lm.get("bai") else "")
            + f"{tk.get('de_xuat', 0)} đề xuất nguồn, "
            + (f"bỏ {tk['spam']} bài spam, " if tk.get('spam') else "")
+           + (f"bỏ {tk['khong_brand']} bài đường hashtag không nhắc brand, "
+              if tk.get("khong_brand") else "")
            + _cau_seeding_tk(tk)
            + f"{_usd(tk.get('usd') or 0)} USD")
     pheu = tk.get("pheu") or {}
@@ -4749,8 +4830,9 @@ def _ban_sao_tu_khoa(hits: list) -> list[tuple[dict, datetime.datetime]]:
             "_goc_id": goc.get("id") if isinstance(goc.get("id"), (str, int)) else None,
             "_sac_thai": None if not sac or sac == phan_loai.CHUA else sac,
             "_chu_de": None if not cd or cd == phan_loai.CHUA else cd,
-            # Bản sao bỏ `__goc`: chép id số của bài Facebook TRƯỚC (`khu_trung_fb`).
-            **_cot_fb(d),
+            # Bản sao bỏ `__goc`: chép id số của bài Facebook TRƯỚC (`khu_trung_fb`), nhãn đường
+            # hashtag (`inputUrl` Instagram nằm trong `__goc`) cho cổng brand của `luu_tu_khoa`.
+            **_cot_fb(d), "_tag_feed": TDA.duong_hashtag(d),
         }, dt))
     return ra
 
@@ -4788,6 +4870,7 @@ def _du_an_khop(queries: list[str], cac: list[dict]) -> list[dict]:
 def luu_tu_khoa(queries: list[str], ban: list) -> dict:
     """Ghi bản sao bài (từ `_ban_sao_tu_khoa`) vào mọi dự án khớp. -> {mã dự án: (mới, cập
     nhật, đề xuất mới)}. Ném LoiKho nếu kho hỏng — bên gọi nền tự nuốt."""
+    import loc_rac
     ra: dict[str, tuple[int, int, int]] = {}
     if not ban:
         return ra
@@ -4796,11 +4879,19 @@ def luu_tu_khoa(queries: list[str], ban: list) -> dict:
         nguon = K.nguon_cua_du_an(ma)
         theo = {(n["nen_tang"], _chuan_dinh_danh(n["nen_tang"], n["dinh_danh"])): int(n["id"])
                 for n in nguon}
+        da = K.doc_du_an(ma) or x
+        # Cổng brand đường hashtag (18/10/2026, `nhac_brand`): social_listen tìm Instagram theo
+        # hashtag như /theodoi — bài chỉ-hashtag không gọi tên brand không vào kho dự án.
+        cong = cau_hinh_hashtag_brand(da)
+        nha = _kenh_nha(nguon)
+        ban_brand = [(d, dt) for d, dt in ban if not (
+            cong["bat"] and TDA.duong_hashtag(d) and not nhac_brand(d, cong["ten"])
+            and loc_rac.khoa_tai_khoan(d.get("platform"), d.get("username")) not in nha)]
         # Seeding affiliate (18/10/2026): bài social_listen ghi vào kho cũng không đếm bài seeding
         # — cùng luật, cùng sổ với /theodoi (`_loc_seeding`).
-        ban_da, bo, seed = _loc_seeding(K.doc_du_an(ma) or x, ban, datetime.datetime.now(_VN)
+        ban_da, bo, seed = _loc_seeding(da, ban_brand, datetime.datetime.now(_VN)
                                         - datetime.timedelta(days=TDA.NGAY_PHAM_VI), nguon)
-        tk_s: dict = {}
+        tk_s: dict = {"khong_brand": len(ban) - len(ban_brand)}
         _ghi_so_seeding(ma, bo, seed, tk_s)
         rows, thay = [], set()
         for d, dt in ban_da:
@@ -4830,7 +4921,10 @@ def luu_tu_khoa(queries: list[str], ban: list) -> dict:
             dx = K.ghi_de_xuat(ma, _de_xuat_tu(ban_da, set(theo), queries))
             K.dong_luot(luot, trang_thai="xong", bai_moi=moi, bai_cap_nhat=cu,
                         ghi_chu=(f"tìm theo từ khoá '{', '.join(queries)[:150]}'; {dx} đề xuất "
-                                 "nguồn mới; " + _cau_seeding_tk(tk_s) + "chi phí ở sổ chi phí "
+                                 "nguồn mới; "
+                                 + (f"bỏ {tk_s['khong_brand']} bài đường hashtag không nhắc "
+                                    "brand, " if tk_s["khong_brand"] else "")
+                                 + _cau_seeding_tk(tk_s) + "chi phí ở sổ chi phí "
                                  "quét, không tính vào trần theo dõi"))
         except K.LoiKho as e:
             K.dong_luot(luot, trang_thai="loi", loi=str(e))

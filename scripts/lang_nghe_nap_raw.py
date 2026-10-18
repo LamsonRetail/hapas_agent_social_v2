@@ -26,8 +26,9 @@ Pipeline = lượt tìm theo từ khoá (`theo_doi._tach_va_giu`): khung ngày `
 → nay; bỏ trùng trong lô (giữ bản nhiều bình luận nhất; Threads hai actor cùng mã bài giữ bản
 futurizerush như `_bo_trung_duong_2`); bài ĐÃ CÓ (kể cả bản trùng Facebook theo `ma_so_fb`) chỉ
 NÂNG số (`lang_nghe_db.nang_so_lieu`: số cũ không hạ số mới, ảnh chụp ghi đúng ngày đọc raw); bài
-MỚI: sổ đã loại → từ loại trừ → cổng thị trường VN → spam → seeding affiliate (lịch sử = kho + sổ +
-CẢ lô raw) → AI phân xử → ghi `kieu_quet = tu_khoa`. Raw theo NGUỒN (TikTok userPosts, trang thedoor)
+MỚI: sổ đã loại → từ loại trừ → cổng thị trường VN → spam → cổng brand đường hashtag (bài CHỈ từ
+feed challengePosts / Instagram hashtag phải gọi tên brand, `theo_doi.nhac_brand`) → seeding
+affiliate (lịch sử = kho + sổ + CẢ lô raw) → AI phân xử → ghi `kieu_quet = tu_khoa`. Raw theo NGUỒN (TikTok userPosts, trang thedoor)
 của tài khoản ĐANG THEO DÕI đi đường nguồn theo dõi (`theo_doi.chon_bai`, kieu `theo_doi`, gắn
 `nguon_id`) như lượt quét nguồn thật — kênh nhà giữ mọi bài, dashboard tách đúng bài brand. Sắc thái /
 chủ đề AI trả cùng lượt; phần thiếu để gán nhãn nền làm. Không ghi đề xuất nguồn (cả tháng dữ liệu sẽ
@@ -39,7 +40,7 @@ tảng như lượt thật.
 An toàn:
   • Mặc định CHẠY THỬ: không gọi AI, không ghi gì (kể cả sổ) — kết nối kho đặt
     `default_transaction_read_only`; in phễu ước tính (bài sẽ nạp TRƯỚC AI, thảo luận thêm, bài
-    seeding bị loại, bài đã có sẽ nâng số) và số lô AI.
+    seeding bị loại, bài đường hashtag không nhắc brand bị loại, bài đã có sẽ nâng số) và số lô AI.
   • `--ap-dung --sao-luu <tệp>`: AI tuần tự từng phần ≤ `apify_tool._AI_LO` bài, một lô model một
     lúc, nghỉ `gan_nhan_nen.NGHI_GIUA_LO` giây giữa hai phần (quota model dùng chung với bot) —
     hỏng giữa chừng thì chạy lại: bài đã ghi thành "đã có", bài đã loại thành "đã loại trước".
@@ -169,6 +170,10 @@ def _tiktok(f: pathlib.Path) -> tuple[list, list]:
         if loai == "userPosts":
             for d, _ in rows:
                 d["_ho_so"] = True
+        elif loai == "challengePosts":
+            # Feed hashtag: đường hashtag như `theo_doi._them_feed_tag` — qua cổng brand.
+            for d, _ in rows:
+                d["_tag_feed"] = f"#{TT.chuan_tag(x.get('tag') or '')}"
         (ho_so if loai == "userPosts" else tim).extend(rows)
     return tim, ho_so
 
@@ -256,10 +261,17 @@ def doc_raw(duong: list[str], tu: datetime.datetime, den: datetime.datetime) -> 
         else:
             rows = {"scrapeforge": A._chuan_facebook, "ig": A._chuan_instagram,
                     "th1": A._chuan_threads, "th2": A._chuan_threads_2}[kieu](items)
+        tim_tu = bool((r.get("input") or {}).get("keywordSearch"))
         for d, _ in rows:
             d["platform"] = p
             if kieu == "th2":
                 d["_th2"] = True
+            if kieu == "ig":
+                # Cổng brand (18/10/2026): actor hashtag Instagram là đường hashtag, TRỪ run
+                # `keywordSearch` (trang tìm theo từ khoá) — theo `inputUrl` của bài, thiếu thì
+                # theo input của run.
+                t = TDA.tag_ig(d)
+                d["_tag_feed"] = ("" if tim_tu else "#") if t is None else t
         them(f, actor, rows, ra["tim"])
     return ra
 
@@ -283,7 +295,7 @@ def loc_khung(rows: list, tu: datetime.datetime, den: datetime.datetime) -> tupl
     (Facebook thêm cùng `ma_so_fb`, Threads cùng mã bài). Bản giữ: bản đọc từ HỒ SƠ (đi đường
     nguồn nếu tài khoản đang được theo dõi), rồi bản futurizerush với Threads (có follower + lượt
     xem, như `_bo_trung_duong_2`), rồi bản nhiều bình luận nhất. -> (bài, {nền tảng: {"ve",
-    "pham_vi", "ngoai_pham_vi", "trung"}})."""
+    "pham_vi", "ngoai_pham_vi", "trung"}}). Bản giữ mang nhãn đường hashtag gộp (`gop_duong`)."""
     import khu_trung_fb as KT
     dem: dict[str, dict] = {}
     chon: dict[tuple, tuple] = {}
@@ -311,6 +323,8 @@ def loc_khung(rows: list, tu: datetime.datetime, den: datetime.datetime) -> tupl
                 return (bool(b.get("_ho_so")), not b.get("_th2"), _so(b.get("comments")))
             if hon(d) > hon(cu[0]):
                 chon[k] = (d, dt)
+            # Bài chỉ-hashtag (cổng brand) khi MỌI bản đều từ đường hashtag — như `tach_da_biet`.
+            TDA.gop_duong(chon[k][0], cu[0] if chon[k][0] is d else d)
         else:
             chon[k] = (d, dt)
         for b in phu:
@@ -342,10 +356,12 @@ def che_do_chay_thu(ghi: dict):
     """Thay MỌI chỗ ghi + AI của pipeline bằng bản đếm (`ghi`), và đặt kết nối kho chỉ đọc
     (`default_transaction_read_only` — chỗ ghi nào lọt khỏi danh sách này thì Postgres từ chối,
     không ghi im lặng)."""
-    ghi.update(ai=[], bai=[], nang=[], loai=0, seeding=[])
+    ghi.update(ai=[], ai_khong_khop=0, bai=[], nang=[], loai=0, loai_ds=[], seeding=[])
 
     def ai(rows, *a, **k):
         ghi["ai"].append(len(rows))
+        # Bài không nhắc từ khoá mà vẫn tới AI: chạy thật AI ĐƯỢC giữ (ngoài số "sẽ nạp").
+        ghi["ai_khong_khop"] += sum(1 for d, _ in rows if not d.get("_khop"))
         return {}, {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "bỏ qua: chạy thử"}
 
     def ghi_bai(ma, luot, kieu, rows):
@@ -358,6 +374,7 @@ def che_do_chay_thu(ghi: dict):
 
     def loai(ma, dau, moi, tu):
         ghi["loai"] += len(moi)
+        ghi["loai_ds"].extend(moi)              # (khoá, lý do, giờ đăng) — phễu chạy thử
 
     def seeding(ma, moi, bay_gio=None):
         ghi["seeding"].extend(moi)
@@ -384,7 +401,7 @@ def che_do_chay_thu(ghi: dict):
 # ───────────────────────────── chạy pipeline ─────────────────────────────
 def _tk_moi(tu: datetime.datetime) -> dict:
     return {"pheu": {}, "moi": 0, "cu": 0, "giu": 0, "de_xuat": 0, "cap_nhat": 0, "spam": 0,
-            "seeding": 0, "pham_vi": {"tu": tu.isoformat(timespec="minutes")}}
+            "khong_brand": 0, "seeding": 0, "pham_vi": {"tu": tu.isoformat(timespec="minutes")}}
 
 
 def _cong(tong: dict, x: dict) -> None:
@@ -532,7 +549,9 @@ def cau_ghi_chu(tong: dict, tep: list, bo_qua: list, khung: str) -> list[str]:
           + (f"; bỏ qua {len(bo_qua)} tệp (actor không có bộ chuẩn hoá của Mark)" if bo_qua else ""),
           f"tìm theo từ khoá (raw): nâng số liệu {tong['cap_nhat']} bài đã có, giữ "
           f"{tong['moi'] + tong['cu']} ({tong['moi']} mới), " + T._cau_seeding_tk(tong)
-          + (f"bỏ {tong['spam']} bài spam, " if tong.get("spam") else "") + "0,00 USD"]
+          + (f"bỏ {tong['spam']} bài spam, " if tong.get("spam") else "")
+          + (f"bỏ {tong['khong_brand']} bài đường hashtag không nhắc brand, "
+             if tong.get("khong_brand") else "") + "0,00 USD"]
     for p in (*_MXH, "web"):
         if p in tong["pheu"]:
             ra.append(T._cau_pheu(p, {**tong["pheu"][p], "ngay": tong.get("_ngay", 0),
@@ -642,11 +661,21 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None, nghi=time.sl
         nhac = {T._dong_seeding(d, dt)["khoa"] for d, dt in tim if A._khop_tu_khoa(d, tu_kw)}
         seed_nhac = [x for x in seed if x["khoa"] in nhac]
         thi_truong = sum(int(f.get("thi_truong") or 0) for f in tong["pheu"].values())
-        in_ra(f"ƯỚC TÍNH: sẽ nạp ≤ {len(moi)} bài mới, ≈ {_tl(moi)} thảo luận (1 + bình luận) — "
-              f"TRƯỚC AI (AI còn loại bài lạc đề / trùng tên); trong đó gọi tên {ten[0]}: "
+        # Cổng brand đường hashtag: bài bỏ (theo khoá sổ đã loại) + thảo luận, tách theo nền tảng.
+        k_brand = {str(k) for k, ly, _ in ghi["loai_ds"] if ly == T.LY_DO_HASHTAG_BRAND}
+        bo_brand = [{"bl": d.get("comments"), "p": d["platform"]} for d, _ in tim
+                    if _khoa(d) in k_brand]
+        theo_p = {p: sum(1 for x in bo_brand if x["p"] == p) for p in _MXH}
+        # Soát 18/10/2026: số "sẽ nạp" là bài mới NHẮC từ khoá (chạy thử không có AI) — không phải
+        # trần: chạy thật AI còn được giữ bài không nhắc từ khoá trong số gửi AI (`_giu_tu_khoa`).
+        in_ra(f"ƯỚC TÍNH: sẽ nạp {len(moi)} bài mới nhắc từ khoá, ≈ {_tl(moi)} thảo luận (1 + bình "
+              f"luận) — TRƯỚC AI (AI còn loại bài lạc đề / trùng tên, và được giữ thêm bài trong "
+              f"{ghi['ai_khong_khop']} bài không nhắc từ khoá gửi AI); trong đó gọi tên {ten[0]}: "
               f"{len(goi_ten)} bài, {_tl(goi_ten)} thảo luận. Loại seeding affiliate {len(seed)} "
               f"bài ({_tl(seed)} thảo luận; {len(seed_nhac)} bài / {_tl(seed_nhac)} thảo luận "
-              f"nhắc từ khoá) của {len(tong.get('_tk_seeding') or {})} tài khoản; ngoài thị "
+              f"nhắc từ khoá) của {len(tong.get('_tk_seeding') or {})} tài khoản; loại vì đường "
+              f"hashtag không nhắc brand {len(bo_brand)} bài ({_tl(bo_brand)} thảo luận"
+              + "".join(f"; {p} {n}" for p, n in theo_p.items() if n) + f"); ngoài thị "
               f"trường VN {thi_truong}; nâng số {len(ghi['nang'])} bài đã có.")
         for tk_, x in sorted((tong.get("_tk_seeding") or {}).items(),
                              key=lambda kv: (-kv[1]["so_bai"], kv[0])):

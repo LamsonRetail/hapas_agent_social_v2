@@ -253,7 +253,7 @@ def test_chay_thu_khong_ai_khong_ghi_in_phieu_uoc_tinh(monkeypatch, tmp_path, ai
     assert ma == 0 and ai == [] and kho.ghi == [] and kho.nang == [] and kho.luot == {}
     assert "PGOPTIONS" not in os.environ, "trả lại môi trường sau chạy thử"
     assert "seeding affiliate 8" in out and "seeding tiktok @aff_mau: 8 bài" in out
-    m = re.search(r"ƯỚC TÍNH: sẽ nạp ≤ (\d+) bài mới", out)
+    m = re.search(r"ƯỚC TÍNH: sẽ nạp (\d+) bài mới nhắc từ khoá", out)
     assert m and int(m.group(1)) == 3 + 6 + 2 + 2, out      # review + livestream + mina + kênh nhà
     assert "Bỏ qua 1 tệp" in out and "AI: " in out
     assert "CẢNH BÁO: 5 tệp raw mang giờ ghi HÔM NAY" in out, "raw vừa ghi: nhắc giữ giờ đọc thật"
