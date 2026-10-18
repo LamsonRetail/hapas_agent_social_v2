@@ -411,8 +411,8 @@ def _map_tiktok(raw: list) -> tuple[list[dict], int]:
     return [{
         "kenh": it.get("uniqueId") or "",
         "text": str(it.get("text") or "")[:1000],
-        "likes": int(it.get("diggCount") or 0),
-        "replies": int(it.get("replyCommentTotal") or 0),
+        "likes": _so(it.get("diggCount")),
+        "replies": _so(it.get("replyCommentTotal")),
         "thoi_gian": _gio(it.get("createTimeISO")),
         "tac_gia_thich": "có" if it.get("likedByAuthor") else "",
         "link": it.get("videoWebUrl") or it.get("submittedVideoUrl") or "",
@@ -433,8 +433,8 @@ def _map_youtube(raw: list) -> tuple[list[dict], int]:
     return [{
         "kenh": it.get("author") or "",
         "text": str(it.get("comment") or "")[:1000],
-        "likes": int(it.get("voteCount") or 0),
-        "replies": int(it.get("replyCount") or 0),
+        "likes": _so(it.get("voteCount")),
+        "replies": _so(it.get("replyCount")),
         # publishedTimeText là chữ tương đối ("2 years ago") — giữ nguyên văn,
         # KHÔNG bịa thành ngày tuyệt đối.
         "thoi_gian": str(it.get("publishedTimeText") or ""),
@@ -466,8 +466,8 @@ def _map_facebook(raw: list) -> tuple[list[dict], int]:
         out.append({
             "kenh": str(_first(it, "profileName", "authorName", "name", "author")),
             "text": str(txt)[:1000],
-            "likes": int(_first(it, "likesCount", "likeCount", "reactionsCount", default=0) or 0),
-            "replies": int(_first(it, "replyCount", "commentsCount", default=0) or 0),
+            "likes": _so(_first(it, "likesCount", "likeCount", "reactionsCount", default=0)),
+            "replies": _so(_first(it, "replyCount", "commentsCount", default=0)),
             "thoi_gian": _gio(_first(it, "date", "timestamp", "createdAt", default=None)),
             "tac_gia_thich": "",
             "link": str(_first(it, "facebookUrl", "commentUrl", "postUrl")),
@@ -482,9 +482,27 @@ def _map_facebook(raw: list) -> tuple[list[dict], int]:
     return out, len(raw)
 
 
+_HE_SO_DEM = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}
+
+
 def _so(v) -> int:
+    """Số đếm actor trả (like, trả lời…) → int ≥ 0: 12, "12", "1,234", "1.234", "5.4K", "1,2M".
+
+    Vì sao (đo 18/10/2026): actor bình luận Facebook trả `likesCount` dạng chữ "5.4K"; `int()`
+    ném ValueError và làm hỏng CẢ bước cào bình luận của lượt (Threads/FB không dòng nào). Đọc
+    không được thì 0 — số đếm sai không đáng làm mất bình luận."""
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, (int, float)):
+        return max(0, int(v))
+    s = str(v or "").strip().replace(" ", "").upper()
+    if not s:
+        return 0
     try:
-        return int(v or 0)
+        if s[-1] in _HE_SO_DEM:
+            return max(0, round(float(s[:-1].replace(",", ".")) * _HE_SO_DEM[s[-1]]))
+        so = s.replace(",", "").replace(".", "")
+        return int(so) if so.isdigit() else max(0, int(float(s)))
     except (TypeError, ValueError):
         return 0
 
