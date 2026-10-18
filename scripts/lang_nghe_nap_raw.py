@@ -45,6 +45,10 @@ An toàn:
     lúc, nghỉ `gan_nhan_nen.NGHI_GIUA_LO` giây giữa hai phần (quota model dùng chung với bot) —
     hỏng giữa chừng thì chạy lại: bài đã ghi thành "đã có", bài đã loại thành "đã loại trước"
     (lý do luật không tốn AI như seeding thì luật xét lại, không gọi AI — `theo_doi._con_chan`).
+    Soát 18/10/2026 (M3): AI không phán (bỏ qua, lỗi, hết `HAN_LO` giây, đạt trần
+    `--toi-da-goi-ai`) thì phần đó KHÔNG ghi theo luật, không vào sổ (`can_ai`) — script báo số
+    bài chưa phán, chạy lại là xét tiếp; lô quá hạn không chạy nền song song với lô sau (`GacAI`
+    chờ model trả lời xong rồi mới gửi lô kế).
     Tệp hoàn tác: lượt, khoá bài thêm (= bài có `luot_dau` = lượt nạp), khoá sổ thêm.
   • `--hoan-tac <tệp>`: xoá đúng các bài lượt nạp đã thêm MÀ CHƯA BỊ ĐỤNG (lượt sau chưa cập nhật,
     chưa cào bình luận), gỡ khoá sổ đã thêm. Số đã nâng của bài cũ và ảnh chụp ngày đọc giữ nguyên
@@ -73,12 +77,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import contextvars
 import datetime
 import json
 import math
 import os
 import pathlib
 import sys
+import threading
 import time
 
 GOC = pathlib.Path(__file__).resolve().parent.parent
@@ -96,7 +102,8 @@ _VN = datetime.timezone(datetime.timedelta(hours=7))
 TU_MAC_DINH = "2026-09-17"
 LO = A._AI_LO                      # bài mỗi phần gửi AI (một lô model)
 NGHI_GIUA_LO = 5                   # = gan_nhan_nen.NGHI_GIUA_LO
-HAN_LO = 180.0                     # = gan_nhan_nen.HAN_LO
+HAN_LO = 180.0                     # = gan_nhan_nen.HAN_LO — giây chờ model mỗi phần (soát M3)
+TOI_DA_GOI_AI = 50                 # trần lượt gọi model cả lần chạy (`--toi-da-goi-ai`)
 NHAN = "nạp raw Kompa"
 _MXH = ("youtube", "tiktok", "facebook", "instagram", "threads")
 #: Actor → (nền tảng, bộ chuẩn hoá). thedoor / Google / YouTube có đường riêng bên dưới.
@@ -405,10 +412,82 @@ def che_do_chay_thu(ghi: dict):
             os.environ["PGOPTIONS"] = pg
 
 
+# ───────────────────────────── gác AI (soát 18/10/2026, M3) ─────────────────────────────
+class GacAI:
+    """Gác MỌI lượt gọi model của lần chạy áp dụng:
+      • trần tổng số lượt gọi (`toi_da`, mỗi lô ≤ `LO` bài một lượt): quá trần thì phần sau trả
+        "bỏ qua: đạt trần" — với `can_ai` phần đó không ghi, chạy lại script là xét tiếp;
+      • TUẦN TỰ thật: `apify_tool._hoi_model` hết giờ thì luồng model vẫn chạy nền (không thể huỷ
+        lời gọi đang chờ). Lô sau phải chờ luồng đó xong, kẻo hai lô cùng gọi model — quota dùng
+        chung với bot (`gan_nhan_nen` cũng một lô một lúc).
+    `cai()` thay `A._hoi_model` / `A._phan_xu_ai` trong lúc chạy, xong thì trả lại."""
+
+    def __init__(self, toi_da: int, in_ra=print):
+        self.toi_da = max(0, int(toi_da))
+        self.da_goi = 0
+        self.vuot = 0                       # bài không được gửi vì đạt trần
+        self.cho = 0                        # số lần phải chờ lô quá hạn
+        self.in_ra = in_ra
+        self._dang: list[threading.Thread] = []
+        self._hoi_goc = A._hoi_model
+        self._xu_goc = A._phan_xu_ai
+
+    def cho_lo_truoc(self) -> None:
+        for t in list(self._dang):
+            if t.is_alive():
+                self.cho += 1
+                self.in_ra("    lô AI trước quá hạn — chờ model trả lời xong rồi mới gửi lô sau")
+                t.join()
+        self._dang = [t for t in self._dang if t.is_alive()]
+
+    def hoi(self, nhac: str, ngan_sach: float) -> str:
+        """Thay `A._hoi_model`: gọi bản gốc trong luồng RIÊNG được theo dõi (chờ không giới hạn ở
+        trong, `ngan_sach` giây ở ngoài); hết giờ thì ném `_FutTimeout` như bản gốc nhưng nhớ luồng."""
+        self.cho_lo_truoc()
+        kq: dict = {}
+        ctx = contextvars.copy_context()
+
+        def chay():
+            try:
+                kq["ra"] = ctx.run(self._hoi_goc, nhac, 10.0 ** 6)
+            except BaseException as e:  # noqa: BLE001 — chuyển lỗi về luồng gọi
+                kq["loi"] = e
+        t = threading.Thread(target=chay, name="nap-raw-model", daemon=True)
+        self._dang.append(t)
+        t.start()
+        t.join(max(0.0, float(ngan_sach)))
+        if t.is_alive():
+            raise A._FutTimeout()
+        self._dang.remove(t)
+        if "loi" in kq:
+            raise kq["loi"]
+        return kq.get("ra") or ""
+
+    def phan_xu(self, rows, *a, **k):
+        """Thay `A._phan_xu_ai`: đếm lượt gọi (mỗi `LO` bài một lô), dừng ở trần."""
+        can = math.ceil(len(rows) / LO) if rows else 0
+        if can and self.da_goi + can > self.toi_da:
+            self.vuot += len(rows)
+            return {}, {"_sac_thai": {}, "_chu_de": {},
+                        "trang_thai": f"bỏ qua: đạt trần {self.toi_da} lượt gọi AI"}
+        self.cho_lo_truoc()
+        self.da_goi += can
+        return self._xu_goc(rows, *a, **k)
+
+    @contextlib.contextmanager
+    def cai(self):
+        A._hoi_model, A._phan_xu_ai = self.hoi, self.phan_xu
+        try:
+            yield self
+        finally:
+            A._hoi_model, A._phan_xu_ai = self._hoi_goc, self._xu_goc
+
+
 # ───────────────────────────── chạy pipeline ─────────────────────────────
 def _tk_moi(tu: datetime.datetime) -> dict:
     return {"pheu": {}, "moi": 0, "cu": 0, "giu": 0, "de_xuat": 0, "cap_nhat": 0, "spam": 0,
-            "khong_brand": 0, "seeding": 0, "pham_vi": {"tu": tu.isoformat(timespec="minutes")}}
+            "khong_brand": 0, "seeding": 0, "chua_ai": 0,
+            "pham_vi": {"tu": tu.isoformat(timespec="minutes")}}
 
 
 def _cong(tong: dict, x: dict) -> None:
@@ -444,9 +523,10 @@ def _nang(ngay):
 
 
 def chay_tu_khoa(du_an: dict, luot: int, hits: list, tu: datetime.datetime, nghi, tong: dict,
-                 lo: int = LO) -> int:
+                 lo: int = LO, *, can_ai: bool = False) -> int:
     """Bài đường từ khoá → `_tach_va_giu` theo từng phần ≤ `lo` bài (một lô AI), nghỉ giữa hai phần
-    đã gọi AI. Lịch sử seeding = CẢ lô (`lich_su_seeding`). -> số lô AI đã dùng."""
+    đã gọi AI. Lịch sử seeding = CẢ lô (`lich_su_seeding`). `can_ai`: AI không phán thì không ghi
+    (chạy áp dụng); AI chờ `HAN_LO` giây mỗi phần. -> số lô AI đã dùng."""
     tu_kw = T.tu_tim(du_an)
     them = [T._dong_seeding(d, dt) for d, dt in hits if A._khop_tu_khoa(d, tu_kw)]
     hits = sorted(hits, key=lambda x: (x[0]["platform"], x[1]))
@@ -457,7 +537,7 @@ def chay_tu_khoa(du_an: dict, luot: int, hits: list, tu: datetime.datetime, nghi
         tk = _tk_moi(tu)
         T._tach_va_giu(du_an, luot, phan, tu_kw, time.monotonic() + HAN_LO + 30, tk,
                        cap_nhat_so=_nang(ngay), lich_su_seeding=them, ai={"song_song": 1},
-                       de_xuat=False)
+                       de_xuat=False, can_ai=can_ai, giay_ai=HAN_LO)
         _cong(tong, tk)
         if _so_ai(tk):
             so_lo += 1
@@ -465,9 +545,10 @@ def chay_tu_khoa(du_an: dict, luot: int, hits: list, tu: datetime.datetime, nghi
     return so_lo
 
 
-def chay_web(du_an: dict, luot: int, web: list, tu: datetime.datetime, tong: dict) -> None:
+def chay_web(du_an: dict, luot: int, web: list, tu: datetime.datetime, tong: dict, *,
+             can_ai: bool = False) -> None:
     """Raw Google → `nguon_web.thu_thap` (đoạn trích, không tải trang) → `_tach_va_giu` với sổ đã
-    loại RIÊNG của web, như `theo_doi._tim_web` + `_tim_tu_khoa`."""
+    loại RIÊNG của web, như `theo_doi._tim_web` + `_tim_tu_khoa`. `can_ai` như `chay_tu_khoa`."""
     ma = du_an["ma"]
     tu_kw = T.tu_tim(du_an)
     for items, luc, _ten in web:
@@ -502,7 +583,7 @@ def chay_web(du_an: dict, luot: int, web: list, tu: datetime.datetime, tong: dic
         if hits:
             T._tach_va_giu(du_an, luot, hits, tu_web, time.monotonic() + HAN_LO + 30, tk,
                            ma_loai=f"{ma}:web", cap_nhat_so=_nang(luc.date()),
-                           ai={"song_song": 1}, de_xuat=False)
+                           ai={"song_song": 1}, de_xuat=False, can_ai=can_ai, giay_ai=HAN_LO)
         con = tk.pop("_bi_loai", None)
         if con:
             TDA.ghi_loai(f"{ma}:web", TDA.dau_loai(du_an, tu_web), con, tu)
@@ -510,9 +591,10 @@ def chay_web(du_an: dict, luot: int, web: list, tu: datetime.datetime, tong: dic
 
 
 def chay_nguon(du_an: dict, luot: int, theo_nguon: dict[int, list], nguon: dict[int, dict],
-               tong: dict, nghi) -> int:
+               tong: dict, nghi, *, can_ai: bool = False) -> int:
     """Raw theo NGUỒN đang theo dõi → đường nguồn: bài đã có chỉ nâng số; bài mới qua `chon_bai`
-    (kênh nhà giữ mọi bài) → `ghi_bai(…, "theo_doi")`. -> số lô AI."""
+    (kênh nhà giữ mọi bài; `can_ai`: bài nguồn khác mà AI không phán thì không ghi; AI chờ
+    `HAN_LO` giây) → `ghi_bai(…, "theo_doi")`. -> số lô AI."""
     ma = du_an["ma"]
     so_lo = 0
 
@@ -529,8 +611,9 @@ def chay_nguon(du_an: dict, luot: int, theo_nguon: dict[int, list], nguon: dict[
         for i in range(0, len(moi), LO):
             phan = moi[i:i + LO]
             ghi, tk = T.chon_bai(du_an, {nid: phan}, {nid: nguon[nid]},
-                                 time.monotonic() + min(150.0, HAN_LO))
-            for k in ("lay_duoc", "qua_cu", "khong_nhac", "loai_tru", "ai_loai", "seeding"):
+                                 time.monotonic() + HAN_LO, can_ai=can_ai)
+            for k in ("lay_duoc", "qua_cu", "khong_nhac", "loai_tru", "ai_loai", "seeding",
+                      "chua_ai"):
                 tong["nguon"][k] += int(tk.get(k) or 0)
             if ghi:
                 m, c = K.ghi_bai(ma, luot, "theo_doi", ghi)
@@ -559,6 +642,11 @@ def cau_ghi_chu(tong: dict, tep: list, bo_qua: list, khung: str) -> list[str]:
           + (f"bỏ {tong['spam']} bài spam, " if tong.get("spam") else "")
           + (f"bỏ {tong['khong_brand']} bài đường hashtag không nhắc brand, "
              if tong.get("khong_brand") else "") + "0,00 USD"]
+    chua = int(tong.get("chua_ai") or 0) + int(n.get("chua_ai") or 0)
+    if chua:
+        # Soát M3: phần AI không phán KHÔNG ghi theo luật — nói rõ để người chạy chạy lại.
+        ra.insert(1, f"AI chưa phán {chua} bài (lỗi / hết giờ / đạt trần gọi AI) — CHƯA ghi, "
+                     "không vào sổ; chạy lại script (tệp hoàn tác mới) để nạp tiếp")
     for p in (*_MXH, "web"):
         if p in tong["pheu"]:
             ra.append(T._cau_pheu(p, {**tong["pheu"][p], "ngay": tong.get("_ngay", 0),
@@ -567,15 +655,16 @@ def cau_ghi_chu(tong: dict, tep: list, bo_qua: list, khung: str) -> list[str]:
         ra.append(f"raw theo nguồn đang theo dõi (đường nguồn): {n['da_co']} bài đã có (nâng số "
                   f"{n['cap_nhat']}), {n['lay_duoc']} bài mới → quá {T.NGAY_GIU} ngày "
                   f"{n['qua_cu']}, không nhắc {n['khong_nhac']}, từ loại trừ {n['loai_tru']}, "
-                  f"AI loại {n['ai_loai']}, seeding {n['seeding']} → giữ {n['giu']} "
-                  f"({n['moi']} mới)")
+                  f"AI loại {n['ai_loai']}, seeding {n['seeding']}"
+                  + (f", AI chưa phán {n['chua_ai']}" if n.get("chua_ai") else "")
+                  + f" → giữ {n['giu']} ({n['moi']} mới)")
     return ra
 
 
 def _tong_moi(tu: datetime.datetime, ngay: int) -> dict:
     t = _tk_moi(tu)
     t["nguon"] = {k: 0 for k in ("lay_duoc", "qua_cu", "khong_nhac", "loai_tru", "ai_loai",
-                                 "seeding", "giu", "moi", "cu", "da_co", "cap_nhat")}
+                                 "seeding", "chua_ai", "giu", "moi", "cu", "da_co", "cap_nhat")}
     t["_ngay"] = ngay
     return t
 
@@ -693,8 +782,12 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None, nghi=time.sl
                              key=lambda kv: (-kv[1]["so_bai"], kv[0])):
             in_ra(f"    seeding {loc_rac.cau_seeding(tk_, x)}")
         n_ai = sum(ghi["ai"])
-        in_ra(f"AI: {n_ai} bài cần phân xử → {so_lo} lần gọi model ({sum(math.ceil(x / LO) for x in ghi['ai'] if x)} "
-              f"lô ≤ {LO} bài, một lô một lúc, nghỉ {NGHI_GIUA_LO} giây) — ≈ {so_lo} phút.")
+        so_goi = sum(math.ceil(x / LO) for x in ghi["ai"] if x)
+        in_ra(f"AI: {n_ai} bài cần phân xử → {so_lo} lần gọi model ({so_goi} lô ≤ {LO} bài, một lô "
+              f"một lúc, chờ ≤ {HAN_LO:g} giây/lô, nghỉ {NGHI_GIUA_LO} giây) — ≈ {so_lo} phút; trần "
+              f"--toi-da-goi-ai {ns.toi_da_goi_ai} lượt"
+              + (" — THẤP hơn số lô: phần vượt trần không ghi, chạy lại để nạp tiếp"
+                 if so_goi > ns.toi_da_goi_ai else "") + ".")
         in_ra("Không ghi gì. Ghi thật: thêm --ap-dung --sao-luu <tệp hoàn tác>.")
         return 0
     return ap_dung(ns, ma, du_an, raw, tim, theo_nguon, nguon, tong, tu, khung, in_ra, nghi)
@@ -734,10 +827,13 @@ def ap_dung(ns, ma, du_an, raw, tim, theo_nguon, nguon, tong, tu, khung, in_ra, 
                                timespec="seconds"), "tu": ns.tu,
                            "tep": [t for t, _, _ in raw["tep"]]})
         so_lo = 0
+        gac = GacAI(ns.toi_da_goi_ai, in_ra)
         try:
-            so_lo += chay_tu_khoa(du_an, luot, tim, tu, nghi, tong)
-            chay_web(du_an, luot, raw["web"], tu, tong)
-            so_lo += chay_nguon(du_an, luot, theo_nguon, nguon, tong, nghi)
+            # Soát M3: AI không phán thì không ghi (`can_ai`); mọi lượt gọi model qua `GacAI`.
+            with gac.cai():
+                so_lo += chay_tu_khoa(du_an, luot, tim, tu, nghi, tong, can_ai=True)
+                chay_web(du_an, luot, raw["web"], tu, tong, can_ai=True)
+                so_lo += chay_nguon(du_an, luot, theo_nguon, nguon, tong, nghi, can_ai=True)
         except Exception as e:  # noqa: BLE001 — vẫn đóng lượt + ghi khoá đã thêm để hoàn tác được
             trang_thai, loi = "loi", A._che_token(f"{type(e).__name__}: {e}")[:300]
         finally:
@@ -754,9 +850,16 @@ def ap_dung(ns, ma, du_an, raw, tim, theo_nguon, nguon, tong, tu, khung, in_ra, 
             T._bao_dashboard(ma, luot)
     for c in cau:
         in_ra("  " + c)
-    in_ra(f"Lượt {luot}: thêm {len(them)} bài, {so_lo} lần gọi model; khoá sổ thêm "
-          f"{len(so_them)}. Tệp hoàn tác: {ns.sao_luu}" + (f". LỖI: {loi}" if loi else ""))
-    return 0 if loi is None else 1
+    chua = int(tong.get("chua_ai") or 0) + int(tong["nguon"].get("chua_ai") or 0)
+    in_ra(f"Lượt {luot}: thêm {len(them)} bài, {gac.da_goi}/{gac.toi_da} lượt gọi model"
+          + (f" (chờ lô quá hạn {gac.cho} lần)" if gac.cho else "")
+          + f"; khoá sổ thêm {len(so_them)}. Tệp hoàn tác: {ns.sao_luu}"
+          + (f". LỖI: {loi}" if loi else ""))
+    if chua:
+        in_ra(f"CHƯA XONG: {chua} bài AI chưa phán (lỗi / hết giờ / đạt trần --toi-da-goi-ai) — "
+              "không ghi, không vào sổ. Chạy lại cùng lệnh với --sao-luu <tệp MỚI> để nạp tiếp "
+              "(bài đã ghi thành \"đã có\", bài đã loại không gọi AI lại).")
+    return 0 if loi is None and not chua else 1
 
 
 def hoan_tac(ma: str, tep: str, in_ra) -> int:
@@ -805,6 +908,9 @@ def tao_parser() -> argparse.ArgumentParser:
     ap.add_argument("--ap-dung", action="store_true", help="ghi thật (cần --sao-luu)")
     ap.add_argument("--sao-luu", metavar="TEP", help="tệp hoàn tác JSONL (tạo mới)")
     ap.add_argument("--hoan-tac", metavar="TEP", help="xoá bài lượt nạp đã thêm (chưa bị đụng)")
+    ap.add_argument("--toi-da-goi-ai", type=int, default=TOI_DA_GOI_AI, metavar="N",
+                    help=f"trần tổng lượt gọi model cả lần chạy (mặc định {TOI_DA_GOI_AI}; mỗi lô "
+                         f"≤ {LO} bài một lượt) — phần vượt trần không ghi, chạy lại để nạp tiếp")
     return ap
 
 

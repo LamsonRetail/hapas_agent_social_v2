@@ -189,11 +189,13 @@ class KhoGia:
 
 @pytest.fixture
 def ai(monkeypatch):
+    """AI giả: phán GIỮ mọi bài (mã ugc) — chạy áp dụng chỉ ghi bài AI đã phán (soát M3)."""
     goi: list[tuple] = []
 
     def phan_xu(rows, *a, **k):
         goi.append((len(rows), k.get("song_song")))
-        return {}, {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"}
+        return ({i: (True, "ugc", "") for i in range(len(rows))},
+                {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"})
     monkeypatch.setattr(A, "_phan_xu_ai", phan_xu)
     monkeypatch.setattr(N, "_chuan_bi_model", lambda: None)
     return goi
@@ -308,6 +310,71 @@ def test_ap_dung_qua_pipeline_ghi_luot_va_tep_hoan_tac(monkeypatch, tmp_path, ai
     assert ma == 0 and set(kho.bai) == {khoa_cu, dung}
     assert "giữ 1 bài đã bị đụng sau lượt nạp" in out
     assert TDA.doc_seeding("hapas") == []
+
+
+def test_ap_dung_ai_khong_phan_thi_khong_ghi_va_bao_chay_lai(monkeypatch, tmp_path):
+    """Soát 18/10/2026 (M3): AI lỗi / hết giờ / đạt trần thì phần đó KHÔNG ghi theo luật, không vào
+    sổ; script báo số bài chưa phán, trả mã 1; chạy lại (AI ổn) thì nạp tiếp đúng các bài đó."""
+    kho = KhoGia().cai(monkeypatch)
+    monkeypatch.setattr(N, "_chuan_bi_model", lambda: None)
+    goi: list[int] = []
+
+    def hong(rows, *a, **k):
+        goi.append(len(rows))
+        return {}, {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "bỏ qua: model lỗi (0/9)"}
+    monkeypatch.setattr(A, "_phan_xu_ai", hong)
+    raw = str(_tao_raw(tmp_path / "raw"))
+    ma, out = _chay(["hapas", raw, "--tu", _tu(), "--ap-dung", "--sao-luu",
+                     str(tmp_path / "a.jsonl")])
+    assert ma == 1 and goi, out
+    ghi = [r["tai_khoan"] for _, rows in kho.ghi for r in rows]
+    assert set(ghi) == {"nha_mau"}, "chỉ kênh nhà (AI chỉ gán nhãn) — bài AI chưa phán không ghi"
+    assert "CHƯA XONG" in out and "AI chưa phán" in out
+    so = TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas", "túi hapas"]),
+                      BAY_GIO - datetime.timedelta(days=60))
+    assert {v[0] for v in so.values()} <= {L.LY_DO_SEEDING_BAI}, "AI chưa phán: không vào sổ"
+    # Trần 0 lượt gọi AI: không gọi model nào.
+    goi.clear()
+    ma, out = _chay(["hapas", raw, "--tu", _tu(), "--ap-dung", "--sao-luu",
+                     str(tmp_path / "b.jsonl"), "--toi-da-goi-ai", "0"])
+    assert ma == 1 and goi == [] and "0/0 lượt gọi model" in out
+    # Chạy lại khi AI ổn: bài chưa phán được xét và ghi.
+    monkeypatch.setattr(A, "_phan_xu_ai", lambda rows, *a, **k: (
+        {i: (True, "ugc", "") for i in range(len(rows))},
+        {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"}))
+    ma, out = _chay(["hapas", raw, "--tu", _tu(), "--ap-dung", "--sao-luu",
+                     str(tmp_path / "c.jsonl")])
+    assert ma == 0, out
+    assert {"review_mau", "live_mau"} <= {r["tai_khoan"] for _, rows in kho.ghi for r in rows}
+
+
+def test_gac_ai_tuan_tu_cho_lo_qua_han_va_tran_luot_goi():
+    """Lô hết giờ: luồng model vẫn chạy nền — lô sau CHỜ nó xong, không bao giờ hai lô cùng gọi
+    model. Trần lượt gọi: quá trần thì trả "bỏ qua" (không gọi)."""
+    import threading
+    import time
+    dang, nhieu_nhat = [0], [0]
+    khoa = threading.Lock()
+
+    def hoi_cham(nhac, ngan_sach):
+        with khoa:
+            dang[0] += 1
+            nhieu_nhat[0] = max(nhieu_nhat[0], dang[0])
+        time.sleep(0.4)
+        with khoa:
+            dang[0] -= 1
+        return f"ok {nhac}"
+    out: list[str] = []
+    g = N.GacAI(1, out.append)
+    g._hoi_goc = hoi_cham
+    with pytest.raises(A._FutTimeout):
+        g.hoi("a", 0.05)
+    assert g.hoi("b", 5) == "ok b" and nhieu_nhat[0] == 1 and g.cho == 1
+    assert "chờ model trả lời xong" in out[0]
+    g._xu_goc = lambda rows, *a, **k: ({0: (True, "ugc", "")}, {"trang_thai": "đã chạy"})
+    assert g.phan_xu([1, 2, 3])[1]["trang_thai"] == "đã chạy" and g.da_goi == 1
+    px, tt = g.phan_xu([1, 2])
+    assert px == {} and tt["trang_thai"] == "bỏ qua: đạt trần 1 lượt gọi AI" and g.vuot == 2
 
 
 def test_nang_so_lieu_chi_nang_va_ghi_dung_ngay(monkeypatch):

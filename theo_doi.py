@@ -997,7 +997,8 @@ def _video_youtube(ids: list[str], kenh: dict | None = None) -> list[tuple]:
 
 # ───────────────────────────── lọc + nhãn ─────────────────────────────
 def chon_bai(du_an: dict, theo_nguon: dict[int, list], nguon: dict[int, dict],
-             han_ai: float, bay_gio: datetime.datetime | None = None) -> tuple[list[dict], dict]:
+             han_ai: float, bay_gio: datetime.datetime | None = None, *,
+             can_ai: bool = False) -> tuple[list[dict], dict]:
     """Giữ bài liên quan tới dự án + gán nhãn. -> (dòng ghi kho, thống kê).
 
     • Bài cũ hơn `NGAY_GIU` ngày hoặc không có ngày: bỏ.
@@ -1005,7 +1006,9 @@ def chon_bai(du_an: dict, theo_nguon: dict[int, list], nguon: dict[int, dict],
     • Nguồn `kenh_nha` (kênh của chính brand): giữ mọi bài; AI chỉ gán sắc thái/chủ đề.
     • Nguồn khác: chỉ xét bài NHẮC từ khoá dự án; tài khoản seeding affiliate (18/10/2026,
       `_loc_seeding`) bỏ trước AI; AI phán giữ/loại (trùng tên, lạc đề…). AI hỏng/hết giờ/
-      `khong_ro` thì giữ theo luật (đã nhắc từ khoá, nguồn do người chọn)."""
+      `khong_ro` thì giữ theo luật (đã nhắc từ khoá, nguồn do người chọn) — trừ khi `can_ai`
+      (script nạp raw, soát 18/10/2026 M3): bài nguồn không phải kênh nhà mà AI không phán thì
+      không ghi, đếm `chua_ai` (chạy lại là xét lại)."""
     bay_gio = bay_gio or datetime.datetime.now(_VN)
     moc = bay_gio - datetime.timedelta(days=NGAY_GIU)
     tu_khoa = [str(x) for x in du_an.get("tu_khoa") or [] if str(x).strip()] or [du_an["ten"]]
@@ -1057,9 +1060,12 @@ def chon_bai(du_an: dict, theo_nguon: dict[int, list], nguon: dict[int, dict],
     ra = []
     for i, (d, dt, n) in enumerate(cho):
         px = phan_xu.get(i)
+        nha = n.get("loai") == "kenh_nha"
+        if can_ai and not nha and i not in phan_xu:
+            tk["chua_ai"] = tk.get("chua_ai", 0) + 1
+            continue
         if px and px[1] == "khong_ro":
             px = None                     # AI không chắc → về luật (như social_listen)
-        nha = n.get("loai") == "kenh_nha"
         if px and not px[0] and not nha:
             tk["ai_loai"] += 1
             continue
@@ -3767,7 +3773,8 @@ def _con_chan(v, d: dict, cong: dict, ten=None, la_nha=None) -> bool:
 
 def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
                  tk: dict, *, lich_su_seeding: list[dict] | tuple = (),
-                 ai: dict | None = None, de_xuat: bool = True) -> None:
+                 ai: dict | None = None, de_xuat: bool = True, can_ai: bool = False,
+                 giay_ai: float | None = None) -> None:
     """Phân xử AI (như social_listen): AI giữ thì giữ; AI không phán được thì giữ khi bài
     THỰC SỰ nhắc từ khoá. Trùng, từ loại trừ, thị trường ngoài VN (chắc chắn — `_ngoai_vn`), spam,
     bài đường hashtag không nhắc brand (`nhac_brand`), seeding affiliate bỏ cứng trước AI; dự án VN
@@ -3775,7 +3782,9 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     của nền tảng (`tk["pheu"]`). `lich_su_seeding`: dòng lịch sử thêm cho luật seeding
     (`_loc_seeding`); `ai`: tham số thêm của `apify_tool._phan_xu_ai` (script nạp raw: `song_song`
     1 — một lô model một lúc như gán nhãn nền); `de_xuat` False: không ghi đề xuất nguồn (nạp raw
-    cả tháng không đổ hàng trăm đề xuất vào hàng chờ duyệt)."""
+    cả tháng không đổ hàng trăm đề xuất vào hàng chờ duyệt). `can_ai` (script nạp raw, soát M3):
+    bài AI không phán thì không ghi, đếm `chua_ai`; `giay_ai`: giây chờ AI (thay trần 150 giây của
+    lượt bot — script đặt `HAN_LO`)."""
     import loc_rac
     ma = du_an["ma"]
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
@@ -3851,7 +3860,8 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     if not cho:
         _dem_duong_2(tk, "loai", n2_vao)
         return
-    han_ai = time.monotonic() + max(0.0, min(150.0, han - time.monotonic() - 30))
+    han_ai = time.monotonic() + (max(0.0, float(giay_ai)) if giay_ai is not None
+                                 else max(0.0, min(150.0, han - time.monotonic() - 30)))
     px_all, tt = A._phan_xu_ai(cho, tu, du_an.get("boi_canh") or du_an["ten"],
                                du_an.get("thi_truong") or "VN", han_ai, **(ai or {}))
     tk["ai"] = tt.get("trang_thai") or ""
@@ -3861,6 +3871,12 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     vn = str(du_an.get("thi_truong") or "VN").upper() == "VN"
     for i, (d, dt) in enumerate(cho):
         px = px_all.get(i)
+        if can_ai and i not in px_all:
+            # Script nạp raw (soát 18/10/2026, M3): AI không phán (bỏ qua / lỗi / hết giờ / đạt
+            # trần) thì KHÔNG ghi theo luật và không vào sổ — chạy lại script là bài được xét lại.
+            ph(d)["chua_ai"] = ph(d).get("chua_ai", 0) + 1
+            tk["chua_ai"] = tk.get("chua_ai", 0) + 1
+            continue
         if px and px[1] == "khong_ro":
             px = None
         if px and px[0] and px[1] == "other_market" and vn \
@@ -3934,6 +3950,7 @@ def _cau_pheu(p: str, f: dict) -> str:
             + (f"hashtag không nhắc brand {f['khong_brand']}, " if f.get("khong_brand") else "")
             + (f"seeding affiliate {f['seeding']}, " if f.get("seeding") else "")
             + f"AI loại {sum(ai.values())}" + (f" ({ly})" if ly else "")
+            + (f", AI chưa phán {f['chua_ai']} (chưa ghi)" if f.get("chua_ai") else "")
             + (f", không nhắc từ khoá {f['khong_nhac']}" if f.get("khong_nhac") else "")
             + f" → giữ {f.get('giu', 0)} ({f.get('moi', 0)} mới)"
             + (f"; từ khoá lỗi: {f['loi_mot_phan']}" if f.get("loi_mot_phan") else "")
