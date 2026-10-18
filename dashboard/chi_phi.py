@@ -708,6 +708,42 @@ def nguon_tag(du_an: dict, tu: list[str]) -> list[str]:
     return rieng or tu
 
 
+def bo_tu(du_an: dict, p: str) -> list[str]:
+    """Bản sao `theo_doi.bo_tu` (18/10/2026): từ khoá KHÔNG đem đi tìm trên nền tảng `p`
+    (`cau_hinh.tu_khoa.<p>.bo_tu`) — vd "yêu từ điều nhỏ nhất" trên Facebook ra 18/20 bài không phải
+    HAPAS. Chỉ bỏ ở bước tìm; bài vẫn lọc theo đủ từ khoá."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    nh = goc.get("tu_khoa") if isinstance(goc.get("tu_khoa"), dict) else {}
+    rieng = nh.get(p) if isinstance(nh.get(p), dict) else {}
+    x = rieng.get("bo_tu")
+    if not isinstance(x, list):
+        return []
+    return [" ".join(s.split()) for s in x if isinstance(s, str) and s.strip()]
+
+
+def _khoa_bo_tu(s) -> str:
+    return _norm(" ".join(str(s or "").replace("#", " ").split()))
+
+
+def _khoa_tag(s) -> str:
+    return re.sub(r"[^a-z0-9]", "", hashtag_ig(s))
+
+
+def tu_nen_tang(du_an: dict, p: str, tu: list[str]) -> list[str]:
+    """Bản sao `theo_doi.tu_nen_tang`: từ khoá TÌM của nền tảng = `tu` bỏ `bo_tu` (trọn cụm, không dấu,
+    không phân biệt hoa thường)."""
+    bo = {_khoa_bo_tu(x) for x in bo_tu(du_an, p)}
+    return [x for x in tu if _khoa_bo_tu(x) not in bo] if bo else list(tu)
+
+
+def tag_cua(du_an: dict, p: str, tu: list[str]) -> list[str]:
+    """Bản sao `theo_doi.tag_cua`: hashtag của đường tìm theo hashtag (Instagram, feed TikTok) — `nguon_tag`
+    trên từ khoá đã bỏ `bo_tu`, rồi bỏ hashtag trùng một mục MỘT chữ của `bo_tu`."""
+    bo = {_khoa_tag(x) for x in bo_tu(du_an, p) if len(x.replace("#", " ").split()) == 1} - {""}
+    nguon = nguon_tag(du_an, tu_nen_tang(du_an, p, tu))
+    return [t for t in nguon if _khoa_tag(t) not in bo] if bo else nguon
+
+
 def tu_gui(p: str, tu: list[str], so_tu: int = TK_IG_TOI_DA_TU, so_bai: int = 0) -> list[str]:
     """Bản sao `theo_doi._tu_cho`: từ khoá thật sự gửi actor. Instagram: `so_tu` hashtag đầu (mọi
     từ khoá viết liền, bỏ dấu — 17/10/2026); Threads: `so_bai // 10` từ đầu (≥ 1, ≤ 20 — actor lấy
@@ -748,34 +784,44 @@ def bang_cau_hinh(du_an: dict) -> dict:
     sau rút gọn, kèm `so_cau` câu tìm). `uoc_web` = phần Báo & Web của `uoc_tk` (ngoài chiến dịch
     chạy ≤ 1 lượt/ngày — `luot_web_thuong`), `uoc_tk_mxh` = phần còn lại (chạy mọi lượt)."""
     tu = tu_tim(du_an)
-    tag = nguon_tag(du_an, tu)          # 18/10/2026: hashtag riêng của dự án hoặc từ khoá
     tk = {p: {**cau_hinh(du_an, "tu_khoa", p)} for p in NEN_TANG}
     bl = {p: {**cau_hinh(du_an, "binh_luan", p)} for p in NEN_TANG}
+    # Từ khoá TÌM từng nền tảng (`bo_tu`, 18/10/2026); hashtag riêng của dự án hoặc từ khoá.
+    tu_nt = {p: tu_nen_tang(du_an, p, tu) for p in NEN_TANG}
+    khoa_tu = {_khoa_bo_tu(x) for x in tu}
+    khoa_tag = {_khoa_tag(t) for t in nguon_tag(du_an, tu)}
     for p in NEN_TANG:
-        tu_p = tag if p == "instagram" else tu
+        tu_p = tag_cua(du_an, p, tu) if p == "instagram" else tu_nt[p]
+        tk[p]["bo_tu"] = bo_tu(du_an, p)
+        tk[p]["so_tu_tim"] = len(tu_nt[p])
+        # Mục không khớp từ khoá nào (hashtag một chữ với Instagram / TikTok) — gõ sai: trang nói rõ.
+        tk[p]["bo_tu_la"] = [x for x in tk[p]["bo_tu"] if _khoa_bo_tu(x) not in khoa_tu and not (
+            p in ("instagram", "tiktok") and len(x.replace("#", " ").split()) == 1
+            and _khoa_tag(x) in khoa_tag)]
         tk[p]["uoc"] = (uoc_tk_nen_tang(p, tk[p]["so_bai"], tu_p, tk[p]["so_tu"],
                                         fb_toi_da=GIOI_HAN["tk_so_bai"][1],
                                         boc=tk[p].get("boc", WEB_BOC_MAC_DINH))
                         if tk[p]["bat"] else 0.0)
-        tk[p]["so_tu_gui"] = (len(rut_gon_web(tu)) if p == "web"
+        tk[p]["so_tu_gui"] = (len(rut_gon_web(tu_p)) if p == "web"
                               else len(tu_gui(p, tu_p, tk[p]["so_tu"], tk[p]["so_bai"])))
         bl[p]["uoc"] = (uoc_binh_luan_luot(bl[p]["so_bai"], bl[p]["moi_bai"], p)
                         if bl[p]["bat"] else 0.0)
     # Đường 2 Threads (17/10/2026): cộng vào ô USD của Threads; biểu mẫu chưa có ô riêng nên cấu
     # hình hiệu lực phát kèm (`duong2`) cho trình duyệt cộng đúng số máy chủ đã tính.
     c2 = cau_hinh_th2(du_an)
-    tk["threads"]["duong2"] = {**c2, "uoc": uoc_th2(c2, tu),
-                               "uoc_khi_bat": uoc_th2({**c2, "bat": c2["bat_rieng"]}, tu)}
+    tk["threads"]["duong2"] = {**c2, "uoc": uoc_th2(c2, tu_nt["threads"]),
+                               "uoc_khi_bat": uoc_th2({**c2, "bat": c2["bat_rieng"]},
+                                                      tu_nt["threads"])}
     tk["threads"]["uoc"] = round(tk["threads"]["uoc"] + tk["threads"]["duong2"]["uoc"], 4)
-    tk["web"]["so_cau"] = so_cau_web(tu)
+    tk["web"]["so_cau"] = so_cau_web(tu_nt["web"])
     # Facebook đường 2 (17/10/2026): dòng riêng trên trang (`tk.facebook.duong2`), cộng vào tổng
     # tìm theo từ khoá; `uoc` của Facebook vẫn chỉ là đường chính.
     d2 = tk["facebook"]["duong2"]
-    d2["cum"] = tu_fb_duong2(du_an, tu)
+    d2["cum"] = tu_fb_duong2(du_an, tu_nt["facebook"])
     d2["uoc"] = uoc_fb_duong2(len(d2["cum"]), d2["so_bai_moi_tu"]) if d2["bat"] else 0.0
     # TikTok feed hashtag (17/10/2026): cũng một dòng phụ, cộng vào tổng.
     th = tk["tiktok"]["hashtag"]
-    th["tag"] = tag_tiktok(tag)
+    th["tag"] = tag_tiktok(tag_cua(du_an, "tiktok", tu))
     th["uoc"] = uoc_tag_tiktok(th["so_yeu_cau"], len(th["tag"])) if th["bat"] else 0.0
     uoc_tk = round(sum(x["uoc"] for x in tk.values()) + d2["uoc"] + th["uoc"], 4)
     return {"tu_khoa": tk, "binh_luan": bl, "so_tu_khoa": len(tu),

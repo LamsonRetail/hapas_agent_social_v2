@@ -1442,13 +1442,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             # duyệt cộng ngay khi người dùng bật lại phần đang tắt (cùng hàm `chi_phi.uoc_th2`).
             th2 = bang["tu_khoa"]["threads"].get("duong2")
             if isinstance(th2, dict):
-                th2["uoc_neu_bat"] = CP.uoc_th2({**th2, "bat": True}, CP.tu_tim(d))
+                th2["uoc_neu_bat"] = CP.uoc_th2({**th2, "bat": True},
+                                                CP.tu_nen_tang(d, "threads", CP.tu_tim(d)))
             # `cau_hinh` hiển thị: Threads (MAC_DINH_TAT) chưa đặt thì ô bật hiện TẮT như hiệu lực.
             dong.append({**d, "cau_hinh": CP.cau_hinh_hien_thi(d.get("cau_hinh")),
                          # Hashtag riêng của dự án đã chuẩn hoá (18/10/2026); [] = suy từ từ khoá.
                          "hashtag_rieng": CP.nguon_tag(d, []),
+                         # "Không tìm trên…" đã lưu từng nền tảng (18/10/2026) cho trình duyệt.
+                         "bo_tu": {p: CP.bo_tu(d, p) for p in CP.NEN_TANG},
                          # Hashtag Instagram thật sự gửi mỗi lượt (khối Nâng cao hiện danh sách).
-                         "tag_ig": CP.tu_gui("instagram", CP.nguon_tag(d, CP.tu_tim(d)),
+                         "tag_ig": CP.tu_gui("instagram", CP.tag_cua(d, "instagram", CP.tu_tim(d)),
                                              bang["tu_khoa"]["instagram"]["so_tu"]),
                          "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
                          "bang": bang, "lich": dl,
@@ -1533,6 +1536,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                             x[k_so] = NL.so_nguyen(form.get(o_so), nhan, 0, CP.SO_TOI_DA)
                     if x:
                         tk[khoi] = x
+                # "Không tìm trên…" (18/10/2026, `tu_khoa.<p>.bo_tu`): từ khoá không đem đi tìm trên
+                # nền tảng này. Biểu mẫu không có ô (trang cũ) thì giữ danh sách đang lưu; ô trống
+                # = bỏ khoá (tìm mọi từ khoá như trước).
+                o_bo = f"tk_{p}_bo_tu"
+                if o_bo in form:
+                    bo = NL.danh_sach(form.get(o_bo))
+                else:
+                    bo = CP.bo_tu(cu_du_an, p)
+                if bo:
+                    tk["bo_tu"] = bo
                 ch["tu_khoa"][p] = tk
                 if p == "web":             # web không cào bình luận (giai đoạn 1)
                     continue
