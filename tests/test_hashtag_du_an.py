@@ -45,12 +45,11 @@ def mo(monkeypatch):
     ("#hapas, #YeuTuDieuNhoNhat", ["hapas", "yeutudieunhonhat"]),
     ("#hapas #hapassuperbrandday", ["hapas", "hapassuperbrandday"]),      # dán từ caption
     ("TúiHAPAS; quà_tặng\n#hapas, HAPAS", ["tuihapas", "qua_tang", "hapas"]),
-    # Soát 18/10/2026: cách nhau bằng dấu cách / tab là NHIỀU tag (bản cũ gộp thành một)...
-    ("hapas yeutudieunhonhat\thapasvn  #quatanghapas", ["hapas", "yeutudieunhonhat", "hapasvn",
-                                                       "quatanghapas"]),
-    ("Túi HAPAS", ["tui", "hapas"]),
-    # ... trừ cụm đứng ngay sau '#': khẩu hiệu có dấu cách là MỘT tag.
-    ("#Yêu từ điều nhỏ nhất, hapas vn", ["yeutudieunhonhat", "hapas", "vn"]),
+    # Soát 18/10/2026: dấu tách là phẩy, chấm phẩy, xuống dòng, tab và '#'; dấu cách TRONG một
+    # đoạn được nối lại — "Túi HAPAS" là MỘT tag (bản trước ra tag rác "tui" chiếm suất Instagram).
+    ("Túi HAPAS", ["tuihapas"]),
+    ("hapas vn\tTúi HAPAS  #quatanghapas", ["hapasvn", "tuihapas", "quatanghapas"]),
+    ("#Yêu từ điều nhỏ nhất, Túi HAPAS", ["yeutudieunhonhat", "tuihapas"]),
     ("#Đồng hồ 20/10", ["dongho2010"]),
     ("🥰, , #", []),
     ("", []),
@@ -58,6 +57,14 @@ def mo(monkeypatch):
 def test_chuan_hoa_hashtag_dung_dang_mark_gui_actor(vao, ra):
     assert NL.hashtag(vao) == ra
     assert A.hashtag_ig_ds(ra) == ra, "đã đúng dạng apify_tool.hashtag_ig — Mark không đổi gì"
+
+
+def test_hashtag_mot_doan_trung_cach_mark_suy_tu_tu_khoa():
+    """Một đoạn có dấu cách ra đúng tag Mark tự suy từ từ khoá cùng chữ (`apify_tool.hashtag_ig`
+    — hàm của Mark không đổi: từ khoá "túi hapas" vẫn là #tuihapas)."""
+    for x in ("Túi HAPAS", "túi xách hapas", "#Yêu từ điều nhỏ nhất"):
+        assert NL.hashtag(x) == A.hashtag_ig_ds([x])
+    assert A.hashtag_ig("túi hapas") == "tuihapas"
 
 
 def test_hashtag_qua_dai_hoac_qua_nhieu_bao_loi():
@@ -89,6 +96,8 @@ def test_trang_nguon_o_hashtag_thay_thi_truong_va_giu_thi_truong_cu():
     t = c.get("/nguon").text
     assert "Thị trường" not in t and 'name="thi_truong"' not in t
     assert "Chưa đặt — Mark tự lấy từ từ khoá" in t and t.count('name="hashtag"') == 2
+    # Nhãn ô nói đúng luật tách (soát 18/10/2026): dấu cách không tách tag.
+    assert t.count("dấu cách trong một hashtag được nối lại") == 2 and "dấu cách hoặc #" not in t
     r = c.post("/du-an/hapas/sua", data={"csrf": csrf, "ten": "HAPAS", "tu_khoa": "hapas",
                                          "hashtag": "#hapas, #Yêu từ điều nhỏ nhất",
                                          "dang_bat": "1"})

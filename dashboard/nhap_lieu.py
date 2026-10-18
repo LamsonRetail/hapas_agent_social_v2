@@ -145,20 +145,16 @@ def hashtag(s) -> list[str]:
     """Ô hashtag của dự án -> danh sách lưu `du_an.hashtag` (chủ dự án 18/10/2026: "bỏ phần thị
     trường, thay bằng phần hashtag").
 
-    Tách theo dấu phẩy / chấm phẩy / xuống dòng / dấu '#' (dán nguyên "#hapas #yeutudieunhonhat"
-    từ caption vẫn ra 2 tag) và theo DẤU CÁCH / tab ở phần chữ không đứng sau '#' — soát
-    18/10/2026: bản cũ không tách dấu cách nên "hapas yeutudieunhonhat" gộp thành MỘT tag
-    "hapasyeutudieunhonhat" không ai dùng. Cụm đứng NGAY sau '#' tới dấu tách kế tiếp là MỘT tag
-    (chủ dự án gõ khẩu hiệu "#Yêu từ điều nhỏ nhất" = #yeutudieunhonhat — tách theo dấu cách thì
-    ra 5 tag rác "yeu", "tu"… chiếm chỗ tag thật). Mỗi tag bỏ dấu (đ→d), chữ thường, chỉ giữ
-    [a-z0-9_] — đúng dạng Mark gửi actor Instagram (`apify_tool.hashtag_ig`). Tag không còn chữ/số
-    nào (emoji…) bỏ qua; bỏ trùng, giữ thứ tự gõ."""
-    cac: list[str] = []
-    for muc in re.split(r"[,;\r\n]+", str(s or "")):
-        dau, *sau_thang = muc.split("#")
-        cac += dau.split() + sau_thang
+    Tách theo dấu phẩy, chấm phẩy, xuống dòng, tab và dấu '#' (dán nguyên "#hapas
+    #yeutudieunhonhat" từ caption vẫn ra 2 tag). Dấu cách TRONG một đoạn thì nối lại thành MỘT tag:
+    "Túi HAPAS" = #tuihapas, khẩu hiệu "#Yêu từ điều nhỏ nhất" = #yeutudieunhonhat — như
+    `apify_tool.hashtag_ig` suy tag từ từ khoá ("túi hapas" → tuihapas). Soát 18/10/2026: bản
+    trước tách theo dấu cách nên "Túi HAPAS" ra tag rác "tui", chiếm một suất hashtag Instagram
+    (Mark chỉ gửi `so_tu` tag đầu). Mỗi tag bỏ dấu (đ→d), chữ thường, chỉ giữ [a-z0-9_] — đúng
+    dạng Mark gửi actor Instagram. Tag không còn chữ/số nào (emoji…) bỏ qua; bỏ trùng, giữ thứ tự
+    gõ."""
     ra: list[str] = []
-    for x in cac:
+    for x in re.split(r"[,;\r\n\t#]+", str(s or "")):
         g = unicodedata.normalize("NFD", x.replace("đ", "d").replace("Đ", "D"))
         t = re.sub(r"[^a-z0-9_]", "", "".join(c for c in g if unicodedata.category(c) != "Mn")
                    .lower())
