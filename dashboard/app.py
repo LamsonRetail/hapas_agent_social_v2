@@ -1662,7 +1662,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         if du_an:
             cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an)
             chi = await _chi_lich(du_an["ma"])
-            sua =(next((x for x in cac if str(x["id"]) == str(sua_id)), None)
+            sua = (next((x for x in cac if str(x["id"]) == str(sua_id)), None)
                    if ql and sua_id else None)
             if ql:
                 bm = bm or (LQ.tu_form(sua, bay_gio) if sua else LQ.tu_form_mac_dinh(bay_gio))
