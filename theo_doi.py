@@ -4466,7 +4466,14 @@ def _tao_phan_bl(v, p: str, lo: list[dict], per: int) -> dict:
 def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
     """Lập MỌI phần bình luận rồi lưu sổ một lần — bot tắt giữa chừng thì hoặc chưa có phần
     nào (lần sau chọn lại), hoặc có đủ (không lặng lẽ bỏ nền tảng còn lại). `per_cfg`: số
-    bình luận mỗi bài (0 = cào hết) — một số chung, hoặc {nền tảng: số}."""
+    bình luận mỗi bài (0 = cào hết) — một số chung, hoặc {nền tảng: số}.
+
+    Thứ tự phần trong sổ = thứ tự CHẠY (soát 18/10/2026, lượt 17): xếp TOÀN CỤC giữa mọi nền
+    tảng theo bài ưu tiên nhất của lô (`_uu_tien_bl` — chưa cào trước, rồi thiếu nhiều nhất);
+    bằng nhau thì giữ thứ tự `BL_NEN_TANG`. Trước đây phần nối theo nền tảng: ghi chú báo "ưu tiên
+    Threads 966, Facebook 868, Threads 418" mà các lô Facebook chạy trước, tiêu 1,81 USD, mười
+    phần Threads sau đó đều "bỏ qua (trần còn 0,02 USD)" — Threads chưa từng được cào bình luận
+    trong lượt thường. Thứ tự nằm trong sổ việc nên bot khởi động lại đọc tiếp đúng thứ tự đó."""
     import deep_dive_tool as D
     cac = []
     for p in BL_NEN_TANG:
@@ -4483,12 +4490,15 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
             uoc = round((sum(can) * gia + _BL_KHOI_DONG.get(p, 0.0)
                          + D._GIA_MOI_BAI.get(p, 0.0) * len(lo)     # Threads: dòng bài gốc
                          + (_BL_FB_LOC_NGAY * len(lo) if moc is not None else 0.0)) * _HE_SO_UOC, 4)
-            ph = {"id": f"bl-{p}-{len(_phan_bl(v)) + len(cac)}", "nen_tang": p, "trang_thai": "cho",
+            dau = min(_uu_tien_bl(b) for b in lo)          # bài ưu tiên nhất của lô
+            ph = {"id": "", "nen_tang": p, "trang_thai": "cho",     # id: sau khi sắp
                   "bai": [{k: b.get(k) for k in ("khoa", "link", "nen_tang", "tai_khoan",
                                                  "tac_gia", "binh_luan", "nguon_loai")}
                           for b in lo],
                   "per": per_lo, "gia": gia, "uoc_usd": uoc if gia else 0.0,
-                  "day_du": day_du, "tang_dan": moc is not None}
+                  "day_du": day_du, "tang_dan": moc is not None,
+                  # Khoá xếp lô (`_uu_tien_bl` của bài đầu lô) — sổ giữ để phễu nói đúng lý do.
+                  "chua_cao": not dau[0], "thieu": max(0, -dau[1])}
             if p != "youtube":
                 ph.update(actor=D._ACTORS[p], payload=_payload_bl(p, urls, per_lo, day_du, moc),
                           limit=D._limit(p, urls, per_lo))
@@ -4501,8 +4511,13 @@ def _tao_cac_phan_bl(v, ds: list[dict], per_cfg) -> None:
                                   {b["link"]: b["bl_goc_thieu"] for b in lo
                                    if b.get("bl_goc_thieu")} if day_du else None)
             cac.append(ph)
+    # Sắp ổn định: cùng khoá thì giữ thứ tự nền tảng (`BL_NEN_TANG`) và thứ tự lô trong nền tảng.
+    cac.sort(key=lambda x: (not x["chua_cao"], -x["thieu"]))
     if cac:
         with v._khoa:
+            co = len(_phan_bl(v))
+            for i, ph in enumerate(cac):
+                ph["id"] = f"bl-{ph['nen_tang']}-{co + i}"
             _phan_bl(v).extend(cac)
             v.luu()
 
@@ -4603,11 +4618,20 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         _gan_doc_tiep_bl(ma, ds)
         _tao_cac_phan_bl(v, ds, {p: c["moi_bai"] for p, c in cfg.items()})
         tk["ghi_chu"] += _cau_uu_tien_bl(ds)
+    vi_tri_cau = len(tk["ghi_chu"])        # câu thứ tự chạy đứng ngay sau câu ưu tiên
     cac_ph = list(_phan_bl(v))
-    for i, ph in enumerate(cac_ph):
+    # Thứ tự chạy = thứ tự trong sổ (ưu tiên toàn cục, `_tao_cac_phan_bl`), trừ phần đang dở và
+    # phần được kéo lên vì sàn công bằng (`_chon_phan_bl`). Mỗi phần xét đúng MỘT lần: việc đã kết
+    # thúc thì `cap_nhat_phan` không đổi trạng thái, vòng lặp không được quay lại phần đó mãi.
+    xet: set[int] = set()
+    da_chay: list[str] = []
+    while True:
+        cho = [x for x in cac_ph if id(x) not in xet and x.get("trang_thai") not in _KET_PHAN]
+        if not cho:
+            break
+        ph, keo = _chon_phan_bl(cac_ph, cho, min(con, _con_viec(v)))
+        xet.add(id(ph))
         p = ph["nen_tang"]
-        if ph.get("trang_thai") in _KET_PHAN:
-            continue
         bai = ph["bai"]
         tk["bai"] += len(bai)
         rows: list[dict] = []
@@ -4621,6 +4645,7 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             v.cap_nhat_phan(ph, trang_thai="xong" if not kq["loi"] else "mot_phan",
                             ma="OK" if not kq["loi"] else "LOI", so_item=len(rows), usd_so=0.0,
                             ly_do=kq["loi"][:200])
+            da_chay.append(_nhan_lo_bl(ph))
             continue
         dang_do = ph.get("trang_thai") in ("dang_gui", "dang_chay")
         min_charge = float(D._MIN_CHARGE.get(p, 0.0))
@@ -4628,11 +4653,11 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             cap = float(ph.get("tran_usd") or 0) or _TRAN_TOI_THIEU
         else:
             tran_console = A._tran_nen_tang(p, nen=True)[1]
-            sau = sum(float(x.get("uoc_usd") or 0) for x in cac_ph[i + 1:]
-                      if x.get("trang_thai") not in _KET_PHAN)
+            sau = sum(float(x.get("uoc_usd") or 0) for x in cho if x is not ph)
             # `giu_cho_phan` (soát 18/10/2026): lô TikTok qua TikTok API chừa chỗ cho dự phòng
             # clockworks 0,00125 USD/bình luận (gấp ~3 giá API) — như phần theo dõi nguồn.
-            cap = _tran_lo_bl(tran_console, con, _con_viec(v), sau, giu_cho_phan(ph), min_charge)
+            cap = _tran_lo_bl(tran_console, con, _con_viec(v), sau, giu_cho_phan(ph), min_charge,
+                              sum(_san_bl(cac_ph, cho, p).values()))
             het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
             if cap < max(min_charge, _TRAN_TOI_THIEU) - 1e-9 or het_gio:
                 ly = ("hết giờ" if het_gio else
@@ -4642,6 +4667,7 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 v.cap_nhat_phan(ph, trang_thai="loi", ma="NGAN_SACH", so_item=0, usd_so=0.0,
                                 ly_do=ly)
                 continue
+        da_chay.append(_nhan_lo_bl(ph) + (" (kéo lên: sàn công bằng)" if keo else ""))
         items, meta, loi, khong_kiem = _chay_actor(v, p, ph, cap, han, min_charge)
         if khong_kiem is not None:
             v.cap_nhat_phan(ph, trang_thai="loi", ma="KHONG_KIEM_DUOC", so_item=0,
@@ -4668,22 +4694,111 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
         _ghi_bl_kho(ma, luot, ph, rows, thuong_hieu, han, tk,
                     day_du=loi is None and meta.get("ma", "OK") == "OK", khong_tinh_thieu=rong)
         quet_lon._ket_phan(v, ph, meta, len(items), loi, usd_so=tien)
+    cau = _cau_thu_tu_bl(da_chay)
+    if cau:
+        tk["ghi_chu"].insert(vi_tri_cau, cau)
     tk["usd"] = round(tk["usd"], 4)
     return tk
 
 
+def _can_lo_bl(p: str) -> float:
+    """USD tối thiểu một lô bình luận của nền tảng `p` cần để được gửi: mức actor đòi, không dưới
+    sàn 0,1 USD mà `_run_actor` kẹp trần."""
+    import deep_dive_tool as D
+    return max(_TRAN_TOI_THIEU, float(D._MIN_CHARGE.get(p, 0.0)))
+
+
+def _san_bl(cac_ph: list[dict], cho: list[dict], p: str) -> dict[str, float]:
+    """Sàn công bằng của bước bình luận (18/10/2026): {nền tảng: USD giữ} cho mỗi nền tảng TRẢ
+    TIỀN khác `p` còn phần chờ (`cho`) mà CHƯA phần nào của nó được xét trong việc (mọi phần còn
+    "cho") và trần console của nó đủ một lô — theo thứ tự lô đầu của nó trong sổ (ưu tiên cao
+    trước). Mức giữ = đúng mức một lô cần để được gửi (`_can_lo_bl`).
+
+    Vì sao sàn theo NỀN TẢNG mà không chỉ luật giữ 50% cho các lô sau (`BL_GIU_CHO_SAU`): mỗi lô
+    lấy tới nửa phần còn, nên sau k lô của cùng một nền tảng phần còn chỉ ~P/2^k — đủ lô của nền
+    tảng có bài ưu tiên cao là nền tảng xếp sau hết tiền (lượt 17: Threads còn 0,02 USD). Vì sao
+    giữ đúng mức tối thiểu mà không chia đều ngân sách theo nền tảng: chia đều làm lô ưu tiên cao
+    đói tiền vì nền tảng có ít bài đáng cào; luật 50% vẫn giữ phần lớn hơn cho các lô sau như cũ,
+    sàn chỉ bảo đảm mỗi nền tảng đang bật được chạy ít nhất một lô khi còn đủ tiền."""
+    da_co = {x.get("nen_tang") for x in cac_ph if x.get("trang_thai") != "cho"}
+    ra: dict[str, float] = {}
+    for x in cho:
+        q = x.get("nen_tang")
+        if q == p or q in ra or q in da_co or not float(x.get("gia") or 0):
+            continue
+        can = _can_lo_bl(q)
+        if A._tran_nen_tang(q, nen=True)[1] + 1e-9 >= can:
+            ra[q] = can
+    return ra
+
+
+def _chon_phan_bl(cac_ph: list[dict], cho: list[dict], con_p: float) -> tuple[dict, str | None]:
+    """Phần bình luận chạy TIẾP và nền tảng được kéo lên vì sàn công bằng (None: không kéo).
+
+    Phần đang dở (bot khởi động lại giữa run) trước — đã gửi Apify, chỉ đọc tiếp. Rồi phần đầu
+    `cho` (thứ tự ưu tiên toàn cục trong sổ). Riêng lô của nền tảng ĐÃ có phần được xét mà phần còn
+    `con_p` = min(tháng, việc) trừ sàn của các nền tảng chưa có lượt (`_san_bl`) không đủ một lô
+    của nó: lô đó NHƯỜNG — chạy trước lô đầu của nền tảng chưa có lượt có ưu tiên cao nhất, rồi
+    quay lại xét lô đó với phần còn lại. Lô đầu của một nền tảng không bao giờ nhường (sàn chỉ cắt
+    trần của nó xuống mức nó cần — `_tran_lo_bl`), nên mỗi vòng kết thúc ĐÚNG một phần và vòng
+    lặp luôn dừng. Ước tính đổi theo tiền đã tiêu nằm trong sổ, nên khởi động lại xét lại y vậy."""
+    dang = next((x for x in cho if x.get("trang_thai") in ("dang_gui", "dang_chay")), None)
+    if dang is not None:
+        return dang, None
+    ph = cho[0]
+    p = ph.get("nen_tang")
+    if not float(ph.get("gia") or 0):
+        return ph, None
+    san = _san_bl(cac_ph, cho, p)
+    da_luot = any(x.get("nen_tang") == p and x.get("trang_thai") != "cho" for x in cac_ph)
+    if san and da_luot and con_p - sum(san.values()) < _can_lo_bl(p) - 1e-9:
+        q = next(iter(san))
+        return next(x for x in cho if x.get("nen_tang") == q), q
+    return ph, None
+
+
+def _nhan_lo_bl(ph: dict) -> str:
+    """Nhãn một lô trong câu thứ tự chạy: nền tảng + số bình luận còn thiếu của bài đầu lô."""
+    n = ph.get("thieu")
+    if n is None:                                     # phần lập trước 18/10/2026
+        n = max((int(b.get("binh_luan") or 0) for b in ph.get("bai") or []), default=0)
+    p = ph.get("nen_tang")
+    return f"{_TEN.get(p, p)} {int(n):,}".replace(",", ".")
+
+
+#: Câu thứ tự chạy liệt kê tối đa chừng này lô (ghi chú lượt có trần `K.GHI_CHU_TOI_DA`).
+BL_THU_TU_TOI_DA = 6
+
+
+def _cau_thu_tu_bl(da_chay: list[str]) -> str:
+    """Câu phễu: các lô bình luận ĐÃ gửi actor / API theo đúng thứ tự đã chạy (≥ 2 lô)."""
+    if len(da_chay) < 2:
+        return ""
+    du = da_chay[:BL_THU_TU_TOI_DA]
+    them = len(da_chay) - len(du)
+    return ("bình luận: thứ tự chạy " + " → ".join(du)
+            + (f" → … (+{them} lô)" if them else ""))
+
+
 def _tran_lo_bl(tran_console: float, con: float, con_v: float, sau: float, uoc: float,
-                min_charge: float = 0.0) -> float:
+                min_charge: float = 0.0, san: float = 0.0) -> float:
     """Trần USD một lô bình luận = min(trần console, phần còn P = min(tháng, việc) trừ phần giữ
     cho các lô SAU (`sau` = Σ ước tính lô sau, tối đa `BL_GIU_CHO_SAU` × P), ước tính × 1,5). Vì
     sao giữ chỗ (18/10/2026): lô bài to đứng đầu theo ưu tiên (`_uu_tien_bl`) mà lấy hết phần còn
     thì các bài sau lại đói như cũ; phần bài to chưa cào được lượt sau đọc tiếp. Soát 18/10/2026:
     phần giữ tính trên min(tháng, việc) — tính trên riêng việc thì khi tháng còn ít hơn việc, lô
-    đầu vẫn lấy hết phần còn của tháng."""
+    đầu vẫn lấy hết phần còn của tháng.
+
+    `san` (18/10/2026, `_san_bl`): tổng sàn giữ cho các nền tảng chưa có lượt — trần không vượt
+    P − `san`, nhưng không bị cắt dưới mức lô này cần để được gửi (lô nào phải nhường thì
+    `_chon_phan_bl` quyết, không phải hàm này)."""
     p = min(con, con_v)
-    return round(min(tran_console, p,
-                     max(_TRAN_TOI_THIEU, p - min(sau, BL_GIU_CHO_SAU * p)),
-                     max(_TRAN_TOI_THIEU, min_charge, uoc * _HE_SO_TRAN)), 2)
+    can = max(_TRAN_TOI_THIEU, min_charge)
+    muc = min(tran_console, p, max(_TRAN_TOI_THIEU, p - min(sau, BL_GIU_CHO_SAU * p)),
+              max(can, uoc * _HE_SO_TRAN))
+    if san > 0:
+        muc = min(muc, max(can, p - san))
+    return round(muc, 2)
 
 
 def _cau_uu_tien_bl(ds: list[dict]) -> list[str]:
