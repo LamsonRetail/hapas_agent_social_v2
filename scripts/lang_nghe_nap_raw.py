@@ -29,8 +29,10 @@ NÂNG số (`lang_nghe_db.nang_so_lieu`: số cũ không hạ số mới, ảnh 
 MỚI: sổ đã loại → từ loại trừ → cổng thị trường VN → spam → cổng brand đường hashtag (bài CHỈ từ
 feed challengePosts / Instagram hashtag phải gọi tên brand, `theo_doi.nhac_brand`) → seeding
 affiliate (lịch sử = kho + sổ + CẢ lô raw) → AI phân xử → ghi `kieu_quet = tu_khoa`. Raw theo NGUỒN (TikTok userPosts, trang thedoor)
-của tài khoản ĐANG THEO DÕI đi đường nguồn theo dõi (`theo_doi.chon_bai`, kieu `theo_doi`, gắn
-`nguon_id`) như lượt quét nguồn thật — kênh nhà giữ mọi bài, dashboard tách đúng bài brand. Sắc thái /
+của tài khoản ĐANG THEO DÕI — và bài tìm thấy mà chủ bài / link khớp ĐÚNG MỘT nguồn kênh nhà
+(`tach_kenh_nha`, soát 18/10/2026) — CHỈ đi đường nguồn theo dõi (`theo_doi.chon_bai`, kieu
+`theo_doi`, gắn `nguon_id`; ghi TRƯỚC đường từ khoá) như lượt quét nguồn thật — kênh nhà giữ mọi
+bài, dashboard tách đúng bài brand. Sắc thái /
 chủ đề AI trả cùng lượt; phần thiếu để gán nhãn nền làm. Không ghi đề xuất nguồn (cả tháng dữ liệu sẽ
 đổ hàng trăm đề xuất vào hàng chờ duyệt).
 
@@ -90,6 +92,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import sys
 import threading
 import time
@@ -417,6 +420,115 @@ def tach_nguon(ho_so: list, nguon: list[dict]) -> tuple[dict[int, list], list]:
                             else None)
             ra.setdefault(int(n["id"]), []).append((d, dt))
     return ra, con
+
+
+# ───────────────────────────── chủ bài ↔ nguồn (soát 18/10/2026) ─────────────────────────────
+# Vì sao: lượt nạp 14 (18/10/2026 17:30–17:41, raw `hapasglobal` của Kompa) ghép trang thedoor qua
+# `theo_doi.ghep_nguon` rồi gọi LẠI `_dong_tu_tai_khoan` cho đường từ khoá — mỗi lần một dict mới,
+# nên phép loại `id(d) not in dung` luôn đúng: bài fanpage nhà đi CẢ HAI đường, đường từ khoá ghi
+# trước (`kieu_quet = tu_khoa`, `nguon_id` NULL) → bài nhà thành "External channel", lọt sắc thái /
+# chủ đề (phễu "đường nguồn: 103 bài đã có, 19 mới"). Nay ghép theo DẤU ổn định của chủ bài, mỗi
+# bài một đường; luật dùng chung với `scripts/lang_nghe_sua_nguon_nha.py` (sửa dữ liệu đã ghi).
+#: Id trang Facebook trong link: `/<id trang>/posts/…` (thedoor), `profile.php?id=…`,
+#: `permalink.php?story_fbid=…&id=<id trang>` — như `doc_thedoor` ghép trang theo id trong URL.
+_RE_ID_TRANG = re.compile(r"facebook\.com/(\d{5,25})(?=[/?#]|$)|[?&]id=(\d{5,25})", re.IGNORECASE)
+
+
+def dau_chu_bai(p: str, tai_khoan: str = "", *links: str) -> set[str]:
+    """Dấu nhận diện chủ bài theo luật `/theodoi`: tài khoản = định danh nguồn
+    (`theo_doi._chuan_dinh_danh`; Facebook: tên trang như `theo_doi._kenh_nha`), tên trang trong
+    link (`theo_doi_api._ten_trang`), id trang trong link (`_RE_ID_TRANG`); TikTok / Threads thêm
+    @tài khoản trong link. Không dùng tên hiển thị (hai trang khác nhau cùng tên "HAPAS")."""
+    p, tk = str(p or ""), str(tai_khoan or "").strip()
+    ra: set[str] = set()
+    if p != "facebook":
+        if T._chuan_dinh_danh(p, tk):
+            ra.add(T._chuan_dinh_danh(p, tk))
+        for u in links if p in ("tiktok", "threads") else ():
+            m = re.search(r"/@([\w.\-]+)", str(u or ""))
+            if m:
+                ra.add(m.group(1).lower())
+        return ra
+    if "/" in tk:                                  # định danh nguồn là URL trang
+        links, tk = (tk, *links), ""
+    tk = tk.lstrip("@").lower()
+    if tk:
+        ra.add(f"id:{tk}" if tk.isdigit() else f"ten:{tk}")
+    for u in links:
+        ten = TDA._ten_trang(u)
+        if ten:
+            ra.add(f"ten:{ten.lower()}")
+        ra.update(f"id:{a or b}" for a, b in _RE_ID_TRANG.findall(str(u or "")))
+    return ra
+
+
+def bang_dau(nguon: list[dict]) -> dict[int, tuple[str, set[str]]]:
+    """{id nguồn: (nền tảng, dấu của định danh — tài khoản hay URL)}."""
+    return {int(n["id"]): (str(n.get("nen_tang") or ""),
+                           dau_chu_bai(str(n.get("nen_tang") or ""), str(n.get("dinh_danh") or ""),
+                                       str(n.get("dinh_danh") or "")))
+            for n in nguon}
+
+
+def nguon_khop(p: str, dau: set[str], bang: dict[int, tuple[str, set[str]]]) -> list[int]:
+    """Các nguồn cùng nền tảng có chung dấu với chủ bài — chỉ gắn khi ĐÚNG MỘT."""
+    return [nid for nid, (q, d) in bang.items() if q == p and dau & d]
+
+
+def doc_trang_fb(items: list, bang: dict, nguon: dict[int, dict]) -> dict[int | None, list]:
+    """Item thedoor → {id nguồn: [(dòng, ngày)]}; khoá None = trang không khớp ĐÚNG MỘT nguồn
+    Facebook (đi đường từ khoá). Ghép theo trang của TỪNG item (`page.url`, `page.id`, id trang
+    trong link bài), không theo dự phòng "run một trang thì về trang đó" của `doc_thedoor` /
+    `ghep_nguon` (raw nạp lại có thể là trang lạ khi dự án chỉ có một nguồn Facebook)."""
+    nhom: dict[int | None, list] = {}
+    for it in items:
+        if not TDA.la_thedoor(it):
+            continue
+        pg, po = it["page"], it["post"]
+        dau = dau_chu_bai("facebook", "", str(pg.get("url") or ""), str(po.get("url") or ""))
+        if str(pg.get("id") or "").isdigit():
+            dau.add(f"id:{pg['id']}")
+        ids = nguon_khop("facebook", dau, bang)
+        nhom.setdefault(ids[0] if len(ids) == 1 else None, []).append(it)
+    ra: dict[int | None, list] = {}
+    for nid, its in nhom.items():
+        urls = [str(nguon[nid]["dinh_danh"])] if nid is not None else []
+        for tk in TDA.doc_thedoor(its, urls).values():
+            for d, dt in T._dong_tu_tai_khoan("facebook", tk):
+                d["_ho_so"] = True                # bản đọc TRANG: thắng bản tìm khi bỏ trùng
+                ra.setdefault(nid, []).append((d, dt))
+    return ra
+
+
+def tach_kenh_nha(tim: list, nguon: list[dict]) -> tuple[list, dict[int, list]]:
+    """Bài đường từ khoá mà chủ bài / link khớp ĐÚNG MỘT nguồn kênh nhà → đường nguồn của nguồn đó
+    (như lượt `/theodoi`: gắn `nguon_id`, `kieu_quet = theo_doi`, kênh nhà giữ mọi bài). Đường từ
+    khoá Facebook không gắn được nguồn (`theo_doi._dinh_danh_tai_khoan` → None): bài fanpage nhà
+    mina / scrapeforge tìm thấy sẽ thành "External channel". -> (bài còn lại, {id nguồn: bài})."""
+    bang = bang_dau([n for n in nguon if n.get("loai") == "kenh_nha"])
+    con, sang = [], {}
+    for d, dt in tim:
+        p = str(d.get("platform") or "")
+        ids = nguon_khop(p, dau_chu_bai(p, str(d.get("username") or ""), str(d.get("link") or "")),
+                         bang) if bang else []
+        if len(ids) != 1:
+            con.append((d, dt))
+            continue
+        goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
+        d["_goc_id"] = d.get("_goc_id") or goc.get("id")      # khoá như `chon_bai` (`_goc_id`)
+        sang.setdefault(ids[0], []).append((d, dt))
+    return con, sang
+
+
+def khoa_on_dinh(d: dict) -> set[str]:
+    """Khoá bài + mọi id số Facebook của dòng (`khu_trung_fb.cac_ma_so`): hai bản đọc của cùng
+    bài (link pfbid ↔ id số) chung ít nhất một khoá. Không dùng `id()` của dict."""
+    import khu_trung_fb as KT
+    k = _khoa(d)
+    if d.get("platform") != "facebook":
+        return {k}
+    return {k} | {f"facebook:{x}" for x in KT.cac_ma_so(
+        {"khoa": k, "link": d.get("link"), "ma_so_fb": KT.ma_so_fb(d)})}
 
 
 # ───────────────────────────── chạy thử: tạm thay phần ghi + AI ─────────────────────────────
@@ -791,24 +903,24 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None, nghi=time.sl
     tim, dem = loc_khung(raw["tim"] + raw["ho_so"], tu, bay_gio)
     theo_nguon, le = tach_nguon([x for x in tim if x[0].get("_ho_so")], nguon_ds)
     tim = [x for x in tim if not x[0].get("_ho_so")] + le
-    # Trang Facebook (thedoor) của nguồn đang theo dõi → đường nguồn; trang lạ → đường từ khoá.
-    fb_nguon = [n for n in nguon_ds if n.get("nen_tang") == "facebook"]
+    # Trang Facebook (thedoor) khớp ĐÚNG MỘT nguồn đang theo dõi → CHỈ đường nguồn; trang lạ →
+    # đường từ khoá (soát 18/10/2026, lượt nạp 14: bản trước loại theo `id()` của dict nên bài
+    # trang nhà đi cả hai đường — `doc_trang_fb`).
+    fb = bang_dau([n for n in nguon_ds if n.get("nen_tang") == "facebook"])
     for items, luc, _ten in raw["trang_fb"]:
-        ket = TDA.doc_thedoor(items, [n["dinh_danh"] for n in fb_nguon])
-        ghep, _loi = T.ghep_nguon("facebook", ket, fb_nguon) if fb_nguon else ({}, {})
-        dung = {id(d) for ds in ghep.values() for d, _ in ds}
-        for nid, ds in ghep.items():
+        for nid, ds in doc_trang_fb(items, fb, nguon).items():
             for d, dt in ds:
                 if dt and tu <= dt <= bay_gio + datetime.timedelta(hours=1):
                     d["_luc_doc"] = luc
-                    theo_nguon.setdefault(nid, []).append((d, dt))
-        for tk_ in ket.values():
-            for d, dt in T._dong_tu_tai_khoan("facebook", tk_):
-                if id(d) not in dung and dt and tu <= dt <= bay_gio + datetime.timedelta(hours=1):
-                    d["_luc_doc"] = luc
-                    tim.append((d, dt))
+                    (tim if nid is None else theo_nguon.setdefault(nid, [])).append((d, dt))
+    tim, sang = tach_kenh_nha(tim, nguon_ds)
+    for nid, ds in sang.items():
+        theo_nguon.setdefault(nid, []).extend(ds)
     # Hai lần đọc cùng trang (vòng 2 + Kompa): bỏ trùng, giữ bản nhiều bình luận nhất.
     theo_nguon = {nid: loc_khung(ds, tu, bay_gio)[0] for nid, ds in theo_nguon.items()}
+    # Bản tìm theo từ khoá của bài đã sang đường nguồn (link pfbid ↔ id số): bỏ — mỗi bài một đường.
+    da = {k for ds in theo_nguon.values() for d, _ in ds for k in khoa_on_dinh(d)}
+    tim = [x for x in tim if not khoa_on_dinh(x[0]) & da]
     khung = f"{tu:%d/%m} → {bay_gio.astimezone(_VN):%d/%m}"
     tong = _tong_moi(tu, (bay_gio.date() - tu.date()).days)
     for p, x in dem.items():
@@ -839,9 +951,9 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None, nghi=time.sl
     if not ns.ap_dung:
         ghi: dict = {}
         with che_do_chay_thu(ghi):
-            so_lo = chay_tu_khoa(du_an, 0, tim, tu, lambda s: None, tong)
+            so_lo = chay_nguon(du_an, 0, theo_nguon, nguon, tong, lambda s: None)
+            so_lo += chay_tu_khoa(du_an, 0, tim, tu, lambda s: None, tong)
             chay_web(du_an, 0, raw["web"], tu, tong)
-            so_lo += chay_nguon(du_an, 0, theo_nguon, nguon, tong, lambda s: None)
         for c in cau_ghi_chu(tong, raw["tep"], raw["bo_qua"], khung):
             in_ra("  " + c)
         import loc_rac
@@ -957,12 +1069,15 @@ def ap_dung(ns, ma, du_an, raw, tim, theo_nguon, nguon, tong, tu, khung, in_ra, 
         try:
             # Soát M3: AI không phán thì không ghi (`can_ai`); mọi lượt gọi model qua `GacAI`.
             with gac.cai():
+                # Đường nguồn ghi TRƯỚC (soát 18/10/2026): bản trùng còn lọt ở đường từ khoá (khoá
+                # khác, không id số) gặp bài đã có `nguon_id` → chỉ nâng số; ngược lại đường nguồn
+                # thấy "đã có" và chỉ nâng số, bài nhà giữ `nguon_id` NULL.
+                so_lo += chay_nguon(du_an, luot, theo_nguon, nguon, tong, nghi, can_ai=True,
+                                    sau_phan=so_moi.ghi)
                 so_lo += chay_tu_khoa(du_an, luot, tim, tu, nghi, tong, can_ai=True,
                                       sau_phan=so_moi.ghi)
                 chay_web(du_an, luot, raw["web"], tu, tong, can_ai=True, khoa_web=khoa_web,
                          sau_phan=so_moi.ghi)
-                so_lo += chay_nguon(du_an, luot, theo_nguon, nguon, tong, nghi, can_ai=True,
-                                    sau_phan=so_moi.ghi)
             trang_thai, loi = "xong", None
         except KeyboardInterrupt:
             # Người chạy bấm Ctrl-C: phần đã ghi giữ nguyên (tệp hoàn tác có đủ khoá) → "một phần".
