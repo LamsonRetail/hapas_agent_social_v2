@@ -60,7 +60,11 @@ def test_uoc_tinh_mark_bang_dashboard_va_giam_khi_bo_tu():
     goc = CP.bang_cau_hinh({**DA, "cau_hinh": {"tu_khoa": {
         p: {k: v for k, v in x.items() if k != "bo_tu"}
         for p, x in DA["cau_hinh"]["tu_khoa"].items()}}})
-    assert b["tu_khoa"]["threads"]["so_tu_gui"] == 5 < goc["tu_khoa"]["threads"]["so_tu_gui"]
+    # Threads đường 1 (18/10/2026) chỉ nhận từ một chữ có tên brand → bỏ cụm "túi hapas" không đổi
+    # đường 1; số từ TÌM (đường 2 nhận mọi từ) giảm theo `bo_tu`.
+    assert b["tu_khoa"]["threads"]["so_tu_gui"] == goc["tu_khoa"]["threads"]["so_tu_gui"] == 1
+    assert b["tu_khoa"]["threads"]["tu_duong1"] == ["hapas"]
+    assert b["tu_khoa"]["threads"]["so_tu_tim"] == 5 < goc["tu_khoa"]["threads"]["so_tu_tim"]
     assert b["tu_khoa"]["instagram"]["uoc"] < goc["tu_khoa"]["instagram"]["uoc"]
     assert b["tu_khoa"]["facebook"]["so_tu_tim"] == len(TU) - 1
     assert b["tu_khoa"]["facebook"]["duong2"]["cum"] == ["túi hapas", "quà tặng hapas"]

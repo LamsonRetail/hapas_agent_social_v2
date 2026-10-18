@@ -48,6 +48,9 @@ _TOC_HAT_GIONG = {
     A._ACTORS["instagram"]: 3.0,
     A._ACTORS["facebook"]: 1.0,
     A._ACTORS["threads"]: 0.9,
+    # Threads đường 2 (18/10/2026, cụm nhiều chữ — `_ke_threads`): chưa đủ mẫu (đo 17/10: 10 bài
+    # 16,5 s cả khởi động), để 1 bài/giây; EWMA tự sửa.
+    A._ACTORS["threads_2"]: 1.0,
     "youtube": 1.0,                       # TRANG search/giây (mỗi trang ~3 lượt API)
     # Bình luận: CHƯA đo — để lạc quan cho ngưỡng "lượt chậm" của deep_dive không đẩy lượt
     # vài trăm bình luận sang nền; ngưỡng 1500 bình luận vẫn chặn lượt lớn. EWMA tự sửa.
@@ -125,6 +128,11 @@ def giay_tai_cho(plats: list[str], lims: dict, queries: list[str]) -> float:
             g = _GIAY_TAI_CHO_KHOI_DONG + (n / len(A._IG_TAB)) / toc(A._ACTORS[p])
         elif p == "facebook":
             g = _GIAY_TAI_CHO_KHOI_DONG + (n / k) / toc(A._ACTORS[p])
+        elif p == "threads":             # hai run NỐI ĐUÔI: cụm (đường 2) rồi từ một chữ
+            q1, q2 = A.tach_tu_threads(queries)
+            l1, l2 = A.chia_limit_threads(len(q1), len(q2), n)
+            g = sum(_GIAY_TAI_CHO_KHOI_DONG + m / toc(A._ACTORS[a])
+                    for a, tu, m in (("threads", q1, l1), ("threads_2", q2, l2)) if tu)
         else:
             g = _GIAY_TAI_CHO_KHOI_DONG + n / toc(A._ACTORS[p])
         ra = max(ra, g)
@@ -210,6 +218,13 @@ def dung_payload(p: str, ph: dict, ts: dict) -> dict:
     if p == "facebook":
         return {"query": ph["tu_khoa"], "search_type": "posts", "max_results": n,
                 "start_date": ph["tu"], "end_date": ph["den"]}
+    if p == "threads" and ph.get("kieu") == "duong2":
+        # scrapersdelight (18/10/2026, cụm nhiều chữ): lọc ngày "trong N ngày tới hôm nay" — N
+        # chốt lúc lập kế hoạch (`ngay`) để payload dựng lại vẫn y hệt (khớp run sau khởi động lại).
+        q = list(ph["tu_khoa"])
+        return {"keywords": q, "searchType": "both", "passesPerSurface": A.TH2_LUOT,
+                "maxPostsPerKeyword": max(1, math.ceil(n / max(1, len(q)))), "maxItems": n,
+                "postedWithinDays": int(ph["ngay"])}
     if p == "threads":
         return {"mode": "search", "keywords": [ph["tu_khoa"]], "max_posts": max(10, n),
                 "search_filter": "recent", "start_date": ph["tu"], "end_date": ph["den"]}
@@ -217,12 +232,15 @@ def dung_payload(p: str, ph: dict, ts: dict) -> dict:
 
 
 def _uoc_phan(p: str, ph: dict) -> tuple[float, float]:
-    """(USD, giây) ước tính của một lượt con."""
+    """(USD, giây) ước tính của một lượt con. `gia` / `khoi` của phần (nếu có) thắng giá của
+    nền tảng — lượt con đi actor khác actor tìm bài chính (Threads đường 2: 0,001/bài, 0 khởi
+    động), như `_so_tien`."""
     n = int(ph["limit"])
     if p == "youtube":
         return 0.0, ph["so_trang"] * 3.0
-    gia = _GIA_DO if ph.get("kieu") == "do" else _GIA[p]
-    usd = A._START_COST.get(p, 0.0) + gia * n
+    gia = ph.get("gia") or (_GIA_DO if ph.get("kieu") == "do" else _GIA[p])
+    khoi = float(ph["khoi"]) if ph.get("khoi") is not None else A._START_COST.get(p, 0.0)
+    usd = khoi + float(gia) * n
     return round(usd, 4), _GIAY_KHOI_DONG + n / toc(ph["actor"])
 
 
@@ -294,22 +312,39 @@ def _ke_facebook(q, lim, ts, ctx) -> dict:
 
 
 def _ke_threads(q, lim, ts, ctx) -> dict:
+    """Từ khoá MỘT chữ → futurizerush, mỗi từ × mỗi cửa sổ ngày một lượt con; cụm nhiều chữ → MỘT
+    lượt con đường 2 (scrapersdelight) — 18/10/2026, xem `apify_tool._tim_threads_tai_cho`:
+    futurizerush khớp cụm theo kiểu HOẶC từng chữ (4/88 bài liên quan, vẫn trả tiền mọi bài)."""
     d_from = A._parse_date(ts["date_from"], end=False)
     d_to = A._parse_date(ts["date_to"], end=True)
-    per_kw = math.ceil(lim / max(1, len(q)))
-    w = math.ceil(per_kw / _THREADS_MOI_LUOT)
-    cua = _cua_so(d_from, d_to, w)
+    q1, q2 = A.tach_tu_threads(q)
+    l1, l2 = A.chia_limit_threads(len(q1), len(q2), lim)
     ra = {"phan": [], "chua_phu": [], "ghi_chu": []}
-    moi = math.ceil(per_kw / len(cua))
-    if moi > _THREADS_MOI_LUOT:
-        ra["chua_phu"].append(
-            f"Threads: khoảng ngày chỉ có {len(cua)} ngày nên mỗi lượt phải lấy {moi} bài "
-            f"(>{_THREADS_MOI_LUOT}) — lượt dài, dễ không kịp hạn.")
-    for k in q:
-        for a, b in cua:
-            ra["phan"].append({"actor": A._ACTORS["threads"], "tu_khoa": k, "limit": moi,
-                               "tu": f"{a:%Y-%m-%d}", "den": f"{b:%Y-%m-%d}",
-                               "nhan": f"'{k}' {a:%d/%m}–{b:%d/%m}"})
+    if q1:
+        per_kw = math.ceil(l1 / len(q1))
+        w = math.ceil(per_kw / _THREADS_MOI_LUOT)
+        cua = _cua_so(d_from, d_to, w)
+        moi = math.ceil(per_kw / len(cua))
+        if moi > _THREADS_MOI_LUOT:
+            ra["chua_phu"].append(
+                f"Threads: khoảng ngày chỉ có {len(cua)} ngày nên mỗi lượt phải lấy {moi} bài "
+                f"(>{_THREADS_MOI_LUOT}) — lượt dài, dễ không kịp hạn.")
+        for k in q1:
+            for a, b in cua:
+                ra["phan"].append({"actor": A._ACTORS["threads"], "tu_khoa": k, "limit": moi,
+                                   "tu": f"{a:%Y-%m-%d}", "den": f"{b:%Y-%m-%d}",
+                                   "nhan": f"'{k}' {a:%d/%m}–{b:%d/%m}"})
+    if q2:
+        ngay = max(1, math.ceil((datetime.datetime.now(A._VN_TZ) - d_from).total_seconds()
+                                / 86400))
+        ra["phan"].append({"kieu": "duong2", "actor": A._ACTORS["threads_2"], "tu_khoa": q2,
+                           "limit": l2, "gia": A.TH2_GIA, "khoi": 0.0, "ngay": ngay,
+                           "nhan": ("đường 2 " + ", ".join(f"'{k}'" for k in q2))[:120]})
+        ra["ghi_chu"].append(
+            "Threads: cụm nhiều chữ (" + ", ".join(f"'{k}'" for k in q2)[:100] + ") chỉ tìm qua "
+            "scrapersdelight (khớp cụm, 0,001 USD/bài) — futurizerush khớp từng chữ của cụm. "
+            f"Actor này lọc 'trong {ngay} ngày tới hôm nay', không theo cửa sổ ngày: bài ngoài "
+            "khoảng bị lọc lại sau.")
     return ra
 
 
@@ -810,6 +845,8 @@ def _chuan_hoa(p: str, ph: dict, items: list) -> list[tuple]:
         if ph.get("kieu") == "do":
             return A._chuan_tiktok([it for it in items if not it.get("noResults")])
         return A._chuan_tiktok(A._chuan_clockworks(items))
+    if p == "threads" and ph.get("kieu") == "duong2":
+        return [(A.so_cho_bang(d), dt) for d, dt in A._chuan_threads_2(items)]
     return {"instagram": A._chuan_instagram, "facebook": A._chuan_facebook,
             "threads": A._chuan_threads}[p](items)
 
@@ -1257,6 +1294,26 @@ def _phan_xu_tang(rows: list, ts: dict, han_mono: float, log: list, *, cache: di
     return ket, tt
 
 
+def _bo_trung_dong(raw: list) -> tuple[list, int]:
+    """Bỏ dòng trùng link của MỘT nền tảng (giữ thứ tự gặp đầu). -> (dòng giữ, số trùng). Cùng
+    bài từ hai lượt con (Threads hai đường, 18/10/2026): giữ bản CÓ lượt xem — futurizerush có
+    follower + view, scrapersdelight không có (để 0, `apify_tool.so_cho_bang`), như
+    `theo_doi._bo_trung_duong_2`."""
+    da: dict = {}                        # khoá link → vị trí trong `giu`
+    giu, trung = [], 0
+    for d, dt in raw:
+        k = _chuan_link(d.get("link"))
+        if k and k in da:
+            trung += 1
+            if not giu[da[k]][0].get("views") and d.get("views"):
+                giu[da[k]] = (d, dt)
+            continue
+        if k:
+            da[k] = len(giu)
+        giu.append((d, dt))
+    return giu, trung
+
+
 def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
     plats = list(v.d["nen_tang"])
     queries, country = ts["queries"], ts["country"]
@@ -1265,15 +1322,7 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
     bi_loai: list = []
     for p in plats:
         raw = v.doc_dong(p)
-        da, giu, trung = set(), [], 0
-        for d, dt in raw:
-            k = _chuan_link(d.get("link"))
-            if k and k in da:
-                trung += 1
-                continue
-            if k:
-                da.add(k)
-            giu.append((d, dt))
+        giu, trung = _bo_trung_dong(raw)
         trong = [(d, dt) for d, dt in giu if dt and d_from <= dt <= d_to]
         per[p] = {"scraped": len(raw), "trung_lap": trung, "trong_khoang": len(trong)}
         for d, dt in trong:

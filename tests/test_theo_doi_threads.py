@@ -247,7 +247,13 @@ def test_tim_tu_khoa_threads_phieu_moc_de_xuat_va_tien(mo):
               cau_hinh={"tu_khoa": {"threads": {"bat": True}}})
     tk = _chay_tk(da)
     assert goi["threads"][0] == ["hapas"] and goi["threads"][1] == 15 and goi["threads"][2] >= 30
-    assert any("tìm Threads: 1/3 từ khoá đầu" in x and "≥ 30" in x for x in tk["ghi_chu"])
+    # Đường 1 (18/10/2026): chỉ "hapas" là từ một chữ có tên brand — đủ, không còn câu "1/3 từ khoá
+    # đầu"; phễu nói đường 1 tìm gì, cụm nào chỉ gửi đường 2.
+    assert not any("từ khoá đầu" in x for x in tk["ghi_chu"])
+    assert tk["pheu"]["threads"]["duong1"] == {"tu": ["hapas"], "ly_do": "từ một chữ có tên brand",
+                                               "chi_duong2": ["túi hapas", "yeutudieunhonhat"]}
+    assert any("đường 1 futurizerush tìm 'hapas' (từ một chữ có tên brand; 2 từ khoá chỉ gửi "
+               "đường 2: 'túi hapas', 'yeutudieunhonhat')" in c for c in T._cau_tk(tk))
     rows = {r["khoa"]: r for kieu, cac in kho.bai for r in cac}
     assert {r["tai_khoan"] for r in rows.values()} == {"nguoi_mau_a", "nguoi_mau_b"}   # c: không nhắc
     assert {r["tai_khoan"]: r["nguon_id"] for r in rows.values()} == {"nguoi_mau_a": None,

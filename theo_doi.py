@@ -1289,7 +1289,8 @@ def _chay_phan_apify(v, p: str, ph: dict, ds: list[dict], cap: float, han: float
 # từ khoá actor lấy ≥ 10 bài nên lượt chỉ tìm `so_bai // 10` từ ĐẦU (≥ 1) — tổng bài ≤ số bài đặt,
 # ước tính (n × giá + phí khởi động) × 1,3 như nền tảng khác (`_tu_cho`). Từ 17/10/2026 thêm ĐƯỜNG 2
 # (`_FETCH["threads_2"]`, scrapersdelight, `_tim_threads_2`): chạy trước đường 1, mọi từ khoá,
-# phễu + mốc + tiền riêng, gộp bài và bỏ trùng theo mã bài (`_bo_trung_duong_2`).
+# phễu + mốc + tiền riêng, gộp bài và bỏ trùng theo mã bài (`_bo_trung_duong_2`). Từ 18/10/2026
+# đường 1 chỉ nhận từ khoá MỘT chữ có tên brand (`tu_threads_duong1`): cụm nhiều chữ chỉ đi đường 2.
 TK_NEN_TANG = ("youtube", "tiktok", "facebook", "instagram", "threads", "web")
 #: Threads = `apify_tool._UNIT_COST` / `_START_COST` (4 GB × 0,02 USD, gói FREE).
 # TikTok từ 16/10/2026: TikTok API, tính theo YÊU CẦU (0,002 USD = giá thật từng run, đo lại
@@ -1691,6 +1692,94 @@ def tu_nen_tang(du_an: dict, p: str, tu: list[str]) -> list[str]:
     return [x for x in tu if _khoa_bo_tu(x) not in bo] if bo else list(tu)
 
 
+# ───────────── Từ khoá ĐƯỜNG 1 Threads (futurizerush) — 18/10/2026 ─────────────
+# Đo thật 18/10/2026: futurizerush~meta-threads-scraper tìm cụm NHIỀU chữ theo kiểu HOẶC từng chữ
+# ("túi hapas" ra bài chỉ có chữ "túi") — một run chỉ 4/88 bài liên quan mà vẫn trả 0,0025 USD/bài
+# + 0,08 phí khởi động. Chỉ "hapas" thì mỗi khung ngày chạm ~30–36 bài liên quan. Đường 2
+# (scrapersdelight, 0,001 USD/bài, không phí khởi động) khớp cụm đúng hơn và vẫn nhận MỌI từ khoá.
+# Nên đường 1 chỉ nhận từ khoá MỘT chữ có tên brand; cụm nhiều chữ chỉ gửi đường 2.
+# Ghi đè: `du_an.cau_hinh.tu_khoa.threads.duong1_tu` = danh sách từ khoá đường 1 (thay luật trên,
+# vẫn bỏ `bo_tu` của Threads). Sửa bằng jsonb_set như các khoá Nâng cao khác, vd:
+#   sudo -u postgres psql -d lang_nghe -c "UPDATE du_an SET cau_hinh = jsonb_set(cau_hinh,
+#     '{tu_khoa,threads,duong1_tu}', '[\"hapas\", \"hapasvn\"]'::jsonb) WHERE ma = 'hapas'"
+# (lưu trang Ngân sách giữ nguyên khoá này — khối tu_khoa.threads bắt đầu từ bản đang lưu).
+def _mot_chu_co_brand(kw: str, ten: list[str]) -> bool:
+    """`kw` là từ khoá MỘT chữ (không dấu cách sau khi bỏ '#') mà dạng viết liền (bỏ dấu, chỉ a-z0-9,
+    `_khoa_tag`) chứa một tên brand viết liền: với tên HAPAS thì "hapas", "#HAPAS", "hapas.vn",
+    "hapasvn", "quatanghapas" có; "túi hapas" (hai chữ), "yeutudieunhonhat" không. Tên ≤ 3 ký tự
+    ("PNJ") phải đứng ĐẦU từ như luật hashtag của `apify_tool._khop_mot_tu` ("pnj30nam" có)."""
+    if not A.tu_mot_chu(kw):
+        return False
+    k = _khoa_tag(kw)
+    for t in ten:
+        b = _khoa_tag(t)
+        if b and (b in k if len(b) > 3 else k.startswith(b)):
+            return True
+    return False
+
+
+def duong1_tu(du_an: dict) -> list[str] | None:
+    """Danh sách ghi đè `du_an.cau_hinh.tu_khoa.threads.duong1_tu` (chuẩn: bỏ mục không phải chữ /
+    rỗng, gộp khoảng trắng, bỏ trùng không dấu) — None khi thiếu hoặc không phải danh sách."""
+    goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
+    nh = goc.get("tu_khoa") if isinstance(goc.get("tu_khoa"), dict) else {}
+    th = nh.get("threads") if isinstance(nh.get("threads"), dict) else {}
+    x = th.get("duong1_tu")
+    if not isinstance(x, list):
+        return None
+    ra: list[str] = []
+    for s in x:
+        s = " ".join(s.split()) if isinstance(s, str) else ""
+        if s and A._norm(s) not in {A._norm(y) for y in ra}:
+            ra.append(s)
+    return ra
+
+
+def tu_threads_duong1(du_an: dict, tu: list[str]) -> tuple[list[str], str]:
+    """Từ khoá ĐƯỜNG 1 Threads (futurizerush) từ `tu` = từ khoá TÌM của Threads (đã bỏ `bo_tu`).
+    -> (từ khoá, lý do cho phễu). Có `duong1_tu` thì dùng danh sách đó (bỏ `bo_tu`); không thì
+    chỉ từ MỘT chữ có tên brand (`_mot_chu_co_brand`; brand = tên + mã dự án + `ten` của
+    `hashtag_can_nhac_brand` — `cau_hinh_hashtag_brand`, như cổng brand và miễn seeding). Rỗng sau
+    khi lọc thì tìm tên brand (tên một chữ đầu tiên, không có thì tên viết liền). Tối đa
+    `TK_TOI_DA_TU`; `_tu_cho` cắt tiếp theo số bài."""
+    ten = cau_hinh_hashtag_brand(du_an)["ten"]
+    rieng = duong1_tu(du_an)
+    if rieng is not None:
+        ra, ly = tu_nen_tang(du_an, "threads", rieng), "theo cấu hình duong1_tu"
+    else:
+        ra, ly = [kw for kw in tu if _mot_chu_co_brand(kw, ten)], "từ một chữ có tên brand"
+    if not ra and ten:
+        ra = [next((t for t in ten if A.tu_mot_chu(t)), "") or _khoa_tag(ten[0])]
+        ly = ("duong1_tu rỗng" if rieng is not None else "không có từ một chữ có tên brand") \
+            + " — tìm tên brand"
+    # Bỏ trùng như actor nhận ("#HAPAS" = "hapas" — `apify_tool._bo_trung_tu_khoa`), để `_tu_cho`
+    # không tốn một suất `so_bai // 10` cho bản trùng.
+    da: set[str] = set()
+    gon = []
+    for x in ra:
+        k = _khoa_tu_th(x)
+        if x and k not in da:
+            da.add(k)
+            gon.append(x)
+    return gon[:TK_TOI_DA_TU], ly
+
+
+def _khoa_tu_th(x) -> str:
+    """Khoá bỏ trùng từ khoá Threads như actor nhận (`apify_tool._bo_trung_tu_khoa`)."""
+    return " ".join(A._tokens(str(x or ""))) or str(x or "").lower()
+
+
+def _chi_duong_2(tu_p: list[str], tu_1: list[str]) -> list[str]:
+    """Từ khoá TÌM của Threads không đi đường 1 (chỉ đường 2 nhận) — cho phễu."""
+    co = {_khoa_tu_th(x) for x in tu_1}
+    return [x for x in tu_p if _khoa_tu_th(x) not in co]
+
+
+def _tu_threads_1(du_an: dict, tu_p: list[str]) -> list[str]:
+    """Từ khoá đường 1 Threads cho ước tính — như lượt chạy: không có từ khoá TÌM nào thì rỗng."""
+    return tu_threads_duong1(du_an, tu_p)[0] if tu_p else []
+
+
 def tag_cua(du_an: dict, p: str, tu: list[str]) -> list[str]:
     """Đầu vào hashtag của đường tìm theo hashtag của nền tảng `p` (Instagram, feed hashtag TikTok):
     `nguon_tag` trên từ khoá ĐÃ bỏ `bo_tu`, rồi bỏ hashtag trùng một mục MỘT chữ của `bo_tu` ("#quatang2010",
@@ -1806,8 +1895,12 @@ def uoc_tu_khoa_du_an(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA,
         if c["bat"] and p == "web":
             tong += uoc_web(c["so_bai"], tu_p, c["boc"])
         elif c["bat"]:
+            # Threads đường 1 (18/10/2026): chỉ từ một chữ có tên brand (`tu_threads_duong1`) —
+            # cùng danh sách lượt chạy gửi futurizerush, nên sản lượng lượt trước (`ve_tu`) khớp.
             tong += uoc_tu_khoa_nen_tang(p, c["so_bai"],
-                                         tag_cua(du_an, p, tu) if p == "instagram" else tu_p,
+                                         tag_cua(du_an, p, tu) if p == "instagram"
+                                         else _tu_threads_1(du_an, tu_p) if p == "threads"
+                                         else tu_p,
                                          c["so_tu"], fb_toi_da,
                                          moc=m.get(p) if p == "threads" else None)
         if p == "facebook" and c["duong2"]["bat"]:
@@ -1837,8 +1930,8 @@ def uoc_threads_1(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA, moc: dict | None =
         return 0.0
     m = (moc or {}).get("threads") if isinstance(moc, dict) else None
     return uoc_tu_khoa_nen_tang("threads", c["so_bai"],
-                                tu_nen_tang(du_an, "threads", tu_tim(du_an)), c["so_tu"],
-                                fb_toi_da, moc=m if isinstance(m, dict) else {})
+                                _tu_threads_1(du_an, tu_nen_tang(du_an, "threads", tu_tim(du_an))),
+                                c["so_tu"], fb_toi_da, moc=m if isinstance(m, dict) else {})
 
 
 def giu_cho_tu_khoa(du_an: dict, fb_toi_da: int = TK_FB_TOI_DA, moc: dict | None = None) -> float:
@@ -2032,7 +2125,11 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             if bo_p:
                 tk["ghi_chu"].append(f"tìm {_TEN[p]}: không tìm {len(bo_p)} từ khoá theo cấu hình "
                                      f"({', '.join(bo_p)[:80]})")
-            q = _tu_cho(p, tag_p if p == "instagram" else tu_p, cfg[p]["so_tu"], so_bai)
+            # Từ khoá của ĐƯỜNG CHÍNH. Threads (18/10/2026): đường 1 futurizerush chỉ nhận từ một
+            # chữ có tên brand (`tu_threads_duong1`); đường 2 vẫn nhận mọi từ khoá `tu_p`.
+            tu_1, ly_1 = (tu_threads_duong1(du_an, tu_p) if p == "threads" and tu_p
+                          else (tu_p, ""))
+            q = _tu_cho(p, tag_p if p == "instagram" else tu_1, cfg[p]["so_tu"], so_bai)
             if not q:
                 continue
             if p in co_run:
@@ -2074,7 +2171,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             moc_th = (moc_cu.get(p) if isinstance(moc_cu.get(p), dict) else {}) \
                 if p == "threads" else None
             uoc = (uoc_web(so_bai, tu_p, cfg[p]["boc"]) if p == "web"
-                   else uoc_tu_khoa_nen_tang(p, so_bai, tag_p if p == "instagram" else tu_p,
+                   else uoc_tu_khoa_nen_tang(p, so_bai, tag_p if p == "instagram" else tu_1,
                                              cfg[p]["so_tu"], fb_toi_da, moc=moc_th))
             if p == "web":
                 # Trần trang dự phòng là TRẦN, không phải tiền chắc tiêu: chỉ cần đủ cho phần
@@ -2086,20 +2183,20 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # nó; đường 1 (phí khởi động 0,08) co về số từ khoá ĐẦU vừa phần còn lại — từ khoá
                 # đứng đầu là từ chính của dự án ("hapas"), cũng là từ ra bài nhiều nhất. Ước tính
                 # theo sản lượng nên từ khoá về 0 bài lượt trước không làm co oan.
-                co = _co_threads(tu_p, so_bai, min(con, _con_viec(v)), moc_th)
+                co = _co_threads(tu_1, so_bai, min(con, _con_viec(v)), moc_th)
                 if co:
                     q, so_bai, uoc = co
                     tk["ghi_chu"].append(
-                        f"tìm Threads: ngân sách còn {_usd(min(con, _con_viec(v)))} USD — co còn "
-                        f"{len(q)}/{len(tu_p)} từ khoá đầu × {TH_TOI_THIEU_BAI} bài (ước tính "
-                        f"{_usd(uoc)} USD)")
-            if p == "threads" and not co and len(q) < min(len(tu_p), TH_TOI_DA_MOI_LUOT) \
+                        f"tìm Threads đường 1: ngân sách còn {_usd(min(con, _con_viec(v)))} USD — "
+                        f"co còn {len(q)}/{len(tu_1)} từ khoá đầu × {TH_TOI_THIEU_BAI} bài (ước "
+                        f"tính {_usd(uoc)} USD)")
+            if p == "threads" and not co and len(q) < min(len(tu_1), TH_TOI_DA_MOI_LUOT) \
                     and uoc <= min(con, _con_viec(v)) + 1e-9:
                 # MỘT câu về số từ khoá Threads (câu co ngân sách ở trên thay câu này).
                 tk["ghi_chu"].append(
-                    f"tìm Threads: {len(q)}/{len(tu_p)} từ khoá đầu ({', '.join(q)[:80]}) — actor "
-                    f"lấy ≥ {TH_TOI_THIEU_BAI} bài mỗi từ; đặt số bài Threads ≥ "
-                    f"{TH_TOI_THIEU_BAI * min(len(tu_p), TH_TOI_DA_MOI_LUOT)} để tìm đủ")
+                    f"tìm Threads đường 1: {len(q)}/{len(tu_1)} từ khoá đầu ({', '.join(q)[:80]}) "
+                    f"— actor lấy ≥ {TH_TOI_THIEU_BAI} bài mỗi từ; đặt số bài Threads ≥ "
+                    f"{TH_TOI_THIEU_BAI * min(len(tu_1), TH_TOI_DA_MOI_LUOT)} để tìm đủ")
             if uoc > min(con, _con_viec(v)) + 1e-9 or v.con_giay() < _CHUA_GIAY_CUOI + 60:
                 het_gio = v.con_giay() < _CHUA_GIAY_CUOI + 60
                 _bo_qua_tk(v, tk, p, "QUA_GIO" if het_gio else "NGAN_SACH",
@@ -2193,10 +2290,14 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 # nói lý do) chứ không phải "về 0" — mã nặng nhất thắng như `_tong_hop_nguon`.
                 x = max(loi_tu, key=lambda m: A._DO_NANG.get(m.get("ma"), 0))
                 ma_loi, loi = _loi_tim(x.get("ma") or "LOI", str(x.get("ly_do") or ""))
+            # Threads (18/10/2026): phễu ghi đường 1 dùng từ nào, vì sao, cụm nào chỉ gửi đường 2.
+            duong1 = ({"tu": list(q_gui), "ly_do": ly_1, "chi_duong2": _chi_duong_2(tu_p, tu_1)}
+                      if p == "threads" else None)
             if loi is not None:
                 tk["ghi_chu"].append(f"tìm {_TEN[p]}: {loi}")
                 # Sổ việc (`pheu_tu_khoa`) giữ lý do như phễu bỏ qua; `_cau_tk` không lặp dòng.
-                tk["pheu"][p] = {**_pheu_moi(ngay, ly_cs), "loi": loi, "ma_loi": ma_loi}
+                tk["pheu"][p] = {**_pheu_moi(ngay, ly_cs), "loi": loi, "ma_loi": ma_loi,
+                                 **({"duong1": duong1} if duong1 else {})}
             # Threads: phí khởi động 0,08 USD mất cả khi actor trả 0 bài — vẫn trừ vào phần còn.
             co_khoi = bool(got) or (p == "threads" and loi is None)
             tien = round(len(got) * _TK_GIA.get(p, 0.0)
@@ -2230,6 +2331,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 ph_p["xin_ly_do"] = (f"{ly_xin}; ước tính {_usd(uoc)} USD, " + san_luong_du_kien(
                     q, max(TH_TOI_THIEU_BAI, so_bai // len(q)), moc_th,
                     max(so_bai, TH_TOI_THIEU_BAI))[1])
+                ph_p["duong1"] = duong1
                 _bo_trung_duong_2(hits, got, tk)
             if loi_tu:
                 # Có bài nhưng vài từ khoá hỏng: phễu nói từ nào, vì sao (mã → nhãn ngắn).
@@ -4038,7 +4140,8 @@ def _cau_pheu(p: str, f: dict) -> str:
     ly = ", ".join(f"{A._MA_AI.get(k, k)} {n}"
                    for k, n in sorted(ai.items(), key=lambda kv: (-kv[1], kv[0])))
     return (f"phễu tìm {_TEN.get(p, p)} (xin {f.get('ngay', 0)} ngày, {f.get('ly_do') or '?'}"
-            + (f"; {f['xin_ly_do']}" if f.get("xin_ly_do") else "") + "): "
+            + (f"; {f['xin_ly_do']}" if f.get("xin_ly_do") else "")
+            + _cau_duong_1(f.get("duong1")) + "): "
             f"về {f.get('ve', 0)} → trong phạm vi {f.get('pham_vi', 0)} (ngoài phạm vi "
             f"{f.get('ngoai_pham_vi', 0)}) → cập nhật {f.get('cap_nhat', 0)} bài đã có; bài mới: "
             + (f"đã loại trước {f['da_loai_truoc']}, " if f.get("da_loai_truoc") else "")
@@ -4060,6 +4163,18 @@ def _cau_pheu(p: str, f: dict) -> str:
             + _cau_noi(f.get("noi"))
             + _cau_tag(f.get("tag_feed"))
             + _cau_web(f.get("web")))
+
+
+def _cau_duong_1(d) -> str:
+    """Phần "đường 1 dùng từ nào" của phễu Threads (18/10/2026, `tu_threads_duong1`): từ khoá gửi
+    futurizerush, vì sao, và cụm chỉ gửi đường 2 (scrapersdelight)."""
+    if not isinstance(d, dict) or not d.get("tu"):
+        return ""
+    def ds(xs) -> str:
+        return ", ".join(f"'{x}'" for x in xs)[:100]
+    chi2 = d.get("chi_duong2") or []
+    return (f"; đường 1 futurizerush tìm {ds(d['tu'])} ({d.get('ly_do') or '?'}"
+            + (f"; {len(chi2)} từ khoá chỉ gửi đường 2: {ds(chi2)}" if chi2 else "") + ")")
 
 
 def _cau_duong(d) -> str:
