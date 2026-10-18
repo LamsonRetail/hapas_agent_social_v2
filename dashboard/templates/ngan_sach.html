@@ -179,7 +179,7 @@
 <section class="the-khoi cach-duoi ns-ch" aria-labelledby="ns-ch-tieu-de">
   {% if ql %}
   <script type="application/json" id="ns-du-lieu">{{ {"hang_so": hang_so, "tu_khoa": d.tu_khoa or [], "ten": d.ten,
-    "hashtag_rieng": tag_rieng,
+    "hashtag_rieng": tag_rieng, "bo_tu": d.bo_tu or {},
     "mac_dinh": {"tk_so_bai": d.tk_so_bai or 0, "bl_so_bai": d.bl_so_bai or 0, "bl_moi_bai": d.bl_moi_bai or 0},
     "da_tieu": d.da_tieu, "nguon_con_lai": nguon_con, "ngay_con_lai": db.ngay_con_lai,
     "co_lich": co_lich, "luot_con_lai": so_luot, "luot_30": luot_30,
@@ -323,7 +323,7 @@
   <details class="ns-nc" id="ns-nang-cao">
     <summary>
       <span class="ns-nc__ten">Nâng cao</span>
-      <span class="ns-nc__phu">Tìm rộng hơn, feed hashtag, số hashtag Instagram, Báo &amp; Web</span>
+      <span class="ns-nc__phu">Tìm rộng hơn, feed hashtag, số hashtag Instagram, Báo &amp; Web, từ khoá không tìm</span>
       <span class="ns-nc__tong">+<output data-o="nc-tong" data-usd="{{ nc_usd }}">{{ nc_usd|usd_vn(3) }}</output> USD/lượt <span class="mo">— đã cộng vào bảng</span></span>
     </summary>
     <div class="ns-nc__luoi">
@@ -417,6 +417,27 @@
         <div class="ns-nc__so">
           {% if ql %}<label class="ns-nc__o">Tối đa trang/lượt <input type="number" name="tk_web_boc" min="0" max="{{ hang_so.gioi_han.tk_so_bai[1] }}" step="1" inputmode="numeric" placeholder="{{ g_boc }}" value="{{ r_wb.get('boc') if 'boc' in r_wb else '' }}" aria-label="Báo &amp; Web: số trang đọc dự phòng tối đa mỗi lượt, 0 = tắt (trống = {{ g_boc }})"></label>
           {% else %}<span>Đọc trang bị chặn tối đa {{ wb.boc }} trang/lượt</span>{% endif %}
+        </div>
+      </div>
+      {# "Không tìm trên…" (18/10/2026) = `tu_khoa.<nền tảng>.bo_tu`: từ khoá dự án KHÔNG đem đi tìm trên
+         nền tảng đó (mọi cách tìm của nền tảng); bài vẫn lọc theo đủ từ khoá. Một ô mỗi nền tảng. #}
+      <div class="ns-nc__muc ns-nc__muc--rong" data-nt="bo_tu">
+        <div class="ns-nc__dau">
+          <b>Không tìm trên…</b>
+          <button type="button" class="goi-y" data-goi-y="Từ khoá ghi trong ô của một nền tảng sẽ KHÔNG được đem đi tìm trên nền tảng đó (mọi cách tìm của nền tảng, kể cả tìm rộng hơn). Bài vẫn phải nhắc từ khoá của dự án mới được giữ — đây chỉ bớt câu tìm kéo về bài lạc đề. Ghi đúng từ khoá như ở trang Nguồn, cách nhau dấu phẩy; với Instagram và feed hashtag TikTok, ghi hashtag một chữ (vd #quatang2010) để bỏ hashtag đó. Ô trống = tìm mọi từ khoá.">i</button>
+        </div>
+        <p class="ns-nc__mo-ta">Dùng cho cụm chung chung kéo về bài không liên quan — vd "yêu từ điều nhỏ nhất" trên Facebook (đo 18/10/2026: 18/20 bài không phải {{ d.ten }}). Bài vẫn lọc theo đủ {{ b.so_tu_khoa }} từ khoá.</p>
+        <div class="ns-nc__bo-tu">
+          {% for p in hang_so.nen_tang %}
+          {% set tkp = b.tu_khoa[p] %}
+          {% set bo_p = tkp.bo_tu or [] %}
+          <label class="ns-nc__bo">
+            <span class="ns-nc__bo-ten"><span class="the the--nt-{{ p }}">{{ p|ten_nen_tang }}</span> <span class="ns-so-tu" data-o="bo-tu-{{ p }}">{% if tkp.so_tu_tim < b.so_tu_khoa %}tìm {{ tkp.so_tu_tim }}/{{ b.so_tu_khoa }} từ khoá{% else %}tìm đủ {{ b.so_tu_khoa }} từ khoá{% endif %}</span></span>
+            {% if ql %}<input type="text" name="tk_{{ p }}_bo_tu" value="{{ bo_p|join(', ') }}" placeholder="trống = tìm mọi từ khoá" maxlength="2000" autocomplete="off" aria-label="{{ p|ten_nen_tang }}: từ khoá không đem đi tìm, cách nhau dấu phẩy">
+            {% else %}<span>{{ bo_p|join(', ') if bo_p else '—' }}</span>{% endif %}
+            {% if tkp.bo_tu_la %}<span class="ns-nc__bo-la">Không khớp từ khoá nào của dự án: {{ tkp.bo_tu_la|join(', ') }}</span>{% endif %}
+          </label>
+          {% endfor %}
         </div>
       </div>
     </div>

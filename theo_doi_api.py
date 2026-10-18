@@ -23,6 +23,7 @@ theo_doi ít đụng nhau. Hai việc:
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import math
 import re
@@ -486,21 +487,68 @@ def xoay_fb(q: list[str], lim: int, lim_cfg: int, moc: dict | None,
     return q_gui, (bat_dau + so_quet) % len(q) if q else 0, lim
 
 
+# ── Đường HASHTAG của bài (18/10/2026, cổng "phải nhắc brand" — `theo_doi.nhac_brand`) ──
+# Bài đến CHỈ từ đường hashtag (feed `challengePosts` TikTok, Instagram hashtag, TikTok dự phòng
+# clockworks hashtag) vào feed vì gắn một tag — tag rộng (#quatang2010) kéo theo bài không nói về
+# brand. Nhãn đường nằm ở `_tag_feed` của bài ("#tag", nhiều tag cách nhau dấu cách; "#" = đường
+# hashtag không rõ tag; "" = đã biết KHÔNG phải bài chỉ-hashtag); thiếu nhãn thì suy từ nguồn.
+_RE_TAG_IG = re.compile(r"instagram\.com/explore/tags/([^/?#]+)", re.IGNORECASE)
+
+
+def tag_ig(d: dict) -> str | None:
+    """Hashtag nguồn của bài Instagram theo `inputUrl` (trang actor đọc, có trong `__goc`):
+    "#tag"; "" khi là trang tìm theo từ khoá (`keywordSearch`, "explore/search/keyword"); None
+    khi bài không mang `inputUrl`."""
+    goc = d.get("__goc") if isinstance(d.get("__goc"), dict) else {}
+    u = str(goc.get("inputUrl") or "")
+    if not u:
+        return None
+    m = _RE_TAG_IG.search(u)
+    return f"#{A.hashtag_ig(m.group(1))}" if m else ""
+
+
+def duong_hashtag(d: dict) -> str:
+    """Nhãn đường hashtag của bài (xem trên) hoặc "" khi bài không đến CHỈ từ đường hashtag."""
+    x = d.get("_tag_feed")
+    if x is not None:
+        return str(x)
+    p = d.get("platform")
+    if p == "instagram":
+        return tag_ig(d) or ""
+    if p == "tiktok" and str(d.get("_nguon") or "").startswith("clockworks"):
+        return "#"               # dự phòng clockworks~tiktok-hashtag-scraper: tìm theo hashtag
+    return ""
+
+
+def gop_duong(giu: dict, bo: dict) -> None:
+    """Hai bản của MỘT bài (bỏ trùng trong lượt): bài chỉ-hashtag khi MỌI bản từ đường hashtag
+    (tag gộp lại); một bản từ đường từ khoá / nguồn thì bản giữ không còn là bài chỉ-hashtag."""
+    a = duong_hashtag(giu)
+    if a:
+        b = duong_hashtag(bo)
+        giu["_tag_feed"] = " ".join(dict.fromkeys(f"{a} {b}".split())) if b else ""
+
+
 def tach_da_biet(ma: str, hits: list[tuple], khoa_cua) -> tuple[list[dict], list[tuple], dict]:
     """Bài trong phạm vi → (dòng cập nhật số liệu của bài ĐÃ CÓ trong kho, bài mới cần lọc,
-    {nền tảng: số dòng trùng trong lượt}). `khoa_cua(d)` → khoá bài."""
+    {nền tảng: số dòng trùng trong lượt}). `khoa_cua(d)` → khoá bài. Bản trùng gộp nhãn đường
+    hashtag vào bản giữ (`gop_duong`)."""
     thay: dict[str, tuple] = {}
     trung: dict[str, int] = {}
     for d, dt in hits:
         k = khoa_cua(d)
         if k in thay:
             trung[d.get("platform")] = trung.get(d.get("platform"), 0) + 1
+            gop_duong(thay[k][0], d)
             continue
         thay[k] = (d, dt)
     da = K.khoa_da_co(ma, list(thay)) if thay else set()
     cap_nhat = [{"khoa": k, "xem": _so(d.get("views")), "thich": _so(d.get("likes")),
                  "binh_luan": _so(d.get("comments")), "chia_se": _so(d.get("shares")),
-                 "nen_tang": d.get("platform")}
+                 "nen_tang": d.get("platform"),
+                 # Script nạp raw: ngày ĐỌC của lần đọc này (`lang_nghe_db.nang_so_lieu`).
+                 **({"_ngay_so": d["_luc_doc"].astimezone(_VN).date()}
+                    if isinstance(d.get("_luc_doc"), datetime.datetime) else {})}
                 for k, (d, _) in thay.items() if k in da]
     moi = [x for k, x in thay.items() if k not in da]
     return cap_nhat, moi, trung
@@ -549,12 +597,53 @@ def doc_loai(ma: str, dau: str, tu: datetime.datetime) -> dict[str, list]:
             if isinstance(v, list) and len(v) == 2 and str(v[1]) >= moc}
 
 
-def ghi_loai(ma: str, dau: str, moi: list[tuple], tu: datetime.datetime) -> None:
-    """Gộp bài bị loại lượt này vào sổ, bỏ bài đã ra khỏi phạm vi; ghi nguyên tử. Không ghi
-    được thì chỉ báo (lượt sau xét lại — tốn AI, không mất bài)."""
-    import json
+@contextlib.contextmanager
+def _khoa_so():
+    """Khoá sổ "đã loại": trong tiến trình (`_KHOA_LOAI`) VÀ giữa các tiến trình (18/10/2026 —
+    `flock` trên tệp `.lock` cạnh sổ, chỉ POSIX). Vì sao: script dọn seeding / nạp raw
+    (`scripts/lang_nghe_loc_seeding.py`, `lang_nghe_nap_raw.py`) chạy bằng user mark trong tiến
+    trình RIÊNG mà ghi cùng sổ với bot — đọc-sửa-ghi không liền một khối thì bên ghi sau đè mất
+    phần bên kia vừa thêm. Không khoá được tệp (Windows, thư mục chỉ đọc) thì chỉ khoá trong tiến
+    trình như trước."""
     import os
     with _KHOA_LOAI:
+        fd = None
+        try:
+            import fcntl
+            f = _duong_loai()
+            f.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(f"{f}.lock", os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            if fd is not None:
+                os.close(fd)
+            fd = None
+        try:
+            yield
+        finally:
+            if fd is not None:
+                os.close(fd)                 # đóng tệp = nhả flock
+
+
+def _ghi_so_loai(d: dict) -> None:
+    """Ghi NGUYÊN TỬ cả sổ (tệp tạm + `os.replace`). Không ghi được thì chỉ báo (lượt sau xét lại
+    — tốn AI, không mất bài)."""
+    import json
+    import os
+    f = _duong_loai()
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, f)
+    except OSError as e:
+        print(f"[theo_doi] không ghi được sổ bài đã loại: {type(e).__name__}", flush=True)
+
+
+def ghi_loai(ma: str, dau: str, moi: list[tuple], tu: datetime.datetime) -> None:
+    """Gộp bài bị loại lượt này vào sổ, bỏ bài đã ra khỏi phạm vi; ghi nguyên tử. Đổi dấu luật thì
+    phần "bai" làm lại từ đầu, các khoá khác của dự án (sổ seeding, 18/10/2026) giữ nguyên."""
+    with _khoa_so():
         d = _doc_so_loai() or {"du_an": {}}
         cu = doc_loai(ma, dau, tu)
         for khoa, ly, dt in moi:
@@ -562,15 +651,115 @@ def ghi_loai(ma: str, dau: str, moi: list[tuple], tu: datetime.datetime) -> None
                 cu[str(khoa)] = [str(ly)[:40], dt.astimezone(_VN).date().isoformat()]
         if len(cu) > LOAI_TOI_DA:
             cu = dict(sorted(cu.items(), key=lambda kv: kv[1][1])[-LOAI_TOI_DA:])
-        d["du_an"][ma] = {"dau": dau, "bai": cu}
-        f = _duong_loai()
-        try:
-            f.parent.mkdir(parents=True, exist_ok=True)
-            tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
-            tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, f)
-        except OSError as e:
-            print(f"[theo_doi] không ghi được sổ bài đã loại: {type(e).__name__}", flush=True)
+        x = d["du_an"].get(ma)
+        d["du_an"][ma] = {**(x if isinstance(x, dict) else {}), "dau": dau, "bai": cu}
+        _ghi_so_loai(d)
+
+
+# ── Sổ seeding affiliate (18/10/2026, `loc_rac.tai_khoan_seeding`) ──
+# Bài seeding bị loại KHÔNG vào `bai`, nên kho không còn thấy nhịp đăng của tài khoản đó: lượt sau
+# chỉ thấy vài bài mới mỗi ngày và thả lọt. Sổ này giữ (nền tảng, tài khoản, giờ đăng, bình luận,
+# xem) của từng bài seeding đã loại để luật tính trên "lịch sử kho + sổ + lô". Khác phần "bai":
+# KHÔNG theo dấu luật — đổi từ khoá (`dau_loai`) thì bài bị loại theo luật cũ được xét lại, nhưng
+# nhịp đăng của tài khoản vẫn còn. Cùng tệp `.loai-tu-khoa.json` (khoá "seeding" của dự án), giữ
+# bài đăng trong `NGAY_PHAM_VI_TOI_DA` ngày, trần `LOAI_TOI_DA` dòng.
+def _gio_so(s) -> datetime.datetime | None:
+    try:
+        t = datetime.datetime.fromisoformat(str(s))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=_VN)
+
+
+def doc_seeding(ma: str, tu: datetime.datetime | None = None) -> list[dict]:
+    """Bài seeding đã loại của dự án (đăng từ `tu`): [{khoa, nen_tang, tai_khoan, dang_luc, bl,
+    xem, tt}] (`tt` = thích + chia sẻ; dòng ghi trước 18/10/2026 tối không có → None)."""
+    x = (_doc_so_loai().get("du_an") or {}).get(ma)
+    s = x.get("seeding") if isinstance(x, dict) and isinstance(x.get("seeding"), dict) else {}
+    ra = []
+    for k, v in s.items():
+        luc = _gio_so(v[2]) if isinstance(v, list) and len(v) >= 5 else None
+        if luc is None or (tu is not None and luc < tu):
+            continue
+        ra.append({"khoa": k, "nen_tang": v[0], "tai_khoan": v[1], "dang_luc": luc,
+                   "bl": _so(v[3]), "xem": _so(v[4]), "tt": _so(v[5]) if len(v) > 5 else None})
+    return ra
+
+
+def _so_lon(a, b):
+    """Số luỹ kế của hai lần đọc (bình luận, lượt xem chỉ tăng): lấy số lớn hơn; thiếu một bên thì
+    lấy bên còn lại."""
+    a, b = _so(a), _so(b)
+    return b if a is None else a if b is None else max(a, b)
+
+
+def ghi_seeding(ma: str, moi: list[dict], bay_gio: datetime.datetime | None = None, *,
+                chi_cap_nhat: bool = False) -> None:
+    """Gộp bài seeding vừa loại (`moi` = [{khoa, nen_tang, tai_khoan, dang_luc, bl, xem, tuỳ chọn
+    tt = thích + chia sẻ (soát M4)}]) vào sổ;
+    bỏ bài đăng trước `NGAY_PHAM_VI_TOI_DA` ngày; ghi nguyên tử. Bài đã có trong sổ (soát
+    18/10/2026, H1): số bình luận / xem cập nhật theo lần đọc mới (giữ số lớn hơn — số luỹ kế), để
+    luật không mãi tính trên số của lần thấy đầu. `chi_cap_nhat`: chỉ cập nhật số của khoá ĐÃ có
+    (bài lượt này được giữ mà sổ còn dòng cũ), không thêm khoá mới; không đổi gì thì không ghi."""
+    if not moi:
+        return
+    san = (bay_gio or datetime.datetime.now(_VN)) - datetime.timedelta(days=NGAY_PHAM_VI_TOI_DA)
+    with _khoa_so():
+        d = _doc_so_loai() or {"du_an": {}}
+        x = d["du_an"].get(ma) if isinstance(d["du_an"].get(ma), dict) else {}
+        s = {k: v for k, v in (x.get("seeding") or {}).items()
+             if isinstance(v, list) and len(v) >= 5 and (_gio_so(v[2]) or san) >= san}
+        doi = len(s) != len(x.get("seeding") or {})
+        for r in moi:
+            luc = r.get("dang_luc")
+            k = str(r.get("khoa") or "")
+            if not k or not isinstance(luc, datetime.datetime) or luc < san:
+                continue
+            cu = s.get(k)
+            if cu is None and chi_cap_nhat:
+                continue
+            moi_dong = [str(r.get("nen_tang") or ""), str(r.get("tai_khoan") or ""),
+                        luc.astimezone(_VN).isoformat(timespec="minutes"),
+                        _so_lon(cu[3] if cu else None, r.get("bl")),
+                        _so_lon(cu[4] if cu else None, r.get("xem")),
+                        _so_lon(cu[5] if cu and len(cu) > 5 else None, r.get("tt"))]
+            if cu is not None and chi_cap_nhat:
+                moi_dong[:3] = cu[:3]
+            if moi_dong != (cu[:6] if cu else None):
+                s[k] = moi_dong
+                doi = True
+        if not doi:
+            return
+        if len(s) > LOAI_TOI_DA:
+            s = dict(sorted(s.items(), key=lambda kv: kv[1][2])[-LOAI_TOI_DA:])
+        d["du_an"][ma] = {**x, "seeding": s}
+        _ghi_so_loai(d)
+
+
+def cap_nhat_seeding(ma: str, moi: list[dict]) -> None:
+    """Số mới của bài ĐÃ nằm trong sổ seeding mà lượt này được giữ (`ghi_seeding(chi_cap_nhat)`)."""
+    ghi_seeding(ma, moi, chi_cap_nhat=True)
+
+
+def bo_khoi_so(ma: str, khoa: list[str]) -> int:
+    """Gỡ các khoá bài khỏi sổ của dự án — cả phần "bai" (mọi lý do) lẫn sổ seeding — khi script
+    HOÀN TÁC đưa bài về lại `bai`. -> số dòng đã gỡ."""
+    ks = {str(k) for k in khoa if k}
+    if not ks:
+        return 0
+    with _khoa_so():
+        d = _doc_so_loai() or {"du_an": {}}
+        x = d["du_an"].get(ma)
+        if not isinstance(x, dict):
+            return 0
+        n = 0
+        for phan in ("bai", "seeding"):
+            s = x.get(phan) if isinstance(x.get(phan), dict) else {}
+            n += sum(1 for k in ks if k in s)
+            x[phan] = {k: v for k, v in s.items() if k not in ks}
+        if n:
+            _ghi_so_loai(d)
+        return n
 
 
 def _so(v):
@@ -688,6 +877,7 @@ def tim_noi_tiktok(q: list[str], bay_gio: datetime.datetime, tran: float,
     if not (q or tag) or so_yc <= 0 or not TT.dung_api("tiktok_tim"):
         return []
     items: list = []
+    theo_tag: list[tuple[str, list]] = []      # bài feed hashtag: nhãn `_tag_feed` (cổng brand)
     yc_tu = min(so_yc, len(q) * trang)
     try:
         if q and yc_tu:
@@ -709,12 +899,17 @@ def tim_noi_tiktok(q: list[str], bay_gio: datetime.datetime, tran: float,
                     if not c:
                         continue
                     cid[t] = c
-                items += TT.bai_hashtag(cid[t], trang, ngan)
+                theo_tag.append((t, TT.bai_hashtag(cid[t], trang, ngan)))
             except A.LoiApify as e:
                 if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
                     raise
                 print(f"[theo_doi] lượt nổi #{t} lỗi: {e.ma}", flush=True)
+    # Bài feed mang nhãn đường hashtag; bản trùng với bài tìm theo từ khoá gộp ở `tach_da_biet`.
     ra = A._chuan_tiktok(A._chuan_clockworks(items))
+    for t, cac in theo_tag:
+        for d, dt in A._chuan_tiktok(A._chuan_clockworks(cac)):
+            d["_tag_feed"] = f"#{t}"
+            ra.append((d, dt))
     for d, _ in ra:
         d["_noi"] = True
     return ra

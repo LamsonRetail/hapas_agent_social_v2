@@ -162,13 +162,17 @@
       .replace(/\p{Mn}/gu, "").toLowerCase().replace(/[^a-z0-9_]/g, "");
   }
   var TU_IG = TU.map(tagIg).filter(function (t, i, ds) { return t && ds.indexOf(t) === i; });
-  function uocTk(p, so, soTu, boc) {
-    if (p === "web") return uocWeb(so, TU, boc);
+  // `tu`, `tuIg` (18/10/2026): từ khoá / hashtag TÌM của nền tảng sau khi bỏ "Không tìm trên…"
+  // (`tuP`, `tagP`); bỏ trống = TU / TU_IG như trước.
+  function uocTk(p, so, soTu, boc, tu, tuIg) {
+    tu = tu || TU;
+    tuIg = tuIg || TU_IG;
+    if (p === "web") return uocWeb(so, tu, boc);
     // Threads (= chi_phi.tu_gui): chỉ `so // 10` từ đầu (≥ 1, ≤ 20) — actor lấy ≥ 10 bài mỗi từ.
     var thMin = hs.th_toi_thieu_bai || 10;
-    var q = p === "instagram" ? TU_IG.slice(0, soTu)
-      : p === "threads" ? TU.slice(0, Math.max(1, Math.min(hs.th_toi_da_moi_luot || 20, Math.floor(so / thMin))))
-      : TU;
+    var q = p === "instagram" ? tuIg.slice(0, soTu)
+      : p === "threads" ? tu.slice(0, Math.max(1, Math.min(hs.th_toi_da_moi_luot || 20, Math.floor(so / thMin))))
+      : tu;
     var gia = (hs.tk_gia || {})[p] || 0;
     if (!q.length || !gia || so <= 0) return 0;
     if (p === "instagram") {         // hai run (tab bài + reels), mỗi run mọi hashtag × trần mỗi tag
@@ -187,6 +191,35 @@
   if (TAG_DA.length) {               // = chi_phi.tu_gui("instagram", nguon_tag(...))
     TU_IG = NGUON_TAG.map(tagIg).filter(function (t, i, ds) { return t && ds.indexOf(t) === i; });
   }
+  // <bo_tu> "Không tìm trên…" (18/10/2026) — = chi_phi.bo_tu / tu_nen_tang / tag_cua (bài thử
+  // tests/test_bo_tu.py::test_ngan_sach_js_bo_tu_khop_python chạy khối này bằng node). Đọc ô
+  // `tk_<p>_bo_tu` đang gõ (mẫu nhanh không đổi ô này), trang không có ô thì theo danh sách đã lưu.
+  function boTu(p, doc) {
+    var ten = "tk_" + p + "_bo_tu";
+    var s = doc && form && form.elements.namedItem(ten) ? doc.gt(ten) : null;
+    var ds = s == null ? ((D.bo_tu || {})[p] || []) : s.split(/[,\n;]+/);
+    return ds.map(function (x) { return String(x).trim(); }).filter(Boolean);
+  }
+  function khoaBo(s) {
+    return norm(String(s || "").replace(/#/g, " ").split(/\s+/).filter(Boolean).join(" "));
+  }
+  function khoaTag(s) { return tagIg(s).replace(/[^a-z0-9]/g, ""); }
+  function tuP(p, doc) {
+    var bo = {};
+    boTu(p, doc).forEach(function (x) { bo[khoaBo(x)] = 1; });
+    return TU.filter(function (x) { return !bo[khoaBo(x)]; });
+  }
+  function tagP(p, doc) {            // đầu vào hashtag (= chi_phi.tag_cua)
+    var bo = {};
+    boTu(p, doc).forEach(function (x) {
+      if (String(x).replace(/#/g, " ").split(/\s+/).filter(Boolean).length === 1 && khoaTag(x)) bo[khoaTag(x)] = 1;
+    });
+    return (TAG_DA.length ? TAG_DA : tuP(p, doc)).filter(function (t) { return !bo[khoaTag(t)]; });
+  }
+  function igP(doc) {                // = chi_phi._tu_ig(tag_cua("instagram"))
+    return tagP("instagram", doc).map(tagIg).filter(function (t, i, ds) { return t && ds.indexOf(t) === i; });
+  }
+  // </bo_tu>
   function uocBl(p, so, moi) {       // = chi_phi.uoc_binh_luan_luot
     moi = moi || hs.bl_uoc_moi_bai;
     var gia = (hs.bl_gia || {})[p] || 0;
@@ -198,34 +231,43 @@
   var HF2 = hs.fb2 || {};
   function chuCua(s) { return norm(s).match(/[\p{L}\p{N}]+/gu) || []; }   // = chi_phi._tokens
   var TEN = chuCua(D.ten);
-  var CUM_FB2 = TU.filter(function (kw) {
-    var c = chuCua(kw);
-    return String(kw).split(/\s+/).filter(Boolean).length >= 2 && TEN.length > 0 &&
-      (TEN.every(function (t) { return c.indexOf(t) >= 0; }) || c.indexOf(TEN.join("")) >= 0);
-  });
+  function cumFb2(doc) {             // = chi_phi.tu_fb_duong2(du_an, tu_nen_tang("facebook"))
+    return tuP("facebook", doc).filter(function (kw) {
+      var c = chuCua(kw);
+      return String(kw).split(/\s+/).filter(Boolean).length >= 2 && TEN.length > 0 &&
+        (TEN.every(function (t) { return c.indexOf(t) >= 0; }) || c.indexOf(TEN.join("")) >= 0);
+    });
+  }
   function cauHinhD2(doc, fb) {
     var o = doc.gt("tk_facebook_d2_so_bai");
     var so = kep(o !== "" ? o : HF2.moi_tu, 0, GH.tk_so_bai[1], HF2.moi_tu);
     var y = doc.bat("tk_facebook_d2_bat") && !!fb.y;
     var c = { y: y, bat: y && so > 0, so_bai: so };
-    c.uoc = c.bat && CUM_FB2.length ? r4(CUM_FB2.length * (so * HF2.gia + HF2.khoi) * hs.he_so) : 0;
+    var cum = cumFb2(doc);
+    c.so_cum = cum.length;
+    c.uoc = c.bat && cum.length ? r4(cum.length * (so * HF2.gia + HF2.khoi) * hs.he_so) : 0;
     return c;
   }
   // TikTok feed hashtag (17/10/2026) — = chi_phi._cau_hinh_tag / tag_tiktok / uoc_tag_tiktok: từ
   // khoá MỘT chữ thành hashtag (bỏ '#', bỏ dấu, chỉ [0-9a-z], 3–40 ký tự), trần yêu cầu × giá × hệ số.
   var HTT = hs.tt_tag || {};
-  var TAG_TT = [];
-  NGUON_TAG.forEach(function (kw) {
-    if (String(kw).split(/\s+/).filter(Boolean).length !== 1) return;
-    var t = norm(String(kw).replace(/^#+/, "")).replace(/[^0-9a-z]/g, "");
-    if (t.length >= 3 && t.length <= 40 && TAG_TT.indexOf(t) < 0) TAG_TT.push(t);
-  });
+  function tagTt(doc) {              // = chi_phi.tag_tiktok(tag_cua("tiktok"))
+    var ra = [];
+    tagP("tiktok", doc).forEach(function (kw) {
+      if (String(kw).split(/\s+/).filter(Boolean).length !== 1) return;
+      var t = norm(String(kw).replace(/^#+/, "")).replace(/[^0-9a-z]/g, "");
+      if (t.length >= 3 && t.length <= 40 && ra.indexOf(t) < 0) ra.push(t);
+    });
+    return ra;
+  }
   function cauHinhTag(doc, tt) {
     var o = doc.gt("tk_tiktok_tag_so_yc");
     var so = kep(o !== "" ? o : HTT.yeu_cau, 0, GH.tk_so_bai[1], HTT.yeu_cau);
     var y = doc.bat("tk_tiktok_tag_bat") && !!tt.y;
     var c = { y: y, bat: y && so > 0, so_bai: so };
-    c.uoc = c.bat && TAG_TT.length ? r4(so * (hs.tk_tt_yeu_cau || 0) * hs.he_so) : 0;
+    var tag = tagTt(doc);
+    c.so_tag = tag.length;
+    c.uoc = c.bat && tag.length ? r4(so * (hs.tk_tt_yeu_cau || 0) * hs.he_so) : 0;
     return c;
   }
   // Threads "Tìm rộng hơn" (= chi_phi.cau_hinh_th2 + uoc_th2, máy chủ tính sẵn trong D.th2). 18/10/2026
@@ -242,10 +284,12 @@
     var kq = { tk: {}, bl: {} };
     var stk = 0;
     var sbl = 0;
+    var ig = igP(doc);
     NT.forEach(function (p) {
       var a = cauHinh(doc, "tk", p);
       var b = cauHinh(doc, "bl", p);
-      a.uoc = a.bat ? uocTk(p, a.so_bai, a.so_tu, a.boc) : 0;
+      a.tu = tuP(p, doc);
+      a.uoc = a.bat ? uocTk(p, a.so_bai, a.so_tu, a.boc, a.tu, ig) : 0;
       if (p === "threads") {
         a.th2 = cauHinhTh2(doc, a);
         a.uoc = r4(a.uoc + a.th2.uoc);
@@ -260,6 +304,7 @@
     stk += kq.d2.uoc;
     kq.tag = cauHinhTag(doc, kq.tk.tiktok || {});
     stk += kq.tag.uoc;
+    kq.ig = ig;
     kq.uoc_tk = r4(stk);
     kq.uoc_bl = r4(sbl);
     kq.tong = r4(kq.uoc_tk + kq.uoc_bl);
@@ -365,7 +410,8 @@
 
   // ── trạng thái chưa lưu ──
   var CAC_O = Array.prototype.filter.call(form.elements, function (e) {
-    return e.name && e.name !== "csrf" && (e.type === "checkbox" || e.type === "number");
+    return e.name && e.name !== "csrf" && (e.type === "checkbox" || e.type === "number" ||
+      /_bo_tu$/.test(e.name));        // ô chữ "Không tìm trên…" (18/10/2026) cũng là thay đổi chưa lưu
   });
   function chup() {
     return CAC_O.map(function (e) { return e.type === "checkbox" ? (e.checked ? "1" : "0") : e.value; })
@@ -407,9 +453,19 @@
     ghi("nc-tong", soVn(nc, 3), nc);
     var ig = kq.tk.instagram;         // hashtag Instagram thật sự gửi (số hashtag đặt ở Nâng cao)
     if (ig) {
-      var igq = TU_IG.slice(0, ig.so_tu);
+      var igq = kq.ig.slice(0, ig.so_tu);
       ghi("ig-tag", igq.length ? "#" + igq.join(" #") + " (" + igq.length + " hashtag)" : "chưa có hashtag nào");
     }
+    // Số từ khoá / cụm / hashtag THẬT SỰ tìm — đổi ngay khi sửa "Không tìm trên…" (18/10/2026).
+    var wb = kq.tk.web;
+    if (wb) ghi("web-so-tu", rutGonWeb(wb.tu).length + " → " + soCauWeb(wb.tu) + " câu");
+    ghi("fb2-so-cum", String(kq.d2.so_cum));
+    ghi("tt-tag-so", String(kq.tag.so_tag));
+    NT.forEach(function (p) {
+      var a = kq.tk[p];
+      var bo = TU.length - a.tu.length;
+      ghi("bo-tu-" + p, bo ? "tìm " + a.tu.length + "/" + TU.length + " từ khoá" : "tìm đủ " + TU.length + " từ khoá");
+    });
     var fb = o("ghi-fb");             // gói FREE: đặt quá tk_fb_toi_da thì làm nổi ghi chú
     if (fb) {
       var vuotFb = kq.tk.facebook && kq.tk.facebook.bat && kq.tk.facebook.so_bai > hs.tk_fb_toi_da;
@@ -481,10 +537,7 @@
   }
 
   ghiGoiY("ghi-ig", (TAG_DA.length ? "Tìm theo hashtag của dự án (" : "Từ khoá viết liền thành hashtag, bỏ dấu (") +
-    TU_IG.length + " hashtag); tab bài + reels, " + soVn((hs.tk_gia || {}).instagram || 0, 4) + " USD/bài");
-  ghi("web-so-tu", rutGonWeb(TU).length + " → " + soCauWeb(TU) + " câu");
-  ghi("fb2-so-cum", String(CUM_FB2.length));
-  ghi("tt-tag-so", String(TAG_TT.length));
+    igP(docForm).length + " hashtag); tab bài + reels, " + soVn((hs.tk_gia || {}).instagram || 0, 4) + " USD/bài");
 
   // giá mỗi mẫu nhanh (chỉ phụ thuộc từ khoá dự án) — ghi ngay trên nút
   Object.keys(MAU).forEach(function (k) {

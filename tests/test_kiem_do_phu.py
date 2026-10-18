@@ -58,6 +58,13 @@ def test_chon_tag_tu_khoa_roi_tag_chien_dich_bo_tag_chung():
         "hapas", "tuihapas", "hapasxthom", "lammoidieuviyeu"]
     assert KDP.chon_tag(["hapas"], []) == ["hapas"]
     assert len(KDP.chon_tag(["hapas", "a b c d"], bai * 3)) <= KDP.TAG_TOI_DA
+    # `bo_tu` (soát LOW): mục một chữ không thành tag mẫu, kể cả tag lấy từ bài đã giữ.
+    assert KDP.chon_tag(["hapas", "quatang2010"], bai, bo=["#QuaTang2010", "lammoi dieu"]) == [
+        "hapas", "hapasxthom", "lammoidieuviyeu"]
+    da = {**DU_AN, "tu_khoa": ["hapas", "quatang2010"],
+          "cau_hinh": {"tu_khoa": {"tiktok": {"bo_tu": ["quatang2010"]}}}}
+    assert "quatang2010" not in KDP.chon_tag(T.tu_nen_tang(da, "tiktok", T.tu_tim(da)),
+                                             ["quatang2010, x"] * 3, bo=T.bo_tu(da, "tiktok"))
 
 
 def test_chon_tac_gia_bo_nguon_dang_theo_doi_va_trung():
@@ -105,6 +112,55 @@ def test_ly_do_sot():
     d2 = {"text": "túi hapas đẹp", "username": "kol.cu", "likes": 9000}
     assert KDP.ly_do_sot(d2, BAY, ["hapas"], {"kol.cu"}, BAY) == [
         "tìm theo từ khoá không trả về bài này"]
+
+
+def test_danh_dau_doc_so_seeding_bai_seeding_khong_la_sot_va_duoc_xet_lai(monkeypatch):
+    """Soát 18/10/2026 (H1): bài seeding đã loại chỉ còn ở sổ seeding (đổi từ khoá đã làm lại phần
+    "bai" của sổ) không phải bài "sót"; bài loại theo luật được đưa qua phễu xét lại, bài AI loại
+    thì không."""
+    import theo_doi_api as TDA
+    monkeypatch.setattr(K, "khoa_da_co", lambda ma, khoa: set())
+    luc = datetime.datetime.now(_VN) - datetime.timedelta(days=2)
+    tu_pv = luc - datetime.timedelta(days=10)
+    tu = ["hapas"]
+    items = [(TT.video(_aw(v, u, desc, luc, bl=0)), "#hapas")
+             for v, u, desc in ((71, "aff.x", "#hapas"), (72, "aff.x", "#hapas xinh"),
+                                (73, "kol.y", "túi hapas"))]
+    TDA.ghi_seeding("hapas", [{"khoa": "tiktok:71", "nen_tang": "tiktok", "tai_khoan": "aff.x",
+                               "dang_luc": luc, "bl": 0, "xem": 10}])
+    TDA.ghi_loai("hapas", TDA.dau_loai(DU_AN, tu), [("tiktok:72", "ai:lac_de", luc)], tu_pv)
+    mau = KDP.danh_dau("hapas", items, DU_AN, tu, tu_pv, luc + datetime.timedelta(hours=1),
+                       lambda d: T._khoa_bai("tiktok", d["link"]))
+    x = {m["khoa"]: (m["da_loai"], m["xet_lai"]) for m in mau}
+    assert x == {"tiktok:71": (True, True), "tiktok:72": (True, False),
+                 "tiktok:73": (False, False)}
+    so = KDP.tinh_do_phu(mau)
+    assert (so["so_nhac"], so["so_sot"], so["so_da_loai"]) == (1, 1, 2)
+
+
+def test_danh_dau_bai_da_co_ma_so_con_khoa_cu_van_tinh_vao_do_phu(monkeypatch):
+    """Soát 18/10/2026: bài seeding được xét lại và GIỮ (đã có trong kho) mà sổ "đã loại" / sổ
+    seeding còn khoá cũ — bản trước đánh dấu vừa `da_co` vừa `da_loai`, `tinh_do_phu` bỏ bài khỏi cả
+    tử lẫn mẫu số (độ phủ thấp đi theo số bài đã lấp). Nay bài đã có không phải bài đã loại."""
+    import theo_doi_api as TDA
+    monkeypatch.setattr(K, "khoa_da_co", lambda ma, khoa: {"tiktok:81", "tiktok:82"})
+    luc = datetime.datetime.now(_VN) - datetime.timedelta(days=2)
+    tu_pv = luc - datetime.timedelta(days=10)
+    tu = ["hapas"]
+    items = [(TT.video(_aw(v, u, "túi hapas", luc, bl=bl)), "#hapas")
+             for v, u, bl in ((81, "aff.x", 40), (82, "kol.y", 9), (83, "kol.z", 0))]
+    TDA.ghi_seeding("hapas", [{"khoa": "tiktok:81", "nen_tang": "tiktok", "tai_khoan": "aff.x",
+                               "dang_luc": luc, "bl": 0, "xem": 10}])
+    TDA.ghi_loai("hapas", TDA.dau_loai(DU_AN, tu), [("tiktok:81", "seeding_affiliate", luc),
+                                                    ("tiktok:82", "he_chu", luc)], tu_pv)
+    mau = KDP.danh_dau("hapas", items, DU_AN, tu, tu_pv, luc + datetime.timedelta(hours=1),
+                       lambda d: T._khoa_bai("tiktok", d["link"]))
+    x = {m["khoa"]: (m["da_co"], m["da_loai"], m["xet_lai"]) for m in mau}
+    assert x == {"tiktok:81": (True, False, False), "tiktok:82": (True, False, False),
+                 "tiktok:83": (False, False, False)}
+    so = KDP.tinh_do_phu(mau)
+    assert (so["so_nhac"], so["so_da_co"], so["so_da_loai"], so["so_sot"]) == (3, 2, 0, 1)
+    assert so["do_phu"] == pytest.approx(66.67)
 
 
 # ───────────────────────────── tiktok_api: hashtag + tài khoản ─────────────────────────────
@@ -638,7 +694,9 @@ def test_trang_ngan_sach_kiem_do_phu_luu_cong_tac_va_tran():
     r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "dp_bat": "1", "dp_tran": "5"})
     assert "Kiểm độ phủ: trần tối đa" in thong_bao(c, r)
     r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf})
-    assert "do_phu" not in kho.du_an["hapas"]["cau_hinh"], "biểu mẫu cũ không có ô: không đụng"
+    # Kho giả gộp nhóm như `kho.dat_cau_hinh` (18/10/2026): nhóm biểu mẫu không gửi giữ nguyên.
+    assert kho.du_an["hapas"]["cau_hinh"]["do_phu"] == {"bat": True}, \
+        "biểu mẫu cũ không có ô: không đụng"
     dang_nhap(c, XEM)
     t = c.get("/ngan-sach").text
     assert 'name="dp_tran"' not in t and "Kiểm độ phủ (TikTok, 2 lần/tuần)" in t

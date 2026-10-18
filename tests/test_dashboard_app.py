@@ -202,8 +202,10 @@ class GiaKho:
                 for b in self.bai if b["khoa"] in set(khoa)}
 
     def dat_cau_hinh(self, ai, ma, cau_hinh):
+        # Như `kho.dat_cau_hinh`: chỉ thay các nhóm được gửi, nhóm khác của JSONB giữ nguyên.
+        goc = self.du_an[ma].get("cau_hinh")
         self.du_an[ma].update(
-            cau_hinh=cau_hinh,
+            cau_hinh={**(goc if isinstance(goc, dict) else {}), **cau_hinh},
             tk_bat=any(v.get("bat") is True for v in cau_hinh["tu_khoa"].values()),
             bl_bat=any(v.get("bat") is True for v in cau_hinh["binh_luan"].values()))
         self._ghi(ai, "sua_cau_hinh", f"du_an:{ma}")

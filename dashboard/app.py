@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import copy
 import datetime
 import hashlib
 import hmac
@@ -1442,13 +1443,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             # duyệt cộng ngay khi người dùng bật lại phần đang tắt (cùng hàm `chi_phi.uoc_th2`).
             th2 = bang["tu_khoa"]["threads"].get("duong2")
             if isinstance(th2, dict):
-                th2["uoc_neu_bat"] = CP.uoc_th2({**th2, "bat": True}, CP.tu_tim(d))
+                th2["uoc_neu_bat"] = CP.uoc_th2({**th2, "bat": True},
+                                                CP.tu_nen_tang(d, "threads", CP.tu_tim(d)))
             # `cau_hinh` hiển thị: Threads (MAC_DINH_TAT) chưa đặt thì ô bật hiện TẮT như hiệu lực.
             dong.append({**d, "cau_hinh": CP.cau_hinh_hien_thi(d.get("cau_hinh")),
                          # Hashtag riêng của dự án đã chuẩn hoá (18/10/2026); [] = suy từ từ khoá.
                          "hashtag_rieng": CP.nguon_tag(d, []),
+                         # "Không tìm trên…" đã lưu từng nền tảng (18/10/2026) cho trình duyệt.
+                         "bo_tu": {p: CP.bo_tu(d, p) for p in CP.NEN_TANG},
                          # Hashtag Instagram thật sự gửi mỗi lượt (khối Nâng cao hiện danh sách).
-                         "tag_ig": CP.tu_gui("instagram", CP.nguon_tag(d, CP.tu_tim(d)),
+                         "tag_ig": CP.tu_gui("instagram", CP.tag_cua(d, "instagram", CP.tu_tim(d)),
                                              bang["tu_khoa"]["instagram"]["so_tu"]),
                          "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
                          "bang": bang, "lich": dl,
@@ -1498,9 +1502,26 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         try:
             await _du_an_phai_co(ma)
             cu_du_an = await _k(app.state.kho.doc_du_an, ma) or {}
-            ch: dict = {"tu_khoa": {}, "binh_luan": {}}
+            # Soát 18/10/2026: bấm Lưu từng XOÁ khối `gian` (giãn nhịp) của mọi nền tảng — biểu
+            # mẫu dựng lại cả nhóm tu_khoa / binh_luan / do_phu từ ô của nó, nên khoá con biểu mẫu
+            # không quản (`gian`, `so_tu` ngoài Instagram, khoá thêm về sau…) mất theo. Nay mỗi khối
+            # bắt đầu từ bản ĐANG LƯU, chỉ đặt lại khoá biểu mẫu quản (ô trống vẫn = bỏ khoá, theo
+            # mặc định chung); nhóm ngoài biểu mẫu (`seeding`, `hashtag_can_nhac_brand`, `web`,
+            # `theo_doi`…) giữ nhờ `kho.dat_cau_hinh` chỉ thay nhóm được gửi.
+            cu_ch = cu_du_an.get("cau_hinh") if isinstance(cu_du_an.get("cau_hinh"), dict) else {}
+
+            def khoi_cu(*duong: str) -> dict:
+                x = cu_ch
+                for k in duong:
+                    x = x.get(k) if isinstance(x, dict) else None
+                return copy.deepcopy(x) if isinstance(x, dict) else {}
+            ch: dict = {"tu_khoa": khoi_cu("tu_khoa"), "binh_luan": khoi_cu("binh_luan")}
             for p in CP.NEN_TANG:
-                tk = {"bat": form.get(f"tk_{p}_bat") == "1"}
+                tk = khoi_cu("tu_khoa", p)
+                tk["bat"] = form.get(f"tk_{p}_bat") == "1"
+                for k in ("so_bai", *(("so_tu",) if p == "instagram" else ()),
+                          *(("boc",) if p == "web" else ())):
+                    tk.pop(k, None)
                 if (form.get(f"tk_{p}_so_bai") or "").strip():
                     tk["so_bai"] = NL.so_nguyen(form.get(f"tk_{p}_so_bai"),
                                                 f"Tìm từ khoá {CS.TEN_NEN_TANG.get(p, p)}: số bài",
@@ -1533,10 +1554,26 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                             x[k_so] = NL.so_nguyen(form.get(o_so), nhan, 0, CP.SO_TOI_DA)
                     if x:
                         tk[khoi] = x
+                    else:
+                        tk.pop(khoi, None)
+                # "Không tìm trên…" (18/10/2026, `tu_khoa.<p>.bo_tu`): từ khoá không đem đi tìm trên
+                # nền tảng này. Biểu mẫu không có ô (trang cũ) thì giữ danh sách đang lưu; ô trống
+                # = bỏ khoá (tìm mọi từ khoá như trước).
+                o_bo = f"tk_{p}_bo_tu"
+                if o_bo in form:
+                    bo = NL.danh_sach(form.get(o_bo))
+                else:
+                    bo = CP.bo_tu(cu_du_an, p)
+                tk.pop("bo_tu", None)
+                if bo:
+                    tk["bo_tu"] = bo
                 ch["tu_khoa"][p] = tk
                 if p == "web":             # web không cào bình luận (giai đoạn 1)
                     continue
-                bl = {"bat": form.get(f"bl_{p}_bat") == "1"}
+                bl = khoi_cu("binh_luan", p)
+                bl["bat"] = form.get(f"bl_{p}_bat") == "1"
+                bl.pop("so_bai", None)
+                bl.pop("moi_bai", None)
                 if (form.get(f"bl_{p}_so_bai") or "").strip():
                     bl["so_bai"] = NL.so_nguyen(form.get(f"bl_{p}_so_bai"),
                                                 f"Bình luận {CS.TEN_NEN_TANG.get(p, p)}: số bài",
@@ -1551,7 +1588,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 ch["binh_luan"][p] = bl
             if "dp_tran" in form:
                 # Kiểm độ phủ (17/10/2026, 2 lần/tuần): công tắc + trần mỗi lần; ô trống = 0,20.
-                dp: dict = {"bat": form.get("dp_bat") == "1"}
+                dp = khoi_cu("do_phu")
+                dp["bat"] = form.get("dp_bat") == "1"
+                dp.pop("tran_usd", None)
                 if (form.get("dp_tran") or "").strip():
                     t = NL.tran_usd(form.get("dp_tran"))
                     if t > CP.DP_TRAN_TOI_DA:

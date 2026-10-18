@@ -97,10 +97,11 @@ def du_an_dang_bat() -> list[dict]:
 
 
 def nguon_cua_du_an(ma: str) -> list[dict]:
-    """Mọi nguồn của dự án (kể cả tạm dừng): để gắn bài tìm theo từ khoá về nguồn đã có và
-    không đề xuất lại nguồn đã nằm trong danh sách."""
+    """Mọi nguồn của dự án (kể cả tạm dừng): để gắn bài tìm theo từ khoá về nguồn đã có, không đề
+    xuất lại nguồn đã nằm trong danh sách, và (`loai`, 18/10/2026) để kênh nhà không bao giờ bị luật
+    seeding affiliate bắt."""
     with ket_noi() as c:
-        return c.execute("SELECT id, nen_tang, dinh_danh FROM nguon WHERE du_an = %s",
+        return c.execute("SELECT id, nen_tang, dinh_danh, loai FROM nguon WHERE du_an = %s",
                          (ma,)).fetchall()
 
 
@@ -374,7 +375,8 @@ def khoa_fb_trung(ma: str, rows: list[dict]) -> dict[str, str]:
 
 
 def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, int]:
-    """Upsert bài đã giữ + số liệu của ngày hôm nay (giờ VN). -> (bài mới, bài cập nhật).
+    """Upsert bài đã giữ + số liệu của ngày hôm nay (giờ VN) — dòng mang `_ngay_so` (script nạp
+    raw: ngày ĐỌC raw, soát 18/10/2026) thì ảnh chụp vào ngày đó. -> (bài mới, bài cập nhật).
 
     Bài đã có: số liệu lấy bản mới; nhãn AI (sắc thái/chủ đề) chỉ đè khi lượt này có nhãn;
     bài từng vào bằng `theo_doi` thì giữ nguyên kiểu đó (quét từ khoá về sau không hạ cấp).
@@ -411,13 +413,13 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
             them += "".join(f"{k} = COALESCE(bai.{k}, EXCLUDED.{k}), " for k in cac
                             if k in _COT_FB)
             gia_tri = [r.get(k) for k in cac]
+            # Lần đọc cũ (`_ngay_so`, nạp raw) trùng bài đã có (bản trùng Facebook): số chỉ NÂNG.
+            ham = "GREATEST" if r.get("_ngay_so") is not None else "COALESCE"
             x = c.execute(
                 f"INSERT INTO bai (du_an, kieu_quet, luot_dau, luot_cuoi, {cot}) "
                 f"VALUES (%s, %s, %s, %s, {dat}) "
                 "ON CONFLICT (du_an, khoa) DO UPDATE SET "
-                "xem = COALESCE(EXCLUDED.xem, bai.xem), thich = COALESCE(EXCLUDED.thich, bai.thich), "
-                "binh_luan = COALESCE(EXCLUDED.binh_luan, bai.binh_luan), "
-                "chia_se = COALESCE(EXCLUDED.chia_se, bai.chia_se), "
+                + "".join(f"{k} = {ham}(EXCLUDED.{k}, bai.{k}), " for k in _SO) +
                 "followers = COALESCE(EXCLUDED.followers, bai.followers), "
                 "sac_thai = COALESCE(EXCLUDED.sac_thai, bai.sac_thai), "
                 "chu_de = COALESCE(EXCLUDED.chu_de, bai.chu_de), "
@@ -433,7 +435,16 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                 moi += 1
             else:
                 cu += 1
-            if any(r.get(k) is not None for k in _SO):
+            if any(r.get(k) is not None for k in _SO) and r.get("_ngay_so") is not None:
+                # Lần đọc CŨ (script nạp raw, soát 18/10/2026): ảnh chụp vào đúng NGÀY ĐỌC, ngày đó
+                # đã có dòng thì giữ số lớn hơn từng cột (như `nang_so_lieu`).
+                c.execute(
+                    "INSERT INTO chi_so_ngay (du_an, khoa, ngay, xem, thich, binh_luan, chia_se) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (du_an, khoa, ngay) DO "
+                    "UPDATE SET " + ", ".join(f"{k} = GREATEST(EXCLUDED.{k}, chi_so_ngay.{k})"
+                                              for k in _SO),
+                    [ma, r["khoa"], r["_ngay_so"], *[r.get(k) for k in _SO]])
+            elif any(r.get(k) is not None for k in _SO):
                 c.execute(
                     "INSERT INTO chi_so_ngay (du_an, khoa, ngay, xem, thich, binh_luan, chia_se) "
                     "VALUES (%s, %s, (now() AT TIME ZONE %s)::date, %s, %s, %s, %s) "
@@ -468,6 +479,62 @@ def cap_nhat_so_lieu(ma: str, luot_id: int, rows: list[dict]) -> int:
                 "chia_se = EXCLUDED.chia_se",
                 [ma, r["khoa"], _TZ, *[r.get(k) for k in _SO]])
     return n
+
+
+def nang_so_lieu(ma: str, luot_id: int, rows: list[dict], ngay) -> int:
+    """Số liệu của một lần đọc CŨ (script nạp raw đã trả tiền, 18/10/2026) cho bài ĐÃ CÓ: mỗi số
+    chỉ được NÂNG (GREATEST — xem/thích/bình luận/chia sẻ là số luỹ kế; lượt quét sau lần đọc đó
+    đã ghi số lớn hơn thì giữ), `cap_nhat_cuoi`/`luot_cuoi` chỉ đổi khi có số tăng. Ảnh chụp ghi
+    vào ĐÚNG ngày đọc `ngay` (không phải hôm nay): ngày đó đã có dòng thì giữ số lớn hơn từng cột.
+    Khác `cap_nhat_so_lieu` (số MỚI NHẤT đè số cũ, ảnh chụp hôm nay) — dùng nó cho số cũ là hạ số
+    thật xuống và ghi nhầm ngày. Dòng mang `_ngay_so` (ngày đọc của CHÍNH lần đọc đó) thắng `ngay`
+    chung của phần. -> số bài có ít nhất một số tăng."""
+    n = 0
+    tang = " OR ".join(f"%s::bigint > COALESCE({k}, -1)" for k in _SO)
+    with ket_noi() as c:
+        for r in rows:
+            v = [r.get(k) for k in _SO]
+            if all(x is None for x in v):
+                continue
+            x = c.execute(
+                "UPDATE bai SET " + ", ".join(f"{k} = GREATEST(%s::bigint, {k})" for k in _SO)
+                + ", cap_nhat_cuoi = now(), luot_cuoi = %s WHERE du_an = %s AND khoa = %s "
+                f"AND ({tang}) RETURNING khoa", [*v, luot_id, ma, r["khoa"], *v]).fetchone()
+            n += 1 if x else 0
+            c.execute(
+                "INSERT INTO chi_so_ngay (du_an, khoa, ngay, xem, thich, binh_luan, chia_se) "
+                "SELECT %s, %s, %s, %s, %s, %s, %s WHERE EXISTS (SELECT 1 FROM bai WHERE "
+                "du_an = %s AND khoa = %s) ON CONFLICT (du_an, khoa, ngay) DO UPDATE SET "
+                + ", ".join(f"{k} = GREATEST(EXCLUDED.{k}, chi_so_ngay.{k})" for k in _SO),
+                [ma, r["khoa"], r.get("_ngay_so") or ngay, *v, ma, r["khoa"]])
+    return n
+
+
+def khoa_theo_luot_dau(ma: str, luot_id: int) -> list[dict]:
+    """Bài lần đầu vào kho ở lượt `luot_id` (khoá, lượt cuối, đã cào bình luận chưa, số bình luận
+    đã cào) — hoàn tác script nạp raw: chỉ xoá bài chưa bị lượt sau đụng tới. Chỉ đọc."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT b.khoa, b.luot_cuoi, b.bl_lay_luc, (SELECT count(*) FROM binh_luan x WHERE "
+            "x.du_an = b.du_an AND x.khoa_bai = b.khoa) AS so_bl FROM bai b WHERE b.du_an = %s "
+            "AND b.luot_dau = %s ORDER BY b.khoa", (ma, int(luot_id))).fetchall()
+
+
+def lich_su_tai_khoan(ma: str, tai_khoan: list[str], tu) -> list[dict]:
+    """Bài đã giữ của các tài khoản (`tai_khoan` chữ thường) đăng từ `tu` — lịch sử nhịp đăng cho
+    luật seeding affiliate (`loc_rac.tai_khoan_seeding`, 18/10/2026). Soát M4: kèm thích / chia sẻ
+    (tín hiệu tương tác khi nền tảng không có lượt xem) và link / nội dung / id số Facebook (khoá
+    ổn định — pfbid đổi mỗi lượt, `theo_doi._khoa_loai_on_dinh`). Chỉ đọc."""
+    ds = sorted({str(x).strip().lstrip("@").lower() for x in tai_khoan if str(x or "").strip()})
+    if not ds:
+        return []
+    with ket_noi() as c:
+        so_fb = "ma_so_fb" if _co_ma_so_fb(c) else "NULL::text AS ma_so_fb"
+        return c.execute(
+            "SELECT khoa, nen_tang, lower(tai_khoan) AS tai_khoan, tac_gia, dang_luc, binh_luan, "
+            "xem, thich, chia_se, link, CASE WHEN nen_tang = 'facebook' THEN noi_dung END AS "
+            f"noi_dung, {so_fb} FROM bai WHERE du_an = %s AND lower(tai_khoan) = ANY(%s) "
+            "AND dang_luc >= %s", (ma, ds, tu)).fetchall()
 
 
 def bai_youtube_can_lam_moi(ma: str, ngay: int = 14, toi_da: int = 200) -> list[dict]:

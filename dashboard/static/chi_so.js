@@ -731,7 +731,7 @@
       " — rồi đếm bài nhắc brand đã có trong kho. Số lớn tính theo thảo luận (mỗi bài nặng 1 + số bình luận); theo số bài: " +
       pt(x.do_phu) + ". Lần kiểm " + ngayDu(x.luc) + ": " + so(x.so_mau) + " bài mẫu, " + so(x.so_nhac) +
       " bài nhắc brand, " + so(x.so_sot) + " bài sót (" + so(x.bo_sung) + " đã bổ sung vào kho)." +
-      (x.so_da_loai ? " " + so(x.so_da_loai) + " bài AI đã loại trước không tính là sót." : "") +
+      (x.so_da_loai ? " " + so(x.so_da_loai) + " bài đã loại trước (AI, luật seeding / thị trường / cổng brand) không tính là sót." : "") +
       (lyDoChu(x) ? " Lý do sót: " + lyDoChu(x) + "." : "") +
       (lamGiChu(x) ? " Mark đã làm: " + lamGiChu(x) + "." : "") +
       " Dưới " + pt(x.nguong) + " là thu thập đang có lỗ." + (x.cu ? " Lần kiểm này đã cũ — Mark chưa kiểm lại." : "") +

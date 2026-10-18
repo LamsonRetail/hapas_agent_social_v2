@@ -903,8 +903,10 @@ def thu_thap(du_an: dict, *, tu: datetime.date | None = None, den: datetime.date
              tu_dong_ho=time.monotonic, them_tu: list[str] | None = None,
              tu_giu: datetime.datetime | None = None, da_biet=None,
              boc=None, boc_toi_da: int = 0, da_boc: set[str] | None = None,
-             so: dict | None = None) -> tuple[list, dict]:
-    """MỘT lượt web của dự án -> (hits `(d, dt)` đã qua lọc luật, thống kê phễu).
+             so: dict | None = None, tu_tim: list[str] | None = None) -> tuple[list, dict]:
+    """MỘT lượt web của dự án -> (hits `(d, dt)` đã qua lọc luật, thống kê phễu). `tu_tim` (18/10/2026,
+    `theo_doi.tu_nen_tang`): từ khoá đem đi TÌM khi khác từ khoá dự án (bỏ `bo_tu` của web) — chỉ
+    đổi câu tìm Google, bài vẫn lọc theo đủ từ khoá dự án.
 
     Bước: câu tìm (từ khoá + `them_tu`) -> actor Google (trần USD) -> chống trùng URL chuẩn ->
     bỏ MXH/sàn/miền nhà -> `da_biet(khoá)` (bài đã có trong kho / đã bị loại: không tải lại) ->
@@ -942,7 +944,7 @@ def thu_thap(du_an: dict, *, tu: datetime.date | None = None, den: datetime.date
     tu_khoa = rut_gon_tu_khoa([*goc_tu, *(them_tu or [])]) or goc_tu
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
     nha = mien_nha(du_an)
-    q = cau_truy_van(du_an, them_tu)
+    q = cau_truy_van({**du_an, "tu_khoa": tu_tim} if tu_tim is not None else du_an, them_tu)
     tk["truy_van"] = q
     tk["uoc_usd"] = uoc_luot(len(q), so_trang)
     tran = tran_luot(tk["uoc_usd"], con_usd)
