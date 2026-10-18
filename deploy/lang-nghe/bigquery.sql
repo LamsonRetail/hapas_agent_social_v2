@@ -20,22 +20,23 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.du_an`
   tu_khoa         ARRAY<STRING> OPTIONS(description='Từ khoá dự án: bài từ nguồn không phải kênh nhà phải nhắc ít nhất một từ (so khớp bỏ dấu, không phân biệt hoa thường) mới được giữ. Mảng rỗng khi chưa đặt (khi đó Mark dùng tên dự án).'),
   tu_loai_tru     ARRAY<STRING> OPTIONS(description='Từ loại trừ: bài chứa một từ này bị bỏ cứng trước bước AI (vd hapasguitars). Mảng rỗng khi không đặt.'),
   boi_canh        STRING    OPTIONS(description='Mô tả brand đưa cho bước AI phân xử giữ/loại và gán sắc thái, chủ đề. Chuỗi rỗng khi chưa viết.'),
-  thi_truong      STRING    OPTIONS(description='Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN. Dùng cho bước AI nhận bài ngoài thị trường.'),
+  thi_truong      STRING    OPTIONS(description='Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN. Dùng cho bước AI nhận bài ngoài thị trường. Từ 18/10/2026 dashboard không còn ô sửa: dự án mới luôn VN, dự án cũ giữ giá trị đã lưu.'),
   tran_usd_thang  NUMERIC   OPTIONS(description='Trần chi phí theo dõi mỗi tháng, USD (tiền Apify, không VAT). ≥ 0, không trần trên (ràng buộc nguồn), mặc định 5. Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng.'),
   dang_bat        BOOL      OPTIONS(description='TRUE: dự án đang bật, /theodoi được quét. FALSE: tắt trên dashboard, /theodoi từ chối.'),
   tao_luc         TIMESTAMP OPTIONS(description='Thời điểm tạo dự án ở DB nguồn, UTC; giờ VN = DATETIME(tao_luc, "Asia/Ho_Chi_Minh").'),
   sua_luc         TIMESTAMP OPTIONS(description='Thời điểm sửa dự án gần nhất ở DB nguồn, UTC.'),
+  hashtag         ARRAY<STRING> OPTIONS(description='Hashtag riêng của dự án, người quản lý nhập trên dashboard (từ 18/10/2026): đã bỏ #, bỏ dấu, chữ thường, chỉ a-z 0-9 _, bỏ trùng, giữ thứ tự gõ; tối đa 50 mục. Mark dùng cho tìm hashtag Instagram và feed hashtag TikTok. Mảng rỗng (mặc định; mọi dự án trước 18/10/2026): Mark suy hashtag từ tu_khoa như trước. Không dùng để lọc bài.'),
   dong_bo_luc     TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC. Chỉ để kiểm độ trễ đồng bộ.')
 )
 OPTIONS(description='''[Lớp] Raw
-[Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc (từ khoá, từ loại trừ, trần chi phí tháng).
+[Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc + thu thập (từ khoá, từ loại trừ, hashtag riêng, trần chi phí tháng).
 [Grain] 1 dòng = 1 dự án
 [Khoá] PK: ma | Join: ma → nguon.du_an, bai.du_an, chi_so_ngay.du_an, luot_quet.du_an
 [Nguồn] Postgres lang_nghe.public.du_an trên VPS Mark (người quản lý sửa trên dashboard social.hapas.vn)
-[Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026)
+[Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026); cột hashtag từ 18/10/2026
 [Đã xử lý] Bỏ cột sua_boi (email người sửa); thêm dong_bo_luc; dự án xoá ở nguồn thì xoá ở đây khi đồng bộ
 [Refresh] Nạp lại toàn bảng bằng MERGE (có xoá dòng không còn ở nguồn) sau mỗi lượt quét và 6 giờ một lần
-[Dùng khi] Gắn tên dự án, xem cấu hình từ khoá và trần chi phí tháng
+[Dùng khi] Gắn tên dự án, xem cấu hình từ khoá, hashtag và trần chi phí tháng
 [Không dùng khi] Số bài, thảo luận → dùng SOCIAL_LISTENING.bai; chi phí đã tiêu → dùng SOCIAL_LISTENING.luot_quet
 [Lưu ý] Bảng chứa cấu hình hiện hành, không giữ lịch sử thay đổi (lịch sử sửa nằm ở nhật ký trên VPS, không đẩy lên).''');
 
@@ -347,6 +348,26 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
 -- khớp COMMENT luot_quet.chi_phi_usd bên Postgres. Chỉ đổi mô tả, không đổi kiểu cột.
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.luot_quet`
   ALTER COLUMN chi_phi_usd SET OPTIONS(description='Chi phí Apify THẬT của lượt, USD, không VAT: tổng usageTotalUsd đúng các run của lượt, đọc khi run cuối đã xong ≥ 45 giây; Mark đọc lại ~90 giây sau run cuối và NÂNG số nếu Apify ghi thêm phí sự kiện (chỉ nâng, không hạ; từ 17/10/2026 — lượt cũ hơn có thể thiếu phí ghi trễ). 0 khi lượt chỉ dùng YouTube Data API (miễn phí). Không âm.');
+
+-- Hashtag riêng của dự án (18/10/2026, chủ dự án: "bỏ phần thị trường, thay bằng phần hashtag"):
+-- bảng đã tạo trước thì thêm cột (dong_bo_bq MERGE cả hashtag — chạy khối này TRƯỚC khi bật bản
+-- mới, cùng lúc chạy schema.sql trên Postgres), cập nhật mô tả thi_truong + mô tả bảng cho khớp.
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.du_an`
+  ADD COLUMN IF NOT EXISTS hashtag ARRAY<STRING> OPTIONS(description='Hashtag riêng của dự án, người quản lý nhập trên dashboard (từ 18/10/2026): đã bỏ #, bỏ dấu, chữ thường, chỉ a-z 0-9 _, bỏ trùng, giữ thứ tự gõ; tối đa 50 mục. Mark dùng cho tìm hashtag Instagram và feed hashtag TikTok. Mảng rỗng (mặc định; mọi dự án trước 18/10/2026): Mark suy hashtag từ tu_khoa như trước. Không dùng để lọc bài.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.du_an`
+  ALTER COLUMN thi_truong SET OPTIONS(description='Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN. Dùng cho bước AI nhận bài ngoài thị trường. Từ 18/10/2026 dashboard không còn ô sửa: dự án mới luôn VN, dự án cũ giữ giá trị đã lưu.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.du_an`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc + thu thập (từ khoá, từ loại trừ, hashtag riêng, trần chi phí tháng).
+[Grain] 1 dòng = 1 dự án
+[Khoá] PK: ma | Join: ma → nguon.du_an, bai.du_an, chi_so_ngay.du_an, luot_quet.du_an
+[Nguồn] Postgres lang_nghe.public.du_an trên VPS Mark (người quản lý sửa trên dashboard social.hapas.vn)
+[Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026); cột hashtag từ 18/10/2026
+[Đã xử lý] Bỏ cột sua_boi (email người sửa); thêm dong_bo_luc; dự án xoá ở nguồn thì xoá ở đây khi đồng bộ
+[Refresh] Nạp lại toàn bảng bằng MERGE (có xoá dòng không còn ở nguồn) sau mỗi lượt quét và 6 giờ một lần
+[Dùng khi] Gắn tên dự án, xem cấu hình từ khoá, hashtag và trần chi phí tháng
+[Không dùng khi] Số bài, thảo luận → dùng SOCIAL_LISTENING.bai; chi phí đã tiêu → dùng SOCIAL_LISTENING.luot_quet
+[Lưu ý] Bảng chứa cấu hình hiện hành, không giữ lịch sử thay đổi (lịch sử sửa nằm ở nhật ký trên VPS, không đẩy lên).''');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`

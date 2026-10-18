@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS du_an (
   bl_moi_bai      INT NOT NULL DEFAULT 0 CHECK (bl_moi_bai = 0 OR bl_moi_bai >= 5),
   tk_bat          BOOLEAN NOT NULL DEFAULT TRUE,
   tk_so_bai       INT NOT NULL DEFAULT 15 CHECK (tk_so_bai >= 0),
-  cau_hinh        JSONB NOT NULL DEFAULT '{}'::jsonb
+  cau_hinh        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  hashtag         TEXT[] NOT NULL DEFAULT '{}'    -- hashtag riêng (IG + feed TikTok), 18/10/2026
 );
 -- Đợt 2b (15/10/2026): cào bình luận — DB đã tạo trước đó thì thêm cột ở đây.
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_bat BOOLEAN NOT NULL DEFAULT TRUE;
@@ -98,6 +99,11 @@ ALTER TABLE du_an DROP CONSTRAINT IF EXISTS du_an_tk_so_bai_check;
 ALTER TABLE du_an ADD CONSTRAINT du_an_tk_so_bai_check CHECK (tk_so_bai >= 0);
 ALTER TABLE du_an DROP CONSTRAINT IF EXISTS du_an_tran_usd_thang_check;
 ALTER TABLE du_an ADD CONSTRAINT du_an_tran_usd_thang_check CHECK (tran_usd_thang >= 0);
+-- 18/10/2026 (chủ dự án: "bỏ phần thị trường, thay bằng phần hashtag"): hashtag riêng của dự án,
+-- sửa ở trang Nguồn. Mark dùng cho tìm hashtag Instagram + feed hashtag TikTok; mảng rỗng thì suy
+-- từ từ khoá như trước. Quyền: role mark đọc cả bảng (GRANT SELECT ON du_an), lang_nghe_web ghi
+-- cả bảng (GRANT INSERT, UPDATE ON du_an) — không có GRANT theo cột nào cần thêm.
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS hashtag TEXT[] NOT NULL DEFAULT '{}';
 
 -- 1 dòng = 1 nguồn theo dõi. `dinh_danh`: username TikTok/Instagram/Threads, kênh YouTube (UC… hoặc
 -- @handle), URL trang Facebook — đã chuẩn hoá chữ thường (trừ id kênh YouTube UC…).
@@ -415,17 +421,38 @@ CREATE TABLE IF NOT EXISTS kiem_do_phu (
 );
 CREATE INDEX IF NOT EXISTS kiem_do_phu_du_an_luc ON kiem_do_phu (du_an, luc DESC);
 
+-- Hạn mức GÓI Apify (18/10/2026, chủ dự án: "đo kĩ phần hiển thị chi phí để ko bị lố so với thực tế
+-- gói"): ảnh chụp `GET /v2/users/me/limits` (miễn phí) của tài khoản Apify Mark đang dùng — Mark ghi
+-- sau mỗi lượt /theodoi, sau bước chốt lại chi phí và mỗi 3 giờ ở nhịp lịch quét. Vì sao bảng mà
+-- không cho dashboard tự gọi Apify: dashboard không giữ APIFY_TOKEN (chỉ /opt/mark/app/.env có) —
+-- không đưa token sang tiến trình thứ hai chỉ để đọc vài con số. Gói FREE 10 USD/chu kỳ (16/10–15/11)
+-- là trần THẬT; trần tháng dự án 30 USD lớn hơn thì không có tác dụng — trang Ngân sách cảnh báo.
+CREATE TABLE IF NOT EXISTS han_muc_apify (
+  id              BIGSERIAL PRIMARY KEY,
+  luc             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  goi             TEXT NOT NULL DEFAULT '',
+  da_dung_usd     NUMERIC(10,4) NOT NULL CHECK (da_dung_usd >= 0),
+  tran_usd        NUMERIC(10,2) NOT NULL CHECK (tran_usd >= 0),
+  chu_ky_tu       TIMESTAMPTZ,
+  chu_ky_den      TIMESTAMPTZ,
+  tran_luot_usd   NUMERIC(10,2) CHECK (tran_luot_usd >= 0),
+  du_tru_usd      NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (du_tru_usd >= 0),
+  luot_id         BIGINT REFERENCES luot_quet(id) ON DELETE SET NULL,
+  nguon_ghi       TEXT NOT NULL DEFAULT 'luot' CHECK (nguon_ghi IN ('luot', 'chot_lai', 'nhip'))
+);
+CREATE INDEX IF NOT EXISTS han_muc_apify_luc ON han_muc_apify (luc DESC);
+
 -- ───────────── Mô tả bảng + cột theo quy chuẩn BI (task t280613, skill lsr-bq-description-standard) ─────────────
 -- Chủ dự án 14/10/2026: DB mới cũng theo rule mô tả của BI (11 nhãn bảng, mô tả mọi cột). Ghi
 -- ngay trong file build (COMMENT ON chạy lại không mất), có bài canh tests/test_theo_doi.py.
 
 COMMENT ON TABLE du_an IS $$[Lớp] Raw
-[Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc (từ khoá, từ loại trừ, trần chi phí theo dõi mỗi tháng).
+[Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc + thu thập (từ khoá, từ loại trừ, hashtag riêng, trần chi phí theo dõi mỗi tháng).
 [Grain] 1 dòng = 1 dự án
 [Khoá] PK: ma | Join: ma → nguon.du_an, bai.du_an, chi_so_ngay.du_an, luot_quet.du_an, de_xuat.du_an, lich_quet.du_an
 [Nguồn] Người quản lý nhập trên dashboard social.hapas.vn (role lang_nghe_web); Mark chỉ đọc
-[Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026)
-[Đã xử lý] Mã dự án chữ thường; thị trường 2 chữ in hoa; trần tháng ≥ 0 USD (ràng buộc CHECK)
+[Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026); cột hashtag từ 18/10/2026
+[Đã xử lý] Mã dự án chữ thường; thị trường 2 chữ in hoa; hashtag bỏ #, bỏ dấu, chữ thường, chỉ a-z 0-9 _; trần tháng ≥ 0 USD (ràng buộc CHECK)
 [Refresh] Ghi tức thời khi người quản lý sửa trên dashboard (mỗi lần sửa ghi nhat_ky)
 [Dùng khi] Biết dự án nào đang bật, từ khoá lọc, trần chi phí tháng
 [Không dùng khi] Chi phí đã tiêu → dùng luot_quet; bài và tương tác → dùng bai; bản cho BI → dùng ganesha-381907.SOCIAL_LISTENING.du_an
@@ -435,7 +462,8 @@ COMMENT ON COLUMN du_an.ten IS 'Tên hiển thị của dự án (vd HAPAS). Kh�
 COMMENT ON COLUMN du_an.tu_khoa IS 'Từ khoá dự án; bài từ nguồn không phải kênh nhà phải nhắc ít nhất một từ (so khớp bỏ dấu, không phân biệt hoa thường). Mảng rỗng: Mark dùng tên dự án.';
 COMMENT ON COLUMN du_an.tu_loai_tru IS 'Từ loại trừ: bài chứa một từ này bị bỏ cứng trước bước AI. Mảng rỗng khi không đặt.';
 COMMENT ON COLUMN du_an.boi_canh IS 'Mô tả brand cho bước AI phân xử giữ/loại và gán sắc thái, chủ đề. Chuỗi rỗng khi chưa viết.';
-COMMENT ON COLUMN du_an.thi_truong IS 'Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN.';
+COMMENT ON COLUMN du_an.thi_truong IS 'Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN. Từ 18/10/2026 dashboard không còn ô sửa: dự án mới luôn VN, dự án cũ giữ giá trị đã lưu; Mark vẫn dùng cho cổng thị trường và bước AI.';
+COMMENT ON COLUMN du_an.hashtag IS 'Hashtag riêng của dự án, người quản lý nhập ở trang Nguồn (từ 18/10/2026): đã bỏ #, bỏ dấu (đ→d), chữ thường, chỉ a-z 0-9 _, bỏ trùng, giữ thứ tự gõ; tối đa 50 mục, mỗi mục ≤ 100 ký tự. Mark dùng cho lượt tìm hashtag Instagram (lấy cau_hinh.tu_khoa.instagram.so_tu hashtag đầu, mặc định 12) và feed hashtag TikTok (bỏ thêm dấu _, chỉ tag 3–40 ký tự). Mảng rỗng (mặc định; mọi dự án trước 18/10/2026): Mark suy hashtag từ tu_khoa như trước — Instagram: mọi từ khoá viết liền bỏ dấu, TikTok: từ khoá một chữ. Không dùng để lọc bài (bài vẫn lọc theo tu_khoa, tu_loai_tru).';
 COMMENT ON COLUMN du_an.tran_usd_thang IS 'Trần chi phí theo dõi mỗi tháng (giờ VN), USD tiền Apify, không VAT, ≥ 0 (không trần trên). Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng.';
 COMMENT ON COLUMN du_an.dang_bat IS 'TRUE: dự án bật, /theodoi được quét. FALSE: tắt, /theodoi từ chối.';
 COMMENT ON COLUMN du_an.tao_luc IS 'Thời điểm tạo dự án (TIMESTAMPTZ, hiển thị theo múi giờ phiên; lưu UTC).';
@@ -687,7 +715,7 @@ COMMENT ON COLUMN dong_bo_bq.bang IS 'Tên bảng được đồng bộ. PK.';
 COMMENT ON COLUMN dong_bo_bq.moc IS 'Mốc đã đẩy xong (giá trị lớn nhất của cột mốc của bảng; với chi_so_ngay là ngày). NULL khi chưa đẩy lần nào hoặc bảng nạp lại toàn bộ.';
 COMMENT ON COLUMN dong_bo_bq.lan_cuoi IS 'Thời điểm lượt đồng bộ gần nhất (UTC).';
 COMMENT ON COLUMN dong_bo_bq.so_dong IS 'Số dòng đã đẩy ở lượt gần nhất, dòng.';
-COMMENT ON COLUMN dong_bo_bq.loi IS 'Lỗi lượt gần nhất (đã bỏ URL, tối đa 200 ký tự). NULL khi thành công.';
+COMMENT ON COLUMN dong_bo_bq.loi IS 'Lỗi lượt gần nhất (đã bỏ URL, tối đa 200 ký tự). Bắt đầu bằng "cảnh báo: " là CẢNH BÁO, không phải lỗi: lượt vẫn xong, mốc vẫn dời (vd bỏ cột tuỳ chọn chưa có ở Postgres hoặc BigQuery, từ 18/10/2026). NULL khi thành công không cảnh báo.';
 
 COMMENT ON TABLE lich_quet IS $$[Lớp] Raw
 [Mục đích] Lịch quét tự động của từng dự án (mỗi N giờ, hằng ngày, hằng tuần, chiến dịch) để Mark tự chạy /theodoi đúng mốc, kèm trạng thái lần chạy gần nhất.
@@ -743,10 +771,32 @@ COMMENT ON COLUMN kiem_do_phu.do_phu IS 'Độ phủ theo số bài = 100 × so_
 COMMENT ON COLUMN kiem_do_phu.do_phu_tl IS 'Độ phủ theo thảo luận = 100 × thao_luan_da_co / thao_luan_nhac, % — số chính trên dashboard (dưới 80% hiện cảnh báo). NULL khi không có bài nhắc brand.';
 COMMENT ON COLUMN kiem_do_phu.bo_sung IS 'Số bài sót đã qua lọc + AI và được ghi mới vào bai ngay trong lượt kiểm, bài.';
 COMMENT ON COLUMN kiem_do_phu.so_yeu_cau IS 'Số yêu cầu TikTok API đã gửi (mỗi yêu cầu một run Apify), yêu cầu.';
-COMMENT ON COLUMN kiem_do_phu.chi_phi_usd IS 'Chi phí theo sổ = so_yeu_cau × 0,003 USD (trần mặc định 0,20 USD/lần), không VAT; tiền thật đã cộng vào luot_quet.chi_phi_usd của lượt. Không âm.';
+COMMENT ON COLUMN kiem_do_phu.chi_phi_usd IS 'Chi phí theo sổ = so_yeu_cau × 0,002 USD (giá thật một yêu cầu TikTok API, đo từng run 18/10/2026; dòng trước 18/10/2026 ghi theo 0,0034), trần mặc định 0,20 USD/lần, không VAT; tiền thật đã cộng vào luot_quet.chi_phi_usd của lượt. Không âm.';
 COMMENT ON COLUMN kiem_do_phu.mau IS 'Thành phần mẫu (JSON): tag [{ten, trang, bai, loi}], tac_gia [{ten, trang, bai, loi}], theo_duong {hashtag, tac_gia: số đo riêng từng đường}, ngay (30), tran_usd.';
 COMMENT ON COLUMN kiem_do_phu.bai_sot IS 'Tối đa 10 bài sót nhiều thảo luận nhất (JSON): khoa, link, tai_khoan, ten, thao_luan, binh_luan, thich, xem, dang_luc, noi_dung (≤ 200 ký tự), duong, tag, ma_ly_do + ly_do (lý do có lẽ bị sót: chi_hashtag, ngoai_cua_so, it_thich, tac_gia_moi, khac), bo_sung (đã ghi vào bai chưa), hanh_dong (câu Mark đã làm cho bài này).';
 COMMENT ON COLUMN kiem_do_phu.hanh_dong IS 'Việc Mark tự làm sau lượt kiểm (JSON): de_xuat [{dinh_danh, so_bai, thao_luan, uu_tien}] (đề xuất nguồn ghi vào de_xuat), tag_noi (hashtag lượt nổi đang dùng), tag_them (hashtag vừa thêm), noi {trang: [trước, sau], gio: [trước, sau], ly_do} (nới/lùi lượt nổi). {} khi không có bài sót.';
+COMMENT ON TABLE han_muc_apify IS $$[Lớp] Raw
+[Mục đích] Ảnh chụp hạn mức gói Apify của tài khoản Mark đang dùng (đã dùng, trần gói, chu kỳ, trần mỗi lượt nền trên console) để trang Ngân sách so dự báo với phần còn thật của gói.
+[Grain] 1 dòng = 1 lần Mark đọc GET /v2/users/me/limits
+[Khoá] PK: id | Join: luot_id → luot_quet.id
+[Nguồn] Mark (theo_doi.ghi_han_muc_goi) đọc Apify /v2/users/me/limits (miễn phí) + trần việc nền trên console platform; dashboard chỉ đọc
+[Phạm vi] Tài khoản Apify trong APIFY_TOKEN của Mark, cả tài khoản (mọi việc dùng chung token) | Kênh: Không có | Từ 18/10/2026
+[Đã xử lý] USD không VAT; mốc giờ lưu UTC; chu kỳ theo Apify (không theo tháng lịch); đã dùng là số Apify báo lúc đọc
+[Refresh] Sau mỗi lượt /theodoi, sau bước chốt lại chi phí (~90 giây sau run cuối) và mỗi 3 giờ ở nhịp lịch quét của Mark
+[Dùng khi] Biết gói còn bao nhiêu tới ngày đặt lại, so dự báo với phần còn của gói, so trần nội bộ dự án với trần gói
+[Không dùng khi] Tiền thật từng lượt → dùng luot_quet; trần tháng của dự án → dùng du_an
+[Lưu ý] Đã dùng tính CẢ tài khoản, gồm việc khác và run thử dùng chung token; Apify ghi phí sự kiện trễ vài chục giây nên dòng ngay sau lượt có thể thiếu chút ít. Đổi token thì chu kỳ và số theo tài khoản mới. Không đẩy lên BigQuery.$$;
+COMMENT ON COLUMN han_muc_apify.id IS 'Mã ảnh chụp tự tăng. PK.';
+COMMENT ON COLUMN han_muc_apify.luc IS 'Thời điểm Mark đọc hạn mức (UTC).';
+COMMENT ON COLUMN han_muc_apify.goi IS 'Mã gói Apify (FREE, STARTER…; APIFY_GOI trong .env của Mark thắng). Chuỗi rỗng khi token không đọc được /users/me.';
+COMMENT ON COLUMN han_muc_apify.da_dung_usd IS 'Đã dùng trong chu kỳ hiện tại của CẢ tài khoản (current.monthlyUsageUsd), USD, không VAT, ≥ 0.';
+COMMENT ON COLUMN han_muc_apify.tran_usd IS 'Trần chi của gói trong một chu kỳ (limits.maxMonthlyUsageUsd), USD, ≥ 0. Chạm trần thì Apify từ chối mọi run tới ngày đặt lại.';
+COMMENT ON COLUMN han_muc_apify.chu_ky_tu IS 'Bắt đầu chu kỳ hạn mức (monthlyUsageCycle.startAt, UTC). NULL khi Apify không trả.';
+COMMENT ON COLUMN han_muc_apify.chu_ky_den IS 'Thời điểm đặt lại hạn mức = endAt + 1 giây (UTC; giờ VN = chu_ky_den AT TIME ZONE ''Asia/Ho_Chi_Minh''). NULL khi Apify không trả.';
+COMMENT ON COLUMN han_muc_apify.tran_luot_usd IS 'Trần USD mỗi việc nền trên console platform (Năng lực → Quét mạng xã hội) lúc đọc — một lượt /theodoi không tiêu quá số này. NULL khi không đọc được.';
+COMMENT ON COLUMN han_muc_apify.du_tru_usd IS 'Phần Mark chừa lại không dùng cho việc nền (quet_lon._DU_TRU_THANG), USD; phần dùng được = tran_usd − da_dung_usd − du_tru_usd.';
+COMMENT ON COLUMN han_muc_apify.luot_id IS 'Lượt /theodoi vừa xong khi ghi (nguon_ghi luot, chot_lai). FK → luot_quet.id. NULL khi ghi ở nhịp định kỳ.';
+COMMENT ON COLUMN han_muc_apify.nguon_ghi IS 'Lúc ghi. Giá trị: luot (đóng lượt), chot_lai (chốt lại chi phí ~90 giây sau run cuối), nhip (nhịp lịch quét mỗi 3 giờ).';
 
 RESET ROLE;
 
@@ -760,6 +810,9 @@ GRANT USAGE ON SEQUENCE luot_quet_id_seq, de_xuat_id_seq TO mark;
 -- Kiểm độ phủ (17/10/2026): Mark chỉ thêm dòng + đọc lại; không sửa/xoá lịch sử.
 GRANT SELECT, INSERT ON kiem_do_phu TO mark;
 GRANT USAGE ON SEQUENCE kiem_do_phu_id_seq TO mark;
+-- Hạn mức gói Apify (18/10/2026): Mark chỉ thêm ảnh chụp + đọc lại; không sửa/xoá.
+GRANT SELECT, INSERT ON han_muc_apify TO mark;
+GRANT USAGE ON SEQUENCE han_muc_apify_id_seq TO mark;
 -- Lịch quét tự động (15/10/2026): Mark đọc ĐÚNG các cột nó dùng (`lang_nghe_db._COT_LICH`; không
 -- đọc email tao_boi/sua_boi), chỉ ghi cột trạng thái chạy (FOR UPDATE cần quyền UPDATE trên ít
 -- nhất một cột — đủ ở đây). Không tạo/xoá/sửa cấu hình lịch. REVOKE trước: bản nháp cũ cấp SELECT

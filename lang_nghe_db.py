@@ -57,13 +57,31 @@ def ket_noi():
 
 
 # ───────────────────────────── đọc cấu hình ─────────────────────────────
+_CO_HASHTAG: list[bool] = []
+
+
+def _co_hashtag(c) -> bool:
+    """DB đã có cột `du_an.hashtag` (18/10/2026) chưa — bản Mark mới lên VPS TRƯỚC khi chạy
+    schema.sql thì /theodoi vẫn đọc được dự án (thiếu cột là hỏng cả lượt), hashtag coi như rỗng
+    (suy từ từ khoá như trước). Có rồi thì nhớ trong tiến trình (như `_co_ma_so_fb`)."""
+    if _CO_HASHTAG:
+        return True
+    x = c.execute("SELECT 1 AS co FROM information_schema.columns WHERE table_schema = "
+                  "current_schema() AND table_name = 'du_an' AND column_name = 'hashtag'"
+                  ).fetchone()
+    if x:
+        _CO_HASHTAG.append(True)
+    return bool(x)
+
+
 def doc_du_an(ma: str) -> dict | None:
     with ket_noi() as c:
         return c.execute(
             "SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
             "tran_usd_thang::float AS tran_usd_thang, dang_bat, bl_bat, bl_so_bai, bl_moi_bai, "
-            "tk_bat, tk_so_bai, cau_hinh "
-            "FROM du_an WHERE ma = %s",
+            "tk_bat, tk_so_bai, cau_hinh, "
+            + ("hashtag " if _co_hashtag(c) else "'{}'::text[] AS hashtag ")
+            + "FROM du_an WHERE ma = %s",
             (ma,)).fetchone()
 
 
@@ -128,6 +146,16 @@ def da_tieu_thang(ma: str) -> float:
 
 
 # ───────────────────────────── lượt quét ─────────────────────────────
+def chi_luot_gan(ma: str, toi_da: int = 20) -> list[dict]:
+    """Chi phí thật các lượt /theodoi gần nhất (mới trước) — câu nhận việc nói chi THẬT bên cạnh
+    ước tính TỐI ĐA (18/10/2026, `dashboard.chi_phi.chi_luot_thuc`)."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT id, kieu, bat_dau, ket_thuc, trang_thai, chi_phi_usd::float AS chi_phi_usd "
+            "FROM luot_quet WHERE du_an = %s AND kieu = 'theo_doi' ORDER BY id DESC LIMIT %s",
+            (ma, max(1, int(toi_da)))).fetchall()
+
+
 def luot_dang_chay(ma: str) -> dict | None:
     """Lượt theo dõi khác của cùng dự án còn đang chạy (trong `GIO_BO_DO` giờ) — có thì
     không mở lượt mới, kẻo hai lượt cùng tiêu một phần ngân sách."""
@@ -477,6 +505,19 @@ def bai_can_lam_moi(ma: str, nen_tang: str, tu, toi_da: int) -> list[dict]:
             (ma, nen_tang, tu, _TZ, _TZ, toi_da)).fetchall()
 
 
+def nhip_dang_nguon(ma: str, ngay: int = 14) -> dict[int, int]:
+    """{id nguồn: số bài CAO NHẤT nguồn đăng trong MỘT ngày (giờ VN)} trên bài đã giữ đăng trong
+    `ngay` ngày qua — co số bài mỗi lần theo nhịp đăng (18/10/2026, `dashboard.chi_phi.
+    so_bai_co_gian`). Nguồn không có bài trong cửa sổ thì không có khoá."""
+    with ket_noi() as c:
+        rows = c.execute(
+            "SELECT nguon_id, max(n) AS n FROM (SELECT nguon_id, "
+            "(dang_luc AT TIME ZONE %s)::date AS d, count(*) AS n FROM bai WHERE du_an = %s "
+            "AND nguon_id IS NOT NULL AND dang_luc >= now() - make_interval(days => %s) "
+            "GROUP BY 1, 2) t GROUP BY 1", (_TZ, ma, int(ngay))).fetchall()
+    return {int(r["nguon_id"]): int(r["n"]) for r in rows}
+
+
 def lich_chien_dich(ma: str) -> list[dict]:
     """Mọi lịch kiểu chiến dịch của dự án (bật hay tắt) — nới phạm vi theo dõi theo khung
     chiến dịch (`theo_doi_api.pham_vi`)."""
@@ -558,6 +599,23 @@ def ghi_kiem_do_phu(r: dict) -> int:
     return int(x["id"])
 
 
+#: Cột của `han_muc_apify` Mark ghi (18/10/2026) — bài thử đối chiếu với schema.sql.
+_COT_HAN_MUC = ("goi", "da_dung_usd", "tran_usd", "chu_ky_tu", "chu_ky_den", "tran_luot_usd",
+                "du_tru_usd", "luot_id", "nguon_ghi")
+
+
+def ghi_han_muc(r: dict) -> int:
+    """Ghi MỘT ảnh chụp hạn mức gói Apify (bảng `han_muc_apify`) cho trang Ngân sách — dashboard
+    không giữ token Apify. `luot_id` không còn trong `luot_quet` thì ghi NULL. -> id."""
+    with ket_noi() as c:
+        x = c.execute(
+            f"INSERT INTO han_muc_apify ({', '.join(_COT_HAN_MUC)}) VALUES ("
+            + ", ".join("(SELECT id FROM luot_quet WHERE id = %s)" if k == "luot_id" else "%s"
+                        for k in _COT_HAN_MUC)
+            + ") RETURNING id", [r.get(k) for k in _COT_HAN_MUC]).fetchone()
+    return int(x["id"])
+
+
 # ───────────────────────────── bình luận (đợt 2b, 15/10/2026) ─────────────────────────────
 #: Bài đã cào được cào lại khi số bình luận nền tảng báo tăng ≥ 20% (và ≥ 5) — bài cũ ít đổi
 #: thì không trả tiền đọc lại cùng bình luận.
@@ -570,13 +628,18 @@ BL_NGAY = 35
 def bai_can_lay_binh_luan(ma: str, nen_tang: list[str], toi_da: int,
                           cao_het: bool = False) -> list[dict]:
     """Bài nên cào bình luận lượt này: đăng trong `BL_NGAY` ngày, nền tảng báo có bình luận,
-    chưa cào hoặc bình luận tăng đủ nhiều. Bài chưa cào đi trước, rồi bài nhiều bình luận."""
+    chưa cào hoặc bình luận tăng đủ nhiều. Bài chưa cào đi trước, rồi bài thiếu nhiều bình luận.
+    `bl_goc` (18/10/2026): số bình luận GỐC đã có trong kho — TikTok cào dở thì đọc tiếp từ đó
+    (`theo_doi._chia_lo_bl`, `tiktok_api.binh_luan(bat_dau=…)`); khoá chính (du_an, khoa_bai, ma)
+    phủ phép đếm."""
     if toi_da <= 0 or not nen_tang:
         return []
     with ket_noi() as c:
         return c.execute(
             "SELECT b.khoa, b.nen_tang, b.link, b.tai_khoan, b.tac_gia, b.binh_luan, "
-            "b.bl_lay_luc, b.bl_da_lay, b.bl_lay_khi_co, n.loai AS nguon_loai "
+            "b.bl_lay_luc, b.bl_da_lay, b.bl_lay_khi_co, n.loai AS nguon_loai, "
+            "(SELECT count(*) FROM binh_luan c WHERE c.du_an = b.du_an AND c.khoa_bai = b.khoa "
+            "AND NOT c.la_tra_loi) AS bl_goc "
             "FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
             "WHERE b.du_an = %s AND b.nen_tang = ANY(%s) AND COALESCE(b.binh_luan, 0) > 0 "
             "AND b.link <> '' AND b.dang_luc >= now() - make_interval(days => %s) "
@@ -608,11 +671,49 @@ _NHAN_KHO = "(binh_luan.loai = 'seeding' OR binh_luan.ly_do_loc = 'affiliate_han
 _GIU_NHAN_KHO = f"(EXCLUDED.loai = 'hop_le' AND {_NHAN_KHO})"
 
 
+def goc_thieu_tra_loi(ma: str, khoa_bai: list[str], tran_moi_goc: int, toi_da: int = 200,
+                      bo: list[str] | tuple = ()) -> dict[str, list[tuple[str, int, int]]]:
+    """{khoá bài: [(mã bình luận gốc, số trả lời nền tảng báo, số trả lời kho đã có), …]} — gốc
+    ĐÃ có trong kho mà số trả lời trong kho còn dưới min(số báo, `tran_moi_goc` — một yêu cầu trả
+    lời đọc được tối đa bấy nhiêu), thiếu nhiều trước, tối đa `toi_da` gốc mỗi bài (soát 18/10/2026:
+    video TikTok đã đọc hết trang gốc mà vẫn thiếu thì lấy trả lời cho các gốc này —
+    `tiktok_api.binh_luan`).
+
+    `bo` = khoá "<khoa_bai>\\x1f<ma>" bỏ qua: gốc đã hỏi mà không thêm được trả lời nào (trả lời
+    bị ẩn / xoá — số báo không bao giờ đạt; `theo_doi._gan_doc_tiep_bl`). Giới hạn `toi_da` ngay
+    trong SQL (`row_number` theo bài): video lớn có hàng nghìn gốc thiếu thì không kéo hết về rồi
+    mới cắt ở Python."""
+    if not khoa_bai:
+        return {}
+    with ket_noi() as c:
+        rows = c.execute(
+            "SELECT khoa_bai, ma, tra_loi, da_co FROM ("
+            "SELECT g.khoa_bai, g.ma, g.tra_loi, count(r.ma) AS da_co, row_number() OVER ("
+            "PARTITION BY g.khoa_bai ORDER BY LEAST(g.tra_loi, %(tran)s) - count(r.ma) DESC, g.ma"
+            ") AS thu_tu FROM binh_luan g "
+            "LEFT JOIN binh_luan r ON r.du_an = g.du_an AND r.khoa_bai = g.khoa_bai "
+            "AND r.ma_cha = g.ma WHERE g.du_an = %(ma)s AND g.khoa_bai = ANY(%(khoa)s) "
+            "AND NOT g.la_tra_loi AND COALESCE(g.tra_loi, 0) > 0 "
+            "AND NOT ((g.khoa_bai || chr(31) || g.ma) = ANY(%(bo)s)) "
+            "GROUP BY g.khoa_bai, g.ma, g.tra_loi HAVING count(r.ma) < LEAST(g.tra_loi, %(tran)s)"
+            ") x WHERE thu_tu <= %(toi_da)s ORDER BY khoa_bai, thu_tu",
+            {"ma": ma, "khoa": list(khoa_bai), "tran": int(tran_moi_goc), "bo": list(bo),
+             "toi_da": int(toi_da)}).fetchall()
+    ra: dict[str, list[tuple[str, int, int]]] = {}
+    for r in rows:
+        ra.setdefault(r["khoa_bai"], []).append(
+            (str(r["ma"]), int(r["tra_loi"]), int(r["da_co"] or 0)))
+    return ra
+
+
 def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
-                  da_lay: dict[str, tuple[int, int | None]]) -> tuple[int, int]:
+                  da_lay: dict[str, tuple[int, int | None]],
+                  khong_tinh_thieu: set[str] | None = None) -> tuple[int, int]:
     """Upsert bình luận (mỗi dòng có `khoa_bai` + `_COT_BL`) và đánh dấu bài đã cào
     (`da_lay` = {khoa bài: (số bình luận lấy được, số nền tảng báo lúc đó)}) trong CÙNG giao
-    dịch. Nhãn chỉ đè khi lượt này có nhãn. -> (mới, cập nhật)."""
+    dịch. Nhãn chỉ đè khi lượt này có nhãn. -> (mới, cập nhật). `khong_tinh_thieu` (soát
+    18/10/2026): khoá bài mà lượt này KHÔNG tính là một lần thiếu dù không thêm được gì (trang
+    đọc tiếp rỗng — lỗi vị trí của Mark, không phải bài hết bình luận): giữ `bl_lan_thieu`."""
     moi = cu = 0
     cot = ", ".join(_COT_BL)
     dat = ", ".join(["%s"] * len(_COT_BL))
@@ -667,11 +768,13 @@ def ghi_binh_luan(ma: str, luot_id: int, rows: list[dict],
                 "bl_da_lay = t.moi, bl_lan_thieu = CASE "
                 "  WHEN t.moi >= COALESCE(%s, bai.binh_luan, 0) * %s THEN 0 "
                 "  WHEN t.moi > COALESCE(bai.bl_da_lay, 0) THEN 0 "
+                "  WHEN %s THEN bai.bl_lan_thieu "
                 "  ELSE bai.bl_lan_thieu + 1 END "
                 "FROM (SELECT GREATEST(%s, (SELECT count(*) FROM binh_luan b WHERE "
                 "      b.du_an = %s AND b.khoa_bai = %s)) AS moi) t "
                 "WHERE bai.du_an = %s AND bai.khoa = %s",
-                (co, co, BL_DU_TOI_THIEU, n, ma, khoa, ma, khoa))
+                (co, co, BL_DU_TOI_THIEU, khoa in (khong_tinh_thieu or ()), n, ma, khoa, ma,
+                 khoa))
         _danh_dau_seeding(c, ma, [r.get("ma_noi_dung") for r in rows])
         _danh_dau_affiliate(c, ma, [r.get("khoa_bai") for r in rows])
     return moi, cu

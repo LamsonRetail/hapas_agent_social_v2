@@ -56,13 +56,23 @@ import apify_tool as A
 
 ACTOR = "scraptik~tiktok-api"
 NHAN = "TikTok API (scraptik)"
-# USD mỗi yêu cầu. Bảng giá actor: 0,002 (sự kiện "request", không phí khởi động) nhưng đo THẬT
-# 17/10/2026 trên tài khoản FREE (GET /users/me/limits trước/sau): 85 yêu cầu 0,19 USD, 42 yêu cầu
-# 0,143 USD → 0,0023–0,0034 USD/yêu cầu (phí nền tảng mỗi run). Ước tính/trần/sổ dùng 0,003 cho
-# khỏi báo thiếu; tiền thật vẫn chốt theo run id (`viec_nen.chot_chi_phi`).
-GIA_YEU_CAU = 0.003
+# USD mỗi yêu cầu = giá bảng (sự kiện "request", không phí khởi động, `pricingInfos` từ
+# 01/01/2026). Đo lại 18/10/2026 theo TỪNG RUN (`usageTotalUsd` đọc sau ≥ 12 giờ, hết phí ghi trễ):
+# 14/14 run scraptik của tài khoản FREE mới đều 0,0020 USD, `chargedEventCounts` {"request": 1};
+# Σ 97 run của chu kỳ 4,5756 so với mức tài khoản 4,5819 (lệch 0,006 = lưu trữ, không phải phí
+# mỗi run). Số 0,0023–0,0034 đo 17/10 là CHÊNH MỨC TÀI KHOẢN trước/sau trong lúc agent khác chạy
+# actor Threads song song (0,155 USD/run) — không phải giá một yêu cầu. Dùng 0,003 thì ước tính,
+# trần đếm yêu cầu (`_Ngan`) và sổ đều lố 50%: kiểm độ phủ 0,20 USD chỉ gửi 58 thay vì 100 yêu cầu.
+GIA_YEU_CAU = 0.002
 TIM_MOI_TRANG = 30           # searchPosts_count tối đa thật sự trả bài (50 → 0 bài)
 BAI_MOI_TRANG = 10           # userPosts trả 10 bài/yêu cầu dù xin 30
+
+
+def so_yeu_cau_ho_so(n: int) -> int:
+    """Số yêu cầu TỐI ĐA đọc `n` bài mới nhất của MỘT tài khoản (`_ho_so_mot`): 1 hồ sơ + ⌈n/10⌉
+    trang + 1 trang bù bài ghim (bỏ `is_top`). @hapas.official 20 bài: 4 yêu cầu = 0,008 USD
+    (ước tính cũ 20 bài × 0,0012 × 1,3 = 0,031 — lố 4 lần)."""
+    return 2 + math.ceil(max(1, int(n)) / BAI_MOI_TRANG)
 BL_MOI_TRANG = 50
 TRA_LOI_MOI_TRANG = 50
 _TRAN_LUOT = 0.1             # trần USD gửi Apify cho MỘT yêu cầu (sàn của `_run_actor`)
@@ -335,7 +345,8 @@ def _ghi_loi(loi_ra: list | None, khoa: str, e: Exception) -> None:
 def ho_so(ten: list[str], n: int, tran_usd: float | None = None,
           loi_ra: list | None = None) -> list[dict]:
     """Bài MỚI NHẤT của từng tài khoản (item kiểu clockworks~tiktok-profile-scraper, bỏ bài
-    ghim như `excludePinnedPosts`). Không đọc được thì một item {"input", "note"} như actor
+    ghim như `excludePinnedPosts`): ít nhất `n` bài khi tài khoản có đủ, và HẾT bài của các trang
+    đã tải (18/10/2026 — có thể hơn `n`). Không đọc được thì một item {"input", "note"} như actor
     cũ (`account_tool._doc_tiktok` ghi thành ghi chú của nguồn). Lỗi API của MỘT tài khoản
     không ném ra (review 16/10: ném là bỏ cả lô): ghi `(tên, mã, lý do)` vào `loi_ra` — bên
     gọi chỉ chạy dự phòng cho đúng các tài khoản đó. Tài khoản đọc được mà KHÔNG có video thì
@@ -391,7 +402,9 @@ def _ho_so_mot(ten: str, n: int, ngan: _Ngan, loi_ra: list | None = None) -> lis
     if not bai:
         return [{"input": ten, "authorMeta": am,
                  "note": "Tài khoản chưa có video công khai (TikTok API)"}]
-    return bai[:n]
+    # Giữ HẾT bài của các trang đã tải (soát 18/10/2026): tiền tính theo yêu cầu (trang ~10 bài),
+    # cắt `bai[:n]` là bỏ bài đã trả tiền — nhất là khi số bài đã co theo nhịp đăng.
+    return bai
 
 
 # ───────────────────────────── bình luận ─────────────────────────────
@@ -404,30 +417,100 @@ def id_video(url: str) -> str | None:
 
 
 def binh_luan(urls: list[str], per: int, tra_loi: int = 20,
-              tran_usd: float | None = None, loi_ra: list | None = None) -> list[dict]:
+              tran_usd: float | None = None, loi_ra: list | None = None,
+              bat_dau: dict[str, int] | None = None,
+              tra_loi_cho: dict[str, list] | None = None,
+              trang_thai: dict | None = None) -> list[dict]:
     """Bình luận của từng video (item kiểu clockworks~tiktok-comments-scraper). Mỗi video tối
     đa `per` dòng (gốc + trả lời, như `maxItems` = per × số bài của actor cũ): bình luận gốc
     trước (50/yêu cầu), rồi trả lời của các luồng nhiều trả lời nhất (tối đa `tra_loi` mỗi
     luồng, 1 yêu cầu/luồng). Link không bóc được id video (link rút gọn) và video lỗi API ghi
     vào `loi_ra` (không ném — review 16/10) — bên gọi chạy dự phòng cho đúng các video đó.
-    Video đọc được mà 0 bình luận KHÔNG phải lỗi."""
+    Video đọc được mà 0 bình luận KHÔNG phải lỗi.
+
+    `bat_dau` (18/10/2026): {link: số bình luận GỐC đã có trong kho} — video cào dở lượt trước
+    đọc TIẾP từ vị trí đó (`listComments_cursor` là vị trí, 50/trang) thay vì trả tiền đọc lại
+    các trang đầu: video 5.181 bình luận cần ~70 trang gốc, mỗi lượt cào lại từ đầu tốn lại
+    đúng phần đã có. Trùng do thứ tự đổi chút giữa hai lượt thì kho gộp theo cid.
+
+    Soát 18/10/2026 — video bị cắt GIỮA phần trả lời (gốc đã đọc hết, tổng vẫn dưới 80%): đọc
+    tiếp từ vị trí gốc chỉ gặp trang rỗng, mỗi lượt 0 bình luận mới rồi video bị bỏ hẳn.
+    `tra_loi_cho` {link: [(cid gốc, số trả lời nền tảng báo[, số trả lời kho đã có]), …]}: video đó
+    KHÔNG đọc trang gốc, chỉ lấy trả lời của các gốc đã có trong kho mà chưa đủ trả lời
+    (`lang_nghe_db.goc_thieu_tra_loi`). `trang_thai` (dict bên gọi đưa vào) nhận {link:
+    {"het_goc": đã đọc tới trang gốc cuối (has_more = 0 / trang không có gì mới), "rong": trang
+    đọc tiếp đầu tiên rỗng}}; video đi nhánh trả lời thì thêm "tu_dau" và "goc_can"
+    (`_tra_loi_kho`)."""
     ngan = _Ngan(tran_usd)
+    tu = bat_dau or {}
+    cho = tra_loi_cho or {}
     cac = [(u, id_video(u)) for u in urls]
     for u, vid in cac:
         if not vid:
             _ghi_loi(loi_ra, u, A.LoiApify("LOI", "link không có id video (link rút gọn?)"))
-    ra = _song_song(lambda x: _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra) if x[1] else [],
-                    cac)
+    ra = _song_song(lambda x: (_tra_loi_kho(x[0], x[1], per, tra_loi, ngan, cho[x[0]], loi_ra,
+                                            trang_thai) if cho.get(x[0])
+                               else _bl_mot(x[0], x[1], per, tra_loi, ngan, loi_ra,
+                                            int(tu.get(x[0]) or 0), trang_thai))
+                    if x[1] else [], cac)
     return [r for ds in ra for r in ds]
 
 
+def _tra_loi_kho(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan, goc: list,
+                 loi_ra: list | None = None, trang_thai: dict | None = None) -> list[dict]:
+    """Trả lời của các gốc ĐÃ có trong kho (`goc` = [(cid, số trả lời báo[, số trả lời kho đã
+    có]), …], thiếu nhiều trước), 1 yêu cầu mỗi gốc, tới khi đủ `per` dòng. Không đọc trang gốc.
+
+    Soát 18/10/2026 (MEDIUM): gốc mà TikTok báo nhiều trả lời hơn số API trả (trả lời bị ẩn / xoá)
+    không bao giờ hết "thiếu"; nhánh này không đọc trang gốc nên số báo trong kho cũng không được
+    cập nhật — bản cũ ghi "het_goc" mãi, video cào dở đi nhánh trả lời mọi lượt (tới 200 gốc ×
+    0,002 = 0,40 USD/video/lượt) và bình luận GỐC mới bị sót tới hết cửa sổ 35 ngày. Nay
+    `trang_thai[url]` ghi "het_goc" = False + "tu_dau": lượt sau đọc trang gốc TỪ ĐẦU (gốc mới,
+    số trả lời mới); "goc_can" = gốc đã hỏi mà API trả KHÔNG nhiều hơn số kho đã có (không thêm
+    được trả lời nào) — bên gọi ghi sổ để bỏ qua gốc đó ở các lượt sau."""
+    ra: list[dict] = []
+    thay: set[str] = set()
+    can: list[str] = []
+    for x in goc:
+        cid, da_co = str(x[0]), (int(x[2] or 0) if len(x) > 2 else 0)
+        if len(ra) >= per:
+            break
+        try:
+            it = _goi({"commentReplies_commentId": cid, "commentReplies_awemeId": vid,
+                       "commentReplies_count": min(TRA_LOI_MOI_TRANG, max(1, tra_loi))}, ngan)
+        except A.LoiApify as e:
+            if e.ma in _DUNG_HAN:
+                raise
+            if not ra:
+                _ghi_loi(loi_ra, url, e)
+            break
+        if it is None:
+            break
+        tra = [r for r in (it.get("comments") or [])[:max(1, tra_loi)]
+               if isinstance(r, dict) and r.get("cid")]
+        if len({str(r["cid"]) for r in tra}) <= da_co:
+            can.append(cid)
+        for r in tra:
+            if str(r["cid"]) not in thay and len(ra) < per:
+                thay.add(str(r["cid"]))
+                d = binh_luan_dong(r, url)
+                d["repliesToId"] = d["repliesToId"] or cid
+                ra.append(d)
+    if trang_thai is not None:
+        trang_thai[url] = {"het_goc": False, "tu_dau": True, "rong": False,
+                           "tra_loi_kho": len(goc), "goc_can": can}
+    return ra
+
+
 def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
-            loi_ra: list | None = None) -> list[dict]:
+            loi_ra: list | None = None, tu: int = 0,
+            trang_thai: dict | None = None) -> list[dict]:
     goc: list[dict] = []
     thay: set[str] = set()
-    con_tro = 0
+    con_tro = max(0, int(tu))
+    het_goc = rong = False
     try:
-        for _ in range(math.ceil(max(1, per) / BL_MOI_TRANG) + 2):
+        for i in range(math.ceil(max(1, per) / BL_MOI_TRANG) + 2):
             it = _goi({"listComments_awemeId": vid, "listComments_count": BL_MOI_TRANG,
                        "listComments_cursor": con_tro}, ngan)
             if it is None:
@@ -438,7 +521,11 @@ def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
                     thay.add(str(c["cid"]))
                     goc.append(binh_luan_dong(c, url))
                     moi += 1
-            if len(goc) >= per or not it.get("has_more") or not moi:
+            rong = rong or (i == 0 and con_tro > 0 and not moi)
+            if not it.get("has_more") or not moi:
+                het_goc = True            # trang gốc cuối (trang không có gì mới là đã hết)
+                break
+            if len(goc) >= per:
                 break
             con_tro = max(con_tro + BL_MOI_TRANG, _so(it.get("cursor")) or 0)
     except A.LoiApify as e:
@@ -447,6 +534,8 @@ def _bl_mot(url: str, vid: str, per: int, tra_loi: int, ngan: _Ngan,
         if not goc:
             _ghi_loi(loi_ra, url, e)
             return []
+    if trang_thai is not None:
+        trang_thai[url] = {"het_goc": het_goc, "rong": rong}
     goc = goc[:per]
     ra = list(goc)
     if tra_loi > 0:

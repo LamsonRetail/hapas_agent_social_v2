@@ -350,6 +350,11 @@ details[open] > summary { margin-bottom: 12px; }
 .ng-o { min-width: 0; padding: 12px 14px; border-radius: 10px; background: var(--be-mat-2); border: 1px solid var(--ke); }
 .ng-o h3 { margin-bottom: 8px; color: var(--chu-mo); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .ng-the { display: flex; flex-wrap: wrap; gap: 6px; }
+.ng-o h3 .goi-y { text-transform: none; margin-left: 4px; vertical-align: -1px; }
+/* Hashtag của dự án (18/10/2026, thay ô thị trường): nhãn #tag tô ngọc; trần tháng là dòng chân ô */
+.the--tag { background: var(--ngoc-nhat); color: var(--ngoc-chu); white-space: normal; overflow-wrap: anywhere; }
+.ng-o__chan { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--ke); font-size: 13px; color: var(--chu-phu); }
+.ng-o__chan b { color: var(--chu); font-variant-numeric: tabular-nums; }
 .ng-nguon { display: flex; align-items: flex-start; gap: 8px; min-width: 200px; }
 .ng-nguon .the { flex: none; margin-top: 1px; }
 .ng-nguon__chu { min-width: 0; overflow-wrap: anywhere; }
@@ -360,13 +365,44 @@ details[open] > summary { margin-bottom: 12px; }
 .ng-bang td { vertical-align: middle; }
 .ng-bang td:last-child .cum-nut { flex-wrap: nowrap; }
 .ng-bang td.nho { min-width: 92px; }
+/* Đề xuất chờ duyệt (18/10/2026): lọc + chọn nhiều + thanh duyệt hàng loạt dính đáy khung nhìn */
+.dx-loc { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; margin-bottom: 10px; }
+.dx-o { flex-direction: row !important; align-items: center; gap: 8px !important; font-weight: 600; white-space: nowrap; }
+.dx-o select { min-height: 34px; padding-top: 4px; padding-bottom: 4px; }
+.dx-o input[type="number"] { width: 72px; min-height: 34px; padding-top: 4px; padding-bottom: 4px; text-align: right; }
+.dx-loc__dem { margin-left: auto; align-self: center; }
+.dx-bang td, .dx-bang th { vertical-align: middle; }
+.dx-bang .dx-o-chon { width: 40px; text-align: center; padding-left: 8px; padding-right: 8px; }
+.dx-bang .dx-o-chon input { width: 17px; height: 17px; margin: 0; vertical-align: middle; cursor: pointer; }
+.dx-bang td:nth-last-child(1) .cum-nut { flex-wrap: nowrap; }
+.dx-thanh {
+  position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+  margin: 12px -6px 0; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--vien);
+  background: var(--be-mat); box-shadow: 0 -6px 18px -10px rgba(16, 24, 40, .35);
+}
+.dx-thanh--co { border-color: color-mix(in srgb, var(--nhan) 45%, transparent); }
+.dx-thanh__chon { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.dx-thanh__so { font-size: 13.5px; color: var(--chu-phu); white-space: nowrap; }
+.dx-thanh__so b { color: var(--chu); font-size: 16px; font-variant-numeric: tabular-nums; }
+.dx-thanh__so-lieu { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.dx-thanh__uoc { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--chu); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dx-thanh__nut { margin-left: auto; }
+@media (max-width: 760px) {
+  .dx-loc__dem { margin-left: 0; flex-basis: 100%; }
+  .dx-thanh { margin: 12px 0 0; padding: 10px 12px; gap: 8px 12px; }
+  .dx-thanh__nut { margin-left: 0; width: 100%; }
+  .dx-thanh__nut .nut { flex: 1 1 0; }
+  /* điện thoại: thanh dính đáy chiếm ít chỗ khi chưa chọn gì — thông số hiện khi đã chọn */
+  .dx-thanh:not(.dx-thanh--co) .dx-thanh__so-lieu { display: none; }
+}
 
 /* ─── trang Người xem ─── */
-/* Người xem: bảng rộng (chức danh, trạng thái Lark, đăng nhập) — cuộn ngang trong khung trên điện thoại */
+/* Người xem: bảng rộng (trạng thái Lark, đăng nhập) — cuộn ngang trong khung trên điện thoại.
+   18/10/2026 bỏ cột chức danh; phòng ban là dòng mờ dưới tên Lark. */
 .nx-bang td { vertical-align: middle; }
 .nx-bang .nx-dong2 { display: block; font-size: 12px; color: var(--chu-phu); margin-top: 2px; }
+.nx-bang .nx-pb { color: var(--chu-mo); margin-top: 0; }
 .nx-bang .nx-o { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.nx-bang td.nx-cd { min-width: 160px; }
 .nx-bang td.nho { white-space: nowrap; }
 @media (max-width: 600px) { .nx-bang td:first-child { min-width: 150px; max-width: 170px; overflow-wrap: anywhere; } }
 

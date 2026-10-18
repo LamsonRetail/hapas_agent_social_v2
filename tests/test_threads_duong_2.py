@@ -193,7 +193,7 @@ def test_hai_duong_gop_bo_trung_theo_ma_bai_phieu_va_moc_rieng(mo):  # noqa: F81
     assert ph["tk-threads_2"]["usd_so"] == pytest.approx(0.006) and ph["tk-threads_2"]["so_item"] == 6
     assert ph["tk-threads_2-run-threads_2"]["trang_thai"] == "xong"
     moc = T.doc_moc_tk("hapas")
-    assert set(moc) == {"threads", T.TH2_KHOA}
+    assert set(moc) - {T.KHOA_NHIP_TIM} == {"threads", T.TH2_KHOA}
     # Sản lượng từng từ khoá (từ gửi mà 0 bài ghi 0) — ước tính lượt sau theo số thật.
     assert moc[T.TH2_KHOA]["ve"] == 6
     assert moc[T.TH2_KHOA]["ve_tu"] == {"hapas": 6, "tui hapas": 0, "qua tang hapas": 0}
@@ -473,7 +473,8 @@ def test_trang_ngan_sach_cong_duong_2_va_luu_khong_mat_cau_hinh():
         "bat": True, "duong2": {"bat": False, "so_bai": 50}}}})
     csrf = dang_nhap(c, QL)
     t = c.get("/ngan-sach").text
-    assert 'data-o="ghi-th2"' in t and "Đường 2 tắt" in t and '"th2": {' in t
+    # 18/10/2026: phần mở rộng nằm ở khối "Nâng cao", chữ thường ngày (không "đường 2").
+    assert 'data-o="ghi-th2"' in t and "Tìm rộng hơn đang tắt" in t and '"th2": {' in t
     r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "tk_threads_bat": "1",
                                                    "tk_threads_so_bai": "40"})
     assert "Đã lưu cấu hình thu thập" in thong_bao(c, r)

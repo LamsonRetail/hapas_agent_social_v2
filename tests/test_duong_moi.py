@@ -497,7 +497,8 @@ def test_gia_nguon_facebook_thedoor_khop_dashboard():
         assert CP.uoc_mot_luot("facebook", so_nguon, n) == T._uoc_phan("facebook", so_nguon, n)
     assert T._uoc_phan("facebook", 6, 20) == pytest.approx((6 * 20 * 0.0025 + 0.01) * 1.3,
                                                            abs=1e-4)
-    assert CP.phi_khoi_dong_ngay("facebook") == pytest.approx(0.01 * 1.3)
+    # Dự báo là KỲ VỌNG (18/10/2026): đúng phí khởi động thedoor 0,01 USD/run, không nhân 1,3.
+    assert CP.phi_khoi_dong_ngay("facebook") == pytest.approx(0.01)
     assert CP.hang_so_cho_trinh_duyet()["khoi_nguon"]["facebook"] == 0.01
     import tiktok_api as TT
     assert TT.CHON["facebook_theo_doi"] == {"chinh": TDA.FB_TRANG,
@@ -747,7 +748,7 @@ def test_cau_hinh_feed_hashtag_va_uoc_tinh(ch, bat, so):
     assert b["tu_khoa"]["tiktok"]["hashtag"]["tag"] == ["hapas", "hapassuperbrandday"]
     u = T.uoc_tag_tiktok(so, 2) if bat else 0.0
     assert b["tu_khoa"]["tiktok"]["hashtag"]["uoc"] == u
-    assert u == (round(so * 0.003 * 1.3, 4) if bat else 0.0)
+    assert u == (round(so * 0.002 * 1.3, 4) if bat else 0.0)   # 0,002 USD/yêu cầu (18/10/2026)
     tat = dict(da, cau_hinh={**ch, "tu_khoa": {**ch.get("tu_khoa", {}), "tiktok": {
         **(ch.get("tu_khoa", {}).get("tiktok") or {}), "hashtag": {"bat": False}}}})
     assert T.uoc_tu_khoa_du_an(da) == pytest.approx(T.uoc_tu_khoa_du_an(tat) + u, abs=1e-4)
@@ -811,14 +812,14 @@ def test_feed_hashtag_trong_luot_tim_qua_cung_pheu(mo):
     f = tk["pheu"]["tiktok"]
     tf = f["tag_feed"]
     assert (tf["ve"], tf["moi"], tf["yeu_cau"]) == (3, 2, 5) and tf["chua_toi"] == []
-    assert tf["usd"] == pytest.approx(5 * 0.003, abs=1e-9)
+    assert tf["usd"] == pytest.approx(5 * 0.002, abs=1e-9)
     assert f["ve"] == 3 and f["ngoai_pham_vi"] == 1, "bài feed qua cùng cửa sổ phạm vi ngày"
-    assert tk["usd"] == pytest.approx(6 * 0.003, abs=1e-9), "1 yêu cầu thường + 5 feed"
+    assert tk["usd"] == pytest.approx(6 * 0.002, abs=1e-9), "1 yêu cầu thường + 5 feed"
     dong = next(c for c in T._cau_tk(tk) if c.startswith("phễu tìm TikTok"))
     assert "feed hashtag (chưa có lượt feed hashtag; #hapas 2 trang, #hapassuperbrandday 1 " \
            "trang; 5 yêu cầu): về 3, thêm 2 bài" in dong
     moc = T.doc_moc_tk("hapas")
-    assert moc[T.TK_TAG]["usd"] == pytest.approx(0.015) and moc[T.TK_TAG]["tag"] == [
+    assert moc[T.TK_TAG]["usd"] == pytest.approx(0.010) and moc[T.TK_TAG]["tag"] == [
         "hapas", "hapassuperbrandday"]
     assert moc[KDP.KHOA_MOC]["cid"] == {"hapas": "cid-hapas",
                                         "hapassuperbrandday": "cid-hapassuperbrandday"}
@@ -840,13 +841,13 @@ def test_feed_hashtag_tran_ngan_sach_tag_luot_noi_va_tat(mo):
         "id": run["id"], "nen_tang": "tiktok", "run_id": run["id"], "actor": T.TT_ACTOR}))
     _, tf = ctx.run(T._them_feed_tag, v, "hapas", 3, ["hapas", "hapassuperbrandday"], [], {},
                     datetime.datetime.now(_VN), {"bat": True, "so_yeu_cau": 5, "gio": 20},
-                    3 * 0.003 + 0.0005, [{"run_id": "r0", "actor": T.TT_ACTOR}])
+                    3 * 0.002 + 0.0005, [{"run_id": "r0", "actor": T.TT_ACTOR}])
     assert goi["mau"] == [({"hapas": 1}, {})]
     assert tf["yeu_cau"] == 2 and tf["chua_toi"] == ["hapassuperbrandday"]
     assert "chưa tới #hapassuperbrandday (tăng số yêu cầu)" in T._cau_tag(tf)
     _, tf = ctx.run(T._them_feed_tag, v, "hapas", 3, ["hapas"], [], {},
                     datetime.datetime.now(_VN), {"bat": True, "so_yeu_cau": 5, "gio": 20},
-                    0.004, [{"run_id": "r0", "actor": T.TT_ACTOR}])
+                    0.003, [{"run_id": "r0", "actor": T.TT_ACTOR}])
     assert "không còn ngân sách" in tf["ly_do"] and len(goi["mau"]) == 1
     # Tag lượt nổi (kiểm độ phủ đã thêm) không đọc lại ở feed; cid đã nhớ thì không tìm lại.
     T.ghi_moc_tk("hapas", {KDP.KHOA_NOI_CFG: {"tag": ["hapas"]}, T.TK_TAG: {},

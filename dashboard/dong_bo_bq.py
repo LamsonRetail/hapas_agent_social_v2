@@ -43,7 +43,14 @@ BANG: dict[str, dict] = {
         "cot": [("ma", "STRING"), ("ten", "STRING"), ("tu_khoa", "ARRAY<STRING>"),
                 ("tu_loai_tru", "ARRAY<STRING>"), ("boi_canh", "STRING"), ("thi_truong", "STRING"),
                 ("tran_usd_thang", "NUMERIC"), ("dang_bat", "BOOL"), ("tao_luc", "TIMESTAMP"),
-                ("sua_luc", "TIMESTAMP")],
+                ("sua_luc", "TIMESTAMP"),
+                # Hashtag riêng của dự án (18/10/2026): ALTER … ADD COLUMN hashtag trên BigQuery +
+                # schema.sql trên Postgres trước khi bật bản mới (mảng rỗng khi chưa đặt).
+                ("hashtag", "ARRAY<STRING>")],
+        # Cột thêm SAU khi bảng đã tạo (soát 18/10/2026, như cổng `kho._co_hashtag` của dashboard
+        # và Mark): bên nào (Postgres / BigQuery) chưa chạy ALTER thì bỏ cột đó khỏi lượt + cảnh
+        # báo, KHÔNG làm hỏng cả bảng (thiếu cột là lỗi cả câu MERGE — du_an không đồng bộ nữa).
+        "tuy_chon": ("hashtag",),
     },
     "nguon": {
         "khoa": ["id"], "kieu": "toan_bo",
@@ -112,16 +119,22 @@ def da_bat() -> bool:
 
 
 # ───────────────────────────── SQL ─────────────────────────────
-def sql_toan_bo(bang: str) -> str:
+def _cot(bang: str, cot: list | None = None) -> list[tuple[str, str]]:
+    """Cột của lượt: `cot` (đã bỏ cột tuỳ chọn còn thiếu — `cot_hieu_luc`) hoặc đủ cột của bảng."""
+    return list(cot) if cot is not None else BANG[bang]["cot"]
+
+
+def sql_toan_bo(bang: str, cot: list | None = None) -> str:
     b = BANG[bang]
-    return f"SELECT {', '.join(c for c, _ in b['cot'])} FROM {bang} ORDER BY {', '.join(b['khoa'])}"
+    return (f"SELECT {', '.join(c for c, _ in _cot(bang, cot))} FROM {bang} "
+            f"ORDER BY {', '.join(b['khoa'])}")
 
 
 def sql_chan_tren(bang: str) -> str:
     return f"SELECT max({BANG[bang]['moc']}) AS hi FROM {bang}"
 
 
-def sql_lo(bang: str, co_moc: bool, co_sau: bool) -> str:
+def sql_lo(bang: str, co_moc: bool, co_sau: bool, cot: list | None = None) -> str:
     """Một lô của bảng tăng dần, tham số tên: lo, hi, [tu], [sau_moc, sau_<khoá>…].
 
     `tu` là mốc cũ: bảng `tang_dan` lấy mốc > tu; `theo_ngay` lấy ngày ≥ tu − 1. `sau_*` là
@@ -138,14 +151,15 @@ def sql_lo(bang: str, co_moc: bool, co_sau: bool) -> str:
     if co_sau:
         dk.append(f"({moc}, {', '.join(khoa)}) > (%(sau_moc)s, "
                   f"{', '.join('%(sau_' + k + ')s' for k in khoa)})")
-    return (f"SELECT {', '.join(c for c, _ in b['cot'])}, {moc} AS _moc FROM {bang} "
+    return (f"SELECT {', '.join(c for c, _ in _cot(bang, cot))}, {moc} AS _moc FROM {bang} "
             f"WHERE {' AND '.join(dk)} ORDER BY {moc}, {', '.join(khoa)} LIMIT %(lo)s")
 
 
-def sql_merge(bang: str) -> str:
-    """MERGE BigQuery dùng tham số `@rows` (ARRAY<STRUCT> đúng cột của bảng)."""
+def sql_merge(bang: str, cot: list | None = None) -> str:
+    """MERGE BigQuery dùng tham số `@rows` (ARRAY<STRUCT> đúng cột của lượt). Cột không có trong
+    lượt (tuỳ chọn còn thiếu) thì MERGE không đụng tới."""
     b = BANG[bang]
-    cot = [c for c, _ in b["cot"]]
+    cot = [c for c, _ in _cot(bang, cot)]
     on = " AND ".join(f"T.{k} = S.{k}" for k in b["khoa"])
     cap_nhat = ", ".join(f"{c} = S.{c}" for c in cot if c not in b["khoa"])
     sql = (f"MERGE `{dataset()}.{bang}` T USING (SELECT * FROM UNNEST(@rows)) S ON {on} "
@@ -181,16 +195,16 @@ def chuan_gia_tri(kieu: str, v):
     return str(v)
 
 
-def dong_bq(bang: str, rows: list[dict]) -> list[dict]:
-    cot = BANG[bang]["cot"]
-    return [{c: chuan_gia_tri(k, r.get(c)) for c, k in cot} for r in rows]
+def dong_bq(bang: str, rows: list[dict], cot: list | None = None) -> list[dict]:
+    return [{c: chuan_gia_tri(k, r.get(c)) for c, k in _cot(bang, cot)} for r in rows]
 
 
 def _tham_so_bq(bang: str, rows: list[dict]):
     """Dựng tham số `@rows` cho thư viện google-cloud-bigquery. Import muộn: chỉ máy chủ
-    dashboard có thư viện; bộ thử thay hàm này."""
+    dashboard có thư viện; bộ thử thay hàm này. Cột theo dòng đầu (lượt đã bỏ cột tuỳ chọn còn
+    thiếu thì dòng không có khoá đó)."""
     from google.cloud import bigquery as bq
-    cot = BANG[bang]["cot"]
+    cot = [x for x in BANG[bang]["cot"] if not rows or x[0] in rows[0]]
     kieu_dong = bq.StructQueryParameterType(*[
         bq.ArrayQueryParameterType("STRING", name=c) if k.startswith("ARRAY")
         else bq.ScalarQueryParameterType(k, name=c) for c, k in cot])
@@ -213,6 +227,15 @@ class _BigQuery:
         job = self._client.query(sql, job_config=self._bq.QueryJobConfig(query_parameters=tham_so))
         job.result(timeout=300)
         return int(job.num_dml_affected_rows or 0)
+
+    def cot(self, bang: str) -> set[str]:
+        """Tên cột hiện có của bảng đích (INFORMATION_SCHEMA của dataset — chỉ đọc)."""
+        job = self._client.query(
+            f"SELECT column_name FROM `{dataset()}.INFORMATION_SCHEMA.COLUMNS` "
+            "WHERE table_name = @bang",
+            job_config=self._bq.QueryJobConfig(query_parameters=[
+                self._bq.ScalarQueryParameter("bang", "STRING", bang)]))
+        return {r["column_name"] for r in job.result(timeout=60)}
 
 
 # ───────────────────────────── kho ─────────────────────────────
@@ -239,6 +262,13 @@ def _doc_moc(ket_noi, bang: str):
     return r["moc"] if r else None
 
 
+#: Tiền tố cảnh báo trong cột `dong_bo_bq.loi` (soát 18/10/2026): bảng chưa có cột cảnh báo riêng
+#: (thêm cột = đổi schema trên VPS), nên cảnh báo — lượt vẫn xong, mốc vẫn dời, vd bỏ cột tuỳ chọn
+#: còn thiếu — đi chung cột `loi` với tiền tố này; `trang_thai` tách ra `canh_bao` để trang
+#: "Kết nối BigQuery" hiện nhãn "cảnh báo" chứ không gắn nhãn "lỗi".
+TIEN_TO_CANH_BAO = "cảnh báo: "
+
+
 def _ghi_moc(ket_noi, bang: str, moc, so_dong: int, loi: str | None) -> None:
     """Ghi kết quả lượt; `moc` None = giữ mốc cũ (lỗi, hoặc bảng nạp lại toàn bộ)."""
     with ket_noi() as c:
@@ -250,7 +280,7 @@ def _ghi_moc(ket_noi, bang: str, moc, so_dong: int, loi: str | None) -> None:
             (bang, moc, so_dong, (loi or None) and str(loi)[:500]))
 
 
-def _doc_tang_dan(bang: str, ket_noi, moc_cu):
+def _doc_tang_dan(bang: str, ket_noi, moc_cu, cot: list | None = None):
     """Sinh từng lô dòng của bảng tăng dần trong (mốc cũ, chặn trên]. -> (lô…, chặn trên)."""
     b = BANG[bang]
     with ket_noi() as c:
@@ -266,7 +296,8 @@ def _doc_tang_dan(bang: str, ket_noi, moc_cu):
             ts["sau_moc"] = sau["_moc"]
             ts.update({f"sau_{k}": sau[k] for k in b["khoa"]})
         with ket_noi() as c:
-            rows = c.execute(sql_lo(bang, moc_cu is not None, sau is not None), ts).fetchall()
+            rows = c.execute(sql_lo(bang, moc_cu is not None, sau is not None, cot),
+                             ts).fetchall()
         if rows:
             lo_list.append(rows)
             sau = rows[-1]
@@ -274,20 +305,54 @@ def _doc_tang_dan(bang: str, ket_noi, moc_cu):
             return lo_list, hi
 
 
-def dong_bo_bang(bang: str, ket_noi, bq, tham_so=_tham_so_bq) -> dict:
-    """Đẩy một bảng. -> {"bang", "so_dong", "loi"}."""
+def cot_hieu_luc(bang: str, ket_noi, bq) -> tuple[list[tuple[str, str]], str]:
+    """(cột của lượt, cảnh báo). Cột tuỳ chọn (`tuy_chon`) chưa có ở Postgres (schema.sql chưa
+    chạy) hoặc BigQuery (ALTER … ADD COLUMN chưa chạy) thì bỏ khỏi lượt. BigQuery giả / cũ không
+    có `cot` → coi như có đủ; không đọc được INFORMATION_SCHEMA thì cũng vậy (MERGE như trước) kèm
+    cảnh báo."""
     b = BANG[bang]
-    tong, moc_moi, loi = 0, None, None
+    tc = tuple(b.get("tuy_chon") or ())
+    if not tc:
+        return b["cot"], ""
+    with ket_noi() as c:
+        co_pg = {r["column_name"] for r in c.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = "
+            "current_schema() AND table_name = %s AND column_name = ANY(%s)",
+            (bang, list(tc))).fetchall()}
+    ghi = []
+    ham = getattr(bq, "cot", None)
+    co_bq = set(tc)
+    if ham is not None:
+        try:
+            co_bq = set(ham(bang))
+        except Exception as e:  # noqa: BLE001 — không kiểm được thì MERGE như trước
+            ghi.append(f"không đọc được cột BigQuery ({type(e).__name__}) — MERGE đủ cột")
+    bo = [c for c in tc if c not in co_pg or c not in co_bq]
+    for c in bo:
+        o = [x for x, co in (("Postgres", c in co_pg), ("BigQuery", c in co_bq)) if not co]
+        ghi.append(f"bỏ cột {c}: {' và '.join(o)} chưa có cột (chạy "
+                   + " / ".join("schema.sql" if x == "Postgres" else "ALTER trong bigquery.sql"
+                                for x in o) + ")")
+    return [x for x in b["cot"] if x[0] not in bo], "; ".join(ghi)
+
+
+def dong_bo_bang(bang: str, ket_noi, bq, tham_so=_tham_so_bq) -> dict:
+    """Đẩy một bảng. -> {"bang", "so_dong", "loi"} (+ "canh_bao" khi bỏ cột tuỳ chọn còn thiếu —
+    cảnh báo ghi vào `dong_bo_bq.loi` với tiền tố `TIEN_TO_CANH_BAO` để trang "Kết nối BigQuery"
+    thấy là CẢNH BÁO, mốc vẫn dời)."""
+    b = BANG[bang]
+    tong, moc_moi, loi, canh = 0, None, None, ""
     try:
+        cot, canh = cot_hieu_luc(bang, ket_noi, bq)
         if b["kieu"] == "toan_bo":
             with ket_noi() as c:
-                rows = c.execute(sql_toan_bo(bang)).fetchall()
-            bq.chay(sql_merge(bang), tham_so(bang, dong_bq(bang, rows)))
+                rows = c.execute(sql_toan_bo(bang, cot)).fetchall()
+            bq.chay(sql_merge(bang, cot), tham_so(bang, dong_bq(bang, rows, cot)))
             tong = len(rows)
         else:
-            cac_lo, hi = _doc_tang_dan(bang, ket_noi, _doc_moc(ket_noi, bang))
+            cac_lo, hi = _doc_tang_dan(bang, ket_noi, _doc_moc(ket_noi, bang), cot)
             for rows in cac_lo:
-                bq.chay(sql_merge(bang), tham_so(bang, dong_bq(bang, rows)))
+                bq.chay(sql_merge(bang, cot), tham_so(bang, dong_bq(bang, rows, cot)))
                 tong += len(rows)
             moc_moi = hi
     except Exception as e:  # noqa: BLE001 — một bảng hỏng không chặn bảng khác
@@ -295,8 +360,10 @@ def dong_bo_bang(bang: str, ket_noi, bq, tham_so=_tham_so_bq) -> dict:
         gon = _URL.sub("<url>", str(e))[:200]
         loi = f"{type(e).__name__}: {gon}"
         moc_moi = None
-    _ghi_moc(ket_noi, bang, moc_moi, tong, loi)
-    return {"bang": bang, "so_dong": tong, "loi": loi}
+    if canh:
+        print(f"[dong_bo_bq] {bang}: {canh}", flush=True)
+    _ghi_moc(ket_noi, bang, moc_moi, tong, loi or (TIEN_TO_CANH_BAO + canh if canh else None))
+    return {"bang": bang, "so_dong": tong, "loi": loi, **({"canh_bao": canh} if canh else {})}
 
 
 def chay(ket_noi=ket_noi_kho, bq=None, tham_so=_tham_so_bq) -> dict:
@@ -314,13 +381,24 @@ def chay(ket_noi=ket_noi_kho, bq=None, tham_so=_tham_so_bq) -> dict:
         _KHOA.release()
 
 
+def tach_canh_bao(r: dict) -> dict:
+    """Bản sao một dòng `dong_bo_bq`: `loi` bắt đầu bằng `TIEN_TO_CANH_BAO` thì chuyển phần sau
+    sang `canh_bao` và `loi` = None (lượt đó KHÔNG lỗi)."""
+    r = dict(r)
+    loi = str(r.get("loi") or "")
+    if loi.startswith(TIEN_TO_CANH_BAO):
+        r.update(loi=None, canh_bao=loi[len(TIEN_TO_CANH_BAO):])
+    return r
+
+
 def trang_thai(ket_noi=ket_noi_kho) -> dict:
-    """Cho trang "Kết nối BigQuery" của dashboard: dataset, mốc, lần cuối, số dòng, lỗi."""
+    """Cho trang "Kết nối BigQuery" của dashboard: dataset, mốc, lần cuối, số dòng, lỗi, cảnh báo
+    (`tach_canh_bao`)."""
     with ket_noi() as c:
         rows = c.execute("SELECT bang, moc, lan_cuoi, so_dong, loi FROM dong_bo_bq").fetchall()
     theo = {r["bang"]: r for r in rows}
     return {"dataset": dataset(), "da_bat": da_bat(),
-            "bang": [dict(theo.get(b) or {"bang": b}) for b in THU_TU]}
+            "bang": [tach_canh_bao(theo.get(b) or {"bang": b}) for b in THU_TU]}
 
 
 def cai_vao(app) -> None:

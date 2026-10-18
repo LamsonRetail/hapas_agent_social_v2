@@ -121,8 +121,8 @@ def test_den_luot_moi_theo_nhip():
 def test_tran_moi_san_mot_trang_tran_ba_trang_va_kep_phan_con():
     uoc = T.uoc_tu_khoa_nen_tang("tiktok", 300, ["k"] * 21)      # 4 trang/từ + 10 làm mới
     # Lượt thường 1 trang/từ, lượt nổi tới hạn (chừa 2 trang/từ): phần ước tính chưa dùng
-    # = 0,3666 − 21 − 10 − 42 yêu cầu = 0,1476 USD (≈ 49 yêu cầu) — giữa sàn 21 và trần 63.
-    assert TDA.tran_moi(21, uoc, 21 * G, 5.0, du_noi=42 * G) == pytest.approx(0.1476)
+    # = 0,2444 − 21 − 10 − 42 yêu cầu = 0,0984 USD (≈ 49 yêu cầu × 0,002) — giữa sàn 21 và trần 63.
+    assert TDA.tran_moi(21, uoc, 21 * G, 5.0, du_noi=42 * G) == pytest.approx(0.0984)
     assert TDA.tran_moi(21, uoc, 21 * G, 5.0, du_noi=0.0) == pytest.approx(63 * G)
     # Ước tính đã tiêu hết: vẫn được sàn 1 trang/từ (nằm trong ước tính) — trừ khi hết tiền.
     assert TDA.tran_moi(21, uoc, uoc, 5.0) == pytest.approx(21 * G)

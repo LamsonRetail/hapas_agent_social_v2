@@ -150,14 +150,15 @@ def test_ho_so_bo_bai_ghim_lat_trang_va_ghi_chu(api):
     api.bai["c1"] = ([_aweme(i) for i in range(10, 20)], 1, "c2")
     ra = TT.ho_so(["@kenh_a", "khong_co"], 12)
     cua_a = [x for x in ra if x.get("input") == "kenh_a"]
-    assert len(cua_a) == 12 and "1" not in {x["id"] for x in cua_a}, "bỏ bài ghim"
+    # 2 trang đã trả tiền (8 + 10 bài): giữ HẾT 18 bài, không cắt về 12 (soát 18/10/2026).
+    assert len(cua_a) == 18 and "1" not in {x["id"] for x in cua_a}, "bỏ bài ghim"
     assert cua_a[0]["authorMeta"]["fans"] == 99 and cua_a[0]["authorMeta"]["video"] == 40
     assert [g["userPosts_maxCursor"] for g in api.goi if "userPosts_userId" in g] == ["0", "c1"]
     ghi = [x for x in ra if x.get("input") == "khong_co"]
     assert ghi and "không thấy" in ghi[0]["note"]
     # Đọc bằng bộ đọc cũ của soi_tai_khoan: hồ sơ + bài, tài khoản không thấy thành ghi chú.
     doc = account_tool._doc_tiktok(ra)
-    assert doc["kenh_a"]["ho_so"]["followers"] == 99 and len(doc["kenh_a"]["bai"]) == 12
+    assert doc["kenh_a"]["ho_so"]["followers"] == 99 and len(doc["kenh_a"]["bai"]) == 18
     assert doc["khong_co"]["ghi_chu"]
 
 

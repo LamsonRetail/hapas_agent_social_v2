@@ -255,7 +255,7 @@ def test_tim_tu_khoa_threads_phieu_moc_de_xuat_va_tien(mo):
     f = tk["pheu"]["threads"]
     assert (f["ve"], f["cua_so"], f["khong_nhac"], f["giu"]) == (3, 3, 1, 2)
     assert any(c.startswith("phễu tìm Threads (xin 30 ngày") for c in T._cau_tk(tk))
-    assert set(T.doc_moc_tk("hapas")) == {"threads"}
+    assert set(T.doc_moc_tk("hapas")) - {T.KHOA_NHIP_TIM} == {"threads"}
     # Run TikTok giả ở trên không mang tên actor TikTok API → sổ theo video về (0 bài = 0 USD).
     assert tk["usd"] == pytest.approx(3 * 0.0025 + 0.08)
 
@@ -265,7 +265,10 @@ def test_tim_tu_khoa_threads_0_bai_van_tru_phi_khoi_dong(mo):
     mo.setattr(A, "_FETCH", {p: (lambda *a, **k: []) for p in T.TK_NEN_TANG})
     tk = _chay_tk(dict(DU_AN, tk_bat=True, tk_so_bai=15, cau_hinh=BAT_TH))
     assert tk["usd"] == pytest.approx(0.08) and tk["pheu"]["threads"]["ve"] == 0
-    assert T.doc_moc_tk("hapas") == {}, "0 bài không dời mốc"
+    moc = T.doc_moc_tk("hapas")
+    assert set(moc) - {T.KHOA_NHIP_TIM} == set(), "0 bài không dời mốc"
+    # Lịch sử nhịp (18/10/2026) có lượt về 0 bài — đường 1 Threads giãn nhịp khi lặp nhiều lượt.
+    assert moc[T.KHOA_NHIP_TIM]["threads"]["lich_su"][-1][1:] == [0, 0]
 
 
 # ───────────────────────────── bình luận Threads ─────────────────────────────
@@ -341,7 +344,11 @@ def test_dashboard_bo_loc_nhan_threads():
         CS.doc_bo_loc({"nen_tang": "twitter"})
 
 
-def test_dashboard_chi_phi_khop_mark_threads():
+def test_dashboard_chi_phi_khop_mark_threads(monkeypatch):
+    import tiktok_api as TT
+    # Dashboard tính nguồn TikTok theo đường TikTok API (production, 18/10/2026: theo yêu cầu);
+    # conftest tắt API → so cùng đường đó.
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
     assert CP.GIA == T._GIA and CP.START_COST == A._START_COST and A._START_COST["threads"] == 0.08
     assert CP.KHOI_NGUON == T._KHOI_NGUON and T._KHOI_NGUON["threads"] == 0.0
     assert CP.TK_GIA == T._TK_GIA and CP.TK_KHOI == T._TK_KHOI
@@ -394,9 +401,10 @@ def test_du_bao_thang_threads_theo_tai_khoan_khong_phi_khoi_dong():
            "chu_ky_ngay": 1} for i in range(21)]
     db = CP.du_bao(ng, 0, 50, None, datetime.datetime(2026, 10, 15, 12, tzinfo=_VN))
     (th,) = db["nen_tang"]
-    # Actor hồ sơ (17/10/2026): 21 tài khoản × 0,002 × 1,3 mỗi ngày, không phí khởi động
-    # (chế độ "user" cũ: 21 × 10 × 0,0025 × 1,3 + 2 lô × 0,08 × 1,3 ≈ 0,89 USD/ngày).
-    assert th["thang_cau_hinh"] == pytest.approx(30 * 21 * 0.002 * 1.3)
+    # Actor hồ sơ (17/10/2026): 21 tài khoản × 0,002 mỗi ngày (kỳ vọng, 18/10/2026: không nhân
+    # 1,3 — run thật 0,0020/hồ sơ), không phí khởi động (chế độ "user" cũ: 21 × 10 × 0,0025 × 1,3
+    # + 2 lô × 0,08 × 1,3 ≈ 0,89 USD/ngày).
+    assert th["thang_cau_hinh"] == pytest.approx(30 * 21 * 0.002)
     assert th["khoi_dong_con_lai"] == 0
 
 

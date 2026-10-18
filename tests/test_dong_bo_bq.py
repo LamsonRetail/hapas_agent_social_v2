@@ -30,11 +30,12 @@ def _moc(bang, r):
 class GiaKho:
     """Đủ để chạy các câu SQL của dong_bo_bq trên dữ liệu trong bộ nhớ."""
 
-    def __init__(self, du_lieu):
+    def __init__(self, du_lieu, thieu_cot=()):
         self.du_lieu = du_lieu
         self.moc: dict[str, dict] = {}
         self.cau: list[str] = []
         self._kq: list = []
+        self.thieu_cot = set(thieu_cot)       # cột Postgres chưa có (schema.sql chưa chạy)
 
     @contextlib.contextmanager
     def __call__(self):
@@ -63,6 +64,8 @@ class GiaKho:
             return []
         if sql.startswith("SELECT bang, moc"):
             return [{"bang": b, **v} for b, v in self.moc.items()]
+        if "information_schema.columns" in sql:
+            return [{"column_name": c} for c in ts[1] if c not in self.thieu_cot]
         bang = re.search(r" FROM (\w+)", sql).group(1)
         rows = self.du_lieu.get(bang, [])
         if "AS hi" in sql:
@@ -242,6 +245,68 @@ def test_bang_nho_nap_lai_toan_bo_va_luot_quet_theo_ket_thuc():
     bq2 = GiaBQ()
     D.dong_bo_bang("luot_quet", kho, bq2, _tham_so)
     assert bq2.goi[0][1][0]["trang_thai"] == "xong"
+
+
+class GiaBQCot(GiaBQ):
+    """BigQuery giả biết cột của bảng đích (`_BigQuery.cot` — INFORMATION_SCHEMA)."""
+
+    def __init__(self, thieu=(), hong=False):
+        super().__init__()
+        self.thieu, self.hong = set(thieu), hong
+
+    def cot(self, bang):
+        if self.hong:
+            raise RuntimeError("không có quyền")
+        return {c for c, _ in D.BANG[bang]["cot"]} - self.thieu
+
+
+def _du_an():
+    return {"du_an": [{"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas"], "tu_loai_tru": [],
+                       "boi_canh": "", "thi_truong": "VN", "tran_usd_thang": 5,
+                       "dang_bat": True, "tao_luc": T0, "sua_luc": T0, "hashtag": ["hapas"]}]}
+
+
+@pytest.mark.parametrize("kho_thieu, bq_thieu, ben", [
+    ({"hashtag"}, set(), "Postgres"), (set(), {"hashtag"}, "BigQuery"),
+    ({"hashtag"}, {"hashtag"}, "Postgres và BigQuery")])
+def test_thieu_cot_hashtag_bo_cot_canh_bao_khong_hong_bang(kho_thieu, bq_thieu, ben):
+    """Soát 18/10/2026: `du_an.hashtag` thêm sau khi bảng đã tạo. Bên nào chưa chạy ALTER thì bản
+    cũ hỏng CẢ câu MERGE (du_an không đồng bộ nữa). Nay bỏ cột đó, cảnh báo, các cột khác vẫn đẩy."""
+    kho = GiaKho(_du_an(), thieu_cot=kho_thieu)
+    bq = GiaBQCot(thieu=bq_thieu)
+    kq = D.dong_bo_bang("du_an", kho, bq, _tham_so)
+    assert kq["loi"] is None and kq["so_dong"] == 1
+    assert kq["canh_bao"].startswith(f"bỏ cột hashtag: {ben} chưa có cột")
+    sql, rows = bq.goi[0]
+    assert "hashtag" not in sql and "hashtag" not in rows[0] and rows[0]["ma"] == "hapas"
+    assert next(c for c in kho.cau if c.startswith("SELECT ma,")).count("hashtag") == 0
+    assert kho.moc["du_an"]["loi"].startswith("cảnh báo: bỏ cột hashtag")
+
+
+def test_trang_thai_tach_canh_bao_khoi_loi():
+    """Soát 18/10/2026: cảnh báo đi chung cột `loi` (bảng chưa có cột riêng) nên trang Kết nối
+    BigQuery gắn nhãn "lỗi" cho một lượt XONG. `trang_thai` tách tiền tố "cảnh báo: " ra
+    `canh_bao`; lỗi thật giữ nguyên ở `loi`."""
+    kho = GiaKho(_du_an(), thieu_cot={"hashtag"})
+    D.dong_bo_bang("du_an", kho, GiaBQCot(), _tham_so)
+    D.dong_bo_bang("nguon", kho, GiaBQ(hong_lan=1), _tham_so)          # lỗi thật
+    theo = {b["bang"]: b for b in D.trang_thai(kho)["bang"]}
+    assert theo["du_an"]["loi"] is None and theo["du_an"]["so_dong"] == 1
+    assert theo["du_an"]["canh_bao"].startswith("bỏ cột hashtag: Postgres chưa có cột")
+    assert theo["nguon"]["loi"] == "RuntimeError: quota" and "canh_bao" not in theo["nguon"]
+    assert theo["bai"] == {"bang": "bai"}                               # chưa chạy lần nào
+    assert D.tach_canh_bao({"loi": "Lỗi: cảnh báo: x"})["loi"] == "Lỗi: cảnh báo: x"
+
+
+def test_du_cot_hashtag_thi_day_ca_hashtag():
+    kho = GiaKho(_du_an())
+    bq = GiaBQCot()
+    kq = D.dong_bo_bang("du_an", kho, bq, _tham_so)
+    assert kq == {"bang": "du_an", "so_dong": 1, "loi": None}
+    assert "S.hashtag" in bq.goi[0][0] and bq.goi[0][1][0]["hashtag"] == ["hapas"]
+    # Không đọc được INFORMATION_SCHEMA: MERGE đủ cột như trước, kèm cảnh báo.
+    kq = D.dong_bo_bang("du_an", GiaKho(_du_an()), GiaBQCot(hong=True), _tham_so)
+    assert kq["loi"] is None and "không đọc được cột BigQuery" in kq["canh_bao"]
 
 
 def test_chua_bat_va_khoa_mot_luot(monkeypatch):

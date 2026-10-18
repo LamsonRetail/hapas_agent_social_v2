@@ -211,6 +211,55 @@ def test_phan_ho_so_qua_api_thieu_tai_khoan_thi_chay_clockworks(monkeypatch):
     assert set(rows) == {"kenh_a", "kenh_b"}
 
 
+def test_du_phong_tiktok_chua_cho_trong_tran_va_san_theo_gia_that(monkeypatch):
+    """Soát 18/10/2026: trần phần hồ sơ TikTok hạ theo giá TikTok API (1 tài khoản × 10 video =
+    3 yêu cầu ≈ 0,008 USD → trần 0,10), sau 1 yêu cầu còn 0,098 < sàn 0,1 mà bản trước đòi — dự phòng
+    clockworks (0,003 USD/video) KHÔNG BAO GIỜ chạy đúng lúc API hỏng. Nay trần chừa chỗ cho dự
+    phòng (`giu_cho_phan`, như Facebook) và sàn theo giá thật (`can_du_phong_tt`)."""
+    monkeypatch.setattr(TT, "dung_api", lambda viec: True)
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 5.0, True))
+    ph = T.chia_phan([{"id": 1, "nen_tang": "tiktok", "dinh_danh": "kenh_loi",
+                       "so_bai_moi_lan": 10}])["tiktok"][0]
+    assert ph["du_phong"]["uoc_usd"] == round(10 * 0.003 * T._HE_SO_UOC, 4) == 0.039
+    assert T.giu_cho_phan(ph) == 0.039 > ph["uoc_usd"]
+    assert T._tran_phan("tiktok", ph, 5.0) == 0.12          # ⌈max(0,1; 0,039)⌉ + 0,02
+
+    def tra(actor, p):
+        if actor != TT.ACTOR:
+            return [{"authorMeta": {"name": "kenh_loi"}, "createTimeISO": "2026-10-15",
+                     "webVideoUrl": "https://www.tiktok.com/@kenh_loi/video/70000010"}]
+        return [{"status_code": 5, "status_msg": "lỗi"}]          # API hỏng cho tài khoản này
+    r = GiaRun(monkeypatch, tra)
+    _v, (items, _meta, loi, _) = _chay_phan(dict(ph), cap=0.10)  # trần cũ: 0,10
+    assert [a for a, _, _ in r.goi if a != TT.ACTOR] == ["clockworks~tiktok-profile-scraper"]
+    assert loi is None and items and items[-1]["webVideoUrl"].endswith("70000010")
+    # Phần còn không đủ cho dự phòng theo giá thật: không chạy (không vượt trần phần).
+    r2 = GiaRun(monkeypatch, tra)
+    _chay_phan(dict(ph), cap=0.03)
+    assert all(a == TT.ACTOR for a, _, _ in r2.goi)
+    assert TDA.can_du_phong_tt(ph, 2) == 0.078
+
+
+def test_binh_luan_tiktok_khong_qua_api_tinh_gia_clockworks(monkeypatch):
+    """Soát 18/10/2026: bảng chọn đổi bình luận TikTok về clockworks (0,00125 USD/bình luận) mà
+    phần vẫn lập theo giá TikTok API 0,0004 — ước tính, trần lô và sổ hụt ~3 lần."""
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, nen=None, c=None: (1000, 5.0, True))
+    bai = [{"khoa": "tiktok:1", "nen_tang": "tiktok", "link": "https://www.tiktok.com/@a/video/1",
+            "binh_luan": 100, "bl_lay_luc": None}]
+    can = T._can_bl(bai[0], 0)
+    for api, gia in ((True, 0.0004), (False, 0.00125)):
+        monkeypatch.setattr(TT, "dung_api", lambda viec, api=api: api)
+        v = GiaViec({}, [])
+        T._tao_cac_phan_bl(v, [dict(b) for b in bai], {"tiktok": 0})
+        (ph,) = T._phan_bl(v)
+        assert ph["gia"] == gia and ph["uoc_usd"] == round(can * gia * T._HE_SO_UOC, 4)
+        assert bool(ph.get("bo_chuyen")) is api
+        if api:
+            # Lô qua API chừa chỗ cho dự phòng clockworks trong trần lô (`giu_cho_phan`).
+            assert ph["du_phong"]["uoc_usd"] == round(can * 0.00125 * T._HE_SO_UOC, 4)
+            assert T.giu_cho_phan(ph) == ph["du_phong"]["uoc_usd"] > ph["uoc_usd"]
+
+
 def test_phan_binh_luan_qua_api_va_viec_nen_cong_run_phu(monkeypatch, tmp_path):
     monkeypatch.setattr(TT, "dung_api", lambda viec: True)
     u1 = "https://www.tiktok.com/@a/video/70000001"

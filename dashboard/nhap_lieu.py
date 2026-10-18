@@ -135,6 +135,39 @@ def thi_truong(s) -> str:
     return t
 
 
+#: Hashtag riêng của dự án (18/10/2026): tối đa 50 mục (= số từ khoá tối đa Mark tìm), mỗi mục
+#: ≤ 100 ký tự sau chuẩn hoá (Instagram cắt tag dài hơn, TikTok chỉ nhận 3–40).
+HASHTAG_TOI_DA = 50
+HASHTAG_DAI_TOI_DA = 100
+
+
+def hashtag(s) -> list[str]:
+    """Ô hashtag của dự án -> danh sách lưu `du_an.hashtag` (chủ dự án 18/10/2026: "bỏ phần thị
+    trường, thay bằng phần hashtag").
+
+    Tách theo dấu phẩy, chấm phẩy, xuống dòng, tab và dấu '#' (dán nguyên "#hapas
+    #yeutudieunhonhat" từ caption vẫn ra 2 tag). Dấu cách TRONG một đoạn thì nối lại thành MỘT tag:
+    "Túi HAPAS" = #tuihapas, khẩu hiệu "#Yêu từ điều nhỏ nhất" = #yeutudieunhonhat — như
+    `apify_tool.hashtag_ig` suy tag từ từ khoá ("túi hapas" → tuihapas). Soát 18/10/2026: bản
+    trước tách theo dấu cách nên "Túi HAPAS" ra tag rác "tui", chiếm một suất hashtag Instagram
+    (Mark chỉ gửi `so_tu` tag đầu). Mỗi tag bỏ dấu (đ→d), chữ thường, chỉ giữ [a-z0-9_] — đúng
+    dạng Mark gửi actor Instagram. Tag không còn chữ/số nào (emoji…) bỏ qua; bỏ trùng, giữ thứ tự
+    gõ."""
+    ra: list[str] = []
+    for x in re.split(r"[,;\r\n\t#]+", str(s or "")):
+        g = unicodedata.normalize("NFD", x.replace("đ", "d").replace("Đ", "D"))
+        t = re.sub(r"[^a-z0-9_]", "", "".join(c for c in g if unicodedata.category(c) != "Mn")
+                   .lower())
+        if not t or t in ra:
+            continue
+        if len(t) > HASHTAG_DAI_TOI_DA:
+            raise LoiNhap(f"Hashtag “{t[:30]}…” quá dài (tối đa {HASHTAG_DAI_TOI_DA} ký tự).")
+        ra.append(t)
+    if len(ra) > HASHTAG_TOI_DA:
+        raise LoiNhap(f"Tối đa {HASHTAG_TOI_DA} hashtag mỗi dự án.")
+    return ra
+
+
 def ngay(s, mac_dinh: datetime.date) -> datetime.date:
     t = str(s or "").strip()
     if not t:
@@ -305,15 +338,23 @@ def _facebook(s: str) -> tuple[str, str]:
 
 # ───────────────────────────── biểu mẫu ─────────────────────────────
 def du_an(form: dict, *, moi: bool) -> dict:
-    """Biểu mẫu dự án -> dict cột `du_an` (trừ trần tháng: sửa ở trang Ngân sách)."""
+    """Biểu mẫu dự án -> dict cột `du_an` (trừ trần tháng: sửa ở trang Ngân sách).
+
+    18/10/2026: biểu mẫu bỏ ô thị trường (chủ dự án: "bỏ phần thị trường, thay bằng phần
+    hashtag") — dự án mới mặc định VN; khi SỬA mà biểu mẫu không gửi ô thì KHÔNG có khoá
+    `thi_truong` (kho giữ giá trị đang lưu, cổng thị trường của Mark không đổi). Ô hashtag cũng
+    vậy: không gửi (trang cũ còn mở) thì không có khoá `hashtag` — không xoá hashtag đã đặt."""
     d = {
         "ten": sach(form.get("ten"), 200),
         "tu_khoa": danh_sach(form.get("tu_khoa")),
         "tu_loai_tru": danh_sach(form.get("tu_loai_tru")),
         "boi_canh": sach(form.get("boi_canh"), 2000),
-        "thi_truong": thi_truong(form.get("thi_truong")),
         "dang_bat": str(form.get("dang_bat") or "").strip() in ("1", "on", "true"),
     }
+    if moi or "thi_truong" in form:
+        d["thi_truong"] = thi_truong(form.get("thi_truong"))
+    if moi or "hashtag" in form:
+        d["hashtag"] = hashtag(form.get("hashtag"))
     if moi:
         d["ma"] = ma_du_an(form.get("ma"))
     if not d["ten"]:
