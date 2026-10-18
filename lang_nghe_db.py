@@ -471,6 +471,44 @@ def cap_nhat_so_lieu(ma: str, luot_id: int, rows: list[dict]) -> int:
     return n
 
 
+def nang_so_lieu(ma: str, luot_id: int, rows: list[dict], ngay) -> int:
+    """Số liệu của một lần đọc CŨ (script nạp raw đã trả tiền, 18/10/2026) cho bài ĐÃ CÓ: mỗi số
+    chỉ được NÂNG (GREATEST — xem/thích/bình luận/chia sẻ là số luỹ kế; lượt quét sau lần đọc đó
+    đã ghi số lớn hơn thì giữ), `cap_nhat_cuoi`/`luot_cuoi` chỉ đổi khi có số tăng. Ảnh chụp ghi
+    vào ĐÚNG ngày đọc `ngay` (không phải hôm nay): ngày đó đã có dòng thì giữ số lớn hơn từng cột.
+    Khác `cap_nhat_so_lieu` (số MỚI NHẤT đè số cũ, ảnh chụp hôm nay) — dùng nó cho số cũ là hạ số
+    thật xuống và ghi nhầm ngày. -> số bài có ít nhất một số tăng."""
+    n = 0
+    tang = " OR ".join(f"%s::bigint > COALESCE({k}, -1)" for k in _SO)
+    with ket_noi() as c:
+        for r in rows:
+            v = [r.get(k) for k in _SO]
+            if all(x is None for x in v):
+                continue
+            x = c.execute(
+                "UPDATE bai SET " + ", ".join(f"{k} = GREATEST(%s::bigint, {k})" for k in _SO)
+                + ", cap_nhat_cuoi = now(), luot_cuoi = %s WHERE du_an = %s AND khoa = %s "
+                f"AND ({tang}) RETURNING khoa", [*v, luot_id, ma, r["khoa"], *v]).fetchone()
+            n += 1 if x else 0
+            c.execute(
+                "INSERT INTO chi_so_ngay (du_an, khoa, ngay, xem, thich, binh_luan, chia_se) "
+                "SELECT %s, %s, %s, %s, %s, %s, %s WHERE EXISTS (SELECT 1 FROM bai WHERE "
+                "du_an = %s AND khoa = %s) ON CONFLICT (du_an, khoa, ngay) DO UPDATE SET "
+                + ", ".join(f"{k} = GREATEST(EXCLUDED.{k}, chi_so_ngay.{k})" for k in _SO),
+                [ma, r["khoa"], ngay, *v, ma, r["khoa"]])
+    return n
+
+
+def khoa_theo_luot_dau(ma: str, luot_id: int) -> list[dict]:
+    """Bài lần đầu vào kho ở lượt `luot_id` (khoá, lượt cuối, đã cào bình luận chưa, số bình luận
+    đã cào) — hoàn tác script nạp raw: chỉ xoá bài chưa bị lượt sau đụng tới. Chỉ đọc."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT b.khoa, b.luot_cuoi, b.bl_lay_luc, (SELECT count(*) FROM binh_luan x WHERE "
+            "x.du_an = b.du_an AND x.khoa_bai = b.khoa) AS so_bl FROM bai b WHERE b.du_an = %s "
+            "AND b.luot_dau = %s ORDER BY b.khoa", (ma, int(luot_id))).fetchall()
+
+
 def lich_su_tai_khoan(ma: str, tai_khoan: list[str], tu) -> list[dict]:
     """Bài đã giữ của các tài khoản (`tai_khoan` chữ thường) đăng từ `tu` — lịch sử nhịp đăng cho
     luật seeding affiliate (`loc_rac.tai_khoan_seeding`, 18/10/2026). Chỉ đọc."""
@@ -479,8 +517,8 @@ def lich_su_tai_khoan(ma: str, tai_khoan: list[str], tu) -> list[dict]:
         return []
     with ket_noi() as c:
         return c.execute(
-            "SELECT khoa, nen_tang, lower(tai_khoan) AS tai_khoan, dang_luc, binh_luan, xem "
-            "FROM bai WHERE du_an = %s AND lower(tai_khoan) = ANY(%s) AND dang_luc >= %s",
+            "SELECT khoa, nen_tang, lower(tai_khoan) AS tai_khoan, tac_gia, dang_luc, binh_luan, "
+            "xem FROM bai WHERE du_an = %s AND lower(tai_khoan) = ANY(%s) AND dang_luc >= %s",
             (ma, ds, tu)).fetchall()
 
 

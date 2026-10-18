@@ -106,6 +106,13 @@ def test_kenh_nha_va_tai_khoan_mang_ten_brand_khong_bao_gio_la_seeding():
     brand = [{**r, "tk": ("tiktok", "hapas.aeon_mau")} for r in rows]
     assert L.tai_khoan_seeding(brand, CFG, set(), ["HAPAS", "hapas"]) == {}
     assert L.tai_khoan_seeding(brand, {**CFG, "mien_ten_brand": False}, set(), ["HAPAS"])
+    # Trang Facebook của cửa hàng có định danh là id số, tên hiển thị mang tên brand (raw mina 17/10:
+    # "HAPAS SÀI GÒN" 7 bài/ngày, 0 bình luận) — chỉ cần MỘT dòng có tên là miễn.
+    so = [{**r, "tk": ("facebook", "61594301968444")} for r in rows]
+    so[0]["ten"] = "HAPAS SÀI GÒN"
+    assert L.tai_khoan_seeding(so, CFG, set(), ["HAPAS", "hapas"]) == {}
+    assert L.tai_khoan_seeding([{**r, "ten": "Phạm Mai Khanh"} for r in so[1:]], CFG, set(),
+                               ["HAPAS"]), "affiliate Shopee tên người: vẫn bắt"
     # Facebook kênh nhà: định danh URL trang, bài lượt tìm mang slug trang.
     nha = T._kenh_nha([{"nen_tang": "facebook", "loai": "kenh_nha",
                         "dinh_danh": "https://www.facebook.com/HapasGlobal"},

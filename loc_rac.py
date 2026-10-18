@@ -353,12 +353,14 @@ def bai_spam(text: str) -> str:
 #     5 tài khoản như vậy.
 #   • `bai_bay_ngay` 20: không tài khoản nào trong số đo đổi kết quả giữa 15, 20 và 25. Ngưỡng này
 #     dành cho lượt hằng ngày, khi kho chỉ thấy vài bài mỗi ngày của một tài khoản seeding.
-# Raw Kompa: 1.210/2.123 bài liên quan kho chưa có là bài seeding (1.307/13.110 thảo luận); kho có
-# 377 bài seeding (494 thảo luận).
+# Raw Kompa: 1.210/2.123 bài liên quan kho chưa có là bài seeding (1.307/13.110 thảo luận). Kho
+# 17/10: 332 bài seeding của 11 tài khoản theo lịch sử kho; 377 bài / 16 tài khoản khi sổ seeding đã
+# có nhịp đăng từ raw.
 # Bài của tài khoản seeding mà TỰ có ≥ `giu_bl_tu` bình luận vẫn giữ, vì có thảo luận thật (video
 # 26/09 của thuytrang.lee: 69 bình luận, 1,5 triệu xem). Kênh nhà (`nguon.loai = kenh_nha`) và tài
-# khoản mang tên brand (cửa hàng hapasgigamall, hapas.aeonth, hapasperfume — `mien_ten_brand`)
-# không bao giờ là seeding. Bài bị loại KHÔNG vào `bai` (không đếm), nằm ở sổ "đã loại" với lý do
+# khoản mang tên brand ở định danh hoặc tên hiển thị (cửa hàng hapasgigamall, hapas.aeonth,
+# hapasperfume; trang Facebook id số "HAPAS SÀI GÒN" 7 bài/ngày, "HAPAS Vincom Đà Nẵng" 5 bài/ngày
+# — `mien_ten_brand`) không bao giờ là seeding. Bài bị loại KHÔNG vào `bai` (không đếm), nằm ở sổ "đã loại" với lý do
 # `LY_DO_SEEDING_BAI`: lượt sau không trả tiền cào bình luận, không gửi AI lại.
 SEEDING_BAI = {"bat": True, "bai_mot_ngay": 5, "bai_bay_ngay": 20, "trung_vi_bl": 2,
                "trung_vi_xem": 15000, "giu_bl_tu": 10, "ngay": 35, "mien_ten_brand": True}
@@ -405,8 +407,9 @@ def khoa_tai_khoan(nen_tang, tai_khoan) -> tuple[str, str] | None:
 
 
 def ten_brand_trong(tai_khoan: str, thuong_hieu) -> bool:
-    """Tài khoản mang tên brand (`thuong_hieu` = tên + mã dự án; so bỏ dấu, bỏ dấu câu): cửa hàng /
-    kênh phụ của chính brand ("hapas.aeonth", "hapasgigamall") — không xét seeding."""
+    """Định danh / tên hiển thị mang tên brand (`thuong_hieu` = tên + mã dự án; so bỏ dấu, bỏ dấu
+    câu): cửa hàng / kênh phụ của chính brand ("hapas.aeonth", "hapasgigamall", "HAPAS SÀI GÒN") —
+    không xét seeding."""
     u = re.sub(r"[^a-z0-9]", "", bo_dau(tai_khoan))
     return bool(u) and any(b and b in u for b in _ten_brand(thuong_hieu))
 
@@ -432,20 +435,27 @@ def tai_khoan_seeding(bai: list[dict], cfg: dict, mien: set | frozenset = frozen
                       thuong_hieu: list[str] | tuple = ()) -> dict[tuple[str, str], dict]:
     """THUẦN. Tài khoản seeding affiliate theo luật ở đầu mục. `bai` = bài liên quan (lịch sử kho,
     sổ seeding, lô đang xử lý): [{"tk": (nền tảng, tài khoản) | None, "khoa", "dang_luc"
-    (datetime có múi giờ), "bl", "xem"}] — trùng khoá chỉ đếm một lần (dòng đầu thắng; số liệu
-    thiếu thì lấy dòng sau). `mien` = tập (nền tảng, tài khoản) kênh nhà. -> {tài khoản: {"so_bai",
-    "max_ngay", "ngay", "max_7", "tv_bl", "tv_xem"}} — CHỈ tài khoản bị coi là seeding.
+    (datetime có múi giờ), "bl", "xem", tuỳ chọn "ten" (tên hiển thị)}] — trùng khoá chỉ đếm một
+    lần (dòng đầu thắng; số liệu thiếu thì lấy dòng sau). `mien` = tập (nền tảng, tài khoản) kênh
+    nhà. Tài khoản mang tên brand ở định danh HOẶC tên hiển thị (trang Facebook của cửa hàng có
+    định danh là id số: "HAPAS SÀI GÒN", "HAPAS Vincom Đà Nẵng" — đo raw 17/10) được miễn. ->
+    {tài khoản: {"so_bai", "max_ngay", "ngay", "max_7", "tv_bl", "tv_xem"}} — CHỈ tài khoản bị
+    coi là seeding.
 
     Trung vị chỉ tính trên số ĐỌC ĐƯỢC; tài khoản không có số bình luận nào thì không kết luận
     (không bắt). Không có số xem nào thì bỏ điều kiện xem (bài Facebook ảnh không có lượt xem)."""
     if not cfg.get("bat"):
         return {}
     theo: dict[tuple[str, str], dict[str, dict]] = {}
+    brand: set[tuple[str, str]] = set()
     for r in bai:
         tk = r.get("tk")
         if not tk or not r.get("khoa") or r.get("dang_luc") is None or tk in mien:
             continue
-        if cfg.get("mien_ten_brand", True) and ten_brand_trong(tk[1], thuong_hieu):
+        if cfg.get("mien_ten_brand", True) and (ten_brand_trong(tk[1], thuong_hieu)
+                                                or ten_brand_trong(r.get("ten") or "",
+                                                                   thuong_hieu)):
+            brand.add(tk)
             continue
         cu = theo.setdefault(tk, {}).get(r["khoa"])
         if cu is None:
@@ -458,6 +468,8 @@ def tai_khoan_seeding(bai: list[dict], cfg: dict, mien: set | frozenset = frozen
                     cu[k] = _so_hay_none(r.get(k))
     ra: dict[tuple[str, str], dict] = {}
     for tk, cac in theo.items():
+        if tk in brand:                   # một dòng bất kỳ mang tên brand là đủ miễn
+            continue
         dem: dict = {}
         for x in cac.values():
             dem[x["ngay"]] = dem.get(x["ngay"], 0) + 1

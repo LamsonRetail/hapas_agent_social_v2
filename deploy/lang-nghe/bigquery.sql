@@ -148,8 +148,8 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.luot_quet`
 (
   id              INT64     OPTIONS(description='Mã lượt quét tự tăng ở DB nguồn. PK. Join: → bai.luot_dau, bai.luot_cuoi.'),
   du_an           STRING    OPTIONS(description='Dự án của lượt. FK → du_an.ma.'),
-  kieu            STRING    OPTIONS(description='Giá trị: theo_doi (lượt /theodoi quét nguồn, tính vào trần tháng), tu_khoa (lượt tìm theo từ khoá ghi vào kho).'),
-  ma_viec         STRING    OPTIONS(description='Mã việc nền của Mark (vd t10140830-ab12c), đối chiếu với /viec. NULL khi lượt không chạy qua việc nền.'),
+  kieu            STRING    OPTIONS(description='Giá trị: theo_doi (lượt /theodoi quét nguồn, tính vào trần tháng), tu_khoa (lượt tìm theo từ khoá ghi vào kho; cả lượt nạp raw đã trả tiền bằng scripts/lang_nghe_nap_raw.py từ 18/10/2026, chi phí 0).'),
+  ma_viec         STRING    OPTIONS(description='Mã việc nền của Mark (vd t10140830-ab12c), đối chiếu với /viec. nap-raw-<năm tháng ngày giờ phút> với lượt nạp raw (từ 18/10/2026). NULL khi lượt không chạy qua việc nền.'),
   job_id          STRING    OPTIONS(description='Mã job platform đã giao lượt (lịch run trên console). NULL khi lượt do Lịch quét tự động trên dashboard giao (không qua job platform) hoặc không lấy được.'),
   bat_dau         TIMESTAMP OPTIONS(description='Thời điểm bắt đầu lượt, UTC.'),
   ket_thuc        TIMESTAMP OPTIONS(description='Thời điểm kết thúc lượt, UTC. NULL khi lượt đang chạy.'),
@@ -386,6 +386,13 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
 [Dùng khi] Đếm bài, thảo luận (1 + binh_luan), nguồn nổi bật, sắc thái, chủ đề, từ khoá theo ngày đăng/nền tảng/dự án
 [Không dùng khi] Tương tác theo từng ngày để vẽ tăng trưởng → dùng SOCIAL_LISTENING.chi_so_ngay; chi phí quét → dùng SOCIAL_LISTENING.luot_quet
 [Lưu ý] Số liệu là lần đọc gần nhất, không phải cuối kỳ; bài YouTube được đọc lại số mỗi ngày trong 14 ngày đầu, nền tảng khác chỉ khi bài còn nằm trong N bài mới nhất của nguồn. Đây là mẫu theo nguồn đã chọn, không phải toàn bộ thảo luận trên mạng. MERGE không xoá dòng: bài seeding đã dọn ở Postgres (scripts/lang_nghe_loc_seeding.py) còn ở đây nếu đồng bộ bật trước khi dọn.''');
+
+-- Lượt nạp raw đã trả tiền (18/10/2026, scripts/lang_nghe_nap_raw.py): kieu tu_khoa, ma_viec
+-- nap-raw-<giờ>. Bảng đã tạo trước thì đổi mô tả cột cho khớp COMMENT bên Postgres.
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.luot_quet`
+  ALTER COLUMN kieu SET OPTIONS(description='Giá trị: theo_doi (lượt /theodoi quét nguồn, tính vào trần tháng), tu_khoa (lượt tìm theo từ khoá ghi vào kho; cả lượt nạp raw đã trả tiền bằng scripts/lang_nghe_nap_raw.py từ 18/10/2026, chi phí 0).');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.luot_quet`
+  ALTER COLUMN ma_viec SET OPTIONS(description='Mã việc nền của Mark (vd t10140830-ab12c), đối chiếu với /viec. nap-raw-<năm tháng ngày giờ phút> với lượt nạp raw (từ 18/10/2026). NULL khi lượt không chạy qua việc nền.');
 
 -- Kiểm sau khi tạo: không còn mô tả rỗng.
 -- SELECT table_name, option_value FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.TABLE_OPTIONS`

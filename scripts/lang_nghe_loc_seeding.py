@@ -4,7 +4,9 @@ Vì sao: điều tra khoảng thiếu so với Kompa (18/10/2026) thấy khoản
 đăng 10–180 video HAPAS mỗi ngày, chỉ có hashtag, gần 0 bình luận. Chủ dự án chốt: KHÔNG đếm video
 seeding affiliate. Từ bản này, lượt quét (/theodoi, social_listen) và script nạp raw bỏ bài seeding
 TRƯỚC khi ghi (`theo_doi._loc_seeding`, luật `loc_rac.tai_khoan_seeding`); script này dọn phần ĐÃ
-vào kho trước đó — đo trên ảnh chụp kho 17/10: 377 bài của 11 tài khoản, 494 thảo luận.
+vào kho trước đó. Đo trên ảnh chụp kho 17/10: chỉ với kho thì bắt 11 tài khoản, 332 bài (417 thảo
+luận); chạy SAU `scripts/lang_nghe_nap_raw.py` (sổ seeding đã có nhịp đăng từ raw Kompa) thì bắt 16
+tài khoản, 377 bài (494 thảo luận) — nên nạp raw trước, dọn sau.
 
 Luật: ĐÚNG `loc_rac.tai_khoan_seeding` với cấu hình hiệu lực của dự án (`du_an.cau_hinh.seeding`,
 thiếu = mặc định `loc_rac.SEEDING_BAI`), trên bài đã giữ đăng từ mốc sớm hơn của (phạm vi theo dõi,
@@ -38,7 +40,8 @@ hoàn tác chỉ cần INSERT (đã có):
     sudo -u postgres psql -d lang_nghe -c 'REVOKE DELETE ON bai FROM mark'
     sudo -u mark $PY scripts/lang_nghe_loc_seeding.py hapas --hoan-tac /opt/mark/loc-seeding-<ngày>.jsonl
 
-Chạy SAU khi bản code có luật seeding đã lên VPS (bản cũ sẽ ghi lại bài seeding ở lượt sau). Sổ
+Chạy SAU khi bản code có luật seeding đã lên VPS (bản cũ sẽ ghi lại bài seeding ở lượt sau) và sau
+script nạp raw (nếu nạp). Sổ
 nằm ở thư mục việc nền của Mark (`apify_tool._thu_muc_nen`, /opt/mark/app/.audit/viec-nen) — chạy
 bằng user mark từ /opt/mark/app như lệnh trên. BigQuery: MERGE không xoá dòng — nếu đã bật đồng bộ
 thì bài đã dọn phải xoá tay trên BigQuery (bản in nói số dòng `dong_bo_bq`).
@@ -71,9 +74,9 @@ SQL_CHI_DOC = "SET TRANSACTION READ ONLY"
 SQL_DU_AN = ("/* seed:du_an */ SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
              "cau_hinh FROM du_an WHERE ma = %s")
 SQL_NGUON = "/* seed:nguon */ SELECT id, nen_tang, dinh_danh, loai FROM nguon WHERE du_an = %s"
-SQL_BAI = ("/* seed:bai */ SELECT khoa, nen_tang, nguon_id, link, tai_khoan, dang_luc, binh_luan, "
-           "xem FROM bai WHERE du_an = %s AND dang_luc >= %s AND btrim(tai_khoan) <> '' "
-           "ORDER BY dang_luc, khoa")
+SQL_BAI = ("/* seed:bai */ SELECT khoa, nen_tang, nguon_id, link, tai_khoan, tac_gia, dang_luc, "
+           "binh_luan, xem FROM bai WHERE du_an = %s AND dang_luc >= %s AND "
+           "btrim(tai_khoan) <> '' ORDER BY dang_luc, khoa")
 SQL_DEM_BL = ("/* seed:dem_bl */ SELECT khoa_bai, count(*) AS n FROM binh_luan WHERE du_an = %s "
               "AND khoa_bai = ANY(%s) GROUP BY khoa_bai")
 SQL_DEM_CS = ("/* seed:dem_cs */ SELECT khoa, count(*) AS n FROM chi_so_ngay WHERE du_an = %s "
@@ -139,14 +142,16 @@ def _mau_link(link: str) -> str:
 
 # ───────────────────────────── kế hoạch (thuần) ─────────────────────────────
 def ke_hoach(du_an: dict, nguon: list[dict], bai: list[dict], so_seeding: list[dict]) -> dict:
-    """THUẦN. Bài đã giữ (khoa, nen_tang, link, tai_khoan, dang_luc, binh_luan, xem) + sổ seeding
-    -> {"cfg", "tai_khoan": {tk: số đo}, "bo": {tk: [bài]}, "giu_bl": {tk: [bài]}, "mien": {tk:
-    số đo}}. `mien` = tài khoản ĐỦ luật nhưng là kênh nhà / mang tên brand (để người chạy thấy)."""
+    """THUẦN. Bài đã giữ (khoa, nen_tang, link, tai_khoan, tac_gia, dang_luc, binh_luan, xem) + sổ
+    seeding -> {"cfg", "tai_khoan": {tk: số đo}, "bo": {tk: [bài]}, "giu_bl": {tk: [bài]},
+    "mien": {tk: số đo}}. `mien` = tài khoản ĐỦ luật nhưng là kênh nhà / mang tên brand (để người
+    chạy thấy)."""
     import theo_doi as T
     cfg = loc_rac.cau_hinh_seeding(du_an)
     th = [str(du_an.get("ten") or ""), str(du_an.get("ma") or "")]
     rows = [{"tk": loc_rac.khoa_tai_khoan(r["nen_tang"], r["tai_khoan"]), "khoa": r["khoa"],
-             "dang_luc": r["dang_luc"], "bl": r.get("binh_luan"), "xem": r.get("xem")}
+             "dang_luc": r["dang_luc"], "bl": r.get("binh_luan"), "xem": r.get("xem"),
+             "ten": r.get("tac_gia") or ""}
             for r in bai if r.get("dang_luc") is not None]
     rows += [{"tk": loc_rac.khoa_tai_khoan(x["nen_tang"], x["tai_khoan"]), **x}
              for x in so_seeding]

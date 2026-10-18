@@ -3374,7 +3374,8 @@ def _dong_seeding(d: dict, dt) -> dict:
     import loc_rac
     return {"tk": loc_rac.khoa_tai_khoan(d.get("platform"), d.get("username")),
             "khoa": d.get("_khoa") or _khoa_bai(str(d.get("platform") or ""), d.get("link") or ""),
-            "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views")}
+            "dang_luc": dt, "bl": d.get("comments"), "xem": d.get("views"),
+            "ten": str(d.get("kenh") or "")}
 
 
 def _loc_seeding(du_an: dict, cho: list, tu: datetime.datetime, nguon: list[dict] | None = None,
@@ -3400,7 +3401,8 @@ def _loc_seeding(du_an: dict, cho: list, tu: datetime.datetime, nguon: list[dict
     rows: list[dict] = []
     try:
         rows += [{"tk": loc_rac.khoa_tai_khoan(r["nen_tang"], r["tai_khoan"]), "khoa": r["khoa"],
-                  "dang_luc": r["dang_luc"], "bl": r.get("binh_luan"), "xem": r.get("xem")}
+                  "dang_luc": r["dang_luc"], "bl": r.get("binh_luan"), "xem": r.get("xem"),
+                  "ten": r.get("tac_gia") or ""}
                  for r in K.lich_su_tai_khoan(ma, sorted(u for _, u in cac_tk), tu)]
     except K.LoiKho as e:
         print(f"[theo_doi] seeding: không đọc được lịch sử kho ({e}) — tính trên sổ + lô",
