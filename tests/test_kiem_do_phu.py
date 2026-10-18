@@ -638,7 +638,9 @@ def test_trang_ngan_sach_kiem_do_phu_luu_cong_tac_va_tran():
     r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf, "dp_bat": "1", "dp_tran": "5"})
     assert "Kiểm độ phủ: trần tối đa" in thong_bao(c, r)
     r = c.post("/ngan-sach/hapas/cau-hinh", data={"csrf": csrf})
-    assert "do_phu" not in kho.du_an["hapas"]["cau_hinh"], "biểu mẫu cũ không có ô: không đụng"
+    # Kho giả gộp nhóm như `kho.dat_cau_hinh` (18/10/2026): nhóm biểu mẫu không gửi giữ nguyên.
+    assert kho.du_an["hapas"]["cau_hinh"]["do_phu"] == {"bat": True}, \
+        "biểu mẫu cũ không có ô: không đụng"
     dang_nhap(c, XEM)
     t = c.get("/ngan-sach").text
     assert 'name="dp_tran"' not in t and "Kiểm độ phủ (TikTok, 2 lần/tuần)" in t
