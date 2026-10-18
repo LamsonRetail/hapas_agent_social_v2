@@ -4648,9 +4648,13 @@ def _lay_binh_luan(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                             usd_so=khong_kiem, ly_do=quet_lon._CAU_KHONG_KIEM)
             con = max(0.0, con - khong_kiem)
             continue
+        # rows đặt lại mỗi phần: phần trước để sót dòng của nền tảng khác thì không ghi nhầm.
+        # ValueError/TypeError (số lạ kiểu "5.4K", đo 18/10/2026) chỉ hỏng PHẦN này, không hỏng
+        # cả bước bình luận — trước đây lỗi văng ra làm Threads/Facebook không được cào dòng nào.
+        rows: list[dict] = []
         try:
             rows = _doc_bl(p, items)
-        except RuntimeError as e:             # shape lạ: báo, không ghi bừa
+        except (RuntimeError, ValueError, TypeError) as e:   # shape/số lạ: báo, không ghi bừa
             loi = loi or A.LoiApify("LOI", str(e)[:250])
         tien = TDA.tien_phan(p, ph, items, meta)
         con = max(0.0, con - tien)
