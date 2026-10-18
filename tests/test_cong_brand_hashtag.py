@@ -34,15 +34,44 @@ TEN = ["HAPAS", "hapas"]
 
 # ───────────────────────────── luật thuần ─────────────────────────────
 def test_cau_hinh_mac_dinh_bat_chi_false_la_tat_va_ten_them():
-    assert T.cau_hinh_hashtag_brand(DU_AN) == {"bat": True, "ten": TEN}
+    assert T.cau_hinh_hashtag_brand(DU_AN) == {"bat": True, "ten": TEN,
+                                               "tag_rong": ["quatang2010"]}
     for x, bat in ((False, False), ({"bat": False}, False), ("false", True), (0, True),
                    ({"bat": "khong"}, True), (None, True), ({}, True)):
         c = T.cau_hinh_hashtag_brand({**DU_AN, "cau_hinh": {"hashtag_can_nhac_brand": x}})
         assert c["bat"] is bat, x
     c = T.cau_hinh_hashtag_brand({**DU_AN, "cau_hinh": {"hashtag_can_nhac_brand": {
-        "ten": ["Mate Made", 3, "  ", "HAPAS"]}}})
-    assert c == {"bat": True, "ten": ["HAPAS", "hapas", "Mate Made"]}
+        "ten": ["Mate Made", 3, "  ", "HAPAS"], "tag_rong": ["#QuaTang2010", "quà 8/3", 5]}}})
+    assert c == {"bat": True, "ten": ["HAPAS", "hapas", "Mate Made"],
+                 "tag_rong": ["quatang2010", "qua83"]}
+    assert T.cau_hinh_hashtag_brand({**DU_AN, "cau_hinh": {"hashtag_can_nhac_brand": {
+        "tag_rong": []}}})["tag_rong"] == []
     assert T.cau_hinh_hashtag_brand({**DU_AN, "cau_hinh": "rác"})["bat"] is True
+
+
+def test_ten_brand_gom_tag_chien_dich_bo_tag_rong(monkeypatch):
+    """Soát 18/10/2026 (M1): hashtag riêng của dự án, tag kiểm độ phủ đã thêm vào lượt nổi và khẩu
+    hiệu chiến dịch đang chạy là "tên brand" của cổng (dạng viết liền); #quatang2010 (tag rộng) và
+    tag chung chung thì không."""
+    monkeypatch.setattr(T, "khau_hieu_chien_dich", lambda ma, bay_gio: (
+        {"id": 1}, ["Yêu từ điều nhỏ nhất"]))
+    T.ghi_moc_tk("hapas", {KDP.KHOA_NOI_CFG: {"tag": ["lammoidieuviyeu", "fyp"]}})
+    da = {**DU_AN, "hashtag": ["hapas", "quatang2010", "hapassuperbrandday"]}
+    assert T.ten_brand(da) == ["HAPAS", "hapas", "hapassuperbrandday", "lammoidieuviyeu",
+                               "yeutudieunhonhat"]
+    tat_dp = {**da, "cau_hinh": {"do_phu": {"bat": False}}}
+    assert "lammoidieuviyeu" not in T.ten_brand(tat_dp), "kiểm độ phủ tắt: lượt nổi mặc định"
+    khong_rong = {**da, "cau_hinh": {"hashtag_can_nhac_brand": {"tag_rong": []}}}
+    assert "quatang2010" in T.ten_brand(khong_rong)
+    ten = T.ten_brand(da)
+    assert T.nhac_brand({"text": "Quà 20/10 #yeutudieunhonhat"}, ten)
+    assert T.nhac_brand({"text": "Yêu từ điều nhỏ nhất 💛"}, ten), "đúng cụm khẩu hiệu"
+    assert not T.nhac_brand({"text": "Yêu từ những điều nhỏ nhất"}, ten), "không phải khẩu hiệu"
+    assert not T.nhac_brand({"text": "Quà 20/10 #quatang2010", "_tag_feed": "#quatang2010"}, ten)
+    # Instagram thiếu inputUrl: mọi tag gửi là tag brand → bài từ feed brand; có tag rộng → "#".
+    assert T.tag_feed_chung(["hapas", "#hapassuperbrandday"], ten) == "#hapas #hapassuperbrandday"
+    assert T.tag_feed_chung(["hapas", "quatang2010"], ten) == "#"
+    assert T.tag_feed_chung([], ten) == "#"
 
 
 def test_nhac_brand_bo_dau_khong_phan_biet_hoa_thuong_va_tag_feed():
@@ -150,6 +179,31 @@ def test_tat_cong_thi_bai_hashtag_toi_ai_ke_ca_bai_da_loai_truoc(monkeypatch, ai
     T._tach_va_giu(tat, 8, [_bai(1, "shop_qua", "Set quà 20/10 cho mẹ #quatang2010",
                                  "#quatang2010")], DU_AN["tu_khoa"], 1e12, tk)
     assert ai == [["shop_qua"]] and not tk["pheu"]["tiktok"]["khong_brand"]
+
+
+def test_bai_tag_chien_dich_giu_va_them_ten_thi_go_bai_da_loai(monkeypatch, ai):
+    """Soát 18/10/2026 (M1): bài feed #quatang2010 chỉ gắn tag chiến dịch của dự án
+    (#hapassuperbrandday không cần, #yeutudieunhonhat không có chữ "hapas") được giữ; bài đã bị cổng
+    loại, lượt sau người vận hành thêm tên ("Mate Made") thì `_con_chan` gọi lại `nhac_brand` → xét
+    lại, tới AI; chủ bài thành kênh nhà cũng vậy."""
+    kho = KhoGia()
+    kho.cai(monkeypatch)
+    monkeypatch.setattr(T, "khau_hieu_chien_dich", lambda ma, bay_gio: (None, []))
+    da = {**DU_AN, "hashtag": ["quatang2010", "yeutudieunhonhat"]}
+    hits = [_bai(1, "shop_qua", "Set quà 20/10 #quatang2010 #yeutudieunhonhat", "#quatang2010"),
+            _bai(2, "shop_mm", "Mate Made x 20/10 #quatang2010", "#quatang2010"),
+            _bai(3, "shop_c", "Quà 20/10 #quatang2010", "#quatang2010")]
+    T._tach_va_giu(da, 7, hits, da["tu_khoa"], 1e12, _tk())
+    assert ai == [["shop_qua"]]
+    assert {k: v[0] for k, v in _so().items()} == {"tiktok:772": LY, "tiktok:773": LY}
+    them = {**da, "cau_hinh": {"hashtag_can_nhac_brand": {"ten": ["Mate Made"]}}}
+    tk = _tk()
+    T._tach_va_giu(them, 8, hits[1:], da["tu_khoa"], 1e12, tk)
+    f = tk["pheu"]["tiktok"]
+    assert ai[-1] == ["shop_mm"] and (f["da_loai_truoc"], f["xet_lai"]) == (1, 1)
+    kho.nguon = [{"id": 1, "nen_tang": "tiktok", "dinh_danh": "shop_c", "loai": "kenh_nha"}]
+    T._tach_va_giu(them, 9, hits[2:], da["tu_khoa"], 1e12, _tk())
+    assert ai[-1] == ["shop_c"], "thành kênh nhà: sổ không chặn nữa"
 
 
 def test_ban_trung_tu_duong_tu_khoa_khong_bi_cong(monkeypatch, ai):
@@ -288,7 +342,11 @@ def test_nap_raw_feed_hashtag_va_ig_hashtag_qua_cong_brand(monkeypatch, tmp_path
                 "https://www.instagram.com/explore/tags/quatang2010")),
             ("raw_ig_kw.json", {"hashtags": ["quà 20/10"], "keywordSearch": True},
              ig("K1", "shop.kw", "Quà 20/10 #quatang2010",
-                "https://www.instagram.com/explore/search/keyword/?q=qua"))):
+                "https://www.instagram.com/explore/search/keyword/?q=qua")),
+            # Thiếu inputUrl, run chỉ tìm #hapas (tag brand): bài chắc từ feed #hapas → giữ (M1).
+            ("raw_ig_thieu_url.json", {"hashtags": ["hapas"]},
+             {k: v for k, v in ig("U1", "shop.ig2", "Quà 20/10 #quatang2010", "").items()
+              if k != "inputUrl"})):
         (goc / "kompa" / ten).write_text(json.dumps(
             {"actor": "apify/instagram-hashtag-scraper", "input": inp, "items": [it]}),
             encoding="utf-8")
@@ -298,7 +356,7 @@ def test_nap_raw_feed_hashtag_va_ig_hashtag_qua_cong_brand(monkeypatch, tmp_path
     for d, _ in raw["tim"]:                      # nhãn của bản đọc ĐẦU mỗi tài khoản
         nhan.setdefault(d["username"], d.get("_tag_feed"))
     assert nhan["shop_qua_mau"] == "#quatang2010" and nhan["shop.ig"] == "#quatang2010"
-    assert nhan["shop.kw"] == "" and nhan["review_mau"] == "#hapas"
+    assert nhan["shop.kw"] == "" and nhan["review_mau"] == "#hapas" and nhan["shop.ig2"] == "#"
     giu, _ = N.loc_khung(raw["tim"], tu, R.BAY_GIO)
     assert next(d for d, _ in giu if d["username"] == "live_mau" and d["link"].endswith(
         live0["aweme_id"]))["_tag_feed"] == "", "bản trùng có đường từ khoá"

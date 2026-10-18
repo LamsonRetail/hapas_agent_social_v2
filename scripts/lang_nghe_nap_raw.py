@@ -263,6 +263,7 @@ def doc_raw(duong: list[str], tu: datetime.datetime, den: datetime.datetime) -> 
             rows = {"scrapeforge": A._chuan_facebook, "ig": A._chuan_instagram,
                     "th1": A._chuan_threads, "th2": A._chuan_threads_2}[kieu](items)
         tim_tu = bool((r.get("input") or {}).get("keywordSearch"))
+        tag_vao = [str(t) for t in (r.get("input") or {}).get("hashtags") or [] if str(t).strip()]
         for d, _ in rows:
             d["platform"] = p
             if kieu == "th2":
@@ -270,9 +271,12 @@ def doc_raw(duong: list[str], tu: datetime.datetime, den: datetime.datetime) -> 
             if kieu == "ig":
                 # Cổng brand (18/10/2026): actor hashtag Instagram là đường hashtag, TRỪ run
                 # `keywordSearch` (trang tìm theo từ khoá) — theo `inputUrl` của bài, thiếu thì
-                # theo input của run.
+                # theo input của run (`_tag_vao`: `chay` gắn nhãn `theo_doi.tag_feed_chung` khi mọi
+                # hashtag của run là tag brand / chiến dịch — soát 18/10/2026 M1).
                 t = TDA.tag_ig(d)
                 d["_tag_feed"] = ("" if tim_tu else "#") if t is None else t
+                if t is None and not tim_tu and tag_vao:
+                    d["_tag_vao"] = tag_vao
         them(f, actor, rows, ra["tim"])
     return ra
 
@@ -596,6 +600,11 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None, nghi=time.sl
         in_ra(f"Không có dự án '{ma}' trong kho.")
         return 2
     raw = doc_raw(ns.duong, tu, bay_gio)
+    ten_brand = None
+    for d, _ in raw["tim"]:
+        if d.get("_tag_vao") and d.get("_tag_feed") == "#":
+            ten_brand = ten_brand or T.ten_brand(du_an, bay_gio)
+            d["_tag_feed"] = T.tag_feed_chung(d["_tag_vao"], ten_brand)
     nguon_ds = K.nguon_cua_du_an(ma)
     nguon = {int(n["id"]): n for n in nguon_ds}
     tim, dem = loc_khung(raw["tim"] + raw["ho_so"], tu, bay_gio)
