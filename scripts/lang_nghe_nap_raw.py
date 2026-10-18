@@ -49,10 +49,13 @@ An toàn:
     `--toi-da-goi-ai`) thì phần đó KHÔNG ghi theo luật, không vào sổ (`can_ai`) — script báo số
     bài chưa phán, chạy lại là xét tiếp; lô quá hạn không chạy nền song song với lô sau (`GacAI`
     chờ model trả lời xong rồi mới gửi lô kế).
-    Tệp hoàn tác: lượt, khoá bài thêm (= bài có `luot_dau` = lượt nạp), khoá sổ thêm.
+    Tệp hoàn tác: lượt, khoá bài thêm (= bài có `luot_dau` = lượt nạp), khoá sổ thêm — dòng "so"
+    ghi NGAY sau mỗi phần, mang tên sổ (dự án, hoặc `<mã>:web` của Báo & Web — `SoThem`).
   • `--hoan-tac <tệp>`: xoá đúng các bài lượt nạp đã thêm MÀ CHƯA BỊ ĐỤNG (lượt sau chưa cập nhật,
-    chưa cào bình luận), gỡ khoá sổ đã thêm. Số đã nâng của bài cũ và ảnh chụp ngày đọc giữ nguyên
-    (số đọc thật). Cần GRANT DELETE tạm như `lang_nghe_gop_bai_fb.py`.
+    chưa cào bình luận), gỡ khoá sổ đã thêm (sổ dự án — đường từ khoá + đường nguồn — và sổ web).
+    Giao dịch xoá giữ khoá advisory mở lượt (`lang_nghe_db.so_khoa_luot`) và dừng khi dự án có
+    lượt khác đang chạy. Số đã nâng của bài cũ và ảnh chụp ngày đọc giữ nguyên (số đọc thật). Cần
+    GRANT DELETE tạm như `lang_nghe_gop_bai_fb.py` (bản in nhắc REVOKE khi xong).
 
 VPS (user mark, venv Hermes, cwd /opt/mark/app — model đi đúng đường lease như /theodoi). Chép raw
 lên VPS trước, ví dụ `/opt/mark/raw-kompa-1810/` (quyền 700, chủ mark), GIỮ giờ ghi tệp (`rsync -a`
@@ -123,6 +126,14 @@ SQL_XOA = ("/* nap:xoa */ DELETE FROM bai b WHERE b.du_an = %s AND b.khoa = ANY(
            "b.luot_dau = %s AND b.luot_cuoi = %s AND b.bl_lay_luc IS NULL AND NOT EXISTS ("
            "SELECT 1 FROM binh_luan x WHERE x.du_an = b.du_an AND x.khoa_bai = b.khoa) "
            "RETURNING b.khoa")
+# Hoàn tác (soát 18/10/2026, LOW): cùng khoá advisory MỞ LƯỢT với `lang_nghe_db.mo_luot` (như script
+# gộp bài trùng / dọn seeding) — lượt mới chờ giao dịch xoá commit; lượt đang chạy (trừ chính lượt
+# nạp) thì dừng, kẻo xoá bài lượt đó vừa gặp lại.
+SQL_HAN_KHOA = "/* nap:han_khoa */ SET LOCAL lock_timeout = '30s'"
+SQL_KHOA_LUOT = "/* nap:khoa_luot */ " + K._SQL_KHOA_LUOT
+SQL_LUOT_CHAY = ("/* nap:luot_chay */ SELECT id FROM luot_quet WHERE du_an = %s AND id <> %s AND "
+                 "trang_thai = 'dang_chay' AND bat_dau > now() - make_interval(hours => %s) "
+                 "ORDER BY id")
 
 
 # ───────────────────────────── đọc raw ─────────────────────────────
@@ -563,10 +574,11 @@ def _nang(ngay):
 
 
 def chay_tu_khoa(du_an: dict, luot: int, hits: list, tu: datetime.datetime, nghi, tong: dict,
-                 lo: int = LO, *, can_ai: bool = False) -> int:
+                 lo: int = LO, *, can_ai: bool = False, sau_phan=None) -> int:
     """Bài đường từ khoá → `_tach_va_giu` theo từng phần ≤ `lo` bài (một lô AI), nghỉ giữa hai phần
     đã gọi AI. Lịch sử seeding = CẢ lô (`lich_su_seeding`). `can_ai`: AI không phán thì không ghi
-    (chạy áp dụng); AI chờ `HAN_LO` giây mỗi phần. -> số lô AI đã dùng."""
+    (chạy áp dụng); AI chờ `HAN_LO` giây mỗi phần. `sau_phan()`: gọi sau mỗi phần (ghi khoá sổ vừa
+    thêm vào tệp hoàn tác NGAY). -> số lô AI đã dùng."""
     tu_kw = T.tu_tim(du_an)
     them = [T._dong_seeding(d, dt) for d, dt in hits if A._khop_tu_khoa(d, tu_kw)]
     hits = sorted(hits, key=lambda x: (x[0]["platform"], x[1]))
@@ -579,6 +591,8 @@ def chay_tu_khoa(du_an: dict, luot: int, hits: list, tu: datetime.datetime, nghi
                        cap_nhat_so=_nang(ngay), lich_su_seeding=them, ai={"song_song": 1},
                        de_xuat=False, can_ai=can_ai, giay_ai=HAN_LO)
         _cong(tong, tk)
+        if sau_phan:
+            sau_phan()
         if _so_ai(tk):
             so_lo += 1
             nghi(NGHI_GIUA_LO)
@@ -586,9 +600,10 @@ def chay_tu_khoa(du_an: dict, luot: int, hits: list, tu: datetime.datetime, nghi
 
 
 def chay_web(du_an: dict, luot: int, web: list, tu: datetime.datetime, tong: dict, *,
-             can_ai: bool = False) -> None:
+             can_ai: bool = False, khoa_web: set | None = None, sau_phan=None) -> None:
     """Raw Google → `nguon_web.thu_thap` (đoạn trích, không tải trang) → `_tach_va_giu` với sổ đã
-    loại RIÊNG của web, như `theo_doi._tim_web` + `_tim_tu_khoa`. `can_ai` như `chay_tu_khoa`."""
+    loại RIÊNG của web, như `theo_doi._tim_web` + `_tim_tu_khoa`. `can_ai`, `sau_phan` như
+    `chay_tu_khoa`; `khoa_web` nhận khoá bài web của lô (lọc khoá sổ web khi ghi tệp hoàn tác)."""
     ma = du_an["ma"]
     tu_kw = T.tu_tim(du_an)
     for items, luc, _ten in web:
@@ -620,6 +635,9 @@ def chay_web(du_an: dict, luot: int, web: list, tu: datetime.datetime, tong: dic
         for h, _ in hits:
             h["_luc_doc"] = luc
         tk["_bi_loai"] = list(wk.get("bi_loai") or [])
+        if khoa_web is not None:
+            khoa_web.update(_khoa(h) for h, _ in hits)
+            khoa_web.update(str(x[0]) for x in tk["_bi_loai"] if x)
         if hits:
             T._tach_va_giu(du_an, luot, hits, tu_web, time.monotonic() + HAN_LO + 30, tk,
                            ma_loai=f"{ma}:web", cap_nhat_so=_nang(luc.date()),
@@ -628,13 +646,15 @@ def chay_web(du_an: dict, luot: int, web: list, tu: datetime.datetime, tong: dic
         if con:
             TDA.ghi_loai(f"{ma}:web", TDA.dau_loai(du_an, tu_web), con, tu)
         _cong(tong, tk)
+        if sau_phan:
+            sau_phan()
 
 
 def chay_nguon(du_an: dict, luot: int, theo_nguon: dict[int, list], nguon: dict[int, dict],
-               tong: dict, nghi, *, can_ai: bool = False) -> int:
+               tong: dict, nghi, *, can_ai: bool = False, sau_phan=None) -> int:
     """Raw theo NGUỒN đang theo dõi → đường nguồn: bài đã có chỉ nâng số; bài mới qua `chon_bai`
     (kênh nhà giữ mọi bài; `can_ai`: bài nguồn khác mà AI không phán thì không ghi; AI chờ
-    `HAN_LO` giây) → `ghi_bai(…, "theo_doi")`. -> số lô AI."""
+    `HAN_LO` giây) → `ghi_bai(…, "theo_doi")`. `sau_phan` như `chay_tu_khoa`. -> số lô AI."""
     ma = du_an["ma"]
     so_lo = 0
 
@@ -660,6 +680,8 @@ def chay_nguon(du_an: dict, luot: int, theo_nguon: dict[int, list], nguon: dict[
                 tong["nguon"]["moi"] += m
                 tong["nguon"]["giu"] += len(ghi)
                 tong["nguon"]["cu"] += c
+            if sau_phan:
+                sau_phan()
             if phan:
                 so_lo += 1
                 nghi(NGHI_GIUA_LO)
@@ -857,12 +879,42 @@ def _ghi_dong(so_luu, x: dict) -> None:
     os.fsync(so_luu.fileno())
 
 
+class SoThem:
+    """Khoá sổ lần nạp đã thêm, ghi vào tệp hoàn tác NGAY sau mỗi phần (soát 18/10/2026, LOW —
+    trước đây chỉ ghi một dòng "so" ở cuối, tiến trình bị giết giữa chừng là mất). Theo dõi cả sổ
+    của dự án (đường từ khoá + đường nguồn: "đã loại" + seeding) và sổ RIÊNG của web
+    (`<mã>:web`). Chỉ nhận khoá của bài trong lô nạp (`khoa_nap`), không gỡ nhầm khoá lượt quét
+    chạy song song vừa thêm."""
+
+    def __init__(self, ma: str, khoa_nap: set[str], khoa_web: set[str], so_luu):
+        self.ma, self.khoa_nap, self.khoa_web, self.so_luu = ma, khoa_nap, khoa_web, so_luu
+        self.truoc = {s: _khoa_so(s) for s in (ma, f"{ma}:web")}
+        self.da_ghi: dict[str, set[str]] = {s: set() for s in self.truoc}
+
+    def ghi(self) -> None:
+        for s, cu in self.truoc.items():
+            nhan = self.khoa_web if s.endswith(":web") else self.khoa_nap
+            moi = sorted(((_khoa_so(s) - cu) & nhan) - self.da_ghi[s])
+            if moi:
+                _ghi_dong(self.so_luu, {"loai_dong": "so", "so": s, "khoa": moi})
+                self.da_ghi[s].update(moi)
+
+    def tong(self) -> int:
+        return sum(len(x) for x in self.da_ghi.values())
+
+
 def ap_dung(ns, ma, du_an, raw, tim, theo_nguon, nguon, tong, tu, khung, in_ra, nghi) -> int:
     _chuan_bi_model()
-    so_truoc = _khoa_so(ma)
+    # Khoá sổ có thể thêm: bài đường từ khoá + bài theo nguồn (sổ seeding của `chon_bai`), kèm khoá
+    # ổn định Facebook; khoá web điền dần trong `chay_web`.
+    lo_nap = [*tim, *(x for ds in theo_nguon.values() for x in ds)]
+    khoa_nap = {_khoa(d) for d, _ in lo_nap} | {
+        k for d, dt in lo_nap for k in T._khoa_loai_on_dinh(d, dt)}
+    khoa_web: set[str] = set()
     luot = K.mo_luot(ma, "tu_khoa", ma_viec=f"nap-raw-{datetime.datetime.now(_VN):%Y%m%d%H%M}")
     trang_thai, loi = "xong", None
     with open(ns.sao_luu, "x", encoding="utf-8") as so_luu:
+        so_moi = SoThem(ma, khoa_nap, khoa_web, so_luu)
         _ghi_dong(so_luu, {"loai_dong": "dau", "du_an": ma, "luot_id": luot, "lenh": "nap_raw",
                            "luc": datetime.datetime.now(datetime.timezone.utc).isoformat(
                                timespec="seconds"), "tu": ns.tu,
@@ -872,18 +924,19 @@ def ap_dung(ns, ma, du_an, raw, tim, theo_nguon, nguon, tong, tu, khung, in_ra, 
         try:
             # Soát M3: AI không phán thì không ghi (`can_ai`); mọi lượt gọi model qua `GacAI`.
             with gac.cai():
-                so_lo += chay_tu_khoa(du_an, luot, tim, tu, nghi, tong, can_ai=True)
-                chay_web(du_an, luot, raw["web"], tu, tong, can_ai=True)
-                so_lo += chay_nguon(du_an, luot, theo_nguon, nguon, tong, nghi, can_ai=True)
+                so_lo += chay_tu_khoa(du_an, luot, tim, tu, nghi, tong, can_ai=True,
+                                      sau_phan=so_moi.ghi)
+                chay_web(du_an, luot, raw["web"], tu, tong, can_ai=True, khoa_web=khoa_web,
+                         sau_phan=so_moi.ghi)
+                so_lo += chay_nguon(du_an, luot, theo_nguon, nguon, tong, nghi, can_ai=True,
+                                    sau_phan=so_moi.ghi)
         except Exception as e:  # noqa: BLE001 — vẫn đóng lượt + ghi khoá đã thêm để hoàn tác được
             trang_thai, loi = "loi", A._che_token(f"{type(e).__name__}: {e}")[:300]
         finally:
+            so_moi.ghi()
             them = [str(r["khoa"]) for r in K.khoa_theo_luot_dau(ma, luot)]
             _ghi_dong(so_luu, {"loai_dong": "bai_moi", "khoa": them})
-            khoa_nap = {_khoa(d) for d, _ in tim} | {
-                k for d, dt in tim for k in T._khoa_loai_on_dinh(d, dt)}
-            so_them = sorted((_khoa_so(ma) - so_truoc) & khoa_nap)
-            _ghi_dong(so_luu, {"loai_dong": "so", "khoa": so_them})
+            so_them = [k for x in so_moi.da_ghi.values() for k in x]
             cau = cau_ghi_chu(tong, raw["tep"], raw["bo_qua"], khung)
             K.dong_luot(luot, trang_thai=trang_thai, bai_moi=tong["moi"] + tong["nguon"]["moi"],
                         bai_cap_nhat=tong["cap_nhat"] + tong["cu"] + tong["nguon"]["cap_nhat"],
@@ -904,7 +957,11 @@ def ap_dung(ns, ma, du_an, raw, tim, theo_nguon, nguon, tong, tu, khung, in_ra, 
 
 
 def hoan_tac(ma: str, tep: str, in_ra) -> int:
-    dau, khoa, so = {}, set(), set()
+    """Xoá bài lượt nạp đã thêm mà chưa bị đụng + gỡ khoá sổ đã thêm (sổ dự án — đường từ khoá và
+    đường nguồn — lẫn sổ web `<mã>:web`; dòng "so" cũ không có trường "so" là sổ dự án). Soát
+    18/10/2026 (LOW): giao dịch xoá giữ khoá advisory mở lượt (`lang_nghe_db.so_khoa_luot`) và dừng
+    khi dự án có lượt khác đang chạy."""
+    dau, khoa, so = {}, set(), {}
     with open(tep, encoding="utf-8") as f:
         for i, dong in enumerate(f):
             if not dong.strip():
@@ -915,7 +972,7 @@ def hoan_tac(ma: str, tep: str, in_ra) -> int:
             elif r.get("loai_dong") == "bai_moi":
                 khoa |= set(r.get("khoa") or [])
             elif r.get("loai_dong") == "so":
-                so |= set(r.get("khoa") or [])
+                so.setdefault(str(r.get("so") or ma), set()).update(r.get("khoa") or [])
     if dau.get("du_an") != ma or not dau.get("luot_id"):
         in_ra(f"Tệp hoàn tác không phải của dự án '{ma}' (hoặc thiếu lượt) — dừng.")
         return 2
@@ -930,13 +987,26 @@ def hoan_tac(ma: str, tep: str, in_ra) -> int:
     sach = [str(r["khoa"]) for r in hien if r.get("luot_cuoi") == luot and not r.get("bl_lay_luc")
             and not int(r.get("so_bl") or 0)]
     with K.ket_noi() as c:
+        c.execute(SQL_HAN_KHOA)
+        c.execute(SQL_KHOA_LUOT, (K.so_khoa_luot(ma),))
+        dang = [int(r["id"]) for r in c.execute(SQL_LUOT_CHAY, (ma, luot, K.GIO_BO_DO)).fetchall()]
+        if dang:
+            in_ra(f"Dự án có lượt đang chạy (lượt {', '.join(map(str, dang))}) — đợi lượt xong rồi "
+                  "chạy lại --hoan-tac (chưa xoá gì).")
+            return 2
         xoa = [r["khoa"] for r in c.execute(SQL_XOA, (ma, sach, luot, luot)).fetchall()] \
             if sach else []
-    TDA.bo_khoi_so(ma, sorted(so))
+    go = 0
+    for s, ks in so.items():
+        if s in (ma, f"{ma}:web"):
+            TDA.bo_khoi_so(s, sorted(ks))
+            go += len(ks)
     giu = sorted({str(r["khoa"]) for r in hien} - set(xoa))
     in_ra(f"Hoàn tác lượt nạp {luot}: xoá {len(xoa)} bài; giữ {len(giu)} bài đã bị đụng sau lượt "
           f"nạp (lượt sau cập nhật / đã cào bình luận)" + (": " + ", ".join(giu[:10]) if giu else "")
-          + f"; gỡ {len(so)} khoá khỏi sổ đã loại / sổ seeding. Số đã nâng của bài cũ giữ nguyên.")
+          + f"; gỡ {go} khoá khỏi sổ đã loại / sổ seeding / sổ web. Số đã nâng của bài cũ giữ "
+          "nguyên. Xong thì thu quyền: sudo -u postgres psql -d lang_nghe -c 'REVOKE DELETE ON bai "
+          "FROM mark'.")
     return 0
 
 

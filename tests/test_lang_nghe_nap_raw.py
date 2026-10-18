@@ -97,6 +97,8 @@ class KhoGia:
         self.ghi: list[tuple] = []
         self.nang: list[tuple] = []
         self.quyen_xoa = True
+        self.luot_chay: list[int] = []
+        self.khoa_luot: list[int] = []
 
     def cai(self, mp):
         for ten in ("doc_du_an", "nguon_cua_du_an", "khoa_da_co", "khoa_fb_trung",
@@ -168,6 +170,12 @@ class KhoGia:
         self._kq = []
         if sql == N.SQL_QUYEN:
             self._kq = [{"xoa": self.quyen_xoa}]
+        elif sql == N.SQL_HAN_KHOA:
+            pass
+        elif sql == N.SQL_KHOA_LUOT:
+            self.khoa_luot.append(ts[0])
+        elif sql == N.SQL_LUOT_CHAY:
+            self._kq = [{"id": i} for i in self.luot_chay if i != ts[1]]
         elif sql == N.SQL_XOA:
             _ma, khoa, luot_dau, luot_cuoi = ts
             for k in list(khoa):
@@ -321,22 +329,65 @@ def test_ap_dung_qua_pipeline_ghi_luot_va_tep_hoan_tac(monkeypatch, tmp_path, ai
     assert x["bai_moi"] == len([k for k, r in kho.bai.items() if r.get("luot_dau") == luot])
     assert len(TDA.doc_seeding("hapas")) == 8
     dong = [json.loads(s) for s in tep.read_text(encoding="utf-8").splitlines()]
-    assert [d["loai_dong"] for d in dong] == ["dau", "bai_moi", "so"]
-    assert dong[0]["luot_id"] == luot and khoa_cu not in dong[1]["khoa"]
-    assert len(dong[2]["khoa"]) >= 8 and {
+    # Dòng "so" ghi NGAY sau mỗi phần (soát LOW: tiến trình chết giữa chừng vẫn hoàn tác được sổ),
+    # "bai_moi" ở cuối.
+    loai = [d["loai_dong"] for d in dong]
+    assert loai[0] == "dau" and loai[-1] == "bai_moi" and set(loai[1:-1]) == {"so"}
+    assert dong[0]["luot_id"] == luot and khoa_cu not in dong[-1]["khoa"]
+    so = {k for d in dong if d["loai_dong"] == "so" for k in d["khoa"]}
+    assert {d["so"] for d in dong if d["loai_dong"] == "so"} == {"hapas"}
+    assert len(so) >= 8 and {
         k for k, v in TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas", "túi hapas"]),
                                    BAY_GIO - datetime.timedelta(days=60)).items()
-        if v[0] == L.LY_DO_SEEDING_BAI} <= set(dong[2]["khoa"])
+        if v[0] == L.LY_DO_SEEDING_BAI} <= so
     # Hoàn tác: xoá bài lượt nạp đã thêm, TRỪ bài lượt sau đã đụng; gỡ khoá sổ; bài cũ giữ.
     dung = min(k for k, r in kho.bai.items() if r.get("luot_dau") == luot)
     kho.bai[dung]["luot_cuoi"] = luot + 1
     kho.quyen_xoa = False
     assert _chay(["hapas", "--hoan-tac", str(tep)])[0] == 2
     kho.quyen_xoa = True
+    # Lượt khác đang chạy: dừng, chưa xoá gì (khoá advisory mở lượt đã giữ).
+    kho.luot_chay = [luot, 99]
+    so_bai = len(kho.bai)
+    ma, out = _chay(["hapas", "--hoan-tac", str(tep)])
+    assert ma == 2 and "lượt 99" in out and len(kho.bai) == so_bai
+    assert kho.khoa_luot == [K.so_khoa_luot("hapas")]
+    kho.luot_chay = [luot]                      # chính lượt nạp (bỏ dở) không chặn
     ma, out = _chay(["hapas", "--hoan-tac", str(tep)])
     assert ma == 0 and set(kho.bai) == {khoa_cu, dung}
-    assert "giữ 1 bài đã bị đụng sau lượt nạp" in out
+    assert "giữ 1 bài đã bị đụng sau lượt nạp" in out and "REVOKE DELETE ON bai" in out
     assert TDA.doc_seeding("hapas") == []
+
+
+def test_so_them_ghi_sau_moi_phan_va_hoan_tac_go_ca_so_web(monkeypatch, tmp_path):
+    """Soát LOW: khoá sổ lần nạp thêm (sổ dự án + sổ web `<mã>:web`) ghi vào tệp hoàn tác ngay sau
+    mỗi phần, chỉ khoá của bài trong lô; `--hoan-tac` gỡ cả hai sổ (dòng "so" cũ = sổ dự án)."""
+    kho = KhoGia().cai(monkeypatch)
+    luc = BAY_GIO - datetime.timedelta(days=2)
+    tu = BAY_GIO - datetime.timedelta(days=60)
+    TDA.ghi_loai("hapas", "d1", [("tiktok:cu", "spam", luc)], tu)       # có sẵn trước lần nạp
+    tep = tmp_path / "h.jsonl"
+    with open(tep, "x", encoding="utf-8") as f:
+        N._ghi_dong(f, {"loai_dong": "dau", "du_an": "hapas", "luot_id": 7})
+        so = N.SoThem("hapas", {"tiktok:1", "tiktok:2"}, {"web:h1"}, f)
+        TDA.ghi_loai("hapas", "d1", [("tiktok:1", "spam", luc), ("tiktok:la", "spam", luc)], tu)
+        so.ghi()
+        TDA.ghi_loai("hapas:web", "d2", [("web:h1", "khong_nhac", luc)], tu)
+        TDA.ghi_seeding("hapas", [{"khoa": "tiktok:2", "nen_tang": "tiktok", "tai_khoan": "a",
+                                   "dang_luc": luc, "bl": 0, "xem": 1}])
+        so.ghi()
+        so.ghi()                                  # không có gì mới: không ghi thêm dòng
+        N._ghi_dong(f, {"loai_dong": "so", "khoa": []})                # dạng cũ không có "so"
+        N._ghi_dong(f, {"loai_dong": "bai_moi", "khoa": []})
+    dong = [json.loads(x) for x in tep.read_text(encoding="utf-8").splitlines()]
+    assert [(d.get("so"), d["khoa"]) for d in dong if d["loai_dong"] == "so"] == [
+        ("hapas", ["tiktok:1"]), ("hapas", ["tiktok:2"]), ("hapas:web", ["web:h1"]), (None, [])]
+    assert so.tong() == 3
+    ma, out = _chay(["hapas", "--hoan-tac", str(tep)])
+    assert ma == 0 and "gỡ 3 khoá" in out
+    assert set(TDA.doc_loai("hapas", "d1", tu)) == {"tiktok:cu", "tiktok:la"}
+    assert TDA.doc_loai("hapas:web", "d2", tu) == {} and TDA.doc_seeding("hapas") == []
+    assert kho.khoa_luot == [K.so_khoa_luot("hapas")]
 
 
 def test_ap_dung_ai_khong_phan_thi_khong_ghi_va_bao_chay_lai(monkeypatch, tmp_path):
