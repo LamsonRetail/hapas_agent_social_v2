@@ -315,31 +315,76 @@ def test_nguon_theo_doi_khong_phai_kenh_nha_cung_qua_luat(monkeypatch, ai):
     assert len(TDA.doc_seeding("hapas")) == 8
 
 
-def test_cong_thi_truong_vn_bo_bai_thai_truoc_ai(monkeypatch, ai):
-    """Bài chữ Thái và bài tài khoản "HAPAS THAILAND" không có dấu hiệu Việt bị bỏ TRƯỚC AI; bài VN
-    giữ. Trước đây AI nhận tín hiệu thị trường nhưng GIỮ bài brand nước khác (mã other_market)."""
-    kho = KhoGia().cai(monkeypatch)
-    luc = datetime.datetime.now(_VN) - datetime.timedelta(days=2)
+_LUC_TT = datetime.datetime.now(_VN) - datetime.timedelta(days=2)
 
-    def bai(i, user, kenh, text):
-        return ({"platform": "tiktok", "username": user, "kenh": kenh, "text": text,
-                 "hashtags": "hapas", "link": f"https://www.tiktok.com/@{user}/video/55{i}",
-                 "comments": 3, "views": 900, "likes": 1, "shares": 0}, luc)
-    hits = [bai(1, "hapasthailand", "HAPAS THAILAND", "New tote collection #hapas"),
-            bai(2, "shop_th", "ร้านกระเป๋า", "กระเป๋าใหม่ hapas สวยมาก ราคาพิเศษ วันนี้"),
-            bai(3, "khach_vn", "Khách", "túi hapas xinh quá trời")]
+
+def _bai_tt(i, user, kenh, text, p="tiktok", **them):
+    return ({"platform": p, "username": user, "kenh": kenh, "text": text, "hashtags": "hapas",
+             "link": (f"https://www.tiktok.com/@{user}/video/55{i}" if p == "tiktok"
+                      else f"https://www.youtube.com/watch?v=yt{i:09d}"),
+             "comments": 3, "views": 900, "likes": 1, "shares": 0, **them}, _LUC_TT)
+
+
+def test_cong_thi_truong_vn_chi_bo_chu_ngoai_trong_noi_dung_con_lai_de_ai(monkeypatch):
+    """Soát 18/10/2026 (M2): cổng VN trước AI chỉ bỏ bài có NỘI DUNG chữ ngoài VN rõ (chữ Thái) hoặc
+    kênh YouTube khai nước khác mà không có dấu hiệu Việt. Tài khoản "HAPAS THAILAND" viết Latin là
+    ca mơ hồ → AI; AI giữ với mã other_market thì dự án VN loại (ai:other_market)."""
+    kho = KhoGia().cai(monkeypatch)
+    gui: list[list[str]] = []
+
+    def phan_xu(rows, *a, **k):
+        gui.append([d["username"] for d, _ in rows])
+        return ({i: (True, "other_market", "TH") for i, (d, _) in enumerate(rows)
+                 if d["username"] == "hapasthailand"},
+                {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"})
+    monkeypatch.setattr(A, "_phan_xu_ai", phan_xu)
+    hits = [_bai_tt(1, "hapasthailand", "HAPAS THAILAND", "New tote collection #hapas"),
+            _bai_tt(2, "shop_th", "ร้านกระเป๋า", "กระเป๋าใหม่ hapas สวยมาก ราคาพิเศษ วันนี้"),
+            _bai_tt(3, "khach_vn", "Khách", "túi hapas xinh quá trời"),
+            _bai_tt(4, "kenh_us", "Hapas Review", "Hapas tote bag honest review and unboxing",
+                    p="youtube", _quoc_gia="US"),
+            _bai_tt(5, "kenh_us_vn", "Hapas Review", "Review túi Hapas mới nhất", p="youtube",
+                    _quoc_gia="US")]
     tk = _tk()
     T._tach_va_giu(DU_AN, 7, hits, ["hapas"], 1e12, tk)
-    assert tk["pheu"]["tiktok"]["thi_truong"] == 2 and ai == [["khach_vn"]]
-    assert [r["tai_khoan"] for r in kho.ghi[0]] == ["khach_vn"]
-    so = TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas"]), luc - datetime.timedelta(days=1))
-    assert sorted(v[0] for v in so.values()) == ["he_chu", "thi_truong"]
-    assert "ngoài thị trường VN 2" in T._cau_pheu("tiktok", tk["pheu"]["tiktok"])
-    # Dự án thị trường khác (TH): không áp cổng VN.
+    f, fy = tk["pheu"]["tiktok"], tk["pheu"]["youtube"]
+    assert (f["thi_truong"], fy["thi_truong"]) == (1, 1)
+    assert sorted(u for g in gui for u in g) == ["hapasthailand", "kenh_us_vn", "khach_vn"]
+    assert sorted(r["tai_khoan"] for g in kho.ghi for r in g) == ["kenh_us_vn", "khach_vn"]
+    assert f["ai_loai"] == {"other_market": 1}
+    so = TDA.doc_loai("hapas", TDA.dau_loai(DU_AN, ["hapas"]), _LUC_TT - datetime.timedelta(days=1))
+    assert sorted(v[0] for v in so.values()) == ["ai:other_market", "he_chu", "thi_truong"]
+    assert "ngoài thị trường VN 1" in T._cau_pheu("tiktok", f)
+    assert "brand ở thị trường khác 1" in T._cau_pheu("tiktok", f)
+    # Dự án thị trường khác (TH): không áp cổng VN, AI other_market giữ như social_listen.
     tk2 = _tk()
     T._tach_va_giu({**DU_AN, "ma": "hapas_th", "thi_truong": "TH"}, 7, hits[:2], ["hapas"],
                    1e12, tk2)
-    assert not tk2["pheu"]["tiktok"].get("thi_truong")
+    assert not tk2["pheu"]["tiktok"].get("thi_truong") and not tk2["pheu"]["tiktok"]["ai_loai"]
+
+
+def test_cong_vn_khong_loai_chu_toan_hoc_ten_hien_thi_la_va_caption_khong_dau(monkeypatch, ai):
+    """Raw Kompa 18/10/2026: trang "HAPAS - Thương Hiệu Túi Xách Nữ" viết caption bằng chữ toán học
+    ("𝗦𝗘𝗧 𝗤𝗨𝗔̀ 𝗕𝗔́𝗡 𝗖𝗛𝗔̣𝗬…") bị cổng cũ đếm là chữ ngoài VN; tài khoản Việt tên hiển thị "𓇼˖°"
+    caption trống bị loại vì TÊN; caption không dấu không trúng 40 từ Việt bị YouTube luật "≥ 5 từ
+    Latin" loại. Nay cả ba tới AI; bài đã bị loại vì lý do VN được xét lại (NFKC)."""
+    KhoGia().cai(monkeypatch)
+    hits = [_bai_tt(1, "hapas_page", "HAPAS - Thương Hiệu Túi Xách Nữ",
+                    "𝗦𝗘𝗧 𝗤𝗨𝗔̀ 𝗕𝗔́𝗡 𝗖𝗛𝗔̣𝗬 𝗡𝗛𝗔̂́𝗧 𝟮𝟬/𝟭𝟬 𝗡𝗛𝗔̀ 𝗛𝗔𝗣𝗔𝗦 🎁"),
+            _bai_tt(2, "botrmnguynth198", "𓇼˖°ꕤ𓇼", ""),
+            _bai_tt(3, "kenh_yt", "Linh", "Mo hop tui Hapas size lon gia re cho chi em", p="youtube")]
+    hits[1][0]["hashtags"] = ""
+    dau = TDA.dau_loai(DU_AN, ["hapas"])
+    TDA.ghi_loai("hapas", dau, [(T._khoa_bai("tiktok", hits[0][0]["link"]), "he_chu", _LUC_TT)],
+                 _LUC_TT - datetime.timedelta(days=5))
+    tk = _tk()
+    T._tach_va_giu(DU_AN, 7, hits, ["hapas"], 1e12, tk)
+    assert not tk["pheu"]["tiktok"]["thi_truong"] and not tk["pheu"]["youtube"]["thi_truong"]
+    assert tk["pheu"]["tiktok"]["xet_lai"] == 1, "bài loại nhầm vì chữ toán học được xét lại"
+    assert sorted(u for g in ai for u in g) == ["botrmnguynth198", "hapas_page", "kenh_yt"]
+    assert T._ngoai_vn(DU_AN, _bai_tt(9, "x", "ร้าน", "กระเป๋า hapas สวยมาก")[0], ["hapas"]) == \
+        "he_chu"
+    assert T._ngoai_vn(DU_AN, _bai_tt(9, "x", "김민지", "túi hapas xinh")[0], ["hapas"]) == ""
 
 
 # ───────────────────────────── sổ ─────────────────────────────

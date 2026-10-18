@@ -3546,20 +3546,61 @@ def _ghi_so_seeding(ma: str, bo: list, seed: dict, tk: dict) -> None:
     tk.setdefault("_tk_seeding", {}).update(seed)
 
 
+#: Hệ chữ của một NGÔN NGỮ ngoài VN rõ ràng (tên Unicode của chữ bắt đầu bằng một trong các từ này).
+#: Không gồm Hy Lạp / Kirin / ký hiệu (hay dùng để trang trí tên, chữ "𝗛𝗔𝗣𝗔𝗦" toán học đã về Latin
+#: nhờ NFKC).
+_HE_CHU_NGOAI = ("THAI", "HANGUL", "CJK", "HIRAGANA", "KATAKANA", "ARABIC", "DEVANAGARI", "BENGALI",
+                 "KHMER", "LAO", "MYANMAR", "TAMIL", "TELUGU", "GUJARATI", "GURMUKHI", "KANNADA",
+                 "MALAYALAM", "SINHALA", "HEBREW")
+#: Chữ ngoài VN trong nội dung: ≥ chừng này chữ VÀ ≥ `apify_tool._NGUONG_PHI_LATIN` số chữ cái.
+_HE_CHU_TOI_THIEU = 3
+
+
+def _ban_nfkc(d: dict) -> dict:
+    """Bản sao nông của bài với chữ chuẩn NFKC: caption kiểu chữ toán học "𝗦𝗘𝗧 𝗤𝗨𝗔̀ 𝗕𝗔́𝗡 𝗖𝗛𝗔̣𝗬"
+    (trang HAPAS - Thương Hiệu Túi Xách Nữ, raw Kompa 18/10/2026) về lại "SET QUÀ BÁN CHẠY" — trước
+    đó các chữ này không mang tên "LATIN" nên cổng đếm là chữ ngoài VN và loại bài của chính brand."""
+    import unicodedata
+    return {**d, **{k: unicodedata.normalize("NFKC", str(d.get(k) or ""))
+                    for k in ("text", "kenh", "username", "hashtags")}}
+
+
+def _chu_ngoai_noi_dung(d: dict) -> bool:
+    """NỘI DUNG (phần đầu tiêu đề/caption, KHÔNG gồm tên hiển thị) là chữ của ngôn ngữ ngoài VN
+    (`_HE_CHU_NGOAI`): ≥ `_HE_CHU_TOI_THIEU` chữ và ≥ ngưỡng tỉ lệ trong số chữ cái."""
+    import unicodedata
+    dau = str(d.get("text") or "").split(" — ", 1)[0][:120]
+    chu = [c for c in dau if c.isalpha()]
+    ngoai = sum(1 for c in chu if unicodedata.name(c, "").split(" ")[0] in _HE_CHU_NGOAI)
+    return ngoai >= _HE_CHU_TOI_THIEU and ngoai >= A._NGUONG_PHI_LATIN * len(chu)
+
+
 def _ngoai_vn(du_an: dict, d: dict, tu: list[str]) -> str:
-    """Cổng thị trường VN (18/10/2026) của lượt tìm theo từ khoá: ĐÚNG phần thị trường của luật dự
-    phòng social_listen (`apify_tool._ly_do_loai`) — dự án VN thì bài chữ ngoài VN (Thái, Hindi…)
-    và bài của tài khoản brand nước khác không có dấu hiệu Việt ("HAPAS THAILAND") bị bỏ TRƯỚC AI.
-    Trước đây lượt tìm chỉ đưa tín hiệu thị trường cho AI, mà AI GIỮ bài brand nước khác (mã
-    other_market) — bài HAPAS Thái lọt vào số của dự án VN. Bài web có cổng riêng (`nguon_web`).
-    -> mã lý do ("he_chu" | "thi_truong") hoặc ""."""
+    """Cổng thị trường VN (18/10/2026) của lượt tìm theo từ khoá, TRƯỚC AI. -> mã lý do ("he_chu" |
+    "thi_truong") hoặc "". Bài web có cổng riêng (`nguon_web`).
+
+    Soát 18/10/2026 (M2) — cổng chỉ loại khi CHẮC, trường hợp mơ hồ để AI quyết (AI có mã
+    other_market; `_giu_tu_khoa` coi other_market của dự án VN là loại):
+      1. dấu hiệu Việt (chữ có dấu, ngôn ngữ 'vi', kênh ở VN, '#tiktokvn', '.vn', giá '299k'…) → giữ,
+         THẮNG cả nước khai của kênh YouTube;
+      2. NỘI DUNG là chữ ngoài VN rõ (Thái, Hàn, Trung, Nhật, Ả Rập, Hindi… — `_chu_ngoai_noi_dung`)
+         → "he_chu". Chữ lạ chỉ ở TÊN HIỂN THỊ ("𓇼˖°", tên kênh tiếng Hàn của người Việt) không tính;
+      3. kênh YouTube khai nước khác VN → "thi_truong";
+      4. còn lại (caption không dấu không trúng 40 từ Việt không dấu, tiêu đề tiếng Anh, tài khoản
+         "HAPAS THAILAND" viết Latin) → "" — AI quyết. Bản trước loại các ca này bằng luật (YouTube
+         tiêu đề ≥ 5 từ Latin, tên nước trong tên kênh) và loại nhầm caption Việt không dấu.
+    Chữ chuẩn NFKC trước khi đo (`_ban_nfkc`)."""
     p = str(d.get("platform") or "")
     if str(du_an.get("thi_truong") or "VN").upper() != "VN" or p == W.NEN_TANG:
         return ""
-    if A._ngoai_thi_truong(d, "VN"):
+    x = _ban_nfkc(d)
+    if A._la_noi_dung_vn(x) or A._co_dau_hieu_vn(x):
+        return ""
+    if _chu_ngoai_noi_dung(x):
         return "he_chu"
-    if p in A._NEN_TANG_CONG_VN or p == "tiktok":
-        return "thi_truong" if A._ly_do_ngoai_vn(d, p, tu) else ""
+    qg = str(d.get("_quoc_gia") or "").strip().upper()
+    if qg and qg != "VN":
+        return "thi_truong"
     return ""
 
 
@@ -3698,7 +3739,10 @@ def nhac_brand(d: dict, ten: list[str]) -> bool:
 #: bao giờ xét lại; tắt luật, đổi ngưỡng, tài khoản thành kênh nhà cũng không gỡ được (dấu luật
 #: `dau_loai` không tính `cau_hinh`). Xét lại rẻ: không gửi AI, không cào bình luận (bài không vào
 #: `bai`), chỉ một câu đọc lịch sử tài khoản.
-LY_DO_XET_LAI = frozenset({"seeding_affiliate"})          # = loc_rac.LY_DO_SEEDING_BAI
+#: Cổng thị trường VN (`_ngoai_vn`, soát M2): "he_chu", "thi_truong" — luật thuần trên nội dung,
+#: xét lại để luật sửa (NFKC, bỏ luật tên kênh / YouTube tiếng Anh) gỡ được bài đã loại nhầm.
+LY_DO_XET_LAI = frozenset({"seeding_affiliate",           # = loc_rac.LY_DO_SEEDING_BAI
+                           "he_chu", "thi_truong"})
 
 
 def _con_chan(v, d: dict, cong: dict, ten=None, la_nha=None) -> bool:
@@ -3725,12 +3769,13 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
                  tk: dict, *, lich_su_seeding: list[dict] | tuple = (),
                  ai: dict | None = None, de_xuat: bool = True) -> None:
     """Phân xử AI (như social_listen): AI giữ thì giữ; AI không phán được thì giữ khi bài
-    THỰC SỰ nhắc từ khoá. Trùng, từ loại trừ, thị trường ngoài VN, spam, bài đường hashtag không
-    nhắc brand (`nhac_brand`), seeding affiliate bỏ cứng trước AI. Mỗi bước đếm vào phễu của nền
-    tảng (`tk["pheu"]`). `lich_su_seeding`: dòng lịch sử thêm cho luật seeding (`_loc_seeding`);
-    `ai`: tham số thêm của `apify_tool._phan_xu_ai` (script
-    nạp raw: `song_song` 1 — một lô model một lúc như gán nhãn nền); `de_xuat` False: không ghi đề
-    xuất nguồn (nạp raw cả tháng không đổ hàng trăm đề xuất vào hàng chờ duyệt)."""
+    THỰC SỰ nhắc từ khoá. Trùng, từ loại trừ, thị trường ngoài VN (chắc chắn — `_ngoai_vn`), spam,
+    bài đường hashtag không nhắc brand (`nhac_brand`), seeding affiliate bỏ cứng trước AI; dự án VN
+    thì bài AI giữ với mã other_market (brand ở thị trường khác) cũng loại. Mỗi bước đếm vào phễu
+    của nền tảng (`tk["pheu"]`). `lich_su_seeding`: dòng lịch sử thêm cho luật seeding
+    (`_loc_seeding`); `ai`: tham số thêm của `apify_tool._phan_xu_ai` (script nạp raw: `song_song`
+    1 — một lô model một lúc như gán nhãn nền); `de_xuat` False: không ghi đề xuất nguồn (nạp raw
+    cả tháng không đổ hàng trăm đề xuất vào hàng chờ duyệt)."""
     import loc_rac
     ma = du_an["ma"]
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
@@ -3790,7 +3835,7 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
                     continue
         d["_khoa"] = khoa
         d["_khop"] = A._khop_tu_khoa(d, tu)
-        d["_thi_truong"] = A._thi_truong(d, tu)
+        d["_thi_truong"] = A._thi_truong(_ban_nfkc(d), tu)
         cho.append((d, dt))
     if nguon is None:
         nguon = K.nguon_cua_du_an(ma) if cho else []
@@ -3813,10 +3858,17 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
     theo = {(n["nen_tang"], _chuan_dinh_danh(n["nen_tang"], n["dinh_danh"])): int(n["id"])
             for n in nguon}
     rows, ban = [], []
+    vn = str(du_an.get("thi_truong") or "VN").upper() == "VN"
     for i, (d, dt) in enumerate(cho):
         px = px_all.get(i)
         if px and px[1] == "khong_ro":
             px = None
+        if px and px[0] and px[1] == "other_market" and vn \
+                and str(px[2] if len(px) > 2 else "").strip().upper() != "VN":
+            # Soát 18/10/2026 (M2): cổng VN để AI quyết ca mơ hồ ("HAPAS THAILAND" viết Latin,
+            # tiêu đề tiếng Anh). AI giữ bài brand ở thị trường khác với mã other_market (đúng cho
+            # social_listen), nhưng bài đó không thuộc số của dự án VN — loại, ghi rõ mã.
+            px = (False, "other_market", px[2] if len(px) > 2 else "")
         if px and not px[0]:
             lo = ph(d)["ai_loai"]
             lo[str(px[1])] = lo.get(str(px[1]), 0) + 1
