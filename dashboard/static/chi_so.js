@@ -66,7 +66,9 @@
   var O_LOAI = { kenh_nha: "tim", kol: "hong", page: "xanh", group: "la", bao: "cam", tu_khoa: "ngoc", khac: "xam" };
   var O_SAC = { tc: "la", ti: "do", tl: "xam", nha: "tim" };
   // Trạng thái hiển thị (không gửi lên máy chủ).
-  var tt = { che: "ngay", sacNguon: "bai", tgNguon: "bai", cdNguon: "bai", tkDang: "may", cdMo: false };
+  // sapNguon: cách xếp bảng Nguồn nổi bật — máy chủ xếp (tham số sap_nguon), không theo URL.
+  var tt = { che: "ngay", sacNguon: "bai", tgNguon: "bai", cdNguon: "bai", ntNguon: "bai", tkDang: "may", cdMo: false,
+             sapNguon: "thao_luan" };
 
   // ─── bộ lọc CHUNG (đợt 2f): MỘT bộ lọc cho mọi khối + khung chi tiết; luôn khớp URL ───
   // Tham số giống hệt API (/api/chi-so, /api/bai, /api/binh-luan); điều kiện RIÊNG của khung chi
@@ -635,19 +637,33 @@
     o.appendChild(than);
     return o;
   }
-  // Chia hàng KPI: mỗi thẻ ≥ KPI_TOI_THIEU px; không vừa một hàng thì chia đều nhiều hàng
-  // (7 thẻ → 4 + 3) và cho các thẻ của hàng ít thẻ giãn ra lấp đủ hàng (lưới 12 cột: span 3 / span 4)
-  // — không ép thẻ hẹp lại (số tràn), không chừa ô trống cuối hàng.
-  var KPI_TOI_THIEU = 200;
+  // Ô KPI hàng phụ (19/10/2026): không biểu tượng, không khung riêng — các ô chung MỘT thẻ, ngăn
+  // bằng đường kẻ mảnh; số nhỏ hơn hàng chính để mắt đọc ba số lớn trước.
+  function oKpiPhu(nhan, n, doi, goiY) {
+    var o = tao("div", "kpi cs-kpi-o");
+    var than = tao("div", "kpi__than");
+    var nh = tao("div", "kpi__nhan", nhan);
+    if (goiY) { nh.appendChild(chuNode(" ")); nh.appendChild(nutGoiY(goiY)); }
+    than.appendChild(nh);
+    than.appendChild(oSoThe(n));
+    var d = doi ? oDoi(doi.nay, doi.truoc, doi.doi_pt, null, doi.moi) : null;
+    if (d) than.appendChild(d);
+    o.appendChild(than);
+    return o;
+  }
+  // Chia hàng phụ: mỗi ô ≥ KPI_TOI_THIEU px; không vừa một hàng thì chia đều nhiều hàng
+  // (5 ô → 3 + 2) và cho các ô của hàng ít ô giãn ra lấp đủ hàng (lưới bội chung: span 2 / span 3)
+  // — không ép ô hẹp lại (số tràn), không chừa ô trống cuối hàng. Thẻ sắc thái luôn cả hàng.
+  var KPI_TOI_THIEU = 168;
   function bcnn(a, b) { var x = a, y = b; while (y) { var t = y; y = x % y; x = t; } return a / x * b; }
   function chiaCotKpi() {
-    var el = $("kpi");
+    var el = document.querySelector("#kpi .cs-kpi-phu");
     if (!el) return;
     var the = Array.prototype.slice.call(el.querySelectorAll(":scope > .kpi:not(.cs-kpi-sac)"));
     var n = the.length;
     if (!n) return;
-    var w = el.clientWidth || 0, khe = 16;
-    var vua = Math.max(1, Math.floor((w + khe) / (KPI_TOI_THIEU + khe)));
+    var w = el.clientWidth || 0;
+    var vua = Math.max(1, Math.floor(w / KPI_TOI_THIEU));
     var hang = Math.ceil(n / vua), dem = [], con = n;
     for (var h = hang; h > 0; h--) { var k = Math.ceil(con / h); dem.push(k); con -= k; }
     var L = dem.reduce(function (a, k) { return bcnn(a, k); }, 1), i = 0;
@@ -656,30 +672,49 @@
     });
     el.style.setProperty("--so-kpi", String(L));
   }
+  // Khung xương KPI: cùng hình hai tầng với số thật (không nhảy bố cục khi số về).
+  function khungKpi(el) {
+    xoa(el);
+    var c = tao("div", "cs-kpi-chinh");
+    for (var i = 0; i < 3; i++) c.appendChild(tao("div", "cs-khung-cho cs-khung-cho--kpi"));
+    el.appendChild(c);
+    el.appendChild(tao("div", "cs-khung-cho cs-khung-cho--kpi-phu"));
+  }
+  // KPI hai tầng (19/10/2026, góp ý marketing): hàng chính ba số trả lời "kỳ này nói về brand bao
+  // nhiêu" — Thảo luận, Lượt xem, Bài đăng; hàng phụ số bổ trợ. Báo & Web không còn thẻ riêng: nằm
+  // ở khối Phân bố thảo luận (dòng nền tảng + tóm tắt).
   function veKpi(d) {
     var k = d.kpi, el = $("kpi");
     // Lọc theo mức tương tác: tương tác cộng dồn theo tuổi bài -> so với kỳ trước lệch, không hiện.
     var lech = d.so_sanh_lech === "tuong_tac", ss = lech ? {} : (d.so_sanh || {});
     xoa(el);
-    el.appendChild(theKpi("Bài đăng", k.bai, ss.bai, "hong", "tai_lieu"));
-    el.appendChild(theKpi("Thảo luận", k.thao_luan, ss.thao_luan, "tim", "tro_chuyen"));
-    el.appendChild(theKpi("Nguồn có bài", k.nguon_co_bai, ss.nguon_co_bai, "xanh", "phat_song"));
-    if (k.bai_khu_trung != null && k.bai_khu_trung < k.bai) {
-      el.appendChild(theKpi("Bài gốc", k.bai_khu_trung, null, "xam", "ban_sao",
-                            "Bài đăng sau khi gộp các bản đăng lại cùng nội dung (khử trùng): " +
-                            so(k.bai - k.bai_khu_trung) + " trong " + so(k.bai) + " bài là bản đăng lại."));
-    }
     var LAN_QUET = "Cộng từ số của từng bài tính tới lần quét gần nhất — bài trong chiến dịch được cập nhật dần mỗi lần quét lại." +
       (k.web ? " Bài Báo & Web không có lượt xem / thích / chia sẻ nên không góp vào số này." : "");
-    el.appendChild(theKpi("Lượt xem", k.xem, ss.xem, "la", "mat", LAN_QUET));
-    el.appendChild(theKpi("Tương tác", k.tuong_tac, ss.tuong_tac, "cam", "tim_dac", "Thích + bình luận + chia sẻ. " + LAN_QUET));
-    if (k.web) el.appendChild(theKpi("Báo & Web", k.web.bai, null, "xanh", "bao", moTaWeb(k.web)));
-    if (d.y_dinh_mua) el.appendChild(theYDinhKpi(d.y_dinh_mua, lech));
-    if (d.do_phu) el.appendChild(theDoPhuKpi(d.do_phu));
-    el.appendChild(theSacKpi(k));
+    var chinh = tao("div", "cs-kpi-chinh");
+    [theKpi("Thảo luận", k.thao_luan, ss.thao_luan, "tim", "tro_chuyen",
+            "Số bài + số bình luận nền tảng báo trên các bài đó (cách tính của Kompa) — không phải toàn bộ thảo luận về brand ngoài mạng."),
+     theKpi("Lượt xem", k.xem, ss.xem, "la", "mat", LAN_QUET),
+     theKpi("Bài đăng", k.bai, ss.bai, "hong", "tai_lieu",
+            "Số bài trong kỳ sau bộ lọc — gồm cả bài Internal channel (kênh nhà) và bài Báo & Web." +
+            (k.web ? " Trong đó " + so(k.web.bai) + " bài Báo & Web (xem khối Phân bố thảo luận)." : ""))
+    ].forEach(function (o) { o.classList.add("cs-kpi--lon"); chinh.appendChild(o); });
+    el.appendChild(chinh);
+    var phu = tao("div", "the-khoi cs-kpi-phu");
+    phu.appendChild(oKpiPhu("Nguồn có bài", k.nguon_co_bai, ss.nguon_co_bai,
+      "Số tác giả / kênh / trang khác nhau có bài trong kỳ — một kênh đăng 10 bài vẫn tính 1 nguồn."));
+    if (k.bai_khu_trung != null && k.bai_khu_trung < k.bai) {
+      phu.appendChild(oKpiPhu("Bài gốc", k.bai_khu_trung, null,
+                              "Bài đăng sau khi gộp các bản đăng lại cùng nội dung (khử trùng): " +
+                              so(k.bai - k.bai_khu_trung) + " trong " + so(k.bai) + " bài là bản đăng lại."));
+    }
+    phu.appendChild(oKpiPhu("Tương tác", k.tuong_tac, ss.tuong_tac, "Thích + bình luận + chia sẻ. " + LAN_QUET));
+    if (d.y_dinh_mua) phu.appendChild(theYDinhKpi(d.y_dinh_mua, lech));
+    if (d.do_phu) phu.appendChild(theDoPhuKpi(d.do_phu));
+    phu.appendChild(theSacKpi(k, (d.binh_luan_da_cao || {}).kpi));
+    el.appendChild(phu);
     chiaCotKpi();
   }
-  // Thẻ Báo & Web: số bài là số chính; số miền / % PR / % nhắc ở tiêu đề nằm trong ⓘ.
+  // Báo & Web: số miền / % PR / % nhắc ở tiêu đề — ⓘ của dòng tóm tắt ở khối Phân bố thảo luận.
   function moTaWeb(w) {
     var theo = Object.keys(w.theo_kieu || {}).map(function (k) { return tenG("kieu_trang", k) + " " + so(w.theo_kieu[k]); });
     return so(w.bai) + " bài từ " + so(w.mien) + " trang (tên miền)" + (theo.length ? " — " + theo.join(", ") : "") + ". " +
@@ -696,8 +731,7 @@
   // Ý định mua: số + % trên bình luận sạch (dòng riêng) + so kỳ trước khi kỳ trước có số.
   // Cả thẻ là nút: mở ngăn với đúng các bình luận đã đếm.
   function theYDinhKpi(y, lech) {
-    var o = nut("", "the-khoi kpi kpi--ngoc cs-kpi-yd", moYDinh);
-    o.appendChild(oBieuTuong("gio_hang"));
+    var o = nut("", "kpi cs-kpi-o cs-kpi-yd", moYDinh);
     var than = tao("span", "kpi__than");
     than.appendChild(tao("span", "kpi__nhan", "Ý định mua"));
     than.appendChild(oSoThe(y.so));
@@ -717,16 +751,19 @@
   }
   // Mã y_dinh đang lọc (mọi món = "1") — ngăn bình luận của khối mở đúng món đang lọc.
   function maYDinh() { return G.y_dinh || "1"; }
-  // ─── Độ phủ (17/10/2026): kiểm 2 lần/tuần của Mark — trong một mẫu bài TikTok lấy bằng đường
+  // ─── Độ thu đủ (17/10/2026; tên cũ "Độ phủ" — 19/10 đổi vì marketing đọc nhầm thành độ phủ thị
+  // trường / share of voice): kiểm 2 lần/tuần của Mark — trong một mẫu bài TikTok lấy bằng đường
   // KHÁC thu thập hằng ngày (hashtag brand/chiến dịch + bài mới nhất của nhà sáng tạo nổi), bao
   // nhiêu % (theo thảo luận) bài nhắc brand đã có trong kho. Không theo bộ lọc / khoảng ngày.
-  // ▲/▼ = chênh ĐIỂM % với lần kiểm trước; dưới ngưỡng (80%) thẻ chuyển màu cảnh báo.
+  // ▲/▼ = chênh ĐIỂM % với lần kiểm trước; dưới ngưỡng (80%) ô chuyển màu cảnh báo.
   function soDiem(x) {
     return Math.abs(x).toLocaleString("vi-VN", { maximumFractionDigits: 1 }) + " điểm";
   }
   function moTaDoPhu(x) {
     var nguon = (x.tag || []).concat(x.tac_gia || []);
-    return "Mark kiểm 2 lần mỗi tuần (≤ " + soTien2(x.tran_usd) + " USD/lần): lấy mẫu bài TikTok " + so(x.ngay_mau) +
+    return "Độ thu đủ: trong một mẫu bài nhắc brand Mark tự lấy để kiểm, bao nhiêu % đã có sẵn trong kho — " +
+      "đo việc thu thập có sót bài không. KHÔNG phải độ phủ thị trường hay share of voice. Từ " + pt(x.nguong) +
+      " trở lên là ổn; dưới mức này là thu thập đang có lỗ. Cách kiểm: Mark kiểm 2 lần mỗi tuần (≤ " + soTien2(x.tran_usd) + " USD/lần): lấy mẫu bài TikTok " + so(x.ngay_mau) +
       " ngày qua đường KHÁC thu thập hằng ngày" + (nguon.length ? " — " + nguon.join(", ") : "") +
       " — rồi đếm bài nhắc brand đã có trong kho. Số lớn tính theo thảo luận (mỗi bài nặng 1 + số bình luận); theo số bài: " +
       pt(x.do_phu) + ". Lần kiểm " + ngayDu(x.luc) + ": " + so(x.so_mau) + " bài mẫu, " + so(x.so_nhac) +
@@ -734,7 +771,7 @@
       (x.so_da_loai ? " " + so(x.so_da_loai) + " bài đã loại trước (AI, luật seeding / thị trường / cổng brand) không tính là sót." : "") +
       (lyDoChu(x) ? " Lý do sót: " + lyDoChu(x) + "." : "") +
       (lamGiChu(x) ? " Mark đã làm: " + lamGiChu(x) + "." : "") +
-      " Dưới " + pt(x.nguong) + " là thu thập đang có lỗ." + (x.cu ? " Lần kiểm này đã cũ — Mark chưa kiểm lại." : "") +
+      (x.cu ? " Lần kiểm này đã cũ — Mark chưa kiểm lại." : "") +
       " Không theo bộ lọc / khoảng ngày.";
   }
   function soTien2(x) { return (x == null ? 0.2 : x).toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -755,15 +792,14 @@
   }
   function theDoPhuKpi(x) {
     var canh = !!x.canh_bao;
-    var o = tao("div", "the-khoi kpi kpi--" + (canh ? "cam" : "ngoc") + " cs-kpi-dp" + (canh ? " cs-kpi-dp--canh" : ""));
-    o.appendChild(oBieuTuong("tim_kiem"));
+    var o = tao("div", "kpi cs-kpi-o cs-kpi-dp" + (canh ? " cs-kpi-dp--canh" : ""));
     var than = tao("div", "kpi__than");
-    var nh = tao("div", "kpi__nhan", "Độ phủ");
+    var nh = tao("div", "kpi__nhan", "Độ thu đủ");
     nh.appendChild(chuNode(" "));
     nh.appendChild(nutGoiY(moTaDoPhu(x)));
     if (canh || x.cu) {
       nh.appendChild(chuNode(" "));
-      nh.appendChild(nutGoiY(canh ? "Độ phủ theo thảo luận " + pt(x.do_phu_tl) + " — dưới " + pt(x.nguong) +
+      nh.appendChild(nutGoiY(canh ? "Độ thu đủ theo thảo luận " + pt(x.do_phu_tl) + " — dưới " + pt(x.nguong) +
         ": nhiều bài brand chưa được thu thập. Bấm “bài sót” để xem." : "Lần kiểm gần nhất " + ngayDu(x.luc) + " đã quá " + so(x.cu_ngay || 7) + " ngày.", "goi-y--canh"));
     }
     than.appendChild(nh);
@@ -810,7 +846,7 @@
   }
   function moDoPhu(x) {
     if (!hop) return;
-    batDauNgan("Độ phủ", "Bài brand bị sót");
+    batDauNgan("Độ thu đủ", "Bài brand bị sót");
     $("chi-tiet-mo-ta").textContent = "Lần kiểm " + ngayDu(x.luc) + " · " + so(x.so_mau) + " bài mẫu TikTok " + so(x.ngay_mau) +
       " ngày · " + so(x.so_da_co) + "/" + so(x.so_nhac) + " bài nhắc brand đã có · " + so(x.so_sot) + " sót, " + so(x.bo_sung) +
       " đã bổ sung · nhiều thảo luận nhất trước";
@@ -827,16 +863,18 @@
       than.appendChild(tao("p", "mo nho", "Chỉ hiện " + so((x.bai_sot || []).length) + " bài nhiều thảo luận nhất."));
     }
   }
-  // Bốn chỉ số sắc thái của bài gộp vào MỘT thẻ rộng có thanh 100% (bấm ô → xem bài).
-  function theSacKpi(k) {
-    var o = tao("div", "the-khoi kpi kpi--la cs-kpi-sac");
+  // Bốn chỉ số sắc thái của bài gộp vào MỘT ô cả hàng có thanh 100% (bấm ô → xem bài). `kb`: KPI
+  // bình luận — ⓘ nói thêm phần tiêu cực của bình luận chia theo chủ đề (19/10/2026).
+  function theSacKpi(k, kb) {
+    var o = tao("div", "kpi cs-kpi-o cs-kpi-sac");
     var dau = tao("div", "cs-kpi-sac__dau");
-    dau.appendChild(oBieuTuong("mat_cuoi"));
     var n = tao("div", "kpi__than");
     var nh = tao("div", "kpi__nhan", "Sắc thái bài ");
     var daPl = (k.tich_cuc || 0) + (k.tieu_cuc || 0) + (k.trung_lap || 0);
-    nh.appendChild(nutGoiY("Sắc thái của bài đăng; % trên " + so(daPl) + " bài đã phân loại." +
-      (k.bai_kenh_nha ? " Không tính " + so(k.bai_kenh_nha) + " bài Internal channel — bài của thương hiệu không mang sắc thái khách." : "")));
+    nh.appendChild(nutGoiY("Sắc thái của bài đăng — AI chấm thái độ của bài với thương hiệu; % trên " + so(daPl) + " bài đã phân loại." +
+      (k.bai_kenh_nha ? " Không tính " + so(k.bai_kenh_nha) + " bài Internal channel — bài của thương hiệu không mang sắc thái khách." : "") +
+      (kb && kb.tieu_cuc ? " Bình luận tiêu cực: " + so(kb.tieu_cuc_thuong_hieu) + " về thương hiệu/sản phẩm, " +
+        so(kb.tieu_cuc_khac) + " về nội dung/KOL & khác (xem khối Sắc thái)." : "")));
     n.appendChild(nh);
     dau.appendChild(n);
     o.appendChild(dau);
@@ -980,12 +1018,61 @@
       b.setAttribute("aria-label", TEN_SAC[r[0]] + ": " + so(r[1]) + " " + x.don + " — bấm để xem");
       cg.appendChild(b);
     });
+    veTachTieuCuc(laBl ? d.binh_luan_da_cao.kpi : null);
     var gy = $("sac-goi-y");
     if (gy) {
       if (!GOC_GOI_Y.sac) GOC_GOI_Y.sac = gy.getAttribute("data-goi-y") || "";
       datGoiY(gy, GOC_GOI_Y.sac + (!tong ? " Chưa có dữ liệu sắc thái." : " % trên " + so(daPhan) +
         (laBl ? " bình luận hợp lệ đã phân loại." : " bài đã phân loại.")) + chuGanNhan(d.gan_nhan));
     }
+  }
+  // Tiêu cực của BÌNH LUẬN chia theo chủ đề (19/10/2026, góp ý marketing): chê sản phẩm / giá /
+  // dịch vụ / so đối thủ là về thương hiệu; chê KOL, nội dung clip, minigame, tag bạn… thì không.
+  // Bài đăng không cần tách: sắc thái bài vốn chấm theo thương hiệu (nói ở ⓘ). Chỉ đọc, không bấm —
+  // ngăn bình luận chỉ lọc được một chủ đề mỗi lần (bấm từng chủ đề ở "Sắc thái theo chủ đề").
+  var NHOM_TI = [
+    { k: "tieu_cuc_thuong_hieu", ten: "Về thương hiệu/sản phẩm", lop: "cs-ti-tach__o--th",
+      cd: "Sản phẩm/chất lượng, Giá/mua ở đâu/ý định mua, Giao hàng/dịch vụ, Đối thủ" },
+    { k: "tieu_cuc_khac", ten: "Về nội dung/KOL & khác", lop: "cs-ti-tach__o--khac",
+      cd: "KOL/nội dung, Minigame, Tag bạn bè, Khác, chưa gán chủ đề" }
+  ];
+  function veTachTieuCuc(kb) {
+    var el = $("ti-tach");
+    if (!el) return;
+    xoa(el);
+    var tong = kb ? kb.tieu_cuc || 0 : 0;
+    el.hidden = !(tong > 0 && kb.tieu_cuc_thuong_hieu != null);
+    if (el.hidden) return;
+    var dau = tao("p", "cs-ti-tach__dau");
+    dau.appendChild(chuNode("Tiêu cực "));
+    dau.appendChild(tao("b", "so", so(tong)));
+    dau.appendChild(chuNode(" bình luận — nói về:"));
+    el.appendChild(dau);
+    var thanh = tao("div", "cs-tron cs-ti-tach__thanh");
+    thanh.setAttribute("aria-hidden", "true");
+    var ds = tao("div", "cs-ti-tach__ds");
+    NHOM_TI.forEach(function (g) {
+      var v = kb[g.k] || 0;
+      if (v) {
+        var p = tao("span", g.lop);
+        p.style.flex = v + " 1 0";
+        thanh.appendChild(p);
+      }
+      var d = tao("div", "cs-ti-tach__dong");
+      var c = tao("span", "cs-ti-tach__cham " + g.lop);
+      c.setAttribute("aria-hidden", "true");
+      d.appendChild(c);
+      var ten = tao("span", "cs-ti-tach__ten", g.ten + " ");
+      ten.appendChild(nutGoiY("Gồm bình luận chủ đề: " + g.cd + "."));
+      d.appendChild(ten);
+      var sl = tao("span", "cs-ti-tach__so");
+      sl.appendChild(tao("b", "so", so(v)));
+      sl.appendChild(chuNode(" (" + ptCua(v, tong) + ")"));
+      d.appendChild(sl);
+      ds.appendChild(d);
+    });
+    el.appendChild(thanh);
+    el.appendChild(ds);
   }
   // Gán nhãn AI chạy nền (17/10/2026): lượt quét ghi kho trước, Mark gán nhãn sau — "Chưa phân
   // loại" giảm dần. Nói ở ⓘ của khối Sắc thái, không thêm dòng chữ trên trang.
@@ -1222,21 +1309,28 @@
   }
   function tenChuDe(cd) { return cd === CHUA ? "Chưa phân loại chủ đề" : cd; }
   function hangChuDe(x, don, laBl) {
+    return hangSac(tenChuDe(x.chu_de), null, x, don, function (s) { moChuDe(x.chu_de, s, laBl); });
+  }
+  // MỘT hàng 100% sắc thái (chủ đề, nền tảng): tên | thanh bốn mảng (bấm mảng = xem đúng mục đó) |
+  // tổng | Chi tiết. Mảng ≥ 9% ghi % ngay trên mảng; title + aria-label luôn có số và % (không chỉ màu).
+  function hangSac(ten, dau, x, don, mo) {
     var h = tao("div", "cs-cd__hang");
-    var ten = tao("div", "cs-cd__ten", tenChuDe(x.chu_de));
-    ten.title = tenChuDe(x.chu_de);
-    h.appendChild(ten);
+    var o = tao("div", "cs-cd__ten");
+    if (dau) o.appendChild(dau);
+    o.appendChild(tao("span", "cs-cd__chu", ten));
+    o.title = ten;
+    h.appendChild(o);
     var th = tao("div", "cs-cd__thanh");
     th.setAttribute("role", "group");
-    th.setAttribute("aria-label", "Sắc thái của " + tenChuDe(x.chu_de));
+    th.setAttribute("aria-label", "Sắc thái của " + ten);
     SAC4.forEach(function (s) {
       var v = x[s] || 0;
       if (!v) return;
       var p = 100 * v / (x.so || 1);
-      var b = nut(p >= 9 ? Math.round(p) + "%" : "", "cs-cd__doan cs-cd__doan--" + LOP_SAC[s], function () { moChuDe(x.chu_de, s, laBl); });
+      var b = nut(p >= 9 ? Math.round(p) + "%" : "", "cs-cd__doan cs-cd__doan--" + LOP_SAC[s], function () { mo(s); });
       b.style.flexGrow = String(v);
       b.title = TEN_SAC[s] + ": " + so(v) + " " + don + " (" + ptCua(v, x.so) + ")";
-      b.setAttribute("aria-label", tenChuDe(x.chu_de) + " — " + b.title);
+      b.setAttribute("aria-label", ten + " — " + b.title);
       th.appendChild(b);
     });
     h.appendChild(th);
@@ -1244,10 +1338,53 @@
     sl.appendChild(tao("b", "so", so(x.so)));
     sl.appendChild(chuNode(" " + don));
     h.appendChild(sl);
-    var ct = nut("Chi tiết", "nut nut--nhe nut--nho cs-cd__nut", function () { moChuDe(x.chu_de, null, laBl); });
-    ct.setAttribute("aria-label", "Chi tiết: " + tenChuDe(x.chu_de));
+    var ct = nut("Chi tiết", "nut nut--nhe nut--nho cs-cd__nut", function () { mo(null); });
+    ct.setAttribute("aria-label", "Chi tiết: " + ten);
     h.appendChild(ct);
     return h;
+  }
+
+  // ─── sắc thái theo nền tảng (19/10/2026): cùng tập với vòng Sắc thái, nút Bài / Bình luận ───
+  function veSacNenTang(d) {
+    var coBl = coBinhLuan(d);
+    if (!coBl) tt.ntNguon = "bai";
+    nhomNut($("nguon-sac-nt"), nutNguon(coBl), tt.ntNguon, function (v) {
+      tt.ntNguon = v;
+      giuTapTrung($("nguon-sac-nt"), function () { chay("sắc thái theo nền tảng", function () { veSacNenTang(duLieu); }); });
+    });
+    var laBl = tt.ntNguon === "bl";
+    var ds = (laBl ? (d.binh_luan_da_cao || {}).sac_thai_nen_tang : d.sac_thai_nen_tang) || [];
+    var don = laBl ? "bình luận" : "bài";
+    var tong = ds.reduce(function (a, x) { return a + x.so; }, 0);
+    var tom = $("snt-tom-tat");
+    xoa(tom);
+    if (ds.length) {
+      tom.appendChild(tao("b", "", so(ds.length)));
+      tom.appendChild(chuNode(" nền tảng · "));
+      tom.appendChild(tao("b", "", so(tong)));
+      tom.appendChild(chuNode(" " + don + (laBl ? " hợp lệ" : "")));
+    } else {
+      tom.textContent = " ";
+    }
+    var el = $("sac-nen-tang");
+    xoa(el);
+    if (!ds.length) {
+      el.appendChild(tao("div", "trong", laBl ? "Chưa có bình luận hợp lệ trong khoảng này." : "Chưa có bài (ngoài Internal channel) trong khoảng này."));
+      return;
+    }
+    ds.forEach(function (x) {
+      var ten = TEN_NT[x.nen_tang] || x.ten;
+      el.appendChild(hangSac(ten, huyHieuNT(x.nen_tang, false, true), x, don, function (s) {
+        if (laBl) {
+          datLocBl({ nen_tang_bl: x.nen_tang, sac_thai_bl: s || "", loai_bl: "hop_le", chu_de_bl: "", q_bl: "", nguon_bl: "" }, true);
+          return;
+        }
+        // ct_ngoai_nha: hàng không tính bài Internal channel — danh sách cũng không (khớp số).
+        var dk = { ct_nen_tang: x.nen_tang, ct_ngoai_nha: "1" };
+        if (s) dk.ct_sac_thai = s;
+        moChiTiet("bai", dk, ten + (s ? " · " + TEN_SAC[s] : ""));
+      }));
+    });
   }
   function moChuDe(cd, s, laBl) {
     if (laBl) {                                        // bình luận: lọc luồng bình luận bên dưới
@@ -1490,6 +1627,26 @@
       return c;
     }, function (x) { moChiTiet("bai", { ct_loai: x.loai }, x.ten); },
     function (x) { return MAU_LOAI[x.loai] || MAU_LOAI.khac; });
+    veWebPhanBo(d.kpi && d.kpi.web);
+  }
+  // Báo & Web (19/10/2026: thôi là thẻ KPI riêng): dòng tóm tắt dưới danh sách nền tảng — số bài,
+  // số trang, % PR, % nhắc ở tiêu đề; chi tiết theo loại trang trong ⓘ. Bấm = xem bài Báo & Web.
+  function veWebPhanBo(w) {
+    var el = $("pb-web");
+    if (!el) return;
+    xoa(el);
+    el.hidden = !w;
+    if (!w) return;
+    var b = nut("", "cs-pb__web-nut", function () { moChiTiet("bai", { ct_nen_tang: "web" }, TEN_NT.web); });
+    b.appendChild(huyHieuNT("web", false, true));
+    var c = tao("span", "cs-pb__web-chu");
+    c.appendChild(tao("b", "", TEN_NT.web + ": "));
+    c.appendChild(chuNode(so(w.bai) + " bài từ " + so(w.mien) + " trang · PR " +
+      (w.pr_pt == null ? "chưa rõ" : pt(w.pr_pt)) + " · nhắc ở tiêu đề " + (w.tieu_de_pt == null ? "chưa rõ" : pt(w.tieu_de_pt))));
+    b.appendChild(c);
+    b.setAttribute("aria-label", TEN_NT.web + ": " + so(w.bai) + " bài từ " + so(w.mien) + " trang — bấm để xem bài");
+    el.appendChild(b);
+    el.appendChild(nutGoiY(moTaWeb(w)));
   }
 
   // ─── bảng ───
@@ -1518,8 +1675,41 @@
     return k;
   }
 
+  // Đổi cách xếp (19/10/2026): hỏi lại máy chủ CHỈ để lấy bảng nguồn (máy chủ xếp trước khi cắt
+  // top 10) — các khối khác giữ nguyên, không khung xương cả trang.
+  var ctlNguon = null;
+  function thamSoNguon() { return { sap_nguon: tt.sapNguon === "thao_luan" ? "" : tt.sapNguon }; }
+  function taiNguon() {
+    if (!duLieu) return;
+    if (ctlNguon) ctlNguon.abort();
+    var ctl = ctlNguon = taoCtl(), el = $("top-nguon");
+    el.classList.add("cs-dang-doi");
+    el.setAttribute("aria-busy", "true");
+    function xong() {
+      if (ctl !== ctlNguon) return false;
+      ctlNguon = null;
+      el.classList.remove("cs-dang-doi");
+      el.removeAttribute("aria-busy");
+      return true;
+    }
+    goiApi("chi-so", thamSoNguon(), { signal: ctl.signal })
+      .then(function (j) {
+        if (!xong() || !duLieu) return;
+        duLieu.top_nguon = j.top_nguon;
+        duLieu.sap_nguon = j.sap_nguon;
+        chay("nguồn nổi bật", function () { veTopNguon(duLieu); });
+      })
+      .catch(function (e) {
+        if ((e && e.name === "AbortError") || !xong()) return;
+        baoLoi(((e && e.message) || "Không tải được bảng nguồn.") + " Bảng Nguồn nổi bật vẫn theo cách xếp cũ.",
+               function () { baoLoi(""); taiNguon(); });
+      });
+  }
   function veTopNguon(d) {
     var tabs = $("tab-nen-tang"), noiDung = $("top-nguon");
+    // Người dùng đã chọn cách xếp khác lúc số còn đang tải (hoặc lượt tải mang cách cũ): giữ lựa
+    // chọn, hỏi lại bảng nguồn — không ghi đè ô chọn.
+    if (d.sap_nguon && tt.sapNguon !== d.sap_nguon && !ctlNguon) setTimeout(taiNguon, 0);
     xoa(tabs);
     xoa(noiDung);
     if (!d.top_nguon.length) { noiDung.appendChild(tao("div", "trong", "Chưa có bài trong khoảng này.")); return; }
@@ -1630,10 +1820,13 @@
     var b = d.binh_luan_da_cao, el = $("kpi-bl");
     if (!b || !el) return;
     var k = b.kpi, kp = d.kpi;
-    var phu = kp.bl_nen_tang_bao_bai_da_cao ? Math.min(100, Math.round(1000 * kp.bl_da_cao / kp.bl_nen_tang_bao_bai_da_cao) / 10) : null;
-    $("don-vi-bl").textContent = so(k.so) + " bình luận đã cào trên " + so(k.so_bai) + " bài" + (phu != null ? " · độ phủ " + pt(phu) : "");
+    // Tỉ lệ bình luận đã đọc = đã cào / số bình luận nền tảng báo trên các bài đó (19/10/2026: tên
+    // cũ "độ phủ" — trùng chữ với thẻ kiểm thu thập, nay là "Độ thu đủ").
+    var daDoc = kp.bl_nen_tang_bao_bai_da_cao ? Math.min(100, Math.round(1000 * kp.bl_da_cao / kp.bl_nen_tang_bao_bai_da_cao) / 10) : null;
+    $("don-vi-bl").textContent = so(k.so) + " bình luận đã cào trên " + so(k.so_bai) + " bài" +
+      (daDoc != null ? " · tỉ lệ bình luận đã đọc " + pt(daDoc) : "");
     xoa(el);
-    el.appendChild(oSo("Đã cào (thô)", so(k.so), "trên " + so(k.so_bai) + " bài" + (phu != null ? " · phủ " + pt(phu) : "")));
+    el.appendChild(oSo("Đã cào (thô)", so(k.so), "trên " + so(k.so_bai) + " bài" + (daDoc != null ? " · tỉ lệ đã đọc " + pt(daDoc) : "")));
     el.appendChild(oSo("Thảo luận sạch", so(k.sach), "đã lọc " + so(k.da_loc) + (k.thuong_hieu ? " · " + so(k.thuong_hieu) + " thương hiệu" : "")));
     el.appendChild(oSo("Tích cực", pt(k.tich_cuc_pt), so(k.tich_cuc) + " bình luận", "var(--cs-tc)"));
     el.appendChild(oSo("Tiêu cực", pt(k.tieu_cuc_pt), so(k.tieu_cuc) + " bình luận", "var(--cs-ti)"));
@@ -2912,8 +3105,8 @@
   // Số liệu đang hiện là của bộ lọc TRƯỚC (lượt đổi lỗi): mờ + `inert` các khối (không bấm xem
   // chi tiết được — tránh trộn bộ lọc mới với số cũ), tới khi tải được.
   var soCu = false;
-  var CHON_KHOI_CU = "#cs-trang > .luoi, " +
-    "#cs-trang > section.the-khoi:not(.cs-bo-loc):not(#khoi-bl), #khoi-bl .cs-bl-ben";
+  var CHON_KHOI_CU = "#cs-trang .cs-nhom > .luoi, #cs-trang .cs-nhom > #kpi, " +
+    "#cs-trang .cs-nhom > section.the-khoi:not(#khoi-bl), #khoi-bl .cs-bl-ben";
   function khoiCu(cu) {
     soCu = cu;
     $("cs-trang").classList.toggle("cs-so-cu", cu);
@@ -2943,9 +3136,7 @@
     t.setAttribute("aria-busy", "true");
     if (t.classList.contains("dang-tai")) return;
     t.classList.add("cs-dang-doi");
-    var k = $("kpi");
-    xoa(k);
-    for (var i = 0; i < 6; i++) k.appendChild(tao("div", "cs-khung-cho cs-khung-cho--kpi"));
+    khungKpi($("kpi"));
     var nn = $("nha-ngoai");
     if (!nn.contains(document.activeElement)) {
       xoa(nn);
@@ -2979,6 +3170,12 @@
     baoLoiLoc("");
     if (ctlChung) { ctlChung.abort(); ctlChung = null; }
     if (bl.ctl) { bl.ctl.abort(); bl.ctl = null; }
+    if (ctlNguon) {                                    // lượt mới đã mang cách xếp đang chọn
+      ctlNguon.abort();
+      ctlNguon = null;
+      $("top-nguon").classList.remove("cs-dang-doi");
+      $("top-nguon").removeAttribute("aria-busy");
+    }
     batDauDoi();
     veThanhLocChung();
     clearTimeout(henLoc);
@@ -3083,17 +3280,20 @@
     var d = duLieu, m = mau();
     kyTruocChu = ngayDu(d.khoang.ky_truoc.tu) + " – " + ngayDu(d.khoang.ky_truoc.den);
     kyTruocCoSo = coKyTruoc(d);
+    // Theo thứ tự trên trang (19/10/2026): Tổng quan → Kênh & Nguồn → Sắc thái & Chủ đề → Ý định
+    // mua → Nội dung.
     chay("bộ lọc", veThanhLocChung);
-    chay("internal vs external channel", function () { veNhaNgoai(d); });
     chay("KPI", function () { veKpi(d); });
     chay("thảo luận", function () { veXuHuong(d, m); });
+    chay("phân bố", function () { vePhanBo(d); });
+    chay("internal vs external channel", function () { veNhaNgoai(d); });
+    chay("nguồn nổi bật", function () { veTopNguon(d); });
     chay("sắc thái", function () { veSacThai(d, m); });
     chay("sắc thái theo thời gian", function () { veSacThaiTg(d, m); });
-    chay("ý định mua", function () { veYDinh(d, m); });
+    chay("sắc thái theo nền tảng", function () { veSacNenTang(d); });
     chay("chủ đề", function () { veChuDe(d); });
     chay("từ khoá", function () { veTuKhoa(d); });
-    chay("phân bố", function () { vePhanBo(d); });
-    chay("nguồn nổi bật", function () { veTopNguon(d); });
+    chay("ý định mua", function () { veYDinh(d, m); });
     chay("bài nổi bật", function () { veTopBai(d); });
     chay("bình luận", function () { veBinhLuan(d); });
     // Kỳ so sánh: nói MỘT lần ở ⓘ cạnh khoảng ngày (17/10/2026), thẻ KPI chỉ còn "▲ x%".
@@ -3131,7 +3331,7 @@
   // đè kết quả mới); doiLoc: lượt do đổi bộ lọc chung -> luồng bình luận tải lại từ trang 1.
   function tai(ctl, doiLoc) {
     function conMoi() { return ctl === ctlChung; }
-    return goiApi("chi-so", {}, { signal: ctl.signal, khiBan: function (g) {
+    return goiApi("chi-so", thamSoNguon(), { signal: ctl.signal, khiBan: function (g) {
       if (conMoi()) baoLoi("Máy chủ đang bận tính số liệu — tự thử lại sau " + g + " giây…");
     } })
       .then(function (j) {
@@ -3143,7 +3343,7 @@
         if (lanDau) {
           tt.che = j.xu_huong && j.xu_huong.don_vi === "tuần" ? "tuan" : "ngay";
           var nguon = coBinhLuan(j) ? "bl" : "bai";
-          tt.sacNguon = tt.tgNguon = tt.cdNguon = nguon;
+          tt.sacNguon = tt.tgNguon = tt.cdNguon = tt.ntNguon = nguon;
         }
         loiLuot = false;
         ketThucDoi();
@@ -3230,6 +3430,14 @@
     if (tam && tam.open && !laDienThoai()) tam.close();  // xoay/rộng ra: thanh lọc về chỗ cũ
     doDau();
   }, 150));
+
+  // Ô "Xếp theo" của Nguồn nổi bật (19/10/2026).
+  (function () {
+    var s = $("tn-sap-xep");
+    if (!s) return;
+    s.value = tt.sapNguon;
+    s.addEventListener("change", function () { tt.sapNguon = s.value; taiNguon(); });
+  })();
 
   // Công tắc "Gồm cả bình luận minigame" (mặc định TẮT): theo URL như bộ lọc chung (gom_mg=1).
   (function () {

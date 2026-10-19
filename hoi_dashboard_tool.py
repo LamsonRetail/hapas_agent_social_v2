@@ -91,7 +91,8 @@ PHAN = {
     "khung_hoang": "tín hiệu khủng hoảng: bài tiêu cực ≥ 1.000 tương tác, tiêu cực tăng",
     "chi_phi": "ngân sách tháng: đã tiêu, dự báo, trần, các lượt quét gần nhất (chi phí, kết quả)",
     "lich": "lịch quét tự động: trạng thái, mốc kế, ≈ USD 30 ngày, kết quả lần gần nhất",
-    "do_phu": "kiểm độ phủ thu thập hằng tuần (khi đã có)",
+    "do_phu": "độ thu đủ (thẻ “Độ thu đủ”, trước gọi độ phủ): % mẫu kiểm của Mark đã có trong "
+              "kho, 2 lần/tuần (khi đã có) — không phải độ phủ thị trường / share of voice",
     "bo_loc": "giá trị lọc đang có dữ liệu (nền tảng, loại nguồn, chủ đề, khoá nguồn…)",
 }
 PHAN_MAC_DINH = ("tong_quan", "sac_thai", "chu_de", "tu_khoa", "bai")
@@ -112,7 +113,7 @@ SCHEMA = {
         "dashboard — bao nhiêu bài/thảo luận, tăng giảm so với kỳ trước, tích cực/tiêu cực %, "
         "chủ đề, từ khoá nổi bật, nguồn/KOL nói nhiều, bài nổi bật, Internal vs External "
         "channel, khách hỏi mua, báo & web, cảnh báo khủng hoảng, chi phí/ngân sách quét, lịch "
-        "quét, độ phủ. KHÔNG dùng để quét mới (đó là `social_listen`/`/theodoi`).\n"
+        "quét, độ thu đủ. KHÔNG dùng để quét mới (đó là `social_listen`/`/theodoi`).\n"
         "THAM SỐ: không nói kỳ thì để trống (= 30 ngày trọn tới hết hôm qua, như dashboard). "
         "`bo_loc` dùng đúng mã của dashboard; giá trị nguồn/chủ đề lạ thì gọi `phan`=[\"bo_loc\"] "
         "để lấy giá trị hợp lệ.\n"
@@ -792,17 +793,18 @@ def _lich(kho, du_an: dict, quan_ly: bool, bay_gio) -> dict:
 
 
 def _do_phu(kho, ma: str, bay_gio) -> dict:
-    """Thẻ "Độ phủ" (kiểm hằng tuần) — chỉ khi bản dashboard + kho đã có (17/10/2026)."""
+    """Thẻ "Độ thu đủ" (trước gọi "Độ phủ"; kiểm 2 lần/tuần) — chỉ khi bản dashboard + kho đã có
+    (17/10/2026). Khoá dữ liệu vẫn là `do_phu`."""
     ham, json_fn = getattr(kho, "do_phu_gan_nhat", None), getattr(CS, "do_phu_json", None)
     if ham is None or json_fn is None:
-        return {"co": False, "ghi_chu": "Dashboard bản này chưa có kiểm độ phủ."}
+        return {"co": False, "ghi_chu": "Dashboard bản này chưa có kiểm độ thu đủ."}
     try:
         x = json_fn(ham(ma), bay_gio)
     except Exception as e:  # noqa: BLE001 — bảng chưa tạo: như trang, không có thẻ
-        print(f"[hoi_dashboard] độ phủ lỗi: {type(e).__name__}")
-        return {"co": False, "ghi_chu": "Chưa đọc được kết quả kiểm độ phủ."}
+        print(f"[hoi_dashboard] độ thu đủ lỗi: {type(e).__name__}")
+        return {"co": False, "ghi_chu": "Chưa đọc được kết quả kiểm độ thu đủ."}
     if not x:
-        return {"co": False, "ghi_chu": "Dự án chưa có lượt kiểm độ phủ nào."}
+        return {"co": False, "ghi_chu": "Dự án chưa có lượt kiểm độ thu đủ nào."}
     return {"co": True, **x}
 
 

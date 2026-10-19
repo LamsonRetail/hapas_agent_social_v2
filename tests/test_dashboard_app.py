@@ -2997,3 +2997,78 @@ def test_quan_tri_vien_doi_moi_quyen_va_chuyen_du_an():
     assert r.status_code == 303 and kho.du_an["hapas"]["don_vi"] == "matemade"
     dang_nhap(c, XEM)                     # người xem HAPAS: dự án đã sang bên khác → không thấy
     assert c.get("/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14").status_code == 404
+
+
+
+def _hai_nguon(kho):
+    d1 = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    kho.bai = [_bai(d1, khoa="tiktok:1", nguon_id=1, nguon_ten="A", tac_gia="A", binh_luan=50, xem=10),
+               _bai(d1, khoa="tiktok:2", nguon_id=2, nguon_ten="B", tac_gia="B", binh_luan=0,
+                    xem=9000, sac_thai="Tiêu cực"),
+               _bai(d1, khoa="tiktok:3", nguon_id=3, nguon_ten="Nhà", tac_gia="Nhà",
+                    nguon_loai="kenh_nha")]
+
+
+Q_HAI = "/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14"
+
+
+def test_chi_so_bo_cuc_moi_va_xep_nguon():
+    """Góp ý marketing 19/10/2026: năm nhóm, Nguồn nổi bật xếp ở máy chủ (`sap_nguon`), sắc thái
+    theo nền tảng, tiêu cực bình luận tách đôi, "Tỉ lệ bình luận đã đọc"."""
+    _, c, kho = tao()
+    _hai_nguon(kho)
+    dang_nhap(c, XEM)
+    d = c.get(Q_HAI).json()
+    assert d["sap_nguon"] == "thao_luan" and d["top_nguon"][0]["nguon"][0]["ten"] == "A"
+    assert "top_nguon_theo" not in d                         # chỉ ở bộ nhớ đệm
+    assert d["sac_thai_nen_tang"] == [{"nen_tang": "tiktok", "ten": "TikTok", "so": 2, "Tích cực": 1,
+                                       "Tiêu cực": 1, "Trung lập": 0, "chưa phân loại": 0}]
+    assert "sac_thai_nen_tang" in d["binh_luan_da_cao"]
+    assert {"tieu_cuc_thuong_hieu", "tieu_cuc_khac"} <= set(d["binh_luan_da_cao"]["kpi"])
+    d = c.get(Q_HAI + "&sap_nguon=xem").json()
+    assert d["sap_nguon"] == "xem" and d["top_nguon"][0]["nguon"][0]["ten"] == "B"
+    assert c.get(Q_HAI + "&sap_nguon=la").status_code == 400
+    dang_nhap(c, "nguoi.la@x.vn")                    # quyền giữ nguyên: người lạ không có số
+    assert c.get(Q_HAI + "&sap_nguon=xem").status_code == 403
+    dang_nhap(c, XEM)
+    t = c.get("/").text
+    for ma in ("nhom-tq", "nhom-kn", "nhom-st", "nhom-yd", "nhom-nd", "tn-sap-xep", "sac-nen-tang",
+               "nguon-sac-nt", "ti-tach", "pb-web"):
+        assert f'id="{ma}"' in t, ma
+    # thứ tự nhóm: Tổng quan → Kênh & Nguồn → Sắc thái & Chủ đề → Ý định mua → Nội dung
+    vt = [t.index(f'id="{x}"') for x in ("kpi", "nen-tang", "khoi-nha-ngoai", "top-nguon", "bd-sac-thai",
+                                          "sac-nen-tang", "chu-de", "tk-may", "khoi-y-dinh", "top-bai",
+                                          "khoi-bl")]
+    assert vt == sorted(vt)
+    assert [o for o in re.findall(r'<option value="(\w+)"', t) if o in ("thao_luan", "bai", "xem")] == [
+        "thao_luan", "bai", "xem"]
+    assert 'class="muc__so"' not in t and "Tỉ lệ bình luận đã đọc" in t and "Độ phủ =" not in t
+
+
+def test_doi_cach_xep_nguon_khong_tinh_lai_ca_trang(monkeypatch):
+    """Review M2: đổi "Xếp theo" lấy bảng từ bộ nhớ đệm (cả ba cách đã tính một lượt) — không
+    tính lại cả trang dưới khoá `ban` (503 cho người khác)."""
+    from dashboard import chi_so as CS
+    _, c, kho = tao()
+    _hai_nguon(kho)
+    dang_nhap(c, XEM)
+    goc, dem = CS.tong_hop, []
+    monkeypatch.setattr(CS, "tong_hop", lambda *a, **k: dem.append(1) or goc(*a, **k))
+    tops = {s: c.get(Q_HAI + f"&sap_nguon={s}").json()["top_nguon"][0]["nguon"][0]["ten"]
+            for s in ("thao_luan", "xem", "bai", "thao_luan")}
+    assert len(dem) == 1 and tops == {"thao_luan": "A", "xem": "B", "bai": "A"}
+
+
+def test_chi_tiet_sac_thai_nen_tang_khop_so_hang():
+    """Review M1: "Chi tiết" của hàng Sắc thái theo nền tảng (bài) không kèm bài Internal channel —
+    tổng danh sách = số của hàng."""
+    _, c, kho = tao()
+    _hai_nguon(kho)
+    dang_nhap(c, XEM)
+    hang = c.get(Q_HAI).json()["sac_thai_nen_tang"][0]
+    q = "/api/bai?du_an=hapas&tu=2026-10-08&den=2026-10-14&ct_nen_tang=tiktok"
+    assert c.get(q).json()["tong"] == 3                       # không cờ: gồm bài kênh nhà
+    assert c.get(q + "&ct_ngoai_nha=1").json()["tong"] == hang["so"] == 2
+    assert c.get(q + "&ct_ngoai_nha=1&ct_sac_thai=Tiêu cực").json()["tong"] == hang["Tiêu cực"]
+    assert c.get(q + "&ct_ngoai_nha=x").status_code == 400
+

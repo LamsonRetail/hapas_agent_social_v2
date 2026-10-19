@@ -859,3 +859,54 @@ def test_tu_ghep_danh_sach_hop_le():
     assert len({f for f, _ in dang}) == len(dang)
     assert TG.HU & set(TG.GHEP) <= {"ban than", "co the", "do do"}
     assert TG.LIEN["tuixach"] == "tui xach" and TG.GHEP["tui xach"] == "túi xách"
+
+
+# ───────────────── góp ý marketing 19/10/2026: xếp nguồn, sắc thái theo nền tảng, tiêu cực tách đôi ─────────────────
+def test_top_nguon_xep_theo_lua_chon_truoc_khi_cat():
+    """Xếp ở máy chủ TRƯỚC khi cắt top: top 1 theo lượt xem là nguồn nhiều xem nhất dù ít thảo luận."""
+    rows = [bai("2026-10-10T09:00+07:00", nid=1, tk="a", tg="A", bl=50, xem=10),
+            bai("2026-10-10T09:00+07:00", nid=2, tk="b", tg="B", bl=0, xem=9000),
+            bai("2026-10-10T10:00+07:00", nid=3, tk="c", tg="C", bl=1, xem=20),
+            bai("2026-10-10T11:00+07:00", nid=3, tk="c", tg="C", bl=1, xem=20),
+            bai("2026-10-10T12:00+07:00", nid=3, tk="c", tg="C", bl=1, xem=20)]
+    def ten(sap):
+        return [n["ten"] for n in CS.top_nguon(rows, toi_da=1, sap=sap)[0]["nguon"]]
+    assert ten("thao_luan") == ["A"] and ten("xem") == ["B"] and ten("bai") == ["C"]
+    assert CS.top_nguon(rows) == CS.top_nguon(rows, sap="thao_luan")       # mặc định không đổi
+    th = CS.tong_hop(rows, D(2026, 10, 10), D(2026, 10, 10), hom_nay=D(2026, 10, 11), sap_nguon="xem")
+    assert th["sap_nguon"] == "xem" and th["top_nguon"][0]["nguon"][0]["ten"] == "B"
+    with pytest.raises(KeyError):
+        CS.top_nguon(rows, sap="la")
+
+
+def test_sac_thai_theo_nen_tang_bai_bo_kenh_nha():
+    rows = [bai("2026-10-10T09:00+07:00", sac="Tích cực"),
+            bai("2026-10-10T09:00+07:00", sac="Tiêu cực"),
+            bai("2026-10-10T09:00+07:00", p="facebook", sac=None),
+            bai("2026-10-10T09:00+07:00", p="facebook", sac="Tích cực", loai="kenh_nha")]
+    th = CS.tong_hop(rows, D(2026, 10, 10), D(2026, 10, 10), hom_nay=D(2026, 10, 11))
+    assert th["sac_thai_nen_tang"] == [
+        {"nen_tang": "tiktok", "ten": "TikTok", "so": 2, CS.TC: 1, CS.TI: 1, CS.TL: 0, CS.CHUA: 0},
+        {"nen_tang": "facebook", "ten": "Facebook", "so": 1, CS.TC: 0, CS.TI: 0, CS.TL: 0, CS.CHUA: 1}]
+    # cùng tập với vòng sắc thái: tổng khớp
+    assert sum(g["so"] for g in th["sac_thai_nen_tang"]) == sum(x["so"] for x in th["sac_thai"])
+
+
+def test_bl_sac_thai_nen_tang_va_tieu_cuc_tach_theo_chu_de():
+    luc = datetime.datetime(2026, 10, 10, 9, tzinfo=datetime.timezone(datetime.timedelta(hours=7)))
+
+    def c(sac, cd, p="tiktok", **kw):
+        return {"khoa_bai": "k", "ma": f"{sac}{cd}{p}", "nen_tang": p, "luc": luc, "dang_luc": luc,
+                "sac_thai": sac, "chu_de": cd, "noi_dung": "x", **kw}
+    rows = [c("Tiêu cực", "Sản phẩm/chất lượng"), c("Tiêu cực", "Giá/mua ở đâu/ý định mua"),
+            c("Tiêu cực", "Giao hàng/dịch vụ", p="facebook"), c("Tiêu cực", "Đối thủ"),
+            c("Tiêu cực", "KOL/nội dung"), c("Tiêu cực", "Minigame/bài dự thi"),
+            c("Tiêu cực", None), c("Tích cực", "Sản phẩm/chất lượng"),
+            c("Tiêu cực", "Sản phẩm/chất lượng", loai="spam")]          # bị lọc: không tính
+    d = datetime.date(2026, 10, 10)
+    b = CS.tong_hop_bl(rows, d, d, hom_nay=d)
+    assert b["kpi"]["tieu_cuc"] == 7
+    assert (b["kpi"]["tieu_cuc_thuong_hieu"], b["kpi"]["tieu_cuc_khac"]) == (4, 3)
+    nt = {g["nen_tang"]: g for g in b["sac_thai_nen_tang"]}
+    assert nt["tiktok"]["so"] == 7 and nt["tiktok"][CS.TI] == 6 and nt["tiktok"][CS.TC] == 1
+    assert nt["facebook"]["so"] == 1 and b["sac_thai_nen_tang"][0]["nen_tang"] == "tiktok"
