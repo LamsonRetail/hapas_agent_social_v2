@@ -283,6 +283,17 @@ _COT_BAI = ("khoa", "nen_tang", "nguon_id", "link", "tac_gia", "tai_khoan", "fol
             "dang_luc", "noi_dung", "hashtag", "khop_tu_khoa", "sac_thai", "chu_de", "ly_do_giu",
             "xem", "thich", "binh_luan", "chia_se", "ma_noi_dung")
 _SO = ("xem", "thich", "binh_luan", "chia_se")
+#: Số "tụt về 0" (19/10/2026, bài TikTok 1.387 bình luận ghi thành 0 dù TikTok vẫn hiện 1.389):
+#: nhiều parser đổi trường thiếu thành 0 (`int(x or 0)`). Bài đã có số > 0 mà lượt mới trả đúng 0
+#: thì coi như nguồn không trả số — giữ số cũ; lượt sau đọc được số thật sẽ ghi đè.
+_GIU_KHI_VE_0 = "COALESCE(NULLIF({moi}, CASE WHEN {cu} > 0 THEN 0 END), {cu})"
+
+
+def _so_da_giu(x, r: dict) -> list:
+    """Số ghi vào `chi_so_ngay`: số của bài SAU khi cập nhật (đã giữ số cũ khi tụt về 0) cho cột
+    lượt này có đọc; cột lượt này không đọc vẫn để NULL như trước."""
+    return [(x[k] if isinstance(x, dict) and k in x else r.get(k)) if r.get(k) is not None else None
+            for k in _SO]
 #: Cột riêng của bài Báo & Web (16/10/2026, `nguon_web`): chỉ đưa vào câu ghi khi dòng có giá trị
 #: — bài mạng xã hội ghi đúng câu lệnh cũ, DB chưa chạy bản schema mới vẫn ghi được bài MXH.
 _COT_WEB = ("kieu_trang", "muc_nhac", "la_pr")
@@ -419,7 +430,9 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                 f"INSERT INTO bai (du_an, kieu_quet, luot_dau, luot_cuoi, {cot}) "
                 f"VALUES (%s, %s, %s, %s, {dat}) "
                 "ON CONFLICT (du_an, khoa) DO UPDATE SET "
-                + "".join(f"{k} = {ham}(EXCLUDED.{k}, bai.{k}), " for k in _SO) +
+                + "".join(f"{k} = GREATEST(EXCLUDED.{k}, bai.{k}), " if ham == "GREATEST" else
+                          f"{k} = " + _GIU_KHI_VE_0.format(moi=f"EXCLUDED.{k}", cu=f"bai.{k}") + ", "
+                          for k in _SO) +
                 "followers = COALESCE(EXCLUDED.followers, bai.followers), "
                 "sac_thai = COALESCE(EXCLUDED.sac_thai, bai.sac_thai), "
                 "chu_de = COALESCE(EXCLUDED.chu_de, bai.chu_de), "
@@ -429,7 +442,7 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                 "kieu_quet = CASE WHEN bai.kieu_quet = 'theo_doi' THEN 'theo_doi' "
                 "ELSE EXCLUDED.kieu_quet END, "
                 "cap_nhat_cuoi = now(), luot_cuoi = EXCLUDED.luot_cuoi "
-                "RETURNING (xmax = 0) AS moi",
+                "RETURNING (xmax = 0) AS moi, xem, thich, binh_luan, chia_se",
                 [ma, kieu, luot_id, luot_id, *gia_tri]).fetchone()
             if x and x["moi"]:
                 moi += 1
@@ -451,7 +464,7 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                     "ON CONFLICT (du_an, khoa, ngay) DO UPDATE SET xem = EXCLUDED.xem, "
                     "thich = EXCLUDED.thich, binh_luan = EXCLUDED.binh_luan, "
                     "chia_se = EXCLUDED.chia_se",
-                    [ma, r["khoa"], _TZ, *[r.get(k) for k in _SO]])
+                    [ma, r["khoa"], _TZ, *_so_da_giu(x, r)])
     return moi, cu
 
 
@@ -464,10 +477,11 @@ def cap_nhat_so_lieu(ma: str, luot_id: int, rows: list[dict]) -> int:
     with ket_noi() as c:
         for r in rows:
             x = c.execute(
-                "UPDATE bai SET xem = COALESCE(%s, xem), thich = COALESCE(%s, thich), "
-                "binh_luan = COALESCE(%s, binh_luan), chia_se = COALESCE(%s, chia_se), "
+                "UPDATE bai SET " + "".join(
+                    f"{k} = " + _GIU_KHI_VE_0.format(moi="%s::bigint", cu=k) + ", " for k in _SO) +
                 "cap_nhat_cuoi = now(), luot_cuoi = %s WHERE du_an = %s AND khoa = %s "
-                "RETURNING khoa", [*[r.get(k) for k in _SO], luot_id, ma, r["khoa"]]).fetchone()
+                "RETURNING khoa, xem, thich, binh_luan, chia_se",
+                [*[r.get(k) for k in _SO], luot_id, ma, r["khoa"]]).fetchone()
             if not x:
                 continue
             n += 1
@@ -477,7 +491,7 @@ def cap_nhat_so_lieu(ma: str, luot_id: int, rows: list[dict]) -> int:
                 "ON CONFLICT (du_an, khoa, ngay) DO UPDATE SET xem = EXCLUDED.xem, "
                 "thich = EXCLUDED.thich, binh_luan = EXCLUDED.binh_luan, "
                 "chia_se = EXCLUDED.chia_se",
-                [ma, r["khoa"], _TZ, *[r.get(k) for k in _SO]])
+                [ma, r["khoa"], _TZ, *_so_da_giu(x, r)])
     return n
 
 
