@@ -1703,6 +1703,7 @@ def tu_nen_tang(du_an: dict, p: str, tu: list[str]) -> list[str]:
 #   sudo -u postgres psql -d lang_nghe -c "UPDATE du_an SET cau_hinh = jsonb_set(cau_hinh,
 #     '{tu_khoa,threads,duong1_tu}', '[\"hapas\", \"hapasvn\"]'::jsonb) WHERE ma = 'hapas'"
 # (lưu trang Ngân sách giữ nguyên khoá này — khối tu_khoa.threads bắt đầu từ bản đang lưu).
+# `duong1_tu: []` = TẮT đường 1 (19/10/2026); không có từ nào hợp lệ cũng tắt — không rơi về tên.
 def _mot_chu_co_brand(kw: str, ten: list[str]) -> bool:
     """`kw` là từ khoá MỘT chữ (không dấu cách sau khi bỏ '#') mà dạng viết liền (bỏ dấu, chỉ a-z0-9,
     `_khoa_tag`) chứa một tên brand viết liền: với tên HAPAS thì "hapas", "#HAPAS", "hapas.vn",
@@ -1739,19 +1740,24 @@ def tu_threads_duong1(du_an: dict, tu: list[str]) -> tuple[list[str], str]:
     """Từ khoá ĐƯỜNG 1 Threads (futurizerush) từ `tu` = từ khoá TÌM của Threads (đã bỏ `bo_tu`).
     -> (từ khoá, lý do cho phễu). Có `duong1_tu` thì dùng danh sách đó (bỏ `bo_tu`); không thì
     chỉ từ MỘT chữ có tên brand (`_mot_chu_co_brand`; brand = tên + mã dự án + `ten` của
-    `hashtag_can_nhac_brand` — `cau_hinh_hashtag_brand`, như cổng brand và miễn seeding). Rỗng sau
-    khi lọc thì tìm tên brand (tên một chữ đầu tiên, không có thì tên viết liền). Tối đa
-    `TK_TOI_DA_TU`; `_tu_cho` cắt tiếp theo số bài."""
+    `hashtag_can_nhac_brand` — `cau_hinh_hashtag_brand`, như cổng brand và miễn seeding). Tối đa
+    `TK_TOI_DA_TU`; `_tu_cho` cắt tiếp theo số bài.
+
+    Rỗng (sau khi lọc `bo_tu`) = ĐƯỜNG 1 TẮT: lượt chỉ chạy đường 2, phễu ghi lý do. Vì sao (soát PR
+    #76, 19/10/2026): bản 18/10 rơi về tìm tên brand — phá luật `bo_tu` (bỏ "hapas" vẫn tìm
+    "HAPAS"), dự án tên nhiều chữ thì tìm theo MÃ dự án ("kdla", 0,08 USD/lượt cho bài lạc đề), và
+    `duong1_tu: []` không tắt được đường 1. Nay `duong1_tu: []` (rỗng có chủ ý) là cách tắt."""
     ten = cau_hinh_hashtag_brand(du_an)["ten"]
     rieng = duong1_tu(du_an)
     if rieng is not None:
         ra, ly = tu_nen_tang(du_an, "threads", rieng), "theo cấu hình duong1_tu"
+        if not ra:
+            ly = ("duong1_tu rỗng" if not rieng else "duong1_tu chỉ còn từ bị bo_tu") \
+                + " — tắt đường 1"
     else:
         ra, ly = [kw for kw in tu if _mot_chu_co_brand(kw, ten)], "từ một chữ có tên brand"
-    if not ra and ten:
-        ra = [next((t for t in ten if A.tu_mot_chu(t)), "") or _khoa_tag(ten[0])]
-        ly = ("duong1_tu rỗng" if rieng is not None else "không có từ một chữ có tên brand") \
-            + " — tìm tên brand"
+        if not ra:
+            ly = "không có từ một chữ có tên brand — tắt đường 1"
     # Bỏ trùng như actor nhận ("#HAPAS" = "hapas" — `apify_tool._bo_trung_tu_khoa`), để `_tu_cho`
     # không tốn một suất `so_bai // 10` cho bản trùng.
     da: set[str] = set()
@@ -2130,7 +2136,8 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
             tu_1, ly_1 = (tu_threads_duong1(du_an, tu_p) if p == "threads" and tu_p
                           else (tu_p, ""))
             q = _tu_cho(p, tag_p if p == "instagram" else tu_1, cfg[p]["so_tu"], so_bai)
-            if not q:
+            # Threads đường 1 tắt (19/10/2026, `tu_threads_duong1` rỗng) vẫn chạy đường 2 bên dưới.
+            if not q and not (p == "threads" and tu_p):
                 continue
             if p in co_run:
                 tk["ghi_chu"].append(f"tìm {_TEN[p]}: bot khởi động lại giữa lượt tìm — không gửi lại")
@@ -2158,6 +2165,16 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 con = max(0.0, con - tien2)
                 tk["usd"] += tien2
                 hits.extend(hits2)
+                if not q:
+                    # Đường 1 TẮT (19/10/2026): không có từ một chữ có tên brand sau khi lọc
+                    # `bo_tu`, hoặc `duong1_tu: []` — KHÔNG rơi về tên brand / mã dự án. Phễu +
+                    # ghi chú nói lý do và cụm nào chỉ gửi đường 2; không trả 0,08 khởi động.
+                    _bo_qua_tk(v, tk, p, "TAT_DUONG_1", ly_1,
+                               f"{len(tu_p)} từ khoá chỉ gửi đường 2"
+                               if cau_hinh_th2(du_an)["bat"] else
+                               "đường 2 cũng tắt — lượt này không tìm Threads")
+                    tk["pheu"][p]["duong1"] = {"tu": [], "ly_do": ly_1, "chi_duong2": list(tu_p)}
+                    continue
             if p in TK_GIAN_NEN_TANG:
                 # Giãn nhịp (18/10/2026): nhiều lượt liền gần như không ra bài mới → 2 ngày/lần.
                 bo, ly_gian = gian_nhip(cfg[p].get("gian"),

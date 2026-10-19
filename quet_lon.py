@@ -113,9 +113,10 @@ def _nguong() -> tuple[int, int, int]:
             A._so_env("SOCIAL_NEN_NGUONG_GIAY", 80, 20, 3600))
 
 
-def giay_tai_cho(plats: list[str], lims: dict, queries: list[str]) -> float:
+def giay_tai_cho(plats: list[str], lims: dict, queries: list[str], d_to=None) -> float:
     """Giây Apify ƯỚC TÍNH nếu chạy tại chỗ — các nền tảng chạy song song nên lấy nền
-    tảng chậm nhất. TikTok tại chỗ = lượt dò apidojo + lượt dự phòng clockworks."""
+    tảng chậm nhất. TikTok tại chỗ = lượt dò apidojo + lượt dự phòng clockworks. `d_to`: ngày
+    kết thúc khoảng hỏi (Threads khoảng cũ không chạy đường 2 — `A.ly_do_bo_duong_2`)."""
     k = max(1, len(A._bo_trung_tu_khoa(queries)))
     ra = 0.0
     for p in plats:
@@ -129,10 +130,10 @@ def giay_tai_cho(plats: list[str], lims: dict, queries: list[str]) -> float:
         elif p == "facebook":
             g = _GIAY_TAI_CHO_KHOI_DONG + (n / k) / toc(A._ACTORS[p])
         elif p == "threads":             # hai run NỐI ĐUÔI: cụm (đường 2) rồi từ một chữ
-            q1, q2 = A.tach_tu_threads(queries)
+            q1, q2 = A.tach_tu_threads(queries, d_to)
             l1, l2 = A.chia_limit_threads(len(q1), len(q2), n)
             g = sum(_GIAY_TAI_CHO_KHOI_DONG + m / toc(A._ACTORS[a])
-                    for a, tu, m in (("threads", q1, l1), ("threads_2", q2, l2)) if tu)
+                    for a, tu, m in (("threads", q1, l1), ("threads_2", q2, l2)) if tu and m)
         else:
             g = _GIAY_TAI_CHO_KHOI_DONG + n / toc(A._ACTORS[p])
         ra = max(ra, g)
@@ -224,7 +225,7 @@ def dung_payload(p: str, ph: dict, ts: dict) -> dict:
         q = list(ph["tu_khoa"])
         return {"keywords": q, "searchType": "both", "passesPerSurface": A.TH2_LUOT,
                 "maxPostsPerKeyword": max(1, math.ceil(n / max(1, len(q)))), "maxItems": n,
-                "postedWithinDays": int(ph["ngay"])}
+                "postedWithinDays": max(1, min(A.TH2_NGAY_TOI_DA, int(ph["ngay"])))}
     if p == "threads":
         return {"mode": "search", "keywords": [ph["tu_khoa"]], "max_posts": max(10, n),
                 "search_filter": "recent", "start_date": ph["tu"], "end_date": ph["den"]}
@@ -314,13 +315,19 @@ def _ke_facebook(q, lim, ts, ctx) -> dict:
 def _ke_threads(q, lim, ts, ctx) -> dict:
     """Từ khoá MỘT chữ → futurizerush, mỗi từ × mỗi cửa sổ ngày một lượt con; cụm nhiều chữ → MỘT
     lượt con đường 2 (scrapersdelight) — 18/10/2026, xem `apify_tool._tim_threads_tai_cho`:
-    futurizerush khớp cụm theo kiểu HOẶC từng chữ (4/88 bài liên quan, vẫn trả tiền mọi bài)."""
+    futurizerush khớp cụm theo kiểu HOẶC từng chữ (4/88 bài liên quan, vẫn trả tiền mọi bài).
+    Khoảng KẾT THÚC cũ hơn hôm nay quá `A.TH2_TRE_TOI_DA` ngày (19/10/2026): scrapersdelight chỉ
+    lọc "trong N ngày tới hôm nay" (trả bài mới nhất, tính tiền rồi bỏ) → không có lượt đường 2,
+    cụm đi futurizerush theo cửa sổ ngày như trước 18/10, ghi chú nói rõ (`A.ly_do_bo_duong_2`)."""
     d_from = A._parse_date(ts["date_from"], end=False)
     d_to = A._parse_date(ts["date_to"], end=True)
-    q1, q2 = A.tach_tu_threads(q)
+    q1, q2 = A.tach_tu_threads(q, d_to)
     l1, l2 = A.chia_limit_threads(len(q1), len(q2), lim)
     ra = {"phan": [], "chua_phu": [], "ghi_chu": []}
-    if q1:
+    ly2 = A.ly_do_bo_duong_2(d_to)
+    if ly2 and A.tach_tu_threads(q)[1]:
+        ra["ghi_chu"].append(f"Threads: {ly2}.")
+    if q1 and l1 > 0:
         per_kw = math.ceil(l1 / len(q1))
         w = math.ceil(per_kw / _THREADS_MOI_LUOT)
         cua = _cua_so(d_from, d_to, w)
@@ -334,9 +341,9 @@ def _ke_threads(q, lim, ts, ctx) -> dict:
                 ra["phan"].append({"actor": A._ACTORS["threads"], "tu_khoa": k, "limit": moi,
                                    "tu": f"{a:%Y-%m-%d}", "den": f"{b:%Y-%m-%d}",
                                    "nhan": f"'{k}' {a:%d/%m}–{b:%d/%m}"})
-    if q2:
-        ngay = max(1, math.ceil((datetime.datetime.now(A._VN_TZ) - d_from).total_seconds()
-                                / 86400))
+    if q2 and l2 > 0:
+        # Xin tới BÂY GIỜ (actor lọc "trong N ngày tới hôm nay"), kẹp `A.TH2_NGAY_TOI_DA`.
+        ngay = A.ngay_th2(d_from, datetime.datetime.now(A._VN_TZ))
         ra["phan"].append({"kieu": "duong2", "actor": A._ACTORS["threads_2"], "tu_khoa": q2,
                            "limit": l2, "gia": A.TH2_GIA, "khoi": 0.0, "ngay": ngay,
                            "nhan": ("đường 2 " + ", ".join(f"'{k}'" for k in q2))[:120]})
@@ -595,7 +602,7 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
     goi = A._goi_apify() if "facebook" in plats else None
     lims_xet = {p: (min(n, 20) if p == "facebook" and goi in ("FREE", "") else n)
                 for p, n in lims.items()}
-    giay = giay_tai_cho(plats, lims_xet, queries)
+    giay = giay_tai_cho(plats, lims_xet, queries, d_to)
     nen, vi_sao = can_chay_nen(lims_xet, giay, ep)
     import viec_nen
     ts = {"queries": A._bo_trung_tu_khoa(queries), "platforms": plats, "limit": lims,
@@ -635,7 +642,7 @@ def xu_ly_lon(args: dict, *, queries, plats, lims, explicit, country, d_from, d_
                             A._tran_nen_tang(p, nen=nen)[:2])) for p in plats}
                if any(A._khoa_rieng(p) for p in plats) else None)
     if not nen:
-        est_tai_cho, est_luot = A._uoc_tai_cho(plats, lims, queries)
+        est_tai_cho, est_luot = A._uoc_tai_cho(plats, lims, queries, d_to)
         rieng_usd = A._cau_tran_rieng(plats, None, est_luot, nen=False)
         return tool_result(
             success=True, chi_uoc_tinh=True, se_chay_nen=False, queries=queries,

@@ -186,6 +186,7 @@
     "luot_web_con_lai": luot_web, "luot_web_30": luot_web_30,
     "dp": {"luot_con_lai": dp.luot_con_lai or 0, "luot_30": dp.luot_30 or 0},
     "th2": b.tu_khoa.threads.duong2 if b.tu_khoa.threads.duong2 is defined else {},
+    "th1_goc": b.tu_khoa.threads.duong1_goc if b.tu_khoa.threads.duong1_goc is defined else none,
     "tran_luot": tran_luot,
     "tran_platform": db.tran_platform, "tran_da": d.tran_usd_thang|float}|json_script }}</script>
   <form method="post" action="/ngan-sach/{{ d.ma|urlencode }}/cau-hinh" id="ns-form">

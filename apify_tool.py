@@ -2523,7 +2523,8 @@ def _cau_loai_video_tiktok(ds: list[dict], noi: str = "sheet") -> str:
     return s + f"; lọc theo cột '{_COT_LOAI_VIDEO}'."
 
 
-def _uoc_tai_cho(plats: list[str], lims: dict, queries: list[str]) -> tuple[float, dict]:
+def _uoc_tai_cho(plats: list[str], lims: dict, queries: list[str],
+                 d_to=None) -> tuple[float, dict]:
     """(USD ước tính cả lượt, {nền tảng: USD mỗi lượt actor}) của social_listen tại chỗ.
     Facebook chạy MỖI từ khoá một run nên phí khởi động nhân theo số từ; Instagram hai run (tab
     bài + reels, mỗi run mọi hashtag). TikTok qua
@@ -2540,7 +2541,7 @@ def _uoc_tai_cho(plats: list[str], lims: dict, queries: list[str]) -> tuple[floa
                 for p in plats}
     if "threads" in plats:
         # 18/10/2026: futurizerush chỉ cho từ một chữ, cụm đi đường 2 (`_tim_threads_tai_cho`).
-        u, est_luot["threads"] = uoc_threads_tai_cho(queries, lims["threads"])
+        u, est_luot["threads"] = uoc_threads_tai_cho(queries, lims["threads"], d_to)
         est += u
     if "tiktok" in plats:
         q = _bo_trung_tu_khoa(queries) or [""]
@@ -3226,6 +3227,13 @@ _ACTORS["threads_ho_so"] = "scrapersdelight~threads-profile-scraper"
 TH2_GIA = 0.001          # USD / bài (pricingInfos 17/10/2026, sự kiện "post-scraped")
 TH2_LUOT = 2             # passesPerSurface mặc định (lượt thứ 3 trở đi gần như không thêm bài)
 TH_HO_SO_GIA = 0.002     # USD / hồ sơ kèm 4–10 bài mới nhất ("profile-scraped")
+#: Trần `postedWithinDays` gửi scrapersdelight. Input schema của actor (đọc 17/10/2026) chỉ có
+#: `minimum: 0` (0 = KHÔNG lọc ngày), không có `maximum` — đặt hằng để không bao giờ gửi số
+#: khổng lồ khi khoảng hỏi rất dài; bài cũ hơn mốc này chỉ còn đường 1 bắt (19/10/2026).
+TH2_NGAY_TOI_DA = 365
+#: Ngày kết thúc khoảng hỏi cũ hơn hôm nay QUÁ số ngày này thì KHÔNG chạy scrapersdelight
+#: (`ly_do_bo_duong_2`, soát PR #76 19/10/2026).
+TH2_TRE_TOI_DA = 2
 # Việc nền đọc dataset có `fields=` (`_lay_items`): trường bộ đọc dùng phải có trong danh sách. Thêm
 # cho futurizerush các trường `theo_doi` đọc mà danh sách cũ thiếu: `search_keyword` (sản lượng
 # từng từ khoá — ước tính theo lượt trước), `record_type` + `requested_username` + `profile_url`
@@ -3307,7 +3315,7 @@ def _fetch_threads_2(q: list[str], limit: int, country: str, d_from, d_to, *,
     q = _bo_trung_tu_khoa(q)
     if not q or limit <= 0:
         return []
-    ngay = max(1, math.ceil((d_to - d_from).total_seconds() / 86400))
+    ngay = ngay_th2(d_from, d_to)
     raw = _call(_ACTORS["threads_2"], {
         "keywords": q, "searchType": "both",
         "passesPerSurface": max(1, min(5, int(so_luot))),
@@ -3324,30 +3332,73 @@ def _fetch_threads_2(q: list[str], limit: int, country: str, d_from, d_to, *,
 # USD/bài, không phí khởi động. Nên futurizerush chỉ nhận từ khoá MỘT chữ, cụm đi đường 2.
 # social_listen không có dự án: "tên brand" là chính các từ khoá một chữ người dùng gõ (như
 # `danh_dau_bai_nha(…, queries)`); `/theodoi` lọc thêm theo tên brand (`theo_doi.tu_threads_duong1`).
-def tach_tu_threads(q: list[str]) -> tuple[list[str], list[str]]:
-    """(từ khoá MỘT chữ → futurizerush, cụm nhiều chữ → scrapersdelight), đã bỏ trùng."""
+def ngay_th2(d_from, d_to) -> int:
+    """`postedWithinDays` của scrapersdelight cho cửa sổ [d_from, d_to]: số ngày làm tròn LÊN (bao
+    trọn 0 giờ ngày đầu), 1 ≤ N ≤ `TH2_NGAY_TOI_DA`."""
+    return max(1, min(TH2_NGAY_TOI_DA, math.ceil((d_to - d_from).total_seconds() / 86400)))
+
+
+def ly_do_bo_duong_2(d_to, bay_gio=None) -> str:
+    """'' khi scrapersdelight dùng được cho khoảng ngày kết thúc `d_to`; không thì lý do (câu cho
+    `per_platform` / phễu). Vì sao (soát PR #76, 19/10/2026): actor chỉ lọc "trong N ngày tới
+    hôm nay" — hỏi khoảng cũ (vd tháng 8) thì nó trả bài MỚI NHẤT, bị tính tiền rồi bị lọc bỏ hết.
+    Khi đó cụm nhiều chữ đi futurizerush (có `start_date` / `end_date` thật) như trước 18/10."""
+    bay_gio = bay_gio or datetime.datetime.now(_VN_TZ)
+    tre = (bay_gio.date() - d_to.date()).days
+    if tre <= TH2_TRE_TOI_DA:
+        return ""
+    return (f"khoảng ngày kết thúc {d_to:%d/%m/%Y}, cũ hơn hôm nay {tre} ngày (> "
+            f"{TH2_TRE_TOI_DA}): scrapersdelight chỉ lọc 'trong N ngày tới hôm nay' nên sẽ trả bài "
+            "mới nhất ngoài khoảng (vẫn tính tiền) — không chạy; cụm nhiều chữ tìm qua "
+            "futurizerush theo đúng khoảng ngày (khớp từng chữ của cụm, nhiều bài lạc đề hơn)")
+
+
+def tach_tu_threads(q: list[str], d_to=None) -> tuple[list[str], list[str]]:
+    """(từ khoá MỘT chữ → futurizerush, cụm nhiều chữ → scrapersdelight), đã bỏ trùng. `d_to` =
+    ngày kết thúc khoảng hỏi: khoảng cũ (`ly_do_bo_duong_2`) thì mọi từ khoá đi futurizerush."""
     q = _bo_trung_tu_khoa(q)
+    if d_to is not None and ly_do_bo_duong_2(d_to):
+        return q, []
     return [k for k in q if tu_mot_chu(k)], [k for k in q if not tu_mot_chu(k)]
 
 
 def chia_limit_threads(so1: int, so2: int, limit: int) -> tuple[int, int]:
-    """Chia trần bài Threads của lượt cho hai đường theo số từ khoá (mỗi đường có từ ≥ 1 bài)."""
+    """Chia trần bài Threads của lượt cho hai đường theo số từ khoá: tổng = `limit`, mỗi đường có
+    từ ≥ 1 bài khi `limit` ≥ 2; `limit` < 2 (không chia nổi) thì cả phần cho đường 1 (từ một chữ —
+    thường là tên brand), đường 2 nhận 0 bài và không chạy (soát 19/10/2026: (1, 1, 1) ra 2 bài)."""
+    limit = max(0, int(limit))
     if not so2:
-        return int(limit), 0
+        return limit, 0
     if not so1:
-        return 0, int(limit)
-    l1 = max(1, round(limit * so1 / (so1 + so2)))
-    return l1, max(1, int(limit) - l1)
+        return 0, limit
+    if limit < 2:
+        return limit, 0
+    l1 = min(limit - 1, max(1, round(limit * so1 / (so1 + so2))))
+    return l1, limit - l1
 
 
-def uoc_threads_tai_cho(queries: list[str], limit: int) -> tuple[float, float]:
+def chia_tran_threads(tran: float, l2: int, hai_duong: bool) -> tuple[float | None, float]:
+    """(trần USD run đường 1 — None = để `_call` dùng trần console, trần USD run đường 2) của
+    social_listen tại chỗ. Hai run cùng lượt CHIA trần console Threads (soát 19/10/2026: mỗi run
+    mang trọn trần thì tổng có thể gấp đôi): đường 2 lấy max(sàn, bài × 0,001 × 1,5) nhưng chừa
+    sàn cho đường 1, đường 1 lấy phần còn lại. Trần console dưới 2 × sàn (0,2 USD) thì mỗi run
+    vẫn ở sàn `_TRAN_USD_KHOANG[0]` — tổng tối đa 0,2 USD."""
+    san = _TRAN_USD_KHOANG[0]
+    t2 = max(san, l2 * TH2_GIA * 1.5)
+    if not hai_duong:
+        return None, round(min(tran, t2), 2)
+    t2 = round(min(t2, max(san, tran - san)), 2)
+    return round(max(san, tran - t2), 2), t2
+
+
+def uoc_threads_tai_cho(queries: list[str], limit: int, d_to=None) -> tuple[float, float]:
     """(USD cả lượt, USD lượt actor lớn nhất) Threads của social_listen tại chỗ — như
     `_tim_threads_tai_cho`: futurizerush (phí khởi động + bài) chỉ khi có từ một chữ, đường 2 theo
-    bài trả về."""
-    q1, q2 = tach_tu_threads(queries)
+    bài trả về; khoảng cũ (`d_to`, `ly_do_bo_duong_2`) thì mọi từ khoá đi futurizerush."""
+    q1, q2 = tach_tu_threads(queries, d_to)
     l1, l2 = chia_limit_threads(len(q1), len(q2), limit)
-    u1 = _START_COST["threads"] + _UNIT_COST["threads"] * l1 if q1 else 0.0
-    u2 = TH2_GIA * l2 if q2 else 0.0
+    u1 = _START_COST["threads"] + _UNIT_COST["threads"] * l1 if q1 and l1 else 0.0
+    u2 = TH2_GIA * l2 if q2 and l2 else 0.0
     return u1 + u2, max(u1, u2)
 
 
@@ -3355,24 +3406,28 @@ def _tim_threads_tai_cho(q: list[str], limit: int, country: str, d_from, d_to) -
     """Threads của social_listen tại chỗ: từ một chữ → `_FETCH["threads"]` (futurizerush), cụm →
     `_FETCH["threads_2"]` (scrapersdelight; chạy TRƯỚC — nhanh, rẻ, như `/theodoi`). Đường 2 lọc
     ngày theo "trong N ngày tới hôm nay" nên xin từ `d_from` tới BÂY GIỜ (khoảng ngày cũ: bài ngoài
-    khoảng bị `_handle` lọc lại); trần USD = max(sàn, bài × 0,001 × 1,5) kẹp trần console Threads.
+    khoảng bị `_handle` lọc lại). Khoảng KẾT THÚC cũ hơn hôm nay quá `TH2_TRE_TOI_DA` ngày thì
+    không chạy đường 2, cụm đi futurizerush (`ly_do_bo_duong_2` — `_handle` ghi lý do vào
+    `per_platform`). Hai run CHIA trần console Threads (`chia_tran_threads`).
     Một đường lỗi mà đường kia chạy được: lỗi vào sổ run (`_SO_RUN`) → nguồn "chỉ có một phần";
     mọi đường đều lỗi: ném lỗi đầu như trước. Bỏ trùng theo mã bài, giữ bản đường 1 (có follower,
     lượt xem — như `theo_doi._bo_trung_duong_2`)."""
-    q1, q2 = tach_tu_threads(q)
+    q1, q2 = tach_tu_threads(q, d_to)
     l1, l2 = chia_limit_threads(len(q1), len(q2), limit)
     so = _SO_RUN.get()
     bay_gio = datetime.datetime.now(_VN_TZ)
-    tran2 = round(min(_tran_nen_tang("threads")[1],
-                      max(_TRAN_USD_KHOANG[0], l2 * TH2_GIA * 1.5)), 2)
-    viec = [(q2, lambda: _FETCH["threads_2"](
+    tran1, tran2 = chia_tran_threads(_tran_nen_tang("threads")[1], l2,
+                                     bool(q1 and l1 and q2 and l2))
+    viec = [(q2, l2, lambda: _FETCH["threads_2"](
                 q2, l2, country, d_from, max(d_to, bay_gio),
                 moi_tu=max(1, math.ceil(l2 / max(1, len(q2)))), tran_usd=tran2)),
-            (q1, lambda: _FETCH["threads"](q1, l1, country, d_from, d_to))]
+            (q1, l1, lambda: _FETCH["threads"](
+                q1, l1, country, d_from, d_to,
+                **({"tran_usd": tran1} if tran1 is not None else {})))]
     ra: dict[int, list] = {}
     loi: list[Exception] = []
-    for i, (tu, fn) in enumerate(viec):
-        if not tu:
+    for i, (tu, lim, fn) in enumerate(viec):
+        if not tu or lim <= 0:
             continue
         try:
             ra[i] = list(fn() or [])
@@ -4314,7 +4369,7 @@ def _handle(args: dict, **kwargs) -> str:
     # 17/10/2026: hai run, mỗi run mọi hashtag — `_uoc_tai_cho`).
     # Ước tính MỖI LƯỢT chạy actor của từng nền tảng (`est_luot`) — so với `tran_usd_<p>` để
     # nói ra khi trần riêng trói (Apify dừng ở trần, có thể thiếu bài).
-    est, est_luot = _uoc_tai_cho(plats, lims, queries)
+    est, est_luot = _uoc_tai_cho(plats, lims, queries, d_to)
     cau_bai_rieng = _cau_tran_rieng(plats, limit_xin)
     cau_usd_rieng = _cau_tran_rieng(plats, None, est_luot)
     # Lùi vài giây để đồng hồ máy lệch với Apify không làm sót run đầu tiên.
@@ -4446,6 +4501,12 @@ def _handle(args: dict, **kwargs) -> str:
                     "(Facebook gói free: 20 kết quả và 1 LẦN CHẠY / 24 GIỜ) hoặc actor bị "
                     "chặn. PHẢI nói rõ sự mơ hồ này, đừng kết luận là nguồn này không có gì."
                 )
+
+    # Khoảng ngày cũ (19/10/2026, `ly_do_bo_duong_2`): cụm nhiều chữ KHÔNG đi scrapersdelight —
+    # nói ra, không lặng lẽ đổi đường (bài lạc đề nhiều hơn là do đường futurizerush).
+    ly2 = ly_do_bo_duong_2(d_to) if "threads" in per_platform else ""
+    if ly2 and tach_tu_threads(queries)[1]:
+        per_platform["threads"]["duong2_bo_qua"] = ly2
 
     scraped = sum(v.get("scraped", 0) for v in per_platform.values())
 
