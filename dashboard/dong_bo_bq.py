@@ -18,17 +18,22 @@ cần bảng tạm (bảng tạm cũng phải có mô tả theo quy chuẩn), kh
 Mốc (= chặn trên) chỉ dời khi CẢ bảng đẩy xong; lỗi giữa chừng thì ghi `loi`, giữ mốc cũ — lần
 sau đẩy lại, MERGE nên không nhân đôi.
 
-Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, `dong_bo_bq`, cột email (`sua_boi`, `them_boi`).
+Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, `dong_bo_bq`, cột email (`sua_boi`, `them_boi`), và
+`ket_noi_ngoai` (token TikTok đã mã hoá, email người cấp) — TikTok Ads chỉ đẩy `tk_quang_cao` +
+`qc_*` (19/10/2026; bộ hẹn giờ TikTok gọi `chay()` ngay sau lượt đồng bộ của nó).
 Chạy: sau mỗi lượt quét (hook `sau_cap_nhat` của dashboard) và 6 giờ một lần. Một lượt một lúc.
 """
 from __future__ import annotations
 
 import contextlib
 import datetime
+import json
 import os
 import re
 import threading
 import time
+
+from dashboard import quang_cao as QC
 
 #: Số dòng mỗi lần MERGE (tham số truy vấn BigQuery giới hạn kích thước; 500 bài ~ 1 MB).
 LO = 500
@@ -106,7 +111,47 @@ BANG: dict[str, dict] = {
                 ("san_pham", "STRING")],
     },
 }
-THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan")   # cha trước con
+#: TikTok Ads (19/10/2026): cột số kiểu riêng chung mọi bảng qc_* (`quang_cao.COT_SO`) + `chi_so` là
+#: JSON dạng CHUỖI (`chuan_gia_tri` dumps dict; BI đọc bằng JSON_VALUE / PARSE_JSON) + mốc.
+_COT_QC = [*((c, "NUMERIC" if c in QC.COT_TIEN else "INT64") for c in QC.TEN_COT_SO),
+           ("chi_so", "STRING"), ("cap_nhat_luc", "TIMESTAMP")]
+# Không đẩy `ket_noi_ngoai` (token mã hoá, email người cấp) — chỉ tài khoản + số quảng cáo.
+BANG.update({
+    "tk_quang_cao": {
+        "khoa": ["advertiser_id"], "kieu": "toan_bo",
+        "cot": [("advertiser_id", "STRING"), ("ten", "STRING"), ("don_vi", "STRING"),
+                ("gan_tay", "BOOL"), ("gan_luc", "TIMESTAMP"), ("tien_te", "STRING"),
+                ("mui_gio", "STRING"), ("dang_dong_bo", "BOOL"), ("con_quyen", "BOOL"),
+                ("thay_lan_dau", "TIMESTAMP"), ("thay_cuoi", "TIMESTAMP"),
+                ("nap_lui_tu", "DATE"), ("nap_lui_xong_luc", "TIMESTAMP"),
+                ("khan_gia_luc", "TIMESTAMP"),
+                ("cap_nhat_luc", "TIMESTAMP")],
+    },
+    "qc_tk_ngay": {
+        "khoa": ["advertiser_id", "ngay"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "cot": [("advertiser_id", "STRING"), ("ngay", "DATE"), *_COT_QC],
+    },
+    "qc_campaign_ngay": {
+        "khoa": ["campaign_id", "ngay"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "cot": [("advertiser_id", "STRING"), ("campaign_id", "STRING"), ("ngay", "DATE"),
+                ("ten", "STRING"), ("muc_tieu", "STRING"), *_COT_QC],
+    },
+    "qc_ad_ngay": {
+        "khoa": ["ad_id", "ngay"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "cot": [("advertiser_id", "STRING"), ("campaign_id", "STRING"), ("adgroup_id", "STRING"),
+                ("ad_id", "STRING"), ("ngay", "DATE"), ("ten_ad", "STRING"),
+                ("noi_dung", "STRING"), ("ten_campaign", "STRING"), ("ten_nhom", "STRING"),
+                *_COT_QC],
+    },
+    "qc_khan_gia": {
+        "khoa": ["advertiser_id", "tu", "den", "chieu", "gia_tri"], "kieu": "tang_dan",
+        "moc": "cap_nhat_luc",
+        "cot": [("advertiser_id", "STRING"), ("tu", "DATE"), ("den", "DATE"), ("chieu", "STRING"),
+                ("gia_tri", "STRING"), *_COT_QC],
+    },
+})
+THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan",   # cha trước con
+          "tk_quang_cao", "qc_tk_ngay", "qc_campaign_ngay", "qc_ad_ngay", "qc_khan_gia")
 
 
 def dataset() -> str:
@@ -192,11 +237,31 @@ def chuan_gia_tri(kieu: str, v):
         return bool(v)
     if kieu.startswith("ARRAY"):
         return [str(x) for x in v if x is not None]
+    if isinstance(v, (dict, list)):
+        # JSONB của Postgres (qc_*.chi_so) → chuỗi JSON (str(dict) là cú pháp Python, BI không đọc được)
+        return json.dumps(v, ensure_ascii=False, sort_keys=True, default=str)
     return str(v)
 
 
+def xuat_tien_qc() -> bool:
+    """`BQ_QC_XUAT_TIEN` = "1": đẩy cả số TIỀN của quảng cáo TikTok (chi, gia_tri_mua_shop, khoá tiền
+    trong chi_so) lên BigQuery. Mặc định "0" (chờ chủ dự án quyết — trên dashboard chỉ quản trị
+    viên + quản lý của bên thấy tiền): cột tiền đẩy NULL, khoá tiền bị bỏ khỏi chi_so."""
+    return (os.environ.get("BQ_QC_XUAT_TIEN") or "0").strip() == "1"
+
+
+def _bo_tien(bang: str, r: dict) -> dict:
+    if not bang.startswith("qc_") or xuat_tien_qc():
+        return r
+    r = {k: (None if k in QC.COT_TIEN else v) for k, v in r.items()}
+    if isinstance(r.get("chi_so"), dict):
+        r["chi_so"] = {k: v for k, v in r["chi_so"].items() if not QC.la_tien(k)}
+    return r
+
+
 def dong_bq(bang: str, rows: list[dict], cot: list | None = None) -> list[dict]:
-    return [{c: chuan_gia_tri(k, r.get(c)) for c, k in _cot(bang, cot)} for r in rows]
+    return [{c: chuan_gia_tri(k, x.get(c)) for c, k in _cot(bang, cot)}
+            for x in (_bo_tien(bang, r) for r in rows)]
 
 
 def _tham_so_bq(bang: str, rows: list[dict]):

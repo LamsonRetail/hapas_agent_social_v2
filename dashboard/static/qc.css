@@ -1,0 +1,82 @@
+/* Trang "Quảng cáo TikTok" (19/10/2026). Cùng hệ giao diện giao_dien.css; KPI hai tầng dùng CHUNG
+   quy tắc với trang Chỉ số (#80, giao_dien.css). Không màu trang trí: màu chỉ cho
+   trạng thái (▲/▼) và một màu dữ liệu (--s1) cho thanh + đường biểu đồ. */
+.qc-moi { margin: 0; font-size: 13px; color: var(--chu-phu); font-variant-numeric: tabular-nums; }
+
+/* ─── bộ lọc ─── */
+.the-khoi.qc-loc {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; margin-bottom: 16px;
+  background: var(--be-mat-3); border-color: var(--vien-3); box-shadow: none; padding: 14px 16px;
+}
+.qc-loc label.o { flex: 0 1 200px; min-width: 150px; }
+.qc-loc label.o select, .qc-loc label.o input { width: 100%; }
+.qc-loc__nhanh { margin-left: auto; }
+
+/* ─── nhóm nút một-trong-nhiều (như .cs-phan của trang Chỉ số) ─── */
+.qc-phan { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--be-mat-2); border: 1px solid var(--ke); max-width: 100%; overflow-x: auto; }
+.qc-phan:empty { display: none; }
+.qc-phan__nut {
+  display: inline-flex; align-items: center; border: 1px solid transparent; background: transparent; color: var(--chu-phu);
+  font: inherit; font-size: 12.5px; font-weight: 550; line-height: 1.2; padding: 4px 11px; border-radius: 7px;
+  cursor: pointer; min-height: 28px; white-space: nowrap; text-decoration: none;
+  transition: background-color .15s ease-out, color .15s ease-out;
+}
+.qc-phan__nut:hover { color: var(--chu); text-decoration: none; }
+.qc-phan__nut[aria-current="true"], .qc-phan__nut[aria-pressed="true"] {
+  background: var(--be-mat); border-color: var(--truc); color: var(--nhan-dam); font-weight: 700;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .1);
+}
+@media (prefers-color-scheme: dark) {
+  .qc-phan__nut[aria-current="true"], .qc-phan__nut[aria-pressed="true"] { background: var(--nhan-nen); border-color: transparent; }
+}
+
+/* nhóm nút trong đầu mục: co theo bề rộng thẻ, cuộn ngang khi chật (điện thoại) */
+.muc__phai.qc-phan, .qc-xu-huong .muc__phai { min-width: 0; max-width: 100%; }
+.qc-xu-huong .muc__phai { flex: 1 1 auto; justify-content: flex-end; }
+
+/* ─── KPI hai tầng ─── */
+.qc-kpi { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; min-width: 0; }
+/* hàng chính / hàng phụ: quy tắc chung trong giao_dien.css (.kpi-chinh, .kpi--lon, .kpi-phu, .kpi-o) */
+.kpi__nhan .goi-y { vertical-align: 1px; }
+
+/* ─── bảng top ─── */
+.qc-h3 { font-size: 13.5px; color: var(--chu-phu); margin: 0 0 8px; }
+.qc-h3--cach { margin-top: 18px; }
+.qc-bang td { vertical-align: top; }
+.qc-bang__ten { min-width: 260px; }
+.qc-bang__chinh { display: block; font-weight: 600; color: var(--chu); overflow-wrap: anywhere; }
+.qc-bang__noi-dung {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  max-width: 560px; margin-top: 2px; font-size: 12.5px; color: var(--chu-phu); overflow-wrap: anywhere;
+}
+.qc-bang__phu { display: block; margin-top: 2px; font-size: 12px; color: var(--chu-mo); }
+
+/* ─── khán giả ─── */
+.qc-kg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 28px; }
+.qc-kg__o { min-width: 0; }
+.qc-kg__them { margin: 8px 0 0; }
+.qc-thanh-ds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.qc-thanh { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "ten gt" "ray ray"; gap: 4px 10px; }
+.qc-thanh__ten { grid-area: ten; font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-thanh__gt { grid-area: gt; font-size: 12px; color: var(--chu-mo); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qc-thanh__gt b { color: var(--chu); font-weight: 700; }
+.qc-thanh__ray { grid-area: ray; height: 8px; border-radius: 999px; background: var(--be-mat-2); box-shadow: inset 0 0 0 1px var(--ke); overflow: hidden; }
+.qc-thanh__dac { display: block; height: 100%; border-radius: inherit; background: var(--s1); }
+
+@media (max-width: 1200px) {
+  .the-khoi.qc-kpi-phu { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .qc-kg { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .the-khoi.qc-kpi-phu { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qc-loc label.o { flex: 1 1 140px; }
+  .qc-loc__nhanh { margin-left: 0; }
+  .qc-kg { grid-template-columns: minmax(0, 1fr); }
+  .qc-bang__ten { min-width: 200px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qc-phan__nut { transition: none; }
+}
+@media (forced-colors: active) {
+  .qc-phan__nut, .kpi-o { border: 1px solid CanvasText; }
+}

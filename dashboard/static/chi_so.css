@@ -302,18 +302,8 @@ dialog.cs-tam::backdrop { background: rgba(10, 18, 40, .45); }
    chia ô bằng đường kẻ mảnh (bóng 1px trái + trên của từng ô, khung cắt phần thừa ở mép), số nhỏ
    hơn, không biểu tượng; số cột do JS tính (chiaCotKpi). Thẻ sắc thái luôn cả hàng cuối. */
 .cs-kpi { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.cs-kpi-chinh { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.cs-trang .the-khoi.kpi.cs-kpi--lon { padding: 18px 20px; gap: 12px 14px; }
-.cs-kpi--lon .kpi__nhan { font-size: 14px; }
-.cs-kpi--lon .kpi__so { font-size: clamp(26px, 13cqi, 36px); margin-top: 4px; }
-.cs-trang .the-khoi.cs-kpi-phu {
-  display: grid; grid-template-columns: repeat(var(--so-kpi, 5), minmax(0, 1fr)); padding: 0; overflow: hidden;
-}
-.cs-kpi-o {
-  padding: 12px 16px; border: 0; border-radius: 0; background: transparent; box-shadow: -1px 0 0 var(--ke), 0 -1px 0 var(--ke);
-}
-.cs-kpi-o .kpi__nhan { font-size: 12.5px; }
-.cs-kpi-o .kpi__so { font-size: clamp(18px, 11cqi, 22px); margin-top: 1px; }
+/* Hàng chính / hàng phụ (cs-kpi-chinh, cs-kpi--lon, cs-kpi-phu, cs-kpi-o): quy tắc nằm ở
+   giao_dien.css (dùng chung với trang Quảng cáo TikTok, 19/10/2026). */
 .cs-khung-cho--kpi-phu { height: 150px; }
 .cs-kpi__cham { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .cs-kpi-yd { width: 100%; font: inherit; text-align: left; cursor: pointer; color: inherit; transition: background-color .12s; }
@@ -806,11 +796,6 @@ html.cs-khoa-cuon { overflow: hidden; }
 @media (max-width: 600px) {
   .cs-trang .the-khoi { padding: 14px; }
   /* hàng chính: số dẫn (Thảo luận) cả hàng, hai số kia chia đôi; bỏ biểu tượng cho số khỏi tràn */
-  .cs-kpi-chinh { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .cs-kpi-chinh > :first-child { grid-column: 1 / -1; }
-  .cs-kpi-chinh .kpi__icon { display: none; }
-  .cs-trang .the-khoi.kpi.cs-kpi--lon { padding: 14px; }
-  .cs-kpi-o { padding: 10px 14px; }
   .kpi.cs-kpi-sac { padding: 12px 14px; }
   .cs-nhom__ten { font-size: 18px; }
   .cs-the__nut { width: 100%; }

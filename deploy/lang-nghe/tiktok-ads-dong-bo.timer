@@ -1,0 +1,13 @@
+# /etc/systemd/system/tiktok-ads-dong-bo.timer — đồng bộ TikTok Ads mỗi ngày 06:30 giờ VN
+# (chủ dự án chốt 19/10/2026). Persistent: VPS tắt lúc 06:30 thì chạy bù ngay khi bật lại.
+[Unit]
+Description=Dong bo TikTok Ads moi ngay 06:30 gio VN
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 Asia/Ho_Chi_Minh
+Persistent=true
+RandomizedDelaySec=120
+Unit=tiktok-ads-dong-bo.service
+
+[Install]
+WantedBy=timers.target

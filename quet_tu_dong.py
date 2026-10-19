@@ -66,6 +66,17 @@ def _anh_chup_goi() -> None:
     theo_doi.ghi_han_muc_goi(None, "nhip")
 
 
+def _nhac_tiktok(bay_gio: datetime.datetime) -> None:
+    """Nhắc quản trị viên gia hạn kết nối TikTok Ads của dashboard (19/10/2026,
+    `nhac_tiktok_ads.py`): tự giãn (đọc kho ≤ 1 lần/giờ, chỉ khi có nơi nhận). Lỗi chỉ ghi log."""
+    try:
+        import nhac_tiktok_ads
+        nhac_tiktok_ads.nhac(bay_gio)
+    except Exception as e:  # noqa: BLE001 — lời nhắc không bao giờ làm hỏng nhịp lịch quét
+        _bao_mot_lan(f"nhac-tiktok-{type(e).__name__}", f"nhắc gia hạn TikTok Ads lỗi: "
+                     f"{type(e).__name__}")
+
+
 def _bay_gio() -> datetime.datetime:
     return datetime.datetime.now(VN)
 
@@ -300,6 +311,7 @@ def mot_nhip(bay_gio: datetime.datetime | None = None) -> list[dict]:
             ra.append({"id": row.get("id"), "hanh_dong": q.get("hanh_dong"),
                        "ma_loi": kq.get("ma_loi")})
         _anh_chup_goi()
+        _nhac_tiktok(bay_gio)
     except K.LoiKho as e:
         _bao_mot_lan(f"kho-{e}", f"kho lắng nghe chưa dùng được, lịch tạm dừng: {e}")
     except Exception as e:  # noqa: BLE001 — nhịp không bao giờ làm chết Mark
