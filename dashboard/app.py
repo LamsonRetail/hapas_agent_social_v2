@@ -1148,13 +1148,17 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         if isinstance(x, JSONResponse):
             return x
         du_an, tu, den, bo_loc = x
+        # Cách xếp bảng Nguồn nổi bật (19/10/2026): xếp ở máy chủ, trước khi cắt top mỗi nền tảng.
+        sap_nguon = request.query_params.get("sap_nguon") or "thao_luan"
+        if sap_nguon not in CS.SAP_NGUON:
+            return JSONResponse({"loi": "Cách xếp nguồn không hợp lệ."}, status_code=400)
         hom_nay = _hom_nay()
         # Bộ nhớ đệm: khoá gồm BỘ LỌC + mốc lượt quét vừa xong — có lượt mới là tính lại ngay,
         # không có thì nhiều người mở cùng bộ lọc trong NHO_CHI_SO_GIAY giây chỉ tính một lần.
         # Dòng thô (chưa lọc) nhớ riêng theo khoảng (`_kq_nho`): đổi bộ lọc không đọc lại kho.
         moc = await _moc_luot()
         khoa = (du_an["ma"], tu, den, CS.khoa_bo_loc(bo_loc), hom_nay,
-                tuple(du_an["tu_khoa"] or []), *moc)
+                tuple(du_an["tu_khoa"] or []), sap_nguon, *moc)
         nho = app.state.nho_chi_so
         x = nho.get(khoa)
         if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
@@ -1181,7 +1185,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     # MỘT bộ lọc đã dịch cho mọi khối: chữ tìm chỉ bỏ dấu mỗi dòng một lần.
                     f = CS.bien_dich(bo_loc)
                     d = CS.tong_hop(kq["rows"], tu, den, tu_khoa_du_an=tu_khoa_da,
-                                    hom_nay=hom_nay, bo_loc=f)
+                                    hom_nay=hom_nay, bo_loc=f, sap_nguon=sap_nguon)
                     tk = CS.tu_khoa_thao_luan(kq["rows"], kb["rows"], tu, den,
                                               tu_khoa_du_an=tu_khoa_da, bo_loc=f,
                                               bai_theo_khoa=bai_khoa)

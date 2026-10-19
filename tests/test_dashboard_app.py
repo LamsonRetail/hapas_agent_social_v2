@@ -2997,3 +2997,40 @@ def test_quan_tri_vien_doi_moi_quyen_va_chuyen_du_an():
     assert r.status_code == 303 and kho.du_an["hapas"]["don_vi"] == "matemade"
     dang_nhap(c, XEM)                     # người xem HAPAS: dự án đã sang bên khác → không thấy
     assert c.get("/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14").status_code == 404
+
+
+def test_chi_so_bo_cuc_moi_va_xep_nguon():
+    """Góp ý marketing 19/10/2026: KPI hai tầng, năm nhóm, "Độ thu đủ", "Tỉ lệ bình luận đã đọc",
+    Nguồn nổi bật xếp ở máy chủ (`sap_nguon`), sắc thái theo nền tảng."""
+    _, c, kho = tao()
+    d1 = datetime.datetime(2026, 10, 10, 9, 0, tzinfo=VN)
+    kho.bai = [_bai(d1, khoa="tiktok:1", nguon_id=1, nguon_ten="A", tac_gia="A", binh_luan=50, xem=10),
+               _bai(d1, khoa="tiktok:2", nguon_id=2, nguon_ten="B", tac_gia="B", binh_luan=0,
+                    xem=9000, sac_thai="Tiêu cực")]
+    dang_nhap(c, XEM)
+    q = "/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14"
+    d = c.get(q).json()
+    assert d["sap_nguon"] == "thao_luan" and d["top_nguon"][0]["nguon"][0]["ten"] == "A"
+    assert d["sac_thai_nen_tang"][0]["nen_tang"] == "tiktok" and d["sac_thai_nen_tang"][0]["so"] == 2
+    assert "sac_thai_nen_tang" in d["binh_luan_da_cao"]
+    assert {"tieu_cuc_thuong_hieu", "tieu_cuc_khac"} <= set(d["binh_luan_da_cao"]["kpi"])
+    d = c.get(q + "&sap_nguon=xem").json()
+    assert d["sap_nguon"] == "xem" and d["top_nguon"][0]["nguon"][0]["ten"] == "B"
+    assert c.get(q + "&sap_nguon=la").status_code == 400
+    dang_nhap(c, "nguoi.la@x.vn")                    # quyền giữ nguyên: người lạ không có số
+    assert c.get(q + "&sap_nguon=xem").status_code in (401, 403, 404)
+    dang_nhap(c, XEM)
+    t = c.get("/").text
+    for ma in ("nhom-tq", "nhom-kn", "nhom-st", "nhom-yd", "nhom-nd", "tn-sap-xep", "sac-nen-tang",
+               "nguon-sac-nt", "ti-tach", "pb-web"):
+        assert f'id="{ma}"' in t, ma
+    # thứ tự nhóm: Tổng quan → Kênh & Nguồn → Sắc thái & Chủ đề → Ý định mua → Nội dung
+    vt = [t.index(f'id="{x}"') for x in ("kpi", "nen-tang", "khoi-nha-ngoai", "top-nguon", "bd-sac-thai",
+                                          "sac-nen-tang", "chu-de", "tk-may", "khoi-y-dinh", "top-bai",
+                                          "khoi-bl")]
+    assert vt == sorted(vt)
+    assert 'class="muc__so"' not in t and "Tỉ lệ bình luận đã đọc" in t and "Độ phủ =" not in t
+    js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
+    assert '"Độ thu đủ"' in js and "KHÔNG phải độ phủ thị trường" in js
+    assert '" · độ phủ "' not in js and "tỉ lệ bình luận đã đọc" in js
+    assert 'theKpi("Báo & Web"' not in js and "sap_nguon" in js

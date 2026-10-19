@@ -180,6 +180,10 @@ CHU_DE_BAI = ("Chiến dịch & quảng cáo", "Giá cả & khuyến mãi", "Ch�
 CHU_DE_MINIGAME = "Minigame/bài dự thi"
 CHU_DE_BL = ("Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua", "KOL/nội dung",
              "Giao hàng/dịch vụ", "Đối thủ", "Tag bạn bè", CHU_DE_MINIGAME, "Khác")
+#: Chủ đề bình luận nói về THƯƠNG HIỆU / sản phẩm (mã Mark SP, GIA, DV, DT) — tách "Tiêu cực" của
+#: bình luận làm hai phần. Còn lại (ND, MG, TAG, Khác, chưa gán) = về nội dung / KOL & khác.
+CHU_DE_BL_THUONG_HIEU = frozenset({"Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua",
+                                   "Giao hàng/dịch vụ", "Đối thủ"})
 _TOI_DA_GIA_TRI = {"nen_tang": len(TEN_NEN_TANG), "loai": 7, "nguon": 50, "sac_thai": 4,
                    "chu_de": 40, "anh_huong": 5, "kieu_trang": len(KIEU_TRANG)}
 _RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube|threads|web):")
@@ -625,6 +629,21 @@ def sac_thai_chu_de(rows: list[dict]) -> list[dict]:
     return sorted(dem.values(), key=lambda g: (g["chu_de"] == CHUA, -g["so"], g["chu_de"]))
 
 
+def sac_thai_nen_tang(rows: list[dict], ham_sac=None) -> list[dict]:
+    """Nền tảng × sắc thái (19/10/2026, marketing: "sắc thái theo kênh"). `rows` là đúng tập vòng
+    sắc thái đếm — bài: bên gọi đã bỏ kênh nhà; bình luận: chỉ hợp lệ. `ham_sac`: `sac` (bài, mặc
+    định) hoặc `sac_bl`. Nhiều mục trước. -> [{nen_tang, ten, so, TC, TI, TL, CHUA}]."""
+    ham_sac = ham_sac or sac
+    dem: dict[str, dict] = {}
+    for r in rows:
+        p = r.get("nen_tang") or "?"
+        g = dem.setdefault(p, {"nen_tang": p, "ten": TEN_NEN_TANG.get(p, p), "so": 0,
+                               TC: 0, TI: 0, TL: 0, CHUA: 0})
+        g["so"] += 1
+        g[ham_sac(r)] += 1
+    return sorted(dem.values(), key=lambda g: (-g["so"], g["nen_tang"]))
+
+
 def _phan_bo(rows: list[dict], khoa) -> dict[str, dict]:
     gom: dict[str, dict] = {}
     for r in rows:
@@ -650,9 +669,18 @@ def phan_bo_loai(rows: list[dict]) -> list[dict]:
 
 
 # ───────────────────────── nguồn + bài nổi bật ─────────────────────────
-def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON) -> list[dict]:
-    """Top `toi_da` nguồn MỖI nền tảng theo thảo luận (hoà thì số bài, rồi lượt xem). Nền tảng
-    xếp theo tổng thảo luận giảm dần. -> [{nen_tang, ten_nen_tang, so_nguon, nguon: [...]}]."""
+#: Cách xếp bảng Nguồn nổi bật (19/10/2026, tham số `sap_nguon` của /api/chi-so): tiêu chí chính
+#: rồi hai tiêu chí còn lại làm hoà. Xếp TRƯỚC khi cắt `TOP_NGUON` — top theo lượt xem là đúng
+#: các nguồn nhiều xem nhất, không phải top thảo luận đem xếp lại.
+SAP_NGUON = {"thao_luan": ("thao_luan", "bai", "xem"), "bai": ("bai", "thao_luan", "xem"),
+             "xem": ("xem", "thao_luan", "bai")}
+
+
+def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON, sap: str = "thao_luan") -> list[dict]:
+    """Top `toi_da` nguồn MỖI nền tảng theo `sap` (`SAP_NGUON`; mặc định thảo luận, hoà thì số
+    bài, rồi lượt xem). Nền tảng xếp theo tổng thảo luận giảm dần.
+    -> [{nen_tang, ten_nen_tang, so_nguon, nguon: [...]}]."""
+    thu_tu = SAP_NGUON[sap]
     gom: dict[tuple, dict] = {}
     for r in rows:
         k = (r.get("nen_tang") or "?", _khoa_nguon(r))
@@ -677,7 +705,7 @@ def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON) -> list[dict]:
     tong = {p: sum(g["thao_luan"] for g in ds) for p, ds in theo.items()}
     ra = []
     for p in sorted(theo, key=lambda p: (-tong[p], p)):
-        ds = sorted(theo[p], key=lambda g: (-g["thao_luan"], -g["bai"], -(g["xem"] or 0), g["ten"]))
+        ds = sorted(theo[p], key=lambda g: (*(-(g[k] or 0) for k in thu_tu), g["ten"]))
         ra.append({"nen_tang": p, "ten_nen_tang": TEN_NEN_TANG.get(p, p),
                    "so_nguon": len(ds), "nguon": ds[:toi_da]})
     return ra
@@ -1072,10 +1100,10 @@ def tu_khoa(rows: list[dict], tu_khoa_du_an: list[str] | tuple = (),
 def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
              tu_khoa_du_an: list[str] | tuple = (), nen_tang: str | None = None,
              loai_nguon: str | None = None, hom_nay: datetime.date | None = None,
-             bo_loc=None) -> dict:
+             bo_loc=None, sap_nguon: str = "thao_luan") -> dict:
     """Mọi khối của trang Chỉ số. `rows` gồm bài của CẢ kỳ này lẫn kỳ trước (kho đọc một lần
     từ đầu kỳ trước); hàm tự chia. `bo_loc` (bộ lọc chung) áp cho CẢ hai kỳ — so sánh cùng một
-    tập. -> dict thuần JSON (ngày dạng ISO)."""
+    tập. `sap_nguon`: cách xếp bảng Nguồn nổi bật (`SAP_NGUON`). -> dict thuần JSON (ngày ISO)."""
     hom_nay = hom_nay or datetime.datetime.now(VN).date()
     f = bien_dich(_gop(bo_loc, nen_tang, loai_nguon))
     rows = loc_bai(rows, f)
@@ -1097,8 +1125,10 @@ def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
         "kpi": k_nay, "kpi_truoc": k_truoc, "so_sanh": ss, "so_sanh_lech": lech,
         "xu_huong": xu_huong(nay, tu, den, hom_nay),
         "sac_thai": sac_thai(nay), "sac_thai_chu_de": sac_thai_chu_de(nay),
+        "sac_thai_nen_tang": sac_thai_nen_tang([r for r in nay if not la_kenh_nha(r)]),
         "nen_tang": phan_bo_nen_tang(nay), "loai_nguon": phan_bo_loai(nay),
-        "top_nguon": top_nguon(nay), "tu_khoa": tu_khoa(nay, tu_khoa_du_an),
+        "top_nguon": top_nguon(nay, sap=sap_nguon), "sap_nguon": sap_nguon,
+        "tu_khoa": tu_khoa(nay, tu_khoa_du_an),
         "top_bai": top_bai(nay),
     }
 
@@ -1251,18 +1281,25 @@ def tong_hop_bl(rows: list[dict], tu: datetime.date, den: datetime.date, *,
         g["so"] += 1
         g[sac_bl(c)] += 1
 
+    # Tiêu cực chia đôi theo chủ đề (19/10/2026): chê sản phẩm / giá / dịch vụ / so đối thủ là
+    # tiếng về THƯƠNG HIỆU; chê KOL, nội dung clip, minigame, tag bạn… thì không.
+    ti_th = sum(1 for c in khach if sac_bl(c) == TI
+                and str(c.get("chu_de") or "").strip() in CHU_DE_BL_THUONG_HIEU)
+
     def pt(x: str) -> float | None:
         return round(100.0 * dem[x] / da, 1) if da else None
     return {
         "loai": [{"loai": k, "ten": TEN_LOAI_BL[k], "so": theo_loai[k]} for k in LOAI_BL
                  if theo_loai[k]],
+        "sac_thai_nen_tang": sac_thai_nen_tang(khach, sac_bl),
         "kpi": {"so": len(rows), "khach": len(khach), "sach": len(khach),
                 "da_loc": len(rows) - len(khach) - theo_loai["thuong_hieu"],
                 "thuong_hieu": theo_loai["thuong_hieu"],
                 "so_bai": len({c.get("khoa_bai") for c in rows}), "da_phan_loai": da,
                 "tich_cuc": dem[TC], "tieu_cuc": dem[TI], "trung_lap": dem[TL],
                 "chua_phan_loai": dem[CHUA], "tich_cuc_pt": pt(TC), "tieu_cuc_pt": pt(TI),
-                "trung_lap_pt": pt(TL)},
+                "trung_lap_pt": pt(TL),
+                "tieu_cuc_thuong_hieu": ti_th, "tieu_cuc_khac": dem[TI] - ti_th},
         "xu_huong": {"don_vi": "tuần" if theo_tuan else "ngày",
                      "moc": [m.isoformat() for m in moc], **cot},
         "chu_de": sorted(cd.values(), key=lambda g: (g["chu_de"] == CHUA, -g["so"], g["chu_de"])),
