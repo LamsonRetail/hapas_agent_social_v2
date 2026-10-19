@@ -445,7 +445,6 @@ dialog.cs-tam::backdrop { background: rgba(10, 18, 40, .45); }
 .cs-yd__mon:hover { border-color: color-mix(in srgb, var(--cs-yd) 50%, transparent); }
 .cs-yd__mon.dang { background: color-mix(in srgb, var(--cs-yd) 14%, var(--be-mat)); border-color: var(--cs-yd); }
 .cs-yd__mon--mo { border-style: dashed; color: var(--chu-mo); }
-.cs-yd__mon-ghi { flex-basis: 100%; font-size: 12px; color: var(--chu-mo); }
 .cs-chip--mon { background: color-mix(in srgb, var(--cs-yd) 12%, var(--be-mat)); color: color-mix(in srgb, var(--cs-yd) 80%, var(--chu)); }
 .cs-yd__bai .cs-chip--mon { flex: none; }
 

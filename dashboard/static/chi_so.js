@@ -1137,10 +1137,6 @@
         (x.ma === "chua_ro" ? " (bình luận không nói tên món và chưa được AI xếp món)" : "");
       el.appendChild(b);
     });
-    var ghi = [];
-    if (y.so || y.sp_ai) ghi.push("AI xếp món " + so(y.sp_ai) + "/" + so(ds.reduce(function (a, x) { return a + x.so; }, 0)) + ", còn lại theo chữ trong bình luận");
-    if (y.ngoai_brand) ghi.push("không tính " + so(y.ngoai_brand) + " câu hỏi mua đồ không phải của brand");
-    if (ghi.length) el.appendChild(tao("span", "cs-yd__mon-ghi", ghi.join(" · ")));
   }
   function veTopYDinh(y) {
     var el = $("yd-top");
