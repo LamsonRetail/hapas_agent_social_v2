@@ -125,12 +125,15 @@ def kiem_luu_quyen(lam: dict, email_lam: str, dich: dict | None, email: str, don
 def kiem_xoa_quyen(lam: dict, email_lam: str, dich: dict | None, email: str,
                    don_vi: str) -> None:
     """Bỏ quyền của `email` ở MỘT bên (quyền ở bên khác giữ nguyên)."""
+    # Quyền người làm xét TRƯỚC (soát 19/10/2026): xét người bị bỏ trước thì quản lý bên A dò được
+    # ai có quyền ở bên B qua khác biệt câu báo lỗi.
+    he_thong = _la_he_thong(lam) or la_quan_tri(lam)
+    if not he_thong and (lam.get("ben") or {}).get(don_vi) != "quan_ly":
+        raise LoiQuyen("Chỉ quản trị viên hoặc quản lý của bên này mới bỏ được người khỏi bên.")
     if not dich or don_vi not in dich.get("ben", {}):
         raise LoiQuyen("Người này không có quyền ở bên này.")
-    if _la_he_thong(lam) or la_quan_tri(lam):
+    if he_thong:
         return
-    if (lam.get("ben") or {}).get(don_vi) != "quan_ly":
-        raise LoiQuyen("Chỉ quản trị viên hoặc quản lý của bên này mới bỏ được người khỏi bên.")
     if email == email_lam:
         raise LoiQuyen("Không tự bỏ quyền của chính mình — nhờ quản trị viên.")
     if la_quan_tri(dich):

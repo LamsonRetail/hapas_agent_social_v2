@@ -55,3 +55,17 @@ def test_luat_cho_phep():
     PQ.kiem_luu_quyen(QT, "a@x.vn", QL_HP, "b@x.vn", "matemade", "quan_ly")
     PQ.kiem_dat_quan_tri(QT, QT, False, 1)
     PQ.kiem_luu_quyen(PQ.HE_THONG, "cli:x", None, "b@x.vn", "hapas", "quan_ly")
+
+
+def test_xoa_quyen_ben_khac_khong_lo_ai_thuoc_ben_do():
+    """Soát 19/10/2026: quản lý HAPAS bỏ quyền ai đó ở MATEMADE — câu báo lỗi giống nhau dù người
+    đó có hay không có quyền ở MATEMADE (không dò được danh sách bên khác)."""
+    loi = []
+    for dich in (None, {"la_quan_tri": False, "ben": {"hapas": "xem"}}, XEM_MM):
+        with pytest.raises(PQ.LoiQuyen) as e:
+            PQ.kiem_xoa_quyen(QL_HP, "a@x.vn", dich, "b@x.vn", "matemade")
+        loi.append(str(e.value))
+    assert len(set(loi)) == 1 and loi[0].startswith("Chỉ quản trị viên hoặc quản lý")
+    # Quản trị viên vẫn nhận câu rõ ràng khi người đó không có quyền ở bên.
+    with pytest.raises(PQ.LoiQuyen, match="không có quyền ở bên này"):
+        PQ.kiem_xoa_quyen(QT, "a@x.vn", None, "b@x.vn", "matemade")
