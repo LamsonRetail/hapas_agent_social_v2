@@ -941,8 +941,9 @@ def test_kho_theo_quy_chuan_mo_ta_bi():
     sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql").read_text(
         encoding="utf-8")
     bang = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", sql, re.DOTALL)
-    # + lich_quet (15/10), kiem_do_phu (17/10/2026), han_muc_apify (18/10/2026)
-    assert len(bang) == 13
+    # + lich_quet (15/10), kiem_do_phu (17/10/2026), han_muc_apify (18/10/2026),
+    # don_vi + quyen (phân quyền theo bên, 19/10/2026)
+    assert len(bang) == 15
     # Cột thêm bằng ALTER (không nằm trong khối CREATE) cũng phải có mô tả.
     assert re.search(r"COMMENT ON COLUMN luot_quet\.lich_id IS '.{10,}';", sql)
     for ten, khoi in bang:
@@ -1096,8 +1097,8 @@ def test_gan_nhan_nen_luot_chi_gan_luat_con_lai_de_trong(mo, monkeypatch):
     """17/10/2026: lượt 7 chạy 54 phút vì gán nhãn trong lượt. Mặc định (nền bật) lượt KHÔNG gọi
     model: chỉ gán phần luật (dòng chỉ @tag/emoji — thường đã bị `loc_rac` tách khỏi hop_le), dòng
     còn lại để trống cho `gan_nhan_nen`."""
-    import phan_loai
     import gan_nhan_nen
+    import phan_loai
     monkeypatch.delenv("MARK_GAN_NHAN_NEN", raising=False)
     monkeypatch.setattr(gan_nhan_nen, "dang_chay", gan_nhan_nen.bat)   # luồng nền đang sống
     monkeypatch.setattr(phan_loai, "phan_loai_binh_luan",

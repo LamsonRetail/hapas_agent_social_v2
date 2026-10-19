@@ -65,7 +65,7 @@ NGUON = {"nen_tang": "tiktok", "dinh_danh": "kola", "ten": "KOL A",
          "link": "https://www.tiktok.com/@kola", "loai": "kol", "nhan": ["kol"], "chu_ky_ngay": 1,
          "so_bai_moi_lan": 5}
 DU_AN = {"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas"], "tu_loai_tru": [],
-         "boi_canh": "", "thi_truong": "VN", "dang_bat": True}
+         "boi_canh": "", "thi_truong": "VN", "dang_bat": True, "don_vi": "hapas"}
 LICH = {"ten": "Sáng", "kieu": "hang_ngay", "cau_hinh": {"gio": ["08:00"], "thu": []},
         "bat": True, "quet_moi_nguon": False, "lan_chay_ke": None}
 
@@ -79,8 +79,11 @@ THAO_TAC = [
     ("xoa_nguon", lambda: K.xoa_nguon(AI, 7)),
     ("duyet_de_xuat", lambda: K.duyet_de_xuat(AI, 5, NGUON)),
     ("tu_choi_de_xuat", lambda: K.tu_choi_de_xuat(AI, 5)),
-    ("luu_nguoi_xem", lambda: K.luu_nguoi_xem(AI, "moi@hapas.vn", "xem")),
+    ("luu_quyen", lambda: K.luu_quyen(AI, "moi@hapas.vn", "hapas", "xem")),
+    ("xoa_quyen", lambda: K.xoa_quyen(AI, "xem@hapas.vn", "hapas")),
+    ("dat_quan_tri", lambda: K.dat_quan_tri(AI, "moi@hapas.vn", True)),
     ("xoa_nguoi_xem", lambda: K.xoa_nguoi_xem(AI, "xem@hapas.vn")),
+    ("them_don_vi", lambda: K.them_don_vi(AI, "ben-moi", "Bên mới")),
     ("dong_bo_bq", lambda: K.ghi_nhat_ky(AI, "dong_bo_bq", "bigquery", {"kieu": "bam_tay"})),
     ("dang_nhap_lan_dau", lambda: K.ghi_dang_nhap(AI, "ou_123")),
     ("them_lich", lambda: K.them_lich(AI, "hapas", LICH)),
@@ -105,6 +108,9 @@ def test_moi_thao_tac_ghi_nhat_ky_cung_giao_dich(gia, hanh_dong, goi):
         r"SELECT vai_tro FROM nguoi_xem": [{"vai_tro": "xem"}],
         r"count\(\*\)": [{"n": 1}],
         r"SELECT 1 AS co FROM du_an": [{"co": 1}],
+        r"SELECT 1 AS co FROM don_vi": [{"co": 1}],
+        # quyền (người làm = quản trị viên; người bị sửa cũng có quyền Chỉ xem HAPAS)
+        r"FROM nguoi_xem n WHERE n.email": [{"la_quan_tri": True, "ben": {"hapas": "xem"}}],
         r"FROM lich_quet WHERE id = %s FOR UPDATE": [LICH_DONG],
         r"^UPDATE lich_quet .*RETURNING du_an": [{"du_an": "hapas"}],
         r"^DELETE FROM lich_quet": [LICH_DONG],
@@ -188,17 +194,122 @@ def test_duyet_de_xuat_da_xu_ly_thi_khong_them_gi(gia):
 
 
 @pytest.mark.parametrize("goi", [lambda: K.xoa_nguoi_xem(AI, "quan@hapas.vn"),
-                                 lambda: K.luu_nguoi_xem(AI, "quan@hapas.vn", "xem")])
-def test_khong_xoa_khong_ha_quan_ly_cuoi(gia, goi):
-    gia.tra.update({r"SELECT vai_tro FROM nguoi_xem": [{"vai_tro": "quan_ly"}],
+                                 lambda: K.dat_quan_tri(AI, "quan@hapas.vn", False)])
+def test_khong_xoa_khong_ha_quan_tri_cuoi(gia, goi):
+    gia.tra.update({r"FROM nguoi_xem n WHERE n.email": [{"la_quan_tri": True, "ben": {}}],
                     r"count\(\*\)": [{"n": 0}]})
-    with pytest.raises(K.LoiDuLieu):
+    with pytest.raises(K.LoiDuLieu, match="cuối cùng"):
         goi()
     sql = [s for s, _ in gia.gd[0].lenh]
-    # khoá bảng TRƯỚC khi đọc vai trò (đọc trước rồi mới khoá thì hai người cùng xoá hai quản lý
-    # cuối vẫn lọt — vai trò đọc được đã cũ)
-    assert sql[0].startswith("LOCK TABLE nguoi_xem")
-    assert not any(s.startswith(("DELETE", "INSERT")) for s in sql)
+    # khoá bảng TRƯỚC khi đọc quyền (đọc trước rồi mới khoá thì hai người cùng bỏ hai quản trị viên
+    # cuối vẫn lọt — quyền đọc được đã cũ); khoá cả `quyen`
+    assert sql[0] == "LOCK TABLE nguoi_xem, quyen IN SHARE ROW EXCLUSIVE MODE"
+    assert not any(s.startswith(("DELETE", "INSERT", "UPDATE")) for s in sql)
+
+
+def _quyen_theo_email(gia, bang: dict):
+    """GiaConn trả quyền theo THAM SỐ email của câu `_SQL_QUYEN` (người làm ≠ người bị sửa)."""
+    goc = GiaConn.execute
+
+    def execute(self, sql, tham_so=None):
+        if sql.startswith("SELECT n.la_quan_tri") and "FROM nguoi_xem n WHERE n.email" in sql:
+            self.lenh.append((sql, tuple(tham_so or ())))
+            r = bang.get(tham_so[0])
+            return GiaCur([r] if r else [])
+        return goc(self, sql, tham_so)
+    return execute
+
+
+@pytest.mark.parametrize("goi, khop", [
+    (lambda: K.luu_quyen(AI, "moi@hapas.vn", "hapas", "quan_ly"), "chỉ thêm được người Chỉ xem"),
+    (lambda: K.luu_quyen(AI, "moi@hapas.vn", "matemade", "xem"), "quản lý của bên này"),
+    (lambda: K.luu_quyen(AI, "qt@hapas.vn", "hapas", "xem"), "quản trị viên"),
+    (lambda: K.luu_quyen(AI, AI, "hapas", "xem"), "chính mình"),
+    (lambda: K.xoa_quyen(AI, "ql2@hapas.vn", "hapas"), "Quản lý của bên"),
+    (lambda: K.xoa_quyen(AI, "xem@hapas.vn", "matemade"), "quản lý của bên này"),
+    (lambda: K.dat_quan_tri(AI, "xem@hapas.vn", True), "Chỉ quản trị viên"),
+    (lambda: K.xoa_nguoi_xem(AI, "xem@hapas.vn"), "Chỉ quản trị viên"),
+    (lambda: K.them_don_vi(AI, "ben-moi", "Bên mới"), "Chỉ quản trị viên"),
+])
+def test_quan_ly_ben_khong_vuot_quyen_trong_giao_dich(gia, monkeypatch, goi, khop):
+    """Kho đọc quyền NGƯỜI LÀM trong giao dịch (sau khoá) rồi kiểm luật — tầng app lọt thì kho
+    vẫn chặn: quản lý HAPAS không cấp Quản lý, không đụng bên khác / quản trị viên / chính mình."""
+    monkeypatch.setattr(GiaConn, "execute", _quyen_theo_email(gia, {
+        AI: {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}},
+        "qt@hapas.vn": {"la_quan_tri": True, "ben": {}},
+        "ql2@hapas.vn": {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}},
+        "xem@hapas.vn": {"la_quan_tri": False, "ben": {"hapas": "xem", "matemade": "xem"}},
+    }))
+    gia.tra[r"count\(\*\)"] = [{"n": 1}]
+    with pytest.raises(K.LoiDuLieu, match=khop):
+        goi()
+    sql = [s for s, _ in gia.gd[0].lenh]
+    assert not any(s.startswith(("DELETE", "INSERT", "UPDATE")) for s in sql)
+
+
+def test_quan_ly_ben_them_va_bo_nguoi_chi_xem(gia, monkeypatch):
+    """Quản lý HAPAS thêm người Chỉ xem HAPAS; bỏ quyền HAPAS của người còn MATEMADE chỉ xoá dòng
+    `quyen` của HAPAS; người hết bên thì xoá luôn dòng người xem."""
+    monkeypatch.setattr(GiaConn, "execute", _quyen_theo_email(gia, {
+        AI: {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}},
+        "xem@hapas.vn": {"la_quan_tri": False, "ben": {"hapas": "xem", "matemade": "xem"}}}))
+    gia.tra[r"SELECT 1 AS co FROM don_vi"] = [{"co": 1}]
+    K.luu_quyen(AI, "moi@hapas.vn", "hapas", "xem")
+    sql = [(s, p) for s, p in gia.gd[0].lenh]
+    assert any(s.startswith("INSERT INTO quyen") and p[:3] == ("moi@hapas.vn", "hapas", "xem")
+               for s, p in sql)
+    assert sql[-1][1][:2] == (AI, "luu_quyen")
+    assert K.xoa_quyen(AI, "xem@hapas.vn", "hapas") is False     # còn MATEMADE
+    lenh = gia.gd[1].lenh
+    assert ("DELETE FROM quyen WHERE email = %s AND don_vi = %s", ("xem@hapas.vn", "hapas")) in lenh
+    assert not any("DELETE FROM quyen" in s and "matemade" in p for s, p in lenh)
+    gia.tra[r"RETURNING n.email"] = [{"email": "xem@hapas.vn"}]
+    assert K.xoa_quyen(AI, "xem@hapas.vn", "hapas") is True      # hết bên -> xoá dòng
+
+
+def test_quyen_cua_doc_dung_cot_mark_duoc_cap(gia):
+    """`quyen_cua` chạy bằng role mark (tool hỏi đáp): chỉ cột đã GRANT trong schema.sql."""
+    gia.tra[r"FROM nguoi_xem n WHERE n.email"] = [{"la_quan_tri": False,
+                                                    "ben": {"hapas": "xem", "x": "lạ"}}]
+    assert K.quyen_cua("XEM@hapas.vn") == {"la_quan_tri": False, "ben": {"hapas": "xem"}}
+    assert K.vai_tro("xem@hapas.vn") == "xem"
+    sql, ts = gia.gd[0].lenh[0]
+    assert ts == ("xem@hapas.vn",)
+    assert set(re.findall(r"\bn\.(\w+)", sql)) <= {"email", "la_quan_tri"}
+    assert set(re.findall(r"\bq\.(\w+)", sql)) <= {"email", "don_vi", "vai_tro"}
+    assert "GRANT SELECT (la_quan_tri) ON nguoi_xem TO mark;" in SCHEMA
+    assert "GRANT SELECT (email, don_vi, vai_tro) ON quyen TO mark;" in SCHEMA
+    assert "GRANT SELECT ON don_vi TO mark;" in SCHEMA
+    gia.tra.pop(r"FROM nguoi_xem n WHERE n.email")
+    assert K.quyen_cua("la@hapas.vn") is None and K.vai_tro("la@hapas.vn") is None
+
+
+def test_schema_phan_quyen_ben_chay_lai_an_toan():
+    """Chuyển đổi 19/10/2026 trong schema.sql (chạy lại mỗi lần deploy): mọi câu chỉ chạm dòng
+    chưa chuyển, không đè thay đổi làm sau trên dashboard."""
+    s = SCHEMA
+    assert s.index("CREATE TABLE IF NOT EXISTS don_vi") < s.index("CREATE TABLE IF NOT EXISTS du_an")
+    assert "('hapas', 'HAPAS'), ('matemade', 'MATEMADE')\n  ON CONFLICT (ma) DO NOTHING" in s
+    assert "ALTER TABLE du_an ADD COLUMN IF NOT EXISTS don_vi TEXT REFERENCES don_vi(ma)" in s
+    assert ("CASE WHEN ma LIKE '%matemade%' THEN 'matemade' ELSE 'hapas' END\n  WHERE don_vi IS "
+            "NULL;") in s
+    assert "is_nullable = 'YES'" in s and "ALTER COLUMN don_vi SET NOT NULL" in s
+    assert "ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS la_quan_tri BOOLEAN NOT NULL DEFAULT FALSE" in s
+    # quản trị viên đầu tiên: chỉ khi chưa có ai
+    m = re.search(r"INSERT INTO nguoi_xem \(email, vai_tro, them_boi, la_quan_tri\)(.*?);", s, re.DOTALL)
+    assert "'thamnt@hapas.vn', 'thienlq@hapas.vn'" in m.group(1)
+    assert "WHERE NOT EXISTS (SELECT 1 FROM nguoi_xem WHERE la_quan_tri)" in m.group(1)
+    # nganlt / itsupport + quy tắc chung: chỉ người chưa có dòng quyền nào, không thêm người mới
+    khoi = re.findall(r"INSERT INTO quyen \(email, don_vi, vai_tro, them_boi\)(.*?);", s, re.DOTALL)
+    assert len(khoi) == 2
+    assert "('nganlt@hapas.vn', 'quan_ly'), ('itsupport@hapas.vn', 'xem')" in khoi[0]
+    assert "JOIN nguoi_xem n" in khoi[0]
+    assert all("NOT EXISTS (SELECT 1 FROM quyen q WHERE q.email = n.email)" in k for k in khoi)
+    assert "NOT n.la_quan_tri" in khoi[1] and "ON CONFLICT (email, don_vi) DO NOTHING" in khoi[1]
+    assert s.index("'nganlt@hapas.vn'") < s.index("SELECT n.email, 'hapas', n.vai_tro")
+    assert "GRANT INSERT, UPDATE, DELETE ON quyen TO lang_nghe_web;" in s
+    from dashboard import dong_bo_bq
+    assert not {"quyen", "don_vi", "nguoi_xem"} & set(dong_bo_bq.BANG)
 
 
 def _cot(bang: str) -> set[str]:
@@ -258,7 +369,8 @@ def test_chi_ghi_bang_role_lang_nghe_web_duoc_ghi():
     của de_xuat; INSERT nhat_ky. Dashboard KHÔNG ghi bai/luot_quet/chi_so_ngay (phần của Mark)."""
     src = (GOC / "dashboard" / "kho.py").read_text(encoding="utf-8")
     ghi = set(re.findall(r"(?:INSERT INTO|UPDATE|DELETE FROM) ([a-z_]+)", src))
-    assert ghi <= {"du_an", "nguon", "nguoi_xem", "nhat_ky", "de_xuat", "lich_quet"}
+    assert ghi <= {"du_an", "nguon", "nguoi_xem", "nhat_ky", "de_xuat", "lich_quet", "quyen",
+                   "don_vi"}
     assert "GRANT INSERT, UPDATE, DELETE ON lich_quet TO lang_nghe_web;" in SCHEMA
     for m in re.finditer(r"UPDATE de_xuat SET (.*?) WHERE", src, re.DOTALL):
         cot = {x.replace('"', " ").split()[0] for x in m.group(1).split(",")

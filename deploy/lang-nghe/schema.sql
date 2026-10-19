@@ -17,8 +17,8 @@
 -- Ba role, đăng nhập bằng Unix socket + peer (không mật khẩu, không mở cổng):
 --   lang_nghe_chu  — sở hữu bảng (NOLOGIN), chỉ dùng để chạy file này.
 --   mark           — user hệ điều hành của bot: ĐỌC dự án/nguồn/lịch, GHI bài/lượt quét/đề xuất
---                    và cột trạng thái chạy của lịch; đọc email + vai trò người xem (hỏi đáp
---                    số liệu dashboard trong chat chỉ cho người xem).
+--                    và cột trạng thái chạy của lịch; đọc email + quyền theo bên của người xem
+--                    (hỏi đáp số liệu dashboard trong chat chỉ cho người xem, chỉ dự án bên họ).
 --   lang_nghe_web  — user hệ điều hành của dashboard: quản lý dự án/nguồn/lịch/người xem, đọc mọi thứ.
 
 \set ON_ERROR_STOP on
@@ -52,6 +52,16 @@ GRANT CREATE ON SCHEMA public TO lang_nghe_chu;
 
 SET ROLE lang_nghe_chu;
 
+-- Bên (đơn vị) sở hữu dự án (19/10/2026, chủ dự án: phân quyền theo bên — HAPAS, MATEMADE…). Mỗi dự
+-- án thuộc một bên; người xem có quyền theo từng bên (bảng `quyen`). Tạo TRƯỚC du_an (khoá ngoại).
+CREATE TABLE IF NOT EXISTS don_vi (
+  ma              TEXT PRIMARY KEY CHECK (ma ~ '^[a-z0-9][a-z0-9_-]{1,39}$'),
+  ten             TEXT NOT NULL CHECK (length(ten) BETWEEN 1 AND 200),
+  tao_luc         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO don_vi (ma, ten) VALUES ('hapas', 'HAPAS'), ('matemade', 'MATEMADE')
+  ON CONFLICT (ma) DO NOTHING;
+
 -- 1 dòng = 1 dự án/brand. `ma` là chữ gõ sau /theodoi (vd "hapas").
 CREATE TABLE IF NOT EXISTS du_an (
   ma              TEXT PRIMARY KEY CHECK (ma ~ '^[a-z0-9][a-z0-9_-]{1,39}$'),
@@ -71,7 +81,8 @@ CREATE TABLE IF NOT EXISTS du_an (
   tk_bat          BOOLEAN NOT NULL DEFAULT TRUE,
   tk_so_bai       INT NOT NULL DEFAULT 15 CHECK (tk_so_bai >= 0),
   cau_hinh        JSONB NOT NULL DEFAULT '{}'::jsonb,
-  hashtag         TEXT[] NOT NULL DEFAULT '{}'    -- hashtag riêng (IG + feed TikTok), 18/10/2026
+  hashtag         TEXT[] NOT NULL DEFAULT '{}',   -- hashtag riêng (IG + feed TikTok), 18/10/2026
+  don_vi          TEXT NOT NULL REFERENCES don_vi(ma) ON UPDATE CASCADE   -- bên, 19/10/2026
 );
 -- Đợt 2b (15/10/2026): cào bình luận — DB đã tạo trước đó thì thêm cột ở đây.
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS bl_bat BOOLEAN NOT NULL DEFAULT TRUE;
@@ -104,6 +115,20 @@ ALTER TABLE du_an ADD CONSTRAINT du_an_tran_usd_thang_check CHECK (tran_usd_than
 -- từ từ khoá như trước. Quyền: role mark đọc cả bảng (GRANT SELECT ON du_an), lang_nghe_web ghi
 -- cả bảng (GRANT INSERT, UPDATE ON du_an) — không có GRANT theo cột nào cần thêm.
 ALTER TABLE du_an ADD COLUMN IF NOT EXISTS hashtag TEXT[] NOT NULL DEFAULT '{}';
+-- 19/10/2026: bên của dự án. DB đã có dự án: thêm cột cho phép NULL, gán bên (mã có "matemade" →
+-- matemade, còn lại → hapas; chỉ dòng còn NULL nên chạy lại không đè bên đã đổi trên dashboard),
+-- rồi mới NOT NULL — chỉ ALTER khi cột còn cho NULL (chạy lại không xin khoá bảng vô ích).
+ALTER TABLE du_an ADD COLUMN IF NOT EXISTS don_vi TEXT REFERENCES don_vi(ma) ON UPDATE CASCADE;
+UPDATE du_an SET don_vi = CASE WHEN ma LIKE '%matemade%' THEN 'matemade' ELSE 'hapas' END
+  WHERE don_vi IS NULL;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+             AND table_name = 'du_an' AND column_name = 'don_vi' AND is_nullable = 'YES') THEN
+    ALTER TABLE du_an ALTER COLUMN don_vi SET NOT NULL;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS du_an_don_vi ON du_an (don_vi);
 
 -- 1 dòng = 1 nguồn theo dõi. `dinh_danh`: username TikTok/Instagram/Threads, kênh YouTube (UC… hoặc
 -- @handle), URL trang Facebook — đã chuẩn hoá chữ thường (trừ id kênh YouTube UC…).
@@ -311,16 +336,21 @@ CREATE TABLE IF NOT EXISTS chi_so_ngay (
   FOREIGN KEY (du_an, khoa) REFERENCES bai (du_an, khoa) ON UPDATE CASCADE ON DELETE CASCADE
 );
 
--- Ai được vào dashboard. `quan_ly` sửa được dự án/nguồn/ngân sách/người xem; `xem` chỉ xem.
+-- Ai được vào dashboard. Từ 19/10/2026 quyền theo BÊN: cờ `la_quan_tri` (toàn hệ thống) + bảng
+-- `quyen` (vai trò từng bên). `vai_tro` là cột CŨ, chỉ còn để tương thích (Mark bản cũ đọc): dashboard
+-- giữ nó = vai trò gộp (quan_ly khi là quản trị viên hoặc quản lý một bên, còn lại xem), không dùng
+-- để quyết định quyền nữa.
 CREATE TABLE IF NOT EXISTS nguoi_xem (
   email           TEXT PRIMARY KEY CHECK (email = lower(email) AND email LIKE '%@%'),
   vai_tro         TEXT NOT NULL CHECK (vai_tro IN ('xem', 'quan_ly')),
   them_boi        TEXT,
-  them_luc        TIMESTAMPTZ NOT NULL DEFAULT now()
+  them_luc        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  la_quan_tri     BOOLEAN NOT NULL DEFAULT FALSE
 );
+ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS la_quan_tri BOOLEAN NOT NULL DEFAULT FALSE;
 -- Danh bạ Lark (17/10/2026, chủ dự án: "thêm title trong công ty… biết email có active thật
 -- không"): bản đệm đọc từ Lark contact API bằng app của dashboard (dashboard/danh_ba.py), làm
--- mới ≤ 12 giờ/lần khi mở trang Người xem và ngay khi thêm email. `dang_nhap_cuoi` ghi mỗi lượt
+-- mới ≤ 12 giờ/lần khi mở trang Quản trị và ngay khi thêm email. `dang_nhap_cuoi` ghi mỗi lượt
 -- đăng nhập thành công. Không ghi nhật ký (bản đệm, không phải thao tác của người quản lý).
 ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS ten_lark TEXT;
 ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS chuc_danh TEXT;
@@ -337,6 +367,49 @@ ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS dang_nhap_cuoi TIMESTAMPTZ;
 ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS lark_open_id TEXT;
 ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS lark_union_id TEXT;
 ALTER TABLE nguoi_xem ADD COLUMN IF NOT EXISTS lark_user_id TEXT;
+
+-- Quyền theo bên (19/10/2026): một người nhiều bên, mỗi bên một vai trò. Xoá người xem thì xoá luôn
+-- quyền. Người không phải quản trị viên và không còn dòng nào ở đây thì không đăng nhập được
+-- (dashboard xoá luôn dòng nguoi_xem của họ).
+CREATE TABLE IF NOT EXISTS quyen (
+  email           TEXT NOT NULL REFERENCES nguoi_xem(email) ON DELETE CASCADE ON UPDATE CASCADE,
+  don_vi          TEXT NOT NULL REFERENCES don_vi(ma) ON UPDATE CASCADE,
+  vai_tro         TEXT NOT NULL CHECK (vai_tro IN ('xem', 'quan_ly')),
+  them_boi        TEXT,
+  them_luc        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (email, don_vi)
+);
+CREATE INDEX IF NOT EXISTS quyen_don_vi ON quyen (don_vi);
+
+-- Chuyển quyền cũ sang quyền theo bên (chủ dự án chốt 19/10/2026). Chạy lại không đè thay đổi
+-- làm sau đó trên dashboard:
+--   1. Quản trị viên đầu tiên: thamnt + thienlq — CHỈ khi chưa có quản trị viên nào (dashboard luôn
+--      giữ ≥ 1 quản trị viên, nên từ lần thứ hai câu này không làm gì).
+--   2. nganlt: Quản lý HAPAS; itsupport: Chỉ xem HAPAS — chỉ khi người đó còn tên và CHƯA có dòng
+--      quyền nào (bị xoá rồi thì không thêm lại; đã đổi vai trò thì không đè).
+--   3. Mọi người còn lại chưa có dòng quyền nào và không phải quản trị viên: chép vai_tro cũ thành
+--      quyền ở bên HAPAS (người thêm bằng bản dashboard / lệnh cũ trước khi lên bản mới). Dashboard
+--      không để lại người "có tên mà không quyền", nên câu này không cấp lại quyền đã bỏ.
+INSERT INTO nguoi_xem (email, vai_tro, them_boi, la_quan_tri)
+  SELECT e, 'quan_ly', 'chuyen_quyen_ben', TRUE
+  FROM unnest(ARRAY['thamnt@hapas.vn', 'thienlq@hapas.vn']) AS t(e)
+  WHERE NOT EXISTS (SELECT 1 FROM nguoi_xem WHERE la_quan_tri)
+  ON CONFLICT (email) DO UPDATE SET la_quan_tri = TRUE, vai_tro = 'quan_ly';
+INSERT INTO quyen (email, don_vi, vai_tro, them_boi)
+  SELECT n.email, 'hapas', t.v, 'chuyen_quyen_ben'
+  FROM (VALUES ('nganlt@hapas.vn', 'quan_ly'), ('itsupport@hapas.vn', 'xem')) AS t(e, v)
+  JOIN nguoi_xem n ON n.email = t.e
+  WHERE NOT EXISTS (SELECT 1 FROM quyen q WHERE q.email = n.email)
+  ON CONFLICT (email, don_vi) DO NOTHING;
+INSERT INTO quyen (email, don_vi, vai_tro, them_boi)
+  SELECT n.email, 'hapas', n.vai_tro, 'chuyen_quyen_ben' FROM nguoi_xem n
+  WHERE NOT n.la_quan_tri AND NOT EXISTS (SELECT 1 FROM quyen q WHERE q.email = n.email)
+  ON CONFLICT (email, don_vi) DO NOTHING;
+-- Cột cũ vai_tro = vai trò gộp (như dashboard `kho._vai_cu`) — Mark bản cũ đọc đúng.
+UPDATE nguoi_xem n SET vai_tro = 'quan_ly' WHERE n.vai_tro <> 'quan_ly' AND (n.la_quan_tri OR
+  EXISTS (SELECT 1 FROM quyen q WHERE q.email = n.email AND q.vai_tro = 'quan_ly'));
+UPDATE nguoi_xem n SET vai_tro = 'xem' WHERE n.vai_tro <> 'xem' AND NOT n.la_quan_tri AND
+  NOT EXISTS (SELECT 1 FROM quyen q WHERE q.email = n.email AND q.vai_tro = 'quan_ly');
 
 -- Nhật ký mọi thay đổi làm trên dashboard (ai, lúc nào, sửa gì). Không đẩy lên BigQuery.
 CREATE TABLE IF NOT EXISTS nhat_ky (
@@ -449,7 +522,7 @@ CREATE INDEX IF NOT EXISTS han_muc_apify_luc ON han_muc_apify (luc DESC);
 COMMENT ON TABLE du_an IS $$[Lớp] Raw
 [Mục đích] Danh mục dự án/brand đang được lắng nghe và cấu hình lọc + thu thập (từ khoá, từ loại trừ, hashtag riêng, trần chi phí theo dõi mỗi tháng).
 [Grain] 1 dòng = 1 dự án
-[Khoá] PK: ma | Join: ma → nguon.du_an, bai.du_an, chi_so_ngay.du_an, luot_quet.du_an, de_xuat.du_an, lich_quet.du_an
+[Khoá] PK: ma | Join: ma → nguon.du_an, bai.du_an, chi_so_ngay.du_an, luot_quet.du_an, de_xuat.du_an, lich_quet.du_an; don_vi → don_vi.ma
 [Nguồn] Người quản lý nhập trên dashboard social.hapas.vn (role lang_nghe_web); Mark chỉ đọc
 [Phạm vi] Mọi dự án lắng nghe | Kênh: Không có | Dữ liệu từ khi bật đợt 2 (sau 14/10/2026); cột hashtag từ 18/10/2026
 [Đã xử lý] Mã dự án chữ thường; thị trường 2 chữ in hoa; hashtag bỏ #, bỏ dấu, chữ thường, chỉ a-z 0-9 _; trần tháng ≥ 0 USD (ràng buộc CHECK)
@@ -475,6 +548,22 @@ COMMENT ON COLUMN du_an.tk_bat IS 'Công tắc TỔNG tìm theo từ khoá. TRUE
 COMMENT ON COLUMN du_an.tk_so_bai IS 'Số bài mặc định lấy mỗi nền tảng mỗi lượt khi tìm theo từ khoá (khi cau_hinh không ghi đè), bài, ≥ 0 (không trần trên; Facebook gói Free thực tế tối đa 20 bài, 1 lượt/24h; Threads chỉ tìm số bài // 10 từ khoá đầu vì actor lấy ≥ 10 bài mỗi từ). 0 = không tìm.';
 COMMENT ON COLUMN du_an.cau_hinh IS 'Cấu hình thu thập theo từng nền tảng (JSON), sửa ở trang Ngân sách: {"tu_khoa": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "so_tu" ≥ 1}}, "binh_luan": {"<nền tảng>": {"bat", "so_bai" ≥ 0, "moi_bai" 0 = hết hoặc ≥ 5}}} — không trần trên nghiệp vụ (chỉ chặn số rác > 1.000.000). Khoá thiếu/giá trị rác thì dùng cột chung tk_* / bl_*; chỉ bat = true là bật; thiếu bat thì bật theo cột chung, TRỪ threads (thiếu bat = tắt — chủ dự án bật trên trang Ngân sách, từ 16/10/2026); cột tk_bat / bl_bat là công tắc tổng. {} = theo cột chung (Threads tắt). Từ 17/10/2026 "tu_khoa"."threads" có thêm "duong2": {"bat", "so_bai" = trần bài cả lượt (0 = tắt, mặc định 100), "so_bai_moi_tu" (mặc định 20), "so_luot" 1–5 (mặc định 2)} cho đường 2 tìm Threads (scrapersdelight) — chỉ chạy khi Threads bật; thiếu bat = BẬT, false = tắt. Từ 18/10/2026 "tu_khoa"."threads" có "duong1_tu": danh sách từ khoá gửi đường 1 tìm Threads (futurizerush) — thiếu thì chỉ từ khoá MỘT chữ có tên brand (tên, mã dự án, hashtag_can_nhac_brand.ten; vd hapas, hapasvn), vì futurizerush khớp cụm nhiều chữ theo từng chữ; cụm nhiều chữ chỉ đi đường 2; vẫn bỏ bo_tu của Threads; rỗng sau khi lọc thì tìm tên brand; chưa có ô trên trang Ngân sách (sửa bằng jsonb_set, lưu trang giữ nguyên). Cũng từ 17/10/2026: "tu_khoa"."facebook" có "duong2": {"bat", "so_bai_moi_tu" (bài mới nhất mỗi cụm, mặc định 12, 0 = tắt), "gio" (giờ tối thiểu giữa hai lượt, mặc định 20), "gio_chien_dich" (giờ tối thiểu khi đang có lịch chiến dịch, mặc định = gio; hạ xuống thì quét dày hơn — 6 giờ ≈ 4 lượt/ngày, tới ~25 USD/tháng/dự án)} cho đường 2 tìm Facebook (mina, chỉ cụm nhiều chữ có tên brand) — thiếu bat thì theo Facebook (số bài > 0); "tu_khoa"."tiktok" có "hashtag": {"bat", "so_yeu_cau" (trần yêu cầu mỗi lượt, mặc định 5, 0 = tắt), "gio" (mặc định 20)} cho feed hashtag TikTok của từ khoá một chữ — thiếu bat thì theo TikTok; "so_tu" của instagram là số hashtag mỗi lượt (mặc định 12). Từ 18/10/2026 "tu_khoa"."<nền tảng>"."bo_tu": danh sách từ khoá KHÔNG đem đi tìm trên nền tảng đó (mọi đường tìm của nền tảng; so trọn cụm, bỏ dấu, không phân biệt hoa thường; Instagram / feed hashtag TikTok: mục một chữ bỏ hashtag cùng dạng viết liền) — bài vẫn lọc theo đủ tu_khoa; sửa ở khối Nâng cao trang Ngân sách ("Không tìm trên…"), thiếu/rỗng = tìm mọi từ khoá. Cũng từ 18/10/2026 "seeding": {"bat" (thiếu = BẬT, chỉ false là tắt), "bai_mot_ngay" (mặc định 5), "bai_bay_ngay" (20), "trung_vi_bl" (2), "trung_vi_xem" (15000, 0 = bỏ điều kiện xem), "trung_vi_tuong_tac" (300, trung vị thích + chia sẻ thay điều kiện xem khi tài khoản không có số xem nào — chưa hiệu chỉnh, 0 = bỏ), "giu_bl_tu" (10, 0 = không giữ bài nào), "ngay" (35, số ngày lịch sử), "mien_ten_brand" (thiếu = true), "nen_tang" (mặc định ["tiktok"] — nền tảng đã hiệu chỉnh; thêm youtube / facebook / instagram / threads để bật; lượt xem 0 của Facebook / Instagram / Threads là thiếu số)} cho luật seeding affiliate cấp bài: tài khoản đăng ≥ bai_mot_ngay bài liên quan trong một ngày hoặc ≥ bai_bay_ngay bài trong 7 ngày, VÀ trung vị bình luận ≤ trung_vi_bl, trung vị lượt xem ≤ trung_vi_xem thì bài của nó không vào bai (trừ bài ≥ giu_bl_tu bình luận); kênh nhà và tài khoản mang tên dự án, mã dự án, một tên trong hashtag_can_nhac_brand.ten hoặc một du_an.hashtag (so nguyên cụm viết liền, không gồm tag kiểm độ phủ tự học) ở định danh hoặc tên hiển thị không bao giờ bị bắt; số rác/ngoài khoảng → mặc định. "tu_khoa"."instagram" / "facebook" / "threads" có "gian": {"bat" (thiếu = BẬT), "luot" (mặc định 3, 1–6), "ty_le" (0,05), "gio" (44)} giãn nhịp đường tìm ít bài mới: luot lượt tìm liền có bài mới < ty_le × bài về thì chỉ tìm lại sau gio giờ (chiến dịch đang chạy thì không giãn); lưu trang Ngân sách giữ nguyên khối này và mọi khoá biểu mẫu không có ô. Cũng từ 18/10/2026 "hashtag_can_nhac_brand": true / false hoặc {"bat" (thiếu = BẬT, chỉ false là tắt), "ten" (danh sách tên brand thêm, vd thương hiệu con), "tag_rong" (hashtag rộng KHÔNG tính là tên brand, thiếu = ["quatang2010"])} cho cổng brand của bài CHỈ đến từ đường hashtag (feed hashtag TikTok, Instagram tìm theo hashtag, TikTok dự phòng theo hashtag, mẫu hashtag của kiểm độ phủ): bài chỉ vào bai khi nội dung, hashtag, tên hoặc định danh chủ bài (hoặc chính hashtag của feed) gọi tên dự án, mã dự án, một tên trong "ten" hoặc một tag chiến dịch của dự án (du_an.hashtag, tag kiểm độ phủ thêm vào lượt nổi khi tag chứa tên brand, khẩu hiệu lịch chiến dịch đang chạy — dạng viết liền, trừ tag_rong và tag chung chung; từ 18/10/2026) (bỏ dấu, không phân biệt hoa thường); kênh nhà miễn; bài bị bỏ trước AI, vào sổ đã loại với lý do hashtag_khong_nhac_brand (mỗi lượt xét lại theo danh sách tên hiện hành — thêm tên / tag là gỡ được; chưa có ô trên trang Ngân sách: sửa JSON bằng jsonb_set, lệnh mẫu ở theo_doi.py, lưu trang Ngân sách giữ nguyên khối).';
 COMMENT ON COLUMN du_an.sua_boi IS 'Email người sửa gần nhất trên dashboard. NULL khi tạo bằng lệnh cài đặt. Email nội bộ — không đẩy lên BigQuery.';
+COMMENT ON COLUMN du_an.don_vi IS 'Bên (đơn vị) sở hữu dự án, từ 19/10/2026. FK → don_vi.ma. Không NULL. Quyết định ai xem/sửa dự án trên dashboard và ai hỏi được Mark số của dự án (quyen.don_vi). Dự án có trước 19/10/2026: mã chứa "matemade" → matemade, còn lại → hapas. Chỉ quản trị viên chuyển được dự án sang bên khác. Chưa đẩy lên BigQuery.';
+
+COMMENT ON TABLE don_vi IS $$[Lớp] Raw
+[Mục đích] Danh mục bên (đơn vị: HAPAS, MATEMADE…) sở hữu dự án lắng nghe, làm gốc cho phân quyền theo bên trên dashboard.
+[Grain] 1 dòng = 1 bên
+[Khoá] PK: ma | Join: ma → du_an.don_vi, quyen.don_vi
+[Nguồn] Quản trị viên tạo trên dashboard social.hapas.vn (trang Quản trị); hapas, matemade có sẵn từ schema.sql
+[Phạm vi] Mọi bên dùng dashboard | Kênh: Không có | Từ 19/10/2026
+[Đã xử lý] Mã chữ thường, số, -, _ (2–40 ký tự, ràng buộc CHECK); tên 1–200 ký tự
+[Refresh] Ghi tức thời khi quản trị viên tạo bên (ghi nhat_ky)
+[Dùng khi] Biết dự án thuộc bên nào, tên hiển thị của bên
+[Không dùng khi] Ai có quyền ở bên nào → dùng quyen
+[Lưu ý] Không xoá bên trên dashboard (dự án và quyền trỏ tới). Không đẩy lên BigQuery.$$;
+COMMENT ON COLUMN don_vi.ma IS 'Mã bên (vd hapas, matemade). PK. Chữ thường, số, -, _; 2–40 ký tự. Join: → du_an.don_vi, quyen.don_vi.';
+COMMENT ON COLUMN don_vi.ten IS 'Tên hiển thị của bên (vd HAPAS). Không NULL, 1–200 ký tự.';
+COMMENT ON COLUMN don_vi.tao_luc IS 'Thời điểm tạo bên (UTC).';
 
 COMMENT ON TABLE nguon IS $$[Lớp] Raw
 [Mục đích] Danh sách nguồn mạng xã hội đang theo dõi của từng dự án, kèm chu kỳ quét và tình trạng quét gần nhất.
@@ -657,18 +746,19 @@ COMMENT ON COLUMN chi_so_ngay.binh_luan IS 'Bình luận nền tảng báo, lũy
 COMMENT ON COLUMN chi_so_ngay.chia_se IS 'Lượt chia sẻ lũy kế, lượt. NULL với YouTube, Instagram.';
 
 COMMENT ON TABLE nguoi_xem IS $$[Lớp] Raw
-[Mục đích] Ai được vào dashboard social.hapas.vn và với vai trò gì.
+[Mục đích] Ai được vào dashboard social.hapas.vn: cờ quản trị viên toàn hệ thống và thông tin danh bạ Lark; vai trò theo từng bên ở bảng quyen.
 [Grain] 1 dòng = 1 email
-[Khoá] PK: email | Join: Không có
-[Nguồn] Người quản lý thêm/xoá trên dashboard; người quản lý đầu tiên thêm bằng lệnh quan_tri; tên, chức danh, phòng ban, trạng thái đọc từ danh bạ Lark (contact API)
-[Phạm vi] Nhân viên HAPAS (tài khoản Lark của tổ chức) | Kênh: Không có | Từ khi cài dashboard
-[Đã xử lý] Email chữ thường; trạng thái Lark quy về 5 giá trị
-[Refresh] Ghi tức thời khi người quản lý sửa; cột danh bạ làm mới ≤ 12 giờ/lần khi mở trang Người xem và khi thêm email; dang_nhap_cuoi, lark_open_id, lark_union_id, lark_user_id ghi mỗi lượt đăng nhập
-[Dùng khi] Kiểm quyền đăng nhập dashboard
-[Không dùng khi] Lịch sử thêm/xoá → dùng nhat_ky
-[Lưu ý] Email nội bộ — không đẩy lên BigQuery. Luôn phải còn ít nhất một quan_ly.$$;
-COMMENT ON COLUMN nguoi_xem.email IS 'Email công ty (enterprise_email Lark), chữ thường. PK.';
-COMMENT ON COLUMN nguoi_xem.vai_tro IS 'Giá trị: xem (chỉ xem), quan_ly (sửa dự án, nguồn, ngân sách, người xem).';
+[Khoá] PK: email | Join: email → quyen.email
+[Nguồn] Quản trị viên / quản lý của bên thêm, xoá trên dashboard; quản trị viên đầu tiên đặt bằng schema.sql hoặc lệnh quan_tri; tên, chức danh, phòng ban, trạng thái đọc từ danh bạ Lark (contact API)
+[Phạm vi] Nhân viên HAPAS (tài khoản Lark của tổ chức) | Kênh: Không có | Từ khi cài dashboard; la_quan_tri từ 19/10/2026
+[Đã xử lý] Email chữ thường; trạng thái Lark quy về 5 giá trị; vai_tro (cột cũ) = vai trò gộp từ la_quan_tri + quyen
+[Refresh] Ghi tức thời khi sửa người xem; cột danh bạ làm mới ≤ 12 giờ/lần khi mở trang Quản trị và khi thêm email; dang_nhap_cuoi, lark_open_id, lark_union_id, lark_user_id ghi mỗi lượt đăng nhập
+[Dùng khi] Kiểm quyền đăng nhập dashboard, biết ai là quản trị viên
+[Không dùng khi] Vai trò ở từng bên → dùng quyen; lịch sử thêm/xoá → dùng nhat_ky
+[Lưu ý] Email nội bộ — không đẩy lên BigQuery. Luôn phải còn ít nhất một quản trị viên. Người không phải quản trị viên mà không có dòng quyen nào thì không đăng nhập được (dashboard xoá luôn dòng).$$;
+COMMENT ON COLUMN nguoi_xem.email IS 'Email công ty (enterprise_email Lark), chữ thường. PK. Join: → quyen.email.';
+COMMENT ON COLUMN nguoi_xem.vai_tro IS 'CŨ (trước 19/10/2026), chỉ giữ để tương thích — KHÔNG dùng để quyết định quyền (dùng la_quan_tri + quyen). Dashboard giữ = vai trò gộp: quan_ly khi là quản trị viên hoặc Quản lý ít nhất một bên, còn lại xem. Giá trị: xem, quan_ly.';
+COMMENT ON COLUMN nguoi_xem.la_quan_tri IS 'TRUE: quản trị viên toàn hệ thống (mọi bên, mọi dự án, tạo bên, thêm/xoá/đổi mọi người kể cả quản trị viên khác, trang BigQuery). FALSE (mặc định): quyền theo từng bên ở bảng quyen. Từ 19/10/2026; luôn còn ít nhất một TRUE.';
 COMMENT ON COLUMN nguoi_xem.them_boi IS 'Email người thêm. NULL khi thêm bằng lệnh cài đặt.';
 COMMENT ON COLUMN nguoi_xem.them_luc IS 'Thời điểm thêm (UTC).';
 COMMENT ON COLUMN nguoi_xem.ten_lark IS 'Tên trong danh bạ Lark. NULL khi chưa đọc được hoặc không có trong danh bạ.';
@@ -682,6 +772,23 @@ COMMENT ON COLUMN nguoi_xem.lark_open_id IS 'open_id Lark của tài khoản (ri
 COMMENT ON COLUMN nguoi_xem.lark_union_id IS 'union_id Lark của tài khoản (chung mọi app của cùng nhà phát triển; dùng khi đổi app Lark). Ghi lúc đăng nhập. NULL khi chưa đăng nhập.';
 COMMENT ON COLUMN nguoi_xem.lark_user_id IS 'user_id Lark (mã nhân viên trong tổ chức). Ghi lúc đăng nhập. NULL khi chưa đăng nhập hoặc app thiếu scope contact:user.employee_id:readonly.';
 
+COMMENT ON TABLE quyen IS $$[Lớp] Raw
+[Mục đích] Vai trò của từng người xem ở từng bên (Quản lý / Chỉ xem) — dashboard và Mark chỉ cho người này đọc / sửa dự án của các bên ở đây.
+[Grain] 1 dòng = 1 người xem × 1 bên
+[Khoá] PK: email + don_vi | Join: email → nguoi_xem.email; don_vi → don_vi.ma, du_an.don_vi
+[Nguồn] Quản trị viên (mọi vai trò) hoặc quản lý của bên (chỉ người Chỉ xem của bên mình) thêm/xoá trên dashboard; lệnh quan_tri; dòng có trước 19/10/2026 chép từ nguoi_xem.vai_tro sang bên hapas
+[Phạm vi] Mọi người xem không phải quản trị viên (quản trị viên có thể có hoặc không) | Kênh: Không có | Từ 19/10/2026
+[Đã xử lý] Vai trò quy về 2 giá trị (ràng buộc CHECK)
+[Refresh] Ghi tức thời khi sửa người xem (ghi nhat_ky trước/sau)
+[Dùng khi] Kiểm ai xem / sửa được dự án của bên nào
+[Không dùng khi] Quản trị viên toàn hệ thống → dùng nguoi_xem.la_quan_tri; lịch sử đổi quyền → dùng nhat_ky
+[Lưu ý] Email nội bộ — không đẩy lên BigQuery. Xoá người xem thì quyền xoá theo (ON DELETE CASCADE); bỏ dòng cuối của người không phải quản trị viên thì dashboard xoá luôn người đó.$$;
+COMMENT ON COLUMN quyen.email IS 'Email người xem. Một phần PK. FK → nguoi_xem.email (xoá người thì xoá quyền).';
+COMMENT ON COLUMN quyen.don_vi IS 'Bên được cấp quyền. Một phần PK. FK → don_vi.ma.';
+COMMENT ON COLUMN quyen.vai_tro IS 'Vai trò ở bên này. Giá trị: xem (chỉ đọc dự án của bên), quan_ly (sửa dự án, nguồn, từ khoá, ngân sách từng dự án, lịch quét, duyệt đề xuất của bên; thêm/xoá người Chỉ xem của bên).';
+COMMENT ON COLUMN quyen.them_boi IS 'Email người cấp quyền; chuyen_quyen_ben khi chép từ vai trò cũ (schema.sql 19/10/2026); cli:<user> khi cấp bằng lệnh quan_tri. Email nội bộ.';
+COMMENT ON COLUMN quyen.them_luc IS 'Thời điểm cấp quyền lần đầu ở bên này (UTC; đổi vai trò không đổi cột này).';
+
 COMMENT ON TABLE nhat_ky IS $$[Lớp] Raw
 [Mục đích] Nhật ký mọi thay đổi làm trên dashboard: ai, lúc nào, sửa gì.
 [Grain] 1 dòng = 1 thao tác sửa
@@ -692,7 +799,7 @@ COMMENT ON TABLE nhat_ky IS $$[Lớp] Raw
 [Refresh] Append tức thời
 [Dùng khi] Kiểm toán thay đổi nguồn, ngân sách, người xem
 [Không dùng khi] Trạng thái hiện hành → dùng du_an, nguon, nguoi_xem
-[Lưu ý] Có email nội bộ — không đẩy lên BigQuery; chỉ người quản lý xem.$$;
+[Lưu ý] Có email nội bộ — không đẩy lên BigQuery; quản trị viên xem mọi dòng, quản lý của bên chỉ xem dòng về dự án / quyền của bên mình.$$;
 COMMENT ON COLUMN nhat_ky.id IS 'Mã dòng tự tăng. PK.';
 COMMENT ON COLUMN nhat_ky.luc IS 'Thời điểm thao tác (UTC).';
 COMMENT ON COLUMN nhat_ky.ai IS 'Email người thao tác.';
@@ -827,10 +934,19 @@ GRANT UPDATE (lan_chay_ke, lan_chay_cuoi, ket_qua_cuoi, so_lan_chay) ON lich_que
 -- quyền ở trên. Cột mới mà `dashboard.kho.vai_tro` đọc thêm thì cấp thêm ở đây (thiếu quyền thì
 -- tool ĐÓNG — không trả số cho ai). Chạy lại nhiều lần không sao (GRANT trùng không lỗi).
 GRANT SELECT (email, vai_tro) ON nguoi_xem TO mark;
+-- Phân quyền theo bên (19/10/2026): tool chỉ trả số dự án của các bên người hỏi được xem
+-- (`dashboard.kho.quyen_cua` — đọc nguoi_xem.la_quan_tri + quyen(email, don_vi, vai_tro));
+-- cột du_an.don_vi: role mark đã được đọc cả bảng du_an (cấp ở trên).
+GRANT SELECT (la_quan_tri) ON nguoi_xem TO mark;
+GRANT SELECT (email, don_vi, vai_tro) ON quyen TO mark;
+GRANT SELECT ON don_vi TO mark;
 
 -- Quyền của dashboard: quản lý cấu hình + người xem, đọc mọi thứ, ghi nhật ký và mốc đồng bộ.
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO lang_nghe_web;
 GRANT INSERT, UPDATE, DELETE ON du_an, nguon, nguoi_xem TO lang_nghe_web;
+-- 19/10/2026: quyền theo bên (thêm/đổi/bỏ) + tạo bên (không xoá bên).
+GRANT INSERT, UPDATE, DELETE ON quyen TO lang_nghe_web;
+GRANT INSERT, UPDATE ON don_vi TO lang_nghe_web;
 GRANT UPDATE (trang_thai, xu_ly_boi, xu_ly_luc) ON de_xuat TO lang_nghe_web;
 GRANT INSERT ON nhat_ky TO lang_nghe_web;
 GRANT INSERT, UPDATE ON dong_bo_bq TO lang_nghe_web;

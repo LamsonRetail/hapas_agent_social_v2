@@ -42,6 +42,7 @@
     <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten">Dự án {{ du_an.ten }}</h2>
     <span class="the">{{ du_an.ma }}</span>
+    {% if du_an.don_vi %}<span class="the the--nhan" title="Bên sở hữu dự án">Bên {{ ten_ben.get(du_an.don_vi, du_an.don_vi|upper) }}</span>{% endif %}
     {% if du_an.dang_bat %}<span class="the the--tot the--cham">Đang bật</span>{% else %}<span class="the the--loi the--cham">Đang tắt</span>{% endif %}
     <span class="muc__phai muc__phu">Sửa lần cuối {{ du_an.sua_luc|gio_vn }}{% if du_an.sua_boi %} bởi {{ du_an.sua_boi }}{% endif %}</span>
   </div>
@@ -67,6 +68,10 @@
       <label class="o rong">Từ loại trừ (bài có từ này bị bỏ, không qua AI) <input type="text" name="tu_loai_tru" value="{{ du_an.tu_loai_tru|join(', ') }}"></label>
       <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000">{{ du_an.boi_canh }}</textarea></label>
       <label class="o"><span><input type="checkbox" name="dang_bat" value="1"{% if du_an.dang_bat %} checked{% endif %}> Đang bật (tắt thì /theodoi và Lịch quét không quét)</span></label>
+      {% if don_vi_ds %}{# chỉ quản trị viên: chuyển dự án sang bên khác (đổi ai xem được dữ liệu) #}
+      <label class="o">Bên sở hữu
+        <select name="don_vi">{% for b in don_vi_ds %}<option value="{{ b.ma }}"{% if b.ma == du_an.don_vi %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}</select></label>
+      {% endif %}
       <div><button class="nut" type="submit">Lưu dự án</button></div>
     </form>
   </details>
@@ -271,12 +276,14 @@
 <div class="the-khoi cach-duoi"><p class="trong">Chưa có dự án nào.{% if not ql %} Nhờ người quản lý thêm dự án.{% endif %}</p></div>
 {% endif %}
 
-{% if ql %}
+{% if ben_tao %}
 <section class="the-khoi">
   <details{% if not du_an %} open{% endif %}>
     <summary>Thêm dự án mới</summary>
     <form method="post" action="/du-an/them" class="luoi-form">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o">Bên sở hữu
+        <select name="don_vi" required>{% for b in ben_tao %}<option value="{{ b.ma }}"{% if du_an and b.ma == du_an.don_vi %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}</select></label>
       <label class="o">Mã dự án (gõ sau /theodoi) <input type="text" name="ma" required maxlength="40" pattern="[a-z0-9][a-z0-9_\-]{1,39}" placeholder="vd hapas"></label>
       <label class="o">Tên dự án <input type="text" name="ten" required maxlength="200"></label>
       <label class="o rong">Từ khoá (cách nhau bằng dấu phẩy) <input type="text" name="tu_khoa" required placeholder="vd hapas, túi hapas"></label>

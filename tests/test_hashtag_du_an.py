@@ -118,7 +118,7 @@ def test_them_du_an_moi_mac_dinh_vn_kem_hashtag():
     _, c, kho = tao()
     csrf = dang_nhap(c, QL)
     r = c.post("/du-an/them", data={"csrf": csrf, "ma": "moi", "ten": "Mới", "tu_khoa": "moi",
-                                    "hashtag": "#Mới #moi2026"})
+                                    "hashtag": "#Mới #moi2026", "don_vi": "hapas"})
     assert r.status_code == 303
     assert kho.du_an["moi"]["thi_truong"] == "VN" and kho.du_an["moi"]["hashtag"] == [
         "moi", "moi2026"]
@@ -174,9 +174,10 @@ def test_kho_dashboard_co_cot_thi_doc_ghi_hashtag(monkeypatch):
     KD.sua_du_an("ql@hapas.vn", "hapas", dict(SUA, hashtag=["hapas", "yeu"]))
     sql, ts = next(x for x in gd[-1].lenh if x[0].startswith("UPDATE du_an"))
     assert "hashtag = %s::text[]" in sql and ["hapas", "yeu"] in ts
-    KD.them_du_an("ql@hapas.vn", dict(SUA, ma="moi", thi_truong="VN", hashtag=["moi"]))
+    KD.them_du_an("ql@hapas.vn", dict(SUA, ma="moi", thi_truong="VN", hashtag=["moi"],
+                                      don_vi="hapas"))
     sql, ts = next(x for x in gd[-1].lenh if x[0].startswith("INSERT INTO du_an"))
-    assert "sua_boi, hashtag)" in sql and ts[-1] == ["moi"]
+    assert "sua_boi, don_vi, hashtag)" in sql and ts[-1] == ["moi"]
     assert len(KD._CO_HASHTAG) == 1, "có cột rồi thì nhớ, không hỏi lại information_schema"
 
 

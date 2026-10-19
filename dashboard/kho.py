@@ -2,9 +2,13 @@
 
 Kết nối bằng role `lang_nghe_web` qua Unix socket + peer (user hệ điều hành của dịch vụ), không
 mật khẩu; đổi bằng `LANG_NGHE_WEB_DSN` khi thử ở máy khác. Quyền của role (xem
-`deploy/lang-nghe/schema.sql`): đọc mọi bảng; ghi `du_an`, `nguon`, `nguoi_xem`, `lich_quet`; chỉ đổi trạng
-thái `de_xuat`; chỉ THÊM `nhat_ky`. Dashboard KHÔNG ghi `bai`, `luot_quet`, `chi_so_ngay` — đó là
-phần của Mark.
+`deploy/lang-nghe/schema.sql`): đọc mọi bảng; ghi `du_an`, `nguon`, `nguoi_xem`, `quyen`, `don_vi`,
+`lich_quet`; chỉ đổi trạng thái `de_xuat`; chỉ THÊM `nhat_ky`. Dashboard KHÔNG ghi `bai`, `luot_quet`,
+`chi_so_ngay` — đó là phần của Mark.
+
+Phân quyền theo bên (19/10/2026, `phan_quyen.py`): hàm sửa người xem / tạo bên đọc quyền của NGƯỜI
+LÀM ngay trong giao dịch (sau khi khoá bảng) rồi mới kiểm luật — tầng app có lọt thì kho vẫn chặn
+(quản lý của bên không tự nâng quyền, luôn còn ít nhất một quản trị viên).
 
 Mỗi hàm sửa dữ liệu ghi thêm MỘT dòng `nhat_ky` (ai, hành động, đối tượng, chi tiết JSON) TRONG
 CÙNG giao dịch: sửa thành công thì chắc chắn có nhật ký, nhật ký lỗi thì không sửa gì. Ngoại lệ
@@ -21,6 +25,8 @@ import contextlib
 import datetime
 import json
 import os
+
+from dashboard import phan_quyen as PQ
 
 _TZ = "Asia/Ho_Chi_Minh"
 #: Chặn số bài đọc một lần cho trang Chỉ số (2 kỳ). Vượt thì trả cờ `bi_cat` để trang báo.
@@ -82,17 +88,49 @@ def kiem_tra() -> bool:
         return bool(c.execute("SELECT 1 AS ok").fetchone())
 
 
-def vai_tro(email: str) -> str | None:
+#: Câu đọc quyền MỘT người: cờ quản trị + {bên: vai trò}. Chỉ đọc các cột role `mark` được cấp
+#: (`hoi_dashboard_tool` gọi `quyen_cua` bằng role mark): nguoi_xem(email, la_quan_tri),
+#: quyen(email, don_vi, vai_tro) — thêm cột ở đây thì cấp thêm GRANT trong schema.sql.
+_SQL_QUYEN = ("SELECT n.la_quan_tri, COALESCE((SELECT json_object_agg(q.don_vi, q.vai_tro) "
+              "FROM quyen q WHERE q.email = n.email), '{}'::json) AS ben "
+              "FROM nguoi_xem n WHERE n.email = %s")
+
+
+def quyen_cua(email: str) -> dict | None:
+    """Quyền của `email` — {"la_quan_tri", "ben": {mã bên: vai trò}}; None khi không có tên.
+    Đọc lại MỖI yêu cầu (xoá quyền có hiệu lực ngay)."""
     with ket_noi() as c:
-        r = c.execute("SELECT vai_tro FROM nguoi_xem WHERE email = %s",
-                      (str(email or "").lower(),)).fetchone()
-    return r["vai_tro"] if r else None
+        r = c.execute(_SQL_QUYEN, (str(email or "").lower(),)).fetchone()
+    return PQ.chuan(r) if r else None
+
+
+def vai_tro(email: str) -> str | None:
+    """Vai trò GỘP (bản trước 19/10/2026): quan_ly / xem / None — `phan_quyen.vai_chung`. Không
+    dùng để quyết định quyền trên dashboard nữa (quyền theo bên: `quyen_cua`)."""
+    return PQ.vai_chung(quyen_cua(email))
+
+
+# ───────────────────────────── bên (đơn vị, 19/10/2026) ─────────────────────────────
+def cac_don_vi() -> list[dict]:
+    with ket_noi() as c:
+        return c.execute("SELECT ma, ten, tao_luc FROM don_vi ORDER BY ma").fetchall()
+
+
+def them_don_vi(ai: str, ma: str, ten: str, *, he_thong: bool = False) -> None:
+    """Tạo bên mới. Chỉ quản trị viên (đọc quyền người làm trong giao dịch)."""
+    with ket_noi(trung=f"Mã bên '{ma}' đã có.") as c:
+        try:
+            PQ.kiem_tao_ben(_lam(c, ai, he_thong))
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
+        c.execute("INSERT INTO don_vi (ma, ten) VALUES (%s, %s)", (ma, ten))
+        _nhat_ky(c, ai, "them_don_vi", f"don_vi:{ma}", {"don_vi": ma, "ten": ten})
 
 
 # ───────────────────────────── dự án ─────────────────────────────
 _COT_DU_AN = ("ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
               "tran_usd_thang::float AS tran_usd_thang, dang_bat, tao_luc, sua_luc, sua_boi, "
-              "bl_bat, bl_so_bai, bl_moi_bai, tk_bat, tk_so_bai, cau_hinh")
+              "bl_bat, bl_so_bai, bl_moi_bai, tk_bat, tk_so_bai, cau_hinh, don_vi")
 #: Cột `du_an.hashtag` (18/10/2026) — chỉ đọc/ghi khi DB đã có (`_co_hashtag`).
 _CO_HASHTAG: list[bool] = []
 
@@ -142,30 +180,38 @@ def _hashtag_ghi(c, d: dict) -> bool:
 def them_du_an(ai: str, d: dict) -> None:
     with ket_noi(trung=f"Mã dự án '{d['ma']}' đã có.") as c:
         co_tag = _hashtag_ghi(c, d)
+        # `don_vi` (19/10/2026): bên của dự án — app đã kiểm người tạo được tạo dự án ở bên này.
         c.execute("INSERT INTO du_an (ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
-                  f"dang_bat, sua_boi{', hashtag' if co_tag else ''}) VALUES "
-                  f"(%s, %s, %s, %s, %s, %s, %s, %s{', %s::text[]' if co_tag else ''})",
+                  f"dang_bat, sua_boi, don_vi{', hashtag' if co_tag else ''}) VALUES "
+                  f"(%s, %s, %s, %s, %s, %s, %s, %s, %s{', %s::text[]' if co_tag else ''})",
                   (d["ma"], d["ten"], d["tu_khoa"], d["tu_loai_tru"], d["boi_canh"],
-                   d.get("thi_truong") or "VN", d["dang_bat"], ai,
+                   d.get("thi_truong") or "VN", d["dang_bat"], ai, d["don_vi"],
                    *([d["hashtag"]] if co_tag else [])))
         _nhat_ky(c, ai, "them_du_an", f"du_an:{d['ma']}", d)
 
 
 def sua_du_an(ai: str, ma: str, d: dict) -> None:
     """Sửa dự án. Thiếu khoá `thi_truong` / `hashtag` (biểu mẫu không có ô — 18/10/2026 bỏ ô thị
-    trường) thì giữ giá trị đang lưu: COALESCE với tham số NULL."""
+    trường) thì giữ giá trị đang lưu: COALESCE với tham số NULL. Khoá `don_vi` (chuyển dự án sang
+    bên khác — app chỉ cho quản trị viên) thì nhật ký ghi cả bên cũ."""
     with ket_noi() as c:
         co_tag = _hashtag_ghi(c, d)
+        ct = dict(d)
+        if d.get("don_vi"):
+            cu = c.execute("SELECT don_vi FROM du_an WHERE ma = %s FOR UPDATE", (ma,)).fetchone()
+            ct["don_vi_truoc"] = cu["don_vi"] if cu else None
         r = c.execute("UPDATE du_an SET ten = %s, tu_khoa = %s, tu_loai_tru = %s, boi_canh = %s, "
                       "thi_truong = COALESCE(%s, thi_truong), dang_bat = %s, "
                       f"{'hashtag = %s::text[], ' if co_tag else ''}"
+                      "don_vi = COALESCE(%s, don_vi), "
                       "sua_luc = now(), sua_boi = %s WHERE ma = %s RETURNING ma",
                       (d["ten"], d["tu_khoa"], d["tu_loai_tru"], d["boi_canh"],
                        d.get("thi_truong"), d["dang_bat"],
-                       *([d["hashtag"]] if co_tag else []), ai, ma)).fetchone()
+                       *([d["hashtag"]] if co_tag else []), d.get("don_vi") or None,
+                       ai, ma)).fetchone()
         if not r:
             raise LoiDuLieu("Không còn dự án này.")
-        _nhat_ky(c, ai, "sua_du_an", f"du_an:{ma}", d)
+        _nhat_ky(c, ai, "sua_du_an", f"du_an:{ma}", ct)
 
 
 def dat_tran_thang(ai: str, ma: str, usd) -> None:
@@ -676,14 +722,18 @@ def xoa_lich(ai: str, lid: int) -> None:
 # ───────────────────────────── người xem + nhật ký ─────────────────────────────
 def cac_nguoi_xem() -> list[dict]:
     """Người xem kèm bản đệm danh bạ Lark. `dang_nhap_cuoi`: cột mới (ghi mỗi lượt đăng nhập);
-    người chưa đăng nhập lại kể từ khi có cột thì lấy lần đăng nhập đầu trong nhật ký."""
+    người chưa đăng nhập lại kể từ khi có cột thì lấy lần đăng nhập đầu trong nhật ký.
+    `la_quan_tri` + `quyen` ({bên: vai trò}, 19/10/2026) — app lọc theo bên người đang xem."""
     with ket_noi() as c:
-        return c.execute(
-            "SELECT n.email, n.vai_tro, n.them_boi, n.them_luc, n.ten_lark, n.chuc_danh, "
-            "n.phong_ban, n.trang_thai_lark, n.danh_ba_loi, n.danh_ba_luc, n.lark_open_id, "
+        rows = c.execute(
+            "SELECT n.email, n.vai_tro, n.la_quan_tri, n.them_boi, n.them_luc, n.ten_lark, "
+            "n.chuc_danh, n.phong_ban, n.trang_thai_lark, n.danh_ba_loi, n.danh_ba_luc, "
+            "n.lark_open_id, COALESCE((SELECT json_object_agg(q.don_vi, q.vai_tro) FROM quyen q "
+            "WHERE q.email = n.email), '{}'::json) AS quyen, "
             "COALESCE(n.dang_nhap_cuoi, (SELECT max(k.luc) FROM nhat_ky k "
             "WHERE k.hanh_dong = 'dang_nhap_lan_dau' AND k.doi_tuong = 'nguoi_xem:' || n.email)"
-            ") AS dang_nhap_cuoi FROM nguoi_xem n ORDER BY n.vai_tro DESC, n.email").fetchall()
+            ") AS dang_nhap_cuoi FROM nguoi_xem n ORDER BY n.la_quan_tri DESC, n.email").fetchall()
+    return [{**r, "quyen": dict(r.get("quyen") or {})} for r in rows]
 
 
 def ghi_danh_ba(ket_qua: dict[str, dict]) -> None:
@@ -710,41 +760,136 @@ def ghi_loi_danh_ba(emails: list[str], loai: str) -> None:
 
 
 def _khoa_nguoi_xem(c) -> None:
-    """Khoá bảng người xem TRƯỚC khi đọc vai trò: hai người cùng xoá/hạ hai quản lý cuối cùng
-    một lúc thì người sau phải đợi, rồi đọc lại thấy số quản lý đã giảm."""
-    c.execute("LOCK TABLE nguoi_xem IN SHARE ROW EXCLUSIVE MODE")
+    """Khoá bảng người xem + quyền TRƯỚC khi đọc quyền: hai người cùng bỏ hai quản trị viên cuối
+    cùng một lúc thì người sau phải đợi, rồi đọc lại thấy số quản trị viên đã giảm; quyền của người
+    làm đọc sau khoá nên không dùng bản cũ (vừa bị hạ quyền thì thao tác bị chặn)."""
+    c.execute("LOCK TABLE nguoi_xem, quyen IN SHARE ROW EXCLUSIVE MODE")
 
 
-def _so_quan_ly_con_lai(c, bo_email: str) -> int:
-    """Số quản lý KHÁC `bo_email` (gọi sau `_khoa_nguoi_xem`, cùng giao dịch)."""
-    return int(c.execute("SELECT count(*) AS n FROM nguoi_xem WHERE vai_tro = 'quan_ly' "
+def _quyen_trong(c, email: str) -> dict | None:
+    r = c.execute(_SQL_QUYEN, (email,)).fetchone()
+    return PQ.chuan(r) if r else None
+
+
+def _lam(c, ai: str, he_thong: bool) -> dict:
+    """Quyền NGƯỜI LÀM, đọc trong giao dịch; lệnh máy chủ (`quan_tri.py`) = `PQ.HE_THONG`."""
+    if he_thong:
+        return PQ.HE_THONG
+    return _quyen_trong(c, ai) or {"la_quan_tri": False, "ben": {}}
+
+
+def _so_quan_tri_khac(c, bo_email: str) -> int:
+    """Số quản trị viên KHÁC `bo_email` (gọi sau `_khoa_nguoi_xem`, cùng giao dịch)."""
+    return int(c.execute("SELECT count(*) AS n FROM nguoi_xem WHERE la_quan_tri "
                          "AND email <> %s", (bo_email,)).fetchone()["n"])
 
 
-def luu_nguoi_xem(ai: str, email: str, vai_tro_moi: str) -> None:
-    """Thêm người xem, hoặc đổi vai trò nếu đã có. Không hạ quyền quản lý cuối cùng."""
-    with ket_noi() as c:
-        if vai_tro_moi != "quan_ly":
-            _khoa_nguoi_xem(c)
-            cu = c.execute("SELECT vai_tro FROM nguoi_xem WHERE email = %s", (email,)).fetchone()
-            if cu and cu["vai_tro"] == "quan_ly" and _so_quan_ly_con_lai(c, email) == 0:
-                raise LoiDuLieu("Không hạ quyền người quản lý cuối cùng — thêm quản lý khác trước.")
-        c.execute("INSERT INTO nguoi_xem (email, vai_tro, them_boi) VALUES (%s, %s, %s) "
-                  "ON CONFLICT (email) DO UPDATE SET vai_tro = EXCLUDED.vai_tro",
-                  (email, vai_tro_moi, ai))
-        _nhat_ky(c, ai, "luu_nguoi_xem", f"nguoi_xem:{email}", {"vai_tro": vai_tro_moi})
+def _vai_cu(c, email: str) -> None:
+    """Giữ cột cũ `nguoi_xem.vai_tro` (Mark bản cũ còn đọc) = vai trò gộp `PQ.vai_chung`."""
+    c.execute("UPDATE nguoi_xem n SET vai_tro = CASE WHEN n.la_quan_tri OR EXISTS (SELECT 1 FROM "
+              "quyen q WHERE q.email = n.email AND q.vai_tro = 'quan_ly') THEN 'quan_ly' "
+              "ELSE 'xem' END WHERE n.email = %s", (email,))
 
 
-def xoa_nguoi_xem(ai: str, email: str) -> None:
+def _don_nguoi_trong(c, email: str) -> bool:
+    """Người không còn bên nào và không phải quản trị viên thì xoá dòng `nguoi_xem` (không để dòng
+    "có tên mà không quyền" — chạy lại schema.sql không chép vai trò cũ cho họ lần nữa)."""
+    return bool(c.execute("DELETE FROM nguoi_xem n WHERE n.email = %s AND NOT n.la_quan_tri AND "
+                          "NOT EXISTS (SELECT 1 FROM quyen q WHERE q.email = n.email) "
+                          "RETURNING n.email", (email,)).fetchone())
+
+
+def _loi(e: PQ.LoiQuyen) -> LoiDuLieu:
+    return LoiDuLieu(str(e))
+
+
+def luu_quyen(ai: str, email: str, don_vi: str, vai_tro_moi: str, *,
+              he_thong: bool = False) -> None:
+    """Thêm `email` vào bên `don_vi` (chưa có tên thì tạo dòng người xem) hoặc đổi vai trò ở bên
+    đó. Luật (`PQ.kiem_luu_quyen`): quản lý của bên chỉ thêm người Chỉ xem, không đụng quản trị
+    viên / quản lý khác / chính mình."""
     with ket_noi() as c:
         _khoa_nguoi_xem(c)
-        cu = c.execute("SELECT vai_tro FROM nguoi_xem WHERE email = %s", (email,)).fetchone()
-        if not cu:
-            raise LoiDuLieu("Không còn người xem này.")
-        if cu["vai_tro"] == "quan_ly" and _so_quan_ly_con_lai(c, email) == 0:
-            raise LoiDuLieu("Không xoá được người quản lý cuối cùng — thêm quản lý khác trước.")
+        dich = _quyen_trong(c, email)
+        try:
+            PQ.kiem_luu_quyen(_lam(c, ai, he_thong), ai, dich, email, don_vi, vai_tro_moi)
+        except PQ.LoiQuyen as e:
+            raise _loi(e) from None
+        if not c.execute("SELECT 1 AS co FROM don_vi WHERE ma = %s", (don_vi,)).fetchone():
+            raise LoiDuLieu("Không có bên này.")
+        c.execute("INSERT INTO nguoi_xem (email, vai_tro, them_boi) VALUES (%s, %s, %s) "
+                  "ON CONFLICT (email) DO NOTHING", (email, vai_tro_moi, ai))
+        c.execute("INSERT INTO quyen (email, don_vi, vai_tro, them_boi) VALUES (%s, %s, %s, %s) "
+                  "ON CONFLICT (email, don_vi) DO UPDATE SET vai_tro = EXCLUDED.vai_tro",
+                  (email, don_vi, vai_tro_moi, ai))
+        _vai_cu(c, email)
+        _nhat_ky(c, ai, "luu_quyen", f"quyen:{email}:{don_vi}",
+                 {"email": email, "don_vi": don_vi, "nguoi_moi": dich is None,
+                  "truoc": (dich or {}).get("ben", {}).get(don_vi), "sau": vai_tro_moi})
+
+
+def xoa_quyen(ai: str, email: str, don_vi: str, *, he_thong: bool = False) -> bool:
+    """Bỏ quyền của `email` ở MỘT bên; quyền ở bên khác giữ nguyên. Hết bên và không phải quản
+    trị viên thì xoá luôn dòng người xem. -> có xoá dòng người xem hay không."""
+    with ket_noi() as c:
+        _khoa_nguoi_xem(c)
+        dich = _quyen_trong(c, email)
+        try:
+            PQ.kiem_xoa_quyen(_lam(c, ai, he_thong), ai, dich, email, don_vi)
+        except PQ.LoiQuyen as e:
+            raise _loi(e) from None
+        c.execute("DELETE FROM quyen WHERE email = %s AND don_vi = %s", (email, don_vi))
+        het = _don_nguoi_trong(c, email)
+        if not het:
+            _vai_cu(c, email)
+        _nhat_ky(c, ai, "xoa_quyen", f"quyen:{email}:{don_vi}",
+                 {"email": email, "don_vi": don_vi, "truoc": dich["ben"][don_vi],
+                  "xoa_nguoi_xem": het})
+    return het
+
+
+def dat_quan_tri(ai: str, email: str, bat: bool, *, he_thong: bool = False) -> bool:
+    """Bật / tắt cờ quản trị viên của `email` (bật: chưa có tên thì tạo). Chỉ quản trị viên; không
+    tắt quản trị viên cuối. Tắt mà người đó không còn bên nào thì xoá dòng người xem.
+    -> có xoá dòng người xem hay không."""
+    with ket_noi() as c:
+        _khoa_nguoi_xem(c)
+        dich = _quyen_trong(c, email)
+        try:
+            PQ.kiem_dat_quan_tri(_lam(c, ai, he_thong), dich, bat, _so_quan_tri_khac(c, email))
+        except PQ.LoiQuyen as e:
+            raise _loi(e) from None
+        het = False
+        if bat:
+            c.execute("INSERT INTO nguoi_xem (email, vai_tro, them_boi, la_quan_tri) VALUES "
+                      "(%s, 'quan_ly', %s, TRUE) ON CONFLICT (email) DO UPDATE SET "
+                      "la_quan_tri = TRUE", (email, ai))
+        else:
+            if dich is None:
+                raise LoiDuLieu("Không còn người xem này.")
+            c.execute("UPDATE nguoi_xem SET la_quan_tri = FALSE WHERE email = %s", (email,))
+            het = _don_nguoi_trong(c, email)
+        if not het:
+            _vai_cu(c, email)
+        _nhat_ky(c, ai, "dat_quan_tri", f"nguoi_xem:{email}",
+                 {"email": email, "truoc": PQ.la_quan_tri(dich), "sau": bool(bat),
+                  "xoa_nguoi_xem": het})
+    return het
+
+
+def xoa_nguoi_xem(ai: str, email: str, *, he_thong: bool = False) -> None:
+    """Xoá hẳn một người (mọi bên — `quyen` ON DELETE CASCADE). Chỉ quản trị viên; không xoá quản
+    trị viên cuối cùng."""
+    with ket_noi() as c:
+        _khoa_nguoi_xem(c)
+        dich = _quyen_trong(c, email)
+        try:
+            PQ.kiem_xoa_nguoi(_lam(c, ai, he_thong), dich, _so_quan_tri_khac(c, email))
+        except PQ.LoiQuyen as e:
+            raise _loi(e) from None
         c.execute("DELETE FROM nguoi_xem WHERE email = %s", (email,))
-        _nhat_ky(c, ai, "xoa_nguoi_xem", f"nguoi_xem:{email}", {"vai_tro": cu["vai_tro"]})
+        _nhat_ky(c, ai, "xoa_nguoi_xem", f"nguoi_xem:{email}",
+                 {"email": email, "la_quan_tri": dich["la_quan_tri"], "ben": dich["ben"]})
 
 
 def ghi_nhat_ky(ai: str, hanh_dong: str, doi_tuong: str, chi_tiet: dict | None = None) -> None:
@@ -778,7 +923,18 @@ def ghi_dang_nhap(email: str, open_id: str, union_id: str = "", user_id: str = "
     return True
 
 
-def nhat_ky(gioi_han: int = 100) -> list[dict]:
+def nhat_ky(gioi_han: int = 100, du_an: list[str] | None = None,
+            don_vi: list[str] | None = None) -> list[dict]:
+    """Nhật ký mới nhất trước. `du_an` / `don_vi` (quản lý của bên, 19/10/2026): chỉ dòng về các dự
+    án đó (đối tượng `du_an:<mã>` hoặc chi tiết có `du_an`) hoặc về quyền ở các bên đó — không thấy
+    thao tác của bên khác. Cả hai None = mọi dòng (quản trị viên)."""
     with ket_noi() as c:
-        return c.execute("SELECT id, luc, ai, hanh_dong, doi_tuong, chi_tiet FROM nhat_ky "
-                         "ORDER BY id DESC LIMIT %s", (int(gioi_han),)).fetchall()
+        if du_an is None and don_vi is None:
+            return c.execute("SELECT id, luc, ai, hanh_dong, doi_tuong, chi_tiet FROM nhat_ky "
+                             "ORDER BY id DESC LIMIT %s", (int(gioi_han),)).fetchall()
+        da = list(du_an or [])
+        return c.execute(
+            "SELECT id, luc, ai, hanh_dong, doi_tuong, chi_tiet FROM nhat_ky WHERE "
+            "chi_tiet->>'du_an' = ANY(%s) OR doi_tuong = ANY(%s) OR chi_tiet->>'don_vi' = ANY(%s) "
+            "ORDER BY id DESC LIMIT %s",
+            (da, [f"du_an:{m}" for m in da], list(don_vi or []), int(gioi_han))).fetchall()

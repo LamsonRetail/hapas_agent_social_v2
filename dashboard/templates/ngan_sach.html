@@ -126,6 +126,7 @@
       {% elif goi.tran_luot is not none %}<div><dt>Trần mỗi lượt (console)</dt><dd class="ns-gia-tri">{{ goi.tran_luot|usd_vn }}</dd><dd class="ns-phu">USD — một lượt không tiêu quá</dd></div>{% endif %}
     </dl>
     {% for c in goi.canh_bao %}<p class="thong-bao thong-bao--canh ns-goi__canh" role="note">⚠ {{ c }}</p>{% endfor %}
+    {% if goi_mot_phan %}<p class="ghi-chu nho">Đã dùng / trần gói là của cả tài khoản Apify dùng chung; trần nội bộ và dự báo chỉ tính các dự án của bên bạn.</p>{% endif %}
   </div>
   {% endif %}
 </section>

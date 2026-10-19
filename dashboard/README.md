@@ -9,13 +9,30 @@ Dashboard **chỉ gồm**:
 1. **Chỉ số** (`/`): bài, thảo luận (= bài + bình luận nền tảng báo, như Kompa), nguồn có bài, lượt xem, tương tác, % tích cực/tiêu cực/trung lập, so với kỳ liền trước cùng độ dài; xu hướng theo ngày (theo tuần khi khoảng > 92 ngày, giờ VN); sắc thái × chủ đề; theo nền tảng; theo loại nguồn; nguồn nổi bật; từ khoá nổi bật; bài nổi bật. Lọc theo dự án, khoảng ngày (mặc định 30 ngày trọn tới hết hôm qua — so ngày trọn với ngày trọn), nền tảng, loại nguồn. Tự cập nhật khi Mark quét xong (không tải lại trang).
 2. **Nguồn** (`/nguon`): thêm/sửa dự án; thêm/sửa/tạm dừng/xoá nguồn theo dõi (dán nguyên link trang cá nhân cũng được), mỗi nguồn kèm ước tính USD/tháng (tính lại ngay khi đổi số bài/chu kỳ); duyệt/từ chối nguồn Mark đề xuất.
 3. **Ngân sách** (`/ngan-sach`) — quản trị chi phí (chủ dự án 15/10/2026). Hai tầng trần: platform đặt trần tháng cấp cửa hàng (KDLA, chưa có — trang hiện "chưa có (chờ KDLA)"; `kho.tran_platform()` trả None tới khi Mark ghi trần đó vào kho), dashboard đặt trần tháng từng dự án (0–100 USD); Mark áp trần THẤP HƠN. Trang hiện: đã tiêu tháng này (giờ VN), **dự báo cả tháng** = đã tiêu + phần còn lại của tháng theo cấu hình nguồn hiện tại (nguồn tạm dừng không tính, YouTube 0), dự báo theo nền tảng, cảnh báo đỏ khi dự báo > trần hiệu lực kèm 3 nguồn tốn nhất và cách giảm (tăng chu kỳ / giảm số bài / tạm dừng); lịch sử lượt quét. Công thức ở `chi_phi.py`, chép từ `theo_doi._uoc_phan` (giá, hệ số 1,3, phí khởi động actor) — bài thử đối chiếu với Mark.
-4. **Người xem** (`/nguoi-xem`, chỉ quản lý): ai được vào, vai trò, nhật ký thay đổi; tên, chức danh, phòng ban, trạng thái tài khoản Lark (đang hoạt động / chưa kích hoạt / tạm khoá / đã nghỉ việc / không có trong danh bạ — đọc danh bạ Lark, đệm trong `nguoi_xem`, làm mới nền ≤ 12 giờ/lần) và lần đăng nhập gần nhất. Thêm email: kiểm với danh bạ và cảnh báo (không chặn) nếu không có / không hoạt động.
+4. **Quản trị** (`/quan-tri`, trước 19/10/2026 tên "Người xem" ở `/nguoi-xem` — đường cũ chuyển hướng 308; quản trị viên + quản lý của bên): ai được vào, quyền theo từng bên, nhật ký thay đổi; tên, chức danh, phòng ban, trạng thái tài khoản Lark (đang hoạt động / chưa kích hoạt / tạm khoá / đã nghỉ việc / không có trong danh bạ — đọc danh bạ Lark, đệm trong `nguoi_xem`, làm mới nền ≤ 12 giờ/lần) và lần đăng nhập gần nhất. Thêm email: kiểm với danh bạ và cảnh báo (không chặn) nếu không có / không hoạt động.
 5. **Chi tiết + bình luận** (đợt 2b, 15/10/2026): bấm vào điểm/cột/dòng bất kỳ trên trang Chỉ số mở khung các bài làm nên con số đó (`/api/bai`), mỗi bài mở được bình luận Mark đã cào (`/api/binh-luan`). Khối "Bình luận đã đọc" đếm sắc thái/chủ đề bình luận của khách (bình luận của thương hiệu không tính). Số bài × số bình luận mỗi lượt đặt ở trang Ngân sách.
    - **Ý định mua** (16/10/2026): ô KPI + khối riêng (cột theo ngày/tuần/tháng, bài có nhiều câu hỏi mua nhất; bấm là ra đúng bình luận). Ý định mua = bình luận hợp lệ có chủ đề AI "Giá/mua ở đâu/ý định mua" HOẶC câu hỏi giá/mua (xin giá, giá bn, ib, mua ở đâu, còn hàng, size, ship, đặt hàng…) — `chi_so.la_y_dinh_mua`. Theo bộ lọc chung; so kỳ trước không có % khi kỳ trước 0. Bộ lọc nhanh "Khách hỏi mua" = cùng định nghĩa (`y_dinh=1`).
    - **Từ khoá nổi bật**: chữ chuẩn hoá chung với ô tìm (`chuan_chu.py`: NFKC cho chữ kiểu cách 𝐃𝐚́𝐧, teen code mk/bn/ko…, bỏ dấu khi so); bản có dấu/không dấu gộp một nhóm; mảnh câu hỏi giá ("xin giá", "giá set", "set giá") không vào mây — đã đếm ở Ý định mua. Từ 16/10/2026 (chủ dự án: "lấy bình luận spam, key word đang lỗi"): tách TỪ trước khi ghép cụm (`tu_ghep.py`, danh sách từ ghép tự soạn + so khớp dài nhất, so có dấu) — cụm là một từ ghép ("túi xách", "nước hoa") hoặc hai từ đơn liền nhau ("túi đẹp"), không còn mảnh cắt ngang như "xách nữ", "nữ tuyệt", "lòng kiểm"; bỏ mã/chữ dính số, nhãn dán TikTok "[…]", tên người được tag, hashtag có số (#quatang2010); "#tuixach" đếm chung với "túi xách"; bình luận có mã giới thiệu / lời dặn dán mã không vào mây dù nhãn còn hợp lệ (`chi_so.la_rac_quang_cao`); cụm cần ≥ 2 người viết và người viết nhiều nhất ≤ 2/3 số thảo luận của cụm. Không dùng pyvi/underthesea (nặng, chậm, tách sai chữ MXH — xem đầu `tu_ghep.py`). Ngăn từ khoá đếm bình luận đúng như mây (`cum_bl`, không xét tên tác giả). Mặc định không gồm bình luận chủ đề "Minigame/bài dự thi" (công tắc "Gồm cả bình luận minigame", `gom_mg=1` trên URL). Màu theo ngưỡng: xanh khi ≥ 25% tích cực và gấp đôi tiêu cực, đỏ đối xứng, còn lại xám; hộp rê chuột cảnh báo "x% từ 1 bài" khi một bài góp ≥ 60%.
    - Nhãn hiển thị (16/10/2026): **Internal channel** (nguồn loại `kenh_nha`) / **External channel** (`ben_ngoai`). Giá trị lưu và tham số URL không đổi.
-6. **BigQuery** (`/bigquery`): trạng thái đồng bộ kho lên BigQuery; quản lý bấm "Đồng bộ ngay".
+6. **BigQuery** (`/bigquery`, chỉ quản trị viên từ 19/10/2026): trạng thái đồng bộ kho lên BigQuery; bấm "Đồng bộ ngay".
 7. **Lịch quét** (`/lich-quet`, chủ dự án chốt 15/10/2026 "Dashboard + Mark tự chạy"): lịch quét tự động mỗi dự án — mỗi N giờ trong khung giờ, hằng ngày (giờ cụ thể), hằng tuần (ngày + giờ), chiến dịch (từ lúc → tới lúc, mỗi 30 phút – 7 ngày, dài ≤ 92 ngày, bắt đầu trong 365 ngày tới, mặc định quét mọi nguồn; đang diễn ra thì lịch thường nhường, hết khung tự dừng). Biểu mẫu có xem trước 10 lần chạy tới (giờ VN) và chi phí tối đa so với trần tháng, tính ở máy chủ trong threadpool (`/api/lich-quet/xem-truoc`, đúng hàm Mark dùng — `lich_quet.py`; kỳ của lịch đang gõ chỉ đếm mốc của chính nó). Mark (`quet_tu_dong.py`, nhịp 30 giây trên VPS, không qua hàng đợi job platform) tự chạy `/theodoi` đúng mốc, báo mỗi lượt lên platform bằng trace; kết quả hiện ở đây, không nhắn Lark. Trang Ngân sách nhân theo số lượt của lịch đang bật (không còn giả định 1 lượt/ngày).
+
+### Phân quyền theo bên (chủ dự án chốt 19/10/2026)
+
+Mỗi dự án thuộc đúng một **bên** (`du_an.don_vi` → bảng `don_vi`: `hapas`, `matemade`, quản trị viên tạo thêm). Luật ở `phan_quyen.py` (thuần), dùng chung cho app, kho (kiểm lại TRONG giao dịch sau khi khoá `nguoi_xem` + `quyen`) và kho giả của bộ thử.
+
+| Vai trò | Ở đâu | Được làm |
+|---|---|---|
+| **Quản trị viên** | `nguoi_xem.la_quan_tri` | Mọi bên, mọi dự án; tạo bên; tạo dự án ở bất kỳ bên nào, chuyển dự án sang bên khác (ô "Bên sở hữu" khi sửa dự án); thêm/xoá/đổi bất kỳ ai, kể cả quản trị viên khác; trang BigQuery. Luôn còn ≥ 1 quản trị viên. |
+| **Quản lý** của một bên | `quyen (email, don_vi, 'quan_ly')` | Sửa dự án / nguồn / từ khoá / ngân sách từng dự án / lịch quét / duyệt đề xuất — CHỈ dự án của bên đó; tạo dự án ở bên đó; thêm/bỏ người **Chỉ xem** của bên đó (không cấp Quản lý, không đụng quản trị viên, không tự đổi quyền mình; bỏ người khỏi bên X chỉ xoá quyền ở X). |
+| **Chỉ xem** của một bên | `quyen (…, 'xem')` | Xem số liệu dự án của bên đó. |
+
+- Một người có thể có quyền ở nhiều bên. Không cờ quản trị và không dòng `quyen` nào = không đăng nhập được; dashboard xoá luôn dòng `nguoi_xem` khi người đó hết bên.
+- Dự án của bên khác: như không có (API 404 "Không có dự án này", không có trong ô chọn); xem được mà không sửa được: POST 403. Nguồn / đề xuất / lịch: dự án đọc lại từ kho, không tin biểu mẫu. `/su-kien` chỉ đẩy `cap-nhat` của dự án người đó đọc được.
+- Trang Ngân sách của người không phải quản trị viên: số đã dùng / trần / ngày đặt lại của **gói Apify** là của cả tài khoản dùng chung (chi phí token chung, chỉ đọc — chấp nhận cho mọi người xem thấy); trần nội bộ + dự báo tới lúc đặt lại chỉ cộng dự án của bên họ. Dashboard không có ô sửa hạn mức Apify (Mark ghi `han_muc_apify`).
+- Nhật ký trên trang Quản trị: quản trị viên thấy mọi dòng; quản lý của bên chỉ thấy dòng về dự án / quyền của bên mình.
+- Cột cũ `nguoi_xem.vai_tro` chỉ còn để tương thích (Mark bản cũ đọc): dashboard giữ nó = vai trò gộp, không dùng để quyết định quyền.
+- Mark (`hoi_dashboard_tool`) đọc quyền bằng `kho.quyen_cua` và chỉ trả số dự án của bên người hỏi.
 
 Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần mỗi lượt hay lịch "Giao việc" của Mark — những thứ đó vẫn ở console platform (chủ dự án: "mark vẫn phải theo luật của platform như trước không đổi … dashboard chỉ gồm những chỉ số và quản lý nguồn cũng như ngân sách"). Lịch console (tab Lịch chạy, kiểu Giao việc, nội dung `/theodoi <mã dự án>` — `deploy/lang-nghe/README.md` mục 5) vẫn chạy song song với lịch quét tự động.
 
@@ -30,20 +47,21 @@ Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần
 | `chi_phi.py` | dự báo chi phí theo dõi tháng (thuần Python; hằng số chép từ Mark, có bài đối chiếu) |
 | `lich_quet.py` | lịch quét tự động: kiểm cấu hình, tính mốc (giờ VN), quyết định nhịp — thuần, Mark import chung |
 | `trang_lich.py` | dựng danh sách lịch + bản xem trước (mốc + chi phí) cho trang Lịch quét |
+| `phan_quyen.py` | luật phân quyền theo bên (thuần): phạm vi đọc/sửa, luật sửa người xem |
 | `nhap_lieu.py` | kiểm biểu mẫu, chuẩn hoá định danh nguồn đúng dạng Mark dùng khi quét |
 | `dang_nhap.py` | đăng nhập Lark (OAuth), phiên cookie ký HMAC, CSRF |
 | `danh_ba.py` | danh bạ Lark (token tổ chức): email -> tên, chức danh, phòng ban, trạng thái tài khoản |
 | `dong_bo_bq.py` | đồng bộ kho → BigQuery (gắn vào hook `app.state.sau_cap_nhat`) |
-| `quan_tri.py` | lệnh thêm người quản lý đầu tiên |
+| `quan_tri.py` | lệnh máy chủ: cấp/bỏ quản trị viên, quyền theo bên, tạo bên, liệt kê |
 | `templates/`, `static/` | giao diện (Jinja2, ECharts 5.5.1 phục vụ tại chỗ `static/echarts.min.js`, sáng/tối theo hệ điều hành) |
 
-Đường dẫn: `/`, `/api/chi-so`, `/nguon`, `/ngan-sach`, `/nguoi-xem`, `/bigquery`, `/su-kien` (SSE), `/dang-nhap`, `/dang-nhap/lark`, `/dang-nhap/xong`, `/dang-xuat`, `/suc-khoe` (không cần đăng nhập), `/noi-bo/co-du-lieu` (chỉ Mark trên cùng máy), và các POST sửa dữ liệu (`/du-an/…`, `/nguon/…`, `/de-xuat/…`, `/ngan-sach/<mã>`, `/nguoi-xem/…`, `/bigquery/dong-bo`).
+Đường dẫn: `/`, `/api/chi-so`, `/nguon`, `/ngan-sach`, `/quan-tri` (`/nguoi-xem` → 308), `/bigquery` (chỉ quản trị viên), `/su-kien` (SSE), `/dang-nhap`, `/dang-nhap/lark`, `/dang-nhap/xong`, `/dang-xuat`, `/suc-khoe` (không cần đăng nhập), `/noi-bo/co-du-lieu` (chỉ Mark trên cùng máy), và các POST sửa dữ liệu (`/du-an/…`, `/nguon/…`, `/de-xuat/…`, `/ngan-sach/<mã>`, `/nguoi-xem/them|xoa|quan-tri`, `/don-vi/them`, `/bigquery/dong-bo`).
 
 ## Bảo vệ
 
-- Đăng nhập bằng Lark: tài khoản phải thuộc tổ chức Lark của HAPAS (`tenant_key` = `DASH_LARK_TENANT_KEY`), email lấy `enterprise_email` (chỉ khi trống mới lấy `email`), và email phải có trong `nguoi_xem`. Lần đầu mỗi email đăng nhập, open_id Lark được ghi vào nhật ký. Vai trò đọc lại MỖI lượt — xoá người xem có hiệu lực ngay.
-- Phiên 8 giờ. "Đăng xuất" chỉ xoá cookie ở trình duyệt đó (cookie ký không thu hồi được từ máy chủ); muốn chặn ai ngay thì xoá khỏi trang Người xem, muốn đăng xuất TẤT CẢ thì đổi `DASH_SESSION_KEY` rồi restart.
-- Mọi POST: phiên + mã CSRF + vai trò `quan_ly`, kiểm phía máy chủ. Không còn ít nhất một quản lý thì không xoá/hạ quyền được (khoá bảng trong giao dịch).
+- Đăng nhập bằng Lark: tài khoản phải thuộc tổ chức Lark của HAPAS (`tenant_key` = `DASH_LARK_TENANT_KEY`), email lấy `enterprise_email` (chỉ khi trống mới lấy `email`), và email phải có quyền (quản trị viên hoặc ít nhất một bên — xem "Phân quyền theo bên"). Lần đầu mỗi email đăng nhập, open_id Lark được ghi vào nhật ký. Quyền đọc lại MỖI lượt — xoá người xem / bỏ quyền ở bên có hiệu lực ngay.
+- Phiên 8 giờ. "Đăng xuất" chỉ xoá cookie ở trình duyệt đó (cookie ký không thu hồi được từ máy chủ); muốn chặn ai ngay thì xoá khỏi trang Quản trị, muốn đăng xuất TẤT CẢ thì đổi `DASH_SESSION_KEY` rồi restart.
+- Mọi POST: phiên + mã CSRF + quyền sửa ĐÚNG dự án / bên đó, kiểm phía máy chủ. Không còn ít nhất một quản trị viên thì không xoá/bỏ quyền được (khoá bảng `nguoi_xem` + `quyen` trong giao dịch).
 - Cookie HttpOnly, Secure, SameSite=Lax. Chỉ chuyển hướng tới đường dẫn tương đối. CSP `script-src 'self'` (không CDN), mọi chữ từ kho đều được thoát.
 - Người chỉ xem không thấy email người sửa/thêm và chữ lỗi thô (chỉ thấy "có lỗi").
 - `/api/chi-so`: tối đa 2 lượt tính cùng lúc (quá thì 503 "đang bận", trang tự thử lại), kết quả nhớ 60 giây theo mốc lượt quét mới nhất, đọc tối đa 20.000 bài MỚI NHẤT (vượt thì trang cảnh báo).
@@ -78,9 +96,10 @@ sudo sed -i "s/__KHOA_BAO_openssl_rand_hex_32__/$KHOA_BAO/" /opt/lang-nghe/.env
 sudoedit /opt/mark/app/.env; unset KHOA_BAO
 sudoedit /opt/lang-nghe/.env        # DASH_LARK_APP_ID/SECRET, DASH_LARK_TENANT_KEY
 
-# 4. kiểm peer auth, rồi thêm người quản lý ĐẦU TIÊN
-sudo -u lang_nghe_web psql -d lang_nghe -c 'select count(*) from nguoi_xem'
-cd /opt/lang-nghe/app && sudo -u lang_nghe_web /opt/lang-nghe/venv/bin/python -m dashboard.quan_tri them-nguoi <email-lark>@hapas.vn quan_ly
+# 4. kiểm peer auth, rồi (nếu schema.sql chưa đặt) thêm quản trị viên ĐẦU TIÊN
+sudo -u lang_nghe_web psql -d lang_nghe -c 'select count(*) from nguoi_xem where la_quan_tri'
+cd /opt/lang-nghe/app && sudo -u lang_nghe_web /opt/lang-nghe/venv/bin/python -m dashboard.quan_tri quan-tri <email-lark>@hapas.vn
+#    quyền theo bên: … quan_tri them-quyen <email> <bên> <xem|quan_ly>; bo-quyen <email> <bên>; them-ben <mã> <tên>; ds-nguoi
 
 # 5. dịch vụ (chỉ nghe 127.0.0.1:8090, 1 worker)
 sudo install -o root -g root -m 0644 dashboard/lang-nghe-dashboard.service /etc/systemd/system/
@@ -91,7 +110,7 @@ journalctl -u lang-nghe-dashboard -n 50
 
 Dashboard KHÔNG khởi động (xem `journalctl`) khi: thiếu biến bắt buộc, `DASH_SESSION_KEY` không phải ≥ 32 ký tự hex, `LANG_NGHE_BAO_KHOA` có nhưng ngắn hơn 32 ký tự hex hoặc TRÙNG khoá phiên.
 
-Cập nhật mã: `rsync` lại bước 2, `pip install -r` nếu `requirements.txt` đổi, `sudo systemctl restart lang-nghe-dashboard`.
+Cập nhật mã: **chạy `deploy/lang-nghe/schema.sql` TRƯỚC** khi mã mới cần cột/bảng mới (19/10/2026: `don_vi`, `quyen`, `nguoi_xem.la_quan_tri`, `du_an.don_vi` — thiếu thì dashboard mới không đọc được quyền, mọi trang 503), rồi `rsync` lại bước 2, `pip install -r` nếu `requirements.txt` đổi, `sudo systemctl restart lang-nghe-dashboard`.
 
 Unit systemd đã đặt `InaccessiblePaths=-/opt/mark` (dashboard không đọc được thư mục/.env của Mark), `ProtectProc=invisible`, `CapabilityBoundingSet=` rỗng, `SystemCallFilter=@system-service`. **Việc sau (chủ dự án duyệt):** thêm `InaccessiblePaths=-/opt/lang-nghe` vào unit của Mark để chiều ngược lại cũng kín (Mark chỉ cần socket Postgres).
 
