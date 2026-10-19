@@ -646,4 +646,6 @@ def test_nang_so_lieu_chi_nang_va_ghi_dung_ngay(monkeypatch):
     assert "GREATEST(EXCLUDED.xem, chi_so_ngay.xem)" in anh[0]
     cau.clear()
     K.ghi_bai("hapas", 9, "tu_khoa", [{"khoa": "tiktok:6", "nen_tang": "tiktok", "xem": 7}])
-    assert "xem = COALESCE(EXCLUDED.xem, bai.xem)" in cau[0][0] and "now() AT TIME ZONE" in cau[1][0]
+    # Lượt thường: số mới thắng, trừ khi tụt đúng về 0 từ số > 0 (test_so_ve_0, 19/10/2026).
+    assert ("xem = COALESCE(NULLIF(EXCLUDED.xem, CASE WHEN bai.xem > 0 THEN 0 END), bai.xem)"
+            in cau[0][0] and "now() AT TIME ZONE" in cau[1][0])
