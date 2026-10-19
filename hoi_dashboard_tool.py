@@ -22,8 +22,11 @@ AI ĐƯỢC HỎI (chốt chặn bằng code — đây là dữ liệu nội b�
      từ chối.
   2. open_id → email công ty qua danh bạ Lark (`enterprise_email`, trống mới lấy `email` — cùng
      thứ tự với đăng nhập dashboard `dang_nhap.LarkOAuth`).
-  3. Email phải có trong bảng `nguoi_xem` (vai trò `xem` hoặc `quan_ly`), đọc lại MỖI lần gọi
-     bằng đúng `dashboard.kho.vai_tro` — xoá người xem trên dashboard là Mark thôi trả số ngay.
+  3. Email phải có quyền trên dashboard (quản trị viên, hoặc vai trò ở ít nhất một bên), đọc lại
+     MỖI lần gọi bằng đúng `dashboard.kho.quyen_cua` — xoá người xem trên dashboard là Mark thôi
+     trả số ngay.
+  4. Chỉ dự án của các bên người hỏi được xem (19/10/2026, `dashboard.phan_quyen`; quản trị viên:
+     mọi dự án) — dự án bên khác như không có, danh sách `cac_du_an` cũng chỉ gồm dự án đó.
   Không kiểm được bước nào thì ĐÓNG (không trả số), nói rõ vì sao.
 
 KHÔNG DÙNG DỮ LIỆU CÁ NHÂN THÔ
@@ -34,7 +37,8 @@ quét chỉ người `quan_ly` thấy (như `app.an_chi_tiet`). Câu trả lời
 
 KHO
 Đọc bằng role `mark` (Unix socket + peer, DSN của Mark `lang_nghe_db._dsn`). Quyền đọc thêm cần
-cho tool: `nguoi_xem (email, vai_tro)` — xem `deploy/lang-nghe/schema.sql`. Lịch quét đọc bằng
+cho tool: `nguoi_xem (email, vai_tro, la_quan_tri)`, `quyen (email, don_vi, vai_tro)`, `don_vi` —
+xem `deploy/lang-nghe/schema.sql`. Lịch quét đọc bằng
 câu SQL riêng (`KhoMark.cac_lich`) vì role `mark` không được đọc email người tạo/sửa lịch.
 """
 from __future__ import annotations
@@ -55,6 +59,7 @@ import scheduler
 from dashboard import chi_phi as CP
 from dashboard import chi_so as CS
 from dashboard import nhap_lieu as NL
+from dashboard import phan_quyen as PQ
 from dashboard import trang_lich as TL
 
 VN = CS.VN
@@ -62,7 +67,6 @@ VN = CS.VN
 DASHBOARD_URL = (os.environ.get("MARK_DASHBOARD_URL") or "").strip().rstrip("/") \
     or "https://social.hapas.vn"
 KHOANG_TOI_DA_NGAY = 400          # như `app.KHOANG_TOI_DA_NGAY`
-VAI_TRO_XEM = ("xem", "quan_ly")  # như `nhap_lieu.VAI_TRO`
 LOI_CHUNG = "có lỗi — người quản lý xem chi tiết"     # như `app.LOI_CHUNG`
 TOP_MAC_DINH, TOP_TOI_DA = 5, 10
 LUOT_TOI_DA = 10
@@ -163,7 +167,7 @@ class TuChoi(Exception):
 
 # ───────────────────────────── kho (đọc) ─────────────────────────────
 _KHOA_DSN = threading.Lock()
-_HAM_KHO = ("vai_tro", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_luan_trong_khoang",
+_HAM_KHO = ("quyen_cua", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_luan_trong_khoang",
             "binh_luan_hop_le_gon", "bai_theo_khoa", "ngu_canh_bai", "cac_nguon", "da_tieu_thang",
             "tran_platform", "cac_luot", "tien_do_gan_nhan", "luot_xong_moi_nhat",
             "do_phu_gan_nhat", "han_muc_apify", "nhip_dang")
@@ -301,22 +305,23 @@ def email_cua(open_id: str) -> str:
 
 
 def kiem_quyen(kho, open_id: str) -> dict:
-    """{"email", "vai_tro"} khi người hỏi là người xem dashboard; không thì ném TuChoi."""
+    """{"email", "vai_tro" (gộp), "q" (quyền theo bên)} khi người hỏi có quyền trên dashboard;
+    không thì ném TuChoi."""
     email = email_cua(open_id)
     if not email:
         raise TuChoi("Mark chưa đọc được email Lark của bạn nên chưa đối chiếu được danh sách "
                      "người xem dashboard (app Mark cần quyền đọc email trong danh bạ). Nhờ chủ "
                      f"agent kiểm tra, hoặc mở thẳng {DASHBOARD_URL}.")
     try:
-        vai = kho.vai_tro(email)
+        q = PQ.chuan(kho.quyen_cua(email))
     except Exception as e:  # noqa: BLE001 — không đọc được danh sách thì ĐÓNG
         print(f"[hoi_dashboard] đọc nguoi_xem lỗi: {type(e).__name__}")
         raise TuChoi("Mark chưa đọc được danh sách người xem dashboard lúc này nên chưa trả số. "
                      f"Thử lại sau ít phút, hoặc mở thẳng {DASHBOARD_URL}.") from None
-    if vai not in VAI_TRO_XEM:
+    if not PQ.co_quyen(q):
         raise TuChoi(f"Email {email} chưa có trong danh sách người xem dashboard nên Mark không "
-                     "trả số liệu. Nhờ người quản lý dashboard thêm email này ở tab Người xem.")
-    return {"email": email, "vai_tro": vai}
+                     "trả số liệu. Nhờ người quản lý dashboard thêm email này ở tab Quản trị.")
+    return {"email": email, "vai_tro": PQ.vai_chung(q), "q": q}
 
 
 # ───────────────────────────── đọc tham số ─────────────────────────────
@@ -680,13 +685,15 @@ def _khoi_ngan_sach(kho, d: dict, da_tieu: dict, dat_lai, bay_gio) -> tuple[dict
     return k, cac_lich, luot_gan
 
 
-def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
+def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio,
+             ds: list[dict] | None = None) -> dict:
     """Như trang Ngân sách (`app.trang_ngan_sach`) cho MỘT dự án + các lượt quét gần nhất.
 
     Soát 18/10/2026: cùng hàm, cùng tham số với trang (`chi_phi.khoi_ngan_sach`, `goi_ngan_sach`,
     `chi_lich`) — trước đó Mark báo tiền nguồn theo số bài CẤU HÌNH (trang: đã co theo nhịp đăng),
     "theo lịch" theo mức tối đa chưa kẹp ở trần console (8,6 USD/lượt) và trần nội bộ của gói chỉ
-    của một dự án (trang: tổng các dự án đang bật)."""
+    của một dự án (trang: tổng các dự án đang bật). `ds` = dự án người hỏi đọc được (19/10/2026):
+    trần nội bộ + dự báo của gói chỉ cộng các dự án đó, như trang Ngân sách."""
     ma = du_an["ma"]
     da_tieu = kho.da_tieu_thang() or {}
     tieu = float(da_tieu.get(ma, 0.0))
@@ -704,7 +711,7 @@ def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio) -> dict:
     if snap:
         khoi = [(du_an, k) if d["ma"] == ma else (d, _khoi_ngan_sach(kho, d, da_tieu, dat_lai,
                                                                      bay_gio)[0])
-                for d in kho.cac_du_an()]
+                for d in (ds if ds is not None else kho.cac_du_an())]
         if not any(d["ma"] == ma for d, _ in khoi):
             khoi.append((du_an, k))
         goi = CP.goi_ngan_sach(snap, khoi, bay_gio)
@@ -812,11 +819,11 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
     """Lõi của tool (bài thử gọi thẳng với kho giả). Ném TuChoi / NL.LoiNhap / CS.LoiBoLoc."""
     kho = kho or _kho_mac_dinh()
     nguoi = kiem_quyen(kho, open_id if open_id is not None else nguoi_hoi())
-    quan_ly = nguoi["vai_tro"] == "quan_ly"
     bay_gio = bay_gio or datetime.datetime.now(VN)
     hn = bay_gio.astimezone(VN).date()
     args = args or {}
-    ds = kho.cac_du_an()
+    # Chỉ dự án của bên người hỏi được xem (như trang); bên khác = "không có dự án".
+    ds = PQ.loc_du_an(nguoi["q"], kho.cac_du_an())
     ma = str(args.get("du_an") or "").strip()
     du_an_ngan = _chon_du_an(ds, ma)
     cac_du_an = [{"ma": d["ma"], "ten": d["ten"], "dang_bat": bool(d.get("dang_bat"))} for d in ds]
@@ -824,6 +831,10 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
         raise NL.LoiNhap(f"Không có dự án “{ma}” trên dashboard. Dự án đang có: "
                          + (", ".join(f"{d['ma']} ({d['ten']})" for d in ds) or "chưa có") + ".")
     du_an = kho.doc_du_an(du_an_ngan["ma"]) or du_an_ngan
+    if not PQ.doc_duoc(nguoi["q"], du_an):         # vừa chuyển bên giữa hai lần đọc
+        raise NL.LoiNhap(f"Không có dự án “{ma}” trên dashboard.")
+    # Chữ lỗi thô của lượt quét: chỉ người SỬA được dự án này (như `app.an_chi_tiet`).
+    quan_ly = PQ.sua_duoc(nguoi["q"], du_an)
     nhanh = None
     if args.get("bo_loc_nhanh"):
         nhanh = next((x for x in CS.BO_LOC_NHANH if x["ma"] == args["bo_loc_nhanh"]), None)
@@ -848,7 +859,7 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
         "bo_loc": {k: v for k, v in CS.bo_loc_json(bo_loc).items()
                    if v not in ("", [], "tat_ca")},
         "link": link_dashboard(du_an["ma"], tu, den, bo_loc),
-        "vai_tro_nguoi_hoi": nguoi["vai_tro"],
+        "vai_tro_nguoi_hoi": "quan_ly" if quan_ly else "xem",
         "canh_bao": [],
     }
     if nhanh:
@@ -881,7 +892,7 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
         ra["canh_bao"].append(f"AI còn đang gán nhãn: {so_vn(g.get('cho_bai'))} bài và "
                               f"{so_vn(g.get('cho_bl'))} bình luận chờ — sắc thái/chủ đề sẽ còn đổi.")
     if "chi_phi" in phan:
-        ra["phan"]["chi_phi"] = _chi_phi(kho, du_an, quan_ly, top, bay_gio)
+        ra["phan"]["chi_phi"] = _chi_phi(kho, du_an, quan_ly, top, bay_gio, ds)
         ra["link_ngan_sach"] = f"{DASHBOARD_URL}/ngan-sach?" + urllib.parse.urlencode(
             {"du_an": du_an["ma"]})
     if "lich" in phan:

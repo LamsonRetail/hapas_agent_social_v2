@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from dashboard import app as A
 from dashboard import dang_nhap as DN
 from dashboard import danh_ba as DB
+from dashboard import phan_quyen as PQ
 from dashboard.kho import LoiDuLieu
 
 VN = datetime.timezone(datetime.timedelta(hours=7))
@@ -41,7 +42,7 @@ class GiaKho:
                                 "tu_loai_tru": [], "boi_canh": "", "thi_truong": "VN",
                                 "tran_usd_thang": 5.0, "dang_bat": True, "tao_luc": now,
                                 "sua_luc": now, "sua_boi": None, "bl_bat": True,
-                                "bl_so_bai": 10, "bl_moi_bai": 20}}
+                                "bl_so_bai": 10, "bl_moi_bai": 20, "don_vi": "hapas"}}
         self.nguon: dict[int, dict] = {}
         self.de_xuat = {
             5: {"id": 5, "du_an": "hapas", "nen_tang": "tiktok", "dinh_danh": "@KolA", "ten": "KOL A",
@@ -51,7 +52,15 @@ class GiaKho:
             6: {"id": 6, "du_an": "hapas", "nen_tang": "facebook", "dinh_danh": "facebook.com/x",
                 "ten": "X", "link": "", "ly_do": "", "so_bai": 1, "thao_luan": 2,
                 "trang_thai": "cho", "de_xuat_luc": now, "xu_ly_boi": None, "xu_ly_luc": None}}
+        # `nguoi` = cột cũ vai_tro (vai trò gộp, kho giả giữ đồng bộ như `kho._vai_cu`). Quyền
+        # thật (19/10/2026): `quan_tri` + `quyen` {email: {bên: vai trò}}. Dòng chỉ có trong
+        # `nguoi` (bộ thử cũ đặt tay) hiểu như schema.sql chuyển: quan_ly → quản trị viên (bộ thử
+        # cũ coi quản lý là sửa được mọi thứ), xem → Chỉ xem HAPAS.
         self.nguoi = {QL: "quan_ly", XEM: "xem"}
+        self.quan_tri: set[str] = {QL}
+        self.quyen: dict[str, dict[str, str]] = {XEM: {"hapas": "xem"}}
+        self.don_vi = {"hapas": {"ma": "hapas", "ten": "HAPAS", "tao_luc": None},
+                       "matemade": {"ma": "matemade", "ten": "MATEMADE", "tao_luc": None}}
         self.danh_ba: dict[str, dict] = {}       # bản đệm danh bạ Lark theo email
         self.dang_nhap_cuoi: dict[str, datetime.datetime] = {}
         self.ma_lark: dict[str, dict] = {}       # email -> {open_id, union_id, user_id}
@@ -74,8 +83,105 @@ class GiaKho:
             raise RuntimeError("mất kết nối")
         return True
 
+    def quyen_cua(self, email):
+        if email not in self.nguoi:
+            return None
+        q = {"la_quan_tri": email in self.quan_tri, "ben": dict(self.quyen.get(email) or {})}
+        if not q["la_quan_tri"] and not q["ben"]:
+            if self.nguoi[email] == "quan_ly":
+                q["la_quan_tri"] = True
+            elif self.nguoi[email] == "xem":
+                q["ben"] = {"hapas": "xem"}
+        return q
+
     def vai_tro(self, email):
-        return self.nguoi.get(email)
+        return PQ.vai_chung(self.quyen_cua(email))
+
+    def cac_don_vi(self):
+        return [dict(v) for _, v in sorted(self.don_vi.items())]
+
+    def them_don_vi(self, ai, ma, ten, he_thong=False):
+        try:
+            PQ.kiem_tao_ben(PQ.HE_THONG if he_thong else self._lam(ai))
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
+        if ma in self.don_vi:
+            raise LoiDuLieu(f"Mã bên '{ma}' đã có.")
+        self.don_vi[ma] = {"ma": ma, "ten": ten, "tao_luc": None}
+        self._ghi(ai, "them_don_vi", f"don_vi:{ma}")
+
+    # ── quyền theo bên: cùng luật `phan_quyen` mà kho thật kiểm trong giao dịch ──
+    def _lam(self, ai):
+        return self.quyen_cua(ai) or {"la_quan_tri": False, "ben": {}}
+
+    def _dong_bo(self, email):
+        """Như kho thật: không quản trị + hết bên thì xoá dòng; còn thì giữ cột cũ = vai gộp.
+        Dòng còn lại luôn có quyền tường minh (không rơi về cách hiểu dòng cũ)."""
+        if email not in self.quan_tri and not self.quyen.get(email):
+            self.nguoi.pop(email, None)
+            self.quyen.pop(email, None)
+            return True
+        self.nguoi[email] = PQ.vai_chung({"la_quan_tri": email in self.quan_tri,
+                                          "ben": self.quyen.get(email) or {}})
+        return False
+
+    def _tuong_minh(self, email):
+        """Dòng cũ (chỉ có `nguoi`) -> quyền tường minh trước khi sửa."""
+        q = self.quyen_cua(email)
+        if q is not None:
+            if q["la_quan_tri"]:
+                self.quan_tri.add(email)
+            self.quyen[email] = dict(q["ben"])
+        return q
+
+    def luu_quyen(self, ai, email, don_vi, vai_tro, he_thong=False):
+        dich = self._tuong_minh(email)
+        try:
+            PQ.kiem_luu_quyen(PQ.HE_THONG if he_thong else self._lam(ai), ai, dich, email,
+                              don_vi, vai_tro)
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
+        if don_vi not in self.don_vi:
+            raise LoiDuLieu("Không có bên này.")
+        self.quyen.setdefault(email, {})[don_vi] = vai_tro
+        self._dong_bo(email)
+        self._ghi(ai, "luu_quyen", f"quyen:{email}:{don_vi}")
+
+    def xoa_quyen(self, ai, email, don_vi, he_thong=False):
+        dich = self._tuong_minh(email)
+        try:
+            PQ.kiem_xoa_quyen(PQ.HE_THONG if he_thong else self._lam(ai), ai, dich, email, don_vi)
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
+        del self.quyen[email][don_vi]
+        het = self._dong_bo(email)
+        self._ghi(ai, "xoa_quyen", f"quyen:{email}:{don_vi}")
+        return het
+
+    def _so_qt_khac(self, email):
+        return sum(1 for e in self.nguoi if e != email and (self.quyen_cua(e) or {}).get(
+            "la_quan_tri"))
+
+    def dat_quan_tri(self, ai, email, bat, he_thong=False):
+        dich = self._tuong_minh(email)
+        try:
+            PQ.kiem_dat_quan_tri(PQ.HE_THONG if he_thong else self._lam(ai), dich, bat,
+                                 self._so_qt_khac(email))
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
+        if bat:
+            self.nguoi.setdefault(email, "quan_ly")
+            self.quan_tri.add(email)
+            het = False
+        else:
+            if dich is None:
+                raise LoiDuLieu("Không còn người xem này.")
+            self.quan_tri.discard(email)
+            het = self._dong_bo(email)
+        if not het:
+            self._dong_bo(email)
+        self._ghi(ai, "dat_quan_tri", f"nguoi_xem:{email}")
+        return het
 
     def cac_du_an(self):
         return [dict(v) for _, v in sorted(self.du_an.items())]
@@ -296,6 +402,8 @@ class GiaKho:
 
     def cac_nguoi_xem(self):
         return [{"email": e, "vai_tro": v, "them_boi": None, "them_luc": None,
+                 "la_quan_tri": bool((self.quyen_cua(e) or {}).get("la_quan_tri")),
+                 "quyen": dict((self.quyen_cua(e) or {}).get("ben") or {}),
                  "ten_lark": None, "chuc_danh": None, "phong_ban": None, "trang_thai_lark": None,
                  "danh_ba_loi": None, "danh_ba_luc": None,
                  "dang_nhap_cuoi": self.dang_nhap_cuoi.get(e), **self.danh_ba.get(e, {}),
@@ -318,12 +426,16 @@ class GiaKho:
             if e in self.nguoi:
                 self.danh_ba.setdefault(e, {}).update(danh_ba_loi=loai, danh_ba_luc=luc)
 
-    def luu_nguoi_xem(self, ai, email, vai_tro):
-        self.nguoi[email] = vai_tro
-        self._ghi(ai, "luu_nguoi_xem", f"nguoi_xem:{email}")
-
-    def xoa_nguoi_xem(self, ai, email):
+    def xoa_nguoi_xem(self, ai, email, he_thong=False):
+        dich = self.quyen_cua(email)
+        try:
+            PQ.kiem_xoa_nguoi(PQ.HE_THONG if he_thong else self._lam(ai), dich,
+                              self._so_qt_khac(email))
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
         del self.nguoi[email]
+        self.quan_tri.discard(email)
+        self.quyen.pop(email, None)
         self._ghi(ai, "xoa_nguoi_xem", f"nguoi_xem:{email}")
 
     def ghi_dang_nhap(self, email, open_id, union_id="", user_id=""):
@@ -343,9 +455,15 @@ class GiaKho:
     def ghi_nhat_ky(self, ai, hanh_dong, doi_tuong, chi_tiet=None):
         self._ghi(ai, hanh_dong, doi_tuong)
 
-    def nhat_ky(self, gioi_han=100):
+    def nhat_ky(self, gioi_han=100, du_an=None, don_vi=None):
+        """Như kho thật: `du_an`/`don_vi` (quản lý của bên) chỉ dòng về dự án / quyền các bên đó."""
+        def thuoc(d):
+            if du_an is None and don_vi is None:
+                return True
+            return (d in {f"du_an:{m}" for m in du_an or []}
+                    or any(d.startswith("quyen:") and d.endswith(f":{b}") for b in don_vi or []))
         return [{"id": i, "luc": None, "ai": a, "hanh_dong": h, "doi_tuong": d, "chi_tiet": {}}
-                for i, (a, h, d) in enumerate(self.nk)][:gioi_han]
+                for i, (a, h, d) in enumerate(self.nk) if thuoc(d)][:gioi_han]
 
 
 class GiaDongBo:
@@ -544,7 +662,7 @@ def test_email_bi_xoa_khoi_nguoi_xem_mat_quyen_ngay():
 
 
 # ───────────────────────────── quyền sửa + CSRF ─────────────────────────────
-SUA = [("/du-an/them", {"ma": "moi", "ten": "Mới", "tu_khoa": "moi"}),
+SUA = [("/du-an/them", {"ma": "moi", "ten": "Mới", "tu_khoa": "moi", "don_vi": "hapas"}),
        ("/du-an/hapas/sua", {"ten": "HAPAS 2", "tu_khoa": "hapas", "thi_truong": "VN"}),
        ("/nguon/them", {"du_an": "hapas", "nen_tang": "tiktok", "dinh_danh": "@kolb"}),
        ("/nguon/1/sua", {"nen_tang": "tiktok", "dinh_danh": "kolc"}),
@@ -554,8 +672,10 @@ SUA = [("/du-an/them", {"ma": "moi", "ten": "Mới", "tu_khoa": "moi"}),
        ("/de-xuat/6/tu-choi", {}),
        ("/de-xuat/hang-loat", {"du_an": "hapas", "hanh_dong": "tu_choi", "ids": "5,6"}),
        ("/ngan-sach/hapas", {"tran_usd_thang": "7"}),
-       ("/nguoi-xem/them", {"email": "moi@hapas.vn", "vai_tro": "xem"}),
+       ("/nguoi-xem/them", {"email": "moi@hapas.vn", "vai_tro": "xem", "don_vi": "hapas"}),
        ("/nguoi-xem/xoa", {"email": XEM}),
+       ("/nguoi-xem/quan-tri", {"email": "moi@hapas.vn", "bat": "1"}),
+       ("/don-vi/them", {"ma": "ben-moi", "ten": "Bên mới"}),
        ("/bigquery/dong-bo", {})]
 
 
@@ -577,7 +697,7 @@ def test_nguoi_chi_xem_khong_sua_duoc_gi():
         r = c.post(duong, data={"csrf": csrf, **form})
         assert r.status_code == 403, duong
         assert "Chỉ người quản lý" in r.text, duong
-    assert c.get("/nguoi-xem").status_code == 403
+    assert c.get("/quan-tri").status_code == 403
     assert kho.nk == [] and dong_bo.so_lan_chay == 0
     assert truoc == (json.dumps(kho.du_an, default=str), json.dumps(kho.nguon, default=str),
                      json.dumps(kho.de_xuat, default=str), dict(kho.nguoi))
@@ -765,8 +885,13 @@ def test_them_va_sua_du_an():
     r = c.post("/du-an/them", data={"csrf": csrf, "ma": "DoiThu", "ten": "Đối thủ",
                                     "tu_khoa": "doithu, đối thủ", "thi_truong": "vn",
                                     "dang_bat": "1"})
+    assert "Chọn bên" in thong_bao(c, r) and "doithu" not in kho.du_an   # quản trị: phải chọn
+    r = c.post("/du-an/them", data={"csrf": csrf, "ma": "DoiThu", "ten": "Đối thủ",
+                                    "tu_khoa": "doithu, đối thủ", "thi_truong": "vn",
+                                    "dang_bat": "1", "don_vi": "matemade"})
     assert r.status_code == 303 and r.headers["location"] == "/nguon?du_an=doithu"
     assert kho.du_an["doithu"]["tu_khoa"] == ["doithu", "đối thủ"]
+    assert kho.du_an["doithu"]["don_vi"] == "matemade"
     r = c.post("/du-an/them", data={"csrf": csrf, "ma": "x y", "ten": "Sai", "tu_khoa": "a"})
     assert "Mã dự án" in thong_bao(c, r)
     r = c.post("/du-an/hapas/sua", data={"csrf": csrf, "ten": "HAPAS VN", "tu_khoa": "hapas",
@@ -867,19 +992,20 @@ def test_api_chi_so_khong_doc_ghi_chu_luot():
 
 
 # ───────────────────────────── người xem ─────────────────────────────
-def test_khong_xoa_khong_ha_quan_ly_cuoi():
+def test_khong_xoa_khong_bo_quan_tri_vien_cuoi():
+    """19/10/2026: luôn còn ≥ 1 quản trị viên (kho kiểm trong giao dịch, câu báo hiện thẳng)."""
     _, c, kho = tao()
     csrf = dang_nhap(c, QL)
     r = c.post("/nguoi-xem/xoa", data={"csrf": csrf, "email": QL})
-    assert "quản lý cuối cùng" in thong_bao(c, r) and kho.nguoi[QL] == "quan_ly"
-    r = c.post("/nguoi-xem/them", data={"csrf": csrf, "email": QL, "vai_tro": "xem"})
-    assert "quản lý cuối cùng" in thong_bao(c, r) and kho.nguoi[QL] == "quan_ly"
+    assert "quản trị viên cuối cùng" in thong_bao(c, r) and QL in kho.quan_tri
+    r = c.post("/nguoi-xem/quan-tri", data={"csrf": csrf, "email": QL, "bat": "0"})
+    assert "quản trị viên cuối cùng" in thong_bao(c, r) and QL in kho.quan_tri
     assert kho.nk == []
-    c.post("/nguoi-xem/them", data={"csrf": csrf, "email": " QL2@Hapas.VN ", "vai_tro": "quan_ly"})
-    assert kho.nguoi["ql2@hapas.vn"] == "quan_ly"
+    r = c.post("/nguoi-xem/them", data={"csrf": csrf, "email": " QL2@Hapas.VN ", "quan_tri": "1"})
+    assert r.status_code == 303 and "ql2@hapas.vn" in kho.quan_tri
     r = c.post("/nguoi-xem/xoa", data={"csrf": csrf, "email": QL})
     assert r.status_code == 303 and QL not in kho.nguoi
-    assert [x[1] for x in kho.nk] == ["luu_nguoi_xem", "xoa_nguoi_xem"]
+    assert [x[1] for x in kho.nk] == ["dat_quan_tri", "xoa_nguoi_xem"]
     assert all(x[0] == QL for x in kho.nk)
 
 
@@ -887,7 +1013,7 @@ def test_trang_nguoi_xem_hien_nhat_ky():
     _, c, kho = tao()
     kho.nk.append((QL, "them_nguon", "nguon:<b>1</b>"))
     dang_nhap(c, QL)
-    t = c.get("/nguoi-xem").text
+    t = c.get("/quan-tri").text
     assert "them_nguon" in t and "nguon:&lt;b&gt;1&lt;/b&gt;" in t and "<b>1</b>" not in t
 
 
@@ -975,10 +1101,10 @@ def test_trang_nguoi_xem_doc_danh_ba_nen_roi_hien_ten_phong_ban():
     ghi: list = []
     _, c, kho = tao(danh_ba=danh_ba_gia(ghi=ghi))
     dang_nhap(c, QL)
-    t = c.get("/nguoi-xem").text           # trang trả ngay bằng bản đệm (trống) ...
+    t = c.get("/quan-tri").text           # trang trả ngay bằng bản đệm (trống) ...
     assert "Đang đọc danh bạ" in t and "Trần Quản" not in t
     assert kho.danh_ba[QL]["chuc_danh"] == "Trưởng phòng Marketing"   # ... rồi đọc nền (kho giữ)
-    t = c.get("/nguoi-xem").text
+    t = c.get("/quan-tri").text
     # 18/10/2026 (chủ dự án): bỏ cột Chức danh; phòng ban vẫn hiện dưới tên Lark.
     assert "Chức danh" not in t and "Trưởng phòng Marketing" not in t
     assert "Chuyên viên nội dung" not in t and "chức danh" not in t
@@ -986,11 +1112,11 @@ def test_trang_nguoi_xem_doc_danh_ba_nen_roi_hien_ten_phong_ban():
     assert "Marketing · Nội dung" in t
     assert t.count("Đang hoạt động") == 2 and "Đang đọc danh bạ" not in t
     so_goi = len(ghi)
-    c.get("/nguoi-xem")                    # bản đệm còn mới (< 12 giờ): không gọi Lark
+    c.get("/quan-tri")                    # bản đệm còn mới (< 12 giờ): không gọi Lark
     assert len(ghi) == so_goi
     for e in (QL, XEM):                    # cũ hơn 12 giờ -> đọc lại
         kho.danh_ba[e]["danh_ba_luc"] -= datetime.timedelta(hours=13)
-    c.get("/nguoi-xem")
+    c.get("/quan-tri")
     assert len(ghi) > so_goi
 
 
@@ -998,26 +1124,26 @@ def test_trang_nguoi_xem_thieu_quyen_danh_ba_van_hien_va_giai_thich():
     ghi: list = []
     _, c, kho = tao(danh_ba=danh_ba_gia(loi_buoc="email", ghi=ghi))
     dang_nhap(c, QL)
-    assert c.get("/nguoi-xem").status_code == 200
-    t = c.get("/nguoi-xem").text
+    assert c.get("/quan-tri").status_code == 200
+    t = c.get("/quan-tri").text
     assert t.count("Chưa đọc được danh bạ") == 2
     assert "contact:user.id:readonly" in t and "goi-y--canh" in t
     assert kho.danh_ba[QL]["danh_ba_loi"] == "thieu_quyen"
     so_goi = len(ghi)
-    c.get("/nguoi-xem")                    # lỗi: 1 giờ sau mới thử lại
+    c.get("/quan-tri")                    # lỗi: 1 giờ sau mới thử lại
     assert len(ghi) == so_goi
     for e in (QL, XEM):
         kho.danh_ba[e]["danh_ba_luc"] -= datetime.timedelta(minutes=61)
-    c.get("/nguoi-xem")
+    c.get("/quan-tri")
     assert len(ghi) > so_goi
 
 
 def test_trang_nguoi_xem_giu_du_lieu_cu_khi_lan_doc_sau_loi():
     _, c, kho = tao()
     dang_nhap(c, QL)
-    c.get("/nguoi-xem")
+    c.get("/quan-tri")
     kho.ghi_loi_danh_ba([QL], "loi")
-    t = c.get("/nguoi-xem").text
+    t = c.get("/quan-tri").text
     assert "Trần Quản" in t and "Lần đọc danh bạ gần nhất lỗi" in t
 
 
@@ -1026,7 +1152,7 @@ def test_trang_nguoi_xem_khong_cho_lark_cham(monkeypatch):
     monkeypatch.setattr(A, "DANH_BA_NEN_GIAY", 0.05)
     _, c, kho = tao(danh_ba=danh_ba_gia(cham=2))
     dang_nhap(c, QL)
-    assert c.get("/nguoi-xem").status_code == 200
+    assert c.get("/quan-tri").status_code == 200
     assert kho.danh_ba[QL]["danh_ba_loi"] == "loi"
 
 
@@ -1034,7 +1160,7 @@ def test_trang_nguoi_xem_hien_dang_nhap_gan_nhat():
     _, c, kho = tao()
     kho.dang_nhap_cuoi[XEM] = datetime.datetime(2026, 10, 16, 2, 5, tzinfo=datetime.UTC)
     dang_nhap(c, QL)
-    t = c.get("/nguoi-xem").text
+    t = c.get("/quan-tri").text
     assert "16/10/2026 09:05" in t and t.count("Chưa đăng nhập") == 1
 
 
@@ -1042,7 +1168,7 @@ def test_them_nguoi_xem_canh_bao_khi_khong_co_trong_danh_ba():
     _, c, kho = tao()
     csrf = dang_nhap(c, QL)
     r = c.post("/nguoi-xem/them", data={"csrf": csrf, "email": "go-sai@hapas.vn",
-                                        "vai_tro": "xem"})
+                                        "vai_tro": "xem", "don_vi": "hapas"})
     # đường thêm (nhanh, không dò cả danh bạ) KHÔNG ghi "khong_co" — chưa chắc vì Lark không
     # khớp enterprise_email; lượt đọc nền khi mở trang (có dò) mới ghi
     assert "go-sai@hapas.vn" not in kho.danh_ba
@@ -1050,7 +1176,7 @@ def test_them_nguoi_xem_canh_bao_khi_khong_co_trong_danh_ba():
     assert "thong-bao--canh" in t and "Lark chưa khớp email này" in t
     assert kho.nguoi["go-sai@hapas.vn"] == "xem"           # cảnh báo, KHÔNG chặn
     assert kho.danh_ba["go-sai@hapas.vn"]["trang_thai_lark"] == "khong_co"
-    t = c.get("/nguoi-xem").text
+    t = c.get("/quan-tri").text
     assert "Không có trong danh bạ" in t and "chưa đăng nhập dashboard lần nào" in t
 
 
@@ -1060,7 +1186,7 @@ def test_them_nguoi_xem_canh_bao_khi_da_nghi_viec():
     _, c, kho = tao(danh_ba=danh_ba_gia(nguoi))
     csrf = dang_nhap(c, QL)
     t = thong_bao(c, c.post("/nguoi-xem/them", data={"csrf": csrf, "email": "nghi@hapas.vn",
-                                                    "vai_tro": "xem"}))
+                                                    "vai_tro": "xem", "don_vi": "hapas"}))
     assert "thong-bao--canh" in t and "Đã nghỉ việc" in t and "nghi@hapas.vn" in kho.nguoi
 
 
@@ -1069,7 +1195,7 @@ def test_them_nguoi_xem_dang_hoat_dong_bao_ten():
     del kho.nguoi[XEM]
     csrf = dang_nhap(c, QL)
     t = thong_bao(c, c.post("/nguoi-xem/them", data={"csrf": csrf, "email": XEM,
-                                                    "vai_tro": "xem"}))
+                                                    "vai_tro": "xem", "don_vi": "hapas"}))
     assert "thong-bao--ok" in t and "— Lê Xem, tài khoản Lark đang hoạt động" in t
     assert "Chuyên viên nội dung" not in t, "18/10/2026: không hiện chức danh"
 
@@ -1080,7 +1206,7 @@ def test_them_nguoi_xem_lark_hong_hoac_cham_van_luu(monkeypatch, kw):
     _, c, kho = tao(danh_ba=danh_ba_gia(**kw))
     csrf = dang_nhap(c, QL)
     t = thong_bao(c, c.post("/nguoi-xem/them", data={"csrf": csrf, "email": "moi@hapas.vn",
-                                                    "vai_tro": "xem"}))
+                                                    "vai_tro": "xem", "don_vi": "hapas"}))
     assert "thong-bao--ok" in t and "Chưa kiểm được với danh bạ Lark" in t
     assert kho.nguoi["moi@hapas.vn"] == "xem"
     assert kho.danh_ba["moi@hapas.vn"]["danh_ba_loi"] in ("thieu_quyen", "loi")
@@ -1167,11 +1293,11 @@ def test_dang_nhap_luu_open_id_roi_trang_nguoi_xem_doc_theo_open_id():
     assert c.get("/dang-nhap/xong", params={"code": "x", "state": _bat_dau(c)}).status_code == 303
     assert kho.ma_lark[GIAM_DOC]["open_id"] == "ou_gd"
     assert kho.danh_ba[GIAM_DOC]["danh_ba_luc"] is None
-    c.get("/nguoi-xem")                    # đọc nền: GIAM_DOC tra thẳng theo open_id
+    c.get("/quan-tri")                    # đọc nền: GIAM_DOC tra thẳng theo open_id
     assert kho.danh_ba[GIAM_DOC]["trang_thai_lark"] == "hoat_dong"
     em = _duong_goi(ghi, DB.DUONG_EMAIL_RA_ID)
     assert all(GIAM_DOC not in json.loads(r.content)["emails"] for r in em)
-    t = c.get("/nguoi-xem").text
+    t = c.get("/quan-tri").text
     assert kho.danh_ba[GIAM_DOC]["chuc_danh"] == "Giám đốc"
     assert "Phạm Giám Đốc" in t and '<span class="nx-dong2 nx-pb">Nội dung</span>' in t
     assert "Giám đốc" not in t
@@ -1182,7 +1308,7 @@ def test_trang_nguoi_xem_do_ca_danh_ba_cho_email_doanh_nghiep_chua_dang_nhap():
     kho.nguoi[GIAM_DOC] = "xem"
     _, c, kho = tao(kho, danh_ba=danh_ba_gia(NGUOI_DN))
     dang_nhap(c, QL)
-    c.get("/nguoi-xem")
+    c.get("/quan-tri")
     assert kho.danh_ba[GIAM_DOC]["chuc_danh"] == "Giám đốc"
     assert kho.ma_lark[GIAM_DOC]["open_id"] == "ou_gd"     # lưu để lần sau tra thẳng
 
@@ -1190,7 +1316,7 @@ def test_trang_nguoi_xem_do_ca_danh_ba_cho_email_doanh_nghiep_chua_dang_nhap():
 def test_danh_ba_khong_ghi_nhat_ky():
     _, c, kho = tao()
     dang_nhap(c, QL)
-    c.get("/nguoi-xem")
+    c.get("/quan-tri")
     assert kho.nk == []
 
 
@@ -1208,7 +1334,8 @@ def test_moi_thao_tac_sua_ghi_nhat_ky_dung_nguoi():
     hanh_dong = [x[1] for x in kho.nk]
     assert hanh_dong == ["them_du_an", "sua_du_an", "them_nguon", "sua_nguon",
                          "doi_trang_thai_nguon", "xoa_nguon", "duyet_de_xuat", "tu_choi_de_xuat",
-                         "dat_tran_thang", "luu_nguoi_xem", "xoa_nguoi_xem", "dong_bo_bq"]
+                         "dat_tran_thang", "luu_quyen", "xoa_nguoi_xem", "dat_quan_tri",
+                         "them_don_vi", "dong_bo_bq"]
     assert all(x[0] == QL for x in kho.nk)
 
 
@@ -1252,7 +1379,7 @@ def test_cac_trang_hien_dung_va_thoat_chu():
     _co_nguon(kho)
     kho.nguon[1]["link"] = "javascript:alert(2)"
     dang_nhap(c, XEM)
-    for p in ("/", "/nguon", "/ngan-sach", "/bigquery", "/lich-quet"):
+    for p in ("/", "/nguon", "/ngan-sach", "/lich-quet"):
         r = c.get(p)
         assert r.status_code == 200, p
         assert "<script>alert(1)</script>" not in r.text, p
@@ -1273,11 +1400,11 @@ def test_cac_trang_hien_dung_va_thoat_chu():
     t = c.get("/nguon").text
     assert 'href="javascript:' not in t
     assert "Thêm nguồn" not in t and "Duyệt" not in t               # người xem: không có nút sửa
-    assert "Người xem" not in c.get("/").text.split("<main")[0]       # mục chỉ cho quản lý
+    assert "Quản trị<" not in c.get("/").text.split("<main")[0]       # mục chỉ cho quản lý
     dang_nhap(c, QL)
     t = c.get("/nguon").text
     assert "Thêm nguồn" in t and "Duyệt" in t and "Thêm dự án mới" in t
-    assert 'href="/nguoi-xem"' in c.get("/").text
+    assert 'href="/quan-tri"' in c.get("/").text
 
 
 def test_trang_chi_so_giu_du_khoi_va_an_toan_csp():
@@ -1296,7 +1423,7 @@ def test_trang_chi_so_giu_du_khoi_va_an_toan_csp():
                "kpi-bl", "loai-bl", "bl-tim", "bl-truong", "bl-sap-xep", "bl-ds", "chi-tiet",
                "loi-tai", "canh-bao", "canh-bao-bl"):
         assert f'id="{ma}"' in t, ma
-    for m in re.finditer(r"<script([^>]*)>(.*?)</script>", t, re.S):
+    for m in re.finditer(r"<script([^>]*)>(.*?)</script>", t, re.DOTALL):
         assert "src=" in m.group(1) or 'type="application/json"' in m.group(1), m.group(0)[:80]
     assert not re.search(r"\son[a-z]+=", t)
     js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
@@ -1319,20 +1446,25 @@ def test_khong_co_trang_ky_nang_hay_cong_tac_cua_mark():
 
 
 # ───────────────────────────── BigQuery ─────────────────────────────
-def test_trang_bigquery_nguoi_xem_thay_nhung_khong_bam_duoc():
+def test_trang_bigquery_chi_quan_tri_vien():
+    """19/10/2026: trang BigQuery (trạng thái mọi bảng của mọi bên) + nút đồng bộ chỉ quản trị
+    viên; người xem và quản lý của một bên: 403, menu không có mục BigQuery."""
     dong_bo = GiaDongBo()
     app, c, kho = tao(dong_bo=dong_bo)
+    kho.quyen[HP_QL] = {"hapas": "quan_ly"}
+    kho.nguoi[HP_QL] = "quan_ly"
     assert dong_bo.app_cai is app and len(app.state.sau_cap_nhat) == 1   # đã gắn hook
-    csrf = dang_nhap(c, XEM)
-    t = c.get("/bigquery").text
-    assert "ganesha-381907.SOCIAL_LISTENING" in t and "14/10/2026 09:00" in t
-    assert "Forbidden" not in t and A.LOI_CHUNG in t           # người xem: chỉ dấu "có lỗi"
-    assert "Đồng bộ ngay" not in t
-    assert "11 nhãn" in t and "nhật ký" in t
-    assert c.post("/bigquery/dong-bo", data={"csrf": csrf}).status_code == 403
+    for ai in (XEM, HP_QL):
+        csrf = dang_nhap(c, ai)
+        assert c.get("/bigquery").status_code == 403, ai
+        assert 'href="/bigquery"' not in c.get("/").text, ai
+        assert c.post("/bigquery/dong-bo", data={"csrf": csrf}).status_code == 403, ai
     assert dong_bo.so_lan_chay == 0 and kho.nk == []
     dang_nhap(c, QL)
-    assert "Forbidden: &lt;b&gt;quyền&lt;/b&gt;" in c.get("/bigquery").text   # quản lý: chữ thô, đã thoát
+    t = c.get("/bigquery").text
+    assert "ganesha-381907.SOCIAL_LISTENING" in t and "14/10/2026 09:00" in t
+    assert "11 nhãn" in t and "nhật ký" in t
+    assert "Forbidden: &lt;b&gt;quyền&lt;/b&gt;" in t        # quản trị viên: chữ thô, đã thoát
 
 
 def test_trang_bigquery_canh_bao_khong_gan_nhan_loi():
@@ -1348,7 +1480,7 @@ def test_trang_bigquery_canh_bao_khong_gan_nhan_loi():
                           if b["bang"] == "du_an" else b for b in tt["bang"]]
             return tt
     _, c, _ = tao(dong_bo=CoCanhBao())
-    for ai in (QL, XEM):
+    for ai in (QL,):
         dang_nhap(c, ai)
         t = c.get("/bigquery").text
         assert '<span class="the the--canh">cảnh báo</span>' in t and canh in t
@@ -1376,7 +1508,7 @@ def test_bigquery_chua_bat_va_loi_trang_thai():
     assert "Đồng bộ chưa bật" in thong_bao(c, r)
     assert dong_bo.so_lan_chay == 0 and kho.nk == []
     _, c2, _ = tao(dong_bo=GiaDongBo(loi_trang_thai=True))
-    dang_nhap(c2, XEM)
+    dang_nhap(c2, QL)
     r = c2.get("/bigquery")
     assert r.status_code == 200 and "Chưa đọc được trạng thái đồng bộ (RuntimeError)" in r.text
 
@@ -1732,16 +1864,37 @@ def test_sse_tran_moi_nguoi_va_dong_khi_mat_quyen():
 
     kho = GiaKho()
     lan = []
-    goc = kho.vai_tro
+    goc = kho.quyen_cua
 
-    def vai_tro(email):                      # lần 1 (mở luồng) còn quyền, lần 2 đã bị xoá
+    def quyen_cua(email):                    # lần 1 (mở luồng) còn quyền, lần 2 đã bị xoá
         lan.append(email)
         return goc(email) if len(lan) == 1 else None
-    kho.vai_tro = vai_tro
+    kho.quyen_cua = quyen_cua
     _, c, _ = tao(kho, sse_kiem_quyen_giay=0.0)
     dang_nhap(c, XEM)
     r = c.get("/su-kien")
     assert r.status_code == 200 and "event: het-quyen" in r.text and len(lan) == 2
+
+
+def test_sse_chi_day_su_kien_du_an_cua_ben_minh():
+    """19/10/2026: luồng /su-kien của người xem MATEMADE không nhận `cap-nhat` của dự án HAPAS
+    (lộ mã dự án + giờ quét của bên khác); dự án của bên mình vẫn nhận."""
+    kho = _kho_hai_ben()
+    app, c, _ = tao(kho, sse_toi_da_su_kien=1)
+    bt = app.state.bang_tin
+    goc = bt.dang_ky
+
+    def dang_ky(email=""):                  # hai sự kiện đã chờ sẵn khi luồng vừa mở
+        q = goc(email)
+        q.put_nowait(("cap-nhat", {"du_an": "hapas", "luot": 1}))
+        q.put_nowait(("cap-nhat", {"du_an": "mm", "luot": 2}))
+        return q
+    bt.dang_ky = dang_ky
+    dang_nhap(c, MM_XEM)
+    chu = c.get("/su-kien").text
+    assert '"du_an": "mm"' in chu and '"du_an": "hapas"' not in chu
+    dang_nhap(c, QL)                         # quản trị viên: nhận cả hai (tối đa 1 → cái đầu)
+    assert '"du_an": "hapas"' in c.get("/su-kien").text
 
 
 def test_nguoi_xem_khong_thay_email_va_loi_tho():
@@ -2656,3 +2809,191 @@ def test_lich_quet_luot_bi_bo_van_hien_ket_qua_viec_truoc(giua_thang):
     dang_nhap(c, XEM)
     assert "lượt trước còn chạy · việc t1: lỗi" in c.get("/lich-quet").text
 
+
+# ───────────────────── phân quyền theo bên (19/10/2026) ─────────────────────
+#: HAPAS: QL (quản trị viên), XEM (Chỉ xem HAPAS), HP_QL (Quản lý HAPAS). MATEMADE: MM_XEM, MM_QL.
+#: HAI_BEN: Chỉ xem cả hai bên. Dự án `mm` thuộc MATEMADE.
+HP_QL, MM_XEM, MM_QL, HAI_BEN = ("nganlt@hapas.vn", "mm.xem@hapas.vn", "mm.ql@hapas.vn",
+                                 "hai.ben@hapas.vn")
+
+
+def _kho_hai_ben() -> GiaKho:
+    kho = GiaKho()
+    kho.du_an["mm"] = {**kho.du_an["hapas"], "ma": "mm", "ten": "MATEMADE Store",
+                       "don_vi": "matemade"}
+    _co_nguon(kho)                                                       # nguồn 1: hapas
+    kho.them_nguon("seed", "mm", {"nen_tang": "tiktok", "dinh_danh": "mmkol", "ten": "MM",
+                                  "link": "", "loai": "kol", "nhan": [], "chu_ky_ngay": 1,
+                                  "so_bai_moi_lan": 5})                  # nguồn 2: mm
+    kho.de_xuat[7] = {**kho.de_xuat[5], "id": 7, "du_an": "mm", "dinh_danh": "@mmx",
+                      "link": "https://www.tiktok.com/@mmx", "ly_do": "2 bài"}
+    _them_lich(kho)                                                      # lịch 1: hapas
+    for e, ben in ((HP_QL, {"hapas": "quan_ly"}), (MM_XEM, {"matemade": "xem"}),
+                   (MM_QL, {"matemade": "quan_ly"}),
+                   (HAI_BEN, {"hapas": "xem", "matemade": "xem"})):
+        kho.quyen[e] = ben
+        kho.nguoi[e] = PQ.vai_chung({"la_quan_tri": False, "ben": ben})
+    kho.nk.clear()
+    return kho
+
+
+def _anh_kho(kho) -> str:
+    return json.dumps([kho.du_an, kho.nguon, kho.de_xuat, kho.lich, kho.quyen, sorted(kho.nguoi),
+                       sorted(kho.quan_tri), kho.don_vi], default=str, sort_keys=True)
+
+
+def test_ben_khac_khong_doc_duoc_du_lieu():
+    """Người xem MATEMADE hỏi số / trang của dự án HAPAS: như không có dự án (404, không số), và
+    không thấy mã dự án HAPAS trong ô chọn của trang nào."""
+    _, c, kho = tao(_kho_hai_ben())
+    dang_nhap(c, MM_XEM)
+    q = "&tu=2026-10-08&den=2026-10-14"
+    for duong in ("/api/chi-so", "/api/bai", "/api/binh-luan", "/api/lich-quet/xem-truoc"):
+        r = c.get(f"{duong}?du_an=hapas{q}")
+        assert r.status_code == 404, duong
+        assert "Không có dự án" in r.json()["loi"], duong
+    assert c.get(f"/api/binh-luan?du_an=hapas&khoa=tiktok:1{q}").status_code == 404
+    assert c.get(f"/api/chi-so?du_an=mm{q}").status_code == 200
+    assert kho.goi_bai and all(x[0] == "mm" for x in kho.goi_bai)     # chưa đọc bài hapas lần nào
+    for p in ("/", "/nguon", "/ngan-sach", "/lich-quet"):
+        for duong in (p, f"{p}?du_an=hapas"):
+            t = c.get(duong).text
+            assert 'value="hapas"' not in t and "kola" not in t, duong
+    assert "MATEMADE Store" in c.get("/nguon").text
+    assert c.get("/ngan-sach/luot/1/ghi-chu?du_an=hapas").status_code == 404
+    assert c.get("/quan-tri").status_code == 403 and c.get("/bigquery").status_code == 403
+    assert "MATEMADE: Chỉ xem" in c.get("/").text
+    # người có quyền hai bên thấy cả hai dự án
+    dang_nhap(c, HAI_BEN)
+    assert c.get(f"/api/chi-so?du_an=hapas{q}").status_code == 200
+    assert c.get(f"/api/chi-so?du_an=mm{q}").status_code == 200
+
+
+def test_quan_ly_ben_khac_khong_sua_duoc_gi_cua_hapas():
+    """Quản lý MATEMADE gửi MỌI thao tác sửa nhắm vào dự án / nguồn / đề xuất / lịch của HAPAS:
+    bị chặn (dự án, nguồn, lịch đọc từ KHO — mã dự án trong biểu mẫu không có tác dụng); kho
+    không đổi, nhật ký trống. Dự án của chính bên mình vẫn sửa được."""
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, MM_QL)
+    truoc = _anh_kho(kho)
+    hapas = [("/du-an/them", {"ma": "moi", "ten": "Mới", "tu_khoa": "moi", "don_vi": "hapas"}),
+             ("/du-an/hapas/sua", {"ten": "Bị sửa", "tu_khoa": "x", "don_vi": "matemade"}),
+             ("/nguon/them", {"du_an": "hapas", "nen_tang": "tiktok", "dinh_danh": "@kolb"}),
+             ("/nguon/1/sua", {"du_an": "mm", "nen_tang": "tiktok", "dinh_danh": "kolc"}),
+             ("/nguon/1/trang-thai", {"trang_thai": "tam_dung"}),
+             ("/nguon/1/xoa", {}),
+             ("/de-xuat/5/duyet", {"loai": "kol"}),
+             ("/de-xuat/6/tu-choi", {}),
+             ("/de-xuat/hang-loat", {"du_an": "hapas", "hanh_dong": "tu_choi", "ids": "5,6"}),
+             ("/de-xuat/hang-loat", {"du_an": "mm", "hanh_dong": "tu_choi", "ids": "5,6"}),
+             ("/ngan-sach/hapas", {"tran_usd_thang": "50"}),
+             ("/ngan-sach/hapas/cau-hinh", {"tran_usd_thang": "50"}),
+             ("/ngan-sach/hapas/tu-khoa", {"tk_bat": "1", "tk_so_bai": "99"}),
+             ("/ngan-sach/hapas/binh-luan", {"bl_bat": "1", "bl_so_bai": "9", "bl_moi_bai": "0"}),
+             ("/lich-quet/them", {"du_an": "hapas", "kieu": "hang_ngay", "gio": "09:00"}),
+             ("/lich-quet/1/sua", {"du_an": "mm", "kieu": "hang_ngay", "gio": "09:00"}),
+             ("/lich-quet/1/bat-tat", {"bat": "0"}),
+             ("/lich-quet/1/xoa", {}),
+             ("/nguoi-xem/them", {"email": "moi@hapas.vn", "don_vi": "hapas", "vai_tro": "xem"}),
+             ("/nguoi-xem/xoa", {"email": XEM, "don_vi": "hapas"}),
+             ("/don-vi/them", {"ma": "ben-moi", "ten": "Bên mới"}),
+             ("/bigquery/dong-bo", {})]
+    for duong, form in hapas:
+        r = c.post(duong, data={"csrf": csrf, **form})
+        if r.status_code == 303:
+            t = c.get(r.headers["location"]).text
+            assert "thong-bao--loi" in t or "bỏ qua 2" in t, duong
+        else:
+            assert r.status_code in (400, 403, 404), (duong, r.status_code)
+        assert _anh_kho(kho) == truoc, duong
+    assert kho.nk == []
+    # bên mình: sửa được
+    r = c.post("/nguon/them", data={"csrf": csrf, "du_an": "mm", "nen_tang": "tiktok",
+                                   "dinh_danh": "@kolmoi"})
+    assert r.status_code == 303 and any(n["dinh_danh"] == "kolmoi" and n["du_an"] == "mm"
+                                        for n in kho.nguon.values())
+    r = c.post("/du-an/them", data={"csrf": csrf, "ma": "mm2", "ten": "MM 2", "tu_khoa": "mm"})
+    assert kho.du_an["mm2"]["don_vi"] == "matemade"          # một bên: không cần chọn
+    t = c.get("/nguon?du_an=mm").text
+    assert "Thêm dự án mới" in t and "Sửa dự án" in t
+
+
+def test_chi_xem_mot_ben_quan_ly_ben_khac():
+    """Một người: Quản lý MATEMADE + Chỉ xem HAPAS — trang HAPAS không có nút sửa, POST bị 403."""
+    kho = _kho_hai_ben()
+    kho.quyen[MM_QL] = {"matemade": "quan_ly", "hapas": "xem"}
+    _, c, kho = tao(kho)
+    csrf = dang_nhap(c, MM_QL)
+    t = c.get("/nguon?du_an=hapas").text
+    assert "kola" in t and "Sửa dự án" not in t and "/nguon/1/xoa" not in t
+    r = c.post("/nguon/1/xoa", data={"csrf": csrf})
+    assert r.status_code == 403 and "quản lý của bên" in r.text and 1 in kho.nguon
+    assert c.get("/ngan-sach/luot/1/ghi-chu?du_an=hapas").status_code == 403
+    assert "/nguon/2/xoa" in c.get("/nguon?du_an=mm").text
+
+
+def test_quan_ly_ben_chi_them_bo_nguoi_chi_xem_cua_ben_minh():
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, HP_QL)
+    t = c.get("/quan-tri").text
+    assert "<h1>Quản trị</h1>" in t and XEM in t and HAI_BEN in t
+    assert MM_XEM not in t and MM_QL not in t                     # người chỉ ở bên khác: ẩn
+    assert "MATEMADE: Chỉ xem" not in t                            # quyền bên khác: ẩn
+    assert "/don-vi/them" not in t and "/nguoi-xem/quan-tri" not in t
+    assert c.get("/nguoi-xem").status_code == 308                 # đường cũ còn mở được
+    assert c.get("/nguoi-xem?ben=hapas").headers["location"] == "/quan-tri?ben=hapas"
+
+    def gui(duong, **form):
+        return thong_bao(c, c.post(duong, data={"csrf": csrf, **form}))
+    assert "Đã lưu moi@hapas.vn (HAPAS: Chỉ xem)" in gui("/nguoi-xem/them", email="moi@hapas.vn",
+                                                         vai_tro="xem")   # một bên: tự chọn
+    assert kho.quyen["moi@hapas.vn"] == {"hapas": "xem"}
+    for form, loi in (({"email": "moi2@hapas.vn", "vai_tro": "quan_ly"}, "chỉ thêm được người"),
+                      ({"email": "moi2@hapas.vn", "don_vi": "matemade", "vai_tro": "xem"},
+                       "quản lý của bên này"),
+                      ({"email": QL, "don_vi": "hapas", "vai_tro": "xem"}, "quản trị viên"),
+                      ({"email": HP_QL, "don_vi": "hapas", "vai_tro": "xem"}, "chính mình"),
+                      ({"email": "moi2@hapas.vn", "quan_tri": "1"}, "Chỉ quản trị viên")):
+        assert loi in gui("/nguoi-xem/them", **form), form
+    assert "moi2@hapas.vn" not in kho.nguoi and QL in kho.quan_tri
+    assert "Chỉ quản trị viên" in gui("/nguoi-xem/quan-tri", email=HP_QL, bat="1")
+    assert "Chỉ quản trị viên" in gui("/nguoi-xem/xoa", email=XEM)           # xoá hẳn
+    assert "Chỉ quản trị viên" in gui("/don-vi/them", ma="ben-moi", ten="Bên mới")
+    assert "matemade" in kho.quyen[HAI_BEN]
+    # bỏ khỏi HAPAS: người còn MATEMADE giữ MATEMADE; người chỉ có HAPAS bị xoá khỏi danh sách
+    assert "Đã bỏ quyền" in gui("/nguoi-xem/xoa", email=HAI_BEN, don_vi="hapas")
+    assert kho.quyen[HAI_BEN] == {"matemade": "xem"} and HAI_BEN in kho.nguoi
+    assert "xoá khỏi danh sách" in gui("/nguoi-xem/xoa", email=XEM, don_vi="hapas")
+    assert XEM not in kho.nguoi
+    assert "không có quyền ở bên này" in gui("/nguoi-xem/xoa", email=MM_XEM, don_vi="hapas")
+    assert [h for _, h, _ in kho.nk] == ["luu_quyen", "xoa_quyen", "xoa_quyen"]
+    assert "quyen:hai.ben@hapas.vn:hapas" in c.get("/quan-tri").text   # nhật ký bên mình
+    dang_nhap(c, XEM)
+    assert c.get("/").status_code == 403                           # hết quyền: không vào được
+
+
+def test_quan_tri_vien_doi_moi_quyen_va_chuyen_du_an():
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, QL)
+    t = c.get("/quan-tri").text
+    assert MM_XEM in t and "/don-vi/them" in t and "MATEMADE Store" in t and "Quản trị viên" in t
+    assert "MATEMADE: Chỉ xem" in t and "HAPAS: Chỉ xem" in t
+    assert MM_XEM not in c.get("/quan-tri?ben=hapas").text          # lọc theo bên
+    r = c.post("/nguoi-xem/them", data={"csrf": csrf, "email": MM_XEM, "don_vi": "hapas",
+                                        "vai_tro": "quan_ly"})
+    assert r.status_code == 303 and kho.quyen[MM_XEM] == {"matemade": "xem", "hapas": "quan_ly"}
+    r = c.post("/don-vi/them", data={"csrf": csrf, "ma": "Ben-Moi", "ten": "Bên mới"})
+    assert "Đã tạo bên" in thong_bao(c, r) and "ben-moi" in kho.don_vi
+    # quản lý HAPAS sửa dự án được nhưng KHÔNG chuyển bên; quản trị viên chuyển được
+    csrf2 = dang_nhap(c, HP_QL)
+    r = c.post("/du-an/hapas/sua", data={"csrf": csrf2, "ten": "HAPAS", "tu_khoa": "hapas",
+                                         "don_vi": "matemade"})
+    assert r.status_code == 403 and kho.du_an["hapas"]["don_vi"] == "hapas"
+    assert 'Bên sở hữu\n        <select name="don_vi">' not in c.get("/nguon?du_an=hapas").text
+    csrf = dang_nhap(c, QL)
+    assert 'Bên sở hữu\n        <select name="don_vi">' in c.get("/nguon?du_an=hapas").text
+    r = c.post("/du-an/hapas/sua", data={"csrf": csrf, "ten": "HAPAS", "tu_khoa": "hapas",
+                                         "don_vi": "matemade"})
+    assert r.status_code == 303 and kho.du_an["hapas"]["don_vi"] == "matemade"
+    dang_nhap(c, XEM)                     # người xem HAPAS: dự án đã sang bên khác → không thấy
+    assert c.get("/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14").status_code == 404

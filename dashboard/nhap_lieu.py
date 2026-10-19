@@ -29,7 +29,7 @@ TEN_NEN_TANG = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTub
 # Nhãn hiển thị "Internal channel" (chủ dự án 16/10/2026); giá trị lưu vẫn là `kenh_nha`.
 LOAI_NGUON = {"kol": "KOL/KOC", "page": "Trang/fanpage", "group": "Nhóm", "bao": "Báo/tin tức",
               "kenh_nha": "Internal channel", "khac": "Khác"}
-VAI_TRO = {"xem": "Chỉ xem", "quan_ly": "Quản lý"}
+VAI_TRO = {"xem": "Chỉ xem", "quan_ly": "Quản lý"}   # vai trò TRONG một bên (phan_quyen.py)
 # Chủ dự án 15/10: "không có giới hạn" — hai mức dưới chỉ chặn số rác / tràn cột (NUMERIC(8,2),
 # INT), KHÔNG phải trần nghiệp vụ. Tiền vẫn chặn bằng trần tháng do người dùng đặt.
 TRAN_USD_TOI_DA = Decimal("999999.99")
@@ -125,6 +125,14 @@ def ma_du_an(s) -> str:
     if not _RE_MA_DU_AN.fullmatch(m):
         raise LoiNhap("Mã dự án: 2–40 ký tự a-z, 0-9, '-' hoặc '_', bắt đầu bằng chữ/số "
                       "(đây là chữ gõ sau /theodoi).")
+    return m
+
+
+def ma_don_vi(s) -> str:
+    """Mã bên (19/10/2026): cùng luật với mã dự án (CHECK của bảng `don_vi`)."""
+    m = str(s or "").strip().lower()
+    if not _RE_MA_DU_AN.fullmatch(m):
+        raise LoiNhap("Mã bên: 2–40 ký tự a-z, 0-9, '-' hoặc '_', bắt đầu bằng chữ/số.")
     return m
 
 

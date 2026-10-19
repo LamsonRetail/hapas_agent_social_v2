@@ -420,7 +420,7 @@ def test_nguoi_khong_co_trong_nguoi_xem_bi_tu_choi(monkeypatch):
     def hong(email):
         raise RuntimeError("mất kết nối")
     monkeypatch.setattr(HD, "email_cua", lambda oid: XEM)
-    monkeypatch.setattr(kho, "vai_tro", hong)
+    monkeypatch.setattr(kho, "quyen_cua", hong)
     with pytest.raises(HD.TuChoi, match="chưa đọc được danh sách"):
         HD.tra_loi({}, kho, open_id="ou_hoi", bay_gio=BAY_GIO)
 
@@ -511,12 +511,12 @@ def test_kho_mark_chi_ham_doc_va_dung_dsn_cua_mark(monkeypatch):
     monkeypatch.setenv("LANG_NGHE_DSN", "dbname=lang_nghe_mark")
     monkeypatch.setenv("LANG_NGHE_WEB_DSN", "dbname=lang_nghe_web")
     km = HD.KhoMark()
-    for ten in ("them_du_an", "luu_nguoi_xem", "xoa_nguon", "sua_lich", "ghi_nhat_ky",
+    for ten in ("them_du_an", "luu_quyen", "xoa_quyen", "dat_quan_tri", "xoa_nguon", "sua_lich", "ghi_nhat_ky",
                 "ket_noi", "_dsn"):
         with pytest.raises(AttributeError):
             getattr(km, ten)
-    monkeypatch.setattr(K, "vai_tro", lambda email: K._dsn())
-    assert km.vai_tro("x@hapas.vn") == "dbname=lang_nghe_mark"
+    monkeypatch.setattr(K, "quyen_cua", lambda email: K._dsn())
+    assert km.quyen_cua("x@hapas.vn") == "dbname=lang_nghe_mark"
     assert K._dsn() == "dbname=lang_nghe_web"              # trả lại như cũ sau lần gọi
 
 
@@ -559,3 +559,26 @@ def test_policy_cho_doc_va_brain_biet_tool():
     assert "hoi_dashboard" not in lsr_policy._MUTATING_EXACT
     import brain
     assert "hoi_dashboard" in brain._TOOLING_NOTE and "hoi_dashboard" in brain._TOOL_CAN_XET
+
+
+def test_chi_tra_so_du_an_cua_ben_nguoi_hoi(monkeypatch):
+    """19/10/2026: người xem MATEMADE hỏi Mark số của dự án HAPAS → như không có dự án (không đọc
+    bài nào), `cac_du_an` chỉ gồm dự án bên họ; quản trị viên thấy mọi dự án; chi phí (gói Apify)
+    chỉ cộng dự án trong phạm vi."""
+    from test_dashboard_app import MM_XEM, _kho_hai_ben
+    kho = _kho_hai_ben()
+    monkeypatch.setattr(HD, "email_cua", lambda oid: MM_XEM)
+    with pytest.raises(HD.NL.LoiNhap, match="Không có dự án") as e:
+        HD.tra_loi({"du_an": "hapas", "phan": ["tong_quan"]}, kho, open_id="ou_hoi",
+                   bay_gio=BAY_GIO)
+    assert "hapas (" not in str(e.value) and "mm (" in str(e.value)
+    assert kho.goi_bai == [] and kho.goi_bl == []
+    ra = HD.tra_loi({"phan": ["tong_quan"]}, kho, open_id="ou_hoi", bay_gio=BAY_GIO)
+    assert ra["du_an"]["ma"] == "mm" and [d["ma"] for d in ra["cac_du_an"]] == ["mm"]
+    assert ra["vai_tro_nguoi_hoi"] == "xem"
+    assert all(x[0] == "mm" for x in kho.goi_bai)
+    monkeypatch.setattr(HD, "email_cua", lambda oid: QL)
+    ra = HD.tra_loi({"du_an": "hapas", "phan": ["tong_quan"]}, kho, open_id="ou_hoi",
+                    bay_gio=BAY_GIO)
+    assert {d["ma"] for d in ra["cac_du_an"]} == {"hapas", "mm"}
+    assert ra["vai_tro_nguoi_hoi"] == "quan_ly"

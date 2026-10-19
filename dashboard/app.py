@@ -10,10 +10,14 @@ Kiểm thử được mà không cần Postgres hay mạng: `tao_app(kho=…, ca
 nhận bản giả. Chạy thật: `uvicorn --factory dashboard.app:tao_app` (đọc env, xem README.md).
 
 Bảo vệ, đừng bỏ khi sửa:
-  • Mọi trang/API trừ /suc-khoe, /dang-nhap*, /tinh/* đòi phiên đăng nhập; vai trò đọc lại từ
-    `nguoi_xem` MỖI lượt (xoá người xem có hiệu lực ngay, không đợi phiên hết hạn).
-  • Mọi POST sửa dữ liệu: phiên + mã CSRF + vai trò `quan_ly`, kiểm ở PHÍA MÁY CHỦ (nút bị ẩn
-    trên giao diện chỉ là tiện, không phải chốt chặn).
+  • Mọi trang/API trừ /suc-khoe, /dang-nhap*, /tinh/* đòi phiên đăng nhập; quyền đọc lại từ
+    `nguoi_xem` + `quyen` MỖI lượt (xoá người xem có hiệu lực ngay, không đợi phiên hết hạn).
+  • Phân quyền theo BÊN (19/10/2026, `phan_quyen.py`): mỗi dự án thuộc một bên; người xem chỉ
+    thấy dự án của bên mình (dự án ngoài phạm vi = "không có dự án này", không lộ dữ liệu), chỉ
+    sửa được dự án của bên mình làm Quản lý. Dự án / nguồn / đề xuất / lịch của mỗi thao tác sửa
+    luôn đọc lại từ KHO rồi mới kiểm bên — không tin mã dự án trong biểu mẫu.
+  • Mọi POST sửa dữ liệu: phiên + mã CSRF + quyền sửa ĐÚNG dự án đó, kiểm ở PHÍA MÁY CHỦ (nút bị
+    ẩn trên giao diện chỉ là tiện, không phải chốt chặn).
   • Chuyển hướng chỉ tới đường dẫn tương đối (`nhap_lieu.duong_an_toan`).
   • /noi-bo/co-du-lieu chỉ nhận từ 127.0.0.1/::1, không qua proxy, đúng khoá LANG_NGHE_BAO_KHOA.
 """
@@ -57,6 +61,7 @@ from dashboard import dang_nhap as DN
 from dashboard import danh_ba as DB
 from dashboard import lich_quet as LQ
 from dashboard import nhap_lieu as NL
+from dashboard import phan_quyen as PQ
 from dashboard import trang_lich as TL
 from dashboard.kho import BAI_TOI_DA, BL_TOI_DA, LoiDuLieu, LoiKho
 
@@ -414,15 +419,35 @@ def _la_api(request: Request) -> bool:
     return p.startswith(("/api/", "/noi-bo/")) or p == "/su-kien"
 
 
+#: Câu chặn khi người dùng xem được dự án nhưng không sửa được (Chỉ xem ở bên đó).
+CAM_BEN = ("Chỉ quản trị viên hoặc quản lý của bên sở hữu dự án này mới được sửa. Bạn đang có "
+           "quyền chỉ xem ở bên này.")
+
+
+def _dung_nguoi(email: str, q: dict, csrf: str = "", het: float = 0.0) -> dict:
+    """Người đang đăng nhập. `q` = quyền theo bên (`phan_quyen`); `vai_tro` = vai trò GỘP (đầu trang,
+    menu) — trang của MỘT dự án dùng `_theo_du_an` để vai_tro là quyền ở ĐÚNG dự án đó."""
+    vai = PQ.vai_chung(q)
+    return {"email": email, "vai_tro": vai, "csrf": csrf, "het": het, "q": q,
+            "la_quan_tri": PQ.la_quan_tri(q), "co_quan_ly": vai == "quan_ly",
+            "nhan_vai": PQ.nhan_vai(q)}
+
+
+def _theo_du_an(nguoi: dict, du_an: dict | None) -> dict:
+    """Bản `nguoi` cho trang của một dự án: vai_tro = quan_ly chỉ khi sửa được dự án này
+    (template ẩn nút, `an_chi_tiet` che email + lỗi thô theo đúng quyền ở bên của dự án)."""
+    return {**nguoi, "vai_tro": "quan_ly" if PQ.sua_duoc(nguoi["q"], du_an) else "xem"}
+
+
 async def _nguoi(request: Request) -> dict:
     cfg = request.app.state.cau_hinh
     phien = DN.doc_phien(request.cookies.get(DN.COOKIE_PHIEN), cfg.khoa_phien)
     if not phien:
         raise _ChuaDangNhap()
-    vai = await _k(request.app.state.kho.vai_tro, phien["email"])
-    if vai not in NL.VAI_TRO:
+    q = PQ.chuan(await _k(request.app.state.kho.quyen_cua, phien["email"]))
+    if not PQ.co_quyen(q):
         raise _Cam(f"Bạn chưa có quyền xem — nhờ người quản lý thêm email {phien['email']}.")
-    return {"email": phien["email"], "vai_tro": vai, "csrf": phien["csrf"], "het": phien["het"]}
+    return _dung_nguoi(phien["email"], q, phien["csrf"], phien["het"])
 
 
 async def _doc_form(request: Request) -> dict[str, str]:
@@ -450,14 +475,16 @@ def _cung_nguon_goc(request: Request) -> bool:
 
 
 async def _sua(request: Request, *, can_quan_ly: bool = True) -> tuple[dict, dict]:
-    """Chốt chặn của MỌI POST: phiên -> nguồn gốc -> CSRF -> vai trò. -> (người, biểu mẫu)."""
+    """Chốt chặn của MỌI POST: phiên -> nguồn gốc -> CSRF -> có quyền quản lý ở ÍT NHẤT một bên.
+    -> (người, biểu mẫu). Quyền ở ĐÚNG dự án / bên của thao tác: mỗi đường tự kiểm tiếp
+    (`_du_an_sua`, `_thuoc_du_an_sua`, trang Người xem theo `phan_quyen`)."""
     nguoi = await _nguoi(request)
     if not _cung_nguon_goc(request):
         raise _Cam("Yêu cầu không đến từ trang dashboard.")
     form = await _doc_form(request)
     if not DN.csrf_dung(nguoi, form.get("csrf")):
         raise _Cam("Biểu mẫu đã hết hạn hoặc không hợp lệ — tải lại trang rồi thử lại.")
-    if can_quan_ly and nguoi["vai_tro"] != "quan_ly":
+    if can_quan_ly and not nguoi["co_quan_ly"]:
         raise _Cam("Chỉ người quản lý mới được sửa. Bạn đang có quyền chỉ xem.")
     return nguoi, form
 
@@ -774,7 +801,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         if not email:
             return loi("Tài khoản Lark này không cho đọc email — nhờ người quản lý kiểm quyền "
                        "đọc email của ứng dụng dashboard.", 403)
-        if await _k(app.state.kho.vai_tro, email) not in NL.VAI_TRO:
+        if not PQ.co_quyen(PQ.chuan(await _k(app.state.kho.quyen_cua, email))):
             return loi(f"Bạn chưa có quyền xem — nhờ người quản lý thêm email {email}.", 403)
         try:
             await _k(app.state.kho.ghi_dang_nhap, email, nd.get("open_id") or "",
@@ -795,11 +822,46 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                         samesite="lax")
         return r
 
+    # ─── phạm vi theo bên (19/10/2026) ───
+    async def _ds_doc(nguoi: dict) -> list[dict]:
+        """Dự án người này ĐỌC được (quản trị viên: tất cả) — mọi trang chọn dự án từ đây."""
+        return PQ.loc_du_an(nguoi["q"], await _k(app.state.kho.cac_du_an))
+
+    async def _du_an_doc(nguoi: dict, ma: str) -> dict | None:
+        """Dự án `ma` nếu có VÀ người này đọc được; ngoài phạm vi trả None như không có (không lộ
+        dự án của bên khác có tồn tại hay không)."""
+        d = await _k(app.state.kho.doc_du_an, ma) if ma else None
+        return d if PQ.doc_duoc(nguoi["q"], d) else None
+
+    async def _du_an_sua(nguoi: dict, ma: str) -> dict:
+        """Dự án `ma` để SỬA: không có / ngoài phạm vi -> NL.LoiNhap "Không có dự án này." (chuyển
+        về trang kèm lỗi như trước); xem được mà không sửa được -> 403."""
+        d = await _du_an_doc(nguoi, ma)
+        if not d:
+            raise NL.LoiNhap("Không có dự án này.")
+        if not PQ.sua_duoc(nguoi["q"], d):
+            raise _Cam(CAM_BEN)
+        return d
+
+    async def _thuoc_du_an_sua(nguoi: dict, ma: str, khong_co: str) -> dict:
+        """Nguồn / đề xuất / lịch: dự án của nó (đọc từ KHO) phải sửa được. Ngoài phạm vi = 404
+        như không có."""
+        d = await _du_an_doc(nguoi, ma)
+        if not d:
+            raise _Cam(khong_co, 404)
+        if not PQ.sua_duoc(nguoi["q"], d):
+            raise _Cam(CAM_BEN)
+        return d
+
+    async def _cac_don_vi() -> list[dict]:
+        ham = getattr(app.state.kho, "cac_don_vi", None)
+        return list(await _k(ham)) if ham else []
+
     # ─── chỉ số ───
     @app.get("/")
     async def trang_chi_so(request: Request):
         nguoi = await _nguoi(request)
-        ds = await _k(app.state.kho.cac_du_an)
+        ds = await _ds_doc(nguoi)
         q = request.query_params
         du_an = _chon_du_an(ds, q.get("du_an"))
         loi = ""
@@ -826,10 +888,11 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
 
     async def _loc_api(request: Request):
         """Bộ lọc chung của các API số liệu. -> (dự án, từ, đến, bộ lọc `CS.doc_bo_loc`) hoặc
-        JSONResponse lỗi (400 khi giá trị lọc sai)."""
-        await _nguoi(request)
+        JSONResponse lỗi (400 khi giá trị lọc sai; 404 khi không có dự án HOẶC dự án của bên người
+        này không được xem — như nhau, không trả số)."""
+        nguoi = await _nguoi(request)
         q = request.query_params
-        du_an = await _k(app.state.kho.doc_du_an, q.get("du_an") or "")
+        du_an = await _du_an_doc(nguoi, q.get("du_an") or "")
         if not du_an:
             return JSONResponse({"loi": "Không có dự án này."}, status_code=404)
         try:
@@ -1172,8 +1235,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.get("/nguon")
     async def trang_nguon(request: Request):
         nguoi = await _nguoi(request)
-        ds = await _k(app.state.kho.cac_du_an)
+        ds = await _ds_doc(nguoi)
         du_an = _chon_du_an(ds, request.query_params.get("du_an"))
+        # Bên người này được tạo dự án (quản trị viên: mọi bên) — ô chọn bên của "Thêm dự án";
+        # `don_vi_ds` (mọi bên) chỉ cho quản trị viên chuyển dự án sang bên khác.
+        cac_ben = await _cac_don_vi()
+        ten_ben = {b["ma"]: b["ten"] for b in cac_ben}
+        ben_tao = [{"ma": m, "ten": ten_ben.get(m, m)}
+                   for m in PQ.ben_quan_ly(nguoi["q"], list(ten_ben)) if m in ten_ben]
+        tong = nguoi
+        nguoi = _theo_du_an(nguoi, du_an)
         nguon = await _k(app.state.kho.cac_nguon, du_an["ma"]) if du_an else []
         de_xuat = await _k(app.state.kho.cac_de_xuat, du_an["ma"]) if du_an else []
         du_an = an_chi_tiet(nguoi, [du_an], ("sua_boi",))[0] if du_an else None
@@ -1184,6 +1255,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             nguon = CP.gan_co_gian(nguon, await _nhip_dang(du_an["ma"]), du_an)
         nguon = [{**n, "usd_thang": CP.chi_phi_thang_nguon(n)} for n in nguon]
         return _trang(request, "nguon.html", nguoi, "nguon", du_an_ds=ds, du_an=du_an,
+                      ben_tao=ben_tao, ten_ben=ten_ben,
+                      don_vi_ds=cac_ben if tong["la_quan_tri"] else [],
                       nguon=an_chi_tiet(nguoi, nguon, ("them_boi",), ("loi_cuoi",)),
                       de_xuat=an_chi_tiet(nguoi, de_xuat, ("xu_ly_boi",)),
                       chi_phi_js=CP.hang_so_cho_trinh_duyet(),
@@ -1197,6 +1270,18 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         nguoi, form = await _sua(request)
         try:
             d = NL.du_an(form, moi=True)
+            # Bên của dự án mới: quản trị viên chọn bất kỳ bên nào; quản lý chỉ bên mình quản lý
+            # (một bên thì không cần chọn). Bên ngoài danh sách = từ chối, không tạo.
+            cac = [b["ma"] for b in await _cac_don_vi()]
+            duoc = [m for m in PQ.ben_quan_ly(nguoi["q"], cac) if m in cac]
+            ben = str(form.get("don_vi") or "").strip().lower()
+            if not ben and len(duoc) == 1:
+                ben = duoc[0]
+            if not ben:
+                raise NL.LoiNhap("Chọn bên sở hữu dự án.")
+            if ben not in duoc:
+                raise NL.LoiNhap("Bạn không tạo được dự án ở bên này — chọn bên bạn quản lý.")
+            d["don_vi"] = ben
             await _k(app.state.kho.them_du_an, nguoi["email"], d)
         except (NL.LoiNhap, LoiDuLieu) as e:
             return _chuyen(request, "/nguon", "loi", str(e))
@@ -1208,17 +1293,20 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         nguoi, form = await _sua(request)
         ve = _url("/nguon", du_an=ma)
         try:
+            cu = await _du_an_sua(nguoi, ma)
             d = NL.du_an(form, moi=False)
+            # Chuyển dự án sang bên khác: chỉ quản trị viên (đổi bên = đổi ai thấy cả dữ liệu).
+            ben = str(form.get("don_vi") or "").strip().lower()
+            if ben and ben != cu.get("don_vi"):
+                if not nguoi["la_quan_tri"]:
+                    raise _Cam("Chỉ quản trị viên mới chuyển được dự án sang bên khác.")
+                if ben not in {b["ma"] for b in await _cac_don_vi()}:
+                    raise NL.LoiNhap("Không có bên này.")
+                d["don_vi"] = ben
             await _k(app.state.kho.sua_du_an, nguoi["email"], ma, d)
         except (NL.LoiNhap, LoiDuLieu) as e:
             return _chuyen(request, ve, "loi", str(e))
         return _chuyen(request, ve, "ok", "Đã lưu dự án.")
-
-    async def _du_an_phai_co(ma: str) -> dict:
-        d = await _k(app.state.kho.doc_du_an, ma)
-        if not d:
-            raise NL.LoiNhap("Không có dự án này.")
-        return d
 
     @app.post("/nguon/them")
     async def nguon_them(request: Request):
@@ -1226,7 +1314,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         ma = str(form.get("du_an") or "")
         ve = _url("/nguon", du_an=ma)
         try:
-            await _du_an_phai_co(ma)
+            await _du_an_sua(nguoi, ma)
             d = NL.nguon(form)
             await _k(app.state.kho.them_nguon, nguoi["email"], ma, d)
         except (NL.LoiNhap, LoiDuLieu) as e:
@@ -1234,16 +1322,18 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         return _chuyen(request, ve, "ok",
                        f"Đã thêm nguồn {NL.TEN_NEN_TANG[d['nen_tang']]} {d['dinh_danh']}.")
 
-    async def _nguon_phai_co(nid: int) -> dict:
+    async def _nguon_phai_co(nguoi: dict, nid: int) -> dict:
+        """Nguồn để sửa: dự án của nguồn đọc từ kho (không tin biểu mẫu) phải sửa được."""
         n = await _k(app.state.kho.doc_nguon, nid)
         if not n:
             raise _Cam("Không còn nguồn này.", 404)
+        await _thuoc_du_an_sua(nguoi, n["du_an"], "Không còn nguồn này.")
         return n
 
     @app.post("/nguon/{nid}/sua")
     async def nguon_sua(request: Request, nid: int):
         nguoi, form = await _sua(request)
-        n = await _nguon_phai_co(nid)
+        n = await _nguon_phai_co(nguoi, nid)
         ve = _url("/nguon", du_an=n["du_an"])
         try:
             d = NL.nguon(form)
@@ -1255,7 +1345,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/nguon/{nid}/trang-thai")
     async def nguon_trang_thai(request: Request, nid: int):
         nguoi, form = await _sua(request)
-        n = await _nguon_phai_co(nid)
+        n = await _nguon_phai_co(nguoi, nid)
         ve = _url("/nguon", du_an=n["du_an"])
         tt = str(form.get("trang_thai") or "")
         if tt not in ("dang_theo_doi", "tam_dung"):
@@ -1270,7 +1360,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/nguon/{nid}/xoa")
     async def nguon_xoa(request: Request, nid: int):
         nguoi, _ = await _sua(request)
-        n = await _nguon_phai_co(nid)
+        n = await _nguon_phai_co(nguoi, nid)
         ve = _url("/nguon", du_an=n["du_an"])
         try:
             await _k(app.state.kho.xoa_nguon, nguoi["email"], nid)
@@ -1284,6 +1374,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         x = await _k(app.state.kho.doc_de_xuat, did)
         if not x:
             raise _Cam("Không còn đề xuất này.", 404)
+        await _thuoc_du_an_sua(nguoi, x["du_an"], "Không còn đề xuất này.")
         ve = _url("/nguon", du_an=x["du_an"])
         if x["trang_thai"] != "cho":
             return _chuyen(request, ve, "loi", "Đề xuất này đã được xử lý.")
@@ -1302,6 +1393,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         x = await _k(app.state.kho.doc_de_xuat, did)
         if not x:
             raise _Cam("Không còn đề xuất này.", 404)
+        await _thuoc_du_an_sua(nguoi, x["du_an"], "Không còn đề xuất này.")
         ve = _url("/nguon", du_an=x["du_an"])
         try:
             await _k(app.state.kho.tu_choi_de_xuat, nguoi["email"], did)
@@ -1324,7 +1416,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         ve = _url("/nguon", du_an=ma) + "#de-xuat"
         hd = str(form.get("hanh_dong") or "")
         try:
-            await _du_an_phai_co(ma)
+            await _du_an_sua(nguoi, ma)
             if hd not in ("duyet", "tu_choi"):
                 raise NL.LoiNhap("Chọn Duyệt hoặc Từ chối.")
             ids = ds_id(form.get("ids"))
@@ -1388,9 +1480,15 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.get("/ngan-sach")
     async def trang_ngan_sach(request: Request):
         nguoi = await _nguoi(request)
-        ds = await _k(app.state.kho.cac_du_an)
+        # Chỉ dự án của bên người này xem được (19/10/2026). Khối "Gói Apify": số đã dùng / trần /
+        # ngày đặt lại là của CẢ tài khoản Apify dùng chung (chi phí của token chung, chỉ đọc —
+        # chủ dự án chấp nhận cho mọi người xem thấy), còn trần nội bộ + dự báo tới lúc đặt lại chỉ
+        # cộng các dự án trong phạm vi — không lộ ngân sách / chi tiêu từng dự án của bên khác.
+        ds = await _ds_doc(nguoi)
         da_tieu = await _k(app.state.kho.da_tieu_thang)
         du_an = _chon_du_an(ds, request.query_params.get("du_an"))
+        tong_nguoi = nguoi
+        nguoi = _theo_du_an(nguoi, du_an)
         trang = _so_trang(request.query_params.get("trang"))
         luot, tong = (await _k(app.state.kho.cac_luot, du_an["ma"], trang, LUOT_MOI_TRANG)
                       if du_an else ([], 0))
@@ -1462,7 +1560,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                        else (100.0 if db["du_bao_thang"] else 0))})
         goi = CP.goi_ngan_sach(snap, khoi, bay_gio)
         return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi,
-                      dong=an_chi_tiet(nguoi, dong, ("sua_boi",)), du_an=du_an,
+                      goi_mot_phan=not tong_nguoi["la_quan_tri"],
+                      dong=[an_chi_tiet(_theo_du_an(tong_nguoi, x), [x], ("sua_boi",))[0]
+                            for x in dong], du_an=du_an,
                       luot=an_chi_tiet(nguoi, luot, ("ghi_chu", "ghi_chu_dai"), ("loi",)),
                       tong=tong,
                       trang=trang, so_trang=so_trang, thang=bay_gio.strftime("%m/%Y"),
@@ -1473,10 +1573,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     async def ghi_chu_luot(request: Request, luot_id: int):
         """Ghi chú ĐỦ của một lượt (soát 17/10/2026, L5): trang Ngân sách chỉ in phần đầu, bản đủ
         (tới 20.000 ký tự) mở ở đây. Chữ thuần (`text/plain`, nosniff) — không qua HTML nên không
-        cần thoát ký tự. Chỉ quản lý: người xem không thấy ghi chú (`an_chi_tiet`)."""
-        await _chi_quan_ly(request)
+        cần thoát ký tự. Chỉ người SỬA được dự án đó: người chỉ xem không thấy ghi chú
+        (`an_chi_tiet`); dự án ngoài phạm vi = 404 như không có."""
+        nguoi = await _nguoi(request)
         ma = str(request.query_params.get("du_an") or "")
-        gc = await _k(app.state.kho.ghi_chu_luot, ma, luot_id) if ma else None
+        d = await _du_an_doc(nguoi, ma)
+        if d and not PQ.sua_duoc(nguoi["q"], d):
+            raise _Cam("Trang này chỉ dành cho người quản lý.")
+        gc = await _k(app.state.kho.ghi_chu_luot, ma, luot_id) if d else None
         if gc is None:
             raise _Cam("Không có ghi chú của lượt này.", 404)
         return PlainTextResponse(gc)
@@ -1486,7 +1590,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         nguoi, form = await _sua(request)
         ve = _url("/ngan-sach", du_an=ma)
         try:
-            await _du_an_phai_co(ma)
+            await _du_an_sua(nguoi, ma)
             usd = NL.tran_usd(form.get("tran_usd_thang"))
             await _k(app.state.kho.dat_tran_thang, nguoi["email"], ma, usd)
         except (NL.LoiNhap, LoiDuLieu) as e:
@@ -1500,7 +1604,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         nguoi, form = await _sua(request)
         ve = _url("/ngan-sach", du_an=ma)
         try:
-            await _du_an_phai_co(ma)
+            await _du_an_sua(nguoi, ma)
             cu_du_an = await _k(app.state.kho.doc_du_an, ma) or {}
             # Soát 18/10/2026: bấm Lưu từng XOÁ khối `gian` (giãn nhịp) của mọi nền tảng — biểu
             # mẫu dựng lại cả nhóm tu_khoa / binh_luan / do_phu từ ô của nó, nên khoá con biểu mẫu
@@ -1632,7 +1736,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         nguoi, form = await _sua(request)
         ve = _url("/ngan-sach", du_an=ma)
         try:
-            d = await _du_an_phai_co(ma)
+            d = await _du_an_sua(nguoi, ma)
             bat = form.get("tk_bat") == "1"
             so_bai = NL.so_nguyen(form.get("tk_so_bai"), "Số bài mỗi nền tảng", 0)
             await _k(app.state.kho.dat_tim_tu_khoa, nguoi["email"], ma, bat, so_bai)
@@ -1649,7 +1753,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         nguoi, form = await _sua(request)
         ve = _url("/ngan-sach", du_an=ma)
         try:
-            await _du_an_phai_co(ma)
+            await _du_an_sua(nguoi, ma)
             bat = form.get("bl_bat") == "1"
             so_bai = NL.so_nguyen(form.get("bl_so_bai"), "Số bài cào bình luận mỗi lượt", 0)
             moi_bai = NL.so_nguyen(form.get("bl_moi_bai"), "Số bình luận mỗi bài", 0)
@@ -1692,9 +1796,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     async def _trang_lich(request: Request, nguoi: dict, ma: str | None, sua_id: str = "",
                           bm: dict | None = None, loi: str = "", ma_http: int = 200):
         """Trang Lịch quét. `bm` + `loi`: vẽ lại biểu mẫu vừa gửi bị từ chối (không mất chữ)."""
-        ds = await _k(app.state.kho.cac_du_an)
+        ds = await _ds_doc(nguoi)
         du_an = _chon_du_an(ds, ma)
         bay_gio = _bay_gio()
+        nguoi = _theo_du_an(nguoi, du_an)        # quản lý của ĐÚNG bên dự án đang xem
         ql = nguoi["vai_tro"] == "quan_ly"
         ctx: dict = {"du_an_ds": ds, "du_an": du_an, "lich": [], "tong": None, "bm": None,
                      "xt": None, "sua": None, "loi_bm": loi}
@@ -1735,12 +1840,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.get("/api/lich-quet/xem-truoc")
     async def api_lich_xem_truoc(request: Request):
         """10 lần chạy tới + chi phí của biểu mẫu đang gõ (chưa lưu). Chỉ đọc, ai đăng nhập cũng
-        gọi được; tính ở máy chủ bằng đúng hàm Mark dùng (`dashboard/lich_quet.py`)."""
-        await _nguoi(request)
+        gọi được (dự án của bên mình); tính ở máy chủ bằng đúng hàm Mark dùng
+        (`dashboard/lich_quet.py`)."""
+        nguoi = await _nguoi(request)
         q = request.query_params
         if len(str(request.url.query)) > 4000:
             return JSONResponse({"loi": "Yêu cầu quá dài."}, status_code=400)
-        du_an = await _k(app.state.kho.doc_du_an, q.get("du_an") or "")
+        du_an = await _du_an_doc(nguoi, q.get("du_an") or "")
         if not du_an:
             return JSONResponse({"loi": "Không có dự án này."}, status_code=404)
         lid = q.get("lid") or ""
@@ -1756,10 +1862,12 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                      bay_gio, int(lid) if lid.isdigit() and len(lid) < 19
                                      else None, chi))
 
-    async def _lich_phai_co(lid: int) -> dict:
+    async def _lich_phai_co(nguoi: dict, lid: int) -> dict:
+        """Lịch để sửa: dự án của lịch đọc từ kho phải sửa được (ngoài phạm vi = 404)."""
         x = await _k(app.state.kho.doc_lich, lid)
         if not x:
             raise _Cam("Không còn lịch này.", 404)
+        await _thuoc_du_an_sua(nguoi, x["du_an"], "Không còn lịch này.")
         return x
 
     def _cau_lan_dau(d: dict, bay_gio) -> str:
@@ -1774,7 +1882,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         ma = str(form.get("du_an") or "")
         bay_gio = _bay_gio()
         try:
-            await _du_an_phai_co(ma)
+            await _du_an_sua(nguoi, ma)
             d = LQ.chuan_hoa(form, bay_gio)
             d["lan_chay_ke"] = LQ.moc_ke(d["kieu"], d["cau_hinh"], bay_gio) if d["bat"] else None
             lid = await _k(app.state.kho.them_lich, nguoi["email"], ma, d)
@@ -1787,7 +1895,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/lich-quet/{lid}/sua")
     async def lich_sua(request: Request, lid: int):
         nguoi, form = await _sua(request)
-        x = await _lich_phai_co(lid)
+        x = await _lich_phai_co(nguoi, lid)
         bay_gio = _bay_gio()
         try:
             d = LQ.chuan_hoa(form, bay_gio)
@@ -1802,7 +1910,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/lich-quet/{lid}/bat-tat")
     async def lich_bat_tat(request: Request, lid: int):
         nguoi, form = await _sua(request)
-        x = await _lich_phai_co(lid)
+        x = await _lich_phai_co(nguoi, lid)
         ve = _url("/lich-quet", du_an=x["du_an"])
         bat = form.get("bat") == "1"
         bay_gio = _bay_gio()
@@ -1821,7 +1929,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/lich-quet/{lid}/xoa")
     async def lich_xoa(request: Request, lid: int):
         nguoi, _ = await _sua(request)
-        x = await _lich_phai_co(lid)
+        x = await _lich_phai_co(nguoi, lid)
         ve = _url("/lich-quet", du_an=x["du_an"])
         try:
             await _k(app.state.kho.xoa_lich, nguoi["email"], lid)
@@ -1829,19 +1937,65 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             return _chuyen(request, ve, "loi", str(e))
         return _chuyen(request, ve, "ok", f"Đã xoá lịch #{lid} (lượt đã chạy vẫn giữ trong lịch sử).")
 
-    # ─── người xem ───
+    # ─── người xem (19/10/2026: quyền theo bên) ───
     async def _chi_quan_ly(request: Request) -> dict:
+        """Quản trị viên hoặc quản lý của ít nhất một bên; người chỉ xem: 403 như trước."""
         nguoi = await _nguoi(request)
-        if nguoi["vai_tro"] != "quan_ly":
+        if not nguoi["co_quan_ly"]:
             raise _Cam("Trang này chỉ dành cho người quản lý.")
         return nguoi
 
+    def _dong_nguoi_xem(nguoi: dict, x: dict, ben_thay: list[str], ten_ben: dict,
+                        so_quan_tri: int, dang_doc: bool) -> dict:
+        """Một dòng trang Người xem: quyền ở các bên NGƯỜI XEM TRANG được thấy, và các nút họ
+        bấm được (cùng luật `phan_quyen` mà kho kiểm lại trong giao dịch)."""
+        dich = {"la_quan_tri": bool(x.get("la_quan_tri")), "ben": dict(x.get("quyen") or {})}
+        quyen_hien = []
+        for b in sorted(dich["ben"]):
+            if b not in ben_thay:
+                continue
+            try:
+                PQ.kiem_xoa_quyen(nguoi["q"], nguoi["email"], dich, x["email"], b)
+                xoa_duoc = True
+            except PQ.LoiQuyen:
+                xoa_duoc = False
+            quyen_hien.append({"ma": b, "ten": ten_ben.get(b, b.upper()), "vai": dich["ben"][b],
+                               "xoa_duoc": xoa_duoc})
+        cuoi = dich["la_quan_tri"] and so_quan_tri <= 1
+        return {**x, "o": _o_danh_ba(x, dang_doc), "quyen_hien": quyen_hien,
+                "la_quan_tri": dich["la_quan_tri"], "qt_cuoi": cuoi,
+                "xoa_het": nguoi["la_quan_tri"] and not cuoi}
+
     @app.get("/nguoi-xem")
+    async def trang_nguoi_xem_cu(request: Request):
+        """Đường cũ của trang Quản trị (đổi tên 19/10/2026, chủ dự án): link cũ vẫn mở được —
+        308 sang /quan-tri giữ nguyên query. Đòi đăng nhập trước như mọi trang."""
+        await _nguoi(request)
+        q = request.url.query
+        return RedirectResponse("/quan-tri" + (f"?{q}" if q else ""), status_code=308)
+
+    @app.get("/quan-tri")
     async def trang_nguoi_xem(request: Request):
         nguoi = await _chi_quan_ly(request)
+        cac_ben = await _cac_don_vi()
+        ten_ben = {b["ma"]: b["ten"] for b in cac_ben}
+        qt = nguoi["la_quan_tri"]
+        # Bên người này quản lý (quản trị viên: mọi bên) — chỉ thấy người + nhật ký của các bên đó;
+        # quyền của họ ở bên KHÁC không hiện (không lộ ai làm gì ở bên khác).
+        ben_ql = PQ.ben_quan_ly(nguoi["q"], list(ten_ben))
+        loc = str(request.query_params.get("ben") or "")
+        loc = loc if loc in ben_ql else ""
+        ben_thay = [loc] if loc else ben_ql
         ds = await _k(app.state.kho.cac_nguoi_xem)
-        nk = await _k(app.state.kho.nhat_ky, 100)
-        so_ql = sum(1 for x in ds if x["vai_tro"] == "quan_ly")
+        so_qt = sum(1 for x in ds if x.get("la_quan_tri"))
+        ds = [x for x in ds if set(x.get("quyen") or {}) & set(ben_thay)
+              or (qt and not loc and x.get("la_quan_tri"))]
+        du_an = await _k(app.state.kho.cac_du_an)
+        if qt:
+            nk = await _k(app.state.kho.nhat_ky, 100)
+        else:
+            nk = await _k(app.state.kho.nhat_ky, 100,
+                          [d["ma"] for d in du_an if d.get("don_vi") in ben_ql], ben_ql)
         # Danh bạ Lark: trả trang NGAY bằng bản đệm; dòng cũ thì đọc lại NỀN sau khi đã trả
         # (một lượt đọc một lúc cho cả app — mở trang liên tục không bắn Lark liên tục).
         can = _can_doc_danh_ba(ds, datetime.datetime.now(datetime.UTC))
@@ -1852,8 +2006,12 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                  {x["email"]: x["lark_open_id"] for x in ds
                                   if x.get("lark_open_id")})
         dang_doc = _dang_doc_danh_ba(app)
-        r = _trang(request, "nguoi_xem.html", nguoi, "nguoi_xem", so_quan_ly=so_ql,
-                   ds=[{**x, "o": _o_danh_ba(x, dang_doc)} for x in ds],
+        r = _trang(request, "nguoi_xem.html", nguoi, "nguoi_xem", so_quan_tri=so_qt,
+                   ds=[_dong_nguoi_xem(nguoi, x, ben_thay, ten_ben, so_qt, dang_doc) for x in ds],
+                   ben_ql=[{"ma": m, "ten": ten_ben.get(m, m.upper())} for m in ben_ql],
+                   loc_ben=loc,
+                   cac_ben=([{**b, "du_an": [d for d in du_an if d.get("don_vi") == b["ma"]]}
+                             for b in cac_ben] if qt else []),
                    nhat_ky=[{**x, "chi_tiet_chu": json.dumps(x.get("chi_tiet") or {},
                                                              ensure_ascii=False,
                                                              default=str)[:400]}
@@ -1861,61 +2019,119 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         r.background = nen
         return r
 
-    async def _la_quan_ly_cuoi(email: str) -> bool:
-        """Kiểm ở tầng app cho câu báo dễ hiểu; kho kiểm lại trong giao dịch có khoá bảng."""
-        ds = await _k(app.state.kho.cac_nguoi_xem)
-        ql = [x["email"] for x in ds if x["vai_tro"] == "quan_ly"]
-        return ql == [email]
-
     @app.post("/nguoi-xem/them")
     async def nguoi_xem_them(request: Request):
+        """Thêm / đổi quyền một người ở MỘT bên; quản trị viên tích thêm "Quản trị viên". Luật
+        (quản lý chỉ thêm người Chỉ xem của bên mình…) do kho kiểm trong giao dịch — câu lỗi của
+        kho hiện thẳng cho người dùng."""
         nguoi, form = await _sua(request)
+        kho = app.state.kho
         try:
             e = NL.email(form.get("email"))
-            v = NL.vai_tro(form.get("vai_tro"))
-            if v != "quan_ly" and await _la_quan_ly_cuoi(e):
-                raise NL.LoiNhap("Không hạ quyền người quản lý cuối cùng — thêm quản lý khác trước.")
-            await _k(app.state.kho.luu_nguoi_xem, nguoi["email"], e, v)
+            ben = str(form.get("don_vi") or "").strip().lower()
+            lam_qt = form.get("quan_tri") == "1"
+            if lam_qt and not nguoi["la_quan_tri"]:
+                raise NL.LoiNhap("Chỉ quản trị viên mới cấp quyền quản trị viên.")
+            if not ben and not lam_qt:
+                duoc = PQ.ben_quan_ly(nguoi["q"], [b["ma"] for b in await _cac_don_vi()])
+                if len(duoc) != 1:
+                    raise NL.LoiNhap("Chọn bên cho người này.")
+                ben = duoc[0]
+            phan = []
+            if ben:
+                v = NL.vai_tro(form.get("vai_tro"))
+                await _k(kho.luu_quyen, nguoi["email"], e, ben, v)
+                phan.append(f"{ben.upper()}: {NL.VAI_TRO[v]}")
+            if lam_qt:
+                await _k(kho.dat_quan_tri, nguoi["email"], e, True)
+                phan.append("Quản trị viên")
         except (NL.LoiNhap, LoiDuLieu) as ex:
-            return _chuyen(request, "/nguoi-xem", "loi", str(ex))
+            return _chuyen(request, "/quan-tri", "loi", str(ex))
         # Kiểm email với danh bạ Lark: CHỈ cảnh báo, không chặn (danh bạ có thể chậm/thiếu quyền).
-        tin = f"Đã lưu {e} ({NL.VAI_TRO[v]})"
+        tin = f"Đã lưu {e} ({' · '.join(phan)})"
         # Nhanh: chỉ tra theo email (không dò cả danh bạ). Lark không khớp enterprise_email nên
         # "khong_co" ở đây CHƯA chắc: không ghi, lượt đọc nền khi mở trang sẽ dò kỹ.
         kq = (await doc_danh_ba(app, [e], DANH_BA_THEM_GIAY, quet=False) or {}).get(e)
         if not kq:
-            return _chuyen(request, "/nguoi-xem", "ok",
+            return _chuyen(request, "/quan-tri", "ok",
                            tin + ". Chưa kiểm được với danh bạ Lark — xem cột Trạng thái sau.")
         if kq["trang_thai"] == "khong_co":
-            return _chuyen(request, "/nguoi-xem", "canh",
+            return _chuyen(request, "/quan-tri", "canh",
                            f"{tin}, nhưng Lark chưa khớp email này. Email công ty: dashboard "
                            "đang dò cả danh bạ — xem cột Trạng thái sau ít giây; người này "
                            "đăng nhập một lần là nhận diện chắc chắn.")
         if kq["trang_thai"] != "hoat_dong":
-            return _chuyen(request, "/nguoi-xem", "canh",
+            return _chuyen(request, "/quan-tri", "canh",
                            f"{tin}, nhưng trên Lark: {DB.TRANG_THAI[kq['trang_thai']]} — "
                            "kiểm lại email, người này chưa đăng nhập được.")
         # 18/10/2026: trang Người xem bỏ chức danh (chủ dự án) — câu báo chỉ còn tên Lark.
         ai = kq.get("ten") or ""
-        return _chuyen(request, "/nguoi-xem", "ok",
+        return _chuyen(request, "/quan-tri", "ok",
                        tin + (f" — {ai}" if ai else "") + ", tài khoản Lark đang hoạt động.")
 
-    @app.post("/nguoi-xem/xoa")
-    async def nguoi_xem_xoa(request: Request):
+    @app.post("/nguoi-xem/quan-tri")
+    async def nguoi_xem_quan_tri(request: Request):
+        """Bật / bỏ cờ quản trị viên (chỉ quản trị viên; không bỏ người cuối — kho kiểm)."""
         nguoi, form = await _sua(request)
         try:
             e = NL.email(form.get("email"))
-            if await _la_quan_ly_cuoi(e):
-                raise NL.LoiNhap("Không xoá được người quản lý cuối cùng — thêm quản lý khác trước.")
-            await _k(app.state.kho.xoa_nguoi_xem, nguoi["email"], e)
+            bat = form.get("bat") == "1"
+            het = await _k(app.state.kho.dat_quan_tri, nguoi["email"], e, bat)
         except (NL.LoiNhap, LoiDuLieu) as ex:
-            return _chuyen(request, "/nguoi-xem", "loi", str(ex))
-        return _chuyen(request, "/nguoi-xem", "ok", f"Đã xoá {e} khỏi danh sách người xem.")
+            return _chuyen(request, "/quan-tri", "loi", str(ex))
+        if bat:
+            return _chuyen(request, "/quan-tri", "ok", f"Đã cấp quyền quản trị viên cho {e}.")
+        return _chuyen(request, "/quan-tri", "ok",
+                       f"Đã bỏ quyền quản trị viên của {e}"
+                       + (" — không còn quyền ở bên nào nên đã xoá khỏi danh sách." if het
+                          else "."))
 
-    # ─── BigQuery ───
+    @app.post("/nguoi-xem/xoa")
+    async def nguoi_xem_xoa(request: Request):
+        """Có `don_vi`: bỏ quyền ở MỘT bên (bên khác giữ). Không có: xoá hẳn người đó (chỉ quản trị
+        viên). Luật + "còn ≥ 1 quản trị viên" kho kiểm trong giao dịch có khoá bảng."""
+        nguoi, form = await _sua(request)
+        try:
+            e = NL.email(form.get("email"))
+            ben = str(form.get("don_vi") or "").strip().lower()
+            if ben:
+                het = await _k(app.state.kho.xoa_quyen, nguoi["email"], e, ben)
+                tin = (f"Đã bỏ quyền của {e} ở bên {ben.upper()}"
+                       + (" — không còn quyền ở bên nào nên đã xoá khỏi danh sách." if het
+                          else "."))
+            else:
+                await _k(app.state.kho.xoa_nguoi_xem, nguoi["email"], e)
+                tin = f"Đã xoá {e} khỏi danh sách người xem."
+        except (NL.LoiNhap, LoiDuLieu) as ex:
+            return _chuyen(request, "/quan-tri", "loi", str(ex))
+        return _chuyen(request, "/quan-tri", "ok", tin)
+
+    @app.post("/don-vi/them")
+    async def don_vi_them(request: Request):
+        """Tạo bên mới (chỉ quản trị viên — kho kiểm lại trong giao dịch)."""
+        nguoi, form = await _sua(request)
+        try:
+            if not nguoi["la_quan_tri"]:
+                raise NL.LoiNhap("Chỉ quản trị viên mới tạo được bên.")
+            ma = NL.ma_don_vi(form.get("ma"))
+            ten = NL.sach(form.get("ten"), 200)
+            if not ten:
+                raise NL.LoiNhap("Chưa nhập tên bên.")
+            await _k(app.state.kho.them_don_vi, nguoi["email"], ma, ten)
+        except (NL.LoiNhap, LoiDuLieu) as ex:
+            return _chuyen(request, "/quan-tri", "loi", str(ex))
+        return _chuyen(request, "/quan-tri", "ok", f"Đã tạo bên {ten} (mã {ma}).")
+
+    # ─── BigQuery (19/10/2026: chỉ quản trị viên — trạng thái gồm mọi bảng của mọi bên) ───
+    async def _chi_quan_tri(request: Request) -> dict:
+        nguoi = await _nguoi(request)
+        if not nguoi["la_quan_tri"]:
+            raise _Cam("Trang này chỉ dành cho quản trị viên.")
+        return nguoi
+
     @app.get("/bigquery")
     async def trang_bigquery(request: Request):
-        nguoi = await _nguoi(request)
+        nguoi = await _chi_quan_tri(request)
         loi = ""
         try:
             tt = await _k(app.state.dong_bo.trang_thai)
@@ -1930,6 +2146,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/bigquery/dong-bo")
     async def bigquery_dong_bo(request: Request):
         nguoi, _ = await _sua(request)
+        if not nguoi["la_quan_tri"]:
+            raise _Cam("Chỉ quản trị viên mới đồng bộ BigQuery.")
         if not app.state.dong_bo.da_bat():
             return _chuyen(request, "/bigquery", "loi",
                            "Đồng bộ chưa bật (thiếu BQ_DATASET trên máy chủ dashboard).")
@@ -1954,6 +2172,19 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         toi_da = app.state.sse_toi_da_su_kien
         kiem_quyen = float(app.state.sse_kiem_quyen_giay)
         het = float(nguoi["het"])
+        quyen = [nguoi["q"]]          # đọc lại mỗi `kiem_quyen` giây (bị bỏ bên thì thôi nhận)
+
+        async def duoc_nhan(du_lieu) -> bool:
+            """Chỉ đẩy sự kiện của dự án người này đọc được (19/10/2026): bên của dự án đọc lại từ
+            kho mỗi sự kiện (dự án vừa chuyển bên thì người bên cũ thôi nhận ngay)."""
+            ma = du_lieu.get("du_an") if isinstance(du_lieu, dict) else None
+            if not ma:
+                return True
+            try:
+                d = await _k(app.state.kho.doc_du_an, str(ma))
+            except LoiKho:
+                return False
+            return PQ.doc_duoc(quyen[0], d)
 
         async def dong():
             try:
@@ -1970,7 +2201,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     if time.monotonic() - lan_kiem >= kiem_quyen:
                         # Luồng mở hàng giờ: bị xoá khỏi người xem thì đóng, không đợi hết phiên.
                         lan_kiem = time.monotonic()
-                        if await _k(app.state.kho.vai_tro, nguoi["email"]) not in NL.VAI_TRO:
+                        quyen[0] = PQ.chuan(await _k(app.state.kho.quyen_cua, nguoi["email"]))
+                        if not PQ.co_quyen(quyen[0]):
                             yield _sse("het-quyen", {})
                             break
                     cho = max(0.05, min(15.0, kiem_quyen - (time.monotonic() - lan_kiem)))
@@ -1980,6 +2212,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                         if await request.is_disconnected():
                             break
                         yield ": giu-ket-noi\n\n"
+                        continue
+                    if not await duoc_nhan(du_lieu):
                         continue
                     yield _sse(ten, du_lieu)
                     n += 1
