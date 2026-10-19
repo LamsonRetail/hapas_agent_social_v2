@@ -132,13 +132,15 @@ def la_tien(ten: str) -> bool:
 
 
 def xem_tien(q: dict | None, don_vi: str | None) -> bool:
-    """Người có quyền `q` thấy số tiền của bên `don_vi` không. Bên None (tài khoản chưa gán bên)
+    """Người có quyền `q` thấy số tiền của bên `don_vi` không. 20/10/2026 chủ dự án: mọi người có
+    quyền ở bên (Quản lý hoặc Chỉ xem) đều được biết số tiền của bên mình — nhưng chỉ qua hỏi đáp
+    Mark (trang Quảng cáo chỉ quản trị viên, `thay_trang_qc`). Bên None (tài khoản chưa gán bên)
     hoặc "mọi bên": chỉ quản trị viên."""
     if PQ.la_quan_tri(q):
         return True
     if not don_vi or not PQ.co_quyen(q):
         return False
-    return q["ben"].get(don_vi) == "quan_ly"
+    return q["ben"].get(don_vi) in ("quan_ly", "xem")
 
 
 def loc_tien(x, co_tien: bool):
@@ -162,11 +164,10 @@ def ben_doc_qc(q: dict | None, cac_tk: list[dict]) -> list[str]:
 
 
 def thay_trang_qc(q: dict | None, ben_co_tk: set[str] | list[str]) -> bool:
-    """Mục "Quảng cáo TikTok" trên thanh điều hướng: quản trị viên luôn thấy; người khác khi có
-    quyền ở ít nhất một bên đã có tài khoản quảng cáo."""
-    if PQ.la_quan_tri(q):
-        return True
-    return bool(set((q or {}).get("ben") or {}) & set(ben_co_tk or ()))
+    """Trang/mục "Quảng cáo TikTok" + /api/qc: CHỈ quản trị viên (20/10/2026 chủ dự án: người
+    khác không xem dashboard quảng cáo, chỉ hỏi Mark và nhận câu trả lời bằng chữ).
+    `ben_co_tk` giữ trong chữ ký cho nơi gọi cũ."""
+    return PQ.la_quan_tri(q)
 
 
 TAT_CA = "tat_ca"           # mọi bên (chỉ quản trị viên)

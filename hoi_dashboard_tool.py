@@ -99,8 +99,8 @@ PHAN = {
     "bo_loc": "giá trị lọc đang có dữ liệu (nền tảng, loại nguồn, chủ đề, khoá nguồn…)",
     "quang_cao": "quảng cáo TikTok (TikTok Ads) của các bên người hỏi được xem: hiển thị, view "
                  "video, engaged view, tương tác, follow, vào hồ sơ trong kỳ + % so kỳ trước, top "
-                 "chiến dịch / quảng cáo; chi tiêu, doanh thu Shop, ROAS CHỈ cho quản trị viên và "
-                 "quản lý của bên (`xem_tien`)",
+                 "chiến dịch / quảng cáo; chi tiêu, doanh thu Shop, ROAS cho mọi người có quyền ở bên "
+                 "(`xem_tien`); trả lời bằng chữ, không biểu đồ (trang Quảng cáo chỉ quản trị viên)",
 }
 PHAN_MAC_DINH = ("tong_quan", "sac_thai", "chu_de", "tu_khoa", "bai")
 #: Phần cần dòng bài/bình luận (tính `tinh_chi_so`); phần còn lại chỉ đọc cấu hình/lượt quét.
@@ -842,8 +842,8 @@ def _qc_gon(r: dict, cap: str) -> dict:
 
 def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, top: int) -> dict:
     """Phần `quang_cao`: số TikTok Ads của từng bên người hỏi ĐỌC được (cùng luật trang
-    /quang-cao: `quang_cao.ben_doc_qc`, `tk_trong_pham_vi`), tiền chỉ khi `xem_tien` (quản trị
-    viên / quản lý của bên) — lọc bằng `quang_cao.loc_tien` TRƯỚC khi đưa model."""
+    /quang-cao: `quang_cao.ben_doc_qc`, `tk_trong_pham_vi`), tiền khi `xem_tien` (từ 20/10/2026:
+    mọi người có quyền ở bên) — lọc bằng `quang_cao.loc_tien` TRƯỚC khi đưa model."""
     try:
         cac_tk = list(kho.qc_cac_tk())
     except Exception as e:  # noqa: BLE001 — bảng chưa tạo / chưa cấp quyền: nói rõ, không đoán
@@ -878,14 +878,18 @@ def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, t
              "xem_tien": co_tien, "kpi": {k: v for k, v in kpi.items() if k in QC.KPI_QC},
              "doi_pt": {k: QC.doi_pt(kpi.get(k), truoc.get(k)) for k in QC.KPI_QC},
              "top_chien_dich": top_cap("campaign"), "top_quang_cao": top_cap("ad"),
-             "so_den_ngay": _gio(moi.get("ngay_cuoi")),
-             "link": f"{DASHBOARD_URL}/quang-cao?" + urllib.parse.urlencode(
-                 {"ben": b, "tu": tu.isoformat(), "den": den.isoformat()})}
+             "so_den_ngay": _gio(moi.get("ngay_cuoi"))}
+        if PQ.la_quan_tri(q):
+            # 20/10/2026: trang Quảng cáo chỉ quản trị viên — người khác không nhận link.
+            x["link"] = f"{DASHBOARD_URL}/quang-cao?" + urllib.parse.urlencode(
+                {"ben": b, "tu": tu.isoformat(), "den": den.isoformat()})
         ra.append(QC.loc_tien(x, co_tien))
     return {"co": True, "ky_truoc": {"tu": t0.isoformat(), "den": t1.isoformat()}, "ben": ra,
             "ghi_chu": "Reach là cộng từng ngày (đếm trùng người). Bên có `xem_tien` false: người "
                        "hỏi KHÔNG được xem chi tiêu/doanh thu/ROAS — không nêu, không ước, không "
-                       "suy ra số tiền."}
+                       "suy ra số tiền. Chủ dự án 20/10/2026: số quảng cáo chỉ trả lời BẰNG CHỮ "
+                       "(câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh/sheet/tệp, "
+                       "không gửi link trang Quảng cáo khi không có `link`."}
 
 
 # ───────────────────────────── tool ─────────────────────────────

@@ -1005,43 +1005,36 @@ def _co_so(app_kq):
 Q = "tu=2026-10-12&den=2026-10-18"
 
 
-def test_api_qc_chi_xem_khong_co_truong_tien():
+def test_trang_va_api_quang_cao_chi_quan_tri_vien():
+    """20/10/2026 chủ dự án: trang Quảng cáo + /api/qc chỉ quản trị viên; người khác (kể cả quản
+    lý của bên) chỉ hỏi Mark — trang và API như không có (404)."""
     _app, c, _kho, _kho_qc, _tt, _dv = _co_so(_tao_app())
-    dang_nhap(c, XEM)
-    r = c.get(f"/api/qc?{Q}")
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert d["ben"] == "hapas" and [b["ma"] for b in d["cac_ben"]] == ["hapas"]
-    assert d["xem_tien"] is False
-    assert [t["advertiser_id"] for t in d["tai_khoan"]] == [HAPAS_KOC]
-    tien = {k for k in _khoa_lap(d) if QC.la_tien(k)}
-    assert tien == set(), tien
-    assert d["kpi"]["hien_thi"] > 0 and "chi" not in d["kpi"] and "roas_shop" not in d["kpi"]
-    assert all("chi" not in x for x in d["theo_ngay"] + d["campaign"] + d["ad"])
-    assert c.get(f"/api/qc?{Q}&sap=chi").json()["sap"] == "hien_thi"
-    # Bên khác / tài khoản bên khác / chưa gán: như không có.
-    assert c.get(f"/api/qc?{Q}&ben=matemade").status_code == 404
-    assert c.get(f"/api/qc?{Q}&tk={MM_MKT}").status_code == 404
-    assert c.get(f"/api/qc?{Q}&ben=chua_gan").status_code == 404
-    assert c.get(f"/api/qc?{Q}&ben=tat_ca").status_code == 404
-    t = c.get(f"/quang-cao?{Q}").text
-    assert "MATEMADE MKT" not in t and "Chi tiêu" not in t and "ROAS" not in t
-    assert "Hiển thị" in t and "HAPAS - KOC" in t
-
-
-def test_api_qc_quan_ly_cua_ben_thay_tien_ben_minh():
-    _app, c, _kho, _kho_qc, _tt, _dv = _co_so(_tao_app())
-    dang_nhap(c, HP_QL)
+    for ai in (XEM, HP_QL, MM_XEM, MM_QL):
+        dang_nhap(c, ai)
+        assert c.get(f"/api/qc?{Q}").status_code == 404, ai
+        assert c.get(f"/quang-cao?{Q}").status_code == 404, ai
+        assert c.get(f"/api/qc?{Q}&ben=hapas").status_code == 404, ai
+    dang_nhap(c, QL)
     d = c.get(f"/api/qc?{Q}").json()
     assert d["xem_tien"] is True and d["kpi"]["chi"] > 0
     assert d["kpi"]["roas_shop"] == round(d["kpi"]["gia_tri_mua_shop"] / d["kpi"]["chi"], 2)
-    assert c.get(f"/api/qc?{Q}&ben=matemade").status_code == 404
-    dang_nhap(c, MM_XEM)
-    d = c.get(f"/api/qc?{Q}").json()
-    assert d["ben"] == "matemade" and d["xem_tien"] is False
-    assert {t["advertiser_id"] for t in d["tai_khoan"]} == {MM_MKT, MM_2}
-    dang_nhap(c, MM_QL)
-    assert c.get(f"/api/qc?{Q}").json()["xem_tien"] is True
+    assert c.get(f"/api/qc?{Q}&ben=tat_ca").status_code == 200
+    t = c.get(f"/quang-cao?{Q}").text
+    assert "Hiển thị" in t and "HAPAS - KOC" in t
+
+
+def test_xem_tien_moi_vai_trong_ben_chi_ben_minh():
+    """20/10/2026: Quản lý và Chỉ xem đều được biết tiền của bên mình (qua Mark); bên khác,
+    tài khoản chưa gán bên, "mọi bên": chỉ quản trị viên."""
+    q_xem = {"la_quan_tri": False, "ben": {"hapas": "xem"}}
+    q_ql = {"la_quan_tri": False, "ben": {"matemade": "quan_ly"}}
+    q_qt = {"la_quan_tri": True, "ben": {}}
+    assert QC.xem_tien(q_xem, "hapas") is True and QC.xem_tien(q_ql, "matemade") is True
+    assert QC.xem_tien(q_xem, "matemade") is False and QC.xem_tien(q_ql, "hapas") is False
+    assert QC.xem_tien(q_xem, None) is False and QC.xem_tien(None, "hapas") is False
+    assert QC.xem_tien(q_qt, None) is True and QC.xem_tien(q_qt, "matemade") is True
+    assert QC.thay_trang_qc(q_xem, {"hapas"}) is False and QC.thay_trang_qc(q_ql, {"matemade"}) is False
+    assert QC.thay_trang_qc(q_qt, set()) is True
 
 
 def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
@@ -1059,15 +1052,12 @@ def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
     assert c.get("/api/qc?tu=2025-01-01&den=2026-10-18").status_code == 400
 
 
-def test_muc_dieu_huong_quang_cao_theo_ben():
-    _app, c, kho, _kho_qc, _tt, _dv = _co_so(_tao_app())
-    kho.quyen["chi.ben.moi@hapas.vn"] = {"ben-moi": "xem"}
-    kho.nguoi["chi.ben.moi@hapas.vn"] = "xem"
-    for ai, thay in ((QL, True), (XEM, True), (MM_XEM, True), ("chi.ben.moi@hapas.vn", False)):
+def test_muc_dieu_huong_quang_cao_chi_quan_tri():
+    _app, c, _kho, _kho_qc, _tt, _dv = _co_so(_tao_app())
+    for ai, thay in ((QL, True), (XEM, False), (HP_QL, False), (MM_XEM, False)):
         dang_nhap(c, ai)
         assert ('href="/quang-cao"' in c.get("/nguon").text) is thay, ai
         assert (c.get("/quang-cao").status_code == 200) is thay, ai
-    assert c.get("/api/qc").status_code == 404
 
 
 def test_trang_va_api_khong_bao_gio_co_token():
@@ -1146,9 +1136,10 @@ def test_mark_quang_cao_theo_ben_va_tien(monkeypatch):
     monkeypatch.setattr(HD, "email_cua", lambda oid: XEM)
     ra = HD.tra_loi(args, KhoMarkGia(), open_id="ou_hoi", bay_gio=bay)
     qc = ra["phan"]["quang_cao"]
-    assert [b["ben"] for b in qc["ben"]] == ["hapas"] and qc["ben"][0]["xem_tien"] is False
-    assert not {k for k in _khoa_lap(qc) if QC.la_tien(k)}
-    assert qc["ben"][0]["kpi"]["hien_thi"] > 0 and "du_an" not in ra
+    # 20/10/2026: Chỉ xem cũng được biết tiền của bên mình — nhưng chỉ bằng chữ, không link trang.
+    assert [b["ben"] for b in qc["ben"]] == ["hapas"] and qc["ben"][0]["xem_tien"] is True
+    assert qc["ben"][0]["kpi"]["chi"] > 0 and qc["ben"][0]["kpi"]["hien_thi"] > 0
+    assert "link" not in qc["ben"][0] and "BẰNG CHỮ" in qc["ghi_chu"] and "du_an" not in ra
     ra = HD.tra_loi({**args, "ben": "matemade"}, KhoMarkGia(), open_id="ou_hoi", bay_gio=bay)
     assert ra["phan"]["quang_cao"]["co"] is False
     monkeypatch.setattr(HD, "email_cua", lambda oid: HP_QL)
@@ -1158,6 +1149,7 @@ def test_mark_quang_cao_theo_ben_va_tien(monkeypatch):
     monkeypatch.setattr(HD, "email_cua", lambda oid: QL)
     b = HD.tra_loi(args, KhoMarkGia(), open_id="ou_hoi", bay_gio=bay)["phan"]["quang_cao"]["ben"]
     assert [x["ben"] for x in b] == ["hapas", "matemade"] and all(x["xem_tien"] for x in b)
+    assert all(x["link"].startswith(HD.DASHBOARD_URL + "/quang-cao?") for x in b)
     # Cùng tool, phần khác + quang_cao: vẫn qua dự án như cũ.
     ra = HD.tra_loi({**args, "phan": ["tong_quan", "quang_cao"]}, KhoMarkGia(),
                     open_id="ou_hoi", bay_gio=bay)
