@@ -680,7 +680,14 @@ def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON, sap: str = "thao_luan")
     """Top `toi_da` nguồn MỖI nền tảng theo `sap` (`SAP_NGUON`; mặc định thảo luận, hoà thì số
     bài, rồi lượt xem). Nền tảng xếp theo tổng thảo luận giảm dần.
     -> [{nen_tang, ten_nen_tang, so_nguon, nguon: [...]}]."""
-    thu_tu = SAP_NGUON[sap]
+    SAP_NGUON[sap]                          # cách xếp lạ: KeyError trước khi gom
+    return top_nguon_moi_cach(rows, toi_da, (sap,))[sap]
+
+
+def top_nguon_moi_cach(rows: list[dict], toi_da: int = TOP_NGUON,
+                       cach: tuple = tuple(SAP_NGUON)) -> dict[str, list[dict]]:
+    """Như `top_nguon` cho MỌI cách xếp trong `cach` — gom nguồn MỘT lần, xếp mỗi cách một lần.
+    /api/chi-so nhớ cả ba nên đổi ô "Xếp theo" không tính lại cả trang. -> {sap: [...]}."""
     gom: dict[tuple, dict] = {}
     for r in rows:
         k = (r.get("nen_tang") or "?", _khoa_nguon(r))
@@ -703,12 +710,16 @@ def top_nguon(rows: list[dict], toi_da: int = TOP_NGUON, sap: str = "thao_luan")
     for (p, _), g in gom.items():
         theo[p].append(g)
     tong = {p: sum(g["thao_luan"] for g in ds) for p, ds in theo.items()}
-    ra = []
-    for p in sorted(theo, key=lambda p: (-tong[p], p)):
-        ds = sorted(theo[p], key=lambda g: (*(-(g[k] or 0) for k in thu_tu), g["ten"]))
-        ra.append({"nen_tang": p, "ten_nen_tang": TEN_NEN_TANG.get(p, p),
-                   "so_nguon": len(ds), "nguon": ds[:toi_da]})
-    return ra
+    thu_tu_nt = sorted(theo, key=lambda p: (-tong[p], p))
+
+    def xep(thu_tu: tuple) -> list[dict]:
+        ra = []
+        for p in thu_tu_nt:
+            ds = sorted(theo[p], key=lambda g: (*(-(g[k] or 0) for k in thu_tu), g["ten"]))
+            ra.append({"nen_tang": p, "ten_nen_tang": TEN_NEN_TANG.get(p, p),
+                       "so_nguon": len(ds), "nguon": ds[:toi_da]})
+        return ra
+    return {s: xep(SAP_NGUON[s]) for s in cach}
 
 
 def khoa_nguon_chu(r: dict) -> str:
@@ -1097,13 +1108,22 @@ def tu_khoa(rows: list[dict], tu_khoa_du_an: list[str] | tuple = (),
 
 
 # ───────────────────────── gộp ─────────────────────────
+def _top_nguon_tong_hop(rows: list[dict], sap: str, moi_cach: bool) -> dict:
+    SAP_NGUON[sap]
+    if not moi_cach:
+        return {"top_nguon": top_nguon(rows, sap=sap), "sap_nguon": sap}
+    theo = top_nguon_moi_cach(rows)
+    return {"top_nguon": theo[sap], "sap_nguon": sap, "top_nguon_theo": theo}
+
+
 def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
              tu_khoa_du_an: list[str] | tuple = (), nen_tang: str | None = None,
              loai_nguon: str | None = None, hom_nay: datetime.date | None = None,
-             bo_loc=None, sap_nguon: str = "thao_luan") -> dict:
+             bo_loc=None, sap_nguon: str = "thao_luan", moi_cach_xep: bool = False) -> dict:
     """Mọi khối của trang Chỉ số. `rows` gồm bài của CẢ kỳ này lẫn kỳ trước (kho đọc một lần
     từ đầu kỳ trước); hàm tự chia. `bo_loc` (bộ lọc chung) áp cho CẢ hai kỳ — so sánh cùng một
-    tập. `sap_nguon`: cách xếp bảng Nguồn nổi bật (`SAP_NGUON`). -> dict thuần JSON (ngày ISO)."""
+    tập. `sap_nguon`: cách xếp bảng Nguồn nổi bật (`SAP_NGUON`); `moi_cach_xep`: thêm
+    `top_nguon_theo` = {sap: bảng} cho mọi cách (bộ nhớ đệm của /api/chi-so). -> dict thuần JSON."""
     hom_nay = hom_nay or datetime.datetime.now(VN).date()
     f = bien_dich(_gop(bo_loc, nen_tang, loai_nguon))
     rows = loc_bai(rows, f)
@@ -1127,7 +1147,7 @@ def tong_hop(rows: list[dict], tu: datetime.date, den: datetime.date, *,
         "sac_thai": sac_thai(nay), "sac_thai_chu_de": sac_thai_chu_de(nay),
         "sac_thai_nen_tang": sac_thai_nen_tang([r for r in nay if not la_kenh_nha(r)]),
         "nen_tang": phan_bo_nen_tang(nay), "loai_nguon": phan_bo_loai(nay),
-        "top_nguon": top_nguon(nay, sap=sap_nguon), "sap_nguon": sap_nguon,
+        **_top_nguon_tong_hop(nay, sap_nguon, moi_cach_xep),
         "tu_khoa": tu_khoa(nay, tu_khoa_du_an),
         "top_bai": top_bai(nay),
     }
@@ -1143,7 +1163,11 @@ SAC_BL = (TC, TI, TL)
 
 def _khop(r: dict, ngay: datetime.date | None, *, kenh_nha: bool, ngay_tu=None, ngay_den=None,
           sac_thai=None, chu_de=None, nen_tang=None, loai_nguon=None, nguon=None,
-          cum=None) -> bool:
+          cum=None, ngoai_nha=False) -> bool:
+    # ngoai_nha (19/10/2026): bỏ bài kênh nhà — "Chi tiết" của hàng Sắc thái theo nền tảng đếm
+    # đúng tập vòng sắc thái (không kênh nhà) nên danh sách phải khớp con số của hàng.
+    if ngoai_nha and kenh_nha:
+        return False
     if ngay_tu and (ngay is None or ngay < ngay_tu):
         return False
     if ngay_den and (ngay is None or ngay > ngay_den):

@@ -1009,6 +1009,11 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 if len(v) > dai:
                     raise NL.LoiNhap("Điều kiện quá dài.")
                 dk[ra] = v
+        # ct_ngoai_nha=1: chỉ bài ngoài Internal channel (hàng "Sắc thái theo nền tảng").
+        if q.get("ct_ngoai_nha"):
+            if q.get("ct_ngoai_nha") != "1":
+                raise NL.LoiNhap("Điều kiện ngoài Internal channel không hợp lệ.")
+            dk["ngoai_nha"] = True
         return dk
 
     def _ban():
@@ -1149,6 +1154,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             return x
         du_an, tu, den, bo_loc = x
         # Cách xếp bảng Nguồn nổi bật (19/10/2026): xếp ở máy chủ, trước khi cắt top mỗi nền tảng.
+        # Bộ nhớ đệm giữ bảng của CẢ ba cách xếp (`top_nguon_theo`) — đổi cách xếp không tính lại
+        # cả trang, nên `sap_nguon` không nằm trong khoá nhớ.
         sap_nguon = request.query_params.get("sap_nguon") or "thao_luan"
         if sap_nguon not in CS.SAP_NGUON:
             return JSONResponse({"loi": "Cách xếp nguồn không hợp lệ."}, status_code=400)
@@ -1158,7 +1165,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         # Dòng thô (chưa lọc) nhớ riêng theo khoảng (`_kq_nho`): đổi bộ lọc không đọc lại kho.
         moc = await _moc_luot()
         khoa = (du_an["ma"], tu, den, CS.khoa_bo_loc(bo_loc), hom_nay,
-                tuple(du_an["tu_khoa"] or []), sap_nguon, *moc)
+                tuple(du_an["tu_khoa"] or []), *moc)
         nho = app.state.nho_chi_so
         x = nho.get(khoa)
         if x and time.monotonic() - x[0] < NHO_CHI_SO_GIAY:
@@ -1185,7 +1192,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     # MỘT bộ lọc đã dịch cho mọi khối: chữ tìm chỉ bỏ dấu mỗi dòng một lần.
                     f = CS.bien_dich(bo_loc)
                     d = CS.tong_hop(kq["rows"], tu, den, tu_khoa_du_an=tu_khoa_da,
-                                    hom_nay=hom_nay, bo_loc=f, sap_nguon=sap_nguon)
+                                    hom_nay=hom_nay, bo_loc=f, moi_cach_xep=True)
                     tk = CS.tu_khoa_thao_luan(kq["rows"], kb["rows"], tu, den,
                                               tu_khoa_du_an=tu_khoa_da, bo_loc=f,
                                               bai_theo_khoa=bai_khoa)
@@ -1215,6 +1222,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             while len(nho) > NHO_CHI_SO_TOI_DA:
                 nho.popitem(last=False)
             data = dict(data)
+        theo = data.pop("top_nguon_theo", None)     # `data` là bản sao nông: bộ nhớ đệm giữ nguyên
+        if theo:
+            data["top_nguon"] = theo[sap_nguon]
+        data["sap_nguon"] = sap_nguon
         # Chỉ cần trạng thái lượt gần nhất (`_luot_json`): không kéo ghi chú (tới 20.000 ký tự).
         luot, _ = await _k(app.state.kho.cac_luot, du_an["ma"], 1, 1, ghi_chu=False)
         data["gan_nhan"] = await _tien_do_gan_nhan(du_an["ma"])

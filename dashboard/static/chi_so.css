@@ -408,9 +408,9 @@ dialog.cs-tam::backdrop { background: rgba(10, 18, 40, .45); }
 .cs-ti-tach__o--th { background: var(--cs-ti); }
 .cs-ti-tach__o--khac { background: color-mix(in srgb, var(--cs-ti) 38%, var(--be-mat)); }
 .cs-ti-tach__ds { display: flex; flex-direction: column; gap: 2px; }
-.cs-ti-tach__dong { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 2px 0; font-size: 12.5px; cursor: help; }
+.cs-ti-tach__dong { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 2px 0; font-size: 12.5px; }
 .cs-ti-tach__cham { width: 10px; height: 10px; border-radius: 3px; }
-.cs-ti-tach__ten { color: var(--chu-phu); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-ti-tach__ten { display: flex; align-items: center; gap: 2px; min-width: 0; color: var(--chu-phu); font-weight: 550; }
 .cs-ti-tach__so { color: var(--chu-mo); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .cs-ti-tach__so b { color: var(--chu); font-weight: 700; }
 

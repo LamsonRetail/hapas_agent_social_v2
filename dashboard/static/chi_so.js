@@ -1059,11 +1059,12 @@
         thanh.appendChild(p);
       }
       var d = tao("div", "cs-ti-tach__dong");
-      d.title = "Chủ đề: " + g.cd;
       var c = tao("span", "cs-ti-tach__cham " + g.lop);
       c.setAttribute("aria-hidden", "true");
       d.appendChild(c);
-      d.appendChild(tao("span", "cs-ti-tach__ten", g.ten));
+      var ten = tao("span", "cs-ti-tach__ten", g.ten + " ");
+      ten.appendChild(nutGoiY("Gồm bình luận chủ đề: " + g.cd + "."));
+      d.appendChild(ten);
       var sl = tao("span", "cs-ti-tach__so");
       sl.appendChild(tao("b", "so", so(v)));
       sl.appendChild(chuNode(" (" + ptCua(v, tong) + ")"));
@@ -1378,7 +1379,8 @@
           datLocBl({ nen_tang_bl: x.nen_tang, sac_thai_bl: s || "", loai_bl: "hop_le", chu_de_bl: "", q_bl: "", nguon_bl: "" }, true);
           return;
         }
-        var dk = { ct_nen_tang: x.nen_tang };
+        // ct_ngoai_nha: hàng không tính bài Internal channel — danh sách cũng không (khớp số).
+        var dk = { ct_nen_tang: x.nen_tang, ct_ngoai_nha: "1" };
         if (s) dk.ct_sac_thai = s;
         moChiTiet("bai", dk, ten + (s ? " · " + TEN_SAC[s] : ""));
       }));
@@ -1705,8 +1707,9 @@
   }
   function veTopNguon(d) {
     var tabs = $("tab-nen-tang"), noiDung = $("top-nguon");
-    var chon = $("tn-sap-xep");
-    if (chon && d.sap_nguon && chon.value !== d.sap_nguon && !ctlNguon) chon.value = tt.sapNguon = d.sap_nguon;
+    // Người dùng đã chọn cách xếp khác lúc số còn đang tải (hoặc lượt tải mang cách cũ): giữ lựa
+    // chọn, hỏi lại bảng nguồn — không ghi đè ô chọn.
+    if (d.sap_nguon && tt.sapNguon !== d.sap_nguon && !ctlNguon) setTimeout(taiNguon, 0);
     xoa(tabs);
     xoa(noiDung);
     if (!d.top_nguon.length) { noiDung.appendChild(tao("div", "trong", "Chưa có bài trong khoảng này.")); return; }

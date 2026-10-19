@@ -793,17 +793,18 @@ def _lich(kho, du_an: dict, quan_ly: bool, bay_gio) -> dict:
 
 
 def _do_phu(kho, ma: str, bay_gio) -> dict:
-    """Thẻ "Độ phủ" (kiểm hằng tuần) — chỉ khi bản dashboard + kho đã có (17/10/2026)."""
+    """Thẻ "Độ thu đủ" (trước gọi "Độ phủ"; kiểm 2 lần/tuần) — chỉ khi bản dashboard + kho đã có
+    (17/10/2026). Khoá dữ liệu vẫn là `do_phu`."""
     ham, json_fn = getattr(kho, "do_phu_gan_nhat", None), getattr(CS, "do_phu_json", None)
     if ham is None or json_fn is None:
-        return {"co": False, "ghi_chu": "Dashboard bản này chưa có kiểm độ phủ."}
+        return {"co": False, "ghi_chu": "Dashboard bản này chưa có kiểm độ thu đủ."}
     try:
         x = json_fn(ham(ma), bay_gio)
     except Exception as e:  # noqa: BLE001 — bảng chưa tạo: như trang, không có thẻ
-        print(f"[hoi_dashboard] độ phủ lỗi: {type(e).__name__}")
-        return {"co": False, "ghi_chu": "Chưa đọc được kết quả kiểm độ phủ."}
+        print(f"[hoi_dashboard] độ thu đủ lỗi: {type(e).__name__}")
+        return {"co": False, "ghi_chu": "Chưa đọc được kết quả kiểm độ thu đủ."}
     if not x:
-        return {"co": False, "ghi_chu": "Dự án chưa có lượt kiểm độ phủ nào."}
+        return {"co": False, "ghi_chu": "Dự án chưa có lượt kiểm độ thu đủ nào."}
     return {"co": True, **x}
 
 
