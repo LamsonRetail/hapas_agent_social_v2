@@ -85,9 +85,10 @@ def test_broader_fallback_not_complete_even_with_requested_count(actor):
     assert out.get("status") == "partial"
 
 
-def test_docs_fetch_readonly_available():
-    assert lsr_policy.decide("lark_cli", {"args": ["docs", "+fetch", "--doc-token", "doc_x",
-                                                  "--doc-format", "markdown"]}).allowed
+def test_docs_fetch_refused_for_checked_reader():
+    decision = lsr_policy.decide("lark_cli", {"args": ["docs", "+fetch", "--doc-token", "doc_x",
+                                                      "--doc-format", "markdown"]})
+    assert not decision.allowed and "doc_tai_lieu" in decision.reason
 
 
 def test_unknown_action_not_allowed_by_option_value():
