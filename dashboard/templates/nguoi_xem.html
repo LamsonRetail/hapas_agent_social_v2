@@ -126,9 +126,112 @@
 </section>
 {% endif %}
 
+{% if nguoi.la_quan_tri %}
+{#- TikTok Ads (19/10/2026, chủ dự án): CHỈ quản trị viên thấy thẻ này và các nút (máy chủ kiểm lại
+    mọi POST /tiktok/*). Không bao giờ hiện token — `tt` chỉ có cột không bí mật (tiktok_ads.DichVu.the). #}
+<section class="the-khoi cach-duoi tt" id="tiktok" aria-labelledby="tt-tieu-de">
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">4</span>
+    <h2 class="muc__ten" id="tt-tieu-de">Kết nối TikTok Ads</h2>
+    {% if tt %}<span class="the the--cham{% if tt.muc %} the--{{ tt.muc }}{% endif %}" data-o="tt-trang-thai">{{ tt.nhan }}</span>{% endif %}
+    <button type="button" class="goi-y" data-goi-y="Dashboard đọc số quảng cáo TikTok bằng quyền của một quản trị viên (đăng nhập TikTok for Business, chỉ công cụ ĐỌC). Mỗi lần đăng nhập dùng được 30 ngày — TikTok không gia hạn khi làm mới; Mark nhắc trước 7, 3 và 1 ngày. Token API của app developer thì không hết hạn.">i</button>
+    {% if tt and tt.dang_dong_bo %}<span class="muc__phai"><span class="the the--nhan tt-dang" data-o="tt-dang">Đang đồng bộ</span></span>{% endif %}
+  </div>
+  {% if loi_qc %}
+  <div class="thong-bao thong-bao--loi">{{ loi_qc }}</div>
+  {% elif tt %}
+  {% if tt.loi_khoa %}<div class="thong-bao thong-bao--canh" data-o="tt-loi-khoa">Khoá mã hoá TikTok chưa dùng được: {{ tt.loi_khoa }}. Cần TIKTOK_KHOA_MA_HOA (32 byte, base64) trong /opt/lang-nghe/.env — chưa lưu/đọc token được (dashboard/README.md, mục TikTok Ads).</div>{% endif %}
+  {% if tt.yeu_cau_dong_bo_luc and not tt.dang_dong_bo %}<div class="thong-bao" data-o="tt-yeu-cau">Đã yêu cầu đồng bộ lúc {{ tt.yeu_cau_dong_bo_luc|gio_vn }}{% if tt.yeu_cau_boi %} ({{ tt.yeu_cau_boi }}){% endif %}, sẽ chạy trong ≤ 10 phút.</div>{% endif %}
+  <div class="tt-luoi">
+    <div class="tt-han tt-han--{{ tt.muc or 'trong' }}" data-o="tt-han">
+      {% if tt.khong_het_han %}
+        <span class="tt-han__nhan">Hạn kết nối</span>
+        <span class="tt-han__so">Không hết hạn</span>
+        <span class="tt-han__phu">Token API của app TikTok for Business — không cần đăng nhập lại.</span>
+      {% elif tt.co_token and tt.con_ngay is not none %}
+        <span class="tt-han__nhan">Còn trước khi phải đăng nhập lại</span>
+        <span class="tt-han__so">{{ tt.con_ngay|ngay_con }}</span>
+        <span class="tt-han__ray" role="meter" aria-label="Phần còn của 30 ngày" aria-valuemin="0" aria-valuemax="30" aria-valuenow="{{ [tt.con_ngay, 0]|max }}"><span class="tt-han__dac" style="width: {{ ([[tt.con_ngay / 30 * 100, 100]|min, 0]|max)|round(1) }}%"></span></span>
+        <span class="tt-han__phu">Hết hạn {{ tt.refresh_het_luc|gio_vn }}. Làm mới không kéo dài hạn này.</span>
+      {% else %}
+        <span class="tt-han__nhan">Hạn kết nối</span>
+        <span class="tt-han__so">—</span>
+        <span class="tt-han__phu">{{ 'Đã ngắt kết nối.' if tt.trang_thai == 'da_ngat' else 'Chưa kết nối TikTok Ads.' }}</span>
+      {% endif %}
+    </div>
+    <dl class="tt-ds">
+      <div><dt>Người cấp quyền</dt><dd>{{ tt.nguoi_cap or '—' }}{% if tt.cap_luc %}<span class="tt-ds__phu">{{ tt.cap_luc|gio_vn }}</span>{% endif %}</dd></div>
+      <div data-o="tt-so-tk"><dt>Tài khoản quảng cáo thấy</dt><dd>{% if tt.so_tk_thay is not none %}{{ tt.so_tk_thay }}{% if tt.so_tk_truoc is not none %}<span class="tt-ds__phu">lần trước {{ tt.so_tk_truoc }}</span>{% endif %}{% if tt.it_hon %} <span class="the the--canh">ít hơn lần trước</span>{% endif %}{% else %}—{% endif %}</dd></div>
+      <div><dt>Làm mới token</dt><dd>{{ tt.lam_moi_luc|gio_vn if tt.lam_moi_luc else ('không cần' if tt.khong_het_han else '—') }}</dd></div>
+      <div><dt>Gọi TikTok thành công</dt><dd>{{ tt.goi_ok_luc|gio_vn if tt.goi_ok_luc else '—' }}</dd></div>
+      <div><dt>Đồng bộ thành công</dt><dd>{{ tt.dong_bo_ok_luc|gio_vn if tt.dong_bo_ok_luc else 'chưa có' }}{% if tt.so_den_ngay %}<span class="tt-ds__phu">số đến hết {{ tt.so_den_ngay|gio_vn }}</span>{% endif %}</dd></div>
+      <div data-o="tt-luot"><dt>Lượt đồng bộ cuối</dt><dd>{% if tt.dang_dong_bo %}đang chạy từ {{ tt.dong_bo_bat_dau|gio_vn }}{% elif tt.dong_bo_xong %}{{ tt.dong_bo_xong|gio_vn }} <span class="the the--{{ 'loi' if tt.dong_bo_loi else 'tot' }}">{{ 'có lỗi' if tt.dong_bo_loi else 'ổn' }}</span>{% if tt.dong_bo_so_dong is not none %}<span class="tt-ds__phu">{{ tt.dong_bo_so_dong|so_vn }} dòng</span>{% endif %}{% elif tt.dong_bo_bat_dau %}đang chạy từ {{ tt.dong_bo_bat_dau|gio_vn }}{% else %}—{% endif %}</dd></div>
+      {% if tt.dong_bo_loi or tt.loi_cuoi %}
+      <div class="tt-ds__rong" data-o="tt-loi"><dt>Lỗi gần nhất</dt><dd class="chu-loi">{{ tt.dong_bo_loi or tt.loi_cuoi }}{% if tt.loi_luc and not tt.dong_bo_loi %}<span class="tt-ds__phu">{{ tt.loi_luc|gio_vn }}</span>{% endif %}</dd></div>
+      {% endif %}
+    </dl>
+  </div>
+  <div class="tt-nut">
+    <form method="post" action="/tiktok/ket-noi">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <button class="nut" type="submit"{% if not tt.co_khoa %} disabled{% endif %}>{% if tt.co_token and not tt.khong_het_han %}Đăng nhập lại để gia hạn 30 ngày{% else %}Đăng nhập TikTok để kết nối{% endif %}</button>
+    </form>
+    <form method="post" action="/tiktok/dong-bo">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <button class="nut nut--nhe" type="submit"{% if not tt.co_token or tt.dang_dong_bo or tt.yeu_cau_dong_bo_luc %} disabled{% endif %}><svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>Đồng bộ ngay</button>
+    </form>
+    <form method="post" action="/tiktok/ngat" data-xac-nhan="Ngắt kết nối TikTok Ads? Token bị thu hồi và xoá khỏi máy chủ; số đã đồng bộ giữ nguyên. Muốn đồng bộ tiếp phải đăng nhập lại.">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <button class="nut nut--loi" type="submit"{% if not tt.co_token %} disabled{% endif %}>Ngắt kết nối</button>
+    </form>
+  </div>
+  <details class="tt-token">
+    <summary>Dùng token API không hết hạn</summary>
+    <form method="post" action="/tiktok/token" class="luoi-form" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o rong">Token “API access” của app TikTok for Business (chỉ quyền đọc báo cáo)
+        <input type="password" name="token" required minlength="16" maxlength="4096" spellcheck="false" autocomplete="off"></label>
+      <div><button class="nut nut--nhe" type="submit">Kiểm tra rồi lưu</button></div>
+    </form>
+    <p class="mo nho tt-token__chu">Dashboard thử đọc danh sách tài khoản bằng token trước khi lưu. Token được mã hoá trên máy chủ, không bao giờ hiện lại; lưu token API thay cho lần đăng nhập hiện tại.</p>
+  </details>
+
+  <h3 class="tt-h3">Tài khoản quảng cáo → bên</h3>
+  <p class="mo nho tt-chu">Tên có MATEMADE / MATE MADE tự vào bên MATEMADE, còn lại vào HAPAS; sửa ở đây thì lần đồng bộ sau giữ nguyên. Chưa gán bên: chỉ quản trị viên thấy số. Chi tiêu chỉ quản trị viên và quản lý của bên thấy.</p>
+  {% if tk_qc %}
+  <div class="cuon-ngang">
+  <table class="tt-bang">
+    <thead><tr><th>Tài khoản</th><th>Bên</th><th>Đồng bộ</th><th>Trạng thái</th><th></th></tr></thead>
+    <tbody>
+    {% for t in tk_qc %}
+      <tr data-o="tk-{{ t.advertiser_id }}">
+        <td>{{ t.ten or t.advertiser_id }}<span class="tt-bang__phu">{{ t.advertiser_id }} · {{ t.tien_te }}</span></td>
+        <td><select name="don_vi" form="gb-{{ t.advertiser_id }}" aria-label="Bên của {{ t.ten or t.advertiser_id }}">
+          <option value=""{% if not t.don_vi %} selected{% endif %}>— chưa gán</option>
+          {% for b in ten_ben %}<option value="{{ b.ma }}"{% if b.ma == t.don_vi %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}
+        </select></td>
+        <td><label class="tt-hop"><input type="checkbox" name="dang_dong_bo" value="1" form="gb-{{ t.advertiser_id }}"{% if t.dang_dong_bo %} checked{% endif %}> Đồng bộ</label></td>
+        <td>{% if not t.con_quyen %}<span class="the the--canh">Mất quyền</span> {% endif %}<span class="the">{{ 'Đã sửa tay' if t.gan_tay else 'Tự gán' }}</span>{% if t.con_quyen and t.dang_dong_bo and not t.nap_lui_xong_luc %} <span class="the the--nhan">Chờ nạp 90 ngày</span>{% endif %}</td>
+        <td><form id="gb-{{ t.advertiser_id }}" method="post" action="/tiktok/gan-ben">
+          <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+          <input type="hidden" name="advertiser_id" value="{{ t.advertiser_id }}">
+          <button class="nut nut--nhe nut--nho" type="submit">Lưu</button>
+        </form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="trong">Chưa thấy tài khoản quảng cáo nào — kết nối TikTok Ads trước.</p>
+  {% endif %}
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="the-khoi cach-duoi">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">{{ 4 if nguoi.la_quan_tri else 3 }}</span>
+    <span class="muc__so" aria-hidden="true">{{ 5 if nguoi.la_quan_tri else 3 }}</span>
     <h2 class="muc__ten">Nhật ký thay đổi</h2>
     <button type="button" class="goi-y" data-goi-y="100 dòng mới nhất{% if not nguoi.la_quan_tri %} về dự án và quyền của các bên bạn quản lý{% endif %}.">i</button>
   </div>

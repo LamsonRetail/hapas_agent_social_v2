@@ -16,6 +16,7 @@ Dashboard **chỉ gồm**:
    - Nhãn hiển thị (16/10/2026): **Internal channel** (nguồn loại `kenh_nha`) / **External channel** (`ben_ngoai`). Giá trị lưu và tham số URL không đổi.
 6. **BigQuery** (`/bigquery`, chỉ quản trị viên từ 19/10/2026): trạng thái đồng bộ kho lên BigQuery; bấm "Đồng bộ ngay".
 7. **Lịch quét** (`/lich-quet`, chủ dự án chốt 15/10/2026 "Dashboard + Mark tự chạy"): lịch quét tự động mỗi dự án — mỗi N giờ trong khung giờ, hằng ngày (giờ cụ thể), hằng tuần (ngày + giờ), chiến dịch (từ lúc → tới lúc, mỗi 30 phút – 7 ngày, dài ≤ 92 ngày, bắt đầu trong 365 ngày tới, mặc định quét mọi nguồn; đang diễn ra thì lịch thường nhường, hết khung tự dừng). Biểu mẫu có xem trước 10 lần chạy tới (giờ VN) và chi phí tối đa so với trần tháng, tính ở máy chủ trong threadpool (`/api/lich-quet/xem-truoc`, đúng hàm Mark dùng — `lich_quet.py`; kỳ của lịch đang gõ chỉ đếm mốc của chính nó). Mark (`quet_tu_dong.py`, nhịp 30 giây trên VPS, không qua hàng đợi job platform) tự chạy `/theodoi` đúng mốc, báo mỗi lượt lên platform bằng trace; kết quả hiện ở đây, không nhắn Lark. Trang Ngân sách nhân theo số lượt của lịch đang bật (không còn giả định 1 lượt/ngày).
+8. **Quảng cáo TikTok** (`/quang-cao`, 19/10/2026) — số TikTok Ads theo bên; kết nối + gán bên ở trang Quản trị (chỉ quản trị viên). Xem mục "TikTok Ads" dưới đây.
 
 ### Phân quyền theo bên (chủ dự án chốt 19/10/2026)
 
@@ -33,6 +34,36 @@ Mỗi dự án thuộc đúng một **bên** (`du_an.don_vi` → bảng `don_vi`
 - Nhật ký trên trang Quản trị: quản trị viên thấy mọi dòng; quản lý của bên chỉ thấy dòng về dự án / quyền của bên mình.
 - Cột cũ `nguoi_xem.vai_tro` chỉ còn để tương thích (Mark bản cũ đọc): dashboard giữ nó = vai trò gộp, không dùng để quyết định quyền.
 - Mark (`hoi_dashboard_tool`) đọc quyền bằng `kho.quyen_cua` và chỉ trả số dự án của bên người hỏi.
+
+### TikTok Ads (chủ dự án chốt 19/10/2026)
+
+Số quảng cáo TikTok của các tài khoản quảng cáo HAPAS / MATEMADE, đọc qua **TikTok for Business MCP server** (lớp `tt-ads-mcp-layer`, không cần app developer). Mã: `tiktok_ads.py` (OAuth, MCP, đồng bộ — không LLM), `kho_qc.py` (SQL của các bảng quảng cáo), `quang_cao.py` (luật thuần: chỉ số, tiền, phạm vi theo bên, tổng hợp — dùng chung cho trang, `/api/qc` và Mark).
+
+- **Trang "Quảng cáo TikTok"** (`/quang-cao`, mục menu hiện cho người có quyền ở ít nhất một bên đã có tài khoản quảng cáo; quản trị viên luôn thấy): lọc bên (chỉ bên đọc được; quản trị viên thêm "Tất cả bên", "Chưa gán bên"), tài khoản, khoảng ngày (mặc định 30 ngày tới hết hôm qua; nút 7/30/90 ngày); KPI hai tầng như trang Chỉ số (hàng chính Chi tiêu*, Hiển thị, View video; hàng phụ Reach, Engaged view, Tương tác = thích + bình luận + chia sẻ, Follow, Vào hồ sơ, Doanh thu Shop*, ROAS Shop*) kèm % so kỳ trước; biểu đồ theo ngày (ECharts, chọn chỉ số); top 10 chiến dịch + top 10 quảng cáo, xếp theo Chi*/Hiển thị/View/Follow; khán giả (tuổi, giới tính, tỉnh/thành, nền tảng — cửa sổ 30 ngày mới nhất; tỉnh/thành hiện "Mã vùng N" — **TODO**: thêm bảng mã vùng TikTok/GeoNames → tên tỉnh để hiện tên); dòng "Số đến hết ngày …, đồng bộ lúc …". `*` = chỉ số tiền.
+- **`/api/qc`** (`ben`, `tk`, `tu`, `den`, `sap`): cùng hàm với trang. Bên / tài khoản ngoài phạm vi → 404 như không có.
+- **Quyền**: mỗi tài khoản quảng cáo thuộc một bên (`tk_quang_cao.don_vi`). Người xem chỉ thấy tài khoản của bên mình; tài khoản chưa gán bên chỉ quản trị viên thấy. **Chỉ số tiền** (spend, cpm, cpc, `cost_per_*`, `*_value`, `*_roas`, ngân sách, billed/cash/voucher, cột `chi`, `gia_tri_mua_shop`, ROAS) chỉ **Quản trị viên** và **Quản lý của bên đó** thấy — lọc ở MÁY CHỦ (`quang_cao.loc_tien`, đệ quy mọi khối) trước khi dựng trang / trả API; "Chỉ xem" không bao giờ nhận các trường đó (người không xem tiền không xếp theo chi được).
+- **Thẻ "Kết nối TikTok Ads"** (trang Quản trị, CHỈ quản trị viên): trạng thái, đếm ngược tới hạn 30 ngày (vàng < 7 ngày, đỏ < 2 ngày; "Không hết hạn" với token API), người/lúc cấp quyền, số tài khoản thấy so với lần trước (cảnh báo khi ít hơn), lần làm mới token, lần gọi TikTok thành công, lần đồng bộ thành công + số đến hết ngày, lỗi gần nhất. Nút: **Đăng nhập lại để gia hạn 30 ngày** (OAuth), **Đồng bộ ngay** (CHỈ ghi cờ yêu cầu `yeu_cau_dong_bo_luc` — thẻ hiện "Đã yêu cầu đồng bộ lúc …, sẽ chạy trong ≤ 10 phút", rồi "đang chạy từ …" và kết quả lượt cuối), **Ngắt kết nối** (thu hồi phía TikTok + xoá token, hỏi xác nhận), ô **Dùng token API không hết hạn**. Dưới thẻ: bảng **tài khoản quảng cáo → bên** (sửa bên, bật/tắt đồng bộ).
+- **Gán bên tự động** khi thấy tài khoản lần đầu: tên có MATEMADE / MATE MADE (không phân biệt hoa thường, khoảng trắng, dấu) → `matemade`, còn lại → `hapas`. Quản trị viên sửa thì `gan_tay` = true — lần thấy sau không đè.
+
+Đường dẫn: `POST /tiktok/ket-noi` (bắt đầu OAuth — nút trên thẻ, có CSRF; `GET` chỉ chuyển về thẻ, không tác dụng phụ; trang Quản trị của quản trị viên thêm đúng gốc `https://business-api.tiktok.com` vào CSP `form-action` để form chuyển hướng được), `GET /tiktok/xong` (TikTok trả về), `POST /tiktok/dong-bo`, `POST /tiktok/ngat`, `POST /tiktok/token`, `POST /tiktok/gan-ben` — tất cả CHỈ quản trị viên; POST qua đúng chốt CSRF + Origin như mọi POST.
+
+**Kết nối (đo thật 19/10/2026):** đăng ký client động (DCR, client công khai, không secret) một lần cho mỗi `redirect_uri` = `DASH_BASE_URL + /tiktok/xong` (đã thử thật: đăng ký `https://social.hapas.vn/tiktok/xong` trả HTTP 201) → OAuth PKCE S256, scope `mcp:tt4b`, `resource` = máy chủ MCP. State ký HMAC, sống 10 phút, buộc vào phiên quản trị viên (dấu CSRF của phiên) + nonce trong cookie `ln_tiktok` (HttpOnly, Secure, SameSite=Lax, chỉ đường `/tiktok`) + đúng email; PKCE verifier nằm trong cookie đó ở dạng ĐÃ MÃ HOÁ. Access token sống ~24 giờ, refresh token **30 ngày và không được gia hạn khi làm mới** (TikTok trả lại cùng token, hạn đếm lùi) — dashboard không bao giờ kéo dài `refresh_het_luc`; hết 30 ngày thì `trang_thai = het_han`, quản trị viên đăng nhập lại để có 30 ngày mới. Mark nhắc trước 7, 3, 1 ngày (`nhac_tiktok_ads.py`).
+
+**Token API (không hết hạn, sau này):** khi chủ dự án có app TikTok for Business Developer (quyền đọc báo cáo), dán "API access token" vào ô trên thẻ: dashboard thử MỘT lượt đọc danh sách tài khoản rồi mới lưu (`loai = api_token`, mã hoá, không làm mới, thẻ hiện "Không hết hạn"). Đổi qua lại hai loại chỉ là thao tác trên thẻ — không đổi mã.
+
+**Bảo mật:**
+- Danh sách công cụ MCP **chỉ đọc** cứng trong mã (`tiktok_ads.CONG_CU_DOC`: auth_advertiser_get, advertiser_info_get, report_integrated_get — đúng các công cụ mã dùng). Tên khác — kể cả `tool_execute` (cửa gọi ~380 công cụ khác) và mọi công cụ tạo/sửa/ngân sách mà máy chủ MCP có phơi ra — bị chặn TRƯỚC khi gửi (bài thử canh).
+- Token **mã hoá trong DB** (`ket_noi_ngoai.*_token_enc`) bằng khoá `TIKTOK_KHOA_MA_HOA` (32 byte base64, chỉ trong `/opt/lang-nghe/.env`). Thuật toán **AES-256-GCM** (`cryptography`, `AESGCM`; `requirements.txt`: `cryptography>=48,<51` — venv VPS đã có 50.0.2): base64(1 byte phiên bản | nonce ngẫu nhiên 12 byte | bản mã ‖ thẻ 16 byte), AAD = nhà cung cấp + tên cột — bản mã cột access không giải được ở cột refresh, sửa một byte là từ chối. Khoá thiếu / không phải base64 / không đúng 32 byte: không lưu cũng không đọc token, thẻ báo rõ lý do, lượt đồng bộ ghi `trang_thai = loi` — dashboard không sập.
+- Không trang / API / log / nhật ký nào có token (bài thử canh cả chuỗi mã hoá); lỗi TikTok qua `tiktok_ads.gon_loi` (bỏ đúng các token tiến trình đang dùng, URL và chuỗi giống token) trước khi lưu/hiện.
+- Làm mới token: access còn < 6 giờ thì làm mới trước lượt; TikTok từ chối giữa lượt thì làm mới cưỡng bức MỘT lần rồi chạy tiếp (`McpTuLamMoi`). Ghi token / trạng thái CÓ ĐIỀU KIỆN (đúng token + `cap_luc` đã đọc), lượt dừng khi phát hiện kết nối bị ngắt / đăng nhập lại giữa chừng — không bao giờ khôi phục kết nối quản trị viên vừa ngắt.
+- Ngắt kết nối loại token API: dashboard chỉ xoá được bản trên máy chủ — thông báo nhắc thu hồi token trong TikTok for Business Developer (token không tự hết hạn).
+- `/quang-cao` + `/api/qc` chung ngân sách tính với `/api/chi-so` (tối đa 2 lượt cùng lúc, quá thì 503), khoảng ≤ 400 ngày; bảng top tổng + LIMIT trước rồi mới đọc tên của ≤ 10 đối tượng.
+- Role `mark` chỉ đọc `tk_quang_cao`, `qc_*` và **đúng 6 cột không bí mật** của `ket_noi_ngoai` (nha_cung_cap, loai, trang_thai, refresh_het_luc, goi_ok_luc, loi_cuoi) — không cột token, client_id hay email người cấp.
+- BigQuery chỉ nhận `tk_quang_cao` + 4 bảng `qc_*` — không bao giờ `ket_noi_ngoai`.
+
+**Đồng bộ** (`python -m dashboard.tiktok_ads dong-bo`, bộ hẹn giờ systemd 06:30 giờ VN — `deploy/lang-nghe/README.md` mục 7): làm mới token → đọc lại danh sách tài khoản (gán bên) → mỗi tài khoản đang đồng bộ: lần đầu nạp lùi **90 ngày** (3 cửa sổ 30 ngày, mới trước; lượt bị ngắt thì lượt sau đọc tiếp từ mốc `nap_lui_tu`), sau đó mỗi ngày đọc lại **7 ngày** gần nhất (chuyển đổi TikTok ghi trễ). Cấp tài khoản theo ngày (đủ 100 chỉ số hợp lệ); cấp campaign và ad CHỈ đối tượng có hiển thị (TikTok trả mọi đối tượng chưa xoá — một tài khoản 20.000 ad, 7.599 chạy trong 30 ngày): lấy ID xếp impressions giảm dần, dừng ở dòng 0 đầu tiên; rồi đọc theo lô ≤ 100 ID, ≤ 45 chỉ số mỗi lượt, trang ≤ 200 dòng. Cấp ad chỉ 38 chỉ số chính (một lượt mỗi trang). Khán giả mỗi 7 ngày. Lỗi mạng thử lại 3 lần; tuần tự, nghỉ 0,3 giây giữa các lượt gọi. Upsert theo khoá chính (chạy lại không nhân đôi). Không token dùng được → ghi trạng thái, thoát 0. **Dashboard không bao giờ chạy đồng bộ trong tiến trình web** (MemoryMax 512M, khởi động lại giữa chừng): nút "Đồng bộ ngay" và lần kết nối đầu chỉ ghi cờ yêu cầu; bộ hẹn giờ thứ hai `tiktok-ads-yeu-cau.timer` (10 phút/lần) chạy `dong-bo --chi-khi-yeu-cau` — không có yêu cầu thì thoát ngay (< 1 giây, một câu SELECT). Hai bộ hẹn giờ + lệnh tay không chạy chồng (khoá advisory Postgres). Xong thì đẩy BigQuery ngay (khi đã bật `BQ_DATASET`), ngoài nhịp 6 giờ của dashboard.
+
+Bảng (schema.sql, mô tả 11 nhãn): `ket_noi_ngoai` (một dòng mỗi nhà cung cấp — trạng thái, token mã hoá, lượt đồng bộ gần nhất), `tk_quang_cao`, `qc_tk_ngay`, `qc_campaign_ngay`, `qc_ad_ngay`, `qc_khan_gia` (cột số kiểu riêng + `chi_so` JSONB đủ mọi chỉ số TikTok trả).
 
 Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần mỗi lượt hay lịch "Giao việc" của Mark — những thứ đó vẫn ở console platform (chủ dự án: "mark vẫn phải theo luật của platform như trước không đổi … dashboard chỉ gồm những chỉ số và quản lý nguồn cũng như ngân sách"). Lịch console (tab Lịch chạy, kiểu Giao việc, nội dung `/theodoi <mã dự án>` — `deploy/lang-nghe/README.md` mục 5) vẫn chạy song song với lịch quét tự động.
 
@@ -53,9 +84,12 @@ Dashboard **không** chứa kỹ năng, persona, công tắc năng lực, trần
 | `danh_ba.py` | danh bạ Lark (token tổ chức): email -> tên, chức danh, phòng ban, trạng thái tài khoản |
 | `dong_bo_bq.py` | đồng bộ kho → BigQuery (gắn vào hook `app.state.sau_cap_nhat`) |
 | `quan_tri.py` | lệnh máy chủ: cấp/bỏ quản trị viên, quyền theo bên, tạo bên, liệt kê |
+| `tiktok_ads.py` | TikTok Ads: OAuth (DCR + PKCE), mã hoá token, MCP chỉ đọc, đồng bộ; dòng lệnh `python -m dashboard.tiktok_ads dong-bo` |
+| `kho_qc.py` | SQL của `ket_noi_ngoai`, `tk_quang_cao`, `qc_*` (dùng chung `kho.ket_noi`) |
+| `quang_cao.py` | luật thuần TikTok Ads: chỉ số hợp lệ, chỉ số tiền, phạm vi theo bên, tổng hợp — Mark import chung |
 | `templates/`, `static/` | giao diện (Jinja2, ECharts 5.5.1 phục vụ tại chỗ `static/echarts.min.js`, sáng/tối theo hệ điều hành) |
 
-Đường dẫn: `/`, `/api/chi-so`, `/nguon`, `/ngan-sach`, `/quan-tri` (`/nguoi-xem` → 308), `/bigquery` (chỉ quản trị viên), `/su-kien` (SSE), `/dang-nhap`, `/dang-nhap/lark`, `/dang-nhap/xong`, `/dang-xuat`, `/suc-khoe` (không cần đăng nhập), `/noi-bo/co-du-lieu` (chỉ Mark trên cùng máy), và các POST sửa dữ liệu (`/du-an/…`, `/nguon/…`, `/de-xuat/…`, `/ngan-sach/<mã>`, `/nguoi-xem/them|xoa|quan-tri`, `/don-vi/them`, `/bigquery/dong-bo`).
+Đường dẫn: `/`, `/api/chi-so`, `/quang-cao`, `/api/qc`, `/tiktok/ket-noi`, `/tiktok/xong`, `/nguon`, `/ngan-sach`, `/quan-tri` (`/nguoi-xem` → 308), `/bigquery` (chỉ quản trị viên), `/su-kien` (SSE), `/dang-nhap`, `/dang-nhap/lark`, `/dang-nhap/xong`, `/dang-xuat`, `/suc-khoe` (không cần đăng nhập), `/noi-bo/co-du-lieu` (chỉ Mark trên cùng máy), và các POST sửa dữ liệu (`/du-an/…`, `/nguon/…`, `/de-xuat/…`, `/ngan-sach/<mã>`, `/nguoi-xem/them|xoa|quan-tri`, `/don-vi/them`, `/bigquery/dong-bo`, `/tiktok/dong-bo|ngat|token|gan-ben`).
 
 ## Bảo vệ
 
@@ -159,11 +193,21 @@ Trong `/opt/mark/app/.env` (xem `deploy/lang-nghe/README.md` mục 3): `LANG_NGH
 3. Khoá JSON đặt ở `/opt/lang-nghe/bq-sa.json`: `sudo chown root:lang_nghe_web /opt/lang-nghe/bq-sa.json && sudo chmod 0640 /opt/lang-nghe/bq-sa.json` (dịch vụ chỉ đọc được, không sửa/xoá được).
 4. Trong `/opt/lang-nghe/.env`: `BQ_DATASET=ganesha-381907.SOCIAL_LISTENING`, `BQ_LOCATION=asia-southeast1`, `GOOGLE_APPLICATION_CREDENTIALS=/opt/lang-nghe/bq-sa.json`; `systemctl restart lang-nghe-dashboard`.
 
-Đồng bộ chạy sau mỗi lượt quét và 6 giờ một lần. Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, cột email.
+Đồng bộ chạy sau mỗi lượt quét và 6 giờ một lần. Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, cột email, `ket_noi_ngoai` (token TikTok). **Số tiền quảng cáo** (`chi`, `gia_tri_mua_shop`, khoá tiền trong `chi_so`) chỉ đẩy khi `BQ_QC_XUAT_TIEN=1` (mặc định `0`: cột tiền NULL, khoá tiền bị bỏ — chờ chủ dự án quyết; quyền SELECT cả bảng `qc_*` của role mark cũng đang chờ quyết định này). TikTok Ads (19/10/2026): thêm `tk_quang_cao` + 4 bảng `qc_*` — chạy khối "TikTok Ads" cuối `deploy/lang-nghe/bigquery.sql` TRƯỚC khi bật bản mới (thiếu bảng thì trang BigQuery báo lỗi bảng đó tới khi tạo).
+
+### TikTok Ads — cài lần đầu (cần người duyệt trước khi chạy trên VPS)
+
+Thứ tự: **khoá → schema.sql → mã → bộ hẹn giờ → kết nối**. Chi tiết lệnh ở `deploy/lang-nghe/README.md` mục 7.
+
+1. Khoá mã hoá (một lần, KHÔNG dán vào chat/log/commit): `echo "TIKTOK_KHOA_MA_HOA=$(openssl rand -base64 32)" | sudo tee -a /opt/lang-nghe/.env >/dev/null` (tệp vẫn 600 root). Mất/đổi khoá = token cũ không giải mã được → đăng nhập TikTok lại (số đã đồng bộ không mất).
+2. `deploy/lang-nghe/schema.sql` (6 bảng mới + quyền), rồi `rsync` mã + `systemctl restart lang-nghe-dashboard`.
+3. Hai bộ hẹn giờ: `tiktok-ads-dong-bo.timer` (06:30 hằng ngày) và `tiktok-ads-yeu-cau.timer` (10 phút/lần, chỉ chạy khi có yêu cầu "Đồng bộ ngay") — deploy/lang-nghe/README.md mục 7. `pip install -r requirements.txt` (thêm `cryptography`, venv thường đã có).
+4. Quản trị viên mở **Quản trị → Kết nối TikTok Ads → Đăng nhập TikTok để kết nối**, đăng nhập TikTok for Business bằng tài khoản thấy đủ 16 tài khoản quảng cáo, bấm Authorize. Dashboard tự đăng ký client (không cần khai redirect URL ở đâu), lưu token, đọc danh sách tài khoản, gán bên và ghi yêu cầu đồng bộ — bộ hẹn giờ 10 phút bắt đầu nạp 90 ngày. Kiểm bảng "Tài khoản quảng cáo → bên".
+5. Mark nhắc gia hạn: đặt `MARK_TIKTOK_NHAC=oc_<nhóm quản trị>` (hoặc `ou_…`) trong `/opt/mark/app/.env`, `mark restart` (trống thì dùng `MARK_LICH_QUET_BAO_LOI`; cả hai trống = không nhắc, thẻ vẫn đếm ngược).
 
 ## Chạy bộ thử (máy dev, không cần Postgres/mạng)
 
 ```powershell
 cd D:\hapas_w49; $env:LARK_APP_ID='cli_test'; $env:LARK_APP_SECRET='test'
-python -X utf8 -m pytest -q -p no:cacheprovider --basetemp=.pt/tmpd tests/test_dashboard_*.py tests/test_dong_bo_bq.py
+python -X utf8 -m pytest -q -p no:cacheprovider --basetemp=.pt/tmpd tests/test_dashboard_*.py tests/test_dong_bo_bq.py tests/test_tiktok_ads.py
 ```

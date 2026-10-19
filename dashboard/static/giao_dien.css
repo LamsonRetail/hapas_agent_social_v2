@@ -216,6 +216,31 @@ main.khung { padding-top: 22px; padding-bottom: 28px; }
 .kpi__doi--tang { color: var(--tot); }
 .kpi__doi--giam { color: var(--loi); }
 
+/* ─── KPI hai tầng (trang Chỉ số #80 + trang Quảng cáo TikTok, 19/10/2026) ───
+   Hàng chính: ba thẻ số lớn. Hàng phụ: MỘT thẻ chia ô bằng đường kẻ mảnh (bóng 1px trái + trên của
+   từng ô, khung cắt phần thừa ở mép), số nhỏ hơn, không biểu tượng; số cột qua biến --so-kpi.
+   Tên cs-* là của trang Chỉ số (chi_so.js dựng), tên không tiền tố cho trang khác. */
+.kpi-chinh, .cs-kpi-chinh { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.the-khoi.kpi.kpi--lon, .cs-trang .the-khoi.kpi.cs-kpi--lon { padding: 18px 20px; gap: 12px 14px; }
+.kpi--lon .kpi__nhan, .cs-kpi--lon .kpi__nhan { font-size: 14px; }
+.kpi--lon .kpi__so, .cs-kpi--lon .kpi__so { font-size: clamp(26px, 13cqi, 36px); margin-top: 4px; }
+.the-khoi.kpi-phu, .cs-trang .the-khoi.cs-kpi-phu {
+  display: grid; grid-template-columns: repeat(var(--so-kpi, 5), minmax(0, 1fr)); padding: 0; overflow: hidden;
+}
+.kpi-o, .cs-kpi-o {
+  padding: 12px 16px; border: 0; border-radius: 0; background: transparent; box-shadow: -1px 0 0 var(--ke), 0 -1px 0 var(--ke);
+}
+.kpi-o .kpi__nhan, .cs-kpi-o .kpi__nhan { font-size: 12.5px; }
+.kpi-o .kpi__so, .cs-kpi-o .kpi__so { font-size: clamp(18px, 11cqi, 22px); margin-top: 1px; }
+@media (max-width: 600px) {
+  /* hàng chính: số dẫn cả hàng, hai số kia chia đôi; bỏ biểu tượng cho số khỏi tràn */
+  .kpi-chinh, .cs-kpi-chinh { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .kpi-chinh > :first-child, .cs-kpi-chinh > :first-child { grid-column: 1 / -1; }
+  .kpi-chinh .kpi__icon, .cs-kpi-chinh .kpi__icon { display: none; }
+  .the-khoi.kpi.kpi--lon, .cs-trang .the-khoi.kpi.cs-kpi--lon { padding: 14px; }
+  .kpi-o, .cs-kpi-o { padding: 10px 14px; }
+}
+
 /* hàng thẻ KPI dùng chung các trang phụ (Nguồn, Lịch quét, BigQuery, Người xem) */
 .luoi-kpi { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 
@@ -439,6 +464,39 @@ dialog.chi-tiet::backdrop { background: rgba(10, 18, 40, .45); }
 .chi-tiet__than > * { flex-shrink: 0; }
 dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 
+/* ─── Kết nối TikTok Ads (trang Quản trị, chỉ quản trị viên — 19/10/2026) ───
+   Ô hạn bên trái là thứ quản trị viên cần nhìn trước: còn bao nhiêu ngày trước khi phải đăng nhập lại
+   (vàng < 7 ngày, đỏ < 2 ngày — màu do máy chủ quyết ở tt.muc). Bên phải: các mốc dạng danh sách. */
+.tt-luoi { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px 28px; align-items: start; }
+.tt-han { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 10px; background: var(--be-mat-2); border: 1px solid var(--ke); }
+.tt-han__nhan { font-size: 12.5px; font-weight: 600; color: var(--chu-phu); }
+.tt-han__so { font-size: 28px; font-weight: 750; line-height: 1.15; letter-spacing: -.01em; color: var(--chu); font-variant-numeric: tabular-nums; }
+.tt-han__ray { display: block; height: 6px; margin: 6px 0 2px; border-radius: 999px; background: var(--chua); overflow: hidden; }
+.tt-han__dac { display: block; height: 100%; border-radius: inherit; background: var(--tot); }
+.tt-han__phu { font-size: 12.5px; color: var(--chu-phu); }
+.tt-han--tot .tt-han__so { color: var(--tot); }
+.tt-han--canh { background: var(--canh-nen); border-color: color-mix(in srgb, var(--canh) 35%, transparent); }
+.tt-han--canh .tt-han__so { color: var(--canh); }
+.tt-han--canh .tt-han__dac { background: var(--canh); }
+.tt-han--loi { background: var(--loi-nen); border-color: color-mix(in srgb, var(--loi) 35%, transparent); }
+.tt-han--loi .tt-han__so { color: var(--loi); }
+.tt-han--loi .tt-han__dac { background: var(--loi); }
+.tt-ds { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 24px; margin: 0; }
+.tt-ds > div { min-width: 0; }
+.tt-ds dt { font-size: 12px; font-weight: 600; color: var(--chu-mo); }
+.tt-ds dd { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.tt-ds__phu { display: block; font-size: 12px; font-weight: 400; color: var(--chu-phu); }
+.tt-ds__rong { grid-column: 1 / -1; }
+.tt-nut { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 12px; }
+.tt-nut form { margin: 0; }
+.tt-token { margin: 4px 0 4px; }
+.tt-token__chu { margin: 8px 0 0; max-width: 72ch; }
+.tt-h3 { font-size: 14px; color: var(--tieu-de); margin: 18px 0 4px; padding-top: 16px; border-top: 1px solid var(--ke); }
+.tt-chu { margin: 0 0 10px; max-width: 90ch; }
+.tt-bang td { vertical-align: middle; }
+.tt-bang__phu { display: block; font-size: 12px; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
+.tt-hop { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
 @media (max-width: 760px) {
   .khung { padding: 0 16px; }
   .dau-trang__trong { flex-wrap: wrap; gap: 6px 12px; min-height: 0; padding-top: 10px; }
@@ -458,6 +516,7 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
   .kpi__icon .bt { width: 19px; height: 19px; }
   .luoi-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .bieu-do { height: 260px; }
+  .tt-luoi { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 480px) {
   .ten-trang__chu { display: none; }

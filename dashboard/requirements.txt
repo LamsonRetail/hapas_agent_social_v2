@@ -13,3 +13,6 @@ httpx==0.28.1
 psycopg[binary]==3.2.9
 # đồng bộ BigQuery (dashboard/dong_bo_bq.py); chỉ dùng khi đặt BQ_DATASET
 google-cloud-bigquery==3.34.0
+# mã hoá token TikTok Ads (AES-256-GCM, dashboard/tiktok_ads.py, 19/10/2026). VPS venv đã có 50.0.2
+# (kéo theo google-cloud-bigquery); venv Mark 48.0.1 — dải này hợp cả hai.
+cryptography>=48,<51

@@ -942,8 +942,9 @@ def test_kho_theo_quy_chuan_mo_ta_bi():
         encoding="utf-8")
     bang = re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", sql, re.DOTALL)
     # + lich_quet (15/10), kiem_do_phu (17/10/2026), han_muc_apify (18/10/2026),
-    # don_vi + quyen (phân quyền theo bên, 19/10/2026)
-    assert len(bang) == 15
+    # don_vi + quyen (phân quyền theo bên, 19/10/2026), ket_noi_ngoai + tk_quang_cao + qc_tk_ngay +
+    # qc_campaign_ngay + qc_ad_ngay + qc_khan_gia (TikTok Ads, 19/10/2026)
+    assert len(bang) == 21
     # Cột thêm bằng ALTER (không nằm trong khối CREATE) cũng phải có mô tả.
     assert re.search(r"COMMENT ON COLUMN luot_quet\.lich_id IS '.{10,}';", sql)
     for ten, khoi in bang:

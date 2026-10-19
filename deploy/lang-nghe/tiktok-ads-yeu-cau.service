@@ -1,0 +1,52 @@
+# /etc/systemd/system/tiktok-ads-yeu-cau.service — lượt đồng bộ TikTok Ads KHI CÓ YÊU CẦU ("Đồng bộ ngay")
+# (dashboard/tiktok_ads.py, 19/10/2026). Bộ hẹn giờ tiktok-ads-yeu-cau.timer gọi mỗi 10 phút; không có yêu cầu thì thoát ngay.
+# Chạy bằng user của dashboard (lang_nghe_web: role Postgres trùng tên, peer auth) với cùng venv + .env
+# (TIKTOK_KHOA_MA_HOA, BQ_*). Chưa kết nối / token hết hạn: ghi trạng thái rồi thoát 0 (không đỏ).
+# Lần đầu mỗi tài khoản nạp lùi 90 ngày — có thể chạy vài chục phút; hai bộ hẹn giờ (06:30 và
+# 10 phút theo yêu cầu) và lệnh tay không bao giờ chạy chồng (khoá advisory Postgres). README mục 7.
+[Unit]
+Description=Dong bo TikTok Ads khi co yeu cau tu dashboard
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lang_nghe_web
+Group=lang_nghe_web
+EnvironmentFile=/opt/lang-nghe/.env
+Environment=HOME=/opt/lang-nghe
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/lang-nghe/app
+ExecStart=/opt/lang-nghe/venv/bin/python -m dashboard.tiktok_ads dong-bo --chi-khi-yeu-cau
+# Nạp lùi 90 ngày của tài khoản lớn: nhiều nghìn lượt gọi tuần tự. Quá 6 giờ thì dừng (lượt sau
+# đọc tiếp phần còn thiếu — mốc tk_quang_cao.nap_lui_tu ghi sau mỗi cửa sổ 30 ngày; upsert không nhân đôi).
+TimeoutStartSec=6h
+Nice=10
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=64
+# hardening — như lang-nghe-dashboard.service
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+InaccessiblePaths=-/opt/mark
+ProtectProc=invisible
+ProcSubset=pid
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# AF_UNIX: socket Postgres (peer). AF_INET/6: gọi RA business-api.tiktok.com + BigQuery.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+ProtectHostname=yes
+ProtectClock=yes
+SystemCallArchitectures=native
+UMask=0077

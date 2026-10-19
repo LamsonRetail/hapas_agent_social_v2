@@ -29,7 +29,8 @@ Mô tả bảng và cột theo quy chuẩn BI (task Lark t280613, skill `lsr-bq-
 
 ```bash
 sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
-sudo -u postgres psql -d lang_nghe -c '\dt'        # 15 bảng (lich_quet 15/10, kiem_do_phu 17/10, han_muc_apify 18/10, don_vi + quyen 19/10/2026)
+sudo -u postgres psql -d lang_nghe -c '\dt'        # 21 bảng (lich_quet 15/10, kiem_do_phu 17/10, han_muc_apify 18/10, don_vi + quyen 19/10/2026,
+# TikTok Ads 19/10/2026: ket_noi_ngoai, tk_quang_cao, qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay, qc_khan_gia)
 ```
 
 `lock_timeout=5s` cần khi DB đang chạy. Lệnh `ALTER TABLE` (ví dụ thêm `luot_quet.lich_id`) xin khoá độc quyền trên bảng.
@@ -49,7 +50,7 @@ Chạy lại file này nhiều lần không hỏng gì.
 
 Quyền của Mark:
 
-- **Đọc:** `du_an`, `nguon`, `don_vi`; `lich_quet` chỉ các cột Mark dùng (không đọc email người tạo/sửa); `nguoi_xem (email, vai_tro, la_quan_tri)` + `quyen (email, don_vi, vai_tro)` cho hỏi đáp số liệu (chỉ trả số dự án của bên người hỏi, từ 19/10/2026).
+- **Đọc:** `du_an`, `nguon`, `don_vi`; TikTok Ads (19/10/2026): `tk_quang_cao`, `qc_*` và ĐÚNG 6 cột không bí mật của `ket_noi_ngoai` (nha_cung_cap, loai, trang_thai, refresh_het_luc, goi_ok_luc, loi_cuoi — không bao giờ cột token); `lich_quet` chỉ các cột Mark dùng (không đọc email người tạo/sửa); `nguoi_xem (email, vai_tro, la_quan_tri)` + `quyen (email, don_vi, vai_tro)` cho hỏi đáp số liệu (chỉ trả số dự án của bên người hỏi, từ 19/10/2026).
 - **Ghi:** `bai`, `chi_so_ngay`, `luot_quet`, `de_xuat`; `kiem_do_phu` chỉ thêm dòng (kiểm độ phủ 2 lần/tuần, từ 17/10/2026); `han_muc_apify` chỉ thêm dòng (ảnh chụp hạn mức gói Apify cho trang Ngân sách sau mỗi lượt và mỗi 3 giờ, từ 18/10/2026 — dashboard không giữ token Apify).
 - **Chỉ sửa:** cột lần quét và lỗi của `nguon`; cột trạng thái chạy của `lich_quet` (`lan_chay_ke`, `lan_chay_cuoi`, `ket_qua_cuoi`, `so_lan_chay`).
 - **Không được:** thêm hay xoá nguồn, sửa dự án, sửa ngân sách, tạo/sửa/xoá lịch.
@@ -131,6 +132,45 @@ sudo -u mark psql -d lang_nghe -c "select id, trang_thai, so_nguon, bai_moi, chi
 Gõ `/theodoi hapas` trong chat riêng với Mark. Mark trả về mã việc ngay; quét xong Mark nhắn kết quả, có chi phí thật kèm theo.
 
 Thứ tự quét: YouTube trước vì miễn phí, rồi Instagram, TikTok, Facebook.
+
+## 7. TikTok Ads (19/10/2026, chủ dự án chốt)
+
+Dashboard đọc số quảng cáo TikTok qua TikTok for Business MCP (OAuth của một quản trị viên, chỉ công cụ ĐỌC — `dashboard/tiktok_ads.py`; xem `dashboard/README.md` mục "TikTok Ads"). Thứ tự triển khai: **khoá → schema → mã → bộ hẹn giờ → BigQuery → kết nối**.
+
+```bash
+# a. Khoá mã hoá token (32 byte base64) — một lần; không dán vào chat/log/commit
+echo "TIKTOK_KHOA_MA_HOA=$(openssl rand -base64 32)" | sudo tee -a /opt/lang-nghe/.env >/dev/null
+sudo stat -c '%a %U' /opt/lang-nghe/.env          # vẫn 600 root
+
+# b. Schema (6 bảng mới + quyền; chạy lại không hỏng) TRƯỚC mã mới
+sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
+
+# c. Mã dashboard (rsync như dashboard/README.md bước 2) rồi
+sudo systemctl restart lang-nghe-dashboard
+
+# d. HAI bộ hẹn giờ (user lang_nghe_web, cùng venv + .env với dashboard):
+#    tiktok-ads-dong-bo  — mỗi ngày 06:30 giờ VN
+#    tiktok-ads-yeu-cau  — mỗi 10 phút, chỉ chạy khi quản trị viên bấm "Đồng bộ ngay" / vừa kết nối
+#    (dashboard KHÔNG chạy đồng bộ trong tiến trình web, chỉ ghi cờ yêu cầu)
+sudo install -o root -g root -m 0644 deploy/lang-nghe/tiktok-ads-dong-bo.service   deploy/lang-nghe/tiktok-ads-dong-bo.timer deploy/lang-nghe/tiktok-ads-yeu-cau.service   deploy/lang-nghe/tiktok-ads-yeu-cau.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now tiktok-ads-dong-bo.timer tiktok-ads-yeu-cau.timer
+systemctl list-timers 'tiktok-ads-*'
+/opt/lang-nghe/venv/bin/python -c "import cryptography; print(cryptography.__version__)"   # ≥ 48
+# in trạng thái (không in token) — chạy đúng user + .env của dịch vụ
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env   -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.tiktok_ads trang-thai
+# chạy một lượt ngay (thay vì đợi 06:30): sudo systemctl start tiktok-ads-dong-bo.service
+```
+
+e. **BigQuery** (khi đã bật `BQ_DATASET`): chạy khối "TikTok Ads" ở cuối `deploy/lang-nghe/bigquery.sql` (5 bảng `tk_quang_cao`, `qc_tk_ngay`, `qc_campaign_ngay`, `qc_ad_ngay`, `qc_khan_gia` — mô tả 11 nhãn) TRƯỚC khi bật mã mới; chủ dự án duyệt trước khi chạy. Bộ hẹn giờ đẩy BigQuery ngay sau mỗi lượt đồng bộ có dòng mới.
+
+f. **Kết nối**: quản trị viên mở `https://social.hapas.vn/quan-tri#tiktok` → "Đăng nhập TikTok để kết nối" → đăng nhập TikTok for Business bằng tài khoản thấy đủ các tài khoản quảng cáo → Authorize. Dashboard tự đăng ký client OAuth (không cần app developer, không cần khai redirect URL), lưu token mã hoá, đọc tài khoản (gán bên MATEMADE/HAPAS tự động), rồi ghi yêu cầu đồng bộ: trong ≤ 10 phút bộ hẹn giờ `tiktok-ads-yeu-cau` bắt đầu nạp 90 ngày (tài khoản lớn mất vài chục phút tới vài giờ; bị ngắt thì lượt sau đọc tiếp). Kiểm bảng "Tài khoản quảng cáo → bên".
+
+- **Gia hạn**: mỗi lần đăng nhập dùng được đúng **30 ngày** (TikTok không gia hạn khi làm mới). Thẻ đếm ngược (vàng < 7 ngày, đỏ < 2 ngày); Mark nhắn trước 7/3/1 ngày tới `MARK_TIKTOK_NHAC` (`oc_…`/`ou_…` trong `/opt/mark/app/.env`, trống thì `MARK_LICH_QUET_BAO_LOI`). Gia hạn = bấm "Đăng nhập lại để gia hạn 30 ngày".
+- **Chuyển sang token API không hết hạn**: tạo app trên TikTok for Business Developer (chỉ quyền đọc báo cáo/tài khoản), lấy "API access token", dán vào ô "Dùng token API không hết hạn" trên thẻ. Dashboard thử đọc trước khi lưu; `loai` đổi thành `api_token`, thẻ hiện "Không hết hạn", Mark thôi nhắc. Muốn quay lại OAuth: bấm Đăng nhập lại.
+- **Ngắt**: nút "Ngắt kết nối" thu hồi token phía TikTok và xoá khỏi DB (số đã đồng bộ giữ nguyên).
+- **Kiểm**: `journalctl -u tiktok-ads-dong-bo -u tiktok-ads-yeu-cau -n 50` (mỗi lượt in một dòng JSON tóm tắt, không token); `sudo -u lang_nghe_web psql -d lang_nghe -c "select trang_thai, refresh_het_luc, dong_bo_ok_luc, dong_bo_so_dong, dong_bo_loi from ket_noi_ngoai"`.
+- **Đồng bộ lại một khoảng**: lệnh `systemd-run` như trên với `dong-bo --tu 2026-09-01 --den 2026-09-30` (hoặc `dong-bo --bu 30`); không chạy chồng với bộ hẹn giờ (khoá advisory — lượt sau tự bỏ qua).
 
 ## Vận hành
 
