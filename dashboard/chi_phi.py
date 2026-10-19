@@ -784,17 +784,19 @@ def duong1_tu(du_an: dict) -> list[str] | None:
 def tu_threads_duong1(du_an: dict, tu: list[str]) -> tuple[list[str], str]:
     """Bản sao `theo_doi.tu_threads_duong1` (18/10/2026): từ khoá ĐƯỜNG 1 Threads (futurizerush) —
     `duong1_tu` nếu có, không thì chỉ từ MỘT chữ có tên brand (cụm nhiều chữ chỉ gửi đường 2);
-    rỗng thì tên brand. Ước tính đường 1 tính trên đúng danh sách này."""
+    rỗng = đường 1 TẮT (19/10/2026, không rơi về tên brand / mã dự án) → ước tính đường 1 = 0.
+    Ước tính đường 1 tính trên đúng danh sách này."""
     ten = ten_brand(du_an)
     rieng = duong1_tu(du_an)
     if rieng is not None:
         ra, ly = tu_nen_tang(du_an, "threads", rieng), "theo cấu hình duong1_tu"
+        if not ra:
+            ly = ("duong1_tu rỗng" if not rieng else "duong1_tu chỉ còn từ bị bo_tu") \
+                + " — tắt đường 1"
     else:
         ra, ly = [kw for kw in tu if _mot_chu_co_brand(kw, ten)], "từ một chữ có tên brand"
-    if not ra and ten:
-        ra = [next((t for t in ten if _mot_chu(t)), "") or _khoa_tag(ten[0])]
-        ly = ("duong1_tu rỗng" if rieng is not None else "không có từ một chữ có tên brand") \
-            + " — tìm tên brand"
+        if not ra:
+            ly = "không có từ một chữ có tên brand — tắt đường 1"
     da: set[str] = set()
     gon = []
     for x in ra:                     # bỏ trùng như actor nhận ("#HAPAS" = "hapas")
@@ -863,6 +865,12 @@ def bang_cau_hinh(du_an: dict) -> dict:
     # số từ gửi tính trên đúng danh sách Mark gửi futurizerush; đường 2 vẫn mọi từ khoá.
     tu_d1 = tu_threads_duong1(du_an, tu_nt["threads"])[0] if tu_nt["threads"] else []
     tk["threads"]["tu_duong1"] = tu_d1
+    # Cho trình duyệt tính lại khi gõ ô "Không tìm trên Threads" (19/10/2026): danh sách đường 1
+    # TRƯỚC khi bỏ `bo_tu` (ghi đè `duong1_tu` hoặc từ một chữ có tên brand) — lọc `bo_tu` xong mà
+    # rỗng thì đường 1 tắt, ước tính 0 (`ngan_sach.js`, = `tu_threads_duong1`).
+    rieng = duong1_tu(du_an)
+    tk["threads"]["duong1_goc"] = (rieng if rieng is not None else
+                                   [kw for kw in tu if _mot_chu_co_brand(kw, ten_brand(du_an))])
     for p in NEN_TANG:
         tu_p = (tag_cua(du_an, p, tu) if p == "instagram" else tu_d1 if p == "threads"
                 else tu_nt[p])

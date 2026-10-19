@@ -220,6 +220,15 @@
     return tagP("instagram", doc).map(tagIg).filter(function (t, i, ds) { return t && ds.indexOf(t) === i; });
   }
   // </bo_tu>
+  // Threads đường 1 (19/10/2026, = chi_phi.tu_threads_duong1): danh sách gốc máy chủ phát (`th1_goc`
+  // — ghi đè duong1_tu hoặc từ một chữ có tên brand) bỏ "Không tìm trên Threads" đang gõ; rỗng =
+  // đường 1 tắt → ước tính đường 1 = 0 (chỉ còn đường 2). Trang cũ không có `th1_goc`: như trước.
+  function tuD1(doc) {
+    if (!Array.isArray(D.th1_goc)) return tuP("threads", doc);
+    var bo = {};
+    boTu("threads", doc).forEach(function (x) { bo[khoaBo(x)] = 1; });
+    return D.th1_goc.filter(function (x) { return !bo[khoaBo(x)]; });
+  }
   function uocBl(p, so, moi) {       // = chi_phi.uoc_binh_luan_luot
     moi = moi || hs.bl_uoc_moi_bai;
     var gia = (hs.bl_gia || {})[p] || 0;
@@ -289,7 +298,8 @@
       var a = cauHinh(doc, "tk", p);
       var b = cauHinh(doc, "bl", p);
       a.tu = tuP(p, doc);
-      a.uoc = a.bat ? uocTk(p, a.so_bai, a.so_tu, a.boc, a.tu, ig) : 0;
+      a.uoc = a.bat ? uocTk(p, a.so_bai, a.so_tu, a.boc,
+        p === "threads" && a.tu.length ? tuD1(doc) : a.tu, ig) : 0;
       if (p === "threads") {
         a.th2 = cauHinhTh2(doc, a);
         a.uoc = r4(a.uoc + a.th2.uoc);

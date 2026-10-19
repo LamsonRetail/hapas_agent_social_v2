@@ -50,7 +50,7 @@ def test_chi_tu_mot_chu_co_ten_brand_vao_duong_1():
     assert T.tu_threads_duong1(mm, ["hapas", "matemade", "mate made"])[0] == ["hapas", "matemade"]
 
 
-def test_ghi_de_duong1_tu_va_rong_thi_tim_ten_brand():
+def test_ghi_de_duong1_tu_va_rong_thi_tat_duong_1():
     th = {"bat": True, "duong1_tu": ["hapas", " túi   hapas ", "HAPAS", 7, "", "hapasvn"],
           "bo_tu": ["hapasvn"]}
     da = dict(DU_AN, tu_khoa=TU_DO, cau_hinh={"tu_khoa": {"threads": th}})
@@ -60,17 +60,27 @@ def test_ghi_de_duong1_tu_va_rong_thi_tim_ten_brand():
     # Không phải danh sách: như thiếu → luật một chữ.
     rac = dict(da, cau_hinh={"tu_khoa": {"threads": {"duong1_tu": "hapas"}}})
     assert T.duong1_tu(rac) is None and T.tu_threads_duong1(rac, TU_DO)[0][0] == "hapas"
-    # Rỗng sau khi lọc → tên brand.
+    # Soát PR #76 (19/10/2026): rỗng thì TẮT đường 1 — không rơi về tên brand / mã dự án.
     rong = dict(da, cau_hinh={"tu_khoa": {"threads": {"duong1_tu": ["hapasvn"],
                                                       "bo_tu": ["hapasvn"]}}})
-    assert T.tu_threads_duong1(rong, TU_DO) == (["HAPAS"], "duong1_tu rỗng — tìm tên brand")
+    assert T.tu_threads_duong1(rong, TU_DO) == ([], "duong1_tu chỉ còn từ bị bo_tu — tắt đường 1")
+    tat = dict(da, cau_hinh={"tu_khoa": {"threads": {"duong1_tu": []}}})
+    assert T.tu_threads_duong1(tat, TU_DO) == ([], "duong1_tu rỗng — tắt đường 1"), \
+        "`duong1_tu: []` có chủ ý = tắt đường 1"
     chi_cum = ["túi hapas", "quà tặng hapas"]
     assert T.tu_threads_duong1(dict(DU_AN, tu_khoa=chi_cum), chi_cum) == (
-        ["HAPAS"], "không có từ một chữ có tên brand — tìm tên brand")
-    # Tên brand nhiều chữ: dạng viết liền.
-    hai = {"ma": "mm", "ten": "Mate Made", "tu_khoa": ["túi mate made"]}
-    assert T.tu_threads_duong1(hai, ["túi mate made"])[0] == ["mm"], "mã dự án một chữ đứng sau tên"
-    assert T.tu_threads_duong1({"ten": "Mate Made"}, ["túi mate made"])[0] == ["matemade"]
+        [], "không có từ một chữ có tên brand — tắt đường 1")
+    # `bo_tu` = ["hapas"] thì đường 1 KHÔNG tìm "HAPAS" (luật bo_tu thắng).
+    bo = dict(DU_AN, tu_khoa=["hapas", "túi hapas"],
+              cau_hinh={"tu_khoa": {"threads": {"bo_tu": ["hapas"]}}})
+    assert T.tu_threads_duong1(bo, T.tu_nen_tang(bo, "threads", T.tu_tim(bo)))[0] == []
+    # Tên brand nhiều chữ: không tìm theo mã dự án ("kdla") hay tên viết liền.
+    kdla = {"ma": "kdla", "ten": "Khu Du Lịch A", "tu_khoa": ["khu du lịch a"]}
+    assert T.tu_threads_duong1(kdla, ["khu du lịch a"])[0] == []
+    assert T.tu_threads_duong1({"ten": "Mate Made"}, ["túi mate made"])[0] == []
+    for d in (rong, tat, bo, kdla):
+        tu = T.tu_nen_tang(d, "threads", T.tu_tim(d))
+        assert CP.tu_threads_duong1(d, tu) == T.tu_threads_duong1(d, tu), d
 
 
 def test_dashboard_cung_danh_sach_va_cung_uoc_tinh():
@@ -99,6 +109,22 @@ def test_dashboard_cung_danh_sach_va_cung_uoc_tinh():
     b = CP.bang_cau_hinh(dict(DU_AN, tu_khoa=TU_DO, tk_bat=True, tk_so_bai=40,
                               cau_hinh={"tu_khoa": {"threads": {"bat": True}}}))
     assert b["tu_khoa"]["threads"]["so_tu_gui"] == 4                 # 40 bài → 4 từ đầu
+
+
+@pytest.mark.parametrize("th", [{"bo_tu": ["hapas"]}, {"duong1_tu": []}])
+def test_dashboard_duong_1_tat_thi_0_usd(th):
+    """Đường 1 tắt (19/10/2026): ước tính Threads chỉ còn đường 2, khớp lượt chạy + giữ chỗ."""
+    da = dict(DU_AN, tu_khoa=["hapas", "túi hapas"], tk_bat=True, tk_so_bai=40,
+              cau_hinh={"tu_khoa": {"threads": {"bat": True, **th}}})
+    assert T.uoc_threads_1(da) == 0.0
+    b = CP.bang_cau_hinh(da)
+    t = b["tu_khoa"]["threads"]
+    assert t["tu_duong1"] == [] and t["so_tu_gui"] == 0
+    assert t["uoc"] == pytest.approx(t["duong2"]["uoc"], abs=1e-9) and t["uoc"] > 0
+    assert b["uoc_tk"] == pytest.approx(T.uoc_tu_khoa_du_an(da, fb_toi_da=10 ** 6), abs=1e-4)
+    assert T.giu_cho_tu_khoa(da) == pytest.approx(T.uoc_tu_khoa_du_an(da), abs=1e-4)
+    # Trình duyệt tính lại theo danh sách gốc (trước `bo_tu`) máy chủ phát.
+    assert t["duong1_goc"] == ([] if "duong1_tu" in th else ["hapas"])
 
 
 def test_uoc_tinh_theo_san_luong_tinh_tren_tu_duong_1():
@@ -141,6 +167,24 @@ def test_theodoi_duong_1_loi_phieu_van_ghi_tu(mo):  # noqa: F811
     assert tk["pheu"]["threads"]["loi"] and tk["pheu"]["threads"]["duong1"]["tu"] == ["hapas"]
 
 
+@pytest.mark.parametrize("th", [{"bo_tu": ["hapas"]}, {"duong1_tu": []}])
+def test_theodoi_duong_1_tat_chi_chay_duong_2(mo, th):  # noqa: F811
+    """Soát PR #76 (19/10/2026): không có từ một chữ có tên brand sau `bo_tu` / `duong1_tu: []`
+    → KHÔNG gọi futurizerush (không 0,08 USD khởi động), đường 2 vẫn chạy, phễu ghi lý do."""
+    GiaKhoTk(mo)
+    goi: list = []
+    mo.setattr(A, "_FETCH", _fetch(goi, {"threads": _d1(), T.TH2_KHOA: _d2()}))
+    tk = _chay_tk(_da(**th))
+    assert [g[0] for g in goi] == [T.TH2_KHOA], "chỉ đường 2"
+    f = tk["pheu"]["threads"]
+    assert "tắt đường 1" in f["bo_qua"] and f["duong1"]["tu"] == []
+    assert "hapas" not in f["duong1"]["chi_duong2"] if th.get("bo_tu") else \
+        f["duong1"]["chi_duong2"] == TU
+    assert any(c.startswith("tìm Threads: bỏ qua (") and "tắt đường 1" in c
+               for c in T._cau_tk(tk))
+    assert tk["pheu"][T.TH2_KHOA]["ve"] == len(_d2()) and tk["usd"] < 0.08
+
+
 def test_theodoi_ghi_de_duong1_tu(mo):  # noqa: F811
     GiaKhoTk(mo)
     goi: list = []
@@ -163,7 +207,8 @@ def test_social_listen_tach_hai_duong_bo_trung_giu_ban_duong_1(monkeypatch):
     (p2, q2, l2, ngay2, k2), (p1, q1, l1, _, k1) = goi
     # Trần bài chia theo số từ khoá: 1 từ một chữ / 2 cụm ("#hapas" trùng "hapas").
     assert (p2, q2, l2) == (T.TH2_KHOA, ["túi hapas", "quà tặng hapas"], 67)
-    assert (p1, q1, l1, k1) == ("threads", ["hapas"], 33, {})
+    # Hai run CHIA trần console Threads 5 USD (19/10/2026): đường 1 lấy phần còn lại.
+    assert (p1, q1, l1, k1) == ("threads", ["hapas"], 33, {"tran_usd": 4.9})
     # Đường 2 lọc "trong N ngày tới hôm nay": xin tới BÂY GIỜ để bao trọn khoảng ngày cũ; trần USD
     # = max(sàn 0,1; 67 × 0,001 × 1,5).
     assert ngay2 >= 9 and k2 == {"moi_tu": 34, "tran_usd": 0.1}
@@ -179,6 +224,7 @@ def test_social_listen_tach_hai_duong_bo_trung_giu_ban_duong_1(monkeypatch):
     goi.clear()
     A._tim_threads_tai_cho(["hapas"], 30, "VN", tu, den)
     assert [(g[0], g[1], g[2]) for g in goi] == [("threads", ["hapas"], 30)]
+    assert goi[0][4] == {}, "một đường: trần console nguyên vẹn (`_call` tự đọc)"
     goi.clear()
     A._tim_threads_tai_cho(["túi hapas"], 30, "VN", tu, den)
     assert [g[0] for g in goi] == [T.TH2_KHOA], "chỉ cụm: không trả 0,08 khởi động futurizerush"
@@ -223,8 +269,11 @@ def test_social_listen_uoc_tinh_va_handle(quet, monkeypatch):  # noqa: F811
 
 # ───────────────────────────── social_listen nền (quet_lon) ─────────────────────────────
 def test_quet_nen_cum_thanh_mot_luot_duong_2():
-    ts = {"queries": ["hapas", "túi hapas"], "date_from": "2026-09-01", "date_to": "2026-09-30",
-          "country": "VN"}
+    # Khoảng tới HÔM NAY (khoảng cũ thì không có đường 2 — `test_khoang_cu_khong_chay_duong_2`).
+    hom_nay = datetime.datetime.now(A._VN_TZ).date()
+    ts = {"queries": ["hapas", "túi hapas"],
+          "date_from": f"{hom_nay - datetime.timedelta(days=30):%Y-%m-%d}",
+          "date_to": f"{hom_nay:%Y-%m-%d}", "country": "VN"}
     kh = Q.ke_hoach(["hapas", "túi hapas"], ["threads"], {"threads": 200}, ts, 45, {})
     x = kh["nen_tang"]["threads"]
     th1 = [ph for ph in x["phan"] if ph.get("kieu") != "duong2"]
@@ -235,7 +284,7 @@ def test_quet_nen_cum_thanh_mot_luot_duong_2():
     assert th2["actor"] == A._ACTORS["threads_2"] and th2["payload"] == {
         "keywords": ["túi hapas"], "searchType": "both", "passesPerSurface": A.TH2_LUOT,
         "maxPostsPerKeyword": 100, "maxItems": 100, "postedWithinDays": th2["ngay"]}
-    assert th2["ngay"] >= (datetime.datetime.now(A._VN_TZ).date() - datetime.date(2026, 9, 1)).days
+    assert th2["ngay"] >= 30
     assert th2["uoc_usd"] == pytest.approx(100 * 0.001), "0,001/bài, không phí khởi động"
     assert any("chỉ tìm qua scrapersdelight" in c for c in x["ghi_chu"])
     # Dữ liệu về: đọc bằng bộ đọc đường 2; sổ tiền theo giá của phần.
@@ -305,3 +354,85 @@ def test_uoc_khong_doi_cho_tu_mot_chu_va_khong_lam_cham(mo):  # noqa: F811
     v = GiaViec({}, [])
     contextvars.copy_context().run(T._tim_tu_khoa, v, da, 3, 5.0, time.monotonic() + 600)
     assert [(g[0], g[1]) for g in goi] == [("threads", ["hapas", "hapasvn"])]
+
+
+# ───────────────────────────── khoảng ngày cũ (soát PR #76, 19/10/2026) ─────────────────────────────
+def _khoang(lui_den: int, dai: int = 30):
+    """(d_from, d_to) VN: kết thúc `lui_den` ngày trước hôm nay, dài `dai` ngày."""
+    ngay = datetime.datetime.now(A._VN_TZ).date() - datetime.timedelta(days=lui_den)
+    den = A._parse_date(f"{ngay:%Y-%m-%d}", end=True)
+    return den - datetime.timedelta(days=dai), den
+
+
+def test_ly_do_bo_duong_2_theo_ngay_ket_thuc():
+    assert A.ly_do_bo_duong_2(_khoang(0)[1]) == "" and A.ly_do_bo_duong_2(_khoang(2)[1]) == ""
+    ly = A.ly_do_bo_duong_2(_khoang(3)[1])
+    assert "cũ hơn hôm nay 3 ngày" in ly and "scrapersdelight" in ly and "futurizerush" in ly
+    # Khoảng cũ: mọi từ khoá (cả cụm) đi futurizerush như trước 18/10; không `d_to` thì như cũ.
+    q = ["hapas", "túi hapas", "#HAPAS"]
+    assert A.tach_tu_threads(q, _khoang(60)[1]) == (["hapas", "túi hapas"], [])
+    assert A.tach_tu_threads(q, _khoang(1)[1]) == A.tach_tu_threads(q) == (["hapas"], ["túi hapas"])
+    # `postedWithinDays` kẹp: schema chỉ có minimum 0 (0 = không lọc) → 1 ≤ N ≤ hằng.
+    bay = datetime.datetime.now(A._VN_TZ)
+    assert A.ngay_th2(bay - datetime.timedelta(days=900), bay) == A.TH2_NGAY_TOI_DA
+    assert A.ngay_th2(bay, bay) == 1
+    assert Q.dung_payload("threads", {"kieu": "duong2", "tu_khoa": ["túi hapas"], "limit": 10,
+                                      "ngay": 9999}, {})["postedWithinDays"] == A.TH2_NGAY_TOI_DA
+
+
+def test_khoang_cu_khong_chay_duong_2(monkeypatch):
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (1000, 5.0, True))
+    goi: list = []
+    monkeypatch.setattr(A, "_FETCH", _fetch(goi, {"threads": _d1(), T.TH2_KHOA: _d2()}))
+    tu, den = _khoang(50)
+    A._tim_threads_tai_cho(["hapas", "túi hapas"], 100, "VN", tu, den)
+    assert [(g[0], g[1], g[2], g[4]) for g in goi] == [("threads", ["hapas", "túi hapas"], 100, {})]
+    # Ước tính USD + giây cùng đường: không có run scrapersdelight.
+    assert A.uoc_threads_tai_cho(["túi hapas"], 100, den) == pytest.approx((0.08 + 0.25, 0.33))
+    t1 = Q.toc(A._ACTORS["threads"])
+    assert Q.giay_tai_cho(["threads"], {"threads": 100}, ["hapas", "túi hapas"], den) == round(
+        15 + 100 / t1, 1)
+    # Việc nền: không lượt đường 2, cụm thành lượt futurizerush theo cửa sổ ngày, ghi chú nói rõ.
+    ts = {"queries": ["hapas", "túi hapas"], "date_from": f"{tu:%Y-%m-%d}",
+          "date_to": f"{den:%Y-%m-%d}", "country": "VN"}
+    x = Q.ke_hoach(["hapas", "túi hapas"], ["threads"], {"threads": 200}, ts, 45, {})["nen_tang"][
+        "threads"]
+    assert all(ph.get("kieu") != "duong2" for ph in x["phan"])
+    assert {ph["tu_khoa"] for ph in x["phan"]} == {"hapas", "túi hapas"}
+    assert all(ph["actor"] == A._ACTORS["threads"] for ph in x["phan"])
+    assert any("scrapersdelight chỉ lọc" in c for c in x["ghi_chu"])
+
+
+def test_social_listen_khoang_cu_ghi_ly_do(quet, monkeypatch):  # noqa: F811
+    chay, _ = quet
+    goi: list = []
+    monkeypatch.setattr(A, "_tran_nen_tang", lambda p, *a, **k: (500, 1.0, True))
+    tu, den = _khoang(45)
+    d1 = A._chuan_threads(copy.deepcopy(MAU["tim_kiem_1"]))
+    for p, f in _fetch(goi, {"threads": d1, T.TH2_KHOA: _d2()}).items():
+        monkeypatch.setitem(A._FETCH, p, f)
+    kq = chay(queries=["hapas", "túi hapas"], date_from=f"{tu:%Y-%m-%d}",
+              date_to=f"{den:%Y-%m-%d}")
+    assert [g[0] for g in goi] == ["threads"], "không trả tiền scrapersdelight cho bài ngoài khoảng"
+    assert "scrapersdelight chỉ lọc" in kq["per_platform"]["threads"]["duong2_bo_qua"]
+    # Khoảng tới hôm nay: không có câu này.
+    goi.clear()
+    kq = chay(queries=["hapas", "túi hapas"])
+    assert "duong2_bo_qua" not in kq["per_platform"]["threads"]
+
+
+# ───────────────────────────── LOW: chia bài / chia trần ─────────────────────────────
+def test_chia_limit_khong_vuot_tran_va_chia_tran_console():
+    for so1, so2, lim in [(1, 1, 1), (1, 1, 0), (1, 1, 2), (3, 1, 2), (1, 5, 3), (2, 2, 101)]:
+        l1, l2 = A.chia_limit_threads(so1, so2, lim)
+        assert l1 + l2 == lim and l1 >= 0 and l2 >= 0, (so1, so2, lim)
+        if lim >= 2:
+            assert l1 >= 1 and l2 >= 1
+    assert A.chia_limit_threads(1, 1, 1) == (1, 0)
+    # Hai run cùng lượt: tổng trần = trần console (≥ 0,2); một run thì để `_call` đọc trần console.
+    assert A.chia_tran_threads(1.0, 67, True) == (0.9, 0.1)
+    assert A.chia_tran_threads(0.3, 1000, True) == (0.1, 0.2)
+    assert A.chia_tran_threads(5.0, 67, False) == (None, 0.1)
+    for tran in (0.2, 0.25, 1.0, 3.3):
+        t1, t2 = A.chia_tran_threads(tran, 5000, True)
+        assert t1 + t2 == pytest.approx(tran) and min(t1, t2) >= A._TRAN_USD_KHOANG[0]
