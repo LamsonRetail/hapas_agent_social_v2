@@ -533,8 +533,8 @@ async def _nguoi(request: Request) -> dict:
 
 
 async def _co_qc(app: FastAPI, q: dict) -> bool:
-    """Mục "Quảng cáo TikTok" trên menu: quản trị viên luôn thấy; người khác khi có quyền ở ít
-    nhất một bên đã có tài khoản quảng cáo (`quang_cao.thay_trang_qc`). Bên có tài khoản nhớ
+    """Mục "Quảng cáo TikTok" trên menu + trang + /api/qc: từ 20/10/2026 CHỈ quản trị viên
+    (`quang_cao.thay_trang_qc`; người khác hỏi Mark, trả lời bằng chữ). Bên có tài khoản nhớ
     `NHO_BEN_QC_GIAY`; kho quảng cáo chưa dùng được (chưa chạy schema.sql) = không có."""
     if PQ.la_quan_tri(q):
         return True
@@ -2584,6 +2584,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.get("/api/qc")
     async def api_qc(request: Request):
         nguoi = await _nguoi(request)
+        if not nguoi.get("co_qc"):
+            return JSONResponse({"loi": "Không có quyền xem trang quảng cáo."}, status_code=404)
         try:
             d = await _qc_cho(nguoi, request.query_params, nghiem=True)
         except NL.LoiNhap as e:

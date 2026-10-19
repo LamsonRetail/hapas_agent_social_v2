@@ -8,10 +8,10 @@
 {% block noi_dung %}
 {% macro doi_kpi(o) %}{% if o.doi is not none %}<span class="kpi__doi{% if o.mau_doi and o.doi > 0 %} kpi__doi--tang{% elif o.mau_doi and o.doi < 0 %} kpi__doi--giam{% endif %}">{{ '▲' if o.doi > 0 else ('▼' if o.doi < 0 else '•') }} {{ o.doi|abs|pt_vn }} so với kỳ trước</span>{% elif o.co_truoc is false %}<span class="kpi__doi">kỳ trước chưa có số</span>{% endif %}{% endmacro %}
 {#- 19/10/2026 (chủ dự án): số quảng cáo TikTok theo bên. Máy chủ đã lọc: chỉ bên người xem đọc được,
-    chỉ số TIỀN chỉ có khi d.xem_tien (quản trị viên / quản lý của bên) — template không phải chốt chặn. #}
+    trang chỉ quản trị viên (20/10/2026); chỉ số TIỀN khi d.xem_tien — template không phải chốt chặn. #}
 <div class="dau-muc">
   <div class="dau-muc__chu">
-    <div class="dau-muc__tieu-de"><h1>Quảng cáo TikTok</h1><button type="button" class="goi-y" data-goi-y="Số đọc từ TikTok Ads mỗi sáng 06:30 (đọc lại 7 ngày gần nhất vì chuyển đổi TikTok ghi trễ). Ngày theo múi giờ tài khoản quảng cáo. Chỉ số tiền chỉ quản trị viên và quản lý của bên thấy.">i</button></div>
+    <div class="dau-muc__tieu-de"><h1>Quảng cáo TikTok</h1><button type="button" class="goi-y" data-goi-y="Số đọc từ TikTok Ads mỗi sáng 06:30 (đọc lại 7 ngày gần nhất vì chuyển đổi TikTok ghi trễ). Ngày theo múi giờ tài khoản quảng cáo. Trang này chỉ quản trị viên xem; người có quyền ở bên hỏi Mark để biết số (trả lời bằng chữ).">i</button></div>
     <p class="qc-moi" id="qc-moi">{% if d and d.moi.ngay_cuoi %}Số đến hết ngày {{ d.moi.ngay_cuoi|gio_vn }}{% if dong_bo_luc %}, đồng bộ lúc {{ dong_bo_luc|gio_vn }}{% endif %}{% else %}Chưa có số quảng cáo nào được đồng bộ.{% endif %}</p>
   </div>
 </div>
