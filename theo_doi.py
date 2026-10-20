@@ -2462,22 +2462,7 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
                 tk["ghi_chu"].append(lm["ghi_chu"])
         if cfg["tiktok"]["bat"] and "tiktok_gio_ho_so" not in da_xong \
                 and _nen_tang_dung_duoc("tiktok")[0]:
-            # Cờ giỏ của video chỉ thấy ở feed hashtag (21/10/2026): đọc hồ sơ nhà sáng tạo,
-            # trần `LANG_NGHE_GIO_HO_SO_USD` (mặc định 0,05) trong phần còn của lượt — tính tiền.
-            hs = TDA.gio_ho_so_luot(ma, luot, min(con, _con_viec(v)),
-                                    lambda ph: _them_phan_tk(v, ph))
-            _them_phan_tk(v, {"id": "hs-tiktok", "loai": "moc", "nen_tang": "tiktok_gio_ho_so",
-                              "trang_thai": "xong", "usd_so": hs["usd"],
-                              "so_item": hs["cap_nhat"]})
-            tk["gio_ho_so"] = hs
-            tk["usd"] += hs["usd"]
-            if hs.get("yeu_cau"):
-                tk["ghi_chu"].append(
-                    f"cờ giỏ qua hồ sơ TikTok: {hs['tai_khoan']} tài khoản, {hs['yeu_cau']} yêu cầu "
-                    f"({hs['usd']:.3f} USD), thấy {hs['thay']} video, không đọc lại được "
-                    f"{hs['khong_doc_duoc']}")
-            if hs.get("ghi_chu"):
-                tk["ghi_chu"].append(hs["ghi_chu"])
+            _gio_ho_so_cuoi_luot(v, ma, luot, con, tk)
     finally:
         if tk["pheu"]:
             # Sổ việc nền giữ phễu cùng run id và tiền của từng phần — đối chiếu tiền đi đâu.
@@ -2488,6 +2473,45 @@ def _tim_tu_khoa(v, du_an: dict, luot: int, con: float, han: float) -> dict:
     tk.pop("_nhip", None)
     tk["usd"] = round(tk["usd"], 4)
     return tk
+
+
+#: Giây tối thiểu còn lại của việc để chạy bước đọc hồ sơ cuối lượt (25 yêu cầu × 2–8 giây).
+GIO_HO_SO_CON_GIAY = 240
+
+
+def _gio_ho_so_cuoi_luot(v, ma: str, luot: int, con: float, tk: dict) -> None:
+    """Cờ giỏ của video chỉ thấy ở feed hashtag (21/10/2026): đọc hồ sơ nhà sáng tạo, trần
+    `LANG_NGHE_GIO_HO_SO_USD` (mặc định 0,05) trong phần còn của lượt SAU khi trừ tiền tìm theo từ
+    khoá + làm mới đã tiêu (`tk["usd"]`) — tính tiền vào lượt. Lỗi bước này không làm hỏng lượt
+    (đã ghi bài), chỉ ghi chú; mất quyền kho thì ném như mọi bước khác."""
+    if v.con_giay() < GIO_HO_SO_CON_GIAY:
+        tk["ghi_chu"].append("cờ giỏ qua hồ sơ TikTok: bỏ qua (việc sắp hết giờ)")
+        return
+    phan_dau = len(_phan_tk(v))
+    try:
+        hs = TDA.gio_ho_so_luot(ma, luot, min(max(0.0, con - tk["usd"]), _con_viec(v)),
+                                lambda ph: _them_phan_tk(v, ph),
+                                dung=lambda: v.con_giay() < GIO_HO_SO_CON_GIAY / 3)
+    except Exception as e:
+        if type(e).__name__ == "MatQuyen":
+            raise
+        # Run đã gửi vẫn nằm trong sổ việc (`_KHI_CO_RUN`) nên tiền vẫn được chốt theo run id.
+        usd = round(sum(TDA.TT.GIA_YEU_CAU for ph in _phan_tk(v)[phan_dau:]
+                        if ph.get("nen_tang") == "tiktok_gio_ho_so" and ph.get("run_id")), 4)
+        hs = {"usd": usd, "cap_nhat": 0, "yeu_cau": 0,
+              "ghi_chu": f"cờ giỏ qua hồ sơ: lỗi {type(e).__name__}"}
+    _them_phan_tk(v, {"id": "hs-tiktok", "loai": "moc", "nen_tang": "tiktok_gio_ho_so",
+                      "trang_thai": "xong", "usd_so": hs["usd"], "so_item": hs["cap_nhat"]})
+    tk["gio_ho_so"] = hs
+    tk["usd"] += hs["usd"]
+    if hs.get("yeu_cau"):
+        tk["ghi_chu"].append(
+            f"cờ giỏ qua hồ sơ TikTok: {hs['tai_khoan']} tài khoản, {hs['yeu_cau']} yêu cầu "
+            f"({hs['usd']:.3f} USD), thấy {hs['thay']} video, chưa đọc lại được "
+            f"{hs['khong_doc_duoc']}, bỏ qua {hs.get('bo_qua_nho', 0)} tài khoản đã thử "
+            f"{TDA.NHO_NGAY} ngày")
+    if hs.get("ghi_chu"):
+        tk["ghi_chu"].append(hs["ghi_chu"])
 
 
 def _loi_tim(ma: str, ly: str) -> tuple[str, str]:

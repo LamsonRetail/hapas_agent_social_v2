@@ -679,7 +679,7 @@ def rut_gon(d: dict, phan: list[str], top: int) -> dict:
             "quy_tac": "Theo TỪNG video, chỉ TikTok ngoài Internal channel: KOC affiliate = video "
                        "gắn giỏ TikTok Shop, KOC branding = video không gắn giỏ; chỉ HAI nhóm. "
                        "`chua_doc_lai_duoc` = video chỉ thấy ở feed hashtag mà hồ sơ nhà sáng tạo "
-                       "không đọc lại được (đã xoá / riêng tư / quá cũ) — nói riêng, không gộp. `bai` = số video, `nguoi` = số nhà sáng tạo, "
+                       "chưa đọc lại được (chưa thử, hoặc hồ sơ không còn thấy video) — nói riêng, không gộp. `bai` = số video, `nguoi` = số nhà sáng tạo, "
                        "`quang_cao` = video TikTok đánh dấu quảng cáo; % trên tổng hai nhóm. Số "
                        "theo mọi bộ lọc khác (trừ chính bo_loc.koc). Lọc: bo_loc.koc."}
     if "khung_hoang" in phan:

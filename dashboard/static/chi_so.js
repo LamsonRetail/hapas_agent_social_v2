@@ -2729,7 +2729,7 @@
   // Một câu cho ⓘ của ô lọc + khối KOC (20/10/2026, task t284905).
   var GOI_Y_KOC = "Theo từng video, chỉ TikTok ngoài Internal channel. KOC affiliate = video gắn giỏ TikTok Shop; " +
     "KOC branding = video không gắn giỏ. Video chỉ thấy ở feed hashtag được đọc lại qua hồ sơ nhà sáng tạo; " +
-    "video không đọc lại được (đã xoá, riêng tư, quá cũ) không vào nhóm nào. Chọn thì bài nền tảng khác không khớp; bình luận theo bài.";
+    "video chưa đọc lại được (chưa thử, hoặc hồ sơ không còn thấy video) không vào nhóm nào. Chọn thì bài nền tảng khác không khớp; bình luận theo bài.";
   var TRUONG_G = [
     { k: "nen_tang", ten: "Nền tảng" }, { k: "loai", ten: "Loại nguồn" }, { k: "nguon", ten: "Nguồn", tim: true },
     { k: "sac_thai", ten: "Sắc thái" }, { k: "chu_de", ten: "Chủ đề", tim: true }, { k: "anh_huong", ten: "Ảnh hưởng" },
@@ -3145,7 +3145,7 @@
     // Kỳ / bộ lọc không có video TikTok External channel và không lọc theo KOC: ẩn cả thẻ cho gọn.
     khoi.hidden = !tong.bai && !x.chua_doc_lai && !G.koc.length;
     chua.hidden = !x.chua_doc_lai;
-    chua.textContent = x.chua_doc_lai ? so(x.chua_doc_lai) + " video chưa đọc lại được giỏ (đã xoá / riêng tư / quá cũ) — không tính vào hai nhóm." : "";
+    chua.textContent = x.chua_doc_lai ? so(x.chua_doc_lai) + " video chưa đọc lại được giỏ (chưa thử, hoặc hồ sơ không còn thấy video) — không tính vào hai nhóm." : "";
     giuNut(el, function () {
       xoa(el);
       if (!tong.bai) { el.appendChild(tao("div", "trong", "Không có video TikTok External channel khớp bộ lọc.")); return; }

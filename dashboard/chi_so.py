@@ -104,7 +104,7 @@ def la_kenh_nha(r: dict) -> bool:
 # nguồn `kol` (nguồn KOL/KOC đang theo dõi): hai chiều AND với nhau. NULL = chưa rõ (video
 # chỉ thấy ở feed hashtag — feed không báo giỏ —, bài cũ chưa bù) → "Chưa rõ", không đoán branding.
 #: Chủ dự án 20/10 tối: CHỈ HAI NHÓM trên trang (thẻ, chip, ô lọc). Video còn NULL (chỉ thấy ở feed
-#: hashtag mà hồ sơ nhà sáng tạo không đọc lại được — đã xoá / riêng tư / quá cũ; `theo_doi_api.
+#: hashtag mà hồ sơ nhà sáng tạo chưa đọc lại được — chưa thử, hoặc không còn thấy; `theo_doi_api.
 #: doc_ho_so_gio`) là một dòng mờ dưới khối, không phải thẻ; `koc=chua_ro` vẫn nhận trên URL (ẩn).
 KOC = {"affiliate": "KOC affiliate · gắn giỏ", "branding": "KOC branding · không giỏ",
        "chua_ro": "Chưa đọc lại được giỏ"}

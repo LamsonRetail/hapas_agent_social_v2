@@ -604,6 +604,8 @@ def test_script_doc_ho_so_ghi_qua_luot_va_tran(tmp_path, monkeypatch):
     monkeypatch.setattr(K, "mo_luot", lambda *a, **k: 55)
     dong = {}
     monkeypatch.setattr(K, "dong_luot", lambda luot, **k: dong.update(k, luot=luot))
+    nhip = []
+    monkeypatch.setattr(K, "nhip_luot", lambda luot, usd, ghi_chu=None: nhip.append(usd))
     cap = []
     monkeypatch.setattr(K, "cap_nhat_so_lieu", lambda ma, luot, rows: cap.extend(rows) or len(rows))
     gia = GiaTT({"a": [[_a("8100000001", 10, SHOP), _a("8100000009", 9, None)]]})
@@ -615,6 +617,7 @@ def test_script_doc_ho_so_ghi_qua_luot_va_tran(tmp_path, monkeypatch):
     assert {r["khoa"]: r["gio_hang"] for r in cap} == {"tiktok:8100000001": True,
                                                        "tiktok:8100000009": False}
     assert dong["luot"] == 55 and dong["chi_phi_usd"] == pytest.approx(2 * TT.GIA_YEU_CAU)
+    assert dong["trang_thai"] == "xong" and nhip == [pytest.approx(2 * TT.GIA_YEU_CAU)]
     assert len(sl.read_text(encoding="utf-8").splitlines()) == 2
 
 
@@ -632,3 +635,166 @@ def test_buoc_cuoi_luot_tran_moi_luot(monkeypatch):
     assert len(gia.goi) == 2 and cap[0]["gio_hang"] is False and tk["usd"] == 0.004
     monkeypatch.setenv("LANG_NGHE_GIO_HO_SO_USD", "0")
     assert TDA.gio_ho_so_luot("hapas", 7, 1.0, phan.append)["yeu_cau"] == 0
+
+
+# ───────────────────────────── soát 21/10/2026 (trước lượt trả tiền) ─────────────────────────────
+class GiaTTNo(GiaTT):
+    """Như `GiaTT` nhưng ném `loi_sau` ở hồ sơ thứ `n_ho_so` (chết giữa chừng)."""
+
+    def __init__(self, trang, n_ho_so, loi_sau):
+        super().__init__(trang)
+        self.n, self.loi_sau, self.ho_so = n_ho_so, loi_sau, 0
+
+    def __call__(self, payload, ngan):
+        if "profile_username" in payload:
+            self.ho_so += 1
+            if self.ho_so == self.n:
+                raise self.loi_sau
+        return super().__call__(payload, ngan)
+
+
+def test_doc_ho_so_ghi_dan_va_chet_giua_chung_van_dua_lo(monkeypatch):
+    gia = GiaTTNo({"a": [[_a("8100000001", 10, SHOP)]], "b": [[_a("8200000001", 10)]]},
+                  3, RuntimeError("mạng"))
+    monkeypatch.setattr(TT, "_goi", gia)
+    lo, so = [], []
+    bai = [_bn("a", "8100000001"), _bn("a", "8100000002"), _bn("b", "8200000001"),
+           _bn("c", "8300000001")]
+    with pytest.raises(RuntimeError):
+        TDA.doc_ho_so_gio(bai, 1.0, so_run=so, ghi_lo=lambda r, tk: lo.append(
+            ([x["khoa"] for x in r], tk["usd"])), lo=1)
+    assert [k for k, _ in lo] == [["tiktok:8100000001"], ["tiktok:8200000001"]]
+    assert len(so) == 4 and lo[-1][1] == pytest.approx(4 * TT.GIA_YEU_CAU)
+
+
+def _script_gia(monkeypatch, gia):
+    import quet_lon
+    monkeypatch.setattr(K, "doc_du_an", lambda ma: {"tran_usd_thang": 50})
+    monkeypatch.setattr(K, "da_tieu_thang", lambda ma: 0.0)
+    monkeypatch.setattr(quet_lon, "ngan_sach", lambda t: (9.0, None, ""))
+    monkeypatch.setattr(quet_lon, "tran_usd_nen", lambda: 9.0)
+    monkeypatch.setenv("APIFY_TOKEN", "x")
+    monkeypatch.setattr(K, "luot_dang_chay", lambda ma: None)
+    monkeypatch.setattr(K, "mo_luot", lambda *a, **k: 77)
+    dong, nhip, cap = {}, [], []
+    monkeypatch.setattr(K, "dong_luot", lambda luot, **k: dong.update(k, luot=luot))
+    monkeypatch.setattr(K, "nhip_luot", lambda luot, usd, ghi_chu=None: nhip.append(usd))
+    monkeypatch.setattr(K, "cap_nhat_so_lieu", lambda ma, luot, rows: cap.extend(rows) or len(rows))
+    monkeypatch.setattr(TDA, "ghi_nho_ho_so", lambda *a, **k: None)
+    monkeypatch.setattr(TT, "_goi", gia)
+    return dong, nhip, cap
+
+
+def test_script_ctrl_c_dong_luot_loi_voi_tien_da_tieu(tmp_path, monkeypatch):
+    gia = GiaTTNo({"a": [[_a("8100000001", 10, SHOP)]]}, 2, KeyboardInterrupt())
+    dong, nhip, cap = _script_gia(monkeypatch, gia)
+    monkeypatch.setattr(G, "LO_TAI_KHOAN", 1)
+    sl = tmp_path / "sl.jsonl"
+    bai = [_bn("a", "8100000001"), _bn("a", "8100000003"), _bn("b", "8200000001")]
+    with pytest.raises(KeyboardInterrupt):
+        G.doc_ho_so("hapas", bai, 9.0, 3, lambda s: None, datetime.datetime.now(VN),
+                    sao_luu=str(sl), cu={"tiktok:8100000001": {"gio_hang": None,
+                                                                "la_quang_cao": None}})
+    assert dong["trang_thai"] == "loi" and "KeyboardInterrupt" in dong["loi"]
+    assert dong["chi_phi_usd"] == pytest.approx(2 * TT.GIA_YEU_CAU)   # hồ sơ + 1 trang của a
+    assert [r["khoa"] for r in cap] == ["tiktok:8100000001"] and nhip
+    assert len(sl.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_script_het_gio_dung_sach(monkeypatch):
+    gia = GiaTT({"a": [[_a("8100000001", 10)]], "b": [[_a("8200000001", 10)]]})
+    dong, nhip, cap = _script_gia(monkeypatch, gia)
+    gio = [datetime.datetime(2026, 10, 21, 6, 49, tzinfo=VN)]
+
+    def dong_ho():
+        gio[0] += datetime.timedelta(minutes=1)
+        return gio[0]
+    out: list[str] = []
+    rows, tk = G.doc_ho_so("hapas", [_bn("a", "8100000001"), _bn("a", "8100000002"),
+                                     _bn("b", "8200000001")], 9.0, 3, out.append,
+                           datetime.datetime(2026, 10, 21, 6, 0, tzinfo=VN), dong_ho=dong_ho)
+    assert dong["trang_thai"] == "xong" and "hết giờ" in dong["ghi_chu"] and tk["loi"] is None
+    assert tk["tai_khoan"] == 0 and not gia.goi          # 06:50 ở lần kiểm đầu: không gửi gì
+
+
+@pytest.mark.parametrize("bat_dau,het,phut,ky_vong", [
+    ((5, 0), None, 150, (21, 6, 50)), ((7, 30), None, 150, (21, 10, 0)),
+    ((23, 0), datetime.time(6, 50), 600, (22, 6, 50)), ((5, 0), None, 30, (21, 5, 30))])
+def test_han_dung(bat_dau, het, phut, ky_vong):
+    b = datetime.datetime(2026, 10, 21, *bat_dau, tzinfo=VN)
+    assert G.han_dung(b, het, phut) == datetime.datetime(2026, 10, ky_vong[0], ky_vong[1],
+                                                         ky_vong[2], tzinfo=VN)
+
+
+def test_chay_thu_in_tran_hieu_luc(monkeypatch):
+    import quet_lon
+    monkeypatch.setattr(K, "bai_tiktok_co", lambda ma: [
+        dict(_bn("a", "8100000001"), gio_hang=None, la_quang_cao=None)])
+    monkeypatch.setattr(K, "doc_du_an", lambda ma: {"tran_usd_thang": 5})
+    monkeypatch.setattr(K, "da_tieu_thang", lambda ma: 4.0)
+    monkeypatch.setattr(quet_lon, "ngan_sach", lambda t: (9.0, None, ""))
+    monkeypatch.setattr(quet_lon, "tran_usd_nen", lambda: 9.0)
+    monkeypatch.setattr(TT, "_goi", lambda *a, **k: pytest.fail("chạy thử không gọi API"))
+    out: list[str] = []
+    G.chay(_ns_hs(["--doc-ho-so", "--toi-da-usd", "9"]), out.append)
+    chu = "\n".join(out)
+    assert "trần 1.0000 USD = min(--toi-da-usd 9.0, còn tháng dự án 1.00" in chu
+
+
+def test_so_nho_bo_tai_khoan_da_thu(tmp_path, monkeypatch):
+    monkeypatch.setattr(A, "_thu_muc_nen", lambda: tmp_path)
+    nay = datetime.datetime(2026, 10, 21, 7, tzinfo=VN)
+    TDA.ghi_nho_ho_so("hapas", {"a": ["8100000001"], "cu": ["1"]}, nay - datetime.timedelta(days=8))
+    TDA.ghi_nho_ho_so("hapas", {"a": ["8100000001"]}, nay - datetime.timedelta(days=1))
+    assert TDA.tai_khoan_moi_thu("hapas", nay) == {"a"}            # "cu" quá 7 ngày
+    TDA.ghi_nho_ho_so("hapas", {"x": ["1"]}, nay + datetime.timedelta(days=40))
+    assert set(TDA.doc_nho_ho_so("hapas")) == {"x"}                # chỉ giữ 30 ngày
+
+
+@pytest.mark.tiktok_api
+def test_buoc_cuoi_luot_bo_tai_khoan_trong_so_nho(tmp_path, monkeypatch):
+    monkeypatch.setattr(A, "_thu_muc_nen", lambda: tmp_path)
+    nay = datetime.datetime(2026, 10, 21, 7, tzinfo=VN)
+    TDA.ghi_nho_ho_so("hapas", {"a": ["8100000001"]}, nay - datetime.timedelta(days=2))
+    monkeypatch.setattr(K, "bai_gio_null_luot", lambda ma, luot: [
+        _bn("a", "8100000001"), _bn("b", "8200000001")])
+    monkeypatch.setattr(K, "cap_nhat_so_lieu", lambda ma, luot, rows: len(rows))
+    gia = GiaTT({"b": []})                                         # b: hồ sơ trống → nhớ b
+    monkeypatch.setattr(TT, "_goi", gia)
+    tk = TDA.gio_ho_so_luot("hapas", 7, 1.0, lambda ph: None, bay_gio=nay)
+    assert [p.get("profile_username") for p in gia.goi if "profile_username" in p] == ["b"]
+    assert tk["bo_qua_nho"] == 1 and set(TDA.doc_nho_ho_so("hapas")) == {"a", "b"}
+
+
+class _ViecGia:
+    def __init__(self, giay):
+        import threading
+        self._khoa, self.d, self.giay = threading.RLock(), {}, giay
+
+    def con_giay(self):
+        return self.giay
+
+    def luu(self):
+        pass
+
+    def cac_phan(self):
+        return []
+
+
+def test_buoc_cuoi_luot_co_lap_loi_va_tru_tien(monkeypatch):
+    import theo_doi as T
+    seen = {}
+
+    def no(ma, luot, con, them_phan, dung=None):
+        seen["con"] = con
+        them_phan({"id": "hs-tiktok-r1", "nen_tang": "tiktok_gio_ho_so", "run_id": "r1"})
+        raise RuntimeError("hỏng")
+    monkeypatch.setattr(TDA, "gio_ho_so_luot", no)
+    v = _ViecGia(1000)
+    tk = {"usd": 0.3, "ghi_chu": []}
+    T._gio_ho_so_cuoi_luot(v, "hapas", 7, 0.5, tk)
+    assert seen["con"] == pytest.approx(0.2)                       # đã trừ tiền tìm + làm mới
+    assert tk["usd"] == pytest.approx(0.3 + TT.GIA_YEU_CAU) and "lỗi RuntimeError" in tk["ghi_chu"][-1]
+    v2 = _ViecGia(10)
+    monkeypatch.setattr(TDA, "gio_ho_so_luot", lambda *a, **k: pytest.fail("sắp hết giờ"))
+    T._gio_ho_so_cuoi_luot(v2, "hapas", 7, 0.5, {"usd": 0.0, "ghi_chu": []})

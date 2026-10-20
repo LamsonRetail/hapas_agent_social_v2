@@ -836,7 +836,8 @@ def lam_moi_tiktok(v, ma: str, luot: int, tu: datetime.datetime, con: float,
 # không giỏ). Gom video theo tài khoản, đọc hồ sơ tài khoản nhiều video chưa rõ nhất trước (trần
 # mua được nhiều video nhất), lật tới khi thấy đủ video cần tìm / video cũ hơn video cũ nhất cần
 # tìm / `HO_SO_GIO_TRANG` trang. Mọi video của tài khoản đọc được mà kho đã có cũng được điền
-# cờ (miễn phí). Video không thấy (xoá, riêng tư, quá cũ) giữ NULL — "không đọc lại được".
+# cờ (miễn phí). Video không thấy trong số trang đã đọc (có thể đã xoá, riêng tư hoặc nằm sâu hơn)
+# và tài khoản chưa thử giữ NULL — "chưa đọc lại được".
 HO_SO_GIO_TRANG = 3
 
 
@@ -864,15 +865,25 @@ def uoc_ho_so(so_tai_khoan: int, so_trang: int = HO_SO_GIO_TRANG) -> int:
 
 
 def doc_ho_so_gio(bai: list[dict], tran_usd: float, so_trang: int = HO_SO_GIO_TRANG,
-                  them_phan=None) -> tuple[list[dict], dict]:
+                  them_phan=None, *, so_run: list | None = None, ghi_lo=None, lo: int = 20,
+                  dung=None, bo_qua: set[str] | frozenset = frozenset()
+                  ) -> tuple[list[dict], dict]:
     """Đọc hồ sơ để điền cờ giỏ cho `bai` (khoa, link, tai_khoan, dang_luc) trong trần `tran_usd`.
     -> (dòng {khoa, xem…, gio_hang, la_quang_cao} của MỌI video hồ sơ đọc được — ghi bằng
     `lang_nghe_db.cap_nhat_so_lieu`, chỉ bài đã có trong kho được cập nhật; thống kê {"tai_khoan",
-    "yeu_cau", "usd", "thay", "khong_doc_duoc", "loi"}). `them_phan(ph)` ghi run vào sổ việc."""
-    nhom = nhom_ho_so(bai)
+    "yeu_cau", "usd", "thay", "khong_doc_duoc", "loi", "thieu": {tài khoản: [id chưa thấy]}}).
+
+    Soát 21/10/2026 (trước lượt trả tiền 9 USD): `so_run` = sổ run của BÊN GỌI (mỗi yêu cầu đã gửi
+    một dòng ngay khi gửi) — chết giữa chừng thì bên gọi vẫn tính đúng tiền đã tiêu; `ghi_lo(dòng
+    mới, tk)` gọi sau mỗi `lo` tài khoản và lúc kết thúc (cả khi ném lỗi) để ghi kho + sao lưu dần;
+    `dung()` True = dừng trước tài khoản kế (hết giờ); `bo_qua` = tài khoản không đọc (sổ nhớ 7
+    ngày). Hồ sơ đọc theo TÊN tài khoản: kho không lưu uid tác giả nên không thử lại theo uid
+    (`tiktok_api.bai_tai_khoan` nhận `uid` khi có). `them_phan(ph)` ghi run vào sổ việc."""
+    nhom = [(t, ds) for t, ds in nhom_ho_so(bai) if t not in bo_qua]
     ngan = TT.Ngan(tran_usd)
-    tk = {"tai_khoan": 0, "yeu_cau": 0, "usd": 0.0, "thay": 0, "khong_doc_duoc": 0, "loi": ""}
-    so: list = []
+    tk = {"tai_khoan": 0, "yeu_cau": 0, "usd": 0.0, "thay": 0, "khong_doc_duoc": 0, "loi": "",
+          "thieu": {}}
+    so = so_run if so_run is not None else []
     dat = [(A._NEN_TANG, "tiktok"), (A._SO_RUN, so)]
     if them_phan is not None:
         dat.append((A._KHI_CO_RUN, lambda run, meta: them_phan({
@@ -880,10 +891,27 @@ def doc_ho_so_gio(bai: list[dict], tran_usd: float, so_trang: int = HO_SO_GIO_TR
             "run_id": run.get("id"), "trang_thai": "xong"})))
     moc = [(bien, bien.set(gt)) for bien, gt in dat]
     rows: dict[str, dict] = {}
+    cho: list[dict] = []                       # dòng chưa đưa cho `ghi_lo`
     can_tat_ca: set[str] = {TT.id_video(str(b["link"])) for _, ds in nhom for b in ds}
+
+    def cap_nhat_tk():
+        tk["yeu_cau"] = ngan.da
+        tk["usd"] = round(sum(TT.GIA_YEU_CAU for m in so if isinstance(m, dict)
+                              and m.get("run_id")), 4)
+        tk["thay"] = sum(1 for x in can_tat_ca if f"tiktok:{x}" in rows)
+        tk["khong_doc_duoc"] = len(can_tat_ca) - tk["thay"]
+
+    def day_lo():
+        cap_nhat_tk()
+        if ghi_lo is not None and cho:
+            ghi_lo(list(cho), tk)
+            cho.clear()
     try:
-        for ten, ds in nhom:
+        for i, (ten, ds) in enumerate(nhom):
             if ngan.toi_da - ngan.da < 2:          # hồ sơ + ít nhất một trang
+                break
+            if dung is not None and dung():
+                tk["loi"] = tk["loi"] or "het_gio"
                 break
             can = {TT.id_video(str(b["link"])) for b in ds}
             luc = [b["dang_luc"] for b in ds if isinstance(b.get("dang_luc"), datetime.datetime)]
@@ -895,24 +923,90 @@ def doc_ho_so_gio(bai: list[dict], tran_usd: float, so_trang: int = HO_SO_GIO_TR
                 if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
                     tk["loi"] = e.ma
                     break
+                tk["thieu"][ten] = sorted(can)
                 continue
             tk["tai_khoan"] += 1
             for it in items:
                 co = {"gio_hang": A._gio_hang_tiktok(it), "la_quang_cao": A._quang_cao_tiktok(it)}
-                rows[f"tiktok:{it['id']}"] = {
-                    "khoa": f"tiktok:{it['id']}", "xem": it.get("playCount"),
-                    "thich": it.get("diggCount"), "binh_luan": it.get("commentCount"),
-                    "chia_se": it.get("shareCount"),
-                    **{k: v for k, v in co.items() if v is not None}}
+                r = {"khoa": f"tiktok:{it['id']}", "xem": it.get("playCount"),
+                     "thich": it.get("diggCount"), "binh_luan": it.get("commentCount"),
+                     "chia_se": it.get("shareCount"),
+                     **{k: v for k, v in co.items() if v is not None}}
+                rows[r["khoa"]] = r
+                cho.append(r)
+            thieu = sorted(can - {it["id"] for it in items})
+            if thieu:
+                tk["thieu"][ten] = thieu
+            if (i + 1) % max(1, int(lo)) == 0:
+                day_lo()
     finally:
         for bien, t in reversed(moc):
             bien.reset(t)
-    tk["yeu_cau"] = ngan.da
-    tk["usd"] = round(sum(TT.GIA_YEU_CAU for m in so if isinstance(m, dict)
-                          and m.get("run_id")), 4)
-    tk["thay"] = sum(1 for x in can_tat_ca if f"tiktok:{x}" in rows)
-    tk["khong_doc_duoc"] = len(can_tat_ca) - tk["thay"]
+        day_lo()
     return list(rows.values()), tk
+
+
+# Sổ nhớ "đã thử hồ sơ mà chưa thấy video" (soát 21/10/2026): lượt quét không đọc lại hồ sơ của
+# tài khoản vừa thử trong `NHO_NGAY` ngày (video đã xoá / riêng tư / quá sâu thì đọc lại chỉ tốn
+# tiền). Tệp JSON cạnh sổ "đã loại" (`.gio-ho-so.json`, ghi nguyên tử), chỉ giữ `NHO_GIU_NGAY` ngày.
+NHO_NGAY = 7
+NHO_GIU_NGAY = 30
+_KHOA_NHO = threading.Lock()
+
+
+def _duong_nho():
+    return A._thu_muc_nen() / ".gio-ho-so.json"
+
+
+def doc_nho_ho_so(ma: str) -> dict[str, dict]:
+    """{tài khoản: {"luc": ISO, "thieu": [id]}} của dự án."""
+    import json
+    try:
+        d = json.loads(_duong_nho().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    x = (d.get("du_an") or {}).get(ma) if isinstance(d, dict) else None
+    return x if isinstance(x, dict) else {}
+
+
+def tai_khoan_moi_thu(ma: str, bay_gio: datetime.datetime, ngay: int = NHO_NGAY) -> set[str]:
+    """Tài khoản đã thử trong `ngay` ngày (bỏ qua ở lượt quét)."""
+    ra = set()
+    for t, x in doc_nho_ho_so(ma).items():
+        try:
+            if bay_gio - datetime.datetime.fromisoformat(str(x.get("luc"))) < \
+                    datetime.timedelta(days=ngay):
+                ra.add(t)
+        except (TypeError, ValueError):
+            continue
+    return ra
+
+
+def ghi_nho_ho_so(ma: str, thieu: dict[str, list], bay_gio: datetime.datetime) -> None:
+    """Ghi tài khoản vừa đọc mà còn video chưa thấy; bỏ dòng cũ hơn `NHO_GIU_NGAY` ngày."""
+    import json
+    if not thieu:
+        return
+    with _KHOA_NHO:
+        f = _duong_nho()
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = {}
+        d = d if isinstance(d, dict) else {}
+        da = (d.setdefault("du_an", {})).setdefault(ma, {})
+        for t, ids in thieu.items():
+            da[t] = {"luc": bay_gio.isoformat(timespec="seconds"), "thieu": list(ids)[:50]}
+        han = bay_gio - datetime.timedelta(days=NHO_GIU_NGAY)
+        for t in [t for t, x in da.items() if str(x.get("luc") or "") < han.isoformat()]:
+            del da[t]
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError as e:
+            print(f"[theo_doi] không ghi được sổ nhớ hồ sơ: {type(e).__name__}", flush=True)
 
 
 def ho_so_gio_usd() -> float:
@@ -923,12 +1017,15 @@ def ho_so_gio_usd() -> float:
         return 0.05
 
 
-def gio_ho_so_luot(ma: str, luot: int, con: float, them_phan) -> dict:
+def gio_ho_so_luot(ma: str, luot: int, con: float, them_phan, dung=None,
+                   bay_gio: datetime.datetime | None = None) -> dict:
     """Bước cuối lượt tìm TikTok: video lượt này ghi/cập nhật mà còn `gio_hang` NULL (chỉ thấy ở
-    feed hashtag) → đọc hồ sơ nhà sáng tạo, trần min(`ho_so_gio_usd`, `con`). -> thống kê."""
+    feed hashtag) → đọc hồ sơ nhà sáng tạo, trần min(`ho_so_gio_usd`, `con`), bỏ tài khoản đã thử
+    trong `NHO_NGAY` ngày. -> thống kê."""
+    bay_gio = bay_gio or datetime.datetime.now(_VN)
     tran = min(ho_so_gio_usd(), con)
     tk = {"tai_khoan": 0, "yeu_cau": 0, "usd": 0.0, "thay": 0, "khong_doc_duoc": 0,
-          "cap_nhat": 0, "ghi_chu": ""}
+          "cap_nhat": 0, "ghi_chu": "", "bo_qua_nho": 0}
     if tran < 2 * TT.GIA_YEU_CAU or not TT.dung_api("tiktok_ho_so"):
         return tk
     try:
@@ -940,8 +1037,11 @@ def gio_ho_so_luot(ma: str, luot: int, con: float, them_phan) -> dict:
         return tk
     if not bai:
         return tk
-    rows, x = doc_ho_so_gio(bai, tran, them_phan=them_phan)
+    bo = tai_khoan_moi_thu(ma, bay_gio)
+    tk["bo_qua_nho"] = sum(1 for t, _ in nhom_ho_so(bai) if t in bo)
+    rows, x = doc_ho_so_gio(bai, tran, them_phan=them_phan, dung=dung, bo_qua=bo)
     tk.update({k: x[k] for k in ("tai_khoan", "yeu_cau", "usd", "thay", "khong_doc_duoc")})
+    ghi_nho_ho_so(ma, x.get("thieu") or {}, bay_gio)
     if rows:
         tk["cap_nhat"] = K.cap_nhat_so_lieu(ma, luot, rows)
     if x.get("loi"):

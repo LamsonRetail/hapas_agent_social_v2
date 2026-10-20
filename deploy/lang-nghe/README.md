@@ -304,7 +304,7 @@ sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=
 
 Cờ giỏ TikTok Shop theo từng video vào `bai.gio_hang` (+ `bai.la_quang_cao` = is_ads). TRUE = KOC
 affiliate, FALSE = KOC branding — dashboard chỉ HAI nhóm (chủ dự án 20/10 tối); NULL (video không
-đọc lại được giỏ: đã xoá / riêng tư / quá cũ) là một dòng mờ dưới khối. Cờ theo loại phản hồi (`tiktok_api.DAY_DU` /
+đọc lại được giỏ: chưa thử, hoặc hồ sơ không còn thấy video) là một dòng mờ dưới khối. Cờ theo loại phản hồi (`tiktok_api.DAY_DU` /
 `FEED` / `CHI_TIET`): tìm kiếm / hồ sơ không có anchor shop = FALSE; feed hashtag chỉ tin TRUE
 (không bao giờ trả anchor shop); `post` thiếu anchors = NULL. Ghi kho: TRUE dính, FALSE chỉ điền
 chỗ NULL, NULL không đè.
@@ -334,11 +334,19 @@ chưa có cột thì lần sau không đẩy lại, nên không để dòng có 
    ```
    Mỗi tài khoản tối đa 1 hồ sơ + 3 trang (`--so-trang`) × 0,002 USD; tài khoản nhiều video chưa rõ
    trước; trần = min(9, còn tháng dự án, ngân sách Apify việc nền), một lượt `theo_doi` riêng
-   ("gio-ho-so-…") nên tiền vào trần tháng. Video không thấy giữ NULL ("không đọc lại được").
+   ("gio-ho-so-…") nên tiền vào trần tháng. Video không thấy giữ NULL ("chưa đọc lại được").
+   Chạy từng phần ~2 USD (`--toi-da-usd 2`, lặp lại tới khi hết 9 USD hoặc hết video): cứ 20 tài
+   khoản ghi kho + sao lưu + cập nhật chi phí đang tiêu của lượt (lượt khác thấy ngay); dừng sạch ở
+   `--het-gio HH:MM` (mặc định 06:50 nếu bắt đầu trước — trước lượt quét 07:00) hoặc sau
+   `--toi-da-phut` (150, dưới 3 giờ "bỏ dở"); chết / Ctrl-C thì lượt đóng `loi` với đúng tiền đã
+   tiêu, chạy lại là làm tiếp (bài đã có cờ không còn NULL).
    (Đường cũ `--goi-api`: đọc từng video qua `post`, phản hồi có thể thiếu anchors — không dùng.)
 7. Về sau, mỗi lượt tìm TikTok tự đọc hồ sơ cho video lượt đó còn NULL (chỉ thấy ở feed hashtag),
    trần `LANG_NGHE_GIO_HO_SO_USD` trong `/opt/mark/app/.env` (mặc định 0,05 USD/lượt, 0 = tắt),
-   tính vào chi phí lượt (phần `tiktok_gio_ho_so`; ghi chú lượt "cờ giỏ qua hồ sơ TikTok: …").
+   tính vào chi phí lượt (phần `tiktok_gio_ho_so`; ghi chú lượt "cờ giỏ qua hồ sơ TikTok: …"); trần
+   tính sau khi trừ tiền tìm + làm mới của lượt; lỗi bước này không làm hỏng lượt. Tài khoản đã thử
+   mà chưa thấy video thì 7 ngày không thử lại (`.audit/viec-nen/.gio-ho-so.json`; script dùng sổ
+   này khi có `--theo-so-nho`).
 8. Kiểm: `select gio_hang, count(*) from bai where du_an = 'hapas' and nen_tang = 'tiktok' group
    by 1`; dashboard trang Chỉ số → khối "KOC affiliate vs KOC branding", ô lọc "Loại KOC".
 

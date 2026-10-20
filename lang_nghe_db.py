@@ -242,6 +242,15 @@ def dong_luot(luot_id: int, *, trang_thai: str, so_nguon: int = 0, so_nguon_loi:
              cat_ghi_chu(ghi_chu), luot_id))
 
 
+def nhip_luot(luot_id: int, usd: float, ghi_chu: str | None = None) -> None:
+    """Nhịp sống của lượt ĐANG CHẠY dài (script đọc hồ sơ, 21/10/2026): chi phí đã tiêu tới giờ
+    (chỉ nâng — `da_tieu_thang` của lượt khác thấy ngay tiền đang tiêu) + ghi chú tiến độ."""
+    with ket_noi() as c:
+        c.execute("UPDATE luot_quet SET chi_phi_usd = GREATEST(chi_phi_usd, %s), "
+                  "ghi_chu = COALESCE(%s, ghi_chu) WHERE id = %s AND trang_thai = 'dang_chay'",
+                  (round(float(usd or 0), 4), cat_ghi_chu(ghi_chu), int(luot_id)))
+
+
 def _usd_vn(x: float) -> str:
     return f"{x:.4f}".replace(".", ",")
 

@@ -32,8 +32,13 @@ Hai đường:
       khi thấy đủ video cần tìm / video cũ hơn video cũ nhất cần tìm / `--so-trang` trang (mặc định
       3); video khác của tài khoản đã có trong kho cũng được điền cờ (miễn phí). Mỗi tài khoản tối
       đa 1 + `--so-trang` yêu cầu × `tiktok_api.GIA_YEU_CAU`. Trần, lượt riêng ("gio-ho-so-…"),
-      sổ chi phí như (b). Video không thấy (xoá / riêng tư / quá cũ) giữ NULL, đếm "không đọc lại
-      được". Chạy thử in danh sách tài khoản, số video cần tìm, số yêu cầu + USD ước tính.
+      sổ chi phí như (b). Video không thấy trong số trang đã đọc giữ NULL, đếm "chưa đọc lại
+      được". Chạy thử in trần hiệu lực, danh sách tài khoản, số video cần tìm, số yêu cầu + USD.
+      An toàn khi chạy dài (soát 21/10/2026): cứ 20 tài khoản ghi kho + sao lưu + cập nhật chi phí
+      đang tiêu của lượt (`lang_nghe_db.nhip_luot` — lượt khác thấy tiền đang tiêu); dừng sạch ở
+      `--het-gio` (mặc định 06:50 nếu bắt đầu trước đó — trước lượt quét 07:00) hoặc sau
+      `--toi-da-phut` (150, dưới 3 giờ "bỏ dở" của lượt); chết / Ctrl-C thì lượt đóng 'loi' với
+      đúng tiền đã tiêu. Nên chạy từng phần ~2 USD.
 
 An toàn:
   • Mặc định CHẠY THỬ: chỉ đọc kho, in số bài khớp, số sẽ đặt TRUE / FALSE, số còn NULL.
@@ -246,22 +251,58 @@ def ke_hoach_ho_so(bai: list[dict], toi_da_usd: float | None, so_trang: int) -> 
     return {"nhom": nhom, "yeu_cau": yc, "usd": round(yc * TT.GIA_YEU_CAU, 4), "vua_tran": vua}
 
 
-def doc_ho_so(ma: str, bai: list[dict], toi_da_usd: float, so_trang: int, in_ra,
-              bay_gio) -> tuple[list[dict], dict]:
-    """Đọc hồ sơ (`theo_doi_api.doc_ho_so_gio`) trong MỘT lượt `theo_doi` riêng, trần = min(X,
-    phần còn tháng dự án, ngân sách Apify việc nền). -> (dòng đã ghi, thống kê + "luot", "loi")."""
+#: Mặc định dừng TRƯỚC lượt quét hằng ngày 07:00 (giờ VN) và trước khi lượt bị coi là bỏ dở
+#: (`lang_nghe_db.GIO_BO_DO` = 3 giờ tính từ `bat_dau`): chạy dài hơn thì chia lần.
+HET_GIO_MAC_DINH = datetime.time(6, 50)
+TOI_DA_PHUT = 150
+LO_TAI_KHOAN = 20
+
+
+def tran_hieu_luc(ma: str, toi_da_usd: float) -> tuple[float, str]:
+    """(trần thật, câu giải thích) = min(X, còn tháng dự án, ngân sách Apify việc nền). Chỉ đọc."""
     import lang_nghe_db as K
     import quet_lon
-    import theo_doi_api as TDA
     du_an = K.doc_du_an(ma) or {}
     con = max(0.0, float(du_an.get("tran_usd_thang") or 0) - K.da_tieu_thang(ma))
     ns_apify, _, ghi = quet_lon.ngan_sach(quet_lon.tran_usd_nen())
     tran = min(float(toi_da_usd), con, ns_apify)
-    in_ra(f"Hồ sơ TikTok: trần {tran:.4f} USD = min(--toi-da-usd {toi_da_usd}, còn tháng dự án "
-          f"{con:.2f}, ngân sách Apify việc nền {ns_apify:.2f}). {ghi}")
+    return tran, (f"trần {tran:.4f} USD = min(--toi-da-usd {toi_da_usd}, còn tháng dự án "
+                  f"{con:.2f}, ngân sách Apify việc nền {ns_apify:.2f}). {ghi}")
+
+
+def han_dung(bay_gio: datetime.datetime, het_gio: datetime.time | None,
+             toi_da_phut: int) -> datetime.datetime:
+    """Mốc phải dừng: sớm hơn của `het_gio` (hôm nay, hoặc ngày mai nếu đã qua) và bay_gio +
+    `toi_da_phut`. `het_gio` None = mặc định 06:50 nếu bắt đầu trước 06:50, không thì chỉ trần phút."""
+    moc = bay_gio + datetime.timedelta(minutes=max(1, int(toi_da_phut)))
+    if het_gio is None:
+        het_gio = HET_GIO_MAC_DINH if bay_gio.timetz().replace(tzinfo=None) < HET_GIO_MAC_DINH \
+            else None
+    if het_gio is not None:
+        h = bay_gio.replace(hour=het_gio.hour, minute=het_gio.minute, second=0, microsecond=0)
+        if h <= bay_gio:
+            h += datetime.timedelta(days=1)
+        moc = min(moc, h)
+    return moc
+
+
+def doc_ho_so(ma: str, bai: list[dict], toi_da_usd: float, so_trang: int, in_ra,
+              bay_gio, *, sao_luu: str | None = None, cu: dict | None = None,
+              het_gio: datetime.time | None = None, toi_da_phut: int = TOI_DA_PHUT,
+              bo_qua: set[str] | frozenset = frozenset(), dong_ho=None) -> tuple[list[dict], dict]:
+    """Đọc hồ sơ (`theo_doi_api.doc_ho_so_gio`) trong MỘT lượt `theo_doi` riêng, trần = min(X,
+    phần còn tháng dự án, ngân sách Apify việc nền). Soát 21/10/2026: cứ `LO_TAI_KHOAN` tài khoản
+    thì ghi kho + sao lưu + nhịp lượt (chi phí đã tiêu, tiến độ — `lang_nghe_db.nhip_luot`); dừng
+    sạch ở `han_dung`; chết giữa chừng (kể cả Ctrl-C) thì lượt đóng 'loi' với ĐÚNG tiền đã tiêu
+    (đếm theo run đã gửi). -> (dòng đã ghi, thống kê + "luot", "loi")."""
+    import lang_nghe_db as K
+    import theo_doi_api as TDA
+    import tiktok_api as TT
+    tran, cau = tran_hieu_luc(ma, toi_da_usd)
+    in_ra(f"Hồ sơ TikTok: {cau}")
     tk = {"luot": None, "usd": 0.0, "loi": None, "tai_khoan": 0, "yeu_cau": 0, "thay": 0,
           "khong_doc_duoc": 0, "cap_nhat": 0}
-    if tran < 0.004:
+    if tran < 2 * TT.GIA_YEU_CAU:
         tk["loi"] = "trần dưới 2 yêu cầu"
         return [], tk
     if not os.environ.get("APIFY_TOKEN", "").strip():
@@ -271,25 +312,57 @@ def doc_ho_so(ma: str, bai: list[dict], toi_da_usd: float, so_trang: int, in_ra,
     if dang:
         tk["loi"] = f"dự án đang có lượt {dang.get('ma_viec') or dang.get('id')}"
         return [], tk
+    dong_ho = dong_ho or (lambda: datetime.datetime.now(_VN))
+    han = han_dung(bay_gio, het_gio, toi_da_phut)
+    in_ra(f"Hồ sơ TikTok: dừng muộn nhất {han:%d/%m %H:%M} (giờ VN).")
     luot = K.mo_luot(ma, "theo_doi", ma_viec=f"gio-ho-so-{bay_gio:%Y%m%d%H%M}")
     tk["luot"] = luot
+    so: list = []
     rows: list[dict] = []
+    cu = cu or {}
+
+    def tien() -> float:
+        return round(sum(TT.GIA_YEU_CAU for m in so if isinstance(m, dict) and m.get("run_id")), 4)
+
+    def cau_tk() -> str:
+        return (f"cờ giỏ TikTok qua hồ sơ (script, 21/10/2026): {tk['tai_khoan']} tài khoản, "
+                f"{tk['yeu_cau']} yêu cầu, thấy {tk['thay']} video cần tìm, chưa đọc lại được "
+                f"{tk['khong_doc_duoc']}, cập nhật {tk['cap_nhat']} bài")
+
+    def ghi_lo(lo: list[dict], x: dict) -> None:
+        tk.update({k: x[k] for k in ("tai_khoan", "yeu_cau", "thay", "khong_doc_duoc")})
+        tk["cap_nhat"] += K.cap_nhat_so_lieu(ma, luot, lo)
+        rows.extend(lo)
+        if sao_luu:
+            _ghi_sao_luu(sao_luu, ma, [{**r, "_cu": cu[r["khoa"]]} for r in lo
+                                       if r["khoa"] in cu and any(c in r for c in _CO)], "ho_so")
+        K.nhip_luot(luot, tien(), cau_tk() + " (đang chạy)")
+        in_ra(f"  … {tk['tai_khoan']} tài khoản, {tien():.4f} USD")
+    trang_thai, loi = "loi", None
     try:
-        rows, x = TDA.doc_ho_so_gio(bai, tran, so_trang)
-        tk.update({k: x[k] for k in ("tai_khoan", "yeu_cau", "usd", "thay", "khong_doc_duoc")})
-        tk["loi"] = x.get("loi") or None
-        tk["cap_nhat"] = K.cap_nhat_so_lieu(ma, luot, rows) if rows else 0
+        _, x = TDA.doc_ho_so_gio(bai, tran, so_trang, so_run=so, ghi_lo=ghi_lo,
+                                 lo=LO_TAI_KHOAN, dung=lambda: dong_ho() >= han, bo_qua=bo_qua)
+        tk.update({k: x[k] for k in ("tai_khoan", "yeu_cau", "thay", "khong_doc_duoc")})
+        loi = x.get("loi") or None
+        trang_thai = "loi" if loi and loi != "het_gio" else "xong"
+        TDA.ghi_nho_ho_so(ma, x.get("thieu") or {}, bay_gio)
+    except BaseException as e:      # kể cả Ctrl-C: đóng lượt 'loi' với tiền đã tiêu rồi ném tiếp
+        loi = f"{type(e).__name__}: {e}"[:300]
+        raise
     finally:
-        K.dong_luot(luot, trang_thai="loi" if tk["loi"] and not rows else "xong", so_nguon=0,
-                    bai_moi=0, bai_cap_nhat=tk["cap_nhat"], chi_phi_usd=tk["usd"],
-                    loi=(tk["loi"] or None) and str(tk["loi"])[:500],
-                    ghi_chu=(f"cờ giỏ TikTok qua hồ sơ (script, 21/10/2026): {tk['tai_khoan']} "
-                             f"tài khoản, {tk['yeu_cau']} yêu cầu, thấy {tk['thay']} video cần "
-                             f"tìm, không đọc lại được {tk['khong_doc_duoc']}"))
+        tk["usd"], tk["loi"] = tien(), loi
+        K.dong_luot(luot, trang_thai=trang_thai, so_nguon=0, bai_moi=0,
+                    bai_cap_nhat=tk["cap_nhat"], chi_phi_usd=tk["usd"],
+                    loi=(loi or None) and str(loi)[:500],
+                    ghi_chu=cau_tk() + (" — dừng vì hết giờ, chạy lại để làm tiếp"
+                                        if loi == "het_gio" else ""))
     in_ra(f"Hồ sơ TikTok: {tk['tai_khoan']} tài khoản, {tk['yeu_cau']} yêu cầu, thấy "
-          f"{tk['thay']} video cần tìm, không đọc lại được {tk['khong_doc_duoc']} (xoá / riêng tư "
-          f"/ quá cũ), cập nhật {tk['cap_nhat']} bài trong kho; chi phí {tk['usd']:.4f} USD "
-          f"(lượt {luot}, tính vào trần tháng của dự án).")
+          f"{tk['thay']} video cần tìm, chưa đọc lại được {tk['khong_doc_duoc']} (chưa thử, hoặc "
+          f"hồ sơ không còn thấy video), cập nhật {tk['cap_nhat']} bài trong kho; chi phí "
+          f"{tk['usd']:.4f} USD (lượt {luot}, tính vào trần tháng của dự án)"
+          + (" — dừng vì hết giờ, chạy lại để làm tiếp." if loi == "het_gio" else "."))
+    if loi == "het_gio":
+        tk["loi"] = None
     return rows, tk
 
 
@@ -327,7 +400,17 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
           " — chỉ chạy khi có --goi-api --toi-da-usd X (và --ghi).")
     ho_so = getattr(ns, "doc_ho_so", False)
     so_trang = getattr(ns, "so_trang", None) or 3
-    hs = ke_hoach_ho_so(kh["con_null"], getattr(ns, "toi_da_usd", None) if ho_so else None,
+    tran = getattr(ns, "toi_da_usd", None) if ho_so else None
+    if ho_so:
+        try:
+            tran, cau = tran_hieu_luc(ma, tran)     # chỉ đọc (soát 21/10/2026, L2)
+            in_ra(f"Hồ sơ TikTok (chạy thử): {cau}")
+        except Exception as e:  # noqa: BLE001 — chạy thử vẫn in kế hoạch theo --toi-da-usd
+            in_ra(f"Hồ sơ TikTok: không tính được trần hiệu lực ({type(e).__name__}) — dùng "
+                  f"--toi-da-usd {tran}.")
+    bo_qua = (TDA_tai_khoan_moi_thu(ma, bay_gio) if getattr(ns, "theo_so_nho", False)
+              else frozenset())
+    hs = ke_hoach_ho_so([b for b in kh["con_null"] if _tk_bai(b) not in bo_qua], tran,
                         so_trang)
     in_ra(f"Đọc HỒ SƠ nhà sáng tạo cho bài còn NULL: {len(hs['nhom'])} tài khoản, "
           f"{sum(len(d) for _, d in hs['nhom'])} video cần tìm, tối đa {hs['yeu_cau']} yêu cầu ≈ "
@@ -346,9 +429,10 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
         in_ra(f"Đã ghi cờ cho {n} bài (sao lưu giá trị cũ: {ns.sao_luu}).")
     if ho_so and kh["con_null"]:
         cu = {b["khoa"]: {c: b.get(c) for c in _CO} for b in bai}
-        rows, tk = doc_ho_so(ma, kh["con_null"], ns.toi_da_usd, so_trang, in_ra, bay_gio)
-        _ghi_sao_luu(ns.sao_luu, ma, [{**r, "_cu": cu[r["khoa"]]} for r in rows
-                                      if r["khoa"] in cu and any(c in r for c in _CO)], "ho_so")
+        rows, tk = doc_ho_so(ma, kh["con_null"], ns.toi_da_usd, so_trang, in_ra, bay_gio,
+                             sao_luu=ns.sao_luu, cu=cu, het_gio=getattr(ns, "het_gio", None),
+                             toi_da_phut=getattr(ns, "toi_da_phut", None) or TOI_DA_PHUT,
+                             bo_qua=bo_qua)
         if tk["loi"]:
             in_ra(f"Hồ sơ TikTok: {tk['loi']}")
             return 1
@@ -361,6 +445,23 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
             in_ra(f"TikTok API: {tk['loi']}")
             return 1
     return 0
+
+
+def _tk_bai(b: dict) -> str:
+    import theo_doi_api as TDA
+    return TDA._tai_khoan_tt(b)
+
+
+def TDA_tai_khoan_moi_thu(ma: str, bay_gio) -> set[str]:  # noqa: N802
+    import theo_doi_api as TDA
+    return TDA.tai_khoan_moi_thu(ma, bay_gio)
+
+
+def _gio(s: str) -> datetime.time:
+    try:
+        return datetime.datetime.strptime(s.strip(), "%H:%M").time()
+    except ValueError:
+        raise argparse.ArgumentTypeError("--het-gio dạng HH:MM") from None
 
 
 def _chuan_bi() -> None:
@@ -382,6 +483,12 @@ def main(argv=None) -> int:
                     help="trang hồ sơ tối đa mỗi tài khoản (10 video/trang, mặc định 3)")
     ap.add_argument("--toi-da-usd", type=float, default=None,
                     help="trần USD của --goi-api / --doc-ho-so")
+    ap.add_argument("--het-gio", type=_gio, default=None,
+                    help="HH:MM giờ VN dừng sạch (mặc định 06:50 nếu bắt đầu trước 06:50)")
+    ap.add_argument("--toi-da-phut", type=int, default=TOI_DA_PHUT,
+                    help=f"phút chạy tối đa (mặc định {TOI_DA_PHUT}, dưới 3 giờ bỏ dở của lượt)")
+    ap.add_argument("--theo-so-nho", action="store_true",
+                    help="bỏ tài khoản đã thử hồ sơ trong 7 ngày (sổ nhớ của lượt quét)")
     ns = ap.parse_args(argv)
     if ns.ghi and not ns.sao_luu:
         ap.error("--ghi cần --sao-luu <tệp>")
