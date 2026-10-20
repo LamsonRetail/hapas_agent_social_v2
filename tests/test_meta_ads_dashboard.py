@@ -450,6 +450,44 @@ def test_ma_2_qua_tai_thi_chia_nho_roi_giam_trang():
     assert all(r.method == "GET" for r in gm.goi)
 
 
+def test_ad_qua_nang_ca_khi_mot_ngay_thi_doc_theo_lo_chien_dich():
+    """20/10/2026 nạp lùi thật: act_2960062120880808 cấp ad 1 ngày, trang 50 vẫn mã 1 (Meta tính
+    mọi ad trước khi chia trang). Nay đọc theo lô chiến dịch (filtering campaign.id IN) — chỉ GET,
+    `filtering` qua chốt tham số; lô 2 chiến dịch vẫn nặng thì chia đôi lô."""
+    dv, kho_qc, gm = _mdv()
+    _gom_tk(dv)
+    goc = gm._insights
+    loc_da_gui = []
+
+    class _Nang(Exception):
+        pass
+
+    def to(act, q):
+        if q["level"] == "ad" and act == NUOC_HOA:
+            loc = json.loads(q["filtering"]) if q.get("filtering") else None
+            if not loc:
+                raise _Nang()
+            ids = loc[0]["value"]
+            loc_da_gui.append(list(ids))
+            if len(ids) > 1:                      # lô 2 chiến dịch vẫn nặng → phải chia đôi lô
+                raise _Nang()
+            return [r for r in goc(act, q) if r.get("campaign_id") in ids]
+        return goc(act, q)
+
+    def xu_ly(req):
+        try:
+            return gm.xu_ly(req)
+        except _Nang:
+            return httpx.Response(500, json={"error": {"code": 1, "message": "reduce data"}})
+    gm._insights = to
+    dv.http = MA.Http(transport=httpx.MockTransport(xu_ly), ngu=lambda s: None)
+    kq = dv.dong_bo(tu=datetime.date(2026, 10, 18), den=datetime.date(2026, 10, 18))
+    assert not kq.get("loi"), kq
+    assert ["120201"] in loc_da_gui and ["120202"] in loc_da_gui
+    assert {k[0] for k in kho_qc.bang["qc_ad_ngay"]} >= {"12020177", "12020277"}
+    assert all(r.method == "GET" for r in gm.goi)
+
+
 def test_ma_2_mot_ngay_trang_nho_nhat_van_loi_thi_bao_loi():
     dv, kho_qc, gm = _mdv()
     _gom_tk(dv)
