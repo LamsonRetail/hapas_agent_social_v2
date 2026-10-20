@@ -97,25 +97,11 @@ def _so(r: dict, reach: bool) -> list:
             if reach or m != "reach"]
 
 
-def _cong(rows: list[dict]) -> dict:
-    t: dict = {}
-    for r in rows:
-        for c in QC.TEN_COT_SO:
-            if r.get(c) is not None:
-                t[c] = (t.get(c) or 0) + r[c]
-    return t
-
-
-def _tong_theo_tien_te(rows: list[dict], tien_te_cua) -> dict[str, dict]:
-    nhom: dict[str, list] = {}
-    for r in rows:
-        nhom.setdefault(tien_te_cua(r), []).append(r)
-    return {tt: _cong(ds) for tt, ds in sorted(nhom.items())}
-
-
-def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, ten_nen=QC.TEN_NEN_TANG_QC) -> list:
+def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, tong: dict[str, dict],
+              ten_nen=QC.TEN_NEN_TANG_QC) -> list:
     """Ba TB.Bang (tab a, b, c) từ dòng kho. `tk` = tài khoản trong phạm vi (cac_tk), `ngay` / `cd` /
-    `qc` = {"rows", "tong"} của `kho_sheet_qc.doc_theo_ngay` / `doc_tong`."""
+    `qc` = {"rows", "tong"} của `kho_sheet_qc.doc_theo_ngay` / `doc_tong`; `tong` = tổng TOÀN phạm vi
+    theo tiền tệ (`doc_tong_tien_te`) — dòng TỔNG không cộng từ dòng có thể đã cắt."""
     import trinh_bay_sheet as TB
     thong_tin = {str(t["advertiser_id"]): t for t in tk}
 
@@ -130,8 +116,7 @@ def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, ten_nen=QC.TEN_NEN
     dau_tk = [TB.Cot("Nền tảng"), TB.Cot("Tài khoản"), TB.Cot("Mã TK", "ma")]
     # (a) theo ngày × tài khoản
     rows_a = [[_ngay(r["ngay"]), *tk_cua(r), *_so(r, True)] for r in ngay["rows"]]
-    tong_a = [["", f"TỔNG {tt}", "", "", tt, *_so(t, True)]
-              for tt, t in _tong_theo_tien_te(ngay["rows"], tien_te).items()]
+    tong_a = [["", f"TỔNG {tt} (cả kỳ)", "", "", tt, *_so(t, True)] for tt, t in tong.items()]
     a = TB.Bang(TAB_NGAY, [TB.Cot("Ngày", "ngay"), *dau_tk, TB.Cot("Tiền tệ"), *_cot_so(True)],
                 rows_a, dong_tong=tong_a, gap_duoc=False, ten_tab=TAB_NGAY,
                 mo_ta="Mỗi tài khoản mỗi ngày một dòng (ngày theo múi giờ tài khoản); dòng TỔNG theo "
@@ -177,11 +162,10 @@ def tieu_de(yc: dict, tk: list[dict], ten_ben: str) -> str:
 
 
 def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict, cd: dict,
-                   qc: dict):
+                   qc: dict, tong: dict[str, dict]):
+    """`tong` = tổng TOÀN phạm vi theo tiền tệ (`doc_tong_tien_te`), không từ dòng đã cắt."""
     import trinh_bay_sheet as TB
     tu, den = _ngay(yc["tu"]), _ngay(yc["den"])
-    tien_te = {str(t["advertiser_id"]): t.get("tien_te") or "VND" for t in tk}
-    tong = _tong_theo_tien_te(ngay["rows"], lambda r: tien_te.get(str(r["advertiser_id"]), "VND"))
     so_lieu = [TB.SoLieu("Tài khoản trong phạm vi", len(tk), "so_nguyen"),
                TB.SoLieu("Chiến dịch có phân phối", cd["tong"], "so_nguyen"),
                TB.SoLieu("Quảng cáo có phân phối", qc["tong"], "so_nguyen")]
@@ -209,13 +193,13 @@ def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict,
         "Sheet riêng tư: chia sẻ link đóng, chỉ người yêu cầu được XEM. Tạo bằng nút Tạo Sheet ở "
         f"{TRANG} (chỉ quản trị viên).",
     ]
-    for ten, d, tran in ((TAB_NGAY, ngay, KS.TRAN_DONG["ngay"]),
-                         (TAB_CHIEN_DICH, cd, KS.TRAN_DONG["chien_dich"]),
-                         (TAB_QUANG_CAO, qc, KS.TRAN_DONG["quang_cao"])):
+    for ten, d, tran, giu in ((TAB_NGAY, ngay, KS.TRAN_DONG["ngay"], "giữ các ngày gần nhất"),
+                              (TAB_CHIEN_DICH, cd, KS.TRAN_DONG["chien_dich"], "chi nhiều nhất trước"),
+                              (TAB_QUANG_CAO, qc, KS.TRAN_DONG["quang_cao"], "chi nhiều nhất trước")):
         if d["tong"] > len(d["rows"]):
             ghi_chu.append(f"ĐÃ CẮT tab {ten}: {len(d['rows']):,} / {d['tong']:,} dòng (trần "
-                           f"{tran:,} dòng — chi nhiều nhất trước). Muốn đủ: thu hẹp ngày / tài khoản "
-                           "rồi tạo lại.".replace(",", "."))
+                           f"{tran:,} dòng — {giu}). Số liệu chính và dòng TỔNG vẫn là tổng ĐỦ cả "
+                           "kỳ. Muốn đủ dòng: thu hẹp ngày / tài khoản rồi tạo lại.".replace(",", "."))
     ten_tk = ", ".join(t.get("ten") or t["advertiser_id"] for t in tk[:6]) + (
         f" và {len(tk) - 6} tài khoản khác" if len(tk) > 6 else "")
     return TB.TongQuan(
@@ -240,9 +224,12 @@ def tra_open_id(lark, email: str) -> str | None:
     return None
 
 
-def cap_quyen_xem(lark, tok: str, email: str) -> None:
+def cap_quyen_xem(lark, tok: str, email: str, con_quyen=None) -> None:
     """Người yêu cầu chỉ cần XEM số (như `meta_ads_tool._grant_view`); theo email, hỏng thì theo
-    open_id. Không cấp được → ném (KHÔNG báo xong)."""
+    open_id. `con_quyen()`: kiểm lại NGAY trước khi thêm cộng tác viên (bị bỏ quản trị giữa lượt →
+    không bao giờ chia sẻ). Không cấp được → ném (KHÔNG báo xong)."""
+    if con_quyen is not None and not con_quyen():
+        raise ValueError("Chưa chia sẻ Sheet: bạn không còn là quản trị viên.")
     duong = f"/open-apis/drive/v1/permissions/{tok}/members"
     try:
         lark.call("POST", duong, query={"type": "sheet"},
@@ -303,8 +290,8 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
         import lark_client as lark
     import trinh_bay_sheet as TB
     xuat = xuat or TB.xuat
-    yid, email = int(yc["id"]), str(yc["nguoi_hoi"])
-    tde, ket = None, None
+    yid, email, moc = int(yc["id"]), str(yc["nguoi_hoi"]), yc.get("bat_dau_luc")
+    tde, ket, ghi = None, None, None
     try:
         tk = pham_vi(yc, kho, kho_qc)
         ids = [str(t["advertiser_id"]) for t in tk]
@@ -315,14 +302,23 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
         ngay = ks.doc_theo_ngay(ids, tu, den)
         cd = ks.doc_tong("chien_dich", ids, tu, den)
         qc = ks.doc_tong("quang_cao", ids, tu, den)
+        tong = ks.doc_tong_tien_te(ids, tu, den)
         tde = tieu_de(yc, tk, ten_ben)
-        kq = xuat(tde, dung_bang(tk, ngay, cd, qc), dung_tong_quan(yc, tk, ten_ben, tde, ngay, cd, qc),
-                  sau_khi_tao=TB.khoa_rieng_tu, cap_quyen=lambda tok: cap_quyen_xem(lark, tok, email))
+
+        def con_quyen() -> bool:
+            return PQ.la_quan_tri(PQ.chuan(kho.quyen_cua(email)))
+        kq = xuat(tde, dung_bang(tk, ngay, cd, qc, tong),
+                  dung_tong_quan(yc, tk, ten_ben, tde, ngay, cd, qc, tong),
+                  sau_khi_tao=TB.khoa_rieng_tu,
+                  cap_quyen=lambda tok: cap_quyen_xem(lark, tok, email, con_quyen))
+        if not KS.link_lark(kq.url):
+            raise ValueError("Chưa nhận được link Sheet hợp lệ từ Lark — bấm tạo lại.")
         so_dong = {"ngay": len(ngay["rows"]), "chien_dich": len(cd["rows"]),
                    "quang_cao": len(qc["rows"]), "tong_chien_dich": cd["tong"],
                    "tong_quang_cao": qc["tong"]}
         loi = None if kq.day_du is not False else ("Sheet ghi thiếu — " + kq.cau_kiem)[:300]
-        ks.ket_thuc(yid, "xong", tieu_de=tde, sheet_url=kq.url, so_dong=so_dong, loi=loi)
+        ghi = ks.ket_thuc(yid, "xong", bat_dau_luc=moc, tieu_de=tde, sheet_url=kq.url,
+                          so_dong=so_dong, loi=loi)
         ket = {"trang_thai": "xong", "url": kq.url, "so_dong": so_dong}
         tin = (f"Sheet quảng cáo đã xong: {tde}\n{kq.url}\n"
                f"{so_dong['ngay']} dòng theo ngày · {so_dong['chien_dich']} chiến dịch · "
@@ -331,17 +327,22 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
                   or cd["tong"] > len(cd["rows"]) else "")
                + ". Bạn có quyền xem; link chia sẻ đã đóng.")
     except LoiYeuCau as e:
-        ks.ket_thuc(yid, "loi", tieu_de=tde, loi=str(e))
+        ghi = ks.ket_thuc(yid, "loi", bat_dau_luc=moc, tieu_de=tde, loi=str(e))
         ket = {"trang_thai": "loi", "loi": str(e)}
         tin = f"Chưa tạo được Sheet quảng cáo: {e}"
     except Exception as e:  # noqa: BLE001 — luôn kết thúc yêu cầu, rồi báo
         cau = "Lark hoặc kho dữ liệu lỗi khi tạo Sheet — bấm tạo lại sau ít phút."
         if isinstance(e, ValueError) and str(e).startswith("Chưa"):
             cau = str(e)                      # câu của bước riêng tư / cấp quyền
-        ks.ket_thuc(yid, "loi", tieu_de=tde, loi=cau, loi_noi_bo=_gon(e))
+        ghi = ks.ket_thuc(yid, "loi", bat_dau_luc=moc, tieu_de=tde, loi=cau, loi_noi_bo=_gon(e))
         ket = {"trang_thai": "loi", "loi": cau}
         tin = f"Chưa tạo được Sheet quảng cáo{f' ({tde})' if tde else ''}: {cau}"
         log(f"[xuat_sheet_qc] #{yid}: lỗi {_gon(e)[:300]}")
+    if ghi is False:
+        # Dòng đã bị dọn (quá hạn) / nhận lại giữa lượt: không nhắn — trang đã nói "Quá hạn", người
+        # dùng bấm lại; Sheet (nếu đã tạo) vẫn riêng tư của bot.
+        log(f"[xuat_sheet_qc] #{yid}: dòng không còn là lượt này (đã dọn / nhận lại) — không nhắn")
+        return {**ket, "mo_coi": True}
     if nhan_tin(lark, email, tin, f"sheet-qc-{yid}"):
         try:
             ks.da_nhan_tin(yid)

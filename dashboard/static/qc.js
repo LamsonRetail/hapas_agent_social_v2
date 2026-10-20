@@ -161,8 +161,8 @@
 })();
 
 // Tạo Lark Sheet (20/10/2026): còn yêu cầu đang chờ / đang tạo → hỏi lại /api/qc/sheet mỗi 5 giây (tối
-// đa 15 phút, tab ẩn thì thôi hỏi) và vẽ lại danh sách bằng textContent; hết yêu cầu đang tạo thì mở lại
-// nút "Tạo Sheet". Không có JS: trang vẫn đúng, tải lại là thấy trạng thái mới.
+// đa 15 phút, tab ẩn thì thôi hỏi) và vẽ lại danh sách bằng textContent; hết yêu cầu đang tạo (hoặc hết
+// 15 phút) thì mở lại nút "Tạo Sheet". Không có JS: trang vẫn đúng, tải lại là thấy trạng thái mới.
 (function () {
   var khung = document.getElementById("sheet");
   var ds = document.getElementById("qc-sheet-ds");
@@ -214,7 +214,13 @@
         }
       })
       .catch(function () { /* mạng chập chờn: lượt sau hỏi lại */ })
-      .then(function (xong) { if (!xong && Date.now() - batDau < TOI_DA) setTimeout(hoi, NHIP); });
+      .then(function (xong) {
+        if (xong) return;
+        if (Date.now() - batDau < TOI_DA) { setTimeout(hoi, NHIP); return; }
+        // Hết 15 phút mà vẫn đang tạo: thôi hỏi, mở lại nút (máy chủ vẫn chặn nếu còn đang chờ thật).
+        if (nut) nut.disabled = false;
+        if (goiY) goiY.textContent = "Chưa thấy xong — tải lại trang để xem trạng thái mới.";
+      });
   }
   setTimeout(hoi, NHIP);
 })();

@@ -4,10 +4,13 @@
 # quảng cáo (cả chi) và chỉ sửa cột kết quả của yeu_cau_sheet_qc. LISTEN kênh qc_sheet (trigger
 # yeu_cau_sheet_qc_bao) + quét dòng chờ lúc khởi động / mỗi 60 giây. Dashboard không bao giờ cầm app Lark
 # này; unit này không đọc được /opt/lang-nghe (khoá giải mã token quảng cáo). README mục 10.
+# PartOf=mark.service: agent-deploy kéo mã mới về /opt/mark/app rồi CHỈ `agentctl restart mark` — unit này
+# khởi động lại theo Mark nên không bao giờ chạy mã cũ (dừng Mark cũng dừng nó; WantedBy giữ bật lúc boot).
 [Unit]
 Description=Nghe yeu cau tao Lark Sheet quang cao (Mark)
-After=network-online.target postgresql.service
+After=network-online.target postgresql.service mark.service
 Wants=network-online.target
+PartOf=mark.service
 
 [Service]
 Type=simple
@@ -15,6 +18,7 @@ User=mark
 Group=mark
 Environment=HOME=/opt/mark
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
 WorkingDirectory=/opt/mark/app
 ExecStart=/opt/mark/hermes-agent/venv/bin/python -m xuat_sheet_qc
 Restart=always

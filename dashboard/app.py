@@ -2808,7 +2808,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                or int(sd.get("tong_chien_dich") or 0) > int(sd.get("chien_dich") or 0))
         return {"id": r.get("id"), "trang_thai": tt, "nhan": _NHAN_SHEET.get(tt, tt),
                 "ten": r.get("tieu_de") or pv, "pham_vi": pv,
-                "url": NL.link_an_toan(r.get("sheet_url")) if tt == "xong" else "",
+                "url": KS.link_lark(r.get("sheet_url")) if tt == "xong" else "",
                 "loi": (r.get("loi") or ("Dịch vụ tạo Sheet chưa nhận yêu cầu — bấm tạo lại sau ít "
                                          "phút." if tt == "qua_han" else "")),
                 "luc": gio_vn(r.get("tao_luc")),

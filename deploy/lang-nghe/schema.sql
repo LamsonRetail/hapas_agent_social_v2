@@ -904,7 +904,8 @@ CREATE TABLE IF NOT EXISTS yeu_cau_sheet_qc (
   trang_thai      TEXT NOT NULL DEFAULT 'cho'
                   CHECK (trang_thai IN ('cho', 'dang_tao', 'xong', 'loi')),
   tieu_de         TEXT,
-  sheet_url       TEXT CHECK (sheet_url IS NULL OR sheet_url ~ '^https://'),
+  sheet_url       TEXT CHECK (sheet_url IS NULL
+                  OR sheet_url ~ '^https://[a-z0-9.-]+\.(larksuite\.com|feishu\.cn)(/|$)'),
   so_dong         JSONB NOT NULL DEFAULT '{}'::jsonb,
   loi             TEXT,
   loi_noi_bo      TEXT,
@@ -1706,7 +1707,12 @@ GRANT SELECT (email, don_vi, vai_tro) ON quyen TO mark;
 GRANT SELECT ON don_vi TO mark;
 
 -- Quyền của dashboard: quản lý cấu hình + người xem, đọc mọi thứ, ghi nhật ký và mốc đồng bộ.
+BEGIN;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO lang_nghe_web;
+-- Xuất Lark Sheet (20/10/2026): thu NGAY trong cùng giao dịch quyền đọc cả bảng vừa cấp ở trên — web
+-- không bao giờ có lúc nào đọc được loi_noi_bo; quyền theo cột cấp lại ở khối cuối file.
+REVOKE SELECT ON yeu_cau_sheet_qc FROM lang_nghe_web;
+COMMIT;
 GRANT INSERT, UPDATE, DELETE ON du_an, nguon, nguoi_xem TO lang_nghe_web;
 -- 19/10/2026: quyền theo bên (thêm/đổi/bỏ) + tạo bên (không xoá bên).
 GRANT INSERT, UPDATE, DELETE ON quyen TO lang_nghe_web;

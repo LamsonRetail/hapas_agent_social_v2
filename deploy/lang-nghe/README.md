@@ -325,7 +325,7 @@ sudo -u postgres psql -d lang_nghe -c '\dp yeu_cau_sheet_qc'   -c "select policy
 # b. Dashboard mới (mục Tạo Lark Sheet; bỏ "Đồng bộ ngay" ở thẻ Quản trị + dải trên trang Chỉ số)
 sudo systemctl restart lang-nghe-dashboard
 # c. Bộ nghe phía Mark (mã đã có ở /opt/mark/app qua agent-deploy; kiểm trước khi cài)
-test -f /opt/mark/app/xuat_sheet_qc.py && sudo -u mark /opt/mark/hermes-agent/venv/bin/python -c   "import sys; sys.path.insert(0, '/opt/mark/app'); import xuat_sheet_qc"
+test -f /opt/mark/app/xuat_sheet_qc.py && sudo -u mark /opt/mark/hermes-agent/venv/bin/python -c   "import psycopg, sys; assert tuple(map(int, psycopg.__version__.split('.')[:2])) >= (3, 2), psycopg.__version__; sys.path.insert(0, '/opt/mark/app'); import xuat_sheet_qc; print('ok', psycopg.__version__)"
 sudo install -o root -g root -m 0644 deploy/lang-nghe/qc-sheet-nghe.service /etc/systemd/system/
 sudo systemd-analyze verify /etc/systemd/system/qc-sheet-nghe.service
 sudo systemctl daemon-reload
@@ -335,6 +335,10 @@ journalctl -u qc-sheet-nghe -n 20                          # "đang nghe kênh q
 sudo systemd-run --quiet --wait --pipe -p User=mark -p WorkingDirectory=/opt/mark/app   /opt/mark/hermes-agent/venv/bin/python -m xuat_sheet_qc --mot-lan
 ```
 
+- **Theo Mark khi tự lên mã**: agent-deploy chỉ khởi động lại unit `mark` (`agentctl restart mark`).
+  Unit có `PartOf=mark.service` + `After=mark.service` nên khởi động lại (và dừng) cùng Mark — không
+  chạy mã cũ sau mỗi lần Mark tự cập nhật; `WantedBy=multi-user.target` giữ nó bật lúc khởi động máy.
+  Kiểm: `systemctl show -p PartOf qc-sheet-nghe` → `PartOf=mark.service`.
 - **Biến môi trường**: không thêm biến nào. Bộ nghe dùng `LARK_APP_ID` / `LARK_APP_SECRET` /
   `LANG_NGHE_DSN` sẵn có trong `/opt/mark/app/.env` (config.py tự nạp). Dashboard không thêm gì
   (`DASH_LARK_APP_*` vẫn chỉ để đăng nhập).

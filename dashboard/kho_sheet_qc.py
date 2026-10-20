@@ -121,18 +121,41 @@ def nhan() -> dict | None:
             f"LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING {_COT_MARK}").fetchone()
 
 
-def ket_thuc(yid: int, trang_thai: str, *, tieu_de: str | None = None,
+def ket_thuc(yid: int, trang_thai: str, *, bat_dau_luc=None, tieu_de: str | None = None,
              sheet_url: str | None = None, so_dong: dict | None = None, loi: str | None = None,
-             loi_noi_bo: str | None = None) -> None:
+             loi_noi_bo: str | None = None) -> bool:
+    """Kết thúc yêu cầu ĐÚNG lượt đã nhận: chỉ khi còn dang_tao và cùng mốc `bat_dau_luc` lúc nhận
+    (dòng đã bị `don_dep` đổi thành loi / nhận lại thì không đè). Link chỉ ghi khi đúng Lark
+    (`link_lark`). -> có ghi được không."""
     if trang_thai not in ("xong", "loi"):
         raise ValueError("trạng thái kết thúc phải là xong hoặc loi")
     with ket_noi() as c:
-        c.execute("UPDATE yeu_cau_sheet_qc SET trang_thai = %s, tieu_de = %s, sheet_url = %s, "
-                  "so_dong = %s::jsonb, loi = %s, loi_noi_bo = %s, xong_luc = now() WHERE id = %s",
-                  (trang_thai, (tieu_de or None) and str(tieu_de)[:300], sheet_url or None,
-                   json.dumps(so_dong or {}, ensure_ascii=False, default=str),
-                   (loi or None) and str(loi)[:300], (loi_noi_bo or None) and str(loi_noi_bo)[:500],
-                   int(yid)))
+        n = c.execute(
+            "UPDATE yeu_cau_sheet_qc SET trang_thai = %s, tieu_de = %s, sheet_url = %s, "
+            "so_dong = %s::jsonb, loi = %s, loi_noi_bo = %s, xong_luc = now() WHERE id = %s "
+            "AND trang_thai = 'dang_tao' AND bat_dau_luc IS NOT DISTINCT FROM %s",
+            (trang_thai, (tieu_de or None) and str(tieu_de)[:300], link_lark(sheet_url) or None,
+             json.dumps(so_dong or {}, ensure_ascii=False, default=str),
+             (loi or None) and str(loi)[:300], (loi_noi_bo or None) and str(loi_noi_bo)[:500],
+             int(yid), bat_dau_luc)).rowcount
+    return bool(n)
+
+
+#: Link Sheet hợp lệ: https + máy chủ Lark / Feishu (cùng luật CHECK của bảng). Khác → "".
+_HOST_LARK = (".larksuite.com", ".feishu.cn")
+
+
+def link_lark(url) -> str:
+    from urllib.parse import urlsplit
+    s = str(url or "").strip()
+    try:
+        u = urlsplit(s)
+    except ValueError:
+        return ""
+    host = (u.hostname or "").lower()
+    if u.scheme != "https" or not host.endswith(_HOST_LARK) or u.username or u.password:
+        return ""
+    return s
 
 
 def da_nhan_tin(yid: int) -> None:
@@ -165,8 +188,9 @@ _GIAY_DOC = "120s"
 
 def doc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date,
                   toi_da: int = TRAN_DONG["ngay"]) -> dict:
-    """Tab (a): mỗi tài khoản × ngày một dòng (qc_tk_ngay). -> {"rows", "tong"} (tong = số dòng
-    trước trần)."""
+    """Tab (a): mỗi tài khoản × ngày một dòng (qc_tk_ngay). Quá trần thì giữ các NGÀY GẦN NHẤT
+    (xếp ngày giảm dần khi cắt, trả lại tăng dần để hiện). -> {"rows", "tong"} (tong = số dòng
+    trước trần). Tổng KHÔNG cộng từ đây (có thể đã cắt) — dùng `doc_tong_tien_te`."""
     if not ids:
         return {"rows": [], "tong": 0}
     with ket_noi() as c:
@@ -174,9 +198,27 @@ def doc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date,
         rows = c.execute(
             f"SELECT advertiser_id, ngay, {', '.join(QC.TEN_COT_SO)}, count(*) OVER () AS tong "
             "FROM qc_tk_ngay WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s "
-            "ORDER BY ngay, advertiser_id LIMIT %s", (list(ids), tu, den, int(toi_da))).fetchall()
+            "ORDER BY ngay DESC, advertiser_id LIMIT %s", (list(ids), tu, den, int(toi_da))
+        ).fetchall()
+    rows = sorted(rows, key=lambda r: (r["ngay"], str(r["advertiser_id"])))
     return {"rows": [{k: v for k, v in r.items() if k != "tong"} for r in rows],
             "tong": int(rows[0]["tong"]) if rows else 0}
+
+
+def doc_tong_tien_te(ids: list[str], tu: datetime.date, den: datetime.date) -> dict[str, dict]:
+    """Tổng cả kỳ theo TIỀN TỆ tài khoản trên TOÀN phạm vi (không trần dòng) — dòng TỔNG của tab
+    theo ngày + Tổng quan không bao giờ lấy từ dòng đã cắt. -> {tiền tệ: {cột số: tổng}}."""
+    if not ids:
+        return {}
+    with ket_noi() as c:
+        c.execute(f"SET LOCAL statement_timeout = '{_GIAY_DOC}'")
+        rows = c.execute(
+            f"SELECT COALESCE(NULLIF(k.tien_te, ''), 'VND') AS tien_te, "
+            f"{', '.join(f'sum(q.{x})::float AS {x}' if x in QC.COT_TIEN else f'sum(q.{x})::bigint AS {x}' for x in QC.TEN_COT_SO)} "
+            "FROM qc_tk_ngay q JOIN tk_quang_cao k USING (advertiser_id) "
+            "WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s GROUP BY 1 ORDER BY 1",
+            (list(ids), tu, den)).fetchall()
+    return {r["tien_te"]: {k: v for k, v in r.items() if k != "tien_te"} for r in rows}
 
 
 #: Cấp → (bảng, khoá, cột tên lấy từ NGÀY MỚI NHẤT của mỗi đối tượng trong kỳ).

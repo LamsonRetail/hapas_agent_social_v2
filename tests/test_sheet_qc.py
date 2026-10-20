@@ -276,15 +276,30 @@ class KhoNghe:
                 for i in range(1, 4)]
         return {"rows": rows, "tong": 12000}                 # bị cắt: 3 / 12.000
 
+    def doc_tong_tien_te(self, ids, tu, den):
+        """Tổng TOÀN phạm vi (kho thật: SUM … GROUP BY tiền tệ, không trần) — cố ý khác cộng dòng."""
+        tien = {t["advertiser_id"]: t["tien_te"] for t in self.cac_tk()}
+        ra = {}
+        for a in ids:
+            x = ra.setdefault(tien[a], {})
+            for k, v in {"chi": 9_000_000.0, "hien_thi": 900_000, "click": 9_000, "follow": 900,
+                         "view_video": 90_000}.items():
+                x[k] = x.get(k, 0) + v
+        return ra
+
     def ket_thuc(self, yid, tt, **kw):
         self.ket.append((yid, tt, kw))
+        return self.con_luot
+
+    con_luot = True
 
     def da_nhan_tin(self, yid):
         self.nhan_tin.append(yid)
 
 
 YC = {"id": 7, "nguoi_hoi": QL, "ben": "hapas", "nen_tang": "tiktok", "tk": None,
-      "tu": datetime.date(2026, 10, 12), "den": datetime.date(2026, 10, 18), "trang_thai": "dang_tao"}
+      "tu": datetime.date(2026, 10, 12), "den": datetime.date(2026, 10, 18), "trang_thai": "dang_tao",
+      "bat_dau_luc": datetime.datetime(2026, 10, 20, 3, 0, tzinfo=datetime.timezone.utc)}
 TK = [{"advertiser_id": HAPAS_KOC, "ten": "HAPAS - KOC", "don_vi": "hapas", "nen_tang": "tiktok",
        "tien_te": "VND"},
       {"advertiser_id": MM_2, "ten": "mate made 2", "don_vi": "matemade", "nen_tang": "tiktok",
@@ -318,14 +333,18 @@ def test_bo_nghe_dung_ba_tab_khoa_rieng_tu_cap_xem_nhan_tin(monkeypatch):
     r1 = dict(zip(tq, ngay[1]))
     assert r1["CPM"] == 10000 and r1["CTR (%)"] == 1.2 and r1["Chi / follow"] == 5000
     o = gia.o(X.TAB_NGAY)
-    tong = [r for r in o if str(r[1]).startswith("TỔNG")]
-    assert {r[1] for r in tong} == {"TỔNG USD", "TỔNG VND"}       # dòng tổng theo tiền tệ
+    tong = {r[1]: dict(zip(tq, r)) for r in o if str(r[1]).startswith("TỔNG")}
+    assert set(tong) == {"TỔNG USD (cả kỳ)", "TỔNG VND (cả kỳ)"}     # dòng tổng theo tiền tệ
+    # Dòng TỔNG + Tổng quan lấy từ tổng TOÀN phạm vi (doc_tong_tien_te), không cộng dòng (M1).
+    assert tong["TỔNG VND (cả kỳ)"]["Chi"] == 9_000_000 and tong["TỔNG VND (cả kỳ)"]["CPM"] == 10_000
     cd = gia.du_lieu(X.TAB_CHIEN_DICH)
     assert "Reach" not in cd[0] and dict(zip(cd[0], cd[1]))["Mục tiêu"] == "Lượt xem video"
     assert not str(dict(zip(cd[0], cd[1]))["Tên chiến dịch"]).startswith("=")   # chặn công thức
     assert len(gia.du_lieu(X.TAB_QUANG_CAO)) == 1 + 3
     ghi = " ".join(str(c) for r in gia.o("Tổng quan") for c in r)
     assert "ĐÃ CẮT tab Theo quảng cáo: 3 / 12.000 dòng" in ghi and QL in ghi
+    assert "chi nhiều nhất trước" in ghi and "vẫn là tổng ĐỦ cả kỳ" in ghi
+    assert "9.000.000" in ghi or 9_000_000 in [c for r in gia.o("Tổng quan") for c in r]
     # Thứ tự: khoá riêng tư TRƯỚC mọi lần ghi số; cấp quyền XEM theo email SAU cùng.
     i_pub, i_ghi, i_mem = gia.thu_tu("/public", "/values_batch_update", "/members")
     assert -1 < i_pub < i_ghi < i_mem
@@ -334,6 +353,7 @@ def test_bo_nghe_dung_ba_tab_khoa_rieng_tu_cap_xem_nhan_tin(monkeypatch):
     # Kết thúc + nhắn link.
     (yid, tt, kw), = k.ket
     assert (yid, tt) == (7, "xong") and kw["sheet_url"] == kq["url"] and kw["loi"] is None
+    assert kw["bat_dau_luc"] == YC["bat_dau_luc"]                  # đúng lượt đã nhận (L4)
     assert kw["so_dong"] == {"ngay": 14, "chien_dich": 1, "quang_cao": 3, "tong_chien_dich": 1,
                              "tong_quang_cao": 12000}
     (loai, ma, text, uuid), = lk.tin
@@ -493,3 +513,87 @@ def test_don_vi_chay_duoi_user_mark():
 @pytest.mark.parametrize("ten", ["chuan_bi", "main", "nghe", "xu_ly_cho"])
 def test_bo_nghe_co_du_ham(ten):
     assert callable(getattr(X, ten))
+
+
+# ───────────────────────────── soát độc lập (20/10/2026) ─────────────────────────────
+def test_tab_ngay_cat_giu_ngay_gan_nhat_va_ghi_chu_dung(monkeypatch):
+    """M1: tab theo ngày quá trần giữ các NGÀY GẦN NHẤT; ghi chú nói đúng cách cắt; tổng vẫn đủ."""
+    def doc(self, ids, tu, den):
+        rows = [{"advertiser_id": ids[0], "ngay": den - datetime.timedelta(days=i), "chi": 1.0,
+                 "hien_thi": 10} for i in (1, 0)]
+        return {"rows": sorted(rows, key=lambda r: r["ngay"]), "tong": 400}
+    monkeypatch.setattr(KhoNghe, "doc_theo_ngay", doc)
+    kq, _k, lk = _chay(monkeypatch)
+    ngay = lk.gia.du_lieu(X.TAB_NGAY)
+    assert kq["trang_thai"] == "xong" and len(ngay) == 3
+    ghi = " ".join(str(c) for r in lk.gia.o("Tổng quan") for c in r)
+    assert "ĐÃ CẮT tab Theo ngày × tài khoản: 2 / 400 dòng" in ghi and "giữ các ngày gần nhất" in ghi
+    src = (GOC / "dashboard" / "kho_sheet_qc.py").read_text(encoding="utf-8")
+    doc_ngay = src[src.index("def doc_theo_ngay"):src.index("def doc_tong_tien_te")]
+    assert "ORDER BY ngay DESC" in doc_ngay
+    tong = src[src.index("def doc_tong_tien_te"):src.index("#: Cấp → (bảng")]
+    assert "LIMIT" not in tong and "GROUP BY 1" in tong and "JOIN tk_quang_cao" in tong
+
+
+def test_bo_quan_tri_giua_luot_thi_khong_chia_se(monkeypatch):
+    """L3: kiểm quyền lại NGAY trước khi thêm cộng tác viên."""
+    lan = {"n": 0}
+
+    def quyen(self, email):
+        lan["n"] += 1
+        return QUYEN[QL] if lan["n"] == 1 else {"la_quan_tri": False, "ben": {}}
+    monkeypatch.setattr(KhoNghe, "quyen_cua", quyen)
+    kq, k, lk = _chay(monkeypatch)
+    assert kq["trang_thai"] == "loi" and "không còn là quản trị viên" in k.ket[0][2]["loi"]
+    assert not [g for g in lk.gia.goi if g[1].endswith("/members")]
+
+
+def test_dong_da_don_thi_khong_nhan_link(monkeypatch):
+    """L4: kết thúc không khớp lượt (đã dọn / nhận lại) → không nhắn link."""
+    monkeypatch.setattr(KhoNghe, "con_luot", False)
+    kq, k, lk = _chay(monkeypatch)
+    assert kq.get("mo_coi") is True and lk.tin == [] and k.nhan_tin == []
+
+
+def test_link_lark_chi_https_lark(monkeypatch):
+    """L5: link chỉ https + máy chủ Lark / Feishu (bộ nghe, trang, CHECK của bảng)."""
+    ok = ("https://x.larksuite.com/sheets/a", "https://abc.feishu.cn/sheets/b")
+    hong = ("http://x.larksuite.com/s", "https://larksuite.com.evil.io/s", "javascript:alert(1)",
+            "https://u:p@x.larksuite.com/s", "https://evil.com/?x=.larksuite.com", "")
+    assert all(KS.link_lark(u) == u for u in ok) and not any(KS.link_lark(u) for u in hong)
+    sql = (GOC / "deploy" / "lang-nghe" / "schema.sql").read_text(encoding="utf-8")
+    assert r"(larksuite\.com|feishu\.cn)" in sql
+    import apify_tool as A
+    lk = LarkMark()
+    lk.gia.url = "https://evil.example/sheets/x"
+    monkeypatch.setattr(A.lark, "call", lk.call)
+    k = KhoNghe(YC, TK, QUYEN)
+    kq = X.xu_ly(dict(YC), ks=k, kho=k, kho_qc=k, lark=lk, log=lambda s: None)
+    assert kq["trang_thai"] == "loi" and "link Sheet hợp lệ" in k.ket[0][2]["loi"]
+
+
+def test_web_khong_co_luc_nao_doc_loi_noi_bo():
+    """L6: thu quyền đọc cả bảng ngay trong giao dịch của GRANT SELECT ON ALL TABLES."""
+    sql = (GOC / "deploy" / "lang-nghe" / "schema.sql").read_text(encoding="utf-8")
+    i = sql.index("GRANT SELECT ON ALL TABLES IN SCHEMA public TO lang_nghe_web;")
+    assert sql[:i].rstrip().endswith("BEGIN;")
+    khoi = sql[i:sql.index("COMMIT;", i)]
+    assert "REVOKE SELECT ON yeu_cau_sheet_qc FROM lang_nghe_web;" in khoi
+
+
+def test_don_vi_theo_mark_khi_tu_len_ma():
+    """M2: agent-deploy chỉ khởi động lại `mark` → bộ nghe PartOf mark, cùng trình thông dịch."""
+    s = (GOC / "deploy" / "lang-nghe" / "qc-sheet-nghe.service").read_text(encoding="utf-8")
+    dong = s.splitlines()
+    assert "PartOf=mark.service" in dong
+    assert any(x.startswith("After=") and "mark.service" in x.split() for x in dong)
+    assert "WantedBy=multi-user.target" in s and "Environment=HOME=/opt/mark" in s
+    assert "Environment=PYTHONUTF8=1" in s
+    readme = (GOC / "deploy" / "lang-nghe" / "README.md").read_text(encoding="utf-8")
+    assert "PartOf=mark.service" in readme and "psycopg.__version__" in readme
+
+
+def test_js_het_15_phut_mo_lai_nut():
+    js = (GOC / "dashboard" / "static" / "qc.js").read_text(encoding="utf-8")
+    khoi = js[js.index("Hết 15 phút"):]
+    assert "nut.disabled = false" in khoi[:300] and "tải lại trang" in khoi[:300]
