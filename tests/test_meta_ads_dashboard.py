@@ -414,6 +414,65 @@ def test_qua_nhieu_du_lieu_thi_chia_doi_cua_so():
     assert len([k for k in kho_qc.bang["qc_ad_ngay"] if k[0] == "12020177"]) == 4
 
 
+def test_ma_2_qua_tai_thi_chia_nho_roi_giam_trang():
+    """20/10/2026 nạp lùi thật: tài khoản lớn bị Meta trả mã 2/1504044 (quá tải / hết giờ) sau khi
+    đã chia đôi — trước đây bỏ cả tài khoản. Nay mã 2 cũng chia đôi; 1 ngày vẫn lỗi thì xin trang
+    nhỏ dần (500 → 200) tới khi đọc được."""
+    dv, kho_qc, gm = _mdv()
+    _gom_tk(dv)
+    goc = gm._insights
+    lan = {"n": 0}
+
+    class _QuaTai(Exception):
+        pass
+
+    def to(act, q):
+        tr = json.loads(q["time_range"])
+        if q["level"] == "campaign" and act == NUOC_HOA and (
+                tr["since"] != tr["until"] or int(q["limit"]) > 200):
+            lan["n"] += 1
+            raise _QuaTai()
+        return goc(act, q)
+
+    def xu_ly(req):
+        try:
+            return gm.xu_ly(req)
+        except _QuaTai:
+            return httpx.Response(500, json={"error": {"code": 2, "error_subcode": 1504044,
+                                                       "message": "Service temporarily unavailable"}})
+    gm._insights = to
+    dv.http = MA.Http(transport=httpx.MockTransport(xu_ly), ngu=lambda s: None)
+    kq = dv.dong_bo(tu=datetime.date(2026, 10, 15), den=datetime.date(2026, 10, 18))
+    assert not kq.get("loi"), kq
+    assert lan["n"] > 0
+    # đủ 4 ngày × 2 chiến dịch của tài khoản nước hoa
+    assert len([k for k in kho_qc.bang["qc_campaign_ngay"] if k[0] in ("120201", "120202")]) == 8
+    assert all(r.method == "GET" for r in gm.goi)
+
+
+def test_ma_2_mot_ngay_trang_nho_nhat_van_loi_thi_bao_loi():
+    dv, kho_qc, gm = _mdv()
+    _gom_tk(dv)
+    goc = gm._insights
+
+    def to(act, q):
+        if q["level"] == "campaign" and act == NUOC_HOA:
+            raise RuntimeError("qua tai")
+        return goc(act, q)
+
+    def xu_ly(req):
+        try:
+            return gm.xu_ly(req)
+        except RuntimeError:
+            return httpx.Response(500, json={"error": {"code": 2, "error_subcode": 1504044}})
+    gm._insights = to
+    dv.http = MA.Http(transport=httpx.MockTransport(xu_ly), ngu=lambda s: None)
+    kq = dv.dong_bo(tu=datetime.date(2026, 10, 18), den=datetime.date(2026, 10, 18))
+    # các tài khoản khác vẫn ghi được; tài khoản lỗi được báo (không treo, không lặp vô hạn)
+    assert kho_qc.bang["qc_campaign_ngay"]
+    assert "2/1504044" in json.dumps(kq, ensure_ascii=False, default=str)
+
+
 def test_token_bi_tu_choi_giua_luot_thi_trang_thai():
     dv, kho_qc, gm = _mdv()
     _gom_tk(dv)

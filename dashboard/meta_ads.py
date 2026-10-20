@@ -95,6 +95,11 @@ CUA_SO_NGAY = 30
 LUI_NGAY = 7
 KHAN_GIA_NGAY = 7
 TRANG = 500                    # dòng mỗi trang insights
+#: 1 ngày vẫn quá nặng → xin lại với trang nhỏ dần (Meta hết giờ khi một trang nhiều ad × action).
+TRANG_NHO = (200, 50)
+#: Mã 2 = "Service temporarily unavailable" — với insights thường là yêu cầu quá nặng / hết giờ
+#: (mã con 1504044): xử lý như quá nhiều dữ liệu (chia nhỏ), không bỏ cả tài khoản.
+MA_QUA_TAI = frozenset({2})
 TRAN_TRANG = 2000              # trang tối đa mỗi lượt đọc (phòng vòng lặp vô hạn)
 THU_LAI = 3                    # lỗi mạng / 5xx
 THU_LAI_GIOI_HAN = 4           # giới hạn tần suất: nghỉ 30, 60, 120, 240 giây
@@ -344,8 +349,8 @@ class Graph:
 
 
 def tham_so_insights(cap: str, truong, tu: datetime.date, den: datetime.date, *,
-                     theo_ngay: bool = True, breakdowns=()) -> dict:
-    p = {"level": cap, "fields": ",".join(truong), "limit": TRANG,
+                     theo_ngay: bool = True, breakdowns=(), trang: int = TRANG) -> dict:
+    p = {"level": cap, "fields": ",".join(truong), "limit": trang,
          "time_range": json.dumps({"since": tu.isoformat(), "until": den.isoformat()})}
     if theo_ngay:
         p["time_increment"] = 1
@@ -784,22 +789,31 @@ class DichVu:
         return n, b
 
     def _doc_ghi(self, g: Graph, act: str, cap: str, truong, a: datetime.date,
-                 b: datetime.date, xu_ly) -> int:
-        """Đọc insights [a, b] theo trang, ghi từng trang. Meta báo quá nhiều dữ liệu → chia đôi
-        cửa sổ (tới 1 ngày; upsert nên đọc lại phần đã ghi không nhân đôi)."""
+                 b: datetime.date, xu_ly, trang: int = TRANG) -> int:
+        """Đọc insights [a, b] theo trang, ghi từng trang. Meta báo quá nhiều dữ liệu (mã 1) hoặc
+        quá tải / hết giờ (mã 2, vd 2/1504044 — 20/10/2026 gặp ở 6 tài khoản lớn khi nạp lùi) →
+        chia đôi cửa sổ (tới 1 ngày); 1 ngày vẫn lỗi → xin trang nhỏ dần (TRANG_NHO). Upsert nên
+        đọc lại phần đã ghi không nhân đôi."""
         try:
             n = 0
-            for ds in g.trang_lap(f"{act}/insights", tham_so_insights(cap, truong, a, b)):
+            for ds in g.trang_lap(f"{act}/insights",
+                                  tham_so_insights(cap, truong, a, b, trang=trang)):
                 n += xu_ly(ds)
             return n
-        except LoiQuaNhieu:
-            if a >= b:
+        except LoiMeta as e:
+            if not (isinstance(e, LoiQuaNhieu) or e.ma in MA_QUA_TAI):
                 raise
-            giua = a + datetime.timedelta(days=(b - a).days // 2)
-            self.log(f"[meta_ads] {act} {cap} {a}→{b} quá nhiều dữ liệu — chia đôi")
-            return (self._doc_ghi(g, act, cap, truong, a, giua, xu_ly)
-                    + self._doc_ghi(g, act, cap, truong, giua + datetime.timedelta(days=1), b,
-                                    xu_ly))
+            if a < b:
+                giua = a + datetime.timedelta(days=(b - a).days // 2)
+                self.log(f"[meta_ads] {act} {cap} {a}→{b} quá nhiều dữ liệu (mã {e.ma}) — chia đôi")
+                return (self._doc_ghi(g, act, cap, truong, a, giua, xu_ly, trang)
+                        + self._doc_ghi(g, act, cap, truong, giua + datetime.timedelta(days=1), b,
+                                        xu_ly, trang))
+            nho = next((x for x in TRANG_NHO if x < trang), None)
+            if nho is None:
+                raise
+            self.log(f"[meta_ads] {act} {cap} {a} quá nặng (mã {e.ma}) — trang {nho} dòng")
+            return self._doc_ghi(g, act, cap, truong, a, b, xu_ly, nho)
 
     def _mot_cua_so(self, g: Graph, act: str, a: datetime.date, b: datetime.date) -> int:
         def ghi_bang(dong, ghi):
