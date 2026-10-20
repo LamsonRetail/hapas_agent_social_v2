@@ -1165,8 +1165,10 @@ def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
     assert c.get(f"/api/qc?{Q}&ben=chua_gan").json()["tai_khoan"][0]["advertiser_id"] == LE
     assert c.get(f"/api/qc?{Q}&ben=khong-co").status_code == 404
     t = c.get(f"/quang-cao?{Q}").text
-    assert "Chi tiêu" in t and "ROAS Shop" in t and 'id="qc-du-lieu"' in t
-    assert "Số đến hết ngày 18/10/2026" in t
+    assert "Chi tiêu" in t and "ROAS Shop" in t and 'id="qc-api"' in t
+    # Thiết kế 20/10/2026: kỳ đang xem ở đầu trang, "số đến ngày" ở dải trạng thái, CPM + CTR tính lại.
+    assert "12/10 – 18/10/2026" in t and "số đến <b>18/10</b>" in t
+    assert 'data-kpi="cpm"' in t and 'data-kpi="ctr"' in t
     assert c.get("/api/qc?tu=2025-01-01&den=2026-10-18").status_code == 400
 
 
