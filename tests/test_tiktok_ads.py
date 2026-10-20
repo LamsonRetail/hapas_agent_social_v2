@@ -423,7 +423,9 @@ class GiaKhoQC:
             if (t.get("nen_tang") or "tiktok") == nen and t.get("dang_dong_bo")                     and t.get("duyet", True) and t.get("con_quyen", True):
                 t["nap_lui_tu"] = t["nap_lui_xong_luc"] = None
                 n += 1
-        self.nk.append((ai, f"nap_lai_{nen}"))
+        self.yeu_cau_dong_bo(ai, ncc, kieu="day_du")
+        self.nk = [x for x in self.nk if x != (ai, f"dong_bo_{nen}")]   # một dòng mỗi lần bấm
+        self.nk.append((ai, "dong_bo_qc"))
         return n
 
     # số liệu: upsert theo PK

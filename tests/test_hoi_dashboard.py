@@ -582,3 +582,17 @@ def test_chi_tra_so_du_an_cua_ben_nguoi_hoi(monkeypatch):
                     bay_gio=BAY_GIO)
     assert {d["ma"] for d in ra["cac_du_an"]} == {"hapas", "mm"}
     assert ra["vai_tro_nguoi_hoi"] == "quan_ly"
+
+
+def test_do_phu_chi_quan_tri_vien(la_nguoi_xem):
+    """20/10/2026: Độ thu đủ là số VẬN HÀNH — Mark chỉ trả cho quản trị viên (như thẻ ở Quản trị)."""
+    from test_kiem_do_phu import _dong_dp
+    kho = _kho_mau()
+    kho.do_phu = [_dong_dp(66.67, BAY_GIO)]
+    hoi = {"du_an": "hapas", "tu": "2026-10-08", "den": "2026-10-14", "phan": ["do_phu"]}
+    xem = _json(HD.tra_loi(dict(hoi), kho, open_id="ou_hoi", bay_gio=BAY_GIO))
+    assert xem["phan"]["do_phu"]["co"] is False and "chỉ quản trị viên" in xem["phan"]["do_phu"][
+        "ghi_chu"]
+    qt = _json(HD.tra_loi(dict(hoi), kho, open_id="ou_qt", bay_gio=BAY_GIO))
+    assert qt["phan"]["do_phu"]["co"] is True and qt["phan"]["do_phu"]["do_phu_tl"] == 66.67
+    assert "CHỈ trả cho quản trị viên" in HD.PHAN["do_phu"]

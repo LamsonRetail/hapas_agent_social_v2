@@ -218,27 +218,45 @@ def _ngay_ngan(x) -> str:
     return x.strftime("%d/%m") if isinstance(x, datetime.date) else "—"
 
 
+#: "Đồng bộ lại 90 ngày" không nhận từ 00:00 tới 07:30 giờ VN (soát 20/10/2026): lượt nạp lại chạy nhiều giờ,
+#: bắt đầu trước sáng là chồng lên lượt hằng ngày 06:30 / 06:45.
+DAY_DU_TU = datetime.time(7, 30)
+CAU_SANG = "để không chồng lượt tự động sáng (00:00–07:30) — bấm sau 07:30"
+
+
 def ly_do_khong_dong_bo(the: dict | None, bay: datetime.datetime, kieu: str, *,
-                        hien_ai: bool = False, trong_gio: bool | None = None) -> str | None:
+                        hien_ai: bool = False, la_quan_tri: bool = True,
+                        bay_dv: datetime.datetime | None = None) -> str | None:
     """Lý do KHÔNG ghi được yêu cầu `kieu` (nhanh | day_du) cho nền tảng này — None = được. Cùng luật
-    nút và máy chủ: chưa kết nối / đang chạy / đang có yêu cầu (`kiem_yeu_cau`) / trong khung đồng bộ
-    hằng ngày; nhanh còn giãn 15 phút sau lượt nhanh trước; day_du thiếu khoá giải mã."""
+    nút và máy chủ: chưa kết nối / đang chạy / đang có yêu cầu (`kiem_yeu_cau`) / khoá mã hoá chưa dùng
+    được / trong khung đồng bộ hằng ngày; nhanh còn giãn 15 phút sau lượt nhanh trước; day_du chỉ quản
+    trị viên và không nhận 00:00–07:30. `bay_dv`: đồng hồ của dịch vụ đồng bộ (khung giờ; bộ thử đặt
+    giờ giả) — mặc định `bay`."""
     t = the or {}
+    bay_dv = bay_dv or bay
+    if kieu == "day_du" and not la_quan_tri:
+        return "chỉ quản trị viên"
     if kieu == "day_du":
         ly = kiem_yeu_cau({**t, "nhanh_xong_luc": None, "dong_bo_kieu": None}, bay, hien_ai=hien_ai)
-        if not ly and t.get("loi_khoa"):
-            ly = f"khoá mã hoá chưa dùng được ({t['loi_khoa']})"
     else:
         ly = kiem_yeu_cau(t, bay, hien_ai=hien_ai)
-    if not ly and (trong_gio_dong_bo(bay) if trong_gio is None else trong_gio):
+    if not ly and t.get("loi_khoa"):
+        ly = f"khoá mã hoá chưa dùng được ({t['loi_khoa']})"
+    if not ly and trong_gio_dong_bo(bay_dv):
         ly = CAU_TRONG_GIO
+    if not ly and kieu == "day_du":
+        g = (bay_dv if bay_dv.tzinfo else bay_dv.replace(tzinfo=datetime.UTC)).astimezone(VN).time()
+        if g < DAY_DU_TU:
+            ly = CAU_SANG
     return ly
 
 
 def dong_dieu_khien(the: dict | None, nen_tang: str, bay: datetime.datetime, *,
-                    hien_ai: bool = False, trong_gio: bool | None = None) -> dict:
+                    hien_ai: bool = False, la_quan_tri: bool = False,
+                    bay_dv: datetime.datetime | None = None) -> dict:
     """Một dòng điều khiển đồng bộ (mọi chữ là chữ thường, không tiền, không số liệu): tên đầy đủ,
-    MỘT câu trạng thái, lý do khoá từng nút, chi tiết phụ (gập)."""
+    MỘT câu trạng thái, lý do khoá từng nút, chi tiết phụ (gập). Lỗi chi tiết + số tài khoản chỉ quản
+    trị viên (`la_quan_tri`); người khác thấy câu chung."""
     t = the or {}
     tt = tinh_trang_dong_bo(t)
     luc = t.get("dong_bo_xong") or t.get("dong_bo_ok_luc")
@@ -251,19 +269,22 @@ def dong_dieu_khien(the: dict | None, nen_tang: str, bay: datetime.datetime, *,
                + (" (lại 90 ngày)" if t.get("yeu_cau_kieu") == "day_du" else "")
                + " — bắt đầu trong ≤ 2 phút")
     elif tt == "co_loi":
-        cau = "Lỗi lần trước — xem chi tiết"
+        cau = "Lỗi lần trước — " + ("xem chi tiết" if la_quan_tri else "báo quản trị viên")
     else:
         cau = f"Số đến {_ngay_ngan(t.get('so_den_ngay'))} · cập nhật {_ngay_ngan(luc)} {_gio(luc)}"
     loi = t.get("dong_bo_loi") or (t.get("loi_cuoi") if tt == "co_loi" else None)
+    if loi and not la_quan_tri:
+        loi = "Lỗi lần trước — báo quản trị viên"
     return {"nen_tang": nen_tang, "ncc": NEN_NCC[nen_tang], "ten": TEN_DAY_DU[nen_tang],
             "tinh_trang": tt, "nhan": TEN_TINH_TRANG[tt], "cau": cau,
-            "ly_nhanh": ly_do_khong_dong_bo(t, bay, "nhanh", hien_ai=hien_ai, trong_gio=trong_gio),
+            "ly_nhanh": ly_do_khong_dong_bo(t, bay, "nhanh", hien_ai=hien_ai, bay_dv=bay_dv),
             "ly_day_du": ly_do_khong_dong_bo(t, bay, "day_du", hien_ai=hien_ai,
-                                             trong_gio=trong_gio),
+                                             la_quan_tri=la_quan_tri, bay_dv=bay_dv),
             "so_den_ngay": t.get("so_den_ngay"), "dong_bo_luc": luc,
-            "chi_tiet": {"so_tk": t.get("so_tk_thay"), "bat_dau": t.get("dong_bo_bat_dau"),
-                         "xong": t.get("dong_bo_xong"), "so_dong": t.get("dong_bo_so_dong"),
-                         "kieu": t.get("dong_bo_kieu"), "loi": loi},
+            "chi_tiet": {"so_tk": t.get("so_tk_thay") if la_quan_tri else None,
+                         "bat_dau": t.get("dong_bo_bat_dau"), "xong": t.get("dong_bo_xong"),
+                         "so_dong": t.get("dong_bo_so_dong"), "kieu": t.get("dong_bo_kieu"),
+                         "loi": loi},
             "co_token": bool(t.get("co_token"))}
 
 

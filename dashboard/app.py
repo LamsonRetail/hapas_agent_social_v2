@@ -1053,11 +1053,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             log.warning("đọc trạng thái đồng bộ %s lỗi: %s", nen, type(e).__name__)
             return None
 
-    def _trong_gio(nen: str) -> bool:
-        """Khung đồng bộ hằng ngày 06:25–07:30 theo ĐỒNG HỒ của dịch vụ (bộ thử đặt giờ giả)."""
-        return TA.yeu_cau_trong_gio_dong_bo(_dv_qc()[nen])
+    def _bay_dv(nen: str) -> datetime.datetime:
+        """Đồng hồ của dịch vụ đồng bộ (khung 06:25–07:30; 00:00–07:30 của lượt 90 ngày) — bộ thử
+        đặt giờ giả."""
+        f = getattr(_dv_qc()[nen], "_bay_gio", None)
+        return f() if callable(f) else datetime.datetime.now(datetime.timezone.utc)
 
-    async def _dai_qc(hien_ai: bool = False) -> list[dict]:
+    async def _dai_qc(la_quan_tri: bool = False) -> list[dict]:
         """Điều khiển đồng bộ (trang Quảng cáo, thiết kế lại 20/10/2026): mỗi nền tảng một dòng —
         tên đầy đủ, một câu trạng thái, lý do khoá từng nút; chi tiết phụ để gập. KHÔNG tiền, không
         số liệu. Nền tảng chưa kết nối vẫn có dòng ("Chưa kết nối") để biết vì sao không bấm được."""
@@ -1066,8 +1068,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         for nen in QC.NEN_TANG_QC:
             t = await _the_qc(nen)
             if t is not None:
-                ra.append(QC.dong_dieu_khien(t, nen, bay, hien_ai=hien_ai,
-                                             trong_gio=_trong_gio(nen)))
+                ra.append(QC.dong_dieu_khien(t, nen, bay, hien_ai=la_quan_tri,
+                                             la_quan_tri=la_quan_tri, bay_dv=_bay_dv(nen)))
         return ra if any(x["co_token"] for x in ra) else []
 
     #: `ncc` của biểu mẫu → nền tảng (ca_hai = cả hai). `nen_tang` (bản trước) vẫn nhận.
@@ -1104,26 +1106,27 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 continue
             # Email người đã yêu cầu chỉ quản trị viên thấy; người khác chỉ thấy giờ.
             ly_do = QC.ly_do_khong_dong_bo(t, bay, kieu, hien_ai=nguoi["la_quan_tri"],
-                                           trong_gio=_trong_gio(n))
+                                           la_quan_tri=nguoi["la_quan_tri"], bay_dv=_bay_dv(n))
             if ly_do:
                 if ca and ly_do == "chưa kết nối":
                     continue
                 tu_choi.append(f"{ten}: {ly_do}")
                 continue
             try:
-                so_tk = None
                 if kieu == "day_du":
-                    so_tk = await _k(app.state.kho_qc.nap_lai, nguoi["email"], QC.NEN_NCC[n])
-                await _k(_dv_qc()[n].yeu_cau, nguoi["email"], kieu)
-                await _k(app.state.kho.ghi_nhat_ky, nguoi["email"], "dong_bo_qc",
-                         f"quang_cao:{n}", {"kieu": "bam_tay", "cua_so": kieu,
-                                            **({"so_tk": so_tk} if so_tk is not None else {})})
+                    # MỘT giao dịch: xoá mốc nạp lùi + ghi cờ day_du + NOTIFY + một dòng nhật ký —
+                    # hỏng thì không đổi gì (không có cảnh mốc đã xoá mà chưa có yêu cầu).
+                    await _k(app.state.kho_qc.nap_lai, nguoi["email"], QC.NEN_NCC[n])
+                else:
+                    await _k(_dv_qc()[n].yeu_cau, nguoi["email"], kieu)
+                    await _k(app.state.kho.ghi_nhat_ky, nguoi["email"], "dong_bo_qc",
+                             f"quang_cao:{n}", {"kieu": "bam_tay", "cua_so": kieu})
                 ok.append(ten)
             except (LoiKho, LoiDuLieu) as e:
                 log.warning("ghi yêu cầu đồng bộ %s lỗi: %s", n, type(e).__name__)
                 tu_choi.append(f"{ten}: chưa ghi được yêu cầu")
         if ok:
-            pham_vi = ("nạp lại 90 ngày, chạy nền — có thể mất vài chục phút tới vài giờ"
+            pham_vi = ("nạp lại 90 ngày, chạy nền — có thể mất vài giờ (Meta tới ~6 giờ)"
                        if kieu == "day_du" else "hôm nay + 2 ngày trước")
             tin = (f"Đã yêu cầu đồng bộ {', '.join(ok)} ({pham_vi}). {CHO_DONG_BO}"
                    + (f" Bỏ qua — {'; '.join(tu_choi)}." if tu_choi else ""))
@@ -2800,7 +2803,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             loi = str(e)
         except LoiKho:
             loi = "Chưa đọc được số quảng cáo (kho chưa có bảng TikTok Ads)."
-        dai = await _dai_qc(hien_ai=nguoi["la_quan_tri"])
+        dai = await _dai_qc(la_quan_tri=nguoi["la_quan_tri"])
         dong_bo = max((x["dong_bo_luc"] for x in dai if x.get("dong_bo_luc")), default=None)
         ctx: dict = {"dai_qc": dai, "duong_ve": "/quang-cao"}
         if d:

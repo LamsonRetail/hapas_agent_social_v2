@@ -564,7 +564,8 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .dai-qc__phai { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; max-width: 100%; }
 .dai-qc__tach { display: inline-flex; position: relative; }
 .dai-qc__chinh { margin: 0; }
-.dai-qc__chinh .nut { gap: 6px; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.dai-qc__chinh .nut { gap: 6px; }
+.dai-qc__chinh:not(:last-child) .nut { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .dai-qc .bt { width: 15px; height: 15px; }
 .dai-qc__them > summary.nut { margin: 0; padding: 3px 9px; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; color: var(--chu); }
 .dai-qc__them > summary.nut::before { width: 6px; height: 6px; border-width: 0 2px 2px 0; transform: rotate(45deg) translate(-1px, -1px); }

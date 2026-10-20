@@ -91,15 +91,15 @@ def test_dong_bo_lai_90_ngay_chi_quan_tri_va_nap_lai():
     tk = {a: t for a, t in h.kho_qc.tk.items() if (t.get("nen_tang") or "tiktok") == "tiktok"}
     assert all(t["nap_lui_xong_luc"] is None for t in tk.values() if t.get("dang_dong_bo"))
     assert all(t["nap_lui_xong_luc"] == BAY for a, t in h.kho_qc.tk.items() if a.startswith("act_"))
-    assert (QL, "nap_lai_tiktok") in h.kho_qc.nk
+    assert (QL, "dong_bo_qc") in h.kho_qc.nk
     assert not h.kho_qc.kns["meta_ads"].get("yeu_cau_dong_bo_luc")
     # Lượt nhanh vừa xong < 15 phút không chặn đồng bộ lại 90 ngày (chỉ chặn nhanh).
     th = {"co_token": True, "nhanh_xong_luc": datetime.datetime.now(UTC), "dong_bo_kieu": "nhanh"}
     bay = datetime.datetime.now(UTC)
-    assert "bấm lại được từ" in QC.ly_do_khong_dong_bo(th, bay, "nhanh", trong_gio=False)
-    assert QC.ly_do_khong_dong_bo(th, bay, "day_du", trong_gio=False) is None
+    assert "bấm lại được từ" in QC.ly_do_khong_dong_bo(th, bay, "nhanh", bay_dv=BAY)
+    assert QC.ly_do_khong_dong_bo(th, bay, "day_du", bay_dv=BAY) is None
     assert "khoá mã hoá" in QC.ly_do_khong_dong_bo({"co_token": True, "loi_khoa": "thiếu"}, bay,
-                                                     "day_du", trong_gio=False)
+                                                     "day_du", bay_dv=BAY)
 
 
 def test_trong_gio_dong_bo_tu_dong_khoa_nut_va_may_chu_tu_choi():
@@ -124,12 +124,69 @@ def test_ncc_kieu_sai_va_chua_ket_noi():
     for f in ({"ncc": "youtube"}, {"ncc": "tiktok_ads", "kieu": "tat_ca"}):
         r = h.c.post("/quang-cao/dong-bo", data={"csrf": csrf, **f})
         assert "không hợp lệ" in _tb(h.c, r)
-    x = QC.dong_dieu_khien({}, "meta", datetime.datetime.now(UTC), trong_gio=False)
+    x = QC.dong_dieu_khien({}, "meta", datetime.datetime.now(UTC), bay_dv=BAY)
     assert x["cau"].startswith("Chưa kết nối") and x["ly_nhanh"] == "chưa kết nối"
     assert x["ten"] == "Meta (Facebook) Ads" and x["ncc"] == "meta_ads"
     x = QC.dong_dieu_khien({"co_token": True, "dong_bo_loi": "x"}, "tiktok",
-                           datetime.datetime.now(UTC), trong_gio=False)
+                           datetime.datetime.now(UTC), la_quan_tri=True, bay_dv=BAY)
     assert x["cau"] == "Lỗi lần trước — xem chi tiết" and x["chi_tiet"]["loi"] == "x"
     x = QC.dong_dieu_khien({"co_token": True, "dang_dong_bo": True}, "tiktok",
-                           datetime.datetime.now(UTC), trong_gio=False)
+                           datetime.datetime.now(UTC), bay_dv=BAY)
     assert x["cau"].startswith("Đang đồng bộ…") and x["ly_nhanh"].startswith("đang chạy")
+
+
+# ───────────────────────────── soát 20/10/2026 (M1–M3, L1–L3) ─────────────────────────────
+def _ve(app, dai, la_quan_tri):
+    return app.state.mau.env.get_template("_dai_qc.html").render(
+        dai_qc=dai, nguoi={"la_quan_tri": la_quan_tri, "csrf": "x"}, duong_ve="/quang-cao")
+
+
+def test_nguoi_khong_phai_quan_tri_khong_thay_90_ngay_va_loi_tho():
+    """Trang Quảng cáo chỉ quản trị viên mở được (`QC.thay_trang_qc` = la_quan_tri) — đây là lớp chặn
+    thứ hai: dựng dải với người thường thì không có menu 90 ngày, không số tài khoản, không chữ lỗi."""
+    h = _h()
+    assert QC.thay_trang_qc({"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}, {"hapas"}) is False
+    the = {"co_token": True, "dong_bo_loi": "token=abc lỗi 500", "so_tk_thay": 7}
+    x = QC.dong_dieu_khien(the, "tiktok", BAY, la_quan_tri=False, bay_dv=BAY)
+    assert x["ly_day_du"] == "chỉ quản trị viên" and x["chi_tiet"]["so_tk"] is None
+    assert x["cau"] == "Lỗi lần trước — báo quản trị viên" and "abc" not in str(x)
+    t = _ve(h.app, [x], False)
+    assert "Đồng bộ lại 90 ngày" not in t and 'value="day_du"' not in t and "Tài khoản thấy" not in t
+    assert "Đồng bộ ngay" in t and "token" not in t
+    y = QC.dong_dieu_khien(the, "tiktok", BAY, la_quan_tri=True, bay_dv=BAY)
+    t = _ve(h.app, [y], True)
+    assert 'value="day_du"' in t and "Tài khoản thấy" in t and "token=abc" in t
+    assert "Meta tới ~6 giờ" in t and "số tức thì của Mark" in t                # M3
+
+
+def test_90_ngay_khong_nhan_tu_0h_toi_7h30_nhanh_van_duoc():
+    sang = datetime.datetime(2026, 10, 19, 22, 0, tzinfo=UTC)          # 05:00 giờ VN
+    the = {"co_token": True}
+    assert QC.ly_do_khong_dong_bo(the, sang, "day_du", bay_dv=sang) == QC.CAU_SANG
+    assert QC.ly_do_khong_dong_bo(the, sang, "nhanh", bay_dv=sang) is None
+    h = _h()
+    h.tdv._bay_gio = h.dv._bay_gio = lambda: sang
+    csrf = dang_nhap(h.c, QL)
+    r = h.c.post("/quang-cao/dong-bo", data={"csrf": csrf, "ncc": "meta_ads", "kieu": "day_du"})
+    assert "để không chồng lượt tự động sáng" in _tb(h.c, r)
+    assert not h.kho_qc.kns["meta_ads"].get("yeu_cau_dong_bo_luc")
+
+
+def test_khoa_ma_hoa_hong_chan_ca_dong_bo_ngay():
+    assert "khoá mã hoá" in QC.ly_do_khong_dong_bo({"co_token": True, "loi_khoa": "thiếu"}, BAY,
+                                                     "nhanh", bay_dv=BAY)
+
+
+def test_90_ngay_mot_giao_dich_mot_dong_nhat_ky():
+    """L1/L2: nap_lai xoá mốc + ghi cờ day_du cùng giao dịch; một dòng nhật ký mỗi lần bấm."""
+    import inspect
+
+    from dashboard import kho_qc as KQ
+    src = inspect.getsource(KQ.nap_lai)
+    assert "_yeu_cau(c, ai, ncc, \"day_du\")" in src and src.count("_nhat_ky(") == 1
+    h = _h()
+    csrf = dang_nhap(h.c, QL)
+    n0 = len(h.kho_qc.nk) + len(h.kho.nk)
+    h.c.post("/quang-cao/dong-bo", data={"csrf": csrf, "ncc": "tiktok_ads", "kieu": "day_du"})
+    assert len(h.kho_qc.nk) + len(h.kho.nk) == n0 + 1
+    assert h.kho_qc.kns["tiktok_ads"]["yeu_cau_kieu"] == "day_du"
