@@ -354,6 +354,20 @@ def dat_nap_lui(advertiser_id: str, tu: datetime.date, xong: bool) -> None:
                   (tu, bool(xong), advertiser_id))
 
 
+def nap_lai(ai: str, ncc: str = NCC) -> int:
+    """"Đồng bộ lại 90 ngày" (trang Quảng cáo, quản trị viên, 20/10/2026): xoá mốc nạp lùi của mọi tài
+    khoản ĐANG ĐỒNG BỘ (đã duyệt) của nền tảng — lượt đầy đủ kế tiếp nạp lại 90 ngày theo đúng đường
+    nạp lùi sẵn có (3 cửa sổ 30 ngày, mới trước, ngắt giữa chừng thì lượt sau đọc tiếp). Upsert theo
+    khoá chính nên đọc lại không nhân đôi số. -> số tài khoản."""
+    nen = _nen_tang(ncc)
+    with ket_noi() as c:
+        n = c.execute("UPDATE tk_quang_cao SET nap_lui_tu = NULL, nap_lui_xong_luc = NULL, "
+                      "cap_nhat_luc = now() WHERE nen_tang = %s AND dang_dong_bo AND duyet "
+                      "AND con_quyen", (nen,)).rowcount or 0
+        _nhat_ky(c, ai, f"nap_lai_{nen}", f"ket_noi:{ncc}", {"so_tk": n, "ngay": 90})
+    return int(n)
+
+
 def dat_khan_gia(advertiser_id: str) -> None:
     with ket_noi() as c:
         c.execute("UPDATE tk_quang_cao SET khan_gia_luc = now() WHERE advertiser_id = %s",

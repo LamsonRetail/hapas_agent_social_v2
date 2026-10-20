@@ -674,7 +674,7 @@ def test_dong_bo_bam_tay_moi_nguoi_co_quyen():
     n_meta, n_tt = len(gm.goi), len(tt.goi)
     r = c.post("/quang-cao/dong-bo", data={"csrf": csrf, "nen_tang": "tat_ca", "ve": "/"})
     assert r.status_code == 303 and r.headers["location"] == "/"
-    assert "Đã yêu cầu đồng bộ TikTok, Meta" in c.get("/").text
+    assert "Đã yêu cầu đồng bộ TikTok Ads, Meta (Facebook) Ads" in c.get("/").text
     assert len(gm.goi) == n_meta and len(tt.goi) == n_tt
     for k in ("tiktok_ads", "meta_ads"):
         assert kho_qc.kns[k]["yeu_cau_kieu"] == "nhanh" and kho_qc.kns[k]["yeu_cau_boi"] == XEM

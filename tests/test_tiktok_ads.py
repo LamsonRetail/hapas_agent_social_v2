@@ -416,6 +416,16 @@ class GiaKhoQC:
     def dat_khan_gia(self, adv):
         self.tk[adv]["khan_gia_luc"] = BAY
 
+    def nap_lai(self, ai, ncc="tiktok_ads"):
+        nen = "meta" if ncc == "meta_ads" else "tiktok"
+        n = 0
+        for t in self.tk.values():
+            if (t.get("nen_tang") or "tiktok") == nen and t.get("dang_dong_bo")                     and t.get("duyet", True) and t.get("con_quyen", True):
+                t["nap_lui_tu"] = t["nap_lui_xong_luc"] = None
+                n += 1
+        self.nk.append((ai, f"nap_lai_{nen}"))
+        return n
+
     # số liệu: upsert theo PK
     def _ghi(self, bang, rows):
         _, pk = KQ.BANG_QC[bang]
@@ -1169,7 +1179,7 @@ def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
     t = c.get(f"/quang-cao?{Q}").text
     assert "Chi tiêu" in t and "ROAS Shop" in t and 'id="qc-api"' in t
     # Thiết kế 20/10/2026: kỳ đang xem ở đầu trang, "số đến ngày" ở dải trạng thái, CPM + CTR tính lại.
-    assert "12/10 – 18/10/2026" in t and "số đến <b>18/10</b>" in t
+    assert "12/10 – 18/10/2026" in t and "Số đến 18/10" in t
     assert 'data-kpi="cpm"' in t and 'data-kpi="ctr"' in t
     assert c.get("/api/qc?tu=2025-01-01&den=2026-10-18").status_code == 400
 

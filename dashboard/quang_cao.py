@@ -200,6 +200,73 @@ def dai_trang_thai(the: dict | None, nen_tang: str) -> dict:
             "co_token": bool(t.get("co_token"))}
 
 
+# ─── Điều khiển đồng bộ trên trang Quảng cáo (thiết kế lại 20/10/2026, chủ dự án: "rối, không biết đang
+# đồng bộ TikTok hay Facebook") — mỗi nền tảng MỘT dòng: tên đầy đủ + một câu trạng thái + một nút tách
+# "Đồng bộ ngay" (nhanh, 3 ngày) / "Đồng bộ lại 90 ngày" (day_du + nạp lại 90 ngày, chỉ quản trị viên). ───
+NCC_NEN = {"tiktok_ads": "tiktok", "meta_ads": "meta"}
+NEN_NCC = {v: k for k, v in NCC_NEN.items()}
+TEN_DAY_DU = {"tiktok": "TikTok Ads", "meta": "Meta (Facebook) Ads"}
+KIEU_DONG_BO = ("nhanh", "day_du")
+CAU_TRONG_GIO = "trong giờ đồng bộ tự động (06:25–07:30) — bấm lại sau 07:30"
+
+
+def _ngay_ngan(x) -> str:
+    if isinstance(x, datetime.datetime):
+        if x.tzinfo is None:
+            x = x.replace(tzinfo=datetime.timezone.utc)
+        return x.astimezone(VN).strftime("%d/%m")
+    return x.strftime("%d/%m") if isinstance(x, datetime.date) else "—"
+
+
+def ly_do_khong_dong_bo(the: dict | None, bay: datetime.datetime, kieu: str, *,
+                        hien_ai: bool = False, trong_gio: bool | None = None) -> str | None:
+    """Lý do KHÔNG ghi được yêu cầu `kieu` (nhanh | day_du) cho nền tảng này — None = được. Cùng luật
+    nút và máy chủ: chưa kết nối / đang chạy / đang có yêu cầu (`kiem_yeu_cau`) / trong khung đồng bộ
+    hằng ngày; nhanh còn giãn 15 phút sau lượt nhanh trước; day_du thiếu khoá giải mã."""
+    t = the or {}
+    if kieu == "day_du":
+        ly = kiem_yeu_cau({**t, "nhanh_xong_luc": None, "dong_bo_kieu": None}, bay, hien_ai=hien_ai)
+        if not ly and t.get("loi_khoa"):
+            ly = f"khoá mã hoá chưa dùng được ({t['loi_khoa']})"
+    else:
+        ly = kiem_yeu_cau(t, bay, hien_ai=hien_ai)
+    if not ly and (trong_gio_dong_bo(bay) if trong_gio is None else trong_gio):
+        ly = CAU_TRONG_GIO
+    return ly
+
+
+def dong_dieu_khien(the: dict | None, nen_tang: str, bay: datetime.datetime, *,
+                    hien_ai: bool = False, trong_gio: bool | None = None) -> dict:
+    """Một dòng điều khiển đồng bộ (mọi chữ là chữ thường, không tiền, không số liệu): tên đầy đủ,
+    MỘT câu trạng thái, lý do khoá từng nút, chi tiết phụ (gập)."""
+    t = the or {}
+    tt = tinh_trang_dong_bo(t)
+    luc = t.get("dong_bo_xong") or t.get("dong_bo_ok_luc")
+    if tt == "chua_ket_noi":
+        cau = "Chưa kết nối — kết nối ở trang Quản trị"
+    elif tt == "dang_chay":
+        cau = f"Đang đồng bộ… (từ {_gio(t.get('dong_bo_bat_dau'))})"
+    elif tt == "da_yeu_cau":
+        cau = (f"Đã yêu cầu lúc {_gio(t.get('yeu_cau_dong_bo_luc'))}"
+               + (" (lại 90 ngày)" if t.get("yeu_cau_kieu") == "day_du" else "")
+               + " — bắt đầu trong ≤ 2 phút")
+    elif tt == "co_loi":
+        cau = "Lỗi lần trước — xem chi tiết"
+    else:
+        cau = f"Số đến {_ngay_ngan(t.get('so_den_ngay'))} · cập nhật {_ngay_ngan(luc)} {_gio(luc)}"
+    loi = t.get("dong_bo_loi") or (t.get("loi_cuoi") if tt == "co_loi" else None)
+    return {"nen_tang": nen_tang, "ncc": NEN_NCC[nen_tang], "ten": TEN_DAY_DU[nen_tang],
+            "tinh_trang": tt, "nhan": TEN_TINH_TRANG[tt], "cau": cau,
+            "ly_nhanh": ly_do_khong_dong_bo(t, bay, "nhanh", hien_ai=hien_ai, trong_gio=trong_gio),
+            "ly_day_du": ly_do_khong_dong_bo(t, bay, "day_du", hien_ai=hien_ai,
+                                             trong_gio=trong_gio),
+            "so_den_ngay": t.get("so_den_ngay"), "dong_bo_luc": luc,
+            "chi_tiet": {"so_tk": t.get("so_tk_thay"), "bat_dau": t.get("dong_bo_bat_dau"),
+                         "xong": t.get("dong_bo_xong"), "so_dong": t.get("dong_bo_so_dong"),
+                         "kieu": t.get("dong_bo_kieu"), "loi": loi},
+            "co_token": bool(t.get("co_token"))}
+
+
 def _utc(x):
     if isinstance(x, datetime.datetime) and x.tzinfo is None:
         return x.replace(tzinfo=datetime.timezone.utc)

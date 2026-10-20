@@ -1,36 +1,64 @@
-{#- Dải trạng thái đồng bộ quảng cáo (20/10/2026, chủ dự án): CHỈ trên trang Quảng cáo (bỏ khỏi trang Chỉ số
-    và bỏ "Đồng bộ ngay" ở thẻ kết nối Quản trị cùng ngày — đây là nút đồng bộ bấm tay duy nhất). CHỈ ngày, giờ,
-    trạng thái (không tiền, không số liệu). "Đồng bộ ngay" chỉ ghi cờ yêu cầu lượt nhanh (POST
-    /quang-cao/dong-bo, máy chủ kiểm quyền + chống bấm dồn). Một hàng mảnh: mỗi nền tảng một cụm
-    (chấm màu nền tảng · số đến ngày · giờ cập nhật · trạng thái), nút bên phải; điện thoại xếp dọc,
-    nút cả bề ngang. Giờ rút gọn "dd/mm HH:MM" (năm không giúp gì ở đây). #}
-{% macro _ngan(x) %}{% if x %}{% set s = x|gio_vn %}{{ s[:5] }}{{ s[10:] }}{% else %}—{% endif %}{% endmacro %}
+{#- Điều khiển đồng bộ quảng cáo — CHỈ trang Quảng cáo (chỉ quản trị viên). Thiết kế lại 20/10/2026 (chủ dự án:
+    "rối, không biết đang đồng bộ TikTok hay Facebook"): mỗi nền tảng MỘT dòng — chấm màu nền tảng + tên đầy đủ
+    (TikTok Ads / Meta (Facebook) Ads), MỘT câu trạng thái chữ thường, một nút tách: "Đồng bộ ngay" (nhanh — hôm nay
+    + 2 ngày trước) và trong menu ▾ "Đồng bộ lại 90 ngày" (nạp lại 90 ngày, chạy nền, hỏi xác nhận). Nút khoá thì
+    nói vì sao (đang chạy / đã có yêu cầu / trong giờ đồng bộ tự động / chưa kết nối). Chi tiết (tài khoản, lượt
+    cuối, lỗi) gập trong "chi tiết". Mọi nút chỉ ghi cờ (POST /quang-cao/dong-bo, ncc + kieu) — máy chủ kiểm lại
+    quyền, khung giờ, chống bấm dồn. Không tiền, không số liệu. Điện thoại: dòng xếp dọc, nút cả bề ngang. #}
+{% macro _luc(x) %}{% if x %}{% set s = x|gio_vn %}{{ s[:5] }}{{ s[10:] }}{% else %}—{% endif %}{% endmacro %}
+{% macro _bt_xoay(xoay=false) %}<svg class="bt{% if xoay %} dai-qc__xoay{% endif %}" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>{% endmacro %}
+{% macro _an(ncc, kieu) %}<input type="hidden" name="csrf" value="{{ nguoi.csrf }}"><input type="hidden" name="ncc" value="{{ ncc }}"><input type="hidden" name="kieu" value="{{ kieu }}"><input type="hidden" name="ve" value="{{ duong_ve or '/quang-cao' }}">{% endmacro %}
 {% if dai_qc %}
-{% set dang = dai_qc|selectattr('tinh_trang', 'in', ['dang_chay', 'da_yeu_cau'])|list %}
-<section class="dai-qc" aria-label="Đồng bộ số quảng cáo" data-o="dai-qc">
-  <h2 class="dai-qc__ten">Số quảng cáo</h2>
+{% set duoc = dai_qc|rejectattr('ly_nhanh')|list %}
+<section class="dai-qc" aria-labelledby="dai-qc-ten" data-o="dai-qc">
+  <div class="dai-qc__dau">
+    <h2 class="dai-qc__ten" id="dai-qc-ten">Đồng bộ số quảng cáo</h2>
+    <button type="button" class="goi-y" data-goi-y="Tự động mỗi sáng: TikTok 06:30, Meta 06:45 (đọc lại 7 ngày). Đồng bộ ngay: đọc lại hôm nay + 2 ngày trước, bắt đầu trong ≤ 2 phút, xong sau vài phút; bấm lại sau 15 phút. Đồng bộ lại 90 ngày: đọc lại toàn bộ 90 ngày (sửa số cũ bị lệch), chạy nền — có thể mất vài chục phút tới vài giờ. Trong 06:25–07:30 không nhận yêu cầu mới.">i</button>
+    {% if duoc|length > 1 %}
+    <form method="post" action="/quang-cao/dong-bo" class="dai-qc__ca">{{ _an('ca_hai', 'nhanh') }}
+      <button class="nut nut--nhe nut--nho" type="submit">{{ _bt_xoay() }}Đồng bộ cả hai</button>
+    </form>
+    {% endif %}
+  </div>
   <ul class="dai-qc__ds">
     {% for x in dai_qc %}
-    <li class="dai-qc__o" data-nen-tang="{{ x.nen_tang }}" data-tinh-trang="{{ x.tinh_trang }}">
-      <span class="dai-qc__nen"><span class="qc-cham qc-cham--{{ x.nen_tang }}" aria-hidden="true"></span>{{ x.ten }}</span>
-      <span class="dai-qc__chu">số đến <b>{{ _ngan(x.so_den_ngay) }}</b><span class="dai-qc__luc"> · cập nhật {{ _ngan(x.dong_bo_luc) }}</span></span>
-      <span class="dai-qc__tt dai-qc__tt--{{ x.tinh_trang }}">{{ x.nhan }}</span>
+    <li class="dai-qc__dong" data-nen-tang="{{ x.nen_tang }}" data-tinh-trang="{{ x.tinh_trang }}">
+      <div class="dai-qc__trai">
+        <span class="dai-qc__nen"><span class="qc-cham qc-cham--{{ x.nen_tang }}" aria-hidden="true"></span>{{ x.ten }}</span>
+        <span class="dai-qc__cau dai-qc__cau--{{ x.tinh_trang }}">{{ x.cau }}</span>
+        {% if x.co_token %}
+        <details class="dai-qc__ct">
+          <summary>chi tiết</summary>
+          <dl>
+            <div><dt>Tài khoản thấy</dt><dd>{{ x.chi_tiet.so_tk if x.chi_tiet.so_tk is not none else '—' }}</dd></div>
+            <div><dt>Số đến ngày</dt><dd>{{ x.so_den_ngay|gio_vn if x.so_den_ngay else '—' }}</dd></div>
+            <div><dt>Lượt cuối</dt><dd>{% if x.chi_tiet.bat_dau %}{{ 'nhanh' if x.chi_tiet.kieu == 'nhanh' else 'đầy đủ' }} · bắt đầu {{ _luc(x.chi_tiet.bat_dau) }}{% if x.chi_tiet.xong %} · xong {{ _luc(x.chi_tiet.xong) }}{% endif %}{% if x.chi_tiet.so_dong is not none %} · {{ x.chi_tiet.so_dong|so_vn }} dòng{% endif %}{% else %}—{% endif %}</dd></div>
+            {% if x.chi_tiet.loi %}<div><dt>Lỗi</dt><dd class="chu-loi">{{ x.chi_tiet.loi }}</dd></div>{% endif %}
+          </dl>
+        </details>
+        {% endif %}
+      </div>
+      <div class="dai-qc__phai">
+        <div class="dai-qc__tach" role="group" aria-label="Đồng bộ {{ x.ten }}">
+          <form method="post" action="/quang-cao/dong-bo" class="dai-qc__chinh">{{ _an(x.ncc, 'nhanh') }}
+            <button class="nut nut--nhe nut--nho" type="submit"{% if x.ly_nhanh %} disabled aria-describedby="dai-qc-ly-{{ x.nen_tang }}"{% endif %}>{{ _bt_xoay(x.tinh_trang == 'dang_chay') }}Đồng bộ ngay</button>
+          </form>
+          <details class="dai-qc__them">
+            <summary class="nut nut--nhe nut--nho" title="Cách đồng bộ khác"><span class="dai-qc__an">Cách đồng bộ khác cho {{ x.ten }}</span></summary>
+            <div class="dai-qc__menu">
+              <form method="post" action="/quang-cao/dong-bo" data-xac-nhan="Đồng bộ lại 90 ngày cho {{ x.ten }}? Chạy nền, có thể mất vài chục phút tới vài giờ; trong lúc chạy vẫn xem được số hiện có.">{{ _an(x.ncc, 'day_du') }}
+                <button class="dai-qc__muc" type="submit"{% if x.ly_day_du %} disabled{% endif %}>
+                  <b>Đồng bộ lại 90 ngày</b>
+                  <span>{{ ('Chưa bấm được: ' ~ x.ly_day_du) if x.ly_day_du else 'Đọc lại toàn bộ 90 ngày, chạy nền (lâu).' }}</span>
+                </button>
+              </form>
+            </div>
+          </details>
+        </div>
+        {% if x.ly_nhanh %}<span class="dai-qc__ly" id="dai-qc-ly-{{ x.nen_tang }}">Chưa bấm được: {{ x.ly_nhanh }}</span>{% endif %}
+      </div>
     </li>
     {% endfor %}
   </ul>
-  <form method="post" action="/quang-cao/dong-bo" class="dai-qc__nut">
-    <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-    <input type="hidden" name="nen_tang" value="tat_ca">
-    <input type="hidden" name="ve" value="{{ duong_ve or '/' }}">
-    {% if dang|length == dai_qc|length %}
-    <button class="nut nut--nhe nut--nho" type="button" disabled title="Đã có lượt đồng bộ đang chờ hoặc đang chạy — tải lại trang sau ít phút.">
-      <svg class="bt dai-qc__xoay" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>Đang đồng bộ…
-    </button>
-    {% else %}
-    <button class="nut nut--nhe nut--nho" type="submit" title="Đọc lại số hôm nay và 2 ngày trước — bắt đầu trong ≤ 2 phút, xong sau vài phút.">
-      <svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>Đồng bộ ngay
-    </button>
-    {% endif %}
-  </form>
 </section>
 {% endif %}
