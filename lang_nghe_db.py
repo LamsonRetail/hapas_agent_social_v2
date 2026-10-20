@@ -378,12 +378,14 @@ def ghi_co_tiktok(c, ma: str, khoa: str, r: dict) -> bool:
     cac = _cot_tt(c, r)
     if not cac:
         return False
-    moi = [_GOP_CO.format(cu=k, moi="%s::boolean") for k in cac]
+    # Tham số đặt tên: `_GOP_CO` nhắc giá trị mới HAI lần, mỗi cột lại dùng ở cả SET lẫn WHERE —
+    # tham số vị trí `%s` thiếu (21/10/2026, chạy thật trên Postgres: ProgrammingError, hỏng cả lô).
+    moi = [_GOP_CO.format(cu=k, moi=f"%({k})s::boolean") for k in cac]
     x = c.execute(
         "UPDATE bai SET " + ", ".join(f"{k} = {m}" for k, m in zip(cac, moi)) +
-        ", cap_nhat_cuoi = now() WHERE du_an = %s AND khoa = %s AND (" +
+        ", cap_nhat_cuoi = now() WHERE du_an = %(du_an)s AND khoa = %(khoa)s AND (" +
         " OR ".join(f"{k} IS DISTINCT FROM {m}" for k, m in zip(cac, moi)) + ") RETURNING khoa",
-        [*(r[k] for k in cac), ma, khoa, *(r[k] for k in cac)]).fetchone()
+        {**{k: r[k] for k in cac}, "du_an": ma, "khoa": khoa}).fetchone()
     return bool(x)
 
 

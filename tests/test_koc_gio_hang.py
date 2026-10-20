@@ -120,7 +120,7 @@ class Kho:
         return False
 
     def execute(self, sql, ts=()):
-        self.cau.append((sql, list(ts or [])))
+        self.cau.append((sql, dict(ts) if isinstance(ts, dict) else list(ts or [])))
         if "information_schema" in sql:
             self._kq = {"co": 1} if self.co_cot else None
         elif sql.startswith("INSERT INTO bai"):
@@ -182,7 +182,7 @@ def test_cap_nhat_so_dien_co_bai_da_co(kho):
     k = kho()
     K.cap_nhat_so_lieu("hapas", 1, [{"khoa": "tiktok:1", "xem": 9, "gio_hang": True}])
     sql, ts = next(x for x in k.cau if x[0].startswith("UPDATE bai SET gio_hang"))
-    assert "IS DISTINCT FROM" in sql and ts[0] is True and "cap_nhat_cuoi = now()" in sql
+    assert "IS DISTINCT FROM" in sql and ts["gio_hang"] is True and "cap_nhat_cuoi = now()" in sql
     assert "la_quang_cao" not in sql                    # dòng không mang cờ quảng cáo
     # nang_so_lieu (số cũ của raw): không có số nào vẫn điền cờ
     k.cau.clear()
@@ -798,3 +798,25 @@ def test_buoc_cuoi_luot_co_lap_loi_va_tru_tien(monkeypatch):
     v2 = _ViecGia(10)
     monkeypatch.setattr(TDA, "gio_ho_so_luot", lambda *a, **k: pytest.fail("sắp hết giờ"))
     T._gio_ho_so_cuoi_luot(v2, "hapas", 7, 0.5, {"usd": 0.0, "ghi_chu": []})
+
+
+def test_ghi_co_tiktok_moi_tham_so_trong_sql_deu_co_gia_tri(monkeypatch):
+    """21/10/2026, chạy thật: `_GOP_CO` nhắc giá trị mới hai lần và dùng ở cả SET lẫn WHERE — bản
+    tham số vị trí truyền thiếu (ProgrammingError, hỏng cả lô cap_nhat_so_lieu). Mọi tên `%(x)s`
+    phải có trong tham số, không còn `%s` vị trí."""
+    import re
+    import lang_nghe_db as K
+
+    class C:
+        def execute(self, sql, params):
+            self.sql, self.params = sql, params
+            return self
+
+        def fetchone(self):
+            return {"khoa": "k"}
+
+    c = C()
+    monkeypatch.setattr(K, "_co_cot", lambda _c, _k: True)
+    assert K.ghi_co_tiktok(c, "hapas", "k", {"khoa": "k", "gio_hang": True, "la_quang_cao": False})
+    assert "%s" not in c.sql
+    assert set(re.findall(r"%\((\w+)\)s", c.sql)) <= set(c.params)
