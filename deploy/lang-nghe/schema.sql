@@ -1718,6 +1718,9 @@ GRANT SELECT (email, vai_tro) ON nguoi_xem TO mark;
 -- (`dashboard.kho.quyen_cua` — đọc nguoi_xem.la_quan_tri + quyen(email, don_vi, vai_tro));
 -- cột du_an.don_vi: role mark đã được đọc cả bảng du_an (cấp ở trên).
 GRANT SELECT (la_quan_tri) ON nguoi_xem TO mark;
+-- Bộ nghe Lark Sheet quảng cáo (`xuat_sheet_qc`, 21/10/2026): chia quyền xem + nhắn link theo
+-- union_id Lark của người bấm (`dashboard.kho.union_id_cua`) — email đăng nhập không trùng email Lark.
+GRANT SELECT (lark_union_id) ON nguoi_xem TO mark;
 GRANT SELECT (email, don_vi, vai_tro) ON quyen TO mark;
 GRANT SELECT ON don_vi TO mark;
 
