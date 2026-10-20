@@ -25,6 +25,7 @@ import contextlib
 import datetime
 import json
 import os
+import time
 
 from dashboard import phan_quyen as PQ
 
@@ -339,6 +340,35 @@ def tu_choi_de_xuat(ai: str, did: int) -> None:
 
 
 # ───────────────────────────── bài + lượt quét (chỉ đọc) ─────────────────────────────
+#: Cờ TikTok của bài (20/10/2026, `bai.gio_hang` / `bai.la_quang_cao` — KOC affiliate vs branding):
+#: chỉ đọc khi DB đã có cột (`_co_co_tiktok`); chưa có thì cùng tên, NULL ("chưa rõ") — bản
+#: dashboard lên trước schema.sql vẫn mở được trang. Có rồi thì nhớ.
+_CO_CO_TT: list[bool] = []
+#: Lần cuối DB trả "chưa có cột" (monotonic) — nhớ `_KHONG_CO_GIAY` giây, không hỏi mỗi lượt đọc.
+_KHONG_CO_TT: list[float] = []
+_KHONG_CO_GIAY = 300.0
+
+
+def _co_co_tiktok(c) -> bool:
+    if _CO_CO_TT:
+        return True
+    if _KHONG_CO_TT and time.monotonic() - _KHONG_CO_TT[-1] < _KHONG_CO_GIAY:
+        return False
+    x = c.execute("SELECT count(*) AS n FROM information_schema.columns WHERE table_schema = "
+                  "current_schema() AND table_name = 'bai' AND column_name IN "
+                  "('gio_hang', 'la_quang_cao')").fetchone()
+    if x and x.get("n") == 2:
+        _CO_CO_TT.append(True)
+    else:
+        _KHONG_CO_TT[:] = [time.monotonic()]
+    return bool(_CO_CO_TT)
+
+
+def _cot_co_tiktok(c) -> str:
+    return (", b.gio_hang, b.la_quang_cao" if _co_co_tiktok(c)
+            else ", NULL::boolean AS gio_hang, NULL::boolean AS la_quang_cao")
+
+
 def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) -> dict:
     """Bài đăng trong [tu, den) kèm loại/tên nguồn. -> {"rows": [...], "bi_cat": bool}.
 
@@ -347,7 +377,8 @@ def bai_trong_khoang(du_an: str, tu: datetime.datetime, den: datetime.datetime) 
     kỳ trước, và trang báo rõ bằng cờ `bi_cat` — không lặng lẽ mất bài mới nhất."""
     with ket_noi() as c:
         rows = c.execute(
-            f"SELECT {_COT_BAI_CS} FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "
+            f"SELECT {_COT_BAI_CS}{_cot_co_tiktok(c)} FROM bai b "
+            "LEFT JOIN nguon n ON n.id = b.nguon_id "
             "WHERE b.du_an = %s AND b.dang_luc >= %s AND b.dang_luc < %s "
             "ORDER BY b.dang_luc DESC LIMIT %s", (du_an, tu, den, BAI_TOI_DA + 1)).fetchall()
     return {"rows": rows[:BAI_TOI_DA], "bi_cat": len(rows) > BAI_TOI_DA}
@@ -385,6 +416,7 @@ def bai_theo_khoa(du_an: str, khoa: list[str], co_chu: bool = False) -> list[dic
         return rows
     cot = _COT_BAI_GOC + (_COT_BAI_GOC_CHU if co_chu else "")
     with ket_noi() as c:
+        cot += _cot_co_tiktok(c)              # lọc "Loại KOC" của bình luận theo bài gốc
         for i in range(0, len(khoa), 5000):
             rows += c.execute(
                 f"SELECT {cot} FROM bai b LEFT JOIN nguon n ON n.id = b.nguon_id "

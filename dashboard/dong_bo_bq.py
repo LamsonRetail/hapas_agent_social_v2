@@ -90,7 +90,11 @@ BANG: dict[str, dict] = {
                 ("kieu_trang", "STRING"), ("muc_nhac", "STRING"), ("la_pr", "BOOL"),
                 # Khử trùng Facebook (17/10/2026): id số của bài (ALTER … ADD COLUMN ma_so_fb
                 # trên BigQuery + schema.sql trên Postgres trước khi bật).
-                ("ma_so_fb", "STRING")],
+                ("ma_so_fb", "STRING"),
+                # KOC gắn giỏ / branding (20/10/2026): cờ TikTok — tuỳ chọn, MERGE khi cả hai
+                # bên đã có cột (schema.sql + ALTER trong bigquery.sql).
+                ("gio_hang", "BOOL"), ("la_quang_cao", "BOOL")],
+        "tuy_chon": ("gio_hang", "la_quang_cao"),
     },
     "chi_so_ngay": {
         "khoa": ["du_an", "khoa", "ngay"], "kieu": "theo_ngay", "moc": "ngay",

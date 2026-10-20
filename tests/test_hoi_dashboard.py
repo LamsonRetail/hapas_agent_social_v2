@@ -57,9 +57,10 @@ def _kho_mau() -> GiaKho:
     kho = GiaKho()
     kho.bai = [
         _bai(_luc(10), khoa="tiktok:1", binh_luan=40, thich=2000, xem=90000,
-             noi_dung="túi xách hapas đẹp quá giá tốt", followers=250000),
+             noi_dung="túi xách hapas đẹp quá giá tốt", followers=250000, gio_hang=True),
         _bai(_luc(11), khoa="tiktok:2", sac_thai="Tiêu cực", binh_luan=900, thich=800,
-             chia_se=50, noi_dung="túi xách bong da sau một tuần thất vọng", chu_de="Chất lượng sản phẩm"),
+             chia_se=50, noi_dung="túi xách bong da sau một tuần thất vọng", chu_de="Chất lượng sản phẩm",
+             gio_hang=False),
         _bai(_luc(12), khoa="facebook:3", nen_tang="facebook", nguon_id=None, kieu_quet="tu_khoa",
              nguon_loai=None, tai_khoan="page.x", tac_gia="Page X", sac_thai="Trung lập",
              noi_dung="review túi xách màu be", binh_luan=5),
@@ -76,7 +77,7 @@ def _kho_mau() -> GiaKho:
         _bai(_luc(5), khoa="tiktok:8", sac_thai="Tiêu cực", binh_luan=1, noi_dung="túi xách xấu"),
         # đăng TRƯỚC cả kỳ trước: chỉ tới được qua bình luận mới (đường `bai_theo_khoa`)
         _bai(datetime.datetime(2026, 9, 20, 9, 0, tzinfo=VN), khoa="tiktok:9", followers=500000,
-             binh_luan=70, thich=3000, noi_dung="túi xách hapas review"),
+             binh_luan=70, thich=3000, noi_dung="túi xách hapas review", gio_hang=True),
     ]
     bl = [
         _bl("tiktok:1", "a", _luc(10, 10)),
@@ -118,6 +119,8 @@ QUERY = (
     "&chu_de=Giá/mua ở đâu/ý định mua",
     "&kieu_trang=bao",
     "&gom_mg=1",
+    "&koc=affiliate",                    # KOC gắn giỏ (20/10/2026): bình luận theo bài gốc
+    "&koc=branding,chua_ro",
 )
 #: Khoá của /api/chi-so mà tool không tính (thông tin phiên/lượt, không phải số của bộ lọc).
 #: `do_phu` (kiểm độ phủ, 17/10/2026): lần kiểm gần nhất, không theo bộ lọc/khoảng ngày.

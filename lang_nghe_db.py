@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import os
+import time
 
 _TZ = "Asia/Ho_Chi_Minh"
 #: Lượt `theo_doi` còn `dang_chay` quá chừng này coi như bỏ dở (bot tắt giữa chừng).
@@ -241,6 +242,15 @@ def dong_luot(luot_id: int, *, trang_thai: str, so_nguon: int = 0, so_nguon_loi:
              cat_ghi_chu(ghi_chu), luot_id))
 
 
+def nhip_luot(luot_id: int, usd: float, ghi_chu: str | None = None) -> None:
+    """Nhịp sống của lượt ĐANG CHẠY dài (script đọc hồ sơ, 21/10/2026): chi phí đã tiêu tới giờ
+    (chỉ nâng — `da_tieu_thang` của lượt khác thấy ngay tiền đang tiêu) + ghi chú tiến độ."""
+    with ket_noi() as c:
+        c.execute("UPDATE luot_quet SET chi_phi_usd = GREATEST(chi_phi_usd, %s), "
+                  "ghi_chu = COALESCE(%s, ghi_chu) WHERE id = %s AND trang_thai = 'dang_chay'",
+                  (round(float(usd or 0), 4), cat_ghi_chu(ghi_chu), int(luot_id)))
+
+
 def _usd_vn(x: float) -> str:
     return f"{x:.4f}".replace(".", ",")
 
@@ -313,6 +323,67 @@ def _co_ma_so_fb(c) -> bool:
                   ).fetchone()
     if x:
         _CO_MA_SO_FB.append(True)
+    return bool(x)
+
+
+#: Cờ TikTok của bài (20/10/2026, task Lark t284905 — tách KOC affiliate gắn giỏ khỏi KOC
+#: branding): `gio_hang` (giỏ TikTok Shop), `la_quang_cao` (is_ads). Chỉ đưa vào câu ghi khi dòng
+#: mang giá trị bool VÀ DB đã có cột (`_co_cot`) — bản code lên VPS trước schema.sql vẫn ghi bài.
+_COT_TT = ("gio_hang", "la_quang_cao")
+_CO_COT: set[str] = set()
+#: Câu trả lời "chưa có cột" nhớ `_KHONG_CO_GIAY` giây (soát 21/10/2026): không hỏi information_schema
+#: mỗi dòng trước khi chạy schema.sql, mà chạy xong schema thì vài phút sau tự ghi cột.
+_KHONG_CO: dict[str, float] = {}
+_KHONG_CO_GIAY = 300.0
+#: Gộp cờ cũ {cu} với cờ mới {moi}: TRUE dính (đo raw 18/10/2026: 21 video feed hashtag báo "không
+#: giỏ" mà bản đọc tìm kiếm / hồ sơ cùng video báo có giỏ — feed hay thiếu anchor), FALSE chỉ điền
+#: chỗ NULL, NULL không bao giờ đè giá trị đã biết. Bảng: (N,F)→F (N,T)→T (F,T)→T (T,F)→T (F,N)→F.
+_GOP_CO = "COALESCE({cu} OR {moi}, {cu}, {moi})"
+
+
+def co_tiktok(d: dict) -> dict:
+    """{"gio_hang", "la_quang_cao"} (chỉ khoá có giá trị bool) cho dòng ghi kho của bài TikTok;
+    {} với nền tảng khác hoặc khi nguồn không báo — dòng không mang cờ ghi đúng câu lệnh cũ."""
+    if (d.get("platform") or d.get("nen_tang")) != "tiktok":
+        return {}
+    return {k: d[k] for k in _COT_TT if isinstance(d.get(k), bool)}
+
+
+def _co_cot(c, ten: str) -> bool:
+    """DB đã chạy bản schema có cột `bai.<ten>` chưa (như `_co_ma_so_fb`); có rồi thì nhớ."""
+    if ten in _CO_COT:
+        return True
+    if time.monotonic() - _KHONG_CO.get(ten, float("-inf")) < _KHONG_CO_GIAY:
+        return False
+    x = c.execute("SELECT 1 AS co FROM information_schema.columns WHERE table_schema = "
+                  "current_schema() AND table_name = 'bai' AND column_name = %s", (ten,)
+                  ).fetchone()
+    if x:
+        _CO_COT.add(ten)
+    else:
+        _KHONG_CO[ten] = time.monotonic()
+    return bool(x)
+
+
+def _cot_tt(c, r: dict) -> tuple[str, ...]:
+    """Cột cờ TikTok dòng `r` mang (giá trị bool) mà DB đã có. Không mang cờ → () và không
+    hỏi DB."""
+    return tuple(k for k in _COT_TT if isinstance(r.get(k), bool) and _co_cot(c, k))
+
+
+def ghi_co_tiktok(c, ma: str, khoa: str, r: dict) -> bool:
+    """Gộp cờ TikTok của dòng `r` vào bài ĐÃ CÓ (`_GOP_CO`); chỉ ghi (và đẩy `cap_nhat_cuoi` để
+    BigQuery đồng bộ lại) khi cờ thật sự đổi. -> có đổi không. Dùng cho đường chỉ cập nhật số
+    (`cap_nhat_so_lieu`, `nang_so_lieu`) và script bù `scripts/lang_nghe_nap_gio_hang.py`."""
+    cac = _cot_tt(c, r)
+    if not cac:
+        return False
+    moi = [_GOP_CO.format(cu=k, moi="%s::boolean") for k in cac]
+    x = c.execute(
+        "UPDATE bai SET " + ", ".join(f"{k} = {m}" for k, m in zip(cac, moi)) +
+        ", cap_nhat_cuoi = now() WHERE du_an = %s AND khoa = %s AND (" +
+        " OR ".join(f"{k} IS DISTINCT FROM {m}" for k, m in zip(cac, moi)) + ") RETURNING khoa",
+        [*(r[k] for k in cac), ma, khoa, *(r[k] for k in cac)]).fetchone()
     return bool(x)
 
 
@@ -411,7 +482,7 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
                 if khoa_cu:
                     r["khoa"] = khoa_cu
             cac = _COT_BAI + tuple(k for k in _COT_WEB if r.get(k) is not None) + tuple(
-                k for k in _COT_FB if co_cot and r.get(k) is not None)
+                k for k in _COT_FB if co_cot and r.get(k) is not None) + _cot_tt(c, r)
             cot = ", ".join(cac)
             # Nguồn có thể bị xoá trên dashboard giữa lượt quét: lấy id qua truy vấn con để nguồn
             # đã xoá thành NULL, không làm hỏng khoá ngoại (và rollback) cả lô bài đã trả tiền.
@@ -423,6 +494,9 @@ def ghi_bai(ma: str, luot_id: int, kieu: str, rows: list[dict]) -> tuple[int, in
             # loại — id reel thay vì id bài); dòng cũ chưa có id thì điền.
             them += "".join(f"{k} = COALESCE(bai.{k}, EXCLUDED.{k}), " for k in cac
                             if k in _COT_FB)
+            # Cờ TikTok (20/10/2026): TRUE dính, FALSE chỉ điền chỗ NULL (`_GOP_CO`).
+            them += "".join(f"{k} = " + _GOP_CO.format(cu=f"bai.{k}", moi=f"EXCLUDED.{k}") + ", "
+                            for k in cac if k in _COT_TT)
             gia_tri = [r.get(k) for k in cac]
             # Lần đọc cũ (`_ngay_so`, nạp raw) trùng bài đã có (bản trùng Facebook): số chỉ NÂNG.
             ham = "GREATEST" if r.get("_ngay_so") is not None else "COALESCE"
@@ -485,6 +559,7 @@ def cap_nhat_so_lieu(ma: str, luot_id: int, rows: list[dict]) -> int:
             if not x:
                 continue
             n += 1
+            ghi_co_tiktok(c, ma, r["khoa"], r)      # bài cũ gặp lại: điền cờ còn NULL
             c.execute(
                 "INSERT INTO chi_so_ngay (du_an, khoa, ngay, xem, thich, binh_luan, chia_se) "
                 "VALUES (%s, %s, (now() AT TIME ZONE %s)::date, %s, %s, %s, %s) "
@@ -509,18 +584,53 @@ def nang_so_lieu(ma: str, luot_id: int, rows: list[dict], ngay) -> int:
         for r in rows:
             v = [r.get(k) for k in _SO]
             if all(x is None for x in v):
+                ghi_co_tiktok(c, ma, r["khoa"], r)
                 continue
             x = c.execute(
                 "UPDATE bai SET " + ", ".join(f"{k} = GREATEST(%s::bigint, {k})" for k in _SO)
                 + ", cap_nhat_cuoi = now(), luot_cuoi = %s WHERE du_an = %s AND khoa = %s "
                 f"AND ({tang}) RETURNING khoa", [*v, luot_id, ma, r["khoa"], *v]).fetchone()
             n += 1 if x else 0
+            # Cờ TikTok của lần đọc cũ: chỉ điền / nâng theo `_GOP_CO`, kể cả khi số không tăng.
+            ghi_co_tiktok(c, ma, r["khoa"], r)
             c.execute(
                 "INSERT INTO chi_so_ngay (du_an, khoa, ngay, xem, thich, binh_luan, chia_se) "
                 "SELECT %s, %s, %s, %s, %s, %s, %s WHERE EXISTS (SELECT 1 FROM bai WHERE "
                 "du_an = %s AND khoa = %s) ON CONFLICT (du_an, khoa, ngay) DO UPDATE SET "
                 + ", ".join(f"{k} = GREATEST(EXCLUDED.{k}, chi_so_ngay.{k})" for k in _SO),
                 [ma, r["khoa"], r.get("_ngay_so") or ngay, *v, ma, r["khoa"]])
+    return n
+
+
+def bai_tiktok_co(ma: str) -> list[dict]:
+    """Mọi bài TikTok của dự án kèm cờ hiện có (khoá, link, gio_hang, la_quang_cao) — script bù cờ
+    `scripts/lang_nghe_nap_gio_hang.py`. DB chưa có cột → LoiKho (chạy schema.sql trước).
+    Chỉ đọc."""
+    with ket_noi() as c:
+        if not all(_co_cot(c, k) for k in _COT_TT):
+            raise LoiKho("Kho chưa có cột bai.gio_hang / bai.la_quang_cao — chạy schema.sql trước.")
+        return c.execute("SELECT khoa, link, tai_khoan, dang_luc, gio_hang, la_quang_cao FROM bai "
+                         "WHERE du_an = %s AND nen_tang = 'tiktok' ORDER BY khoa", (ma,)).fetchall()
+
+
+def bai_gio_null_luot(ma: str, luot_id: int) -> list[dict]:
+    """Bài TikTok lượt `luot_id` ghi / cập nhật mà `gio_hang` còn NULL (chỉ thấy ở feed hashtag) —
+    bước đọc hồ sơ cuối lượt (`theo_doi_api.gio_ho_so_luot`). DB chưa có cột → []. Chỉ đọc."""
+    with ket_noi() as c:
+        if not _co_cot(c, "gio_hang"):
+            return []
+        return c.execute("SELECT khoa, link, tai_khoan, dang_luc FROM bai WHERE du_an = %s AND "
+                         "nen_tang = 'tiktok' AND gio_hang IS NULL AND luot_cuoi = %s",
+                         (ma, luot_id)).fetchall()
+
+
+def ghi_co_tiktok_lo(ma: str, cac: list[dict]) -> int:
+    """Gộp cờ của nhiều bài đã có trong MỘT giao dịch (`ghi_co_tiktok`; mỗi dòng {khoa, gio_hang?,
+    la_quang_cao?}). -> số bài có cờ đổi."""
+    n = 0
+    with ket_noi() as c:
+        for r in cac:
+            n += 1 if ghi_co_tiktok(c, ma, r["khoa"], r) else 0
     return n
 
 
