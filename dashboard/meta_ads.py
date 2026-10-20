@@ -81,7 +81,9 @@ _DUONG = re.compile(r"me|me/(?:adaccounts|permissions)|act_[0-9]{1,30}"
 #: `batch` (Graph nhận `?method=delete` trên GET), khoá lạ trong `paging.next` — bị chặn TRƯỚC khi
 #: gửi, cả trang đầu lẫn trang sau. `access_token` được phép có mặt trong `paging.next` nhưng luôn bị
 #: bỏ khỏi URL (token đi header).
-THAM_SO_DUOC = frozenset({"fields", "limit", "after", "before", "level", "time_range",
+#: `filtering` (20/10/2026): lọc insights theo campaign.id khi cấp ad của tài khoản lớn quá nặng —
+#: tham số đọc của Graph, không đổi phương thức.
+THAM_SO_DUOC = frozenset({"fields", "limit", "after", "before", "level", "time_range", "filtering",
                           "time_increment", "breakdowns", "access_token"})
 
 MA_GIOI_HAN = frozenset({4, 17, 32, 613, *range(80000, 80015)})
@@ -100,6 +102,8 @@ TRANG_NHO = (200, 50)
 #: Mã 2 = "Service temporarily unavailable" — với insights thường là yêu cầu quá nặng / hết giờ
 #: (mã con 1504044): xử lý như quá nhiều dữ liệu (chia nhỏ), không bỏ cả tài khoản.
 MA_QUA_TAI = frozenset({2})
+#: Cấp ad 1 ngày vẫn quá nặng → đọc theo lô chiến dịch (lọc campaign.id IN [...]).
+LO_CAMPAIGN = 10
 TRAN_TRANG = 2000              # trang tối đa mỗi lượt đọc (phòng vòng lặp vô hạn)
 THU_LAI = 3                    # lỗi mạng / 5xx
 THU_LAI_GIOI_HAN = 4           # giới hạn tần suất: nghỉ 30, 60, 120, 240 giây
@@ -349,9 +353,12 @@ class Graph:
 
 
 def tham_so_insights(cap: str, truong, tu: datetime.date, den: datetime.date, *,
-                     theo_ngay: bool = True, breakdowns=(), trang: int = TRANG) -> dict:
+                     theo_ngay: bool = True, breakdowns=(), trang: int = TRANG,
+                     loc: list | None = None) -> dict:
     p = {"level": cap, "fields": ",".join(truong), "limit": trang,
          "time_range": json.dumps({"since": tu.isoformat(), "until": den.isoformat()})}
+    if loc:
+        p["filtering"] = json.dumps(loc)
     if theo_ngay:
         p["time_increment"] = 1
     if breakdowns:
@@ -789,7 +796,7 @@ class DichVu:
         return n, b
 
     def _doc_ghi(self, g: Graph, act: str, cap: str, truong, a: datetime.date,
-                 b: datetime.date, xu_ly, trang: int = TRANG) -> int:
+                 b: datetime.date, xu_ly, trang: int = TRANG, loc: list | None = None) -> int:
         """Đọc insights [a, b] theo trang, ghi từng trang. Meta báo quá nhiều dữ liệu (mã 1) hoặc
         quá tải / hết giờ (mã 2, vd 2/1504044 — 20/10/2026 gặp ở 6 tài khoản lớn khi nạp lùi) →
         chia đôi cửa sổ (tới 1 ngày); 1 ngày vẫn lỗi → xin trang nhỏ dần (TRANG_NHO). Upsert nên
@@ -797,7 +804,7 @@ class DichVu:
         try:
             n = 0
             for ds in g.trang_lap(f"{act}/insights",
-                                  tham_so_insights(cap, truong, a, b, trang=trang)):
+                                  tham_so_insights(cap, truong, a, b, trang=trang, loc=loc)):
                 n += xu_ly(ds)
             return n
         except LoiMeta as e:
@@ -806,14 +813,39 @@ class DichVu:
             if a < b:
                 giua = a + datetime.timedelta(days=(b - a).days // 2)
                 self.log(f"[meta_ads] {act} {cap} {a}→{b} quá nhiều dữ liệu (mã {e.ma}) — chia đôi")
-                return (self._doc_ghi(g, act, cap, truong, a, giua, xu_ly, trang)
+                return (self._doc_ghi(g, act, cap, truong, a, giua, xu_ly, trang, loc)
                         + self._doc_ghi(g, act, cap, truong, giua + datetime.timedelta(days=1), b,
-                                        xu_ly, trang))
+                                        xu_ly, trang, loc))
             nho = next((x for x in TRANG_NHO if x < trang), None)
-            if nho is None:
-                raise
-            self.log(f"[meta_ads] {act} {cap} {a} quá nặng (mã {e.ma}) — trang {nho} dòng")
-            return self._doc_ghi(g, act, cap, truong, a, b, xu_ly, nho)
+            if nho is not None:
+                self.log(f"[meta_ads] {act} {cap} {a} quá nặng (mã {e.ma}) — trang {nho} dòng")
+                return self._doc_ghi(g, act, cap, truong, a, b, xu_ly, nho, loc)
+            if cap == "ad" and loc is None:
+                # Meta tính số cho MỌI quảng cáo của tài khoản rồi mới chia trang — trang nhỏ
+                # không giúp. Đọc theo lô chiến dịch có chạy trong ngày (lọc campaign.id).
+                self.log(f"[meta_ads] {act} ad {a} quá nặng — đọc theo lô chiến dịch")
+                return self._ad_theo_campaign(g, act, truong, a, xu_ly)
+            raise
+
+    def _ad_theo_campaign(self, g: Graph, act: str, truong, ngay: datetime.date, xu_ly) -> int:
+        """Cấp ad của MỘT ngày, đọc theo lô LO_CAMPAIGN chiến dịch có phân phối hôm đó. Lô vẫn quá
+        nặng → chia đôi lô; một chiến dịch vẫn quá nặng → báo lỗi (không lặp vô hạn)."""
+        ids: list[str] = []
+        for ds in g.trang_lap(f"{act}/insights", tham_so_insights(
+                "campaign", ("campaign_id",), ngay, ngay, trang=TRANG)):
+            ids.extend(str(r["campaign_id"]) for r in ds if r.get("campaign_id"))
+        ids = sorted(set(ids))
+
+        def lo(cac: list[str]) -> int:
+            loc = [{"field": "campaign.id", "operator": "IN", "value": cac}]
+            try:
+                return self._doc_ghi(g, act, "ad", truong, ngay, ngay, xu_ly, TRANG_NHO[-1], loc)
+            except LoiMeta as e:
+                if not (isinstance(e, LoiQuaNhieu) or e.ma in MA_QUA_TAI) or len(cac) == 1:
+                    raise
+                giua = len(cac) // 2
+                return lo(cac[:giua]) + lo(cac[giua:])
+        return sum(lo(ids[i:i + LO_CAMPAIGN]) for i in range(0, len(ids), LO_CAMPAIGN))
 
     def _mot_cua_so(self, g: Graph, act: str, a: datetime.date, b: datetime.date) -> int:
         def ghi_bang(dong, ghi):
