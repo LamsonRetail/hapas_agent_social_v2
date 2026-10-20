@@ -124,7 +124,9 @@ def la_tien(ten: str) -> bool:
     real_time_cost_per_*, *_value, *_roas, *budget*, *_spend, *_cost; cột riêng chi,
     gia_tri_mua_shop, roas_shop."""
     t = str(ten or "").lower()
-    if t in _TIEN_DUNG or t in COT_TIEN or t in ("roas_shop", "doanh_thu_shop"):
+    if t in _TIEN_DUNG or t in COT_TIEN or t in ("roas_shop", "doanh_thu_shop", "chi_phi"):
+        return True
+    if t.startswith("chi_moi_"):            # chi phí suy ra của Mark (chi_moi_follow, …)
         return True
     return (t.startswith(("cost_", "real_time_cost_per_", "skan_cost_per_"))
             or t.endswith(("_value", "_roas", "_spend", "_cost", "_budget"))
