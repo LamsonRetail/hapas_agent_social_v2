@@ -98,6 +98,11 @@ _MUTATING_EXACT = {
     # cả team → đòi `write_data`. Như `nho_bai_hoc`: CỐ Ý ngoài `_TOOL_CO_CONG_TAC`,
     # cổng là env (an toàn mặc định = tắt); thêm công tắc phải sửa cùng lúc console.
     "ghi_bai_hoc": "write_data",
+    # Số tức thì (tuc_thi_tool.py, 20/10/2026): ghi yêu cầu đọc lại số quảng cáo vào kho (dịch vụ
+    # đồng bộ chạy, chỉ đọc nền tảng), cào chỉ số bài/kênh (Apify, tốn tiền) hoặc mở lượt quét →
+    # đòi `write_data`. Phần tốn tiền còn chốt xác nhận chi phí bằng code trong tool; công tắc
+    # của đường cào bên dưới (chi_so_bai / soi_tai_khoan) vẫn áp ở trong tool.
+    "lay_so_tuc_thi": "write_data",
 }
 _MUTATING_WORDS = {
     "create", "update", "delete", "remove", "send", "write", "edit",

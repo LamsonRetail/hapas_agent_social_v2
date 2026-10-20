@@ -33,7 +33,9 @@ _TEN_KY_NANG = {
     p.read_text(encoding="utf-8").splitlines()[0].lstrip("#").strip()
     for p in (_GOC / "skills").glob("*.md")
 }
-_HAM_HANH_VI = {"nap_ky_nang", "khong_nap_ky_nang", "goi_tool", "chi_uoc_tinh"}
+_HAM_HANH_VI = {"nap_ky_nang", "khong_nap_ky_nang", "goi_tool", "chi_uoc_tinh",
+                # 20/10/2026 số tức thì: đúng tham số / không gọi (câu nhắc dashboard → kho)
+                "goi_tool_tham_so", "khong_goi_tool"}
 _CASES = sorted((_EV / "cases").glob("*.yaml"))
 
 

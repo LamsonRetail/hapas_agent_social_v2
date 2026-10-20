@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextvars
 import json
 import os
+import threading
 import time
 import uuid
 
@@ -34,16 +35,39 @@ _MA_LUOT: contextvars.ContextVar = contextvars.ContextVar("lsr_ma_luot", default
 _CHUA_VIET = 60.0
 
 
-def bat_dau() -> None:
+#: Số thứ tự lượt trả lời của TỪNG chat (20/10/2026, xác nhận chi phí của `lay_so_tuc_thi`): mã xác
+#: nhận chỉ dùng được ở đúng lượt KẾ TIẾP sau lượt ước tính — tin nhắn trả lời "Chạy nhé?". Trong bộ
+#: nhớ tiến trình (Mark khởi động lại thì mã cũ cũng mất — hỏi lại).
+_STT_CHAT: dict[str, int] = {}
+_STT: contextvars.ContextVar = contextvars.ContextVar("lsr_stt_luot", default=None)
+_KHOA_STT = threading.Lock()
+
+
+def bat_dau(chat: str | None = None) -> None:
     """Gọi đầu mỗi lượt trả lời (brain.reply). Contextvar → theo đúng luồng của lượt đó;
-    Hermes chép context sang luồng chạy tool song song (propagate_context_to_thread)."""
+    Hermes chép context sang luồng chạy tool song song (propagate_context_to_thread). `chat`: mỗi
+    tin nhắn của người dùng ở chat đó tăng số thứ tự lượt một."""
     _BAT_DAU.set(_dong_ho())
     _MA_LUOT.set(uuid.uuid4().hex)
+    if chat:
+        with _KHOA_STT:
+            n = _STT_CHAT.get(chat, 0) + 1
+            if len(_STT_CHAT) > 5000:
+                _STT_CHAT.clear()
+            _STT_CHAT[chat] = n
+        _STT.set((chat, n))
+    else:
+        _STT.set(None)
 
 
 def ma_luot() -> str | None:
     """Mã của lượt trả lời đang chạy; None ngoài lượt (việc nền, nhắc việc, bộ thử)."""
     return _MA_LUOT.get()
+
+
+def stt_luot() -> tuple[str, int] | None:
+    """(chat, số thứ tự lượt trả lời của chat đó) của lượt đang chạy; None ngoài lượt / không chat."""
+    return _STT.get()
 
 
 def da_chay() -> float | None:

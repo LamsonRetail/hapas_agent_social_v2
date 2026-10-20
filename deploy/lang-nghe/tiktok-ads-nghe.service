@@ -1,0 +1,55 @@
+# /etc/systemd/system/tiktok-ads-nghe.service — bộ NGHE yêu cầu số TikTok Ads tức thì của Mark (20/10/2026,
+# dashboard/nghe_qc.py). Chạy lâu dài: LISTEN kênh Postgres qc_tuc_thi; Mark thêm dòng yeu_cau_tuc_thi
+# (trigger pg_notify) → lượt đọc CHỈ các tài khoản trong phạm vi người hỏi, ≤ 7 ngày gồm hôm nay, chỉ
+# đọc nền tảng. Cũng chạy ngay cờ "Đồng bộ ngay" loại nhanh của dashboard. Bộ hẹn giờ tiktok-ads-yeu-cau
+# (2 phút) vẫn quét hàng chờ — dự phòng khi unit này dừng. Không chạy chồng lượt hằng ngày (khoá
+# advisory Postgres). Trần: QC_TUC_THI_TRAN_GIO (mặc định 12 lượt/giờ) trong /opt/lang-nghe/.env.
+# Cùng user, venv, .env và hardening với tiktok-ads-yeu-cau.service. README mục 7c.
+[Unit]
+Description=Nghe yeu cau so TikTok Ads tuc thi cua Mark
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lang_nghe_web
+Group=lang_nghe_web
+EnvironmentFile=/opt/lang-nghe/.env
+Environment=HOME=/opt/lang-nghe
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/lang-nghe/app
+ExecStart=/opt/lang-nghe/venv/bin/python -m dashboard.nghe_qc tiktok_ads
+Restart=always
+RestartSec=10
+Nice=10
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=64
+# hardening — như lang-nghe-dashboard.service / tiktok-ads-yeu-cau.service
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+InaccessiblePaths=-/opt/mark
+ProtectProc=invisible
+ProcSubset=pid
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# AF_UNIX: socket Postgres (peer, LISTEN). AF_INET/6: gọi RA business-api.tiktok.com + BigQuery.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+ProtectHostname=yes
+ProtectClock=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -141,6 +141,25 @@ def tk_dung(cac_tk: list[dict], nen_tang: str | None = None) -> list[dict]:
             and (nen_tang in (None, "", "tat_ca") or nen_tang_tk(t) == nen_tang)]
 
 
+# ───────────────────────────── giờ đồng bộ hằng ngày (soát 20/10/2026 H2) ─────────────────────────────
+#: Bộ hẹn giờ hằng ngày: TikTok 06:30, Meta 06:45 (giờ VN). Trong khung này KHÔNG mở lượt đọc tức
+#: thì / lượt nhanh (bộ nghe, bộ hẹn giờ 2 phút, Mark) — lượt hằng ngày đọc lại 7 ngày, không bị
+#: lượt nhỏ giành khoá. Mark trả số đã có và nói đồng bộ hằng ngày đang chạy.
+GIO_DONG_BO = (datetime.time(6, 25), datetime.time(7, 30))
+
+
+def trong_gio_dong_bo(bay: datetime.datetime | None = None) -> bool:
+    bay = bay or datetime.datetime.now(VN)
+    if bay.tzinfo is None:
+        bay = bay.replace(tzinfo=datetime.UTC)
+    g = bay.astimezone(VN).time()
+    return GIO_DONG_BO[0] <= g < GIO_DONG_BO[1]
+
+
+CAU_GIO_DONG_BO = ("Đồng bộ quảng cáo hằng ngày đang chạy (06:25–07:30 giờ VN) — chưa đọc lại "
+                   "ngay; trả số đã có, sau 07:30 hỏi lại để có số mới.")
+
+
 # ───────────────────────────── đồng bộ bấm tay + dải trạng thái (20/10/2026) ─────────────────────────────
 #: Chủ dự án 20/10/2026: mọi người có quyền ở ít nhất một bên bấm được "Đồng bộ ngay" (như nút
 #: BigQuery) — chỉ ghi cờ, lượt "nhanh" 3 ngày; giãn 15 phút sau lượt bấm tay gần nhất.

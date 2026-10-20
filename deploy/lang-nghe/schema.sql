@@ -770,6 +770,117 @@ BEGIN
   END IF;
 END $mt$;
 
+-- ───────────── Số tức thì của Mark (20/10/2026, chủ dự án chốt) ─────────────
+-- "mark có quyền cao nhất có thể cào real time theo yêu cầu": một dòng = một yêu cầu Mark gửi khi
+-- người hỏi cần số MỚI hơn số trong kho (dashboard/kho_tuc_thi.py). Quảng cáo: Mark CHỈ thêm dòng
+-- chờ, bộ nghe tiktok-ads-nghe / meta-ads-nghe (user lang_nghe_web, có khoá giải mã) chạy lượt
+-- đọc — Mark không bao giờ cầm token. Bài / kênh / quét: Mark tự chạy (Apify, trần nhỏ), dòng
+-- dùng đếm trần mỗi người / mỗi bên mỗi ngày và giữ chi phí thật. Bảng mới: CREATE nhanh, không
+-- khoá bảng nào khác.
+CREATE TABLE IF NOT EXISTS yeu_cau_tuc_thi (
+  id              BIGSERIAL PRIMARY KEY,
+  loai            TEXT NOT NULL CHECK (loai IN ('quang_cao', 'bai', 'kenh', 'quet')),
+  nguoi_hoi       TEXT NOT NULL,
+  ben             TEXT,
+  nha_cung_cap    TEXT CHECK (nha_cung_cap IS NULL OR nha_cung_cap IN ('tiktok_ads', 'meta_ads')),
+  tai_khoan       TEXT[] NOT NULL DEFAULT '{}',
+  tu              DATE,
+  den             DATE,
+  du_an           TEXT,
+  so_muc          INT NOT NULL DEFAULT 0 CHECK (so_muc >= 0),
+  chi_tiet        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  trang_thai      TEXT NOT NULL DEFAULT 'cho'
+                  CHECK (trang_thai IN ('cho', 'dang_chay', 'xong', 'loi', 'bo_qua', 'tu_choi')),
+  uoc_usd         NUMERIC(10,4),
+  chi_phi_usd     NUMERIC(10,4),
+  so_dong         INT,
+  so_tk_ok        INT CHECK (so_tk_ok >= 0),
+  loi             TEXT,
+  tao_luc         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  bat_dau_luc     TIMESTAMPTZ,
+  xong_luc        TIMESTAMPTZ,
+  CHECK (den IS NULL OR tu IS NULL OR den >= tu)
+);
+CREATE INDEX IF NOT EXISTS yeu_cau_tuc_thi_loai_luc ON yeu_cau_tuc_thi (loai, tao_luc DESC);
+CREATE INDEX IF NOT EXISTS yeu_cau_tuc_thi_cho ON yeu_cau_tuc_thi (nha_cung_cap, trang_thai)
+  WHERE trang_thai IN ('cho', 'dang_chay');
+-- Soát 20/10/2026 M5 (quyền tối thiểu của role mark):
+--   • TRƯỚC khi thêm: trạng thái do CSDL quyết, Mark không chọn được — có `loi` (Mark từ chối vì
+--     trần / quyền / ngân sách) → tu_choi; quảng cáo → cho (bộ nghe chạy); bài / kênh / quét →
+--     dang_chay (Mark tự chạy rồi kết thúc). Cột kết quả (so_dong, so_tk_ok, chi_phi_usd, mốc giờ)
+--     luôn do CSDL đặt.
+--   • SAU khi thêm: một dòng nhat_ky "mark_real_time" (ai = email người hỏi) + pg_notify cho dòng
+--     quảng cáo chờ. Hàm SECURITY DEFINER (chủ lang_nghe_chu, search_path cố định): role mark KHÔNG
+--     có quyền ghi nhat_ky. Thông báo chỉ gửi khi giao dịch COMMIT.
+-- CREATE OR REPLACE + khối DO kiểm pg_trigger: chạy lại không tạo trùng, không xin khoá khi đã có.
+CREATE OR REPLACE FUNCTION chuan_yeu_cau_tuc_thi() RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+  NEW.trang_thai := CASE WHEN NEW.loi IS NOT NULL THEN 'tu_choi'
+                         WHEN NEW.loai = 'quang_cao' THEN 'cho' ELSE 'dang_chay' END;
+  NEW.tao_luc := now();
+  NEW.bat_dau_luc := CASE WHEN NEW.trang_thai = 'dang_chay' THEN now() END;
+  NEW.xong_luc := CASE WHEN NEW.trang_thai = 'tu_choi' THEN now() END;
+  NEW.so_dong := NULL;
+  NEW.so_tk_ok := NULL;
+  NEW.chi_phi_usd := NULL;
+  RETURN NEW;
+END $fn$;
+CREATE OR REPLACE FUNCTION bao_yeu_cau_tuc_thi() RETURNS trigger LANGUAGE plpgsql
+  SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+BEGIN
+  INSERT INTO public.nhat_ky (ai, hanh_dong, doi_tuong, chi_tiet)
+  VALUES (NEW.nguoi_hoi, 'mark_real_time', 'tuc_thi:' || NEW.id,
+          jsonb_build_object('loai', NEW.loai, 'ben', NEW.ben, 'nha_cung_cap', NEW.nha_cung_cap,
+                             'so_tai_khoan', cardinality(NEW.tai_khoan), 'tu', NEW.tu,
+                             'den', NEW.den, 'du_an', NEW.du_an, 'so_muc', NEW.so_muc,
+                             'trang_thai', NEW.trang_thai, 'ly_do', left(NEW.loi, 300)));
+  IF NEW.loai = 'quang_cao' AND NEW.trang_thai = 'cho' THEN
+    PERFORM pg_notify('qc_tuc_thi', COALESCE(NEW.nha_cung_cap, ''));
+  END IF;
+  RETURN NULL;
+END $fn$;
+REVOKE ALL ON FUNCTION bao_yeu_cau_tuc_thi() FROM PUBLIC;
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'yeu_cau_tuc_thi_chuan'
+                 AND tgrelid = 'yeu_cau_tuc_thi'::regclass) THEN
+    CREATE TRIGGER yeu_cau_tuc_thi_chuan BEFORE INSERT ON yeu_cau_tuc_thi
+      FOR EACH ROW EXECUTE FUNCTION chuan_yeu_cau_tuc_thi();
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'yeu_cau_tuc_thi_bao'
+                 AND tgrelid = 'yeu_cau_tuc_thi'::regclass) THEN
+    CREATE TRIGGER yeu_cau_tuc_thi_bao AFTER INSERT ON yeu_cau_tuc_thi
+      FOR EACH ROW EXECUTE FUNCTION bao_yeu_cau_tuc_thi();
+  END IF;
+END $mt$;
+-- Bảo mật theo dòng (M5): role mark chỉ SỬA dòng bài / kênh / quét (dòng quảng cáo do bộ nghe kết
+-- thúc); đọc + thêm mọi dòng; lang_nghe_web đọc + sửa mọi dòng. Chủ bảng (lang_nghe_chu, chạy file
+-- này và hàm SECURITY DEFINER) bỏ qua RLS. Bật RLS / tạo chính sách chỉ khi chưa có.
+DO $mt$
+BEGIN
+  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'yeu_cau_tuc_thi'::regclass) THEN
+    ALTER TABLE yeu_cau_tuc_thi ENABLE ROW LEVEL SECURITY;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_tuc_thi'
+                 AND policyname = 'tuc_thi_doc') THEN
+    CREATE POLICY tuc_thi_doc ON yeu_cau_tuc_thi FOR SELECT TO mark, lang_nghe_web USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_tuc_thi'
+                 AND policyname = 'tuc_thi_them_mark') THEN
+    CREATE POLICY tuc_thi_them_mark ON yeu_cau_tuc_thi FOR INSERT TO mark WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_tuc_thi'
+                 AND policyname = 'tuc_thi_sua_mark') THEN
+    CREATE POLICY tuc_thi_sua_mark ON yeu_cau_tuc_thi FOR UPDATE TO mark
+      USING (loai <> 'quang_cao') WITH CHECK (loai <> 'quang_cao');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_tuc_thi'
+                 AND policyname = 'tuc_thi_sua_web') THEN
+    CREATE POLICY tuc_thi_sua_web ON yeu_cau_tuc_thi FOR UPDATE TO lang_nghe_web
+      USING (true) WITH CHECK (true);
+  END IF;
+END $mt$;
+
 -- ───────────── Mô tả bảng + cột theo quy chuẩn BI (task t280613, skill lsr-bq-description-standard) ─────────────
 -- Chủ dự án 14/10/2026: DB mới cũng theo rule mô tả của BI (11 nhãn bảng, mô tả mọi cột). Ghi
 -- ngay trong file build (COMMENT ON chạy lại không mất), có bài canh tests/test_theo_doi.py.
@@ -1375,6 +1486,37 @@ COMMENT ON COLUMN qc_khan_gia.mua_shop IS 'Lượt mua trong TikTok Shop gán ch
 COMMENT ON COLUMN qc_khan_gia.gia_tri_mua_shop IS 'Doanh thu gán cho quảng cáo, theo tiền tệ tài khoản: TikTok Shop (total_onsite_shopping_value, giá khách trả); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi, phân bổ mặc định của Meta). 0 khi dòng có phân phối mà không có mua. CHỈ SỐ TIỀN.';
 COMMENT ON COLUMN qc_khan_gia.chi_so IS 'MỌI chỉ số nền tảng trả cho dòng (JSON {tên chỉ số: số}; số đã đổi từ chữ, "-" của TikTok → null). TikTok: tài khoản/campaign đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Meta (20/10/2026): mọi trường Insights đã xin, danh sách action thành <trường>__<action_type> (vd actions__purchase, action_values__purchase, video_p100_watched_actions__video_view); reach, frequency, ctr, cpc, cpm, cpp, *_avg_*, *roas* KHÔNG cộng được qua dòng. Khoá tiền: spend, cpm, cpc, cpp, cost_per_*, *_value, action_values__*, *roas*, *budget*.';
 COMMENT ON COLUMN qc_khan_gia.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
+COMMENT ON TABLE yeu_cau_tuc_thi IS $$[Lớp] Raw
+[Mục đích] Sổ yêu cầu số TỨC THÌ của Mark (đọc số quảng cáo mới, cào chỉ số bài / kênh, mở lượt quét lắng nghe theo yêu cầu) — hàng chờ cho bộ nghe quảng cáo, đếm trần, dấu vết ai xin gì.
+[Grain] 1 dòng = 1 yêu cầu Mark gửi (kể cả bị từ chối vì trần)
+[Khoá] PK: id | Join: ben → don_vi.ma; du_an → du_an.ma; tai_khoan[] → tk_quang_cao.advertiser_id
+[Nguồn] Mark (tool lay_so_tuc_thi, role mark) thêm dòng; bộ nghe tiktok-ads-nghe / meta-ads-nghe và bộ hẹn giờ *-ads-yeu-cau (role lang_nghe_web) nhận + kết thúc dòng quảng cáo
+[Phạm vi] Mọi người có vai trò ở ít nhất một bên, chỉ trong phạm vi bên của họ | Kênh TikTok Ads, Meta Ads, Apify (bài, kênh, quét) | Từ 20/10/2026
+[Đã xử lý] Tài khoản đã lọc theo bên người hỏi trước khi ghi; khoảng ngày quảng cáo đã kẹp ≤ 7 ngày gồm hôm nay; dòng chờ quá 15 phút → bo_qua, chạy quá 60 phút → loi
+[Refresh] Theo yêu cầu (thời gian thực); dòng không bao giờ xoá
+[Dùng khi] Biết Mark đã xin đọc gì, lúc nào, cho ai; đếm trần mỗi người / mỗi bên / mỗi giờ; soát chi phí Apify của lượt cào tức thì
+[Không dùng khi] Số quảng cáo → dùng qc_tk_ngay; lượt quét lắng nghe và chi phí tháng → dùng luot_quet; ai sửa gì trên dashboard → dùng nhat_ky
+[Lưu ý] Có email người hỏi — KHÔNG đẩy lên BigQuery. Mọi yêu cầu có một dòng nhat_ky (hanh_dong mark_real_time) do trigger ghi; trạng thái lúc thêm do trigger đặt; RLS: role mark chỉ sửa dòng bài/kênh/quét.$$;
+COMMENT ON COLUMN yeu_cau_tuc_thi.id IS 'Mã yêu cầu tự tăng. PK.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.loai IS 'Loại: quang_cao (đọc số TikTok/Meta Ads mới — bộ nghe chạy), bai (cào chỉ số link bài), kenh (cào hồ sơ + bài mới của kênh), quet (mở lượt quét lắng nghe /theodoi).';
+COMMENT ON COLUMN yeu_cau_tuc_thi.nguoi_hoi IS 'Email công ty của người hỏi Mark (đã xác thực qua chat riêng Lark / web console). Dữ liệu cá nhân — không đẩy BigQuery.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.ben IS 'Bên (don_vi.ma) của phạm vi yêu cầu; NULL khi nhiều bên hoặc dữ liệu công khai không thuộc bên nào.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.nha_cung_cap IS 'Chỉ loai quang_cao: tiktok_ads hoặc meta_ads (mỗi nhà cung cấp một dòng). NULL với loại khác.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.tai_khoan IS 'Chỉ loai quang_cao: mã tài khoản quảng cáo (advertiser_id / act_…) trong phạm vi người hỏi cần đọc lại. Mảng rỗng với loại khác.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.tu IS 'Ngày đầu khoảng cần đọc lại (giờ VN; bộ nghe kẹp theo múi giờ tài khoản, tối đa 7 ngày gồm hôm nay). NULL với bài/kênh.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.den IS 'Ngày cuối khoảng cần đọc lại (≤ hôm nay). NULL với bài/kênh.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.du_an IS 'Chỉ loai quet: mã dự án được quét (du_an.ma). NULL với loại khác.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.so_muc IS 'Số mục của yêu cầu: link bài (bai), kênh (kenh), nguồn (quet), tài khoản (quang_cao). Dùng đếm trần mỗi người mỗi ngày.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.chi_tiet IS 'Chi tiết JSON: link / kênh đã xin, nền tảng, lý do từ chối, mã việc nền của lượt quét. Không chứa token.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.trang_thai IS 'cho (đợi bộ nghe), dang_chay, xong, loi, bo_qua (quá hạn / chạm trần phía dịch vụ / lượt khác), tu_choi (Mark chặn vì trần, quyền, ngân sách — không tốn gì, không tính trần).';
+COMMENT ON COLUMN yeu_cau_tuc_thi.uoc_usd IS 'Chi phí ước tính lúc xin (USD, Apify), NULL với quảng cáo (API nền tảng miễn phí).';
+COMMENT ON COLUMN yeu_cau_tuc_thi.chi_phi_usd IS 'Chi phí Apify thật của yêu cầu (USD, cộng usageTotalUsd các run), NULL khi chưa biết / không tốn tiền.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.so_dong IS 'Chỉ loai quang_cao: số dòng qc_* lượt đọc đã ghi/cập nhật. NULL khi chưa chạy.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.so_tk_ok IS 'Chỉ loai quang_cao: số tài khoản lượt đọc ĐỌC ĐƯỢC (so với so_muc = số tài khoản xin). Nhỏ hơn so_muc = cập nhật một phần; 0 → trạng thái loi/bo_qua, không bao giờ xong. NULL khi chưa chạy.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.loi IS 'Lý do lỗi / bỏ qua / từ chối (đã bỏ token và URL), ≤ 500 ký tự. NULL khi ổn.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.tao_luc IS 'Lúc Mark ghi yêu cầu (UTC).';
+COMMENT ON COLUMN yeu_cau_tuc_thi.bat_dau_luc IS 'Lúc lượt đọc / cào bắt đầu (UTC). Các yêu cầu gộp vào cùng một lượt có cùng mốc.';
+COMMENT ON COLUMN yeu_cau_tuc_thi.xong_luc IS 'Lúc kết thúc (UTC) — Mark nói "số cập nhật lúc HH:MM" theo mốc này.';
 RESET ROLE;
 
 -- Quyền của bot: đọc cấu hình, ghi kết quả. Không sửa dự án, không thêm/xoá nguồn.
@@ -1436,3 +1578,21 @@ GRANT SELECT ON tk_quang_cao, qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay, qc_khan_
 -- không xoá số (DELETE không cấp). Đọc đã có ở GRANT SELECT ON ALL TABLES phía trên.
 GRANT INSERT, UPDATE ON ket_noi_ngoai, tk_quang_cao, qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay,
   qc_khan_gia TO lang_nghe_web;
+
+-- Số tức thì (20/10/2026, dashboard/kho_tuc_thi.py): Mark thêm + đọc yêu cầu, chỉ sửa cột kết quả
+-- (yêu cầu bài / kênh / quét của chính nó), KHÔNG xoá. Nhật ký: Mark chỉ THÊM dòng nhat_ky (không
+-- đọc, không sửa) — mỗi yêu cầu một dòng "mark_real_time". Bộ nghe + bộ hẹn giờ (lang_nghe_web)
+-- nhận / kết thúc dòng quảng cáo. Không bảng quảng cáo nào thêm quyền ghi cho mark.
+-- Soát 20/10/2026 M5: INSERT chỉ các cột yêu cầu (trạng thái, mốc giờ, kết quả do trigger đặt);
+-- UPDATE chỉ cột kết quả và CHỈ dòng bài/kênh/quét (RLS ở trên); KHÔNG quyền nào trên nhat_ky
+-- (nhật ký do trigger SECURITY DEFINER ghi). REVOKE trước: thu quyền cả bảng / nhật ký của bản
+-- nháp trước, rồi cấp lại theo cột.
+REVOKE INSERT, UPDATE ON yeu_cau_tuc_thi FROM mark;
+REVOKE INSERT ON nhat_ky FROM mark;
+REVOKE USAGE ON SEQUENCE nhat_ky_id_seq FROM mark;
+GRANT SELECT ON yeu_cau_tuc_thi TO mark;
+GRANT INSERT (loai, nguoi_hoi, ben, nha_cung_cap, tai_khoan, tu, den, du_an, so_muc, chi_tiet,
+              uoc_usd, loi) ON yeu_cau_tuc_thi TO mark;
+GRANT UPDATE (trang_thai, chi_phi_usd, loi, chi_tiet, xong_luc) ON yeu_cau_tuc_thi TO mark;
+GRANT USAGE ON SEQUENCE yeu_cau_tuc_thi_id_seq TO mark;
+GRANT SELECT, UPDATE ON yeu_cau_tuc_thi TO lang_nghe_web;

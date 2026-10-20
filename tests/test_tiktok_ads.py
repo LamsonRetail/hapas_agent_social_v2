@@ -294,9 +294,12 @@ class GiaKhoQC:
                              refresh_het_luc=None, trang_thai="da_ngat")
         self.nk.append((ai, f"ngat_{KQ._nen_tang(ncc)}"))
 
-    def bat_dau_dong_bo(self, ncc=KQ.NCC, cho_nhanh=False):
+    def bat_dau_dong_bo(self, ncc=KQ.NCC, cho_nhanh=False, chi_nhanh=False):
         # Như SQL: loại lượt quyết định từ yêu cầu đang chờ TRONG cùng câu UPDATE xoá cờ.
         k = self._kn(ncc)
+        if chi_nhanh and not (k.get("yeu_cau_dong_bo_luc") and k.get("yeu_cau_kieu") == "nhanh"):
+            return None                        # bộ nghe: không bắt đầu gì (cờ day_du giữ nguyên)
+        cho_nhanh = cho_nhanh or chi_nhanh
         kieu = ("nhanh" if cho_nhanh and k.get("yeu_cau_dong_bo_luc")
                 and k.get("yeu_cau_kieu") == "nhanh" else "day_du")
         k.update(dong_bo_bat_dau=self.bay, dong_bo_xong=None, yeu_cau_dong_bo_luc=None,

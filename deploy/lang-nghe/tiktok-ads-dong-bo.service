@@ -8,6 +8,10 @@
 Description=Dong bo TikTok Ads vao kho lang_nghe (dashboard social.hapas.vn)
 After=network-online.target postgresql.service
 Wants=network-online.target
+# Soát 20/10/2026 H2: lượt hằng ngày CHỜ khoá (≤ 30 phút, --cho-khoa-phut) khi lượt nhỏ đang chạy;
+# vẫn không có khoá → thoát 3 → Restart=on-failure chạy lại (tối đa 3 lần / 4 giờ), không lặng lẽ mất.
+StartLimitIntervalSec=4h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -21,6 +25,8 @@ ExecStart=/opt/lang-nghe/venv/bin/python -m dashboard.tiktok_ads dong-bo
 # Nạp lùi 90 ngày của tài khoản lớn: nhiều nghìn lượt gọi tuần tự. Quá 6 giờ thì dừng (lượt sau
 # đọc tiếp phần còn thiếu — mốc tk_quang_cao.nap_lui_tu ghi sau mỗi cửa sổ 30 ngày; upsert không nhân đôi).
 TimeoutStartSec=6h
+Restart=on-failure
+RestartSec=10min
 Nice=10
 MemoryMax=512M
 CPUQuota=50%

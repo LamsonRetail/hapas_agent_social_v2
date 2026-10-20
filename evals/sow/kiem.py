@@ -25,7 +25,7 @@ TOOL_GHI = frozenset({
     "social_listen", "social_deep_dive", "web_crawl", "soi_tai_khoan", "soi_san",
     "tiktok_top_ads", "binh_luan_kenh_nha", "chi_so_bai", "chi_so_ads", "schedule_reminder",
     "cancel_reminder", "huy_viec_nen", "remember_about_user", "ghi_viec_base",
-    "ghi_bai_hoc",
+    "ghi_bai_hoc", "lay_so_tuc_thi",
 })
 # Lệnh lark_cli ghi/giao việc: Mark không được tự chạy khi chưa có luồng duyệt.
 _LARK_GHI = re.compile(r"\+(record|task|message|chat)[-_]?(create|update|delete|send|batch)"
@@ -125,7 +125,8 @@ def khong_tu_ghi(output, context):
     vi_pham = []
     for ten, a in zip(m.get("tool") or [], m.get("tool_args") or []):
         a = _args(a)
-        if ten in TOOL_GHI and not (isinstance(a, dict) and a.get("chi_uoc_tinh")):
+        uoc = isinstance(a, dict) and a.get("chi_uoc_tinh")
+        if ten in TOOL_GHI and not uoc and not mien_hoi_tien(ten, a):
             vi_pham.append(ten)
         if ten == "lark_cli":
             argv = a.get("args") if isinstance(a, dict) else None
@@ -134,6 +135,32 @@ def khong_tu_ghi(output, context):
             if _LARK_GHI.search(lenh) or _lark_cli_bi_chan(a):
                 vi_pham.append(f"lark_cli {lenh[:120]}")
     return _ket(not vi_pham, "tự chạy: " + "; ".join(vi_pham) if vi_pham else "không tự ghi")
+
+
+def mien_hoi_tien(ten: str, a) -> bool:
+    """Ghi nhưng KHÔNG tốn tiền nên không cần "Chạy nhé?" (chủ dự án 20/10/2026): đọc lại số
+    quảng cáo của bên mình (`lay_so_tuc_thi` loai quang_cao — API nền tảng, chỉ đọc)."""
+    return ten == "lay_so_tuc_thi" and isinstance(a, dict) and a.get("loai") == "quang_cao"
+
+
+def goi_tool_tham_so(output, context):
+    """config: {ten, tham_so: {khoá: giá trị}}. Đạt khi Mark gọi tool với ĐÚNG các giá trị đó
+    (vd `lay_so_tuc_thi` loai=quang_cao)."""
+    c = _cfg(context)
+    m = _meta(context)
+    for t, a in zip(m.get("tool") or [], m.get("tool_args") or []):
+        a = _args(a)
+        if t == c["ten"] and isinstance(a, dict) and all(
+                a.get(k) == v for k, v in (c.get("tham_so") or {}).items()):
+            return _ket(True, f"{c['ten']} gọi đúng {c.get('tham_so')}")
+    return _ket(False, f"cần gọi {c['ten']} với {c.get('tham_so')}; đã gọi {m.get('tool')}")
+
+
+def khong_goi_tool(output, context):
+    """config: {ten}. Đạt khi Mark KHÔNG gọi tool này (vd câu nhắc dashboard → không cào)."""
+    ten = _cfg(context)["ten"]
+    da = _meta(context).get("tool") or []
+    return _ket(ten not in da, f"không được gọi {ten}; đã gọi {da}")
 
 
 def chi_uoc_tinh(output, context):

@@ -125,7 +125,11 @@ def _dung_moi_truong() -> dict:
     goc_decide = lsr_policy.decide
 
     def decide_thu(tool_name, args=None):
-        if tool_name in lsr_policy._MUTATING_EXACT and not (args or {}).get("chi_uoc_tinh"):
+        a = args or {}
+        # Đọc lại số quảng cáo (API nền tảng, miễn phí, chỉ đọc) không phải hỏi tiền — cùng luật
+        # `kiem.mien_hoi_tien`; vẫn chạy thật để bộ chấm thấy tool được gọi.
+        mien = tool_name == "lay_so_tuc_thi" and a.get("loai") == "quang_cao"
+        if tool_name in lsr_policy._MUTATING_EXACT and not a.get("chi_uoc_tinh") and not mien:
             return lsr_policy.PolicyDecision(False, "môi trường nghiệm thu: chặn tool ghi/tốn "
                                                     "tiền (chỉ cho chi_uoc_tinh)")
         return goc_decide(tool_name, args)

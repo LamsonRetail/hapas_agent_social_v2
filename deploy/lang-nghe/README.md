@@ -29,7 +29,7 @@ Mô tả bảng và cột theo quy chuẩn BI (task Lark t280613, skill `lsr-bq-
 
 ```bash
 sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
-sudo -u postgres psql -d lang_nghe -c '\dt'        # 21 bảng (lich_quet 15/10, kiem_do_phu 17/10, han_muc_apify 18/10, don_vi + quyen 19/10/2026,
+sudo -u postgres psql -d lang_nghe -c '\dt'        # 22 bảng (lich_quet 15/10, kiem_do_phu 17/10, han_muc_apify 18/10, don_vi + quyen 19/10/2026, yeu_cau_tuc_thi 20/10/2026,
 # TikTok Ads 19/10/2026: ket_noi_ngoai, tk_quang_cao, qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay, qc_khan_gia)
 ```
 
@@ -51,7 +51,7 @@ Chạy lại file này nhiều lần không hỏng gì.
 Quyền của Mark:
 
 - **Đọc:** `du_an`, `nguon`, `don_vi`; TikTok Ads (19/10/2026): `tk_quang_cao`, `qc_*` và ĐÚNG 6 cột không bí mật của `ket_noi_ngoai` (nha_cung_cap, loai, trang_thai, refresh_het_luc, goi_ok_luc, loi_cuoi — không bao giờ cột token); `lich_quet` chỉ các cột Mark dùng (không đọc email người tạo/sửa); `nguoi_xem (email, vai_tro, la_quan_tri)` + `quyen (email, don_vi, vai_tro)` cho hỏi đáp số liệu (chỉ trả số dự án của bên người hỏi, từ 19/10/2026).
-- **Ghi:** `bai`, `chi_so_ngay`, `luot_quet`, `de_xuat`; `kiem_do_phu` chỉ thêm dòng (kiểm độ phủ 2 lần/tuần, từ 17/10/2026); `han_muc_apify` chỉ thêm dòng (ảnh chụp hạn mức gói Apify cho trang Ngân sách sau mỗi lượt và mỗi 3 giờ, từ 18/10/2026 — dashboard không giữ token Apify).
+- **Ghi:** `bai`, `chi_so_ngay`, `luot_quet`, `de_xuat`; `kiem_do_phu` chỉ thêm dòng (kiểm độ phủ 2 lần/tuần, từ 17/10/2026); `han_muc_apify` chỉ thêm dòng (ảnh chụp hạn mức gói Apify cho trang Ngân sách sau mỗi lượt và mỗi 3 giờ, từ 18/10/2026 — dashboard không giữ token Apify). `yeu_cau_tuc_thi` thêm (chỉ cột yêu cầu) + đọc + sửa cột kết quả dòng bài/kênh/quét (RLS) — số tức thì, từ 20/10/2026, mục 9; không quyền nào trên `nhat_ky`.
 - **Chỉ sửa:** cột lần quét và lỗi của `nguon`; cột trạng thái chạy của `lich_quet` (`lan_chay_ke`, `lan_chay_cuoi`, `ket_qua_cuoi`, `so_lan_chay`).
 - **Không được:** thêm hay xoá nguồn, sửa dự án, sửa ngân sách, tạo/sửa/xoá lịch.
 
@@ -214,6 +214,79 @@ e. **BigQuery** (`BQ_QC_XUAT_TIEN=1` ở prod — tiền Meta đẩy như TikTok
 ### Đồng bộ bấm tay cho mọi người có quyền (20/10/2026)
 
 Dải "Số quảng cáo" (trang Chỉ số cho mọi người có quyền ở ít nhất một bên; trang Quảng cáo cho quản trị viên) hiện mỗi nền tảng: số đến ngày nào, đồng bộ lúc nào, trạng thái (ổn / có lỗi / đang chạy / đã yêu cầu) — không tiền, không số liệu — và nút **Đồng bộ ngay** (`POST /quang-cao/dong-bo`, CSRF). Nút chỉ ghi cờ yêu cầu loại **nhanh**: hôm nay + 2 ngày trước, chỉ tài khoản có hiển thị trong 30 ngày (xong trong vài phút); bộ hẹn giờ `*-yeu-cau` (2 phút) chạy. Đang chạy / đang có yêu cầu → không tạo mới, trả lời "Đang có yêu cầu lúc HH:MM (ai)" / "đang chạy từ HH:MM"; sau một lượt nhanh phải chờ 15 phút. Yêu cầu đầy đủ của quản trị viên đang chờ không bị hạ thành nhanh. Bộ hẹn giờ hằng ngày giữ đọc lại 7 ngày. Nạp lùi, kết nối, ngắt, gán bên: vẫn chỉ quản trị viên. Nhật ký: `dong_bo_qc` kiểu `bam_tay`.
+
+## 9. Số tức thì của Mark (20/10/2026, chủ dự án chốt) — cần người duyệt trước khi chạy trên VPS
+
+Mark (tool `lay_so_tuc_thi`, `tuc_thi_tool.py`) lấy số MỚI khi người hỏi cần: đọc lại số TikTok /
+Meta Ads của bên họ (≤ 7 ngày gồm hôm nay), chỉ số hiện tại của ≤ 5 link bài / ≤ 2 kênh (Apify),
+mở một lượt quét lắng nghe dự án. Mark KHÔNG cầm token quảng cáo: nó chỉ thêm dòng
+`yeu_cau_tuc_thi`; trigger gọi `pg_notify('qc_tuc_thi', …)`; bộ nghe `tiktok-ads-nghe` /
+`meta-ads-nghe` (user lang_nghe_web, `dashboard/nghe_qc.py`) chạy lượt đọc chỉ các tài khoản đó
+rồi đánh dấu xong; Mark chờ ≤ 90 giây rồi trả số từ kho kèm giờ cập nhật TỪNG nền tảng (đủ / một
+phần / chưa đọc lại được).
+
+```bash
+cd /opt/lang-nghe/app   # sau khi rsync mã mới (dashboard/README.md bước 2) — Mark tự lên qua agent-deploy
+# a. Schema (bảng yeu_cau_tuc_thi + 2 trigger + RLS + quyền; chạy lại không hỏng) TRƯỚC mã mới — như mục 7b
+sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
+sudo -u postgres psql -d lang_nghe -c '\dp yeu_cau_tuc_thi' -c "select policyname, roles, cmd from pg_policies where tablename='yeu_cau_tuc_thi'"
+# b. Lượt hằng ngày nay CHỜ khoá + chạy lại khi lỗi (Restart=on-failure, cần systemd ≥ 244 cho oneshot)
+sudo install -o root -g root -m 0644 deploy/lang-nghe/tiktok-ads-dong-bo.service \
+  deploy/lang-nghe/meta-ads-dong-bo.service /etc/systemd/system/
+# c. Hai bộ nghe (chạy lâu dài, Restart=always; cùng hardening với *-ads-yeu-cau)
+sudo install -o root -g root -m 0644 deploy/lang-nghe/tiktok-ads-nghe.service \
+  deploy/lang-nghe/meta-ads-nghe.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now tiktok-ads-nghe.service meta-ads-nghe.service
+journalctl -u tiktok-ads-nghe -u meta-ads-nghe -n 20      # "đang nghe kênh qc_tuc_thi"
+# d. Thử (không cần Mark): xử lý hàng chờ một lần
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env \
+  -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.nghe_qc tiktok_ads --mot-lan
+```
+
+- **Lượt hằng ngày không bao giờ lặng lẽ mất** (soát H2): `dong-bo` hằng ngày gặp lượt nhỏ đang giữ
+  khoá thì CHỜ (thử lại mỗi 30 giây, tối đa `--cho-khoa-phut`, mặc định 30), vẫn không có khoá →
+  thoát 3 → `Restart=on-failure` (10 phút, tối đa 3 lần / 4 giờ). Khung 06:25–07:30 giờ VN: bộ nghe,
+  bộ hẹn giờ 2 phút và Mark KHÔNG mở lượt đọc tức thì / lượt nhanh (yêu cầu chờ → bo_qua, Mark trả
+  số đã có và nói đồng bộ hằng ngày đang chạy; cờ nhanh của dashboard đợi sau 07:30).
+- **Bộ nghe** (soát H1, L4): chỉ mở lượt NHANH của dashboard (câu UPDATE bắt đầu lượt chỉ khớp cờ
+  nhanh), lượt đầy đủ để bộ hẹn giờ; không chạy được (khoá bận, chưa kết nối, thiếu khoá) → chờ
+  thông báo / 60 giây, không quay vòng.
+- **Dự phòng**: bộ hẹn giờ `*-ads-yeu-cau` (2 phút) cũng xử lý hàng chờ — bộ nghe dừng thì yêu cầu
+  vẫn chạy (chậm ≤ 2 phút; quá 90 giây Mark trả số cũ kèm giờ cập nhật). Nút "Đồng bộ ngay" loại
+  nhanh của dashboard cũng NOTIFY → bộ nghe chạy ngay.
+- **Độ mới trung thực** (soát M1): lượt đọc 0 tài khoản → loi / bo_qua (không bao giờ xong); thiếu →
+  xong + `so_tk_ok` < `so_muc` + "một phần"; Mark nói từng nền tảng.
+- **Trần** (chống nền tảng chặn + chi phí; đếm NGUYÊN TỬ bằng khoá advisory trong CSDL): phía Mark
+  (`/opt/mark/app/.env`, tuỳ chọn) — `MARK_TUC_THI_QC_NGUOI_GIO` 6 yêu cầu đọc quảng cáo/người/giờ
+  (một yêu cầu cả TikTok + Meta tính 1), `MARK_TUC_THI_QC_GIO` 12/nhà cung cấp/giờ, cùng phạm vi
+  trong 5 phút dùng lại lượt trước; `MARK_TUC_THI_BAI_LUOT` 5 link/lần, `MARK_TUC_THI_BAI_NGAY` 30
+  link/người/ngày, `MARK_TUC_THI_KENH_LUOT` 2, `MARK_TUC_THI_KENH_NGAY` 10 kênh/người/ngày,
+  `MARK_TUC_THI_QUET_NGAY` 2 lượt quét theo yêu cầu/bên/ngày (dự án chưa có bên: theo chính dự án).
+  Phía dịch vụ (`/opt/lang-nghe/.env`) — `QC_TUC_THI_TRAN_GIO` 12 lượt/nhà cung cấp/giờ (chốt thứ
+  hai); chờ quá 15 phút → bo_qua, chạy quá 60 phút → loi (cả dòng bài/kênh/quét kẹt).
+- **Tiền**: quảng cáo = API nền tảng (miễn phí, chỉ đọc). Bài / kênh / quét = Apify: kiểm gói Apify
+  trước (không hỏi được gói → KHÔNG chạy), chi phí thật ghi sổ `chi_phi_tool` +
+  `yeu_cau_tuc_thi.chi_phi_usd`; lượt quét đi đúng đường `/theodoi` (trần tháng dự án, ngân sách
+  việc nền). Phần tốn tiền phải xác nhận (soát M2, M3): ước tính → "Chạy nhé?" → mã xác nhận CHỈ
+  dùng được ở đúng tin nhắn KẾ TIẾP của người đó trong cùng chat (qua thêm một tin → hết hạn), cùng
+  phạm vi, 15 phút, một lần. Số USD của lượt quét = ĐÚNG mức `tao_luot` giữ chỗ (nguồn + từ khoá +
+  bình luận + kiểm độ phủ, `theo_doi.uoc_giu_cho`) và bị buộc vào mã: lúc chạy cần giữ nhiều hơn →
+  không tạo, hỏi lại.
+- **Quyết định của chủ dự án (M4)**: người có vai trò Chỉ xem ở bên cũng mở được lượt quét theo
+  yêu cầu — tức là tiêu ngân sách tháng của dự án. Câu xác nhận nói rõ số USD và ngân sách dự án bị
+  trừ. Muốn chỉ Quản lý được mở quét thì đổi ở `tuc_thi_tool.quet` (dùng `PQ.sua_duoc`).
+- **Quyền** (soát M5): như `hoi_dashboard` — chat riêng / web đã xác thực, có vai trò ở ≥ 1 bên;
+  chỉ tài khoản / dự án bên mình; tài khoản chưa gán bên chỉ quản trị viên. Role `mark`: SELECT
+  `yeu_cau_tuc_thi`, INSERT CHỈ các cột yêu cầu (trạng thái, mốc giờ, kết quả do trigger
+  `chuan_yeu_cau_tuc_thi` đặt), UPDATE cột kết quả và CHỈ dòng bài/kênh/quét (RLS). KHÔNG quyền nào
+  trên `nhat_ky` (dòng "mark_real_time" do trigger SECURITY DEFINER ghi), `ket_noi_ngoai`, `qc_*`.
+- **Kiểm**: `sudo -u lang_nghe_web psql -d lang_nghe -c "select id, loai, nha_cung_cap, trang_thai,
+  so_muc, so_tk_ok, so_dong, loi, tao_luc, xong_luc from yeu_cau_tuc_thi order by id desc limit 20"`;
+  nhật ký: `select * from nhat_ky where hanh_dong = 'mark_real_time' order by id desc limit 20`.
+- **Gỡ**: `systemctl disable --now tiktok-ads-nghe meta-ads-nghe` (bộ hẹn giờ vẫn xử lý hàng chờ).
+  Tắt hẳn phía Mark: `MARK_TUC_THI=0` trong `/opt/mark/app/.env` rồi `mark restart` (tool trả lời
+  "đang tắt"; chưa có công tắc console riêng cho `lay_so_tuc_thi`).
 
 ## Vận hành
 
