@@ -597,3 +597,31 @@ def test_js_het_15_phut_mo_lai_nut():
     js = (GOC / "dashboard" / "static" / "qc.js").read_text(encoding="utf-8")
     khoi = js[js.index("Hết 15 phút"):]
     assert "nut.disabled = false" in khoi[:300] and "tải lại trang" in khoi[:300]
+
+
+def test_bo_nghe_uu_tien_union_id_roi_moi_toi_email(monkeypatch):
+    """21/10/2026 chạy thật: email đăng nhập dashboard không trùng email Lark — Lark từ chối
+    member_type=email và receive_id email. Có union_id (ghi lúc đăng nhập) thì dùng nó trước."""
+    import apify_tool as A
+    lk = LarkMark()
+    monkeypatch.setattr(A.lark, "call", lk.call)
+    k = KhoNghe(YC, TK, QUYEN)
+    k.union_id_cua = lambda email: "on_qtv"
+    kq = X.xu_ly(dict(YC), ks=k, kho=k, kho_qc=k, lark=lk, log=lambda s: None)
+    mem = [(b["member_type"], b["member_id"]) for m, p, q, b in lk.gia.goi if p.endswith("/members")]
+    assert kq["trang_thai"] == "xong" and mem == [("unionid", "on_qtv")]
+    assert [(t[0], t[1]) for t in lk.tin] == [("union_id", "on_qtv")]
+    # union_id bị từ chối → lùi về email như cũ
+    lk = LarkMark(hong={"unionid"})
+    monkeypatch.setattr(A.lark, "call", lk.call)
+    k = KhoNghe(YC, TK, QUYEN)
+    k.union_id_cua = lambda email: "on_qtv"
+    kq = X.xu_ly(dict(YC), ks=k, kho=k, kho_qc=k, lark=lk, log=lambda s: None)
+    mem = [b["member_type"] for m, p, q, b in lk.gia.goi if p.endswith("/members")]
+    assert kq["trang_thai"] == "xong" and mem == ["unionid", "email"]
+
+
+def test_schema_mark_doc_union_id():
+    sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql"
+           ).read_text(encoding="utf-8")
+    assert "GRANT SELECT (lark_union_id) ON nguoi_xem TO mark;" in sql

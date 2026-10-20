@@ -22,9 +22,12 @@ bộ lọc, không mang danh sách tài khoản.
 khoá riêng tư TRƯỚC khi ghi số (`TB.khoa_rieng_tu`: đóng chia sẻ link / ngoài tổ chức, kiểm lại) →
 ghi → trang trí → Tổng quan → cấp quyền XEM cho người yêu cầu (hỏng thì ném — không bao giờ báo
 "xong" cho Sheet người đó không mở được). File do bot sở hữu, không thư mục (như mọi Sheet của Mark).
-Người nhận theo EMAIL (dashboard chỉ biết email; open_id của app dashboard khác app Mark): thêm cộng
-tác viên member_type=email, hỏng thì tra open_id qua danh bạ của app Mark rồi thử lại. Xong thì nhắn
-link (lỗi thì nhắn lý do) cho người yêu cầu — nhắn hỏng không làm hỏng yêu cầu.
+Người nhận: union_id Lark của người bấm TRƯỚC (dashboard ghi lúc đăng nhập — `kho.union_id_cua`;
+chung mọi app của cùng nhà phát triển nên app Mark dùng được; open_id của app dashboard thì khác app
+Mark). 21/10/2026 chạy thật: email đăng nhập không trùng email Lark → member_type=email / receive_id
+email bị từ chối, danh bạ app Mark cũng không tra ra; union_id thì chia quyền + nhắn đều được. Chưa
+có union_id thì email, rồi open_id tra danh bạ. Xong thì nhắn link (lỗi thì nhắn lý do) cho người yêu
+cầu — nhắn hỏng không làm hỏng yêu cầu.
 
 Chạy tay (trên VPS, user mark): `python -m xuat_sheet_qc` (nghe mãi) hoặc `--mot-lan` (xử lý hàng
 chờ một lần rồi thoát).
@@ -224,13 +227,20 @@ def tra_open_id(lark, email: str) -> str | None:
     return None
 
 
-def cap_quyen_xem(lark, tok: str, email: str, con_quyen=None) -> None:
-    """Người yêu cầu chỉ cần XEM số (như `meta_ads_tool._grant_view`); theo email, hỏng thì theo
-    open_id. `con_quyen()`: kiểm lại NGAY trước khi thêm cộng tác viên (bị bỏ quản trị giữa lượt →
-    không bao giờ chia sẻ). Không cấp được → ném (KHÔNG báo xong)."""
+def cap_quyen_xem(lark, tok: str, email: str, con_quyen=None, union_id: str | None = None) -> None:
+    """Người yêu cầu chỉ cần XEM số (như `meta_ads_tool._grant_view`); theo union_id (nếu có), rồi
+    email, rồi open_id. `con_quyen()`: kiểm lại NGAY trước khi thêm cộng tác viên (bị bỏ quản trị giữa
+    lượt → không bao giờ chia sẻ). Không cấp được → ném (KHÔNG báo xong)."""
     if con_quyen is not None and not con_quyen():
         raise ValueError("Chưa chia sẻ Sheet: bạn không còn là quản trị viên.")
     duong = f"/open-apis/drive/v1/permissions/{tok}/members"
+    if union_id:
+        try:
+            lark.call("POST", duong, query={"type": "sheet"},
+                      body={"member_type": "unionid", "member_id": union_id, "perm": "view"})
+            return
+        except Exception as e:  # noqa: BLE001
+            print(f"[xuat_sheet_qc] cấp quyền theo union_id lỗi: {_gon(e)[:200]}", flush=True)
     try:
         lark.call("POST", duong, query={"type": "sheet"},
                   body={"member_type": "email", "member_id": email, "perm": "view"})
@@ -248,10 +258,11 @@ def cap_quyen_xem(lark, tok: str, email: str, con_quyen=None) -> None:
     raise ValueError("Chưa chia sẻ được Sheet cho bạn (Lark từ chối thêm quyền xem).")
 
 
-def nhan_tin(lark, email: str, text: str, uuid: str) -> bool:
-    """Nhắn người yêu cầu (theo email; hỏng thì theo open_id). `uuid`: khởi động lại giữa chừng
-    không thành hai tin. Hỏng → False (không làm hỏng yêu cầu)."""
-    for loai, ma in (("email", email), ("open_id", None)):
+def nhan_tin(lark, email: str, text: str, uuid: str, union_id: str | None = None) -> bool:
+    """Nhắn người yêu cầu (theo union_id nếu có, rồi email, rồi open_id). `uuid`: khởi động lại
+    giữa chừng không thành hai tin. Hỏng → False (không làm hỏng yêu cầu)."""
+    cac = (([("union_id", union_id)] if union_id else []) + [("email", email), ("open_id", None)])
+    for loai, ma in cac:
         if loai == "open_id":
             ma = tra_open_id(lark, email)
             if not ma:
@@ -293,6 +304,10 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
     yid, email, moc = int(yc["id"]), str(yc["nguoi_hoi"]), yc.get("bat_dau_luc")
     tde, ket, ghi = None, None, None
     try:
+        uid = kho.union_id_cua(email) if hasattr(kho, "union_id_cua") else None
+    except Exception:  # noqa: BLE001 — thiếu union_id thì lùi về email / open_id
+        uid = None
+    try:
         tk = pham_vi(yc, kho, kho_qc)
         ids = [str(t["advertiser_id"]) for t in tk]
         tu, den = _ngay(yc["tu"]), _ngay(yc["den"])
@@ -310,7 +325,7 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
         kq = xuat(tde, dung_bang(tk, ngay, cd, qc, tong),
                   dung_tong_quan(yc, tk, ten_ben, tde, ngay, cd, qc, tong),
                   sau_khi_tao=TB.khoa_rieng_tu,
-                  cap_quyen=lambda tok: cap_quyen_xem(lark, tok, email, con_quyen))
+                  cap_quyen=lambda tok: cap_quyen_xem(lark, tok, email, con_quyen, uid))
         if not KS.link_lark(kq.url):
             raise ValueError("Chưa nhận được link Sheet hợp lệ từ Lark — bấm tạo lại.")
         so_dong = {"ngay": len(ngay["rows"]), "chien_dich": len(cd["rows"]),
@@ -343,7 +358,7 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
         # dùng bấm lại; Sheet (nếu đã tạo) vẫn riêng tư của bot.
         log(f"[xuat_sheet_qc] #{yid}: dòng không còn là lượt này (đã dọn / nhận lại) — không nhắn")
         return {**ket, "mo_coi": True}
-    if nhan_tin(lark, email, tin, f"sheet-qc-{yid}"):
+    if nhan_tin(lark, email, tin, f"sheet-qc-{yid}", uid):
         try:
             ks.da_nhan_tin(yid)
         except Exception as e:  # noqa: BLE001

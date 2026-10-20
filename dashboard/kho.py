@@ -105,6 +105,19 @@ def quyen_cua(email: str) -> dict | None:
     return PQ.chuan(r) if r else None
 
 
+def union_id_cua(email: str) -> str | None:
+    """union_id Lark của `email` (ghi lúc đăng nhập dashboard) — chung mọi app của cùng nhà phát
+    triển nên app của Mark dùng được để chia Sheet / nhắn tin (21/10/2026: email đăng nhập không
+    trùng email Lark, Lark từ chối member_type=email). Chưa có / thiếu quyền cột → None."""
+    try:
+        with ket_noi() as c:
+            r = c.execute("SELECT lark_union_id FROM nguoi_xem WHERE email = %s",
+                          (str(email or "").lower(),)).fetchone()
+    except LoiKho:
+        return None
+    return (str(r["lark_union_id"]).strip() or None) if r and r.get("lark_union_id") else None
+
+
 def vai_tro(email: str) -> str | None:
     """Vai trò GỘP (bản trước 19/10/2026): quan_ly / xem / None — `phan_quyen.vai_chung`. Không
     dùng để quyết định quyền trên dashboard nữa (quyền theo bên: `quyen_cua`)."""
