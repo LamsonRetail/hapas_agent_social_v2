@@ -220,39 +220,59 @@ class GiaKhoQC:
     """Bản bộ nhớ của `dashboard.kho_qc` — cùng tên hàm, khoá chính như schema.sql."""
 
     def __init__(self, ben=("hapas", "matemade")):
-        self.kn: dict | None = None
+        self.kns: dict[str, dict] = {}          # một dòng ket_noi_ngoai mỗi nhà cung cấp
         self.tk: dict[str, dict] = {}
         self.bang = {b: {} for b in KQ.BANG_QC}
         self.ben = set(ben)
-        self.dang = False
+        self.dang_khoa: set = set()             # khoá advisory đang giữ (TikTok / Meta riêng)
         self.nk: list[tuple] = []
+        self.bay = BAY                          # "now()" của kho giả (bài thử dời được)
+
+    # Dòng TikTok (bài thử cũ đọc/ghi thẳng `kho_qc.kn`).
+    @property
+    def kn(self):
+        return self.kns.get(KQ.NCC)
+
+    @kn.setter
+    def kn(self, v):
+        if v is None:
+            self.kns.pop(KQ.NCC, None)
+        else:
+            self.kns[KQ.NCC] = v
+
+    @property
+    def dang(self):
+        return KQ.KHOA_DONG_BO in self.dang_khoa
 
     # kết nối
     def doc_ket_noi(self, ncc=KQ.NCC):
-        return dict(self.kn) if self.kn else None
+        return dict(self.kns[ncc]) if self.kns.get(ncc) else None
 
-    def _kn(self):
-        if self.kn is None:
-            self.kn = {"nha_cung_cap": KQ.NCC, "loai": "mcp_oauth", "trang_thai": "chua_ket_noi"}
-        return self.kn
+    def _kn(self, ncc=KQ.NCC):
+        if ncc not in self.kns:
+            self.kns[ncc] = {"nha_cung_cap": ncc, "loai": "mcp_oauth", "trang_thai": "chua_ket_noi"}
+        return self.kns[ncc]
 
     def luu_dang_ky(self, client_id, redirect_uri, ncc=KQ.NCC):
-        self._kn().update(client_id=client_id, redirect_uri=redirect_uri)
+        self._kn(ncc).update(client_id=client_id, redirect_uri=redirect_uri)
 
     def luu_token(self, ai, loai, access_enc, refresh_enc, access_het, refresh_het, ncc=KQ.NCC):
-        self._kn().update(loai=loai, access_token_enc=access_enc, refresh_token_enc=refresh_enc,
-                          access_het_luc=access_het, refresh_het_luc=refresh_het, nguoi_cap=ai,
-                          cap_luc=BAY, trang_thai="hoat_dong", loi_cuoi=None)
-        self.nk.append((ai, "ket_noi_tiktok"))
+        self._kn(ncc).update(loai=loai, access_token_enc=access_enc, refresh_token_enc=refresh_enc,
+                             access_het_luc=access_het, refresh_het_luc=refresh_het, nguoi_cap=ai,
+                             cap_luc=self.bay, trang_thai="hoat_dong", loi_cuoi=None)
+        self.nk.append((ai, f"ket_noi_{KQ._nen_tang(ncc)}"))
 
-    def _dung(self, neu):
-        k = self._kn()
+    def luu_thong_tin_token(self, chu, quyen, ncc):
+        self._kn(ncc).update(chu_token=chu, quyen_token=list(quyen or []))
+
+    def _dung(self, neu, ncc=KQ.NCC):
+        k = self._kn(ncc)
         return neu is None or (k.get("access_token_enc"), k.get("cap_luc")) == tuple(neu)
 
     def cap_nhat_token(self, access_enc, access_het, refresh_enc, refresh_het, neu, ncc=KQ.NCC):
-        if not self._dung(neu):                      # như SQL: IS NOT DISTINCT FROM giá trị đã đọc
+        if not self._dung(neu, ncc):                 # như SQL: IS NOT DISTINCT FROM giá trị đã đọc
             return False
-        k = self._kn()
+        k = self._kn(ncc)
         k.update(access_token_enc=access_enc, access_het_luc=access_het, refresh_het_luc=refresh_het,
                  lam_moi_luc=BAY, trang_thai="hoat_dong")
         if refresh_enc:
@@ -260,50 +280,62 @@ class GiaKhoQC:
         return True
 
     def ghi_trang_thai(self, trang_thai, loi=None, ncc=KQ.NCC, *, neu=None, con_token=False):
-        if not self._dung(neu) or (con_token and not self._kn().get("access_token_enc")):
+        if not self._dung(neu, ncc) or (con_token and not self._kn(ncc).get("access_token_enc")):
             return
-        self._kn()["trang_thai"] = trang_thai
+        self._kn(ncc)["trang_thai"] = trang_thai
         if loi:
-            self.kn["loi_cuoi"] = str(loi)[:500]
+            self._kn(ncc)["loi_cuoi"] = str(loi)[:500]
 
     def ghi_goi_ok(self, ncc=KQ.NCC):
-        self._kn()["goi_ok_luc"] = BAY
+        self._kn(ncc)["goi_ok_luc"] = BAY
 
     def ngat(self, ai, ncc=KQ.NCC):
-        self._kn().update(access_token_enc=None, refresh_token_enc=None, access_het_luc=None,
-                          refresh_het_luc=None, trang_thai="da_ngat")
-        self.nk.append((ai, "ngat_tiktok"))
+        self._kn(ncc).update(access_token_enc=None, refresh_token_enc=None, access_het_luc=None,
+                             refresh_het_luc=None, trang_thai="da_ngat")
+        self.nk.append((ai, f"ngat_{KQ._nen_tang(ncc)}"))
 
-    def bat_dau_dong_bo(self, ncc=KQ.NCC):
-        self._kn().update(dong_bo_bat_dau=BAY, dong_bo_xong=None, yeu_cau_dong_bo_luc=None)
+    def bat_dau_dong_bo(self, ncc=KQ.NCC, cho_nhanh=False):
+        # Như SQL: loại lượt quyết định từ yêu cầu đang chờ TRONG cùng câu UPDATE xoá cờ.
+        k = self._kn(ncc)
+        kieu = ("nhanh" if cho_nhanh and k.get("yeu_cau_dong_bo_luc")
+                and k.get("yeu_cau_kieu") == "nhanh" else "day_du")
+        k.update(dong_bo_bat_dau=self.bay, dong_bo_xong=None, yeu_cau_dong_bo_luc=None,
+                 yeu_cau_kieu=None, dong_bo_kieu=kieu)
+        return kieu
 
-    def yeu_cau_dong_bo(self, ai, ncc=KQ.NCC):
-        k = self._kn()
-        k["yeu_cau_dong_bo_luc"] = k.get("yeu_cau_dong_bo_luc") or BAY
+    def yeu_cau_dong_bo(self, ai, ncc=KQ.NCC, kieu="day_du"):
+        # Như SQL: yêu cầu day_du đang chờ không bị hạ thành nhanh; mốc cũ giữ nguyên.
+        k = self._kn(ncc)
+        cho = k.get("yeu_cau_dong_bo_luc")
+        k["yeu_cau_kieu"] = "day_du" if (cho and k.get("yeu_cau_kieu") == "day_du") else kieu
+        k["yeu_cau_dong_bo_luc"] = cho or self.bay
         k["yeu_cau_boi"] = ai
-        self.nk.append((ai, "dong_bo_tiktok"))
+        if kieu == "day_du":
+            self.nk.append((ai, f"dong_bo_{KQ._nen_tang(ncc)}"))
 
     def ket_thuc_dong_bo(self, so_dong, loi, den_ngay, ncc=KQ.NCC):
-        k = self._kn()
-        k.update(dong_bo_xong=BAY, dong_bo_so_dong=so_dong, dong_bo_loi=loi)
+        k = self._kn(ncc)
+        k.update(dong_bo_xong=self.bay, dong_bo_so_dong=so_dong, dong_bo_loi=loi)
+        if k.get("dong_bo_kieu") == "nhanh":
+            k["nhanh_xong_luc"] = self.bay
         if not loi:
             k["dong_bo_ok_luc"] = BAY
         if den_ngay:
             k["so_den_ngay"] = max(k.get("so_den_ngay") or den_ngay, den_ngay)
 
     @contextlib.contextmanager
-    def khoa_dong_bo(self):
-        if self.dang:
+    def khoa_dong_bo(self, khoa=KQ.KHOA_DONG_BO):
+        if khoa in self.dang_khoa:
             yield False
             return
-        self.dang = True
+        self.dang_khoa.add(khoa)
         try:
             yield True
         finally:
-            self.dang = False
+            self.dang_khoa.discard(khoa)
 
-    def dang_dong_bo(self):
-        return self.dang
+    def dang_dong_bo(self, khoa=KQ.KHOA_DONG_BO):
+        return khoa in self.dang_khoa
 
     # tài khoản (cùng luật SQL của kho_qc.ghi_tk / gan_ben)
     def cac_tk(self):
@@ -312,7 +344,9 @@ class GiaKhoQC:
     def ben_co_tk(self):
         return {t["don_vi"] for t in self.tk.values() if t.get("don_vi")}
 
-    def ghi_tk(self, ds, ncc=KQ.NCC):
+    def ghi_tk(self, ds, ncc=KQ.NCC, duyet_moi=None):
+        nen = KQ._nen_tang(ncc)
+        duyet_moi = set(duyet_moi or ())
         moi = []
         for t in ds:
             adv = t["advertiser_id"]
@@ -328,7 +362,8 @@ class GiaKhoQC:
                                 "dang_dong_bo": True, "con_quyen": True, "nap_lui_xong_luc": None,
                                 "nap_lui_tu": None,
                                 "khan_gia_luc": None, "thay_lan_dau": BAY, "thay_cuoi": BAY,
-                                "cap_nhat_luc": BAY}
+                                "cap_nhat_luc": BAY, "nen_tang": nen,
+                                "duyet": nen != "meta" or adv in duyet_moi}
             else:
                 cu.update(ten=t.get("ten") or "", con_quyen=True,
                           tien_te=t.get("tien_te") or "VND",
@@ -337,19 +372,37 @@ class GiaKhoQC:
                     cu["don_vi"] = tu_dong
         thay = {t["advertiser_id"] for t in ds}
         for adv, t in self.tk.items():
-            if adv not in thay:
+            if adv not in thay and t.get("nen_tang", "tiktok") == nen:
                 t["con_quyen"] = False
-        k = self._kn()
+        k = self._kn(ncc)
         truoc = k.get("so_tk_thay")
         k.update(so_tk_truoc=truoc, so_tk_thay=len(thay))
         return {"so_tk_thay": len(thay), "so_tk_truoc": truoc, "moi": moi}
 
-    def gan_ben(self, ai, advertiser_id, don_vi, dang_dong_bo):
+    def dat_duyet(self, ai, ids, ncc="meta_ads"):
+        nen = KQ._nen_tang(ncc)
+        ids = set(ids)
+        for adv in ids:
+            self.tk.setdefault(adv, {"advertiser_id": adv, "ten": "", "don_vi": None,
+                                     "gan_tay": False, "tien_te": "VND",
+                                     "mui_gio": "Asia/Ho_Chi_Minh", "dang_dong_bo": True,
+                                     "con_quyen": False, "nap_lui_xong_luc": None,
+                                     "nap_lui_tu": None, "khan_gia_luc": None, "nen_tang": nen})
+        for adv, t in self.tk.items():
+            if t.get("nen_tang") == nen:
+                t["duyet"] = adv in ids
+        self.nk.append((ai, f"duyet_tk_{nen}"))
+        return {"duyet": len(ids)}
+
+    def gan_ben(self, ai, advertiser_id, don_vi, dang_dong_bo, duyet=None):
         if advertiser_id not in self.tk:
             raise LoiDuLieu("Không có tài khoản quảng cáo này.")
         if don_vi and don_vi not in self.ben:
             raise LoiDuLieu("Không có bên này.")
-        self.tk[advertiser_id].update(don_vi=don_vi, dang_dong_bo=bool(dang_dong_bo), gan_tay=True)
+        t = self.tk[advertiser_id]
+        t.update(don_vi=don_vi, dang_dong_bo=bool(dang_dong_bo), gan_tay=True)
+        if duyet is not None and t.get("nen_tang") == "meta":
+            t["duyet"] = bool(duyet)
         self.nk.append((ai, "gan_ben_tk_qc"))
 
     def dat_nap_lui(self, adv, tu, xong):
@@ -442,6 +495,71 @@ class GiaKhoQC:
         rows = [r for r in self.bang["qc_tk_ngay"].values() if r["advertiser_id"] in ids]
         return {"ngay_cuoi": max((r["ngay"] for r in rows), default=None),
                 "ghi_luc": BAY if rows else None}
+
+    # tra một đối tượng (cùng nghĩa các hàm kho_qc.qc_tim / qc_ten / qc_doi_tuong…)
+    def _bang_tra(self, cap):
+        bang, khoa, cot, ten = KQ.CAP_TRA_CUU[cap]
+        return self.bang[bang], khoa, cot, ten
+
+    def _moi_nhat(self, cap, ids):
+        rows, khoa, cot, _ = self._bang_tra(cap)
+        moi = {}
+        for r in rows.values():
+            if r["advertiser_id"] in ids and (r[khoa] not in moi or r["ngay"] > moi[r[khoa]]["ngay"]):
+                moi[r[khoa]] = r
+        return {m: {"ma": m, "advertiser_id": r["advertiser_id"], **{c: r.get(c) for c in cot}}
+                for m, r in moi.items()}
+
+    def qc_tim(self, cap, ids, mau, ma, n=KQ.TRA_CUU_TOI_DA):
+        if cap == "tai_khoan" or not ids or not (mau or ma):
+            return {"rows": [], "tong": 0}
+        _, _, _, ten = self._bang_tra(cap)
+        ds = [x for x in self._moi_nhat(cap, ids).values()
+              if x["ma"] == ma or (mau and mau in QC.chu_tim(x.get(ten) or ""))]
+        ds.sort(key=lambda x: (x["ma"] != ma, x.get(ten) or "", x["ma"]))
+        return {"rows": ds[:n], "tong": len(ds)}
+
+    def qc_ten(self, cap, ids, n=5000):
+        _, _, _, ten = self._bang_tra(cap)
+        return [{"ma": x["ma"], "advertiser_id": x["advertiser_id"], "ten": x.get(ten)}
+                for x in self._moi_nhat(cap, ids).values()][:n]
+
+    def _cua(self, cap, ma, tu, den, ids):
+        # Như SQL: lọc mã VÀ tài khoản trong phạm vi.
+        rows, khoa, _, _ = self._bang_tra(cap)
+        return [r for r in rows.values() if str(r[khoa]) in ma and r["advertiser_id"] in ids
+                and tu <= r["ngay"] <= den], khoa
+
+    def qc_doi_tuong(self, cap, ma, tu, den, ids):
+        rows, khoa = self._cua(cap, set(ma), tu, den, set(ids))
+        nhom = {}
+        for r in rows:
+            nhom.setdefault((str(r[khoa]), r["advertiser_id"]), []).append(r)
+        ra = []
+        for (m, tk), rs in nhom.items():
+            co = [r["ngay"] for r in rs if (r.get("hien_thi") or 0) > 0 or (r.get("chi") or 0) > 0]
+            ra.append({"ma": m, "tk": tk, **self._cong(rs),
+                       "so_ngay": len({r["ngay"] for r in rs}), "ngay_dau": min(co, default=None),
+                       "ngay_cuoi": max(co, default=None)})
+        return ra
+
+    def qc_chi_so_tong(self, cap, ma, tu, den, ids):
+        rows, khoa = self._cua(cap, set(ma), tu, den, set(ids))
+        tong = {}
+        for r in rows:
+            for k, v in (r.get("chi_so") or {}).items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    kh = (str(r[khoa]), r["advertiser_id"], k)
+                    tong[kh] = tong.get(kh, 0) + v
+        return [{"ma": m, "tk": tk, "ten": k, "tong": float(v)} for (m, tk, k), v in tong.items()]
+
+    def qc_doi_tuong_ngay(self, cap, ma, tu, den, ids):
+        rows, khoa = self._cua(cap, set(ma), tu, den, set(ids))
+        nhom = {}
+        for r in rows:
+            nhom.setdefault((str(r[khoa]), r["advertiser_id"], r["ngay"]), []).append(r)
+        return [{"ma": m, "tk": tk, "ngay": d, **self._cong(rs)}
+                for (m, tk, d), rs in sorted(nhom.items())]
 
 
 def _dv(kho_qc=None, tt=None, bay=BAY):
@@ -1047,8 +1165,10 @@ def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
     assert c.get(f"/api/qc?{Q}&ben=chua_gan").json()["tai_khoan"][0]["advertiser_id"] == LE
     assert c.get(f"/api/qc?{Q}&ben=khong-co").status_code == 404
     t = c.get(f"/quang-cao?{Q}").text
-    assert "Chi tiêu" in t and "ROAS Shop" in t and 'id="qc-du-lieu"' in t
-    assert "Số đến hết ngày 18/10/2026" in t
+    assert "Chi tiêu" in t and "ROAS Shop" in t and 'id="qc-api"' in t
+    # Thiết kế 20/10/2026: kỳ đang xem ở đầu trang, "số đến ngày" ở dải trạng thái, CPM + CTR tính lại.
+    assert "12/10 – 18/10/2026" in t and "số đến <b>18/10</b>" in t
+    assert 'data-kpi="cpm"' in t and 'data-kpi="ctr"' in t
     assert c.get("/api/qc?tu=2025-01-01&den=2026-10-18").status_code == 400
 
 
@@ -1097,12 +1217,12 @@ def test_quan_tri_gan_ben_va_dong_bo_bam_tay():
     assert "Không có bên này" in c.get(r.headers["location"]).text
     tt_goi = len(_tt.goi)
     r = c.post("/tiktok/dong-bo", data={"csrf": csrf})
-    assert "sẽ chạy trong ≤ 10 phút" in c.get(r.headers["location"]).text
+    assert "sẽ chạy trong ≤ 2 phút" in c.get(r.headers["location"]).text
     # Dashboard CHỈ ghi cờ — không gọi TikTok, không chạy lượt nào trong tiến trình web.
     assert len(_tt.goi) == tt_goi and (QL, "dong_bo_tiktok") in kho_qc.nk
     assert kho_qc.kn["yeu_cau_dong_bo_luc"] == BAY and kho_qc.kn["yeu_cau_boi"] == QL
     t = c.get("/quan-tri").text
-    assert 'data-o="tt-yeu-cau"' in t and "sẽ chạy trong ≤ 10 phút" in t
+    assert 'data-o="tt-yeu-cau"' in t and "sẽ chạy trong ≤ 2 phút" in t
     r = c.post("/tiktok/ngat", data={"csrf": csrf})
     assert "Đã ngắt kết nối" in c.get(r.headers["location"]).text
     assert kho_qc.kn["access_token_enc"] is None
@@ -1131,7 +1251,8 @@ def test_mark_quang_cao_theo_ben_va_tien(monkeypatch):
                 return getattr(kho_qc, HD._HAM_KHO_QC[ten])
             return getattr(kho, ten)
     assert set(HD._HAM_KHO_QC.values()) <= {"cac_tk", "qc_tong", "qc_top", "qc_moi",
-                                         "qc_theo_ngay"}
+                                         "qc_theo_ngay", "qc_tim", "qc_ten", "qc_doi_tuong",
+                                         "qc_chi_so_tong", "qc_doi_tuong_ngay"}
     bay = datetime.datetime(2026, 10, 19, 9, 0, tzinfo=VN)
     args = {"phan": ["quang_cao"], "tu": "2026-10-12", "den": "2026-10-18"}
     monkeypatch.setattr(HD, "email_cua", lambda oid: XEM)
@@ -1331,7 +1452,7 @@ def test_hai_bo_hen_gio_systemd():
     ngay = (d / "tiktok-ads-dong-bo.timer").read_text(encoding="utf-8")
     assert "OnCalendar=*-*-* 06:30:00 Asia/Ho_Chi_Minh" in ngay
     yc = (d / "tiktok-ads-yeu-cau.timer").read_text(encoding="utf-8")
-    assert "OnUnitInactiveSec=10min" in yc and "Unit=tiktok-ads-yeu-cau.service" in yc
+    assert "OnUnitActiveSec=2min" in yc and "Unit=tiktok-ads-yeu-cau.service" in yc
     sv = (d / "tiktok-ads-yeu-cau.service").read_text(encoding="utf-8")
     assert "dashboard.tiktok_ads dong-bo --chi-khi-yeu-cau" in sv and "User=lang_nghe_web" in sv
     req = (GOC / "dashboard" / "requirements.txt").read_text(encoding="utf-8")

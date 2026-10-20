@@ -150,7 +150,7 @@ sudo systemctl restart lang-nghe-dashboard
 
 # d. HAI bộ hẹn giờ (user lang_nghe_web, cùng venv + .env với dashboard):
 #    tiktok-ads-dong-bo  — mỗi ngày 06:30 giờ VN
-#    tiktok-ads-yeu-cau  — mỗi 10 phút, chỉ chạy khi quản trị viên bấm "Đồng bộ ngay" / vừa kết nối
+#    tiktok-ads-yeu-cau  — mỗi 2 phút (từ 20/10/2026), chỉ chạy khi có người bấm "Đồng bộ ngay" / vừa kết nối
 #    (dashboard KHÔNG chạy đồng bộ trong tiến trình web, chỉ ghi cờ yêu cầu)
 sudo install -o root -g root -m 0644 deploy/lang-nghe/tiktok-ads-dong-bo.service   deploy/lang-nghe/tiktok-ads-dong-bo.timer deploy/lang-nghe/tiktok-ads-yeu-cau.service   deploy/lang-nghe/tiktok-ads-yeu-cau.timer /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -164,13 +164,56 @@ sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=
 
 e. **BigQuery** (khi đã bật `BQ_DATASET`): chạy khối "TikTok Ads" ở cuối `deploy/lang-nghe/bigquery.sql` (5 bảng `tk_quang_cao`, `qc_tk_ngay`, `qc_campaign_ngay`, `qc_ad_ngay`, `qc_khan_gia` — mô tả 11 nhãn) TRƯỚC khi bật mã mới; chủ dự án duyệt trước khi chạy. Bộ hẹn giờ đẩy BigQuery ngay sau mỗi lượt đồng bộ có dòng mới.
 
-f. **Kết nối**: quản trị viên mở `https://social.hapas.vn/quan-tri#tiktok` → "Đăng nhập TikTok để kết nối" → đăng nhập TikTok for Business bằng tài khoản thấy đủ các tài khoản quảng cáo → Authorize. Dashboard tự đăng ký client OAuth (không cần app developer, không cần khai redirect URL), lưu token mã hoá, đọc tài khoản (gán bên MATEMADE/HAPAS tự động), rồi ghi yêu cầu đồng bộ: trong ≤ 10 phút bộ hẹn giờ `tiktok-ads-yeu-cau` bắt đầu nạp 90 ngày (tài khoản lớn mất vài chục phút tới vài giờ; bị ngắt thì lượt sau đọc tiếp). Kiểm bảng "Tài khoản quảng cáo → bên".
+f. **Kết nối**: quản trị viên mở `https://social.hapas.vn/quan-tri#tiktok` → "Đăng nhập TikTok để kết nối" → đăng nhập TikTok for Business bằng tài khoản thấy đủ các tài khoản quảng cáo → Authorize. Dashboard tự đăng ký client OAuth (không cần app developer, không cần khai redirect URL), lưu token mã hoá, đọc tài khoản (gán bên MATEMADE/HAPAS tự động), rồi ghi yêu cầu đồng bộ: trong ≤ 2 phút bộ hẹn giờ `tiktok-ads-yeu-cau` bắt đầu nạp 90 ngày (tài khoản lớn mất vài chục phút tới vài giờ; bị ngắt thì lượt sau đọc tiếp). Kiểm bảng "Tài khoản quảng cáo → bên".
 
 - **Gia hạn**: mỗi lần đăng nhập dùng được đúng **30 ngày** (TikTok không gia hạn khi làm mới). Thẻ đếm ngược (vàng < 7 ngày, đỏ < 2 ngày); Mark nhắn trước 7/3/1 ngày tới `MARK_TIKTOK_NHAC` (`oc_…`/`ou_…` trong `/opt/mark/app/.env`, trống thì `MARK_LICH_QUET_BAO_LOI`). Gia hạn = bấm "Đăng nhập lại để gia hạn 30 ngày".
 - **Chuyển sang token API không hết hạn**: tạo app trên TikTok for Business Developer (chỉ quyền đọc báo cáo/tài khoản), lấy "API access token", dán vào ô "Dùng token API không hết hạn" trên thẻ. Dashboard thử đọc trước khi lưu; `loai` đổi thành `api_token`, thẻ hiện "Không hết hạn", Mark thôi nhắc. Muốn quay lại OAuth: bấm Đăng nhập lại.
 - **Ngắt**: nút "Ngắt kết nối" thu hồi token phía TikTok và xoá khỏi DB (số đã đồng bộ giữ nguyên).
 - **Kiểm**: `journalctl -u tiktok-ads-dong-bo -u tiktok-ads-yeu-cau -n 50` (mỗi lượt in một dòng JSON tóm tắt, không token); `sudo -u lang_nghe_web psql -d lang_nghe -c "select trang_thai, refresh_het_luc, dong_bo_ok_luc, dong_bo_so_dong, dong_bo_loi from ket_noi_ngoai"`.
 - **Đồng bộ lại một khoảng**: lệnh `systemd-run` như trên với `dong-bo --tu 2026-09-01 --den 2026-09-30` (hoặc `dong-bo --bu 30`); không chạy chồng với bộ hẹn giờ (khoá advisory — lượt sau tự bỏ qua).
+- **Đổi bộ hẹn giờ yêu cầu sang 2 phút (20/10/2026)**: cài lại `tiktok-ads-yeu-cau.timer` (`OnUnitActiveSec=2min`), `sudo systemctl daemon-reload && sudo systemctl restart tiktok-ads-yeu-cau.timer`.
+
+## 8. Meta Ads (20/10/2026, chủ dự án chốt)
+
+Facebook / Instagram Ads đi CHUNG đường ống TikTok (`dashboard/meta_ads.py`; chi tiết `dashboard/README.md` mục "Meta Ads"): cùng bảng (`tk_quang_cao.nen_tang = 'meta'`, `qc_*`), cùng luật quyền / tiền, trang Quảng cáo (chỉ quản trị viên, lọc TikTok / Meta / Tất cả), Mark hỏi đáp bằng chữ. Token = token người dùng hệ thống **CHỈ ĐỌC** đang có trong `/opt/mark/app/.env` (`MARK_META_ADS_TOKEN`, quyền `ads_read` + `read_insights` + `public_profile`, `me` = mark_ads_reader). Không dùng MCP chính thức của Meta (xin `ads_management`). Thứ tự: **schema → mã → nhập token → bộ hẹn giờ → BigQuery**.
+
+```bash
+# a. Schema (thêm cột/ràng buộc, chạy lại không hỏng) TRƯỚC mã mới — cùng lệnh mục 7b
+sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
+
+# b. Mã dashboard (rsync như dashboard/README.md bước 2) rồi
+sudo systemctl restart lang-nghe-dashboard
+
+# c. Nhập token từ .env của Mark — KHÔNG in token: chỉ hai dòng MARK_META_* đi qua ống, lệnh đọc
+#    STDIN, kiểm GET me + me/permissions (từ chối nếu có quyền ghi) + me/adaccounts, mã hoá bằng
+#    TIKTOK_KHOA_MA_HOA (khoá chung), lưu danh sách DUYỆT = MARK_META_AD_ACCOUNT_IDS, gán bên, ghi
+#    yêu cầu đồng bộ; in tóm tắt không bí mật (tên token, quyền, số tài khoản).
+sudo grep -E '^MARK_META_(ADS_TOKEN|AD_ACCOUNT_IDS)=' /opt/mark/app/.env \
+  | sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env \
+      -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.meta_ads \
+      nhap-token --dang-env --ai deploy-20-10
+
+# d. HAI bộ hẹn giờ: meta-ads-dong-bo (06:45 giờ VN hằng ngày) + meta-ads-yeu-cau (2 phút, chỉ chạy khi có cờ)
+sudo install -o root -g root -m 0644 deploy/lang-nghe/meta-ads-dong-bo.service deploy/lang-nghe/meta-ads-dong-bo.timer \
+  deploy/lang-nghe/meta-ads-yeu-cau.service deploy/lang-nghe/meta-ads-yeu-cau.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now meta-ads-dong-bo.timer meta-ads-yeu-cau.timer
+systemctl list-timers 'meta-ads-*'
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env \
+  -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.meta_ads trang-thai
+```
+
+e. **BigQuery** (`BQ_QC_XUAT_TIEN=1` ở prod — tiền Meta đẩy như TikTok): chạy khối "Meta Ads (20/10/2026) — NÂNG CẤP BẢNG ĐÃ TẠO" ở CUỐI `deploy/lang-nghe/bigquery.sql` (thêm `tk_quang_cao.nen_tang`, `duyet` + cập nhật mô tả bảng/cột cho Meta) — chủ dự án duyệt trước khi chạy. Chưa chạy thì `dong_bo_bq` bỏ hai cột mới khỏi lượt + cảnh báo trên trang BigQuery, không hỏng bảng.
+
+- **Chỉ đọc**: client chỉ GET `https://graph.facebook.com/<phiên bản>/` + đường trong danh sách (me, me/adaccounts, me/permissions, act_<số>, act_<số>/insights|campaigns|ads); tham số đổi phương thức (`method`, `_method`, `batch`) bị chặn; trang sau phải cùng đường; không theo chuyển hướng; có bài thử canh "0 byte ra mạng" khi sai. Token có `ads_management`, `business_management`, `*_manage*`… bị từ chối, không lưu.
+- **Duyệt tài khoản**: chỉ tài khoản `duyet` mới được đọc số (danh sách nhập kèm token, thay `MARK_META_AD_ACCOUNT_IDS`). Tài khoản mới mà token thấy → "Chưa duyệt", quản trị viên tích "Duyệt" ở bảng "Tài khoản quảng cáo → bên" (trang Quản trị).
+- **Gán bên tự động**: tên có MATEMADE / MATE MADE / MADEMATE → matemade; tên có chữ THAI → chưa gán (chỉ quản trị viên thấy; chưa làm HAPAS Thái đợt này); còn lại → hapas. Quản trị viên sửa thì giữ.
+- **Đổi token**: dán token mới trên thẻ "Kết nối Meta Ads" (giữ danh sách duyệt) hoặc chạy lại bước c (đặt lại danh sách duyệt theo .env). Thu hồi token cũ trong Meta Business Settings → Người dùng hệ thống (dashboard không thu hồi được bằng quyền đọc; "Ngắt" chỉ xoá bản trên máy chủ).
+- **Kiểm**: `journalctl -u meta-ads-dong-bo -u meta-ads-yeu-cau -n 50`; `sudo -u lang_nghe_web psql -d lang_nghe -c "select nha_cung_cap, trang_thai, chu_token, quyen_token, dong_bo_ok_luc, dong_bo_loi from ket_noi_ngoai"`.
+
+### Đồng bộ bấm tay cho mọi người có quyền (20/10/2026)
+
+Dải "Số quảng cáo" (trang Chỉ số cho mọi người có quyền ở ít nhất một bên; trang Quảng cáo cho quản trị viên) hiện mỗi nền tảng: số đến ngày nào, đồng bộ lúc nào, trạng thái (ổn / có lỗi / đang chạy / đã yêu cầu) — không tiền, không số liệu — và nút **Đồng bộ ngay** (`POST /quang-cao/dong-bo`, CSRF). Nút chỉ ghi cờ yêu cầu loại **nhanh**: hôm nay + 2 ngày trước, chỉ tài khoản có hiển thị trong 30 ngày (xong trong vài phút); bộ hẹn giờ `*-yeu-cau` (2 phút) chạy. Đang chạy / đang có yêu cầu → không tạo mới, trả lời "Đang có yêu cầu lúc HH:MM (ai)" / "đang chạy từ HH:MM"; sau một lượt nhanh phải chờ 15 phút. Yêu cầu đầy đủ của quản trị viên đang chờ không bị hạ thành nhanh. Bộ hẹn giờ hằng ngày giữ đọc lại 7 ngày. Nạp lùi, kết nối, ngắt, gán bên: vẫn chỉ quản trị viên. Nhật ký: `dong_bo_qc` kiểu `bam_tay`.
 
 ## Vận hành
 

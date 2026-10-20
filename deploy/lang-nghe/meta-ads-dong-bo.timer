@@ -1,0 +1,13 @@
+# /etc/systemd/system/meta-ads-dong-bo.timer — đồng bộ Meta Ads mỗi ngày 06:45 giờ VN
+# (chủ dự án chốt 20/10/2026; sau TikTok 06:30). Persistent: VPS tắt lúc 06:45 thì chạy bù khi bật lại.
+[Unit]
+Description=Dong bo Meta Ads moi ngay 06:45 gio VN
+
+[Timer]
+OnCalendar=*-*-* 06:45:00 Asia/Ho_Chi_Minh
+Persistent=true
+RandomizedDelaySec=120
+Unit=meta-ads-dong-bo.service
+
+[Install]
+WantedBy=timers.target

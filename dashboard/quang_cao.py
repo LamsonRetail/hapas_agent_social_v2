@@ -1,8 +1,11 @@
-"""Quảng cáo TikTok (TikTok Ads, chủ dự án chốt 19/10/2026) — phần THUẦN: định nghĩa chỉ số, luật
-"chỉ số tiền", phạm vi theo bên, tổng hợp số cho trang "Quảng cáo TikTok" + `/api/qc` + Mark.
+"""Quảng cáo TikTok + Meta (TikTok Ads 19/10/2026, Meta Ads 20/10/2026, chủ dự án chốt) — phần
+THUẦN: định nghĩa chỉ số, luật "chỉ số tiền", phạm vi theo bên, tổng hợp số cho trang "Quảng cáo" +
+`/api/qc` + Mark.
 
-Không SQL, không HTTP, không FastAPI: dashboard (`app.py`), bộ đồng bộ (`tiktok_ads.py`) và tool
-`hoi_dashboard` của Mark cùng import module này — một phép tính, ba chỗ dùng (như `chi_so.py`).
+Không SQL, không HTTP, không FastAPI: dashboard (`app.py`), hai bộ đồng bộ (`tiktok_ads.py`,
+`meta_ads.py`) và tool `hoi_dashboard` của Mark cùng import module này — một phép tính, nhiều chỗ
+dùng (như `chi_so.py`). Mỗi tài khoản có `nen_tang` (tiktok | meta); cột số kiểu riêng chung cho cả
+hai nền tảng (bảng ánh xạ Meta ở `meta_ads.py`).
 
 Luật quyền (chủ dự án chốt):
   • Mỗi tài khoản quảng cáo thuộc một bên (`tk_quang_cao.don_vi`); chưa gán bên = chỉ quản trị viên
@@ -102,35 +105,154 @@ CHI_SO_KHAN_GIA: tuple[str, ...] = (
     "spend", "impressions", "clicks", "ctr", "cpm", "conversion", "video_play_actions",
     "video_watched_6s", "likes", "comments", "shares", "follows", "profile_visits",
 )
+#: Mọi chiều khán giả có trong qc_khan_gia (CHECK ở schema.sql). TikTok: 4 chiều đầu; Meta (20/10/2026):
+#: age + gender (cùng mã TikTok khi trùng nghĩa — `meta_ads.GIA_TRI_META`), region, publisher_platform,
+#: platform_position (giá trị "<nền tảng>/<vị trí>" — Meta chỉ cho chia vị trí kèm nền tảng).
+CHIEU_TAT_CA: tuple[str, ...] = ("age", "gender", "province_id", "region", "platform",
+                                 "publisher_platform", "platform_position")
 TEN_CHIEU = {"age": "Tuổi", "gender": "Giới tính", "province_id": "Tỉnh/thành",
-             "platform": "Nền tảng"}
+             "platform": "Thiết bị", "region": "Vùng (Meta)",
+             "publisher_platform": "Nền tảng Meta", "platform_position": "Vị trí Meta"}
 TEN_GIA_TRI = {
     "AGE_13_17": "13–17", "AGE_18_24": "18–24", "AGE_25_34": "25–34", "AGE_35_44": "35–44",
     "AGE_45_54": "45–54", "AGE_55_100": "55+", "NONE": "Không rõ", "FEMALE": "Nữ",
     "MALE": "Nam", "ANDROID": "Android", "IPHONE": "iPhone", "IPAD": "iPad", "WAP": "Web di động",
     "UNKNOWN": "Không rõ", "-1": "Không rõ",
+    # Meta (20/10/2026): nhóm tuổi Meta khác TikTok từ 55 tuổi; nền tảng hiển thị.
+    "55-64": "55–64", "65+": "65+", "facebook": "Facebook", "instagram": "Instagram",
+    "messenger": "Messenger", "audience_network": "Audience Network", "threads": "Threads",
+    "whatsapp": "WhatsApp", "unknown": "Không rõ",
 }
+
+# ───────────────────────────── nền tảng quảng cáo ─────────────────────────────
+NEN_TANG_QC: tuple[str, ...] = ("tiktok", "meta")
+TEN_NEN_TANG_QC = {"tiktok": "TikTok", "meta": "Meta"}
+
+
+def nen_tang_tk(t: dict) -> str:
+    """Nền tảng của một dòng tk_quang_cao (dòng trước 20/10/2026 / kho giả cũ: tiktok)."""
+    return str(t.get("nen_tang") or "tiktok")
+
+
+def tk_dung(cac_tk: list[dict], nen_tang: str | None = None) -> list[dict]:
+    """Tài khoản được tính số: đã duyệt (`duyet` — Meta: danh sách quản trị viên duyệt; TikTok
+    luôn TRUE) và đúng nền tảng khi lọc (`nen_tang` None / "tat_ca" = mọi nền tảng)."""
+    return [t for t in cac_tk if t.get("duyet", True) is not False
+            and (nen_tang in (None, "", "tat_ca") or nen_tang_tk(t) == nen_tang)]
+
+
+# ───────────────────────────── đồng bộ bấm tay + dải trạng thái (20/10/2026) ─────────────────────────────
+#: Chủ dự án 20/10/2026: mọi người có quyền ở ít nhất một bên bấm được "Đồng bộ ngay" (như nút
+#: BigQuery) — chỉ ghi cờ, lượt "nhanh" 3 ngày; giãn 15 phút sau lượt bấm tay gần nhất.
+GIAN_PHUT = 15
+TEN_TINH_TRANG = {"dang_chay": "đang chạy", "da_yeu_cau": "đã yêu cầu", "co_loi": "có lỗi",
+                  "on": "ổn", "chua_ket_noi": "chưa kết nối"}
+
+
+def _gio(x) -> str:
+    if not isinstance(x, datetime.datetime):
+        return "—"
+    if x.tzinfo is None:
+        x = x.replace(tzinfo=datetime.timezone.utc)
+    return x.astimezone(VN).strftime("%H:%M")
+
+
+def tinh_trang_dong_bo(the: dict | None) -> str:
+    """Thẻ kết nối (`*_ads.DichVu.the`) → một trạng thái ngắn (không tiền, không số)."""
+    t = the or {}
+    if not t.get("co_token"):
+        return "chua_ket_noi"
+    if t.get("dang_dong_bo"):
+        return "dang_chay"
+    if t.get("yeu_cau_dong_bo_luc"):
+        return "da_yeu_cau"
+    if t.get("dong_bo_loi") or t.get("trang_thai") in ("loi", "het_han"):
+        return "co_loi"
+    return "on"
+
+
+def dai_trang_thai(the: dict | None, nen_tang: str) -> dict:
+    """Một ô của dải trạng thái đồng bộ (mọi người có quyền thấy): CHỈ ngày + giờ + trạng thái."""
+    t = the or {}
+    tt = tinh_trang_dong_bo(t)
+    return {"nen_tang": nen_tang, "ten": TEN_NEN_TANG_QC.get(nen_tang, nen_tang),
+            "tinh_trang": tt, "nhan": TEN_TINH_TRANG[tt], "so_den_ngay": t.get("so_den_ngay"),
+            "dong_bo_luc": t.get("dong_bo_xong") or t.get("dong_bo_ok_luc"),
+            "co_token": bool(t.get("co_token"))}
+
+
+def _utc(x):
+    if isinstance(x, datetime.datetime) and x.tzinfo is None:
+        return x.replace(tzinfo=datetime.timezone.utc)
+    return x if isinstance(x, datetime.datetime) else None
+
+
+def kiem_yeu_cau(the: dict | None, bay: datetime.datetime, gian_phut: int = GIAN_PHUT, *,
+                 hien_ai: bool = False) -> str | None:
+    """Có được ghi yêu cầu "Đồng bộ ngay" (nhanh) cho nền tảng này không. None = được; không thì câu
+    trả lời cho người bấm: đang chạy / đang có yêu cầu / chưa hết thời gian giãn / chưa kết nối.
+    Email người yêu cầu chỉ hiện khi `hien_ai` (quản trị viên); người khác chỉ thấy giờ.
+    Giãn 15 phút tính từ mốc MUỘN NHẤT của: lượt nhanh gần nhất kết thúc (`nhanh_xong_luc`) và lượt
+    nhanh gần nhất BẮT ĐẦU (`dong_bo_bat_dau` khi `dong_bo_kieu` = nhanh) — lượt bị giết giữa chừng
+    (hết giờ, OOM, khởi động lại) không ghi được lúc xong nhưng vẫn bị tính giãn."""
+    t = the or {}
+    if not t.get("co_token"):
+        return "chưa kết nối"
+    if t.get("dang_dong_bo"):
+        return f"đang chạy từ {_gio(t.get('dong_bo_bat_dau'))}"
+    if t.get("yeu_cau_dong_bo_luc"):
+        ai = t.get("yeu_cau_boi") if hien_ai else None
+        return (f"đang có yêu cầu lúc {_gio(t.get('yeu_cau_dong_bo_luc'))}"
+                + (f" ({ai})" if ai else ""))
+    moc = [x for x in (_utc(t.get("nhanh_xong_luc")),
+                       _utc(t.get("dong_bo_bat_dau")) if t.get("dong_bo_kieu") == "nhanh" else None)
+           if x]
+    if moc:
+        cuoi = max(moc)
+        duoc = cuoi + datetime.timedelta(minutes=gian_phut)
+        if bay < duoc:
+            return f"vừa đồng bộ lúc {_gio(cuoi)}, bấm lại được từ {_gio(duoc)}"
+    return None
 
 
 # ───────────────────────────── chỉ số tiền ─────────────────────────────
-_TIEN_DUNG = frozenset({"spend", "cpm", "cpc", "billed_cost", "cash_spend", "voucher_spend",
+_TIEN_DUNG = frozenset({"spend", "cpm", "cpc", "cpp", "billed_cost", "cash_spend", "voucher_spend",
                         "cashback_coupon_spend", "tax_spend", "value_per_complete_payment",
-                        "value_per_total_purchase", "campaign_budget", "budget", "balance"})
+                        "value_per_total_purchase", "campaign_budget", "budget", "balance",
+                        "roas", "gia_tri_mua"})
 
 
 def la_tien(ten: str) -> bool:
-    """Chỉ số / cột mang số TIỀN (chủ dự án: chỉ Quản trị viên + Quản lý của bên thấy).
-    Luật theo tên để chỉ số TikTok mới thêm vẫn bị chặn đúng: spend, cpm, cpc, cost_per_*,
-    real_time_cost_per_*, *_value, *_roas, *budget*, *_spend, *_cost; cột riêng chi,
-    gia_tri_mua_shop, roas_shop."""
+    """Chỉ số / cột mang số TIỀN (chủ dự án: chỉ người có quyền ở bên đó biết, qua Mark).
+    Luật theo tên để chỉ số mới thêm vẫn bị chặn đúng: spend, cpm, cpc, cpp, cost_per_*,
+    real_time_cost_per_*, *_value, *roas*, *budget*, *_spend, *_cost; Meta: action_values__*,
+    purchase_roas__* (20/10/2026); cột riêng chi, gia_tri_mua_shop, roas_shop."""
     t = str(ten or "").lower()
     if t in _TIEN_DUNG or t in COT_TIEN or t in ("roas_shop", "doanh_thu_shop", "chi_phi"):
         return True
-    if t.startswith("chi_moi_"):            # chi phí suy ra của Mark (chi_moi_follow, …)
+    if t.startswith(("chi_moi_", "chi_tren_")):   # chi phí suy ra của Mark (chi_moi_follow, …)
         return True
-    return (t.startswith(("cost_", "real_time_cost_per_", "skan_cost_per_"))
+    return (t.startswith(("cost_", "real_time_cost_per_", "skan_cost_per_", "action_values"))
             or t.endswith(("_value", "_roas", "_spend", "_cost", "_budget"))
-            or "budget" in t)
+            or "budget" in t or "_roas" in t or "_value__" in t or "values__" in t)
+
+
+#: Chỉ số KHÔNG cộng được qua ngày / đối tượng (tỉ lệ, trung bình, người duy nhất): tổng của chúng vô
+#: nghĩa — Mark tính lại tỉ lệ từ tổng (CTR = click / hiển thị…), reach / frequency để trống.
+_KHONG_CONG_DUNG = frozenset({"reach", "frequency", "ctr", "cpc", "cpm", "cpp", "result_rate",
+                              "conversion_rate", "engagement_rate", "profile_visits_rate"})
+
+
+def cong_duoc(ten: str) -> bool:
+    """Chỉ số cộng được (số đếm, tiền): spend, impressions, clicks, actions__*, video_p25…, likes…
+    Không cộng: reach, frequency, ctr/cpc/cpm/cpp, *rate*, cost_per_*, *average*/*avg*, *roas*,
+    value_per_*, unique_*, *_per_user (soát 20/10/2026 trên tên TikTok + Meta)."""
+    t = str(ten or "").lower()
+    if t in _KHONG_CONG_DUNG:
+        return False
+    return not any(x in t for x in ("rate", "cost_per", "average", "avg", "roas", "frequency",
+                                    "reach", "per_user", "value_per", "unique", "_ctr", "cpm",
+                                    "cpc"))
 
 
 def xem_tien(q: dict | None, don_vi: str | None) -> bool:
@@ -223,10 +345,29 @@ def ten_mau(ten: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", s.upper())
 
 
-def ben_tu_dong(ten: str) -> str:
-    """Gán bên tự động khi thấy tài khoản lần đầu (chủ dự án chốt): tên có MATEMADE / MATE MADE
-    (không phân biệt hoa thường, khoảng trắng) → matemade; còn lại → hapas."""
-    return "matemade" if "MATEMADE" in ten_mau(ten) else "hapas"
+def _chu_rieng(ten: str) -> list[str]:
+    """Tên → các CHỮ hoa không dấu (tách theo mọi ký tự không phải chữ/số)."""
+    s = unicodedata.normalize("NFKD", str(ten or "").replace("đ", "d").replace("Đ", "D"))
+    return re.findall(r"[A-Z0-9]+", s.encode("ascii", "ignore").decode().upper())
+
+
+def chu_tim(s: str) -> str:
+    """Chữ để so khớp tên khi tra cứu: bỏ dấu (đ→d), chữ thường, bỏ khoảng trắng / ký hiệu — khớp
+    đúng biểu thức `kho_qc._chuan_sql` phía Postgres."""
+    return "".join(_chu_rieng(s)).lower()
+
+
+def ben_tu_dong(ten: str) -> str | None:
+    """Gán bên tự động khi thấy tài khoản lần đầu (chủ dự án chốt, áp cả TikTok lẫn Meta):
+      • tên có chữ THAI đứng riêng (vd "THAI 1", "Thái") → None: chưa gán bên, chỉ quản trị viên
+        thấy (20/10/2026: chưa làm HAPAS Thái Lan đợt này) — xét TRƯỚC, nghi ngờ thì hẹp;
+      • tên có MATEMADE / MATE MADE / MADEMATE (không phân biệt hoa thường, khoảng trắng, dấu)
+        → matemade;
+      • còn lại → hapas."""
+    if "THAI" in _chu_rieng(ten):
+        return None
+    m = ten_mau(ten)
+    return "matemade" if ("MATEMADE" in m or "MADEMATE" in m) else "hapas"
 
 
 # ───────────────────────────── tổng hợp cho trang / API / Mark ─────────────────────────────
@@ -277,17 +418,40 @@ def dong_top(r: dict) -> dict:
     return x
 
 
+def nhan_gia_tri(chieu: str, g: str) -> str:
+    """Mã giá trị khán giả → nhãn hiện (TikTok: mã AGE_…, mã vùng số; Meta: tên vùng, nền tảng,
+    "nền tảng/vị trí")."""
+    if g in TEN_GIA_TRI:
+        return TEN_GIA_TRI[g]
+    if chieu == "province_id":
+        return f"Mã vùng {g}" if g else "Không rõ"
+    if chieu == "platform_position" and "/" in g:
+        nt, vt = g.split("/", 1)
+        return f"{TEN_GIA_TRI.get(nt, nt)} · {vt.replace('_', ' ')}"
+    return g or "Không rõ"
+
+
 def khan_gia(rows: list[dict]) -> dict:
     """Dòng qc_khan_gia (đã cộng theo chieu + gia_tri trên các tài khoản) → {chiều: [{nhan, …}]},
     mỗi chiều sắp theo hiển thị giảm dần, % hiển thị trong chiều."""
-    ra: dict[str, list[dict]] = {c: [] for c in CHIEU_KHAN_GIA}
+    ra: dict[str, list[dict]] = {c: [] for c in CHIEU_TAT_CA}
+    gop: dict[tuple, dict] = {}
     for r in rows:
         c = r.get("chieu")
         if c in ra:
             g = str(r.get("gia_tri") if r.get("gia_tri") is not None else "")
-            nhan = TEN_GIA_TRI.get(g) or (f"Mã vùng {g}" if c == "province_id" else g or "Không rõ")
-            ra[c].append({**{k: r.get(k) for k in TEN_COT_SO}, "gia_tri": g, "nhan": nhan,
-                          "tuong_tac": tuong_tac(r)})
+            nhan = nhan_gia_tri(c, g)
+            x = gop.get((c, nhan))
+            if x is None:
+                x = gop[(c, nhan)] = {**{k: r.get(k) for k in TEN_COT_SO}, "gia_tri": g,
+                                      "nhan": nhan}
+                ra[c].append(x)
+            else:
+                # Cùng nhãn (vd "Nữ" của TikTok + Meta, hoặc hai mã "Không rõ"): cộng chung một dòng.
+                for k in TEN_COT_SO:
+                    if r.get(k) is not None:
+                        x[k] = (x.get(k) or 0) + r[k]
+            x["tuong_tac"] = tuong_tac(x)
     for c, ds in ra.items():
         tong = sum(int(x.get("hien_thi") or 0) for x in ds) or 0
         ds.sort(key=lambda x: -(x.get("hien_thi") or 0))
@@ -303,22 +467,35 @@ TEN_MUC_TIEU = {
     "APP_PROMOTION": "Quảng bá ứng dụng", "APP_INSTALL": "Cài ứng dụng",
     "FOLLOWERS": "Người theo dõi", "PROFILE_VISITS": "Vào hồ sơ", "SHOP_PURCHASES": "Mua Shop",
     "LIVE_SHOPPING": "Bán hàng LIVE", "RF_REACH": "Tiếp cận (đặt trước)",
+    # Meta (20/10/2026): mục tiêu ODAX + mục tiêu cũ còn trên chiến dịch cũ.
+    "OUTCOME_AWARENESS": "Nhận biết", "OUTCOME_TRAFFIC": "Lưu lượng",
+    "OUTCOME_ENGAGEMENT": "Tương tác", "OUTCOME_LEADS": "Khách tiềm năng",
+    "OUTCOME_SALES": "Bán hàng", "OUTCOME_APP_PROMOTION": "Quảng bá ứng dụng",
+    "BRAND_AWARENESS": "Nhận biết thương hiệu", "LINK_CLICKS": "Lượt bấm liên kết",
+    "POST_ENGAGEMENT": "Tương tác bài viết", "PAGE_LIKES": "Thích Trang", "MESSAGES": "Tin nhắn",
+    "PRODUCT_CATALOG_SALES": "Bán hàng theo danh mục", "STORE_VISITS": "Ghé cửa hàng",
+    "EVENT_RESPONSES": "Phản hồi sự kiện", "LEAD_GENERATION_META": "Khách tiềm năng",
 }
 
 #: Ô KPI trang Quảng cáo: mã → (nhãn, ⓘ, là tiền, tô màu ▲/▼). Thứ tự = thứ tự hiện.
 KPI_QC: dict[str, tuple[str, str, bool, bool]] = {
-    "chi": ("Chi tiêu", "Tổng spend TikTok báo, theo tiền tệ của tài khoản, chưa VAT.", True, False),
+    "chi": ("Chi tiêu", "Tổng spend TikTok / Meta báo, theo tiền tệ của tài khoản, chưa VAT.",
+            True, False),
     "hien_thi": ("Hiển thị", "", False, True),
-    "view_video": ("View video", "Lượt xem video (video_play_actions).", False, True),
-    "engaged_view": ("Engaged view", ("Lượt xem ≥ 6 giây hoặc có tương tác trong 1 ngày (TikTok "
-                                      "tính)."), False, True),
+    "view_video": ("View video", ("TikTok: lượt xem video (video_play_actions). Meta: lượt xem "
+                                  "≥ 3 giây (action video_view)."), False, True),
+    "engaged_view": ("Engaged view", ("TikTok: xem ≥ 6 giây hoặc có tương tác trong 1 ngày. Meta: "
+                                      "ThruPlay (xem hết hoặc ≥ 15 giây)."), False, True),
     "reach": ("Reach", ("Cộng reach từng ngày: một người thấy quảng cáo nhiều ngày được đếm "
-                        "nhiều lần — cao hơn reach duy nhất của cả kỳ trong TikTok Ads Manager."),
-              False, True),
-    "tuong_tac": ("Tương tác", "Thích + bình luận + chia sẻ trên quảng cáo.", False, True),
-    "follow": ("Follow", "Lượt theo dõi kênh từ quảng cáo.", False, True),
-    "vao_ho_so": ("Vào hồ sơ", "Lượt vào trang hồ sơ kênh từ quảng cáo.", False, True),
-    "gia_tri_mua_shop": ("Doanh thu Shop", "Giá trị mua TikTok Shop mà TikTok gán cho quảng cáo.",
+                        "nhiều lần — cao hơn reach duy nhất của cả kỳ trong trình quản lý quảng "
+                        "cáo."), False, True),
+    "tuong_tac": ("Tương tác", ("Thích + bình luận + chia sẻ trên quảng cáo (Meta: cảm xúc bài "
+                                "viết + bình luận + chia sẻ)."), False, True),
+    "follow": ("Follow", "TikTok: theo dõi kênh. Meta: lượt thích Trang (action like).",
+               False, True),
+    "vao_ho_so": ("Vào hồ sơ", "Lượt vào trang hồ sơ kênh từ quảng cáo (chỉ TikTok).", False, True),
+    "gia_tri_mua_shop": ("Doanh thu Shop", ("TikTok: giá trị mua TikTok Shop. Meta: giá trị mua "
+                                            "(purchase, mặc định phân bổ của Meta)."),
                          True, True),
     "roas_shop": ("ROAS Shop", "Doanh thu Shop ÷ Chi tiêu (lần).", True, True),
 }

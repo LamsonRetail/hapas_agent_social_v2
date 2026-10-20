@@ -529,3 +529,43 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 @media (forced-colors: active) {
   .the, .nut, .goi-y, .muc__so, .kpi__icon { border: 1px solid CanvasText; }
 }
+
+/* ─── Quảng cáo: màu nền tảng + dải trạng thái đồng bộ (20/10/2026) ───
+   Màu nền tảng quảng cáo đi theo token nền tảng chung (--nt-*): TikTok mực đậm (tối: sáng), Meta xanh
+   Facebook — cùng màu ở chấm, thanh tỉ trọng, cột biểu đồ. Dải trạng thái: một hàng mảnh, KHÔNG số. */
+:root { --qc-tiktok: var(--nt-tiktok); --qc-meta: var(--nt-facebook); }
+.qc-cham { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--qc-tiktok); }
+.qc-cham--meta { background: var(--qc-meta); }
+
+.dai-qc {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 0 0 16px; padding: 8px 8px 8px 14px;
+  border: 1px solid var(--vien); border-radius: var(--bo); background: var(--be-mat);
+  font-size: 12.5px; color: var(--chu-phu); font-variant-numeric: tabular-nums;
+}
+.dai-qc__ten { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--tieu-de); }
+.dai-qc__ds { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; padding: 0; list-style: none; flex: 1 1 auto; min-width: 0; }
+.dai-qc__o { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.dai-qc__nen { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; color: var(--chu); }
+.dai-qc__chu b { font-weight: 650; color: var(--chu); }
+/* trạng thái: chấm + chữ; chỉ "có lỗi" mới tô đỏ cả chữ — "ổn" lặng lẽ */
+.dai-qc__tt { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--chu-mo); }
+.dai-qc__tt::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.dai-qc__tt--on { color: var(--tot); }
+.dai-qc__tt--co_loi { color: var(--loi); }
+.dai-qc__tt--dang_chay, .dai-qc__tt--da_yeu_cau { color: var(--nhan-dam); }
+.dai-qc__tt--dang_chay::before { animation: dai-qc-nhip 1.2s ease-in-out infinite; }
+.dai-qc__nut { margin: 0 0 0 auto; }
+.dai-qc__nut .nut { gap: 6px; }
+.dai-qc__nut .bt { width: 15px; height: 15px; }
+.dai-qc__xoay { animation: dai-qc-xoay 1.4s linear infinite; }
+@keyframes dai-qc-nhip { 50% { opacity: .3; } }
+@keyframes dai-qc-xoay { to { transform: rotate(360deg); } }
+@media (max-width: 640px) {
+  .dai-qc { padding: 10px 12px; }
+  .dai-qc__ds { flex-direction: column; gap: 6px; flex-basis: 100%; }
+  .dai-qc__nut { flex-basis: 100%; margin-left: 0; }
+  .dai-qc__nut .nut { width: 100%; justify-content: center; min-height: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dai-qc__tt--dang_chay::before, .dai-qc__xoay { animation: none; }
+}

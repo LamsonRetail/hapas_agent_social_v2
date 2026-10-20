@@ -1,14 +1,15 @@
-# /etc/systemd/system/tiktok-ads-yeu-cau.timer — mỗi 10 phút kiểm cờ "Đồng bộ ngay" (19/10/2026).
+# /etc/systemd/system/tiktok-ads-yeu-cau.timer — mỗi 2 phút kiểm cờ "Đồng bộ ngay" (19/10/2026; 2 phút
+# từ 20/10/2026, chủ dự án: mọi người có quyền bấm được — chỉ là một câu SELECT trên cờ).
 # Dashboard KHÔNG chạy đồng bộ trong tiến trình web: nút chỉ ghi ket_noi_ngoai.yeu_cau_dong_bo_luc;
 # lượt này chạy `dong-bo --chi-khi-yeu-cau` (không có yêu cầu thì thoát < 1 giây, không in gì).
 # Không chạy chồng với tiktok-ads-dong-bo (06:30) — khoá advisory Postgres.
 [Unit]
-Description=Dong bo TikTok Ads theo yeu cau (moi 10 phut)
+Description=Dong bo TikTok Ads theo yeu cau (moi 2 phut)
 
 [Timer]
 OnBootSec=5min
-OnUnitInactiveSec=10min
-AccuracySec=30s
+OnUnitActiveSec=2min
+AccuracySec=15s
 Unit=tiktok-ads-yeu-cau.service
 
 [Install]

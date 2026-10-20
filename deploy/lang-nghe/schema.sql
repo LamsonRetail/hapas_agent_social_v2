@@ -521,9 +521,9 @@ CREATE INDEX IF NOT EXISTS han_muc_apify_luc ON han_muc_apify (luc DESC);
 -- `ket_noi_ngoai` dưới dạng MÃ HOÁ (khoá TIKTOK_KHOA_MA_HOA chỉ có trong /opt/lang-nghe/.env); role
 -- mark chỉ đọc các cột không bí mật (cấp theo cột ở cuối file). Mỗi tài khoản quảng cáo thuộc một
 -- bên (`tk_quang_cao.don_vi`), chỉ số tiền chỉ quản trị viên + quản lý của bên thấy (lọc ở app).
--- Một dòng mỗi nhà cung cấp kết nối ngoài (hiện chỉ 'tiktok_ads').
+-- Một dòng mỗi nhà cung cấp kết nối ngoài ('tiktok_ads'; 'meta_ads' từ 20/10/2026).
 CREATE TABLE IF NOT EXISTS ket_noi_ngoai (
-  nha_cung_cap    TEXT PRIMARY KEY CHECK (nha_cung_cap IN ('tiktok_ads')),
+  nha_cung_cap    TEXT PRIMARY KEY,
   loai            TEXT NOT NULL DEFAULT 'mcp_oauth' CHECK (loai IN ('mcp_oauth', 'api_token')),
   client_id       TEXT,
   redirect_uri    TEXT,
@@ -552,9 +552,9 @@ CREATE TABLE IF NOT EXISTS ket_noi_ngoai (
   cap_nhat_luc    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 1 dòng = 1 tài khoản quảng cáo TikTok (advertiser) mà lần kết nối thấy.
+-- 1 dòng = 1 tài khoản quảng cáo (TikTok advertiser / Meta act_…) mà lần kết nối thấy.
 CREATE TABLE IF NOT EXISTS tk_quang_cao (
-  advertiser_id   TEXT PRIMARY KEY CHECK (advertiser_id ~ '^[0-9]{1,30}$'),
+  advertiser_id   TEXT PRIMARY KEY,
   ten             TEXT NOT NULL DEFAULT '',
   don_vi          TEXT REFERENCES don_vi(ma) ON UPDATE CASCADE,
   gan_tay         BOOLEAN NOT NULL DEFAULT FALSE,
@@ -568,7 +568,9 @@ CREATE TABLE IF NOT EXISTS tk_quang_cao (
   nap_lui_tu      DATE,
   nap_lui_xong_luc TIMESTAMPTZ,
   khan_gia_luc    TIMESTAMPTZ,
-  cap_nhat_luc    TIMESTAMPTZ NOT NULL DEFAULT now()
+  cap_nhat_luc    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  nen_tang        TEXT NOT NULL DEFAULT 'tiktok',
+  duyet           BOOLEAN NOT NULL DEFAULT TRUE
 );
 CREATE INDEX IF NOT EXISTS tk_quang_cao_don_vi ON tk_quang_cao (don_vi);
 
@@ -676,7 +678,7 @@ CREATE TABLE IF NOT EXISTS qc_khan_gia (
   advertiser_id   TEXT NOT NULL REFERENCES tk_quang_cao(advertiser_id),
   tu              DATE NOT NULL,
   den             DATE NOT NULL CHECK (den >= tu),
-  chieu           TEXT NOT NULL CHECK (chieu IN ('age', 'gender', 'province_id', 'platform')),
+  chieu           TEXT NOT NULL,
   gia_tri         TEXT NOT NULL,
   chi             NUMERIC(16,2),
   hien_thi        BIGINT,
@@ -702,6 +704,71 @@ CREATE TABLE IF NOT EXISTS qc_khan_gia (
 );
 CREATE INDEX IF NOT EXISTS qc_khan_gia_moi ON qc_khan_gia (advertiser_id, den DESC);
 CREATE INDEX IF NOT EXISTS qc_khan_gia_cap_nhat ON qc_khan_gia (cap_nhat_luc);
+
+-- ───────────── Meta Ads (20/10/2026, chủ dự án chốt) ─────────────
+-- Meta (Facebook / Instagram) Ads đi CHUNG đường ống TikTok (`dashboard/meta_ads.py`, bộ hẹn giờ
+-- meta-ads-dong-bo 06:45 giờ VN): một dòng ket_noi_ngoai 'meta_ads' (token người dùng hệ thống CHỈ
+-- ĐỌC, mã hoá cùng khoá TIKTOK_KHOA_MA_HOA, AAD riêng), tài khoản act_… trong tk_quang_cao
+-- (nen_tang = 'meta', chỉ tài khoản `duyet` mới được đọc số), số trong cùng 4 bảng qc_*. Khoá chính
+-- qc_* giữ nguyên (mã campaign/ad hai nền tảng khác dạng; upsert không bao giờ đè dòng của tài
+-- khoản khác — kho_qc.sql_upsert). Chạy lại nhiều lần không sao; ALTER chỉ đổi danh mục (thêm cột
+-- DEFAULT hằng) hoặc quét bảng nhỏ (CHECK) — dưới lock_timeout.
+-- Đổi ràng buộc CHECK NGUYÊN TỬ (soát 20/10/2026): mỗi khối DO là MỘT giao dịch — DROP + ADD cùng
+-- thành công hoặc cùng huỷ (lock_timeout giữa chừng không bao giờ để bảng mất CHECK); ràng buộc đã
+-- đúng (pg_get_constraintdef) thì bỏ qua — chạy lại schema.sql là không làm gì, không xin khoá.
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'ket_noi_ngoai'::regclass
+                 AND conname = 'ket_noi_ngoai_nha_cung_cap_check'
+                 AND pg_get_constraintdef(oid) LIKE '%meta_ads%') THEN
+    ALTER TABLE ket_noi_ngoai DROP CONSTRAINT IF EXISTS ket_noi_ngoai_nha_cung_cap_check;
+    ALTER TABLE ket_noi_ngoai ADD CONSTRAINT ket_noi_ngoai_nha_cung_cap_check
+      CHECK (nha_cung_cap IN ('tiktok_ads', 'meta_ads'));
+  END IF;
+END $mt$;
+ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS chu_token TEXT;
+ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS quyen_token TEXT[];
+-- Đồng bộ bấm tay cho mọi người có quyền (20/10/2026): loại yêu cầu / lượt + mốc giãn 15 phút.
+ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS yeu_cau_kieu TEXT;
+ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS dong_bo_kieu TEXT;
+ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS nhanh_xong_luc TIMESTAMPTZ;
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'ket_noi_ngoai'::regclass
+                 AND conname = 'ket_noi_ngoai_kieu_check'
+                 AND pg_get_constraintdef(oid) LIKE '%dong_bo_kieu%') THEN
+    ALTER TABLE ket_noi_ngoai DROP CONSTRAINT IF EXISTS ket_noi_ngoai_kieu_check;
+    ALTER TABLE ket_noi_ngoai ADD CONSTRAINT ket_noi_ngoai_kieu_check
+      CHECK ((yeu_cau_kieu IS NULL OR yeu_cau_kieu IN ('day_du', 'nhanh'))
+             AND (dong_bo_kieu IS NULL OR dong_bo_kieu IN ('day_du', 'nhanh')));
+  END IF;
+END $mt$;
+ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS nen_tang TEXT NOT NULL DEFAULT 'tiktok';
+ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS duyet BOOLEAN NOT NULL DEFAULT TRUE;
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'tk_quang_cao'::regclass
+                 AND conname = 'tk_quang_cao_ma_check'
+                 AND pg_get_constraintdef(oid) LIKE '%act_%') THEN
+    -- CHECK cũ (chỉ chuỗi số) bỏ CÙNG giao dịch với CHECK mới.
+    ALTER TABLE tk_quang_cao DROP CONSTRAINT IF EXISTS tk_quang_cao_advertiser_id_check;
+    ALTER TABLE tk_quang_cao DROP CONSTRAINT IF EXISTS tk_quang_cao_ma_check;
+    ALTER TABLE tk_quang_cao ADD CONSTRAINT tk_quang_cao_ma_check CHECK (
+      (nen_tang = 'tiktok' AND advertiser_id ~ '^[0-9]{1,30}$')
+      OR (nen_tang = 'meta' AND advertiser_id ~ '^act_[0-9]{1,30}$'));
+  END IF;
+END $mt$;
+CREATE INDEX IF NOT EXISTS tk_quang_cao_nen_tang ON tk_quang_cao (nen_tang);
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'qc_khan_gia'::regclass
+                 AND conname = 'qc_khan_gia_chieu_check'
+                 AND pg_get_constraintdef(oid) LIKE '%platform_position%') THEN
+    ALTER TABLE qc_khan_gia DROP CONSTRAINT IF EXISTS qc_khan_gia_chieu_check;
+    ALTER TABLE qc_khan_gia ADD CONSTRAINT qc_khan_gia_chieu_check CHECK (chieu IN ('age', 'gender',
+      'province_id', 'region', 'platform', 'publisher_platform', 'platform_position'));
+  END IF;
+END $mt$;
 
 -- ───────────── Mô tả bảng + cột theo quy chuẩn BI (task t280613, skill lsr-bq-description-standard) ─────────────
 -- Chủ dự án 14/10/2026: DB mới cũng theo rule mô tả của BI (11 nhãn bảng, mô tả mọi cột). Ghi
@@ -1094,18 +1161,18 @@ COMMENT ON COLUMN han_muc_apify.luot_id IS 'Lượt /theodoi vừa xong khi ghi 
 COMMENT ON COLUMN han_muc_apify.nguon_ghi IS 'Lúc ghi. Giá trị: luot (đóng lượt), chot_lai (chốt lại chi phí ~90 giây sau run cuối), nhip (nhịp lịch quét mỗi 3 giờ).';
 
 COMMENT ON TABLE ket_noi_ngoai IS $$[Lớp] Raw
-[Mục đích] Trạng thái kết nối tới dịch vụ ngoài của dashboard (hiện: TikTok Ads qua TikTok for Business MCP) — loại token, hạn, người cấp, số tài khoản thấy, lượt đồng bộ gần nhất — cho thẻ "Kết nối TikTok Ads" và lời nhắc gia hạn của Mark.
+[Mục đích] Trạng thái kết nối tới dịch vụ ngoài của dashboard (TikTok Ads qua TikTok for Business MCP; Meta Ads qua Graph API, từ 20/10/2026) — loại token, hạn, người cấp, số tài khoản thấy, lượt đồng bộ gần nhất — cho thẻ "Kết nối TikTok Ads" / "Kết nối Meta Ads", dải trạng thái đồng bộ và lời nhắc gia hạn của Mark.
 [Grain] 1 dòng = 1 nhà cung cấp kết nối (nha_cung_cap)
 [Khoá] PK: nha_cung_cap | Join: Không có
-[Nguồn] Dashboard social.hapas.vn (OAuth của quản trị viên, nút trên trang Quản trị) và bộ hẹn giờ tiktok-ads-dong-bo (dashboard/tiktok_ads.py)
-[Phạm vi] Nhà cung cấp tiktok_ads | Kênh TikTok Ads | Từ 19/10/2026
-[Đã xử lý] Token MÃ HOÁ AES-256-GCM (AAD = nhà cung cấp + tên cột; khoá TIKTOK_KHOA_MA_HOA chỉ ở /opt/lang-nghe/.env); lỗi đã bỏ URL và chuỗi giống token
-[Refresh] Ghi khi quản trị viên kết nối/ngắt/dán token/bấm Đồng bộ ngay (chỉ ghi cờ yêu cầu), khi làm mới access token (≈ mỗi 24 giờ khi đồng bộ) và mỗi lượt đồng bộ (06:30 giờ VN hằng ngày + lượt theo yêu cầu, bộ hẹn giờ 10 phút)
+[Nguồn] Dashboard social.hapas.vn (OAuth / dán token của quản trị viên trên trang Quản trị; lệnh python -m dashboard.meta_ads nhap-token; nút "Đồng bộ ngay" của mọi người có quyền) và bộ hẹn giờ tiktok-ads-* / meta-ads-* (dashboard/tiktok_ads.py, dashboard/meta_ads.py)
+[Phạm vi] Nhà cung cấp tiktok_ads (từ 19/10/2026), meta_ads (từ 20/10/2026) | Kênh TikTok Ads, Meta Ads | Từ 19/10/2026
+[Đã xử lý] Token MÃ HOÁ AES-256-GCM (AAD = nhà cung cấp + tên cột; một khoá TIKTOK_KHOA_MA_HOA chung, chỉ ở /opt/lang-nghe/.env); token Meta chỉ lưu khi quyền đã cấp nằm trọn trong ads_read, read_insights, public_profile; lỗi đã bỏ URL và chuỗi giống token
+[Refresh] Ghi khi quản trị viên kết nối/ngắt/dán token, khi ai đó bấm Đồng bộ ngay (chỉ ghi cờ yêu cầu), khi làm mới access token TikTok (≈ mỗi 24 giờ khi đồng bộ) và mỗi lượt đồng bộ (06:30 TikTok / 06:45 Meta giờ VN hằng ngày + lượt theo yêu cầu, bộ hẹn giờ 2 phút)
 [Dùng khi] Biết kết nối còn hạn bao lâu, ai cấp, lần đồng bộ / gọi thành công cuối, lỗi cuối
 [Không dùng khi] Số quảng cáo → dùng qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay; danh sách tài khoản → dùng tk_quang_cao
 [Lưu ý] Refresh token TikTok KHÔNG được gia hạn khi làm mới: hạn cứng 30 ngày từ lần đăng nhập (refresh_het_luc); loai api_token không hết hạn. Role mark chỉ đọc nha_cung_cap, loai, trang_thai, refresh_het_luc, goi_ok_luc, loi_cuoi. Không đẩy lên BigQuery.$$;
-COMMENT ON COLUMN ket_noi_ngoai.nha_cung_cap IS 'Mã nhà cung cấp. PK. Giá trị: tiktok_ads.';
-COMMENT ON COLUMN ket_noi_ngoai.loai IS 'Loại token. Giá trị: mcp_oauth (OAuth của quản trị viên, access ~24 giờ + refresh 30 ngày không gia hạn), api_token (token API của app developer, không hết hạn, không làm mới).';
+COMMENT ON COLUMN ket_noi_ngoai.nha_cung_cap IS 'Mã nhà cung cấp. PK. Giá trị: tiktok_ads, meta_ads (từ 20/10/2026).';
+COMMENT ON COLUMN ket_noi_ngoai.loai IS 'Loại token. Giá trị: mcp_oauth (OAuth của quản trị viên, access ~24 giờ + refresh 30 ngày không gia hạn), api_token (TikTok: token API của app developer; Meta: token người dùng hệ thống chỉ đọc — không hết hạn, không làm mới).';
 COMMENT ON COLUMN ket_noi_ngoai.client_id IS 'Mã client OAuth TikTok cấp khi dashboard tự đăng ký (Dynamic Client Registration, client công khai — không có secret). NULL khi chưa đăng ký.';
 COMMENT ON COLUMN ket_noi_ngoai.redirect_uri IS 'Địa chỉ trả về đã đăng ký cùng client_id (DASH_BASE_URL + /tiktok/xong). Đổi địa chỉ thì dashboard đăng ký client mới.';
 COMMENT ON COLUMN ket_noi_ngoai.access_token_enc IS 'Access token ĐÃ MÃ HOÁ AES-256-GCM (base64 của phiên bản 1 byte + nonce 12 byte + bản mã và thẻ). BÍ MẬT — role mark không được đọc. NULL khi chưa kết nối / đã ngắt.';
@@ -1127,27 +1194,32 @@ COMMENT ON COLUMN ket_noi_ngoai.dong_bo_ok_luc IS 'Lần đồng bộ gần nh�
 COMMENT ON COLUMN ket_noi_ngoai.dong_bo_so_dong IS 'Số dòng qc_* ghi/sửa trong lượt đồng bộ gần nhất, dòng.';
 COMMENT ON COLUMN ket_noi_ngoai.dong_bo_loi IS 'Lỗi của lượt đồng bộ gần nhất (theo tài khoản, đã gọn). NULL khi lượt ổn.';
 COMMENT ON COLUMN ket_noi_ngoai.so_den_ngay IS 'Số liệu đã đồng bộ tới hết ngày này (múi giờ tài khoản, thường là hôm qua). NULL khi chưa đồng bộ.';
-COMMENT ON COLUMN ket_noi_ngoai.yeu_cau_dong_bo_luc IS 'Lúc quản trị viên bấm “Đồng bộ ngay” (hoặc vừa kết nối) mà lượt chưa chạy (UTC). Bộ hẹn giờ tiktok-ads-yeu-cau (10 phút/lần) chạy khi cột này khác NULL; lượt bắt đầu thì đặt lại NULL. NULL = không có yêu cầu chờ.';
-COMMENT ON COLUMN ket_noi_ngoai.yeu_cau_boi IS 'Email Lark của quản trị viên gửi yêu cầu đồng bộ gần nhất. NULL khi chưa ai yêu cầu.';
+COMMENT ON COLUMN ket_noi_ngoai.yeu_cau_dong_bo_luc IS 'Lúc có người bấm “Đồng bộ ngay” (hoặc quản trị viên vừa kết nối) mà lượt chưa chạy (UTC). Bộ hẹn giờ tiktok-ads-yeu-cau / meta-ads-yeu-cau (2 phút/lần) chạy khi cột này khác NULL; lượt bắt đầu thì đặt lại NULL. NULL = không có yêu cầu chờ.';
+COMMENT ON COLUMN ket_noi_ngoai.yeu_cau_boi IS 'Email Lark của người gửi yêu cầu đồng bộ gần nhất. NULL khi chưa ai yêu cầu.';
 COMMENT ON COLUMN ket_noi_ngoai.cap_nhat_luc IS 'Lần sửa dòng gần nhất (UTC).';
+COMMENT ON COLUMN ket_noi_ngoai.chu_token IS 'Tên người dùng của token (Meta: me.name, vd mark_ads_reader) — không bí mật, hiện trên thẻ kết nối. NULL với TikTok hoặc khi chưa dán token.';
+COMMENT ON COLUMN ket_noi_ngoai.quyen_token IS 'Quyền đã cấp của token (Meta: me/permissions trạng thái granted, vd {ads_read,read_insights,public_profile}) lúc lưu. NULL với TikTok hoặc khi chưa dán token.';
+COMMENT ON COLUMN ket_noi_ngoai.yeu_cau_kieu IS 'Loại yêu cầu đồng bộ đang chờ. Giá trị: day_du (quản trị viên / vừa kết nối: lượt thường, nạp lùi nếu cần), nhanh (người có quyền bấm Đồng bộ ngay: hôm nay + 2 ngày trước, chỉ tài khoản có hiển thị). Yêu cầu day_du đang chờ không bị hạ thành nhanh. NULL khi không có yêu cầu.';
+COMMENT ON COLUMN ket_noi_ngoai.dong_bo_kieu IS 'Loại lượt đồng bộ gần nhất / đang chạy. Giá trị: day_du, nhanh. NULL khi chưa có lượt nào từ 20/10/2026.';
+COMMENT ON COLUMN ket_noi_ngoai.nhanh_xong_luc IS 'Lúc lượt nhanh (bấm tay) gần nhất kết thúc (UTC) — bấm lại được sau 15 phút. NULL khi chưa có lượt nhanh.';
 COMMENT ON TABLE tk_quang_cao IS $$[Lớp] Dim
-[Mục đích] Danh sách tài khoản quảng cáo TikTok dashboard đọc được và tài khoản thuộc bên nào — quyết định ai xem được số của tài khoản.
-[Grain] 1 dòng = 1 tài khoản quảng cáo TikTok (advertiser_id)
+[Mục đích] Danh sách tài khoản quảng cáo TikTok + Meta dashboard đọc được, tài khoản thuộc bên nào và (Meta) đã được duyệt đọc số chưa — quyết định ai xem được số của tài khoản.
+[Grain] 1 dòng = 1 tài khoản quảng cáo (advertiser_id: TikTok advertiser hoặc Meta act_…)
 [Khoá] PK: advertiser_id | Join: don_vi → don_vi.ma; advertiser_id → qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay, qc_khan_gia
-[Nguồn] TikTok for Business MCP: auth_advertiser_get (tên) + advertiser_info_get (tiền tệ, múi giờ), mỗi lượt đồng bộ; bên do gán tự động hoặc quản trị viên sửa trên trang Quản trị
-[Phạm vi] Mọi tài khoản quảng cáo người cấp quyền thấy được (19/10/2026: 16 tài khoản HAPAS, MATEMADE) | Kênh TikTok Ads | Từ 19/10/2026
-[Đã xử lý] Gán bên tự động khi thấy lần đầu: tên có MATEMADE / MATE MADE (không phân biệt hoa thường, khoảng trắng) → matemade, còn lại → hapas; không bao giờ đè bên quản trị viên đã sửa (gan_tay)
-[Refresh] Upsert mỗi lượt đồng bộ (06:30 giờ VN + bấm tay) và khi kết nối; sửa tay bên/đồng bộ trên trang Quản trị
+[Nguồn] TikTok for Business MCP: auth_advertiser_get (tên) + advertiser_info_get (tiền tệ, múi giờ); Meta Graph API GET me/adaccounts (tên, currency, timezone_name) — mỗi lượt đồng bộ; bên + duyệt do gán tự động / lệnh nhập token hoặc quản trị viên sửa trên trang Quản trị
+[Phạm vi] Mọi tài khoản quảng cáo người cấp quyền / token thấy được (19/10/2026: 16 tài khoản TikTok; 20/10/2026: 20 tài khoản Meta) | Kênh TikTok Ads + Meta Ads | Từ 19/10/2026 (Meta từ 20/10/2026)
+[Đã xử lý] Gán bên tự động khi thấy: tên có chữ THAI đứng riêng → chưa gán (NULL); tên có MATEMADE / MATE MADE / MADEMATE (không phân biệt hoa thường, khoảng trắng, dấu) → matemade; còn lại → hapas; không bao giờ đè bên quản trị viên đã sửa (gan_tay). Meta: tài khoản mới chưa duyệt trừ khi có trong danh sách nhập kèm token
+[Refresh] Upsert mỗi lượt đồng bộ (06:30 TikTok / 06:45 Meta giờ VN + bấm tay) và khi kết nối; sửa tay bên/đồng bộ/duyệt trên trang Quản trị
 [Dùng khi] Lọc số quảng cáo theo bên; biết tài khoản nào đang đồng bộ, đã nạp lùi 90 ngày chưa
 [Không dùng khi] Số chi/hiển thị → dùng qc_tk_ngay; trạng thái token → dùng ket_noi_ngoai
-[Lưu ý] don_vi NULL = chưa gán bên, chỉ quản trị viên thấy. con_quyen false = lần đọc gần nhất không còn thấy tài khoản (mất quyền) — số cũ giữ nguyên.$$;
-COMMENT ON COLUMN tk_quang_cao.advertiser_id IS 'Mã tài khoản quảng cáo TikTok (chuỗi số). PK. Join: → qc_*.advertiser_id.';
-COMMENT ON COLUMN tk_quang_cao.ten IS 'Tên tài khoản trên TikTok (advertiser_name, đã bỏ khoảng trắng hai đầu), vd "MATEMADE MKT". Chuỗi rỗng khi TikTok không trả.';
+[Lưu ý] don_vi NULL = chưa gán bên, chỉ quản trị viên thấy. con_quyen false = lần đọc gần nhất không còn thấy tài khoản (mất quyền) — số cũ giữ nguyên. duyet false (chỉ Meta) = không đọc số, trang và Mark bỏ qua.$$;
+COMMENT ON COLUMN tk_quang_cao.advertiser_id IS 'Mã tài khoản quảng cáo: TikTok chuỗi số; Meta act_<số> (từ 20/10/2026). PK. Join: → qc_*.advertiser_id.';
+COMMENT ON COLUMN tk_quang_cao.ten IS 'Tên tài khoản trên nền tảng (TikTok advertiser_name; Meta name; đã bỏ khoảng trắng hai đầu), vd "MATEMADE MKT". Chuỗi rỗng khi nền tảng không trả (hoặc tài khoản Meta đã duyệt nhưng chưa thấy).';
 COMMENT ON COLUMN tk_quang_cao.don_vi IS 'Bên sở hữu tài khoản. FK → don_vi.ma. NULL = chưa gán bên (chỉ quản trị viên thấy số).';
 COMMENT ON COLUMN tk_quang_cao.gan_tay IS 'TRUE: quản trị viên đã sửa bên/đồng bộ trên trang Quản trị — gán tự động không đè. FALSE: bên do gán tự động.';
 COMMENT ON COLUMN tk_quang_cao.gan_luc IS 'Lần quản trị viên sửa bên/đồng bộ gần nhất (UTC; người sửa ở nhat_ky). NULL khi chưa sửa tay.';
 COMMENT ON COLUMN tk_quang_cao.tien_te IS 'Tiền tệ của tài khoản (currency, mã ISO, vd VND) — đơn vị mọi cột tiền của tài khoản.';
-COMMENT ON COLUMN tk_quang_cao.mui_gio IS 'Múi giờ của tài khoản (display_timezone, vd Asia/Ho_Chi_Minh) — ngày trong qc_* theo múi giờ này.';
+COMMENT ON COLUMN tk_quang_cao.mui_gio IS 'Múi giờ của tài khoản (TikTok display_timezone; Meta timezone_name; vd Asia/Ho_Chi_Minh) — ngày trong qc_* theo múi giờ này.';
 COMMENT ON COLUMN tk_quang_cao.dang_dong_bo IS 'TRUE: lượt đồng bộ đọc số tài khoản này. FALSE: quản trị viên tắt (số cũ giữ).';
 COMMENT ON COLUMN tk_quang_cao.con_quyen IS 'TRUE: lần đọc gần nhất còn thấy tài khoản. FALSE: không còn thấy (người cấp quyền mất quyền) — không đồng bộ, số cũ giữ.';
 COMMENT ON COLUMN tk_quang_cao.thay_lan_dau IS 'Lần đầu dashboard thấy tài khoản (UTC).';
@@ -1156,150 +1228,152 @@ COMMENT ON COLUMN tk_quang_cao.nap_lui_tu IS 'Nạp lùi đã đọc xong xuốn
 COMMENT ON COLUMN tk_quang_cao.nap_lui_xong_luc IS 'Lúc nạp lùi 90 ngày lần đầu xong (UTC). NULL = chưa nạp lùi (lượt sau nạp).';
 COMMENT ON COLUMN tk_quang_cao.khan_gia_luc IS 'Lần đọc khán giả gần nhất (UTC; đọc lại mỗi 7 ngày). NULL khi chưa đọc.';
 COMMENT ON COLUMN tk_quang_cao.cap_nhat_luc IS 'Lần sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery (bảng nhỏ — nạp lại toàn bộ).';
+COMMENT ON COLUMN tk_quang_cao.nen_tang IS 'Nền tảng quảng cáo. Giá trị: tiktok, meta (từ 20/10/2026). Dòng trước 20/10/2026 = tiktok.';
+COMMENT ON COLUMN tk_quang_cao.duyet IS 'TRUE: được đọc số (TikTok luôn TRUE; Meta = có trong danh sách duyệt — thay MARK_META_AD_ACCOUNT_IDS, nhập kèm token hoặc quản trị viên tích trên trang Quản trị). FALSE: tài khoản Meta thấy được nhưng chưa duyệt — không đồng bộ, trang và Mark bỏ qua.';
 COMMENT ON TABLE qc_tk_ngay IS $$[Lớp] Raw
-[Mục đích] Số quảng cáo TikTok theo ngày của cả tài khoản (chi, hiển thị, xem video, tương tác, follow, doanh thu Shop…) cho trang "Quảng cáo TikTok" và Mark.
+[Mục đích] Số quảng cáo TikTok / Meta theo ngày của cả tài khoản (chi, hiển thị, xem video, tương tác, follow, doanh thu Shop…) cho trang "Quảng cáo" và Mark.
 [Grain] 1 dòng = 1 tài khoản quảng cáo × 1 ngày (múi giờ tài khoản)
 [Khoá] PK: advertiser_id + ngay | Join: advertiser_id → tk_quang_cao.advertiser_id
-[Nguồn] TikTok for Business MCP report_integrated_get (BASIC, AUCTION_ADVERTISER, chiều advertiser_id + stat_time_day), bộ hẹn giờ tiktok-ads-dong-bo
-[Phạm vi] Tài khoản tk_quang_cao đang đồng bộ | Kênh TikTok Ads | Từ 90 ngày trước lần kết nối đầu (nạp lùi)
+[Nguồn] TikTok for Business MCP report_integrated_get (BASIC, AUCTION_ADVERTISER, chiều advertiser_id + stat_time_day), bộ hẹn giờ tiktok-ads-dong-bo; Meta: Graph API GET act_<id>/insights (time_increment=1; khán giả: breakdowns, không theo ngày), bộ hẹn giờ meta-ads-dong-bo
+[Phạm vi] Tài khoản tk_quang_cao đang đồng bộ | Kênh TikTok Ads + Meta Ads (Facebook/Instagram, từ 20/10/2026) | Từ 90 ngày trước lần kết nối đầu (nạp lùi)
 [Đã xử lý] Chỉ ngày có hiển thị hoặc chi > 0; số đổi từ chữ ("-" → NULL); cột số kiểu riêng chép từ chi_so
-[Refresh] Upsert hằng ngày 06:30 giờ VN: đọc lại 7 ngày gần nhất tới hết hôm qua; lần đầu mỗi tài khoản 90 ngày (3 cửa sổ 30 ngày)
+[Refresh] Upsert hằng ngày 06:30 (TikTok) / 06:45 (Meta) giờ VN + lượt bấm tay "Đồng bộ ngay" (hôm nay + 2 ngày trước): đọc lại 7 ngày gần nhất tới hết hôm qua; lần đầu mỗi tài khoản 90 ngày (3 cửa sổ 30 ngày)
 [Dùng khi] Tổng chi/hiển thị/xem/tương tác theo ngày, tài khoản, bên; xu hướng; ROAS Shop = gia_tri_mua_shop / chi
 [Không dùng khi] Số từng chiến dịch → dùng qc_campaign_ngay; từng quảng cáo → dùng qc_ad_ngay; tuổi/giới tính/tỉnh → dùng qc_khan_gia
 [Lưu ý] Chuyển đổi TikTok ghi trễ tới 7 ngày nên số 7 ngày gần nhất còn đổi; reach cộng nhiều ngày là đếm trùng người. Tiền theo tiền tệ tài khoản, chỉ quản trị viên + quản lý của bên thấy.$$;
 COMMENT ON COLUMN qc_tk_ngay.advertiser_id IS 'Tài khoản quảng cáo. Một phần PK. FK → tk_quang_cao.advertiser_id.';
 COMMENT ON COLUMN qc_tk_ngay.ngay IS 'Ngày số liệu theo múi giờ tài khoản (tk_quang_cao.mui_gio, thường GMT+7). Một phần PK.';
-COMMENT ON COLUMN qc_tk_ngay.chi IS 'Chi tiêu quảng cáo (spend), theo tiền tệ của tài khoản (tk_quang_cao.tien_te; 16 tài khoản HAPAS/MATEMADE đo 19/10/2026 đều VND), TikTok báo, chưa VAT. NULL khi TikTok không trả. CHỈ SỐ TIỀN: chỉ quản trị viên + quản lý của bên thấy.';
-COMMENT ON COLUMN qc_tk_ngay.hien_thi IS 'Lượt hiển thị (impressions), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.reach IS 'Người tiếp cận (reach) trong ĐÚNG phạm vi dòng (ngày / cửa sổ), người. Cộng nhiều dòng thì đếm trùng người — không phải reach duy nhất. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.click IS 'Lượt bấm (clicks, đích đến), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.ket_qua IS 'Kết quả theo mục tiêu tối ưu của chiến dịch (result), đơn vị tuỳ mục tiêu (lượt xem, hiển thị, chuyển đổi…). NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.chuyen_doi IS 'Chuyển đổi (conversion) theo sự kiện tối ưu, lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.view_video IS 'Lượt xem video (video_play_actions), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.view_hai_giay IS 'Lượt xem ≥ 2 giây (video_watched_2s), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.view_sau_giay IS 'Lượt xem ≥ 6 giây (video_watched_6s), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.view_het IS 'Lượt xem hết video (video_views_p100), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.engaged_view IS 'Lượt xem tương tác (engaged_view: xem ≥ 6 giây hoặc tương tác trong 1 ngày), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.thich IS 'Lượt thích trên quảng cáo (likes, trả phí), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.binh_luan IS 'Bình luận trên quảng cáo (comments, trả phí), bình luận. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.chia_se IS 'Lượt chia sẻ (shares, trả phí), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.follow IS 'Lượt theo dõi kênh từ quảng cáo (follows), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.vao_ho_so IS 'Lượt vào trang hồ sơ kênh từ quảng cáo (profile_visits), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.mua_shop IS 'Lượt mua trong TikTok Shop gán cho quảng cáo (onsite_shopping), lượt mua. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_tk_ngay.gia_tri_mua_shop IS 'Doanh thu mua TikTok Shop gán cho quảng cáo (total_onsite_shopping_value), theo tiền tệ tài khoản, giá khách trả TikTok báo. 0 khi không bán qua Shop. CHỈ SỐ TIỀN.';
-COMMENT ON COLUMN qc_tk_ngay.chi_so IS 'MỌI chỉ số TikTok trả cho dòng (JSON {tên chỉ số TikTok: số}; số đã đổi từ chữ, "-" của TikTok → null). Tài khoản/campaign: đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Khoá tiền: spend, cpm, cpc, cost_per_*, *_value, *_roas, *budget*.';
+COMMENT ON COLUMN qc_tk_ngay.chi IS 'Chi tiêu quảng cáo (spend), theo tiền tệ của tài khoản (tk_quang_cao.tien_te; 16 tài khoản TikTok đo 19/10/2026 và 20 tài khoản Meta đo 20/10/2026 đều VND), nền tảng báo, chưa VAT. NULL khi nền tảng không trả. CHỈ SỐ TIỀN: chỉ quản trị viên + quản lý của bên thấy.';
+COMMENT ON COLUMN qc_tk_ngay.hien_thi IS 'Lượt hiển thị (impressions), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.reach IS 'Người tiếp cận (reach) trong ĐÚNG phạm vi dòng (ngày / cửa sổ), người. Cộng nhiều dòng thì đếm trùng người — không phải reach duy nhất. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.click IS 'Lượt bấm (clicks, đích đến), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.ket_qua IS 'Kết quả theo mục tiêu tối ưu của chiến dịch (TikTok result), đơn vị tuỳ mục tiêu (lượt xem, hiển thị, chuyển đổi…); Meta luôn NULL. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.chuyen_doi IS 'Chuyển đổi, lượt: TikTok conversion (sự kiện tối ưu); Meta action mua (purchase > omni_purchase > offsite_conversion.fb_pixel_purchase — lấy tên đầu tiên có, không cộng các tên trùng nghĩa). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.view_video IS 'Lượt xem video, lượt: TikTok video_play_actions; Meta action video_view (xem ≥ 3 giây). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.view_hai_giay IS 'Lượt xem ≥ 2 giây (TikTok video_watched_2s; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.view_sau_giay IS 'Lượt xem ≥ 6 giây (TikTok video_watched_6s; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.view_het IS 'Lượt xem hết video (TikTok video_views_p100; Meta video_p100_watched_actions), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.engaged_view IS 'Lượt xem tương tác, lượt: TikTok engaged_view (xem ≥ 6 giây hoặc tương tác trong 1 ngày); Meta ThruPlay (video_thruplay_watched_actions: xem hết hoặc ≥ 15 giây). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.thich IS 'Lượt thích / cảm xúc trên quảng cáo (TikTok likes; Meta action post_reaction), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.binh_luan IS 'Bình luận trên quảng cáo (TikTok comments; Meta action comment), bình luận. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.chia_se IS 'Lượt chia sẻ (TikTok shares; Meta action post), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.follow IS 'Lượt theo dõi từ quảng cáo, lượt: TikTok follows (theo dõi kênh); Meta action like (thích Trang). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.vao_ho_so IS 'Lượt vào trang hồ sơ kênh từ quảng cáo (TikTok profile_visits; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.mua_shop IS 'Lượt mua trong TikTok Shop gán cho quảng cáo (TikTok onsite_shopping; Meta NULL — lượt mua Meta ở chuyen_doi), lượt mua. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_tk_ngay.gia_tri_mua_shop IS 'Doanh thu gán cho quảng cáo, theo tiền tệ tài khoản: TikTok Shop (total_onsite_shopping_value, giá khách trả); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi, phân bổ mặc định của Meta). 0 khi dòng có phân phối mà không có mua. CHỈ SỐ TIỀN.';
+COMMENT ON COLUMN qc_tk_ngay.chi_so IS 'MỌI chỉ số nền tảng trả cho dòng (JSON {tên chỉ số: số}; số đã đổi từ chữ, "-" của TikTok → null). TikTok: tài khoản/campaign đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Meta (20/10/2026): mọi trường Insights đã xin, danh sách action thành <trường>__<action_type> (vd actions__purchase, action_values__purchase, video_p100_watched_actions__video_view); reach, frequency, ctr, cpc, cpm, cpp, *_avg_*, *roas* KHÔNG cộng được qua dòng. Khoá tiền: spend, cpm, cpc, cpp, cost_per_*, *_value, action_values__*, *roas*, *budget*.';
 COMMENT ON COLUMN qc_tk_ngay.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
 COMMENT ON TABLE qc_campaign_ngay IS $$[Lớp] Raw
-[Mục đích] Số quảng cáo TikTok theo ngày của từng chiến dịch (campaign) có phân phối — xếp hạng chiến dịch theo chi/hiển thị/xem/follow.
+[Mục đích] Số quảng cáo TikTok / Meta theo ngày của từng chiến dịch (campaign) có phân phối — xếp hạng chiến dịch theo chi/hiển thị/xem/follow.
 [Grain] 1 dòng = 1 campaign × 1 ngày (múi giờ tài khoản)
 [Khoá] PK: campaign_id + ngay | Join: advertiser_id → tk_quang_cao.advertiser_id; campaign_id → qc_ad_ngay.campaign_id
-[Nguồn] TikTok for Business MCP report_integrated_get (BASIC, AUCTION_CAMPAIGN, chiều campaign_id + stat_time_day; tên + mục tiêu xin như chỉ số), bộ hẹn giờ tiktok-ads-dong-bo
-[Phạm vi] Tài khoản tk_quang_cao đang đồng bộ, chỉ campaign có hiển thị trong cửa sổ đọc | Kênh TikTok Ads | Từ 90 ngày trước lần kết nối đầu
+[Nguồn] TikTok for Business MCP report_integrated_get (BASIC, AUCTION_CAMPAIGN, chiều campaign_id + stat_time_day; tên + mục tiêu xin như chỉ số), bộ hẹn giờ tiktok-ads-dong-bo; Meta: Graph API GET act_<id>/insights (time_increment=1; khán giả: breakdowns, không theo ngày), bộ hẹn giờ meta-ads-dong-bo
+[Phạm vi] Tài khoản tk_quang_cao đang đồng bộ, chỉ campaign có hiển thị trong cửa sổ đọc | Kênh TikTok Ads + Meta Ads (Facebook/Instagram, từ 20/10/2026) | Từ 90 ngày trước lần kết nối đầu
 [Đã xử lý] Lấy ID campaign xếp impressions giảm dần, dừng ở dòng 0 đầu tiên; đọc số theo lô ≤ 100 ID; chỉ ngày có hiển thị hoặc chi > 0; "-" → NULL
-[Refresh] Upsert hằng ngày 06:30 giờ VN, đọc lại 7 ngày gần nhất; lần đầu 90 ngày
+[Refresh] Upsert hằng ngày 06:30 (TikTok) / 06:45 (Meta) giờ VN + lượt bấm tay "Đồng bộ ngay" (hôm nay + 2 ngày trước), đọc lại 7 ngày gần nhất; lần đầu 90 ngày
 [Dùng khi] Top chiến dịch trong kỳ; chi/hiển thị/xem theo chiến dịch và ngày
 [Không dùng khi] Tổng tài khoản → dùng qc_tk_ngay (đủ cả phần không gán chiến dịch); từng quảng cáo → dùng qc_ad_ngay
 [Lưu ý] ten / muc_tieu là giá trị lúc đọc (đổi tên thì dòng cũ giữ tên cũ — lấy tên ngày mới nhất). Ngân sách chiến dịch (campaign_budget) chỉ nằm trong chi_so và là số tiền.$$;
 COMMENT ON COLUMN qc_campaign_ngay.advertiser_id IS 'Tài khoản quảng cáo của campaign. FK → tk_quang_cao.advertiser_id.';
-COMMENT ON COLUMN qc_campaign_ngay.campaign_id IS 'Mã campaign TikTok. Một phần PK. Join: → qc_ad_ngay.campaign_id.';
+COMMENT ON COLUMN qc_campaign_ngay.campaign_id IS 'Mã campaign (TikTok campaign_id; Meta campaign_id). Một phần PK. Join: → qc_ad_ngay.campaign_id.';
 COMMENT ON COLUMN qc_campaign_ngay.ngay IS 'Ngày số liệu theo múi giờ tài khoản (thường GMT+7). Một phần PK.';
 COMMENT ON COLUMN qc_campaign_ngay.ten IS 'Tên campaign lúc đọc (campaign_name). Chuỗi rỗng khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.muc_tieu IS 'Mục tiêu campaign (objective_type), vd REACH, VIDEO_VIEWS, PRODUCT_SALES, ENGAGEMENT. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.chi IS 'Chi tiêu quảng cáo (spend), theo tiền tệ của tài khoản (tk_quang_cao.tien_te; 16 tài khoản HAPAS/MATEMADE đo 19/10/2026 đều VND), TikTok báo, chưa VAT. NULL khi TikTok không trả. CHỈ SỐ TIỀN: chỉ quản trị viên + quản lý của bên thấy.';
-COMMENT ON COLUMN qc_campaign_ngay.hien_thi IS 'Lượt hiển thị (impressions), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.reach IS 'Người tiếp cận (reach) trong ĐÚNG phạm vi dòng (ngày / cửa sổ), người. Cộng nhiều dòng thì đếm trùng người — không phải reach duy nhất. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.click IS 'Lượt bấm (clicks, đích đến), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.ket_qua IS 'Kết quả theo mục tiêu tối ưu của chiến dịch (result), đơn vị tuỳ mục tiêu (lượt xem, hiển thị, chuyển đổi…). NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.chuyen_doi IS 'Chuyển đổi (conversion) theo sự kiện tối ưu, lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.view_video IS 'Lượt xem video (video_play_actions), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.view_hai_giay IS 'Lượt xem ≥ 2 giây (video_watched_2s), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.view_sau_giay IS 'Lượt xem ≥ 6 giây (video_watched_6s), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.view_het IS 'Lượt xem hết video (video_views_p100), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.engaged_view IS 'Lượt xem tương tác (engaged_view: xem ≥ 6 giây hoặc tương tác trong 1 ngày), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.thich IS 'Lượt thích trên quảng cáo (likes, trả phí), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.binh_luan IS 'Bình luận trên quảng cáo (comments, trả phí), bình luận. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.chia_se IS 'Lượt chia sẻ (shares, trả phí), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.follow IS 'Lượt theo dõi kênh từ quảng cáo (follows), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.vao_ho_so IS 'Lượt vào trang hồ sơ kênh từ quảng cáo (profile_visits), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.mua_shop IS 'Lượt mua trong TikTok Shop gán cho quảng cáo (onsite_shopping), lượt mua. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_campaign_ngay.gia_tri_mua_shop IS 'Doanh thu mua TikTok Shop gán cho quảng cáo (total_onsite_shopping_value), theo tiền tệ tài khoản, giá khách trả TikTok báo. 0 khi không bán qua Shop. CHỈ SỐ TIỀN.';
-COMMENT ON COLUMN qc_campaign_ngay.chi_so IS 'MỌI chỉ số TikTok trả cho dòng (JSON {tên chỉ số TikTok: số}; số đã đổi từ chữ, "-" của TikTok → null). Tài khoản/campaign: đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Khoá tiền: spend, cpm, cpc, cost_per_*, *_value, *_roas, *budget*.';
+COMMENT ON COLUMN qc_campaign_ngay.muc_tieu IS 'Mục tiêu campaign: TikTok objective_type (vd REACH, VIDEO_VIEWS, PRODUCT_SALES); Meta objective (vd OUTCOME_ENGAGEMENT, OUTCOME_SALES, LINK_CLICKS). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.chi IS 'Chi tiêu quảng cáo (spend), theo tiền tệ của tài khoản (tk_quang_cao.tien_te; 16 tài khoản TikTok đo 19/10/2026 và 20 tài khoản Meta đo 20/10/2026 đều VND), nền tảng báo, chưa VAT. NULL khi nền tảng không trả. CHỈ SỐ TIỀN: chỉ quản trị viên + quản lý của bên thấy.';
+COMMENT ON COLUMN qc_campaign_ngay.hien_thi IS 'Lượt hiển thị (impressions), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.reach IS 'Người tiếp cận (reach) trong ĐÚNG phạm vi dòng (ngày / cửa sổ), người. Cộng nhiều dòng thì đếm trùng người — không phải reach duy nhất. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.click IS 'Lượt bấm (clicks, đích đến), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.ket_qua IS 'Kết quả theo mục tiêu tối ưu của chiến dịch (TikTok result), đơn vị tuỳ mục tiêu (lượt xem, hiển thị, chuyển đổi…); Meta luôn NULL. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.chuyen_doi IS 'Chuyển đổi, lượt: TikTok conversion (sự kiện tối ưu); Meta action mua (purchase > omni_purchase > offsite_conversion.fb_pixel_purchase — lấy tên đầu tiên có, không cộng các tên trùng nghĩa). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.view_video IS 'Lượt xem video, lượt: TikTok video_play_actions; Meta action video_view (xem ≥ 3 giây). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.view_hai_giay IS 'Lượt xem ≥ 2 giây (TikTok video_watched_2s; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.view_sau_giay IS 'Lượt xem ≥ 6 giây (TikTok video_watched_6s; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.view_het IS 'Lượt xem hết video (TikTok video_views_p100; Meta video_p100_watched_actions), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.engaged_view IS 'Lượt xem tương tác, lượt: TikTok engaged_view (xem ≥ 6 giây hoặc tương tác trong 1 ngày); Meta ThruPlay (video_thruplay_watched_actions: xem hết hoặc ≥ 15 giây). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.thich IS 'Lượt thích / cảm xúc trên quảng cáo (TikTok likes; Meta action post_reaction), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.binh_luan IS 'Bình luận trên quảng cáo (TikTok comments; Meta action comment), bình luận. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.chia_se IS 'Lượt chia sẻ (TikTok shares; Meta action post), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.follow IS 'Lượt theo dõi từ quảng cáo, lượt: TikTok follows (theo dõi kênh); Meta action like (thích Trang). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.vao_ho_so IS 'Lượt vào trang hồ sơ kênh từ quảng cáo (TikTok profile_visits; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.mua_shop IS 'Lượt mua trong TikTok Shop gán cho quảng cáo (TikTok onsite_shopping; Meta NULL — lượt mua Meta ở chuyen_doi), lượt mua. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_campaign_ngay.gia_tri_mua_shop IS 'Doanh thu gán cho quảng cáo, theo tiền tệ tài khoản: TikTok Shop (total_onsite_shopping_value, giá khách trả); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi, phân bổ mặc định của Meta). 0 khi dòng có phân phối mà không có mua. CHỈ SỐ TIỀN.';
+COMMENT ON COLUMN qc_campaign_ngay.chi_so IS 'MỌI chỉ số nền tảng trả cho dòng (JSON {tên chỉ số: số}; số đã đổi từ chữ, "-" của TikTok → null). TikTok: tài khoản/campaign đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Meta (20/10/2026): mọi trường Insights đã xin, danh sách action thành <trường>__<action_type> (vd actions__purchase, action_values__purchase, video_p100_watched_actions__video_view); reach, frequency, ctr, cpc, cpm, cpp, *_avg_*, *roas* KHÔNG cộng được qua dòng. Khoá tiền: spend, cpm, cpc, cpp, cost_per_*, *_value, action_values__*, *roas*, *budget*.';
 COMMENT ON COLUMN qc_campaign_ngay.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
 COMMENT ON TABLE qc_ad_ngay IS $$[Lớp] Raw
-[Mục đích] Số quảng cáo TikTok theo ngày của từng quảng cáo (ad) có phân phối — top quảng cáo/video theo chi/hiển thị/xem/follow.
+[Mục đích] Số quảng cáo TikTok / Meta theo ngày của từng quảng cáo (ad) có phân phối — top quảng cáo/video theo chi/hiển thị/xem/follow.
 [Grain] 1 dòng = 1 ad × 1 ngày (múi giờ tài khoản)
 [Khoá] PK: ad_id + ngay | Join: advertiser_id → tk_quang_cao.advertiser_id; campaign_id → qc_campaign_ngay.campaign_id
-[Nguồn] TikTok for Business MCP report_integrated_get (BASIC, AUCTION_AD, chiều ad_id + stat_time_day; tên, nội dung, campaign/nhóm xin như chỉ số), bộ hẹn giờ tiktok-ads-dong-bo
-[Phạm vi] Tài khoản tk_quang_cao đang đồng bộ, CHỈ ad có hiển thị trong cửa sổ đọc (đo 19/10/2026: 7.599 / 20.000 ad của MATEMADE MKT chạy trong 30 ngày) | Kênh TikTok Ads | Từ 90 ngày trước lần kết nối đầu
+[Nguồn] TikTok for Business MCP report_integrated_get (BASIC, AUCTION_AD, chiều ad_id + stat_time_day; tên, nội dung, campaign/nhóm xin như chỉ số), bộ hẹn giờ tiktok-ads-dong-bo; Meta: Graph API GET act_<id>/insights (time_increment=1; khán giả: breakdowns, không theo ngày), bộ hẹn giờ meta-ads-dong-bo
+[Phạm vi] Tài khoản tk_quang_cao đang đồng bộ, CHỈ ad có hiển thị trong cửa sổ đọc (đo 19/10/2026: 7.599 / 20.000 ad của MATEMADE MKT chạy trong 30 ngày) | Kênh TikTok Ads + Meta Ads (Facebook/Instagram, từ 20/10/2026) | Từ 90 ngày trước lần kết nối đầu
 [Đã xử lý] Lấy ID ad xếp impressions giảm dần, dừng ở dòng 0 đầu tiên; lô ≤ 100 ID, ≤ 45 chỉ số mỗi lượt gọi; chi_so chỉ gồm 38 chỉ số chính (không đủ 100 như tài khoản/campaign); chỉ ngày có hiển thị hoặc chi > 0
-[Refresh] Upsert hằng ngày 06:30 giờ VN, đọc lại 7 ngày gần nhất; lần đầu 90 ngày
+[Refresh] Upsert hằng ngày 06:30 (TikTok) / 06:45 (Meta) giờ VN + lượt bấm tay "Đồng bộ ngay" (hôm nay + 2 ngày trước), đọc lại 7 ngày gần nhất; lần đầu 90 ngày
 [Dùng khi] Top quảng cáo trong kỳ; nội dung quảng cáo nào kéo xem/follow
 [Không dùng khi] Tổng tài khoản → dùng qc_tk_ngay; chiến dịch → dùng qc_campaign_ngay; khán giả → dùng qc_khan_gia
 [Lưu ý] Bảng lớn nhất (hàng nghìn dòng mỗi ngày với tài khoản lớn). Chỉ số ngoài 38 chỉ số chính của ad → xem cấp campaign/tài khoản.$$;
 COMMENT ON COLUMN qc_ad_ngay.advertiser_id IS 'Tài khoản quảng cáo của ad. FK → tk_quang_cao.advertiser_id.';
-COMMENT ON COLUMN qc_ad_ngay.campaign_id IS 'Campaign chứa ad. Join: → qc_campaign_ngay.campaign_id. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.adgroup_id IS 'Nhóm quảng cáo (ad group) chứa ad. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.ad_id IS 'Mã quảng cáo TikTok. Một phần PK.';
+COMMENT ON COLUMN qc_ad_ngay.campaign_id IS 'Campaign chứa ad. Join: → qc_campaign_ngay.campaign_id. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.adgroup_id IS 'Nhóm quảng cáo chứa ad (TikTok ad group; Meta ad set). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.ad_id IS 'Mã quảng cáo (TikTok ad_id; Meta ad_id). Một phần PK.';
 COMMENT ON COLUMN qc_ad_ngay.ngay IS 'Ngày số liệu theo múi giờ tài khoản (thường GMT+7). Một phần PK.';
 COMMENT ON COLUMN qc_ad_ngay.ten_ad IS 'Tên quảng cáo lúc đọc (ad_name). Chuỗi rỗng khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.noi_dung IS 'Chữ quảng cáo (ad_text), ≤ 2.000 ký tự; quảng cáo Spark Ads thường là chú thích bài gốc. Chuỗi rỗng khi không có.';
+COMMENT ON COLUMN qc_ad_ngay.noi_dung IS 'Chữ quảng cáo (TikTok ad_text), ≤ 2.000 ký tự; quảng cáo Spark Ads thường là chú thích bài gốc. Chuỗi rỗng khi không có; Meta luôn rỗng (không đọc nội dung sáng tạo).';
 COMMENT ON COLUMN qc_ad_ngay.ten_campaign IS 'Tên campaign chứa ad lúc đọc (campaign_name). Chuỗi rỗng khi TikTok không trả.';
 COMMENT ON COLUMN qc_ad_ngay.ten_nhom IS 'Tên nhóm quảng cáo lúc đọc (adgroup_name). Chuỗi rỗng khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.chi IS 'Chi tiêu quảng cáo (spend), theo tiền tệ của tài khoản (tk_quang_cao.tien_te; 16 tài khoản HAPAS/MATEMADE đo 19/10/2026 đều VND), TikTok báo, chưa VAT. NULL khi TikTok không trả. CHỈ SỐ TIỀN: chỉ quản trị viên + quản lý của bên thấy.';
-COMMENT ON COLUMN qc_ad_ngay.hien_thi IS 'Lượt hiển thị (impressions), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.reach IS 'Người tiếp cận (reach) trong ĐÚNG phạm vi dòng (ngày / cửa sổ), người. Cộng nhiều dòng thì đếm trùng người — không phải reach duy nhất. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.click IS 'Lượt bấm (clicks, đích đến), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.ket_qua IS 'Kết quả theo mục tiêu tối ưu của chiến dịch (result), đơn vị tuỳ mục tiêu (lượt xem, hiển thị, chuyển đổi…). NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.chuyen_doi IS 'Chuyển đổi (conversion) theo sự kiện tối ưu, lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.view_video IS 'Lượt xem video (video_play_actions), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.view_hai_giay IS 'Lượt xem ≥ 2 giây (video_watched_2s), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.view_sau_giay IS 'Lượt xem ≥ 6 giây (video_watched_6s), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.view_het IS 'Lượt xem hết video (video_views_p100), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.engaged_view IS 'Lượt xem tương tác (engaged_view: xem ≥ 6 giây hoặc tương tác trong 1 ngày), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.thich IS 'Lượt thích trên quảng cáo (likes, trả phí), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.binh_luan IS 'Bình luận trên quảng cáo (comments, trả phí), bình luận. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.chia_se IS 'Lượt chia sẻ (shares, trả phí), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.follow IS 'Lượt theo dõi kênh từ quảng cáo (follows), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.vao_ho_so IS 'Lượt vào trang hồ sơ kênh từ quảng cáo (profile_visits), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.mua_shop IS 'Lượt mua trong TikTok Shop gán cho quảng cáo (onsite_shopping), lượt mua. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_ad_ngay.gia_tri_mua_shop IS 'Doanh thu mua TikTok Shop gán cho quảng cáo (total_onsite_shopping_value), theo tiền tệ tài khoản, giá khách trả TikTok báo. 0 khi không bán qua Shop. CHỈ SỐ TIỀN.';
-COMMENT ON COLUMN qc_ad_ngay.chi_so IS 'MỌI chỉ số TikTok trả cho dòng (JSON {tên chỉ số TikTok: số}; số đã đổi từ chữ, "-" của TikTok → null). Tài khoản/campaign: đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Khoá tiền: spend, cpm, cpc, cost_per_*, *_value, *_roas, *budget*.';
+COMMENT ON COLUMN qc_ad_ngay.chi IS 'Chi tiêu quảng cáo (spend), theo tiền tệ của tài khoản (tk_quang_cao.tien_te; 16 tài khoản TikTok đo 19/10/2026 và 20 tài khoản Meta đo 20/10/2026 đều VND), nền tảng báo, chưa VAT. NULL khi nền tảng không trả. CHỈ SỐ TIỀN: chỉ quản trị viên + quản lý của bên thấy.';
+COMMENT ON COLUMN qc_ad_ngay.hien_thi IS 'Lượt hiển thị (impressions), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.reach IS 'Người tiếp cận (reach) trong ĐÚNG phạm vi dòng (ngày / cửa sổ), người. Cộng nhiều dòng thì đếm trùng người — không phải reach duy nhất. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.click IS 'Lượt bấm (clicks, đích đến), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.ket_qua IS 'Kết quả theo mục tiêu tối ưu của chiến dịch (TikTok result), đơn vị tuỳ mục tiêu (lượt xem, hiển thị, chuyển đổi…); Meta luôn NULL. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.chuyen_doi IS 'Chuyển đổi, lượt: TikTok conversion (sự kiện tối ưu); Meta action mua (purchase > omni_purchase > offsite_conversion.fb_pixel_purchase — lấy tên đầu tiên có, không cộng các tên trùng nghĩa). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.view_video IS 'Lượt xem video, lượt: TikTok video_play_actions; Meta action video_view (xem ≥ 3 giây). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.view_hai_giay IS 'Lượt xem ≥ 2 giây (TikTok video_watched_2s; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.view_sau_giay IS 'Lượt xem ≥ 6 giây (TikTok video_watched_6s; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.view_het IS 'Lượt xem hết video (TikTok video_views_p100; Meta video_p100_watched_actions), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.engaged_view IS 'Lượt xem tương tác, lượt: TikTok engaged_view (xem ≥ 6 giây hoặc tương tác trong 1 ngày); Meta ThruPlay (video_thruplay_watched_actions: xem hết hoặc ≥ 15 giây). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.thich IS 'Lượt thích / cảm xúc trên quảng cáo (TikTok likes; Meta action post_reaction), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.binh_luan IS 'Bình luận trên quảng cáo (TikTok comments; Meta action comment), bình luận. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.chia_se IS 'Lượt chia sẻ (TikTok shares; Meta action post), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.follow IS 'Lượt theo dõi từ quảng cáo, lượt: TikTok follows (theo dõi kênh); Meta action like (thích Trang). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.vao_ho_so IS 'Lượt vào trang hồ sơ kênh từ quảng cáo (TikTok profile_visits; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.mua_shop IS 'Lượt mua trong TikTok Shop gán cho quảng cáo (TikTok onsite_shopping; Meta NULL — lượt mua Meta ở chuyen_doi), lượt mua. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_ngay.gia_tri_mua_shop IS 'Doanh thu gán cho quảng cáo, theo tiền tệ tài khoản: TikTok Shop (total_onsite_shopping_value, giá khách trả); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi, phân bổ mặc định của Meta). 0 khi dòng có phân phối mà không có mua. CHỈ SỐ TIỀN.';
+COMMENT ON COLUMN qc_ad_ngay.chi_so IS 'MỌI chỉ số nền tảng trả cho dòng (JSON {tên chỉ số: số}; số đã đổi từ chữ, "-" của TikTok → null). TikTok: tài khoản/campaign đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Meta (20/10/2026): mọi trường Insights đã xin, danh sách action thành <trường>__<action_type> (vd actions__purchase, action_values__purchase, video_p100_watched_actions__video_view); reach, frequency, ctr, cpc, cpm, cpp, *_avg_*, *roas* KHÔNG cộng được qua dòng. Khoá tiền: spend, cpm, cpc, cpp, cost_per_*, *_value, action_values__*, *roas*, *budget*.';
 COMMENT ON COLUMN qc_ad_ngay.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
 COMMENT ON TABLE qc_khan_gia IS $$[Lớp] Raw
-[Mục đích] Khán giả quảng cáo TikTok của tài khoản (tuổi, giới tính, tỉnh/thành, nền tảng) trong cửa sổ 30 ngày — ai đang xem quảng cáo.
+[Mục đích] Khán giả quảng cáo TikTok / Meta của tài khoản (tuổi, giới tính, tỉnh/thành, nền tảng) trong cửa sổ 30 ngày — ai đang xem quảng cáo.
 [Grain] 1 dòng = 1 tài khoản × 1 cửa sổ (tu..den) × 1 chiều × 1 giá trị của chiều
 [Khoá] PK: advertiser_id + tu + den + chieu + gia_tri | Join: advertiser_id → tk_quang_cao.advertiser_id
-[Nguồn] TikTok for Business MCP report_integrated_get (AUDIENCE, AUCTION_ADVERTISER, chiều advertiser_id + một chiều khán giả), bộ hẹn giờ tiktok-ads-dong-bo
-[Phạm vi] Tài khoản đang đồng bộ có hiển thị trong 30 ngày | Kênh TikTok Ads | Từ lần kết nối đầu (19/10/2026)
+[Nguồn] TikTok for Business MCP report_integrated_get (AUDIENCE, AUCTION_ADVERTISER, chiều advertiser_id + một chiều khán giả), bộ hẹn giờ tiktok-ads-dong-bo; Meta: Graph API GET act_<id>/insights (time_increment=1; khán giả: breakdowns, không theo ngày), bộ hẹn giờ meta-ads-dong-bo
+[Phạm vi] Tài khoản đang đồng bộ có hiển thị trong 30 ngày | Kênh TikTok Ads + Meta Ads (Facebook/Instagram, từ 20/10/2026) | Từ lần kết nối đầu (19/10/2026)
 [Đã xử lý] 13 chỉ số (chi, hiển thị, bấm, ctr, cpm, chuyển đổi, xem, xem 6 giây, thích, bình luận, chia sẻ, follow, vào hồ sơ); "-" → NULL; cột không có trong báo cáo khán giả (reach, engaged_view…) NULL
-[Refresh] Mỗi 7 ngày mỗi tài khoản (trong lượt đồng bộ 06:30 giờ VN), cửa sổ 30 ngày tới hết hôm qua; cửa sổ cũ giữ lại (lịch sử)
+[Refresh] Mỗi 7 ngày mỗi tài khoản (trong lượt đồng bộ 06:30 TikTok / 06:45 Meta giờ VN), cửa sổ 30 ngày tới hết hôm qua; cửa sổ cũ giữ lại (lịch sử)
 [Dùng khi] Phân bố hiển thị/xem theo tuổi, giới tính, tỉnh, nền tảng — lấy cửa sổ den mới nhất của từng tài khoản
 [Không dùng khi] Số theo ngày → dùng qc_tk_ngay; theo chiến dịch → dùng qc_campaign_ngay
 [Lưu ý] Các cửa sổ chồng nhau — KHÔNG cộng nhiều cửa sổ. province_id là mã vùng TikTok (GeoNames), -1 = không rõ.$$;
 COMMENT ON COLUMN qc_khan_gia.advertiser_id IS 'Tài khoản quảng cáo. Một phần PK. FK → tk_quang_cao.advertiser_id.';
 COMMENT ON COLUMN qc_khan_gia.tu IS 'Ngày đầu cửa sổ 30 ngày (múi giờ tài khoản). Một phần PK.';
 COMMENT ON COLUMN qc_khan_gia.den IS 'Ngày cuối cửa sổ (múi giờ tài khoản, = hôm qua lúc đọc). Một phần PK.';
-COMMENT ON COLUMN qc_khan_gia.chieu IS 'Chiều khán giả. Một phần PK. Giá trị: age, gender, province_id, platform.';
-COMMENT ON COLUMN qc_khan_gia.gia_tri IS 'Giá trị của chiều (mã TikTok): age AGE_13_17…AGE_55_100, NONE; gender FEMALE, MALE, NONE; province_id mã vùng số (-1 không rõ); platform ANDROID, IPHONE, IPAD, WAP, UNKNOWN. Một phần PK.';
-COMMENT ON COLUMN qc_khan_gia.chi IS 'Chi tiêu quảng cáo (spend), theo tiền tệ của tài khoản (tk_quang_cao.tien_te; 16 tài khoản HAPAS/MATEMADE đo 19/10/2026 đều VND), TikTok báo, chưa VAT. NULL khi TikTok không trả. CHỈ SỐ TIỀN: chỉ quản trị viên + quản lý của bên thấy.';
-COMMENT ON COLUMN qc_khan_gia.hien_thi IS 'Lượt hiển thị (impressions), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.reach IS 'Người tiếp cận (reach) trong ĐÚNG phạm vi dòng (ngày / cửa sổ), người. Cộng nhiều dòng thì đếm trùng người — không phải reach duy nhất. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.click IS 'Lượt bấm (clicks, đích đến), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.ket_qua IS 'Kết quả theo mục tiêu tối ưu của chiến dịch (result), đơn vị tuỳ mục tiêu (lượt xem, hiển thị, chuyển đổi…). NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.chuyen_doi IS 'Chuyển đổi (conversion) theo sự kiện tối ưu, lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.view_video IS 'Lượt xem video (video_play_actions), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.view_hai_giay IS 'Lượt xem ≥ 2 giây (video_watched_2s), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.view_sau_giay IS 'Lượt xem ≥ 6 giây (video_watched_6s), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.view_het IS 'Lượt xem hết video (video_views_p100), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.engaged_view IS 'Lượt xem tương tác (engaged_view: xem ≥ 6 giây hoặc tương tác trong 1 ngày), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.thich IS 'Lượt thích trên quảng cáo (likes, trả phí), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.binh_luan IS 'Bình luận trên quảng cáo (comments, trả phí), bình luận. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.chia_se IS 'Lượt chia sẻ (shares, trả phí), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.follow IS 'Lượt theo dõi kênh từ quảng cáo (follows), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.vao_ho_so IS 'Lượt vào trang hồ sơ kênh từ quảng cáo (profile_visits), lượt. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.mua_shop IS 'Lượt mua trong TikTok Shop gán cho quảng cáo (onsite_shopping), lượt mua. NULL khi TikTok không trả.';
-COMMENT ON COLUMN qc_khan_gia.gia_tri_mua_shop IS 'Doanh thu mua TikTok Shop gán cho quảng cáo (total_onsite_shopping_value), theo tiền tệ tài khoản, giá khách trả TikTok báo. 0 khi không bán qua Shop. CHỈ SỐ TIỀN.';
-COMMENT ON COLUMN qc_khan_gia.chi_so IS 'MỌI chỉ số TikTok trả cho dòng (JSON {tên chỉ số TikTok: số}; số đã đổi từ chữ, "-" của TikTok → null). Tài khoản/campaign: đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Khoá tiền: spend, cpm, cpc, cost_per_*, *_value, *_roas, *budget*.';
+COMMENT ON COLUMN qc_khan_gia.chieu IS 'Chiều khán giả. Một phần PK. Giá trị: age, gender (TikTok + Meta), province_id, platform (TikTok: tỉnh, thiết bị), region, publisher_platform, platform_position (Meta, từ 20/10/2026).';
+COMMENT ON COLUMN qc_khan_gia.gia_tri IS 'Giá trị của chiều (mã TikTok): age AGE_13_17…AGE_55_100, NONE; gender FEMALE, MALE, NONE; province_id mã vùng số (-1 không rõ); platform ANDROID, IPHONE, IPAD, WAP, UNKNOWN. Meta: age cùng mã TikTok tới 45–54, rồi 55-64, 65+; gender FEMALE, MALE, NONE; region tên vùng Meta (vd Ho Chi Minh City); publisher_platform facebook, instagram, messenger, audience_network, threads; platform_position "<nền tảng>/<vị trí>" (vd instagram/reels). Một phần PK.';
+COMMENT ON COLUMN qc_khan_gia.chi IS 'Chi tiêu quảng cáo (spend), theo tiền tệ của tài khoản (tk_quang_cao.tien_te; 16 tài khoản TikTok đo 19/10/2026 và 20 tài khoản Meta đo 20/10/2026 đều VND), nền tảng báo, chưa VAT. NULL khi nền tảng không trả. CHỈ SỐ TIỀN: chỉ quản trị viên + quản lý của bên thấy.';
+COMMENT ON COLUMN qc_khan_gia.hien_thi IS 'Lượt hiển thị (impressions), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.reach IS 'Người tiếp cận (reach) trong ĐÚNG phạm vi dòng (ngày / cửa sổ), người. Cộng nhiều dòng thì đếm trùng người — không phải reach duy nhất. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.click IS 'Lượt bấm (clicks, đích đến), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.ket_qua IS 'Kết quả theo mục tiêu tối ưu của chiến dịch (TikTok result), đơn vị tuỳ mục tiêu (lượt xem, hiển thị, chuyển đổi…); Meta luôn NULL. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.chuyen_doi IS 'Chuyển đổi, lượt: TikTok conversion (sự kiện tối ưu); Meta action mua (purchase > omni_purchase > offsite_conversion.fb_pixel_purchase — lấy tên đầu tiên có, không cộng các tên trùng nghĩa). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.view_video IS 'Lượt xem video, lượt: TikTok video_play_actions; Meta action video_view (xem ≥ 3 giây). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.view_hai_giay IS 'Lượt xem ≥ 2 giây (TikTok video_watched_2s; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.view_sau_giay IS 'Lượt xem ≥ 6 giây (TikTok video_watched_6s; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.view_het IS 'Lượt xem hết video (TikTok video_views_p100; Meta video_p100_watched_actions), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.engaged_view IS 'Lượt xem tương tác, lượt: TikTok engaged_view (xem ≥ 6 giây hoặc tương tác trong 1 ngày); Meta ThruPlay (video_thruplay_watched_actions: xem hết hoặc ≥ 15 giây). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.thich IS 'Lượt thích / cảm xúc trên quảng cáo (TikTok likes; Meta action post_reaction), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.binh_luan IS 'Bình luận trên quảng cáo (TikTok comments; Meta action comment), bình luận. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.chia_se IS 'Lượt chia sẻ (TikTok shares; Meta action post), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.follow IS 'Lượt theo dõi từ quảng cáo, lượt: TikTok follows (theo dõi kênh); Meta action like (thích Trang). NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.vao_ho_so IS 'Lượt vào trang hồ sơ kênh từ quảng cáo (TikTok profile_visits; Meta NULL), lượt. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.mua_shop IS 'Lượt mua trong TikTok Shop gán cho quảng cáo (TikTok onsite_shopping; Meta NULL — lượt mua Meta ở chuyen_doi), lượt mua. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_khan_gia.gia_tri_mua_shop IS 'Doanh thu gán cho quảng cáo, theo tiền tệ tài khoản: TikTok Shop (total_onsite_shopping_value, giá khách trả); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi, phân bổ mặc định của Meta). 0 khi dòng có phân phối mà không có mua. CHỈ SỐ TIỀN.';
+COMMENT ON COLUMN qc_khan_gia.chi_so IS 'MỌI chỉ số nền tảng trả cho dòng (JSON {tên chỉ số: số}; số đã đổi từ chữ, "-" của TikTok → null). TikTok: tài khoản/campaign đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Meta (20/10/2026): mọi trường Insights đã xin, danh sách action thành <trường>__<action_type> (vd actions__purchase, action_values__purchase, video_p100_watched_actions__video_view); reach, frequency, ctr, cpc, cpm, cpp, *_avg_*, *roas* KHÔNG cộng được qua dòng. Khoá tiền: spend, cpm, cpc, cpp, cost_per_*, *_value, action_values__*, *roas*, *budget*.';
 COMMENT ON COLUMN qc_khan_gia.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
 RESET ROLE;
 

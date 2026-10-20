@@ -141,7 +141,7 @@
   <div class="thong-bao thong-bao--loi">{{ loi_qc }}</div>
   {% elif tt %}
   {% if tt.loi_khoa %}<div class="thong-bao thong-bao--canh" data-o="tt-loi-khoa">Khoá mã hoá TikTok chưa dùng được: {{ tt.loi_khoa }}. Cần TIKTOK_KHOA_MA_HOA (32 byte, base64) trong /opt/lang-nghe/.env — chưa lưu/đọc token được (dashboard/README.md, mục TikTok Ads).</div>{% endif %}
-  {% if tt.yeu_cau_dong_bo_luc and not tt.dang_dong_bo %}<div class="thong-bao" data-o="tt-yeu-cau">Đã yêu cầu đồng bộ lúc {{ tt.yeu_cau_dong_bo_luc|gio_vn }}{% if tt.yeu_cau_boi %} ({{ tt.yeu_cau_boi }}){% endif %}, sẽ chạy trong ≤ 10 phút.</div>{% endif %}
+  {% if tt.yeu_cau_dong_bo_luc and not tt.dang_dong_bo %}<div class="thong-bao" data-o="tt-yeu-cau">Đã yêu cầu đồng bộ lúc {{ tt.yeu_cau_dong_bo_luc|gio_vn }}{% if tt.yeu_cau_boi %} ({{ tt.yeu_cau_boi }}){% endif %}, sẽ chạy trong ≤ 2 phút.</div>{% endif %}
   <div class="tt-luoi">
     <div class="tt-han tt-han--{{ tt.muc or 'trong' }}" data-o="tt-han">
       {% if tt.khong_het_han %}
@@ -196,23 +196,79 @@
     <p class="mo nho tt-token__chu">Dashboard thử đọc danh sách tài khoản bằng token trước khi lưu. Token được mã hoá trên máy chủ, không bao giờ hiện lại; lưu token API thay cho lần đăng nhập hiện tại.</p>
   </details>
 
-  <h3 class="tt-h3">Tài khoản quảng cáo → bên</h3>
-  <p class="mo nho tt-chu">Tên có MATEMADE / MATE MADE tự vào bên MATEMADE, còn lại vào HAPAS; sửa ở đây thì lần đồng bộ sau giữ nguyên. Chưa gán bên: chỉ quản trị viên thấy số. Trang Quảng cáo chỉ quản trị viên; người có quyền ở bên hỏi Mark để biết số (kể cả chi tiêu), trả lời bằng chữ.</p>
+  {% endif %}
+</section>
+
+{#- Meta Ads (20/10/2026): CHỈ quản trị viên (máy chủ kiểm lại mọi POST /meta/*). `mt` chỉ có cột không
+    bí mật (meta_ads.DichVu.the) — không bao giờ token. Giao diện tối giản, chờ lượt thiết kế. #}
+<section class="the-khoi cach-duoi tt" id="meta" aria-labelledby="mt-tieu-de">
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">5</span>
+    <h2 class="muc__ten" id="mt-tieu-de">Kết nối Meta Ads</h2>
+    {% if mt %}<span class="the the--cham{% if mt.muc %} the--{{ mt.muc }}{% endif %}" data-o="mt-trang-thai">{{ mt.nhan }}</span>{% endif %}
+    <button type="button" class="goi-y" data-goi-y="Dashboard đọc số Facebook / Instagram Ads bằng token người dùng hệ thống CHỈ ĐỌC (ads_read + read_insights), chỉ gọi GET Graph API. Token loại này không hết hạn. Chỉ tài khoản đã duyệt mới được đọc số.">i</button>
+    {% if mt and mt.dang_dong_bo %}<span class="muc__phai"><span class="the the--nhan" data-o="mt-dang">Đang đồng bộ</span></span>{% endif %}
+  </div>
+  {% if mt and not loi_qc %}
+  {% if mt.loi_khoa %}<div class="thong-bao thong-bao--canh" data-o="mt-loi-khoa">Khoá mã hoá chưa dùng được: {{ mt.loi_khoa }}. Meta dùng chung TIKTOK_KHOA_MA_HOA trong /opt/lang-nghe/.env.</div>{% endif %}
+  {% if mt.yeu_cau_dong_bo_luc and not mt.dang_dong_bo %}<div class="thong-bao" data-o="mt-yeu-cau">Đã yêu cầu đồng bộ lúc {{ mt.yeu_cau_dong_bo_luc|gio_vn }}{% if mt.yeu_cau_boi %} ({{ mt.yeu_cau_boi }}){% endif %}, sẽ chạy trong ≤ 2 phút.</div>{% endif %}
+  <dl class="tt-ds">
+    <div><dt>Token của</dt><dd data-o="mt-chu">{{ mt.chu_token or '—' }}{% if mt.cap_luc %}<span class="tt-ds__phu">dán lúc {{ mt.cap_luc|gio_vn }}{% if mt.nguoi_cap %} ({{ mt.nguoi_cap }}){% endif %}</span>{% endif %}</dd></div>
+    <div><dt>Quyền đã cấp</dt><dd data-o="mt-quyen">{{ mt.quyen_token|join(', ') if mt.quyen_token else '—' }}</dd></div>
+    <div data-o="mt-so-tk"><dt>Tài khoản thấy / đã duyệt</dt><dd>{{ mt.so_tk_thay if mt.so_tk_thay is not none else '—' }} / {{ mt.so_tk_duyet }}{% if mt.so_tk_cho_duyet %} <span class="the the--canh">{{ mt.so_tk_cho_duyet }} chờ duyệt</span>{% endif %}</dd></div>
+    <div><dt>Gọi Meta thành công</dt><dd>{{ mt.goi_ok_luc|gio_vn if mt.goi_ok_luc else '—' }}</dd></div>
+    <div><dt>Đồng bộ thành công</dt><dd>{{ mt.dong_bo_ok_luc|gio_vn if mt.dong_bo_ok_luc else 'chưa có' }}{% if mt.so_den_ngay %}<span class="tt-ds__phu">số đến hết {{ mt.so_den_ngay|gio_vn }}</span>{% endif %}</dd></div>
+    <div data-o="mt-luot"><dt>Lượt đồng bộ cuối</dt><dd>{% if mt.dang_dong_bo %}đang chạy từ {{ mt.dong_bo_bat_dau|gio_vn }}{% elif mt.dong_bo_xong %}{{ mt.dong_bo_xong|gio_vn }} <span class="the the--{{ 'loi' if mt.dong_bo_loi else 'tot' }}">{{ 'có lỗi' if mt.dong_bo_loi else 'ổn' }}</span>{% if mt.dong_bo_so_dong is not none %}<span class="tt-ds__phu">{{ mt.dong_bo_so_dong|so_vn }} dòng</span>{% endif %}{% else %}—{% endif %}</dd></div>
+    {% if mt.dong_bo_loi or mt.loi_cuoi %}
+    <div class="tt-ds__rong" data-o="mt-loi"><dt>Lỗi gần nhất</dt><dd class="chu-loi">{{ mt.dong_bo_loi or mt.loi_cuoi }}</dd></div>
+    {% endif %}
+  </dl>
+  <div class="tt-nut">
+    <form method="post" action="/meta/dong-bo">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <button class="nut nut--nhe" type="submit"{% if not mt.co_token or mt.dang_dong_bo or mt.yeu_cau_dong_bo_luc %} disabled{% endif %}>Đồng bộ ngay</button>
+    </form>
+    <form method="post" action="/meta/ngat" data-xac-nhan="Xoá token Meta khỏi máy chủ? Số đã đồng bộ giữ nguyên. Token người dùng hệ thống KHÔNG tự hết hạn — thu hồi trong Meta Business Settings.">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <button class="nut nut--loi" type="submit"{% if not mt.co_token %} disabled{% endif %}>Ngắt (xoá token)</button>
+    </form>
+  </div>
+  <details class="tt-token">
+    <summary>Dán token mới</summary>
+    <form method="post" action="/meta/token" class="luoi-form" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <label class="o rong">Token người dùng hệ thống Meta (chỉ ads_read + read_insights)
+        <input type="password" name="token" required minlength="20" maxlength="4096" spellcheck="false" autocomplete="off"></label>
+      <div><button class="nut nut--nhe" type="submit">Kiểm tra rồi lưu</button></div>
+    </form>
+    <p class="mo nho tt-token__chu">Dashboard đọc me, me/permissions, me/adaccounts trước khi lưu và TỪ CHỐI token có quyền ghi (ads_management, business_management, *_manage*…). Token được mã hoá, không bao giờ hiện lại. Duyệt tài khoản giữ như cũ; tài khoản mới chờ duyệt ở bảng dưới.</p>
+  </details>
+  {% endif %}
+</section>
+
+<section class="the-khoi cach-duoi tt" id="tk-qc" aria-labelledby="tkqc-tieu-de">
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">6</span>
+    <h2 class="muc__ten" id="tkqc-tieu-de">Tài khoản quảng cáo → bên</h2>
+  </div>
+  <p class="mo nho tt-chu">Tên có MATEMADE / MATE MADE / MADEMATE tự vào bên MATEMADE; tên có chữ THAI để chưa gán (chỉ quản trị viên thấy); còn lại vào HAPAS. Sửa ở đây thì lần đồng bộ sau giữ nguyên. Meta: chỉ tài khoản đã duyệt mới được đọc số. Trang Quảng cáo chỉ quản trị viên; người có quyền ở bên hỏi Mark để biết số (kể cả chi tiêu), trả lời bằng chữ.</p>
   {% if tk_qc %}
   <div class="cuon-ngang">
   <table class="tt-bang">
-    <thead><tr><th>Tài khoản</th><th>Bên</th><th>Đồng bộ</th><th>Trạng thái</th><th></th></tr></thead>
+    <thead><tr><th>Tài khoản</th><th>Nền tảng</th><th>Bên</th><th>Đồng bộ</th><th>Duyệt</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>
     {% for t in tk_qc %}
-      <tr data-o="tk-{{ t.advertiser_id }}">
+      <tr data-o="tk-{{ t.advertiser_id }}" data-nen-tang="{{ t.nen_tang }}">
         <td>{{ t.ten or t.advertiser_id }}<span class="tt-bang__phu">{{ t.advertiser_id }} · {{ t.tien_te }}</span></td>
+        <td>{{ TEN_NEN_TANG_QC[t.nen_tang] }}</td>
         <td><select name="don_vi" form="gb-{{ t.advertiser_id }}" aria-label="Bên của {{ t.ten or t.advertiser_id }}">
           <option value=""{% if not t.don_vi %} selected{% endif %}>— chưa gán</option>
           {% for b in ten_ben %}<option value="{{ b.ma }}"{% if b.ma == t.don_vi %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}
         </select></td>
         <td><label class="tt-hop"><input type="checkbox" name="dang_dong_bo" value="1" form="gb-{{ t.advertiser_id }}"{% if t.dang_dong_bo %} checked{% endif %}> Đồng bộ</label></td>
-        <td>{% if not t.con_quyen %}<span class="the the--canh">Mất quyền</span> {% endif %}<span class="the">{{ 'Đã sửa tay' if t.gan_tay else 'Tự gán' }}</span>{% if t.con_quyen and t.dang_dong_bo and not t.nap_lui_xong_luc %} <span class="the the--nhan">Chờ nạp 90 ngày</span>{% endif %}</td>
-        <td><form id="gb-{{ t.advertiser_id }}" method="post" action="/tiktok/gan-ben">
+        <td>{% if t.nen_tang == 'meta' %}<label class="tt-hop"><input type="checkbox" name="duyet" value="1" form="gb-{{ t.advertiser_id }}"{% if t.duyet %} checked{% endif %}> Duyệt</label>{% else %}—{% endif %}</td>
+        <td>{% if not t.con_quyen %}<span class="the the--canh">Mất quyền</span> {% endif %}{% if not t.duyet %}<span class="the the--canh">Chưa duyệt</span> {% endif %}<span class="the">{{ 'Đã sửa tay' if t.gan_tay else 'Tự gán' }}</span>{% if t.duyet and t.con_quyen and t.dang_dong_bo and not t.nap_lui_xong_luc %} <span class="the the--nhan">Chờ nạp 90 ngày</span>{% endif %}</td>
+        <td><form id="gb-{{ t.advertiser_id }}" method="post" action="/qc/gan-ben">
           <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
           <input type="hidden" name="advertiser_id" value="{{ t.advertiser_id }}">
           <button class="nut nut--nhe nut--nho" type="submit">Lưu</button>
@@ -222,16 +278,15 @@
     </tbody>
   </table>
   </div>
-  {% else %}
-  <p class="trong">Chưa thấy tài khoản quảng cáo nào — kết nối TikTok Ads trước.</p>
-  {% endif %}
+  {% elif not loi_qc %}
+  <p class="trong">Chưa thấy tài khoản quảng cáo nào — kết nối TikTok Ads hoặc Meta Ads trước.</p>
   {% endif %}
 </section>
 {% endif %}
 
 <section class="the-khoi cach-duoi">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">{{ 5 if nguoi.la_quan_tri else 3 }}</span>
+    <span class="muc__so" aria-hidden="true">{{ 7 if nguoi.la_quan_tri else 3 }}</span>
     <h2 class="muc__ten">Nhật ký thay đổi</h2>
     <button type="button" class="goi-y" data-goi-y="100 dòng mới nhất{% if not nguoi.la_quan_tri %} về dự án và quyền của các bên bạn quản lý{% endif %}.">i</button>
   </div>

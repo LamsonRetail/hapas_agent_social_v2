@@ -1,0 +1,16 @@
+# /etc/systemd/system/meta-ads-yeu-cau.timer — mỗi 2 phút kiểm cờ "Đồng bộ ngay" của Meta Ads
+# (20/10/2026). Dashboard KHÔNG chạy đồng bộ trong tiến trình web: nút chỉ ghi
+# ket_noi_ngoai.yeu_cau_dong_bo_luc (nha_cung_cap = meta_ads); lượt này chạy
+# `dong-bo --chi-khi-yeu-cau` (không có yêu cầu thì thoát < 1 giây, không in gì).
+# Không chạy chồng với meta-ads-dong-bo (06:45) — khoá advisory Postgres riêng của Meta.
+[Unit]
+Description=Dong bo Meta Ads theo yeu cau (moi 2 phut)
+
+[Timer]
+OnBootSec=6min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=meta-ads-yeu-cau.service
+
+[Install]
+WantedBy=timers.target

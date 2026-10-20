@@ -1,19 +1,41 @@
-// Trang "Quảng cáo TikTok" (19/10/2026): chỉ vẽ biểu đồ "Theo ngày" từ JSON máy chủ nhúng sẵn
-// (#qc-du-lieu — đã lọc chỉ số tiền theo quyền). Không gọi API, không chèn HTML từ dữ liệu
-// (CSP script-src 'self'; chữ chỉ qua textContent). Màu đọc từ biến CSS → sáng/tối tự theo.
+// Trang "Quảng cáo" (TikTok 19/10/2026, + Meta 20/10/2026): vẽ biểu đồ "Theo ngày" từ #qc-api = ĐÚNG
+// payload của GET /api/qc (đã lọc tiền theo quyền ở máy chủ; theo_ngay_nen_tang có `nen_tang`).
+// Xem "Tất cả" mà phạm vi có cả TikTok lẫn Meta → cột chồng theo nền tảng (màu nền tảng, cùng màu thanh
+// tỉ trọng + chấm ở bảng); một nền tảng → đường vùng một màu như trước. Điện thoại: gập sẵn bộ lọc để
+// số lên màn hình đầu. Không gọi API, không chèn HTML từ dữ liệu (CSP script-src 'self'; chữ chỉ qua
+// textContent). Màu đọc từ biến CSS → sáng/tối tự theo.
 "use strict";
 (function () {
-  var el = document.getElementById("qc-du-lieu");
+  // Bộ lọc gập trên điện thoại (máy tính luôn mở; dòng tóm tắt chỉ hiện ≤ 760px — qc.css).
+  var loc = document.getElementById("qc-loc");
+  if (loc && window.matchMedia && window.matchMedia("(max-width: 760px)").matches) loc.open = false;
+
+  var CHUOI = [["chi", "Chi tiêu"], ["hien_thi", "Hiển thị"], ["click", "Click"], ["view_video", "View video"],
+               ["engaged_view", "Engaged view"], ["tuong_tac", "Tương tác"], ["follow", "Follow"]];
+  var TEN_NEN = { tiktok: "TikTok", meta: "Meta" };
+  var api = document.getElementById("qc-api");
   var khung = document.getElementById("qc-bd-ngay");
   var nhom = document.getElementById("qc-chon-chi-so");
-  if (!el || !khung || !nhom || !window.echarts) return;
-  var d;
-  try { d = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
-  if (!d.chuoi || !d.chuoi.length || !d.ngay || !d.ngay.length) return;
+  var chuGiai = document.getElementById("qc-chu-giai");
+  if (!api || !khung || !nhom || !window.echarts) return;
+  var p;
+  try { p = JSON.parse(api.textContent || "{}"); } catch (e) { return; }
+  var ds = p.theo_ngay || [];
+  if (!ds.length) return;
+  var ngay = ds.map(function (x) { return x.ngay; });
+  var co = ds[0];
+  var chuoi = CHUOI.filter(function (c) { return c[0] in co; });
+  if (!chuoi.length) return;
+  // Theo nền tảng: { tiktok: {ngày: dòng}, meta: {...} } — chỉ khi xem "Tất cả" và có ≥ 2 nền tảng.
+  var theoNen = {};
+  (p.theo_ngay_nen_tang || []).forEach(function (r) { (theoNen[r.nen_tang] = theoNen[r.nen_tang] || {})[r.ngay] = r; });
+  var cacNen = (p.theo_nen_tang || []).map(function (n) { return n.nen_tang; }).filter(function (n) { return theoNen[n]; });
+  var chong = p.nen_tang === "tat_ca" && cacNen.length > 1;
+
   var giamDong = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   var SO = new Intl.NumberFormat("vi-VN");
-  var chon = d.chuoi[0].ma;
-  try { var luu = window.localStorage.getItem("qc-chi-so"); if (luu && d.chuoi.some(function (c) { return c.ma === luu; })) chon = luu; } catch (e) { /* bỏ qua */ }
+  var chon = chuoi[0][0];
+  try { var luu = window.localStorage.getItem("qc-chi-so"); if (luu && chuoi.some(function (c) { return c[0] === luu; })) chon = luu; } catch (e) { /* bỏ qua */ }
   var bd = null;
 
   function bien(ten) { return getComputedStyle(document.documentElement).getPropertyValue(ten).trim(); }
@@ -25,23 +47,29 @@
     return x.toLocaleString("vi-VN", { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : 1 }) + dv[1];
   }
   function ngayNgan(iso) { return iso.slice(8, 10) + "/" + iso.slice(5, 7); }
+  function ngayDu(iso) { return iso.split("-").reverse().join("/"); }
   function hexRgba(hex, a) {
     var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
     return m ? "rgba(" + parseInt(m[1], 16) + "," + parseInt(m[2], 16) + "," + parseInt(m[3], 16) + "," + a + ")" : hex;
   }
-  function donVi(ma) { return ma === "chi" ? (d.tien_te && d.tien_te.length === 1 && d.tien_te[0] !== "VND" ? " " + d.tien_te[0] : " ₫") : ""; }
+  function donVi(ma) {
+    if (ma !== "chi") return "";
+    var tt = p.tien_te || ["VND"];
+    return tt.length === 1 && tt[0] !== "VND" ? " " + tt[0] : " ₫";
+  }
+  function giaTri(r, ma) { return r ? (r[ma] || 0) : 0; }
 
   function veNut() {
     while (nhom.firstChild) nhom.removeChild(nhom.firstChild);
-    d.chuoi.forEach(function (c) {
+    chuoi.forEach(function (c) {
       var b = document.createElement("button");
       b.type = "button";
       b.className = "qc-phan__nut";
-      b.textContent = c.ten;
-      b.setAttribute("aria-pressed", c.ma === chon ? "true" : "false");
+      b.textContent = c[1];
+      b.setAttribute("aria-pressed", c[0] === chon ? "true" : "false");
       b.addEventListener("click", function () {
-        if (chon === c.ma) return;
-        chon = c.ma;
+        if (chon === c[0]) return;
+        chon = c[0];
         try { window.localStorage.setItem("qc-chi-so", chon); } catch (e) { /* bỏ qua */ }
         Array.prototype.forEach.call(nhom.children, function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
         ve();
@@ -50,13 +78,51 @@
     });
   }
 
+  function veChuGiai() {
+    if (!chuGiai) return;
+    while (chuGiai.firstChild) chuGiai.removeChild(chuGiai.firstChild);
+    chuGiai.hidden = !chong;
+    if (!chong) return;
+    cacNen.forEach(function (n) {
+      var li = document.createElement("li");
+      var cham = document.createElement("span");
+      cham.className = "qc-cham qc-cham--" + n;
+      cham.setAttribute("aria-hidden", "true");
+      li.appendChild(cham);
+      li.appendChild(document.createTextNode(TEN_NEN[n] || n));
+      chuGiai.appendChild(li);
+    });
+  }
+
   function ve() {
-    var c = d.chuoi.filter(function (x) { return x.ma === chon; })[0] || d.chuoi[0];
+    var c = chuoi.filter(function (x) { return x[0] === chon; })[0] || chuoi[0];
+    var ma = c[0], ten = c[1];
     var m = { chu: bien("--chu"), phu: bien("--chu-phu"), mo: bien("--chu-mo"), ke: bien("--ke"),
               truc: bien("--truc"), mat: bien("--be-mat"), phong: bien("--phong") || "system-ui, sans-serif",
-              chinh: bien("--s1") };
+              chinh: bien("--s1"), tiktok: bien("--qc-tiktok") || "#111827", meta: bien("--qc-meta") || "#1877f2" };
     if (!bd) bd = window.echarts.init(khung, null, { renderer: "canvas" });
-    khung.setAttribute("aria-label", "Biểu đồ " + c.ten.toLowerCase() + " theo ngày, " + d.ngay.length + " ngày");
+    khung.setAttribute("aria-label", "Biểu đồ " + ten.toLowerCase() + " theo ngày" + (chong ? ", chia theo nền tảng" : "") + ", " + ngay.length + " ngày");
+    veChuGiai();
+    var series;
+    if (chong) {
+      series = cacNen.map(function (n, i) {
+        return {
+          name: TEN_NEN[n] || n, type: "bar", stack: "nen", barMaxWidth: 22, barCategoryGap: "28%",
+          data: ngay.map(function (x) { return giaTri(theoNen[n][x], ma); }),
+          itemStyle: { color: m[n] || m.chinh, borderRadius: i === cacNen.length - 1 ? [3, 3, 0, 0] : 0 },
+          emphasis: { focus: "series" }
+        };
+      });
+    } else {
+      series = [{
+        name: ten, type: "line", data: ds.map(function (x) { return giaTri(x, ma); }),
+        showSymbol: ngay.length <= 45, symbol: "circle", symbolSize: 6,
+        smooth: 0.25, smoothMonotone: "x", lineStyle: { width: 2, color: m.chinh },
+        itemStyle: { color: m.chinh, borderColor: m.mat, borderWidth: 2 },
+        areaStyle: { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: hexRgba(m.chinh, 0.22) }, { offset: 1, color: hexRgba(m.chinh, 0.02) }]) }
+      }];
+    }
     bd.setOption({
       animation: !giamDong, animationDuration: 250,
       textStyle: { fontFamily: m.phong, color: m.phu },
@@ -64,20 +130,20 @@
       tooltip: {
         trigger: "axis", renderMode: "richText", backgroundColor: m.mat, borderColor: m.ke, borderWidth: 1,
         padding: [8, 12], textStyle: { color: m.chu, fontSize: 12, fontFamily: m.phong },
-        axisPointer: { type: "line", lineStyle: { color: m.truc, type: "dashed" } },
-        formatter: function (ps) { var i = ps[0].dataIndex; return d.ngay[i].split("-").reverse().join("/") + "\n" + c.ten + ": " + SO.format(c.ds[i]) + donVi(c.ma); }
+        axisPointer: chong ? { type: "shadow", shadowStyle: { color: hexRgba(m.truc, 0.25) } }
+                           : { type: "line", lineStyle: { color: m.truc, type: "dashed" } },
+        formatter: function (ps) {
+          var i = ps[0].dataIndex, dong = [ngayDu(ngay[i])], tong = 0;
+          ps.forEach(function (x) { tong += x.value || 0; dong.push(x.seriesName + ": " + SO.format(x.value || 0) + donVi(ma)); });
+          if (chong) dong.push("Cộng: " + SO.format(tong) + donVi(ma));
+          return dong.join("\n");
+        }
       },
-      xAxis: { type: "category", data: d.ngay, boundaryGap: false, axisLine: { lineStyle: { color: m.ke } }, axisTick: { show: false },
+      xAxis: { type: "category", data: ngay, boundaryGap: chong, axisLine: { lineStyle: { color: m.ke } }, axisTick: { show: false },
                axisLabel: { color: m.mo, fontSize: 11, hideOverlap: true, formatter: ngayNgan, margin: 10 } },
       yAxis: { type: "value", splitLine: { lineStyle: { color: m.ke, type: [4, 4] } },
                axisLabel: { color: m.mo, fontSize: 11, formatter: function (v) { return soGon(v); } } },
-      series: [{
-        name: c.ten, type: "line", data: c.ds, showSymbol: d.ngay.length <= 45, symbol: "circle", symbolSize: 6,
-        smooth: 0.25, smoothMonotone: "x", lineStyle: { width: 2, color: m.chinh },
-        itemStyle: { color: m.chinh, borderColor: m.mat, borderWidth: 2 },
-        areaStyle: { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: hexRgba(m.chinh, 0.22) }, { offset: 1, color: hexRgba(m.chinh, 0.02) }]) }
-      }]
+      series: series
     }, true);
   }
 
