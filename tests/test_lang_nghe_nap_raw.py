@@ -320,7 +320,8 @@ def test_ap_dung_qua_pipeline_ghi_luot_va_tep_hoan_tac(monkeypatch, tmp_path, ai
                      "thich": review0["statistics"]["digg_count"],
                      "binh_luan": review0["statistics"]["comment_count"] + 5,
                      "chia_se": review0["statistics"]["share_count"], "nen_tang": "tiktok",
-                     "_ngay_so": ngay_tep}]
+                     # Cờ TikTok (20/10/2026): bài đã có gặp lại được điền cờ còn NULL.
+                     "la_quang_cao": False, "_ngay_so": ngay_tep}]
     # Bài MỚI cũng mang ngày đọc raw: ảnh chụp chi_so_ngay không theo now() (soát LOW).
     assert all(r.get("_ngay_so") for _, rs in kho.ghi for r in rs)
     (luot, x), = kho.luot.items()

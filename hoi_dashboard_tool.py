@@ -93,6 +93,8 @@ PHAN = {
                   "nước hoa, set quà…), bài nhiều nhất",
     "web": "Báo & Web: số bài, số miền, % PR, % nhắc ở tiêu đề, theo loại trang",
     "nha_ngoai": "Internal channel vs External channel",
+    "koc": "KOC affiliate (video TikTok gắn giỏ TikTok Shop) vs KOC branding (không giỏ) vs chưa "
+           "rõ giỏ: số video, nhà sáng tạo, thảo luận, lượt xem, tương tác, %, sắc thái video",
     "khung_hoang": "tín hiệu khủng hoảng: bài tiêu cực ≥ 1.000 tương tác, tiêu cực tăng",
     "chi_phi": "ngân sách tháng: đã tiêu, dự báo, trần, các lượt quét gần nhất (chi phí, kết quả)",
     "lich": "lịch quét tự động: trạng thái, mốc kế, ≈ USD 30 ngày, kết quả lần gần nhất",
@@ -108,7 +110,7 @@ PHAN = {
 PHAN_MAC_DINH = ("tong_quan", "sac_thai", "chu_de", "tu_khoa", "bai")
 #: Phần cần dòng bài/bình luận (tính `tinh_chi_so`); phần còn lại chỉ đọc cấu hình/lượt quét.
 _PHAN_SO_LIEU = {"tong_quan", "xu_huong", "sac_thai", "chu_de", "tu_khoa", "nguon", "bai",
-                 "binh_luan", "y_dinh_mua", "web", "nha_ngoai", "khung_hoang", "bo_loc"}
+                 "binh_luan", "y_dinh_mua", "web", "nha_ngoai", "koc", "khung_hoang", "bo_loc"}
 _HOI_RIENG = ("Hãy hỏi Mark trong chat RIÊNG trên Lark (hoặc web console đã đăng nhập), hoặc mở "
               f"thẳng dashboard {DASHBOARD_URL}.")
 
@@ -122,7 +124,8 @@ SCHEMA = {
         "KHI NÀO GỌI: hỏi về số liệu/tình hình lắng nghe của một dự án đang theo dõi trên "
         "dashboard — bao nhiêu bài/thảo luận, tăng giảm so với kỳ trước, tích cực/tiêu cực %, "
         "chủ đề, từ khoá nổi bật, nguồn/KOL nói nhiều, bài nổi bật, Internal vs External "
-        "channel, khách hỏi mua, báo & web, cảnh báo khủng hoảng, chi phí/ngân sách quét, lịch "
+        "channel, KOC affiliate (video gắn giỏ) vs KOC branding (`phan`=[\"koc\"]), khách hỏi "
+        "mua, báo & web, cảnh báo khủng hoảng, chi phí/ngân sách quét, lịch "
         "quét, độ thu đủ; số quảng cáo TikTok Ads + Meta Ads (Facebook/Instagram) của bên "
         "(`phan`=[\"quang_cao\"], không cần dự án). KHÔNG dùng để quét mới (đó là "
         "`social_listen`/`/theodoi`).\n"
@@ -169,7 +172,8 @@ SCHEMA = {
                     " chu_de: nhãn chủ đề; nguon: khoá nguồn (lấy từ phần bo_loc/nguon); "
                     "anh_huong: nano,micro,macro,mega,khong_ro; tuong_tac: 100|1000|10000; q: chữ "
                     "tìm; kieu_quet: theo_doi|tu_khoa; kieu_trang: bao,dien_dan,blog,mxh_khac,"
-                    "khac; y_dinh: \"1\" = chỉ bình luận hỏi mua, hoặc mã món = chỉ bình luận "
+                    "khac; koc: affiliate,branding,chua_ro (video TikTok External channel theo "
+                    "giỏ TikTok Shop); y_dinh: \"1\" = chỉ bình luận hỏi mua, hoặc mã món = chỉ bình luận "
                     "hỏi mua món đó (" + ", ".join(k for k in CS.Y_DINH if k != "1") + "); "
                     "gom_mg: \"1\" = mây từ gồm minigame."),
                 "additionalProperties": True,
@@ -561,6 +565,8 @@ def _bai_gon(b: dict) -> dict:
           "chia_se": b.get("chia_se"), "noi_dung": _chu(b.get("noi_dung"))}
     if b.get("kieu_trang"):
         ra["kieu_trang"] = CS.KIEU_TRANG.get(b["kieu_trang"], b["kieu_trang"])
+    if b.get("koc"):                      # video TikTok External channel: gắn giỏ hay không
+        ra["loai_koc"] = CS.KOC.get(b["koc"], b["koc"])
     return ra
 
 
@@ -660,6 +666,19 @@ def rut_gon(d: dict, phan: list[str], top: int) -> dict:
     if "nha_ngoai" in phan:
         ra["nha_ngoai"] = {CS.TEN_KENH_NHA: d["nha_ngoai"]["kenh_nha"],
                            CS.TEN_BEN_NGOAI: d["nha_ngoai"]["ben_ngoai"]}
+    if "koc" in phan:
+        x = d["loai_koc"]
+        ra["koc"] = {
+            "tong": x["tong"],
+            "nhom": [{"loai": g["ten"], "ma": g["ma"], **{c: g[c] for c in (
+                "bai", "nguoi", "thao_luan", "xem", "tuong_tac", "quang_cao", "bai_pt",
+                "thao_luan_pt", "xem_pt", "tuong_tac_pt")},
+                      "sac_thai_video": g["sac_bai"]} for g in x["nhom"]],
+            "quy_tac": "Theo TỪNG video, chỉ TikTok ngoài Internal channel: KOC affiliate = video "
+                       "gắn giỏ TikTok Shop, KOC branding = video không gắn giỏ, chưa rõ = nguồn "
+                       "không báo giỏ (không đoán). `bai` = số video, `nguoi` = số nhà sáng tạo, "
+                       "`quang_cao` = video TikTok đánh dấu quảng cáo; % trên tổng ba nhóm. Số "
+                       "theo mọi bộ lọc khác (trừ chính bo_loc.koc). Lọc: bo_loc.koc."}
     if "khung_hoang" in phan:
         kh = d.get("_khung_hoang")
         if kh is None:
@@ -678,7 +697,7 @@ def rut_gon(d: dict, phan: list[str], top: int) -> dict:
         ra["bo_loc"] = {
             "nen_tang": dem["nen_tang"], "loai": dem["loai"], "pham_vi": dem["pham_vi"],
             "sac_thai": dem["sac_thai"], "anh_huong": dem["anh_huong"],
-            "kieu_trang": dem["kieu_trang"],
+            "kieu_trang": dem["kieu_trang"], "koc": dem["koc"],
             "chu_de": [{x: g[x] for x in ("gia_tri", "so_bai", "so_bl")}
                        for g in dem["chu_de"][:20]],
             "nguon": [{x: g[x] for x in ("gia_tri", "ten", "nen_tang", "so")}

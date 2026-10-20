@@ -203,7 +203,9 @@ def video(a: dict) -> dict:
                      if isinstance(t, dict) and t.get("hashtag_name")],
         "webVideoUrl": f"https://www.tiktok.com/@{ten}/video/{vid}" if ten and vid else "",
         "textLanguage": a.get("desc_language"), "region": a.get("region"),
-        "hasTikTokShopProduct": _gio_hang(a), "isAd": bool(a.get("is_ads")),
+        "hasTikTokShopProduct": _gio_hang(a),
+        # Thiếu hẳn `is_ads` thì None (20/10/2026, `bai.la_quang_cao`) — không đoán thành False.
+        "isAd": bool(a["is_ads"]) if a.get("is_ads") is not None else None,
         "isPinned": bool(a.get("is_top")),
         "musicMeta": {"musicName": (a.get("music") or {}).get("title") or ""},
         "_nguon": NHAN,

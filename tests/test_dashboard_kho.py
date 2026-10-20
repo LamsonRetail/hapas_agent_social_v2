@@ -58,6 +58,8 @@ def gia(monkeypatch):
         gd.append(c)
         yield c
     monkeypatch.setattr(K, "ket_noi", ket_noi)
+    # DB đã có cột cờ TikTok (20/10/2026): không hỏi information_schema trước mỗi câu đọc bài.
+    monkeypatch.setattr(K, "_CO_CO_TT", [True])
     return types.SimpleNamespace(gd=gd, tra=tra)
 
 

@@ -64,6 +64,8 @@ công cụ từ chối — chuyển NGUYÊN lời từ chối (có hướng dẫ
   "ngoài danh sách theo dõi" = chip `ngoai_theo_doi`; "khách hỏi mua" = `y_dinh: "1"`;
   "khách hỏi mua ví / set quà…" = `y_dinh` là mã món (`tui, vi, nuoc_hoa, trang_suc, set_qua,
   khac, chua_ro`).
+  KOC affiliate (video TikTok gắn giỏ) / KOC branding (không giỏ) = `koc: affiliate` /
+  `koc: branding` (chip `koc_aff` / `koc_brand`); khác với `loai: kol` (nguồn KOL đang theo dõi).
   Lọc theo một nguồn/chủ đề mà chưa biết mã → gọi trước với `phan: ["bo_loc"]` lấy giá trị.
 - Phần (`phan`) theo câu hỏi, đừng lấy tất cả:
   - tổng quan, "thế nào rồi" → để trống (mặc định: tổng quan, sắc thái, chủ đề, từ khoá,
@@ -74,6 +76,9 @@ công cụ từ chối — chuyển NGUYÊN lời từ chối (có hướng dẫ
     mua MÓN gì theo đúng `theo_mon` (vd "set quà 120, túi 40, chưa rõ món 300") — KHÔNG gọi
     chung là "hỏi mua túi"; "Chưa rõ món" là bình luận không nói tên món (vd "xin giá")
   - báo chí, diễn đàn → `web`; kênh nhà so với bên ngoài → `nha_ngoai`
+  - "bao nhiêu video KOC affiliate / KOC branding", "video gắn giỏ" → `koc`. Đó là TỪNG
+    video TikTok ngoài Internal channel theo giỏ TikTok Shop; nói luôn số "chưa rõ giỏ"
+    (nguồn không báo) — không gộp phần chưa rõ vào branding
   - "có khủng hoảng không", "có gì đáng lo" → `khung_hoang` + `sac_thai`
   - tiền quét, ngân sách, các lượt quét → `chi_phi`; lịch quét tự động → `lich`
   - thu thập có sót không → `do_phu`

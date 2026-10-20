@@ -94,6 +94,27 @@ def la_kenh_nha(r: dict) -> bool:
     return loai(r) == "kenh_nha"
 
 
+# ───────────────── KOC affiliate / KOC branding (20/10/2026, task Lark t284905) ─────────────────
+# Marketing: "đang bị lẫn KOC branding và KOC aff → tiêu chí: KOC branding không gắn giỏ hàng ><
+# KOC aff có gắn giỏ" (chủ dự án duyệt PA1). Xếp THEO TỪNG VIDEO, không theo tài khoản: một nhà
+# sáng tạo có thể đăng cả video gắn giỏ lẫn video không giỏ. Chỉ TikTok (nền tảng duy nhất có cờ
+# giỏ — `bai.gio_hang`), trừ Internal channel (video của chính brand không phải KOC). KHÔNG đặt
+# ngưỡng follower: tiêu chí marketing chỉ là giỏ hàng, và bài tìm theo từ khoá (phần lớn video
+# TikTok) không có loại nguồn — muốn chỉ KOC lớn thì kết hợp ô "Ảnh hưởng". Độc lập với loại
+# nguồn `kol` (nguồn KOL/KOC đang theo dõi): hai chiều AND với nhau. NULL = nguồn không báo giỏ
+# (feed hashtag, bài cũ chưa bù) → "Chưa rõ", không bao giờ đoán thành branding.
+KOC = {"affiliate": "KOC affiliate · gắn giỏ", "branding": "KOC branding · không giỏ",
+       "chua_ro": "Chưa rõ giỏ hàng"}
+
+
+def nhom_koc(r: dict) -> str | None:
+    """affiliate | branding | chua_ro cho video TikTok ngoài Internal channel; None với bài khác."""
+    if r.get("nen_tang") != "tiktok" or la_kenh_nha(r):
+        return None
+    g = r.get("gio_hang")
+    return "affiliate" if g is True else "branding" if g is False else "chua_ro"
+
+
 def khoang_truoc(tu: datetime.date, den: datetime.date) -> tuple[datetime.date, datetime.date]:
     """Kỳ liền trước cùng độ dài: 01–30/09 -> 02/08–31/08."""
     n = (den - tu).days + 1
@@ -133,6 +154,9 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
 #   nen_tang, loai, nguon, anh_huong, tuong_tac, kieu_quet   cấp BÀI; bình luận theo bài của nó.
 #   kieu_trang loại trang của bài web (báo, diễn đàn…); bài MXH không có nên chỉ khớp khi chiều này
 #              trống. Bình luận theo bài của nó.
+#   koc        Loại KOC của video TikTok ngoài Internal channel (`nhom_koc`: affiliate / branding /
+#              chua_ro, 20/10/2026); bài khác không khớp khi chiều này có giá trị. Bình luận
+#              theo bài.
 #   sac_thai   bài theo sắc thái BÀI (bài kênh nhà không mang tiếng khách → không khớp); bình luận
 #              theo sắc thái của CHÍNH nó (chỉ bình luận hợp lệ có sắc thái).
 #   chu_de     bài và bình luận có HAI bộ nhãn khác nhau (13 chủ đề bài, 8 chủ đề bình luận của
@@ -147,7 +171,7 @@ def loc(rows: list[dict], nen_tang: str | None = None, loai_nguon: str | None = 
 #   gom_mg     "1" = mây từ khoá GỒM cả bình luận minigame (mặc định ẩn). KHÔNG lọc khối nào khác —
 #              chỉ là tuỳ chọn hiển thị của mây + ngăn từ khoá, nằm đây để theo URL và khoá nhớ.
 CHIEU_LOC = ("pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong",
-             "tuong_tac", "q", "kieu_quet", "kieu_trang", "y_dinh", "gom_mg")
+             "tuong_tac", "q", "kieu_quet", "kieu_trang", "koc", "y_dinh", "gom_mg")
 _BIT = {k: 1 << i for i, k in enumerate(CHIEU_LOC)}
 PHAM_VI = {"tat_ca": "Tất cả", "kenh_nha": TEN_KENH_NHA, "ben_ngoai": TEN_BEN_NGOAI}
 #: Mã sắc thái trên URL (gọn, không dấu) -> nhãn lưu trong kho.
@@ -185,7 +209,7 @@ CHU_DE_BL = ("Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua"
 CHU_DE_BL_THUONG_HIEU = frozenset({"Sản phẩm/chất lượng", "Giá/mua ở đâu/ý định mua",
                                    "Giao hàng/dịch vụ", "Đối thủ"})
 _TOI_DA_GIA_TRI = {"nen_tang": len(TEN_NEN_TANG), "loai": 7, "nguon": 50, "sac_thai": 4,
-                   "chu_de": 40, "anh_huong": 5, "kieu_trang": len(KIEU_TRANG)}
+                   "chu_de": 40, "anh_huong": 5, "kieu_trang": len(KIEU_TRANG), "koc": len(KOC)}
 _RE_DAU_NGUON = re.compile(r"(n|t|link|\?|tiktok|facebook|instagram|youtube|threads|web):")
 #: Khoá nguồn dài nhất: "link:" + link bài (kho cắt 500 ký tự) — bài không có tác giả/tài khoản.
 NGUON_TOI_DA_KY_TU = 520
@@ -203,6 +227,14 @@ BO_LOC_NHANH = (
     {"ma": "kol", "ten": "KOL/KOC nói về thương hiệu",
      "mo_ta": "Bài của các nguồn KOL/KOC đang theo dõi (External channel).",
      "loc": {"pham_vi": "ben_ngoai", "loai": "kol"}},
+    # 20/10/2026 (task t284905): tách KOC theo giỏ hàng TikTok Shop của TỪNG video.
+    {"ma": "koc_aff", "ten": "KOC affiliate (gắn giỏ)",
+     "mo_ta": "Video TikTok External channel có gắn giỏ TikTok Shop — theo từng video.",
+     "loc": {"koc": "affiliate"}},
+    {"ma": "koc_brand", "ten": "KOC branding (không giỏ)",
+     "mo_ta": "Video TikTok External channel không gắn giỏ hàng — theo từng video; chưa rõ "
+              "giỏ (nguồn không báo) không tính.",
+     "loc": {"koc": "branding"}},
     {"ma": "khung_hoang", "ten": "Cảnh báo khủng hoảng",
      "mo_ta": "Tiêu cực trên bài có từ 1.000 tương tác — thứ lan nhanh nhất, kể cả trên Internal channel.",
      "loc": {"sac_thai": "tieu_cuc", "tuong_tac": "1000"}},
@@ -324,7 +356,7 @@ def doc_bo_loc(q) -> dict:
             "sac_thai": tuple(sorted(set(sac_ds))), "chu_de": chu_de,
             "anh_huong": nhieu("anh_huong", ANH_HUONG), "tuong_tac": int(tt) if tt else 0,
             "q": tim, "kieu_quet": kq, "kieu_trang": nhieu("kieu_trang", KIEU_TRANG),
-            "y_dinh": yd, "gom_mg": mg}
+            "koc": nhieu("koc", KOC), "y_dinh": yd, "gom_mg": mg}
 
 
 def khoa_bo_loc(bo_loc: dict | None) -> tuple:
@@ -368,6 +400,7 @@ class _Loc:
         self.cd_bl = {x for x in cd if nhom_chu_de(x) != "bai"}
         self.ah = set(b.get("anh_huong") or ())
         self.kt = set(b.get("kieu_trang") or ())
+        self.koc = set(b.get("koc") or ())
         self.tt = int(b.get("tuong_tac") or 0)
         self.kq = b.get("kieu_quet") or ""
         self.q = CC.khoa_tim(b.get("q")) if b.get("q") else ""
@@ -376,12 +409,13 @@ class _Loc:
         self._q_bai: dict[int, bool] = {}
         self.rong = self._tinh_rong()
         # Bình luận cần tra BÀI gốc khi lọc theo thứ dòng bình luận không mang.
-        self.can_bai = bool(self.ah or self.tt or self.kq or self.q or self.kt or
+        self.can_bai = bool(self.ah or self.tt or self.kq or self.q or self.kt or self.koc or
                             any(not k.startswith("n:") for k in self.ng))
 
     def _tinh_rong(self) -> bool:
         return not (self.pv != "tat_ca" or self.nt or self.lo or self.ng or self.sac or self.cd_bai
-                    or self.cd_bl or self.ah or self.tt or self.kq or self.q or self.kt or self.yd)
+                    or self.cd_bl or self.ah or self.tt or self.kq or self.q or self.kt or self.koc
+                    or self.yd)
 
     def bo_y_dinh(self) -> _Loc:
         """Bản sao KHÔNG có chiều y_dinh — mẫu số "% bình luận sạch" của Ý định mua: đang lọc
@@ -432,6 +466,8 @@ class _Loc:
             m |= _BIT["kieu_quet"]
         if self.kt and r.get("kieu_trang") not in self.kt:
             m |= _BIT["kieu_trang"]
+        if self.koc and nhom_koc(r) not in self.koc:
+            m |= _BIT["koc"]
         return m
 
     def hong_bl(self, c: dict, bai: dict | None = None) -> int:
@@ -466,6 +502,8 @@ class _Loc:
             m |= _BIT["kieu_quet"]
         if self.kt and (bai is None or bai.get("kieu_trang") not in self.kt):
             m |= _BIT["kieu_trang"]
+        if self.koc and (bai is None or nhom_koc(bai) not in self.koc):
+            m |= _BIT["koc"]
         if self.yd and not khop_y_dinh(c, self.yd):
             m |= _BIT["y_dinh"]
         return m
@@ -754,7 +792,7 @@ def _the_bai(r: dict) -> dict:
         "chu_de": r.get("chu_de") or "", "loai": TEN_LOAI.get(loai(r), loai(r)),
         "xem": so_co(r.get("xem")), "thich": so_co(r.get("thich")),
         "binh_luan": so_co(r.get("binh_luan")), "chia_se": so_co(r.get("chia_se")),
-        "thao_luan": thao_luan(r)}
+        "thao_luan": thao_luan(r), "koc": nhom_koc(r)}
 
 
 def top_bai(rows: list[dict], toi_da: int = TOP_BAI) -> list[dict]:
@@ -774,7 +812,7 @@ def top_bai(rows: list[dict], toi_da: int = TOP_BAI) -> list[dict]:
             "chu_de": r.get("chu_de") or "", "loai": TEN_LOAI.get(loai(r), loai(r)),
             "xem": so_co(r.get("xem")), "thich": so_co(r.get("thich")),
             "binh_luan": so_co(r.get("binh_luan")), "chia_se": so_co(r.get("chia_se")),
-            "thao_luan": thao_luan(r)})
+            "thao_luan": thao_luan(r), "koc": nhom_koc(r)})
     return ra
 
 
@@ -1711,6 +1749,26 @@ def _phia() -> dict:
             "sac_bai": dict.fromkeys(MA_SAC, 0), "sac_bl": dict.fromkeys(MA_SAC, 0)}
 
 
+def _nhom_koc() -> dict:
+    return {"bai": 0, "thao_luan": 0, "xem": 0, "tuong_tac": 0, "quang_cao": 0,
+            "sac_bai": dict.fromkeys(MA_SAC, 0), "nguoi": set()}
+
+
+def _loai_koc_json(koc: dict[str, dict]) -> dict:
+    """Khối "KOC affiliate vs branding" (20/10/2026): mỗi nhóm số video, nhà sáng tạo, thảo luận,
+    lượt xem, tương tác, video quảng cáo (is_ads), sắc thái bài + % trên tổng ba nhóm. `tong` =
+    tổng của video TikTok External channel khớp mọi bộ lọc TRỪ chính chiều "Loại KOC"."""
+    tong = {k: sum(g[k] for g in koc.values()) for k in ("bai", "thao_luan", "xem", "tuong_tac")}
+
+    def pt(a, b):
+        return round(100.0 * a / b, 1) if b else None
+    return {"tong": tong, "nhom": [
+        {"ma": k, "ten": KOC[k], **{x: g[x] for x in ("bai", "thao_luan", "xem", "tuong_tac",
+                                                        "quang_cao", "sac_bai")},
+         "nguoi": len(g["nguoi"]), **{f"{x}_pt": pt(g[x], tong[x]) for x in tong}}
+        for k, g in koc.items()]}
+
+
 def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datetime.date,
                   bo_loc=None, bai_theo_khoa: dict | None = None) -> dict:
     """Trên kỳ [tu, den]: số đếm cho từng ô của thanh lọc (`bo_loc_dem`) + khối "Kênh nhà vs Bên
@@ -1728,6 +1786,7 @@ def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datet
     sac_bl_dem: collections.Counter = collections.Counter()
     ten_nguon: dict[str, dict] = {}
     nha = {"kenh_nha": _phia(), "ben_ngoai": _phia()}
+    koc = {k: _nhom_koc() for k in KOC}
     pv = _BIT["pham_vi"]
     for r in trong_khoang(bai, tu, den):
         m = f.hong_bai(r)
@@ -1767,6 +1826,16 @@ def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datet
             dem["kieu_quet"][kieu_quet_bai(r)] += 1
         if m in (0, _BIT["kieu_trang"]) and r.get("kieu_trang") in KIEU_TRANG:
             dem["kieu_trang"][r["kieu_trang"]] += 1
+        if m in (0, _BIT["koc"]) and (nk := nhom_koc(r)) is not None:
+            dem["koc"][nk] += 1
+            g = koc[nk]
+            g["bai"] += 1
+            g["thao_luan"] += thao_luan(r)
+            g["xem"] += so(r.get("xem"))
+            g["tuong_tac"] += tuong_tac_bai(r)
+            g["sac_bai"][SAC_MA[sac(r)]] += 1
+            g["quang_cao"] += 1 if r.get("la_quang_cao") is True else 0
+            g["nguoi"].add(_khoa_nguon(r))
     tra = (bai_theo_khoa or {}).get
     for c in bl:
         n = _ngay_bl(c)
@@ -1800,11 +1869,11 @@ def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datet
                     key=lambda g: (g["gia_tri"] == CHUA, -(g["so_bai"] + g["so_bl"]),
                                    g["gia_tri"]))
     don = {k: dict(dem[k]) for k in ("pham_vi", "nen_tang", "loai", "anh_huong", "tuong_tac",
-                                    "kieu_quet", "kieu_trang")}
+                                    "kieu_quet", "kieu_trang", "koc")}
     return {"bo_loc_dem": {**don, "sac_thai": {k: {"bai": dem["sac_thai"][k],
                                                    "bl": sac_bl_dem[k]} for k in MA_SAC},
                            "chu_de": chu_de, "nguon": nguon},
-            "nha_ngoai": nha}
+            "nha_ngoai": nha, "loai_koc": _loai_koc_json(koc)}
 
 
 #: Nhãn + giá trị của thanh lọc cho trình duyệt (một nguồn sự thật với phần kiểm ở máy chủ).
@@ -1812,6 +1881,7 @@ NHAN_BO_LOC = {
     "pham_vi": PHAM_VI, "nen_tang": TEN_NEN_TANG, "loai": TEN_LOAI,
     "sac_thai": {k: v[0].upper() + v[1:] for k, v in MA_SAC.items()},
     "anh_huong": ANH_HUONG, "kieu_quet": KIEU_QUET, "kieu_trang": KIEU_TRANG, "y_dinh": Y_DINH,
+    "koc": KOC,
     "tuong_tac": [{"gia_tri": str(m), "ten": f"Từ {m:,}".replace(",", ".") + " tương tác"}
                   for m in TUONG_TAC_MUC],
 }

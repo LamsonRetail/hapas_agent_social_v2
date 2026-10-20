@@ -546,6 +546,9 @@ def tach_da_biet(ma: str, hits: list[tuple], khoa_cua) -> tuple[list[dict], list
     cap_nhat = [{"khoa": k, "xem": _so(d.get("views")), "thich": _so(d.get("likes")),
                  "binh_luan": _so(d.get("comments")), "chia_se": _so(d.get("shares")),
                  "nen_tang": d.get("platform"),
+                 # Cờ TikTok (20/10/2026): bài đã có mà cờ còn NULL thì được điền
+                 # (`K.ghi_co_tiktok`).
+                 **K.co_tiktok(d),
                  # Script nạp raw: ngày ĐỌC của lần đọc này (`lang_nghe_db.nang_so_lieu`).
                  **({"_ngay_so": d["_luc_doc"].astimezone(_VN).date()}
                     if isinstance(d.get("_luc_doc"), datetime.datetime) else {})}

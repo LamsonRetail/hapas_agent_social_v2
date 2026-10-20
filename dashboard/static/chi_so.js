@@ -78,12 +78,12 @@
   // mã món (17/10/2026, vd "set_qua") = chỉ bình luận hỏi mua món đó — chip món của khối Ý định mua.
   // gom_mg: tuỳ chọn của MÂY TỪ (gồm bình luận minigame) — theo URL như bộ lọc nhưng không lọc khối
   // nào khác, nên không hiện chip / không đếm là "đang lọc" / bộ lọc nhanh và "Xoá lọc" giữ nguyên.
-  var CHIEU = ["pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong", "tuong_tac", "q", "kieu_quet", "kieu_trang", "y_dinh", "gom_mg"];
+  var CHIEU = ["pham_vi", "nen_tang", "loai", "nguon", "sac_thai", "chu_de", "anh_huong", "tuong_tac", "q", "kieu_quet", "kieu_trang", "koc", "y_dinh", "gom_mg"];
   var CHIEU_LOC_THAT = CHIEU.filter(function (k) { return k !== "gom_mg"; });
-  var NHIEU = { nen_tang: 1, loai: 1, nguon: 1, sac_thai: 1, chu_de: 1, anh_huong: 1, kieu_trang: 1 };
+  var NHIEU = { nen_tang: 1, loai: 1, nguon: 1, sac_thai: 1, chu_de: 1, anh_huong: 1, kieu_trang: 1, koc: 1 };
   var TEN_CHIEU = { pham_vi: "Phạm vi", nen_tang: "Nền tảng", loai: "Loại nguồn", nguon: "Nguồn", sac_thai: "Sắc thái",
                     chu_de: "Chủ đề", anh_huong: "Ảnh hưởng", tuong_tac: "Tương tác", q: "Tìm", kieu_quet: "Kiểu quét", kieu_trang: "Loại trang",
-                    y_dinh: "Ý định mua", gom_mg: "Mây từ" };
+                    koc: "Loại KOC", y_dinh: "Ý định mua", gom_mg: "Mây từ" };
   var MA_SAC = { "Tích cực": "tich_cuc", "Tiêu cực": "tieu_cuc", "Trung lập": "trung_lap", "chưa phân loại": "chua_phan_loai" };
   var LOP_MA_SAC = { tich_cuc: "tc", tieu_cuc: "ti", trung_lap: "tl", chua_phan_loai: "chua" };
   var RE_DAU_NGUON = /^(n|t|link|\?|tiktok|facebook|instagram|youtube|threads|web):/;
@@ -91,7 +91,7 @@
   var tenNguonDaBiet = {};
   function locRong() {
     return { pham_vi: "tat_ca", nen_tang: [], loai: [], nguon: [], sac_thai: [], chu_de: [], anh_huong: [],
-             tuong_tac: "", q: "", kieu_quet: "", kieu_trang: [], y_dinh: "", gom_mg: "" };
+             tuong_tac: "", q: "", kieu_quet: "", kieu_trang: [], koc: [], y_dinh: "", gom_mg: "" };
   }
   // "a,b" -> ["a","b"]; khoá nguồn có thể chứa dấu phẩy (tên tác giả) — ghép như máy chủ.
   function tachGiaTri(k, s) {
@@ -335,6 +335,9 @@
     if (r.kieu_trang) ds.push(chip(tenG("kieu_trang", r.kieu_trang), "web", "Loại trang của bài Báo & Web"));
     if (r.la_pr) ds.push(chip("PR", "pr", "Bài PR: thân bài dẫn link về trang của thương hiệu hoặc ghi nguồn/ảnh từ thương hiệu"));
     if (r.muc_nhac) ds.push(chip(TEN_MUC_NHAC[r.muc_nhac] || r.muc_nhac, "nguon", "Mức nhắc thương hiệu trong bài"));
+    // Video TikTok External channel (20/10/2026): giỏ TikTok Shop — chưa rõ thì không gắn nhãn.
+    if (r.koc === "affiliate") ds.push(chip("Gắn giỏ", "gio", "KOC affiliate: video gắn giỏ TikTok Shop"));
+    else if (r.koc === "branding") ds.push(chip("Không giỏ", "nguon", "KOC branding: video không gắn giỏ hàng"));
     return ds;
   }
   function chipSac(s) {
@@ -2723,12 +2726,18 @@
   }
 
   // ─── thanh lọc chung: các trường (ô chọn nhiều giá trị, có số đếm) ───
+  // Một câu cho ⓘ của ô lọc + khối KOC (20/10/2026, task t284905).
+  var GOI_Y_KOC = "Theo từng video, chỉ TikTok ngoài Internal channel. KOC affiliate = video gắn giỏ TikTok Shop; " +
+    "KOC branding = video không gắn giỏ; Chưa rõ = nguồn không báo giỏ (feed hashtag, bài cũ chưa bù) — không đoán. " +
+    "Chọn thì bài nền tảng khác không khớp; bình luận theo bài.";
   var TRUONG_G = [
     { k: "nen_tang", ten: "Nền tảng" }, { k: "loai", ten: "Loại nguồn" }, { k: "nguon", ten: "Nguồn", tim: true },
     { k: "sac_thai", ten: "Sắc thái" }, { k: "chu_de", ten: "Chủ đề", tim: true }, { k: "anh_huong", ten: "Ảnh hưởng" },
     { k: "tuong_tac", ten: "Tương tác" }, { k: "kieu_quet", ten: "Kiểu quét" },
     // Báo & Web (16/10/2026): chỉ hiện khi kỳ có bài web hoặc đang lọc (bài MXH không có loại trang)
-    { k: "kieu_trang", ten: "Loại trang", chiKhiCo: true }
+    { k: "kieu_trang", ten: "Loại trang", chiKhiCo: true },
+    // KOC theo giỏ hàng (20/10/2026): chỉ hiện khi kỳ có video TikTok External channel hoặc đang lọc
+    { k: "koc", ten: "Loại KOC", chiKhiCo: true }
   ];
   var GHI_CHU_G = {
     nguon: "Bình luận theo nguồn của bài. Số = bài trong kỳ.",
@@ -2737,7 +2746,8 @@
     anh_huong: "Theo follower của tài khoản đăng bài; bình luận theo bài.",
     tuong_tac: "Thích + bình luận + chia sẻ của bài; bình luận theo bài.",
     kieu_quet: "Bài vào kho bằng đường nào; bình luận theo bài.",
-    kieu_trang: "Chỉ bài Báo & Web có loại trang — chọn thì bài mạng xã hội không khớp; bình luận theo bài."
+    kieu_trang: "Chỉ bài Báo & Web có loại trang — chọn thì bài mạng xã hội không khớp; bình luận theo bài.",
+    koc: GOI_Y_KOC
   };
   var TEN_NHOM_CD = { bai: "Chủ đề bài", bl: "Chủ đề bình luận", chung: "Dùng chung" };
   var nutG = {}, popG = null;
@@ -3086,6 +3096,74 @@
     $("nn-phu").title = phu ? "Theo " + phu + " bộ lọc khác đang chọn" : "Toàn bộ dữ liệu kỳ này";
   }
 
+  // ─── KOC affiliate vs KOC branding (20/10/2026, task t284905): bấm một nhóm = lọc "Loại KOC" ───
+  var MAU_KOC = { affiliate: "var(--cam-2)", branding: "var(--xanh-2)", chua_ro: "var(--trung-lap)" };
+  function benKoc(x, tong) {
+    var dang = G.koc.length === 1 && G.koc[0] === x.ma, mo = G.koc.length > 0 && G.koc.indexOf(x.ma) < 0;
+    var o = nut("", "cs-nn__ben cs-koc__ben" + (mo ? " cs-nn__ben--mo" : ""), function () {
+      datLocChung({ koc: dang ? [] : [x.ma] });
+    });
+    o.setAttribute("aria-pressed", dang ? "true" : "false");
+    o.setAttribute("data-k", x.ma);
+    o.style.setProperty("--koc-mau", MAU_KOC[x.ma] || MAU_KOC.chua_ro);
+    var dau = tao("span", "cs-nn__dau");
+    var cham = tao("span", "cs-koc__cham");
+    cham.setAttribute("aria-hidden", "true");
+    dau.appendChild(cham);
+    var ten = tao("span", "cs-nn__ten-khoi");
+    ten.appendChild(tao("span", "cs-nn__ten", x.ten));
+    var phu = so(x.nguoi) + " nhà sáng tạo" + (x.quang_cao ? " · " + so(x.quang_cao) + " video quảng cáo" : "");
+    ten.appendChild(tao("span", "cs-koc__phu", phu));
+    dau.appendChild(ten);
+    dau.appendChild(tao("span", "cs-nn__hd", dang ? "Đang lọc · bỏ" : "Xem riêng →"));
+    o.appendChild(dau);
+    var s4 = tao("span", "cs-koc__so");
+    [["Video", "bai"], ["Thảo luận", "thao_luan"], ["Lượt xem", "xem"], ["Tương tác", "tuong_tac"]].forEach(function (c) {
+      var o1 = tao("span", "cs-nn__o");
+      o1.appendChild(tao("span", "cs-nn__nhan", c[0]));
+      var v = tao("b", "so", soThe(x[c[1]]));
+      if (x[c[1]] >= 1e6) v.title = so(x[c[1]]);
+      o1.appendChild(v);
+      var p = x[c[1] + "_pt"];
+      o1.appendChild(tao("span", "cs-koc__pt", p == null ? "—" : ptCua(x[c[1]], tong[c[1]])));
+      s4.appendChild(o1);
+    });
+    o.appendChild(s4);
+    o.appendChild(dongSacNN("Sắc thái video", x.sac_bai, "video"));
+    o.setAttribute("aria-label", x.ten + ": " + so(x.bai) + " video, " + so(x.thao_luan) + " thảo luận, " +
+                   so(x.xem) + " lượt xem — " + (dang ? "đang lọc, bấm để bỏ" : "bấm để chỉ xem nhóm này"));
+    return o;
+  }
+  function veKoc(d) {
+    var x = d.loai_koc, el = $("loai-koc"), ty = $("koc-ty"), khoi = $("khoi-koc");
+    if (!x || !el) return;
+    var tong = x.tong;
+    // Kỳ / bộ lọc không có video TikTok External channel và không lọc theo KOC: ẩn cả thẻ cho gọn.
+    khoi.hidden = !tong.bai && !G.koc.length;
+    giuNut(el, function () {
+      xoa(el);
+      if (!tong.bai) { el.appendChild(tao("div", "trong", "Không có video TikTok External channel khớp bộ lọc.")); return; }
+      x.nhom.forEach(function (n) { el.appendChild(benKoc(n, tong)); });
+    });
+    xoa(ty);
+    if (tong.bai) {
+      var t = tao("div", "cs-nn__thanh");
+      t.setAttribute("role", "img");
+      t.setAttribute("aria-label", "Tỷ trọng video: " + x.nhom.map(function (n) { return n.ten + " " + ptCua(n.bai, tong.bai); }).join(", "));
+      x.nhom.forEach(function (n) {
+        if (!n.bai) return;
+        var s = tao("span", "cs-nn__phan");
+        s.style.flex = n.bai + " 1 0";
+        s.style.background = MAU_KOC[n.ma] || MAU_KOC.chua_ro;
+        t.appendChild(s);
+      });
+      ty.appendChild(t);
+    }
+    var phu = soChieuDang(Object.assign({}, G, { koc: [] }));
+    $("koc-phu").textContent = so(tong.bai) + " video · tỷ trọng theo số video";
+    $("koc-phu").title = phu ? "Theo " + phu + " bộ lọc khác đang chọn" : "Toàn bộ dữ liệu kỳ này";
+  }
+
   // ─── đổi bộ lọc: URL, chờ (khung xương), một AbortController cho mọi khối ───
   var ctlChung = null, henLoc = null, dangDoi = false, loiLuot = false;
   function urlHienTai() {
@@ -3287,6 +3365,7 @@
     chay("thảo luận", function () { veXuHuong(d, m); });
     chay("phân bố", function () { vePhanBo(d); });
     chay("internal vs external channel", function () { veNhaNgoai(d); });
+    chay("KOC affiliate vs branding", function () { veKoc(d); });
     chay("nguồn nổi bật", function () { veTopNguon(d); });
     chay("sắc thái", function () { veSacThai(d, m); });
     chay("sắc thái theo thời gian", function () { veSacThaiTg(d, m); });

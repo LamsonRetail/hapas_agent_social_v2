@@ -48,3 +48,20 @@
       config: {ten: "hoi_dashboard", co_tham_so: "phan"}
     - type: icontains-any
       value: ["USD", "social.hapas.vn"]
+
+# người chấm (20/10/2026, task Lark t284905): KOC affiliate = video TikTok gắn giỏ TikTok Shop, KOC
+# branding = không gắn giỏ, theo từng video; phải nói số "chưa rõ giỏ" riêng, không gộp vào branding.
+- description: "SOW 21 · Hỏi dashboard — bao nhiêu video KOC affiliate (gắn giỏ) vs KOC branding, đọc phần koc"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21k
+    hoi: "30 ngày qua HAPAS có bao nhiêu video KOC affiliate gắn giỏ, bao nhiêu video KOC branding?"
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "hoi_dashboard", co_tham_so: "phan"}
+    - type: icontains-any
+      value: ["giỏ", "social.hapas.vn"]
+    - type: not-icontains
+      value: "Chạy nhé"

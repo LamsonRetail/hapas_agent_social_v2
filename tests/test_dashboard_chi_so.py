@@ -288,7 +288,7 @@ def test_doc_bo_loc_chuan_hoa_va_tu_choi():
     rong = CS.doc_bo_loc({})
     assert rong == {"pham_vi": "tat_ca", "nen_tang": (), "loai": (), "nguon": (), "sac_thai": (),
                     "chu_de": (), "anh_huong": (), "tuong_tac": 0, "q": "", "kieu_quet": "",
-                    "kieu_trang": (), "y_dinh": "", "gom_mg": ""}
+                    "kieu_trang": (), "koc": (), "y_dinh": "", "gom_mg": ""}
     b = CS.doc_bo_loc({"nen_tang": "tiktok,facebook,tiktok", "sac_thai": "tieu_cuc,Tích cực",
                        "tuong_tac": "1.000", "q": "  túi   xách ",
                        "nguon": "n:1,tiktok:khach, a,n:2", "loai": "kol"})

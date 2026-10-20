@@ -821,6 +821,10 @@ def _dong_tu_tai_khoan(p: str, tk: dict) -> list[tuple[dict, datetime.datetime |
             # doc_thedoor`), không có thì id trong link `/<id trang>/posts/<id bài>`; actor cũ:
             # `postId`, link pfbid thì không có id.
             **({"ma_so_fb": KT.ma_so_fb({**b, "_goc": goc})} if p == "facebook" else {}),
+            # Cờ TikTok (20/10/2026, `bai.gio_hang` / `bai.la_quang_cao`): đọc từ item gốc kiểu
+            # clockworks (`tiktok_api.video`); thiếu trường thì None — không đoán.
+            **({"gio_hang": A._gio_hang_tiktok(goc), "la_quang_cao": A._quang_cao_tiktok(goc)}
+               if p == "tiktok" else {}),
         }, b.get("ngay")))
     return ra
 
@@ -1107,7 +1111,7 @@ def chon_bai(du_an: dict, theo_nguon: dict[int, list], nguon: dict[int, dict],
             "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
             "binh_luan": _so_hay_none(d.get("comments")),
             "chia_se": _so_hay_none(d.get("shares")),
-            **_cot_fb(d), **_ngay_so(d),
+            **_cot_fb(d), **K.co_tiktok(d), **_ngay_so(d),
         })
     tk["giu"] = len(ra)
     return ra, tk
@@ -4151,7 +4155,7 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
             "binh_luan": _so_hay_none(d.get("comments")),
             "chia_se": _so_hay_none(d.get("shares")),
-            **_cot_web(d), **_cot_fb(d), **_ngay_so(d),
+            **_cot_web(d), **_cot_fb(d), **K.co_tiktok(d), **_ngay_so(d),
         })
         ban.append((d, dt))
     tk["giu"] = len(rows)
@@ -5511,7 +5515,7 @@ def luu_tu_khoa(queries: list[str], ban: list) -> dict:
                 "xem": _so_hay_none(d.get("views")), "thich": _so_hay_none(d.get("likes")),
                 "binh_luan": _so_hay_none(d.get("comments")),
                 "chia_se": _so_hay_none(d.get("shares")),
-                **_cot_fb(d),
+                **_cot_fb(d), **K.co_tiktok(d),
             })
         luot = K.mo_luot(ma, "tu_khoa")
         try:
