@@ -61,6 +61,7 @@ from dashboard import chi_so as CS
 from dashboard import dang_nhap as DN
 from dashboard import danh_ba as DB
 from dashboard import lich_quet as LQ
+from dashboard import meta_ads as MA
 from dashboard import nhap_lieu as NL
 from dashboard import phan_quyen as PQ
 from dashboard import quang_cao as QC
@@ -113,8 +114,8 @@ TIKTOK_STATE_GIAY = 600
 NHO_BEN_QC_GIAY = 60.0
 TOP_QC = 10
 #: 19/10/2026 (soát): dashboard KHÔNG chạy đồng bộ TikTok trong tiến trình web — chỉ ghi cờ yêu cầu,
-#: bộ hẹn giờ tiktok-ads-yeu-cau.timer (10 phút/lần) chạy lượt.
-CHO_DONG_BO = "Lượt đồng bộ sẽ chạy trong ≤ 10 phút (bộ hẹn giờ trên máy chủ)."
+#: bộ hẹn giờ tiktok-ads-yeu-cau.timer / meta-ads-yeu-cau.timer (2 phút/lần, 20/10/2026) chạy lượt.
+CHO_DONG_BO = "Lượt đồng bộ sẽ chạy trong ≤ 2 phút (bộ hẹn giờ trên máy chủ)."
 
 log = logging.getLogger("lang_nghe.dashboard")
 
@@ -562,7 +563,7 @@ class KhoQcRong:
     def ben_co_tk(self):
         return set()
 
-    def dang_dong_bo(self):
+    def dang_dong_bo(self, *a):
         return False
 
     def __getattr__(self, ten: str):
@@ -775,7 +776,7 @@ def _dang_doc_danh_ba(app: FastAPI) -> bool:
 
 # ───────────────────────────── nhà máy ứng dụng ─────────────────────────────
 def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=None,
-            danh_ba=None, kho_qc=None, tiktok=None,
+            danh_ba=None, kho_qc=None, tiktok=None, meta=None,
             chu_ky_kiem: float | None = CHU_KY_KIEM,
             sse_toi_da_su_kien: int | None = None,
             sse_kiem_quyen_giay: float = SSE_KIEM_QUYEN_GIAY) -> FastAPI:
@@ -787,7 +788,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     `sse_toi_da_su_kien` (luồng SSE tự đóng sau N sự kiện) và `sse_kiem_quyen_giay`;
     `danh_ba` = DanhBaLark với httpx.MockTransport (mặc định: danh bạ Lark thật, cùng app).
     TikTok Ads (19/10/2026): `kho_qc` (mặc định `dashboard.kho_qc` khi kho thật, `KhoQcRong` khi bộ
-    thử truyền kho giả) và `tiktok` (`tiktok_ads.DichVu` — bộ thử truyền bản có HTTP giả)."""
+    thử truyền kho giả) và `tiktok` (`tiktok_ads.DichVu` — bộ thử truyền bản có HTTP giả). Meta Ads
+    (20/10/2026): `meta` (`meta_ads.DichVu`, cùng `kho_qc`)."""
     if kho_qc is None:
         if kho is None:
             from dashboard import kho_qc as kho_qc_pg
@@ -798,6 +800,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         from dashboard import kho as kho_pg
         kho = kho_pg
     tiktok = tiktok or TA.DichVu(kho_qc)
+    meta = meta or MA.DichVu(kho_qc)
     cau_hinh = cau_hinh or DN.CauHinh.tu_env()
     lark = lark or DN.LarkOAuth(cau_hinh)
     danh_ba = danh_ba or DB.DanhBaLark(cau_hinh)
@@ -826,6 +829,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     app.state.danh_ba_doc_tu = float("-inf")
     app.state.kho_qc = kho_qc
     app.state.tiktok = tiktok
+    app.state.meta = meta
     app.state.nho_ben_qc = (float("-inf"), set())
     app.state.mau = _tao_mau()
     app.state.bang_tin = BangTin()
@@ -1017,7 +1021,70 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                "hom_nay": hom_nay.isoformat(), "toi_da_ngay": KHOANG_TOI_DA_NGAY,
                "nhan": CS.NHAN_BO_LOC, "nhanh": list(CS.BO_LOC_NHANH)}
         return _trang(request, "chi_so.html", nguoi, "chi_so", du_an_ds=ds, du_an=du_an,
-                      loc=loc, loi_loc=loi, chua_tron=den >= hom_nay)
+                      loc=loc, loi_loc=loi, chua_tron=den >= hom_nay,
+                      dai_qc=await _dai_qc(), duong_ve="/")
+
+    # ─── đồng bộ quảng cáo: dải trạng thái + "Đồng bộ ngay" cho mọi người có quyền (20/10/2026) ───
+    def _dv_qc() -> dict:
+        return {"tiktok": app.state.tiktok, "meta": app.state.meta}
+
+    async def _the_qc(nen: str) -> dict | None:
+        try:
+            return await _k(_dv_qc()[nen].the)
+        except Exception as e:  # noqa: BLE001 — kho quảng cáo chưa dùng được: không có dải
+            log.warning("đọc trạng thái đồng bộ %s lỗi: %s", nen, type(e).__name__)
+            return None
+
+    async def _dai_qc() -> list[dict]:
+        """Dải trạng thái đồng bộ quảng cáo (mọi người có quyền): mỗi nền tảng đã kết nối một ô —
+        số đến ngày nào, đồng bộ lúc nào, trạng thái. KHÔNG tiền, không số liệu."""
+        ra = []
+        for nen in QC.NEN_TANG_QC:
+            t = await _the_qc(nen)
+            if t and t.get("co_token"):
+                ra.append(QC.dai_trang_thai(t, nen))
+        return ra
+
+    @app.post("/quang-cao/dong-bo")
+    async def quang_cao_dong_bo(request: Request):
+        """"Đồng bộ ngay" cho MỌI người có quyền ở ít nhất một bên (như nút BigQuery): CHỈ ghi cờ
+        yêu cầu loại "nhanh" (hôm nay + 2 ngày trước, tài khoản có hiển thị) — bộ hẹn giờ 2 phút
+        chạy, dashboard không chạy đồng bộ. Đang chạy / đang có yêu cầu / chưa hết 15 phút giãn
+        → không tạo yêu cầu mới, trả lời lý do. Nạp lùi, kết nối, ngắt, gán bên: vẫn chỉ quản trị."""
+        nguoi, form = await _sua(request, can_quan_ly=False)
+        if not PQ.co_quyen(nguoi["q"]):
+            raise _Cam("Bạn chưa có quyền ở bên nào.")
+        ve = NL.duong_an_toan(str(form.get("ve") or "/"))
+        nen = str(form.get("nen_tang") or "tat_ca")
+        if nen not in (*QC.NEN_TANG_QC, "tat_ca"):
+            return _chuyen(request, ve, "loi", "Nền tảng không hợp lệ.")
+        bay = datetime.datetime.now(datetime.timezone.utc)
+        ok, tu_choi = [], []
+        for n in (QC.NEN_TANG_QC if nen == "tat_ca" else (nen,)):
+            t = await _the_qc(n)
+            if t is None:
+                tu_choi.append(f"{QC.TEN_NEN_TANG_QC[n]}: chưa đọc được trạng thái")
+                continue
+            ly_do = QC.kiem_yeu_cau(t, bay)
+            if ly_do:
+                if nen == "tat_ca" and ly_do == "chưa kết nối":
+                    continue
+                tu_choi.append(f"{QC.TEN_NEN_TANG_QC[n]}: {ly_do}")
+                continue
+            try:
+                await _k(_dv_qc()[n].yeu_cau, nguoi["email"], "nhanh")
+                await _k(app.state.kho.ghi_nhat_ky, nguoi["email"], "dong_bo_qc",
+                         f"quang_cao:{n}", {"kieu": "bam_tay", "cua_so": "nhanh"})
+                ok.append(QC.TEN_NEN_TANG_QC[n])
+            except (LoiKho, LoiDuLieu) as e:
+                log.warning("ghi yêu cầu đồng bộ %s lỗi: %s", n, type(e).__name__)
+                tu_choi.append(f"{QC.TEN_NEN_TANG_QC[n]}: chưa ghi được yêu cầu")
+        if ok:
+            tin = (f"Đã yêu cầu đồng bộ {', '.join(ok)} (hôm nay + 2 ngày trước). {CHO_DONG_BO}"
+                   + (f" Bỏ qua — {'; '.join(tu_choi)}." if tu_choi else ""))
+            return _chuyen(request, ve, "ok", tin)
+        return _chuyen(request, ve, "canh", "Chưa tạo yêu cầu mới — "
+                       + ("; ".join(tu_choi) or "chưa kết nối nền tảng nào") + ".")
 
     async def _loc_api(request: Request):
         """Bộ lọc chung của các API số liệu. -> (dự án, từ, đến, bộ lọc `CS.doc_bo_loc`) hoặc
@@ -2155,17 +2222,20 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                   if x.get("lark_open_id")})
         dang_doc = _dang_doc_danh_ba(app)
         # TikTok Ads (19/10/2026): thẻ kết nối + bảng gán bên — CHỈ quản trị viên (chủ dự án chốt).
-        tt_the, tk_qc, loi_qc = None, [], ""
+        tt_the, mt_the, tk_qc, loi_qc = None, None, [], ""
         if qt:
             try:
                 tt_the = await _k(app.state.tiktok.the)
-                tk_qc = list(await _k(app.state.kho_qc.cac_tk))
+                mt_the = await _k(app.state.meta.the)
+                tk_qc = [{**t, "nen_tang": QC.nen_tang_tk(t), "duyet": t.get("duyet", True)}
+                         for t in await _k(app.state.kho_qc.cac_tk)]
             except (LoiKho, LoiDuLieu) as e:
-                log.warning("thẻ TikTok Ads lỗi: %s", type(e).__name__)
-                loi_qc = ("Chưa đọc được bảng TikTok Ads — chạy deploy/lang-nghe/schema.sql bản mới "
-                          "trên VPS rồi tải lại trang.")
+                log.warning("thẻ quảng cáo lỗi: %s", type(e).__name__)
+                loi_qc = ("Chưa đọc được bảng quảng cáo (TikTok / Meta Ads) — chạy "
+                          "deploy/lang-nghe/schema.sql bản mới trên VPS rồi tải lại trang.")
         r = _trang(request, "nguoi_xem.html", nguoi, "nguoi_xem", so_quan_tri=so_qt,
-                   tt=tt_the, tk_qc=tk_qc, loi_qc=loi_qc,
+                   tt=tt_the, mt=mt_the, tk_qc=tk_qc, loi_qc=loi_qc,
+                   TEN_NEN_TANG_QC=QC.TEN_NEN_TANG_QC,
                    ten_ben=[{"ma": m, "ten": t} for m, t in ten_ben.items()],
                    ds=[_dong_nguoi_xem(nguoi, x, ben_thay, ten_ben, so_qt, dang_doc) for x in ds],
                    ben_ql=[{"ma": m, "ten": ten_ben.get(m, m.upper())} for m in ben_ql],
@@ -2327,8 +2397,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                        "phút để xem kết quả (đang có lượt khác thì lượt này tự bỏ qua).")
 
     # ─── TikTok Ads (19/10/2026): kết nối — CHỈ quản trị viên ───
-    def _ve_quan_tri(request: Request, loai: str, tin: str, *, xoa_cookie: bool = False):
-        r = _chuyen(request, "/quan-tri#tiktok", loai, tin)
+    def _ve_quan_tri(request: Request, loai: str, tin: str, *, xoa_cookie: bool = False,
+                     neo: str = "tiktok"):
+        r = _chuyen(request, f"/quan-tri#{neo}", loai, tin)
         if xoa_cookie:
             r.delete_cookie(COOKIE_TIKTOK, path="/tiktok", secure=cau_hinh.cookie_secure,
                             httponly=True, samesite="lax")
@@ -2424,7 +2495,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                             "vài chục phút tới vài giờ.", xoa_cookie=True)
 
     async def _yeu_cau_dong_bo(ai: str) -> bool:
-        """Ghi cờ yêu cầu đồng bộ (bộ hẹn giờ 10 phút chạy). Dashboard KHÔNG tự chạy đồng bộ."""
+        """Ghi cờ yêu cầu đồng bộ (bộ hẹn giờ 2 phút chạy). Dashboard KHÔNG tự chạy đồng bộ."""
         try:
             await _k(app.state.tiktok.yeu_cau, ai)
             return True
@@ -2486,27 +2557,103 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                             f"{kq.get('so_tk_thay')} tài khoản quảng cáo. " + CHO_DONG_BO)
 
     @app.post("/tiktok/gan-ben")
+    @app.post("/qc/gan-ben")
     async def tiktok_gan_ben(request: Request):
+        """Bảng "Tài khoản quảng cáo → bên" (TikTok + Meta): bên, bật đồng bộ, (Meta) duyệt."""
         nguoi, form = await _sua_qt(request)
         adv = str(form.get("advertiser_id") or "")
         ben = str(form.get("don_vi") or "").strip().lower()
         bat = form.get("dang_dong_bo") == "1"
-        if not re.fullmatch(r"[0-9]{1,30}", adv):
-            return _ve_quan_tri(request, "loi", "Mã tài khoản quảng cáo không hợp lệ.")
+        meta = adv.startswith("act_")
+        if not re.fullmatch(r"(act_)?[0-9]{1,30}", adv):
+            return _ve_quan_tri(request, "loi", "Mã tài khoản quảng cáo không hợp lệ.", neo="tk-qc")
+        duyet = (form.get("duyet") == "1") if meta else None
         try:
-            await _k(app.state.kho_qc.gan_ben, nguoi["email"], adv, ben or None, bat)
+            if meta:
+                await _k(app.state.kho_qc.gan_ben, nguoi["email"], adv, ben or None, bat, duyet)
+            else:
+                await _k(app.state.kho_qc.gan_ben, nguoi["email"], adv, ben or None, bat)
         except (LoiDuLieu, LoiKho) as e:
-            return _ve_quan_tri(request, "loi", str(e))
+            return _ve_quan_tri(request, "loi", str(e), neo="tk-qc")
         app.state.nho_ben_qc = (float("-inf"), set())
         return _ve_quan_tri(request, "ok", f"Đã lưu tài khoản {adv}: "
                             + (f"bên {ben.upper()}" if ben else "chưa gán bên")
-                            + (", đang đồng bộ." if bat else ", tắt đồng bộ."))
+                            + (", đang đồng bộ" if bat else ", tắt đồng bộ")
+                            + ("" if duyet is None else (", đã duyệt." if duyet else
+                                                         ", chưa duyệt (không đọc số).")),
+                            neo="tk-qc")
+
+    # ─── Meta Ads (20/10/2026): kết nối — CHỈ quản trị viên ───
+    async def _yeu_cau_meta(ai: str) -> bool:
+        try:
+            await _k(app.state.meta.yeu_cau, ai)
+            return True
+        except (LoiKho, LoiDuLieu) as e:
+            log.warning("ghi yêu cầu đồng bộ Meta lỗi: %s", type(e).__name__)
+            return False
+
+    @app.post("/meta/dong-bo")
+    async def meta_dong_bo(request: Request):
+        nguoi, _ = await _sua_qt(request)
+        loi = app.state.meta.loi_khoa()
+        if loi:
+            return _ve_quan_tri(request, "loi", f"Chưa đồng bộ được: {loi}.", neo="meta")
+        if not await _yeu_cau_meta(nguoi["email"]):
+            return _ve_quan_tri(request, "loi", "Chưa ghi được yêu cầu đồng bộ — thử lại sau.",
+                                neo="meta")
+        return _ve_quan_tri(request, "ok", "Đã yêu cầu đồng bộ Meta Ads — " + CHO_DONG_BO,
+                            neo="meta")
+
+    @app.post("/meta/ngat")
+    async def meta_ngat(request: Request):
+        nguoi, _ = await _sua_qt(request)
+        try:
+            await _k(app.state.meta.ngat, nguoi["email"])
+        except (LoiKho, LoiDuLieu) as e:
+            return _ve_quan_tri(request, "loi", f"Chưa ngắt được ({e}).", neo="meta")
+        return _ve_quan_tri(request, "canh", "Đã xoá token Meta khỏi máy chủ (số đã đồng bộ giữ "
+                            "nguyên). Token người dùng hệ thống KHÔNG tự hết hạn và dashboard không "
+                            "thu hồi được bằng quyền đọc — vào Meta Business Settings → Người dùng "
+                            "hệ thống → thu hồi / tạo lại token.", neo="meta")
+
+    @app.post("/meta/token")
+    async def meta_token(request: Request):
+        """Dán token người dùng hệ thống: GET me + me/permissions (CHỈ ĐỌC mới nhận) +
+        me/adaccounts rồi mới lưu (mã hoá). Duyệt tài khoản giữ như cũ; tài khoản mới chờ duyệt."""
+        nguoi, form = await _sua_qt(request)
+        mt = app.state.meta
+        loi = mt.loi_khoa()
+        if loi:
+            return _ve_quan_tri(request, "loi", f"Chưa lưu được token: {loi}.", neo="meta")
+        try:
+            kq = await _k(mt.luu_token, nguoi["email"], form.get("token") or "")
+        except MA.LoiTokenKhongChiDoc as e:
+            return _ve_quan_tri(request, "loi", f"Không lưu: {e}.", neo="meta")
+        except MA.LoiXacThuc:
+            return _ve_quan_tri(request, "loi", "Meta không nhận token này (chưa lưu gì).",
+                                neo="meta")
+        except (MA.LoiMeta, TA.LoiMaHoa, LoiKho) as e:
+            return _ve_quan_tri(request, "loi", f"Chưa lưu được token ({e}).", neo="meta")
+        app.state.nho_ben_qc = (float("-inf"), set())
+        return _ve_quan_tri(request, "ok", f"Đã lưu token Meta ({kq.get('chu') or 'không tên'}; "
+                            f"quyền {', '.join(kq.get('quyen') or [])}) — thấy "
+                            f"{kq.get('so_tk_thay')} tài khoản. Tài khoản mới cần được duyệt ở bảng "
+                            "bên dưới. " + CHO_DONG_BO, neo="meta")
 
     # ─── Quảng cáo TikTok (trang + API; chỉ bên đọc được, tiền chỉ quản trị/quản lý) ───
     def _du_lieu_qc(nguoi: dict, qp, cac_tk: list[dict], ten_ben: dict, *, nghiem: bool) -> dict:
         """Số cho trang /quang-cao và /api/qc (cùng một hàm, chạy trong threadpool). `nghiem`: API —
         bên / tài khoản ngoài phạm vi là 404 (như không có); trang — lùi về mặc định."""
         q = nguoi["q"]
+        # 20/10/2026: lọc nền tảng (tat_ca | tiktok | meta) + chỉ tài khoản đã duyệt (Meta).
+        nen = str(qp.get("nen_tang") or "tat_ca")
+        if nen not in (*QC.NEN_TANG_QC, "tat_ca"):
+            if nghiem:
+                raise NL.LoiNhap("Nền tảng phải là tat_ca, tiktok hoặc meta.")
+            nen = "tat_ca"
+        cac_nen = [n for n in QC.NEN_TANG_QC if any(QC.nen_tang_tk(t) == n
+                                                    for t in QC.tk_dung(cac_tk))]
+        cac_tk = QC.tk_dung(cac_tk, nen)
         cac_ben = QC.ben_doc_qc(q, cac_tk)
         if nguoi["la_quan_tri"]:
             if any(not t.get("don_vi") for t in cac_tk):
@@ -2541,19 +2688,39 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             d += datetime.timedelta(days=1)
         sap = QC.cot_sap(qp.get("sap"), co_tien)
         ten_tk = {t["advertiser_id"]: t.get("ten") or t["advertiser_id"] for t in cac_tk}
+        nen_tk = {t["advertiser_id"]: QC.nen_tang_tk(t) for t in cac_tk}
 
         def top(cap):
-            return [{**QC.dong_top(r), "ten_tk": ten_tk.get(r.get("advertiser_id"), "")}
+            return [{**QC.dong_top(r), "ten_tk": ten_tk.get(r.get("advertiser_id"), ""),
+                     "nen_tang": nen_tk.get(r.get("advertiser_id"), "tiktok")}
                     for r in (kq.qc_top(cap, ids, tu, den, sap, TOP_QC) if ids else [])]
+        # Tách theo nền tảng (KPI tổng + chuỗi ngày của từng nền tảng trong phạm vi đang lọc).
+        theo_nen, ngay_nen = [], []
+        for n in QC.NEN_TANG_QC:
+            ids_n = [i for i in ids if nen_tk.get(i) == n]
+            if ids_n:
+                theo_nen.append({"nen_tang": n, "ten": QC.TEN_NEN_TANG_QC[n],
+                                 "so_tai_khoan": len(ids_n),
+                                 "kpi": QC.kpi(kq.qc_tong(ids_n, tu, den))})
+                ngay_nen.extend({"ngay": r["ngay"].isoformat() if hasattr(r["ngay"], "isoformat")
+                                 else str(r["ngay"]), "nen_tang": n,
+                                 **{c: r.get(c) or 0 for c in QC.TEN_COT_SO},
+                                 "tuong_tac": QC.tuong_tac(r)}
+                                for r in kq.qc_theo_ngay(ids_n, tu, den))
         kg = kq.qc_khan_gia(ids) if ids else {"rows": [], "tu": None, "den": None}
         moi = (kq.qc_moi(ids) if ids else None) or {}
         ten = {**ten_ben, QC.TAT_CA: "Tất cả bên", QC.CHUA_GAN: "Chưa gán bên"}
         ra = {
             "ben": ben, "cac_ben": [{"ma": b, "ten": ten.get(b, b.upper())} for b in cac_ben],
+            "nen_tang": nen,
+            "cac_nen_tang": [{"ma": "tat_ca", "ten": "Tất cả"}]
+            + [{"ma": n, "ten": QC.TEN_NEN_TANG_QC[n]} for n in cac_nen],
             "tk": tk,
             "tai_khoan": [{"advertiser_id": t["advertiser_id"],
                            "ten": t.get("ten") or t["advertiser_id"],
+                           "nen_tang": QC.nen_tang_tk(t),
                            "tien_te": t.get("tien_te") or "VND"} for t in tk_ben],
+            "theo_nen_tang": theo_nen, "theo_ngay_nen_tang": ngay_nen,
             "tu": tu.isoformat(), "den": den.isoformat(),
             "ky_truoc": {"tu": t0.isoformat(), "den": t1.isoformat()},
             "xem_tien": co_tien, "sap": sap,
@@ -2607,17 +2774,15 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             loi = str(e)
         except LoiKho:
             loi = "Chưa đọc được số quảng cáo (kho chưa có bảng TikTok Ads)."
-        dong_bo = None
-        try:
-            dong_bo = (await _k(app.state.tiktok.the)).get("dong_bo_ok_luc")
-        except (LoiKho, LoiDuLieu):
-            pass
-        ctx: dict = {}
+        dai = await _dai_qc()
+        dong_bo = max((x["dong_bo_luc"] for x in dai if x.get("dong_bo_luc")), default=None)
+        ctx: dict = {"dai_qc": dai, "duong_ve": "/quang-cao"}
         if d:
-            loc = {"ben": d["ben"], "tk": d["tk"], "tu": d["tu"], "den": d["den"], "sap": d["sap"]}
+            loc = {"ben": d["ben"], "nen_tang": d["nen_tang"], "tk": d["tk"], "tu": d["tu"],
+                   "den": d["den"], "sap": d["sap"]}
             hq = _hom_nay() - datetime.timedelta(days=1)
             chinh, phu = QC.chon_kpi(d["xem_tien"])
-            ctx = {"kpi_chinh": [_o_kpi(d, k) for k in chinh], "kpi_phu": [_o_kpi(d, k) for k in phu],
+            ctx |= {"kpi_chinh": [_o_kpi(d, k) for k in chinh], "kpi_phu": [_o_kpi(d, k) for k in phu],
                    "du_lieu_bd": _bd_qc(d), "url_cho": lambda **kw: _url("/quang-cao",
                                                                        **{**loc, **kw}),
                    "hom_qua": hq.isoformat(),
@@ -2627,7 +2792,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                                    ("view", "View"), ("follow", "Follow"))
                                if d["xem_tien"] or k != "chi"]}
         return _trang(request, "quang_cao.html", nguoi, "quang_cao", d=d, loi_qc=loi,
-                      dong_bo_luc=dong_bo, TEN_CHIEU=QC.TEN_CHIEU, **ctx)
+                      dong_bo_luc=dong_bo, TEN_CHIEU=QC.TEN_CHIEU, CHIEU=QC.CHIEU_TAT_CA,
+                      TEN_NEN_TANG_QC=QC.TEN_NEN_TANG_QC, **ctx)
 
     # ─── thời gian thực ───
     @app.get("/su-kien")

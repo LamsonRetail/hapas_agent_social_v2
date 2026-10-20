@@ -1,0 +1,24 @@
+{#- Dải trạng thái đồng bộ quảng cáo (20/10/2026, chủ dự án): mọi người có quyền thấy — CHỈ ngày, giờ,
+    trạng thái (không tiền, không số liệu). "Đồng bộ ngay" chỉ ghi cờ yêu cầu lượt nhanh (POST
+    /quang-cao/dong-bo, máy chủ kiểm quyền + chống bấm dồn). Markup tối giản — chờ lượt thiết kế. #}
+{% if dai_qc %}
+<section class="dai-qc" aria-label="Đồng bộ số quảng cáo" data-o="dai-qc">
+  <h2 class="dai-qc__ten">Số quảng cáo</h2>
+  <ul class="dai-qc__ds">
+    {% for x in dai_qc %}
+    <li class="dai-qc__o" data-nen-tang="{{ x.nen_tang }}" data-tinh-trang="{{ x.tinh_trang }}">
+      <span class="dai-qc__nen">{{ x.ten }}</span>
+      <span class="dai-qc__ngay">số đến hết {{ x.so_den_ngay|gio_vn if x.so_den_ngay else '—' }}</span>
+      <span class="dai-qc__luc">đồng bộ lúc {{ x.dong_bo_luc|gio_vn if x.dong_bo_luc else '—' }}</span>
+      <span class="the">{{ x.nhan }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/quang-cao/dong-bo" class="dai-qc__nut">
+    <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+    <input type="hidden" name="nen_tang" value="tat_ca">
+    <input type="hidden" name="ve" value="{{ duong_ve or '/' }}">
+    <button class="nut nut--nhe nut--nho" type="submit">Đồng bộ ngay</button>
+  </form>
+</section>
+{% endif %}

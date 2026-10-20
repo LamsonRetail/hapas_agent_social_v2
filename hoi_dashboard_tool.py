@@ -40,13 +40,15 @@ KHO
 cho tool: `nguoi_xem (email, vai_tro, la_quan_tri)`, `quyen (email, don_vi, vai_tro)`, `don_vi` —
 xem `deploy/lang-nghe/schema.sql`. Lịch quét đọc bằng
 câu SQL riêng (`KhoMark.cac_lich`) vì role `mark` không được đọc email người tạo/sửa lịch.
-Phần `quang_cao` (TikTok Ads, 19/10/2026) đọc `tk_quang_cao` + `qc_*` bằng hàm ĐỌC của
-`dashboard.kho_qc` (`_HAM_KHO_QC`); role `mark` không có quyền đọc cột token của `ket_noi_ngoai`.
+Phần `quang_cao` (TikTok Ads 19/10/2026, Meta Ads 20/10/2026) đọc `tk_quang_cao` + `qc_*` bằng hàm
+ĐỌC của `dashboard.kho_qc` (`_HAM_KHO_QC`, gồm tra một đối tượng `qc_tim`…); role `mark` không có
+quyền đọc cột token của `ket_noi_ngoai`.
 """
 from __future__ import annotations
 
 import collections
 import datetime
+import difflib
 import json
 import os
 import threading
@@ -97,10 +99,11 @@ PHAN = {
     "do_phu": "độ thu đủ (thẻ “Độ thu đủ”, trước gọi độ phủ): % mẫu kiểm của Mark đã có trong "
               "kho, 2 lần/tuần (khi đã có) — không phải độ phủ thị trường / share of voice",
     "bo_loc": "giá trị lọc đang có dữ liệu (nền tảng, loại nguồn, chủ đề, khoá nguồn…)",
-    "quang_cao": "quảng cáo TikTok (TikTok Ads) của các bên người hỏi được xem: hiển thị, view "
-                 "video, engaged view, tương tác, follow, vào hồ sơ trong kỳ + % so kỳ trước, top "
-                 "chiến dịch / quảng cáo; chi tiêu, doanh thu Shop, ROAS cho mọi người có quyền ở bên "
-                 "(`xem_tien`); trả lời bằng chữ, không biểu đồ (trang Quảng cáo chỉ quản trị viên)",
+    "quang_cao": "quảng cáo TikTok Ads + Meta Ads (Facebook/Instagram) của các bên người hỏi được "
+                 "xem: tổng + tách theo nền tảng (`theo_nen_tang`), theo tài khoản, theo ngày, top "
+                 "chiến dịch / quảng cáo (có nền tảng), chi phí suy ra; chi tiêu, doanh thu, ROAS cho "
+                 "mọi người có quyền ở bên (`xem_tien`). Tra MỘT đối tượng (chiến dịch / quảng cáo / "
+                 "tài khoản người hỏi nêu tên): `tim` + `cap`. Trả lời bằng chữ, không biểu đồ",
 }
 PHAN_MAC_DINH = ("tong_quan", "sac_thai", "chu_de", "tu_khoa", "bai")
 #: Phần cần dòng bài/bình luận (tính `tinh_chi_so`); phần còn lại chỉ đọc cấu hình/lượt quét.
@@ -120,8 +123,19 @@ SCHEMA = {
         "dashboard — bao nhiêu bài/thảo luận, tăng giảm so với kỳ trước, tích cực/tiêu cực %, "
         "chủ đề, từ khoá nổi bật, nguồn/KOL nói nhiều, bài nổi bật, Internal vs External "
         "channel, khách hỏi mua, báo & web, cảnh báo khủng hoảng, chi phí/ngân sách quét, lịch "
-        "quét, độ thu đủ; số quảng cáo TikTok Ads của bên (`phan`=[\"quang_cao\"], không cần "
-        "dự án). KHÔNG dùng để quét mới (đó là `social_listen`/`/theodoi`).\n"
+        "quét, độ thu đủ; số quảng cáo TikTok Ads + Meta Ads (Facebook/Instagram) của bên "
+        "(`phan`=[\"quang_cao\"], không cần dự án). KHÔNG dùng để quét mới (đó là "
+        "`social_listen`/`/theodoi`).\n"
+        "QUẢNG CÁO — CÂU HỎI CỦA NGƯỜI DÙNG LÀ GỐC (chủ dự án 20/10/2026): hỏi về một chiến dịch / "
+        "quảng cáo / tài khoản cụ thể (\"chỉ số chiến dịch A tuần trước\") thì gọi `phan`="
+        "[\"quang_cao\"] + `tim` (tên hoặc mã người hỏi nói) + `cap` (chien_dich | quang_cao | "
+        "tai_khoan) + đúng kỳ hỏi (`tu`/`den` hoặc `so_ngay`), `nen_tang` nếu họ nói TikTok/Meta, "
+        "`theo_ngay`=true khi họ muốn từng ngày. Trả lời ĐÚNG thứ được hỏi (đối tượng, kỳ, chỉ số) — "
+        "không đổ mọi chỉ số, không tự nêu chi tiêu khi không được hỏi; nhưng hỏi về chi phí / hiệu "
+        "quả / \"chỉ số\" của chiến dịch, quảng cáo, tài khoản thì LUÔN nêu chi tiêu và chi phí "
+        "(CPM, CPC, chi/kết quả…). `mo_ho` true hoặc nhiều đối tượng khớp, hoặc kỳ không rõ → hỏi "
+        "lại một câu ngắn. Không khớp (`tim_thay` 0) → nói rõ không thấy, đưa `goi_y` để người hỏi "
+        "chọn — KHÔNG đoán số.\n"
         "THAM SỐ: không nói kỳ thì để trống (= 30 ngày trọn tới hết hôm qua, như dashboard). "
         "`bo_loc` dùng đúng mã của dashboard; giá trị nguồn/chủ đề lạ thì gọi `phan`=[\"bo_loc\"] "
         "để lấy giá trị hợp lệ.\n"
@@ -162,6 +176,19 @@ SCHEMA = {
             "ben": {"type": "string",
                     "description": "Chỉ cho phần quang_cao: mã bên (hapas, matemade…). Trống = mọi "
                                    "bên người hỏi được xem, tách từng bên."},
+            "nen_tang": {"type": "string", "enum": ["tiktok", "meta"],
+                         "description": "Chỉ cho phần quang_cao: chỉ TikTok Ads hoặc chỉ Meta Ads "
+                                        "(Facebook/Instagram). Trống = cả hai."},
+            "cap": {"type": "string", "enum": ["chien_dich", "quang_cao", "tai_khoan"],
+                    "description": "Chỉ cho phần quang_cao: cấp đối tượng cần tra khi có `tim` "
+                                   "(mặc định chien_dich)."},
+            "tim": {"type": "string",
+                    "description": "Chỉ cho phần quang_cao: tên (một phần, không cần dấu / hoa "
+                                   "thường / khoảng trắng) hoặc mã của chiến dịch / quảng cáo / tài "
+                                   "khoản người hỏi nói tới. Trả đủ chỉ số của đúng đối tượng đó "
+                                   "trong kỳ."},
+            "theo_ngay": {"type": "boolean",
+                          "description": "Chỉ cho phần quang_cao + `tim`: kèm chuỗi từng ngày."},
             "phan": {"type": "array", "items": {"type": "string", "enum": list(PHAN)},
                      "description": "Phần cần lấy. Trống = " + ", ".join(PHAN_MAC_DINH) + ". "
                                     + "; ".join(f"{k}: {v}" for k, v in PHAN.items())},
@@ -186,7 +213,10 @@ _HAM_KHO = ("quyen_cua", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_lua
 #: TikTok Ads (19/10/2026): hàm ĐỌC của `dashboard.kho_qc` (role mark chỉ SELECT tk_quang_cao + qc_*,
 #: không đọc được cột token của ket_noi_ngoai). Tên phía tool → tên trong kho_qc.
 _HAM_KHO_QC = {"qc_cac_tk": "cac_tk", "qc_tong": "qc_tong", "qc_top": "qc_top", "qc_moi": "qc_moi",
-               "qc_theo_ngay": "qc_theo_ngay"}
+               "qc_theo_ngay": "qc_theo_ngay",
+               # 20/10/2026: tra một đối tượng — chỉ SELECT tham số hoá (kho_qc, mục "tra cứu").
+               "qc_tim": "qc_tim", "qc_ten": "qc_ten", "qc_doi_tuong": "qc_doi_tuong",
+               "qc_chi_so_tong": "qc_chi_so_tong", "qc_doi_tuong_ngay": "qc_doi_tuong_ngay"}
 
 
 class KhoMark:
@@ -828,32 +858,59 @@ def _do_phu(kho, ma: str, bay_gio) -> dict:
     return {"co": True, **x}
 
 
-# ───────────────────────────── quảng cáo TikTok (19/10/2026) ─────────────────────────────
+# ───────────────────────────── quảng cáo TikTok + Meta (19–20/10/2026) ─────────────────────────────
 #: 20/10/2026 chủ dự án: "hỏi gì cũng phải biết số tiền đã chi" — thêm chi theo tài khoản, theo
 #: ngày và chi phí suy ra cho phần quang_cao. Cột gọn cho mỗi dòng tài khoản / ngày.
 _QC_COT_GON = ("chi", "hien_thi", "reach", "view_video", "engaged_view", "follow", "vao_ho_so",
                "gia_tri_mua_shop")
 QC_NGAY_TOI_DA = 93
+#: Tra một đối tượng (20/10/2026, "câu hỏi của người dùng là gốc"): trả tối đa 10 đối tượng khớp.
+TRA_CUU_TRA = 10
+GOI_Y_TOI_DA = 5
+CAP_TRA = ("chien_dich", "quang_cao", "tai_khoan")
+_TEN_CAP = {"chien_dich": "chiến dịch", "quang_cao": "quảng cáo", "tai_khoan": "tài khoản"}
+GHI_CHU_REACH = ("Reach là người duy nhất của TỪNG ngày — không cộng được qua nhiều ngày: tổng kỳ "
+                 "nhiều ngày để reach trống (null); xem reach từng ngày ở `theo_ngay`.")
+
+
+def _chia(a, b, nhan=1):
+    try:
+        return round(float(a) * nhan / float(b), 2) if a is not None and b else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _qc_chi_phi(k: dict) -> dict:
     """Chi phí suy ra từ tổng (chia cho 0 → None): CPM, chi / follow, chi / 1.000 view, chi /
     engaged view, ROAS shop."""
-    def chia(a, b, nhan=1):
-        try:
-            return round(float(a) * nhan / float(b), 2) if a is not None and b else None
-        except (TypeError, ValueError):
-            return None
-    return {"cpm": chia(k.get("chi"), k.get("hien_thi"), 1000),
-            "chi_moi_follow": chia(k.get("chi"), k.get("follow")),
-            "chi_moi_1000_view": chia(k.get("chi"), k.get("view_video"), 1000),
-            "chi_moi_engaged_view": chia(k.get("chi"), k.get("engaged_view")),
-            "roas_shop": chia(k.get("gia_tri_mua_shop"), k.get("chi"))}
+    return {"cpm": _chia(k.get("chi"), k.get("hien_thi"), 1000),
+            "chi_moi_follow": _chia(k.get("chi"), k.get("follow")),
+            "chi_moi_1000_view": _chia(k.get("chi"), k.get("view_video"), 1000),
+            "chi_moi_engaged_view": _chia(k.get("chi"), k.get("engaged_view")),
+            "roas_shop": _chia(k.get("gia_tri_mua_shop"), k.get("chi"))}
+
+
+def _chi_phi_day_du(k: dict) -> dict:
+    """Mọi chi phí / tỉ lệ tính LẠI từ tổng (không bao giờ cộng tỉ lệ của từng ngày): CPM, CPC, CTR
+    (%), chi / follow, chi / 1.000 view, chi / engaged view, chi / kết quả, chi / chuyển đổi, ROAS."""
+    return {**_qc_chi_phi(k), "cpc": _chia(k.get("chi"), k.get("click")),
+            "ctr": _chia(k.get("click"), k.get("hien_thi"), 100),
+            "chi_moi_ket_qua": _chia(k.get("chi"), k.get("ket_qua")),
+            "chi_moi_chuyen_doi": _chia(k.get("chi"), k.get("chuyen_doi")),
+            "roas": _chia(k.get("gia_tri_mua_shop"), k.get("chi"))}
+
+
+def _bo_reach(k: dict, nhieu_ngay: bool) -> dict:
+    """Tổng nhiều ngày: reach (người duy nhất từng ngày) không cộng được → None."""
+    if nhieu_ngay and "reach" in k:
+        k = {**k, "reach": None}
+    return k
 
 
 def _qc_gon(r: dict, cap: str) -> dict:
     x = {k: r.get(k) for k in ("chi", "hien_thi", "view_video", "engaged_view", "tuong_tac",
                                "follow", "vao_ho_so", "gia_tri_mua_shop", "roas_shop")}
+    x["nen_tang"] = QC.TEN_NEN_TANG_QC.get(r.get("nen_tang") or "tiktok", r.get("nen_tang"))
     if cap == "campaign":
         x.update(ten=r.get("ten") or r.get("campaign_id"), tai_khoan=r.get("ten_tk"),
                  muc_tieu=QC.TEN_MUC_TIEU.get(str(r.get("muc_tieu") or ""), r.get("muc_tieu")))
@@ -863,25 +920,44 @@ def _qc_gon(r: dict, cap: str) -> dict:
     return x
 
 
+def _pham_vi_qc(q: dict, cac_tk: list[dict], hoi: str, tra_cuu: bool) -> list[str]:
+    """Bên người hỏi đọc được (cùng luật trang). Tra cứu của quản trị viên gồm cả tài khoản chưa
+    gán bên (`chua_gan` — chỉ quản trị viên)."""
+    ben = QC.ben_doc_qc(q, cac_tk)
+    if tra_cuu and PQ.la_quan_tri(q) and any(not t.get("don_vi") for t in cac_tk):
+        ben.append(QC.CHUA_GAN)
+    if hoi:
+        return [hoi] if hoi in ben else []
+    return ben
+
+
 def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, top: int) -> dict:
-    """Phần `quang_cao`: số TikTok Ads của từng bên người hỏi ĐỌC được (cùng luật trang
-    /quang-cao: `quang_cao.ben_doc_qc`, `tk_trong_pham_vi`), tiền khi `xem_tien` (từ 20/10/2026:
-    mọi người có quyền ở bên) — lọc bằng `quang_cao.loc_tien` TRƯỚC khi đưa model."""
+    """Phần `quang_cao`: số TikTok + Meta Ads của từng bên người hỏi ĐỌC được (cùng luật trang
+    /quang-cao: `quang_cao.ben_doc_qc`, `tk_trong_pham_vi`, chỉ tài khoản đã duyệt), tiền khi
+    `xem_tien` (từ 20/10/2026: mọi người có quyền ở bên) — lọc bằng `quang_cao.loc_tien` TRƯỚC khi
+    đưa model. Có `tim` / `cap` → tra đúng đối tượng người hỏi nêu (`tra_cuu_qc`)."""
+    nen = str(args.get("nen_tang") or "").strip().lower()
+    if nen and nen not in QC.NEN_TANG_QC:
+        return {"co": False, "ghi_chu": "nen_tang chỉ nhận tiktok hoặc meta."}
     try:
-        cac_tk = list(kho.qc_cac_tk())
+        cac_tk = QC.tk_dung(list(kho.qc_cac_tk()), nen or None)
     except Exception as e:  # noqa: BLE001 — bảng chưa tạo / chưa cấp quyền: nói rõ, không đoán
         print(f"[hoi_dashboard] quảng cáo lỗi: {type(e).__name__}")
-        return {"co": False, "ghi_chu": "Chưa đọc được số quảng cáo TikTok (kho chưa có bảng hoặc "
+        return {"co": False, "ghi_chu": "Chưa đọc được số quảng cáo (kho chưa có bảng hoặc "
                                         "chưa cấp quyền) — nói rõ là chưa có số, đừng đoán."}
-    ben_doc = QC.ben_doc_qc(q, cac_tk)
     hoi = str(args.get("ben") or "").strip().lower()
+    if args.get("tim") or args.get("cap"):
+        return tra_cuu_qc(kho, q, args, cac_tk, tu, den)
+    ben_doc = QC.ben_doc_qc(q, cac_tk)
     if hoi and hoi not in ben_doc:
         return {"co": False, "ghi_chu": f"Không có tài khoản quảng cáo của bên “{hoi}” trong phạm "
                                         "vi bạn được xem."}
     cac_ben = [hoi] if hoi else ben_doc
     if not cac_ben:
-        return {"co": False, "ghi_chu": "Bên của bạn chưa có tài khoản quảng cáo TikTok nào."}
+        return {"co": False, "ghi_chu": "Bên của bạn chưa có tài khoản quảng cáo nào"
+                                        + (f" trên {QC.TEN_NEN_TANG_QC[nen]}" if nen else "") + "."}
     t0, t1 = QC.khoang_truoc(tu, den)
+    nhieu = den > tu
     ra = []
     for b in cac_ben:
         tk = QC.tk_trong_pham_vi(q, cac_tk, b)
@@ -889,25 +965,43 @@ def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, t
         co_tien = QC.xem_tien(q, b)
         sap = "chi" if co_tien else "hien_thi"
         ten_tk = {t["advertiser_id"]: t.get("ten") or t["advertiser_id"] for t in tk}
+        nen_tk = {t["advertiser_id"]: QC.nen_tang_tk(t) for t in tk}
         kpi = QC.kpi(kho.qc_tong(ids, tu, den) if ids else {})
         truoc = QC.kpi(kho.qc_tong(ids, t0, t1) if ids else {})
 
-        def top_cap(cap, ids=ids, sap=sap, ten_tk=ten_tk):
-            return [_qc_gon({**QC.dong_top(r), "ten_tk": ten_tk.get(r.get("advertiser_id"))}, cap)
+        def top_cap(cap, ids=ids, sap=sap, ten_tk=ten_tk, nen_tk=nen_tk):
+            return [_qc_gon({**QC.dong_top(r), "ten_tk": ten_tk.get(r.get("advertiser_id")),
+                             "nen_tang": nen_tk.get(r.get("advertiser_id"))}, cap)
                     for r in (kho.qc_top(cap, ids, tu, den, sap, top) if ids else [])]
         moi = (kho.qc_moi(ids) if ids else None) or {}
-        x = {"ben": b, "tai_khoan": [t.get("ten") or t["advertiser_id"] for t in tk],
+        doi = {k: QC.doi_pt(kpi.get(k), truoc.get(k)) for k in QC.KPI_QC}
+        if nhieu:
+            doi["reach"] = None
+        x = {"ben": b,
+             "tai_khoan": [{"ten": t.get("ten") or t["advertiser_id"],
+                            "nen_tang": QC.TEN_NEN_TANG_QC[QC.nen_tang_tk(t)]} for t in tk],
              "tien_te": sorted({t.get("tien_te") or "VND" for t in tk}) or ["VND"],
-             "xem_tien": co_tien, "kpi": {k: v for k, v in kpi.items() if k in QC.KPI_QC},
-             "doi_pt": {k: QC.doi_pt(kpi.get(k), truoc.get(k)) for k in QC.KPI_QC},
-             "top_chien_dich": top_cap("campaign"), "top_quang_cao": top_cap("ad"),
-             "so_den_ngay": _gio(moi.get("ngay_cuoi")), "chi_phi": _qc_chi_phi(kpi)}
+             "xem_tien": co_tien,
+             "kpi": _bo_reach({k: v for k, v in kpi.items() if k in QC.KPI_QC}, nhieu),
+             "doi_pt": doi, "top_chien_dich": top_cap("campaign"), "top_quang_cao": top_cap("ad"),
+             "so_den_ngay": _gio(moi.get("ngay_cuoi")), "chi_phi": _chi_phi_day_du(kpi)}
+        theo_nen = []
+        for n in QC.NEN_TANG_QC:
+            ids_n = [i for i in ids if nen_tk.get(i) == n]
+            if ids_n:
+                kn = QC.kpi(kho.qc_tong(ids_n, tu, den) or {})
+                theo_nen.append({"nen_tang": QC.TEN_NEN_TANG_QC[n], "so_tai_khoan": len(ids_n),
+                                 **_bo_reach({c: kn.get(c) for c in _QC_COT_GON}, nhieu),
+                                 "tuong_tac": kn.get("tuong_tac"), **_chi_phi_day_du(kn)})
+        x["theo_nen_tang"] = theo_nen
         theo_tk = []
         for t in tk:
             k1 = QC.kpi(kho.qc_tong([t["advertiser_id"]], tu, den) or {})
             if k1.get("hien_thi") or k1.get("chi"):
                 theo_tk.append({"tai_khoan": ten_tk[t["advertiser_id"]],
-                                **{c: k1.get(c) for c in _QC_COT_GON}, **_qc_chi_phi(k1)})
+                                "nen_tang": QC.TEN_NEN_TANG_QC[nen_tk[t["advertiser_id"]]],
+                                **_bo_reach({c: k1.get(c) for c in _QC_COT_GON}, nhieu),
+                                **_qc_chi_phi(k1)})
         x["theo_tai_khoan"] = sorted(theo_tk, key=lambda r: -(float(r.get("chi") or 0)))
         ngay = list(kho.qc_theo_ngay(ids, tu, den) if ids else [])[-QC_NGAY_TOI_DA:]
         x["theo_ngay"] = [{"ngay": str(r.get("ngay")), **{c: r.get(c) for c in _QC_COT_GON}}
@@ -915,16 +1009,156 @@ def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, t
         if PQ.la_quan_tri(q):
             # 20/10/2026: trang Quảng cáo chỉ quản trị viên — người khác không nhận link.
             x["link"] = f"{DASHBOARD_URL}/quang-cao?" + urllib.parse.urlencode(
-                {"ben": b, "tu": tu.isoformat(), "den": den.isoformat()})
+                {"ben": b, "tu": tu.isoformat(), "den": den.isoformat(),
+                 **({"nen_tang": nen} if nen else {})})
         ra.append(QC.loc_tien(x, co_tien))
     return {"co": True, "ky_truoc": {"tu": t0.isoformat(), "den": t1.isoformat()}, "ben": ra,
-            "ghi_chu": "Reach là cộng từng ngày (đếm trùng người). Bên có `xem_tien` false: người "
-                       "hỏi KHÔNG được xem chi tiêu/doanh thu/ROAS — không nêu, không ước, không "
-                       "suy ra số tiền. Có chi theo tài khoản (`theo_tai_khoan`), theo ngày "
-                       "(`theo_ngay`) và chi phí suy ra (`chi_phi`: CPM, chi/follow, chi/1.000 "
-                       "view, chi/engaged view, ROAS). Chủ dự án 20/10/2026: số quảng cáo chỉ trả lời BẰNG CHỮ "
-                       "(câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh/sheet/tệp, "
-                       "không gửi link trang Quảng cáo khi không có `link`."}
+            "ghi_chu": GHI_CHU_QC + " " + GHI_CHU_REACH}
+
+
+GHI_CHU_QC = (
+    "Câu hỏi của người dùng là gốc: trả lời ĐÚNG đối tượng, kỳ và chỉ số được hỏi — không đổ mọi "
+    "chỉ số, không tự nêu chi tiêu khi không được hỏi; hỏi về chi phí / hiệu quả / \"chỉ số\" của "
+    "chiến dịch, quảng cáo, tài khoản thì luôn nêu chi tiêu + chi phí. Hỏi về MỘT chiến dịch / "
+    "quảng cáo / tài khoản cụ thể thì gọi lại với `tim` + `cap`. Bên có `xem_tien` false: người hỏi "
+    "KHÔNG được xem chi tiêu/doanh thu/ROAS — không nêu, không ước, không suy ra số tiền. Có chi "
+    "theo tài khoản (`theo_tai_khoan`), theo nền tảng (`theo_nen_tang`: TikTok / Meta), theo ngày "
+    "(`theo_ngay`) và chi phí suy ra (`chi_phi`: CPM, CPC, CTR, chi/follow, chi/1.000 view, chi/"
+    "engaged view, ROAS — tính lại từ tổng). Meta: view_video = xem ≥ 3 giây, engaged_view = "
+    "ThruPlay, follow = thích Trang, doanh thu = giá trị mua (purchase). Chủ dự án 20/10/2026: số "
+    "quảng cáo chỉ trả lời BẰNG CHỮ (câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh/"
+    "sheet/tệp, không gửi link trang Quảng cáo khi không có `link`.")
+
+
+def _khop_tk(t: dict, mau: str, ma: str) -> bool:
+    adv = str(t["advertiser_id"])
+    return bool((mau and mau in QC.chu_tim(t.get("ten") or "")) or (ma and (
+        adv == ma or adv == f"act_{ma}")))
+
+
+def _goi_y(kho, cap: str, pham_vi: list[tuple[str, list[dict]]], mau: str) -> list[str]:
+    """Tên gần đúng nhất (≤ 5) trong phạm vi người hỏi — Mark hỏi lại người dùng, không đoán."""
+    ten = []
+    for _, tk in pham_vi:
+        if cap == "tai_khoan":
+            ten += [t.get("ten") or t["advertiser_id"] for t in tk]
+        elif tk:
+            ten += [r.get("ten") or r.get("ma") for r in
+                    kho.qc_ten(cap, [t["advertiser_id"] for t in tk])]
+    ten = list(dict.fromkeys(x for x in ten if x))
+
+    def diem(x):
+        c = QC.chu_tim(x)
+        return (difflib.SequenceMatcher(None, mau, c).ratio()
+                + (0.5 if mau and (mau in c or c in mau) else 0))
+    return sorted(ten, key=lambda x: -diem(x))[:GOI_Y_TOI_DA] if mau else ten[:GOI_Y_TOI_DA]
+
+
+def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
+               den: datetime.date) -> dict:
+    """Tra MỘT đối tượng người hỏi nêu (chủ dự án 20/10/2026): `tim` (một phần tên — bỏ dấu, hoa
+    thường, khoảng trắng — hoặc mã) ở cấp `cap`, CHỈ trong tài khoản của bên người hỏi đọc được.
+    Mỗi đối tượng khớp: tên, nền tảng, tài khoản, bên, mục tiêu, ngày đầu/cuối có phân phối, đủ cột
+    số + mọi chỉ số thô CỘNG ĐƯỢC từ `chi_so` (tỉ lệ / reach / frequency không cộng — tính lại từ
+    tổng), chi phí suy ra; `theo_ngay` tuỳ chọn. Quá 10 khớp: 10 đối tượng chi nhiều nhất + tổng
+    số khớp + `mo_ho`. Không khớp: `goi_y` 5 tên gần nhất. Tiền lọc theo `xem_tien` từng bên."""
+    cap = str(args.get("cap") or "chien_dich").strip().lower()
+    if cap not in CAP_TRA:
+        return {"co": False, "ghi_chu": "cap chỉ nhận chien_dich, quang_cao hoặc tai_khoan."}
+    tim = str(args.get("tim") or "").strip()[:200]
+    if not tim:
+        return {"co": False, "ghi_chu": f"Cần tên hoặc mã {_TEN_CAP[cap]} (`tim`) — hỏi lại người "
+                                        "dùng muốn xem đối tượng nào."}
+    mau, ma = QC.chu_tim(tim), tim
+    hoi = str(args.get("ben") or "").strip().lower()
+    pham_vi = [(b, QC.tk_trong_pham_vi(q, cac_tk, b))
+               for b in _pham_vi_qc(q, cac_tk, hoi, True)]
+    if not pham_vi:
+        return {"co": False, "ghi_chu": "Không có tài khoản quảng cáo nào trong phạm vi bạn được "
+                                        "xem" + (f" (bên “{hoi}”)" if hoi else "") + "."}
+    ung_vien, tong = [], 0                 # (bên, tài khoản, dòng tên)
+    for b, tk in pham_vi:
+        theo_id = {t["advertiser_id"]: t for t in tk}
+        if cap == "tai_khoan":
+            for t in tk:
+                if _khop_tk(t, mau, ma):
+                    ung_vien.append((b, t, {"ma": t["advertiser_id"], "ten": t.get("ten")}))
+                    tong += 1
+            continue
+        if not tk:
+            continue
+        r = kho.qc_tim(cap, list(theo_id), mau, ma)
+        tong += int(r.get("tong") or 0)
+        for x in r.get("rows") or []:
+            t = theo_id.get(x.get("advertiser_id"))
+            if t:
+                ung_vien.append((b, t, x))
+    nhieu = den > tu
+    if not ung_vien:
+        return {"co": True, "tim_thay": 0, "cap": cap, "tim": tim,
+                "khoang": {"tu": tu.isoformat(), "den": den.isoformat()},
+                "goi_y": _goi_y(kho, cap, pham_vi, mau),
+                "ghi_chu": f"Không thấy {_TEN_CAP[cap]} nào khớp “{tim}” trong phạm vi bạn được xem. "
+                           "Nói rõ là không thấy, đưa vài tên trong `goi_y` để người hỏi chọn — "
+                           "KHÔNG đoán số."}
+    # Số trong kỳ của mọi ứng viên (≤ 200) → xếp theo chi (bên không xem tiền: theo hiển thị).
+    ma_ds = [str(x["ma"]) for _, _, x in ung_vien]
+    so = {str(r["ma"]): r for r in kho.qc_doi_tuong(cap, ma_ds, tu, den)}
+
+    def khoa_sap(u):
+        b, _, x = u
+        r = so.get(str(x["ma"])) or {}
+        return -(float(r.get("chi") or 0) if QC.xem_tien(q, b if b != QC.CHUA_GAN else None)
+                 else float(r.get("hien_thi") or 0))
+    ung_vien.sort(key=khoa_sap)
+    chon = ung_vien[:TRA_CUU_TRA]
+    ma_chon = [str(x["ma"]) for _, _, x in chon]
+    tho: dict[str, dict] = {}
+    for r in kho.qc_chi_so_tong(cap, ma_chon, tu, den):
+        if QC.cong_duoc(r["ten"]):
+            tho.setdefault(str(r["ma"]), {})[r["ten"]] = r["tong"]
+    chuoi: dict[str, list] = {}
+    if args.get("theo_ngay"):
+        for r in kho.qc_doi_tuong_ngay(cap, ma_chon, tu, den):
+            chuoi.setdefault(str(r["ma"]), []).append(
+                {"ngay": str(r.get("ngay")), **{c: r.get(c) for c in QC.TEN_COT_SO},
+                 **_chi_phi_day_du(r)})
+    ket_qua = []
+    for b, t, x in chon:
+        m = str(x["ma"])
+        r = so.get(m) or {}
+        cot = QC.kpi({c: r.get(c) for c in QC.TEN_COT_SO})
+        y = {"cap": cap, "ma": m, "ten": x.get("ten") or x.get("ten_ad") or t.get("ten") or m,
+             "nen_tang": QC.TEN_NEN_TANG_QC[QC.nen_tang_tk(t)],
+             "tai_khoan": t.get("ten") or t["advertiser_id"],
+             "ben": b if b != QC.CHUA_GAN else None,
+             "tien_te": t.get("tien_te") or "VND",
+             "ngay_dau_co_phan_phoi": _gio(r.get("ngay_dau")),
+             "ngay_cuoi_co_phan_phoi": _gio(r.get("ngay_cuoi")),
+             "so": _bo_reach(cot, nhieu), "chi_phi": _chi_phi_day_du(cot),
+             "chi_so_tho_cong_duoc": tho.get(m, {}),
+             "trang_thai": "dashboard không lưu trạng thái bật/tắt — chỉ biết ngày có phân phối"}
+        if not r:
+            y["ghi_chu"] = "Không có phân phối trong kỳ hỏi."
+        if cap == "chien_dich":
+            y["muc_tieu"] = QC.TEN_MUC_TIEU.get(str(x.get("muc_tieu") or ""), x.get("muc_tieu"))
+        if cap == "quang_cao":
+            y.update(chien_dich=x.get("ten_campaign") or x.get("campaign_id"),
+                     nhom=x.get("ten_nhom") or x.get("adgroup_id"))
+        if m in chuoi:
+            y["theo_ngay"] = chuoi[m][-QC_NGAY_TOI_DA:]
+        co_tien = QC.xem_tien(q, b if b != QC.CHUA_GAN else None)
+        y["xem_tien"] = co_tien
+        ket_qua.append(QC.loc_tien(y, co_tien))
+    mo_ho = tong > TRA_CUU_TRA or len(ung_vien) > TRA_CUU_TRA
+    return {"co": True, "tim_thay": max(tong, len(ung_vien)), "cap": cap, "tim": tim,
+            "khoang": {"tu": tu.isoformat(), "den": den.isoformat()}, "mo_ho": mo_ho,
+            "doi_tuong": ket_qua,
+            "ghi_chu": (("Nhiều đối tượng khớp — đây là 10 đối tượng chi nhiều nhất; hỏi lại người "
+                         "dùng muốn đúng cái nào. " if mo_ho else "")
+                        + "Chỉ số thô trong `chi_so_tho_cong_duoc` là tổng các chỉ số cộng được "
+                        "(số đếm, tiền); tỉ lệ (CTR, CPC, CPM, ROAS…) đã tính LẠI từ tổng trong "
+                        "`chi_phi`, reach / frequency không cộng. " + GHI_CHU_QC)}
 
 
 # ───────────────────────────── tool ─────────────────────────────
@@ -944,6 +1178,8 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
     hn = bay_gio.astimezone(VN).date()
     args = args or {}
     phan_hoi = [p for p in (args.get("phan") or []) if p in PHAN]
+    if not phan_hoi and (args.get("tim") or args.get("cap")):
+        phan_hoi = ["quang_cao"]           # tra một đối tượng quảng cáo: không cần dự án
     if phan_hoi == ["quang_cao"]:
         # Chỉ hỏi quảng cáo: không cần dự án lắng nghe (bên có tài khoản quảng cáo mà chưa có dự án).
         tu, den = doc_khoang(args, hn)
@@ -956,8 +1192,9 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
                 "phan": {"quang_cao": quang_cao(kho, nguoi["q"], args, tu, den, top)},
                 "canh_bao": (["Kỳ có ngày hôm nay (chưa hết ngày): số còn tăng."]
                              if den >= hn else []),
-                "ghi_chu": "Số quảng cáo đồng bộ mỗi sáng 06:30 (đọc lại 7 ngày gần nhất vì chuyển "
-                           "đổi TikTok ghi trễ); ngày theo múi giờ tài khoản quảng cáo."}
+                "ghi_chu": "Số quảng cáo đồng bộ mỗi sáng (TikTok 06:30, Meta 06:45; đọc lại 7 "
+                           "ngày gần nhất vì chuyển đổi ghi trễ) và khi có người bấm \"Đồng bộ "
+                           "ngay\"; ngày theo múi giờ tài khoản quảng cáo."}
     # Chỉ dự án của bên người hỏi được xem (như trang); bên khác = "không có dự án".
     ds = PQ.loc_du_an(nguoi["q"], kho.cac_du_an())
     ma = str(args.get("du_an") or "").strip()

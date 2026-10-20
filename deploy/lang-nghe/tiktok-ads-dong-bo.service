@@ -3,7 +3,7 @@
 # Chạy bằng user của dashboard (lang_nghe_web: role Postgres trùng tên, peer auth) với cùng venv + .env
 # (TIKTOK_KHOA_MA_HOA, BQ_*). Chưa kết nối / token hết hạn: ghi trạng thái rồi thoát 0 (không đỏ).
 # Lần đầu mỗi tài khoản nạp lùi 90 ngày — có thể chạy vài chục phút; hai bộ hẹn giờ (06:30 và
-# 10 phút theo yêu cầu) và lệnh tay không bao giờ chạy chồng (khoá advisory Postgres). README mục 7.
+# 2 phút theo yêu cầu) và lệnh tay không bao giờ chạy chồng (khoá advisory Postgres). README mục 7.
 [Unit]
 Description=Dong bo TikTok Ads vao kho lang_nghe (dashboard social.hapas.vn)
 After=network-online.target postgresql.service

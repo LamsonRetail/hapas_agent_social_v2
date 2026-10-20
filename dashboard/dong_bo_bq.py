@@ -19,8 +19,9 @@ Mốc (= chặn trên) chỉ dời khi CẢ bảng đẩy xong; lỗi giữa ch�
 sau đẩy lại, MERGE nên không nhân đôi.
 
 Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, `dong_bo_bq`, cột email (`sua_boi`, `them_boi`), và
-`ket_noi_ngoai` (token TikTok đã mã hoá, email người cấp) — TikTok Ads chỉ đẩy `tk_quang_cao` +
-`qc_*` (19/10/2026; bộ hẹn giờ TikTok gọi `chay()` ngay sau lượt đồng bộ của nó).
+`ket_noi_ngoai` (token TikTok / Meta đã mã hoá, email người cấp) — quảng cáo chỉ đẩy `tk_quang_cao`
++ `qc_*` (TikTok 19/10/2026, Meta 20/10/2026 — cùng bảng, `tk_quang_cao.nen_tang`; hai bộ hẹn giờ gọi
+`chay()` ngay sau lượt đồng bộ của mình).
 Chạy: sau mỗi lượt quét (hook `sau_cap_nhat` của dashboard) và 6 giờ một lần. Một lượt một lúc.
 """
 from __future__ import annotations
@@ -125,7 +126,10 @@ BANG.update({
                 ("thay_lan_dau", "TIMESTAMP"), ("thay_cuoi", "TIMESTAMP"),
                 ("nap_lui_tu", "DATE"), ("nap_lui_xong_luc", "TIMESTAMP"),
                 ("khan_gia_luc", "TIMESTAMP"),
-                ("cap_nhat_luc", "TIMESTAMP")],
+                ("cap_nhat_luc", "TIMESTAMP"),
+                # Meta Ads (20/10/2026): nền tảng + duyệt (ALTER … ADD COLUMN cuối bigquery.sql).
+                ("nen_tang", "STRING"), ("duyet", "BOOL")],
+        "tuy_chon": ("nen_tang", "duyet"),
     },
     "qc_tk_ngay": {
         "khoa": ["advertiser_id", "ngay"], "kieu": "tang_dan", "moc": "cap_nhat_luc",

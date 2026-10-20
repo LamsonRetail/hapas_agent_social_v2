@@ -1,14 +1,27 @@
-// Trang "Quảng cáo TikTok" (19/10/2026): chỉ vẽ biểu đồ "Theo ngày" từ JSON máy chủ nhúng sẵn
-// (#qc-du-lieu — đã lọc chỉ số tiền theo quyền). Không gọi API, không chèn HTML từ dữ liệu
-// (CSP script-src 'self'; chữ chỉ qua textContent). Màu đọc từ biến CSS → sáng/tối tự theo.
+// Trang "Quảng cáo" (TikTok 19/10/2026, + Meta 20/10/2026): vẽ biểu đồ "Theo ngày" từ JSON máy chủ
+// nhúng sẵn. Nguồn chính: #qc-api = ĐÚNG payload của GET /api/qc (đã lọc tiền theo quyền; mỗi dòng
+// tai_khoan / campaign / ad / theo_nen_tang / theo_ngay_nen_tang có `nen_tang`) — mọi khối của trang
+// dựng lại được từ một payload này (lượt thiết kế sau). #qc-du-lieu: chuỗi dựng sẵn (dự phòng).
+// Không gọi API, không chèn HTML từ dữ liệu (CSP script-src 'self'; chữ chỉ qua textContent).
 "use strict";
 (function () {
+  var CHUOI = [["chi", "Chi tiêu"], ["hien_thi", "Hiển thị"], ["view_video", "View video"],
+               ["engaged_view", "Engaged view"], ["tuong_tac", "Tương tác"], ["follow", "Follow"]];
+  function tuPayload(p) {
+    var ds = (p && p.theo_ngay) || [];
+    var co = ds.length ? ds[0] : {};
+    return { ngay: ds.map(function (x) { return x.ngay; }), tien_te: p.tien_te || ["VND"],
+             chuoi: CHUOI.filter(function (c) { return c[0] in co; }).map(function (c) {
+               return { ma: c[0], ten: c[1], ds: ds.map(function (x) { return x[c[0]] || 0; }) };
+             }) };
+  }
+  var api = document.getElementById("qc-api");
   var el = document.getElementById("qc-du-lieu");
   var khung = document.getElementById("qc-bd-ngay");
   var nhom = document.getElementById("qc-chon-chi-so");
-  if (!el || !khung || !nhom || !window.echarts) return;
+  if ((!api && !el) || !khung || !nhom || !window.echarts) return;
   var d;
-  try { d = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
+  try { d = api ? tuPayload(JSON.parse(api.textContent || "{}")) : JSON.parse(el.textContent || "{}"); } catch (e) { return; }
   if (!d.chuoi || !d.chuoi.length || !d.ngay || !d.ngay.length) return;
   var giamDong = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   var SO = new Intl.NumberFormat("vi-VN");
