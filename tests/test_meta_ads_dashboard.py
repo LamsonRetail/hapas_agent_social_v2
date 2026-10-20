@@ -708,8 +708,8 @@ def test_bo_hen_gio_2_phut_va_06_45():
     sv = (d / "meta-ads-yeu-cau.service").read_text(encoding="utf-8")
     assert "dashboard.meta_ads dong-bo --chi-khi-yeu-cau" in sv and "User=lang_nghe_web" in sv
     assert "InaccessiblePaths=-/opt/mark" in sv
-    assert "dashboard.meta_ads dong-bo\n" in (d / "meta-ads-dong-bo.service").read_text(
-        encoding="utf-8")
+    assert "dashboard.meta_ads dong-bo --cho-khoa-phut 120\n" in (
+        d / "meta-ads-dong-bo.service").read_text(encoding="utf-8")
     from dashboard import app as A
     assert "≤ 2 phút" in A.CHO_DONG_BO
 

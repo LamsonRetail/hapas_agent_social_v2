@@ -230,8 +230,8 @@ cd /opt/lang-nghe/app   # sau khi rsync mã mới (dashboard/README.md bước 2
 # a. Schema (bảng yeu_cau_tuc_thi + 2 trigger + RLS + quyền; chạy lại không hỏng) TRƯỚC mã mới — như mục 7b
 sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
 sudo -u postgres psql -d lang_nghe -c '\dp yeu_cau_tuc_thi' -c "select policyname, roles, cmd from pg_policies where tablename='yeu_cau_tuc_thi'"
-# b. Lượt hằng ngày nay CHỜ khoá; chạy lại CHỈ khi thoát 3 (RestartForceExitStatus=3, Restart=no — cần
-#    systemd ≥ 244 cho oneshot, VPS 255); hỏng hẳn → OnFailure=qc-dong-bo-loi@<ncc> ghi lỗi lên thẻ kết nối
+# b. Lượt hằng ngày nay tự CHỜ khoá (--cho-khoa-phut 120); KHÔNG chạy lại bằng systemd (systemd 255
+#    từ chối RestartForceExitStatus với Type=oneshot — thử trên VPS 20/10); hỏng → OnFailure=qc-dong-bo-loi@<ncc>
 sudo install -o root -g root -m 0644 deploy/lang-nghe/tiktok-ads-dong-bo.service \
   deploy/lang-nghe/meta-ads-dong-bo.service deploy/lang-nghe/qc-dong-bo-loi@.service /etc/systemd/system/
 sudo systemd-analyze verify /etc/systemd/system/tiktok-ads-dong-bo.service \
@@ -248,10 +248,10 @@ sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=
 ```
 
 - **Lượt hằng ngày không bao giờ lặng lẽ mất** (soát H2): `dong-bo` hằng ngày gặp lượt nhỏ đang giữ
-  khoá thì CHỜ (thử lại mỗi 30 giây, tối đa `--cho-khoa-phut`, mặc định 30), vẫn không có khoá →
-  thoát 3 → systemd chạy lại sau 10 phút CHỈ với mã 3 (`RestartForceExitStatus=3`, `Restart=no`;
-  lần đầu + 3 lần chạy lại trong `StartLimitIntervalSec=6h`). Lỗi khác, bị giết vì quá
-  `TimeoutStartSec=6h` hay SIGTERM: KHÔNG chạy lại (không vòng lặp giữ khoá cả ngày) — nạp lùi 90
+  khoá thì CHỜ trong tiến trình (thử lại mỗi 30 giây, tối đa `--cho-khoa-phut`: đơn vị đặt 120, mặc
+  định CLI 30), vẫn không có khoá → thoát 3. systemd KHÔNG chạy lại (thử trên VPS 20/10/2026: systemd
+  255 từ chối `RestartForceExitStatus` với `Type=oneshot` — đơn vị không nạp được). Mọi lỗi, kể cả bị
+  giết vì quá `TimeoutStartSec=6h`: KHÔNG chạy lại (không vòng lặp giữ khoá cả ngày) — nạp lùi 90
   ngày dở dang, lượt hằng ngày hôm sau đọc tiếp nhờ mốc `tk_quang_cao.nap_lui_tu` ghi sau mỗi cửa sổ
   30 ngày. Hỏng hẳn → `OnFailure=qc-dong-bo-loi@<ncc>.service` đặt thẻ kết nối "lỗi" + lý do (quản
   trị viên thấy trên trang Quảng cáo); xử lý xong: `systemctl reset-failed tiktok-ads-dong-bo

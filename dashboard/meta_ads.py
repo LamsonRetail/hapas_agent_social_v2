@@ -1043,7 +1043,7 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
     if kq.get("ban") and not a.chi_khi_yeu_cau:
         # Soát 20/10/2026 H2: lượt hằng ngày KHÔNG được lặng lẽ mất vì lượt nhỏ đang giữ khoá.
         print(f"[meta_ads] chờ {a.cho_khoa_phut} phút vẫn chưa giữ được khoá đồng bộ — thoát 3 "
-              "(systemd Restart=on-failure chạy lại)", file=sys.stderr)
+              "(OnFailure báo lỗi lên thẻ kết nối)", file=sys.stderr)
         return 3
     if kq.get("so_dong") and not a.khong_bq:
         if dong_bo_bq is None:

@@ -504,21 +504,22 @@ def test_h2_khung_dong_bo_hang_ngay_khong_luot_nho(monkeypatch, h):
 
 
 def test_n2_don_vi_dong_bo_chi_chay_lai_khi_ma_3_va_bao_loi(monkeypatch):
-    """N2: chạy lại CHỈ khi thoát 3 (chờ khoá hết giờ) — không khi lỗi khác / quá 6 giờ / SIGTERM;
-    StartLimit phủ lần đầu + 3 lần chạy lại (≤ 30 phút chờ + 10 phút nghỉ mỗi lần); hỏng hẳn →
+    """N2 (sửa sau khi thử trên VPS 20/10/2026: systemd 255 TỪ CHỐI RestartForceExitStatus với
+    Type=oneshot — đơn vị không nạp được): KHÔNG chạy lại bằng systemd. Lượt hằng ngày tự chờ khoá
+    trong tiến trình (--cho-khoa-phut 120 < TimeoutStartSec 6 giờ); hỏng (thoát ≠ 0 / quá giờ) →
     OnFailure ghi lỗi lên thẻ kết nối."""
     def tri(s, k):
         return [d.split("=", 1)[1] for d in s.splitlines() if d.startswith(k + "=")]
     for n, ncc in (("tiktok", "tiktok_ads"), ("meta", "meta_ads")):
         s = (GOC / "deploy" / "lang-nghe" / f"{n}-ads-dong-bo.service").read_text(
             encoding="utf-8")
-        assert tri(s, "Restart") == ["no"] and tri(s, "RestartForceExitStatus") == ["3"]
-        assert tri(s, "RestartPreventExitStatus") == [] and tri(s, "TimeoutStartSec") == ["6h"]
+        assert tri(s, "Type") == ["oneshot"] and tri(s, "TimeoutStartSec") == ["6h"]
+        for k in ("Restart", "RestartForceExitStatus", "RestartPreventExitStatus", "RestartSec",
+                  "StartLimitBurst", "StartLimitIntervalSec"):
+            assert tri(s, k) == [], k            # oneshot + RestartForceExitStatus = bị từ chối
         assert tri(s, "OnFailure") == [f"qc-dong-bo-loi@{ncc}.service"]
-        lan = int(tri(s, "StartLimitBurst")[0])
-        assert lan == 4 and tri(s, "StartLimitIntervalSec") == ["6h"]
-        # lần đầu + 3 lần chạy lại: 4 × 30 phút chờ + 3 × 10 phút nghỉ = 150 phút < 6 giờ.
-        assert 4 * 30 + 3 * 10 < 6 * 60
+        assert tri(s, "ExecStart")[0].endswith(f"-m dashboard.{n}_ads dong-bo --cho-khoa-phut 120")
+        assert 120 < 6 * 60
         assert s.index("OnFailure=") < s.index("[Service]")       # thuộc [Unit]
     loi = (GOC / "deploy" / "lang-nghe" / "qc-dong-bo-loi@.service").read_text(encoding="utf-8")
     assert "-m dashboard.nghe_qc %i --bao-loi-dong-bo" in loi and "User=lang_nghe_web" in loi
