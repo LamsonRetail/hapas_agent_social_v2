@@ -176,10 +176,6 @@
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <button class="nut" type="submit"{% if not tt.co_khoa %} disabled{% endif %}>{% if tt.co_token and not tt.khong_het_han %}Đăng nhập lại để gia hạn 30 ngày{% else %}Đăng nhập TikTok để kết nối{% endif %}</button>
     </form>
-    <form method="post" action="/tiktok/dong-bo">
-      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <button class="nut nut--nhe" type="submit"{% if not tt.co_token or tt.dang_dong_bo or tt.yeu_cau_dong_bo_luc %} disabled{% endif %}><svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>Đồng bộ ngay</button>
-    </form>
     <form method="post" action="/tiktok/ngat" data-xac-nhan="Ngắt kết nối TikTok Ads? Token bị thu hồi và xoá khỏi máy chủ; số đã đồng bộ giữ nguyên. Muốn đồng bộ tiếp phải đăng nhập lại.">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <button class="nut nut--loi" type="submit"{% if not tt.co_token %} disabled{% endif %}>Ngắt kết nối</button>
@@ -224,10 +220,6 @@
     {% endif %}
   </dl>
   <div class="tt-nut">
-    <form method="post" action="/meta/dong-bo">
-      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <button class="nut nut--nhe" type="submit"{% if not mt.co_token or mt.dang_dong_bo or mt.yeu_cau_dong_bo_luc %} disabled{% endif %}>Đồng bộ ngay</button>
-    </form>
     <form method="post" action="/meta/ngat" data-xac-nhan="Xoá token Meta khỏi máy chủ? Số đã đồng bộ giữ nguyên. Token người dùng hệ thống KHÔNG tự hết hạn — thu hồi trong Meta Business Settings.">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <button class="nut nut--loi" type="submit"{% if not mt.co_token %} disabled{% endif %}>Ngắt (xoá token)</button>

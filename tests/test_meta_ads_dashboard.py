@@ -658,12 +658,19 @@ def test_dong_bo_bam_tay_moi_nguoi_co_quyen():
     csrf = dang_nhap(c, "la@hapas.vn")
     r = c.post("/quang-cao/dong-bo", data={"csrf": csrf, "nen_tang": "meta"})
     assert r.status_code == 403 and not kho_qc.kns["meta_ads"].get("yeu_cau_dong_bo_luc")
-    # Người Chỉ xem: được, chỉ ghi cờ (không gọi Meta / TikTok), nhật ký bam_tay.
-    csrf = dang_nhap(c, XEM)
+    # 20/10/2026 (chủ dự án): dải "Số quảng cáo" CHỈ ở trang Quảng cáo — trang Chỉ số không còn.
+    csrf = dang_nhap(c, QL)
     t = c.get("/").text
+    assert 'data-o="dai-qc"' not in t and 'action="/quang-cao/dong-bo"' not in t
+    t = c.get("/quang-cao").text
     assert 'data-o="dai-qc"' in t and 'action="/quang-cao/dong-bo"' in t
     dai = t.split('data-o="dai-qc"')[1].split("</section>")[0]
     assert "Chi tiêu" not in dai and "TikTok" in dai and "Meta" in dai
+    assert 'name="ve" value="/quang-cao"' in dai
+    # Người Chỉ xem: không thấy dải, nhưng đường POST vẫn nhận (luật cũ) — chỉ ghi cờ (không gọi
+    # Meta / TikTok), nhật ký bam_tay.
+    csrf = dang_nhap(c, XEM)
+    assert 'data-o="dai-qc"' not in c.get("/").text
     n_meta, n_tt = len(gm.goi), len(tt.goi)
     r = c.post("/quang-cao/dong-bo", data={"csrf": csrf, "nen_tang": "tat_ca", "ve": "/"})
     assert r.status_code == 303 and r.headers["location"] == "/"
@@ -693,7 +700,7 @@ def test_dong_bo_bam_tay_moi_nguoi_co_quyen():
     assert "bấm lại được từ" in c.get(r.headers["location"]).text
     assert not kho_qc.kns["meta_ads"].get("yeu_cau_dong_bo_luc")
     # Nạp lùi / kết nối / ngắt / gán bên: vẫn chỉ quản trị viên.
-    for p in ("/meta/dong-bo", "/meta/ngat", "/meta/token", "/qc/gan-ben", "/tiktok/dong-bo"):
+    for p in ("/meta/ngat", "/meta/token", "/qc/gan-ben"):
         assert c.post(p, data={"csrf": csrf, "token": TOKEN, "advertiser_id": NUOC_HOA}
                       ).status_code == 403, p
 
@@ -769,8 +776,10 @@ def test_quan_tri_duyet_va_ngat_meta():
     r = c.post("/qc/gan-ben", data={"csrf": csrf, "advertiser_id": LA, "don_vi": "hapas",
                                      "dang_dong_bo": "1", "duyet": "1"})
     assert r.status_code == 303 and kho_qc.tk[LA]["duyet"] is True
-    c.post("/meta/dong-bo", data={"csrf": csrf})
-    assert kho_qc.kns["meta_ads"]["yeu_cau_kieu"] == "day_du"
+    # Thẻ Meta không còn "Đồng bộ ngay" (20/10/2026) — đường cũ không còn.
+    assert c.post("/meta/dong-bo", data={"csrf": csrf}).status_code in (404, 405)
+    the = c.get("/quan-tri").text.split("Kết nối Meta Ads")[1].split("</section>")[0]
+    assert "Đồng bộ ngay" not in the and "Ngắt (xoá token)" in the
     r = c.post("/meta/token", data={"csrf": csrf, "token": "EAAsai0123456789abcdefghijk"})
     assert "không nhận token" in c.get(r.headers["location"]).text
     r = c.post("/meta/ngat", data={"csrf": csrf})

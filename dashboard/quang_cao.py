@@ -527,3 +527,42 @@ def chon_kpi(co_tien: bool) -> tuple[tuple[str, ...], tuple[str, ...]]:
     chinh = KPI_CHINH_TIEN if co_tien else KPI_CHINH_XEM
     phu = tuple(k for k, v in KPI_QC.items() if k not in chinh and (co_tien or not v[2]))
     return chinh, phu
+
+
+# ───────────────────────────── xuất Lark Sheet (20/10/2026) ─────────────────────────────
+#: Chủ dự án 20/10/2026: trang Quảng cáo (chỉ quản trị viên) xuất số theo ĐÚNG bộ lọc trang thành một
+#: Lark Sheet ba tab. Dashboard chỉ ghi yêu cầu (`kho_sheet_qc`); Mark dựng Sheet (`xuat_sheet_qc`).
+#: Hai đầu cùng dùng các hàm thuần dưới đây — phạm vi và chỉ số suy ra không lệch nhau.
+XUAT_TOI_DA_NGAY = 400          # = KHOANG_TOI_DA_NGAY của trang; CHECK của bảng yeu_cau_sheet_qc
+
+
+def tk_xuat(q: dict | None, cac_tk: list[dict], ben: str, nen_tang: str,
+            tk: str | None = None) -> list[dict]:
+    """Tài khoản của phạm vi xuất — CÙNG luật trang /quang-cao: đúng nền tảng, đã duyệt, trong bên
+    người này xem được; `tk` (nếu chọn) phải thuộc phạm vi đó. Ngoài phạm vi → [] (như không có)."""
+    if nen_tang not in (*NEN_TANG_QC, TAT_CA) or not ben:
+        return []
+    ds = tk_trong_pham_vi(q, tk_dung(cac_tk, nen_tang), ben)
+    if tk:
+        ds = [t for t in ds if str(t.get("advertiser_id")) == str(tk)]
+    return ds
+
+
+def _chia_so(a, b, nhan: float = 1.0):
+    if a is None or not b:
+        return None
+    return round(float(a) / float(b) * nhan, 4)
+
+
+def hieu_qua(r: dict) -> dict:
+    """Chỉ số SUY RA từ tổng (không cộng tỉ lệ — như trang): CPM, CPC, CTR (%), chi / 1.000 view,
+    chi / follow, chi / kết quả, ROAS Shop, tương tác. Thiếu mẫu số → None (ô trống, không phải 0)."""
+    chi = r.get("chi")
+    return {"cpm": _chia_so(chi, r.get("hien_thi"), 1000),
+            "cpc": _chia_so(chi, r.get("click")),
+            "ctr": _chia_so(r.get("click"), r.get("hien_thi"), 100),
+            "chi_tren_1000_view": _chia_so(chi, r.get("view_video"), 1000),
+            "chi_moi_follow": _chia_so(chi, r.get("follow")),
+            "chi_moi_ket_qua": _chia_so(chi, r.get("ket_qua")),
+            "roas_shop": _chia_so(r.get("gia_tri_mua_shop"), chi),
+            "tuong_tac": tuong_tac(r)}

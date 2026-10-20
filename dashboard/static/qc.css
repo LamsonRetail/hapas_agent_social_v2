@@ -111,6 +111,42 @@
 .qc-thanh__ray { grid-area: ray; height: 8px; border-radius: 999px; background: var(--be-mat-2); box-shadow: inset 0 0 0 1px var(--ke); overflow: hidden; }
 .qc-thanh__dac { display: block; height: 100%; border-radius: inherit; background: var(--s1); }
 
+/* ─── Tạo Lark Sheet (20/10/2026): trái = phạm vi + nút, phải = yêu cầu gần đây. Trạng thái bằng chữ +
+   chấm màu (không chỉ màu); "Đang tạo" thở nhẹ, tắt khi giảm chuyển động. ─── */
+.qc-sheet__than { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px 32px; }
+.qc-sheet__tao { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.qc-sheet__pv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; margin: 0; }
+.qc-sheet__pv div { min-width: 0; }
+.qc-sheet__pv dt { font-size: 12px; color: var(--chu-mo); }
+.qc-sheet__pv dd { margin: 2px 0 0; font-size: 14px; font-weight: 650; color: var(--chu); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.qc-sheet__pv .qc-cham { display: inline-block; margin-right: 6px; vertical-align: 1px; }
+.qc-sheet__pv .qc-sheet__phu { white-space: nowrap; }
+.qc-sheet__phu { font-weight: 450; color: var(--chu-mo); font-size: 12.5px; }
+.qc-sheet__tab { list-style: none; margin: 0; padding: 10px 14px; border-radius: var(--bo-nho); background: var(--be-mat-2); border: 1px solid var(--ke); display: flex; flex-direction: column; gap: 6px; }
+.qc-sheet__tab li { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 13px; color: var(--chu-phu); }
+.qc-sheet__tab b { font-weight: 650; color: var(--chu); }
+.qc-sheet__nut { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0; }
+.qc-sheet__goi-y { margin: 0; }
+.qc-sheet__gan-day { min-width: 0; }
+.qc-sheet__ds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.qc-sheet__o { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 10px 0; border-top: 1px solid var(--ke); }
+.qc-sheet__o:first-child { border-top: 0; padding-top: 2px; }
+.qc-sheet__ten { font-size: 13.5px; font-weight: 600; color: var(--chu); overflow-wrap: anywhere; min-width: 0; }
+.qc-sheet__meta { display: inline-flex; align-items: center; gap: 10px; justify-self: end; white-space: nowrap; font-size: 12px; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
+.qc-sheet__tt { display: inline-flex; align-items: center; gap: 5px; font-weight: 650; color: var(--chu-phu); }
+.qc-sheet__tt::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.qc-sheet__tt--xong { color: var(--tot); }
+.qc-sheet__tt--loi, .qc-sheet__tt--qua_han { color: var(--loi); }
+.qc-sheet__tt--cho, .qc-sheet__tt--dang_tao { color: var(--nhan-dam); }
+.qc-sheet__tt--cho::before, .qc-sheet__tt--dang_tao::before { animation: qc-tho 1.4s ease-in-out infinite; }
+@keyframes qc-tho { 50% { opacity: .3; } }
+.qc-sheet__ket { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12.5px; }
+.qc-sheet__mo { display: inline-flex; align-items: center; gap: 4px; font-weight: 650; }
+.qc-sheet__mo .bt { width: 14px; height: 14px; }
+.qc-sheet__loi { grid-column: 1 / -1; font-size: 12.5px; color: var(--loi); overflow-wrap: anywhere; }
+.qc-sheet__loi--canh { color: var(--canh); }
+.qc-sheet__trong { padding: 4px 0; font-size: 13px; color: var(--chu-mo); }
+
 @media (max-width: 1200px) {
   .the-khoi.qc-kpi-phu { grid-template-columns: repeat(min(var(--so-kpi), 4), minmax(0, 1fr)); }
   .qc-kg { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -140,6 +176,11 @@
   .qc-loc label.o { flex: 1 1 140px; }
   .qc-loc__nhanh { margin-left: 0; }
   .qc-kg { grid-template-columns: minmax(0, 1fr); }
+  .qc-sheet__than { grid-template-columns: minmax(0, 1fr); }
+  .qc-sheet__nut .nut { width: 100%; justify-content: center; min-height: 44px; }
+  .qc-sheet__gan-day { border-top: 1px solid var(--ke); padding-top: 16px; }
+  .qc-sheet__o { grid-template-columns: minmax(0, 1fr); }
+  .qc-sheet__meta { justify-self: start; }
   .qc-chia__ds { grid-template-columns: minmax(0, 1fr); }
   .qc-chia__o, .qc-chia__o:first-child { padding: 0; }
   .qc-chia__o + .qc-chia__o { border-left: 0; border-top: 1px solid var(--ke); margin-top: 16px; padding-top: 16px; }
@@ -160,6 +201,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .qc-phan__nut, .qc-nen__nut, .qc-loc-khung__tom::after { transition: none; }
+  .qc-sheet__tt::before { animation: none !important; }
 }
 @media (forced-colors: active) {
   .qc-phan__nut, .qc-nen__nut, .kpi-o { border: 1px solid CanvasText; }

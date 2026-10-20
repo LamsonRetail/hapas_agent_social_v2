@@ -1,0 +1,55 @@
+# /etc/systemd/system/qc-sheet-nghe.service — bộ NGHE yêu cầu "Tạo Lark Sheet" của trang Quảng cáo
+# (20/10/2026, xuat_sheet_qc.py). Chạy lâu dài DƯỚI USER MARK: app Lark tạo được Sheet chỉ có trong
+# /opt/mark/app/.env (config.py của Mark tự nạp — không EnvironmentFile), role Postgres mark đọc được số
+# quảng cáo (cả chi) và chỉ sửa cột kết quả của yeu_cau_sheet_qc. LISTEN kênh qc_sheet (trigger
+# yeu_cau_sheet_qc_bao) + quét dòng chờ lúc khởi động / mỗi 60 giây. Dashboard không bao giờ cầm app Lark
+# này; unit này không đọc được /opt/lang-nghe (khoá giải mã token quảng cáo). README mục 10.
+[Unit]
+Description=Nghe yeu cau tao Lark Sheet quang cao (Mark)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mark
+Group=mark
+Environment=HOME=/opt/mark
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/mark/app
+ExecStart=/opt/mark/hermes-agent/venv/bin/python -m xuat_sheet_qc
+Restart=always
+RestartSec=10
+Nice=10
+MemoryMax=768M
+CPUQuota=50%
+TasksMax=64
+# hardening — chiều ngược của lang-nghe-dashboard.service: không đọc thư mục / .env của dashboard
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+InaccessiblePaths=-/opt/lang-nghe
+# Mark ghi bộ nhớ đệm tên Lark / sổ audit ở đây (nếu có); thiếu thư mục thì bỏ qua.
+ReadWritePaths=-/opt/mark/app/.tokens -/opt/mark/app/.audit
+ProtectProc=invisible
+ProcSubset=pid
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# AF_UNIX: socket Postgres (peer, LISTEN). AF_INET/6: gọi RA open.larksuite.com.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+ProtectHostname=yes
+ProtectClock=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

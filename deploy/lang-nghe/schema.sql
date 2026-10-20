@@ -881,6 +881,130 @@ BEGIN
   END IF;
 END $mt$;
 
+-- ───────────── Xuất Lark Sheet quảng cáo (20/10/2026, chủ dự án chốt) ─────────────
+-- Trang Quảng cáo (chỉ quản trị viên) có nút "Tạo Sheet": một dòng = một yêu cầu xuất số quảng cáo
+-- theo ĐÚNG bộ lọc trang (bên, nền tảng, tài khoản, từ–đến) thành MỘT Lark Sheet ba tab (theo ngày ×
+-- tài khoản, theo chiến dịch, theo quảng cáo). Dashboard (lang_nghe_web) KHÔNG giữ app Lark tạo
+-- được Sheet nên chỉ THÊM dòng; bộ nghe qc-sheet-nghe (user mark, `xuat_sheet_qc.py`, .env của Mark)
+-- nhận qua pg_notify('qc_sheet') + quét dòng chờ lúc khởi động / mỗi phút, dựng Sheet, chia sẻ quyền
+-- XEM cho người yêu cầu, nhắn link trên Lark và ghi lại trạng thái + link.
+-- Vì sao bảng RIÊNG (không thêm `loai` vào yeu_cau_tuc_thi): hai bên đổi vai — ở đây web thêm, Mark
+-- sửa; yeu_cau_tuc_thi cho Mark THÊM mọi dòng và cho lang_nghe_web SỬA mọi dòng (RLS tuc_thi_*).
+-- Dùng chung bảng thì web sửa được link / trạng thái Sheet, Mark thêm được yêu cầu Sheet giả. Bảng
+-- riêng: quyền theo cột + RLS gọn, kênh NOTIFY riêng (bộ nghe quảng cáo không bị đánh thức).
+-- Bảng mới: CREATE nhanh, không khoá bảng nào khác.
+CREATE TABLE IF NOT EXISTS yeu_cau_sheet_qc (
+  id              BIGSERIAL PRIMARY KEY,
+  nguoi_hoi       TEXT NOT NULL CHECK (length(nguoi_hoi) BETWEEN 3 AND 254),
+  ben             TEXT NOT NULL CHECK (ben ~ '^[a-z0-9][a-z0-9_-]{0,39}$'),
+  nen_tang        TEXT NOT NULL CHECK (nen_tang IN ('tat_ca', 'tiktok', 'meta')),
+  tk              TEXT CHECK (tk IS NULL OR tk ~ '^(act_)?[0-9]{1,30}$'),
+  tu              DATE NOT NULL,
+  den             DATE NOT NULL,
+  trang_thai      TEXT NOT NULL DEFAULT 'cho'
+                  CHECK (trang_thai IN ('cho', 'dang_tao', 'xong', 'loi')),
+  tieu_de         TEXT,
+  sheet_url       TEXT CHECK (sheet_url IS NULL OR sheet_url ~ '^https://'),
+  so_dong         JSONB NOT NULL DEFAULT '{}'::jsonb,
+  loi             TEXT,
+  loi_noi_bo      TEXT,
+  da_nhan_tin     BOOLEAN NOT NULL DEFAULT FALSE,
+  tao_luc         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  bat_dau_luc     TIMESTAMPTZ,
+  xong_luc        TIMESTAMPTZ,
+  CHECK (den >= tu AND den - tu < 400)
+);
+CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_nguoi ON yeu_cau_sheet_qc (nguoi_hoi, tao_luc DESC);
+CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_cho ON yeu_cau_sheet_qc (trang_thai, id)
+  WHERE trang_thai IN ('cho', 'dang_tao');
+-- TRƯỚC khi thêm (SECURITY DEFINER, chủ lang_nghe_chu bỏ qua RLS để đếm cả bảng): trạng thái + cột
+-- kết quả do CSDL đặt (web không chọn được); trần NGUYÊN TỬ dưới khoá advisory — một yêu cầu đang
+-- chờ / đang tạo (chưa quá 30 phút) mỗi người, ≤ 4 yêu cầu mỗi người mỗi giờ, ≤ 30 yêu cầu toàn hệ
+-- thống mỗi giờ. App kiểm trước cùng số (`dashboard/kho_sheet_qc.py`) để báo câu rõ; đây là chốt
+-- thứ hai.
+CREATE OR REPLACE FUNCTION chuan_yeu_cau_sheet_qc() RETURNS trigger LANGUAGE plpgsql
+  SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+BEGIN
+  NEW.nguoi_hoi := lower(btrim(NEW.nguoi_hoi));
+  NEW.trang_thai := 'cho';
+  NEW.tao_luc := now();
+  NEW.bat_dau_luc := NULL;
+  NEW.xong_luc := NULL;
+  NEW.tieu_de := NULL;
+  NEW.sheet_url := NULL;
+  NEW.so_dong := '{}'::jsonb;
+  NEW.loi := NULL;
+  NEW.loi_noi_bo := NULL;
+  NEW.da_nhan_tin := FALSE;
+  PERFORM pg_advisory_xact_lock(hashtext('sheet_qc|' || NEW.nguoi_hoi));
+  PERFORM pg_advisory_xact_lock(hashtext('sheet_qc|*'));
+  IF EXISTS (SELECT 1 FROM public.yeu_cau_sheet_qc WHERE nguoi_hoi = NEW.nguoi_hoi
+             AND ((trang_thai = 'cho' AND tao_luc > now() - interval '30 minutes')
+                  OR (trang_thai = 'dang_tao' AND bat_dau_luc > now() - interval '30 minutes'))) THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: đang có yêu cầu chờ' USING ERRCODE = 'check_violation';
+  END IF;
+  IF (SELECT count(*) FROM public.yeu_cau_sheet_qc WHERE nguoi_hoi = NEW.nguoi_hoi
+      AND tao_luc > now() - interval '1 hour') >= 4 THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: quá trần mỗi người mỗi giờ' USING ERRCODE = 'check_violation';
+  END IF;
+  IF (SELECT count(*) FROM public.yeu_cau_sheet_qc WHERE tao_luc > now() - interval '1 hour') >= 30 THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: quá trần chung mỗi giờ' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $fn$;
+REVOKE ALL ON FUNCTION chuan_yeu_cau_sheet_qc() FROM PUBLIC;
+-- SAU khi thêm: đánh thức bộ nghe (thông báo chỉ gửi khi giao dịch COMMIT; không ai nghe thì bỏ —
+-- bộ nghe vẫn quét dòng chờ mỗi phút).
+CREATE OR REPLACE FUNCTION bao_yeu_cau_sheet_qc() RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+  PERFORM pg_notify('qc_sheet', NEW.id::text);
+  RETURN NULL;
+END $fn$;
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'yeu_cau_sheet_qc_chuan'
+                 AND tgrelid = 'yeu_cau_sheet_qc'::regclass) THEN
+    CREATE TRIGGER yeu_cau_sheet_qc_chuan BEFORE INSERT ON yeu_cau_sheet_qc
+      FOR EACH ROW EXECUTE FUNCTION chuan_yeu_cau_sheet_qc();
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'yeu_cau_sheet_qc_bao'
+                 AND tgrelid = 'yeu_cau_sheet_qc'::regclass) THEN
+    CREATE TRIGGER yeu_cau_sheet_qc_bao AFTER INSERT ON yeu_cau_sheet_qc
+      FOR EACH ROW EXECUTE FUNCTION bao_yeu_cau_sheet_qc();
+  END IF;
+END $mt$;
+-- Bảo mật theo dòng: lang_nghe_web chỉ THÊM + ĐỌC dòng của CHÍNH người đang đăng nhập — app đặt
+-- `set_config('lang_nghe.nguoi', <email phiên>, true)` trong cùng giao dịch (`kho_sheet_qc._la`);
+-- quên đặt = không thấy dòng nào, không thêm được (lớp chặn thứ hai sau kiểm quyền của app, không
+-- phải ranh giới chống chính role web). Không chính sách UPDATE / DELETE nào cho web → web không bao
+-- giờ sửa trạng thái / link. Role mark đọc + sửa mọi dòng (chỉ cột kết quả — cấp theo cột cuối
+-- file), không thêm, không xoá. Bật RLS / tạo chính sách chỉ khi chưa có.
+DO $mt$
+BEGIN
+  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'yeu_cau_sheet_qc'::regclass) THEN
+    ALTER TABLE yeu_cau_sheet_qc ENABLE ROW LEVEL SECURITY;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_sheet_qc'
+                 AND policyname = 'sheet_qc_doc_web') THEN
+    CREATE POLICY sheet_qc_doc_web ON yeu_cau_sheet_qc FOR SELECT TO lang_nghe_web
+      USING (nguoi_hoi = current_setting('lang_nghe.nguoi', true));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_sheet_qc'
+                 AND policyname = 'sheet_qc_them_web') THEN
+    CREATE POLICY sheet_qc_them_web ON yeu_cau_sheet_qc FOR INSERT TO lang_nghe_web
+      WITH CHECK (nguoi_hoi = current_setting('lang_nghe.nguoi', true));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_sheet_qc'
+                 AND policyname = 'sheet_qc_doc_mark') THEN
+    CREATE POLICY sheet_qc_doc_mark ON yeu_cau_sheet_qc FOR SELECT TO mark USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_sheet_qc'
+                 AND policyname = 'sheet_qc_sua_mark') THEN
+    CREATE POLICY sheet_qc_sua_mark ON yeu_cau_sheet_qc FOR UPDATE TO mark
+      USING (true) WITH CHECK (true);
+  END IF;
+END $mt$;
+
 -- ───────────── Mô tả bảng + cột theo quy chuẩn BI (task t280613, skill lsr-bq-description-standard) ─────────────
 -- Chủ dự án 14/10/2026: DB mới cũng theo rule mô tả của BI (11 nhãn bảng, mô tả mọi cột). Ghi
 -- ngay trong file build (COMMENT ON chạy lại không mất), có bài canh tests/test_theo_doi.py.
@@ -1517,6 +1641,34 @@ COMMENT ON COLUMN yeu_cau_tuc_thi.loi IS 'Lý do lỗi / bỏ qua / từ chối 
 COMMENT ON COLUMN yeu_cau_tuc_thi.tao_luc IS 'Lúc Mark ghi yêu cầu (UTC).';
 COMMENT ON COLUMN yeu_cau_tuc_thi.bat_dau_luc IS 'Lúc lượt đọc / cào bắt đầu (UTC). Các yêu cầu gộp vào cùng một lượt có cùng mốc.';
 COMMENT ON COLUMN yeu_cau_tuc_thi.xong_luc IS 'Lúc kết thúc (UTC) — Mark nói "số cập nhật lúc HH:MM" theo mốc này.';
+COMMENT ON TABLE yeu_cau_sheet_qc IS $$[Lớp] Raw
+[Mục đích] Sổ yêu cầu xuất số quảng cáo TikTok / Meta Ads thành Lark Sheet từ trang Quảng cáo — hàng chờ cho bộ nghe qc-sheet-nghe (Mark) và dấu vết ai xuất phạm vi nào, link nào.
+[Grain] 1 dòng = 1 lần quản trị viên bấm "Tạo Sheet" (đã qua trần)
+[Khoá] PK: id | Join: ben → don_vi.ma (trừ tat_ca, chua_gan); tk → tk_quang_cao.advertiser_id
+[Nguồn] Dashboard social.hapas.vn (role lang_nghe_web) thêm dòng; bộ nghe qc-sheet-nghe (role mark, xuat_sheet_qc.py) nhận, dựng Sheet và ghi kết quả
+[Phạm vi] Chỉ quản trị viên | Kênh TikTok Ads, Meta Ads | Từ 20/10/2026
+[Đã xử lý] Trạng thái + cột kết quả lúc thêm do trigger đặt; trần (1 yêu cầu đang chờ, 4/người/giờ, 30/giờ toàn hệ thống) do trigger kiểm; email chữ thường; chờ / đang tạo quá 30 phút → loi
+[Refresh] Theo yêu cầu (thời gian thực); dòng không bao giờ xoá
+[Dùng khi] Biết ai đã xuất Sheet quảng cáo nào, phạm vi nào, lúc nào, link nào; soát lỗi xuất Sheet
+[Không dùng khi] Số quảng cáo → dùng qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay; yêu cầu đọc số mới của Mark → dùng yeu_cau_tuc_thi
+[Lưu ý] Có email người yêu cầu và link Sheet (Sheet riêng tư, chỉ người yêu cầu được xem) — KHÔNG đẩy lên BigQuery. RLS: web chỉ thấy / thêm dòng của chính người đăng nhập (lang_nghe.nguoi), chỉ mark sửa kết quả.$$;
+COMMENT ON COLUMN yeu_cau_sheet_qc.id IS 'Mã yêu cầu tự tăng. PK. Cũng là payload của pg_notify(qc_sheet).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.nguoi_hoi IS 'Email công ty (chữ thường) của quản trị viên bấm Tạo Sheet — Sheet chia sẻ quyền xem cho email này, Mark nhắn link tới email này. Dữ liệu cá nhân — không đẩy BigQuery.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.ben IS 'Bên của bộ lọc trang: mã don_vi, tat_ca (mọi bên) hoặc chua_gan (tài khoản chưa gán bên).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.nen_tang IS 'Nền tảng của bộ lọc trang: tat_ca, tiktok hoặc meta.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tk IS 'Một tài khoản quảng cáo của bộ lọc (advertiser_id / act_…); NULL = mọi tài khoản của bên + nền tảng.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tu IS 'Ngày đầu khoảng xuất (ngày theo múi giờ tài khoản, như qc_tk_ngay.ngay).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.den IS 'Ngày cuối khoảng xuất; tối đa 400 ngày (CHECK).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.trang_thai IS 'cho (đợi bộ nghe), dang_tao, xong (có sheet_url), loi (xem loi).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tieu_de IS 'Tên file Sheet bộ nghe đặt (vd "TikTok Ads · HAPAS · 01/10–19/10/2026"). NULL khi chưa tạo.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.sheet_url IS 'Link Lark Sheet (riêng tư: chia sẻ link đóng, chỉ người yêu cầu được xem). NULL khi chưa xong / lỗi.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.so_dong IS 'Số dòng từng tab JSON {ngay, chien_dich, quang_cao, tong_chien_dich, tong_quang_cao}: tong_* lớn hơn số dòng = tab bị cắt ở trần dòng.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.loi IS 'Lý do lỗi cho người yêu cầu (đã bỏ token / URL), ≤ 300 ký tự. NULL khi ổn.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.loi_noi_bo IS 'Chi tiết lỗi kỹ thuật cho vận hành (loại lỗi + chữ lỗi đã che token), ≤ 500 ký tự. Role lang_nghe_web không đọc được cột này.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.da_nhan_tin IS 'Mark đã nhắn link (hoặc lỗi) cho người yêu cầu trên Lark chưa.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tao_luc IS 'Lúc bấm Tạo Sheet (UTC, trigger đặt).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.bat_dau_luc IS 'Lúc bộ nghe nhận yêu cầu (UTC).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.xong_luc IS 'Lúc xong / lỗi (UTC).';
 RESET ROLE;
 
 -- Quyền của bot: đọc cấu hình, ghi kết quả. Không sửa dự án, không thêm/xoá nguồn.
@@ -1599,4 +1751,21 @@ GRANT INSERT (loai, nguoi_hoi, ben, nha_cung_cap, tai_khoan, tu, den, du_an, so_
 GRANT UPDATE (trang_thai, chi_phi_usd, loi, chi_tiet, xong_luc) ON yeu_cau_tuc_thi TO mark;
 GRANT USAGE ON SEQUENCE yeu_cau_tuc_thi_id_seq TO mark;
 GRANT SELECT, UPDATE ON yeu_cau_tuc_thi TO lang_nghe_web;
+COMMIT;
+
+-- Xuất Lark Sheet quảng cáo (20/10/2026, dashboard/kho_sheet_qc.py + xuat_sheet_qc.py): web THÊM đúng
+-- các cột phạm vi + ĐỌC các cột trạng thái (không loi_noi_bo), KHÔNG sửa / xoá; Mark ĐỌC + SỬA cột
+-- kết quả, KHÔNG thêm / xoá. RLS ở trên giới hạn dòng (web: chỉ dòng của người đăng nhập). REVOKE
+-- trước (thu quyền cả bảng — GRANT SELECT ON ALL TABLES phía trên vừa cấp cho web), rồi cấp theo
+-- cột; một giao dịch: chạy lại file này không có khoảng trống quyền.
+BEGIN;
+REVOKE ALL ON yeu_cau_sheet_qc FROM mark, lang_nghe_web;
+REVOKE ALL ON SEQUENCE yeu_cau_sheet_qc_id_seq FROM mark, lang_nghe_web;
+GRANT SELECT (id, nguoi_hoi, ben, nen_tang, tk, tu, den, trang_thai, tieu_de, sheet_url, so_dong,
+              loi, da_nhan_tin, tao_luc, bat_dau_luc, xong_luc) ON yeu_cau_sheet_qc TO lang_nghe_web;
+GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tu, den) ON yeu_cau_sheet_qc TO lang_nghe_web;
+GRANT USAGE ON SEQUENCE yeu_cau_sheet_qc_id_seq TO lang_nghe_web;
+GRANT SELECT ON yeu_cau_sheet_qc TO mark;
+GRANT UPDATE (trang_thai, tieu_de, sheet_url, so_dong, loi, loi_noi_bo, da_nhan_tin, bat_dau_luc,
+              xong_luc) ON yeu_cau_sheet_qc TO mark;
 COMMIT;

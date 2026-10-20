@@ -622,6 +622,33 @@ def _canh(canh_bao: list, viec: str, e: Exception, du: bool = True) -> None:
     print(f"[trinh_bay_sheet] {cau}", flush=True)
 
 
+# Bản chung của `meta_ads_tool._khoa_rieng_tu` (20/10/2026 — cùng lời gọi, cùng điều kiện kiểm) cho Sheet
+# xuất từ trang Quảng cáo (`xuat_sheet_qc`). meta_ads_tool được giữ nguyên byte (bài canh
+# test_meta_ads_tool_cu_khong_doi) nên chưa gọi sang đây; đổi một bên thì đổi cả hai.
+CAU_CHUA_RIENG_TU = "Chưa xác minh được Sheet riêng tư; chưa ghi số ads."
+
+
+def khoa_rieng_tu(token: str) -> None:
+    """`xuat(sau_khi_tao=khoa_rieng_tu)`: chạy NGAY SAU khi tạo bảng tính, TRƯỚC mọi lần ghi số —
+    đóng chia sẻ link / ngoài tổ chức kế thừa, chỉ người toàn quyền (bot) thêm được cộng tác viên,
+    rồi ĐỌC LẠI kiểm; chưa đúng thì ném (không ghi số nào)."""
+    # Drive v2 fields/enums verified against larksuite/oapi-sdk-go v3.12.0 drive/v2.
+    A.lark.call("PATCH", f"/open-apis/drive/v2/permissions/{token}/public", query={"type": "sheet"},
+                body={"external_access_entity": "closed", "link_share_entity": "closed",
+                      "share_entity": "same_tenant",
+                      "manage_collaborator_entity": "collaborator_full_access"})
+    permission = A.lark.call("GET", f"/open-apis/drive/v2/permissions/{token}/public",
+                             query={"type": "sheet"})
+    public = ((permission or {}).get("data") or {}).get("permission_public") or {}
+    # `share_entity` của Drive v2 chỉ có `anyone` | `same_tenant`; đòi đúng giá trị vừa đặt (không
+    # phải `anyone`), cộng `collaborator_full_access` để chỉ người toàn quyền (bot) thêm được cộng
+    # tác viên.
+    if (public.get("link_share_entity") != "closed" or public.get("external_access_entity") != "closed"
+            or public.get("share_entity") != "same_tenant"
+            or public.get("manage_collaborator_entity") != "collaborator_full_access"):
+        raise ValueError(CAU_CHUA_RIENG_TU)
+
+
 def _them_tab(tok: str, ten: str, vi_tri: int | None) -> str:
     p: dict = {"title": ten}
     if vi_tri is not None:
