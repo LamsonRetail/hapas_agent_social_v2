@@ -146,14 +146,20 @@ def ngat(ai: str, ncc: str = NCC) -> None:
         _nhat_ky(c, ai, f"ngat_{_nen_tang(ncc)}", f"ket_noi:{ncc}", {})
 
 
-def bat_dau_dong_bo(ncc: str = NCC, kieu: str = "day_du") -> None:
-    """Lượt bắt đầu: ghi mốc + loại lượt (day_du | nhanh) + xoá cờ yêu cầu đang chờ (lượt này đáp
-    ứng nó)."""
+def bat_dau_dong_bo(ncc: str = NCC, cho_nhanh: bool = False) -> str:
+    """Lượt bắt đầu: ghi mốc, xoá cờ yêu cầu đang chờ (lượt này đáp ứng nó) và quyết định loại lượt
+    NGUYÊN TỬ trong MỘT câu UPDATE (vế SET đọc giá trị CŨ của dòng): nhanh chỉ khi `cho_nhanh`
+    (bộ hẹn giờ yêu cầu, không khoảng ngày tay) và yêu cầu đang chờ là nhanh — yêu cầu day_du ghi
+    giữa lúc đọc và lúc khoá không bao giờ bị lượt nhanh "nuốt". -> "nhanh" | "day_du"."""
     with ket_noi() as c:
         _dam_bao(c, ncc)
-        c.execute("UPDATE ket_noi_ngoai SET dong_bo_bat_dau = now(), dong_bo_xong = NULL, "
-                  "dong_bo_kieu = %s, yeu_cau_dong_bo_luc = NULL, yeu_cau_kieu = NULL "
-                  "WHERE nha_cung_cap = %s", ("nhanh" if kieu == "nhanh" else "day_du", ncc))
+        r = c.execute(
+            "UPDATE ket_noi_ngoai SET dong_bo_bat_dau = now(), dong_bo_xong = NULL, "
+            "dong_bo_kieu = CASE WHEN %s AND yeu_cau_dong_bo_luc IS NOT NULL "
+            "AND yeu_cau_kieu = 'nhanh' THEN 'nhanh' ELSE 'day_du' END, "
+            "yeu_cau_dong_bo_luc = NULL, yeu_cau_kieu = NULL WHERE nha_cung_cap = %s "
+            "RETURNING dong_bo_kieu", (bool(cho_nhanh), ncc)).fetchone()
+    return (r or {}).get("dong_bo_kieu") or "day_du"
 
 
 def yeu_cau_dong_bo(ai: str, ncc: str = NCC, kieu: str = "day_du") -> None:
@@ -549,45 +555,54 @@ def qc_ten(cap: str, ids: list[str], n: int = 5000) -> list[dict]:
                          "LIMIT %s", (list(ids), max(1, min(int(n), 20000)))).fetchall()
 
 
-def qc_doi_tuong(cap: str, ma: list[str], tu: datetime.date, den: datetime.date) -> list[dict]:
-    """Tổng cột số kiểu riêng của từng đối tượng trong kỳ + ngày đầu / cuối CÓ phân phối."""
-    if cap not in CAP_TRA_CUU or not ma:
+def qc_doi_tuong(cap: str, ma: list[str], tu: datetime.date, den: datetime.date,
+                 ids: list[str]) -> list[dict]:
+    """Tổng cột số kiểu riêng của từng đối tượng trong kỳ + ngày đầu / cuối CÓ phân phối. CHỈ dòng
+    của các tài khoản `ids` (phạm vi người hỏi) — mã trùng ở tài khoản khác không bao giờ lọt vào;
+    nhóm theo (mã, tài khoản)."""
+    if cap not in CAP_TRA_CUU or not ma or not ids:
         return []
     bang, khoa, _, _ = CAP_TRA_CUU[cap]
     pp = "(COALESCE(hien_thi, 0) > 0 OR COALESCE(chi, 0) > 0)"
     with ket_noi() as c:
         return c.execute(
-            f"SELECT {khoa} AS ma, min(advertiser_id) AS advertiser_id, {_TONG}, "
+            f"SELECT {khoa} AS ma, advertiser_id AS tk, {_TONG}, "
             f"count(DISTINCT ngay) AS so_ngay, min(ngay) FILTER (WHERE {pp}) AS ngay_dau, "
             f"max(ngay) FILTER (WHERE {pp}) AS ngay_cuoi FROM {bang} WHERE {khoa} = ANY(%s) "
-            f"AND ngay BETWEEN %s AND %s GROUP BY {khoa}",
-            (list(ma)[:TRA_CUU_TOI_DA], tu, den)).fetchall()
+            f"AND advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s GROUP BY {khoa}, advertiser_id",
+            (list(ma)[:TRA_CUU_TOI_DA], list(ids), tu, den)).fetchall()
 
 
-def qc_chi_so_tong(cap: str, ma: list[str], tu: datetime.date, den: datetime.date) -> list[dict]:
-    """Tổng THÔ từng khoá số trong `chi_so` (JSONB) của từng đối tượng trong kỳ. Khoá không cộng
-    được (tỉ lệ, reach…) vẫn trả — bên gọi bỏ bằng `quang_cao.cong_duoc` và tính lại tỉ lệ."""
-    if cap not in CAP_TRA_CUU or not ma:
+def qc_chi_so_tong(cap: str, ma: list[str], tu: datetime.date, den: datetime.date,
+                   ids: list[str]) -> list[dict]:
+    """Tổng THÔ từng khoá số trong `chi_so` (JSONB) của từng đối tượng trong kỳ, chỉ tài khoản
+    `ids`. Khoá không cộng được (tỉ lệ, reach…) vẫn trả — bên gọi bỏ bằng `quang_cao.cong_duoc`."""
+    if cap not in CAP_TRA_CUU or not ma or not ids:
         return []
     bang, khoa, _, _ = CAP_TRA_CUU[cap]
     with ket_noi() as c:
         return c.execute(
-            f"SELECT t.{khoa} AS ma, e.key AS ten, sum((e.value)::text::numeric)::float AS tong "
+            f"SELECT t.{khoa} AS ma, t.advertiser_id AS tk, e.key AS ten, "
+            "sum((e.value)::text::numeric)::float AS tong "
             f"FROM {bang} t, jsonb_each(t.chi_so) AS e WHERE t.{khoa} = ANY(%s) "
-            "AND t.ngay BETWEEN %s AND %s AND jsonb_typeof(e.value) = 'number' "
-            f"GROUP BY t.{khoa}, e.key", (list(ma)[:TRA_CUU_TOI_DA], tu, den)).fetchall()
+            "AND t.advertiser_id = ANY(%s) AND t.ngay BETWEEN %s AND %s "
+            "AND jsonb_typeof(e.value) = 'number' "
+            f"GROUP BY t.{khoa}, t.advertiser_id, e.key",
+            (list(ma)[:TRA_CUU_TOI_DA], list(ids), tu, den)).fetchall()
 
 
-def qc_doi_tuong_ngay(cap: str, ma: list[str], tu: datetime.date, den: datetime.date
-                      ) -> list[dict]:
-    """Chuỗi theo ngày của từng đối tượng (cột số kiểu riêng)."""
-    if cap not in CAP_TRA_CUU or not ma:
+def qc_doi_tuong_ngay(cap: str, ma: list[str], tu: datetime.date, den: datetime.date,
+                      ids: list[str]) -> list[dict]:
+    """Chuỗi theo ngày của từng đối tượng (cột số kiểu riêng), chỉ tài khoản `ids`."""
+    if cap not in CAP_TRA_CUU or not ma or not ids:
         return []
     bang, khoa, _, _ = CAP_TRA_CUU[cap]
     with ket_noi() as c:
-        return c.execute(f"SELECT {khoa} AS ma, ngay, {_TONG} FROM {bang} WHERE {khoa} = ANY(%s) "
-                         f"AND ngay BETWEEN %s AND %s GROUP BY {khoa}, ngay ORDER BY {khoa}, ngay",
-                         (list(ma)[:TRA_CUU_TOI_DA], tu, den)).fetchall()
+        return c.execute(f"SELECT {khoa} AS ma, advertiser_id AS tk, ngay, {_TONG} FROM {bang} "
+                         f"WHERE {khoa} = ANY(%s) AND advertiser_id = ANY(%s) "
+                         f"AND ngay BETWEEN %s AND %s GROUP BY {khoa}, advertiser_id, ngay "
+                         f"ORDER BY {khoa}, advertiser_id, ngay",
+                         (list(ma)[:TRA_CUU_TOI_DA], list(ids), tu, den)).fetchall()
 
 
 def trang_thai_nhac(ncc: str = NCC) -> dict | None:

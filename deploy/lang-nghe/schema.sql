@@ -713,30 +713,62 @@ CREATE INDEX IF NOT EXISTS qc_khan_gia_cap_nhat ON qc_khan_gia (cap_nhat_luc);
 -- qc_* giữ nguyên (mã campaign/ad hai nền tảng khác dạng; upsert không bao giờ đè dòng của tài
 -- khoản khác — kho_qc.sql_upsert). Chạy lại nhiều lần không sao; ALTER chỉ đổi danh mục (thêm cột
 -- DEFAULT hằng) hoặc quét bảng nhỏ (CHECK) — dưới lock_timeout.
-ALTER TABLE ket_noi_ngoai DROP CONSTRAINT IF EXISTS ket_noi_ngoai_nha_cung_cap_check;
-ALTER TABLE ket_noi_ngoai ADD CONSTRAINT ket_noi_ngoai_nha_cung_cap_check
-  CHECK (nha_cung_cap IN ('tiktok_ads', 'meta_ads'));
+-- Đổi ràng buộc CHECK NGUYÊN TỬ (soát 20/10/2026): mỗi khối DO là MỘT giao dịch — DROP + ADD cùng
+-- thành công hoặc cùng huỷ (lock_timeout giữa chừng không bao giờ để bảng mất CHECK); ràng buộc đã
+-- đúng (pg_get_constraintdef) thì bỏ qua — chạy lại schema.sql là không làm gì, không xin khoá.
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'ket_noi_ngoai'::regclass
+                 AND conname = 'ket_noi_ngoai_nha_cung_cap_check'
+                 AND pg_get_constraintdef(oid) LIKE '%meta_ads%') THEN
+    ALTER TABLE ket_noi_ngoai DROP CONSTRAINT IF EXISTS ket_noi_ngoai_nha_cung_cap_check;
+    ALTER TABLE ket_noi_ngoai ADD CONSTRAINT ket_noi_ngoai_nha_cung_cap_check
+      CHECK (nha_cung_cap IN ('tiktok_ads', 'meta_ads'));
+  END IF;
+END $mt$;
 ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS chu_token TEXT;
 ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS quyen_token TEXT[];
 -- Đồng bộ bấm tay cho mọi người có quyền (20/10/2026): loại yêu cầu / lượt + mốc giãn 15 phút.
 ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS yeu_cau_kieu TEXT;
 ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS dong_bo_kieu TEXT;
 ALTER TABLE ket_noi_ngoai ADD COLUMN IF NOT EXISTS nhanh_xong_luc TIMESTAMPTZ;
-ALTER TABLE ket_noi_ngoai DROP CONSTRAINT IF EXISTS ket_noi_ngoai_kieu_check;
-ALTER TABLE ket_noi_ngoai ADD CONSTRAINT ket_noi_ngoai_kieu_check
-  CHECK ((yeu_cau_kieu IS NULL OR yeu_cau_kieu IN ('day_du', 'nhanh'))
-         AND (dong_bo_kieu IS NULL OR dong_bo_kieu IN ('day_du', 'nhanh')));
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'ket_noi_ngoai'::regclass
+                 AND conname = 'ket_noi_ngoai_kieu_check'
+                 AND pg_get_constraintdef(oid) LIKE '%dong_bo_kieu%') THEN
+    ALTER TABLE ket_noi_ngoai DROP CONSTRAINT IF EXISTS ket_noi_ngoai_kieu_check;
+    ALTER TABLE ket_noi_ngoai ADD CONSTRAINT ket_noi_ngoai_kieu_check
+      CHECK ((yeu_cau_kieu IS NULL OR yeu_cau_kieu IN ('day_du', 'nhanh'))
+             AND (dong_bo_kieu IS NULL OR dong_bo_kieu IN ('day_du', 'nhanh')));
+  END IF;
+END $mt$;
 ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS nen_tang TEXT NOT NULL DEFAULT 'tiktok';
 ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS duyet BOOLEAN NOT NULL DEFAULT TRUE;
-ALTER TABLE tk_quang_cao DROP CONSTRAINT IF EXISTS tk_quang_cao_advertiser_id_check;
-ALTER TABLE tk_quang_cao DROP CONSTRAINT IF EXISTS tk_quang_cao_ma_check;
-ALTER TABLE tk_quang_cao ADD CONSTRAINT tk_quang_cao_ma_check CHECK (
-  (nen_tang = 'tiktok' AND advertiser_id ~ '^[0-9]{1,30}$')
-  OR (nen_tang = 'meta' AND advertiser_id ~ '^act_[0-9]{1,30}$'));
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'tk_quang_cao'::regclass
+                 AND conname = 'tk_quang_cao_ma_check'
+                 AND pg_get_constraintdef(oid) LIKE '%act_%') THEN
+    -- CHECK cũ (chỉ chuỗi số) bỏ CÙNG giao dịch với CHECK mới.
+    ALTER TABLE tk_quang_cao DROP CONSTRAINT IF EXISTS tk_quang_cao_advertiser_id_check;
+    ALTER TABLE tk_quang_cao DROP CONSTRAINT IF EXISTS tk_quang_cao_ma_check;
+    ALTER TABLE tk_quang_cao ADD CONSTRAINT tk_quang_cao_ma_check CHECK (
+      (nen_tang = 'tiktok' AND advertiser_id ~ '^[0-9]{1,30}$')
+      OR (nen_tang = 'meta' AND advertiser_id ~ '^act_[0-9]{1,30}$'));
+  END IF;
+END $mt$;
 CREATE INDEX IF NOT EXISTS tk_quang_cao_nen_tang ON tk_quang_cao (nen_tang);
-ALTER TABLE qc_khan_gia DROP CONSTRAINT IF EXISTS qc_khan_gia_chieu_check;
-ALTER TABLE qc_khan_gia ADD CONSTRAINT qc_khan_gia_chieu_check CHECK (chieu IN ('age', 'gender',
-  'province_id', 'region', 'platform', 'publisher_platform', 'platform_position'));
+DO $mt$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'qc_khan_gia'::regclass
+                 AND conname = 'qc_khan_gia_chieu_check'
+                 AND pg_get_constraintdef(oid) LIKE '%platform_position%') THEN
+    ALTER TABLE qc_khan_gia DROP CONSTRAINT IF EXISTS qc_khan_gia_chieu_check;
+    ALTER TABLE qc_khan_gia ADD CONSTRAINT qc_khan_gia_chieu_check CHECK (chieu IN ('age', 'gender',
+      'province_id', 'region', 'platform', 'publisher_platform', 'platform_position'));
+  END IF;
+END $mt$;
 
 -- ───────────── Mô tả bảng + cột theo quy chuẩn BI (task t280613, skill lsr-bq-description-standard) ─────────────
 -- Chủ dự án 14/10/2026: DB mới cũng theo rule mô tả của BI (11 nhãn bảng, mô tả mọi cột). Ghi

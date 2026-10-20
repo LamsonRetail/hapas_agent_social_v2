@@ -181,25 +181,37 @@ def dai_trang_thai(the: dict | None, nen_tang: str) -> dict:
             "co_token": bool(t.get("co_token"))}
 
 
-def kiem_yeu_cau(the: dict | None, bay: datetime.datetime, gian_phut: int = GIAN_PHUT) -> str | None:
+def _utc(x):
+    if isinstance(x, datetime.datetime) and x.tzinfo is None:
+        return x.replace(tzinfo=datetime.timezone.utc)
+    return x if isinstance(x, datetime.datetime) else None
+
+
+def kiem_yeu_cau(the: dict | None, bay: datetime.datetime, gian_phut: int = GIAN_PHUT, *,
+                 hien_ai: bool = False) -> str | None:
     """Có được ghi yêu cầu "Đồng bộ ngay" (nhanh) cho nền tảng này không. None = được; không thì câu
-    trả lời cho người bấm: đang chạy / đang có yêu cầu / chưa hết thời gian giãn / chưa kết nối."""
+    trả lời cho người bấm: đang chạy / đang có yêu cầu / chưa hết thời gian giãn / chưa kết nối.
+    Email người yêu cầu chỉ hiện khi `hien_ai` (quản trị viên); người khác chỉ thấy giờ.
+    Giãn 15 phút tính từ mốc MUỘN NHẤT của: lượt nhanh gần nhất kết thúc (`nhanh_xong_luc`) và lượt
+    nhanh gần nhất BẮT ĐẦU (`dong_bo_bat_dau` khi `dong_bo_kieu` = nhanh) — lượt bị giết giữa chừng
+    (hết giờ, OOM, khởi động lại) không ghi được lúc xong nhưng vẫn bị tính giãn."""
     t = the or {}
     if not t.get("co_token"):
         return "chưa kết nối"
     if t.get("dang_dong_bo"):
         return f"đang chạy từ {_gio(t.get('dong_bo_bat_dau'))}"
     if t.get("yeu_cau_dong_bo_luc"):
-        ai = t.get("yeu_cau_boi")
+        ai = t.get("yeu_cau_boi") if hien_ai else None
         return (f"đang có yêu cầu lúc {_gio(t.get('yeu_cau_dong_bo_luc'))}"
                 + (f" ({ai})" if ai else ""))
-    xong = t.get("nhanh_xong_luc")
-    if isinstance(xong, datetime.datetime):
-        if xong.tzinfo is None:
-            xong = xong.replace(tzinfo=datetime.timezone.utc)
-        duoc = xong + datetime.timedelta(minutes=gian_phut)
+    moc = [x for x in (_utc(t.get("nhanh_xong_luc")),
+                       _utc(t.get("dong_bo_bat_dau")) if t.get("dong_bo_kieu") == "nhanh" else None)
+           if x]
+    if moc:
+        cuoi = max(moc)
+        duoc = cuoi + datetime.timedelta(minutes=gian_phut)
         if bay < duoc:
-            return f"vừa đồng bộ lúc {_gio(xong)}, bấm lại được từ {_gio(duoc)}"
+            return f"vừa đồng bộ lúc {_gio(cuoi)}, bấm lại được từ {_gio(duoc)}"
     return None
 
 

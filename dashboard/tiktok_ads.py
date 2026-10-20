@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import datetime
 import hashlib
 import json
@@ -689,6 +690,7 @@ class DichVu:
             "co_client": bool(r.get("client_id")),
             "yeu_cau_dong_bo_luc": r.get("yeu_cau_dong_bo_luc"), "yeu_cau_boi": r.get("yeu_cau_boi"),
             "yeu_cau_kieu": r.get("yeu_cau_kieu"), "nhanh_xong_luc": r.get("nhanh_xong_luc"),
+            "dong_bo_kieu": r.get("dong_bo_kieu"),
         }
 
     # ── OAuth ──
@@ -852,7 +854,6 @@ class DichVu:
         `theo_yeu_cau` (bộ hẹn giờ 2 phút): yêu cầu đang chờ là loại "nhanh" (người dùng bấm
         "Đồng bộ ngay", 20/10/2026) thì chỉ đọc hôm nay + 2 ngày trước của tài khoản có hiển thị."""
         r = self.kho.doc_ket_noi() or {}
-        nhanh = bool(theo_yeu_cau and r.get("yeu_cau_kieu") == "nhanh" and not (bu or tu or den))
         loi = self.loi_khoa()
         if loi:
             if r.get("access_token_enc"):
@@ -865,7 +866,7 @@ class DichVu:
         with self.kho.khoa_dong_bo() as giu:
             if not giu:
                 return {"bo_qua": "đang có lượt đồng bộ khác"}
-            return self._dong_bo(bu=bu, tu=tu, den=den, nhanh=nhanh)
+            return self._dong_bo(bu=bu, tu=tu, den=den, theo_yeu_cau=theo_yeu_cau)
 
     def co_yeu_cau(self) -> bool:
         """Có yêu cầu "Đồng bộ ngay" đang chờ (bộ hẹn giờ 2 phút chỉ chạy khi có)."""
@@ -879,10 +880,31 @@ class DichVu:
         yêu cầu day_du đang chờ không bao giờ bị hạ thành nhanh (`kho_qc.yeu_cau_dong_bo`)."""
         self.kho.yeu_cau_dong_bo(ai, kieu=kieu)
 
-    def _dong_bo(self, *, bu, tu, den, nhanh: bool = False) -> dict:
-        # Cũng xoá cờ yêu cầu đang chờ (lượt này đáp ứng nó) + ghi loại lượt (giãn 15 phút).
-        self.kho.bat_dau_dong_bo(kieu="nhanh" if nhanh else "day_du")
-        tong, loi, den_ngay = 0, [], None
+    def _dong_bo(self, *, bu, tu, den, theo_yeu_cau: bool = False) -> dict:
+        """Bắt đầu lượt (xoá cờ yêu cầu + quyết định loại lượt NGUYÊN TỬ — `kho_qc.bat_dau_dong_bo`)
+        rồi chạy; LUÔN kết thúc lượt: khoá/bản mã hỏng → trạng thái loi; ngoại lệ lạ → ghi "dừng
+        bất thường" rồi ném tiếp (thẻ không bao giờ kẹt "ổn", dong_bo_xong không bao giờ NULL)."""
+        kieu = self.kho.bat_dau_dong_bo(cho_nhanh=bool(theo_yeu_cau and not (bu or tu or den)))
+        dem = {"tong": 0, "den_ngay": None}
+        ket = None
+        try:
+            ket = self._chay(dem, bu=bu, tu=tu, den=den, nhanh=kieu == "nhanh")
+        except LoiMaHoa as e:
+            self.kho.ghi_trang_thai("loi", f"Không giải mã được token: {e}", con_token=True)
+            ket = (f"không giải mã được token: {e}", {"loi": str(e), "so_dong": dem["tong"]})
+        finally:
+            if ket is None:
+                ten = "lượt dừng bất thường — xem journalctl tiktok-ads-*"
+                with contextlib.suppress(Exception):
+                    self.kho.ghi_trang_thai("loi", ten, con_token=True)
+                with contextlib.suppress(Exception):
+                    self.kho.ket_thuc_dong_bo(dem["tong"], ten, dem["den_ngay"])
+        self.kho.ket_thuc_dong_bo(dem["tong"], ket[0], dem["den_ngay"])
+        return ket[1]
+
+    def _chay(self, dem: dict, *, bu, tu, den, nhanh: bool) -> tuple[str | None, dict]:
+        """Thân lượt. -> (chữ lỗi cho ket_thuc_dong_bo | None, kết quả trả). `dem` cập nhật dần."""
+        loi = []
         try:
             mcp = self.mcp()
             self.kham_pha(mcp)
@@ -902,8 +924,9 @@ class DichVu:
                     continue                  # lượt nhanh: chỉ tài khoản có hiển thị 30 ngày
                 try:
                     n, d = self._dong_bo_tk(mcp, t, bay, bu=bu, tu=tu, den=den, nhanh=nhanh)
-                    tong += n
-                    den_ngay = max(den_ngay, d) if den_ngay and d else (d or den_ngay)
+                    dem["tong"] += n
+                    dn = dem["den_ngay"]
+                    dem["den_ngay"] = max(dn, d) if dn and d else (d or dn)
                 except LoiXacThuc:
                     raise
                 except LoiTikTok as e:
@@ -911,22 +934,18 @@ class DichVu:
                     self.log(f"[tiktok_ads] {t['advertiser_id']} lỗi: {e}")
             self.kho.ghi_trang_thai("hoat_dong", con_token=True)
         except ChuaKetNoi as e:
-            self.kho.ket_thuc_dong_bo(tong, str(e), den_ngay)
-            return {"bo_qua": str(e)}
+            return str(e), {"bo_qua": str(e)}
         except LoiHetHan as e:
-            self.kho.ket_thuc_dong_bo(tong, f"hết hạn: {e}", den_ngay)
-            return {"bo_qua": "token hết hạn — cần đăng nhập lại", "so_dong": tong}
+            return f"hết hạn: {e}", {"bo_qua": "token hết hạn — cần đăng nhập lại",
+                                      "so_dong": dem["tong"]}
         except LoiXacThuc as e:
             self.kho.ghi_trang_thai("loi", f"TikTok từ chối token: {e}", con_token=True)
-            self.kho.ket_thuc_dong_bo(tong, f"token bị từ chối: {e}", den_ngay)
-            return {"loi": str(e), "so_dong": tong}
+            return f"token bị từ chối: {e}", {"loi": str(e), "so_dong": dem["tong"]}
         except LoiTikTok as e:
             self.kho.ghi_trang_thai("loi", str(e), con_token=True)
-            self.kho.ket_thuc_dong_bo(tong, str(e), den_ngay)
-            return {"loi": str(e), "so_dong": tong}
+            return str(e), {"loi": str(e), "so_dong": dem["tong"]}
         chu_loi = "; ".join(loi)[:500] or None
-        self.kho.ket_thuc_dong_bo(tong, chu_loi, den_ngay)
-        return {"so_dong": tong, "den_ngay": den_ngay, "loi": chu_loi}
+        return chu_loi, {"so_dong": dem["tong"], "den_ngay": dem["den_ngay"], "loi": chu_loi}
 
     def _dong_bo_tk(self, mcp: Mcp, t: dict, bay: datetime.datetime, *, bu, tu, den,
                     nhanh: bool = False) -> tuple[int, datetime.date]:

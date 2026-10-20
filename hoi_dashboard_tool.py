@@ -1054,6 +1054,23 @@ def _goi_y(kho, cap: str, pham_vi: list[tuple[str, list[dict]]], mau: str) -> li
     return sorted(ten, key=lambda x: -diem(x))[:GOI_Y_TOI_DA] if mau else ten[:GOI_Y_TOI_DA]
 
 
+#: Bí danh mua của Meta (purchase > omni_purchase > offsite_conversion.fb_pixel_purchase — luật
+#: `meta_ads.MUA`): cùng một lượt mua đếm ở nhiều tên. Tổng thô trả cho Mark chỉ giữ TÊN ĐẦU TIÊN có
+#: mặt của mỗi nhóm (actions__…, action_values__…, purchase_roas__…) — model không thể cộng trùng.
+_BI_DANH_MUA = ("purchase", "omni_purchase", "offsite_conversion.fb_pixel_purchase")
+
+
+def bo_bi_danh(tho: dict) -> dict:
+    """Bỏ các tên bí danh mua thừa khỏi tổng thô, giữ đúng tên được chọn của từng tiền tố."""
+    ra = dict(tho)
+    tien_to = {k.split("__", 1)[0] for k in tho if "__" in k}
+    for tt in tien_to:
+        co = [f"{tt}__{a}" for a in _BI_DANH_MUA if f"{tt}__{a}" in tho]
+        for k in co[1:]:
+            ra.pop(k, None)
+    return ra
+
+
 def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
                den: datetime.date) -> dict:
     """Tra MỘT đối tượng người hỏi nêu (chủ dự án 20/10/2026): `tim` (một phần tên — bỏ dấu, hoa
@@ -1102,31 +1119,36 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
                            "Nói rõ là không thấy, đưa vài tên trong `goi_y` để người hỏi chọn — "
                            "KHÔNG đoán số."}
     # Số trong kỳ của mọi ứng viên (≤ 200) → xếp theo chi (bên không xem tiền: theo hiển thị).
+    # Đọc số CHỈ trong tài khoản của ứng viên (phạm vi người hỏi), khoá (mã, tài khoản): mã trùng ở
+    # tài khoản ngoài phạm vi không bao giờ lọt vào tổng.
     ma_ds = [str(x["ma"]) for _, _, x in ung_vien]
-    so = {str(r["ma"]): r for r in kho.qc_doi_tuong(cap, ma_ds, tu, den)}
+    tk_ds = sorted({str(t["advertiser_id"]) for _, t, _ in ung_vien})
+    so = {(str(r["ma"]), str(r["tk"])): r for r in kho.qc_doi_tuong(cap, ma_ds, tu, den, tk_ds)}
 
     def khoa_sap(u):
-        b, _, x = u
-        r = so.get(str(x["ma"])) or {}
+        b, t, x = u
+        r = so.get((str(x["ma"]), str(t["advertiser_id"]))) or {}
         return -(float(r.get("chi") or 0) if QC.xem_tien(q, b if b != QC.CHUA_GAN else None)
                  else float(r.get("hien_thi") or 0))
     ung_vien.sort(key=khoa_sap)
     chon = ung_vien[:TRA_CUU_TRA]
     ma_chon = [str(x["ma"]) for _, _, x in chon]
-    tho: dict[str, dict] = {}
-    for r in kho.qc_chi_so_tong(cap, ma_chon, tu, den):
+    tk_chon = sorted({str(t["advertiser_id"]) for _, t, _ in chon})
+    tho: dict[tuple, dict] = {}
+    for r in kho.qc_chi_so_tong(cap, ma_chon, tu, den, tk_chon):
         if QC.cong_duoc(r["ten"]):
-            tho.setdefault(str(r["ma"]), {})[r["ten"]] = r["tong"]
-    chuoi: dict[str, list] = {}
+            tho.setdefault((str(r["ma"]), str(r["tk"])), {})[r["ten"]] = r["tong"]
+    chuoi: dict[tuple, list] = {}
     if args.get("theo_ngay"):
-        for r in kho.qc_doi_tuong_ngay(cap, ma_chon, tu, den):
-            chuoi.setdefault(str(r["ma"]), []).append(
+        for r in kho.qc_doi_tuong_ngay(cap, ma_chon, tu, den, tk_chon):
+            chuoi.setdefault((str(r["ma"]), str(r["tk"])), []).append(
                 {"ngay": str(r.get("ngay")), **{c: r.get(c) for c in QC.TEN_COT_SO},
                  **_chi_phi_day_du(r)})
     ket_qua = []
     for b, t, x in chon:
         m = str(x["ma"])
-        r = so.get(m) or {}
+        km = (m, str(t["advertiser_id"]))
+        r = so.get(km) or {}
         cot = QC.kpi({c: r.get(c) for c in QC.TEN_COT_SO})
         y = {"cap": cap, "ma": m, "ten": x.get("ten") or x.get("ten_ad") or t.get("ten") or m,
              "nen_tang": QC.TEN_NEN_TANG_QC[QC.nen_tang_tk(t)],
@@ -1136,7 +1158,7 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
              "ngay_dau_co_phan_phoi": _gio(r.get("ngay_dau")),
              "ngay_cuoi_co_phan_phoi": _gio(r.get("ngay_cuoi")),
              "so": _bo_reach(cot, nhieu), "chi_phi": _chi_phi_day_du(cot),
-             "chi_so_tho_cong_duoc": tho.get(m, {}),
+             "chi_so_tho_cong_duoc": bo_bi_danh(tho.get(km, {})),
              "trang_thai": "dashboard không lưu trạng thái bật/tắt — chỉ biết ngày có phân phối"}
         if not r:
             y["ghi_chu"] = "Không có phân phối trong kỳ hỏi."
@@ -1145,8 +1167,8 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
         if cap == "quang_cao":
             y.update(chien_dich=x.get("ten_campaign") or x.get("campaign_id"),
                      nhom=x.get("ten_nhom") or x.get("adgroup_id"))
-        if m in chuoi:
-            y["theo_ngay"] = chuoi[m][-QC_NGAY_TOI_DA:]
+        if km in chuoi:
+            y["theo_ngay"] = chuoi[km][-QC_NGAY_TOI_DA:]
         co_tien = QC.xem_tien(q, b if b != QC.CHUA_GAN else None)
         y["xem_tien"] = co_tien
         ket_qua.append(QC.loc_tien(y, co_tien))

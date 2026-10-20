@@ -49,6 +49,7 @@ cờ — bộ hẹn giờ 2 phút chạy `dong-bo --chi-khi-yeu-cau`; dashboard 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import json
 import os
@@ -76,9 +77,12 @@ _PHIEN_BAN = re.compile(r"v[0-9]{1,3}\.[0-9]{1,3}")
 #: Đường được GET (phần sau /<phiên bản>/).
 _DUONG = re.compile(r"me|me/(?:adaccounts|permissions)|act_[0-9]{1,30}"
                     r"|act_[0-9]{1,30}/(?:insights|campaigns|ads)")
-#: Tham số đổi phương thức / gộp lệnh của Graph API — không bao giờ gửi.
-_THAM_SO_CAM = frozenset({"method", "_method", "batch", "x-http-method-override",
-                          "http_method", "_reqname"})
+#: Tham số ĐƯỢC gửi (danh sách cho phép — soát 20/10/2026). Mọi khoá khác — `method`, `_method`,
+#: `batch` (Graph nhận `?method=delete` trên GET), khoá lạ trong `paging.next` — bị chặn TRƯỚC khi
+#: gửi, cả trang đầu lẫn trang sau. `access_token` được phép có mặt trong `paging.next` nhưng luôn bị
+#: bỏ khỏi URL (token đi header).
+THAM_SO_DUOC = frozenset({"fields", "limit", "after", "before", "level", "time_range",
+                          "time_increment", "breakdowns", "access_token"})
 
 MA_GIOI_HAN = frozenset({4, 17, 32, 613, *range(80000, 80015)})
 MA_TOKEN_HONG = frozenset({102, 190})
@@ -197,8 +201,9 @@ def kiem_url(phuong_thuc: str, url: str, tiep: str | None = None) -> tuple[str, 
     if not hop_le:
         raise LoiChan(f"chặn đường '{duong[:60]}': không nằm trong danh sách chỉ đọc")
     ts = parse_qsl(p.query, keep_blank_values=True)
-    if any(k.lower() in _THAM_SO_CAM for k, _ in ts):
-        raise LoiChan("chặn tham số đổi phương thức")
+    la = sorted({k for k, _ in ts if k not in THAM_SO_DUOC})
+    if la:
+        raise LoiChan("chặn tham số ngoài danh sách đọc: " + ", ".join(x[:30] for x in la[:5]))
     q = urlencode([(k, v) for k, v in ts if k.lower() != "access_token"])
     return urlunsplit(("https", MAY_CHU, p.path, q, "")), duong
 
@@ -458,6 +463,34 @@ def dong_khan_gia(r: dict, act: str, tu: datetime.date, den: datetime.date, chie
             "chi_so": chi_so_json(r)}
 
 
+def gop_khan_gia(rows: list[dict]) -> list[dict]:
+    """Dòng khán giả cùng `gia_tri` sau khi đổi mã (vd Meta "Unknown" + "unknown" → NONE) CỘNG lại
+    thành một dòng (PK …, chieu, gia_tri) — không ghi đè. Số đếm/tiền cộng; reach không cộng được →
+    NULL khi gộp; chi_so: khoá cộng được thì cộng, còn lại bỏ."""
+    gop: dict[str, dict] = {}
+    for x in rows:
+        cu = gop.get(x["gia_tri"])
+        if cu is None:
+            gop[x["gia_tri"]] = {**x, "chi_so": dict(x.get("chi_so") or {})}
+            continue
+        for k in QC.TEN_COT_SO:
+            if k == "reach":
+                cu[k] = None
+            elif x.get(k) is not None:
+                cu[k] = (cu.get(k) or 0) + x[k]
+        cs = cu["chi_so"]
+        for k, v in (x.get("chi_so") or {}).items():
+            if not QC.cong_duoc(k) or not isinstance(v, (int, float)) or isinstance(v, bool):
+                cs.pop(k, None)
+            elif isinstance(cs.get(k), (int, float)):
+                cs[k] = cs[k] + v
+            else:
+                cs[k] = v
+        for k in [k for k in cs if not QC.cong_duoc(k)]:
+            cs.pop(k)
+    return list(gop.values())
+
+
 def co_phan_phoi(r: dict) -> bool:
     return bool((r.get("hien_thi") or 0) > 0 or (r.get("chi") or 0) > 0)
 
@@ -547,6 +580,7 @@ class DichVu:
             "dang_dong_bo": dang, "loi_khoa": self.loi_khoa(), "co_khoa": self.loi_khoa() is None,
             "yeu_cau_dong_bo_luc": r.get("yeu_cau_dong_bo_luc"), "yeu_cau_boi": r.get("yeu_cau_boi"),
             "yeu_cau_kieu": r.get("yeu_cau_kieu"), "nhanh_xong_luc": r.get("nhanh_xong_luc"),
+            "dong_bo_kieu": r.get("dong_bo_kieu"),
         }
 
     # ── token ──
@@ -634,8 +668,9 @@ class DichVu:
 
     def dong_bo(self, *, bu: int | None = None, tu: datetime.date | None = None,
                 den: datetime.date | None = None, theo_yeu_cau: bool = False) -> dict:
+        """Một lượt đồng bộ. `theo_yeu_cau` (bộ hẹn giờ 2 phút): loại lượt (nhanh / đầy đủ) quyết định
+        NGUYÊN TỬ lúc bắt đầu, sau khi giữ khoá (`kho_qc.bat_dau_dong_bo`)."""
         r = self.kho.doc_ket_noi(NCC) or {}
-        nhanh = bool(theo_yeu_cau and r.get("yeu_cau_kieu") == "nhanh" and not (bu or tu or den))
         loi = self.loi_khoa()
         if loi:
             if r.get("access_token_enc"):
@@ -647,11 +682,32 @@ class DichVu:
         with self.kho.khoa_dong_bo(KHOA_DONG_BO) as giu:
             if not giu:
                 return {"bo_qua": "đang có lượt đồng bộ Meta khác"}
-            return self._dong_bo(bu=bu, tu=tu, den=den, nhanh=nhanh)
+            return self._dong_bo(bu=bu, tu=tu, den=den, theo_yeu_cau=theo_yeu_cau)
 
-    def _dong_bo(self, *, bu, tu, den, nhanh: bool = False) -> dict:
-        self.kho.bat_dau_dong_bo(NCC, kieu="nhanh" if nhanh else "day_du")
-        tong, loi, den_ngay = 0, [], None
+    def _dong_bo(self, *, bu, tu, den, theo_yeu_cau: bool = False) -> dict:
+        """Bắt đầu lượt rồi chạy; LUÔN kết thúc lượt (dong_bo_xong): khoá/bản mã hỏng → trạng thái
+        loi; ngoại lệ lạ → ghi "dừng bất thường" rồi ném tiếp (thẻ không bao giờ kẹt "ổn")."""
+        kieu = self.kho.bat_dau_dong_bo(NCC, cho_nhanh=bool(theo_yeu_cau and not (bu or tu or den)))
+        dem = {"tong": 0, "den_ngay": None}
+        ket = None
+        try:
+            ket = self._chay(dem, bu=bu, tu=tu, den=den, nhanh=kieu == "nhanh")
+        except LoiMaHoa as e:
+            self.kho.ghi_trang_thai("loi", f"Không giải mã được token: {e}", NCC, con_token=True)
+            ket = (f"không giải mã được token: {e}", {"loi": str(e), "so_dong": dem["tong"]})
+        finally:
+            if ket is None:
+                ten = "lượt dừng bất thường — xem journalctl meta-ads-*"
+                with contextlib.suppress(Exception):
+                    self.kho.ghi_trang_thai("loi", ten, NCC, con_token=True)
+                with contextlib.suppress(Exception):
+                    self.kho.ket_thuc_dong_bo(dem["tong"], ten, dem["den_ngay"], NCC)
+        self.kho.ket_thuc_dong_bo(dem["tong"], ket[0], dem["den_ngay"], NCC)
+        return ket[1]
+
+    def _chay(self, dem: dict, *, bu, tu, den, nhanh: bool) -> tuple[str | None, dict]:
+        """Thân lượt. -> (chữ lỗi cho ket_thuc_dong_bo | None, kết quả trả). `dem` cập nhật dần."""
+        loi = []
         try:
             g = self.graph()
             self.kham_pha(g)
@@ -669,8 +725,9 @@ class DichVu:
                     continue
                 try:
                     n, d = self._dong_bo_tk(g, t, bay, bu=bu, tu=tu, den=den, nhanh=nhanh)
-                    tong += n
-                    den_ngay = max(den_ngay, d) if den_ngay and d else (d or den_ngay)
+                    dem["tong"] += n
+                    dn = dem["den_ngay"]
+                    dem["den_ngay"] = max(dn, d) if dn and d else (d or dn)
                 except LoiXacThuc:
                     raise
                 except LoiMeta as e:
@@ -678,21 +735,17 @@ class DichVu:
                     self.log(f"[meta_ads] {t['advertiser_id']} lỗi: {e}")
             self.kho.ghi_trang_thai("hoat_dong", None, NCC, con_token=True)
         except ChuaKetNoi as e:
-            self.kho.ket_thuc_dong_bo(tong, str(e), den_ngay, NCC)
-            return {"bo_qua": str(e)}
+            return str(e), {"bo_qua": str(e)}
         except LoiXacThuc as e:
             self.kho.ghi_trang_thai("het_han" if e.het_han else "loi",
                                     f"Meta từ chối token: {e} — dán token mới", NCC,
                                     con_token=True)
-            self.kho.ket_thuc_dong_bo(tong, f"token bị từ chối: {e}", den_ngay, NCC)
-            return {"loi": str(e), "so_dong": tong}
+            return f"token bị từ chối: {e}", {"loi": str(e), "so_dong": dem["tong"]}
         except LoiMeta as e:
             self.kho.ghi_trang_thai("loi", str(e), NCC, con_token=True)
-            self.kho.ket_thuc_dong_bo(tong, str(e), den_ngay, NCC)
-            return {"loi": str(e), "so_dong": tong}
+            return str(e), {"loi": str(e), "so_dong": dem["tong"]}
         chu_loi = "; ".join(loi)[:500] or None
-        self.kho.ket_thuc_dong_bo(tong, chu_loi, den_ngay, NCC)
-        return {"so_dong": tong, "den_ngay": den_ngay, "loi": chu_loi}
+        return chu_loi, {"so_dong": dem["tong"], "den_ngay": dem["den_ngay"], "loi": chu_loi}
 
     def _dong_bo_tk(self, g: Graph, t: dict, bay: datetime.datetime, *, bu, tu, den,
                     nhanh: bool = False) -> tuple[int, datetime.date]:
@@ -778,11 +831,8 @@ class DichVu:
         for chieu, bd in CHIEU_META:
             rows = g.trang(f"{act}/insights", tham_so_insights(
                 "account", TRUONG_KHAN_GIA, a, hq, theo_ngay=False, breakdowns=bd))
-            gop: dict[str, dict] = {}
-            for r in rows:
-                x = dong_khan_gia(r, act, a, hq, chieu)
-                gop[x["gia_tri"]] = x          # PK (…, chieu, gia_tri) — một dòng mỗi giá trị
-            n += self.kho.ghi_khan_gia(list(gop.values()))
+            n += self.kho.ghi_khan_gia(gop_khan_gia([dong_khan_gia(r, act, a, hq, chieu)
+                                                      for r in rows]))
         self.kho.dat_khan_gia(act)
         return n
 

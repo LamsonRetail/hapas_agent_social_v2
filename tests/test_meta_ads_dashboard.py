@@ -8,6 +8,7 @@ Không mạng: máy chủ Graph GIẢ bằng httpx.MockTransport; kho quảng c�
 Meta bỏ action bằng 0)."""
 from __future__ import annotations
 
+import contextlib
 import datetime
 import io
 import json
@@ -521,8 +522,11 @@ def test_kiem_yeu_cau_dang_chay_dang_cho_gian_15_phut():
     assert QC.kiem_yeu_cau({**co, "dang_dong_bo": True,
                             "dong_bo_bat_dau": bay - datetime.timedelta(minutes=5)},
                            bay) == "đang chạy từ 09:55"
+    # Email người yêu cầu chỉ quản trị viên thấy; người khác chỉ thấy giờ.
     assert QC.kiem_yeu_cau({**co, "yeu_cau_dong_bo_luc": bay, "yeu_cau_boi": XEM},
-                           bay) == f"đang có yêu cầu lúc 10:00 ({XEM})"
+                           bay, hien_ai=True) == f"đang có yêu cầu lúc 10:00 ({XEM})"
+    assert QC.kiem_yeu_cau({**co, "yeu_cau_dong_bo_luc": bay, "yeu_cau_boi": XEM},
+                           bay) == "đang có yêu cầu lúc 10:00"
     m = QC.kiem_yeu_cau({**co, "nhanh_xong_luc": bay - datetime.timedelta(minutes=5)}, bay)
     assert m == "vừa đồng bộ lúc 09:55, bấm lại được từ 10:10"
     assert QC.kiem_yeu_cau({**co, "nhanh_xong_luc": bay - datetime.timedelta(minutes=16)},
@@ -571,11 +575,15 @@ def test_dong_bo_bam_tay_moi_nguoi_co_quyen():
     for k in ("tiktok_ads", "meta_ads"):
         assert kho_qc.kns[k]["yeu_cau_kieu"] == "nhanh" and kho_qc.kns[k]["yeu_cau_boi"] == XEM
     assert any(x[0] == XEM and x[1] == "dong_bo_qc" for x in kho.nk)
-    # Đang có yêu cầu: không tạo mới, nói lúc nào + ai.
+    # Đang có yêu cầu: không tạo mới, nói lúc nào; email người yêu cầu chỉ quản trị viên thấy.
+    csrf = dang_nhap(c, QL)
+    r = c.post("/quang-cao/dong-bo", data={"csrf": csrf, "nen_tang": "meta"})
+    t = c.get(r.headers["location"]).text
+    assert "đang có yêu cầu lúc" in t and f"({XEM})" in t
     csrf = dang_nhap(c, HP_QL)
     r = c.post("/quang-cao/dong-bo", data={"csrf": csrf, "nen_tang": "meta"})
     t = c.get(r.headers["location"]).text
-    assert "Chưa tạo yêu cầu mới" in t and "đang có yêu cầu lúc" in t and XEM in t
+    assert "Chưa tạo yêu cầu mới" in t and "đang có yêu cầu lúc" in t and XEM not in t
     assert kho_qc.kns["meta_ads"]["yeu_cau_boi"] == XEM
     # Đang chạy: từ chối.
     kho_qc.kns["meta_ads"]["yeu_cau_dong_bo_luc"] = None
@@ -868,3 +876,178 @@ def test_meta_ads_tool_cu_khong_doi():
     kq = subprocess.run(["git", "diff", "--quiet", "c1e1627", "--", "meta_ads_tool.py"],
                         cwd=GOC, capture_output=True, check=False)
     assert kq.returncode == 0
+
+
+# ───────────────────────────── soát độc lập 20/10/2026 ─────────────────────────────
+def test_khoa_hong_giua_luot_ghi_loi_va_luon_ket_thuc_luot():
+    """#1: bản mã không giải được (khoá đổi) → trạng thái loi + dong_bo_xong; lỗi lạ → "dừng bất
+    thường" rồi ném tiếp — không bao giờ kẹt "ổn" / dong_bo_xong NULL. Cả Meta lẫn TikTok."""
+    dv, kho_qc, gm = _mdv()
+    _gom_tk(dv)
+    dv._khoa = bytes(range(1, 33))                         # khoá hợp lệ nhưng KHÁC khoá đã mã hoá
+    kq = dv.dong_bo()
+    kn = kho_qc.doc_ket_noi("meta_ads")
+    assert "loi" in kq and kn["trang_thai"] == "loi" and kn["dong_bo_xong"]
+    assert "giải mã" in kn["dong_bo_loi"] and gm.goi[-1] is not None
+    dv._khoa = KHOA_TT
+    kho_qc.kns["meta_ads"].update(trang_thai="hoat_dong", dong_bo_xong=None, dong_bo_loi=None)
+
+    def no(*a, **kw):
+        raise RuntimeError("hỏng bất ngờ")
+    dv.kham_pha = no
+    with pytest.raises(RuntimeError):
+        dv.dong_bo()
+    kn = kho_qc.doc_ket_noi("meta_ads")
+    assert kn["dong_bo_xong"] and "bất thường" in kn["dong_bo_loi"] and kn["trang_thai"] == "loi"
+    tdv, kho_t, tt = _dv()
+    _ket_noi_san(tdv, tt)
+    tdv._khoa = bytes(range(1, 33))
+    kq = tdv.dong_bo()
+    assert "loi" in kq and kho_t.kn["trang_thai"] == "loi" and kho_t.kn["dong_bo_xong"]
+    tdv._khoa = KHOA_TT
+    kho_t.kn.update(dong_bo_xong=None)
+    tdv.kham_pha = no
+    with pytest.raises(RuntimeError):
+        tdv.dong_bo()
+    assert kho_t.kn["dong_bo_xong"] and "bất thường" in kho_t.kn["dong_bo_loi"]
+
+
+def test_tra_cuu_chi_doc_tai_khoan_trong_pham_vi(monkeypatch):
+    """#2: số của đối tượng chỉ đọc trong tài khoản người hỏi được xem (SQL lọc advertiser_id,
+    nhóm theo (mã, tài khoản))."""
+    from test_tiktok_ads import _GhiSQL
+    h = _app_hai_nen_tang()
+    goi = []
+    kho_mark = _KhoMarkGia(h.kho, h.kho_qc)
+    goc = h.kho_qc.qc_doi_tuong
+
+    def ghi(cap, ma, tu, den, ids):
+        goi.append(set(ids))
+        return goc(cap, ma, tu, den, ids)
+    monkeypatch.setattr(h.kho_qc, "qc_doi_tuong", ghi)
+    import hoi_dashboard_tool as HD
+    monkeypatch.setattr(HD, "email_cua", lambda oid: MM_XEM)
+    r = HD.tra_loi({"tim": "sale", **ARGS}, kho_mark, open_id="ou_hoi", bay_gio=BAY_MARK)
+    assert r["phan"]["quang_cao"]["doi_tuong"] and goi
+    pham_vi = {k for k, t in h.kho_qc.tk.items() if t.get("don_vi") == "matemade"}
+    assert all(x <= pham_vi for x in goi) and NUOC_HOA not in set().union(*goi)
+    g = _GhiSQL()
+    monkeypatch.setattr(KQ, "ket_noi", g)
+    d = datetime.date(2026, 10, 1)
+    KQ.qc_doi_tuong("chien_dich", ["1"], d, d, [MATE])
+    KQ.qc_chi_so_tong("chien_dich", ["1"], d, d, [MATE])
+    KQ.qc_doi_tuong_ngay("chien_dich", ["1"], d, d, [MATE])
+    for sql, ts in g.cau:
+        assert "advertiser_id = ANY(%s)" in sql and "GROUP BY" in sql
+        assert re.search(r"GROUP BY t?\.?campaign_id, t?\.?advertiser_id", sql), sql
+        assert [MATE] in list(ts)
+    assert KQ.qc_doi_tuong("chien_dich", ["1"], d, d, []) == []
+
+
+def test_loai_luot_quyet_dinh_nguyen_tu_khi_bat_dau(monkeypatch):
+    """#4: yêu cầu day_du (quản trị viên) tới SAU lúc đọc nhưng TRƯỚC khi giữ khoá → lượt đầy đủ,
+    không bị lượt nhanh "nuốt"."""
+    from test_tiktok_ads import _GhiSQL
+    dv, kho_qc, _ = _mdv()
+    _gom_tk(dv)
+    dv.yeu_cau(XEM, "nhanh")
+    goc = kho_qc.khoa_dong_bo
+
+    @contextlib.contextmanager
+    def khoa_co_chen(khoa=KQ.KHOA_DONG_BO):
+        dv.yeu_cau(QL)                                    # chen giữa đọc và khoá
+        with goc(khoa) as giu:
+            yield giu
+    monkeypatch.setattr(kho_qc, "khoa_dong_bo", khoa_co_chen)
+    dv.dong_bo(theo_yeu_cau=True)
+    kn = kho_qc.doc_ket_noi("meta_ads")
+    assert kn["dong_bo_kieu"] == "day_du" and kn["yeu_cau_dong_bo_luc"] is None
+    g = _GhiSQL({"RETURNING": [{"dong_bo_kieu": "nhanh"}]})
+    monkeypatch.setattr(KQ, "ket_noi", g)
+    assert KQ.bat_dau_dong_bo("meta_ads", cho_nhanh=True) == "nhanh"
+    sql = next(x for x, _ in g.cau if x.startswith("UPDATE"))
+    assert "RETURNING dong_bo_kieu" in sql and "yeu_cau_kieu = NULL" in sql
+    assert "yeu_cau_kieu = 'nhanh' THEN 'nhanh'" in sql
+
+
+@pytest.mark.parametrize("url", [
+    "https://graph.facebook.com/v26.0/act_1/insights?pretty=0",
+    "https://graph.facebook.com/v26.0/act_1/insights?fields=spend&debug=all",
+    "https://graph.facebook.com/v26.0/act_1/insights?fields=spend&METHOD=delete",
+    "https://graph.facebook.com/v26.0/me?callback=x",
+])
+def test_tham_so_ngoai_danh_sach_bi_chan(url):
+    """#6: tham số theo danh sách cho phép (cả trang sau)."""
+    gm = GiaMeta()
+    with pytest.raises(MA.LoiChan):
+        MA.Http(transport=gm.transport(), ngu=lambda s: None).yeu_cau("GET", url)
+    assert gm.goi == []
+
+
+def test_trang_sau_co_tham_so_la_bi_chan():
+    gm = GiaMeta()
+    goc = gm._trang
+
+    def la(q, ds, n, duong):
+        d = goc(q, ds, n, duong)
+        if "paging" in d:
+            d["paging"]["next"] += "&method=delete"
+        return d
+    gm._trang = la
+    g = MA.Graph(TOKEN, MA.Http(transport=gm.transport(), ngu=lambda s: None), ngu=lambda s: None)
+    with pytest.raises(MA.LoiChan):
+        g.trang("me/adaccounts", {"limit": 2})
+    assert len(gm.goi) == 1
+    sach, _ = MA.kiem_url("GET", "https://graph.facebook.com/v26.0/act_1/insights?fields=spend"
+                                 "&level=ad&time_range=x&time_increment=1&breakdowns=age"
+                                 f"&limit=5&after=a&before=b&access_token={TOKEN}")
+    assert TOKEN not in sach
+
+
+def test_khan_gia_cung_ma_thi_cong_khong_ghi_de():
+    """#8: "Unknown" và "unknown" cùng đổi thành NONE → cộng một dòng (reach không cộng → NULL)."""
+    d = datetime.date(2026, 10, 1)
+    rows = [MA.dong_khan_gia({"age": a, "spend": "10", "impressions": str(n), "reach": "5",
+                              "clicks": "1"}, NUOC_HOA, d, d, "age")
+            for a, n in (("Unknown", 100), ("unknown", 50), ("18-24", 7))]
+    gop = {x["gia_tri"]: x for x in MA.gop_khan_gia(rows)}
+    assert set(gop) == {"NONE", "AGE_18_24"}
+    assert gop["NONE"]["hien_thi"] == 150 and gop["NONE"]["chi"] == 20
+    assert gop["NONE"]["reach"] is None and gop["AGE_18_24"]["reach"] == 5
+    assert gop["NONE"]["chi_so"]["impressions"] == 150 and "reach" not in gop["NONE"]["chi_so"]
+
+
+def test_gian_15_phut_tinh_ca_luot_bi_giet_giua_chung():
+    """#10: lượt nhanh bắt đầu rồi bị giết (không có nhanh_xong_luc) vẫn bị tính giãn."""
+    bay = datetime.datetime(2026, 10, 20, 3, 0, tzinfo=datetime.timezone.utc)
+    t = {"co_token": True, "dong_bo_kieu": "nhanh",
+         "dong_bo_bat_dau": bay - datetime.timedelta(minutes=4)}
+    assert "bấm lại được từ 10:11" in QC.kiem_yeu_cau(t, bay)
+    assert QC.kiem_yeu_cau({**t, "dong_bo_kieu": "day_du"}, bay) is None
+    assert QC.kiem_yeu_cau({**t, "dong_bo_bat_dau": bay - datetime.timedelta(minutes=20)},
+                           bay) is None
+    dv, _, _ = _mdv()
+    _gom_tk(dv)
+    assert "dong_bo_kieu" in dv.the()
+
+
+def test_tong_tho_khong_tra_bi_danh_mua_thua():
+    """#7: Mark chỉ nhận MỘT tên mua mỗi tiền tố — không cộng trùng được."""
+    import hoi_dashboard_tool as HD
+    tho = {"actions__purchase": 2, "actions__omni_purchase": 2,
+           "actions__offsite_conversion.fb_pixel_purchase": 2, "actions__like": 1,
+           "action_values__omni_purchase": 9, "action_values__offsite_conversion.fb_pixel_purchase": 9}
+    ra = HD.bo_bi_danh(tho)
+    assert ra == {"actions__purchase": 2, "actions__like": 1, "action_values__omni_purchase": 9}
+
+
+def test_schema_doi_check_nguyen_tu_va_bo_qua_khi_da_dung():
+    """#3: mỗi cặp DROP + ADD CHECK nằm trong MỘT khối DO, chỉ chạy khi định nghĩa chưa đúng."""
+    sql = (GOC / "deploy" / "lang-nghe" / "schema.sql").read_text(encoding="utf-8")
+    for ten in ("ket_noi_ngoai_nha_cung_cap_check", "ket_noi_ngoai_kieu_check",
+                "tk_quang_cao_ma_check", "qc_khan_gia_chieu_check"):
+        for m in re.finditer(rf"ALTER TABLE \w+ ADD CONSTRAINT {ten}", sql):
+            khoi = sql[sql.rfind("DO $mt$", 0, m.start()):m.start()]
+            assert "pg_get_constraintdef" in khoi and "END $mt$" not in khoi, ten
+    assert "ALTER TABLE tk_quang_cao DROP CONSTRAINT IF EXISTS tk_quang_cao_advertiser_id_check;\n" \
+        not in sql.split("DO $mt$")[0][-3000:]

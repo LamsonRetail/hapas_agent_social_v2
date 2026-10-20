@@ -294,9 +294,14 @@ class GiaKhoQC:
                              refresh_het_luc=None, trang_thai="da_ngat")
         self.nk.append((ai, f"ngat_{KQ._nen_tang(ncc)}"))
 
-    def bat_dau_dong_bo(self, ncc=KQ.NCC, kieu="day_du"):
-        self._kn(ncc).update(dong_bo_bat_dau=self.bay, dong_bo_xong=None, yeu_cau_dong_bo_luc=None,
-                             yeu_cau_kieu=None, dong_bo_kieu=kieu)
+    def bat_dau_dong_bo(self, ncc=KQ.NCC, cho_nhanh=False):
+        # Như SQL: loại lượt quyết định từ yêu cầu đang chờ TRONG cùng câu UPDATE xoá cờ.
+        k = self._kn(ncc)
+        kieu = ("nhanh" if cho_nhanh and k.get("yeu_cau_dong_bo_luc")
+                and k.get("yeu_cau_kieu") == "nhanh" else "day_du")
+        k.update(dong_bo_bat_dau=self.bay, dong_bo_xong=None, yeu_cau_dong_bo_luc=None,
+                 yeu_cau_kieu=None, dong_bo_kieu=kieu)
+        return kieu
 
     def yeu_cau_dong_bo(self, ai, ncc=KQ.NCC, kieu="day_du"):
         # Như SQL: yêu cầu day_du đang chờ không bị hạ thành nhanh; mốc cũ giữ nguyên.
@@ -519,38 +524,42 @@ class GiaKhoQC:
         return [{"ma": x["ma"], "advertiser_id": x["advertiser_id"], "ten": x.get(ten)}
                 for x in self._moi_nhat(cap, ids).values()][:n]
 
-    def _cua(self, cap, ma, tu, den):
+    def _cua(self, cap, ma, tu, den, ids):
+        # Như SQL: lọc mã VÀ tài khoản trong phạm vi.
         rows, khoa, _, _ = self._bang_tra(cap)
-        return [r for r in rows.values() if str(r[khoa]) in ma and tu <= r["ngay"] <= den], khoa
+        return [r for r in rows.values() if str(r[khoa]) in ma and r["advertiser_id"] in ids
+                and tu <= r["ngay"] <= den], khoa
 
-    def qc_doi_tuong(self, cap, ma, tu, den):
-        rows, khoa = self._cua(cap, set(ma), tu, den)
+    def qc_doi_tuong(self, cap, ma, tu, den, ids):
+        rows, khoa = self._cua(cap, set(ma), tu, den, set(ids))
         nhom = {}
         for r in rows:
-            nhom.setdefault(str(r[khoa]), []).append(r)
+            nhom.setdefault((str(r[khoa]), r["advertiser_id"]), []).append(r)
         ra = []
-        for m, rs in nhom.items():
+        for (m, tk), rs in nhom.items():
             co = [r["ngay"] for r in rs if (r.get("hien_thi") or 0) > 0 or (r.get("chi") or 0) > 0]
-            ra.append({"ma": m, "advertiser_id": rs[0]["advertiser_id"], **self._cong(rs),
+            ra.append({"ma": m, "tk": tk, **self._cong(rs),
                        "so_ngay": len({r["ngay"] for r in rs}), "ngay_dau": min(co, default=None),
                        "ngay_cuoi": max(co, default=None)})
         return ra
 
-    def qc_chi_so_tong(self, cap, ma, tu, den):
-        rows, khoa = self._cua(cap, set(ma), tu, den)
+    def qc_chi_so_tong(self, cap, ma, tu, den, ids):
+        rows, khoa = self._cua(cap, set(ma), tu, den, set(ids))
         tong = {}
         for r in rows:
             for k, v in (r.get("chi_so") or {}).items():
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    tong[(str(r[khoa]), k)] = tong.get((str(r[khoa]), k), 0) + v
-        return [{"ma": m, "ten": k, "tong": float(v)} for (m, k), v in tong.items()]
+                    kh = (str(r[khoa]), r["advertiser_id"], k)
+                    tong[kh] = tong.get(kh, 0) + v
+        return [{"ma": m, "tk": tk, "ten": k, "tong": float(v)} for (m, tk, k), v in tong.items()]
 
-    def qc_doi_tuong_ngay(self, cap, ma, tu, den):
-        rows, khoa = self._cua(cap, set(ma), tu, den)
+    def qc_doi_tuong_ngay(self, cap, ma, tu, den, ids):
+        rows, khoa = self._cua(cap, set(ma), tu, den, set(ids))
         nhom = {}
         for r in rows:
-            nhom.setdefault((str(r[khoa]), r["ngay"]), []).append(r)
-        return [{"ma": m, "ngay": d, **self._cong(rs)} for (m, d), rs in sorted(nhom.items())]
+            nhom.setdefault((str(r[khoa]), r["advertiser_id"], r["ngay"]), []).append(r)
+        return [{"ma": m, "tk": tk, "ngay": d, **self._cong(rs)}
+                for (m, tk, d), rs in sorted(nhom.items())]
 
 
 def _dv(kho_qc=None, tt=None, bay=BAY):

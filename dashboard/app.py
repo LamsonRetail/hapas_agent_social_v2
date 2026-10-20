@@ -1065,7 +1065,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             if t is None:
                 tu_choi.append(f"{QC.TEN_NEN_TANG_QC[n]}: chưa đọc được trạng thái")
                 continue
-            ly_do = QC.kiem_yeu_cau(t, bay)
+            # Email người đã yêu cầu chỉ quản trị viên thấy; người khác chỉ thấy giờ.
+            ly_do = QC.kiem_yeu_cau(t, bay, hien_ai=nguoi["la_quan_tri"])
             if ly_do:
                 if nen == "tat_ca" and ly_do == "chưa kết nối":
                     continue
