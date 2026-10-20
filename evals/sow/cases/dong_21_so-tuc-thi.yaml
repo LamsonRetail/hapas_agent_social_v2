@@ -1,0 +1,139 @@
+# SOW 21 — Số tức thì (tool lay_so_tuc_thi, chủ dự án 20/10/2026): "mark có quyền cao nhất có thể cào
+# real time theo yêu cầu". Luật nằm ở mô tả tool + kỹ năng (lời dặn, không chặn bằng từ khoá):
+#   • câu nhắc dashboard → số TRONG KHO (hoi_dashboard), KHÔNG cào;
+#   • câu đòi số hiện tại ("bây giờ", "mới nhất") → lay_so_tuc_thi;
+#   • ý thật sự mơ hồ → MỘT câu hỏi lại ngắn;
+#   • tốn tiền (quét, cào bài/kênh) → chi_uoc_tinh rồi "Chạy nhé?" (code còn chặn bằng mã xác nhận);
+#   • quảng cáo đọc lại miễn phí → gọi luôn, không hỏi tiền.
+# Máy nghiệm thu thường không nối được kho lang_nghe — tool báo chưa đọc được kho; Mark phải nói chưa
+# có số, không bịa. Bộ chấm chỉ chấm ĐƯỜNG ĐI (tool nào, tham số nào) + câu chốt.
+
+# người chấm: đọc số TRONG KHO của dashboard (hoi_dashboard, sắc thái/khủng hoảng), không cào lại;
+# nói kỳ + link dashboard.
+- description: "SOW 21 · Số tức thì — câu nhắc dashboard: dùng số trong kho, KHÔNG cào"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21t1
+    hoi: "Phân tích tiêu cực trên dashboard cho tôi, dự án HAPAS 7 ngày qua."
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:goi_tool
+      config: {ten: "hoi_dashboard"}
+    - type: python
+      value: file://kiem.py:khong_goi_tool
+      config: {ten: "lay_so_tuc_thi"}
+    - type: not-icontains
+      value: "Chạy nhé"
+
+# người chấm: đòi số quảng cáo HIỆN TẠI → lay_so_tuc_thi loai quang_cao, gọi luôn (miễn phí, không hỏi
+# "Chạy nhé?"); trả lời nói số tính tới lúc nào hoặc nói rõ chưa đọc lại được; không đề nghị tắt/đổi
+# ngân sách quảng cáo.
+- description: "SOW 21 · Số tức thì — 'số ads bây giờ': đọc lại quảng cáo ngay, không hỏi tiền"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21t2
+    hoi: "Số quảng cáo TikTok của HAPAS hôm nay tính tới bây giờ thế nào? Lấy số mới nhất giúp tôi."
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:goi_tool_tham_so
+      config: {ten: "lay_so_tuc_thi", tham_so: {loai: "quang_cao"}}
+    - type: not-icontains
+      value: "Chạy nhé"
+    - type: not-icontains-any
+      value: ["tạm dừng chiến dịch giúp", "tôi tắt", "tôi sẽ tắt", "giảm ngân sách giúp"]
+
+# người chấm: "số ads sao rồi" không rõ muốn số đã chốt hay số đang chạy hôm nay — chấp nhận MỘT câu
+# hỏi lại ngắn, HOẶC trả số trong kho kèm mốc thời gian; chưa đọc lại / cào gì khi chưa rõ ý.
+- description: "SOW 21 · Số tức thì — câu mơ hồ: một câu hỏi lại ngắn hoặc số kho có mốc giờ"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21t3
+    hoi: "Số ads sao rồi em?"
+    luot_truoc: []
+  assert:
+    - type: icontains-any
+      value: ["hôm nay", "đang chạy", "đã chốt", "kỳ nào", "khoảng nào", "tính tới", "cập nhật", "ngày nào"]
+    - type: python
+      value: file://kiem.py:khong_goi_tool
+      config: {ten: "lay_so_tuc_thi"}
+
+# người chấm: mở quét tốn tiền → gọi lay_so_tuc_thi loai quet với chi_uoc_tinh, nêu USD + thời gian,
+# KẾT THÚC bằng "Chạy nhé?" — chưa chạy thật.
+- description: "SOW 21 · Số tức thì — quét lại dự án ngay: báo chi phí rồi 'Chạy nhé?'"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21t4
+    hoi: "Quét lại dự án hapas ngay bây giờ cho tôi, cần số mới nhất."
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:chi_uoc_tinh
+      config: {ten: "lay_so_tuc_thi"}
+    - type: icontains
+      value: "Chạy nhé"
+
+# L6 (soát 20/10/2026) — định tuyến "cào lại số bài" giữa lay_so_tuc_thi / chi_so_bai / social_listen.
+# người chấm: 1–2 link, đòi số hiện tại → lay_so_tuc_thi loai bai ở chế độ ước tính (tốn tiền), kết
+# bằng "Chạy nhé?"; KHÔNG Sheet chi_so_bai, KHÔNG social_listen.
+- description: "SOW 21 · Số tức thì — 'cào lại số bài X': bai + ước tính, không Sheet"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21t5
+    hoi: "Cào lại số bài này ngay giúp tôi, view bây giờ bao nhiêu: https://www.tiktok.com/@hapas.official/video/7420000000000000001"
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:chi_uoc_tinh
+      config: {ten: "lay_so_tuc_thi"}
+    - type: python
+      value: file://kiem.py:khong_goi_tool
+      config: {ten: "social_listen"}
+    - type: icontains
+      value: "Chạy nhé"
+
+# người chấm: danh sách dài, cần đếm + cộng tổng + Sheet → chi_so_bai (ước tính trước), không phải
+# lay_so_tuc_thi.
+- description: "SOW 21 · Số tức thì — 8 link cần tổng + Sheet: chi_so_bai, không lay_so_tuc_thi"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21t6
+    hoi: |
+      Đếm view từng link rồi cộng tổng, làm thành sheet giúp tôi:
+      https://www.tiktok.com/@a/video/7420000000000000011
+      https://www.tiktok.com/@a/video/7420000000000000012
+      https://www.tiktok.com/@a/video/7420000000000000013
+      https://www.tiktok.com/@a/video/7420000000000000014
+      https://www.tiktok.com/@a/video/7420000000000000015
+      https://www.tiktok.com/@a/video/7420000000000000016
+      https://www.tiktok.com/@a/video/7420000000000000017
+      https://www.tiktok.com/@a/video/7420000000000000018
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:chi_uoc_tinh
+      config: {ten: "chi_so_bai"}
+    - type: python
+      value: file://kiem.py:khong_goi_tool
+      config: {ten: "lay_so_tuc_thi"}
+    - type: icontains
+      value: "Chạy nhé"
+
+# người chấm: tìm bài MỚI theo từ khoá (không có link) → social_listen ước tính, không phải
+# lay_so_tuc_thi.
+- description: "SOW 21 · Số tức thì — tìm bài mới theo từ khoá: social_listen, không lay_so_tuc_thi"
+  metadata: {sow_dong: 21, hang_muc: "Báo cáo tổng hợp chiến dịch Marketing"}
+  vars:
+    ma: d21t7
+    hoi: "Cào lại xem hôm nay trên TikTok có bài mới nào nói về túi HAPAS không?"
+    luot_truoc: []
+  assert:
+    - type: python
+      value: file://kiem.py:chi_uoc_tinh
+      config: {ten: "social_listen"}
+    - type: python
+      value: file://kiem.py:khong_goi_tool
+      config: {ten: "lay_so_tuc_thi"}
+    - type: icontains
+      value: "Chạy nhé"

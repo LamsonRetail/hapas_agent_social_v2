@@ -589,6 +589,41 @@ def cua_so_nhanh(hq: datetime.date) -> tuple[datetime.date, datetime.date]:
     return homnay - datetime.timedelta(days=NHANH_NGAY - 1), homnay
 
 
+#: Lượt "tức thì" theo phạm vi (Mark hỏi số mới, chủ dự án 20/10/2026): tối đa 7 ngày GỒM hôm nay.
+TUC_THI_NGAY = 7
+
+
+def cua_so_tuc_thi(hq: datetime.date, tu: datetime.date | None, den: datetime.date | None
+                   ) -> tuple[datetime.date, datetime.date] | None:
+    """Cửa sổ của lượt tức thì cho MỘT tài khoản (`hq` = hôm qua theo múi giờ tài khoản): [tu, den]
+    kẹp vào [hôm nay − 6, hôm nay]. Kỳ hỏi nằm hẳn trước 7 ngày gần nhất → None (số cũ đã chốt
+    ở lượt hằng ngày, không cần đọc lại)."""
+    homnay = hq + datetime.timedelta(days=1)
+    a = max(tu or homnay, homnay - datetime.timedelta(days=TUC_THI_NGAY - 1))
+    b = min(den or homnay, homnay)
+    return (a, b) if a <= b else None
+
+
+def ly_do_ngoai_cua_so(t: dict, hq: datetime.date, tu: datetime.date | None) -> str:
+    """Vì sao tài khoản không có cửa sổ đọc lại (soát L-e): múi giờ sau giờ VN → "hôm nay" giờ VN
+    ở đó chưa bắt đầu; còn lại là kỳ hỏi ngoài 7 ngày gần nhất theo ngày của tài khoản."""
+    homnay = hq + datetime.timedelta(days=1)
+    if tu and tu > homnay:
+        return (f"tài khoản theo múi giờ {t.get('mui_gio') or '?'}, ngày {tu:%d/%m} ở đó chưa bắt "
+                f"đầu (hôm nay ở đó là {homnay:%d/%m}) — chưa có số để đọc")
+    return "kỳ hỏi ngoài 7 ngày gần nhất theo ngày của tài khoản"
+
+
+def ket_qua_pham_vi(ids: set[str], dem: dict, doc: set[str], hong: dict[str, str],
+                    loi: str | None) -> dict:
+    """Kết quả lượt theo phạm vi (soát N1): TỪNG tài khoản đọc được (`tk_doc`) / không đọc được kèm
+    lý do (`tk_hong`) — tài khoản chưa tới lượt (lượt dừng giữa chừng) mang lỗi chung. Bộ nghe
+    chia lại cho TỪNG yêu cầu đã gộp."""
+    for a in sorted(ids - doc - set(hong)):
+        hong[a] = (loi or "không đọc được")[:200]
+    return {**dem, "so_tk": len(doc), "tk_doc": sorted(doc), "tk_hong": dict(hong), "loi": loi}
+
+
 def co_chay_gan(kho, t: dict, bay: datetime.datetime) -> bool:
     """Tài khoản có hiển thị trong 30 ngày gần nhất (lượt nhanh bỏ tài khoản không chạy)."""
     hq = hom_qua(t.get("mui_gio"), bay)
@@ -608,6 +643,30 @@ def _utc(dt):
     if isinstance(dt, datetime.datetime) and dt.tzinfo is None:
         return dt.replace(tzinfo=datetime.timezone.utc)
     return dt
+
+
+#: Lượt hằng ngày chờ khoá: thử lại mỗi 30 giây (soát 20/10/2026 H2).
+NHIP_CHO_KHOA = 30
+
+
+def chay_voi_khoa(mo_khoa, chay, cho_giay: float, ngu, log, ten: str,
+                  bo_qua: str = "đang có lượt đồng bộ khác") -> dict:
+    """Giữ khoá advisory (`mo_khoa()` → context manager → True/False) rồi `chay()`. Lượt khác đang
+    giữ: chờ, thử lại mỗi `NHIP_CHO_KHOA` giây tới `cho_giay` giây; vẫn không có khoá →
+    {"ban": True, "bo_qua"} (dòng lệnh thoát khác 0). `cho_giay` 0 (nút, bộ hẹn giờ 2 phút, bộ
+    nghe) → {"bo_qua"} ngay như trước."""
+    da = 0.0
+    while True:
+        with mo_khoa() as giu:
+            if giu:
+                return chay()
+        if cho_giay <= 0:
+            return {"bo_qua": bo_qua}
+        if da >= cho_giay:
+            return {"ban": True, "bo_qua": bo_qua}
+        log(f"[{ten}] lượt khác đang giữ khoá đồng bộ — chờ ({int(da)}/{int(cho_giay)} giây)")
+        ngu(NHIP_CHO_KHOA)
+        da += NHIP_CHO_KHOA
 
 
 class DichVu:
@@ -849,10 +908,15 @@ class DichVu:
 
     # ── đồng bộ ──
     def dong_bo(self, *, bu: int | None = None, tu: datetime.date | None = None,
-                den: datetime.date | None = None, theo_yeu_cau: bool = False) -> dict:
+                den: datetime.date | None = None, theo_yeu_cau: bool = False,
+                chi_nhanh: bool = False, cho_khoa_giay: float = 0) -> dict:
         """Một lượt đồng bộ (bộ hẹn giờ / nút). Không bao giờ chạy chồng (khoá advisory).
         `theo_yeu_cau` (bộ hẹn giờ 2 phút): yêu cầu đang chờ là loại "nhanh" (người dùng bấm
-        "Đồng bộ ngay", 20/10/2026) thì chỉ đọc hôm nay + 2 ngày trước của tài khoản có hiển thị."""
+        "Đồng bộ ngay", 20/10/2026) thì chỉ đọc hôm nay + 2 ngày trước của tài khoản có hiển thị.
+        `chi_nhanh` (bộ nghe): chỉ chạy khi cờ đang chờ là nhanh — không bao giờ mở lượt đầy đủ.
+        `cho_khoa_giay` (lượt hằng ngày, soát 20/10/2026 H2): lượt khác đang giữ khoá thì CHỜ (thử lại
+        mỗi `NHIP_CHO_KHOA` giây) tới chừng ấy giây; hết giờ vẫn không có khoá → {"ban": True}
+        (dòng lệnh thoát khác 0, systemd chạy lại) — lượt hằng ngày không bao giờ lặng lẽ mất."""
         r = self.kho.doc_ket_noi() or {}
         loi = self.loi_khoa()
         if loi:
@@ -863,10 +927,11 @@ class DichVu:
         if not r.get("access_token_enc"):
             self.kho.ghi_trang_thai(r.get("trang_thai") or "chua_ket_noi")
             return {"bo_qua": "chưa kết nối TikTok Ads"}
-        with self.kho.khoa_dong_bo() as giu:
-            if not giu:
-                return {"bo_qua": "đang có lượt đồng bộ khác"}
-            return self._dong_bo(bu=bu, tu=tu, den=den, theo_yeu_cau=theo_yeu_cau)
+        return chay_voi_khoa(
+            lambda: self.kho.khoa_dong_bo(),
+            lambda: self._dong_bo(bu=bu, tu=tu, den=den, theo_yeu_cau=theo_yeu_cau,
+                                  chi_nhanh=chi_nhanh),
+            cho_khoa_giay, self.ngu, self.log, "tiktok_ads")
 
     def co_yeu_cau(self) -> bool:
         """Có yêu cầu "Đồng bộ ngay" đang chờ (bộ hẹn giờ 2 phút chỉ chạy khi có)."""
@@ -880,11 +945,78 @@ class DichVu:
         yêu cầu day_du đang chờ không bao giờ bị hạ thành nhanh (`kho_qc.yeu_cau_dong_bo`)."""
         self.kho.yeu_cau_dong_bo(ai, kieu=kieu)
 
-    def _dong_bo(self, *, bu, tu, den, theo_yeu_cau: bool = False) -> dict:
+    def dong_bo_tai_khoan(self, ids, tu: datetime.date | None, den: datetime.date | None
+                          ) -> dict:
+        """Lượt TỨC THÌ theo phạm vi (Mark hỏi số mới, 20/10/2026; bộ nghe `nghe_qc` gọi): CHỈ các
+        tài khoản `ids` đang đồng bộ, cửa sổ [tu, den] kẹp vào 7 ngày gồm hôm nay (`cua_so_tuc_thi`).
+        Chỉ đọc (report_integrated_get — `Mcp` chặn mọi công cụ ngoài CONG_CU_DOC); không khám phá
+        lại tài khoản, không khán giả, KHÔNG đụng cờ yêu cầu / mốc lượt của thẻ kết nối. Cùng khoá
+        advisory với lượt thường (không bao giờ chạy chồng).
+        -> {"so_dong", "so_tk" (tài khoản đọc được), "so_tk_yeu_cau", "den_ngay", "loi"} |
+        {"ban": True, "bo_qua"} | {"bo_qua"}."""
+        r = self.kho.doc_ket_noi() or {}
+        loi = self.loi_khoa()
+        if loi:
+            return {"bo_qua": loi}
+        if not r.get("access_token_enc"):
+            return {"bo_qua": "chưa kết nối TikTok Ads"}
+        with self.kho.khoa_dong_bo() as giu:
+            if not giu:
+                return {"ban": True, "bo_qua": "đang có lượt đồng bộ khác"}
+            return self._dong_bo_pham_vi({str(x) for x in ids or ()}, tu, den)
+
+    def _dong_bo_pham_vi(self, ids: set[str], tu, den) -> dict:
+        dem = {"so_dong": 0, "so_tk_yeu_cau": len(ids), "den_ngay": None}
+        doc: set[str] = set()
+        hong: dict[str, str] = {}
+        loi = []
+        try:
+            mcp = self.mcp()
+            bay = self._bay_gio()
+            for t in self.kho.cac_tk():
+                adv = str(t["advertiser_id"])
+                if adv not in ids:
+                    continue
+                if ((t.get("nen_tang") or "tiktok") != "tiktok" or not t.get("dang_dong_bo")
+                        or not t.get("con_quyen", True)):
+                    hong[adv] = "tài khoản đang tắt đồng bộ hoặc mất quyền"
+                    continue
+                hq = hom_qua(t.get("mui_gio"), bay)
+                cs = cua_so_tuc_thi(hq, tu, den)
+                if cs is None:
+                    hong[adv] = ly_do_ngoai_cua_so(t, hq, tu)
+                    continue
+                try:
+                    dem["so_dong"] += self._mot_cua_so(mcp, adv, *cs)
+                    doc.add(adv)
+                    dn = dem["den_ngay"]
+                    dem["den_ngay"] = max(dn, cs[1]) if dn else cs[1]
+                except LoiXacThuc:
+                    raise
+                except LoiTikTok as e:
+                    hong[adv] = str(e)[:200]
+                    loi.append(f"{t.get('ten') or adv}: {e}")
+                    self.log(f"[tiktok_ads] tức thì {adv} lỗi: {e}")
+        except (ChuaKetNoi, LoiHetHan) as e:
+            return ket_qua_pham_vi(ids, dem, doc, hong, str(e))
+        except LoiXacThuc as e:
+            self.kho.ghi_trang_thai("loi", f"TikTok từ chối token: {e}", con_token=True)
+            return ket_qua_pham_vi(ids, dem, doc, hong, f"token bị từ chối: {e}")
+        except (LoiTikTok, LoiMaHoa) as e:
+            return ket_qua_pham_vi(ids, dem, doc, hong, str(e))
+        return ket_qua_pham_vi(ids, dem, doc, hong, "; ".join(loi)[:500] or None)
+
+    def _dong_bo(self, *, bu, tu, den, theo_yeu_cau: bool = False, chi_nhanh: bool = False
+                 ) -> dict:
         """Bắt đầu lượt (xoá cờ yêu cầu + quyết định loại lượt NGUYÊN TỬ — `kho_qc.bat_dau_dong_bo`)
         rồi chạy; LUÔN kết thúc lượt: khoá/bản mã hỏng → trạng thái loi; ngoại lệ lạ → ghi "dừng
         bất thường" rồi ném tiếp (thẻ không bao giờ kẹt "ổn", dong_bo_xong không bao giờ NULL)."""
-        kieu = self.kho.bat_dau_dong_bo(cho_nhanh=bool(theo_yeu_cau and not (bu or tu or den)))
+        if chi_nhanh:
+            kieu = self.kho.bat_dau_dong_bo(cho_nhanh=True, chi_nhanh=True)
+            if kieu is None:
+                return {"bo_qua": "không có yêu cầu nhanh đang chờ"}
+        else:
+            kieu = self.kho.bat_dau_dong_bo(cho_nhanh=bool(theo_yeu_cau and not (bu or tu or den)))
         dem = {"tong": 0, "den_ngay": None}
         ket = None
         try:
@@ -1029,6 +1161,29 @@ def _ngay_tham_so(s: str) -> datetime.date:
         raise argparse.ArgumentTypeError("ngày dạng YYYY-MM-DD") from None
 
 
+def yeu_cau_trong_gio_dong_bo(dv, bay: datetime.datetime | None = None) -> bool:
+    """Đang trong khung đồng bộ hằng ngày (06:25–07:30 giờ VN) → MỌI cờ "Đồng bộ ngay" (nhanh lẫn
+    đầy đủ của quản trị viên) đợi sau khung (soát L-a): bộ hẹn giờ 2 phút không chạy, cờ giữ."""
+    if bay is None and callable(getattr(dv, "_bay_gio", None)):
+        bay = dv._bay_gio()
+    return QC.trong_gio_dong_bo(bay)
+
+
+def tuc_thi_du_phong(ncc: str, dv, bat: bool) -> None:
+    """Bộ hẹn giờ 2 phút cũng xử lý hàng chờ số tức thì của Mark (`nghe_qc.xu_ly_cho`) — dự phòng
+    khi bộ nghe `*-ads-nghe` chết / chưa cài. `bat` False (bộ thử truyền dịch vụ giả) → bỏ qua.
+    Lỗi (bảng chưa tạo…) chỉ in một dòng stderr, không làm đỏ lượt."""
+    if not bat:
+        return
+    try:
+        from dashboard import nghe_qc
+        kq = nghe_qc.xu_ly_cho(ncc, dv, log=lambda *_: None)
+        if not kq.get("khong_co"):
+            print(f"[{ncc}] tức thì: {json.dumps(kq, ensure_ascii=False, default=str)[:300]}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[{ncc}] tức thì lỗi: {type(e).__name__}: {gon_loi(e)}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_bq=None) -> int:
     p = argparse.ArgumentParser(prog="python -m dashboard.tiktok_ads",
                                 description="Đồng bộ TikTok Ads vào kho lang_nghe.")
@@ -1040,6 +1195,9 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
     d.add_argument("--khong-bq", action="store_true", help="không đẩy BigQuery sau khi xong")
     d.add_argument("--chi-khi-yeu-cau", action="store_true",
                    help="chỉ chạy khi có yêu cầu \"Đồng bộ ngay\" đang chờ (bộ hẹn giờ 2 phút)")
+    d.add_argument("--cho-khoa-phut", type=int, default=30,
+                   help="lượt hằng ngày: lượt khác đang giữ khoá thì chờ tối đa N phút (mặc định "
+                        "30), quá thì thoát 3 để systemd chạy lại")
     sub.add_parser("trang-thai", help="in trạng thái kết nối (không in token)")
     a = p.parse_args(argv)
     try:
@@ -1049,9 +1207,14 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
             return 0
         if a.bu is not None and not 1 <= a.bu <= 400:
             p.error("--bu trong 1..400")
+        if a.chi_khi_yeu_cau:
+            tuc_thi_du_phong(NCC, dv, dich_vu is None)
+            if dv.co_yeu_cau() and yeu_cau_trong_gio_dong_bo(dv):
+                return 0                      # khung đồng bộ hằng ngày: cờ đợi sau 07:30
         if a.chi_khi_yeu_cau and not dv.co_yeu_cau():
             return 0                          # không có yêu cầu: thoát ngay, không in gì
-        kq = dv.dong_bo(bu=a.bu, tu=a.tu, den=a.den, theo_yeu_cau=a.chi_khi_yeu_cau)
+        kq = dv.dong_bo(bu=a.bu, tu=a.tu, den=a.den, theo_yeu_cau=a.chi_khi_yeu_cau,
+                        cho_khoa_giay=0 if a.chi_khi_yeu_cau else max(0, a.cho_khoa_phut) * 60)
     except LoiMaHoa as e:
         print(f"[tiktok_ads] {e}", file=sys.stderr)
         return 0                              # chưa cấu hình: im lặng, không làm đỏ systemd
@@ -1059,6 +1222,11 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
         print(f"[tiktok_ads] lỗi: {type(e).__name__}: {gon_loi(e)}", file=sys.stderr)
         return 1
     print(f"[tiktok_ads] {json.dumps(kq, ensure_ascii=False, default=str)}")
+    if kq.get("ban") and not a.chi_khi_yeu_cau:
+        # Soát 20/10/2026 H2: lượt hằng ngày KHÔNG được lặng lẽ mất vì lượt nhỏ đang giữ khoá.
+        print(f"[tiktok_ads] chờ {a.cho_khoa_phut} phút vẫn chưa giữ được khoá đồng bộ — thoát 3 "
+              "(OnFailure báo lỗi lên thẻ kết nối)", file=sys.stderr)
+        return 3
     if kq.get("so_dong") and not a.khong_bq:
         if dong_bo_bq is None:
             from dashboard import dong_bo_bq

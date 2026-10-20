@@ -126,6 +126,10 @@ SCHEMA = {
         "quét, độ thu đủ; số quảng cáo TikTok Ads + Meta Ads (Facebook/Instagram) của bên "
         "(`phan`=[\"quang_cao\"], không cần dự án). KHÔNG dùng để quét mới (đó là "
         "`social_listen`/`/theodoi`).\n"
+        "SỐ TRONG KHO HAY SỐ MỚI (20/10/2026): câu nhắc dashboard / kỳ đã qua → tool này (kho, "
+        "không cào). Người hỏi đòi số HIỆN TẠI (\"bây giờ\", \"mới nhất\", \"cập nhật lại\", "
+        "\"hôm nay đang chạy thế nào\") hoặc cần số mới hơn kho → `lay_so_tuc_thi`. Luôn nói số "
+        "tính tới lúc nào.\n"
         "QUẢNG CÁO — CÂU HỎI CỦA NGƯỜI DÙNG LÀ GỐC (chủ dự án 20/10/2026): hỏi về một chiến dịch / "
         "quảng cáo / tài khoản cụ thể (\"chỉ số chiến dịch A tuần trước\") thì gọi `phan`="
         "[\"quang_cao\"] + `tim` (tên hoặc mã người hỏi nói) + `cap` (chien_dich | quang_cao | "
@@ -217,6 +221,11 @@ _HAM_KHO_QC = {"qc_cac_tk": "cac_tk", "qc_tong": "qc_tong", "qc_top": "qc_top", 
                # 20/10/2026: tra một đối tượng — chỉ SELECT tham số hoá (kho_qc, mục "tra cứu").
                "qc_tim": "qc_tim", "qc_ten": "qc_ten", "qc_doi_tuong": "qc_doi_tuong",
                "qc_chi_so_tong": "qc_chi_so_tong", "qc_doi_tuong_ngay": "qc_doi_tuong_ngay"}
+#: Số tức thì (20/10/2026, `tuc_thi_tool`): hàm của `dashboard.kho_tuc_thi` Mark được gọi — thêm /
+#: đọc yêu cầu của chính nó, đếm trần, tra dự án của link/kênh. Không hàm nào của bộ nghe.
+_HAM_KHO_TT = {"tt_tao": "tao", "tt_doc": "doc", "tt_gan_day_qc": "gan_day_qc", "tt_dem": "dem",
+               "tt_cap_nhat": "cap_nhat", "tt_du_an_cua_link": "du_an_cua_link",
+               "tt_du_an_cua_kenh": "du_an_cua_kenh"}
 
 
 class KhoMark:
@@ -227,10 +236,13 @@ class KhoMark:
     `_HAM_KHO`: tool không bao giờ gọi được hàm GHI của dashboard qua cửa này."""
 
     def __getattr__(self, ten: str):
-        if ten not in _HAM_KHO and ten not in _HAM_KHO_QC:
+        if ten not in _HAM_KHO and ten not in _HAM_KHO_QC and ten not in _HAM_KHO_TT:
             raise AttributeError(ten)
         from dashboard import kho as K
-        if ten in _HAM_KHO_QC:
+        if ten in _HAM_KHO_TT:
+            from dashboard import kho_tuc_thi as KT
+            fn = getattr(KT, _HAM_KHO_TT[ten])
+        elif ten in _HAM_KHO_QC:
             # kho_qc dùng chung `kho.ket_noi` (đọc `K._dsn` lúc gọi) — đổi DSN bên dưới là đủ.
             from dashboard import kho_qc as KQ
             fn = getattr(KQ, _HAM_KHO_QC[ten])
@@ -1215,8 +1227,9 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
                 "canh_bao": (["Kỳ có ngày hôm nay (chưa hết ngày): số còn tăng."]
                              if den >= hn else []),
                 "ghi_chu": "Số quảng cáo đồng bộ mỗi sáng (TikTok 06:30, Meta 06:45; đọc lại 7 "
-                           "ngày gần nhất vì chuyển đổi ghi trễ) và khi có người bấm \"Đồng bộ "
-                           "ngay\"; ngày theo múi giờ tài khoản quảng cáo."}
+                           "ngày gần nhất vì chuyển đổi ghi trễ), khi có người bấm \"Đồng bộ "
+                           "ngay\" và khi Mark đọc lại theo yêu cầu (`lay_so_tuc_thi`); ngày theo "
+                           "múi giờ tài khoản quảng cáo. Luôn nói số tính tới lúc nào."}
     # Chỉ dự án của bên người hỏi được xem (như trang); bên khác = "không có dự án".
     ds = PQ.loc_du_an(nguoi["q"], kho.cac_du_an())
     ma = str(args.get("du_an") or "").strip()

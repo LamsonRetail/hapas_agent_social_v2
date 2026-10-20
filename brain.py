@@ -70,6 +70,7 @@ import viec_base_tool  # noqa: E402,F401  (registers `xem_truoc_viec_base`/`ghi_
 import tien_do  # noqa: E402  (registers `tra_tien_do`: việc quá hạn/sắp hạn do code so ngày; nhắc nhóm 08:30 nếu cấu hình)
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import hoi_dashboard_tool  # noqa: E402,F401  (registers `hoi_dashboard`: số liệu dashboard social.hapas.vn cho người xem)
+import tuc_thi_tool  # noqa: E402,F401  (registers `lay_so_tuc_thi`: số mới ngay — quảng cáo, bài, kênh, quét)
 import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho bài học chiến dịch, tắt khi thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import execution_receipts  # noqa: E402  (bằng chứng tool bền vững theo chat)
@@ -182,6 +183,24 @@ _TOOLING_NOTE = "\n".join(
         "so sánh, số và % CHÉP từ kết quả (cần phép tính khác thì `tinh`), lời đọc ngắn, cảnh báo "
         "trong `canh_bao`, cuối cùng dán `link` để mở đúng màn hình. Tool từ chối vì quyền/nhóm "
         "chat thì chuyển nguyên lời, không dùng đường khác để lấy số.",
+        # 20/10: chủ dự án — Mark "cào real time theo yêu cầu", nhưng câu hỏi là gốc: câu nói tới
+        # dashboard thì đọc kho; câu đòi số hiện tại thì lấy mới. Lời dặn, không chặn bằng từ khoá.
+        "- SỐ TRONG KHO HAY SỐ MỚI NGAY — tự suy từ câu hỏi, ít hỏi lại: câu nhắc dashboard/trang/"
+        "kỳ đã qua ('phân tích tiêu cực trên dashboard', 'theo dashboard', 'số trên trang Chỉ số', "
+        "'tuần trước') → `hoi_dashboard` (kho, KHÔNG cào). Câu đòi số hiện tại ('bây giờ', 'mới "
+        "nhất', 'ngay lúc này', 'cập nhật lại', 'cào lại', 'hôm nay đang chạy thế nào') hoặc cần số "
+        "mới hơn kho → `lay_so_tuc_thi`: `loai`=quang_cao (TikTok/Meta Ads của bên người hỏi — "
+        "miễn phí, chỉ đọc, gọi luôn, chờ ≤ 90 giây), bai (vài link bài), kenh (1–2 kênh), quet "
+        "(mở lượt quét lắng nghe dự án). Chỉ hỏi lại MỘT câu ngắn khi thật sự không đoán được ý. "
+        "LUÔN nói số tính tới lúc nào (`do_moi`), số hôm nay là tạm tính. bai/kenh/quet TỐN TIỀN: "
+        "gọi `chi_uoc_tinh`=true, báo USD + ngân sách bị trừ + thời gian, KẾT THÚC bằng \"Chạy "
+        "nhé?\" và DỪNG; CHỈ khi tin nhắn KẾ TIẾP của chính người đó đồng ý rõ ('ok', 'chạy đi', "
+        "'đồng ý') mới gọi lại với `ma_xac_nhan`, tin kế tiếp nói gì khác thì KHÔNG chạy, bỏ mã "
+        "(code chỉ nhận mã ở đúng tin kế tiếp). 'Cào lại số bài X' (1–5 link) → `loai`=bai; "
+        "danh sách dài ra Sheet → `chi_so_bai`; tìm bài mới theo từ khoá → `social_listen`. "
+        "Quảng cáo: Mark CHỈ "
+        "ĐỌC — không bao giờ đề nghị/hứa tạm dừng, bật/tắt, đổi ngân sách chiến dịch; số tiền chỉ "
+        "trả bằng chữ.",
         # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
         # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).
@@ -333,6 +352,10 @@ _TOOL_CAN_XET = {
                     "ngày; người hỏi cũng phải có quyền xem Base)", {}),
     "hoi_dashboard": ("trả lời số liệu dashboard lắng nghe social.hapas.vn (chỉ cho người có "
                       "quyền xem dashboard, trong chat riêng)", {}),
+    "lay_so_tuc_thi": ("lấy số MỚI NGAY: đọc lại số TikTok/Meta Ads của bên người hỏi, chỉ số "
+                       "hiện tại của vài link bài / kênh, mở lượt quét lắng nghe (chỉ người có "
+                       "quyền ở bên, trong chat riêng; phần tốn tiền phải hỏi trước)",
+                       {"loai": "quang_cao"}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",
                  {"args": ["wiki", "+search", "x"]}),
@@ -1027,7 +1050,7 @@ def reply(user_text: str, *, chat_id: str, sender_open_id: str | None = None,
     scheduler.set_current_scheduled((kenh or {}).get("scheduled") is True)
     # Đồng hồ của lượt: tool gọi muộn được nhắc gói lại, quá mốc chặn thì không chạy nữa
     # (dong_ho_luot) — để lượt kịp trả lời trước trần của vòng job.
-    dong_ho_luot.bat_dau()
+    dong_ho_luot.bat_dau(chat_id)
     # Tin rỗng / chỉ @tag (đường job platform không chặn trước như run.py) không bao
     # giờ thành một lượt user rỗng — gửi model hay ghi lịch sử đều hỏng.
     user_text = _cau_hoi_co_chu(user_text)

@@ -638,7 +638,8 @@ def _khoa_tao(ma: str) -> threading.Lock:
         return _KHOA_TAO.setdefault(ma, threading.Lock())
 
 
-def tao_luot(ma: str, *, moi_nguon: bool = False, lich: dict | None = None) -> dict:
+def tao_luot(ma: str, *, moi_nguon: bool = False, lich: dict | None = None,
+             tran_xac_nhan: float | None = None) -> dict:
     """Tạo MỘT việc nền theo dõi dự án `ma` — đường chung của `/theodoi` (chat, lịch console)
     và lịch quét tự động trên dashboard (`quet_tu_dong`, `lich` = {"id", "moc"}). Cùng dự án thì
     chạy tuần tự (`_khoa_tao`): kiểm việc dở → kế hoạch → ghi sổ việc là MỘT bước.
@@ -646,27 +647,21 @@ def tao_luot(ma: str, *, moi_nguon: bool = False, lich: dict | None = None) -> d
     -> {"ok": True, "ma_viec", "cau"} hoặc {"ok": False, "ma_loi", "cau"}; `cau` là câu trả
     lời chat. Mã lỗi: các mã của `ke_hoach`, cùng dang_chay (việc cũ chưa xong), het_ngan_sach
     (lịch: tháng của dự án đã hết), het_ngan_sach_apify (ngân sách việc nền của tài khoản),
-    tu_choi (sổ việc nền từ chối — hàng đợi đầy, tiến trình khác giữ quyền)."""
+    tu_choi (sổ việc nền từ chối — hàng đợi đầy, tiến trình khác giữ quyền), vuot_xac_nhan
+    (`tran_xac_nhan`: mức giữ chỗ người dùng đã đồng ý — Mark quét theo yêu cầu, 20/10/2026 — mà
+    lượt này phải giữ NHIỀU hơn → không tạo, hỏi lại)."""
     with _khoa_tao(ma):
-        return _tao_luot(ma, moi_nguon=moi_nguon, lich=lich)
+        return _tao_luot(ma, moi_nguon=moi_nguon, lich=lich, tran_xac_nhan=tran_xac_nhan)
 
 
-def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
-    cu = _viec_dang_do(ma)
-    if cu:
-        return {"ok": False, "ma_loi": "dang_chay", "ma_viec": cu.get("ma"),
-                "cau": (f"Đã có việc theo dõi '{ma}' chưa xong (mã {cu.get('ma')}) — không tạo "
-                        "thêm để khỏi quét trùng nguồn. Gõ /viec để xem tiến độ.")}
-    kh = ke_hoach(ma, moi_nguon=moi_nguon)
-    if kh.get("loi"):
-        return {"ok": False, "ma_loi": kh.get("ma_loi") or "loi", "cau": kh["loi"]}
-    if lich is not None and kh["con_thang"] < 0.01:
-        # Lịch tự động KHÔNG chạy khi tháng của dự án đã hết (chat vẫn chạy được phần miễn phí).
-        return {"ok": False, "ma_loi": "het_ngan_sach",
-                "cau": (f"hết ngân sách tháng của dự án ({_usd(kh['da_tieu'])}/"
-                        f"{_usd(kh['tran_thang'])} USD)")}
+def uoc_giu_cho(kh: dict, ma: str | None = None) -> dict:
+    """Mức GIỮ CHỖ (USD, trường hợp xấu nhất) của một lượt theo dõi theo kế hoạch `kh`
+    (`ke_hoach`) — ĐÚNG phép tính `tao_luot` giữ trong sổ việc nền: phần theo dõi nguồn
+    (`giu_cho_phan`, gồm dự phòng) + tìm theo từ khoá + cào bình luận + kiểm độ phủ, kẹp theo ngân
+    sách Apify của việc nền. Dùng chung cho câu ước tính của Mark (soát 20/10/2026 M3): số người
+    dùng đồng ý = số sẽ giữ. -> {"phan", "tong", "tong_uoc", "dp_phan", "tk_uoc", "bl_uoc",
+    "dp_uoc", "ns_apify", "hm"}."""
     import quet_lon
-    import viec_nen
     phan = chia_phan(kh["nguon"])
     # Giữ chỗ phần theo dõi nguồn = TRƯỜNG HỢP XẤU NHẤT (`giu_cho_phan`), không chỉ ước tính đường
     # chính (soát 17/10/2026): dự phòng Threads (futurizerush "user", ~0,137 USD/tài khoản) và
@@ -676,6 +671,7 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
     tong = round(sum(giu_cho_phan(ph) for cac in phan.values() for ph in cac), 2)
     dp_phan = round(max(0.0, tong - tong_uoc), 2)
     da = kh["du_an"]
+    ma = ma or da["ma"]
     # Bình luận (đợt 2b): chưa biết bài nào sẽ được cào nên giữ chỗ theo trần cấu hình, giá
     # Facebook; tiền thật vẫn chốt theo run id.
     bl_uoc = round(uoc_binh_luan_du_an(da), 2)
@@ -694,6 +690,35 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None) -> dict:
     # trang Ngân sách (`dashboard.chi_phi.du_bao_do_phu`).
     dp_uoc = round(max(0.0, min(uoc_do_phu(da), ns_apify - tong)), 2)
     tong = round(tong + dp_uoc, 2)
+    return {"phan": phan, "tong": tong, "tong_uoc": tong_uoc, "dp_phan": dp_phan,
+            "tk_uoc": tk_uoc, "bl_uoc": bl_uoc, "dp_uoc": dp_uoc, "ns_apify": ns_apify, "hm": hm}
+
+
+def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None,
+              tran_xac_nhan: float | None = None) -> dict:
+    cu = _viec_dang_do(ma)
+    if cu:
+        return {"ok": False, "ma_loi": "dang_chay", "ma_viec": cu.get("ma"),
+                "cau": (f"Đã có việc theo dõi '{ma}' chưa xong (mã {cu.get('ma')}) — không tạo "
+                        "thêm để khỏi quét trùng nguồn. Gõ /viec để xem tiến độ.")}
+    kh = ke_hoach(ma, moi_nguon=moi_nguon)
+    if kh.get("loi"):
+        return {"ok": False, "ma_loi": kh.get("ma_loi") or "loi", "cau": kh["loi"]}
+    if lich is not None and kh["con_thang"] < 0.01:
+        # Lịch tự động KHÔNG chạy khi tháng của dự án đã hết (chat vẫn chạy được phần miễn phí).
+        return {"ok": False, "ma_loi": "het_ngan_sach",
+                "cau": (f"hết ngân sách tháng của dự án ({_usd(kh['da_tieu'])}/"
+                        f"{_usd(kh['tran_thang'])} USD)")}
+    import viec_nen
+    u = uoc_giu_cho(kh, ma)
+    phan, tong, dp_phan = u["phan"], u["tong"], u["dp_phan"]
+    tk_uoc, bl_uoc, dp_uoc, ns_apify, hm = (u["tk_uoc"], u["bl_uoc"], u["dp_uoc"], u["ns_apify"],
+                                            u["hm"])
+    if tran_xac_nhan is not None and tong > float(tran_xac_nhan) + 1e-9:
+        return {"ok": False, "ma_loi": "vuot_xac_nhan", "uoc_usd": tong, "cau": (
+            f"Chưa chạy: lượt này nay phải giữ tối đa {_usd(tong)} USD, nhiều hơn mức "
+            f"{_usd(float(tran_xac_nhan))} USD bạn đã đồng ý (nguồn tới hạn / ngân sách vừa đổi). "
+            "Báo lại chi phí mới và hỏi lại trước khi chạy.")}
     if tong > ns_apify + 1e-9:
         return {"ok": False, "ma_loi": "het_ngan_sach_apify", "cau": (
             f"Chưa chạy: lượt này ước tính {_usd(tong)} USD mà ngân sách Apify còn dùng được "

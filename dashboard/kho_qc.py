@@ -146,11 +146,15 @@ def ngat(ai: str, ncc: str = NCC) -> None:
         _nhat_ky(c, ai, f"ngat_{_nen_tang(ncc)}", f"ket_noi:{ncc}", {})
 
 
-def bat_dau_dong_bo(ncc: str = NCC, cho_nhanh: bool = False) -> str:
+def bat_dau_dong_bo(ncc: str = NCC, cho_nhanh: bool = False, chi_nhanh: bool = False
+                    ) -> str | None:
     """Lượt bắt đầu: ghi mốc, xoá cờ yêu cầu đang chờ (lượt này đáp ứng nó) và quyết định loại lượt
     NGUYÊN TỬ trong MỘT câu UPDATE (vế SET đọc giá trị CŨ của dòng): nhanh chỉ khi `cho_nhanh`
     (bộ hẹn giờ yêu cầu, không khoảng ngày tay) và yêu cầu đang chờ là nhanh — yêu cầu day_du ghi
-    giữa lúc đọc và lúc khoá không bao giờ bị lượt nhanh "nuốt". -> "nhanh" | "day_du"."""
+    giữa lúc đọc và lúc khoá không bao giờ bị lượt nhanh "nuốt". -> "nhanh" | "day_du".
+    `chi_nhanh` (bộ nghe `nghe_qc`, 20/10/2026): CHỈ bắt đầu khi yêu cầu đang chờ là nhanh — câu
+    UPDATE không khớp dòng nào → None (không bắt đầu gì, cờ day_du giữ nguyên cho bộ hẹn giờ);
+    bộ nghe không bao giờ mở được lượt đầy đủ."""
     with ket_noi() as c:
         _dam_bao(c, ncc)
         r = c.execute(
@@ -158,7 +162,11 @@ def bat_dau_dong_bo(ncc: str = NCC, cho_nhanh: bool = False) -> str:
             "dong_bo_kieu = CASE WHEN %s AND yeu_cau_dong_bo_luc IS NOT NULL "
             "AND yeu_cau_kieu = 'nhanh' THEN 'nhanh' ELSE 'day_du' END, "
             "yeu_cau_dong_bo_luc = NULL, yeu_cau_kieu = NULL WHERE nha_cung_cap = %s "
-            "RETURNING dong_bo_kieu", (bool(cho_nhanh), ncc)).fetchone()
+            "AND (NOT %s OR (yeu_cau_dong_bo_luc IS NOT NULL AND yeu_cau_kieu = 'nhanh')) "
+            "RETURNING dong_bo_kieu", (bool(cho_nhanh or chi_nhanh), ncc, bool(chi_nhanh))
+        ).fetchone()
+    if chi_nhanh:
+        return (r or {}).get("dong_bo_kieu")
     return (r or {}).get("dong_bo_kieu") or "day_du"
 
 
@@ -174,6 +182,9 @@ def yeu_cau_dong_bo(ai: str, ncc: str = NCC, kieu: str = "day_du") -> None:
                   "NULL AND yeu_cau_kieu = 'day_du' THEN 'day_du' ELSE %s END, "
                   "yeu_cau_dong_bo_luc = COALESCE(yeu_cau_dong_bo_luc, now()), yeu_cau_boi = %s "
                   "WHERE nha_cung_cap = %s", (kieu, ai, ncc))
+        # 20/10/2026: đánh thức bộ nghe (`nghe_qc`, LISTEN qc_tuc_thi) — lượt nhanh chạy ngay thay vì
+        # chờ bộ hẹn giờ 2 phút. Thông báo chỉ gửi khi giao dịch COMMIT; không ai nghe thì bỏ.
+        c.execute("SELECT pg_notify('qc_tuc_thi', %s)", (ncc,))
         if kieu == "day_du":
             _nhat_ky(c, ai, f"dong_bo_{_nen_tang(ncc)}", f"ket_noi:{ncc}", {"kieu": "yeu_cau"})
 
