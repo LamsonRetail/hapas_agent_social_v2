@@ -185,7 +185,8 @@ _HAM_KHO = ("quyen_cua", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_lua
             "do_phu_gan_nhat", "han_muc_apify", "nhip_dang")
 #: TikTok Ads (19/10/2026): hàm ĐỌC của `dashboard.kho_qc` (role mark chỉ SELECT tk_quang_cao + qc_*,
 #: không đọc được cột token của ket_noi_ngoai). Tên phía tool → tên trong kho_qc.
-_HAM_KHO_QC = {"qc_cac_tk": "cac_tk", "qc_tong": "qc_tong", "qc_top": "qc_top", "qc_moi": "qc_moi"}
+_HAM_KHO_QC = {"qc_cac_tk": "cac_tk", "qc_tong": "qc_tong", "qc_top": "qc_top", "qc_moi": "qc_moi",
+               "qc_theo_ngay": "qc_theo_ngay"}
 
 
 class KhoMark:
@@ -828,6 +829,28 @@ def _do_phu(kho, ma: str, bay_gio) -> dict:
 
 
 # ───────────────────────────── quảng cáo TikTok (19/10/2026) ─────────────────────────────
+#: 20/10/2026 chủ dự án: "hỏi gì cũng phải biết số tiền đã chi" — thêm chi theo tài khoản, theo
+#: ngày và chi phí suy ra cho phần quang_cao. Cột gọn cho mỗi dòng tài khoản / ngày.
+_QC_COT_GON = ("chi", "hien_thi", "reach", "view_video", "engaged_view", "follow", "vao_ho_so",
+               "gia_tri_mua_shop")
+QC_NGAY_TOI_DA = 93
+
+
+def _qc_chi_phi(k: dict) -> dict:
+    """Chi phí suy ra từ tổng (chia cho 0 → None): CPM, chi / follow, chi / 1.000 view, chi /
+    engaged view, ROAS shop."""
+    def chia(a, b, nhan=1):
+        try:
+            return round(float(a) * nhan / float(b), 2) if a is not None and b else None
+        except (TypeError, ValueError):
+            return None
+    return {"cpm": chia(k.get("chi"), k.get("hien_thi"), 1000),
+            "chi_moi_follow": chia(k.get("chi"), k.get("follow")),
+            "chi_moi_1000_view": chia(k.get("chi"), k.get("view_video"), 1000),
+            "chi_moi_engaged_view": chia(k.get("chi"), k.get("engaged_view")),
+            "roas_shop": chia(k.get("gia_tri_mua_shop"), k.get("chi"))}
+
+
 def _qc_gon(r: dict, cap: str) -> dict:
     x = {k: r.get(k) for k in ("chi", "hien_thi", "view_video", "engaged_view", "tuong_tac",
                                "follow", "vao_ho_so", "gia_tri_mua_shop", "roas_shop")}
@@ -878,7 +901,17 @@ def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, t
              "xem_tien": co_tien, "kpi": {k: v for k, v in kpi.items() if k in QC.KPI_QC},
              "doi_pt": {k: QC.doi_pt(kpi.get(k), truoc.get(k)) for k in QC.KPI_QC},
              "top_chien_dich": top_cap("campaign"), "top_quang_cao": top_cap("ad"),
-             "so_den_ngay": _gio(moi.get("ngay_cuoi"))}
+             "so_den_ngay": _gio(moi.get("ngay_cuoi")), "chi_phi": _qc_chi_phi(kpi)}
+        theo_tk = []
+        for t in tk:
+            k1 = QC.kpi(kho.qc_tong([t["advertiser_id"]], tu, den) or {})
+            if k1.get("hien_thi") or k1.get("chi"):
+                theo_tk.append({"tai_khoan": ten_tk[t["advertiser_id"]],
+                                **{c: k1.get(c) for c in _QC_COT_GON}, **_qc_chi_phi(k1)})
+        x["theo_tai_khoan"] = sorted(theo_tk, key=lambda r: -(float(r.get("chi") or 0)))
+        ngay = list(kho.qc_theo_ngay(ids, tu, den) if ids else [])[-QC_NGAY_TOI_DA:]
+        x["theo_ngay"] = [{"ngay": str(r.get("ngay")), **{c: r.get(c) for c in _QC_COT_GON}}
+                          for r in ngay]
         if PQ.la_quan_tri(q):
             # 20/10/2026: trang Quảng cáo chỉ quản trị viên — người khác không nhận link.
             x["link"] = f"{DASHBOARD_URL}/quang-cao?" + urllib.parse.urlencode(
@@ -887,7 +920,9 @@ def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, t
     return {"co": True, "ky_truoc": {"tu": t0.isoformat(), "den": t1.isoformat()}, "ben": ra,
             "ghi_chu": "Reach là cộng từng ngày (đếm trùng người). Bên có `xem_tien` false: người "
                        "hỏi KHÔNG được xem chi tiêu/doanh thu/ROAS — không nêu, không ước, không "
-                       "suy ra số tiền. Chủ dự án 20/10/2026: số quảng cáo chỉ trả lời BẰNG CHỮ "
+                       "suy ra số tiền. Có chi theo tài khoản (`theo_tai_khoan`), theo ngày "
+                       "(`theo_ngay`) và chi phí suy ra (`chi_phi`: CPM, chi/follow, chi/1.000 "
+                       "view, chi/engaged view, ROAS). Chủ dự án 20/10/2026: số quảng cáo chỉ trả lời BẰNG CHỮ "
                        "(câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh/sheet/tệp, "
                        "không gửi link trang Quảng cáo khi không có `link`."}
 

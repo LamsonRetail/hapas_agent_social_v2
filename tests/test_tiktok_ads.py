@@ -1130,7 +1130,8 @@ def test_mark_quang_cao_theo_ben_va_tien(monkeypatch):
             if ten in HD._HAM_KHO_QC:
                 return getattr(kho_qc, HD._HAM_KHO_QC[ten])
             return getattr(kho, ten)
-    assert set(HD._HAM_KHO_QC.values()) <= {"cac_tk", "qc_tong", "qc_top", "qc_moi"}
+    assert set(HD._HAM_KHO_QC.values()) <= {"cac_tk", "qc_tong", "qc_top", "qc_moi",
+                                         "qc_theo_ngay"}
     bay = datetime.datetime(2026, 10, 19, 9, 0, tzinfo=VN)
     args = {"phan": ["quang_cao"], "tu": "2026-10-12", "den": "2026-10-18"}
     monkeypatch.setattr(HD, "email_cua", lambda oid: XEM)
@@ -1140,6 +1141,13 @@ def test_mark_quang_cao_theo_ben_va_tien(monkeypatch):
     assert [b["ben"] for b in qc["ben"]] == ["hapas"] and qc["ben"][0]["xem_tien"] is True
     assert qc["ben"][0]["kpi"]["chi"] > 0 and qc["ben"][0]["kpi"]["hien_thi"] > 0
     assert "link" not in qc["ben"][0] and "BẰNG CHỮ" in qc["ghi_chu"] and "du_an" not in ra
+    # 20/10/2026 "hỏi gì cũng biết số tiền đã chi": chi theo tài khoản, theo ngày, chi phí suy ra.
+    b0 = qc["ben"][0]
+    assert b0["theo_tai_khoan"] and b0["theo_tai_khoan"][0]["chi"] > 0
+    assert sum(float(r["chi"] or 0) for r in b0["theo_tai_khoan"]) == float(b0["kpi"]["chi"])
+    assert b0["theo_ngay"] and all("chi" in r and "ngay" in r for r in b0["theo_ngay"])
+    assert b0["chi_phi"]["cpm"] == round(float(b0["kpi"]["chi"]) * 1000 / b0["kpi"]["hien_thi"], 2)
+    assert QC.la_tien("chi_phi") and QC.la_tien("chi_moi_follow") and not QC.la_tien("hien_thi")
     ra = HD.tra_loi({**args, "ben": "matemade"}, KhoMarkGia(), open_id="ou_hoi", bay_gio=bay)
     assert ra["phan"]["quang_cao"]["co"] is False
     monkeypatch.setattr(HD, "email_cua", lambda oid: HP_QL)
