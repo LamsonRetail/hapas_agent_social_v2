@@ -625,7 +625,7 @@ _TRUONG_ACTOR = {
     "clockworks~tiktok-hashtag-scraper": ("createTimeISO", "authorMeta", "playCount",
                                           "diggCount", "commentCount", "shareCount",
                                           "hashtags", "text", "webVideoUrl", "textLanguage",
-                                          "hasTikTokShopProduct"),
+                                          "hasTikTokShopProduct", "isAd"),
     # Trường thật của run 17/10/2026 (`raw_ig_apify_*`). Item lỗi của hashtag rỗng (`error:
     # "no_items"`) đọc qua `fields` chỉ còn url TRANG TAG — bộ chuẩn hoá bỏ vì không có shortcode.
     "apify~instagram-hashtag-scraper": ("id", "shortCode", "url", "timestamp", "caption",
@@ -2470,6 +2470,8 @@ def _chuan_clockworks(raw: list) -> list[dict]:
             "textLanguage": it.get("textLanguage"),
             # Cờ giỏ hàng TikTok Shop — tách video affiliate (gắn giỏ) khỏi video viral.
             "hasTikTokShopProduct": it.get("hasTikTokShopProduct"),
+            # Cờ quảng cáo (20/10/2026, cột `bai.la_quang_cao`): thiếu trường thì None.
+            "isAd": it.get("isAd"),
             "_nguon": it.get("_nguon") or "clockworks (dự phòng)",
             "__goc": it,                   # bản ghi gốc của actor → tab "Dữ liệu gốc"
         })
@@ -2489,6 +2491,12 @@ _NHAN_GIO = {True: "Affiliate (gắn giỏ)", False: "Viral (không giỏ)"}
 def _gio_hang_tiktok(it: dict) -> bool | None:
     """True = video gắn giỏ TikTok Shop, False = không gắn, None = nguồn không báo."""
     v = it.get("hasTikTokShopProduct")
+    return v if isinstance(v, bool) else None
+
+
+def _quang_cao_tiktok(it: dict) -> bool | None:
+    """True = TikTok đánh dấu video là quảng cáo (`isAd`), False = không, None = nguồn không báo."""
+    v = it.get("isAd")
     return v if isinstance(v, bool) else None
 
 
@@ -2571,7 +2579,14 @@ def _fetch_tiktok_fallback(q: list[str], limit: int,
     except Exception as e:  # noqa: BLE001
         print(f"[social_listen] tiktok fallback lỗi: {_che_token(e)}")
         return []
-    return _chuan_clockworks(raw)
+    return _chuan_clockworks(chi_tin_gio_true(raw))
+
+
+def chi_tin_gio_true(items: list) -> list:
+    """Feed hashtag (clockworks tiktok-hashtag-scraper; 21/10/2026): "không giỏ" CHƯA đo được độ
+    tin (feed hashtag scraptik không bao giờ trả anchor shop) → chỉ giữ TRUE, còn lại None."""
+    return [{**it, "hasTikTokShopProduct": True if it.get("hasTikTokShopProduct") is True
+             else None} if isinstance(it, dict) else it for it in items]
 
 
 def _chuan_tiktok(raw: list) -> list[tuple]:
@@ -2596,6 +2611,9 @@ def _chuan_tiktok(raw: list) -> list[tuple]:
             "link": it.get("postPage") or "",
             "_nguon": it.get("_nguon") or "apidojo",
             "gio_hang": _gio_hang_tiktok(it),
+            # Kho `lang_nghe` (20/10/2026): `bai.gio_hang` / `bai.la_quang_cao` — tách KOC
+            # affiliate (gắn giỏ) khỏi KOC branding trên dashboard (`theo_doi._cot_tiktok`).
+            "la_quang_cao": _quang_cao_tiktok(it),
             # Bản ghi gốc (mọi trường) cho tab "Dữ liệu gốc". Khoá "__" không vào sổ việc
             # nền (viec_nen.ghi_dong bỏ khoá "__") và không bao giờ vào tool_result.
             "__goc": it.get("__goc") or it,

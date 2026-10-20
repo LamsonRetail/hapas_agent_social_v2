@@ -447,6 +447,17 @@ dialog.cs-tam::backdrop { background: rgba(10, 18, 40, .45); }
 .cs-nn__sac-pt { grid-column: 2; font-size: 12px; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
 .cs-nn__tc { color: var(--cs-tc-chu); font-weight: 650; }
 .cs-nn__ti { color: var(--cs-ti-chu); font-weight: 650; }
+/* KOC affiliate vs branding (20/10/2026): ba thẻ cùng kiểu Internal/External, màu theo nhóm. */
+.cs-koc__luoi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cs-koc__chua { margin: 10px 0 0; font-size: 12px; color: var(--chu-mo); }
+.cs-koc__ben { border-top: 3px solid var(--koc-mau, var(--trung-lap)); }
+.cs-koc__cham { flex: none; width: 12px; height: 12px; border-radius: 999px; background: var(--koc-mau, var(--trung-lap)); }
+.cs-koc__phu { font-size: 12px; color: var(--chu-mo); }
+.cs-koc__so { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 10px; }
+.cs-koc__so .cs-nn__o:nth-child(3) { padding-left: 0; border-left: 0; }
+.cs-koc__pt { font-size: 12px; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
+.cs-chip--gio { background: var(--cam-nhat); color: var(--cam-chu); font-weight: 650; }
+@media (max-width: 760px) { .cs-koc__luoi { grid-template-columns: minmax(0, 1fr); } }
 .cs-o-nut { display: inline-flex; gap: 6px; white-space: nowrap; }
 .cs-o-nut .nut[aria-pressed="true"] { background: var(--nhan-nen); color: var(--nhan-dam); border-color: var(--nhan); }
 

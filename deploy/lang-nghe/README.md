@@ -357,6 +357,56 @@ sudo systemd-run --quiet --wait --pipe -p User=mark -p WorkingDirectory=/opt/mar
 - **Gỡ**: `systemctl disable --now qc-sheet-nghe` (yêu cầu mới chờ 30 phút rồi thành "Quá hạn"; trang
   vẫn chạy).
 
+## 11. KOC affiliate (gắn giỏ) vs KOC branding (20–21/10/2026, task Lark t284905, PA1)
+
+Cờ giỏ TikTok Shop theo từng video vào `bai.gio_hang` (+ `bai.la_quang_cao` = is_ads). TRUE = KOC
+affiliate, FALSE = KOC branding — dashboard chỉ HAI nhóm (chủ dự án 20/10 tối); NULL (video không
+đọc lại được giỏ: chưa thử, hoặc hồ sơ không còn thấy video) là một dòng mờ dưới khối. Cờ theo loại phản hồi (`tiktok_api.DAY_DU` /
+`FEED` / `CHI_TIET`): tìm kiếm / hồ sơ không có anchor shop = FALSE; feed hashtag chỉ tin TRUE
+(không bao giờ trả anchor shop); `post` thiếu anchors = NULL. Ghi kho: TRUE dính, FALSE chỉ điền
+chỗ NULL, NULL không đè.
+
+**Thứ tự — BigQuery TRƯỚC** (đồng bộ `bai` đi theo mốc `cap_nhat_cuoi`; dòng đẩy lên lúc BigQuery
+chưa có cột thì lần sau không đẩy lại, nên không để dòng có cờ đồng bộ trước khi BigQuery có cột):
+
+1. Sao lưu DB (mục Vận hành).
+2. BigQuery: chạy khối cuối `bigquery.sql` (`ALTER TABLE … SOCIAL_LISTENING.bai ADD COLUMN IF NOT
+   EXISTS gio_hang, la_quang_cao`). Postgres chưa có cột thì `dong_bo_bq` tự bỏ hai cột (cảnh báo).
+3. Postgres: `schema.sql` (mục 1) — thêm hai cột NULL được, chỉ đổi danh mục.
+4. Lên code (merge `main`, agent-deploy) → `mark restart`, khởi động lại dashboard. Bản code lên
+   trước schema vẫn chạy (hỏi `information_schema`, nhớ "chưa có cột" 5 phút).
+5. Bù bài cũ từ raw đã trả tiền (0 USD), chạy thử rồi ghi:
+   ```bash
+   sudo -u mark $PY scripts/lang_nghe_nap_gio_hang.py hapas /opt/mark/raw-kompa-1810
+   sudo -u mark $PY scripts/lang_nghe_nap_gio_hang.py hapas /opt/mark/raw-kompa-1810 --ghi        --sao-luu /opt/mark/gio-hang-$(date +%F).jsonl
+   ```
+   Raw kompa + vòng 2–3 (172 tệp, đo 21/10/2026): 3.660 video — giỏ 1.575, không giỏ 966, chưa rõ
+   1.119 (1.118 chỉ thấy ở feed hashtag).
+6. TRẢ TIỀN (chủ dự án duyệt ≤ 10 USD, chạy với trần 9 USD): bài còn NULL đọc qua HỒ SƠ nhà
+   sáng tạo (userPosts, `aweme` đầy đủ). Chạy thử trước (in tài khoản, video cần tìm, yêu cầu, USD
+   và số tài khoản trần đủ), rồi chạy thật:
+   ```bash
+   sudo -u mark $PY scripts/lang_nghe_nap_gio_hang.py hapas --doc-ho-so --toi-da-usd 9
+   sudo -u mark $PY scripts/lang_nghe_nap_gio_hang.py hapas --doc-ho-so --toi-da-usd 9 --ghi        --sao-luu /opt/mark/gio-ho-so-$(date +%F).jsonl
+   ```
+   Mỗi tài khoản tối đa 1 hồ sơ + 3 trang (`--so-trang`) × 0,002 USD; tài khoản nhiều video chưa rõ
+   trước; trần = min(9, còn tháng dự án, ngân sách Apify việc nền), một lượt `theo_doi` riêng
+   ("gio-ho-so-…") nên tiền vào trần tháng. Video không thấy giữ NULL ("chưa đọc lại được").
+   Chạy từng phần ~2 USD (`--toi-da-usd 2`, lặp lại tới khi hết 9 USD hoặc hết video): cứ 20 tài
+   khoản ghi kho + sao lưu + cập nhật chi phí đang tiêu của lượt (lượt khác thấy ngay); dừng sạch ở
+   `--het-gio HH:MM` (mặc định 06:50 nếu bắt đầu trước — trước lượt quét 07:00) hoặc sau
+   `--toi-da-phut` (150, dưới 3 giờ "bỏ dở"); chết / Ctrl-C thì lượt đóng `loi` với đúng tiền đã
+   tiêu, chạy lại là làm tiếp (bài đã có cờ không còn NULL).
+   (Đường cũ `--goi-api`: đọc từng video qua `post`, phản hồi có thể thiếu anchors — không dùng.)
+7. Về sau, mỗi lượt tìm TikTok tự đọc hồ sơ cho video lượt đó còn NULL (chỉ thấy ở feed hashtag),
+   trần `LANG_NGHE_GIO_HO_SO_USD` trong `/opt/mark/app/.env` (mặc định 0,05 USD/lượt, 0 = tắt),
+   tính vào chi phí lượt (phần `tiktok_gio_ho_so`; ghi chú lượt "cờ giỏ qua hồ sơ TikTok: …"); trần
+   tính sau khi trừ tiền tìm + làm mới của lượt; lỗi bước này không làm hỏng lượt. Tài khoản đã thử
+   mà chưa thấy video thì 7 ngày không thử lại (`.audit/viec-nen/.gio-ho-so.json`; script dùng sổ
+   này khi có `--theo-so-nho`).
+8. Kiểm: `select gio_hang, count(*) from bai where du_an = 'hapas' and nen_tang = 'tiktok' group
+   by 1`; dashboard trang Chỉ số → khối "KOC affiliate vs KOC branding", ô lọc "Loại KOC".
+
 ## Vận hành
 
 - **Sao lưu:**
