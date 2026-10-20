@@ -1890,6 +1890,76 @@ def do_phu_json(rows: list[dict], bay_gio: datetime.datetime) -> dict | None:
             "hanh_dong": hanh_dong_json(r.get("hanh_dong"))}
 
 
+# ─── Độ thu đủ trên trang Quản trị (20/10/2026, chủ dự án): số này chỉ giúp người vận hành (đo
+# thu thập có sót bài không), MKT không dùng → bỏ ô khỏi trang Chỉ số, chuyển thành thẻ vận hành
+# CHỈ quản trị viên. Chữ ⓘ / tóm tắt dựng ở máy chủ (trước ở chi_so.js `moTaDoPhu`, `lyDoChu`,
+# `lamGiChu`) — cùng nội dung. ───
+def _pt(v) -> str:
+    return "—" if v is None else f"{float(v):.1f}".replace(".", ",").replace(",0", "") + "%"
+
+
+def _so_vn(v) -> str:
+    return f"{so(v):,}".replace(",", ".")
+
+
+def ly_do_chu(x: dict) -> str:
+    return ", ".join(f"{l['ten']} {_so_vn(l['so'])}" for l in x.get("ly_do") or [])
+
+
+def lam_gi_chu(x: dict) -> str:
+    h, ra = x.get("hanh_dong") or {}, []
+    if h.get("de_xuat"):
+        ut = sum(1 for g in h["de_xuat"] if g.get("uu_tien"))
+        ra.append("đề xuất theo dõi " + ", ".join("@" + g["dinh_danh"] for g in h["de_xuat"][:5])
+                  + (f" ({_so_vn(ut)} ưu tiên)" if ut else ""))
+    if h.get("tag_them"):
+        ra.append("thêm #" + ", #".join(h["tag_them"]) + " vào lượt nổi")
+    if h.get("noi_ly_do"):
+        ra.append(h["noi_ly_do"])
+    if x.get("bo_sung"):
+        ra.append(f"ghi {_so_vn(x['bo_sung'])} bài sót vào kho")
+    return "; ".join(ra)
+
+
+def _ngay_du(iso) -> str:
+    s = str(iso or "")[:10]
+    return f"{s[8:10]}/{s[5:7]}/{s[:4]}" if len(s) == 10 else "—"
+
+
+def mo_ta_do_phu(x: dict) -> str:
+    """Câu ⓘ của thẻ Độ thu đủ (`do_phu_json`)."""
+    nguon = list(x.get("tag") or []) + list(x.get("tac_gia") or [])
+    tran = x.get("tran_usd")
+    ld, lg = ly_do_chu(x), lam_gi_chu(x)
+    tien = f"{(0.2 if tran is None else float(tran)):.2f}".replace(".", ",")
+    return ("Độ thu đủ: trong một mẫu bài nhắc brand Mark tự lấy để kiểm, bao nhiêu % đã có sẵn "
+            "trong kho — đo việc thu thập có sót bài không. KHÔNG phải độ phủ thị trường hay share "
+            f"of voice. Từ {_pt(x.get('nguong'))} trở lên là ổn; dưới mức này là thu thập đang có lỗ. "
+            f"Cách kiểm: Mark kiểm 2 lần mỗi tuần (≤ {tien} USD/lần): lấy mẫu bài TikTok {_so_vn(x.get('ngay_mau'))} ngày qua đường KHÁC thu "
+            "thập hằng ngày" + (" — " + ", ".join(nguon) if nguon else "")
+            + " — rồi đếm bài nhắc brand đã có trong kho. Số lớn tính theo thảo luận (mỗi bài nặng "
+            f"1 + số bình luận); theo số bài: {_pt(x.get('do_phu'))}. Lần kiểm {_ngay_du(x.get('luc'))}: "
+            f"{_so_vn(x.get('so_mau'))} bài mẫu, {_so_vn(x.get('so_nhac'))} bài nhắc brand, "
+            f"{_so_vn(x.get('so_sot'))} bài sót ({_so_vn(x.get('bo_sung'))} đã bổ sung vào kho)."
+            + (f" {_so_vn(x['so_da_loai'])} bài đã loại trước (AI, luật seeding / thị trường / cổng "
+               "brand) không tính là sót." if x.get("so_da_loai") else "")
+            + (f" Lý do sót: {ld}." if ld else "") + (f" Mark đã làm: {lg}." if lg else "")
+            + (" Lần kiểm này đã cũ — Mark chưa kiểm lại." if x.get("cu") else "")
+            + " Không theo bộ lọc / khoảng ngày.")
+
+
+def the_do_phu(x: dict | None) -> dict | None:
+    """`do_phu_json` → thêm chữ hiển thị cho thẻ vận hành ở trang Quản trị."""
+    if not x:
+        return None
+    ld = (x.get("ly_do") or [None])[0]
+    return {**x, "mo_ta": mo_ta_do_phu(x), "ly_do_chu": ly_do_chu(x), "lam_gi": lam_gi_chu(x),
+            "ly_do_dau": ld["ten"] if ld else "", "ngay": _ngay_du(x.get("luc")),
+            "doi_chu": None if x.get("doi_diem") is None else
+            f"{'▲' if x['doi_diem'] > 0 else '▼' if x['doi_diem'] < 0 else '■'} "
+            f"{abs(x['doi_diem']):.1f}".replace(".", ",").replace(",0", "") + " điểm"}
+
+
 #: Nhãn ngắn của mã lý do sót (`kiem_do_phu.LY_DO`) cho dòng tóm tắt thẻ.
 LY_DO_NGAN = {"chi_hashtag": "chỉ có hashtag", "ngoai_cua_so": "ngoài cửa sổ tuần",
               "it_thich": "ít thích", "tac_gia_moi": "nhà sáng tạo mới", "khac": "khác"}

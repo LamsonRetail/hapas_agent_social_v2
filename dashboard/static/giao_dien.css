@@ -569,3 +569,17 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 @media (prefers-reduced-motion: reduce) {
   .dai-qc__tt--dang_chay::before, .dai-qc__xoay { animation: none; }
 }
+
+/* ─── Độ thu đủ — thẻ vận hành trang Quản trị (20/10/2026; trước là ô KPI trang Chỉ số) ─── */
+.dp-ds { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.dp-o { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 14px; border: 1px solid var(--ke); border-radius: var(--bo-nho); background: var(--be-mat); }
+.dp-o--canh { background: color-mix(in srgb, var(--canh-nen) 70%, var(--be-mat)); }
+.dp-o--canh .dp-o__so b { color: var(--canh); }
+.dp-o__dau { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dp-o__ten { font-weight: 700; color: var(--chu); overflow-wrap: anywhere; }
+.dp-o__so { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.dp-o__so b { font-size: 24px; line-height: 1.15; font-weight: 750; color: var(--chu); }
+.dp-o__phu { margin: 0; font-size: 12.5px; color: var(--chu-mo); }
+.dp-o__sot > summary { cursor: pointer; font-size: 13px; color: var(--nhan); }
+.dp-sot { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.dp-sot li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; overflow-wrap: anywhere; }

@@ -709,7 +709,6 @@
     }
     phu.appendChild(oKpiPhu("Tương tác", k.tuong_tac, ss.tuong_tac, "Thích + bình luận + chia sẻ. " + LAN_QUET));
     if (d.y_dinh_mua) phu.appendChild(theYDinhKpi(d.y_dinh_mua, lech));
-    if (d.do_phu) phu.appendChild(theDoPhuKpi(d.do_phu));
     phu.appendChild(theSacKpi(k, (d.binh_luan_da_cao || {}).kpi));
     el.appendChild(phu);
     chiaCotKpi();
@@ -751,118 +750,8 @@
   }
   // Mã y_dinh đang lọc (mọi món = "1") — ngăn bình luận của khối mở đúng món đang lọc.
   function maYDinh() { return G.y_dinh || "1"; }
-  // ─── Độ thu đủ (17/10/2026; tên cũ "Độ phủ" — 19/10 đổi vì marketing đọc nhầm thành độ phủ thị
-  // trường / share of voice): kiểm 2 lần/tuần của Mark — trong một mẫu bài TikTok lấy bằng đường
-  // KHÁC thu thập hằng ngày (hashtag brand/chiến dịch + bài mới nhất của nhà sáng tạo nổi), bao
-  // nhiêu % (theo thảo luận) bài nhắc brand đã có trong kho. Không theo bộ lọc / khoảng ngày.
-  // ▲/▼ = chênh ĐIỂM % với lần kiểm trước; dưới ngưỡng (80%) ô chuyển màu cảnh báo.
-  function soDiem(x) {
-    return Math.abs(x).toLocaleString("vi-VN", { maximumFractionDigits: 1 }) + " điểm";
-  }
-  function moTaDoPhu(x) {
-    var nguon = (x.tag || []).concat(x.tac_gia || []);
-    return "Độ thu đủ: trong một mẫu bài nhắc brand Mark tự lấy để kiểm, bao nhiêu % đã có sẵn trong kho — " +
-      "đo việc thu thập có sót bài không. KHÔNG phải độ phủ thị trường hay share of voice. Từ " + pt(x.nguong) +
-      " trở lên là ổn; dưới mức này là thu thập đang có lỗ. Cách kiểm: Mark kiểm 2 lần mỗi tuần (≤ " + soTien2(x.tran_usd) + " USD/lần): lấy mẫu bài TikTok " + so(x.ngay_mau) +
-      " ngày qua đường KHÁC thu thập hằng ngày" + (nguon.length ? " — " + nguon.join(", ") : "") +
-      " — rồi đếm bài nhắc brand đã có trong kho. Số lớn tính theo thảo luận (mỗi bài nặng 1 + số bình luận); theo số bài: " +
-      pt(x.do_phu) + ". Lần kiểm " + ngayDu(x.luc) + ": " + so(x.so_mau) + " bài mẫu, " + so(x.so_nhac) +
-      " bài nhắc brand, " + so(x.so_sot) + " bài sót (" + so(x.bo_sung) + " đã bổ sung vào kho)." +
-      (x.so_da_loai ? " " + so(x.so_da_loai) + " bài đã loại trước (AI, luật seeding / thị trường / cổng brand) không tính là sót." : "") +
-      (lyDoChu(x) ? " Lý do sót: " + lyDoChu(x) + "." : "") +
-      (lamGiChu(x) ? " Mark đã làm: " + lamGiChu(x) + "." : "") +
-      (x.cu ? " Lần kiểm này đã cũ — Mark chưa kiểm lại." : "") +
-      " Không theo bộ lọc / khoảng ngày.";
-  }
-  function soTien2(x) { return (x == null ? 0.2 : x).toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-  function lyDoChu(x) {
-    return (x.ly_do || []).map(function (l) { return l.ten + " " + so(l.so); }).join(", ");
-  }
-  function lamGiChu(x) {
-    var h = x.hanh_dong || {}, ra = [];
-    if ((h.de_xuat || []).length) {
-      var ut = h.de_xuat.filter(function (g) { return g.uu_tien; }).length;
-      ra.push("đề xuất theo dõi " + h.de_xuat.map(function (g) { return "@" + g.dinh_danh; }).slice(0, 5).join(", ") +
-        (ut ? " (" + so(ut) + " ưu tiên)" : ""));
-    }
-    if ((h.tag_them || []).length) ra.push("thêm #" + h.tag_them.join(", #") + " vào lượt nổi");
-    if (h.noi_ly_do) ra.push(h.noi_ly_do);
-    if (x.bo_sung) ra.push("ghi " + so(x.bo_sung) + " bài sót vào kho");
-    return ra.join("; ");
-  }
-  function theDoPhuKpi(x) {
-    var canh = !!x.canh_bao;
-    var o = tao("div", "kpi cs-kpi-o cs-kpi-dp" + (canh ? " cs-kpi-dp--canh" : ""));
-    var than = tao("div", "kpi__than");
-    var nh = tao("div", "kpi__nhan", "Độ thu đủ");
-    nh.appendChild(chuNode(" "));
-    nh.appendChild(nutGoiY(moTaDoPhu(x)));
-    if (canh || x.cu) {
-      nh.appendChild(chuNode(" "));
-      nh.appendChild(nutGoiY(canh ? "Độ thu đủ theo thảo luận " + pt(x.do_phu_tl) + " — dưới " + pt(x.nguong) +
-        ": nhiều bài brand chưa được thu thập. Bấm “bài sót” để xem." : "Lần kiểm gần nhất " + ngayDu(x.luc) + " đã quá " + so(x.cu_ngay || 7) + " ngày.", "goi-y--canh"));
-    }
-    than.appendChild(nh);
-    var s = tao("span", "kpi__so so", pt(x.do_phu_tl));
-    than.appendChild(s);
-    if (x.doi_diem != null) {
-      var lop = x.doi_diem > 0 ? "tang" : x.doi_diem < 0 ? "giam" : "bang";
-      var d = tao("div", "kpi__doi kpi__doi--" + lop);
-      d.title = "So với lần kiểm " + ngayDu(x.truoc && x.truoc.luc) + ": " + pt(x.truoc && x.truoc.do_phu_tl) + " → " + pt(x.do_phu_tl);
-      var hien = tao("span", "", (x.doi_diem > 0 ? "▲ " : x.doi_diem < 0 ? "▼ " : "■ ") + soDiem(x.doi_diem));
-      hien.setAttribute("aria-hidden", "true");
-      d.appendChild(hien);
-      d.appendChild(tao("span", "cs-an", x.doi_diem > 0 ? "tăng " + soDiem(x.doi_diem) + " so với lần kiểm trước"
-        : x.doi_diem < 0 ? "giảm " + soDiem(x.doi_diem) + " so với lần kiểm trước" : "không đổi so với lần kiểm trước"));
-      than.appendChild(d);
-    }
-    var phu = tao("span", "kpi__phu cs-kpi-dp__phu");
-    if (x.so_sot) {
-      // "thiếu N bài · lý do · Mark đã làm gì" — chi tiết trong ngăn.
-      phu.appendChild(nut("thiếu " + so(x.so_sot) + " bài", "cs-kpi-dp__nut", function () { moDoPhu(x); }));
-      var ld = (x.ly_do || [])[0];
-      phu.appendChild(chuNode((ld ? " · " + ld.ten : "") + " · " + ngayNgan(String(x.luc || "").slice(0, 10))));
-    } else {
-      phu.appendChild(chuNode(so(x.so_mau) + " bài mẫu, không sót · " + ngayNgan(String(x.luc || "").slice(0, 10))));
-    }
-    than.appendChild(phu);
-    o.appendChild(than);
-    return o;
-  }
-  function theBaiSot(b) {
-    var o = tao("article", "cs-bai cs-sot");
-    var dau = tao("div", "cs-sot__dau");
-    dau.appendChild(linkAnToan(b.link, "@" + (b.tai_khoan || "?"), "cs-sot__ten"));
-    if (b.dang_luc) dau.appendChild(tao("span", "mo nho", " · " + ngayDu(b.dang_luc)));
-    dau.appendChild(tao("span", "the" + (b.bo_sung ? " the--tot" : ""), b.bo_sung ? "đã bổ sung" : "chưa bổ sung"));
-    o.appendChild(dau);
-    o.appendChild(tao("div", "cs-sot__so so", so(b.thao_luan) + " thảo luận · " + so(b.binh_luan) + " bình luận · " +
-      soThe(b.thich) + " thích · " + soThe(b.xem) + " xem"));
-    if (b.noi_dung) o.appendChild(tao("p", "cs-sot__chu", b.noi_dung));
-    if ((b.ly_do || []).length) o.appendChild(tao("p", "cs-sot__ly nho", "Có lẽ sót vì: " + b.ly_do.join("; ") + "."));
-    if ((b.duong || []).length) o.appendChild(tao("p", "mo nho", "Thấy qua: " + b.duong.join(", ")));
-    if ((b.hanh_dong || []).length) o.appendChild(tao("p", "cs-sot__lam nho", "Mark đã làm: " + b.hanh_dong.join("; ") + "."));
-    return o;
-  }
-  function moDoPhu(x) {
-    if (!hop) return;
-    batDauNgan("Độ thu đủ", "Bài brand bị sót");
-    $("chi-tiet-mo-ta").textContent = "Lần kiểm " + ngayDu(x.luc) + " · " + so(x.so_mau) + " bài mẫu TikTok " + so(x.ngay_mau) +
-      " ngày · " + so(x.so_da_co) + "/" + so(x.so_nhac) + " bài nhắc brand đã có · " + so(x.so_sot) + " sót, " + so(x.bo_sung) +
-      " đã bổ sung · nhiều thảo luận nhất trước";
-    var than = $("chi-tiet-than");
-    xoa(than);
-    var frag = document.createDocumentFragment();
-    var tom = tao("div", "cs-sot-tom");
-    if (lyDoChu(x)) tom.appendChild(tao("p", "nho", "Lý do sót: " + lyDoChu(x) + "."));
-    if (lamGiChu(x)) tom.appendChild(tao("p", "nho", "Mark đã làm: " + lamGiChu(x) + "."));
-    if (tom.firstChild) frag.appendChild(tom);
-    (x.bai_sot || []).forEach(function (b) { frag.appendChild(theBaiSot(b)); });
-    than.appendChild(frag);
-    if (x.so_sot > (x.bai_sot || []).length) {
-      than.appendChild(tao("p", "mo nho", "Chỉ hiện " + so((x.bai_sot || []).length) + " bài nhiều thảo luận nhất."));
-    }
-  }
+  // Độ thu đủ (kiểm thu thập 2 lần/tuần của Mark): 20/10/2026 chủ dự án bỏ khỏi trang Chỉ số — chỉ giúp
+  // người vận hành, nay là thẻ ở trang Quản trị (chỉ quản trị viên; chữ dựng ở máy chủ, chi_so.the_do_phu).
   // Bốn chỉ số sắc thái của bài gộp vào MỘT ô cả hàng có thanh 100% (bấm ô → xem bài). `kb`: KPI
   // bình luận — ⓘ nói thêm phần tiêu cực của bình luận chia theo chủ đề (19/10/2026).
   function theSacKpi(k, kb) {

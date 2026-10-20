@@ -1448,7 +1448,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         # Chỉ cần trạng thái lượt gần nhất (`_luot_json`): không kéo ghi chú (tới 20.000 ký tự).
         luot, _ = await _k(app.state.kho.cac_luot, du_an["ma"], 1, 1, ghi_chu=False)
         data["gan_nhan"] = await _tien_do_gan_nhan(du_an["ma"])
-        data["do_phu"] = await _do_phu(du_an["ma"])
+        # 20/10/2026 (chủ dự án): "Độ thu đủ" chỉ giúp người vận hành — không còn trên trang Chỉ số
+        # (thẻ vận hành ở trang Quản trị, chỉ quản trị viên); API không trả nữa.
         data.update(du_an={"ma": du_an["ma"], "ten": du_an["ten"]},
                     ngay_cuoi_chua_tron=den >= hom_nay,
                     luot_gan_nhat=_luot_json(luot[0] if luot else None),
@@ -2252,8 +2253,18 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 log.warning("thẻ quảng cáo lỗi: %s", type(e).__name__)
                 loi_qc = ("Chưa đọc được bảng quảng cáo (TikTok / Meta Ads) — chạy "
                           "deploy/lang-nghe/schema.sql bản mới trên VPS rồi tải lại trang.")
+        # Độ thu đủ (20/10/2026): thẻ VẬN HÀNH, chỉ quản trị viên — mỗi dự án lần kiểm gần nhất,
+        # đúng hàm của trang Chỉ số trước đây (`_do_phu` → `CS.do_phu_json`), không SQL mới.
+        do_phu = []
+        if qt:
+            for d in du_an:
+                x = CS.the_do_phu(await _do_phu(d["ma"]))
+                if x:
+                    do_phu.append({**x, "du_an": d["ma"], "ten_du_an": d.get("ten") or d["ma"],
+                                   "dang_bat": d.get("dang_bat", True)})
         r = _trang(request, "nguoi_xem.html", nguoi, "nguoi_xem", so_quan_tri=so_qt,
-                   tt=tt_the, mt=mt_the, tk_qc=tk_qc, loi_qc=loi_qc,
+                   tt=tt_the, mt=mt_the, tk_qc=tk_qc, loi_qc=loi_qc, do_phu=do_phu,
+                   co_kiem_do_phu=qt and bool(du_an),
                    TEN_NEN_TANG_QC=QC.TEN_NEN_TANG_QC,
                    ten_ben=[{"ma": m, "ten": t} for m, t in ten_ben.items()],
                    ds=[_dong_nguoi_xem(nguoi, x, ben_thay, ten_ben, so_qt, dang_doc) for x in ds],
