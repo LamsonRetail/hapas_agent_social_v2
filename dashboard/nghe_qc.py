@@ -65,8 +65,9 @@ def _bay(dv) -> datetime.datetime:
 
 
 def ket_luan(kq: dict, so_xin: int) -> tuple[str, str | None]:
-    """(trạng thái, lỗi) cho các yêu cầu của MỘT lượt đọc (soát M1): không đọc được tài khoản nào →
-    loi (có lỗi) / bo_qua (không có gì để đọc); đọc thiếu → xong + "một phần"."""
+    """(trạng thái, lỗi) cho MỘT yêu cầu (soát M1/N1 — gọi với số của CHÍNH dòng đó): không đọc
+    được tài khoản nào → loi (có lỗi) / bo_qua (không có gì để đọc); đọc thiếu → xong + "một
+    phần"."""
     ok = int(kq.get("so_tk") or 0)
     loi = kq.get("loi")
     if ok == 0:
@@ -118,13 +119,56 @@ def xu_ly_cho(ncc: str, dv, kho_tt=None, *, log=print) -> dict:
     if kq.get("bo_qua"):
         kho_tt.ket_thuc(ids, "bo_qua", so_tk_ok=0, loi=kq["bo_qua"])
     else:
-        tt, loi = ket_luan(kq, len(tk))
-        kho_tt.ket_thuc(ids, tt, so_dong=int(kq.get("so_dong") or 0),
-                        so_tk_ok=int(kq.get("so_tk") or 0), loi=loi)
+        ket_thuc_tung_dong(kho_tt, rows, kq)
+        day_bq(kq, log)
     log(f"[nghe_qc] {ncc}: {len(ids)} yêu cầu, {kq.get('so_tk', 0)}/{len(tk)} tài khoản, "
         f"{tu}→{den}: {kq.get('so_dong', 0)} dòng"
         + (f", lỗi: {kq['loi']}" if kq.get("loi") else ""))
     return {**kq, "so_yeu_cau": len(ids)}
+
+
+def ket_thuc_tung_dong(kho_tt, rows: list[dict], kq: dict) -> None:
+    """Lượt gộp nhiều yêu cầu (soát N1): mỗi dòng nhận ĐÚNG số của tài khoản CỦA NÓ — đọc được =
+    tài khoản của dòng ∩ `tk_doc`; lỗi = `tk_hong` của tài khoản dòng đó. Người có 3 tài khoản
+    hỏng không bao giờ nhận "đủ"."""
+    doc = {str(x) for x in kq.get("tk_doc") or []}
+    hong = {str(k): v for k, v in (kq.get("tk_hong") or {}).items()}
+    for r in rows:
+        cua = sorted({str(x) for x in r.get("tai_khoan") or []})
+        ok = [a for a in cua if a in doc]
+        loi_dong = {a: hong.get(a) or kq.get("loi") or "không đọc được" for a in cua
+                    if a not in doc}
+        loi = "; ".join(f"{a}: {v}" for a, v in loi_dong.items())[:500] or None
+        tt, ly = ket_luan({"so_tk": len(ok), "loi": loi}, len(cua))
+        kho_tt.ket_thuc([r["id"]], tt, so_dong=int(kq.get("so_dong") or 0), so_tk_ok=len(ok),
+                        loi=ly, chi_tiet_them={"tk_doc": ok, "tk_hong": loi_dong})
+
+
+#: Đẩy BigQuery sau lượt của bộ nghe (soát L-b) — tối đa mỗi `BQ_GIAN_GIAY` giây một lần (quota cập
+#: nhật bảng của BigQuery: 5 lần / 10 giây mỗi bảng; lượt Mark có thể dồn dập).
+BQ_GIAN_GIAY = 600.0
+_BQ = {"luc": float("-inf")}
+
+
+def day_bq(kq: dict, log=print, *, dong_bo_bq=None, dong_ho=time.monotonic) -> bool:
+    """Lượt có ghi dòng → đẩy BigQuery như đường bộ hẹn giờ (`dong_bo_bq.chay`), giãn 10 phút. Lỗi
+    chỉ ghi log (BigQuery còn nhịp 6 giờ của dashboard). -> có đẩy hay không."""
+    if not kq.get("so_dong"):
+        return False
+    bay = dong_ho()
+    if bay - _BQ["luc"] < BQ_GIAN_GIAY:
+        return False
+    if dong_bo_bq is None:
+        from dashboard import dong_bo_bq
+    if not dong_bo_bq.da_bat():
+        return False
+    _BQ["luc"] = bay
+    try:
+        dong_bo_bq.chay()
+        return True
+    except Exception as e:  # noqa: BLE001
+        log(f"[nghe_qc] BigQuery lỗi: {type(e).__name__}")
+        return False
 
 
 def xu_ly_co_nhanh(ncc: str, dv, *, log=print) -> dict | None:
@@ -138,6 +182,8 @@ def xu_ly_co_nhanh(ncc: str, dv, *, log=print) -> dict | None:
         return None
     kq = dv.dong_bo(theo_yeu_cau=True, chi_nhanh=True)
     log(f"[nghe_qc] {ncc}: lượt bấm tay {kq}")
+    if da_chay(kq):
+        day_bq(kq, log)
     return kq
 
 
@@ -212,12 +258,35 @@ def _dong(conn) -> None:
         print(f"[nghe_qc] đóng kết nối lỗi: {type(e).__name__}", file=sys.stderr)
 
 
+CAU_LOI_DONG_BO = ("Lượt đồng bộ hằng ngày không xong (lượt khác giữ khoá quá lâu sau 3 lần thử, "
+                   "lỗi, hoặc quá 6 giờ) — xem journalctl -u {ncc}-dong-bo; lượt sau tự đọc lại 7 "
+                   "ngày / nạp lùi tiếp.")
+
+
+def bao_loi_dong_bo(ncc: str, kho_qc=None) -> None:
+    """OnFailure của *-ads-dong-bo (soát N2): ghi lỗi lên thẻ kết nối (trạng thái loi + lý do) để
+    quản trị viên thấy — không để 3 lần thử hỏng nằm im. Chỉ khi còn token (`con_token`)."""
+    if kho_qc is None:
+        from dashboard import kho_qc
+    kho_qc.ghi_trang_thai("loi", CAU_LOI_DONG_BO.format(ncc=ncc.replace("_", "-")), ncc,
+                          con_token=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m dashboard.nghe_qc",
                                 description="Nghe yêu cầu số quảng cáo tức thì của Mark.")
     p.add_argument("ncc", choices=NCC)
     p.add_argument("--mot-lan", action="store_true", help="xử lý hàng chờ một lần rồi thoát")
+    p.add_argument("--bao-loi-dong-bo", action="store_true",
+                   help="ghi lỗi lượt đồng bộ hằng ngày lên thẻ kết nối (OnFailure của systemd)")
     a = p.parse_args(argv)
+    if a.bao_loi_dong_bo:
+        try:
+            bao_loi_dong_bo(a.ncc)
+        except Exception as e:  # noqa: BLE001
+            print(f"[nghe_qc] ghi lỗi đồng bộ hỏng: {_gon(e)}", file=sys.stderr)
+            return 1
+        return 0
     if a.mot_lan:
         try:
             print(f"[nghe_qc] {xu_ly_cho(a.ncc, dich_vu(a.ncc))}")

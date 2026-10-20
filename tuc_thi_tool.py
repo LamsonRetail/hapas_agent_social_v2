@@ -169,7 +169,7 @@ _KHOA_XN = threading.Lock()
 _dong_ho = time.monotonic
 
 
-def _stt() -> tuple[str, int] | None:
+def _stt() -> tuple[str, str, int] | None:
     try:
         import dong_ho_luot
         return dong_ho_luot.stt_luot()
@@ -193,7 +193,8 @@ def cap_ma(loai: str, email: str, muc, uoc_usd: float) -> str:
         bay = _dong_ho()
         for k in [k for k, v in _XAC_NHAN.items() if v["het"] < bay]:
             _XAC_NHAN.pop(k, None)
-        _XAC_NHAN[ma] = {"loai": loai, "email": email, "chat": stt[0], "stt": stt[1],
+        _XAC_NHAN[ma] = {"loai": loai, "email": email, "chat": stt[0], "ky": stt[1],
+                         "stt": stt[2],
                          "khoa": _khoa_pham_vi(loai, muc), "uoc_usd": float(uoc_usd),
                          "het": bay + XAC_NHAN_GIAY}
     return ma
@@ -214,11 +215,15 @@ def dung_ma(ma: str, loai: str, email: str, muc) -> float:
                 loai, email, stt[0] if stt else None, _khoa_pham_vi(loai, muc)):
             raise TuChoi("Mã xác nhận không khớp người hỏi / cuộc chat / phạm vi đã ước tính — ước "
                          "tính lại rồi hỏi \"Chạy nhé?\".")
-        if stt[1] == x["stt"]:
+        if stt[1] != x["ky"]:
+            _XAC_NHAN.pop(ma, None)
+            raise TuChoi("Mã xác nhận đã hết hạn (Mark vừa khởi động lại / làm mới phiên). Ước "
+                         "tính lại rồi hỏi \"Chạy nhé?\".")
+        if stt[2] == x["stt"]:
             raise TuChoi("Chưa chạy: người dùng chưa trả lời câu hỏi chi phí. Báo `cau_uoc_tinh`, "
                          "KẾT THÚC bằng \"Chạy nhé?\" và chờ họ đồng ý.")
         _XAC_NHAN.pop(ma, None)
-        if stt[1] != x["stt"] + 1:
+        if stt[2] != x["stt"] + 1:
             raise TuChoi("Mã xác nhận đã hết hạn: chỉ dùng được ở tin nhắn NGAY SAU câu hỏi chi "
                          "phí. Ước tính lại rồi hỏi \"Chạy nhé?\".")
         return x["uoc_usd"]
@@ -306,11 +311,19 @@ def _tk_pham_vi(kho, q: dict, args: dict, cac_tk: list[dict], hn: datetime.date
 
 
 def _dung_lai(rows: list[dict], ids: set[str], tu, den) -> dict | None:
+    """Dòng gần đây (chờ / đang chạy / xong ≤ 5 phút) phủ phạm vi này. Dòng đã xong chỉ dùng lại
+    khi MỌI tài khoản của người hỏi đều đọc được trong dòng đó (`chi_tiet.tk_doc`, soát N1) — tài
+    khoản hỏng thì xin lượt mới thay vì báo "đủ"."""
     for r in rows:
-        if (ids <= {str(x) for x in r.get("tai_khoan") or []}
+        if not (ids <= {str(x) for x in r.get("tai_khoan") or []}
                 and (r.get("tu") is None or r["tu"] <= tu)
                 and (r.get("den") is None or r["den"] >= den)):
-            return r
+            continue
+        doc = (r.get("chi_tiet") or {}).get("tk_doc")
+        if r.get("trang_thai") == "xong" and not (isinstance(doc, list)
+                                                   and ids <= {str(x) for x in doc}):
+            continue
+        return r
     return None
 
 
@@ -333,24 +346,42 @@ def _han_cho() -> float:
     return _dong_ho() + con
 
 
-def do_moi_ncc(r: dict, xin: int, ghi_kho, q: dict) -> dict:
-    """Độ mới của MỘT nền tảng sau lượt đọc (soát M1): đủ / một phần / chưa đọc lại được — câu nói
-    sẵn + mốc datetime (so sánh bằng datetime, không bằng chuỗi)."""
+#: Lý do KHÔNG bí mật (người không phải quản trị viên vẫn thấy nguyên văn) — soát L-e.
+_LY_DO_CONG_KHAI = ("tài khoản theo múi giờ", "kỳ hỏi ngoài 7 ngày",
+                    "tài khoản đang tắt đồng bộ", "tài khoản chưa duyệt")
+
+
+def _ly_do(v: str, q: dict) -> str:
+    v = str(v or "không đọc được")
+    return v if PQ.la_quan_tri(q) or v.startswith(_LY_DO_CONG_KHAI) else HD.LOI_CHUNG
+
+
+def do_moi_ncc(r: dict, ids: list[str], ghi_kho, q: dict) -> dict:
+    """Độ mới của MỘT nền tảng cho ĐÚNG tài khoản của người hỏi (`ids`) — soát M1/N1: đủ / một
+    phần / chưa đọc lại được. Số đọc được = `ids` ∩ `chi_tiet.tk_doc` của dòng (dòng gộp hoặc dòng
+    dùng lại của người khác vẫn đúng); dòng cũ không có `tk_doc` chỉ dùng `so_tk_ok` khi phạm vi
+    trùng khít. Đọc được nhiều hơn số xin = vô lý → coi như chưa đọc lại. Mốc là datetime."""
     ten = TEN_NCC.get(r.get("nha_cung_cap"), r.get("nha_cung_cap") or "?")
     tt = r.get("trang_thai")
-    ok = r.get("so_tk_ok")
-    xin = int(r.get("so_muc") or xin or 0)
-    loi = r.get("loi")
-    if loi and not PQ.la_quan_tri(q):
-        loi = HD.LOI_CHUNG
+    ids = sorted({str(x) for x in ids or []})
+    xin = len(ids)
+    ct = r.get("chi_tiet") or {}
+    if isinstance(ct.get("tk_doc"), list):
+        ok = len(set(ids) & {str(x) for x in ct["tk_doc"]})
+        hong = {a: v for a, v in (ct.get("tk_hong") or {}).items() if a in ids}
+    elif set(ids) == {str(x) for x in r.get("tai_khoan") or []}:
+        ok, hong = r.get("so_tk_ok"), {}
+    else:
+        ok, hong = None, {}
     x = {"nen_tang": ten, "trang_thai": tt, "so_tk_xin": xin, "so_tk_doc_duoc": ok}
     kho_luc = _gio(ghi_kho)
-    if tt == "xong" and ok:
+    ly_hong = "; ".join(sorted({_ly_do(v, q) for v in hong.values()}))
+    if tt == "xong" and ok and ok <= xin:
         x["luc"] = _utc(r.get("xong_luc"))
         if ok < xin:
             x["muc"] = "mot_phan"
             x["cau"] = (f"{ten}: cập nhật MỘT PHẦN lúc {_gio(x['luc'])} ({ok}/{xin} tài khoản đọc "
-                        "lại được" + (f"; lỗi: {loi}" if loi else "") + ")")
+                        "lại được" + (f"; còn lại: {ly_hong}" if ly_hong else "") + ")")
         else:
             x["muc"] = "du"
             x["cau"] = f"{ten}: số cập nhật lúc {_gio(x['luc'])} (đủ {ok}/{xin} tài khoản)"
@@ -358,8 +389,10 @@ def do_moi_ncc(r: dict, xin: int, ghi_kho, q: dict) -> dict:
     x["muc"] = "chua"
     if tt in ("cho", "dang_chay"):
         ly = "lượt đọc chưa xong sau ~90 giây (lượt khác đang chạy hoặc nhiều tài khoản)"
+    elif ok is not None and ok > xin:
+        ly = "số tài khoản đọc được không khớp yêu cầu"
     else:
-        ly = loi or "không đọc lại được"
+        ly = ly_hong or (_ly_do(r.get("loi"), q) if r.get("loi") else "không đọc lại được")
     x["cau"] = (f"{ten}: chưa đọc lại được ({ly}) — số trong kho ghi lúc {kho_luc or '?'}"
                 + ("; hỏi lại sau ít phút" if tt in ("cho", "dang_chay") else ""))
     return x
@@ -430,7 +463,7 @@ def quang_cao(kho, nguoi: dict, args: dict, bay_gio: datetime.datetime, ngu=time
         ghi = (kho.qc_moi(ids_ncc) or {}).get("ghi_luc") if ids_ncc else None
         if ncc in cho_ids:
             r = rows.get(cho_ids[ncc]) or {"nha_cung_cap": ncc}
-            x = do_moi_ncc(r, len(theo_ncc.get(ncc, [])), ghi, q)
+            x = do_moi_ncc(r, theo_ncc.get(ncc, []), ghi, q)
             lam_moi["nha_cung_cap"][ncc].update(trang_thai=x["trang_thai"], muc=x["muc"])
         else:
             ly = (lam_moi["nha_cung_cap"].get(ncc) or {}).get("tu_choi") or lam_moi.get("ly_do") \

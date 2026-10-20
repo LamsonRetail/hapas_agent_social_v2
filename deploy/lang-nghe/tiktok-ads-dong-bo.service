@@ -8,10 +8,18 @@
 Description=Dong bo TikTok Ads vao kho lang_nghe (dashboard social.hapas.vn)
 After=network-online.target postgresql.service
 Wants=network-online.target
-# Soát 20/10/2026 H2: lượt hằng ngày CHỜ khoá (≤ 30 phút, --cho-khoa-phut) khi lượt nhỏ đang chạy;
-# vẫn không có khoá → thoát 3 → Restart=on-failure chạy lại (tối đa 3 lần / 4 giờ), không lặng lẽ mất.
-StartLimitIntervalSec=4h
-StartLimitBurst=3
+# Soát 20/10/2026 H2 + N2: lượt hằng ngày CHỜ khoá (≤ 30 phút, --cho-khoa-phut) khi lượt nhỏ đang
+# chạy; vẫn không có khoá → thoát 3 → systemd chạy lại SAU 10 phút — CHỈ với mã 3
+# (RestartForceExitStatus, Restart=no: lỗi khác, bị giết vì quá TimeoutStartSec 6 giờ, SIGTERM
+# không bao giờ chạy lại → không vòng lặp giữ khoá cả ngày; nạp lùi dở dang lượt hằng ngày SAU tự đọc
+# tiếp nhờ mốc tk_quang_cao.nap_lui_tu ghi sau mỗi cửa sổ 30 ngày). Mỗi lần chờ ≤ 30 phút + 10 phút
+# nghỉ: lần đầu + 3 lần chạy lại ≈ 2 giờ 40 phút, trong cửa sổ 6 giờ (Burst 4 = lần đầu + 3).
+# Hỏng hẳn (hết lượt chạy lại, lỗi khác, quá giờ) → OnFailure ghi lỗi lên thẻ kết nối của dashboard
+# (qc-dong-bo-loi@.service) — không nằm im. Cần systemd ≥ 244 (Restart cho Type=oneshot); VPS:
+# systemd 255 (Ubuntu 24.04). Gỡ trạng thái failed sau khi xử lý: systemctl reset-failed tiktok-ads-dong-bo.
+StartLimitIntervalSec=6h
+StartLimitBurst=4
+OnFailure=qc-dong-bo-loi@tiktok_ads.service
 
 [Service]
 Type=oneshot
@@ -25,7 +33,8 @@ ExecStart=/opt/lang-nghe/venv/bin/python -m dashboard.tiktok_ads dong-bo
 # Nạp lùi 90 ngày của tài khoản lớn: nhiều nghìn lượt gọi tuần tự. Quá 6 giờ thì dừng (lượt sau
 # đọc tiếp phần còn thiếu — mốc tk_quang_cao.nap_lui_tu ghi sau mỗi cửa sổ 30 ngày; upsert không nhân đôi).
 TimeoutStartSec=6h
-Restart=on-failure
+Restart=no
+RestartForceExitStatus=3
 RestartSec=10min
 Nice=10
 MemoryMax=512M

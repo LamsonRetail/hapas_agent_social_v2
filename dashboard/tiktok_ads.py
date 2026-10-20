@@ -604,6 +604,26 @@ def cua_so_tuc_thi(hq: datetime.date, tu: datetime.date | None, den: datetime.da
     return (a, b) if a <= b else None
 
 
+def ly_do_ngoai_cua_so(t: dict, hq: datetime.date, tu: datetime.date | None) -> str:
+    """Vì sao tài khoản không có cửa sổ đọc lại (soát L-e): múi giờ sau giờ VN → "hôm nay" giờ VN
+    ở đó chưa bắt đầu; còn lại là kỳ hỏi ngoài 7 ngày gần nhất theo ngày của tài khoản."""
+    homnay = hq + datetime.timedelta(days=1)
+    if tu and tu > homnay:
+        return (f"tài khoản theo múi giờ {t.get('mui_gio') or '?'}, ngày {tu:%d/%m} ở đó chưa bắt "
+                f"đầu (hôm nay ở đó là {homnay:%d/%m}) — chưa có số để đọc")
+    return "kỳ hỏi ngoài 7 ngày gần nhất theo ngày của tài khoản"
+
+
+def ket_qua_pham_vi(ids: set[str], dem: dict, doc: set[str], hong: dict[str, str],
+                    loi: str | None) -> dict:
+    """Kết quả lượt theo phạm vi (soát N1): TỪNG tài khoản đọc được (`tk_doc`) / không đọc được kèm
+    lý do (`tk_hong`) — tài khoản chưa tới lượt (lượt dừng giữa chừng) mang lỗi chung. Bộ nghe
+    chia lại cho TỪNG yêu cầu đã gộp."""
+    for a in sorted(ids - doc - set(hong)):
+        hong[a] = (loi or "không đọc được")[:200]
+    return {**dem, "so_tk": len(doc), "tk_doc": sorted(doc), "tk_hong": dict(hong), "loi": loi}
+
+
 def co_chay_gan(kho, t: dict, bay: datetime.datetime) -> bool:
     """Tài khoản có hiển thị trong 30 ngày gần nhất (lượt nhanh bỏ tài khoản không chạy)."""
     hq = hom_qua(t.get("mui_gio"), bay)
@@ -946,37 +966,45 @@ class DichVu:
             return self._dong_bo_pham_vi({str(x) for x in ids or ()}, tu, den)
 
     def _dong_bo_pham_vi(self, ids: set[str], tu, den) -> dict:
-        dem = {"so_dong": 0, "so_tk": 0, "so_tk_yeu_cau": len(ids), "den_ngay": None}
+        dem = {"so_dong": 0, "so_tk_yeu_cau": len(ids), "den_ngay": None}
+        doc: set[str] = set()
+        hong: dict[str, str] = {}
         loi = []
         try:
             mcp = self.mcp()
             bay = self._bay_gio()
             for t in self.kho.cac_tk():
                 adv = str(t["advertiser_id"])
-                if (adv not in ids or (t.get("nen_tang") or "tiktok") != "tiktok"
-                        or not t.get("dang_dong_bo") or not t.get("con_quyen", True)):
+                if adv not in ids:
                     continue
-                cs = cua_so_tuc_thi(hom_qua(t.get("mui_gio"), bay), tu, den)
+                if ((t.get("nen_tang") or "tiktok") != "tiktok" or not t.get("dang_dong_bo")
+                        or not t.get("con_quyen", True)):
+                    hong[adv] = "tài khoản đang tắt đồng bộ hoặc mất quyền"
+                    continue
+                hq = hom_qua(t.get("mui_gio"), bay)
+                cs = cua_so_tuc_thi(hq, tu, den)
                 if cs is None:
+                    hong[adv] = ly_do_ngoai_cua_so(t, hq, tu)
                     continue
                 try:
                     dem["so_dong"] += self._mot_cua_so(mcp, adv, *cs)
-                    dem["so_tk"] += 1
+                    doc.add(adv)
                     dn = dem["den_ngay"]
                     dem["den_ngay"] = max(dn, cs[1]) if dn else cs[1]
                 except LoiXacThuc:
                     raise
                 except LoiTikTok as e:
+                    hong[adv] = str(e)[:200]
                     loi.append(f"{t.get('ten') or adv}: {e}")
                     self.log(f"[tiktok_ads] tức thì {adv} lỗi: {e}")
         except (ChuaKetNoi, LoiHetHan) as e:
-            return {**dem, "loi": str(e)}
+            return ket_qua_pham_vi(ids, dem, doc, hong, str(e))
         except LoiXacThuc as e:
             self.kho.ghi_trang_thai("loi", f"TikTok từ chối token: {e}", con_token=True)
-            return {**dem, "loi": f"token bị từ chối: {e}"}
+            return ket_qua_pham_vi(ids, dem, doc, hong, f"token bị từ chối: {e}")
         except (LoiTikTok, LoiMaHoa) as e:
-            return {**dem, "loi": str(e)}
-        return {**dem, "loi": "; ".join(loi)[:500] or None}
+            return ket_qua_pham_vi(ids, dem, doc, hong, str(e))
+        return ket_qua_pham_vi(ids, dem, doc, hong, "; ".join(loi)[:500] or None)
 
     def _dong_bo(self, *, bu, tu, den, theo_yeu_cau: bool = False, chi_nhanh: bool = False
                  ) -> dict:
@@ -1133,12 +1161,12 @@ def _ngay_tham_so(s: str) -> datetime.date:
         raise argparse.ArgumentTypeError("ngày dạng YYYY-MM-DD") from None
 
 
-def nhanh_trong_gio_dong_bo(dv, ncc: str, bay: datetime.datetime | None = None) -> bool:
-    """Cờ đang chờ là lượt NHANH và đang trong khung đồng bộ hằng ngày (06:25–07:30) → để sau."""
-    r = dv.kho.doc_ket_noi(ncc) or {}
+def yeu_cau_trong_gio_dong_bo(dv, bay: datetime.datetime | None = None) -> bool:
+    """Đang trong khung đồng bộ hằng ngày (06:25–07:30 giờ VN) → MỌI cờ "Đồng bộ ngay" (nhanh lẫn
+    đầy đủ của quản trị viên) đợi sau khung (soát L-a): bộ hẹn giờ 2 phút không chạy, cờ giữ."""
     if bay is None and callable(getattr(dv, "_bay_gio", None)):
         bay = dv._bay_gio()
-    return r.get("yeu_cau_kieu") == "nhanh" and QC.trong_gio_dong_bo(bay)
+    return QC.trong_gio_dong_bo(bay)
 
 
 def tuc_thi_du_phong(ncc: str, dv, bat: bool) -> None:
@@ -1181,8 +1209,8 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
             p.error("--bu trong 1..400")
         if a.chi_khi_yeu_cau:
             tuc_thi_du_phong(NCC, dv, dich_vu is None)
-            if dv.co_yeu_cau() and nhanh_trong_gio_dong_bo(dv, NCC):
-                return 0                      # khung đồng bộ hằng ngày: lượt nhanh đợi sau 07:30
+            if dv.co_yeu_cau() and yeu_cau_trong_gio_dong_bo(dv):
+                return 0                      # khung đồng bộ hằng ngày: cờ đợi sau 07:30
         if a.chi_khi_yeu_cau and not dv.co_yeu_cau():
             return 0                          # không có yêu cầu: thoát ngay, không in gì
         kq = dv.dong_bo(bu=a.bu, tu=a.tu, den=a.den, theo_yeu_cau=a.chi_khi_yeu_cau,

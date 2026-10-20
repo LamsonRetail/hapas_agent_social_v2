@@ -37,8 +37,12 @@ _CHUA_VIET = 60.0
 
 #: Số thứ tự lượt trả lời của TỪNG chat (20/10/2026, xác nhận chi phí của `lay_so_tuc_thi`): mã xác
 #: nhận chỉ dùng được ở đúng lượt KẾ TIẾP sau lượt ước tính — tin nhắn trả lời "Chạy nhé?". Trong bộ
-#: nhớ tiến trình (Mark khởi động lại thì mã cũ cũng mất — hỏi lại).
-_STT_CHAT: dict[str, int] = {}
+#: nhớ tiến trình. Mỗi chat mang một KỲ (epoch: mã tiến trình + mã ngẫu nhiên lúc chat vào bảng) —
+#: bảng đầy thì bỏ chat CŨ NHẤT (không xoá cả bảng), chat bị bỏ quay lại nhận kỳ MỚI; tiến trình
+#: khởi động lại cũng là kỳ mới → mã xác nhận của kỳ cũ không bao giờ khớp (soát L-c).
+STT_TOI_DA = 5000
+_KY_TIEN_TRINH = uuid.uuid4().hex[:8]
+_STT_CHAT: dict[str, list] = {}           # chat → [kỳ, số thứ tự]; thứ tự chèn = cũ → mới
 _STT: contextvars.ContextVar = contextvars.ContextVar("lsr_stt_luot", default=None)
 _KHOA_STT = threading.Lock()
 
@@ -51,11 +55,14 @@ def bat_dau(chat: str | None = None) -> None:
     _MA_LUOT.set(uuid.uuid4().hex)
     if chat:
         with _KHOA_STT:
-            n = _STT_CHAT.get(chat, 0) + 1
-            if len(_STT_CHAT) > 5000:
-                _STT_CHAT.clear()
-            _STT_CHAT[chat] = n
-        _STT.set((chat, n))
+            v = _STT_CHAT.pop(chat, None)
+            if v is None:
+                while len(_STT_CHAT) >= STT_TOI_DA:
+                    _STT_CHAT.pop(next(iter(_STT_CHAT)))          # bỏ chat cũ nhất
+                v = [f"{_KY_TIEN_TRINH}:{uuid.uuid4().hex[:6]}", 0]
+            v[1] += 1
+            _STT_CHAT[chat] = v                                    # chèn lại = mới nhất
+            _STT.set((chat, v[0], v[1]))
     else:
         _STT.set(None)
 
@@ -65,8 +72,9 @@ def ma_luot() -> str | None:
     return _MA_LUOT.get()
 
 
-def stt_luot() -> tuple[str, int] | None:
-    """(chat, số thứ tự lượt trả lời của chat đó) của lượt đang chạy; None ngoài lượt / không chat."""
+def stt_luot() -> tuple[str, str, int] | None:
+    """(chat, kỳ, số thứ tự lượt trả lời của chat đó) của lượt đang chạy; None ngoài lượt / không
+    chat."""
     return _STT.get()
 
 

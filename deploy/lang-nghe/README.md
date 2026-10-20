@@ -230,9 +230,12 @@ cd /opt/lang-nghe/app   # sau khi rsync mã mới (dashboard/README.md bước 2
 # a. Schema (bảng yeu_cau_tuc_thi + 2 trigger + RLS + quyền; chạy lại không hỏng) TRƯỚC mã mới — như mục 7b
 sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
 sudo -u postgres psql -d lang_nghe -c '\dp yeu_cau_tuc_thi' -c "select policyname, roles, cmd from pg_policies where tablename='yeu_cau_tuc_thi'"
-# b. Lượt hằng ngày nay CHỜ khoá + chạy lại khi lỗi (Restart=on-failure, cần systemd ≥ 244 cho oneshot)
+# b. Lượt hằng ngày nay CHỜ khoá; chạy lại CHỈ khi thoát 3 (RestartForceExitStatus=3, Restart=no — cần
+#    systemd ≥ 244 cho oneshot, VPS 255); hỏng hẳn → OnFailure=qc-dong-bo-loi@<ncc> ghi lỗi lên thẻ kết nối
 sudo install -o root -g root -m 0644 deploy/lang-nghe/tiktok-ads-dong-bo.service \
-  deploy/lang-nghe/meta-ads-dong-bo.service /etc/systemd/system/
+  deploy/lang-nghe/meta-ads-dong-bo.service deploy/lang-nghe/qc-dong-bo-loi@.service /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/tiktok-ads-dong-bo.service \
+  /etc/systemd/system/meta-ads-dong-bo.service
 # c. Hai bộ nghe (chạy lâu dài, Restart=always; cùng hardening với *-ads-yeu-cau)
 sudo install -o root -g root -m 0644 deploy/lang-nghe/tiktok-ads-nghe.service \
   deploy/lang-nghe/meta-ads-nghe.service /etc/systemd/system/
@@ -246,17 +249,26 @@ sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=
 
 - **Lượt hằng ngày không bao giờ lặng lẽ mất** (soát H2): `dong-bo` hằng ngày gặp lượt nhỏ đang giữ
   khoá thì CHỜ (thử lại mỗi 30 giây, tối đa `--cho-khoa-phut`, mặc định 30), vẫn không có khoá →
-  thoát 3 → `Restart=on-failure` (10 phút, tối đa 3 lần / 4 giờ). Khung 06:25–07:30 giờ VN: bộ nghe,
-  bộ hẹn giờ 2 phút và Mark KHÔNG mở lượt đọc tức thì / lượt nhanh (yêu cầu chờ → bo_qua, Mark trả
-  số đã có và nói đồng bộ hằng ngày đang chạy; cờ nhanh của dashboard đợi sau 07:30).
+  thoát 3 → systemd chạy lại sau 10 phút CHỈ với mã 3 (`RestartForceExitStatus=3`, `Restart=no`;
+  lần đầu + 3 lần chạy lại trong `StartLimitIntervalSec=6h`). Lỗi khác, bị giết vì quá
+  `TimeoutStartSec=6h` hay SIGTERM: KHÔNG chạy lại (không vòng lặp giữ khoá cả ngày) — nạp lùi 90
+  ngày dở dang, lượt hằng ngày hôm sau đọc tiếp nhờ mốc `tk_quang_cao.nap_lui_tu` ghi sau mỗi cửa sổ
+  30 ngày. Hỏng hẳn → `OnFailure=qc-dong-bo-loi@<ncc>.service` đặt thẻ kết nối "lỗi" + lý do (quản
+  trị viên thấy trên trang Quảng cáo); xử lý xong: `systemctl reset-failed tiktok-ads-dong-bo
+  meta-ads-dong-bo`. Khung 06:25–07:30 giờ VN: bộ nghe, bộ hẹn giờ 2 phút và Mark KHÔNG mở lượt đọc
+  tức thì / lượt bấm tay nào — kể cả cờ đầy đủ của quản trị viên (yêu cầu chờ → bo_qua, Mark trả số
+  đã có và nói đồng bộ hằng ngày đang chạy; cờ "Đồng bộ ngay" giữ tới sau 07:30).
 - **Bộ nghe** (soát H1, L4): chỉ mở lượt NHANH của dashboard (câu UPDATE bắt đầu lượt chỉ khớp cờ
   nhanh), lượt đầy đủ để bộ hẹn giờ; không chạy được (khoá bận, chưa kết nối, thiếu khoá) → chờ
   thông báo / 60 giây, không quay vòng.
 - **Dự phòng**: bộ hẹn giờ `*-ads-yeu-cau` (2 phút) cũng xử lý hàng chờ — bộ nghe dừng thì yêu cầu
   vẫn chạy (chậm ≤ 2 phút; quá 90 giây Mark trả số cũ kèm giờ cập nhật). Nút "Đồng bộ ngay" loại
   nhanh của dashboard cũng NOTIFY → bộ nghe chạy ngay.
-- **Độ mới trung thực** (soát M1): lượt đọc 0 tài khoản → loi / bo_qua (không bao giờ xong); thiếu →
-  xong + `so_tk_ok` < `so_muc` + "một phần"; Mark nói từng nền tảng.
+- **Độ mới trung thực** (soát M1, N1): lượt gộp nhiều yêu cầu chia lại cho TỪNG dòng — `so_tk_ok` =
+  tài khoản CỦA dòng đó đọc được, `chi_tiet.tk_doc` / `tk_hong` (lý do từng tài khoản); 0 tài khoản →
+  loi / bo_qua (không bao giờ xong); thiếu → xong + "một phần". Mark nói từng nền tảng theo ĐÚNG tài
+  khoản của người hỏi (kể cả dòng dùng lại của người khác); tài khoản múi giờ sau giờ VN mà "hôm nay"
+  ở đó chưa bắt đầu → nói rõ lý do. Sau lượt của bộ nghe có ghi dòng → đẩy BigQuery, giãn 10 phút.
 - **Trần** (chống nền tảng chặn + chi phí; đếm NGUYÊN TỬ bằng khoá advisory trong CSDL): phía Mark
   (`/opt/mark/app/.env`, tuỳ chọn) — `MARK_TUC_THI_QC_NGUOI_GIO` 6 yêu cầu đọc quảng cáo/người/giờ
   (một yêu cầu cả TikTok + Meta tính 1), `MARK_TUC_THI_QC_GIO` 12/nhà cung cấp/giờ, cùng phạm vi

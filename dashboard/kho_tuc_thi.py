@@ -218,12 +218,17 @@ def tra_lai(ids: list[int]) -> None:
 
 
 def ket_thuc(ids: list[int], trang_thai: str, *, so_dong: int | None = None,
-             so_tk_ok: int | None = None, loi: str | None = None) -> None:
+             so_tk_ok: int | None = None, loi: str | None = None,
+             chi_tiet_them: dict | None = None) -> None:
+    """Kết thúc yêu cầu. Bộ nghe gọi TỪNG dòng khi gộp lượt (soát N1): `so_tk_ok` = tài khoản CỦA
+    DÒNG ĐÓ đọc được, `chi_tiet_them` = {tk_doc, tk_hong} của dòng."""
     if ids:
         with ket_noi() as c:
             c.execute("UPDATE yeu_cau_tuc_thi SET trang_thai = %s, so_dong = %s, so_tk_ok = %s, "
-                      "loi = %s, xong_luc = now() WHERE id = ANY(%s)",
-                      (trang_thai, so_dong, so_tk_ok, str(loi)[:500] if loi else None, list(ids)))
+                      "loi = %s, chi_tiet = chi_tiet || %s::jsonb, xong_luc = now() "
+                      "WHERE id = ANY(%s)",
+                      (trang_thai, so_dong, so_tk_ok, str(loi)[:500] if loi else None,
+                       _json(chi_tiet_them), list(ids)))
 
 
 def don_dep(nha_cung_cap: str, cho_phut: int = 15, chay_phut: int = 60) -> int:

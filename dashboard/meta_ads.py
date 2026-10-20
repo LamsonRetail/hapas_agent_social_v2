@@ -696,39 +696,47 @@ class DichVu:
             return self._dong_bo_pham_vi({str(x) for x in ids or ()}, tu, den)
 
     def _dong_bo_pham_vi(self, ids: set[str], tu, den) -> dict:
-        dem = {"so_dong": 0, "so_tk": 0, "so_tk_yeu_cau": len(ids), "den_ngay": None}
+        dem = {"so_dong": 0, "so_tk_yeu_cau": len(ids), "den_ngay": None}
+        doc: set[str] = set()
+        hong: dict[str, str] = {}
         loi = []
         try:
             g = self.graph()
             bay = self._bay_gio()
             for t in self.kho.cac_tk():
                 act = str(t["advertiser_id"])
-                if (act not in ids or QC.nen_tang_tk(t) != NEN_TANG or not t.get("duyet")
-                        or not t.get("dang_dong_bo") or not t.get("con_quyen", True)):
+                if act not in ids:
                     continue
-                cs = TA.cua_so_tuc_thi(TA.hom_qua(t.get("mui_gio"), bay), tu, den)
+                if (QC.nen_tang_tk(t) != NEN_TANG or not t.get("duyet")
+                        or not t.get("dang_dong_bo") or not t.get("con_quyen", True)):
+                    hong[act] = "tài khoản chưa duyệt, đang tắt đồng bộ hoặc mất quyền"
+                    continue
+                hq = TA.hom_qua(t.get("mui_gio"), bay)
+                cs = TA.cua_so_tuc_thi(hq, tu, den)
                 if cs is None:
+                    hong[act] = TA.ly_do_ngoai_cua_so(t, hq, tu)
                     continue
                 try:
                     dem["so_dong"] += self._mot_cua_so(g, act, *cs)
-                    dem["so_tk"] += 1
+                    doc.add(act)
                     dn = dem["den_ngay"]
                     dem["den_ngay"] = max(dn, cs[1]) if dn else cs[1]
                 except LoiXacThuc:
                     raise
                 except LoiMeta as e:
+                    hong[act] = str(e)[:200]
                     loi.append(f"{t.get('ten') or act}: {e}")
                     self.log(f"[meta_ads] tức thì {act} lỗi: {e}")
         except ChuaKetNoi as e:
-            return {**dem, "loi": str(e)}
+            return TA.ket_qua_pham_vi(ids, dem, doc, hong, str(e))
         except LoiXacThuc as e:
             self.kho.ghi_trang_thai("het_han" if e.het_han else "loi",
                                     f"Meta từ chối token: {e} — dán token mới", NCC,
                                     con_token=True)
-            return {**dem, "loi": f"token bị từ chối: {e}"}
+            return TA.ket_qua_pham_vi(ids, dem, doc, hong, f"token bị từ chối: {e}")
         except (LoiMeta, LoiMaHoa) as e:
-            return {**dem, "loi": str(e)}
-        return {**dem, "loi": "; ".join(loi)[:500] or None}
+            return TA.ket_qua_pham_vi(ids, dem, doc, hong, str(e))
+        return TA.ket_qua_pham_vi(ids, dem, doc, hong, "; ".join(loi)[:500] or None)
 
     def dong_bo(self, *, bu: int | None = None, tu: datetime.date | None = None,
                 den: datetime.date | None = None, theo_yeu_cau: bool = False,
@@ -1019,8 +1027,8 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
             p.error("--bu trong 1..400")
         if a.chi_khi_yeu_cau:
             TA.tuc_thi_du_phong(NCC, dv, dich_vu is None)
-            if dv.co_yeu_cau() and TA.nhanh_trong_gio_dong_bo(dv, NCC):
-                return 0                      # khung đồng bộ hằng ngày: lượt nhanh đợi sau 07:30
+            if dv.co_yeu_cau() and TA.yeu_cau_trong_gio_dong_bo(dv):
+                return 0                      # khung đồng bộ hằng ngày: cờ đợi sau 07:30
         if a.chi_khi_yeu_cau and not dv.co_yeu_cau():
             return 0
         kq = dv.dong_bo(bu=a.bu, tu=a.tu, den=a.den, theo_yeu_cau=a.chi_khi_yeu_cau,

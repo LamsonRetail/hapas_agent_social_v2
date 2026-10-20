@@ -1587,6 +1587,9 @@ GRANT INSERT, UPDATE ON ket_noi_ngoai, tk_quang_cao, qc_tk_ngay, qc_campaign_nga
 -- UPDATE chỉ cột kết quả và CHỈ dòng bài/kênh/quét (RLS ở trên); KHÔNG quyền nào trên nhat_ky
 -- (nhật ký do trigger SECURITY DEFINER ghi). REVOKE trước: thu quyền cả bảng / nhật ký của bản
 -- nháp trước, rồi cấp lại theo cột.
+-- Một giao dịch (soát L-d): chạy lại file này, Mark không bao giờ thấy khoảng trống quyền giữa
+-- REVOKE và GRANT.
+BEGIN;
 REVOKE INSERT, UPDATE ON yeu_cau_tuc_thi FROM mark;
 REVOKE INSERT ON nhat_ky FROM mark;
 REVOKE USAGE ON SEQUENCE nhat_ky_id_seq FROM mark;
@@ -1596,3 +1599,4 @@ GRANT INSERT (loai, nguoi_hoi, ben, nha_cung_cap, tai_khoan, tu, den, du_an, so_
 GRANT UPDATE (trang_thai, chi_phi_usd, loi, chi_tiet, xong_luc) ON yeu_cau_tuc_thi TO mark;
 GRANT USAGE ON SEQUENCE yeu_cau_tuc_thi_id_seq TO mark;
 GRANT SELECT, UPDATE ON yeu_cau_tuc_thi TO lang_nghe_web;
+COMMIT;

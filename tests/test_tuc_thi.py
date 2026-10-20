@@ -134,11 +134,13 @@ class GiaKhoTT:
             if r["id"] in ids and r["trang_thai"] == "dang_chay":
                 r.update(trang_thai="cho", bat_dau_luc=None)
 
-    def ket_thuc(self, ids, trang_thai, *, so_dong=None, so_tk_ok=None, loi=None):
+    def ket_thuc(self, ids, trang_thai, *, so_dong=None, so_tk_ok=None, loi=None,
+                 chi_tiet_them=None):
         for r in self.rows:
             if r["id"] in ids:
                 r.update(trang_thai=trang_thai, so_dong=so_dong, so_tk_ok=so_tk_ok, loi=loi,
                          xong_luc=self.bay)
+                r["chi_tiet"] = {**r["chi_tiet"], **(chi_tiet_them or {})}
 
     def don_dep(self, ncc, cho_phut=15, chay_phut=60):
         return 0
@@ -310,12 +312,15 @@ def test_cua_so_tuc_thi_kep_7_ngay():
 
 # ───────────────────────────── M1: độ mới trung thực ─────────────────────────────
 def test_doc_mot_phan_va_khong_doc_duoc_noi_dung_tung_nen_tang(monkeypatch, h):
+    moi = "7999999999999999999"
+
     def meta_hong(ids, tu, den):
-        return {"so_dong": 0, "so_tk": 0, "so_tk_yeu_cau": len(ids), "loi": "act_1001: lỗi"}
+        return {"so_dong": 0, "so_tk": 0, "so_tk_yeu_cau": len(ids), "loi": "act_1001: lỗi",
+                "tk_doc": [], "tk_hong": {a: "lỗi Graph" for a in ids}}
 
     def tiktok_thieu(ids, tu, den):
-        return {"so_dong": 5, "so_tk": 1, "so_tk_yeu_cau": len(ids), "loi": "1 tài khoản lỗi"}
-    moi = "7999999999999999999"
+        return {"so_dong": 5, "so_tk": 1, "so_tk_yeu_cau": len(ids), "loi": "1 tài khoản lỗi",
+                "tk_doc": [HAPAS_KOC], "tk_hong": {moi: "lỗi TikTok"}}
     h.kho_qc.tk[moi] = {**h.kho_qc.tk[HAPAS_KOC], "advertiser_id": moi, "ten": "HAPAS - MỚI"}
     monkeypatch.setattr(h.dv, "dong_bo_tai_khoan", meta_hong)
     monkeypatch.setattr(h.tdv, "dong_bo_tai_khoan", tiktok_thieu)
@@ -343,9 +348,11 @@ def test_do_moi_so_sanh_bang_datetime_khong_bang_chuoi(monkeypatch, h):
     som = datetime.datetime(2026, 10, 18, 16, 59, tzinfo=UTC)       # 23:59 18/10 VN
     muon = datetime.datetime(2026, 10, 18, 17, 5, tzinfo=UTC)       # 00:05 19/10 VN
     a = TT.do_moi_ncc({"nha_cung_cap": "tiktok_ads", "trang_thai": "xong", "so_tk_ok": 1,
-                       "so_muc": 1, "xong_luc": som}, 1, None, {"la_quan_tri": True})
+                       "so_muc": 1, "tai_khoan": ["1"], "xong_luc": som}, ["1"], None,
+                      {"la_quan_tri": True})
     b = TT.do_moi_ncc({"nha_cung_cap": "meta_ads", "trang_thai": "xong", "so_tk_ok": 1,
-                       "so_muc": 1, "xong_luc": muon}, 1, None, {"la_quan_tri": True})
+                       "so_muc": 1, "tai_khoan": ["2"], "xong_luc": muon}, ["2"], None,
+                      {"la_quan_tri": True})
     assert max(a["luc"], b["luc"]) == muon and "00:05 19/10" in b["cau"]
 
 
@@ -486,7 +493,7 @@ def test_h2_khung_dong_bo_hang_ngay_khong_luot_nho(monkeypatch, h):
     assert kq["bo_qua"] == QC.CAU_GIO_DONG_BO and h.kho_tt.rows[0]["trang_thai"] == "bo_qua"
     h.kho_qc.yeu_cau_dong_bo(QL, KQ.NCC, kieu="nhanh")
     assert NQ.xu_ly_co_nhanh("tiktok_ads", h.tdv) is None
-    assert TA.nhanh_trong_gio_dong_bo(h.tdv, KQ.NCC)
+    assert TA.yeu_cau_trong_gio_dong_bo(h.tdv)
     assert TA.main(["dong-bo", "--khong-bq", "--chi-khi-yeu-cau"], dich_vu=h.tdv) == 0
     assert h.kho_qc.doc_ket_noi(KQ.NCC)["yeu_cau_dong_bo_luc"]   # cờ giữ tới sau 07:30
     # Mark: không xin đọc lại, nói đồng bộ hằng ngày đang chạy, vẫn trả số kho.
@@ -496,11 +503,33 @@ def test_h2_khung_dong_bo_hang_ngay_khong_luot_nho(monkeypatch, h):
     assert "đang chạy (06:25–07:30" in r["do_moi"]["cau"] and r["quang_cao"]["co"]
 
 
-def test_don_vi_dong_bo_hang_ngay_chay_lai_khi_loi():
-    for n in ("tiktok", "meta"):
+def test_n2_don_vi_dong_bo_chi_chay_lai_khi_ma_3_va_bao_loi(monkeypatch):
+    """N2: chạy lại CHỈ khi thoát 3 (chờ khoá hết giờ) — không khi lỗi khác / quá 6 giờ / SIGTERM;
+    StartLimit phủ lần đầu + 3 lần chạy lại (≤ 30 phút chờ + 10 phút nghỉ mỗi lần); hỏng hẳn →
+    OnFailure ghi lỗi lên thẻ kết nối."""
+    def tri(s, k):
+        return [d.split("=", 1)[1] for d in s.splitlines() if d.startswith(k + "=")]
+    for n, ncc in (("tiktok", "tiktok_ads"), ("meta", "meta_ads")):
         s = (GOC / "deploy" / "lang-nghe" / f"{n}-ads-dong-bo.service").read_text(
             encoding="utf-8")
-        assert "Restart=on-failure" in s and "StartLimitBurst=3" in s
+        assert tri(s, "Restart") == ["no"] and tri(s, "RestartForceExitStatus") == ["3"]
+        assert tri(s, "RestartPreventExitStatus") == [] and tri(s, "TimeoutStartSec") == ["6h"]
+        assert tri(s, "OnFailure") == [f"qc-dong-bo-loi@{ncc}.service"]
+        lan = int(tri(s, "StartLimitBurst")[0])
+        assert lan == 4 and tri(s, "StartLimitIntervalSec") == ["6h"]
+        # lần đầu + 3 lần chạy lại: 4 × 30 phút chờ + 3 × 10 phút nghỉ = 150 phút < 6 giờ.
+        assert 4 * 30 + 3 * 10 < 6 * 60
+        assert s.index("OnFailure=") < s.index("[Service]")       # thuộc [Unit]
+    loi = (GOC / "deploy" / "lang-nghe" / "qc-dong-bo-loi@.service").read_text(encoding="utf-8")
+    assert "-m dashboard.nghe_qc %i --bao-loi-dong-bo" in loi and "User=lang_nghe_web" in loi
+    ghi = []
+
+    class KhoGia:
+        def ghi_trang_thai(self, *a, **k):
+            ghi.append((a, k))
+    NQ.bao_loi_dong_bo("meta_ads", KhoGia())
+    (tt, ly, ncc), k = ghi[0]
+    assert tt == "loi" and ncc == "meta_ads" and "meta-ads-dong-bo" in ly and k["con_token"]
 
 
 # ───────────────────────────── chỉ đọc nền tảng + không token + quyền tối thiểu ─────────────────────────────
@@ -882,3 +911,115 @@ def test_sql_kho_tuc_thi_tham_so_hoa_tran_nguyen_tu(monkeypatch):
     assert "OR loai <> 'quang_cao'" in c.lenh[1][0]                # L3: dòng bài/kênh/quét kẹt
     with pytest.raises(ValueError):
         KT.tao("xoa_quang_cao", XEM)
+
+
+# ───────────────────────────── soát lại 20/10/2026 (N1, L-a…L-e) ─────────────────────────────
+def test_n1_lo_gop_hai_yeu_cau_moi_dong_dung_so_cua_minh(monkeypatch, h):
+    """N1: hai yêu cầu gộp một lượt; tài khoản của B là đúng tài khoản hỏng → B "chưa", A "đủ"
+    — không bao giờ "đủ 10/3"."""
+    moi = "7999999999999999999"
+    h.kho_qc.tk[moi] = {**h.kho_qc.tk[HAPAS_KOC], "advertiser_id": moi, "ten": "HAPAS - MỚI"}
+    goc = h.tdv.dong_bo_tai_khoan
+
+    def hong_moi(ids, tu, den):
+        kq = goc([i for i in ids if i != moi], tu, den)
+        return {**kq, "tk_hong": {**kq["tk_hong"], moi: "lỗi TikTok"}, "so_tk_yeu_cau": len(ids),
+                "loi": "lỗi TikTok"}
+    monkeypatch.setattr(h.tdv, "dong_bo_tai_khoan", hong_moi)
+    a = _yc(h, tk=(HAPAS_KOC,))
+    b = _yc(h, tk=(moi,))
+    NQ.xu_ly_cho("tiktok_ads", h.tdv, h.kho_tt, log=lambda *x: None)
+    ra, rb = h.kho_tt.doc([a["id"]])[0], h.kho_tt.doc([b["id"]])[0]
+    assert ra["trang_thai"] == "xong" and ra["so_tk_ok"] == 1 and ra["chi_tiet"]["tk_doc"] == [
+        HAPAS_KOC]
+    assert rb["trang_thai"] == "loi" and rb["so_tk_ok"] == 0
+    assert rb["chi_tiet"]["tk_hong"] == {moi: "lỗi TikTok"}
+    q = {"la_quan_tri": True}
+    assert TT.do_moi_ncc(ra, [HAPAS_KOC], None, q)["muc"] == "du"
+    x = TT.do_moi_ncc(rb, [moi], None, q)
+    assert x["muc"] == "chua" and "lỗi TikTok" in x["cau"]
+    # Dòng dùng lại của người khác: chỉ tính tài khoản CỦA người hỏi.
+    assert TT.do_moi_ncc({**ra, "tai_khoan": [HAPAS_KOC, moi]}, [moi], None, q)["muc"] == "chua"
+    # Đọc được nhiều hơn số xin (dòng cũ hỏng số) → không bao giờ báo "đủ".
+    vo_ly = {**ra, "chi_tiet": {}, "tai_khoan": [HAPAS_KOC], "so_tk_ok": 10}
+    assert TT.do_moi_ncc(vo_ly, [HAPAS_KOC], None, q)["muc"] == "chua"
+    # Dòng xong mà tài khoản của người hỏi hỏng → không dùng lại, xin lượt mới.
+    assert TT._dung_lai([{**ra, "tai_khoan": [HAPAS_KOC, moi]}], {moi}, NGAY, NGAY) is None
+    assert TT._dung_lai([ra], {HAPAS_KOC}, NGAY, NGAY)["id"] == a["id"]
+
+
+def test_la_khung_dong_bo_giu_ca_co_day_du(h):
+    luc = datetime.datetime(2026, 10, 19, 6, 50, tzinfo=VN)
+    h.tdv._bay_gio = lambda: luc
+    h.kho_qc.yeu_cau_dong_bo(QL, KQ.NCC, kieu="day_du")
+    assert TA.main(["dong-bo", "--khong-bq", "--chi-khi-yeu-cau"], dich_vu=h.tdv) == 0
+    k = h.kho_qc.doc_ket_noi(KQ.NCC)
+    assert k["yeu_cau_dong_bo_luc"] and k["yeu_cau_kieu"] == "day_du"   # cờ đợi sau 07:30
+
+
+def test_lb_day_bigquery_sau_luot_bo_nghe_gian_10_phut(monkeypatch):
+    class BQ:
+        n = 0
+
+        def da_bat(self):
+            return True
+
+        def chay(self):
+            BQ.n += 1
+    gio = {"t": 1000.0}
+    monkeypatch.setitem(NQ._BQ, "luc", float("-inf"))
+    for _ in range(3):
+        NQ.day_bq({"so_dong": 5}, dong_bo_bq=BQ(), dong_ho=lambda: gio["t"])
+        gio["t"] += 60
+    assert BQ.n == 1                                             # giãn 10 phút
+    gio["t"] += NQ.BQ_GIAN_GIAY
+    assert NQ.day_bq({"so_dong": 5}, dong_bo_bq=BQ(), dong_ho=lambda: gio["t"]) and BQ.n == 2
+    assert not NQ.day_bq({"so_dong": 0}, dong_bo_bq=BQ(), dong_ho=lambda: gio["t"] + 9999)
+
+
+def test_lc_bo_chat_cu_nhat_va_ky_moi_lam_ma_cu_het_han(monkeypatch, h):
+    monkeypatch.setattr(dong_ho_luot, "STT_TOI_DA", 3)
+    monkeypatch.setattr(dong_ho_luot, "_STT_CHAT", {})
+    for c in ("c1", "c2", "c3"):
+        dong_ho_luot.bat_dau(c)
+    dong_ho_luot.bat_dau("c1")                     # c1 thành mới nhất
+    dong_ho_luot.bat_dau("c4")                     # bỏ c2 (cũ nhất), không xoá cả bảng
+    assert list(dong_ho_luot._STT_CHAT) == ["c3", "c1", "c4"]
+    assert dong_ho_luot._STT_CHAT["c1"][1] == 2
+    # Mã của kỳ cũ: chat bị bỏ rồi quay lại (số thứ tự lại từ 1) không khớp được.
+    _kenh_gia(monkeypatch)
+    base = {"loai": "kenh", "kenh": ["@hapas.official"]}
+    dong_ho_luot.bat_dau("c3")
+    ma = _hoi(monkeypatch, h, XEM, {**base, "chi_uoc_tinh": True})["ma_xac_nhan"]
+    dong_ho_luot._STT_CHAT.pop("c3")               # bị bỏ / tiến trình làm mới
+    dong_ho_luot.bat_dau("c3")
+    with pytest.raises(HD.TuChoi, match="hết hạn"):
+        _hoi(monkeypatch, h, XEM, {**base, "ma_xac_nhan": ma})
+    assert ":" in dong_ho_luot.stt_luot()[1]       # kỳ = mã tiến trình + mã chat
+
+
+def test_le_tai_khoan_mui_gio_sau_vn_noi_ly_do(monkeypatch, h):
+    """L-e: 06:30 ngày 20 giờ VN = 16:30 ngày 19 ở Los Angeles — "hôm nay" giờ VN ở đó chưa bắt đầu
+    → không đọc, nói lý do; tài khoản giờ VN vẫn đọc."""
+    h.kho_qc.tk[HAPAS_KOC]["mui_gio"] = "America/Los_Angeles"
+    luc = datetime.datetime(2026, 10, 20, 9, 0, tzinfo=VN)
+    h.tdv._bay_gio = lambda: luc
+    kq = h.tdv.dong_bo_tai_khoan([HAPAS_KOC], datetime.date(2026, 10, 20),
+                                 datetime.date(2026, 10, 20))
+    assert kq["so_tk"] == 0 and "America/Los_Angeles" in kq["tk_hong"][HAPAS_KOC]
+    assert "chưa bắt" in kq["tk_hong"][HAPAS_KOC]
+    _yc(h)
+    h.kho_tt.rows[-1].update(tu=datetime.date(2026, 10, 20), den=datetime.date(2026, 10, 20))
+    NQ.xu_ly_cho("tiktok_ads", h.tdv, h.kho_tt, log=lambda *x: None)
+    r = h.kho_tt.rows[-1]
+    assert r["trang_thai"] == "bo_qua" or r["trang_thai"] == "loi"
+    x = TT.do_moi_ncc(r, [HAPAS_KOC], None, {"ben": {"hapas": "xem"}})   # không phải quản trị
+    assert "múi giờ America/Los_Angeles" in x["cau"]                  # lý do công khai vẫn hiện
+
+
+def test_ld_quyen_yeu_cau_tuc_thi_trong_mot_giao_dich():
+    sql = (GOC / "deploy" / "lang-nghe" / "schema.sql").read_text(encoding="utf-8")
+    a, b = sql.index("BEGIN;\nREVOKE INSERT, UPDATE ON yeu_cau_tuc_thi FROM mark;"), \
+        sql.index("GRANT SELECT, UPDATE ON yeu_cau_tuc_thi TO lang_nghe_web;\nCOMMIT;")
+    khoi = sql[a:b]
+    assert "REVOKE INSERT ON nhat_ky FROM mark;" in khoi and "GRANT INSERT (" in khoi
