@@ -527,6 +527,14 @@ def gop_duong(giu: dict, bo: dict) -> None:
     if a:
         b = duong_hashtag(bo)
         giu["_tag_feed"] = " ".join(dict.fromkeys(f"{a} {b}".split())) if b else ""
+    # Cờ TikTok (21/10/2026): gộp như kho (`lang_nghe_db._GOP_CO`) — bản feed (None) không làm mất
+    # TRUE / FALSE của bản tìm kiếm / hồ sơ.
+    for k in K._COT_TT:
+        x, y = giu.get(k), bo.get(k)
+        if x is True or y is True:
+            giu[k] = True
+        elif x is None and isinstance(y, bool):
+            giu[k] = y
 
 
 def tach_da_biet(ma: str, hits: list[tuple], khoa_cua) -> tuple[list[dict], list[tuple], dict]:

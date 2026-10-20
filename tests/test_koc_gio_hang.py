@@ -143,6 +143,7 @@ def kho(monkeypatch):
         k = Kho(**kw)
         monkeypatch.setattr(K, "ket_noi", lambda: k)
         monkeypatch.setattr(K, "_CO_COT", set())
+        monkeypatch.setattr(K, "_KHONG_CO", {})
         return k
     return tao
 
@@ -369,6 +370,7 @@ def test_trang_co_khoi_va_o_loc():
 def test_api_va_kho_doc_cot(monkeypatch):
     from dashboard import kho as KD
     monkeypatch.setattr(KD, "_CO_CO_TT", [])
+    monkeypatch.setattr(KD, "_KHONG_CO_TT", [])
 
     class C:
         def __init__(self, n):
@@ -380,6 +382,7 @@ def test_api_va_kho_doc_cot(monkeypatch):
         def fetchone(self):
             return {"n": self.n}
     assert "NULL::boolean AS gio_hang" in KD._cot_co_tiktok(C(0))      # DB chưa chạy schema
+    KD._KHONG_CO_TT.clear()                     # (bình thường: hỏi lại sau `_KHONG_CO_GIAY`)
     assert KD._cot_co_tiktok(C(2)) == ", b.gio_hang, b.la_quang_cao" and KD._CO_CO_TT
 
 
@@ -398,3 +401,69 @@ def test_hoi_dashboard_tra_phan_koc():
     assert any(b.get("loai_koc") == CS.KOC["affiliate"] for b in ra["bai"]["top"])
     assert "koc" in HD.PHAN and "koc" in HD._PHAN_SO_LIEU
     assert "koc: affiliate,branding,chua_ro" in json.dumps(HD.SCHEMA, ensure_ascii=False)
+
+
+# ───────────────────────────── soát 21/10/2026: cờ theo loại phản hồi ─────────────────────────────
+@pytest.mark.parametrize("nguon,anchors,ky_vong", [
+    (TT.FEED, SHOP, True), (TT.FEED, KHAC, None), (TT.FEED, None, None), (TT.FEED, "khong", None),
+    (TT.DAY_DU, SHOP, True), (TT.DAY_DU, KHAC, False), (TT.DAY_DU, None, False),
+    (TT.DAY_DU, "khong", False),
+    (TT.CHI_TIET, SHOP, True), (TT.CHI_TIET, KHAC, False), (TT.CHI_TIET, None, None)])
+def test_co_gio_theo_loai_phan_hoi(nguon, anchors, ky_vong):
+    assert TT.video(_aweme("7201000001", anchors), nguon)["hasTikTokShopProduct"] is ky_vong
+
+
+def test_nap_raw_feed_khong_bao_gio_ra_false(tmp_path):
+    import lang_nghe_nap_raw as N
+    dong = [{"loai": "challengePosts", "tag": "hapas", "item": {"aweme_list": [
+                _aweme("7301000001", KHAC), _aweme("7301000002", SHOP)]}},
+            {"loai": "searchPosts", "item": {"search_item_list": [
+                {"aweme_info": _aweme("7301000003", None)}]}},
+            {"loai": "userPosts", "item": {"aweme_list": [_aweme("7301000004")]}}]
+    f = tmp_path / "raw_tt_x.jsonl"
+    f.write_text("\n".join(json.dumps(x) for x in dong), encoding="utf-8")
+    tim, ho_so = N._tiktok(f)
+    co = {d["link"].rsplit("/", 1)[-1]: d["gio_hang"] for d, _ in tim + ho_so}
+    assert co == {"7301000001": None, "7301000002": True, "7301000003": False,
+                  "7301000004": False}
+
+
+def test_clockworks_hashtag_chi_tin_true():
+    ra = A.chi_tin_gio_true([{"hasTikTokShopProduct": False}, {"hasTikTokShopProduct": True},
+                             {}])
+    assert [x["hasTikTokShopProduct"] for x in ra] == [None, True, None]
+
+
+@pytest.mark.parametrize("giu,bo,ky_vong", [(None, False, False), (False, True, True),
+                                            (True, None, True), (False, None, False),
+                                            (None, None, None)])
+def test_gop_duong_gop_co(giu, bo, ky_vong):
+    a = {"platform": "tiktok", "gio_hang": giu}
+    TDA.gop_duong(a, {"platform": "tiktok", "gio_hang": bo})
+    assert a.get("gio_hang") is ky_vong
+
+
+def test_nho_cau_tra_loi_chua_co_cot(kho, monkeypatch):
+    k = kho(co_cot=False)
+    gio = [1000.0]
+    monkeypatch.setattr(K.time, "monotonic", lambda: gio[0])
+    monkeypatch.setattr(K, "_KHONG_CO", {})
+    assert not K._co_cot(k, "gio_hang") and not K._co_cot(k, "gio_hang")
+    assert sum("information_schema" in s for s, _ in k.cau) == 1
+    gio[0] += K._KHONG_CO_GIAY + 1
+    k.co_cot = True
+    assert K._co_cot(k, "gio_hang")
+    from dashboard import kho as KD
+    monkeypatch.setattr(KD, "_CO_CO_TT", [])
+    monkeypatch.setattr(KD, "_KHONG_CO_TT", [])
+    monkeypatch.setattr(KD.time, "monotonic", lambda: gio[0])
+    hoi = []
+
+    class C:
+        def execute(self, sql, ts=()):
+            hoi.append(sql)
+            return self
+
+        def fetchone(self):
+            return {"n": 0}
+    assert not KD._co_co_tiktok(C()) and not KD._co_co_tiktok(C()) and len(hoi) == 1

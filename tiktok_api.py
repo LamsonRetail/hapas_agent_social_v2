@@ -177,18 +177,34 @@ def _tac_gia(au: dict) -> dict:
                              or au.get("enterprise_verify_reason"))}
 
 
-def _gio_hang(a: dict) -> bool | None:
+#: Loại phản hồi chứa `aweme` (21/10/2026, soát 65 tệp raw scraptik) — cờ giỏ đọc khác nhau:
+#:   DAY_DU  searchPosts `aweme_info`, userPosts `aweme_list`: tự nhất quán; `anchors` null / thiếu
+#:           = KHÔNG giỏ (26 video null ở tìm kiếm đọc lại ở hồ sơ: 0 có giỏ).
+#:   FEED    challengePosts (feed hashtag): KHÔNG BAO GIỜ trả anchor shop (0 TRUE / 354 FALSE /
+#:           1.300 null; 21/53 "không giỏ" của feed trái với tìm kiếm / hồ sơ báo có giỏ) → chỉ
+#:           tin TRUE, còn lại None.
+#:   CHI_TIET post `aweme_detail`: chưa đo đủ — thiếu `anchors` thì None (như trước).
+DAY_DU, FEED, CHI_TIET = "day_du", "feed", "chi_tiet"
+
+
+def _gio_hang(a: dict, nguon: str = CHI_TIET) -> bool | None:
     """Cờ giỏ TikTok Shop: anchor "anchor_complex_shop"/"anchor_shop" (đo 16/10: 25/30 bài tìm
-    "hapas" có). Thiếu hẳn trường `anchors` thì None — không đoán thành "viral"."""
+    "hapas" có). `nguon` = loại phản hồi (`DAY_DU` / `FEED` / `CHI_TIET`) — không đoán."""
     an = a.get("anchors")
-    if not isinstance(an, list):
+    co = isinstance(an, list) and any(
+        "shop" in str((x or {}).get("component_key") or "") for x in an if isinstance(x, dict))
+    if co:
+        return True
+    if nguon == FEED:
         return None
-    return any("shop" in str((x or {}).get("component_key") or "") for x in an
-               if isinstance(x, dict))
+    if nguon == DAY_DU:
+        return False
+    return False if isinstance(an, list) else None
 
 
-def video(a: dict) -> dict:
-    """`aweme_info`/`aweme_detail` của API → item kiểu clockworks (hashtag/profile scraper)."""
+def video(a: dict, nguon: str = CHI_TIET) -> dict:
+    """`aweme_info`/`aweme_detail` của API → item kiểu clockworks (hashtag/profile scraper).
+    `nguon`: loại phản hồi cho cờ giỏ (`_gio_hang`) — bên gọi nói rõ, không đoán."""
     au = a.get("author") or {}
     st = a.get("statistics") or {}
     ten = str(au.get("unique_id") or "")
@@ -203,7 +219,7 @@ def video(a: dict) -> dict:
                      if isinstance(t, dict) and t.get("hashtag_name")],
         "webVideoUrl": f"https://www.tiktok.com/@{ten}/video/{vid}" if ten and vid else "",
         "textLanguage": a.get("desc_language"), "region": a.get("region"),
-        "hasTikTokShopProduct": _gio_hang(a),
+        "hasTikTokShopProduct": _gio_hang(a, nguon),
         # Thiếu hẳn `is_ads` thì None (20/10/2026, `bai.la_quang_cao`) — không đoán thành False.
         "isAd": bool(a["is_ads"]) if a.get("is_ads") is not None else None,
         "isPinned": bool(a.get("is_top")),
@@ -318,7 +334,7 @@ def _tim_mot(kw: str, per: int, moc: int, vung: str, d_from, ngan: _Ngan,
             a = (x or {}).get("aweme_info") if isinstance(x, dict) else None
             if not isinstance(a, dict) or not a.get("aweme_id"):
                 continue
-            v = video(a)
+            v = video(a, DAY_DU)
             if v["id"] in thay:
                 continue
             thay.add(v["id"])
@@ -395,7 +411,7 @@ def _ho_so_mot(ten: str, n: int, ngan: _Ngan, loi_ra: list | None = None) -> lis
             break
         for a in it.get("aweme_list") or []:
             if isinstance(a, dict) and a.get("aweme_id") and not a.get("is_top"):
-                v = video(a)
+                v = video(a, DAY_DU)
                 v.update(authorMeta=am, input=ten)
                 bai.append(v)
         con_tro = str(it.get("max_cursor") or "")
@@ -581,7 +597,7 @@ def so_lieu_bai(urls: list[str], tran_usd: float | None = None) -> list[dict]:
                 raise
             return []
         a = (it or {}).get("aweme_detail")
-        return [video(a)] if isinstance(a, dict) and a.get("aweme_id") else []
+        return [video(a, CHI_TIET)] if isinstance(a, dict) and a.get("aweme_id") else []
     return [x for ds in _song_song(mot, list(dict.fromkeys(urls))) for x in ds]
 
 
@@ -646,7 +662,7 @@ def bai_hashtag(cid: str, so_trang: int, ngan: _Ngan) -> list[dict]:
         for a in it.get("aweme_list") or []:
             if isinstance(a, dict) and a.get("aweme_id") and str(a["aweme_id"]) not in thay:
                 thay.add(str(a["aweme_id"]))
-                ra.append(video(a))
+                ra.append(video(a, FEED))
                 moi += 1
         sau = _so(it.get("cursor")) or 0
         if not it.get("has_more") or not moi or sau <= con_tro:
@@ -682,7 +698,7 @@ def bai_tai_khoan(ten: str, so_trang: int, ngan: _Ngan, uid: str | None = None,
         cu = False
         for a in it.get("aweme_list") or []:
             if isinstance(a, dict) and a.get("aweme_id") and not a.get("is_top"):
-                v = video(a)
+                v = video(a, DAY_DU)
                 ra.append(v)
                 dt = A._to_vn(v["createTimeISO"])
                 cu = cu or bool(d_from and dt and dt < d_from)
@@ -747,7 +763,7 @@ def tim_moi_nhat(viec: list[tuple[str, datetime.datetime | None]], so_trang: int
             if not isinstance(a, dict) or not a.get("aweme_id"):
                 continue
             try:
-                v = video(a)
+                v = video(a, DAY_DU)
                 dt = A._to_vn(v["createTimeISO"])
             except (KeyError, TypeError, ValueError, AttributeError):
                 continue                     # một bài hỏng shape không làm mất cả trang đã trả

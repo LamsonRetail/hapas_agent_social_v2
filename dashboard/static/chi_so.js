@@ -2728,7 +2728,7 @@
   // ─── thanh lọc chung: các trường (ô chọn nhiều giá trị, có số đếm) ───
   // Một câu cho ⓘ của ô lọc + khối KOC (20/10/2026, task t284905).
   var GOI_Y_KOC = "Theo từng video, chỉ TikTok ngoài Internal channel. KOC affiliate = video gắn giỏ TikTok Shop; " +
-    "KOC branding = video không gắn giỏ; Chưa rõ = nguồn không báo giỏ (feed hashtag, bài cũ chưa bù) — không đoán. " +
+    "KOC branding = video không gắn giỏ; Chưa rõ = video chỉ thấy ở feed hashtag (feed không báo giỏ) hoặc bài cũ chưa bù — không đoán. " +
     "Chọn thì bài nền tảng khác không khớp; bình luận theo bài.";
   var TRUONG_G = [
     { k: "nen_tang", ten: "Nền tảng" }, { k: "loai", ten: "Loại nguồn" }, { k: "nguon", ten: "Nguồn", tim: true },

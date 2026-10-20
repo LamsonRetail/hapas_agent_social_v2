@@ -101,8 +101,8 @@ def la_kenh_nha(r: dict) -> bool:
 # giỏ — `bai.gio_hang`), trừ Internal channel (video của chính brand không phải KOC). KHÔNG đặt
 # ngưỡng follower: tiêu chí marketing chỉ là giỏ hàng, và bài tìm theo từ khoá (phần lớn video
 # TikTok) không có loại nguồn — muốn chỉ KOC lớn thì kết hợp ô "Ảnh hưởng". Độc lập với loại
-# nguồn `kol` (nguồn KOL/KOC đang theo dõi): hai chiều AND với nhau. NULL = nguồn không báo giỏ
-# (feed hashtag, bài cũ chưa bù) → "Chưa rõ", không bao giờ đoán thành branding.
+# nguồn `kol` (nguồn KOL/KOC đang theo dõi): hai chiều AND với nhau. NULL = chưa rõ (video
+# chỉ thấy ở feed hashtag — feed không báo giỏ —, bài cũ chưa bù) → "Chưa rõ", không đoán branding.
 KOC = {"affiliate": "KOC affiliate · gắn giỏ", "branding": "KOC branding · không giỏ",
        "chua_ro": "Chưa rõ giỏ hàng"}
 
@@ -233,7 +233,7 @@ BO_LOC_NHANH = (
      "loc": {"koc": "affiliate"}},
     {"ma": "koc_brand", "ten": "KOC branding (không giỏ)",
      "mo_ta": "Video TikTok External channel không gắn giỏ hàng — theo từng video; chưa rõ "
-              "giỏ (nguồn không báo) không tính.",
+              "giỏ (chỉ thấy ở feed hashtag) không tính.",
      "loc": {"koc": "branding"}},
     {"ma": "khung_hoang", "ten": "Cảnh báo khủng hoảng",
      "mo_ta": "Tiêu cực trên bài có từ 1.000 tương tác — thứ lan nhanh nhất, kể cả trên Internal channel.",

@@ -78,7 +78,7 @@ công cụ từ chối — chuyển NGUYÊN lời từ chối (có hướng dẫ
   - báo chí, diễn đàn → `web`; kênh nhà so với bên ngoài → `nha_ngoai`
   - "bao nhiêu video KOC affiliate / KOC branding", "video gắn giỏ" → `koc`. Đó là TỪNG
     video TikTok ngoài Internal channel theo giỏ TikTok Shop; nói luôn số "chưa rõ giỏ"
-    (nguồn không báo) — không gộp phần chưa rõ vào branding
+    (video chỉ thấy ở feed hashtag / nguồn không báo giỏ) — không gộp phần chưa rõ vào branding
   - "có khủng hoảng không", "có gì đáng lo" → `khung_hoang` + `sac_thai`
   - tiền quét, ngân sách, các lượt quét → `chi_phi`; lịch quét tự động → `lich`
   - thu thập có sót không → `do_phu`

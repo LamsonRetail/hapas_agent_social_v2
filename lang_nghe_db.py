@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import os
+import time
 
 _TZ = "Asia/Ho_Chi_Minh"
 #: Lượt `theo_doi` còn `dang_chay` quá chừng này coi như bỏ dở (bot tắt giữa chừng).
@@ -321,6 +322,10 @@ def _co_ma_so_fb(c) -> bool:
 #: mang giá trị bool VÀ DB đã có cột (`_co_cot`) — bản code lên VPS trước schema.sql vẫn ghi bài.
 _COT_TT = ("gio_hang", "la_quang_cao")
 _CO_COT: set[str] = set()
+#: Câu trả lời "chưa có cột" nhớ `_KHONG_CO_GIAY` giây (soát 21/10/2026): không hỏi information_schema
+#: mỗi dòng trước khi chạy schema.sql, mà chạy xong schema thì vài phút sau tự ghi cột.
+_KHONG_CO: dict[str, float] = {}
+_KHONG_CO_GIAY = 300.0
 #: Gộp cờ cũ {cu} với cờ mới {moi}: TRUE dính (đo raw 18/10/2026: 21 video feed hashtag báo "không
 #: giỏ" mà bản đọc tìm kiếm / hồ sơ cùng video báo có giỏ — feed hay thiếu anchor), FALSE chỉ điền
 #: chỗ NULL, NULL không bao giờ đè giá trị đã biết. Bảng: (N,F)→F (N,T)→T (F,T)→T (T,F)→T (F,N)→F.
@@ -339,11 +344,15 @@ def _co_cot(c, ten: str) -> bool:
     """DB đã chạy bản schema có cột `bai.<ten>` chưa (như `_co_ma_so_fb`); có rồi thì nhớ."""
     if ten in _CO_COT:
         return True
+    if time.monotonic() - _KHONG_CO.get(ten, float("-inf")) < _KHONG_CO_GIAY:
+        return False
     x = c.execute("SELECT 1 AS co FROM information_schema.columns WHERE table_schema = "
                   "current_schema() AND table_name = 'bai' AND column_name = %s", (ten,)
                   ).fetchone()
     if x:
         _CO_COT.add(ten)
+    else:
+        _KHONG_CO[ten] = time.monotonic()
     return bool(x)
 
 

@@ -675,8 +675,8 @@ def rut_gon(d: dict, phan: list[str], top: int) -> dict:
                 "thao_luan_pt", "xem_pt", "tuong_tac_pt")},
                       "sac_thai_video": g["sac_bai"]} for g in x["nhom"]],
             "quy_tac": "Theo TỪNG video, chỉ TikTok ngoài Internal channel: KOC affiliate = video "
-                       "gắn giỏ TikTok Shop, KOC branding = video không gắn giỏ, chưa rõ = nguồn "
-                       "không báo giỏ (không đoán). `bai` = số video, `nguoi` = số nhà sáng tạo, "
+                       "gắn giỏ TikTok Shop, KOC branding = video không gắn giỏ, chưa rõ = video "
+                       "chỉ thấy ở feed hashtag / nguồn không báo giỏ (không đoán). `bai` = số video, `nguoi` = số nhà sáng tạo, "
                        "`quang_cao` = video TikTok đánh dấu quảng cáo; % trên tổng ba nhóm. Số "
                        "theo mọi bộ lọc khác (trừ chính bo_loc.koc). Lọc: bo_loc.koc."}
     if "khung_hoang" in phan:

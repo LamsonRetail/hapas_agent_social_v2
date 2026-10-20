@@ -2579,7 +2579,14 @@ def _fetch_tiktok_fallback(q: list[str], limit: int,
     except Exception as e:  # noqa: BLE001
         print(f"[social_listen] tiktok fallback lỗi: {_che_token(e)}")
         return []
-    return _chuan_clockworks(raw)
+    return _chuan_clockworks(chi_tin_gio_true(raw))
+
+
+def chi_tin_gio_true(items: list) -> list:
+    """Feed hashtag (clockworks tiktok-hashtag-scraper; 21/10/2026): "không giỏ" CHƯA đo được độ
+    tin (feed hashtag scraptik không bao giờ trả anchor shop) → chỉ giữ TRUE, còn lại None."""
+    return [{**it, "hasTikTokShopProduct": True if it.get("hasTikTokShopProduct") is True
+             else None} if isinstance(it, dict) else it for it in items]
 
 
 def _chuan_tiktok(raw: list) -> list[tuple]:

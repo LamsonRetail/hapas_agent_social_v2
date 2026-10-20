@@ -300,6 +300,35 @@ sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=
   Tắt hẳn phía Mark: `MARK_TUC_THI=0` trong `/opt/mark/app/.env` rồi `mark restart` (tool trả lời
   "đang tắt"; chưa có công tắc console riêng cho `lay_so_tuc_thi`).
 
+## 11. KOC affiliate (gắn giỏ) vs KOC branding (20–21/10/2026, task Lark t284905, PA1)
+
+Cờ giỏ TikTok Shop theo từng video vào `bai.gio_hang` (+ `bai.la_quang_cao` = is_ads). TRUE = KOC
+affiliate, FALSE = KOC branding, NULL = chưa rõ. Cờ theo loại phản hồi (`tiktok_api.DAY_DU` /
+`FEED` / `CHI_TIET`): tìm kiếm / hồ sơ không có anchor shop = FALSE; feed hashtag chỉ tin TRUE
+(không bao giờ trả anchor shop); `post` thiếu anchors = NULL. Ghi kho: TRUE dính, FALSE chỉ điền
+chỗ NULL, NULL không đè.
+
+**Thứ tự — BigQuery TRƯỚC** (đồng bộ `bai` đi theo mốc `cap_nhat_cuoi`; dòng đẩy lên lúc BigQuery
+chưa có cột thì lần sau không đẩy lại, nên không để dòng có cờ đồng bộ trước khi BigQuery có cột):
+
+1. Sao lưu DB (mục Vận hành).
+2. BigQuery: chạy khối cuối `bigquery.sql` (`ALTER TABLE … SOCIAL_LISTENING.bai ADD COLUMN IF NOT
+   EXISTS gio_hang, la_quang_cao`). Postgres chưa có cột thì `dong_bo_bq` tự bỏ hai cột (cảnh báo).
+3. Postgres: `schema.sql` (mục 1) — thêm hai cột NULL được, chỉ đổi danh mục.
+4. Lên code (merge `main`, agent-deploy) → `mark restart`, khởi động lại dashboard. Bản code lên
+   trước schema vẫn chạy (hỏi `information_schema`, nhớ "chưa có cột" 5 phút).
+5. Bù bài cũ từ raw đã trả tiền (0 USD), chạy thử rồi ghi:
+   ```bash
+   sudo -u mark $PY scripts/lang_nghe_nap_gio_hang.py hapas /opt/mark/raw-kompa-1810
+   sudo -u mark $PY scripts/lang_nghe_nap_gio_hang.py hapas /opt/mark/raw-kompa-1810 --ghi        --sao-luu /opt/mark/gio-hang-$(date +%F).jsonl
+   ```
+   Raw kompa + vòng 2–3 (172 tệp, đo 21/10/2026): 3.660 video — giỏ 1.575, không giỏ 966, chưa rõ
+   1.119 (1.118 chỉ thấy ở feed hashtag).
+6. (Tuỳ chọn, TRẢ TIỀN) đọc lại bài còn NULL qua TikTok API: 0,002 USD/video, thử nhỏ trước —
+   `--goi-api --toi-da-usd 0.01 --ghi --sao-luu …` (5 video; phản hồi `post` có thể thiếu anchors).
+7. Kiểm: `select gio_hang, count(*) from bai where du_an = 'hapas' and nen_tang = 'tiktok' group
+   by 1`; dashboard trang Chỉ số → khối "KOC affiliate vs KOC branding", ô lọc "Loại KOC".
+
 ## Vận hành
 
 - **Sao lưu:**

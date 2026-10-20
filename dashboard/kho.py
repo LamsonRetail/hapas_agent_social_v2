@@ -25,6 +25,7 @@ import contextlib
 import datetime
 import json
 import os
+import time
 
 from dashboard import phan_quyen as PQ
 
@@ -343,16 +344,23 @@ def tu_choi_de_xuat(ai: str, did: int) -> None:
 #: chỉ đọc khi DB đã có cột (`_co_co_tiktok`); chưa có thì cùng tên, NULL ("chưa rõ") — bản
 #: dashboard lên trước schema.sql vẫn mở được trang. Có rồi thì nhớ.
 _CO_CO_TT: list[bool] = []
+#: Lần cuối DB trả "chưa có cột" (monotonic) — nhớ `_KHONG_CO_GIAY` giây, không hỏi mỗi lượt đọc.
+_KHONG_CO_TT: list[float] = []
+_KHONG_CO_GIAY = 300.0
 
 
 def _co_co_tiktok(c) -> bool:
     if _CO_CO_TT:
         return True
+    if _KHONG_CO_TT and time.monotonic() - _KHONG_CO_TT[-1] < _KHONG_CO_GIAY:
+        return False
     x = c.execute("SELECT count(*) AS n FROM information_schema.columns WHERE table_schema = "
                   "current_schema() AND table_name = 'bai' AND column_name IN "
                   "('gio_hang', 'la_quang_cao')").fetchone()
     if x and x.get("n") == 2:
         _CO_CO_TT.append(True)
+    else:
+        _KHONG_CO_TT[:] = [time.monotonic()]
     return bool(_CO_CO_TT)
 
 

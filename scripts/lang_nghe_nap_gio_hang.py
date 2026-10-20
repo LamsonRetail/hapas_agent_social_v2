@@ -12,9 +12,11 @@ Hai đường:
       clockworks / apidojo qua `_chuan_clockworks` / `_chuan_tiktok`. Actor TikTok khác (epctex,
       powerai…) không có bộ chuẩn hoá của Mark — bỏ qua, in tên. Khớp bài theo khoá
       (`theo_doi._khoa_bai`: "tiktok:<id video>"). Nhiều bản đọc của một video gộp như kho
-      (`lang_nghe_db._GOP_CO`): có bản báo giỏ là TRUE (feed hashtag hay thiếu anchor — đo raw
-      18/10: 21 video feed báo "không giỏ" mà tìm kiếm / hồ sơ báo có giỏ), FALSE chỉ khi không
-      bản nào báo TRUE, NULL khi không bản nào báo.
+      (`lang_nghe_db._GOP_CO`): có bản báo giỏ là TRUE, FALSE chỉ khi không bản nào báo TRUE,
+      NULL khi không bản nào báo. Cờ theo loại phản hồi (`tiktok_api.DAY_DU` / `FEED` /
+      `CHI_TIET`, soát 21/10/2026): tìm kiếm / hồ sơ không có anchor shop = FALSE (kể cả anchors
+      trống); feed hashtag (scraptik challengePosts, clockworks hashtag) chỉ tin TRUE — feed không
+      bao giờ trả anchor shop, 21/53 "không giỏ" của feed trái với tìm kiếm / hồ sơ.
   (b) TRẢ TIỀN — bài còn NULL sau (a): in số bài + ước tính (`tiktok_api.so_lieu_bai`, 1 yêu cầu
       / video = `tiktok_api.GIA_YEU_CAU` USD; API không nhận nhiều id một yêu cầu). CHỈ gọi khi
       có `--goi-api --toi-da-usd X`: trần = min(X, phần còn của tháng dự án, ngân sách Apify việc
@@ -26,12 +28,19 @@ Hai đường:
 
 An toàn:
   • Mặc định CHẠY THỬ: chỉ đọc kho, in số bài khớp, số sẽ đặt TRUE / FALSE, số còn NULL.
+  • Thứ tự triển khai: ALTER BigQuery (cuối `deploy/lang-nghe/bigquery.sql`) TRƯỚC schema.sql
+    và TRƯỚC script này — đồng bộ BigQuery đi theo mốc `cap_nhat_cuoi`: dòng đã đồng bộ khi
+    BigQuery chưa có cột sẽ không được đẩy lại (README §11).
   • `--ghi --sao-luu <tệp>`: ghi (một giao dịch) và lưu giá trị cũ từng bài vào tệp JSONL (hoàn
     tác: `UPDATE bai SET gio_hang = <cũ>, la_quang_cao = <cũ> …` theo tệp). Cờ chỉ được điền /
     nâng (`_GOP_CO`), không bao giờ hạ TRUE, không ghi đè bằng NULL; `cap_nhat_cuoi = now()` chỉ
     với bài có cờ đổi (BigQuery đồng bộ lại đúng các bài đó).
+  • Phạm vi sao lưu của đường trả tiền (`--goi-api`): tệp chỉ giữ giá trị CŨ của hai cờ cho bài
+    nhận được cờ; số liệu (xem / thích / bình luận / chia sẻ) đọc lại được cập nhật theo luật
+    thường của kho (`cap_nhat_so_lieu`, ảnh chụp `chi_so_ngay` hôm nay) và KHÔNG có trong tệp —
+    đó là số đọc thật mới hơn, không cần hoàn tác.
 
-VPS (user mark, cwd /opt/mark/app; chạy schema.sql + ALTER bigquery.sql trước):
+VPS (user mark, cwd /opt/mark/app; chạy ALTER bigquery.sql rồi schema.sql trước — README §11):
 
     cd /opt/mark/app
     PY=/opt/mark/hermes-agent/venv/bin/python
@@ -109,6 +118,8 @@ def doc_co_raw(duong: list[str]) -> dict:
                                      f"actor {actor or '?'} không có bộ chuẩn hoá của Mark"))
             continue
         items = [it for it in r.get("items") or [] if isinstance(it, dict) and not A._la_demo(it)]
+        if actor == A._ACTORS["tiktok_fallback"]:
+            items = A.chi_tin_gio_true(items)       # feed hashtag: chỉ tin TRUE
         rows = A._chuan_tiktok(A._chuan_clockworks(items) if kieu == "clockworks" else items)
         them(rows)
         ra["tep"].append((f.name, actor, len(rows)))

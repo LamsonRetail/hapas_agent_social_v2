@@ -223,7 +223,9 @@ def _tiktok(f: pathlib.Path) -> tuple[list, list]:
             continue
         aw = [a for a in aw if isinstance(a, dict) and a.get("aweme_id")
               and not (loai == "userPosts" and a.get("is_top"))]
-        rows = A._chuan_tiktok(A._chuan_clockworks([TT.video(a) for a in aw]))
+        # Cờ giỏ theo loại phản hồi (21/10/2026, `tiktok_api.DAY_DU` / `FEED` / `CHI_TIET`).
+        nguon = {"challengePosts": TT.FEED, "post": TT.CHI_TIET}.get(loai, TT.DAY_DU)
+        rows = A._chuan_tiktok(A._chuan_clockworks([TT.video(a, nguon) for a in aw]))
         if loai == "userPosts":
             for d, _ in rows:
                 d["_ho_so"] = True

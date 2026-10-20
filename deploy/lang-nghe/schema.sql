@@ -270,8 +270,8 @@ CREATE INDEX IF NOT EXISTS bai_ma_so_fb ON bai (du_an, ma_so_fb) WHERE ma_so_fb 
 -- Marketing: "đang bị lẫn KOC branding và KOC aff → tiêu chí: KOC branding không gắn giỏ hàng ><
 -- KOC aff có gắn giỏ". Cờ giỏ TikTok Shop đã có lúc cào (`tiktok_api._gio_hang`: anchor có
 -- "shop"; `hasTikTokShopProduct` của clockworks) nhưng trước đây mất khi ghi kho. Hai cột NULL
--- được (chỉ đổi danh mục, không ghi lại bảng). NULL = nguồn không báo — không bao giờ đoán thành
--- FALSE. Ghi: TRUE dính (bản đọc báo giỏ rồi thì bản đọc sau không hạ — feed hashtag hay thiếu
+-- được (chỉ đổi danh mục, không ghi lại bảng). NULL = chưa rõ (chỉ thấy ở feed hashtag — feed không
+-- bao giờ trả anchor shop — hoặc nguồn không báo); tìm kiếm / hồ sơ không có anchor shop = FALSE. Ghi: TRUE dính (bản đọc báo giỏ rồi thì bản đọc sau không hạ — feed hashtag hay thiếu
 -- anchor, đo raw 18/10: 21 video feed báo không giỏ mà tìm kiếm / hồ sơ báo có giỏ), FALSE chỉ
 -- điền chỗ NULL, NULL không đè gì (`lang_nghe_db._GOP_CO`). Quyền: GRANT cả bảng bai cho mark ở
 -- cuối file đã đủ (không có GRANT theo cột). Bài cũ: scripts/lang_nghe_nap_gio_hang.py.
@@ -1070,7 +1070,7 @@ COMMENT ON COLUMN bai.kieu_trang IS 'Loại trang của bài web. Giá trị: ba
 COMMENT ON COLUMN bai.muc_nhac IS 'Mức nhắc brand trong bài web. Giá trị: tieu_de (từ khoá ở tiêu đề), chinh (≥ 3 lần trong thân bài), thoang (nhắc lướt 1–2 lần, vd bài liệt kê nhiều brand). NULL với bài mạng xã hội.';
 COMMENT ON COLUMN bai.la_pr IS 'TRUE: bài web có dấu hiệu bài đặt/PR (thân bài dẫn link về miền của brand hoặc ghi "Ảnh/Nguồn: <brand>"). FALSE: không thấy dấu hiệu. NULL với bài mạng xã hội.';
 COMMENT ON COLUMN bai.ma_so_fb IS 'Id số ổn định của bài Facebook (5–25 chữ số): id bài actor trả (postId, post_id, post.id, feedbackId), không có thì bóc từ link (/posts/, /videos/, /reel/, /permalink/, story_fbid=). Dùng để nhận bản trùng: pfbid trong link và khoa đổi mỗi lượt cào (đo 17/10/2026). Không phải khoá (PK là du_an + khoa), không join bảng khác; không duy nhất (bản trùng cũ chưa gộp có thể cùng id). NULL với nền tảng khác, bài ghi trước 17/10/2026 chưa được quét lại (quét lại thì Mark điền), hoặc link pfbid mà actor không trả id.';
-COMMENT ON COLUMN bai.gio_hang IS 'Chỉ TikTok: TRUE = video gắn giỏ TikTok Shop (KOC affiliate trên dashboard), FALSE = không gắn giỏ (KOC branding), theo từng video. NULL = nguồn không báo (feed hashtag, actor không có trường) hoặc nền tảng khác — không phải FALSE. TRUE không bị lần đọc sau hạ; bài trước 20/10/2026 điền bằng scripts/lang_nghe_nap_gio_hang.py.';
+COMMENT ON COLUMN bai.gio_hang IS 'Chỉ TikTok: TRUE = video gắn giỏ TikTok Shop (KOC affiliate trên dashboard), FALSE = không gắn giỏ (KOC branding), theo từng video. Đọc từ tìm kiếm / hồ sơ TikTok (anchors không có shop, kể cả anchors trống = FALSE); feed hashtag chỉ báo được TRUE (không bao giờ trả anchor shop, đo 21/10/2026). NULL = chưa rõ: video chỉ thấy ở feed hashtag, nguồn không báo, hoặc nền tảng khác — không phải FALSE. TRUE không bị lần đọc sau hạ; bài trước 20/10/2026 điền bằng scripts/lang_nghe_nap_gio_hang.py.';
 COMMENT ON COLUMN bai.la_quang_cao IS 'Chỉ TikTok: TRUE = TikTok đánh dấu video là quảng cáo (is_ads / isAd), FALSE = không. NULL = nguồn không báo hoặc nền tảng khác. Không dùng để tách KOC (tiêu chí là gio_hang).';
 
 COMMENT ON TABLE binh_luan IS $$[Lớp] Raw
