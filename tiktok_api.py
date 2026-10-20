@@ -672,10 +672,14 @@ def bai_hashtag(cid: str, so_trang: int, ngan: _Ngan) -> list[dict]:
 
 
 def bai_tai_khoan(ten: str, so_trang: int, ngan: _Ngan, uid: str | None = None,
-                  d_from: datetime.datetime | None = None) -> tuple[list[dict], str | None]:
+                  d_from: datetime.datetime | None = None, can_tim: set[str] | None = None,
+                  ca_ghim: bool = False) -> tuple[list[dict], str | None]:
     """Bài MỚI NHẤT của một tài khoản (bỏ bài ghim), tối đa `so_trang` trang × 10 bài; dừng sớm
     khi trang đã có bài cũ hơn `d_from`. `uid` đã biết thì bỏ yêu cầu hồ sơ. -> (bài, uid).
-    Trang sau lỗi thì giữ các trang trước; trang đầu / hồ sơ lỗi thì ném."""
+    Trang sau lỗi thì giữ các trang trước; trang đầu / hồ sơ lỗi thì ném.
+    Đọc cờ giỏ theo hồ sơ (21/10/2026, `theo_doi_api.doc_ho_so_gio`): `can_tim` = id video cần
+    thấy — đủ thì dừng; `ca_ghim` = giữ cả video ghim (video cần tìm có thể đang ghim; video ghim
+    không tính vào điều kiện "cũ hơn `d_from`")."""
     if not uid:
         it = _goi({"profile_username": str(ten).lstrip("@"), "profile_region": "VN"}, ngan)
         uid = str(((it or {}).get("user") or {}).get("uid") or "") or None
@@ -697,13 +701,16 @@ def bai_tai_khoan(ten: str, so_trang: int, ngan: _Ngan, uid: str | None = None,
             break
         cu = False
         for a in it.get("aweme_list") or []:
-            if isinstance(a, dict) and a.get("aweme_id") and not a.get("is_top"):
+            if isinstance(a, dict) and a.get("aweme_id") and (ca_ghim or not a.get("is_top")):
                 v = video(a, DAY_DU)
                 ra.append(v)
+                if a.get("is_top"):
+                    continue
                 dt = A._to_vn(v["createTimeISO"])
                 cu = cu or bool(d_from and dt and dt < d_from)
         con_tro = str(it.get("max_cursor") or "")
-        if cu or not it.get("has_more") or not con_tro:
+        du = bool(can_tim) and can_tim <= {v["id"] for v in ra}
+        if du or cu or not it.get("has_more") or not con_tro:
             break
     return ra, uid
 

@@ -93,8 +93,9 @@ PHAN = {
                   "nước hoa, set quà…), bài nhiều nhất",
     "web": "Báo & Web: số bài, số miền, % PR, % nhắc ở tiêu đề, theo loại trang",
     "nha_ngoai": "Internal channel vs External channel",
-    "koc": "KOC affiliate (video TikTok gắn giỏ TikTok Shop) vs KOC branding (không giỏ) vs chưa "
-           "rõ giỏ: số video, nhà sáng tạo, thảo luận, lượt xem, tương tác, %, sắc thái video",
+    "koc": "KOC affiliate (video TikTok gắn giỏ TikTok Shop) vs KOC branding (không giỏ): số "
+           "video, nhà sáng tạo, thảo luận, lượt xem, tương tác, %, sắc thái video + số video "
+           "chưa đọc lại được giỏ",
     "khung_hoang": "tín hiệu khủng hoảng: bài tiêu cực ≥ 1.000 tương tác, tiêu cực tăng",
     "chi_phi": "ngân sách tháng: đã tiêu, dự báo, trần, các lượt quét gần nhất (chi phí, kết quả)",
     "lich": "lịch quét tự động: trạng thái, mốc kế, ≈ USD 30 ngày, kết quả lần gần nhất",
@@ -172,8 +173,8 @@ SCHEMA = {
                     " chu_de: nhãn chủ đề; nguon: khoá nguồn (lấy từ phần bo_loc/nguon); "
                     "anh_huong: nano,micro,macro,mega,khong_ro; tuong_tac: 100|1000|10000; q: chữ "
                     "tìm; kieu_quet: theo_doi|tu_khoa; kieu_trang: bao,dien_dan,blog,mxh_khac,"
-                    "khac; koc: affiliate,branding,chua_ro (video TikTok External channel theo "
-                    "giỏ TikTok Shop); y_dinh: \"1\" = chỉ bình luận hỏi mua, hoặc mã món = chỉ bình luận "
+                    "khac; koc: affiliate,branding (video TikTok External channel theo giỏ "
+                    "TikTok Shop); y_dinh: \"1\" = chỉ bình luận hỏi mua, hoặc mã món = chỉ bình luận "
                     "hỏi mua món đó (" + ", ".join(k for k in CS.Y_DINH if k != "1") + "); "
                     "gom_mg: \"1\" = mây từ gồm minigame."),
                 "additionalProperties": True,
@@ -674,10 +675,12 @@ def rut_gon(d: dict, phan: list[str], top: int) -> dict:
                 "bai", "nguoi", "thao_luan", "xem", "tuong_tac", "quang_cao", "bai_pt",
                 "thao_luan_pt", "xem_pt", "tuong_tac_pt")},
                       "sac_thai_video": g["sac_bai"]} for g in x["nhom"]],
+            "chua_doc_lai_duoc": x["chua_doc_lai"],
             "quy_tac": "Theo TỪNG video, chỉ TikTok ngoài Internal channel: KOC affiliate = video "
-                       "gắn giỏ TikTok Shop, KOC branding = video không gắn giỏ, chưa rõ = video "
-                       "chỉ thấy ở feed hashtag / nguồn không báo giỏ (không đoán). `bai` = số video, `nguoi` = số nhà sáng tạo, "
-                       "`quang_cao` = video TikTok đánh dấu quảng cáo; % trên tổng ba nhóm. Số "
+                       "gắn giỏ TikTok Shop, KOC branding = video không gắn giỏ; chỉ HAI nhóm. "
+                       "`chua_doc_lai_duoc` = video chỉ thấy ở feed hashtag mà hồ sơ nhà sáng tạo "
+                       "không đọc lại được (đã xoá / riêng tư / quá cũ) — nói riêng, không gộp. `bai` = số video, `nguoi` = số nhà sáng tạo, "
+                       "`quang_cao` = video TikTok đánh dấu quảng cáo; % trên tổng hai nhóm. Số "
                        "theo mọi bộ lọc khác (trừ chính bo_loc.koc). Lọc: bo_loc.koc."}
     if "khung_hoang" in phan:
         kh = d.get("_khung_hoang")

@@ -77,8 +77,8 @@ công cụ từ chối — chuyển NGUYÊN lời từ chối (có hướng dẫ
     chung là "hỏi mua túi"; "Chưa rõ món" là bình luận không nói tên món (vd "xin giá")
   - báo chí, diễn đàn → `web`; kênh nhà so với bên ngoài → `nha_ngoai`
   - "bao nhiêu video KOC affiliate / KOC branding", "video gắn giỏ" → `koc`. Đó là TỪNG
-    video TikTok ngoài Internal channel theo giỏ TikTok Shop; nói luôn số "chưa rõ giỏ"
-    (video chỉ thấy ở feed hashtag / nguồn không báo giỏ) — không gộp phần chưa rõ vào branding
+    video TikTok ngoài Internal channel theo giỏ TikTok Shop, chỉ HAI nhóm; số
+    `chua_doc_lai_duoc` (đã xoá / riêng tư / quá cũ) nói riêng nếu khác 0 — không gộp vào branding
   - "có khủng hoảng không", "có gì đáng lo" → `khung_hoang` + `sac_thai`
   - tiền quét, ngân sách, các lượt quét → `chi_phi`; lịch quét tự động → `lich`
   - thu thập có sót không → `do_phu`

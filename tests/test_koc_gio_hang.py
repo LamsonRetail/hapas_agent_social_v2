@@ -337,10 +337,12 @@ def test_khoi_kenh_nguon_va_dem_o_loc():
                          CS.doc_bo_loc({"koc": "branding"}))
     assert d["bo_loc_dem"]["koc"] == {"affiliate": 2, "branding": 1, "chua_ro": 1}
     x = d["loai_koc"]
-    assert x["tong"]["bai"] == 4             # bỏ kênh nhà + Facebook; bỏ chính chiều koc
+    # HAI nhóm (chủ dự án 20/10 tối); video NULL là dòng mờ `chua_doc_lai`, không phải thẻ
+    assert [g["ma"] for g in x["nhom"]] == ["affiliate", "branding"]
+    assert x["tong"]["bai"] == 3 and x["chua_doc_lai"] == 1    # bỏ kênh nhà + Facebook
     aff = next(g for g in x["nhom"] if g["ma"] == "affiliate")
     assert aff["bai"] == 2 and aff["nguoi"] == 2 and aff["quang_cao"] == 1
-    assert aff["bai_pt"] == 50.0 and aff["xem"] == 200 and aff["tuong_tac"] == 32
+    assert aff["bai_pt"] == 66.7 and aff["xem"] == 200 and aff["tuong_tac"] == 32
     br = next(g for g in x["nhom"] if g["ma"] == "branding")
     assert br["sac_bai"]["tieu_cuc"] == 1
     # chiều khác vẫn áp: lọc Facebook thì không còn video TikTok nào
@@ -360,9 +362,13 @@ def test_chip_nhanh_va_nhan_va_the_bai():
 def test_trang_co_khoi_va_o_loc():
     html = (GOC / "dashboard" / "templates" / "chi_so.html").read_text(encoding="utf-8")
     assert 'id="khoi-koc"' in html and 'id="loai-koc"' in html and "Theo từng video" in html
+    assert 'id="koc-chua"' in html and "tổng hai nhóm" in html
+    assert html.count("cs-khung-cho--nn", html.index('id="loai-koc"'),
+                      html.index('id="koc-chua"')) == 2
     js = (GOC / "dashboard" / "static" / "chi_so.js").read_text(encoding="utf-8")
     assert '"kieu_trang", "koc", "y_dinh"' in js and "function veKoc(" in js
     assert '{ k: "koc", ten: "Loại KOC"' in js and "veKoc(d)" in js
+    assert 'k === "koc" && gt === "chua_ro"' in js and "chưa đọc lại được giỏ" in js
     css = (GOC / "dashboard" / "static" / "chi_so.css").read_text(encoding="utf-8")
     assert ".cs-koc__luoi" in css
 
@@ -395,12 +401,13 @@ def test_hoi_dashboard_tra_phan_koc():
                        datetime.date(2026, 10, 14), CS.doc_bo_loc({}), datetime.date(2026, 10, 17))
     ra = HD.rut_gon(d, ["koc", "bo_loc", "bai"], 5)
     nhom = {g["ma"]: g for g in ra["koc"]["nhom"]}
+    assert set(nhom) == {"affiliate", "branding"}
     assert nhom["affiliate"]["bai"] == 1 and nhom["branding"]["bai"] == 1
-    assert nhom["chua_ro"]["bai"] == 1                    # tiktok:6 không có cờ
+    assert ra["koc"]["chua_doc_lai_duoc"] == 1            # tiktok:6 không có cờ
     assert "TỪNG video" in ra["koc"]["quy_tac"] and ra["bo_loc"]["koc"]["affiliate"] == 1
     assert any(b.get("loai_koc") == CS.KOC["affiliate"] for b in ra["bai"]["top"])
     assert "koc" in HD.PHAN and "koc" in HD._PHAN_SO_LIEU
-    assert "koc: affiliate,branding,chua_ro" in json.dumps(HD.SCHEMA, ensure_ascii=False)
+    assert "koc: affiliate,branding " in json.dumps(HD.SCHEMA, ensure_ascii=False)
 
 
 # ───────────────────────────── soát 21/10/2026: cờ theo loại phản hồi ─────────────────────────────
@@ -467,3 +474,161 @@ def test_nho_cau_tra_loi_chua_co_cot(kho, monkeypatch):
         def fetchone(self):
             return {"n": 0}
     assert not KD._co_co_tiktok(C()) and not KD._co_co_tiktok(C()) and len(hoi) == 1
+
+
+# ───────────────────────────── đọc hồ sơ nhà sáng tạo (21/10/2026) ─────────────────────────────
+class GiaTT:
+    """Giả `tiktok_api._goi`: hồ sơ trả uid, userPosts trả trang theo con trỏ. Mỗi lời gọi ghi
+    run id vào `A._SO_RUN` như `_call` thật."""
+
+    def __init__(self, trang: dict[str, list[list[dict]]], loi: set[str] = frozenset()):
+        self.trang, self.loi, self.goi = trang, set(loi), []
+
+    def __call__(self, payload, ngan):
+        if not ngan.xin():
+            return None
+        self.goi.append(payload)
+        so = A._SO_RUN.get(None)
+        if so is not None:
+            so.append({"run_id": f"r{len(self.goi)}"})
+        if "profile_username" in payload:
+            ten = payload["profile_username"]
+            if ten in self.loi:
+                raise A.LoiApify("LOI", "riêng tư")
+            return {"user": {"uid": f"u-{ten}"}}
+        ten = payload["userPosts_userId"][2:]
+        i = int(payload["userPosts_maxCursor"] or 0)
+        ds = self.trang.get(ten) or []
+        if i >= len(ds):
+            return {"aweme_list": [], "has_more": False}
+        return {"aweme_list": ds[i], "has_more": i + 1 < len(ds), "max_cursor": str(i + 1)}
+
+
+def _a(vid, ngay, anchors="khong", top=False, ten="a"):
+    a = _aweme(vid, anchors, ten=ten)
+    a["create_time"] = int(datetime.datetime(2026, 10, ngay, tzinfo=VN).timestamp())
+    if top:
+        a["is_top"] = 1
+    return a
+
+
+def _bn(ten, vid, ngay=10):
+    return {"khoa": f"tiktok:{vid}", "tai_khoan": ten, "dang_luc":
+            datetime.datetime(2026, 10, ngay, tzinfo=VN),
+            "link": f"https://www.tiktok.com/@{ten}/video/{vid}"}
+
+
+def test_nhom_ho_so_nhieu_video_truoc():
+    bai = [_bn("b", "8000000001"), _bn("a", "8000000002"), _bn("a", "8000000003"),
+           {"khoa": "tiktok:x", "tai_khoan": "", "link": "https://www.tiktok.com/@c/video/8000000004"},
+           {"khoa": "tiktok:y", "tai_khoan": "d", "link": "khong-co-id"}]
+    nhom = TDA.nhom_ho_so(bai)
+    assert [(t, len(d)) for t, d in nhom] == [("a", 2), ("b", 1), ("c", 1)]
+    assert TDA.uoc_ho_so(3) == 12                         # 1 hồ sơ + 3 trang mỗi tài khoản
+
+
+def test_doc_ho_so_lat_trang_tim_thay_va_bonus(monkeypatch):
+    gia = GiaTT({
+        # a: trang 1 có video ghim (cần tìm) + bonus; trang 2 có video cần tìm còn lại → dừng
+        "a": [[_a("8100000001", 20, SHOP, top=True), _a("8100000009", 19, KHAC)],
+              [_a("8100000002", 12, None)], [_a("8100000003", 1)]],
+        # b: video cần tìm không có (xoá) — dừng khi video cũ hơn video cần tìm
+        "b": [[_a("8200000005", 15)], [_a("8200000006", 2)], [_a("8200000007", 1)]]})
+    monkeypatch.setattr(TT, "_goi", gia)
+    bai = [_bn("a", "8100000001"), _bn("a", "8100000002", 12), _bn("b", "8200000001", 10)]
+    rows, tk = TDA.doc_ho_so_gio(bai, 1.0)
+    co = {r["khoa"]: r.get("gio_hang") for r in rows}
+    assert co["tiktok:8100000001"] is True and co["tiktok:8100000002"] is False
+    assert co["tiktok:8100000009"] is False               # bonus: video khác của tài khoản
+    assert "tiktok:8100000003" not in co                  # đủ video cần tìm thì thôi lật
+    assert "tiktok:8200000007" not in co                  # cũ hơn video cần tìm thì thôi lật
+    assert tk["thay"] == 2 and tk["khong_doc_duoc"] == 1 and tk["tai_khoan"] == 2
+    assert tk["yeu_cau"] == len(gia.goi) == 6 and tk["usd"] == pytest.approx(6 * TT.GIA_YEU_CAU)
+
+
+def test_doc_ho_so_kep_tran_tai_khoan_nhieu_video_truoc(monkeypatch):
+    gia = GiaTT({"a": [[_a("8100000001", 10)]], "b": [[_a("8200000001", 10)]]})
+    monkeypatch.setattr(TT, "_goi", gia)
+    bai = [_bn("b", "8200000001"), _bn("a", "8100000001"), _bn("a", "8100000002")]
+    rows, tk = TDA.doc_ho_so_gio(bai, 3 * TT.GIA_YEU_CAU)
+    assert [p.get("profile_username") for p in gia.goi if "profile_username" in p] == ["a"]
+    assert tk["yeu_cau"] == 2 and tk["khong_doc_duoc"] == 2   # b không đủ trần: giữ NULL
+
+
+def test_doc_ho_so_loi_mot_tai_khoan_khong_dung_ca_luot(monkeypatch):
+    gia = GiaTT({"b": [[_a("8200000001", 10, SHOP)]]}, loi={"a"})
+    monkeypatch.setattr(TT, "_goi", gia)
+    rows, tk = TDA.doc_ho_so_gio([_bn("a", "8100000001"), _bn("a", "8100000002"),
+                                  _bn("b", "8200000001")], 1.0)
+    assert [r["khoa"] for r in rows] == ["tiktok:8200000001"] and tk["khong_doc_duoc"] == 2
+
+
+def test_script_doc_ho_so_chay_thu_khong_goi_api(tmp_path, monkeypatch):
+    bai = [dict(_bn("a", "8100000001"), gio_hang=None, la_quang_cao=None),
+           dict(_bn("a", "8100000002"), gio_hang=None, la_quang_cao=None),
+           dict(_bn("b", "8200000001"), gio_hang=True, la_quang_cao=False)]
+    monkeypatch.setattr(K, "bai_tiktok_co", lambda ma: [dict(b) for b in bai])
+    monkeypatch.setattr(TT, "_goi", lambda *a, **k: pytest.fail("chạy thử không được gọi API"))
+    monkeypatch.setattr(K, "mo_luot", lambda *a, **k: pytest.fail("chạy thử không mở lượt"))
+    out: list[str] = []
+    G.chay(_ns_hs(["--doc-ho-so", "--toi-da-usd", "0.008"]), out.append)
+    chu = "\n".join(out)
+    assert "1 tài khoản, 2 video cần tìm, tối đa 4 yêu cầu" in chu and "@a: 2 video" in chu
+    assert "trần --toi-da-usd đủ cho 1 tài khoản đầu" in chu
+
+
+def _ns_hs(them):
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("du_an")
+    p.add_argument("duong", nargs="*")
+    for c in ("--ghi", "--goi-api", "--doc-ho-so"):
+        p.add_argument(c, action="store_true")
+    p.add_argument("--sao-luu")
+    p.add_argument("--toi-da-usd", type=float)
+    p.add_argument("--so-trang", type=int, default=3)
+    return p.parse_args(["hapas", *them])
+
+
+def test_script_doc_ho_so_ghi_qua_luot_va_tran(tmp_path, monkeypatch):
+    import quet_lon
+    bai = [dict(_bn("a", "8100000001"), gio_hang=None, la_quang_cao=None),
+           dict(_bn("a", "8100000009"), gio_hang=None, la_quang_cao=None)]
+    monkeypatch.setattr(K, "bai_tiktok_co", lambda ma: [dict(b) for b in bai])
+    monkeypatch.setattr(K, "doc_du_an", lambda ma: {"tran_usd_thang": 5})
+    monkeypatch.setattr(K, "da_tieu_thang", lambda ma: 4.99)          # còn tháng 0,01
+    monkeypatch.setattr(quet_lon, "ngan_sach", lambda t: (1.0, None, ""))
+    monkeypatch.setattr(quet_lon, "tran_usd_nen", lambda: 1.0)
+    monkeypatch.setenv("APIFY_TOKEN", "x")
+    monkeypatch.setattr(K, "luot_dang_chay", lambda ma: None)
+    monkeypatch.setattr(K, "mo_luot", lambda *a, **k: 55)
+    dong = {}
+    monkeypatch.setattr(K, "dong_luot", lambda luot, **k: dong.update(k, luot=luot))
+    cap = []
+    monkeypatch.setattr(K, "cap_nhat_so_lieu", lambda ma, luot, rows: cap.extend(rows) or len(rows))
+    gia = GiaTT({"a": [[_a("8100000001", 10, SHOP), _a("8100000009", 9, None)]]})
+    monkeypatch.setattr(TT, "_goi", gia)
+    sl = tmp_path / "sl.jsonl"
+    assert G.chay(_ns_hs(["--doc-ho-so", "--toi-da-usd", "9", "--ghi", "--sao-luu", str(sl)]),
+                  lambda s: None) == 0
+    assert len(gia.goi) == 2                     # trần = còn tháng 0,01 USD; đủ ở trang 1
+    assert {r["khoa"]: r["gio_hang"] for r in cap} == {"tiktok:8100000001": True,
+                                                       "tiktok:8100000009": False}
+    assert dong["luot"] == 55 and dong["chi_phi_usd"] == pytest.approx(2 * TT.GIA_YEU_CAU)
+    assert len(sl.read_text(encoding="utf-8").splitlines()) == 2
+
+
+@pytest.mark.tiktok_api
+def test_buoc_cuoi_luot_tran_moi_luot(monkeypatch):
+    monkeypatch.setenv("LANG_NGHE_GIO_HO_SO_USD", "0.004")
+    assert TDA.ho_so_gio_usd() == 0.004
+    monkeypatch.setattr(K, "bai_gio_null_luot", lambda ma, luot: [_bn("a", "8100000001")])
+    cap = []
+    monkeypatch.setattr(K, "cap_nhat_so_lieu", lambda ma, luot, rows: cap.extend(rows) or 1)
+    gia = GiaTT({"a": [[_a("8100000001", 10, None)]]})
+    monkeypatch.setattr(TT, "_goi", gia)
+    phan = []
+    tk = TDA.gio_ho_so_luot("hapas", 7, 1.0, phan.append)
+    assert len(gia.goi) == 2 and cap[0]["gio_hang"] is False and tk["usd"] == 0.004
+    monkeypatch.setenv("LANG_NGHE_GIO_HO_SO_USD", "0")
+    assert TDA.gio_ho_so_luot("hapas", 7, 1.0, phan.append)["yeu_cau"] == 0

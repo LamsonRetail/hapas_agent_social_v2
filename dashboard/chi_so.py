@@ -103,8 +103,12 @@ def la_kenh_nha(r: dict) -> bool:
 # TikTok) không có loại nguồn — muốn chỉ KOC lớn thì kết hợp ô "Ảnh hưởng". Độc lập với loại
 # nguồn `kol` (nguồn KOL/KOC đang theo dõi): hai chiều AND với nhau. NULL = chưa rõ (video
 # chỉ thấy ở feed hashtag — feed không báo giỏ —, bài cũ chưa bù) → "Chưa rõ", không đoán branding.
+#: Chủ dự án 20/10 tối: CHỈ HAI NHÓM trên trang (thẻ, chip, ô lọc). Video còn NULL (chỉ thấy ở feed
+#: hashtag mà hồ sơ nhà sáng tạo không đọc lại được — đã xoá / riêng tư / quá cũ; `theo_doi_api.
+#: doc_ho_so_gio`) là một dòng mờ dưới khối, không phải thẻ; `koc=chua_ro` vẫn nhận trên URL (ẩn).
 KOC = {"affiliate": "KOC affiliate · gắn giỏ", "branding": "KOC branding · không giỏ",
-       "chua_ro": "Chưa rõ giỏ hàng"}
+       "chua_ro": "Chưa đọc lại được giỏ"}
+KOC_HIEN = ("affiliate", "branding")
 
 
 def nhom_koc(r: dict) -> str | None:
@@ -232,8 +236,8 @@ BO_LOC_NHANH = (
      "mo_ta": "Video TikTok External channel có gắn giỏ TikTok Shop — theo từng video.",
      "loc": {"koc": "affiliate"}},
     {"ma": "koc_brand", "ten": "KOC branding (không giỏ)",
-     "mo_ta": "Video TikTok External channel không gắn giỏ hàng — theo từng video; chưa rõ "
-              "giỏ (chỉ thấy ở feed hashtag) không tính.",
+     "mo_ta": "Video TikTok External channel không gắn giỏ hàng — theo từng video; video "
+              "chưa đọc lại được giỏ không tính.",
      "loc": {"koc": "branding"}},
     {"ma": "khung_hoang", "ten": "Cảnh báo khủng hoảng",
      "mo_ta": "Tiêu cực trên bài có từ 1.000 tương tác — thứ lan nhanh nhất, kể cả trên Internal channel.",
@@ -1755,10 +1759,11 @@ def _nhom_koc() -> dict:
 
 
 def _loai_koc_json(koc: dict[str, dict]) -> dict:
-    """Khối "KOC affiliate vs branding" (20/10/2026): mỗi nhóm số video, nhà sáng tạo, thảo luận,
-    lượt xem, tương tác, video quảng cáo (is_ads), sắc thái bài + % trên tổng ba nhóm. `tong` =
-    tổng của video TikTok External channel khớp mọi bộ lọc TRỪ chính chiều "Loại KOC"."""
-    tong = {k: sum(g[k] for g in koc.values()) for k in ("bai", "thao_luan", "xem", "tuong_tac")}
+    """Khối "KOC affiliate vs branding" (20/10/2026): HAI nhóm (`KOC_HIEN`), mỗi nhóm số video,
+    nhà sáng tạo, thảo luận, lượt xem, tương tác, video quảng cáo (is_ads), sắc thái bài + % trên
+    tổng hai nhóm. `tong` = tổng hai nhóm của video TikTok External channel khớp mọi bộ lọc TRỪ
+    chính chiều "Loại KOC"; `chua_doc_lai` = số video còn NULL (dòng mờ dưới khối)."""
+    tong = {k: sum(koc[n][k] for n in KOC_HIEN) for k in ("bai", "thao_luan", "xem", "tuong_tac")}
 
     def pt(a, b):
         return round(100.0 * a / b, 1) if b else None
@@ -1766,7 +1771,7 @@ def _loai_koc_json(koc: dict[str, dict]) -> dict:
         {"ma": k, "ten": KOC[k], **{x: g[x] for x in ("bai", "thao_luan", "xem", "tuong_tac",
                                                         "quang_cao", "sac_bai")},
          "nguoi": len(g["nguoi"]), **{f"{x}_pt": pt(g[x], tong[x]) for x in tong}}
-        for k, g in koc.items()]}
+        for k, g in koc.items() if k in KOC_HIEN], "chua_doc_lai": koc["chua_ro"]["bai"]}
 
 
 def tong_quan_loc(bai: list[dict], bl: list[dict], tu: datetime.date, den: datetime.date,

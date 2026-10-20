@@ -2728,8 +2728,8 @@
   // ─── thanh lọc chung: các trường (ô chọn nhiều giá trị, có số đếm) ───
   // Một câu cho ⓘ của ô lọc + khối KOC (20/10/2026, task t284905).
   var GOI_Y_KOC = "Theo từng video, chỉ TikTok ngoài Internal channel. KOC affiliate = video gắn giỏ TikTok Shop; " +
-    "KOC branding = video không gắn giỏ; Chưa rõ = video chỉ thấy ở feed hashtag (feed không báo giỏ) hoặc bài cũ chưa bù — không đoán. " +
-    "Chọn thì bài nền tảng khác không khớp; bình luận theo bài.";
+    "KOC branding = video không gắn giỏ. Video chỉ thấy ở feed hashtag được đọc lại qua hồ sơ nhà sáng tạo; " +
+    "video không đọc lại được (đã xoá, riêng tư, quá cũ) không vào nhóm nào. Chọn thì bài nền tảng khác không khớp; bình luận theo bài.";
   var TRUONG_G = [
     { k: "nen_tang", ten: "Nền tảng" }, { k: "loai", ten: "Loại nguồn" }, { k: "nguon", ten: "Nguồn", tim: true },
     { k: "sac_thai", ten: "Sắc thái" }, { k: "chu_de", ten: "Chủ đề", tim: true }, { k: "anh_huong", ten: "Ảnh hưởng" },
@@ -2816,7 +2816,11 @@
       ds.sort(function (a, b) { return thu[a.nhom] - thu[b.nhom] || a.i - b.i; });
     } else {
       if (!NHIEU[k]) ds.push({ gt: "", ten: "Tất cả", so: null });
-      Object.keys(NHAN[k] || {}).forEach(function (gt) { ds.push({ gt: gt, ten: tenG(k, gt), so: (dem[k] || {})[gt] || 0 }); });
+      Object.keys(NHAN[k] || {}).forEach(function (gt) {
+        // Loại KOC (20/10/2026): chỉ hai nhóm; `chua_ro` chỉ hiện khi đang lọc bằng URL.
+        if (k === "koc" && gt === "chua_ro" && G.koc.indexOf(gt) < 0) return;
+        ds.push({ gt: gt, ten: tenG(k, gt), so: (dem[k] || {})[gt] || 0 });
+      });
     }
     return ds;
   }
@@ -3135,11 +3139,13 @@
     return o;
   }
   function veKoc(d) {
-    var x = d.loai_koc, el = $("loai-koc"), ty = $("koc-ty"), khoi = $("khoi-koc");
+    var x = d.loai_koc, el = $("loai-koc"), ty = $("koc-ty"), khoi = $("khoi-koc"), chua = $("koc-chua");
     if (!x || !el) return;
     var tong = x.tong;
     // Kỳ / bộ lọc không có video TikTok External channel và không lọc theo KOC: ẩn cả thẻ cho gọn.
-    khoi.hidden = !tong.bai && !G.koc.length;
+    khoi.hidden = !tong.bai && !x.chua_doc_lai && !G.koc.length;
+    chua.hidden = !x.chua_doc_lai;
+    chua.textContent = x.chua_doc_lai ? so(x.chua_doc_lai) + " video chưa đọc lại được giỏ (đã xoá / riêng tư / quá cũ) — không tính vào hai nhóm." : "";
     giuNut(el, function () {
       xoa(el);
       if (!tong.bai) { el.appendChild(tao("div", "trong", "Không có video TikTok External channel khớp bộ lọc.")); return; }

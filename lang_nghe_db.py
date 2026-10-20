@@ -600,8 +600,19 @@ def bai_tiktok_co(ma: str) -> list[dict]:
     with ket_noi() as c:
         if not all(_co_cot(c, k) for k in _COT_TT):
             raise LoiKho("Kho chưa có cột bai.gio_hang / bai.la_quang_cao — chạy schema.sql trước.")
-        return c.execute("SELECT khoa, link, gio_hang, la_quang_cao FROM bai WHERE du_an = %s "
-                         "AND nen_tang = 'tiktok' ORDER BY khoa", (ma,)).fetchall()
+        return c.execute("SELECT khoa, link, tai_khoan, dang_luc, gio_hang, la_quang_cao FROM bai "
+                         "WHERE du_an = %s AND nen_tang = 'tiktok' ORDER BY khoa", (ma,)).fetchall()
+
+
+def bai_gio_null_luot(ma: str, luot_id: int) -> list[dict]:
+    """Bài TikTok lượt `luot_id` ghi / cập nhật mà `gio_hang` còn NULL (chỉ thấy ở feed hashtag) —
+    bước đọc hồ sơ cuối lượt (`theo_doi_api.gio_ho_so_luot`). DB chưa có cột → []. Chỉ đọc."""
+    with ket_noi() as c:
+        if not _co_cot(c, "gio_hang"):
+            return []
+        return c.execute("SELECT khoa, link, tai_khoan, dang_luc FROM bai WHERE du_an = %s AND "
+                         "nen_tang = 'tiktok' AND gio_hang IS NULL AND luot_cuoi = %s",
+                         (ma, luot_id)).fetchall()
 
 
 def ghi_co_tiktok_lo(ma: str, cac: list[dict]) -> int:

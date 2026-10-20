@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import math
+import os
 import re
 import threading
 import time
@@ -825,6 +826,126 @@ def lam_moi_tiktok(v, ma: str, luot: int, tu: datetime.datetime, con: float,
             for it in items if it.get("id") in vid]
     if rows:
         tk["cap_nhat"] = K.cap_nhat_so_lieu(ma, luot, rows)
+    return tk
+
+
+# ── Đọc cờ giỏ qua HỒ SƠ nhà sáng tạo (21/10/2026, chủ dự án: chỉ hai nhóm KOC affiliate / KOC
+# branding) ──
+# Feed hashtag không bao giờ trả anchor shop (`tiktok_api.FEED`), nên video chỉ thấy ở feed có
+# `gio_hang` NULL. Hồ sơ (userPosts) trả `aweme` đầy đủ (`tiktok_api.DAY_DU`: không anchor shop =
+# không giỏ). Gom video theo tài khoản, đọc hồ sơ tài khoản nhiều video chưa rõ nhất trước (trần
+# mua được nhiều video nhất), lật tới khi thấy đủ video cần tìm / video cũ hơn video cũ nhất cần
+# tìm / `HO_SO_GIO_TRANG` trang. Mọi video của tài khoản đọc được mà kho đã có cũng được điền
+# cờ (miễn phí). Video không thấy (xoá, riêng tư, quá cũ) giữ NULL — "không đọc lại được".
+HO_SO_GIO_TRANG = 3
+
+
+def _tai_khoan_tt(b: dict) -> str:
+    tk = str(b.get("tai_khoan") or "").strip().lstrip("@").lower()
+    if tk:
+        return tk
+    m = re.search(r"/@([\w.\-]+)", str(b.get("link") or ""))
+    return m.group(1).lower() if m else ""
+
+
+def nhom_ho_so(bai: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Bài TikTok chưa rõ giỏ → [(tài khoản, bài)], tài khoản nhiều bài trước. Thuần."""
+    nhom: dict[str, list[dict]] = {}
+    for b in bai:
+        k = _tai_khoan_tt(b)
+        if k and TT.id_video(str(b.get("link") or "")):
+            nhom.setdefault(k, []).append(b)
+    return sorted(nhom.items(), key=lambda x: (-len(x[1]), x[0]))
+
+
+def uoc_ho_so(so_tai_khoan: int, so_trang: int = HO_SO_GIO_TRANG) -> int:
+    """Số yêu cầu TỐI ĐA: mỗi tài khoản 1 hồ sơ + `so_trang` trang."""
+    return so_tai_khoan * (1 + max(1, int(so_trang)))
+
+
+def doc_ho_so_gio(bai: list[dict], tran_usd: float, so_trang: int = HO_SO_GIO_TRANG,
+                  them_phan=None) -> tuple[list[dict], dict]:
+    """Đọc hồ sơ để điền cờ giỏ cho `bai` (khoa, link, tai_khoan, dang_luc) trong trần `tran_usd`.
+    -> (dòng {khoa, xem…, gio_hang, la_quang_cao} của MỌI video hồ sơ đọc được — ghi bằng
+    `lang_nghe_db.cap_nhat_so_lieu`, chỉ bài đã có trong kho được cập nhật; thống kê {"tai_khoan",
+    "yeu_cau", "usd", "thay", "khong_doc_duoc", "loi"}). `them_phan(ph)` ghi run vào sổ việc."""
+    nhom = nhom_ho_so(bai)
+    ngan = TT.Ngan(tran_usd)
+    tk = {"tai_khoan": 0, "yeu_cau": 0, "usd": 0.0, "thay": 0, "khong_doc_duoc": 0, "loi": ""}
+    so: list = []
+    dat = [(A._NEN_TANG, "tiktok"), (A._SO_RUN, so)]
+    if them_phan is not None:
+        dat.append((A._KHI_CO_RUN, lambda run, meta: them_phan({
+            "id": f"hs-tiktok-{run.get('id')}", "nen_tang": "tiktok_gio_ho_so",
+            "run_id": run.get("id"), "trang_thai": "xong"})))
+    moc = [(bien, bien.set(gt)) for bien, gt in dat]
+    rows: dict[str, dict] = {}
+    can_tat_ca: set[str] = {TT.id_video(str(b["link"])) for _, ds in nhom for b in ds}
+    try:
+        for ten, ds in nhom:
+            if ngan.toi_da - ngan.da < 2:          # hồ sơ + ít nhất một trang
+                break
+            can = {TT.id_video(str(b["link"])) for b in ds}
+            luc = [b["dang_luc"] for b in ds if isinstance(b.get("dang_luc"), datetime.datetime)]
+            tu = min(luc) - datetime.timedelta(days=1) if luc else None
+            try:
+                items, _ = TT.bai_tai_khoan(ten, so_trang, ngan, d_from=tu, can_tim=can,
+                                            ca_ghim=True)
+            except A.LoiApify as e:
+                if e.ma in ("HET_TIEN_THANG", "DA_HUY"):
+                    tk["loi"] = e.ma
+                    break
+                continue
+            tk["tai_khoan"] += 1
+            for it in items:
+                co = {"gio_hang": A._gio_hang_tiktok(it), "la_quang_cao": A._quang_cao_tiktok(it)}
+                rows[f"tiktok:{it['id']}"] = {
+                    "khoa": f"tiktok:{it['id']}", "xem": it.get("playCount"),
+                    "thich": it.get("diggCount"), "binh_luan": it.get("commentCount"),
+                    "chia_se": it.get("shareCount"),
+                    **{k: v for k, v in co.items() if v is not None}}
+    finally:
+        for bien, t in reversed(moc):
+            bien.reset(t)
+    tk["yeu_cau"] = ngan.da
+    tk["usd"] = round(sum(TT.GIA_YEU_CAU for m in so if isinstance(m, dict)
+                          and m.get("run_id")), 4)
+    tk["thay"] = sum(1 for x in can_tat_ca if f"tiktok:{x}" in rows)
+    tk["khong_doc_duoc"] = len(can_tat_ca) - tk["thay"]
+    return list(rows.values()), tk
+
+
+def ho_so_gio_usd() -> float:
+    """Trần USD mỗi lượt đọc hồ sơ lấy cờ giỏ (`LANG_NGHE_GIO_HO_SO_USD`, mặc định 0,05; 0 = tắt)."""
+    try:
+        return max(0.0, float(os.environ.get("LANG_NGHE_GIO_HO_SO_USD") or 0.05))
+    except ValueError:
+        return 0.05
+
+
+def gio_ho_so_luot(ma: str, luot: int, con: float, them_phan) -> dict:
+    """Bước cuối lượt tìm TikTok: video lượt này ghi/cập nhật mà còn `gio_hang` NULL (chỉ thấy ở
+    feed hashtag) → đọc hồ sơ nhà sáng tạo, trần min(`ho_so_gio_usd`, `con`). -> thống kê."""
+    tran = min(ho_so_gio_usd(), con)
+    tk = {"tai_khoan": 0, "yeu_cau": 0, "usd": 0.0, "thay": 0, "khong_doc_duoc": 0,
+          "cap_nhat": 0, "ghi_chu": ""}
+    if tran < 2 * TT.GIA_YEU_CAU or not TT.dung_api("tiktok_ho_so"):
+        return tk
+    try:
+        bai = K.bai_gio_null_luot(ma, luot)
+    except Exception as e:
+        if type(e).__name__ == "MatQuyen":
+            raise
+        tk["ghi_chu"] = f"cờ giỏ qua hồ sơ: không đọc được kho ({type(e).__name__})"
+        return tk
+    if not bai:
+        return tk
+    rows, x = doc_ho_so_gio(bai, tran, them_phan=them_phan)
+    tk.update({k: x[k] for k in ("tai_khoan", "yeu_cau", "usd", "thay", "khong_doc_duoc")})
+    if rows:
+        tk["cap_nhat"] = K.cap_nhat_so_lieu(ma, luot, rows)
+    if x.get("loi"):
+        tk["ghi_chu"] = f"cờ giỏ qua hồ sơ: dừng {x['loi']}"
     return tk
 
 
