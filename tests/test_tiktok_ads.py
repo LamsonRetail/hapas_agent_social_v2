@@ -416,6 +416,18 @@ class GiaKhoQC:
     def dat_khan_gia(self, adv):
         self.tk[adv]["khan_gia_luc"] = BAY
 
+    def nap_lai(self, ai, ncc="tiktok_ads"):
+        nen = "meta" if ncc == "meta_ads" else "tiktok"
+        n = 0
+        for t in self.tk.values():
+            if (t.get("nen_tang") or "tiktok") == nen and t.get("dang_dong_bo")                     and t.get("duyet", True) and t.get("con_quyen", True):
+                t["nap_lui_tu"] = t["nap_lui_xong_luc"] = None
+                n += 1
+        self.yeu_cau_dong_bo(ai, ncc, kieu="day_du")
+        self.nk = [x for x in self.nk if x != (ai, f"dong_bo_{nen}")]   # một dòng mỗi lần bấm
+        self.nk.append((ai, "dong_bo_qc"))
+        return n
+
     # số liệu: upsert theo PK
     def _ghi(self, bang, rows):
         _, pk = KQ.BANG_QC[bang]
@@ -823,7 +835,7 @@ def test_oauth_chi_quan_tri_vien():
         csrf = dang_nhap(c, ai)
         assert c.post("/tiktok/ket-noi", data={"csrf": csrf}).status_code == 403, ai
         assert c.get("/tiktok/xong", params={"code": "ma-dung", "state": "x"}).status_code == 403
-        for duong, form in (("/tiktok/dong-bo", {}), ("/tiktok/ngat", {}),
+        for duong, form in (("/tiktok/ngat", {}),
                             ("/tiktok/token", {"token": "x" * 20}),
                             ("/tiktok/gan-ben", {"advertiser_id": HAPAS_KOC, "don_vi": "hapas"})):
             r = c.post(duong, data={"csrf": csrf, **form})
@@ -834,8 +846,7 @@ def test_oauth_chi_quan_tri_vien():
 def test_post_tiktok_doi_csrf():
     _app, c, _kho, _kho_qc, _tt, _dv = _tao_app()
     dang_nhap(c, QL)
-    for duong in ("/tiktok/ket-noi", "/tiktok/dong-bo", "/tiktok/ngat", "/tiktok/token",
-                  "/tiktok/gan-ben"):
+    for duong in ("/tiktok/ket-noi", "/tiktok/ngat", "/tiktok/token", "/tiktok/gan-ben"):
         assert c.post(duong, data={"csrf": "sai"}).status_code == 403, duong
         r = c.post(duong, data={"csrf": "x"}, headers={"origin": "https://evil.example"})
         assert r.status_code == 403, duong
@@ -1170,7 +1181,7 @@ def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
     t = c.get(f"/quang-cao?{Q}").text
     assert "Chi tiêu" in t and "ROAS Shop" in t and 'id="qc-api"' in t
     # Thiết kế 20/10/2026: kỳ đang xem ở đầu trang, "số đến ngày" ở dải trạng thái, CPM + CTR tính lại.
-    assert "12/10 – 18/10/2026" in t and "số đến <b>18/10</b>" in t
+    assert "12/10 – 18/10/2026" in t and "Số đến 18/10" in t
     assert 'data-kpi="cpm"' in t and 'data-kpi="ctr"' in t
     assert c.get("/api/qc?tu=2025-01-01&den=2026-10-18").status_code == 400
 
@@ -1200,7 +1211,10 @@ def test_the_ket_noi_chi_quan_tri_vien_thay():
     dang_nhap(c, QL)
     t = c.get("/quan-tri").text
     assert "Kết nối TikTok Ads" in t and "Đăng nhập lại để gia hạn 30 ngày" in t
-    assert "Đồng bộ ngay" in t and "Ngắt kết nối" in t and 'action="/tiktok/token"' in t
+    assert "Ngắt kết nối" in t and 'action="/tiktok/token"' in t
+    # 20/10/2026 (chủ dự án): thẻ kết nối không còn "Đồng bộ ngay" — chỉ ở trang Quảng cáo.
+    the = t.split("Kết nối TikTok Ads")[1].split("Kết nối Meta Ads")[0]
+    assert "Đồng bộ ngay" not in the and 'action="/tiktok/dong-bo"' not in t
     assert 'data-o="tk-' + MM_MKT + '"' in t and "Tài khoản quảng cáo → bên" in t
     assert "25 ngày" in t and "the--tot" in t
     dang_nhap(c, HP_QL)
@@ -1218,12 +1232,12 @@ def test_quan_tri_gan_ben_va_dong_bo_bam_tay():
     assert kho_qc.tk[LE]["gan_tay"] is True and (QL, "gan_ben_tk_qc") in kho_qc.nk
     r = c.post("/tiktok/gan-ben", data={"csrf": csrf, "advertiser_id": LE, "don_vi": "khong-co"})
     assert "Không có bên này" in c.get(r.headers["location"]).text
+    # 20/10/2026: đường "Đồng bộ ngay" của thẻ đã bỏ (đồng bộ bấm tay chỉ ở trang Quảng cáo).
     tt_goi = len(_tt.goi)
-    r = c.post("/tiktok/dong-bo", data={"csrf": csrf})
-    assert "sẽ chạy trong ≤ 2 phút" in c.get(r.headers["location"]).text
-    # Dashboard CHỈ ghi cờ — không gọi TikTok, không chạy lượt nào trong tiến trình web.
-    assert len(_tt.goi) == tt_goi and (QL, "dong_bo_tiktok") in kho_qc.nk
-    assert kho_qc.kn["yeu_cau_dong_bo_luc"] == BAY and kho_qc.kn["yeu_cau_boi"] == QL
+    assert c.post("/tiktok/dong-bo", data={"csrf": csrf}).status_code in (404, 405)
+    assert len(_tt.goi) == tt_goi and not kho_qc.kn.get("yeu_cau_dong_bo_luc")
+    # Cờ yêu cầu ghi từ đường khác (vd vừa kết nối) vẫn hiện trên thẻ.
+    _dv.yeu_cau(QL)
     t = c.get("/quan-tri").text
     assert 'data-o="tt-yeu-cau"' in t and "sẽ chạy trong ≤ 2 phút" in t
     r = c.post("/tiktok/ngat", data={"csrf": csrf})
@@ -1425,7 +1439,7 @@ def test_dashboard_khong_bao_gio_chay_dong_bo(monkeypatch):
     q, _ = _bat_dau(c, csrf)
     c.get("/tiktok/xong", params={"code": "ma-dung", "state": q["state"]})
     c.post("/tiktok/token", data={"csrf": csrf, "token": TOK})
-    c.post("/tiktok/dong-bo", data={"csrf": csrf})
+    c.post("/quang-cao/dong-bo", data={"csrf": csrf, "nen_tang": "tiktok"})
     assert kho_qc.kn["yeu_cau_dong_bo_luc"] == BAY
     src = (GOC / "dashboard" / "app.py").read_text(encoding="utf-8")
     assert ".dong_bo_nen(" not in src and "tt.dong_bo(" not in src

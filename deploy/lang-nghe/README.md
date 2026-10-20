@@ -300,6 +300,63 @@ sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=
   Tắt hẳn phía Mark: `MARK_TUC_THI=0` trong `/opt/mark/app/.env` rồi `mark restart` (tool trả lời
   "đang tắt"; chưa có công tắc console riêng cho `lay_so_tuc_thi`).
 
+## 10. Tạo Lark Sheet từ trang Quảng cáo (20/10/2026, chủ dự án chốt) — cần người duyệt trước khi chạy trên VPS
+
+Trang Quảng cáo (chỉ quản trị viên) có mục **Tạo Lark Sheet**: xuất số theo ĐÚNG bộ lọc đang xem (bên,
+nền tảng, tài khoản, từ–đến) thành MỘT Lark Sheet riêng tư — Tổng quan + ba tab: *Theo ngày × tài
+khoản*, *Theo chiến dịch*, *Theo quảng cáo* (tổng cả kỳ; tối đa 20.000 / 5.000 / 10.000 dòng, cắt thì
+Tổng quan nói rõ). Có chi tiêu và chỉ số suy ra như trang (CPM, CPC, CTR, chi / 1.000 view, chi /
+follow, chi / kết quả, ROAS Shop). TikTok và Meta cùng đường (cùng bảng `qc_*`); tên file ghi nền
+tảng ("TikTok Ads · HAPAS · 01/10–19/10/2026").
+
+Đường đi: dashboard (lang_nghe_web) KHÔNG có app Lark tạo Sheet — chỉ thêm dòng `yeu_cau_sheet_qc`
+(RLS: chỉ dòng của chính người đăng nhập; trigger đặt trạng thái + kiểm trần). Trigger gọi
+`pg_notify('qc_sheet', id)`; bộ nghe **`qc-sheet-nghe`** (user **mark**, `xuat_sheet_qc.py`, venv + `.env`
+của Mark) kiểm lại người bấm còn là quản trị viên, tính lại phạm vi, đọc số bằng role `mark`, tạo Sheet
+bằng app Lark của Mark (khoá chia sẻ link TRƯỚC khi ghi số — đúng đường `chi_so_ads`), chia sẻ quyền
+**xem** cho email người bấm, nhắn link trên Lark, ghi trạng thái + link. Trang hỏi lại 5 giây một lần
+khi còn yêu cầu đang tạo.
+
+```bash
+cd /opt/lang-nghe/app   # sau khi rsync mã mới (dashboard/README.md bước 2) — Mark tự lên qua agent-deploy
+# a. Schema TRƯỚC mã mới (bảng yeu_cau_sheet_qc + 2 trigger + RLS + quyền theo cột; chạy lại không hỏng)
+sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -f deploy/lang-nghe/schema.sql
+sudo -u postgres psql -d lang_nghe -c '\dp yeu_cau_sheet_qc'   -c "select policyname, roles, cmd from pg_policies where tablename='yeu_cau_sheet_qc'"
+# b. Dashboard mới (mục Tạo Lark Sheet; bỏ "Đồng bộ ngay" ở thẻ Quản trị + dải trên trang Chỉ số)
+sudo systemctl restart lang-nghe-dashboard
+# c. Bộ nghe phía Mark (mã đã có ở /opt/mark/app qua agent-deploy; kiểm trước khi cài)
+test -f /opt/mark/app/xuat_sheet_qc.py && sudo -u mark /opt/mark/hermes-agent/venv/bin/python -c   "import psycopg, sys; assert tuple(map(int, psycopg.__version__.split('.')[:2])) >= (3, 2), psycopg.__version__; sys.path.insert(0, '/opt/mark/app'); import xuat_sheet_qc; print('ok', psycopg.__version__)"
+sudo install -o root -g root -m 0644 deploy/lang-nghe/qc-sheet-nghe.service /etc/systemd/system/
+sudo systemd-analyze verify /etc/systemd/system/qc-sheet-nghe.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now qc-sheet-nghe.service
+journalctl -u qc-sheet-nghe -n 20                          # "đang nghe kênh qc_sheet"
+# d. Thử: bấm Tạo Sheet trên trang Quảng cáo (khoảng 7 ngày), xem journalctl; hoặc xử lý hàng chờ một lần:
+sudo systemd-run --quiet --wait --pipe -p User=mark -p WorkingDirectory=/opt/mark/app   /opt/mark/hermes-agent/venv/bin/python -m xuat_sheet_qc --mot-lan
+```
+
+- **Theo Mark khi tự lên mã**: agent-deploy chỉ khởi động lại unit `mark` (`agentctl restart mark`).
+  Unit có `PartOf=mark.service` + `After=mark.service` nên khởi động lại (và dừng) cùng Mark — không
+  chạy mã cũ sau mỗi lần Mark tự cập nhật; `WantedBy=multi-user.target` giữ nó bật lúc khởi động máy.
+  Kiểm: `systemctl show -p PartOf qc-sheet-nghe` → `PartOf=mark.service`.
+- **Biến môi trường**: không thêm biến nào. Bộ nghe dùng `LARK_APP_ID` / `LARK_APP_SECRET` /
+  `LANG_NGHE_DSN` sẵn có trong `/opt/mark/app/.env` (config.py tự nạp). Dashboard không thêm gì
+  (`DASH_LARK_APP_*` vẫn chỉ để đăng nhập).
+- **Quyền app Lark của Mark** (đã có cho `chi_so_ads` / `social_listen`): tạo Sheet, sửa quyền Drive
+  (thêm cộng tác viên theo email, đóng chia sẻ link), gửi tin `im:message`. Tra email → open_id
+  (`contact:user.id:readonly`) chỉ là đường lùi khi thêm quyền theo email bị từ chối.
+- **Trần**: 1 yêu cầu đang chờ / đang tạo mỗi người, 4 yêu cầu mỗi người mỗi giờ, 30 mỗi giờ toàn hệ
+  thống (trigger `chuan_yeu_cau_sheet_qc`, khoá advisory); khoảng ≤ 400 ngày. Chờ / đang tạo quá 30
+  phút → `loi` (bộ nghe dọn; trang hiện "Quá hạn" và cho bấm lại).
+- **Quyền DB**: lang_nghe_web INSERT chỉ (nguoi_hoi, ben, nen_tang, tk, tu, den), SELECT mọi cột trừ
+  `loi_noi_bo`, không UPDATE / DELETE; RLS theo `lang_nghe.nguoi` (app đặt bằng `set_config` trong
+  cùng giao dịch). mark: SELECT, UPDATE chỉ cột kết quả, không INSERT / DELETE.
+- **Kiểm**: `sudo -u mark psql -d lang_nghe -c "select id, nguoi_hoi, nen_tang, ben, tu, den,
+  trang_thai, so_dong, loi, loi_noi_bo, da_nhan_tin, tao_luc, xong_luc from yeu_cau_sheet_qc order by
+  id desc limit 20"`; nhật ký: `select * from nhat_ky where hanh_dong = 'tao_sheet_qc' order by id desc`.
+- **Gỡ**: `systemctl disable --now qc-sheet-nghe` (yêu cầu mới chờ 30 phút rồi thành "Quá hạn"; trang
+  vẫn chạy).
+
 ## 11. KOC affiliate (gắn giỏ) vs KOC branding (20–21/10/2026, task Lark t284905, PA1)
 
 Cờ giỏ TikTok Shop theo từng video vào `bai.gio_hang` (+ `bai.la_quang_cao` = is_ads). TRUE = KOC

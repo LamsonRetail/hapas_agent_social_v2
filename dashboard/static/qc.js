@@ -159,3 +159,68 @@
     mq.addEventListener("change", function () { if (bd) { bd.dispose(); bd = null; } ve(); });
   }
 })();
+
+// Tạo Lark Sheet (20/10/2026): còn yêu cầu đang chờ / đang tạo → hỏi lại /api/qc/sheet mỗi 5 giây (tối
+// đa 15 phút, tab ẩn thì thôi hỏi) và vẽ lại danh sách bằng textContent; hết yêu cầu đang tạo (hoặc hết
+// 15 phút) thì mở lại nút "Tạo Sheet". Không có JS: trang vẫn đúng, tải lại là thấy trạng thái mới.
+(function () {
+  var khung = document.getElementById("sheet");
+  var ds = document.getElementById("qc-sheet-ds");
+  var nut = document.getElementById("qc-sheet-nut");
+  var goiY = document.getElementById("qc-sheet-goi-y");
+  if (!khung || !ds || khung.getAttribute("data-dang") !== "1" || !window.fetch) return;
+  var batDau = Date.now();
+  var NHIP = 5000, TOI_DA = 15 * 60 * 1000;
+
+  function the(ten, lop, chu) {
+    var x = document.createElement(ten);
+    if (lop) x.className = lop;
+    if (chu != null) x.textContent = chu;
+    return x;
+  }
+  function veO(x) {
+    var li = the("li", "qc-sheet__o");
+    li.setAttribute("data-id", String(x.id));
+    li.setAttribute("data-tinh-trang", x.trang_thai);
+    li.appendChild(the("span", "qc-sheet__ten", x.ten));
+    var meta = the("span", "qc-sheet__meta");
+    meta.appendChild(the("span", "qc-sheet__tt qc-sheet__tt--" + x.trang_thai, x.nhan));
+    meta.appendChild(the("span", "qc-sheet__luc", x.luc));
+    li.appendChild(meta);
+    if (x.url && /^https:\/\//.test(x.url)) {
+      var ket = the("span", "qc-sheet__ket");
+      var a = the("a", "qc-sheet__mo", "Mở Sheet");
+      a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      ket.appendChild(a);
+      if (x.so_dong) ket.appendChild(the("span", "qc-sheet__phu", x.so_dong));
+      li.appendChild(ket);
+    }
+    if (x.loi) li.appendChild(the("span", "qc-sheet__loi" + (x.trang_thai === "xong" ? " qc-sheet__loi--canh" : ""), x.loi));
+    return li;
+  }
+  function hoi() {
+    if (document.hidden) { setTimeout(hoi, NHIP); return; }
+    fetch("/api/qc/sheet", { credentials: "same-origin", headers: { "Accept": "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (p) {
+        if (!p || !p.ds) return;
+        while (ds.firstChild) ds.removeChild(ds.firstChild);
+        p.ds.forEach(function (x) { ds.appendChild(veO(x)); });
+        if (!p.dang) {
+          khung.setAttribute("data-dang", "0");
+          if (nut) nut.disabled = false;
+          if (goiY) goiY.textContent = "Thường xong sau 1–2 phút.";
+          return true;
+        }
+      })
+      .catch(function () { /* mạng chập chờn: lượt sau hỏi lại */ })
+      .then(function (xong) {
+        if (xong) return;
+        if (Date.now() - batDau < TOI_DA) { setTimeout(hoi, NHIP); return; }
+        // Hết 15 phút mà vẫn đang tạo: thôi hỏi, mở lại nút (máy chủ vẫn chặn nếu còn đang chờ thật).
+        if (nut) nut.disabled = false;
+        if (goiY) goiY.textContent = "Chưa thấy xong — tải lại trang để xem trạng thái mới.";
+      });
+  }
+  setTimeout(hoi, NHIP);
+})();

@@ -657,23 +657,40 @@ def test_do_phu_json_doi_diem_canh_bao_link_an_toan():
         "tag": ["lammoidieuviyeu"], "trang": 3, "gio": 20, "moi_trang": None}
 
 
-def test_api_chi_so_co_the_do_phu_va_bang_chua_tao_thi_bo_the():
-    from test_dashboard_app import XEM, dang_nhap, tao
+def test_do_thu_du_chi_o_quan_tri_khong_o_chi_so():
+    """20/10/2026 chủ dự án: "Độ thu đủ" chỉ giúp người vận hành — bỏ khỏi trang Chỉ số (API không
+    trả, JS không vẽ ô) cho mọi người; thẻ vận hành ở trang Quản trị, CHỈ quản trị viên, mỗi dự án
+    một dòng (đúng `CS.do_phu_json`), bảng chưa tạo thì trang vẫn chạy."""
+    from test_dashboard_app import HP_QL, QL, XEM, dang_nhap, tao
     from dashboard.kho import LoiKho
     _, c, kho = tao()
-    dang_nhap(c, XEM)
-    url = "/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14"
-    assert c.get(url).json()["do_phu"] is None
     luc = datetime.datetime.now(_VN) - datetime.timedelta(hours=1)
     kho.do_phu = [_dong_dp(66.67, luc), _dong_dp(70.0, luc - datetime.timedelta(days=4))]
-    d = c.get(url).json()["do_phu"]
-    assert d["do_phu_tl"] == 66.67 and d["canh_bao"] and d["so_sot"] == 10
+    url = "/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14"
+    for ai in (XEM, QL):
+        dang_nhap(c, ai)
+        assert "do_phu" not in c.get(url).json(), ai
+    js = (Path(__file__).resolve().parents[1] / "dashboard" / "static" / "chi_so.js").read_text(
+        encoding="utf-8")
+    assert "theDoPhuKpi" not in js and "d.do_phu" not in js
+    dang_nhap(c, QL)
+    t = c.get("/quan-tri").text
+    khoi = t.split('data-o="do-thu-du"')[1].split("</section>")[0]
+    assert "Độ thu đủ" in khoi and "66,7%" in khoi and "▼ 3,3 điểm" in khoi
+    assert "thiếu 10 bài" in khoi and "chỉ có hashtag" in khoi and "dưới 80,0%" in khoi
+    assert "Lần kiểm" in khoi and "KHÔNG phải độ phủ thị trường" in khoi           # ⓘ
+    assert 'href="/ngan-sach?du_an=hapas"' in khoi and "đã bổ sung" in khoi
+    assert 'href="javascript' not in khoi
+    # Quản lý của bên (không phải quản trị viên): không thấy thẻ.
+    dang_nhap(c, HP_QL)
+    assert 'data-o="do-thu-du"' not in c.get("/quan-tri").text
 
     def hong(*a, **k):
         raise LoiKho("kho lắng nghe báo lỗi (UndefinedTable: 42P01)")
     kho.do_phu_gan_nhat = hong
-    r = c.get(url)
-    assert r.status_code == 200 and r.json()["do_phu"] is None
+    dang_nhap(c, QL)
+    r = c.get("/quan-tri")
+    assert r.status_code == 200 and "Chưa dự án nào có lượt kiểm" in r.text
 
 
 def test_trang_ngan_sach_kiem_do_phu_luu_cong_tac_va_tran():

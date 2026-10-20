@@ -99,8 +99,10 @@ PHAN = {
     "khung_hoang": "tín hiệu khủng hoảng: bài tiêu cực ≥ 1.000 tương tác, tiêu cực tăng",
     "chi_phi": "ngân sách tháng: đã tiêu, dự báo, trần, các lượt quét gần nhất (chi phí, kết quả)",
     "lich": "lịch quét tự động: trạng thái, mốc kế, ≈ USD 30 ngày, kết quả lần gần nhất",
-    "do_phu": "độ thu đủ (thẻ “Độ thu đủ”, trước gọi độ phủ): % mẫu kiểm của Mark đã có trong "
-              "kho, 2 lần/tuần (khi đã có) — không phải độ phủ thị trường / share of voice",
+    "do_phu": "độ thu đủ (số VẬN HÀNH, trước gọi độ phủ; từ 20/10/2026 chỉ ở trang Quản trị và CHỈ "
+              "trả cho quản trị viên): % mẫu kiểm của Mark đã có trong kho, 2 lần/tuần (khi đã có) "
+              "— không phải độ phủ thị trường / share of voice; chỉ lấy khi người hỏi hỏi thu "
+              "thập có sót không",
     "bo_loc": "giá trị lọc đang có dữ liệu (nền tảng, loại nguồn, chủ đề, khoá nguồn…)",
     "quang_cao": "quảng cáo TikTok Ads + Meta Ads (Facebook/Instagram) của các bên người hỏi được "
                  "xem: tổng + tách theo nền tảng (`theo_nen_tang`), theo tài khoản, theo ngày, top "
@@ -1330,7 +1332,10 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
         ra["link_lich_quet"] = f"{DASHBOARD_URL}/lich-quet?" + urllib.parse.urlencode(
             {"du_an": du_an["ma"]})
     if "do_phu" in phan:
-        ra["phan"]["do_phu"] = _do_phu(kho, du_an["ma"], bay_gio)
+        # Số VẬN HÀNH (20/10/2026): chỉ quản trị viên — như thẻ ở trang Quản trị.
+        ra["phan"]["do_phu"] = (_do_phu(kho, du_an["ma"], bay_gio) if PQ.la_quan_tri(nguoi["q"])
+                                else {"co": False, "ghi_chu": "Độ thu đủ là số vận hành — chỉ "
+                                      "quản trị viên xem được (trang Quản trị)."})
     if "quang_cao" in phan:
         ra["phan"]["quang_cao"] = quang_cao(kho, nguoi["q"], args, tu, den, top)
     ra["ghi_chu"] = ("Số tính bằng đúng code của dashboard. % đổi = so với kỳ liền trước cùng độ "

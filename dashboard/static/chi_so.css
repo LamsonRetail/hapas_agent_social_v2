@@ -309,22 +309,6 @@ dialog.cs-tam::backdrop { background: rgba(10, 18, 40, .45); }
 .cs-kpi-yd { width: 100%; font: inherit; text-align: left; cursor: pointer; color: inherit; transition: background-color .12s; }
 .cs-kpi-yd:hover { background: var(--be-mat-2); }
 .cs-kpi-yd:focus-visible { outline: 2px solid var(--nhan); outline-offset: -2px; }
-.cs-kpi-dp--canh { background: color-mix(in srgb, var(--canh-nen) 70%, var(--be-mat)); }
-.cs-kpi-dp--canh .kpi__so { color: var(--canh); }
-.cs-kpi-dp__phu { overflow-wrap: anywhere; }
-.cs-kpi-dp__nut { font: inherit; color: var(--nhan); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-.cs-kpi-dp__nut:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
-.cs-sot + .cs-sot { margin-top: 10px; }
-.cs-sot__dau { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.cs-sot__ten { font-weight: 650; overflow-wrap: anywhere; }
-.cs-sot__dau .the { margin-left: auto; }
-.cs-sot__so { margin-top: 4px; font-size: 13px; }
-.cs-sot__chu { margin: 6px 0 0; overflow-wrap: anywhere; }
-.cs-sot__ly { margin: 6px 0 0; color: var(--canh); }
-.cs-sot__lam { margin: 4px 0 0; color: var(--tot); }
-.cs-sot-tom { margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: var(--be-mat-2); border: 1px solid var(--ke); }
-.cs-sot-tom p { margin: 0; }
-.cs-sot-tom p + p { margin-top: 4px; }
 .kpi.cs-kpi-sac {
   grid-column: 1 / -1; display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
   align-items: center; gap: 10px 28px; padding: 12px 16px; container-type: normal;

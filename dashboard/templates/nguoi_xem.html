@@ -176,10 +176,6 @@
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <button class="nut" type="submit"{% if not tt.co_khoa %} disabled{% endif %}>{% if tt.co_token and not tt.khong_het_han %}Đăng nhập lại để gia hạn 30 ngày{% else %}Đăng nhập TikTok để kết nối{% endif %}</button>
     </form>
-    <form method="post" action="/tiktok/dong-bo">
-      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <button class="nut nut--nhe" type="submit"{% if not tt.co_token or tt.dang_dong_bo or tt.yeu_cau_dong_bo_luc %} disabled{% endif %}><svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>Đồng bộ ngay</button>
-    </form>
     <form method="post" action="/tiktok/ngat" data-xac-nhan="Ngắt kết nối TikTok Ads? Token bị thu hồi và xoá khỏi máy chủ; số đã đồng bộ giữ nguyên. Muốn đồng bộ tiếp phải đăng nhập lại.">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <button class="nut nut--loi" type="submit"{% if not tt.co_token %} disabled{% endif %}>Ngắt kết nối</button>
@@ -224,10 +220,6 @@
     {% endif %}
   </dl>
   <div class="tt-nut">
-    <form method="post" action="/meta/dong-bo">
-      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <button class="nut nut--nhe" type="submit"{% if not mt.co_token or mt.dang_dong_bo or mt.yeu_cau_dong_bo_luc %} disabled{% endif %}>Đồng bộ ngay</button>
-    </form>
     <form method="post" action="/meta/ngat" data-xac-nhan="Xoá token Meta khỏi máy chủ? Số đã đồng bộ giữ nguyên. Token người dùng hệ thống KHÔNG tự hết hạn — thu hồi trong Meta Business Settings.">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <button class="nut nut--loi" type="submit"{% if not mt.co_token %} disabled{% endif %}>Ngắt (xoá token)</button>
@@ -284,9 +276,64 @@
 </section>
 {% endif %}
 
+{#- Độ thu đủ (20/10/2026, chủ dự án): thẻ VẬN HÀNH, chỉ quản trị viên — trước là ô KPI trên trang Chỉ số
+    nhưng chỉ đo thu thập có sót bài không (MKT không dùng). Mỗi dự án một dòng: số theo thảo luận, ▲▼ điểm
+    so với lần kiểm trước, "thiếu N bài · lý do · ngày kiểm", ⓘ cách kiểm; bấm "thiếu N bài" mở danh sách
+    bài sót (thay cho ngăn của trang Chỉ số). Cấu hình kiểm (bật/tắt, trần USD) ở trang Ngân sách. #}
+{% if co_kiem_do_phu %}
+<section class="the-khoi cach-duoi" id="do-thu-du" aria-labelledby="dp-tieu-de" data-o="do-thu-du">
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">7</span>
+    <h2 class="muc__ten" id="dp-tieu-de">Độ thu đủ</h2>
+    <button type="button" class="goi-y" data-goi-y="Số cho người vận hành: Mark kiểm 2 lần mỗi tuần xem thu thập có sót bài nhắc brand không (mẫu TikTok lấy bằng đường khác). Không phải độ phủ thị trường / share of voice, không theo bộ lọc. Bật / tắt và trần USD mỗi lần: trang Ngân sách của dự án.">i</button>
+  </div>
+  {% if do_phu %}
+  <ul class="dp-ds">
+    {% for x in do_phu %}
+    <li class="dp-o{% if x.canh_bao %} dp-o--canh{% endif %}" data-du-an="{{ x.du_an }}">
+      <div class="dp-o__dau">
+        <span class="dp-o__ten">{{ x.ten_du_an }}{% if not x.dang_bat %} <span class="the">đang tắt</span>{% endif %}</span>
+        <button type="button" class="goi-y" data-goi-y="{{ x.mo_ta }}">i</button>
+        {% if x.canh_bao %}<span class="the the--canh">dưới {{ x.nguong|pt_vn }}</span>{% endif %}
+        {% if x.cu %}<span class="the the--canh" title="Lần kiểm gần nhất đã quá {{ x.cu_ngay }} ngày">kiểm đã cũ</span>{% endif %}
+      </div>
+      <div class="dp-o__so">
+        <b class="so">{{ x.do_phu_tl|pt_vn }}</b>
+        {% if x.doi_chu %}<span class="kpi__doi kpi__doi--{{ 'tang' if x.doi_diem > 0 else ('giam' if x.doi_diem < 0 else 'bang') }}" title="So với lần kiểm {{ x.truoc.luc[:10] if x.truoc and x.truoc.luc else '' }}: {{ x.truoc.do_phu_tl|pt_vn if x.truoc else '—' }} → {{ x.do_phu_tl|pt_vn }}">{{ x.doi_chu }}</span>{% endif %}
+        <span class="dp-o__phu">theo thảo luận · theo số bài {{ x.do_phu|pt_vn }}</span>
+      </div>
+      {% if x.so_sot %}
+      <details class="dp-o__sot">
+        <summary>thiếu {{ x.so_sot|so_vn }} bài{% if x.ly_do_dau %} · {{ x.ly_do_dau }}{% endif %} · {{ x.ngay }}</summary>
+        {% if x.ly_do_chu %}<p class="mo nho">Lý do sót: {{ x.ly_do_chu }}.</p>{% endif %}
+        {% if x.lam_gi %}<p class="mo nho">Mark đã làm: {{ x.lam_gi }}.</p>{% endif %}
+        <ul class="dp-sot">
+          {% for b in x.bai_sot %}
+          <li>
+            {% if b.link %}<a href="{{ b.link }}" target="_blank" rel="noopener noreferrer">@{{ b.tai_khoan or '?' }}</a>{% else %}@{{ b.tai_khoan or '?' }}{% endif %}
+            <span class="mo nho">{% if b.dang_luc %}{{ b.dang_luc[:10] }} · {% endif %}{{ b.thao_luan|so_vn }} thảo luận · {{ b.binh_luan|so_vn }} bình luận</span>
+            <span class="the{% if b.bo_sung %} the--tot{% endif %}">{{ 'đã bổ sung' if b.bo_sung else 'chưa bổ sung' }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% if x.so_sot > x.bai_sot|length %}<p class="mo nho">Chỉ hiện {{ x.bai_sot|length }} bài nhiều thảo luận nhất.</p>{% endif %}
+      </details>
+      {% else %}
+      <p class="dp-o__phu">{{ x.so_mau|so_vn }} bài mẫu, không sót · {{ x.ngay }}</p>
+      {% endif %}
+      <a class="nho" href="/ngan-sach?du_an={{ x.du_an }}">Cấu hình kiểm</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="trong">Chưa dự án nào có lượt kiểm độ thu đủ.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="the-khoi cach-duoi">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">{{ 7 if nguoi.la_quan_tri else 3 }}</span>
+    <span class="muc__so" aria-hidden="true">{{ (8 if co_kiem_do_phu else 7) if nguoi.la_quan_tri else 3 }}</span>
     <h2 class="muc__ten">Nhật ký thay đổi</h2>
     <button type="button" class="goi-y" data-goi-y="100 dòng mới nhất{% if not nguoi.la_quan_tri %} về dự án và quyền của các bên bạn quản lý{% endif %}.">i</button>
   </div>

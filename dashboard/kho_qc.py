@@ -170,6 +170,18 @@ def bat_dau_dong_bo(ncc: str = NCC, cho_nhanh: bool = False, chi_nhanh: bool = F
     return (r or {}).get("dong_bo_kieu") or "day_du"
 
 
+def _yeu_cau(c, ai: str, ncc: str, kieu: str) -> None:
+    """Ghi cờ yêu cầu trong giao dịch `c` (dùng chung `yeu_cau_dong_bo` / `nap_lai`)."""
+    _dam_bao(c, ncc)
+    c.execute("UPDATE ket_noi_ngoai SET yeu_cau_kieu = CASE WHEN yeu_cau_dong_bo_luc IS NOT "
+              "NULL AND yeu_cau_kieu = 'day_du' THEN 'day_du' ELSE %s END, "
+              "yeu_cau_dong_bo_luc = COALESCE(yeu_cau_dong_bo_luc, now()), yeu_cau_boi = %s "
+              "WHERE nha_cung_cap = %s", (kieu, ai, ncc))
+    # 20/10/2026: đánh thức bộ nghe (`nghe_qc`, LISTEN qc_tuc_thi) — lượt nhanh chạy ngay thay vì
+    # chờ bộ hẹn giờ 2 phút. Thông báo chỉ gửi khi giao dịch COMMIT; không ai nghe thì bỏ.
+    c.execute("SELECT pg_notify('qc_tuc_thi', %s)", (ncc,))
+
+
 def yeu_cau_dong_bo(ai: str, ncc: str = NCC, kieu: str = "day_du") -> None:
     """Ghi cờ yêu cầu — bộ hẹn giờ 2 phút (`dong-bo --chi-khi-yeu-cau`) chạy lượt. Yêu cầu đang
     chờ thì giữ mốc cũ (không dời). `kieu`: day_du (quản trị viên / vừa kết nối) hoặc nhanh (mọi
@@ -177,14 +189,7 @@ def yeu_cau_dong_bo(ai: str, ncc: str = NCC, kieu: str = "day_du") -> None:
     nhanh: nhật ký ghi ở app (`kho.ghi_nhat_ky`, kieu bam_tay)."""
     kieu = "nhanh" if kieu == "nhanh" else "day_du"
     with ket_noi() as c:
-        _dam_bao(c, ncc)
-        c.execute("UPDATE ket_noi_ngoai SET yeu_cau_kieu = CASE WHEN yeu_cau_dong_bo_luc IS NOT "
-                  "NULL AND yeu_cau_kieu = 'day_du' THEN 'day_du' ELSE %s END, "
-                  "yeu_cau_dong_bo_luc = COALESCE(yeu_cau_dong_bo_luc, now()), yeu_cau_boi = %s "
-                  "WHERE nha_cung_cap = %s", (kieu, ai, ncc))
-        # 20/10/2026: đánh thức bộ nghe (`nghe_qc`, LISTEN qc_tuc_thi) — lượt nhanh chạy ngay thay vì
-        # chờ bộ hẹn giờ 2 phút. Thông báo chỉ gửi khi giao dịch COMMIT; không ai nghe thì bỏ.
-        c.execute("SELECT pg_notify('qc_tuc_thi', %s)", (ncc,))
+        _yeu_cau(c, ai, ncc, kieu)
         if kieu == "day_du":
             _nhat_ky(c, ai, f"dong_bo_{_nen_tang(ncc)}", f"ket_noi:{ncc}", {"kieu": "yeu_cau"})
 
@@ -352,6 +357,23 @@ def dat_nap_lui(advertiser_id: str, tu: datetime.date, xong: bool) -> None:
         c.execute("UPDATE tk_quang_cao SET nap_lui_tu = %s, nap_lui_xong_luc = CASE WHEN %s "
                   "THEN now() ELSE nap_lui_xong_luc END WHERE advertiser_id = %s",
                   (tu, bool(xong), advertiser_id))
+
+
+def nap_lai(ai: str, ncc: str = NCC) -> int:
+    """"Đồng bộ lại 90 ngày" (trang Quảng cáo, quản trị viên, 20/10/2026), MỘT giao dịch: xoá mốc nạp lùi
+    của mọi tài khoản ĐANG ĐỒNG BỘ (đã duyệt, còn quyền) của nền tảng + ghi cờ yêu cầu day_du + NOTIFY +
+    MỘT dòng nhật ký — lượt đầy đủ kế tiếp nạp lại 90 ngày theo đúng đường nạp lùi sẵn có (3 cửa sổ
+    30 ngày, mới trước, ngắt giữa chừng thì lượt sau đọc tiếp). Upsert theo khoá chính nên đọc lại
+    không nhân đôi số. -> số tài khoản."""
+    nen = _nen_tang(ncc)
+    with ket_noi() as c:
+        n = c.execute("UPDATE tk_quang_cao SET nap_lui_tu = NULL, nap_lui_xong_luc = NULL, "
+                      "cap_nhat_luc = now() WHERE nen_tang = %s AND dang_dong_bo AND duyet "
+                      "AND con_quyen", (nen,)).rowcount or 0
+        _yeu_cau(c, ai, ncc, "day_du")
+        _nhat_ky(c, ai, "dong_bo_qc", f"quang_cao:{nen}",
+                 {"kieu": "bam_tay", "cua_so": "day_du", "nap_lai_ngay": 90, "so_tk": n})
+    return int(n)
 
 
 def dat_khan_gia(advertiser_id: str) -> None:
