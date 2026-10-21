@@ -421,15 +421,104 @@ details[open] > summary { margin-bottom: 12px; }
   .dx-thanh:not(.dx-thanh--co) .dx-thanh__so-lieu { display: none; }
 }
 
-/* ─── trang Người xem ─── */
-/* Người xem: bảng rộng (trạng thái Lark, đăng nhập) — cuộn ngang trong khung trên điện thoại.
-   18/10/2026 bỏ cột chức danh; phòng ban là dòng mờ dưới tên Lark. */
-.nx-bang td { vertical-align: middle; }
-.nx-bang .nx-dong2 { display: block; font-size: 12px; color: var(--chu-phu); margin-top: 2px; }
-.nx-bang .nx-pb { color: var(--chu-mo); margin-top: 0; }
-.nx-bang .nx-o { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.nx-bang td.nho { white-space: nowrap; }
-@media (max-width: 600px) { .nx-bang td:first-child { min-width: 150px; max-width: 170px; overflow-wrap: anywhere; } }
+/* ─── trang Quản trị: Người dùng và quyền (21/10/2026) ───
+   Danh sách nhẹ: tên đậm trước, email + phòng ban mờ dưới; quyền là chữ thường; "Sửa quyền" mở ngăn
+   ngay dưới dòng (ô chọn theo bên + công tắc Quản trị viên + Lưu/Huỷ). Điện thoại: mỗi dòng là một
+   thẻ, nhãn cột hiện trước giá trị, nút ≥ 44px. 18/10/2026: không hiện chức danh (chủ dự án). */
+.nx-cong-cu { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.nx-tim { position: relative; flex: 1 1 280px; max-width: 460px; display: flex; align-items: center; }
+.nx-tim .bt { position: absolute; left: 11px; color: var(--chu-mo); pointer-events: none; }
+.nx-tim input { width: 100%; padding-left: 34px; }
+.nx-them { margin-bottom: 14px; padding: 16px 18px; border: 1px solid var(--vien-3); border-radius: 10px; background: var(--be-mat-3); }
+.nx-them__tieu-de { margin: 0 0 12px; font-size: 14px; color: var(--tieu-de); }
+.nx-chon-nguoi { position: relative; display: flex; flex-direction: column; gap: 5px; max-width: 460px; margin-bottom: 14px; }
+.nx-truong { font-size: 12.5px; font-weight: 650; color: var(--chu); padding: 0; margin-bottom: 6px; }
+.nx-chon-nguoi .nx-truong { margin-bottom: 0; }
+.nx-goi-y {
+  position: absolute; z-index: 20; top: 64px; left: 0; right: 0; margin: 0; padding: 4px; list-style: none;
+  background: var(--be-mat); border: 1px solid var(--vien); border-radius: 10px; box-shadow: var(--bong-noi);
+  max-height: 320px; overflow-y: auto;
+}
+.nx-goi-y__dong { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+.nx-goi-y__dong:hover, .nx-goi-y__dong[aria-selected="true"] { background: var(--nhan-nen); }
+.nx-goi-y__ten { font-weight: 650; color: var(--chu); }
+.nx-goi-y__phu { font-size: 12px; color: var(--chu-phu); overflow-wrap: anywhere; }
+
+.nx-ds { list-style: none; margin: 0; padding: 0; border: 1px solid var(--ke); border-radius: 10px; background: var(--be-mat); }
+.nx-dau, .nx-hang {
+  display: grid; grid-template-columns: minmax(200px, 2.2fr) minmax(170px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 112px;
+  gap: 4px 16px; align-items: center; padding: 10px 14px;
+}
+.nx-dau { background: var(--be-mat-2); color: var(--chu-phu); font-weight: 650; font-size: 12.5px; border-radius: 10px 10px 0 0; border-bottom: 1px solid var(--ke); }
+.nx-dong + .nx-dong { border-top: 1px solid var(--ke); }
+.nx-dong { scroll-margin-top: 80px; transition: background-color .5s ease-out; }
+.nx-dong--mo, .nx-dong--doi { background: color-mix(in srgb, var(--nhan-nen) 45%, transparent); }
+.nx-dong--vua-luu { background: var(--tot-nen); }
+.nx-nguoi { display: flex; flex-direction: column; min-width: 0; }
+.nx-ten { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-weight: 700; color: var(--chu); overflow-wrap: anywhere; }
+.nx-phu { display: block; font-size: 12px; color: var(--chu-phu); overflow-wrap: anywhere; }
+.nx-pb { color: var(--chu-mo); }
+.nx-quyen__chu { color: var(--chu); }
+.nx-quyen__chu--qt { font-weight: 650; color: var(--tim-chu); }
+.nx-o { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nx-dn { font-size: 12.5px; color: var(--chu-phu); font-variant-numeric: tabular-nums; }
+.nx-hd { justify-self: end; }
+.nx-nhan { display: none; }
+
+.nx-ngan { padding: 4px 14px 14px; }
+.nx-form { display: flex; flex-direction: column; gap: 12px; }
+.nx-ngan .nx-form { padding: 14px 16px; border: 1px solid var(--vien); border-radius: 10px; background: var(--be-mat); max-width: 640px; }
+.nx-ben { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.nx-o-ben { display: grid; grid-template-columns: 140px minmax(0, 220px); align-items: center; gap: 4px 12px; }
+.nx-o-ben__ten { font-weight: 600; }
+.nx-o-ben select { width: 100%; }
+.nx-o-ben select:disabled { opacity: .6; cursor: not-allowed; }
+.nx-ly-do { grid-column: 2; font-size: 12px; color: var(--chu-mo); }
+.nx-ghi { margin: 0; font-size: 12.5px; color: var(--chu-mo); }
+.nx-cong-tac { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; width: fit-content; min-height: 32px; }
+.nx-cong-tac input {
+  -webkit-appearance: none; appearance: none; flex: none; width: 36px; height: 20px; margin: 0; border-radius: 999px;
+  background: var(--truc); position: relative; cursor: pointer; transition: background-color .15s ease-out;
+}
+.nx-cong-tac input::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(16, 24, 40, .25); transition: transform .15s ease-out;
+}
+.nx-cong-tac input:checked { background: var(--nhan); }
+.nx-cong-tac input:checked::after { transform: translateX(16px); }
+.nx-cong-tac input:disabled { opacity: .5; cursor: not-allowed; }
+.nx-cong-tac:has(input:disabled) { cursor: not-allowed; color: var(--chu-phu); }
+.nx-chan { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.nx-trang-thai { margin-right: auto; font-size: 12.5px; color: var(--canh); }
+.nx-ngan__chan { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; max-width: 640px; margin-top: 10px; }
+.nx-ngan__chan form { margin: 0; }
+.nx-trong { padding: 18px 0 6px; text-align: center; color: var(--chu-mo); }
+.nx-trong p { margin: 0 0 10px; }
+@media (prefers-reduced-motion: reduce) { .nx-dong, .nx-cong-tac input, .nx-cong-tac input::after { transition: none; } }
+
+@media (max-width: 760px) {
+  .nx-dau { display: none; }
+  .nx-ds { border: 0; background: transparent; display: flex; flex-direction: column; gap: 10px; }
+  .nx-dong { border: 1px solid var(--ke); border-radius: 10px; background: var(--be-mat); }
+  .nx-dong + .nx-dong { border-top: 1px solid var(--ke); }
+  .nx-hang { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 14px; }
+  .nx-quyen, .nx-lark, .nx-dn { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: center; }
+  .nx-nhan { display: block; font-size: 12px; color: var(--chu-mo); font-weight: 600; }
+  .nx-hd { justify-self: stretch; }
+  .nx-hd .nut, .nx-chan .nut, .nx-cong-cu .nut, .nx-ngan__chan .nut { min-height: 44px; }
+  .nx-hd .nut { width: 100%; }
+  .nx-cong-cu .nut { flex: 1 1 100%; }
+  .nx-tim { max-width: none; flex-basis: 100%; }
+  .nx-tim input, .nx-o-ben select, .nx-chon-nguoi input { min-height: 44px; font-size: 16px; }
+  .nx-ngan { padding: 0 10px 12px; }
+  .nx-ngan .nx-form { padding: 12px; }
+  .nx-o-ben { grid-template-columns: minmax(0, 1fr); }
+  .nx-ly-do { grid-column: 1; }
+  .nx-cong-tac { min-height: 44px; }
+  .nx-chan .nut { flex: 1 1 0; }
+  .nx-trang-thai { flex-basis: 100%; }
+  .nx-them { padding: 14px 12px; }
+}
 
 /* ─── đăng nhập / lỗi ─── */
 .trang-dang-nhap { max-width: 440px; margin: 9vh auto; text-align: center; }

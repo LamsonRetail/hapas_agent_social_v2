@@ -164,3 +164,80 @@ def kiem_xoa_nguoi(lam: dict, dich: dict | None, so_quan_tri_khac: int) -> None:
 def kiem_tao_ben(lam: dict) -> None:
     if not (_la_he_thong(lam) or la_quan_tri(lam)):
         raise LoiQuyen("Chỉ quản trị viên mới tạo được bên.")
+
+
+# ─────────────── đặt TRỌN quyền một người trong một lần Lưu (21/10/2026) ───────────────
+#: Lựa chọn của ô Quyền theo bên trên trang Quản trị: "" = Không có quyền.
+LUA_CHON_BEN = {"": "Không có quyền", **VAI_TRO}
+
+
+def thay_doi_quyen(lam: dict, email_lam: str, dich: dict | None, email: str,
+                   quan_tri: bool | None, ben_moi: dict[str, str | None],
+                   so_quan_tri_khac: int) -> tuple[list[tuple], dict]:
+    """Chủ dự án 21/10/2026: mỗi người sửa quyền ở MỘT chỗ, bấm Lưu mới áp. Hàm này so trạng thái
+    gửi lên với `dich` (quyền hiện tại, None = chưa có tên) và KIỂM TỪNG THAY ĐỔI bằng đúng các
+    luật cũ (`kiem_dat_quan_tri`, `kiem_luu_quyen`, `kiem_xoa_quyen`) — không luật nào mới, không
+    luật nào bị bỏ; một thay đổi sai thì cả lần lưu bị từ chối (kho áp trong MỘT giao dịch).
+
+    `quan_tri`: None = không đổi cờ (biểu mẫu của quản lý bên không có công tắc). `ben_moi`: chỉ các
+    bên biểu mẫu GỬI LÊN {bên: "xem" | "quan_ly" | None (bỏ quyền)}; bên không gửi giữ nguyên (ô bị
+    khoá không gửi, quyền ở bên người sửa không quản lý không bị xoá ngầm). Người còn / sẽ là quản
+    trị viên: bỏ qua `ben_moi` (quản trị viên có mọi bên; quyền theo bên giữ để dùng lại khi bỏ cờ).
+    -> (thay đổi [("quan_tri", None, trước, sau) | ("ben", mã, trước, sau)], quyền sau khi lưu)."""
+    cu = chuan(dich) or {"la_quan_tri": False, "ben": {}}
+    qt_moi = cu["la_quan_tri"] if quan_tri is None else bool(quan_tri)
+    doi: list[tuple] = []
+    if qt_moi != cu["la_quan_tri"]:
+        kiem_dat_quan_tri(lam, dich, qt_moi, so_quan_tri_khac)
+        doi.append(("quan_tri", None, cu["la_quan_tri"], qt_moi))
+    ben = dict(cu["ben"])
+    if not qt_moi:
+        for b, v in sorted(ben_moi.items()):
+            truoc = cu["ben"].get(b)
+            if (v or None) == truoc:
+                continue
+            if v:
+                kiem_luu_quyen(lam, email_lam, dich, email, b, v)
+                ben[b] = v
+            else:
+                kiem_xoa_quyen(lam, email_lam, dich, email, b)
+                ben.pop(b, None)
+            doi.append(("ben", b, truoc, v or None))
+    if not doi:
+        # Cùng một câu cho người đã có tên và người mới: không thành cách dò email nào đã có quyền.
+        raise LoiQuyen("Chưa chọn quyền nào để lưu.")
+    return doi, {"la_quan_tri": qt_moi, "ben": ben}
+
+
+def lua_chon_ben(lam: dict, email_lam: str, dich: dict | None, email: str,
+                 don_vi: str) -> tuple[list[str], str]:
+    """Ô Quyền ở bên `don_vi` của một người: các giá trị (trong `LUA_CHON_BEN`) người sửa được
+    chọn — giá trị hiện tại luôn có — và câu vì sao bị khoá (câu lỗi của luật, rỗng khi chọn
+    được ít nhất một giá trị khác). Dùng CHÍNH các hàm kiểm ở trên nên trang không hứa điều kho
+    sẽ từ chối."""
+    cu = ((dich or {}).get("ben") or {}).get(don_vi) or ""
+    duoc, ly_do = [], ""
+    for v in LUA_CHON_BEN:
+        if v == cu:
+            duoc.append(v)
+            continue
+        try:
+            if v:
+                kiem_luu_quyen(lam, email_lam, dich, email, don_vi, v)
+            else:
+                kiem_xoa_quyen(lam, email_lam, dich, email, don_vi)
+        except LoiQuyen as e:
+            ly_do = ly_do or str(e)
+            continue
+        duoc.append(v)
+    return duoc, ("" if len(duoc) > 1 else ly_do)
+
+
+def tom_tat(q: dict | None, ten_ben: dict[str, str], ben_thay: list[str] | None = None) -> str:
+    """Chữ thường cho cột Quyền: "Quản trị viên" hoặc "HAPAS · Quản lý, MATEMADE · Chỉ xem" — chỉ
+    các bên `ben_thay` (người xem trang quản lý), không lộ quyền ở bên khác."""
+    if la_quan_tri(q):
+        return "Quản trị viên"
+    ben = (q or {}).get("ben") or {}
+    return ", ".join(f"{ten_ben.get(b, b.upper())} · {VAI_TRO[v]}" for b, v in sorted(ben.items())
+                     if v in VAI_TRO and (ben_thay is None or b in ben_thay))

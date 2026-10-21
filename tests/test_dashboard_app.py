@@ -183,6 +183,34 @@ class GiaKho:
         self._ghi(ai, "dat_quan_tri", f"nguoi_xem:{email}")
         return het
 
+    def dat_quyen(self, ai, email, quan_tri, ben, he_thong=False):
+        """Như kho thật: kiểm TOÀN BỘ trước (`PQ.thay_doi_quyen`), lỗi thì không áp gì; một dòng
+        nhật ký mỗi thay đổi."""
+        dich = self.quyen_cua(email)
+        try:
+            doi, sau = PQ.thay_doi_quyen(PQ.HE_THONG if he_thong else self._lam(ai), ai, dich,
+                                         email, quan_tri, ben, self._so_qt_khac(email))
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
+        if any(k == "ben" and v and b not in self.don_vi for k, b, _, v in doi):
+            raise LoiDuLieu("Không có bên này.")
+        self._tuong_minh(email)
+        self.nguoi.setdefault(email, PQ.vai_chung(sau) or "xem")
+        for k, b, _, v in doi:
+            if k == "quan_tri":
+                (self.quan_tri.add if v else self.quan_tri.discard)(email)
+            elif v:
+                self.quyen.setdefault(email, {})[b] = v
+            else:
+                self.quyen.get(email, {}).pop(b, None)
+        het = self._dong_bo(email)
+        for k, b, _, v in doi:
+            if k == "quan_tri":
+                self._ghi(ai, "dat_quan_tri", f"nguoi_xem:{email}")
+            else:
+                self._ghi(ai, "luu_quyen" if v else "xoa_quyen", f"quyen:{email}:{b}")
+        return {"thay_doi": doi, "nguoi_moi": dich is None, "xoa_nguoi_xem": het, "sau": sau}
+
     def cac_du_an(self):
         return [dict(v) for _, v in sorted(self.du_an.items())]
 
@@ -672,9 +700,9 @@ SUA = [("/du-an/them", {"ma": "moi", "ten": "Mới", "tu_khoa": "moi", "don_vi":
        ("/de-xuat/6/tu-choi", {}),
        ("/de-xuat/hang-loat", {"du_an": "hapas", "hanh_dong": "tu_choi", "ids": "5,6"}),
        ("/ngan-sach/hapas", {"tran_usd_thang": "7"}),
-       ("/nguoi-xem/them", {"email": "moi@hapas.vn", "vai_tro": "xem", "don_vi": "hapas"}),
+       ("/nguoi-xem/quyen", {"email": "moi@hapas.vn", "vai__hapas": "xem"}),
        ("/nguoi-xem/xoa", {"email": XEM}),
-       ("/nguoi-xem/quan-tri", {"email": "moi@hapas.vn", "bat": "1"}),
+       ("/nguoi-xem/quyen", {"email": "moi@hapas.vn", "co_quan_tri": "1", "quan_tri": "1"}),
        ("/don-vi/them", {"ma": "ben-moi", "ten": "Bên mới"}),
        ("/bigquery/dong-bo", {})]
 
@@ -998,10 +1026,18 @@ def test_khong_xoa_khong_bo_quan_tri_vien_cuoi():
     csrf = dang_nhap(c, QL)
     r = c.post("/nguoi-xem/xoa", data={"csrf": csrf, "email": QL})
     assert "quản trị viên cuối cùng" in thong_bao(c, r) and QL in kho.quan_tri
-    r = c.post("/nguoi-xem/quan-tri", data={"csrf": csrf, "email": QL, "bat": "0"})
+    r = c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": QL, "co_quan_tri": "1"})
     assert "quản trị viên cuối cùng" in thong_bao(c, r) and QL in kho.quan_tri
+    # bỏ cờ của chính mình kèm cấp bên cùng lúc: cả lần lưu bị từ chối (không áp nửa chừng)
+    r = c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": QL, "co_quan_tri": "1",
+                                         "vai__hapas": "quan_ly"})
+    assert "quản trị viên cuối cùng" in thong_bao(c, r) and QL not in kho.quyen
     assert kho.nk == []
-    r = c.post("/nguoi-xem/them", data={"csrf": csrf, "email": " QL2@Hapas.VN ", "quan_tri": "1"})
+    t = c.get("/quan-tri").text                  # công tắc khoá + lý do, không có nút Xoá
+    assert "Quản trị viên cuối cùng — thêm quản trị viên khác" in t
+    assert 'name="co_quan_tri"' not in t.split('data-email="quan@hapas.vn"')[1].split("</li>")[0]
+    r = c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": " QL2@Hapas.VN ",
+                                         "co_quan_tri": "1", "quan_tri": "1"})
     assert r.status_code == 303 and "ql2@hapas.vn" in kho.quan_tri
     r = c.post("/nguoi-xem/xoa", data={"csrf": csrf, "email": QL})
     assert r.status_code == 303 and QL not in kho.nguoi
@@ -1108,7 +1144,9 @@ def test_trang_nguoi_xem_doc_danh_ba_nen_roi_hien_ten_phong_ban():
     # 18/10/2026 (chủ dự án): bỏ cột Chức danh; phòng ban vẫn hiện dưới tên Lark.
     assert "Chức danh" not in t and "Trưởng phòng Marketing" not in t
     assert "Chuyên viên nội dung" not in t and "chức danh" not in t
-    assert '<span class="nx-dong2">Trần Quản</span><span class="nx-dong2 nx-pb">Marketing</span>' in t
+    assert '<span class="nx-ten">Trần Quản' in t
+    assert '<span class="nx-phu">quan@hapas.vn</span>' in t
+    assert '<span class="nx-phu nx-pb">Marketing</span>' in t
     assert "Marketing · Nội dung" in t
     assert t.count("Đang hoạt động") == 2 and "Đang đọc danh bạ" not in t
     so_goi = len(ghi)
@@ -1167,8 +1205,8 @@ def test_trang_nguoi_xem_hien_dang_nhap_gan_nhat():
 def test_them_nguoi_xem_canh_bao_khi_khong_co_trong_danh_ba():
     _, c, kho = tao()
     csrf = dang_nhap(c, QL)
-    r = c.post("/nguoi-xem/them", data={"csrf": csrf, "email": "go-sai@hapas.vn",
-                                        "vai_tro": "xem", "don_vi": "hapas"})
+    r = c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": "go-sai@hapas.vn",
+                                         "vai__hapas": "xem"})
     # đường thêm (nhanh, không dò cả danh bạ) KHÔNG ghi "khong_co" — chưa chắc vì Lark không
     # khớp enterprise_email; lượt đọc nền khi mở trang (có dò) mới ghi
     assert "go-sai@hapas.vn" not in kho.danh_ba
@@ -1185,8 +1223,8 @@ def test_them_nguoi_xem_canh_bao_khi_da_nghi_viec():
                                             "status": {"is_resigned": True}}}
     _, c, kho = tao(danh_ba=danh_ba_gia(nguoi))
     csrf = dang_nhap(c, QL)
-    t = thong_bao(c, c.post("/nguoi-xem/them", data={"csrf": csrf, "email": "nghi@hapas.vn",
-                                                    "vai_tro": "xem", "don_vi": "hapas"}))
+    t = thong_bao(c, c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": "nghi@hapas.vn",
+                                                     "vai__hapas": "xem"}))
     assert "thong-bao--canh" in t and "Đã nghỉ việc" in t and "nghi@hapas.vn" in kho.nguoi
 
 
@@ -1194,8 +1232,8 @@ def test_them_nguoi_xem_dang_hoat_dong_bao_ten():
     _, c, kho = tao()
     del kho.nguoi[XEM]
     csrf = dang_nhap(c, QL)
-    t = thong_bao(c, c.post("/nguoi-xem/them", data={"csrf": csrf, "email": XEM,
-                                                    "vai_tro": "xem", "don_vi": "hapas"}))
+    t = thong_bao(c, c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": XEM,
+                                                     "vai__hapas": "xem"}))
     assert "thong-bao--ok" in t and "— Lê Xem, tài khoản Lark đang hoạt động" in t
     assert "Chuyên viên nội dung" not in t, "18/10/2026: không hiện chức danh"
 
@@ -1205,8 +1243,8 @@ def test_them_nguoi_xem_lark_hong_hoac_cham_van_luu(monkeypatch, kw):
     monkeypatch.setattr(A, "DANH_BA_THEM_GIAY", 0.05)
     _, c, kho = tao(danh_ba=danh_ba_gia(**kw))
     csrf = dang_nhap(c, QL)
-    t = thong_bao(c, c.post("/nguoi-xem/them", data={"csrf": csrf, "email": "moi@hapas.vn",
-                                                    "vai_tro": "xem", "don_vi": "hapas"}))
+    t = thong_bao(c, c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": "moi@hapas.vn",
+                                                     "vai__hapas": "xem"}))
     assert "thong-bao--ok" in t and "Chưa kiểm được với danh bạ Lark" in t
     assert kho.nguoi["moi@hapas.vn"] == "xem"
     assert kho.danh_ba["moi@hapas.vn"]["danh_ba_loi"] in ("thieu_quyen", "loi")
@@ -1299,7 +1337,8 @@ def test_dang_nhap_luu_open_id_roi_trang_nguoi_xem_doc_theo_open_id():
     assert all(GIAM_DOC not in json.loads(r.content)["emails"] for r in em)
     t = c.get("/quan-tri").text
     assert kho.danh_ba[GIAM_DOC]["chuc_danh"] == "Giám đốc"
-    assert "Phạm Giám Đốc" in t and '<span class="nx-dong2 nx-pb">Nội dung</span>' in t
+    assert '<span class="nx-ten">Phạm Giám Đốc' in t
+    assert '<span class="nx-phu nx-pb">Nội dung</span>' in t
     assert "Giám đốc" not in t
 
 
@@ -2898,8 +2937,10 @@ def test_quan_ly_ben_khac_khong_sua_duoc_gi_cua_hapas():
              ("/lich-quet/1/sua", {"du_an": "mm", "kieu": "hang_ngay", "gio": "09:00"}),
              ("/lich-quet/1/bat-tat", {"bat": "0"}),
              ("/lich-quet/1/xoa", {}),
-             ("/nguoi-xem/them", {"email": "moi@hapas.vn", "don_vi": "hapas", "vai_tro": "xem"}),
-             ("/nguoi-xem/xoa", {"email": XEM, "don_vi": "hapas"}),
+             ("/nguoi-xem/quyen", {"email": "moi@hapas.vn", "vai__hapas": "xem"}),
+             ("/nguoi-xem/quyen", {"email": XEM, "vai__hapas": ""}),
+             ("/nguoi-xem/quyen", {"email": MM_XEM, "vai__hapas": "xem"}),
+             ("/nguoi-xem/xoa", {"email": XEM}),
              ("/don-vi/them", {"ma": "ben-moi", "ten": "Bên mới"}),
              ("/bigquery/dong-bo", {})]
     for duong, form in hapas:
@@ -2936,40 +2977,71 @@ def test_chi_xem_mot_ben_quan_ly_ben_khac():
     assert "/nguon/2/xoa" in c.get("/nguon?du_an=mm").text
 
 
+def _dong_cua(t: str, email: str) -> str:
+    """Phần HTML của MỘT dòng người trên trang Quản trị."""
+    return t.split(f'data-email="{email}"')[1].split("</li>")[0]
+
+
 def test_quan_ly_ben_chi_them_bo_nguoi_chi_xem_cua_ben_minh():
+    """21/10/2026: quản lý HAPAS sửa quyền qua MỘT nút Lưu (/nguoi-xem/quyen) — mọi luật cũ giữ
+    nguyên: chỉ cấp Chỉ xem ở bên mình, không đụng quản trị viên / quản lý khác / chính mình, không
+    xoá hẳn, không thấy người / quyền của bên khác."""
     _, c, kho = tao(_kho_hai_ben())
     csrf = dang_nhap(c, HP_QL)
     t = c.get("/quan-tri").text
     assert "<h1>Quản trị</h1>" in t and XEM in t and HAI_BEN in t
     assert MM_XEM not in t and MM_QL not in t                     # người chỉ ở bên khác: ẩn
-    assert "MATEMADE: Chỉ xem" not in t                            # quyền bên khác: ẩn
-    assert "/don-vi/them" not in t and "/nguoi-xem/quan-tri" not in t
+    assert "MATEMADE · Chỉ xem" not in t and "MATEMADE" not in t  # quyền / bên khác: ẩn
+    assert "/don-vi/them" not in t and 'name="co_quan_tri"' not in t and 'name="quan_tri"' not in t
+    assert "Xoá khỏi danh sách" not in t and "/nguoi-xem/xoa" not in t
+    assert "/nguoi-xem/them" not in t and "Cấp quản trị" not in t and "×" not in t
+    assert 'name="vai__hapas"' in t and 'name="vai__matemade"' not in t
     assert c.get("/nguoi-xem").status_code == 308                 # đường cũ còn mở được
     assert c.get("/nguoi-xem?ben=hapas").headers["location"] == "/quan-tri?ben=hapas"
+    # dòng XEM: chọn được Không có quyền / Chỉ xem; "Quản lý" khoá (chỉ quản trị viên cấp)
+    d = _dong_cua(t, XEM)
+    assert "HAPAS · Chỉ xem" in d and "Sửa quyền" in d
+    assert '<option value="quan_ly" disabled>Quản lý</option>' in d
+    assert '<option value="xem" selected>Chỉ xem</option>' in d
+    # dòng của chính mình: khoá, có lý do, không có nút Sửa quyền
+    d = _dong_cua(t, HP_QL)
+    assert "data-nx-sua" not in d and "HAPAS · Quản lý" in d
 
-    def gui(duong, **form):
-        return thong_bao(c, c.post(duong, data={"csrf": csrf, **form}))
-    assert "Đã lưu moi@hapas.vn (HAPAS: Chỉ xem)" in gui("/nguoi-xem/them", email="moi@hapas.vn",
-                                                         vai_tro="xem")   # một bên: tự chọn
+    def gui(**form):
+        return thong_bao(c, c.post("/nguoi-xem/quyen", data={"csrf": csrf, **form}))
+    t = gui(email="moi@hapas.vn", vai__hapas="xem")
+    assert "Đã lưu quyền cho moi@hapas.vn: HAPAS · Chỉ xem" in t
     assert kho.quyen["moi@hapas.vn"] == {"hapas": "xem"}
-    for form, loi in (({"email": "moi2@hapas.vn", "vai_tro": "quan_ly"}, "chỉ thêm được người"),
-                      ({"email": "moi2@hapas.vn", "don_vi": "matemade", "vai_tro": "xem"},
-                       "quản lý của bên này"),
-                      ({"email": QL, "don_vi": "hapas", "vai_tro": "xem"}, "quản trị viên"),
-                      ({"email": HP_QL, "don_vi": "hapas", "vai_tro": "xem"}, "chính mình"),
-                      ({"email": "moi2@hapas.vn", "quan_tri": "1"}, "Chỉ quản trị viên")):
-        assert loi in gui("/nguoi-xem/them", **form), form
+    for form, loi in (({"email": "moi2@hapas.vn", "vai__hapas": "quan_ly"}, "chỉ thêm được người"),
+                      ({"email": "moi2@hapas.vn", "vai__matemade": "xem"}, "quản lý của bên này"),
+                      ({"email": QL, "vai__hapas": "xem"}, "quản trị viên"),
+                      ({"email": HP_QL, "vai__hapas": "xem"}, "chính mình"),
+                      ({"email": HP_QL, "vai__hapas": ""}, "chính mình"),
+                      ({"email": "moi2@hapas.vn", "co_quan_tri": "1", "quan_tri": "1"},
+                       "Chỉ quản trị viên"),
+                      ({"email": "moi2@hapas.vn"}, "Chưa chọn quyền nào"),
+                      ({"email": XEM}, "Chưa chọn quyền nào"),      # cùng câu: không dò được ai
+                      ({"email": MM_XEM, "vai__hapas": ""}, "Chưa chọn quyền nào"),
+                      ({"email": "moi2@hapas.vn", "vai__hapas": "sep"}, "Vai trò phải là"),
+                      ({"email": "khong-phai-email", "vai__hapas": "xem"}, "Email không hợp lệ"),
+                      ({"email": "moi2@hapas.vn", "vai__HA PAS!": "xem"}, "Mã bên"),
+                      # một thay đổi sai -> cả lần lưu bị từ chối (HAPAS không bị bỏ)
+                      ({"email": HAI_BEN, "vai__hapas": "", "vai__matemade": ""},
+                       "quản lý của bên này")):
+        assert loi in gui(**form), form
     assert "moi2@hapas.vn" not in kho.nguoi and QL in kho.quan_tri
-    assert "Chỉ quản trị viên" in gui("/nguoi-xem/quan-tri", email=HP_QL, bat="1")
-    assert "Chỉ quản trị viên" in gui("/nguoi-xem/xoa", email=XEM)           # xoá hẳn
-    assert "Chỉ quản trị viên" in gui("/don-vi/them", ma="ben-moi", ten="Bên mới")
-    assert "matemade" in kho.quyen[HAI_BEN]
-    # bỏ khỏi HAPAS: người còn MATEMADE giữ MATEMADE; người chỉ có HAPAS bị xoá khỏi danh sách
-    assert "Đã bỏ quyền" in gui("/nguoi-xem/xoa", email=HAI_BEN, don_vi="hapas")
+    assert kho.quyen[HAI_BEN] == {"hapas": "xem", "matemade": "xem"}
+    assert "Chỉ quản trị viên" in thong_bao(c, c.post("/nguoi-xem/xoa",
+                                                       data={"csrf": csrf, "email": XEM}))
+    assert "Chỉ quản trị viên" in thong_bao(c, c.post("/don-vi/them", data={
+        "csrf": csrf, "ma": "ben-moi", "ten": "Bên mới"}))
+    # bỏ khỏi HAPAS: người còn MATEMADE giữ MATEMADE (không lộ tên bên đó); người chỉ có HAPAS bị
+    # xoá khỏi danh sách
+    t = gui(email=HAI_BEN, vai__hapas="")
+    assert f"Đã lưu — {HAI_BEN} không còn quyền ở bên bạn quản lý" in t and "MATEMADE" not in t
     assert kho.quyen[HAI_BEN] == {"matemade": "xem"} and HAI_BEN in kho.nguoi
-    assert "xoá khỏi danh sách" in gui("/nguoi-xem/xoa", email=XEM, don_vi="hapas")
+    assert "xoá khỏi danh sách" in gui(email=XEM, vai__hapas="")
     assert XEM not in kho.nguoi
-    assert "không có quyền ở bên này" in gui("/nguoi-xem/xoa", email=MM_XEM, don_vi="hapas")
     assert [h for _, h, _ in kho.nk] == ["luu_quyen", "xoa_quyen", "xoa_quyen"]
     assert "quyen:hai.ben@hapas.vn:hapas" in c.get("/quan-tri").text   # nhật ký bên mình
     dang_nhap(c, XEM)
@@ -2981,11 +3053,21 @@ def test_quan_tri_vien_doi_moi_quyen_va_chuyen_du_an():
     csrf = dang_nhap(c, QL)
     t = c.get("/quan-tri").text
     assert MM_XEM in t and "/don-vi/them" in t and "MATEMADE Store" in t and "Quản trị viên" in t
-    assert "MATEMADE: Chỉ xem" in t and "HAPAS: Chỉ xem" in t
+    assert "HAPAS · Chỉ xem, MATEMADE · Chỉ xem" in _dong_cua(t, HAI_BEN)
+    assert "Xoá khỏi danh sách" in _dong_cua(t, XEM)
+    assert 'name="vai__hapas"' in _dong_cua(t, MM_XEM) and 'name="vai__matemade"' in _dong_cua(
+        t, MM_XEM)
     assert MM_XEM not in c.get("/quan-tri?ben=hapas").text          # lọc theo bên
-    r = c.post("/nguoi-xem/them", data={"csrf": csrf, "email": MM_XEM, "don_vi": "hapas",
-                                        "vai_tro": "quan_ly"})
-    assert r.status_code == 303 and kho.quyen[MM_XEM] == {"matemade": "xem", "hapas": "quan_ly"}
+    # ngăn sửa vẫn có mọi bên khi đang lọc (lưu không xoá ngầm bên đang ẩn)
+    assert 'name="vai__matemade"' in _dong_cua(c.get("/quan-tri?ben=hapas").text, HAI_BEN)
+    r = c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": MM_XEM, "vai__hapas": "quan_ly",
+                                         "vai__matemade": "xem", "co_quan_tri": "1",
+                                         "loc_ben": "hapas"})
+    assert r.headers["location"].startswith("/quan-tri?ben=hapas#nx-")
+    assert ("Đã lưu quyền cho mm.xem@hapas.vn: HAPAS · Quản lý, MATEMADE · Chỉ xem"
+            in thong_bao(c, r))
+    assert kho.quyen[MM_XEM] == {"matemade": "xem", "hapas": "quan_ly"}
+    assert [h for _, h, _ in kho.nk] == ["luu_quyen"]               # chỉ bên đổi mới ghi
     r = c.post("/don-vi/them", data={"csrf": csrf, "ma": "Ben-Moi", "ten": "Bên mới"})
     assert "Đã tạo bên" in thong_bao(c, r) and "ben-moi" in kho.don_vi
     # quản lý HAPAS sửa dự án được nhưng KHÔNG chuyển bên; quản trị viên chuyển được
@@ -3002,6 +3084,113 @@ def test_quan_tri_vien_doi_moi_quyen_va_chuyen_du_an():
     dang_nhap(c, XEM)                     # người xem HAPAS: dự án đã sang bên khác → không thấy
     assert c.get("/api/chi-so?du_an=hapas&tu=2026-10-08&den=2026-10-14").status_code == 404
 
+
+def test_luu_quyen_mot_lan_ap_tron_bo():
+    """Một lần Lưu = một tập quyền đầy đủ: nhiều bên + cờ quản trị cùng lúc; bên không gửi giữ
+    nguyên; bật quản trị viên giữ quyền theo bên; hết quyền thì người đó rời danh sách."""
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, QL)
+
+    def gui(**form):
+        return thong_bao(c, c.post("/nguoi-xem/quyen", data={"csrf": csrf, **form}))
+    assert "HAPAS · Quản lý" in gui(email=HAI_BEN, vai__hapas="quan_ly", vai__matemade="")
+    assert kho.quyen[HAI_BEN] == {"hapas": "quan_ly"}
+    assert [h for _, h, _ in kho.nk] == ["luu_quyen", "xoa_quyen"]
+    kho.nk.clear()
+    # bên không gửi lên (ô khoá / không hiện) giữ nguyên
+    gui(email=MM_XEM, vai__hapas="xem")
+    assert kho.quyen[MM_XEM] == {"matemade": "xem", "hapas": "xem"}
+    # bật Quản trị viên (ô theo bên khoá -> không gửi): quyền theo bên giữ để dùng lại
+    assert "Đã lưu quyền cho nganlt@hapas.vn: Quản trị viên" in gui(
+        email=HP_QL, co_quan_tri="1", quan_tri="1")
+    assert HP_QL in kho.quan_tri and kho.quyen[HP_QL] == {"hapas": "quan_ly"}
+    # đang là quản trị viên: ô theo bên gửi kèm bị bỏ qua (không đổi gì)
+    assert "Chưa chọn quyền nào" in gui(email=HP_QL, co_quan_tri="1", quan_tri="1",
+                                        vai__hapas="xem")
+    # bỏ cờ + đổi bên trong cùng một lần
+    gui(email=HP_QL, co_quan_tri="1", vai__hapas="xem", vai__matemade="xem")
+    assert HP_QL not in kho.quan_tri
+    assert kho.quyen[HP_QL] == {"hapas": "xem", "matemade": "xem"}
+    # bên không có: không áp gì
+    assert "Không có bên này" in gui(email=HP_QL, vai__hapas="", vai__ben_la="xem")
+    assert kho.quyen[HP_QL] == {"hapas": "xem", "matemade": "xem"}
+    # hết quyền -> rời danh sách
+    assert "không còn quyền nào" in gui(email=HP_QL, vai__hapas="", vai__matemade="")
+    assert HP_QL not in kho.nguoi
+    # người mới chỉ là quản trị viên
+    assert "Quản trị viên" in gui(email="qt2@hapas.vn", co_quan_tri="1", quan_tri="1")
+    assert "qt2@hapas.vn" in kho.quan_tri
+
+
+def test_luu_quyen_doi_csrf_va_cung_nguon_goc():
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, QL)
+    truoc = _anh_kho(kho)
+    data = {"email": XEM, "vai__hapas": "quan_ly"}
+    for gui in ({**data}, {**data, "csrf": "sai"}):
+        r = c.post("/nguoi-xem/quyen", data=gui)
+        assert r.status_code == 403 and "Biểu mẫu đã hết hạn" in r.text
+    r = c.post("/nguoi-xem/quyen", data={**data, "csrf": csrf},
+               headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403
+    assert _anh_kho(kho) == truoc and kho.nk == []
+    csrf_xem = dang_nhap(c, XEM)                                  # chỉ xem: 403
+    r = c.post("/nguoi-xem/quyen", data={**data, "csrf": csrf_xem})
+    assert r.status_code == 403 and _anh_kho(kho) == truoc
+
+
+def test_trang_quan_tri_dien_thoai_va_tim_kiem():
+    """Danh sách là các dòng (thẻ trên điện thoại), nhãn cột cho điện thoại, ô tìm theo tên, nút
+    Thêm người; CSS có bố cục ≤ 760px với nút ≥ 44px; khoá tìm kiếm không dấu."""
+    _, c, kho = tao(_kho_hai_ben())
+    kho.danh_ba[XEM] = {"ten_lark": "Lê Xem", "phong_ban": "Nội dung"}
+    dang_nhap(c, QL)
+    t = c.get("/quan-tri").text
+    assert 'name="viewport" content="width=device-width, initial-scale=1"' in t
+    assert "nx-bang" not in t and t.count('class="nx-dong"') == 6
+    assert 'placeholder="Tìm người theo tên hoặc email"' in t and "Thêm người" in t
+    assert '<span class="nx-nhan">Quyền</span>' in t and "/tinh/quan_tri.js?v=" in t
+    assert 'data-tim="le xem xem@hapas.vn noi dung"' in t
+    assert 'name="vai__hapas"' in t and 'role="switch"' in t
+    css = c.get("/tinh/giao_dien.css").text
+    vung = css.split("@media (max-width: 760px) {\n  .nx-dau")[1].split("\n}\n")[0]
+    assert "min-height: 44px" in vung and ".nx-hang { grid-template-columns: minmax(0, 1fr)" in vung
+    js = c.get("/tinh/quan_tri.js").text
+    assert "/api/danh-ba/tim" in js and "textContent" in js and "innerHTML" not in js
+
+
+NGUOI_TIM = {**NGUOI_DN, "an@hapas.vn": {
+    "open_id": "ou_an", "name": "Nguyễn Thị Ân", "enterprise_email": "an@hapas.vn",
+    "department_ids": ["od_mkt"], "status": {"is_activated": True}},
+    "cu@hapas.vn": {"open_id": "ou_cu", "name": "Nguyễn Cũ", "email": "cu@hapas.vn",
+                    "department_ids": ["od_mkt"], "status": {"is_resigned": True}}}
+
+
+def test_api_tim_nguoi_theo_ten_trong_danh_ba():
+    ghi: list = []
+    _, c, _ = tao(_kho_hai_ben(), danh_ba=danh_ba_gia(NGUOI_TIM, ghi=ghi))
+    dang_nhap(c, HP_QL)                                    # quản lý bên được dùng
+    assert c.get("/api/danh-ba/tim?q=n").json() == {"ket_qua": [], "loi": ""}
+    assert ghi == []                                       # < 2 chữ: không gọi Lark
+    kq = c.get("/api/danh-ba/tim?q=nguyen an").json()
+    assert kq == {"ket_qua": [{"ten": "Nguyễn Thị Ân", "email": "an@hapas.vn",
+                               "phong_ban": "Marketing", "trang_thai": "hoat_dong"}], "loi": ""}
+    assert "chuc_danh" not in json.dumps(kq)
+    assert c.get("/api/danh-ba/tim?q=Nguyễn").json()["ket_qua"][0]["email"] == "an@hapas.vn"
+    assert c.get("/api/danh-ba/tim?q=cu").json()["ket_qua"] == []        # nghỉ việc: không gợi ý
+    t = c.get("/api/danh-ba/tim?q=giam doc").json()["ket_qua"]
+    assert [x["email"] for x in t] == [GIAM_DOC] and t[0]["phong_ban"] == "Nội dung"
+    so = len(ghi)
+    c.get("/api/danh-ba/tim?q=pham")                       # trong 30 phút: không đọc lại Lark
+    assert len(ghi) == so
+    dang_nhap(c, XEM)
+    assert c.get("/api/danh-ba/tim?q=nguyen").status_code == 403
+
+
+def test_api_tim_nguoi_danh_ba_loi_thi_bao_de_nhap_email():
+    _, c, _ = tao(danh_ba=danh_ba_gia(NGUOI_TIM, loi_buoc="quet_nguoi"))
+    dang_nhap(c, QL)
+    assert c.get("/api/danh-ba/tim?q=nguyen").json() == {"ket_qua": [], "loi": "thieu_quyen"}
 
 
 def _hai_nguon(kho):
