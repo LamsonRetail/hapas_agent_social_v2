@@ -1968,6 +1968,10 @@ def test_ngan_sach_canh_bao_vuot_tran_va_goi_y(giua_thang):
     assert i1 < i5 < i2                                       # 3 nguồn tốn nhất, tốn nhất trước
     assert "<b>Nguồn 3</b>" not in t and "<b>Nguồn 4</b>" not in t   # YouTube 0, tạm dừng
     assert "tăng chu kỳ quét, giảm số bài mỗi lần, hoặc tạm dừng nguồn tốn nhất" in t
+    # 21/10/2026: khối cảnh báo gập sau nút ⚠ (bấm mới mở), không JS thì hiện sẵn
+    assert 'id="ns-canh-bao" role="alert" hidden' in t
+    assert 'id="ns-mo-canh-bao" aria-expanded="false" aria-controls="ns-canh-bao"' in t
+    assert ".ns-canh-bao[hidden] { display: block; }" in t.split("<noscript>", 1)[1]
     assert "Hoặc tăng trần dự án" in t
 
 
