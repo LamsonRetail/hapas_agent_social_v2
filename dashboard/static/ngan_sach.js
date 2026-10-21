@@ -4,6 +4,19 @@
 // chủ phát trong #ns-du-lieu, ở đây không tự đặt giá nào. Không có JS thì trang vẫn đủ số (máy chủ
 // dựng sẵn) và biểu mẫu vẫn gửi được.
 "use strict";
+// Nút ⚠ "Dự báo vượt trần" (21/10/2026): mở / đóng khối cảnh báo gập — mọi vai trò (khối biểu mẫu
+// bên dưới chỉ chạy cho người sửa được cấu hình).
+(function () {
+  var nut = document.getElementById("ns-mo-canh-bao");
+  var khoi = document.getElementById("ns-canh-bao");
+  if (!nut || !khoi) return;
+  nut.addEventListener("click", function () {
+    var mo = khoi.hidden;
+    khoi.hidden = !mo;
+    nut.setAttribute("aria-expanded", mo ? "true" : "false");
+    if (mo && khoi.scrollIntoView) khoi.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+})();
 (function () {
   var nguon = document.getElementById("ns-du-lieu");
   var form = document.getElementById("ns-form");

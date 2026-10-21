@@ -68,7 +68,9 @@
   <div class="muc">
     <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
     <h2 class="muc__ten" id="ns-tong-tieu-de">{{ d.ten }}</h2><span class="the">{{ d.ma }}</span>{% if not d.dang_bat %} <span class="the">đang tắt</span>{% endif %}
-    <span class="muc__phai">{% if db.vuot %}<span class="the the--loi ns-pill">Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD</span>
+    {# Cảnh báo vượt trần GẬP sau nút ⚠ (chủ dự án 21/10/2026: "không cần đọc mà nó cứ hiện") —
+       bấm nút mở / đóng khối cảnh báo bên dưới; không JS thì khối hiện sẵn (<noscript>). #}
+    <span class="muc__phai">{% if db.vuot %}<button type="button" class="the the--loi ns-pill ns-pill--nut" id="ns-mo-canh-bao" aria-expanded="false" aria-controls="ns-canh-bao" title="Xem cảnh báo và cách xử lý"><span class="ns-pill__tam" aria-hidden="true">⚠</span>Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD<span class="ns-pill__mui" aria-hidden="true">▾</span></button>
     {% else %}<span class="the the--tot ns-pill">Trong trần</span>{% endif %}</span>
   </div>
   <div class="ns-tong__than">
@@ -100,7 +102,8 @@
   </div>
 
   {% if db.vuot %}
-  <div class="thong-bao thong-bao--loi ns-canh-bao" role="alert">
+  <noscript><style>.ns-canh-bao[hidden] { display: block; }</style></noscript>
+  <div class="thong-bao thong-bao--loi ns-canh-bao" id="ns-canh-bao" role="alert" hidden>
     <p><b>⚠ Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD</b> ({{ db.du_bao_thang|usd_vn }} / {{ db.tran|usd_vn }} USD): Mark sẽ chạm trần trước cuối tháng và bỏ qua các nguồn còn lại tới tháng sau.</p>
     <p>Muốn đủ tháng: tăng chu kỳ quét, giảm số bài mỗi lần, hoặc tạm dừng nguồn tốn nhất{% if db.top_ton %}:{% else %}.{% endif %}</p>
     {% if db.top_ton %}

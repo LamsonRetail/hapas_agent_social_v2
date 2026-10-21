@@ -7,6 +7,14 @@
 /* ─── tóm tắt dự án ─── */
 .ns-pill { font-size: 13px; font-weight: 650; padding: 3px 12px; }
 .ns-pill::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 2px; }
+.ns-pill--nut { cursor: pointer; border: 1px solid transparent; font: inherit; font-size: 13px; font-weight: 650; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; }
+.ns-pill--nut::before { content: none; }
+.ns-pill--nut:hover { border-color: currentColor; }
+.ns-pill--nut:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.ns-pill__tam { font-size: 14px; line-height: 1; }
+.ns-pill__mui { font-size: 11px; transition: transform .15s ease; }
+.ns-pill--nut[aria-expanded="true"] .ns-pill__mui { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .ns-pill__mui { transition: none; } }
 .ns-tong__than { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 18px 32px; align-items: start; }
 .ns-nhan { color: var(--chu-phu); font-size: 13px; font-weight: 600; }
 .ns-so-lon { font-size: 34px; font-weight: 750; line-height: 1.2; margin-top: 2px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
