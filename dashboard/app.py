@@ -2360,7 +2360,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 v = str(form.get(k) or "").strip()
                 ben[NL.ma_don_vi(str(k)[5:])] = NL.vai_tro(v) if v else None
             quan_tri = (form.get("quan_tri") == "1") if form.get("co_quan_tri") == "1" else None
-            kq = await _k(app.state.kho.dat_quyen, nguoi["email"], e, quan_tri, ben)
+            # Giá trị trang đã tải (soát 21/10/2026): kho từ chối khi đã có người sửa sau đó.
+            da_tai = {"quan_tri": (form.get("qt_cu") == "1") if form.get("qt_cu") in ("0", "1")
+                      else None,
+                      "ben": {b: (str(form.get(f"cu__{b}") or "").strip() or None)
+                              for b in ben if f"cu__{b}" in form}}
+            kq = await _k(app.state.kho.dat_quyen, nguoi["email"], e, quan_tri, ben,
+                          da_tai=da_tai)
         except (NL.LoiNhap, LoiDuLieu) as ex:
             return _chuyen(request, _ve_nguoi(form, ""), "loi", str(ex))
         ve = _ve_nguoi(form, "" if kq["xoa_nguoi_xem"] else e)
@@ -2377,6 +2383,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         tt = PQ.tom_tat(kq["sau"], cac_ben, thay)
         tin = (f"Đã lưu quyền cho {ai}: {tt}" if tt
                else f"Đã lưu — {ai} không còn quyền ở bên bạn quản lý")
+        if kq["sau"]["la_quan_tri"] and any((v or None) != kq["sau"]["ben"].get(b)
+                                             for b, v in ben.items()):
+            tin += " (đã là quản trị viên — quyền theo bên giữ nguyên)"
         if not kq["nguoi_moi"]:
             return _chuyen(request, ve, "ok", tin + ".")
         # Người mới: kiểm email với danh bạ Lark — CHỈ cảnh báo, không chặn. Nhanh: chỉ tra theo
@@ -2404,6 +2413,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         """Xoá hẳn một người (mọi bên) — chỉ quản trị viên, không xoá quản trị viên cuối (kho kiểm
         trong giao dịch có khoá bảng). Bỏ quyền ở MỘT bên: chọn "Không có quyền" rồi Lưu."""
         nguoi, form = await _sua(request)
+        if "don_vi" in form:
+            # Tab cũ (nút × bỏ quyền MỘT bên, trước 21/10/2026): không được thành xoá hẳn người.
+            return _chuyen(request, "/quan-tri", "loi",
+                           "Trang đã cũ — tải lại trang rồi sửa quyền bằng nút Sửa quyền.")
         try:
             e = NL.email(form.get("email"))
             await _k(app.state.kho.xoa_nguoi_xem, nguoi["email"], e)
@@ -2435,10 +2448,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
 
     @app.get("/api/danh-ba/tim")
     async def api_danh_ba_tim(request: Request):
-        """Gợi ý người theo TÊN hoặc email cho ô "Thêm người" (quản trị viên / quản lý bên). Tìm
+        """Gợi ý người theo TÊN hoặc email cho ô "Thêm người". Tìm
         không dấu trong bản nhớ của cả danh bạ Lark; tối đa 8 người. Danh bạ chưa đọc được thì
-        trả `loi` — trang vẫn cho nhập email."""
-        await _chi_quan_ly(request)
+        trả `loi` — trang vẫn cho nhập email. CHỈ quản trị viên (soát 21/10/2026: quản lý bên không
+        liệt kê được cả danh bạ công ty — họ nhập email)."""
+        nguoi = await _chi_quan_ly(request)
+        if not nguoi["la_quan_tri"]:
+            raise _Cam("Chỉ quản trị viên mới tìm được trong danh bạ Lark — nhập email Lark.")
         q = bo_dau(" ".join(str(request.query_params.get("q") or "").split()))[:80]
         if len(q) < 2:
             return JSONResponse({"ket_qua": [], "loi": ""})

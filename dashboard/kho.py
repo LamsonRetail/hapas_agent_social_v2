@@ -923,19 +923,21 @@ def dat_quan_tri(ai: str, email: str, bat: bool, *, he_thong: bool = False) -> b
 
 
 def dat_quyen(ai: str, email: str, quan_tri: bool | None, ben: dict[str, str | None], *,
-              he_thong: bool = False) -> dict:
+              da_tai: dict | None = None, he_thong: bool = False) -> dict:
     """Đặt TRỌN quyền một người trong MỘT giao dịch (nút Lưu trang Quản trị, 21/10/2026): cờ quản
     trị viên (None = không đổi) + {bên: vai trò | None = bỏ} cho các bên biểu mẫu gửi lên. Mọi
     thay đổi kiểm bằng đúng luật cũ (`PQ.thay_doi_quyen`) sau khi khoá bảng; một thay đổi sai thì
     không áp gì. Nhật ký: MỘT dòng mỗi thay đổi, cùng tên/chi tiết như các hàm lẻ (`luu_quyen`,
     `xoa_quyen`, `dat_quan_tri`) — quản lý bên A chỉ thấy dòng về bên A (lọc `chi_tiet.don_vi`).
+    `da_tai`: giá trị trang đã tải (soát 21/10/2026) — đổi sau khi mở trang thì từ chối, kiểm SAU
+    khoá nên hai người cùng lưu không ghi đè nhau.
     -> {"thay_doi": [...], "nguoi_moi": bool, "xoa_nguoi_xem": bool, "sau": quyền sau khi lưu}."""
     with ket_noi() as c:
         _khoa_nguoi_xem(c)
         dich = _quyen_trong(c, email)
         try:
             doi, sau = PQ.thay_doi_quyen(_lam(c, ai, he_thong), ai, dich, email, quan_tri, ben,
-                                          _so_quan_tri_khac(c, email))
+                                          _so_quan_tri_khac(c, email), da_tai)
         except PQ.LoiQuyen as e:
             raise _loi(e) from None
         kq = {"thay_doi": doi, "nguoi_moi": dich is None, "xoa_nguoi_xem": False, "sau": sau}

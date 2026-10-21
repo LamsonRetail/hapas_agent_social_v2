@@ -173,7 +173,7 @@ LUA_CHON_BEN = {"": "Không có quyền", **VAI_TRO}
 
 def thay_doi_quyen(lam: dict, email_lam: str, dich: dict | None, email: str,
                    quan_tri: bool | None, ben_moi: dict[str, str | None],
-                   so_quan_tri_khac: int) -> tuple[list[tuple], dict]:
+                   so_quan_tri_khac: int, da_tai: dict | None = None) -> tuple[list[tuple], dict]:
     """Chủ dự án 21/10/2026: mỗi người sửa quyền ở MỘT chỗ, bấm Lưu mới áp. Hàm này so trạng thái
     gửi lên với `dich` (quyền hiện tại, None = chưa có tên) và KIỂM TỪNG THAY ĐỔI bằng đúng các
     luật cũ (`kiem_dat_quan_tri`, `kiem_luu_quyen`, `kiem_xoa_quyen`) — không luật nào mới, không
@@ -181,17 +181,36 @@ def thay_doi_quyen(lam: dict, email_lam: str, dich: dict | None, email: str,
 
     `quan_tri`: None = không đổi cờ (biểu mẫu của quản lý bên không có công tắc). `ben_moi`: chỉ các
     bên biểu mẫu GỬI LÊN {bên: "xem" | "quan_ly" | None (bỏ quyền)}; bên không gửi giữ nguyên (ô bị
-    khoá không gửi, quyền ở bên người sửa không quản lý không bị xoá ngầm). Người còn / sẽ là quản
-    trị viên: bỏ qua `ben_moi` (quản trị viên có mọi bên; quyền theo bên giữ để dùng lại khi bỏ cờ).
+    khoá không gửi, quyền ở bên người sửa không quản lý không bị xoá ngầm). Quản trị viên sửa người
+    còn / sẽ là quản trị viên: bỏ qua `ben_moi` (quyền theo bên giữ để dùng lại khi bỏ cờ).
+    `da_tai`: giá trị trang ĐÃ TẢI cho các ô gửi lên {"quan_tri": bool | None, "ben": {bên: vai |
+    None}} — khác giá trị đang lưu thì có người sửa sau khi mở trang: từ chối, không ghi đè.
     -> (thay đổi [("quan_tri", None, trước, sau) | ("ben", mã, trước, sau)], quyền sau khi lưu)."""
+    toan_quyen = _la_he_thong(lam) or la_quan_tri(lam)
+    if not toan_quyen:
+        # Soát 21/10/2026: phạm vi NGƯỜI SỬA xét TRƯỚC mọi so sánh với quyền hiện tại của người bị
+        # sửa — câu lỗi không phụ thuộc người đó có / không có quyền ở bên khác (không dò được).
+        if quan_tri is not None:
+            kiem_dat_quan_tri(lam, dich, bool(quan_tri), so_quan_tri_khac)
+        ql = set(ben_quan_ly(lam))
+        if any(b not in ql for b in ben_moi):
+            raise LoiQuyen("Chỉ quản trị viên hoặc quản lý của bên này mới sửa được quyền ở bên "
+                           "này.")
     cu = chuan(dich) or {"la_quan_tri": False, "ben": {}}
+    if da_tai is not None:
+        cu_qt, cu_ben = da_tai.get("quan_tri"), da_tai.get("ben") or {}
+        if ((quan_tri is not None and cu_qt is not None and bool(cu_qt) != cu["la_quan_tri"])
+                or any(b in ben_moi and (v or None) != cu["ben"].get(b)
+                       for b, v in cu_ben.items())):
+            raise LoiQuyen(f"Đã có người sửa quyền của {email} sau khi bạn mở trang — tải lại "
+                           "trang rồi sửa.")
     qt_moi = cu["la_quan_tri"] if quan_tri is None else bool(quan_tri)
     doi: list[tuple] = []
     if qt_moi != cu["la_quan_tri"]:
         kiem_dat_quan_tri(lam, dich, qt_moi, so_quan_tri_khac)
         doi.append(("quan_tri", None, cu["la_quan_tri"], qt_moi))
     ben = dict(cu["ben"])
-    if not qt_moi:
+    if not (qt_moi and toan_quyen):
         for b, v in sorted(ben_moi.items()):
             truoc = cu["ben"].get(b)
             if (v or None) == truoc:

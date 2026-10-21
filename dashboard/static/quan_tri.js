@@ -67,7 +67,8 @@
         var o = f.querySelector("[data-nx-email]");
         if (o.value.indexOf("@") < 0) {
           e.preventDefault();
-          f.querySelector("[data-nx-chon-ghi]").textContent = "Chọn một người trong gợi ý, hoặc nhập email đầy đủ.";
+          f.querySelector("[data-nx-chon-ghi]").textContent = o.hasAttribute("data-nx-goi-y") ?
+            "Chọn một người trong gợi ý, hoặc nhập email đầy đủ." : "Nhập email Lark đầy đủ, vd ten@hapas.vn.";
           o.focus();
           return;
         }
@@ -147,7 +148,8 @@
   });
   trong.querySelector("[data-nx-them-tu]").addEventListener("click", function () { datMoThem(true, o_tim.value.trim()); });
 
-  function anGoiY() { dsGoiY.hidden = true; dsGoiY.textContent = ""; oEmail.setAttribute("aria-expanded", "false"); chon = -1; }
+  // Quản lý bên: không có ô gợi ý (danh bạ chỉ quản trị viên tìm được) — chỉ nhập email.
+  function anGoiY() { if (!dsGoiY) return; dsGoiY.hidden = true; dsGoiY.textContent = ""; oEmail.setAttribute("aria-expanded", "false"); chon = -1; }
   function daCo(email) { return dong.filter(function (d) { return d.getAttribute("data-email") === email; })[0]; }
   function chonNguoi(x) {
     var d = daCo(x.email);
@@ -193,6 +195,7 @@
     }
   }
   function timDanhBa() {
+    if (!dsGoiY) return;
     var q = oEmail.value.trim(), so = ++luot;
     clearTimeout(hen);
     if (q.length < 2) { anGoiY(); ghiChon.textContent = ghiGoc; return; }
@@ -203,9 +206,10 @@
         .then(function (d) { if (so === luot) veGoiY(d.ket_qua || [], d.loi); });
     }, 250);
   }
-  oEmail.addEventListener("input", timDanhBa);
+  if (dsGoiY) oEmail.addEventListener("input", timDanhBa);
   oEmail.addEventListener("blur", function () { setTimeout(anGoiY, 120); });
   oEmail.addEventListener("keydown", function (e) {
+    if (!dsGoiY) return;
     var li = dsGoiY.querySelectorAll("li");
     if (dsGoiY.hidden || !li.length) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {

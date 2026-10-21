@@ -100,7 +100,7 @@ def test_thay_doi_quyen_ap_tron_bo_cho_quan_tri_vien():
     (QL_HP, None, True, {}, 3, "Chỉ quản trị viên"),
     (QL_HP, None, None, {"hapas": "quan_ly"}, 1, "chỉ thêm được người Chỉ xem"),
     (QL_HP, None, None, {"matemade": "xem"}, 1, "quản lý của bên này"),
-    (QL_HP, QT, None, {"hapas": "xem"}, 1, None),               # quản trị viên: bên bỏ qua
+    (QL_HP, QT, None, {"hapas": "xem"}, 1, "quyền của quản trị viên"),
     (QL_HP, {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}, None, {"hapas": "xem"}, 1,
      "chỉ quản trị viên đổi được"),
     (QL_HP, {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}, None, {"hapas": None}, 1,
@@ -132,3 +132,33 @@ def test_lua_chon_ben_khop_luat():
     assert PQ.tom_tat(QL_HP, {"hapas": "HAPAS"}) == "HAPAS · Quản lý, MATEMADE · Chỉ xem"
     assert PQ.tom_tat(QL_HP, {"hapas": "HAPAS"}, ["hapas"]) == "HAPAS · Quản lý"
     assert PQ.tom_tat(QT, {}) == "Quản trị viên"
+
+
+@pytest.mark.parametrize("dich", [None, XEM_MM, QT, {"la_quan_tri": False,
+                                                    "ben": {"matemade": "quan_ly"}}])
+@pytest.mark.parametrize("qt, ben, khop", [
+    (None, {"matemade": None}, "quản lý của bên này"),
+    (None, {"matemade": "xem"}, "quản lý của bên này"),
+    (None, {"hapas": "xem", "matemade": None}, "quản lý của bên này"),
+    (False, {}, "Chỉ quản trị viên"),
+    (True, {"hapas": "xem"}, "Chỉ quản trị viên"),
+])
+def test_quan_ly_ben_khong_do_duoc_quyen_ben_khac(dich, qt, ben, khop):
+    """Soát 21/10/2026 (HIGH): phạm vi người sửa xét TRƯỚC mọi so sánh — cùng một câu lỗi dù người
+    bị sửa có / không có quyền ở bên khác hay là quản trị viên."""
+    with pytest.raises(PQ.LoiQuyen) as e:
+        _doi(QL_HP, dich, qt, ben)
+    assert khop in str(e.value) and "Chưa chọn" not in str(e.value)
+
+
+def test_thay_doi_quyen_tu_choi_khi_trang_da_cu():
+    xem = {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}
+    with pytest.raises(PQ.LoiQuyen, match="sau khi bạn mở trang"):
+        PQ.thay_doi_quyen(QT, "a@x.vn", xem, "b@x.vn", None, {"hapas": None}, 1,
+                          {"ben": {"hapas": "xem"}})
+    with pytest.raises(PQ.LoiQuyen, match="sau khi bạn mở trang"):
+        PQ.thay_doi_quyen(QT, "a@x.vn", QT, "b@x.vn", False, {}, 1, {"quan_tri": False})
+    # khớp giá trị đã tải -> lưu được; ô không gửi thì không so
+    doi, _ = PQ.thay_doi_quyen(QT, "a@x.vn", xem, "b@x.vn", None, {"hapas": "xem"}, 1,
+                               {"ben": {"hapas": "quan_ly", "matemade": "xem"}})
+    assert doi == [("ben", "hapas", "quan_ly", "xem")]

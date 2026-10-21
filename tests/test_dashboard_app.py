@@ -183,13 +183,13 @@ class GiaKho:
         self._ghi(ai, "dat_quan_tri", f"nguoi_xem:{email}")
         return het
 
-    def dat_quyen(self, ai, email, quan_tri, ben, he_thong=False):
+    def dat_quyen(self, ai, email, quan_tri, ben, da_tai=None, he_thong=False):
         """Như kho thật: kiểm TOÀN BỘ trước (`PQ.thay_doi_quyen`), lỗi thì không áp gì; một dòng
         nhật ký mỗi thay đổi."""
         dich = self.quyen_cua(email)
         try:
             doi, sau = PQ.thay_doi_quyen(PQ.HE_THONG if he_thong else self._lam(ai), ai, dich,
-                                         email, quan_tri, ben, self._so_qt_khac(email))
+                                         email, quan_tri, ben, self._so_qt_khac(email), da_tai)
         except PQ.LoiQuyen as e:
             raise LoiDuLieu(str(e)) from None
         if any(k == "ben" and v and b not in self.don_vi for k, b, _, v in doi):
@@ -3169,7 +3169,9 @@ NGUOI_TIM = {**NGUOI_DN, "an@hapas.vn": {
 def test_api_tim_nguoi_theo_ten_trong_danh_ba():
     ghi: list = []
     _, c, _ = tao(_kho_hai_ben(), danh_ba=danh_ba_gia(NGUOI_TIM, ghi=ghi))
-    dang_nhap(c, HP_QL)                                    # quản lý bên được dùng
+    dang_nhap(c, HP_QL)               # quản lý bên: không liệt kê danh bạ công ty (soát 21/10)
+    assert c.get("/api/danh-ba/tim?q=nguyen").status_code == 403 and ghi == []
+    dang_nhap(c, QL)
     assert c.get("/api/danh-ba/tim?q=n").json() == {"ket_qua": [], "loi": ""}
     assert ghi == []                                       # < 2 chữ: không gọi Lark
     kq = c.get("/api/danh-ba/tim?q=nguyen an").json()
@@ -3265,3 +3267,84 @@ def test_chi_tiet_sac_thai_nen_tang_khop_so_hang():
     assert c.get(q + "&ct_ngoai_nha=1&ct_sac_thai=Tiêu cực").json()["tong"] == hang["Tiêu cực"]
     assert c.get(q + "&ct_ngoai_nha=x").status_code == 400
 
+
+# ─────────────── soát 21/10/2026: dò quyền, trang cũ, danh bạ, tab cũ ───────────────
+def test_quan_ly_ben_khong_do_duoc_ai_co_quyen_ben_khac_qua_cau_loi():
+    """HIGH: cùng một câu lỗi cho mọi người bị sửa (không có tên / chỉ ở MATEMADE / quản lý
+    MATEMADE / hai bên / quản trị viên) khi quản lý HAPAS gửi ô của bên khác hoặc cờ quản trị."""
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, HP_QL)
+    truoc = _anh_kho(kho)
+    for form in ({"vai__matemade": ""}, {"vai__matemade": "xem"},
+                 {"vai__hapas": "", "vai__matemade": ""}, {"co_quan_tri": "1"},
+                 {"co_quan_tri": "1", "quan_tri": "1"}):
+        cau = set()
+        for e in ("chua-co@hapas.vn", MM_XEM, MM_QL, HAI_BEN, QL):
+            t = thong_bao(c, c.post("/nguoi-xem/quyen", data={"csrf": csrf, "email": e, **form}))
+            cau.add(re.search(r'thong-bao--loi" role="status">([^<]*)<', t).group(1)
+                    .replace(e, "<e>"))
+        assert len(cau) == 1, (form, cau)
+    assert _anh_kho(kho) == truoc and kho.nk == []
+
+
+def test_luu_tu_trang_cu_khong_ghi_de_thay_doi_moi():
+    """M1: trang mang giá trị đã tải (qt_cu, cu__<bên>); có người sửa sau khi mở trang thì từ
+    chối, không âm thầm đảo lại."""
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, QL)
+    t = _dong_cua(c.get("/quan-tri").text, HP_QL)
+    assert 'name="qt_cu" value="0"' in t and 'name="cu__hapas" value="quan_ly"' in t
+    assert 'name="cu__matemade" value=""' in t
+    kho.quan_tri.add(HP_QL)                                 # quản trị viên khác vừa cấp
+    t = thong_bao(c, c.post("/nguoi-xem/quyen", data={
+        "csrf": csrf, "email": HP_QL, "co_quan_tri": "1", "qt_cu": "0", "vai__hapas": "quan_ly",
+        "cu__hapas": "quan_ly"}))
+    assert "Đã có người sửa quyền của nganlt@hapas.vn sau khi bạn mở trang" in t
+    assert HP_QL in kho.quan_tri
+    kho.quan_tri.discard(HP_QL)
+    kho.quyen[HP_QL] = {"hapas": "xem"}                     # bên cũng vậy
+    t = thong_bao(c, c.post("/nguoi-xem/quyen", data={
+        "csrf": csrf, "email": HP_QL, "vai__hapas": "", "cu__hapas": "quan_ly"}))
+    assert "sau khi bạn mở trang" in t and kho.quyen[HP_QL] == {"hapas": "xem"}
+    # người mới mà ai đó vừa thêm
+    t = thong_bao(c, c.post("/nguoi-xem/quyen", data={
+        "csrf": csrf, "email": XEM, "vai__hapas": "quan_ly", "cu__hapas": "",
+        "co_quan_tri": "1", "qt_cu": "0"}))
+    assert "sau khi bạn mở trang" in t and kho.quyen[XEM] == {"hapas": "xem"}
+    assert kho.nk == []
+    # khớp -> lưu được
+    assert "HAPAS · Quản lý" in thong_bao(c, c.post("/nguoi-xem/quyen", data={
+        "csrf": csrf, "email": XEM, "vai__hapas": "quan_ly", "cu__hapas": "xem",
+        "co_quan_tri": "1", "qt_cu": "0"}))
+
+
+def test_quan_ly_ben_them_nguoi_bang_email_khong_goi_y_danh_ba():
+    """M2: ô Thêm người của quản lý bên chỉ nhận email (không gợi ý theo tên)."""
+    _, c, _ = tao(_kho_hai_ben())
+    dang_nhap(c, HP_QL)
+    t = c.get("/quan-tri").text.split('id="nx-them"')[1].split("</form>")[0]
+    assert 'type="email" name="email"' in t and "data-nx-goi-y" not in t
+    assert 'role="combobox"' not in t and "Nhập email Lark" in t
+    dang_nhap(c, QL)
+    t = c.get("/quan-tri").text.split('id="nx-them"')[1].split("</form>")[0]
+    assert "data-nx-goi-y" in t and 'role="combobox"' in t
+
+
+def test_tab_cu_xoa_mot_ben_khong_thanh_xoa_ca_nguoi():
+    """M3: biểu mẫu × cũ (có don_vi) gửi /nguoi-xem/xoa: từ chối, không xoá hẳn người."""
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, QL)
+    t = thong_bao(c, c.post("/nguoi-xem/xoa", data={"csrf": csrf, "email": HAI_BEN,
+                                                    "don_vi": "hapas"}))
+    assert "Trang đã cũ" in t and kho.quyen[HAI_BEN] == {"hapas": "xem", "matemade": "xem"}
+    assert kho.nk == []
+
+
+def test_cap_quan_tri_kem_quyen_ben_thi_bao_ro():
+    """LOW: bên gửi kèm khi cấp quản trị viên được giữ nguyên — câu báo nói rõ."""
+    _, c, kho = tao(_kho_hai_ben())
+    csrf = dang_nhap(c, QL)
+    t = thong_bao(c, c.post("/nguoi-xem/quyen", data={
+        "csrf": csrf, "email": HAI_BEN, "co_quan_tri": "1", "quan_tri": "1", "vai__hapas": ""}))
+    assert "Quản trị viên (đã là quản trị viên — quyền theo bên giữ nguyên)" in t
+    assert HAI_BEN in kho.quan_tri and kho.quyen[HAI_BEN] == {"hapas": "xem", "matemade": "xem"}

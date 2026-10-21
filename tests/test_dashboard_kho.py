@@ -316,6 +316,19 @@ def test_dat_quyen_khong_bo_quan_tri_cuoi_va_ben_phai_co(gia, monkeypatch):
         assert not any(s.startswith(("DELETE", "INSERT", "UPDATE")) for s, _ in c.lenh)
 
 
+def test_dat_quyen_trang_cu_bi_tu_choi_sau_khoa(gia, monkeypatch):
+    """Soát 21/10/2026 (M1): giá trị trang đã tải so với quyền đọc SAU khoá bảng."""
+    monkeypatch.setattr(GiaConn, "execute", _quyen_theo_email(gia, {
+        AI: {"la_quan_tri": True, "ben": {}},
+        "xem@hapas.vn": {"la_quan_tri": True, "ben": {"hapas": "xem"}}}))
+    gia.tra[r"count\(\*\)"] = [{"n": 1}]
+    with pytest.raises(K.LoiDuLieu, match="sau khi bạn mở trang"):
+        K.dat_quyen(AI, "xem@hapas.vn", False, {}, da_tai={"quan_tri": False, "ben": {}})
+    sql = [s for s, _ in gia.gd[0].lenh]
+    assert sql[0].startswith("LOCK TABLE")
+    assert not any(s.startswith(("DELETE", "INSERT", "UPDATE")) for s in sql)
+
+
 def test_quyen_cua_doc_dung_cot_mark_duoc_cap(gia):
     """`quyen_cua` chạy bằng role mark (tool hỏi đáp): chỉ cột đã GRANT trong schema.sql."""
     gia.tra[r"FROM nguoi_xem n WHERE n.email"] = [{"la_quan_tri": False,
