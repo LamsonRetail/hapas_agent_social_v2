@@ -68,6 +68,7 @@ from dashboard import phan_quyen as PQ
 from dashboard import quang_cao as QC
 from dashboard import tiktok_ads as TA
 from dashboard import trang_lich as TL
+from dashboard.chuan_chu import bo_dau
 from dashboard.kho import BAI_TOI_DA, BL_TOI_DA, LoiDuLieu, LoiKho
 
 THU_MUC = Path(__file__).resolve().parent
@@ -106,6 +107,10 @@ DANH_BA_GIAY = 12 * 3600
 DANH_BA_LOI_GIAY = 3600
 DANH_BA_NEN_GIAY = 30.0
 DANH_BA_THEM_GIAY = 5.0
+# Ô "Thêm người" tìm theo tên (21/10/2026): cả danh bạ đọc một lần, nhớ 30 phút (lỗi: 5 phút).
+DANH_BA_DS_GIAY = 1800.0
+DANH_BA_DS_LOI_GIAY = 300.0
+DANH_BA_DS_TOI_DA_GIAY = 20.0
 _CHUA_KIEM = object()
 #: TikTok Ads (19/10/2026): cookie giữ lượt OAuth (nonce + PKCE verifier ĐÃ MÃ HOÁ + email quản trị
 #: viên), chỉ gửi kèm đường /tiktok, sống 10 phút. Mục "Quảng cáo TikTok" trên menu đọc bên có tài
@@ -845,6 +850,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     app.state.dong_bo = dong_bo
     app.state.danh_ba = danh_ba
     app.state.danh_ba_doc_tu = float("-inf")
+    app.state.danh_ba_ds = (float("-inf"), [], "")
+    app.state.khoa_danh_ba_ds = asyncio.Lock()
     app.state.kho_qc = kho_qc
     app.state.tiktok = tiktok
     app.state.meta = meta
@@ -2209,26 +2216,32 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             raise _Cam("Trang này chỉ dành cho người quản lý.")
         return nguoi
 
-    def _dong_nguoi_xem(nguoi: dict, x: dict, ben_thay: list[str], ten_ben: dict,
-                        so_quan_tri: int, dang_doc: bool) -> dict:
-        """Một dòng trang Người xem: quyền ở các bên NGƯỜI XEM TRANG được thấy, và các nút họ
-        bấm được (cùng luật `phan_quyen` mà kho kiểm lại trong giao dịch)."""
+    def _neo_nguoi(email: str) -> str:
+        """Mã neo của một dòng (#nx-…) — trang quay về đúng người vừa lưu."""
+        return "nx-" + hashlib.sha256(email.encode()).hexdigest()[:10]
+
+    def _dong_nguoi_xem(nguoi: dict, x: dict, ben_ql: list[str], ben_thay: list[str],
+                        ten_ben: dict, so_quan_tri: int, dang_doc: bool) -> dict:
+        """Một dòng trang Quản trị (21/10/2026): tóm tắt quyền bằng chữ (chỉ các bên người xem
+        trang quản lý) + ngăn "Sửa quyền": mỗi bên người sửa quản lý một ô chọn (lựa chọn khoá
+        theo CHÍNH luật `phan_quyen` mà kho kiểm lại trong giao dịch) + công tắc Quản trị viên."""
         dich = {"la_quan_tri": bool(x.get("la_quan_tri")), "ben": dict(x.get("quyen") or {})}
-        quyen_hien = []
-        for b in sorted(dich["ben"]):
-            if b not in ben_thay:
-                continue
-            try:
-                PQ.kiem_xoa_quyen(nguoi["q"], nguoi["email"], dich, x["email"], b)
-                xoa_duoc = True
-            except PQ.LoiQuyen:
-                xoa_duoc = False
-            quyen_hien.append({"ma": b, "ten": ten_ben.get(b, b.upper()), "vai": dich["ben"][b],
-                               "xoa_duoc": xoa_duoc})
+        lam, e_lam = nguoi["q"], nguoi["email"]
+        o_ben = []
+        for b in ben_ql:
+            duoc, ly_do = PQ.lua_chon_ben(lam, e_lam, dich, x["email"], b)
+            o_ben.append({"ma": b, "ten": ten_ben.get(b, b.upper()), "vai": dich["ben"].get(b, ""),
+                          "duoc": duoc, "khoa": len(duoc) < 2, "ly_do": ly_do})
         cuoi = dich["la_quan_tri"] and so_quan_tri <= 1
-        return {**x, "o": _o_danh_ba(x, dang_doc), "quyen_hien": quyen_hien,
-                "la_quan_tri": dich["la_quan_tri"], "qt_cuoi": cuoi,
-                "xoa_het": nguoi["la_quan_tri"] and not cuoi}
+        qt_doi = nguoi["la_quan_tri"] and not cuoi
+        sua_duoc = qt_doi or any(not o["khoa"] for o in o_ben)
+        ten = x.get("ten_lark") or ""
+        return {**x, "o": _o_danh_ba(x, dang_doc), "neo": _neo_nguoi(x["email"]), "ten": ten,
+                "tom_tat": PQ.tom_tat(dich, ten_ben, None if nguoi["la_quan_tri"] else ben_thay),
+                "o_ben": o_ben, "la_quan_tri": dich["la_quan_tri"], "qt_cuoi": cuoi,
+                "qt_doi": qt_doi, "sua_duoc": sua_duoc,
+                "xoa_het": nguoi["la_quan_tri"] and not cuoi,
+                "tim": bo_dau(" ".join(filter(None, (ten, x["email"], x.get("phong_ban")))))}
 
     @app.get("/nguoi-xem")
     async def trang_nguoi_xem_cu(request: Request):
@@ -2254,6 +2267,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         so_qt = sum(1 for x in ds if x.get("la_quan_tri"))
         ds = [x for x in ds if set(x.get("quyen") or {}) & set(ben_thay)
               or (qt and not loc and x.get("la_quan_tri"))]
+        # 21/10/2026: xếp theo TÊN (tên Lark, chưa có thì email) — chọn người qua tên cho dễ.
+        ds.sort(key=lambda x: bo_dau(x.get("ten_lark") or x["email"]))
         du_an = await _k(app.state.kho.cac_du_an)
         if qt:
             nk = await _k(app.state.kho.nhat_ky, 100)
@@ -2296,8 +2311,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                    co_kiem_do_phu=qt and bool(du_an),
                    TEN_NEN_TANG_QC=QC.TEN_NEN_TANG_QC,
                    ten_ben=[{"ma": m, "ten": t} for m, t in ten_ben.items()],
-                   ds=[_dong_nguoi_xem(nguoi, x, ben_thay, ten_ben, so_qt, dang_doc) for x in ds],
+                   ds=[_dong_nguoi_xem(nguoi, x, ben_ql, ben_thay, ten_ben, so_qt, dang_doc)
+                       for x in ds],
                    ben_ql=[{"ma": m, "ten": ten_ben.get(m, m.upper())} for m in ben_ql],
+                   LUA_CHON_BEN=PQ.LUA_CHON_BEN,
+                   o_moi=[{"ma": m, "ten": ten_ben.get(m, m.upper()),
+                           "vai": "xem" if m == loc or len(ben_ql) == 1 else "",
+                           "duoc": PQ.lua_chon_ben(nguoi["q"], nguoi["email"], None, "",
+                                                    m)[0]} for m in ben_ql],
                    loc_ben=loc,
                    cac_ben=([{**b, "du_an": [d for d in du_an if d.get("don_vi") == b["ma"]]}
                              for b in cac_ben] if qt else []),
@@ -2314,92 +2335,133 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                                    f"form-action 'self' {TA.MAY_CHU}")
         return r
 
-    @app.post("/nguoi-xem/them")
-    async def nguoi_xem_them(request: Request):
-        """Thêm / đổi quyền một người ở MỘT bên; quản trị viên tích thêm "Quản trị viên". Luật
-        (quản lý chỉ thêm người Chỉ xem của bên mình…) do kho kiểm trong giao dịch — câu lỗi của
-        kho hiện thẳng cho người dùng."""
+    def _ve_nguoi(form, email: str = "") -> str:
+        """Trang Quản trị sau khi lưu: giữ bộ lọc bên (mã hợp lệ mới giữ) + neo về đúng người."""
+        loc = str(form.get("loc_ben") or "").strip().lower()
+        duong = "/quan-tri" + (f"?ben={loc}" if re.fullmatch(r"[a-z0-9][a-z0-9_\-]{1,39}", loc)
+                               else "")
+        return duong + (f"#{_neo_nguoi(email)}" if email else "")
+
+    @app.post("/nguoi-xem/quyen")
+    async def nguoi_xem_quyen(request: Request):
+        """Lưu TRỌN quyền của một người (21/10/2026 — thay /nguoi-xem/them, /nguoi-xem/quan-tri và
+        nút × bỏ từng bên): `email`, `vai__<mã bên>` = "" | xem | quan_ly cho mỗi bên biểu mẫu gửi
+        (ô bị khoá không gửi = giữ nguyên), `co_quan_tri=1` khi biểu mẫu có công tắc + `quan_tri=1`
+        khi bật. Kho kiểm từng thay đổi bằng luật cũ trong MỘT giao dịch; câu lỗi hiện thẳng."""
         nguoi, form = await _sua(request)
-        kho = app.state.kho
         try:
             e = NL.email(form.get("email"))
-            ben = str(form.get("don_vi") or "").strip().lower()
-            lam_qt = form.get("quan_tri") == "1"
-            if lam_qt and not nguoi["la_quan_tri"]:
-                raise NL.LoiNhap("Chỉ quản trị viên mới cấp quyền quản trị viên.")
-            if not ben and not lam_qt:
-                duoc = PQ.ben_quan_ly(nguoi["q"], [b["ma"] for b in await _cac_don_vi()])
-                if len(duoc) != 1:
-                    raise NL.LoiNhap("Chọn bên cho người này.")
-                ben = duoc[0]
-            phan = []
-            if ben:
-                v = NL.vai_tro(form.get("vai_tro"))
-                await _k(kho.luu_quyen, nguoi["email"], e, ben, v)
-                phan.append(f"{ben.upper()}: {NL.VAI_TRO[v]}")
-            if lam_qt:
-                await _k(kho.dat_quan_tri, nguoi["email"], e, True)
-                phan.append("Quản trị viên")
+            ben: dict[str, str | None] = {}
+            for k in form:
+                if not str(k).startswith("vai__"):
+                    continue
+                if len(ben) >= 50:
+                    raise NL.LoiNhap("Quá nhiều bên trong một lần lưu.")
+                v = str(form.get(k) or "").strip()
+                ben[NL.ma_don_vi(str(k)[5:])] = NL.vai_tro(v) if v else None
+            quan_tri = (form.get("quan_tri") == "1") if form.get("co_quan_tri") == "1" else None
+            # Giá trị trang đã tải (soát 21/10/2026): kho từ chối khi đã có người sửa sau đó.
+            da_tai = {"quan_tri": (form.get("qt_cu") == "1") if form.get("qt_cu") in ("0", "1")
+                      else None,
+                      "ben": {b: (str(form.get(f"cu__{b}") or "").strip() or None)
+                              for b in ben if f"cu__{b}" in form}}
+            kq = await _k(app.state.kho.dat_quyen, nguoi["email"], e, quan_tri, ben,
+                          da_tai=da_tai)
         except (NL.LoiNhap, LoiDuLieu) as ex:
-            return _chuyen(request, "/quan-tri", "loi", str(ex))
-        # Kiểm email với danh bạ Lark: CHỈ cảnh báo, không chặn (danh bạ có thể chậm/thiếu quyền).
-        tin = f"Đã lưu {e} ({' · '.join(phan)})"
-        # Nhanh: chỉ tra theo email (không dò cả danh bạ). Lark không khớp enterprise_email nên
-        # "khong_co" ở đây CHƯA chắc: không ghi, lượt đọc nền khi mở trang sẽ dò kỹ.
-        kq = (await doc_danh_ba(app, [e], DANH_BA_THEM_GIAY, quet=False) or {}).get(e)
-        if not kq:
-            return _chuyen(request, "/quan-tri", "ok",
+            return _chuyen(request, _ve_nguoi(form, ""), "loi", str(ex))
+        ve = _ve_nguoi(form, "" if kq["xoa_nguoi_xem"] else e)
+        if kq["xoa_nguoi_xem"]:
+            return _chuyen(request, ve, "ok", f"Đã lưu — {e} không còn quyền nào nên đã xoá "
+                           "khỏi danh sách.")
+        cac_ben = {b["ma"]: b["ten"] for b in await _cac_don_vi()}
+        thay = None if nguoi["la_quan_tri"] else PQ.ben_quan_ly(nguoi["q"], list(cac_ben))
+        # Tên Lark chỉ khi người này (sau khi lưu) nằm trong phạm vi người sửa thấy trên trang.
+        ai = e
+        if thay is None or set(kq["sau"]["ben"]) & set(thay):
+            cu = next((x for x in await _k(app.state.kho.cac_nguoi_xem) if x["email"] == e), {})
+            ai = cu.get("ten_lark") or e
+        tt = PQ.tom_tat(kq["sau"], cac_ben, thay)
+        tin = (f"Đã lưu quyền cho {ai}: {tt}" if tt
+               else f"Đã lưu — {ai} không còn quyền ở bên bạn quản lý")
+        if kq["sau"]["la_quan_tri"] and any((v or None) != kq["sau"]["ben"].get(b)
+                                             for b, v in ben.items()):
+            tin += " (đã là quản trị viên — quyền theo bên giữ nguyên)"
+        if not kq["nguoi_moi"]:
+            return _chuyen(request, ve, "ok", tin + ".")
+        # Người mới: kiểm email với danh bạ Lark — CHỈ cảnh báo, không chặn. Nhanh: chỉ tra theo
+        # email (không dò cả danh bạ); Lark không khớp enterprise_email nên "khong_co" ở đây CHƯA
+        # chắc: không ghi, lượt đọc nền khi mở trang sẽ dò kỹ.
+        kq_db = (await doc_danh_ba(app, [e], DANH_BA_THEM_GIAY, quet=False) or {}).get(e)
+        if not kq_db:
+            return _chuyen(request, ve, "ok",
                            tin + ". Chưa kiểm được với danh bạ Lark — xem cột Trạng thái sau.")
-        if kq["trang_thai"] == "khong_co":
-            return _chuyen(request, "/quan-tri", "canh",
+        if kq_db["trang_thai"] == "khong_co":
+            return _chuyen(request, ve, "canh",
                            f"{tin}, nhưng Lark chưa khớp email này. Email công ty: dashboard "
                            "đang dò cả danh bạ — xem cột Trạng thái sau ít giây; người này "
                            "đăng nhập một lần là nhận diện chắc chắn.")
-        if kq["trang_thai"] != "hoat_dong":
-            return _chuyen(request, "/quan-tri", "canh",
-                           f"{tin}, nhưng trên Lark: {DB.TRANG_THAI[kq['trang_thai']]} — "
+        if kq_db["trang_thai"] != "hoat_dong":
+            return _chuyen(request, ve, "canh",
+                           f"{tin}, nhưng trên Lark: {DB.TRANG_THAI[kq_db['trang_thai']]} — "
                            "kiểm lại email, người này chưa đăng nhập được.")
-        # 18/10/2026: trang Người xem bỏ chức danh (chủ dự án) — câu báo chỉ còn tên Lark.
-        ai = kq.get("ten") or ""
-        return _chuyen(request, "/quan-tri", "ok",
-                       tin + (f" — {ai}" if ai else "") + ", tài khoản Lark đang hoạt động.")
-
-    @app.post("/nguoi-xem/quan-tri")
-    async def nguoi_xem_quan_tri(request: Request):
-        """Bật / bỏ cờ quản trị viên (chỉ quản trị viên; không bỏ người cuối — kho kiểm)."""
-        nguoi, form = await _sua(request)
-        try:
-            e = NL.email(form.get("email"))
-            bat = form.get("bat") == "1"
-            het = await _k(app.state.kho.dat_quan_tri, nguoi["email"], e, bat)
-        except (NL.LoiNhap, LoiDuLieu) as ex:
-            return _chuyen(request, "/quan-tri", "loi", str(ex))
-        if bat:
-            return _chuyen(request, "/quan-tri", "ok", f"Đã cấp quyền quản trị viên cho {e}.")
-        return _chuyen(request, "/quan-tri", "ok",
-                       f"Đã bỏ quyền quản trị viên của {e}"
-                       + (" — không còn quyền ở bên nào nên đã xoá khỏi danh sách." if het
-                          else "."))
+        ten = kq_db.get("ten") or ""
+        return _chuyen(request, ve, "ok",
+                       tin + (f" — {ten}" if ten else "") + ", tài khoản Lark đang hoạt động.")
 
     @app.post("/nguoi-xem/xoa")
     async def nguoi_xem_xoa(request: Request):
-        """Có `don_vi`: bỏ quyền ở MỘT bên (bên khác giữ). Không có: xoá hẳn người đó (chỉ quản trị
-        viên). Luật + "còn ≥ 1 quản trị viên" kho kiểm trong giao dịch có khoá bảng."""
+        """Xoá hẳn một người (mọi bên) — chỉ quản trị viên, không xoá quản trị viên cuối (kho kiểm
+        trong giao dịch có khoá bảng). Bỏ quyền ở MỘT bên: chọn "Không có quyền" rồi Lưu."""
         nguoi, form = await _sua(request)
+        if "don_vi" in form:
+            # Tab cũ (nút × bỏ quyền MỘT bên, trước 21/10/2026): không được thành xoá hẳn người.
+            return _chuyen(request, "/quan-tri", "loi",
+                           "Trang đã cũ — tải lại trang rồi sửa quyền bằng nút Sửa quyền.")
         try:
             e = NL.email(form.get("email"))
-            ben = str(form.get("don_vi") or "").strip().lower()
-            if ben:
-                het = await _k(app.state.kho.xoa_quyen, nguoi["email"], e, ben)
-                tin = (f"Đã bỏ quyền của {e} ở bên {ben.upper()}"
-                       + (" — không còn quyền ở bên nào nên đã xoá khỏi danh sách." if het
-                          else "."))
-            else:
-                await _k(app.state.kho.xoa_nguoi_xem, nguoi["email"], e)
-                tin = f"Đã xoá {e} khỏi danh sách người xem."
+            await _k(app.state.kho.xoa_nguoi_xem, nguoi["email"], e)
         except (NL.LoiNhap, LoiDuLieu) as ex:
-            return _chuyen(request, "/quan-tri", "loi", str(ex))
-        return _chuyen(request, "/quan-tri", "ok", tin)
+            return _chuyen(request, _ve_nguoi(form), "loi", str(ex))
+        return _chuyen(request, _ve_nguoi(form), "ok", f"Đã xoá {e} khỏi danh sách người xem.")
+
+    async def _danh_ba_ds() -> tuple[list[dict], str]:
+        """Cả danh bạ Lark cho ô Thêm người, nhớ DANH_BA_DS_GIAY (lỗi: DANH_BA_DS_LOI_GIAY) — gõ
+        tên không bắn Lark mỗi phím; một lượt đọc một lúc cho cả app. -> (người, loại lỗi)."""
+        luc, ds, loi = app.state.danh_ba_ds
+        if time.monotonic() - luc < (DANH_BA_DS_LOI_GIAY if loi else DANH_BA_DS_GIAY):
+            return ds, loi
+        async with app.state.khoa_danh_ba_ds:
+            luc, ds, loi = app.state.danh_ba_ds
+            if time.monotonic() - luc < (DANH_BA_DS_LOI_GIAY if loi else DANH_BA_DS_GIAY):
+                return ds, loi
+            loi = ""
+            try:
+                ds = await asyncio.wait_for(app.state.danh_ba.cac_nguoi(), DANH_BA_DS_TOI_DA_GIAY)
+            except DB.LoiDanhBa as ex:
+                log.warning("đọc cả danh bạ Lark lỗi: %s", ex)
+                ds, loi = [], ex.loai
+            except Exception as ex:  # noqa: BLE001 — chỉ là gợi ý, nhập email vẫn được
+                log.warning("đọc cả danh bạ Lark lỗi: %s", type(ex).__name__)
+                ds, loi = [], "loi"
+            app.state.danh_ba_ds = (time.monotonic(), ds, loi)
+            return ds, loi
+
+    @app.get("/api/danh-ba/tim")
+    async def api_danh_ba_tim(request: Request):
+        """Gợi ý người theo TÊN hoặc email cho ô "Thêm người". Tìm
+        không dấu trong bản nhớ của cả danh bạ Lark; tối đa 8 người. Danh bạ chưa đọc được thì
+        trả `loi` — trang vẫn cho nhập email. CHỈ quản trị viên (soát 21/10/2026: quản lý bên không
+        liệt kê được cả danh bạ công ty — họ nhập email)."""
+        nguoi = await _chi_quan_ly(request)
+        if not nguoi["la_quan_tri"]:
+            raise _Cam("Chỉ quản trị viên mới tìm được trong danh bạ Lark — nhập email Lark.")
+        q = bo_dau(" ".join(str(request.query_params.get("q") or "").split()))[:80]
+        if len(q) < 2:
+            return JSONResponse({"ket_qua": [], "loi": ""})
+        ds, loi = await _danh_ba_ds()
+        tu = q.split()
+        kq = [x for x in ds if all(t in bo_dau(f"{x['ten']} {x['email']}") for t in tu)][:8]
+        return JSONResponse({"ket_qua": kq, "loi": loi})
 
     @app.post("/don-vi/them")
     async def don_vi_them(request: Request):

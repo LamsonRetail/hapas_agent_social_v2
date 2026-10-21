@@ -269,6 +269,66 @@ def test_quan_ly_ben_them_va_bo_nguoi_chi_xem(gia, monkeypatch):
     assert K.xoa_quyen(AI, "xem@hapas.vn", "hapas") is True      # hết bên -> xoá dòng
 
 
+def test_dat_quyen_mot_giao_dich_mot_dong_nhat_ky_moi_thay_doi(gia, monkeypatch):
+    """Nút Lưu trang Quản trị (21/10/2026): khoá bảng -> đọc quyền -> kiểm MỌI thay đổi -> áp ->
+    mỗi thay đổi một dòng nhật ký (có `don_vi` để quản lý bên chỉ thấy bên mình), cùng giao dịch."""
+    monkeypatch.setattr(GiaConn, "execute", _quyen_theo_email(gia, {
+        AI: {"la_quan_tri": True, "ben": {}},
+        "xem@hapas.vn": {"la_quan_tri": False, "ben": {"hapas": "xem", "matemade": "xem"}}}))
+    gia.tra.update({r"count\(\*\)": [{"n": 1}],
+                    r"SELECT ma FROM don_vi": [{"ma": "hapas"}]})
+    kq = K.dat_quyen(AI, "xem@hapas.vn", None, {"hapas": "quan_ly", "matemade": None})
+    assert kq["thay_doi"] == [("ben", "hapas", "xem", "quan_ly"), ("ben", "matemade", "xem", None)]
+    assert len(gia.gd) == 1
+    lenh = gia.gd[0].lenh
+    assert lenh[0][0] == "LOCK TABLE nguoi_xem, quyen IN SHARE ROW EXCLUSIVE MODE"
+    sql = [s for s, _ in lenh]
+    ghi = [i for i, s in enumerate(sql) if s.startswith(("INSERT INTO quyen", "DELETE FROM quyen"))]
+    nk = [(i, p) for i, (s, p) in enumerate(lenh) if s.startswith("INSERT INTO nhat_ky")]
+    assert len(ghi) == 2 and [p[1] for _, p in nk] == ["luu_quyen", "xoa_quyen"]
+    assert all(i > max(ghi) for i, _ in nk), "nhật ký ghi SAU khi áp"
+    assert '"don_vi": "hapas"' in nk[0][1][3] and '"don_vi": "matemade"' in nk[1][1][3]
+
+
+def test_dat_quyen_mot_thay_doi_sai_thi_khong_ap_gi(gia, monkeypatch):
+    monkeypatch.setattr(GiaConn, "execute", _quyen_theo_email(gia, {
+        AI: {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}},
+        "xem@hapas.vn": {"la_quan_tri": False, "ben": {"hapas": "xem", "matemade": "xem"}}}))
+    gia.tra[r"count\(\*\)"] = [{"n": 1}]
+    with pytest.raises(K.LoiDuLieu, match="quản lý của bên này"):
+        K.dat_quyen(AI, "xem@hapas.vn", None, {"hapas": None, "matemade": None})
+    with pytest.raises(K.LoiDuLieu, match="Chỉ quản trị viên"):
+        K.dat_quyen(AI, "moi@hapas.vn", True, {"hapas": "xem"})
+    for c in gia.gd:
+        assert not any(s.startswith(("DELETE", "INSERT", "UPDATE")) for s, _ in c.lenh)
+
+
+def test_dat_quyen_khong_bo_quan_tri_cuoi_va_ben_phai_co(gia, monkeypatch):
+    monkeypatch.setattr(GiaConn, "execute", _quyen_theo_email(gia, {
+        AI: {"la_quan_tri": True, "ben": {}}}))
+    gia.tra[r"count\(\*\)"] = [{"n": 0}]
+    with pytest.raises(K.LoiDuLieu, match="cuối cùng"):
+        K.dat_quyen(AI, AI, False, {"hapas": "xem"})
+    gia.tra[r"SELECT ma FROM don_vi"] = []
+    with pytest.raises(K.LoiDuLieu, match="Không có bên này"):
+        K.dat_quyen(AI, "moi@hapas.vn", None, {"ben-la": "xem"})
+    for c in gia.gd:
+        assert not any(s.startswith(("DELETE", "INSERT", "UPDATE")) for s, _ in c.lenh)
+
+
+def test_dat_quyen_trang_cu_bi_tu_choi_sau_khoa(gia, monkeypatch):
+    """Soát 21/10/2026 (M1): giá trị trang đã tải so với quyền đọc SAU khoá bảng."""
+    monkeypatch.setattr(GiaConn, "execute", _quyen_theo_email(gia, {
+        AI: {"la_quan_tri": True, "ben": {}},
+        "xem@hapas.vn": {"la_quan_tri": True, "ben": {"hapas": "xem"}}}))
+    gia.tra[r"count\(\*\)"] = [{"n": 1}]
+    with pytest.raises(K.LoiDuLieu, match="sau khi bạn mở trang"):
+        K.dat_quyen(AI, "xem@hapas.vn", False, {}, da_tai={"quan_tri": False, "ben": {}})
+    sql = [s for s, _ in gia.gd[0].lenh]
+    assert sql[0].startswith("LOCK TABLE")
+    assert not any(s.startswith(("DELETE", "INSERT", "UPDATE")) for s in sql)
+
+
 def test_quyen_cua_doc_dung_cot_mark_duoc_cap(gia):
     """`quyen_cua` chạy bằng role mark (tool hỏi đáp): chỉ cột đã GRANT trong schema.sql."""
     gia.tra[r"FROM nguoi_xem n WHERE n.email"] = [{"la_quan_tri": False,

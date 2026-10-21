@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block tieu_de %}Quản trị{% endblock %}
+{% block dau %}<script src="{{ tinh('quan_tri.js') }}" defer></script>{% endblock %}
 {% block noi_dung %}
 {#- 19/10/2026: quyền theo BÊN; trang đổi tên "Người xem" → "Quản trị" (đường /quan-tri, /nguoi-xem chuyển hướng; POST vẫn /nguoi-xem/*). Quản trị viên thấy/sửa mọi người + tạo bên; quản lý của bên chỉ thấy
     người của bên mình và chỉ thêm/bỏ người Chỉ xem ở bên đó. Nút ẩn chỉ là tiện — kho kiểm lại. #}
@@ -20,89 +21,148 @@
   {% endif %}
 </div>
 
-<section class="the-khoi cach-duoi">
+{#- 21/10/2026 (chủ dự án: "phân quyền đơn giản hơn — chọn vai trò qua tên người dùng, nút Lưu để ấn định
+    quyền mỗi lần"): tìm người theo tên/email (lọc tại chỗ), mỗi người một ngăn "Sửa quyền" gồm ô chọn theo
+    bên + công tắc Quản trị viên; KHÔNG áp gì cho tới khi bấm Lưu (POST /nguoi-xem/quyen, kho kiểm từng thay
+    đổi bằng luật cũ trong một giao dịch). Lựa chọn bị khoá theo đúng luật đó (`phan_quyen.lua_chon_ben`). #}
+<section class="the-khoi cach-duoi nx" id="nguoi" data-nx>
   <div class="muc">
     <span class="muc__so" aria-hidden="true">1</span>
-    <h2 class="muc__ten">Danh sách ({{ ds|length }})</h2>
-    <button type="button" class="goi-y" data-goi-y="Tên, phòng ban và trạng thái đọc từ danh bạ Lark công ty, làm mới mỗi 12 giờ và ngay khi thêm email. Đăng nhập gần nhất: lượt đăng nhập dashboard thành công cuối cùng. Cột Quyền chỉ hiện các bên bạn quản lý.">i</button>
-    {% if nguoi.la_quan_tri %}<span class="muc__phai muc__phu">{{ so_quan_tri }} quản trị viên</span>{% endif %}
+    <h2 class="muc__ten">Người dùng và quyền</h2>
+    <button type="button" class="goi-y" data-goi-y="Tìm theo tên hoặc email, bấm Sửa quyền rồi Lưu — thay đổi chỉ có hiệu lực khi bấm Lưu. Tên, phòng ban và trạng thái đọc từ danh bạ Lark công ty (làm mới mỗi 12 giờ). Cột Quyền chỉ hiện các bên bạn quản lý.{% if not nguoi.la_quan_tri %} Quản lý của bên chỉ cấp được quyền Chỉ xem ở bên mình.{% endif %}">i</button>
+    <span class="muc__phai muc__phu"><span><span data-nx-dem>{{ ds|length }}</span> người{% if nguoi.la_quan_tri %} · {{ so_quan_tri }} quản trị viên{% endif %}</span></span>
   </div>
-  <div class="cuon-ngang">
-  <table class="nx-bang">
-    {#- 18/10/2026 (chủ dự án: "bỏ phần chức danh trong người xem dashboard đi còn lại giữ nguyên"): bỏ
-        cột Chức danh; phòng ban vẫn hiện, dưới tên Lark. Cột nguoi_xem.chuc_danh vẫn giữ trong kho. #}
-    <thead><tr><th>Người xem</th><th>Trạng thái Lark</th><th>Đăng nhập gần nhất</th><th>Quyền</th><th>Thêm bởi</th><th></th></tr></thead>
-    <tbody>
+
+  <div class="nx-cong-cu">
+    <label class="nx-tim">
+      <svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+      <input type="search" data-nx-tim placeholder="Tìm người theo tên hoặc email" aria-label="Tìm người theo tên hoặc email" autocomplete="off" spellcheck="false">
+    </label>
+    <button class="nut" type="button" data-nx-mo-them aria-expanded="false" aria-controls="nx-them">
+      <svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Thêm người
+    </button>
+  </div>
+
+  <div class="nx-them" id="nx-them" hidden>
+    <form method="post" action="/nguoi-xem/quyen" class="nx-form" data-nx-form data-nx-moi autocomplete="off">
+      <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+      <input type="hidden" name="loc_ben" value="{{ loc_ben }}">
+      <h3 class="nx-them__tieu-de">Thêm người</h3>
+      <div class="nx-chon-nguoi">
+        {#- Gợi ý theo tên từ danh bạ Lark: CHỈ quản trị viên (soát 21/10/2026 — /api/danh-ba/tim liệt kê cả công ty). #}
+        {% if nguoi.la_quan_tri %}
+        <label class="nx-truong" for="nx-email">Người</label>
+        <input id="nx-email" type="text" name="email" required maxlength="254" inputmode="email" spellcheck="false"
+               placeholder="Gõ tên hoặc email Lark" data-nx-email data-nx-goi-y role="combobox" aria-autocomplete="list"
+               aria-expanded="false" aria-controls="nx-goi-y">
+        <ul class="nx-goi-y" id="nx-goi-y" role="listbox" aria-label="Gợi ý từ danh bạ Lark" hidden></ul>
+        <p class="nx-ghi" data-nx-chon-ghi>Gõ ít nhất 2 chữ của tên để tìm trong danh bạ Lark, hoặc nhập thẳng email.</p>
+        {% else %}
+        <label class="nx-truong" for="nx-email">Email Lark</label>
+        <input id="nx-email" type="email" name="email" required maxlength="254" spellcheck="false"
+               placeholder="ten@hapas.vn" data-nx-email>
+        <p class="nx-ghi" data-nx-chon-ghi>Nhập email Lark của người cần thêm.</p>
+        {% endif %}
+      </div>
+      {% if nguoi.la_quan_tri %}
+      <input type="hidden" name="co_quan_tri" value="1"><input type="hidden" name="qt_cu" value="0">
+      <label class="nx-cong-tac"><input type="checkbox" role="switch" name="quan_tri" value="1" data-nx-qt><span>Quản trị viên (mọi bên)</span></label>
+      {% endif %}
+      <fieldset class="nx-ben">
+        <legend class="nx-truong">Quyền theo bên</legend>
+        {% for o in o_moi %}
+        <input type="hidden" name="cu__{{ o.ma }}" value="">
+        <label class="nx-o-ben"><span class="nx-o-ben__ten">{{ o.ten }}</span>
+          <select name="vai__{{ o.ma }}" data-nx-ben>
+            {% for v, ten in LUA_CHON_BEN.items() %}<option value="{{ v }}"{% if v == o.vai %} selected{% endif %}{% if v not in o.duoc %} disabled{% endif %}>{{ ten }}</option>{% endfor %}
+          </select></label>
+        {% endfor %}
+      </fieldset>
+      <p class="nx-ghi" data-nx-ghi-qt hidden>Quản trị viên có toàn quyền ở mọi bên — không cần chọn theo bên.</p>
+      <div class="nx-chan">
+        <span class="nx-trang-thai" data-nx-trang-thai aria-live="polite"></span>
+        <button class="nut nut--nhe" type="button" data-nx-dong-them>Huỷ</button>
+        <button class="nut" type="submit" data-nx-luu>Lưu</button>
+      </div>
+    </form>
+  </div>
+
+  <ul class="nx-ds" data-nx-ds>
+    <li class="nx-dau" aria-hidden="true"><span>Người</span><span>Quyền</span><span>Lark</span><span>Đăng nhập gần nhất</span><span></span></li>
     {% for x in ds %}
-      <tr>
-        <td>{{ x.email }}{% if x.email == nguoi.email %} <span class="the the--nhan">bạn</span>{% endif %}{% if x.ten_lark %}<span class="nx-dong2">{{ x.ten_lark }}</span>{% endif %}{% if x.phong_ban %}<span class="nx-dong2 nx-pb">{{ x.phong_ban }}</span>{% endif %}</td>
-        <td><span class="nx-o"><span class="the{% if x.o.mau %} the--{{ x.o.mau }}{% endif %}">{{ x.o.chu }}</span><button type="button" class="goi-y{% if x.o.canh %} goi-y--canh{% endif %}" data-goi-y="{{ x.o.goi_y }}" aria-label="Giải thích trạng thái Lark">i</button></span></td>
-        <td class="nho">{% if x.dang_nhap_cuoi %}{{ x.dang_nhap_cuoi|gio_vn }}{% else %}<span class="phu">Chưa đăng nhập</span>{% endif %}</td>
-        <td>
-          {% if x.la_quan_tri %}<span class="the the--tim" data-o="quan-tri">Quản trị viên</span>{% endif %}
-          {% for b in x.quyen_hien %}
-          <span class="nx-quyen" data-o="quyen-{{ b.ma }}"><span class="o-mau o-mau--{{ 'tim' if b.vai == 'quan_ly' else 'xanh' }}">{{ b.ten }}: {{ VAI_TRO.get(b.vai, b.vai) }}</span>
-            {% if b.xoa_duoc %}
-            <form method="post" action="/nguoi-xem/xoa" class="nx-inline" data-xac-nhan="Bỏ quyền của {{ x.email }} ở bên {{ b.ten }}?">
-              <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-              <input type="hidden" name="email" value="{{ x.email }}">
-              <input type="hidden" name="don_vi" value="{{ b.ma }}">
-              <button class="nut nut--nhe nut--nho" type="submit" aria-label="Bỏ quyền ở bên {{ b.ten }}">×</button>
-            </form>
-            {% endif %}
-          </span>
-          {% endfor %}
-        </td>
-        <td class="nho">{{ x.them_boi or '—' }}<span class="nx-dong2">{{ x.them_luc|gio_vn }}</span></td>
-        <td>
+    <li class="nx-dong" id="{{ x.neo }}" data-tim="{{ x.tim }}" data-email="{{ x.email }}">
+      <div class="nx-hang">
+        <div class="nx-nguoi">
+          <span class="nx-ten">{{ x.ten or x.email }}{% if x.email == nguoi.email %} <span class="the the--nhan">bạn</span>{% endif %}<span class="the the--canh nx-chua-luu" hidden>Chưa lưu</span><span class="the the--tot nx-da-luu" hidden>Đã lưu</span></span>
+          {% if x.ten %}<span class="nx-phu">{{ x.email }}</span>{% endif %}
+          {% if x.phong_ban %}<span class="nx-phu nx-pb">{{ x.phong_ban }}</span>{% endif %}
+        </div>
+        <div class="nx-quyen" data-o="quyen"><span class="nx-nhan">Quyền</span><span class="nx-quyen__chu{% if x.la_quan_tri %} nx-quyen__chu--qt{% endif %}">{{ x.tom_tat or '—' }}</span></div>
+        <div class="nx-lark"><span class="nx-nhan">Lark</span><span class="nx-o"><span class="the{% if x.o.mau %} the--{{ x.o.mau }}{% endif %}">{{ x.o.chu }}</span><button type="button" class="goi-y{% if x.o.canh %} goi-y--canh{% endif %}" data-goi-y="{{ x.o.goi_y }}" aria-label="Giải thích trạng thái Lark">i</button></span></div>
+        <div class="nx-dn"><span class="nx-nhan">Đăng nhập</span>{% if x.dang_nhap_cuoi %}{{ x.dang_nhap_cuoi|gio_vn }}{% else %}<span class="phu">Chưa đăng nhập</span>{% endif %}</div>
+        <div class="nx-hd">
+          {% if x.sua_duoc or x.xoa_het %}
+          <button class="nut nut--nhe nut--nho" type="button" data-nx-sua aria-expanded="false" aria-controls="{{ x.neo }}-sua">Sửa quyền</button>
+          {% endif %}
+        </div>
+      </div>
+      {% if x.sua_duoc or x.xoa_het %}
+      <div class="nx-ngan" id="{{ x.neo }}-sua" hidden>
+        <form method="post" action="/nguoi-xem/quyen" class="nx-form" data-nx-form data-ten="{{ x.ten or x.email }}">
+          <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+          <input type="hidden" name="email" value="{{ x.email }}">
+          <input type="hidden" name="loc_ben" value="{{ loc_ben }}">
           {% if nguoi.la_quan_tri %}
-          <form method="post" action="/nguoi-xem/quan-tri" class="nx-inline">
+          {% if x.qt_doi %}<input type="hidden" name="co_quan_tri" value="1"><input type="hidden" name="qt_cu" value="{{ '1' if x.la_quan_tri else '0' }}">{% endif %}
+          <label class="nx-cong-tac"><input type="checkbox" role="switch" name="quan_tri" value="1" data-nx-qt{% if x.la_quan_tri %} checked{% endif %}{% if not x.qt_doi %} disabled{% endif %}><span>Quản trị viên (mọi bên)</span></label>
+          {% if x.qt_cuoi %}<p class="nx-ghi">Quản trị viên cuối cùng — thêm quản trị viên khác trước khi bỏ quyền này.</p>{% endif %}
+          {% endif %}
+          <fieldset class="nx-ben">
+            <legend class="nx-truong">Quyền theo bên</legend>
+            {% for o in x.o_ben %}
+            <input type="hidden" name="cu__{{ o.ma }}" value="{{ o.vai }}">
+            <label class="nx-o-ben"><span class="nx-o-ben__ten">{{ o.ten }}</span>
+              <select name="vai__{{ o.ma }}" data-nx-ben{% if o.khoa %} disabled data-nx-khoa{% endif %}>
+                {% for v, ten in LUA_CHON_BEN.items() %}<option value="{{ v }}"{% if v == o.vai %} selected{% endif %}{% if v not in o.duoc %} disabled{% endif %}>{{ ten }}</option>{% endfor %}
+              </select>
+              {% if o.khoa and o.ly_do %}<span class="nx-ly-do">{{ o.ly_do }}</span>{% endif %}
+            </label>
+            {% endfor %}
+          </fieldset>
+          <p class="nx-ghi" data-nx-ghi-qt{% if not x.la_quan_tri %} hidden{% endif %}>Quản trị viên có toàn quyền ở mọi bên — quyền theo bên được giữ nguyên để dùng lại nếu bỏ quản trị.</p>
+          <div class="nx-chan">
+            <span class="nx-trang-thai" data-nx-trang-thai aria-live="polite"></span>
+            <button class="nut nut--nhe" type="button" data-nx-huy>Huỷ</button>
+            <button class="nut" type="submit" data-nx-luu>Lưu</button>
+          </div>
+        </form>
+        <div class="nx-ngan__chan">
+          <span class="nx-phu">{% if x.them_boi %}Thêm bởi {{ x.them_boi }}{% if x.them_luc %} · {{ x.them_luc|gio_vn }}{% endif %}{% endif %}</span>
+          {% if x.xoa_het %}
+          <form method="post" action="/nguoi-xem/xoa" data-xac-nhan="Xoá hẳn {{ x.ten or x.email }} ({{ x.email }}) khỏi danh sách — mất quyền ở mọi bên?">
             <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
             <input type="hidden" name="email" value="{{ x.email }}">
-            <input type="hidden" name="bat" value="{{ '0' if x.la_quan_tri else '1' }}">
-            <button class="nut nut--nhe nut--nho" type="submit"{% if x.qt_cuoi %} disabled title="Quản trị viên cuối cùng — thêm quản trị viên khác trước"{% endif %}>{{ 'Bỏ quản trị' if x.la_quan_tri else 'Cấp quản trị' }}</button>
-          </form>
-          <form method="post" action="/nguoi-xem/xoa" class="nx-inline" data-xac-nhan="Xoá hẳn {{ x.email }} (mọi bên) khỏi danh sách người xem?">
-            <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-            <input type="hidden" name="email" value="{{ x.email }}">
-            <button class="nut nut--loi nut--nho" type="submit"{% if not x.xoa_het %} disabled title="Quản trị viên cuối cùng — thêm quản trị viên khác trước"{% endif %}>Xoá</button>
+            <input type="hidden" name="loc_ben" value="{{ loc_ben }}">
+            <button class="nut nut--loi nut--nho" type="submit">Xoá khỏi danh sách</button>
           </form>
           {% endif %}
-        </td>
-      </tr>
+        </div>
+      </div>
+      {% endif %}
+    </li>
     {% endfor %}
-    </tbody>
-  </table>
+  </ul>
+  <div class="nx-trong" data-nx-trong hidden>
+    <p>Không có ai khớp “<span data-nx-tu></span>” trong danh sách.</p>
+    <button class="nut nut--nhe" type="button" data-nx-them-tu>Thêm người này</button>
   </div>
-</section>
-
-<section class="the-khoi cach-duoi">
-  <div class="muc">
-    <span class="muc__so" aria-hidden="true">2</span>
-    <h2 class="muc__ten">Thêm hoặc đổi quyền</h2>
-    <button type="button" class="goi-y" data-goi-y="Một người có thể có quyền ở nhiều bên: lưu từng bên một. Email đã có quyền ở bên đó thì chỉ đổi vai trò.{% if not nguoi.la_quan_tri %} Quản lý của bên chỉ thêm được người Chỉ xem.{% endif %} Khi lưu, dashboard kiểm email với danh bạ Lark và cảnh báo nếu không có hoặc không hoạt động (vẫn lưu).">i</button>
-  </div>
-  <form method="post" action="/nguoi-xem/them" class="luoi-form">
-    <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-    <label class="o">Email Lark <input type="email" name="email" required maxlength="254" placeholder="ten@hapas.vn"></label>
-    <label class="o">Bên
-      <select name="don_vi">
-        {% if nguoi.la_quan_tri %}<option value="">— (chỉ cấp quản trị viên)</option>{% endif %}
-        {% for b in ben_ql %}<option value="{{ b.ma }}"{% if b.ma == loc_ben %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}
-      </select></label>
-    <label class="o">Vai trò
-      <select name="vai_tro">{% for k, v in VAI_TRO.items() %}{% if nguoi.la_quan_tri or k == 'xem' %}<option value="{{ k }}">{{ v }}</option>{% endif %}{% endfor %}</select></label>
-    {% if nguoi.la_quan_tri %}
-    <label class="o"><span><input type="checkbox" name="quan_tri" value="1"> Quản trị viên (mọi bên)</span></label>
-    {% endif %}
-    <div><button class="nut" type="submit">Lưu</button></div>
-  </form>
+  {% if not ds %}<p class="trong">Chưa có ai trong danh sách.</p>{% endif %}
 </section>
 
 {% if nguoi.la_quan_tri %}
 <section class="the-khoi cach-duoi">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">3</span>
+    <span class="muc__so" aria-hidden="true">2</span>
     <h2 class="muc__ten">Bên và dự án</h2>
     <button type="button" class="goi-y" data-goi-y="Chỉ quản trị viên thấy mục này. Chuyển dự án sang bên khác: trang Nguồn → Sửa dự án → Bên sở hữu.">i</button>
   </div>
@@ -131,7 +191,7 @@
     mọi POST /tiktok/*). Không bao giờ hiện token — `tt` chỉ có cột không bí mật (tiktok_ads.DichVu.the). #}
 <section class="the-khoi cach-duoi tt" id="tiktok" aria-labelledby="tt-tieu-de">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">4</span>
+    <span class="muc__so" aria-hidden="true">3</span>
     <h2 class="muc__ten" id="tt-tieu-de">Kết nối TikTok Ads</h2>
     {% if tt %}<span class="the the--cham{% if tt.muc %} the--{{ tt.muc }}{% endif %}" data-o="tt-trang-thai">{{ tt.nhan }}</span>{% endif %}
     <button type="button" class="goi-y" data-goi-y="Dashboard đọc số quảng cáo TikTok bằng quyền của một quản trị viên (đăng nhập TikTok for Business, chỉ công cụ ĐỌC). Mỗi lần đăng nhập dùng được 30 ngày — TikTok không gia hạn khi làm mới; Mark nhắc trước 7, 3 và 1 ngày. Token API của app developer thì không hết hạn.">i</button>
@@ -199,7 +259,7 @@
     bí mật (meta_ads.DichVu.the) — không bao giờ token. Giao diện tối giản, chờ lượt thiết kế. #}
 <section class="the-khoi cach-duoi tt" id="meta" aria-labelledby="mt-tieu-de">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">5</span>
+    <span class="muc__so" aria-hidden="true">4</span>
     <h2 class="muc__ten" id="mt-tieu-de">Kết nối Meta Ads</h2>
     {% if mt %}<span class="the the--cham{% if mt.muc %} the--{{ mt.muc }}{% endif %}" data-o="mt-trang-thai">{{ mt.nhan }}</span>{% endif %}
     <button type="button" class="goi-y" data-goi-y="Dashboard đọc số Facebook / Instagram Ads bằng token người dùng hệ thống CHỈ ĐỌC (ads_read + read_insights), chỉ gọi GET Graph API. Token loại này không hết hạn. Chỉ tài khoản đã duyệt mới được đọc số.">i</button>
@@ -240,7 +300,7 @@
 
 <section class="the-khoi cach-duoi tt" id="tk-qc" aria-labelledby="tkqc-tieu-de">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">6</span>
+    <span class="muc__so" aria-hidden="true">5</span>
     <h2 class="muc__ten" id="tkqc-tieu-de">Tài khoản quảng cáo → bên</h2>
   </div>
   <p class="mo nho tt-chu">Tên có MATEMADE / MATE MADE / MADEMATE tự vào bên MATEMADE; tên có chữ THAI để chưa gán (chỉ quản trị viên thấy); còn lại vào HAPAS. Sửa ở đây thì lần đồng bộ sau giữ nguyên. Meta: chỉ tài khoản đã duyệt mới được đọc số. Trang Quảng cáo chỉ quản trị viên; người có quyền ở bên hỏi Mark để biết số (kể cả chi tiêu), trả lời bằng chữ.</p>
@@ -283,7 +343,7 @@
 {% if co_kiem_do_phu %}
 <section class="the-khoi cach-duoi" id="do-thu-du" aria-labelledby="dp-tieu-de" data-o="do-thu-du">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">7</span>
+    <span class="muc__so" aria-hidden="true">6</span>
     <h2 class="muc__ten" id="dp-tieu-de">Độ thu đủ</h2>
     <button type="button" class="goi-y" data-goi-y="Số cho người vận hành: Mark kiểm 2 lần mỗi tuần xem thu thập có sót bài nhắc brand không (mẫu TikTok lấy bằng đường khác). Không phải độ phủ thị trường / share of voice, không theo bộ lọc. Bật / tắt và trần USD mỗi lần: trang Ngân sách của dự án.">i</button>
   </div>
@@ -333,7 +393,7 @@
 
 <section class="the-khoi cach-duoi">
   <div class="muc">
-    <span class="muc__so" aria-hidden="true">{{ (8 if co_kiem_do_phu else 7) if nguoi.la_quan_tri else 3 }}</span>
+    <span class="muc__so" aria-hidden="true">{{ (7 if co_kiem_do_phu else 6) if nguoi.la_quan_tri else 2 }}</span>
     <h2 class="muc__ten">Nhật ký thay đổi</h2>
     <button type="button" class="goi-y" data-goi-y="100 dòng mới nhất{% if not nguoi.la_quan_tri %} về dự án và quyền của các bên bạn quản lý{% endif %}.">i</button>
   </div>

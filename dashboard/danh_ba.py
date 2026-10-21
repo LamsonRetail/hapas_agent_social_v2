@@ -128,10 +128,10 @@ class DanhBaLark:
         self._token = (tk, time.monotonic() + (int(het) if isinstance(het, int) else 3600))
         return tk
 
-    async def _quet_ca_danh_ba(self, kh, h: dict, can: set[str]) -> dict[str, dict]:
-        """Bước 1b: dò mọi phòng ban, trả {email cần tìm: người Lark} khớp `enterprise_email`
-        hoặc `email`. Dừng sớm khi đã tìm đủ; quá QUET_TOI_DA lần gọi thì dừng với phần đã có."""
-        tim: dict[str, dict] = {}
+    async def _duyet(self, kh, h: dict):
+        """Đi qua danh bạ: GET departments/0/children (fetch_child) rồi find_by_department cho gốc
+        và từng phòng ban. Sinh (tên phòng ban | "", người Lark). Trần QUET_TOI_DA lần gọi mỗi
+        lượt — quá thì dừng với phần đã có. Lỗi Lark -> LoiDanhBa (bên gọi quyết bỏ qua hay báo)."""
         so_goi = 0
 
         async def trang(buoc: str, duong: str, params: list) -> list[dict]:
@@ -152,18 +152,51 @@ class DanhBaLark:
 
         con = await trang("quet_phong_ban", DUONG_PHONG_BAN_CON,
                           [("department_id_type", "open_department_id"), ("fetch_child", "true")])
+        ten_pb = {str(p.get("open_department_id") or ""): str(p.get("name") or "") for p in con}
         pbs = ["0", *(str(p.get("open_department_id") or "") for p in con)]
         for pb in dict.fromkeys(x for x in pbs if x):
-            if so_goi >= QUET_TOI_DA or len(tim) >= len(can):
+            if so_goi >= QUET_TOI_DA:
                 break
             for u in await trang("quet_nguoi", DUONG_NGUOI_THEO_PB,
                                  [("department_id", pb), ("user_id_type", "open_id"),
                                   ("department_id_type", "open_department_id")]):
-                for k in ("enterprise_email", "email"):
-                    e = str(u.get(k) or "").strip().lower()
-                    if e in can and u.get("open_id"):
-                        tim.setdefault(e, u)
+                yield ten_pb.get(pb, ""), u
+
+    async def _quet_ca_danh_ba(self, kh, h: dict, can: set[str]) -> dict[str, dict]:
+        """Bước 1b: dò mọi phòng ban, trả {email cần tìm: người Lark} khớp `enterprise_email`
+        hoặc `email`. Dừng sớm khi đã tìm đủ; quá QUET_TOI_DA lần gọi thì dừng với phần đã có."""
+        tim: dict[str, dict] = {}
+        async for _, u in self._duyet(kh, h):
+            for k in ("enterprise_email", "email"):
+                e = str(u.get(k) or "").strip().lower()
+                if e in can and u.get("open_id"):
+                    tim.setdefault(e, u)
+            if len(tim) >= len(can):
+                break
         return tim
+
+    async def cac_nguoi(self) -> list[dict]:
+        """Cả danh bạ cho ô "Thêm người" (tìm theo TÊN, 21/10/2026): [{"ten", "email",
+        "phong_ban", "trang_thai"}] — người có email (email công ty `enterprise_email` trước),
+        đang hoạt động hoặc chưa kích hoạt. Cùng đường gọi + scope với bước 1b (Lark không có API
+        tìm người theo tên bằng token tổ chức — /search/v1/user cần token người dùng). Không
+        chức danh (chủ dự án bỏ 18/10/2026). Lỗi -> LoiDanhBa."""
+        import httpx
+        ra: dict[str, dict] = {}
+        async with httpx.AsyncClient(timeout=self.giay, transport=self.transport) as kh:
+            h = {"Authorization": f"Bearer {await self._token_to_chuc(kh)}"}
+            async for pb, u in self._duyet(kh, h):
+                e = next((str(u.get(k) or "").strip().lower() for k in ("enterprise_email", "email")
+                          if "@" in str(u.get(k) or "")), "")
+                tt = trang_thai(u.get("status"))
+                if not e or tt in ("nghi_viec", "tam_khoa"):
+                    continue
+                x = ra.setdefault(e, {"ten": str(u.get("name") or "").strip()[:200] or e,
+                                      "email": e, "phong_ban": [], "trang_thai": tt})
+                if pb and pb not in x["phong_ban"]:
+                    x["phong_ban"].append(pb)
+        return [{**x, "phong_ban": " · ".join(x["phong_ban"])[:300]}
+                for x in sorted(ra.values(), key=lambda x: x["ten"].lower())]
 
     async def tra_cuu(self, emails: list[str], open_id_cua: dict[str, str] | None = None,
                       quet: bool = True) -> dict[str, dict]:

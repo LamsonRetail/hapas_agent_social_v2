@@ -922,6 +922,62 @@ def dat_quan_tri(ai: str, email: str, bat: bool, *, he_thong: bool = False) -> b
     return het
 
 
+def dat_quyen(ai: str, email: str, quan_tri: bool | None, ben: dict[str, str | None], *,
+              da_tai: dict | None = None, he_thong: bool = False) -> dict:
+    """Đặt TRỌN quyền một người trong MỘT giao dịch (nút Lưu trang Quản trị, 21/10/2026): cờ quản
+    trị viên (None = không đổi) + {bên: vai trò | None = bỏ} cho các bên biểu mẫu gửi lên. Mọi
+    thay đổi kiểm bằng đúng luật cũ (`PQ.thay_doi_quyen`) sau khi khoá bảng; một thay đổi sai thì
+    không áp gì. Nhật ký: MỘT dòng mỗi thay đổi, cùng tên/chi tiết như các hàm lẻ (`luu_quyen`,
+    `xoa_quyen`, `dat_quan_tri`) — quản lý bên A chỉ thấy dòng về bên A (lọc `chi_tiet.don_vi`).
+    `da_tai`: giá trị trang đã tải (soát 21/10/2026) — đổi sau khi mở trang thì từ chối, kiểm SAU
+    khoá nên hai người cùng lưu không ghi đè nhau.
+    -> {"thay_doi": [...], "nguoi_moi": bool, "xoa_nguoi_xem": bool, "sau": quyền sau khi lưu}."""
+    with ket_noi() as c:
+        _khoa_nguoi_xem(c)
+        dich = _quyen_trong(c, email)
+        try:
+            doi, sau = PQ.thay_doi_quyen(_lam(c, ai, he_thong), ai, dich, email, quan_tri, ben,
+                                          _so_quan_tri_khac(c, email), da_tai)
+        except PQ.LoiQuyen as e:
+            raise _loi(e) from None
+        kq = {"thay_doi": doi, "nguoi_moi": dich is None, "xoa_nguoi_xem": False, "sau": sau}
+        them = sorted({b for k, b, _, v in doi if k == "ben" and v})
+        if them:
+            co = {r["ma"] for r in c.execute("SELECT ma FROM don_vi WHERE ma = ANY(%s)",
+                                             (them,)).fetchall()}
+            if set(them) - co:
+                raise LoiDuLieu("Không có bên này.")
+        if dich is None:
+            c.execute("INSERT INTO nguoi_xem (email, vai_tro, them_boi, la_quan_tri) VALUES "
+                      "(%s, %s, %s, %s) ON CONFLICT (email) DO NOTHING",
+                      (email, PQ.vai_chung(sau) or "xem", ai, sau["la_quan_tri"]))
+        for k, b, _, v in doi:
+            if k == "quan_tri":
+                c.execute("UPDATE nguoi_xem SET la_quan_tri = %s WHERE email = %s", (v, email))
+            elif v:
+                c.execute("INSERT INTO quyen (email, don_vi, vai_tro, them_boi) VALUES "
+                          "(%s, %s, %s, %s) ON CONFLICT (email, don_vi) DO UPDATE SET "
+                          "vai_tro = EXCLUDED.vai_tro", (email, b, v, ai))
+            else:
+                c.execute("DELETE FROM quyen WHERE email = %s AND don_vi = %s", (email, b))
+        het = _don_nguoi_trong(c, email)
+        if not het:
+            _vai_cu(c, email)
+        kq["xoa_nguoi_xem"] = het
+        for k, b, truoc, v in doi:
+            if k == "quan_tri":
+                _nhat_ky(c, ai, "dat_quan_tri", f"nguoi_xem:{email}",
+                         {"email": email, "truoc": truoc, "sau": v, "xoa_nguoi_xem": het})
+            elif v:
+                _nhat_ky(c, ai, "luu_quyen", f"quyen:{email}:{b}",
+                         {"email": email, "don_vi": b, "nguoi_moi": dich is None,
+                          "truoc": truoc, "sau": v})
+            else:
+                _nhat_ky(c, ai, "xoa_quyen", f"quyen:{email}:{b}",
+                         {"email": email, "don_vi": b, "truoc": truoc, "xoa_nguoi_xem": het})
+    return kq
+
+
 def xoa_nguoi_xem(ai: str, email: str, *, he_thong: bool = False) -> None:
     """Xoá hẳn một người (mọi bên — `quyen` ON DELETE CASCADE). Chỉ quản trị viên; không xoá quản
     trị viên cuối cùng."""

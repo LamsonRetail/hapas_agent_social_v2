@@ -69,3 +69,96 @@ def test_xoa_quyen_ben_khac_khong_lo_ai_thuoc_ben_do():
     # Quản trị viên vẫn nhận câu rõ ràng khi người đó không có quyền ở bên.
     with pytest.raises(PQ.LoiQuyen, match="không có quyền ở bên này"):
         PQ.kiem_xoa_quyen(QT, "a@x.vn", None, "b@x.vn", "matemade")
+
+
+
+# ─────────────── một lần Lưu = trọn quyền một người (21/10/2026) ───────────────
+def _doi(lam, dich, quan_tri=None, ben=None, so_qt_khac=1, email="b@x.vn"):
+    return PQ.thay_doi_quyen(lam, "a@x.vn", dich, email, quan_tri, ben or {}, so_qt_khac)
+
+
+def test_thay_doi_quyen_ap_tron_bo_cho_quan_tri_vien():
+    doi, sau = _doi(QT, XEM_MM, True, {"hapas": "quan_ly"})
+    assert doi == [("quan_tri", None, False, True)]           # sẽ là quản trị viên: bỏ qua bên
+    assert sau == {"la_quan_tri": True, "ben": {"matemade": "xem"}}
+    doi, sau = _doi(QT, XEM_MM, None, {"hapas": "quan_ly", "matemade": None})
+    assert doi == [("ben", "hapas", None, "quan_ly"), ("ben", "matemade", "xem", None)]
+    assert sau == {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}
+    # bỏ cờ + đặt bên cùng lúc (còn quản trị viên khác)
+    doi, sau = _doi(QT, QT, False, {"hapas": "xem"}, so_qt_khac=1)
+    assert doi == [("quan_tri", None, True, False), ("ben", "hapas", None, "xem")]
+    # bên không gửi giữ nguyên; giá trị không đổi không tính -> không có gì để lưu
+    with pytest.raises(PQ.LoiQuyen, match="Chưa chọn quyền nào"):
+        _doi(QT, QL_HP, None, {"hapas": "quan_ly", "khac": None})
+    with pytest.raises(PQ.LoiQuyen, match="Chưa chọn quyền nào"):
+        _doi(QT, None, None, {"hapas": None})                  # người mới: cùng một câu
+
+
+@pytest.mark.parametrize("lam, dich, qt, ben, so_qt, khop", [
+    (QT, QT, False, {}, 0, "quản trị viên cuối cùng"),
+    (QT, QT, False, {"hapas": "xem"}, 0, "quản trị viên cuối cùng"),
+    (QL_HP, None, True, {}, 3, "Chỉ quản trị viên"),
+    (QL_HP, None, None, {"hapas": "quan_ly"}, 1, "chỉ thêm được người Chỉ xem"),
+    (QL_HP, None, None, {"matemade": "xem"}, 1, "quản lý của bên này"),
+    (QL_HP, QT, None, {"hapas": "xem"}, 1, "quyền của quản trị viên"),
+    (QL_HP, {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}, None, {"hapas": "xem"}, 1,
+     "chỉ quản trị viên đổi được"),
+    (QL_HP, {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}, None, {"hapas": None}, 1,
+     "chỉ quản trị viên bỏ được"),
+    # một thay đổi hợp lệ + một sai: cả lần bị từ chối
+    (QL_HP, {"la_quan_tri": False, "ben": {"hapas": "xem", "matemade": "xem"}}, None,
+     {"hapas": None, "matemade": None}, 1, "quản lý của bên này"),
+])
+def test_thay_doi_quyen_giu_moi_luat_cu(lam, dich, qt, ben, so_qt, khop):
+    with pytest.raises(PQ.LoiQuyen, match=khop or "Chưa chọn quyền nào"):
+        _doi(lam, dich, qt, ben, so_qt)
+
+
+def test_quan_ly_khong_tu_doi_quyen_minh():
+    for ben in ({"hapas": "xem"}, {"hapas": None}):
+        with pytest.raises(PQ.LoiQuyen, match="chính mình"):
+            PQ.thay_doi_quyen(QL_HP, "a@x.vn", QL_HP, "a@x.vn", None, ben, 1)
+
+
+def test_lua_chon_ben_khop_luat():
+    xem = {"la_quan_tri": False, "ben": {"hapas": "xem"}}
+    assert PQ.lua_chon_ben(QT, "a@x.vn", xem, "b@x.vn", "hapas") == (["", "xem", "quan_ly"], "")
+    assert PQ.lua_chon_ben(QL_HP, "a@x.vn", xem, "b@x.vn", "hapas") == (["", "xem"], "")
+    assert PQ.lua_chon_ben(QL_HP, "a@x.vn", None, "", "hapas") == (["", "xem"], "")
+    duoc, ly_do = PQ.lua_chon_ben(QL_HP, "a@x.vn", QT, "b@x.vn", "hapas")
+    assert duoc == [""] and "quản trị viên" in ly_do
+    duoc, ly_do = PQ.lua_chon_ben(QL_HP, "a@x.vn", QL_HP, "a@x.vn", "hapas")
+    assert duoc == ["quan_ly"] and "chính mình" in ly_do
+    assert PQ.tom_tat(QL_HP, {"hapas": "HAPAS"}) == "HAPAS · Quản lý, MATEMADE · Chỉ xem"
+    assert PQ.tom_tat(QL_HP, {"hapas": "HAPAS"}, ["hapas"]) == "HAPAS · Quản lý"
+    assert PQ.tom_tat(QT, {}) == "Quản trị viên"
+
+
+@pytest.mark.parametrize("dich", [None, XEM_MM, QT, {"la_quan_tri": False,
+                                                    "ben": {"matemade": "quan_ly"}}])
+@pytest.mark.parametrize("qt, ben, khop", [
+    (None, {"matemade": None}, "quản lý của bên này"),
+    (None, {"matemade": "xem"}, "quản lý của bên này"),
+    (None, {"hapas": "xem", "matemade": None}, "quản lý của bên này"),
+    (False, {}, "Chỉ quản trị viên"),
+    (True, {"hapas": "xem"}, "Chỉ quản trị viên"),
+])
+def test_quan_ly_ben_khong_do_duoc_quyen_ben_khac(dich, qt, ben, khop):
+    """Soát 21/10/2026 (HIGH): phạm vi người sửa xét TRƯỚC mọi so sánh — cùng một câu lỗi dù người
+    bị sửa có / không có quyền ở bên khác hay là quản trị viên."""
+    with pytest.raises(PQ.LoiQuyen) as e:
+        _doi(QL_HP, dich, qt, ben)
+    assert khop in str(e.value) and "Chưa chọn" not in str(e.value)
+
+
+def test_thay_doi_quyen_tu_choi_khi_trang_da_cu():
+    xem = {"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}
+    with pytest.raises(PQ.LoiQuyen, match="sau khi bạn mở trang"):
+        PQ.thay_doi_quyen(QT, "a@x.vn", xem, "b@x.vn", None, {"hapas": None}, 1,
+                          {"ben": {"hapas": "xem"}})
+    with pytest.raises(PQ.LoiQuyen, match="sau khi bạn mở trang"):
+        PQ.thay_doi_quyen(QT, "a@x.vn", QT, "b@x.vn", False, {}, 1, {"quan_tri": False})
+    # khớp giá trị đã tải -> lưu được; ô không gửi thì không so
+    doi, _ = PQ.thay_doi_quyen(QT, "a@x.vn", xem, "b@x.vn", None, {"hapas": "xem"}, 1,
+                               {"ben": {"hapas": "quan_ly", "matemade": "xem"}})
+    assert doi == [("ben", "hapas", "quan_ly", "xem")]
