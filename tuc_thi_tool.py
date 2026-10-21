@@ -56,8 +56,13 @@ from dashboard import quang_cao as QC
 VN = HD.VN
 NCC_NEN = {"tiktok": "tiktok_ads", "meta": "meta_ads"}
 TEN_NCC = {"tiktok_ads": "TikTok Ads", "meta_ads": "Meta Ads"}
-CHO_TOI_DA = 90.0          # giây chờ lượt đọc quảng cáo
+#: Giây chờ lượt đọc quảng cáo. 21/10/2026: 4 tài khoản MATEMADE × 7 ngày đọc tới TỪNG quảng cáo
+#: (chủ dự án: giữ đủ tầng quảng cáo) mất 251 giây — chờ 90 giây thì Mark trả "chưa đọc lại
+#: được" dù lượt vẫn xong. Nâng lên 330 giây, vẫn bị kẹp dưới mốc chặn của đồng hồ lượt
+#: (`_han_cho`) để còn thời gian viết trả lời trước trần vòng job.
+CHO_TOI_DA = 330.0
 NHIP_HOI = 2.0             # giây giữa hai lần hỏi DB
+CHUA_SAU_CHAN = 15.0       # giây chừa trước mốc chặn của đồng hồ lượt
 GIAN_PHUT = 5              # cùng phạm vi trong 5 phút: dùng lại lượt trước
 TUC_THI_NGAY = 7           # khoảng đọc lại ≤ 7 ngày gồm hôm nay
 TK_TOI_DA = 40             # tài khoản tối đa mỗi lần đọc lại (L5)
@@ -97,7 +102,7 @@ SCHEMA = {
     "description": (
         "Lấy số MỚI NGAY (thời gian thực) khi người hỏi cần số mới hơn số đang có trong kho "
         "dashboard: (1) quang_cao — đọc lại số TikTok Ads / Meta Ads của bên họ (miễn phí, chỉ đọc, "
-        "≤ 7 ngày gồm hôm nay; chờ tối đa ~90 giây rồi trả số); (2) bai — chỉ số hiện tại của vài "
+        "≤ 7 ngày gồm hôm nay; chờ tối đa ~5 phút rồi trả số — nhiều tài khoản đọc tới từng quảng cáo mất vài phút); (2) bai — chỉ số hiện tại của vài "
         "link bài (≤ 5 link, tốn tiền Apify); (3) kenh — hồ sơ + bài mới nhất của 1–2 kênh (tốn "
         "tiền); (4) quet — mở ngay một lượt quét lắng nghe cho dự án của bên họ (tốn tiền, chạy "
         "nền, kết quả về như lượt quét thường).\n"
@@ -336,13 +341,15 @@ def _cho(kho, ids: list[int], han: float, ngu) -> list[dict]:
 
 
 def _han_cho() -> float:
-    """Chờ ≤ 90 giây, và không vượt mốc nhắc của đồng hồ lượt (chừa thời gian viết trả lời)."""
+    """Chờ ≤ `CHO_TOI_DA` giây, và dừng trước mốc CHẶN của đồng hồ lượt `CHUA_SAU_CHAN` giây (mốc
+    chặn đã chừa ≥ 60 giây trước trần vòng job để model viết trả lời)."""
     try:
         import dong_ho_luot
         da = dong_ho_luot.da_chay()
+        chan = dong_ho_luot.nguong()[1]
     except Exception:  # noqa: BLE001
-        da = None
-    con = CHO_TOI_DA if da is None else max(5.0, min(CHO_TOI_DA, 300.0 - da))
+        da, chan = None, 400.0
+    con = CHO_TOI_DA if da is None else max(5.0, min(CHO_TOI_DA, chan - CHUA_SAU_CHAN - da))
     return _dong_ho() + con
 
 
@@ -388,7 +395,8 @@ def do_moi_ncc(r: dict, ids: list[str], ghi_kho, q: dict) -> dict:
         return x
     x["muc"] = "chua"
     if tt in ("cho", "dang_chay"):
-        ly = "lượt đọc chưa xong sau ~90 giây (lượt khác đang chạy hoặc nhiều tài khoản)"
+        ly = ("lượt đọc chưa xong trong thời gian chờ (nhiều tài khoản / nhiều quảng cáo, hoặc lượt "
+              "khác đang chạy)")
     elif ok is not None and ok > xin:
         ly = "số tài khoản đọc được không khớp yêu cầu"
     else:

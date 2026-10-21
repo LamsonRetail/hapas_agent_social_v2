@@ -222,7 +222,7 @@ Meta Ads của bên họ (≤ 7 ngày gồm hôm nay), chỉ số hiện tại c
 mở một lượt quét lắng nghe dự án. Mark KHÔNG cầm token quảng cáo: nó chỉ thêm dòng
 `yeu_cau_tuc_thi`; trigger gọi `pg_notify('qc_tuc_thi', …)`; bộ nghe `tiktok-ads-nghe` /
 `meta-ads-nghe` (user lang_nghe_web, `dashboard/nghe_qc.py`) chạy lượt đọc chỉ các tài khoản đó
-rồi đánh dấu xong; Mark chờ ≤ 90 giây rồi trả số từ kho kèm giờ cập nhật TỪNG nền tảng (đủ / một
+rồi đánh dấu xong; Mark chờ ≤ 330 giây (kẹp dưới mốc chặn của đồng hồ lượt) rồi trả số từ kho kèm giờ cập nhật TỪNG nền tảng (đủ / một
 phần / chưa đọc lại được).
 
 ```bash
@@ -262,7 +262,7 @@ sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=
   nhanh), lượt đầy đủ để bộ hẹn giờ; không chạy được (khoá bận, chưa kết nối, thiếu khoá) → chờ
   thông báo / 60 giây, không quay vòng.
 - **Dự phòng**: bộ hẹn giờ `*-ads-yeu-cau` (2 phút) cũng xử lý hàng chờ — bộ nghe dừng thì yêu cầu
-  vẫn chạy (chậm ≤ 2 phút; quá 90 giây Mark trả số cũ kèm giờ cập nhật). Nút "Đồng bộ ngay" loại
+  vẫn chạy (chậm ≤ 2 phút; quá thời gian chờ Mark trả số cũ kèm giờ cập nhật). Nút "Đồng bộ ngay" loại
   nhanh của dashboard cũng NOTIFY → bộ nghe chạy ngay.
 - **Độ mới trung thực** (soát M1, N1): lượt gộp nhiều yêu cầu chia lại cho TỪNG dòng — `so_tk_ok` =
   tài khoản CỦA dòng đó đọc được, `chi_tiet.tk_doc` / `tk_hong` (lý do từng tài khoản); 0 tài khoản →
