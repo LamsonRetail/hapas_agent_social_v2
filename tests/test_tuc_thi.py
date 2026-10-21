@@ -1024,3 +1024,17 @@ def test_ld_quyen_yeu_cau_tuc_thi_trong_mot_giao_dich():
         sql.index("GRANT SELECT, UPDATE ON yeu_cau_tuc_thi TO lang_nghe_web;\nCOMMIT;")
     khoi = sql[a:b]
     assert "REVOKE INSERT ON nhat_ky FROM mark;" in khoi and "GRANT INSERT (" in khoi
+
+
+def test_han_cho_330_giay_nhung_dung_truoc_moc_chan(monkeypatch):
+    """21/10/2026: 4 tài khoản × 7 ngày tới từng quảng cáo mất 251 giây — chờ đủ ~5 phút, nhưng
+    luôn dừng trước mốc chặn của đồng hồ lượt (mặc định 400 giây) 15 giây."""
+    import dong_ho_luot
+    monkeypatch.setattr(TT, "_dong_ho", lambda: 1000.0)
+    monkeypatch.setattr(dong_ho_luot, "nguong", lambda: (300.0, 400.0, 480.0))
+    monkeypatch.setattr(dong_ho_luot, "da_chay", lambda: 20.0)
+    assert TT._han_cho() == 1000.0 + 330.0
+    monkeypatch.setattr(dong_ho_luot, "da_chay", lambda: 200.0)
+    assert TT._han_cho() == 1000.0 + 185.0
+    monkeypatch.setattr(dong_ho_luot, "da_chay", lambda: 395.0)
+    assert TT._han_cho() == 1000.0 + 5.0

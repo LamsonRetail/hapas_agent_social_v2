@@ -190,7 +190,7 @@ _TOOLING_NOTE = "\n".join(
         "'tuần trước') → `hoi_dashboard` (kho, KHÔNG cào). Câu đòi số hiện tại ('bây giờ', 'mới "
         "nhất', 'ngay lúc này', 'cập nhật lại', 'cào lại', 'hôm nay đang chạy thế nào') hoặc cần số "
         "mới hơn kho → `lay_so_tuc_thi`: `loai`=quang_cao (TikTok/Meta Ads của bên người hỏi — "
-        "miễn phí, chỉ đọc, gọi luôn, chờ ≤ 90 giây), bai (vài link bài), kenh (1–2 kênh), quet "
+        "miễn phí, chỉ đọc, gọi luôn, chờ ≤ ~5 phút), bai (vài link bài), kenh (1–2 kênh), quet "
         "(mở lượt quét lắng nghe dự án). Chỉ hỏi lại MỘT câu ngắn khi thật sự không đoán được ý. "
         "LUÔN nói số tính tới lúc nào (`do_moi`), số hôm nay là tạm tính. bai/kenh/quet TỐN TIỀN: "
         "gọi `chi_uoc_tinh`=true, báo USD + ngân sách bị trừ + thời gian, KẾT THÚC bằng \"Chạy "
