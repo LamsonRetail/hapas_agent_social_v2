@@ -490,6 +490,49 @@ class GiaKhoQC:
         ra.sort(key=lambda x: (-(x.get(cot) or 0), x[khoa]))
         return ra[:n]
 
+    #: Cùng nghĩa với KQ.SAP_BANG_SQL (bản Python cho kho giả).
+    _SAP_BANG = {
+        "chi": lambda t: t.get("chi"), "hien_thi": lambda t: t.get("hien_thi"),
+        "click": lambda t: t.get("click"), "view": lambda t: t.get("view_video"),
+        "follow": lambda t: t.get("follow"), "tuong_tac": QC.tuong_tac,
+        "cpm": lambda t: (t["chi"] * 1000 / t["hien_thi"]
+                          if (t.get("hien_thi") or 0) >= QC.NGUONG_TI_LE else None),
+        "ctr": lambda t: (t["click"] / t["hien_thi"]
+                          if (t.get("hien_thi") or 0) >= QC.NGUONG_TI_LE else None),
+        "roas": lambda t: (t["gia_tri_mua_shop"] / t["chi"]
+                           if (t.get("chi") or 0) > 0 and t.get("gia_tri_mua_shop") is not None
+                           else None),
+    }
+
+    def qc_bang(self, cap, ids, tu, den, *, sap, tang=False, mau="", cd="", n=10):
+        bang, khoa = (("qc_campaign_ngay", "campaign_id") if cap == "campaign"
+                      else ("qc_ad_ngay", "ad_id"))
+        cac = [r for r in self.bang[bang].values() if r["advertiser_id"] in ids
+               and tu <= r["ngay"] <= den and (not cd or r.get("campaign_id") == cd)]
+        nhom: dict = {}
+        for r in cac:
+            nhom.setdefault(r[khoa], []).append(r)
+        ra = []
+        for k, rs in nhom.items():
+            cuoi = max(rs, key=lambda r: r["ngay"])
+            ten = ([cuoi.get("ten")] if cap == "campaign"
+                   else [cuoi.get("ten_ad"), cuoi.get("ten_campaign")])
+            if mau and not any(mau in QC.chu_tim(x or "") for x in ten):
+                continue
+            x = {khoa: k, "advertiser_id": cuoi["advertiser_id"], **self._cong(rs)}
+            if cap == "campaign":
+                x.update(ten=cuoi["ten"], muc_tieu=cuoi["muc_tieu"])
+            else:
+                x.update(campaign_id=cuoi["campaign_id"], ten_ad=cuoi["ten_ad"],
+                         noi_dung=cuoi["noi_dung"], ten_campaign=cuoi["ten_campaign"])
+            ra.append(x)
+        f = self._SAP_BANG[sap]
+        co = [x for x in ra if f(x) is not None]
+        co.sort(key=lambda x: ((f(x) if tang else -f(x)), -(x.get("hien_thi") or 0), x[khoa]))
+        khong = sorted((x for x in ra if f(x) is None),
+                       key=lambda x: (-(x.get("hien_thi") or 0), x[khoa]))
+        return {"rows": (co + khong)[:n], "tong": len(ra)}
+
     def qc_khan_gia(self, ids):
         rows = [r for r in self.bang["qc_khan_gia"].values() if r["advertiser_id"] in ids]
         moi = {}

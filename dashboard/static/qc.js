@@ -160,6 +160,16 @@
   }
 })();
 
+// Lọc bảng chiến dịch / quảng cáo (22/10/2026): đổi "Xếp theo" / "Thứ tự" / "Số dòng" là gửi luôn (ô tìm
+// vẫn chờ Enter hoặc nút Lọc). Không có JS: nút Lọc vẫn đủ dùng.
+(function () {
+  var f = document.querySelector('form[data-o="loc-bang"]');
+  if (!f) return;
+  Array.prototype.forEach.call(f.querySelectorAll("select[data-tu-gui]"), function (s) {
+    s.addEventListener("change", function () { f.submit(); });
+  });
+})();
+
 // Tạo Lark Sheet (20/10/2026): còn yêu cầu đang chờ / đang tạo → hỏi lại /api/qc/sheet mỗi 5 giây (tối
 // đa 15 phút, tab ẩn thì thôi hỏi) và vẽ lại danh sách bằng textContent; hết yêu cầu đang tạo (hoặc hết
 // 15 phút) thì mở lại nút "Tạo Sheet". Không có JS: trang vẫn đúng, tải lại là thấy trạng thái mới.

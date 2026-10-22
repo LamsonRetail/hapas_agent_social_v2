@@ -30,7 +30,7 @@
   </div>
   {% if d and d.cac_nen_tang|length > 2 %}
   <nav class="qc-nen" aria-label="Nền tảng" data-o="loc-nen-tang">
-    {% for n in d.cac_nen_tang %}<a class="qc-nen__nut" href="{{ url_cho(nen_tang=n.ma, tk='') }}"{% if n.ma == d.nen_tang %} aria-current="true"{% endif %}>{% if n.ma != 'tat_ca' %}<span class="qc-cham qc-cham--{{ n.ma }}" aria-hidden="true"></span>{% endif %}{{ n.ten }}</a>{% endfor %}
+    {% for n in d.cac_nen_tang %}<a class="qc-nen__nut" href="{{ url_cho(nen_tang=n.ma, tk='', cd='') }}"{% if n.ma == d.nen_tang %} aria-current="true"{% endif %}>{% if n.ma != 'tat_ca' %}<span class="qc-cham qc-cham--{{ n.ma }}" aria-hidden="true"></span>{% endif %}{{ n.ten }}</a>{% endfor %}
   </nav>
   {% endif %}
 </div>
@@ -56,6 +56,10 @@
     <label class="o">Đến ngày <input type="date" name="den" value="{{ d.den }}" required></label>
     <input type="hidden" name="nen_tang" value="{{ d.nen_tang }}">
     <input type="hidden" name="sap" value="{{ d.sap }}">
+    {#- giữ chữ tìm + cách xếp; KHÔNG giữ chiến dịch (cd) — đổi bên / tài khoản thì chiến dịch cũ thường không còn #}
+    {% if d.bang.tim %}<input type="hidden" name="tim" value="{{ d.bang.tim }}">{% endif %}
+    {% if d.bang.chieu == 'tang' %}<input type="hidden" name="chieu" value="tang">{% endif %}
+    {% if d.bang.so != SO_DONG_BANG[0] %}<input type="hidden" name="so" value="{{ d.bang.so }}">{% endif %}
     <button class="nut" type="submit">Xem</button>
     <nav class="qc-phan qc-loc__nhanh" aria-label="Khoảng nhanh">
       {% for n in (7, 30, 90) %}<a class="qc-phan__nut" href="{{ url_cho(tu=nhanh[n], den=hom_qua) }}"{% if d.tu == nhanh[n] and d.den == hom_qua %} aria-current="true"{% endif %}>{{ n }} ngày</a>{% endfor %}
@@ -150,59 +154,86 @@
 </section>
 <script type="application/json" id="qc-api">{{ d|json_script }}</script>
 
-{% macro bang_top(ds, cap) %}
+{#- Bảng chiến dịch / quảng cáo (22/10/2026, MKT: lọc theo tên, chiến dịch; sắp theo mọi chỉ số). Máy chủ
+    lọc + xếp (`kho_qc.qc_bang`) rồi mới cắt 10/25/50 dòng — không xếp lại trên 10 dòng đã cắt. Bấm tiêu
+    đề cột: lần đầu cao → thấp, bấm lại thấp → cao (aria-sort). Bấm tên chiến dịch = lọc quảng cáo của nó. #}
+{% macro th_sap(ma) %}{% set nhan = SAP_BANG[ma] %}{% set dang = ma == d.sap %}{% set tang = dang and d.bang.chieu == 'tang' %}<th class="so"{% if dang %} aria-sort="{{ 'ascending' if tang else 'descending' }}"{% endif %}><a class="qc-sap{% if dang %} qc-sap--dang{% endif %}" href="{{ url_cho(sap=ma, chieu=('tang' if dang and not tang else '')) }}#top" title="Xếp theo {{ nhan }}, {{ 'thấp → cao' if dang and not tang else 'cao → thấp' }}">{{ nhan }}<span class="qc-sap__mui" aria-hidden="true">{{ ('▲' if tang else '▼') if dang else '↕' }}</span></a></th>{% endmacro %}
+{% macro loc_cd(r, chu) %}{% if r.campaign_id and r.campaign_id != d.bang.cd %}<a class="qc-bang__loc" href="{{ url_cho(cd=r.campaign_id) }}#top" title="Chỉ xem quảng cáo của chiến dịch này">{{ chu }}</a>{% else %}{{ chu }}{% endif %}{% endmacro %}
+{% macro bang_top(ds, cap, tong) %}
 {% set ten_cot = 'Chiến dịch' if cap == 'campaign' else 'Quảng cáo' %}
 <div class="cuon-ngang qc-bang-khung">
 <table class="qc-bang">
   <thead><tr>
     <th>{{ ten_cot }}</th>
-    {% if d.xem_tien %}<th class="so">Chi</th>{% endif %}
-    <th class="so">Hiển thị</th>
-    {% if d.xem_tien %}<th class="so">CPM</th>{% endif %}
-    <th class="so">CTR</th><th class="so">View video</th><th class="so">Tương tác</th><th class="so">Follow</th>
-    {% if d.xem_tien %}<th class="so">ROAS</th>{% endif %}
+    {% if d.xem_tien %}{{ th_sap('chi') }}{% endif %}
+    {{ th_sap('hien_thi') }}
+    {% if d.xem_tien %}{{ th_sap('cpm') }}{% endif %}
+    {{ th_sap('click') }}{{ th_sap('ctr') }}{{ th_sap('view') }}{{ th_sap('tuong_tac') }}{{ th_sap('follow') }}
+    {% if d.xem_tien %}{{ th_sap('roas') }}{% endif %}
   </tr></thead>
   <tbody>
   {% for r in ds %}
     <tr>
       <td class="qc-bang__ten">
         {% if cap == 'campaign' %}
-          <span class="qc-bang__chinh">{{ r.ten or r.campaign_id }}</span>
+          <span class="qc-bang__chinh">{{ loc_cd(r, r.ten or r.campaign_id) }}</span>
           <span class="qc-bang__phu" data-nen-tang="{{ r.nen_tang }}"><span class="qc-cham qc-cham--{{ r.nen_tang }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ r.ten_tk }}{% if r.muc_tieu %} · {{ r.muc_tieu|ten_muc_tieu }}{% endif %}</span>
         {% else %}
           <span class="qc-bang__chinh">{{ r.ten_ad or r.ad_id }}</span>
           {% if r.noi_dung %}<span class="qc-bang__noi-dung">{{ r.noi_dung }}</span>{% endif %}
-          <span class="qc-bang__phu" data-nen-tang="{{ r.nen_tang }}"><span class="qc-cham qc-cham--{{ r.nen_tang }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ r.ten_campaign or r.campaign_id or '' }}{% if r.ten_tk %} · {{ r.ten_tk }}{% endif %}</span>
+          <span class="qc-bang__phu" data-nen-tang="{{ r.nen_tang }}"><span class="qc-cham qc-cham--{{ r.nen_tang }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ loc_cd(r, r.ten_campaign or r.campaign_id or '') }}{% if r.ten_tk %} · {{ r.ten_tk }}{% endif %}</span>
         {% endif %}
       </td>
       {% if d.xem_tien %}<td class="so qc-bang__chi" data-nhan="Chi">{{ r.chi|so_vn }}</td>{% endif %}
       <td class="so" data-nhan="Hiển thị">{{ r.hien_thi|so_vn }}</td>
       {% if d.xem_tien %}<td class="so" data-nhan="CPM">{{ cpm(r) }}</td>{% endif %}
+      <td class="so" data-nhan="Click">{{ r.click|so_vn }}</td>
       <td class="so" data-nhan="CTR">{{ ctr(r) }}</td>
       <td class="so" data-nhan="View video">{{ r.view_video|so_vn }}</td>
       <td class="so" data-nhan="Tương tác">{{ r.tuong_tac|so_vn }}</td><td class="so" data-nhan="Follow">{{ r.follow|so_vn }}</td>
       {% if d.xem_tien %}<td class="so" data-nhan="ROAS">{{ r.roas_shop|so_thap or '—' }}</td>{% endif %}
     </tr>
   {% else %}
-    <tr><td colspan="{{ 9 if d.xem_tien else 6 }}" class="trong">Không có {{ ten_cot|lower }} nào chạy trong khoảng này.</td></tr>
+    <tr><td colspan="{{ 10 if d.xem_tien else 7 }}" class="trong">Không có {{ ten_cot|lower }} nào {{ 'khớp bộ lọc' if d.bang.tim or d.bang.cd else 'chạy' }} trong khoảng này.</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+{% if tong > ds|length %}<p class="mo nho qc-bang__dem">Đang hiện {{ ds|length }} / {{ tong|so_vn }} {{ ten_cot|lower }}{% if ds|length < SO_DONG_BANG[-1] %} — <a href="{{ url_cho(so=SO_DONG_BANG[-1]) }}#top">hiện {{ SO_DONG_BANG[-1] }} dòng</a>{% endif %}{% if not d.bang.tim %}, hoặc tìm theo tên ở trên{% endif %}.</p>{% endif %}
 {% endmacro %}
 
+{% set ten_cd = ((d.campaign|first).ten if d.campaign else none) or ((d.ad|first).ten_campaign if d.ad else none) or d.bang.cd %}
+{% set co_loc = d.bang.tim or d.bang.cd or d.bang.chieu == 'tang' or d.bang.so != SO_DONG_BANG[0] or d.sap != (sap_xep|first)[0] %}
 <section class="the-khoi cach-duoi" aria-labelledby="qc-top-tieu-de" id="top">
   <div class="muc">
-    <h2 class="muc__ten" id="qc-top-tieu-de">Chiến dịch và quảng cáo nổi bật</h2>
-    <button type="button" class="goi-y" data-goi-y="10 dòng đứng đầu trong khoảng ngày theo cột đang chọn. Chỉ chiến dịch / quảng cáo có hiển thị (nền tảng trả cả hàng nghìn quảng cáo không chạy — không đọc). CPM, CTR tính lại từ tổng của dòng.">i</button>
-    <nav class="muc__phai qc-phan" aria-label="Xếp theo">
-      {% for ma, ten in sap_xep %}<a class="qc-phan__nut" href="{{ url_cho(sap=ma) }}#top"{% if ma == d.sap %} aria-current="true"{% endif %}>{{ ten }}</a>{% endfor %}
-    </nav>
+    <h2 class="muc__ten" id="qc-top-tieu-de">Chiến dịch và quảng cáo</h2>
+    <button type="button" class="goi-y" data-goi-y="Tìm theo tên (không cần gõ dấu): bảng chiến dịch khớp tên chiến dịch; bảng quảng cáo khớp tên quảng cáo hoặc tên chiến dịch chứa nó. Bấm tên một chiến dịch để chỉ xem quảng cáo của chiến dịch đó. Bấm tiêu đề cột để xếp, bấm lại để đổi chiều. CPM, CTR, ROAS tính lại từ tổng của dòng; khi xếp theo CPM hoặc CTR, dòng dưới {{ NGUONG_TI_LE|so_vn }} hiển thị xuống cuối để số lẻ không lấn lên đầu. Bộ lọc này chỉ áp vào hai bảng — số tổng, biểu đồ và Lark Sheet vẫn theo Bộ lọc đầu trang.">i</button>
   </div>
-  <h3 class="qc-h3">Chiến dịch</h3>
-  {{ bang_top(d.campaign, 'campaign') }}
-  <h3 class="qc-h3 qc-h3--cach">Quảng cáo</h3>
-  {{ bang_top(d.ad, 'ad') }}
+  <form class="qc-bang-loc" method="get" action="/quang-cao#top" role="search" aria-label="Lọc và sắp xếp bảng" data-o="loc-bang">
+    {% for k in ('ben', 'nen_tang', 'tk', 'tu', 'den') if d[k] %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
+    {% if d.bang.cd %}<input type="hidden" name="cd" value="{{ d.bang.cd }}">{% endif %}
+    <label class="o qc-bang-loc__tim">Tìm theo tên
+      <input type="search" name="tim" value="{{ d.bang.tim }}" maxlength="{{ TIM_TOI_DA }}" placeholder="Tên chiến dịch hoặc quảng cáo" autocomplete="off">
+    </label>
+    <label class="o">Xếp theo
+      <select name="sap" data-tu-gui>{% for ma, ten in sap_xep %}<option value="{{ ma }}"{% if ma == d.sap %} selected{% endif %}>{{ ten }}</option>{% endfor %}</select>
+    </label>
+    <label class="o">Thứ tự
+      <select name="chieu" data-tu-gui><option value="giam"{% if d.bang.chieu != 'tang' %} selected{% endif %}>Cao → thấp</option><option value="tang"{% if d.bang.chieu == 'tang' %} selected{% endif %}>Thấp → cao</option></select>
+    </label>
+    <label class="o qc-bang-loc__so">Số dòng
+      <select name="so" data-tu-gui>{% for n in SO_DONG_BANG %}<option value="{{ n }}"{% if n == d.bang.so %} selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+    </label>
+    <button class="nut" type="submit">Lọc</button>
+    {% if co_loc %}<a class="qc-bang-loc__bo" href="{{ url_cho(tim='', cd='', chieu='', so='', sap='') }}#top">Bỏ lọc</a>{% endif %}
+  </form>
+  {% if d.bang.cd %}
+  <p class="qc-bang-the"><span>Chiến dịch: <b>{{ ten_cd }}</b></span><a class="qc-bang-the__bo" href="{{ url_cho(cd='') }}#top" aria-label="Bỏ lọc chiến dịch {{ ten_cd }}" title="Bỏ lọc chiến dịch">✕</a></p>
+  {% endif %}
+  <h3 class="qc-h3">Chiến dịch{% if d.bang.tim or d.bang.cd %}<span class="qc-h3__dem"> · {{ d.bang.tong_campaign|so_vn }} khớp</span>{% endif %}</h3>
+  {{ bang_top(d.campaign, 'campaign', d.bang.tong_campaign) }}
+  <h3 class="qc-h3 qc-h3--cach">Quảng cáo{% if d.bang.tim or d.bang.cd %}<span class="qc-h3__dem"> · {{ d.bang.tong_ad|so_vn }} khớp</span>{% endif %}</h3>
+  {{ bang_top(d.ad, 'ad', d.bang.tong_ad) }}
 </section>
 
 <section class="the-khoi cach-duoi" aria-labelledby="qc-kg-tieu-de">

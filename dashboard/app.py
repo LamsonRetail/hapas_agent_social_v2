@@ -118,7 +118,6 @@ _CHUA_KIEM = object()
 COOKIE_TIKTOK = "ln_tiktok"
 TIKTOK_STATE_GIAY = 600
 NHO_BEN_QC_GIAY = 60.0
-TOP_QC = 10
 #: 19/10/2026 (soát): dashboard KHÔNG chạy đồng bộ TikTok trong tiến trình web — chỉ ghi cờ yêu cầu,
 #: bộ hẹn giờ tiktok-ads-yeu-cau.timer / meta-ads-yeu-cau.timer (2 phút/lần, 20/10/2026) chạy lượt.
 CHO_DONG_BO = "Lượt đồng bộ sẽ chạy trong ≤ 2 phút (bộ hẹn giờ trên máy chủ)."
@@ -2777,14 +2776,21 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             ngay.append({"ngay": d.isoformat(), **{c: r.get(c) or 0 for c in QC.TEN_COT_SO},
                          "tuong_tac": QC.tuong_tac(r)})
             d += datetime.timedelta(days=1)
-        sap = QC.cot_sap(qp.get("sap"), co_tien)
+        # 22/10/2026 (MKT): bảng chiến dịch / quảng cáo lọc theo tên + chiến dịch, xếp theo mọi cột.
+        lb = QC.loc_bang(qp, co_tien)
+        sap = lb["sap"]
         ten_tk = {t["advertiser_id"]: t.get("ten") or t["advertiser_id"] for t in cac_tk}
         nen_tk = {t["advertiser_id"]: QC.nen_tang_tk(t) for t in cac_tk}
+        dem = {}
 
         def top(cap):
+            # Chữ tìm không còn chữ/số Latin nào (vd "…", chữ Thái) → không khớp gì, không lờ đi.
+            b = (kq.qc_bang(cap, ids, tu, den, sap=sap, tang=lb["chieu"] == "tang", mau=lb["mau"],
+                            cd=lb["cd"], n=lb["so"]) if ids and not (lb["tim"] and not lb["mau"])
+                 else {"rows": [], "tong": 0})
+            dem[cap] = b["tong"]
             return [{**QC.dong_top(r), "ten_tk": ten_tk.get(r.get("advertiser_id"), ""),
-                     "nen_tang": nen_tk.get(r.get("advertiser_id"), "tiktok")}
-                    for r in (kq.qc_top(cap, ids, tu, den, sap, TOP_QC) if ids else [])]
+                     "nen_tang": nen_tk.get(r.get("advertiser_id"), "tiktok")} for r in b["rows"]]
         # Tách theo nền tảng (KPI tổng + chuỗi ngày của từng nền tảng trong phạm vi đang lọc).
         theo_nen, ngay_nen = [], []
         for n in QC.NEN_TANG_QC:
@@ -2820,6 +2826,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             "kpi": kpi, "kpi_truoc": kpi_truoc,
             "doi": {k: QC.doi_pt(kpi.get(k), kpi_truoc.get(k)) for k in kpi},
             "theo_ngay": ngay, "campaign": top("campaign"), "ad": top("ad"),
+            "bang": {"tim": lb["tim"], "cd": lb["cd"], "chieu": lb["chieu"], "so": lb["so"],
+                     "tong_campaign": dem.get("campaign", 0), "tong_ad": dem.get("ad", 0)},
             "khan_gia": QC.khan_gia(kg.get("rows") or []),
             "khan_gia_khoang": {"tu": kg.get("tu"), "den": kg.get("den")},
             "moi": {"ngay_cuoi": moi.get("ngay_cuoi"), "ghi_luc": moi.get("ghi_luc")},
@@ -2869,8 +2877,11 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         dong_bo = max((x["dong_bo_luc"] for x in dai if x.get("dong_bo_luc")), default=None)
         ctx: dict = {"dai_qc": dai, "duong_ve": "/quang-cao"}
         if d:
+            b = d["bang"]
             loc = {"ben": d["ben"], "nen_tang": d["nen_tang"], "tk": d["tk"], "tu": d["tu"],
-                   "den": d["den"], "sap": d["sap"]}
+                   "den": d["den"], "sap": d["sap"], "tim": b["tim"], "cd": b["cd"],
+                   "chieu": "tang" if b["chieu"] == "tang" else "",
+                   "so": b["so"] if b["so"] != QC.SO_DONG_BANG[0] else ""}
             hq = _hom_nay() - datetime.timedelta(days=1)
             chinh, phu = QC.chon_kpi(d["xem_tien"])
             ctx |= {"kpi_chinh": [_o_kpi(d, k) for k in chinh], "kpi_phu": [_o_kpi(d, k) for k in phu],
@@ -2879,9 +2890,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                    "hom_qua": hq.isoformat(),
                    "nhanh": {n: (hq - datetime.timedelta(days=n - 1)).isoformat()
                              for n in (7, 30, 90)},
-                   "sap_xep": [(k, t) for k, t in (("chi", "Chi"), ("hien_thi", "Hiển thị"),
-                                                   ("view", "View"), ("follow", "Follow"))
-                               if d["xem_tien"] or k != "chi"]}
+                   "sap_xep": [(k, t) for k, t in QC.SAP_BANG.items()
+                               if d["xem_tien"] or k not in QC.SAP_BANG_TIEN],
+                   "SO_DONG_BANG": QC.SO_DONG_BANG}
         ctx["sheet_ds"] = await _ds_sheet(nguoi["email"])
         if d:
             ctx["sheet_so_ngay"] = (datetime.date.fromisoformat(d["den"])
@@ -2889,7 +2900,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         return _trang(request, "quang_cao.html", nguoi, "quang_cao", d=d, loi_qc=loi,
                       dong_bo_luc=dong_bo, TEN_CHIEU=QC.TEN_CHIEU, CHIEU=QC.CHIEU_TAT_CA,
                       TEN_NEN_TANG_QC=QC.TEN_NEN_TANG_QC, SHEET_TRAN_DONG=KS.TRAN_DONG,
-                      SHEET_TRAN_GIO=KS.TRAN_GIO, **ctx)
+                      SHEET_TRAN_GIO=KS.TRAN_GIO, SAP_BANG=QC.SAP_BANG, TIM_TOI_DA=QC.TIM_TOI_DA,
+                      NGUONG_TI_LE=QC.NGUONG_TI_LE, **ctx)
 
     # ─── xuất Lark Sheet (20/10/2026, chủ dự án): CHỈ quản trị viên. Dashboard chỉ GHI yêu cầu
     # (`kho_sheet_qc.tao`, RLS theo email phiên); bộ nghe qc-sheet-nghe của Mark (app Lark của Mark)

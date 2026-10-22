@@ -517,6 +517,43 @@ def cot_sap(sap: str | None, co_tien: bool) -> str:
     return sap
 
 
+#: Bảng chiến dịch / quảng cáo trang Quảng cáo (22/10/2026, MKT: "lọc theo tên, campaign và sort theo
+#: các chỉ số"): mã `sap` → nhãn. Mọi cột của bảng đều sắp được; tỉ lệ (CPM, CTR, ROAS) tính lại từ
+#: tổng của dòng ở SQL (`kho_qc.qc_bang`). Chi / CPM / ROAS là chỉ số tiền — chỉ người xem tiền.
+SAP_BANG: dict[str, str] = {"chi": "Chi", "hien_thi": "Hiển thị", "cpm": "CPM", "click": "Click",
+                            "ctr": "CTR", "view": "View video", "tuong_tac": "Tương tác",
+                            "follow": "Follow", "roas": "ROAS"}
+SAP_BANG_TIEN = frozenset({"chi", "cpm", "roas"})
+#: CPM / CTR chỉ xếp hạng dòng có ≥ 1.000 hiển thị (dòng 3 hiển thị CTR 33% không phải "tốt nhất");
+#: dòng dưới ngưỡng xuống cuối, vẫn hiện số. Giải thích ở nút "i" của khối.
+NGUONG_TI_LE = 1000
+SO_DONG_BANG = (10, 25, 50)
+TIM_TOI_DA = 100
+
+
+def loc_bang(qp, co_tien: bool) -> dict:
+    """Tham số lọc / sắp bảng chiến dịch + quảng cáo → giá trị đã kiểm (sai thì về mặc định, không
+    báo lỗi — như `cot_sap`). `sap` tiền với người không xem tiền → hien_thi (không lộ thứ hạng chi).
+      tim   — chữ tìm trong tên chiến dịch / quảng cáo (≤ 100 ký tự; so khớp bỏ dấu `chu_tim`)
+      cd    — mã chiến dịch: bảng chiến dịch chỉ dòng đó, bảng quảng cáo chỉ quảng cáo của nó
+      sap   — mã trong SAP_BANG; chieu — giam | tang; so — 10 | 25 | 50 dòng mỗi bảng."""
+    sap = str(qp.get("sap") or "")
+    if sap not in SAP_BANG or (sap in SAP_BANG_TIEN and not co_tien):
+        sap = "chi" if co_tien else "hien_thi"
+    chieu = "tang" if qp.get("chieu") == "tang" else "giam"
+    try:
+        so = int(qp.get("so") or 0)
+    except (TypeError, ValueError):
+        so = 0
+    so = so if so in SO_DONG_BANG else SO_DONG_BANG[0]
+    tim = " ".join(str(qp.get("tim") or "").split())[:TIM_TOI_DA]
+    cd = str(qp.get("cd") or "").strip()
+    if len(cd) > 64 or not re.fullmatch(r"[0-9A-Za-z_-]*", cd):
+        cd = ""
+    return {"tim": tim, "mau": chu_tim(tim) if tim else "", "cd": cd, "sap": sap,
+            "chieu": chieu, "so": so}
+
+
 def dong_top(r: dict) -> dict:
     """Một dòng bảng top (campaign / ad) từ tổng SQL → dòng hiển thị (thêm tương tác, ROAS)."""
     x = dict(r)
