@@ -467,7 +467,14 @@ class GiaKhoQC:
         for r in self.bang["qc_tk_ngay"].values():
             if r["advertiser_id"] in ids and tu <= r["ngay"] <= den:
                 theo.setdefault(r["ngay"], []).append(r)
-        return [{"ngay": d, **self._cong(rs)} for d, rs in sorted(theo.items())]
+
+        # 22/10/2026: như SQL — cộng chỉ số kiểu SỐ trong JSON chi_so, thiếu / chữ → 0.
+        def json_so(rs, k):
+            return int(sum(v for r in rs for v in [(r.get("chi_so") or {}).get(k)]
+                           if isinstance(v, (int, float)) and not isinstance(v, bool)))
+        return [{"ngay": d, **self._cong(rs),
+                 **{ma: json_so(rs, k) for ma, k, *_ in QC.CHUOI_XEM_SP}}
+                for d, rs in sorted(theo.items())]
 
     def qc_top(self, cap, ids, tu, den, sap, n=20):
         bang, khoa = (("qc_campaign_ngay", "campaign_id") if cap == "campaign"
@@ -1018,10 +1025,11 @@ def test_lo_100_id_45_chi_so_trang_200():
     assert all(len(a["metrics"]) <= 45 for t, a in tt.cong_cu if t == "report_integrated_get")
     assert all(a["page_size"] <= 200 for t, a in tt.cong_cu
                if t == "report_integrated_get" and a["metrics"] != ["impressions"])
-    # Cấp tài khoản xin đủ 100 chỉ số hợp lệ (3 lượt ≤ 45), không tên lạ (TikTok từ chối cả lượt).
+    # Cấp tài khoản xin đủ 101 chỉ số hợp lệ (3 lượt ≤ 45), không tên lạ (TikTok từ chối cả lượt).
+    # 22/10/2026: + onsite_on_web_detail (xem trang SP TikTok Shop) — vẫn 3 lượt.
     tk = [a["metrics"] for t, a in tt.cong_cu if t == "report_integrated_get"
           and a["data_level"] == "AUCTION_ADVERTISER" and a["report_type"] == "BASIC"]
-    assert sum(len(m) for m in tk[:3]) == len(QC.CHI_SO_HOP_LE) == 100
+    assert sum(len(m) for m in tk[:3]) == len(QC.CHI_SO_HOP_LE) == 101
     # Chỉ ngày có hiển thị: ad giả chạy ngày lẻ.
     assert {r["ngay"].day % 2 for r in kho_qc.bang["qc_ad_ngay"].values()} == {1}
     assert len({r["ad_id"] for r in kho_qc.bang["qc_ad_ngay"].values()}) == 250

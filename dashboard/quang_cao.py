@@ -24,10 +24,14 @@ from dashboard import phan_quyen as PQ
 
 VN = datetime.timezone(datetime.timedelta(hours=7))
 
-#: 100 chỉ số `report_integrated_get` nhận được (đo thật 19/10/2026 trên 16 tài khoản — một tên
+#: 101 chỉ số `report_integrated_get` nhận được (đo thật 19/10/2026 trên 16 tài khoản — một tên
 #: lạ làm hỏng CẢ lượt gọi, nên chỉ xin trong danh sách này). Bỏ `currency`, `timezone` (thuộc tính
 #: tài khoản, xin riêng qua advertiser_info_get). 3 tên TikTok từ chối: cost_per_engaged_view,
 #: cost_per_1000_engagements, cost_per_messaging_total_conversation_tiktok_direct_message.
+#: 22/10/2026 (chủ dự án): thêm `onsite_on_web_detail` = lượt xem trang chi tiết sản phẩm TikTok
+#: Shop do quảng cáo (đo thật ở AUCTION_ADVERTISER + AUCTION_CAMPAIGN). 101 tên vẫn 3 lô × 45 (cấp
+#: campaign 4 thuộc tính + 101 = 105, vẫn 3 lô) — không thêm lượt gọi. `onsite_on_web_detail_rate`
+#: (= xem ÷ click, > 100%) KHÔNG xin. Tên TikTok TỪ CHỐI (đo 22/10/2026): TEN_TU_CHOI.
 CHI_SO_HOP_LE: tuple[str, ...] = (
     "spend", "impressions", "gross_impressions", "clicks", "ctr", "cpc", "cpm", "reach",
     "frequency", "cost_per_1000_reached", "result", "cost_per_result", "result_rate",
@@ -40,7 +44,8 @@ CHI_SO_HOP_LE: tuple[str, ...] = (
     "value_per_complete_payment", "purchase", "cost_per_purchase", "purchase_rate",
     "total_purchase_value", "total_landing_page_view", "cost_per_landing_page_view",
     "total_pageview", "checkout", "cost_per_checkout", "add_billing", "onsite_on_web_cart",
-    "cost_per_onsite_on_web_cart", "onsite_shopping", "cost_per_onsite_shopping",
+    "cost_per_onsite_on_web_cart", "onsite_on_web_detail", "onsite_shopping",
+    "cost_per_onsite_shopping",
     "total_onsite_shopping_value", "onsite_shopping_roas", "onsite_initiate_checkout_count",
     "on_web_order", "total_on_web_order_value", "onsite_form", "cost_per_onsite_form", "form",
     "cost_per_form", "app_install", "cost_per_app_install", "registration",
@@ -56,6 +61,14 @@ CHI_SO_HOP_LE: tuple[str, ...] = (
     "live_effective_views", "live_product_clicks",
     "messaging_total_conversation_tiktok_direct_message", "vta_conversion",
     "cost_per_vta_conversion", "cta_conversion", "cost_per_cta_conversion",
+)
+#: Tên TikTok từ chối (một tên làm hỏng cả lượt gọi) — đo 19/10 + 22/10/2026; bài thử canh không lọt
+#: vào CHI_SO_HOP_LE / CHI_SO_AD.
+TEN_TU_CHOI: tuple[str, ...] = (
+    "cost_per_engaged_view", "cost_per_1000_engagements",
+    "cost_per_messaging_total_conversation_tiktok_direct_message", "shop_page_view",
+    "product_page_view", "total_product_detail_page_view", "onsite_shopping_page_view",
+    "product_clicks", "onsite_product_view", "live_product_clicks_rate", "shop_visits",
 )
 #: Thuộc tính cấp quảng cáo xin như "chỉ số" (đo 19/10/2026: hợp lệ ở data_level AUCTION_AD).
 THUOC_TINH_AD: tuple[str, ...] = (
@@ -83,10 +96,37 @@ TEN_COT_SO = tuple(c for c, _ in COT_SO)
 #: Cột kiểu tiền (NUMERIC, VND theo tiền tệ tài khoản); còn lại là số đếm (BIGINT).
 COT_TIEN = frozenset({"chi", "gia_tri_mua_shop"})
 
+#: 22/10/2026 (chủ dự án: "cái gì gây hiểu nhầm thì phải làm cho rõ ràng"): hai chuỗi "xem trang sản
+#: phẩm" cho biểu đồ Theo ngày, cộng từ JSON `chi_so` của qc_tk_ngay. MỖI chuỗi thuộc MỘT nền tảng —
+#: không gộp, không cộng chồng: TikTok đếm trong TikTok Shop, Meta đếm trên WEBSITE (pixel). Không
+#: phải tiền. (khoá payload, khoá trong chi_so, nền tảng, nhãn, định nghĩa)
+CHUOI_XEM_SP: tuple[tuple[str, str, str, str, str], ...] = (
+    ("xem_sp_shop", "onsite_on_web_detail", "tiktok", "Xem trang SP TikTok Shop",
+     "TikTok: lượt xem trang chi tiết sản phẩm trong TikTok Shop do quảng cáo mang lại (đếm "
+     "lượt, không phải số người; không gồm trang chủ shop)"),
+    ("xem_sp_web", "actions__view_content", "meta", "Xem SP website (Meta)",
+     "Meta Pixel ViewContent: lượt xem trang sản phẩm trên WEBSITE sau quảng cáo — không phải "
+     "Shop"),
+)
+TEN_CHUOI_XEM_SP = tuple(c[0] for c in CHUOI_XEM_SP)
+
+
+def chuoi_xem_sp(ngay: list[dict]) -> list[dict]:
+    """Chuỗi xem trang sản phẩm có số ≠ 0 trong `ngay` (dòng theo ngày của phạm vi đang xem) →
+    [{ma, nen_tang, ten, dinh_nghia, tong}] cho nút chọn + chú thích ⓘ. Nền tảng không có trong
+    phạm vi thì tổng = 0 → không có nút."""
+    ra = []
+    for ma, _k, nen, ten, dn in CHUOI_XEM_SP:
+        tong = sum(int(r.get(ma) or 0) for r in ngay)
+        if tong:
+            ra.append({"ma": ma, "nen_tang": nen, "ten": ten, "dinh_nghia": dn, "tong": tong})
+    return ra
+
 #: Cấp quảng cáo: 1 lượt gọi ≤ 45 chỉ số. Tài khoản lớn có hàng nghìn ad chạy mỗi ngày (MATEMADE MKT
 #: 7.599 ad / 30 ngày) — xin đủ 120 tên là 3 lượt gọi cho MỖI lô 100 ad × mỗi trang; nên cấp ad chỉ
 #: xin bộ dưới đây (đủ cột kiểu riêng + tỉ lệ/chi phí chính), 1 lượt mỗi trang. Cấp tài khoản và
-#: campaign xin đủ CHI_SO_HOP_LE.
+#: campaign xin đủ CHI_SO_HOP_LE. 22/10/2026: cấp ad đúng 7 + 38 = 45 tên — KHÔNG thêm
+#: `onsite_on_web_detail` (tên thứ 46 = lô thứ hai cho mọi trang ad, gấp đôi lượt gọi).
 THUOC_TINH_AD_GIU: tuple[str, ...] = ("campaign_id", "campaign_name", "adgroup_id",
                                       "adgroup_name", "ad_name", "ad_text", "objective_type")
 CHI_SO_AD: tuple[str, ...] = (

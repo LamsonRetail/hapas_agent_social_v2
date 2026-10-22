@@ -146,6 +146,8 @@
 <section class="the-khoi cach-duoi qc-xu-huong" aria-labelledby="qc-xh-tieu-de">
   <div class="muc">
     <h2 class="muc__ten" id="qc-xh-tieu-de">Theo ngày</h2>
+    {#- 22/10/2026 (chủ dự án): hai chuỗi xem trang sản phẩm — mỗi chuỗi một nền tảng, định nghĩa rõ. #}
+    {% if d.chuoi_xem_sp %}<button type="button" class="goi-y" aria-label="Giải thích chỉ số xem trang sản phẩm" data-goi-y="{% for c in d.chuoi_xem_sp %}{{ c.ten }} — {{ c.dinh_nghia }}. {% endfor %}{% if d.chuoi_xem_sp|length > 1 %}Hai chỉ số đếm ở hai nơi khác nhau nên không cộng với nhau.{% endif %}">i</button>{% endif %}
     <div class="muc__phai"><div class="qc-phan" id="qc-chon-chi-so" role="group" aria-label="Chỉ số"></div></div>
   </div>
   <ul class="qc-chu-giai" id="qc-chu-giai" hidden></ul>

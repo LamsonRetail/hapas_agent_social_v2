@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import json
+import re
 import unicodedata
 
 from dashboard import quang_cao as QC
@@ -454,13 +455,28 @@ def qc_tong(ids: list[str], tu: datetime.date, den: datetime.date) -> dict:
                          (list(ids), tu, den)).fetchone() or {}
 
 
+def _tong_json(khoa: str, ten: str) -> str:
+    """sum một chỉ số trong JSON `chi_so` (chỉ giá trị kiểu số; chữ / thiếu → bỏ qua, không lỗi
+    ép kiểu). `khoa`, `ten` là hằng trong `quang_cao.CHUOI_XEM_SP` — không bao giờ từ người dùng."""
+    if not (re.fullmatch(r"[a-z0-9_]+", khoa) and re.fullmatch(r"[a-z0-9_]+", ten)):
+        raise ValueError(f"tên chỉ số lạ: {khoa!r}")
+    return (f"coalesce(sum(CASE WHEN jsonb_typeof(chi_so->'{khoa}') = 'number' "
+            f"THEN (chi_so->>'{khoa}')::numeric END), 0)::bigint AS {ten}")
+
+
+#: 22/10/2026 (chủ dự án): biểu đồ Theo ngày thêm "Xem trang SP TikTok Shop" + "Xem SP website
+#: (Meta)" — cộng từ JSON chi_so (SQL cố định, không tham số hoá tên).
+_TONG_XEM_SP = ", ".join(_tong_json(k, ma) for ma, k, *_ in QC.CHUOI_XEM_SP)
+
+
 def qc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date) -> list[dict]:
+    """Tổng cột số theo ngày + hai chuỗi xem trang sản phẩm (`QC.TEN_CHUOI_XEM_SP`)."""
     if not ids:
         return []
     with ket_noi() as c:
-        return c.execute(f"SELECT ngay, {_TONG} FROM qc_tk_ngay WHERE advertiser_id = ANY(%s) "
-                         "AND ngay BETWEEN %s AND %s GROUP BY ngay ORDER BY ngay",
-                         (list(ids), tu, den)).fetchall()
+        return c.execute(f"SELECT ngay, {_TONG}, {_TONG_XEM_SP} FROM qc_tk_ngay "
+                         "WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s "
+                         "GROUP BY ngay ORDER BY ngay", (list(ids), tu, den)).fetchall()
 
 
 _SAP_SQL = {"chi": "chi", "hien_thi": "hien_thi", "view_video": "view_video",
