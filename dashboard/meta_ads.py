@@ -12,10 +12,16 @@ KẾT NỐI
   • Không dùng MCP chính thức của Meta (xin ads_management). Lưu token (`luu_token`) chỉ khi quyền
     đã cấp nằm TRỌN trong `QUYEN_CHO_PHEP` — có ads_management, business_management hay bất kỳ quyền
     *_manage*/publish nào là TỪ CHỐI, không lưu.
+  • 22/10/2026 (chủ dự án): cho thêm `pages_read_engagement` + `pages_show_list` (CHỈ ĐỌC — tên
+    Trang của kênh đăng; Meta thường cấp hai quyền này cùng nhau). Không bắt buộc: token thiếu quyền
+    vẫn lưu được, kênh hiện "Page <id>". KHÔNG thêm instagram_basic: username IG thường bị từ chối →
+    lần lỗi đầu tiên của lượt thì thôi hỏi IG, hiện "IG <id>".
 
 AN TOÀN (chỉ đọc — kiểm TRƯỚC khi gửi, `kiem_url`)
   • Chỉ GET; chỉ https://graph.facebook.com/<phiên bản>/ + đường trong danh sách: me,
-    me/adaccounts, me/permissions, act_<số>, act_<số>/insights, act_<số>/campaigns, act_<số>/ads.
+    me/adaccounts, me/permissions, act_<số>, act_<số>/insights, act_<số>/campaigns, act_<số>/ads;
+    và <id số> trần (tên Trang / Instagram của kênh đăng, 22/10/2026) CHỈ với đúng một tham số
+    fields=name hoặc fields=username, không trang sau.
     Trang sau (`paging.next`) phải cùng đường của trang đầu (riêng me/… Meta đổi thành <id số>/…).
   • Tham số đổi phương thức (`method`, `_method`, `batch`…) bị chặn — Graph API nhận `?method=delete`
     trên GET. Token đi bằng header Authorization, `access_token` trong URL trang sau bị bỏ.
@@ -32,6 +38,11 @@ cờ — bộ hẹn giờ 2 phút chạy `dong-bo --chi-khi-yeu-cau`; dashboard 
     async (POST). Ghi theo TỪNG TRANG (không giữ cả cửa sổ trong bộ nhớ, MemoryMax 512M).
   • Khán giả mỗi tuần, cửa sổ 30 ngày: age, gender, region, publisher_platform,
     publisher_platform+platform_position.
+  • Kênh đăng (22/10/2026): lượt đầy đủ đọc Trang (creative.actor_id / object_story_spec.page_id) và
+    Instagram (instagram_user_id) của các ad CÓ phân phối chưa biết kênh — GET act_<id>/ads lọc
+    ad.id IN ≤ 200 mã (kể cả ad đã lưu trữ / xoá), tối đa `TRAN_KENH_LUOT` lượt mỗi lần. Tên Trang /
+    username Instagram chỉ khi token có pages_read_engagement (≤ `TRAN_TEN_LUOT` lượt mỗi lần);
+    lỗi → bỏ qua, trang hiện "Page <id>". Lỗi một tài khoản chỉ ghi nhật ký (trừ token bị từ chối).
   • Giới hạn tần suất (mã 4, 17, 32, 613, 80000–80014, HTTP 429): nghỉ rồi thử lại; tải header
     x-business-use-case-usage / x-ad-account-usage ≥ 85% thì nghỉ trước lượt sau.
 
@@ -70,13 +81,21 @@ KHOA_DONG_BO = 720_191_002
 
 #: Quyền token được phép có (đo 20/10/2026: đúng 3 quyền này). Thêm bất kỳ quyền nào khác — nhất là
 #: ads_management, business_management, *_manage_*, publish_* — là token không còn chỉ đọc: từ chối.
-QUYEN_CHO_PHEP = frozenset({"ads_read", "read_insights", "public_profile"})
+#: 22/10/2026 (chủ dự án): + pages_read_engagement, pages_show_list (chỉ đọc; tên Trang của kênh
+#: đăng — Meta thường cấp hai quyền cùng nhau).
+QUYEN_CHO_PHEP = frozenset({"ads_read", "read_insights", "public_profile", "pages_read_engagement",
+                            "pages_show_list"})
+QUYEN_TEN_KENH = "pages_read_engagement"
 QUYEN_CAN = frozenset({"ads_read", "read_insights"})
 
 _PHIEN_BAN = re.compile(r"v[0-9]{1,3}\.[0-9]{1,3}")
 #: Đường được GET (phần sau /<phiên bản>/).
 _DUONG = re.compile(r"me|me/(?:adaccounts|permissions)|act_[0-9]{1,30}"
                     r"|act_[0-9]{1,30}/(?:insights|campaigns|ads)")
+#: Nút trần <id số> (Trang / tài khoản Instagram — 22/10/2026): chỉ GET với ĐÚNG một tham số
+#: fields thuộc `TRUONG_NUT` (tên), không trang sau.
+_NUT = re.compile(r"[1-9][0-9]{0,30}")
+TRUONG_NUT = frozenset({"name", "username"})
 #: Tham số ĐƯỢC gửi (danh sách cho phép — soát 20/10/2026). Mọi khoá khác — `method`, `_method`,
 #: `batch` (Graph nhận `?method=delete` trên GET), khoá lạ trong `paging.next` — bị chặn TRƯỚC khi
 #: gửi, cả trang đầu lẫn trang sau. `access_token` được phép có mặt trong `paging.next` nhưng luôn bị
@@ -202,6 +221,12 @@ def kiem_url(phuong_thuc: str, url: str, tiep: str | None = None) -> tuple[str, 
     if len(phan) < 3 or phan[0] != "" or not _PHIEN_BAN.fullmatch(phan[1]):
         raise LoiChan("chặn đường Graph không có phiên bản")
     duong = phan[2]
+    ts = parse_qsl(p.query, keep_blank_values=True)
+    if tiep is None and _NUT.fullmatch(duong):
+        ts_nut = [(k, v) for k, v in ts if k.lower() != "access_token"]
+        if len(ts_nut) != 1 or ts_nut[0][0] != "fields" or ts_nut[0][1] not in TRUONG_NUT:
+            raise LoiChan("chặn nút Graph: chỉ được fields=name hoặc fields=username")
+        return urlunsplit(("https", MAY_CHU, p.path, urlencode(ts_nut), "")), duong
     if tiep is None:
         hop_le = bool(_DUONG.fullmatch(duong))
     else:
@@ -209,7 +234,6 @@ def kiem_url(phuong_thuc: str, url: str, tiep: str | None = None) -> tuple[str, 
             re.fullmatch(rf"[1-9][0-9]{{0,30}}/{tiep[3:]}", duong)))
     if not hop_le:
         raise LoiChan(f"chặn đường '{duong[:60]}': không nằm trong danh sách chỉ đọc")
-    ts = parse_qsl(p.query, keep_blank_values=True)
     la = sorted({k for k, _ in ts if k not in THAM_SO_DUOC})
     if la:
         raise LoiChan("chặn tham số ngoài danh sách đọc: " + ", ".join(x[:30] for x in la[:5]))
@@ -522,11 +546,67 @@ def kiem_quyen(quyen: list[dict]) -> list[str]:
     thua = [q for q in cap if q not in QUYEN_CHO_PHEP]
     if thua:
         raise LoiTokenKhongChiDoc("token có quyền ngoài chỉ đọc (" + ", ".join(thua[:10]) + ") — "
-                                  "tạo token người dùng hệ thống CHỈ ads_read + read_insights")
+                                  "tạo token người dùng hệ thống CHỈ ads_read + read_insights "
+                                  "(+ pages_read_engagement, pages_show_list nếu muốn tên "
+                                  "Trang)")
     thieu = sorted(QUYEN_CAN - set(cap))
     if thieu:
         raise LoiTokenKhongChiDoc("token thiếu quyền " + ", ".join(thieu))
     return cap
+
+
+# ───────────────────────────── kênh đăng (22/10/2026) ─────────────────────────────
+#: Trường creative đọc kênh đăng — đo thật 22/10/2026 (50 ad chi nhiều nhất của tài khoản lớn
+#: nhất): 50/50 có actor_id (Trang) + instagram_user_id; 49/50 actor_id = object_story_spec.page_id.
+TRUONG_KENH = ("id,creative{actor_id,instagram_user_id,"
+               "object_story_spec{page_id,instagram_user_id},effective_instagram_media_id}")
+#: Lọc thêm mọi trạng thái — mặc định Graph bỏ ad đã lưu trữ / xoá (ad có số cũ vẫn cần kênh).
+TRANG_THAI_AD = ("ACTIVE", "PAUSED", "DELETED", "PENDING_REVIEW", "DISAPPROVED", "PREAPPROVED",
+                 "PENDING_BILLING_INFO", "CAMPAIGN_PAUSED", "ARCHIVED", "ADSET_PAUSED",
+                 "IN_PROCESS", "WITH_ISSUES")
+LO_KENH = 200
+TRAN_KENH_LUOT = 100           # lượt act_<id>/ads mỗi lần đồng bộ (20.000 ad); lần đầu ≈ 35
+TRAN_TEN_LUOT = 50             # lượt đọc tên Trang / IG mỗi lần đồng bộ
+
+
+def _id_so(v) -> str | None:
+    s = str(v or "").strip()
+    return s if _NUT.fullmatch(s) else None
+
+
+def dong_kenh(x: dict, act: str) -> dict:
+    """Một ad của act_<id>/ads → dòng qc_ad_kenh. Kênh = Trang (actor_id, rồi page_id); IG đi kèm
+    ở kenh_phu_id. Không Trang mà có IG → kênh là IG (loai instagram)."""
+    cr = x.get("creative") if isinstance(x.get("creative"), dict) else {}
+    oss = cr.get("object_story_spec") if isinstance(cr.get("object_story_spec"), dict) else {}
+    trang = _id_so(cr.get("actor_id")) or _id_so(oss.get("page_id"))
+    ig = _id_so(cr.get("instagram_user_id")) or _id_so(oss.get("instagram_user_id"))
+    if trang:
+        kenh, loai, phu = trang, "page", ig
+    elif ig:
+        kenh, loai, phu = ig, "instagram", None
+    else:
+        kenh, loai, phu = None, "khong_thay", None
+    return {"advertiser_id": act, "ad_id": str(x.get("id")), "nen_tang": NEN_TANG,
+            "kenh_id": kenh, "loai": loai, "kenh_phu_id": phu,
+            "bai_id": _id_so(cr.get("effective_instagram_media_id"))}
+
+
+def doc_kenh_ad(g: Graph, act: str, ids: list[str]) -> list[dict]:
+    """GET act_<id>/ads lọc ad.id IN ≤ 200 mã (mọi trạng thái) → dòng qc_ad_kenh. Ad Meta không
+    trả → dòng không kênh (`loai` khong_thay)."""
+    loc = [{"field": "ad.id", "operator": "IN", "value": list(ids)},
+           {"field": "ad.effective_status", "operator": "IN", "value": list(TRANG_THAI_AD)}]
+    ra = {}
+    for x in g.trang(f"{act}/ads", {"fields": TRUONG_KENH, "filtering": json.dumps(loc),
+                                    "limit": LO_KENH}):
+        if str(x.get("id")) in ids:
+            ra[str(x["id"])] = dong_kenh(x, act)
+    for ad in ids:
+        ra.setdefault(ad, {"advertiser_id": act, "ad_id": ad, "nen_tang": NEN_TANG,
+                           "kenh_id": None, "loai": "khong_thay", "kenh_phu_id": None,
+                           "bai_id": None})
+    return list(ra.values())
 
 
 # ───────────────────────────── dịch vụ ─────────────────────────────
@@ -796,6 +876,7 @@ class DichVu:
             self.kham_pha(g)
             bay = self._bay_gio()
             cap_luc = (self.kho.doc_ket_noi(NCC) or {}).get("cap_luc")
+            da_doc: list[str] = []
             for t in self.kho.cac_tk():
                 if QC.nen_tang_tk(t) != NEN_TANG or not t.get("duyet"):
                     continue
@@ -816,6 +897,10 @@ class DichVu:
                 except LoiMeta as e:
                     loi.append(f"{t.get('ten') or t['advertiser_id']}: {e}")
                     self.log(f"[meta_ads] {t['advertiser_id']} lỗi: {e}")
+                    continue
+                da_doc.append(str(t["advertiser_id"]))
+            if not nhanh:
+                self.kenh_dang(g, da_doc)
             self.kho.ghi_trang_thai("hoat_dong", None, NCC, con_token=True)
         except ChuaKetNoi as e:
             return str(e), {"bo_qua": str(e)}
@@ -829,6 +914,73 @@ class DichVu:
             return str(e), {"loi": str(e), "so_dong": dem["tong"]}
         chu_loi = "; ".join(loi)[:500] or None
         return chu_loi, {"so_dong": dem["tong"], "den_ngay": dem["den_ngay"], "loi": chu_loi}
+
+    def kenh_dang(self, g: Graph, ids: list[str]) -> int:
+        """Kênh đăng (Trang / Instagram) của ad CÓ phân phối chưa biết kênh (22/10/2026), rồi tên
+        khi token có pages_read_engagement. Lỗi của MỘT tài khoản (Meta, kho chưa có bảng) ghi
+        nhật ký rồi sang tài khoản sau (soát 22/10/2026); chỉ token bị từ chối (LoiXacThuc) ném
+        tiếp như phần số. -> số dòng qc_ad_kenh đã ghi."""
+        con, n = TRAN_KENH_LUOT, 0
+        for act in ids:
+            if con <= 0:
+                break
+            try:
+                cac = self.kho.ad_chua_kenh(act, con * LO_KENH)
+                for i in range(0, len(cac), LO_KENH):
+                    if con <= 0:
+                        break
+                    con -= 1
+                    n += self.kho.ghi_ad_kenh(doc_kenh_ad(g, act, cac[i:i + LO_KENH]))
+            except LoiXacThuc:
+                raise
+            except Exception as e:  # noqa: BLE001 — phần phụ: không làm hỏng lượt đồng bộ số
+                self.log(f"[meta_ads] kênh đăng {act} lỗi ({type(e).__name__}: {TA.gon_loi(e)})")
+        try:
+            quyen = (self.kho.doc_ket_noi(NCC) or {}).get("quyen_token") or []
+        except Exception:  # noqa: BLE001
+            quyen = []
+        if QUYEN_TEN_KENH in quyen:
+            self._ten_kenh(g, ids)
+        if n:
+            self.log(f"[meta_ads] kênh đăng: {n} quảng cáo mới, {TRAN_KENH_LUOT - con} lượt")
+        return n
+
+    def _ten_kenh(self, g: Graph, ids: list[str]) -> None:
+        """Tên Trang (fields=name) / username Instagram (fields=username) của kênh chưa có tên, tối
+        đa TRAN_TEN_LUOT lượt. Lỗi một kênh (không quyền trên Trang đó…) → ghi dòng không tên (hỏi
+        lại sau 1 ngày), đi tiếp. Username IG cần instagram_basic (không xin): lỗi IG ĐẦU TIÊN của
+        lượt thì thôi hỏi IG cả lượt — không đốt trần; trang hiện "IG <id>"."""
+        con, bo_ig = TRAN_TEN_LUOT, False
+        for act in ids:
+            try:
+                cac = self.kho.kenh_chua_ten(NEN_TANG, act)
+            except Exception as e:  # noqa: BLE001
+                self.log(f"[meta_ads] tên kênh {act} lỗi ({type(e).__name__}: {TA.gon_loi(e)})")
+                continue
+            for k in cac:
+                ig = k["loai"] == "instagram"
+                if ig and bo_ig:
+                    continue
+                if con <= 0:
+                    return
+                con -= 1
+                truong = "username" if ig else "name"
+                try:
+                    d = g.goi(k["kenh_id"], {"fields": truong})
+                except LoiXacThuc:
+                    raise
+                except LoiMeta as e:
+                    self.log(f"[meta_ads] tên kênh {k['kenh_id']}: {e}")
+                    d = {}
+                    bo_ig = bo_ig or ig
+                v = str(d.get(truong) or "").strip()[:200] or None
+                try:
+                    self.kho.ghi_kenh([{"nen_tang": NEN_TANG, "kenh_id": k["kenh_id"],
+                                        "loai": k["loai"], "ten": None if ig else v,
+                                        "username": v if ig else None}])
+                except Exception as e:  # noqa: BLE001
+                    self.log(f"[meta_ads] ghi tên kênh lỗi ({type(e).__name__})")
+                    return
 
     def _dong_bo_tk(self, g: Graph, t: dict, bay: datetime.datetime, *, bu, tu, den,
                     nhanh: bool = False) -> tuple[int, datetime.date]:

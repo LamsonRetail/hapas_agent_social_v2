@@ -106,9 +106,11 @@ PHAN = {
     "bo_loc": "giá trị lọc đang có dữ liệu (nền tảng, loại nguồn, chủ đề, khoá nguồn…)",
     "quang_cao": "quảng cáo TikTok Ads + Meta Ads (Facebook/Instagram) của các bên người hỏi được "
                  "xem: tổng + tách theo nền tảng (`theo_nen_tang`), theo tài khoản, theo ngày, top "
-                 "chiến dịch / quảng cáo (có nền tảng), chi phí suy ra; chi tiêu, doanh thu, ROAS cho "
-                 "mọi người có quyền ở bên (`xem_tien`). Tra MỘT đối tượng (chiến dịch / quảng cáo / "
-                 "tài khoản người hỏi nêu tên): `tim` + `cap`. Trả lời bằng chữ, không biểu đồ",
+                 "chiến dịch / quảng cáo (có nền tảng), chi phí suy ra; chi tiêu cho mọi người có "
+                 "quyền ở bên (`xem_tien`); doanh thu Shop / ROAS tạm không báo (22/10/2026 — khác "
+                 "cách công ty tính). Tra MỘT đối tượng (chiến dịch / quảng cáo / "
+                 "tài khoản người hỏi nêu tên): `tim` + `cap`. Trả lời bằng chữ, không biểu đồ; "
+                 "đòi Sheet / file → `xuat_sheet_qc`",
 }
 PHAN_MAC_DINH = ("tong_quan", "sac_thai", "chu_de", "tu_khoa", "bai")
 #: Phần cần dòng bài/bình luận (tính `tinh_chi_so`); phần còn lại chỉ đọc cấu hình/lượt quét.
@@ -146,6 +148,9 @@ SCHEMA = {
         "(CPM, CPC, chi/kết quả…). `mo_ho` true hoặc nhiều đối tượng khớp, hoặc kỳ không rõ → hỏi "
         "lại một câu ngắn. Không khớp (`tim_thay` 0) → nói rõ không thấy, đưa `goi_y` để người hỏi "
         "chọn — KHÔNG đoán số.\n"
+        "QUẢNG CÁO RA SHEET (22/10/2026): người hỏi đòi Sheet / file / Excel / \"xuất\" / \"tải về\" "
+        "số quảng cáo → `xuat_sheet_qc` (không phải tool này); không đòi thì trả lời bằng chữ.\n"
+        + ("" if QC.HIEN_DOANH_THU else QC.CAU_KHONG_DOANH_THU + "\n") +
         "THAM SỐ: không nói kỳ thì để trống (= 30 ngày trọn tới hết hôm qua, như dashboard). "
         "`bo_loc` dùng đúng mã của dashboard; giá trị nguồn/chủ đề lạ thì gọi `phan`=[\"bo_loc\"] "
         "để lấy giá trị hợp lệ.\n"
@@ -220,7 +225,10 @@ _KHOA_DSN = threading.Lock()
 _HAM_KHO = ("quyen_cua", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_luan_trong_khoang",
             "binh_luan_hop_le_gon", "bai_theo_khoa", "ngu_canh_bai", "cac_nguon", "da_tieu_thang",
             "tran_platform", "cac_luot", "tien_do_gan_nhan", "luot_xong_moi_nhat",
-            "do_phu_gan_nhat", "han_muc_apify", "nhip_dang")
+            "do_phu_gan_nhat", "han_muc_apify", "nhip_dang",
+            # 22/10/2026 (`sheet_qc_tool`): union_id Lark ghi lúc đăng nhập dashboard — đối chiếu danh
+            # tính khi email danh bạ không phải enterprise_email.
+            "union_id_cua")
 #: TikTok Ads (19/10/2026): hàm ĐỌC của `dashboard.kho_qc` (role mark chỉ SELECT tk_quang_cao + qc_*,
 #: không đọc được cột token của ket_noi_ngoai). Tên phía tool → tên trong kho_qc.
 _HAM_KHO_QC = {"qc_cac_tk": "cac_tk", "qc_tong": "qc_tong", "qc_top": "qc_top", "qc_moi": "qc_moi",
@@ -233,6 +241,10 @@ _HAM_KHO_QC = {"qc_cac_tk": "cac_tk", "qc_tong": "qc_tong", "qc_top": "qc_top", 
 _HAM_KHO_TT = {"tt_tao": "tao", "tt_doc": "doc", "tt_gan_day_qc": "gan_day_qc", "tt_dem": "dem",
                "tt_cap_nhat": "cap_nhat", "tt_du_an_cua_link": "du_an_cua_link",
                "tt_du_an_cua_kenh": "du_an_cua_kenh"}
+#: Xuất Lark Sheet quảng cáo qua Mark (22/10/2026, `sheet_qc_tool`): hàm của `dashboard.kho_sheet_qc`
+#: tool được gọi — thêm yêu cầu (nguon="mark", role mark chỉ thêm được dòng nguon = 'mark') + tên bên.
+#: Không hàm nào của bộ nghe (nhận / kết thúc là việc của `xuat_sheet_qc`).
+_HAM_KHO_SQ = {"sq_tao": "tao", "sq_ten_ben": "ten_ben"}
 
 
 class KhoMark:
@@ -243,10 +255,14 @@ class KhoMark:
     `_HAM_KHO`: tool không bao giờ gọi được hàm GHI của dashboard qua cửa này."""
 
     def __getattr__(self, ten: str):
-        if ten not in _HAM_KHO and ten not in _HAM_KHO_QC and ten not in _HAM_KHO_TT:
+        if (ten not in _HAM_KHO and ten not in _HAM_KHO_QC and ten not in _HAM_KHO_TT
+                and ten not in _HAM_KHO_SQ):
             raise AttributeError(ten)
         from dashboard import kho as K
-        if ten in _HAM_KHO_TT:
+        if ten in _HAM_KHO_SQ:
+            from dashboard import kho_sheet_qc as KS
+            fn = getattr(KS, _HAM_KHO_SQ[ten])
+        elif ten in _HAM_KHO_TT:
             from dashboard import kho_tuc_thi as KT
             fn = getattr(KT, _HAM_KHO_TT[ten])
         elif ten in _HAM_KHO_QC:
@@ -1047,7 +1063,7 @@ def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, t
             x["link"] = f"{DASHBOARD_URL}/quang-cao?" + urllib.parse.urlencode(
                 {"ben": b, "tu": tu.isoformat(), "den": den.isoformat(),
                  **({"nen_tang": nen} if nen else {})})
-        ra.append(QC.loc_tien(x, co_tien))
+        ra.append(QC.loc_doanh_thu(QC.loc_tien(x, co_tien)))   # 22/10/2026: ẩn doanh thu / ROAS
     return {"co": True, "ky_truoc": {"tu": t0.isoformat(), "den": t1.isoformat()}, "ben": ra,
             "ghi_chu": GHI_CHU_QC + " " + GHI_CHU_REACH}
 
@@ -1057,13 +1073,16 @@ GHI_CHU_QC = (
     "chỉ số, không tự nêu chi tiêu khi không được hỏi; hỏi về chi phí / hiệu quả / \"chỉ số\" của "
     "chiến dịch, quảng cáo, tài khoản thì luôn nêu chi tiêu + chi phí. Hỏi về MỘT chiến dịch / "
     "quảng cáo / tài khoản cụ thể thì gọi lại với `tim` + `cap`. Bên có `xem_tien` false: người hỏi "
-    "KHÔNG được xem chi tiêu/doanh thu/ROAS — không nêu, không ước, không suy ra số tiền. Có chi "
+    "KHÔNG được xem chi tiêu — không nêu, không ước, không suy ra số tiền. Có chi "
     "theo tài khoản (`theo_tai_khoan`), theo nền tảng (`theo_nen_tang`: TikTok / Meta), theo ngày "
     "(`theo_ngay`) và chi phí suy ra (`chi_phi`: CPM, CPC, CTR, chi/follow, chi/1.000 view, chi/"
-    "engaged view, ROAS — tính lại từ tổng). Meta: view_video = xem ≥ 3 giây, engaged_view = "
-    "ThruPlay, follow = thích Trang, doanh thu = giá trị mua (purchase). Chủ dự án 20/10/2026: số "
-    "quảng cáo chỉ trả lời BẰNG CHỮ (câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh/"
-    "sheet/tệp, không gửi link trang Quảng cáo khi không có `link`.")
+    "engaged view — tính lại từ tổng). Meta: view_video = xem ≥ 3 giây, engaged_view = "
+    "ThruPlay, follow = thích Trang. Chủ dự án 20/10/2026: số "
+    "quảng cáo trả lời BẰNG CHỮ (câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh, "
+    "không gửi link trang Quảng cáo khi không có `link`. Chủ dự án 22/10/2026: người hỏi ĐÒI Sheet "
+    "/ file / xuất / tải về số quảng cáo thì dùng `xuat_sheet_qc` (Lark Sheet riêng, Mark nhắn "
+    "link) — không tự dựng Sheet bằng đường khác; không đòi thì vẫn trả lời bằng chữ."
+    + ("" if QC.HIEN_DOANH_THU else " " + QC.CAU_KHONG_DOANH_THU))
 
 
 def _khop_tk(t: dict, mau: str, ma: str) -> bool:
@@ -1207,7 +1226,7 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
             y["theo_ngay"] = chuoi[km][-QC_NGAY_TOI_DA:]
         co_tien = QC.xem_tien(q, b if b != QC.CHUA_GAN else None)
         y["xem_tien"] = co_tien
-        ket_qua.append(QC.loc_tien(y, co_tien))
+        ket_qua.append(QC.loc_doanh_thu(QC.loc_tien(y, co_tien)))   # 22/10/2026: ẩn doanh thu
     mo_ho = tong > TRA_CUU_TRA or len(ung_vien) > TRA_CUU_TRA
     return {"co": True, "tim_thay": max(tong, len(ung_vien)), "cap": cap, "tim": tim,
             "khoang": {"tu": tu.isoformat(), "den": den.isoformat()}, "mo_ho": mo_ho,
@@ -1215,7 +1234,7 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
             "ghi_chu": (("Nhiều đối tượng khớp — đây là 10 đối tượng chi nhiều nhất; hỏi lại người "
                          "dùng muốn đúng cái nào. " if mo_ho else "")
                         + "Chỉ số thô trong `chi_so_tho_cong_duoc` là tổng các chỉ số cộng được "
-                        "(số đếm, tiền); tỉ lệ (CTR, CPC, CPM, ROAS…) đã tính LẠI từ tổng trong "
+                        "(số đếm, tiền); tỉ lệ (CTR, CPC, CPM…) đã tính LẠI từ tổng trong "
                         "`chi_phi`, reach / frequency không cộng. " + GHI_CHU_QC)}
 
 

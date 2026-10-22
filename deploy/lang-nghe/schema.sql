@@ -783,6 +783,36 @@ BEGIN
   END IF;
 END $mt$;
 
+-- ───────────── Kênh đăng của quảng cáo (22/10/2026, chủ dự án chốt) ─────────────
+-- Trang Quảng cáo tách mỗi tài khoản theo "kênh đăng" — danh tính quảng cáo chạy dưới tên: TikTok
+-- identity (tài khoản chính chủ, KOC / Spark Ads), Meta Trang Facebook (+ Instagram đi kèm). Bộ đồng bộ
+-- (tiktok_ads.py ad_get qua tool_execute dạng cố định + identity_get; meta_ads.py GET act_<id>/ads)
+-- đọc kênh MỘT lần cho mỗi ad có phân phối (kênh của ad không đổi). Bảng mới: CREATE nhanh, không khoá
+-- bảng nào khác; chạy lại không sao.
+CREATE TABLE IF NOT EXISTS qc_ad_kenh (
+  advertiser_id   TEXT NOT NULL REFERENCES tk_quang_cao(advertiser_id),
+  ad_id           TEXT NOT NULL,
+  nen_tang        TEXT NOT NULL CHECK (nen_tang IN ('tiktok', 'meta')),
+  kenh_id         TEXT,
+  loai            TEXT NOT NULL,
+  kenh_phu_id     TEXT,
+  bai_id          TEXT,
+  cap_nhat_luc    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (advertiser_id, ad_id)
+);
+CREATE INDEX IF NOT EXISTS qc_ad_kenh_kenh ON qc_ad_kenh (nen_tang, kenh_id);
+CREATE INDEX IF NOT EXISTS qc_ad_kenh_cap_nhat ON qc_ad_kenh (cap_nhat_luc);
+CREATE TABLE IF NOT EXISTS qc_kenh (
+  nen_tang        TEXT NOT NULL CHECK (nen_tang IN ('tiktok', 'meta')),
+  kenh_id         TEXT NOT NULL,
+  loai            TEXT,
+  ten             TEXT,
+  username        TEXT,
+  cap_nhat_luc    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (nen_tang, kenh_id)
+);
+CREATE INDEX IF NOT EXISTS qc_kenh_cap_nhat ON qc_kenh (cap_nhat_luc);
+
 -- ───────────── Số tức thì của Mark (20/10/2026, chủ dự án chốt) ─────────────
 -- "mark có quyền cao nhất có thể cào real time theo yêu cầu": một dòng = một yêu cầu Mark gửi khi
 -- người hỏi cần số MỚI hơn số trong kho (dashboard/kho_tuc_thi.py). Quảng cáo: Mark CHỈ thêm dòng
@@ -928,6 +958,20 @@ CREATE TABLE IF NOT EXISTS yeu_cau_sheet_qc (
   xong_luc        TIMESTAMPTZ,
   CHECK (den >= tu AND den - tu < 400)
 );
+-- 22/10/2026 (chủ dự án): Sheet theo ĐÚNG bộ lọc trang — nhiều tài khoản (tk_ds, ≤ 200 mã; cột tk cũ
+-- vẫn đọc được cho dòng cũ) + bộ lọc bảng chiến dịch / quảng cáo (tim, cd, sap, chieu). Cột NULL được
+-- thêm không mặc định: tức thì, không viết lại bảng. Trigger chuan_yeu_cau_sheet_qc kiểm giá trị.
+ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS tk_ds TEXT[],
+  ADD COLUMN IF NOT EXISTS tim TEXT, ADD COLUMN IF NOT EXISTS cd TEXT,
+  ADD COLUMN IF NOT EXISTS sap TEXT, ADD COLUMN IF NOT EXISTS chieu TEXT;
+-- 22/10/2026 (chủ dự án: "khi hỏi Mark thì Mark vẫn xuất Sheet được"): Mark (tool xuat_sheet_qc,
+-- role mark) cũng THÊM dòng — cho chính người hỏi. `nguon` ghi dòng từ đâu: web không được cấp
+-- cột này (luôn mặc định 'web'), Mark phải ghi 'mark' (RLS sheet_qc_them_mark). Bộ nghe đọc cột này:
+-- dòng web chỉ quản trị viên; dòng mark thì người có quyền ở bên, phạm vi + cột tiền tính lại từ
+-- quyền CSDL của nguoi_hoi lúc dựng. Mặc định hằng số: PG ≥ 11 thêm cột không viết lại bảng; CHECK
+-- chỉ quét bảng (nhỏ) một lần. IF NOT EXISTS: chạy lại bỏ qua cả ràng buộc.
+ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS nguon TEXT NOT NULL DEFAULT 'web'
+  CHECK (nguon IN ('web', 'mark'));
 CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_nguoi ON yeu_cau_sheet_qc (nguoi_hoi, tao_luc DESC);
 CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_cho ON yeu_cau_sheet_qc (trang_thai, id)
   WHERE trang_thai IN ('cho', 'dang_tao');
@@ -936,6 +980,13 @@ CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_cho ON yeu_cau_sheet_qc (trang_thai,
 -- chờ / đang tạo (chưa quá 30 phút) mỗi người, ≤ 4 yêu cầu mỗi người mỗi giờ, ≤ 30 yêu cầu toàn hệ
 -- thống mỗi giờ. App kiểm trước cùng số (`dashboard/kho_sheet_qc.py`) để báo câu rõ; đây là chốt
 -- thứ hai.
+-- 22/10/2026: trigger chạy cho MỌI dòng thêm, dù web hay Mark (role mark) thêm — cùng trần, cùng
+-- kiểm bộ lọc; trần đếm CHUNG hai nguồn (một người: một yêu cầu đang chờ dù bấm trang hay hỏi Mark).
+-- Khoá advisory là khoá của CẢ cơ sở dữ liệu (không theo role): phiên web và phiên Mark thêm cho
+-- cùng người xếp hàng trên cùng khoá 'sheet_qc|<email>'. Thứ tự khoá luôn người → toàn hệ thống
+-- (`kho_sheet_qc.tao` giữ khoá người TRƯỚC khi INSERT, trigger lấy lại — cùng phiên nên không tự
+-- chặn — rồi khoá '*'), nên hai nguồn không thể khoá chéo nhau. Khoá _xact nhả khi giao dịch kết thúc.
+-- nguon KHÔNG bị trigger đặt lại: RLS WITH CHECK chạy SAU trigger BEFORE và kiểm đúng giá trị này.
 CREATE OR REPLACE FUNCTION chuan_yeu_cau_sheet_qc() RETURNS trigger LANGUAGE plpgsql
   SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
 BEGIN
@@ -950,6 +1001,30 @@ BEGIN
   NEW.loi := NULL;
   NEW.loi_noi_bo := NULL;
   NEW.da_nhan_tin := FALSE;
+  -- 22/10/2026: bộ lọc (cùng luật quang_cao.loc_bang / tk_chon); rỗng → NULL. Sai → invalid_parameter_value
+  -- (app báo "Bộ lọc không hợp lệ", không lẫn với trần check_violation).
+  NEW.tim := NULLIF(btrim(NEW.tim), '');
+  NEW.cd := NULLIF(btrim(NEW.cd), '');
+  IF cardinality(NEW.tk_ds) = 0 THEN
+    NEW.tk_ds := NULL;
+  END IF;
+  IF NEW.tk_ds IS NOT NULL AND (cardinality(NEW.tk_ds) > 200 OR array_ndims(NEW.tk_ds) <> 1
+      OR EXISTS (SELECT 1 FROM unnest(NEW.tk_ds) x WHERE x IS NULL OR x !~ '^(act_)?[0-9]{1,30}$')) THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: tk_ds sai' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NEW.tim IS NOT NULL AND length(NEW.tim) > 100 THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: tim quá 100 ký tự' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NEW.cd IS NOT NULL AND NEW.cd !~ '^[0-9A-Za-z_-]{0,64}$' THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: cd sai' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NEW.sap IS NOT NULL AND NEW.sap NOT IN ('chi', 'hien_thi', 'cpm', 'click', 'ctr', 'view',
+                                             'tuong_tac', 'follow', 'roas') THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: sap sai' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NEW.chieu IS NOT NULL AND NEW.chieu NOT IN ('giam', 'tang') THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: chieu sai' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
   PERFORM pg_advisory_xact_lock(hashtext('sheet_qc|' || NEW.nguoi_hoi));
   PERFORM pg_advisory_xact_lock(hashtext('sheet_qc|*'));
   IF EXISTS (SELECT 1 FROM public.yeu_cau_sheet_qc WHERE nguoi_hoi = NEW.nguoi_hoi
@@ -961,7 +1036,17 @@ BEGIN
       AND tao_luc > now() - interval '1 hour') >= 4 THEN
     RAISE EXCEPTION 'yeu_cau_sheet_qc: quá trần mỗi người mỗi giờ' USING ERRCODE = 'check_violation';
   END IF;
-  IF (SELECT count(*) FROM public.yeu_cau_sheet_qc WHERE tao_luc > now() - interval '1 hour') >= 30 THEN
+  -- Trần toàn hệ thống TÁCH theo nguồn (soát 22/10/2026): dòng Mark (người hỏi Mark, có thể bị
+  -- lừa qua lời nhắn) ≤ 15/giờ đếm riêng dòng mark; dòng web (quản trị viên) ≤ 30/giờ đếm riêng
+  -- dòng web — Mark không bao giờ chiếm hết trần của nút trên trang. nguon đã có giá trị mặc định
+  -- ('web') trước khi trigger chạy; web không ghi được cột, mark bị RLS buộc 'mark'.
+  IF NEW.nguon = 'mark' THEN
+    IF (SELECT count(*) FROM public.yeu_cau_sheet_qc WHERE nguon = 'mark'
+        AND tao_luc > now() - interval '1 hour') >= 15 THEN
+      RAISE EXCEPTION 'yeu_cau_sheet_qc: quá trần Mark mỗi giờ' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF (SELECT count(*) FROM public.yeu_cau_sheet_qc WHERE nguon <> 'mark'
+         AND tao_luc > now() - interval '1 hour') >= 30 THEN
     RAISE EXCEPTION 'yeu_cau_sheet_qc: quá trần chung mỗi giờ' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -992,7 +1077,11 @@ END $mt$;
 -- quên đặt = không thấy dòng nào, không thêm được (lớp chặn thứ hai sau kiểm quyền của app, không
 -- phải ranh giới chống chính role web). Không chính sách UPDATE / DELETE nào cho web → web không bao
 -- giờ sửa trạng thái / link. Role mark đọc + sửa mọi dòng (chỉ cột kết quả — cấp theo cột cuối
--- file), không thêm, không xoá. Bật RLS / tạo chính sách chỉ khi chưa có.
+-- file), không xoá. 22/10/2026: role mark THÊM được dòng (tool xuat_sheet_qc — Sheet cho chính
+-- người hỏi Mark), chỉ dòng nguon = 'mark' (sheet_qc_them_mark); app Mark tự đặt nguoi_hoi = email
+-- người hỏi đã xác thực — CSDL không biết người hỏi Lark nên KHÔNG tin dòng: bộ nghe tính lại quyền,
+-- phạm vi tài khoản và cột tiền từ quyền CSDL của nguoi_hoi lúc dựng Sheet. Bật RLS / tạo chính
+-- sách chỉ khi chưa có.
 DO $mt$
 BEGIN
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'yeu_cau_sheet_qc'::regclass) THEN
@@ -1016,6 +1105,11 @@ BEGIN
                  AND policyname = 'sheet_qc_sua_mark') THEN
     CREATE POLICY sheet_qc_sua_mark ON yeu_cau_sheet_qc FOR UPDATE TO mark
       USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'yeu_cau_sheet_qc'
+                 AND policyname = 'sheet_qc_them_mark') THEN
+    CREATE POLICY sheet_qc_them_mark ON yeu_cau_sheet_qc FOR INSERT TO mark
+      WITH CHECK (nguon = 'mark');
   END IF;
 END $mt$;
 
@@ -1626,6 +1720,42 @@ COMMENT ON COLUMN qc_khan_gia.mua_shop IS 'Lượt mua trong TikTok Shop gán ch
 COMMENT ON COLUMN qc_khan_gia.gia_tri_mua_shop IS 'Doanh thu gán cho quảng cáo, theo tiền tệ tài khoản: TikTok Shop (total_onsite_shopping_value, giá khách trả); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi, phân bổ mặc định của Meta). 0 khi dòng có phân phối mà không có mua. CHỈ SỐ TIỀN.';
 COMMENT ON COLUMN qc_khan_gia.chi_so IS 'MỌI chỉ số nền tảng trả cho dòng (JSON {tên chỉ số: số}; số đã đổi từ chữ, "-" của TikTok → null). TikTok: tài khoản/campaign đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Meta (20/10/2026): mọi trường Insights đã xin, danh sách action thành <trường>__<action_type> (vd actions__purchase, action_values__purchase, video_p100_watched_actions__video_view); reach, frequency, ctr, cpc, cpm, cpp, *_avg_*, *roas* KHÔNG cộng được qua dòng. Khoá tiền: spend, cpm, cpc, cpp, cost_per_*, *_value, action_values__*, *roas*, *budget*.';
 COMMENT ON COLUMN qc_khan_gia.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
+COMMENT ON TABLE qc_ad_kenh IS $$[Lớp] Raw
+[Mục đích] Kênh đăng của từng quảng cáo (ad) — danh tính quảng cáo chạy dưới tên: TikTok identity (tài khoản chính chủ, KOC / Spark Ads), Meta Trang Facebook (+ Instagram đi kèm) — để tách số quảng cáo theo kênh.
+[Grain] 1 dòng = 1 ad của 1 tài khoản quảng cáo
+[Khoá] PK: advertiser_id + ad_id | Join: (advertiser_id, ad_id) → qc_ad_ngay; (nen_tang, kenh_id) → qc_kenh; (nen_tang, kenh_phu_id) → qc_kenh (Instagram)
+[Nguồn] TikTok for Business MCP tool_execute ad_get (trường identity_id, identity_type, tiktok_item_id), bộ hẹn giờ tiktok-ads-dong-bo; Meta Graph API GET act_<id>/ads (creative.actor_id, object_story_spec.page_id, instagram_user_id), bộ hẹn giờ meta-ads-dong-bo
+[Phạm vi] Ad có phân phối (có dòng qc_ad_ngay) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 22/10/2026 (đọc lùi mọi ad đã có số, chi nhiều trước)
+[Đã xử lý] Một lần mỗi ad (kênh của ad không đổi); ≤ 300 lượt TikTok / 100 lượt Meta mỗi lần đồng bộ; ad nền tảng không trả → kenh_id NULL, loai khong_thay, hỏi lại sau 7 ngày. Meta: kênh = Trang (actor_id, rồi page_id), không Trang mà có Instagram → kênh là Instagram
+[Refresh] Thêm dòng trong lượt đồng bộ hằng ngày 06:30 (TikTok) / 06:45 (Meta) giờ VN, sau phần số; lượt nhanh / tức thì không đọc kênh
+[Dùng khi] Số quảng cáo theo kênh đăng (join qc_ad_ngay theo advertiser_id + ad_id); bao nhiêu chi tiêu chạy qua KOC / Spark Ads so với kênh chính chủ
+[Không dùng khi] Tên kênh → dùng qc_kenh; số theo ngày của ad → dùng qc_ad_ngay
+[Lưu ý] Ad chưa có dòng (chưa tới lượt đọc) và dòng kenh_id NULL gộp vào "Chưa xác định" trên trang. Một Trang Meta có thể đi với nhiều Instagram — kenh_phu_id là của từng ad.$$;
+COMMENT ON COLUMN qc_ad_kenh.advertiser_id IS 'Tài khoản quảng cáo của ad (TikTok chuỗi số; Meta act_<số>). Một phần PK. FK → tk_quang_cao.advertiser_id.';
+COMMENT ON COLUMN qc_ad_kenh.ad_id IS 'Mã quảng cáo (TikTok ad_id; Meta ad id). Một phần PK. Join: → qc_ad_ngay.ad_id.';
+COMMENT ON COLUMN qc_ad_kenh.nen_tang IS 'Nền tảng: tiktok | meta. Không NULL.';
+COMMENT ON COLUMN qc_ad_kenh.kenh_id IS 'Mã kênh đăng: TikTok identity_id (chuỗi số hoặc UUID); Meta id Trang Facebook (hoặc id Instagram khi ad không có Trang). Join: → qc_kenh.kenh_id. NULL khi nền tảng không trả ad hoặc ad không có danh tính (loai khong_thay).';
+COMMENT ON COLUMN qc_ad_kenh.loai IS 'Loại kênh. TikTok identity_type: AUTH_CODE (bài KOC uỷ quyền bằng mã — Spark Ads), BC_AUTH_TT (tài khoản TikTok gắn Business Center — chính chủ hoặc KOC), TT_USER (tài khoản TikTok chính chủ), CUSTOMIZED_USER (danh tính tuỳ chỉnh, không phải tài khoản TikTok). Meta: page | instagram. khong_thay: nền tảng không trả ad. Không NULL.';
+COMMENT ON COLUMN qc_ad_kenh.kenh_phu_id IS 'Kênh đi kèm: Meta id tài khoản Instagram (instagram_user_id) của ad chạy dưới Trang. NULL với TikTok và khi ad Meta không gắn Instagram.';
+COMMENT ON COLUMN qc_ad_kenh.bai_id IS 'Mã bài gốc của quảng cáo: TikTok tiktok_item_id (video), Meta effective_instagram_media_id. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_kenh.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery; dòng khong_thay hỏi lại khi cũ hơn 7 ngày.';
+COMMENT ON TABLE qc_kenh IS $$[Lớp] Dim
+[Mục đích] Tên kênh đăng của quảng cáo (TikTok identity, Trang Facebook, tài khoản Instagram) để hiện trên trang Quảng cáo.
+[Grain] 1 dòng = 1 kênh của 1 nền tảng
+[Khoá] PK: nen_tang + kenh_id | Join: (nen_tang, kenh_id) ← qc_ad_kenh.kenh_id / qc_ad_kenh.kenh_phu_id
+[Nguồn] TikTok for Business MCP identity_get (display_name, username), bộ hẹn giờ tiktok-ads-dong-bo; Meta Graph API GET /<id>?fields=name (Trang) | fields=username (Instagram) — cần quyền pages_read_engagement, bộ hẹn giờ meta-ads-dong-bo
+[Phạm vi] TikTok: MỌI danh tính của tài khoản có kênh chưa có tên (đo 22/10/2026: 1.951 danh tính ở MATEMADE MKT) | Meta: Trang / Instagram gặp trong qc_ad_kenh | Từ 22/10/2026
+[Đã xử lý] Bỏ trùng theo identity_id; tên trống không ghi đè tên đã biết; ≤ 200 ký tự
+[Refresh] Upsert trong lượt đồng bộ hằng ngày khi có kênh chưa có tên (TikTok một lượt identity_get mỗi tài khoản; Meta ≤ 50 lượt mỗi lần, hỏi lại kênh chưa tên sau 1 ngày)
+[Dùng khi] Hiện tên kênh cạnh số theo kênh (join từ qc_ad_kenh)
+[Không dùng khi] Số theo kênh → dùng qc_ad_kenh join qc_ad_ngay; kênh lắng nghe mạng xã hội → dùng nguon
+[Lưu ý] Meta: token thiếu pages_read_engagement thì không có dòng / ten NULL — trang hiện "Page <id>" / "IG <id>".$$;
+COMMENT ON COLUMN qc_kenh.nen_tang IS 'Nền tảng: tiktok | meta. Một phần PK.';
+COMMENT ON COLUMN qc_kenh.kenh_id IS 'Mã kênh: TikTok identity_id; Meta id Trang hoặc id tài khoản Instagram. Một phần PK. Join: ← qc_ad_kenh.kenh_id, qc_ad_kenh.kenh_phu_id.';
+COMMENT ON COLUMN qc_kenh.loai IS 'Loại kênh: TikTok identity_type (AUTH_CODE, BC_AUTH_TT, TT_USER, CUSTOMIZED_USER); Meta page | instagram. NULL khi chưa biết.';
+COMMENT ON COLUMN qc_kenh.ten IS 'Tên hiển thị: TikTok display_name; Meta tên Trang. NULL khi nền tảng không trả hoặc token Meta thiếu pages_read_engagement.';
+COMMENT ON COLUMN qc_kenh.username IS 'Tên người dùng không @: TikTok username (thường NULL với AUTH_CODE); Meta username Instagram. NULL khi không có.';
+COMMENT ON COLUMN qc_kenh.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
 COMMENT ON TABLE yeu_cau_tuc_thi IS $$[Lớp] Raw
 [Mục đích] Sổ yêu cầu số TỨC THÌ của Mark (đọc số quảng cáo mới, cào chỉ số bài / kênh, mở lượt quét lắng nghe theo yêu cầu) — hàng chờ cho bộ nghe quảng cáo, đếm trần, dấu vết ai xin gì.
 [Grain] 1 dòng = 1 yêu cầu Mark gửi (kể cả bị từ chối vì trần)
@@ -1659,20 +1789,26 @@ COMMENT ON COLUMN yeu_cau_tuc_thi.bat_dau_luc IS 'Lúc lượt đọc / cào b�
 COMMENT ON COLUMN yeu_cau_tuc_thi.xong_luc IS 'Lúc kết thúc (UTC) — Mark nói "số cập nhật lúc HH:MM" theo mốc này.';
 COMMENT ON TABLE yeu_cau_sheet_qc IS $$[Lớp] Raw
 [Mục đích] Sổ yêu cầu xuất số quảng cáo TikTok / Meta Ads thành Lark Sheet từ trang Quảng cáo — hàng chờ cho bộ nghe qc-sheet-nghe (Mark) và dấu vết ai xuất phạm vi nào, link nào.
-[Grain] 1 dòng = 1 lần quản trị viên bấm "Tạo Sheet" (đã qua trần)
+[Grain] 1 dòng = 1 lần quản trị viên bấm "Xuất Lark Sheet theo bộ lọc này" (trước 22/10/2026: "Tạo Sheet") hoặc 1 lần người có quyền nhờ Mark xuất Sheet (từ 22/10/2026, nguon = mark); đã qua trần
 [Khoá] PK: id | Join: ben → don_vi.ma (trừ tat_ca, chua_gan); tk → tk_quang_cao.advertiser_id
-[Nguồn] Dashboard social.hapas.vn (role lang_nghe_web) thêm dòng; bộ nghe qc-sheet-nghe (role mark, xuat_sheet_qc.py) nhận, dựng Sheet và ghi kết quả
-[Phạm vi] Chỉ quản trị viên | Kênh TikTok Ads, Meta Ads | Từ 20/10/2026
-[Đã xử lý] Trạng thái + cột kết quả lúc thêm do trigger đặt; trần (1 yêu cầu đang chờ, 4/người/giờ, 30/giờ toàn hệ thống) do trigger kiểm; email chữ thường; chờ / đang tạo quá 30 phút → loi
+[Nguồn] Dashboard social.hapas.vn (role lang_nghe_web) hoặc Mark (tool xuat_sheet_qc, role mark) thêm dòng; bộ nghe qc-sheet-nghe (role mark, xuat_sheet_qc.py) nhận, dựng Sheet và ghi kết quả
+[Phạm vi] Dòng web: chỉ quản trị viên; dòng Mark: người có quyền ở bên (Sheet không cột tiền khi không xem tiền) | Kênh TikTok Ads, Meta Ads | Từ 20/10/2026
+[Đã xử lý] Trạng thái + cột kết quả lúc thêm do trigger đặt; trần (1 yêu cầu đang chờ, 4/người/giờ, toàn hệ thống 30/giờ dòng web + 15/giờ dòng mark, đếm riêng) do trigger kiểm; email chữ thường; chờ / đang tạo quá 30 phút → loi
 [Refresh] Theo yêu cầu (thời gian thực); dòng không bao giờ xoá
 [Dùng khi] Biết ai đã xuất Sheet quảng cáo nào, phạm vi nào, lúc nào, link nào; soát lỗi xuất Sheet
 [Không dùng khi] Số quảng cáo → dùng qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay; yêu cầu đọc số mới của Mark → dùng yeu_cau_tuc_thi
-[Lưu ý] Có email người yêu cầu và link Sheet (Sheet riêng tư, chỉ người yêu cầu được xem) — KHÔNG đẩy lên BigQuery. RLS: web chỉ thấy / thêm dòng của chính người đăng nhập (lang_nghe.nguoi), chỉ mark sửa kết quả.$$;
+[Lưu ý] Có email người yêu cầu và link Sheet (Sheet riêng tư, chỉ người yêu cầu được xem) — KHÔNG đẩy lên BigQuery. RLS: web chỉ thấy / thêm dòng của chính người đăng nhập (lang_nghe.nguoi); mark chỉ thêm dòng nguon = mark, chỉ mark sửa kết quả.$$;
 COMMENT ON COLUMN yeu_cau_sheet_qc.id IS 'Mã yêu cầu tự tăng. PK. Cũng là payload của pg_notify(qc_sheet).';
-COMMENT ON COLUMN yeu_cau_sheet_qc.nguoi_hoi IS 'Email công ty (chữ thường) của quản trị viên bấm Tạo Sheet — Sheet chia sẻ quyền xem cho email này, Mark nhắn link tới email này. Dữ liệu cá nhân — không đẩy BigQuery.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.nguoi_hoi IS 'Email công ty (chữ thường) của quản trị viên bấm Tạo Sheet, hoặc của người hỏi Mark (nguon = mark) — Sheet chia sẻ quyền xem cho email này, Mark nhắn link tới email này. Dữ liệu cá nhân — không đẩy BigQuery.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.ben IS 'Bên của bộ lọc trang: mã don_vi, tat_ca (mọi bên) hoặc chua_gan (tài khoản chưa gán bên).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.nen_tang IS 'Nền tảng của bộ lọc trang: tat_ca, tiktok hoặc meta.';
-COMMENT ON COLUMN yeu_cau_sheet_qc.tk IS 'Một tài khoản quảng cáo của bộ lọc (advertiser_id / act_…); NULL = mọi tài khoản của bên + nền tảng.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tk IS 'Một tài khoản quảng cáo của bộ lọc (advertiser_id / act_…); NULL = mọi tài khoản của bên + nền tảng. Từ 22/10/2026 danh sách ở tk_ds (một mã thì ghi cả cột này); bộ nghe đọc tk_ds trước, rồi tk (dòng cũ).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tk_ds IS 'Các tài khoản quảng cáo đã chọn (advertiser_id / act_…, tối đa 200, trigger kiểm); NULL = mọi tài khoản của bên + nền tảng. Từ 22/10/2026; dòng cũ NULL (xem tk).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tim IS 'Chữ tìm theo tên của bảng chiến dịch / quảng cáo (≤ 100 ký tự, so khớp bỏ dấu); NULL = không lọc tên. Từ 22/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.cd IS 'Mã chiến dịch của bộ lọc bảng (chỉ chiến dịch đó + quảng cáo của nó); NULL = mọi chiến dịch. Từ 22/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.sap IS 'Cột xếp tab chiến dịch / quảng cáo: chi, hien_thi, cpm, click, ctr, view, tuong_tac, follow, roas; NULL (dòng cũ) = chi. Từ 22/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.chieu IS 'Chiều xếp: giam (cao → thấp) hoặc tang; NULL (dòng cũ) = giam. Từ 22/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.nguon IS 'Dòng từ đâu: web (nút trên trang Quảng cáo, chỉ quản trị viên — mặc định, web không ghi được cột này) hoặc mark (người hỏi Mark trên Lark nhờ xuất Sheet, tool xuat_sheet_qc). Từ 22/10/2026; dòng cũ = web.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.tu IS 'Ngày đầu khoảng xuất (ngày theo múi giờ tài khoản, như qc_tk_ngay.ngay).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.den IS 'Ngày cuối khoảng xuất; tối đa 400 ngày (CHECK).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.trang_thai IS 'cho (đợi bộ nghe), dang_tao, xong (có sheet_url), loi (xem loi).';
@@ -1754,6 +1890,10 @@ GRANT SELECT ON tk_quang_cao, qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay, qc_khan_
 -- không xoá số (DELETE không cấp). Đọc đã có ở GRANT SELECT ON ALL TABLES phía trên.
 GRANT INSERT, UPDATE ON ket_noi_ngoai, tk_quang_cao, qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay,
   qc_khan_gia TO lang_nghe_web;
+-- Kênh đăng (22/10/2026): như qc_* — bộ hẹn giờ (lang_nghe_web) thêm/sửa, không xoá; dashboard đọc qua
+-- GRANT SELECT ON ALL TABLES phía trên; Mark chỉ đọc (không cột tiền, không bí mật).
+GRANT INSERT, UPDATE ON qc_ad_kenh, qc_kenh TO lang_nghe_web;
+GRANT SELECT ON qc_ad_kenh, qc_kenh TO mark;
 
 -- Số tức thì (20/10/2026, dashboard/kho_tuc_thi.py): Mark thêm + đọc yêu cầu, chỉ sửa cột kết quả
 -- (yêu cầu bài / kênh / quét của chính nó), KHÔNG xoá. Nhật ký: Mark chỉ THÊM dòng nhat_ky (không
@@ -1785,11 +1925,18 @@ COMMIT;
 BEGIN;
 REVOKE ALL ON yeu_cau_sheet_qc FROM mark, lang_nghe_web;
 REVOKE ALL ON SEQUENCE yeu_cau_sheet_qc_id_seq FROM mark, lang_nghe_web;
-GRANT SELECT (id, nguoi_hoi, ben, nen_tang, tk, tu, den, trang_thai, tieu_de, sheet_url, so_dong,
-              loi, da_nhan_tin, tao_luc, bat_dau_luc, xong_luc) ON yeu_cau_sheet_qc TO lang_nghe_web;
-GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tu, den) ON yeu_cau_sheet_qc TO lang_nghe_web;
+GRANT SELECT (id, nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, trang_thai,
+              tieu_de, sheet_url, so_dong, loi, da_nhan_tin, tao_luc, bat_dau_luc, xong_luc)
+  ON yeu_cau_sheet_qc TO lang_nghe_web;
+GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu)
+  ON yeu_cau_sheet_qc TO lang_nghe_web;
 GRANT USAGE ON SEQUENCE yeu_cau_sheet_qc_id_seq TO lang_nghe_web;
 GRANT SELECT ON yeu_cau_sheet_qc TO mark;
 GRANT UPDATE (trang_thai, tieu_de, sheet_url, so_dong, loi, loi_noi_bo, da_nhan_tin, bat_dau_luc,
               xong_luc) ON yeu_cau_sheet_qc TO mark;
+-- 22/10/2026 (tool xuat_sheet_qc): Mark THÊM đúng các cột yêu cầu + nguon (RLS sheet_qc_them_mark buộc
+-- nguon = 'mark'); trạng thái / kết quả / mốc giờ do trigger đặt như dòng web. Không DELETE.
+GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, nguon)
+  ON yeu_cau_sheet_qc TO mark;
+GRANT USAGE ON SEQUENCE yeu_cau_sheet_qc_id_seq TO mark;
 COMMIT;

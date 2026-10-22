@@ -978,10 +978,156 @@ def test_bigquery_nen_tang_khong_token_khong_email(monkeypatch):
     assert DBQ._bo_tien("qc_tk_ngay", r) == r
 
 
+#: Ghim meta_ads_tool (22/10/2026): sha256[:12] của từng dòng bỏ / thêm so với c1e1627 — đúng các
+#: dòng tạm gỡ doanh thu / ROAS. Đổi meta_ads_tool có chủ đích thì cập nhật hai danh sách này.
+DONG_BO_MONG_DOI = [
+    "11d266cab096", "18f592804fe5", "281619d1bf5f", "2bb63ba10a6b", "3a86d17b4d9f",
+    "3dc90aa0f7ba", "74d3ca1f2726", "77473b045975", "ac1ddd354ec4", "b24c7679a1f5",
+]
+DONG_THEM_MONG_DOI = [
+    "00336da746fc", "077377bd6564", "0f1c53408ce1", "2250fabf602e", "26124dd29a44",
+    "3dbe9b284cad", "4e47a1d3725f", "514cf68c16f7", "5c4f59458fdb", "62c94e5d9f09",
+    "64117d37729a", "70b6b00b4cb5", "798ffe5f4f9a", "7bc782d3d69e", "89144ccdabe5",
+    "91c8cb36c911", "a9486d74224e", "ae2e885d3ecb", "b9f48d465c33", "bdcb0dc58954",
+    "d44aef7aef36", "d92240fc3e98", "dc43bc6c5289", "dcd4e9901fba", "e3b0c44298fc",
+    "e3b0c44298fc",
+]
+#: Ảnh chụp HÀNH VI của bản c1e1627 (trước khi gỡ) cho lượt cố định ở `_hanh_vi_meta_ads`: băm
+#: SCHEMA + danh_muc và nguyên văn ghi chú Tổng quan. Chụp 22/10/2026 bằng cách nạp
+#: `git show c1e1627:meta_ads_tool.py` vào module tạm (bộ thử không cần git cho phần này). Bật
+#: lại `quang_cao.HIEN_DOANH_THU` phải ra ĐÚNG như vậy.
+CU_SCHEMA_BAM = "bd602ce9a648499b"
+CU_DANH_MUC_BAM = "281cc6d2d834a9c8"
+CU_GHI_CHU = [
+    (
+     "2026-10-01–2026-10-01. Mốc ngày tính theo múi giờ của từng tài khoản (cột Múi "
+     "giờ TK), đúng cách Meta cộng số. Số theo phân bổ mặc định của Meta. Reach/tần "
+     "suất/ROAS Meta không cộng tổng. Dòng có số hiển thị/chi tiêu mà Meta không trả "
+     "mua/lead/tin nhắn/video thì ghi 0 (Meta bỏ số 0); ô trống = Meta không trả số "
+     "phân phối cho dòng đó, không phải 0."),
+    (
+     "Có chia nhỏ (tuổi/giới tính/nền tảng/vị trí): Meta có thể ẩn số mua, giá trị "
+     "mua, ROAS Meta, lead, tin nhắn vì quyền riêng tư; ô trống ở các cột đó = Meta "
+     "không trả số, không phải 0, và tổng cột đó để trống."),
+    (
+     "Dòng TỔNG (theo từng tiền tệ) và SỐ LIỆU CHÍNH là tổng tool tự cộng từ các dòng "
+     "đã đọc; CTR/CPC/CPM/ROAS/chi phí mỗi kết quả của dòng tổng tính lại từ tổng, "
+     "không cộng tỉ lệ. Tiền theo đơn vị tiền tệ của từng tài khoản (cột Tiền tệ), "
+     "không quy đổi."),
+    (
+     "Các tab Theo tài khoản, Theo nền tảng, Theo ngày, Theo chiến dịch: tool tự cộng "
+     "từ các dòng của tab Chi tiết, riêng từng tiền tệ (không cộng VND với USD); tỉ lệ "
+     "tính lại từ tổng; Theo ngày sắp theo ngày tăng dần; các tab khác theo chi tiêu "
+     "giảm dần; dòng TỔNG ở đó bằng đúng dòng TỔNG của Chi tiết. Tiếp cận, tần suất và "
+     "ROAS Meta không cộng được qua ngày/nền tảng/đối tượng nên không có ở các tab gộp "
+     "(roas meta, tiếp cận: xem từng dòng ở Chi tiết)."),
+    (
+     "Tab Dữ liệu gốc: cột mã/ngày/chia nhỏ + các trường Meta mà tab Chi tiết không có "
+     "(danh sách actions… ở dạng JSON), cùng thứ tự dòng với tab Chi tiết — để đối "
+     "chiếu cách tính."),
+]
+
+
+def _bam(x) -> str:
+    import hashlib
+    chu = json.dumps(x, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(chu.encode()).hexdigest()[:16]
+
+
+def _dong_doi_meta_ads_tool() -> tuple[list[str], list[str]]:
+    """(dòng bỏ, dòng thêm) của meta_ads_tool.py so với c1e1627 — sha256 12 ký tự, đã sắp."""
+    import hashlib
+    kq = subprocess.run(["git", "diff", "-U0", "c1e1627", "--", "meta_ads_tool.py"],
+                        cwd=GOC, capture_output=True, check=True, text=True, encoding="utf-8")
+    doi = [d for d in kq.stdout.splitlines() if d[:1] in "+-" and not d.startswith(("+++", "---"))]
+    h = lambda d: hashlib.sha256(d[1:].rstrip().encode()).hexdigest()[:12]  # noqa: E731
+    return (sorted(h(d) for d in doi if d[0] == "-"), sorted(h(d) for d in doi if d[0] == "+"))
+
+
+def _hanh_vi_meta_ads(mod) -> dict:
+    """SCHEMA, kết quả danh_muc và ghi chú Tổng quan của một lượt xuất cố định (2 TK, theo ngày,
+    chia nền tảng, cấp chiến dịch, có ROAS Meta) — không mạng, không Lark."""
+    import unittest.mock as um
+
+    import memory_store
+    import scheduler
+    acc = [{"id": "act_1", "name": "HAPAS A", "currency": "VND", "timezone_name": "Asia/Ho_Chi_Minh"},
+           {"id": "act_2", "name": "HAPAS B", "currency": "VND", "timezone_name": "Asia/Ho_Chi_Minh"}]
+
+    def dong(cid, nen, chi):
+        return {"campaign_id": cid, "campaign_name": "C" + cid, "date_start": "2026-10-01",
+                "date_stop": "2026-10-01", "publisher_platform": nen, "spend": str(chi),
+                "impressions": "10", "clicks": "1",
+                "actions": [{"action_type": "purchase", "value": "1"}],
+                "action_values": [{"action_type": "purchase", "value": "500"}],
+                "purchase_roas": [{"action_type": "purchase", "value": "5"}]}
+    data = {"act_1/insights": [dong("1", "facebook", 100), dong("1", "instagram", 50)],
+            "act_2/insights": [dong("2", "facebook", 300)]}
+    tq = []
+    with contextlib.ExitStack() as st:
+        for ten, gt in (("accounts", lambda self: [dict(a) for a in acc]),
+                        ("pages", lambda self, tail, params, limit: (
+                            [dict(r) for r in data.get(tail, [])], False))):
+            st.enter_context(um.patch.object(mod.MetaClient, ten, gt))
+        st.enter_context(um.patch.object(mod, "_allowed", lambda actor: True))
+        st.enter_context(um.patch.dict("os.environ", {"MARK_META_ADS_TOKEN": "fake"}))
+        st.enter_context(um.patch.object(
+            mod, "_private_sheet", lambda title, bang, t, actor, goc=None, gop=(): tq.append(t)
+            or types.SimpleNamespace(url="https://x", token="t", cac_url=["https://x"],
+                                     day_du=True, kiem={"day_du": True, "cau": "", "tabs": []})))
+        memory_store.set_current_sender("ou_asker")
+        scheduler.set_current_chat_type("p2p")
+        mod.set_context({"channel": "lark", "chat_type": "p2p", "nguoi_gui": "ou_asker"})
+        try:
+            danh_muc = json.loads(mod._handle({"danh_muc": True}))
+            chi_so = [k for k in ("spend", "purchases", "revenue", "roas", "meta_roas", "reach")
+                      if k in mod.SCHEMA["parameters"]["properties"]["chi_so"]["items"]["enum"]]
+            with contextlib.suppress(Exception):
+                mod._handle({"tai_khoan": "tat_ca", "tu_ngay": "2026-10-01",
+                             "den_ngay": "2026-10-01", "cap": "chien_dich", "theo_ngay": True,
+                             "chia_theo": ["nen_tang"], "chi_so": chi_so})
+        finally:
+            memory_store.set_current_sender(None)
+            scheduler.set_current_chat_type(None)
+            mod.set_context({})
+    return {"schema": mod.SCHEMA, "danh_muc": danh_muc,
+            "ghi_chu": list(tq[0].ghi_chu) if tq else None}
+
+
 def test_meta_ads_tool_cu_khong_doi():
-    kq = subprocess.run(["git", "diff", "--quiet", "c1e1627", "--", "meta_ads_tool.py"],
-                        cwd=GOC, capture_output=True, check=False)
-    assert kq.returncode == 0
+    """22/10/2026 (chủ dự án): meta_ads_tool chỉ được đổi đúng các dòng tạm gỡ doanh thu / ROAS
+    (commit "fix(chi-so-ads): tạm gỡ giá trị mua và ROAS…"); mọi dòng khác vẫn như c1e1627. Đổi
+    meta_ads_tool có chủ đích thì cập nhật hai danh sách băm dưới đây."""
+    bo, them = _dong_doi_meta_ads_tool()
+    assert bo == DONG_BO_MONG_DOI and them == DONG_THEM_MONG_DOI, (bo, them)
+
+
+def test_meta_ads_tool_bat_lai_giong_c1e1627(monkeypatch):
+    """Bật lại công tắc → SCHEMA, danh_muc, ghi chú Sheet đúng như bản c1e1627 (ảnh chụp ở trên)."""
+    import importlib
+
+    import meta_ads_tool as MT
+    monkeypatch.setattr(QC, "HIEN_DOANH_THU", True)    # SCHEMA dựng lúc nạp: nạp lại với cờ bật
+    try:
+        importlib.reload(MT)
+        assert MT.HIEN_DOANH_THU is True
+        r = _hanh_vi_meta_ads(MT)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(MT)
+    assert MT.HIEN_DOANH_THU is False
+    assert _bam(r["schema"]) == CU_SCHEMA_BAM and _bam(r["danh_muc"]) == CU_DANH_MUC_BAM
+    assert r["ghi_chu"] == CU_GHI_CHU
+
+
+def test_meta_ads_tool_tat_khong_doanh_thu_roas():
+    import meta_ads_tool as MT
+    r = _hanh_vi_meta_ads(MT)
+    bo = {"revenue", "roas", "meta_roas"}
+    assert not bo & {m["ma"] for g in r["danh_muc"]["nhom"].values() for m in g}
+    assert not bo & set(r["schema"]["parameters"]["properties"]["chi_so"]["items"]["enum"])
+    assert r["ghi_chu"] and not any(re.search(r"ROAS|giá trị mua", x, re.I) for x in r["ghi_chu"])
+    assert r["ghi_chu"] != CU_GHI_CHU and _bam(r["schema"]) != CU_SCHEMA_BAM
 
 
 # ───────────────────────────── soát độc lập 20/10/2026 ─────────────────────────────

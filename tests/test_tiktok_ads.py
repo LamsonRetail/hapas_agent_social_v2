@@ -467,7 +467,14 @@ class GiaKhoQC:
         for r in self.bang["qc_tk_ngay"].values():
             if r["advertiser_id"] in ids and tu <= r["ngay"] <= den:
                 theo.setdefault(r["ngay"], []).append(r)
-        return [{"ngay": d, **self._cong(rs)} for d, rs in sorted(theo.items())]
+
+        # 22/10/2026: như SQL — cộng chỉ số kiểu SỐ trong JSON chi_so, thiếu / chữ → 0.
+        def json_so(rs, k):
+            return int(sum(v for r in rs for v in [(r.get("chi_so") or {}).get(k)]
+                           if isinstance(v, (int, float)) and not isinstance(v, bool)))
+        return [{"ngay": d, **self._cong(rs),
+                 **{ma: json_so(rs, k) for ma, k, *_ in QC.CHUOI_XEM_SP}}
+                for d, rs in sorted(theo.items())]
 
     def qc_top(self, cap, ids, tu, den, sap, n=20):
         bang, khoa = (("qc_campaign_ngay", "campaign_id") if cap == "campaign"
@@ -504,7 +511,7 @@ class GiaKhoQC:
                            else None),
     }
 
-    def qc_bang(self, cap, ids, tu, den, *, sap, tang=False, mau="", cd="", n=10):
+    def qc_bang(self, cap, ids, tu, den, *, sap, tang=False, mau="", cd="", n=10, bo_qua=0):
         bang, khoa = (("qc_campaign_ngay", "campaign_id") if cap == "campaign"
                       else ("qc_ad_ngay", "ad_id"))
         cac = [r for r in self.bang[bang].values() if r["advertiser_id"] in ids
@@ -531,7 +538,14 @@ class GiaKhoQC:
         co.sort(key=lambda x: ((f(x) if tang else -f(x)), -(x.get("hien_thi") or 0), x[khoa]))
         khong = sorted((x for x in ra if f(x) is None),
                        key=lambda x: (-(x.get("hien_thi") or 0), x[khoa]))
-        return {"rows": (co + khong)[:n], "tong": len(ra)}
+        # Phân trang như KQ.qc_bang (22/10/2026): quá trang cuối → trang cuối.
+        n = max(1, min(int(n), KQ.TOP_TOI_DA))
+        bo_qua = max(0, int(bo_qua))
+        if ra and bo_qua >= len(ra):
+            bo_qua = (len(ra) - 1) // n * n
+        if not ra:
+            bo_qua = 0
+        return {"rows": (co + khong)[bo_qua:bo_qua + n], "tong": len(ra), "bo_qua": bo_qua}
 
     def qc_khan_gia(self, ids):
         rows = [r for r in self.bang["qc_khan_gia"].values() if r["advertiser_id"] in ids]
@@ -680,8 +694,10 @@ def test_chan_cong_cu_ghi_va_tool_execute_truoc_khi_gui(ten):
 
 
 def test_cong_cu_doc_di_qua_va_doc_sse_phien():
-    # Soát 19/10/2026: chỉ đúng các công cụ mã dùng.
-    assert TA.CONG_CU_DOC == {"auth_advertiser_get", "advertiser_info_get", "report_integrated_get"}
+    # Soát 19/10/2026: chỉ đúng các công cụ mã dùng. 22/10/2026: + identity_get, tool_execute (chỉ
+    # đúng dạng ad_get — test_kenh_dang.py).
+    assert TA.CONG_CU_DOC == {"auth_advertiser_get", "advertiser_info_get", "report_integrated_get",
+                              "identity_get", "tool_execute"}
     src = (GOC / "dashboard" / "tiktok_ads.py").read_text(encoding="utf-8")
     goi = set(re.findall(r'goi\("([a-z_]+)"', src))
     assert goi == TA.CONG_CU_DOC, goi
@@ -1018,10 +1034,11 @@ def test_lo_100_id_45_chi_so_trang_200():
     assert all(len(a["metrics"]) <= 45 for t, a in tt.cong_cu if t == "report_integrated_get")
     assert all(a["page_size"] <= 200 for t, a in tt.cong_cu
                if t == "report_integrated_get" and a["metrics"] != ["impressions"])
-    # Cấp tài khoản xin đủ 100 chỉ số hợp lệ (3 lượt ≤ 45), không tên lạ (TikTok từ chối cả lượt).
+    # Cấp tài khoản xin đủ 101 chỉ số hợp lệ (3 lượt ≤ 45), không tên lạ (TikTok từ chối cả lượt).
+    # 22/10/2026: + onsite_on_web_detail (xem trang SP TikTok Shop) — vẫn 3 lượt.
     tk = [a["metrics"] for t, a in tt.cong_cu if t == "report_integrated_get"
           and a["data_level"] == "AUCTION_ADVERTISER" and a["report_type"] == "BASIC"]
-    assert sum(len(m) for m in tk[:3]) == len(QC.CHI_SO_HOP_LE) == 100
+    assert sum(len(m) for m in tk[:3]) == len(QC.CHI_SO_HOP_LE) == 101
     # Chỉ ngày có hiển thị: ad giả chạy ngày lẻ.
     assert {r["ngay"].day % 2 for r in kho_qc.bang["qc_ad_ngay"].values()} == {1}
     assert len({r["ad_id"] for r in kho_qc.bang["qc_ad_ngay"].values()}) == 250
@@ -1192,7 +1209,8 @@ def test_trang_va_api_quang_cao_chi_quan_tri_vien():
     dang_nhap(c, QL)
     d = c.get(f"/api/qc?{Q}").json()
     assert d["xem_tien"] is True and d["kpi"]["chi"] > 0
-    assert d["kpi"]["roas_shop"] == round(d["kpi"]["gia_tri_mua_shop"] / d["kpi"]["chi"], 2)
+    # 22/10/2026: doanh thu Shop / ROAS tạm ẩn — kể cả quản trị viên (QC.HIEN_DOANH_THU).
+    assert "roas_shop" not in d["kpi"] and "gia_tri_mua_shop" not in d["kpi"]
     assert c.get(f"/api/qc?{Q}&ben=tat_ca").status_code == 200
     t = c.get(f"/quang-cao?{Q}").text
     assert "Hiển thị" in t and "HAPAS - KOC" in t
@@ -1222,7 +1240,7 @@ def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
     assert c.get(f"/api/qc?{Q}&ben=chua_gan").json()["tai_khoan"][0]["advertiser_id"] == LE
     assert c.get(f"/api/qc?{Q}&ben=khong-co").status_code == 404
     t = c.get(f"/quang-cao?{Q}").text
-    assert "Chi tiêu" in t and "ROAS Shop" in t and 'id="qc-api"' in t
+    assert "Chi tiêu" in t and "ROAS Shop" not in t and 'id="qc-api"' in t
     # Thiết kế 20/10/2026: kỳ đang xem ở đầu trang, "số đến ngày" ở dải trạng thái, CPM + CTR tính lại.
     assert "12/10 – 18/10/2026" in t and "Số đến 18/10" in t
     assert 'data-kpi="cpm"' in t and 'data-kpi="ctr"' in t

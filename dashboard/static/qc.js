@@ -4,11 +4,17 @@
 // tỉ trọng + chấm ở bảng); một nền tảng → đường vùng một màu như trước. Điện thoại: gập sẵn bộ lọc để
 // số lên màn hình đầu. Không gọi API, không chèn HTML từ dữ liệu (CSP script-src 'self'; chữ chỉ qua
 // textContent). Màu đọc từ biến CSS → sáng/tối tự theo.
+// 22/10/2026 (chủ dự án): thêm "Xem trang SP TikTok Shop" / "Xem SP website (Meta)" (`chuoi_xem_sp` của
+// payload, chỉ chuỗi có số trong phạm vi) — mỗi chuỗi thuộc MỘT nền tảng nên luôn là đường một màu của
+// nền tảng đó, không chồng, không cộng; chú giải dưới tiêu đề ghi rõ định nghĩa.
 "use strict";
 (function () {
   // Bộ lọc gập trên điện thoại (máy tính luôn mở; dòng tóm tắt chỉ hiện ≤ 760px — qc.css).
   var loc = document.getElementById("qc-loc");
-  if (loc && window.matchMedia && window.matchMedia("(max-width: 760px)").matches) loc.open = false;
+  var hep = window.matchMedia ? window.matchMedia("(max-width: 760px)") : null;
+  if (loc && hep && hep.matches) loc.open = false;
+  // Cửa sổ hẹp → rộng: dòng tóm tắt bị ẩn ở máy tính, bộ lọc đang gập sẽ biến mất → mở lại.
+  if (loc && hep && hep.addEventListener) hep.addEventListener("change", function () { if (!hep.matches) loc.open = true; });
 
   var CHUOI = [["chi", "Chi tiêu"], ["hien_thi", "Hiển thị"], ["click", "Click"], ["view_video", "View video"],
                ["engaged_view", "Engaged view"], ["tuong_tac", "Tương tác"], ["follow", "Follow"]];
@@ -30,6 +36,11 @@
   var theoNen = {};
   (p.theo_ngay_nen_tang || []).forEach(function (r) { (theoNen[r.nen_tang] = theoNen[r.nen_tang] || {})[r.ngay] = r; });
   var cacNen = (p.theo_nen_tang || []).map(function (n) { return n.nen_tang; }).filter(function (n) { return theoNen[n]; });
+  // Chuỗi riêng một nền tảng: [mã, nhãn, nền tảng, định nghĩa] — chỉ khi nền tảng đó có trong phạm vi.
+  var coNen = (p.theo_nen_tang || []).map(function (n) { return n.nen_tang; });
+  (p.chuoi_xem_sp || []).forEach(function (c) {
+    if (c.ma in co && coNen.indexOf(c.nen_tang) >= 0) chuoi.push([c.ma, c.ten, c.nen_tang, c.dinh_nghia]);
+  });
   var chong = p.nen_tang === "tat_ca" && cacNen.length > 1;
 
   var giamDong = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -66,6 +77,7 @@
       b.type = "button";
       b.className = "qc-phan__nut";
       b.textContent = c[1];
+      if (c[3]) b.title = c[3];
       b.setAttribute("aria-pressed", c[0] === chon ? "true" : "false");
       b.addEventListener("click", function () {
         if (chon === c[0]) return;
@@ -78,9 +90,21 @@
     });
   }
 
-  function veChuGiai() {
+  function veChuGiai(rieng) {
     if (!chuGiai) return;
     while (chuGiai.firstChild) chuGiai.removeChild(chuGiai.firstChild);
+    if (rieng) {
+      // Chuỗi một nền tảng: chấm màu nền tảng + định nghĩa luôn hiện (không phải rê chuột mới thấy).
+      var li1 = document.createElement("li");
+      var ch = document.createElement("span");
+      ch.className = "qc-cham qc-cham--" + rieng[2];
+      ch.setAttribute("aria-hidden", "true");
+      li1.appendChild(ch);
+      li1.appendChild(document.createTextNode(rieng[3] || rieng[1]));
+      chuGiai.appendChild(li1);
+      chuGiai.hidden = false;
+      return;
+    }
     chuGiai.hidden = !chong;
     if (!chong) return;
     cacNen.forEach(function (n) {
@@ -96,15 +120,16 @@
 
   function ve() {
     var c = chuoi.filter(function (x) { return x[0] === chon; })[0] || chuoi[0];
-    var ma = c[0], ten = c[1];
+    var ma = c[0], ten = c[1], nenRieng = c[2] || null;
+    var xep = chong && !nenRieng;            // cột chồng theo nền tảng — không bao giờ cho chuỗi riêng
     var m = { chu: bien("--chu"), phu: bien("--chu-phu"), mo: bien("--chu-mo"), ke: bien("--ke"),
               truc: bien("--truc"), mat: bien("--be-mat"), phong: bien("--phong") || "system-ui, sans-serif",
               chinh: bien("--s1"), tiktok: bien("--qc-tiktok") || "#111827", meta: bien("--qc-meta") || "#1877f2" };
     if (!bd) bd = window.echarts.init(khung, null, { renderer: "canvas" });
-    khung.setAttribute("aria-label", "Biểu đồ " + ten.toLowerCase() + " theo ngày" + (chong ? ", chia theo nền tảng" : "") + ", " + ngay.length + " ngày");
-    veChuGiai();
+    khung.setAttribute("aria-label", "Biểu đồ " + ten.toLowerCase() + " theo ngày" + (xep ? ", chia theo nền tảng" : "") + ", " + ngay.length + " ngày");
+    veChuGiai(nenRieng ? c : null);
     var series;
-    if (chong) {
+    if (xep) {
       series = cacNen.map(function (n, i) {
         return {
           name: TEN_NEN[n] || n, type: "bar", stack: "nen", barMaxWidth: 22, barCategoryGap: "28%",
@@ -114,13 +139,17 @@
         };
       });
     } else {
+      // Chuỗi riêng: số của ĐÚNG nền tảng đó (theo_ngay_nen_tang), màu nền tảng.
+      var mau = nenRieng ? (m[nenRieng] || m.chinh) : m.chinh;
+      var rNen = nenRieng ? theoNen[nenRieng] : null;
       series = [{
-        name: ten, type: "line", data: ds.map(function (x) { return giaTri(x, ma); }),
+        name: ten, type: "line",
+        data: ds.map(function (x) { return rNen ? giaTri(rNen[x.ngay], ma) : giaTri(x, ma); }),
         showSymbol: ngay.length <= 45, symbol: "circle", symbolSize: 6,
-        smooth: 0.25, smoothMonotone: "x", lineStyle: { width: 2, color: m.chinh },
-        itemStyle: { color: m.chinh, borderColor: m.mat, borderWidth: 2 },
+        smooth: 0.25, smoothMonotone: "x", lineStyle: { width: 2, color: mau },
+        itemStyle: { color: mau, borderColor: m.mat, borderWidth: 2 },
         areaStyle: { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: hexRgba(m.chinh, 0.22) }, { offset: 1, color: hexRgba(m.chinh, 0.02) }]) }
+          { offset: 0, color: hexRgba(mau, 0.22) }, { offset: 1, color: hexRgba(mau, 0.02) }]) }
       }];
     }
     bd.setOption({
@@ -130,16 +159,17 @@
       tooltip: {
         trigger: "axis", renderMode: "richText", backgroundColor: m.mat, borderColor: m.ke, borderWidth: 1,
         padding: [8, 12], textStyle: { color: m.chu, fontSize: 12, fontFamily: m.phong },
-        axisPointer: chong ? { type: "shadow", shadowStyle: { color: hexRgba(m.truc, 0.25) } }
+        axisPointer: xep ? { type: "shadow", shadowStyle: { color: hexRgba(m.truc, 0.25) } }
                            : { type: "line", lineStyle: { color: m.truc, type: "dashed" } },
         formatter: function (ps) {
           var i = ps[0].dataIndex, dong = [ngayDu(ngay[i])], tong = 0;
           ps.forEach(function (x) { tong += x.value || 0; dong.push(x.seriesName + ": " + SO.format(x.value || 0) + donVi(ma)); });
-          if (chong) dong.push("Cộng: " + SO.format(tong) + donVi(ma));
+          if (nenRieng) dong.push(nenRieng === "tiktok" ? "(đếm lượt xem, không phải số người)" : "(trên website — không phải Shop)");
+          if (xep) dong.push("Cộng: " + SO.format(tong) + donVi(ma));
           return dong.join("\n");
         }
       },
-      xAxis: { type: "category", data: ngay, boundaryGap: chong, axisLine: { lineStyle: { color: m.ke } }, axisTick: { show: false },
+      xAxis: { type: "category", data: ngay, boundaryGap: xep, axisLine: { lineStyle: { color: m.ke } }, axisTick: { show: false },
                axisLabel: { color: m.mo, fontSize: 11, hideOverlap: true, formatter: ngayNgan, margin: 10 } },
       yAxis: { type: "value", splitLine: { lineStyle: { color: m.ke, type: [4, 4] } },
                axisLabel: { color: m.mo, fontSize: 11, formatter: function (v) { return soGon(v); } } },
@@ -160,8 +190,8 @@
   }
 })();
 
-// Lọc bảng chiến dịch / quảng cáo (22/10/2026): đổi "Xếp theo" / "Thứ tự" / "Số dòng" là gửi luôn (ô tìm
-// vẫn chờ Enter hoặc nút Lọc). Không có JS: nút Lọc vẫn đủ dùng.
+// Lọc bảng chiến dịch / quảng cáo (22/10/2026): đổi "Xếp theo" / "Thứ tự" là gửi luôn (ô tìm vẫn chờ
+// Enter hoặc nút Lọc). Không có JS: nút Lọc vẫn đủ dùng.
 (function () {
   var f = document.querySelector('form[data-o="loc-bang"]');
   if (!f) return;
@@ -170,9 +200,71 @@
   });
 })();
 
-// Tạo Lark Sheet (20/10/2026): còn yêu cầu đang chờ / đang tạo → hỏi lại /api/qc/sheet mỗi 5 giây (tối
+// Chọn nhiều tài khoản (22/10/2026, chủ dự án): ô "Tài khoản" là danh sách đánh dấu trong <details>
+// (không JS vẫn chọn + gửi được). JS thêm: ô tìm (bỏ dấu, không phân biệt hoa thường), "Chọn tất cả /
+// Bỏ chọn" (áp vào các dòng đang hiện), dòng tóm tắt "Tất cả tài khoản (N)" / "3 tài khoản" / tên, đóng
+// khi bấm ra ngoài hoặc Esc. Gửi khi đã chọn đủ mọi tài khoản → bỏ chọn hết (= tất cả, URL gọn).
+(function () {
+  var khoi = document.querySelector('[data-o="chon-tk"]');
+  if (!khoi) return;
+  var khung = khoi.querySelector("details");
+  var tom = khoi.querySelector(".qc-tk__gia-tri");
+  var congCu = khoi.querySelector("[data-tk-cong-cu]");
+  var tim = khoi.querySelector(".qc-tk__tim");
+  var trong = khoi.querySelector("[data-tk-trong]");
+  var hop = Array.prototype.slice.call(khoi.querySelectorAll('input[type="checkbox"][name="tk"]'));
+  if (!khung || !tom || !hop.length) return;
+  if (congCu) congCu.hidden = false;
+
+  function boDau(x) {
+    return (x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase();
+  }
+  function ten(h) { var t = h.parentNode.querySelector(".qc-tk__ten"); return t ? t.textContent : h.value; }
+  function veTom() {
+    var chon = hop.filter(function (h) { return h.checked; });
+    tom.textContent = !chon.length || chon.length === hop.length ? tom.getAttribute("data-tat-ca")
+      : chon.length === 1 ? ten(chon[0]) : chon.length + " tài khoản";
+  }
+  function loc() {
+    var q = boDau(tim ? tim.value.trim() : "");
+    var con = 0;
+    hop.forEach(function (h) {
+      var hien = !q || boDau(ten(h)).indexOf(q) >= 0 || h.value.indexOf(q) >= 0;
+      h.parentNode.hidden = !hien;
+      if (hien) con++;
+    });
+    Array.prototype.forEach.call(khoi.querySelectorAll(".qc-tk__nhom"), function (f) {
+      f.hidden = !f.querySelector(".qc-tk__o:not([hidden])");
+    });
+    if (trong) trong.hidden = con > 0;
+  }
+  hop.forEach(function (h) { h.addEventListener("change", veTom); });
+  if (tim) {
+    tim.addEventListener("input", loc);
+    // Enter trong ô tìm không gửi cả bộ lọc (người dùng đang lọc danh sách).
+    tim.addEventListener("keydown", function (e) { if (e.key === "Enter") e.preventDefault(); });
+  }
+  Array.prototype.forEach.call(khoi.querySelectorAll("button[data-tk]"), function (b) {
+    b.addEventListener("click", function () {
+      var bat = b.getAttribute("data-tk") === "tat-ca";
+      hop.forEach(function (h) { if (!h.parentNode.hidden) h.checked = bat; });
+      veTom();
+    });
+  });
+  document.addEventListener("click", function (e) { if (khung.open && !khoi.contains(e.target)) khung.open = false; });
+  khoi.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && khung.open) { khung.open = false; khung.querySelector("summary").focus(); }
+  });
+  khung.addEventListener("toggle", function () { if (khung.open && tim) tim.focus(); });
+  var f = khoi.closest("form");
+  if (f) f.addEventListener("submit", function () {
+    if (hop.every(function (h) { return h.checked; })) hop.forEach(function (h) { h.checked = false; });
+  });
+})();
+
+// Xuất Lark Sheet (20/10/2026; 22/10/2026 nằm trong mục "Chiến dịch và quảng cáo"): còn yêu cầu đang chờ / đang tạo → hỏi lại /api/qc/sheet mỗi 5 giây (tối
 // đa 15 phút, tab ẩn thì thôi hỏi) và vẽ lại danh sách bằng textContent; hết yêu cầu đang tạo (hoặc hết
-// 15 phút) thì mở lại nút "Tạo Sheet". Không có JS: trang vẫn đúng, tải lại là thấy trạng thái mới.
+// 15 phút) thì mở lại nút "Xuất Lark Sheet". Không có JS: trang vẫn đúng, tải lại là thấy trạng thái mới.
 (function () {
   var khung = document.getElementById("sheet");
   var ds = document.getElementById("qc-sheet-ds");

@@ -12,8 +12,9 @@ KẾT NỐI (đo thật 19/10/2026 từ máy PC, xem dashboard/README.md mục "
     làm Bearer — đổi loại chỉ là cấu hình (`ket_noi_ngoai.loai`), không làm mới, không hết hạn.
 
 AN TOÀN
-  • Danh sách công cụ CHỈ ĐỌC cứng (`CONG_CU_DOC`): tên nào khác — kể cả `tool_execute` (cửa gọi
-    ~380 công cụ khác, trong đó có ghi) và mọi công cụ tạo/sửa/ngân sách — bị chặn TRƯỚC khi gửi.
+  • Danh sách công cụ CHỈ ĐỌC cứng (`CONG_CU_DOC`): tên nào khác — mọi công cụ tạo/sửa/ngân
+    sách — bị chặn TRƯỚC khi gửi. `tool_execute` (cửa gọi ~380 công cụ khác, trong đó có ghi) chỉ
+    qua được ĐÚNG một dạng đọc `ad_get` trường cố định (`kiem_ad_get`, 22/10/2026 chủ dự án duyệt).
   • Token mã hoá khi nằm trong DB (`ma_hoa`, khoá `TIKTOK_KHOA_MA_HOA` 32 byte base64 trong
     /opt/lang-nghe/.env). Không bao giờ in/log/hiện token; lỗi đi qua `gon_loi` (bỏ chuỗi giống
     token, URL). Mark chỉ đọc cột không bí mật của `ket_noi_ngoai` (quyền theo cột trong schema.sql).
@@ -33,6 +34,11 @@ ghi cờ yêu cầu — bộ hẹn giờ 2 phút chạy `dong-bo --chi-khi-yeu-c
     tuần một lần, cửa sổ 30 ngày.
   • Tuần tự, nghỉ ngắn giữa các lượt gọi; lỗi mạng (hết giờ, đứt giữa chừng) thử lại 3 lần.
   • Upsert theo khoá chính — chạy lại không nhân đôi. Khoá advisory Postgres: không chạy chồng.
+  • Kênh đăng (22/10/2026): sau số của mọi tài khoản, lượt đầy đủ đọc danh tính đăng (identity)
+    của các ad CÓ phân phối chưa biết kênh — `ad_get` ≤ 100 ad mỗi lượt gọi, tối đa
+    `TRAN_KENH_LUOT` lượt mỗi lần đồng bộ (ad chi nhiều trước); tên kênh từ `identity_get` (một
+    lượt mỗi tài khoản khi có kênh chưa có tên). Kênh của một ad không đổi nên chỉ đọc một lần.
+    Lỗi một tài khoản ghi nhật ký rồi sang tài khoản sau — không làm hỏng lượt đồng bộ số.
 """
 from __future__ import annotations
 
@@ -64,8 +70,22 @@ PHIEN_BAN_MCP = "2025-06-18"
 TEN_CLIENT = "hapas-social-listening-dashboard"
 
 #: Công cụ ĐƯỢC gọi — chỉ đọc, và CHỈ những công cụ mã này thật sự dùng (soát 19/10/2026: bỏ bc_get,
-#: identity_*, tool_get/tool_list). Mọi tên khác bị chặn trước khi gửi (kể cả tool_execute).
-CONG_CU_DOC = frozenset({"auth_advertiser_get", "advertiser_info_get", "report_integrated_get"})
+#: tool_get/tool_list). Mọi tên khác bị chặn trước khi gửi.
+#: 22/10/2026 (chủ dự án): thêm `identity_get` (đọc danh tính đăng — kênh TikTok/KOC/Spark của tài
+#: khoản; tham số chỉ `KHOA_IDENTITY_GET`) và `tool_execute` CHỈ đúng một dạng: đọc `ad_get` với
+#: danh sách trường cố định `TRUONG_AD_GET` + lọc ≤ 100 ad_id (`kiem_ad_get`). Mọi đích khác của
+#: tool_execute (dispatcher có ~380 công cụ, kể cả công cụ GHI tên đuôi _get như split_test_end_get)
+#: vẫn bị chặn trước khi gửi.
+CONG_CU_DOC = frozenset({"auth_advertiser_get", "advertiser_info_get", "report_integrated_get",
+                         "identity_get", "tool_execute"})
+#: Tham số được phép của identity_get (đo 22/10/2026: một lượt page_size 100 trả ĐỦ 1.952 danh tính
+#: của MATEMADE MKT, page_info toàn 0 — vẫn xử lý phân trang phòng khi TikTok đổi).
+KHOA_IDENTITY_GET = frozenset({"advertiser_id", "page", "page_size"})
+#: Trường `ad_get` (qua tool_execute) — CỐ ĐỊNH, đo thật 22/10/2026 trên MATEMADE MKT: 100/100
+#: ad chi nhiều nhất 30 ngày có identity_id (BC_AUTH_TT 56, AUTH_CODE 44), 100% nối identity_get.
+TRUONG_AD_GET = ("ad_id", "identity_id", "identity_type", "identity_authorized_bc_id",
+                 "tiktok_item_id", "campaign_id")
+TRANG_AD_GET = 1000
 LOAI = ("mcp_oauth", "api_token")
 #: Mã lỗi TikTok coi là "token hỏng/hết hạn" (Marketing API: 40100–40105).
 MA_XAC_THUC = frozenset({40100, 40101, 40102, 40104, 40105})
@@ -329,10 +349,58 @@ def thu_hoi(http: Http, token: str, goi_y: str = "access_token") -> bool:
 
 
 # ───────────────────────────── MCP (JSON-RPC) ─────────────────────────────
+_RE_SO = re.compile(r"[0-9]{1,30}")
+
+
+def _so_nguyen(v, a: int, b: int) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and a <= v <= b
+
+
+def kiem_ad_get(args) -> None:
+    """tool_execute CHỈ khi đúng dạng (22/10/2026, chủ dự án duyệt): {"tool_name": "ad_get",
+    "params": {"advertiser_id": <số>, "fields": TRUONG_AD_GET, "filtering": {"ad_ids": [1–100 mã
+    số]}, "page_size": 1–1000, "page"?: ≥ 1}}. Thừa / thiếu / lạ một khoá là chặn."""
+    def chan(ly_do: str):
+        raise LoiChan(f"chặn tool_execute: {ly_do}")
+    if not isinstance(args, dict) or set(args) != {"tool_name", "params"}:
+        chan("chỉ nhận đúng hai khoá tool_name + params")
+    if args.get("tool_name") != "ad_get":
+        chan(f"đích '{str(args.get('tool_name'))[:60]}' không được phép (chỉ ad_get)")
+    p = args.get("params")
+    if not isinstance(p, dict) or not ({"advertiser_id", "fields", "filtering", "page_size"}
+                                       <= set(p) <= {"advertiser_id", "fields", "filtering",
+                                                     "page_size", "page"}):
+        chan("tham số ad_get ngoài danh sách")
+    if not isinstance(p["advertiser_id"], str) or not _RE_SO.fullmatch(p["advertiser_id"]):
+        chan("advertiser_id sai dạng")
+    if p["fields"] != list(TRUONG_AD_GET):
+        chan("fields phải đúng danh sách cố định")
+    loc = p["filtering"]
+    ids = loc.get("ad_ids") if isinstance(loc, dict) else None
+    if (set(loc or ()) != {"ad_ids"} or not isinstance(ids, list) or not 1 <= len(ids) <= LO_ID
+            or not all(isinstance(x, str) and _RE_SO.fullmatch(x) for x in ids)):
+        chan("filtering chỉ được ad_ids (1–100 mã số)")
+    if not _so_nguyen(p["page_size"], 1, TRANG_AD_GET):
+        chan("page_size 1–1000")
+    if "page" in p and not _so_nguyen(p["page"], 1, 10_000):
+        chan("page sai")
+
+
 def kiem_cong_cu(ten: str, args: dict | None = None) -> None:
-    """Chặn mọi công cụ ngoài danh sách chỉ đọc (gồm tool_execute). Gọi TRƯỚC khi gửi."""
+    """Chặn mọi công cụ ngoài danh sách chỉ đọc. Gọi TRƯỚC khi gửi. identity_get chỉ nhận
+    `KHOA_IDENTITY_GET`; tool_execute chỉ đúng dạng `kiem_ad_get`."""
     if ten not in CONG_CU_DOC:
         raise LoiChan(f"chặn công cụ '{str(ten)[:60]}': không nằm trong danh sách chỉ đọc")
+    if ten == "tool_execute":
+        kiem_ad_get(args)
+    elif ten == "identity_get":
+        a = args if isinstance(args, dict) else None
+        if (a is None or not set(a) <= KHOA_IDENTITY_GET
+                or not isinstance(a.get("advertiser_id"), str)
+                or not _RE_SO.fullmatch(a["advertiser_id"])
+                or not _so_nguyen(a.get("page_size", 1), 1, 100)
+                or not _so_nguyen(a.get("page", 1), 1, 10_000)):
+            raise LoiChan("chặn identity_get: tham số ngoài danh sách")
 
 
 class Mcp:
@@ -494,6 +562,67 @@ def bo_loc_id(dim: str, ids: list[str]) -> list[dict]:
     if len(ids) > LO_ID:
         raise ValueError("tối đa 100 ID mỗi bộ lọc")
     return [{"field_name": LOC_ID[dim], "filter_type": "IN", "filter_value": json.dumps(ids)}]
+
+
+# ───────────────────────────── kênh đăng (22/10/2026) ─────────────────────────────
+#: Lượt ad_get tối đa mỗi lần đồng bộ (100 ad/lượt → 30.000 ad). Lần đầu ≈ 175 lượt cho mọi tài
+#: khoản; sau đó chỉ ad mới chạy.
+TRAN_KENH_LUOT = 300
+TRAN_TRANG_IDENTITY = 50
+#: Ad không thấy trong ad_get (đã xoá, Smart+ nâng cấp…) — ghi dòng không kênh để không hỏi lại mỗi
+#: ngày; `kho_qc.ad_chua_kenh` hỏi lại sau `kho_qc.HOI_LAI_KHONG_THAY_NGAY` ngày.
+KHONG_THAY = "khong_thay"
+
+
+def _chu(v, n: int = 200) -> str | None:
+    s = str(v or "").strip()
+    return s[:n] or None
+
+
+def doc_kenh_ad(mcp, adv: str, ids: list[str]) -> list[dict]:
+    """MỘT lượt ad_get (qua tool_execute, dạng cố định) cho ≤ 100 ad → dòng `qc_ad_kenh`. ≤ 100 ID
+    với page_size 1.000 luôn vừa một trang — không đọc trang sau (soát 22/10/2026: mỗi lượt gọi
+    đều tính vào trần). Ad TikTok không trả → dòng `loai` = KHONG_THAY, không kênh."""
+    ra: dict[str, dict] = {}
+    p = {"advertiser_id": adv, "fields": list(TRUONG_AD_GET),
+         "filtering": {"ad_ids": list(ids)}, "page_size": TRANG_AD_GET}
+    d = mcp.goi("tool_execute", {"tool_name": "ad_get", "params": p}) or {}
+    for x in d.get("list") or []:
+        ad = str(x.get("ad_id") or "")
+        if ad not in ids:
+            continue
+        kenh = _chu(x.get("identity_id"), 100)
+        ra[ad] = {"advertiser_id": adv, "ad_id": ad, "nen_tang": "tiktok", "kenh_id": kenh,
+                  "loai": _chu(x.get("identity_type"), 40) if kenh else KHONG_THAY,
+                  "kenh_phu_id": None, "bai_id": _chu(x.get("tiktok_item_id"), 40)}
+    for ad in ids:
+        ra.setdefault(ad, {"advertiser_id": adv, "ad_id": ad, "nen_tang": "tiktok",
+                           "kenh_id": None, "loai": KHONG_THAY, "kenh_phu_id": None,
+                           "bai_id": None})
+    return list(ra.values())
+
+
+def doc_identity(mcp, adv: str) -> list[dict]:
+    """identity_get của một tài khoản → dòng `qc_kenh` (bỏ trùng theo identity_id)."""
+    ra: dict[str, dict] = {}
+    trang = 1
+    while True:
+        a = {"advertiser_id": adv, "page_size": 100}
+        if trang > 1:
+            a["page"] = trang
+        d = mcp.goi("identity_get", a) or {}
+        for x in d.get("identity_list") or d.get("list") or []:
+            k = _chu(x.get("identity_id"), 100)
+            if k:
+                ra[k] = {"nen_tang": "tiktok", "kenh_id": k,
+                         "loai": _chu(x.get("identity_type"), 40),
+                         "ten": _chu(x.get("display_name")), "username": _chu(x.get("username"))}
+        # Đo 22/10/2026: page_info toàn 0 và một lượt đã trả đủ — chỉ đi tiếp khi TikTok báo rõ.
+        tong = int((d.get("page_info") or {}).get("total_page") or 0)
+        if trang >= tong or trang >= TRAN_TRANG_IDENTITY:
+            break
+        trang += 1
+    return list(ra.values())
 
 
 # ───────────────────────────── dòng TikTok → dòng kho ─────────────────────────────
@@ -1042,6 +1171,7 @@ class DichVu:
             self.kham_pha(mcp)
             bay = self._bay_gio()
             cap_luc = (self.kho.doc_ket_noi() or {}).get("cap_luc")
+            da_doc: list[str] = []
             for t in self.kho.cac_tk():
                 # 20/10/2026: tk_quang_cao có cả tài khoản Meta (`meta_ads.py` đồng bộ riêng).
                 if (t.get("nen_tang") or "tiktok") != "tiktok":
@@ -1064,6 +1194,10 @@ class DichVu:
                 except LoiTikTok as e:
                     loi.append(f"{t.get('ten') or t['advertiser_id']}: {e}")
                     self.log(f"[tiktok_ads] {t['advertiser_id']} lỗi: {e}")
+                    continue
+                da_doc.append(str(t["advertiser_id"]))
+            if not nhanh:
+                self.kenh_dang(mcp, da_doc)
             self.kho.ghi_trang_thai("hoat_dong", con_token=True)
         except ChuaKetNoi as e:
             return str(e), {"bo_qua": str(e)}
@@ -1078,6 +1212,43 @@ class DichVu:
             return str(e), {"loi": str(e), "so_dong": dem["tong"]}
         chu_loi = "; ".join(loi)[:500] or None
         return chu_loi, {"so_dong": dem["tong"], "den_ngay": dem["den_ngay"], "loi": chu_loi}
+
+    def kenh_dang(self, mcp, ids: list[str]) -> int:
+        """Kênh đăng của ad CÓ phân phối chưa biết kênh (22/10/2026). Chỉ đọc (ad_get dạng cố
+        định, identity_get); tối đa TRAN_KENH_LUOT lượt gọi (mỗi lượt ad_get / identity_get đều
+        tính). Lỗi của MỘT tài khoản (TikTok, kho chưa có bảng — schema.sql chưa chạy) ghi nhật
+        ký rồi sang tài khoản sau (soát 22/10/2026); chỉ token bị từ chối (LoiXacThuc) ném tiếp
+        như phần số. -> số dòng qc_ad_kenh đã ghi."""
+        con, n = TRAN_KENH_LUOT, 0
+        for adv in ids:
+            if con <= 0:
+                break
+            try:
+                cac = self.kho.ad_chua_kenh(adv, con * LO_ID)
+                for lo in lo_id(cac):
+                    if con <= 0:
+                        break
+                    con -= 1
+                    n += self.kho.ghi_ad_kenh(doc_kenh_ad(mcp, adv, lo))
+                thieu = self.kho.kenh_chua_ten("tiktok", adv)
+                if thieu and con > 0:
+                    con -= 1
+                    rows = doc_identity(mcp, adv)
+                    co = {r["kenh_id"] for r in rows}
+                    # identity_get không trả (danh tính đã gỡ…): ghi dòng không tên — nhớ âm,
+                    # `kho_qc.kenh_chua_ten` chỉ hỏi lại sau HOI_LAI_TEN_NGAY["tiktok"] ngày.
+                    rows += [{"nen_tang": "tiktok", "kenh_id": k["kenh_id"], "loai": k["loai"],
+                              "ten": None, "username": None}
+                             for k in thieu if k["kenh_id"] not in co]
+                    self.kho.ghi_kenh(rows)
+            except LoiXacThuc:
+                raise
+            except Exception as e:  # noqa: BLE001 — phần phụ: không làm hỏng lượt đồng bộ số
+                self.log(f"[tiktok_ads] kênh đăng {adv} lỗi ({type(e).__name__}: {gon_loi(e)})")
+        if n:
+            self.log(f"[tiktok_ads] kênh đăng: {n} quảng cáo mới, "
+                     f"{TRAN_KENH_LUOT - con} lượt gọi")
+        return n
 
     def _dong_bo_tk(self, mcp: Mcp, t: dict, bay: datetime.datetime, *, bu, tu, den,
                     nhanh: bool = False) -> tuple[int, datetime.date]:

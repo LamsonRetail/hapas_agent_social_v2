@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import json
+import re
 import unicodedata
 
 from dashboard import quang_cao as QC
@@ -454,13 +455,28 @@ def qc_tong(ids: list[str], tu: datetime.date, den: datetime.date) -> dict:
                          (list(ids), tu, den)).fetchone() or {}
 
 
+def _tong_json(khoa: str, ten: str) -> str:
+    """sum một chỉ số trong JSON `chi_so` (chỉ giá trị kiểu số; chữ / thiếu → bỏ qua, không lỗi
+    ép kiểu). `khoa`, `ten` là hằng trong `quang_cao.CHUOI_XEM_SP` — không bao giờ từ người dùng."""
+    if not (re.fullmatch(r"[a-z0-9_]+", khoa) and re.fullmatch(r"[a-z0-9_]+", ten)):
+        raise ValueError(f"tên chỉ số lạ: {khoa!r}")
+    return (f"coalesce(sum(CASE WHEN jsonb_typeof(chi_so->'{khoa}') = 'number' "
+            f"THEN (chi_so->>'{khoa}')::numeric END), 0)::bigint AS {ten}")
+
+
+#: 22/10/2026 (chủ dự án): biểu đồ Theo ngày thêm "Xem trang SP TikTok Shop" + "Xem SP website
+#: (Meta)" — cộng từ JSON chi_so (SQL cố định, không tham số hoá tên).
+_TONG_XEM_SP = ", ".join(_tong_json(k, ma) for ma, k, *_ in QC.CHUOI_XEM_SP)
+
+
 def qc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date) -> list[dict]:
+    """Tổng cột số theo ngày + hai chuỗi xem trang sản phẩm (`QC.TEN_CHUOI_XEM_SP`)."""
     if not ids:
         return []
     with ket_noi() as c:
-        return c.execute(f"SELECT ngay, {_TONG} FROM qc_tk_ngay WHERE advertiser_id = ANY(%s) "
-                         "AND ngay BETWEEN %s AND %s GROUP BY ngay ORDER BY ngay",
-                         (list(ids), tu, den)).fetchall()
+        return c.execute(f"SELECT ngay, {_TONG}, {_TONG_XEM_SP} FROM qc_tk_ngay "
+                         "WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s "
+                         "GROUP BY ngay ORDER BY ngay", (list(ids), tu, den)).fetchall()
 
 
 _SAP_SQL = {"chi": "chi", "hien_thi": "hien_thi", "view_video": "view_video",
@@ -531,48 +547,75 @@ def sql_ten_bang(cap: str, *, cd: bool) -> str:
             f"WHERE {_dk_bang(cd)} ORDER BY {khoa}, ngay DESC")
 
 
-def sql_bang(cap: str, sap: str, tang: bool, *, loc_ma: bool, cd: bool) -> str:
+def sql_bang(cap: str, sap: str, tang: bool, *, loc_ma: bool, cd: bool, them: str = "",
+             bo_qua: bool = True) -> str:
     """SQL một bảng chiến dịch / quảng cáo: tổng theo đối tượng trong kỳ (lọc chiến dịch `cd`, lọc
-    mã khớp tên `loc_ma`) → xếp theo `sap` → LIMIT, kèm `tong_khop` (số dòng khớp trước LIMIT).
-    Tham số theo thứ tự: ids, tu, den, [cd], [mã], n."""
+    mã khớp tên `loc_ma`) → xếp theo `sap` → LIMIT [OFFSET], kèm `tong_khop` (số dòng khớp trước
+    LIMIT). Tham số theo thứ tự: ids, tu, den, [cd], [mã], n, [bỏ qua].
+    22/10/2026: `bo_qua` — trang của bảng trang Quảng cáo (OFFSET); bộ nghe Sheet (`kho_sheet_qc.
+    doc_tong`) dùng CHÍNH hàm này không OFFSET, `them` = cột tổng thêm (hằng trong mã, không bao
+    giờ từ tham số) — cùng luật lọc / xếp hai đầu."""
     bang, khoa, _ = _TOP[cap]
     dk = _dk_bang(cd) + (f" AND {khoa} = ANY(%s)" if loc_ma else "")
     xep = SAP_BANG_SQL.get(sap, "t.hien_thi")
-    return (f"WITH t AS (SELECT {khoa}, advertiser_id, {_TONG} FROM {bang} WHERE {dk} "
+    return (f"WITH t AS (SELECT {khoa}, advertiser_id, {_TONG}{them} FROM {bang} WHERE {dk} "
             f"GROUP BY {khoa}, advertiser_id) SELECT t.*, count(*) OVER () AS tong_khop FROM t "
             f"ORDER BY {xep} {'ASC' if tang else 'DESC'} NULLS LAST, t.hien_thi DESC NULLS LAST, "
-            f"t.{khoa} LIMIT %s")
+            f"t.{khoa} LIMIT %s" + (" OFFSET %s" if bo_qua else ""))
+
+
+def ma_khop_ten(c, cap: str, ids: list[str], tu: datetime.date, den: datetime.date, mau: str,
+                cd: str = "") -> list:
+    """Mã chiến dịch / quảng cáo trong kỳ có TÊN MỚI NHẤT chứa `mau` (đã qua `quang_cao.chu_tim`) —
+    so khớp ở PYTHON bằng đúng `chu_tim` (xem `qc_bang`). `c`: kết nối đang mở của nơi gọi."""
+    _, khoa, _ = _TOP[cap]
+    pv = [list(ids), tu, den] + ([cd] if cd else [])
+    return [r[khoa] for r in c.execute(sql_ten_bang(cap, cd=bool(cd)), pv).fetchall()
+            if any(mau in QC.chu_tim(r.get(x) or "") for x in _TIM_BANG[cap])]
 
 
 def qc_bang(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, *, sap: str,
-            tang: bool = False, mau: str = "", cd: str = "", n: int = 10) -> dict:
+            tang: bool = False, mau: str = "", cd: str = "", n: int = 10, bo_qua: int = 0) -> dict:
     """Bảng chiến dịch / quảng cáo của trang Quảng cáo — lọc tên (`mau` đã qua
     `quang_cao.chu_tim`), lọc chiến dịch `cd`, xếp theo mọi cột (`quang_cao.loc_bang` đã kiểm).
-    Chỉ tài khoản `ids` (phạm vi người xem). -> {"rows": [...], "tong": số dòng khớp}.
+    Chỉ tài khoản `ids` (phạm vi người xem). -> {"rows": [...], "tong": số dòng khớp, "bo_qua":
+    OFFSET thật đã dùng}.
+
+    Phân trang (22/10/2026): `n` dòng từ dòng thứ `bo_qua`. Quá trang cuối (URL cũ, vừa lọc hẹp
+    lại) → đếm rồi trả TRANG CUỐI (không trả bảng rỗng khi vẫn có dòng khớp).
 
     Lọc tên so khớp ở PYTHON bằng đúng `quang_cao.chu_tim` (như Mark tra cứu): đo 22/10/2026 trên
     21.060 quảng cáo / 30 ngày, bỏ dấu bằng translate() trong Postgres mất ~1,8 giây, đọc tên mới
     nhất + so ở Python ~0,3 giây."""
+    rong = {"rows": [], "tong": 0, "bo_qua": 0}
     if not ids or cap not in _TOP:
-        return {"rows": [], "tong": 0}
+        return rong
     _, khoa, _ = _TOP[cap]
+    n = max(1, min(int(n), TOP_TOI_DA))
+    bo_qua = max(0, int(bo_qua))
     pv = [list(ids), tu, den] + ([cd] if cd else [])
     _, moi = sql_top(cap, "hien_thi")
     with ket_noi() as c:
         ma = None
         if mau:
-            ma = [r[khoa] for r in c.execute(sql_ten_bang(cap, cd=bool(cd)), pv).fetchall()
-                  if any(mau in QC.chu_tim(r.get(x) or "") for x in _TIM_BANG[cap])]
+            ma = ma_khop_ten(c, cap, ids, tu, den, mau, cd)
             if not ma:
-                return {"rows": [], "tong": 0}
-        ts = pv + ([ma] if ma is not None else []) + [max(1, min(int(n), TOP_TOI_DA))]
-        rows = c.execute(sql_bang(cap, sap, tang, loc_ma=ma is not None, cd=bool(cd)), ts).fetchall()
+                return rong
+        sql = sql_bang(cap, sap, tang, loc_ma=ma is not None, cd=bool(cd))
+        ts = pv + ([ma] if ma is not None else [])
+        rows = c.execute(sql, ts + [n, bo_qua]).fetchall()
+        if not rows and bo_qua:
+            dem = c.execute(sql, ts + [1, 0]).fetchall()
+            if not dem:
+                return rong
+            bo_qua = (int(dem[0]["tong_khop"]) - 1) // n * n
+            rows = c.execute(sql, ts + [n, bo_qua]).fetchall()
         if not rows:
-            return {"rows": [], "tong": 0}
+            return rong
         ten = {r[khoa]: r for r in c.execute(moi, ([r[khoa] for r in rows], tu, den)).fetchall()}
     return {"rows": [{**{k: v for k, v in r.items() if k != "tong_khop"},
                       **{k: v for k, v in (ten.get(r[khoa]) or {}).items() if k != khoa}}
-                     for r in rows], "tong": int(rows[0]["tong_khop"])}
+                     for r in rows], "tong": int(rows[0]["tong_khop"]), "bo_qua": bo_qua}
 
 
 def qc_khan_gia(ids: list[str]) -> dict:
@@ -715,3 +758,128 @@ def trang_thai_nhac(ncc: str = NCC) -> dict | None:
     with ket_noi() as c:
         return c.execute("SELECT nha_cung_cap, loai, trang_thai, refresh_het_luc, goi_ok_luc, "
                          "loi_cuoi FROM ket_noi_ngoai WHERE nha_cung_cap = %s", (ncc,)).fetchone()
+
+
+# ───────────────────────────── kênh đăng (22/10/2026) ─────────────────────────────
+#: Kênh đăng = danh tính một quảng cáo chạy dưới tên: TikTok identity (tài khoản chính chủ /
+#: KOC / Spark Ads), Meta Trang (+ Instagram đi kèm). `qc_ad_kenh` một dòng mỗi ad (kênh của ad
+#: không đổi — chỉ đọc một lần), `qc_kenh` tên kênh. Đọc trang: gộp `qc_ad_ngay` theo kênh.
+#: Ad nền tảng không trả (đã xoá, Smart+ nâng cấp…) → dòng không kênh; hỏi lại sau chừng ấy ngày.
+HOI_LAI_KHONG_THAY_NGAY = 7
+#: Kênh đã hỏi tên mà không có (nhớ âm): TikTok — identity_get không trả danh tính đó, hỏi lại sau
+#: 7 ngày; Meta — tên Trang / IG lỗi (thiếu quyền…), hỏi lại sau 1 ngày.
+HOI_LAI_TEN_NGAY = {"tiktok": 7, "meta": 1}
+KENH_TOI_DA = 500
+_COT_AD_KENH = ("advertiser_id", "ad_id", "nen_tang", "kenh_id", "loai", "kenh_phu_id", "bai_id")
+
+
+def sql_ad_chua_kenh() -> str:
+    """ad_id CÓ phân phối (có dòng qc_ad_ngay) của một tài khoản chưa biết kênh — chi nhiều trước.
+    Chỉ mã số (dạng nền tảng nhận; chốt chỉ đọc của tiktok_ads chặn mọi dạng khác)."""
+    return ("SELECT q.ad_id FROM qc_ad_ngay q WHERE q.advertiser_id = %s "
+            "AND q.ad_id ~ '^[0-9]{1,30}$' AND NOT EXISTS (SELECT 1 FROM qc_ad_kenh k "
+            "WHERE k.advertiser_id = q.advertiser_id AND k.ad_id = q.ad_id "
+            "AND (k.kenh_id IS NOT NULL OR k.cap_nhat_luc > now() - make_interval(days => %s))) "
+            "GROUP BY q.ad_id ORDER BY sum(q.chi) DESC NULLS LAST, "
+            "sum(q.hien_thi) DESC NULLS LAST, q.ad_id LIMIT %s")
+
+
+def ad_chua_kenh(advertiser_id: str, n: int) -> list[str]:
+    if n <= 0:
+        return []
+    with ket_noi() as c:
+        return [r["ad_id"] for r in c.execute(
+            sql_ad_chua_kenh(), (str(advertiser_id), HOI_LAI_KHONG_THAY_NGAY, int(n))).fetchall()]
+
+
+def ghi_ad_kenh(rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    cot = ", ".join(_COT_AD_KENH)
+    sua = ", ".join(f"{c} = EXCLUDED.{c}" for c in _COT_AD_KENH[2:])
+    sql = (f"INSERT INTO qc_ad_kenh ({cot}) VALUES ({', '.join(['%s'] * len(_COT_AD_KENH))}) "
+           f"ON CONFLICT (advertiser_id, ad_id) DO UPDATE SET {sua}, cap_nhat_luc = now()")
+    with ket_noi() as c, c.cursor() as cur:
+        cur.executemany(sql, [tuple(r.get(k) for k in _COT_AD_KENH) for r in rows])
+    return len(rows)
+
+
+def sql_kenh_chua_ten() -> str:
+    """Kênh (và Instagram đi kèm) của một tài khoản chưa có dòng qc_kenh, hoặc chưa có tên mà lần
+    hỏi trước đã quá `HOI_LAI_TEN_NGAY` ngày (tham số)."""
+    return ("SELECT DISTINCT x.kenh_id, x.loai FROM ("
+            "SELECT kenh_id, loai FROM qc_ad_kenh WHERE advertiser_id = %s AND nen_tang = %s "
+            "AND kenh_id IS NOT NULL UNION SELECT kenh_phu_id, 'instagram' FROM qc_ad_kenh "
+            "WHERE advertiser_id = %s AND nen_tang = %s AND kenh_phu_id IS NOT NULL) x "
+            "LEFT JOIN qc_kenh c ON c.nen_tang = %s AND c.kenh_id = x.kenh_id "
+            "WHERE c.kenh_id IS NULL OR (c.ten IS NULL AND c.username IS NULL "
+            "AND c.cap_nhat_luc < now() - make_interval(days => %s)) ORDER BY 1 LIMIT 500")
+
+
+def kenh_chua_ten(nen_tang: str, advertiser_id: str) -> list[dict]:
+    adv = str(advertiser_id)
+    with ket_noi() as c:
+        return c.execute(sql_kenh_chua_ten(), (adv, nen_tang, adv, nen_tang, nen_tang,
+                                               HOI_LAI_TEN_NGAY.get(nen_tang, 1))).fetchall()
+
+
+def ghi_kenh(rows: list[dict]) -> int:
+    """Upsert tên kênh — giá trị trống không xoá tên đã biết."""
+    if not rows:
+        return 0
+    sql = ("INSERT INTO qc_kenh (nen_tang, kenh_id, loai, ten, username) "
+           "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (nen_tang, kenh_id) DO UPDATE SET "
+           "loai = COALESCE(EXCLUDED.loai, qc_kenh.loai), "
+           "ten = COALESCE(EXCLUDED.ten, qc_kenh.ten), "
+           "username = COALESCE(EXCLUDED.username, qc_kenh.username), cap_nhat_luc = now()")
+    with ket_noi() as c, c.cursor() as cur:
+        cur.executemany(sql, [(r["nen_tang"], r["kenh_id"], r.get("loai"), r.get("ten"),
+                               r.get("username")) for r in rows])
+    return len(rows)
+
+
+#: Cột xếp bảng kênh — chỉ nối chuỗi từ bảng cố định này.
+SAP_KENH_SQL = {"chi": "g.chi", "hien_thi": "g.hien_thi"}
+
+
+def sql_kenh_dang(cot: str) -> tuple[str, str]:
+    """(1) tổng theo kênh (ad đã biết kênh), xếp + LIMIT, kèm tổng số kênh; (2) tổng phần đã biết /
+    chưa biết kênh (độ phủ + dòng "Chưa xác định")."""
+    tong_a = ", ".join(f"sum(q.{c}) AS {c}" for c in QC.TEN_COT_SO)
+    gop = ", ".join(f"sum(a.{c})::float AS {c}" if c in QC.COT_TIEN else
+                    f"sum(a.{c})::bigint AS {c}" for c in QC.TEN_COT_SO)
+    kenh = (f"WITH a AS (SELECT q.advertiser_id, q.ad_id, {tong_a} FROM qc_ad_ngay q "
+            "WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s "
+            "GROUP BY q.advertiser_id, q.ad_id), "
+            "g AS (SELECT k.nen_tang, k.kenh_id, max(k.loai) AS loai, "
+            "(array_agg(k.kenh_phu_id ORDER BY a.hien_thi DESC NULLS LAST) "
+            "FILTER (WHERE k.kenh_phu_id IS NOT NULL))[1] AS kenh_phu_id, "
+            "array_agg(DISTINCT a.advertiser_id) AS tk_ids, count(*) AS so_ad, "
+            f"{gop} FROM a JOIN qc_ad_kenh k ON k.advertiser_id = a.advertiser_id "
+            "AND k.ad_id = a.ad_id WHERE k.kenh_id IS NOT NULL GROUP BY k.nen_tang, k.kenh_id) "
+            "SELECT g.*, c.ten, c.username, p.username AS phu_username, count(*) OVER () AS tong "
+            "FROM g LEFT JOIN qc_kenh c ON c.nen_tang = g.nen_tang AND c.kenh_id = g.kenh_id "
+            "LEFT JOIN qc_kenh p ON p.nen_tang = g.nen_tang AND p.kenh_id = g.kenh_phu_id "
+            f"ORDER BY {SAP_KENH_SQL[cot]} DESC NULLS LAST, g.hien_thi DESC NULLS LAST, g.kenh_id "
+            "LIMIT %s")
+    phu = (f"SELECT (k.kenh_id IS NOT NULL) AS biet, count(DISTINCT q.ad_id) AS so_ad, {_TONG} "
+           "FROM qc_ad_ngay q LEFT JOIN qc_ad_kenh k ON k.advertiser_id = q.advertiser_id "
+           "AND k.ad_id = q.ad_id WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s "
+           "GROUP BY 1")
+    return kenh, phu
+
+
+def qc_kenh_dang(ids: list[str], tu: datetime.date, den: datetime.date, *, sap: str = "chi",
+                 n: int = 20) -> dict:
+    """Số theo kênh đăng của các tài khoản `ids` trong [tu, den]. -> {"rows" (≤ n kênh, xếp theo
+    `sap` ∈ chi | hien_thi), "tong" (số kênh), "biet" / "chua_ro" (tổng phần ad đã / chưa biết
+    kênh)}. Gọi viên kiểm `ids` theo phạm vi người xem và lọc tiền."""
+    rong = {"rows": [], "tong": 0, "biet": {}, "chua_ro": {}}
+    if not ids:
+        return rong
+    kenh, phu = sql_kenh_dang(sap if sap in SAP_KENH_SQL else "hien_thi")
+    with ket_noi() as c:
+        rows = c.execute(kenh, (list(ids), tu, den, max(1, min(int(n), KENH_TOI_DA)))).fetchall()
+        tong = {bool(r["biet"]): r for r in c.execute(phu, (list(ids), tu, den)).fetchall()}
+    return {"rows": rows, "tong": int(rows[0]["tong"]) if rows else 0,
+            "biet": tong.get(True) or {}, "chua_ro": tong.get(False) or {}}

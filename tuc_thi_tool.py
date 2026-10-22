@@ -95,7 +95,8 @@ QUY_TAC = (
     "nền tảng (`do_moi`: đủ / MỘT PHẦN / chưa đọc lại được — nói đúng như vậy). Số hôm nay là TẠM "
     "TÍNH (nền tảng còn cập nhật trễ vài giờ). Số tiền quảng cáo chỉ trả bằng chữ, chỉ cho bên "
     "người hỏi được xem. Mark CHỈ ĐỌC quảng cáo: không bao giờ đề nghị hay hứa tạm dừng, bật/tắt, "
-    "đổi ngân sách, sửa chiến dịch — việc đó người dùng tự làm trên trình quản lý quảng cáo.")
+    "đổi ngân sách, sửa chiến dịch — việc đó người dùng tự làm trên trình quản lý quảng cáo."
+    + ("" if QC.HIEN_DOANH_THU else " " + QC.CAU_KHONG_DOANH_THU))
 
 SCHEMA = {
     "name": "lay_so_tuc_thi",
@@ -483,7 +484,8 @@ def quang_cao(kho, nguoi: dict, args: dict, bay_gio: datetime.datetime, ngu=time
         cac.append(x)
     # Trả lời bằng số TRONG KHO (cùng đường đọc của hoi_dashboard).
     doc = {k: args.get(k) for k in ("nen_tang", "ben", "tim", "cap", "theo_ngay") if args.get(k)}
-    so = HD.quang_cao(kho, q, doc, tu, den, HD.TOP_MAC_DINH)
+    # 22/10/2026: doanh thu Shop / ROAS tạm không báo (HD.quang_cao đã lọc; lọc lại cho chắc).
+    so = QC.loc_doanh_thu(HD.quang_cao(kho, q, doc, tu, den, HD.TOP_MAC_DINH))
     moc = [x["luc"] for x in cac if x.get("luc")]
     do_moi = {"theo_nen_tang": [{k: (_gio(v) if isinstance(v, datetime.datetime) else v)
                                  for k, v in x.items()} for x in cac],

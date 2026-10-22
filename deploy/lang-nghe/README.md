@@ -306,7 +306,9 @@ Trang Quảng cáo (chỉ quản trị viên) có mục **Tạo Lark Sheet**: xu
 nền tảng, tài khoản, từ–đến) thành MỘT Lark Sheet riêng tư — Tổng quan + ba tab: *Theo ngày × tài
 khoản*, *Theo chiến dịch*, *Theo quảng cáo* (tổng cả kỳ; tối đa 20.000 / 5.000 / 10.000 dòng, cắt thì
 Tổng quan nói rõ). Có chi tiêu và chỉ số suy ra như trang (CPM, CPC, CTR, chi / 1.000 view, chi /
-follow, chi / kết quả, ROAS Shop). TikTok và Meta cùng đường (cùng bảng `qc_*`); tên file ghi nền
+follow, chi / kết quả). Cột Doanh thu Shop + ROAS Shop tạm gỡ từ 22/10/2026 (chủ dự án: nền tảng
+đo khác cách công ty tự tính; dữ liệu vẫn lưu, bật lại bằng `quang_cao.HIEN_DOANH_THU = True`).
+TikTok và Meta cùng đường (cùng bảng `qc_*`); tên file ghi nền
 tảng ("TikTok Ads · HAPAS · 01/10–19/10/2026").
 
 Đường đi: dashboard (lang_nghe_web) KHÔNG có app Lark tạo Sheet — chỉ thêm dòng `yeu_cau_sheet_qc`
@@ -316,6 +318,31 @@ của Mark) kiểm lại người bấm còn là quản trị viên, tính lại
 bằng app Lark của Mark (khoá chia sẻ link TRƯỚC khi ghi số — đúng đường `chi_so_ads`), chia sẻ quyền
 **xem** cho email người bấm, nhắn link trên Lark, ghi trạng thái + link. Trang hỏi lại 5 giây một lần
 khi còn yêu cầu đang tạo.
+
+**22/10/2026 (chủ dự án) — một chỗ, đúng bộ lọc**: mục riêng "Tạo Lark Sheet" bỏ; nút **"Xuất Lark Sheet
+theo bộ lọc này"** + danh sách Sheet gần đây nằm cuối mục *Chiến dịch và quảng cáo*. Yêu cầu mang thêm
+nhiều tài khoản (`tk_ds`, ≤ 200 mã; chọn đủ = NULL = mọi tài khoản) và bộ lọc bảng (`tim`, `cd`, `sap`,
+`chieu`). Tab chiến dịch / quảng cáo lọc + xếp bằng CHÍNH SQL của bảng trang (`kho_qc.sql_bang` qua
+`kho_sheet_qc.doc_tong`), MỌI dòng khớp (không chỉ trang đang xem) tới trần; tab theo ngày chỉ theo tài
+khoản + ngày; Tổng quan ghi bộ lọc đã dùng. Dòng cũ (cột mới NULL) dựng như trước. Lên mã: chạy
+`schema.sql` (thêm 5 cột NULL — tức thì, không viết lại bảng; trigger kiểm giá trị) TRƯỚC khi MERGE vào
+`main` — Mark tự deploy ngay khi merge (agent-deploy) và bộ dựng Sheet đọc các cột mới; mã cũ chạy
+được với schema mới (cột NULL, bị lờ). Thứ tự: schema.sql → merge → rsync dashboard.
+
+**22/10/2026 (chủ dự án) — hỏi Mark vẫn xuất Sheet được**: tool **`xuat_sheet_qc`** của Mark
+(`sheet_qc_tool.py`) thêm dòng `yeu_cau_sheet_qc` với `nguon = 'mark'`, `nguoi_hoi` = email người hỏi đã
+xác thực (chat riêng Lark / web console, cùng cửa `hoi_dashboard`), chỉ tài khoản trong các bên người đó
+đọc được; bộ nghe dựng CÙNG Sheet và nhắn link cho chính người hỏi. Mark chỉ gọi khi người hỏi đòi Sheet /
+file / xuất / tải về (lời dặn: mô tả tool, `skills/hoi-dashboard-lang-nghe.md`, `brain.py`); còn lại
+vẫn trả lời bằng chữ. **Luật cứng ở bộ nghe** (không tin dòng, kể cả của Mark): dòng `web` vẫn chỉ quản
+trị viên; dòng `mark` cần người còn quyền ở bên — phạm vi tài khoản tính lại từ quyền CSDL của
+`nguoi_hoi` lúc dựng (mã ngoài phạm vi bị bỏ, Tổng quan + tin nhắn nói số đã bỏ; "Tất cả bên" / "Chưa
+gán bên" chỉ quản trị viên), và **không xem tiền (`quang_cao.xem_tien`) của mọi tài khoản trong Sheet →
+Sheet không có cột / giá trị tiền nào** (chi, CPM, CPC, chi / …, doanh thu; dòng TỔNG gộp mọi tiền tệ;
+không xếp theo tiền). Không đọc được quyền → không Sheet. Đổi quyền giữa lượt → không chia sẻ. Trần
+(trigger) đếm CHUNG hai nguồn. Thứ tự lên: **schema (cột `nguon` + quyền INSERT của mark + RLS
+`sheet_qc_them_mark`) → mã Mark** (bộ nghe đọc `nguon`; tool ghi `nguon`) — mã mới trên schema cũ thì
+bộ nghe lỗi "column nguon does not exist" tới khi chạy schema. Dashboard không đổi mã.
 
 ```bash
 cd /opt/lang-nghe/app   # sau khi rsync mã mới (dashboard/README.md bước 2) — Mark tự lên qua agent-deploy
@@ -345,14 +372,24 @@ sudo systemd-run --quiet --wait --pipe -p User=mark -p WorkingDirectory=/opt/mar
 - **Quyền app Lark của Mark** (đã có cho `chi_so_ads` / `social_listen`): tạo Sheet, sửa quyền Drive
   (thêm cộng tác viên theo email, đóng chia sẻ link), gửi tin `im:message`. Tra email → open_id
   (`contact:user.id:readonly`) chỉ là đường lùi khi thêm quyền theo email bị từ chối.
-- **Trần**: 1 yêu cầu đang chờ / đang tạo mỗi người, 4 yêu cầu mỗi người mỗi giờ, 30 mỗi giờ toàn hệ
-  thống (trigger `chuan_yeu_cau_sheet_qc`, khoá advisory); khoảng ≤ 400 ngày. Chờ / đang tạo quá 30
+- **Trần**: 1 yêu cầu đang chờ / đang tạo mỗi người, 4 yêu cầu mỗi người mỗi giờ; toàn hệ
+  thống đếm RIÊNG theo nguồn — 30/giờ dòng web (nút trang), 15/giờ dòng Mark (`KS.TRAN_GIO_MARK`, soát
+  22/10/2026: người hỏi Mark không chặn được quản trị viên xuất) (trigger `chuan_yeu_cau_sheet_qc`, khoá advisory); khoảng ≤ 400 ngày. Trigger kiểm bộ lọc
+  (22/10/2026): `tim` ≤ 100 ký tự, `cd` ~ `^[0-9A-Za-z_-]{0,64}$`, `sap` trong danh sách cột xếp,
+  `chieu` ∈ (giam, tang), `tk_ds` ≤ 200 mã dạng advertiser_id — sai thì `invalid_parameter_value`. Chờ / đang tạo quá 30
   phút → `loi` (bộ nghe dọn; trang hiện "Quá hạn" và cho bấm lại).
-- **Quyền DB**: lang_nghe_web INSERT chỉ (nguoi_hoi, ben, nen_tang, tk, tu, den), SELECT mọi cột trừ
+- **Quyền DB**: lang_nghe_web INSERT chỉ (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap,
+  chieu), SELECT mọi cột trừ
   `loi_noi_bo`, không UPDATE / DELETE; RLS theo `lang_nghe.nguoi` (app đặt bằng `set_config` trong
-  cùng giao dịch). mark: SELECT, UPDATE chỉ cột kết quả, không INSERT / DELETE.
+  cùng giao dịch). mark: SELECT, UPDATE chỉ cột kết quả, không DELETE; từ 22/10/2026 INSERT chỉ
+  (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, nguon) + USAGE sequence, RLS
+  `sheet_qc_them_mark` WITH CHECK (nguon = 'mark') — web không được cấp cột `nguon` (luôn 'web').
+  Trigger BEFORE INSERT chạy cho mọi role (trần + kiểm bộ lọc áp cho dòng Mark); khoá advisory
+  `sheet_qc|<email>` rồi `sheet_qc|*` là khoá cả CSDL nên web và Mark cùng người xếp hàng nhau, cùng
+  thứ tự khoá (người → toàn hệ thống) nên không khoá chéo.
 - **Kiểm**: `sudo -u mark psql -d lang_nghe -c "select id, nguoi_hoi, nen_tang, ben, tu, den,
-  trang_thai, so_dong, loi, loi_noi_bo, da_nhan_tin, tao_luc, xong_luc from yeu_cau_sheet_qc order by
+  tk_ds, tim, cd, sap, chieu, nguon, trang_thai, so_dong, loi, loi_noi_bo, da_nhan_tin, tao_luc, xong_luc
+  from yeu_cau_sheet_qc order by
   id desc limit 20"`; nhật ký: `select * from nhat_ky where hanh_dong = 'tao_sheet_qc' order by id desc`.
 - **Gỡ**: `systemctl disable --now qc-sheet-nghe` (yêu cầu mới chờ 30 phút rồi thành "Quá hạn"; trang
   vẫn chạy).
@@ -406,6 +443,31 @@ chưa có cột thì lần sau không đẩy lại, nên không để dòng có 
    này khi có `--theo-so-nho`).
 8. Kiểm: `select gio_hang, count(*) from bai where du_an = 'hapas' and nen_tang = 'tiktok' group
    by 1`; dashboard trang Chỉ số → khối "KOC affiliate vs KOC branding", ô lọc "Loại KOC".
+
+## 12. Kênh đăng của quảng cáo (22/10/2026, chủ dự án chốt) — cần người duyệt trước khi chạy trên VPS
+
+Trang Quảng cáo tách mỗi tài khoản theo kênh đăng (TikTok: tài khoản chính chủ / KOC Spark Ads;
+Meta: Trang + Instagram) — `dashboard/README.md` mục "Kênh đăng của quảng cáo". Hai bảng mới
+`qc_ad_kenh`, `qc_kenh`; bộ đồng bộ TikTok / Meta hằng ngày tự điền (chỉ đọc; lỗi không làm hỏng lượt).
+
+1. Postgres: `schema.sql` (mục 7b — CREATE bảng mới + GRANT; chạy lại không hỏng).
+2. BigQuery: khối "Kênh đăng của quảng cáo" trong `bigquery.sql` (hai CREATE TABLE IF NOT EXISTS,
+   người duyệt rồi mới chạy). Chưa chạy thì trang "Kết nối BigQuery" báo lỗi riêng hai bảng này.
+3. Lên code, khởi động lại dashboard. Lượt 06:30 / 06:45 sáng hôm sau đọc kênh lần đầu (≈ 175 lượt
+   TikTok + ≈ 35 lượt Meta, ad chi nhiều trước); muốn sớm hơn: `sudo systemctl start
+   tiktok-ads-dong-bo.service` / `meta-ads-dong-bo.service`.
+4. **Chủ dự án — tên Trang Facebook / Instagram**: tạo lại token người dùng hệ thống `mark_ads_reader`
+   trong Meta Business Settings, tick thêm **`pages_read_engagement`** và **`pages_show_list`** (chỉ
+   đọc; Meta thường cấp cùng nhau) bên cạnh `ads_read` + `read_insights`, giao quyền xem các Trang
+   đứng tên quảng cáo cho người dùng hệ thống, rồi dán ở thẻ "Kết nối Meta Ads" (hoặc `nhap-token`
+   như mục 8c). Dashboard chỉ nhận đúng các quyền `ads_read`, `read_insights`, `public_profile`,
+   `pages_read_engagement`, `pages_show_list` — tick thêm quyền khác (nhất là ads_management,
+   business_management, *_manage*, instagram_basic) là bị từ chối. Chưa làm bước này: bảng hiện
+   "Page <id>", số vẫn đủ. Username Instagram cần instagram_basic (KHÔNG xin) → thường hiện
+   "IG <id>"; dashboard thử một lần mỗi lượt, lỗi thì thôi.
+5. Kiểm: `select nen_tang, loai, count(*) from qc_ad_kenh group by 1, 2;` và
+   `select count(*) filter (where ten is not null), count(*) from qc_kenh;` — trang Quảng cáo, khối
+   "Theo kênh đăng" (dòng phụ "x% chi tiêu đã biết kênh").
 
 ## Vận hành
 

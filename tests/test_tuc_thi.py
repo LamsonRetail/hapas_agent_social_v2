@@ -562,7 +562,8 @@ def test_mark_khong_bao_gio_thay_token(monkeypatch, h):
 def test_m5_quyen_toi_thieu_role_mark():
     sql = (GOC / "deploy" / "lang-nghe" / "schema.sql").read_text(encoding="utf-8")
     sau = sql.split("Soát 20/10/2026 M5: INSERT chỉ các cột yêu cầu")[1]
-    assert not re.search(r"GRANT[^;]*ON[^;]*(ket_noi_ngoai|qc_|tk_quang_cao)[^;]*TO mark", sau)
+    # \b: bảng qc_* / tk_quang_cao, không phải sequence yeu_cau_sheet_qc_id_seq (22/10/2026).
+    assert not re.search(r"GRANT[^;]*ON[^;]*\b(ket_noi_ngoai|qc_|tk_quang_cao)[^;]*TO mark", sau)
     assert not re.search(r"GRANT[^;]*ON nhat_ky[^;]*TO mark", sql)
     assert "REVOKE INSERT ON nhat_ky FROM mark;" in sql
     assert "REVOKE INSERT, UPDATE ON yeu_cau_tuc_thi FROM mark;" in sql
