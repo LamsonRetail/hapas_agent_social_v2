@@ -11,7 +11,10 @@
 (function () {
   // Bộ lọc gập trên điện thoại (máy tính luôn mở; dòng tóm tắt chỉ hiện ≤ 760px — qc.css).
   var loc = document.getElementById("qc-loc");
-  if (loc && window.matchMedia && window.matchMedia("(max-width: 760px)").matches) loc.open = false;
+  var hep = window.matchMedia ? window.matchMedia("(max-width: 760px)") : null;
+  if (loc && hep && hep.matches) loc.open = false;
+  // Cửa sổ hẹp → rộng: dòng tóm tắt bị ẩn ở máy tính, bộ lọc đang gập sẽ biến mất → mở lại.
+  if (loc && hep && hep.addEventListener) hep.addEventListener("change", function () { if (!hep.matches) loc.open = true; });
 
   var CHUOI = [["chi", "Chi tiêu"], ["hien_thi", "Hiển thị"], ["click", "Click"], ["view_video", "View video"],
                ["engaged_view", "Engaged view"], ["tuong_tac", "Tương tác"], ["follow", "Follow"]];
