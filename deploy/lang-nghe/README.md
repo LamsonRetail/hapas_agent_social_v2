@@ -317,6 +317,15 @@ bằng app Lark của Mark (khoá chia sẻ link TRƯỚC khi ghi số — đún
 **xem** cho email người bấm, nhắn link trên Lark, ghi trạng thái + link. Trang hỏi lại 5 giây một lần
 khi còn yêu cầu đang tạo.
 
+**22/10/2026 (chủ dự án) — một chỗ, đúng bộ lọc**: mục riêng "Tạo Lark Sheet" bỏ; nút **"Xuất Lark Sheet
+theo bộ lọc này"** + danh sách Sheet gần đây nằm cuối mục *Chiến dịch và quảng cáo*. Yêu cầu mang thêm
+nhiều tài khoản (`tk_ds`, ≤ 200 mã; chọn đủ = NULL = mọi tài khoản) và bộ lọc bảng (`tim`, `cd`, `sap`,
+`chieu`). Tab chiến dịch / quảng cáo lọc + xếp bằng CHÍNH SQL của bảng trang (`kho_qc.sql_bang` qua
+`kho_sheet_qc.doc_tong`), MỌI dòng khớp (không chỉ trang đang xem) tới trần; tab theo ngày chỉ theo tài
+khoản + ngày; Tổng quan ghi bộ lọc đã dùng. Dòng cũ (cột mới NULL) dựng như trước. Lên mã: chạy
+`schema.sql` (thêm 5 cột NULL — tức thì, không viết lại bảng; trigger kiểm giá trị) TRƯỚC khi khởi động
+lại dashboard / Mark — mã mới đọc + ghi các cột này.
+
 ```bash
 cd /opt/lang-nghe/app   # sau khi rsync mã mới (dashboard/README.md bước 2) — Mark tự lên qua agent-deploy
 # a. Schema TRƯỚC mã mới (bảng yeu_cau_sheet_qc + 2 trigger + RLS + quyền theo cột; chạy lại không hỏng)
@@ -346,13 +355,17 @@ sudo systemd-run --quiet --wait --pipe -p User=mark -p WorkingDirectory=/opt/mar
   (thêm cộng tác viên theo email, đóng chia sẻ link), gửi tin `im:message`. Tra email → open_id
   (`contact:user.id:readonly`) chỉ là đường lùi khi thêm quyền theo email bị từ chối.
 - **Trần**: 1 yêu cầu đang chờ / đang tạo mỗi người, 4 yêu cầu mỗi người mỗi giờ, 30 mỗi giờ toàn hệ
-  thống (trigger `chuan_yeu_cau_sheet_qc`, khoá advisory); khoảng ≤ 400 ngày. Chờ / đang tạo quá 30
+  thống (trigger `chuan_yeu_cau_sheet_qc`, khoá advisory); khoảng ≤ 400 ngày. Trigger kiểm bộ lọc
+  (22/10/2026): `tim` ≤ 100 ký tự, `cd` ~ `^[0-9A-Za-z_-]{0,64}$`, `sap` trong danh sách cột xếp,
+  `chieu` ∈ (giam, tang), `tk_ds` ≤ 200 mã dạng advertiser_id — sai thì `invalid_parameter_value`. Chờ / đang tạo quá 30
   phút → `loi` (bộ nghe dọn; trang hiện "Quá hạn" và cho bấm lại).
-- **Quyền DB**: lang_nghe_web INSERT chỉ (nguoi_hoi, ben, nen_tang, tk, tu, den), SELECT mọi cột trừ
+- **Quyền DB**: lang_nghe_web INSERT chỉ (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap,
+  chieu), SELECT mọi cột trừ
   `loi_noi_bo`, không UPDATE / DELETE; RLS theo `lang_nghe.nguoi` (app đặt bằng `set_config` trong
   cùng giao dịch). mark: SELECT, UPDATE chỉ cột kết quả, không INSERT / DELETE.
 - **Kiểm**: `sudo -u mark psql -d lang_nghe -c "select id, nguoi_hoi, nen_tang, ben, tu, den,
-  trang_thai, so_dong, loi, loi_noi_bo, da_nhan_tin, tao_luc, xong_luc from yeu_cau_sheet_qc order by
+  tk_ds, tim, cd, sap, chieu, trang_thai, so_dong, loi, loi_noi_bo, da_nhan_tin, tao_luc, xong_luc
+  from yeu_cau_sheet_qc order by
   id desc limit 20"`; nhật ký: `select * from nhat_ky where hanh_dong = 'tao_sheet_qc' order by id desc`.
 - **Gỡ**: `systemctl disable --now qc-sheet-nghe` (yêu cầu mới chờ 30 phút rồi thành "Quá hạn"; trang
   vẫn chạy).

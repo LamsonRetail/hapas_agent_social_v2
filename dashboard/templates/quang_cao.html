@@ -39,19 +39,39 @@
 
 {% if d %}
 {% set ten_ben = (d.cac_ben|selectattr('ma', 'equalto', d.ben)|map(attribute='ten')|first) or '' %}
-{% set ten_tk = (d.tai_khoan|selectattr('advertiser_id', 'equalto', d.tk)|map(attribute='ten')|first) or 'Tất cả tài khoản' %}
+{#- 22/10/2026 (chủ dự án): chọn NHIỀU tài khoản (tk= lặp lại). Không chọn = tất cả. #}
+{% set tk_chon = d.tai_khoan|selectattr('advertiser_id', 'in', d.tk_ds)|list %}
+{% set ten_tk = ('Tất cả tài khoản (' ~ d.tai_khoan|length ~ ')') if not tk_chon else (tk_chon[0].ten if tk_chon|length == 1 else (tk_chon|length ~ ' tài khoản')) %}
 <details class="qc-loc-khung" id="qc-loc" open>
   <summary class="qc-loc-khung__tom"><span class="qc-loc-khung__nhan">Bộ lọc</span><span class="qc-loc-khung__gia-tri">{{ ten_ben }} · {{ ten_tk }} · {{ ngay_ngan(d.tu) }}–{{ ngay_ngan(d.den) }}</span></summary>
   <form class="the-khoi qc-loc" method="get" action="/quang-cao" aria-label="Bộ lọc">
     <label class="o">Bên
       <select name="ben">{% for b in d.cac_ben %}<option value="{{ b.ma }}"{% if b.ma == d.ben %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}</select>
     </label>
-    <label class="o">Tài khoản
-      <select name="tk">
-        <option value="">Tất cả tài khoản ({{ d.tai_khoan|length }})</option>
-        {% for t in d.tai_khoan %}<option value="{{ t.advertiser_id }}"{% if t.advertiser_id == d.tk %} selected{% endif %}>{{ t.ten }} · {{ TEN_NEN_TANG_QC[t.nen_tang] }}</option>{% endfor %}
-      </select>
-    </label>
+    {#- Tài khoản (22/10/2026): danh sách đánh dấu trong <details> — không JS vẫn chọn + gửi được (tk= lặp
+        lại); qc.js thêm ô tìm, "Chọn tất cả / Bỏ chọn", cập nhật dòng tóm tắt, đóng khi bấm ra ngoài / Esc. #}
+    <div class="o qc-tk" data-o="chon-tk">
+      <span class="qc-tk__nhan" id="qc-tk-nhan">Tài khoản</span>
+      <details class="qc-tk__khung">
+        <summary class="qc-tk__tom" aria-labelledby="qc-tk-nhan qc-tk-gia-tri"><span class="qc-tk__gia-tri" id="qc-tk-gia-tri" data-tat-ca="Tất cả tài khoản ({{ d.tai_khoan|length }})">{{ ten_tk }}</span></summary>
+        <div class="qc-tk__bang">
+          <div class="qc-tk__cong-cu" data-tk-cong-cu hidden>
+            <input type="search" class="qc-tk__tim" placeholder="Tìm tài khoản" aria-label="Tìm tài khoản" autocomplete="off">
+            <span class="qc-tk__nut-nhom"><button type="button" class="qc-tk__nut" data-tk="tat-ca">Chọn tất cả</button><button type="button" class="qc-tk__nut" data-tk="bo">Bỏ chọn</button></span>
+          </div>
+          <div class="qc-tk__ds">
+            {% for n in TEN_NEN_TANG_QC %}{% set cua = d.tai_khoan|selectattr('nen_tang', 'equalto', n)|list %}{% if cua %}
+            <fieldset class="qc-tk__nhom">
+              <legend class="qc-tk__nhom-ten"><span class="qc-cham qc-cham--{{ n }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[n] }}<span class="qc-tk__dem">{{ cua|length }}</span></legend>
+              {% for t in cua %}<label class="qc-tk__o"><input type="checkbox" name="tk" value="{{ t.advertiser_id }}"{% if t.advertiser_id in d.tk_ds %} checked{% endif %}><span class="qc-tk__ten">{{ t.ten }}</span></label>{% endfor %}
+            </fieldset>
+            {% endif %}{% endfor %}
+            <p class="qc-tk__trong" data-tk-trong hidden>Không có tài khoản nào khớp.</p>
+          </div>
+          <p class="qc-tk__goi-y mo nho">Không chọn tài khoản nào = tất cả. Bấm Xem để áp dụng.</p>
+        </div>
+      </details>
+    </div>
     <label class="o">Từ ngày <input type="date" name="tu" value="{{ d.tu }}" required></label>
     <label class="o">Đến ngày <input type="date" name="den" value="{{ d.den }}" required></label>
     <input type="hidden" name="nen_tang" value="{{ d.nen_tang }}">
@@ -59,7 +79,6 @@
     {#- giữ chữ tìm + cách xếp; KHÔNG giữ chiến dịch (cd) — đổi bên / tài khoản thì chiến dịch cũ thường không còn #}
     {% if d.bang.tim %}<input type="hidden" name="tim" value="{{ d.bang.tim }}">{% endif %}
     {% if d.bang.chieu == 'tang' %}<input type="hidden" name="chieu" value="tang">{% endif %}
-    {% if d.bang.so != SO_DONG_BANG[0] %}<input type="hidden" name="so" value="{{ d.bang.so }}">{% endif %}
     <button class="nut" type="submit">Xem</button>
     <nav class="qc-phan qc-loc__nhanh" aria-label="Khoảng nhanh">
       {% for n in (7, 30, 90) %}<a class="qc-phan__nut" href="{{ url_cho(tu=nhanh[n], den=hom_qua) }}"{% if d.tu == nhanh[n] and d.den == hom_qua %} aria-current="true"{% endif %}>{{ n }} ngày</a>{% endfor %}
@@ -199,18 +218,38 @@
   </tbody>
 </table>
 </div>
-{% if tong > ds|length %}<p class="mo nho qc-bang__dem">Đang hiện {{ ds|length }} / {{ tong|so_vn }} {{ ten_cot|lower }}{% if ds|length < SO_DONG_BANG[-1] %} — <a href="{{ url_cho(so=SO_DONG_BANG[-1]) }}#top">hiện {{ SO_DONG_BANG[-1] }} dòng</a>{% endif %}{% if not d.bang.tim %}, hoặc tìm theo tên ở trên{% endif %}.</p>{% endif %}
+{{ thanh_trang(cap, tong, ten_cot) }}
+{% endmacro %}
+{#- Thanh trang (22/10/2026, chủ dự án): 20 dòng một trang, phân trang ở máy chủ. Kiểu cổ điển ‹ 1 2 3 … 150 ›
+    (`quang_cao.o_trang`), trang đang xem tô màu nhấn; điện thoại gọn ‹ 3/150 ›. Liên kết giữ mọi bộ lọc +
+    trang của bảng kia, về #top. Không cần JS. #}
+{% macro thanh_trang(cap, tong, ten_cot) %}
+{% set trang = d.bang['trang_' ~ cap] %}{% set so_trang = d.bang['so_trang_' ~ cap] %}
+{% if so_trang > 1 %}
+<nav class="qc-trang" aria-label="Trang của bảng {{ ten_cot|lower }}">
+  <ul class="qc-trang__ds">
+    <li>{% if trang > 1 %}<a class="qc-trang__o qc-trang__ben" href="{{ url_trang(cap, trang - 1) }}" rel="prev"><span class="dai-qc__an">Trang trước</span><span aria-hidden="true">‹</span></a>{% else %}<span class="qc-trang__o qc-trang__ben" aria-disabled="true"><span class="dai-qc__an">Trang trước</span><span aria-hidden="true">‹</span></span>{% endif %}</li>
+    {% for p in o_trang(trang, so_trang) %}
+    <li class="qc-trang__so">{% if p is none %}<span class="qc-trang__ba" aria-hidden="true">…</span>{% else %}<a class="qc-trang__o" href="{{ url_trang(cap, p) }}"{% if p == trang %} aria-current="page"{% endif %}><span class="dai-qc__an">Trang </span>{{ p|so_vn }}</a>{% endif %}</li>
+    {% endfor %}
+    <li class="qc-trang__gon" aria-hidden="true">{{ trang|so_vn }}/{{ so_trang|so_vn }}</li>
+    <li>{% if trang < so_trang %}<a class="qc-trang__o qc-trang__ben" href="{{ url_trang(cap, trang + 1) }}" rel="next"><span class="dai-qc__an">Trang sau</span><span aria-hidden="true">›</span></a>{% else %}<span class="qc-trang__o qc-trang__ben" aria-disabled="true"><span class="dai-qc__an">Trang sau</span><span aria-hidden="true">›</span></span>{% endif %}</li>
+  </ul>
+  <p class="qc-trang__dem">Trang {{ trang|so_vn }}/{{ so_trang|so_vn }} · {{ tong|so_vn }} khớp</p>
+</nav>
+{% endif %}
 {% endmacro %}
 
 {% set ten_cd = ((d.campaign|first).ten if d.campaign else none) or ((d.ad|first).ten_campaign if d.ad else none) or d.bang.cd %}
-{% set co_loc = d.bang.tim or d.bang.cd or d.bang.chieu == 'tang' or d.bang.so != SO_DONG_BANG[0] or d.sap != (sap_xep|first)[0] %}
+{% set co_loc = d.bang.tim or d.bang.cd or d.bang.chieu == 'tang' or d.sap != (sap_xep|first)[0] %}
 <section class="the-khoi cach-duoi" aria-labelledby="qc-top-tieu-de" id="top">
   <div class="muc">
     <h2 class="muc__ten" id="qc-top-tieu-de">Chiến dịch và quảng cáo</h2>
-    <button type="button" class="goi-y" data-goi-y="Tìm theo tên (không cần gõ dấu): bảng chiến dịch khớp tên chiến dịch; bảng quảng cáo khớp tên quảng cáo hoặc tên chiến dịch chứa nó. Bấm tên một chiến dịch để chỉ xem quảng cáo của chiến dịch đó. Bấm tiêu đề cột để xếp, bấm lại để đổi chiều. CPM, CTR, ROAS tính lại từ tổng của dòng; khi xếp theo CPM hoặc CTR, dòng dưới {{ NGUONG_TI_LE|so_vn }} hiển thị xuống cuối để số lẻ không lấn lên đầu. Bộ lọc này chỉ áp vào hai bảng — số tổng, biểu đồ và Lark Sheet vẫn theo Bộ lọc đầu trang.">i</button>
+    <button type="button" class="goi-y" data-goi-y="Tìm theo tên (không cần gõ dấu): bảng chiến dịch khớp tên chiến dịch; bảng quảng cáo khớp tên quảng cáo hoặc tên chiến dịch chứa nó. Bấm tên một chiến dịch để chỉ xem quảng cáo của chiến dịch đó. Bấm tiêu đề cột để xếp, bấm lại để đổi chiều. CPM, CTR, ROAS tính lại từ tổng của dòng; khi xếp theo CPM hoặc CTR, dòng dưới {{ NGUONG_TI_LE|so_vn }} hiển thị xuống cuối để số lẻ không lấn lên đầu. Mỗi bảng 20 dòng một trang. Bộ lọc này áp vào hai bảng và tab chiến dịch / quảng cáo của Lark Sheet; số tổng và biểu đồ theo Bộ lọc đầu trang.">i</button>
   </div>
   <form class="qc-bang-loc" method="get" action="/quang-cao#top" role="search" aria-label="Lọc và sắp xếp bảng" data-o="loc-bang">
-    {% for k in ('ben', 'nen_tang', 'tk', 'tu', 'den') if d[k] %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
+    {% for k in ('ben', 'nen_tang', 'tu', 'den') if d[k] %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
+    {% for x in d.tk_ds %}<input type="hidden" name="tk" value="{{ x }}">{% endfor %}
     {% if d.bang.cd %}<input type="hidden" name="cd" value="{{ d.bang.cd }}">{% endif %}
     <label class="o qc-bang-loc__tim">Tìm theo tên
       <input type="search" name="tim" value="{{ d.bang.tim }}" maxlength="{{ TIM_TOI_DA }}" placeholder="Tên chiến dịch hoặc quảng cáo" autocomplete="off">
@@ -221,11 +260,8 @@
     <label class="o">Thứ tự
       <select name="chieu" data-tu-gui><option value="giam"{% if d.bang.chieu != 'tang' %} selected{% endif %}>Cao → thấp</option><option value="tang"{% if d.bang.chieu == 'tang' %} selected{% endif %}>Thấp → cao</option></select>
     </label>
-    <label class="o qc-bang-loc__so">Số dòng
-      <select name="so" data-tu-gui>{% for n in SO_DONG_BANG %}<option value="{{ n }}"{% if n == d.bang.so %} selected{% endif %}>{{ n }}</option>{% endfor %}</select>
-    </label>
     <button class="nut" type="submit">Lọc</button>
-    {% if co_loc %}<a class="qc-bang-loc__bo" href="{{ url_cho(tim='', cd='', chieu='', so='', sap='') }}#top">Bỏ lọc</a>{% endif %}
+    {% if co_loc %}<a class="qc-bang-loc__bo" href="{{ url_cho(tim='', cd='', chieu='', sap='') }}#top">Bỏ lọc</a>{% endif %}
   </form>
   {% if d.bang.cd %}
   <p class="qc-bang-the"><span>Chiến dịch: <b>{{ ten_cd }}</b></span><a class="qc-bang-the__bo" href="{{ url_cho(cd='') }}#top" aria-label="Bỏ lọc chiến dịch {{ ten_cd }}" title="Bỏ lọc chiến dịch">✕</a></p>
@@ -234,6 +270,51 @@
   {{ bang_top(d.campaign, 'campaign', d.bang.tong_campaign) }}
   <h3 class="qc-h3 qc-h3--cach">Quảng cáo{% if d.bang.tim or d.bang.cd %}<span class="qc-h3__dem"> · {{ d.bang.tong_ad|so_vn }} khớp</span>{% endif %}</h3>
   {{ bang_top(d.ad, 'ad', d.bang.tong_ad) }}
+
+  {#- Xuất Lark Sheet (20/10/2026; 22/10/2026 chủ dự án: MỘT chỗ, ngay trong mục này — Sheet chứa ĐÚNG những
+      gì đang lọc: bộ lọc đầu trang + bộ lọc bảng, MỌI dòng khớp (không chỉ trang đang xem) tới trần). Chỉ
+      quản trị viên; máy chủ kiểm lại quyền + phạm vi (POST /quang-cao/tao-sheet), Mark dựng Sheet bằng
+      app Lark của Mark (dashboard không gọi Lark). Trái = phạm vi + nút; phải = Sheet gần đây của chính
+      người xem (qc.js hỏi lại /api/qc/sheet mỗi 5 giây khi còn yêu cầu đang tạo). Điện thoại xếp dọc. #}
+  {% set dang_sheet = sheet_ds|selectattr('dang')|list %}
+  <div class="qc-sheet" id="sheet" data-dang="{{ '1' if dang_sheet else '0' }}" aria-labelledby="qc-sheet-tieu-de" role="region">
+    <div class="qc-sheet__than">
+      <div class="qc-sheet__tao">
+        <h3 class="qc-h3 qc-sheet__tieu-de" id="qc-sheet-tieu-de">Xuất Lark Sheet <button type="button" class="goi-y" data-goi-y="Mark tạo một Lark Sheet riêng tư từ đúng bộ lọc đang xem (cả chi tiêu), chia sẻ quyền XEM cho bạn và nhắn link trên Lark. Tab Tổng quan (ghi bộ lọc đã dùng) + theo ngày × tài khoản (chỉ theo tài khoản + ngày) + theo chiến dịch + theo quảng cáo (lọc, xếp như hai bảng trên, mọi dòng khớp — tối đa {{ SHEET_TRAN_DONG.chien_dich|so_vn }} chiến dịch, {{ SHEET_TRAN_DONG.quang_cao|so_vn }} quảng cáo). Tối đa {{ SHEET_TRAN_GIO }} Sheet mỗi giờ.">i</button></h3>
+        <p class="qc-sheet__pv">
+          {% if d.nen_tang != 'tat_ca' %}<span class="qc-cham qc-cham--{{ d.nen_tang }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[d.nen_tang] }}{% else %}TikTok + Meta{% endif %} · {{ ten_ben }} · {{ ten_tk }} · {{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}/{{ d.den[:4] }}<span class="qc-sheet__phu"> ({{ sheet_so_ngay }} ngày)</span>
+          <br><span class="qc-sheet__phu">{% if d.bang.tim %}Tên khớp “{{ d.bang.tim }}” · {% endif %}{% if d.bang.cd %}Chiến dịch {{ ten_cd }} · {% endif %}Xếp {{ SAP_BANG[d.sap] }} {{ 'thấp → cao' if d.bang.chieu == 'tang' else 'cao → thấp' }} · {{ d.bang.tong_campaign|so_vn }} chiến dịch, {{ d.bang.tong_ad|so_vn }} quảng cáo{% if d.bang.tong_ad > SHEET_TRAN_DONG.quang_cao or d.bang.tong_campaign > SHEET_TRAN_DONG.chien_dich %} (cắt ở trần){% endif %}</span>
+        </p>
+        <form method="post" action="/quang-cao/tao-sheet" class="qc-sheet__nut" data-o="tao-sheet">
+          <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+          {% for k in ('ben', 'nen_tang', 'tu', 'den', 'sap') %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
+          {% for x in d.tk_ds %}<input type="hidden" name="tk" value="{{ x }}">{% endfor %}
+          {% if d.bang.tim %}<input type="hidden" name="tim" value="{{ d.bang.tim }}">{% endif %}
+          {% if d.bang.cd %}<input type="hidden" name="cd" value="{{ d.bang.cd }}">{% endif %}
+          <input type="hidden" name="chieu" value="{{ d.bang.chieu }}">
+          <button class="nut" type="submit" id="qc-sheet-nut"{% if dang_sheet %} disabled{% endif %}>
+            <svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 9.5h16M4 15h16M10 4v16"/></svg>Xuất Lark Sheet theo bộ lọc này
+          </button>
+          <p class="mo nho qc-sheet__goi-y" id="qc-sheet-goi-y">{% if dang_sheet %}Đang tạo một Sheet — đợi xong rồi tạo tiếp.{% else %}Thường xong sau 1–2 phút.{% endif %}</p>
+        </form>
+      </div>
+      <div class="qc-sheet__gan-day">
+        <h4 class="qc-sheet__h4">Sheet gần đây của bạn</h4>
+        <ul class="qc-sheet__ds" id="qc-sheet-ds" aria-live="polite">
+          {% for x in sheet_ds %}
+          <li class="qc-sheet__o" data-id="{{ x.id }}" data-tinh-trang="{{ x.trang_thai }}">
+            <span class="qc-sheet__ten">{{ x.ten }}</span>
+            <span class="qc-sheet__meta"><span class="qc-sheet__tt qc-sheet__tt--{{ x.trang_thai }}">{{ x.nhan }}</span><span class="qc-sheet__luc">{{ x.luc }}</span></span>
+            {% if x.url %}<span class="qc-sheet__ket"><a class="qc-sheet__mo" href="{{ x.url }}" target="_blank" rel="noopener noreferrer">Mở Sheet<svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M18 14v5H5V6h5"/></svg></a>{% if x.so_dong %}<span class="qc-sheet__phu">{{ x.so_dong }}</span>{% endif %}</span>{% endif %}
+            {% if x.loi %}<span class="qc-sheet__loi{% if x.trang_thai == 'xong' %} qc-sheet__loi--canh{% endif %}">{{ x.loi }}</span>{% endif %}
+          </li>
+          {% else %}
+          <li class="qc-sheet__trong">Chưa xuất Sheet nào. Bấm “Xuất Lark Sheet theo bộ lọc này” để xuất đúng hai bảng trên (mọi trang).</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
 </section>
 
 <section class="the-khoi cach-duoi" aria-labelledby="qc-kg-tieu-de">
@@ -265,60 +346,6 @@
   {% endif %}
 </section>
 
-{#- Tạo Lark Sheet (20/10/2026, chủ dự án): xuất ĐÚNG bộ lọc đang xem thành một Lark Sheet ba tab. Trang chỉ
-    quản trị viên; máy chủ kiểm lại quyền + phạm vi (POST /quang-cao/tao-sheet), Mark dựng Sheet bằng app
-    Lark của Mark (dashboard không gọi Lark). Bố cục: trái = phạm vi sẽ xuất + nút; phải = yêu cầu gần đây
-    của chính người xem (qc.js hỏi lại /api/qc/sheet mỗi 5 giây khi còn yêu cầu đang tạo). Điện thoại:
-    xếp dọc, nút cả bề ngang. #}
-{% set dang_sheet = sheet_ds|selectattr('dang')|list %}
-<section class="the-khoi cach-duoi qc-sheet" id="sheet" aria-labelledby="qc-sheet-tieu-de" data-dang="{{ '1' if dang_sheet else '0' }}">
-  <div class="muc">
-    <h2 class="muc__ten" id="qc-sheet-tieu-de">Tạo Lark Sheet</h2>
-    <button type="button" class="goi-y" data-goi-y="Mark tạo một Lark Sheet riêng tư từ số đang lọc ở trang này (cả chi tiêu), chia sẻ quyền XEM cho bạn và nhắn link trên Lark. Tab Tổng quan + ba tab dữ liệu; CPM, CTR, chi / follow… tính lại từ tổng từng dòng. Tối đa {{ SHEET_TRAN_GIO }} Sheet mỗi giờ.">i</button>
-  </div>
-  <div class="qc-sheet__than">
-    <div class="qc-sheet__tao">
-      <dl class="qc-sheet__pv" aria-label="Phạm vi sẽ xuất">
-        <div><dt>Nền tảng</dt><dd>{% if d.nen_tang == 'tat_ca' %}Tất cả{% else %}<span class="qc-cham qc-cham--{{ d.nen_tang }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[d.nen_tang] }}{% endif %}</dd></div>
-        <div><dt>Bên</dt><dd>{{ ten_ben }}</dd></div>
-        <div><dt>Tài khoản</dt><dd>{% if d.tk %}{{ ten_tk }}{% else %}Tất cả ({{ d.tai_khoan|length }}){% endif %}</dd></div>
-        <div><dt>Khoảng ngày</dt><dd>{{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}/{{ d.den[:4] }}<span class="qc-sheet__phu"> · {{ sheet_so_ngay }} ngày</span></dd></div>
-      </dl>
-      <ul class="qc-sheet__tab" aria-label="Các tab của Sheet">
-        <li><b>Theo ngày × tài khoản</b><span>mỗi tài khoản mỗi ngày một dòng, dòng tổng theo tiền tệ</span></li>
-        <li><b>Theo chiến dịch</b><span>tổng cả kỳ, xếp theo chi</span></li>
-        <li><b>Theo quảng cáo</b><span>tổng cả kỳ, tối đa {{ SHEET_TRAN_DONG.quang_cao|so_vn }} quảng cáo chi nhiều nhất</span></li>
-      </ul>
-      <form method="post" action="/quang-cao/tao-sheet" class="qc-sheet__nut" data-o="tao-sheet">
-        <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-        <input type="hidden" name="ben" value="{{ d.ben }}">
-        <input type="hidden" name="nen_tang" value="{{ d.nen_tang }}">
-        <input type="hidden" name="tk" value="{{ d.tk }}">
-        <input type="hidden" name="tu" value="{{ d.tu }}">
-        <input type="hidden" name="den" value="{{ d.den }}">
-        <button class="nut" type="submit" id="qc-sheet-nut"{% if dang_sheet %} disabled{% endif %}>
-          <svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 9.5h16M4 15h16M10 4v16"/></svg>Tạo Sheet
-        </button>
-        <p class="mo nho qc-sheet__goi-y" id="qc-sheet-goi-y">{% if dang_sheet %}Đang tạo một Sheet — đợi xong rồi tạo tiếp.{% else %}Thường xong sau 1–2 phút.{% endif %}</p>
-      </form>
-    </div>
-    <div class="qc-sheet__gan-day">
-      <h3 class="qc-h3">Sheet gần đây của bạn</h3>
-      <ul class="qc-sheet__ds" id="qc-sheet-ds" aria-live="polite">
-        {% for x in sheet_ds %}
-        <li class="qc-sheet__o" data-id="{{ x.id }}" data-tinh-trang="{{ x.trang_thai }}">
-          <span class="qc-sheet__ten">{{ x.ten }}</span>
-          <span class="qc-sheet__meta"><span class="qc-sheet__tt qc-sheet__tt--{{ x.trang_thai }}">{{ x.nhan }}</span><span class="qc-sheet__luc">{{ x.luc }}</span></span>
-          {% if x.url %}<span class="qc-sheet__ket"><a class="qc-sheet__mo" href="{{ x.url }}" target="_blank" rel="noopener noreferrer">Mở Sheet<svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M18 14v5H5V6h5"/></svg></a>{% if x.so_dong %}<span class="qc-sheet__phu">{{ x.so_dong }}</span>{% endif %}</span>{% endif %}
-          {% if x.loi %}<span class="qc-sheet__loi{% if x.trang_thai == 'xong' %} qc-sheet__loi--canh{% endif %}">{{ x.loi }}</span>{% endif %}
-        </li>
-        {% else %}
-        <li class="qc-sheet__trong">Chưa tạo Sheet nào. Bấm “Tạo Sheet” để xuất đúng phạm vi bên trái.</li>
-        {% endfor %}
-      </ul>
-    </div>
-  </div>
-</section>
 {% endif %}
 {% endif %}
 {% endblock %}

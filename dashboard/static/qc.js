@@ -160,8 +160,8 @@
   }
 })();
 
-// Lọc bảng chiến dịch / quảng cáo (22/10/2026): đổi "Xếp theo" / "Thứ tự" / "Số dòng" là gửi luôn (ô tìm
-// vẫn chờ Enter hoặc nút Lọc). Không có JS: nút Lọc vẫn đủ dùng.
+// Lọc bảng chiến dịch / quảng cáo (22/10/2026): đổi "Xếp theo" / "Thứ tự" là gửi luôn (ô tìm vẫn chờ
+// Enter hoặc nút Lọc). Không có JS: nút Lọc vẫn đủ dùng.
 (function () {
   var f = document.querySelector('form[data-o="loc-bang"]');
   if (!f) return;
@@ -170,9 +170,71 @@
   });
 })();
 
-// Tạo Lark Sheet (20/10/2026): còn yêu cầu đang chờ / đang tạo → hỏi lại /api/qc/sheet mỗi 5 giây (tối
+// Chọn nhiều tài khoản (22/10/2026, chủ dự án): ô "Tài khoản" là danh sách đánh dấu trong <details>
+// (không JS vẫn chọn + gửi được). JS thêm: ô tìm (bỏ dấu, không phân biệt hoa thường), "Chọn tất cả /
+// Bỏ chọn" (áp vào các dòng đang hiện), dòng tóm tắt "Tất cả tài khoản (N)" / "3 tài khoản" / tên, đóng
+// khi bấm ra ngoài hoặc Esc. Gửi khi đã chọn đủ mọi tài khoản → bỏ chọn hết (= tất cả, URL gọn).
+(function () {
+  var khoi = document.querySelector('[data-o="chon-tk"]');
+  if (!khoi) return;
+  var khung = khoi.querySelector("details");
+  var tom = khoi.querySelector(".qc-tk__gia-tri");
+  var congCu = khoi.querySelector("[data-tk-cong-cu]");
+  var tim = khoi.querySelector(".qc-tk__tim");
+  var trong = khoi.querySelector("[data-tk-trong]");
+  var hop = Array.prototype.slice.call(khoi.querySelectorAll('input[type="checkbox"][name="tk"]'));
+  if (!khung || !tom || !hop.length) return;
+  if (congCu) congCu.hidden = false;
+
+  function boDau(x) {
+    return (x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase();
+  }
+  function ten(h) { var t = h.parentNode.querySelector(".qc-tk__ten"); return t ? t.textContent : h.value; }
+  function veTom() {
+    var chon = hop.filter(function (h) { return h.checked; });
+    tom.textContent = !chon.length || chon.length === hop.length ? tom.getAttribute("data-tat-ca")
+      : chon.length === 1 ? ten(chon[0]) : chon.length + " tài khoản";
+  }
+  function loc() {
+    var q = boDau(tim ? tim.value.trim() : "");
+    var con = 0;
+    hop.forEach(function (h) {
+      var hien = !q || boDau(ten(h)).indexOf(q) >= 0 || h.value.indexOf(q) >= 0;
+      h.parentNode.hidden = !hien;
+      if (hien) con++;
+    });
+    Array.prototype.forEach.call(khoi.querySelectorAll(".qc-tk__nhom"), function (f) {
+      f.hidden = !f.querySelector(".qc-tk__o:not([hidden])");
+    });
+    if (trong) trong.hidden = con > 0;
+  }
+  hop.forEach(function (h) { h.addEventListener("change", veTom); });
+  if (tim) {
+    tim.addEventListener("input", loc);
+    // Enter trong ô tìm không gửi cả bộ lọc (người dùng đang lọc danh sách).
+    tim.addEventListener("keydown", function (e) { if (e.key === "Enter") e.preventDefault(); });
+  }
+  Array.prototype.forEach.call(khoi.querySelectorAll("button[data-tk]"), function (b) {
+    b.addEventListener("click", function () {
+      var bat = b.getAttribute("data-tk") === "tat-ca";
+      hop.forEach(function (h) { if (!h.parentNode.hidden) h.checked = bat; });
+      veTom();
+    });
+  });
+  document.addEventListener("click", function (e) { if (khung.open && !khoi.contains(e.target)) khung.open = false; });
+  khoi.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && khung.open) { khung.open = false; khung.querySelector("summary").focus(); }
+  });
+  khung.addEventListener("toggle", function () { if (khung.open && tim) tim.focus(); });
+  var f = khoi.closest("form");
+  if (f) f.addEventListener("submit", function () {
+    if (hop.every(function (h) { return h.checked; })) hop.forEach(function (h) { h.checked = false; });
+  });
+})();
+
+// Xuất Lark Sheet (20/10/2026; 22/10/2026 nằm trong mục "Chiến dịch và quảng cáo"): còn yêu cầu đang chờ / đang tạo → hỏi lại /api/qc/sheet mỗi 5 giây (tối
 // đa 15 phút, tab ẩn thì thôi hỏi) và vẽ lại danh sách bằng textContent; hết yêu cầu đang tạo (hoặc hết
-// 15 phút) thì mở lại nút "Tạo Sheet". Không có JS: trang vẫn đúng, tải lại là thấy trạng thái mới.
+// 15 phút) thì mở lại nút "Xuất Lark Sheet". Không có JS: trang vẫn đúng, tải lại là thấy trạng thái mới.
 (function () {
   var khung = document.getElementById("sheet");
   var ds = document.getElementById("qc-sheet-ds");

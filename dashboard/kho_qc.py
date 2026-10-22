@@ -531,48 +531,75 @@ def sql_ten_bang(cap: str, *, cd: bool) -> str:
             f"WHERE {_dk_bang(cd)} ORDER BY {khoa}, ngay DESC")
 
 
-def sql_bang(cap: str, sap: str, tang: bool, *, loc_ma: bool, cd: bool) -> str:
+def sql_bang(cap: str, sap: str, tang: bool, *, loc_ma: bool, cd: bool, them: str = "",
+             bo_qua: bool = True) -> str:
     """SQL một bảng chiến dịch / quảng cáo: tổng theo đối tượng trong kỳ (lọc chiến dịch `cd`, lọc
-    mã khớp tên `loc_ma`) → xếp theo `sap` → LIMIT, kèm `tong_khop` (số dòng khớp trước LIMIT).
-    Tham số theo thứ tự: ids, tu, den, [cd], [mã], n."""
+    mã khớp tên `loc_ma`) → xếp theo `sap` → LIMIT [OFFSET], kèm `tong_khop` (số dòng khớp trước
+    LIMIT). Tham số theo thứ tự: ids, tu, den, [cd], [mã], n, [bỏ qua].
+    22/10/2026: `bo_qua` — trang của bảng trang Quảng cáo (OFFSET); bộ nghe Sheet (`kho_sheet_qc.
+    doc_tong`) dùng CHÍNH hàm này không OFFSET, `them` = cột tổng thêm (hằng trong mã, không bao
+    giờ từ tham số) — cùng luật lọc / xếp hai đầu."""
     bang, khoa, _ = _TOP[cap]
     dk = _dk_bang(cd) + (f" AND {khoa} = ANY(%s)" if loc_ma else "")
     xep = SAP_BANG_SQL.get(sap, "t.hien_thi")
-    return (f"WITH t AS (SELECT {khoa}, advertiser_id, {_TONG} FROM {bang} WHERE {dk} "
+    return (f"WITH t AS (SELECT {khoa}, advertiser_id, {_TONG}{them} FROM {bang} WHERE {dk} "
             f"GROUP BY {khoa}, advertiser_id) SELECT t.*, count(*) OVER () AS tong_khop FROM t "
             f"ORDER BY {xep} {'ASC' if tang else 'DESC'} NULLS LAST, t.hien_thi DESC NULLS LAST, "
-            f"t.{khoa} LIMIT %s")
+            f"t.{khoa} LIMIT %s" + (" OFFSET %s" if bo_qua else ""))
+
+
+def ma_khop_ten(c, cap: str, ids: list[str], tu: datetime.date, den: datetime.date, mau: str,
+                cd: str = "") -> list:
+    """Mã chiến dịch / quảng cáo trong kỳ có TÊN MỚI NHẤT chứa `mau` (đã qua `quang_cao.chu_tim`) —
+    so khớp ở PYTHON bằng đúng `chu_tim` (xem `qc_bang`). `c`: kết nối đang mở của nơi gọi."""
+    _, khoa, _ = _TOP[cap]
+    pv = [list(ids), tu, den] + ([cd] if cd else [])
+    return [r[khoa] for r in c.execute(sql_ten_bang(cap, cd=bool(cd)), pv).fetchall()
+            if any(mau in QC.chu_tim(r.get(x) or "") for x in _TIM_BANG[cap])]
 
 
 def qc_bang(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, *, sap: str,
-            tang: bool = False, mau: str = "", cd: str = "", n: int = 10) -> dict:
+            tang: bool = False, mau: str = "", cd: str = "", n: int = 10, bo_qua: int = 0) -> dict:
     """Bảng chiến dịch / quảng cáo của trang Quảng cáo — lọc tên (`mau` đã qua
     `quang_cao.chu_tim`), lọc chiến dịch `cd`, xếp theo mọi cột (`quang_cao.loc_bang` đã kiểm).
-    Chỉ tài khoản `ids` (phạm vi người xem). -> {"rows": [...], "tong": số dòng khớp}.
+    Chỉ tài khoản `ids` (phạm vi người xem). -> {"rows": [...], "tong": số dòng khớp, "bo_qua":
+    OFFSET thật đã dùng}.
+
+    Phân trang (22/10/2026): `n` dòng từ dòng thứ `bo_qua`. Quá trang cuối (URL cũ, vừa lọc hẹp
+    lại) → đếm rồi trả TRANG CUỐI (không trả bảng rỗng khi vẫn có dòng khớp).
 
     Lọc tên so khớp ở PYTHON bằng đúng `quang_cao.chu_tim` (như Mark tra cứu): đo 22/10/2026 trên
     21.060 quảng cáo / 30 ngày, bỏ dấu bằng translate() trong Postgres mất ~1,8 giây, đọc tên mới
     nhất + so ở Python ~0,3 giây."""
+    rong = {"rows": [], "tong": 0, "bo_qua": 0}
     if not ids or cap not in _TOP:
-        return {"rows": [], "tong": 0}
+        return rong
     _, khoa, _ = _TOP[cap]
+    n = max(1, min(int(n), TOP_TOI_DA))
+    bo_qua = max(0, int(bo_qua))
     pv = [list(ids), tu, den] + ([cd] if cd else [])
     _, moi = sql_top(cap, "hien_thi")
     with ket_noi() as c:
         ma = None
         if mau:
-            ma = [r[khoa] for r in c.execute(sql_ten_bang(cap, cd=bool(cd)), pv).fetchall()
-                  if any(mau in QC.chu_tim(r.get(x) or "") for x in _TIM_BANG[cap])]
+            ma = ma_khop_ten(c, cap, ids, tu, den, mau, cd)
             if not ma:
-                return {"rows": [], "tong": 0}
-        ts = pv + ([ma] if ma is not None else []) + [max(1, min(int(n), TOP_TOI_DA))]
-        rows = c.execute(sql_bang(cap, sap, tang, loc_ma=ma is not None, cd=bool(cd)), ts).fetchall()
+                return rong
+        sql = sql_bang(cap, sap, tang, loc_ma=ma is not None, cd=bool(cd))
+        ts = pv + ([ma] if ma is not None else [])
+        rows = c.execute(sql, ts + [n, bo_qua]).fetchall()
+        if not rows and bo_qua:
+            dem = c.execute(sql, ts + [1, 0]).fetchall()
+            if not dem:
+                return rong
+            bo_qua = (int(dem[0]["tong_khop"]) - 1) // n * n
+            rows = c.execute(sql, ts + [n, bo_qua]).fetchall()
         if not rows:
-            return {"rows": [], "tong": 0}
+            return rong
         ten = {r[khoa]: r for r in c.execute(moi, ([r[khoa] for r in rows], tu, den)).fetchall()}
     return {"rows": [{**{k: v for k, v in r.items() if k != "tong_khop"},
                       **{k: v for k, v in (ten.get(r[khoa]) or {}).items() if k != khoa}}
-                     for r in rows], "tong": int(rows[0]["tong_khop"])}
+                     for r in rows], "tong": int(rows[0]["tong_khop"]), "bo_qua": bo_qua}
 
 
 def qc_khan_gia(ids: list[str]) -> dict:

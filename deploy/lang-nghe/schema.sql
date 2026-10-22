@@ -928,6 +928,12 @@ CREATE TABLE IF NOT EXISTS yeu_cau_sheet_qc (
   xong_luc        TIMESTAMPTZ,
   CHECK (den >= tu AND den - tu < 400)
 );
+-- 22/10/2026 (chủ dự án): Sheet theo ĐÚNG bộ lọc trang — nhiều tài khoản (tk_ds, ≤ 200 mã; cột tk cũ
+-- vẫn đọc được cho dòng cũ) + bộ lọc bảng chiến dịch / quảng cáo (tim, cd, sap, chieu). Cột NULL được
+-- thêm không mặc định: tức thì, không viết lại bảng. Trigger chuan_yeu_cau_sheet_qc kiểm giá trị.
+ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS tk_ds TEXT[],
+  ADD COLUMN IF NOT EXISTS tim TEXT, ADD COLUMN IF NOT EXISTS cd TEXT,
+  ADD COLUMN IF NOT EXISTS sap TEXT, ADD COLUMN IF NOT EXISTS chieu TEXT;
 CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_nguoi ON yeu_cau_sheet_qc (nguoi_hoi, tao_luc DESC);
 CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_cho ON yeu_cau_sheet_qc (trang_thai, id)
   WHERE trang_thai IN ('cho', 'dang_tao');
@@ -950,6 +956,30 @@ BEGIN
   NEW.loi := NULL;
   NEW.loi_noi_bo := NULL;
   NEW.da_nhan_tin := FALSE;
+  -- 22/10/2026: bộ lọc (cùng luật quang_cao.loc_bang / tk_chon); rỗng → NULL. Sai → invalid_parameter_value
+  -- (app báo "Bộ lọc không hợp lệ", không lẫn với trần check_violation).
+  NEW.tim := NULLIF(btrim(NEW.tim), '');
+  NEW.cd := NULLIF(btrim(NEW.cd), '');
+  IF cardinality(NEW.tk_ds) = 0 THEN
+    NEW.tk_ds := NULL;
+  END IF;
+  IF NEW.tk_ds IS NOT NULL AND (cardinality(NEW.tk_ds) > 200 OR array_ndims(NEW.tk_ds) <> 1
+      OR EXISTS (SELECT 1 FROM unnest(NEW.tk_ds) x WHERE x IS NULL OR x !~ '^(act_)?[0-9]{1,30}$')) THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: tk_ds sai' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NEW.tim IS NOT NULL AND length(NEW.tim) > 100 THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: tim quá 100 ký tự' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NEW.cd IS NOT NULL AND NEW.cd !~ '^[0-9A-Za-z_-]{0,64}$' THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: cd sai' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NEW.sap IS NOT NULL AND NEW.sap NOT IN ('chi', 'hien_thi', 'cpm', 'click', 'ctr', 'view',
+                                             'tuong_tac', 'follow', 'roas') THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: sap sai' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF NEW.chieu IS NOT NULL AND NEW.chieu NOT IN ('giam', 'tang') THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: chieu sai' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
   PERFORM pg_advisory_xact_lock(hashtext('sheet_qc|' || NEW.nguoi_hoi));
   PERFORM pg_advisory_xact_lock(hashtext('sheet_qc|*'));
   IF EXISTS (SELECT 1 FROM public.yeu_cau_sheet_qc WHERE nguoi_hoi = NEW.nguoi_hoi
@@ -1659,7 +1689,7 @@ COMMENT ON COLUMN yeu_cau_tuc_thi.bat_dau_luc IS 'Lúc lượt đọc / cào b�
 COMMENT ON COLUMN yeu_cau_tuc_thi.xong_luc IS 'Lúc kết thúc (UTC) — Mark nói "số cập nhật lúc HH:MM" theo mốc này.';
 COMMENT ON TABLE yeu_cau_sheet_qc IS $$[Lớp] Raw
 [Mục đích] Sổ yêu cầu xuất số quảng cáo TikTok / Meta Ads thành Lark Sheet từ trang Quảng cáo — hàng chờ cho bộ nghe qc-sheet-nghe (Mark) và dấu vết ai xuất phạm vi nào, link nào.
-[Grain] 1 dòng = 1 lần quản trị viên bấm "Tạo Sheet" (đã qua trần)
+[Grain] 1 dòng = 1 lần quản trị viên bấm "Xuất Lark Sheet theo bộ lọc này" (trước 22/10/2026: "Tạo Sheet"; đã qua trần)
 [Khoá] PK: id | Join: ben → don_vi.ma (trừ tat_ca, chua_gan); tk → tk_quang_cao.advertiser_id
 [Nguồn] Dashboard social.hapas.vn (role lang_nghe_web) thêm dòng; bộ nghe qc-sheet-nghe (role mark, xuat_sheet_qc.py) nhận, dựng Sheet và ghi kết quả
 [Phạm vi] Chỉ quản trị viên | Kênh TikTok Ads, Meta Ads | Từ 20/10/2026
@@ -1672,7 +1702,12 @@ COMMENT ON COLUMN yeu_cau_sheet_qc.id IS 'Mã yêu cầu tự tăng. PK. Cũng l
 COMMENT ON COLUMN yeu_cau_sheet_qc.nguoi_hoi IS 'Email công ty (chữ thường) của quản trị viên bấm Tạo Sheet — Sheet chia sẻ quyền xem cho email này, Mark nhắn link tới email này. Dữ liệu cá nhân — không đẩy BigQuery.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.ben IS 'Bên của bộ lọc trang: mã don_vi, tat_ca (mọi bên) hoặc chua_gan (tài khoản chưa gán bên).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.nen_tang IS 'Nền tảng của bộ lọc trang: tat_ca, tiktok hoặc meta.';
-COMMENT ON COLUMN yeu_cau_sheet_qc.tk IS 'Một tài khoản quảng cáo của bộ lọc (advertiser_id / act_…); NULL = mọi tài khoản của bên + nền tảng.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tk IS 'Một tài khoản quảng cáo của bộ lọc (advertiser_id / act_…); NULL = mọi tài khoản của bên + nền tảng. Từ 22/10/2026 danh sách ở tk_ds (một mã thì ghi cả cột này); bộ nghe đọc tk_ds trước, rồi tk (dòng cũ).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tk_ds IS 'Các tài khoản quảng cáo đã chọn (advertiser_id / act_…, tối đa 200, trigger kiểm); NULL = mọi tài khoản của bên + nền tảng. Từ 22/10/2026; dòng cũ NULL (xem tk).';
+COMMENT ON COLUMN yeu_cau_sheet_qc.tim IS 'Chữ tìm theo tên của bảng chiến dịch / quảng cáo (≤ 100 ký tự, so khớp bỏ dấu); NULL = không lọc tên. Từ 22/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.cd IS 'Mã chiến dịch của bộ lọc bảng (chỉ chiến dịch đó + quảng cáo của nó); NULL = mọi chiến dịch. Từ 22/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.sap IS 'Cột xếp tab chiến dịch / quảng cáo: chi, hien_thi, cpm, click, ctr, view, tuong_tac, follow, roas; NULL (dòng cũ) = chi. Từ 22/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.chieu IS 'Chiều xếp: giam (cao → thấp) hoặc tang; NULL (dòng cũ) = giam. Từ 22/10/2026.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.tu IS 'Ngày đầu khoảng xuất (ngày theo múi giờ tài khoản, như qc_tk_ngay.ngay).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.den IS 'Ngày cuối khoảng xuất; tối đa 400 ngày (CHECK).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.trang_thai IS 'cho (đợi bộ nghe), dang_tao, xong (có sheet_url), loi (xem loi).';
@@ -1785,9 +1820,11 @@ COMMIT;
 BEGIN;
 REVOKE ALL ON yeu_cau_sheet_qc FROM mark, lang_nghe_web;
 REVOKE ALL ON SEQUENCE yeu_cau_sheet_qc_id_seq FROM mark, lang_nghe_web;
-GRANT SELECT (id, nguoi_hoi, ben, nen_tang, tk, tu, den, trang_thai, tieu_de, sheet_url, so_dong,
-              loi, da_nhan_tin, tao_luc, bat_dau_luc, xong_luc) ON yeu_cau_sheet_qc TO lang_nghe_web;
-GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tu, den) ON yeu_cau_sheet_qc TO lang_nghe_web;
+GRANT SELECT (id, nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, trang_thai,
+              tieu_de, sheet_url, so_dong, loi, da_nhan_tin, tao_luc, bat_dau_luc, xong_luc)
+  ON yeu_cau_sheet_qc TO lang_nghe_web;
+GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu)
+  ON yeu_cau_sheet_qc TO lang_nghe_web;
 GRANT USAGE ON SEQUENCE yeu_cau_sheet_qc_id_seq TO lang_nghe_web;
 GRANT SELECT ON yeu_cau_sheet_qc TO mark;
 GRANT UPDATE (trang_thai, tieu_de, sheet_url, so_dong, loi, loi_noi_bo, da_nhan_tin, bat_dau_luc,

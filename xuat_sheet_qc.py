@@ -5,8 +5,12 @@ Chủ dự án 20/10/2026: trang Quảng cáo (chỉ quản trị viên) có m�
 ĐÚNG bộ lọc trang (bên, nền tảng, tài khoản, từ–đến) thành MỘT Lark Sheet, tiêu đề ghi TikTok Ads
 (Meta khi lọc Meta — cùng bảng qc_*, cùng mã), ba tab:
   (a) Theo ngày × tài khoản  (qc_tk_ngay, mỗi tài khoản mỗi ngày một dòng + dòng tổng theo tiền tệ)
-  (b) Theo chiến dịch        (tổng cả kỳ, xếp chi giảm dần)
-  (c) Theo quảng cáo         (tổng cả kỳ, xếp chi giảm dần, cắt ở `kho_sheet_qc.TRAN_DONG`)
+  (b) Theo chiến dịch        (tổng cả kỳ, lọc + xếp như bảng trang)
+  (c) Theo quảng cáo         (tổng cả kỳ, lọc + xếp như bảng trang, cắt ở `kho_sheet_qc.TRAN_DONG`)
+22/10/2026 (chủ dự án): nút "Xuất Lark Sheet theo bộ lọc này" nằm trong mục "Chiến dịch và quảng cáo";
+yêu cầu mang thêm nhiều tài khoản (tk_ds) + bộ lọc bảng (tim, cd, sap, chieu). Tab (b)/(c) lọc / xếp
+bằng CHÍNH SQL của bảng trang (`kho_qc.sql_bang` qua `kho_sheet_qc.doc_tong`), mọi dòng khớp (không chỉ
+một trang) tới trần; tab (a) chỉ theo tài khoản + ngày; Tổng quan liệt kê bộ lọc đã dùng.
 Có chi (chỉ quản trị viên bấm được) + chỉ số suy ra như trang (`quang_cao.hieu_qua`: CPM, CPC, CTR,
 chi / 1.000 view, chi / follow, chi / kết quả, ROAS Shop).
 
@@ -16,7 +20,7 @@ lúc khởi động và mỗi `CHO_GIAY` giây vẫn quét dòng chờ (không m
 
 Không tin đầu kia: mỗi yêu cầu kiểm lại người bấm CÒN là quản trị viên (`kho.quyen_cua`, role mark
 đọc được) và tự tính lại phạm vi tài khoản bằng đúng luật trang (`quang_cao.tk_xuat`) — dòng chỉ mang
-bộ lọc, không mang danh sách tài khoản.
+bộ lọc (danh sách tài khoản đã chọn cũng chỉ là bộ lọc — giao lại với phạm vi tính lại).
 
 Đường Sheet giống hệt `chi_so_ads` (meta_ads_tool, số quảng cáo): `trinh_bay_sheet.xuat` — tạo →
 khoá riêng tư TRƯỚC khi ghi số (`TB.khoa_rieng_tu`: đóng chia sẻ link / ngoài tổ chức, kiểm lại) →
@@ -100,12 +104,50 @@ def _so(r: dict, reach: bool) -> list:
             if reach or m != "reach"]
 
 
+def loc_yeu_cau(yc: dict) -> dict:
+    """Bộ lọc bảng của yêu cầu (cột tim / cd / sap / chieu, 22/10/2026) qua CHÍNH
+    `quang_cao.loc_bang` của trang (người bấm là quản trị viên → xếp theo tiền được). Dòng cũ (cột
+    NULL) = chi giảm dần, không lọc — như trước."""
+    return QC.loc_bang({k: yc.get(k) for k in ("tim", "cd", "sap", "chieu")}, True)
+
+
+def cach_xep(lb: dict) -> str:
+    return f"xếp theo {QC.SAP_BANG.get(lb['sap'], lb['sap'])} " + (
+        "thấp → cao" if lb["chieu"] == "tang" else "cao → thấp")
+
+
+def _giu(lb: dict) -> str:
+    """Câu "giữ dòng nào" khi tab bị cắt ở trần (theo đúng cách xếp)."""
+    if lb["sap"] == "chi" and lb["chieu"] == "giam":
+        return "chi nhiều nhất trước"
+    return cach_xep(lb) + ", giữ các dòng đầu"
+
+
+def mo_ta_loc(yc: dict, lb: dict, tk: list[dict]) -> list[str]:
+    """Các dòng "Bộ lọc" của tab Tổng quan — đúng những gì Sheet đã lọc (đầu trang + bảng)."""
+    chon = yc.get("tk_ds") or ([yc["tk"]] if yc.get("tk") else [])
+    ten = ", ".join(t.get("ten") or t["advertiser_id"] for t in tk[:6]) + (
+        f" và {len(tk) - 6} tài khoản khác" if len(tk) > 6 else "")
+    ra = ["Bộ lọc tài khoản: " + (f"{len(tk)} tài khoản đã chọn ({ten})" if chon
+                                  else f"mọi tài khoản của phạm vi ({len(tk)})")]
+    ra.append("Bộ lọc bảng (tab chiến dịch + quảng cáo): "
+              + "; ".join([*([f"tìm theo tên “{lb['tim']}”"] if lb["tim"] else []),
+                           *([f"chỉ chiến dịch mã {lb['cd']}"] if lb["cd"] else []),
+                           cach_xep(lb)])
+              + ". Tab theo ngày × tài khoản chỉ theo tài khoản + khoảng ngày.")
+    return ra
+
+
 def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, tong: dict[str, dict],
-              ten_nen=QC.TEN_NEN_TANG_QC) -> list:
+              ten_nen=QC.TEN_NEN_TANG_QC, lb: dict | None = None) -> list:
     """Ba TB.Bang (tab a, b, c) từ dòng kho. `tk` = tài khoản trong phạm vi (cac_tk), `ngay` / `cd` /
     `qc` = {"rows", "tong"} của `kho_sheet_qc.doc_theo_ngay` / `doc_tong`; `tong` = tổng TOÀN phạm vi
-    theo tiền tệ (`doc_tong_tien_te`) — dòng TỔNG không cộng từ dòng có thể đã cắt."""
+    theo tiền tệ (`doc_tong_tien_te`) — dòng TỔNG không cộng từ dòng có thể đã cắt. `lb` = bộ lọc
+    bảng (`loc_yeu_cau`) — chỉ để ghi mô tả tab đúng cách lọc / xếp."""
     import trinh_bay_sheet as TB
+    lb = lb or loc_yeu_cau({})
+    loc = (f", tên khớp “{lb['tim']}”" if lb["tim"] else "") + (
+        f", chiến dịch {lb['cd']}" if lb["cd"] else "")
     thong_tin = {str(t["advertiser_id"]): t for t in tk}
 
     def tk_cua(r):
@@ -133,7 +175,7 @@ def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, tong: dict[str, di
                                  TB.Cot("Mục tiêu"), TB.Cot("Ngày có số", "so_nguyen"),
                                  TB.Cot("Tiền tệ"), *_cot_so(False)],
                 rows_b, gap_duoc=False, ten_tab=TAB_CHIEN_DICH,
-                mo_ta="Tổng cả kỳ của từng chiến dịch có phân phối, xếp chi giảm dần")
+                mo_ta=f"Tổng cả kỳ của từng chiến dịch{loc}, {cach_xep(lb)}")
     # (c) theo quảng cáo
     rows_c = [[*tk_cua(r)[:3], str(r.get("ad_id") or ""), r.get("ten_ad") or "",
                r.get("noi_dung") or "", r.get("ten_campaign") or "", r.get("ten_nhom") or "",
@@ -143,8 +185,8 @@ def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, tong: dict[str, di
                                 TB.Cot("Nhóm quảng cáo"), TB.Cot("Ngày có số", "so_nguyen"),
                                 TB.Cot("Tiền tệ"), *_cot_so(False)],
                 rows_c, gap_duoc=False, ten_tab=TAB_QUANG_CAO,
-                mo_ta="Tổng cả kỳ của từng quảng cáo có phân phối, xếp chi giảm dần"
-                      + (f" — {len(rows_c):,}/{qc['tong']:,} quảng cáo chi nhiều nhất".replace(",", ".")
+                mo_ta=f"Tổng cả kỳ của từng quảng cáo{loc}, {cach_xep(lb)}"
+                      + (f" — {len(rows_c):,}/{qc['tong']:,} quảng cáo đầu tiên".replace(",", ".")
                          if qc["tong"] > len(rows_c) else ""))
     return [a, b, c]
 
@@ -159,19 +201,27 @@ def ten_nen_tieu_de(nen_tang: str, tk: list[dict]) -> str:
 def tieu_de(yc: dict, tk: list[dict], ten_ben: str) -> str:
     tu, den = _ngay(yc["tu"]), _ngay(yc["den"])
     pham_vi = ten_ben
-    if yc.get("tk") and tk:
+    chon = yc.get("tk_ds") or ([yc["tk"]] if yc.get("tk") else [])
+    if chon and len(tk) == 1:
         pham_vi += f" · {tk[0].get('ten') or tk[0]['advertiser_id']}"
+    elif chon and tk:
+        pham_vi += f" · {len(tk)} tài khoản"
     return f"{ten_nen_tieu_de(yc['nen_tang'], tk)} Ads · {pham_vi} · {tu:%d/%m}–{den:%d/%m/%Y}"
 
 
 def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict, cd: dict,
-                   qc: dict, tong: dict[str, dict]):
-    """`tong` = tổng TOÀN phạm vi theo tiền tệ (`doc_tong_tien_te`), không từ dòng đã cắt."""
+                   qc: dict, tong: dict[str, dict], lb: dict | None = None):
+    """`tong` = tổng TOÀN phạm vi theo tiền tệ (`doc_tong_tien_te`), không từ dòng đã cắt. Ghi chú
+    đầu liệt kê bộ lọc đã dùng (`mo_ta_loc`)."""
     import trinh_bay_sheet as TB
+    lb = lb or loc_yeu_cau(yc)
     tu, den = _ngay(yc["tu"]), _ngay(yc["den"])
+    co_loc = bool(lb["tim"] or lb["cd"])
     so_lieu = [TB.SoLieu("Tài khoản trong phạm vi", len(tk), "so_nguyen"),
-               TB.SoLieu("Chiến dịch có phân phối", cd["tong"], "so_nguyen"),
-               TB.SoLieu("Quảng cáo có phân phối", qc["tong"], "so_nguyen")]
+               TB.SoLieu("Chiến dịch khớp bộ lọc" if co_loc else "Chiến dịch có phân phối",
+                         cd["tong"], "so_nguyen"),
+               TB.SoLieu("Quảng cáo khớp bộ lọc" if co_loc else "Quảng cáo có phân phối",
+                         qc["tong"], "so_nguyen")]
     nhieu = len(tong) > 1
     for tt, t in tong.items():
         h = QC.hieu_qua(t)
@@ -185,6 +235,9 @@ def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict,
                     TB.SoLieu("Follow", t.get("follow"), "so_nguyen", khoi=k),
                     TB.SoLieu("Chi / follow", h["chi_moi_follow"], "tien", tt, khoi=k)]
     ghi_chu = [
+        *mo_ta_loc(yc, lb, tk),
+        "Số liệu chính + dòng TỔNG là tổng cả phạm vi tài khoản + khoảng ngày (bộ lọc bảng không áp "
+        "vào tổng — như số tổng của trang).",
         "Số đọc từ kho quảng cáo của dashboard (đồng bộ TikTok mỗi sáng 06:30, Meta 06:45, đọc lại "
         "7 ngày gần nhất) — giống trang Quảng cáo cùng bộ lọc.",
         "Ngày theo múi giờ tài khoản quảng cáo. Tiền theo tiền tệ từng tài khoản (cột Tiền tệ), "
@@ -193,12 +246,12 @@ def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict,
         "từng dòng (không trung bình tỉ lệ). Ô trống = không có số / mẫu số bằng 0.",
         "Reach chỉ ở tab theo ngày: cộng reach nhiều ngày đếm trùng người.",
         "Chỉ chiến dịch / quảng cáo CÓ phân phối trong kỳ (có hiển thị hoặc chi).",
-        "Sheet riêng tư: chia sẻ link đóng, chỉ người yêu cầu được XEM. Tạo bằng nút Tạo Sheet ở "
-        f"{TRANG} (chỉ quản trị viên).",
+        "Sheet riêng tư: chia sẻ link đóng, chỉ người yêu cầu được XEM. Tạo bằng nút “Xuất Lark "
+        f"Sheet theo bộ lọc này” ở {TRANG} (chỉ quản trị viên).",
     ]
     for ten, d, tran, giu in ((TAB_NGAY, ngay, KS.TRAN_DONG["ngay"], "giữ các ngày gần nhất"),
-                              (TAB_CHIEN_DICH, cd, KS.TRAN_DONG["chien_dich"], "chi nhiều nhất trước"),
-                              (TAB_QUANG_CAO, qc, KS.TRAN_DONG["quang_cao"], "chi nhiều nhất trước")):
+                              (TAB_CHIEN_DICH, cd, KS.TRAN_DONG["chien_dich"], _giu(lb)),
+                              (TAB_QUANG_CAO, qc, KS.TRAN_DONG["quang_cao"], _giu(lb))):
         if d["tong"] > len(d["rows"]):
             ghi_chu.append(f"ĐÃ CẮT tab {ten}: {len(d['rows']):,} / {d['tong']:,} dòng (trần "
                            f"{tran:,} dòng — {giu}). Số liệu chính và dòng TỔNG vẫn là tổng ĐỦ cả "
@@ -284,7 +337,10 @@ def pham_vi(yc: dict, kho, kho_qc) -> list[dict]:
     tu, den = _ngay(yc["tu"]), _ngay(yc["den"])
     if tu > den or (den - tu).days >= QC.XUAT_TOI_DA_NGAY:
         raise LoiYeuCau(f"Khoảng ngày phải từ 1 tới {QC.XUAT_TOI_DA_NGAY} ngày.")
-    tk = QC.tk_xuat(q, list(kho_qc.cac_tk()), yc["ben"], yc["nen_tang"], yc.get("tk"))
+    # 22/10/2026: nhiều tài khoản (cột tk_ds); dòng cũ chỉ có cột tk. Mã rơi khỏi phạm vi (bị bỏ bên
+    # / bỏ duyệt từ lúc bấm) thì bỏ; không còn mã nào → lỗi như cũ.
+    tk = QC.tk_xuat(q, list(kho_qc.cac_tk()), yc["ben"], yc["nen_tang"],
+                    yc.get("tk_ds") or yc.get("tk"))
     if not tk:
         raise LoiYeuCau("Phạm vi này không còn tài khoản quảng cáo nào (đổi bên / nền tảng / "
                         "tài khoản rồi tạo lại).")
@@ -314,16 +370,22 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
         ben = yc["ben"]
         ten_ben = {**ks.ten_ben(), QC.TAT_CA: "Tất cả bên", QC.CHUA_GAN: "Chưa gán bên"}.get(
             ben, ben.upper())
+        lb = loc_yeu_cau(yc)
         ngay = ks.doc_theo_ngay(ids, tu, den)
-        cd = ks.doc_tong("chien_dich", ids, tu, den)
-        qc = ks.doc_tong("quang_cao", ids, tu, den)
+        if lb["tim"] and not lb["mau"]:
+            # Chữ tìm không còn chữ/số Latin nào: không khớp gì (như bảng trang Quảng cáo).
+            cd = qc = {"rows": [], "tong": 0}
+        else:
+            loc = {"sap": lb["sap"], "tang": lb["chieu"] == "tang", "mau": lb["mau"], "cd": lb["cd"]}
+            cd = ks.doc_tong("chien_dich", ids, tu, den, **loc)
+            qc = ks.doc_tong("quang_cao", ids, tu, den, **loc)
         tong = ks.doc_tong_tien_te(ids, tu, den)
         tde = tieu_de(yc, tk, ten_ben)
 
         def con_quyen() -> bool:
             return PQ.la_quan_tri(PQ.chuan(kho.quyen_cua(email)))
-        kq = xuat(tde, dung_bang(tk, ngay, cd, qc, tong),
-                  dung_tong_quan(yc, tk, ten_ben, tde, ngay, cd, qc, tong),
+        kq = xuat(tde, dung_bang(tk, ngay, cd, qc, tong, lb=lb),
+                  dung_tong_quan(yc, tk, ten_ben, tde, ngay, cd, qc, tong, lb),
                   sau_khi_tao=TB.khoa_rieng_tu,
                   cap_quyen=lambda tok: cap_quyen_xem(lark, tok, email, con_quyen, uid))
         if not KS.link_lark(kq.url):

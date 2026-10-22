@@ -35,7 +35,8 @@ class GiaKhoSheet:
     def __init__(self):
         self.rows: list[dict] = []
 
-    def tao(self, nguoi_hoi, ben, nen_tang, tk, tu, den, *, tran_gio=KS.TRAN_GIO):
+    def tao(self, nguoi_hoi, ben, nen_tang, tk, tu, den, *, tran_gio=KS.TRAN_GIO, tk_ds=None,
+            tim=None, cd=None, sap=None, chieu=None):
         bay = datetime.datetime.now(UTC)
         cua = [r for r in self.rows if r["nguoi_hoi"] == nguoi_hoi]
         dang = sum(1 for r in cua if KS.hien_trang(r, bay) in ("cho", "dang_tao"))
@@ -43,8 +44,11 @@ class GiaKhoSheet:
         ly = KS.ly_do_chan(dang, gio, tran_gio)
         if ly:
             raise LoiDuLieu(ly)
+        ds = list(tk_ds or []) or None                 # như KS.tao: một mã → ghi cả cột tk cũ
         r = {"id": len(self.rows) + 1, "nguoi_hoi": nguoi_hoi, "ben": ben, "nen_tang": nen_tang,
-             "tk": tk, "tu": tu, "den": den, "trang_thai": "cho", "tieu_de": None, "sheet_url": None,
+             "tk": tk or (ds[0] if ds and len(ds) == 1 else None), "tk_ds": ds, "tu": tu,
+             "den": den, "tim": tim, "cd": cd, "sap": sap, "chieu": chieu,
+             "trang_thai": "cho", "tieu_de": None, "sheet_url": None,
              "so_dong": {}, "loi": None, "da_nhan_tin": False, "tao_luc": bay, "bat_dau_luc": None,
              "xong_luc": None}
         self.rows.append(r)
@@ -112,9 +116,12 @@ def test_tao_sheet_ghi_yeu_cau_dung_pham_vi_va_tran():
     csrf = dang_nhap(c, QL)
     t = c.get(f"/quang-cao?{Q}&ben=matemade&nen_tang=tiktok").text
     khoi = t.split('id="sheet"')[1].split("</section>")[0]
-    assert "Tạo Lark Sheet" in t and 'action="/quang-cao/tao-sheet"' in khoi
+    assert "Xuất Lark Sheet theo bộ lọc này" in khoi and 'action="/quang-cao/tao-sheet"' in khoi
     assert 'name="ben" value="matemade"' in khoi and 'name="nen_tang" value="tiktok"' in khoi
-    assert "7 ngày" in khoi and "Theo quảng cáo" in khoi and "Chưa tạo Sheet nào" in khoi
+    assert "7 ngày" in khoi and "quảng cáo" in khoi and "Chưa xuất Sheet nào" in khoi
+    # 22/10/2026: MỘT chỗ xuất — trong mục "Chiến dịch và quảng cáo", không còn mục riêng cuối trang.
+    assert t.count('action="/quang-cao/tao-sheet"') == 1 and "Tạo Lark Sheet" not in t
+    assert t.index('id="top"') < t.index('id="sheet"') < t.index('id="qc-kg-tieu-de"')
     r = c.post("/quang-cao/tao-sheet", data=_form(csrf, ben="matemade", nen_tang="tiktok",
                                                    tk=MM_MKT))
     assert r.status_code == 303 and r.headers["location"].endswith("#sheet")
@@ -264,7 +271,10 @@ class KhoNghe:
                 for a in ids for i in range((den - tu).days + 1)]
         return {"rows": rows, "tong": len(rows)}
 
-    def doc_tong(self, cap, ids, tu, den):
+    loc: list = []
+
+    def doc_tong(self, cap, ids, tu, den, toi_da=None, **loc):
+        self.loc = [*self.loc, (cap, loc)]
         if cap == "chien_dich":
             rows = [{"campaign_id": "17001", "advertiser_id": ids[0], "ten": "=HYPERLINK(1)",
                      "muc_tieu": "VIDEO_VIEWS", "chi": 500000.0, "hien_thi": 50000, "click": 400,
@@ -412,7 +422,7 @@ def test_bo_nghe_rieng_tu_hong_thi_khong_ghi_so(monkeypatch):
 
 def test_bo_nghe_loi_bat_ngo_luon_ket_thuc(monkeypatch):
     class Hong(KhoNghe):
-        def doc_tong(self, *a):
+        def doc_tong(self, *a, **kw):
             raise RuntimeError("statement timeout token=abc")
     import apify_tool as A
     lk = LarkMark()
@@ -473,10 +483,14 @@ def test_schema_quyen_rls_trigger():
     a = sql.index("BEGIN;\nREVOKE ALL ON yeu_cau_sheet_qc FROM mark, lang_nghe_web;")
     assert a > sql.index("GRANT SELECT ON ALL TABLES IN SCHEMA public TO lang_nghe_web;")
     khoi = sql[a:sql.index("COMMIT;", a)]
-    ins = re.search(r"GRANT INSERT \(([^)]*)\) ON yeu_cau_sheet_qc TO lang_nghe_web;", khoi).group(1)
-    assert {x.strip() for x in ins.split(",")} == {"nguoi_hoi", "ben", "nen_tang", "tk", "tu", "den"}
-    doc = re.search(r"GRANT SELECT \(([^)]*)\) ON yeu_cau_sheet_qc TO lang_nghe_web;", khoi).group(1)
+    ins = re.search(r"GRANT INSERT \(([^)]*)\)\s+ON yeu_cau_sheet_qc TO lang_nghe_web;", khoi).group(1)
+    assert {x.strip() for x in ins.split(",")} == {"nguoi_hoi", "ben", "nen_tang", "tk", "tu", "den",
+                                                    "tk_ds", "tim", "cd", "sap", "chieu"}
+    doc = re.search(r"GRANT SELECT \(([^)]*)\)\s+ON yeu_cau_sheet_qc TO lang_nghe_web;", khoi).group(1)
     assert "loi_noi_bo" not in doc and "sheet_url" in doc
+    assert {"tk_ds", "tim", "cd", "sap", "chieu"} <= {x.strip() for x in doc.split(",")}
+    # Mọi cột web đọc (KS._COT_WEB) đều được cấp SELECT theo cột.
+    assert {x.strip() for x in KS._COT_WEB.split(",")} <= {x.strip() for x in doc.split(",")}
     upd = re.search(r"GRANT UPDATE \(([^)]*)\) ON yeu_cau_sheet_qc TO mark;", khoi).group(1)
     assert {x.strip() for x in upd.split(",")} == {
         "trang_thai", "tieu_de", "sheet_url", "so_dong", "loi", "loi_noi_bo", "da_nhan_tin",
@@ -625,3 +639,220 @@ def test_schema_mark_doc_union_id():
     sql = (Path(__file__).resolve().parents[1] / "deploy" / "lang-nghe" / "schema.sql"
            ).read_text(encoding="utf-8")
     assert "GRANT SELECT (lark_union_id) ON nguoi_xem TO mark;" in sql
+
+
+# ───────────────────────────── 22/10/2026: Sheet theo ĐÚNG bộ lọc (một chỗ, nhiều tài khoản) ─────────────────────────────
+class _FormDs(str):
+    """Thân form urlencoded như trình duyệt gửi: `tk` lặp lại."""
+
+
+def _form_ds(csrf, tk=(), **kw):
+    from urllib.parse import urlencode
+    return _FormDs(urlencode([(k, v) for k, v in _form(csrf, **kw).items() if k != "tk"]
+                             + [("tk", x) for x in tk]))
+
+
+def _gui(c, body):
+    return c.post("/quang-cao/tao-sheet", content=body.encode(),
+                  headers={"content-type": "application/x-www-form-urlencoded"})
+
+
+def test_tao_sheet_nhieu_tai_khoan_va_loc_bang():
+    _a, c, kho, _kq, ks = _app()
+    csrf = dang_nhap(c, QL)
+    r = _gui(c, _form_ds(
+        csrf, tk=(MM_2, HAPAS_KOC), tim="  Chiến   dịch ", cd="ca04010000", sap="hien_thi",
+        chieu="tang"))
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.endswith("#sheet") and loc.count("tk=") == 2 and "tim=Chi" in loc and "cd=ca04010000" in loc
+    x = ks.rows[0]
+    assert x["tk_ds"] == [HAPAS_KOC, MM_2] and x["tk"] is None           # thứ tự theo phạm vi
+    assert (x["tim"], x["cd"], x["sap"], x["chieu"]) == ("Chiến dịch", "ca04010000", "hien_thi", "tang")
+    assert (QL, KS.HANH_DONG, "sheet_qc:1") in kho.nk
+    j = c.get("/api/qc/sheet").json()
+    assert "2 tài khoản" in j["ds"][0]["pham_vi"] and "tìm “Chiến dịch”" in j["ds"][0]["pham_vi"]
+
+
+def test_tao_sheet_tk_ngoai_pham_vi_va_loc_sai():
+    _a, c, _kho, _kq, ks = _app()
+    csrf = dang_nhap(c, QL)
+    for f, cau in ((_form_ds(csrf, tk=(MM_2, HAPAS_KOC), ben="matemade"), "không còn trong phạm vi"),
+                   (_form_ds(csrf, tk=(HAPAS_KOC,), ben="matemade"), "chưa có tài khoản"),
+                   (_form_ds(csrf, tk=("x'--",)), "Bộ lọc không hợp lệ"),
+                   (_form_ds(csrf, tk=tuple(str(10 ** 6 + i) for i in range(QC.TK_TOI_DA + 1))),
+                    "Bộ lọc không hợp lệ")):
+        r = _gui(c, f)
+        assert r.status_code == 303 and cau in c.get(r.headers["location"].split("#")[0]).text, cau
+    assert ks.rows == []
+    # Chọn đủ mọi tài khoản của phạm vi = NULL (mọi tài khoản); sap / chieu sai → mặc định.
+    r = _gui(c, _form_ds(csrf, tk=(MM_2, MM_MKT), ben="matemade", sap="chi; drop", chieu="ASC",
+                         cd="a b"))
+    assert r.status_code == 303
+    x = ks.rows[0]
+    assert x["tk_ds"] is None and x["tk"] is None and x["sap"] == "chi" and x["chieu"] == "giam"
+    assert x["cd"] is None and x["tim"] is None
+    # Một tài khoản: ghi cả cột tk cũ (bộ nghe cũ vẫn đọc được trong lúc lên mã).
+    ks.rows[0]["trang_thai"] = "xong"
+    _gui(c, _form_ds(csrf, tk=(MM_2,), ben="matemade"))
+    assert ks.rows[1]["tk_ds"] == [MM_2] and ks.rows[1]["tk"] == MM_2
+
+
+def test_form_xuat_sheet_mang_du_bo_loc_trang():
+    _a, c, _kho, _kq, _ks = _app()
+    dang_nhap(c, QL)
+    t = c.get(f"/quang-cao?{Q}&tk={MM_2}&tk={HAPAS_KOC}&tim=tet&sap=click&chieu=tang&cd=ca1&ta=3").text
+    f = t.split('data-o="tao-sheet"')[1].split("</form>")[0]
+    an = re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', f)
+    assert ("tim", "tet") in an and ("cd", "ca1") in an and ("sap", "click") in an
+    assert ("chieu", "tang") in an and [v for k, v in an if k == "tk"] == [HAPAS_KOC, MM_2]
+    assert not any(k in ("ta", "tc", "so") for k, _ in an)          # mọi dòng khớp, không một trang
+    assert "Xuất Lark Sheet theo bộ lọc này" in f
+
+
+def test_bo_nghe_ap_dung_loc_bang_va_nhieu_tk(monkeypatch):
+    yc = {**YC, "nen_tang": "tiktok", "tk_ds": [HAPAS_KOC], "tim": "Tết", "cd": "17001",
+          "sap": "hien_thi", "chieu": "tang"}
+    kq, k, lk = _chay(monkeypatch, yc)
+    assert kq["trang_thai"] == "xong"
+    loc = {"sap": "hien_thi", "tang": True, "mau": "tet", "cd": "17001"}
+    assert k.loc == [("chien_dich", loc), ("quang_cao", loc)]
+    # Tab theo ngày chỉ theo tài khoản + ngày (không lọc bảng): đúng 1 tài khoản đã chọn × 7 ngày.
+    ngay = lk.gia.du_lieu(X.TAB_NGAY)
+    assert len(ngay) == 1 + 7 and {r[3] for r in ngay[1:]} == {HAPAS_KOC}
+    assert lk.gia.dau.title == "TikTok Ads · HAPAS · HAPAS - KOC · 12/10–18/10/2026"
+    ghi = " ".join(str(c) for r in lk.gia.o("Tổng quan") for c in r)
+    assert "Bộ lọc tài khoản: 1 tài khoản đã chọn (HAPAS - KOC)" in ghi
+    assert "tìm theo tên “Tết”" in ghi and "chỉ chiến dịch mã 17001" in ghi
+    assert "xếp theo Hiển thị thấp → cao" in ghi and "chỉ theo tài khoản + khoảng ngày" in ghi
+    assert "Chiến dịch khớp bộ lọc" in ghi
+    # Dòng cũ (không cột mới) = như trước: chi giảm, không lọc, mọi tài khoản của phạm vi.
+    kq, k, lk = _chay(monkeypatch)
+    assert k.loc[0] == ("chien_dich", {"sap": "chi", "tang": False, "mau": "", "cd": ""})
+    ghi = " ".join(str(c) for r in lk.gia.o("Tổng quan") for c in r)
+    assert "mọi tài khoản của phạm vi (2)" in ghi and "xếp theo Chi cao → thấp" in ghi
+    # Chữ tìm không còn chữ / số Latin: không khớp gì, không đọc kho.
+    kq, k, lk = _chay(monkeypatch, {**YC, "tim": "…"})
+    assert kq["trang_thai"] == "xong" and k.loc == [] and kq["so_dong"]["chien_dich"] == 0
+    # Nhiều tài khoản: mã rơi khỏi phạm vi bị bỏ; không còn mã nào → lỗi như cũ.
+    kq, k, lk = _chay(monkeypatch, {**YC, "tk_ds": [HAPAS_KOC, LE, MM_2]})
+    assert {r[3] for r in lk.gia.du_lieu(X.TAB_NGAY)[1:]} == {HAPAS_KOC, LE}
+    assert "2 tài khoản" in lk.gia.dau.title
+    kq, k, lk = _chay(monkeypatch, {**YC, "tk_ds": [MM_2]})
+    assert kq["trang_thai"] == "loi" and "không còn tài khoản" in k.ket[0][2]["loi"]
+
+
+def _ket_noi_gia(tra):
+    goi = []
+
+    class C:
+        def execute(self, sql, ts=()):
+            goi.append((sql, list(ts)))
+            self._r = tra(sql, list(ts))
+            return self
+
+        def fetchall(self):
+            return self._r
+
+        def fetchone(self):
+            return self._r[0] if self._r else None
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def kn(*a, **k):
+        yield C()
+    return goi, kn
+
+
+def test_doc_tong_sheet_dung_sql_bang_trang(monkeypatch):
+    """Tab chiến dịch / quảng cáo: CHÍNH `kho_qc.sql_bang` (không OFFSET, thêm so_ngay), tên khớp
+    bằng `kho_qc.ma_khop_ten`; mặc định = thứ tự cũ (chi giảm, hiển thị, mã)."""
+    from dashboard import kho_qc as KQ
+    tu, den = datetime.date(2026, 10, 1), datetime.date(2026, 10, 7)
+
+    def tra(sql, ts):
+        if sql.startswith("WITH"):
+            return [{"campaign_id": "c1", "ad_id": "c1", "advertiser_id": "1", "chi": 5.0,
+                     "so_ngay": 3, "tong_khop": 9}]
+        if "advertiser_id = ANY(%s) AND ngay BETWEEN" in sql and sql.startswith("SELECT DISTINCT"):
+            return [{"campaign_id": k, "ad_id": k, "ten": t, "ten_ad": t, "ten_campaign": None}
+                    for k, t in (("c1", "Chiến dịch TẾT"), ("c2", "Sale 11.11"))]
+        return [{"campaign_id": "c1", "ad_id": "c1", "ten": "Tên", "ten_ad": "Tên"}]
+    for cap, cap_qc in (("chien_dich", "campaign"), ("quang_cao", "ad")):
+        goi, kn = _ket_noi_gia(tra)
+        monkeypatch.setattr(KS, "ket_noi", kn)
+        r = KS.doc_tong(cap, ["1"], tu, den)
+        sql, ts = next(g for g in goi if g[0].startswith("WITH"))
+        khoa = "campaign_id" if cap_qc == "campaign" else "ad_id"
+        assert sql == KQ.sql_bang(cap_qc, "chi", False, loc_ma=False, cd=False, them=KS._SO_NGAY,
+                                  bo_qua=False)
+        assert sql.endswith(f"ORDER BY t.chi DESC NULLS LAST, t.hien_thi DESC NULLS LAST, "
+                            f"t.{khoa} LIMIT %s") and "OFFSET" not in sql
+        assert sql.count("%s") == len(ts) and ts[-1] == KS.TRAN_DONG[cap]
+        assert r["tong"] == 9 and "tong_khop" not in r["rows"][0] and r["rows"][0]["so_ngay"] == 3
+        # Có lọc: tên khớp ở Python → lọc theo mã; chiến dịch; xếp + chiều đúng bảng SAP_BANG_SQL.
+        goi, kn = _ket_noi_gia(tra)
+        monkeypatch.setattr(KS, "ket_noi", kn)
+        KS.doc_tong(cap, ["1"], tu, den, sap="ctr", tang=True, mau="tet", cd="cd9")
+        sql, ts = next(g for g in goi if g[0].startswith("WITH"))
+        assert sql == KQ.sql_bang(cap_qc, "ctr", True, loc_ma=True, cd=True, them=KS._SO_NGAY,
+                                  bo_qua=False)
+        assert KQ.SAP_BANG_SQL["ctr"] in sql and sql.count("%s") == len(ts)
+        assert ts[3] == "cd9" and ts[4] == ["c1"]                   # chỉ "Chiến dịch TẾT" khớp
+        goi, kn = _ket_noi_gia(tra)
+        monkeypatch.setattr(KS, "ket_noi", kn)
+        assert KS.doc_tong(cap, ["1"], tu, den, mau="khongco") == {"rows": [], "tong": 0}
+        assert not any(g[0].startswith("WITH") for g in goi)
+
+
+def test_kho_sheet_tao_ghi_cot_moi_va_bao_loc_sai(monkeypatch):
+    class InvalidParameterValue(Exception):
+        pass
+
+    def tra(sql, ts):
+        if sql.startswith("INSERT"):
+            assert sql.count("%s") == len(ts) == 11
+            if ts[7] == "hong":
+                raise InvalidParameterValue("yeu_cau_sheet_qc: tim")
+            return [{"id": 1, "tk": ts[3], "tk_ds": ts[4], "tim": ts[7]}]
+        return [{"dang": 0, "gio": 0}]
+    goi, kn = _ket_noi_gia(tra)
+    monkeypatch.setattr(KS, "ket_noi", kn)
+    d = datetime.date(2026, 10, 1)
+    r = KS.tao(QL, "hapas", "tiktok", None, d, d, tk_ds=["1"], tim="tet", sap="chi", chieu="giam")
+    assert r == {"id": 1, "tk": "1", "tk_ds": ["1"], "tim": "tet"}
+    r = KS.tao(QL, "hapas", "tiktok", None, d, d, tk_ds=["1", "2"])
+    assert r["tk"] is None and r["tk_ds"] == ["1", "2"]
+    assert KS.tao(QL, "hapas", "tiktok", "9", d, d)["tk_ds"] is None        # nơi gọi cũ
+    with pytest.raises(LoiDuLieu, match="Bộ lọc không hợp lệ"):
+        KS.tao(QL, "hapas", "tiktok", None, d, d, tim="hong")
+    ins = [s for s, _ in goi if s.startswith("INSERT")][0]
+    assert "tk_ds, tu, den, tim, cd, sap, chieu" in ins and "RETURNING " + KS._COT_WEB in ins
+
+
+def test_schema_cot_loc_va_trigger_kiem():
+    sql = (GOC / "deploy" / "lang-nghe" / "schema.sql").read_text(encoding="utf-8")
+    alter = sql[sql.index("ALTER TABLE yeu_cau_sheet_qc ADD COLUMN"):]
+    alter = alter[:alter.index(";")]
+    for cot, kieu in (("tk_ds", "TEXT[]"), ("tim", "TEXT"), ("cd", "TEXT"), ("sap", "TEXT"),
+                      ("chieu", "TEXT")):
+        assert f"ADD COLUMN IF NOT EXISTS {cot} {kieu}" in alter, cot
+        assert f"COMMENT ON COLUMN yeu_cau_sheet_qc.{cot} IS" in sql, cot
+    assert "NOT NULL" not in alter and "DEFAULT" not in alter       # thêm cột tức thì, không viết lại
+    assert sql.index("ALTER TABLE yeu_cau_sheet_qc ADD COLUMN") < sql.index(
+        "CREATE OR REPLACE FUNCTION chuan_yeu_cau_sheet_qc()")
+    chuan = sql[sql.index("CREATE OR REPLACE FUNCTION chuan_yeu_cau_sheet_qc()"):]
+    chuan = chuan[:chuan.index("END $fn$;")]
+    # Cùng luật với app: tim ≤ TIM_TOI_DA, cd như loc_bang, sap ⊇ SAP_BANG, chieu, ≤ TK_TOI_DA mã.
+    assert f"length(NEW.tim) > {QC.TIM_TOI_DA}" in chuan
+    assert "NEW.cd !~ '^[0-9A-Za-z_-]{0,64}$'" in chuan
+    sap = re.search(r"NEW\.sap NOT IN \(([^)]*)\)", chuan).group(1)
+    assert set(QC.SAP_BANG) <= {x.strip().strip("'") for x in sap.split(",")}
+    chieu = re.search(r"NEW\.chieu NOT IN \(([^)]*)\)", chuan).group(1)
+    assert {x.strip().strip("'") for x in chieu.split(",")} == set(QC.CHIEU_BANG)
+    assert f"cardinality(NEW.tk_ds) > {QC.TK_TOI_DA}" in chuan
+    assert "x !~ '^(act_)?[0-9]{1,30}$'" in chuan
+    assert chuan.count("USING ERRCODE = 'invalid_parameter_value'") == 5
+    # Kiểm bộ lọc TRƯỚC khoá advisory / đếm trần (giá trị sai không giữ khoá).
+    assert chuan.index("invalid_parameter_value") < chuan.index("pg_advisory_xact_lock")

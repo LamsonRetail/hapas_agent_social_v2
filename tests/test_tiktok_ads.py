@@ -504,7 +504,7 @@ class GiaKhoQC:
                            else None),
     }
 
-    def qc_bang(self, cap, ids, tu, den, *, sap, tang=False, mau="", cd="", n=10):
+    def qc_bang(self, cap, ids, tu, den, *, sap, tang=False, mau="", cd="", n=10, bo_qua=0):
         bang, khoa = (("qc_campaign_ngay", "campaign_id") if cap == "campaign"
                       else ("qc_ad_ngay", "ad_id"))
         cac = [r for r in self.bang[bang].values() if r["advertiser_id"] in ids
@@ -531,7 +531,14 @@ class GiaKhoQC:
         co.sort(key=lambda x: ((f(x) if tang else -f(x)), -(x.get("hien_thi") or 0), x[khoa]))
         khong = sorted((x for x in ra if f(x) is None),
                        key=lambda x: (-(x.get("hien_thi") or 0), x[khoa]))
-        return {"rows": (co + khong)[:n], "tong": len(ra)}
+        # Phân trang như KQ.qc_bang (22/10/2026): quá trang cuối → trang cuối.
+        n = max(1, min(int(n), KQ.TOP_TOI_DA))
+        bo_qua = max(0, int(bo_qua))
+        if ra and bo_qua >= len(ra):
+            bo_qua = (len(ra) - 1) // n * n
+        if not ra:
+            bo_qua = 0
+        return {"rows": (co + khong)[bo_qua:bo_qua + n], "tong": len(ra), "bo_qua": bo_qua}
 
     def qc_khan_gia(self, ids):
         rows = [r for r in self.bang["qc_khan_gia"].values() if r["advertiser_id"] in ids]

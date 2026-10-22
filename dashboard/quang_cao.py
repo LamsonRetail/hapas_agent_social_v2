@@ -527,8 +527,25 @@ SAP_BANG_TIEN = frozenset({"chi", "cpm", "roas"})
 #: CPM / CTR chỉ xếp hạng dòng có ≥ 1.000 hiển thị (dòng 3 hiển thị CTR 33% không phải "tốt nhất");
 #: dòng dưới ngưỡng xuống cuối, vẫn hiện số. Giải thích ở nút "i" của khối.
 NGUONG_TI_LE = 1000
-SO_DONG_BANG = (10, 25, 50)
 TIM_TOI_DA = 100
+#: 22/10/2026 (chủ dự án): bỏ ô "Số dòng" — mỗi bảng 20 dòng một trang, phân trang ở MÁY CHỦ
+#: (LIMIT/OFFSET trong `kho_qc.qc_bang`); trang của bảng chiến dịch ở tham số `tc`, quảng cáo ở `ta`.
+#: Tham số `so` cũ trong URL bị lờ đi (không lỗi).
+DONG_MOI_TRANG = 20
+TRANG_TOI_DA = 1_000_000        # chặn OFFSET khổng lồ từ URL gõ tay (vẫn kẹp về trang cuối)
+#: Chọn nhiều tài khoản (22/10/2026): tối đa chừng này mã trong URL / yêu cầu Sheet (= trigger
+#: `chuan_yeu_cau_sheet_qc`). Không chọn = mọi tài khoản trong phạm vi.
+TK_TOI_DA = 200
+CHIEU_BANG = ("giam", "tang")
+_MA_TK = re.compile(r"(act_)?[0-9]{1,30}")
+
+
+def so_trang(x) -> int:
+    """Tham số trang (`tc` / `ta`) → số trang ≥ 1; sai / thiếu → 1 (không báo lỗi)."""
+    s = str(x or "").strip()
+    if not s.isdecimal() or len(s) > 7:
+        return 1
+    return max(1, min(int(s), TRANG_TOI_DA))
 
 
 def loc_bang(qp, co_tien: bool) -> dict:
@@ -536,22 +553,55 @@ def loc_bang(qp, co_tien: bool) -> dict:
     báo lỗi — như `cot_sap`). `sap` tiền với người không xem tiền → hien_thi (không lộ thứ hạng chi).
       tim   — chữ tìm trong tên chiến dịch / quảng cáo (≤ 100 ký tự; so khớp bỏ dấu `chu_tim`)
       cd    — mã chiến dịch: bảng chiến dịch chỉ dòng đó, bảng quảng cáo chỉ quảng cáo của nó
-      sap   — mã trong SAP_BANG; chieu — giam | tang; so — 10 | 25 | 50 dòng mỗi bảng."""
+      sap   — mã trong SAP_BANG; chieu — giam | tang
+      tc/ta — trang bảng chiến dịch / quảng cáo (22/10/2026, thay "Số dòng"; máy chủ kẹp về trang
+              cuối). Bộ nghe Sheet (`xuat_sheet_qc`) dùng lại hàm này cho cột tim/cd/sap/chieu của
+              yêu cầu — cùng một luật kiểm hai đầu."""
     sap = str(qp.get("sap") or "")
     if sap not in SAP_BANG or (sap in SAP_BANG_TIEN and not co_tien):
         sap = "chi" if co_tien else "hien_thi"
     chieu = "tang" if qp.get("chieu") == "tang" else "giam"
-    try:
-        so = int(qp.get("so") or 0)
-    except (TypeError, ValueError):
-        so = 0
-    so = so if so in SO_DONG_BANG else SO_DONG_BANG[0]
     tim = " ".join(str(qp.get("tim") or "").split())[:TIM_TOI_DA]
     cd = str(qp.get("cd") or "").strip()
     if len(cd) > 64 or not re.fullmatch(r"[0-9A-Za-z_-]*", cd):
         cd = ""
     return {"tim": tim, "mau": chu_tim(tim) if tim else "", "cd": cd, "sap": sap,
-            "chieu": chieu, "so": so}
+            "chieu": chieu, "tc": so_trang(qp.get("tc")), "ta": so_trang(qp.get("ta"))}
+
+
+def o_trang(trang: int, so_trang_: int) -> list[int | None]:
+    """Các ô của thanh trang kiểu cổ điển (None = "…"): ≤ 8 trang hiện đủ; gần đầu
+    1 2 3 4 5 6 … cuối; gần cuối 1 … (6 trang cuối); giữa 1 … t-1 t t+1 … cuối."""
+    n = max(1, int(so_trang_))
+    t = max(1, min(int(trang), n))
+    if n <= 8:
+        return list(range(1, n + 1))
+    if t <= 4:
+        return [*range(1, 7), None, n]
+    if t >= n - 3:
+        return [1, None, *range(n - 5, n + 1)]
+    return [1, None, t - 1, t, t + 1, None, n]
+
+
+def tk_chon(gia_tri, tk_ben: list[dict]) -> tuple[list[str], list[str]]:
+    """Tham số `tk` (lặp lại được; một `tk=` cũ vẫn dùng được) → (mã đã chọn TRONG phạm vi theo thứ
+    tự danh sách, mã ngoài phạm vi / sai dạng). Trùng bỏ; quá TK_TOI_DA mã → phần dư tính là sai.
+    Chọn đủ mọi tài khoản = không chọn (mọi tài khoản) — URL / yêu cầu Sheet gọn."""
+    if isinstance(gia_tri, str):
+        gia_tri = [gia_tri]
+    vao: list[str] = []
+    for x in gia_tri or ():
+        s = str(x or "").strip()
+        if s and s not in vao:
+            vao.append(s)
+    co = {str(t["advertiser_id"]) for t in tk_ben}
+    ngoai = [s for s in vao if s not in co or not _MA_TK.fullmatch(s)]
+    ngoai += [s for s in vao if s not in ngoai][TK_TOI_DA:]
+    giu = set(vao) - set(ngoai)
+    chon = [str(t["advertiser_id"]) for t in tk_ben if str(t["advertiser_id"]) in giu]
+    if chon and len(chon) == len(co):
+        chon = []
+    return chon, ngoai
 
 
 def dong_top(r: dict) -> dict:
@@ -662,14 +712,17 @@ XUAT_TOI_DA_NGAY = 400          # = KHOANG_TOI_DA_NGAY của trang; CHECK của 
 
 
 def tk_xuat(q: dict | None, cac_tk: list[dict], ben: str, nen_tang: str,
-            tk: str | None = None) -> list[dict]:
+            tk: str | list[str] | tuple[str, ...] | None = None) -> list[dict]:
     """Tài khoản của phạm vi xuất — CÙNG luật trang /quang-cao: đúng nền tảng, đã duyệt, trong bên
-    người này xem được; `tk` (nếu chọn) phải thuộc phạm vi đó. Ngoài phạm vi → [] (như không có)."""
+    người này xem được; `tk` (nếu chọn) phải thuộc phạm vi đó. Ngoài phạm vi → [] (như không có).
+    22/10/2026: `tk` nhận MỘT mã (dòng cũ, cột tk) hoặc DANH SÁCH mã (cột tk_ds) — trả phần giao
+    với phạm vi; nơi gọi so độ dài để biết có mã nào rơi khỏi phạm vi."""
     if nen_tang not in (*NEN_TANG_QC, TAT_CA) or not ben:
         return []
     ds = tk_trong_pham_vi(q, tk_dung(cac_tk, nen_tang), ben)
     if tk:
-        ds = [t for t in ds if str(t.get("advertiser_id")) == str(tk)]
+        chon = {str(tk)} if isinstance(tk, str) else {str(x) for x in tk}
+        ds = [t for t in ds if str(t.get("advertiser_id")) in chon]
     return ds
 
 
