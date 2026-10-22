@@ -338,7 +338,8 @@ def test_api_va_trang_nhieu_tai_khoan_trong_pham_vi():
     assert d["kpi"]["chi"] == tong["chi"]
     assert sum(x["hien_thi"] for x in d["theo_ngay"]) == tong["hien_thi"]           # biểu đồ
     t0, t1 = QC.khoang_truoc(TU, DEN)                                               # kỳ trước
-    assert d["kpi_truoc"] == json_kpi(QC.kpi(kho_qc.qc_tong([MM_2, HAPAS_KOC], t0, t1)))
+    truoc = QC.loc_doanh_thu(QC.kpi(kho_qc.qc_tong([MM_2, HAPAS_KOC], t0, t1)))
+    assert d["kpi_truoc"] == json_kpi(truoc)
     assert {r["advertiser_id"] for r in d["campaign"] + d["ad"]} == {MM_2, HAPAS_KOC}
     assert d["bang"]["tong_ad"] < tat["bang"]["tong_ad"]
     # Một tk= cũ vẫn chạy; chọn đủ mọi tài khoản = tất cả.
