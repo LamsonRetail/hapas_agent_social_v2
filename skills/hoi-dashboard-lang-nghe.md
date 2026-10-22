@@ -36,6 +36,9 @@ Câu hỏi của người dùng là gốc — tự suy, ít hỏi lại:
   và dùng số đang có kèm giờ cập nhật cuối.
 - Quảng cáo: Mark CHỈ ĐỌC. Không đề nghị, không hứa tạm dừng / bật / tắt / đổi ngân sách chiến
   dịch. Số tiền chỉ trả bằng chữ, chỉ bên người hỏi được xem.
+- Doanh thu Shop / ROAS quảng cáo: tạm KHÔNG báo (chủ dự án 22/10/2026 — nền tảng đo khác cách
+  công ty tự tính). Người hỏi thì nói rõ vậy và gợi ý xem báo cáo doanh thu của công ty; không
+  ước, không tự tính từ số khác.
 
 ## Ai được hỏi
 

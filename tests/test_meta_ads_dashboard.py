@@ -979,9 +979,17 @@ def test_bigquery_nen_tang_khong_token_khong_email(monkeypatch):
 
 
 def test_meta_ads_tool_cu_khong_doi():
-    kq = subprocess.run(["git", "diff", "--quiet", "c1e1627", "--", "meta_ads_tool.py"],
-                        cwd=GOC, capture_output=True, check=False)
-    assert kq.returncode == 0
+    """22/10/2026 (chủ dự án): meta_ads_tool chỉ được đổi phần tạm gỡ doanh thu / ROAS — mọi dòng
+    khác vẫn như c1e1627."""
+    kq = subprocess.run(["git", "diff", "-U0", "c1e1627", "--", "meta_ads_tool.py"],
+                        cwd=GOC, capture_output=True, check=False, text=True, encoding="utf-8")
+    duoc = ("DOANH_THU", "ROAS", "_an(", "def _an", "hoi_tiep", "y_nghia", "GROUPS.get(key",
+            "Meta có thể ẩn số mua", "lead, tin nhắn vì quyền riêng tư", "Tiếp cận, tần suất",
+            'SCHEMA = {"name": "chi_so_ads"', '"chi_so": {"type": "array"')
+    doi = [d for d in kq.stdout.splitlines() if d[:1] in "+-" and not d.startswith(("+++", "---"))]
+    la = [d for d in doi if d[1:].strip() and not d[1:].strip().startswith("#")
+          and not any(x in d for x in duoc)]
+    assert kq.returncode == 0 and doi and not la, la
 
 
 # ───────────────────────────── soát độc lập 20/10/2026 ─────────────────────────────

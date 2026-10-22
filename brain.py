@@ -200,7 +200,8 @@ _TOOLING_NOTE = "\n".join(
         "danh sách dài ra Sheet → `chi_so_bai`; tìm bài mới theo từ khoá → `social_listen`. "
         "Quảng cáo: Mark CHỈ "
         "ĐỌC — không bao giờ đề nghị/hứa tạm dừng, bật/tắt, đổi ngân sách chiến dịch; số tiền chỉ "
-        "trả bằng chữ.",
+        "trả bằng chữ. Doanh thu Shop / ROAS quảng cáo tạm không báo (22/10/2026: khác cách công "
+        "ty tính) — hỏi thì nói vậy, gợi ý báo cáo doanh thu của công ty.",
         # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
         # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).

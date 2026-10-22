@@ -25,7 +25,8 @@ def test_loc_bang_kiem_tham_so():
     # Người không xem tiền: không xếp theo chỉ số tiền (thứ hạng chi cũng là thông tin tiền).
     for sap in QC.SAP_BANG_TIEN:
         assert QC.loc_bang({"sap": sap}, False)["sap"] == "hien_thi", sap
-        assert QC.loc_bang({"sap": sap}, True)["sap"] == sap
+        if sap in QC.SAP_BANG:          # 22/10/2026: roas tạm ẩn (QC.HIEN_DOANH_THU)
+            assert QC.loc_bang({"sap": sap}, True)["sap"] == sap
     assert QC.loc_bang({"sap": "chi; DROP TABLE x"}, True)["sap"] == "chi"
     assert QC.loc_bang({"chieu": "tang"}, True)["chieu"] == "tang"
     assert QC.loc_bang({"chieu": "ASC"}, True)["chieu"] == "giam"
@@ -154,7 +155,7 @@ def test_trang_quang_cao_thanh_loc_va_tieu_de_cot_bam_duoc():
     th = re.search(r'<th class="so" aria-sort="descending"><a class="qc-sap qc-sap--dang" '
                    r'href="([^"]+)"', t)
     assert th and "sap=chi" in th.group(1) and "chieu=tang" in th.group(1)
-    for nhan in ("CPM", "CTR", "ROAS", "Click", "Tương tác"):
+    for nhan in ("CPM", "CTR", "Click", "Tương tác"):
         assert f'>{nhan}<span class="qc-sap__mui"' in t, nhan
     # Tên chiến dịch là link lọc quảng cáo của nó.
     assert re.search(r'class="qc-bang__loc" href="[^"]*cd=[^"]+#top"', t)

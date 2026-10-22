@@ -106,8 +106,9 @@ PHAN = {
     "bo_loc": "giá trị lọc đang có dữ liệu (nền tảng, loại nguồn, chủ đề, khoá nguồn…)",
     "quang_cao": "quảng cáo TikTok Ads + Meta Ads (Facebook/Instagram) của các bên người hỏi được "
                  "xem: tổng + tách theo nền tảng (`theo_nen_tang`), theo tài khoản, theo ngày, top "
-                 "chiến dịch / quảng cáo (có nền tảng), chi phí suy ra; chi tiêu, doanh thu, ROAS cho "
-                 "mọi người có quyền ở bên (`xem_tien`). Tra MỘT đối tượng (chiến dịch / quảng cáo / "
+                 "chiến dịch / quảng cáo (có nền tảng), chi phí suy ra; chi tiêu cho mọi người có "
+                 "quyền ở bên (`xem_tien`); doanh thu Shop / ROAS tạm không báo (22/10/2026 — khác "
+                 "cách công ty tính). Tra MỘT đối tượng (chiến dịch / quảng cáo / "
                  "tài khoản người hỏi nêu tên): `tim` + `cap`. Trả lời bằng chữ, không biểu đồ",
 }
 PHAN_MAC_DINH = ("tong_quan", "sac_thai", "chu_de", "tu_khoa", "bai")
@@ -146,6 +147,7 @@ SCHEMA = {
         "(CPM, CPC, chi/kết quả…). `mo_ho` true hoặc nhiều đối tượng khớp, hoặc kỳ không rõ → hỏi "
         "lại một câu ngắn. Không khớp (`tim_thay` 0) → nói rõ không thấy, đưa `goi_y` để người hỏi "
         "chọn — KHÔNG đoán số.\n"
+        + ("" if QC.HIEN_DOANH_THU else QC.CAU_KHONG_DOANH_THU + "\n") +
         "THAM SỐ: không nói kỳ thì để trống (= 30 ngày trọn tới hết hôm qua, như dashboard). "
         "`bo_loc` dùng đúng mã của dashboard; giá trị nguồn/chủ đề lạ thì gọi `phan`=[\"bo_loc\"] "
         "để lấy giá trị hợp lệ.\n"
@@ -1047,7 +1049,7 @@ def quang_cao(kho, q: dict, args: dict, tu: datetime.date, den: datetime.date, t
             x["link"] = f"{DASHBOARD_URL}/quang-cao?" + urllib.parse.urlencode(
                 {"ben": b, "tu": tu.isoformat(), "den": den.isoformat(),
                  **({"nen_tang": nen} if nen else {})})
-        ra.append(QC.loc_tien(x, co_tien))
+        ra.append(QC.loc_doanh_thu(QC.loc_tien(x, co_tien)))   # 22/10/2026: ẩn doanh thu / ROAS
     return {"co": True, "ky_truoc": {"tu": t0.isoformat(), "den": t1.isoformat()}, "ben": ra,
             "ghi_chu": GHI_CHU_QC + " " + GHI_CHU_REACH}
 
@@ -1057,13 +1059,14 @@ GHI_CHU_QC = (
     "chỉ số, không tự nêu chi tiêu khi không được hỏi; hỏi về chi phí / hiệu quả / \"chỉ số\" của "
     "chiến dịch, quảng cáo, tài khoản thì luôn nêu chi tiêu + chi phí. Hỏi về MỘT chiến dịch / "
     "quảng cáo / tài khoản cụ thể thì gọi lại với `tim` + `cap`. Bên có `xem_tien` false: người hỏi "
-    "KHÔNG được xem chi tiêu/doanh thu/ROAS — không nêu, không ước, không suy ra số tiền. Có chi "
+    "KHÔNG được xem chi tiêu — không nêu, không ước, không suy ra số tiền. Có chi "
     "theo tài khoản (`theo_tai_khoan`), theo nền tảng (`theo_nen_tang`: TikTok / Meta), theo ngày "
     "(`theo_ngay`) và chi phí suy ra (`chi_phi`: CPM, CPC, CTR, chi/follow, chi/1.000 view, chi/"
-    "engaged view, ROAS — tính lại từ tổng). Meta: view_video = xem ≥ 3 giây, engaged_view = "
-    "ThruPlay, follow = thích Trang, doanh thu = giá trị mua (purchase). Chủ dự án 20/10/2026: số "
+    "engaged view — tính lại từ tổng). Meta: view_video = xem ≥ 3 giây, engaged_view = "
+    "ThruPlay, follow = thích Trang. Chủ dự án 20/10/2026: số "
     "quảng cáo chỉ trả lời BẰNG CHỮ (câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh/"
-    "sheet/tệp, không gửi link trang Quảng cáo khi không có `link`.")
+    "sheet/tệp, không gửi link trang Quảng cáo khi không có `link`."
+    + ("" if QC.HIEN_DOANH_THU else " " + QC.CAU_KHONG_DOANH_THU))
 
 
 def _khop_tk(t: dict, mau: str, ma: str) -> bool:
@@ -1207,7 +1210,7 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
             y["theo_ngay"] = chuoi[km][-QC_NGAY_TOI_DA:]
         co_tien = QC.xem_tien(q, b if b != QC.CHUA_GAN else None)
         y["xem_tien"] = co_tien
-        ket_qua.append(QC.loc_tien(y, co_tien))
+        ket_qua.append(QC.loc_doanh_thu(QC.loc_tien(y, co_tien)))   # 22/10/2026: ẩn doanh thu
     mo_ho = tong > TRA_CUU_TRA or len(ung_vien) > TRA_CUU_TRA
     return {"co": True, "tim_thay": max(tong, len(ung_vien)), "cap": cap, "tim": tim,
             "khoang": {"tu": tu.isoformat(), "den": den.isoformat()}, "mo_ho": mo_ho,
@@ -1215,7 +1218,7 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
             "ghi_chu": (("Nhiều đối tượng khớp — đây là 10 đối tượng chi nhiều nhất; hỏi lại người "
                          "dùng muốn đúng cái nào. " if mo_ho else "")
                         + "Chỉ số thô trong `chi_so_tho_cong_duoc` là tổng các chỉ số cộng được "
-                        "(số đếm, tiền); tỉ lệ (CTR, CPC, CPM, ROAS…) đã tính LẠI từ tổng trong "
+                        "(số đếm, tiền); tỉ lệ (CTR, CPC, CPM…) đã tính LẠI từ tổng trong "
                         "`chi_phi`, reach / frequency không cộng. " + GHI_CHU_QC)}
 
 

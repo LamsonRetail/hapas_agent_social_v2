@@ -26,6 +26,7 @@ import memory_store
 import requests
 import scheduler
 import trinh_bay_sheet as TB
+from dashboard.quang_cao import CAU_KHONG_DOANH_THU, HIEN_DOANH_THU
 from tools.registry import registry, tool_error, tool_result
 
 VN = dt.timezone(dt.timedelta(hours=7))
@@ -72,6 +73,14 @@ GROUPS = {
     "tin_nhan_lead": list(METRICS)[13:17],
     "video": list(METRICS)[17:],
 }
+#: 22/10/2026 (chủ dự án): giá trị mua / ROAS đo khác cách công ty tự tính → tạm gỡ khỏi Sheet và
+#: danh mục, cùng công tắc với dashboard (`dashboard.quang_cao.HIEN_DOANH_THU`).
+#: Đọc công tắc lúc chạy (`HIEN_DOANH_THU` của module này) — bộ thử bật lại được bằng monkeypatch.
+DOANH_THU = ("revenue", "roas", "meta_roas")
+
+
+def _an(key) -> bool:
+    return not HIEN_DOANH_THU and key in DOANH_THU
 PURCHASE = ("purchase", "omni_purchase", "offsite_conversion.fb_pixel_purchase")
 LEAD = ("lead", "onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead")
 BREAKDOWNS = {"tuoi": "age", "gioi_tinh": "gender", "nen_tang": "publisher_platform",
@@ -243,7 +252,9 @@ def _metrics(wanted):
     for key in wanted:
         if key not in METRICS and key not in GROUPS:
             raise ValueError("Chỉ số không hỗ trợ: " + str(key))
-        result.extend(GROUPS.get(key, [key]))
+        if _an(key):
+            raise ValueError("Chỉ số " + str(key) + " tạm không báo. " + CAU_KHONG_DOANH_THU)
+        result.extend(k for k in GROUPS.get(key, [key]) if not _an(k))
     return list(dict.fromkeys(result))
 
 
@@ -1016,9 +1027,10 @@ def _handle(args, **kwargs):
     try:
         if args.get("danh_muc") is True:
             return tool_result({"nhom": {g: [{"ma": k, "ten": METRICS[k][0], "don_vi": METRICS[k][1],
-                        "y_nghia": METRICS[k][2]} for k in keys] for g, keys in GROUPS.items()},
+                        "y_nghia": METRICS[k][2]} for k in keys if not _an(k)] for g, keys in GROUPS.items()},
                 "chia_theo": BREAKDOWNS, "khoang_ngay": ["hom_nay", "hom_qua", "7_ngay", "14_ngay", "30_ngay", "thang_nay", "thang_truoc"],
-                "hoi_tiep": "Bạn cần chỉ số nào, tài khoản nào và khoảng thời gian nào?"})
+                "hoi_tiep": "Bạn cần chỉ số nào, tài khoản nào và khoảng thời gian nào?",
+                **({} if HIEN_DOANH_THU else {"ghi_chu": CAU_KHONG_DOANH_THU})})
         actor = _actor()
         if not _allowed(actor):
             raise ValueError("Bạn chưa được phép xem số ads hoặc không đọc được quyền. Nhờ quản trị agent thêm email vào Console → Mark → Năng lực → Danh sách người được xem số ads.")
@@ -1188,7 +1200,7 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
     raw = _goc_gon(rows, wanted, breakdown) if rows else None
     zero = sum(1 for r in rows if _toan_0(r, wanted))
     notes = [f"{span}. Mốc ngày tính theo múi giờ của từng tài khoản (cột Múi giờ TK), đúng cách Meta cộng số. "
-             "Số theo phân bổ mặc định của Meta. Reach/tần suất/ROAS Meta không cộng tổng. "
+             "Số theo phân bổ mặc định của Meta. Reach/tần suất" + ("/ROAS Meta" if HIEN_DOANH_THU else "") + " không cộng tổng. "
              "Dòng có số hiển thị/chi tiêu mà Meta không trả mua/lead/tin nhắn/video thì ghi 0 (Meta bỏ số 0); "
              "ô trống = Meta không trả số phân phối cho dòng đó, không phải 0."]
     if loc:
@@ -1196,8 +1208,9 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
                      + (" (lọc theo tên CHIẾN DỊCH, kể cả ở cấp " + _TEN_CAP[level] + ")"
                         if level in ("adset", "ad") else "") + ". " + _cach_loc(loc))
     if breakdown:
-        notes.append("Có chia nhỏ (tuổi/giới tính/nền tảng/vị trí): Meta có thể ẩn số mua, giá trị mua, "
-                     "ROAS Meta, lead, tin nhắn vì quyền riêng tư; ô trống ở các cột đó = Meta không trả số, "
+        notes.append("Có chia nhỏ (tuổi/giới tính/nền tảng/vị trí): Meta có thể ẩn số mua, "
+                     + ("giá trị mua, ROAS Meta, " if HIEN_DOANH_THU else "")
+                     + "lead, tin nhắn vì quyền riêng tư; ô trống ở các cột đó = Meta không trả số, "
                      "không phải 0, và tổng cột đó để trống.")
     if partial:
         notes.append("Khoảng ngày gồm HÔM NAY theo múi giờ tài khoản: ngày chưa hết, số hôm nay còn thay đổi.")
@@ -1208,7 +1221,7 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
                      + (" Có lọc tên: trần tính trên dòng Meta trả TRƯỚC khi tự lọc, nên có thể còn "
                         "chiến dịch khớp ở phần chưa đọc." if loc else ""))
     notes.append(f"Dòng {label} (theo từng tiền tệ) và SỐ LIỆU CHÍNH là tổng tool tự cộng từ các dòng đã đọc; "
-                 "CTR/CPC/CPM/ROAS/chi phí mỗi kết quả của dòng tổng tính lại từ tổng, không cộng tỉ lệ. "
+                 "CTR/CPC/CPM" + ("/ROAS" if HIEN_DOANH_THU else "") + "/chi phí mỗi kết quả của dòng tổng tính lại từ tổng, không cộng tỉ lệ. "
                  "Tiền theo đơn vị tiền tệ của từng tài khoản (cột Tiền tệ), không quy đổi.")
     if gop_bang:
         bo = [METRICS[k][0].lower() for k in wanted if k in _KHONG_CONG]
@@ -1220,7 +1233,8 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
                      + f": tool tự cộng từ các dòng của tab "
                      f"{TAB_CHI_TIET}, riêng từng tiền tệ (không cộng VND với USD); tỉ lệ tính lại từ tổng; "
                      + sap + f"; dòng {label} ở đó bằng đúng dòng {label} của "
-                     f"{TAB_CHI_TIET}. Tiếp cận, tần suất và ROAS Meta không cộng được qua ngày/nền tảng/đối "
+                     f"{TAB_CHI_TIET}. Tiếp cận, tần suất"
+                     + (" và ROAS Meta" if HIEN_DOANH_THU else "") + " không cộng được qua ngày/nền tảng/đối "
                      "tượng nên không có ở các tab gộp"
                      + (" (" + ", ".join(bo) + ": xem từng dòng ở " + TAB_CHI_TIET + ")" if bo else "") + ".")
     if zero:
@@ -1258,7 +1272,9 @@ def _dung_sheet(rows, accounts, wanted, level, breakdown, theo_ngay, cut, spans,
             "raw": raw, "gop_bang": gop_bang, "totals": totals, "zero": zero}
 
 
-SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Có lọc tên: tool đối chiếu danh sách campaign với Insights; chép cau_doi_chieu, phân biệt campaign khớp tên và campaign có báo cáo trong ngày. Không có dòng Insights không chứng minh campaign không tồn tại hay chi tiêu bằng 0. Không suy đoán khác tài khoản khi đã quét tất cả. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng. Yêu cầu vừa theo_ngay vừa chia_theo, hoặc cấp nhom_quang_cao/quang_cao, hoặc cấp chien_dich nhiều tài khoản: gọi xem_truoc=true TRƯỚC; so_dong > 2000 thì báo số dòng + kich_thuoc, hỏi lấy đủ chi tiết (vẫn có tab gộp + chế độ lọc theo tài khoản) hay gọn hơn, chỉ xuất sau khi họ trả lời. Sheet: Tổng quan, các tab gộp (Theo tài khoản/nền tảng/ngày/chiến dịch), Đối chiếu campaign, Chi tiết, Dữ liệu gốc. Tên chiến dịch phải chứa đủ nhiều chữ: loc_tat_ca=[chữ 1, chữ 2] (mỗi chữ một mục, cả khi xem_truoc); có loc_ap_dung mà không khớp thì chép nguyên cau_loc, mời chọn trong ten_gan_dung.",
+SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi xuất Sheet riêng cho người hỏi có quyền. Hỏi chung: gọi danh_muc=true để liệt kê mọi chỉ số tên Việt, đơn vị, ý nghĩa, cách chia và ngày; hỏi người dùng chọn. Hỏi cụ thể: lấy đúng chi_so được yêu cầu; chép cau_tong nguyên văn, không tự tính. Có lọc tên: tool đối chiếu danh sách campaign với Insights; chép cau_doi_chieu, phân biệt campaign khớp tên và campaign có báo cáo trong ngày. Không có dòng Insights không chứng minh campaign không tồn tại hay chi tiêu bằng 0. Không suy đoán khác tài khoản khi đã quét tất cả. Chỉ đọc ads, API miễn phí; không sửa/tạm dừng. Nhóm cần chuyển chat riêng. Yêu cầu vừa theo_ngay vừa chia_theo, hoặc cấp nhom_quang_cao/quang_cao, hoặc cấp chien_dich nhiều tài khoản: gọi xem_truoc=true TRƯỚC; so_dong > 2000 thì báo số dòng + kich_thuoc, hỏi lấy đủ chi tiết (vẫn có tab gộp + chế độ lọc theo tài khoản) hay gọn hơn, chỉ xuất sau khi họ trả lời. Sheet: Tổng quan, các tab gộp (Theo tài khoản/nền tảng/ngày/chiến dịch), Đối chiếu campaign, Chi tiết, Dữ liệu gốc. Tên chiến dịch phải chứa đủ nhiều chữ: loc_tat_ca=[chữ 1, chữ 2] (mỗi chữ một mục, cả khi xem_truoc); có loc_ap_dung mà không khớp thì chép nguyên cau_loc, mời chọn trong ten_gan_dung."
+    + ("" if HIEN_DOANH_THU else " Giá trị mua (doanh thu) và ROAS không có trong danh mục / Sheet. "
+       + CAU_KHONG_DOANH_THU),
     "parameters": {"type": "object", "properties": {
         "danh_muc": {"type": "boolean"},
         "danh_sach_tai_khoan": {"type": "boolean", "description": "true = liệt kê tên + mã các tài khoản đọc được (không lấy số)."},
@@ -1269,7 +1285,7 @@ SCHEMA = {"name": "chi_so_ads", "description": "Đọc số Meta Ads HAPAS rồi
         "tu_ngay": {"type": "string"}, "den_ngay": {"type": "string"},
         "cap": {"type": "string", "enum": list(LEVELS)}, "theo_ngay": {"type": "boolean"},
         "chia_theo": {"type": "array", "items": {"type": "string", "enum": list(BREAKDOWNS)}},
-        "chi_so": {"type": "array", "items": {"type": "string", "enum": list(METRICS) + list(GROUPS)}},
+        "chi_so": {"type": "array", "items": {"type": "string", "enum": [k for k in METRICS if not _an(k)] + list(GROUPS)}},
         "loc_tat_ca": {"type": "array", "maxItems": LOC_TOI_DA,
                        "items": {"type": "string", "maxLength": 100},
                        "description": "Lọc theo TÊN CHIẾN DỊCH: tên phải chứa ĐỦ MỌI chữ, không phân biệt hoa thường. "

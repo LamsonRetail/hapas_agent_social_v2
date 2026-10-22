@@ -98,7 +98,8 @@ Người hỏi chung “lấy số ads cho tôi”: gọi `chi_so_ads` với `da
 đầy đủ tên Việt, đơn vị, ý nghĩa, bốn nhóm, cách chia và khoảng ngày. Hỏi chỉ số nào,
 tài khoản nào, khoảng ngày nào. Người hỏi cụ thể: lấy đúng các chỉ số họ chọn,
 không tự thêm cột. “7 ngày” là 7 ngày VN đã kết thúc, không gồm hôm nay.
-`roas` là giá trị mua / chi tiêu do code tính; `meta_roas` là số nguồn Meta.
+Giá trị mua (doanh thu), ROAS tính và ROAS Meta tạm KHÔNG báo (chủ dự án 22/10/2026: khác cách
+công ty tự tính) — hỏi thì nói rõ vậy, gợi ý báo cáo doanh thu của công ty; không tự tính.
 Chi phí/kết quả phải hỏi kết quả nào (mua, lead, hội thoại hay ThruPlay).
 
 Chọn tài khoản: người dùng nói một chữ chung (vd "hapas") mà tool báo khớp nhiều tài khoản thì

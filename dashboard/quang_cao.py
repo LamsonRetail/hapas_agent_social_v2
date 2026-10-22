@@ -385,6 +385,39 @@ def loc_tien(x, co_tien: bool):
     return x
 
 
+# ───────────────────────────── doanh thu Shop / ROAS (tạm ẩn 22/10/2026) ──────────────────────
+#: 22/10/2026 (chủ dự án): "Doanh thu Shop" (gia_tri_mua_shop = TikTok total_onsite_shopping_value,
+#: Meta giá trị mua purchase) và ROAS suy ra từ nó đo KHÁC cách công ty tự tính → tạm gỡ khỏi
+#: MỌI chỗ người xem số (trang + /api/qc, Lark Sheet, Mark). Dữ liệu vẫn lưu và đồng bộ như cũ
+#: (COT_SO, COT_TIEN, BigQuery giữ nguyên). Bật lại: đổi HIEN_DOANH_THU = True — một chỗ duy nhất.
+HIEN_DOANH_THU = False
+CAU_KHONG_DOANH_THU = (
+    "Doanh thu Shop và ROAS tạm KHÔNG báo (chủ dự án 22/10/2026): nền tảng quảng cáo đo khác cách "
+    "công ty tự tính. Người hỏi thì nói rõ vậy và gợi ý xem báo cáo doanh thu của công ty — không "
+    "nêu, không ước, không tự tính từ số khác.")
+
+
+def la_doanh_thu(ten: str) -> bool:
+    """Khoá mang doanh thu / ROAS: cột riêng gia_tri_mua_shop, roas_shop, roas; chỉ số thô TikTok
+    *_value, value_per_*, *roas*; Meta action_values__*, purchase_roas__*."""
+    t = str(ten or "").lower()
+    if t in ("gia_tri_mua_shop", "gia_tri_mua", "doanh_thu_shop", "roas_shop", "roas", "revenue"):
+        return True
+    return ("roas" in t or t.endswith("_value") or "_value__" in t or "value_per_" in t
+            or t.startswith("action_values"))
+
+
+def loc_doanh_thu(x):
+    """Bỏ mọi khoá doanh thu / ROAS (đệ quy) khi HIEN_DOANH_THU tắt. Không sửa bản gốc."""
+    if HIEN_DOANH_THU:
+        return x
+    if isinstance(x, dict):
+        return {k: loc_doanh_thu(v) for k, v in x.items() if not la_doanh_thu(k)}
+    if isinstance(x, list):
+        return [loc_doanh_thu(v) for v in x]
+    return x
+
+
 # ───────────────────────────── phạm vi theo bên ─────────────────────────────
 def ben_doc_qc(q: dict | None, cac_tk: list[dict]) -> list[str]:
     """Mã bên người này xem được ở trang Quảng cáo (chỉ bên có ≥ 1 tài khoản đã gán)."""
@@ -524,6 +557,8 @@ SAP_BANG: dict[str, str] = {"chi": "Chi", "hien_thi": "Hiển thị", "cpm": "CP
                             "ctr": "CTR", "view": "View video", "tuong_tac": "Tương tác",
                             "follow": "Follow", "roas": "ROAS"}
 SAP_BANG_TIEN = frozenset({"chi", "cpm", "roas"})
+if not HIEN_DOANH_THU:      # 22/10/2026: ROAS tạm ẩn — URL cũ `sap=roas` về sắp mặc định
+    SAP_BANG.pop("roas", None)
 #: CPM / CTR chỉ xếp hạng dòng có ≥ 1.000 hiển thị (dòng 3 hiển thị CTR 33% không phải "tốt nhất");
 #: dòng dưới ngưỡng xuống cuối, vẫn hiện số. Giải thích ở nút "i" của khối.
 NGUONG_TI_LE = 1000
@@ -700,7 +735,8 @@ KPI_CHINH_XEM = ("hien_thi", "view_video", "engaged_view")
 def chon_kpi(co_tien: bool) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """(hàng chính 3 ô, hàng phụ) — người không xem tiền không có ô tiền nào."""
     chinh = KPI_CHINH_TIEN if co_tien else KPI_CHINH_XEM
-    phu = tuple(k for k, v in KPI_QC.items() if k not in chinh and (co_tien or not v[2]))
+    phu = tuple(k for k, v in KPI_QC.items() if k not in chinh and (co_tien or not v[2])
+                and (HIEN_DOANH_THU or not la_doanh_thu(k)))   # 22/10/2026: ẩn doanh thu / ROAS
     return chinh, phu
 
 

@@ -12,7 +12,8 @@ yêu cầu mang thêm nhiều tài khoản (tk_ds) + bộ lọc bảng (tim, cd,
 bằng CHÍNH SQL của bảng trang (`kho_qc.sql_bang` qua `kho_sheet_qc.doc_tong`), mọi dòng khớp (không chỉ
 một trang) tới trần; tab (a) chỉ theo tài khoản + ngày; Tổng quan liệt kê bộ lọc đã dùng.
 Có chi (chỉ quản trị viên bấm được) + chỉ số suy ra như trang (`quang_cao.hieu_qua`: CPM, CPC, CTR,
-chi / 1.000 view, chi / follow, chi / kết quả, ROAS Shop).
+chi / 1.000 view, chi / follow, chi / kết quả; ROAS Shop + Doanh thu Shop tạm ẩn từ 22/10/2026 —
+`quang_cao.HIEN_DOANH_THU`).
 
 Vì sao ở phía Mark: dashboard không giữ app Lark tạo được Sheet (và không được có). Dashboard chỉ thêm
 dòng `yeu_cau_sheet_qc`; trigger gọi pg_notify('qc_sheet') → tiến trình này LISTEN, nhận gần như ngay;
@@ -71,6 +72,9 @@ _COT_SO = (
     ("mua_shop", "Mua Shop", "so_nguyen"), ("gia_tri_mua_shop", "Doanh thu Shop", "tien"),
     ("roas_shop", "ROAS Shop", "ti_le"),
 )
+# 22/10/2026 (chủ dự án): Doanh thu Shop / ROAS tạm ẩn — nền tảng đo khác cách công ty tự tính.
+if not QC.HIEN_DOANH_THU:
+    _COT_SO = tuple(c for c in _COT_SO if not QC.la_doanh_thu(c[0]))
 TAB_NGAY, TAB_CHIEN_DICH, TAB_QUANG_CAO = "Theo ngày × tài khoản", "Theo chiến dịch", "Theo quảng cáo"
 
 
@@ -242,7 +246,8 @@ def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict,
         "7 ngày gần nhất) — giống trang Quảng cáo cùng bộ lọc.",
         "Ngày theo múi giờ tài khoản quảng cáo. Tiền theo tiền tệ từng tài khoản (cột Tiền tệ), "
         "chưa VAT.",
-        "CPM, CPC, CTR, chi / 1.000 view, chi / follow, chi / kết quả, ROAS tính lại từ TỔNG của "
+        "CPM, CPC, CTR, chi / 1.000 view, chi / follow, chi / kết quả"
+        + (", ROAS" if QC.HIEN_DOANH_THU else "") + " tính lại từ TỔNG của "
         "từng dòng (không trung bình tỉ lệ). Ô trống = không có số / mẫu số bằng 0.",
         "Reach chỉ ở tab theo ngày: cộng reach nhiều ngày đếm trùng người.",
         "Chỉ chiến dịch / quảng cáo CÓ phân phối trong kỳ (có hiển thị hoặc chi).",
