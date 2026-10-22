@@ -225,7 +225,10 @@ _KHOA_DSN = threading.Lock()
 _HAM_KHO = ("quyen_cua", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_luan_trong_khoang",
             "binh_luan_hop_le_gon", "bai_theo_khoa", "ngu_canh_bai", "cac_nguon", "da_tieu_thang",
             "tran_platform", "cac_luot", "tien_do_gan_nhan", "luot_xong_moi_nhat",
-            "do_phu_gan_nhat", "han_muc_apify", "nhip_dang")
+            "do_phu_gan_nhat", "han_muc_apify", "nhip_dang",
+            # 22/10/2026 (`sheet_qc_tool`): union_id Lark ghi lúc đăng nhập dashboard — đối chiếu danh
+            # tính khi email danh bạ không phải enterprise_email.
+            "union_id_cua")
 #: TikTok Ads (19/10/2026): hàm ĐỌC của `dashboard.kho_qc` (role mark chỉ SELECT tk_quang_cao + qc_*,
 #: không đọc được cột token của ket_noi_ngoai). Tên phía tool → tên trong kho_qc.
 _HAM_KHO_QC = {"qc_cac_tk": "cac_tk", "qc_tong": "qc_tong", "qc_top": "qc_top", "qc_moi": "qc_moi",

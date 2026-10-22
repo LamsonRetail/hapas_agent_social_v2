@@ -34,6 +34,10 @@ KENH = "qc_sheet"                  # kênh LISTEN/NOTIFY (trigger trong schema.s
 TRANG_THAI = ("cho", "dang_tao", "xong", "loi")
 GUC = "lang_nghe.nguoi"            # RLS của lang_nghe_web (schema.sql: sheet_qc_*_web)
 TRAN_GIO = 4                       # yêu cầu mỗi người mỗi 60 phút (= trigger)
+TRAN_CHUNG_GIO = 30                # dòng web toàn hệ thống mỗi giờ (= trigger, đếm nguon <> 'mark')
+#: Dòng Mark toàn hệ thống mỗi giờ (soát 22/10/2026, = trigger, đếm RIÊNG nguon = 'mark'): người hỏi
+#: Mark / lượt bị lừa qua lời nhắn không chiếm được trần của nút trên trang (quản trị viên).
+TRAN_GIO_MARK = 15
 QUA_HAN_PHUT = 30                  # chờ / đang tạo quá chừng này → coi như hỏng (không chặn nữa)
 #: Trần dòng mỗi tab (trinh_bay_sheet nới lưới tới 20.000 dòng; tab quảng cáo hay lớn nhất).
 TRAN_DONG = {"ngay": 20_000, "chien_dich": 5_000, "quang_cao": 10_000}
@@ -47,6 +51,8 @@ NGUON = ("web", "mark")
 #: `quang_cao.loc_bang` / `quang_cao.tk_chon`; sai thì ném invalid_parameter_value.
 CAU_LOC_SAI = "Bộ lọc không hợp lệ — tải lại trang rồi thử lại."
 #: Câu khi chính trigger từ chối (trần chung toàn hệ thống — app không đếm được dòng người khác).
+CAU_TRAN_MARK = ("Mark đã nhận đủ yêu cầu tạo Sheet quảng cáo trong giờ này (trần chung của Mark) "
+                 "— thử lại sau ít phút, hoặc nhờ quản trị viên xuất trên trang Quảng cáo.")
 CAU_TRAN_CHUNG = ("Chưa nhận thêm yêu cầu — đã đủ trần tạo Sheet chung mỗi giờ hoặc bạn vừa có "
                   "Sheet đang tạo. Thử lại sau ít phút.")
 
@@ -105,7 +111,8 @@ def tao(nguoi_hoi: str, ben: str, nen_tang: str, tk: str | None, tu: datetime.da
                 + (() if nguon is None else (nguon,))).fetchone()
         except Exception as x:  # noqa: BLE001 — CheckViolation của trigger (trần chung)
             if type(x).__name__ == "CheckViolation":
-                raise LoiDuLieu(CAU_TRAN_CHUNG) from None
+                raise LoiDuLieu(CAU_TRAN_MARK if nguon == "mark" and "Mark" in str(x)
+                                else CAU_TRAN_CHUNG) from None
             if type(x).__name__ == "InvalidParameterValue":
                 raise LoiDuLieu(CAU_LOC_SAI) from None
             raise

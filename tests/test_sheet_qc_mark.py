@@ -68,6 +68,8 @@ class KhoTool:
 
 def _hoi(monkeypatch, ai, args, kho=None):
     monkeypatch.setattr(HD, "email_cua", lambda oid: ai)
+    monkeypatch.setattr(ST, "lien_he", lambda oid: {"enterprise_email": ai, "email": "",
+                                                    "union_id": "on_x"})
     kho = kho or KhoTool()
     return ST.tra_loi(args, kho, open_id="ou_hoi", bay_gio=BAY), kho
 
@@ -167,6 +169,8 @@ def test_tool_cua_hoi_dashboard_va_tran(monkeypatch):
     kho = KhoTool(hong=KS.ly_do_chan(1, 0))
     monkeypatch.setattr(HD, "_kho_mac_dinh", lambda: kho)
     monkeypatch.setattr(HD, "nguoi_hoi", lambda: "ou_hoi")
+    monkeypatch.setattr(ST, "lien_he", lambda oid: {"enterprise_email": XEM, "email": "",
+                                                    "union_id": ""})
     ra = json.loads(ST._handle({}))
     assert "đang có một Sheet đang tạo" in json.dumps(ra, ensure_ascii=False)
 
@@ -328,7 +332,8 @@ def test_schema_mark_them_dong_nguon_rls_va_trigger():
     # Trigger BEFORE INSERT không lọc theo role (trần áp cho dòng Mark) và không đặt lại nguon.
     chuan = sql[sql.index("CREATE OR REPLACE FUNCTION chuan_yeu_cau_sheet_qc()"):]
     chuan = chuan[:chuan.index("END $fn$;")]
-    assert "current_user" not in chuan and "session_user" not in chuan and "nguon" not in chuan
+    assert "current_user" not in chuan and "session_user" not in chuan
+    assert "NEW.nguon :=" not in chuan               # đọc nguon (trần tách), không bao giờ đặt lại
     assert chuan.index("hashtext('sheet_qc|' || NEW.nguoi_hoi)") < chuan.index(
         "hashtext('sheet_qc|*')")
     assert "COMMENT ON COLUMN yeu_cau_sheet_qc.nguon IS" in sql
@@ -360,3 +365,108 @@ def test_policy_va_bo_cham_eval_xuat_sheet():
     sys.path.insert(0, str(GOC / "evals" / "sow"))
     import kiem
     assert "xuat_sheet_qc" in kiem.TOOL_GHI and kiem.mien_hoi_tien("xuat_sheet_qc", {})
+
+
+# ───────────────────────────── soát bảo mật 22/10/2026 ─────────────────────────────
+class KhoUid(KhoTool):
+    def __init__(self, uid):
+        super().__init__()
+        self.uid = uid
+
+    def union_id_cua(self, email):
+        if isinstance(self.uid, Exception):
+            raise self.uid
+        return self.uid
+
+
+@pytest.mark.parametrize("lh, uid_kho, duoc", [
+    ({"enterprise_email": XEM, "email": "", "union_id": ""}, None, True),        # tổ chức cấp
+    ({"enterprise_email": "", "email": XEM, "union_id": "on_1"}, "on_1", True),  # khớp union_id
+    ({"enterprise_email": "", "email": XEM, "union_id": "on_1"}, "on_2", False),  # lệch
+    ({"enterprise_email": "", "email": XEM, "union_id": "on_1"}, None, False),     # chưa đăng nhập
+    ({"enterprise_email": "", "email": XEM, "union_id": ""}, "on_1", False),       # danh bạ thiếu
+    ({"enterprise_email": "", "email": XEM, "union_id": "on_1"}, RuntimeError("kho"), False),
+    ({"enterprise_email": "khac@hapas.vn", "email": XEM, "union_id": "on_1"}, "on_1", False),
+])
+def test_danh_tinh_email_tu_khai_phai_khop_union_id(monkeypatch, lh, uid_kho, duoc):
+    monkeypatch.setattr(HD, "email_cua", lambda oid: XEM)
+    monkeypatch.setattr(ST, "lien_he", lambda oid: dict(lh))
+    kho = KhoUid(uid_kho)
+    if duoc:
+        ST.tra_loi({}, kho, open_id="ou_hoi", bay_gio=BAY)
+        assert kho.rows[0]["nguoi_hoi"] == XEM
+    else:
+        with pytest.raises(HD.TuChoi, match="chưa xác minh được email"):
+            ST.tra_loi({}, kho, open_id="ou_hoi", bay_gio=BAY)
+        assert kho.rows == []
+
+
+def test_danh_tinh_danh_ba_loi_thi_dong(monkeypatch):
+    monkeypatch.setattr(HD, "email_cua", lambda oid: XEM)
+
+    def hong(oid):
+        raise RuntimeError("lark 500")
+    monkeypatch.setattr(ST, "lien_he", hong)
+    kho = KhoUid("on_1")
+    with pytest.raises(HD.TuChoi, match="chưa đối chiếu được danh bạ"):
+        ST.tra_loi({}, kho, open_id="ou_hoi", bay_gio=BAY)
+    assert kho.rows == [] and "union_id_cua" in HD._HAM_KHO
+
+
+def test_luoi_tien_theo_khoa_cot_dan_nhan_sai(monkeypatch):
+    """Cột tiền dán nhãn sai kiểu (roas_shop kiểu ti_le) + bộ lọc cột hỏng → lưới cuối theo KHOÁ
+    chặn, không ghi số nào."""
+    monkeypatch.setattr(QC, "HIEN_DOANH_THU", True)
+    monkeypatch.setattr(QC, "xem_tien", lambda q, b: bool(q and q.get("la_quan_tri")))
+    monkeypatch.setattr(X, "_COT_SO", X._COT_SO + (("roas_shop", "ROAS Shop", "ti_le"),))
+    goc = X._cot
+    monkeypatch.setattr(X, "_cot", lambda reach, tien=True: [      # lọc chỉ theo kiểu (hỏng)
+        c for c in X._COT_SO if (reach or c[0] != "reach") and c[2] != "tien"])
+    kq, k, lk = _chay(monkeypatch, YC_MARK)
+    assert kq["trang_thai"] == "loi" and "roas_shop" in k.ket[0][2]["loi_noi_bo"]
+    assert not [g for g in lk.gia.goi if g[1].endswith("/values_batch_update")]
+    with pytest.raises(ValueError, match="roas_shop"):
+        X.chot_khong_tien(["hien_thi", "roas_shop"])
+    X.chot_khong_tien(["hien_thi", "click", "ctr"])
+    # `_cot` thật: bỏ theo khoá LẪN kiểu.
+    monkeypatch.setattr(X, "_cot", goc)
+    assert "roas_shop" not in [m for m, _, _ in X._cot(True, False)]
+    # Tổng quan: mục dán cờ tay sai (không đánh dấu tiền) vẫn bị lưới theo khoá chặn.
+    monkeypatch.setattr(X, "_SO_TQ", X._SO_TQ + (("chi_moi_ket_qua", "Chi / KQ", "so", False, ""),))
+    kq, k, lk = _chay(monkeypatch, YC_MARK)
+    assert kq["trang_thai"] == "loi" and "chi_moi_ket_qua" in k.ket[0][2]["loi_noi_bo"]
+    assert not [g for g in lk.gia.goi if g[1].endswith("/values_batch_update")]
+
+
+def test_tran_gio_mark_tach_khoi_tran_web():
+    sql = (GOC / "deploy" / "lang-nghe" / "schema.sql").read_text(encoding="utf-8")
+    chuan = sql[sql.index("CREATE OR REPLACE FUNCTION chuan_yeu_cau_sheet_qc()"):]
+    chuan = chuan[:chuan.index("END $fn$;")]
+    assert KS.TRAN_GIO_MARK == 15 and KS.TRAN_CHUNG_GIO == 30
+    assert re.search(r"IF NEW\.nguon = 'mark' THEN\s+IF \(SELECT count\(\*\) FROM "
+                     r"public\.yeu_cau_sheet_qc WHERE nguon = 'mark'\s+AND tao_luc > now\(\) - "
+                     rf"interval '1 hour'\) >= {KS.TRAN_GIO_MARK} THEN", chuan)
+    assert re.search(r"ELSIF \(SELECT count\(\*\) FROM public\.yeu_cau_sheet_qc WHERE nguon <> "
+                     rf"'mark'\s+AND tao_luc > now\(\) - interval '1 hour'\) >= {KS.TRAN_CHUNG_GIO} "
+                     r"THEN", chuan)
+    assert "'yeu_cau_sheet_qc: quá trần Mark mỗi giờ'" in chuan
+    assert "CREATE OR REPLACE FUNCTION chuan_yeu_cau_sheet_qc()" in sql     # chạy lại được
+    # Trần mỗi người không đổi (đếm mọi nguồn).
+    assert f"AND tao_luc > now() - interval '1 hour') >= {KS.TRAN_GIO} THEN" in chuan
+
+
+def test_kho_sheet_tran_mark_bao_cau_rieng(monkeypatch):
+    class CheckViolation(Exception):
+        pass
+
+    def tra(sql, ts):
+        if sql.startswith("INSERT"):
+            raise CheckViolation("yeu_cau_sheet_qc: quá trần Mark mỗi giờ")
+        return [{"dang": 0, "gio": 0}]
+    _goi, kn = _ket_noi_gia(tra)
+    monkeypatch.setattr(KS, "ket_noi", kn)
+    d = datetime.date(2026, 10, 1)
+    with pytest.raises(LoiDuLieu, match="trần chung của Mark"):
+        KS.tao(XEM, "hapas", "tiktok", None, d, d, nguon="mark")
+    with pytest.raises(LoiDuLieu, match="trần tạo Sheet chung"):
+        KS.tao(XEM, "hapas", "tiktok", None, d, d)

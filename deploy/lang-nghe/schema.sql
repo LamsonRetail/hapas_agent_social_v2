@@ -1006,7 +1006,17 @@ BEGIN
       AND tao_luc > now() - interval '1 hour') >= 4 THEN
     RAISE EXCEPTION 'yeu_cau_sheet_qc: quá trần mỗi người mỗi giờ' USING ERRCODE = 'check_violation';
   END IF;
-  IF (SELECT count(*) FROM public.yeu_cau_sheet_qc WHERE tao_luc > now() - interval '1 hour') >= 30 THEN
+  -- Trần toàn hệ thống TÁCH theo nguồn (soát 22/10/2026): dòng Mark (người hỏi Mark, có thể bị
+  -- lừa qua lời nhắn) ≤ 15/giờ đếm riêng dòng mark; dòng web (quản trị viên) ≤ 30/giờ đếm riêng
+  -- dòng web — Mark không bao giờ chiếm hết trần của nút trên trang. nguon đã có giá trị mặc định
+  -- ('web') trước khi trigger chạy; web không ghi được cột, mark bị RLS buộc 'mark'.
+  IF NEW.nguon = 'mark' THEN
+    IF (SELECT count(*) FROM public.yeu_cau_sheet_qc WHERE nguon = 'mark'
+        AND tao_luc > now() - interval '1 hour') >= 15 THEN
+      RAISE EXCEPTION 'yeu_cau_sheet_qc: quá trần Mark mỗi giờ' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF (SELECT count(*) FROM public.yeu_cau_sheet_qc WHERE nguon <> 'mark'
+         AND tao_luc > now() - interval '1 hour') >= 30 THEN
     RAISE EXCEPTION 'yeu_cau_sheet_qc: quá trần chung mỗi giờ' USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -1717,7 +1727,7 @@ COMMENT ON TABLE yeu_cau_sheet_qc IS $$[Lớp] Raw
 [Khoá] PK: id | Join: ben → don_vi.ma (trừ tat_ca, chua_gan); tk → tk_quang_cao.advertiser_id
 [Nguồn] Dashboard social.hapas.vn (role lang_nghe_web) hoặc Mark (tool xuat_sheet_qc, role mark) thêm dòng; bộ nghe qc-sheet-nghe (role mark, xuat_sheet_qc.py) nhận, dựng Sheet và ghi kết quả
 [Phạm vi] Dòng web: chỉ quản trị viên; dòng Mark: người có quyền ở bên (Sheet không cột tiền khi không xem tiền) | Kênh TikTok Ads, Meta Ads | Từ 20/10/2026
-[Đã xử lý] Trạng thái + cột kết quả lúc thêm do trigger đặt; trần (1 yêu cầu đang chờ, 4/người/giờ, 30/giờ toàn hệ thống) do trigger kiểm; email chữ thường; chờ / đang tạo quá 30 phút → loi
+[Đã xử lý] Trạng thái + cột kết quả lúc thêm do trigger đặt; trần (1 yêu cầu đang chờ, 4/người/giờ, toàn hệ thống 30/giờ dòng web + 15/giờ dòng mark, đếm riêng) do trigger kiểm; email chữ thường; chờ / đang tạo quá 30 phút → loi
 [Refresh] Theo yêu cầu (thời gian thực); dòng không bao giờ xoá
 [Dùng khi] Biết ai đã xuất Sheet quảng cáo nào, phạm vi nào, lúc nào, link nào; soát lỗi xuất Sheet
 [Không dùng khi] Số quảng cáo → dùng qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay; yêu cầu đọc số mới của Mark → dùng yeu_cau_tuc_thi

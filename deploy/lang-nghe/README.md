@@ -371,8 +371,9 @@ sudo systemd-run --quiet --wait --pipe -p User=mark -p WorkingDirectory=/opt/mar
 - **Quyền app Lark của Mark** (đã có cho `chi_so_ads` / `social_listen`): tạo Sheet, sửa quyền Drive
   (thêm cộng tác viên theo email, đóng chia sẻ link), gửi tin `im:message`. Tra email → open_id
   (`contact:user.id:readonly`) chỉ là đường lùi khi thêm quyền theo email bị từ chối.
-- **Trần**: 1 yêu cầu đang chờ / đang tạo mỗi người, 4 yêu cầu mỗi người mỗi giờ, 30 mỗi giờ toàn hệ
-  thống (trigger `chuan_yeu_cau_sheet_qc`, khoá advisory); khoảng ≤ 400 ngày. Trigger kiểm bộ lọc
+- **Trần**: 1 yêu cầu đang chờ / đang tạo mỗi người, 4 yêu cầu mỗi người mỗi giờ; toàn hệ
+  thống đếm RIÊNG theo nguồn — 30/giờ dòng web (nút trang), 15/giờ dòng Mark (`KS.TRAN_GIO_MARK`, soát
+  22/10/2026: người hỏi Mark không chặn được quản trị viên xuất) (trigger `chuan_yeu_cau_sheet_qc`, khoá advisory); khoảng ≤ 400 ngày. Trigger kiểm bộ lọc
   (22/10/2026): `tim` ≤ 100 ký tự, `cd` ~ `^[0-9A-Za-z_-]{0,64}$`, `sap` trong danh sách cột xếp,
   `chieu` ∈ (giam, tang), `tk_ds` ≤ 200 mã dạng advertiser_id — sai thì `invalid_parameter_value`. Chờ / đang tạo quá 30
   phút → `loi` (bộ nghe dọn; trang hiện "Quá hạn" và cho bấm lại).

@@ -108,8 +108,20 @@ def _ngay(x) -> datetime.date:
 
 # ───────────────────────────── dựng bảng (thuần) ─────────────────────────────
 def _cot(reach: bool, tien: bool = True) -> list:
-    """Cột số của tab: reach chỉ tab theo ngày; `tien` False → bỏ MỌI cột tiền (`QC.la_tien`)."""
-    return [c for c in _COT_SO if (reach or c[0] != "reach") and (tien or not QC.la_tien(c[0]))]
+    """Cột số của tab: reach chỉ tab theo ngày; `tien` False → bỏ MỌI cột tiền — theo KHOÁ chỉ số
+    (`QC.la_tien`) lẫn kiểu hiển thị ("tien")."""
+    return [c for c in _COT_SO if (reach or c[0] != "reach")
+            and (tien or not (QC.la_tien(c[0]) or c[2] == "tien"))]
+
+
+def chot_khong_tien(khoa, cot=()) -> None:
+    """Lưới cuối (soát 22/10/2026): Sheet không quyền tiền mà còn KHOÁ chỉ số tiền (`QC.la_tien`,
+    kể cả cột dán nhãn sai kiểu — vd roas_shop kiểu ti_le) hoặc cột / số kiểu tiền → ném, không
+    bao giờ ghi."""
+    lo = sorted({str(k) for k in khoa if QC.la_tien(k)})
+    if lo or any(getattr(x, "kieu", "") == "tien" or getattr(x, "cot_tien_te", None) for x in cot):
+        raise ValueError("Sheet không có quyền tiền vẫn còn số tiền (" + ", ".join(lo)
+                         + ") — không ghi.")
 
 
 def _cot_so(reach: bool, tien: bool = True) -> list:
@@ -256,8 +268,10 @@ def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, tong: dict[str, di
                 mo_ta=f"Tổng cả kỳ của từng quảng cáo{loc}, {cach_xep(lb)}"
                       + (f" — {len(rows_c):,}/{qc['tong']:,} quảng cáo đầu tiên".replace(",", ".")
                          if qc["tong"] > len(rows_c) else ""))
-    if not tien and any(x.kieu == "tien" or x.cot_tien_te for bg in (a, b, c) for x in bg.cot):
-        raise ValueError("Sheet không có quyền tiền vẫn còn cột tiền — không ghi.")
+    if not tien:
+        # Khoá NGUỒN của mọi cột số đã ghi (cùng `_cot` dựng cột + ô), không chỉ kiểu hiển thị.
+        chot_khong_tien([m for m, _, _ in (*_cot(True, tien), *_cot(False, tien))],
+                        [x for bg in (a, b, c) for x in bg.cot])
     return [a, b, c]
 
 
@@ -279,6 +293,16 @@ def tieu_de(yc: dict, tk: list[dict], ten_ben: str) -> str:
     return f"{ten_nen_tieu_de(yc['nen_tang'], tk)} Ads · {pham_vi} · {tu:%d/%m}–{den:%d/%m/%Y}"
 
 
+#: Số liệu chính của Tổng quan theo từng tiền tệ: (khoá nguồn, nhãn, kiểu, là tiền — đánh dấu tay,
+#: ghi chú). Bỏ theo cờ tay; lưới cuối `chot_khong_tien` kiểm lại theo KHOÁ (`QC.la_tien`).
+_SO_TQ = (("chi", "Chi tiêu", "tien", True, ""), ("hien_thi", "Hiển thị", "so_nguyen", False, ""),
+          ("cpm", "CPM", "tien", True, "chi ÷ hiển thị × 1.000"),
+          ("ctr", "CTR (%)", "phan_tram_100", False, "click ÷ hiển thị"),
+          ("view_video", "View video", "so_nguyen", False, ""),
+          ("follow", "Follow", "so_nguyen", False, ""),
+          ("chi_moi_follow", "Chi / follow", "tien", True, ""))
+
+
 def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict, cd: dict,
                    qc: dict, tong: dict[str, dict], lb: dict | None = None, tien: bool = True):
     """`tong` = tổng TOÀN phạm vi theo tiền tệ (`doc_tong_tien_te`), không từ dòng đã cắt. Ghi chú
@@ -293,19 +317,18 @@ def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict,
                TB.SoLieu("Quảng cáo khớp bộ lọc" if co_loc else "Quảng cáo có phân phối",
                          qc["tong"], "so_nguyen")]
     nhieu = len(tong) > 1
+    khoa_tq: list[str] = []
     for tt, t in tong.items():
-        h = QC.hieu_qua(t)
+        gt = {**t, **QC.hieu_qua(t)}
         k = f"Tài khoản tiền {tt}" if nhieu else ""
-        so_lieu += ([TB.SoLieu("Chi tiêu", t.get("chi"), "tien", tt, khoi=k)] if tien else []) + [
-            TB.SoLieu("Hiển thị", t.get("hien_thi"), "so_nguyen", khoi=k),
-            *([TB.SoLieu("CPM", h["cpm"], "tien", tt, "chi ÷ hiển thị × 1.000", khoi=k)]
-              if tien else []),
-            TB.SoLieu("CTR (%)", h["ctr"], "phan_tram_100", ghi_chu="click ÷ hiển thị", khoi=k),
-            TB.SoLieu("View video", t.get("view_video"), "so_nguyen", khoi=k),
-            TB.SoLieu("Follow", t.get("follow"), "so_nguyen", khoi=k),
-            *([TB.SoLieu("Chi / follow", h["chi_moi_follow"], "tien", tt, khoi=k)] if tien else [])]
-    if not tien and any(x.kieu == "tien" for x in so_lieu):
-        raise ValueError("Tổng quan không có quyền tiền vẫn còn số tiền — không ghi.")
+        for khoa, nhan, kieu, la_tien_tay, ghi in _SO_TQ:
+            if not tien and la_tien_tay:
+                continue
+            khoa_tq.append(khoa)
+            so_lieu.append(TB.SoLieu(nhan, gt.get(khoa), kieu, tt if kieu == "tien" else None,
+                                     ghi, khoi=k))
+    if not tien:
+        chot_khong_tien(khoa_tq, so_lieu)
     tao_boi = ("Tạo theo yêu cầu gửi Mark trong chat riêng trên Lark." if tu_mark(yc) else
                f"Tạo bằng nút “Xuất Lark Sheet theo bộ lọc này” ở {TRANG} (chỉ quản trị viên).")
     tien_ghi = ([
