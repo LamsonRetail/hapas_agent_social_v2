@@ -16,6 +16,8 @@ tư, chia quyền XEM cho người hỏi (union_id → email → open_id) và nh
 AI ĐƯỢC XUẤT, PHẠM VI NÀO (cùng cửa của `hoi_dashboard`):
   1. Người hỏi: `hoi_dashboard_tool.nguoi_hoi` (chat riêng Lark / web đã xác thực; nhóm, A2A, lịch tự
      chạy → từ chối) + `kiem_quyen` (email có quyền trên dashboard, đọc lại mỗi lần).
+     Thêm (soát 22/10/2026, `xac_minh_danh_tinh`): email phải là enterprise_email Lark, hoặc union_id
+     người hỏi trùng union_id dashboard ghi cho email đó — email tự khai không đủ để xuất Sheet.
   2. Tài khoản: chỉ trong các bên người hỏi đọc được (`_pham_vi_qc`, cùng luật trang; chưa gán bên
      chỉ quản trị viên). Tên / mã người hỏi nêu phải khớp tài khoản TRONG phạm vi — không khớp thì từ
      chối (không nói tài khoản đó có tồn tại ở bên khác hay không). Mỗi Sheet một bên (quản trị viên
@@ -32,6 +34,7 @@ from __future__ import annotations
 import datetime
 import json
 import re
+import urllib.parse
 
 from tools.registry import registry, tool_error, tool_result  # type: ignore
 
@@ -180,12 +183,56 @@ def chon_tai_khoan(q: dict, cac_tk: list[dict], nen: str, ben_hoi: str,
     return ben, [t for _, t in chon]
 
 
+CAU_DANH_TINH = (
+    "Mark chưa xác minh được email {email} đúng là của bạn: danh bạ Lark không có email công ty do tổ "
+    "chức cấp (chỉ email tự khai), và tài khoản đó chưa khớp lần đăng nhập dashboard của bạn. Mark không "
+    "xuất Sheet theo email này. Đăng nhập social.hapas.vn một lần bằng Lark rồi hỏi lại, hoặc nhờ quản "
+    "trị viên Lark cấp email công ty.")
+
+
+def lien_he(open_id: str) -> dict:
+    """open_id → {enterprise_email, email, union_id} từ danh bạ Lark (app Mark). Không đọc được → ném."""
+    r = HD.lark.call("GET", f"/open-apis/contact/v3/users/{urllib.parse.quote(open_id)}",
+                     query={"user_id_type": "open_id"})
+    u = ((r or {}).get("data") or {}).get("user") or {}
+    return {"enterprise_email": str(u.get("enterprise_email") or "").strip().lower(),
+            "email": str(u.get("email") or "").strip().lower(),
+            "union_id": str(u.get("union_id") or "").strip()}
+
+
+def xac_minh_danh_tinh(kho, open_id: str, email: str) -> None:
+    """Soát 22/10/2026: `HD.email_cua` lùi từ enterprise_email (tổ chức cấp) sang `email` NGƯỜI DÙNG
+    TỰ KHAI trong Lark — ai đó khai email của người khác sẽ xuất Sheet dưới quyền người đó. Tool này
+    TẠO Sheet và chia quyền theo email nên đòi chắc hơn: email là enterprise_email → nhận; không thì
+    union_id của người hỏi (danh bạ app Mark) phải TRÙNG union_id dashboard ghi cho email đó lúc đăng
+    nhập bằng Lark (`kho.union_id_cua`). Thiếu / lệch / không đọc được → HD.TuChoi."""
+    try:
+        u = lien_he(open_id)
+    except Exception as e:  # noqa: BLE001 — không đối chiếu được thì ĐÓNG
+        print(f"[{TEN}] danh bạ lỗi: {type(e).__name__}")
+        raise HD.TuChoi("Mark chưa đối chiếu được danh bạ Lark lúc này nên chưa xuất Sheet — thử lại "
+                        "sau ít phút.") from None
+    if u["enterprise_email"]:
+        if u["enterprise_email"] == email:
+            return
+        raise HD.TuChoi(CAU_DANH_TINH.format(email=email))
+    try:
+        uid_kho = kho.union_id_cua(email)
+    except Exception:  # noqa: BLE001
+        uid_kho = None
+    if u["union_id"] and uid_kho and u["union_id"] == str(uid_kho).strip():
+        return
+    raise HD.TuChoi(CAU_DANH_TINH.format(email=email))
+
+
 def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
             bay_gio: datetime.datetime | None = None) -> dict:
     """Lõi của tool (bài thử gọi thẳng với kho giả). Ném HD.TuChoi / NL.LoiNhap / LoiDuLieu."""
     kho = kho or HD._kho_mac_dinh()
-    nguoi = HD.kiem_quyen(kho, open_id if open_id is not None else HD.nguoi_hoi())
+    oid = open_id if open_id is not None else HD.nguoi_hoi()
+    nguoi = HD.kiem_quyen(kho, oid)
     q, email = nguoi["q"], nguoi["email"]
+    xac_minh_danh_tinh(kho, oid, email)
     args = args or {}
     bay_gio = bay_gio or datetime.datetime.now(HD.VN)
     hn = bay_gio.astimezone(HD.VN).date()
