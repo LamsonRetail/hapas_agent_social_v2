@@ -504,6 +504,77 @@ def qc_top(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, sap:
             for r in rows]
 
 
+#: Bảng trang Quảng cáo (22/10/2026): mã `sap` (`quang_cao.SAP_BANG`) → biểu thức trên tổng `t` của
+#: dòng. Tỉ lệ tính lại từ tổng; CPM / CTR dưới NGUONG_TI_LE hiển thị và ROAS khi chi = 0 → NULL
+#: (xuống cuối dù tăng hay giảm). Chỉ nối chuỗi từ bảng cố định này — không bao giờ từ tham số.
+SAP_BANG_SQL = {
+    "chi": "t.chi", "hien_thi": "t.hien_thi", "click": "t.click", "view": "t.view_video",
+    "follow": "t.follow",
+    "tuong_tac": "(COALESCE(t.thich, 0) + COALESCE(t.binh_luan, 0) + COALESCE(t.chia_se, 0))",
+    "cpm": f"CASE WHEN t.hien_thi >= {QC.NGUONG_TI_LE} THEN t.chi * 1000 / t.hien_thi END",
+    "ctr": f"CASE WHEN t.hien_thi >= {QC.NGUONG_TI_LE} THEN t.click::float / t.hien_thi END",
+    "roas": "CASE WHEN t.chi > 0 THEN t.gia_tri_mua_shop / t.chi END",
+}
+#: Cấp → cột tên để tìm (tên của NGÀY MỚI NHẤT, như cột hiện ở bảng). Quảng cáo khớp cả tên chiến
+#: dịch chứa nó — gõ tên chiến dịch là thấy các quảng cáo của chiến dịch đó.
+_TIM_BANG = {"campaign": ("ten",), "ad": ("ten_ad", "ten_campaign")}
+
+
+def _dk_bang(cd: bool) -> str:
+    return "advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s" + (" AND campaign_id = %s" if cd else "")
+
+
+def sql_ten_bang(cap: str, *, cd: bool) -> str:
+    """Tên mới nhất của mọi đối tượng trong kỳ (để lọc theo tên ở Python). Tham số: ids, tu, den, [cd]."""
+    bang, khoa, _ = _TOP[cap]
+    return (f"SELECT DISTINCT ON ({khoa}) {khoa}, {', '.join(_TIM_BANG[cap])} FROM {bang} "
+            f"WHERE {_dk_bang(cd)} ORDER BY {khoa}, ngay DESC")
+
+
+def sql_bang(cap: str, sap: str, tang: bool, *, loc_ma: bool, cd: bool) -> str:
+    """SQL một bảng chiến dịch / quảng cáo: tổng theo đối tượng trong kỳ (lọc chiến dịch `cd`, lọc
+    mã khớp tên `loc_ma`) → xếp theo `sap` → LIMIT, kèm `tong_khop` (số dòng khớp trước LIMIT).
+    Tham số theo thứ tự: ids, tu, den, [cd], [mã], n."""
+    bang, khoa, _ = _TOP[cap]
+    dk = _dk_bang(cd) + (f" AND {khoa} = ANY(%s)" if loc_ma else "")
+    xep = SAP_BANG_SQL.get(sap, "t.hien_thi")
+    return (f"WITH t AS (SELECT {khoa}, advertiser_id, {_TONG} FROM {bang} WHERE {dk} "
+            f"GROUP BY {khoa}, advertiser_id) SELECT t.*, count(*) OVER () AS tong_khop FROM t "
+            f"ORDER BY {xep} {'ASC' if tang else 'DESC'} NULLS LAST, t.hien_thi DESC NULLS LAST, "
+            f"t.{khoa} LIMIT %s")
+
+
+def qc_bang(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, *, sap: str,
+            tang: bool = False, mau: str = "", cd: str = "", n: int = 10) -> dict:
+    """Bảng chiến dịch / quảng cáo của trang Quảng cáo — lọc tên (`mau` đã qua
+    `quang_cao.chu_tim`), lọc chiến dịch `cd`, xếp theo mọi cột (`quang_cao.loc_bang` đã kiểm).
+    Chỉ tài khoản `ids` (phạm vi người xem). -> {"rows": [...], "tong": số dòng khớp}.
+
+    Lọc tên so khớp ở PYTHON bằng đúng `quang_cao.chu_tim` (như Mark tra cứu): đo 22/10/2026 trên
+    21.060 quảng cáo / 30 ngày, bỏ dấu bằng translate() trong Postgres mất ~1,8 giây, đọc tên mới
+    nhất + so ở Python ~0,3 giây."""
+    if not ids or cap not in _TOP:
+        return {"rows": [], "tong": 0}
+    _, khoa, _ = _TOP[cap]
+    pv = [list(ids), tu, den] + ([cd] if cd else [])
+    _, moi = sql_top(cap, "hien_thi")
+    with ket_noi() as c:
+        ma = None
+        if mau:
+            ma = [r[khoa] for r in c.execute(sql_ten_bang(cap, cd=bool(cd)), pv).fetchall()
+                  if any(mau in QC.chu_tim(r.get(x) or "") for x in _TIM_BANG[cap])]
+            if not ma:
+                return {"rows": [], "tong": 0}
+        ts = pv + ([ma] if ma is not None else []) + [max(1, min(int(n), TOP_TOI_DA))]
+        rows = c.execute(sql_bang(cap, sap, tang, loc_ma=ma is not None, cd=bool(cd)), ts).fetchall()
+        if not rows:
+            return {"rows": [], "tong": 0}
+        ten = {r[khoa]: r for r in c.execute(moi, ([r[khoa] for r in rows], tu, den)).fetchall()}
+    return {"rows": [{**{k: v for k, v in r.items() if k != "tong_khop"},
+                      **{k: v for k, v in (ten.get(r[khoa]) or {}).items() if k != khoa}}
+                     for r in rows], "tong": int(rows[0]["tong_khop"])}
+
+
 def qc_khan_gia(ids: list[str]) -> dict:
     """Cửa sổ khán giả MỚI NHẤT của từng tài khoản, cộng theo chiều + giá trị.
     -> {"rows": [...], "tu", "den"} (tu/den = khoảng nhỏ nhất / lớn nhất của các cửa sổ)."""
