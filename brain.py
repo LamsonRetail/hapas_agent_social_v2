@@ -71,6 +71,7 @@ import tien_do  # noqa: E402  (registers `tra_tien_do`: việc quá hạn/sắp 
 import kho_tool  # noqa: E402,F401  (registers `tra_kho`: tra lại kho bằng nhiều bộ từ khoá)
 import hoi_dashboard_tool  # noqa: E402,F401  (registers `hoi_dashboard`: số liệu dashboard social.hapas.vn cho người xem)
 import tuc_thi_tool  # noqa: E402,F401  (registers `lay_so_tuc_thi`: số mới ngay — quảng cáo, bài, kênh, quét)
+import sheet_qc_tool  # noqa: E402,F401  (registers `xuat_sheet_qc`: số quảng cáo → Lark Sheet riêng cho người hỏi)
 import bai_hoc_tool  # noqa: E402  (registers `ghi_bai_hoc`/`nho_bai_hoc`: kho bài học chiến dịch, tắt khi thiếu MARK_HINDSIGHT_URL/MARK_HINDSIGHT_API_KEY)
 import memory_store  # noqa: E402  (persistent history + per-user memory + remember tool)
 import execution_receipts  # noqa: E402  (bằng chứng tool bền vững theo chat)
@@ -202,6 +203,15 @@ _TOOLING_NOTE = "\n".join(
         "ĐỌC — không bao giờ đề nghị/hứa tạm dừng, bật/tắt, đổi ngân sách chiến dịch; số tiền chỉ "
         "trả bằng chữ. Doanh thu Shop / ROAS quảng cáo tạm không báo (22/10/2026: khác cách công "
         "ty tính) — hỏi thì nói vậy, gợi ý báo cáo doanh thu của công ty.",
+        # 22/10: chủ dự án — nút xuất Sheet quảng cáo gom về trang Quảng cáo (chỉ quản trị viên),
+        # nhưng "khi hỏi Mark thì Mark vẫn xuất Sheet được". Lời dặn; luật tiền / phạm vi do bộ tạo
+        # Sheet (`xuat_sheet_qc.py`) chặn bằng code.
+        "- SỐ QUẢNG CÁO RA LARK SHEET: CHỈ khi người hỏi đòi Sheet / file / Excel / 'xuất' / 'tải "
+        "về' số TikTok/Meta Ads → `xuat_sheet_qc` (miễn phí, gọi luôn; tool ghi yêu cầu, Mark nhắn "
+        "link riêng sau ~1–2 phút). Hỏi số bình thường → trả lời bằng chữ, KHÔNG tạo Sheet. Trả lời: "
+        "nói đang tạo + xác nhận đúng phạm vi đã dùng (bên, nền tảng, tài khoản, từ–đến, bộ lọc) + "
+        "mã yêu cầu; không bịa link. `co_cot_tien` false → nói rõ Sheet không có cột tiền, không "
+        "bao giờ hứa số tiền trong Sheet đó.",
         # 01/10: chạy bằng Claude, Mark quét thẳng ngay câu đầu ("có chiến dịch hapas nào
         # viral không") — luật chỉ nằm trong mô tả tool thì Claude dễ bỏ qua. Nhắc lại ở
         # system prompt; vẫn là lời dặn, không chặn bằng code (chủ agent chọn vậy).
@@ -357,6 +367,8 @@ _TOOL_CAN_XET = {
                        "hiện tại của vài link bài / kênh, mở lượt quét lắng nghe (chỉ người có "
                        "quyền ở bên, trong chat riêng; phần tốn tiền phải hỏi trước)",
                        {"loai": "quang_cao"}),
+    "xuat_sheet_qc": ("xuất số TikTok/Meta Ads của bên người hỏi thành Lark Sheet riêng (chỉ "
+                      "khi người hỏi đòi Sheet/file; Mark nhắn link)", {}),
     "web_scrape": ("đọc nội dung một trang web công khai", {}),
     "lark_cli": ("tra Wiki và tài liệu công khai trên Lark",
                  {"args": ["wiki", "+search", "x"]}),

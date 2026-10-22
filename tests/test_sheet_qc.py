@@ -497,7 +497,8 @@ def test_schema_quyen_rls_trigger():
         "trang_thai", "tieu_de", "sheet_url", "so_dong", "loi", "loi_noi_bo", "da_nhan_tin",
         "bat_dau_luc", "xong_luc"}
     assert "GRANT SELECT ON yeu_cau_sheet_qc TO mark;" in khoi
-    assert not re.search(r"GRANT[^;]*(INSERT|DELETE)[^;]*ON yeu_cau_sheet_qc[^;]*TO mark", sql)
+    # 22/10/2026: mark THÊM được (tool xuat_sheet_qc, chỉ nguon = 'mark' — test_sheet_qc_mark).
+    assert not re.search(r"GRANT[^;]*DELETE[^;]*ON yeu_cau_sheet_qc[^;]*TO mark", sql)
     assert not re.search(r"GRANT[^;]*(UPDATE|DELETE)[^;(]*ON yeu_cau_sheet_qc[^;]*TO lang_nghe_web",
                          sql)
     # Trigger: trạng thái do CSDL đặt + trần; NOTIFY đúng kênh bộ nghe LISTEN.

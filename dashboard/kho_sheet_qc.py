@@ -12,9 +12,12 @@ qc_*) nhận qua pg_notify('qc_sheet') — trigger `yeu_cau_sheet_qc_bao` — v�
 Quyền (schema.sql): lang_nghe_web chỉ INSERT cột phạm vi + SELECT cột trạng thái, và RLS chỉ cho
 dòng của người đang đăng nhập (`lang_nghe.nguoi`, đặt bằng `_la` trong CÙNG giao dịch); trạng thái
 lúc thêm + trần do trigger `yeu_cau_sheet_qc_chuan` đặt / kiểm. Role mark đọc mọi dòng, chỉ sửa cột
-kết quả, không thêm.
+kết quả; 22/10/2026 (chủ dự án: "khi hỏi Mark thì Mark vẫn xuất Sheet được") role mark THÊM được dòng
+`nguon = 'mark'` cho chính người hỏi (tool `xuat_sheet_qc` của Mark, `sheet_qc_tool.py`, gọi `tao`
+với `nguon="mark"`) — cùng trigger, cùng trần, cùng khoá advisory với dòng web.
 
-Hàm dashboard gọi (lang_nghe_web): `tao`, `gan_day`. Hàm bộ nghe gọi (role mark — tiến trình
+Hàm dashboard gọi (lang_nghe_web): `tao`, `gan_day`. Tool Mark gọi (role mark, qua
+`hoi_dashboard_tool.KhoMark`): `tao` (nguon="mark"), `ten_ben`. Hàm bộ nghe gọi (role mark — tiến trình
 `xuat_sheet_qc` đổi `kho._dsn` sang DSN của Mark): `nhan`, `ket_thuc`, `da_nhan_tin`, `don_dep`,
 `ten_ben`, `doc_theo_ngay`, `doc_tong` (lọc / xếp bảng bằng SQL của `kho_qc.sql_bang`). Chỉ SQL
 tham số hoá.
@@ -37,7 +40,9 @@ TRAN_DONG = {"ngay": 20_000, "chien_dich": 5_000, "quang_cao": 10_000}
 HANH_DONG = "tao_sheet_qc"
 _COT_WEB = ("id, nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, trang_thai, "
             "tieu_de, sheet_url, so_dong, loi, da_nhan_tin, tao_luc, bat_dau_luc, xong_luc")
-_COT_MARK = _COT_WEB + ", loi_noi_bo"
+_COT_MARK = _COT_WEB + ", loi_noi_bo, nguon"
+#: Cột nguon (22/10/2026): web không được cấp cột → CSDL đặt 'web'; tool Mark ghi 'mark' (RLS buộc).
+NGUON = ("web", "mark")
 #: 22/10/2026: cột lọc bảng (tim, cd, sap, chieu) + nhiều tài khoản (tk_ds) — trigger kiểm cùng luật
 #: `quang_cao.loc_bang` / `quang_cao.tk_chon`; sai thì ném invalid_parameter_value.
 CAU_LOC_SAI = "Bộ lọc không hợp lệ — tải lại trang rồi thử lại."
@@ -66,11 +71,16 @@ def ly_do_chan(dang: int, trong_gio: int, tran: int = TRAN_GIO) -> str | None:
 def tao(nguoi_hoi: str, ben: str, nen_tang: str, tk: str | None, tu: datetime.date,
         den: datetime.date, *, tran_gio: int = TRAN_GIO, tk_ds: list[str] | None = None,
         tim: str | None = None, cd: str | None = None, sap: str | None = None,
-        chieu: str | None = None) -> dict:
+        chieu: str | None = None, nguon: str | None = None) -> dict:
     """Thêm MỘT yêu cầu (trạng thái do trigger đặt). Trần kiểm NGUYÊN TỬ dưới cùng khoá advisory
     với trigger. Vượt trần → LoiDuLieu (câu cho người bấm). -> dòng vừa thêm (cột web đọc được).
     22/10/2026: `tk_ds` = các tài khoản đã chọn (None = mọi tài khoản của bên + nền tảng; một mã thì
-    ghi cả cột `tk` cũ), `tim` / `cd` / `sap` / `chieu` = bộ lọc bảng (`quang_cao.loc_bang`)."""
+    ghi cả cột `tk` cũ), `tim` / `cd` / `sap` / `chieu` = bộ lọc bảng (`quang_cao.loc_bang`).
+    `nguon` (22/10/2026): None = dòng web (cột không có trong INSERT — role web không được cấp cột,
+    CSDL đặt 'web'); "mark" = tool của Mark (role mark; RLS buộc đúng 'mark'). Khoá người ở dưới
+    lấy TRƯỚC khoá toàn hệ thống của trigger — cùng thứ tự cho cả hai nguồn."""
+    if nguon is not None and nguon not in NGUON:
+        raise ValueError("nguon phải là web hoặc mark")
     with ket_noi() as c:
         e = _la(c, nguoi_hoi)
         c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("sheet_qc|" + e,))
@@ -84,12 +94,15 @@ def tao(nguoi_hoi: str, ben: str, nen_tang: str, tk: str | None, tu: datetime.da
         if ly:
             raise LoiDuLieu(ly)
         ds = [str(x) for x in (tk_ds or [])] or None
+        cot, giu = ("", "") if nguon is None else (", nguon", ", %s")
         try:
             return c.execute(
                 f"INSERT INTO yeu_cau_sheet_qc (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, "
-                f"sap, chieu) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {_COT_WEB}",
+                f"sap, chieu{cot}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s{giu}) "
+                f"RETURNING {_COT_WEB}",
                 (e, ben, nen_tang, tk or (ds[0] if ds and len(ds) == 1 else None), ds, tu, den,
-                 tim or None, cd or None, sap or None, chieu or None)).fetchone()
+                 tim or None, cd or None, sap or None, chieu or None)
+                + (() if nguon is None else (nguon,))).fetchone()
         except Exception as x:  # noqa: BLE001 — CheckViolation của trigger (trần chung)
             if type(x).__name__ == "CheckViolation":
                 raise LoiDuLieu(CAU_TRAN_CHUNG) from None
