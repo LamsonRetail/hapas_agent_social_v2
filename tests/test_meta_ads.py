@@ -12,6 +12,13 @@ import scheduler
 import trinh_bay_sheet as TB
 
 
+@pytest.fixture(autouse=True)
+def _bat_doanh_thu(monkeypatch):
+    """22/10/2026: doanh thu / ROAS tạm tắt (`HIEN_DOANH_THU`); các bài thử này soát đường BẬT lại.
+    Đường tắt: tests/test_qc_bo_doanh_thu.py."""
+    monkeypatch.setattr(T, "HIEN_DOANH_THU", True)
+
+
 P2P = {"channel": "lark", "chat_type": "p2p", "nguoi_gui": "ou_asker"}
 
 

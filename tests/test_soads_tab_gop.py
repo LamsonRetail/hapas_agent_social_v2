@@ -16,6 +16,13 @@ import trinh_bay_sheet as TB
 from sheet_gia import LarkGia
 from test_trinh_bay_meta_ads import _gia, context  # noqa: F401 — fixture tự dùng
 
+
+@pytest.fixture(autouse=True)
+def _bat_doanh_thu(monkeypatch):
+    """22/10/2026: doanh thu / ROAS tạm tắt (`HIEN_DOANH_THU`); các bài thử này soát đường BẬT lại.
+    Đường tắt: tests/test_qc_bo_doanh_thu.py."""
+    monkeypatch.setattr(T, "HIEN_DOANH_THU", True)
+
 ACC = [{"id": "act_111111111111111111", "name": "HAPAS A", "currency": "VND", "timezone_name": "Asia/Ho_Chi_Minh"},
        {"id": "act_2", "name": "HAPAS B", "currency": "VND", "timezone_name": "Asia/Ho_Chi_Minh"},
        {"id": "act_3", "name": "HAPAS US", "currency": "USD", "timezone_name": "Asia/Ho_Chi_Minh"}]
