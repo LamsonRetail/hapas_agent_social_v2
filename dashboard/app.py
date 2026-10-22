@@ -2791,7 +2791,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         while d <= den:
             r = theo.get(d) or {}
             ngay.append({"ngay": d.isoformat(), **{c: r.get(c) or 0 for c in QC.TEN_COT_SO},
-                         "tuong_tac": QC.tuong_tac(r)})
+                         "tuong_tac": QC.tuong_tac(r),
+                         # 22/10/2026 (chủ dự án): xem trang SP — mỗi khoá chỉ một nền tảng.
+                         **{c: r.get(c) or 0 for c in QC.TEN_CHUOI_XEM_SP}})
             d += datetime.timedelta(days=1)
         # 22/10/2026 (MKT): bảng chiến dịch / quảng cáo lọc theo tên + chiến dịch, xếp theo mọi cột;
         # (chủ dự án) 20 dòng một trang, trang `tc` / `ta` kẹp về trang cuối ở `kho_qc.qc_bang`.
@@ -2823,7 +2825,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 ngay_nen.extend({"ngay": r["ngay"].isoformat() if hasattr(r["ngay"], "isoformat")
                                  else str(r["ngay"]), "nen_tang": n,
                                  **{c: r.get(c) or 0 for c in QC.TEN_COT_SO},
-                                 "tuong_tac": QC.tuong_tac(r)}
+                                 "tuong_tac": QC.tuong_tac(r),
+                                 **{c: r.get(c) or 0 for c in QC.TEN_CHUOI_XEM_SP}}
                                 for r in kq.qc_theo_ngay(ids_n, tu, den))
         kg = kq.qc_khan_gia(ids) if ids else {"rows": [], "tu": None, "den": None}
         moi = (kq.qc_moi(ids) if ids else None) or {}
@@ -2846,7 +2849,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                if t["advertiser_id"] in ids}) or ["VND"],
             "kpi": kpi, "kpi_truoc": kpi_truoc,
             "doi": {k: QC.doi_pt(kpi.get(k), kpi_truoc.get(k)) for k in kpi},
-            "theo_ngay": ngay, "campaign": top("campaign"), "ad": top("ad"),
+            "theo_ngay": ngay, "chuoi_xem_sp": QC.chuoi_xem_sp(ngay),
+            "campaign": top("campaign"), "ad": top("ad"),
             "bang": {"tim": lb["tim"], "cd": lb["cd"], "chieu": lb["chieu"], "moi_trang": moi_trang,
                      "tong_campaign": dem.get("campaign", 0), "tong_ad": dem.get("ad", 0),
                      "trang_campaign": trang.get("campaign", 1), "trang_ad": trang.get("ad", 1),
