@@ -103,6 +103,9 @@ _MUTATING_EXACT = {
     # đòi `write_data`. Phần tốn tiền còn chốt xác nhận chi phí bằng code trong tool; công tắc
     # của đường cào bên dưới (chi_so_bai / soi_tai_khoan) vẫn áp ở trong tool.
     "lay_so_tuc_thi": "write_data",
+    # Xuất số quảng cáo ra Lark Sheet qua Mark (sheet_qc_tool.py, 22/10/2026): ghi một dòng
+    # yeu_cau_sheet_qc; bộ nghe tạo Sheet riêng cho người hỏi → ghi dữ liệu ra ngoài, đòi `write_data`.
+    "xuat_sheet_qc": "write_data",
 }
 _MUTATING_WORDS = {
     "create", "update", "delete", "remove", "send", "write", "edit",

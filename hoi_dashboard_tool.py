@@ -109,7 +109,8 @@ PHAN = {
                  "chiến dịch / quảng cáo (có nền tảng), chi phí suy ra; chi tiêu cho mọi người có "
                  "quyền ở bên (`xem_tien`); doanh thu Shop / ROAS tạm không báo (22/10/2026 — khác "
                  "cách công ty tính). Tra MỘT đối tượng (chiến dịch / quảng cáo / "
-                 "tài khoản người hỏi nêu tên): `tim` + `cap`. Trả lời bằng chữ, không biểu đồ",
+                 "tài khoản người hỏi nêu tên): `tim` + `cap`. Trả lời bằng chữ, không biểu đồ; "
+                 "đòi Sheet / file → `xuat_sheet_qc`",
 }
 PHAN_MAC_DINH = ("tong_quan", "sac_thai", "chu_de", "tu_khoa", "bai")
 #: Phần cần dòng bài/bình luận (tính `tinh_chi_so`); phần còn lại chỉ đọc cấu hình/lượt quét.
@@ -147,6 +148,8 @@ SCHEMA = {
         "(CPM, CPC, chi/kết quả…). `mo_ho` true hoặc nhiều đối tượng khớp, hoặc kỳ không rõ → hỏi "
         "lại một câu ngắn. Không khớp (`tim_thay` 0) → nói rõ không thấy, đưa `goi_y` để người hỏi "
         "chọn — KHÔNG đoán số.\n"
+        "QUẢNG CÁO RA SHEET (22/10/2026): người hỏi đòi Sheet / file / Excel / \"xuất\" / \"tải về\" "
+        "số quảng cáo → `xuat_sheet_qc` (không phải tool này); không đòi thì trả lời bằng chữ.\n"
         + ("" if QC.HIEN_DOANH_THU else QC.CAU_KHONG_DOANH_THU + "\n") +
         "THAM SỐ: không nói kỳ thì để trống (= 30 ngày trọn tới hết hôm qua, như dashboard). "
         "`bo_loc` dùng đúng mã của dashboard; giá trị nguồn/chủ đề lạ thì gọi `phan`=[\"bo_loc\"] "
@@ -235,6 +238,10 @@ _HAM_KHO_QC = {"qc_cac_tk": "cac_tk", "qc_tong": "qc_tong", "qc_top": "qc_top", 
 _HAM_KHO_TT = {"tt_tao": "tao", "tt_doc": "doc", "tt_gan_day_qc": "gan_day_qc", "tt_dem": "dem",
                "tt_cap_nhat": "cap_nhat", "tt_du_an_cua_link": "du_an_cua_link",
                "tt_du_an_cua_kenh": "du_an_cua_kenh"}
+#: Xuất Lark Sheet quảng cáo qua Mark (22/10/2026, `sheet_qc_tool`): hàm của `dashboard.kho_sheet_qc`
+#: tool được gọi — thêm yêu cầu (nguon="mark", role mark chỉ thêm được dòng nguon = 'mark') + tên bên.
+#: Không hàm nào của bộ nghe (nhận / kết thúc là việc của `xuat_sheet_qc`).
+_HAM_KHO_SQ = {"sq_tao": "tao", "sq_ten_ben": "ten_ben"}
 
 
 class KhoMark:
@@ -245,10 +252,14 @@ class KhoMark:
     `_HAM_KHO`: tool không bao giờ gọi được hàm GHI của dashboard qua cửa này."""
 
     def __getattr__(self, ten: str):
-        if ten not in _HAM_KHO and ten not in _HAM_KHO_QC and ten not in _HAM_KHO_TT:
+        if (ten not in _HAM_KHO and ten not in _HAM_KHO_QC and ten not in _HAM_KHO_TT
+                and ten not in _HAM_KHO_SQ):
             raise AttributeError(ten)
         from dashboard import kho as K
-        if ten in _HAM_KHO_TT:
+        if ten in _HAM_KHO_SQ:
+            from dashboard import kho_sheet_qc as KS
+            fn = getattr(KS, _HAM_KHO_SQ[ten])
+        elif ten in _HAM_KHO_TT:
             from dashboard import kho_tuc_thi as KT
             fn = getattr(KT, _HAM_KHO_TT[ten])
         elif ten in _HAM_KHO_QC:
@@ -1064,8 +1075,10 @@ GHI_CHU_QC = (
     "(`theo_ngay`) và chi phí suy ra (`chi_phi`: CPM, CPC, CTR, chi/follow, chi/1.000 view, chi/"
     "engaged view — tính lại từ tổng). Meta: view_video = xem ≥ 3 giây, engaged_view = "
     "ThruPlay, follow = thích Trang. Chủ dự án 20/10/2026: số "
-    "quảng cáo chỉ trả lời BẰNG CHỮ (câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh/"
-    "sheet/tệp, không gửi link trang Quảng cáo khi không có `link`."
+    "quảng cáo trả lời BẰNG CHỮ (câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh, "
+    "không gửi link trang Quảng cáo khi không có `link`. Chủ dự án 22/10/2026: người hỏi ĐÒI Sheet "
+    "/ file / xuất / tải về số quảng cáo thì dùng `xuat_sheet_qc` (Lark Sheet riêng, Mark nhắn "
+    "link) — không tự dựng Sheet bằng đường khác; không đòi thì vẫn trả lời bằng chữ."
     + ("" if QC.HIEN_DOANH_THU else " " + QC.CAU_KHONG_DOANH_THU))
 
 

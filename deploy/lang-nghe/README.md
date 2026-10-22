@@ -328,6 +328,21 @@ khoản + ngày; Tổng quan ghi bộ lọc đã dùng. Dòng cũ (cột mới N
 `schema.sql` (thêm 5 cột NULL — tức thì, không viết lại bảng; trigger kiểm giá trị) TRƯỚC khi khởi động
 lại dashboard / Mark — mã mới đọc + ghi các cột này.
 
+**22/10/2026 (chủ dự án) — hỏi Mark vẫn xuất Sheet được**: tool **`xuat_sheet_qc`** của Mark
+(`sheet_qc_tool.py`) thêm dòng `yeu_cau_sheet_qc` với `nguon = 'mark'`, `nguoi_hoi` = email người hỏi đã
+xác thực (chat riêng Lark / web console, cùng cửa `hoi_dashboard`), chỉ tài khoản trong các bên người đó
+đọc được; bộ nghe dựng CÙNG Sheet và nhắn link cho chính người hỏi. Mark chỉ gọi khi người hỏi đòi Sheet /
+file / xuất / tải về (lời dặn: mô tả tool, `skills/hoi-dashboard-lang-nghe.md`, `brain.py`); còn lại
+vẫn trả lời bằng chữ. **Luật cứng ở bộ nghe** (không tin dòng, kể cả của Mark): dòng `web` vẫn chỉ quản
+trị viên; dòng `mark` cần người còn quyền ở bên — phạm vi tài khoản tính lại từ quyền CSDL của
+`nguoi_hoi` lúc dựng (mã ngoài phạm vi bị bỏ, Tổng quan + tin nhắn nói số đã bỏ; "Tất cả bên" / "Chưa
+gán bên" chỉ quản trị viên), và **không xem tiền (`quang_cao.xem_tien`) của mọi tài khoản trong Sheet →
+Sheet không có cột / giá trị tiền nào** (chi, CPM, CPC, chi / …, doanh thu; dòng TỔNG gộp mọi tiền tệ;
+không xếp theo tiền). Không đọc được quyền → không Sheet. Đổi quyền giữa lượt → không chia sẻ. Trần
+(trigger) đếm CHUNG hai nguồn. Thứ tự lên: **schema (cột `nguon` + quyền INSERT của mark + RLS
+`sheet_qc_them_mark`) → mã Mark** (bộ nghe đọc `nguon`; tool ghi `nguon`) — mã mới trên schema cũ thì
+bộ nghe lỗi "column nguon does not exist" tới khi chạy schema. Dashboard không đổi mã.
+
 ```bash
 cd /opt/lang-nghe/app   # sau khi rsync mã mới (dashboard/README.md bước 2) — Mark tự lên qua agent-deploy
 # a. Schema TRƯỚC mã mới (bảng yeu_cau_sheet_qc + 2 trigger + RLS + quyền theo cột; chạy lại không hỏng)
@@ -364,9 +379,14 @@ sudo systemd-run --quiet --wait --pipe -p User=mark -p WorkingDirectory=/opt/mar
 - **Quyền DB**: lang_nghe_web INSERT chỉ (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap,
   chieu), SELECT mọi cột trừ
   `loi_noi_bo`, không UPDATE / DELETE; RLS theo `lang_nghe.nguoi` (app đặt bằng `set_config` trong
-  cùng giao dịch). mark: SELECT, UPDATE chỉ cột kết quả, không INSERT / DELETE.
+  cùng giao dịch). mark: SELECT, UPDATE chỉ cột kết quả, không DELETE; từ 22/10/2026 INSERT chỉ
+  (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, nguon) + USAGE sequence, RLS
+  `sheet_qc_them_mark` WITH CHECK (nguon = 'mark') — web không được cấp cột `nguon` (luôn 'web').
+  Trigger BEFORE INSERT chạy cho mọi role (trần + kiểm bộ lọc áp cho dòng Mark); khoá advisory
+  `sheet_qc|<email>` rồi `sheet_qc|*` là khoá cả CSDL nên web và Mark cùng người xếp hàng nhau, cùng
+  thứ tự khoá (người → toàn hệ thống) nên không khoá chéo.
 - **Kiểm**: `sudo -u mark psql -d lang_nghe -c "select id, nguoi_hoi, nen_tang, ben, tu, den,
-  tk_ds, tim, cd, sap, chieu, trang_thai, so_dong, loi, loi_noi_bo, da_nhan_tin, tao_luc, xong_luc
+  tk_ds, tim, cd, sap, chieu, nguon, trang_thai, so_dong, loi, loi_noi_bo, da_nhan_tin, tao_luc, xong_luc
   from yeu_cau_sheet_qc order by
   id desc limit 20"`; nhật ký: `select * from nhat_ky where hanh_dong = 'tao_sheet_qc' order by id desc`.
 - **Gỡ**: `systemctl disable --now qc-sheet-nghe` (yêu cầu mới chờ 30 phút rồi thành "Quá hạn"; trang
