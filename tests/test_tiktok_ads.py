@@ -1192,7 +1192,8 @@ def test_trang_va_api_quang_cao_chi_quan_tri_vien():
     dang_nhap(c, QL)
     d = c.get(f"/api/qc?{Q}").json()
     assert d["xem_tien"] is True and d["kpi"]["chi"] > 0
-    assert d["kpi"]["roas_shop"] == round(d["kpi"]["gia_tri_mua_shop"] / d["kpi"]["chi"], 2)
+    # 22/10/2026: doanh thu Shop / ROAS tạm ẩn — kể cả quản trị viên (QC.HIEN_DOANH_THU).
+    assert "roas_shop" not in d["kpi"] and "gia_tri_mua_shop" not in d["kpi"]
     assert c.get(f"/api/qc?{Q}&ben=tat_ca").status_code == 200
     t = c.get(f"/quang-cao?{Q}").text
     assert "Hiển thị" in t and "HAPAS - KOC" in t
@@ -1222,7 +1223,7 @@ def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
     assert c.get(f"/api/qc?{Q}&ben=chua_gan").json()["tai_khoan"][0]["advertiser_id"] == LE
     assert c.get(f"/api/qc?{Q}&ben=khong-co").status_code == 404
     t = c.get(f"/quang-cao?{Q}").text
-    assert "Chi tiêu" in t and "ROAS Shop" in t and 'id="qc-api"' in t
+    assert "Chi tiêu" in t and "ROAS Shop" not in t and 'id="qc-api"' in t
     # Thiết kế 20/10/2026: kỳ đang xem ở đầu trang, "số đến ngày" ở dải trạng thái, CPM + CTR tính lại.
     assert "12/10 – 18/10/2026" in t and "Số đến 18/10" in t
     assert 'data-kpi="cpm"' in t and 'data-kpi="ctr"' in t

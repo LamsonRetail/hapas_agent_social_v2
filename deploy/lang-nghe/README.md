@@ -306,7 +306,9 @@ Trang Quảng cáo (chỉ quản trị viên) có mục **Tạo Lark Sheet**: xu
 nền tảng, tài khoản, từ–đến) thành MỘT Lark Sheet riêng tư — Tổng quan + ba tab: *Theo ngày × tài
 khoản*, *Theo chiến dịch*, *Theo quảng cáo* (tổng cả kỳ; tối đa 20.000 / 5.000 / 10.000 dòng, cắt thì
 Tổng quan nói rõ). Có chi tiêu và chỉ số suy ra như trang (CPM, CPC, CTR, chi / 1.000 view, chi /
-follow, chi / kết quả, ROAS Shop). TikTok và Meta cùng đường (cùng bảng `qc_*`); tên file ghi nền
+follow, chi / kết quả). Cột Doanh thu Shop + ROAS Shop tạm gỡ từ 22/10/2026 (chủ dự án: nền tảng
+đo khác cách công ty tự tính; dữ liệu vẫn lưu, bật lại bằng `quang_cao.HIEN_DOANH_THU = True`).
+TikTok và Meta cùng đường (cùng bảng `qc_*`); tên file ghi nền
 tảng ("TikTok Ads · HAPAS · 01/10–19/10/2026").
 
 Đường đi: dashboard (lang_nghe_web) KHÔNG có app Lark tạo Sheet — chỉ thêm dòng `yeu_cau_sheet_qc`

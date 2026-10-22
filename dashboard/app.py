@@ -393,6 +393,7 @@ def _tao_mau() -> Jinja2Templates:
     env.globals.update(TEN_NEN_TANG=NL.TEN_NEN_TANG, LOAI_NGUON=NL.LOAI_NGUON,
                        VAI_TRO=NL.VAI_TRO, TEN_LOAI=CS.TEN_LOAI, LICH_CHAY=LICH_CHAY,
                        ECHARTS=ECHARTS, ECHARTS_SRI=ECHARTS_SRI)
+    env.globals["HIEN_DOANH_THU"] = QC.HIEN_DOANH_THU   # 22/10/2026: doanh thu / ROAS tạm ẩn
     return Jinja2Templates(env=env)
 
 
@@ -2833,7 +2834,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             "moi": {"ngay_cuoi": moi.get("ngay_cuoi"), "ghi_luc": moi.get("ghi_luc")},
         }
         # Chốt chặn tiền ở MÁY CHỦ: người Chỉ xem không bao giờ nhận khoá tiền (kể cả khối con).
-        return QC.loc_tien(ra, co_tien)
+        # 22/10/2026 (chủ dự án): doanh thu Shop / ROAS tạm ẩn với MỌI người (`QC.HIEN_DOANH_THU`).
+        return QC.loc_doanh_thu(QC.loc_tien(ra, co_tien))
 
     async def _qc_cho(nguoi: dict, qp, *, nghiem: bool) -> dict:
         """Cùng ngân sách tính với /api/chi-so (`app.state.ban`, tối đa TINH_SONG_SONG lượt cùng

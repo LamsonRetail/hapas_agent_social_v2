@@ -329,7 +329,8 @@ def test_bo_nghe_dung_ba_tab_khoa_rieng_tu_cap_xem_nhan_tin(monkeypatch):
     assert len(ngay) == 1 + 14 and MM_2 not in {r[3] for r in ngay[1:]}
     tq = ngay[0]
     assert {"CPM", "CPC", "CTR (%)", "Chi / 1.000 view", "Chi / follow", "Chi / kết quả",
-            "ROAS Shop", "Reach"} <= set(tq)
+            "Reach"} <= set(tq)
+    assert not {"ROAS Shop", "Doanh thu Shop"} & set(tq)        # 22/10/2026: tạm ẩn
     r1 = dict(zip(tq, ngay[1]))
     assert r1["CPM"] == 10000 and r1["CTR (%)"] == 1.2 and r1["Chi / follow"] == 5000
     o = gia.o(X.TAB_NGAY)

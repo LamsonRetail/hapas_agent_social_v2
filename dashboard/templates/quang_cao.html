@@ -135,7 +135,7 @@
         <div><dt>CTR</dt><dd>{{ ctr(x) }}</dd></div>
         <div><dt>View video</dt><dd>{{ x.view_video|so_gon }}</dd></div>
         {% if d.xem_tien %}<div><dt>Chi / view</dt><dd>{{ chi_view(x) }} ₫</dd></div>
-        <div><dt>ROAS</dt><dd>{{ x.roas_shop|so_thap or '—' }}</dd></div>{% endif %}
+        {% if HIEN_DOANH_THU %}<div><dt>ROAS</dt><dd>{{ x.roas_shop|so_thap or '—' }}</dd></div>{% endif %}{% endif %}
       </dl>
     </article>
     {% endfor %}
@@ -169,7 +169,7 @@
     {{ th_sap('hien_thi') }}
     {% if d.xem_tien %}{{ th_sap('cpm') }}{% endif %}
     {{ th_sap('click') }}{{ th_sap('ctr') }}{{ th_sap('view') }}{{ th_sap('tuong_tac') }}{{ th_sap('follow') }}
-    {% if d.xem_tien %}{{ th_sap('roas') }}{% endif %}
+    {% if d.xem_tien and HIEN_DOANH_THU %}{{ th_sap('roas') }}{% endif %}
   </tr></thead>
   <tbody>
   {% for r in ds %}
@@ -191,10 +191,10 @@
       <td class="so" data-nhan="CTR">{{ ctr(r) }}</td>
       <td class="so" data-nhan="View video">{{ r.view_video|so_vn }}</td>
       <td class="so" data-nhan="Tương tác">{{ r.tuong_tac|so_vn }}</td><td class="so" data-nhan="Follow">{{ r.follow|so_vn }}</td>
-      {% if d.xem_tien %}<td class="so" data-nhan="ROAS">{{ r.roas_shop|so_thap or '—' }}</td>{% endif %}
+      {% if d.xem_tien and HIEN_DOANH_THU %}<td class="so" data-nhan="ROAS">{{ r.roas_shop|so_thap or '—' }}</td>{% endif %}
     </tr>
   {% else %}
-    <tr><td colspan="{{ 10 if d.xem_tien else 7 }}" class="trong">Không có {{ ten_cot|lower }} nào {{ 'khớp bộ lọc' if d.bang.tim or d.bang.cd else 'chạy' }} trong khoảng này.</td></tr>
+    <tr><td colspan="{{ (10 if HIEN_DOANH_THU else 9) if d.xem_tien else 7 }}" class="trong">Không có {{ ten_cot|lower }} nào {{ 'khớp bộ lọc' if d.bang.tim or d.bang.cd else 'chạy' }} trong khoảng này.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -207,7 +207,7 @@
 <section class="the-khoi cach-duoi" aria-labelledby="qc-top-tieu-de" id="top">
   <div class="muc">
     <h2 class="muc__ten" id="qc-top-tieu-de">Chiến dịch và quảng cáo</h2>
-    <button type="button" class="goi-y" data-goi-y="Tìm theo tên (không cần gõ dấu): bảng chiến dịch khớp tên chiến dịch; bảng quảng cáo khớp tên quảng cáo hoặc tên chiến dịch chứa nó. Bấm tên một chiến dịch để chỉ xem quảng cáo của chiến dịch đó. Bấm tiêu đề cột để xếp, bấm lại để đổi chiều. CPM, CTR, ROAS tính lại từ tổng của dòng; khi xếp theo CPM hoặc CTR, dòng dưới {{ NGUONG_TI_LE|so_vn }} hiển thị xuống cuối để số lẻ không lấn lên đầu. Bộ lọc này chỉ áp vào hai bảng — số tổng, biểu đồ và Lark Sheet vẫn theo Bộ lọc đầu trang.">i</button>
+    <button type="button" class="goi-y" data-goi-y="Tìm theo tên (không cần gõ dấu): bảng chiến dịch khớp tên chiến dịch; bảng quảng cáo khớp tên quảng cáo hoặc tên chiến dịch chứa nó. Bấm tên một chiến dịch để chỉ xem quảng cáo của chiến dịch đó. Bấm tiêu đề cột để xếp, bấm lại để đổi chiều. CPM, CTR{{ ', ROAS' if HIEN_DOANH_THU }} tính lại từ tổng của dòng; khi xếp theo CPM hoặc CTR, dòng dưới {{ NGUONG_TI_LE|so_vn }} hiển thị xuống cuối để số lẻ không lấn lên đầu. Bộ lọc này chỉ áp vào hai bảng — số tổng, biểu đồ và Lark Sheet vẫn theo Bộ lọc đầu trang.">i</button>
   </div>
   <form class="qc-bang-loc" method="get" action="/quang-cao#top" role="search" aria-label="Lọc và sắp xếp bảng" data-o="loc-bang">
     {% for k in ('ben', 'nen_tang', 'tk', 'tu', 'den') if d[k] %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
