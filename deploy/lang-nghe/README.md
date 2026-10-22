@@ -420,12 +420,14 @@ Meta: Trang + Instagram) — `dashboard/README.md` mục "Kênh đăng của qu�
    TikTok + ≈ 35 lượt Meta, ad chi nhiều trước); muốn sớm hơn: `sudo systemctl start
    tiktok-ads-dong-bo.service` / `meta-ads-dong-bo.service`.
 4. **Chủ dự án — tên Trang Facebook / Instagram**: tạo lại token người dùng hệ thống `mark_ads_reader`
-   trong Meta Business Settings, tick thêm **`pages_read_engagement`** (chỉ đọc) bên cạnh
-   `ads_read` + `read_insights`, giao quyền xem các Trang đứng tên quảng cáo cho người dùng hệ thống,
-   rồi dán ở thẻ "Kết nối Meta Ads" (hoặc `nhap-token` như mục 8c). Dashboard chỉ nhận đúng các quyền
-   `ads_read`, `read_insights`, `public_profile`, `pages_read_engagement` — tick thêm quyền khác (nhất
-   là ads_management, business_management, *_manage*) là bị từ chối. Chưa làm bước này: bảng hiện
-   "Page <id>" / "IG <id>", số vẫn đủ.
+   trong Meta Business Settings, tick thêm **`pages_read_engagement`** và **`pages_show_list`** (chỉ
+   đọc; Meta thường cấp cùng nhau) bên cạnh `ads_read` + `read_insights`, giao quyền xem các Trang
+   đứng tên quảng cáo cho người dùng hệ thống, rồi dán ở thẻ "Kết nối Meta Ads" (hoặc `nhap-token`
+   như mục 8c). Dashboard chỉ nhận đúng các quyền `ads_read`, `read_insights`, `public_profile`,
+   `pages_read_engagement`, `pages_show_list` — tick thêm quyền khác (nhất là ads_management,
+   business_management, *_manage*, instagram_basic) là bị từ chối. Chưa làm bước này: bảng hiện
+   "Page <id>", số vẫn đủ. Username Instagram cần instagram_basic (KHÔNG xin) → thường hiện
+   "IG <id>"; dashboard thử một lần mỗi lượt, lỗi thì thôi.
 5. Kiểm: `select nen_tang, loai, count(*) from qc_ad_kenh group by 1, 2;` và
    `select count(*) filter (where ten is not null), count(*) from qc_kenh;` — trang Quảng cáo, khối
    "Theo kênh đăng" (dòng phụ "x% chi tiêu đã biết kênh").

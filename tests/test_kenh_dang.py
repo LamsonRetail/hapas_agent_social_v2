@@ -3,7 +3,8 @@ tool_execute CHỈ dạng ad_get cố định) và Meta (nút <id> chỉ fields=
 pages_read_engagement), đồng bộ kênh trong lượt hằng ngày (giả), khối "Theo kênh đăng" của trang
 Quảng cáo, schema + BigQuery.
 
-Không mạng: dùng lại máy chủ giả TikTok / Meta và kho giả của test_tiktok_ads / test_meta_ads_dashboard,
+Không mạng: dùng lại máy chủ giả TikTok / Meta và kho giả của test_tiktok_ads /
+test_meta_ads_dashboard,
 thêm phần kênh đăng (đo thật 22/10/2026: ad_get trả identity_id cho 100/100 ad chi nhiều nhất của
 MATEMADE MKT; identity_get một lượt trả đủ, page_info toàn 0)."""
 from __future__ import annotations
@@ -161,8 +162,8 @@ class GiaKhoKenh(GiaKhoQC):
             for kid, loai in ((r.get("kenh_id"), r.get("loai")),
                               (r.get("kenh_phu_id"), "instagram")):
                 c = self.kenh.get((nen, kid))
-                if kid and (c is None or (not c.get("ten") and not c.get("username")
-                                          and (self.bay - c["cap_nhat_luc"]).days >= 1)):
+                cu = c and (self.bay - c["cap_nhat_luc"]).days >= KQ.HOI_LAI_TEN_NGAY[nen]
+                if kid and (c is None or (not c.get("ten") and not c.get("username") and cu)):
                     ra.add((kid, loai))
         return [{"kenh_id": k, "loai": lo} for k, lo in sorted(ra)]
 
@@ -209,13 +210,16 @@ class GiaKhoKenh(GiaKhoQC):
                 "chua_ro": {**self._cong(chua), "so_ad": len(chua)} if chua else {}}
 
 
-# ───────────────────────────── máy chủ TikTok giả có ad_get / identity_get ─────────────────────────
+# ───────────────────────── máy chủ TikTok giả có ad_get / identity_get ─────────────────────────
 class GiaTikTokKenh(GiaTikTok):
     """ad_id giả dạng số (như thật). Ad cuối cùng của mỗi lượt ad_get "không thấy" (đã xoá)."""
 
-    def __init__(self, *a, loi_identity=False, **kw):
+    def __init__(self, *a, loi_identity=False, loi_adv=(), bo_identity=(), ma_loi=50000, **kw):
         super().__init__(*a, **kw)
         self.loi_identity = loi_identity
+        self.loi_adv = set(loi_adv)            # tài khoản ad_get lỗi
+        self.bo_identity = set(bo_identity)    # danh tính identity_get không trả
+        self.ma_loi = ma_loi
 
     @staticmethod
     def _so(x: str) -> str:
@@ -241,17 +245,19 @@ class GiaTikTokKenh(GiaTikTok):
             self.cong_cu.append((ten, a))
             p = a["params"]
             ids = p["filtering"]["ad_ids"]
+            if p["advertiser_id"] in self.loi_adv:
+                return {"code": self.ma_loi, "message": "lỗi"}
             ds = [{"ad_id": x, "identity_id": f"id-{int(x) % 3}",
                    "identity_type": "AUTH_CODE" if int(x) % 3 else "BC_AUTH_TT",
                    "tiktok_item_id": "76" + x[-6:], "campaign_id": "1"} for x in ids[:-1]]
             return {"code": 0, "message": "OK", "data": {"list": ds, "page_info": {
-                "page": 1, "page_size": p["page_size"], "total_page": 1,
+                "page": 1, "page_size": p["page_size"], "total_page": 5,
                 "total_number": len(ds)}}}
         if ten == "identity_get":
             self.cong_cu.append((ten, a))
             if self.loi_identity:
                 return {"code": 50000, "message": "lỗi hệ thống"}
-            return {"code": 0, "data": {"identity_list": [
+            return {"code": 0, "data": {"identity_list": [x for x in [
                 {"identity_id": "id-0", "identity_type": "BC_AUTH_TT", "display_name": "MATE MADE",
                  "username": "matemade.official"},
                 {"identity_id": "id-1", "identity_type": "AUTH_CODE", "display_name": "Bé Duy",
@@ -259,7 +265,8 @@ class GiaTikTokKenh(GiaTikTok):
                 {"identity_id": "id-1", "identity_type": "AUTH_CODE", "display_name": "Bé Duy",
                  "username": None},
                 {"identity_id": "id-2", "identity_type": "AUTH_CODE",
-                 "display_name": "<b>Nhật Hạ</b>", "username": None}],
+                 "display_name": "<b>Nhật Hạ</b>", "username": None}]
+                if x["identity_id"] not in self.bo_identity],
                 "page_info": {"page": 0, "page_size": 0, "total_number": 0, "total_page": 0}}}
         return super()._cong_cu(ten, a)
 
@@ -320,7 +327,7 @@ def test_kenh_hong_khong_lam_hong_luot_dong_bo(cach):
     kq = dv.dong_bo(tu=datetime.date(2026, 10, 16), den=datetime.date(2026, 10, 18))
     assert kq.get("loi") is None and kq["so_dong"] > 0
     assert kho.kn["trang_thai"] == "hoat_dong" and not kho.kn.get("dong_bo_loi")
-    assert any("kênh đăng dừng" in x for x in nhat_ky)
+    assert any(re.search(r"kênh đăng \d+ lỗi", x) for x in nhat_ky)
     assert not any(tt.access in x for x in nhat_ky)
 
 
@@ -565,3 +572,95 @@ def test_tai_lieu_nhac_quyen_meta_va_cong_cu_tiktok():
         assert "pages_read_engagement" in s and "qc_ad_kenh" in s, p
     src = (GOC / "dashboard" / "tiktok_ads.py").read_text(encoding="utf-8")
     assert set(re.findall(r'goi\("([a-z_]+)"', src)) == TA.CONG_CU_DOC
+
+
+# ───────────────────────────── soát 22/10/2026 ─────────────────────────────
+def test_tai_khoan_loi_khong_chan_tai_khoan_sau_va_mot_trang_mot_luot():
+    """Lỗi kênh của MỘT tài khoản không chặn tài khoản sau; ad_get chỉ một lượt mỗi lô (page_info
+    giả báo 5 trang vẫn không đọc trang 2)."""
+    from test_tiktok_ads import HAPAS_KOC, MM_2
+    dv, kho, tt = _tiktok(so_ad=5, so_khong_chay=0, loi_adv={HAPAS_KOC})
+    nk = []
+    dv.log = nk.append
+    kq = dv.dong_bo(tu=datetime.date(2026, 10, 16), den=datetime.date(2026, 10, 18))
+    assert kq.get("loi") is None and kho.kn["trang_thai"] == "hoat_dong"
+    da = {a for a, _ in kho.ad_kenh}
+    assert HAPAS_KOC not in da and {MM_MKT, MM_2} <= da
+    assert any(f"kênh đăng {HAPAS_KOC} lỗi" in x for x in nk)
+    ad_get = [a for t, a in tt.cong_cu if t == "tool_execute"]
+    assert all("page" not in a["params"] for a in ad_get)
+    assert len(ad_get) == 3                     # 3 tài khoản có số × 1 lô, không trang 2
+
+
+def test_token_bi_tu_choi_o_phan_kenh_van_nem_tiep():
+    class McpTuChoi:
+        def goi(self, ten, a):
+            raise TA.LoiXacThuc("từ chối", 40105)
+    kho = GiaKhoKenh()
+    d = datetime.date(2026, 10, 18)
+    kho.bang["qc_ad_ngay"][("1", d)] = {"advertiser_id": MM_MKT, "ad_id": "1", "ngay": d,
+                                        "chi": 1, "hien_thi": 1}
+    dv, _, _ = _dv(kho)
+    with pytest.raises(TA.LoiXacThuc):
+        dv.kenh_dang(McpTuChoi(), [MM_MKT])
+
+
+def test_tran_tinh_ca_identity_get_va_nho_am_danh_tinh_khong_tra(monkeypatch):
+    dv, kho, tt = _tiktok(so_ad=5, so_khong_chay=0, bo_identity={"id-2"})
+    dv.dong_bo(tu=datetime.date(2026, 10, 16), den=datetime.date(2026, 10, 18))
+    assert kho.kenh[("tiktok", "id-2")]["ten"] is None            # nhớ âm
+    assert kho.kenh[("tiktok", "id-0")]["ten"] == "MATE MADE"
+    tt.cong_cu.clear()
+    dv.dong_bo(tu=datetime.date(2026, 10, 16), den=datetime.date(2026, 10, 18))
+    assert not [t for t, _ in tt.cong_cu if t == "identity_get"]   # trong 7 ngày: không hỏi lại
+    kho.bay += datetime.timedelta(days=KQ.HOI_LAI_TEN_NGAY["tiktok"])
+    dv.dong_bo(tu=datetime.date(2026, 10, 16), den=datetime.date(2026, 10, 18))
+    assert [t for t, _ in tt.cong_cu if t == "identity_get"]
+    # Trần đếm cả identity_get: trần 1 → một lượt ad_get, không identity_get.
+    monkeypatch.setattr(TA, "TRAN_KENH_LUOT", 1)
+    dv2, kho2, tt2 = _tiktok(so_ad=5, so_khong_chay=0)
+    dv2.dong_bo(tu=datetime.date(2026, 10, 16), den=datetime.date(2026, 10, 18))
+    assert [t for t, _ in tt2.cong_cu if t in ("tool_execute", "identity_get")] == ["tool_execute"]
+
+
+class GiaMetaIg(GiaMetaKenh):
+    """Mỗi ad một Instagram riêng; username IG luôn bị từ chối (thiếu instagram_basic)."""
+
+    def xu_ly(self, req):
+        duong = req.url.path.split("/", 2)[2]
+        q = {k: v[0] for k, v in parse_qs(urlsplit(str(req.url)).query).items()}
+        m = re.fullmatch(r"(act_[0-9]+)/ads", duong)
+        if m:
+            self.goi.append(req)
+            loc = json.loads(q["filtering"])
+            ds = [{"id": x, "creative": {"actor_id": "2241", "instagram_user_id": "9" + x}}
+                  for x in loc[0]["value"]]
+            return httpx.Response(200, json={"data": ds})
+        if re.fullmatch(r"[0-9]+", duong) and q.get("fields") == "username":
+            self.goi.append(req)
+            return httpx.Response(400, json={"error": {"code": 100, "error_subcode": 33}})
+        return super().xu_ly(req)
+
+
+def test_meta_ig_loi_dau_tien_thi_thoi_hoi_ig_ca_luot():
+    gm = GiaMetaIg(quyen=("ads_read", "read_insights", "pages_read_engagement",
+                          "pages_show_list"))
+    dv, kho, gm = _mdv(GiaKhoKenh(), gm)
+    _gom_tk(dv)
+    dv.dong_bo(tu=datetime.date(2026, 10, 16), den=datetime.date(2026, 10, 18))
+    so_ig = len({r["kenh_phu_id"] for r in kho.ad_kenh.values()})
+    assert so_ig > 1
+    ten = [r for r in gm.goi if re.fullmatch(r"/v[0-9.]+/[0-9]+", r.url.path)]
+    ig = [r for r in ten if "fields=username" in str(r.url)]
+    assert len(ig) == 1 and len(ten) == 2                 # 1 IG lỗi rồi thôi + 1 Trang
+    assert kho.kenh[("meta", "2241")]["ten"] == "MATE MADE"
+
+
+def test_meta_pages_show_list_duoc_phep():
+    q = [{"permission": p, "status": "granted"} for p in
+         ("ads_read", "read_insights", "pages_read_engagement", "pages_show_list")]
+    assert "pages_show_list" in MA.kiem_quyen(q)
+    with pytest.raises(MA.LoiTokenKhongChiDoc):
+        MA.kiem_quyen(q + [{"permission": "instagram_basic", "status": "granted"}])
+    for p in ("deploy/lang-nghe/README.md", "dashboard/templates/nguoi_xem.html"):
+        assert "pages_show_list" in (GOC / p).read_text(encoding="utf-8"), p

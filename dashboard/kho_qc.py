@@ -718,11 +718,14 @@ def trang_thai_nhac(ncc: str = NCC) -> dict | None:
 
 
 # ───────────────────────────── kênh đăng (22/10/2026) ─────────────────────────────
-#: Kênh đăng = danh tính một quảng cáo chạy dưới tên: TikTok identity (tài khoản chính chủ / KOC /
-#: Spark Ads), Meta Trang (+ Instagram đi kèm). `qc_ad_kenh` một dòng mỗi ad (kênh của ad không đổi —
-#: chỉ đọc một lần), `qc_kenh` tên kênh. Đọc trang: gộp `qc_ad_ngay` theo kênh trong phạm vi.
+#: Kênh đăng = danh tính một quảng cáo chạy dưới tên: TikTok identity (tài khoản chính chủ /
+#: KOC / Spark Ads), Meta Trang (+ Instagram đi kèm). `qc_ad_kenh` một dòng mỗi ad (kênh của ad
+#: không đổi — chỉ đọc một lần), `qc_kenh` tên kênh. Đọc trang: gộp `qc_ad_ngay` theo kênh.
 #: Ad nền tảng không trả (đã xoá, Smart+ nâng cấp…) → dòng không kênh; hỏi lại sau chừng ấy ngày.
 HOI_LAI_KHONG_THAY_NGAY = 7
+#: Kênh đã hỏi tên mà không có (nhớ âm): TikTok — identity_get không trả danh tính đó, hỏi lại sau
+#: 7 ngày; Meta — tên Trang / IG lỗi (thiếu quyền…), hỏi lại sau 1 ngày.
+HOI_LAI_TEN_NGAY = {"tiktok": 7, "meta": 1}
 KENH_TOI_DA = 500
 _COT_AD_KENH = ("advertiser_id", "ad_id", "nen_tang", "kenh_id", "loai", "kenh_phu_id", "bai_id")
 
@@ -732,10 +735,10 @@ def sql_ad_chua_kenh() -> str:
     Chỉ mã số (dạng nền tảng nhận; chốt chỉ đọc của tiktok_ads chặn mọi dạng khác)."""
     return ("SELECT q.ad_id FROM qc_ad_ngay q WHERE q.advertiser_id = %s "
             "AND q.ad_id ~ '^[0-9]{1,30}$' AND NOT EXISTS (SELECT 1 FROM qc_ad_kenh k "
-            "WHERE k.advertiser_id = q.advertiser_id AND k.ad_id = q.ad_id AND (k.kenh_id IS NOT NULL "
-            "OR k.cap_nhat_luc > now() - make_interval(days => %s))) "
-            "GROUP BY q.ad_id ORDER BY sum(q.chi) DESC NULLS LAST, sum(q.hien_thi) DESC NULLS LAST, "
-            "q.ad_id LIMIT %s")
+            "WHERE k.advertiser_id = q.advertiser_id AND k.ad_id = q.ad_id "
+            "AND (k.kenh_id IS NOT NULL OR k.cap_nhat_luc > now() - make_interval(days => %s))) "
+            "GROUP BY q.ad_id ORDER BY sum(q.chi) DESC NULLS LAST, "
+            "sum(q.hien_thi) DESC NULLS LAST, q.ad_id LIMIT %s")
 
 
 def ad_chua_kenh(advertiser_id: str, n: int) -> list[str]:
@@ -760,29 +763,31 @@ def ghi_ad_kenh(rows: list[dict]) -> int:
 
 def sql_kenh_chua_ten() -> str:
     """Kênh (và Instagram đi kèm) của một tài khoản chưa có dòng qc_kenh, hoặc chưa có tên mà lần
-    hỏi trước đã hơn 1 ngày."""
+    hỏi trước đã quá `HOI_LAI_TEN_NGAY` ngày (tham số)."""
     return ("SELECT DISTINCT x.kenh_id, x.loai FROM ("
             "SELECT kenh_id, loai FROM qc_ad_kenh WHERE advertiser_id = %s AND nen_tang = %s "
             "AND kenh_id IS NOT NULL UNION SELECT kenh_phu_id, 'instagram' FROM qc_ad_kenh "
             "WHERE advertiser_id = %s AND nen_tang = %s AND kenh_phu_id IS NOT NULL) x "
             "LEFT JOIN qc_kenh c ON c.nen_tang = %s AND c.kenh_id = x.kenh_id "
             "WHERE c.kenh_id IS NULL OR (c.ten IS NULL AND c.username IS NULL "
-            "AND c.cap_nhat_luc < now() - interval '1 day') ORDER BY 1 LIMIT 500")
+            "AND c.cap_nhat_luc < now() - make_interval(days => %s)) ORDER BY 1 LIMIT 500")
 
 
 def kenh_chua_ten(nen_tang: str, advertiser_id: str) -> list[dict]:
     adv = str(advertiser_id)
     with ket_noi() as c:
-        return c.execute(sql_kenh_chua_ten(), (adv, nen_tang, adv, nen_tang, nen_tang)).fetchall()
+        return c.execute(sql_kenh_chua_ten(), (adv, nen_tang, adv, nen_tang, nen_tang,
+                                               HOI_LAI_TEN_NGAY.get(nen_tang, 1))).fetchall()
 
 
 def ghi_kenh(rows: list[dict]) -> int:
     """Upsert tên kênh — giá trị trống không xoá tên đã biết."""
     if not rows:
         return 0
-    sql = ("INSERT INTO qc_kenh (nen_tang, kenh_id, loai, ten, username) VALUES (%s, %s, %s, %s, %s) "
-           "ON CONFLICT (nen_tang, kenh_id) DO UPDATE SET "
-           "loai = COALESCE(EXCLUDED.loai, qc_kenh.loai), ten = COALESCE(EXCLUDED.ten, qc_kenh.ten), "
+    sql = ("INSERT INTO qc_kenh (nen_tang, kenh_id, loai, ten, username) "
+           "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (nen_tang, kenh_id) DO UPDATE SET "
+           "loai = COALESCE(EXCLUDED.loai, qc_kenh.loai), "
+           "ten = COALESCE(EXCLUDED.ten, qc_kenh.ten), "
            "username = COALESCE(EXCLUDED.username, qc_kenh.username), cap_nhat_luc = now()")
     with ket_noi() as c, c.cursor() as cur:
         cur.executemany(sql, [(r["nen_tang"], r["kenh_id"], r.get("loai"), r.get("ten"),
