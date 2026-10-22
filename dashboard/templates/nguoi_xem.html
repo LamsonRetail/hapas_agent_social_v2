@@ -262,7 +262,7 @@
     <span class="muc__so" aria-hidden="true">4</span>
     <h2 class="muc__ten" id="mt-tieu-de">Kết nối Meta Ads</h2>
     {% if mt %}<span class="the the--cham{% if mt.muc %} the--{{ mt.muc }}{% endif %}" data-o="mt-trang-thai">{{ mt.nhan }}</span>{% endif %}
-    <button type="button" class="goi-y" data-goi-y="Dashboard đọc số Facebook / Instagram Ads bằng token người dùng hệ thống CHỈ ĐỌC (ads_read + read_insights), chỉ gọi GET Graph API. Token loại này không hết hạn. Chỉ tài khoản đã duyệt mới được đọc số.">i</button>
+    <button type="button" class="goi-y" data-goi-y="Dashboard đọc số Facebook / Instagram Ads bằng token người dùng hệ thống CHỈ ĐỌC (ads_read + read_insights; thêm pages_read_engagement để hiện tên Trang / Instagram của kênh đăng), chỉ gọi GET Graph API. Token loại này không hết hạn. Chỉ tài khoản đã duyệt mới được đọc số.">i</button>
     {% if mt and mt.dang_dong_bo %}<span class="muc__phai"><span class="the the--nhan" data-o="mt-dang">Đang đồng bộ</span></span>{% endif %}
   </div>
   {% if mt and not loi_qc %}
@@ -289,11 +289,11 @@
     <summary>Dán token mới</summary>
     <form method="post" action="/meta/token" class="luoi-form" autocomplete="off">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <label class="o rong">Token người dùng hệ thống Meta (chỉ ads_read + read_insights)
+      <label class="o rong">Token người dùng hệ thống Meta (ads_read + read_insights; nên tick thêm pages_read_engagement)
         <input type="password" name="token" required minlength="20" maxlength="4096" spellcheck="false" autocomplete="off"></label>
       <div><button class="nut nut--nhe" type="submit">Kiểm tra rồi lưu</button></div>
     </form>
-    <p class="mo nho tt-token__chu">Dashboard đọc me, me/permissions, me/adaccounts trước khi lưu và TỪ CHỐI token có quyền ghi (ads_management, business_management, *_manage*…). Token được mã hoá, không bao giờ hiện lại. Duyệt tài khoản giữ như cũ; tài khoản mới chờ duyệt ở bảng dưới.</p>
+    <p class="mo nho tt-token__chu">Dashboard đọc me, me/permissions, me/adaccounts trước khi lưu và TỪ CHỐI token có quyền ghi (ads_management, business_management, *_manage*…). Quyền được phép: ads_read, read_insights, public_profile, pages_read_engagement (chỉ đọc — để bảng “Theo kênh đăng” hiện tên Trang thay vì “Page &lt;id&gt;”). Token được mã hoá, không bao giờ hiện lại. Duyệt tài khoản giữ như cũ; tài khoản mới chờ duyệt ở bảng dưới.</p>
   </details>
   {% endif %}
 </section>

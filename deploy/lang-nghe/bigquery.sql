@@ -618,6 +618,56 @@ OPTIONS(description='''[Lớp] Raw
 -- SELECT table_name, column_name, description FROM `ganesha-381907.SOCIAL_LISTENING.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS`
 --   WHERE description IS NULL OR TRIM(description) = '';
 
+-- Kênh đăng của quảng cáo (22/10/2026, chủ dự án chốt): hai bảng mới, chạy cùng lúc với schema.sql
+-- trên Postgres (dong_bo_bq đẩy qc_ad_kenh + qc_kenh sau qc_khan_gia; chưa chạy khối này thì hai bảng
+-- báo lỗi trên trang Kết nối BigQuery, bảng khác vẫn đẩy). Không cột tiền.
+CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.qc_ad_kenh`
+(
+  advertiser_id     STRING    OPTIONS(description='Tài khoản quảng cáo của ad (TikTok chuỗi số; Meta act_<số>). Một phần PK. FK → tk_quang_cao.advertiser_id.'),
+  ad_id             STRING    OPTIONS(description='Mã quảng cáo (TikTok ad_id; Meta ad id). Một phần PK. Join: → qc_ad_ngay.ad_id (cùng advertiser_id).'),
+  nen_tang          STRING    OPTIONS(description='Nền tảng: tiktok | meta. Không NULL.'),
+  kenh_id           STRING    OPTIONS(description='Mã kênh đăng: TikTok identity_id (chuỗi số hoặc UUID); Meta id Trang Facebook (hoặc id Instagram khi ad không có Trang). Join: → qc_kenh.kenh_id (cùng nen_tang). NULL khi nền tảng không trả ad (loai khong_thay).'),
+  loai              STRING    OPTIONS(description='Loại kênh. TikTok identity_type: AUTH_CODE (bài KOC uỷ quyền bằng mã — Spark Ads), BC_AUTH_TT (tài khoản TikTok gắn Business Center — chính chủ hoặc KOC), TT_USER (tài khoản TikTok chính chủ), CUSTOMIZED_USER (danh tính tuỳ chỉnh). Meta: page | instagram. khong_thay: nền tảng không trả ad. Không NULL.'),
+  kenh_phu_id       STRING    OPTIONS(description='Kênh đi kèm: Meta id tài khoản Instagram (instagram_user_id) của ad chạy dưới Trang. Join: → qc_kenh.kenh_id. NULL với TikTok và khi ad Meta không gắn Instagram.'),
+  bai_id            STRING    OPTIONS(description='Mã bài gốc của quảng cáo: TikTok tiktok_item_id (video), Meta effective_instagram_media_id. NULL khi nền tảng không trả.'),
+  cap_nhat_luc      TIMESTAMP OPTIONS(description='Lần bộ đồng bộ TikTok / Meta ghi/sửa dòng ở Postgres (UTC) — mốc đẩy BigQuery.'),
+  dong_bo_luc       TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
+)
+CLUSTER BY advertiser_id, kenh_id
+OPTIONS(description='''[Lớp] Raw
+[Mục đích] Kênh đăng của từng quảng cáo — danh tính quảng cáo chạy dưới tên: TikTok identity (chính chủ, KOC / Spark Ads), Meta Trang Facebook (+ Instagram đi kèm) — để tách số quảng cáo theo kênh.
+[Grain] 1 dòng = 1 ad của 1 tài khoản quảng cáo
+[Khoá] PK: advertiser_id + ad_id | Join: (advertiser_id, ad_id) → qc_ad_ngay; (nen_tang, kenh_id) → qc_kenh; (nen_tang, kenh_phu_id) → qc_kenh (Instagram)
+[Nguồn] Postgres lang_nghe.public.qc_ad_kenh trên VPS Mark; TikTok for Business MCP tool_execute ad_get (identity_id, identity_type, tiktok_item_id); Meta Graph API GET act_<id>/ads (creative.actor_id, object_story_spec.page_id, instagram_user_id)
+[Phạm vi] Ad có phân phối (có dòng qc_ad_ngay) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 22/10/2026 (đọc lùi mọi ad đã có số, chi nhiều trước)
+[Đã xử lý] Một lần mỗi ad (kênh của ad không đổi); ad nền tảng không trả → kenh_id NULL, loai khong_thay (hỏi lại sau 7 ngày); Meta: kênh = Trang, không Trang mà có Instagram → kênh là Instagram
+[Refresh] MERGE theo advertiser_id + ad_id các dòng có cap_nhat_luc mới hơn mốc, sau lượt đồng bộ TikTok 06:30 / Meta 06:45 giờ VN và 6 giờ một lần
+[Dùng khi] Số quảng cáo theo kênh đăng (join qc_ad_ngay theo advertiser_id + ad_id); chi tiêu qua KOC / Spark Ads so với kênh chính chủ
+[Không dùng khi] Tên kênh → dùng SOCIAL_LISTENING.qc_kenh; số theo ngày của ad → dùng SOCIAL_LISTENING.qc_ad_ngay
+[Lưu ý] Ad chưa có dòng (chưa tới lượt đọc) hoặc kenh_id NULL = "Chưa xác định" trên dashboard — luôn LEFT JOIN từ qc_ad_ngay.''');
+
+CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.qc_kenh`
+(
+  nen_tang          STRING    OPTIONS(description='Nền tảng: tiktok | meta. Một phần PK.'),
+  kenh_id           STRING    OPTIONS(description='Mã kênh: TikTok identity_id; Meta id Trang hoặc id tài khoản Instagram. Một phần PK. Join: ← qc_ad_kenh.kenh_id, qc_ad_kenh.kenh_phu_id (cùng nen_tang).'),
+  loai              STRING    OPTIONS(description='Loại kênh: TikTok identity_type (AUTH_CODE, BC_AUTH_TT, TT_USER, CUSTOMIZED_USER); Meta page | instagram. NULL khi chưa biết.'),
+  ten               STRING    OPTIONS(description='Tên hiển thị: TikTok display_name; Meta tên Trang. NULL khi nền tảng không trả hoặc token Meta thiếu quyền pages_read_engagement.'),
+  username          STRING    OPTIONS(description='Tên người dùng không @: TikTok username (thường NULL với AUTH_CODE); Meta username Instagram. NULL khi không có.'),
+  cap_nhat_luc      TIMESTAMP OPTIONS(description='Lần bộ đồng bộ ghi/sửa dòng ở Postgres (UTC) — mốc đẩy BigQuery.'),
+  dong_bo_luc       TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
+)
+OPTIONS(description='''[Lớp] Dim
+[Mục đích] Tên kênh đăng của quảng cáo (TikTok identity, Trang Facebook, tài khoản Instagram).
+[Grain] 1 dòng = 1 kênh của 1 nền tảng
+[Khoá] PK: nen_tang + kenh_id | Join: (nen_tang, kenh_id) ← qc_ad_kenh.kenh_id / qc_ad_kenh.kenh_phu_id
+[Nguồn] Postgres lang_nghe.public.qc_kenh trên VPS Mark; TikTok for Business MCP identity_get (display_name, username); Meta Graph API GET /<id>?fields=name | username (cần pages_read_engagement)
+[Phạm vi] TikTok: mọi danh tính của tài khoản có kênh chưa có tên (đo 22/10/2026: 1.951 danh tính ở MATEMADE MKT) | Meta: Trang / Instagram gặp trong qc_ad_kenh | Từ 22/10/2026
+[Đã xử lý] Bỏ trùng theo identity_id; tên trống không ghi đè tên đã biết; ≤ 200 ký tự
+[Refresh] MERGE theo nen_tang + kenh_id các dòng có cap_nhat_luc mới hơn mốc, sau lượt đồng bộ TikTok 06:30 / Meta 06:45 giờ VN và 6 giờ một lần
+[Dùng khi] Gắn tên kênh vào số theo kênh (join từ qc_ad_kenh)
+[Không dùng khi] Số theo kênh → dùng SOCIAL_LISTENING.qc_ad_kenh join SOCIAL_LISTENING.qc_ad_ngay; nguồn lắng nghe mạng xã hội → dùng SOCIAL_LISTENING.nguon
+[Lưu ý] Meta: token thiếu pages_read_engagement thì không có dòng hoặc ten NULL (dashboard hiện "Page <id>" / "IG <id>").''');
+
 -- ───────────── Meta Ads (20/10/2026) — NÂNG CẤP BẢNG ĐÃ TẠO (người duyệt rồi mới chạy) ─────────────
 -- CREATE … IF NOT EXISTS ở trên không thêm cột / không đổi mô tả của bảng đã có: chạy các lệnh
 -- dưới đây một lần TRƯỚC khi bật bản dashboard có Meta Ads (dong_bo_bq tự bỏ cột nen_tang / duyet

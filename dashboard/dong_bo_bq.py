@@ -20,7 +20,8 @@ sau đẩy lại, MERGE nên không nhân đôi.
 
 Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, `dong_bo_bq`, cột email (`sua_boi`, `them_boi`), và
 `ket_noi_ngoai` (token TikTok / Meta đã mã hoá, email người cấp) — quảng cáo chỉ đẩy `tk_quang_cao`
-+ `qc_*` (TikTok 19/10/2026, Meta 20/10/2026 — cùng bảng, `tk_quang_cao.nen_tang`; hai bộ hẹn giờ gọi
++ `qc_*` (TikTok 19/10/2026, Meta 20/10/2026 — cùng bảng, `tk_quang_cao.nen_tang`; kênh đăng
+`qc_ad_kenh` + `qc_kenh` từ 22/10/2026; hai bộ hẹn giờ gọi
 `chay()` ngay sau lượt đồng bộ của mình).
 Chạy: sau mỗi lượt quét (hook `sau_cap_nhat` của dashboard) và 6 giờ một lần. Một lượt một lúc.
 """
@@ -157,9 +158,24 @@ BANG.update({
         "cot": [("advertiser_id", "STRING"), ("tu", "DATE"), ("den", "DATE"), ("chieu", "STRING"),
                 ("gia_tri", "STRING"), *_COT_QC],
     },
+    # 22/10/2026 (chủ dự án): kênh đăng của quảng cáo + tên kênh (không cột tiền). Bảng BigQuery tạo
+    # bằng khối cuối bigquery.sql — chưa chạy thì hai bảng này báo lỗi trên trang Kết nối BigQuery,
+    # bảng khác vẫn đẩy bình thường.
+    "qc_ad_kenh": {
+        "khoa": ["advertiser_id", "ad_id"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "cot": [("advertiser_id", "STRING"), ("ad_id", "STRING"), ("nen_tang", "STRING"),
+                ("kenh_id", "STRING"), ("loai", "STRING"), ("kenh_phu_id", "STRING"),
+                ("bai_id", "STRING"), ("cap_nhat_luc", "TIMESTAMP")],
+    },
+    "qc_kenh": {
+        "khoa": ["nen_tang", "kenh_id"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "cot": [("nen_tang", "STRING"), ("kenh_id", "STRING"), ("loai", "STRING"),
+                ("ten", "STRING"), ("username", "STRING"), ("cap_nhat_luc", "TIMESTAMP")],
+    },
 })
 THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan",   # cha trước con
-          "tk_quang_cao", "qc_tk_ngay", "qc_campaign_ngay", "qc_ad_ngay", "qc_khan_gia")
+          "tk_quang_cao", "qc_tk_ngay", "qc_campaign_ngay", "qc_ad_ngay", "qc_khan_gia",
+          "qc_ad_kenh", "qc_kenh")
 
 
 def dataset() -> str:

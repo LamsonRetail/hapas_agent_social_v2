@@ -783,6 +783,36 @@ BEGIN
   END IF;
 END $mt$;
 
+-- ───────────── Kênh đăng của quảng cáo (22/10/2026, chủ dự án chốt) ─────────────
+-- Trang Quảng cáo tách mỗi tài khoản theo "kênh đăng" — danh tính quảng cáo chạy dưới tên: TikTok
+-- identity (tài khoản chính chủ, KOC / Spark Ads), Meta Trang Facebook (+ Instagram đi kèm). Bộ đồng bộ
+-- (tiktok_ads.py ad_get qua tool_execute dạng cố định + identity_get; meta_ads.py GET act_<id>/ads)
+-- đọc kênh MỘT lần cho mỗi ad có phân phối (kênh của ad không đổi). Bảng mới: CREATE nhanh, không khoá
+-- bảng nào khác; chạy lại không sao.
+CREATE TABLE IF NOT EXISTS qc_ad_kenh (
+  advertiser_id   TEXT NOT NULL REFERENCES tk_quang_cao(advertiser_id),
+  ad_id           TEXT NOT NULL,
+  nen_tang        TEXT NOT NULL CHECK (nen_tang IN ('tiktok', 'meta')),
+  kenh_id         TEXT,
+  loai            TEXT NOT NULL,
+  kenh_phu_id     TEXT,
+  bai_id          TEXT,
+  cap_nhat_luc    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (advertiser_id, ad_id)
+);
+CREATE INDEX IF NOT EXISTS qc_ad_kenh_kenh ON qc_ad_kenh (nen_tang, kenh_id);
+CREATE INDEX IF NOT EXISTS qc_ad_kenh_cap_nhat ON qc_ad_kenh (cap_nhat_luc);
+CREATE TABLE IF NOT EXISTS qc_kenh (
+  nen_tang        TEXT NOT NULL CHECK (nen_tang IN ('tiktok', 'meta')),
+  kenh_id         TEXT NOT NULL,
+  loai            TEXT,
+  ten             TEXT,
+  username        TEXT,
+  cap_nhat_luc    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (nen_tang, kenh_id)
+);
+CREATE INDEX IF NOT EXISTS qc_kenh_cap_nhat ON qc_kenh (cap_nhat_luc);
+
 -- ───────────── Số tức thì của Mark (20/10/2026, chủ dự án chốt) ─────────────
 -- "mark có quyền cao nhất có thể cào real time theo yêu cầu": một dòng = một yêu cầu Mark gửi khi
 -- người hỏi cần số MỚI hơn số trong kho (dashboard/kho_tuc_thi.py). Quảng cáo: Mark CHỈ thêm dòng
@@ -1626,6 +1656,42 @@ COMMENT ON COLUMN qc_khan_gia.mua_shop IS 'Lượt mua trong TikTok Shop gán ch
 COMMENT ON COLUMN qc_khan_gia.gia_tri_mua_shop IS 'Doanh thu gán cho quảng cáo, theo tiền tệ tài khoản: TikTok Shop (total_onsite_shopping_value, giá khách trả); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi, phân bổ mặc định của Meta). 0 khi dòng có phân phối mà không có mua. CHỈ SỐ TIỀN.';
 COMMENT ON COLUMN qc_khan_gia.chi_so IS 'MỌI chỉ số nền tảng trả cho dòng (JSON {tên chỉ số: số}; số đã đổi từ chữ, "-" của TikTok → null). TikTok: tài khoản/campaign đủ 100 tên hợp lệ; ad: 38 chỉ số + thuộc tính; khán giả: 13. Meta (20/10/2026): mọi trường Insights đã xin, danh sách action thành <trường>__<action_type> (vd actions__purchase, action_values__purchase, video_p100_watched_actions__video_view); reach, frequency, ctr, cpc, cpm, cpp, *_avg_*, *roas* KHÔNG cộng được qua dòng. Khoá tiền: spend, cpm, cpc, cpp, cost_per_*, *_value, action_values__*, *roas*, *budget*.';
 COMMENT ON COLUMN qc_khan_gia.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
+COMMENT ON TABLE qc_ad_kenh IS $$[Lớp] Raw
+[Mục đích] Kênh đăng của từng quảng cáo (ad) — danh tính quảng cáo chạy dưới tên: TikTok identity (tài khoản chính chủ, KOC / Spark Ads), Meta Trang Facebook (+ Instagram đi kèm) — để tách số quảng cáo theo kênh.
+[Grain] 1 dòng = 1 ad của 1 tài khoản quảng cáo
+[Khoá] PK: advertiser_id + ad_id | Join: (advertiser_id, ad_id) → qc_ad_ngay; (nen_tang, kenh_id) → qc_kenh; (nen_tang, kenh_phu_id) → qc_kenh (Instagram)
+[Nguồn] TikTok for Business MCP tool_execute ad_get (trường identity_id, identity_type, tiktok_item_id), bộ hẹn giờ tiktok-ads-dong-bo; Meta Graph API GET act_<id>/ads (creative.actor_id, object_story_spec.page_id, instagram_user_id), bộ hẹn giờ meta-ads-dong-bo
+[Phạm vi] Ad có phân phối (có dòng qc_ad_ngay) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 22/10/2026 (đọc lùi mọi ad đã có số, chi nhiều trước)
+[Đã xử lý] Một lần mỗi ad (kênh của ad không đổi); ≤ 300 lượt TikTok / 100 lượt Meta mỗi lần đồng bộ; ad nền tảng không trả → kenh_id NULL, loai khong_thay, hỏi lại sau 7 ngày. Meta: kênh = Trang (actor_id, rồi page_id), không Trang mà có Instagram → kênh là Instagram
+[Refresh] Thêm dòng trong lượt đồng bộ hằng ngày 06:30 (TikTok) / 06:45 (Meta) giờ VN, sau phần số; lượt nhanh / tức thì không đọc kênh
+[Dùng khi] Số quảng cáo theo kênh đăng (join qc_ad_ngay theo advertiser_id + ad_id); bao nhiêu chi tiêu chạy qua KOC / Spark Ads so với kênh chính chủ
+[Không dùng khi] Tên kênh → dùng qc_kenh; số theo ngày của ad → dùng qc_ad_ngay
+[Lưu ý] Ad chưa có dòng (chưa tới lượt đọc) và dòng kenh_id NULL gộp vào "Chưa xác định" trên trang. Một Trang Meta có thể đi với nhiều Instagram — kenh_phu_id là của từng ad.$$;
+COMMENT ON COLUMN qc_ad_kenh.advertiser_id IS 'Tài khoản quảng cáo của ad (TikTok chuỗi số; Meta act_<số>). Một phần PK. FK → tk_quang_cao.advertiser_id.';
+COMMENT ON COLUMN qc_ad_kenh.ad_id IS 'Mã quảng cáo (TikTok ad_id; Meta ad id). Một phần PK. Join: → qc_ad_ngay.ad_id.';
+COMMENT ON COLUMN qc_ad_kenh.nen_tang IS 'Nền tảng: tiktok | meta. Không NULL.';
+COMMENT ON COLUMN qc_ad_kenh.kenh_id IS 'Mã kênh đăng: TikTok identity_id (chuỗi số hoặc UUID); Meta id Trang Facebook (hoặc id Instagram khi ad không có Trang). Join: → qc_kenh.kenh_id. NULL khi nền tảng không trả ad hoặc ad không có danh tính (loai khong_thay).';
+COMMENT ON COLUMN qc_ad_kenh.loai IS 'Loại kênh. TikTok identity_type: AUTH_CODE (bài KOC uỷ quyền bằng mã — Spark Ads), BC_AUTH_TT (tài khoản TikTok gắn Business Center — chính chủ hoặc KOC), TT_USER (tài khoản TikTok chính chủ), CUSTOMIZED_USER (danh tính tuỳ chỉnh, không phải tài khoản TikTok). Meta: page | instagram. khong_thay: nền tảng không trả ad. Không NULL.';
+COMMENT ON COLUMN qc_ad_kenh.kenh_phu_id IS 'Kênh đi kèm: Meta id tài khoản Instagram (instagram_user_id) của ad chạy dưới Trang. NULL với TikTok và khi ad Meta không gắn Instagram.';
+COMMENT ON COLUMN qc_ad_kenh.bai_id IS 'Mã bài gốc của quảng cáo: TikTok tiktok_item_id (video), Meta effective_instagram_media_id. NULL khi nền tảng không trả.';
+COMMENT ON COLUMN qc_ad_kenh.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery; dòng khong_thay hỏi lại khi cũ hơn 7 ngày.';
+COMMENT ON TABLE qc_kenh IS $$[Lớp] Dim
+[Mục đích] Tên kênh đăng của quảng cáo (TikTok identity, Trang Facebook, tài khoản Instagram) để hiện trên trang Quảng cáo.
+[Grain] 1 dòng = 1 kênh của 1 nền tảng
+[Khoá] PK: nen_tang + kenh_id | Join: (nen_tang, kenh_id) ← qc_ad_kenh.kenh_id / qc_ad_kenh.kenh_phu_id
+[Nguồn] TikTok for Business MCP identity_get (display_name, username), bộ hẹn giờ tiktok-ads-dong-bo; Meta Graph API GET /<id>?fields=name (Trang) | fields=username (Instagram) — cần quyền pages_read_engagement, bộ hẹn giờ meta-ads-dong-bo
+[Phạm vi] TikTok: MỌI danh tính của tài khoản có kênh chưa có tên (đo 22/10/2026: 1.951 danh tính ở MATEMADE MKT) | Meta: Trang / Instagram gặp trong qc_ad_kenh | Từ 22/10/2026
+[Đã xử lý] Bỏ trùng theo identity_id; tên trống không ghi đè tên đã biết; ≤ 200 ký tự
+[Refresh] Upsert trong lượt đồng bộ hằng ngày khi có kênh chưa có tên (TikTok một lượt identity_get mỗi tài khoản; Meta ≤ 50 lượt mỗi lần, hỏi lại kênh chưa tên sau 1 ngày)
+[Dùng khi] Hiện tên kênh cạnh số theo kênh (join từ qc_ad_kenh)
+[Không dùng khi] Số theo kênh → dùng qc_ad_kenh join qc_ad_ngay; kênh lắng nghe mạng xã hội → dùng nguon
+[Lưu ý] Meta: token thiếu pages_read_engagement thì không có dòng / ten NULL — trang hiện "Page <id>" / "IG <id>".$$;
+COMMENT ON COLUMN qc_kenh.nen_tang IS 'Nền tảng: tiktok | meta. Một phần PK.';
+COMMENT ON COLUMN qc_kenh.kenh_id IS 'Mã kênh: TikTok identity_id; Meta id Trang hoặc id tài khoản Instagram. Một phần PK. Join: ← qc_ad_kenh.kenh_id, qc_ad_kenh.kenh_phu_id.';
+COMMENT ON COLUMN qc_kenh.loai IS 'Loại kênh: TikTok identity_type (AUTH_CODE, BC_AUTH_TT, TT_USER, CUSTOMIZED_USER); Meta page | instagram. NULL khi chưa biết.';
+COMMENT ON COLUMN qc_kenh.ten IS 'Tên hiển thị: TikTok display_name; Meta tên Trang. NULL khi nền tảng không trả hoặc token Meta thiếu pages_read_engagement.';
+COMMENT ON COLUMN qc_kenh.username IS 'Tên người dùng không @: TikTok username (thường NULL với AUTH_CODE); Meta username Instagram. NULL khi không có.';
+COMMENT ON COLUMN qc_kenh.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
 COMMENT ON TABLE yeu_cau_tuc_thi IS $$[Lớp] Raw
 [Mục đích] Sổ yêu cầu số TỨC THÌ của Mark (đọc số quảng cáo mới, cào chỉ số bài / kênh, mở lượt quét lắng nghe theo yêu cầu) — hàng chờ cho bộ nghe quảng cáo, đếm trần, dấu vết ai xin gì.
 [Grain] 1 dòng = 1 yêu cầu Mark gửi (kể cả bị từ chối vì trần)
@@ -1754,6 +1820,10 @@ GRANT SELECT ON tk_quang_cao, qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay, qc_khan_
 -- không xoá số (DELETE không cấp). Đọc đã có ở GRANT SELECT ON ALL TABLES phía trên.
 GRANT INSERT, UPDATE ON ket_noi_ngoai, tk_quang_cao, qc_tk_ngay, qc_campaign_ngay, qc_ad_ngay,
   qc_khan_gia TO lang_nghe_web;
+-- Kênh đăng (22/10/2026): như qc_* — bộ hẹn giờ (lang_nghe_web) thêm/sửa, không xoá; dashboard đọc qua
+-- GRANT SELECT ON ALL TABLES phía trên; Mark chỉ đọc (không cột tiền, không bí mật).
+GRANT INSERT, UPDATE ON qc_ad_kenh, qc_kenh TO lang_nghe_web;
+GRANT SELECT ON qc_ad_kenh, qc_kenh TO mark;
 
 -- Số tức thì (20/10/2026, dashboard/kho_tuc_thi.py): Mark thêm + đọc yêu cầu, chỉ sửa cột kết quả
 -- (yêu cầu bài / kênh / quét của chính nó), KHÔNG xoá. Nhật ký: Mark chỉ THÊM dòng nhat_ky (không

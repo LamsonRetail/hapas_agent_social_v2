@@ -1,0 +1,15 @@
+/* Khối "Theo kênh đăng" của trang Quảng cáo (22/10/2026). Bảng + thẻ điện thoại dùng CHUNG .qc-bang
+   (qc.css); file này chỉ thêm nhãn loại kênh và dòng "Chưa xác định". Màu từ token giao_dien.css
+   (sáng / tối tự đổi): Chính chủ = màu nhấn, Spark Ads = trung tính, Page / Instagram = màu Meta. */
+.qc-kenh__loai {
+  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; vertical-align: 1px;
+  font-size: 11px; font-weight: 650; line-height: 1.5; white-space: nowrap;
+  background: var(--be-mat-2); color: var(--chu-phu); border: 1px solid var(--ke);
+}
+.qc-kenh__loai--chinh_chu { background: var(--nhan-nen); color: var(--nhan-dam); border-color: transparent; }
+.qc-kenh__loai--page, .qc-kenh__loai--instagram {
+  background: color-mix(in srgb, var(--qc-meta) 14%, transparent);
+  color: var(--chu); border-color: color-mix(in srgb, var(--qc-meta) 35%, transparent);
+}
+.qc-kenh__chua-ro .qc-bang__chinh { font-weight: 550; color: var(--chu-phu); font-style: italic; }
+.qc-kenh__chua-ro td { background: var(--be-mat-3); }

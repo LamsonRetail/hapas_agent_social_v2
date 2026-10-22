@@ -407,6 +407,29 @@ chưa có cột thì lần sau không đẩy lại, nên không để dòng có 
 8. Kiểm: `select gio_hang, count(*) from bai where du_an = 'hapas' and nen_tang = 'tiktok' group
    by 1`; dashboard trang Chỉ số → khối "KOC affiliate vs KOC branding", ô lọc "Loại KOC".
 
+## 12. Kênh đăng của quảng cáo (22/10/2026, chủ dự án chốt) — cần người duyệt trước khi chạy trên VPS
+
+Trang Quảng cáo tách mỗi tài khoản theo kênh đăng (TikTok: tài khoản chính chủ / KOC Spark Ads;
+Meta: Trang + Instagram) — `dashboard/README.md` mục "Kênh đăng của quảng cáo". Hai bảng mới
+`qc_ad_kenh`, `qc_kenh`; bộ đồng bộ TikTok / Meta hằng ngày tự điền (chỉ đọc; lỗi không làm hỏng lượt).
+
+1. Postgres: `schema.sql` (mục 7b — CREATE bảng mới + GRANT; chạy lại không hỏng).
+2. BigQuery: khối "Kênh đăng của quảng cáo" trong `bigquery.sql` (hai CREATE TABLE IF NOT EXISTS,
+   người duyệt rồi mới chạy). Chưa chạy thì trang "Kết nối BigQuery" báo lỗi riêng hai bảng này.
+3. Lên code, khởi động lại dashboard. Lượt 06:30 / 06:45 sáng hôm sau đọc kênh lần đầu (≈ 175 lượt
+   TikTok + ≈ 35 lượt Meta, ad chi nhiều trước); muốn sớm hơn: `sudo systemctl start
+   tiktok-ads-dong-bo.service` / `meta-ads-dong-bo.service`.
+4. **Chủ dự án — tên Trang Facebook / Instagram**: tạo lại token người dùng hệ thống `mark_ads_reader`
+   trong Meta Business Settings, tick thêm **`pages_read_engagement`** (chỉ đọc) bên cạnh
+   `ads_read` + `read_insights`, giao quyền xem các Trang đứng tên quảng cáo cho người dùng hệ thống,
+   rồi dán ở thẻ "Kết nối Meta Ads" (hoặc `nhap-token` như mục 8c). Dashboard chỉ nhận đúng các quyền
+   `ads_read`, `read_insights`, `public_profile`, `pages_read_engagement` — tick thêm quyền khác (nhất
+   là ads_management, business_management, *_manage*) là bị từ chối. Chưa làm bước này: bảng hiện
+   "Page <id>" / "IG <id>", số vẫn đủ.
+5. Kiểm: `select nen_tang, loai, count(*) from qc_ad_kenh group by 1, 2;` và
+   `select count(*) filter (where ten is not null), count(*) from qc_kenh;` — trang Quảng cáo, khối
+   "Theo kênh đăng" (dòng phụ "x% chi tiêu đã biết kênh").
+
 ## Vận hành
 
 - **Sao lưu:**

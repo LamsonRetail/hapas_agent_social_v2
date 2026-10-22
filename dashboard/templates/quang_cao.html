@@ -154,6 +154,8 @@
 </section>
 <script type="application/json" id="qc-api">{{ d|json_script }}</script>
 
+{% include "_kenh_dang.html" %}
+
 {#- Bảng chiến dịch / quảng cáo (22/10/2026, MKT: lọc theo tên, chiến dịch; sắp theo mọi chỉ số). Máy chủ
     lọc + xếp (`kho_qc.qc_bang`) rồi mới cắt 10/25/50 dòng — không xếp lại trên 10 dòng đã cắt. Bấm tiêu
     đề cột: lần đầu cao → thấp, bấm lại thấp → cao (aria-sort). Bấm tên chiến dịch = lọc quảng cáo của nó. #}
