@@ -6,12 +6,12 @@ Ads), Meta Trang Facebook (Instagram đi kèm hiện là thông tin phụ). Bộ
 dòng hiển thị — không SQL, không gọi mạng.
 
 Quyết định (22/10/2026):
-  • Meta gộp theo TRANG (actor) — một ad luôn có Trang; Instagram của ad (nếu có) là thông tin phụ của
-    dòng (Instagram của ad tiêu nhiều hiển thị nhất). Ad chỉ có Instagram → kênh là Instagram.
+  • Meta gộp theo TRANG (actor) — một ad luôn có Trang; Instagram của ad (nếu có) là thông tin phụ
+    của dòng (Instagram của ad tiêu nhiều hiển thị nhất). Ad chỉ có Instagram → kênh là Instagram.
   • Nhãn TikTok: AUTH_CODE → Spark Ads (bài KOC uỷ quyền bằng mã); TT_USER / CUSTOMIZED_USER → Chính
     chủ; BC_AUTH_TT (tài khoản gắn Business Center — đo 22/10/2026: phần lớn là KOC, cả MATE MADE) →
-    Chính chủ khi tên / username trùng tên tài khoản quảng cáo (vd "MATE MADE" ↔ "MATEMADE MKT"), còn
-    lại Spark Ads.
+    Chính chủ khi tên / username trùng tên tài khoản quảng cáo (vd "MATE MADE" ↔ "MATEMADE MKT"),
+    còn lại Spark Ads.
   • Xếp theo chi tiêu (người không xem tiền: theo hiển thị); độ phủ tính cùng thước đo — người không
     xem tiền không suy ra được tỉ lệ chi.
   • Ad chưa đọc kênh / nền tảng không trả gộp một dòng "Chưa xác định" (luôn ở cuối bảng).
@@ -27,7 +27,7 @@ from dashboard import quang_cao as QC
 SO_KENH = (20, 100, 500)
 _CHINH_CHU_TIKTOK = frozenset({"TT_USER", "CUSTOMIZED_USER"})
 NHAN = {"spark": "Spark Ads", "chinh_chu": "Chính chủ", "page": "Page", "instagram": "Instagram"}
-#: Cột số của một dòng (không thêm cột tiền nào khác ngoài chi — `QC.loc_tien` bỏ khi không xem tiền).
+#: Cột số của một dòng (không cột tiền nào khác ngoài chi — `QC.loc_tien` bỏ khi không xem tiền).
 COT = ("chi", "hien_thi", "click", "view_video", "follow")
 
 
