@@ -325,8 +325,9 @@ nhiều tài khoản (`tk_ds`, ≤ 200 mã; chọn đủ = NULL = mọi tài kho
 `chieu`). Tab chiến dịch / quảng cáo lọc + xếp bằng CHÍNH SQL của bảng trang (`kho_qc.sql_bang` qua
 `kho_sheet_qc.doc_tong`), MỌI dòng khớp (không chỉ trang đang xem) tới trần; tab theo ngày chỉ theo tài
 khoản + ngày; Tổng quan ghi bộ lọc đã dùng. Dòng cũ (cột mới NULL) dựng như trước. Lên mã: chạy
-`schema.sql` (thêm 5 cột NULL — tức thì, không viết lại bảng; trigger kiểm giá trị) TRƯỚC khi khởi động
-lại dashboard / Mark — mã mới đọc + ghi các cột này.
+`schema.sql` (thêm 5 cột NULL — tức thì, không viết lại bảng; trigger kiểm giá trị) TRƯỚC khi MERGE vào
+`main` — Mark tự deploy ngay khi merge (agent-deploy) và bộ dựng Sheet đọc các cột mới; mã cũ chạy
+được với schema mới (cột NULL, bị lờ). Thứ tự: schema.sql → merge → rsync dashboard.
 
 **22/10/2026 (chủ dự án) — hỏi Mark vẫn xuất Sheet được**: tool **`xuat_sheet_qc`** của Mark
 (`sheet_qc_tool.py`) thêm dòng `yeu_cau_sheet_qc` với `nguon = 'mark'`, `nguoi_hoi` = email người hỏi đã
