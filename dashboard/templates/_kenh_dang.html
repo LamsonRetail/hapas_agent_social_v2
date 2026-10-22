@@ -1,0 +1,65 @@
+{#- Theo kênh đăng (22/10/2026, chủ dự án): mỗi tài khoản quảng cáo tách theo danh tính quảng cáo chạy dưới
+    tên — TikTok: tài khoản chính chủ / KOC (Spark Ads); Meta: Trang Facebook (Instagram đi kèm là dòng
+    phụ). Máy chủ đã lọc phạm vi + tiền (`kenh_dang.du_lieu`, `QC.loc_tien`): người không xem tiền không
+    có cột Chi, xếp + độ phủ theo hiển thị. Dòng "Chưa xác định" luôn ở cuối. Điện thoại: thẻ như bảng
+    chiến dịch (.qc-bang). Cần `d`, `url_cho` của trang Quảng cáo. #}
+{% set kd = d.kenh %}
+{% if kd %}
+{% set theo_chi = kd.do_phu_theo == 'chi' %}
+<link rel="stylesheet" href="{{ tinh('kenh.css') }}">
+<section class="the-khoi cach-duoi qc-kenh" id="kenh" aria-labelledby="qc-kenh-tieu-de">
+  <div class="muc">
+    <h2 class="muc__ten" id="qc-kenh-tieu-de">Theo kênh đăng</h2>
+    <button type="button" class="goi-y" data-goi-y="Kênh đăng là danh tính quảng cáo chạy dưới tên. TikTok: tài khoản chính chủ hoặc tài khoản KOC cho phép chạy bài (Spark Ads). Meta: Trang Facebook đứng tên quảng cáo; Instagram đi kèm ghi ở dòng phụ. {% if kd.do_phu is not none %}{{ kd.do_phu|pt_vn }} {{ 'chi tiêu' if theo_chi else 'lượt hiển thị' }} trong phạm vi đang lọc đã biết kênh; {% endif %}quảng cáo chưa xác định kênh gộp vào “Chưa xác định” (kênh đọc mỗi sáng cùng lượt đồng bộ, quảng cáo mới có kênh từ hôm sau). Một kênh chạy ở nhiều tài khoản được cộng chung.">i</button>
+    {% if kd.do_phu is not none %}<span class="muc__phai muc__phu">{{ kd.do_phu|pt_vn }} {{ 'chi tiêu' if theo_chi else 'hiển thị' }} đã biết kênh</span>{% endif %}
+  </div>
+  {% if kd.loi %}
+  <p class="trong">{{ kd.loi }}</p>
+  {% else %}
+  <div class="cuon-ngang qc-bang-khung">
+  <table class="qc-bang qc-kenh__bang">
+    <thead><tr>
+      <th>Kênh</th>
+      {% if d.xem_tien %}<th class="so" aria-sort="descending">Chi ▼</th>{% endif %}
+      <th class="so"{% if not d.xem_tien %} aria-sort="descending"{% endif %}>Hiển thị{% if not d.xem_tien %} ▼{% endif %}</th>
+      <th class="so">Click</th><th class="so">View video</th><th class="so">Tương tác</th><th class="so">Follow</th>
+    </tr></thead>
+    <tbody>
+    {% for r in kd.rows %}
+      <tr>
+        <td class="qc-bang__ten">
+          <span class="qc-bang__chinh">{{ r.ten }} <span class="qc-kenh__loai qc-kenh__loai--{{ r.loai }}">{{ r.nhan_loai }}</span></span>
+          <span class="qc-bang__phu" data-nen-tang="{{ r.nen_tang }}"><span class="qc-cham qc-cham--{{ r.nen_tang }}" aria-hidden="true"></span>{% if r.phu %}{{ r.phu }} · {% endif %}{{ r.tai_khoan[:2]|join(', ') }}{% if r.tai_khoan|length > 2 %} +{{ r.tai_khoan|length - 2 }}{% endif %} · {{ r.so_ad|so_vn }} quảng cáo</span>
+        </td>
+        {% if d.xem_tien %}<td class="so qc-bang__chi" data-nhan="Chi">{{ r.chi|so_vn }}</td>{% endif %}
+        <td class="so" data-nhan="Hiển thị">{{ r.hien_thi|so_vn }}</td>
+        <td class="so" data-nhan="Click">{{ r.click|so_vn }}</td>
+        <td class="so" data-nhan="View video">{{ r.view_video|so_vn }}</td>
+        <td class="so" data-nhan="Tương tác">{{ r.tuong_tac|so_vn }}</td>
+        <td class="so" data-nhan="Follow">{{ r.follow|so_vn }}</td>
+      </tr>
+    {% endfor %}
+    {% if kd.chua_ro %}{% set r = kd.chua_ro %}
+      <tr class="qc-kenh__chua-ro">
+        <td class="qc-bang__ten">
+          <span class="qc-bang__chinh">{{ r.ten }}</span>
+          <span class="qc-bang__phu">{{ r.so_ad|so_vn }} quảng cáo chưa đọc được kênh</span>
+        </td>
+        {% if d.xem_tien %}<td class="so qc-bang__chi" data-nhan="Chi">{{ r.chi|so_vn }}</td>{% endif %}
+        <td class="so" data-nhan="Hiển thị">{{ r.hien_thi|so_vn }}</td>
+        <td class="so" data-nhan="Click">{{ r.click|so_vn }}</td>
+        <td class="so" data-nhan="View video">{{ r.view_video|so_vn }}</td>
+        <td class="so" data-nhan="Tương tác">{{ r.tuong_tac|so_vn }}</td>
+        <td class="so" data-nhan="Follow">{{ r.follow|so_vn }}</td>
+      </tr>
+    {% endif %}
+    {% if not kd.rows and not kd.chua_ro %}
+      <tr><td colspan="{{ 7 if d.xem_tien else 6 }}" class="trong">Không có quảng cáo nào chạy trong khoảng này.</td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+  </div>
+  {% if kd.tong > kd.rows|length %}<p class="mo nho qc-bang__dem">Đang hiện {{ kd.rows|length }} / {{ kd.tong|so_vn }} kênh{% if kd.so_tiep %} — <a href="{{ url_cho(kenh_so=kd.so_tiep) }}#kenh">xem thêm (tới {{ kd.so_tiep }} kênh)</a>{% endif %}.</p>{% endif %}
+  {% endif %}
+</section>
+{% endif %}

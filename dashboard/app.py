@@ -2860,6 +2860,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             "khan_gia_khoang": {"tu": kg.get("tu"), "den": kg.get("den")},
             "moi": {"ngay_cuoi": moi.get("ngay_cuoi"), "ghi_luc": moi.get("ghi_luc")},
         }
+        # 22/10/2026 (chủ dự án): khối "Theo kênh đăng" — cùng phạm vi `ids` + khoảng ngày; tiền lọc
+        # ngay dưới (loc_tien). `kenh_dang.du_lieu` nhận danh sách id nên hợp với chọn nhiều tài khoản.
+        from dashboard import kenh_dang as KD
+        ra["kenh"] = KD.du_lieu(kq, ids, tu, den, qp, co_tien, ten_tk)
         # Chốt chặn tiền ở MÁY CHỦ: người Chỉ xem không bao giờ nhận khoá tiền (kể cả khối con).
         # 22/10/2026 (chủ dự án): doanh thu Shop / ROAS tạm ẩn với MỌI người (`QC.HIEN_DOANH_THU`).
         return QC.loc_doanh_thu(QC.loc_tien(ra, co_tien))

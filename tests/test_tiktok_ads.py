@@ -694,8 +694,10 @@ def test_chan_cong_cu_ghi_va_tool_execute_truoc_khi_gui(ten):
 
 
 def test_cong_cu_doc_di_qua_va_doc_sse_phien():
-    # Soát 19/10/2026: chỉ đúng các công cụ mã dùng.
-    assert TA.CONG_CU_DOC == {"auth_advertiser_get", "advertiser_info_get", "report_integrated_get"}
+    # Soát 19/10/2026: chỉ đúng các công cụ mã dùng. 22/10/2026: + identity_get, tool_execute (chỉ
+    # đúng dạng ad_get — test_kenh_dang.py).
+    assert TA.CONG_CU_DOC == {"auth_advertiser_get", "advertiser_info_get", "report_integrated_get",
+                              "identity_get", "tool_execute"}
     src = (GOC / "dashboard" / "tiktok_ads.py").read_text(encoding="utf-8")
     goi = set(re.findall(r'goi\("([a-z_]+)"', src))
     assert goi == TA.CONG_CU_DOC, goi
