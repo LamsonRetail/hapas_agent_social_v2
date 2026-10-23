@@ -84,15 +84,15 @@ def test_kenh_dang_phan_trang_chung_chua_xac_dinh_o_tfoot_dong_phu_mot_dong():
     assert "Chưa xác định" in tfoot and "Chưa xác định" not in k.split("<tbody>")[1].split("</tbody>")[0]
     # chú thích cuối bảng → (i) + nút "Tải đủ" ở đầu mục
     assert "Đang hiện" not in k and "xem thêm" not in k
-    assert re.search(r'data-goi-y="[^"]*đang tải 20 / 45 kênh đầu', k)
-    assert re.search(r'<a class="qc-kenh__them" href="[^"]*kenh_so=100[^"]*#kenh">Tải đủ 45 kênh</a>', k)
+    assert "qc-kenh__them" not in k and k.count('<tr>') == 1 + 45                  # mặc định tải 100: đủ 45
     # dòng phụ: một dòng cắt "…", đủ tài khoản ở title
     phu = re.search(r'<span class="qc-bang__phu" data-nen-tang="tiktok" title="([^"]+)">', k)
     assert phu and "@kenh0" in phu.group(1) and "2 quảng cáo" in phu.group(1)
     assert '<span class="qc-bang__phu-chu">' in k
-    # đã tải đủ: không còn nút
-    k = _trang_qc(kenh_so=100).split('id="kenh"')[1].split("</section>")[0]
-    assert "qc-kenh__them" not in k and k.count('<tr>') == 1 + 45                  # thead + 45 kênh
+    # quá 100 kênh: (i) nói đang tải 100 / N + nút "Tải đủ"
+    k = _trang_qc(kenh=180).split('id="kenh"')[1].split("</section>")[0]
+    assert re.search(r'data-goi-y="[^"]*đang tải 100 / 180 kênh đầu', k)
+    assert re.search(r'<a class="qc-kenh__them" href="[^"]*kenh_so=500[^"]*#kenh">Tải đủ 180 kênh</a>', k)
 
 
 def test_sheet_va_dai_dong_bo_ghi_chu_vao_dau_i():

@@ -488,7 +488,7 @@ def test_khoi_kenh_xep_chi_do_phu_chua_xac_dinh():
     assert kd["rows"][0]["tuong_tac"] == 6 and kd["rows"][0]["tai_khoan"] == ["MATEMADE MKT"]
     assert kd["do_phu"] == round(1700 / 1800 * 100, 1) and kd["do_phu_theo"] == "chi"
     assert kd["chua_ro"]["chi"] == 100 and kd["chua_ro"]["so_ad"] == 1
-    assert kd["tong"] == 3 and kd["so"] == 20 and kd["so_tiep"] is None
+    assert kd["tong"] == 3 and kd["so"] == 100 and kd["so_tiep"] is None
 
 
 def test_khoi_kenh_khong_xem_tien_khong_lo_chi():
@@ -506,14 +506,14 @@ def test_khoi_kenh_pham_vi_va_xem_them():
     assert [r["ten"] for r in kd["rows"]] == ["Page 2241"] and kd["chua_ro"] is None
     assert KD.du_lieu(kho, [], D1, D2, {}, True, TEN_TK) is None
     kd = KD.du_lieu(kho, [MM_MKT, "act_1"], D1, D2, {"kenh_so": "1"}, True, TEN_TK)
-    assert kd["so"] == 20                                 # chỉ 20 / 100 / 500
+    assert kd["so"] == 100                                # chỉ 100 / 500 (23/10/2026)
     for n in KD.SO_KENH:
         assert KD.so_kenh({"kenh_so": str(n)}) == n
-    assert KD.so_kenh({"kenh_so": "x"}) == 20
-    kho.qc_kenh_dang = lambda *a, **k: {"rows": [{"nen_tang": "tiktok", "kenh_id": "a"}] * 20,
-                                        "tong": 45, "biet": {}, "chua_ro": {}}
+    assert KD.so_kenh({"kenh_so": "x"}) == 100
+    kho.qc_kenh_dang = lambda *a, **k: {"rows": [{"nen_tang": "tiktok", "kenh_id": "a"}] * 100,
+                                        "tong": 450, "biet": {}, "chua_ro": {}}
     kd = KD.du_lieu(kho, [MM_MKT], D1, D2, {}, True, TEN_TK)
-    assert kd["so_tiep"] == 100 and kd["do_phu"] is None
+    assert kd["so_tiep"] == 500 and kd["do_phu"] is None
 
 
 def test_khoi_kenh_kho_chua_bang_khong_sap():
