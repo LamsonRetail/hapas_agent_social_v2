@@ -1,0 +1,19 @@
+{#- Thanh trang dùng chung (23/10/2026, chủ dự án: mọi bảng dài một kiểu như mẫu ‹ 1 2 3 4 5 6 … ›).
+    `phan_trang(trang, so_trang, url, nhan, dem='')`: `url(p)` → liên kết trang p (máy chủ phân trang,
+    không cần JS); `nhan` = tên bảng cho trình đọc màn hình; `dem` = dòng nhỏ bên phải ("· 1.043 khớp").
+    Cùng markup với `PhanTrang` (chung.js) — bảng nạp sẵn / nạp bằng JS dùng bản JS. Một trang thì ẩn. #}
+{% macro phan_trang(trang, so_trang, url, nhan, dem='') %}
+{% if so_trang > 1 %}
+<nav class="phan-trang" aria-label="Trang của bảng {{ nhan }}">
+  <ul class="phan-trang__ds">
+    <li>{% if trang > 1 %}<a class="phan-trang__o phan-trang__ben" href="{{ url(trang - 1) }}" rel="prev"><span class="dai-qc__an">Trang trước</span><span aria-hidden="true">‹</span></a>{% else %}<span class="phan-trang__o phan-trang__ben" aria-disabled="true"><span class="dai-qc__an">Trang trước</span><span aria-hidden="true">‹</span></span>{% endif %}</li>
+    {% for p in o_trang(trang, so_trang) %}
+    <li class="phan-trang__so">{% if p is none %}<span class="phan-trang__ba" aria-hidden="true">…</span>{% else %}<a class="phan-trang__o" href="{{ url(p) }}"{% if p == trang %} aria-current="page"{% endif %}><span class="dai-qc__an">Trang </span>{{ p|so_vn }}</a>{% endif %}</li>
+    {% endfor %}
+    <li class="phan-trang__gon" aria-hidden="true">{{ trang|so_vn }}/{{ so_trang|so_vn }}</li>
+    <li>{% if trang < so_trang %}<a class="phan-trang__o phan-trang__ben" href="{{ url(trang + 1) }}" rel="next"><span class="dai-qc__an">Trang sau</span><span aria-hidden="true">›</span></a>{% else %}<span class="phan-trang__o phan-trang__ben" aria-disabled="true"><span class="dai-qc__an">Trang sau</span><span aria-hidden="true">›</span></span>{% endif %}</li>
+  </ul>
+  <p class="phan-trang__dem">Trang {{ trang|so_vn }}/{{ so_trang|so_vn }}{% if dem %} · {{ dem }}{% endif %}</p>
+</nav>
+{% endif %}
+{% endmacro %}

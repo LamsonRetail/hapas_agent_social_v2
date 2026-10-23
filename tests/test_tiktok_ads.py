@@ -1284,6 +1284,43 @@ def test_the_ket_noi_chi_quan_tri_vien_thay():
     assert "Kết nối TikTok Ads" not in t and "/tiktok/" not in t
 
 
+def test_quan_tri_gon_ghi_chu_trong_i_va_thanh_trang():
+    """23/10/2026 (chủ dự án: "ghi chú để vào dấu i", "tài khoản quảng cáo → bên để cho gọn lại", bảng
+    dài thì chuyển trang): đoạn giải thích vào ⓘ, bảng gán bên gọn + lọc + thanh trang chung 20 dòng,
+    form mỗi dòng giữ nguyên trường; nhật ký và danh sách người cũng phân trang."""
+    _app, c, kho, _kho_qc, _tt, _dv = _co_so(_tao_app())
+    for i in range(30):
+        kho.nk.append((QL, "sua_du_an", f"du_an:x{i}"))
+    dang_nhap(c, QL)
+    t = c.get("/quan-tri").text
+    khoi = t.split('id="tk-qc"')[1].split("</section>")[0]
+    # ghi chú dài không còn là đoạn chữ dưới tiêu đề — nằm trong data-goi-y
+    assert 'class="mo nho tt-chu"' not in t and "tt-token__chu" not in t
+    assert re.search(r'class="goi-y" data-goi-y="Tên có MATEMADE[^"]*chỉ tài khoản đã duyệt', khoi)
+    assert re.search(r'data-goi-y="Token chỉ cần quyền đọc báo cáo[^"]*không bao giờ hiện lại', t)
+    assert re.search(r'data-goi-y="Cần ads_read[^"]*TỪ CHỐI token có quyền ghi', t)
+    # bảng gọn: nền tảng là nhãn trong ô tài khoản, không còn cột Nền tảng; lọc + thanh trang chung
+    assert "<th>Nền tảng</th>" not in khoi and 'class="the the--nt-tiktok tkqc-nt">TikTok<' in khoi
+    assert 'data-phan-trang="20"' in khoi and 'data-tkqc-loc="nen"' in khoi
+    assert 'data-tkqc-loc="ben"' in khoi and '<option value="chua-duyet">Chưa duyệt</option>' in khoi
+    # form mỗi dòng: cùng trường, cùng đường POST
+    dong = khoi.split(f'data-o="tk-{LE}"')[1].split("</tr>")[0]
+    assert f'id="gb-{LE}" method="post" action="/qc/gan-ben"' in dong
+    for ten in ('name="don_vi" form="gb-', 'name="dang_dong_bo" value="1" form="gb-',
+                'name="advertiser_id" value="' + LE, 'name="csrf"'):
+        assert ten in dong, ten
+    assert 'data-ben="-"' in dong                       # LE chưa gán bên (để lọc "Chưa gán")
+    # nhật ký: thanh trang 20 dòng, Chi tiết cắt 2 dòng với bản đủ ở title
+    nk = t.split("Nhật ký thay đổi")[1].split("</section>")[0]
+    assert 'data-phan-trang="20"' in nk and 'class="cat-chu" title="' in nk
+    # danh sách người: thanh trang chung, hàng tiêu đề nằm ngoài <ul>
+    ds = t.split('data-nx-ds')[1].split("</ul>")[0]
+    assert 'data-phan-trang="20"' in ds and "nx-dau" not in ds
+    js = (Path(__file__).resolve().parents[1] / "dashboard" / "static" / "quan_tri.js").read_text(
+        encoding="utf-8")
+    assert "data-loc-an" in js and "phan-trang:lam-moi" in js
+
+
 def test_quan_tri_gan_ben_va_dong_bo_bam_tay():
     _app, c, _kho, kho_qc, _tt, _dv = _co_so(_tao_app())
     csrf = dang_nhap(c, QL)

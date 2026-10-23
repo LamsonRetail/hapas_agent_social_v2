@@ -76,6 +76,8 @@
   var chonNt = document.querySelector("[data-dx-nen-tang]");
   var chonSap = document.querySelector("[data-dx-sap]");
   var dem = document.querySelector("[data-dx-dem]");
+  // 23/10/2026 (chủ dự án: mọi bảng dài một kiểu thanh trang ‹ 1 2 3 … ›): thanh trang là
+  // PhanTrang.ve dùng chung (chung.js); ở đây tự phân trang vì còn lọc / sắp / chọn theo trang.
   var phan = document.querySelector("[data-dx-trang]");
   var thanh = document.querySelector("[data-dx-thanh]");
   var oTrang = document.querySelector("[data-dx-chon-trang]");
@@ -135,13 +137,22 @@
     var a = khop.length ? trang * MOI_TRANG + 1 : 0;
     var b = Math.min(khop.length, (trang + 1) * MOI_TRANG);
     if (dem) dem.textContent = "Đang xem " + a + "–" + b + " / " + khop.length + " đề xuất";
-    if (phan) {
-      phan.hidden = soTrang <= 1;
-      phan.querySelector("[data-dx-trang-so]").textContent = "Trang " + (trang + 1) + "/" + soTrang;
-      phan.querySelector("[data-dx-lui]").disabled = trang <= 0;
-      phan.querySelector("[data-dx-toi]").disabled = trang >= soTrang - 1;
+    var PT = typeof window !== "undefined" ? window.PhanTrang : null;
+    if (phan && PT) {
+      phan.replaceChildren(PT.ve({
+        trang: trang + 1, soTrang: soTrang, nhan: "đề xuất nguồn chờ duyệt",
+        dem: khop.length.toLocaleString("vi-VN") + " đề xuất",
+        chon: function (p) { trang = p - 1; ve(); veTrangMoi(); }
+      }));
     }
     veThanh();
+  }
+  // Sang trang: đầu bảng đã trôi khỏi màn hình thì cuộn về; giữ tiêu điểm trên ô trang hiện tại.
+  function veTrangMoi() {
+    var bang = than.closest(".cuon-ngang") || than;
+    if (bang.getBoundingClientRect().top < 0) bang.scrollIntoView({ block: "start" });
+    var cur = phan.querySelector('[aria-current="page"]');
+    if (cur) cur.focus({ preventScroll: true });
   }
   function locLai() {
     var nt = chonNt ? chonNt.value : "";
@@ -158,10 +169,6 @@
   }
   if (chonNt) chonNt.addEventListener("change", locLai);
   if (chonSap) chonSap.addEventListener("change", locLai);
-  if (phan) {
-    phan.querySelector("[data-dx-lui]").addEventListener("click", function () { trang -= 1; ve(); });
-    phan.querySelector("[data-dx-toi]").addEventListener("click", function () { trang += 1; ve(); });
-  }
   than.addEventListener("change", function (e) {
     var o = e.target;
     if (!o.matches || !o.matches("[data-dx-chon]")) return;

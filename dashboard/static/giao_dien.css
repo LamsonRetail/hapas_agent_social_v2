@@ -390,6 +390,13 @@ details[open] > summary { margin-bottom: 12px; }
 .ng-bang td { vertical-align: middle; }
 .ng-bang td:last-child .cum-nut { flex-wrap: nowrap; }
 .ng-bang td.nho { min-width: 92px; }
+/* 23/10/2026: ô biểu mẫu có nút ⓘ cạnh nhãn (giống label.o; nút đứng ngoài <label>) */
+.ng-truong { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--chu); }
+.ng-truong__nhan, .ng-chon { display: flex; align-items: center; gap: 6px; }
+.ng-chon { font-size: 12.5px; font-weight: 600; color: var(--chu); }
+.ng-chon input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: -2px; }
+.ng-bang .cat-chu, .dx-ly-do .cat-chu { max-width: 320px; overflow-wrap: anywhere; }
+.dx-ly-do { min-width: 180px; }
 /* Đề xuất chờ duyệt (18/10/2026): lọc + chọn nhiều + thanh duyệt hàng loạt dính đáy khung nhìn */
 .dx-loc { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; margin-bottom: 10px; }
 .dx-o { flex-direction: row !important; align-items: center; gap: 8px !important; font-weight: 600; white-space: nowrap; }
@@ -444,7 +451,10 @@ details[open] > summary { margin-bottom: 12px; }
 .nx-goi-y__ten { font-weight: 650; color: var(--chu); }
 .nx-goi-y__phu { font-size: 12px; color: var(--chu-phu); overflow-wrap: anywhere; }
 
-.nx-ds { list-style: none; margin: 0; padding: 0; border: 1px solid var(--ke); border-radius: 10px; background: var(--be-mat); }
+/* 23/10/2026: khung viền là .cuon-ngang.nx-khung (hàng tiêu đề nằm ngoài <ul> để thanh trang chung đếm
+   đúng <li>); không cuộn ngang — lưới tự co, dưới 760px thành thẻ. */
+.nx-khung { overflow: visible; }
+.nx-ds { list-style: none; margin: 0; padding: 0; }
 .nx-dau, .nx-hang {
   display: grid; grid-template-columns: minmax(200px, 2.2fr) minmax(170px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 112px;
   gap: 4px 16px; align-items: center; padding: 10px 14px;
@@ -498,7 +508,8 @@ details[open] > summary { margin-bottom: 12px; }
 
 @media (max-width: 760px) {
   .nx-dau { display: none; }
-  .nx-ds { border: 0; background: transparent; display: flex; flex-direction: column; gap: 10px; }
+  .nx-khung { border: 0; background: transparent; }
+  .nx-ds { display: flex; flex-direction: column; gap: 10px; }
   .nx-dong { border: 1px solid var(--ke); border-radius: 10px; background: var(--be-mat); }
   .nx-dong + .nx-dong { border-top: 1px solid var(--ke); }
   .nx-hang { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 14px; }
@@ -533,7 +544,6 @@ details[open] > summary { margin-bottom: 12px; }
 }
 .trang-dang-nhap__dau .bt { width: 28px; height: 28px; }
 .trang-dang-nhap__dau--loi { background: linear-gradient(135deg, var(--hong), var(--hong-2)); box-shadow: 0 10px 20px -10px rgba(226, 59, 104, .8); }
-.phan-trang { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
 
 /* ─── khung chi tiết (dialog chung) ─── */
 .bieu-do canvas { cursor: pointer; }
@@ -551,7 +561,6 @@ dialog.chi-tiet::backdrop { background: rgba(10, 18, 40, .45); }
 /* Thẻ có overflow:hidden trong cột flex cao cố định sẽ bị co tới 0 (min-height tự động = 0) → mất
    chữ bình luận khi danh sách dài. Giữ nguyên chiều cao thẻ, để khung cuộn. */
 .chi-tiet__than > * { flex-shrink: 0; }
-dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 
 /* ─── Kết nối TikTok Ads (trang Quản trị, chỉ quản trị viên — 19/10/2026) ───
    Ô hạn bên trái là thứ quản trị viên cần nhìn trước: còn bao nhiêu ngày trước khi phải đăng nhập lại
@@ -579,12 +588,43 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .tt-nut { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 12px; }
 .tt-nut form { margin: 0; }
 .tt-token { margin: 4px 0 4px; }
-.tt-token__chu { margin: 8px 0 0; max-width: 72ch; }
+/* 23/10/2026: ô token — câu giải thích vào ⓘ cạnh nhãn (không còn đoạn chữ dưới ô) */
+.tt-token__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; margin-top: 10px; }
+.tt-o { display: flex; flex-direction: column; gap: 5px; flex: 1 1 320px; max-width: 560px; min-width: 0; }
+.tt-o__nhan { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--chu); }
+.tt-o input { width: 100%; }
 .tt-h3 { font-size: 14px; color: var(--tieu-de); margin: 18px 0 4px; padding-top: 16px; border-top: 1px solid var(--ke); }
-.tt-chu { margin: 0 0 10px; max-width: 90ch; }
 .tt-bang td { vertical-align: middle; }
 .tt-bang__phu { display: block; font-size: 12px; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
-.tt-hop { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* ─── Tài khoản quảng cáo → bên (23/10/2026, chủ dự án: "để cho gọn lại") ───
+   ~40 dòng: hàng thấp (ô 5px dọc), nền tảng là nhãn nhỏ cạnh tên, Đồng bộ / Duyệt hai cột ô tích hẹp,
+   trạng thái là nhãn ngắn. Lọc tại chỗ ở trên bảng, thanh trang chung ở dưới. */
+.tkqc-loc { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.tkqc-loc .tkqc-tim { flex: 1 1 240px; max-width: 340px; }
+.tkqc-loc select, .tkqc-loc input { min-height: 34px; font-size: 13px; }
+.tkqc-bang th, .tkqc-bang td { padding: 5px 10px; }
+.tkqc-bang td { font-size: 13px; }
+.tkqc-bang select { min-height: 30px; padding: 3px 30px 3px 9px; font-size: 13px; max-width: 170px; background-position: right 7px center; }
+.tkqc-tk { min-width: 220px; max-width: 360px; }
+.tkqc-tk__ten { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tkqc-tk__chu { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--chu); }
+.tkqc-nt { flex: none; padding: 0 7px; font-size: 11px; line-height: 18px; }
+.tkqc-bang .tkqc-o-hop { width: 1%; text-align: center; white-space: nowrap; }
+.tkqc-o-hop input { width: 17px; height: 17px; margin: 0; vertical-align: middle; cursor: pointer; }
+.tkqc-trang { white-space: nowrap; }
+.tkqc-trang .the + .the { margin-left: 4px; }
+.tkqc-luu { width: 1%; text-align: right; position: relative; }   /* giữ nhãn ẩn "Lưu" trong khung cuộn */
+.tkqc-luu form { margin: 0; }
+.tkqc-luu .nut--nho { min-height: 28px; padding: 2px 12px; }
+.tkqc-bang tr.tkqc-doi > td { background: color-mix(in srgb, var(--nhan-nen) 45%, transparent); }
+.tkqc-bang tr.tkqc-vua-luu > td { background: var(--tot-nen); }
+
+/* ─── Nhật ký thay đổi (23/10/2026): 20 dòng / trang; Chi tiết JSON cắt 2 dòng, đủ ở title ─── */
+.nk-bang td { padding-top: 6px; padding-bottom: 6px; vertical-align: middle; }
+.nk-luc { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.nk-bang .nk-chi-tiet { min-width: 240px; }
+.nk-chi-tiet .cat-chu { overflow-wrap: anywhere; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; color: var(--chu-phu); max-width: 640px; }
 
 @media (max-width: 760px) {
   .khung { padding: 0 16px; }
@@ -606,6 +646,13 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
   .luoi-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .bieu-do { height: 260px; }
   .tt-luoi { grid-template-columns: minmax(0, 1fr); }
+  .tkqc-loc .tkqc-tim { flex-basis: 100%; max-width: none; }
+  .tkqc-loc select { flex: 1 1 0; min-width: 0; }
+  .tkqc-loc select, .tkqc-loc input, .tkqc-bang select, .tt-o input { min-height: 44px; font-size: 16px; }
+  .tkqc-luu .nut--nho, .tt-token__form .nut { min-height: 44px; }
+  .tkqc-o-hop input { width: 22px; height: 22px; }
+  .tkqc-tk { min-width: 160px; max-width: 190px; }        /* tên cắt "…" (đủ ở title) để ô chọn bên lọt khung */
+  .tt-token__form .nut { flex: 1 1 100%; }
 }
 @media (max-width: 480px) {
   .ten-trang__chu { display: none; }
@@ -650,7 +697,8 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .dai-qc__ct dt { color: var(--chu-mo); }
 .dai-qc__ct dt::after { content: ":"; }
 .dai-qc__ct dd { margin: 0; color: var(--chu); overflow-wrap: anywhere; }
-.dai-qc__phai { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; max-width: 100%; }
+/* 23/10/2026: lý do nút khoá vào (i) cạnh nút — một hàng thay dòng chữ dưới nút */
+.dai-qc__phai { display: flex; align-items: center; gap: 6px; flex: none; max-width: 100%; }
 .dai-qc__tach { display: inline-flex; position: relative; }
 .dai-qc__chinh { margin: 0; }
 .dai-qc__chinh .nut { gap: 6px; }
@@ -668,7 +716,6 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .dai-qc__muc span { font-size: 12px; color: var(--chu-mo); }
 .dai-qc__muc[disabled] { cursor: not-allowed; }
 .dai-qc__muc[disabled] b { color: var(--chu-mo); }
-.dai-qc__ly { font-size: 12px; color: var(--chu-mo); text-align: right; max-width: 280px; }
 .dai-qc__an { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .dai-qc__xoay { animation: dai-qc-xoay 1.4s linear infinite; }
 @keyframes dai-qc-xoay { to { transform: rotate(360deg); } }
@@ -676,14 +723,12 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
   .dai-qc { padding: 10px 12px; }
   .dai-qc__dong { flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 0; }
   .dai-qc__trai { flex-basis: auto; flex-direction: column; gap: 2px; }
-  .dai-qc__phai { align-items: stretch; }
-  .dai-qc__tach { display: flex; }
+  .dai-qc__tach { display: flex; flex: 1 1 auto; }
   .dai-qc__chinh { flex: 1 1 auto; }
   .dai-qc__chinh .nut, .dai-qc__them > summary.nut { min-height: 44px; }
   .dai-qc__chinh .nut { width: 100%; justify-content: center; }
   .dai-qc__them > summary.nut { padding: 3px 14px; }
   .dai-qc__menu { width: min(280px, calc(100vw - 48px)); }
-  .dai-qc__ly { text-align: left; max-width: none; }
   .dai-qc__ca .nut { min-height: 36px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -703,3 +748,33 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .dp-o__sot > summary { cursor: pointer; font-size: 13px; color: var(--nhan); }
 .dp-sot { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .dp-sot li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; overflow-wrap: anywhere; }
+
+/* ─── thanh trang dùng chung (23/10/2026, chủ dự án: mọi bảng dài một kiểu như mẫu ‹ 1 2 3 4 5 6 … ›):
+   ô tròn có viền ≥ 36px (44px điện thoại), trang đang xem tô màu nhấn, hai đầu mờ khi hết trang;
+   điện thoại gọn ‹ 3/150 ›. Máy chủ: macro `_phan_trang.html`; bảng nạp sẵn / JS: `PhanTrang` (chung.js). ─── */
+.phan-trang { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin: 14px 0 0; }
+.phan-trang__ds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.phan-trang__o {
+  position: relative; /* giữ chữ ẩn (.dai-qc__an) trong ô — không nới trang khi bảng cuộn ngang */
+  display: inline-grid; place-items: center; min-width: 36px; height: 36px; padding: 0 8px; border-radius: 999px;
+  font: 600 13.5px/1 var(--phong); color: var(--chu-phu); text-decoration: none; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--ke); background: var(--be-mat); cursor: pointer; transition: background-color .15s ease-out, color .15s ease-out;
+}
+a.phan-trang__o:hover, button.phan-trang__o:hover { background: var(--be-mat-2); color: var(--chu); text-decoration: none; }
+.phan-trang__o:focus-visible { outline: 2px solid var(--nhan); outline-offset: 2px; }
+.phan-trang__o[aria-current="page"] { background: var(--nhan); border-color: var(--nhan); color: #fff; font-weight: 700; cursor: default; }
+@media (prefers-color-scheme: dark) { .phan-trang__o[aria-current="page"] { color: #0b1120; } }
+.phan-trang__ben { font-size: 18px; }
+.phan-trang__ben[aria-disabled="true"], .phan-trang__ben:disabled { opacity: .4; cursor: not-allowed; background: var(--be-mat-2); }
+.phan-trang__ba { display: inline-grid; place-items: center; min-width: 24px; height: 36px; color: var(--chu-mo); }
+.phan-trang__gon { display: none; }
+.phan-trang__dem { margin: 0; font-size: 12.5px; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .phan-trang { justify-content: center; }
+  .phan-trang__so { display: none; }
+  .phan-trang__gon { display: inline-grid; place-items: center; min-width: 72px; height: 44px; font-size: 14px; font-weight: 650; color: var(--chu); font-variant-numeric: tabular-nums; }
+  .phan-trang__o { min-width: 44px; height: 44px; }
+  .phan-trang__dem { flex-basis: 100%; text-align: center; }
+}
+@media (prefers-reduced-motion: reduce) { .phan-trang__o { transition: none; } }
+@media (forced-colors: active) { .phan-trang__o { border: 1px solid CanvasText; } .phan-trang__o[aria-current="page"] { outline: 2px solid Highlight; } }

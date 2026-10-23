@@ -5,6 +5,7 @@
 <script src="{{ tinh('ngan_sach.js') }}" defer></script>
 {% endblock %}
 {% block noi_dung %}
+{% from "_phan_trang.html" import phan_trang with context %}
 {% set ql = nguoi.vai_tro == 'quan_ly' %}
 {% set chon = (dong|selectattr('ma', 'equalto', du_an.ma)|first) if du_an else none %}
 {% macro o_usd(uoc, y_dinh, so_bai, gia) %}{% if not y_dinh %}tắt{% elif not so_bai and not uoc %}tắt (0 bài){% elif not gia and not uoc %}miễn phí{% else %}{{ uoc|usd_vn(3) }}{% endif %}{% endmacro %}
@@ -36,10 +37,12 @@
   {% set muc.so = muc.so + 1 %}
   <div class="muc"><span class="muc__so" aria-hidden="true">{{ muc.so }}</span><h2 class="muc__ten" id="ns-cac-du-an">Tất cả dự án</h2></div>
   <div class="cuon-ngang">
-  <table class="ns-cac-du-an">
+  {#- 23/10/2026 (chủ dự án: mọi bảng dài một kiểu thanh trang): 20 dự án một trang (chung.js PhanTrang). #}
+  <table class="ns-cac-du-an" data-phan-trang="20" data-phan-trang-nhan="dự án">
     <thead><tr><th>Dự án</th><th class="so">Trần hiệu lực</th><th class="so">Đã tiêu</th><th class="so">Dự báo cả tháng</th><th>Tình trạng</th></tr></thead>
     <tbody>
-    {% for x in dong %}
+    {#- dự án đang xem đứng đầu (23/10/2026) — trang 1 của thanh trang luôn có dòng đang chọn #}
+    {% for x in ([chon] if chon else []) + (dong|rejectattr('ma', 'equalto', chon.ma if chon else none)|list) %}
       <tr{% if chon and x.ma == chon.ma %} aria-current="true"{% endif %}>
         <td><a href="/ngan-sach?du_an={{ x.ma|urlencode }}">{{ x.ten }}</a> <span class="mo nho">{{ x.ma }}</span>{% if not x.dang_bat %} <span class="the">đang tắt</span>{% endif %}</td>
         <td class="so">{{ x.du_bao.tran|usd_vn }}</td>
@@ -87,7 +90,7 @@
       </div>
       <ul class="ns-chu-giai">
         <li><i class="ns-o ns-o--tieu" aria-hidden="true"></i>Đã tiêu <b>{{ d.da_tieu|usd_vn }}</b> USD ({{ d.pt|pt_vn }} trần)</li>
-        <li><i class="ns-o ns-o--bao" aria-hidden="true"></i>Dự báo thêm <b>{{ db.con_lai|usd_vn }}</b> USD trong {{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày còn lại{% if db.theo == 'thuc' %} <span class="mo" data-o="du-bao-thuc">= {{ db.so_luot_con|so_vn }} lượt × {{ db.thuc.trung_vi|usd_vn }} USD (trung vị chi thật {{ db.thuc.so_luot }} lượt gần nhất, {{ db.thuc.thap|usd_vn }}–{{ db.thuc.cao|usd_vn }}){% if db.dp_con %} + kiểm độ phủ {{ db.dp_con|usd_vn }}{% endif %}</span>{% elif db.theo == 'nguon' %} <span class="mo" data-o="du-bao-thuc">(chỉ phần nguồn — chưa đủ 3 lượt đo chi thật; mức tối đa ở bảng dưới)</span>{% endif %}</li>
+        <li><i class="ns-o ns-o--bao" aria-hidden="true"></i>Dự báo thêm <b>{{ db.con_lai|usd_vn }}</b> USD trong {{ '%.1f'|format(db.ngay_con_lai)|replace('.', ',') }} ngày còn lại{#- 23/10/2026 (chủ dự án: ghi chú vào dấu i): cách tính dự báo nằm trong nút (i). #}{% if db.theo == 'thuc' %} <button type="button" class="goi-y" data-o="du-bao-thuc" aria-label="Cách tính dự báo" data-goi-y="= {{ db.so_luot_con|so_vn }} lượt × {{ db.thuc.trung_vi|usd_vn }} USD (trung vị chi thật {{ db.thuc.so_luot }} lượt gần nhất, {{ db.thuc.thap|usd_vn }}–{{ db.thuc.cao|usd_vn }}){% if db.dp_con %} + kiểm độ phủ {{ db.dp_con|usd_vn }}{% endif %}">i</button>{% elif db.theo == 'nguon' %} <button type="button" class="goi-y" data-o="du-bao-thuc" aria-label="Cách tính dự báo" data-goi-y="Chỉ phần nguồn — chưa đủ 3 lượt đo chi thật; mức tối đa ở bảng dưới.">i</button>{% endif %}</li>
         <li><i class="ns-o ns-o--tran" aria-hidden="true"></i>Trần hiệu lực <b>{{ db.tran|usd_vn }}</b> USD</li>
       </ul>
     </div>
@@ -120,7 +123,7 @@
   {% if goi and goi.co %}
   <div class="ns-goi" role="group" aria-labelledby="ns-goi-tieu-de" data-o="goi-apify">
     <div class="ns-nhan" id="ns-goi-tieu-de">Gói Apify{% if goi.goi %} {{ goi.goi }}{% endif %} — trần thật của cả tài khoản
-      <button type="button" class="goi-y" data-goi-y="Apify chặn mọi run khi tài khoản dùng hết trần gói trong chu kỳ, bất kể trần dự án. Số đã dùng là của CẢ tài khoản (mọi việc dùng chung token, gồm run thử), theo chu kỳ Apify chứ không theo tháng lịch. Mark chừa {{ goi.du_tru|usd_vn }} USD dự trữ. Ảnh chụp lúc {{ goi.luc|gio_vn }}.">i</button></div>
+      <button type="button" class="goi-y" data-goi-y="Apify chặn mọi run khi tài khoản dùng hết trần gói trong chu kỳ, bất kể trần dự án. Số đã dùng là của CẢ tài khoản (mọi việc dùng chung token, gồm run thử), theo chu kỳ Apify chứ không theo tháng lịch. Mark chừa {{ goi.du_tru|usd_vn }} USD dự trữ. Ảnh chụp lúc {{ goi.luc|gio_vn }}.{% if goi_mot_phan %} Trần nội bộ và dự báo chỉ tính các dự án của bên bạn.{% endif %}">i</button></div>
     <dl class="ns-o-so ns-goi__so">
       <div><dt>Đã dùng chu kỳ này</dt><dd class="ns-gia-tri">{{ goi.da_dung|usd_vn }}</dd><dd class="ns-phu">/ {{ goi.tran|usd_vn }} USD trần gói</dd></div>
       <div><dt>Gói còn</dt><dd class="ns-gia-tri">{{ goi.con_lai|usd_vn }}</dd><dd class="ns-phu">USD · Mark dùng được {{ goi.dung_duoc|usd_vn }}</dd></div>
@@ -129,7 +132,6 @@
       {% elif goi.tran_luot is not none %}<div><dt>Trần mỗi lượt (console)</dt><dd class="ns-gia-tri">{{ goi.tran_luot|usd_vn }}</dd><dd class="ns-phu">USD — một lượt không tiêu quá</dd></div>{% endif %}
     </dl>
     {% for c in goi.canh_bao %}<p class="thong-bao thong-bao--canh ns-goi__canh" role="note">⚠ {{ c }}</p>{% endfor %}
-    {% if goi_mot_phan %}<p class="ghi-chu nho">Đã dùng / trần gói là của cả tài khoản Apify dùng chung; trần nội bộ và dự báo chỉ tính các dự án của bên bạn.</p>{% endif %}
   </div>
   {% endif %}
 </section>
@@ -201,7 +203,7 @@
     <div class="muc ns-ch__muc">
       <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
       <h2 class="muc__ten" id="ns-ch-tieu-de">Thu thập mỗi lượt /theodoi</h2>
-      <button type="button" class="goi-y" data-goi-y="{% if ql %}Ô trống, viền đứt = theo mặc định dự án; bình luận mỗi bài 0 = cào hết. {% endif %}Tìm theo {{ b.so_tu_khoa }} từ khoá của dự án. USD là mức tối đa mỗi lượt; phần mở rộng (tìm rộng hơn, feed hashtag…) nằm trong khối Nâng cao dưới bảng, USD của nó đã cộng vào dòng nền tảng.{% if not ql %} Chỉ người quản lý sửa được.{% endif %}">i</button>
+      <button type="button" class="goi-y" data-goi-y="{% if ql %}Ô trống, viền đứt = theo mặc định dự án (xoá ô để về mặc định); bình luận mỗi bài 0 = cào hết. {% endif %}Tìm theo {{ b.so_tu_khoa }} từ khoá của dự án. USD là mức tối đa mỗi lượt; phần mở rộng (tìm rộng hơn, feed hashtag…) nằm trong khối Nâng cao dưới bảng, USD của nó đã cộng vào dòng nền tảng.{% if not ql %} Chỉ người quản lý sửa được.{% endif %}">i</button>
     </div>
     {% if ql %}
     <div class="ns-mau" role="group" aria-label="Mẫu cấu hình nhanh">
@@ -212,7 +214,8 @@
     </div>
     {% endif %}
   </div>
-  {% if ql or not d.tu_khoa %}<p class="ghi-chu ns-ch__tom">{% if ql %}<span class="ns-vd" aria-hidden="true"></span> = mặc định dự án{% endif %}{% if not d.tu_khoa %}<span class="the the--canh">Dự án chưa có từ khoá nên đang tìm theo tên dự án — <a href="/nguon?du_an={{ d.ma|urlencode }}">thêm từ khoá ở trang Nguồn</a></span>{% endif %}</p>{% endif %}
+  {#- 23/10/2026: chú giải "ô viền đứt = mặc định dự án" dời vào (i) của mục; chỉ cảnh báo còn hiện. #}
+  {% if not d.tu_khoa %}<p class="ns-ch__tom"><span class="the the--canh">Dự án chưa có từ khoá nên đang tìm theo tên dự án — <a href="/nguon?du_an={{ d.ma|urlencode }}">thêm từ khoá ở trang Nguồn</a></span></p>{% endif %}
 
   {#- 18/10/2026 (chủ dự án: "những phần nào mà có đường 2 … đóng vai user để nhìn thì hơi rối và khó
       hiểu nên có thể ẩn đi hoặc thiết kế khéo léo hơn"): MỖI nền tảng MỘT dòng gọn — bật/tắt, số bài,
@@ -222,7 +225,7 @@
       17/10) — tổng các dòng = Tổng mỗi lượt. Tên ô biểu mẫu + khoá JSONB giữ nguyên (Mark đọc
       không đổi). #}
   <div class="ns-bang-boc">
-  <table class="ns-bang">
+  <table class="ns-bang" data-phan-trang="20" data-phan-trang-nhan="thu thập mỗi nền tảng">
     <thead>
       <tr><th rowspan="2" scope="col">Nền tảng</th><th colspan="3" scope="colgroup" class="ns-nhom ns-ranh">Tìm theo từ khoá</th><th colspan="4" scope="colgroup" class="ns-nhom ns-ranh">Cào bình luận</th><th rowspan="2" scope="col" class="so ns-ranh">Tổng/lượt</th></tr>
       <tr><th scope="col" class="ns-ranh">Bật</th><th scope="col">Bài/lượt</th><th scope="col" class="so">≈ USD</th>
@@ -342,11 +345,10 @@
       <div class="ns-nc__muc{% if not y_fb %} ns-mo{% endif %}" data-nt="facebook_d2" data-cha="facebook">
         <div class="ns-nc__dau">
           <span class="the the--nt-facebook">Facebook</span><b>Tìm rộng hơn</b>
-          <button type="button" class="goi-y" data-goi-y="Dùng thêm một nguồn dữ liệu phụ, tính theo bài ({{ hang_so.fb2.gia|usd_vn(3) }} USD/bài), mỗi cụm từ khoá một lần chạy. Chỉ dùng cụm NHIỀU chữ có tên thương hiệu{% if d2.cum %} ({{ d2.cum|join(', ') }}){% endif %}. Tối đa 1 lần mỗi {{ d2.gio }} giờ (đang chạy chiến dịch: {{ d2.gio_chien_dich }} giờ). Bài về đi qua cùng bộ lọc + AI. USD là mức tối đa mỗi lượt, đã cộng vào dòng Facebook. Tắt Facebook ở bảng trên thì phần này cũng tắt.">i</button>
+          <button type="button" class="goi-y" data-goi-y="Thêm nguồn dữ liệu phụ để bắt bài nhỏ, bài trong nhóm public mà cách tìm thường bỏ sót. Tính theo bài ({{ hang_so.fb2.gia|usd_vn(3) }} USD/bài), mỗi cụm từ khoá một lần chạy. Chỉ dùng cụm NHIỀU chữ có tên thương hiệu{% if d2.cum %} ({{ d2.cum|join(', ') }}){% endif %}. Tối đa 1 lần mỗi {{ d2.gio }} giờ (đang chạy chiến dịch: {{ d2.gio_chien_dich }} giờ). Bài về đi qua cùng bộ lọc + AI. USD là mức tối đa mỗi lượt, đã cộng vào dòng Facebook. Tắt Facebook ở bảng trên thì phần này cũng tắt.">i</button>
           {% if ql %}<input type="checkbox" class="ns-cong" role="switch" name="tk_facebook_d2_bat" value="1" aria-label="Facebook: bật tìm rộng hơn"{% if y_d2 %} checked{% endif %}>
           {% else %}<span class="the ns-nc__tt{% if d2.bat %} the--tot{% endif %}">{{ 'bật' if d2.bat else 'tắt' }}</span>{% endif %}
         </div>
-        <p class="ns-nc__mo-ta">Thêm nguồn dữ liệu phụ để bắt bài nhỏ, bài trong nhóm public mà cách tìm thường bỏ sót.</p>
         <div class="ns-nc__so">
           {% if ql %}<label class="ns-nc__o">Bài mỗi cụm <input type="number" name="tk_facebook_d2_so_bai" min="0" max="{{ hang_so.gioi_han.tk_so_bai[1] }}" step="1" inputmode="numeric" placeholder="{{ hang_so.fb2.moi_tu }}" value="{{ r_d2.get('so_bai_moi_tu') if 'so_bai_moi_tu' in r_d2 else '' }}" aria-label="Facebook tìm rộng hơn: số bài mới nhất mỗi cụm, 0 = tắt (trống = {{ hang_so.fb2.moi_tu }})"></label>
           {% else %}<span>{{ d2.so_bai_moi_tu }} bài mỗi cụm</span>{% endif %}
@@ -364,11 +366,10 @@
       <div class="ns-nc__muc{% if not y_th3 %} ns-mo{% endif %}" data-nt="threads_d2" data-cha="threads">
         <div class="ns-nc__dau">
           <span class="the the--nt-threads">Threads</span><b>Tìm rộng hơn</b>
-          <button type="button" class="goi-y" data-o="ghi-th2" data-goi-y="Tìm rộng hơn đang {{ 'bật' if t2.bat_rieng else 'tắt' }}: thêm nguồn dữ liệu phụ bắt bài đang được quan tâm, dùng mọi từ khoá — tối đa {{ t2.so_bai }} bài/lượt, {{ t2.so_bai_moi_tu }} bài mỗi từ khoá, tính theo bài trả về, không phí mở đầu. Chỉ chạy khi Threads bật ở bảng trên; USD đã cộng vào dòng Threads.">i</button>
+          <button type="button" class="goi-y" data-o="ghi-th2" data-goi-y="Tìm rộng hơn đang {{ 'bật' if t2.bat_rieng else 'tắt' }}: thêm nguồn dữ liệu phụ bắt bài Threads đang được quan tâm mà cách tìm thường bỏ sót, dùng mọi từ khoá — tối đa {{ t2.so_bai }} bài/lượt, {{ t2.so_bai_moi_tu }} bài mỗi từ khoá, tính theo bài trả về, không phí mở đầu. Chỉ chạy khi Threads bật ở bảng trên; USD đã cộng vào dòng Threads.">i</button>
           {% if ql %}<input type="hidden" name="tk_threads_d2" value="1"><input type="checkbox" class="ns-cong" role="switch" name="tk_threads_d2_bat" value="1" aria-label="Threads: bật tìm rộng hơn"{% if y_t2 %} checked{% endif %}>
           {% else %}<span class="the ns-nc__tt{% if t2.bat %} the--tot{% endif %}">{{ 'bật' if t2.bat else 'tắt' }}</span>{% endif %}
         </div>
-        <p class="ns-nc__mo-ta">Thêm nguồn dữ liệu phụ để bắt bài Threads đang được quan tâm mà cách tìm thường bỏ sót.</p>
         <div class="ns-nc__so">
           <span>Tối đa {{ t2.so_bai }} bài/lượt</span>
           <output class="ns-nc__usd{% if not t2.bat %} ns-tat-chu{% endif %}" data-o="tk-threads_d2" data-usd="{{ t2.uoc }}">{{ o_nc(t2.bat, t2.uoc) }}</output>
@@ -429,9 +430,8 @@
       <div class="ns-nc__muc ns-nc__muc--rong" data-nt="bo_tu">
         <div class="ns-nc__dau">
           <b>Không tìm trên…</b>
-          <button type="button" class="goi-y" data-goi-y="Từ khoá ghi trong ô của một nền tảng sẽ KHÔNG được đem đi tìm trên nền tảng đó (mọi cách tìm của nền tảng, kể cả tìm rộng hơn). Bài vẫn phải nhắc từ khoá của dự án mới được giữ — đây chỉ bớt câu tìm kéo về bài lạc đề. Ghi đúng từ khoá như ở trang Nguồn, cách nhau dấu phẩy; với Instagram và feed hashtag TikTok, ghi hashtag một chữ (vd #quatang2010) để bỏ hashtag đó. Ô trống = tìm mọi từ khoá.">i</button>
+          <button type="button" class="goi-y" data-goi-y="Từ khoá ghi trong ô của một nền tảng sẽ KHÔNG được đem đi tìm trên nền tảng đó (mọi cách tìm của nền tảng, kể cả tìm rộng hơn). Bài vẫn phải nhắc từ khoá của dự án mới được giữ — đây chỉ bớt câu tìm kéo về bài lạc đề. Ghi đúng từ khoá như ở trang Nguồn, cách nhau dấu phẩy; với Instagram và feed hashtag TikTok, ghi hashtag một chữ (vd #quatang2010) để bỏ hashtag đó. Ô trống = tìm mọi từ khoá. Dùng cho cụm chung chung kéo về bài không liên quan — vd &quot;yêu từ điều nhỏ nhất&quot; trên Facebook (đo 18/10/2026: 18/20 bài không phải {{ d.ten }}). Bài vẫn lọc theo đủ {{ b.so_tu_khoa }} từ khoá.">i</button>
         </div>
-        <p class="ns-nc__mo-ta">Dùng cho cụm chung chung kéo về bài không liên quan — vd "yêu từ điều nhỏ nhất" trên Facebook (đo 18/10/2026: 18/20 bài không phải {{ d.ten }}). Bài vẫn lọc theo đủ {{ b.so_tu_khoa }} từ khoá.</p>
         <div class="ns-nc__bo-tu">
           {% for p in hang_so.nen_tang %}
           {% set tkp = b.tu_khoa[p] %}
@@ -497,7 +497,7 @@
     </div>
     {% if db.nen_tang %}
     <div class="cuon-ngang">
-    <table class="ns-bang-pt">
+    <table class="ns-bang-pt" data-phan-trang="20" data-phan-trang-nhan="dự báo theo nền tảng">
       <thead><tr><th>Nền tảng</th><th class="so">Nguồn</th><th class="so">Còn lại tháng này</th><th class="so">Theo cấu hình 30 ngày</th><th class="so">Theo bài (còn lại)</th><th class="so">Phí khởi động actor (còn lại)</th></tr></thead>
       <tbody>
       {% for p in db.nen_tang %}
@@ -539,7 +539,7 @@
 {% endif %}
 
 {% if du_an %}
-<section class="the-khoi" aria-labelledby="ns-ls-tieu-de">
+<section class="the-khoi" aria-labelledby="ns-ls-tieu-de" id="ns-ls">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
     <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
@@ -576,11 +576,9 @@
     </tbody>
   </table>
   </div>
-  <div class="phan-trang">
-    {% if trang > 1 %}<a class="nut nut--nhe nut--nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}&amp;trang={{ trang - 1 }}">← Mới hơn</a>{% endif %}
-    <span class="mo nho">Trang {{ trang }}/{{ so_trang }}</span>
-    {% if trang < so_trang %}<a class="nut nut--nhe nut--nho" href="/ngan-sach?du_an={{ du_an.ma|urlencode }}&amp;trang={{ trang + 1 }}">Cũ hơn →</a>{% endif %}
-  </div>
+  {#- 23/10/2026 (chủ dự án): thanh trang chung `_phan_trang.html` (máy chủ, 20 lượt/trang) thay
+      "← Mới hơn · Trang x/y · Cũ hơn →"; `url_luot(p)` từ app.py giữ dự án, về #ns-ls. #}
+  {{ phan_trang(trang, so_trang, url_luot, 'lịch sử lượt quét', dem=tong|so_vn ~ ' lượt') }}
   {% else %}
   <p class="trong">Chưa có lượt quét nào.</p>
   {% endif %}

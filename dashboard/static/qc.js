@@ -311,7 +311,7 @@
         if (!p.dang) {
           khung.setAttribute("data-dang", "0");
           if (nut) nut.disabled = false;
-          if (goiY) goiY.textContent = "Thường xong sau 1–2 phút.";
+          if (goiY) { goiY.textContent = ""; goiY.hidden = true; }   // 23/10/2026: gợi ý thời gian nằm ở (i)
           return true;
         }
       })
@@ -321,7 +321,7 @@
         if (Date.now() - batDau < TOI_DA) { setTimeout(hoi, NHIP); return; }
         // Hết 15 phút mà vẫn đang tạo: thôi hỏi, mở lại nút (máy chủ vẫn chặn nếu còn đang chờ thật).
         if (nut) nut.disabled = false;
-        if (goiY) goiY.textContent = "Chưa thấy xong — tải lại trang để xem trạng thái mới.";
+        if (goiY) { goiY.textContent = "Chưa thấy xong — tải lại trang để xem trạng thái mới."; goiY.hidden = false; }
       });
   }
   setTimeout(hoi, NHIP);

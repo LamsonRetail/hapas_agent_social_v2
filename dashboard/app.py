@@ -392,7 +392,7 @@ def _tao_mau() -> Jinja2Templates:
                        ten_loai=lambda x: CS.TEN_LOAI.get(x, x))
     env.globals.update(TEN_NEN_TANG=NL.TEN_NEN_TANG, LOAI_NGUON=NL.LOAI_NGUON,
                        VAI_TRO=NL.VAI_TRO, TEN_LOAI=CS.TEN_LOAI, LICH_CHAY=LICH_CHAY,
-                       ECHARTS=ECHARTS, ECHARTS_SRI=ECHARTS_SRI)
+                       ECHARTS=ECHARTS, ECHARTS_SRI=ECHARTS_SRI, o_trang=QC.o_trang)
     env.globals["HIEN_DOANH_THU"] = QC.HIEN_DOANH_THU   # 22/10/2026: doanh thu / ROAS tạm ẩn
     return Jinja2Templates(env=env)
 
@@ -1844,7 +1844,11 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
         goi = CP.goi_ngan_sach(snap, khoi, bay_gio)
-        return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi,
+
+        def url_luot(so: int, ma=(du_an or {}).get("ma")) -> str:
+            """-> liên kết trang `so` của Lịch sử lượt quét cho macro `phan_trang` (23/10/2026)."""
+            return _url("/ngan-sach", du_an=ma, trang=so if so > 1 else "") + "#ns-ls"
+        return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi, url_luot=url_luot,
                       goi_mot_phan=not tong_nguoi["la_quan_tri"],
                       dong=[an_chi_tiet(_theo_du_an(tong_nguoi, x), [x], ("sua_boi",))[0]
                             for x in dong], du_an=du_an,
@@ -2919,11 +2923,14 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             hq = _hom_nay() - datetime.timedelta(days=1)
             chinh, phu = QC.chon_kpi(d["xem_tien"])
 
-            def url_trang(cap: str, so: int, loc=loc, b=b) -> str:
-                tc = so if cap == "campaign" else b["trang_campaign"]
-                ta = so if cap == "ad" else b["trang_ad"]
-                return _url("/quang-cao", **{**loc, "tc": tc if tc > 1 else "",
-                                             "ta": ta if ta > 1 else ""}) + "#top"
+            def url_trang(cap: str, loc=loc, b=b):
+                """-> url(p) của bảng `cap` cho macro `phan_trang` (giữ trang của bảng kia)."""
+                def url(so: int) -> str:
+                    tc = so if cap == "campaign" else b["trang_campaign"]
+                    ta = so if cap == "ad" else b["trang_ad"]
+                    return _url("/quang-cao", **{**loc, "tc": tc if tc > 1 else "",
+                                                 "ta": ta if ta > 1 else ""}) + "#top"
+                return url
             ctx |= {"kpi_chinh": [_o_kpi(d, k) for k in chinh], "kpi_phu": [_o_kpi(d, k) for k in phu],
                    "du_lieu_bd": _bd_qc(d), "url_cho": lambda **kw: _url("/quang-cao",
                                                                        **{**loc, **kw}),
@@ -2932,7 +2939,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                              for n in (7, 30, 90)},
                    "sap_xep": [(k, t) for k, t in QC.SAP_BANG.items()
                                if d["xem_tien"] or k not in QC.SAP_BANG_TIEN],
-                   "o_trang": QC.o_trang, "url_trang": url_trang}
+                   "url_trang": url_trang}
         ctx["sheet_ds"] = await _ds_sheet(nguoi["email"])
         if d:
             ctx["sheet_so_ngay"] = (datetime.date.fromisoformat(d["den"])

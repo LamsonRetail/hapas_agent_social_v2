@@ -907,6 +907,31 @@ def test_trang_nguon_de_xuat_co_o_chon_va_thanh_hang_loat_chi_quan_ly():
     assert "data-dx-chon" not in t and "/de-xuat/hang-loat" not in t and "data-dx-nen-tang" in t
 
 
+def test_ui_23_10_nguon_lich_bigquery_phan_trang_chung_va_ghi_chu_trong_nut_i(giua_thang):
+    """23/10/2026 (chủ dự án: "ghi chú không để vào dấu i", bảng dài phân trang một kiểu): bảng
+    Nguồn / Lịch / BigQuery có data-phan-trang (thanh trang chung của chung.js); hàng đợi đề xuất
+    bỏ thanh "← Trước · Trang x/y · Sau →" riêng (nguon.js vẽ PhanTrang.ve vào [data-dx-trang]);
+    lý do dài cắt 2 dòng có title; chữ giải thích của ô biểu mẫu nằm trong nút ⓘ."""
+    _, c, kho = tao(_kho_nhieu_de_xuat(6))
+    _co_nguon(kho)
+    csrf = dang_nhap(c, QL)
+    t = c.get("/nguon").text
+    assert 'data-phan-trang="20" data-phan-trang-nhan="nguồn đang có"' in t
+    assert "data-dx-lui" not in t and "data-dx-toi" not in t and "<div data-dx-trang></div>" in t
+    assert '<span class="cat-chu" title="5 bài">5 bài</span>' in t
+    assert "Hashtag (cách nhau" not in t and "Đang bật (tắt thì" not in t
+    assert "(dán nguyên link cũng được)" not in t and "(bài có từ này bị bỏ" not in t
+    assert t.count('data-goi-y="Cách nhau bằng dấu phẩy, chấm phẩy hoặc #') == 2
+    assert 'data-goi-y="Tắt thì /theodoi và Lịch quét không quét dự án này."' in t
+    assert '<label for="da-sua-hashtag">Hashtag</label>' in t and 'id="da-sua-hashtag"' in t
+    c.post("/lich-quet/them", data={"csrf": csrf, "du_an": "hapas", **LICH_2GIO})
+    t = c.get("/lich-quet?du_an=hapas").text
+    assert 'class="lq-bang" data-phan-trang="20" data-phan-trang-nhan="lịch của dự án"' in t
+    t = c.get("/bigquery").text
+    assert 'data-phan-trang="20" data-phan-trang-nhan="bảng BigQuery"' in t
+    assert 'colspan="5" class="trong"' not in t
+
+
 def test_them_va_sua_du_an():
     _, c, kho = tao()
     csrf = dang_nhap(c, QL)
@@ -2264,7 +2289,7 @@ def test_ngan_sach_moi_nen_tang_mot_dong_phan_mo_rong_vao_nang_cao():
               'name="tk_web_boc"'):
         assert t.index(o) > nc, o
     # Chữ hiện ra + chữ ⓘ của bảng và Nâng cao: không "đường 2", không tên actor.
-    vung = t[t.index('<table class="ns-bang">'):t.index("</details>", nc)]
+    vung = t[t.index('<table class="ns-bang"'):t.index("</details>", nc)]
     chu = (re.sub(r"<[^>]+>", " ", t) + " ".join(re.findall(r'data-goi-y="([^"]*)"', vung))).lower()
     for cam in ("đường 2", "duong2", "mina", "scrapersdelight", "futurizerush", "scraptik",
                 "thedoor", "scrapeforge", "actor"):
@@ -2643,6 +2668,27 @@ def test_trang_chi_so_co_thanh_loc_chung():
         assert can in js, can
     assert "q_bl: x.tu" not in js                        # ngăn từ khoá không còn tìm chữ
     assert 'id="khoi-y-dinh"' in t and 'id="bd-y-dinh"' in t and 'id="yd-top"' in t
+
+
+def test_trang_chi_so_dung_thanh_trang_chung():
+    """23/10/2026 (chủ dự án): mọi danh sách dài của trang Chỉ số dùng MỘT thanh trang (chung.js
+    PhanTrang.ve, kiểu ‹ 1 2 3 … ›) — không còn "← Trước / Sau →", "Tải thêm", "Xem thêm / Thu gọn";
+    ghi chú về video chưa đọc lại được giỏ nằm trong nút "!" thay vì dòng mờ."""
+    _, c, _ = tao()
+    dang_nhap(c, XEM)
+    t = c.get("/").text
+    assert '<div class="cs-ngan__trang" id="chi-tiet-trang"></div>' in t
+    assert 'class="phan-trang" id="chi-tiet-trang"' not in t      # thanh tự vẽ cũ
+    assert 'id="khoi-tu-khoa"' in t and 'id="tk-trang" hidden' in t
+    assert 'class="goi-y goi-y--canh cs-goi-y" id="koc-chua"' in t and "cs-koc__chua" not in t
+    js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
+    for cu in ("← Trước", "Sau →", "MOI_TRANG_BL", "bl-them-nut", "baiMo", "ydMo", "cdMo"):
+        assert cu not in js, cu
+    assert js.count("window.PhanTrang.ve(") >= 3                  # ngăn chi tiết, bình luận, chung
+    for ham in ("veTopBai(d, p)", "veChuDe(d, p)", "veTopYDinh(y, p)", "veBangTu(p)", "taiBl(p)",
+                "napTrang(p)"):
+        assert ham in js, ham
+    assert "ngan.tapTrungTrang = true" in js                      # giữ focus khi đổi trang ngăn
 
 
 # ───────────────────────────── lịch quét tự động (15/10/2026) ─────────────────────────────

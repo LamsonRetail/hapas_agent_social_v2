@@ -23,8 +23,9 @@ import unicodedata
 
 from dashboard import quang_cao as QC
 
-#: Số kênh hiện: mặc định 20, "xem thêm" lên 100 rồi 500 (`kho_qc.KENH_TOI_DA`).
-SO_KENH = (20, 100, 500)
+#: Số kênh tải: mặc định 100 (23/10/2026 — bảng chia trang 20 kênh / trang ở trình duyệt), "Tải đủ"
+#: lên 500 (`kho_qc.KENH_TOI_DA`).
+SO_KENH = (100, 500)
 _CHINH_CHU_TIKTOK = frozenset({"TT_USER", "CUSTOMIZED_USER"})
 NHAN = {"spark": "Spark Ads", "chinh_chu": "Chính chủ", "page": "Page", "instagram": "Instagram"}
 #: Cột số của một dòng (không cột tiền nào khác ngoài chi — `QC.loc_tien` bỏ khi không xem tiền).

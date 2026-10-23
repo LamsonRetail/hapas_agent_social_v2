@@ -67,7 +67,7 @@
   var O_SAC = { tc: "la", ti: "do", tl: "xam", nha: "tim" };
   // Trạng thái hiển thị (không gửi lên máy chủ).
   // sapNguon: cách xếp bảng Nguồn nổi bật — máy chủ xếp (tham số sap_nguon), không theo URL.
-  var tt = { che: "ngay", sacNguon: "bai", tgNguon: "bai", cdNguon: "bai", ntNguon: "bai", tkDang: "may", cdMo: false,
+  var tt = { che: "ngay", sacNguon: "bai", tgNguon: "bai", cdNguon: "bai", ntNguon: "bai", tkDang: "may",
              sapNguon: "thao_luan" };
 
   // ─── bộ lọc CHUNG (đợt 2f): MỘT bộ lọc cho mọi khối + khung chi tiết; luôn khớp URL ───
@@ -199,6 +199,28 @@
     b.type = "button";
     if (xuLy) b.addEventListener("click", xuLy);
     return b;
+  }
+  // ─── thanh trang (23/10/2026, chủ dự án: mọi danh sách dài một kiểu ‹ 1 2 3 … › như mẫu) ───
+  // <nav> do window.PhanTrang.ve (chung.js) dựng — không tự vẽ nút Trước/Sau riêng nữa. Danh sách
+  // đã có đủ ở trình duyệt (bài nổi bật, chủ đề, ý định mua, bảng từ) thì catTrang cắt một trang;
+  // ngăn chi tiết + luồng bình luận hỏi máy chủ từng trang (trang / so_trang của API giữ nguyên).
+  function catTrang(ds, trang, co) {
+    var n = Math.max(1, Math.ceil(ds.length / co));
+    var t = Math.min(Math.max(1, trang | 0), n);
+    return { trang: t, soTrang: n, dau: (t - 1) * co, ds: ds.slice((t - 1) * co, t * co) };
+  }
+  // o: {trang, soTrang, nhan, dem}; chon(p) vẽ lại khối ở trang p (đồng bộ). Sau đó: khối trôi lên
+  // quá đầu màn hình thì cuộn về đầu khối, focus ô trang đang chọn của thanh MỚI (thanh cũ đã bị xoá
+  // cùng khối) — người dùng bàn phím không rơi về đầu trang. Một trang: không vẽ gì (null).
+  function thanhTrang(o, chon, khoi) {
+    if (!window.PhanTrang || !(o.soTrang > 1)) return null;
+    return window.PhanTrang.ve({ trang: o.trang, soTrang: o.soTrang, nhan: o.nhan, dem: o.dem, chon: function (p) {
+      chon(p);
+      if (!khoi) return;
+      if (khoi.getBoundingClientRect().top < 0) khoi.scrollIntoView({ block: "start" });
+      var cur = khoi.querySelector('.phan-trang [aria-current="page"]');
+      if (cur) { try { cur.focus({ preventScroll: true }); } catch (_) { cur.focus(); } }
+    } });
   }
   function treo(fn, ms) {
     var t = null;
@@ -1117,13 +1139,15 @@
       el.appendChild(b);
     });
   }
-  function veTopYDinh(y) {
+  function veTopYDinh(y, trang) {
     var el = $("yd-top");
     xoa(el);
     var ds = y.top_bai || [];
     if (!ds.length) { el.appendChild(tao("div", "trong", "Chưa có bình luận hỏi mua trong khoảng này.")); return; }
-    var GON = 5, max = ds[0].so || 1;
-    (tt.ydMo ? ds : ds.slice(0, GON)).forEach(function (x) {
+    // 23/10/2026 (chủ dự án): thanh trang chung thay "Xem thêm / Thu gọn" — 5 bài một trang (vừa cao
+    // biểu đồ bên cạnh); thanh vẫn so với bài đứng đầu cả danh sách.
+    var max = ds[0].so || 1, ct = catTrang(ds, trang, 5);
+    ct.ds.forEach(function (x) {
       var ten = (x.tac_gia || x.nguon || "Không rõ tác giả") + (x.noi_dung ? " · " + x.noi_dung : "");
       // Món khách dưới bài hỏi nhiều nhất (17/10/2026) — không suy từ hashtag của bài (#tuixach… gắn
       // cả bài set quà, bài KOL).
@@ -1150,23 +1174,17 @@
       b.setAttribute("aria-label", (mon ? mon + " · " : "") + ten + ": " + so(x.so) + " bình luận hỏi mua — bấm để xem");
       el.appendChild(b);
     });
-    if (ds.length > GON) {
-      el.appendChild(nut(tt.ydMo ? "Thu gọn" : "Xem thêm " + (ds.length - GON) + " bài", "nut nut--nhe nut--nho cs-yd__them", function () {
-        tt.ydMo = !tt.ydMo;
-        veTopYDinh(y);
-        var t = $("yd-top").querySelector(".cs-yd__them");
-        if (t) t.focus();
-      }));
-    }
+    var nav = thanhTrang({ trang: ct.trang, soTrang: ct.soTrang, nhan: "bài có nhiều câu hỏi mua nhất",
+                           dem: so(ds.length) + " bài" }, function (p) { veTopYDinh(y, p); }, el);
+    if (nav) el.appendChild(nav);
   }
 
   // ─── sắc thái thảo luận theo chủ đề (hàng 100% kiểu Kompa) ───
-  function veChuDe(d) {
+  function veChuDe(d, trang) {
     var b = d.binh_luan_da_cao, coBl = coBinhLuan(d);
     if (!coBl) tt.cdNguon = "bai";
     nhomNut($("nguon-chu-de"), nutNguon(coBl), tt.cdNguon, function (v) {
       tt.cdNguon = v;
-      tt.cdMo = false;
       giuTapTrung($("nguon-chu-de"), function () { chay("chủ đề", function () { veChuDe(duLieu); }); });
     });
     var laBl = tt.cdNguon === "bl";
@@ -1189,15 +1207,12 @@
       el.appendChild(tao("div", "trong", laBl ? "Chưa có bình luận được gán chủ đề." : "Chưa có bài được gán chủ đề."));
       return;
     }
-    (tt.cdMo ? ds : ds.slice(0, 8)).forEach(function (x) { el.appendChild(hangChuDe(x, don, laBl)); });
-    if (ds.length > 8) {
-      el.appendChild(nut(tt.cdMo ? "Thu gọn" : "Xem thêm " + (ds.length - 8) + " chủ đề", "nut nut--nhe nut--nho cs-cd__them", function () {
-        tt.cdMo = !tt.cdMo;
-        veChuDe(duLieu);
-        var t = $("chu-de").querySelector(".cs-cd__them");
-        if (t) t.focus();
-      }));
-    }
+    // 23/10/2026 (chủ dự án): 8 chủ đề một trang, thanh trang chung (thay "Xem thêm / Thu gọn").
+    var ct = catTrang(ds, trang, 8);
+    ct.ds.forEach(function (x) { el.appendChild(hangChuDe(x, don, laBl)); });
+    var nav = thanhTrang({ trang: ct.trang, soTrang: ct.soTrang, nhan: "sắc thái theo chủ đề",
+                           dem: so(ds.length) + " chủ đề" }, function (p) { veChuDe(d, p); }, el);
+    if (nav) el.appendChild(nav);
   }
   function tenChuDe(cd) { return cd === CHUA ? "Chưa phân loại chủ đề" : cd; }
   function hangChuDe(x, don, laBl) {
@@ -1367,6 +1382,7 @@
     });
     $("tk-may").hidden = !laMay;
     $("tk-bang").hidden = laMay;
+    $("tk-trang").hidden = laMay;
     if (!laMay) { veBangTu(); return; }
     xepMay();
     // Đo chữ phải đúng phông đã nạp: phông chưa sẵn thì xếp lại một lần khi nạp xong.
@@ -1458,13 +1474,17 @@
       el.classList.add("cs-may--san");
     }
   }
-  function veBangTu() {
-    var el = $("tk-bang"), ds = may.ds;
+  // 23/10/2026 (chủ dự án): tới 50 từ — 20 từ một trang (hai cột × 10), thanh trang chung đặt
+  // trong #tk-trang ngay dưới bảng (không lồng <nav> trong <ol>); hạng vẫn đếm trên cả danh sách.
+  function veBangTu(trang) {
+    var el = $("tk-bang"), ds = may.ds, ch = $("tk-trang");
     xoa(el);
+    if (ch) xoa(ch);
     $("tk-ghi-chu").textContent = "";
     if (!ds.length) { el.appendChild(tao("li", "trong", "Chưa có từ khoá nổi bật.")); return; }
-    var max = ds[0].so_bai || 1;
-    ds.forEach(function (x, i) {
+    var max = ds[0].so_bai || 1, ct = catTrang(ds, trang, 20);
+    ct.ds.forEach(function (x, j) {
+      var i = ct.dau + j;
       var li = tao("li");
       var b = nut("", "cs-bang-tu__dong", function () { moTuKhoa(x); });
       b.appendChild(tao("span", "cs-bang-tu__hang", String(i + 1)));
@@ -1478,6 +1498,9 @@
       li.appendChild(b);
       el.appendChild(li);
     });
+    var nav = ch && thanhTrang({ trang: ct.trang, soTrang: ct.soTrang, nhan: "từ khoá nổi bật",
+                                 dem: so(ds.length) + " từ" }, function (p) { veBangTu(p); }, $("khoi-tu-khoa"));
+    if (nav) ch.appendChild(nav);
   }
 
   // ─── phân bố theo nền tảng / loại nguồn (thanh ngang HTML) ───
@@ -1625,7 +1648,9 @@
         var w = tao("div", "cs-o-nguon");
         w.appendChild(anhDaiDien(r.ten));
         var c = tao("div", "cs-o-nguon__chu");
-        c.appendChild(linkAnToan(r.link, r.ten));
+        var tn = linkAnToan(r.link, r.ten);
+        tn.title = r.ten;                                 // tên dài kẹp 2 dòng (CSS) — đủ chữ ở title
+        c.appendChild(tn);
         if (r.dinh_danh && r.dinh_danh !== r.ten) c.appendChild(tao("div", "mo nho", r.dinh_danh));
         w.appendChild(c);
         return w; } },
@@ -1657,17 +1682,21 @@
     ], g.nguon));
   }
 
-  function veTopBai(d) {
+  function veTopBai(d, trang) {
     var el = $("top-bai");
     xoa(el);
     if (!d.top_bai.length) { el.appendChild(tao("div", "trong", "Chưa có bài trong khoảng này.")); return; }
-    var GON = 10, ds = tt.baiMo ? d.top_bai : d.top_bai.slice(0, GON);
+    // 23/10/2026 (chủ dự án): 10 bài một trang, thanh trang chung (thay "Xem thêm / Thu gọn").
+    var ct = catTrang(d.top_bai, trang, 10), ds = ct.ds;
     el.appendChild(bang([
       { ten: "Bài", lay: function (r) {
         var w = tao("div", "cs-o-bai");
         w.appendChild(huyHieuNT(r.nen_tang, false));
         var c = tao("div", "cs-o-bai__chu");
-        c.appendChild(linkAnToan(r.link, r.noi_dung || r.link || "(không có chữ)"));
+        // Chữ bài kẹp 2 dòng (CSS); đủ chữ (cắt 500 ký tự) ở title — mở bài gốc để đọc hết.
+        var lk = linkAnToan(r.link, r.noi_dung || r.link || "(không có chữ)");
+        lk.title = String(r.noi_dung || r.link || "").slice(0, 500);
+        c.appendChild(lk);
         c.appendChild(tao("div", "cs-o-bai__phu", (r.tac_gia || "?") + " · " + (TEN_NT[r.nen_tang] || r.nen_tang) +
                           " · " + ngayDu(r.dang_luc) + (r.loai ? " · " + r.loai : "") +
                           (r.kieu_trang ? " · " + tenG("kieu_trang", r.kieu_trang) : "") + (r.la_pr ? " · PR" : "")));
@@ -1687,14 +1716,9 @@
         b.setAttribute("aria-label", "Đọc " + so(r.bl_da_lay) + " bình luận của bài này");
         return b; } }
     ], ds));
-    if (d.top_bai.length > GON) {
-      el.appendChild(nut(tt.baiMo ? "Thu gọn" : "Xem thêm " + (d.top_bai.length - GON) + " bài", "nut nut--nhe nut--nho cs-them-bai", function () {
-        tt.baiMo = !tt.baiMo;
-        veTopBai(duLieu);
-        var t = $("top-bai").querySelector(".cs-them-bai");
-        if (t) t.focus();
-      }));
-    }
+    var nav = thanhTrang({ trang: ct.trang, soTrang: ct.soTrang, nhan: "bài nổi bật",
+                           dem: so(d.top_bai.length) + " bài" }, function (p) { veTopBai(d, p); }, el);
+    if (nav) el.appendChild(nav);
   }
 
   // ─── bình luận: tổng quan (cột bên) ───
@@ -1757,10 +1781,10 @@
   }
 
   // ─── bình luận: luồng có bộ lọc theo trường (kiểu Kompa) ───
-  var MOI_TRANG_BL = 20;
   // Trường RIÊNG của luồng (hậu tố _bl — AND với bộ lọc chung, không đè nó).
   var MAC_DINH = { q_bl: "", nen_tang_bl: "", nguon_bl: "", sac_thai_bl: "", chu_de_bl: "", loai_bl: "hop_le", sap_xep: "thich" };
-  var bl = { loc: Object.assign({}, MAC_DINH), ten: {}, trang: 0, soTrang: 0, tong: 0, facets: null, ctl: null, daTai: false };
+  var bl = { loc: Object.assign({}, MAC_DINH), ten: {}, trang: 0, soTrang: 0, tong: 0, facets: null, ctl: null, daTai: false,
+             tapTrung: false };
   var TRUONG = [
     { k: "nen_tang_bl", f: "nen_tang", ten: "Nền tảng" },
     { k: "nguon_bl", f: "nguon", ten: "Nguồn", tim: true },
@@ -1975,20 +1999,18 @@
     xoa(dem);
     dem.appendChild(tao("b", "", so(bl.tong)));
     dem.appendChild(chuNode(" bình luận"));
-    veNutThem();
+    veTrangBl();
     veLoaiBl();
   }
-  function veNutThem() {
+  // 23/10/2026 (chủ dự án): thanh trang chung thay nút "Tải thêm N bình luận" — mỗi trang (máy chủ
+  // chia, trang / so_trang) thay hẳn danh sách, không nối dài vô tận.
+  function veTrangBl() {
     var k = $("bl-them-khoi");
     xoa(k);
-    if (!bl.tong) return;
-    var n = $("bl-ds").querySelectorAll(".cs-bl").length;
-    if (bl.trang < bl.soTrang) {
-      var b = nut("Tải thêm " + so(Math.min(MOI_TRANG_BL, bl.tong - n)) + " bình luận", "nut nut--nhe", function () { taiBl(true); });
-      b.id = "bl-them-nut";
-      k.appendChild(b);
-    }
-    k.appendChild(tao("span", "", "Đang hiện " + so(n) + "/" + so(bl.tong) + " bình luận"));
+    if (!bl.tong || !window.PhanTrang || bl.soTrang <= 1) return;
+    k.appendChild(window.PhanTrang.ve({ trang: bl.trang, soTrang: bl.soTrang, nhan: "bình luận",
+                                        dem: so(bl.tong) + " bình luận",
+                                        chon: function (p) { bl.tapTrung = true; taiBl(p); } }));
   }
   function trongLoc() {
     var o = tao("div", "cs-trong-loc");
@@ -1997,27 +2019,22 @@
     if (khacMacDinh()) o.appendChild(nut("Xoá lọc", "nut nut--nhe nut--nho", xoaLoc));
     return o;
   }
-  // them = true: tải trang kế tiếp và nối vào; im = true: làm mới lặng lẽ (không mờ danh sách);
-  // ctlNgoai: AbortController của lượt đổi bộ lọc chung (một bộ huỷ cho mọi khối của lượt đó).
-  function taiBl(them, im, ctlNgoai) {
+  // trangChon: số trang cần tải (false / bỏ trống = trang 1); im = true: làm mới lặng lẽ (không mờ
+  // danh sách); ctlNgoai: AbortController của lượt đổi bộ lọc chung (một bộ huỷ cho mọi khối).
+  function taiBl(trangChon, im, ctlNgoai) {
     var ds = $("bl-ds");
     if (!ds) return;
     if (bl.ctl && bl.ctl !== ctlNgoai) bl.ctl.abort();
     var ctl = bl.ctl = ctlNgoai || taoCtl();
-    var trang = them ? bl.trang + 1 : 1;
-    if (!them) {
-      if (!bl.daTai) {
-        xoa(ds);
-        for (var i = 0; i < 3; i++) ds.appendChild(tao("div", "cs-khung-cho cs-khung-cho--the"));
-      } else if (!im) {
-        ds.classList.add("cs-dang-doi");
-      }
-      ds.setAttribute("aria-busy", "true");
-      if (!im) $("bl-dem").textContent = "Đang tải…";
-    } else {
-      var nt = $("bl-them-nut");
-      if (nt) { nt.disabled = true; nt.textContent = "Đang tải…"; }
+    var trang = trangChon > 1 ? trangChon : 1;
+    if (!bl.daTai) {
+      xoa(ds);
+      for (var i = 0; i < 3; i++) ds.appendChild(tao("div", "cs-khung-cho cs-khung-cho--the"));
+    } else if (!im) {
+      ds.classList.add("cs-dang-doi");
     }
+    ds.setAttribute("aria-busy", "true");
+    if (!im) $("bl-dem").textContent = "Đang tải…";
     var dk = { trang: trang };
     Object.keys(bl.loc).forEach(function (k) { if (bl.loc[k]) dk[k] = bl.loc[k]; });
     goiApi("binh-luan", dk, { signal: ctl.signal, khiBan: function (g) {
@@ -2030,21 +2047,31 @@
         bl.soTrang = j.so_trang;
         bl.tong = j.tong;
         if (j.facets) bl.facets = j.facets;
-        if (!them) xoa(ds);
-        if (!them && !j.binh_luan.length) ds.appendChild(trongLoc());
+        xoa(ds);
+        if (!j.binh_luan.length) ds.appendChild(trongLoc());
         var frag = document.createDocumentFragment();
         j.binh_luan.forEach(function (c) { frag.appendChild(theBinhLuan(c, { danhDauTraLoi: true })); });
         ds.appendChild(frag);
         kiemKep(ds);
         veThanhLoc();
+        // Đổi trang bằng thanh trang: về đầu khối bình luận, focus ô trang đang chọn (thanh mới).
+        if (bl.tapTrung) {
+          bl.tapTrung = false;
+          var k = $("khoi-bl");
+          if (k && k.getBoundingClientRect().top < 0) k.scrollIntoView({ block: "start" });
+          var cur = $("bl-them-khoi").querySelector('[aria-current="page"]');
+          if (cur) { try { cur.focus({ preventScroll: true }); } catch (_) { cur.focus(); } }
+        }
       })
       .catch(function (e) {
         if ((e && e.name === "AbortError") || ctl !== bl.ctl) return;
         var loi = tao("div", "thong-bao thong-bao--loi");
         loi.appendChild(chuNode(((e && e.message) || "Không tải được bình luận.") + " "));
-        loi.appendChild(nut("Thử lại", "cs-nut-chu", function () { taiBl(them); }));
-        if (!them) { xoa(ds); ds.appendChild(loi); $("bl-dem").textContent = ""; }
-        else { veNutThem(); $("bl-them-khoi").appendChild(loi); }
+        loi.appendChild(nut("Thử lại", "cs-nut-chu", function () { taiBl(trang); }));
+        bl.tapTrung = false;
+        xoa(ds);
+        ds.appendChild(loi);
+        $("bl-dem").textContent = "";
       })
       .then(function () {
         if (ctl !== bl.ctl) return;
@@ -2415,19 +2442,17 @@
     ds.forEach(function (x) { frag.appendChild(loai === "bai" ? theBai(x) : theBinhLuan(x, { danhDauTraLoi: true })); });
     than.appendChild(frag);
     kiemKep(than);
-    if (j.so_trang > 1) {
-      var t = nut("← Trước", "nut nut--nhe nut--nho", function () { ngan.tapTrungTrang = true; napTrang(j.trang - 1); });
-      t.disabled = j.trang <= 1;
-      ph.appendChild(t);
-      ph.appendChild(tao("span", "mo nho", "Trang " + j.trang + "/" + j.so_trang));
-      var s = nut("Sau →", "nut nut--nhe nut--nho", function () { ngan.tapTrungTrang = true; napTrang(j.trang + 1); });
-      s.disabled = j.trang >= j.so_trang;
-      ph.appendChild(s);
+    // 23/10/2026 (chủ dự án): thanh trang chung (chung.js) thay hai nút Trước / Sau tự vẽ.
+    if (j.so_trang > 1 && window.PhanTrang) {
+      ph.appendChild(window.PhanTrang.ve({ trang: j.trang, soTrang: j.so_trang,
+        nhan: loai === "bai" ? "bài trong khung chi tiết" : "bình luận trong khung chi tiết",
+        dem: so(j.tong) + (loai === "bai" ? " bài" : " bình luận"),
+        chon: function (p) { ngan.tapTrungTrang = true; napTrang(p); } }));
     }
     than.scrollTop = 0;
     if (ngan.tapTrungTrang) {
       ngan.tapTrungTrang = false;
-      var b = ph.querySelector("button:not([disabled])");
+      var b = ph.querySelector('[aria-current="page"]');
       if (b) b.focus();
     }
   }
@@ -3034,7 +3059,7 @@
     // Kỳ / bộ lọc không có video TikTok External channel và không lọc theo KOC: ẩn cả thẻ cho gọn.
     khoi.hidden = !tong.bai && !x.chua_doc_lai && !G.koc.length;
     chua.hidden = !x.chua_doc_lai;
-    chua.textContent = x.chua_doc_lai ? so(x.chua_doc_lai) + " video chưa đọc lại được giỏ (chưa thử, hoặc hồ sơ không còn thấy video) — không tính vào hai nhóm." : "";
+    if (x.chua_doc_lai) datGoiY(chua, so(x.chua_doc_lai) + " video chưa đọc lại được giỏ (chưa thử, hoặc hồ sơ không còn thấy video) — không tính vào hai nhóm.");
     giuNut(el, function () {
       xoa(el);
       if (!tong.bai) { el.appendChild(tao("div", "trong", "Không có video TikTok External channel khớp bộ lọc.")); return; }
