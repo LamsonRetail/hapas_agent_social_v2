@@ -444,7 +444,7 @@ def test_dong_bo_meta_doc_kenh_va_ten_khi_co_quyen(co_quyen, ten_loi):
 
 # ───────────────────────────── khối trang ─────────────────────────────
 def test_nhan_kenh_tiktok_va_meta():
-    assert KD.loai_kenh("tiktok", "AUTH_CODE", "MATE MADE", None, ["MATEMADE MKT"]) == "spark"
+    assert KD.loai_kenh("tiktok", "AUTH_CODE", "Bé Duy", None, ["MATEMADE MKT"]) == "spark"
     assert KD.loai_kenh("tiktok", "BC_AUTH_TT", "MATE MADE", "matemade.official",
                         ["MATEMADE MKT"]) == "chinh_chu"
     assert KD.loai_kenh("tiktok", "BC_AUTH_TT", "Bé Duy", "beduyzuize",
@@ -454,6 +454,12 @@ def test_nhan_kenh_tiktok_va_meta():
     assert KD.loai_kenh("meta", "page", None, None, []) == "page"
     assert KD.loai_kenh("meta", "instagram", None, None, []) == "instagram"
     assert KD.chu_gon("Đồng HỒ ☘️ x") == "donghox"
+    # 23/10/2026: tên / username bắt đầu bằng thương hiệu nhà → Chính chủ, mọi dạng danh tính
+    assert KD.loai_kenh("tiktok", "BC_AUTH_TT", "HAPAS Jewelry", "hapasjewelry.official",
+                        ["HAPAS - MKT BRANDING"]) == "chinh_chu"
+    assert KD.loai_kenh("tiktok", "AUTH_CODE", "MATE MADE Ơi", "matemadeoi", []) == "chinh_chu"
+    assert KD.loai_kenh("tiktok", "AUTH_CODE", "Thuận và cô ấy", "thuanhapas", []) == "spark"
+    assert KD.loai_kenh("tiktok", "AUTH_CODE", "Ngoc Trinh", "hapas_fan", []) == "chinh_chu"
 
 
 def _kho_so():

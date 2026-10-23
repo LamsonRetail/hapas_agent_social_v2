@@ -11,7 +11,8 @@ Quyết định (22/10/2026):
   • Nhãn TikTok: AUTH_CODE → Spark Ads (bài KOC uỷ quyền bằng mã); TT_USER / CUSTOMIZED_USER → Chính
     chủ; BC_AUTH_TT (tài khoản gắn Business Center — đo 22/10/2026: phần lớn là KOC, cả MATE MADE) →
     Chính chủ khi tên / username trùng tên tài khoản quảng cáo (vd "MATE MADE" ↔ "MATEMADE MKT"),
-    còn lại Spark Ads.
+    còn lại Spark Ads. 23/10/2026: tên / username bắt đầu bằng HAPAS / MATE MADE → Chính chủ (mọi
+    dạng danh tính TikTok).
   • Xếp theo chi tiêu (người không xem tiền: theo hiển thị); độ phủ tính cùng thước đo — người không
     xem tiền không suy ra được tỉ lệ chi.
   • Ad chưa đọc kênh / nền tảng không trả gộp một dòng "Chưa xác định" (luôn ở cuối bảng).
@@ -52,11 +53,20 @@ def chinh_chu(ten: str | None, username: str | None, ten_tk: list[str]) -> bool:
     return False
 
 
+#: 23/10/2026 (chủ dự án): kênh TikTok có tên / username BẮT ĐẦU bằng tên thương hiệu nhà là Chính
+#: chủ dù chạy dạng gì (vd "HAPAS Jewelry", "HAPAS Perfume", @hapasjewelry.official, "MATE MADE Ơi").
+DAU_THUONG_HIEU = ("hapas", "matemade")
+
+
+def ten_nha(ten: str | None, username: str | None) -> bool:
+    return any(chu_gon(x).startswith(DAU_THUONG_HIEU) for x in (ten, username))
+
+
 def loai_kenh(nen_tang: str, loai: str | None, ten: str | None, username: str | None,
               ten_tk: list[str]) -> str:
     if nen_tang == "meta":
         return "instagram" if loai == "instagram" else "page"
-    if loai in _CHINH_CHU_TIKTOK:
+    if loai in _CHINH_CHU_TIKTOK or ten_nha(ten, username):
         return "chinh_chu"
     if loai == "BC_AUTH_TT" and chinh_chu(ten, username, ten_tk):
         return "chinh_chu"

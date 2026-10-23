@@ -147,7 +147,7 @@ def test_ghi_dang_nhap_lan_dau_hai_dong_mot_giao_dich(gia):
 def test_nhat_ky_loc_hanh_dong_va_danh_sach_hanh_dong(gia):
     K.nhat_ky(300, hanh_dong="dang_nhap")
     s, p = gia.gd[-1].lenh[-1]
-    assert "WHERE TRUE AND hanh_dong = %s ORDER BY id DESC LIMIT %s" in s and p == ("dang_nhap", 300)
+    assert "WHERE TRUE AND hanh_dong = %s ORDER BY luc DESC, id DESC LIMIT %s" in s and p == ("dang_nhap", 300)
     K.nhat_ky(50, ["hapas"], ["hapas"], hanh_dong="xoa_nguon")
     s, p = gia.gd[-1].lenh[-1]
     assert "chi_tiet->>'don_vi' = ANY(%s)) AND hanh_dong = %s" in s
