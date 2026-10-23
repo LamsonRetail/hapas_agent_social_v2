@@ -759,6 +759,7 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .phan-trang { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin: 14px 0 0; }
 .phan-trang__ds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .phan-trang__o {
+  position: relative; /* giữ chữ ẩn (.dai-qc__an) trong ô — không nới trang khi bảng cuộn ngang */
   display: inline-grid; place-items: center; min-width: 36px; height: 36px; padding: 0 8px; border-radius: 999px;
   font: 600 13.5px/1 var(--phong); color: var(--chu-phu); text-decoration: none; font-variant-numeric: tabular-nums;
   border: 1px solid var(--ke); background: var(--be-mat); cursor: pointer; transition: background-color .15s ease-out, color .15s ease-out;
