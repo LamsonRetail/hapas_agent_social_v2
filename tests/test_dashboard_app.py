@@ -907,6 +907,31 @@ def test_trang_nguon_de_xuat_co_o_chon_va_thanh_hang_loat_chi_quan_ly():
     assert "data-dx-chon" not in t and "/de-xuat/hang-loat" not in t and "data-dx-nen-tang" in t
 
 
+def test_ui_23_10_nguon_lich_bigquery_phan_trang_chung_va_ghi_chu_trong_nut_i(giua_thang):
+    """23/10/2026 (chủ dự án: "ghi chú không để vào dấu i", bảng dài phân trang một kiểu): bảng
+    Nguồn / Lịch / BigQuery có data-phan-trang (thanh trang chung của chung.js); hàng đợi đề xuất
+    bỏ thanh "← Trước · Trang x/y · Sau →" riêng (nguon.js vẽ PhanTrang.ve vào [data-dx-trang]);
+    lý do dài cắt 2 dòng có title; chữ giải thích của ô biểu mẫu nằm trong nút ⓘ."""
+    _, c, kho = tao(_kho_nhieu_de_xuat(6))
+    _co_nguon(kho)
+    csrf = dang_nhap(c, QL)
+    t = c.get("/nguon").text
+    assert 'data-phan-trang="20" data-phan-trang-nhan="nguồn đang có"' in t
+    assert "data-dx-lui" not in t and "data-dx-toi" not in t and "<div data-dx-trang></div>" in t
+    assert '<span class="cat-chu" title="5 bài">5 bài</span>' in t
+    assert "Hashtag (cách nhau" not in t and "Đang bật (tắt thì" not in t
+    assert "(dán nguyên link cũng được)" not in t and "(bài có từ này bị bỏ" not in t
+    assert t.count('data-goi-y="Cách nhau bằng dấu phẩy, chấm phẩy hoặc #') == 2
+    assert 'data-goi-y="Tắt thì /theodoi và Lịch quét không quét dự án này."' in t
+    assert '<label for="da-sua-hashtag">Hashtag</label>' in t and 'id="da-sua-hashtag"' in t
+    c.post("/lich-quet/them", data={"csrf": csrf, "du_an": "hapas", **LICH_2GIO})
+    t = c.get("/lich-quet?du_an=hapas").text
+    assert 'class="lq-bang" data-phan-trang="20" data-phan-trang-nhan="lịch của dự án"' in t
+    t = c.get("/bigquery").text
+    assert 'data-phan-trang="20" data-phan-trang-nhan="bảng BigQuery"' in t
+    assert 'colspan="5" class="trong"' not in t
+
+
 def test_them_va_sua_du_an():
     _, c, kho = tao()
     csrf = dang_nhap(c, QL)

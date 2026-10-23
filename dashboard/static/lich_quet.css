@@ -10,6 +10,8 @@
 .lq-bang td { vertical-align: middle; }
 .lq-bang .lq-ten { font-weight: 650; }
 .lq-bang tr[aria-current="true"] td { background: var(--nhan-nen); }
+/* 23/10/2026: chi tiết lượt cuối (tới 120 ký tự) cắt 2 dòng dưới nhãn, đủ chữ ở title */
+.lq-chi-tiet { max-width: 280px; margin-top: 2px; overflow-wrap: anywhere; }
 .lq-dong--tat td, .lq-dong--ket_thuc td { color: var(--chu-mo); }
 .lq-dong--tat .lq-ten, .lq-dong--ket_thuc .lq-ten { font-weight: 500; }
 .lq-the-nhuong { background: var(--canh-nen); color: var(--canh); }
