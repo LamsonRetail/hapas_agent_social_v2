@@ -575,7 +575,8 @@ def test_trang_quang_cao_co_khoi_theo_kenh_dang():
     q = "tu=2026-10-12&den=2026-10-18&ben=tat_ca"
     t = c.get(f"/quang-cao?{q}").text
     i = t.index('id="qc-kenh-tieu-de"')
-    assert t.index('id="qc-xh-tieu-de"') < i < t.index('id="qc-top-tieu-de"')
+    # 23/10/2026 (chủ dự án): sau "Chiến dịch và quảng cáo", trước "Khán giả"
+    assert t.index('id="qc-xh-tieu-de"') < t.index('id="qc-top-tieu-de"') < i < t.index('id="qc-kg-tieu-de"')
     assert "Theo kênh đăng" in t and "Chính chủ" in t and "Spark Ads" in t
     assert "MATE MADE" in t and "&lt;b&gt;Nhật Hạ&lt;/b&gt;" in t and "<b>Nhật Hạ</b>" not in t
     assert "Chưa xác định" in t and "đã biết kênh" in t and "kenh.css" in t
