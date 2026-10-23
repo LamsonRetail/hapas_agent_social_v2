@@ -24,8 +24,10 @@
     <button type="button" class="goi-y" data-goi-y="Bảng nhỏ nạp lại toàn bộ; bảng lớn chỉ đẩy dòng mới/sửa sau mốc.">i</button>
     <span class="muc__phai muc__phu">{{ tt.bang|length }} bảng</span>
   </div>
+  {% if tt.bang %}
+  {#- 23/10/2026 (chủ dự án: bảng dài phân trang một kiểu): 20 bảng một trang, thanh trang chung (chung.js). #}
   <div class="cuon-ngang">
-  <table>
+  <table data-phan-trang="20" data-phan-trang-nhan="bảng BigQuery">
     <thead><tr><th>Bảng</th><th>Mốc đã đẩy tới</th><th>Lần chạy cuối</th><th class="so">Số dòng lần cuối</th><th>Lỗi / cảnh báo</th></tr></thead>
     <tbody>
     {% for b in tt.bang %}
@@ -36,11 +38,12 @@
         <td class="so">{{ b.so_dong|so_vn if b.so_dong is not none else '—' }}</td>
         <td class="nho">{% if b.loi %}<span class="the the--loi">lỗi</span> <span class="cat-chu" title="{{ b.loi }}">{{ b.loi }}</span>{% elif b.canh_bao %}<span class="the the--canh">cảnh báo</span> <span class="cat-chu" title="{{ b.canh_bao }}">{{ b.canh_bao }}</span>{% else %}<span class="mo">—</span>{% endif %}</td>
       </tr>
-    {% else %}
-      <tr><td colspan="5" class="trong">Chưa có thông tin đồng bộ.</td></tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
+  {% else %}
+  <p class="trong">Chưa có thông tin đồng bộ.</p>
+  {% endif %}
 </section>
 {% endblock %}

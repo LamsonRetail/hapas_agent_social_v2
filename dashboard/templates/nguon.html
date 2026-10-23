@@ -6,6 +6,7 @@
 {% set ql = nguoi.vai_tro == 'quan_ly' %}
 {% set O_LOAI = {'kenh_nha': 'tim', 'kol': 'hong', 'page': 'xanh', 'group': 'la', 'bao': 'cam', 'khac': 'xam'} %}
 {% set muc = namespace(so=0) %}
+{% set GOI_Y_HASHTAG %}<button type="button" class="goi-y" data-goi-y="Cách nhau bằng dấu phẩy, chấm phẩy hoặc #; dấu cách trong một hashtag được nối lại (vd Túi HAPAS = #tuihapas). Để trống = Mark tự lấy từ từ khoá.">i</button>{% endset %}
 <script type="application/json" id="chi-phi-hang-so">{{ chi_phi_js|json_script }}</script>
 <div class="dau-muc">
   <div class="dau-muc__chu">
@@ -64,10 +65,14 @@
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
       <label class="o">Tên dự án <input type="text" name="ten" value="{{ du_an.ten }}" required maxlength="200"></label>
       <label class="o rong">Từ khoá (cách nhau bằng dấu phẩy) <input type="text" name="tu_khoa" value="{{ du_an.tu_khoa|join(', ') }}" required></label>
-      <label class="o rong">Hashtag (cách nhau bằng dấu phẩy, chấm phẩy hoặc #; dấu cách trong một hashtag được nối lại, vd Túi HAPAS = #tuihapas; để trống = Mark tự lấy từ từ khoá) <input type="text" name="hashtag" value="{% for x in du_an.hashtag or [] %}#{{ x }}{% if not loop.last %}, {% endif %}{% endfor %}" maxlength="3000" placeholder="vd #hapas, #yeutudieunhonhat" autocomplete="off"></label>
-      <label class="o rong">Từ loại trừ (bài có từ này bị bỏ, không qua AI) <input type="text" name="tu_loai_tru" value="{{ du_an.tu_loai_tru|join(', ') }}"></label>
+      {#- 23/10/2026 (chủ dự án: "ghi chú không để vào dấu i"): chữ giải thích của ô nằm trong nút ⓘ cạnh
+          nhãn; nút đứng ngoài <label> để tên ô cho trình đọc màn hình vẫn ngắn. #}
+      <div class="ng-truong rong"><span class="ng-truong__nhan"><label for="da-sua-hashtag">Hashtag</label>{{ GOI_Y_HASHTAG }}</span>
+        <input id="da-sua-hashtag" type="text" name="hashtag" value="{% for x in du_an.hashtag or [] %}#{{ x }}{% if not loop.last %}, {% endif %}{% endfor %}" maxlength="3000" placeholder="vd #hapas, #yeutudieunhonhat" autocomplete="off"></div>
+      <div class="ng-truong rong"><span class="ng-truong__nhan"><label for="da-sua-loai-tru">Từ loại trừ</label><button type="button" class="goi-y" data-goi-y="Bài có từ này bị bỏ, không qua AI. Cách nhau bằng dấu phẩy.">i</button></span>
+        <input id="da-sua-loai-tru" type="text" name="tu_loai_tru" value="{{ du_an.tu_loai_tru|join(', ') }}"></div>
       <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000">{{ du_an.boi_canh }}</textarea></label>
-      <label class="o"><span><input type="checkbox" name="dang_bat" value="1"{% if du_an.dang_bat %} checked{% endif %}> Đang bật (tắt thì /theodoi và Lịch quét không quét)</span></label>
+      <div class="ng-chon"><label><input type="checkbox" name="dang_bat" value="1"{% if du_an.dang_bat %} checked{% endif %}> Đang bật</label><button type="button" class="goi-y" data-goi-y="Tắt thì /theodoi và Lịch quét không quét dự án này.">i</button></div>
       {% if don_vi_ds %}{# chỉ quản trị viên: chuyển dự án sang bên khác (đổi ai xem được dữ liệu) #}
       <label class="o">Bên sở hữu
         <select name="don_vi">{% for b in don_vi_ds %}<option value="{{ b.ma }}"{% if b.ma == du_an.don_vi %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}</select></label>
@@ -88,7 +93,8 @@
   </div>
   {% if nguon %}
   <div class="cuon-ngang">
-  <table class="ng-bang">
+  {#- 23/10/2026 (chủ dự án: bảng dài phân trang một kiểu): 20 nguồn một trang, thanh trang chung (chung.js). #}
+  <table class="ng-bang" data-phan-trang="20" data-phan-trang-nhan="nguồn đang có">
     <thead><tr>
       <th>Nguồn</th><th>Loại</th><th>Nhãn</th><th>Trạng thái</th><th class="so">Chu kỳ</th><th class="so">Bài/lần</th>
       <th class="so" title="Theo cấu hình, 30 ngày, chưa gồm phí khởi động actor dùng chung">≈ USD/tháng</th>
@@ -107,7 +113,7 @@
         <td class="so">{{ n.so_bai_moi_lan }}{% if n.so_bai_co_gian %}<div class="mo nho" data-o="co-gian" title="Mark co số bài theo nhịp đăng: {{ n.ly_do_co_gian }}; lấy đủ {{ n.so_bai_moi_lan }} bài mỗi {{ n.ngay_day_du }} ngày (làm mới số liệu bài cũ) và khi đang chiến dịch.">co ~{{ n.so_bai_co_gian }}/lần</div>{% endif %}</td>
         <td class="so">{% if n.trang_thai == 'dang_theo_doi' %}{{ n.usd_thang|usd_vn(3) }}{% else %}<span class="mo" title="Tạm dừng: không tốn tiền; tiếp tục thì ≈ {{ n.usd_thang|usd_vn(3) }}">0</span>{% endif %}</td>
         <td class="nho">{{ n.quet_cuoi|gio_vn if n.quet_cuoi else 'chưa quét' }}</td>
-        <td class="nho">{% if n.loi_cuoi %}<span class="the the--loi">lỗi</span> {{ n.loi_cuoi }}<div class="mo">{{ n.loi_luc|gio_vn }}</div>{% else %}<span class="mo">—</span>{% endif %}</td>
+        <td class="nho">{% if n.loi_cuoi %}<span class="the the--loi">lỗi</span> <span class="cat-chu" title="{{ n.loi_cuoi }}">{{ n.loi_cuoi }}</span><div class="mo">{{ n.loi_luc|gio_vn }}</div>{% else %}<span class="mo">—</span>{% endif %}</td>
         <td class="nho">{{ {'dashboard': 'tay', 'de_xuat': 'đề xuất', 'nhap_file': 'nhập tệp'}.get(n.them_qua, n.them_qua) }}<div class="mo">{{ n.them_boi or '' }}</div></td>
         {% if ql %}
         <td>
@@ -164,7 +170,8 @@
     <input type="hidden" name="du_an" value="{{ du_an.ma }}">
     <label class="o">Nền tảng
       <select name="nen_tang" required>{% for k, v in TEN_NEN_TANG.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
-    <label class="o rong">Tài khoản hoặc link trang (dán nguyên link cũng được) <input type="text" name="dinh_danh" required maxlength="500" placeholder="vd @hapas.official, youtube.com/@hapas, facebook.com/hapasvn"></label>
+    <div class="ng-truong rong"><span class="ng-truong__nhan"><label for="ng-them-dinh-danh">Tài khoản hoặc link trang</label><button type="button" class="goi-y" data-goi-y="Dán nguyên link trang cũng được — Mark tự tách tài khoản.">i</button></span>
+      <input id="ng-them-dinh-danh" type="text" name="dinh_danh" required maxlength="500" placeholder="vd @hapas.official, youtube.com/@hapas, facebook.com/hapasvn"></div>
     <label class="o">Tên hiển thị (tuỳ chọn) <input type="text" name="ten" maxlength="200"></label>
     <label class="o">Loại
       <select name="loai">{% for k, v in LOAI_NGUON.items() %}<option value="{{ k }}"{% if k == 'kol' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
@@ -212,7 +219,7 @@
         <td><div class="ng-nguon"><span class="the the--nt-{{ x.nen_tang }}">{{ x.nen_tang|ten_nen_tang }}</span>
           <div class="ng-nguon__chu">{% set lk = x.link|link_an_toan %}{% if lk %}<a href="{{ lk }}" target="_blank" rel="noopener noreferrer">{{ x.ten or x.dinh_danh }}</a>{% else %}<b>{{ x.ten or x.dinh_danh }}</b>{% endif %}
           <div class="mo nho">{{ x.dinh_danh }}</div></div></div></td>
-        <td class="nho">{{ x.ly_do }}</td>
+        <td class="nho dx-ly-do"><span class="cat-chu" title="{{ x.ly_do }}">{{ x.ly_do }}</span></td>
         <td class="so">{{ x.so_bai|so_vn }}</td>
         <td class="so">{{ x.thao_luan|so_vn }}</td>
         <td class="nho">{{ x.de_xuat_luc|gio_vn }}</td>
@@ -236,11 +243,9 @@
     </tbody>
   </table>
   </div>
-  <div class="phan-trang" data-dx-trang hidden>
-    <button type="button" class="nut nut--nhe nut--nho" data-dx-lui>← Trước</button>
-    <span class="mo nho" data-dx-trang-so></span>
-    <button type="button" class="nut nut--nhe nut--nho" data-dx-toi>Sau →</button>
-  </div>
+  {#- 23/10/2026 (chủ dự án: một kiểu thanh trang): nguon.js vẽ thanh trang chung (PhanTrang.ve) vào đây —
+      tự phân trang vì còn lọc, sắp xếp và "chọn tất cả trên trang"; lý do dài cắt 2 dòng, đủ chữ ở title. #}
+  <div data-dx-trang></div>
   {% if ql %}
   {#- Thanh hàng loạt: ô chọn không có `name` — nguon.js gom id đã chọn vào ô ẩn `ids` lúc gửi (một
       trường, không vướng trần 200 trường của biểu mẫu). Máy chủ xử lý TỪNG đề xuất như nút một dòng
@@ -287,7 +292,8 @@
       <label class="o">Mã dự án (gõ sau /theodoi) <input type="text" name="ma" required maxlength="40" pattern="[a-z0-9][a-z0-9_\-]{1,39}" placeholder="vd hapas"></label>
       <label class="o">Tên dự án <input type="text" name="ten" required maxlength="200"></label>
       <label class="o rong">Từ khoá (cách nhau bằng dấu phẩy) <input type="text" name="tu_khoa" required placeholder="vd hapas, túi hapas"></label>
-      <label class="o rong">Hashtag (tuỳ chọn; cách nhau bằng dấu phẩy, chấm phẩy hoặc #; dấu cách trong một hashtag được nối lại; để trống = Mark tự lấy từ từ khoá) <input type="text" name="hashtag" maxlength="3000" placeholder="vd #hapas, #yeutudieunhonhat" autocomplete="off"></label>
+      <div class="ng-truong rong"><span class="ng-truong__nhan"><label for="da-moi-hashtag">Hashtag (tuỳ chọn)</label>{{ GOI_Y_HASHTAG }}</span>
+        <input id="da-moi-hashtag" type="text" name="hashtag" maxlength="3000" placeholder="vd #hapas, #yeutudieunhonhat" autocomplete="off"></div>
       <label class="o rong">Từ loại trừ (tuỳ chọn) <input type="text" name="tu_loai_tru"></label>
       <label class="o rong">Bối cảnh brand (cho bước AI phân xử) <textarea name="boi_canh" maxlength="2000" placeholder="vd HAPAS — thương hiệu túi xách, trang sức Việt Nam"></textarea></label>
       <label class="o"><span><input type="checkbox" name="dang_bat" value="1" checked> Bật ngay</span></label>

@@ -41,7 +41,9 @@
   </div>
   {% if lich %}
   <div class="cuon-ngang">
-  <table class="lq-bang">
+  {#- 23/10/2026 (chủ dự án: bảng dài phân trang một kiểu): 20 lịch một trang, thanh trang chung (chung.js);
+      chi tiết lượt cuối dài cắt 2 dòng, đủ chữ ở title. #}
+  <table class="lq-bang" data-phan-trang="20" data-phan-trang-nhan="lịch của dự án">
     <thead><tr><th>Lịch</th><th>Trạng thái</th><th>Lần chạy kế</th><th>Lần chạy cuối</th><th class="so">≈ USD/30 ngày</th>{% if ql %}<th>Thao tác</th>{% endif %}</tr></thead>
     <tbody>
     {% for x in lich %}
@@ -56,7 +58,7 @@
           {% else %}{{ x.ke_chu }}{% if x.ke_con %}<div class="mo nho">{{ x.ke_con }}</div>{% endif %}{% endif %}
         </td>
         <td data-nhan="Lần chạy cuối">
-          {% if x.kq %}<span class="the {{ x.kq.lop }}" title="{{ x.kq.title }}">{{ x.kq.nhan }}</span> <span class="nho">{{ x.kq.chi_tiet }}</span>
+          {% if x.kq %}<span class="the {{ x.kq.lop }}" title="{{ x.kq.title }}">{{ x.kq.nhan }}</span>{% if x.kq.chi_tiet %} <span class="nho cat-chu lq-chi-tiet" title="{{ x.kq.title or x.kq.chi_tiet }}">{{ x.kq.chi_tiet }}</span>{% endif %}
           <div class="mo nho">{{ x.kq.luc|gio_vn }}{% if x.so_lan_chay %} · đã chạy {{ x.so_lan_chay|so_vn }} lượt{% endif %}</div>
           {% else %}<span class="mo">chưa chạy</span>{% endif %}
         </td>

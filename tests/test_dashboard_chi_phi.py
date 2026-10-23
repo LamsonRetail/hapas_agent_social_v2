@@ -179,6 +179,50 @@ def test_nguon_js_duyet_hang_loat_khop_python(tmp_path, so_bai, chu_ky):
     assert uoc == f"≈ {tong:.2f} USD/tháng thêm".replace(".", ","), (uoc, tong)
 
 
+def test_nguon_js_de_xuat_dung_thanh_trang_chung(tmp_path):
+    """23/10/2026 (chủ dự án: một kiểu thanh trang): hàng đợi đề xuất vẽ PhanTrang.ve (chung.js)
+    vào [data-dx-trang] — 50 dòng một trang, bấm số trang thì hiện đúng dòng của trang đó; ô
+    "chọn tất cả" chỉ chọn các dòng ĐANG XEM. Chạy nguon.js thật bằng node với DOM giả."""
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("máy không có node")
+    js = (Path(__file__).resolve().parents[1] / "dashboard" / "static" / "nguon.js").read_text(
+        encoding="utf-8")
+    vo = ("var nghe = {}, o = {}, ve = [];\n"
+          "function q(s) { return o[s] || (o[s] = {textContent: '', hidden: false, checked: false,\n"
+          "  disabled: false, setAttribute: function () {}, querySelector: function () { return null; },\n"
+          "  replaceChildren: function () {}, addEventListener: function (e, f) { nghe[s] = f; }}); }\n"
+          "var dong = []; for (var i = 0; i < 60; i++) (function (i) { var chk = {checked: false};\n"
+          "  var a = {'data-dx': String(100 + i), 'data-nt': 'tiktok', 'data-thu-tu': String(i)};\n"
+          "  dong.push({hidden: false, getAttribute: function (k) { return k in a ? a[k] : null; },\n"
+          "             querySelector: function () { return chk; }}); })(i);\n"
+          "var than = {querySelectorAll: function () { return dong; }, appendChild: function () {},\n"
+          "  addEventListener: function () {}, closest: function () { return null; },\n"
+          "  getBoundingClientRect: function () { return {top: 10}; }};\n"
+          "var thanh = {hidden: true, elements: {so_bai_moi_lan: {value: '5'}, chu_ky_ngay: {value: '1'}},\n"
+          "  querySelector: q, querySelectorAll: function () { return []; },\n"
+          "  classList: {toggle: function () {}}, setAttribute: function () {}, addEventListener: function () {}};\n"
+          "globalThis.window = {PhanTrang: {ve: function (x) { ve.push(x); return {}; }}};\n"
+          "globalThis.document = {getElementById: function () { return {textContent: '{}'}; },\n"
+          "  querySelectorAll: function () { return []; },\n"
+          "  querySelector: function (s) { return s === '[data-dx-than]' ? than : s === '[data-dx-thanh]' ?\n"
+          "    thanh : s === '[data-dx-trang]' || s === '[data-dx-chon-trang]' ? q(s) : null; }};\n"
+          + js + "\nvar dau = ve[ve.length - 1]; dau.chon(2); var sau = ve[ve.length - 1];\n"
+          "var oT = q('[data-dx-chon-trang]'); oT.checked = true; nghe['[data-dx-chon-trang]']();\n"
+          "console.log(JSON.stringify([dau.trang, dau.soTrang, dau.dem, sau.trang,\n"
+          "  dong.filter(function (r) { return !r.hidden; }).length, dong[55].hidden, dong[0].hidden,\n"
+          "  q('[data-dx-so-chon]').textContent]));\n")
+    f = tmp_path / "nguon_trang.js"
+    f.write_text(vo, encoding="utf-8")
+    ra = subprocess.run([node, str(f)], capture_output=True, text=True, encoding="utf-8")
+    assert ra.returncode == 0, ra.stderr
+    assert json.loads(ra.stdout) == [1, 2, "60 đề xuất", 2, 10, False, True, 10]
+
+
 def _nguon(i, p, so_bai, chu_ky, tt="dang_theo_doi"):
     return {"id": i, "nen_tang": p, "dinh_danh": f"n{i}", "ten": f"Nguồn {i}",
             "so_bai_moi_lan": so_bai, "chu_ky_ngay": chu_ky, "trang_thai": tt}

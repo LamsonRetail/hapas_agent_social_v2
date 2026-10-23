@@ -390,6 +390,13 @@ details[open] > summary { margin-bottom: 12px; }
 .ng-bang td { vertical-align: middle; }
 .ng-bang td:last-child .cum-nut { flex-wrap: nowrap; }
 .ng-bang td.nho { min-width: 92px; }
+/* 23/10/2026: ô biểu mẫu có nút ⓘ cạnh nhãn (giống label.o; nút đứng ngoài <label>) */
+.ng-truong { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--chu); }
+.ng-truong__nhan, .ng-chon { display: flex; align-items: center; gap: 6px; }
+.ng-chon { font-size: 12.5px; font-weight: 600; color: var(--chu); }
+.ng-chon input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: -2px; }
+.ng-bang .cat-chu, .dx-ly-do .cat-chu { max-width: 320px; overflow-wrap: anywhere; }
+.dx-ly-do { min-width: 180px; }
 /* Đề xuất chờ duyệt (18/10/2026): lọc + chọn nhiều + thanh duyệt hàng loạt dính đáy khung nhìn */
 .dx-loc { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; margin-bottom: 10px; }
 .dx-o { flex-direction: row !important; align-items: center; gap: 8px !important; font-weight: 600; white-space: nowrap; }
