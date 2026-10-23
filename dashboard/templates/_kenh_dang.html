@@ -6,7 +6,12 @@
     23/10/2026 (chủ dự án: ghi chú vào dấu i, bảng dài một kiểu thanh trang): 20 kênh một trang bằng thanh
     trang chung (chung.js, data-phan-trang); "Chưa xác định" nằm ở tfoot nên trang nào cũng thấy. Máy chủ
     tải 100 / 500 kênh đầu (`kenh_so`) — còn kênh chưa tải thì nút "Tải đủ" ở đầu mục thay đoạn chú
-    thích cuối bảng; dòng phụ (IG · tài khoản · số quảng cáo) gọn một dòng, đủ chữ ở title. #}
+    thích cuối bảng; dòng phụ (IG · tài khoản · số quảng cáo) gọn một dòng, đủ chữ ở title.
+    23/10/2026 (chủ dự án: "thêm filter giống phần chiến dịch và quảng cáo"): tìm tên (kt), lọc loại
+    (kl), xếp theo mọi cột (ks / kc, bấm tiêu đề cột như bảng chiến dịch), chia trang ở MÁY CHỦ (kp) trên
+    ĐỦ kênh — bỏ "Tải đủ". Cùng một tài khoản TikTok chạy dưới nhiều danh tính gộp một dòng (kho_qc). #}
+{% from "_phan_trang.html" import phan_trang with context %}
+{% macro th_kenh(ma) %}{% set lk = d.kenh.loc %}{% set nhan = SAP_KENH[ma] %}{% set dang = ma == lk.sap %}{% set tang = dang and lk.chieu == 'tang' %}<th class="so"{% if dang %} aria-sort="{{ 'ascending' if tang else 'descending' }}"{% endif %}><a class="qc-sap{% if dang %} qc-sap--dang{% endif %}" href="{{ url_kenh(ks=('' if ma == lk.mac_dinh else ma), kc=('tang' if dang and not tang else '')) }}" title="Xếp theo {{ nhan }}, {{ 'thấp → cao' if dang and not tang else 'cao → thấp' }}">{{ nhan }}<span class="qc-sap__mui" aria-hidden="true">{{ ('▲' if tang else '▼') if dang else '↕' }}</span></a></th>{% endmacro %}
 {% set kd = d.kenh %}
 {% if kd %}
 {% set theo_chi = kd.do_phu_theo == 'chi' %}
@@ -14,22 +19,39 @@
 <section class="the-khoi cach-duoi qc-kenh" id="kenh" aria-labelledby="qc-kenh-tieu-de">
   <div class="muc">
     <h2 class="muc__ten" id="qc-kenh-tieu-de">Theo kênh đăng</h2>
-    <button type="button" class="goi-y" data-goi-y="Kênh đăng là danh tính quảng cáo chạy dưới tên. TikTok: tài khoản chính chủ hoặc tài khoản KOC cho phép chạy bài (Spark Ads). Meta: Trang Facebook đứng tên quảng cáo; Instagram đi kèm ghi ở dòng phụ. {% if kd.do_phu is not none %}{{ kd.do_phu|pt_vn }} {{ 'chi tiêu' if theo_chi else 'lượt hiển thị' }} trong phạm vi đang lọc đã biết kênh; {% endif %}quảng cáo chưa xác định kênh gộp vào “Chưa xác định” (kênh đọc mỗi sáng cùng lượt đồng bộ, quảng cáo mới có kênh từ hôm sau). Một kênh chạy ở nhiều tài khoản được cộng chung. Bảng xếp theo {{ 'chi tiêu' if theo_chi else 'lượt hiển thị' }}, 20 kênh một trang{% if kd.tong > kd.rows|length %}; đang tải {{ kd.rows|length|so_vn }} / {{ kd.tong|so_vn }} kênh đầu{% endif %}.">i</button>
-    {% set toi = 100 if kd.tong <= 100 and kd.so < 100 else 500 %}
-    {% if (kd.do_phu is not none) or (kd.so_tiep and not kd.loi) %}<span class="muc__phai muc__phu">{% if kd.do_phu is not none %}<span>{{ kd.do_phu|pt_vn }} {{ 'chi tiêu' if theo_chi else 'hiển thị' }} đã biết kênh</span>{% endif %}
-      {%- if kd.so_tiep and not kd.loi %}<a class="qc-kenh__them" href="{{ url_cho(kenh_so=toi) }}#kenh">{{ ('Tải đủ ' ~ kd.tong|so_vn ~ ' kênh') if kd.tong <= toi else ('Tải ' ~ toi ~ ' / ' ~ kd.tong|so_vn ~ ' kênh') }}</a>{% endif %}</span>{% endif %}
+    <button type="button" class="goi-y" data-goi-y="Kênh đăng là danh tính quảng cáo chạy dưới tên. TikTok: tài khoản chính chủ hoặc tài khoản KOC cho phép chạy bài (Spark Ads). Meta: Trang Facebook đứng tên quảng cáo; Instagram đi kèm ghi ở dòng phụ. {% if kd.do_phu is not none %}{{ kd.do_phu|pt_vn }} {{ 'chi tiêu' if theo_chi else 'lượt hiển thị' }} trong phạm vi đang lọc đã biết kênh; {% endif %}quảng cáo chưa xác định kênh gộp vào “Chưa xác định” (kênh đọc mỗi sáng cùng lượt đồng bộ, quảng cáo mới có kênh từ hôm sau). Một kênh chạy ở nhiều tài khoản quảng cáo, hoặc cùng một tài khoản TikTok chạy dưới nhiều cách cấp quyền (gắn thẳng tài khoản quảng cáo / qua Business Center), được cộng chung một dòng. Tìm theo tên kênh, @username hoặc tên tài khoản quảng cáo (không cần gõ dấu); bấm tiêu đề cột để xếp, bấm lại để đổi chiều. 20 kênh một trang.">i</button>
+    {% if kd.do_phu is not none %}<span class="muc__phai muc__phu">{{ kd.do_phu|pt_vn }} {{ 'chi tiêu' if theo_chi else 'hiển thị' }} đã biết kênh</span>{% endif %}
   </div>
   {% if kd.loi %}
   <p class="trong">{{ kd.loi }}</p>
   {% else %}
+  {% set lk = kd.loc %}
+  {% set co_loc_k = lk.tim or lk.loai or lk.sap != lk.mac_dinh or lk.chieu == 'tang' %}
+  <form class="qc-bang-loc qc-kenh-loc" method="get" action="/quang-cao#kenh" role="search" aria-label="Lọc và sắp xếp bảng kênh đăng">
+    {% for k in ('ben', 'nen_tang', 'tu', 'den') if d[k] %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
+    {% for x in d.tk_ds %}<input type="hidden" name="tk" value="{{ x }}">{% endfor %}
+    {% for k, v in (('tim', d.bang.tim), ('cd', d.bang.cd), ('sap', d.sap if d.sap != (sap_xep|first)[0] else ''), ('chieu', 'tang' if d.bang.chieu == 'tang' else '')) if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <label class="o qc-bang-loc__tim">Tìm kênh
+      <input type="search" name="kt" value="{{ lk.tim }}" maxlength="{{ TIM_TOI_DA }}" placeholder="Tên kênh, @username, tài khoản QC" autocomplete="off">
+    </label>
+    <label class="o">Loại
+      <select name="kl" data-tu-gui><option value="">Mọi loại</option>{% for ma, ten, so in kd.cac_loai %}<option value="{{ ma }}"{% if ma == lk.loai %} selected{% endif %}>{{ ten }} ({{ so|so_vn }})</option>{% endfor %}</select>
+    </label>
+    <label class="o">Xếp theo
+      <select name="ks" data-tu-gui>{% for ma, ten in SAP_KENH.items() if d.xem_tien or ma != 'chi' %}<option value="{{ ma }}"{% if ma == lk.sap %} selected{% endif %}>{{ ten }}</option>{% endfor %}</select>
+    </label>
+    <label class="o">Thứ tự
+      <select name="kc" data-tu-gui><option value="giam"{% if lk.chieu != 'tang' %} selected{% endif %}>Cao → thấp</option><option value="tang"{% if lk.chieu == 'tang' %} selected{% endif %}>Thấp → cao</option></select>
+    </label>
+    <button class="nut" type="submit">Lọc</button>
+    {% if co_loc_k %}<a class="qc-bang-loc__bo" href="{{ url_kenh(kt='', kl='', ks='', kc='') }}">Bỏ lọc</a>{% endif %}
+  </form>
+  {% if lk.tim or lk.loai %}<p class="qc-h3__dem qc-kenh__dem">{{ kd.tong_khop|so_vn }} / {{ kd.tong|so_vn }} kênh khớp</p>{% endif %}
   <div class="cuon-ngang qc-bang-khung">
-  <table class="qc-bang qc-kenh__bang" data-phan-trang="20" data-phan-trang-nhan="kênh đăng">
+  <table class="qc-bang qc-kenh__bang">
     <thead><tr>
       <th>Kênh</th>
-      {#- xếp cố định (chi / hiển thị): cùng mũi tên với cột đang xếp của bảng chiến dịch (.qc-sap--dang) #}
-      {% if d.xem_tien %}<th class="so" aria-sort="descending"><span class="qc-sap qc-sap--dang">Chi<span class="qc-sap__mui" aria-hidden="true">▼</span></span></th>{% endif %}
-      <th class="so"{% if not d.xem_tien %} aria-sort="descending"{% endif %}>{% if not d.xem_tien %}<span class="qc-sap qc-sap--dang">Hiển thị<span class="qc-sap__mui" aria-hidden="true">▼</span></span>{% else %}Hiển thị{% endif %}</th>
-      <th class="so">Click</th><th class="so">View video</th><th class="so">Tương tác</th><th class="so">Follow</th>
+      {% for ma in ('chi', 'hien_thi', 'click', 'view_video', 'tuong_tac', 'follow') if d.xem_tien or ma != 'chi' %}{{ th_kenh(ma) }}{% endfor %}
     </tr></thead>
     <tbody>
     {% for r in kd.rows %}
@@ -47,7 +69,7 @@
       </tr>
     {% endfor %}
     {% if not kd.rows and not kd.chua_ro %}
-      <tr><td colspan="{{ 7 if d.xem_tien else 6 }}" class="trong">Không có quảng cáo nào chạy trong khoảng này.</td></tr>
+      <tr><td colspan="{{ 7 if d.xem_tien else 6 }}" class="trong">{% if kd.loc.tim or kd.loc.loai %}Không có kênh nào khớp bộ lọc.{% else %}Không có quảng cáo nào chạy trong khoảng này.{% endif %}</td></tr>
     {% endif %}
     </tbody>
     {% if kd.chua_ro %}
@@ -68,6 +90,7 @@
     {% endif %}
   </table>
   </div>
+  {{ phan_trang(kd.trang, kd.so_trang, url_trang_kenh, 'kênh đăng', kd.tong_khop|so_vn ~ ' kênh') }}
   {% endif %}
 </section>
 {% endif %}

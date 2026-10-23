@@ -23,9 +23,14 @@ import unicodedata
 
 from dashboard import quang_cao as QC
 
-#: Số kênh tải: mặc định 100 (23/10/2026 — bảng chia trang 20 kênh / trang ở trình duyệt), "Tải đủ"
-#: lên 500 (`kho_qc.KENH_TOI_DA`).
-SO_KENH = (100, 500)
+#: 23/10/2026 (chủ dự án: "thêm filter giống phần chiến dịch và quảng cáo"): đọc ĐỦ kênh của phạm vi
+#: (`kho_qc.KENH_TOI_DA`) rồi lọc tên / loại, xếp theo mọi cột, chia trang 20 ở MÁY CHỦ — tìm và xếp
+#: đúng trên toàn bộ kênh, không chỉ phần đã tải. Tham số: kt (tìm), kl (loại), ks (xếp), kc
+#: (chiều: tang | giam), kp (trang).
+KENH_MOI_TRANG = 20
+#: Cột xếp được → nhãn; "chi" chỉ khi xem tiền.
+SAP_KENH = {"chi": "Chi", "hien_thi": "Hiển thị", "click": "Click", "view_video": "View video",
+            "tuong_tac": "Tương tác", "follow": "Follow", "so_ad": "Số quảng cáo"}
 _CHINH_CHU_TIKTOK = frozenset({"TT_USER", "CUSTOMIZED_USER"})
 NHAN = {"spark": "Spark Ads", "chinh_chu": "Chính chủ", "page": "Page", "instagram": "Instagram"}
 #: Cột số của một dòng (không cột tiền nào khác ngoài chi — `QC.loc_tien` bỏ khi không xem tiền).
@@ -83,12 +88,25 @@ def dong(r: dict, ten_tk: dict[str, str]) -> dict:
             **{c: r.get(c) for c in COT}, "tuong_tac": QC.tuong_tac(r)}
 
 
-def so_kenh(qp) -> int:
+def loc_kenh(qp, co_tien: bool) -> dict:
+    """Tham số lọc / xếp / trang của khối (kt, kl, ks, kc, kp) đã kiểm — giá trị lạ về mặc định."""
+    tim = str(qp.get("kt") or "").strip()[:QC.TIM_TOI_DA]
+    loai = str(qp.get("kl") or "")
+    sap = str(qp.get("ks") or "")
+    mac_dinh = "chi" if co_tien else "hien_thi"
+    if sap not in SAP_KENH or (sap == "chi" and not co_tien):
+        sap = mac_dinh
     try:
-        n = int(str(qp.get("kenh_so") or SO_KENH[0]))
+        trang = max(1, min(int(str(qp.get("kp") or 1)), QC.TRANG_TOI_DA))
     except ValueError:
-        return SO_KENH[0]
-    return n if n in SO_KENH else SO_KENH[0]
+        trang = 1
+    return {"tim": tim, "loai": loai if loai in NHAN else "", "sap": sap,
+            "chieu": "tang" if qp.get("kc") == "tang" else "giam", "trang": trang,
+            "mac_dinh": mac_dinh}
+
+
+def _khop(r: dict, mau: str) -> bool:
+    return any(mau in QC.chu_tim(x or "") for x in (r["ten"], r["phu"], *r["tai_khoan"]))
 
 
 def du_lieu(kq, ids: list[str], tu, den, qp, co_tien: bool, ten_tk: dict[str, str]) -> dict | None:
@@ -97,26 +115,42 @@ def du_lieu(kq, ids: list[str], tu, den, qp, co_tien: bool, ten_tk: dict[str, st
     chạy) → khối báo chưa có số, không làm hỏng trang. -> None khi không có tài khoản."""
     if not ids:
         return None
-    so = so_kenh(qp)
+    lk = loc_kenh(qp, co_tien)
     do = "chi" if co_tien else "hien_thi"
     ham = getattr(kq, "qc_kenh_dang", None)
     if ham is None:
         return None
     try:
-        r = ham(list(ids), tu, den, sap=do, n=so)
+        from dashboard.kho_qc import KENH_TOI_DA
+        r = ham(list(ids), tu, den, sap=do, n=KENH_TOI_DA)
     except Exception:  # noqa: BLE001 — bảng chưa có (LoiKho) / lỗi đọc: khối báo chưa có số
         return {"loi": "Chưa đọc được số theo kênh (kho chưa có bảng kênh đăng).", "rows": [],
-                "tong": 0, "so": so, "so_tiep": None, "do_phu": None, "do_phu_theo": do,
-                "chua_ro": None}
+                "tong": 0, "tong_khop": 0, "trang": 1, "so_trang": 1, "loc": lk, "cac_loai": [],
+                "do_phu": None, "do_phu_theo": do, "chua_ro": None}
     biet, chua = r.get("biet") or {}, r.get("chua_ro") or {}
     a, b = float(biet.get(do) or 0), float(chua.get(do) or 0)
-    tong = int(r.get("tong") or 0)
-    tiep = next((n for n in SO_KENH if n > so), None)
+    ds = [dong(x, ten_tk) for x in r.get("rows") or []]
+    dem: dict[str, int] = {}
+    for x in ds:
+        dem[x["loai"]] = dem.get(x["loai"], 0) + 1
+    if lk["loai"]:
+        ds = [x for x in ds if x["loai"] == lk["loai"]]
+    mau = QC.chu_tim(lk["tim"])
+    if lk["tim"]:
+        ds = [x for x in ds if _khop(x, mau)] if mau else []     # không còn chữ/số: không khớp
+    tang = lk["chieu"] == "tang"
+    # Thiếu số (None) luôn xuống cuối, cả hai chiều.
+    ds.sort(key=lambda x: (x.get(lk["sap"]) is None,
+                           (1 if tang else -1) * float(x.get(lk["sap"]) or 0), x["ten"]))
+    so_trang = max(1, -(-len(ds) // KENH_MOI_TRANG))
+    trang = min(lk["trang"], so_trang)
     chua_ro = None
     if chua and (chua.get("hien_thi") or chua.get("chi")):
         chua_ro = {"ten": "Chưa xác định", "so_ad": int(chua.get("so_ad") or 0),
                    **{c: chua.get(c) for c in COT}, "tuong_tac": QC.tuong_tac(chua)}
-    return {"rows": [dong(x, ten_tk) for x in r.get("rows") or []], "tong": tong, "so": so,
-            "so_tiep": tiep if tiep and tong > so else None,
+    return {"rows": ds[(trang - 1) * KENH_MOI_TRANG: trang * KENH_MOI_TRANG],
+            "tong": int(r.get("tong") or 0), "tong_khop": len(ds), "trang": trang,
+            "so_trang": so_trang, "loc": {**lk, "trang": trang},
+            "cac_loai": [(k, NHAN[k], dem[k]) for k in NHAN if dem.get(k)],
             "do_phu": round(a / (a + b) * 100, 1) if a + b else None, "do_phu_theo": do,
             "chua_ro": chua_ro}

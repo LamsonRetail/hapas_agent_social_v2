@@ -189,17 +189,21 @@ class GiaKhoKenh(GiaKhoQC):
             kk = self.ad_kenh.get(k)
             if kk and kk.get("kenh_id"):
                 biet.append(a)
-                g = nhom.setdefault((kk["nen_tang"], kk["kenh_id"]), {
+                # như kho thật (23/10/2026): gộp theo username đã biết, chưa biết thì mã danh tính
+                un = (self.kenh.get((kk["nen_tang"], kk["kenh_id"])) or {}).get("username")
+                g = nhom.setdefault((kk["nen_tang"], f"u:{un.lower()}" if un else kk["kenh_id"]), {
                     "nen_tang": kk["nen_tang"], "kenh_id": kk["kenh_id"], "loai": kk["loai"],
                     "kenh_phu_id": kk.get("kenh_phu_id"), "tk_ids": set(), "so_ad": 0, "_r": []})
+                g["kenh_id"] = min(g["kenh_id"], kk["kenh_id"])
+                g["loai"] = max(g["loai"] or "", kk["loai"] or "") or None
                 g["tk_ids"].add(k[0])
                 g["so_ad"] += 1
                 g["_r"].append(a)
             else:
                 chua.append(a)
         rows = []
-        for (nen, kid), g in nhom.items():
-            c = self.kenh.get((nen, kid)) or {}
+        for (nen, _), g in nhom.items():
+            c = self.kenh.get((nen, g["kenh_id"])) or {}
             p = self.kenh.get((nen, g["kenh_phu_id"])) or {}
             rows.append({**{x: v for x, v in g.items() if x != "_r"}, **self._cong(g["_r"]),
                          "tk_ids": sorted(g["tk_ids"]), "ten": c.get("ten"),
@@ -488,7 +492,7 @@ def test_khoi_kenh_xep_chi_do_phu_chua_xac_dinh():
     assert kd["rows"][0]["tuong_tac"] == 6 and kd["rows"][0]["tai_khoan"] == ["MATEMADE MKT"]
     assert kd["do_phu"] == round(1700 / 1800 * 100, 1) and kd["do_phu_theo"] == "chi"
     assert kd["chua_ro"]["chi"] == 100 and kd["chua_ro"]["so_ad"] == 1
-    assert kd["tong"] == 3 and kd["so"] == 100 and kd["so_tiep"] is None
+    assert kd["tong"] == 3 and kd["tong_khop"] == 3 and (kd["trang"], kd["so_trang"]) == (1, 1)
 
 
 def test_khoi_kenh_khong_xem_tien_khong_lo_chi():
@@ -500,20 +504,48 @@ def test_khoi_kenh_khong_xem_tien_khong_lo_chi():
     assert [r["ten"] for r in kd["rows"]][0] == "<script>x</script>"   # xếp theo hiển thị
 
 
-def test_khoi_kenh_pham_vi_va_xem_them():
+def test_khoi_kenh_pham_vi():
     kho = _kho_so()
     kd = KD.du_lieu(kho, ["act_1"], D1, D2, {}, True, TEN_TK)
     assert [r["ten"] for r in kd["rows"]] == ["Page 2241"] and kd["chua_ro"] is None
     assert KD.du_lieu(kho, [], D1, D2, {}, True, TEN_TK) is None
-    kd = KD.du_lieu(kho, [MM_MKT, "act_1"], D1, D2, {"kenh_so": "1"}, True, TEN_TK)
-    assert kd["so"] == 100                                # chỉ 100 / 500 (23/10/2026)
-    for n in KD.SO_KENH:
-        assert KD.so_kenh({"kenh_so": str(n)}) == n
-    assert KD.so_kenh({"kenh_so": "x"}) == 100
-    kho.qc_kenh_dang = lambda *a, **k: {"rows": [{"nen_tang": "tiktok", "kenh_id": "a"}] * 100,
-                                        "tong": 450, "biet": {}, "chua_ro": {}}
-    kd = KD.du_lieu(kho, [MM_MKT], D1, D2, {}, True, TEN_TK)
-    assert kd["so_tiep"] == 500 and kd["do_phu"] is None
+
+
+def test_khoi_kenh_loc_tim_loai_xep_va_chia_trang_may_chu():
+    """23/10/2026 (chủ dự án): lọc giống bảng chiến dịch — tìm (kt, không dấu, cả tên tài khoản QC),
+    loại (kl), xếp mọi cột (ks / kc), 20 kênh một trang ở máy chủ (kp) trên ĐỦ kênh."""
+    kho = _kho_so()
+    ten = lambda kd: [r["ten"] for r in kd["rows"]]                       # noqa: E731
+    q = lambda **k: KD.du_lieu(kho, [MM_MKT, "act_1"], D1, D2, k, True, TEN_TK)  # noqa: E731
+    assert ten(q(kt="@matemade.official")) == ["MATE MADE"] and q(kt="Script")["tong_khop"] == 1
+    assert len(q(kt="mate made")["rows"]) == 3              # tên tài khoản QC "MATEMADE…" khớp cả ba
+    assert ten(q(kt="matemade-6")) == ["Page 2241"]                     # tên tài khoản QC
+    assert ten(q(kt="…")) == [] and q(kt="…")["tong_khop"] == 0          # không còn chữ: không khớp
+    assert ten(q(kl="page")) == ["Page 2241"] and ten(q(kl="la")) == ten(q())
+    assert [x[0] for x in q()["cac_loai"]] == ["spark", "chinh_chu", "page"]
+    assert ten(q(ks="hien_thi", kc="tang")) == ["Page 2241", "MATE MADE", "<script>x</script>"]
+    assert q(ks="khong_co")["loc"]["sap"] == "chi"
+    # không xem tiền: không xếp theo chi
+    assert KD.du_lieu(kho, [MM_MKT], D1, D2, {"ks": "chi"}, False, TEN_TK)["loc"]["sap"] == "hien_thi"
+    rows = [{"nen_tang": "tiktok", "kenh_id": f"k{i:02d}", "ten": f"Kênh {i}", "hien_thi": i,
+             "chi": i, "so_ad": 1} for i in range(45)]
+    kho.qc_kenh_dang = lambda *a, **k: {"rows": rows, "tong": 45, "biet": {}, "chua_ro": {}}
+    kd = q(kp="3")
+    assert (kd["trang"], kd["so_trang"], len(kd["rows"]), kd["rows"][0]["ten"]) == (3, 3, 5, "Kênh 4")
+    assert q(kp="99")["trang"] == 3 and q(kp="x")["trang"] == 1
+
+
+def test_khoi_kenh_gop_mot_tai_khoan_nhieu_danh_tinh():
+    """Cùng @username (TT_USER gắn thẳng + BC_AUTH_TT qua Business Center) → một dòng, cộng số."""
+    kho = _kho_so()
+    kho.ghi_ad_kenh([{"advertiser_id": MM_MKT, "ad_id": "2", "nen_tang": "tiktok",
+                      "kenh_id": "id-9", "loai": "TT_USER"}])
+    kho.ghi_kenh([{"nen_tang": "tiktok", "kenh_id": "id-9", "loai": "TT_USER",
+                   "ten": "MATE MADE", "username": "MateMade.Official"}])
+    kd = KD.du_lieu(kho, [MM_MKT, "act_1"], D1, D2, {}, True, TEN_TK)
+    mm = [r for r in kd["rows"] if r["ten"] == "MATE MADE"]
+    assert len(mm) == 1 and mm[0]["so_ad"] == 2 and mm[0]["chi"] == 600
+    assert mm[0]["nhan_loai"] == "Chính chủ"
 
 
 def test_khoi_kenh_kho_chua_bang_khong_sap():
