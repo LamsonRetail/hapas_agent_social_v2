@@ -180,7 +180,7 @@ def test_trang_quang_cao_thanh_loc_va_tieu_de_cot_bam_duoc():
 
 # ───────────────────────────── phân trang (22/10/2026, chủ dự án) ─────────────────────────────
 TU, DEN = datetime.date(2026, 10, 12), datetime.date(2026, 10, 18)
-_NAV = r'<nav class="qc-trang" aria-label="([^"]+)">(.*?)</nav>'
+_NAV = r'<nav class="phan-trang" aria-label="([^"]+)">(.*?)</nav>'
 _SO = r'<span class="dai-qc__an">Trang </span>([\d.]+)</a>'
 
 
@@ -284,7 +284,7 @@ def test_thanh_trang_hien_dung_va_giu_bo_loc():
     assert re.findall(_SO, ad) == ["1", "2", "3", "4", "5", "6", "9"] and ad.count("…") == 1
     assert ad.count('aria-current="page"') == 1
     assert re.search(r'aria-current="page"><span class="dai-qc__an">Trang </span>1<', ad)
-    assert re.search(r'<span class="qc-trang__o qc-trang__ben" aria-disabled="true"><span '
+    assert re.search(r'<span class="phan-trang__o phan-trang__ben" aria-disabled="true"><span '
                      r'class="dai-qc__an">Trang trước', ad)
     assert [h for h in _href(ad) if "ta=2" in h] and all(h.endswith("#top") for h in _href(ad))
     assert "Trang 1/9 · 180 khớp" in ad and 'aria-hidden="true">1/9<' in ad
@@ -310,7 +310,7 @@ def test_thanh_trang_hien_dung_va_giu_bo_loc():
     # Một trang: không có thanh trang.
     _a, c2, *_ = _co_so(_tao_app())
     dang_nhap(c2, QL)
-    assert '<nav class="qc-trang"' not in c2.get(f"/quang-cao?{Q}").text
+    assert '<nav class="phan-trang"' not in c2.get(f"/quang-cao?{Q}").text
 
 
 # ───────────────────────────── chọn nhiều tài khoản (22/10/2026, chủ dự án) ─────────────────────────────

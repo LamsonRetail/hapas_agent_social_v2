@@ -170,26 +170,6 @@
 .qc-sap--dang { color: var(--chu); }
 .qc-sap--dang .qc-sap__mui { color: var(--nhan); opacity: 1; }
 
-/* ─── thanh trang (22/10/2026): ‹ 1 2 3 … 150 › — ô tròn ≥ 36px (44px điện thoại), trang đang xem tô màu
-   nhấn, hai đầu mờ khi hết trang. Điện thoại: gọn ‹ 3/150 ›. ─── */
-.qc-trang { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; margin: 12px 0 0; }
-.qc-trang__ds { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.qc-trang__o {
-  display: inline-grid; place-items: center; min-width: 36px; height: 36px; padding: 0 6px; border-radius: 999px;
-  font-size: 13.5px; font-weight: 600; color: var(--chu-phu); text-decoration: none; font-variant-numeric: tabular-nums;
-  border: 1px solid transparent; transition: background-color .15s ease-out, color .15s ease-out;
-}
-a.qc-trang__o:hover { background: var(--be-mat-2); border-color: var(--ke); color: var(--chu); text-decoration: none; }
-a.qc-trang__o:focus-visible { outline: 2px solid var(--nhan); outline-offset: 2px; }
-.qc-trang__o[aria-current="page"] { background: var(--nhan); border-color: var(--nhan); color: #fff; font-weight: 700; }
-@media (prefers-color-scheme: dark) { .qc-trang__o[aria-current="page"] { color: #0b1120; } }
-a.qc-trang__o[aria-current="page"]:hover { background: var(--nhan-dam); color: #fff; }
-.qc-trang__ben { font-size: 18px; line-height: 1; border-color: var(--ke); }
-.qc-trang__ben[aria-disabled="true"] { opacity: .4; cursor: not-allowed; }
-.qc-trang__ba { display: inline-grid; place-items: center; min-width: 24px; height: 36px; color: var(--chu-mo); }
-.qc-trang__gon { display: none; }
-.qc-trang__dem { margin: 0; font-size: 12.5px; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
-
 /* ─── khán giả ─── */
 .qc-kg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px 28px; }
 .qc-kg__o { min-width: 0; }
@@ -267,11 +247,6 @@ a.qc-trang__o[aria-current="page"]:hover { background: var(--nhan-dam); color: #
   .qc-tk__bang { position: static; width: auto; max-width: none; margin-top: 4px; box-shadow: none; }
   .qc-tk__o { min-height: 44px; }
   .qc-tk__nut, .qc-tk__tim { min-height: 44px; }
-  .qc-trang { justify-content: center; }
-  .qc-trang__so { display: none; }
-  .qc-trang__gon { display: inline-grid; place-items: center; min-width: 72px; height: 44px; font-size: 14px; font-weight: 650; color: var(--chu); font-variant-numeric: tabular-nums; }
-  .qc-trang__o { min-width: 44px; height: 44px; }
-  .qc-trang__dem { flex-basis: 100%; text-align: center; }
   .qc-loc__nhanh { margin-left: 0; }
   .qc-bang-loc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .qc-bang-loc label.qc-bang-loc__tim { grid-column: 1 / -1; }
@@ -305,10 +280,8 @@ a.qc-trang__o[aria-current="page"]:hover { background: var(--nhan-dam); color: #
 @media (prefers-reduced-motion: reduce) {
   .qc-phan__nut, .qc-nen__nut, .qc-loc-khung__tom::after { transition: none; }
   .qc-sheet__tt::before { animation: none !important; }
-  .qc-trang__o { transition: none; }
 }
 @media (forced-colors: active) {
   .qc-phan__nut, .qc-nen__nut, .kpi-o { border: 1px solid CanvasText; }
-  .qc-trang__o[aria-current="page"] { outline: 2px solid Highlight; }
   .qc-cham, .qc-chia__doan { forced-color-adjust: none; }
 }

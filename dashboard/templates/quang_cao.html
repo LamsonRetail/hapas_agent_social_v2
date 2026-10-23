@@ -6,6 +6,7 @@
 <script src="{{ tinh('qc.js') }}" defer></script>
 {% endblock %}
 {% block noi_dung %}
+{% from "_phan_trang.html" import phan_trang with context %}
 {#- 19/10/2026 (chủ dự án): số quảng cáo theo bên; 20/10/2026 thêm Meta (Facebook/Instagram) + lọc nền
     tảng. Máy chủ đã lọc: chỉ bên người xem đọc được, trang chỉ quản trị viên (20/10/2026); chỉ số TIỀN
     khi d.xem_tien — template không phải chốt chặn.
@@ -224,24 +225,10 @@
 </div>
 {{ thanh_trang(cap, tong, ten_cot) }}
 {% endmacro %}
-{#- Thanh trang (22/10/2026, chủ dự án): 20 dòng một trang, phân trang ở máy chủ. Kiểu cổ điển ‹ 1 2 3 … 150 ›
-    (`quang_cao.o_trang`), trang đang xem tô màu nhấn; điện thoại gọn ‹ 3/150 ›. Liên kết giữ mọi bộ lọc +
-    trang của bảng kia, về #top. Không cần JS. #}
+{#- Thanh trang: 20 dòng một trang, phân trang ở máy chủ; macro chung `_phan_trang.html` (23/10/2026).
+    Liên kết giữ mọi bộ lọc + trang của bảng kia, về #top. #}
 {% macro thanh_trang(cap, tong, ten_cot) %}
-{% set trang = d.bang['trang_' ~ cap] %}{% set so_trang = d.bang['so_trang_' ~ cap] %}
-{% if so_trang > 1 %}
-<nav class="qc-trang" aria-label="Trang của bảng {{ ten_cot|lower }}">
-  <ul class="qc-trang__ds">
-    <li>{% if trang > 1 %}<a class="qc-trang__o qc-trang__ben" href="{{ url_trang(cap, trang - 1) }}" rel="prev"><span class="dai-qc__an">Trang trước</span><span aria-hidden="true">‹</span></a>{% else %}<span class="qc-trang__o qc-trang__ben" aria-disabled="true"><span class="dai-qc__an">Trang trước</span><span aria-hidden="true">‹</span></span>{% endif %}</li>
-    {% for p in o_trang(trang, so_trang) %}
-    <li class="qc-trang__so">{% if p is none %}<span class="qc-trang__ba" aria-hidden="true">…</span>{% else %}<a class="qc-trang__o" href="{{ url_trang(cap, p) }}"{% if p == trang %} aria-current="page"{% endif %}><span class="dai-qc__an">Trang </span>{{ p|so_vn }}</a>{% endif %}</li>
-    {% endfor %}
-    <li class="qc-trang__gon" aria-hidden="true">{{ trang|so_vn }}/{{ so_trang|so_vn }}</li>
-    <li>{% if trang < so_trang %}<a class="qc-trang__o qc-trang__ben" href="{{ url_trang(cap, trang + 1) }}" rel="next"><span class="dai-qc__an">Trang sau</span><span aria-hidden="true">›</span></a>{% else %}<span class="qc-trang__o qc-trang__ben" aria-disabled="true"><span class="dai-qc__an">Trang sau</span><span aria-hidden="true">›</span></span>{% endif %}</li>
-  </ul>
-  <p class="qc-trang__dem">Trang {{ trang|so_vn }}/{{ so_trang|so_vn }} · {{ tong|so_vn }} khớp</p>
-</nav>
-{% endif %}
+{{ phan_trang(d.bang['trang_' ~ cap], d.bang['so_trang_' ~ cap], url_trang(cap), ten_cot|lower, tong|so_vn ~ ' khớp') }}
 {% endmacro %}
 
 {% set ten_cd = ((d.campaign|first).ten if d.campaign else none) or ((d.ad|first).ten_campaign if d.ad else none) or d.bang.cd %}
