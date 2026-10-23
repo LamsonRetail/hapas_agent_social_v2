@@ -87,8 +87,9 @@ def tao(nguoi_hoi: str, ben: str, nen_tang: str, tk: str | None, tu: datetime.da
     `nguon` (22/10/2026): None = dòng web (cột không có trong INSERT — role web không được cấp cột,
     CSDL đặt 'web'); "mark" = tool của Mark (role mark; RLS buộc đúng 'mark'). Khoá người ở dưới
     lấy TRƯỚC khoá toàn hệ thống của trigger — cùng thứ tự cho cả hai nguồn.
-    23/10/2026 (MKT): `ten_cd` = lọc tên chiến dịch cấp trang (`quang_cao.loc_ten_cd`) — bộ nghe
-    tính lại chiến dịch khớp lúc dựng và áp vào MỌI tab."""
+    23/10/2026 (MKT): `ten_cd` = lọc tên chiến dịch cấp trang — chuỗi JSON chuẩn
+    `{"co":[..],"mot":[..],"khong":[..]}` (`quang_cao.chuoi_ten_cd`, ≤ QC.TEN_CD_CHUOI_TOI_DA = trigger);
+    bộ nghe tính lại chiến dịch khớp lúc dựng và áp vào MỌI tab."""
     if nguon is not None and nguon not in NGUON:
         raise ValueError("nguon phải là web hoặc mark")
     with ket_noi() as c:
@@ -221,15 +222,16 @@ _GIAY_DOC = "120s"
 
 
 def ma_cd_theo_ten(ids: list[str], tu: datetime.date, den: datetime.date,
-                   maus: list[str]) -> list[str]:
-    """23/10/2026 (MKT): chiến dịch khớp lọc tên cấp trang (cột `ten_cd`, `quang_cao.loc_ten_cd`) —
-    CHÍNH `kho_qc.ma_cd_theo_ten` của trang, tính lại lúc dựng Sheet (tên mới nhất trong kỳ xuất)."""
+                   loc: dict) -> list[str]:
+    """23/10/2026 (MKT): chiến dịch khớp lọc tên cấp trang (cột `ten_cd` → `quang_cao.doc_ten_cd` →
+    `loc_ten_cd`; bản 2: chứa tất cả / một trong / không chứa) — CHÍNH `kho_qc.ma_cd_theo_ten` của
+    trang, tính lại lúc dựng Sheet (tên mới nhất trong kỳ xuất)."""
     from dashboard import kho_qc as KQ
-    if not ids or not maus:
+    if not ids or not loc.get("co_loc") or loc.get("khong_khop"):
         return []
     with ket_noi() as c:
         c.execute(f"SET LOCAL statement_timeout = '{_GIAY_DOC}'")
-        return KQ.ma_cd_theo_ten_c(c, ids, tu, den, maus)
+        return KQ.ma_cd_theo_ten_c(c, ids, tu, den, loc)
 
 
 def doc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date,

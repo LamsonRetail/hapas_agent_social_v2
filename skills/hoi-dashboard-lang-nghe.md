@@ -51,6 +51,11 @@ Mark vẫn xuất Sheet được — cùng một Sheet.
 - Tham số: `tai_khoan` = tên / mã người hỏi nêu (trống = mọi tài khoản của `ben`); tên chiến dịch
   → `tim`; `chien_dich` chỉ nhận MÃ; kỳ như `hoi_dashboard` (không nói kỳ = 30 ngày trọn tới hết
   hôm qua, nói rõ). Mỗi Sheet một bên.
+- Lọc tên chiến dịch CẢ Sheet (23/10/2026, MKT — như Meta Ads Manager): "tên chứa A và B" →
+  `ten_cd_co: [A, B]`; "chứa A hoặc B" → `ten_cd_mot`; "trừ / không chứa C" → `ten_cd_khong`; ghép
+  được (AND). `tim` chỉ lọc tab chiến dịch / quảng cáo; khi người hỏi muốn CẢ Sheet (số tổng, theo
+  ngày) chỉ tính các chiến dịch đó thì dùng `ten_cd_*`. Xác nhận lại điều kiện từ
+  `pham_vi.ten_chien_dich`.
 - Trả lời: Sheet ĐANG TẠO, Mark sẽ nhắn link riêng (chỉ người hỏi xem được) sau ~1–2 phút; xác
   nhận đúng phạm vi tool trả trong `pham_vi` (bên, nền tảng, tài khoản, từ–đến, bộ lọc bảng) + mã
   yêu cầu. KHÔNG bịa link, không nói đã xong.

@@ -30,7 +30,8 @@
   <form class="qc-bang-loc qc-kenh-loc" method="get" action="/quang-cao#kenh" role="search" aria-label="Lọc và sắp xếp bảng kênh đăng">
     {% for k in ('ben', 'nen_tang', 'tu', 'den') if d[k] %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
     {% for x in d.tk_ds %}<input type="hidden" name="tk" value="{{ x }}">{% endfor %}
-    {% for k, v in (('tim', d.bang.tim), ('cd', d.bang.cd), ('sap', d.sap if d.sap != (sap_xep|first)[0] else ''), ('chieu', 'tang' if d.bang.chieu == 'tang' else ''), ('ten_cd', d.ten_cd.chu if d.ten_cd else '')) if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    {% for k, v in (('tim', d.bang.tim), ('cd', d.bang.cd), ('sap', d.sap if d.sap != (sap_xep|first)[0] else ''), ('chieu', 'tang' if d.bang.chieu == 'tang' else '')) if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    {% if d.ten_cd %}{% for l in LOAI_TEN_CD %}{% for x in d.ten_cd[l[0]] %}<input type="hidden" name="{{ l[1] }}" value="{{ x }}">{% endfor %}{% endfor %}{% endif %}
     <label class="o qc-bang-loc__tim">Tìm kênh
       <input type="search" name="kt" value="{{ lk.tim }}" maxlength="{{ TIM_TOI_DA }}" placeholder="Tên kênh, @username, tài khoản QC" autocomplete="off">
     </label>

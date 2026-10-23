@@ -35,11 +35,58 @@
 .qc-loc__nhanh { margin-left: auto; }
 /* 23/10/2026 (MKT): ô "Tên chiến dịch" — lọc cả trang; rộng hơn ô ngày vì tên chiến dịch dài. Nhãn +
    nút (i) cùng một dòng (label.o không chứa được nút). Thẻ "Chiến dịch có tên chứa" ngay trên KPI. */
-.qc-loc .qc-loc__ten-cd { flex: 1 1 280px; min-width: 200px; display: flex; flex-direction: column; gap: 5px; }
 .qc-loc__nhan-dong { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--chu); }
-.qc-loc__ten-cd input { width: 100%; }
-.qc-ten-cd { margin-top: 2px; }
 .qc-ten-cd__phu { color: var(--chu-mo); }
+
+/* ─── Tên chiến dịch bản 2 (23/10/2026, MKT — như Meta Ads Manager): ô gọn "Tên chiến dịch ▾" dùng lại
+   khung nổi của chọn tài khoản (.qc-tk__*); bảng ba dòng (chứa tất cả / một trong / không chứa), mỗi
+   dòng là ô thẻ: thẻ ✕ + ô gõ trên cùng một khung viền; gợi ý tên thật xổ dưới ô gõ. ─── */
+.qc-loc .qc-tcd { flex: 0 1 240px; min-width: 180px; position: relative; display: flex; flex-direction: column; gap: 4px; }
+.qc-tcd__bang { width: max(100%, 440px); }
+.qc-tcd__dong + .qc-tcd__dong { margin-top: 10px; }
+.qc-tcd__nhan { display: block; margin: 0 2px 4px; font-size: 12.5px; font-weight: 600; color: var(--chu-phu); }
+.qc-tcd__o {
+  position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 38px; padding: 4px 6px;
+  border: 1px solid var(--truc); border-radius: var(--bo-nho); background: var(--be-mat); cursor: text;
+}
+.qc-tcd__o:focus-within { border-color: var(--nhan); outline: 2px solid var(--nhan-nen); outline-offset: 0; }
+.qc-tcd__o .qc-tcd__go { flex: 1 1 80px; min-width: 80px; width: auto; min-height: 28px; padding: 2px 4px; border: 0; background: transparent; box-shadow: none; outline: none; }
+.qc-tcd__the {
+  display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 2px 2px 9px; border-radius: 999px;
+  background: var(--nhan-nen); color: var(--nhan-dam); font-size: 13px; font-weight: 600; line-height: 1.3;
+}
+.qc-tcd__the-chu { min-width: 0; overflow-wrap: anywhere; }
+.qc-tcd__the-bo {
+  display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer;
+}
+.qc-tcd__the-bo:hover { background: var(--be-mat); }
+.qc-tcd__the-bo:focus-visible { outline: 2px solid var(--nhan); outline-offset: 0; }
+.qc-tcd__goi-y { margin: 10px 2px 0; }
+.qc-tcd__nut { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ke); }
+a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none; }
+.qc-tcd__ds {
+  position: absolute; z-index: 31; top: calc(100% + 2px); left: -1px; right: -1px; max-height: 260px; overflow-y: auto; margin: 0; padding: 4px;
+  list-style: none; border: 1px solid var(--vien); border-radius: var(--bo-nho); background: var(--be-mat); box-shadow: var(--bong-noi);
+}
+.qc-tcd__ds[hidden] { display: none; }
+.qc-tcd__goi { display: flex; align-items: baseline; gap: 8px; min-height: 34px; padding: 6px 8px; border-radius: 6px; font-size: 13.5px; color: var(--chu); cursor: pointer; }
+.qc-tcd__goi[aria-selected="true"], .qc-tcd__goi:hover { background: var(--be-mat-2); }
+.qc-tcd__goi-loai { flex: none; font-size: 11.5px; font-weight: 600; color: var(--chu-mo); }
+.qc-tcd__goi-ten { min-width: 0; overflow-wrap: anywhere; }
+/* thẻ điều kiện đang bật (trên KPI) + trạng thái 0 khớp kèm tên gần nhất */
+.qc-tcd-the { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 2px 0 14px; }
+.qc-tcd-the .qc-bang-the { margin: 0; }
+.qc-tcd-the__dem { font-size: 13px; color: var(--chu-phu); }
+.qc-tcd-the__bo-het { font-size: 13px; padding: 4px 2px; }
+.qc-tcd-trong p { margin: 0; }
+.qc-tcd-trong__tieu-de { margin-top: 12px !important; font-weight: 600; color: var(--chu-phu); }
+.qc-tcd-trong__ds { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.qc-tcd-trong__ds a {
+  display: inline-flex; align-items: center; min-height: 32px; padding: 4px 12px; border: 1px solid var(--vien-3); border-radius: 999px;
+  background: var(--be-mat-3); color: var(--chu); font-size: 13px; text-decoration: none; overflow-wrap: anywhere;
+}
+.qc-tcd-trong__ds a:hover { border-color: var(--nhan); color: var(--nhan-dam); }
 .qc-kg__canh { margin: 0 0 12px; }
 
 /* ─── Tài khoản: chọn nhiều (22/10/2026) — ô giống <select>, bấm mở bảng nổi (không đẩy bố cục): ô tìm,
@@ -254,7 +301,7 @@
   .qc-loc-khung[open] .qc-loc-khung__tom::after { transform: rotate(180deg); }
   .qc-loc-khung[open] .the-khoi.qc-loc { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
   .qc-loc label.o { flex: 1 1 140px; }
-  .qc-loc .qc-tk, .qc-loc .qc-loc__ten-cd { flex: 1 1 100%; }
+  .qc-loc .qc-tk, .qc-loc .qc-tcd { flex: 1 1 100%; }
   .qc-tk__tom { min-height: 44px; }
   .qc-tk__bang { position: static; width: auto; max-width: none; margin-top: 4px; box-shadow: none; }
   .qc-tk__o { min-height: 44px; }
@@ -289,6 +336,18 @@
   .qc-bang__phu { max-width: none; }
   .qc-bang td[data-nhan]::before { content: attr(data-nhan); display: block; font-size: 11.5px; font-weight: 500; color: var(--chu-mo); }
   .qc-bang td.trong { grid-column: 1 / -1; text-align: center; }
+}
+@media (max-width: 640px) {
+  /* 23/10/2026: bảng tên chiến dịch rộng hết khung, mọi chỗ bấm ≥ 44px */
+  .qc-tcd__bang { width: auto; }
+  .qc-tcd__o { min-height: 44px; }
+  .qc-tcd__o .qc-tcd__go { min-height: 36px; }
+  .qc-tcd__the { min-height: 32px; }
+  .qc-tcd__the-bo { width: 32px; height: 32px; }
+  .qc-tcd__goi { min-height: 44px; align-items: center; }
+  .qc-tcd__nut > * { flex: 1 1 0; justify-content: center; min-height: 44px; }
+  .qc-tcd-the .qc-bang-the__bo { width: 44px; height: 44px; }
+  .qc-tcd-the__bo-het, .qc-tcd-trong__ds a { min-height: 44px; display: inline-flex; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .qc-phan__nut, .qc-nen__nut, .qc-loc-khung__tom::after { transition: none; }

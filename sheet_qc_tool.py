@@ -26,6 +26,8 @@ AI ĐƯỢC XUẤT, PHẠM VI NÀO (cùng cửa của `hoi_dashboard`):
      chiến dịch, sap, chieu) kiểm bằng CHÍNH `quang_cao.loc_bang` — người không xem tiền không xếp
      theo tiền. 23/10/2026: `ten_cd` = lọc tên chiến dịch CẢ Sheet (như ô "Tên chiến dịch" của
      Bộ lọc đầu trang), kiểm bằng `quang_cao.loc_ten_cd`; bộ nghe tính lại chiến dịch khớp lúc dựng.
+     Bản 2 (23/10/2026, MKT): `ten_cd_co` / `ten_cd_mot` / `ten_cd_khong` (chứa tất cả / một trong /
+     không chứa, AND); `ten_cd` cũ = `ten_cd_mot`. Lưu chuỗi JSON chuẩn (`quang_cao.chuoi_ten_cd`).
 LUẬT CỨNG Ở BỘ NGHE, KHÔNG Ở ĐÂY: tool này chỉ là lớp thứ nhất. Bộ nghe không tin dòng — tính lại
 quyền, phạm vi tài khoản và cột tiền từ quyền CSDL của nguoi_hoi lúc dựng (người không xem tiền nhận
 Sheet KHÔNG có cột / giá trị tiền). `co_cot_tien` tool trả chỉ để Mark nói đúng, không quyết gì.
@@ -102,11 +104,20 @@ SCHEMA = {
                                    "tự, không cần dấu)."},
             # 23/10/2026 (MKT): lọc tên chiến dịch cấp trang — như ô "Tên chiến dịch" của Bộ lọc
             # đầu trang Quảng cáo; luật dùng khi nào ở tầng lời dặn (skill / brain), không ở đây.
+            # Bản 2: ba danh sách như Meta Ads Manager; mô tả chỉ nói tham số.
+            "ten_cd_co": {"type": "array", "items": {"type": "string"},
+                          "description": "Lọc CẢ Sheet: tên chiến dịch chứa TẤT CẢ các từ khoá này "
+                                         f"(≤ {QC.TU_KHOA_TOI_DA} từ khoá, mỗi từ ≤ "
+                                         f"{QC.TU_KHOA_DAI_TOI_DA} ký tự, không cần dấu)."},
+            "ten_cd_mot": {"type": "array", "items": {"type": "string"},
+                           "description": "Lọc CẢ Sheet: tên chiến dịch chứa ÍT NHẤT MỘT từ khoá "
+                                          "này (cùng trần như ten_cd_co)."},
+            "ten_cd_khong": {"type": "array", "items": {"type": "string"},
+                             "description": "Lọc CẢ Sheet: tên chiến dịch KHÔNG chứa từ khoá nào "
+                                            "trong này (cùng trần như ten_cd_co)."},
             "ten_cd": {"type": "string",
-                       "description": f"Lọc CẢ Sheet theo tên chiến dịch (≤ {QC.TIM_TOI_DA} ký tự, "
-                                      "không cần dấu; dấu phẩy = hoặc): mọi tab và số tổng chỉ tính "
-                                      "chiến dịch có tên chứa chữ này. `tim` thì chỉ lọc tab chiến "
-                                      "dịch / quảng cáo."},
+                       "description": "Tên cũ của ten_cd_mot: chữ, dấu phẩy tách từ khoá "
+                                      f"(≤ {QC.TIM_TOI_DA} ký tự)."},
             "chien_dich": {"type": "string",
                            "description": "MÃ chiến dịch: tab chiến dịch chỉ chiến dịch đó, tab quảng "
                                           "cáo chỉ quảng cáo của nó."},
@@ -133,6 +144,25 @@ def _ds(x) -> list[str]:
     if len(ra) > QC.TK_TOI_DA:
         raise NL.LoiNhap(f"Tối đa {QC.TK_TOI_DA} tài khoản mỗi Sheet.")
     return ra
+
+
+def loc_ten_cd_mark(args: dict, ten_cd: str = "") -> dict:
+    """23/10/2026 (MKT, bản 2): `ten_cd_co` / `ten_cd_mot` / `ten_cd_khong` (+ `ten_cd` cũ = một trong)
+    của model → `quang_cao.loc_ten_cd`. Trang cắt lặng phần vượt trần; ở đây vượt trần là báo lại để
+    Mark nói đúng (không âm thầm đổi điều kiện người hỏi nêu)."""
+    tham: dict[str, list[str]] = {}
+    for loai, ts, *_ in QC.LOAI_TEN_CD:
+        v = args.get("ten_" + ts)
+        v = [v] if isinstance(v, str) else (v if isinstance(v, list) else [])
+        if any(not isinstance(x, (str, int, float)) for x in v):
+            raise NL.LoiNhap(f"`ten_{ts}` phải là danh sách chữ.")
+        tham[ts] = [str(x) for x in v]
+    tham["ten_cd"] = [ten_cd] if ten_cd else []
+    tc = QC.loc_ten_cd(tham)
+    if tc["cat"]:
+        raise NL.LoiNhap(f"Lọc tên chiến dịch tối đa {QC.TU_KHOA_TOI_DA} từ khoá mỗi loại, mỗi từ "
+                         f"khoá {QC.TU_KHOA_DAI_TOI_DA} ký tự.")
+    return tc
 
 
 def _ten_tk(t: dict) -> str:
@@ -260,6 +290,7 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
     ten_cd = " ".join(str(args.get("ten_cd") or "").split())
     if len(ten_cd) > QC.TIM_TOI_DA:
         raise NL.LoiNhap(f"`ten_cd` tối đa {QC.TIM_TOI_DA} ký tự.")
+    tc = loc_ten_cd_mark(args, ten_cd)
     cd =str(args.get("chien_dich") or "").strip()
     if cd and not _MA_CD.fullmatch(cd):
         raise NL.LoiNhap("`chien_dich` chỉ nhận MÃ chiến dịch (chữ số / chữ Latin); tên chiến dịch "
@@ -290,11 +321,10 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
         raise NL.LoiNhap(f"Bạn không xem được tiền của phạm vi này nên không xếp theo "
                          f"{QC.SAP_BANG[sap]} — chọn cột khác (hiển thị, click, view…).")
     lb = QC.loc_bang({"tim": tim, "cd": cd, "sap": sap, "chieu": chieu}, co_tien)
-    tc = QC.loc_ten_cd({"ten_cd": ten_cd})
     # Trần / "đang có Sheet chờ" → LoiDuLieu (cùng câu trang Quảng cáo), `_handle` chuyển lại.
     r = kho.sq_tao(email, ben, nen, None, tu, den, tk_ds=tk_ds or None, tim=lb["tim"] or None,
                    cd=lb["cd"] or None, sap=lb["sap"], chieu=lb["chieu"], nguon="mark",
-                   ten_cd=tc["chu"] or None)
+                   ten_cd=QC.chuoi_ten_cd(tc))
     try:
         ten_ben = {**kho.sq_ten_ben(), QC.TAT_CA: "Tất cả bên", QC.CHUA_GAN: "Chưa gán bên"}
     except Exception:  # noqa: BLE001 — chỉ để nói tên bên cho đẹp
@@ -307,6 +337,8 @@ def tra_loi(args: dict, kho=None, *, open_id: str | None = None,
                           if tk_ds else f"mọi tài khoản của phạm vi ({len(tk)})"),
             "tu": tu.isoformat(), "den": den.isoformat(), "so_ngay": (den - tu).days + 1,
             "ten_chien_dich": tc["chu"] or None,
+            "loc_ten_chien_dich": ({"chua_tat_ca": tc["co"], "chua_mot_trong": tc["mot"],
+                                    "khong_chua": tc["khong"]} if tc["co_loc"] else None),
             "bo_loc_bang": {"tim": lb["tim"] or None, "chien_dich": lb["cd"] or None,
                             "xep_theo": QC.SAP_BANG.get(lb["sap"], lb["sap"]),
                             "chieu": "thấp → cao" if lb["chieu"] == "tang" else "cao → thấp"}},

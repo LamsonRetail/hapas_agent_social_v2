@@ -976,6 +976,9 @@ ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS nguon TEXT NOT NULL DEFAUL
 -- (`quang_cao.loc_ten_cd`: dấu phẩy / chấm phẩy = hoặc, so khớp bỏ dấu). Bộ nghe tính lại chiến dịch
 -- khớp lúc dựng và áp vào MỌI tab + tổng. Cột NULL không mặc định: tức thì, không viết lại bảng.
 -- Trigger chuan_yeu_cau_sheet_qc kiểm độ dài (như tim).
+-- 23/10/2026 (MKT, bản 2 — như Meta Ads Manager): cột GIỮ NGUYÊN kiểu TEXT, nay chứa chuỗi JSON chuẩn
+-- {"co":[..],"mot":[..],"khong":[..]} (`quang_cao.chuoi_ten_cd`: chứa tất cả / chứa một trong / không
+-- chứa, AND); dòng cũ chữ thường đọc như "chứa một trong". Chỉ đổi thân trigger (trần 600 ký tự).
 ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS ten_cd TEXT;
 CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_nguoi ON yeu_cau_sheet_qc (nguoi_hoi, tao_luc DESC);
 CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_cho ON yeu_cau_sheet_qc (trang_thai, id)
@@ -1021,9 +1024,10 @@ BEGIN
   IF NEW.tim IS NOT NULL AND length(NEW.tim) > 100 THEN
     RAISE EXCEPTION 'yeu_cau_sheet_qc: tim quá 100 ký tự' USING ERRCODE = 'invalid_parameter_value';
   END IF;
-  -- 23/10/2026: lọc tên chiến dịch cấp trang — cùng trần quang_cao.TIM_TOI_DA như tim.
-  IF NEW.ten_cd IS NOT NULL AND length(NEW.ten_cd) > 100 THEN
-    RAISE EXCEPTION 'yeu_cau_sheet_qc: ten_cd quá 100 ký tự' USING ERRCODE = 'invalid_parameter_value';
+  -- 23/10/2026: lọc tên chiến dịch cấp trang. Bản 2 (MKT): chuỗi JSON ba danh sách — trần
+  -- quang_cao.TEN_CD_CHUOI_TOI_DA (app cắt trước; đây là chốt thứ hai).
+  IF NEW.ten_cd IS NOT NULL AND length(NEW.ten_cd) > 600 THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: ten_cd quá 600 ký tự' USING ERRCODE = 'invalid_parameter_value';
   END IF;
   IF NEW.cd IS NOT NULL AND NEW.cd !~ '^[0-9A-Za-z_-]{0,64}$' THEN
     RAISE EXCEPTION 'yeu_cau_sheet_qc: cd sai' USING ERRCODE = 'invalid_parameter_value';
@@ -1818,7 +1822,7 @@ COMMENT ON COLUMN yeu_cau_sheet_qc.tim IS 'Chữ tìm theo tên của bảng chi
 COMMENT ON COLUMN yeu_cau_sheet_qc.cd IS 'Mã chiến dịch của bộ lọc bảng (chỉ chiến dịch đó + quảng cáo của nó); NULL = mọi chiến dịch. Từ 22/10/2026.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.sap IS 'Cột xếp tab chiến dịch / quảng cáo: chi, hien_thi, cpm, click, ctr, view, tuong_tac, follow, roas; NULL (dòng cũ) = chi. Từ 22/10/2026.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.chieu IS 'Chiều xếp: giam (cao → thấp) hoặc tang; NULL (dòng cũ) = giam. Từ 22/10/2026.';
-COMMENT ON COLUMN yeu_cau_sheet_qc.ten_cd IS 'Lọc tên chiến dịch CẤP TRANG (ô "Tên chiến dịch" của Bộ lọc đầu trang Quảng cáo, ≤ 100 ký tự; dấu phẩy / chấm phẩy = hoặc, so khớp bỏ dấu với tên mới nhất trong kỳ): mọi tab + tổng của Sheet chỉ tính các chiến dịch khớp. NULL = không lọc. Từ 23/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.ten_cd IS 'Lọc tên chiến dịch CẤP TRANG (ô "Tên chiến dịch" của Bộ lọc đầu trang Quảng cáo, ≤ 600 ký tự): chuỗi JSON {"co":[..],"mot":[..],"khong":[..]} = tên chứa tất cả / chứa một trong / không chứa từ khoá nào (AND; so khớp bỏ dấu, bỏ khoảng trắng / _ / /, với tên mới nhất trong kỳ). Dòng cũ chữ thường (dấu phẩy = hoặc) = "chứa một trong". Mọi tab + tổng của Sheet chỉ tính các chiến dịch khớp. NULL = không lọc. Từ 23/10/2026 (JSON từ bản 2 cùng ngày).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.nguon IS 'Dòng từ đâu: web (nút trên trang Quảng cáo, chỉ quản trị viên — mặc định, web không ghi được cột này) hoặc mark (người hỏi Mark trên Lark nhờ xuất Sheet, tool xuat_sheet_qc). Từ 22/10/2026; dòng cũ = web.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.tu IS 'Ngày đầu khoảng xuất (ngày theo múi giờ tài khoản, như qc_tk_ngay.ngay).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.den IS 'Ngày cuối khoảng xuất; tối đa 400 ngày (CHECK).';
