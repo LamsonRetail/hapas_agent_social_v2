@@ -100,7 +100,6 @@
 /* ô trống = theo mặc định dự án: viền đứt để phân biệt với số đã đặt riêng */
 .ns-bang input[type="number"]:placeholder-shown { border-style: dashed; background: transparent; }
 .ns-bang input[type="number"]:invalid { border-color: var(--loi); }
-.ns-vd { display: inline-block; width: 22px; height: 13px; border: 1px dashed var(--truc); border-radius: 3px; vertical-align: -2px; }
 .ns-bang .ns-usd { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--chu-phu); }
 .ns-bang .ns-tong-dong { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 700; }
 .ns-bang tfoot .ns-usd { color: var(--chu); }
@@ -200,6 +199,7 @@ form[data-ban="1"] .ns-luu .nut:not(.nut--nhe) { box-shadow: 0 0 0 3px var(--nha
 /* ─── lịch sử ─── */
 .ns-ls td { vertical-align: middle; }
 .ns-ls td:nth-child(2) { white-space: nowrap; }
+.ns-ls td:nth-child(3), .ns-ls td:nth-child(4) { white-space: nowrap; }   /* 23/10/2026: giờ một dòng, hàng thấp hơn */
 
 /* ─── điện thoại ─── */
 @media (max-width: 900px) {

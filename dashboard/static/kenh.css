@@ -17,3 +17,11 @@
 }
 .qc-kenh__chua-ro .qc-bang__chinh { font-weight: 550; color: var(--chu-phu); font-style: italic; }
 .qc-kenh__chua-ro td { background: var(--be-mat-3); }
+/* 23/10/2026: "Chưa xác định" ở tfoot (thanh trang không cắt) — chữ thường như dòng kênh, không đậm
+   kiểu dòng tổng; nút "Tải đủ … kênh" ở đầu mục thay chú thích cuối bảng. */
+.qc-kenh__bang tfoot td:not(.qc-bang__chi) { font-weight: 400; }
+.qc-kenh__them { font-weight: 600; white-space: nowrap; }
+@media (max-width: 760px) {
+  .qc-kenh__bang tfoot { display: block; margin-top: 8px; }
+  .qc-kenh__bang tfoot td { border: 0; }
+}

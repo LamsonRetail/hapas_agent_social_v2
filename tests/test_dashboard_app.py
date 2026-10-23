@@ -2264,7 +2264,7 @@ def test_ngan_sach_moi_nen_tang_mot_dong_phan_mo_rong_vao_nang_cao():
               'name="tk_web_boc"'):
         assert t.index(o) > nc, o
     # Chữ hiện ra + chữ ⓘ của bảng và Nâng cao: không "đường 2", không tên actor.
-    vung = t[t.index('<table class="ns-bang">'):t.index("</details>", nc)]
+    vung = t[t.index('<table class="ns-bang"'):t.index("</details>", nc)]
     chu = (re.sub(r"<[^>]+>", " ", t) + " ".join(re.findall(r'data-goi-y="([^"]*)"', vung))).lower()
     for cam in ("đường 2", "duong2", "mina", "scrapersdelight", "futurizerush", "scraptik",
                 "thedoor", "scrapeforge", "actor"):

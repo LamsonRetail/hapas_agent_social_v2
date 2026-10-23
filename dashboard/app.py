@@ -1844,7 +1844,11 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
         goi = CP.goi_ngan_sach(snap, khoi, bay_gio)
-        return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi,
+
+        def url_luot(so: int, ma=(du_an or {}).get("ma")) -> str:
+            """-> liên kết trang `so` của Lịch sử lượt quét cho macro `phan_trang` (23/10/2026)."""
+            return _url("/ngan-sach", du_an=ma, trang=so if so > 1 else "") + "#ns-ls"
+        return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi, url_luot=url_luot,
                       goi_mot_phan=not tong_nguoi["la_quan_tri"],
                       dong=[an_chi_tiet(_theo_du_an(tong_nguoi, x), [x], ("sua_boi",))[0]
                             for x in dong], du_an=du_an,
