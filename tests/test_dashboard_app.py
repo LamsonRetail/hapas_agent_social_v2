@@ -2670,6 +2670,27 @@ def test_trang_chi_so_co_thanh_loc_chung():
     assert 'id="khoi-y-dinh"' in t and 'id="bd-y-dinh"' in t and 'id="yd-top"' in t
 
 
+def test_trang_chi_so_dung_thanh_trang_chung():
+    """23/10/2026 (chủ dự án): mọi danh sách dài của trang Chỉ số dùng MỘT thanh trang (chung.js
+    PhanTrang.ve, kiểu ‹ 1 2 3 … ›) — không còn "← Trước / Sau →", "Tải thêm", "Xem thêm / Thu gọn";
+    ghi chú về video chưa đọc lại được giỏ nằm trong nút "!" thay vì dòng mờ."""
+    _, c, _ = tao()
+    dang_nhap(c, XEM)
+    t = c.get("/").text
+    assert '<div class="cs-ngan__trang" id="chi-tiet-trang"></div>' in t
+    assert 'class="phan-trang" id="chi-tiet-trang"' not in t      # thanh tự vẽ cũ
+    assert 'id="khoi-tu-khoa"' in t and 'id="tk-trang" hidden' in t
+    assert 'class="goi-y goi-y--canh cs-goi-y" id="koc-chua"' in t and "cs-koc__chua" not in t
+    js = (A.THU_MUC / "static" / "chi_so.js").read_text(encoding="utf-8")
+    for cu in ("← Trước", "Sau →", "MOI_TRANG_BL", "bl-them-nut", "baiMo", "ydMo", "cdMo"):
+        assert cu not in js, cu
+    assert js.count("window.PhanTrang.ve(") >= 3                  # ngăn chi tiết, bình luận, chung
+    for ham in ("veTopBai(d, p)", "veChuDe(d, p)", "veTopYDinh(y, p)", "veBangTu(p)", "taiBl(p)",
+                "napTrang(p)"):
+        assert ham in js, ham
+    assert "ngan.tapTrungTrang = true" in js                      # giữ focus khi đổi trang ngăn
+
+
 # ───────────────────────────── lịch quét tự động (15/10/2026) ─────────────────────────────
 # Chủ dự án chốt "Dashboard + Mark tự chạy". Đồng hồ cố định 15/10/2026 12:00 giờ VN (giua_thang).
 LICH_2GIO = {"kieu": "moi_n_gio", "moi_gio": "2", "tu": "07:00", "den": "23:00", "bat": "1"}
