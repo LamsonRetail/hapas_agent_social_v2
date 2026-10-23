@@ -457,16 +457,36 @@ class GiaKhoQC:
                     ra[c] = (ra[c] or 0) + r[c]
         return ra
 
-    def qc_tong(self, ids, tu, den):
-        rows = [r for r in self.bang["qc_tk_ngay"].values()
-                if r["advertiser_id"] in ids and tu <= r["ngay"] <= den]
+    # 23/10/2026: `cds` (lọc tên chiến dịch cấp trang) — như SQL: None = qc_tk_ngay; danh sách = chỉ
+    # các chiến dịch đó, cộng từ qc_campaign_ngay; [] = rỗng.
+    def _nguon(self, ids, tu, den, cds=None):
+        if cds is None:
+            bang, giu = self.bang["qc_tk_ngay"].values(), lambda r: True
+        else:
+            bang, giu = self.bang["qc_campaign_ngay"].values(), lambda r: r["campaign_id"] in cds
+        return [r for r in bang if r["advertiser_id"] in ids and tu <= r["ngay"] <= den and giu(r)]
+
+    def ma_cd_theo_ten(self, ids, tu, den, maus):
+        if not ids or not maus:
+            return []
+        moi: dict = {}
+        for r in self.bang["qc_campaign_ngay"].values():
+            if r["advertiser_id"] in ids and tu <= r["ngay"] <= den and (
+                    r["campaign_id"] not in moi or r["ngay"] > moi[r["campaign_id"]]["ngay"]):
+                moi[r["campaign_id"]] = r
+        return [k for k, r in sorted(moi.items())
+                if any(m in QC.chu_tim(r.get("ten") or "") for m in maus)]
+
+    def qc_tong(self, ids, tu, den, cds=None):
+        if cds is not None and not cds:
+            return {}
+        rows = self._nguon(ids, tu, den, cds)
         return {**self._cong(rows), "so_ngay": len({r["ngay"] for r in rows})}
 
-    def qc_theo_ngay(self, ids, tu, den):
+    def qc_theo_ngay(self, ids, tu, den, cds=None):
         theo: dict = {}
-        for r in self.bang["qc_tk_ngay"].values():
-            if r["advertiser_id"] in ids and tu <= r["ngay"] <= den:
-                theo.setdefault(r["ngay"], []).append(r)
+        for r in self._nguon(ids, tu, den, cds):
+            theo.setdefault(r["ngay"], []).append(r)
 
         # 22/10/2026: như SQL — cộng chỉ số kiểu SỐ trong JSON chi_so, thiếu / chữ → 0.
         def json_so(rs, k):
@@ -511,11 +531,13 @@ class GiaKhoQC:
                            else None),
     }
 
-    def qc_bang(self, cap, ids, tu, den, *, sap, tang=False, mau="", cd="", n=10, bo_qua=0):
+    def qc_bang(self, cap, ids, tu, den, *, sap, tang=False, mau="", cd="", n=10, bo_qua=0,
+                cds=None):
         bang, khoa = (("qc_campaign_ngay", "campaign_id") if cap == "campaign"
                       else ("qc_ad_ngay", "ad_id"))
         cac = [r for r in self.bang[bang].values() if r["advertiser_id"] in ids
-               and tu <= r["ngay"] <= den and (not cd or r.get("campaign_id") == cd)]
+               and tu <= r["ngay"] <= den and (not cd or r.get("campaign_id") == cd)
+               and (cds is None or r.get("campaign_id") in cds)]
         nhom: dict = {}
         for r in cac:
             nhom.setdefault(r[khoa], []).append(r)

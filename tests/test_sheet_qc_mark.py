@@ -179,18 +179,19 @@ def test_kho_sheet_tao_nguon_mark_ghi_cot_nguon(monkeypatch):
     def tra(sql, ts):
         if sql.startswith("INSERT"):
             assert sql.count("%s") == len(ts)
-            return [{"id": 5, "n": len(ts), "nguon": ts[-1] if len(ts) == 12 else None}]
+            return [{"id": 5, "n": len(ts), "nguon": ts[-1] if len(ts) == 13 else None}]
         return [{"dang": 0, "gio": 0}]
     goi, kn = _ket_noi_gia(tra)
     monkeypatch.setattr(KS, "ket_noi", kn)
     d = datetime.date(2026, 10, 1)
-    assert KS.tao(XEM, "hapas", "tiktok", None, d, d, nguon="mark") == {"id": 5, "n": 12,
+    # 23/10/2026: + cột ten_cd (lọc tên chiến dịch cấp trang) trước nguon.
+    assert KS.tao(XEM, "hapas", "tiktok", None, d, d, nguon="mark") == {"id": 5, "n": 13,
                                                                         "nguon": "mark"}
     ins = [s for s, _ in goi if s.startswith("INSERT")][0]
-    assert "sap, chieu, nguon)" in ins
+    assert "sap, chieu, ten_cd, nguon)" in ins
     # Khoá người TRƯỚC khi INSERT (cùng thứ tự khoá với trigger cho cả hai nguồn).
     assert goi[1][0].startswith("SELECT pg_advisory_xact_lock") and goi[1][1] == ["sheet_qc|" + XEM]
-    assert KS.tao(XEM, "hapas", "tiktok", None, d, d)["n"] == 11           # web: không cột nguon
+    assert KS.tao(XEM, "hapas", "tiktok", None, d, d)["n"] == 12           # web: không cột nguon
     with pytest.raises(ValueError):
         KS.tao(XEM, "hapas", "tiktok", None, d, d, nguon="khac")
     assert "nguon" in KS._COT_MARK and "nguon" not in KS._COT_WEB
@@ -323,7 +324,7 @@ def test_schema_mark_them_dong_nguon_rls_va_trigger():
     ins = re.search(r"GRANT INSERT \(([^)]*)\)\s+ON yeu_cau_sheet_qc TO mark;", khoi).group(1)
     assert {x.strip() for x in ins.split(",")} == {"nguoi_hoi", "ben", "nen_tang", "tk", "tk_ds",
                                                     "tu", "den", "tim", "cd", "sap", "chieu",
-                                                    "nguon"}
+                                                    "ten_cd", "nguon"}      # ten_cd: 23/10/2026
     assert "GRANT USAGE ON SEQUENCE yeu_cau_sheet_qc_id_seq TO mark;" in khoi
     # Web KHÔNG được ghi cột nguon (luôn mặc định 'web'); mark không DELETE.
     web = re.search(r"GRANT INSERT \(([^)]*)\)\s+ON yeu_cau_sheet_qc TO lang_nghe_web;", khoi).group(1)

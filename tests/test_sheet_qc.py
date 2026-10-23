@@ -36,7 +36,7 @@ class GiaKhoSheet:
         self.rows: list[dict] = []
 
     def tao(self, nguoi_hoi, ben, nen_tang, tk, tu, den, *, tran_gio=KS.TRAN_GIO, tk_ds=None,
-            tim=None, cd=None, sap=None, chieu=None):
+            tim=None, cd=None, sap=None, chieu=None, ten_cd=None):
         bay = datetime.datetime.now(UTC)
         cua = [r for r in self.rows if r["nguoi_hoi"] == nguoi_hoi]
         dang = sum(1 for r in cua if KS.hien_trang(r, bay) in ("cho", "dang_tao"))
@@ -47,7 +47,7 @@ class GiaKhoSheet:
         ds = list(tk_ds or []) or None                 # như KS.tao: một mã → ghi cả cột tk cũ
         r = {"id": len(self.rows) + 1, "nguoi_hoi": nguoi_hoi, "ben": ben, "nen_tang": nen_tang,
              "tk": tk or (ds[0] if ds and len(ds) == 1 else None), "tk_ds": ds, "tu": tu,
-             "den": den, "tim": tim, "cd": cd, "sap": sap, "chieu": chieu,
+             "den": den, "tim": tim, "cd": cd, "sap": sap, "chieu": chieu, "ten_cd": ten_cd,
              "trang_thai": "cho", "tieu_de": None, "sheet_url": None,
              "so_dong": {}, "loi": None, "da_nhan_tin": False, "tao_luc": bay, "bat_dau_luc": None,
              "xong_luc": None}
@@ -264,8 +264,17 @@ class KhoNghe:
     def ten_ben(self):
         return {"hapas": "HAPAS", "matemade": "MATEMADE"}
 
-    def doc_theo_ngay(self, ids, tu, den):
-        rows = [{"advertiser_id": a, "ngay": tu + datetime.timedelta(days=i), "chi": 100000.0 * (i + 1),
+    # 23/10/2026: lọc tên chiến dịch cấp trang — ghi lại `cds` mỗi lần đọc (bài thử kiểm mọi tab).
+    cds_doc: list = []
+    ma_cd = ["17001"]
+
+    def ma_cd_theo_ten(self, ids, tu, den, maus):
+        self.cds_doc = [*self.cds_doc, ("ma", tuple(maus))]
+        return list(self.ma_cd)
+
+    def doc_theo_ngay(self, ids, tu, den, cds=None):
+        self.cds_doc = [*self.cds_doc, ("ngay", cds)]
+        rows =[{"advertiser_id": a, "ngay": tu + datetime.timedelta(days=i), "chi": 100000.0 * (i + 1),
                  "hien_thi": 10000, "reach": 6000, "click": 120, "view_video": 4000, "follow": 20,
                  "thich": 50, "binh_luan": 5, "chia_se": 2, "ket_qua": 10}
                 for a in ids for i in range((den - tu).days + 1)]
@@ -286,8 +295,9 @@ class KhoNghe:
                 for i in range(1, 4)]
         return {"rows": rows, "tong": 12000}                 # bị cắt: 3 / 12.000
 
-    def doc_tong_tien_te(self, ids, tu, den):
+    def doc_tong_tien_te(self, ids, tu, den, cds=None):
         """Tổng TOÀN phạm vi (kho thật: SUM … GROUP BY tiền tệ, không trần) — cố ý khác cộng dòng."""
+        self.cds_doc = [*self.cds_doc, ("tong", cds)]
         tien = {t["advertiser_id"]: t["tien_te"] for t in self.cac_tk()}
         ra = {}
         for a in ids:
@@ -485,11 +495,12 @@ def test_schema_quyen_rls_trigger():
     assert a > sql.index("GRANT SELECT ON ALL TABLES IN SCHEMA public TO lang_nghe_web;")
     khoi = sql[a:sql.index("COMMIT;", a)]
     ins = re.search(r"GRANT INSERT \(([^)]*)\)\s+ON yeu_cau_sheet_qc TO lang_nghe_web;", khoi).group(1)
+    # 23/10/2026: + ten_cd (lọc tên chiến dịch cấp trang).
     assert {x.strip() for x in ins.split(",")} == {"nguoi_hoi", "ben", "nen_tang", "tk", "tu", "den",
-                                                    "tk_ds", "tim", "cd", "sap", "chieu"}
+                                                    "tk_ds", "tim", "cd", "sap", "chieu", "ten_cd"}
     doc = re.search(r"GRANT SELECT \(([^)]*)\)\s+ON yeu_cau_sheet_qc TO lang_nghe_web;", khoi).group(1)
     assert "loi_noi_bo" not in doc and "sheet_url" in doc
-    assert {"tk_ds", "tim", "cd", "sap", "chieu"} <= {x.strip() for x in doc.split(",")}
+    assert {"tk_ds", "tim", "cd", "sap", "chieu", "ten_cd"} <= {x.strip() for x in doc.split(",")}
     # Mọi cột web đọc (KS._COT_WEB) đều được cấp SELECT theo cột.
     assert {x.strip() for x in KS._COT_WEB.split(",")} <= {x.strip() for x in doc.split(",")}
     upd = re.search(r"GRANT UPDATE \(([^)]*)\) ON yeu_cau_sheet_qc TO mark;", khoi).group(1)
@@ -814,10 +825,11 @@ def test_kho_sheet_tao_ghi_cot_moi_va_bao_loc_sai(monkeypatch):
 
     def tra(sql, ts):
         if sql.startswith("INSERT"):
-            assert sql.count("%s") == len(ts) == 11
+            assert sql.count("%s") == len(ts) == 12                    # + ten_cd (23/10/2026)
             if ts[7] == "hong":
                 raise InvalidParameterValue("yeu_cau_sheet_qc: tim")
-            return [{"id": 1, "tk": ts[3], "tk_ds": ts[4], "tim": ts[7]}]
+            return [{"id": 1, "tk": ts[3], "tk_ds": ts[4], "tim": ts[7]}
+                    | ({"ten_cd": ts[11]} if ts[11] else {})]
         return [{"dang": 0, "gio": 0}]
     goi, kn = _ket_noi_gia(tra)
     monkeypatch.setattr(KS, "ket_noi", kn)
@@ -830,7 +842,10 @@ def test_kho_sheet_tao_ghi_cot_moi_va_bao_loc_sai(monkeypatch):
     with pytest.raises(LoiDuLieu, match="Bộ lọc không hợp lệ"):
         KS.tao(QL, "hapas", "tiktok", None, d, d, tim="hong")
     ins = [s for s, _ in goi if s.startswith("INSERT")][0]
-    assert "tk_ds, tu, den, tim, cd, sap, chieu" in ins and "RETURNING " + KS._COT_WEB in ins
+    assert "tk_ds, tu, den, tim, cd, sap, chieu, ten_cd" in ins and "RETURNING " + KS._COT_WEB in ins
+    # 23/10/2026: lọc tên chiến dịch cấp trang ghi cột ten_cd; rỗng → NULL.
+    assert KS.tao(QL, "hapas", "tiktok", None, d, d, ten_cd="TEASER SALE")["ten_cd"] == "TEASER SALE"
+    assert "ten_cd" not in KS.tao(QL, "hapas", "tiktok", None, d, d, ten_cd="")
 
 
 def test_schema_cot_loc_va_trigger_kiem():
@@ -855,6 +870,11 @@ def test_schema_cot_loc_va_trigger_kiem():
     assert {x.strip().strip("'") for x in chieu.split(",")} == set(QC.CHIEU_BANG)
     assert f"cardinality(NEW.tk_ds) > {QC.TK_TOI_DA}" in chuan
     assert "x !~ '^(act_)?[0-9]{1,30}$'" in chuan
-    assert chuan.count("USING ERRCODE = 'invalid_parameter_value'") == 5
+    # 23/10/2026: + ten_cd (lọc tên chiến dịch cấp trang): cột riêng, cùng trần độ dài như tim.
+    assert "ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS ten_cd TEXT;" in sql
+    assert "COMMENT ON COLUMN yeu_cau_sheet_qc.ten_cd IS" in sql
+    assert f"length(NEW.ten_cd) > {QC.TIM_TOI_DA}" in chuan
+    assert "NEW.ten_cd := NULLIF(btrim(NEW.ten_cd), '');" in chuan
+    assert chuan.count("USING ERRCODE = 'invalid_parameter_value'") == 6
     # Kiểm bộ lọc TRƯỚC khoá advisory / đếm trần (giá trị sai không giữ khoá).
     assert chuan.index("invalid_parameter_value") < chuan.index("pg_advisory_xact_lock")

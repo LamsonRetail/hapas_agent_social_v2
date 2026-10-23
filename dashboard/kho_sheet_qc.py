@@ -19,8 +19,8 @@ với `nguon="mark"`) — cùng trigger, cùng trần, cùng khoá advisory vớ
 Hàm dashboard gọi (lang_nghe_web): `tao`, `gan_day`. Tool Mark gọi (role mark, qua
 `hoi_dashboard_tool.KhoMark`): `tao` (nguon="mark"), `ten_ben`. Hàm bộ nghe gọi (role mark — tiến trình
 `xuat_sheet_qc` đổi `kho._dsn` sang DSN của Mark): `nhan`, `ket_thuc`, `da_nhan_tin`, `don_dep`,
-`ten_ben`, `doc_theo_ngay`, `doc_tong` (lọc / xếp bảng bằng SQL của `kho_qc.sql_bang`). Chỉ SQL
-tham số hoá.
+`ten_ben`, `doc_theo_ngay`, `doc_tong` (lọc / xếp bảng bằng SQL của `kho_qc.sql_bang`),
+`ma_cd_theo_ten` (23/10/2026: lọc tên chiến dịch cấp trang, cột `ten_cd`). Chỉ SQL tham số hoá.
 """
 from __future__ import annotations
 
@@ -42,8 +42,10 @@ QUA_HAN_PHUT = 30                  # chờ / đang tạo quá chừng này → c
 #: Trần dòng mỗi tab (trinh_bay_sheet nới lưới tới 20.000 dòng; tab quảng cáo hay lớn nhất).
 TRAN_DONG = {"ngay": 20_000, "chien_dich": 5_000, "quang_cao": 10_000}
 HANH_DONG = "tao_sheet_qc"
-_COT_WEB = ("id, nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, trang_thai, "
-            "tieu_de, sheet_url, so_dong, loi, da_nhan_tin, tao_luc, bat_dau_luc, xong_luc")
+#: 23/10/2026: + ten_cd (lọc tên chiến dịch cấp trang — schema.sql cấp SELECT / INSERT cột này).
+_COT_WEB = ("id, nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, ten_cd, "
+            "trang_thai, tieu_de, sheet_url, so_dong, loi, da_nhan_tin, tao_luc, bat_dau_luc, "
+            "xong_luc")
 _COT_MARK = _COT_WEB + ", loi_noi_bo, nguon"
 #: Cột nguon (22/10/2026): web không được cấp cột → CSDL đặt 'web'; tool Mark ghi 'mark' (RLS buộc).
 NGUON = ("web", "mark")
@@ -77,14 +79,16 @@ def ly_do_chan(dang: int, trong_gio: int, tran: int = TRAN_GIO) -> str | None:
 def tao(nguoi_hoi: str, ben: str, nen_tang: str, tk: str | None, tu: datetime.date,
         den: datetime.date, *, tran_gio: int = TRAN_GIO, tk_ds: list[str] | None = None,
         tim: str | None = None, cd: str | None = None, sap: str | None = None,
-        chieu: str | None = None, nguon: str | None = None) -> dict:
+        chieu: str | None = None, nguon: str | None = None, ten_cd: str | None = None) -> dict:
     """Thêm MỘT yêu cầu (trạng thái do trigger đặt). Trần kiểm NGUYÊN TỬ dưới cùng khoá advisory
     với trigger. Vượt trần → LoiDuLieu (câu cho người bấm). -> dòng vừa thêm (cột web đọc được).
     22/10/2026: `tk_ds` = các tài khoản đã chọn (None = mọi tài khoản của bên + nền tảng; một mã thì
     ghi cả cột `tk` cũ), `tim` / `cd` / `sap` / `chieu` = bộ lọc bảng (`quang_cao.loc_bang`).
     `nguon` (22/10/2026): None = dòng web (cột không có trong INSERT — role web không được cấp cột,
     CSDL đặt 'web'); "mark" = tool của Mark (role mark; RLS buộc đúng 'mark'). Khoá người ở dưới
-    lấy TRƯỚC khoá toàn hệ thống của trigger — cùng thứ tự cho cả hai nguồn."""
+    lấy TRƯỚC khoá toàn hệ thống của trigger — cùng thứ tự cho cả hai nguồn.
+    23/10/2026 (MKT): `ten_cd` = lọc tên chiến dịch cấp trang (`quang_cao.loc_ten_cd`) — bộ nghe
+    tính lại chiến dịch khớp lúc dựng và áp vào MỌI tab."""
     if nguon is not None and nguon not in NGUON:
         raise ValueError("nguon phải là web hoặc mark")
     with ket_noi() as c:
@@ -104,10 +108,10 @@ def tao(nguoi_hoi: str, ben: str, nen_tang: str, tk: str | None, tu: datetime.da
         try:
             return c.execute(
                 f"INSERT INTO yeu_cau_sheet_qc (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, "
-                f"sap, chieu{cot}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s{giu}) "
-                f"RETURNING {_COT_WEB}",
+                f"sap, chieu, ten_cd{cot}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                f"%s{giu}) RETURNING {_COT_WEB}",
                 (e, ben, nen_tang, tk or (ds[0] if ds and len(ds) == 1 else None), ds, tu, den,
-                 tim or None, cd or None, sap or None, chieu or None)
+                 tim or None, cd or None, sap or None, chieu or None, ten_cd or None)
                 + (() if nguon is None else (nguon,))).fetchone()
         except Exception as x:  # noqa: BLE001 — CheckViolation của trigger (trần chung)
             if type(x).__name__ == "CheckViolation":
@@ -216,38 +220,64 @@ def ten_ben() -> dict[str, str]:
 _GIAY_DOC = "120s"
 
 
-def doc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date,
-                  toi_da: int = TRAN_DONG["ngay"]) -> dict:
-    """Tab (a): mỗi tài khoản × ngày một dòng (qc_tk_ngay). Quá trần thì giữ các NGÀY GẦN NHẤT
-    (xếp ngày giảm dần khi cắt, trả lại tăng dần để hiện). -> {"rows", "tong"} (tong = số dòng
-    trước trần). Tổng KHÔNG cộng từ đây (có thể đã cắt) — dùng `doc_tong_tien_te`."""
-    if not ids:
-        return {"rows": [], "tong": 0}
+def ma_cd_theo_ten(ids: list[str], tu: datetime.date, den: datetime.date,
+                   maus: list[str]) -> list[str]:
+    """23/10/2026 (MKT): chiến dịch khớp lọc tên cấp trang (cột `ten_cd`, `quang_cao.loc_ten_cd`) —
+    CHÍNH `kho_qc.ma_cd_theo_ten` của trang, tính lại lúc dựng Sheet (tên mới nhất trong kỳ xuất)."""
+    from dashboard import kho_qc as KQ
+    if not ids or not maus:
+        return []
     with ket_noi() as c:
         c.execute(f"SET LOCAL statement_timeout = '{_GIAY_DOC}'")
-        rows = c.execute(
-            f"SELECT advertiser_id, ngay, {', '.join(QC.TEN_COT_SO)}, count(*) OVER () AS tong "
-            "FROM qc_tk_ngay WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s "
-            "ORDER BY ngay DESC, advertiser_id LIMIT %s", (list(ids), tu, den, int(toi_da))
-        ).fetchall()
+        return KQ.ma_cd_theo_ten_c(c, ids, tu, den, maus)
+
+
+def doc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date,
+                  toi_da: int = TRAN_DONG["ngay"], cds: list[str] | None = None) -> dict:
+    """Tab (a): mỗi tài khoản × ngày một dòng (qc_tk_ngay). Quá trần thì giữ các NGÀY GẦN NHẤT
+    (xếp ngày giảm dần khi cắt, trả lại tăng dần để hiện). -> {"rows", "tong"} (tong = số dòng
+    trước trần). Tổng KHÔNG cộng từ đây (có thể đã cắt) — dùng `doc_tong_tien_te`.
+    23/10/2026: `cds` (lọc tên chiến dịch cấp trang) → cộng từ qc_campaign_ngay chỉ các chiến dịch
+    đó, vẫn một dòng mỗi tài khoản × ngày; [] = rỗng, không truy vấn."""
+    if not ids or (cds is not None and not cds):
+        return {"rows": [], "tong": 0}
+    if cds is None:
+        sql = (f"SELECT advertiser_id, ngay, {', '.join(QC.TEN_COT_SO)}, count(*) OVER () AS tong "
+               "FROM qc_tk_ngay WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s "
+               "ORDER BY ngay DESC, advertiser_id LIMIT %s")
+        ts = (list(ids), tu, den, int(toi_da))
+    else:
+        from dashboard import kho_qc as KQ
+        sql = (f"SELECT advertiser_id, ngay, {KQ._TONG}, count(*) OVER () AS tong "
+               "FROM qc_campaign_ngay WHERE advertiser_id = ANY(%s) AND campaign_id = ANY(%s) "
+               "AND ngay BETWEEN %s AND %s GROUP BY advertiser_id, ngay "
+               "ORDER BY ngay DESC, advertiser_id LIMIT %s")
+        ts = (list(ids), list(cds), tu, den, int(toi_da))
+    with ket_noi() as c:
+        c.execute(f"SET LOCAL statement_timeout = '{_GIAY_DOC}'")
+        rows = c.execute(sql, ts).fetchall()
     rows = sorted(rows, key=lambda r: (r["ngay"], str(r["advertiser_id"])))
     return {"rows": [{k: v for k, v in r.items() if k != "tong"} for r in rows],
             "tong": int(rows[0]["tong"]) if rows else 0}
 
 
-def doc_tong_tien_te(ids: list[str], tu: datetime.date, den: datetime.date) -> dict[str, dict]:
+def doc_tong_tien_te(ids: list[str], tu: datetime.date, den: datetime.date,
+                     cds: list[str] | None = None) -> dict[str, dict]:
     """Tổng cả kỳ theo TIỀN TỆ tài khoản trên TOÀN phạm vi (không trần dòng) — dòng TỔNG của tab
-    theo ngày + Tổng quan không bao giờ lấy từ dòng đã cắt. -> {tiền tệ: {cột số: tổng}}."""
-    if not ids:
+    theo ngày + Tổng quan không bao giờ lấy từ dòng đã cắt. -> {tiền tệ: {cột số: tổng}}.
+    23/10/2026: `cds` → chỉ các chiến dịch khớp tên (qc_campaign_ngay); [] = {} không truy vấn."""
+    if not ids or (cds is not None and not cds):
         return {}
+    bang, loc_cd = (("qc_tk_ngay", "") if cds is None
+                    else ("qc_campaign_ngay", " AND q.campaign_id = ANY(%s)"))
     with ket_noi() as c:
         c.execute(f"SET LOCAL statement_timeout = '{_GIAY_DOC}'")
         rows = c.execute(
             f"SELECT COALESCE(NULLIF(k.tien_te, ''), 'VND') AS tien_te, "
             f"{', '.join(f'sum(q.{x})::float AS {x}' if x in QC.COT_TIEN else f'sum(q.{x})::bigint AS {x}' for x in QC.TEN_COT_SO)} "
-            "FROM qc_tk_ngay q JOIN tk_quang_cao k USING (advertiser_id) "
-            "WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s GROUP BY 1 ORDER BY 1",
-            (list(ids), tu, den)).fetchall()
+            f"FROM {bang} q JOIN tk_quang_cao k USING (advertiser_id) "
+            f"WHERE q.advertiser_id = ANY(%s){loc_cd} AND q.ngay BETWEEN %s AND %s GROUP BY 1 "
+            "ORDER BY 1", (list(ids), *([list(cds)] if cds is not None else []), tu, den)).fetchall()
     return {r["tien_te"]: {k: v for k, v in r.items() if k != "tien_te"} for r in rows}
 
 
@@ -263,30 +293,31 @@ _SO_NGAY = (", count(DISTINCT ngay) FILTER (WHERE COALESCE(hien_thi, 0) > 0 OR C
 
 def doc_tong(cap: str, ids: list[str], tu: datetime.date, den: datetime.date,
              toi_da: int | None = None, *, sap: str = "chi", tang: bool = False, mau: str = "",
-             cd: str = "") -> dict:
+             cd: str = "", cds: list[str] | None = None) -> dict:
     """Tab (b)/(c): tổng cả kỳ của từng chiến dịch / quảng cáo (nhóm theo mã + tài khoản); ≤ `toi_da`
     dòng. -> {"rows", "tong"} (tong = số đối tượng khớp trước trần).
 
     22/10/2026 (chủ dự án): Sheet chứa ĐÚNG những gì bảng trang Quảng cáo đang lọc — `mau` (tên, đã
     qua `quang_cao.chu_tim`), `cd` (mã chiến dịch), xếp `sap` + `tang` — bằng CHÍNH `kho_qc.sql_bang`
     + `kho_qc.ma_khop_ten` (không chép SQL), mọi dòng khớp (không chỉ một trang) tới trần.
-    Mặc định (chi, giảm) = thứ tự cũ: chi giảm dần, rồi hiển thị, rồi mã."""
-    if cap not in _CAP or not ids:
+    Mặc định (chi, giảm) = thứ tự cũ: chi giảm dần, rồi hiển thị, rồi mã.
+    23/10/2026: `cds` — chiến dịch khớp lọc tên cấp trang (`ma_cd_theo_ten`); [] = rỗng."""
+    if cap not in _CAP or not ids or (cds is not None and not cds):
         return {"rows": [], "tong": 0}
     from dashboard import kho_qc as KQ
     bang, khoa, ten, cap_qc = _CAP[cap]
     toi_da = int(toi_da or TRAN_DONG[cap])
-    pv = [list(ids), tu, den] + ([cd] if cd else [])
+    pv = KQ.tham_bang(ids, tu, den, cd, cds)
     with ket_noi() as c:
         c.execute(f"SET LOCAL statement_timeout = '{_GIAY_DOC}'")
         ma = None
         if mau:
-            ma = KQ.ma_khop_ten(c, cap_qc, ids, tu, den, mau, cd)
+            ma = KQ.ma_khop_ten(c, cap_qc, ids, tu, den, mau, cd, cds)
             if not ma:
                 return {"rows": [], "tong": 0}
         rows = c.execute(
             KQ.sql_bang(cap_qc, sap, tang, loc_ma=ma is not None, cd=bool(cd), them=_SO_NGAY,
-                        bo_qua=False),
+                        bo_qua=False, cds=cds is not None),
             pv + ([ma] if ma is not None else []) + [toi_da]).fetchall()
         if not rows:
             return {"rows": [], "tong": 0}
