@@ -363,8 +363,11 @@ def test_trang_co_khoi_va_o_loc():
     html = (GOC / "dashboard" / "templates" / "chi_so.html").read_text(encoding="utf-8")
     assert 'id="khoi-koc"' in html and 'id="loai-koc"' in html and "Theo từng video" in html
     assert 'id="koc-chua"' in html and "tổng hai nhóm" in html
+    # 23/10/2026 (chủ dự án: ghi chú vào dấu i): video chưa đọc lại được giỏ = nút "!" ở đầu thẻ.
+    assert 'class="goi-y goi-y--canh cs-goi-y" id="koc-chua" data-goi-y=""' in html
+    assert html.index('id="koc-chua"') < html.index('id="loai-koc"')
     assert html.count("cs-khung-cho--nn", html.index('id="loai-koc"'),
-                      html.index('id="koc-chua"')) == 2
+                      html.index("</section>", html.index('id="loai-koc"'))) == 2
     js = (GOC / "dashboard" / "static" / "chi_so.js").read_text(encoding="utf-8")
     assert '"kieu_trang", "koc", "y_dinh"' in js and "function veKoc(" in js
     assert '{ k: "koc", ten: "Loại KOC"' in js and "veKoc(d)" in js

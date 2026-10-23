@@ -138,11 +138,13 @@
     <div class="muc">
       <h3 class="muc__ten" id="koc-tieu-de">KOC affiliate vs KOC branding</h3>
       <button type="button" class="goi-y cs-goi-y" data-goi-y="Theo từng video; chỉ TikTok ngoài Internal channel. KOC affiliate = video gắn giỏ TikTok Shop, KOC branding = video không gắn giỏ. Video chỉ thấy ở feed hashtag được đọc lại qua hồ sơ nhà sáng tạo; video chưa đọc lại được (chưa thử, hoặc hồ sơ không còn thấy video) không vào nhóm nào. Cùng theo mọi bộ lọc khác; % là tỷ trọng trên tổng hai nhóm. Bấm một nhóm để chỉ xem nhóm đó.">i</button>
+      {#- 23/10/2026 (chủ dự án: ghi chú vào dấu i): số video chưa đọc lại được giỏ — trước là dòng mờ
+          dưới thẻ, nay là nút "!" (chữ do chi_so.js đặt theo số liệu). #}
+      <button type="button" class="goi-y goi-y--canh cs-goi-y" id="koc-chua" data-goi-y="" hidden>!</button>
       <span class="muc__phai muc__phu" id="koc-phu"></span>
     </div>
     <div class="cs-nn__ty" id="koc-ty"></div>
     <div class="cs-nn__luoi cs-koc__luoi" id="loai-koc"><div class="cs-khung-cho cs-khung-cho--nn"></div><div class="cs-khung-cho cs-khung-cho--nn"></div></div>
-    <p class="cs-koc__chua" id="koc-chua" hidden></p>
   </section>
 
   <section class="the-khoi" aria-labelledby="tn-tieu-de">
@@ -214,7 +216,7 @@
       <div class="cs-cd" id="chu-de"><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div><div class="cs-khung-cho cs-khung-cho--dong"></div></div>
     </section>
   </div>
-  <section class="the-khoi cs-tk" aria-labelledby="tk-tieu-de">
+  <section class="the-khoi cs-tk" id="khoi-tu-khoa" aria-labelledby="tk-tieu-de">
     <div class="muc">
       <h3 class="muc__ten" id="tk-tieu-de">Từ khoá nổi bật</h3>
       <button type="button" class="goi-y cs-goi-y" data-goi-y="Hashtag và cụm hai chữ trong bài + bình luận hợp lệ; đã bỏ từ khoá của dự án, bài Internal channel, spam, lời của thương hiệu, mảnh câu hỏi giá (“xin giá”, “giá bn” — xem khối Ý định mua) và mặc định cả bình luận minigame (lời chúc dự thi). Bản có dấu và không dấu, teen code (mk = mình) gộp làm một. Cỡ chữ theo số thảo luận.">i</button>
@@ -226,6 +228,7 @@
     </div>
     <div class="cs-may" id="tk-may"><div class="cs-khung-cho cs-khung-cho--may"></div></div>
     <ol class="cs-bang-tu" id="tk-bang" hidden></ol>
+    <div class="cs-tk__trang" id="tk-trang" hidden></div>
     <div class="cs-may__duoi">
       <span class="cs-cg-ngang"><span class="cs-chip cs-chip--tc"><span class="cs-chip__cham"></span>Tích cực</span><span class="cs-chip cs-chip--ti"><span class="cs-chip__cham"></span>Tiêu cực</span><span class="cs-chip cs-chip--tl"><span class="cs-chip__cham"></span>Trung lập / chưa rõ</span><button type="button" class="goi-y cs-goi-y" aria-label="Cách tô màu" data-goi-y="Màu = sắc thái nổi trội trong số thảo luận đã phân loại: xanh khi ≥ 25% tích cực và gấp đôi tiêu cực; đỏ khi ≥ 25% tiêu cực và gấp đôi tích cực; còn lại xám (trung lập, gồm hỏi giá). Rê chuột lên từ để xem tỉ lệ.">i</button></span>
       <span class="mo nho" id="tk-ghi-chu"></span>
@@ -311,7 +314,8 @@
   <p class="mo nho" id="chi-tiet-mo-ta"></p>
   <div class="cs-phan cs-ngan__tab" id="chi-tiet-tab" role="tablist" aria-label="Loại kết quả" hidden></div>
   <div class="chi-tiet__than" id="chi-tiet-than"></div>
-  <div class="phan-trang" id="chi-tiet-trang"></div>
+  {#- 23/10/2026 (chủ dự án): chỗ đặt thanh trang chung (PhanTrang.ve trong chi_so.js). #}
+  <div class="cs-ngan__trang" id="chi-tiet-trang"></div>
 </dialog>
 </div>
 {% endif %}
