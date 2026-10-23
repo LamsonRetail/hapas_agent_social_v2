@@ -644,6 +644,27 @@ def loc_bang(qp, co_tien: bool) -> dict:
             "chieu": chieu, "tc": so_trang(qp.get("tc")), "ta": so_trang(qp.get("ta"))}
 
 
+#: 23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): ô `ten_cd` lọc CẢ TRANG — KPI, biểu đồ,
+#: TikTok và Meta, hai bảng, kênh đăng, Lark Sheet chỉ tính chiến dịch có tên khớp (Khán giả theo
+#: tài khoản nên không theo được — trang ghi rõ). Dấu phẩy / chấm phẩy tách nhiều cụm = HOẶC.
+TACH_TEN_CD = re.compile(r"[,;]")
+
+
+def loc_ten_cd(qp) -> dict:
+    """Tham số `ten_cd` (lọc tên chiến dịch cấp trang) → {"chu": chữ gốc đã gọn (≤ TIM_TOI_DA),
+    "maus": các cụm đã qua `chu_tim`, không trùng}. Một chiến dịch khớp khi TÊN MỚI NHẤT trong kỳ chứa
+    BẤT KỲ cụm nào (`kho_qc.ma_cd_theo_ten`). Cụm không còn chữ/số Latin bị bỏ; có chữ mà mọi cụm bị
+    bỏ (vd "…", chữ Thái) → `maus` rỗng = KHÔNG khớp gì (cùng luật `tim`, không lờ đi). Bộ nghe Sheet
+    (`xuat_sheet_qc`) dùng lại hàm này cho cột `ten_cd` của yêu cầu."""
+    chu = " ".join(str(qp.get("ten_cd") or "").split())[:TIM_TOI_DA]
+    maus: list[str] = []
+    for cum in TACH_TEN_CD.split(chu):
+        m = chu_tim(cum)
+        if m and m not in maus:
+            maus.append(m)
+    return {"chu": chu, "maus": maus}
+
+
 def o_trang(trang: int, so_trang_: int) -> list[int | None]:
     """Các ô của thanh trang kiểu cổ điển (None = "…"): ≤ 8 trang hiện đủ; gần đầu
     1 2 3 4 5 6 … cuối; gần cuối 1 … (6 trang cuối); giữa 1 … t-1 t t+1 … cuối."""

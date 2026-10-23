@@ -35,6 +35,11 @@ viên — chỉ cần còn quyền ở bên. Hai luật CỨNG ở đây (không
     mọi tiền tệ (chỉ số đếm). Không xác định được quyền → coi như không có tiền.
 Dòng web giữ nguyên luật cũ (chỉ quản trị viên, đủ cột tiền).
 
+23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): cột `ten_cd` lọc CẢ Sheet — chiến dịch khớp
+tên tính lại LÚC DỰNG (`kho_sheet_qc.ma_cd_theo_ten`, cùng luật trang), rồi MỌI tab (theo ngày ×
+tài khoản cộng từ qc_campaign_ngay, chiến dịch, quảng cáo), số liệu chính và dòng TỔNG chỉ tính các
+chiến dịch đó. Tiêu đề + Tổng quan ghi rõ bộ lọc. Có chữ mà không còn cụm Latin nào → không khớp gì.
+
 Đường Sheet giống hệt `chi_so_ads` (meta_ads_tool, số quảng cáo): `trinh_bay_sheet.xuat` — tạo →
 khoá riêng tư TRƯỚC khi ghi số (`TB.khoa_rieng_tu`: đóng chia sẻ link / ngoài tổ chức, kiểm lại) →
 ghi → trang trí → Tổng quan → cấp quyền XEM cho người yêu cầu (hỏng thì ném — không bao giờ báo
@@ -143,6 +148,12 @@ def loc_yeu_cau(yc: dict, tien: bool = True) -> dict:
     return QC.loc_bang({k: yc.get(k) for k in ("tim", "cd", "sap", "chieu")}, tien)
 
 
+def loc_ten_cd(yc: dict) -> dict:
+    """Cột `ten_cd` (23/10/2026) qua CHÍNH `quang_cao.loc_ten_cd` của trang. Dòng cũ (NULL) = không
+    lọc ({"chu": "", "maus": []})."""
+    return QC.loc_ten_cd({"ten_cd": yc.get("ten_cd")})
+
+
 def tu_mark(yc: dict) -> bool:
     """Dòng do tool Mark thêm (cột nguon, 22/10/2026). Thiếu cột / dòng cũ = web."""
     return str(yc.get("nguon") or "web") == "mark"
@@ -196,8 +207,9 @@ def so_bo(yc: dict, tk: list[dict]) -> int:
     return len({str(x) for x in chon} - co)
 
 
-def mo_ta_loc(yc: dict, lb: dict, tk: list[dict]) -> list[str]:
-    """Các dòng "Bộ lọc" của tab Tổng quan — đúng những gì Sheet đã lọc (đầu trang + bảng)."""
+def mo_ta_loc(yc: dict, lb: dict, tk: list[dict], tcd: dict | None = None) -> list[str]:
+    """Các dòng "Bộ lọc" của tab Tổng quan — đúng những gì Sheet đã lọc (đầu trang + bảng).
+    `tcd` (23/10/2026) = {"chu", "so"}: lọc tên chiến dịch cấp trang + số chiến dịch khớp lúc dựng."""
     chon = yc.get("tk_ds") or ([yc["tk"]] if yc.get("tk") else [])
     ten = ", ".join(t.get("ten") or t["advertiser_id"] for t in tk[:6]) + (
         f" và {len(tk) - 6} tài khoản khác" if len(tk) > 6 else "")
@@ -205,25 +217,35 @@ def mo_ta_loc(yc: dict, lb: dict, tk: list[dict]) -> list[str]:
     ra = ["Bộ lọc tài khoản: " + (f"{len(tk)} tài khoản đã chọn ({ten})" if chon
                                   else f"mọi tài khoản của phạm vi ({len(tk)})")
           + (f"; bỏ {bo} tài khoản không thuộc phạm vi người yêu cầu được xem" if bo else "")]
+    co_cd = bool(tcd and tcd.get("chu"))
+    if co_cd:
+        ra.append(f"Lọc tên chiến dịch (áp vào CẢ Sheet — mọi tab, số liệu chính, dòng TỔNG): tên "
+                  f"chứa “{tcd['chu']}” (không phân biệt dấu; dấu phẩy = hoặc) — "
+                  + f"{int(tcd.get('so') or 0):,}".replace(",", ".")
+                  + " chiến dịch khớp trong kỳ. Số cộng ở cấp chiến dịch.")
     ra.append("Bộ lọc bảng (tab chiến dịch + quảng cáo): "
               + "; ".join([*([f"tìm theo tên “{lb['tim']}”"] if lb["tim"] else []),
                            *([f"chỉ chiến dịch mã {lb['cd']}"] if lb["cd"] else []),
                            cach_xep(lb)])
-              + ". Tab theo ngày × tài khoản chỉ theo tài khoản + khoảng ngày.")
+              + (". Tab theo ngày × tài khoản theo tài khoản + khoảng ngày + lọc tên chiến dịch."
+                 if co_cd else ". Tab theo ngày × tài khoản chỉ theo tài khoản + khoảng ngày."))
     return ra
 
 
 def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, tong: dict[str, dict],
-              ten_nen=QC.TEN_NEN_TANG_QC, lb: dict | None = None, tien: bool = True) -> list:
+              ten_nen=QC.TEN_NEN_TANG_QC, lb: dict | None = None, tien: bool = True,
+              tcd: dict | None = None) -> list:
     """Ba TB.Bang (tab a, b, c) từ dòng kho. `tk` = tài khoản trong phạm vi (cac_tk), `ngay` / `cd` /
     `qc` = {"rows", "tong"} của `kho_sheet_qc.doc_theo_ngay` / `doc_tong`; `tong` = tổng TOÀN phạm vi
     theo tiền tệ (`doc_tong_tien_te`) — dòng TỔNG không cộng từ dòng có thể đã cắt. `lb` = bộ lọc
     bảng (`loc_yeu_cau`) — chỉ để ghi mô tả tab đúng cách lọc / xếp. `tien` False (22/10/2026): không
     cột tiền, không cột Tiền tệ, `tong` đã gộp (`bo_tien_tong`); kiểm lại lần cuối — còn cột tiền
-    nào là ném (không bao giờ ghi)."""
+    nào là ném (không bao giờ ghi). `tcd` (23/10/2026): lọc tên chiến dịch cấp trang — ghi vào mô
+    tả MỌI tab (số đã lọc ở bước đọc)."""
     import trinh_bay_sheet as TB
     lb = lb or loc_yeu_cau({}, tien)
-    loc = (f", tên khớp “{lb['tim']}”" if lb["tim"] else "") + (
+    cd_ten = f", chỉ chiến dịch có tên chứa “{tcd['chu']}”" if tcd and tcd.get("chu") else ""
+    loc = cd_ten + (f", tên khớp “{lb['tim']}”" if lb["tim"] else "") + (
         f", chiến dịch {lb['cd']}" if lb["cd"] else "")
     thong_tin = {str(t["advertiser_id"]): t for t in tk}
 
@@ -244,8 +266,8 @@ def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, tong: dict[str, di
                *([tt] if tien else []), *_so(t, True, tien)] for tt, t in tong.items()]
     a = TB.Bang(TAB_NGAY, [TB.Cot("Ngày", "ngay"), *dau_tk, *cot_tt, *_cot_so(True, tien)],
                 rows_a, dong_tong=tong_a, gap_duoc=False, ten_tab=TAB_NGAY,
-                mo_ta="Mỗi tài khoản mỗi ngày một dòng (ngày theo múi giờ tài khoản); dòng TỔNG "
-                      + ("theo tiền tệ" if tien else "cả phạm vi (không có cột tiền)"),
+                mo_ta="Mỗi tài khoản mỗi ngày một dòng (ngày theo múi giờ tài khoản" + cd_ten
+                      + "); dòng TỔNG " + ("theo tiền tệ" if tien else "cả phạm vi (không có cột tiền)"),
                 loc_san="Mã TK" if len(thong_tin) > 1 else None, loc_san_ten="Tài khoản")
     # (b) theo chiến dịch
     rows_b = [[*tk_cua(r)[:3], str(r.get("campaign_id") or ""), r.get("ten") or "",
@@ -290,6 +312,9 @@ def tieu_de(yc: dict, tk: list[dict], ten_ben: str) -> str:
         pham_vi += f" · {tk[0].get('ten') or tk[0]['advertiser_id']}"
     elif chon and tk:
         pham_vi += f" · {len(tk)} tài khoản"
+    chu = loc_ten_cd(yc)["chu"]
+    if chu:                       # 23/10/2026: lọc tên chiến dịch cấp trang hiện ngay ở tên file
+        pham_vi += f" · chiến dịch “{chu[:60]}{'…' if len(chu) > 60 else ''}”"
     return f"{ten_nen_tieu_de(yc['nen_tang'], tk)} Ads · {pham_vi} · {tu:%d/%m}–{den:%d/%m/%Y}"
 
 
@@ -304,13 +329,16 @@ _SO_TQ = (("chi", "Chi tiêu", "tien", True, ""), ("hien_thi", "Hiển thị", "
 
 
 def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict, cd: dict,
-                   qc: dict, tong: dict[str, dict], lb: dict | None = None, tien: bool = True):
+                   qc: dict, tong: dict[str, dict], lb: dict | None = None, tien: bool = True,
+                   tcd: dict | None = None):
     """`tong` = tổng TOÀN phạm vi theo tiền tệ (`doc_tong_tien_te`), không từ dòng đã cắt. Ghi chú
-    đầu liệt kê bộ lọc đã dùng (`mo_ta_loc`). `tien` False: không số tiền nào, nói rõ vì sao."""
+    đầu liệt kê bộ lọc đã dùng (`mo_ta_loc`). `tien` False: không số tiền nào, nói rõ vì sao.
+    `tcd` (23/10/2026): lọc tên chiến dịch cấp trang {"chu", "so"} — tổng chỉ các chiến dịch khớp."""
     import trinh_bay_sheet as TB
     lb = lb or loc_yeu_cau(yc, tien)
     tu, den = _ngay(yc["tu"]), _ngay(yc["den"])
-    co_loc = bool(lb["tim"] or lb["cd"])
+    co_cd = bool(tcd and tcd.get("chu"))
+    co_loc = bool(lb["tim"] or lb["cd"] or co_cd)
     so_lieu = [TB.SoLieu("Tài khoản trong phạm vi", len(tk), "so_nguyen"),
                TB.SoLieu("Chiến dịch khớp bộ lọc" if co_loc else "Chiến dịch có phân phối",
                          cd["tong"], "so_nguyen"),
@@ -342,9 +370,12 @@ def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict,
         "Ngày theo múi giờ tài khoản quảng cáo. CTR tính lại từ TỔNG của từng dòng (không trung bình "
         "tỉ lệ). Ô trống = không có số / mẫu số bằng 0."])
     ghi_chu = [
-        *mo_ta_loc(yc, lb, tk),
-        "Số liệu chính + dòng TỔNG là tổng cả phạm vi tài khoản + khoảng ngày (bộ lọc bảng không áp "
-        "vào tổng — như số tổng của trang).",
+        *mo_ta_loc(yc, lb, tk, tcd),
+        ("Số liệu chính + dòng TỔNG là tổng các chiến dịch khớp lọc tên chiến dịch trong phạm vi "
+         "tài khoản + khoảng ngày (bộ lọc bảng không áp vào tổng — như số tổng của trang)."
+         if co_cd else
+         "Số liệu chính + dòng TỔNG là tổng cả phạm vi tài khoản + khoảng ngày (bộ lọc bảng không "
+         "áp vào tổng — như số tổng của trang)."),
         "Số đọc từ kho quảng cáo của dashboard (đồng bộ TikTok mỗi sáng 06:30, Meta 06:45, đọc lại "
         "7 ngày gần nhất) — giống trang Quảng cáo cùng bộ lọc.",
         *tien_ghi,
@@ -494,15 +525,24 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
         ten_ben = {**ks.ten_ben(), QC.TAT_CA: "Tất cả bên", QC.CHUA_GAN: "Chưa gán bên"}.get(
             ben, ben.upper())
         lb = loc_yeu_cau(yc, tien)
-        ngay = ks.doc_theo_ngay(ids, tu, den)
+        # 23/10/2026 (MKT): lọc tên chiến dịch cấp trang — chiến dịch khớp tính lại LÚC DỰNG, áp
+        # vào MỌI tab + tổng. Có chữ mà không còn cụm Latin nào → [] (không khớp gì, như trang).
+        tc = loc_ten_cd(yc)
+        cds = None
+        if tc["chu"]:
+            cds = ks.ma_cd_theo_ten(ids, tu, den, tc["maus"]) if tc["maus"] else []
+        lcd = {"cds": cds} if cds is not None else {}
+        tcd = {"chu": tc["chu"], "so": len(cds or [])} if tc["chu"] else None
+        ngay = ks.doc_theo_ngay(ids, tu, den, **lcd)
         if lb["tim"] and not lb["mau"]:
             # Chữ tìm không còn chữ/số Latin nào: không khớp gì (như bảng trang Quảng cáo).
             cd = qc = {"rows": [], "tong": 0}
         else:
-            loc = {"sap": lb["sap"], "tang": lb["chieu"] == "tang", "mau": lb["mau"], "cd": lb["cd"]}
+            loc = {"sap": lb["sap"], "tang": lb["chieu"] == "tang", "mau": lb["mau"], "cd": lb["cd"],
+                   **lcd}
             cd = ks.doc_tong("chien_dich", ids, tu, den, **loc)
             qc = ks.doc_tong("quang_cao", ids, tu, den, **loc)
-        tong = ks.doc_tong_tien_te(ids, tu, den)
+        tong = ks.doc_tong_tien_te(ids, tu, den, **lcd)
         if not tien:
             ngay, cd, qc = bo_tien_dong(ngay), bo_tien_dong(cd), bo_tien_dong(qc)
             tong = bo_tien_tong(tong)
@@ -517,8 +557,8 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
             con = QC.tk_xuat(q2, list(kho_qc.cac_tk()), ben, yc["nen_tang"], ids)
             return (PQ.co_quyen(q2) and {str(t["advertiser_id"]) for t in con} >= set(ids)
                     and (not tien or co_tien(q2, tk)))
-        kq = xuat(tde, dung_bang(tk, ngay, cd, qc, tong, lb=lb, tien=tien),
-                  dung_tong_quan(yc, tk, ten_ben, tde, ngay, cd, qc, tong, lb, tien=tien),
+        kq = xuat(tde, dung_bang(tk, ngay, cd, qc, tong, lb=lb, tien=tien, tcd=tcd),
+                  dung_tong_quan(yc, tk, ten_ben, tde, ngay, cd, qc, tong, lb, tien=tien, tcd=tcd),
                   sau_khi_tao=TB.khoa_rieng_tu,
                   cap_quyen=lambda tok: cap_quyen_xem(
                       lark, tok, email, con_quyen, uid, CAU_HET_PHAM_VI if mark else CAU_HET_QT))

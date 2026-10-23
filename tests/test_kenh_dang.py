@@ -176,11 +176,15 @@ class GiaKhoKenh(GiaKhoQC):
                 "cap_nhat_luc": self.bay}
         return len(rows)
 
-    def qc_kenh_dang(self, ids, tu, den, *, sap="chi", n=20):
+    def qc_kenh_dang(self, ids, tu, den, *, sap="chi", n=20, cds=None):
         self._kiem()
+        self.cds_kenh = cds                    # 23/10/2026: bài thử kiểm lọc tên chiến dịch đi tới đây
+        if cds is not None and not cds:
+            return {"rows": [], "tong": 0, "biet": {}, "chua_ro": {}}
         theo_ad: dict[tuple, dict] = {}
         for r in self.bang["qc_ad_ngay"].values():
-            if r["advertiser_id"] in ids and tu <= r["ngay"] <= den:
+            if r["advertiser_id"] in ids and tu <= r["ngay"] <= den and (
+                    cds is None or r.get("campaign_id") in cds):
                 k = (r["advertiser_id"], r["ad_id"])
                 theo_ad.setdefault(k, []).append(r)
         nhom, biet, chua = {}, [], []

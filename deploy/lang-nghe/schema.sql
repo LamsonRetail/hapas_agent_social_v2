@@ -972,6 +972,11 @@ ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS tk_ds TEXT[],
 -- chỉ quét bảng (nhỏ) một lần. IF NOT EXISTS: chạy lại bỏ qua cả ràng buộc.
 ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS nguon TEXT NOT NULL DEFAULT 'web'
   CHECK (nguon IN ('web', 'mark'));
+-- 23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): ten_cd = lọc tên chiến dịch CẤP TRANG
+-- (`quang_cao.loc_ten_cd`: dấu phẩy / chấm phẩy = hoặc, so khớp bỏ dấu). Bộ nghe tính lại chiến dịch
+-- khớp lúc dựng và áp vào MỌI tab + tổng. Cột NULL không mặc định: tức thì, không viết lại bảng.
+-- Trigger chuan_yeu_cau_sheet_qc kiểm độ dài (như tim).
+ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS ten_cd TEXT;
 CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_nguoi ON yeu_cau_sheet_qc (nguoi_hoi, tao_luc DESC);
 CREATE INDEX IF NOT EXISTS yeu_cau_sheet_qc_cho ON yeu_cau_sheet_qc (trang_thai, id)
   WHERE trang_thai IN ('cho', 'dang_tao');
@@ -1005,6 +1010,7 @@ BEGIN
   -- (app báo "Bộ lọc không hợp lệ", không lẫn với trần check_violation).
   NEW.tim := NULLIF(btrim(NEW.tim), '');
   NEW.cd := NULLIF(btrim(NEW.cd), '');
+  NEW.ten_cd := NULLIF(btrim(NEW.ten_cd), '');
   IF cardinality(NEW.tk_ds) = 0 THEN
     NEW.tk_ds := NULL;
   END IF;
@@ -1014,6 +1020,10 @@ BEGIN
   END IF;
   IF NEW.tim IS NOT NULL AND length(NEW.tim) > 100 THEN
     RAISE EXCEPTION 'yeu_cau_sheet_qc: tim quá 100 ký tự' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- 23/10/2026: lọc tên chiến dịch cấp trang — cùng trần quang_cao.TIM_TOI_DA như tim.
+  IF NEW.ten_cd IS NOT NULL AND length(NEW.ten_cd) > 100 THEN
+    RAISE EXCEPTION 'yeu_cau_sheet_qc: ten_cd quá 100 ký tự' USING ERRCODE = 'invalid_parameter_value';
   END IF;
   IF NEW.cd IS NOT NULL AND NEW.cd !~ '^[0-9A-Za-z_-]{0,64}$' THEN
     RAISE EXCEPTION 'yeu_cau_sheet_qc: cd sai' USING ERRCODE = 'invalid_parameter_value';
@@ -1808,6 +1818,7 @@ COMMENT ON COLUMN yeu_cau_sheet_qc.tim IS 'Chữ tìm theo tên của bảng chi
 COMMENT ON COLUMN yeu_cau_sheet_qc.cd IS 'Mã chiến dịch của bộ lọc bảng (chỉ chiến dịch đó + quảng cáo của nó); NULL = mọi chiến dịch. Từ 22/10/2026.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.sap IS 'Cột xếp tab chiến dịch / quảng cáo: chi, hien_thi, cpm, click, ctr, view, tuong_tac, follow, roas; NULL (dòng cũ) = chi. Từ 22/10/2026.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.chieu IS 'Chiều xếp: giam (cao → thấp) hoặc tang; NULL (dòng cũ) = giam. Từ 22/10/2026.';
+COMMENT ON COLUMN yeu_cau_sheet_qc.ten_cd IS 'Lọc tên chiến dịch CẤP TRANG (ô "Tên chiến dịch" của Bộ lọc đầu trang Quảng cáo, ≤ 100 ký tự; dấu phẩy / chấm phẩy = hoặc, so khớp bỏ dấu với tên mới nhất trong kỳ): mọi tab + tổng của Sheet chỉ tính các chiến dịch khớp. NULL = không lọc. Từ 23/10/2026.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.nguon IS 'Dòng từ đâu: web (nút trên trang Quảng cáo, chỉ quản trị viên — mặc định, web không ghi được cột này) hoặc mark (người hỏi Mark trên Lark nhờ xuất Sheet, tool xuat_sheet_qc). Từ 22/10/2026; dòng cũ = web.';
 COMMENT ON COLUMN yeu_cau_sheet_qc.tu IS 'Ngày đầu khoảng xuất (ngày theo múi giờ tài khoản, như qc_tk_ngay.ngay).';
 COMMENT ON COLUMN yeu_cau_sheet_qc.den IS 'Ngày cuối khoảng xuất; tối đa 400 ngày (CHECK).';
@@ -1925,10 +1936,12 @@ COMMIT;
 BEGIN;
 REVOKE ALL ON yeu_cau_sheet_qc FROM mark, lang_nghe_web;
 REVOKE ALL ON SEQUENCE yeu_cau_sheet_qc_id_seq FROM mark, lang_nghe_web;
-GRANT SELECT (id, nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, trang_thai,
-              tieu_de, sheet_url, so_dong, loi, da_nhan_tin, tao_luc, bat_dau_luc, xong_luc)
+-- 23/10/2026: + ten_cd (lọc tên chiến dịch cấp trang) ở SELECT / INSERT của web và INSERT của Mark.
+GRANT SELECT (id, nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, ten_cd,
+              trang_thai, tieu_de, sheet_url, so_dong, loi, da_nhan_tin, tao_luc, bat_dau_luc,
+              xong_luc)
   ON yeu_cau_sheet_qc TO lang_nghe_web;
-GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu)
+GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, ten_cd)
   ON yeu_cau_sheet_qc TO lang_nghe_web;
 GRANT USAGE ON SEQUENCE yeu_cau_sheet_qc_id_seq TO lang_nghe_web;
 GRANT SELECT ON yeu_cau_sheet_qc TO mark;
@@ -1936,7 +1949,7 @@ GRANT UPDATE (trang_thai, tieu_de, sheet_url, so_dong, loi, loi_noi_bo, da_nhan_
               xong_luc) ON yeu_cau_sheet_qc TO mark;
 -- 22/10/2026 (tool xuat_sheet_qc): Mark THÊM đúng các cột yêu cầu + nguon (RLS sheet_qc_them_mark buộc
 -- nguon = 'mark'); trạng thái / kết quả / mốc giờ do trigger đặt như dòng web. Không DELETE.
-GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, nguon)
+GRANT INSERT (nguoi_hoi, ben, nen_tang, tk, tk_ds, tu, den, tim, cd, sap, chieu, ten_cd, nguon)
   ON yeu_cau_sheet_qc TO mark;
 GRANT USAGE ON SEQUENCE yeu_cau_sheet_qc_id_seq TO mark;
 COMMIT;

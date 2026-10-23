@@ -445,14 +445,28 @@ _TONG = ", ".join(f"sum({c})::float AS {c}" if c in QC.COT_TIEN else f"sum({c}):
                   for c in QC.TEN_COT_SO)
 
 
-def qc_tong(ids: list[str], tu: datetime.date, den: datetime.date) -> dict:
-    """Tổng các cột số của các tài khoản `ids` trong [tu, den]."""
-    if not ids:
+def _nguon(ids: list[str], tu: datetime.date, den: datetime.date,
+           cds: list[str] | None) -> tuple[str, list]:
+    """(FROM … WHERE …, tham số) của số tổng / theo ngày. 23/10/2026 (MKT, lọc tên chiến dịch cấp
+    trang): `cds` None = cả tài khoản (qc_tk_ngay, như cũ); danh sách = chỉ các chiến dịch đó, cộng
+    từ qc_campaign_ngay (cùng cột số + JSON chi_so)."""
+    if cds is None:
+        return ("FROM qc_tk_ngay WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s",
+                [list(ids), tu, den])
+    return ("FROM qc_campaign_ngay WHERE advertiser_id = ANY(%s) AND campaign_id = ANY(%s) "
+            "AND ngay BETWEEN %s AND %s", [list(ids), list(cds), tu, den])
+
+
+def qc_tong(ids: list[str], tu: datetime.date, den: datetime.date,
+            cds: list[str] | None = None) -> dict:
+    """Tổng các cột số của các tài khoản `ids` trong [tu, den]. `cds` (23/10/2026): chỉ các chiến
+    dịch này (`ma_cd_theo_ten`); [] = không chiến dịch nào khớp → {} không truy vấn."""
+    if not ids or (cds is not None and not cds):
         return {}
+    tu_dau, ts = _nguon(ids, tu, den, cds)
     with ket_noi() as c:
-        return c.execute(f"SELECT {_TONG}, count(DISTINCT ngay) AS so_ngay FROM qc_tk_ngay "
-                         "WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s",
-                         (list(ids), tu, den)).fetchone() or {}
+        return c.execute(f"SELECT {_TONG}, count(DISTINCT ngay) AS so_ngay {tu_dau}",
+                         ts).fetchone() or {}
 
 
 def _tong_json(khoa: str, ten: str) -> str:
@@ -469,14 +483,16 @@ def _tong_json(khoa: str, ten: str) -> str:
 _TONG_XEM_SP = ", ".join(_tong_json(k, ma) for ma, k, *_ in QC.CHUOI_XEM_SP)
 
 
-def qc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date) -> list[dict]:
-    """Tổng cột số theo ngày + hai chuỗi xem trang sản phẩm (`QC.TEN_CHUOI_XEM_SP`)."""
-    if not ids:
+def qc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date,
+                 cds: list[str] | None = None) -> list[dict]:
+    """Tổng cột số theo ngày + hai chuỗi xem trang sản phẩm (`QC.TEN_CHUOI_XEM_SP`). `cds`: như
+    `qc_tong`."""
+    if not ids or (cds is not None and not cds):
         return []
+    tu_dau, ts = _nguon(ids, tu, den, cds)
     with ket_noi() as c:
-        return c.execute(f"SELECT ngay, {_TONG}, {_TONG_XEM_SP} FROM qc_tk_ngay "
-                         "WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s "
-                         "GROUP BY ngay ORDER BY ngay", (list(ids), tu, den)).fetchall()
+        return c.execute(f"SELECT ngay, {_TONG}, {_TONG_XEM_SP} {tu_dau} GROUP BY ngay ORDER BY ngay",
+                         ts).fetchall()
 
 
 _SAP_SQL = {"chi": "chi", "hien_thi": "hien_thi", "view_video": "view_video",
@@ -536,27 +552,38 @@ SAP_BANG_SQL = {
 _TIM_BANG = {"campaign": ("ten",), "ad": ("ten_ad", "ten_campaign")}
 
 
-def _dk_bang(cd: bool) -> str:
-    return "advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s" + (" AND campaign_id = %s" if cd else "")
+def _dk_bang(cd: bool, cds: bool = False) -> str:
+    """23/10/2026: `cds` — lọc tên chiến dịch cấp trang: chỉ dòng có campaign_id trong danh sách
+    (cấp chiến dịch: chính nó; cấp quảng cáo: quảng cáo của các chiến dịch đó)."""
+    return ("advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s"
+            + (" AND campaign_id = %s" if cd else "") + (" AND campaign_id = ANY(%s)" if cds else ""))
 
 
-def sql_ten_bang(cap: str, *, cd: bool) -> str:
-    """Tên mới nhất của mọi đối tượng trong kỳ (để lọc theo tên ở Python). Tham số: ids, tu, den, [cd]."""
+def tham_bang(ids: list[str], tu: datetime.date, den: datetime.date, cd: str = "",
+              cds: list[str] | None = None) -> list:
+    """Tham số của `_dk_bang`, đúng thứ tự: ids, tu, den, [cd], [cds]."""
+    return [list(ids), tu, den] + ([cd] if cd else []) + ([list(cds)] if cds is not None else [])
+
+
+def sql_ten_bang(cap: str, *, cd: bool, cds: bool = False) -> str:
+    """Tên mới nhất của mọi đối tượng trong kỳ (để lọc theo tên ở Python). Tham số: ids, tu, den,
+    [cd], [cds]."""
     bang, khoa, _ = _TOP[cap]
     return (f"SELECT DISTINCT ON ({khoa}) {khoa}, {', '.join(_TIM_BANG[cap])} FROM {bang} "
-            f"WHERE {_dk_bang(cd)} ORDER BY {khoa}, ngay DESC")
+            f"WHERE {_dk_bang(cd, cds)} ORDER BY {khoa}, ngay DESC")
 
 
 def sql_bang(cap: str, sap: str, tang: bool, *, loc_ma: bool, cd: bool, them: str = "",
-             bo_qua: bool = True) -> str:
+             bo_qua: bool = True, cds: bool = False) -> str:
     """SQL một bảng chiến dịch / quảng cáo: tổng theo đối tượng trong kỳ (lọc chiến dịch `cd`, lọc
     mã khớp tên `loc_ma`) → xếp theo `sap` → LIMIT [OFFSET], kèm `tong_khop` (số dòng khớp trước
-    LIMIT). Tham số theo thứ tự: ids, tu, den, [cd], [mã], n, [bỏ qua].
+    LIMIT). Tham số theo thứ tự: ids, tu, den, [cd], [cds], [mã], n, [bỏ qua].
     22/10/2026: `bo_qua` — trang của bảng trang Quảng cáo (OFFSET); bộ nghe Sheet (`kho_sheet_qc.
     doc_tong`) dùng CHÍNH hàm này không OFFSET, `them` = cột tổng thêm (hằng trong mã, không bao
-    giờ từ tham số) — cùng luật lọc / xếp hai đầu."""
+    giờ từ tham số) — cùng luật lọc / xếp hai đầu. 23/10/2026: `cds` — chỉ các chiến dịch khớp tên
+    của Bộ lọc đầu trang (`ma_cd_theo_ten`)."""
     bang, khoa, _ = _TOP[cap]
-    dk = _dk_bang(cd) + (f" AND {khoa} = ANY(%s)" if loc_ma else "")
+    dk = _dk_bang(cd, cds) + (f" AND {khoa} = ANY(%s)" if loc_ma else "")
     xep = SAP_BANG_SQL.get(sap, "t.hien_thi")
     return (f"WITH t AS (SELECT {khoa}, advertiser_id, {_TONG}{them} FROM {bang} WHERE {dk} "
             f"GROUP BY {khoa}, advertiser_id) SELECT t.*, count(*) OVER () AS tong_khop FROM t "
@@ -565,21 +592,47 @@ def sql_bang(cap: str, sap: str, tang: bool, *, loc_ma: bool, cd: bool, them: st
 
 
 def ma_khop_ten(c, cap: str, ids: list[str], tu: datetime.date, den: datetime.date, mau: str,
-                cd: str = "") -> list:
+                cd: str = "", cds: list[str] | None = None) -> list:
     """Mã chiến dịch / quảng cáo trong kỳ có TÊN MỚI NHẤT chứa `mau` (đã qua `quang_cao.chu_tim`) —
     so khớp ở PYTHON bằng đúng `chu_tim` (xem `qc_bang`). `c`: kết nối đang mở của nơi gọi."""
     _, khoa, _ = _TOP[cap]
-    pv = [list(ids), tu, den] + ([cd] if cd else [])
-    return [r[khoa] for r in c.execute(sql_ten_bang(cap, cd=bool(cd)), pv).fetchall()
+    pv = tham_bang(ids, tu, den, cd, cds)
+    return [r[khoa] for r in c.execute(sql_ten_bang(cap, cd=bool(cd), cds=cds is not None),
+                                       pv).fetchall()
             if any(mau in QC.chu_tim(r.get(x) or "") for x in _TIM_BANG[cap])]
 
 
+def ma_cd_theo_ten_c(c, ids: list[str], tu: datetime.date, den: datetime.date,
+                     maus: list[str]) -> list[str]:
+    """`ma_cd_theo_ten` trên kết nối đang mở `c` của nơi gọi."""
+    if not ids or not maus:
+        return []
+    return [r["campaign_id"] for r in c.execute(sql_ten_bang("campaign", cd=False),
+                                                [list(ids), tu, den]).fetchall()
+            if any(m in QC.chu_tim(r.get("ten") or "") for m in maus)]
+
+
+def ma_cd_theo_ten(ids: list[str], tu: datetime.date, den: datetime.date,
+                   maus: list[str]) -> list[str]:
+    """23/10/2026 (MKT, lọc tên chiến dịch CẤP TRANG — `quang_cao.loc_ten_cd`): mã các chiến dịch
+    của `ids` có dòng trong [tu, den] mà TÊN MỚI NHẤT trong kỳ chứa BẤT KỲ cụm nào của `maus` (đã
+    qua `chu_tim`). So khớp ở Python bằng đúng `chu_tim` như `ma_khop_ten` (bỏ dấu trong Postgres
+    chậm hơn — xem `qc_bang`). `maus` rỗng → [] (không khớp gì). Nơi gọi tính lại cho kỳ trước:
+    chiến dịch "teaser" kỳ này so với các chiến dịch "teaser" của kỳ trước."""
+    if not ids or not maus:
+        return []
+    with ket_noi() as c:
+        return ma_cd_theo_ten_c(c, ids, tu, den, maus)
+
+
 def qc_bang(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, *, sap: str,
-            tang: bool = False, mau: str = "", cd: str = "", n: int = 10, bo_qua: int = 0) -> dict:
+            tang: bool = False, mau: str = "", cd: str = "", n: int = 10, bo_qua: int = 0,
+            cds: list[str] | None = None) -> dict:
     """Bảng chiến dịch / quảng cáo của trang Quảng cáo — lọc tên (`mau` đã qua
     `quang_cao.chu_tim`), lọc chiến dịch `cd`, xếp theo mọi cột (`quang_cao.loc_bang` đã kiểm).
     Chỉ tài khoản `ids` (phạm vi người xem). -> {"rows": [...], "tong": số dòng khớp, "bo_qua":
-    OFFSET thật đã dùng}.
+    OFFSET thật đã dùng}. `cds` (23/10/2026): chỉ các chiến dịch khớp tên của Bộ lọc đầu trang
+    (`ma_cd_theo_ten`; [] = không khớp gì → bảng rỗng, không truy vấn), ghép được với `mau` / `cd`.
 
     Phân trang (22/10/2026): `n` dòng từ dòng thứ `bo_qua`. Quá trang cuối (URL cũ, vừa lọc hẹp
     lại) → đếm rồi trả TRANG CUỐI (không trả bảng rỗng khi vẫn có dòng khớp).
@@ -588,20 +641,20 @@ def qc_bang(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, *, 
     21.060 quảng cáo / 30 ngày, bỏ dấu bằng translate() trong Postgres mất ~1,8 giây, đọc tên mới
     nhất + so ở Python ~0,3 giây."""
     rong = {"rows": [], "tong": 0, "bo_qua": 0}
-    if not ids or cap not in _TOP:
+    if not ids or cap not in _TOP or (cds is not None and not cds):
         return rong
     _, khoa, _ = _TOP[cap]
     n = max(1, min(int(n), TOP_TOI_DA))
     bo_qua = max(0, int(bo_qua))
-    pv = [list(ids), tu, den] + ([cd] if cd else [])
+    pv = tham_bang(ids, tu, den, cd, cds)
     _, moi = sql_top(cap, "hien_thi")
     with ket_noi() as c:
         ma = None
         if mau:
-            ma = ma_khop_ten(c, cap, ids, tu, den, mau, cd)
+            ma = ma_khop_ten(c, cap, ids, tu, den, mau, cd, cds)
             if not ma:
                 return rong
-        sql = sql_bang(cap, sap, tang, loc_ma=ma is not None, cd=bool(cd))
+        sql = sql_bang(cap, sap, tang, loc_ma=ma is not None, cd=bool(cd), cds=cds is not None)
         ts = pv + ([ma] if ma is not None else [])
         rows = c.execute(sql, ts + [n, bo_qua]).fetchall()
         if not rows and bo_qua:
@@ -843,17 +896,20 @@ def ghi_kenh(rows: list[dict]) -> int:
 SAP_KENH_SQL = {"chi": "g.chi", "hien_thi": "g.hien_thi"}
 
 
-def sql_kenh_dang(cot: str) -> tuple[str, str]:
+def sql_kenh_dang(cot: str, cds: bool = False) -> tuple[str, str]:
     """(1) tổng theo kênh (ad đã biết kênh), xếp + LIMIT, kèm tổng số kênh; (2) tổng phần đã biết /
     chưa biết kênh (độ phủ + dòng "Chưa xác định").
     23/10/2026 (chủ dự án hỏi hai dòng "HAPAS · Chính chủ"): một tài khoản TikTok có thể chạy dưới
     NHIỀU danh tính (TT_USER gắn thẳng tài khoản QC + BC_AUTH_TT qua Business Center) → gộp theo
-    username khi đã biết (cùng @ = cùng kênh), chưa biết username thì theo mã danh tính."""
-    tong_a = ", ".join(f"sum(q.{c}) AS {c}" for c in QC.TEN_COT_SO)
+    username khi đã biết (cùng @ = cùng kênh), chưa biết username thì theo mã danh tính.
+    23/10/2026 (MKT, lọc tên chiến dịch cấp trang): `cds` — chỉ quảng cáo của các chiến dịch khớp
+    tên; tham số danh sách mã đứng ngay sau (ids, tu, den) ở CẢ hai câu."""
+    loc_cd = " AND q.campaign_id = ANY(%s)" if cds else ""
+    tong_a =", ".join(f"sum(q.{c}) AS {c}" for c in QC.TEN_COT_SO)
     gop = ", ".join(f"sum(a.{c})::float AS {c}" if c in QC.COT_TIEN else
                     f"sum(a.{c})::bigint AS {c}" for c in QC.TEN_COT_SO)
     kenh = (f"WITH a AS (SELECT q.advertiser_id, q.ad_id, {tong_a} FROM qc_ad_ngay q "
-            "WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s "
+            f"WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s{loc_cd} "
             "GROUP BY q.advertiser_id, q.ad_id), "
             "g AS (SELECT k.nen_tang, min(k.kenh_id) AS kenh_id, max(k.loai) AS loai, "
             "max(c.ten) AS ten, max(c.username) AS username, "
@@ -870,22 +926,24 @@ def sql_kenh_dang(cot: str) -> tuple[str, str]:
             "LIMIT %s")
     phu = (f"SELECT (k.kenh_id IS NOT NULL) AS biet, count(DISTINCT q.ad_id) AS so_ad, {_TONG} "
            "FROM qc_ad_ngay q LEFT JOIN qc_ad_kenh k ON k.advertiser_id = q.advertiser_id "
-           "AND k.ad_id = q.ad_id WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s "
-           "GROUP BY 1")
+           "AND k.ad_id = q.ad_id WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s"
+           f"{loc_cd} GROUP BY 1")
     return kenh, phu
 
 
 def qc_kenh_dang(ids: list[str], tu: datetime.date, den: datetime.date, *, sap: str = "chi",
-                 n: int = 20) -> dict:
+                 n: int = 20, cds: list[str] | None = None) -> dict:
     """Số theo kênh đăng của các tài khoản `ids` trong [tu, den]. -> {"rows" (≤ n kênh, xếp theo
     `sap` ∈ chi | hien_thi), "tong" (số kênh), "biet" / "chua_ro" (tổng phần ad đã / chưa biết
-    kênh)}. Gọi viên kiểm `ids` theo phạm vi người xem và lọc tiền."""
+    kênh)}. Gọi viên kiểm `ids` theo phạm vi người xem và lọc tiền. `cds` (23/10/2026): chỉ quảng
+    cáo của các chiến dịch này ([] = không khớp gì → rỗng, không truy vấn)."""
     rong = {"rows": [], "tong": 0, "biet": {}, "chua_ro": {}}
-    if not ids:
+    if not ids or (cds is not None and not cds):
         return rong
-    kenh, phu = sql_kenh_dang(sap if sap in SAP_KENH_SQL else "hien_thi")
+    kenh, phu = sql_kenh_dang(sap if sap in SAP_KENH_SQL else "hien_thi", cds is not None)
+    pv = [list(ids), tu, den] + ([list(cds)] if cds is not None else [])
     with ket_noi() as c:
-        rows = c.execute(kenh, (list(ids), tu, den, max(1, min(int(n), KENH_TOI_DA)))).fetchall()
-        tong = {bool(r["biet"]): r for r in c.execute(phu, (list(ids), tu, den)).fetchall()}
+        rows = c.execute(kenh, (*pv, max(1, min(int(n), KENH_TOI_DA)))).fetchall()
+        tong = {bool(r["biet"]): r for r in c.execute(phu, pv).fetchall()}
     return {"rows": rows, "tong": int(rows[0]["tong"]) if rows else 0,
             "biet": tong.get(True) or {}, "chua_ro": tong.get(False) or {}}

@@ -119,10 +119,13 @@ def _khop(r: dict, mau: str) -> bool:
     return any(mau in QC.chu_tim(x or "") for x in (r["ten"], r["phu"], *r["tai_khoan"]))
 
 
-def du_lieu(kq, ids: list[str], tu, den, qp, co_tien: bool, ten_tk: dict[str, str]) -> dict | None:
+def du_lieu(kq, ids: list[str], tu, den, qp, co_tien: bool, ten_tk: dict[str, str],
+            cds: list[str] | None = None) -> dict | None:
     """Khối "Theo kênh đăng" cho trang + /api/qc. `ids` = tài khoản trong phạm vi người xem (gọi
     viên đã kiểm); tiền lọc ở `QC.loc_tien` của gọi viên. Kho chưa có hàm / bảng (schema.sql chưa
-    chạy) → khối báo chưa có số, không làm hỏng trang. -> None khi không có tài khoản."""
+    chạy) → khối báo chưa có số, không làm hỏng trang. -> None khi không có tài khoản.
+    23/10/2026 (MKT): `cds` = chiến dịch khớp tên của Bộ lọc đầu trang (`kho_qc.ma_cd_theo_ten`) —
+    chỉ quảng cáo của chúng; None = không lọc (không truyền xuống kho, như cũ)."""
     if not ids:
         return None
     lk = loc_kenh(qp, co_tien)
@@ -132,7 +135,8 @@ def du_lieu(kq, ids: list[str], tu, den, qp, co_tien: bool, ten_tk: dict[str, st
         return None
     try:
         from dashboard.kho_qc import KENH_TOI_DA
-        r = ham(list(ids), tu, den, sap=do, n=KENH_TOI_DA)
+        r = ham(list(ids), tu, den, sap=do, n=KENH_TOI_DA,
+                **({"cds": list(cds)} if cds is not None else {}))
     except Exception:  # noqa: BLE001 — bảng chưa có (LoiKho) / lỗi đọc: khối báo chưa có số
         return {"loi": "Chưa đọc được số theo kênh (kho chưa có bảng kênh đăng).", "rows": [],
                 "tong": 0, "tong_khop": 0, "trang": 1, "so_trang": 1, "loc": lk, "cac_loai": [],
