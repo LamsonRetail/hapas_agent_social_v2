@@ -69,7 +69,7 @@ from dashboard import quang_cao as QC
 from dashboard import tiktok_ads as TA
 from dashboard import trang_lich as TL
 from dashboard.chuan_chu import bo_dau
-from dashboard.kho import BAI_TOI_DA, BL_TOI_DA, LoiDuLieu, LoiKho
+from dashboard.kho import BAI_TOI_DA, BL_TOI_DA, LoiDuLieu, LoiKho, ten_hanh_dong
 
 THU_MUC = Path(__file__).resolve().parent
 VN = CS.VN
@@ -88,6 +88,7 @@ SSE_TOI_DA_KET_NOI = 200    # trình duyệt mở cùng lúc; quá thì từ ch�
 SSE_MOI_EMAIL = 5           # mỗi người tối đa ngần này tab nghe sự kiện
 SSE_KIEM_QUYEN_GIAY = 300.0  # luồng SSE đọc lại vai trò mỗi 5 phút; bị xoá khỏi người xem -> đóng
 LUOT_MOI_TRANG = 20
+NHAT_KY_TOI_DA = 300         # dòng nhật ký trang Quản trị (chia trang 20 ở trình duyệt)
 #: Duyệt/từ chối đề xuất hàng loạt (18/10/2026): trần số đề xuất mỗi lần gửi — trang hiện tối đa 200
 #: (`kho.cac_de_xuat`), chừa dư; chặn biểu mẫu rác khiến một yêu cầu chạy hàng nghìn giao dịch.
 DE_XUAT_HANG_LOAT_TOI_DA = 500
@@ -389,7 +390,7 @@ def _tao_mau() -> Jinja2Templates:
                        json_script=json_script, link_an_toan=NL.link_an_toan,
                        # "web" (Báo & Web) không phải nguồn theo dõi được (NL) nhưng có tên hiển thị.
                        ten_nen_tang=lambda p: NL.TEN_NEN_TANG.get(p) or CS.TEN_NEN_TANG.get(p, p),
-                       ten_loai=lambda x: CS.TEN_LOAI.get(x, x))
+                       ten_loai=lambda x: CS.TEN_LOAI.get(x, x), ten_hanh_dong=ten_hanh_dong)
     env.globals.update(TEN_NEN_TANG=NL.TEN_NEN_TANG, LOAI_NGUON=NL.LOAI_NGUON,
                        VAI_TRO=NL.VAI_TRO, TEN_LOAI=CS.TEN_LOAI, LICH_CHAY=LICH_CHAY,
                        ECHARTS=ECHARTS, ECHARTS_SRI=ECHARTS_SRI, o_trang=QC.o_trang)
@@ -2288,11 +2289,15 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         # 21/10/2026: xếp theo TÊN (tên Lark, chưa có thì email) — chọn người qua tên cho dễ.
         ds.sort(key=lambda x: bo_dau(x.get("ten_lark") or x["email"]))
         du_an = await _k(app.state.kho.cac_du_an)
-        if qt:
-            nk = await _k(app.state.kho.nhat_ky, 100)
-        else:
-            nk = await _k(app.state.kho.nhat_ky, 100,
-                          [d["ma"] for d in du_an if d.get("don_vi") in ben_ql], ben_ql)
+        # 23/10/2026 (chủ dự án): lọc nhật ký theo từng hành động (`hd`, chỉ nhận hành động CÓ trong
+        # phạm vi người xem) — lọc ở máy chủ nên lượt đăng nhập dày không đẩy mất hành động khác.
+        pham_vi = (() if qt else
+                   ([d["ma"] for d in du_an if d.get("don_vi") in ben_ql], ben_ql))
+        cac_hd = await _k(app.state.kho.cac_hanh_dong, *pham_vi)
+        hd = str(request.query_params.get("hd") or "")
+        hd = hd if hd in {x["hanh_dong"] for x in cac_hd} else ""
+        nk = await _k(app.state.kho.nhat_ky, NHAT_KY_TOI_DA, *pham_vi,
+                      **({"hanh_dong": hd} if hd else {}))
         # Danh bạ Lark: trả trang NGAY bằng bản đệm; dòng cũ thì đọc lại NỀN sau khi đã trả
         # (một lượt đọc một lúc cho cả app — mở trang liên tục không bắn Lark liên tục).
         can = _can_doc_danh_ba(ds, datetime.datetime.now(datetime.UTC))
@@ -2340,6 +2345,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                    loc_ben=loc,
                    cac_ben=([{**b, "du_an": [d for d in du_an if d.get("don_vi") == b["ma"]]}
                              for b in cac_ben] if qt else []),
+                   cac_hanh_dong=[{**x, "ten": ten_hanh_dong(x["hanh_dong"])} for x in cac_hd],
+                   loc_hd=hd, nhat_ky_toi_da=NHAT_KY_TOI_DA,
                    nhat_ky=[{**x, "chi_tiet_chu": json.dumps(x.get("chi_tiet") or {},
                                                              ensure_ascii=False,
                                                              default=str)[:400]}

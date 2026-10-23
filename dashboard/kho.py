@@ -1004,8 +1004,9 @@ def ghi_dang_nhap(email: str, open_id: str, union_id: str = "", user_id: str = "
     vừa đăng nhập (open_id/union_id/user_id — rỗng thì giữ giá trị cũ) để đọc danh bạ tra thẳng
     theo open_id, không phụ thuộc email (batch_get_id không khớp enterprise_email). open_id đổi
     (lần đầu có, hoặc email cấp lại cho tài khoản khác) thì xoá mốc `danh_ba_luc` để lần mở trang
-    Người xem kế tiếp đọc lại ngay. Không ghi nhật ký mỗi lượt (nhật ký ngập); lần ĐẦU email
-    này đăng nhập thì ghi open_id vào nhật ký. -> có ghi lần đầu hay không. Chỉ ghi — không chặn
+    Người xem kế tiếp đọc lại ngay. 23/10/2026 (chủ dự án): MỖI lượt đăng nhập ghi
+    một dòng `dang_nhap` (lọc được theo hành động ở trang Quản trị); lần ĐẦU email này đăng nhập
+    thì thêm dòng `dang_nhap_lan_dau` kèm open_id. -> có ghi lần đầu hay không. Chỉ ghi — không chặn
     khi open_id đổi (email cấp lại cho người khác là chuyện hợp lệ)."""
     oid, uid, usid = (str(x or "")[:100] for x in (open_id, union_id, user_id))
     with ket_noi() as c:
@@ -1016,6 +1017,7 @@ def ghi_dang_nhap(email: str, open_id: str, union_id: str = "", user_id: str = "
                   "lark_union_id = COALESCE(NULLIF(%s, ''), lark_union_id), "
                   "lark_user_id = COALESCE(NULLIF(%s, ''), lark_user_id) WHERE email = %s",
                   (oid, oid, oid, uid, usid, email))
+        _nhat_ky(c, email, "dang_nhap", f"nguoi_xem:{email}", {"cach": "lark"})
         co = c.execute("SELECT 1 AS co FROM nhat_ky WHERE hanh_dong = 'dang_nhap_lan_dau' "
                        "AND doi_tuong = %s LIMIT 1", (f"nguoi_xem:{email}",)).fetchone()
         if co:
@@ -1024,18 +1026,60 @@ def ghi_dang_nhap(email: str, open_id: str, union_id: str = "", user_id: str = "
     return True
 
 
+#: Tên tiếng Việt của mã hành động nhật ký (23/10/2026, chủ dự án: lọc theo từng hành động).
+#: Mã lạ (thêm sau) vẫn hiện nguyên mã — `ten_hanh_dong`.
+TEN_HANH_DONG = {
+    "dang_nhap": "Đăng nhập", "dang_nhap_lan_dau": "Đăng nhập lần đầu",
+    "dat_quan_tri": "Đặt quản trị viên", "luu_nguoi_xem": "Lưu người xem",
+    "xoa_nguoi_xem": "Xoá người xem", "luu_quyen": "Lưu quyền", "xoa_quyen": "Xoá quyền",
+    "them_don_vi": "Thêm bên", "them_du_an": "Thêm dự án", "sua_du_an": "Sửa dự án",
+    "dat_tran_thang": "Đặt trần tháng", "sua_cau_hinh": "Sửa cấu hình",
+    "sua_binh_luan": "Sửa cách lấy bình luận", "sua_tim_tu_khoa": "Sửa tìm từ khoá",
+    "them_nguon": "Thêm nguồn", "sua_nguon": "Sửa nguồn", "xoa_nguon": "Xoá nguồn",
+    "doi_trang_thai_nguon": "Bật / tắt nguồn", "duyet_de_xuat": "Duyệt đề xuất",
+    "tu_choi_de_xuat": "Từ chối đề xuất", "tra_de_xuat_ve_cho": "Trả đề xuất về chờ",
+    "them_lich": "Thêm lịch quét", "sua_lich": "Sửa lịch quét", "xoa_lich": "Xoá lịch quét",
+    "bat_lich": "Bật lịch quét", "tat_lich": "Tắt lịch quét",
+    "ket_noi_tiktok": "Kết nối TikTok Ads", "ket_noi_meta": "Kết nối Meta Ads",
+    "ngat_tiktok": "Ngắt TikTok Ads", "ngat_meta": "Ngắt Meta Ads",
+    "dong_bo_tiktok": "Đồng bộ TikTok Ads", "dong_bo_meta": "Đồng bộ Meta Ads",
+    "dong_bo_qc": "Đồng bộ quảng cáo", "duyet_tk_meta": "Duyệt tài khoản Meta",
+    "gan_ben_tk_qc": "Gán bên tài khoản QC", "tao_sheet_qc": "Xuất Sheet quảng cáo",
+    "dong_bo_bq": "Đồng bộ BigQuery", "mark_real_time": "Mark đọc số tức thì",
+}
+
+
+def ten_hanh_dong(ma) -> str:
+    return TEN_HANH_DONG.get(str(ma or ""), str(ma or ""))
+
+
+def _loc_nhat_ky(du_an: list[str] | None, don_vi: list[str] | None) -> tuple[str, list]:
+    """(điều kiện WHERE, tham số) phạm vi nhật ký; ("TRUE", []) = mọi dòng (quản trị viên)."""
+    if du_an is None and don_vi is None:
+        return "TRUE", []
+    da = list(du_an or [])
+    return ("(chi_tiet->>'du_an' = ANY(%s) OR doi_tuong = ANY(%s) OR chi_tiet->>'don_vi' = ANY(%s))",
+            [da, [f"du_an:{m}" for m in da], list(don_vi or [])])
+
+
 def nhat_ky(gioi_han: int = 100, du_an: list[str] | None = None,
-            don_vi: list[str] | None = None) -> list[dict]:
+            don_vi: list[str] | None = None, hanh_dong: str | None = None) -> list[dict]:
     """Nhật ký mới nhất trước. `du_an` / `don_vi` (quản lý của bên, 19/10/2026): chỉ dòng về các dự
     án đó (đối tượng `du_an:<mã>` hoặc chi tiết có `du_an`) hoặc về quyền ở các bên đó — không thấy
-    thao tác của bên khác. Cả hai None = mọi dòng (quản trị viên)."""
+    thao tác của bên khác. Cả hai None = mọi dòng (quản trị viên). `hanh_dong` (23/10/2026): chỉ
+    một hành động."""
+    dk, ts = _loc_nhat_ky(du_an, don_vi)
+    if hanh_dong:
+        dk, ts = dk + " AND hanh_dong = %s", [*ts, str(hanh_dong)]
     with ket_noi() as c:
-        if du_an is None and don_vi is None:
-            return c.execute("SELECT id, luc, ai, hanh_dong, doi_tuong, chi_tiet FROM nhat_ky "
-                             "ORDER BY id DESC LIMIT %s", (int(gioi_han),)).fetchall()
-        da = list(du_an or [])
-        return c.execute(
-            "SELECT id, luc, ai, hanh_dong, doi_tuong, chi_tiet FROM nhat_ky WHERE "
-            "chi_tiet->>'du_an' = ANY(%s) OR doi_tuong = ANY(%s) OR chi_tiet->>'don_vi' = ANY(%s) "
-            "ORDER BY id DESC LIMIT %s",
-            (da, [f"du_an:{m}" for m in da], list(don_vi or []), int(gioi_han))).fetchall()
+        return c.execute("SELECT id, luc, ai, hanh_dong, doi_tuong, chi_tiet FROM nhat_ky WHERE "
+                         + dk + " ORDER BY id DESC LIMIT %s", (*ts, int(gioi_han))).fetchall()
+
+
+def cac_hanh_dong(du_an: list[str] | None = None,
+                  don_vi: list[str] | None = None) -> list[dict]:
+    """Các hành động có trong nhật ký (cùng phạm vi `nhat_ky`) + số dòng — cho ô lọc."""
+    dk, ts = _loc_nhat_ky(du_an, don_vi)
+    with ket_noi() as c:
+        return c.execute("SELECT hanh_dong, count(*) AS so FROM nhat_ky WHERE " + dk
+                         + " GROUP BY hanh_dong ORDER BY count(*) DESC, hanh_dong", ts).fetchall()
