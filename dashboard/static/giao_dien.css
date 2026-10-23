@@ -699,7 +699,8 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .dai-qc__ct dt { color: var(--chu-mo); }
 .dai-qc__ct dt::after { content: ":"; }
 .dai-qc__ct dd { margin: 0; color: var(--chu); overflow-wrap: anywhere; }
-.dai-qc__phai { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; max-width: 100%; }
+/* 23/10/2026: lý do nút khoá vào (i) cạnh nút — một hàng thay dòng chữ dưới nút */
+.dai-qc__phai { display: flex; align-items: center; gap: 6px; flex: none; max-width: 100%; }
 .dai-qc__tach { display: inline-flex; position: relative; }
 .dai-qc__chinh { margin: 0; }
 .dai-qc__chinh .nut { gap: 6px; }
@@ -717,7 +718,6 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .dai-qc__muc span { font-size: 12px; color: var(--chu-mo); }
 .dai-qc__muc[disabled] { cursor: not-allowed; }
 .dai-qc__muc[disabled] b { color: var(--chu-mo); }
-.dai-qc__ly { font-size: 12px; color: var(--chu-mo); text-align: right; max-width: 280px; }
 .dai-qc__an { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .dai-qc__xoay { animation: dai-qc-xoay 1.4s linear infinite; }
 @keyframes dai-qc-xoay { to { transform: rotate(360deg); } }
@@ -725,14 +725,12 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
   .dai-qc { padding: 10px 12px; }
   .dai-qc__dong { flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 0; }
   .dai-qc__trai { flex-basis: auto; flex-direction: column; gap: 2px; }
-  .dai-qc__phai { align-items: stretch; }
-  .dai-qc__tach { display: flex; }
+  .dai-qc__tach { display: flex; flex: 1 1 auto; }
   .dai-qc__chinh { flex: 1 1 auto; }
   .dai-qc__chinh .nut, .dai-qc__them > summary.nut { min-height: 44px; }
   .dai-qc__chinh .nut { width: 100%; justify-content: center; }
   .dai-qc__them > summary.nut { padding: 3px 14px; }
   .dai-qc__menu { width: min(280px, calc(100vw - 48px)); }
-  .dai-qc__ly { text-align: left; max-width: none; }
   .dai-qc__ca .nut { min-height: 36px; }
 }
 @media (prefers-reduced-motion: reduce) {

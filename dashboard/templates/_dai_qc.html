@@ -59,7 +59,9 @@
           </details>
           {% endif %}
         </div>
-        {% if x.ly_nhanh %}<span class="dai-qc__ly" id="dai-qc-ly-{{ x.nen_tang }}">Chưa bấm được: {{ x.ly_nhanh }}</span>{% endif %}
+        {#- 23/10/2026 (chủ dự án: ghi chú vào dấu i): lý do nút khoá nằm trong (i) cạnh nút; chữ ẩn giữ cho
+            trình đọc màn hình (aria-describedby của nút). #}
+        {% if x.ly_nhanh %}<span class="dai-qc__an" id="dai-qc-ly-{{ x.nen_tang }}">Chưa bấm được: {{ x.ly_nhanh }}</span><button type="button" class="goi-y" aria-label="Vì sao chưa đồng bộ {{ x.ten }} được" data-goi-y="Chưa bấm được: {{ x.ly_nhanh }}">i</button>{% endif %}
       </div>
     </li>
     {% endfor %}

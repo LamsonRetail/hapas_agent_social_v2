@@ -180,7 +180,9 @@
 
 {#- Bảng chiến dịch / quảng cáo (22/10/2026, MKT: lọc theo tên, chiến dịch; sắp theo mọi chỉ số). Máy chủ
     lọc + xếp (`kho_qc.qc_bang`) rồi mới cắt 10/25/50 dòng — không xếp lại trên 10 dòng đã cắt. Bấm tiêu
-    đề cột: lần đầu cao → thấp, bấm lại thấp → cao (aria-sort). Bấm tên chiến dịch = lọc quảng cáo của nó. #}
+    đề cột: lần đầu cao → thấp, bấm lại thấp → cao (aria-sort). Bấm tên chiến dịch = lọc quảng cáo của nó.
+    23/10/2026 (chủ dự án: dòng dài gọn lại): dòng phụ (nền tảng · chiến dịch · tài khoản) một dòng, đủ chữ
+    ở title — cùng kiểu bảng "Theo kênh đăng". #}
 {% macro th_sap(ma) %}{% set nhan = SAP_BANG[ma] %}{% set dang = ma == d.sap %}{% set tang = dang and d.bang.chieu == 'tang' %}<th class="so"{% if dang %} aria-sort="{{ 'ascending' if tang else 'descending' }}"{% endif %}><a class="qc-sap{% if dang %} qc-sap--dang{% endif %}" href="{{ url_cho(sap=ma, chieu=('tang' if dang and not tang else '')) }}#top" title="Xếp theo {{ nhan }}, {{ 'thấp → cao' if dang and not tang else 'cao → thấp' }}">{{ nhan }}<span class="qc-sap__mui" aria-hidden="true">{{ ('▲' if tang else '▼') if dang else '↕' }}</span></a></th>{% endmacro %}
 {% macro loc_cd(r, chu) %}{% if r.campaign_id and r.campaign_id != d.bang.cd %}<a class="qc-bang__loc" href="{{ url_cho(cd=r.campaign_id) }}#top" title="Chỉ xem quảng cáo của chiến dịch này">{{ chu }}</a>{% else %}{{ chu }}{% endif %}{% endmacro %}
 {% macro bang_top(ds, cap, tong) %}
@@ -201,11 +203,11 @@
       <td class="qc-bang__ten">
         {% if cap == 'campaign' %}
           <span class="qc-bang__chinh">{{ loc_cd(r, r.ten or r.campaign_id) }}</span>
-          <span class="qc-bang__phu" data-nen-tang="{{ r.nen_tang }}"><span class="qc-cham qc-cham--{{ r.nen_tang }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ r.ten_tk }}{% if r.muc_tieu %} · {{ r.muc_tieu|ten_muc_tieu }}{% endif %}</span>
+          <span class="qc-bang__phu" data-nen-tang="{{ r.nen_tang }}" title="{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ r.ten_tk }}{% if r.muc_tieu %} · {{ r.muc_tieu|ten_muc_tieu }}{% endif %}"><span class="qc-cham qc-cham--{{ r.nen_tang }}" aria-hidden="true"></span><span class="qc-bang__phu-chu">{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ r.ten_tk }}{% if r.muc_tieu %} · {{ r.muc_tieu|ten_muc_tieu }}{% endif %}</span></span>
         {% else %}
           <span class="qc-bang__chinh">{{ r.ten_ad or r.ad_id }}</span>
           {% if r.noi_dung %}<span class="qc-bang__noi-dung">{{ r.noi_dung }}</span>{% endif %}
-          <span class="qc-bang__phu" data-nen-tang="{{ r.nen_tang }}"><span class="qc-cham qc-cham--{{ r.nen_tang }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ loc_cd(r, r.ten_campaign or r.campaign_id or '') }}{% if r.ten_tk %} · {{ r.ten_tk }}{% endif %}</span>
+          <span class="qc-bang__phu" data-nen-tang="{{ r.nen_tang }}" title="{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ r.ten_campaign or r.campaign_id or '' }}{% if r.ten_tk %} · {{ r.ten_tk }}{% endif %}"><span class="qc-cham qc-cham--{{ r.nen_tang }}" aria-hidden="true"></span><span class="qc-bang__phu-chu">{{ TEN_NEN_TANG_QC[r.nen_tang] }} · {{ loc_cd(r, r.ten_campaign or r.campaign_id or '') }}{% if r.ten_tk %} · {{ r.ten_tk }}{% endif %}</span></span>
         {% endif %}
       </td>
       {% if d.xem_tien %}<td class="so qc-bang__chi" data-nhan="Chi">{{ r.chi|so_vn }}</td>{% endif %}
@@ -271,7 +273,7 @@
   <div class="qc-sheet" id="sheet" data-dang="{{ '1' if dang_sheet else '0' }}" aria-labelledby="qc-sheet-tieu-de" role="region">
     <div class="qc-sheet__than">
       <div class="qc-sheet__tao">
-        <h3 class="qc-h3 qc-sheet__tieu-de" id="qc-sheet-tieu-de">Xuất Lark Sheet <button type="button" class="goi-y" data-goi-y="Mark tạo một Lark Sheet riêng tư từ đúng bộ lọc đang xem (cả chi tiêu), chia sẻ quyền XEM cho bạn và nhắn link trên Lark. Tab Tổng quan (ghi bộ lọc đã dùng) + theo ngày × tài khoản (chỉ theo tài khoản + ngày) + theo chiến dịch + theo quảng cáo (lọc, xếp như hai bảng trên, mọi dòng khớp — tối đa {{ SHEET_TRAN_DONG.chien_dich|so_vn }} chiến dịch, {{ SHEET_TRAN_DONG.quang_cao|so_vn }} quảng cáo). Tối đa {{ SHEET_TRAN_GIO }} Sheet mỗi giờ.">i</button></h3>
+        <h3 class="qc-h3 qc-sheet__tieu-de" id="qc-sheet-tieu-de">Xuất Lark Sheet <button type="button" class="goi-y" data-goi-y="Mark tạo một Lark Sheet riêng tư từ đúng bộ lọc đang xem (cả chi tiêu), chia sẻ quyền XEM cho bạn và nhắn link trên Lark. Tab Tổng quan (ghi bộ lọc đã dùng) + theo ngày × tài khoản (chỉ theo tài khoản + ngày) + theo chiến dịch + theo quảng cáo (lọc, xếp như hai bảng trên, mọi dòng khớp — tối đa {{ SHEET_TRAN_DONG.chien_dich|so_vn }} chiến dịch, {{ SHEET_TRAN_DONG.quang_cao|so_vn }} quảng cáo). Tối đa {{ SHEET_TRAN_GIO }} Sheet mỗi giờ; thường xong sau 1–2 phút. Sheet xuất đúng hai bảng trên, mọi trang.">i</button></h3>
         <p class="qc-sheet__pv">
           {% if d.nen_tang != 'tat_ca' %}<span class="qc-cham qc-cham--{{ d.nen_tang }}" aria-hidden="true"></span>{{ TEN_NEN_TANG_QC[d.nen_tang] }}{% else %}TikTok + Meta{% endif %} · {{ ten_ben }} · {{ ten_tk }} · {{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}/{{ d.den[:4] }}<span class="qc-sheet__phu"> ({{ sheet_so_ngay }} ngày)</span>
           <br><span class="qc-sheet__phu">{% if d.bang.tim %}Tên khớp “{{ d.bang.tim }}” · {% endif %}{% if d.bang.cd %}Chiến dịch {{ ten_cd }} · {% endif %}Xếp {{ SAP_BANG[d.sap] }} {{ 'thấp → cao' if d.bang.chieu == 'tang' else 'cao → thấp' }} · {{ d.bang.tong_campaign|so_vn }} chiến dịch, {{ d.bang.tong_ad|so_vn }} quảng cáo{% if d.bang.tong_ad > SHEET_TRAN_DONG.quang_cao or d.bang.tong_campaign > SHEET_TRAN_DONG.chien_dich %} (cắt ở trần){% endif %}</span>
@@ -286,7 +288,9 @@
           <button class="nut" type="submit" id="qc-sheet-nut"{% if dang_sheet %} disabled{% endif %}>
             <svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 9.5h16M4 15h16M10 4v16"/></svg>Xuất Lark Sheet theo bộ lọc này
           </button>
-          <p class="mo nho qc-sheet__goi-y" id="qc-sheet-goi-y">{% if dang_sheet %}Đang tạo một Sheet — đợi xong rồi tạo tiếp.{% else %}Thường xong sau 1–2 phút.{% endif %}</p>
+          {#- 23/10/2026 (chủ dự án: ghi chú vào dấu i): "thường xong sau 1–2 phút" dời vào (i); dòng này chỉ
+              còn trạng thái (đang tạo / hết giờ chờ — qc.js ghi), trống thì ẩn. #}
+          <p class="mo nho qc-sheet__goi-y" id="qc-sheet-goi-y"{% if not dang_sheet %} hidden{% endif %}>{% if dang_sheet %}Đang tạo một Sheet — đợi xong rồi tạo tiếp.{% endif %}</p>
         </form>
       </div>
       <div class="qc-sheet__gan-day">
@@ -300,7 +304,7 @@
             {% if x.loi %}<span class="qc-sheet__loi{% if x.trang_thai == 'xong' %} qc-sheet__loi--canh{% endif %}">{{ x.loi }}</span>{% endif %}
           </li>
           {% else %}
-          <li class="qc-sheet__trong">Chưa xuất Sheet nào. Bấm “Xuất Lark Sheet theo bộ lọc này” để xuất đúng hai bảng trên (mọi trang).</li>
+          <li class="qc-sheet__trong">Chưa xuất Sheet nào.</li>
           {% endfor %}
         </ul>
       </div>
