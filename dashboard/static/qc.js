@@ -326,3 +326,181 @@
   }
   setTimeout(hoi, NHIP);
 })();
+
+// Tên chiến dịch bản 2 (23/10/2026, MKT — "như Meta Ads Manager"): bảng ba dòng trong <details> (chứa tất
+// cả / chứa một trong / không chứa — AND). Không JS: mỗi dòng là ô chữ, dấu phẩy tách từ khoá. JS biến mỗi
+// dòng thành ô thẻ: Enter hoặc dấu phẩy → thẻ ✕; Backspace ở ô trống xoá thẻ cuối; thẻ gửi thành ô ẩn lặp
+// lại (cd_co=…&cd_co=…). Gõ → gợi ý tên chiến dịch thật + đoạn tên hay gặp của kỳ / phạm vi đang chọn
+// (/api/qc/ten-cd, chờ 250 ms); chọn gợi ý thêm đúng chữ đó thành thẻ. Dòng tóm tắt "2 điều kiện". Chữ chỉ
+// qua textContent (CSP, không chèn HTML từ dữ liệu). Máy chủ kiểm lại mọi trần (quang_cao.loc_ten_cd).
+(function () {
+  var khoi = document.querySelector('[data-o="loc-ten-cd"]');
+  if (!khoi) return;
+  var khung = khoi.querySelector("details");
+  var tom = khoi.querySelector("#qc-tcd-gia-tri");
+  var f = khoi.closest("form");
+  if (!khung || !tom || !f) return;
+  var TOI_DA = 10, DAI = 60;
+  var cacDong = [];
+  var soGoiY = 0;
+
+  function boDau(x) {
+    return (x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[đĐ]/g, "d").toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+  function veTom() {
+    var n = cacDong.filter(function (d) { return d.ds.length; }).length;
+    tom.textContent = n ? n + " điều kiện" : tom.getAttribute("data-trong");
+  }
+
+  function dung(hang) {
+    var ten = hang.getAttribute("data-tcd");
+    var o = hang.querySelector(".qc-tcd__o");
+    var go = hang.querySelector(".qc-tcd__go");
+    if (!o || !go) return;
+    var d = { ten: ten, o: o, go: go, ds: [] };
+    var nhan = (hang.querySelector("label") || {}).textContent || "";
+    // Danh sách gợi ý (listbox) gắn vào ô; chọn bằng phím lên / xuống + Enter, hoặc bấm.
+    var ds = document.createElement("ul");
+    ds.className = "qc-tcd__ds";
+    ds.id = "qc-tcd-ds-" + ten;
+    ds.setAttribute("role", "listbox");
+    ds.setAttribute("aria-label", "Gợi ý cho " + nhan);
+    ds.hidden = true;
+    o.appendChild(ds);
+    go.setAttribute("role", "combobox");
+    go.setAttribute("aria-autocomplete", "list");
+    go.setAttribute("aria-expanded", "false");
+    go.setAttribute("aria-controls", ds.id);
+    var dangChon = -1, cho = null, luot = 0;
+
+    function veThe() {
+      Array.prototype.forEach.call(o.querySelectorAll(".qc-tcd__the"), function (x) { o.removeChild(x); });
+      d.ds.forEach(function (kw, i) {
+        var t = document.createElement("span");
+        t.className = "qc-tcd__the";
+        var c = document.createElement("span");
+        c.className = "qc-tcd__the-chu";
+        c.textContent = kw;
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "qc-tcd__the-bo";
+        b.textContent = "✕";
+        b.setAttribute("aria-label", "Bỏ từ khoá " + kw);
+        b.addEventListener("click", function () { d.ds.splice(i, 1); veThe(); go.focus(); });
+        var an = document.createElement("input");
+        an.type = "hidden"; an.name = ten; an.value = kw;
+        t.appendChild(c); t.appendChild(b); t.appendChild(an);
+        o.insertBefore(t, go);
+      });
+      go.placeholder = d.ds.length ? "" : "Nhập tên hoặc từ khoá";
+      veTom();
+    }
+    function them(chu) {
+      String(chu || "").split(/[,;]/).forEach(function (x) {
+        var kw = x.replace(/\s+/g, " ").trim().slice(0, DAI).trim();
+        if (!kw || d.ds.length >= TOI_DA) return;
+        var k = boDau(kw) || kw.toLowerCase();
+        if (d.ds.some(function (y) { return (boDau(y) || y.toLowerCase()) === k; })) return;
+        d.ds.push(kw);
+      });
+      veThe();
+    }
+    function dongDs() {
+      ds.hidden = true; dangChon = -1;
+      go.setAttribute("aria-expanded", "false");
+      go.removeAttribute("aria-activedescendant");
+    }
+    function danhDau(i) {
+      var cac = ds.querySelectorAll('[role="option"]');
+      if (!cac.length) return;
+      dangChon = (i + cac.length) % cac.length;
+      Array.prototype.forEach.call(cac, function (x, j) { x.setAttribute("aria-selected", j === dangChon ? "true" : "false"); });
+      go.setAttribute("aria-activedescendant", cac[dangChon].id);
+      cac[dangChon].scrollIntoView({ block: "nearest" });
+    }
+    function chon(chu) { them(chu); go.value = ""; dongDs(); go.focus(); }
+    function veGoiY(q, p) {
+      while (ds.firstChild) ds.removeChild(ds.firstChild);
+      var muc = [["Thêm từ khoá", q]];
+      (p.tu_khoa || []).forEach(function (x) { muc.push(["Đoạn tên", x]); });
+      (p.ten || []).forEach(function (x) { muc.push(["Chiến dịch", x]); });
+      muc.forEach(function (m) {
+        var li = document.createElement("li");
+        li.className = "qc-tcd__goi";
+        li.id = "qc-tcd-goi-" + (++soGoiY);
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", "false");
+        var a = document.createElement("span"); a.className = "qc-tcd__goi-loai"; a.textContent = m[0];
+        var b = document.createElement("span"); b.className = "qc-tcd__goi-ten"; b.textContent = m[1];
+        li.appendChild(a); li.appendChild(b);
+        // mousedown (không phải click): chọn trước khi ô gõ mất tiêu điểm.
+        li.addEventListener("mousedown", function (e) { e.preventDefault(); chon(m[1]); });
+        ds.appendChild(li);
+      });
+      ds.hidden = muc.length < 2;          // chỉ có "Thêm từ khoá" thì không cần xổ
+      go.setAttribute("aria-expanded", ds.hidden ? "false" : "true");
+      dangChon = -1;
+    }
+    function hoi() {
+      var q = go.value.replace(/\s+/g, " ").trim();
+      if (!boDau(q) || !window.fetch) { dongDs(); return; }
+      // Cùng phạm vi đang chọn trong Bộ lọc (bên, nền tảng, tài khoản, từ–đến) — máy chủ kiểm lại.
+      var tham = new URLSearchParams();
+      tham.set("q", q.slice(0, DAI));
+      ["ben", "nen_tang", "tu", "den"].forEach(function (k) { var x = f.elements[k]; if (x && x.value) tham.set(k, x.value); });
+      Array.prototype.forEach.call(f.querySelectorAll('input[name="tk"]:checked'), function (x) { tham.append("tk", x.value); });
+      var so = ++luot;
+      fetch("/api/qc/ten-cd?" + tham.toString(), { credentials: "same-origin", headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (p) { if (p && so === luot && go.value.trim() && document.activeElement === go) veGoiY(q, p); })
+        .catch(function () { /* gợi ý chỉ là phụ — lỗi mạng thì thôi */ });
+    }
+
+    // Không JS = ô chữ "a, b"; có JS: chữ sẵn thành thẻ, ô gõ không gửi nữa (thẻ mang ô ẩn).
+    go.removeAttribute("name");
+    them(go.value);
+    go.value = "";
+    o.addEventListener("click", function (e) { if (e.target === o) go.focus(); });
+    go.addEventListener("input", function () {
+      if (/[,;]/.test(go.value)) {
+        var phan = go.value.split(/[,;]/);
+        var cuoi = phan.pop();
+        them(phan.join(","));
+        go.value = cuoi.replace(/^\s+/, "");
+      }
+      clearTimeout(cho);
+      cho = setTimeout(hoi, 250);
+    });
+    go.addEventListener("keydown", function (e) {
+      var mo = !ds.hidden;
+      if (e.key === "ArrowDown" && mo) { e.preventDefault(); danhDau(dangChon + 1); }
+      else if (e.key === "ArrowUp" && mo) { e.preventDefault(); danhDau(dangChon - 1); }
+      else if (e.key === "Enter") {
+        if (mo && dangChon >= 0) { e.preventDefault(); chon(ds.querySelectorAll('[role="option"]')[dangChon].lastChild.textContent); }
+        else if (go.value.trim()) { e.preventDefault(); chon(go.value); }
+        // ô trống + Enter: gửi biểu mẫu (= Áp dụng)
+      } else if (e.key === "Escape" && mo) { e.preventDefault(); e.stopPropagation(); dongDs(); }
+      else if (e.key === "Backspace" && !go.value && d.ds.length) { d.ds.pop(); veThe(); }
+    });
+    go.addEventListener("blur", function () { setTimeout(dongDs, 120); });
+    d.them = them; d.veThe = veThe;
+    cacDong.push(d);
+  }
+
+  Array.prototype.forEach.call(khoi.querySelectorAll("[data-tcd]"), dung);
+  if (!cacDong.length) return;
+  veTom();
+  // Chữ còn trong ô gõ lúc gửi (chưa Enter) vẫn tính là một từ khoá.
+  f.addEventListener("submit", function () { cacDong.forEach(function (d) { if (d.go.value.trim()) { d.them(d.go.value); d.go.value = ""; } }); });
+  var xoa = khoi.querySelector("[data-tcd-xoa]");
+  if (xoa) xoa.addEventListener("click", function (e) {
+    e.preventDefault();
+    cacDong.forEach(function (d) { d.ds.length = 0; d.go.value = ""; d.veThe(); });
+    cacDong[0].go.focus();
+  });
+  document.addEventListener("click", function (e) { if (khung.open && !khoi.contains(e.target)) khung.open = false; });
+  khoi.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && khung.open) { khung.open = false; khung.querySelector("summary").focus(); }
+  });
+  khung.addEventListener("toggle", function () { if (khung.open) cacDong[0].go.focus(); });
+})();

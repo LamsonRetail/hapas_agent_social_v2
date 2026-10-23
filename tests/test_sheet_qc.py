@@ -268,8 +268,10 @@ class KhoNghe:
     cds_doc: list = []
     ma_cd = ["17001"]
 
-    def ma_cd_theo_ten(self, ids, tu, den, maus):
-        self.cds_doc = [*self.cds_doc, ("ma", tuple(maus))]
+    def ma_cd_theo_ten(self, ids, tu, den, loc):
+        # 23/10/2026 (bản 2): ghi (tất cả, một trong, không chứa) đã qua chu_tim.
+        self.cds_doc = [*self.cds_doc, ("ma", tuple(tuple(loc["maus"][k]) for k in
+                                                    ("co", "mot", "khong")))]
         return list(self.ma_cd)
 
     def doc_theo_ngay(self, ids, tu, den, cds=None):
@@ -873,7 +875,8 @@ def test_schema_cot_loc_va_trigger_kiem():
     # 23/10/2026: + ten_cd (lọc tên chiến dịch cấp trang): cột riêng, cùng trần độ dài như tim.
     assert "ALTER TABLE yeu_cau_sheet_qc ADD COLUMN IF NOT EXISTS ten_cd TEXT;" in sql
     assert "COMMENT ON COLUMN yeu_cau_sheet_qc.ten_cd IS" in sql
-    assert f"length(NEW.ten_cd) > {QC.TIM_TOI_DA}" in chuan
+    # 23/10/2026 (bản 2): chuỗi JSON ba danh sách — trần TEN_CD_CHUOI_TOI_DA (600).
+    assert f"length(NEW.ten_cd) > {QC.TEN_CD_CHUOI_TOI_DA}" in chuan
     assert "NEW.ten_cd := NULLIF(btrim(NEW.ten_cd), '');" in chuan
     assert chuan.count("USING ERRCODE = 'invalid_parameter_value'") == 6
     # Kiểm bộ lọc TRƯỚC khoá advisory / đếm trần (giá trị sai không giữ khoá).

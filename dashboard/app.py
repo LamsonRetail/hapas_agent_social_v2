@@ -2758,9 +2758,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                             "bên dưới. " + CHO_DONG_BO, neo="meta")
 
     # ─── Quảng cáo TikTok (trang + API; chỉ bên đọc được, tiền chỉ quản trị/quản lý) ───
-    def _du_lieu_qc(nguoi: dict, qp, cac_tk: list[dict], ten_ben: dict, *, nghiem: bool) -> dict:
-        """Số cho trang /quang-cao và /api/qc (cùng một hàm, chạy trong threadpool). `nghiem`: API —
-        bên / tài khoản ngoài phạm vi là 404 (như không có); trang — lùi về mặc định."""
+    def _pham_vi_qc(nguoi: dict, qp, cac_tk: list[dict], *, nghiem: bool) -> dict:
+        """Phạm vi đọc của trang /quang-cao, /api/qc và gợi ý tên /api/qc/ten-cd (23/10/2026: tách ra
+        để ba nơi CÙNG một luật): nền tảng, bên, tài khoản (theo quyền người xem), khoảng ngày.
+        `nghiem`: API — bên / tài khoản ngoài phạm vi là 404 (như không có); trang — lùi về mặc định."""
         q = nguoi["q"]
         # 20/10/2026: lọc nền tảng (tat_ca | tiktok | meta) + chỉ tài khoản đã duyệt (Meta).
         nen = str(qp.get("nen_tang") or "tat_ca")
@@ -2793,19 +2794,33 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         tu, den = _doc_khoang(qp)
         if tu > den or (den - tu).days >= KHOANG_TOI_DA_NGAY:
             raise NL.LoiNhap(f"Khoảng ngày phải từ 1 tới {KHOANG_TOI_DA_NGAY} ngày.")
+        return {"nen": nen, "cac_nen": cac_nen, "cac_tk": cac_tk, "cac_ben": cac_ben, "ben": ben,
+                "tk_ben": tk_ben, "tk_ds": tk_ds, "tk": tk, "ids": ids, "tu": tu, "den": den}
+
+    def _du_lieu_qc(nguoi: dict, qp, cac_tk: list[dict], ten_ben: dict, *, nghiem: bool) -> dict:
+        """Số cho trang /quang-cao và /api/qc (cùng một hàm, chạy trong threadpool). `nghiem`: API —
+        bên / tài khoản ngoài phạm vi là 404 (như không có); trang — lùi về mặc định."""
+        q = nguoi["q"]
+        pv = _pham_vi_qc(nguoi, qp, cac_tk, nghiem=nghiem)
+        nen, cac_nen, cac_tk, cac_ben, ben = (pv[k] for k in ("nen", "cac_nen", "cac_tk", "cac_ben",
+                                                              "ben"))
+        tk_ben, tk_ds, tk, ids, tu, den = (pv[k] for k in ("tk_ben", "tk_ds", "tk", "ids", "tu",
+                                                           "den"))
         co_tien = QC.xem_tien(q, ben if ben not in (QC.TAT_CA, QC.CHUA_GAN) else None)
         kq = app.state.kho_qc
         t0, t1 = QC.khoang_truoc(tu, den)
-        # 23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): `ten_cd` lọc CẢ TRANG — KPI, biểu
-        # đồ, TikTok và Meta, hai bảng, kênh đăng chỉ tính các chiến dịch có tên khớp (số cấp chiến
-        # dịch). Kỳ trước tính lại danh sách khớp của CHÍNH kỳ trước (cùng chữ lọc): chiến dịch
-        # "teaser" kỳ này so với chiến dịch "teaser" kỳ trước. Có chữ mà không còn cụm Latin nào →
-        # [] = không khớp gì (như `tim`). Không lọc → không truyền `cds` (kho / Mark như cũ).
+        # 23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): lọc tên chiến dịch CẢ TRANG — KPI,
+        # biểu đồ, TikTok và Meta, hai bảng, kênh đăng chỉ tính các chiến dịch có tên khớp (số cấp
+        # chiến dịch). Bản 2 (MKT, như Meta Ads Manager): `cd_co` / `cd_mot` / `cd_khong` AND với nhau;
+        # `ten_cd` cũ = `cd_mot`. Kỳ trước tính lại danh sách khớp của CHÍNH kỳ trước (cùng điều
+        # kiện): chiến dịch "teaser" kỳ này so với chiến dịch "teaser" kỳ trước. Dòng có từ khoá mà
+        # không còn từ Latin nào → [] = không khớp gì (như `tim`). Không lọc → không truyền `cds`.
         tc = QC.loc_ten_cd(qp)
         cds = cds_truoc = None
-        if tc["chu"]:
-            cds = kq.ma_cd_theo_ten(ids, tu, den, tc["maus"]) if ids and tc["maus"] else []
-            cds_truoc = kq.ma_cd_theo_ten(ids, t0, t1, tc["maus"]) if ids and tc["maus"] else []
+        if tc["co_loc"]:
+            cds = kq.ma_cd_theo_ten(ids, tu, den, tc) if ids and not tc["khong_khop"] else []
+            cds_truoc = (kq.ma_cd_theo_ten(ids, t0, t1, tc) if ids and not tc["khong_khop"]
+                         else [])
         lcd = {"cds": cds} if cds is not None else {}
         lcd_truoc = {"cds": cds_truoc} if cds_truoc is not None else {}
         kpi = QC.kpi(kq.qc_tong(ids, tu, den, **lcd) if ids else {})
@@ -2883,10 +2898,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             "khan_gia": QC.khan_gia(kg.get("rows") or []),
             "khan_gia_khoang": {"tu": kg.get("tu"), "den": kg.get("den")},
             "moi": {"ngay_cuoi": moi.get("ngay_cuoi"), "ghi_luc": moi.get("ghi_luc")},
-            # 23/10/2026: lọc tên chiến dịch cấp trang — chữ gốc + số chiến dịch khớp kỳ này / kỳ
-            # trước (thẻ trên KPI, /api/qc). None = không lọc.
-            "ten_cd": ({"chu": tc["chu"], "so_chien_dich": len(cds or []),
-                        "so_chien_dich_truoc": len(cds_truoc or [])} if tc["chu"] else None),
+            # 23/10/2026: lọc tên chiến dịch cấp trang — ba danh sách từ khoá + mô tả bằng chữ + số
+            # chiến dịch khớp kỳ này / kỳ trước (thẻ trên KPI, /api/qc); `cat` = đã cắt theo trần;
+            # `goi_y` = ≤ 5 tên thật gần nhất khi không chiến dịch nào khớp. None = không lọc.
+            "ten_cd": ({"chu": tc["chu"], "co": tc["co"], "mot": tc["mot"], "khong": tc["khong"],
+                        "cat": tc["cat"], "so_dieu_kien": sum(bool(tc[k]) for k in tc["maus"]),
+                        "so_chien_dich": len(cds or []),
+                        "so_chien_dich_truoc": len(cds_truoc or []),
+                        "goi_y": (QC.ten_gan_nhat(kq.ten_cd_trong_ky(ids, tu, den), tc)
+                                  if ids and not cds else [])}
+                       if tc["co_loc"] else None),
         }
         # 22/10/2026 (chủ dự án): khối "Theo kênh đăng" — cùng phạm vi `ids` + khoảng ngày; tiền
         # lọc ngay dưới (loc_tien). `kenh_dang.du_lieu` nhận danh sách id (hợp chọn nhiều tài khoản).
@@ -2922,6 +2943,31 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                 status_code=404)
         return JSONResponse(json.loads(json.dumps(d, ensure_ascii=False, default=str)))
 
+    @app.get("/api/qc/ten-cd")
+    async def api_qc_ten_cd(request: Request):
+        """23/10/2026 (MKT): gợi ý khi gõ ô từ khoá "Tên chiến dịch" — ≤ 10 tên chiến dịch THẬT trong
+        phạm vi + kỳ đang xem chứa `q` (bỏ dấu), mới nhất trước, + vài đoạn tên hay gặp. Cùng cửa
+        /api/qc (co_qc), cùng luật phạm vi (`_pham_vi_qc`, ngoài phạm vi = 404), cùng ngân sách tính."""
+        nguoi = await _nguoi(request)
+        if not nguoi.get("co_qc"):
+            return JSONResponse({"loi": "Không có quyền xem trang quảng cáo."}, status_code=404)
+        qp = request.query_params
+        q = " ".join(str(qp.get("q") or "").split())[:QC.TU_KHOA_DAI_TOI_DA]
+        if not QC.chu_tim(q):
+            return JSONResponse({"q": q, "ten": [], "tu_khoa": []})
+        if not app.state.ban.acquire(blocking=False):
+            return JSONResponse({"loi": "Máy chủ đang bận — thử lại sau ít giây."}, status_code=503)
+        try:
+            cac_tk = list(await _k(app.state.kho_qc.cac_tk))
+            pv = _pham_vi_qc(nguoi, qp, cac_tk, nghiem=True)
+            ds = (await _k(app.state.kho_qc.ten_cd_trong_ky, pv["ids"], pv["tu"], pv["den"])
+                  if pv["ids"] else [])
+        except NL.LoiNhap as e:
+            return JSONResponse({"loi": str(e)}, status_code=400)
+        finally:
+            app.state.ban.release()
+        return JSONResponse(QC.goi_y_ten_cd(ds, q))
+
     @app.get("/quang-cao")
     async def trang_quang_cao(request: Request):
         nguoi = await _nguoi(request)
@@ -2945,8 +2991,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                    "den": d["den"], "sap": d["sap"], "tim": b["tim"], "cd": b["cd"],
                    "chieu": "tang" if b["chieu"] == "tang" else "",
                    # 23/10/2026 (MKT): lọc tên chiến dịch cấp trang đi cùng MỌI liên kết (khoảng nhanh,
-                   # tab nền tảng, xếp cột, trang, kênh).
-                   "ten_cd": (d.get("ten_cd") or {}).get("chu") or ""}
+                   # tab nền tảng, xếp cột, trang, kênh) — bản 2: cd_co / cd_mot / cd_khong lặp lại.
+                   **QC.tham_ten_cd(d.get("ten_cd"))}
             # 23/10/2026: lọc / xếp của khối "Theo kênh đăng" (kt, kl, ks, kc) đi cùng mọi liên kết;
             # trang của khối (kp) chỉ giữ trong liên kết của chính khối.
             lk = (d.get("kenh") or {}).get("loc") or {}
@@ -2978,6 +3024,20 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                        **loc, "tc": b["trang_campaign"] if b["trang_campaign"] > 1 else "",
                        "ta": b["trang_ad"] if b["trang_ad"] > 1 else "", **kw}) + "#kenh"}
             ctx["url_trang_kenh"] = lambda p, f=ctx["url_kenh"]: f(kp=p if p > 1 else "")
+            # 23/10/2026 (MKT): thẻ lọc tên chiến dịch — ✕ của MỖI điều kiện chỉ bỏ điều kiện đó;
+            # "Bỏ lọc tên" bỏ cả ba; gợi ý tên gần nhất (khi 0 khớp) đặt cd_mot = đúng tên đó (tên có
+            # dấu phẩy / chấm phẩy — sẽ bị tách — thì thành cd_co các đoạn: vẫn chỉ tên đó khớp).
+            tcd = d.get("ten_cd") or {}
+            if tcd:
+                bo = QC.tham_ten_cd(None)
+                ctx["url_bo_tcd"] = {k: _url("/quang-cao", **{**loc, ts: []})
+                                     for k, ts, *_ in QC.LOAI_TEN_CD}
+                ctx["url_bo_tcd"][""] = _url("/quang-cao", **{**loc, **bo})
+                ctx["goi_y_tcd"] = [
+                    (t, _url("/quang-cao", **{**loc, **bo, **(
+                        {"cd_co": [x for x in QC.TACH_TEN_CD.split(t) if x.strip()]}
+                        if QC.TACH_TEN_CD.search(t) else {"cd_mot": [t]})}))
+                    for t in tcd.get("goi_y") or []]
             ctx["SAP_KENH"] = KD.SAP_KENH
         ctx["sheet_ds"] = await _ds_sheet(nguoi["email"])
         if d:
@@ -2987,7 +3047,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                       dong_bo_luc=dong_bo, TEN_CHIEU=QC.TEN_CHIEU, CHIEU=QC.CHIEU_TAT_CA,
                       TEN_NEN_TANG_QC=QC.TEN_NEN_TANG_QC, SHEET_TRAN_DONG=KS.TRAN_DONG,
                       SHEET_TRAN_GIO=KS.TRAN_GIO, SAP_BANG=QC.SAP_BANG, TIM_TOI_DA=QC.TIM_TOI_DA,
-                      NGUONG_TI_LE=QC.NGUONG_TI_LE, **ctx)
+                      NGUONG_TI_LE=QC.NGUONG_TI_LE, LOAI_TEN_CD=QC.LOAI_TEN_CD,
+                      TU_KHOA_TOI_DA=QC.TU_KHOA_TOI_DA, TU_KHOA_DAI_TOI_DA=QC.TU_KHOA_DAI_TOI_DA,
+                      **ctx)
 
     # ─── xuất Lark Sheet (20/10/2026, chủ dự án): CHỈ quản trị viên. Dashboard chỉ GHI yêu cầu
     # (`kho_sheet_qc.tao`, RLS theo email phiên); bộ nghe qc-sheet-nghe của Mark (app Lark của Mark)
@@ -3005,7 +3067,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                  (f" · {ds[0] if ds else r['tk']}" if ds or r.get("tk") else ""))
               + (f" · tìm “{r['tim']}”" if r.get("tim") else "")
               + (f" · chiến dịch {r['cd']}" if r.get("cd") else "")
-              + (f" · tên chiến dịch “{r['ten_cd']}”" if r.get("ten_cd") else "")
+              + (f" · tên chiến dịch {QC.loc_ten_cd(QC.doc_ten_cd(r['ten_cd']))['chu']}"
+                 if r.get("ten_cd") else "")
               + (f" · {tu:%d/%m}–{den:%d/%m/%Y}" if isinstance(tu, datetime.date)
                  and isinstance(den, datetime.date) else ""))
         sd = r.get("so_dong") or {}
@@ -3052,11 +3115,12 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         tk_vao = [str(x).strip() for x in form.getlist("tk") if str(x).strip()]
         tk_vao = list(dict.fromkeys(tk_vao))
         lb = QC.loc_bang(form, True)
-        # 23/10/2026 (MKT): Sheet theo CẢ lọc tên chiến dịch cấp trang (`ten_cd`) — không lờ đi.
+        # 23/10/2026 (MKT): Sheet theo CẢ lọc tên chiến dịch cấp trang — không lờ đi. Bản 2: ba danh
+        # sách lưu một chuỗi JSON chuẩn (`QC.chuoi_ten_cd`) ở cột `ten_cd` có sẵn.
         tc = QC.loc_ten_cd(form)
         ve_q = {"ben": ben, "nen_tang": nen, "tk": tk_vao[:QC.TK_TOI_DA], "tu": form.get("tu"),
                 "den": form.get("den"), "tim": lb["tim"], "cd": lb["cd"], "sap": lb["sap"],
-                "chieu": "tang" if lb["chieu"] == "tang" else "", "ten_cd": tc["chu"]}
+                "chieu": "tang" if lb["chieu"] == "tang" else "", **QC.tham_ten_cd(tc)}
         ve = _url("/quang-cao", **ve_q) + "#sheet"
         if (not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,39}", ben)
                 or nen not in (*QC.NEN_TANG_QC, QC.TAT_CA) or len(tk_vao) > QC.TK_TOI_DA
@@ -3081,7 +3145,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         if len(tk_ds) == len(QC.tk_xuat(nguoi["q"], cac, ben, nen)):
             tk_ds = []
         loc = {"tk_ds": tk_ds or None, "tim": lb["tim"] or None, "cd": lb["cd"] or None,
-               "sap": lb["sap"], "chieu": lb["chieu"], "ten_cd": tc["chu"] or None}
+               "sap": lb["sap"], "chieu": lb["chieu"], "ten_cd": QC.chuoi_ten_cd(tc)}
         try:
             r = await _k(app.state.kho_sheet.tao, nguoi["email"], ben, nen, None, tu, den, **loc)
         except LoiDuLieu as e:

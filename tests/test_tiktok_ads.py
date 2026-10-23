@@ -466,16 +466,26 @@ class GiaKhoQC:
             bang, giu = self.bang["qc_campaign_ngay"].values(), lambda r: r["campaign_id"] in cds
         return [r for r in bang if r["advertiser_id"] in ids and tu <= r["ngay"] <= den and giu(r)]
 
-    def ma_cd_theo_ten(self, ids, tu, den, maus):
-        if not ids or not maus:
-            return []
+    # 23/10/2026 (bản 2): `loc` = `quang_cao.loc_ten_cd` (chứa tất cả / một trong / không chứa).
+    def _ten_moi(self, ids, tu, den):
         moi: dict = {}
         for r in self.bang["qc_campaign_ngay"].values():
             if r["advertiser_id"] in ids and tu <= r["ngay"] <= den and (
                     r["campaign_id"] not in moi or r["ngay"] > moi[r["campaign_id"]]["ngay"]):
                 moi[r["campaign_id"]] = r
-        return [k for k, r in sorted(moi.items())
-                if any(m in QC.chu_tim(r.get("ten") or "") for m in maus)]
+        return moi
+
+    def ma_cd_theo_ten(self, ids, tu, den, loc):
+        if not ids or not loc.get("co_loc") or loc.get("khong_khop"):
+            return []
+        return [k for k, r in sorted(self._ten_moi(ids, tu, den).items())
+                if QC.khop_ten_cd(r.get("ten"), loc)]
+
+    def ten_cd_trong_ky(self, ids, tu, den):
+        self.goi_ten_ky = [*getattr(self, "goi_ten_ky", []), (tuple(ids), tu, den)]
+        return sorted(({"campaign_id": k, "ten": r.get("ten"), "ngay": r["ngay"]}
+                       for k, r in self._ten_moi(ids, tu, den).items()),
+                      key=lambda r: (-r["ngay"].toordinal(), r["campaign_id"]))
 
     def qc_tong(self, ids, tu, den, cds=None):
         if cds is not None and not cds:

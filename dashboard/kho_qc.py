@@ -603,26 +603,45 @@ def ma_khop_ten(c, cap: str, ids: list[str], tu: datetime.date, den: datetime.da
 
 
 def ma_cd_theo_ten_c(c, ids: list[str], tu: datetime.date, den: datetime.date,
-                     maus: list[str]) -> list[str]:
+                     loc: dict) -> list[str]:
     """`ma_cd_theo_ten` trên kết nối đang mở `c` của nơi gọi."""
-    if not ids or not maus:
+    if not ids or not loc.get("co_loc") or loc.get("khong_khop"):
         return []
     return [r["campaign_id"] for r in c.execute(sql_ten_bang("campaign", cd=False),
                                                 [list(ids), tu, den]).fetchall()
-            if any(m in QC.chu_tim(r.get("ten") or "") for m in maus)]
+            if QC.khop_ten_cd(r.get("ten"), loc)]
 
 
 def ma_cd_theo_ten(ids: list[str], tu: datetime.date, den: datetime.date,
-                   maus: list[str]) -> list[str]:
+                   loc: dict) -> list[str]:
     """23/10/2026 (MKT, lọc tên chiến dịch CẤP TRANG — `quang_cao.loc_ten_cd`): mã các chiến dịch
-    của `ids` có dòng trong [tu, den] mà TÊN MỚI NHẤT trong kỳ chứa BẤT KỲ cụm nào của `maus` (đã
-    qua `chu_tim`). So khớp ở Python bằng đúng `chu_tim` như `ma_khop_ten` (bỏ dấu trong Postgres
-    chậm hơn — xem `qc_bang`). `maus` rỗng → [] (không khớp gì). Nơi gọi tính lại cho kỳ trước:
-    chiến dịch "teaser" kỳ này so với các chiến dịch "teaser" của kỳ trước."""
-    if not ids or not maus:
+    của `ids` có dòng trong [tu, den] mà TÊN MỚI NHẤT trong kỳ khớp `loc` (bản 2: chứa tất cả / một
+    trong / không chứa — `quang_cao.khop_ten_cd`). So khớp ở Python bằng đúng `chu_tim` như
+    `ma_khop_ten` (bỏ dấu trong Postgres chậm hơn — xem `qc_bang`). Không điều kiện / chắc chắn không
+    khớp (`khong_khop`) → [] không truy vấn. Nơi gọi tính lại cho kỳ trước: chiến dịch "teaser" kỳ
+    này so với các chiến dịch "teaser" của kỳ trước."""
+    if not ids or not loc.get("co_loc") or loc.get("khong_khop"):
         return []
     with ket_noi() as c:
-        return ma_cd_theo_ten_c(c, ids, tu, den, maus)
+        return ma_cd_theo_ten_c(c, ids, tu, den, loc)
+
+
+#: 23/10/2026 (MKT): tên chiến dịch trong kỳ cho gợi ý ô từ khoá (`/api/qc/ten-cd`) và "tên gần
+#: nhất" khi không chiến dịch nào khớp. Tham số: ids, tu, den.
+SQL_TEN_CD_KY = ("SELECT DISTINCT ON (campaign_id) campaign_id, ten, ngay FROM qc_campaign_ngay "
+                 "WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s "
+                 "ORDER BY campaign_id, ngay DESC")
+
+
+def ten_cd_trong_ky(ids: list[str], tu: datetime.date, den: datetime.date) -> list[dict]:
+    """Tên MỚI NHẤT trong kỳ của mọi chiến dịch của `ids` có dòng trong [tu, den] — chiến dịch chạy
+    gần đây nhất trước (ngày cuối có dòng giảm dần, rồi mã). -> [{campaign_id, ten, ngay}]."""
+    if not ids:
+        return []
+    with ket_noi() as c:
+        rows = c.execute(SQL_TEN_CD_KY, [list(ids), tu, den]).fetchall()
+    return sorted(rows, key=lambda r: (-(r["ngay"].toordinal() if r.get("ngay") else 0),
+                                       str(r["campaign_id"])))
 
 
 def qc_bang(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, *, sap: str,

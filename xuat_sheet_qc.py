@@ -39,6 +39,8 @@ Dòng web giữ nguyên luật cũ (chỉ quản trị viên, đủ cột tiền
 tên tính lại LÚC DỰNG (`kho_sheet_qc.ma_cd_theo_ten`, cùng luật trang), rồi MỌI tab (theo ngày ×
 tài khoản cộng từ qc_campaign_ngay, chiến dịch, quảng cáo), số liệu chính và dòng TỔNG chỉ tính các
 chiến dịch đó. Tiêu đề + Tổng quan ghi rõ bộ lọc. Có chữ mà không còn cụm Latin nào → không khớp gì.
+Bản 2 (23/10/2026, MKT — như Meta Ads Manager): cột lưu chuỗi JSON `{"co","mot","khong"}` (chứa tất cả /
+chứa một trong / không chứa, AND với nhau); dòng cũ chữ thường (dấu phẩy = hoặc) = "chứa một trong".
 
 Đường Sheet giống hệt `chi_so_ads` (meta_ads_tool, số quảng cáo): `trinh_bay_sheet.xuat` — tạo →
 khoá riêng tư TRƯỚC khi ghi số (`TB.khoa_rieng_tu`: đóng chia sẻ link / ngoài tổ chức, kiểm lại) →
@@ -149,9 +151,9 @@ def loc_yeu_cau(yc: dict, tien: bool = True) -> dict:
 
 
 def loc_ten_cd(yc: dict) -> dict:
-    """Cột `ten_cd` (23/10/2026) qua CHÍNH `quang_cao.loc_ten_cd` của trang. Dòng cũ (NULL) = không
-    lọc ({"chu": "", "maus": []})."""
-    return QC.loc_ten_cd({"ten_cd": yc.get("ten_cd")})
+    """Cột `ten_cd` (23/10/2026) qua CHÍNH `quang_cao.loc_ten_cd` của trang (`doc_ten_cd`: JSON bản 2
+    hoặc chữ cũ = "chứa một trong"). Dòng cũ (NULL) = không lọc (`co_loc` False)."""
+    return QC.loc_ten_cd(QC.doc_ten_cd(yc.get("ten_cd")))
 
 
 def tu_mark(yc: dict) -> bool:
@@ -220,7 +222,8 @@ def mo_ta_loc(yc: dict, lb: dict, tk: list[dict], tcd: dict | None = None) -> li
     co_cd = bool(tcd and tcd.get("chu"))
     if co_cd:
         ra.append(f"Lọc tên chiến dịch (áp vào CẢ Sheet — mọi tab, số liệu chính, dòng TỔNG): tên "
-                  f"chứa “{tcd['chu']}” (không phân biệt dấu; dấu phẩy = hoặc) — "
+                  f"{tcd['chu']} (không phân biệt dấu; khoảng trắng, _ và / bỏ qua; các điều kiện "
+                  "kết hợp bằng VÀ) — "
                   + f"{int(tcd.get('so') or 0):,}".replace(",", ".")
                   + " chiến dịch khớp trong kỳ. Số cộng ở cấp chiến dịch.")
     ra.append("Bộ lọc bảng (tab chiến dịch + quảng cáo): "
@@ -244,7 +247,7 @@ def dung_bang(tk: list[dict], ngay: dict, cd: dict, qc: dict, tong: dict[str, di
     tả MỌI tab (số đã lọc ở bước đọc)."""
     import trinh_bay_sheet as TB
     lb = lb or loc_yeu_cau({}, tien)
-    cd_ten = f", chỉ chiến dịch có tên chứa “{tcd['chu']}”" if tcd and tcd.get("chu") else ""
+    cd_ten = f", chỉ chiến dịch có tên {tcd['chu']}" if tcd and tcd.get("chu") else ""
     loc = cd_ten + (f", tên khớp “{lb['tim']}”" if lb["tim"] else "") + (
         f", chiến dịch {lb['cd']}" if lb["cd"] else "")
     thong_tin = {str(t["advertiser_id"]): t for t in tk}
@@ -314,7 +317,7 @@ def tieu_de(yc: dict, tk: list[dict], ten_ben: str) -> str:
         pham_vi += f" · {len(tk)} tài khoản"
     chu = loc_ten_cd(yc)["chu"]
     if chu:                       # 23/10/2026: lọc tên chiến dịch cấp trang hiện ngay ở tên file
-        pham_vi += f" · chiến dịch “{chu[:60]}{'…' if len(chu) > 60 else ''}”"
+        pham_vi += f" · chiến dịch {chu[:80]}{'…' if len(chu) > 80 else ''}"
     return f"{ten_nen_tieu_de(yc['nen_tang'], tk)} Ads · {pham_vi} · {tu:%d/%m}–{den:%d/%m/%Y}"
 
 
@@ -526,13 +529,14 @@ def xu_ly(yc: dict, *, ks=KS, kho=None, kho_qc=None, lark=None, xuat=None, log=p
             ben, ben.upper())
         lb = loc_yeu_cau(yc, tien)
         # 23/10/2026 (MKT): lọc tên chiến dịch cấp trang — chiến dịch khớp tính lại LÚC DỰNG, áp
-        # vào MỌI tab + tổng. Có chữ mà không còn cụm Latin nào → [] (không khớp gì, như trang).
+        # vào MỌI tab + tổng. Bản 2: chứa tất cả / một trong / không chứa (AND). Dòng có từ khoá mà
+        # không còn từ Latin nào → [] (không khớp gì, như trang).
         tc = loc_ten_cd(yc)
         cds = None
-        if tc["chu"]:
-            cds = ks.ma_cd_theo_ten(ids, tu, den, tc["maus"]) if tc["maus"] else []
+        if tc["co_loc"]:
+            cds = ks.ma_cd_theo_ten(ids, tu, den, tc) if not tc["khong_khop"] else []
         lcd = {"cds": cds} if cds is not None else {}
-        tcd = {"chu": tc["chu"], "so": len(cds or [])} if tc["chu"] else None
+        tcd = {"chu": tc["chu"], "so": len(cds or [])} if tc["co_loc"] else None
         ngay = ks.doc_theo_ngay(ids, tu, den, **lcd)
         if lb["tim"] and not lb["mau"]:
             # Chữ tìm không còn chữ/số Latin nào: không khớp gì (như bảng trang Quảng cáo).

@@ -17,6 +17,7 @@ Luật quyền (chủ dự án chốt):
 from __future__ import annotations
 
 import datetime
+import json
 import re
 import unicodedata
 
@@ -644,25 +645,179 @@ def loc_bang(qp, co_tien: bool) -> dict:
             "chieu": chieu, "tc": so_trang(qp.get("tc")), "ta": so_trang(qp.get("ta"))}
 
 
-#: 23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): ô `ten_cd` lọc CẢ TRANG — KPI, biểu đồ,
-#: TikTok và Meta, hai bảng, kênh đăng, Lark Sheet chỉ tính chiến dịch có tên khớp (Khán giả theo
-#: tài khoản nên không theo được — trang ghi rõ). Dấu phẩy / chấm phẩy tách nhiều cụm = HOẶC.
+#: 23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): lọc CẢ TRANG theo tên chiến dịch — KPI,
+#: biểu đồ, TikTok và Meta, hai bảng, kênh đăng, Lark Sheet chỉ tính chiến dịch có tên khớp (Khán giả
+#: theo tài khoản nên không theo được — trang ghi rõ). Dấu phẩy / chấm phẩy tách nhiều từ khoá.
 TACH_TEN_CD = re.compile(r"[,;]")
+#: 23/10/2026 (MKT, bản 2 — "như Meta Ads Manager": "chứa tất cả từ khoá · chứa một trong các từ
+#: khoá · không chứa bất kì từ khoá nào"): ba danh sách từ khoá, các dòng AND với nhau. (mã, tham số
+#: URL / biểu mẫu, nhãn ngắn ở thẻ, nhãn dòng ở bảng chọn). Tham số `ten_cd` cũ (PR #101, dấu phẩy =
+#: hoặc) = `cd_mot` — link cũ vẫn chạy.
+LOAI_TEN_CD = (("co", "cd_co", "chứa tất cả", "Chứa tất cả từ khoá"),
+               ("mot", "cd_mot", "chứa một trong", "Chứa một trong các từ khoá"),
+               ("khong", "cd_khong", "không chứa", "Không chứa từ khoá nào"))
+TU_KHOA_TOI_DA = 10             # từ khoá mỗi dòng
+TU_KHOA_DAI_TOI_DA = 60         # ký tự mỗi từ khoá
+#: Chuỗi JSON lưu ở `yeu_cau_sheet_qc.ten_cd` (= trigger `chuan_yeu_cau_sheet_qc`, schema.sql).
+TEN_CD_CHUOI_TOI_DA = 600
+
+
+def _gia_tri(qp, k: str) -> list:
+    """Mọi giá trị của tham số `k` (QueryParams / FormData: lặp lại; dict: chuỗi hoặc danh sách)."""
+    if qp is None:
+        return []
+    if hasattr(qp, "getlist"):
+        return list(qp.getlist(k))
+    v = qp.get(k)
+    if v is None:
+        return []
+    return list(v) if isinstance(v, (list, tuple)) else [v]
+
+
+def chuoi_ten_cd(loc: dict) -> str | None:
+    """Ba danh sách → chuỗi JSON chuẩn `{"co":[..],"mot":[..],"khong":[..]}` (cột `ten_cd` của yêu
+    cầu Sheet); không điều kiện nào → None."""
+    if not any(loc.get(k) for k, *_ in LOAI_TEN_CD):
+        return None
+    return json.dumps({k: list(loc.get(k) or []) for k, *_ in LOAI_TEN_CD}, ensure_ascii=False,
+                      separators=(",", ":"))
+
+
+def mo_ta_ten_cd(loc: dict) -> str:
+    """Các điều kiện bằng chữ: "chứa tất cả: LOYALTY, 20/10 · không chứa: reach" ("" = không lọc)."""
+    return " · ".join(f"{ngan}: {', '.join(loc[k])}" for k, _, ngan, _ in LOAI_TEN_CD
+                      if loc.get(k))
 
 
 def loc_ten_cd(qp) -> dict:
-    """Tham số `ten_cd` (lọc tên chiến dịch cấp trang) → {"chu": chữ gốc đã gọn (≤ TIM_TOI_DA),
-    "maus": các cụm đã qua `chu_tim`, không trùng}. Một chiến dịch khớp khi TÊN MỚI NHẤT trong kỳ chứa
-    BẤT KỲ cụm nào (`kho_qc.ma_cd_theo_ten`). Cụm không còn chữ/số Latin bị bỏ; có chữ mà mọi cụm bị
-    bỏ (vd "…", chữ Thái) → `maus` rỗng = KHÔNG khớp gì (cùng luật `tim`, không lờ đi). Bộ nghe Sheet
-    (`xuat_sheet_qc`) dùng lại hàm này cho cột `ten_cd` của yêu cầu."""
-    chu = " ".join(str(qp.get("ten_cd") or "").split())[:TIM_TOI_DA]
-    maus: list[str] = []
-    for cum in TACH_TEN_CD.split(chu):
-        m = chu_tim(cum)
-        if m and m not in maus:
-            maus.append(m)
-    return {"chu": chu, "maus": maus}
+    """Tham số lọc tên chiến dịch cấp trang → {"co", "mot", "khong": từ khoá đã gọn (chữ người gõ),
+    "maus": {cùng khoá: từ khoá qua `chu_tim`}, "co_loc", "khong_khop", "cat", "chu"}.
+      • `cd_co` / `cd_mot` / `cd_khong` lặp lại được; dấu phẩy / chấm phẩy trong một giá trị cũng
+        tách. `ten_cd` cũ (dấu phẩy = hoặc) gộp vào `cd_mot`.
+      • Trần: ≤ TU_KHOA_TOI_DA từ khoá mỗi dòng, mỗi từ khoá ≤ TU_KHOA_DAI_TOI_DA ký tự, chuỗi JSON
+        (`chuoi_ten_cd`) ≤ TEN_CD_CHUOI_TOI_DA — vượt thì cắt lặng, `cat` = True (nút i ghi trần).
+      • Từ khoá mà `chu_tim` rút về rỗng (chữ Thái, "…") bị bỏ khi so khớp (vẫn hiện như người gõ).
+        `co` / `mot` có từ khoá mà mọi từ khoá bị bỏ → `khong_khop` = KHÔNG khớp gì (cùng luật `tim`,
+        không lờ đi); `khong` bị bỏ hết thì chỉ là không ràng buộc.
+    Bộ nghe Sheet (`xuat_sheet_qc`) + tool Mark dùng lại hàm này (qua `doc_ten_cd`)."""
+    cat = False
+    tho: dict[str, list[str]] = {}
+    for loai, ts, *_ in LOAI_TEN_CD:
+        vao = _gia_tri(qp, ts) + (_gia_tri(qp, "ten_cd") if loai == "mot" else [])
+        ds: list[str] = []
+        thay: set[str] = set()
+        for v in vao:
+            for cum in TACH_TEN_CD.split(str(v if v is not None else "")):
+                kw = " ".join(cum.split())
+                if not kw:
+                    continue
+                if len(kw) > TU_KHOA_DAI_TOI_DA:
+                    kw, cat = kw[:TU_KHOA_DAI_TOI_DA].rstrip(), True
+                khoa = chu_tim(kw) or kw.casefold()
+                if khoa in thay:
+                    continue
+                if len(ds) >= TU_KHOA_TOI_DA:
+                    cat = True
+                    continue
+                thay.add(khoa)
+                ds.append(kw)
+        tho[loai] = ds
+    # Tổng chuỗi lưu: bớt từ khoá cuối (không chứa → một trong → tất cả) tới khi vừa.
+    while len(chuoi_ten_cd(tho) or "") > TEN_CD_CHUOI_TOI_DA:
+        cat = True
+        next(tho[k] for k in ("khong", "mot", "co") if tho[k]).pop()
+    maus = {k: list(dict.fromkeys(m for m in map(chu_tim, ds) if m)) for k, ds in tho.items()}
+    return {**tho, "maus": maus, "co_loc": any(tho.values()), "cat": cat,
+            "khong_khop": bool((tho["co"] and not maus["co"]) or (tho["mot"] and not maus["mot"])),
+            "chu": mo_ta_ten_cd(tho)}
+
+
+def khop_ten_cd(ten: str | None, loc: dict) -> bool:
+    """Tên chiến dịch (TÊN MỚI NHẤT trong kỳ) khớp bộ lọc `loc_ten_cd`: chứa MỌI từ khoá `co`, ít nhất
+    MỘT từ khoá `mot` (rỗng = không ràng buộc), KHÔNG từ khoá `khong` nào — so bằng `chu_tim` (bỏ dấu,
+    bỏ khoảng trắng / _ / /). Dòng có từ khoá mà không còn từ Latin nào → không khớp."""
+    if loc.get("khong_khop"):
+        return False
+    t = chu_tim(ten or "")
+    m = loc.get("maus") or {}
+    return (all(k in t for k in m.get("co") or ())
+            and (not loc.get("mot") or any(k in t for k in m.get("mot") or ()))
+            and not any(k in t for k in m.get("khong") or ()))
+
+
+def doc_ten_cd(s) -> dict:
+    """Cột `ten_cd` đã lưu → tham số cho `loc_ten_cd`: JSON `{"co","mot","khong"}` (bản 2) hoặc chữ
+    thường (PR #101: dấu phẩy = hoặc → `cd_mot`). NULL / rỗng → không lọc."""
+    s = str(s or "").strip()
+    if s.startswith("{"):
+        try:
+            d = json.loads(s)
+        except ValueError:
+            d = None
+        if isinstance(d, dict):
+            ra = {}
+            for loai, ts, *_ in LOAI_TEN_CD:
+                v = d.get(loai)
+                v = [v] if isinstance(v, str) else (v if isinstance(v, list) else [])
+                ra[ts] = [str(x) for x in v if isinstance(x, (str, int, float))]
+            return ra
+    return {"ten_cd": s}
+
+
+def tham_ten_cd(loc: dict | None) -> dict:
+    """Tham số URL giữ bộ lọc (liên kết, ô ẩn): `cd_co` / `cd_mot` / `cd_khong` lặp lại; `ten_cd` cũ
+    luôn bỏ (đã gộp)."""
+    loc = loc or {}
+    return {"ten_cd": "", **{ts: list(loc.get(k) or []) for k, ts, *_ in LOAI_TEN_CD}}
+
+
+_TACH_DOAN = re.compile(r"[_|\[\]()]+|\s[-–·]\s")
+
+
+def goi_y_ten_cd(ds: list[dict], q: str, n: int = 10, n_tu: int = 5) -> dict:
+    """Gợi ý ô từ khoá (`/api/qc/ten-cd`): `ds` = tên chiến dịch trong kỳ, mới nhất trước
+    (`kho_qc.ten_cd_trong_ky`). -> {"ten": ≤ n tên khác nhau chứa `q` (bỏ dấu), mới nhất trước,
+    "tu_khoa": ≤ n_tu đoạn tên hay gặp (tách theo _ | - ngoặc) chứa `q`, nhiều nhất trước}."""
+    mau = chu_tim(q)
+    if not mau:
+        return {"q": q, "ten": [], "tu_khoa": []}
+    ten: list[str] = []
+    dem: dict[str, list] = {}
+    for r in ds:
+        t = " ".join(str(r.get("ten") or "").split())
+        if not t:
+            continue
+        if mau in chu_tim(t) and t not in ten and len(ten) < n:
+            ten.append(t)
+        for doan in _TACH_DOAN.split(t):
+            doan = " ".join(doan.split())
+            k = chu_tim(doan)
+            if len(k) >= 2 and mau in k and len(doan) <= TU_KHOA_DAI_TOI_DA:
+                dem.setdefault(k, [doan, 0])[1] += 1
+    tu = [d for d, _ in sorted(dem.values(), key=lambda x: -x[1]) if d not in ten][:n_tu]
+    return {"q": q, "ten": ten, "tu_khoa": tu}
+
+
+def ten_gan_nhat(ds: list[dict], loc: dict, n: int = 5) -> list[str]:
+    """Không chiến dịch nào khớp → ≤ n tên THẬT trong kỳ gần nhất với các từ khoá đã gõ (chứa nhiều từ
+    khoá `co` + `mot` nhất, rồi nhiều chữ lẻ của chúng nhất; mới nhất trước khi bằng điểm; bỏ tên chứa
+    từ khoá `khong`). Không tên nào chung chữ nào → []."""
+    maus = loc.get("maus") or {}
+    kw = [*maus.get("co", []), *maus.get("mot", [])]
+    le = list(dict.fromkeys(m for k in (*loc.get("co", []), *loc.get("mot", []))
+                            for m in map(chu_tim, re.split(r"[\s_/|.\-]+", k)) if len(m) >= 2))
+    diem: list[tuple] = []
+    thay: set[str] = set()
+    for i, r in enumerate(ds):
+        t = " ".join(str(r.get("ten") or "").split())
+        c = chu_tim(t)
+        if not t or t in thay or any(k in c for k in maus.get("khong", [])):
+            continue
+        thay.add(t)
+        a, b = sum(k in c for k in kw), sum(m in c for m in le)
+        if a or b:
+            diem.append((-a, -b, i, t))
+    return [t for *_, t in sorted(diem)[:n]]
 
 
 def o_trang(trang: int, so_trang_: int) -> list[int | None]:
