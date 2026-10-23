@@ -1067,13 +1067,14 @@ def nhat_ky(gioi_han: int = 100, du_an: list[str] | None = None,
     """Nhật ký mới nhất trước. `du_an` / `don_vi` (quản lý của bên, 19/10/2026): chỉ dòng về các dự
     án đó (đối tượng `du_an:<mã>` hoặc chi tiết có `du_an`) hoặc về quyền ở các bên đó — không thấy
     thao tác của bên khác. Cả hai None = mọi dòng (quản trị viên). `hanh_dong` (23/10/2026): chỉ
-    một hành động."""
+    một hành động. Xếp theo `luc` (23/10/2026: dòng "dang_nhap" ghi bù từ lịch sử đăng nhập cũ nằm
+    đúng chỗ theo thời gian, không nhảy lên đầu vì id mới)."""
     dk, ts = _loc_nhat_ky(du_an, don_vi)
     if hanh_dong:
         dk, ts = dk + " AND hanh_dong = %s", [*ts, str(hanh_dong)]
     with ket_noi() as c:
         return c.execute("SELECT id, luc, ai, hanh_dong, doi_tuong, chi_tiet FROM nhat_ky WHERE "
-                         + dk + " ORDER BY id DESC LIMIT %s", (*ts, int(gioi_han))).fetchall()
+                         + dk + " ORDER BY luc DESC, id DESC LIMIT %s", (*ts, int(gioi_han))).fetchall()
 
 
 def cac_hanh_dong(du_an: list[str] | None = None,
