@@ -244,6 +244,7 @@
     {% for k in ('ben', 'nen_tang', 'tu', 'den') if d[k] %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
     {% for x in d.tk_ds %}<input type="hidden" name="tk" value="{{ x }}">{% endfor %}
     {% if d.bang.cd %}<input type="hidden" name="cd" value="{{ d.bang.cd }}">{% endif %}
+    {% if d.kenh and d.kenh.loc %}{% set lk = d.kenh.loc %}{% for k, v in (('kt', lk.tim), ('kl', lk.loai), ('ks', lk.sap if lk.sap != lk.mac_dinh else ''), ('kc', 'tang' if lk.chieu == 'tang' else '')) if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endif %}
     <label class="o qc-bang-loc__tim">Tìm theo tên
       <input type="search" name="tim" value="{{ d.bang.tim }}" maxlength="{{ TIM_TOI_DA }}" placeholder="Tên chiến dịch hoặc quảng cáo" autocomplete="off">
     </label>

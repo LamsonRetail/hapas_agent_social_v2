@@ -769,7 +769,8 @@ HOI_LAI_KHONG_THAY_NGAY = 7
 #: Kênh đã hỏi tên mà không có (nhớ âm): TikTok — identity_get không trả danh tính đó, hỏi lại sau
 #: 7 ngày; Meta — tên Trang / IG lỗi (thiếu quyền…), hỏi lại sau 1 ngày.
 HOI_LAI_TEN_NGAY = {"tiktok": 7, "meta": 1}
-KENH_TOI_DA = 500
+#: Trần số kênh một lượt đọc (23/10/2026: trang lọc / xếp / chia trang ở Python trên ĐỦ kênh).
+KENH_TOI_DA = 2000
 _COT_AD_KENH = ("advertiser_id", "ad_id", "nen_tang", "kenh_id", "loai", "kenh_phu_id", "bai_id")
 
 
@@ -844,22 +845,27 @@ SAP_KENH_SQL = {"chi": "g.chi", "hien_thi": "g.hien_thi"}
 
 def sql_kenh_dang(cot: str) -> tuple[str, str]:
     """(1) tổng theo kênh (ad đã biết kênh), xếp + LIMIT, kèm tổng số kênh; (2) tổng phần đã biết /
-    chưa biết kênh (độ phủ + dòng "Chưa xác định")."""
+    chưa biết kênh (độ phủ + dòng "Chưa xác định").
+    23/10/2026 (chủ dự án hỏi hai dòng "HAPAS · Chính chủ"): một tài khoản TikTok có thể chạy dưới
+    NHIỀU danh tính (TT_USER gắn thẳng tài khoản QC + BC_AUTH_TT qua Business Center) → gộp theo
+    username khi đã biết (cùng @ = cùng kênh), chưa biết username thì theo mã danh tính."""
     tong_a = ", ".join(f"sum(q.{c}) AS {c}" for c in QC.TEN_COT_SO)
     gop = ", ".join(f"sum(a.{c})::float AS {c}" if c in QC.COT_TIEN else
                     f"sum(a.{c})::bigint AS {c}" for c in QC.TEN_COT_SO)
     kenh = (f"WITH a AS (SELECT q.advertiser_id, q.ad_id, {tong_a} FROM qc_ad_ngay q "
             "WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s "
             "GROUP BY q.advertiser_id, q.ad_id), "
-            "g AS (SELECT k.nen_tang, k.kenh_id, max(k.loai) AS loai, "
+            "g AS (SELECT k.nen_tang, min(k.kenh_id) AS kenh_id, max(k.loai) AS loai, "
+            "max(c.ten) AS ten, max(c.username) AS username, "
             "(array_agg(k.kenh_phu_id ORDER BY a.hien_thi DESC NULLS LAST) "
             "FILTER (WHERE k.kenh_phu_id IS NOT NULL))[1] AS kenh_phu_id, "
             "array_agg(DISTINCT a.advertiser_id) AS tk_ids, count(*) AS so_ad, "
             f"{gop} FROM a JOIN qc_ad_kenh k ON k.advertiser_id = a.advertiser_id "
-            "AND k.ad_id = a.ad_id WHERE k.kenh_id IS NOT NULL GROUP BY k.nen_tang, k.kenh_id) "
-            "SELECT g.*, c.ten, c.username, p.username AS phu_username, count(*) OVER () AS tong "
-            "FROM g LEFT JOIN qc_kenh c ON c.nen_tang = g.nen_tang AND c.kenh_id = g.kenh_id "
-            "LEFT JOIN qc_kenh p ON p.nen_tang = g.nen_tang AND p.kenh_id = g.kenh_phu_id "
+            "AND k.ad_id = a.ad_id LEFT JOIN qc_kenh c ON c.nen_tang = k.nen_tang "
+            "AND c.kenh_id = k.kenh_id WHERE k.kenh_id IS NOT NULL "
+            "GROUP BY k.nen_tang, COALESCE('u:' || lower(NULLIF(c.username, '')), k.kenh_id)) "
+            "SELECT g.*, p.username AS phu_username, count(*) OVER () AS tong "
+            "FROM g LEFT JOIN qc_kenh p ON p.nen_tang = g.nen_tang AND p.kenh_id = g.kenh_phu_id "
             f"ORDER BY {SAP_KENH_SQL[cot]} DESC NULLS LAST, g.hien_thi DESC NULLS LAST, g.kenh_id "
             "LIMIT %s")
     phu = (f"SELECT (k.kenh_id IS NOT NULL) AS biet, count(DISTINCT q.ad_id) AS so_ad, {_TONG} "

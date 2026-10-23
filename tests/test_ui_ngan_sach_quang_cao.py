@@ -76,23 +76,30 @@ def _trang_qc(kenh=45, **qp):
     return c.get("/quang-cao?" + Q + "".join(f"&{k}={v}" for k, v in qp.items())).text
 
 
-def test_kenh_dang_phan_trang_chung_chua_xac_dinh_o_tfoot_dong_phu_mot_dong():
+def test_kenh_dang_loc_xep_thanh_trang_may_chu_chua_xac_dinh_o_tfoot():
+    """23/10/2026: bộ lọc như bảng chiến dịch (kt / kl / ks / kc), thanh trang chung ở MÁY CHỦ (kp),
+    "Chưa xác định" ở tfoot, dòng phụ một dòng (đủ ở title)."""
     t = _trang_qc()
     k = t.split('id="kenh"')[1].split("</section>")[0]
-    assert '<table class="qc-bang qc-kenh__bang" data-phan-trang="20" data-phan-trang-nhan="kênh đăng">' in k
+    assert '<table class="qc-bang qc-kenh__bang">' in k and "data-phan-trang" not in k
     tfoot = k.split("<tfoot>")[1].split("</tfoot>")[0]
     assert "Chưa xác định" in tfoot and "Chưa xác định" not in k.split("<tbody>")[1].split("</tbody>")[0]
-    # chú thích cuối bảng → (i) + nút "Tải đủ" ở đầu mục
-    assert "Đang hiện" not in k and "xem thêm" not in k
-    assert "qc-kenh__them" not in k and k.count('<tr>') == 1 + 45                  # mặc định tải 100: đủ 45
-    # dòng phụ: một dòng cắt "…", đủ tài khoản ở title
+    assert "qc-kenh__them" not in k and k.count('<tr>') == 1 + 20                  # trang 1: 20 kênh
+    nav = re.search(r'<nav class="phan-trang" aria-label="Trang của bảng kênh đăng">(.*?)</nav>', k, re.S)
+    assert nav and "Trang 1/3 · 45 kênh" in nav.group(1)
+    assert re.search(r'href="[^"]*kp=2[^"]*#kenh" rel="next"', nav.group(1))
+    # bộ lọc: ô tìm + loại + xếp + chiều; tiêu đề cột là liên kết xếp
+    assert 'name="kt"' in k and 'name="kl"' in k and 'name="ks"' in k and 'name="kc"' in k
+    assert '<option value="spark">Spark Ads (45)</option>' in k
+    assert re.search(r'<a class="qc-sap" href="[^"]*ks=click[^"]*#kenh"', k)
     phu = re.search(r'<span class="qc-bang__phu" data-nen-tang="tiktok" title="([^"]+)">', k)
     assert phu and "@kenh0" in phu.group(1) and "2 quảng cáo" in phu.group(1)
-    assert '<span class="qc-bang__phu-chu">' in k
-    # quá 100 kênh: (i) nói đang tải 100 / N + nút "Tải đủ"
-    k = _trang_qc(kenh=180).split('id="kenh"')[1].split("</section>")[0]
-    assert re.search(r'data-goi-y="[^"]*đang tải 100 / 180 kênh đầu', k)
-    assert re.search(r'<a class="qc-kenh__them" href="[^"]*kenh_so=500[^"]*#kenh">Tải đủ 180 kênh</a>', k)
+    # trang 3 + tìm + xếp tăng
+    k = _trang_qc(kp=3).split('id="kenh"')[1].split("</section>")[0]
+    assert k.count('<tr>') == 1 + 5 and "Kênh 40" in k
+    k = _trang_qc(kt="K%C3%AAnh+7", ks="hien_thi", kc="tang").split('id="kenh"')[1].split("</section>")[0]
+    assert "1 / 45 kênh khớp" in k and "Kênh 7 <span" in k and "Bỏ lọc" in k
+    assert 'aria-sort="ascending"' in k
 
 
 def test_sheet_va_dai_dong_bo_ghi_chu_vao_dau_i():

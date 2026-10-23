@@ -60,6 +60,7 @@ from dashboard import chi_phi as CP
 from dashboard import chi_so as CS
 from dashboard import dang_nhap as DN
 from dashboard import danh_ba as DB
+from dashboard import kenh_dang as KD
 from dashboard import kho_sheet_qc as KS
 from dashboard import lich_quet as LQ
 from dashboard import meta_ads as MA
@@ -2873,7 +2874,6 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         }
         # 22/10/2026 (chủ dự án): khối "Theo kênh đăng" — cùng phạm vi `ids` + khoảng ngày; tiền
         # lọc ngay dưới (loc_tien). `kenh_dang.du_lieu` nhận danh sách id (hợp chọn nhiều tài khoản).
-        from dashboard import kenh_dang as KD
         ra["kenh"] = KD.du_lieu(kq, ids, tu, den, qp, co_tien, ten_tk)
         # Chốt chặn tiền ở MÁY CHỦ: người Chỉ xem không bao giờ nhận khoá tiền (kể cả khối con).
         # 22/10/2026 (chủ dự án): doanh thu Shop / ROAS tạm ẩn với MỌI người (`QC.HIEN_DOANH_THU`).
@@ -2927,6 +2927,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             loc = {"ben": d["ben"], "nen_tang": d["nen_tang"], "tk": d["tk_ds"], "tu": d["tu"],
                    "den": d["den"], "sap": d["sap"], "tim": b["tim"], "cd": b["cd"],
                    "chieu": "tang" if b["chieu"] == "tang" else ""}
+            # 23/10/2026: lọc / xếp của khối "Theo kênh đăng" (kt, kl, ks, kc) đi cùng mọi liên kết;
+            # trang của khối (kp) chỉ giữ trong liên kết của chính khối.
+            lk = (d.get("kenh") or {}).get("loc") or {}
+            if lk:
+                loc |= {"kt": lk["tim"], "kl": lk["loai"],
+                        "ks": "" if lk["sap"] == lk["mac_dinh"] else lk["sap"],
+                        "kc": "tang" if lk["chieu"] == "tang" else ""}
             hq = _hom_nay() - datetime.timedelta(days=1)
             chinh, phu = QC.chon_kpi(d["xem_tien"])
 
@@ -2946,7 +2953,12 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                              for n in (7, 30, 90)},
                    "sap_xep": [(k, t) for k, t in QC.SAP_BANG.items()
                                if d["xem_tien"] or k not in QC.SAP_BANG_TIEN],
-                   "url_trang": url_trang}
+                   "url_trang": url_trang,
+                   "url_kenh": lambda loc=loc, b=b, **kw: _url("/quang-cao", **{
+                       **loc, "tc": b["trang_campaign"] if b["trang_campaign"] > 1 else "",
+                       "ta": b["trang_ad"] if b["trang_ad"] > 1 else "", **kw}) + "#kenh"}
+            ctx["url_trang_kenh"] = lambda p, f=ctx["url_kenh"]: f(kp=p if p > 1 else "")
+            ctx["SAP_KENH"] = KD.SAP_KENH
         ctx["sheet_ds"] = await _ds_sheet(nguoi["email"])
         if d:
             ctx["sheet_so_ngay"] = (datetime.date.fromisoformat(d["den"])
