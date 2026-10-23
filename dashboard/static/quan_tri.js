@@ -3,15 +3,40 @@
 // đánh dấu "Chưa lưu"; bấm Lưu mới gửi (POST /nguoi-xem/quyen, máy chủ kiểm lại mọi luật). CSP cấm
 // script nội dòng nên mọi hành vi gắn ở đây; chữ chỉ đi qua textContent.
 "use strict";
+
+// ── bỏ dấu tiếng Việt (khớp chuan_chu.bo_dau của máy chủ: đ → d, bỏ dấu, chữ thường) ──
+function boDau(s) {
+  return String(s || "").toLowerCase().replace(/đ/g, "d").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ").trim();
+}
+
+// 23/10/2026: các danh sách dài của trang dùng thanh trang chung (chung.js, data-phan-trang). Một dòng
+// cần hiện (vừa lưu, chọn người đã có) có thể đang ở trang khác: bấm ‹ / › của thanh trang tới đúng
+// trang chứa nó — không đụng mã dùng chung. Dòng bị bộ lọc ẩn ([data-loc-an]) thì thôi.
+function denTrang(bang, dong) {
+  if (!bang || !dong || dong.hasAttribute("data-loc-an") || !dong.hidden) return;
+  var co = Math.max(1, parseInt(bang.getAttribute("data-phan-trang"), 10) || 20);
+  var than = bang.tagName === "TABLE" ? (bang.tBodies[0] || bang) : bang;
+  var ds = Array.prototype.filter.call(than.children, function (r) {
+    return (r.tagName === "TR" || r.tagName === "LI") && !r.hasAttribute("data-loc-an");
+  });
+  var dich = Math.floor(ds.indexOf(dong) / co), dang = -1;
+  ds.some(function (r, i) { if (!r.hidden) { dang = Math.floor(i / co); return true; } return false; });
+  var neo = bang.closest(".cuon-ngang") || bang;
+  for (var buoc = 0; dich >= 0 && dang >= 0 && dang !== dich && buoc < 500; buoc++) {
+    var nav = neo.nextElementSibling;
+    if (!nav || !nav.classList.contains("phan-trang")) return;
+    var ben = nav.querySelectorAll(".phan-trang__ben");
+    var nut = ben[dich > dang ? ben.length - 1 : 0];
+    if (!nut || nut.disabled) return;
+    nut.click();
+    dang += dich > dang ? 1 : -1;
+  }
+}
+
 (function () {
   var goc = document.querySelector("[data-nx]");
   if (!goc) return;
-
-  // ── bỏ dấu tiếng Việt (khớp chuan_chu.bo_dau của máy chủ: đ → d, bỏ dấu, chữ thường) ──
-  function boDau(s) {
-    return String(s || "").toLowerCase().replace(/đ/g, "d").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      .replace(/\s+/g, " ").trim();
-  }
 
   // ── trạng thái biểu mẫu: đổi so với lúc tải trang? ──
   function oChon(f) { return Array.prototype.slice.call(f.querySelectorAll("[data-nx-ben]")); }
@@ -111,18 +136,21 @@
   // ── tìm trong danh sách (tại chỗ, không dấu) ──
   var o_tim = goc.querySelector("[data-nx-tim]"), dem = goc.querySelector("[data-nx-dem]");
   var trong = goc.querySelector("[data-nx-trong]"), dong = Array.prototype.slice.call(goc.querySelectorAll(".nx-dong"));
+  var ds = goc.querySelector("[data-nx-ds]"), khung = goc.querySelector("[data-nx-khung]");
   function loc() {
     var q = boDau(o_tim.value), tu = q ? q.split(" ") : [], n = 0;
     dong.forEach(function (d) {
       var khop = tu.every(function (t) { return d.getAttribute("data-tim").indexOf(t) >= 0; });
-      // dòng đang sửa dở (chưa lưu) không bị ẩn — khỏi mất thay đổi khỏi tầm mắt
-      d.hidden = !khop && !d.classList.contains("nx-dong--doi");
-      if (!d.hidden) n += 1;
+      // dòng đang sửa dở (chưa lưu) không bị ẩn — khỏi mất thay đổi khỏi tầm mắt.
+      // 23/10/2026: ẩn bằng [data-loc-an] (không phải hidden) để thanh trang chung đếm đúng.
+      var an = !khop && !d.classList.contains("nx-dong--doi");
+      if (an) d.setAttribute("data-loc-an", ""); else { d.removeAttribute("data-loc-an"); n += 1; }
     });
     dem.textContent = q ? n + "/" + dong.length : String(dong.length);
     trong.hidden = !(q && n === 0);
-    goc.querySelector("[data-nx-ds]").hidden = !!(q && n === 0);
+    khung.hidden = !!(q && n === 0);
     trong.querySelector("[data-nx-tu]").textContent = o_tim.value.trim();
+    ds.dispatchEvent(new Event("phan-trang:lam-moi"));
   }
   o_tim.addEventListener("input", loc);
   o_tim.addEventListener("keydown", function (e) { if (e.key === "Escape") { o_tim.value = ""; loc(); } });
@@ -158,6 +186,7 @@
       // Người đã có tên: mở ngăn sửa của họ thay vì thêm lần nữa.
       fThem.reset(); datMoThem(false); o_tim.value = ""; loc();
       var nut = d.querySelector("[data-nx-sua]");
+      denTrang(ds, d);
       d.scrollIntoView({ block: "center" });
       if (nut) moNgan(nut, true);
       return;
@@ -229,8 +258,100 @@
   if (location.hash.indexOf("#nx-") === 0 && document.querySelector(".thong-bao--ok, .thong-bao--canh")) {
     var vua = document.getElementById(location.hash.slice(1));
     if (vua && vua.classList.contains("nx-dong")) {
+      denTrang(ds, vua);
+      vua.scrollIntoView({ block: "center" });
       vua.querySelector(".nx-da-luu").hidden = false;
       vua.classList.add("nx-dong--vua-luu");
+    }
+  }
+})();
+
+// ── Tài khoản quảng cáo → bên (23/10/2026, chủ dự án: "để cho gọn lại") ──
+// Lọc tại chỗ theo nền tảng / bên / trạng thái + tìm tên hoặc mã; dòng không khớp mang [data-loc-an] để
+// thanh trang chung (20 dòng) đếm lại. Lọc theo bên ĐÃ LƯU (data-ben của máy chủ), không theo ô chọn
+// đang sửa. Dòng sửa dở (chưa bấm Lưu) được tô, nút Lưu của nó đậm lên, và không bị lọc ẩn. Mỗi dòng
+// vẫn là form riêng gb-<id> → POST /qc/gan-ben; máy chủ đưa về #tk-qc nên nhớ dòng vừa lưu + bộ lọc
+// trong sessionStorage (chỉ cho tiện — trình duyệt chặn thì thôi) để mở lại đúng trang và tô dòng đó.
+(function () {
+  var goc = document.querySelector("[data-tkqc]");
+  var bang = goc && goc.querySelector(".tkqc-bang");
+  if (!bang) return;
+  var dong = Array.prototype.slice.call(bang.tBodies[0].rows);
+  var tim = goc.querySelector("[data-tkqc-tim]"), dem = goc.querySelector("[data-tkqc-dem]");
+  var loc = Array.prototype.slice.call(goc.querySelectorAll("[data-tkqc-loc]"));
+  var trong = goc.querySelector("[data-tkqc-trong]"), khung = bang.closest(".cuon-ngang");
+  var KHOA = "tkqc-loc", KHOA_VUA = "tkqc-vua";
+  function doc(k) { try { return window.sessionStorage.getItem(k); } catch (e) { return null; } }
+  function ghi(k, v) {
+    try { if (v === null) window.sessionStorage.removeItem(k); else window.sessionStorage.setItem(k, v); } catch (e) { /* bỏ qua */ }
+  }
+
+  dong.forEach(function (d) { d._tim = boDau(d.getAttribute("data-tim")); });
+  function chon(ten) { var s = goc.querySelector('[data-tkqc-loc="' + ten + '"]'); return s ? s.value : ""; }
+  function apLoc() {
+    var q = boDau(tim.value), tu = q ? q.split(" ") : [], nen = chon("nen"), ben = chon("ben"), tt = chon("trang");
+    var n = 0;
+    dong.forEach(function (d) {
+      var co = " " + d.getAttribute("data-trang") + " ";
+      var khop = (!nen || d.getAttribute("data-nen-tang") === nen) && (!ben || d.getAttribute("data-ben") === ben) &&
+        (!tt || co.indexOf(" " + tt + " ") >= 0) && tu.every(function (t) { return d._tim.indexOf(t) >= 0; });
+      if (khop || d.classList.contains("tkqc-doi")) { d.removeAttribute("data-loc-an"); n += 1; }
+      else d.setAttribute("data-loc-an", "");
+    });
+    var dangLoc = !!(q || nen || ben || tt);
+    dem.textContent = dangLoc ? n + "/" + dong.length : String(dong.length);
+    trong.hidden = n > 0;
+    khung.hidden = n === 0;
+    bang.dispatchEvent(new Event("phan-trang:lam-moi"));
+    ghi(KHOA, JSON.stringify({ q: tim.value, nen: nen, ben: ben, trang: tt }));
+  }
+  tim.addEventListener("input", apLoc);
+  tim.addEventListener("keydown", function (e) { if (e.key === "Escape") { tim.value = ""; apLoc(); } });
+  loc.forEach(function (s) { s.addEventListener("change", apLoc); });
+  goc.querySelector("[data-tkqc-bo-loc]").addEventListener("click", function () {
+    tim.value = ""; loc.forEach(function (s) { s.value = ""; }); apLoc(); tim.focus();
+  });
+
+  // dòng sửa dở: so với giá trị lúc tải trang
+  function daDoi(d) {
+    return Array.prototype.some.call(d.querySelectorAll("select, input[type=checkbox]"), function (o) {
+      if (o.tagName === "SELECT") return Array.prototype.some.call(o.options, function (x) { return x.selected !== x.defaultSelected; });
+      return o.checked !== o.defaultChecked;
+    });
+  }
+  dong.forEach(function (d) {
+    var f = d.querySelector("[data-tkqc-form]"), nut = f.querySelector("button");
+    d.addEventListener("change", function () {
+      var c = daDoi(d);
+      d.classList.toggle("tkqc-doi", c);
+      nut.classList.toggle("nut--nhe", !c);
+    });
+    f.addEventListener("submit", function () { ghi(KHOA_VUA, d.getAttribute("data-o")); });
+  });
+
+  // vừa lưu (máy chủ đưa về #tk-qc): khôi phục bộ lọc, mở đúng trang của dòng đó và tô nó
+  var veLai = location.hash === "#tk-qc";
+  if (veLai) {
+    try {
+      var cu = JSON.parse(doc(KHOA) || "null");
+      if (cu) {
+        tim.value = cu.q || "";
+        loc.forEach(function (s) {
+          var v = cu[s.getAttribute("data-tkqc-loc")] || "";
+          if (Array.prototype.some.call(s.options, function (o) { return o.value === v; })) s.value = v;
+        });
+      }
+    } catch (e) { /* bỏ qua */ }
+  }
+  apLoc();
+  var vua = doc(KHOA_VUA);
+  ghi(KHOA_VUA, null);
+  if (vua && veLai) {
+    var d = bang.querySelector('tr[data-o="' + vua.replace(/[^\w-]/g, "") + '"]');
+    if (d) {
+      denTrang(bang, d);
+      d.classList.add("tkqc-vua-luu");
+      d.scrollIntoView({ block: "center" });
     }
   }
 })();

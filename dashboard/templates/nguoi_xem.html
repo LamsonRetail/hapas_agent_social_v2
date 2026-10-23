@@ -87,8 +87,12 @@
     </form>
   </div>
 
-  <ul class="nx-ds" data-nx-ds>
-    <li class="nx-dau" aria-hidden="true"><span>Người</span><span>Quyền</span><span>Lark</span><span>Đăng nhập gần nhất</span><span></span></li>
+  {#- 23/10/2026 (chủ dự án: "dòng dài quá thì làm theo kiểu chuyển tiếp"): thanh trang chung 20 người
+      (data-phan-trang, chung.js). Hàng tiêu đề nằm NGOÀI <ul> vì thanh trang đếm mọi <li>; ô tìm ẩn
+      dòng bằng [data-loc-an] (quan_tri.js) rồi báo thanh trang vẽ lại. #}
+  <div class="cuon-ngang nx-khung" data-nx-khung>
+  <div class="nx-dau" aria-hidden="true"><span>Người</span><span>Quyền</span><span>Lark</span><span>Đăng nhập gần nhất</span><span></span></div>
+  <ul class="nx-ds" data-nx-ds data-phan-trang="20" data-phan-trang-nhan="người dùng">
     {% for x in ds %}
     <li class="nx-dong" id="{{ x.neo }}" data-tim="{{ x.tim }}" data-email="{{ x.email }}">
       <div class="nx-hang">
@@ -152,6 +156,7 @@
     </li>
     {% endfor %}
   </ul>
+  </div>
   <div class="nx-trong" data-nx-trong hidden>
     <p>Không có ai khớp “<span data-nx-tu></span>” trong danh sách.</p>
     <button class="nut nut--nhe" type="button" data-nx-them-tu>Thêm người này</button>
@@ -167,7 +172,7 @@
     <button type="button" class="goi-y" data-goi-y="Chỉ quản trị viên thấy mục này. Chuyển dự án sang bên khác: trang Nguồn → Sửa dự án → Bên sở hữu.">i</button>
   </div>
   <div class="cuon-ngang">
-  <table>
+  <table data-phan-trang="20" data-phan-trang-nhan="bên và dự án">
     <thead><tr><th>Bên</th><th>Mã</th><th>Dự án</th></tr></thead>
     <tbody>
     {% for b in cac_ben %}
@@ -243,13 +248,16 @@
   </div>
   <details class="tt-token">
     <summary>Dùng token API không hết hạn</summary>
-    <form method="post" action="/tiktok/token" class="luoi-form" autocomplete="off">
+    {#- 23/10/2026 (chủ dự án: "ghi chú để vào dấu i"): câu giải thích dưới ô token vào ⓘ cạnh nhãn. #}
+    <form method="post" action="/tiktok/token" class="tt-token__form" autocomplete="off">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <label class="o rong">Token “API access” của app TikTok for Business (chỉ quyền đọc báo cáo)
-        <input type="password" name="token" required minlength="16" maxlength="4096" spellcheck="false" autocomplete="off"></label>
-      <div><button class="nut nut--nhe" type="submit">Kiểm tra rồi lưu</button></div>
+      <div class="tt-o">
+        <span class="tt-o__nhan"><label for="tt-token-o">Token “API access” của app TikTok for Business</label>
+          <button type="button" class="goi-y" aria-label="Về token API TikTok" data-goi-y="Token chỉ cần quyền đọc báo cáo. Dashboard thử đọc danh sách tài khoản bằng token trước khi lưu. Token được mã hoá trên máy chủ, không bao giờ hiện lại; lưu token API thay cho lần đăng nhập hiện tại.">i</button></span>
+        <input id="tt-token-o" type="password" name="token" required minlength="16" maxlength="4096" spellcheck="false" autocomplete="off">
+      </div>
+      <button class="nut nut--nhe" type="submit">Kiểm tra rồi lưu</button>
     </form>
-    <p class="mo nho tt-token__chu">Dashboard thử đọc danh sách tài khoản bằng token trước khi lưu. Token được mã hoá trên máy chủ, không bao giờ hiện lại; lưu token API thay cho lần đăng nhập hiện tại.</p>
   </details>
 
   {% endif %}
@@ -287,49 +295,94 @@
   </div>
   <details class="tt-token">
     <summary>Dán token mới</summary>
-    <form method="post" action="/meta/token" class="luoi-form" autocomplete="off">
+    <form method="post" action="/meta/token" class="tt-token__form" autocomplete="off">
       <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-      <label class="o rong">Token người dùng hệ thống Meta (ads_read + read_insights; nên tick thêm pages_read_engagement, pages_show_list)
-        <input type="password" name="token" required minlength="20" maxlength="4096" spellcheck="false" autocomplete="off"></label>
-      <div><button class="nut nut--nhe" type="submit">Kiểm tra rồi lưu</button></div>
+      <div class="tt-o">
+        <span class="tt-o__nhan"><label for="mt-token-o">Token người dùng hệ thống Meta</label>
+          <button type="button" class="goi-y" aria-label="Về token Meta" data-goi-y="Cần ads_read + read_insights; nên tick thêm pages_read_engagement, pages_show_list (chỉ đọc — để bảng “Theo kênh đăng” hiện tên Trang thay vì “Page &lt;id&gt;”). Dashboard đọc me, me/permissions, me/adaccounts trước khi lưu và TỪ CHỐI token có quyền ghi (ads_management, business_management, *_manage*…). Quyền được phép: ads_read, read_insights, public_profile, pages_read_engagement, pages_show_list. Token được mã hoá, không bao giờ hiện lại. Duyệt tài khoản giữ như cũ; tài khoản mới chờ duyệt ở bảng dưới.">i</button></span>
+        <input id="mt-token-o" type="password" name="token" required minlength="20" maxlength="4096" spellcheck="false" autocomplete="off">
+      </div>
+      <button class="nut nut--nhe" type="submit">Kiểm tra rồi lưu</button>
     </form>
-    <p class="mo nho tt-token__chu">Dashboard đọc me, me/permissions, me/adaccounts trước khi lưu và TỪ CHỐI token có quyền ghi (ads_management, business_management, *_manage*…). Quyền được phép: ads_read, read_insights, public_profile, pages_read_engagement, pages_show_list (chỉ đọc — để bảng “Theo kênh đăng” hiện tên Trang thay vì “Page &lt;id&gt;”). Token được mã hoá, không bao giờ hiện lại. Duyệt tài khoản giữ như cũ; tài khoản mới chờ duyệt ở bảng dưới.</p>
   </details>
   {% endif %}
 </section>
 
-<section class="the-khoi cach-duoi tt" id="tk-qc" aria-labelledby="tkqc-tieu-de">
+{#- 23/10/2026 (chủ dự án: "phần tài khoản quảng cáo → bên thì để cho gọn lại"): ~40 dòng nên gọn —
+    nền tảng thành nhãn nhỏ trong ô tài khoản, Đồng bộ / Duyệt là hai cột ô tích hẹp, nhãn trạng thái ngắn
+    (câu đủ ở title), lọc tại chỗ theo nền tảng / bên / trạng thái + tìm tên, thanh trang chung 20 dòng.
+    Mỗi dòng VẪN là một form riêng gb-<id> POST /qc/gan-ben (don_vi, dang_dong_bo, duyet, advertiser_id,
+    csrf) — lọc / chuyển trang chỉ ẩn dòng, không đổi gì gửi đi. #}
+<section class="the-khoi cach-duoi tt" id="tk-qc" aria-labelledby="tkqc-tieu-de" data-tkqc>
   <div class="muc">
     <span class="muc__so" aria-hidden="true">5</span>
     <h2 class="muc__ten" id="tkqc-tieu-de">Tài khoản quảng cáo → bên</h2>
+    <button type="button" class="goi-y" data-goi-y="Tên có MATEMADE / MATE MADE / MADEMATE tự vào bên MATEMADE; tên có chữ THAI để chưa gán (chỉ quản trị viên thấy); còn lại vào HAPAS. Sửa ở đây (nhãn Sửa tay) thì lần đồng bộ sau giữ nguyên. Meta: chỉ tài khoản đã duyệt mới được đọc số. Mỗi dòng lưu riêng bằng nút Lưu của dòng đó. Trang Quảng cáo chỉ quản trị viên; người có quyền ở bên hỏi Mark để biết số (kể cả chi tiêu), trả lời bằng chữ.">i</button>
+    {% if tk_qc %}{% set so_cho = tk_qc|selectattr('nen_tang', 'equalto', 'meta')|rejectattr('duyet')|list|length %}
+    <span class="muc__phai muc__phu"><span><span data-tkqc-dem>{{ tk_qc|length }}</span> tài khoản{% if so_cho %} · <span class="the the--canh">{{ so_cho }} chưa duyệt</span>{% endif %}</span></span>{% endif %}
   </div>
-  <p class="mo nho tt-chu">Tên có MATEMADE / MATE MADE / MADEMATE tự vào bên MATEMADE; tên có chữ THAI để chưa gán (chỉ quản trị viên thấy); còn lại vào HAPAS. Sửa ở đây thì lần đồng bộ sau giữ nguyên. Meta: chỉ tài khoản đã duyệt mới được đọc số. Trang Quảng cáo chỉ quản trị viên; người có quyền ở bên hỏi Mark để biết số (kể cả chi tiêu), trả lời bằng chữ.</p>
   {% if tk_qc %}
+  <div class="tkqc-loc" role="search" aria-label="Lọc tài khoản quảng cáo">
+    <label class="nx-tim tkqc-tim">
+      <svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+      <input type="search" data-tkqc-tim placeholder="Tìm tên hoặc mã tài khoản" aria-label="Tìm tài khoản theo tên hoặc mã" autocomplete="off" spellcheck="false">
+    </label>
+    <select data-tkqc-loc="nen" aria-label="Lọc theo nền tảng">
+      <option value="">Mọi nền tảng</option>
+      {% for m, ten in TEN_NEN_TANG_QC.items() %}<option value="{{ m }}">{{ ten }}</option>{% endfor %}
+    </select>
+    <select data-tkqc-loc="ben" aria-label="Lọc theo bên">
+      <option value="">Mọi bên</option>
+      {% for b in ten_ben %}<option value="{{ b.ma }}">{{ b.ten }}</option>{% endfor %}
+      <option value="-">Chưa gán</option>
+    </select>
+    <select data-tkqc-loc="trang" aria-label="Lọc theo trạng thái">
+      <option value="">Mọi trạng thái</option>
+      <option value="chua-duyet">Chưa duyệt</option>
+      <option value="mat-quyen">Mất quyền</option>
+      <option value="tat">Tắt đồng bộ</option>
+      <option value="cho-nap">Chờ nạp</option>
+      <option value="sua-tay">Sửa tay</option>
+    </select>
+  </div>
   <div class="cuon-ngang">
-  <table class="tt-bang">
-    <thead><tr><th>Tài khoản</th><th>Nền tảng</th><th>Bên</th><th>Đồng bộ</th><th>Duyệt</th><th>Trạng thái</th><th></th></tr></thead>
+  <table class="tt-bang tkqc-bang" data-phan-trang="20" data-phan-trang-nhan="tài khoản quảng cáo">
+    <thead><tr><th scope="col">Tài khoản</th><th scope="col">Bên</th><th scope="col" class="tkqc-o-hop">Đồng bộ</th><th scope="col" class="tkqc-o-hop">Duyệt</th><th scope="col">Trạng thái</th><th scope="col" class="tkqc-luu"><span class="dai-qc__an">Lưu</span></th></tr></thead>
     <tbody>
-    {% for t in tk_qc %}
-      <tr data-o="tk-{{ t.advertiser_id }}" data-nen-tang="{{ t.nen_tang }}">
-        <td>{{ t.ten or t.advertiser_id }}<span class="tt-bang__phu">{{ t.advertiser_id }} · {{ t.tien_te }}</span></td>
-        <td>{{ TEN_NEN_TANG_QC[t.nen_tang] }}</td>
-        <td><select name="don_vi" form="gb-{{ t.advertiser_id }}" aria-label="Bên của {{ t.ten or t.advertiser_id }}">
+    {% for t in tk_qc %}{% set ten_tk = t.ten or t.advertiser_id %}
+      {%- set co = [] -%}
+      {%- if t.nen_tang == 'meta' and not t.duyet %}{% set _ = co.append('chua-duyet') %}{% endif -%}
+      {%- if not t.con_quyen %}{% set _ = co.append('mat-quyen') %}{% endif -%}
+      {%- if not t.dang_dong_bo %}{% set _ = co.append('tat') %}{% endif -%}
+      {%- if t.duyet and t.con_quyen and t.dang_dong_bo and not t.nap_lui_xong_luc %}{% set _ = co.append('cho-nap') %}{% endif -%}
+      {%- if t.gan_tay %}{% set _ = co.append('sua-tay') %}{% endif %}
+      <tr data-o="tk-{{ t.advertiser_id }}" data-nen-tang="{{ t.nen_tang }}" data-ben="{{ t.don_vi or '-' }}" data-trang="{{ co|join(' ') }}" data-tim="{{ ten_tk }} {{ t.advertiser_id }}">
+        <td class="tkqc-tk"><span class="tkqc-tk__ten"><span class="the the--nt-{{ 'tiktok' if t.nen_tang == 'tiktok' else 'facebook' }} tkqc-nt">{{ TEN_NEN_TANG_QC[t.nen_tang] }}</span><span class="tkqc-tk__chu" title="{{ ten_tk }}">{{ ten_tk }}</span></span><span class="tt-bang__phu">{{ t.advertiser_id }} · {{ t.tien_te }}</span></td>
+        <td><select name="don_vi" form="gb-{{ t.advertiser_id }}" aria-label="Bên của {{ ten_tk }}">
           <option value=""{% if not t.don_vi %} selected{% endif %}>— chưa gán</option>
           {% for b in ten_ben %}<option value="{{ b.ma }}"{% if b.ma == t.don_vi %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}
         </select></td>
-        <td><label class="tt-hop"><input type="checkbox" name="dang_dong_bo" value="1" form="gb-{{ t.advertiser_id }}"{% if t.dang_dong_bo %} checked{% endif %}> Đồng bộ</label></td>
-        <td>{% if t.nen_tang == 'meta' %}<label class="tt-hop"><input type="checkbox" name="duyet" value="1" form="gb-{{ t.advertiser_id }}"{% if t.duyet %} checked{% endif %}> Duyệt</label>{% else %}—{% endif %}</td>
-        <td>{% if not t.con_quyen %}<span class="the the--canh">Mất quyền</span> {% endif %}{% if not t.duyet %}<span class="the the--canh">Chưa duyệt</span> {% endif %}<span class="the">{{ 'Đã sửa tay' if t.gan_tay else 'Tự gán' }}</span>{% if t.duyet and t.con_quyen and t.dang_dong_bo and not t.nap_lui_xong_luc %} <span class="the the--nhan">Chờ nạp 90 ngày</span>{% endif %}</td>
-        <td><form id="gb-{{ t.advertiser_id }}" method="post" action="/qc/gan-ben">
+        <td class="tkqc-o-hop"><input type="checkbox" name="dang_dong_bo" value="1" form="gb-{{ t.advertiser_id }}" aria-label="Đồng bộ {{ ten_tk }}"{% if t.dang_dong_bo %} checked{% endif %}></td>
+        <td class="tkqc-o-hop">{% if t.nen_tang == 'meta' %}<input type="checkbox" name="duyet" value="1" form="gb-{{ t.advertiser_id }}" aria-label="Duyệt {{ ten_tk }}"{% if t.duyet %} checked{% endif %}>{% else %}<span class="mo" title="TikTok không cần duyệt">—</span>{% endif %}</td>
+        <td class="tkqc-trang">
+          {%- if not t.con_quyen %}<span class="the the--loi" title="Kết nối hiện tại không còn thấy tài khoản này">Mất quyền</span>{% endif -%}
+          {%- if t.nen_tang == 'meta' and not t.duyet %}<span class="the the--canh" title="Meta: chưa duyệt thì không đọc số">Chưa duyệt</span>{% endif -%}
+          {%- if 'cho-nap' in co %}<span class="the the--nhan" title="Chờ nạp lùi số 90 ngày ở lượt đồng bộ tới">Chờ nạp</span>{% endif -%}
+          {%- set con = co|reject('equalto', 'sua-tay')|list -%}
+          {%- if not con %}<span class="the the--tot" title="Đang đồng bộ{{ ', bên tự gán' if not t.gan_tay else '' }}">Ổn</span>{% elif con == ['tat'] %}<span class="mo" title="Không đồng bộ tài khoản này">—</span>{% endif -%}
+          {%- if t.gan_tay %}<span class="the" title="Bên đã sửa tay — lần đồng bộ sau giữ nguyên">Sửa tay</span>{% endif -%}
+        </td>
+        <td class="tkqc-luu"><form id="gb-{{ t.advertiser_id }}" method="post" action="/qc/gan-ben" data-tkqc-form>
           <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
           <input type="hidden" name="advertiser_id" value="{{ t.advertiser_id }}">
-          <button class="nut nut--nhe nut--nho" type="submit">Lưu</button>
+          <button class="nut nut--nhe nut--nho" type="submit" aria-label="Lưu {{ ten_tk }}">Lưu</button>
         </form></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
+  <div class="nx-trong" data-tkqc-trong hidden><p>Không có tài khoản nào khớp bộ lọc.</p><button class="nut nut--nhe" type="button" data-tkqc-bo-loc>Bỏ lọc</button></div>
   {% elif not loi_qc %}
   <p class="trong">Chưa thấy tài khoản quảng cáo nào — kết nối TikTok Ads hoặc Meta Ads trước.</p>
   {% endif %}
@@ -348,7 +401,7 @@
     <button type="button" class="goi-y" data-goi-y="Số cho người vận hành: Mark kiểm 2 lần mỗi tuần xem thu thập có sót bài nhắc brand không (mẫu TikTok lấy bằng đường khác). Không phải độ phủ thị trường / share of voice, không theo bộ lọc. Bật / tắt và trần USD mỗi lần: trang Ngân sách của dự án.">i</button>
   </div>
   {% if do_phu %}
-  <ul class="dp-ds">
+  <ul class="dp-ds" data-phan-trang="12" data-phan-trang-nhan="độ thu đủ">
     {% for x in do_phu %}
     <li class="dp-o{% if x.canh_bao %} dp-o--canh{% endif %}" data-du-an="{{ x.du_an }}">
       <div class="dp-o__dau">
@@ -395,20 +448,22 @@
   <div class="muc">
     <span class="muc__so" aria-hidden="true">{{ (7 if co_kiem_do_phu else 6) if nguoi.la_quan_tri else 2 }}</span>
     <h2 class="muc__ten">Nhật ký thay đổi</h2>
-    <button type="button" class="goi-y" data-goi-y="100 dòng mới nhất{% if not nguoi.la_quan_tri %} về dự án và quyền của các bên bạn quản lý{% endif %}.">i</button>
+    <button type="button" class="goi-y" data-goi-y="100 dòng mới nhất{% if not nguoi.la_quan_tri %} về dự án và quyền của các bên bạn quản lý{% endif %}. Ô Chi tiết hiện 2 dòng — rê chuột để xem đủ.">i</button>
+    {% if nhat_ky %}<span class="muc__phai muc__phu">{{ nhat_ky|length }} dòng</span>{% endif %}
   </div>
+  {#- 23/10/2026 (chủ dự án): 100 dòng → thanh trang chung 20 dòng; Chi tiết (JSON) cắt 2 dòng, đủ ở title. #}
   {% if nhat_ky %}
   <div class="cuon-ngang">
-  <table>
+  <table class="nk-bang" data-phan-trang="20" data-phan-trang-nhan="nhật ký thay đổi">
     <thead><tr><th>Lúc</th><th>Ai</th><th>Hành động</th><th>Đối tượng</th><th>Chi tiết</th></tr></thead>
     <tbody>
     {% for x in nhat_ky %}
       <tr>
-        <td class="nho">{{ x.luc|gio_vn }}</td>
+        <td class="nho nk-luc">{{ x.luc|gio_vn }}</td>
         <td class="nho">{{ x.ai }}</td>
         <td><span class="the">{{ x.hanh_dong }}</span></td>
         <td class="nho">{{ x.doi_tuong }}</td>
-        <td class="nho"><div class="cat-chu" title="{{ x.chi_tiet_chu }}">{{ x.chi_tiet_chu }}</div></td>
+        <td class="nho nk-chi-tiet"><div class="cat-chu" title="{{ x.chi_tiet_chu }}">{{ x.chi_tiet_chu }}</div></td>
       </tr>
     {% endfor %}
     </tbody>

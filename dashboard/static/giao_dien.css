@@ -444,7 +444,10 @@ details[open] > summary { margin-bottom: 12px; }
 .nx-goi-y__ten { font-weight: 650; color: var(--chu); }
 .nx-goi-y__phu { font-size: 12px; color: var(--chu-phu); overflow-wrap: anywhere; }
 
-.nx-ds { list-style: none; margin: 0; padding: 0; border: 1px solid var(--ke); border-radius: 10px; background: var(--be-mat); }
+/* 23/10/2026: khung viền là .cuon-ngang.nx-khung (hàng tiêu đề nằm ngoài <ul> để thanh trang chung đếm
+   đúng <li>); không cuộn ngang — lưới tự co, dưới 760px thành thẻ. */
+.nx-khung { overflow: visible; }
+.nx-ds { list-style: none; margin: 0; padding: 0; }
 .nx-dau, .nx-hang {
   display: grid; grid-template-columns: minmax(200px, 2.2fr) minmax(170px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 112px;
   gap: 4px 16px; align-items: center; padding: 10px 14px;
@@ -498,7 +501,8 @@ details[open] > summary { margin-bottom: 12px; }
 
 @media (max-width: 760px) {
   .nx-dau { display: none; }
-  .nx-ds { border: 0; background: transparent; display: flex; flex-direction: column; gap: 10px; }
+  .nx-khung { border: 0; background: transparent; }
+  .nx-ds { display: flex; flex-direction: column; gap: 10px; }
   .nx-dong { border: 1px solid var(--ke); border-radius: 10px; background: var(--be-mat); }
   .nx-dong + .nx-dong { border-top: 1px solid var(--ke); }
   .nx-hang { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 14px; }
@@ -579,12 +583,43 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
 .tt-nut { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 12px; }
 .tt-nut form { margin: 0; }
 .tt-token { margin: 4px 0 4px; }
-.tt-token__chu { margin: 8px 0 0; max-width: 72ch; }
+/* 23/10/2026: ô token — câu giải thích vào ⓘ cạnh nhãn (không còn đoạn chữ dưới ô) */
+.tt-token__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; margin-top: 10px; }
+.tt-o { display: flex; flex-direction: column; gap: 5px; flex: 1 1 320px; max-width: 560px; min-width: 0; }
+.tt-o__nhan { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--chu); }
+.tt-o input { width: 100%; }
 .tt-h3 { font-size: 14px; color: var(--tieu-de); margin: 18px 0 4px; padding-top: 16px; border-top: 1px solid var(--ke); }
-.tt-chu { margin: 0 0 10px; max-width: 90ch; }
 .tt-bang td { vertical-align: middle; }
 .tt-bang__phu { display: block; font-size: 12px; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
-.tt-hop { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* ─── Tài khoản quảng cáo → bên (23/10/2026, chủ dự án: "để cho gọn lại") ───
+   ~40 dòng: hàng thấp (ô 5px dọc), nền tảng là nhãn nhỏ cạnh tên, Đồng bộ / Duyệt hai cột ô tích hẹp,
+   trạng thái là nhãn ngắn. Lọc tại chỗ ở trên bảng, thanh trang chung ở dưới. */
+.tkqc-loc { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.tkqc-loc .tkqc-tim { flex: 1 1 240px; max-width: 340px; }
+.tkqc-loc select, .tkqc-loc input { min-height: 34px; font-size: 13px; }
+.tkqc-bang th, .tkqc-bang td { padding: 5px 10px; }
+.tkqc-bang td { font-size: 13px; }
+.tkqc-bang select { min-height: 30px; padding: 3px 30px 3px 9px; font-size: 13px; max-width: 170px; background-position: right 7px center; }
+.tkqc-tk { min-width: 220px; max-width: 360px; }
+.tkqc-tk__ten { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tkqc-tk__chu { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--chu); }
+.tkqc-nt { flex: none; padding: 0 7px; font-size: 11px; line-height: 18px; }
+.tkqc-bang .tkqc-o-hop { width: 1%; text-align: center; white-space: nowrap; }
+.tkqc-o-hop input { width: 17px; height: 17px; margin: 0; vertical-align: middle; cursor: pointer; }
+.tkqc-trang { white-space: nowrap; }
+.tkqc-trang .the + .the { margin-left: 4px; }
+.tkqc-luu { width: 1%; text-align: right; position: relative; }   /* giữ nhãn ẩn "Lưu" trong khung cuộn */
+.tkqc-luu form { margin: 0; }
+.tkqc-luu .nut--nho { min-height: 28px; padding: 2px 12px; }
+.tkqc-bang tr.tkqc-doi > td { background: color-mix(in srgb, var(--nhan-nen) 45%, transparent); }
+.tkqc-bang tr.tkqc-vua-luu > td { background: var(--tot-nen); }
+
+/* ─── Nhật ký thay đổi (23/10/2026): 20 dòng / trang; Chi tiết JSON cắt 2 dòng, đủ ở title ─── */
+.nk-bang td { padding-top: 6px; padding-bottom: 6px; vertical-align: middle; }
+.nk-luc { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.nk-bang .nk-chi-tiet { min-width: 240px; }
+.nk-chi-tiet .cat-chu { overflow-wrap: anywhere; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; color: var(--chu-phu); max-width: 640px; }
 
 @media (max-width: 760px) {
   .khung { padding: 0 16px; }
@@ -606,6 +641,13 @@ dialog.chi-tiet .phan-trang { padding: 0 20px 14px; }
   .luoi-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .bieu-do { height: 260px; }
   .tt-luoi { grid-template-columns: minmax(0, 1fr); }
+  .tkqc-loc .tkqc-tim { flex-basis: 100%; max-width: none; }
+  .tkqc-loc select { flex: 1 1 0; min-width: 0; }
+  .tkqc-loc select, .tkqc-loc input, .tkqc-bang select, .tt-o input { min-height: 44px; font-size: 16px; }
+  .tkqc-luu .nut--nho, .tt-token__form .nut { min-height: 44px; }
+  .tkqc-o-hop input { width: 22px; height: 22px; }
+  .tkqc-tk { min-width: 160px; max-width: 190px; }        /* tên cắt "…" (đủ ở title) để ô chọn bên lọt khung */
+  .tt-token__form .nut { flex: 1 1 100%; }
 }
 @media (max-width: 480px) {
   .ten-trang__chu { display: none; }
