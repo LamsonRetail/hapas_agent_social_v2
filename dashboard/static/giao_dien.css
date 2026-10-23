@@ -778,3 +778,7 @@ a.phan-trang__o:hover, button.phan-trang__o:hover { background: var(--be-mat-2);
 }
 @media (prefers-reduced-motion: reduce) { .phan-trang__o { transition: none; } }
 @media (forced-colors: active) { .phan-trang__o { border: 1px solid CanvasText; } .phan-trang__o[aria-current="page"] { outline: 2px solid Highlight; } }
+/* nhật ký: ô lọc theo hành động (23/10/2026) */
+.nk-loc { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
+.nk-loc select { min-width: 240px; max-width: 100%; }
+@media (max-width: 640px) { .nk-loc select { flex: 1 1 100%; min-height: 44px; } }

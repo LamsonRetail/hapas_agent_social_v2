@@ -7,6 +7,7 @@ POST sửa dữ liệu phải qua phiên + CSRF + vai trò quản lý ở phía 
 from __future__ import annotations
 
 import asyncio
+import collections
 import datetime
 import json
 import re
@@ -474,6 +475,7 @@ class GiaKho:
         for k, v in (("open_id", open_id), ("union_id", union_id), ("user_id", user_id)):
             if v:
                 ma[k] = v
+        self._ghi(email, "dang_nhap", f"nguoi_xem:{email}")      # 23/10/2026: mỗi lượt một dòng
         if any(h == "dang_nhap_lan_dau" and d == f"nguoi_xem:{email}" for _, h, d in self.nk):
             return False
         self._ghi(email, "dang_nhap_lan_dau", f"nguoi_xem:{email}")
@@ -483,15 +485,23 @@ class GiaKho:
     def ghi_nhat_ky(self, ai, hanh_dong, doi_tuong, chi_tiet=None):
         self._ghi(ai, hanh_dong, doi_tuong)
 
-    def nhat_ky(self, gioi_han=100, du_an=None, don_vi=None):
-        """Như kho thật: `du_an`/`don_vi` (quản lý của bên) chỉ dòng về dự án / quyền các bên đó."""
-        def thuoc(d):
-            if du_an is None and don_vi is None:
-                return True
-            return (d in {f"du_an:{m}" for m in du_an or []}
-                    or any(d.startswith("quyen:") and d.endswith(f":{b}") for b in don_vi or []))
+    def _thuoc(self, d, du_an, don_vi):
+        if du_an is None and don_vi is None:
+            return True
+        return (d in {f"du_an:{m}" for m in du_an or []}
+                or any(d.startswith("quyen:") and d.endswith(f":{b}") for b in don_vi or []))
+
+    def nhat_ky(self, gioi_han=100, du_an=None, don_vi=None, hanh_dong=None):
+        """Như kho thật: `du_an`/`don_vi` (quản lý của bên) chỉ dòng về dự án / quyền các bên đó;
+        `hanh_dong`: chỉ một hành động."""
+        self.hoi_nhat_ky = {"gioi_han": gioi_han, "hanh_dong": hanh_dong}
         return [{"id": i, "luc": None, "ai": a, "hanh_dong": h, "doi_tuong": d, "chi_tiet": {}}
-                for i, (a, h, d) in enumerate(self.nk) if thuoc(d)][:gioi_han]
+                for i, (a, h, d) in enumerate(self.nk)
+                if self._thuoc(d, du_an, don_vi) and (not hanh_dong or h == hanh_dong)][:gioi_han]
+
+    def cac_hanh_dong(self, du_an=None, don_vi=None):
+        dem = collections.Counter(h for _, h, d in self.nk if self._thuoc(d, du_an, don_vi))
+        return [{"hanh_dong": h, "so": n} for h, n in dem.most_common()]
 
 
 class GiaDongBo:
@@ -1076,6 +1086,28 @@ def test_trang_nguoi_xem_hien_nhat_ky():
     dang_nhap(c, QL)
     t = c.get("/quan-tri").text
     assert "them_nguon" in t and "nguon:&lt;b&gt;1&lt;/b&gt;" in t and "<b>1</b>" not in t
+
+
+def test_nhat_ky_loc_theo_hanh_dong_o_may_chu():
+    """23/10/2026 (chủ dự án): ô lọc từng hành động (tên tiếng Việt + số dòng), lọc ở máy chủ;
+    hành động lạ / ngoài phạm vi bị bỏ qua (về mọi hành động)."""
+    _, c, kho = tao()
+    kho.nk += [(QL, "them_nguon", "nguon:1"), (XEM, "dang_nhap", f"nguoi_xem:{XEM}"),
+               (QL, "dang_nhap", f"nguoi_xem:{QL}")]
+    dang_nhap(c, QL)
+    t = c.get("/quan-tri").text
+    o = t.split('name="hd"')[1].split("</select>")[0]
+    assert '<option value="dang_nhap">Đăng nhập (2)</option>' in o
+    assert '<option value="them_nguon">Thêm nguồn (1)</option>' in o
+    assert kho.hoi_nhat_ky == {"gioi_han": A.NHAT_KY_TOI_DA, "hanh_dong": None}
+    assert '<span class="the" title="them_nguon">Thêm nguồn</span>' in t
+    t = c.get("/quan-tri?hd=dang_nhap").text
+    assert kho.hoi_nhat_ky["hanh_dong"] == "dang_nhap"
+    assert '<option value="dang_nhap" selected>' in t and "Bỏ lọc" in t
+    bang = t.split('id="nhat-ky"')[1].split("</section>")[0]
+    assert "Thêm nguồn</span>" not in bang and bang.count("Đăng nhập</span>") == 2
+    c.get("/quan-tri?hd=khong_co")
+    assert kho.hoi_nhat_ky["hanh_dong"] is None
 
 
 # ───────────────────────────── danh bạ Lark trên trang người xem ─────────────────────────────
@@ -1821,7 +1853,10 @@ def test_dang_nhap_uu_tien_email_doanh_nghiep_va_ghi_lan_dau():
         r = c.get("/dang-nhap/xong", params={"code": "x", "state": _bat_dau(c)})
         assert r.status_code == 303
         assert DN.doc_phien(c.cookies.get(DN.COOKIE_PHIEN), KHOA)["email"] == XEM
-    assert kho.nk == [(XEM, "dang_nhap_lan_dau", f"nguoi_xem:{XEM}")] and kho.open_id == "ou_thu_1"
+    # 23/10/2026: mỗi lượt đăng nhập một dòng "dang_nhap"; "dang_nhap_lan_dau" chỉ lần đầu.
+    dn = (XEM, "dang_nhap", f"nguoi_xem:{XEM}")
+    assert kho.nk == [dn, (XEM, "dang_nhap_lan_dau", f"nguoi_xem:{XEM}"), dn]
+    assert kho.open_id == "ou_thu_1"
     assert kho.ma_lark[XEM] == {"open_id": "ou_thu_1", "union_id": "on_thu_1",
                                 "user_id": "u_thu_1"}
     assert set(kho.dang_nhap_cuoi) == {XEM}          # mỗi lượt đăng nhập ghi lần cuối

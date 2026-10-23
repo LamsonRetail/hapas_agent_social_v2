@@ -87,7 +87,6 @@ THAO_TAC = [
     ("xoa_nguoi_xem", lambda: K.xoa_nguoi_xem(AI, "xem@hapas.vn")),
     ("them_don_vi", lambda: K.them_don_vi(AI, "ben-moi", "Bên mới")),
     ("dong_bo_bq", lambda: K.ghi_nhat_ky(AI, "dong_bo_bq", "bigquery", {"kieu": "bam_tay"})),
-    ("dang_nhap_lan_dau", lambda: K.ghi_dang_nhap(AI, "ou_123")),
     ("them_lich", lambda: K.them_lich(AI, "hapas", LICH)),
     ("sua_lich", lambda: K.sua_lich(AI, 3, LICH)),
     ("tat_lich", lambda: K.bat_tat_lich(AI, 3, False, None)),
@@ -130,10 +129,33 @@ def test_ghi_dang_nhap_lan_dau_chi_mot_lan(gia):
     gia.tra[r"FROM nhat_ky WHERE hanh_dong = 'dang_nhap_lan_dau'"] = [{"co": 1}]
     assert K.ghi_dang_nhap(AI, "ou_123") is False
     lenh = gia.gd[0].lenh
-    assert not any(s.startswith("INSERT") for s, _ in lenh)
+    # 23/10/2026: lượt nào cũng ghi MỘT dòng "dang_nhap"; không lần đầu thì không thêm dòng nào khác
+    nk = [p for s, p in lenh if s.startswith("INSERT")]
+    assert nk == [(AI, "dang_nhap", f"nguoi_xem:{AI}", '{"cach": "lark"}')]
     # lượt đăng nhập nào cũng ghi lần cuối + mã Lark, kể cả khi không phải lần đầu
     assert lenh[0][0].startswith("UPDATE nguoi_xem SET dang_nhap_cuoi = now(), ")
     assert lenh[0][1] == ("ou_123", "ou_123", "ou_123", "", "", AI)
+
+
+def test_ghi_dang_nhap_lan_dau_hai_dong_mot_giao_dich(gia):
+    assert K.ghi_dang_nhap(AI, "ou_123") is True
+    assert len(gia.gd) == 1
+    nk = [p[:2] for s, p in gia.gd[0].lenh if s.startswith("INSERT INTO nhat_ky")]
+    assert nk == [(AI, "dang_nhap"), (AI, "dang_nhap_lan_dau")]
+
+
+def test_nhat_ky_loc_hanh_dong_va_danh_sach_hanh_dong(gia):
+    K.nhat_ky(300, hanh_dong="dang_nhap")
+    s, p = gia.gd[-1].lenh[-1]
+    assert "WHERE TRUE AND hanh_dong = %s ORDER BY id DESC LIMIT %s" in s and p == ("dang_nhap", 300)
+    K.nhat_ky(50, ["hapas"], ["hapas"], hanh_dong="xoa_nguon")
+    s, p = gia.gd[-1].lenh[-1]
+    assert "chi_tiet->>'don_vi' = ANY(%s)) AND hanh_dong = %s" in s
+    assert p == (["hapas"], ["du_an:hapas"], ["hapas"], "xoa_nguon", 50)
+    K.cac_hanh_dong(["hapas"], ["hapas"])
+    s, p = gia.gd[-1].lenh[-1]
+    assert "GROUP BY hanh_dong" in s and p == (["hapas"], ["du_an:hapas"], ["hapas"])
+    assert K.ten_hanh_dong("dang_nhap") == "Đăng nhập" and K.ten_hanh_dong("ma_moi") == "ma_moi"
 
 
 def test_ghi_dang_nhap_luu_ma_lark_va_doc_lai_danh_ba_khi_doi(gia):

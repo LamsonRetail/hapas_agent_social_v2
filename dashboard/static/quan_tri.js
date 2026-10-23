@@ -355,3 +355,14 @@ function denTrang(bang, dong) {
     }
   }
 })();
+
+// 23/10/2026: ô lọc nhật ký theo hành động — đổi là gửi (nút Lọc ẩn khi có JS).
+(function () {
+  Array.prototype.forEach.call(document.querySelectorAll("select[data-tu-gui]"), function (o) {
+    var f = o.form;
+    if (!f) return;
+    var nut = f.querySelector(".nk-loc__nut");
+    if (nut) nut.hidden = true;
+    o.addEventListener("change", function () { f.submit(); });
+  });
+})();

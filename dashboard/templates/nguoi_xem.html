@@ -444,14 +444,27 @@
 </section>
 {% endif %}
 
-<section class="the-khoi cach-duoi">
+<section class="the-khoi cach-duoi" id="nhat-ky">
   <div class="muc">
     <span class="muc__so" aria-hidden="true">{{ (7 if co_kiem_do_phu else 6) if nguoi.la_quan_tri else 2 }}</span>
     <h2 class="muc__ten">Nhật ký thay đổi</h2>
-    <button type="button" class="goi-y" data-goi-y="100 dòng mới nhất{% if not nguoi.la_quan_tri %} về dự án và quyền của các bên bạn quản lý{% endif %}. Ô Chi tiết hiện 2 dòng — rê chuột để xem đủ.">i</button>
+    <button type="button" class="goi-y" data-goi-y="{{ nhat_ky_toi_da }} dòng mới nhất{% if loc_hd %} của hành động đang lọc{% endif %}{% if not nguoi.la_quan_tri %} về dự án và quyền của các bên bạn quản lý{% endif %}. Mỗi lượt đăng nhập cũng ghi một dòng “Đăng nhập”. Ô Chi tiết hiện 2 dòng — rê chuột để xem đủ.">i</button>
     {% if nhat_ky %}<span class="muc__phai muc__phu">{{ nhat_ky|length }} dòng</span>{% endif %}
   </div>
-  {#- 23/10/2026 (chủ dự án): 100 dòng → thanh trang chung 20 dòng; Chi tiết (JSON) cắt 2 dòng, đủ ở title. #}
+  {#- 23/10/2026 (chủ dự án): thanh trang chung 20 dòng; Chi tiết (JSON) cắt 2 dòng, đủ ở title. Lọc theo
+      từng hành động ở MÁY CHỦ (`hd`) — đăng nhập ghi mỗi lượt nên lọc ở trình duyệt sẽ sót hành động cũ;
+      đổi ô chọn là gửi (quan_tri.js), nút Lọc cho khi không có JS. #}
+  {% if cac_hanh_dong %}
+  <form method="get" action="/quan-tri#nhat-ky" class="nk-loc" role="search" aria-label="Lọc nhật ký">
+    {% if loc_ben %}<input type="hidden" name="ben" value="{{ loc_ben }}">{% endif %}
+    <select name="hd" data-tu-gui aria-label="Lọc theo hành động">
+      <option value="">Mọi hành động</option>
+      {% for x in cac_hanh_dong %}<option value="{{ x.hanh_dong }}"{% if x.hanh_dong == loc_hd %} selected{% endif %}>{{ x.ten }} ({{ x.so|so_vn }})</option>{% endfor %}
+    </select>
+    <button class="nut nut--nhe nut--nho nk-loc__nut" type="submit">Lọc</button>
+    {% if loc_hd %}<a class="nho" href="/quan-tri{% if loc_ben %}?ben={{ loc_ben|urlencode }}{% endif %}#nhat-ky">Bỏ lọc</a>{% endif %}
+  </form>
+  {% endif %}
   {% if nhat_ky %}
   <div class="cuon-ngang">
   <table class="nk-bang" data-phan-trang="20" data-phan-trang-nhan="nhật ký thay đổi">
@@ -461,7 +474,7 @@
       <tr>
         <td class="nho nk-luc">{{ x.luc|gio_vn }}</td>
         <td class="nho">{{ x.ai }}</td>
-        <td><span class="the">{{ x.hanh_dong }}</span></td>
+        <td><span class="the" title="{{ x.hanh_dong }}">{{ x.hanh_dong|ten_hanh_dong }}</span></td>
         <td class="nho">{{ x.doi_tuong }}</td>
         <td class="nho nk-chi-tiet"><div class="cat-chu" title="{{ x.chi_tiet_chu }}">{{ x.chi_tiet_chu }}</div></td>
       </tr>
@@ -470,7 +483,7 @@
   </table>
   </div>
   {% else %}
-  <p class="trong">Chưa có thay đổi nào.</p>
+  <p class="trong">{% if loc_hd %}Không có dòng nào cho hành động này.{% else %}Chưa có thay đổi nào.{% endif %}</p>
   {% endif %}
 </section>
 {% endblock %}
