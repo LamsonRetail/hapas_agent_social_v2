@@ -40,7 +40,10 @@ from tools.registry import registry, tool_error, tool_result  # type: ignore
 
 _TOOLSET = "browser"          # đi kèm nhóm browser sẵn có
 _HERE = Path(__file__).resolve().parent
-_PY = _HERE / ".venv-scrapling" / "Scripts" / "python.exe"
+# venv Windows để python ở Scripts\python.exe, Linux (VPS) ở bin/python. Cứng một kiểu thì
+# trên VPS mọi lượt quét/cào báo "chưa cài Scrapling" dù đã cài đủ.
+_PY = (_HERE / ".venv-scrapling" / "Scripts" / "python.exe" if os.name == "nt"
+       else _HERE / ".venv-scrapling" / "bin" / "python")
 _RUNNER = _HERE / "scrapling_runner.py"
 _TIMEOUT = 150
 _MAX_CHARS = 20000

@@ -1,0 +1,7 @@
+# Bộ triển khai VPS: script chạy trên Linux phải giữ LF (CRLF làm bash báo `$'\r': command not found`).
+deploy/vps/*.sh text eol=lf
+deploy/vps/mark text eol=lf
+deploy/vps/mark.service text eol=lf
+deploy/vps/*.txt text eol=lf
+deploy/vps/*.ps1 text eol=crlf
+deploy/vps/*.cmd text eol=crlf
