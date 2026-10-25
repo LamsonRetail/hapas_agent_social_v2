@@ -32,7 +32,61 @@
 }
 .qc-loc label.o { flex: 0 1 220px; min-width: 150px; }
 .qc-loc label.o select, .qc-loc label.o input { width: 100%; }
-.qc-loc__nhanh { margin-left: auto; }
+
+/* ─── Thanh lọc một hàng (25/10/2026, chủ dự án): Bên · Tài khoản · Nền tảng · Khoảng ngày · Tên chiến
+   dịch; đổi là áp dụng (qc.js ẩn nút Xem). Máy tính: dính dưới thanh điều hướng (60px) khi cuộn. ─── */
+.qc-loc label.o.qc-loc__ben { flex: 0 1 160px; min-width: 120px; }
+.qc-loc > div.qc-tk { flex-basis: 220px; min-width: 160px; }
+.qc-loc > div.qc-tcd { flex-basis: 200px; min-width: 160px; }
+.qc-loc__xem[hidden] { display: none; }
+.qc-loc__nen { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.qc-loc .qc-nen { box-shadow: none; border-color: var(--truc); padding: 2px; }
+.qc-loc .qc-nen__nut { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+.qc-tk__chan { justify-content: space-between; margin-top: 10px; }
+.qc-tk__chan .qc-tk__goi-y { margin: 0; }
+@media (min-width: 761px) {
+  .qc-loc-khung { position: sticky; top: 61px; z-index: 9; }
+  .qc-loc-khung .the-khoi.qc-loc { box-shadow: 0 6px 14px -12px rgba(16, 24, 40, .45); }
+}
+
+/* ─── Khoảng ngày (25/10/2026): ô gọn có biểu tượng lịch, bảng nổi hai cột — khoảng nhanh | lịch hai
+   tháng + hai ô ngày + so sánh. Lịch: khoang_ngay.css (dùng chung). ─── */
+.qc-loc .qc-kn { flex: 0 1 auto; min-width: 0; position: relative; display: flex; flex-direction: column; gap: 4px; }
+.qc-kn__hang { display: flex; align-items: center; gap: 8px; }
+.qc-kn__khung { position: relative; min-width: 0; }
+.qc-kn__tom { padding-left: 10px; }
+.qc-kn__bt { width: 16px; height: 16px; color: var(--chu-mo); }
+.qc-kn__gia-tri { font-weight: 600; font-variant-numeric: tabular-nums; }
+.qc-tk__bang.qc-kn__bang {
+  width: min(760px, calc(100vw - 32px)); max-width: none; padding: 12px;
+  max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain;
+  display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 14px;
+}
+.qc-kn__nhanh { display: flex; flex-direction: column; gap: 2px; padding-right: 12px; border-right: 1px solid var(--ke); }
+.qc-kn__nhanh-nut {
+  display: flex; align-items: center; min-height: 34px; padding: 4px 10px; border: 0; border-radius: 7px; background: transparent;
+  color: var(--chu-phu); font: inherit; font-size: 13.5px; font-weight: 550; text-align: left; text-decoration: none; cursor: pointer;
+}
+.qc-kn__nhanh-nut:hover { background: var(--be-mat-2); color: var(--chu); text-decoration: none; }
+.qc-kn__nhanh-nut[aria-current="true"] { background: var(--nhan-nen); color: var(--nhan-dam); font-weight: 700; }
+.qc-kn__nhanh-nut:focus-visible { outline: 2px solid var(--nhan); outline-offset: 1px; }
+.qc-kn__nhanh-nut[hidden] { display: none; }
+.qc-kn__phai { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.qc-kn__lich[hidden] { display: none; }
+.qc-kn__o-ngay { display: flex; gap: 10px; }
+.qc-kn__o-ngay label.o { flex: 1 1 0; min-width: 0; }
+.qc-kn__o-ngay label.o.qc-kn__ss { flex: 1.2 1 0; }
+.qc-loc .qc-kn__phai label.o { min-width: 0; }
+.qc-kn__chan { justify-content: space-between; margin-top: 0; }
+.qc-kn__bao { margin: 0; min-width: 0; }
+.qc-kn__moi {
+  flex: none; padding: 3px 9px; border-radius: 999px; background: var(--be-mat-2); border: 1px solid var(--ke);
+  font-size: 12px; font-weight: 550; color: var(--chu-mo); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+/* nhãn khoảng mờ ở đầu mỗi mục + dòng tổng kỳ trên KPI + cửa sổ khán giả */
+.qc-khoang-nhan { font-size: 12.5px; font-weight: 500; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
+.qc-kpi__khoang { margin: 0 2px -4px; font-size: 12.5px; color: var(--chu-mo); }
+.qc-kg__cua-so { margin: -4px 0 12px; font-size: 13px; color: var(--chu-phu); }
 /* 23/10/2026 (MKT): ô "Tên chiến dịch" — lọc cả trang; rộng hơn ô ngày vì tên chiến dịch dài. Nhãn +
    nút (i) cùng một dòng (label.o không chứa được nút). Thẻ "Chiến dịch có tên chứa" ngay trên KPI. */
 .qc-loc__nhan-dong { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--chu); }
@@ -284,29 +338,20 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
   .qc-nen { width: 100%; }
   .qc-nen__nut { flex: 1 1 0; justify-content: center; }
   .the-khoi.qc-kpi-phu { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  /* bộ lọc gập: dòng tóm tắt là một nút mảnh */
-  .qc-loc-khung__tom {
-    display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer;
-    border: 1px solid var(--vien-3); border-radius: var(--bo); background: var(--be-mat-3);
-    font-size: 13px; color: var(--chu-phu); min-height: 44px;
-  }
-  .qc-loc-khung__tom::before { content: none; }          /* bỏ mũi tên chung của details (giao_dien.css) */
-  .qc-loc-khung__nhan { flex: none; font-weight: 700; color: var(--chu); white-space: nowrap; }
-  .qc-loc-khung__gia-tri { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .qc-loc-khung__tom::after {
-    content: ""; flex: none; margin-left: auto; width: 16px; height: 16px; background: var(--mui-chon) center / 16px no-repeat;
-    transition: transform .2s cubic-bezier(.2, .8, .2, 1);
-  }
-  .qc-loc-khung[open] .qc-loc-khung__tom { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-color: transparent; }
-  .qc-loc-khung[open] .qc-loc-khung__tom::after { transform: rotate(180deg); }
-  .qc-loc-khung[open] .the-khoi.qc-loc { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
   .qc-loc label.o { flex: 1 1 140px; }
-  .qc-loc .qc-tk, .qc-loc .qc-tcd { flex: 1 1 100%; }
+  .qc-loc > div.qc-tk, .qc-loc > div.qc-tcd, .qc-loc .qc-kn { flex: 1 1 100%; }
+  .qc-loc label.o.qc-loc__ben { flex: 1 1 100%; }
+  .qc-kn__hang { flex-wrap: wrap; }
+  .qc-kn__khung { flex: 1 1 100%; }
   .qc-tk__tom { min-height: 44px; }
   .qc-tk__bang { position: static; width: auto; max-width: none; margin-top: 4px; box-shadow: none; }
   .qc-tk__o { min-height: 44px; }
   .qc-tk__nut, .qc-tk__tim { min-height: 44px; }
-  .qc-loc__nhanh { margin-left: 0; }
+  .qc-tk__bang.qc-kn__bang { width: auto; grid-template-columns: minmax(0, 1fr); }
+  .qc-kn__nhanh { flex-direction: row; flex-wrap: wrap; padding: 0 0 10px; border-right: 0; border-bottom: 1px solid var(--ke); }
+  .qc-kn__nhanh-nut { min-height: 44px; padding: 4px 12px; border: 1px solid var(--ke); }
+  .qc-loc__nen { flex: 1 1 100%; }
+  .qc-loc .qc-nen__nut { min-height: 40px; }
   .qc-bang-loc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .qc-bang-loc label.qc-bang-loc__tim { grid-column: 1 / -1; }
   .qc-bang-loc label.o { min-width: 0; }
@@ -338,6 +383,29 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
   .qc-bang td.trong { grid-column: 1 / -1; text-align: center; }
 }
 @media (max-width: 640px) {
+  /* bộ lọc gập: dòng tóm tắt là một nút mảnh */
+  .qc-loc-khung__tom {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer;
+    border: 1px solid var(--vien-3); border-radius: var(--bo); background: var(--be-mat-3);
+    font-size: 13px; color: var(--chu-phu); min-height: 44px;
+  }
+  .qc-loc-khung__tom::before { content: none; }          /* bỏ mũi tên chung của details (giao_dien.css) */
+  .qc-loc-khung__nhan { flex: none; font-weight: 700; color: var(--chu); white-space: nowrap; }
+  .qc-loc-khung__gia-tri { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qc-loc-khung__tom::after {
+    content: ""; flex: none; margin-left: auto; width: 16px; height: 16px; background: var(--mui-chon) center / 16px no-repeat;
+    transition: transform .2s cubic-bezier(.2, .8, .2, 1);
+  }
+  .qc-loc-khung[open] .qc-loc-khung__tom { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-color: transparent; }
+  .qc-loc-khung[open] .qc-loc-khung__tom::after { transform: rotate(180deg); }
+  .qc-loc-khung[open] .the-khoi.qc-loc { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
+  .qc-loc .nut, .qc-loc select, .qc-kn__o-ngay input { min-height: 44px; }
+  .qc-kn__o-ngay { flex-wrap: wrap; }
+  .qc-kn__o-ngay label.o { flex: 1 1 140px; }
+  .qc-kn__o-ngay label.o.qc-kn__ss { flex: 1 1 100%; }
+  .qc-kn__chan { flex-wrap: wrap; }
+  .qc-kn__chan .nut { flex: 1 1 100%; justify-content: center; }
+  .qc-loc .qc-nen__nut { min-height: 44px; flex: 1 1 0; justify-content: center; }
   /* 23/10/2026: bảng tên chiến dịch rộng hết khung, mọi chỗ bấm ≥ 44px */
   .qc-tcd__bang { width: auto; }
   .qc-tcd__o { min-height: 44px; }
@@ -350,7 +418,7 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
   .qc-tcd-the__bo-het, .qc-tcd-trong__ds a { min-height: 44px; display: inline-flex; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .qc-phan__nut, .qc-nen__nut, .qc-loc-khung__tom::after { transition: none; }
+  .qc-phan__nut, .qc-nen__nut, .qc-loc-khung__tom::after, .qc-kn__nhanh-nut { transition: none; }
   .qc-sheet__tt::before { animation: none !important; }
 }
 @media (forced-colors: active) {

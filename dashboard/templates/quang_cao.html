@@ -2,7 +2,9 @@
 {% block tieu_de %}Quảng cáo{% endblock %}
 {% block dau %}
 <link rel="stylesheet" href="{{ tinh('qc.css') }}">
+<link rel="stylesheet" href="{{ tinh('khoang_ngay.css') }}">
 <script src="{{ ECHARTS }}" integrity="{{ ECHARTS_SRI }}" defer></script>
+<script src="{{ tinh('khoang_ngay.js') }}" defer></script>
 <script src="{{ tinh('qc.js') }}" defer></script>
 {% endblock %}
 {% block noi_dung %}
@@ -17,6 +19,9 @@
     điện thoại hiện dạng thẻ. Chỉ số chỉ một nền tảng có (Vào hồ sơ = TikTok) ẩn khi lọc nền tảng kia. #}
 {% macro doi_kpi(o) %}{% if o.doi is not none %}<span class="kpi__doi{% if o.mau_doi and o.doi > 0 %} kpi__doi--tang{% elif o.mau_doi and o.doi < 0 %} kpi__doi--giam{% endif %}">{{ '▲' if o.doi > 0 else ('▼' if o.doi < 0 else '•') }} {{ o.doi|abs|pt_vn }} so với kỳ trước</span>{% elif o.co_truoc is false %}<span class="kpi__doi">kỳ trước chưa có số</span>{% endif %}{% endmacro %}
 {% macro ngay_ngan(iso) %}{{ iso[8:10] }}/{{ iso[5:7] }}{% endmacro %}
+{#- 25/10/2026 (chủ dự án): nhãn khoảng mờ ở đầu mỗi mục theo khoảng ngày — đọc riêng một mục vẫn biết
+    số là của kỳ nào (Khán giả có cửa sổ riêng, ghi rõ ở mục đó). #}
+{% macro nhan_khoang() %}<span class="qc-khoang-nhan" data-o="nhan-khoang">{{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}</span>{% endmacro %}
 {#- hiệu quả tính lại từ tổng (không cộng tỉ lệ): CPM = chi ÷ hiển thị × 1000, CTR = click ÷ hiển thị #}
 {% macro cpm(k) %}{% if k.chi is not none and k.hien_thi %}{{ (k.chi / k.hien_thi * 1000)|round|int|so_vn }}{% else %}—{% endif %}{% endmacro %}
 {% macro ctr(k) %}{% if k.click is not none and k.hien_thi %}{{ (k.click / k.hien_thi * 100)|round(2)|so_thap }}%{% else %}—{% endif %}{% endmacro %}
@@ -27,13 +32,9 @@
 <div class="dau-muc qc-dau">
   <div class="dau-muc__chu">
     <div class="dau-muc__tieu-de"><h1>Quảng cáo</h1><button type="button" class="goi-y" data-goi-y="TikTok Ads đọc mỗi sáng 06:30, Meta Ads 06:45 (đọc lại 7 ngày gần nhất vì chuyển đổi ghi trễ). Ngày theo múi giờ tài khoản quảng cáo. Trang này chỉ quản trị viên xem; người có quyền ở bên hỏi Mark để biết số (trả lời bằng chữ).">i</button></div>
-    <p class="qc-moi" id="qc-moi">{% if d %}{{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}/{{ d.den[:4] }}<span class="qc-moi__phu"> · so với {{ ngay_ngan(d.ky_truoc.tu) }} – {{ ngay_ngan(d.ky_truoc.den) }}</span>{% else %}Chưa có số quảng cáo nào được đồng bộ.{% endif %}</p>
+    {#- 25/10/2026 (chủ dự án): dòng kỳ dưới tiêu đề nói ĐÚNG kỳ so sánh đang dùng (`ss`). #}
+    <p class="qc-moi" id="qc-moi">{% if d %}{{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}/{{ d.den[:4] }}<span class="qc-moi__phu"> · {% if d.ky_truoc %}so với {% if d.so_sanh == 'thang_truoc' %}cùng kỳ tháng trước, {% endif %}{{ ngay_ngan(d.ky_truoc.tu) }} – {{ ngay_ngan(d.ky_truoc.den) }}{% if d.ky_truoc.den[:4] != d.den[:4] %}/{{ d.ky_truoc.den[:4] }}{% endif %}{% else %}không so sánh{% endif %}</span>{% else %}Chưa có số quảng cáo nào được đồng bộ.{% endif %}</p>
   </div>
-  {% if d and d.cac_nen_tang|length > 2 %}
-  <nav class="qc-nen" aria-label="Nền tảng" data-o="loc-nen-tang">
-    {% for n in d.cac_nen_tang %}<a class="qc-nen__nut" href="{{ url_cho(nen_tang=n.ma, tk='', cd='') }}"{% if n.ma == d.nen_tang %} aria-current="true"{% endif %}>{% if n.ma != 'tat_ca' %}<span class="qc-cham qc-cham--{{ n.ma }}" aria-hidden="true"></span>{% endif %}{{ n.ten }}</a>{% endfor %}
-  </nav>
-  {% endif %}
 </div>
 
 {% if loi_qc %}<div class="thong-bao thong-bao--loi">{{ loi_qc }}</div>{% endif %}
@@ -43,14 +44,23 @@
 {#- 22/10/2026 (chủ dự án): chọn NHIỀU tài khoản (tk= lặp lại). Không chọn = tất cả. #}
 {% set tk_chon = d.tai_khoan|selectattr('advertiser_id', 'in', d.tk_ds)|list %}
 {% set ten_tk = ('Tất cả tài khoản (' ~ d.tai_khoan|length ~ ')') if not tk_chon else (tk_chon[0].ten if tk_chon|length == 1 else (tk_chon|length ~ ' tài khoản')) %}
+{% set tcd = d.ten_cd or {} %}
+{% set so_dk = tcd.so_dieu_kien or 0 %}
+{% set kh = d.khoang %}
+{#- 25/10/2026 (chủ dự án): MỘT thanh lọc, đổi là áp dụng — Bên, Tài khoản, Nền tảng (nút một-trong-
+    nhiều, chuyển từ góc phải đầu trang vào thanh), Khoảng ngày, Tên chiến dịch. Máy tính: thanh dính
+    đầu trang khi cuộn. Có JS: đổi Bên / Nền tảng là đi luôn, các bảng nổi áp dụng bằng nút của nó, nút
+    "Xem" ẩn (qc.js); không JS: mọi ô vẫn là biểu mẫu GET thường + nút Xem. Điện thoại (≤ 640px): gập
+    thành một dòng tóm tắt "Bên · tài khoản · N ngày · n điều kiện ▾". #}
 <details class="qc-loc-khung" id="qc-loc" open>
-  <summary class="qc-loc-khung__tom"><span class="qc-loc-khung__nhan">Bộ lọc</span><span class="qc-loc-khung__gia-tri">{{ ten_ben }} · {{ ten_tk }} · {{ ngay_ngan(d.tu) }}–{{ ngay_ngan(d.den) }}{% if d.ten_cd %} · {{ d.ten_cd.chu }}{% endif %}</span></summary>
-  <form class="the-khoi qc-loc" method="get" action="/quang-cao" aria-label="Bộ lọc">
-    <label class="o">Bên
-      <select name="ben">{% for b in d.cac_ben %}<option value="{{ b.ma }}"{% if b.ma == d.ben %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}</select>
+  <summary class="qc-loc-khung__tom"><span class="qc-loc-khung__nhan">Bộ lọc</span><span class="qc-loc-khung__gia-tri">{{ ten_ben }} · {{ ten_tk }}{% if d.nen_tang != 'tat_ca' %} · {{ TEN_NEN_TANG_QC[d.nen_tang] }}{% endif %} · {{ kh.so_ngay }} ngày{% if so_dk %} · {{ so_dk }} điều kiện{% endif %}</span></summary>
+  <form class="the-khoi qc-loc" method="get" action="/quang-cao" aria-label="Bộ lọc" data-o="thanh-loc">
+    <label class="o qc-loc__ben">Bên
+      <select name="ben" data-tu-gui>{% for b in d.cac_ben %}<option value="{{ b.ma }}"{% if b.ma == d.ben %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}</select>
     </label>
     {#- Tài khoản (22/10/2026): danh sách đánh dấu trong <details> — không JS vẫn chọn + gửi được (tk= lặp
-        lại); qc.js thêm ô tìm, "Chọn tất cả / Bỏ chọn", cập nhật dòng tóm tắt, đóng khi bấm ra ngoài / Esc. #}
+        lại); qc.js thêm ô tìm, "Chọn tất cả / Bỏ chọn", cập nhật dòng tóm tắt, đóng khi bấm ra ngoài / Esc.
+        25/10/2026: nút "Áp dụng" trong bảng; đóng bảng khi đã đổi lựa chọn cũng là áp dụng. #}
     <div class="o qc-tk" data-o="chon-tk">
       <span class="qc-tk__nhan" id="qc-tk-nhan">Tài khoản</span>
       <details class="qc-tk__khung">
@@ -69,20 +79,62 @@
             {% endif %}{% endfor %}
             <p class="qc-tk__trong" data-tk-trong hidden>Không có tài khoản nào khớp.</p>
           </div>
-          <p class="qc-tk__goi-y mo nho">Không chọn tài khoản nào = tất cả. Bấm Xem để áp dụng.</p>
+          <div class="qc-tcd__nut qc-tk__chan">
+            <p class="qc-tk__goi-y mo nho">Không chọn tài khoản nào = tất cả.</p>
+            <button class="nut" type="submit">Áp dụng</button>
+          </div>
         </div>
       </details>
     </div>
-    <label class="o">Từ ngày <input type="date" name="tu" value="{{ d.tu }}" required></label>
-    <label class="o">Đến ngày <input type="date" name="den" value="{{ d.den }}" required></label>
+    {% if d.cac_nen_tang|length > 2 %}
+    <div class="o qc-loc__nen">
+      <span class="qc-tk__nhan" id="qc-nen-nhan">Nền tảng</span>
+      <nav class="qc-nen" aria-labelledby="qc-nen-nhan" data-o="loc-nen-tang">
+        {% for n in d.cac_nen_tang %}<a class="qc-nen__nut" href="{{ url_cho(nen_tang=n.ma, tk='', cd='') }}"{% if n.ma == d.nen_tang %} aria-current="true"{% endif %}>{% if n.ma != 'tat_ca' %}<span class="qc-cham qc-cham--{{ n.ma }}" aria-hidden="true"></span>{% endif %}{{ n.ten }}</a>{% endfor %}
+      </nav>
+    </div>
+    {% endif %}
+    {#- 25/10/2026 (chủ dự án): Khoảng ngày — MỘT ô "23/09 – 22/10/2026 · 30 ngày ▾" mở bảng nổi: trái là
+        khoảng nhanh (liên kết, bấm là đi; mọi khoảng hết ở NGÀY CUỐI CÓ SỐ `kh.moc`), phải là lịch hai
+        tháng (khoang_ngay.js — bấm ngày đầu, bấm ngày cuối, "Áp dụng") + "So sánh với". Không JS: hai ô
+        ngày + chọn so sánh ngay trong bảng vẫn gửi được. Cạnh ô: "Số tới hết DD/MM" + "!" khi khoảng có
+        ngày sau ngày cuối có số. Thành phần dùng lại được (trang Chỉ số sẽ dùng — đợt sau). #}
+    <div class="o qc-kn" data-o="khoang-ngay">
+      <span class="qc-loc__nhan-dong"><span id="qc-kn-nhan">Khoảng ngày</span> <button type="button" class="goi-y" aria-label="Giải thích khoảng ngày" data-goi-y="Mặc định 30 ngày tới hết ngày cuối có số (không quá hôm qua — hôm nay chưa hết ngày). Mọi khoảng nhanh cũng hết ở ngày đó; Tháng trước là trọn tháng. Tuỳ chọn: bấm ngày đầu rồi ngày cuối trên lịch, rồi Áp dụng (tối đa {{ kh.toi_da }} ngày). So sánh với: Kỳ liền trước = cùng số ngày ngay trước; Cùng kỳ tháng trước = cùng ngày của tháng trước (ngày 31 thành ngày cuối tháng); Không so sánh = ẩn ▲▼. Áp vào số tổng, biểu đồ, bảng, kênh đăng và Lark Sheet; Khán giả có cửa sổ riêng.">i</button></span>
+      <div class="qc-kn__hang">
+        <details class="qc-tk__khung qc-kn__khung" data-khoang-ngay data-tu="{{ d.tu }}" data-den="{{ d.den }}" data-max="{{ kh.moc }}" data-toi-da="{{ kh.toi_da }}">
+          <summary class="qc-tk__tom qc-kn__tom" aria-labelledby="qc-kn-nhan qc-kn-gia-tri"><svg class="bt qc-kn__bt" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span class="qc-tk__gia-tri qc-kn__gia-tri" id="qc-kn-gia-tri" data-kn-tom>{{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}/{{ d.den[:4] }} · {{ kh.so_ngay }} ngày</span></summary>
+          <div class="qc-tk__bang qc-kn__bang" data-kn-bang>
+            <nav class="qc-kn__nhanh" aria-label="Khoảng nhanh">
+              {% for x in khoang_nhanh %}<a class="qc-kn__nhanh-nut" href="{{ x.url }}" data-kn-nhanh="{{ x.ma }}"{% if x.dang %} aria-current="true"{% endif %}>{{ x.nhan }}</a>{% endfor %}
+              <button type="button" class="qc-kn__nhanh-nut" data-kn-tuy-chon{% if not khoang_nhanh|selectattr('dang')|list %} aria-current="true"{% endif %} hidden>Tuỳ chọn</button>
+            </nav>
+            <div class="qc-kn__phai">
+              <div class="qc-kn__lich" data-kn-lich hidden></div>
+              <div class="qc-kn__o-ngay">
+                <label class="o">Từ ngày <input type="date" name="tu" value="{{ d.tu }}" max="{{ kh.hom_qua }}" required data-kn-tu></label>
+                <label class="o">Đến ngày <input type="date" name="den" value="{{ d.den }}" max="{{ kh.hom_qua }}" required data-kn-den></label>
+                <label class="o qc-kn__ss">So sánh với
+                  <select name="ss" data-kn-ss>{% for ma, ten in SO_SANH.items() %}<option value="{{ ma }}"{% if ma == d.so_sanh %} selected{% endif %}>{{ ten }}</option>{% endfor %}</select>
+                </label>
+              </div>
+              <div class="qc-tcd__nut qc-kn__chan">
+                <p class="qc-kn__bao mo nho" data-kn-bao aria-live="polite"></p>
+                <button class="nut" type="submit" data-kn-ap-dung>Áp dụng</button>
+              </div>
+            </div>
+          </div>
+        </details>
+        <span class="qc-kn__moi" data-o="so-toi-het">{% if d.moi.ngay_cuoi %}Số tới hết {{ ngay_ngan(d.moi.ngay_cuoi|string) }}{% else %}Chưa có số{% endif %}</span>
+        {% if kh.chua_du %}<button type="button" class="goi-y goi-y--canh" data-o="khoang-chua-du" data-goi-y="Khoảng đang xem kéo tới {{ ngay_ngan(d.den) }} nhưng số mới có tới hết {{ ngay_ngan(kh.moc) }}{% if d.den > kh.hom_qua %} (hôm nay chưa hết ngày){% endif %} — các ngày sau đó chưa có số nên tổng kỳ và ▲▼ thấp hơn thực tế. Chọn một khoảng nhanh để hết ở ngày cuối có số.">!</button>{% endif %}
+      </div>
+    </div>
     {#- 23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): lọc CẢ TRANG theo tên chiến dịch — KPI,
         biểu đồ, bảng, kênh, Sheet chỉ tính chiến dịch khớp; Khán giả theo tài khoản nên không theo được.
         Bản 2 (MKT, như Meta Ads Manager): ô gọn "Tên chiến dịch ▾" (tóm tắt "2 điều kiện") mở bảng ba
         dòng — chứa tất cả / chứa một trong / không chứa, các dòng AND. Không JS: mỗi dòng là ô chữ, dấu
         phẩy tách từ khoá; qc.js biến thành ô thẻ (Enter / dấu phẩy → thẻ ✕, Backspace ô trống xoá thẻ
         cuối, thẻ gửi thành tham số lặp lại) + gợi ý tên thật (/api/qc/ten-cd). #}
-    {% set tcd = d.ten_cd or {} %}
-    {% set so_dk = tcd.so_dieu_kien or 0 %}
     <div class="o qc-tcd" data-o="loc-ten-cd">
       <span class="qc-loc__nhan-dong"><span id="qc-tcd-nhan">Tên chiến dịch</span> <button type="button" class="goi-y" aria-label="Giải thích lọc tên chiến dịch" data-goi-y="Chỉ tính các chiến dịch có tên khớp — không cần gõ dấu, không phân biệt hoa thường; khoảng trắng, dấu _ và / được bỏ qua (gõ “can nhac da 2010” vẫn khớp “CÂN NHẮC_DA 20/10”). Ba dòng kết hợp với nhau bằng VÀ: Chứa tất cả = tên chứa MỌI từ khoá; Chứa một trong = chứa ÍT NHẤT MỘT từ khoá; Không chứa = không chứa từ khoá NÀO. Gõ từ khoá rồi Enter hoặc dấu phẩy để thêm; chọn gợi ý để thêm tên chiến dịch thật. Tối đa {{ TU_KHOA_TOI_DA }} từ khoá mỗi dòng, mỗi từ khoá {{ TU_KHOA_DAI_TOI_DA }} ký tự — phần vượt bị bỏ. Áp vào số tổng, biểu đồ, TikTok và Meta, bảng chiến dịch / quảng cáo, kênh đăng và Lark Sheet; kỳ trước so với các chiến dịch khớp của kỳ trước. KHÔNG áp vào Khán giả (số khán giả chỉ có theo tài khoản).">i</button></span>
       <details class="qc-tk__khung qc-tcd__khung">
@@ -106,13 +158,12 @@
     </div>
     <input type="hidden" name="nen_tang" value="{{ d.nen_tang }}">
     <input type="hidden" name="sap" value="{{ d.sap }}">
-    {#- giữ chữ tìm + cách xếp; KHÔNG giữ chiến dịch (cd) — đổi bên / tài khoản thì chiến dịch cũ thường không còn #}
+    {#- giữ chữ tìm + cách xếp; KHÔNG giữ chiến dịch (cd) — đổi bên / tài khoản thì chiến dịch cũ thường không còn.
+        25/10/2026: giữ cả lọc / xếp của khối "Theo kênh đăng" (kt, kl, ks, kc). #}
     {% if d.bang.tim %}<input type="hidden" name="tim" value="{{ d.bang.tim }}">{% endif %}
     {% if d.bang.chieu == 'tang' %}<input type="hidden" name="chieu" value="tang">{% endif %}
-    <button class="nut" type="submit">Xem</button>
-    <nav class="qc-phan qc-loc__nhanh" aria-label="Khoảng nhanh">
-      {% for n in (7, 30, 90) %}<a class="qc-phan__nut" href="{{ url_cho(tu=nhanh[n], den=hom_qua) }}"{% if d.tu == nhanh[n] and d.den == hom_qua %} aria-current="true"{% endif %}>{{ n }} ngày</a>{% endfor %}
-    </nav>
+    {% if d.kenh and d.kenh.loc %}{% set lk = d.kenh.loc %}{% for k, v in (('kt', lk.tim), ('kl', lk.loai), ('ks', lk.sap if lk.sap != lk.mac_dinh else ''), ('kc', 'tang' if lk.chieu == 'tang' else '')) if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endif %}
+    <button class="nut qc-loc__xem" type="submit" data-loc-xem>Xem</button>
   </form>
 </details>
 
@@ -124,7 +175,7 @@
   {% for loai, ts, ngan, dai in LOAI_TEN_CD if d.ten_cd[loai] %}
   <p class="qc-bang-the qc-tcd-the__o" data-tcd-the="{{ loai }}"><span>{{ ngan|capitalize }}: <b>{{ d.ten_cd[loai]|join(', ') }}</b></span><a class="qc-bang-the__bo" href="{{ url_bo_tcd[loai] }}" aria-label="Bỏ điều kiện {{ ngan }}: {{ d.ten_cd[loai]|join(', ') }}" title="Bỏ điều kiện này">✕</a></p>
   {% endfor %}
-  <span class="qc-tcd-the__dem">{{ d.ten_cd.so_chien_dich|so_vn }} chiến dịch<span class="qc-ten-cd__phu"> (kỳ trước {{ d.ten_cd.so_chien_dich_truoc|so_vn }})</span>{% if d.ten_cd.cat %}<span class="qc-ten-cd__phu"> · đã bỏ bớt từ khoá vượt trần</span>{% endif %}</span>
+  <span class="qc-tcd-the__dem">{{ d.ten_cd.so_chien_dich|so_vn }} chiến dịch{% if d.ky_truoc %}<span class="qc-ten-cd__phu"> (kỳ trước {{ d.ten_cd.so_chien_dich_truoc|so_vn }})</span>{% endif %}{% if d.ten_cd.cat %}<span class="qc-ten-cd__phu"> · đã bỏ bớt từ khoá vượt trần</span>{% endif %}</span>
   <a class="qc-tcd-the__bo-het" href="{{ url_bo_tcd[''] }}">Bỏ lọc tên</a>
 </div>
 {% endif %}
@@ -147,6 +198,7 @@
     CPM + CTR (tính lại từ tổng kỳ này / kỳ trước; CPM không tô màu ▲▼ vì chi phí tăng chưa chắc xấu). #}
 {% set phu = kpi_phu|rejectattr('ma', 'equalto', 'vao_ho_so' if d.nen_tang == 'meta' else '')|list %}
 <section class="qc-kpi" id="qc-kpi" aria-label="Tổng quan">
+  <p class="qc-kpi__khoang">Tổng kỳ {{ nhan_khoang() }}{% if d.ky_truoc %}<span class="qc-kpi__ss"> · ▲▼ so với {{ ngay_ngan(d.ky_truoc.tu) }} – {{ ngay_ngan(d.ky_truoc.den) }}</span>{% endif %}</p>
   <div class="kpi-chinh">
     {% for o in kpi_chinh %}
     <div class="the-khoi kpi kpi--lon" data-kpi="{{ o.ma }}">
@@ -161,11 +213,11 @@
   {% set hq = [] %}
   {% if d.xem_tien and k.chi is not none and k.hien_thi %}
     {% set v = k.chi / k.hien_thi * 1000 %}{% set vt = (kt.chi / kt.hien_thi * 1000) if (kt.chi is not none and kt.hien_thi) else none %}
-    {% set _ = hq.append({'ma': 'cpm', 'nhan': 'CPM', 'goi_y': 'Chi cho 1.000 lượt hiển thị = Chi tiêu ÷ Hiển thị × 1.000 (tính lại từ tổng kỳ).', 'so': (v|round|int|so_vn) ~ ' ₫', 'day_du': (v|round|int|so_vn) ~ ' ₫', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': false, 'co_truoc': vt is not none}) %}
+    {% set _ = hq.append({'ma': 'cpm', 'nhan': 'CPM', 'goi_y': 'Chi cho 1.000 lượt hiển thị = Chi tiêu ÷ Hiển thị × 1.000 (tính lại từ tổng kỳ).', 'so': (v|round|int|so_vn) ~ ' ₫', 'day_du': (v|round|int|so_vn) ~ ' ₫', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': false, 'co_truoc': (vt is not none) if d.ky_truoc else none}) %}
   {% endif %}
   {% if k.click is not none and k.hien_thi %}
     {% set v = k.click / k.hien_thi * 100 %}{% set vt = (kt.click / kt.hien_thi * 100) if (kt.click is not none and kt.hien_thi) else none %}
-    {% set _ = hq.append({'ma': 'ctr', 'nhan': 'CTR', 'goi_y': 'Tỉ lệ bấm = Click ÷ Hiển thị (tính lại từ tổng kỳ, không trung bình các ngày).', 'so': (v|round(2)|so_thap) ~ '%', 'day_du': (v|round(4)|so_thap(4)) ~ '%', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': true, 'co_truoc': vt is not none}) %}
+    {% set _ = hq.append({'ma': 'ctr', 'nhan': 'CTR', 'goi_y': 'Tỉ lệ bấm = Click ÷ Hiển thị (tính lại từ tổng kỳ, không trung bình các ngày).', 'so': (v|round(2)|so_thap) ~ '%', 'day_du': (v|round(4)|so_thap(4)) ~ '%', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': true, 'co_truoc': (vt is not none) if d.ky_truoc else none}) %}
   {% endif %}
   {% set phu = hq + phu %}
   <div class="the-khoi kpi-phu qc-kpi-phu" style="--so-kpi: {{ phu|length }}">
@@ -217,10 +269,13 @@
 
 <section class="the-khoi cach-duoi qc-xu-huong" aria-labelledby="qc-xh-tieu-de">
   <div class="muc">
-    <h2 class="muc__ten" id="qc-xh-tieu-de">Theo ngày</h2>
+    <h2 class="muc__ten" id="qc-xh-tieu-de">Theo <span id="qc-xh-don-vi">{{ DON_VI_BD[d.theo_ky.mac_dinh]|lower }}</span></h2>
+    {{ nhan_khoang() }}
     {#- 22/10/2026 (chủ dự án): hai chuỗi xem trang sản phẩm — mỗi chuỗi một nền tảng, định nghĩa rõ. #}
     {% if d.chuoi_xem_sp %}<button type="button" class="goi-y" aria-label="Giải thích chỉ số xem trang sản phẩm" data-goi-y="{% for c in d.chuoi_xem_sp %}{{ c.ten }} — {{ c.dinh_nghia }}. {% endfor %}{% if d.chuoi_xem_sp|length > 1 %}Hai chỉ số đếm ở hai nơi khác nhau nên không cộng với nhau.{% endif %}">i</button>{% endif %}
-    <div class="muc__phai"><div class="qc-phan" id="qc-chon-chi-so" role="group" aria-label="Chỉ số"></div></div>
+    {#- 25/10/2026 (chủ dự án): ≤ 31 ngày theo ngày, ≤ 120 theo tuần, dài hơn theo tháng (máy chủ gộp —
+        `QC.gop_ky`); nút "Ngày · Tuần · Tháng" (qc.js) đổi tại chỗ, mặc định theo độ dài khoảng. #}
+    <div class="muc__phai"><div class="qc-phan" id="qc-don-vi" role="group" aria-label="Gộp theo"></div><div class="qc-phan" id="qc-chon-chi-so" role="group" aria-label="Chỉ số"></div></div>
   </div>
   <ul class="qc-chu-giai" id="qc-chu-giai" hidden></ul>
   <div class="bieu-do" id="qc-bd-ngay" role="img" aria-label="Biểu đồ số quảng cáo theo ngày"></div>
@@ -288,6 +343,7 @@
 <section class="the-khoi cach-duoi" aria-labelledby="qc-top-tieu-de" id="top">
   <div class="muc">
     <h2 class="muc__ten" id="qc-top-tieu-de">Chiến dịch và quảng cáo</h2>
+    {{ nhan_khoang() }}
     <button type="button" class="goi-y" data-goi-y="Tìm theo tên (không cần gõ dấu): bảng chiến dịch khớp tên chiến dịch; bảng quảng cáo khớp tên quảng cáo hoặc tên chiến dịch chứa nó. Bấm tên một chiến dịch để chỉ xem quảng cáo của chiến dịch đó. Bấm tiêu đề cột để xếp, bấm lại để đổi chiều. CPM, CTR{{ ', ROAS' if HIEN_DOANH_THU }} tính lại từ tổng của dòng; khi xếp theo CPM hoặc CTR, dòng dưới {{ NGUONG_TI_LE|so_vn }} hiển thị xuống cuối để số lẻ không lấn lên đầu. Mỗi bảng 20 dòng một trang. Bộ lọc này áp vào hai bảng và tab chiến dịch / quảng cáo của Lark Sheet; số tổng và biểu đồ theo Bộ lọc đầu trang.">i</button>
   </div>
   <form class="qc-bang-loc" method="get" action="/quang-cao#top" role="search" aria-label="Lọc và sắp xếp bảng" data-o="loc-bang">
@@ -295,6 +351,7 @@
     {% for x in d.tk_ds %}<input type="hidden" name="tk" value="{{ x }}">{% endfor %}
     {% if d.bang.cd %}<input type="hidden" name="cd" value="{{ d.bang.cd }}">{% endif %}
     {% if d.ten_cd %}{% for l in LOAI_TEN_CD %}{% for x in d.ten_cd[l[0]] %}<input type="hidden" name="{{ l[1] }}" value="{{ x }}">{% endfor %}{% endfor %}{% endif %}
+    {% if d.so_sanh != 'truoc' %}<input type="hidden" name="ss" value="{{ d.so_sanh }}">{% endif %}
     {% if d.kenh and d.kenh.loc %}{% set lk = d.kenh.loc %}{% for k, v in (('kt', lk.tim), ('kl', lk.loai), ('ks', lk.sap if lk.sap != lk.mac_dinh else ''), ('kc', 'tang' if lk.chieu == 'tang' else '')) if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endif %}
     <label class="o qc-bang-loc__tim">Tìm theo tên
       <input type="search" name="tim" value="{{ d.bang.tim }}" maxlength="{{ TIM_TOI_DA }}" placeholder="Tên chiến dịch hoặc quảng cáo" autocomplete="off">
@@ -338,6 +395,7 @@
           {% if d.bang.cd %}<input type="hidden" name="cd" value="{{ d.bang.cd }}">{% endif %}
           {% if d.ten_cd %}{% for l in LOAI_TEN_CD %}{% for x in d.ten_cd[l[0]] %}<input type="hidden" name="{{ l[1] }}" value="{{ x }}">{% endfor %}{% endfor %}{% endif %}
           <input type="hidden" name="chieu" value="{{ d.bang.chieu }}">
+          {% if d.so_sanh != 'truoc' %}<input type="hidden" name="ss" value="{{ d.so_sanh }}">{% endif %}
           <button class="nut" type="submit" id="qc-sheet-nut"{% if dang_sheet %} disabled{% endif %}>
             <svg class="bt" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 9.5h16M4 15h16M10 4v16"/></svg>Xuất Lark Sheet theo bộ lọc này
           </button>
@@ -372,8 +430,9 @@
   <div class="muc">
     <h2 class="muc__ten" id="qc-kg-tieu-de">Khán giả</h2>
     <button type="button" class="goi-y" data-goi-y="Phân bố lượt hiển thị trong cửa sổ 30 ngày gần nhất (đọc lại mỗi tuần) — không theo khoảng ngày đang lọc. TikTok: tuổi, giới tính, tỉnh/thành (mã vùng), thiết bị. Meta: tuổi, giới tính, vùng, nền tảng, vị trí. Cùng nhãn (vd Nữ) thì cộng hai nền tảng.">i</button>
-    {% if d.khan_gia_khoang.tu %}<span class="muc__phai muc__phu">{{ d.khan_gia_khoang.tu|gio_vn }} – {{ d.khan_gia_khoang.den|gio_vn }}</span>{% endif %}
   </div>
+  {#- 25/10/2026 (chủ dự án): khối DUY NHẤT không theo khoảng ngày — nói thẳng ngay dưới tiêu đề. #}
+  {% if d.khan_gia_khoang.tu %}<p class="qc-kg__cua-so" data-o="kg-cua-so">Khán giả: cửa sổ mới nhất {{ ngay_ngan(d.khan_gia_khoang.tu|string) }} – {{ ngay_ngan(d.khan_gia_khoang.den|string) }}/{{ (d.khan_gia_khoang.den|string)[:4] }}, không theo khoảng ngày đang lọc ({{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}).</p>{% endif %}
   {#- 23/10/2026 (MKT): số khán giả chỉ có theo TÀI KHOẢN — không lọc được theo tên chiến dịch. #}
   {% if d.ten_cd %}<p class="thong-bao thong-bao--canh qc-kg__canh" data-o="kg-khong-loc-cd">Khối này KHÔNG theo lọc tên chiến dịch ({{ d.ten_cd.chu }}): số khán giả chỉ có theo tài khoản, nên đây là khán giả của MỌI chiến dịch trong các tài khoản đang chọn.</p>{% endif %}
   {% if d.khan_gia.values()|select|list %}

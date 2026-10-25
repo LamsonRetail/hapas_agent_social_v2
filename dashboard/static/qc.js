@@ -7,11 +7,13 @@
 // 22/10/2026 (chủ dự án): thêm "Xem trang SP TikTok Shop" / "Xem SP website (Meta)" (`chuoi_xem_sp` của
 // payload, chỉ chuỗi có số trong phạm vi) — mỗi chuỗi thuộc MỘT nền tảng nên luôn là đường một màu của
 // nền tảng đó, không chồng, không cộng; chú giải dưới tiêu đề ghi rõ định nghĩa.
+// 25/10/2026 (chủ dự án): gộp theo ngày / tuần / tháng — máy chủ gộp sẵn (`theo_ky`, quang_cao.gop_ky),
+// ở đây chỉ chọn chuỗi theo nút "Ngày · Tuần · Tháng" (mặc định theo độ dài khoảng, không nhớ).
 "use strict";
 (function () {
-  // Bộ lọc gập trên điện thoại (máy tính luôn mở; dòng tóm tắt chỉ hiện ≤ 760px — qc.css).
+  // Bộ lọc gập trên điện thoại (máy tính luôn mở; dòng tóm tắt chỉ hiện ≤ 640px — qc.css, 25/10/2026).
   var loc = document.getElementById("qc-loc");
-  var hep = window.matchMedia ? window.matchMedia("(max-width: 760px)") : null;
+  var hep = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
   if (loc && hep && hep.matches) loc.open = false;
   // Cửa sổ hẹp → rộng: dòng tóm tắt bị ẩn ở máy tính, bộ lọc đang gập sẽ biến mất → mở lại.
   if (loc && hep && hep.addEventListener) hep.addEventListener("change", function () { if (!hep.matches) loc.open = true; });
@@ -28,14 +30,31 @@
   try { p = JSON.parse(api.textContent || "{}"); } catch (e) { return; }
   var ds = p.theo_ngay || [];
   if (!ds.length) return;
-  var ngay = ds.map(function (x) { return x.ngay; });
   var co = ds[0];
   var chuoi = CHUOI.filter(function (c) { return c[0] in co; });
   if (!chuoi.length) return;
-  // Theo nền tảng: { tiktok: {ngày: dòng}, meta: {...} } — chỉ khi xem "Tất cả" và có ≥ 2 nền tảng.
-  var theoNen = {};
-  (p.theo_ngay_nen_tang || []).forEach(function (r) { (theoNen[r.nen_tang] = theoNen[r.nen_tang] || {})[r.ngay] = r; });
-  var cacNen = (p.theo_nen_tang || []).map(function (n) { return n.nen_tang; }).filter(function (n) { return theoNen[n]; });
+  var ky = p.theo_ky || {};
+  var DON_VI = { ngay: "Ngày", tuan: "Tuần", thang: "Tháng" };
+  var coDonVi = (ky.co || ["ngay"]).filter(function (k) { return k === "ngay" || ky[k]; });
+  var donVi = coDonVi.indexOf(ky.mac_dinh) >= 0 ? ky.mac_dinh : "ngay";
+  var nhomDv = document.getElementById("qc-don-vi");
+  var tieuDeDv = document.getElementById("qc-xh-don-vi");
+  // Chuỗi của đơn vị đang chọn: ds (dòng chung), ngay (khoá trục), nhan (khoá → dòng — nhãn tuần / tháng),
+  // theoNen: { tiktok: {khoá: dòng}, meta: {...} } — chỉ dùng khi xem "Tất cả" và có ≥ 2 nền tảng.
+  var ngay, theoNen, dongKy;
+  function napDuLieu() {
+    var x = donVi === "ngay" ? { chung: p.theo_ngay || [], nen_tang: p.theo_ngay_nen_tang || [] } : ky[donVi];
+    ds = x.chung || [];
+    ngay = ds.map(function (r) { return r.ngay; });
+    dongKy = {};
+    ds.forEach(function (r) { dongKy[r.ngay] = r; });
+    theoNen = {};
+    (x.nen_tang || []).forEach(function (r) { (theoNen[r.nen_tang] = theoNen[r.nen_tang] || {})[r.ngay] = r; });
+  }
+  napDuLieu();
+  var nenNgay = {};
+  (p.theo_ngay_nen_tang || []).forEach(function (r) { nenNgay[r.nen_tang] = true; });
+  var cacNen = (p.theo_nen_tang || []).map(function (n) { return n.nen_tang; }).filter(function (n) { return nenNgay[n]; });
   // Chuỗi riêng một nền tảng: [mã, nhãn, nền tảng, định nghĩa] — chỉ khi nền tảng đó có trong phạm vi.
   var coNen = (p.theo_nen_tang || []).map(function (n) { return n.nen_tang; });
   (p.chuoi_xem_sp || []).forEach(function (c) {
@@ -59,6 +78,15 @@
   }
   function ngayNgan(iso) { return iso.slice(8, 10) + "/" + iso.slice(5, 7); }
   function ngayDu(iso) { return iso.split("-").reverse().join("/"); }
+  // Nhãn trục: ngày "23/10"; tuần "Tuần 20/10"; tháng "Tháng 10/2026" (máy chủ đặt `nhan`).
+  function nhanTruc(k) { var r = dongKy[k]; return donVi === "ngay" || !r ? ngayNgan(k) : r.nhan; }
+  function nhanDu(k) {
+    var r = dongKy[k];
+    if (donVi === "ngay" || !r) return ngayDu(k);
+    var cuoiThang = new Date(+r.ngay.slice(0, 4), +r.ngay.slice(5, 7), 0).getDate();
+    var thieu = r.so_ngay < (donVi === "tuan" ? 7 : cuoiThang);
+    return r.nhan + " (" + ngayNgan(r.ngay) + " – " + ngayNgan(r.den) + (thieu ? ", " + r.so_ngay + " ngày trong khoảng" : "") + ")";
+  }
   function hexRgba(hex, a) {
     var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
     return m ? "rgba(" + parseInt(m[1], 16) + "," + parseInt(m[2], 16) + "," + parseInt(m[3], 16) + "," + a + ")" : hex;
@@ -87,6 +115,28 @@
         ve();
       });
       nhom.appendChild(b);
+    });
+  }
+
+  function veDonVi() {
+    if (!nhomDv) return;
+    while (nhomDv.firstChild) nhomDv.removeChild(nhomDv.firstChild);
+    if (coDonVi.length < 2) return;
+    coDonVi.forEach(function (k) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "qc-phan__nut";
+      b.textContent = DON_VI[k];
+      b.setAttribute("aria-pressed", k === donVi ? "true" : "false");
+      b.addEventListener("click", function () {
+        if (donVi === k) return;
+        donVi = k;
+        napDuLieu();
+        Array.prototype.forEach.call(nhomDv.children, function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+        if (tieuDeDv) tieuDeDv.textContent = DON_VI[k].toLowerCase();
+        ve();
+      });
+      nhomDv.appendChild(b);
     });
   }
 
@@ -126,14 +176,14 @@
               truc: bien("--truc"), mat: bien("--be-mat"), phong: bien("--phong") || "system-ui, sans-serif",
               chinh: bien("--s1"), tiktok: bien("--qc-tiktok") || "#111827", meta: bien("--qc-meta") || "#1877f2" };
     if (!bd) bd = window.echarts.init(khung, null, { renderer: "canvas" });
-    khung.setAttribute("aria-label", "Biểu đồ " + ten.toLowerCase() + " theo ngày" + (xep ? ", chia theo nền tảng" : "") + ", " + ngay.length + " ngày");
+    khung.setAttribute("aria-label", "Biểu đồ " + ten.toLowerCase() + " theo " + DON_VI[donVi].toLowerCase() + (xep ? ", chia theo nền tảng" : "") + ", " + ngay.length + " " + DON_VI[donVi].toLowerCase());
     veChuGiai(nenRieng ? c : null);
     var series;
     if (xep) {
       series = cacNen.map(function (n, i) {
         return {
           name: TEN_NEN[n] || n, type: "bar", stack: "nen", barMaxWidth: 22, barCategoryGap: "28%",
-          data: ngay.map(function (x) { return giaTri(theoNen[n][x], ma); }),
+          data: ngay.map(function (x) { return giaTri((theoNen[n] || {})[x], ma); }),
           itemStyle: { color: m[n] || m.chinh, borderRadius: i === cacNen.length - 1 ? [3, 3, 0, 0] : 0 },
           emphasis: { focus: "series" }
         };
@@ -162,7 +212,7 @@
         axisPointer: xep ? { type: "shadow", shadowStyle: { color: hexRgba(m.truc, 0.25) } }
                            : { type: "line", lineStyle: { color: m.truc, type: "dashed" } },
         formatter: function (ps) {
-          var i = ps[0].dataIndex, dong = [ngayDu(ngay[i])], tong = 0;
+          var i = ps[0].dataIndex, dong = [nhanDu(ngay[i])], tong = 0;
           ps.forEach(function (x) { tong += x.value || 0; dong.push(x.seriesName + ": " + SO.format(x.value || 0) + donVi(ma)); });
           if (nenRieng) dong.push(nenRieng === "tiktok" ? "(đếm lượt xem, không phải số người)" : "(trên website — không phải Shop)");
           if (xep) dong.push("Cộng: " + SO.format(tong) + donVi(ma));
@@ -170,7 +220,7 @@
         }
       },
       xAxis: { type: "category", data: ngay, boundaryGap: xep, axisLine: { lineStyle: { color: m.ke } }, axisTick: { show: false },
-               axisLabel: { color: m.mo, fontSize: 11, hideOverlap: true, formatter: ngayNgan, margin: 10 } },
+               axisLabel: { color: m.mo, fontSize: 11, hideOverlap: true, formatter: nhanTruc, margin: 10 } },
       yAxis: { type: "value", splitLine: { lineStyle: { color: m.ke, type: [4, 4] } },
                axisLabel: { color: m.mo, fontSize: 11, formatter: function (v) { return soGon(v); } } },
       series: series
@@ -178,6 +228,7 @@
   }
 
   veNut();
+  veDonVi();
   ve();
   var cho = null;
   window.addEventListener("resize", function () {
@@ -188,6 +239,23 @@
   if (mq && mq.addEventListener) {
     mq.addEventListener("change", function () { if (bd) { bd.dispose(); bd = null; } ve(); });
   }
+})();
+
+// Thanh lọc đầu trang (25/10/2026, chủ dự án: đổi là áp dụng): đổi Bên là gửi luôn; các bảng nổi
+// (tài khoản, khoảng ngày, tên chiến dịch) áp dụng bằng nút của nó; nút "Xem" chỉ còn cho trường hợp
+// không JS. Gửi: bỏ `ss` mặc định (URL gọn, như liên kết máy chủ dựng).
+(function () {
+  var f = document.querySelector('form[data-o="thanh-loc"]');
+  if (!f) return;
+  var xem = f.querySelector("[data-loc-xem]");
+  if (xem) xem.hidden = true;
+  Array.prototype.forEach.call(f.querySelectorAll("select[data-tu-gui]"), function (s) {
+    s.addEventListener("change", function () { if (f.requestSubmit) f.requestSubmit(); else f.submit(); });
+  });
+  f.addEventListener("submit", function () {
+    var ss = f.elements.ss;
+    if (ss && ss.value === "truoc") ss.disabled = true;
+  });
 })();
 
 // Lọc bảng chiến dịch / quảng cáo (22/10/2026): đổi "Xếp theo" / "Thứ tự" là gửi luôn (ô tìm vẫn chờ
@@ -255,8 +323,14 @@
   khoi.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && khung.open) { khung.open = false; khung.querySelector("summary").focus(); }
   });
-  khung.addEventListener("toggle", function () { if (khung.open && tim) tim.focus(); });
+  // 25/10/2026 (chủ dự án: thanh lọc đổi là áp dụng): đóng bảng mà lựa chọn đã khác lúc mở → gửi luôn.
   var f = khoi.closest("form");
+  function dau() { return hop.map(function (h) { return h.checked ? "1" : "0"; }).join(""); }
+  var luc = dau();
+  khung.addEventListener("toggle", function () {
+    if (khung.open) { luc = dau(); if (tim) tim.focus(); return; }
+    if (f && dau() !== luc) { if (f.requestSubmit) f.requestSubmit(); else f.submit(); }
+  });
   if (f) f.addEventListener("submit", function () {
     if (hop.every(function (h) { return h.checked; })) hop.forEach(function (h) { h.checked = false; });
   });
