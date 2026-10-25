@@ -4,6 +4,25 @@
 // chủ phát trong #ns-du-lieu, ở đây không tự đặt giá nào. Không có JS thì trang vẫn đủ số (máy chủ
 // dựng sẵn) và biểu mẫu vẫn gửi được.
 "use strict";
+// Thanh chọn Bên → Dự án (25/10/2026, chủ dự án: chọn bên, chọn dự án rồi mới ra ngân sách): đổi là
+// xem luôn, nút "Xem" chỉ còn cho trường hợp không JS. Đổi Bên thì bỏ dự án (về tổng quan bên mới);
+// dự án rỗng thì không gửi `du_an` (URL gọn `?ben=…`, như liên kết máy chủ dựng).
+(function () {
+  var f = document.getElementById("ns-loc");
+  if (!f) return;
+  var xem = f.querySelector("[data-loc-xem]");
+  if (xem) xem.hidden = true;
+  var ben = f.elements.namedItem("ben");
+  var da = f.elements.namedItem("du_an");
+  function gui() {
+    if (da && !da.value) da.disabled = true;
+    f.submit();
+  }
+  if (ben) ben.addEventListener("change", function () { if (da) da.value = ""; gui(); });
+  if (da) da.addEventListener("change", gui);
+  // Quay lại trang (bfcache): bật lại ô dự án đã tắt lúc gửi.
+  window.addEventListener("pageshow", function () { if (da) da.disabled = false; });
+})();
 // Nút ⚠ "Dự báo vượt trần" (21/10/2026): mở / đóng khối cảnh báo gập — mọi vai trò (khối biểu mẫu
 // bên dưới chỉ chạy cho người sửa được cấu hình).
 (function () {

@@ -684,6 +684,31 @@ def _chon_du_an(ds: list[dict], ma: str | None) -> dict | None:
     return next((d for d in ds if d.get("dang_bat")), ds[0] if ds else None)
 
 
+def _chon_ben_du_an(cac_ben: list[dict], ds: list[dict], ben_q, du_an_q) -> tuple:
+    """Trang Ngân sách (25/10/2026, chủ dự án: "trước tiên phải chọn bên và chọn dự án cụ thể đã
+    xong mới nhảy ra phần custom ngân sách"): (mã bên | None, dự án | None) từ `?ben=` + `?du_an=`.
+    `cac_ben`: bên người xem thấy ({ma, ten, so_du_an}, đã xếp); `ds`: dự án người xem đọc được.
+    - `du_an` đọc được (và thuộc `ben` nếu có `ben`) -> dự án đó, bên suy từ dự án (link cũ
+      `/ngan-sach?du_an=hapas` vẫn chạy). `du_an` thuộc bên khác `ben` (đổi Bên mà không JS) -> tổng
+      quan bên `ben`.
+    - `ben` thấy được, không dự án -> tổng quan bên.
+    - Không tham số: bên đầu tiên có dự án; bên đó đúng một dự án thì vào thẳng dự án.
+    - Tham số sai / ngoài phạm vi: như không tham số nhưng dừng ở tổng quan bên (không tự mở dự án
+      — giống trước: `?du_an=khong-co` không hiện chi tiết dự án nào, không lộ dự án bên khác)."""
+    ben_q, du_an_q = str(ben_q or ""), str(du_an_q or "")
+    if du_an_q:
+        d = next((x for x in ds if x["ma"] == du_an_q), None)
+        if d and (not ben_q or d.get("don_vi") == ben_q):
+            return d.get("don_vi"), d
+    if ben_q and any(b["ma"] == ben_q for b in cac_ben):
+        return ben_q, None
+    b = next((x for x in cac_ben if x.get("so_du_an")), cac_ben[0] if cac_ben else None)
+    if not b:
+        return None, None
+    cua = [x for x in ds if x.get("don_vi") == b["ma"]]
+    return b["ma"], (cua[0] if len(cua) == 1 and not (ben_q or du_an_q) else None)
+
+
 def _so_trang(s, mac_dinh: int = 1) -> int:
     try:
         return min(max(1, int(str(s or mac_dinh))), 10_000)
@@ -1779,7 +1804,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         # cộng các dự án trong phạm vi — không lộ ngân sách / chi tiêu từng dự án của bên khác.
         ds = await _ds_doc(nguoi)
         da_tieu = await _k(app.state.kho.da_tieu_thang)
-        du_an = _chon_du_an(ds, request.query_params.get("du_an"))
+        # Ngân sách tháng của bên (25/10/2026): mọi bên (trần hiệu lực của dự án gồm phần còn của
+        # bên), khối bên chỉ hiện bên người này thấy (`_ben_thay`).
+        ns_ben = await _ngan_sach_ben()
+        # Chọn Bên → Dự án (25/10/2026, chủ dự án): thanh lọc hai ô; không dự án = tổng quan bên.
+        ds_ben = await _ben_chon(nguoi, ns_ben, ds)
+        ben, du_an = _chon_ben_du_an(ds_ben, ds, request.query_params.get("ben"),
+                                     request.query_params.get("du_an"))
         tong_nguoi = nguoi
         nguoi = _theo_du_an(nguoi, du_an)
         trang = _so_trang(request.query_params.get("trang"))
@@ -1797,9 +1828,6 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             except LoiKho:
                 snap = None
         dat_lai = CP._vn((snap or {}).get("chu_ky_den"))
-        # Ngân sách tháng của bên (25/10/2026): mọi bên (trần hiệu lực của dự án gồm phần còn của
-        # bên), khối "Ngân sách theo bên" chỉ hiện bên người này thấy (`_ben_thay`).
-        ns_ben = await _ngan_sach_ben()
         khoi = []
         dong = []
         for d in ds:
@@ -1828,9 +1856,11 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     lan_cuoi = None
             # Mọi số của dự án — Mark (`hoi_dashboard_tool._chi_phi`) gọi đúng hàm này. Nguồn theo
             # số bài Mark thật sự lấy sau khi co theo nhịp đăng (18/10/2026).
-            ben = CP.ben_cua(d, ns_ben)
+            ben_d = CP.ben_cua(d, ns_ben)
+            con_trong = (round(max(0.0, float(ben_d["tran"]) - float(
+                ben_d.get("tong_tran_du_an") or 0)), 2) if ben_d else 0.0)
             k = CP.khoi_ngan_sach(d, tieu, tran_pf, nguon, await _nhip_dang(d["ma"]), luot_gan,
-                                  cac_lich, lan_cuoi, dat_lai, bay_gio, ben)
+                                  cac_lich, lan_cuoi, dat_lai, bay_gio, ben_d)
             khoi.append((d, k))
             db, bang, dl, dp = k["du_bao"], k["bang"], k["lich"], k["do_phu"]
             tran = db["tran"]
@@ -1854,11 +1884,15 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                          "do_phu": {**dp, "noi": CS.noi_tu_hanh_dong(hd_dp)},
                          # Ngân sách bên còn trống (25/10/2026): phần chưa chia cho dự án nào —
                          # trần dự án này đặt được tối đa = trần đang đặt + phần đó.
+                         # 25/10/2026 (chủ dự án): thêm tổng trần dự án của bên + `toi_da` = trần
+                         # dự án này đặt được tối đa (dòng "Bên …" đầu khối + gợi ý cạnh ô trần).
                          "ben_ns": ({"ten": (ns_ben.get(d.get("don_vi")) or {}).get("ten"),
-                                     "tran": ben["tran"],
-                                     "con_trong": round(max(0.0, float(ben["tran"]) - float(
-                                         ben.get("tong_tran_du_an") or 0)), 2)}
-                                    if ben else None),
+                                     "tran": ben_d["tran"],
+                                     "tong_tran_du_an": float(ben_d.get("tong_tran_du_an") or 0),
+                                     "con_trong": con_trong,
+                                     "toi_da": round(float(d.get("tran_usd_thang") or 0)
+                                                     + con_trong, 2)}
+                                    if ben_d else None),
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
@@ -1867,14 +1901,31 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         cac_ben = CP.ngan_sach_cac_ben({m: x for m, x in ns_ben.items() if m in thay},
                                        [(d, k) for d, k in khoi if d.get("don_vi") in thay], goi)
 
+        # Tổng quan bên (25/10/2026): MỘT thẻ cho bên đang chọn — cùng phép tính khối bên cũ
+        # (`ngan_sach_cac_ben`); bên chưa có dòng ngân sách (kho cũ) thì cộng từ các dự án.
+        cua_ben = [(d, k) for d, k in khoi if ben and d.get("don_vi") == ben]
+        the_ben = None
+        if ben:
+            ten_ben = next((b["ten"] for b in ds_ben if b["ma"] == ben), ben)
+            x_ben = ns_ben.get(ben) or {
+                "ma": ben, "ten": ten_ben, "tran": None, "so_du_an": len(cua_ben),
+                "tong_tran_du_an": sum(float(d.get("tran_usd_thang") or 0) for d, _ in cua_ben),
+                "da_tieu": sum(float(da_tieu.get(d["ma"], 0.0)) for d, _ in cua_ben)}
+            the_ben = CP.ngan_sach_cac_ben({ben: x_ben}, cua_ben, goi)["ben"][0]
+
         def url_luot(so: int, ma=(du_an or {}).get("ma")) -> str:
-            """-> liên kết trang `so` của Lịch sử lượt quét cho macro `phan_trang` (23/10/2026)."""
-            return _url("/ngan-sach", du_an=ma, trang=so if so > 1 else "") + "#ns-ls"
+            """-> liên kết trang `so` của Lịch sử lượt quét cho macro `phan_trang` (23/10/2026;
+            25/10/2026 giữ cả bên)."""
+            return _url("/ngan-sach", ben=ben, du_an=ma, trang=so if so > 1 else "") + "#ns-ls"
+        dong = [an_chi_tiet(_theo_du_an(tong_nguoi, x), [x], ("sua_boi",))[0] for x in dong]
         return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi, url_luot=url_luot,
                       goi_mot_phan=not tong_nguoi["la_quan_tri"], cac_ben=cac_ben,
                       sua_ben=tong_nguoi["la_quan_tri"], co_cot_ben=bool(ns_ben),
-                      dong=[an_chi_tiet(_theo_du_an(tong_nguoi, x), [x], ("sua_boi",))[0]
-                            for x in dong], du_an=du_an,
+                      ds_ben=ds_ben, ben=ben, the_ben=the_ben,
+                      ten_ben=the_ben["ten"] if the_ben else "",
+                      dong_ben=[x for x in dong if ben and x.get("don_vi") == ben],
+                      ma_sua={x["ma"] for x in ds if PQ.sua_duoc(tong_nguoi["q"], x)},
+                      dong=dong, du_an=du_an,
                       luot=an_chi_tiet(nguoi, luot, ("ghi_chu", "ghi_chu_dai"), ("loi",)),
                       tong=tong,
                       trang=trang, so_trang=so_trang, thang=bay_gio.strftime("%m/%Y"),
@@ -1892,6 +1943,21 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         except LoiKho:
             return {}
 
+    async def _ben_chon(nguoi: dict, ns_ben: dict, ds: list[dict]) -> list[dict]:
+        """Ô "Bên" của trang Ngân sách (25/10/2026): quản trị viên — mọi bên (kể cả bên chưa có dự
+        án); người khác — bên mình có quyền (như `_ben_thay`). -> [{ma, ten, so_du_an}] xếp theo
+        tên. Tên lấy từ `ngan_sach_ben`, kho cũ không có thì `cac_don_vi`, cuối cùng mã viết hoa."""
+        ten = {m: x.get("ten") or m for m, x in ns_ben.items()}
+        if not ten:
+            ten = {b["ma"]: b.get("ten") or b["ma"] for b in await _cac_don_vi()}
+        if nguoi["la_quan_tri"]:
+            ma = set(ten) | {d.get("don_vi") for d in ds if d.get("don_vi")}
+        else:
+            ma = set((nguoi.get("q") or {}).get("ben") or {})
+        dem = collections.Counter(d.get("don_vi") for d in ds)
+        return sorted(({"ma": m, "ten": ten.get(m) or m.upper(), "so_du_an": dem.get(m, 0)}
+                       for m in ma), key=lambda b: (str(b["ten"]).lower(), b["ma"]))
+
     def _ben_thay(nguoi: dict, ns_ben: dict) -> set[str]:
         """Bên có khối ngân sách trên trang: quản trị viên — mọi bên; người khác — bên mình có quyền
         (quản lý / chỉ xem), chỉ đọc."""
@@ -1906,7 +1972,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         nguoi, form = await _sua(request)
         if not nguoi["la_quan_tri"]:
             raise _Cam("Chỉ quản trị viên mới đặt được ngân sách bên.")
-        ve = "/ngan-sach#ns-ben"
+        # 25/10/2026: về đúng tổng quan bên vừa sửa (thẻ bên có id ns-ben).
+        ve = _url("/ngan-sach", ben=ma) + "#ns-ben"
         try:
             o = (form.get("tran_usd_thang") or "").strip()
             usd = NL.tran_usd(o) if o else None
@@ -1919,6 +1986,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                        f"Đã bỏ ngân sách bên {ma} — chỉ còn trần từng dự án và gói Apify."
                        if usd is None else
                        f"Đã đặt ngân sách bên {ma}: {usd_vn(usd)} USD/tháng.")
+
+    async def _ve_ngan_sach(nguoi: dict, ma: str) -> str:
+        """Đường quay về sau Lưu của dự án `ma` (25/10/2026): giữ `ben` + `du_an` để thông báo hiện
+        trên đúng màn dự án. Dự án ngoài phạm vi / không có -> chỉ `du_an` (trang tự lùi về tổng
+        quan bên, không lộ dự án có hay không)."""
+        d = await _du_an_doc(nguoi, ma)
+        return _url("/ngan-sach", ben=(d or {}).get("don_vi"), du_an=ma)
 
     @app.get("/ngan-sach/luot/{luot_id}/ghi-chu")
     async def ghi_chu_luot(request: Request, luot_id: int):
@@ -1939,7 +2013,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/ngan-sach/{ma}")
     async def ngan_sach_luu(request: Request, ma: str):
         nguoi, form = await _sua(request)
-        ve = _url("/ngan-sach", du_an=ma)
+        ve = await _ve_ngan_sach(nguoi, ma)
         try:
             await _du_an_sua(nguoi, ma)
             usd = NL.tran_usd(form.get("tran_usd_thang"))
@@ -1953,7 +2027,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         """Đợt 2e: cấu hình thu thập TỪNG nền tảng (tìm từ khoá + cào bình luận) và trần tháng
         trong MỘT biểu mẫu. Ô bỏ trống = theo mặc định chung của dự án."""
         nguoi, form = await _sua(request)
-        ve = _url("/ngan-sach", du_an=ma)
+        ve = await _ve_ngan_sach(nguoi, ma)
         try:
             await _du_an_sua(nguoi, ma)
             cu_du_an = await _k(app.state.kho.doc_du_an, ma) or {}
@@ -2085,7 +2159,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/ngan-sach/{ma}/tu-khoa")
     async def ngan_sach_tu_khoa(request: Request, ma: str):
         nguoi, form = await _sua(request)
-        ve = _url("/ngan-sach", du_an=ma)
+        ve = await _ve_ngan_sach(nguoi, ma)
         try:
             d = await _du_an_sua(nguoi, ma)
             bat = form.get("tk_bat") == "1"
@@ -2102,7 +2176,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
     @app.post("/ngan-sach/{ma}/binh-luan")
     async def ngan_sach_binh_luan(request: Request, ma: str):
         nguoi, form = await _sua(request)
-        ve = _url("/ngan-sach", du_an=ma)
+        ve = await _ve_ngan_sach(nguoi, ma)
         try:
             await _du_an_sua(nguoi, ma)
             bat = form.get("bl_bat") == "1"
