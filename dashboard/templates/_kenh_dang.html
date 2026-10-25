@@ -19,6 +19,8 @@
 <section class="the-khoi cach-duoi qc-kenh" id="kenh" aria-labelledby="qc-kenh-tieu-de">
   <div class="muc">
     <h2 class="muc__ten" id="qc-kenh-tieu-de">Theo kênh đăng</h2>
+    {#- 25/10/2026 (chủ dự án): nhãn khoảng mờ như các mục khác của trang. #}
+    <span class="qc-khoang-nhan" data-o="nhan-khoang">{{ d.tu[8:10] }}/{{ d.tu[5:7] }} – {{ d.den[8:10] }}/{{ d.den[5:7] }}</span>
     <button type="button" class="goi-y" data-goi-y="Kênh đăng là danh tính quảng cáo chạy dưới tên. TikTok: tài khoản chính chủ hoặc tài khoản KOC cho phép chạy bài (Spark Ads). Meta: Trang Facebook đứng tên quảng cáo; Instagram đi kèm ghi ở dòng phụ. {% if kd.do_phu is not none %}{{ kd.do_phu|pt_vn }} {{ 'chi tiêu' if theo_chi else 'lượt hiển thị' }} trong phạm vi đang lọc đã biết kênh; {% endif %}quảng cáo chưa xác định kênh gộp vào “Chưa xác định” (kênh đọc mỗi sáng cùng lượt đồng bộ, quảng cáo mới có kênh từ hôm sau). Một kênh chạy ở nhiều tài khoản quảng cáo, hoặc cùng một tài khoản TikTok chạy dưới nhiều cách cấp quyền (gắn thẳng tài khoản quảng cáo / qua Business Center), được cộng chung một dòng. Tìm theo tên kênh, @username hoặc tên tài khoản quảng cáo (không cần gõ dấu); bấm tiêu đề cột để xếp, bấm lại để đổi chiều. 20 kênh một trang.">i</button>
     {% if kd.do_phu is not none %}<span class="muc__phai muc__phu">{{ kd.do_phu|pt_vn }} {{ 'chi tiêu' if theo_chi else 'hiển thị' }} đã biết kênh</span>{% endif %}
   </div>
@@ -32,6 +34,7 @@
     {% for x in d.tk_ds %}<input type="hidden" name="tk" value="{{ x }}">{% endfor %}
     {% for k, v in (('tim', d.bang.tim), ('cd', d.bang.cd), ('sap', d.sap if d.sap != (sap_xep|first)[0] else ''), ('chieu', 'tang' if d.bang.chieu == 'tang' else '')) if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
     {% if d.ten_cd %}{% for l in LOAI_TEN_CD %}{% for x in d.ten_cd[l[0]] %}<input type="hidden" name="{{ l[1] }}" value="{{ x }}">{% endfor %}{% endfor %}{% endif %}
+    {% if d.so_sanh != 'truoc' %}<input type="hidden" name="ss" value="{{ d.so_sanh }}">{% endif %}
     <label class="o qc-bang-loc__tim">Tìm kênh
       <input type="search" name="kt" value="{{ lk.tim }}" maxlength="{{ TIM_TOI_DA }}" placeholder="Tên kênh, @username, tài khoản QC" autocomplete="off">
     </label>

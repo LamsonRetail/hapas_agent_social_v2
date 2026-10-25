@@ -1,0 +1,51 @@
+/* Ô "Khoảng ngày" dùng chung (25/10/2026, chủ dự án): lịch hai tháng do khoang_ngay.js vẽ (.kn-*).
+   Chỉ token của giao_dien.css → sáng / tối tự theo. Khoảng đang chọn tô nền nhạt, hai đầu tô đặc;
+   ngày sau ngày cuối có số mờ + không bấm được; ngày cuối có số có chấm nhỏ. Điện thoại: ô 44px. */
+.kn-dau { display: flex; align-items: flex-start; gap: 4px; }
+.kn-thang-ds { display: flex; flex: 1 1 auto; gap: 24px; min-width: 0; justify-content: center; }
+.kn-thang { min-width: 0; }
+.kn-thang__ten { margin: 6px 0 8px; text-align: center; font-size: 13.5px; font-weight: 700; color: var(--chu); }
+.kn-chuyen {
+  flex: none; width: 32px; height: 32px; margin-top: 2px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--chu-phu); font: inherit; font-size: 20px; line-height: 1; cursor: pointer;
+}
+.kn-chuyen:hover:not(:disabled) { background: var(--be-mat-2); color: var(--chu); }
+.kn-chuyen:disabled { opacity: .35; cursor: default; }
+.kn-chuyen:focus-visible { outline: 2px solid var(--nhan); outline-offset: 1px; }
+.kn-luoi { border-collapse: separate; border-spacing: 0 2px; table-layout: fixed; width: auto; margin: 0; }
+.kn-luoi th, .kn-luoi td { border: 0; background-clip: padding-box; }
+.kn-luoi thead th { background: transparent; white-space: nowrap; }
+.kn-luoi th { width: 34px; padding: 0 0 4px; font-size: 11.5px; font-weight: 600; color: var(--chu-mo); text-align: center; }
+.kn-o {
+  position: relative; width: 34px; height: 34px; padding: 0; text-align: center; vertical-align: middle;
+  font-size: 13px; font-variant-numeric: tabular-nums; color: var(--chu); cursor: pointer; user-select: none;
+}
+.kn-o--ngoai { cursor: default; }
+.kn-o:not(.kn-o--ngoai):not(.kn-o--khoa):hover { background: var(--be-mat-2); border-radius: 8px; }
+.kn-o--trong { background: var(--nhan-nen); color: var(--nhan-dam); }
+.kn-o--trong:not(.kn-o--ngoai):hover { border-radius: 0; }
+.kn-o--xem.kn-o--trong { background: color-mix(in srgb, var(--nhan-nen) 70%, transparent); }
+.kn-o--dau { border-radius: 8px 0 0 8px; }
+.kn-o--cuoi { border-radius: 0 8px 8px 0; }
+.kn-o--dau.kn-o--cuoi { border-radius: 8px; }
+.kn-o--dau, .kn-o--cuoi { background: var(--nhan); color: #fff; font-weight: 700; }
+.kn-o--dau:hover, .kn-o--cuoi:hover { background: var(--nhan) !important; }
+.kn-o--khoa { color: var(--chu-mo); opacity: .4; cursor: not-allowed; }
+.kn-o--moc::after {
+  content: ""; position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
+  background: currentColor; opacity: .7;
+}
+.kn-o:focus-visible { outline: 2px solid var(--nhan); outline-offset: -2px; border-radius: 8px; z-index: 1; }
+.kn-bao--loi { color: var(--loi) !important; }
+@media (prefers-color-scheme: dark) {
+  .kn-o--dau, .kn-o--cuoi { color: #0b1120; }
+}
+@media (max-width: 640px) {
+  .kn-luoi th { width: 44px; }
+  .kn-o { width: 44px; height: 44px; font-size: 14px; }
+  .kn-chuyen { width: 44px; height: 44px; }
+}
+@media (forced-colors: active) {
+  .kn-o--trong, .kn-o--dau, .kn-o--cuoi { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .kn-o--khoa { color: GrayText; }
+}

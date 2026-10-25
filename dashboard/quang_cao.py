@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import numbers
 import re
 import unicodedata
 
@@ -578,6 +579,151 @@ def doi_pt(nay, truoc):
 def khoang_truoc(tu: datetime.date, den: datetime.date) -> tuple[datetime.date, datetime.date]:
     n = (den - tu).days + 1
     return tu - datetime.timedelta(days=n), tu - datetime.timedelta(days=1)
+
+
+# ───────────────────────────── khoảng ngày + so sánh (25/10/2026) ─────────────────────────────
+#: 25/10/2026 (chủ dự án): MỘT ô "Khoảng ngày" (khoảng nhanh + lịch hai tháng) và ô "So sánh với".
+#: Mốc cuối mặc định của mọi khoảng nhanh = NGÀY CUỐI CÓ SỐ của phạm vi đang xem (kẹp ở hôm qua) —
+#: đồng bộ trễ một hôm thì "30 ngày" vẫn là 30 ngày CÓ SỐ, không có đuôi 0 giả. `ss=` trên URL.
+SO_SANH = {"truoc": "Kỳ liền trước", "thang_truoc": "Cùng kỳ tháng trước",
+           "khong": "Không so sánh"}
+SO_SANH_MAC_DINH = "truoc"
+
+
+def doc_so_sanh(qp) -> str:
+    """Tham số `ss` → một mã của SO_SANH; lạ / thiếu → kỳ liền trước (không báo lỗi, như `sap`)."""
+    ss = str((qp or {}).get("ss") or "")
+    return ss if ss in SO_SANH else SO_SANH_MAC_DINH
+
+
+def _ngay(x) -> datetime.date | None:
+    if x is None or x == "":
+        return None
+    if isinstance(x, datetime.datetime):
+        return x.date()
+    if isinstance(x, datetime.date):
+        return x
+    try:
+        return datetime.date.fromisoformat(str(x)[:10])
+    except ValueError:
+        return None
+
+
+def ngay_moc(ngay_cuoi, hom_qua: datetime.date) -> datetime.date:
+    """Mốc cuối của khoảng mặc định / khoảng nhanh: ngày cuối có số, không quá hôm qua (hôm nay chưa
+    hết ngày — số luôn thấp giả). Chưa có số nào → hôm qua."""
+    d = _ngay(ngay_cuoi)
+    return min(d, hom_qua) if d else hom_qua
+
+
+def _cuoi_thang(d: datetime.date) -> datetime.date:
+    sau = (d.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+    return sau - datetime.timedelta(days=1)
+
+
+def lui_thang(d: datetime.date, n: int = 1) -> datetime.date:
+    """Lùi `n` tháng, kẹp ngày vào tháng đích: 31/03 → 28/02 (29/02 năm nhuận), 31/05 → 30/04."""
+    t = d.year * 12 + (d.month - 1) - n
+    dau = datetime.date(t // 12, t % 12 + 1, 1)
+    return dau.replace(day=min(d.day, _cuoi_thang(dau).day))
+
+
+def ky_so_sanh(tu: datetime.date, den: datetime.date,
+               ss: str = SO_SANH_MAC_DINH) -> tuple[datetime.date, datetime.date] | None:
+    """Kỳ so sánh theo `ss`: `truoc` = kỳ liền trước cùng độ dài; `thang_truoc` = cùng ngày của
+    tháng trước (kẹp ngày cuối tháng; `den` là NGÀY CUỐI THÁNG thì kỳ trước cũng hết tháng —
+    01–28/02 so với trọn 01–31/01, không cụt 28/01); `khong` → None (không tính số kỳ trước)."""
+    if ss == "khong":
+        return None
+    if ss == "thang_truoc":
+        t1 = _cuoi_thang(lui_thang(den)) if den == _cuoi_thang(den) else lui_thang(den)
+        return min(lui_thang(tu), t1), t1
+    return khoang_truoc(tu, den)
+
+
+def _ngan(d: datetime.date) -> str:
+    return f"{d.day:02d}/{d.month:02d}"
+
+
+def khoang_nhanh(moc: datetime.date, hom_qua: datetime.date) -> list[dict]:
+    """Khoảng nhanh của ô "Khoảng ngày", MỌI khoảng hết ở `moc` (ngày cuối có số, `ngay_moc`) —
+    trừ "Tháng trước" (trọn tháng trước tháng của mốc). Khoảng một ngày tên "Hôm qua" khi mốc là
+    hôm qua, không thì "Ngày DD/MM" (đồng bộ trễ: không gọi ngày khác là hôm qua)."""
+    def lui(n: int) -> datetime.date:
+        return moc - datetime.timedelta(days=n - 1)
+    dau_thang = moc.replace(day=1)
+    cuoi_truoc = dau_thang - datetime.timedelta(days=1)
+    ds = [("1", "Hôm qua" if moc == hom_qua else f"Ngày {_ngan(moc)}", moc, moc),
+          ("7", "7 ngày", lui(7), moc), ("14", "14 ngày", lui(14), moc),
+          ("30", "30 ngày", lui(30), moc), ("thang_nay", "Tháng này", dau_thang, moc),
+          ("thang_truoc", "Tháng trước", cuoi_truoc.replace(day=1), cuoi_truoc),
+          ("90", "90 ngày", lui(90), moc)]
+    return [{"ma": m, "nhan": n, "tu": a.isoformat(), "den": b.isoformat()} for m, n, a, b in ds]
+
+
+# ─── Theo ngày → theo tuần / tháng (25/10/2026): ≤ 31 ngày theo ngày, ≤ 120 theo tuần (ISO, thứ
+# Hai đầu tuần), dài hơn theo tháng. Máy chủ gộp (một phép tính, có bộ thử); qc.js chỉ chọn. ───
+DON_VI_BD = {"ngay": "Ngày", "tuan": "Tuần", "thang": "Tháng"}
+#: Không cộng được qua ngày (người duy nhất) — ô gộp để None, không cộng sai.
+_KHONG_CONG_KY = frozenset({"reach"})
+
+
+def don_vi_mac_dinh(so_ngay: int) -> str:
+    return "ngay" if so_ngay <= 31 else ("tuan" if so_ngay <= 120 else "thang")
+
+
+def don_vi_co(tu: datetime.date, den: datetime.date) -> list[str]:
+    """Các đơn vị đáng chọn: tuần khi > 7 ngày, tháng khi khoảng sang ≥ 2 tháng — luôn gồm đơn vị
+    mặc định."""
+    so = (den - tu).days + 1
+    co = {"ngay", don_vi_mac_dinh(so)}
+    if so > 7:
+        co.add("tuan")
+    if (tu.year, tu.month) != (den.year, den.month):
+        co.add("thang")
+    return [k for k in DON_VI_BD if k in co]
+
+
+def _dau_ky(d: datetime.date, don_vi: str) -> datetime.date:
+    if don_vi == "tuan":
+        return d - datetime.timedelta(days=d.weekday())
+    if don_vi == "thang":
+        return d.replace(day=1)
+    return d
+
+
+def gop_ky(rows: list[dict], don_vi: str, tu: datetime.date, den: datetime.date) -> list[dict]:
+    """Dòng theo ngày (`ngay` ISO + cột số, có thể có `nen_tang`) → dòng theo tuần / tháng: CỘNG cột
+    số (tỉ lệ không có ở đây — trang tính lại từ tổng), `reach` để None. Mỗi kỳ cắt theo [tu, den]:
+    `ngay` / `den` = ngày đầu / cuối của kỳ TRONG khoảng, `so_ngay` = số ngày đó (tuần đầu / cuối có
+    thể thiếu ngày — chú giải ghi rõ). Nhãn "Tuần DD/MM" (ngày đầu trong khoảng) / "Tháng MM/YYYY".
+    Có `nen_tang` thì gộp riêng từng nền tảng. Giữ thứ tự thời gian."""
+    if don_vi not in ("tuan", "thang"):
+        return [dict(r) for r in rows]
+    nhom: dict = {}
+    for r in rows:
+        d = _ngay(r.get("ngay"))
+        if d is None or not tu <= d <= den:
+            continue
+        dau = _dau_ky(d, don_vi)
+        k = (dau, r.get("nen_tang"))
+        x = nhom.get(k)
+        if x is None:
+            a = max(dau, tu)
+            b = min(dau + datetime.timedelta(days=6) if don_vi == "tuan" else _cuoi_thang(dau), den)
+            x = nhom[k] = {"ngay": a.isoformat(), "den": b.isoformat(), "so_ngay": (b - a).days + 1,
+                           "nhan": (f"Tuần {_ngan(a)}" if don_vi == "tuan"
+                                    else f"Tháng {dau.month:02d}/{dau.year}")}
+            if r.get("nen_tang") is not None:
+                x["nen_tang"] = r["nen_tang"]
+        for c, v in r.items():
+            if c in ("ngay", "nen_tang", "den", "so_ngay", "nhan"):
+                continue
+            if c in _KHONG_CONG_KY:
+                x[c] = None
+            elif isinstance(v, numbers.Number) and not isinstance(v, bool):
+                x[c] = (x.get(c) or 0) + v
+    return [nhom[k] for k in sorted(nhom, key=lambda k: (k[0], str(k[1] or "")))]
 
 
 SAP_XEP = {"chi": "chi", "hien_thi": "hien_thi", "view": "view_video", "follow": "follow"}

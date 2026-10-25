@@ -518,7 +518,8 @@ def test_trang_bang_chon_ba_dong_va_tom_tat():
                 "60 ký tự", "KHÔNG áp vào Khán giả"):
         assert chu in gy, chu
     tom = t.split('class="qc-loc-khung__gia-tri"')[1].split("</span>")[0]
-    assert "· chứa tất cả: LOYALTY, 20/10 · không chứa: reach" in tom
+    # 25/10/2026 (chủ dự án): tóm tắt điện thoại gọn — số điều kiện, không chép từ khoá.
+    assert tom.endswith("· 7 ngày · 2 điều kiện")
     # Không lọc: "Mọi chiến dịch", ô trống, không thẻ, không ghi chú Khán giả.
     t = c.get(f"/quang-cao?{Q}").text
     assert 'data-trong="Mọi chiến dịch">Mọi chiến dịch</span>' in t
