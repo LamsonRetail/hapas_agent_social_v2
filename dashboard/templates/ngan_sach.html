@@ -14,99 +14,147 @@
 {% set muc = namespace(so=0) %}
 <div class="dau-muc">
   <div class="dau-muc__chu">
-    <div class="dau-muc__tieu-de"><h1>Ngân sách theo dõi — tháng {{ thang }}</h1><button type="button" class="goi-y" data-goi-y="Mark áp trần thấp hơn giữa trần dự án và trần platform, chạm trần thì dừng quét — và gói Apify của tài khoản (khối Gói Apify) chặn trước nếu nhỏ hơn. Đã tiêu là tiền Apify thật tháng này; dự báo = số lượt còn lại × trung vị chi thật các lượt gần nhất (chưa đủ 3 lượt thì chỉ phần nguồn). YouTube miễn phí, trần mỗi lượt đặt ở console platform.">i</button></div>
+    <div class="dau-muc__tieu-de"><h1>Ngân sách theo dõi — tháng {{ thang }}</h1><button type="button" class="goi-y" data-goi-y="Ba tầng tiền: gói Apify chung (trần thật của cả tài khoản) > ngân sách tháng của bên (quản trị viên đặt) > trần tháng từng dự án (quản lý của bên chia trong ngân sách bên). Chọn Bên để xem ngân sách cả bên, chọn thêm Dự án để chỉnh trần và cấu hình thu thập của dự án đó. Mark áp trần thấp nhất, chạm trần thì dừng quét. Đã tiêu là tiền Apify thật tháng này; dự báo = số lượt còn lại × trung vị chi thật các lượt gần nhất (chưa đủ 3 lượt thì chỉ phần nguồn). YouTube miễn phí, trần mỗi lượt đặt ở console platform.">i</button></div>
   </div>
-  {% if dong|length > 1 %}
-  <form method="get" action="/ngan-sach" class="hang">
-    <label class="o">Dự án
-      <select name="du_an">
-        {% for x in dong %}<option value="{{ x.ma }}"{% if chon and x.ma == chon.ma %} selected{% endif %}>{{ x.ten }} ({{ x.ma }})</option>{% endfor %}
-      </select>
-    </label>
-    <button class="nut nut--nhe" type="submit">Xem</button>
-  </form>
-  {% endif %}
 </div>
 
-{#- ── Ngân sách theo bên (25/10/2026, chủ dự án: "chia ngân sách theo từng bên, mỗi dự án có 1 ngân
-    sách riêng"). Ba tầng: gói Apify chung (trần thật) > ngân sách tháng của bên (chỉ quản trị viên
-    đặt) > trần tháng dự án (quản lý của bên chia trong ngân sách bên). Quản trị viên thấy mọi bên
-    và sửa tại chỗ; người khác thấy bên của mình, chỉ đọc. ── #}
-{% if cac_ben and cac_ben.ben %}
+{#- ── Chọn Bên → Dự án (25/10/2026, chủ dự án: "nên để chọn bên, chọn dự án cụ thể rồi mới nhảy ra ngân
+    sách cụ thể"). Hai ô nối nhau: Dự án chỉ có dự án của bên đang chọn + "— Tổng quan bên —" (du_an
+    rỗng). Đổi là xem luôn (ngan_sach.js; đổi Bên thì bỏ dự án); không JS: nút Xem — máy chủ thấy dự án
+    không thuộc bên mới thì về tổng quan bên. ── #}
+{% if ds_ben %}
+<form method="get" action="/ngan-sach" class="the-khoi ns-loc" id="ns-loc" aria-label="Chọn bên và dự án" data-o="ns-loc">
+  <label class="o ns-loc__ben">Bên
+    <select name="ben" data-o="chon-ben">{% for b in ds_ben %}<option value="{{ b.ma }}"{% if b.ma == ben %} selected{% endif %}>{{ b.ten }}</option>{% endfor %}</select>
+  </label>
+  <label class="o ns-loc__du-an">Dự án
+    <select name="du_an" data-o="chon-du-an">
+      <option value="">— Tổng quan bên —</option>
+      {% for x in dong_ben %}<option value="{{ x.ma }}"{% if chon and x.ma == chon.ma %} selected{% endif %}>{{ x.ten }}{% if not x.dang_bat %} (đang tắt){% endif %}</option>{% endfor %}
+    </select>
+  </label>
+  <button class="nut nut--nhe ns-loc__xem" type="submit" data-loc-xem>Xem</button>
+</form>
+{% endif %}
+
+{#- Gói Apify chung (25/10/2026): một dải nhỏ đầu trang ở MỌI màn — trần thật của cả tài khoản, dùng
+    chung mọi bên. #}
+{% if cac_ben and cac_ben.tran_goi is not none %}
+<div class="ns-ben__goi{% if cac_ben.vuot_goi %} ns-ben__goi--canh{% endif %}" data-o="ben-goi">
+  <span>Gói Apify chung <b>{{ cac_ben.tran_goi|usd_vn }}</b> USD/chu kỳ</span>
+  <span class="mo" aria-hidden="true">·</span>
+  <span>Tổng ngân sách các bên <b>{{ cac_ben.tong_ben|usd_vn }}</b> USD/tháng</span>
+  <button type="button" class="goi-y{% if cac_ben.vuot_goi %} goi-y--canh{% endif %}" data-goi-y="Gói Apify là trần THẬT của cả tài khoản, dùng chung mọi bên — hết gói thì Mark dừng mọi bên, dù ngân sách bên còn. Gói tính theo chu kỳ Apify (đặt lại ngày 20), ngân sách bên theo tháng lịch.{% if goi_mot_phan %} Tổng chỉ cộng các bên bạn thấy.{% endif %}">i</button>
+  {% if cac_ben.vuot_goi %}<span class="the the--canh">⚠ tổng ngân sách bên vượt gói {{ (cac_ben.tong_ben - cac_ben.tran_goi)|usd_vn }} USD — chỉ cảnh báo; gói hết trước thì Mark dừng</span>{% endif %}
+</div>
+{% endif %}
+
+{% macro tinh_trang_ben(b) %}{% if b.muc == 'vuot' %}<span class="the the--loi">vượt ngân sách</span>{% elif b.muc == 'gan' %}<span class="the the--canh">gần hết</span>{% elif b.muc == 'tot' %}<span class="the the--tot">trong ngân sách</span>{% else %}<span class="the">chưa đặt</span>{% endif %}{% endmacro %}
+{% macro thanh_ben(b) %}<span class="ns-ben__thanh" role="img" aria-label="Đã tiêu {{ b.pt|pt_vn }}, dự báo {{ b.pt_du_bao|pt_vn }} ngân sách bên"><span class="ns-ben__bao" style="width: {{ '%.1f'|format(b.pt_du_bao) }}%"></span><span class="ns-ben__tieu ns-ben__tieu--{{ b.muc }}" style="width: {{ '%.1f'|format(b.pt) }}%"></span></span>{% endmacro %}
+
+{% if not ds_ben and not dong %}
+<section class="the-khoi cach-duoi"><p class="trong">Chưa có dự án nào.</p></section>
+{% endif %}
+
+{#- ── Tổng quan bên (25/10/2026): bên đã chọn, chưa chọn dự án — MỘT thẻ ngân sách của bên này (quản
+    trị viên sửa tại chỗ, cùng route + kiểm như #104; người khác chỉ đọc), rồi các dự án của bên dạng
+    dòng gọn; quản trị viên có thêm khối gập "Tất cả các bên" để so sánh (chỉ đọc). ── #}
+{% if the_ben and not chon %}
+{% set bb = the_ben %}
 <section class="the-khoi cach-duoi ns-ben" aria-labelledby="ns-ben-tieu-de" id="ns-ben">
   {% set muc.so = muc.so + 1 %}
   <div class="muc">
     <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
-    <h2 class="muc__ten" id="ns-ben-tieu-de">Ngân sách theo bên</h2>
-    <button type="button" class="goi-y" data-goi-y="Ngân sách tháng của từng bên do quản trị viên đặt; quản lý của bên chia ngân sách đó cho các dự án (tổng trần các dự án không vượt ngân sách bên — máy chủ chặn khi lưu). Mark dừng quét mọi dự án của bên khi cả bên đã tiêu chạm ngân sách bên, kể cả khi trần dự án còn. Trống = chưa đặt: chỉ trần dự án và gói Apify. Đã tiêu là tiền Apify thật tháng này (giờ VN) của các dự án đang thuộc bên; dự báo cộng dự báo cả tháng của từng dự án.">i</button>
-    <span class="muc__phai muc__phu">{% if sua_ben %}quản trị viên sửa được{% else %}chỉ xem — quản trị viên đặt{% endif %}</span>
+    <h2 class="muc__ten" id="ns-ben-tieu-de">Ngân sách bên {{ bb.ten }}</h2>
+    <button type="button" class="goi-y" data-goi-y="Ngân sách tháng của bên do quản trị viên đặt; quản lý của bên chia ngân sách đó cho các dự án (tổng trần các dự án không vượt ngân sách bên — máy chủ chặn khi lưu). Mark dừng quét mọi dự án của bên khi cả bên đã tiêu chạm ngân sách bên, kể cả khi trần dự án còn. Trống = chưa đặt: chỉ trần dự án và gói Apify. Đã tiêu là tiền Apify thật tháng này (giờ VN) của các dự án đang thuộc bên; dự báo cộng dự báo cả tháng của từng dự án.">i</button>
+    <span class="muc__phai">{{ tinh_trang_ben(bb) }}</span>
   </div>
-  {% if cac_ben.tran_goi is not none %}
-  <div class="ns-ben__goi{% if cac_ben.vuot_goi %} ns-ben__goi--canh{% endif %}" data-o="ben-goi">
-    <span>Gói Apify chung <b>{{ cac_ben.tran_goi|usd_vn }}</b> USD/chu kỳ</span>
-    <span class="mo" aria-hidden="true">·</span>
-    <span>Tổng ngân sách các bên <b>{{ cac_ben.tong_ben|usd_vn }}</b> USD/tháng</span>
-    <button type="button" class="goi-y{% if cac_ben.vuot_goi %} goi-y--canh{% endif %}" data-goi-y="Gói Apify là trần THẬT của cả tài khoản, dùng chung mọi bên — hết gói thì Mark dừng mọi bên, dù ngân sách bên còn. Gói tính theo chu kỳ Apify (đặt lại ngày 20), ngân sách bên theo tháng lịch.{% if goi_mot_phan %} Tổng chỉ cộng các bên bạn thấy.{% endif %}">i</button>
-    {% if cac_ben.vuot_goi %}<span class="the the--canh">⚠ tổng ngân sách bên vượt gói {{ (cac_ben.tong_ben - cac_ben.tran_goi)|usd_vn }} USD — chỉ cảnh báo; gói hết trước thì Mark dừng</span>{% endif %}
+  <div class="ns-tong__than">
+    <div>
+      <div class="ns-nhan">Ngân sách tháng của bên{% if not sua_ben %} <span class="mo nho">· chỉ xem — quản trị viên đặt</span>{% endif %}</div>
+      {% if sua_ben %}
+      <form method="post" action="/ngan-sach-ben/{{ bb.ma|urlencode }}" class="ns-ben__form">
+        <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
+        <input type="number" name="tran_usd_thang" min="0" max="1000" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(bb.tran) if bb.tran is not none else '' }}" placeholder="chưa đặt" aria-label="Ngân sách tháng của bên {{ bb.ten }}, USD (trống = bỏ ngân sách bên)">
+        <span class="ns-tren">USD/tháng</span>
+        <button class="nut" type="submit">Lưu</button>
+      </form>
+      {% elif bb.tran is not none %}<div class="ns-so-lon"><b>{{ bb.tran|usd_vn }}</b> <span class="ns-tren">USD/tháng</span></div>
+      {% else %}<div class="ns-so-lon mo">chưa đặt</div>{% endif %}
+      {% if bb.tran is not none %}
+      <div class="ns-ben-the__thanh">{{ thanh_ben(bb) }}<span class="nho">đã tiêu {{ bb.pt|pt_vn }} · dự báo {{ bb.pt_du_bao|pt_vn }}</span></div>
+      <p class="ns-ben-con" data-o="ben-con-trong">Còn trống cho dự án mới: <b>{{ bb.con_trong|usd_vn }}</b> USD <button type="button" class="goi-y" data-goi-y="Phần ngân sách bên chưa chia cho dự án nào = ngân sách bên {{ bb.tran|usd_vn }} − tổng trần {{ bb.so_du_an }} dự án {{ bb.tong_tran_du_an|usd_vn }} USD. Dự án mới (hoặc tăng trần dự án đang có) chỉ lấy được trong phần này.">i</button></p>
+      {% else %}
+      <p class="ns-ben-con">Chưa đặt ngân sách bên — mỗi dự án chỉ theo trần riêng của nó và gói Apify.</p>
+      {% endif %}
+    </div>
+    <dl class="ns-o-so">
+      <div><dt>Tổng trần dự án</dt><dd class="ns-gia-tri">{{ bb.tong_tran_du_an|usd_vn }}</dd><dd class="ns-phu">USD · {{ bb.so_du_an }} dự án</dd></div>
+      <div><dt>Đã tiêu tháng này</dt><dd class="ns-gia-tri">{{ bb.da_tieu|usd_vn }}</dd><dd class="ns-phu">USD</dd></div>
+      <div><dt>Dự báo cả tháng</dt><dd class="ns-gia-tri{% if bb.muc == 'vuot' %} chu-loi{% endif %}">{{ bb.du_bao|usd_vn }}</dd><dd class="ns-phu">USD{% if bb.tran is not none %} / {{ bb.tran|usd_vn }} ngân sách{% endif %}</dd></div>
+      <div><dt>Còn trống cho dự án mới</dt>{% if bb.con_trong is not none %}<dd class="ns-gia-tri">{{ bb.con_trong|usd_vn }}</dd><dd class="ns-phu">USD</dd>{% else %}<dd class="ns-gia-tri mo">—</dd><dd class="ns-phu">chưa đặt ngân sách bên</dd>{% endif %}</div>
+    </dl>
   </div>
+</section>
+
+<section class="the-khoi cach-duoi" aria-labelledby="ns-ben-da-tieu-de" id="ns-ben-du-an">
+  {% set muc.so = muc.so + 1 %}
+  <div class="muc">
+    <span class="muc__so" aria-hidden="true">{{ muc.so }}</span>
+    <h2 class="muc__ten" id="ns-ben-da-tieu-de">Dự án của bên {{ bb.ten }}</h2>
+    <button type="button" class="goi-y" data-goi-y="Trần dự án là trần tháng quản lý của bên đặt; khi ngân sách bên còn ít hơn phần còn của trần dự án thì trần hiệu lực thấp hơn (ghi dưới số). Mức dùng = đã tiêu (đặc) và dự báo cả tháng (sọc) so với trần hiệu lực. Bấm “Xem / chỉnh” để mở ngân sách và cấu hình thu thập của dự án.">i</button>
+    <span class="muc__phai muc__phu">{{ dong_ben|length }} dự án</span>
+  </div>
+  {% if dong_ben %}
+  <div class="cuon-ngang">
+  <table class="ns-ben-da" data-phan-trang="20" data-phan-trang-nhan="dự án">
+    <thead><tr><th>Dự án</th><th class="so">Trần dự án</th><th class="so">Đã tiêu</th><th class="so">Dự báo cả tháng</th><th>Mức dùng</th><th>Tình trạng</th><th><span class="dai-qc__an">Mở</span></th></tr></thead>
+    <tbody>
+    {% for x in dong_ben %}
+      {% set lk = '/ngan-sach?ben=' ~ (bb.ma|urlencode) ~ '&du_an=' ~ (x.ma|urlencode) %}
+      <tr data-du-an="{{ x.ma }}">
+        <th scope="row" data-nhan="Dự án"><a href="{{ lk }}">{{ x.ten }}</a> <span class="mo nho">{{ x.ma }}</span>{% if not x.dang_bat %} <span class="the">đang tắt</span>{% endif %}</th>
+        <td class="so" data-nhan="Trần dự án">{{ (x.tran_usd_thang or 0)|usd_vn }}{% if (x.du_bao.tran - (x.tran_usd_thang or 0)|float)|abs > 0.005 %}<div class="mo nho">hiệu lực {{ x.du_bao.tran|usd_vn }}</div>{% endif %}</td>
+        <td class="so" data-nhan="Đã tiêu">{{ x.da_tieu|usd_vn }}</td>
+        <td class="so{% if x.du_bao.vuot %} chu-loi{% endif %}" data-nhan="Dự báo">{{ x.du_bao.du_bao_thang|usd_vn }}</td>
+        <td data-nhan="Mức dùng"><span class="ns-ben__thanh" role="img" aria-label="Đã tiêu {{ x.pt|pt_vn }}, dự báo {{ x.pt_du_bao|pt_vn }} trần hiệu lực"><span class="ns-ben__bao" style="width: {{ '%.1f'|format(x.pt_du_bao) }}%"></span><span class="ns-ben__tieu{% if x.du_bao.vuot %} ns-ben__tieu--vuot{% endif %}" style="width: {{ '%.1f'|format(x.pt) }}%"></span></span><span class="nho">{{ x.pt|pt_vn }}</span></td>
+        <td data-nhan="Tình trạng">{% if x.du_bao.vuot %}<span class="the the--loi">vượt {{ x.du_bao.vuot_usd|usd_vn }} USD</span>{% else %}<span class="the the--tot">trong trần</span>{% endif %}</td>
+        <td class="ns-ben-da__mo"><a class="nut nut--nhe" href="{{ lk }}">{{ 'Xem / chỉnh' if x.ma in ma_sua else 'Xem' }}</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="trong">Bên này chưa có dự án nào.</p>
   {% endif %}
+</section>
+
+{% if sua_ben and cac_ben and cac_ben.ben|length > 1 %}
+{#- Quản trị viên (25/10/2026): bảng mọi bên cũ, CHỈ ĐỌC — sửa ngân sách trong tổng quan từng bên. #}
+<details class="the-khoi cach-duoi ns-cac-ben" id="ns-cac-ben">
+  {% set muc.so = muc.so + 1 %}
+  <summary class="muc"><span class="muc__so" aria-hidden="true">{{ muc.so }}</span><span class="muc__ten">Tất cả các bên</span><span class="muc__phai muc__phu">{{ cac_ben.ben|length }} bên · chỉ xem, để so sánh</span></summary>
   <div class="cuon-ngang">
   <table class="ns-ben__bang" data-phan-trang="20" data-phan-trang-nhan="bên">
     <thead><tr><th>Bên</th><th>Ngân sách bên (USD/tháng)</th><th class="so">Tổng trần dự án</th><th class="so">Đã tiêu tháng này</th><th class="so">Dự báo cả tháng</th><th>Mức dùng</th><th>Tình trạng</th></tr></thead>
     <tbody>
     {% for b in cac_ben.ben %}
-      <tr data-ben="{{ b.ma }}">
-        <th scope="row" data-nhan="Bên">{{ b.ten }} <span class="mo nho">{{ b.so_du_an }} dự án</span></th>
-        <td data-nhan="Ngân sách bên">
-          {% if sua_ben %}
-          <form method="post" action="/ngan-sach-ben/{{ b.ma|urlencode }}" class="ns-ben__form">
-            <input type="hidden" name="csrf" value="{{ nguoi.csrf }}">
-            <input type="number" name="tran_usd_thang" min="0" max="1000" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(b.tran) if b.tran is not none else '' }}" placeholder="chưa đặt" aria-label="Ngân sách tháng của bên {{ b.ten }}, USD (trống = bỏ ngân sách bên)">
-            <button class="nut nut--nhe" type="submit">Lưu</button>
-          </form>
-          {% elif b.tran is not none %}<b>{{ b.tran|usd_vn }}</b>
-          {% else %}<span class="mo">chưa đặt</span>{% endif %}
-        </td>
+      <tr data-ben="{{ b.ma }}"{% if b.ma == ben %} aria-current="true"{% endif %}>
+        <th scope="row" data-nhan="Bên"><a href="/ngan-sach?ben={{ b.ma|urlencode }}">{{ b.ten }}</a> <span class="mo nho">{{ b.so_du_an }} dự án</span></th>
+        <td data-nhan="Ngân sách bên">{% if b.tran is not none %}<b>{{ b.tran|usd_vn }}</b>{% else %}<span class="mo">chưa đặt</span>{% endif %}</td>
         <td class="so" data-nhan="Tổng trần dự án">{{ b.tong_tran_du_an|usd_vn }}{% if b.con_trong is not none %}<div class="mo nho">còn trống {{ b.con_trong|usd_vn }}</div>{% endif %}</td>
         <td class="so" data-nhan="Đã tiêu">{{ b.da_tieu|usd_vn }}</td>
         <td class="so{% if b.muc == 'vuot' %} chu-loi{% endif %}" data-nhan="Dự báo">{{ b.du_bao|usd_vn }}</td>
-        <td data-nhan="Mức dùng">{% if b.tran is not none %}<span class="ns-ben__thanh" role="img" aria-label="Đã tiêu {{ b.pt|pt_vn }}, dự báo {{ b.pt_du_bao|pt_vn }} ngân sách bên"><span class="ns-ben__bao" style="width: {{ '%.1f'|format(b.pt_du_bao) }}%"></span><span class="ns-ben__tieu ns-ben__tieu--{{ b.muc }}" style="width: {{ '%.1f'|format(b.pt) }}%"></span></span><span class="nho">{{ b.pt|pt_vn }}</span>{% else %}<span class="mo">—</span>{% endif %}</td>
-        <td data-nhan="Tình trạng">{% if b.muc == 'vuot' %}<span class="the the--loi">vượt ngân sách</span>{% elif b.muc == 'gan' %}<span class="the the--canh">gần hết</span>{% elif b.muc == 'tot' %}<span class="the the--tot">trong ngân sách</span>{% else %}<span class="the">chưa đặt</span>{% endif %}</td>
+        <td data-nhan="Mức dùng">{% if b.tran is not none %}{{ thanh_ben(b) }}<span class="nho">{{ b.pt|pt_vn }}</span>{% else %}<span class="mo">—</span>{% endif %}</td>
+        <td data-nhan="Tình trạng">{{ tinh_trang_ben(b) }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
-</section>
+</details>
 {% endif %}
-
-{% if not dong %}
-<section class="the-khoi cach-duoi"><p class="trong">Chưa có dự án nào.</p></section>
-{% endif %}
-
-{% if dong|length > 1 or (dong and not chon) %}
-<section class="the-khoi cach-duoi" aria-labelledby="ns-cac-du-an">
-  {% set muc.so = muc.so + 1 %}
-  <div class="muc"><span class="muc__so" aria-hidden="true">{{ muc.so }}</span><h2 class="muc__ten" id="ns-cac-du-an">Tất cả dự án</h2></div>
-  <div class="cuon-ngang">
-  {#- 23/10/2026 (chủ dự án: mọi bảng dài một kiểu thanh trang): 20 dự án một trang (chung.js PhanTrang). #}
-  <table class="ns-cac-du-an" data-phan-trang="20" data-phan-trang-nhan="dự án">
-    <thead><tr><th>Dự án</th><th class="so">Trần hiệu lực</th><th class="so">Đã tiêu</th><th class="so">Dự báo cả tháng</th><th>Tình trạng</th></tr></thead>
-    <tbody>
-    {#- dự án đang xem đứng đầu (23/10/2026) — trang 1 của thanh trang luôn có dòng đang chọn #}
-    {% for x in ([chon] if chon else []) + (dong|rejectattr('ma', 'equalto', chon.ma if chon else none)|list) %}
-      <tr{% if chon and x.ma == chon.ma %} aria-current="true"{% endif %}>
-        <td><a href="/ngan-sach?du_an={{ x.ma|urlencode }}">{{ x.ten }}</a> <span class="mo nho">{{ x.ma }}</span>{% if not x.dang_bat %} <span class="the">đang tắt</span>{% endif %}</td>
-        <td class="so">{{ x.du_bao.tran|usd_vn }}</td>
-        <td class="so">{{ x.da_tieu|usd_vn }}</td>
-        <td class="so{% if x.du_bao.vuot %} chu-loi{% endif %}">{{ x.du_bao.du_bao_thang|usd_vn }}</td>
-        <td>{% if x.du_bao.vuot %}<span class="the the--loi">vượt {{ x.du_bao.vuot_usd|usd_vn }} USD</span>{% else %}<span class="the the--tot">trong trần</span>{% endif %}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
-</section>
 {% endif %}
 
 {% if chon %}
@@ -128,6 +176,13 @@
     <span class="muc__phai">{% if db.vuot %}<button type="button" class="the the--loi ns-pill ns-pill--nut" id="ns-mo-canh-bao" aria-expanded="false" aria-controls="ns-canh-bao" title="Xem cảnh báo và cách xử lý"><span class="ns-pill__tam" aria-hidden="true">⚠</span>Dự báo vượt trần {{ db.vuot_usd|usd_vn }} USD<span class="ns-pill__mui" aria-hidden="true">▾</span></button>
     {% else %}<span class="the the--tot ns-pill">Trong trần</span>{% endif %}</span>
   </div>
+  {#- Bối cảnh bên (25/10/2026, chủ dự án): ngân sách bên + tổng trần các dự án + phần còn trống, một
+      dòng gọn đầu khối dự án; bấm tên bên về tổng quan bên. #}
+  {% if ben %}
+  <p class="ns-ben-ngu-canh" data-o="ben-ngu-canh"><a href="/ngan-sach?ben={{ ben|urlencode }}">Bên {{ ten_ben }}</a>:
+    {% if d.ben_ns %}ngân sách <b>{{ d.ben_ns.tran|usd_vn }}</b> · tổng trần dự án <b>{{ d.ben_ns.tong_tran_du_an|usd_vn }}</b> · còn trống <b>{{ d.ben_ns.con_trong|usd_vn }}</b> USD
+    {% else %}chưa đặt ngân sách bên{% if the_ben %} · tổng trần dự án <b>{{ the_ben.tong_tran_du_an|usd_vn }}</b> USD{% endif %}{% endif %}</p>
+  {% endif %}
   <div class="ns-tong__than">
     <div>
       <div class="ns-nhan">Dự báo cả tháng</div>
@@ -234,7 +289,7 @@
 {% set tran_luot = goi.tran_luot if goi and goi.co and goi.tran_luot is not none else none %}
 {% if tran_luot is not none and so_luot > 0 %}{% set toi_da = [toi_da, d.da_tieu + so_luot * tran_luot]|min %}{% endif %}
 {% set du_luot = ((db.tran - d.da_tieu - nguon_con - web_con - dp_con) / so_luot) if so_luot > 0 else 0 %}
-<section class="the-khoi cach-duoi ns-ch" aria-labelledby="ns-ch-tieu-de">
+<section class="the-khoi cach-duoi ns-ch" aria-labelledby="ns-ch-tieu-de" id="ns-ch">
   {% if ql %}
   <script type="application/json" id="ns-du-lieu">{{ {"hang_so": hang_so, "tu_khoa": d.tu_khoa or [], "ten": d.ten,
     "hashtag_rieng": tag_rieng, "bo_tu": d.bo_tu or {},
@@ -506,7 +561,7 @@
     <div class="ns-chan__trai">
     <label class="o">Trần tháng dự án (USD)
       <input type="number" name="tran_usd_thang" min="0" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(d.tran_usd_thang|float) }}"{% if d.ben_ns %} aria-describedby="ns-ben-con"{% endif %} required></label>
-    {% if d.ben_ns %}<p class="ns-ben-con nho" id="ns-ben-con">Ngân sách bên còn trống: <b data-o="ben-con">{{ d.ben_ns.con_trong|usd_vn }}</b> USD <button type="button" class="goi-y" data-goi-y="Ngân sách bên {{ d.ben_ns.ten }} {{ d.ben_ns.tran|usd_vn }} USD/tháng, phần chưa chia cho dự án nào {{ d.ben_ns.con_trong|usd_vn }} USD — trần dự án này đặt được tối đa {{ (d.tran_usd_thang|float + d.ben_ns.con_trong)|usd_vn }} USD. Hạ trần luôn được; muốn hơn thì nhờ quản trị viên tăng ngân sách bên hoặc hạ trần dự án khác của bên.">i</button></p>{% endif %}
+    {% if d.ben_ns %}<p class="ns-ben-con nho" id="ns-ben-con"><span class="ns-ben-con__toi-da" data-o="ben-toi-da">tối đa <b>{{ d.ben_ns.toi_da|usd_vn }}</b> USD</span> · Ngân sách bên còn trống: <b data-o="ben-con">{{ d.ben_ns.con_trong|usd_vn }}</b> USD <button type="button" class="goi-y" data-goi-y="Ngân sách bên {{ d.ben_ns.ten }} {{ d.ben_ns.tran|usd_vn }} USD/tháng, phần chưa chia cho dự án nào {{ d.ben_ns.con_trong|usd_vn }} USD — trần dự án này đặt được tối đa {{ d.ben_ns.toi_da|usd_vn }} USD. Hạ trần luôn được; muốn hơn thì nhờ quản trị viên tăng ngân sách bên hoặc hạ trần dự án khác của bên.">i</button></p>{% endif %}
     {% set g_dp = goc.get('do_phu') if goc.get('do_phu') is mapping else {} %}
     <div class="ns-dp" role="group" aria-labelledby="ns-dp-nhan">
       <span class="ns-dp__nhan" id="ns-dp-nhan">Kiểm độ phủ (2 lần/tuần)</span>

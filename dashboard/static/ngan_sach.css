@@ -211,8 +211,35 @@ form[data-ban="1"] .ns-luu .nut:not(.nut--nhe) { box-shadow: 0 0 0 3px var(--nha
 .ns-ben-con b { color: var(--chu); font-variant-numeric: tabular-nums; }
 .ns-ben-con--vuot, .ns-ben-con--vuot b { color: var(--loi); }
 
-/* ─── tổng quan nhiều dự án ─── */
-.ns-cac-du-an tr[aria-current="true"] td, .ns-cac-du-an tr[aria-current="true"] th { background: var(--nhan-nen); }
+/* ─── chọn Bên → Dự án (25/10/2026, chủ dự án): hai ô nối nhau, cùng kiểu thanh lọc Quảng cáo ─── */
+.the-khoi.ns-loc {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; margin: 0 0 12px;
+  background: var(--be-mat-3); border-color: var(--vien-3); box-shadow: none; padding: 14px 16px;
+}
+.ns-loc label.o { flex: 0 1 260px; min-width: 150px; }
+.ns-loc label.o.ns-loc__ben { flex: 0 1 180px; min-width: 120px; }
+.ns-loc label.o select { width: 100%; }
+.ns-loc__xem[hidden] { display: none; }
+
+/* ─── tổng quan bên (25/10/2026): một thẻ bên + dự án của bên dạng dòng gọn ─── */
+.ns-ben .ns-ben__form { margin-top: 6px; flex-wrap: wrap; }
+.ns-ben .ns-ben__form input[type="number"] { width: 130px; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ns-ben .ns-so-lon b { font-weight: inherit; }
+.ns-ben-the__thanh { display: flex; align-items: center; margin-top: 12px; }
+.ns-ben-the__thanh .ns-ben__thanh { flex: 1 1 auto; max-width: 320px; height: 10px; }
+.ns-ben-da td, .ns-ben-da th { vertical-align: middle; }
+.ns-ben-da th[scope="row"] { font-weight: 650; }
+.ns-ben-da__mo { text-align: right; white-space: nowrap; }
+.ns-ben-da__mo .nut { min-height: 30px; padding: 4px 12px; font-size: 13px; }
+.ns-cac-ben > summary { cursor: pointer; list-style: none; margin-bottom: 0; }
+.ns-cac-ben > summary::-webkit-details-marker { display: none; }
+.ns-cac-ben[open] > summary { margin-bottom: 12px; }
+.ns-ben__bang tr[aria-current="true"] td, .ns-ben__bang tr[aria-current="true"] th { background: var(--nhan-nen); }
+/* dòng bối cảnh bên đầu khối dự án */
+.ns-ben-ngu-canh { margin: -4px 0 14px; font-size: 13.5px; color: var(--chu-phu); }
+.ns-ben-ngu-canh b { color: var(--chu); font-variant-numeric: tabular-nums; }
+.ns-ben-ngu-canh a { font-weight: 650; }
+.ns-ben-con__toi-da b { color: var(--chu); }
 
 /* ─── lịch sử ─── */
 .ns-ls td { vertical-align: middle; }
@@ -274,7 +301,7 @@ form[data-ban="1"] .ns-luu .nut:not(.nut--nhe) { box-shadow: 0 0 0 3px var(--nha
   .ns-mau > span { grid-column: 1 / -1; }
   .ns-mau__nut { padding: 4px 8px; }
   /* Ngân sách theo bên (25/10/2026): mỗi bên một thẻ — tên + tình trạng; ô ngân sách; ba số; thanh */
-  .ns-ben .cuon-ngang { overflow: visible; }
+  .ns-ben .cuon-ngang, .ns-cac-ben .cuon-ngang, #ns-ben-du-an .cuon-ngang { overflow: visible; }
   .ns-ben__bang thead { display: none; }
   .ns-ben__bang, .ns-ben__bang tbody { display: block; }
   .ns-ben__bang tr {
@@ -295,4 +322,28 @@ form[data-ban="1"] .ns-luu .nut:not(.nut--nhe) { box-shadow: 0 0 0 3px var(--nha
   .ns-ben__bang tr > :nth-child(7)::before { content: none; }
   .ns-ben__form input[type="number"] { flex: 1; width: auto; min-width: 0; }
   .ns-ben__thanh { width: calc(100% - 56px); }
+  /* Dự án của bên (25/10/2026): mỗi dự án một thẻ — tên + tình trạng; ba số; thanh + nút mở */
+  .ns-ben-da thead { display: none; }
+  .ns-ben-da, .ns-ben-da tbody { display: block; }
+  .ns-ben-da tr {
+    display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--ke);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas: "ten ten tt" "tran tieu bao" "thanh thanh mo";
+  }
+  .ns-ben-da tbody tr:hover > * { background: transparent; }
+  .ns-ben-da th, .ns-ben-da td { display: block; padding: 0; border: 0; min-width: 0; text-align: left; background: transparent; }
+  .ns-ben-da td[data-nhan]::before { content: attr(data-nhan); display: block; font-size: 11px; color: var(--chu-mo); margin-bottom: 2px; }
+  .ns-ben-da tr > :nth-child(1) { grid-area: ten; font-size: 14px; }
+  .ns-ben-da tr > :nth-child(2) { grid-area: tran; }
+  .ns-ben-da tr > :nth-child(3) { grid-area: tieu; }
+  .ns-ben-da tr > :nth-child(4) { grid-area: bao; }
+  .ns-ben-da tr > :nth-child(5) { grid-area: thanh; align-self: center; }
+  .ns-ben-da tr > :nth-child(5)::before { content: none; }
+  .ns-ben-da tr > :nth-child(6) { grid-area: tt; justify-self: end; }
+  .ns-ben-da tr > :nth-child(6)::before { content: none; }
+  .ns-ben-da tr > :nth-child(7) { grid-area: mo; justify-self: end; }
+  .ns-ben-da .ns-ben__thanh { width: calc(100% - 56px); }
+  .ns-ben-da__mo .nut { min-height: 40px; }
+  .ns-loc label.o, .ns-loc label.o.ns-loc__ben { flex: 1 1 140px; }
+  .ns-loc label.o select { min-height: 44px; font-size: 16px; }
 }

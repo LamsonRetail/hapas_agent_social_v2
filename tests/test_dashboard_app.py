@@ -2401,16 +2401,20 @@ def test_ngan_sach_cong_tac_tim_rong_hon_threads_chi_doi_bat():
         "bat": False, "so_bai": 50}
 
 
-def test_ngan_sach_nhieu_du_an_co_bang_tong_quan():
+def test_ngan_sach_nhieu_du_an_chon_ben_roi_du_an():
+    """25/10/2026 (chủ dự án): bỏ bảng "Tất cả dự án" — bên nhiều dự án thì mở tổng quan bên (mỗi dự án
+    một dòng + liên kết chọn), chọn dự án mới ra chi tiết."""
     kho = GiaKho()
     kho.du_an["moi"] = {**kho.du_an["hapas"], "ma": "moi", "ten": "Dự án mới", "tran_usd_thang": 0.0}
     _, c, _ = tao(kho)
     dang_nhap(c, XEM)
+    t = c.get("/ngan-sach").text
+    assert "Tất cả dự án" not in t and "ns-tong__than" in t and 'id="ns-tong-tieu-de"' not in t
+    assert 'href="/ngan-sach?ben=hapas&amp;du_an=moi"' in t
     t = c.get("/ngan-sach?du_an=hapas").text
-    assert "Tất cả dự án" in t and 'href="/ngan-sach?du_an=moi"' in t
-    assert t.count('aria-current="true"') == 1 and t.count("ns-tong__than") == 1   # chi tiết: dự án chọn
+    assert 'id="ns-tong-tieu-de"' in t and 'value="moi"' in t and "Lịch sử lượt quét" in t
     t = c.get("/ngan-sach?du_an=khong-co").text
-    assert "Tất cả dự án" in t and "ns-tong__than" not in t and "Lịch sử lượt quét" not in t
+    assert 'id="ns-tong-tieu-de"' not in t and "Lịch sử lượt quét" not in t
 
 
 def test_binh_luan_so_sach_va_loc_theo_loai():

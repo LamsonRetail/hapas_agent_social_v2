@@ -27,8 +27,9 @@ def test_ngan_sach_lich_su_dung_thanh_trang_chung_giu_du_an():
     dang_nhap(c, XEM)
     t = c.get("/ngan-sach?du_an=hapas&trang=2").text
     nav = t.split('aria-label="Trang của bảng lịch sử lượt quét"')[1].split("</nav>")[0]
-    assert 'href="/ngan-sach?du_an=hapas#ns-ls" rel="prev"' in nav          # trang 1: không ?trang=1
-    assert 'href="/ngan-sach?du_an=hapas&amp;trang=3#ns-ls" rel="next"' in nav
+    # 25/10/2026: liên kết giữ cả bên (chọn Bên → Dự án)
+    assert 'href="/ngan-sach?ben=hapas&amp;du_an=hapas#ns-ls" rel="prev"' in nav   # trang 1: không ?trang=1
+    assert 'href="/ngan-sach?ben=hapas&amp;du_an=hapas&amp;trang=3#ns-ls" rel="next"' in nav
     assert 'aria-current="page"><span class="dai-qc__an">Trang </span>2<' in nav
     assert "Trang 2/3 · 45 lượt" in nav and 'id="ns-ls"' in t
     assert "Cũ hơn" not in t and "Mới hơn" not in t
@@ -43,13 +44,14 @@ def test_ngan_sach_bang_dai_phan_trang_va_ghi_chu_vao_dau_i():
         kho.du_an[f"da{i}"] = {**kho.du_an["hapas"], "ma": f"da{i}", "ten": f"Dự án {i}"}
     dang_nhap(c, QL)
     t = c.get("/ngan-sach?du_an=hapas").text                  # hapas có nguồn → có bảng dự báo
-    for bang in ("ns-cac-du-an", "ns-bang", "ns-bang-pt"):
+    for bang in ("ns-bang", "ns-bang-pt"):
         assert re.search(rf'<table class="{bang}" data-phan-trang="20" data-phan-trang-nhan="[^"]+"',
                          t), bang
-    # dự án đang xem là dòng đầu (trang 1 của thanh trang luôn có nó)
-    than = c.get("/ngan-sach?du_an=da7").text.split('<table class="ns-cac-du-an"')[1].split("</tbody>")[0]
-    assert than.index('aria-current="true"') < than.index("<td>") + 5
-    assert than.index("du_an=da7") < than.index("du_an=hapas")
+    # 25/10/2026: bảng "Tất cả dự án" bỏ — dự án của bên là dòng gọn ở tổng quan bên, cùng thanh trang
+    assert "ns-cac-du-an" not in t
+    ben = c.get("/ngan-sach?ben=hapas").text
+    assert '<table class="ns-ben-da" data-phan-trang="20" data-phan-trang-nhan="dự án">' in ben
+    assert ben.count('<tr data-du-an=') == 25
     # không còn đoạn ghi chú dưới tiêu đề; chú giải "viền đứt" + mô tả Nâng cao nằm trong (i)
     assert 'class="ghi-chu' not in t and "ns-vd" not in t
     assert re.search(r'data-goi-y="Ô trống, viền đứt = theo mặc định dự án', t)
