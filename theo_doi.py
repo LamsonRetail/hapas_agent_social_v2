@@ -538,6 +538,30 @@ def _viec_dang_do(ma: str) -> dict | None:
     return None
 
 
+def con_thang(ma: str, du_an: dict, da_tieu: float, them: float = 0.0) -> dict:
+    """Phần còn của THÁNG cho dự án `ma` — trần dự án VÀ ngân sách tháng của bên (25/10/2026, chủ
+    dự án: "chia ngân sách theo từng bên, mỗi dự án có 1 ngân sách riêng"), cùng luật trang Ngân
+    sách (`dashboard.chi_phi.tran_hieu_luc`). `them`: tiền đã tiêu mà kho chưa thấy (phần xong của
+    việc đang chạy) — cộng cả vào đã tiêu của dự án lẫn của bên. Gói Apify chung kiểm riêng
+    (`quet_lon.ngan_sach`). Lỗi kho → `K.LoiKho` (không quét — không bao giờ đoán là còn tiền).
+    -> {"con", "tran" (hiệu lực), "tran_du_an", "ben" (None khi bên chưa đặt ngân sách),
+    "chan_boi" ("ben" | "du_an"), "het_ly_do" (câu khi `con` < 0,01)}."""
+    from dashboard import chi_phi as CP
+    them = float(them or 0)
+    tieu = float(da_tieu or 0) + them
+    ben = K.ngan_sach_ben(ma)
+    b = ({**ben, "da_tieu": float(ben.get("da_tieu") or 0) + them}
+         if ben and ben.get("tran") is not None else None)
+    tran_da = float(du_an.get("tran_usd_thang") or 0)
+    tran = CP.tran_hieu_luc(tran_da, None, b, tieu)
+    chan = CP.tran_chan_boi(tran_da, None, b, tieu)
+    het = (f"hết ngân sách tháng của bên {b.get('ten') or b.get('ma')} ({_usd(b['da_tieu'])}/"
+           f"{_usd(float(b['tran']))} USD cả bên)" if chan == "ben" else
+           f"hết ngân sách tháng của dự án ({_usd(tieu)}/{_usd(tran_da)} USD)")
+    return {"con": max(0.0, tran - tieu), "tran": tran, "tran_du_an": tran_da, "ben": b,
+            "chan_boi": chan, "het_ly_do": het}
+
+
 def ke_hoach(ma: str, moi_nguon: bool = False) -> dict:
     """Đọc kho + console, quyết định lượt này quét gì. Không gọi Apify, không tốn tiền.
     `moi_nguon` (lịch quét tự động kiểu chiến dịch, 15/10/2026): quét MỌI nguồn đang theo dõi,
@@ -545,8 +569,9 @@ def ke_hoach(ma: str, moi_nguon: bool = False) -> dict:
 
     -> {"loi": câu báo, "ma_loi": mã} khi không chạy được (mã: khong_co_du_an, du_an_tat,
     dang_chay, kho_loi, khong_co_gi, het_ngan_sach, khong_quet_duoc); ngược lại {"du_an",
-    "nguon", "bo_qua" (nguồn không quét lượt này + lý do), "uoc_tinh", "con_thang",
-    "tran_thang", "da_tieu"}."""
+    "nguon", "bo_qua" (nguồn không quét lượt này + lý do), "uoc_tinh", "con_thang" (phần còn
+    theo `con_thang` — gồm ngân sách bên, 25/10/2026), "tran_thang" (trần dự án), "da_tieu",
+    "ben" (ngân sách bên hoặc None), "het_ly_do"}."""
     try:
         du_an = K.doc_du_an(ma)
         if not du_an:
@@ -565,13 +590,14 @@ def ke_hoach(ma: str, moi_nguon: bool = False) -> dict:
         toi_han = K.nguon_dang_theo_doi(ma) if moi_nguon else K.nguon_toi_han(ma)
         dem = K.dem_nguon(ma) if not toi_han else {}
         da_tieu = K.da_tieu_thang(ma)
+        ct = con_thang(ma, du_an, da_tieu)
     except K.LoiKho as e:
         return {"ma_loi": "kho_loi", "loi": f"Kho lắng nghe chưa dùng được: {e}."}
+    tien = {"con_thang": ct["con"], "tran_thang": ct["tran_du_an"], "da_tieu": da_tieu,
+            "ben": ct["ben"], "het_ly_do": ct["het_ly_do"]}
     if not toi_han and tk_co_bat(du_an):
         # Đợt 2c: tìm theo từ khoá là việc của cả dự án — chạy được dù chưa nguồn nào tới hạn.
-        tran = float(du_an["tran_usd_thang"] or 0)
-        return {"du_an": du_an, "nguon": [], "bo_qua": [], "uoc_tinh": {},
-                "con_thang": max(0.0, tran - da_tieu), "tran_thang": tran, "da_tieu": da_tieu}
+        return {"du_an": du_an, "nguon": [], "bo_qua": [], "uoc_tinh": {}, **tien}
     if not toi_han:
         return {"ma_loi": "khong_co_gi",
                 "loi": (f"Chưa có nguồn nào của {du_an['ten']} tới hạn quét "
@@ -594,19 +620,17 @@ def ke_hoach(ma: str, moi_nguon: bool = False) -> dict:
     # Co số bài mỗi lần theo nhịp đăng (18/10/2026) TRƯỚC khi cắt theo ngân sách: nguồn rẻ đi thì
     # vừa ngân sách hơn.
     con_lai = _co_gian_nguon(ma, du_an, con_lai)
-    tran = float(du_an["tran_usd_thang"] or 0)
-    con_thang = max(0.0, tran - da_tieu)
-    giu, het_tien = _cat_theo_ngan_sach(con_lai, con_thang)
+    # Ngân sách bên (25/10/2026): phần còn = min(trần dự án, phần còn của bên) — `con_thang`.
+    giu, het_tien = _cat_theo_ngan_sach(con_lai, ct["con"])
     for n in het_tien:
-        bo_qua.append((n, f"hết ngân sách tháng của dự án ({_usd(da_tieu)}/{_usd(tran)} USD)"))
+        bo_qua.append((n, ct["het_ly_do"]))
     if not giu:
         ly = bo_qua[0][1] if bo_qua else "không có nguồn quét được"
         # `giu` rỗng: hoặc mọi nguồn còn lại đều vượt phần còn của tháng (het_tien), hoặc không
         # còn nguồn nào (nền tảng tắt / thiếu key).
         return {"ma_loi": "het_ngan_sach" if het_tien else "khong_quet_duoc",
                 "loi": f"Lượt theo dõi {du_an['ten']} không quét được nguồn nào: {ly}."}
-    return {"du_an": du_an, "nguon": giu, "bo_qua": bo_qua, "uoc_tinh": uoc_tinh(giu),
-            "con_thang": con_thang, "tran_thang": tran, "da_tieu": da_tieu}
+    return {"du_an": du_an, "nguon": giu, "bo_qua": bo_qua, "uoc_tinh": uoc_tinh(giu), **tien}
 
 
 # ───────────────────────────── lệnh ─────────────────────────────
@@ -705,10 +729,12 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None,
     if kh.get("loi"):
         return {"ok": False, "ma_loi": kh.get("ma_loi") or "loi", "cau": kh["loi"]}
     if lich is not None and kh["con_thang"] < 0.01:
-        # Lịch tự động KHÔNG chạy khi tháng của dự án đã hết (chat vẫn chạy được phần miễn phí).
+        # Lịch tự động KHÔNG chạy khi tháng của dự án — hoặc của BÊN (25/10/2026) — đã hết (chat
+        # vẫn chạy được phần miễn phí).
         return {"ok": False, "ma_loi": "het_ngan_sach",
-                "cau": (f"hết ngân sách tháng của dự án ({_usd(kh['da_tieu'])}/"
-                        f"{_usd(kh['tran_thang'])} USD)")}
+                "cau": kh.get("het_ly_do") or (
+                    f"hết ngân sách tháng của dự án ({_usd(kh['da_tieu'])}/"
+                    f"{_usd(kh['tran_thang'])} USD)")}
     import viec_nen
     u = uoc_giu_cho(kh, ma)
     phan, tong, dp_phan = u["phan"], u["tong"], u["dp_phan"]
@@ -761,6 +787,10 @@ def _tao_luot(ma: str, *, moi_nguon: bool, lich: dict | None,
            + (f" (gồm tới {_usd(dp_uoc)} USD kiểm độ phủ)" if dp_uoc else "")
            + "; ngân sách tháng "
            f"của dự án còn {_usd(kh['con_thang'])}/{_usd(kh['tran_thang'])} USD"
+           # Ngân sách bên (25/10/2026): phần còn ở trên đã kẹp theo bên — nói rõ bên còn bao nhiêu.
+           + (f" (bên {kh['ben'].get('ten') or kh['ben'].get('ma')} còn "
+              f"{_usd(max(0.0, float(kh['ben']['tran']) - float(kh['ben']['da_tieu'])))}/"
+              f"{_usd(float(kh['ben']['tran']))} USD)" if kh.get("ben") else "")
            # Gói Apify (18/10/2026): trần THẬT của cả tài khoản — trần dự án 30 USD mà gói FREE
            # còn 5 USD thì câu cũ "còn 14,56/30" làm người đọc tưởng còn ~10 lượt.
            + _cau_goi(hm) + ". Xong Mark nhắn kết quả vào đây.")
@@ -5147,7 +5177,9 @@ def _chay_viec(v) -> tuple[str, str]:
         # tiền các phần đã xong của việc này chưa nằm trong "đã tiêu tháng": trừ ở đây.
         da_xong = sum(float(ph.get("usd_so") or 0) for _, ph in v.cac_phan()
                       if ph.get("trang_thai") in _KET_PHAN)
-        con = max(0.0, float(du_an["tran_usd_thang"] or 0) - K.da_tieu_thang(ma) - da_xong)
+        # 25/10/2026: phần còn gồm ngân sách tháng của BÊN (đọc lại lúc chạy — dự án khác cùng bên
+        # có thể vừa tiêu), cùng luật `con_thang` của lúc lập kế hoạch.
+        con = con_thang(ma, du_an, K.da_tieu_thang(ma), da_xong)["con"]
         han = v.han_mono(_CHUA_GIAY_CUOI)
         for p in THU_TU:
             for ph in ((v.d.get("nen_tang") or {}).get(p) or {}).get("phan") or []:

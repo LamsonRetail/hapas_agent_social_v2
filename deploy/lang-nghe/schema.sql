@@ -57,10 +57,26 @@ SET ROLE lang_nghe_chu;
 CREATE TABLE IF NOT EXISTS don_vi (
   ma              TEXT PRIMARY KEY CHECK (ma ~ '^[a-z0-9][a-z0-9_-]{1,39}$'),
   ten             TEXT NOT NULL CHECK (length(ten) BETWEEN 1 AND 200),
-  tao_luc         TIMESTAMPTZ NOT NULL DEFAULT now()
+  tao_luc         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- 25/10/2026 (chủ dự án): ngân sách tháng của bên, chỉ quản trị viên đặt; NULL = chưa đặt.
+  tran_usd_thang  NUMERIC(8,2) CHECK (tran_usd_thang BETWEEN 0 AND 1000),
+  sua_luc         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sua_boi         TEXT
 );
 INSERT INTO don_vi (ma, ten) VALUES ('hapas', 'HAPAS'), ('matemade', 'MATEMADE')
   ON CONFLICT (ma) DO NOTHING;
+-- 25/10/2026 (chủ dự án: "chia ngân sách theo từng bên, mỗi dự án có 1 ngân sách riêng"): ba tầng
+-- tiền — gói Apify chung (trần thật) > ngân sách tháng của BÊN (cột này, chỉ quản trị viên đặt) >
+-- trần tháng của DỰ ÁN (du_an.tran_usd_thang, quản lý của bên đặt). Tổng trần các dự án của một bên
+-- không vượt ngân sách bên (dashboard kiểm trong giao dịch, khoá dòng bên). NULL = chưa đặt: không
+-- có tầng bên, Mark chạy như trước. DB đã có bảng thì thêm cột ở đây. Quyền: lang_nghe_web đã có
+-- INSERT, UPDATE cả bảng don_vi, mark đã có SELECT cả bảng — không cần GRANT theo cột.
+ALTER TABLE don_vi ADD COLUMN IF NOT EXISTS tran_usd_thang NUMERIC(8,2);
+ALTER TABLE don_vi DROP CONSTRAINT IF EXISTS don_vi_tran_usd_thang_check;
+ALTER TABLE don_vi ADD CONSTRAINT don_vi_tran_usd_thang_check
+  CHECK (tran_usd_thang BETWEEN 0 AND 1000);
+ALTER TABLE don_vi ADD COLUMN IF NOT EXISTS sua_luc TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE don_vi ADD COLUMN IF NOT EXISTS sua_boi TEXT;
 
 -- 1 dòng = 1 dự án/brand. `ma` là chữ gõ sau /theodoi (vd "hapas").
 CREATE TABLE IF NOT EXISTS du_an (
@@ -1149,7 +1165,7 @@ COMMENT ON COLUMN du_an.tu_loai_tru IS 'Từ loại trừ: bài chứa một t�
 COMMENT ON COLUMN du_an.boi_canh IS 'Mô tả brand cho bước AI phân xử giữ/loại và gán sắc thái, chủ đề. Chuỗi rỗng khi chưa viết.';
 COMMENT ON COLUMN du_an.thi_truong IS 'Mã nước 2 chữ (ISO 3166-1) của thị trường chính, mặc định VN. Từ 18/10/2026 dashboard không còn ô sửa: dự án mới luôn VN, dự án cũ giữ giá trị đã lưu; Mark vẫn dùng cho cổng thị trường và bước AI.';
 COMMENT ON COLUMN du_an.hashtag IS 'Hashtag riêng của dự án, người quản lý nhập ở trang Nguồn (từ 18/10/2026): đã bỏ #, bỏ dấu (đ→d), chữ thường, chỉ a-z 0-9 _, bỏ trùng, giữ thứ tự gõ; tối đa 50 mục, mỗi mục ≤ 100 ký tự. Mark dùng cho lượt tìm hashtag Instagram (lấy cau_hinh.tu_khoa.instagram.so_tu hashtag đầu, mặc định 12) và feed hashtag TikTok (bỏ thêm dấu _, chỉ tag 3–40 ký tự). Mảng rỗng (mặc định; mọi dự án trước 18/10/2026): Mark suy hashtag từ tu_khoa như trước — Instagram: mọi từ khoá viết liền bỏ dấu, TikTok: từ khoá một chữ. Không dùng để lọc bài (bài vẫn lọc theo tu_khoa, tu_loai_tru).';
-COMMENT ON COLUMN du_an.tran_usd_thang IS 'Trần chi phí theo dõi mỗi tháng (giờ VN), USD tiền Apify, không VAT, ≥ 0 (không trần trên). Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng.';
+COMMENT ON COLUMN du_an.tran_usd_thang IS 'Trần chi phí theo dõi mỗi tháng (giờ VN), USD tiền Apify, không VAT, ≥ 0 (không trần trên). Chỉ lượt kieu = theo_doi tính vào trần; trần mỗi lượt trên console platform vẫn áp dụng riêng. Từ 25/10/2026: bên đã có ngân sách (don_vi.tran_usd_thang) thì tổng trần các dự án của bên không vượt ngân sách bên (dashboard kiểm khi lưu), và trần hiệu lực = min(trần dự án, trần platform, đã tiêu của dự án + phần còn của ngân sách bên tháng này).';
 COMMENT ON COLUMN du_an.dang_bat IS 'TRUE: dự án bật, /theodoi được quét. FALSE: tắt, /theodoi từ chối.';
 COMMENT ON COLUMN du_an.tao_luc IS 'Thời điểm tạo dự án (TIMESTAMPTZ, hiển thị theo múi giờ phiên; lưu UTC).';
 COMMENT ON COLUMN du_an.sua_luc IS 'Thời điểm sửa dự án gần nhất (TIMESTAMPTZ, lưu UTC).';
@@ -1163,19 +1179,22 @@ COMMENT ON COLUMN du_an.sua_boi IS 'Email người sửa gần nhất trên dash
 COMMENT ON COLUMN du_an.don_vi IS 'Bên (đơn vị) sở hữu dự án, từ 19/10/2026. FK → don_vi.ma. Không NULL. Quyết định ai xem/sửa dự án trên dashboard và ai hỏi được Mark số của dự án (quyen.don_vi). Dự án có trước 19/10/2026: mã chứa "matemade" → matemade, còn lại → hapas. Chỉ quản trị viên chuyển được dự án sang bên khác. Chưa đẩy lên BigQuery.';
 
 COMMENT ON TABLE don_vi IS $$[Lớp] Raw
-[Mục đích] Danh mục bên (đơn vị: HAPAS, MATEMADE…) sở hữu dự án lắng nghe, làm gốc cho phân quyền theo bên trên dashboard.
+[Mục đích] Danh mục bên (đơn vị: HAPAS, MATEMADE…) sở hữu dự án lắng nghe, làm gốc cho phân quyền theo bên trên dashboard và giữ ngân sách tháng của bên (từ 25/10/2026).
 [Grain] 1 dòng = 1 bên
 [Khoá] PK: ma | Join: ma → du_an.don_vi, quyen.don_vi
 [Nguồn] Quản trị viên tạo trên dashboard social.hapas.vn (trang Quản trị); hapas, matemade có sẵn từ schema.sql
 [Phạm vi] Mọi bên dùng dashboard | Kênh: Không có | Từ 19/10/2026
 [Đã xử lý] Mã chữ thường, số, -, _ (2–40 ký tự, ràng buộc CHECK); tên 1–200 ký tự
-[Refresh] Ghi tức thời khi quản trị viên tạo bên (ghi nhat_ky)
-[Dùng khi] Biết dự án thuộc bên nào, tên hiển thị của bên
+[Refresh] Ghi tức thời khi quản trị viên tạo bên hoặc đặt ngân sách bên (ghi nhat_ky)
+[Dùng khi] Biết dự án thuộc bên nào, tên hiển thị của bên, ngân sách tháng của bên
 [Không dùng khi] Ai có quyền ở bên nào → dùng quyen
 [Lưu ý] Không xoá bên trên dashboard (dự án và quyền trỏ tới). Không đẩy lên BigQuery.$$;
 COMMENT ON COLUMN don_vi.ma IS 'Mã bên (vd hapas, matemade). PK. Chữ thường, số, -, _; 2–40 ký tự. Join: → du_an.don_vi, quyen.don_vi.';
 COMMENT ON COLUMN don_vi.ten IS 'Tên hiển thị của bên (vd HAPAS). Không NULL, 1–200 ký tự.';
 COMMENT ON COLUMN don_vi.tao_luc IS 'Thời điểm tạo bên (UTC).';
+COMMENT ON COLUMN don_vi.tran_usd_thang IS 'Ngân sách theo dõi mỗi tháng (giờ VN) của CẢ bên, USD tiền Apify, không VAT, 0–1000 (ràng buộc CHECK), từ 25/10/2026. Chỉ quản trị viên đặt trên trang Ngân sách. NULL = chưa đặt: không có tầng bên, chỉ trần dự án + gói Apify. Tổng du_an.tran_usd_thang của các dự án thuộc bên không được vượt số này (dashboard kiểm khi lưu). Mark dừng quét mọi dự án của bên khi đã tiêu tháng (tổng luot_quet.chi_phi_usd kiểu theo_doi của các dự án thuộc bên) chạm số này. Gói Apify chung vẫn là trần thật của cả tài khoản.';
+COMMENT ON COLUMN don_vi.sua_luc IS 'Thời điểm sửa bên gần nhất (UTC), từ 25/10/2026 — hiện chỉ khi đặt ngân sách bên. Dòng có trước 25/10/2026: thời điểm chạy schema.sql.';
+COMMENT ON COLUMN don_vi.sua_boi IS 'Email quản trị viên sửa bên gần nhất. NULL khi chưa sửa lần nào. Email nội bộ — không đẩy lên BigQuery.';
 
 COMMENT ON TABLE nguon IS $$[Lớp] Raw
 [Mục đích] Danh sách nguồn mạng xã hội đang theo dõi của từng dự án, kèm chu kỳ quét và tình trạng quét gần nhất.

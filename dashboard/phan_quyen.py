@@ -166,6 +166,13 @@ def kiem_tao_ben(lam: dict) -> None:
         raise LoiQuyen("Chỉ quản trị viên mới tạo được bên.")
 
 
+def kiem_dat_tran_ben(lam: dict) -> None:
+    """Ngân sách tháng của bên (25/10/2026, chủ dự án): chỉ quản trị viên đặt — quản lý của bên chỉ
+    xem, rồi chia ngân sách đó cho các dự án của bên."""
+    if not (_la_he_thong(lam) or la_quan_tri(lam)):
+        raise LoiQuyen("Chỉ quản trị viên mới đặt được ngân sách bên.")
+
+
 # ─────────────── đặt TRỌN quyền một người trong một lần Lưu (21/10/2026) ───────────────
 #: Lựa chọn của ô Quyền theo bên trên trang Quản trị: "" = Không có quyền.
 LUA_CHON_BEN = {"": "Không có quyền", **VAI_TRO}

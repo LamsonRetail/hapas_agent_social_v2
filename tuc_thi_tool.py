@@ -759,7 +759,9 @@ def quet(kho, nguoi: dict, args: dict, bay_gio: datetime.datetime) -> dict:
     if kh.get("loi"):
         raise TuChoi(kh["loi"])            # gồm "lượt trước còn đang chạy"
     if kh["con_thang"] < 0.01:
-        raise TuChoi(f"Dự án {du_an['ten']} đã hết ngân sách tháng trên dashboard — chưa quét.")
+        # 25/10/2026: phần còn gồm ngân sách tháng của BÊN — câu nói đúng ngân sách nào đã hết.
+        raise TuChoi(f"Dự án {du_an['ten']}: {kh.get('het_ly_do') or 'hết ngân sách tháng'} trên "
+                     "dashboard — chưa quét.")
     u = theo_doi.uoc_giu_cho(kh, ma)       # M3: ĐÚNG mức tao_luot sẽ giữ
     if u["hm"] is None:
         raise TuChoi("Chưa kiểm được ngân sách gói Apify lúc này nên Mark chưa mở lượt quét.")

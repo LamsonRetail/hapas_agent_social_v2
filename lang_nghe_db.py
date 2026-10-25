@@ -147,6 +147,43 @@ def da_tieu_thang(ma: str) -> float:
     return float(r["usd"] or 0)
 
 
+# 25/10/2026 (chủ dự án: "chia ngân sách theo từng bên, mỗi dự án có 1 ngân sách riêng"): ngân sách
+# tháng của BÊN (`don_vi.tran_usd_thang`, chỉ quản trị viên đặt trên dashboard). Mark dừng quét mọi
+# dự án của bên khi cả bên đã tiêu chạm số này — luật chung `dashboard.chi_phi.tran_hieu_luc`.
+_CO_TRAN_BEN: list[bool] = []
+
+
+def _doc_ngan_sach_ben(c, ma: str) -> dict | None:
+    """{ma, ten, tran (None = chưa đặt), da_tieu (cả bên tháng này, giờ VN — cùng phép tính
+    `da_tieu_thang` cộng mọi dự án đang thuộc bên)} của bên sở hữu dự án `ma`; None khi không có
+    dự án. DB chưa chạy schema mới (chưa có cột) → tran None: chạy như trước."""
+    if not _CO_TRAN_BEN and c.execute(
+            "SELECT 1 AS co FROM information_schema.columns WHERE table_schema = current_schema() "
+            "AND table_name = 'don_vi' AND column_name = 'tran_usd_thang'").fetchone():
+        _CO_TRAN_BEN.append(True)
+    b = c.execute("SELECT b.ma, b.ten, "
+                  + ("b.tran_usd_thang::float" if _CO_TRAN_BEN else "NULL::float")
+                  + " AS tran FROM du_an d JOIN don_vi b ON b.ma = d.don_vi WHERE d.ma = %s",
+                  (ma,)).fetchone()
+    if not b:
+        return None
+    if b["tran"] is None:
+        return {**b, "da_tieu": 0.0}
+    r = c.execute(
+        "SELECT COALESCE(sum(l.chi_phi_usd), 0)::float AS usd FROM luot_quet l "
+        "JOIN du_an d ON d.ma = l.du_an WHERE d.don_vi = %s AND l.kieu = 'theo_doi' AND "
+        "l.bat_dau >= (date_trunc('month', now() AT TIME ZONE %s) AT TIME ZONE %s)",
+        (b["ma"], _TZ, _TZ)).fetchone()
+    return {**b, "da_tieu": float(r["usd"] or 0)}
+
+
+def ngan_sach_ben(ma: str) -> dict | None:
+    """Ngân sách tháng của bên sở hữu dự án `ma` (`_doc_ngan_sach_ben`). Lỗi kho → `LoiKho` (bên
+    gọi coi như không quét được — không bao giờ "không đọc được thì cho chạy")."""
+    with ket_noi() as c:
+        return _doc_ngan_sach_ben(c, ma)
+
+
 # ───────────────────────────── lượt quét ─────────────────────────────
 def chi_luot_gan(ma: str, toi_da: int = 20) -> list[dict]:
     """Chi phí thật các lượt /theodoi gần nhất (mới trước) — câu nhận việc nói chi THẬT bên cạnh

@@ -109,7 +109,9 @@ def ke_hoach(ma: str, tai_khoan: list[str] | None, ngay: int, so_bai: int, tran:
     tu = (bay_gio - datetime.timedelta(days=ngay)).astimezone(_VN).date()
     tran = round(min(TRAN_TOI_DA, max(0.0, tran)), 2)
     uoc = round(GIA_KHOI + GIA_BAI * so_bai * len(ten), 4)
-    con = max(0.0, float(du_an.get("tran_usd_thang") or 0) - K.da_tieu_thang(ma))
+    # 25/10/2026: phần còn gồm ngân sách tháng của bên — cùng luật `theo_doi.con_thang`.
+    import theo_doi
+    con = theo_doi.con_thang(ma, du_an, K.da_tieu_thang(ma))["con"]
     return {"du_an": du_an, "nguon": nguon,
             "payload": {"usernames": ten, "maxPosts": int(so_bai),
                         "postsNewerThan": tu.isoformat()},

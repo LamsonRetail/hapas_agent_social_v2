@@ -113,6 +113,20 @@ def _tat_lease_that(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _ngan_sach_ben_mac_dinh(monkeypatch):
+    """Ngân sách tháng của bên (25/10/2026, `lang_nghe_db.ngan_sach_ben`): bộ thử mặc định "bên chưa
+    đặt ngân sách" (None — chạy như trước) thay vì mở kết nối Postgres thật; các kho giả cũ chỉ giả
+    `da_tieu_thang`. Bài cần ngân sách bên thì tự monkeypatch `ngan_sach_ben`; câu SQL thử qua
+    `_doc_ngan_sach_ben` với kết nối giả."""
+    try:
+        import lang_nghe_db
+        monkeypatch.setattr(lang_nghe_db, "ngan_sach_ben", lambda ma: None)
+    except BaseException:
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _xoa_dem_bo_loc(monkeypatch):
     """Bộ đếm trần 20 lần/phút của API bộ lọc (trinh_bay_sheet) là của cả tiến trình: mỗi bài
     bắt đầu với bộ đếm rỗng, kẻo bài sau bị "gần trần" vì các bài trước."""

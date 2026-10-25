@@ -182,7 +182,9 @@ def goi_api(ma: str, bai: list[dict], toi_da_usd: float, in_ra, bay_gio) -> tupl
     import quet_lon
     import tiktok_api as TT
     du_an = K.doc_du_an(ma) or {}
-    con = max(0.0, float(du_an.get("tran_usd_thang") or 0) - K.da_tieu_thang(ma))
+    # 25/10/2026: phần còn gồm ngân sách tháng của bên — cùng luật `theo_doi.con_thang`.
+    import theo_doi
+    con = theo_doi.con_thang(ma, du_an, K.da_tieu_thang(ma))["con"]
     ns_apify, _, ghi = quet_lon.ngan_sach(quet_lon.tran_usd_nen())
     tran = min(float(toi_da_usd), con, ns_apify)
     n = min(len(bai), int(math.floor(tran / TT.GIA_YEU_CAU + 1e-9)))
@@ -263,7 +265,9 @@ def tran_hieu_luc(ma: str, toi_da_usd: float) -> tuple[float, str]:
     import lang_nghe_db as K
     import quet_lon
     du_an = K.doc_du_an(ma) or {}
-    con = max(0.0, float(du_an.get("tran_usd_thang") or 0) - K.da_tieu_thang(ma))
+    # 25/10/2026: phần còn gồm ngân sách tháng của bên — cùng luật `theo_doi.con_thang`.
+    import theo_doi
+    con = theo_doi.con_thang(ma, du_an, K.da_tieu_thang(ma))["con"]
     ns_apify, _, ghi = quet_lon.ngan_sach(quet_lon.tran_usd_nen())
     tran = min(float(toi_da_usd), con, ns_apify)
     return tran, (f"trần {tran:.4f} USD = min(--toi-da-usd {toi_da_usd}, còn tháng dự án "

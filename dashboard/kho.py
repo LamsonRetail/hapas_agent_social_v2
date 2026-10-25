@@ -141,6 +141,118 @@ def them_don_vi(ai: str, ma: str, ten: str, *, he_thong: bool = False) -> None:
         _nhat_ky(c, ai, "them_don_vi", f"don_vi:{ma}", {"don_vi": ma, "ten": ten})
 
 
+# ───── ngân sách tháng của bên (25/10/2026, chủ dự án: "chia ngân sách theo từng bên, mỗi dự án có
+# 1 ngân sách riêng") — ba tầng: gói Apify chung > ngân sách bên (chỉ quản trị viên đặt) > trần dự
+# án (quản lý của bên đặt). LUẬT TIỀN kiểm ở đây, trong giao dịch, sau khi khoá dòng bên
+# (`SELECT … FOR UPDATE`): tổng trần các dự án của bên không vượt ngân sách bên. Thứ tự khoá luôn
+# du_an → don_vi (hai người cùng lưu không kẹt nhau). ─────
+_CO_TRAN_BEN: list[bool] = []
+#: Trần tháng mặc định của dự án mới (= DEFAULT của `du_an.tran_usd_thang` trong schema.sql).
+TRAN_DU_AN_MAC_DINH = 5.0
+
+
+def _co_tran_ben(c) -> bool:
+    """DB đã có cột `don_vi.tran_usd_thang` chưa — bản dashboard mới lên VPS TRƯỚC khi chạy
+    schema.sql thì trang vẫn mở, mọi dự án như chưa có ngân sách bên (như `_co_hashtag`)."""
+    if _CO_TRAN_BEN:
+        return True
+    x = c.execute("SELECT 1 AS co FROM information_schema.columns WHERE table_schema = "
+                  "current_schema() AND table_name = 'don_vi' AND column_name = 'tran_usd_thang'"
+                  ).fetchone()
+    if x:
+        _CO_TRAN_BEN.append(True)
+    return bool(x)
+
+
+def _usd(x) -> str:
+    """USD 2 chữ số lẻ kiểu Việt cho câu báo lỗi (như bộ lọc `usd_vn` của app)."""
+    return f"{float(x or 0):,.2f}".replace(",", "\0").replace(".", ",").replace("\0", ".")
+
+
+def _khoa_ben(c, ma_ben: str) -> dict | None:
+    """Khoá dòng bên (FOR UPDATE) -> {ten, tran} — tran None = chưa đặt ngân sách; None khi DB
+    chưa có cột hoặc không có bên."""
+    if not ma_ben or not _co_tran_ben(c):
+        return None
+    return c.execute("SELECT ten, tran_usd_thang::float AS tran FROM don_vi WHERE ma = %s "
+                     "FOR UPDATE", (ma_ben,)).fetchone()
+
+
+def _tran_du_an_cua_ben(c, ma_ben: str) -> list[dict]:
+    """Trần tháng các dự án của bên (đọc SAU khi khoá dòng bên), trần lớn trước."""
+    return c.execute("SELECT ma, ten, tran_usd_thang::float AS tran FROM du_an WHERE don_vi = %s "
+                     "ORDER BY tran_usd_thang DESC, ma", (ma_ben,)).fetchall()
+
+
+def ngan_sach_ben() -> dict[str, dict]:
+    """Ngân sách tháng của MỌI bên -> {mã bên: {ma, ten, tran (None = chưa đặt), tong_tran_du_an,
+    so_du_an, da_tieu}}. `da_tieu` = tổng `luot_quet.chi_phi_usd` kiểu theo_doi tháng này (giờ VN)
+    của các dự án đang thuộc bên — cùng phép tính `da_tieu_thang` (và `lang_nghe_db.ngan_sach_ben`
+    của Mark). App tự lọc theo bên người xem thấy."""
+    with ket_noi() as c:
+        cot = "b.tran_usd_thang::float" if _co_tran_ben(c) else "NULL::float"
+        return {r["ma"]: dict(r) for r in c.execute(
+            f"SELECT b.ma, b.ten, {cot} AS tran, "
+            "COALESCE((SELECT sum(d.tran_usd_thang) FROM du_an d WHERE d.don_vi = b.ma), 0)::float "
+            "AS tong_tran_du_an, (SELECT count(*) FROM du_an d WHERE d.don_vi = b.ma) AS so_du_an, "
+            "COALESCE((SELECT sum(l.chi_phi_usd) FROM luot_quet l JOIN du_an d ON d.ma = l.du_an "
+            "WHERE d.don_vi = b.ma AND l.kieu = 'theo_doi' AND l.bat_dau >= "
+            "(date_trunc('month', now() AT TIME ZONE %s) AT TIME ZONE %s)), 0)::float AS da_tieu "
+            "FROM don_vi b ORDER BY b.ma", (_TZ, _TZ)).fetchall()}
+
+
+def dat_tran_ben(ai: str, ma_ben: str, usd, *, he_thong: bool = False) -> None:
+    """Đặt ngân sách tháng của bên (`usd` None = bỏ ngân sách bên). Chỉ quản trị viên — quyền người
+    làm đọc trong giao dịch (`PQ.kiem_dat_tran_ben`). Hạ dưới tổng trần các dự án của bên thì từ
+    chối, câu báo kê trần từng dự án và phần phải hạ."""
+    with ket_noi() as c:
+        try:
+            PQ.kiem_dat_tran_ben(_lam(c, ai, he_thong))
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
+        if not _co_tran_ben(c):
+            raise LoiDuLieu("Kho dữ liệu chưa có cột ngân sách bên — nhờ kỹ thuật chạy bản schema "
+                            "mới (deploy/lang-nghe/schema.sql) rồi lưu lại.")
+        cu = _khoa_ben(c, ma_ben)
+        if not cu:
+            raise LoiDuLieu("Không còn bên này.")
+        if usd is not None:
+            ds = _tran_du_an_cua_ben(c, ma_ben)
+            tong = sum(float(x["tran"] or 0) for x in ds)
+            if float(usd) < tong - 1e-9:
+                ke = ", ".join(f"{x['ten']} {_usd(x['tran'])}" for x in ds[:6]
+                               if float(x["tran"] or 0) > 0)
+                raise LoiDuLieu(
+                    f"Không lưu: ngân sách bên {cu['ten']} {_usd(usd)} USD nhỏ hơn tổng trần "
+                    f"{len(ds)} dự án của bên {_usd(tong)} USD ({ke}{'…' if len(ds) > 6 else ''}). "
+                    f"Cần ít nhất {_usd(tong)} USD, hoặc hạ trần dự án trước — thiếu "
+                    f"{_usd(tong - float(usd))} USD.")
+        c.execute("UPDATE don_vi SET tran_usd_thang = %s, sua_luc = now(), sua_boi = %s "
+                  "WHERE ma = %s", (usd, ai, ma_ben))
+        _nhat_ky(c, ai, "dat_tran_ben", f"don_vi:{ma_ben}",
+                 {"don_vi": ma_ben, "cu": cu["tran"], "moi": None if usd is None else str(usd)})
+
+
+def _kiem_tran_trong_ben(c, ma_ben: str, ma: str, tran_moi: float, tran_cu: float,
+                         viec: str) -> None:
+    """Luật tiền (gọi SAU khi khoá dòng dự án): trần `tran_moi` của dự án `ma` cộng trần các dự án
+    KHÁC của bên không vượt ngân sách bên. Bên chưa đặt ngân sách thì bỏ qua. `tran_cu`: trần đang
+    tính vào bên của dự án (0 khi chuyển từ bên khác sang). Câu báo nói phần ngân sách bên còn
+    trống (chưa chia cho dự án nào — cùng số trên trang) và mức tối đa dự án này đặt được."""
+    b = _khoa_ben(c, ma_ben)
+    if not b or b["tran"] is None:
+        return
+    khac = sum(float(x["tran"] or 0) for x in _tran_du_an_cua_ben(c, ma_ben) if x["ma"] != ma)
+    toi_da = max(0.0, float(b["tran"]) - khac)
+    if float(tran_moi) > toi_da + 1e-9:
+        raise LoiDuLieu(
+            f"Không lưu: {viec} {_usd(tran_moi)} USD vượt ngân sách bên {b['ten']}. Ngân sách "
+            f"bên {_usd(b['tran'])} USD, các dự án khác của bên đã giữ {_usd(khac)} USD — ngân "
+            f"sách bên còn trống {_usd(max(0.0, toi_da - float(tran_cu or 0)))} USD, dự án này đặt "
+            f"được tối đa {_usd(toi_da)} USD. Nhờ quản trị viên tăng ngân sách bên, hoặc hạ trần "
+            "dự án khác.")
+
+
 # ───────────────────────────── dự án ─────────────────────────────
 _COT_DU_AN = ("ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
               "tran_usd_thang::float AS tran_usd_thang, dang_bat, tao_luc, sua_luc, sua_boi, "
@@ -194,26 +306,41 @@ def _hashtag_ghi(c, d: dict) -> bool:
 def them_du_an(ai: str, d: dict) -> None:
     with ket_noi(trung=f"Mã dự án '{d['ma']}' đã có.") as c:
         co_tag = _hashtag_ghi(c, d)
+        # 25/10/2026: bên đã có ngân sách thì trần mặc định (5 USD) của dự án mới kẹp vào phần ngân
+        # sách bên còn trống (có thể 0) — tạo dự án không bao giờ làm tổng trần vượt ngân sách bên.
+        tran = None
+        b = _khoa_ben(c, d.get("don_vi"))
+        if b and b["tran"] is not None:
+            giu = sum(float(x["tran"] or 0) for x in _tran_du_an_cua_ben(c, d["don_vi"]))
+            tran = round(max(0.0, min(TRAN_DU_AN_MAC_DINH, float(b["tran"]) - giu)), 2)
         # `don_vi` (19/10/2026): bên của dự án — app đã kiểm người tạo được tạo dự án ở bên này.
         c.execute("INSERT INTO du_an (ma, ten, tu_khoa, tu_loai_tru, boi_canh, thi_truong, "
-                  f"dang_bat, sua_boi, don_vi{', hashtag' if co_tag else ''}) VALUES "
-                  f"(%s, %s, %s, %s, %s, %s, %s, %s, %s{', %s::text[]' if co_tag else ''})",
+                  f"dang_bat, sua_boi, don_vi{', hashtag' if co_tag else ''}"
+                  f"{', tran_usd_thang' if tran is not None else ''}) VALUES "
+                  f"(%s, %s, %s, %s, %s, %s, %s, %s, %s{', %s::text[]' if co_tag else ''}"
+                  f"{', %s' if tran is not None else ''})",
                   (d["ma"], d["ten"], d["tu_khoa"], d["tu_loai_tru"], d["boi_canh"],
                    d.get("thi_truong") or "VN", d["dang_bat"], ai, d["don_vi"],
-                   *([d["hashtag"]] if co_tag else [])))
-        _nhat_ky(c, ai, "them_du_an", f"du_an:{d['ma']}", d)
+                   *([d["hashtag"]] if co_tag else []), *([tran] if tran is not None else [])))
+        _nhat_ky(c, ai, "them_du_an", f"du_an:{d['ma']}",
+                 {**d, **({"tran_usd_thang": tran} if tran is not None else {})})
 
 
 def sua_du_an(ai: str, ma: str, d: dict) -> None:
     """Sửa dự án. Thiếu khoá `thi_truong` / `hashtag` (biểu mẫu không có ô — 18/10/2026 bỏ ô thị
     trường) thì giữ giá trị đang lưu: COALESCE với tham số NULL. Khoá `don_vi` (chuyển dự án sang
-    bên khác — app chỉ cho quản trị viên) thì nhật ký ghi cả bên cũ."""
+    bên khác — app chỉ cho quản trị viên) thì nhật ký ghi cả bên cũ; bên mới đã có ngân sách thì
+    trần của dự án phải vừa phần còn trống của bên (25/10/2026, `_kiem_tran_trong_ben`)."""
     with ket_noi() as c:
         co_tag = _hashtag_ghi(c, d)
         ct = dict(d)
         if d.get("don_vi"):
-            cu = c.execute("SELECT don_vi FROM du_an WHERE ma = %s FOR UPDATE", (ma,)).fetchone()
+            cu = c.execute("SELECT don_vi, tran_usd_thang::float AS tran FROM du_an WHERE ma = %s "
+                           "FOR UPDATE", (ma,)).fetchone()
             ct["don_vi_truoc"] = cu["don_vi"] if cu else None
+            if cu and cu["don_vi"] != d["don_vi"]:
+                _kiem_tran_trong_ben(c, d["don_vi"], ma, float(cu["tran"] or 0), 0.0,
+                                     f"chuyển dự án {ma} sang bên này với trần")
         r = c.execute("UPDATE du_an SET ten = %s, tu_khoa = %s, tu_loai_tru = %s, boi_canh = %s, "
                       "thi_truong = COALESCE(%s, thi_truong), dang_bat = %s, "
                       f"{'hashtag = %s::text[], ' if co_tag else ''}"
@@ -229,12 +356,17 @@ def sua_du_an(ai: str, ma: str, d: dict) -> None:
 
 
 def dat_tran_thang(ai: str, ma: str, usd) -> None:
-    """Trần USD tháng của dự án (0–100; CHECK của bảng chặn thêm một lớp)."""
+    """Trần USD tháng của dự án (≥ 0; CHECK của bảng chặn thêm một lớp). 25/10/2026: bên đã có
+    ngân sách thì TĂNG trần chỉ tới phần ngân sách bên còn trống (khoá dòng bên trong cùng giao
+    dịch — hai quản lý cùng tăng hai dự án không cùng lọt); HẠ trần luôn được."""
     with ket_noi() as c:
-        cu = c.execute("SELECT tran_usd_thang::float AS v FROM du_an WHERE ma = %s FOR UPDATE",
-                       (ma,)).fetchone()
+        cu = c.execute("SELECT tran_usd_thang::float AS v, don_vi FROM du_an WHERE ma = %s "
+                       "FOR UPDATE", (ma,)).fetchone()
         if not cu:
             raise LoiDuLieu("Không còn dự án này.")
+        if float(usd) > float(cu["v"] or 0) + 1e-9:
+            _kiem_tran_trong_ben(c, cu.get("don_vi"), ma, float(usd), float(cu["v"] or 0),
+                                 "trần tháng dự án")
         c.execute("UPDATE du_an SET tran_usd_thang = %s, sua_luc = now(), sua_boi = %s "
                   "WHERE ma = %s", (usd, ai, ma))
         _nhat_ky(c, ai, "dat_tran_thang", f"du_an:{ma}", {"cu": cu["v"], "moi": str(usd)})
@@ -1033,7 +1165,8 @@ TEN_HANH_DONG = {
     "dat_quan_tri": "Đặt quản trị viên", "luu_nguoi_xem": "Lưu người xem",
     "xoa_nguoi_xem": "Xoá người xem", "luu_quyen": "Lưu quyền", "xoa_quyen": "Xoá quyền",
     "them_don_vi": "Thêm bên", "them_du_an": "Thêm dự án", "sua_du_an": "Sửa dự án",
-    "dat_tran_thang": "Đặt trần tháng", "sua_cau_hinh": "Sửa cấu hình",
+    "dat_tran_thang": "Đặt trần tháng", "dat_tran_ben": "Đặt ngân sách bên",
+    "sua_cau_hinh": "Sửa cấu hình",
     "sua_binh_luan": "Sửa cách lấy bình luận", "sua_tim_tu_khoa": "Sửa tìm từ khoá",
     "them_nguon": "Thêm nguồn", "sua_nguon": "Sửa nguồn", "xoa_nguon": "Xoá nguồn",
     "doi_trang_thai_nguon": "Bật / tắt nguồn", "duyet_de_xuat": "Duyệt đề xuất",

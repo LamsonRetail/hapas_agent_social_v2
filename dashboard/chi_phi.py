@@ -2,8 +2,9 @@
 trị được chi phí — tăng giảm chi phí điều chỉnh được từ platform hoặc từ chính dashboard").
 
 Hai tầng trần (đã chốt): platform giữ trần THÁNG cấp cửa hàng (KDLA — chưa có, platform PR #101),
-dashboard giữ trần tháng từng dự án (`du_an.tran_usd_thang`); Mark áp trần THẤP HƠN. Module này
-chỉ TÍNH, thuần Python, không SQL, không import module nào của Mark (venv dashboard không có).
+dashboard giữ trần tháng từng dự án (`du_an.tran_usd_thang`); Mark áp trần THẤP HƠN. 25/10/2026:
+thêm tầng ngân sách tháng của BÊN (`don_vi.tran_usd_thang`) — luật chung ở `tran_hieu_luc`.
+Module này chỉ TÍNH, thuần Python, không SQL, không import module nào của Mark (venv dashboard không có).
 
 Công thức chép từ Mark — PHẢI khớp, có bài thử đối chiếu (`tests/test_dashboard_chi_phi.py`):
   • Một lượt actor (`theo_doi._uoc_phan`): (đơn vị × giá + phí khởi động actor) × hệ số 1,3; đơn
@@ -404,20 +405,49 @@ def so_ngay_thang(bay_gio: datetime.datetime) -> int:
 
 
 # ───────────────────────────── dự báo một dự án ─────────────────────────────
-def tran_hieu_luc(tran_du_an: float, tran_platform: float | None) -> float:
-    """Mark áp trần THẤP HƠN giữa trần platform (cấp cửa hàng) và trần của dự án."""
+# 25/10/2026 (chủ dự án): "chia ngân sách theo từng bên, mỗi dự án có 1 ngân sách riêng" — ba tầng
+# tiền: gói Apify chung (trần thật, `goi_apify`) > ngân sách tháng của BÊN (`don_vi.tran_usd_thang`,
+# chỉ quản trị viên đặt) > trần tháng DỰ ÁN (quản lý của bên đặt). `ben` ở mọi hàm dưới đây =
+# {"tran": USD hoặc None (chưa đặt), "da_tieu": USD cả bên đã tiêu tháng này (gồm dự án này)} —
+# `kho.ngan_sach_ben` (dashboard) / `lang_nghe_db.ngan_sach_ben` (Mark) đọc; None = không có
+# tầng bên.
+def tran_hieu_luc(tran_du_an: float, tran_platform: float | None, ben: dict | None = None,
+                  da_tieu: float = 0.0) -> float:
+    """Trần THÁNG hiệu lực của một dự án — MỘT luật cho trang Ngân sách, Lịch quét, Mark hỏi số và
+    Mark chặn quét (`theo_doi.con_thang`): min(trần dự án, trần platform, `da_tieu` của dự án +
+    phần còn của ngân sách bên tháng này). Bên tiêu hết thì trần = đã tiêu của dự án (phần còn 0:
+    Mark dừng); ngân sách bên chưa đặt (None) thì như trước 25/10/2026."""
     tran = float(tran_du_an or 0)
-    return tran if tran_platform is None else min(tran, float(tran_platform))
+    if tran_platform is not None:
+        tran = min(tran, float(tran_platform))
+    if ben and ben.get("tran") is not None:
+        con_ben = max(0.0, float(ben["tran"]) - float(ben.get("da_tieu") or 0))
+        tran = min(tran, float(da_tieu or 0) + con_ben)
+    return tran
+
+
+def tran_chan_boi(tran_du_an: float, tran_platform: float | None, ben: dict | None = None,
+                  da_tieu: float = 0.0) -> str:
+    """Tầng nào giữ trần hiệu lực (`tran_hieu_luc`): "ben" | "platform" | "du_an" — câu báo nói
+    đúng ngân sách nào đã hết."""
+    tran = tran_hieu_luc(tran_du_an, tran_platform, ben, da_tieu)
+    co_ben = bool(ben and ben.get("tran") is not None)
+    if co_ben and tran < tran_hieu_luc(tran_du_an, tran_platform) - 1e-9:
+        return "ben"
+    if tran_platform is not None and float(tran_platform) < float(tran_du_an or 0) - 1e-9:
+        return "platform"
+    return "du_an"
 
 
 def du_bao(nguon: list[dict], da_tieu: float, tran_du_an: float, tran_platform: float | None,
-           bay_gio: datetime.datetime) -> dict:
+           bay_gio: datetime.datetime, ben: dict | None = None) -> dict:
     """Dự báo tiền theo dõi cả tháng của MỘT dự án. Nguồn tạm dừng không tính.
 
     -> {ngay_con_lai, da_tieu, con_lai (USD phần còn lại), du_bao_thang (đã tiêu + còn lại),
         thang_cau_hinh (USD một tháng 30 ngày theo cấu hình), tran_du_an, tran_platform,
-        tran (hiệu lực), vuot (bool), vuot_usd, nen_tang: [{nen_tang, so_nguon, nguon_con_lai,
-        khoi_dong_con_lai, con_lai, thang_cau_hinh}], nguon: [{id, nen_tang, dinh_danh, ten,
+        tran (hiệu lực, `tran_hieu_luc` — gồm ngân sách bên `ben`), chan_boi, ben ({tran, da_tieu,
+        con} hoặc None khi bên chưa đặt ngân sách), vuot (bool), vuot_usd, nen_tang: [{nen_tang,
+        so_nguon, nguon_con_lai, khoi_dong_con_lai, con_lai, thang_cau_hinh}], nguon: [{id, nen_tang, dinh_danh, ten,
         chu_ky_ngay, so_bai_moi_lan, luot_usd, thang_usd, con_lai_usd}] (tốn nhất trước),
         top_ton: 3 nguồn tốn nhất (> 0)}."""
     con = ngay_con_lai(bay_gio)
@@ -451,15 +481,20 @@ def du_bao(nguon: list[dict], da_tieu: float, tran_du_an: float, tran_platform: 
     nen_tang.sort(key=lambda x: (-x["con_lai"], x["nen_tang"]))
     con_lai = sum(x["con_lai"] for x in nen_tang)
     da_tieu = float(da_tieu or 0)
-    tran = tran_hieu_luc(tran_du_an, tran_platform)
+    tran = tran_hieu_luc(tran_du_an, tran_platform, ben, da_tieu)
     du_bao_thang = da_tieu + con_lai
+    co_ben = bool(ben and ben.get("tran") is not None)
     return {
         "ngay_con_lai": round(con, 4), "da_tieu": round(da_tieu, 4),
         "con_lai": round(con_lai, 4), "du_bao_thang": round(du_bao_thang, 4),
         "thang_cau_hinh": round(sum(x["thang_cau_hinh"] for x in nen_tang), 4),
         "tran_du_an": float(tran_du_an or 0),
         "tran_platform": None if tran_platform is None else float(tran_platform),
-        "tran": tran, "vuot": du_bao_thang > tran + 1e-9,
+        "tran": tran, "chan_boi": tran_chan_boi(tran_du_an, tran_platform, ben, da_tieu),
+        "ben": ({"tran": float(ben["tran"]), "da_tieu": round(float(ben.get("da_tieu") or 0), 4),
+                 "con": round(max(0.0, float(ben["tran"]) - float(ben.get("da_tieu") or 0)), 4)}
+                if co_ben else None),
+        "vuot": du_bao_thang > tran + 1e-9,
         "vuot_usd": round(max(0.0, du_bao_thang - tran), 4),
         "nen_tang": nen_tang, "nguon": theo_nguon,
         "top_ton": [x for x in theo_nguon if x["thang_usd"] > 0][:TOP_NGUON_TON],
@@ -1195,14 +1230,16 @@ def goi_du_bao(goi: dict, phan: list[dict], bay_gio: datetime.datetime) -> dict:
 # số trên trang. Thuần, không SQL: bên gọi đọc kho rồi đưa vào. ─────
 def khoi_ngan_sach(d: dict, tieu: float, tran_pf: float | None, nguon: list[dict], nhip: dict,
                    luot_gan: list[dict], cac_lich: list[dict], lan_cuoi: datetime.datetime | None,
-                   dat_lai: datetime.datetime | None, bay_gio: datetime.datetime) -> dict:
-    """Mọi số của một dự án trên trang Ngân sách. `nguon`: `kho.cac_nguon` (chưa co); `nhip`:
+                   dat_lai: datetime.datetime | None, bay_gio: datetime.datetime,
+                   ben: dict | None = None) -> dict:
+    """Mọi số của một dự án trên trang Ngân sách. `ben` (25/10/2026): ngân sách bên của dự án
+    (`ben_cua`) — trần hiệu lực gồm phần còn của bên. `nguon`: `kho.cac_nguon` (chưa co); `nhip`:
     `kho.nhip_dang`; `luot_gan`: `kho.cac_luot(ma, 1, 20)`; `lan_cuoi`: lần kiểm độ phủ cuối;
     `dat_lai`: lúc gói Apify đặt lại (None khi chưa có ảnh chụp gói).
     -> {nguon (đã co), db (`du_bao` — chỉ nguồn), du_bao (`du_bao_thuc`), thuc, bang, lich, do_phu,
     phan_goi (phần của dự án trong dự báo gói tới lúc đặt lại — None khi dự án tắt / chưa có gói)}."""
     nguon = gan_co_gian(nguon, nhip or {}, d)
-    db = du_bao(nguon, tieu, float(d.get("tran_usd_thang") or 0), tran_pf, bay_gio)
+    db = du_bao(nguon, tieu, float(d.get("tran_usd_thang") or 0), tran_pf, bay_gio, ben)
     thuc = chi_luot_thuc(luot_gan, bay_gio)
     bang = bang_cau_hinh(d)
     dl = du_bao_lich(cac_lich, bang, nguon, bay_gio)
@@ -1231,6 +1268,60 @@ def goi_ngan_sach(snap: dict | None, khoi: list[tuple[dict, dict]],
     return goi_du_bao(goi_apify(snap, sum(k["db"]["tran"] for d, k in khoi if d.get("dang_bat")),
                                 bay_gio),
                       [k["phan_goi"] for _, k in khoi if k.get("phan_goi")], bay_gio)
+
+
+def ben_cua(du_an: dict | None, ns_ben: dict | None) -> dict | None:
+    """Ngân sách bên của dự án từ `kho.ngan_sach_ben()` ({mã bên: dòng}); None khi bên chưa đặt
+    ngân sách hoặc không đọc được — trần như trước 25/10/2026."""
+    x = (ns_ben or {}).get((du_an or {}).get("don_vi"))
+    return x if x and x.get("tran") is not None else None
+
+
+#: Ngưỡng "gần hết" của ngân sách bên (đã tiêu hoặc dự báo ≥ 85 %) — thẻ cảnh báo trên trang.
+BEN_GAN = 0.85
+
+
+def ngan_sach_cac_ben(ns_ben: dict, khoi: list[tuple[dict, dict]], goi: dict | None) -> dict:
+    """Khối "Ngân sách theo bên" (25/10/2026) đầu trang Ngân sách. `ns_ben`: `kho.ngan_sach_ben()`
+    của các bên người xem thấy; `khoi`: [(dự án, `khoi_ngan_sach`)] — dự báo cả tháng (theo chi
+    thật khi đủ lượt) cộng theo bên; `goi`: khối gói Apify (`goi_ngan_sach`).
+    -> {ben: [{ma, ten, tran (None = chưa đặt), tong_tran_du_an, so_du_an, da_tieu, du_bao,
+    con_trong (phần ngân sách bên chưa chia cho dự án), pt, pt_du_bao, muc ("vuot" | "gan" | "tot"
+    | "chua_dat")}], tong_ben (tổng ngân sách các bên đã đặt), tran_goi (None khi chưa có ảnh chụp
+    gói), vuot_goi (tổng ngân sách bên > trần gói — chỉ cảnh báo, gói có thể nâng)}."""
+    du_bao_ben: dict[str, float] = {}
+    for d, k in khoi:
+        b = d.get("don_vi")
+        du_bao_ben[b] = du_bao_ben.get(b, 0.0) + float(
+            (k.get("du_bao") or {}).get("du_bao_thang") or 0)
+    ra = []
+    for ma, x in sorted(ns_ben.items(), key=lambda kv: str(kv[1].get("ten") or kv[0]).lower()):
+        tran = None if x.get("tran") is None else float(x["tran"])
+        tieu = float(x.get("da_tieu") or 0)
+        db = round(max(tieu, du_bao_ben.get(ma, tieu)), 4)
+        tong = float(x.get("tong_tran_du_an") or 0)
+        if tran is None:
+            muc = "chua_dat"
+        elif tieu > tran + 1e-9 or db > tran + 1e-9:
+            muc = "vuot"
+        elif max(tieu, db) >= BEN_GAN * tran:
+            muc = "gan"
+        else:
+            muc = "tot"
+
+        def pt(v: float) -> float | None:
+            if tran is None:
+                return None
+            return min(100.0, 100.0 * v / tran) if tran else (100.0 if v else 0.0)
+        ra.append({"ma": ma, "ten": x.get("ten") or ma, "tran": tran, "tong_tran_du_an": tong,
+                   "so_du_an": int(x.get("so_du_an") or 0), "da_tieu": round(tieu, 4),
+                   "du_bao": db,
+                   "con_trong": None if tran is None else round(max(0.0, tran - tong), 2),
+                   "pt": pt(tieu), "pt_du_bao": pt(db), "muc": muc})
+    tong_ben = round(sum(x["tran"] for x in ra if x["tran"] is not None), 2)
+    tran_goi = float(goi["tran"]) if goi and goi.get("co") and goi.get("tran") else None
+    return {"ben": ra, "tong_ben": tong_ben, "tran_goi": tran_goi,
+            "vuot_goi": tran_goi is not None and tong_ben > tran_goi + 1e-9}
 
 
 def chi_lich(luot_gan: list[dict], snap: dict | None, bay_gio: datetime.datetime) -> dict:
