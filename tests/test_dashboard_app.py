@@ -230,8 +230,46 @@ class GiaKho:
         self._ghi(ai, "sua_du_an", f"du_an:{ma}")
 
     def dat_tran_thang(self, ai, ma, usd):
-        self.du_an[ma]["tran_usd_thang"] = usd
+        # 25/10/2026: luật tiền như `kho._kiem_tran_trong_ben` — TĂNG trần chỉ tới phần ngân sách
+        # bên còn trống (kho thật kiểm trong giao dịch; bài SQL ở tests/test_ngan_sach_ben.py).
+        d = self.du_an[ma]
+        tran_ben = self.tran_ben.get(d["don_vi"])
+        if tran_ben is not None and float(usd) > float(d["tran_usd_thang"]):
+            khac = sum(float(x["tran_usd_thang"]) for m, x in self.du_an.items()
+                       if x["don_vi"] == d["don_vi"] and m != ma)
+            if float(usd) > tran_ben - khac + 1e-9:
+                raise LoiDuLieu(f"Không lưu: trần tháng dự án {usd} USD vượt ngân sách bên — "
+                                "ngân sách bên còn trống "
+                                f"{tran_ben - khac - float(d['tran_usd_thang']):.2f} USD.")
+        d["tran_usd_thang"] = usd
         self._ghi(ai, "dat_tran_thang", f"du_an:{ma}")
+
+    # ── ngân sách tháng của bên (25/10/2026): như `kho.ngan_sach_ben` / `kho.dat_tran_ben` ──
+    @property
+    def tran_ben(self) -> dict:
+        return self.__dict__.setdefault("_tran_ben", {})
+
+    def ngan_sach_ben(self):
+        tieu = self.da_tieu_thang()
+        ra = {}
+        for m, b in self.don_vi.items():
+            ds = [x for x in self.du_an.values() if x["don_vi"] == m]
+            ra[m] = {"ma": m, "ten": b["ten"], "tran": self.tran_ben.get(m),
+                     "tong_tran_du_an": sum(float(x["tran_usd_thang"]) for x in ds),
+                     "so_du_an": len(ds), "da_tieu": sum(tieu.get(x["ma"], 0.0) for x in ds)}
+        return ra
+
+    def dat_tran_ben(self, ai, ma, usd, he_thong=False):
+        try:
+            PQ.kiem_dat_tran_ben(PQ.HE_THONG if he_thong else self._lam(ai))
+        except PQ.LoiQuyen as e:
+            raise LoiDuLieu(str(e)) from None
+        tong = sum(float(x["tran_usd_thang"]) for x in self.du_an.values() if x["don_vi"] == ma)
+        if usd is not None and float(usd) < tong - 1e-9:
+            raise LoiDuLieu(f"Không lưu: ngân sách bên nhỏ hơn tổng trần dự án — thiếu "
+                            f"{tong - float(usd):.2f} USD.")
+        self.tran_ben[ma] = None if usd is None else float(usd)
+        self._ghi(ai, "dat_tran_ben", f"don_vi:{ma}")
 
     def cac_nguon(self, du_an):
         return [dict(n) for n in self.nguon.values() if n["du_an"] == du_an]

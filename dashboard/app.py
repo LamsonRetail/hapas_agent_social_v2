@@ -89,6 +89,8 @@ SSE_TOI_DA_KET_NOI = 200    # trình duyệt mở cùng lúc; quá thì từ ch�
 SSE_MOI_EMAIL = 5           # mỗi người tối đa ngần này tab nghe sự kiện
 SSE_KIEM_QUYEN_GIAY = 300.0  # luồng SSE đọc lại vai trò mỗi 5 phút; bị xoá khỏi người xem -> đóng
 LUOT_MOI_TRANG = 20
+#: Ngân sách tháng tối đa của một bên (25/10/2026) — = CHECK của `don_vi.tran_usd_thang`.
+TRAN_BEN_TOI_DA = 1000
 NHAT_KY_TOI_DA = 300         # dòng nhật ký trang Quản trị (chia trang 20 ở trình duyệt)
 #: Duyệt/từ chối đề xuất hàng loạt (18/10/2026): trần số đề xuất mỗi lần gửi — trang hiện tối đa 200
 #: (`kho.cac_de_xuat`), chừa dư; chặn biểu mẫu rác khiến một yêu cầu chạy hàng nghìn giao dịch.
@@ -1791,6 +1793,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             except LoiKho:
                 snap = None
         dat_lai = CP._vn((snap or {}).get("chu_ky_den"))
+        # Ngân sách tháng của bên (25/10/2026): mọi bên (trần hiệu lực của dự án gồm phần còn của
+        # bên), khối "Ngân sách theo bên" chỉ hiện bên người này thấy (`_ben_thay`).
+        ns_ben = await _ngan_sach_ben()
         khoi = []
         dong = []
         for d in ds:
@@ -1819,8 +1824,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     lan_cuoi = None
             # Mọi số của dự án — Mark (`hoi_dashboard_tool._chi_phi`) gọi đúng hàm này. Nguồn theo
             # số bài Mark thật sự lấy sau khi co theo nhịp đăng (18/10/2026).
+            ben = CP.ben_cua(d, ns_ben)
             k = CP.khoi_ngan_sach(d, tieu, tran_pf, nguon, await _nhip_dang(d["ma"]), luot_gan,
-                                  cac_lich, lan_cuoi, dat_lai, bay_gio)
+                                  cac_lich, lan_cuoi, dat_lai, bay_gio, ben)
             khoi.append((d, k))
             db, bang, dl, dp = k["du_bao"], k["bang"], k["lich"], k["do_phu"]
             tran = db["tran"]
@@ -1842,16 +1848,27 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                          "da_tieu": tieu, "con_lai": max(0.0, tran - tieu), "du_bao": db,
                          "bang": bang, "lich": dl,
                          "do_phu": {**dp, "noi": CS.noi_tu_hanh_dong(hd_dp)},
+                         # Ngân sách bên còn trống (25/10/2026): phần chưa chia cho dự án nào —
+                         # trần dự án này đặt được tối đa = trần đang đặt + phần đó.
+                         "ben_ns": ({"ten": (ns_ben.get(d.get("don_vi")) or {}).get("ten"),
+                                     "tran": ben["tran"],
+                                     "con_trong": round(max(0.0, float(ben["tran"]) - float(
+                                         ben.get("tong_tran_du_an") or 0)), 2)}
+                                    if ben else None),
                          "pt": min(100.0, 100.0 * tieu / tran) if tran else (100.0 if tieu else 0),
                          "pt_du_bao": (min(100.0, 100.0 * db["du_bao_thang"] / tran) if tran
                                        else (100.0 if db["du_bao_thang"] else 0))})
         goi = CP.goi_ngan_sach(snap, khoi, bay_gio)
+        thay = _ben_thay(tong_nguoi, ns_ben)
+        cac_ben = CP.ngan_sach_cac_ben({m: x for m, x in ns_ben.items() if m in thay},
+                                       [(d, k) for d, k in khoi if d.get("don_vi") in thay], goi)
 
         def url_luot(so: int, ma=(du_an or {}).get("ma")) -> str:
             """-> liên kết trang `so` của Lịch sử lượt quét cho macro `phan_trang` (23/10/2026)."""
             return _url("/ngan-sach", du_an=ma, trang=so if so > 1 else "") + "#ns-ls"
         return _trang(request, "ngan_sach.html", nguoi, "ngan_sach", goi=goi, url_luot=url_luot,
-                      goi_mot_phan=not tong_nguoi["la_quan_tri"],
+                      goi_mot_phan=not tong_nguoi["la_quan_tri"], cac_ben=cac_ben,
+                      sua_ben=tong_nguoi["la_quan_tri"], co_cot_ben=bool(ns_ben),
                       dong=[an_chi_tiet(_theo_du_an(tong_nguoi, x), [x], ("sua_boi",))[0]
                             for x in dong], du_an=du_an,
                       luot=an_chi_tiet(nguoi, luot, ("ghi_chu", "ghi_chu_dai"), ("loi",)),
@@ -1859,6 +1876,45 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                       trang=trang, so_trang=so_trang, thang=bay_gio.strftime("%m/%Y"),
                       so_ngay_thang=CP.so_ngay_thang(bay_gio),
                       hang_so=CP.hang_so_cho_trinh_duyet())
+
+    async def _ngan_sach_ben() -> dict:
+        """`kho.ngan_sach_ben()` (25/10/2026); kho giả cũ / kho chưa đọc được -> {} (không có tầng
+        bên — như trước, Mark vẫn tự kiểm phía nó)."""
+        ham = getattr(app.state.kho, "ngan_sach_ben", None)
+        if ham is None:
+            return {}
+        try:
+            return dict(await _k(ham) or {})
+        except LoiKho:
+            return {}
+
+    def _ben_thay(nguoi: dict, ns_ben: dict) -> set[str]:
+        """Bên có khối ngân sách trên trang: quản trị viên — mọi bên; người khác — bên mình có quyền
+        (quản lý / chỉ xem), chỉ đọc."""
+        if nguoi["la_quan_tri"]:
+            return set(ns_ben)
+        return set(ns_ben) & set(((nguoi.get("q") or {}).get("ben") or {}))
+
+    @app.post("/ngan-sach-ben/{ma}")
+    async def ngan_sach_ben_luu(request: Request, ma: str):
+        """Ngân sách tháng của bên (25/10/2026): CHỈ quản trị viên — quản lý của bên nhận 403 (kho
+        kiểm lại trong giao dịch). Ô trống = bỏ ngân sách bên (như trước: chỉ trần dự án + gói)."""
+        nguoi, form = await _sua(request)
+        if not nguoi["la_quan_tri"]:
+            raise _Cam("Chỉ quản trị viên mới đặt được ngân sách bên.")
+        ve = "/ngan-sach#ns-ben"
+        try:
+            o = (form.get("tran_usd_thang") or "").strip()
+            usd = NL.tran_usd(o) if o else None
+            if usd is not None and usd > TRAN_BEN_TOI_DA:
+                raise NL.LoiNhap(f"Ngân sách bên tối đa {usd_vn(TRAN_BEN_TOI_DA)} USD/tháng.")
+            await _k(app.state.kho.dat_tran_ben, nguoi["email"], ma, usd)
+        except (NL.LoiNhap, LoiDuLieu) as e:
+            return _chuyen(request, ve, "loi", str(e))
+        return _chuyen(request, ve, "ok",
+                       f"Đã bỏ ngân sách bên {ma} — chỉ còn trần từng dự án và gói Apify."
+                       if usd is None else
+                       f"Đã đặt ngân sách bên {ma}: {usd_vn(usd)} USD/tháng.")
 
     @app.get("/ngan-sach/luot/{luot_id}/ghi-chu")
     async def ghi_chu_luot(request: Request, luot_id: int):
@@ -2062,13 +2118,15 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
 
     # ─── lịch quét tự động (chủ dự án chốt 15/10/2026: "Dashboard + Mark tự chạy") ───
     async def _du_lieu_lich(du_an: dict):
-        """(lịch, nguồn, đã tiêu tháng, trần platform) của một dự án — đủ cho trang + xem trước.
-        Nguồn theo số bài Mark thật sự lấy sau khi co theo nhịp đăng (soát 18/10/2026: như trang
-        Ngân sách — `tong_quan` cộng phần nguồn theo chu kỳ)."""
+        """(lịch, nguồn, đã tiêu tháng, trần platform, ngân sách bên) của một dự án — đủ cho trang
+        + xem trước. Nguồn theo số bài Mark thật sự lấy sau khi co theo nhịp đăng (soát 18/10/2026:
+        như trang Ngân sách — `tong_quan` cộng phần nguồn theo chu kỳ). Ngân sách bên (25/10/2026):
+        trần hiệu lực gồm phần còn của bên, như trang Ngân sách (`chi_phi.tran_hieu_luc`)."""
         kho, ma = app.state.kho, du_an["ma"]
         cac, nguon = await _k(kho.cac_lich, ma), await _k(kho.cac_nguon, ma)
         return (cac, CP.gan_co_gian(nguon, await _nhip_dang(ma), du_an),
-                float((await _k(kho.da_tieu_thang)).get(ma, 0.0)), await _k(kho.tran_platform, ma))
+                float((await _k(kho.da_tieu_thang)).get(ma, 0.0)), await _k(kho.tran_platform, ma),
+                CP.ben_cua(du_an, await _ngan_sach_ben()))
 
     async def _chi_lich(ma: str) -> dict:
         """Chi thật + trần console mỗi lượt cho trang Lịch quét (18/10/2026, `trang_lich._kep_luot`)
@@ -2095,7 +2153,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         ctx: dict = {"du_an_ds": ds, "du_an": du_an, "lich": [], "tong": None, "bm": None,
                      "xt": None, "sua": None, "loi_bm": loi}
         if du_an:
-            cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an)
+            cac, nguon, da_tieu, tran_pf, ben = await _du_lieu_lich(du_an)
             chi = await _chi_lich(du_an["ma"])
             sua = (next((x for x in cac if str(x["id"]) == str(sua_id)), None)
                    if ql and sua_id else None)
@@ -2106,12 +2164,13 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 """Đếm mốc + chi phí (thuần, có thể vài chục nghìn vòng): chạy trong threadpool,
                 không chặn vòng sự kiện (review 15/10, M2)."""
                 ra = {"lich": TL.dong_lich(cac, du_an, nguon, bay_gio, ql, LOI_CHUNG, chi),
-                      "tong": TL.tong_quan(cac, du_an, nguon, da_tieu, tran_pf, bay_gio, chi)}
+                      "tong": TL.tong_quan(cac, du_an, nguon, da_tieu, tran_pf, bay_gio, chi,
+                                           ben=ben)}
                 if ql:
                     try:
                         d = LQ.chuan_hoa(LQ.bieu_mau(bm), bay_gio)
                         ra["xt"] = TL.xem_truoc(d, cac, du_an, nguon, da_tieu, tran_pf, bay_gio,
-                                                sua["id"] if sua else None, chi)
+                                                sua["id"] if sua else None, chi, ben=ben)
                     except LQ.LoiLich as e:
                         ra["xt"] = {"loi": str(e)}
                     ra.update(sua=sua, bm=bm)
@@ -2146,12 +2205,12 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             d = await _k(LQ.chuan_hoa, dict(q), bay_gio)
         except LQ.LoiLich as e:
             return JSONResponse({"loi": str(e)}, status_code=400)
-        cac, nguon, da_tieu, tran_pf = await _du_lieu_lich(du_an)
+        cac, nguon, da_tieu, tran_pf, ben = await _du_lieu_lich(du_an)
         chi = await _chi_lich(du_an["ma"])
         # Đếm mốc trong threadpool (review 15/10, M2): không chặn vòng sự kiện của cả dashboard.
         return JSONResponse(await _k(TL.xem_truoc, d, cac, du_an, nguon, da_tieu, tran_pf,
                                      bay_gio, int(lid) if lid.isdigit() and len(lid) < 19
-                                     else None, chi))
+                                     else None, chi, ben=ben))
 
     async def _lich_phai_co(nguoi: dict, lid: int) -> dict:
         """Lịch để sửa: dự án của lịch đọc từ kho phải sửa được (ngoài phạm vi = 404)."""

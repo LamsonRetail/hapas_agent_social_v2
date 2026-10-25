@@ -510,6 +510,18 @@
     // (trừ web) + số lượt web còn lại × USD một lượt web
     var tranDa = soTien(docForm.gt("tran_usd_thang"), D.tran_da);
     var tran = D.tran_platform == null ? tranDa : Math.min(tranDa, D.tran_platform);
+    // Ngân sách bên (25/10/2026, `chi_phi.tran_hieu_luc`): trần hiệu lực ≤ đã tiêu + phần còn của
+    // bên; "còn trống" = phần ngân sách bên chưa chia, trừ phần trần vừa gõ tăng thêm (máy chủ
+    // chặn khi lưu nếu âm — ở đây chỉ báo trước).
+    var B = D.ben;
+    if (B) {
+      tran = Math.min(tran, B.toi_da_tran);
+      var trong = B.con_trong - (tranDa - D.tran_da);
+      ghi("ben-con", trong < -1e-9 ? "0,00 (trần gõ vượt " + soVn(-trong, 2) + ")" : soVn(Math.max(trong, 0), 2),
+        r4(trong));
+      var dongBen = o("ben-con");
+      if (dongBen && dongBen.parentNode) dongBen.parentNode.classList.toggle("ns-ben-con--vuot", trong < -1e-9);
+    }
     var ngay = D.co_lich ? (D.luot_con_lai || 0) : (D.ngay_con_lai || 0);
     var luotWeb = D.luot_web_con_lai != null ? D.luot_web_con_lai : ngay;
     var webCon = luotWeb * kq.web;

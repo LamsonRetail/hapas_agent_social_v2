@@ -120,12 +120,14 @@ def dong_lich(cac_lich: list[dict], du_an: dict, nguon: list[dict], bay_gio: dt.
 
 
 def tong_quan(cac_lich: list[dict], du_an: dict, nguon: list[dict], da_tieu: float,
-              tran_pf: float | None, bay_gio: dt.datetime, chi: dict | None = None) -> dict:
+              tran_pf: float | None, bay_gio: dt.datetime, chi: dict | None = None, *,
+              ben: dict | None = None) -> dict:
     """Tháng này theo các lịch đang bật: số lượt còn lại, USD tối đa của lịch (mỗi lượt kẹp ở trần
     console khi biết — `chi`), cả tháng so trần; `tong_thuc` = đã tiêu + lượt còn lại × trung vị
-    chi thật (18/10/2026)."""
+    chi thật (18/10/2026). `ben` (25/10/2026): ngân sách bên (`chi_phi.ben_cua`) — trần gồm phần
+    còn của bên."""
     bang = CP.bang_cau_hinh(du_an)
-    db = CP.du_bao(nguon, da_tieu, float(du_an.get("tran_usd_thang") or 0), tran_pf, bay_gio)
+    db = CP.du_bao(nguon, da_tieu, float(du_an.get("tran_usd_thang") or 0), tran_pf, bay_gio, ben)
     dl = CP.du_bao_lich(cac_lich, bang, nguon, bay_gio)
     if not dl.get("co_lich"):
         return {"co_lich": False, "tran": db["tran"], "da_tieu": float(da_tieu or 0)}
@@ -148,7 +150,7 @@ def tong_quan(cac_lich: list[dict], du_an: dict, nguon: list[dict], da_tieu: flo
 # ───────────────────────────── xem trước biểu mẫu ─────────────────────────────
 def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_tieu: float,
               tran_pf: float | None, bay_gio: dt.datetime, lid: int | None = None,
-              chi: dict | None = None) -> dict:
+              chi: dict | None = None, *, ben: dict | None = None) -> dict:
     """`d` = lịch đã kiểm (`LQ.chuan_hoa`), `cac_lich` = mọi lịch của dự án (lịch đang sửa `lid`
     được thay bằng `d`). `chi` (18/10/2026): như `dong_lich` — mức tối đa mỗi lượt kẹp ở trần
     console, thêm chi thật trung vị. -> {mo_ta, tan_suat, moc: [{chu, con, nhuong}], ghi_moc,
@@ -186,7 +188,7 @@ def xem_truoc(d: dict, cac_lich: list[dict], du_an: dict, nguon: list[dict], da_
     usd_khac = sum(thang.get(x.get("id"), 0)
                    * _kep_luot(CP.uoc_lich(x, bang, nguon)["moi_luot"], chi)
                    for x in khac if x.get("bat"))
-    db = CP.du_bao(nguon, da_tieu, float(du_an.get("tran_usd_thang") or 0), tran_pf, bay_gio)
+    db = CP.du_bao(nguon, da_tieu, float(du_an.get("tran_usd_thang") or 0), tran_pf, bay_gio, ben)
     # Báo & Web (16/10/2026): lịch thường chạy web ≤ 1 lượt/ngày (`CP.luot_web_thuong`, cả dự án —
     # hai lịch cùng ngày vẫn một lượt web); lịch chiến dịch đã gồm web trong `moi_luot`.
     het_thang = _ket_thuc_thang(bay_gio)

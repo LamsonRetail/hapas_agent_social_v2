@@ -226,6 +226,9 @@ _HAM_KHO = ("quyen_cua", "cac_du_an", "doc_du_an", "bai_trong_khoang", "binh_lua
             "binh_luan_hop_le_gon", "bai_theo_khoa", "ngu_canh_bai", "cac_nguon", "da_tieu_thang",
             "tran_platform", "cac_luot", "tien_do_gan_nhan", "luot_xong_moi_nhat",
             "do_phu_gan_nhat", "han_muc_apify", "nhip_dang",
+            # 25/10/2026: ngân sách tháng các bên (đọc don_vi + du_an + luot_quet — role mark
+            # có SELECT).
+            "ngan_sach_ben",
             # 22/10/2026 (`sheet_qc_tool`): union_id Lark ghi lúc đăng nhập dashboard — đối chiếu danh
             # tính khi email danh bạ không phải enterprise_email.
             "union_id_cua")
@@ -745,6 +748,20 @@ def _goi_snap(kho) -> dict | None:
         return None
 
 
+def _ns_ben(kho) -> dict:
+    """Ngân sách tháng các bên (`kho.ngan_sach_ben`, 25/10/2026) như trang (`app._ngan_sach_ben`):
+    kho chưa có hàm / lỗi kho → {} (trần như trước — Mark vẫn chặn quét phía `theo_doi`)."""
+    ham = getattr(kho, "ngan_sach_ben", None)
+    if ham is None:
+        return {}
+    try:
+        return dict(ham() or {})
+    except Exception as e:
+        if not _loi_kho(e):
+            raise
+        return {}
+
+
 def _nhip(kho, ma: str) -> dict:
     """Nhịp đăng từng nguồn (`kho.nhip_dang`) như trang (`app._nhip_dang`): lỗi kho → {}."""
     ham = getattr(kho, "nhip_dang", None)
@@ -767,7 +784,8 @@ def _lich_du_an(kho, ma: str) -> list[dict]:
         return []
 
 
-def _khoi_ngan_sach(kho, d: dict, da_tieu: dict, dat_lai, bay_gio) -> tuple[dict, list, list]:
+def _khoi_ngan_sach(kho, d: dict, da_tieu: dict, dat_lai, bay_gio,
+                    ns_ben: dict | None = None) -> tuple[dict, list, list]:
     """`chi_phi.khoi_ngan_sach` của MỘT dự án với ĐÚNG các đầu vào trang Ngân sách đọc
     (`app.trang_ngan_sach`). -> (khối, lịch, lượt gần nhất)."""
     ma = d["ma"]
@@ -784,7 +802,7 @@ def _khoi_ngan_sach(kho, d: dict, da_tieu: dict, dat_lai, bay_gio) -> tuple[dict
                 raise
     k = CP.khoi_ngan_sach(d, float(da_tieu.get(ma, 0.0)), kho.tran_platform(ma),
                           kho.cac_nguon(ma), _nhip(kho, ma), luot_gan, cac_lich, lan_cuoi,
-                          dat_lai, bay_gio)
+                          dat_lai, bay_gio, CP.ben_cua(d, ns_ben))
     return k, cac_lich, luot_gan
 
 
@@ -802,18 +820,19 @@ def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio,
     tieu = float(da_tieu.get(ma, 0.0))
     snap = _goi_snap(kho)
     dat_lai = CP._vn((snap or {}).get("chu_ky_den"))
-    k, cac_lich, luot_gan = _khoi_ngan_sach(kho, du_an, da_tieu, dat_lai, bay_gio)
+    ns_ben = _ns_ben(kho)
+    k, cac_lich, luot_gan = _khoi_ngan_sach(kho, du_an, da_tieu, dat_lai, bay_gio, ns_ben)
     db, dbt, thuc = k["db"], k["du_bao"], k["thuc"]
     # Như trang Lịch quét: nguồn đã co, mức tối đa mỗi lượt kẹp ở trần console, chi thật trung vị.
     tq = TL.tong_quan(cac_lich, du_an, k["nguon"], tieu, kho.tran_platform(ma), bay_gio,
-                      CP.chi_lich(luot_gan, snap, bay_gio))
+                      CP.chi_lich(luot_gan, snap, bay_gio), ben=CP.ben_cua(du_an, ns_ben))
     luot, tong = kho.cac_luot(ma, 1, min(top, LUOT_TOI_DA))
     # Gói Apify (18/10/2026): trần THẬT của cả tài khoản — như khối "Gói Apify" trang Ngân sách:
     # trần nội bộ = tổng trần các dự án ĐANG BẬT, dự báo tới lúc đặt lại gộp mọi dự án đang bật.
     goi = {"co": False}
     if snap:
         khoi = [(du_an, k) if d["ma"] == ma else (d, _khoi_ngan_sach(kho, d, da_tieu, dat_lai,
-                                                                     bay_gio)[0])
+                                                                     bay_gio, ns_ben)[0])
                 for d in (ds if ds is not None else kho.cac_du_an())]
         if not any(d["ma"] == ma for d, _ in khoi):
             khoi.append((du_an, k))
@@ -838,6 +857,13 @@ def _chi_phi(kho, du_an: dict, quan_ly: bool, top: int, bay_gio,
         "thang": bay_gio.strftime("%m/%Y"),
         "da_tieu_usd": round(tieu, 4), "tran_usd": db["tran"],
         "tran_du_an_usd": db["tran_du_an"], "tran_platform_usd": db["tran_platform"],
+        # Ngân sách tháng của bên (25/10/2026): None = bên chưa đặt; `tran_usd` đã gồm phần còn
+        # của bên.
+        "ngan_sach_ben": ({"tran_usd": db["ben"]["tran"],
+                           "da_tieu_ca_ben_usd": db["ben"]["da_tieu"],
+                           "con_usd": db["ben"]["con"]} if db.get("ben") else None),
+        "tran_giu_boi": {"ben": "ngân sách bên", "platform": "trần platform"}.get(
+            db.get("chan_boi"), "trần dự án"),
         "con_lai_theo_nguon_usd": db["con_lai"], "du_bao_thang_usd": db["du_bao_thang"],
         "vuot_tran": db["vuot"], "vuot_usd": db["vuot_usd"],
         "pt_da_tieu": round(min(100.0, 100.0 * tieu / db["tran"]), 1) if db["tran"] else None,
@@ -881,7 +907,8 @@ def _lich(kho, du_an: dict, quan_ly: bool, bay_gio) -> dict:
     luot_gan, _ = kho.cac_luot(ma, 1, 20, ghi_chu=False)
     chi = CP.chi_lich(luot_gan, _goi_snap(kho), bay_gio)
     ds = TL.dong_lich(cac, du_an, nguon, bay_gio, quan_ly, LOI_CHUNG, chi)
-    tq = TL.tong_quan(cac, du_an, nguon, tieu, kho.tran_platform(ma), bay_gio, chi)
+    tq = TL.tong_quan(cac, du_an, nguon, tieu, kho.tran_platform(ma), bay_gio, chi,
+                      ben=CP.ben_cua(du_an, _ns_ben(kho)))
     return {"tong_quan_thang": tq, "lich": [{
         "id": x.get("id"), "ten": x.get("ten") or x.get("mo_ta"), "kieu": x.get("kieu_ten"),
         "mo_ta": x.get("mo_ta"), "trang_thai": x.get("tt_nhan"), "moc_ke": x.get("ke_chu"),
