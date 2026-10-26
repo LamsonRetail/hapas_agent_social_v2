@@ -469,6 +469,59 @@ Meta: Trang + Instagram) — `dashboard/README.md` mục "Kênh đăng của qu�
    `select count(*) filter (where ten is not null), count(*) from qc_kenh;` — trang Quảng cáo, khối
    "Theo kênh đăng" (dòng phụ "x% chi tiêu đã biết kênh").
 
+## 13. Khán giả theo chiến dịch (26/10/2026, chủ dự án chốt) — cần người duyệt trước khi chạy trên VPS
+
+Khối Khán giả của trang Quảng cáo theo lọc tên chiến dịch + ô chọn một chiến dịch; tỉnh TikTok có tên
+— `dashboard/README.md` mục "Khán giả theo chiến dịch". Bảng mới `qc_khan_gia_cd` + cột mốc hoàn tất
+`tk_quang_cao.khan_gia_cd_den` (`qc_khan_gia` giữ nguyên, vẫn ghi). Thứ tự: **Postgres → BigQuery →
+mã → đọc lại ngay**. Mã mới đọc cột mốc — chạy bước 1 TRƯỚC khi rsync mã.
+
+```bash
+# 1. Postgres — CHỈ phần mới (role postgres: SET ROLE lang_nghe_chu + GRANT; một giao dịch, chạy lại
+#    không sao; file chặn nhầm DB). Cả schema.sql (mục 7b) cũng đã có đúng các lệnh này. Khoá: ADD
+#    COLUMN tk_quang_cao xin ACCESS EXCLUSIVE (tức thì, dưới lock_timeout 5 s) — tránh 06:25–07:30.
+sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -d lang_nghe \
+  < deploy/lang-nghe/2026-10-26-khan-gia-cd.sql
+sudo -u postgres psql -d lang_nghe -c '\dp qc_khan_gia_cd'   # lang_nghe_web arwd, mark r
+sudo -u postgres psql -d lang_nghe -c '\d tk_quang_cao' | grep khan_gia_cd_den
+
+# 2. BigQuery: khối "Khán giả theo chiến dịch" trong bigquery.sql (ALTER tk_quang_cao ADD COLUMN
+#    khan_gia_cd_den + CREATE TABLE IF NOT EXISTS qc_khan_gia_cd; người duyệt rồi mới chạy). Chưa chạy
+#    thì trang "Kết nối BigQuery" báo lỗi riêng qc_khan_gia_cd và cảnh báo bỏ cột mốc của tk_quang_cao.
+
+# 3. Mã dashboard (rsync như dashboard/README.md bước 2) rồi
+sudo systemctl restart lang-nghe-dashboard
+
+# 4. Đọc lại khán giả NGAY (cấp tài khoản + cấp chiến dịch, bỏ qua mốc 7 ngày, KHÔNG trần 20 phút)
+#    — đúng user + .env của bộ hẹn giờ; cùng khoá advisory với lượt đồng bộ (đang có lượt thì chờ tới
+#    --cho-khoa-phut, mặc định 30) và GIỮ khoá suốt lúc chạy (≈ 3.443 chiến dịch: có thể vài chục
+#    phút) — chạy ngoài 06:25–07:30. Không đụng cờ "Đồng bộ ngay" / mốc lượt của thẻ kết nối; xong
+#    thì đẩy BigQuery (--khong-bq để bỏ). Bị ngắt giữa chừng: tài khoản đã xong giữ mốc mới, tài
+#    khoản đang dở giữ cửa sổ cũ — lượt hằng ngày đọc tiếp.
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env \
+  -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.tiktok_ads khan-gia
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env \
+  -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.meta_ads khan-gia
+#    Một tài khoản: thêm --tk <advertiser_id | act_…> (lặp lại được).
+
+# 5. Kiểm
+sudo -u lang_nghe_web psql -d lang_nghe -c "select t.advertiser_id, t.khan_gia_cd_den, count(distinct k.campaign_id), count(*) from tk_quang_cao t join qc_khan_gia_cd k on k.advertiser_id = t.advertiser_id and k.den = t.khan_gia_cd_den group by 1, 2 order by 1"
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env \
+  -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.tiktok_ads vung-chua-ten
+```
+
+- Mỗi dòng kết quả `khan-gia` là JSON `{"so_dong", "so_tk", "loi"}`; `loi` liệt kê MỌI tài khoản /
+  phần cấp chiến dịch lỗi. Lượt hằng ngày in thêm `"khan_gia_cd": {"xong", "con", "loi"}` (con = số
+  tài khoản để lượt sau vì hết 20 phút).
+- Mốc hoàn tất `tk_quang_cao.khan_gia_cd_den`: chỉ dời khi đọc ĐỦ mọi lô × mọi chiều của tài khoản;
+  trang / API / BigQuery chỉ dùng cửa sổ có den = mốc. Lượt lỗi hoặc bị giết (SIGTERM, OOM, hết giờ)
+  để lại dòng den mới hơn mốc — vô hình; lần hoàn tất kế tiếp xoá.
+- `vung-chua-ten` liệt kê mã tỉnh TikTok đã có trong kho mà `dashboard/vung_tiktok.py` chưa có tên
+  (trang hiện "Mã vùng …") — tra `admin1CodesASCII.txt` của GeoNames, bổ sung bảng đó rồi lên code;
+  không cần API.
+- Dung lượng: Postgres chỉ giữ cửa sổ hoàn tất mới nhất mỗi tài khoản (bộ đồng bộ tự xoá — quyền
+  DELETE chỉ trên bảng này); BigQuery giữ đủ lịch sử.
+
 ## Vận hành
 
 - **Sao lưu:**

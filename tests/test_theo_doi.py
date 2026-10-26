@@ -945,8 +945,9 @@ def test_kho_theo_quy_chuan_mo_ta_bi():
     # don_vi + quyen (phân quyền theo bên, 19/10/2026), ket_noi_ngoai + tk_quang_cao + qc_tk_ngay +
     # qc_campaign_ngay + qc_ad_ngay + qc_khan_gia (TikTok Ads, 19/10/2026),
     # yeu_cau_tuc_thi (số tức thì của Mark, 20/10/2026), yeu_cau_sheet_qc (xuất Lark Sheet quảng cáo,
-    # 20/10/2026), qc_ad_kenh + qc_kenh (kênh đăng của quảng cáo, 22/10/2026)
-    assert len(bang) == 25
+    # 20/10/2026), qc_ad_kenh + qc_kenh (kênh đăng của quảng cáo, 22/10/2026), qc_khan_gia_cd (khán giả
+    # theo chiến dịch, 26/10/2026)
+    assert len(bang) == 26
     # Cột thêm bằng ALTER (không nằm trong khối CREATE) cũng phải có mô tả.
     assert re.search(r"COMMENT ON COLUMN luot_quet\.lich_id IS '.{10,}';", sql)
     for ten, khoi in bang:

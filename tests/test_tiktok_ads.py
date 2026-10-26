@@ -71,6 +71,7 @@ class GiaTikTok:
         self.thu_hoi: list[str] = []
         self.dang_ky: list[dict] = []
         self.doi_ma: list[dict] = []
+        self.kg_cd: list[tuple] = []        # (adv, chiều, mã chiến dịch) của khán giả cấp chiến dịch
 
     def transport(self):
         return httpx.MockTransport(self.xu_ly)
@@ -122,9 +123,22 @@ class GiaTikTok:
             chieu = dims[1]
             gt = {"age": ["AGE_18_24", "AGE_25_34"], "gender": ["FEMALE", "MALE"],
                   "province_id": ["1581129", "-1"], "platform": ["ANDROID", "IPHONE"]}[chieu]
-            rows = [{"dimensions": {"advertiser_id": adv, chieu: g},
-                     "metrics": self._chi_so(a["metrics"], i, 1000 * (i + 1))}
-                    for i, g in enumerate(gt)]
+            if dims[0] == "campaign_id":
+                # 26/10/2026: khán giả cấp chiến dịch — AUCTION_CAMPAIGN, lọc ≤ 100 campaign_ids
+                # (chuỗi JSON như báo cáo BASIC); mỗi chiến dịch đủ các giá trị, số theo thứ tự mã.
+                assert cap == "AUCTION_CAMPAIGN" and len(dims) == 2
+                loc = a["filtering"][0]
+                assert loc["field_name"] == "campaign_ids" and loc["filter_type"] == "IN"
+                ids = json.loads(loc["filter_value"])
+                assert 1 <= len(ids) <= TA.LO_ID
+                self.kg_cd.append((adv, chieu, tuple(ids)))
+                rows = [{"dimensions": {"campaign_id": x, chieu: g},
+                         "metrics": self._chi_so(a["metrics"], i, 100 * (j + 1) + i)}
+                        for j, x in enumerate(ids) for i, g in enumerate(gt)]
+            else:
+                rows = [{"dimensions": {"advertiser_id": adv, chieu: g},
+                         "metrics": self._chi_so(a["metrics"], i, 1000 * (i + 1))}
+                        for i, g in enumerate(gt)]
         elif cap == "AUCTION_ADVERTISER":
             rows = [{"dimensions": {"advertiser_id": adv, "stat_time_day": f"{d} 00:00:00"},
                      "metrics": self._chi_so(a["metrics"], d.day, 1000 + d.day)}
@@ -364,7 +378,8 @@ class GiaKhoQC:
                                 "mui_gio": t.get("mui_gio") or "Asia/Ho_Chi_Minh",
                                 "dang_dong_bo": True, "con_quyen": True, "nap_lui_xong_luc": None,
                                 "nap_lui_tu": None,
-                                "khan_gia_luc": None, "thay_lan_dau": BAY, "thay_cuoi": BAY,
+                                "khan_gia_luc": None, "khan_gia_cd_den": None,
+                                "thay_lan_dau": BAY, "thay_cuoi": BAY,
                                 "cap_nhat_luc": BAY, "nen_tang": nen,
                                 "duyet": nen != "meta" or adv in duyet_moi}
             else:
@@ -446,6 +461,84 @@ class GiaKhoQC:
 
     def ghi_khan_gia(self, rows):
         return self._ghi("qc_khan_gia", rows)
+
+    # 26/10/2026: khán giả theo chiến dịch — cùng nghĩa SQL của kho_qc (mốc hoàn tất
+    # tk_quang_cao.khan_gia_cd_den; cap_nhat_luc = "now()" tăng dần của kho giả).
+    def _gio(self):
+        self._tick = getattr(self, "_tick", 0) + 1
+        return self._tick
+
+    def ghi_khan_gia_cd(self, rows):
+        luc = self._gio()
+        return self._ghi("qc_khan_gia_cd", [{**r, "cap_nhat_luc": luc} for r in rows])
+
+    def cd_co_chay(self, adv, tu, den, n):
+        tong: dict = {}
+        for r in self.bang["qc_campaign_ngay"].values():
+            if r["advertiser_id"] == adv and tu <= r["ngay"] <= den:
+                tong[r["campaign_id"]] = tong.get(r["campaign_id"], 0) + (r.get("hien_thi") or 0)
+        return [k for k, v in sorted(tong.items(), key=lambda x: (-x[1], x[0])) if v > 0][:n]
+
+    def gio_kho(self):
+        return self._gio()
+
+    def xong_khan_gia_cd(self, adv, den, tu_luc):
+        b = self.bang["qc_khan_gia_cd"]
+        for k in [k for k, r in b.items() if r["advertiser_id"] == adv
+                  and (r["den"] != den or r["cap_nhat_luc"] < tu_luc)]:
+            del b[k]
+        luc = self._gio()
+        n = 0
+        for r in b.values():
+            if r["advertiser_id"] == adv and r["den"] == den:
+                r["cap_nhat_luc"] = luc
+                n += 1
+        self.tk[adv]["khan_gia_cd_den"] = den
+        return n
+
+    def _moi_cd(self, ids):
+        moc = {a: t.get("khan_gia_cd_den") for a, t in self.tk.items() if a in ids}
+        return [r for r in self.bang["qc_khan_gia_cd"].values()
+                if moc.get(r["advertiser_id"]) is not None
+                and r["den"] == moc[r["advertiser_id"]]]
+
+    def ds_cd_khan_gia(self, ids):
+        cd = {(r["advertiser_id"], r["campaign_id"]): (r["tu"], r["den"]) for r in self._moi_cd(ids)}
+        ds = []
+        for (adv, cid), (tu, den) in cd.items():
+            rs = [r for r in self.bang["qc_campaign_ngay"].values() if r["campaign_id"] == cid
+                  and r["advertiser_id"] == adv and tu <= r["ngay"] <= den]
+            cong = self._cong(rs)
+            ds.append({"advertiser_id": adv, "campaign_id": cid, "tu": tu, "den": den,
+                       "ten": max(rs, key=lambda r: r["ngay"])["ten"] if rs else None,
+                       "chi": cong["chi"], "hien_thi": cong["hien_thi"]})
+        ds.sort(key=lambda x: (-(x["hien_thi"] or 0), x["campaign_id"]))
+        thieu = sorted({r["advertiser_id"] for r in self.bang["qc_khan_gia"].values()
+                        if r["advertiser_id"] in ids
+                        and not self.tk.get(r["advertiser_id"], {}).get("khan_gia_cd_den")})
+        return {"ds": ds, "tk_thieu": thieu}
+
+    def qc_khan_gia_cd(self, ids, cds):
+        self.goi_kg_cd = [*getattr(self, "goi_kg_cd", []), (tuple(ids), tuple(cds))]
+        if not ids or not cds:
+            return {"rows": [], "tu": None, "den": None}
+        nhom: dict = {}
+        for r in self._moi_cd(ids):
+            if r["campaign_id"] in cds:
+                nhom.setdefault((r["chieu"], r["gia_tri"]), []).append(r)
+        ra = [{"chieu": c, "gia_tri": g, "tu": min(x["tu"] for x in rs),
+               "den": max(x["den"] for x in rs), **self._cong(rs)} for (c, g), rs in nhom.items()]
+        return {"rows": ra, "tu": min((r["tu"] for r in ra), default=None),
+                "den": max((r["den"] for r in ra), default=None)}
+
+    def gia_tri_khan_gia(self, chieu):
+        tong: dict = {}
+        for b in ("qc_khan_gia", "qc_khan_gia_cd"):
+            for r in self.bang[b].values():
+                if r["chieu"] == chieu:
+                    tong[r["gia_tri"]] = tong.get(r["gia_tri"], 0) + (r.get("hien_thi") or 0)
+        return [{"gia_tri": g, "hien_thi": h}
+                for g, h in sorted(tong.items(), key=lambda x: (-x[1], x[0]))]
 
     # đọc
     @staticmethod

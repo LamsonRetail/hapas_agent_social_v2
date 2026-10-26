@@ -425,6 +425,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.tk_quang_cao`
   cap_nhat_luc      TIMESTAMP OPTIONS(description='Lần sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery (bảng nhỏ — nạp lại toàn bộ).'),
   nen_tang          STRING    OPTIONS(description='Nền tảng quảng cáo. Giá trị: tiktok, meta (từ 20/10/2026). NULL ở dòng ghi trước khi dashboard đẩy cột này (lượt đồng bộ kế tiếp nạp lại toàn bảng).'),
   duyet             BOOL      OPTIONS(description='TRUE: được đọc số (TikTok luôn TRUE; Meta = quản trị viên đã duyệt tài khoản). FALSE: tài khoản Meta chưa duyệt — không có số trong qc_*. NULL ở dòng ghi trước khi dashboard đẩy cột này.'),
+  khan_gia_cd_den   DATE      OPTIONS(description='Ngày cuối (den) của cửa sổ khán giả CẤP CHIẾN DỊCH đã đọc ĐỦ gần nhất (múi giờ tài khoản; đọc lại mỗi 7 ngày, từ 26/10/2026) — dòng qc_khan_gia_cd của tài khoản có den = mốc này là cửa sổ hoàn tất mới nhất. NULL khi chưa có cửa sổ nào hoàn tất hoặc dòng ghi trước khi dashboard đẩy cột này.'),
   dong_bo_luc       TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 OPTIONS(description='''[Lớp] Dim
@@ -667,6 +668,59 @@ OPTIONS(description='''[Lớp] Dim
 [Dùng khi] Gắn tên kênh vào số theo kênh (join từ qc_ad_kenh)
 [Không dùng khi] Số theo kênh → dùng SOCIAL_LISTENING.qc_ad_kenh join SOCIAL_LISTENING.qc_ad_ngay; nguồn lắng nghe mạng xã hội → dùng SOCIAL_LISTENING.nguon
 [Lưu ý] Meta: token thiếu pages_read_engagement thì không có dòng hoặc ten NULL (dashboard hiện "Page <id>" / "IG <id>").''');
+
+-- Khán giả theo chiến dịch (26/10/2026, chủ dự án chốt): bảng mới, chạy cùng lúc với
+-- deploy/lang-nghe/2026-10-26-khan-gia-cd.sql trên Postgres, TRƯỚC khi bật mã mới (dong_bo_bq đẩy
+-- qc_khan_gia_cd sau qc_khan_gia; chưa chạy khối này thì bảng này báo lỗi trên trang Kết nối BigQuery,
+-- bảng khác vẫn đẩy). Cột tiền theo BQ_QC_XUAT_TIEN như mọi bảng qc_*. Postgres chỉ giữ cửa sổ hoàn
+-- tất mới nhất; BigQuery MERGE tăng dần, không xoá → giữ đủ lịch sử từ 26/10/2026. Chỉ dòng của cửa
+-- sổ đã hoàn tất (den ≤ tk_quang_cao.khan_gia_cd_den) được đẩy. Bảng tk_quang_cao đã tạo thì thêm cột
+-- mốc bằng ALTER dưới (chưa chạy: dong_bo_bq bỏ cột đó khỏi lượt + cảnh báo).
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.tk_quang_cao`
+  ADD COLUMN IF NOT EXISTS khan_gia_cd_den DATE OPTIONS(description='Ngày cuối (den) của cửa sổ khán giả CẤP CHIẾN DỊCH đã đọc ĐỦ gần nhất (múi giờ tài khoản; đọc lại mỗi 7 ngày, từ 26/10/2026) — dòng qc_khan_gia_cd của tài khoản có den = mốc này là cửa sổ hoàn tất mới nhất. NULL khi chưa có cửa sổ nào hoàn tất hoặc dòng ghi trước khi dashboard đẩy cột này.');
+CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia_cd`
+(
+  advertiser_id     STRING    OPTIONS(description='Tài khoản quảng cáo của chiến dịch (TikTok chuỗi số; Meta act_<số>). Một phần PK. FK → tk_quang_cao.advertiser_id.'),
+  campaign_id       STRING    OPTIONS(description='Mã chiến dịch (TikTok campaign_id; Meta campaign id, chuỗi số). Một phần PK. Join: → qc_campaign_ngay.campaign_id (cùng advertiser_id).'),
+  tu                DATE      OPTIONS(description='Ngày đầu cửa sổ 30 ngày (múi giờ tài khoản, thường GMT+7). Một phần PK.'),
+  den               DATE      OPTIONS(description='Ngày cuối cửa sổ (múi giờ tài khoản, = hôm qua lúc đọc). Một phần PK. Cột phân vùng.'),
+  chieu             STRING    OPTIONS(description='Chiều khán giả. Một phần PK. Giá trị: age, gender (TikTok + Meta), province_id, platform (TikTok: tỉnh, thiết bị), region, publisher_platform, platform_position (Meta).'),
+  gia_tri           STRING    OPTIONS(description='Giá trị của chiều, cùng mã với qc_khan_gia.gia_tri: TikTok age AGE_13_17…AGE_55_100, NONE; gender FEMALE, MALE, NONE; province_id mã vùng số GeoNames (-1 không rõ; tên tỉnh ở dashboard/vung_tiktok.py); platform ANDROID, IPHONE, IPAD, WAP, UNKNOWN. Meta: age cùng mã TikTok tới 45–54, rồi 55-64, 65+; region tên vùng Meta; publisher_platform; platform_position <nền tảng>/<vị trí>. Một phần PK.'),
+  chi               NUMERIC   OPTIONS(description='Chi tiêu quảng cáo (spend) của chiến dịch cho giá trị này, theo tiền tệ của tài khoản (tk_quang_cao.tien_te), nền tảng báo, chưa VAT. NULL khi nền tảng không trả. CHỈ SỐ TIỀN — NULL trên BigQuery khi dashboard đặt BQ_QC_XUAT_TIEN khác 1.'),
+  hien_thi          INT64     OPTIONS(description='Lượt hiển thị (impressions), lượt. Cộng được qua chiến dịch. NULL khi nền tảng không trả.'),
+  reach             INT64     OPTIONS(description='Người tiếp cận (reach) của chiến dịch trong cửa sổ cho giá trị này, người. TikTok luôn NULL (báo cáo khán giả không trả). Cộng nhiều dòng / nhiều chiến dịch là đếm trùng người — muốn reach cả tài khoản dùng qc_khan_gia. NULL khi Meta gộp mã trùng.'),
+  click             INT64     OPTIONS(description='Lượt bấm (clicks, đích đến), lượt. NULL khi nền tảng không trả.'),
+  ket_qua           INT64     OPTIONS(description='Kết quả theo mục tiêu tối ưu: TikTok NULL (báo cáo khán giả không xin result); Meta luôn NULL. Giữ cột để cùng dạng với qc_khan_gia.'),
+  chuyen_doi        INT64     OPTIONS(description='Chuyển đổi, lượt: TikTok conversion; Meta action mua (purchase > omni_purchase > offsite_conversion.fb_pixel_purchase — tên đầu tiên có). NULL khi nền tảng không trả hoặc Meta ẩn (quyền riêng tư).'),
+  view_video        INT64     OPTIONS(description='Lượt xem video, lượt: TikTok video_play_actions; Meta action video_view (xem ≥ 3 giây). NULL khi nền tảng không trả.'),
+  view_hai_giay     INT64     OPTIONS(description='Lượt xem ≥ 2 giây, lượt: TikTok NULL (báo cáo khán giả không xin video_watched_2s); Meta NULL.'),
+  view_sau_giay     INT64     OPTIONS(description='Lượt xem ≥ 6 giây (TikTok video_watched_6s; Meta NULL), lượt. NULL khi nền tảng không trả.'),
+  view_het          INT64     OPTIONS(description='Lượt xem hết video, lượt: TikTok NULL (báo cáo khán giả không xin video_views_p100); Meta video_p100_watched_actions. NULL khi nền tảng không trả.'),
+  engaged_view      INT64     OPTIONS(description='Lượt xem tương tác, lượt: TikTok NULL (báo cáo khán giả không xin); Meta ThruPlay (video_thruplay_watched_actions). NULL khi nền tảng không trả.'),
+  thich             INT64     OPTIONS(description='Lượt thích / cảm xúc trên quảng cáo (TikTok likes; Meta action post_reaction), lượt. NULL khi nền tảng không trả.'),
+  binh_luan         INT64     OPTIONS(description='Bình luận trên quảng cáo (TikTok comments; Meta action comment), bình luận. NULL khi nền tảng không trả.'),
+  chia_se           INT64     OPTIONS(description='Lượt chia sẻ (TikTok shares; Meta action post), lượt. NULL khi nền tảng không trả.'),
+  follow            INT64     OPTIONS(description='Lượt theo dõi từ quảng cáo, lượt: TikTok follows; Meta action like (thích Trang). NULL khi nền tảng không trả.'),
+  vao_ho_so         INT64     OPTIONS(description='Lượt vào trang hồ sơ kênh từ quảng cáo (TikTok profile_visits; Meta NULL), lượt. NULL khi nền tảng không trả.'),
+  mua_shop          INT64     OPTIONS(description='Lượt mua TikTok Shop gán cho quảng cáo, lượt mua: TikTok NULL (báo cáo khán giả không xin onsite_shopping); Meta NULL (lượt mua Meta ở chuyen_doi).'),
+  gia_tri_mua_shop  NUMERIC   OPTIONS(description='Doanh thu gán cho quảng cáo theo tiền tệ tài khoản, chưa VAT: TikTok NULL (báo cáo khán giả không xin); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi), NULL khi Meta ẩn. CHỈ SỐ TIỀN — NULL trên BigQuery khi BQ_QC_XUAT_TIEN khác 1.'),
+  chi_so            STRING    OPTIONS(description='Chuỗi JSON của cột JSONB chi_so bên Postgres: MỌI chỉ số nền tảng trả cho dòng {tên chỉ số: số} ("-" của TikTok → null; không gồm campaign_id và mã chiều). TikTok: 13 chỉ số khán giả; Meta: trường Insights đã xin, action thành <trường>__<action_type>. ctr, cpm, reach không cộng được qua dòng. Đọc bằng JSON_VALUE(chi_so, \'$.cpm\'). Khoá tiền (spend, cpm, *_value, action_values__*) chỉ có khi BQ_QC_XUAT_TIEN=1.'),
+  cap_nhat_luc      TIMESTAMP OPTIONS(description='Lần bộ đồng bộ TikTok / Meta ghi/sửa dòng ở Postgres (UTC) — mốc đẩy BigQuery (đẩy dòng có cap_nhat_luc mới hơn lần trước).'),
+  dong_bo_luc       TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
+)
+PARTITION BY den
+CLUSTER BY advertiser_id, campaign_id, chieu
+OPTIONS(description='''[Lớp] Raw
+[Mục đích] Khán giả quảng cáo TikTok / Meta của TỪNG chiến dịch (tuổi, giới tính, tỉnh/thành, nền tảng) trong cửa sổ 30 ngày.
+[Grain] 1 dòng = 1 chiến dịch × 1 cửa sổ (tu..den) × 1 chiều × 1 giá trị
+[Khoá] PK: advertiser_id + campaign_id + tu + den + chieu + gia_tri | Join: advertiser_id → tk_quang_cao.advertiser_id; (advertiser_id, campaign_id) → qc_campaign_ngay
+[Nguồn] Postgres lang_nghe.public.qc_khan_gia_cd trên VPS Mark; TikTok for Business MCP report_integrated_get (AUDIENCE, AUCTION_CAMPAIGN, chiều campaign_id + một chiều khán giả); Meta Ads: Graph API GET act_<id>/insights (level=campaign, breakdowns) — bộ đồng bộ dashboard/tiktok_ads.py, dashboard/meta_ads.py
+[Phạm vi] Chiến dịch CÓ hiển thị trong cửa sổ (≤ 5.000 chiến dịch mỗi tài khoản, nhiều hiển thị trước) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 26/10/2026
+[Đã xử lý] 13 chỉ số khán giả, cùng luật đổi số với qc_khan_gia; Meta mã trùng sau khi đổi (Unknown/unknown) cộng lại theo từng chiến dịch; cột không có trong báo cáo khán giả NULL; "-" → NULL
+[Refresh] MERGE theo khoá các dòng có cap_nhat_luc mới hơn mốc, sau lượt đồng bộ TikTok 06:30 / Meta 06:45 giờ VN và 6 giờ một lần — CHỈ dòng của cửa sổ đã hoàn tất (den ≤ tk_quang_cao.khan_gia_cd_den); nguồn đọc mỗi 7 ngày mỗi tài khoản sau số hằng ngày; không xoá dòng khi Postgres bỏ cửa sổ cũ
+[Dùng khi] Khán giả của một hoặc vài chiến dịch — lấy cửa sổ den mới nhất của từng tài khoản rồi lọc campaign_id
+[Không dùng khi] Khán giả cả tài khoản (reach không đếm trùng) → dùng SOCIAL_LISTENING.qc_khan_gia; số theo ngày của chiến dịch → dùng SOCIAL_LISTENING.qc_campaign_ngay
+[Lưu ý] Các cửa sổ chồng nhau — KHÔNG cộng nhiều cửa sổ. Cộng nhiều chiến dịch: hiển thị / chi / bấm cộng được, reach thì đếm trùng người. Cửa sổ đọc lại cùng ngày (lệnh khan-gia) có thể còn dòng giá trị cũ mà lần đọc sau không còn.''');
 
 -- ───────────── Meta Ads (20/10/2026) — NÂNG CẤP BẢNG ĐÃ TẠO (người duyệt rồi mới chạy) ─────────────
 -- CREATE … IF NOT EXISTS ở trên không thêm cột / không đổi mô tả của bảng đã có: chạy các lệnh

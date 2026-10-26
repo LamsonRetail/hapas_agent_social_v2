@@ -90,7 +90,7 @@
     <div class="o qc-loc__nen">
       <span class="qc-tk__nhan" id="qc-nen-nhan">Nền tảng</span>
       <nav class="qc-nen" aria-labelledby="qc-nen-nhan" data-o="loc-nen-tang">
-        {% for n in d.cac_nen_tang %}<a class="qc-nen__nut" href="{{ url_cho(nen_tang=n.ma, tk='', cd='') }}"{% if n.ma == d.nen_tang %} aria-current="true"{% endif %}>{% if n.ma != 'tat_ca' %}<span class="qc-cham qc-cham--{{ n.ma }}" aria-hidden="true"></span>{% endif %}{{ n.ten }}</a>{% endfor %}
+        {% for n in d.cac_nen_tang %}<a class="qc-nen__nut" href="{{ url_cho(nen_tang=n.ma, tk='', cd='', kg_cd='') }}"{% if n.ma == d.nen_tang %} aria-current="true"{% endif %}>{% if n.ma != 'tat_ca' %}<span class="qc-cham qc-cham--{{ n.ma }}" aria-hidden="true"></span>{% endif %}{{ n.ten }}</a>{% endfor %}
       </nav>
     </div>
     {% endif %}
@@ -130,13 +130,14 @@
       </div>
     </div>
     {#- 23/10/2026 (MKT: "lọc tên campaign" ở Bộ lọc đầu trang): lọc CẢ TRANG theo tên chiến dịch — KPI,
-        biểu đồ, bảng, kênh, Sheet chỉ tính chiến dịch khớp; Khán giả theo tài khoản nên không theo được.
+        biểu đồ, bảng, kênh, Sheet chỉ tính chiến dịch khớp; 26/10/2026: Khán giả cũng theo (số cấp chiến
+        dịch, cửa sổ riêng).
         Bản 2 (MKT, như Meta Ads Manager): ô gọn "Tên chiến dịch ▾" (tóm tắt "2 điều kiện") mở bảng ba
         dòng — chứa tất cả / chứa một trong / không chứa, các dòng AND. Không JS: mỗi dòng là ô chữ, dấu
         phẩy tách từ khoá; qc.js biến thành ô thẻ (Enter / dấu phẩy → thẻ ✕, Backspace ô trống xoá thẻ
         cuối, thẻ gửi thành tham số lặp lại) + gợi ý tên thật (/api/qc/ten-cd). #}
     <div class="o qc-tcd" data-o="loc-ten-cd">
-      <span class="qc-loc__nhan-dong"><span id="qc-tcd-nhan">Tên chiến dịch</span> <button type="button" class="goi-y" aria-label="Giải thích lọc tên chiến dịch" data-goi-y="Chỉ tính các chiến dịch có tên khớp — không cần gõ dấu, không phân biệt hoa thường; khoảng trắng, dấu _ và / được bỏ qua (gõ “can nhac da 2010” vẫn khớp “CÂN NHẮC_DA 20/10”). Ba dòng kết hợp với nhau bằng VÀ: Chứa tất cả = tên chứa MỌI từ khoá; Chứa một trong = chứa ÍT NHẤT MỘT từ khoá; Không chứa = không chứa từ khoá NÀO. Gõ từ khoá rồi Enter hoặc dấu phẩy để thêm; chọn gợi ý để thêm tên chiến dịch thật. Tối đa {{ TU_KHOA_TOI_DA }} từ khoá mỗi dòng, mỗi từ khoá {{ TU_KHOA_DAI_TOI_DA }} ký tự — phần vượt bị bỏ. Áp vào số tổng, biểu đồ, TikTok và Meta, bảng chiến dịch / quảng cáo, kênh đăng và Lark Sheet; kỳ trước so với các chiến dịch khớp của kỳ trước. KHÔNG áp vào Khán giả (số khán giả chỉ có theo tài khoản).">i</button></span>
+      <span class="qc-loc__nhan-dong"><span id="qc-tcd-nhan">Tên chiến dịch</span> <button type="button" class="goi-y" aria-label="Giải thích lọc tên chiến dịch" data-goi-y="Chỉ tính các chiến dịch có tên khớp — không cần gõ dấu, không phân biệt hoa thường; khoảng trắng, dấu _ và / được bỏ qua (gõ “can nhac da 2010” vẫn khớp “CÂN NHẮC_DA 20/10”). Ba dòng kết hợp với nhau bằng VÀ: Chứa tất cả = tên chứa MỌI từ khoá; Chứa một trong = chứa ÍT NHẤT MỘT từ khoá; Không chứa = không chứa từ khoá NÀO. Gõ từ khoá rồi Enter hoặc dấu phẩy để thêm; chọn gợi ý để thêm tên chiến dịch thật. Tối đa {{ TU_KHOA_TOI_DA }} từ khoá mỗi dòng, mỗi từ khoá {{ TU_KHOA_DAI_TOI_DA }} ký tự — phần vượt bị bỏ. Áp vào số tổng, biểu đồ, TikTok và Meta, bảng chiến dịch / quảng cáo, kênh đăng và Lark Sheet; kỳ trước so với các chiến dịch khớp của kỳ trước. Khán giả cũng chỉ cộng các chiến dịch khớp (số khán giả theo chiến dịch, cửa sổ 30 ngày riêng của khối đó).">i</button></span>
       <details class="qc-tk__khung qc-tcd__khung">
         <summary class="qc-tk__tom qc-tcd__tom" aria-labelledby="qc-tcd-nhan qc-tcd-gia-tri"><span class="qc-tk__gia-tri" id="qc-tcd-gia-tri" data-trong="Mọi chiến dịch">{{ (so_dk ~ ' điều kiện') if so_dk else 'Mọi chiến dịch' }}</span></summary>
         <div class="qc-tk__bang qc-tcd__bang">
@@ -426,15 +427,32 @@
 {#- 23/10/2026 (chủ dự án): "Theo kênh đăng" đặt SAU "Chiến dịch và quảng cáo". #}
 {% include "_kenh_dang.html" %}
 
-<section class="the-khoi cach-duoi" aria-labelledby="qc-kg-tieu-de">
+<section class="the-khoi cach-duoi" id="khan-gia" aria-labelledby="qc-kg-tieu-de">
   <div class="muc">
     <h2 class="muc__ten" id="qc-kg-tieu-de">Khán giả</h2>
-    <button type="button" class="goi-y" data-goi-y="Phân bố lượt hiển thị trong cửa sổ 30 ngày gần nhất (đọc lại mỗi tuần) — không theo khoảng ngày đang lọc. TikTok: tuổi, giới tính, tỉnh/thành (mã vùng), thiết bị. Meta: tuổi, giới tính, vùng, nền tảng, vị trí. Cùng nhãn (vd Nữ) thì cộng hai nền tảng.">i</button>
+    <button type="button" class="goi-y" data-goi-y="Phân bố lượt hiển thị trong cửa sổ 30 ngày gần nhất (đọc lại mỗi tuần) — không theo khoảng ngày đang lọc. Theo Bộ lọc đầu trang (bên, tài khoản, nền tảng, tên chiến dịch): không lọc tên chiến dịch = khán giả cả tài khoản; có lọc tên = cộng các chiến dịch có tên khớp. Ô Chiến dịch bên dưới chọn riêng một chiến dịch. TikTok: tuổi, giới tính, tỉnh/thành, thiết bị. Meta: tuổi, giới tính, vùng, nền tảng, vị trí. Cùng nhãn (vd Nữ) thì cộng hai nền tảng. Lượt hiển thị cộng được qua nhiều chiến dịch; số người tiếp cận thì không (một người xem nhiều chiến dịch bị đếm nhiều lần) nên không cộng.">i</button>
   </div>
   {#- 25/10/2026 (chủ dự án): khối DUY NHẤT không theo khoảng ngày — nói thẳng ngay dưới tiêu đề. #}
   {% if d.khan_gia_khoang.tu %}<p class="qc-kg__cua-so" data-o="kg-cua-so">Khán giả: cửa sổ mới nhất {{ ngay_ngan(d.khan_gia_khoang.tu|string) }} – {{ ngay_ngan(d.khan_gia_khoang.den|string) }}/{{ (d.khan_gia_khoang.den|string)[:4] }}, không theo khoảng ngày đang lọc ({{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}).</p>{% endif %}
-  {#- 23/10/2026 (MKT): số khán giả chỉ có theo TÀI KHOẢN — không lọc được theo tên chiến dịch. #}
-  {% if d.ten_cd %}<p class="thong-bao thong-bao--canh qc-kg__canh" data-o="kg-khong-loc-cd">Khối này KHÔNG theo lọc tên chiến dịch ({{ d.ten_cd.chu }}): số khán giả chỉ có theo tài khoản, nên đây là khán giả của MỌI chiến dịch trong các tài khoản đang chọn.</p>{% endif %}
+  {#- 26/10/2026 (chủ dự án): Khán giả theo chiến dịch — câu nói rõ số đang là của ai (cả tài khoản /
+      các chiến dịch khớp lọc tên / một chiến dịch) + ô chọn MỘT chiến dịch (biểu mẫu GET thường, mang
+      lại mọi tham số khác bằng ô ẩn; qc.js: đổi là đi, ẩn nút Xem). Danh sách: chiến dịch có số khán
+      giả trong cửa sổ mới nhất, khớp lọc tên, chi nhiều trước (người không xem tiền: hiển thị). #}
+  {% set kc = d.khan_gia_cd %}
+  <p class="qc-kg__pham-vi" data-o="kg-pham-vi">Số của {% if kc.chon %}chiến dịch <b>{{ kc.chon_ten }}</b> ({{ TEN_NEN_TANG_QC[kc.chon_nen_tang] }}){% elif kc.che_do == 'chien_dich' %}<b>{{ kc.so_cd|so_vn }} chiến dịch</b> có tên khớp lọc ({{ d.ten_cd.chu }}){% else %}mọi chiến dịch của {{ ten_tk|lower if not tk_chon else ten_tk }} (số theo tài khoản){% endif %}.{% if kc.che_do == 'chien_dich' and kc.tk_thieu %} <span class="mo">{{ kc.tk_thieu|length }} tài khoản chưa có số theo chiến dịch (đọc mỗi tuần): {{ kc.tk_thieu|join(', ') }}.</span>{% endif %}</p>
+  {% if kc.ds %}
+  <form class="qc-bang-loc qc-kg-chon" method="get" action="/quang-cao#khan-gia" aria-label="Chọn chiến dịch cho khối Khán giả" data-o="chon-cd-kg">
+    {% for k, v in an_kg %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <label class="o qc-kg-chon__o">Chiến dịch
+      <select name="kg_cd" data-tu-gui>
+        <option value="">{% if d.ten_cd %}Mọi chiến dịch khớp lọc tên ({{ kc.tong_ds|so_vn }}){% else %}Mọi chiến dịch (theo tài khoản){% endif %}</option>
+        {% for x in kc.ds %}<option value="{{ x.campaign_id }}"{% if x.campaign_id == kc.chon %} selected{% endif %}>{{ x.ten }} · {{ TEN_NEN_TANG_QC[x.nen_tang] }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="nut" type="submit" data-kg-xem>Xem</button>
+    {% if kc.tong_ds > kc.ds|length %}<span class="mo nho">Ô chọn hiện {{ kc.ds|length|so_vn }} / {{ kc.tong_ds|so_vn }} chiến dịch {{ 'chi nhiều' if d.xem_tien else 'nhiều hiển thị' }} nhất.</span>{% endif %}
+  </form>
+  {% endif %}
   {% if d.khan_gia.values()|select|list %}
   <div class="qc-kg">
     {% for chieu in CHIEU if d.khan_gia[chieu] %}
@@ -454,7 +472,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <p class="trong">Chưa có số khán giả — đọc mỗi tuần một lần cho tài khoản có chạy trong 30 ngày.</p>
+  <p class="trong" data-o="kg-trong">{% if kc.che_do == 'chien_dich' and not kc.so_cd %}Không chiến dịch nào có tên khớp lọc có số khán giả trong cửa sổ mới nhất — số khán giả theo chiến dịch đọc mỗi tuần một lần cho chiến dịch có chạy trong 30 ngày.{% elif kc.che_do == 'chien_dich' %}Chưa có số khán giả cho {{ 'chiến dịch này' if kc.chon else 'các chiến dịch này' }} — đọc mỗi tuần một lần cho chiến dịch có chạy trong 30 ngày.{% else %}Chưa có số khán giả — đọc mỗi tuần một lần cho tài khoản có chạy trong 30 ngày.{% endif %}</p>
   {% endif %}
 </section>
 

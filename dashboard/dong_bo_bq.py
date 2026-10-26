@@ -21,8 +21,8 @@ sau đẩy lại, MERGE nên không nhân đôi.
 Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, `dong_bo_bq`, cột email (`sua_boi`, `them_boi`), và
 `ket_noi_ngoai` (token TikTok / Meta đã mã hoá, email người cấp) — quảng cáo chỉ đẩy `tk_quang_cao`
 + `qc_*` (TikTok 19/10/2026, Meta 20/10/2026 — cùng bảng, `tk_quang_cao.nen_tang`; kênh đăng
-`qc_ad_kenh` + `qc_kenh` từ 22/10/2026; hai bộ hẹn giờ gọi
-`chay()` ngay sau lượt đồng bộ của mình).
+`qc_ad_kenh` + `qc_kenh` từ 22/10/2026; khán giả theo chiến dịch `qc_khan_gia_cd` từ 26/10/2026;
+hai bộ hẹn giờ gọi `chay()` ngay sau lượt đồng bộ của mình).
 Chạy: sau mỗi lượt quét (hook `sau_cap_nhat` của dashboard) và 6 giờ một lần. Một lượt một lúc.
 """
 from __future__ import annotations
@@ -133,8 +133,11 @@ BANG.update({
                 ("khan_gia_luc", "TIMESTAMP"),
                 ("cap_nhat_luc", "TIMESTAMP"),
                 # Meta Ads (20/10/2026): nền tảng + duyệt (ALTER … ADD COLUMN cuối bigquery.sql).
-                ("nen_tang", "STRING"), ("duyet", "BOOL")],
-        "tuy_chon": ("nen_tang", "duyet"),
+                ("nen_tang", "STRING"), ("duyet", "BOOL"),
+                # 26/10/2026: mốc hoàn tất khán giả cấp chiến dịch (ALTER trong khối "Khán giả theo
+                # chiến dịch" của bigquery.sql; thiếu bên nào thì bỏ cột, kèm cảnh báo).
+                ("khan_gia_cd_den", "DATE")],
+        "tuy_chon": ("nen_tang", "duyet", "khan_gia_cd_den"),
     },
     "qc_tk_ngay": {
         "khoa": ["advertiser_id", "ngay"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
@@ -158,6 +161,21 @@ BANG.update({
         "cot": [("advertiser_id", "STRING"), ("tu", "DATE"), ("den", "DATE"), ("chieu", "STRING"),
                 ("gia_tri", "STRING"), *_COT_QC],
     },
+    # 26/10/2026 (chủ dự án: Khán giả theo chiến dịch): như qc_khan_gia + campaign_id. Postgres chỉ
+    # giữ cửa sổ hoàn tất mới nhất; BigQuery MERGE tăng dần, không xoá theo Postgres → giữ đủ lịch
+    # sử. Bảng BigQuery tạo bằng khối "Khán giả theo chiến dịch" của bigquery.sql — chưa chạy thì bảng
+    # này báo lỗi trên trang Kết nối BigQuery, bảng khác vẫn đẩy.
+    # Soát L4: CHỈ đẩy dòng của cửa sổ đã hoàn tất (den ≤ mốc tk_quang_cao.khan_gia_cd_den) — dòng
+    # của cửa sổ đang đọc / bị bỏ dở không lên BigQuery. Không mất dòng: lúc hoàn tất
+    # `kho_qc.xong_khan_gia_cd` đặt lại cap_nhat_luc của cả cửa sổ (mới hơn mọi mốc đã đẩy).
+    "qc_khan_gia_cd": {
+        "khoa": ["advertiser_id", "campaign_id", "tu", "den", "chieu", "gia_tri"],
+        "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "loc": ("EXISTS (SELECT 1 FROM tk_quang_cao t WHERE t.advertiser_id = "
+                "qc_khan_gia_cd.advertiser_id AND qc_khan_gia_cd.den <= t.khan_gia_cd_den)"),
+        "cot": [("advertiser_id", "STRING"), ("campaign_id", "STRING"), ("tu", "DATE"),
+                ("den", "DATE"), ("chieu", "STRING"), ("gia_tri", "STRING"), *_COT_QC],
+    },
     # 22/10/2026 (chủ dự án): kênh đăng của quảng cáo + tên kênh (không cột tiền). Bảng BigQuery tạo
     # bằng khối cuối bigquery.sql — chưa chạy thì hai bảng này báo lỗi trên trang Kết nối BigQuery,
     # bảng khác vẫn đẩy bình thường.
@@ -175,7 +193,7 @@ BANG.update({
 })
 THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan",   # cha trước con
           "tk_quang_cao", "qc_tk_ngay", "qc_campaign_ngay", "qc_ad_ngay", "qc_khan_gia",
-          "qc_ad_kenh", "qc_kenh")
+          "qc_khan_gia_cd", "qc_ad_kenh", "qc_kenh")
 
 
 def dataset() -> str:
@@ -211,6 +229,8 @@ def sql_lo(bang: str, co_moc: bool, co_sau: bool, cot: list | None = None) -> st
     b = BANG[bang]
     moc, khoa = b["moc"], b["khoa"]
     dk = [f"{moc} <= %(hi)s"]
+    if b.get("loc"):
+        dk.append(b["loc"])       # điều kiện cố định của bảng (hằng trong mã, không tham số)
     if co_moc:
         # Lùi 15 phút: giao dịch bắt đầu sớm (mốc = now() lúc bắt đầu) mà commit SAU lượt đồng bộ
         # trước có mốc nhỏ hơn mốc đã lưu — không lùi thì mất vĩnh viễn. Đọc lại vài dòng thì
