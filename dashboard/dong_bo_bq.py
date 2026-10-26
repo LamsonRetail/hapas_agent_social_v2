@@ -133,8 +133,11 @@ BANG.update({
                 ("khan_gia_luc", "TIMESTAMP"),
                 ("cap_nhat_luc", "TIMESTAMP"),
                 # Meta Ads (20/10/2026): nền tảng + duyệt (ALTER … ADD COLUMN cuối bigquery.sql).
-                ("nen_tang", "STRING"), ("duyet", "BOOL")],
-        "tuy_chon": ("nen_tang", "duyet"),
+                ("nen_tang", "STRING"), ("duyet", "BOOL"),
+                # 26/10/2026: mốc hoàn tất khán giả cấp chiến dịch (ALTER trong khối "Khán giả theo
+                # chiến dịch" của bigquery.sql; thiếu bên nào thì bỏ cột, kèm cảnh báo).
+                ("khan_gia_cd_den", "DATE")],
+        "tuy_chon": ("nen_tang", "duyet", "khan_gia_cd_den"),
     },
     "qc_tk_ngay": {
         "khoa": ["advertiser_id", "ngay"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
@@ -159,12 +162,17 @@ BANG.update({
                 ("gia_tri", "STRING"), *_COT_QC],
     },
     # 26/10/2026 (chủ dự án: Khán giả theo chiến dịch): như qc_khan_gia + campaign_id. Postgres chỉ
-    # giữ ~4 tuần cửa sổ (`kho_qc.KHAN_GIA_CD_GIU_NGAY`); BigQuery MERGE tăng dần, không xoá theo
-    # Postgres → giữ đủ lịch sử. Bảng BigQuery tạo bằng khối "Khán giả theo chiến dịch" cuối
-    # bigquery.sql — chưa chạy thì bảng này báo lỗi trên trang Kết nối BigQuery, bảng khác vẫn đẩy.
+    # giữ cửa sổ hoàn tất mới nhất; BigQuery MERGE tăng dần, không xoá theo Postgres → giữ đủ lịch
+    # sử. Bảng BigQuery tạo bằng khối "Khán giả theo chiến dịch" của bigquery.sql — chưa chạy thì bảng
+    # này báo lỗi trên trang Kết nối BigQuery, bảng khác vẫn đẩy.
+    # Soát L4: CHỈ đẩy dòng của cửa sổ đã hoàn tất (den ≤ mốc tk_quang_cao.khan_gia_cd_den) — dòng
+    # của cửa sổ đang đọc / bị bỏ dở không lên BigQuery. Không mất dòng: lúc hoàn tất
+    # `kho_qc.xong_khan_gia_cd` đặt lại cap_nhat_luc của cả cửa sổ (mới hơn mọi mốc đã đẩy).
     "qc_khan_gia_cd": {
         "khoa": ["advertiser_id", "campaign_id", "tu", "den", "chieu", "gia_tri"],
         "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "loc": ("EXISTS (SELECT 1 FROM tk_quang_cao t WHERE t.advertiser_id = "
+                "qc_khan_gia_cd.advertiser_id AND qc_khan_gia_cd.den <= t.khan_gia_cd_den)"),
         "cot": [("advertiser_id", "STRING"), ("campaign_id", "STRING"), ("tu", "DATE"),
                 ("den", "DATE"), ("chieu", "STRING"), ("gia_tri", "STRING"), *_COT_QC],
     },
@@ -221,6 +229,8 @@ def sql_lo(bang: str, co_moc: bool, co_sau: bool, cot: list | None = None) -> st
     b = BANG[bang]
     moc, khoa = b["moc"], b["khoa"]
     dk = [f"{moc} <= %(hi)s"]
+    if b.get("loc"):
+        dk.append(b["loc"])       # điều kiện cố định của bảng (hằng trong mã, không tham số)
     if co_moc:
         # Lùi 15 phút: giao dịch bắt đầu sớm (mốc = now() lúc bắt đầu) mà commit SAU lượt đồng bộ
         # trước có mốc nhỏ hơn mốc đã lưu — không lùi thì mất vĩnh viễn. Đọc lại vài dòng thì

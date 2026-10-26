@@ -39,7 +39,8 @@ cờ — bộ hẹn giờ 2 phút chạy `dong-bo --chi-khi-yeu-cau`; dashboard 
   • Khán giả mỗi tuần, cửa sổ 30 ngày: age, gender, region, publisher_platform,
     publisher_platform+platform_position — cấp tài khoản (qc_khan_gia) và, từ 26/10/2026, cấp chiến
     dịch (qc_khan_gia_cd: level=campaign, lọc campaign.id ≤ 50 chiến dịch có hiển thị, quá nặng thì
-    chia đôi lô). Đọc lại ngay: `python -m dashboard.meta_ads khan-gia`.
+    chia đôi lô; sau số của mọi tài khoản, có trần thời gian, mốc hoàn tất như TikTok — `TA.
+    luot_khan_gia_cd`). Đọc lại ngay: `python -m dashboard.meta_ads khan-gia`.
   • Kênh đăng (22/10/2026): lượt đầy đủ đọc Trang (creative.actor_id / object_story_spec.page_id) và
     Instagram (instagram_user_id) của các ad CÓ phân phối chưa biết kênh — GET act_<id>/ads lọc
     ad.id IN ≤ 200 mã (kể cả ad đã lưu trữ / xoá), tối đa `TRAN_KENH_LUOT` lượt mỗi lần. Tên Trang /
@@ -643,6 +644,7 @@ class DichVu:
         self.ngu = ngu
         self._bay_gio = bay_gio or (lambda: datetime.datetime.now(datetime.timezone.utc))
         self.log = log
+        self.dong_ho = time.monotonic     # đồng hồ trần thời gian khán giả cấp chiến dịch
         self.phien_ban = phien_ban
 
     # ── khoá ──
@@ -919,8 +921,13 @@ class DichVu:
                     self.log(f"[meta_ads] {t['advertiser_id']} lỗi: {e}")
                     continue
                 da_doc.append(str(t["advertiser_id"]))
+            kg = None
             if not nhanh:
                 self.kenh_dang(g, da_doc)
+                # Soát M3 (26/10/2026): khán giả cấp chiến dịch SAU số của mọi tài khoản, có trần
+                # thời gian (`TA.TRAN_GIAY_KHAN_GIA_CD`) — không làm chậm số hằng ngày.
+                kg = self.khan_gia_cd(g, da_doc, bay)
+                dem["tong"] += kg.get("so_dong") or 0
             self.kho.ghi_trang_thai("hoat_dong", None, NCC, con_token=True)
         except ChuaKetNoi as e:
             return str(e), {"bo_qua": str(e)}
@@ -933,7 +940,29 @@ class DichVu:
             self.kho.ghi_trang_thai("loi", str(e), NCC, con_token=True)
             return str(e), {"loi": str(e), "so_dong": dem["tong"]}
         chu_loi = "; ".join(loi)[:500] or None
-        return chu_loi, {"so_dong": dem["tong"], "den_ngay": dem["den_ngay"], "loi": chu_loi}
+        ra = {"so_dong": dem["tong"], "den_ngay": dem["den_ngay"], "loi": chu_loi}
+        if kg:
+            ra["khan_gia_cd"] = {"xong": kg["xong"], "con": kg["con"], "loi": len(kg["loi"])}
+        return chu_loi, ra
+
+    def khan_gia_cd(self, g: Graph, ids: list[str], bay: datetime.datetime, *, ep: bool = False,
+                    tran_giay: float | None = TA.TRAN_GIAY_KHAN_GIA_CD) -> dict:
+        """Như `tiktok_ads.DichVu.khan_gia_cd`: phần khán giả cấp chiến dịch của lượt (`TA.
+        luot_khan_gia_cd`) cho tài khoản `ids` đã đọc số xong. Lỗi đọc kho → nhật ký, trả rỗng."""
+        rong = {"so_dong": 0, "xong": 0, "con": 0, "loi": []}
+        try:
+            co = {str(x) for x in ids}
+            cac = [t for t in self.kho.cac_tk() if str(t["advertiser_id"]) in co]
+        except Exception as e:  # noqa: BLE001
+            self.log(f"[meta_ads] khán giả theo chiến dịch: đọc tài khoản lỗi ({type(e).__name__})")
+            return {**rong, "loi": [f"đọc tài khoản lỗi ({type(e).__name__})"]}
+        bd = dict(CHIEU_META)
+        return TA.luot_khan_gia_cd(
+            self.kho, cac, bay,
+            lambda act, a, b: (lambda chieu, lo: self._khan_gia_lo(g, act, a, b, chieu, bd[chieu],
+                                                                   lo)),
+            LO_KHAN_GIA_CD, self.log, "meta_ads", ep=ep, tran_giay=tran_giay,
+            dong_ho=self.dong_ho, cac_chieu=tuple(bd), xac_thuc=(LoiXacThuc,))
 
     def kenh_dang(self, g: Graph, ids: list[str]) -> int:
         """Kênh đăng (Trang / Instagram) của ad CÓ phân phối chưa biết kênh (22/10/2026), rồi tên
@@ -1109,31 +1138,23 @@ class DichVu:
         return n
 
     def _khan_gia(self, g: Graph, t: dict, hq: datetime.date, bay: datetime.datetime, *,
-                  ep: bool = False, loi: list | None = None) -> int:
-        """Như `tiktok_ads.DichVu._khan_gia`: cấp tài khoản (mốc khan_gia_luc) + cấp chiến dịch
-        (26/10/2026, mốc = cửa sổ mới nhất của qc_khan_gia_cd); `ep` bỏ qua cả hai mốc. Cùng
+                  ep: bool = False) -> int:
+        """Khán giả CẤP TÀI KHOẢN (mốc khan_gia_luc; `ep` bỏ qua mốc) — như `tiktok_ads.DichVu.
+        _khan_gia`; cấp chiến dịch chạy riêng sau số của mọi tài khoản (`khan_gia_cd`). Cùng
         KHAN_GIA_NGAY = 7 với TikTok (`TA.khan_gia_den_han`)."""
-        tk_han, cd_han = TA.khan_gia_den_han(self.kho, t, hq, bay, ep, self.log)
-        if not (tk_han or cd_han):
+        if not TA.khan_gia_den_han(t, bay, ep):
             return 0
         act = str(t["advertiser_id"])
         a = hq - datetime.timedelta(days=CUA_SO_NGAY - 1)
         if not ((self.kho.qc_tong([act], a, hq) or {}).get("hien_thi") or 0):
             return 0
         n = 0
-        if tk_han:
-            for chieu, bd in CHIEU_META:
-                rows = g.trang(f"{act}/insights", tham_so_insights(
-                    "account", TRUONG_KHAN_GIA, a, hq, theo_ngay=False, breakdowns=bd))
-                n += self.kho.ghi_khan_gia(gop_khan_gia([dong_khan_gia(r, act, a, hq, chieu)
-                                                          for r in rows]))
-            self.kho.dat_khan_gia(act)
-        if cd_han:
-            bd = dict(CHIEU_META)
-            n += TA.doc_khan_gia_cd(
-                self.kho, act, a, hq,
-                lambda chieu, lo: self._khan_gia_lo(g, act, a, hq, chieu, bd[chieu], lo),
-                LO_KHAN_GIA_CD, self.log, "meta_ads", loi, tuple(bd), (LoiXacThuc,))
+        for chieu, bd in CHIEU_META:
+            rows = g.trang(f"{act}/insights", tham_so_insights(
+                "account", TRUONG_KHAN_GIA, a, hq, theo_ngay=False, breakdowns=bd))
+            n += self.kho.ghi_khan_gia(gop_khan_gia([dong_khan_gia(r, act, a, hq, chieu)
+                                                      for r in rows]))
+        self.kho.dat_khan_gia(act)
         return n
 
     def _khan_gia_lo(self, g: Graph, act: str, a: datetime.date, b: datetime.date, chieu: str,
@@ -1174,10 +1195,13 @@ class DichVu:
                                 self.log, "meta_ads", "đang có lượt đồng bộ Meta khác")
 
     def _doc_khan_gia(self, chon: set[str] | None) -> dict:
+        """Cấp tài khoản của mọi tài khoản đã chọn trước, rồi cấp chiến dịch — bỏ qua mốc tuần,
+        KHÔNG trần thời gian (lệnh tay), như TikTok."""
         dem, loi = {"so_dong": 0, "so_tk": 0}, []
         try:
             g = self.graph()
             bay = self._bay_gio()
+            doc: list[str] = []
             for t in self.kho.cac_tk():
                 act = str(t["advertiser_id"])
                 if (QC.nen_tang_tk(t) != NEN_TANG or not t.get("duyet")
@@ -1186,13 +1210,17 @@ class DichVu:
                     continue
                 try:
                     dem["so_dong"] += self._khan_gia(g, t, TA.hom_qua(t.get("mui_gio"), bay), bay,
-                                                     ep=True, loi=loi)
+                                                     ep=True)
                     dem["so_tk"] += 1
+                    doc.append(act)
                 except LoiXacThuc:
                     raise
                 except LoiMeta as e:
                     loi.append(f"{t.get('ten') or act}: {e}")
                     self.log(f"[meta_ads] khán giả {act} lỗi: {e}")
+            kg = self.khan_gia_cd(g, doc, bay, ep=True, tran_giay=None)
+            dem["so_dong"] += kg["so_dong"]
+            loi += kg["loi"]
         except ChuaKetNoi as e:
             return {**dem, "loi": str(e)}
         except LoiXacThuc as e:
@@ -1202,7 +1230,7 @@ class DichVu:
             return {**dem, "loi": f"token bị từ chối: {e}"}
         except (LoiMeta, LoiMaHoa) as e:
             return {**dem, "loi": str(e)}
-        return {**dem, "loi": "; ".join(loi)[:1000] or None}
+        return {**dem, "loi": "; ".join(loi)[:2000] or None}
 
 
 # ───────────────────────────── dòng lệnh ─────────────────────────────

@@ -425,6 +425,7 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.tk_quang_cao`
   cap_nhat_luc      TIMESTAMP OPTIONS(description='Lần sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery (bảng nhỏ — nạp lại toàn bộ).'),
   nen_tang          STRING    OPTIONS(description='Nền tảng quảng cáo. Giá trị: tiktok, meta (từ 20/10/2026). NULL ở dòng ghi trước khi dashboard đẩy cột này (lượt đồng bộ kế tiếp nạp lại toàn bảng).'),
   duyet             BOOL      OPTIONS(description='TRUE: được đọc số (TikTok luôn TRUE; Meta = quản trị viên đã duyệt tài khoản). FALSE: tài khoản Meta chưa duyệt — không có số trong qc_*. NULL ở dòng ghi trước khi dashboard đẩy cột này.'),
+  khan_gia_cd_den   DATE      OPTIONS(description='Ngày cuối (den) của cửa sổ khán giả CẤP CHIẾN DỊCH đã đọc ĐỦ gần nhất (múi giờ tài khoản; đọc lại mỗi 7 ngày, từ 26/10/2026) — dòng qc_khan_gia_cd của tài khoản có den = mốc này là cửa sổ hoàn tất mới nhất. NULL khi chưa có cửa sổ nào hoàn tất hoặc dòng ghi trước khi dashboard đẩy cột này.'),
   dong_bo_luc       TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 OPTIONS(description='''[Lớp] Dim
@@ -671,8 +672,12 @@ OPTIONS(description='''[Lớp] Dim
 -- Khán giả theo chiến dịch (26/10/2026, chủ dự án chốt): bảng mới, chạy cùng lúc với
 -- deploy/lang-nghe/2026-10-26-khan-gia-cd.sql trên Postgres, TRƯỚC khi bật mã mới (dong_bo_bq đẩy
 -- qc_khan_gia_cd sau qc_khan_gia; chưa chạy khối này thì bảng này báo lỗi trên trang Kết nối BigQuery,
--- bảng khác vẫn đẩy). Cột tiền theo BQ_QC_XUAT_TIEN như mọi bảng qc_*. Postgres chỉ giữ ~4 tuần cửa
--- sổ; BigQuery MERGE tăng dần, không xoá → giữ đủ lịch sử từ 26/10/2026.
+-- bảng khác vẫn đẩy). Cột tiền theo BQ_QC_XUAT_TIEN như mọi bảng qc_*. Postgres chỉ giữ cửa sổ hoàn
+-- tất mới nhất; BigQuery MERGE tăng dần, không xoá → giữ đủ lịch sử từ 26/10/2026. Chỉ dòng của cửa
+-- sổ đã hoàn tất (den ≤ tk_quang_cao.khan_gia_cd_den) được đẩy. Bảng tk_quang_cao đã tạo thì thêm cột
+-- mốc bằng ALTER dưới (chưa chạy: dong_bo_bq bỏ cột đó khỏi lượt + cảnh báo).
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.tk_quang_cao`
+  ADD COLUMN IF NOT EXISTS khan_gia_cd_den DATE OPTIONS(description='Ngày cuối (den) của cửa sổ khán giả CẤP CHIẾN DỊCH đã đọc ĐỦ gần nhất (múi giờ tài khoản; đọc lại mỗi 7 ngày, từ 26/10/2026) — dòng qc_khan_gia_cd của tài khoản có den = mốc này là cửa sổ hoàn tất mới nhất. NULL khi chưa có cửa sổ nào hoàn tất hoặc dòng ghi trước khi dashboard đẩy cột này.');
 CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia_cd`
 (
   advertiser_id     STRING    OPTIONS(description='Tài khoản quảng cáo của chiến dịch (TikTok chuỗi số; Meta act_<số>). Một phần PK. FK → tk_quang_cao.advertiser_id.'),
@@ -710,9 +715,9 @@ OPTIONS(description='''[Lớp] Raw
 [Grain] 1 dòng = 1 chiến dịch × 1 cửa sổ (tu..den) × 1 chiều × 1 giá trị
 [Khoá] PK: advertiser_id + campaign_id + tu + den + chieu + gia_tri | Join: advertiser_id → tk_quang_cao.advertiser_id; (advertiser_id, campaign_id) → qc_campaign_ngay
 [Nguồn] Postgres lang_nghe.public.qc_khan_gia_cd trên VPS Mark; TikTok for Business MCP report_integrated_get (AUDIENCE, AUCTION_CAMPAIGN, chiều campaign_id + một chiều khán giả); Meta Ads: Graph API GET act_<id>/insights (level=campaign, breakdowns) — bộ đồng bộ dashboard/tiktok_ads.py, dashboard/meta_ads.py
-[Phạm vi] Chiến dịch CÓ hiển thị trong cửa sổ (≤ 1.000 chiến dịch mỗi tài khoản, nhiều hiển thị trước) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 26/10/2026
+[Phạm vi] Chiến dịch CÓ hiển thị trong cửa sổ (≤ 5.000 chiến dịch mỗi tài khoản, nhiều hiển thị trước) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 26/10/2026
 [Đã xử lý] 13 chỉ số khán giả, cùng luật đổi số với qc_khan_gia; Meta mã trùng sau khi đổi (Unknown/unknown) cộng lại theo từng chiến dịch; cột không có trong báo cáo khán giả NULL; "-" → NULL
-[Refresh] MERGE theo khoá các dòng có cap_nhat_luc mới hơn mốc, sau lượt đồng bộ TikTok 06:30 / Meta 06:45 giờ VN và 6 giờ một lần; nguồn đọc mỗi 7 ngày mỗi tài khoản; không xoá dòng khi Postgres dọn cửa sổ cũ
+[Refresh] MERGE theo khoá các dòng có cap_nhat_luc mới hơn mốc, sau lượt đồng bộ TikTok 06:30 / Meta 06:45 giờ VN và 6 giờ một lần — CHỈ dòng của cửa sổ đã hoàn tất (den ≤ tk_quang_cao.khan_gia_cd_den); nguồn đọc mỗi 7 ngày mỗi tài khoản sau số hằng ngày; không xoá dòng khi Postgres bỏ cửa sổ cũ
 [Dùng khi] Khán giả của một hoặc vài chiến dịch — lấy cửa sổ den mới nhất của từng tài khoản rồi lọc campaign_id
 [Không dùng khi] Khán giả cả tài khoản (reach không đếm trùng) → dùng SOCIAL_LISTENING.qc_khan_gia; số theo ngày của chiến dịch → dùng SOCIAL_LISTENING.qc_campaign_ngay
 [Lưu ý] Các cửa sổ chồng nhau — KHÔNG cộng nhiều cửa sổ. Cộng nhiều chiến dịch: hiển thị / chi / bấm cộng được, reach thì đếm trùng người. Cửa sổ đọc lại cùng ngày (lệnh khan-gia) có thể còn dòng giá trị cũ mà lần đọc sau không còn.''');

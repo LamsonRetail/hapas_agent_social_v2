@@ -975,7 +975,8 @@ def test_schema_meta_va_quyen_mark():
 def test_bigquery_nen_tang_khong_token_khong_email(monkeypatch):
     cot = dict(DBQ.BANG["tk_quang_cao"]["cot"])
     assert cot["nen_tang"] == "STRING" and cot["duyet"] == "BOOL"
-    assert set(DBQ.BANG["tk_quang_cao"]["tuy_chon"]) == {"nen_tang", "duyet"}
+    # 26/10/2026: + mốc hoàn tất khán giả cấp chiến dịch (cột tuỳ chọn như nen_tang / duyet).
+    assert set(DBQ.BANG["tk_quang_cao"]["tuy_chon"]) == {"nen_tang", "duyet", "khan_gia_cd_den"}
     for b, v in DBQ.BANG.items():
         assert not [c for c, _ in v["cot"] if any(x in c for x in ("token", "email", "nguoi_cap"))], b
     sql = (GOC / "deploy" / "lang-nghe" / "bigquery.sql").read_text(encoding="utf-8")

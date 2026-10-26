@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
+import pytest
 from test_dashboard_app import QL, dang_nhap
 from test_meta_ads_dashboard import CAMPAIGN, LA, MATE, NUOC_HOA, GiaMeta, _mdv, _nhap
 from test_tiktok_ads import (
@@ -86,16 +87,20 @@ def test_tiktok_doc_khan_gia_cap_chien_dich_chi_chien_dich_co_chay():
     assert not _audience(tt)
 
 
-def test_tiktok_tuan_sau_doc_lai_va_giu_cua_so_cu_trong_28_ngay():
+def test_tiktok_tuan_sau_doc_lai_chi_giu_cua_so_hoan_tat():
     dv, kho_qc, tt = _dv()
     _ket_noi_san(dv, tt, het_rt=BAY + datetime.timedelta(days=60))
     dv.dong_bo()
+    assert {kho_qc.tk[a]["khan_gia_cd_den"] for a in CHAY} == {CUA_SO[1]}
+    assert kho_qc.tk[LE]["khan_gia_cd_den"] is None          # không chạy: không có cửa sổ
     dv2, _, _ = _dv(kho_qc, tt, bay=BAY + datetime.timedelta(days=7))
     tt.cong_cu.clear()
     dv2.dong_bo()
     assert _audience(tt, "AUCTION_CAMPAIGN") and _audience(tt, "AUCTION_ADVERTISER")
-    cua = {(r["tu"], r["den"]) for r in kho_qc.bang["qc_khan_gia_cd"].values()}
-    assert cua == {CUA_SO, (datetime.date(2026, 9, 26), datetime.date(2026, 10, 25))}
+    moi = (datetime.date(2026, 9, 26), datetime.date(2026, 10, 25))
+    # Hoàn tất cửa sổ mới → mốc dời, cửa sổ cũ bỏ (Postgres chỉ giữ cửa sổ hoàn tất mới nhất).
+    assert {(r["tu"], r["den"]) for r in kho_qc.bang["qc_khan_gia_cd"].values()} == {moi}
+    assert {kho_qc.tk[a]["khan_gia_cd_den"] for a in CHAY} == {moi[1]}
 
 
 def test_tiktok_lo_100_ma_chia_lo(monkeypatch):
@@ -112,50 +117,164 @@ def test_tiktok_lo_100_ma_chia_lo(monkeypatch):
 
 
 class _TikTokTinhLoi(GiaTikTok):
-    """Báo cáo AUDIENCE cấp chiến dịch lỗi ở chiều tỉnh (sau khi tuổi, giới tính đã ghi)."""
+    """Báo cáo AUDIENCE cấp chiến dịch hỏng ở chiều tỉnh (sau khi tuổi, giới tính đã ghi): `loi`
+    = "ma" → TikTok trả mã lỗi; "giet" → tiến trình bị giết (SIGTERM / OOM: không chạy được dọn
+    dẹp nào); None → bình thường. `doi` (tuỳ chọn): đổi số của lần đọc sau."""
 
-    loi = True
+    loi: str | None = "ma"
 
     def _bao_cao(self, a):
         if (self.loi and a["report_type"] == "AUDIENCE" and a["data_level"] == "AUCTION_CAMPAIGN"
                 and a["dimensions"][1] == "province_id"):
+            if self.loi == "giet":
+                raise SystemExit(143)
             return {"code": 40002, "message": "Invalid dimension combination"}
         return super()._bao_cao(a)
 
 
-def test_tiktok_loi_giua_chung_xoa_cua_so_do_dang_va_doc_lai_hom_sau():
+def _api_kg(kho_qc, ids):
+    """Như trang đọc: cửa sổ cấp chiến dịch nhìn thấy được của các tài khoản."""
+    return kho_qc.ds_cd_khan_gia(ids)
+
+
+def test_m1_cua_so_do_dang_vo_hinh_va_doc_lai_hom_sau():
     tt = _TikTokTinhLoi()
     nk: list[str] = []
     dv, kho_qc, tt = _dv(tt=tt)
     dv.log = nk.append
     _ket_noi_san(dv, tt)
     kq = dv.dong_bo()
-    # Phần phụ: lượt số không lỗi, cấp tài khoản đủ, cấp chiến dịch KHÔNG để cửa sổ thiếu chiều.
+    # Phần phụ: lượt số không lỗi, cấp tài khoản đủ; dòng tuổi / giới tính đã ghi nhưng mốc KHÔNG
+    # dời → trang không thấy (cửa sổ thiếu tỉnh, thiết bị không bao giờ lộ), tài khoản "chưa có".
     assert not kq["loi"] and len(kho_qc.bang["qc_khan_gia"]) == 4 * 2 * 3
-    assert not kho_qc.bang["qc_khan_gia_cd"]
-    assert any("khán giả theo chiến dịch" in x and "40002" in x for x in nk)
-    # Hôm sau: chỉ đọc lại cấp chiến dịch (cấp tài khoản đã có trong tuần).
-    tt.loi = False
+    # LE không có chiến dịch chạy: xử lý xong (không cửa sổ); 3 tài khoản lỗi.
+    assert kq["khan_gia_cd"] == {"xong": 1, "con": 0, "loi": 3}
+    assert kho_qc.bang["qc_khan_gia_cd"]
+    assert {r["chieu"] for r in kho_qc.bang["qc_khan_gia_cd"].values()} == {"age", "gender"}
+    assert all(kho_qc.tk[a]["khan_gia_cd_den"] is None for a in CHAY)
+    v = _api_kg(kho_qc, list(CHAY))
+    assert v["ds"] == [] and v["tk_thieu"] == sorted(CHAY)
+    # Mỗi lỗi một dòng nhật ký (không chỉ lỗi đầu).
+    assert sum("khán giả theo chiến dịch" in x and "40002" in x for x in nk) == 3
+    # Tới hạn lại ngay: hôm sau đọc lại cấp chiến dịch (cấp tài khoản đã có trong tuần).
+    tt.loi = None
     tt.cong_cu.clear()
     dv2, _, _ = _dv(kho_qc, tt, bay=BAY + datetime.timedelta(days=1))
     dv2.dong_bo()
     assert _audience(tt, "AUCTION_CAMPAIGN") and not _audience(tt, "AUCTION_ADVERTISER")
+    # Hoàn tất: chỉ còn cửa sổ mới, đủ 4 chiều; dòng dở dang hôm trước bị bỏ.
+    moi = datetime.date(2026, 10, 19)
+    assert {r["den"] for r in kho_qc.bang["qc_khan_gia_cd"].values()} == {moi}
     assert len(kho_qc.bang["qc_khan_gia_cd"]) == 3 * 3 * 4 * 2
+    assert len(_api_kg(kho_qc, list(CHAY))["ds"]) == 9
     # Lệnh khan-gia báo lỗi cấp chiến dịch trong kết quả (không chỉ nhật ký).
-    tt.loi = True
-    kq = dv.doc_khan_gia([HAPAS_KOC])
+    tt.loi = "ma"
+    kq = dv2.doc_khan_gia([HAPAS_KOC])
     assert "khán giả theo chiến dịch" in kq["loi"] and kq["so_tk"] == 1
 
 
-def test_tiktok_kho_chua_co_bang_van_doc_cap_tai_khoan():
+def test_m1_bi_giet_giua_chung_khong_lo_cua_so_thieu():
+    tt = _TikTokTinhLoi()
+    tt.loi = "giet"
+    dv, kho_qc, tt = _dv(tt=tt)
+    _ket_noi_san(dv, tt)
+    with pytest.raises(SystemExit):
+        dv.dong_bo()                            # SIGTERM / OOM: không chạy được dọn dẹp nào
+    # Số hằng ngày của MỌI tài khoản đã ghi trước khi phần khán giả cấp chiến dịch bắt đầu.
+    assert {r["advertiser_id"] for r in kho_qc.bang["qc_tk_ngay"].values()} == set(CHAY)
+    # Dòng dở dang còn trong bảng nhưng vô hình (không mốc): trang, BigQuery, hạn đọc lại.
+    assert kho_qc.bang["qc_khan_gia_cd"]
+    assert _api_kg(kho_qc, list(CHAY))["ds"] == []
+    t = kho_qc.tk[HAPAS_KOC]
+    assert TA.khan_gia_cd_den_han(t, CUA_SO[1])
+    tt.loi = None
+    dv2, _, _ = _dv(kho_qc, tt, bay=BAY + datetime.timedelta(hours=2))
+    dv2.dong_bo()
+    assert len(_api_kg(kho_qc, list(CHAY))["ds"]) == 9
+    assert {r["chieu"] for r in kho_qc.bang["qc_khan_gia_cd"].values()} == set(QC.CHIEU_KHAN_GIA)
+
+
+def test_m2_doc_lai_cung_ngay_loi_giu_cua_so_cu():
+    tt = _TikTokTinhLoi()
+    tt.loi = None
+    dv, kho_qc, tt = _dv(tt=tt)
+    _ket_noi_san(dv, tt)
+    dv.dong_bo()
+    truoc = {k: dict(r) for k, r in kho_qc.bang["qc_khan_gia_cd"].items()
+             if r["advertiser_id"] == HAPAS_KOC}
+    assert len(truoc) == 3 * 4 * 2
+    # Lệnh khan-gia cùng ngày (cùng cửa sổ) lỗi ở chiều tỉnh: cửa sổ cũ vẫn đủ, vẫn nhìn thấy.
+    tt.loi = "ma"
+    kq = dv.doc_khan_gia([HAPAS_KOC])
+    assert "40002" in kq["loi"]
+    sau = {k: r for k, r in kho_qc.bang["qc_khan_gia_cd"].items()
+           if r["advertiser_id"] == HAPAS_KOC}
+    assert set(sau) == set(truoc) and kho_qc.tk[HAPAS_KOC]["khan_gia_cd_den"] == CUA_SO[1]
+    assert {r["chieu"] for r in sau.values()} == set(QC.CHIEU_KHAN_GIA)
+    assert len([x for x in _api_kg(kho_qc, [HAPAS_KOC])["ds"]]) == 3
+    # Đọc lại thành công: giá trị TikTok không còn trả bị bỏ, cap_nhat_luc mới hơn mọi lần ghi.
+    tt.loi = None
+    k_cu = next(iter(sau))
+    kho_qc.bang["qc_khan_gia_cd"][k_cu[:-1] + ("GIA_TRI_CU",)] = {
+        **sau[k_cu], "gia_tri": "GIA_TRI_CU", "cap_nhat_luc": 0}
+    dv.doc_khan_gia([HAPAS_KOC])
+    cua = [r for r in kho_qc.bang["qc_khan_gia_cd"].values() if r["advertiser_id"] == HAPAS_KOC]
+    assert len(cua) == 3 * 4 * 2 and "GIA_TRI_CU" not in {r["gia_tri"] for r in cua}
+    assert len({r["cap_nhat_luc"] for r in cua}) == 1
+
+
+def test_m3_so_moi_tai_khoan_truoc_roi_moi_khan_gia_cap_chien_dich():
+    dv, _kho, tt = _dv()
+    _ket_noi_san(dv, tt)
+    dv.dong_bo()
+    bc = [(i, a) for i, (t, a) in enumerate(tt.cong_cu) if t == "report_integrated_get"]
+    cuoi_so = max(i for i, a in bc if a["report_type"] == "BASIC")
+    dau_cd = min(i for i, a in bc if a["data_level"] == "AUCTION_CAMPAIGN"
+                 and a["report_type"] == "AUDIENCE")
+    assert cuoi_so < dau_cd
+
+
+def test_m3_tran_thoi_gian_dung_va_doc_tiep_luot_sau():
     dv, kho_qc, tt = _dv()
+    _ket_noi_san(dv, tt)
+    # Đồng hồ giả: thời gian chỉ trôi khi kho ghi khán giả cấp chiến dịch (6 lần ghi mỗi tài khoản
+    # có chiến dịch = 1.500 giây > trần 20 phút) — tài khoản đầu xong thì hết giờ.
+    dv.dong_ho = lambda: getattr(kho_qc, "_tick", 0) * 250
+    assert TA.TRAN_GIAY_KHAN_GIA_CD == 20 * 60
+    thu_tu = sorted(CHAY)
+    kq = dv.dong_bo()
+    # LE (không chiến dịch, mốc trống, mã nhỏ nhất) + tài khoản đầu xong; hai tài khoản để lượt
+    # sau — số hằng ngày vẫn đủ, lượt không lỗi.
+    assert kq["khan_gia_cd"] == {"xong": 2, "con": 2, "loi": 0} and not kq["loi"]
+    assert {a for a in CHAY if kho_qc.tk[a]["khan_gia_cd_den"]} == {thu_tu[0]}
+    assert {r["advertiser_id"] for r in kho_qc.bang["qc_tk_ngay"].values()} == set(CHAY)
+    # Lượt sau (cùng ngày): chỉ tài khoản còn tới hạn — đọc tiếp, không làm lại tài khoản đã xong.
+    for n in (1, 2):
+        tt.kg_cd.clear()
+        kq = dv.dong_bo()
+        assert kq["khan_gia_cd"] == {"xong": 2, "con": 2 - n, "loi": 0}
+        assert {x[0] for x in tt.kg_cd} == {thu_tu[n]}
+    assert all(kho_qc.tk[a]["khan_gia_cd_den"] == CUA_SO[1] for a in CHAY)
+    # Lệnh khan-gia không giới hạn thời gian: mọi tài khoản trong một lần.
+    tt.kg_cd.clear()
+    assert dv.doc_khan_gia()["loi"] is None
+    assert {x[0] for x in tt.kg_cd} == set(CHAY)
+
+
+def test_tiktok_kho_loi_van_doc_cap_tai_khoan():
+    nk: list[str] = []
+    dv, kho_qc, tt = _dv()
+    dv.log = nk.append
 
     def chua_co(*_a):
         raise KQ.LoiKho("relation qc_khan_gia_cd does not exist")
-    kho_qc.khan_gia_cd_den = chua_co
+    kho_qc.cd_co_chay = chua_co
     _ket_noi_san(dv, tt)
-    assert not dv.dong_bo()["loi"]
+    kq = dv.dong_bo()
+    # Mỗi tài khoản (cả LE) lỗi riêng, mỗi lỗi một dòng nhật ký; lượt số không lỗi.
+    assert not kq["loi"] and kq["khan_gia_cd"]["loi"] == 4
     assert len(kho_qc.bang["qc_khan_gia"]) == 4 * 2 * 3 and not _audience(tt, "AUCTION_CAMPAIGN")
+    assert sum("LoiKho" in x for x in nk) == 4
 
 
 class _BQ:
@@ -229,6 +348,14 @@ def test_meta_doc_khan_gia_cap_chien_dich():
     nh = [x for x in gm.kg_cd if x[0] == NUOC_HOA]
     assert sorted(x[1] for x in nh) == sorted(",".join(b) for _, b in MA.CHIEU_META)
     assert all(set(x[2]) == {"120201", "120202"} for x in nh)
+    # Soát M3: số (insights không breakdowns) của MỌI tài khoản trước lượt khán giả cấp chiến dịch.
+    q = [{k: v[0] for k, v in parse_qs(urlsplit(str(r.url)).query).items()} for r in gm.goi
+         if "/insights" in str(r.url)]
+    cuoi_so = max(i for i, x in enumerate(q) if not x.get("breakdowns"))
+    dau_cd = min(i for i, x in enumerate(q) if x.get("breakdowns") and x["level"] == "campaign")
+    assert cuoi_so < dau_cd
+    assert {k: kho_qc.tk[k]["khan_gia_cd_den"] for k, _ in co} == {
+        k: datetime.date(2026, 10, 18) for k, _ in co}
     # Lần 2: không đọc lại.
     gm.kg_cd.clear()
     dv.dong_bo()
@@ -391,15 +518,60 @@ def test_reach_khong_cong_qua_nhieu_chien_dich():
 
 def test_tai_khoan_chua_co_so_theo_chien_dich_duoc_neu_ten():
     _app, c, kq = _app_co_so()
-    b = kq.bang["qc_khan_gia_cd"]
-    for k in [k for k, r in b.items() if r["advertiser_id"] == MM_2]:
-        del b[k]
+    kq.tk[MM_2]["khan_gia_cd_den"] = None              # chưa có cửa sổ hoàn tất
     a = _ma_cd(HAPAS_KOC, 0)
     _dat_ten(kq, {a: "Teaser A"})
     d = _api(c, cd_mot="teaser")
     assert d["khan_gia_cd"]["tk_thieu"] == ["mate made 2"]
+    assert all(x["campaign_id"] != _ma_cd(MM_2, 0) for x in _api(c)["khan_gia_cd"]["ds"])
     assert "1 tài khoản chưa có số theo chiến dịch (đọc mỗi tuần): mate made 2" in _khoi(
         c.get(_u(cd_mot="teaser")).text)
+
+
+def test_dong_den_moi_hon_moc_khong_len_trang():
+    """Soát M1: dòng của cửa sổ đang đọc / bỏ dở (den > mốc) không bao giờ vào số của trang."""
+    _app, c, kq = _app_co_so()
+    ma = _ma_cd(HAPAS_KOC, 0)
+    truoc = sum(x["hien_thi"] for x in _api(c, kg_cd=ma)["khan_gia"]["gender"])
+    mau = next(r for r in kq.bang["qc_khan_gia_cd"].values() if r["campaign_id"] == ma
+               and r["chieu"] == "gender")
+    den = CUA_SO[1] + datetime.timedelta(days=1)
+    kq.bang["qc_khan_gia_cd"][("x",)] = {**mau, "den": den, "hien_thi": 10 ** 9}
+    assert sum(x["hien_thi"] for x in _api(c, kg_cd=ma)["khan_gia"]["gender"]) == truoc
+    assert _api(c)["khan_gia_cd"]["ds"] and len(_api(c)["khan_gia_cd"]["ds"]) == 9
+
+
+def test_o_chon_giu_chien_dich_dang_chon_ngoai_tran(monkeypatch):
+    """Soát L2: chiến dịch đang chọn nằm ngoài KG_CD_O_CHON dòng đầu vẫn hiện, vẫn được chọn."""
+    _app, c, _kq = _app_co_so()
+    monkeypatch.setattr(QC, "KG_CD_O_CHON", 2)
+    ds = _api(c)["khan_gia_cd"]
+    assert len(ds["ds"]) == 2 and ds["tong_ds"] == 9
+    ngoai = next(x for x in (_ma_cd(a, i) for a in CHAY for i in range(3))
+                 if x not in {y["campaign_id"] for y in ds["ds"]})
+    d = _api(c, kg_cd=ngoai)["khan_gia_cd"]
+    assert d["chon"] == ngoai and [x["campaign_id"] for x in d["ds"]][-1] == ngoai
+    assert len(d["ds"]) == 3
+    k = _khoi(c.get(_u(kg_cd=ngoai)).text)
+    assert f'<option value="{ngoai}" selected>' in k and "Ô chọn hiện 3 / 9 chiến dịch" in k
+
+
+def test_an_tien_dau_cuoi_qua_api(monkeypatch):
+    """Người không xem tiền (`xem_tien` False): /api/qc không có khoá tiền ở khối Khán giả (ô chọn,
+    các dòng), ô chọn xếp theo hiển thị. Trang /quang-cao hiện chỉ quản trị viên (luôn xem tiền) —
+    bài thử ép `xem_tien` False để canh đường tiền đầu-cuối."""
+    _app, c, _kq = _app_co_so()
+    monkeypatch.setattr(QC, "xem_tien", lambda q, ben: False)
+    d = _api(c, cd_mot="chien")
+    assert d["xem_tien"] is False
+    kc = d["khan_gia_cd"]
+    assert kc["ds"] and all("chi" not in x for x in kc["ds"])
+    hien = [x["hien_thi"] for x in kc["ds"]]
+    assert hien == sorted(hien, reverse=True)
+    assert all(not ({"chi", "gia_tri_mua_shop"} & set(x)) for ds in d["khan_gia"].values()
+               for x in ds)
+    t = c.get(_u()).text
+    assert "chi nhiều" not in _khoi(t)
 
 
 def test_ds_kg_cd_xep_theo_chi_hoac_hien_thi_va_loc_tien():
@@ -422,8 +594,17 @@ def test_nhan_tinh_tiktok():
     assert VT.ten_tinh("13494358") == VT.ten_tinh("1580578") == "TP. Hồ Chí Minh"
     assert VT.ten_tinh("13494353") == VT.ten_tinh("1581088") == "Gia Lai"
     assert VT.ten_tinh("999") is None and VT.ten_tinh(None) is None
-    # 34 tỉnh/thành sau 01/07/2025 + 54 mã cũ (GeoNames ADM1H) = 88 mã, đủ 63 tỉnh cũ theo tên.
-    assert len(VT.TEN_TINH) == 88 and len(set(VT.TEN_TINH.values())) == 65
+    # 34 tỉnh/thành sau 01/07/2025 + 54 mã cũ (GeoNames ADM1H) = 88 mã Việt Nam, đủ 63 tỉnh cũ theo
+    # tên; + 6 mã ngoài Việt Nam gặp thật trong kho (soát 26/10/2026, GeoNames ADM1).
+    assert len(VT.TEN_TINH) == 94 and len(set(VT.TEN_TINH.values())) == 71
+    assert VT.NGOAI_VN <= set(VT.TEN_TINH)
+    assert all("(" in VT.TEN_TINH[k] for k in VT.NGOAI_VN)
+    assert not any("(" in v for k, v in VT.TEN_TINH.items() if k not in VT.NGOAI_VN)
+    for ma, ten in (("1609348", "Bangkok (Thái Lan)"), ("1641897", "Đông Kalimantan (Indonesia)"),
+                    ("1822449", "Ratanakiri (Campuchia)"),
+                    ("1841597", "Gyeongsangbuk-do (Hàn Quốc)"), ("1853904", "Osaka (Nhật Bản)"),
+                    ("1862047", "Hyōgo (Nhật Bản)")):
+        assert QC.nhan_gia_tri("province_id", ma) == ten
     assert all(re.fullmatch(r"[0-9]{6,9}", k) for k in VT.TEN_TINH)
     assert QC.nhan_gia_tri("province_id", "1581129") == "Hà Nội"
     assert QC.nhan_gia_tri("province_id", "42") == "Mã vùng 42"
@@ -440,30 +621,39 @@ class _GhiSQLXoa(_GhiSQL):
 
 
 def test_sql_khan_gia_cd(monkeypatch):
+    luc = datetime.datetime(2026, 10, 19, 1, 0, tzinfo=datetime.UTC)
     g = _GhiSQLXoa({"FROM qc_campaign_ngay WHERE advertiser_id": [{"campaign_id": 7}],
-                    "SELECT max(den)": [{"den": datetime.date(2026, 10, 18)}]})
+                    "SELECT now()": [{"luc": luc}]})
     monkeypatch.setattr(KQ, "ket_noi", g)
     a, b = CUA_SO
     assert KQ.cd_co_chay(HAPAS_KOC, a, b, 1000) == ["7"]
-    assert KQ.khan_gia_cd_den(HAPAS_KOC) == b
-    KQ.xoa_khan_gia_cd(HAPAS_KOC, a, b)
-    KQ.don_khan_gia_cd(HAPAS_KOC, b)
+    assert KQ.gio_kho() == luc
+    KQ.xong_khan_gia_cd(HAPAS_KOC, b, luc)
+    xong = g.cau[-3:]
     KQ.ds_cd_khan_gia([HAPAS_KOC])
     KQ.qc_khan_gia_cd([HAPAS_KOC], ["7"])
     KQ.gia_tri_khan_gia("province_id")
     for sql, ts in g.cau:
-        assert sql.count("%s") == len(ts), sql
-    cau = {s.split(" ", 1)[0] + str(i): (s, t) for i, (s, t) in enumerate(g.cau)}
-    xoa = [(s, t) for s, t in cau.values() if s.startswith("DELETE")]
-    assert len(xoa) == 2 and all("FROM qc_khan_gia_cd WHERE advertiser_id = %s" in s
-                                 for s, _ in xoa)
-    assert xoa[0][1] == (HAPAS_KOC, a, b)
-    assert xoa[1][1] == (HAPAS_KOC, b - datetime.timedelta(days=KQ.KHAN_GIA_CD_GIU_NGAY))
-    doc = [s for s, _ in g.cau if not s.startswith("DELETE")]
+        assert sql.count("%s") == len(ts or ()), sql
+    # Hoàn tất: MỘT kết nối (một giao dịch) — bỏ dòng khác cửa sổ / cũ hơn lượt, đặt lại
+    # cap_nhat_luc, dời mốc; không xoá cửa sổ vừa hoàn tất.
+    assert xong[0] == (("DELETE FROM qc_khan_gia_cd WHERE advertiser_id = %s "
+                        "AND (den <> %s OR cap_nhat_luc < %s)"), (HAPAS_KOC, b, luc))
+    assert xong[1][0].startswith("UPDATE qc_khan_gia_cd SET cap_nhat_luc = now()")
+    assert xong[2] == ("UPDATE tk_quang_cao SET khan_gia_cd_den = %s WHERE advertiser_id = %s",
+                       (b, HAPAS_KOC))
+    doc = [s for s, _ in g.cau if not s.startswith(("DELETE", "UPDATE"))]
     assert not any(re.search(r"\b(INSERT|UPDATE|DELETE)\b", s) for s in doc)
+    # Người đọc chỉ dùng cửa sổ = mốc hoàn tất; danh sách KHÔNG có LIMIT (soát L1).
+    moi = ("WITH moi AS (SELECT advertiser_id, khan_gia_cd_den AS den FROM tk_quang_cao "
+           "WHERE advertiser_id = ANY(%s) AND khan_gia_cd_den IS NOT NULL)")
+    ds = next(s for s in doc if "LEFT JOIN LATERAL" in s)
+    assert ds.startswith(moi) and "JOIN moi USING (advertiser_id, den)" in ds
+    assert "LIMIT" not in ds.split("LEFT JOIN LATERAL")[1]
     tong = next(s for s in doc if "GROUP BY k.chieu, k.gia_tri" in s)
-    assert "FROM qc_khan_gia_cd k JOIN moi USING (advertiser_id, tu, den)" in tong
-    assert "k.campaign_id = ANY(%s)" in tong
+    assert tong.startswith(moi) and "k.campaign_id = ANY(%s)" in tong
+    thieu = next(s for s in doc if "SELECT DISTINCT k.advertiser_id" in s)
+    assert "t.khan_gia_cd_den IS NULL" in thieu
     # Không gọi DB khi không có tài khoản / chiến dịch.
     n = len(g.cau)
     assert KQ.qc_khan_gia_cd([HAPAS_KOC], []) == {"rows": [], "tu": None, "den": None}
@@ -472,14 +662,16 @@ def test_sql_khan_gia_cd(monkeypatch):
     s = KQ.sql_upsert("qc_khan_gia_cd")
     assert "ON CONFLICT (advertiser_id, campaign_id, tu, den, chieu, gia_tri)" in s
     assert "WHERE" not in s
+    assert "khan_gia_cd_den" in KQ._COT_TK
 
 
 # ───────────────────────────── 5. schema + bản delta + BigQuery ─────────────────────────────
 def _khoi_tao(sql: str) -> str:
     return re.search(r"CREATE TABLE IF NOT EXISTS qc_khan_gia_cd \(.*?\n\);\n"
                      r"CREATE INDEX IF NOT EXISTS qc_khan_gia_cd_moi[^\n]*\n"
-                     r"CREATE INDEX IF NOT EXISTS qc_khan_gia_cd_cap_nhat[^\n]*\n", sql,
-                     re.DOTALL).group(0)
+                     r"CREATE INDEX IF NOT EXISTS qc_khan_gia_cd_cap_nhat[^\n]*\n"
+                     r"ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS khan_gia_cd_den DATE;\n",
+                     sql, re.DOTALL).group(0)
 
 
 def test_schema_bang_moi_quyen_va_ban_delta():
@@ -490,6 +682,11 @@ def test_schema_bang_moi_quyen_va_ban_delta():
     assert "REFERENCES tk_quang_cao(advertiser_id)" in tao
     ck = re.search(r"chieu\s+TEXT NOT NULL CHECK \(chieu IN \((.*?)\)\)", tao, re.DOTALL).group(1)
     assert tuple(re.findall(r"'(\w+)'", ck)) == QC.CHIEU_TAT_CA
+    # Mốc hoàn tất: cột tk_quang_cao (CREATE cho DB mới + ALTER cho DB đang chạy) có mô tả.
+    tk = re.search(r"CREATE TABLE IF NOT EXISTS tk_quang_cao \((.*?)\n\);", sql, re.DOTALL).group(1)
+    assert re.search(r"^\s{2}khan_gia_cd_den\s+DATE$", tk, re.MULTILINE)
+    mo_cot = re.search(r"COMMENT ON COLUMN tk_quang_cao\.khan_gia_cd_den IS '[^']{20,}';\n", sql)
+    assert mo_cot
     # Bảng tạo khi đang là chủ bảng (SET ROLE lang_nghe_chu … RESET ROLE), trước GRANT SELECT ON
     # ALL TABLES của web; quyền như qc_khan_gia + DELETE chỉ bảng này; Mark chỉ đọc.
     assert sql.index("SET ROLE lang_nghe_chu;") < sql.index(tao) < sql.index("RESET ROLE;")
@@ -498,12 +695,16 @@ def test_schema_bang_moi_quyen_va_ban_delta():
     assert "GRANT SELECT ON qc_khan_gia_cd TO mark;" in sql
     assert not re.search(r"GRANT[^;]*DELETE[^;]*ON[^;]*qc_(?!khan_gia_cd)", sql)
     assert not re.search(r"GRANT[^;]*(INSERT|UPDATE|DELETE)[^;]*qc_khan_gia_cd[^;]*TO mark", sql)
-    # Bản delta: đúng khối tạo + mô tả của schema.sql, không đổi DB, chặn nhầm DB, một giao dịch.
+    # Bản delta (áp được trên DB CHƯA có bản đầu): đúng khối tạo + mốc + mô tả của schema.sql, không
+    # đổi DB, chặn nhầm DB, một giao dịch, chú thích khoá đúng (soát L5).
     dl = (GOC / "deploy" / "lang-nghe" / "2026-10-26-khan-gia-cd.sql").read_text(encoding="utf-8")
     assert "\\connect" not in dl and "\\c " not in dl and _khoi_tao(dl) == tao
     mo_ta = re.search(r"COMMENT ON TABLE qc_khan_gia_cd IS .*?cap_nhat_luc IS '[^']*';\n", sql,
                       re.DOTALL).group(0)
     assert mo_ta in dl and mo_ta.count("COMMENT ON COLUMN qc_khan_gia_cd.") == 26
+    assert mo_cot.group(0) in dl
+    assert "SHARE ROW EXCLUSIVE" in dl and "ACCESS EXCLUSIVE" in dl
+    assert "không khoá bảng nào khác" not in dl
     assert "to_regclass('public.tk_quang_cao') IS NULL" in dl and "RAISE EXCEPTION" in dl
     i = [dl.index(x) for x in ("BEGIN;", "SET LOCAL ROLE lang_nghe_chu;", tao, "RESET ROLE;",
                                ("GRANT SELECT, INSERT, UPDATE, DELETE ON qc_khan_gia_cd TO "
@@ -519,14 +720,24 @@ def test_bigquery_bang_moi_va_mo_ta_11_nhan(monkeypatch):
     assert DBQ.THU_TU.index("qc_khan_gia") < DBQ.THU_TU.index("qc_khan_gia_cd")
     s = DBQ.sql_merge("qc_khan_gia_cd")
     assert "T.campaign_id = S.campaign_id" in s and "DELETE" not in s
+    # Soát L4: chỉ đẩy dòng của cửa sổ đã hoàn tất (mọi lô — cả lô đầu lẫn lô sau).
+    for co_moc in (False, True):
+        for co_sau in (False, True):
+            q = DBQ.sql_lo("qc_khan_gia_cd", co_moc, co_sau)
+            assert ("qc_khan_gia_cd.den <= t.khan_gia_cd_den" in q
+                    and "t.advertiser_id = qc_khan_gia_cd.advertiser_id" in q), q
+    assert "khan_gia_cd_den" not in DBQ.sql_lo("qc_khan_gia", True, True)
+    assert ("khan_gia_cd_den", "DATE") in DBQ.BANG["tk_quang_cao"]["cot"]
     sql = (GOC / "deploy" / "lang-nghe" / "bigquery.sql").read_text(encoding="utf-8")
+    assert re.search(r"ALTER TABLE `[^`]+\.tk_quang_cao`\s+ADD COLUMN IF NOT EXISTS "
+                     r"khan_gia_cd_den DATE OPTIONS\(description='.{20,}'\);", sql)
     m = re.search(r"CREATE TABLE IF NOT EXISTS `[^`]+\.qc_khan_gia_cd`\s*\((.*?)\n\)\n(.*?)'''\);",
                   sql, re.DOTALL)
     dong = m.group(2).split("description='''", 1)[1].split("\n")
     assert [d.split("]", 1)[0] + "]" for d in dong] == [
         "[Lớp]", "[Mục đích]", "[Grain]", "[Khoá]", "[Nguồn]", "[Phạm vi]", "[Đã xử lý]",
         "[Refresh]", "[Dùng khi]", "[Không dùng khi]", "[Lưu ý]"]
-    assert "dùng SOCIAL_LISTENING.qc_khan_gia" in dong[9]
+    assert "dùng SOCIAL_LISTENING.qc_khan_gia" in dong[9] and "khan_gia_cd_den" in dong[7]
     cot = re.findall(r"^\s{2}(\w+)\s+\w+\s+OPTIONS\(description='(.{10,}?)'\)", m.group(1),
                      re.MULTILINE)
     assert [c for c, _ in cot] == [c for c, _ in b["cot"]] + ["dong_bo_luc"]

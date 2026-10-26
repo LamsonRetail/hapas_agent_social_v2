@@ -3025,6 +3025,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         kg_chon = next((x for x in ds_kg if str(x["campaign_id"]) == kg_ma), None)
         cds_kg = ([str(kg_chon["campaign_id"])] if kg_chon
                   else [str(x["campaign_id"]) for x in ds_kg] if tc["co_loc"] else None)
+        # Ô chọn: ≤ KG_CD_O_CHON dòng đầu + chiến dịch đang chọn nếu nó nằm ngoài (soát L2).
+        o_kg = ds_kg[:QC.KG_CD_O_CHON]
+        if kg_chon is not None and all(x is not kg_chon for x in o_kg):
+            o_kg = [*o_kg, kg_chon]
         if cds_kg is None:
             kg = kq.qc_khan_gia(ids) if ids else {"rows": [], "tu": None, "den": None}
         else:
@@ -3090,7 +3094,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                         "nen_tang": nen_tk.get(x["advertiser_id"], "tiktok"),
                         "ten_tk": ten_tk.get(x["advertiser_id"], ""),
                         "chi": x.get("chi"), "hien_thi": x.get("hien_thi")}
-                       for x in ds_kg[:QC.KG_CD_O_CHON]],
+                       for x in o_kg],
                 "tk_thieu": [ten_tk.get(x, x) for x in kd.get("tk_thieu") or []],
             },
             "moi": {"ngay_cuoi": moi.get("ngay_cuoi"), "ghi_luc": moi.get("ghi_luc")},

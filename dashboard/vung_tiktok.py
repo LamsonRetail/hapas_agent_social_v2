@@ -10,8 +10,10 @@ Báo cáo TikTok có thể trả mã cũ hoặc mã mới tuỳ thời điểm �
 thông dụng (có dấu); mã cũ và mã mới cùng tên (vd Lào Cai cũ / Lào Cai mới) thì khối Khán giả cộng
 chung một dòng (`quang_cao.khan_gia` gộp theo nhãn).
 
-Không gọi API: mã lạ (vùng ngoài Việt Nam, mã TikTok đổi) → trang hiện "Mã vùng <mã>". Soát mã chưa
-có tên trong kho: `python -m dashboard.tiktok_ads vung-chua-ten` (chỉ đọc DB) rồi bổ sung bảng này.
+Ngoài Việt Nam: soát 26/10/2026 trên VPS thấy 6 mã không thuộc Việt Nam (khán giả ở Thái Lan, Nhật,
+Hàn…); tra admin1CodesASCII.txt của GeoNames — cả 6 là ADM1 → "<tên> (<nước>)". Không gọi API: mã
+lạ khác (vùng chưa gặp, mã TikTok đổi) → trang hiện "Mã vùng <mã>". Soát mã chưa có tên trong kho:
+`python -m dashboard.tiktok_ads vung-chua-ten` (chỉ đọc DB) rồi tra GeoNames, bổ sung bảng này.
 """
 from __future__ import annotations
 
@@ -107,7 +109,17 @@ TEN_TINH: dict[str, str] = {
     "1559978": "Yên Bái",
     "1581019": "Hà Tây",
     "12166267": "Sa Đéc",
+    # ── Ngoài Việt Nam (soát 26/10/2026: mã TikTok thật trong kho, tra admin1CodesASCII.txt của
+    #    GeoNames — đều là ADM1; tên GeoNames + nước bằng tiếng Việt) ──
+    "1609348": "Bangkok (Thái Lan)",
+    "1641897": "Đông Kalimantan (Indonesia)",
+    "1822449": "Ratanakiri (Campuchia)",
+    "1841597": "Gyeongsangbuk-do (Hàn Quốc)",
+    "1853904": "Osaka (Nhật Bản)",
+    "1862047": "Hyōgo (Nhật Bản)",
 }
+#: Mã ngoài Việt Nam trong TEN_TINH (đếm / soát riêng).
+NGOAI_VN = frozenset({"1609348", "1641897", "1822449", "1841597", "1853904", "1862047"})
 
 
 def ten_tinh(ma) -> str | None:

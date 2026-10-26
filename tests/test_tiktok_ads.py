@@ -378,7 +378,8 @@ class GiaKhoQC:
                                 "mui_gio": t.get("mui_gio") or "Asia/Ho_Chi_Minh",
                                 "dang_dong_bo": True, "con_quyen": True, "nap_lui_xong_luc": None,
                                 "nap_lui_tu": None,
-                                "khan_gia_luc": None, "thay_lan_dau": BAY, "thay_cuoi": BAY,
+                                "khan_gia_luc": None, "khan_gia_cd_den": None,
+                                "thay_lan_dau": BAY, "thay_cuoi": BAY,
                                 "cap_nhat_luc": BAY, "nen_tang": nen,
                                 "duyet": nen != "meta" or adv in duyet_moi}
             else:
@@ -461,9 +462,15 @@ class GiaKhoQC:
     def ghi_khan_gia(self, rows):
         return self._ghi("qc_khan_gia", rows)
 
-    # 26/10/2026: khán giả theo chiến dịch — cùng nghĩa SQL của kho_qc.
+    # 26/10/2026: khán giả theo chiến dịch — cùng nghĩa SQL của kho_qc (mốc hoàn tất
+    # tk_quang_cao.khan_gia_cd_den; cap_nhat_luc = "now()" tăng dần của kho giả).
+    def _gio(self):
+        self._tick = getattr(self, "_tick", 0) + 1
+        return self._tick
+
     def ghi_khan_gia_cd(self, rows):
-        return self._ghi("qc_khan_gia_cd", rows)
+        luc = self._gio()
+        return self._ghi("qc_khan_gia_cd", [{**r, "cap_nhat_luc": luc} for r in rows])
 
     def cd_co_chay(self, adv, tu, den, n):
         tong: dict = {}
@@ -472,36 +479,30 @@ class GiaKhoQC:
                 tong[r["campaign_id"]] = tong.get(r["campaign_id"], 0) + (r.get("hien_thi") or 0)
         return [k for k, v in sorted(tong.items(), key=lambda x: (-x[1], x[0])) if v > 0][:n]
 
-    def khan_gia_cd_den(self, adv):
-        return max((r["den"] for r in self.bang["qc_khan_gia_cd"].values()
-                    if r["advertiser_id"] == adv), default=None)
+    def gio_kho(self):
+        return self._gio()
 
-    def _xoa_cd(self, giu):
+    def xong_khan_gia_cd(self, adv, den, tu_luc):
         b = self.bang["qc_khan_gia_cd"]
-        xoa = [k for k, r in b.items() if not giu(r)]
-        for k in xoa:
+        for k in [k for k, r in b.items() if r["advertiser_id"] == adv
+                  and (r["den"] != den or r["cap_nhat_luc"] < tu_luc)]:
             del b[k]
-        return len(xoa)
-
-    def xoa_khan_gia_cd(self, adv, tu, den):
-        return self._xoa_cd(lambda r: not (r["advertiser_id"] == adv and r["tu"] == tu
-                                           and r["den"] == den))
-
-    def don_khan_gia_cd(self, adv, moi):
-        moc = moi - datetime.timedelta(days=KQ.KHAN_GIA_CD_GIU_NGAY)
-        return self._xoa_cd(lambda r: not (r["advertiser_id"] == adv and r["den"] < moc))
+        luc = self._gio()
+        n = 0
+        for r in b.values():
+            if r["advertiser_id"] == adv and r["den"] == den:
+                r["cap_nhat_luc"] = luc
+                n += 1
+        self.tk[adv]["khan_gia_cd_den"] = den
+        return n
 
     def _moi_cd(self, ids):
-        moi: dict = {}
-        for r in self.bang["qc_khan_gia_cd"].values():
-            k = (r["den"], r["tu"])
-            if r["advertiser_id"] in ids and (r["advertiser_id"] not in moi
-                                              or k > moi[r["advertiser_id"]]):
-                moi[r["advertiser_id"]] = k
+        moc = {a: t.get("khan_gia_cd_den") for a, t in self.tk.items() if a in ids}
         return [r for r in self.bang["qc_khan_gia_cd"].values()
-                if r["advertiser_id"] in moi and (r["den"], r["tu"]) == moi[r["advertiser_id"]]]
+                if moc.get(r["advertiser_id"]) is not None
+                and r["den"] == moc[r["advertiser_id"]]]
 
-    def ds_cd_khan_gia(self, ids, n=KQ.KG_CD_TOI_DA):
+    def ds_cd_khan_gia(self, ids):
         cd = {(r["advertiser_id"], r["campaign_id"]): (r["tu"], r["den"]) for r in self._moi_cd(ids)}
         ds = []
         for (adv, cid), (tu, den) in cd.items():
@@ -512,10 +513,10 @@ class GiaKhoQC:
                        "ten": max(rs, key=lambda r: r["ngay"])["ten"] if rs else None,
                        "chi": cong["chi"], "hien_thi": cong["hien_thi"]})
         ds.sort(key=lambda x: (-(x["hien_thi"] or 0), x["campaign_id"]))
-        co = {r["advertiser_id"] for r in self.bang["qc_khan_gia_cd"].values()}
         thieu = sorted({r["advertiser_id"] for r in self.bang["qc_khan_gia"].values()
-                        if r["advertiser_id"] in ids} - co)
-        return {"ds": ds[:n], "tk_thieu": thieu}
+                        if r["advertiser_id"] in ids
+                        and not self.tk.get(r["advertiser_id"], {}).get("khan_gia_cd_den")})
+        return {"ds": ds, "tk_thieu": thieu}
 
     def qc_khan_gia_cd(self, ids, cds):
         self.goi_kg_cd = [*getattr(self, "goi_kg_cd", []), (tuple(ids), tuple(cds))]

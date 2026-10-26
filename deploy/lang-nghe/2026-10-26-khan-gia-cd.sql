@@ -1,15 +1,20 @@
 -- Khán giả theo chiến dịch (26/10/2026, chủ dự án chốt) — CHỈ phần thay đổi của schema.sql ngày này:
--- bảng qc_khan_gia_cd + chỉ mục + mô tả 11 nhãn + quyền. schema.sql đã có đúng các lệnh này (chạy cả
--- file vẫn được); file này để áp riêng phần mới, KHÔNG có lệnh đổi DB — DB đích chọn bằng -d (thử
--- trên DB tạm: đổi -d, file không tự nhảy sang lang_nghe).
+-- bảng qc_khan_gia_cd + chỉ mục + cột mốc hoàn tất tk_quang_cao.khan_gia_cd_den + mô tả 11 nhãn +
+-- quyền. schema.sql đã có đúng các lệnh này (chạy cả file vẫn được); file này để áp riêng phần mới,
+-- KHÔNG có lệnh đổi DB — DB đích chọn bằng -d (thử trên DB tạm: đổi -d, file không tự nhảy sang
+-- lang_nghe).
 --
 --   sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -d lang_nghe \
 --     < deploy/lang-nghe/2026-10-26-khan-gia-cd.sql
 --
--- Cần role postgres (superuser): SET ROLE lang_nghe_chu (chủ bảng, NOLOGIN) + GRANT. Chạy TRƯỚC khi
--- bật mã mới (mã cũ không đọc bảng này; mã mới chưa có bảng thì khán giả cấp chiến dịch chỉ ghi nhật
--- ký lỗi, phần khác chạy bình thường). Bảng mới: CREATE nhanh, không khoá bảng nào khác; một giao
--- dịch; chạy lại không sao (IF NOT EXISTS; COMMENT / GRANT ghi đè như cũ).
+-- Cần role postgres (superuser): SET ROLE lang_nghe_chu (chủ bảng, NOLOGIN — ALTER tk_quang_cao,
+-- CREATE) + GRANT. Chạy TRƯỚC khi bật mã mới (mã mới đọc cột tk_quang_cao.khan_gia_cd_den — thiếu
+-- cột thì trang Quảng cáo và đồng bộ quảng cáo lỗi). Một giao dịch; chạy lại không sao (IF NOT
+-- EXISTS; COMMENT / GRANT ghi đè như cũ).
+-- Khoá (soát L5): REFERENCES tk_quang_cao xin SHARE ROW EXCLUSIVE trên tk_quang_cao (chặn ghi bảng
+-- đó tới hết giao dịch), ADD COLUMN xin ACCESS EXCLUSIVE (chặn cả đọc — chỉ đổi danh mục, cột NULL
+-- không DEFAULT nên tức thì). Giao dịch ngắn; Mark / dashboard / bộ đồng bộ đang giữ khoá thì
+-- lock_timeout 5 giây → lỗi, KHÔNG treo, không đổi gì — chạy lại sau (tránh 06:25–07:30 giờ VN).
 
 \set ON_ERROR_STOP on
 
@@ -59,18 +64,19 @@ CREATE TABLE IF NOT EXISTS qc_khan_gia_cd (
 );
 CREATE INDEX IF NOT EXISTS qc_khan_gia_cd_moi ON qc_khan_gia_cd (advertiser_id, den DESC, tu DESC);
 CREATE INDEX IF NOT EXISTS qc_khan_gia_cd_cap_nhat ON qc_khan_gia_cd (cap_nhat_luc);
+ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS khan_gia_cd_den DATE;
 
 COMMENT ON TABLE qc_khan_gia_cd IS $$[Lớp] Raw
 [Mục đích] Khán giả quảng cáo TikTok / Meta của TỪNG chiến dịch (tuổi, giới tính, tỉnh/thành, nền tảng) trong cửa sổ 30 ngày — khối Khán giả của trang Quảng cáo khi lọc tên chiến dịch hoặc chọn một chiến dịch.
 [Grain] 1 dòng = 1 chiến dịch × 1 cửa sổ (tu..den) × 1 chiều × 1 giá trị của chiều
 [Khoá] PK: advertiser_id + campaign_id + tu + den + chieu + gia_tri | Join: advertiser_id → tk_quang_cao.advertiser_id; (advertiser_id, campaign_id) → qc_campaign_ngay (tên, số theo ngày)
 [Nguồn] TikTok for Business MCP report_integrated_get (AUDIENCE, AUCTION_CAMPAIGN, chiều campaign_id + một chiều khán giả, lọc campaign_ids ≤ 100 mã), bộ hẹn giờ tiktok-ads-dong-bo; Meta: Graph API GET act_<id>/insights (level=campaign, breakdowns, lọc campaign.id ≤ 50 mã), bộ hẹn giờ meta-ads-dong-bo; lệnh khan-gia đọc lại ngay
-[Phạm vi] Chiến dịch CÓ hiển thị trong cửa sổ (theo qc_campaign_ngay, ≤ 1.000 chiến dịch mỗi tài khoản, nhiều hiển thị trước) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 26/10/2026
+[Phạm vi] Chiến dịch CÓ hiển thị trong cửa sổ (theo qc_campaign_ngay, ≤ 5.000 chiến dịch mỗi tài khoản, nhiều hiển thị trước) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 26/10/2026
 [Đã xử lý] Cùng 13 chỉ số và cùng luật đổi số với qc_khan_gia (TikTok "-" → NULL; Meta mã trùng sau khi đổi — vd Unknown/unknown — cộng lại theo từng chiến dịch, reach NULL khi gộp); cột không có trong báo cáo khán giả (reach TikTok, engaged_view…) NULL
-[Refresh] Mỗi 7 ngày mỗi tài khoản (trong lượt đồng bộ 06:30 TikTok / 06:45 Meta giờ VN; lỗi thì đọc lại hôm sau), cửa sổ 30 ngày tới hết hôm qua; xoá cửa sổ trước khi đọc lại, lỗi giữa chừng xoá phần đã ghi; giữ cửa sổ có den trong 28 ngày tính từ cửa sổ mới nhất (BigQuery giữ đủ lịch sử)
-[Dùng khi] Khán giả của một hoặc vài chiến dịch — lấy cửa sổ den mới nhất của từng tài khoản, lọc campaign_id
+[Refresh] Mỗi 7 ngày mỗi tài khoản, SAU số hằng ngày của mọi tài khoản trong lượt 06:30 TikTok / 06:45 Meta giờ VN (≤ 20 phút mỗi nền tảng, còn lại lượt sau; lỗi thì đọc lại hôm sau), cửa sổ 30 ngày tới hết hôm qua; upsert, đọc ĐỦ mới dời mốc tk_quang_cao.khan_gia_cd_den và bỏ dòng cũ (một giao dịch); chỉ giữ cửa sổ hoàn tất mới nhất (BigQuery giữ đủ lịch sử)
+[Dùng khi] Khán giả của một hoặc vài chiến dịch — chỉ dòng den = tk_quang_cao.khan_gia_cd_den của từng tài khoản, lọc campaign_id
 [Không dùng khi] Khán giả cả tài khoản → dùng qc_khan_gia (reach không đếm trùng giữa chiến dịch); số theo ngày của chiến dịch → dùng qc_campaign_ngay
-[Lưu ý] Các cửa sổ chồng nhau — KHÔNG cộng nhiều cửa sổ. Cộng nhiều chiến dịch: hiển thị, chi, bấm cộng được; reach thì đếm trùng người. province_id là mã vùng TikTok (GeoNames; tên ở dashboard/vung_tiktok.py), -1 = không rõ.$$;
+[Lưu ý] Dòng den > mốc là cửa sổ đang đọc / bị bỏ dở — KHÔNG dùng. Cộng nhiều chiến dịch: hiển thị, chi, bấm cộng được; reach thì đếm trùng người. province_id là mã vùng TikTok (GeoNames; tên ở dashboard/vung_tiktok.py), -1 = không rõ.$$;
 COMMENT ON COLUMN qc_khan_gia_cd.advertiser_id IS 'Tài khoản quảng cáo của chiến dịch. Một phần PK. FK → tk_quang_cao.advertiser_id.';
 COMMENT ON COLUMN qc_khan_gia_cd.campaign_id IS 'Mã chiến dịch (TikTok campaign_id; Meta campaign id, chuỗi số). Một phần PK. Join: → qc_campaign_ngay.campaign_id (cùng advertiser_id).';
 COMMENT ON COLUMN qc_khan_gia_cd.tu IS 'Ngày đầu cửa sổ 30 ngày (múi giờ tài khoản). Một phần PK.';
@@ -97,16 +103,18 @@ COMMENT ON COLUMN qc_khan_gia_cd.mua_shop IS 'Lượt mua TikTok Shop gán cho q
 COMMENT ON COLUMN qc_khan_gia_cd.gia_tri_mua_shop IS 'Doanh thu gán cho quảng cáo theo tiền tệ tài khoản, chưa VAT: TikTok NULL (báo cáo khán giả không xin); Meta giá trị mua (action_values mua, cùng luật bí danh với chuyen_doi), NULL khi Meta ẩn. CHỈ SỐ TIỀN.';
 COMMENT ON COLUMN qc_khan_gia_cd.chi_so IS 'MỌI chỉ số nền tảng trả cho dòng (JSON {tên chỉ số: số}; "-" của TikTok → null; không gồm campaign_id và mã chiều). TikTok: 13 chỉ số khán giả; Meta: trường Insights đã xin, action thành <trường>__<action_type>; ctr, cpm, reach KHÔNG cộng được qua dòng. Khoá tiền: spend, cpm, *_value, action_values__*.';
 COMMENT ON COLUMN qc_khan_gia_cd.cap_nhat_luc IS 'Lần đồng bộ ghi/sửa dòng gần nhất (UTC). Mốc đồng bộ BigQuery.';
+COMMENT ON COLUMN tk_quang_cao.khan_gia_cd_den IS 'Ngày cuối (den) của cửa sổ khán giả CẤP CHIẾN DỊCH đã đọc ĐỦ gần nhất (múi giờ tài khoản; đọc lại mỗi 7 ngày, từ 26/10/2026) — trang / BigQuery chỉ dùng dòng qc_khan_gia_cd có den = mốc này. NULL khi chưa có cửa sổ nào hoàn tất.';
 
 RESET ROLE;
 
 -- Quyền (như schema.sql): bộ hẹn giờ + dashboard (lang_nghe_web) đọc / thêm / sửa / XOÁ — xoá CHỈ bảng
--- này (xoá cửa sổ trước khi đọc lại + dọn cửa sổ cũ hơn 28 ngày); Mark chỉ đọc. SELECT cho
--- lang_nghe_web ghi rõ ở đây vì GRANT SELECT ON ALL TABLES của schema.sql chỉ áp bảng có lúc chạy.
+-- này (lúc hoàn tất một cửa sổ: bỏ dòng cũ / cửa sổ bỏ dở); Mark chỉ đọc. SELECT cho lang_nghe_web
+-- ghi rõ ở đây vì GRANT SELECT ON ALL TABLES của schema.sql chỉ áp bảng có lúc chạy. Cột
+-- tk_quang_cao.khan_gia_cd_den: quyền cả bảng có sẵn (web SELECT/UPDATE, Mark SELECT) như khan_gia_luc.
 GRANT SELECT, INSERT, UPDATE, DELETE ON qc_khan_gia_cd TO lang_nghe_web;
 GRANT SELECT ON qc_khan_gia_cd TO mark;
 COMMIT;
 
 -- Kiểm sau khi chạy:
 --   sudo -u postgres psql -d lang_nghe -c '\dp qc_khan_gia_cd'
---   sudo -u postgres psql -d lang_nghe -c "select obj_description('qc_khan_gia_cd'::regclass) is not null"
+--   sudo -u postgres psql -d lang_nghe -c '\d tk_quang_cao' | grep khan_gia_cd_den
