@@ -134,24 +134,14 @@
   function $(id) { return document.getElementById(id); }
   // ─── định dạng số: MỘT bộ cho cả trang (17/10/2026) ───
   // so: số đủ, chấm nghìn "1.234.567" (bảng, chú giải, tooltip)
-  // soThe: giá trị lớn trên thẻ / giữa vòng — từ 1 triệu gọn "35,8 tr", "1,2 tỷ" (số đủ ở title)
-  // soTruc: trục, nhãn đỉnh, số đếm trong nút — thêm "N" (nghìn) từ 10.000: "25 N", "3,2 tr"
+  // 26/10/2026 (chủ dự án: "những số đang viết tắt thì phải viết rõ số cụ thể, không viết tắt nữa"):
+  // KHÔNG còn "tỷ" / "tr" / "N" ở bất cứ đâu — soThe / soTruc cũng trả số đầy đủ như so().
+  // soThe: giá trị lớn trên thẻ / giữa vòng — "35.812.345"
+  // soTruc: trục, nhãn đỉnh, số đếm trong nút — "24.776"
   // pt: % một chữ số lẻ dưới 100, từ 100 trở lên làm tròn ("245%")
   function so(n) { return n == null ? "—" : SO.format(n); }
-  function soThe(n) {
-    if (n == null) return "—";
-    var a = Math.abs(n), dv = a >= 1e9 ? [1e9, " tỷ"] : a >= 1e6 ? [1e6, " tr"] : null;
-    if (!dv) return SO.format(n);
-    var x = n / dv[0];
-    return x.toLocaleString("vi-VN", { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : 1 }) + dv[1];
-  }
-  function soTruc(n) {
-    if (n == null) return "—";
-    var a = Math.abs(n);
-    if (a >= 1e6) return soThe(n);
-    if (a >= 1e4) return (n / 1e3).toLocaleString("vi-VN", { maximumFractionDigits: a >= 1e5 ? 0 : 1 }) + " N";
-    return SO.format(n);
-  }
+  function soThe(n) { return n == null ? "—" : SO.format(Math.round(n)); }
+  function soTruc(n) { return soThe(n); }
   function pt(x) {
     if (x == null) return "—";
     var le = Math.abs(x) >= 100 ? 0 : 1;
@@ -854,7 +844,7 @@
       areaStyle: { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [
         { offset: 0, color: hexRgba(m.chinh, 0.24) }, { offset: 1, color: hexRgba(m.chinh, 0.02) }]) },
       markPoint: imax >= 0 ? {
-        // nhãn đỉnh: viên chữ phía trên điểm (ghim cũ cắt chữ dài như "11,7 tr")
+        // nhãn đỉnh: viên chữ phía trên điểm (ghim cũ cắt chữ dài như "11.700.000")
         symbol: "circle", symbolSize: 9, itemStyle: { color: m.chinh, borderColor: m.mat, borderWidth: 2 },
         label: { show: true, position: "top", distance: 8, color: m.chu, fontSize: 11, fontWeight: 700, fontFamily: m.phong,
                  backgroundColor: m.mat, borderColor: m.chinh, borderWidth: 1, borderRadius: 5, padding: [3, 7],
@@ -902,7 +892,8 @@
     ve("bd-sac-thai", {
       animationDuration: 300,
       title: { text: soThe(tong), subtext: "tổng " + x.don, left: "center", top: "middle", itemGap: 2,
-               textStyle: { color: m.chu, fontSize: 21, fontWeight: 750, fontFamily: m.phong },
+               // số đủ dài hơn "tr/tỷ" (26/10/2026): hạ cỡ chữ cho vừa lỗ vòng (~110px)
+               textStyle: { color: m.chu, fontSize: Math.max(13, Math.min(21, Math.floor(104 / (0.56 * soThe(tong).length)))), fontWeight: 750, fontFamily: m.phong },
                subtextStyle: { color: m.mo, fontSize: 12, fontFamily: m.phong } },
       tooltip: { trigger: "item", renderMode: "richText", backgroundColor: m.mat, borderColor: m.ke, borderWidth: 1,
                  padding: [8, 12], textStyle: { color: m.chu, fontSize: 12, fontFamily: m.phong },
@@ -2976,7 +2967,6 @@
       var o1 = tao("span", "cs-nn__o");
       o1.appendChild(tao("span", "cs-nn__nhan", c[0]));
       var v = tao("b", "so", typeof c[1] === "number" ? soThe(c[1]) : c[1]);
-      if (typeof c[1] === "number" && c[1] >= 1e6) v.title = so(c[1]);
       o1.appendChild(v);
       s3.appendChild(o1);
     });
@@ -3040,7 +3030,6 @@
       var o1 = tao("span", "cs-nn__o");
       o1.appendChild(tao("span", "cs-nn__nhan", c[0]));
       var v = tao("b", "so", soThe(x[c[1]]));
-      if (x[c[1]] >= 1e6) v.title = so(x[c[1]]);
       o1.appendChild(v);
       var p = x[c[1] + "_pt"];
       o1.appendChild(tao("span", "cs-koc__pt", p == null ? "—" : ptCua(x[c[1]], tong[c[1]])));

@@ -324,18 +324,14 @@ def usd_vn(x, so_le: int = 2) -> str:
 
 
 def so_gon(n) -> str:
-    """Số gọn kiểu trang Chỉ số (`soThe` của chi_so.js): ≥ 1 tỷ "1,07 tỷ", ≥ 1 triệu "23,3 tr"."""
+    """Số ĐẦY ĐỦ có chấm nghìn "8.812.345.678" (chủ dự án 26/10/2026: "không viết tắt nữa" — bỏ
+    "tỷ" / "tr" / "N"). Giữ tên `so_gon` cho bộ lọc Jinja cũ; khớp `soThe` của chi_so.js."""
     if n is None:
         return "—"
     try:
-        x = float(n)
-    except (TypeError, ValueError):
+        return so_vn(round(float(n)))
+    except (TypeError, ValueError, OverflowError):
         return "—"
-    for nguong, don in ((1e9, " tỷ"), (1e6, " tr")):
-        if abs(x) >= nguong:
-            v = x / nguong
-            return (f"{v:.0f}" if abs(v) >= 100 else f"{v:.1f}").replace(".", ",") + don
-    return so_vn(round(x))
 
 
 def so_thap(x, so_le: int = 2) -> str:

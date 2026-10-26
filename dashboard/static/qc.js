@@ -69,13 +69,8 @@
   var bd = null;
 
   function bien(ten) { return getComputedStyle(document.documentElement).getPropertyValue(ten).trim(); }
-  function soGon(n) {
-    if (n == null) return "—";
-    var a = Math.abs(n), dv = a >= 1e9 ? [1e9, " tỷ"] : a >= 1e6 ? [1e6, " tr"] : a >= 1e4 ? [1e3, " N"] : null;
-    if (!dv) return SO.format(n);
-    var x = n / dv[0];
-    return x.toLocaleString("vi-VN", { maximumFractionDigits: Math.abs(x) >= 100 ? 0 : 1 }) + dv[1];
-  }
+  // 26/10/2026 (chủ dự án: "không viết tắt nữa"): số ĐẦY ĐỦ có chấm nghìn, không "tỷ" / "tr" / "N".
+  function soGon(n) { return n == null ? "—" : SO.format(Math.round(n)); }
   function ngayNgan(iso) { return iso.slice(8, 10) + "/" + iso.slice(5, 7); }
   function ngayDu(iso) { return iso.split("-").reverse().join("/"); }
   // Nhãn trục: ngày "23/10"; tuần "Tuần 20/10"; tháng "Tháng 10/2026" (máy chủ đặt `nhan`).

@@ -226,7 +226,7 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
 .qc-chia__ten { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 700; color: var(--chu); }
 .qc-chia__ten .qc-cham { width: 10px; height: 10px; }
 .qc-chia__tk { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--chu-mo); }
-.qc-chia__so { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 12px; font-variant-numeric: tabular-nums; color: var(--chu-phu); font-size: 13.5px; }
+.qc-chia__so { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 6px 0 12px; font-variant-numeric: tabular-nums; color: var(--chu-phu); font-size: 13.5px; }
 .qc-chia__so b { font-size: 26px; line-height: 1.1; font-weight: 750; color: var(--chu); letter-spacing: -0.01em; }
 .qc-chia__hq { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; margin: 0; }
 .qc-chia__hq div { min-width: 0; }
