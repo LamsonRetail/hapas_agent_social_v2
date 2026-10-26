@@ -21,8 +21,8 @@ sau đẩy lại, MERGE nên không nhân đôi.
 Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, `dong_bo_bq`, cột email (`sua_boi`, `them_boi`), và
 `ket_noi_ngoai` (token TikTok / Meta đã mã hoá, email người cấp) — quảng cáo chỉ đẩy `tk_quang_cao`
 + `qc_*` (TikTok 19/10/2026, Meta 20/10/2026 — cùng bảng, `tk_quang_cao.nen_tang`; kênh đăng
-`qc_ad_kenh` + `qc_kenh` từ 22/10/2026; hai bộ hẹn giờ gọi
-`chay()` ngay sau lượt đồng bộ của mình).
+`qc_ad_kenh` + `qc_kenh` từ 22/10/2026; khán giả theo chiến dịch `qc_khan_gia_cd` từ 26/10/2026;
+hai bộ hẹn giờ gọi `chay()` ngay sau lượt đồng bộ của mình).
 Chạy: sau mỗi lượt quét (hook `sau_cap_nhat` của dashboard) và 6 giờ một lần. Một lượt một lúc.
 """
 from __future__ import annotations
@@ -158,6 +158,16 @@ BANG.update({
         "cot": [("advertiser_id", "STRING"), ("tu", "DATE"), ("den", "DATE"), ("chieu", "STRING"),
                 ("gia_tri", "STRING"), *_COT_QC],
     },
+    # 26/10/2026 (chủ dự án: Khán giả theo chiến dịch): như qc_khan_gia + campaign_id. Postgres chỉ
+    # giữ ~4 tuần cửa sổ (`kho_qc.KHAN_GIA_CD_GIU_NGAY`); BigQuery MERGE tăng dần, không xoá theo
+    # Postgres → giữ đủ lịch sử. Bảng BigQuery tạo bằng khối "Khán giả theo chiến dịch" cuối
+    # bigquery.sql — chưa chạy thì bảng này báo lỗi trên trang Kết nối BigQuery, bảng khác vẫn đẩy.
+    "qc_khan_gia_cd": {
+        "khoa": ["advertiser_id", "campaign_id", "tu", "den", "chieu", "gia_tri"],
+        "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "cot": [("advertiser_id", "STRING"), ("campaign_id", "STRING"), ("tu", "DATE"),
+                ("den", "DATE"), ("chieu", "STRING"), ("gia_tri", "STRING"), *_COT_QC],
+    },
     # 22/10/2026 (chủ dự án): kênh đăng của quảng cáo + tên kênh (không cột tiền). Bảng BigQuery tạo
     # bằng khối cuối bigquery.sql — chưa chạy thì hai bảng này báo lỗi trên trang Kết nối BigQuery,
     # bảng khác vẫn đẩy bình thường.
@@ -175,7 +185,7 @@ BANG.update({
 })
 THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan",   # cha trước con
           "tk_quang_cao", "qc_tk_ngay", "qc_campaign_ngay", "qc_ad_ngay", "qc_khan_gia",
-          "qc_ad_kenh", "qc_kenh")
+          "qc_khan_gia_cd", "qc_ad_kenh", "qc_kenh")
 
 
 def dataset() -> str:

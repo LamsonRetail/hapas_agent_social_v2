@@ -263,6 +263,18 @@
   });
 })();
 
+// Khán giả theo chiến dịch (26/10/2026, chủ dự án): đổi ô "Chiến dịch" là gửi luôn, ẩn nút Xem. Không
+// có JS: nút Xem vẫn gửi biểu mẫu GET (ô ẩn mang lại mọi bộ lọc khác).
+(function () {
+  var f = document.querySelector('form[data-o="chon-cd-kg"]');
+  if (!f) return;
+  var xem = f.querySelector("[data-kg-xem]");
+  if (xem) xem.hidden = true;
+  Array.prototype.forEach.call(f.querySelectorAll("select[data-tu-gui]"), function (s) {
+    s.addEventListener("change", function () { f.submit(); });
+  });
+})();
+
 // Chọn nhiều tài khoản (22/10/2026, chủ dự án): ô "Tài khoản" là danh sách đánh dấu trong <details>
 // (không JS vẫn chọn + gửi được). JS thêm: ô tìm (bỏ dấu, không phân biệt hoa thường), "Chọn tất cả /
 // Bỏ chọn" (áp vào các dòng đang hiện), dòng tóm tắt "Tất cả tài khoản (N)" / "3 tài khoản" / tên, đóng

@@ -469,6 +469,43 @@ Meta: Trang + Instagram) — `dashboard/README.md` mục "Kênh đăng của qu�
    `select count(*) filter (where ten is not null), count(*) from qc_kenh;` — trang Quảng cáo, khối
    "Theo kênh đăng" (dòng phụ "x% chi tiêu đã biết kênh").
 
+## 13. Khán giả theo chiến dịch (26/10/2026, chủ dự án chốt) — cần người duyệt trước khi chạy trên VPS
+
+Khối Khán giả của trang Quảng cáo theo lọc tên chiến dịch + ô chọn một chiến dịch; tỉnh TikTok có tên
+— `dashboard/README.md` mục "Khán giả theo chiến dịch". Bảng mới `qc_khan_gia_cd` (`qc_khan_gia` giữ
+nguyên, vẫn ghi). Thứ tự: **Postgres → BigQuery → mã → đọc lại ngay**.
+
+```bash
+# 1. Postgres — CHỈ phần mới (role postgres: SET ROLE lang_nghe_chu + GRANT; một giao dịch, chạy lại
+#    không sao; file chặn nhầm DB). Cả schema.sql (mục 7b) cũng đã có đúng các lệnh này.
+sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -d lang_nghe   < deploy/lang-nghe/2026-10-26-khan-gia-cd.sql
+sudo -u postgres psql -d lang_nghe -c '\dp qc_khan_gia_cd'   # lang_nghe_web arwd, mark r
+
+# 2. BigQuery: khối "Khán giả theo chiến dịch" trong bigquery.sql (một CREATE TABLE IF NOT EXISTS,
+#    người duyệt rồi mới chạy). Chưa chạy thì trang "Kết nối BigQuery" báo lỗi riêng bảng này.
+
+# 3. Mã dashboard (rsync như dashboard/README.md bước 2) rồi
+sudo systemctl restart lang-nghe-dashboard
+
+# 4. Đọc lại khán giả NGAY (cấp tài khoản + cấp chiến dịch, bỏ qua mốc 7 ngày) — đúng user + .env
+#    của bộ hẹn giờ; cùng khoá advisory với lượt đồng bộ (đang có lượt thì chờ tới --cho-khoa-phut).
+#    Không đụng cờ "Đồng bộ ngay" / mốc lượt của thẻ kết nối; xong thì đẩy BigQuery (--khong-bq để bỏ).
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env   -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.tiktok_ads khan-gia
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env   -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.meta_ads khan-gia
+#    Một tài khoản: thêm --tk <advertiser_id | act_…> (lặp lại được).
+
+# 5. Kiểm
+sudo -u lang_nghe_web psql -d lang_nghe -c "select advertiser_id, max(den), count(distinct campaign_id), count(*) from qc_khan_gia_cd group by 1 order by 1"
+sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=/opt/lang-nghe/.env   -p WorkingDirectory=/opt/lang-nghe/app /opt/lang-nghe/venv/bin/python -m dashboard.tiktok_ads vung-chua-ten
+```
+
+- Mỗi dòng kết quả `khan-gia` là JSON `{"so_dong", "so_tk", "loi"}`; `loi` liệt kê tài khoản / phần
+  cấp chiến dịch lỗi (cửa sổ lỗi bị xoá, lượt hằng ngày sau tự đọc lại).
+- `vung-chua-ten` liệt kê mã tỉnh TikTok đã có trong kho mà `dashboard/vung_tiktok.py` chưa có tên
+  (trang hiện "Mã vùng …") — bổ sung bảng đó (mã GeoNames) rồi lên code; không cần API.
+- Dung lượng: Postgres giữ các cửa sổ có `den` trong 28 ngày từ cửa sổ mới nhất (bộ đồng bộ tự xoá —
+  quyền DELETE chỉ trên bảng này); BigQuery giữ đủ lịch sử.
+
 ## Vận hành
 
 - **Sao lưu:**

@@ -54,6 +54,7 @@ class GiaMeta:
         self.het_han = het_han
         self.trang_tk = 2                    # me/adaccounts: 2 tài khoản mỗi trang (thử paging)
         self.next_la: str | None = None      # đặt URL lạ cho paging.next (thử chốt)
+        self.kg_cd: list[tuple] = []         # (act, breakdowns, mã chiến dịch) khán giả cấp chiến dịch
 
     def transport(self):
         return httpx.MockTransport(self.xu_ly)
@@ -94,6 +95,18 @@ class GiaMeta:
                   "publisher_platform": [{"publisher_platform": "instagram"}],
                   "publisher_platform,platform_position": [
                       {"publisher_platform": "instagram", "platform_position": "reels"}]}[bd]
+            if cap == "campaign":
+                # 26/10/2026: khán giả cấp chiến dịch — lọc campaign.id IN (bắt buộc), mỗi chiến dịch
+                # đủ các giá trị; chỉ chiến dịch của tài khoản này (như Meta).
+                loc = json.loads(q["filtering"])
+                assert loc[0]["field"] == "campaign.id" and loc[0]["operator"] == "IN"
+                assert "campaign_id" in q["fields"].split(",") and "time_increment" not in q
+                self.kg_cd.append((act, bd, tuple(loc[0]["value"])))
+                co = {cid for cid, _ in self.campaign.get(act, [])}
+                return [{**x, "campaign_id": cid, "date_start": tr["since"],
+                         "date_stop": tr["until"],
+                         **{k: v for k, v in self._so(1, 100 + j).items() if k != "actions"}}
+                        for j, cid in enumerate(loc[0]["value"]) if cid in co for x in gt]
             return [{**x, "date_start": tr["since"], "date_stop": tr["until"],
                      **{k: v for k, v in self._so(1, 1000).items() if k != "actions"}} for x in gt]
         rows = []

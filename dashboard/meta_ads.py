@@ -37,7 +37,9 @@ cờ — bộ hẹn giờ 2 phút chạy `dong-bo --chi-khi-yeu-cau`; dashboard 
     đổi trễ). Meta báo "quá nhiều dữ liệu" thì chia đôi cửa sổ (tới 1 ngày) — chỉ GET, không job
     async (POST). Ghi theo TỪNG TRANG (không giữ cả cửa sổ trong bộ nhớ, MemoryMax 512M).
   • Khán giả mỗi tuần, cửa sổ 30 ngày: age, gender, region, publisher_platform,
-    publisher_platform+platform_position.
+    publisher_platform+platform_position — cấp tài khoản (qc_khan_gia) và, từ 26/10/2026, cấp chiến
+    dịch (qc_khan_gia_cd: level=campaign, lọc campaign.id ≤ 50 chiến dịch có hiển thị, quá nặng thì
+    chia đôi lô). Đọc lại ngay: `python -m dashboard.meta_ads khan-gia`.
   • Kênh đăng (22/10/2026): lượt đầy đủ đọc Trang (creative.actor_id / object_story_spec.page_id) và
     Instagram (instagram_user_id) của các ad CÓ phân phối chưa biết kênh — GET act_<id>/ads lọc
     ad.id IN ≤ 200 mã (kể cả ad đã lưu trữ / xoá), tối đa `TRAN_KENH_LUOT` lượt mỗi lần. Tên Trang /
@@ -148,6 +150,10 @@ TRUONG_AD = ("campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id", 
              "objective") + TRUONG_SO
 TRUONG_KHAN_GIA = ("spend", "impressions", "reach", "clicks", "inline_link_clicks", "actions",
                    "action_values", "video_thruplay_watched_actions")
+#: Khán giả cấp chiến dịch (26/10/2026): insights level=campaign, cùng breakdowns + campaign_id; lọc
+#: campaign.id IN lô ≤ LO_KHAN_GIA_CD chiến dịch có hiển thị (Meta quá tải → chia đôi lô).
+TRUONG_KHAN_GIA_CD = ("campaign_id",) + TRUONG_KHAN_GIA
+LO_KHAN_GIA_CD = 50
 #: Chiều khán giả: (chieu lưu trong qc_khan_gia, breakdowns gửi Meta).
 CHIEU_META: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("age", ("age",)), ("gender", ("gender",)), ("region", ("region",)),
@@ -497,6 +503,20 @@ def dong_khan_gia(r: dict, act: str, tu: datetime.date, den: datetime.date, chie
     return {"advertiser_id": act, "tu": tu, "den": den, "chieu": chieu,
             "gia_tri": gia_tri_khan_gia(chieu, r), **dong_so(r, chia_nho=True),
             "chi_so": chi_so_json(r)}
+
+
+def dong_khan_gia_cd(r: dict, act: str, tu: datetime.date, den: datetime.date, chieu: str
+                     ) -> dict:
+    """Dòng khán giả CẤP CHIẾN DỊCH (26/10/2026): như `dong_khan_gia` + campaign_id."""
+    return {**dong_khan_gia(r, act, tu, den, chieu), "campaign_id": str(r.get("campaign_id"))}
+
+
+def gop_khan_gia_cd(rows: list[dict]) -> list[dict]:
+    """`gop_khan_gia` theo TỪNG chiến dịch (khoá campaign_id + gia_tri)."""
+    nhom: dict[str, list[dict]] = {}
+    for x in rows:
+        nhom.setdefault(x["campaign_id"], []).append(x)
+    return [y for ds in nhom.values() for y in gop_khan_gia(ds)]
 
 
 def gop_khan_gia(rows: list[dict]) -> list[dict]:
@@ -1088,22 +1108,101 @@ class DichVu:
         n += self._doc_ghi(g, act, "ad", TRUONG_AD, a, b, ghi_bang(dong_ad, self.kho.ghi_ad_ngay))
         return n
 
-    def _khan_gia(self, g: Graph, t: dict, hq: datetime.date, bay: datetime.datetime) -> int:
-        luc = TA._utc(t.get("khan_gia_luc"))
-        if luc and (bay - luc).days < KHAN_GIA_NGAY:
+    def _khan_gia(self, g: Graph, t: dict, hq: datetime.date, bay: datetime.datetime, *,
+                  ep: bool = False, loi: list | None = None) -> int:
+        """Như `tiktok_ads.DichVu._khan_gia`: cấp tài khoản (mốc khan_gia_luc) + cấp chiến dịch
+        (26/10/2026, mốc = cửa sổ mới nhất của qc_khan_gia_cd); `ep` bỏ qua cả hai mốc. Cùng
+        KHAN_GIA_NGAY = 7 với TikTok (`TA.khan_gia_den_han`)."""
+        tk_han, cd_han = TA.khan_gia_den_han(self.kho, t, hq, bay, ep, self.log)
+        if not (tk_han or cd_han):
             return 0
         act = str(t["advertiser_id"])
         a = hq - datetime.timedelta(days=CUA_SO_NGAY - 1)
         if not ((self.kho.qc_tong([act], a, hq) or {}).get("hien_thi") or 0):
             return 0
         n = 0
-        for chieu, bd in CHIEU_META:
-            rows = g.trang(f"{act}/insights", tham_so_insights(
-                "account", TRUONG_KHAN_GIA, a, hq, theo_ngay=False, breakdowns=bd))
-            n += self.kho.ghi_khan_gia(gop_khan_gia([dong_khan_gia(r, act, a, hq, chieu)
-                                                      for r in rows]))
-        self.kho.dat_khan_gia(act)
+        if tk_han:
+            for chieu, bd in CHIEU_META:
+                rows = g.trang(f"{act}/insights", tham_so_insights(
+                    "account", TRUONG_KHAN_GIA, a, hq, theo_ngay=False, breakdowns=bd))
+                n += self.kho.ghi_khan_gia(gop_khan_gia([dong_khan_gia(r, act, a, hq, chieu)
+                                                          for r in rows]))
+            self.kho.dat_khan_gia(act)
+        if cd_han:
+            bd = dict(CHIEU_META)
+            n += TA.doc_khan_gia_cd(
+                self.kho, act, a, hq,
+                lambda chieu, lo: self._khan_gia_lo(g, act, a, hq, chieu, bd[chieu], lo),
+                LO_KHAN_GIA_CD, self.log, "meta_ads", loi, tuple(bd), (LoiXacThuc,))
         return n
+
+    def _khan_gia_lo(self, g: Graph, act: str, a: datetime.date, b: datetime.date, chieu: str,
+                     bd: tuple[str, ...], lo: list[str]) -> list[dict]:
+        """Insights level=campaign + breakdowns của MỘT lô chiến dịch (lọc campaign.id IN), đủ mọi
+        trang rồi mới gộp (mã trùng sau khi đổi — vd Unknown/unknown — có thể nằm ở hai trang). Meta
+        quá nhiều dữ liệu / quá tải (mã 1, 2) → chia đôi lô; một chiến dịch vẫn lỗi → ném."""
+        co = set(lo)
+        try:
+            rows = g.trang(f"{act}/insights", tham_so_insights(
+                "campaign", TRUONG_KHAN_GIA_CD, a, b, theo_ngay=False, breakdowns=bd,
+                loc=[{"field": "campaign.id", "operator": "IN", "value": list(lo)}]))
+        except LoiMeta as e:
+            if not (isinstance(e, LoiQuaNhieu) or e.ma in MA_QUA_TAI) or len(lo) == 1:
+                raise
+            giua = len(lo) // 2
+            self.log(f"[meta_ads] {act} khán giả {chieu}: lô {len(lo)} chiến dịch quá nặng "
+                     f"(mã {e.ma}) — chia đôi")
+            return (self._khan_gia_lo(g, act, a, b, chieu, bd, lo[:giua])
+                    + self._khan_gia_lo(g, act, a, b, chieu, bd, lo[giua:]))
+        return gop_khan_gia_cd([dong_khan_gia_cd(r, act, a, b, chieu) for r in rows
+                                if str(r.get("campaign_id")) in co])
+
+    # ── khán giả đọc lại ngay (lệnh `khan-gia`, 26/10/2026) ──
+    def doc_khan_gia(self, ids=None, cho_khoa_giay: float = 0) -> dict:
+        """Như `tiktok_ads.DichVu.doc_khan_gia`: đọc lại khán giả NGAY (tài khoản + chiến dịch)
+        cho tài khoản Meta đã duyệt, đang đồng bộ; chỉ GET insights; không đụng cờ / mốc lượt;
+        khoá advisory riêng của Meta."""
+        r = self.kho.doc_ket_noi(NCC) or {}
+        loi = self.loi_khoa()
+        if loi:
+            return {"bo_qua": loi}
+        if not r.get("access_token_enc"):
+            return {"bo_qua": "chưa kết nối Meta Ads"}
+        chon = {chuan_act(x) or str(x) for x in ids} if ids else None
+        return TA.chay_voi_khoa(lambda: self.kho.khoa_dong_bo(KHOA_DONG_BO),
+                                lambda: self._doc_khan_gia(chon), cho_khoa_giay, self.ngu,
+                                self.log, "meta_ads", "đang có lượt đồng bộ Meta khác")
+
+    def _doc_khan_gia(self, chon: set[str] | None) -> dict:
+        dem, loi = {"so_dong": 0, "so_tk": 0}, []
+        try:
+            g = self.graph()
+            bay = self._bay_gio()
+            for t in self.kho.cac_tk():
+                act = str(t["advertiser_id"])
+                if (QC.nen_tang_tk(t) != NEN_TANG or not t.get("duyet")
+                        or not t.get("dang_dong_bo") or not t.get("con_quyen", True)
+                        or (chon is not None and act not in chon)):
+                    continue
+                try:
+                    dem["so_dong"] += self._khan_gia(g, t, TA.hom_qua(t.get("mui_gio"), bay), bay,
+                                                     ep=True, loi=loi)
+                    dem["so_tk"] += 1
+                except LoiXacThuc:
+                    raise
+                except LoiMeta as e:
+                    loi.append(f"{t.get('ten') or act}: {e}")
+                    self.log(f"[meta_ads] khán giả {act} lỗi: {e}")
+        except ChuaKetNoi as e:
+            return {**dem, "loi": str(e)}
+        except LoiXacThuc as e:
+            self.kho.ghi_trang_thai("het_han" if e.het_han else "loi",
+                                    f"Meta từ chối token: {e} — dán token mới", NCC,
+                                    con_token=True)
+            return {**dem, "loi": f"token bị từ chối: {e}"}
+        except (LoiMeta, LoiMaHoa) as e:
+            return {**dem, "loi": str(e)}
+        return {**dem, "loi": "; ".join(loi)[:1000] or None}
 
 
 # ───────────────────────────── dòng lệnh ─────────────────────────────
@@ -1156,6 +1255,15 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
     n.add_argument("--dang-env", action="store_true",
                    help="STDIN là dòng .env (MARK_META_ADS_TOKEN, MARK_META_AD_ACCOUNT_IDS)")
     n.add_argument("--ai", default=None, help="ghi nhật ký là ai nhập (mặc định: deploy)")
+    # 26/10/2026 (chủ dự án: Khán giả theo chiến dịch): đọc lại khán giả NGAY, bỏ qua mốc 7 ngày.
+    k = sub.add_parser("khan-gia", help="đọc lại khán giả ngay (cấp tài khoản + cấp chiến dịch, bỏ "
+                                        "qua mốc 7 ngày) cho mọi tài khoản Meta đã duyệt")
+    k.add_argument("--tk", action="append", metavar="ACT_ID",
+                   help="chỉ tài khoản này (act_… hoặc số; lặp lại được); mặc định mọi tài khoản")
+    k.add_argument("--khong-bq", action="store_true", help="không đẩy BigQuery sau khi xong")
+    k.add_argument("--cho-khoa-phut", type=int, default=30,
+                   help="lượt khác đang giữ khoá thì chờ tối đa N phút (mặc định 30), quá thì thoát 3")
+    k.set_defaults(chi_khi_yeu_cau=False)
     a = p.parse_args(argv)
     token = ""
     try:
@@ -1175,16 +1283,20 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
                               list(ds) if ds is not None else None)
             print("[meta_ads] đã lưu token: " + json.dumps(kq, ensure_ascii=False, default=str))
             return 0
-        if a.bu is not None and not 1 <= a.bu <= 400:
-            p.error("--bu trong 1..400")
-        if a.chi_khi_yeu_cau:
-            TA.tuc_thi_du_phong(NCC, dv, dich_vu is None)
-            if dv.co_yeu_cau() and TA.yeu_cau_trong_gio_dong_bo(dv):
-                return 0                      # khung đồng bộ hằng ngày: cờ đợi sau 07:30
-        if a.chi_khi_yeu_cau and not dv.co_yeu_cau():
-            return 0
-        kq = dv.dong_bo(bu=a.bu, tu=a.tu, den=a.den, theo_yeu_cau=a.chi_khi_yeu_cau,
-                        cho_khoa_giay=0 if a.chi_khi_yeu_cau else max(0, a.cho_khoa_phut) * 60)
+        if a.lenh == "khan-gia":
+            kq = dv.doc_khan_gia(a.tk, cho_khoa_giay=max(0, a.cho_khoa_phut) * 60)
+        else:
+            if a.bu is not None and not 1 <= a.bu <= 400:
+                p.error("--bu trong 1..400")
+            if a.chi_khi_yeu_cau:
+                TA.tuc_thi_du_phong(NCC, dv, dich_vu is None)
+                if dv.co_yeu_cau() and TA.yeu_cau_trong_gio_dong_bo(dv):
+                    return 0                  # khung đồng bộ hằng ngày: cờ đợi sau 07:30
+            if a.chi_khi_yeu_cau and not dv.co_yeu_cau():
+                return 0
+            kq = dv.dong_bo(bu=a.bu, tu=a.tu, den=a.den, theo_yeu_cau=a.chi_khi_yeu_cau,
+                            cho_khoa_giay=0 if a.chi_khi_yeu_cau
+                            else max(0, a.cho_khoa_phut) * 60)
     except LoiMaHoa as e:
         print(f"[meta_ads] {e}", file=sys.stderr)
         return 0 if a.lenh == "dong-bo" else 1

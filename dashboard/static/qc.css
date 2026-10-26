@@ -142,6 +142,10 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
 }
 .qc-tcd-trong__ds a:hover { border-color: var(--nhan); color: var(--nhan-dam); }
 .qc-kg__canh { margin: 0 0 12px; }
+/* 26/10/2026 (chủ dự án): Khán giả theo chiến dịch — câu phạm vi + ô chọn một chiến dịch (tên dài). */
+.qc-kg__pham-vi { margin: -6px 0 12px; font-size: 13px; color: var(--chu-phu); overflow-wrap: anywhere; }
+.qc-bang-loc label.o.qc-kg-chon__o { flex: 0 1 520px; min-width: 220px; }
+.qc-kg-chon__o select { text-overflow: ellipsis; }
 
 /* ─── Tài khoản: chọn nhiều (22/10/2026) — ô giống <select>, bấm mở bảng nổi (không đẩy bố cục): ô tìm,
    Chọn tất cả / Bỏ chọn, nhóm TikTok / Meta có chấm nền tảng. Không JS: vẫn đánh dấu + Xem được. ─── */
@@ -358,6 +362,7 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
   .qc-bang-loc .nut { min-height: 44px; justify-content: center; }
   .qc-bang-loc__bo { justify-self: start; }
   .qc-kg { grid-template-columns: minmax(0, 1fr); }
+  .qc-bang-loc label.o.qc-kg-chon__o { grid-column: 1 / -1; min-width: 0; }
   .qc-sheet__than { grid-template-columns: minmax(0, 1fr); }
   .qc-sheet__nut .nut { width: 100%; justify-content: center; min-height: 44px; }
   .qc-sheet__gan-day { border-top: 1px solid var(--ke); padding-top: 16px; }

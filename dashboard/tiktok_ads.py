@@ -31,7 +31,9 @@ ghi cờ yêu cầu — bộ hẹn giờ 2 phút chạy `dong-bo --chi-khi-yeu-c
     khoản có 20.000 ad, 7.599 chạy trong 30 ngày): lấy ID xếp impressions giảm dần, dừng ở dòng 0
     đầu tiên, rồi đọc số theo lô ≤ 100 ID, ≤ 45 chỉ số mỗi lượt, trang ≤ 200 dòng (trang 1.000 dòng
     nhiều chỉ số tới 1,4 MB từng đứt giữa chừng). Khán giả (tuổi, giới tính, tỉnh, nền tảng) mỗi
-    tuần một lần, cửa sổ 30 ngày.
+    tuần một lần, cửa sổ 30 ngày: cấp tài khoản (qc_khan_gia) và — 26/10/2026 — cấp chiến dịch
+    (qc_khan_gia_cd: AUDIENCE AUCTION_CAMPAIGN, chỉ chiến dịch có hiển thị trong cửa sổ, lô ≤ 100 mã;
+    `doc_khan_gia_cd`). Đọc lại ngay, bỏ qua mốc tuần: `python -m dashboard.tiktok_ads khan-gia`.
   • Tuần tự, nghỉ ngắn giữa các lượt gọi; lỗi mạng (hết giờ, đứt giữa chừng) thử lại 3 lần.
   • Upsert theo khoá chính — chạy lại không nhân đôi. Khoá advisory Postgres: không chạy chồng.
   • Kênh đăng (22/10/2026): sau số của mọi tài khoản, lượt đầy đủ đọc danh tính đăng (identity)
@@ -94,6 +96,9 @@ NAP_LUI_NGAY = 90          # lần đầu mỗi tài khoản
 CUA_SO_NGAY = 30           # stat_time_day tối đa 30 ngày mỗi lượt
 LUI_NGAY = 7               # hằng ngày đọc lại 7 ngày gần nhất (chuyển đổi ghi trễ)
 KHAN_GIA_NGAY = 7          # khán giả: mỗi tuần một lần, cửa sổ 30 ngày
+#: Khán giả cấp chiến dịch (26/10/2026): tối đa chừng ấy chiến dịch CÓ hiển thị trong cửa sổ mỗi tài
+#: khoản (hiển thị nhiều trước), đọc theo lô LO_ID mã (bộ lọc campaign_ids, như số theo ngày).
+TRAN_CD_KHAN_GIA = 1000
 LO_ID = 100                # ≤ 100 ID mỗi bộ lọc
 LO_CHI_SO = 45             # ≤ 45 chỉ số mỗi lượt gọi
 TRANG = 200                # dòng mỗi trang khi nhiều chỉ số
@@ -684,6 +689,11 @@ def dong_khan_gia(r: dict, adv: str, tu: datetime.date, den: datetime.date, chie
             "chi_so": _chi_so_json(r, (chieu,))}
 
 
+def dong_khan_gia_cd(r: dict, adv: str, tu: datetime.date, den: datetime.date, chieu: str) -> dict:
+    """Dòng khán giả CẤP CHIẾN DỊCH (26/10/2026): như `dong_khan_gia` + campaign_id."""
+    return {**dong_khan_gia(r, adv, tu, den, chieu), "campaign_id": str(r.get("campaign_id"))}
+
+
 def cua_so(tu: datetime.date, den: datetime.date, n: int = CUA_SO_NGAY
            ) -> list[tuple[datetime.date, datetime.date]]:
     """[tu, den] → các cửa sổ ≤ n ngày, MỚI TRƯỚC (số gần nhất có sớm nhất)."""
@@ -761,6 +771,64 @@ def co_chay_gan(kho, t: dict, bay: datetime.datetime) -> bool:
                      or {}).get("hien_thi"))
     except Exception:  # noqa: BLE001 — đọc kho hỏng: cứ đọc (an toàn hơn bỏ sót)
         return True
+
+
+def khan_gia_den_han(kho, t: dict, hq: datetime.date, bay: datetime.datetime, ep: bool = False,
+                     log=print) -> tuple[bool, bool]:
+    """(cấp tài khoản, cấp chiến dịch) tới hạn đọc lại khán giả chưa — TikTok + Meta dùng chung.
+    Tài khoản: `khan_gia_luc` cũ hơn KHAN_GIA_NGAY ngày. Chiến dịch (26/10/2026): cửa sổ mới nhất
+    trong qc_khan_gia_cd cũ hơn KHAN_GIA_NGAY ngày hoặc chưa có — lỗi tuần trước (cửa sổ bị xoá)
+    thì hôm sau đọc lại, không chờ một tuần. Kho chưa có bảng (schema.sql chưa chạy) → không đọc
+    cấp chiến dịch, cấp tài khoản vẫn như cũ. `ep`: đọc lại cả hai ngay (lệnh `khan-gia`)."""
+    if ep:
+        return True, True
+    luc = _utc(t.get("khan_gia_luc"))
+    tk = not (luc and (bay - luc).days < KHAN_GIA_NGAY)
+    try:
+        den = kho.khan_gia_cd_den(str(t["advertiser_id"]))
+    except Exception as e:  # noqa: BLE001 — phần phụ: không làm hỏng khán giả cấp tài khoản
+        log(f"[khan_gia] {t.get('advertiser_id')}: chưa đọc được mốc cấp chiến dịch "
+            f"({type(e).__name__})")
+        return tk, False
+    return tk, den is None or (hq - den).days >= KHAN_GIA_NGAY
+
+
+def doc_khan_gia_cd(kho, adv: str, a: datetime.date, b: datetime.date, doc_lo, lo: int, log,
+                    ten: str, loi: list | None = None, cac_chieu=QC.CHIEU_KHAN_GIA,
+                    xac_thuc: tuple = (LoiXacThuc,)) -> int:
+    """Khán giả CẤP CHIẾN DỊCH của một tài khoản, cửa sổ [a, b] (26/10/2026, chủ dự án) — TikTok +
+    Meta dùng chung. Chỉ các chiến dịch CÓ hiển thị trong cửa sổ (`kho.cd_co_chay`, đọc từ kho — không
+    gọi API để tìm; ≤ TRAN_CD_KHAN_GIA, nhiều hiển thị trước), theo lô `lo` mã; `doc_lo(chieu, mã)`
+    gọi nền tảng → dòng qc_khan_gia_cd. Xoá cửa sổ [a, b] trước khi ghi (đọc lại không để dòng cũ
+    lơ lửng); lỗi giữa chừng → xoá phần đã ghi (không bao giờ để cửa sổ thiếu chiều — trang đọc
+    cửa sổ mới nhất); xong → dọn cửa sổ cũ (`kho_qc.KHAN_GIA_CD_GIU_NGAY`).
+    Phần phụ như kênh đăng: lỗi (nền tảng, kho chưa có bảng) chỉ ghi nhật ký (+ `loi` khi có) rồi
+    trả 0 — không làm hỏng lượt đồng bộ số; chỉ token bị từ chối (`xac_thuc`) ném tiếp."""
+    try:
+        cds = kho.cd_co_chay(adv, a, b, TRAN_CD_KHAN_GIA)
+        if not cds:
+            return 0
+        kho.xoa_khan_gia_cd(adv, a, b)
+        n = 0
+        try:
+            for chieu in cac_chieu:
+                for i in range(0, len(cds), lo):
+                    n += kho.ghi_khan_gia_cd(doc_lo(chieu, cds[i:i + lo]))
+        except BaseException:
+            with contextlib.suppress(Exception):
+                kho.xoa_khan_gia_cd(adv, a, b)
+            raise
+        kho.don_khan_gia_cd(adv, b)
+        log(f"[{ten}] {adv} khán giả theo chiến dịch {a}→{b}: {len(cds)} chiến dịch, {n} dòng")
+        return n
+    except xac_thuc:
+        raise
+    except Exception as e:  # noqa: BLE001 — phần phụ: không làm hỏng lượt đồng bộ số
+        chu = f"khán giả theo chiến dịch {adv} lỗi ({type(e).__name__}: {gon_loi(e)})"
+        log(f"[{ten}] {chu}")
+        if loi is not None:
+            loi.append(chu)
+        return 0
 
 
 # ───────────────────────────── dịch vụ ─────────────────────────────
@@ -1307,21 +1375,86 @@ class DichVu:
                           if x["ngay"] and co_phan_phoi(x)])
         return n
 
-    def _khan_gia(self, mcp: Mcp, t: dict, hq: datetime.date, bay: datetime.datetime) -> int:
-        luc = _utc(t.get("khan_gia_luc"))
-        if luc and (bay - luc).days < KHAN_GIA_NGAY:
+    def _khan_gia(self, mcp: Mcp, t: dict, hq: datetime.date, bay: datetime.datetime, *,
+                  ep: bool = False, loi: list | None = None) -> int:
+        """Khán giả cửa sổ 30 ngày tới hôm qua, mỗi tuần một lần: cấp TÀI KHOẢN (qc_khan_gia, mốc
+        khan_gia_luc) và — 26/10/2026 — cấp CHIẾN DỊCH (qc_khan_gia_cd, mốc = cửa sổ mới nhất trong
+        bảng). `ep` (lệnh `khan-gia`): đọc lại cả hai ngay, bỏ qua mốc."""
+        tk_han, cd_han = khan_gia_den_han(self.kho, t, hq, bay, ep, self.log)
+        if not (tk_han or cd_han):
             return 0
         adv = str(t["advertiser_id"])
         a = hq - datetime.timedelta(days=CUA_SO_NGAY - 1)
         if not ((self.kho.qc_tong([adv], a, hq) or {}).get("hien_thi") or 0):
             return 0                          # không chạy 30 ngày: không có khán giả để đọc
         n = 0
-        for chieu in QC.CHIEU_KHAN_GIA:
-            rows = bao_cao(mcp, adv, "AUCTION_ADVERTISER", ["advertiser_id", chieu],
-                           QC.CHI_SO_KHAN_GIA, a, hq, loai="AUDIENCE")
-            n += self.kho.ghi_khan_gia([dong_khan_gia(r, adv, a, hq, chieu) for r in rows])
-        self.kho.dat_khan_gia(adv)
+        if tk_han:
+            for chieu in QC.CHIEU_KHAN_GIA:
+                rows = bao_cao(mcp, adv, "AUCTION_ADVERTISER", ["advertiser_id", chieu],
+                               QC.CHI_SO_KHAN_GIA, a, hq, loai="AUDIENCE")
+                n += self.kho.ghi_khan_gia([dong_khan_gia(r, adv, a, hq, chieu) for r in rows])
+            self.kho.dat_khan_gia(adv)
+        if cd_han:
+            n += doc_khan_gia_cd(self.kho, adv, a, hq,
+                                 lambda chieu, lo: self._khan_gia_lo(mcp, adv, a, hq, chieu, lo),
+                                 LO_ID, self.log, "tiktok_ads", loi)
         return n
+
+    def _khan_gia_lo(self, mcp: Mcp, adv: str, a: datetime.date, b: datetime.date, chieu: str,
+                     lo: list[str]) -> list[dict]:
+        """Báo cáo AUDIENCE cấp chiến dịch (AUCTION_CAMPAIGN, chiều campaign_id + một chiều khán
+        giả) của ≤ LO_ID chiến dịch — phân trang như mọi báo cáo (`bao_cao`)."""
+        co = set(lo)
+        rows = bao_cao(mcp, adv, "AUCTION_CAMPAIGN", ["campaign_id", chieu], QC.CHI_SO_KHAN_GIA,
+                       a, b, loai="AUDIENCE", loc=bo_loc_id("campaign_id", lo))
+        return [dong_khan_gia_cd(r, adv, a, b, chieu) for r in rows
+                if str(r.get("campaign_id")) in co]
+
+    # ── khán giả đọc lại ngay (lệnh `khan-gia`, 26/10/2026) ──
+    def doc_khan_gia(self, ids=None, cho_khoa_giay: float = 0) -> dict:
+        """Đọc lại khán giả NGAY (cấp tài khoản + cấp chiến dịch, bỏ qua mốc 7 ngày) cho các tài
+        khoản đang đồng bộ (`ids` None = mọi tài khoản TikTok). Chỉ đọc (report_integrated_get);
+        không khám phá lại tài khoản, KHÔNG đụng cờ yêu cầu / mốc lượt của thẻ kết nối; cùng khoá
+        advisory với lượt thường (chờ tới `cho_khoa_giay`).
+        -> {"so_dong", "so_tk", "loi"} | {"ban": True, "bo_qua"} | {"bo_qua"}."""
+        r = self.kho.doc_ket_noi() or {}
+        loi = self.loi_khoa()
+        if loi:
+            return {"bo_qua": loi}
+        if not r.get("access_token_enc"):
+            return {"bo_qua": "chưa kết nối TikTok Ads"}
+        chon = {str(x) for x in ids} if ids else None
+        return chay_voi_khoa(lambda: self.kho.khoa_dong_bo(),
+                             lambda: self._doc_khan_gia(chon), cho_khoa_giay, self.ngu, self.log,
+                             "tiktok_ads")
+
+    def _doc_khan_gia(self, chon: set[str] | None) -> dict:
+        dem, loi = {"so_dong": 0, "so_tk": 0}, []
+        try:
+            mcp = self.mcp()
+            bay = self._bay_gio()
+            for t in self.kho.cac_tk():
+                adv = str(t["advertiser_id"])
+                if ((t.get("nen_tang") or "tiktok") != "tiktok" or not t.get("dang_dong_bo")
+                        or not t.get("con_quyen", True) or (chon is not None and adv not in chon)):
+                    continue
+                try:
+                    dem["so_dong"] += self._khan_gia(mcp, t, hom_qua(t.get("mui_gio"), bay), bay,
+                                                     ep=True, loi=loi)
+                    dem["so_tk"] += 1
+                except LoiXacThuc:
+                    raise
+                except LoiTikTok as e:
+                    loi.append(f"{t.get('ten') or adv}: {e}")
+                    self.log(f"[tiktok_ads] khán giả {adv} lỗi: {e}")
+        except (ChuaKetNoi, LoiHetHan, LoiMaHoa) as e:
+            return {**dem, "loi": str(e)}
+        except LoiXacThuc as e:
+            self.kho.ghi_trang_thai("loi", f"TikTok từ chối token: {e}", con_token=True)
+            return {**dem, "loi": f"token bị từ chối: {e}"}
+        except LoiTikTok as e:
+            return {**dem, "loi": str(e)}
+        return {**dem, "loi": "; ".join(loi)[:1000] or None}
 
 
 # ───────────────────────────── dòng lệnh (bộ hẹn giờ) ─────────────────────────────
@@ -1370,12 +1503,28 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
                    help="lượt hằng ngày: lượt khác đang giữ khoá thì chờ tối đa N phút (mặc định "
                         "30), quá thì thoát 3 để systemd chạy lại")
     sub.add_parser("trang-thai", help="in trạng thái kết nối (không in token)")
+    # 26/10/2026 (chủ dự án: Khán giả theo chiến dịch): đọc lại khán giả NGAY, bỏ qua mốc 7 ngày.
+    k = sub.add_parser("khan-gia", help="đọc lại khán giả ngay (cấp tài khoản + cấp chiến dịch, bỏ "
+                                        "qua mốc 7 ngày) cho mọi tài khoản TikTok đang đồng bộ")
+    k.add_argument("--tk", action="append", metavar="ADVERTISER_ID",
+                   help="chỉ tài khoản này (lặp lại được); mặc định mọi tài khoản")
+    k.add_argument("--khong-bq", action="store_true", help="không đẩy BigQuery sau khi xong")
+    k.add_argument("--cho-khoa-phut", type=int, default=30,
+                   help="lượt khác đang giữ khoá thì chờ tối đa N phút (mặc định 30), quá thì thoát 3")
+    sub.add_parser("vung-chua-ten", help="liệt kê mã tỉnh TikTok (province_id) trong kho chưa có "
+                                         "tên ở dashboard/vung_tiktok.py (chỉ đọc DB)")
     a = p.parse_args(argv)
     try:
         dv = dich_vu or DichVu()
         if a.lenh == "trang-thai":
             print(json.dumps(dv.the(), ensure_ascii=False, default=str, indent=1))
             return 0
+        if a.lenh == "vung-chua-ten":
+            print(json.dumps(vung_chua_ten(dv.kho), ensure_ascii=False, default=str, indent=1))
+            return 0
+        if a.lenh == "khan-gia":
+            kq = dv.doc_khan_gia(a.tk, cho_khoa_giay=max(0, a.cho_khoa_phut) * 60)
+            return _sau_luot(kq, a, dong_bo_bq)
         if a.bu is not None and not 1 <= a.bu <= 400:
             p.error("--bu trong 1..400")
         if a.chi_khi_yeu_cau:
@@ -1392,8 +1541,23 @@ def main(argv: list[str] | None = None, dich_vu: DichVu | None = None, dong_bo_b
     except Exception as e:  # noqa: BLE001 — kho chưa dùng được…: báo lỗi, mã thoát 1
         print(f"[tiktok_ads] lỗi: {type(e).__name__}: {gon_loi(e)}", file=sys.stderr)
         return 1
+    return _sau_luot(kq, a, dong_bo_bq)
+
+
+def vung_chua_ten(kho) -> dict:
+    """Mã tỉnh TikTok (province_id) đã có trong kho mà `vung_tiktok.TEN_TINH` chưa có tên (trang
+    hiện "Mã vùng …"), hiển thị nhiều trước — để bổ sung bảng tên."""
+    from dashboard import vung_tiktok as VT
+    rows = kho.gia_tri_khan_gia("province_id")
+    thieu = [r for r in rows if str(r.get("gia_tri") or "") not in ("", "-1")
+             and not VT.ten_tinh(r.get("gia_tri"))]
+    return {"so_ma": len(rows), "so_chua_ten": len(thieu), "chua_ten": thieu[:200]}
+
+
+def _sau_luot(kq: dict, a, dong_bo_bq=None) -> int:
+    """In kết quả một lượt (`dong-bo` / `khan-gia`), mã thoát, đẩy BigQuery khi có dòng mới."""
     print(f"[tiktok_ads] {json.dumps(kq, ensure_ascii=False, default=str)}")
-    if kq.get("ban") and not a.chi_khi_yeu_cau:
+    if kq.get("ban") and not getattr(a, "chi_khi_yeu_cau", False):
         # Soát 20/10/2026 H2: lượt hằng ngày KHÔNG được lặng lẽ mất vì lượt nhỏ đang giữ khoá.
         print(f"[tiktok_ads] chờ {a.cho_khoa_phut} phút vẫn chưa giữ được khoá đồng bộ — thoát 3 "
               "(OnFailure báo lỗi lên thẻ kết nối)", file=sys.stderr)

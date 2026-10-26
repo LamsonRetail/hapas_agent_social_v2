@@ -515,16 +515,18 @@ def test_trang_bang_chon_ba_dong_va_tom_tat():
     # (i) giải thích: không cần dấu, bỏ khoảng trắng / _ / /, AND, trần.
     gy = html.unescape(re.search(r'data-goi-y="([^"]+)"', o).group(1))
     for chu in ("không cần gõ dấu", "khoảng trắng, dấu _ và /", "bằng VÀ", "Tối đa 10 từ khoá",
-                "60 ký tự", "KHÔNG áp vào Khán giả"):
+                "60 ký tự", "Khán giả cũng chỉ cộng các chiến dịch khớp"):
         assert chu in gy, chu
+    # 26/10/2026: Khán giả THEO lọc tên chiến dịch — không còn câu "KHÔNG áp vào Khán giả".
+    assert "KHÔNG áp vào Khán giả" not in t and "theo tài khoản nên không theo được" not in t
     tom = t.split('class="qc-loc-khung__gia-tri"')[1].split("</span>")[0]
     # 25/10/2026 (chủ dự án): tóm tắt điện thoại gọn — số điều kiện, không chép từ khoá.
     assert tom.endswith("· 7 ngày · 2 điều kiện")
-    # Không lọc: "Mọi chiến dịch", ô trống, không thẻ, không ghi chú Khán giả.
+    # Không lọc: "Mọi chiến dịch", ô trống, không thẻ; Khán giả theo tài khoản.
     t = c.get(f"/quang-cao?{Q}").text
     assert 'data-trong="Mọi chiến dịch">Mọi chiến dịch</span>' in t
     assert 'name="cd_co" value=""' in t and 'data-o="the-ten-cd"' not in t
-    assert 'data-o="kg-khong-loc-cd"' not in t
+    assert 'data-o="kg-khong-loc-cd"' not in t and "(số theo tài khoản)" in t
 
 
 def test_trang_the_tung_dieu_kien_va_lien_ket_giu_loc():
@@ -557,7 +559,10 @@ def test_trang_the_tung_dieu_kien_va_lien_ket_giu_loc():
     for dau in ('data-o="loc-bang"', 'class="qc-bang-loc qc-kenh-loc"', 'data-o="tao-sheet"'):
         assert an in t.split(dau)[1].split("</form>")[0], dau
     assert "Tên chiến dịch chứa tất cả: teaser, sale · không chứa: hapas" in t.split('id="sheet"')[1]
-    assert 'data-o="kg-khong-loc-cd"' in t
+    # 26/10/2026: Khán giả theo lọc tên (số cấp chiến dịch) — câu phạm vi nói rõ, không còn cảnh báo.
+    assert 'data-o="kg-khong-loc-cd"' not in t
+    pv = t.split('data-o="kg-pham-vi">')[1].split("</p>")[0]
+    assert "chiến dịch</b> có tên khớp lọc (" in pv
     # Link cũ `ten_cd` → thẻ "chứa một trong", liên kết đổi sang cd_mot.
     t = c.get(_u("/quang-cao", {"ten_cd": "teaser sale"})).text
     assert "Chứa một trong: <b>teaser sale</b>" in t

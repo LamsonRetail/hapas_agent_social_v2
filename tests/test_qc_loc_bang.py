@@ -171,8 +171,10 @@ def test_trang_quang_cao_thanh_loc_va_tieu_de_cot_bam_duoc():
     t = c.get(f"/quang-cao?{Q}&cd={cd}").text
     assert f"Chiến dịch: <b>{ten}</b>" in t and "Bỏ lọc chiến dịch" in t and "khớp" in t
     assert f'<input type="hidden" name="cd" value="{cd}">' in t
-    # Ở form bảng + form Xuất Lark Sheet (Sheet theo đúng bộ lọc bảng), không ở Bộ lọc đầu trang.
-    assert t.count(f'name="cd" value="{cd}"') == 2
+    # Ở form bảng + form Xuất Lark Sheet (Sheet theo đúng bộ lọc bảng) + ô ẩn của ô chọn chiến dịch
+    # trong khối Khán giả (26/10/2026: mang lại MỌI tham số), không ở Bộ lọc đầu trang.
+    assert t.count(f'name="cd" value="{cd}"') == 3
+    assert f'name="cd" value="{cd}"' in t.split('data-o="chon-cd-kg"')[1].split("</form>")[0]
     assert 'name="cd"' not in t.split('id="qc-loc"')[1].split("</form>")[0]
     t = c.get(f"/quang-cao?{Q}&tim=khongcoteninaynay").text
     assert "Không có chiến dịch nào khớp bộ lọc" in t
@@ -372,7 +374,8 @@ def test_api_va_trang_nhieu_tai_khoan_trong_pham_vi():
     assert nhanh and all(h.count("tk=") == 2 for h in nhanh)
     src = (Path(__file__).resolve().parents[1] / "dashboard" / "templates" / "quang_cao.html"
            ).read_text(encoding="utf-8")
-    assert "url_cho(nen_tang=n.ma, tk='', cd='')" in src           # đổi nền tảng: bỏ chọn tài khoản
+    # đổi nền tảng: bỏ chọn tài khoản (26/10/2026: + chiến dịch chọn ở khối Khán giả)
+    assert "url_cho(nen_tang=n.ma, tk='', cd='', kg_cd='')" in src
     # Không chọn: tóm tắt "Tất cả tài khoản (N)", không ô nào đánh dấu.
     t = c.get(f"/quang-cao?{Q}").text
     assert re.search(r'id="qc-tk-gia-tri" data-tat-ca="Tất cả tài khoản \(4\)">Tất cả tài khoản '

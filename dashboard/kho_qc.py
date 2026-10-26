@@ -393,6 +393,9 @@ BANG_QC = {
                     "noi_dung", "ten_campaign", "ten_nhom"), ("ad_id", "ngay")),
     "qc_khan_gia": (("advertiser_id", "tu", "den", "chieu", "gia_tri"),
                     ("advertiser_id", "tu", "den", "chieu", "gia_tri")),
+    # 26/10/2026 (chủ dự án: Khán giả theo chiến dịch): cùng cột số, thêm campaign_id vào khoá.
+    "qc_khan_gia_cd": (("advertiser_id", "campaign_id", "tu", "den", "chieu", "gia_tri"),
+                       ("advertiser_id", "campaign_id", "tu", "den", "chieu", "gia_tri")),
 }
 
 
@@ -438,6 +441,55 @@ def ghi_ad_ngay(rows: list[dict]) -> int:
 
 def ghi_khan_gia(rows: list[dict]) -> int:
     return _ghi("qc_khan_gia", rows)
+
+
+# ───────────────────────────── khán giả theo chiến dịch (26/10/2026) ─────────────────────────────
+#: Postgres giữ các cửa sổ khán giả cấp chiến dịch có `den` trong chừng ấy ngày tính từ cửa sổ mới
+#: nhất của tài khoản (~4 cửa sổ tuần); cũ hơn thì xoá — bảng lớn (chiến dịch × tỉnh × tuần), trang
+#: chỉ đọc cửa sổ mới nhất. Lịch sử đầy đủ ở BigQuery (MERGE tăng dần, không xoá theo Postgres).
+KHAN_GIA_CD_GIU_NGAY = 28
+
+
+def ghi_khan_gia_cd(rows: list[dict]) -> int:
+    return _ghi("qc_khan_gia_cd", rows)
+
+
+def cd_co_chay(advertiser_id: str, tu: datetime.date, den: datetime.date, n: int) -> list[str]:
+    """Mã chiến dịch CÓ hiển thị trong [tu, den] của một tài khoản (từ qc_campaign_ngay — kho chỉ giữ
+    ngày có phân phối), hiển thị nhiều trước, tối đa `n` — bộ đồng bộ chỉ xin khán giả của các chiến
+    dịch này (không gọi API để tìm)."""
+    with ket_noi() as c:
+        return [str(r["campaign_id"]) for r in c.execute(
+            "SELECT campaign_id FROM qc_campaign_ngay WHERE advertiser_id = %s "
+            "AND ngay BETWEEN %s AND %s GROUP BY campaign_id HAVING sum(hien_thi) > 0 "
+            "ORDER BY sum(hien_thi) DESC, campaign_id LIMIT %s",
+            (str(advertiser_id), tu, den, max(1, int(n)))).fetchall()]
+
+
+def khan_gia_cd_den(advertiser_id: str) -> datetime.date | None:
+    """`den` của cửa sổ khán giả cấp chiến dịch mới nhất của tài khoản (None: chưa có) — mốc đọc
+    lại mỗi tuần (cửa sổ dở dang không bao giờ còn lại: bộ đồng bộ xoá khi lỗi giữa chừng)."""
+    with ket_noi() as c:
+        r = c.execute("SELECT max(den) AS den FROM qc_khan_gia_cd WHERE advertiser_id = %s",
+                      (str(advertiser_id),)).fetchone()
+    return (r or {}).get("den")
+
+
+def xoa_khan_gia_cd(advertiser_id: str, tu: datetime.date, den: datetime.date) -> int:
+    """Xoá MỘT cửa sổ khán giả cấp chiến dịch của tài khoản — trước khi đọc lại cửa sổ đó (đọc lại
+    không để dòng cũ lơ lửng) và khi đọc lỗi giữa chừng (không để cửa sổ thiếu chiều)."""
+    with ket_noi() as c:
+        return c.execute("DELETE FROM qc_khan_gia_cd WHERE advertiser_id = %s AND tu = %s "
+                         "AND den = %s", (str(advertiser_id), tu, den)).rowcount or 0
+
+
+def don_khan_gia_cd(advertiser_id: str, moi: datetime.date) -> int:
+    """Sau khi ghi xong cửa sổ có `den` = `moi`: xoá các cửa sổ cấp chiến dịch của tài khoản có
+    `den` < moi − KHAN_GIA_CD_GIU_NGAY ngày."""
+    with ket_noi() as c:
+        return c.execute("DELETE FROM qc_khan_gia_cd WHERE advertiser_id = %s AND den < %s",
+                         (str(advertiser_id),
+                          moi - datetime.timedelta(days=KHAN_GIA_CD_GIU_NGAY))).rowcount or 0
 
 
 # ───────────────────────────── đọc (trang, API, Mark) ─────────────────────────────
@@ -705,6 +757,72 @@ def qc_khan_gia(ids: list[str]) -> dict:
             (list(ids),)).fetchall()
     return {"rows": rows, "tu": min((r["tu"] for r in rows), default=None),
             "den": max((r["den"] for r in rows), default=None)}
+
+
+#: Cửa sổ cấp chiến dịch MỚI NHẤT của từng tài khoản (tham số: ids). Trang chỉ đọc cửa sổ này.
+_MOI_CD = ("WITH moi AS (SELECT DISTINCT ON (advertiser_id) advertiser_id, tu, den "
+           "FROM qc_khan_gia_cd WHERE advertiser_id = ANY(%s) "
+           "ORDER BY advertiser_id, den DESC, tu DESC)")
+#: Trần số chiến dịch đọc cho khối Khán giả (lọc tên ở Python trên danh sách này; ô chọn chỉ hiện
+#: `quang_cao.KG_CD_O_CHON` dòng đầu).
+KG_CD_TOI_DA = 5000
+
+
+def ds_cd_khan_gia(ids: list[str], n: int = KG_CD_TOI_DA) -> dict:
+    """26/10/2026 (chủ dự án): các chiến dịch CÓ số khán giả trong cửa sổ cấp chiến dịch mới nhất
+    của từng tài khoản `ids` — cho ô chọn của khối Khán giả và lọc tên chiến dịch (nơi gọi so tên ở
+    Python bằng `quang_cao.khop_ten_cd`). Tên = tên mới nhất trong cửa sổ, chi + hiển thị = tổng
+    qc_campaign_ngay trong cửa sổ (xếp ô chọn). -> {"ds": [{advertiser_id, campaign_id, tu, den,
+    ten, chi, hien_thi}] (hiển thị nhiều trước, ≤ n), "tk_thieu": [tài khoản có khán giả cấp tài
+    khoản mà CHƯA có cấp chiến dịch]}."""
+    if not ids:
+        return {"ds": [], "tk_thieu": []}
+    with ket_noi() as c:
+        ds = c.execute(
+            f"{_MOI_CD}, cd AS (SELECT k.advertiser_id, k.campaign_id, min(k.tu) AS tu, "
+            "max(k.den) AS den FROM qc_khan_gia_cd k JOIN moi USING (advertiser_id, tu, den) "
+            "GROUP BY k.advertiser_id, k.campaign_id) "
+            "SELECT cd.advertiser_id, cd.campaign_id, cd.tu, cd.den, t.ten, t.chi, t.hien_thi "
+            "FROM cd LEFT JOIN LATERAL (SELECT (array_agg(q.ten ORDER BY q.ngay DESC))[1] AS ten, "
+            "sum(q.chi)::float AS chi, sum(q.hien_thi)::bigint AS hien_thi FROM qc_campaign_ngay q "
+            "WHERE q.campaign_id = cd.campaign_id AND q.advertiser_id = cd.advertiser_id "
+            "AND q.ngay BETWEEN cd.tu AND cd.den) t ON true "
+            "ORDER BY t.hien_thi DESC NULLS LAST, cd.campaign_id LIMIT %s",
+            (list(ids), max(1, int(n)))).fetchall()
+        thieu = [r["advertiser_id"] for r in c.execute(
+            "SELECT DISTINCT k.advertiser_id FROM qc_khan_gia k WHERE k.advertiser_id = ANY(%s) "
+            "AND NOT EXISTS (SELECT 1 FROM qc_khan_gia_cd c WHERE c.advertiser_id = k.advertiser_id) "
+            "ORDER BY 1", (list(ids),)).fetchall()]
+    return {"ds": ds, "tk_thieu": thieu}
+
+
+def qc_khan_gia_cd(ids: list[str], cds: list[str]) -> dict:
+    """Như `qc_khan_gia` nhưng từ qc_khan_gia_cd: cửa sổ cấp chiến dịch mới nhất của từng tài khoản,
+    CHỈ các chiến dịch `cds`, cộng theo chiều + giá trị. Hiển thị / chi / bấm cộng được; reach cộng
+    nhiều chiến dịch là đếm trùng người — nơi gọi bỏ reach khi > 1 chiến dịch. [] → rỗng."""
+    if not ids or not cds:
+        return {"rows": [], "tu": None, "den": None}
+    tong = ", ".join(f"sum(k.{x})::float AS {x}" if x in QC.COT_TIEN
+                     else f"sum(k.{x})::bigint AS {x}" for x in QC.TEN_COT_SO)
+    with ket_noi() as c:
+        rows = c.execute(
+            f"{_MOI_CD} SELECT k.chieu, k.gia_tri, min(k.tu) AS tu, max(k.den) AS den, {tong} "
+            "FROM qc_khan_gia_cd k JOIN moi USING (advertiser_id, tu, den) "
+            "WHERE k.campaign_id = ANY(%s) GROUP BY k.chieu, k.gia_tri",
+            (list(ids), list(cds))).fetchall()
+    return {"rows": rows, "tu": min((r["tu"] for r in rows), default=None),
+            "den": max((r["den"] for r in rows), default=None)}
+
+
+def gia_tri_khan_gia(chieu: str) -> list[dict]:
+    """Mọi giá trị của một chiều trong qc_khan_gia + qc_khan_gia_cd (cửa sổ bất kỳ) kèm tổng hiển
+    thị — lệnh `vung-chua-ten` soát mã tỉnh TikTok chưa có tên."""
+    with ket_noi() as c:
+        return c.execute(
+            "SELECT gia_tri, sum(hien_thi)::bigint AS hien_thi FROM (SELECT gia_tri, hien_thi "
+            "FROM qc_khan_gia WHERE chieu = %s UNION ALL SELECT gia_tri, hien_thi "
+            "FROM qc_khan_gia_cd WHERE chieu = %s) x GROUP BY gia_tri "
+            "ORDER BY 2 DESC NULLS LAST, 1", (chieu, chieu)).fetchall()
 
 
 def qc_moi(ids: list[str]) -> dict:

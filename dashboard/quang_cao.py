@@ -23,6 +23,7 @@ import re
 import unicodedata
 
 from dashboard import phan_quyen as PQ
+from dashboard import vung_tiktok as VT
 
 VN = datetime.timezone(datetime.timedelta(hours=7))
 
@@ -1015,7 +1016,8 @@ def nhan_gia_tri(chieu: str, g: str) -> str:
     if g in TEN_GIA_TRI:
         return TEN_GIA_TRI[g]
     if chieu == "province_id":
-        return f"Mã vùng {g}" if g else "Không rõ"
+        # 26/10/2026 (chủ dự án): tên tỉnh/thành từ mã GeoNames (`vung_tiktok`); mã lạ giữ "Mã vùng".
+        return VT.ten_tinh(g) or (f"Mã vùng {g}" if g else "Không rõ")
     if chieu == "platform_position" and "/" in g:
         nt, vt = g.split("/", 1)
         return f"{TEN_GIA_TRI.get(nt, nt)} · {vt.replace('_', ' ')}"
@@ -1049,6 +1051,41 @@ def khan_gia(rows: list[dict]) -> dict:
         for x in ds:
             x["pt"] = round(100.0 * (x.get("hien_thi") or 0) / tong, 1) if tong else None
     return ra
+
+
+# ───────────────────────────── Khán giả theo chiến dịch (26/10/2026) ─────────────────────────────
+#: Chủ dự án 26/10/2026: khối Khán giả theo Bộ lọc đầu trang (bên, tài khoản, nền tảng, TÊN CHIẾN DỊCH)
+#: + ô chọn MỘT chiến dịch trong khối (tham số URL `kg_cd`). Không lọc tên, không chọn → số cấp TÀI
+#: KHOẢN (qc_khan_gia — đúng, reach không đếm trùng giữa chiến dịch); có lọc tên hoặc chọn → số cấp
+#: CHIẾN DỊCH (qc_khan_gia_cd), cộng các chiến dịch khớp.
+THAM_KG_CD = "kg_cd"
+#: Cùng luật với mã chiến dịch `cd` của bảng (`loc_bang`): chữ/số/_/-, ≤ 64 ký tự.
+_MA_CD = re.compile(r"[0-9A-Za-z_-]{1,64}")
+#: Số chiến dịch tối đa trong ô chọn (số khán giả mặc định vẫn cộng MỌI chiến dịch khớp).
+KG_CD_O_CHON = 500
+
+
+def doc_kg_cd(qp) -> str:
+    """Mã chiến dịch của ô chọn trong khối Khán giả (dạng như `cd` của bảng); lạ → "". Chỉ dùng để
+    so với danh sách đã đọc trong phạm vi người xem — mã ngoài danh sách bị lờ (về mặc định)."""
+    s = str((qp.get(THAM_KG_CD) if qp is not None else "") or "").strip()
+    return s if _MA_CD.fullmatch(s) else ""
+
+
+def ds_kg_cd(ds: list[dict], loc: dict, co_tien: bool) -> list[dict]:
+    """Chiến dịch có số khán giả (`kho_qc.ds_cd_khan_gia`) khớp lọc tên cấp trang `loc`
+    (`loc_ten_cd`; không lọc = mọi chiến dịch), xếp chi giảm dần — hoặc hiển thị khi người xem
+    không được xem tiền (thứ tự không lộ chi tiêu)."""
+    if loc.get("co_loc"):
+        ds = [] if loc.get("khong_khop") else [x for x in ds if khop_ten_cd(x.get("ten"), loc)]
+    khoa = "chi" if co_tien else "hien_thi"
+    return sorted(ds, key=lambda x: (-(x.get(khoa) or 0), -(x.get("hien_thi") or 0),
+                                     str(x.get("campaign_id"))))
+
+
+def bo_reach(rows: list[dict]) -> list[dict]:
+    """Reach cộng qua nhiều chiến dịch là đếm trùng người → NULL (hiển thị, chi, bấm vẫn cộng)."""
+    return [{**r, "reach": None} for r in rows]
 
 
 TEN_MUC_TIEU = {
