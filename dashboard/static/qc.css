@@ -86,7 +86,6 @@
 /* nhãn khoảng mờ ở đầu mỗi mục + dòng tổng kỳ trên KPI + cửa sổ khán giả */
 .qc-khoang-nhan { font-size: 12.5px; font-weight: 500; color: var(--chu-mo); font-variant-numeric: tabular-nums; }
 .qc-kpi__khoang { margin: 0 2px -4px; font-size: 12.5px; color: var(--chu-mo); }
-.qc-kg__cua-so { margin: -4px 0 12px; font-size: 13px; color: var(--chu-phu); }
 /* 23/10/2026 (MKT): ô "Tên chiến dịch" — lọc cả trang; rộng hơn ô ngày vì tên chiến dịch dài. Nhãn +
    nút (i) cùng một dòng (label.o không chứa được nút). Thẻ "Chiến dịch có tên chứa" ngay trên KPI. */
 .qc-loc__nhan-dong { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--chu); }
@@ -142,14 +141,16 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
 }
 .qc-tcd-trong__ds a:hover { border-color: var(--nhan); color: var(--nhan-dam); }
 .qc-kg__canh { margin: 0 0 12px; }
-/* 26/10/2026 (chủ dự án): Khán giả theo chiến dịch — câu phạm vi + ô chọn một chiến dịch (tên dài). */
-.qc-kg__pham-vi { margin: -6px 0 12px; font-size: 13px; color: var(--chu-phu); overflow-wrap: anywhere; }
-.qc-bang-loc label.o.qc-kg-chon__o { flex: 0 1 520px; min-width: 220px; }
-.qc-kg-chon__o select { text-overflow: ellipsis; }
+/* 26/10/2026 (chủ dự án): Khán giả theo chiến dịch — ô "Chiến dịch" chọn nhiều bằng ô tích, dùng lại
+   kiểu ô Tài khoản (.qc-tk__*); bảng nổi rộng hơn vì tên chiến dịch dài. */
+.qc-kg-chon .qc-tk { flex: 0 1 420px; min-width: 220px; }
+.qc-kg-chon__bang { width: min(560px, calc(100vw - 32px)); }
+.qc-kg-chon__nen { flex: none; margin-left: auto; padding-left: 8px; font-size: 12px; color: var(--chu-mo); }
 
 /* ─── Tài khoản: chọn nhiều (22/10/2026) — ô giống <select>, bấm mở bảng nổi (không đẩy bố cục): ô tìm,
    Chọn tất cả / Bỏ chọn, nhóm TikTok / Meta có chấm nền tảng. Không JS: vẫn đánh dấu + Xem được. ─── */
-.qc-loc .qc-tk { flex: 0 1 260px; min-width: 180px; position: relative; display: flex; flex-direction: column; gap: 4px; }
+.qc-loc .qc-tk { flex: 0 1 260px; min-width: 180px; }
+.qc-loc .qc-tk, .qc-kg-chon .qc-tk { position: relative; display: flex; flex-direction: column; gap: 4px; }
 .qc-tk__nhan { font-size: 12.5px; font-weight: 600; color: var(--chu-phu); }
 .qc-tk__khung > summary { list-style: none; }
 .qc-tk__khung > summary::-webkit-details-marker { display: none; }
@@ -362,7 +363,8 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
   .qc-bang-loc .nut { min-height: 44px; justify-content: center; }
   .qc-bang-loc__bo { justify-self: start; }
   .qc-kg { grid-template-columns: minmax(0, 1fr); }
-  .qc-bang-loc label.o.qc-kg-chon__o { grid-column: 1 / -1; min-width: 0; }
+  .qc-kg-chon .qc-tk { grid-column: 1 / -1; min-width: 0; }
+  .qc-kg-chon__bang { width: auto; }
   .qc-sheet__than { grid-template-columns: minmax(0, 1fr); }
   .qc-sheet__nut .nut { width: 100%; justify-content: center; min-height: 44px; }
   .qc-sheet__gan-day { border-top: 1px solid var(--ke); padding-top: 16px; }

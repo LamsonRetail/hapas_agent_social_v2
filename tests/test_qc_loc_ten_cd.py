@@ -526,7 +526,7 @@ def test_trang_bang_chon_ba_dong_va_tom_tat():
     t = c.get(f"/quang-cao?{Q}").text
     assert 'data-trong="Mọi chiến dịch">Mọi chiến dịch</span>' in t
     assert 'name="cd_co" value=""' in t and 'data-o="the-ten-cd"' not in t
-    assert 'data-o="kg-khong-loc-cd"' not in t and "(số theo tài khoản)" in t
+    assert 'data-o="kg-khong-loc-cd"' not in t and "(số theo tài khoản)" not in t
 
 
 def test_trang_the_tung_dieu_kien_va_lien_ket_giu_loc():
@@ -561,8 +561,7 @@ def test_trang_the_tung_dieu_kien_va_lien_ket_giu_loc():
     assert "Tên chiến dịch chứa tất cả: teaser, sale · không chứa: hapas" in t.split('id="sheet"')[1]
     # 26/10/2026: Khán giả theo lọc tên (số cấp chiến dịch) — câu phạm vi nói rõ, không còn cảnh báo.
     assert 'data-o="kg-khong-loc-cd"' not in t
-    pv = t.split('data-o="kg-pham-vi">')[1].split("</p>")[0]
-    assert "chiến dịch</b> có tên khớp lọc (" in pv
+    assert 'data-o="kg-pham-vi"' not in t and 'data-o="chon-cd-kg"' in t
     # Link cũ `ten_cd` → thẻ "chứa một trong", liên kết đổi sang cd_mot.
     t = c.get(_u("/quang-cao", {"ten_cd": "teaser sale"})).text
     assert "Chứa một trong: <b>teaser sale</b>" in t

@@ -416,6 +416,16 @@ def _khoi(t: str) -> str:
     return t.split('id="qc-kg-tieu-de"')[1].split("</section>")[0]
 
 
+def _form_kg(t: str) -> str:
+    return t.split('data-o="chon-cd-kg"')[1].split("</form>")[0]
+
+
+def _hop(t: str) -> dict[str, bool]:
+    """Ô tích của ô Chiến dịch (khối Khán giả): mã → đang tích."""
+    return {x.group(1): " checked" in x.group(0) for x in re.finditer(
+        r'<input type="checkbox" name="kg_cd" value="([^"]+)"[^>]*>', _form_kg(t))}
+
+
 def _dat_ten(kq, ten: dict[str, str]):
     for (cid, _ng), r in kq.bang["qc_campaign_ngay"].items():
         if cid in ten:
@@ -431,37 +441,69 @@ def test_trang_mac_dinh_theo_tai_khoan_co_o_chon_chien_dich():
     _app, c, kq = _app_co_so()
     t = c.get(_u()).text
     k = _khoi(t)
-    assert "(số theo tài khoản)" in k and not getattr(kq, "goi_kg_cd", None)
+    assert not getattr(kq, "goi_kg_cd", None)             # mặc định: số cấp tài khoản
     # Tên tỉnh thay vì mã vùng.
     assert "Hà Nội" in k and "Mã vùng" not in k
-    f = k.split('data-o="chon-cd-kg"')[1].split("</form>")[0]
-    assert 'action="/quang-cao#khan-gia"' in t.split('data-o="chon-cd-kg"')[0][-200:]
-    ma = re.findall(r'<option value="([^"]*)"', f)
-    assert ma[0] == "" and sorted(ma[1:]) == sorted(_ma_cd(a, i) for a in CHAY for i in range(3))
-    assert ">Mọi chiến dịch (theo tài khoản)</option>" in f and " · TikTok</option>" in f
+    f = _form_kg(t)
+    truoc = t.split('data-o="chon-cd-kg"')[0][-300:]
+    assert 'action="/quang-cao#khan-gia"' in truoc and 'method="get"' in truoc
+    hop = _hop(t)
+    assert sorted(hop) == sorted(_ma_cd(a, i) for a in CHAY for i in range(3))
+    assert not any(hop.values())
+    assert "<select" not in f and 'name="kg_cd"' in f
+    # Dòng tóm tắt + ô tích có tên + nền tảng; không JS vẫn có nút Áp dụng (submit) trong biểu mẫu.
+    assert 'data-tat-ca="Mọi chiến dịch">Mọi chiến dịch</span>' in f
+    assert ">TikTok</span></label>" in f
+    assert '<button class="nut" type="submit">Áp dụng</button>' in f
+    assert "data-kg-xem" not in t and "<details" in f
+    # Công cụ (ô tìm, chọn tất cả / bỏ chọn) ẩn tới khi qc.js chạy.
+    assert "data-kg-cong-cu hidden>" in f and 'data-kg="tat-ca"' in f and 'data-kg="bo"' in f
     an = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', f))
     assert an["tu"] == "2026-10-12" and an["den"] == "2026-10-18" and "kg_cd" not in an
-    assert "data-kg-xem>Xem</button>" in f and 'id="khan-gia"' in t
+    assert 'id="khan-gia"' in t
     d = _api(c)
-    assert d["khan_gia_cd"]["che_do"] == "tai_khoan" and d["khan_gia_cd"]["chon"] == ""
+    assert d["khan_gia_cd"]["che_do"] == "tai_khoan" and d["khan_gia_cd"]["chon"] == []
     assert len(d["khan_gia_cd"]["ds"]) == 9
+
+
+def test_khoi_khan_gia_khong_con_chu_giai_thich_nho():
+    """26/10/2026 (chủ dự án): bỏ hai dòng chữ nhỏ; nút (i) ở tiêu đề vẫn nói cửa sổ 30 ngày."""
+    _app, c, kq = _app_co_so()
+    _dat_ten(kq, {_ma_cd(HAPAS_KOC, 0): "Teaser A"})
+    for q in ({}, {"cd_mot": "teaser"}, {"kg_cd": _ma_cd(HAPAS_KOC, 0)},
+              {"kg_cd": [_ma_cd(HAPAS_KOC, 0), _ma_cd(MM_MKT, 1)]}):
+        t = c.get(_u(**q)).text
+        k = _khoi(t)
+        for bo in ("kg-cua-so", "kg-pham-vi", "qc-kg__cua-so", "qc-kg__pham-vi", "cửa sổ mới nhất",
+                   "không theo khoảng ngày đang lọc (", "Số của ", "chưa có số theo chiến dịch (đọc",
+                   "(số theo tài khoản)", "Ô chọn hiện"):
+            assert bo not in k, (q, bo)
+        i = k.split('class="goi-y" data-goi-y="')[1].split('">i</button>')[0]
+        assert "30 ngày" in i and "19/09 – 18/10/2026" in i and "tích" in i
+    css = (GOC / "dashboard/static/qc.css").read_text(encoding="utf-8")
+    assert "qc-kg__cua-so" not in css and "qc-kg__pham-vi" not in css
+    # API giữ nguyên trường cho nơi khác đọc.
+    kc = _api(c, cd_mot="teaser")["khan_gia_cd"]
+    assert {"che_do", "chon", "chon_ten", "chon_nen_tang", "so_cd", "tong_ds", "ds",
+            "tk_thieu"} <= set(kc)
 
 
 def test_chon_mot_chien_dich_va_lien_ket_giu_lua_chon():
     _app, c, kq = _app_co_so()
     ma = _ma_cd(MM_MKT, 1)
     _dat_ten(kq, {ma: "MM Teaser 10.10"})
-    d = _api(c, kg_cd=ma)
+    d = _api(c, kg_cd=ma)                 # một kg_cd đơn như bản cũ vẫn dùng được
     kc = d["khan_gia_cd"]
     assert (kc["che_do"], kc["chon"], kc["so_cd"], kc["chon_ten"], kc["chon_nen_tang"]) == (
-        "chien_dich", ma, 1, "MM Teaser 10.10", "tiktok")
+        "chien_dich", [ma], 1, "MM Teaser 10.10", "tiktok")
     assert kq.goi_kg_cd[-1][1] == (ma,)
     tong = sum(x["hien_thi"] for x in d["khan_gia"]["gender"])
     assert tong == _hien_thi(kq, {ma}) > 0
     t = c.get(_u(kg_cd=ma)).text
-    k = _khoi(t)
-    assert "Số của chiến dịch <b>MM Teaser 10.10</b> (TikTok)." in k
-    assert f'<option value="{ma}" selected>MM Teaser 10.10 · TikTok</option>' in k
+    hop = _hop(t)
+    assert [m for m, v in hop.items() if v] == [ma]
+    f = _form_kg(t)
+    assert 'data-tat-ca="Mọi chiến dịch">MM Teaser 10.10</span>' in f
     # Liên kết của trang (khoảng nhanh) giữ kg_cd; tab nền tảng bỏ (chiến dịch thuộc nền tảng).
     nhanh = [html.unescape(h) for h in re.findall(
         r'href="([^"]+)"', t.split('aria-label="Khoảng nhanh"')[1].split("</nav>")[0])]
@@ -471,20 +513,133 @@ def test_chon_mot_chien_dich_va_lien_ket_giu_lua_chon():
         assert _api(c, kg_cd=la)["khan_gia_cd"]["che_do"] == "tai_khoan", la
 
 
+def test_tich_nhieu_chien_dich_cong_dung_cac_chien_dich_do():
+    _app, c, kq = _app_co_so()
+    a, b, x = _ma_cd(HAPAS_KOC, 0), _ma_cd(MM_MKT, 1), _ma_cd(MM_2, 2)
+    _dat_ten(kq, {a: "Teaser A", b: "MM Teaser B", x: "Sale X"})
+    d = _api(c, kg_cd=[a, b])
+    kc = d["khan_gia_cd"]
+    assert (kc["che_do"], kc["so_cd"], kc["chon"], kc["chon_ten"]) == ("chien_dich", 2, [a, b], "")
+    assert set(kq.goi_kg_cd[-1][1]) == {a, b}
+    assert sum(y["hien_thi"] for y in d["khan_gia"]["gender"]) == _hien_thi(kq, {a, b}) > 0
+    # Thêm chiến dịch thứ ba → cộng đúng ba; trùng mã chỉ tính một.
+    d = _api(c, kg_cd=[a, b, x, a])
+    assert d["khan_gia_cd"]["so_cd"] == 3
+    assert sum(y["hien_thi"] for y in d["khan_gia"]["gender"]) == _hien_thi(kq, {a, b, x})
+    # Trang: đúng các ô được tích, tóm tắt "N chiến dịch", ô ẩn không mang lại kg_cd; liên kết giữ cả hai.
+    t = c.get(_u(kg_cd=[a, b])).text
+    hop = _hop(t)
+    assert {m for m, v in hop.items() if v} == {a, b} and len(hop) == 9
+    f = _form_kg(t)
+    assert 'data-tat-ca="Mọi chiến dịch">2 chiến dịch</span>' in f
+    assert 'name="kg_cd"' not in "".join(re.findall(r'<input type="hidden"[^>]*>', f))
+    nhanh = [html.unescape(h) for h in re.findall(
+        r'href="([^"]+)"', t.split('aria-label="Khoảng nhanh"')[1].split("</nav>")[0])]
+    assert nhanh and all(parse_qs(urlsplit(h).query)["kg_cd"] == [a, b] for h in nhanh)
+    # Tab nền tảng bỏ kg_cd (chiến dịch thuộc một nền tảng; tab chỉ hiện khi có cả TikTok và Meta, mẫu kiểm ở test_qc_loc_bang).
+    nen = [html.unescape(h) for h in re.findall(r'class="qc-nen__nut" href="([^"]+)"', t)]
+    assert all("kg_cd" not in parse_qs(urlsplit(h).query) for h in nen)
+
+
+def test_tich_ma_sai_hoac_ngoai_pham_vi_bi_bo():
+    _app, c, kq = _app_co_so()
+    a = _ma_cd(HAPAS_KOC, 0)
+    # Mã lạ / sai dạng / ngoài phạm vi bị bỏ, mã đúng vẫn giữ.
+    d = _api(c, kg_cd=[a, "ca99990000", "x'; DROP", "a b", "", "x" * 80])
+    assert d["khan_gia_cd"]["chon"] == [a] and d["khan_gia_cd"]["so_cd"] == 1
+    assert kq.goi_kg_cd[-1][1] == (a,)
+    # Toàn mã hỏng → mặc định theo tài khoản, không truy vấn cấp chiến dịch.
+    n = len(kq.goi_kg_cd)
+    d = _api(c, kg_cd=["ca99990000", "x'; DROP"])
+    assert d["khan_gia_cd"]["che_do"] == "tai_khoan" and d["khan_gia_cd"]["chon"] == []
+    assert len(kq.goi_kg_cd) == n
+    # Tài khoản ngoài phạm vi (lọc tk) → mã của nó không tích được.
+    ngoai = _ma_cd(MM_2, 0)
+    d = _api(c, tk=[HAPAS_KOC], kg_cd=[a, ngoai])
+    assert d["khan_gia_cd"]["chon"] == [a]
+    t = c.get(_u(tk=[HAPAS_KOC], kg_cd=[ngoai])).text
+    assert ngoai not in _form_kg(t) and not any(_hop(t).values())
+
+
+def test_tich_qua_tran_ma_nhan_toi_da(monkeypatch):
+    qp = {"kg_cd": [f"c{i}" for i in range(QC.KG_CD_TOI_DA + 50)]}
+    ra = QC.doc_kg_cd(qp)
+    assert len(ra) == QC.KG_CD_TOI_DA and ra[0] == "c0" and ra[-1] == f"c{QC.KG_CD_TOI_DA - 1}"
+    # Qua HTTP: trần đặt thấp → chỉ nhận đúng số đó, theo thứ tự trong URL.
+    _app, c, _kq = _app_co_so()
+    monkeypatch.setattr(QC, "KG_CD_TOI_DA", 2)
+    ma = [_ma_cd(a, i) for a in CHAY for i in range(3)]
+    d = _api(c, kg_cd=ma[:5])["khan_gia_cd"]
+    assert d["chon"] == ma[:2] and d["so_cd"] == 2
+
+
+def test_quang_cao_doc_kg_cd_dang_danh_sach():
+    from starlette.datastructures import QueryParams
+    assert QC.doc_kg_cd(None) == [] and QC.doc_kg_cd({}) == []
+    assert QC.doc_kg_cd({"kg_cd": " 123 "}) == ["123"] and QC.doc_kg_cd({"kg_cd": "a b"}) == []
+    assert QC.doc_kg_cd(QueryParams("kg_cd=a&kg_cd=b&kg_cd=a&kg_cd=%27x&kg_cd=")) == ["a", "b"]
+    assert QC.doc_kg_cd(QueryParams("kg_cd=" + "9" * 64)) == ["9" * 64]
+    assert QC.doc_kg_cd(QueryParams("kg_cd=" + "9" * 65)) == []
+
+
+def test_form_khong_js_gui_kg_cd_lap_lai_va_giu_tham_so_khac():
+    """Không JS: biểu mẫu GET + ô tích name=kg_cd + nút submit → URL kg_cd=a&kg_cd=b cùng mọi ô ẩn."""
+    _app, c, kq = _app_co_so()
+    a, b = _ma_cd(HAPAS_KOC, 0), _ma_cd(MM_MKT, 2)
+    _dat_ten(kq, {a: "Teaser A", b: "Teaser B"})
+    t = c.get(_u(cd_mot="teaser", tim="x")).text
+    f = _form_kg(t)
+    an = re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', f)
+    assert ("cd_mot", "teaser") in an and ("tim", "x") in an and ("tu", "2026-10-12") in an
+    # Mô phỏng trình duyệt: ô ẩn + ô tích a, b → chuỗi truy vấn → trang.
+    r = c.get("/quang-cao?" + urlencode([*an, ("kg_cd", a), ("kg_cd", b)]))
+    assert r.status_code == 200
+    assert {m for m, v in _hop(r.text).items() if v} == {a, b}
+    assert set(kq.goi_kg_cd[-1][1]) == {a, b}
+    # Chưa tích gì: không có tham số kg_cd, vẫn mặc định.
+    assert not any(_hop(c.get("/quang-cao?" + urlencode(an)).text).values())
+
+
+def test_hai_tram_chien_dich_o_tich_html_dung_va_thoat_ky_tu():
+    """~200 chiến dịch giả: ô tích đủ, tên được thoát HTML, ô đã tích có checked, cờ gộp (data-gop)
+    chỉ bật khi có lọc tên và ô chọn chứa đủ mọi chiến dịch."""
+    _app, c, kq = _app_co_so()
+    mau = next(r for r in kq.bang["qc_khan_gia_cd"].values()
+               if r["advertiser_id"] == HAPAS_KOC and r["chieu"] == "gender")
+    nm = next(k for k in kq.bang["qc_campaign_ngay"])
+    for i in range(200):
+        cid = f"zz{i:04d}"
+        kq.bang["qc_khan_gia_cd"][(HAPAS_KOC, cid, "gender", f"g{i}")] = {
+            **mau, "campaign_id": cid, "gia_tri": f"g{i}"}
+        kq.bang["qc_campaign_ngay"][(cid, nm[1])] = {
+            **kq.bang["qc_campaign_ngay"][nm], "campaign_id": cid,
+            "ten": f'Chiến dịch <{i}> "tên" & dài'}
+    t = c.get(_u(kg_cd=["zz0007", "zz0150"])).text
+    hop = _hop(t)
+    assert len(hop) >= 209
+    assert {m for m, v in hop.items() if v} == {"zz0007", "zz0150"}
+    f = _form_kg(t)
+    assert "<7>" not in f and "&lt;7&gt;" in f and "&#34;tên&#34;" in f
+    assert 'data-tat-ca="Mọi chiến dịch">2 chiến dịch</span>' in f and 'data-gop="0"' in f
+    assert f.count("<label") == len(hop) and f.count("</label>") == len(hop)
+    # Có lọc tên + ô chọn đủ → cờ gộp (qc.js gửi như không tích: đúng cùng kết quả, URL gọn).
+    g = _form_kg(c.get(_u(cd_mot="Chiến dịch")).text)
+    assert 'data-gop="1"' in g
+
+
 def test_loc_ten_chien_dich_chi_cong_chien_dich_khop():
     _app, c, kq = _app_co_so()
     a, b, x = _ma_cd(HAPAS_KOC, 0), _ma_cd(MM_MKT, 2), _ma_cd(MM_2, 1)
     _dat_ten(kq, {a: "Teaser Nước Hoa", b: "TEASER mm", x: "Sale 11.11"})
     d = _api(c, cd_mot="teaser")
     kc = d["khan_gia_cd"]
-    assert kc["che_do"] == "chien_dich" and kc["so_cd"] == 2 and kc["chon"] == ""
+    assert kc["che_do"] == "chien_dich" and kc["so_cd"] == 2 and kc["chon"] == []
     assert set(kq.goi_kg_cd[-1][1]) == {a, b}
     assert {y["campaign_id"] for y in kc["ds"]} == {a, b}
     assert sum(y["hien_thi"] for y in d["khan_gia"]["gender"]) == _hien_thi(kq, {a, b})
     t = c.get(_u(cd_mot="teaser")).text
     k = _khoi(t)
-    assert "<b>2 chiến dịch</b> có tên khớp lọc (" in k
-    assert ">Mọi chiến dịch khớp lọc tên (2)</option>" in k
+    assert set(_hop(t)) == {a, b} and not any(_hop(t).values()) and 'data-gop="1"' in _form_kg(t)
     # Ô ẩn của biểu mẫu mang lại lọc tên.
     assert '<input type="hidden" name="cd_mot" value="teaser">' in k
     # Chọn chiến dịch KHÔNG khớp lọc → lờ, vẫn cộng 2 chiến dịch khớp.
@@ -524,8 +679,7 @@ def test_tai_khoan_chua_co_so_theo_chien_dich_duoc_neu_ten():
     d = _api(c, cd_mot="teaser")
     assert d["khan_gia_cd"]["tk_thieu"] == ["mate made 2"]
     assert all(x["campaign_id"] != _ma_cd(MM_2, 0) for x in _api(c)["khan_gia_cd"]["ds"])
-    assert "1 tài khoản chưa có số theo chiến dịch (đọc mỗi tuần): mate made 2" in _khoi(
-        c.get(_u(cd_mot="teaser")).text)
+    assert "chưa có số theo chiến dịch" not in _khoi(c.get(_u(cd_mot="teaser")).text)
 
 
 def test_dong_den_moi_hon_moc_khong_len_trang():
@@ -542,18 +696,20 @@ def test_dong_den_moi_hon_moc_khong_len_trang():
 
 
 def test_o_chon_giu_chien_dich_dang_chon_ngoai_tran(monkeypatch):
-    """Soát L2: chiến dịch đang chọn nằm ngoài KG_CD_O_CHON dòng đầu vẫn hiện, vẫn được chọn."""
+    """Soát L2: chiến dịch đang tích nằm ngoài KG_CD_O_CHON dòng đầu vẫn hiện, vẫn được tích."""
     _app, c, _kq = _app_co_so()
     monkeypatch.setattr(QC, "KG_CD_O_CHON", 2)
     ds = _api(c)["khan_gia_cd"]
     assert len(ds["ds"]) == 2 and ds["tong_ds"] == 9
-    ngoai = next(x for x in (_ma_cd(a, i) for a in CHAY for i in range(3))
-                 if x not in {y["campaign_id"] for y in ds["ds"]})
-    d = _api(c, kg_cd=ngoai)["khan_gia_cd"]
-    assert d["chon"] == ngoai and [x["campaign_id"] for x in d["ds"]][-1] == ngoai
-    assert len(d["ds"]) == 3
-    k = _khoi(c.get(_u(kg_cd=ngoai)).text)
-    assert f'<option value="{ngoai}" selected>' in k and "Ô chọn hiện 3 / 9 chiến dịch" in k
+    ngoai = [x for x in (_ma_cd(a, i) for a in CHAY for i in range(3))
+             if x not in {y["campaign_id"] for y in ds["ds"]}]
+    d = _api(c, kg_cd=ngoai[:2])["khan_gia_cd"]
+    assert d["chon"] == ngoai[:2] and [x["campaign_id"] for x in d["ds"]][-2:] == ngoai[:2]
+    assert len(d["ds"]) == 4 and d["so_cd"] == 2
+    t = c.get(_u(kg_cd=ngoai[:2])).text
+    hop = _hop(t)
+    assert len(hop) == 4 and {m for m, v in hop.items() if v} == set(ngoai[:2])
+    assert "Hiện 4 / 9 chiến dịch" in _form_kg(t) and 'data-gop="0"' in _form_kg(t)
 
 
 def test_an_tien_dau_cuoi_qua_api(monkeypatch):
@@ -571,7 +727,7 @@ def test_an_tien_dau_cuoi_qua_api(monkeypatch):
     assert all(not ({"chi", "gia_tri_mua_shop"} & set(x)) for ds in d["khan_gia"].values()
                for x in ds)
     t = c.get(_u()).text
-    assert "chi nhiều" not in _khoi(t)
+    assert "chi nhiều" not in _khoi(t) and "Hiện " not in _form_kg(t)
 
 
 def test_ds_kg_cd_xep_theo_chi_hoac_hien_thi_va_loc_tien():
@@ -586,7 +742,6 @@ def test_ds_kg_cd_xep_theo_chi_hoac_hien_thi_va_loc_tien():
     # Người không xem tiền: chi bị bỏ khỏi ô chọn (khoá tiền, đệ quy).
     ra = QC.loc_tien({"khan_gia_cd": {"ds": ds}}, False)
     assert all("chi" not in x and "hien_thi" in x for x in ra["khan_gia_cd"]["ds"])
-    assert QC.doc_kg_cd({"kg_cd": " 123 "}) == "123" and QC.doc_kg_cd({"kg_cd": "a b"}) == ""
 
 
 def test_nhan_tinh_tiktok():

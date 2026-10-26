@@ -263,15 +263,66 @@
   });
 })();
 
-// Khán giả theo chiến dịch (26/10/2026, chủ dự án): đổi ô "Chiến dịch" là gửi luôn, ẩn nút Xem. Không
-// có JS: nút Xem vẫn gửi biểu mẫu GET (ô ẩn mang lại mọi bộ lọc khác).
+// Khán giả theo chiến dịch (26/10/2026, chủ dự án): ô "Chiến dịch" chọn nhiều bằng ô tích (cùng kiểu ô
+// Tài khoản, `kg_cd` lặp lại). Không JS: <details> + ô tích + nút "Áp dụng" vẫn gửi biểu mẫu GET. JS thêm:
+// ô tìm (bỏ dấu, không phân biệt hoa thường) lọc danh sách, "Chọn tất cả (đang hiện)" / "Bỏ chọn", dòng
+// tóm tắt "Mọi chiến dịch" / tên / "N chiến dịch", đóng khi bấm ra ngoài hoặc Esc. Áp dụng CHỈ bằng nút
+// (không gửi theo từng lần tích). Lọc tên chiến dịch đang bật + đã tích đủ mọi chiến dịch → gửi như
+// không tích (đúng cùng kết quả, URL gọn).
 (function () {
-  var f = document.querySelector('form[data-o="chon-cd-kg"]');
-  if (!f) return;
-  var xem = f.querySelector("[data-kg-xem]");
-  if (xem) xem.hidden = true;
-  Array.prototype.forEach.call(f.querySelectorAll("select[data-tu-gui]"), function (s) {
-    s.addEventListener("change", function () { f.submit(); });
+  var khoi = document.querySelector('[data-o="chon-cd-kg-hop"]');
+  if (!khoi) return;
+  var khung = khoi.querySelector("details");
+  var tom = khoi.querySelector(".qc-tk__gia-tri");
+  var congCu = khoi.querySelector("[data-kg-cong-cu]");
+  var tim = khoi.querySelector(".qc-tk__tim");
+  var trong = khoi.querySelector("[data-kg-trong]");
+  var hop = Array.prototype.slice.call(khoi.querySelectorAll('input[type="checkbox"][name="kg_cd"]'));
+  if (!khung || !tom || !hop.length) return;
+  if (congCu) congCu.hidden = false;
+
+  function boDau(x) {
+    return (x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[đĐ]/g, "d").toLowerCase();
+  }
+  function ten(h) { var t = h.parentNode.querySelector(".qc-tk__ten"); return t ? t.textContent : h.value; }
+  function veTom() {
+    var chon = hop.filter(function (h) { return h.checked; });
+    tom.textContent = !chon.length ? tom.getAttribute("data-tat-ca")
+      : chon.length === 1 ? ten(chon[0]) : chon.length + " chiến dịch";
+  }
+  function loc() {
+    var q = boDau(tim ? tim.value.trim() : "");
+    var con = 0;
+    hop.forEach(function (h) {
+      var hien = !q || boDau(h.parentNode.textContent).indexOf(q) >= 0 || h.value.indexOf(q) >= 0;
+      h.parentNode.hidden = !hien;
+      if (hien) con++;
+    });
+    if (trong) trong.hidden = con > 0;
+  }
+  hop.forEach(function (h) { h.addEventListener("change", veTom); });
+  if (tim) {
+    tim.addEventListener("input", loc);
+    // Enter trong ô tìm không gửi biểu mẫu (người dùng đang lọc danh sách).
+    tim.addEventListener("keydown", function (e) { if (e.key === "Enter") e.preventDefault(); });
+  }
+  Array.prototype.forEach.call(khoi.querySelectorAll("button[data-kg]"), function (b) {
+    b.addEventListener("click", function () {
+      var bat = b.getAttribute("data-kg") === "tat-ca";
+      hop.forEach(function (h) { if (!h.parentNode.hidden) h.checked = bat; });
+      veTom();
+    });
+  });
+  document.addEventListener("click", function (e) { if (khung.open && !khoi.contains(e.target)) khung.open = false; });
+  khoi.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && khung.open) { khung.open = false; khung.querySelector("summary").focus(); }
+  });
+  khung.addEventListener("toggle", function () { if (khung.open && tim) tim.focus(); });
+  var f = khoi.closest("form");
+  if (f) f.addEventListener("submit", function () {
+    if (f.getAttribute("data-gop") === "1" && hop.every(function (h) { return h.checked; })) {
+      hop.forEach(function (h) { h.checked = false; });
+    }
   });
 })();
 
