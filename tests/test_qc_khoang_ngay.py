@@ -262,10 +262,11 @@ def test_trang_o_khoang_ngay_khoang_nhanh_va_nhan():
     assert t.count('data-o="nhan-khoang">12/10 – 18/10</span>') == 4
     for dau in ('id="qc-kpi"', 'id="qc-xh-tieu-de"', 'id="qc-top-tieu-de"', 'id="qc-kenh-tieu-de"'):
         assert 'data-o="nhan-khoang"' in t.split(dau)[1][:900], dau
-    # Khán giả: cửa sổ riêng, nói rõ.
+    # Khán giả: cửa sổ riêng — 26/10/2026 bỏ dòng chữ nhỏ; cửa sổ nằm trong nút (i) của tiêu đề.
     kg = _khoi(t, 'id="qc-kg-tieu-de"', "</section>")
-    assert re.search(r'data-o="kg-cua-so">Khán giả: cửa sổ mới nhất \d\d/\d\d – \d\d/\d\d/\d{4}, '
-                     r'không theo khoảng ngày đang lọc \(12/10 – 18/10\)\.</p>', kg)
+    assert 'data-o="kg-cua-so"' not in kg and "cửa sổ mới nhất" not in kg
+    assert re.search(r'data-goi-y="Phân bố lượt hiển thị trong cửa sổ 30 ngày gần nhất \(\d\d/\d\d – '
+                     r'\d\d/\d\d/\d{4}\), đọc lại mỗi tuần — không theo khoảng ngày đang lọc', kg)
     # Nút gộp + tiêu đề "Theo ngày".
     assert 'id="qc-don-vi"' in t and 'Theo <span id="qc-xh-don-vi">ngày</span>' in t
     # Tóm tắt điện thoại.

@@ -3013,22 +3013,22 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                  "tuong_tac": QC.tuong_tac(r),
                                  **{c: r.get(c) or 0 for c in QC.TEN_CHUOI_XEM_SP}}
                                 for r in kq.qc_theo_ngay(ids_n, tu, den, **lcd))
-        # 26/10/2026 (chủ dự án): Khán giả theo Bộ lọc đầu trang + ô chọn MỘT chiến dịch (`kg_cd`).
-        # Không lọc tên, không chọn → cấp TÀI KHOẢN (qc_khan_gia: đúng nhất, reach không đếm trùng
-        # giữa chiến dịch). Có lọc tên → cộng các chiến dịch có số khán giả trong cửa sổ cấp chiến dịch
-        # mới nhất mà tên khớp; chọn một chiến dịch (phải nằm trong danh sách đó) → đúng chiến dịch
-        # đó. Cộng > 1 chiến dịch thì bỏ reach (đếm trùng người). Cửa sổ riêng — không theo khoảng
-        # ngày; tên so ở Python bằng đúng `khop_ten_cd` như phần còn lại của trang.
+        # 26/10/2026 (chủ dự án): Khán giả theo Bộ lọc đầu trang + ô chọn NHIỀU chiến dịch bằng ô tích
+        # (`kg_cd` lặp lại). Không lọc tên, không chọn → cấp TÀI KHOẢN (qc_khan_gia: đúng nhất, reach
+        # không đếm trùng giữa chiến dịch). Có lọc tên → cộng các chiến dịch có số khán giả trong cửa
+        # sổ cấp chiến dịch mới nhất mà tên khớp; tích chiến dịch (phải nằm trong danh sách đó) → đúng
+        # các chiến dịch đã tích. Cộng > 1 chiến dịch thì bỏ reach (đếm trùng người). Cửa sổ riêng —
+        # không theo khoảng ngày; tên so ở Python bằng đúng `khop_ten_cd` như phần còn lại của trang.
         kd = kq.ds_cd_khan_gia(ids) if ids else {"ds": [], "tk_thieu": []}
         ds_kg = QC.ds_kg_cd(kd.get("ds") or [], tc, co_tien)
-        kg_ma = QC.doc_kg_cd(qp)
-        kg_chon = next((x for x in ds_kg if str(x["campaign_id"]) == kg_ma), None)
-        cds_kg = ([str(kg_chon["campaign_id"])] if kg_chon
+        kg_ma = set(QC.doc_kg_cd(qp))
+        kg_chon = [x for x in ds_kg if str(x["campaign_id"]) in kg_ma]
+        cds_kg = ([str(x["campaign_id"]) for x in kg_chon] if kg_chon
                   else [str(x["campaign_id"]) for x in ds_kg] if tc["co_loc"] else None)
-        # Ô chọn: ≤ KG_CD_O_CHON dòng đầu + chiến dịch đang chọn nếu nó nằm ngoài (soát L2).
+        # Ô chọn: ≤ KG_CD_O_CHON dòng đầu + chiến dịch đang tích nếu nằm ngoài (soát L2).
         o_kg = ds_kg[:QC.KG_CD_O_CHON]
-        if kg_chon is not None and all(x is not kg_chon for x in o_kg):
-            o_kg = [*o_kg, kg_chon]
+        dau = {id(x) for x in o_kg}
+        o_kg = [*o_kg, *(x for x in kg_chon if id(x) not in dau)]
         if cds_kg is None:
             kg = kq.qc_khan_gia(ids) if ids else {"rows": [], "tu": None, "den": None}
         else:
@@ -3080,14 +3080,17 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                      "so_trang_ad": max(1, -(-dem.get("ad", 0) // moi_trang))},
             "khan_gia": QC.khan_gia(kg.get("rows") or []),
             "khan_gia_khoang": {"tu": kg.get("tu"), "den": kg.get("den")},
-            # 26/10/2026: phạm vi số khán giả — `che_do` tai_khoan | chien_dich; `chon` = mã của ô
-            # chọn ("" = mặc định); `so_cd` = số chiến dịch được cộng; `ds` = ô chọn (≤ KG_CD_O_CHON,
+            # 26/10/2026: phạm vi số khán giả — `che_do` tai_khoan | chien_dich; `chon` = DANH SÁCH mã
+            # đã tích ([] = mặc định; `chon_ten` / `chon_nen_tang` khi tích đúng một); `so_cd` = số chiến dịch
+            # được cộng; `ds` = ô chọn (≤ KG_CD_O_CHON + các mã đã tích,
             # chi / hiển thị — tiền bỏ ở loc_tien); `tk_thieu` = tài khoản chưa có số cấp chiến dịch.
             "khan_gia_cd": {
                 "che_do": "tai_khoan" if cds_kg is None else "chien_dich",
-                "chon": str(kg_chon["campaign_id"]) if kg_chon else "",
-                "chon_ten": (kg_chon.get("ten") or str(kg_chon["campaign_id"])) if kg_chon else "",
-                "chon_nen_tang": nen_tk.get(kg_chon["advertiser_id"], "tiktok") if kg_chon else "",
+                "chon": [str(x["campaign_id"]) for x in kg_chon],
+                "chon_ten": ((kg_chon[0].get("ten") or str(kg_chon[0]["campaign_id"]))
+                             if len(kg_chon) == 1 else ""),
+                "chon_nen_tang": (nen_tk.get(kg_chon[0]["advertiser_id"], "tiktok")
+                                  if len(kg_chon) == 1 else ""),
                 "so_cd": len(cds_kg or []), "tong_ds": len(ds_kg),
                 "ds": [{"campaign_id": str(x["campaign_id"]),
                         "ten": x.get("ten") or str(x["campaign_id"]),
@@ -3202,9 +3205,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                 loc |= {"kt": lk["tim"], "kl": lk["loai"],
                         "ks": "" if lk["sap"] == lk["mac_dinh"] else lk["sap"],
                         "kc": "tang" if lk["chieu"] == "tang" else ""}
-            # 26/10/2026: chiến dịch chọn trong khối Khán giả đi cùng mọi liên kết; biểu mẫu của khối
-            # mang lại MỌI tham số khác bằng ô ẩn (`an_kg`) — đổi chiến dịch không mất bộ lọc nào.
-            loc[QC.THAM_KG_CD] = (d.get("khan_gia_cd") or {}).get("chon") or ""
+            # 26/10/2026: các chiến dịch tích trong khối Khán giả đi cùng mọi liên kết (tham số lặp
+            # lại); biểu mẫu của khối mang lại MỌI tham số khác bằng ô ẩn (`an_kg`).
+            loc[QC.THAM_KG_CD] = list((d.get("khan_gia_cd") or {}).get("chon") or [])
             ctx["an_kg"] = [(k, x) for k, v in loc.items() if k != QC.THAM_KG_CD
                             for x in (v if isinstance(v, list) else [v]) if x not in (None, "")]
             chinh, phu = QC.chon_kpi(d["xem_tien"])
