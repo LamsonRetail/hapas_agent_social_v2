@@ -308,13 +308,21 @@ def danh_dau(ma: str, items: list[tuple[dict, str]], du_an: dict, tu: list[str],
     theo dõi, đánh dấu nhắc brand / đã có trong kho / đã loại trước (`da_loai`: sổ "đã loại" cùng
     dấu luật HOẶC sổ seeding, và CHƯA có trong kho — soát 18/10/2026, H1: bài seeding đã thấy và
     cố ý bỏ không phải bài "sót", kể cả khi đổi từ khoá đã làm lại phần "bai" của sổ). `xet_lai`:
-    bài đã loại theo luật không tốn AI (`theo_doi.LY_DO_XET_LAI`, cổng brand đường hashtag, hoặc
-    chỉ còn ở sổ seeding) — phần lấp lỗ đưa nó qua phễu để luật hiện hành xét lại, như lượt tìm."""
+    bài đã loại theo luật không tốn AI (`theo_doi.LY_DO_XET_LAI`, cổng brand đường hashtag, AI
+    không phán mà không nhắc brand — `LY_DO_KHONG_NHAC_BRAND`, soát 27/10/2026 —, hoặc chỉ còn ở
+    sổ seeding) — phần lấp lỗ đưa nó qua phễu để luật hiện hành xét lại (`theo_doi._con_chan`:
+    vẫn không nhắc brand thì vẫn chặn, không tới AI), như lượt tìm."""
     import loc_rac
     import theo_doi as T
     import theo_doi_api as TDA
     moc = max(tu_pv, bay_gio - datetime.timedelta(days=NGAY_MAU))
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
+    # "Nhắc brand" = khớp từ khoá VÀ có tín hiệu brand (`theo_doi.co_tin_hieu_brand`, soát
+    # 27/10/2026): bài khớp khẩu hiệu chung chung rải rác ("Tử Vi Vô Chính Diệu" khớp "yêu từ điều
+    # nhỏ nhất") mà AI không phán thì lượt quét không giữ, không vào sổ — bản trước đếm nó là bài
+    # SÓT, đẩy tác giả thành đề xuất ưu tiên / nới lượt nổi trả tiền. Tên brand + kênh nhà đọc lười.
+    cong = T.cau_hinh_hashtag_brand(du_an)
+    ten, la_nha = T._cong_brand_luoi(du_an, cong)
     theo: dict[str, dict] = {}
     for it, duong in items:
         for d, dt in A._chuan_tiktok(A._chuan_clockworks([it])):
@@ -328,14 +336,15 @@ def danh_dau(ma: str, items: list[tuple[dict, str]], du_an: dict, tu: list[str],
                     theo[k]["duong"].append(duong)
                 continue
             nhac = (A._khop_tu_khoa(d, tu) and not A._tu_loai_tru_khop(d, loai_tru)
-                    and not loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}"))
+                    and not loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}")
+                    and T.co_tin_hieu_brand(d, cong, ten, la_nha))
             theo[k] = {"khoa": k, "d": d, "dt": dt, "duong": [duong], "nhac": bool(nhac),
                        "tl": _thao_luan(d), "da_co": False, "da_loai": False, "xet_lai": False}
     if theo:
         co = K.khoa_da_co(ma, list(theo))
         loai = TDA.doc_loai(ma, TDA.dau_loai(du_an, tu), tu_pv)
         seed = {x["khoa"] for x in TDA.doc_seeding(ma, tu_pv)}
-        luat = T.LY_DO_XET_LAI | {T.LY_DO_HASHTAG_BRAND}
+        luat = T.LY_DO_XET_LAI | {T.LY_DO_HASHTAG_BRAND, T.LY_DO_KHONG_NHAC_BRAND}
         for k, x in theo.items():
             ly = (loai.get(k) or [""])[0]
             # Bài ĐÃ CÓ trong kho không phải bài "đã loại" dù sổ còn khoá cũ (soát 18/10/2026: bài

@@ -1374,6 +1374,7 @@ def _loc(v, ts: dict, d_from, d_to, cho_ai: bool, log: list) -> dict:
         if val:
             giu, ma, ghi, nguon = val
             d["_ai"], d["_ma_ai"], d["_phan_xu"] = True, ma, nguon
+            d["_ghi_ai"] = str(ghi or "")     # ghi chú gốc của AI cho `theo_doi.luu_tu_khoa`
             if ma == "other_market" and re.fullmatch(r"[A-Za-z]{2}", ghi or ""):
                 if d["_thi_truong"] in ("không rõ", country) and ghi.upper() != country:
                     d["_thi_truong"] = ghi.upper()

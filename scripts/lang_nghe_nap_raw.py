@@ -707,9 +707,11 @@ def _cong(tong: dict, x: dict) -> None:
 
 
 def _so_ai(tk: dict) -> int:
-    """Bài đã tới bước AI của một phần (giữ + AI loại + không nhắc)."""
+    """Bài đã tới bước AI của một phần (giữ + AI loại + không nhắc + AI không phán mà không nhắc
+    brand — soát 27/10/2026)."""
     return sum(int(f.get("giu", 0)) + sum((f.get("ai_loai") or {}).values())
-               + int(f.get("khong_nhac", 0)) for f in tk["pheu"].values())
+               + int(f.get("khong_nhac", 0)) + int(f.get("khong_nhac_brand", 0))
+               for f in tk["pheu"].values())
 
 
 def _nang(ngay):
@@ -974,11 +976,15 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None, nghi=time.sl
         bo_brand = [{"bl": d.get("comments"), "p": d["platform"]} for d, _ in tim
                     if _khoa(d) in k_brand]
         theo_p = {p: sum(1 for x in bo_brand if x["p"] == p) for p in _MXH}
+        # Bài nhắc từ khoá mà không có tín hiệu brand (soát 27/10/2026, `T.co_tin_hieu_brand`):
+        # chạy thử không có AI nên không vào "sẽ nạp"; chạy thật AI vẫn được giữ nếu phán giữ.
+        k_nb = sum(int(f.get("khong_nhac_brand") or 0) for f in tong["pheu"].values())
         # Soát 18/10/2026: số "sẽ nạp" là bài mới NHẮC từ khoá (chạy thử không có AI) — không phải
         # trần: chạy thật AI còn được giữ bài không nhắc từ khoá trong số gửi AI (`_giu_tu_khoa`).
-        in_ra(f"ƯỚC TÍNH: sẽ nạp {len(moi)} bài mới nhắc từ khoá, ≈ {_tl(moi)} thảo luận (1 + bình "
-              f"luận) — TRƯỚC AI (AI còn loại bài lạc đề / trùng tên, và được giữ thêm bài trong "
-              f"{ghi['ai_khong_khop']} bài không nhắc từ khoá gửi AI); trong đó gọi tên {ten[0]}: "
+        in_ra(f"ƯỚC TÍNH: sẽ nạp {len(moi)} bài mới nhắc từ khoá (có tín hiệu brand), ≈ {_tl(moi)} "
+              f"thảo luận (1 + bình luận) — TRƯỚC AI (AI còn loại bài lạc đề / trùng tên, và được "
+              f"giữ thêm bài trong {ghi['ai_khong_khop']} bài không nhắc từ khoá + {k_nb} bài nhắc "
+              f"từ khoá mà không nhắc brand gửi AI); trong đó gọi tên {ten[0]}: "
               f"{len(goi_ten)} bài, {_tl(goi_ten)} thảo luận. Loại seeding affiliate {len(seed)} "
               f"bài ({_tl(seed)} thảo luận; {len(seed_nhac)} bài / {_tl(seed_nhac)} thảo luận "
               f"nhắc từ khoá) của {len(tong.get('_tk_seeding') or {})} tài khoản; loại vì đường "
