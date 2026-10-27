@@ -26,11 +26,17 @@ Vì sao cần: lượt `/theodoi` chỉ gán nhãn bình luận VỪA cào và b
           mang `luot_id` mới mà nhãn vẫn của prompt cũ. Bản đầu chỉ ĐẾM nhóm này rồi bỏ sót.
       Chạy thử in số dòng của từng nhánh. Bài minigame vẫn xét trên MỌI bình luận của bài (lọc
       lượt không làm lệch tỉ lệ số dự thi). Bước (a) không lọc (luật, không gọi model).
+      27/10/2026 (định nghĩa sắc thái của MKT): model nhận KÈM bài chứa bình luận (đầu nội dung +
+      hashtag) và chuỗi brand của dự án — y như việc nền `gan_nhan_nen.gan_lo_bl`. Prompt mới đọc
+      bài để hiểu bình luận đáp lại gì (hùa theo bài chê brand, bình luận dưới video KOL); bản
+      trước gửi trơn chữ bình luận nên gán lại sẽ kém hơn việc nền. Cột `san_pham` (MÓN) KHÔNG
+      đổi ở đây — dashboard chỉ đọc MÓN của dòng hỏi mua, dòng mới thành hỏi mua lùi về chữ.
 
 An toàn:
   • Mặc định CHẠY THỬ: mọi truy vấn trong MỘT giao dịch READ ONLY, không gọi model, không ghi
     gì; in số dòng, mẫu (tác giả đã băm) và ước tính số lượt gọi model. `--thu N` gọi model cho
-    tối đa N dòng (một lô) để xem trước nhãn mới — vẫn không ghi gì.
+    tối đa N dòng (một lô) để xem trước nhãn mới — vẫn không ghi gì; in bảng lật sắc thái cũ →
+    mới và mẫu lật = → + / − → = để MKT soát trước khi --ap-dung (27/10/2026).
   • `--ap-dung --sao-luu <tệp>`: ghi tệp hoàn tác (giá trị cũ + mới của từng dòng, theo du_an,
     khoa_bai, ma) TRƯỚC, rồi UPDATE trong MỘT giao dịch cho mỗi lô ≤ 100 dòng. Mỗi UPDATE chỉ
     sửa đúng dòng mà giá trị hiện tại còn y như lúc đọc — dòng vừa bị lượt quét khác sửa thì bỏ
@@ -51,6 +57,10 @@ của Mark đã lên VPS: lượt quét chạy bản cũ sẽ ghi lại `loai = 
         --ap-dung --sao-luu .audit/gan-lai-1710-den-luot-8.jsonl
     sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --ap-dung --sao-luu .audit/gan-lai-1610.jsonl
     sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --hoan-tac .audit/gan-lai-1610.jsonl
+    # 27/10/2026 (sắc thái MKT): N = id lượt quét CUỐI còn chạy prompt cũ (trước deploy).
+    sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --buoc b --tat-ca --den-luot N --thu 100
+    sudo -u mark $PY scripts/lang_nghe_gan_lai.py hapas --buoc b --tat-ca --den-luot N \
+        --ap-dung --sao-luu .audit/gan-lai-2710-sac-thai.jsonl
 """
 from __future__ import annotations
 
@@ -80,7 +90,7 @@ TOI_THIEU_BL_MINIGAME = 5
 
 # Mọi câu SQL mang thẻ `/* gl:<tên> */` — bộ thử nhận diện câu theo thẻ (kho giả).
 SQL_CHI_DOC = "SET TRANSACTION READ ONLY"
-SQL_DU_AN = "/* gl:du_an */ SELECT ma, ten, tu_khoa FROM du_an WHERE ma = %s"
+SQL_DU_AN = "/* gl:du_an */ SELECT ma, ten, tu_khoa, boi_canh FROM du_an WHERE ma = %s"
 SQL_BL_NHA = (
     "/* gl:bl_nha */ SELECT b.khoa_bai, b.ma, b.tac_gia, b.noi_dung, b.loai, b.ly_do_loc, "
     "b.sac_thai, b.chu_de, b.cua_thuong_hieu, p.tai_khoan AS bai_tai_khoan, "
@@ -92,7 +102,7 @@ SQL_BL_NHA = (
 SQL_BL_HOP_LE = (
     "/* gl:bl_hop_le */ SELECT b.khoa_bai, b.ma, b.tac_gia, b.noi_dung, b.thich, b.loai, "
     "b.ly_do_loc, b.sac_thai, b.chu_de, b.cua_thuong_hieu, b.luot_id, b.thay_lan_dau, "
-    "p.noi_dung AS bai_noi_dung "
+    "p.noi_dung AS bai_noi_dung, left(p.hashtag, 120) AS bai_hashtag "
     "FROM binh_luan b JOIN bai p ON p.du_an = b.du_an AND p.khoa = b.khoa_bai "
     "WHERE b.du_an = %s AND b.loai = 'hop_le' ORDER BY b.khoa_bai, b.ma")
 # Một dòng, chỉ khi giá trị hiện tại còn đúng `cu` (khoá chính + so từng cột).
@@ -193,7 +203,9 @@ def _dong(r: dict, cu: dict, moi: dict, buoc: str, ly_do: str) -> dict:
     return {"khoa_bai": r["khoa_bai"], "ma": r["ma"], "tac_gia": r.get("tac_gia") or "",
             "noi_dung": r.get("noi_dung") or "", "thich": r.get("thich"), "cu": cu,
             "moi": moi, "buoc": buoc, "ly_do": ly_do, "luot_id": r.get("luot_id"),
-            "thay_lan_dau": r.get("thay_lan_dau")}
+            "thay_lan_dau": r.get("thay_lan_dau"),
+            # Ngữ cảnh bài cho model (27/10/2026) — KHÔNG vào tệp hoàn tác (`ghi_lo` chọn khoá).
+            "bai_noi_dung": r.get("bai_noi_dung"), "bai_hashtag": r.get("bai_hashtag")}
 
 
 def chon_thuong_hieu(du_an: dict, rows: list[dict]) -> list[dict]:
@@ -269,24 +281,53 @@ def chia_lo(dong: list[dict]) -> list[list[dict]]:
             + [luat[i:i + LO] for i in range(0, len(luat), LO)])
 
 
-def gan_nhan(lo: list[dict]) -> tuple[list[dict], dict]:
-    """Gọi đúng bộ gán nhãn của lượt cào cho một lô. -> (dòng có nhãn mới KHÁC nhãn cũ,
-    thống kê). Dòng chưa gán được thì giữ nhãn cũ."""
+def gan_nhan(lo: list[dict], brand: str = "") -> tuple[list[dict], dict]:
+    """Gọi đúng bộ gán nhãn của việc nền cho một lô — kèm bài chứa bình luận và `brand`
+    (`gan_nhan_nen.brand_du_an`). -> (dòng có nhãn mới KHÁC nhãn cũ, thống kê). Dòng chưa gán
+    được thì giữ nhãn cũ."""
+    import gan_nhan_nen as N
     tt: dict = {}
     nhan = P.phan_loai_binh_luan(
-        [{"text": d["noi_dung"], "likes": int(d.get("thich") or 0)} for d in lo],
-        HAN_LO_GIAY, tt, song_song=1)
+        [{"text": d["noi_dung"], "likes": int(d.get("thich") or 0),
+          "ngu_canh_bai": N.ngu_canh_bai(d)} for d in lo],
+        HAN_LO_GIAY, tt, song_song=1, brand=brand)
     doi, dem = [], {"chua_gan": 0, "khong_doi": 0}
+    ma_tran: dict[tuple, int] = {}
     for d, (s, c) in zip(lo, nhan):
         if s == P.CHUA or c == P.CHUA:
             dem["chua_gan"] += 1
             continue
+        cap = (d["cu"].get("sac_thai") or "—", s)
+        ma_tran[cap] = ma_tran.get(cap, 0) + 1
         moi = dict(d["cu"], sac_thai=s, chu_de=c)
         if moi == d["cu"]:
             dem["khong_doi"] += 1
             continue
         doi.append(dict(d, moi=moi))
-    return doi, {**dem, "trang_thai": tt.get("trang_thai") or ""}
+    return doi, {**dem, "ma_tran": ma_tran, "trang_thai": tt.get("trang_thai") or ""}
+
+
+_NGAN = {P.SAC_THAI["+"]: "+", P.SAC_THAI["-"]: "-", P.SAC_THAI["="]: "="}
+#: Hai kiểu lật MKT cần soi trước khi --ap-dung (27/10/2026): luật "thiện cảm là +" có thể kéo
+#: bình luận trung lập lên "+", luật "một từ tiêu cực không đủ" có thể kéo lời chê xuống "=".
+_LAT_SOI = ((P.SAC_THAI["="], P.SAC_THAI["+"]), (P.SAC_THAI["-"], P.SAC_THAI["="]))
+
+
+def in_ma_tran(dem: dict, doi: list[dict], mau: int, in_ra=print) -> None:
+    """Bảng lật sắc thái cũ → mới của các dòng gán được + vài mẫu =→+ và −→= (tác giả đã băm)."""
+    mt = dem.get("ma_tran") or {}
+    if not mt:
+        return
+    cot = ("+", "=", "-")
+    in_ra("    Lật sắc thái (hàng = cũ, cột = mới):   " + "  ".join(f"{c:>5}" for c in cot))
+    for cu in sorted({k[0] for k in mt}, key=lambda x: (x not in _NGAN, x)):
+        so = [mt.get((cu, m), 0) for m in (P.SAC_THAI["+"], P.SAC_THAI["="], P.SAC_THAI["-"])]
+        in_ra(f"      {_NGAN.get(cu, cu):<34}" + "  ".join(f"{n:>5}" for n in so))
+    for cu, moi in _LAT_SOI:
+        lat = [d for d in doi if d["cu"].get("sac_thai") == cu and d["moi"]["sac_thai"] == moi]
+        in_ra(f"    Mẫu {_NGAN[cu]} → {_NGAN[moi]}: {len(lat)} dòng")
+        for d in lat[:mau]:
+            in_ra(_mau(d))
 
 
 # ───────────────────────────── ghi + hoàn tác ─────────────────────────────
@@ -405,6 +446,8 @@ def chay(ns, in_ra=print) -> int:
     if not du_an:
         in_ra(f"Không có dự án '{ma}' trong kho.")
         return 2
+    import gan_nhan_nen as N
+    brand = N.brand_du_an(du_an)
     a = chon_thuong_hieu(du_an, nha) if "a" in ns.buoc else []
     bo = {(d["khoa_bai"], d["ma"]) for d in a}
     b = chon_gan_lai(hop_le, ns.tat_ca, bo, den, moc) if "b" in ns.buoc else []
@@ -431,10 +474,12 @@ def chay(ns, in_ra=print) -> int:
         thu = [d for d in b if can_model(d)][:min(max(0, ns.thu), LO)]
         if thu:
             _chuan_bi_model()
-            doi, dem = gan_nhan(thu)
+            doi, dem = gan_nhan(thu, brand)
             in_ra(f"Xem trước {len(thu)} dòng (1 lượt model, KHÔNG ghi): {len(doi)} đổi nhãn, "
                   f"{dem['khong_doi']} giữ nguyên, {dem['chua_gan']} chưa gán được "
                   f"({dem['trang_thai'] or '—'}).")
+            in_ma_tran(dem, doi, ns.mau, in_ra)
+            in_ra("    Mẫu đổi nhãn khác:")
             for d in doi[:ns.mau]:
                 in_ra(_mau(d))
         in_ra("Không ghi gì. Ghi thật: thêm --ap-dung --sao-luu <tệp hoàn tác>.")
@@ -456,7 +501,7 @@ def chay(ns, in_ra=print) -> int:
         sua_b = bo_b = chua = giu = 0
         cac_lo = chia_lo(b)
         for j, lo in enumerate(cac_lo, 1):
-            doi, dem = gan_nhan(lo)
+            doi, dem = gan_nhan(lo, brand)
             x, y = ghi_lo(ma, doi, so_luu)
             sua_b, bo_b = sua_b + x, bo_b + y
             chua, giu = chua + dem["chua_gan"], giu + dem["khong_doi"]

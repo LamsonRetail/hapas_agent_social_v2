@@ -1583,14 +1583,17 @@ def _xu_ly(args: dict) -> str:
                          t0 + A._TOOL_DEADLINE - 10) if actors else None)
 
     tt_pl: dict = {}
-    _danh_dau_thuong_hieu(rows, _thuong_hieu(args.get("thuong_hieu")))
+    th = _thuong_hieu(args.get("thuong_hieu"))
+    _danh_dau_thuong_hieu(rows, th)
     khach = [c for c in rows if not c["cua_thuong_hieu"]]
     for c in rows:
         if c["cua_thuong_hieu"]:          # tiếng của brand: không gán nhãn, không tính
             c["sac_thai"], c["chu_de"] = phan_loai.NHAN_NHA, ""
     if khach:
         han_pl = min(_PHAN_LOAI_TOI_DA, A._TOOL_DEADLINE - (time.monotonic() - t0) - 12)
-        nhan = phan_loai.phan_loai_binh_luan(khach, han_pl, tt_pl)
+        # Brand đang soi (27/10/2026): prompt sắc thái chấm thái độ VỚI BRAND — soi bài đối thủ
+        # mà không nói brand là ai thì lời khen món của hãng đó dễ bị đọc thành "khen hãng khác".
+        nhan = phan_loai.phan_loai_binh_luan(khach, han_pl, tt_pl, brand=", ".join(th))
         for c, (s, cd) in zip(khach, nhan):
             c["sac_thai"], c["chu_de"] = s, cd
 
@@ -2036,7 +2039,7 @@ def _chuan_nen(p: str, ph: dict, items: list) -> list[tuple]:
 _AI_NEN_BINH_LUAN = 1000      # bình luận tối đa gửi model trong một việc nền (10 lượt × 100)
 
 
-def _nhan_nen(v, rows: list[dict]) -> dict:
+def _nhan_nen(v, rows: list[dict], brand: str = "") -> dict:
     """Gán nhãn sắc thái/chủ đề cho việc nền, có cache theo sha1(bài|nội dung): khởi động
     lại không hỏi model lại. Luật trước; model chỉ cho `SOCIAL_AI_NEN_BINH_LUAN` bình luận
     nhiều like nhất còn lại; phần sau "Chưa phân loại" — nói rõ, không đoán."""
@@ -2074,7 +2077,7 @@ def _nhan_nen(v, rows: list[dict]) -> dict:
     moi = {}
     if gui:
         han = max(30.0, min(420.0, v.con_giay() + 240))
-        nhan = phan_loai.phan_loai_binh_luan([rows[i] for i in gui], han, tt)
+        nhan = phan_loai.phan_loai_binh_luan([rows[i] for i in gui], han, tt, brand=brand)
         for i, nh in zip(gui, nhan):
             rows[i]["sac_thai"], rows[i]["chu_de"] = nh
             if nh[0] != phan_loai.CHUA:
@@ -2135,7 +2138,7 @@ def chay_viec_nen(v) -> tuple[str, str]:
         if c["cua_thuong_hieu"]:          # tiếng của brand: không gán nhãn, không tính
             c["sac_thai"], c["chu_de"] = phan_loai.NHAN_NHA, ""
     khach = [c for c in rows if not c["cua_thuong_hieu"]]
-    tt_pl = _nhan_nen(v, khach) if khach else {}
+    tt_pl = _nhan_nen(v, khach, ", ".join(ts.get("thuong_hieu") or ())) if khach else {}
     v.dat("dang_ghi")
     per_url: dict = {}
     for p, nt in v.d["nen_tang"].items():
