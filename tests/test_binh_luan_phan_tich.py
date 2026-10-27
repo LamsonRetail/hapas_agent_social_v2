@@ -601,7 +601,9 @@ def test_prompt_dinh_nghia_ro_va_co_vi_du_bien():
     vi_du = re.findall(r'"[^"\n]+" → \["([+=-])","([A-Z]+)"\]', p)
     # 16/10/2026: +4 ví dụ ca biên (khen + hỏi giá, 2 bài dự thi minigame, lời của shop).
     # 17/10/2026: +3 (chuyện người trong video là ND, hỏi trước khi mua là GIA, mỉa đối thủ).
-    assert 6 <= len(vi_du) <= 20
+    # 27/10/2026 (MKT): +6 một dòng (hưởng ứng vui/ấm áp "+", nhắc bâng quơ "=", gợi ý / quảng
+    # cáo hãng khác "=" DT, món ăn trong video là ND) — 20 ví dụ một dòng.
+    assert 6 <= len(vi_du) <= 24
     assert {s for s, _ in vi_du} == {"+", "-", "="}
     assert all(c in P.CHU_DE for _, c in vi_du)
     for ca in ("đẹp quá", "giá bao nhiêu", "@", "ship chậm", "giá cắt cổ", "nhưng", "❤️"):

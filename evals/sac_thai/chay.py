@@ -196,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--console", action="store_true",
                     help="đi lease console như prod (mặc định: tài khoản AI của máy)")
     ap.add_argument("--bo", default=str(BO), help="tệp JSONL tập chấm")
+    ap.add_argument("--brand", default=BRAND,
+                    help="chuỗi brand gửi model (như `gan_nhan_nen.brand_du_an`)")
     ap.add_argument("--json-ra", help="ghi kết quả từng lần ra tệp JSON")
     ns = ap.parse_args(argv)
 
@@ -210,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     cac_lan = []
     for lan in range(1, ns.lan + 1):
         t0 = time.monotonic()
-        cac_du = gan_nhan(cac_ca)
+        cac_du = gan_nhan(cac_ca, brand=ns.brand)
         cac_diem = [cham(c, d) for c, d in zip(cac_ca, cac_du)]
         print(f"── lần {lan} ({time.monotonic() - t0:.0f}s)")
         in_mot_lan(cac_ca, cac_du, cac_diem)
