@@ -113,10 +113,11 @@ class _Conn:
                                "bai_tai_khoan": p["tai_khoan"], "bai_tac_gia": p["tac_gia"]})
             return _Cur(ra)
         if ten == "bl_hop_le":
-            assert "b.luot_id" in sql and "b.thay_lan_dau" in sql
+            assert "b.luot_id" in sql and "b.thay_lan_dau" in sql and "AS bai_hashtag" in sql
             return _Cur([{**{c: r[c] for c in ("khoa_bai", "ma", "tac_gia", "noi_dung", "thich",
                                                "luot_id", "thay_lan_dau", *S.COT)},
-                          "bai_noi_dung": k.bai[kb]["noi_dung"]}
+                          "bai_noi_dung": k.bai[kb]["noi_dung"],
+                          "bai_hashtag": k.bai[kb].get("hashtag")}
                          for (da, kb, _), r in sorted(k.bl.items())
                          if da == ts[0] and r["loai"] == "hop_le"])
         if ten == "moc_luot":
@@ -165,9 +166,13 @@ def moi(monkeypatch):
     monkeypatch.setattr(K, "ket_noi", kho.ket_noi)
     monkeypatch.setattr(S, "_chuan_bi_model", lambda: None)
     goi: list[list[str]] = []
+    goi_nhac: list[str] = []
+    kho.goi_nhac = goi_nhac
 
     def model(nhac):
-        texts = re.findall(r'<c i="(\d+)">(.*?)</c>', nhac[len(P._NHAC):])
+        # 27/10/2026: bình luận mang b="<k>" khi có bài chứa nó (gán lại kèm ngữ cảnh bài).
+        texts = re.findall(r'<c i="(\d+)"[^>]*>(.*?)</c>', nhac[len(P._NHAC):])
+        goi_nhac.append(nhac)
         goi.append([t for _, t in texts])
         if kho.khi_goi_model:
             kho.khi_goi_model()
@@ -244,6 +249,16 @@ def test_thu_xem_truoc_goi_mot_lo_khong_ghi(moi, capsys):
     assert len(goi) == 1 and len(goi[0]) == 3
     assert kho.bl == truoc and not kho.ghi()
     assert "Xem trước 3 dòng (1 lượt model, KHÔNG ghi)" in capsys.readouterr().out
+
+
+def test_gan_lai_kem_bai_va_brand_nhu_viec_nen(moi):
+    """27/10/2026: prompt mới đọc bài để hiểu bình luận đáp lại gì — gán lại phải gửi bài chứa
+    bình luận + brand của dự án như `gan_nhan_nen.gan_lo_bl`, không gửi trơn chữ bình luận."""
+    kho, _ = moi
+    assert S.main(["hapas", "--thu", "3"]) == 0
+    nhac = kho.goi_nhac[0][len(P._NHAC):]
+    assert nhac.startswith("BRAND đang theo dõi (để biết món nào là hàng của brand): HAPAS")
+    assert "<b k=\"0\">" in nhac and re.search(r'<c i="\d+" b="\d+">', nhac)
 
 
 def test_ap_dung_roi_hoan_tac_tron_vong(moi, tmp_path, capsys):
