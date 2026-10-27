@@ -1054,7 +1054,9 @@ def nhan_gia(monkeypatch):
     monkeypatch.setenv("MARK_GAN_NHAN_NEN", "0")
     goi = []
 
-    def gan(rows, han, tt=None, song_song=None):
+    def gan(rows, han, tt=None, song_song=None, brand=""):
+        # 27/10/2026: gán ngay cũng gửi brand + bài như việc nền.
+        assert all("ngu_canh_bai" in r for r in rows)
         goi.append([r["text"] for r in rows])
         if tt is not None:
             tt["trang_thai"] = "đã chạy"

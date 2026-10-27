@@ -316,11 +316,42 @@ def test_theo_doi_chi_de_nen_khi_luong_nen_dang_chay(monkeypatch):
     assert T._nhan_bai_ngay({"platform": "web"}, "Trung lập", "Khác") == ("Trung lập", "Khác")
     goi = []
     monkeypatch.setattr(P, "phan_loai_binh_luan",
-                        lambda rows, han, tt=None, song_song=None: goi.append(1)
+                        lambda rows, han, tt=None, song_song=None, brand="": goi.append(1)
                         or [("Tích cực", "Sản phẩm/chất lượng")] * len(rows))
     d, tk = [{"text": "đẹp quá"}], {"nhan": ""}
     T._gan_nhan_bl(d, time.monotonic() + 300, tk)
     assert goi and d[0]["sac_thai"] == "Tích cực" and "cho_nen" not in tk
+
+
+def test_theo_doi_gan_ngay_gui_kem_bai_va_brand(monkeypatch):
+    """27/10/2026: prompt đọc bài để hiểu bình luận đáp lại gì — gán ngay (nền tắt) gửi bài +
+    hashtag + brand y như việc nền; dòng ghi kho không bị thêm khoá lạ."""
+    import theo_doi as T
+    monkeypatch.setitem(G._LUONG, "t", None)
+    thay = {}
+
+    def gan(rows, han, tt=None, song_song=None, brand=""):
+        thay.update(rows=rows, brand=brand)
+        return [("Tích cực", "Sản phẩm/chất lượng")] * len(rows)
+    monkeypatch.setattr(P, "phan_loai_binh_luan", gan)
+    d = [{"text": "đẹp quá", "khoa_bai": "tiktok:1"}, {"text": "xin giá", "khoa_bai": "tiktok:2"}]
+    bai = {"tiktok:1": {"noi_dung": "Hộp quà 20/10", "hashtag": ["#hapas", "quatang"]},
+           "tiktok:2": {"noi_dung": "Vlog", "hashtag": "hapas"}}
+    T._gan_nhan_bl(d, time.monotonic() + 300, {"nhan": ""}, ["HAPAS", "túi hapas"], bai)
+    assert thay["brand"] == "HAPAS, túi hapas"
+    assert [r["ngu_canh_bai"] for r in thay["rows"]] == ["Hộp quà 20/10 | #hapas quatang",
+                                                         "Vlog | #hapas"]
+    assert "ngu_canh_bai" not in d[0], "không thêm khoá vào dòng ghi kho"
+
+
+def test_deep_dive_gui_brand_dang_soi():
+    """27/10/2026: soi bài đối thủ có `thuong_hieu` thì model biết brand đang soi."""
+    import inspect
+
+    import deep_dive_tool as D
+    src = inspect.getsource(D)
+    assert 'phan_loai_binh_luan(khach, han_pl, tt_pl, brand=", ".join(th))' in src
+    assert '_nhan_nen(v, khach, ", ".join(ts.get("thuong_hieu") or ()))' in src
 
 
 def test_lang_nghe_db_sql_hang_doi_chi_ghi_dong_con_trong():

@@ -793,7 +793,8 @@ def test_deep_dive_lon_chay_nen_roi_ghi_sheet(nen, monkeypatch):
     tok = A._NEN.set(False)
     A._NEN.reset(tok)
     monkeypatch.setattr(phan_loai, "phan_loai_binh_luan",
-                        lambda rows, han, tt=None: [("Tích cực", "sản phẩm")] * len(rows))
+                        lambda rows, han, tt=None, brand="": [("Tích cực", "sản phẩm")]
+                        * len(rows))
     urls = [f"https://www.tiktok.com/@a/video/{1000000 + i}" for i in range(40)]
     kq = json.loads(D._handle({"post_urls": urls, "max_comments": 100}))
     assert kq["dang_chay_nen"] and "1500" in kq["ly_do_chay_nen"]

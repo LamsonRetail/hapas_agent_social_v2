@@ -5161,7 +5161,7 @@ def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: lis
              and (d["khoa_bai"], d["ma"]) not in da]
     tk["nha"] += sum(1 for d in dong if d["cua_thuong_hieu"])
     if khach:
-        _gan_nhan_bl(khach, han, tk)
+        _gan_nhan_bl(khach, han, tk, thuong_hieu, {b["khoa"]: b for b in bai})
     moi, cu = K.ghi_binh_luan(ma, luot, dong, da_lay, khong_tinh_thieu=khong_tinh_thieu or set())
     tk["lay"] += len(dong)
     tk["moi"] += moi
@@ -5174,9 +5174,11 @@ def _ghi_bl_kho(ma: str, luot: int, ph: dict, rows: list[dict], thuong_hieu: lis
 # và nhịp nền gán dần. Bài Báo & Web: nhãn của bước phân xử (chỉ 400 ký tự đầu) không dùng —
 # nhịp nền chấm lại theo mọi đoạn nhắc brand (`phan_loai.phan_loai_bai`). Tắt nền hoặc luồng nền
 # không chạy trong tiến trình này (`gan_nhan_nen.dang_chay`): gán ngay như cũ.
-def _gan_nhan_bl(khach: list[dict], han: float, tk: dict) -> None:
+def _gan_nhan_bl(khach: list[dict], han: float, tk: dict, thuong_hieu=(),
+                 bai_theo_khoa: dict | None = None) -> None:
     """Điền sắc thái/chủ đề cho bình luận khách sắp ghi kho; `tk["nhan"]`/`tk["cho_nen"]` ghi
-    chuyện đã xảy ra."""
+    chuyện đã xảy ra. Gán ngay (nền tắt) thì gửi KÈM bài + brand như việc nền (27/10/2026: prompt
+    đọc bài để hiểu bình luận đáp lại gì)."""
     import gan_nhan_nen
     import phan_loai
     if gan_nhan_nen.dang_chay():
@@ -5188,8 +5190,17 @@ def _gan_nhan_bl(khach: list[dict], han: float, tk: dict) -> None:
         tk["nhan"] = "để nền"
         return
     tt: dict = {}
+    bai_theo_khoa = bai_theo_khoa or {}
+
+    def ngu_canh(d: dict) -> str:
+        b = bai_theo_khoa.get(d.get("khoa_bai")) or {}
+        ht = b.get("hashtag") or ""
+        ht = " ".join(str(h).lstrip("#") for h in ht) if isinstance(ht, (list, tuple)) else ht
+        return gan_nhan_nen.ngu_canh_bai({"bai_noi_dung": b.get("noi_dung"), "bai_hashtag": ht})
     nhan = phan_loai.phan_loai_binh_luan(
-        khach, max(0.0, min(120.0, han - time.monotonic() - 20)), tt, song_song=2)
+        [dict(d, ngu_canh_bai=ngu_canh(d)) for d in khach],
+        max(0.0, min(120.0, han - time.monotonic() - 20)), tt, song_song=2,
+        brand=", ".join(str(x) for x in thuong_hieu or () if str(x).strip()))
     for d, (s, c) in zip(khach, nhan):
         if s != phan_loai.CHUA:
             d["sac_thai"] = s

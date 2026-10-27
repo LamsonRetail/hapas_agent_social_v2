@@ -17,7 +17,8 @@ import phan_loai as P
 import trinh_bay_sheet as T
 from sheet_gia import LarkGia
 from test_binh_luan_phan_tich import TT, _bl, moi_truong  # noqa: F401
-from test_viec_nen import nen  # noqa: F401
+from test_viec_nen import nen  # noqa: F401
+
 from sheet_gia import meta  # noqa: E402
 
 
@@ -220,7 +221,7 @@ def test_viec_nen_co_tong_quan_muc_luc_kiem_ghi(nen, monkeypatch):  # noqa: F811
     monkeypatch.setattr(lark_client, "call", call)
     monkeypatch.setattr(D, "_cau_hinh", lambda nen=None: (30000, 50.0 if nen else 5.0))
     monkeypatch.setattr(P, "phan_loai_binh_luan",
-                        lambda rows, han, tt=None: [("Tích cực", "Khác")] * len(rows))
+                        lambda rows, han, tt=None, brand="": [("Tích cực", "Khác")] * len(rows))
     urls = [f"https://www.tiktok.com/@a/video/{1000000 + i}" for i in range(40)]
     kq = json.loads(D._handle({"post_urls": urls, "max_comments": 100}))
     assert kq["dang_chay_nen"]
