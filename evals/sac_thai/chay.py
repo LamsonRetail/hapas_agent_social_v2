@@ -22,7 +22,8 @@ Chạy (máy dev, Python có Hermes `run_agent`; gọi model THẬT, không ghi 
 An toàn: chỉ nạp .env để có cấu hình model; bỏ mọi biến LSR_*/PHOENIX_* (không xin lease, không
 báo lượt, không trace lên platform), mặc định đi tài khoản AI của MÁY
 (`MARK_THEO_TAI_KHOAN_CONSOLE=0`), chặn `tai_khoan_ai.bao_loi`. Không in giá trị biến nào.
-Lưu ý: production xin lease console nên model có thể khác model máy — số đo là của model máy.
+Lưu ý: production xin lease console nên model có thể khác model máy — số đo là của model máy
+(in ở đầu mỗi lần chạy: AGENT_PROVIDER / AGENT_MODEL).
 """
 from __future__ import annotations
 
@@ -193,8 +194,6 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Đo nhãn sắc thái/chủ đề bình luận trên tập chấm tay")
     ap.add_argument("--env", help="file .env của Mark (cấu hình model); bỏ trống = môi trường hiện tại")
     ap.add_argument("--lan", type=int, default=1, help="số lần chạy (đo độ dao động)")
-    ap.add_argument("--console", action="store_true",
-                    help="đi lease console như prod (mặc định: tài khoản AI của máy)")
     ap.add_argument("--bo", default=str(BO), help="tệp JSONL tập chấm")
     ap.add_argument("--brand", default=BRAND,
                     help="chuỗi brand gửi model (như `gan_nhan_nen.brand_du_an`)")
@@ -204,11 +203,12 @@ def main(argv: list[str] | None = None) -> int:
     cac_ca = doc_bo(ns.bo)
     if ns.env:
         nap_env(ns.env)
-    if not ns.console:
-        os.environ["MARK_THEO_TAI_KHOAN_CONSOLE"] = "0"
+    # Tài khoản AI của MÁY: lease console cần biến LSR_* (đã bỏ) — không xin credential prod.
+    os.environ["MARK_THEO_TAI_KHOAN_CONSOLE"] = "0"
     import tai_khoan_ai
     tai_khoan_ai.bao_loi = lambda *a, **k: False   # đo thử: không báo lỗi tài khoản lên platform
 
+    print(f"model máy: {os.environ.get('AGENT_PROVIDER', '?')} / {os.environ.get('AGENT_MODEL', '?')}")
     cac_lan = []
     for lan in range(1, ns.lan + 1):
         t0 = time.monotonic()
