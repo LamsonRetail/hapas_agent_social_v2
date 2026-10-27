@@ -8,10 +8,14 @@ chấm từng ca và in độ chính xác sắc thái / chủ đề theo nhóm:
   • mkt_giu_lai — ca MKT KHÔNG nằm trong ví dụ của prompt: đây mới là con số công bằng;
   • mkt_vi_du   — ca MKT đã chép vào ví dụ của prompt (`vi_du: true`): chỉ để thấy model chép
                   đúng ví dụ, không dùng để khoe độ chính xác;
-  • hoi_quy     — các ví dụ có sẵn trong prompt trước 27/10: sửa prompt không được làm hỏng.
+  • hoi_quy     — các ví dụ có sẵn trong prompt: sửa prompt không được làm hỏng;
+  • trung_lap   — bình luận trung lập dưới video KOL / chiến dịch (tự viết, rà soát 27/10): luật
+                  "thiện cảm là +" không được kéo chúng thành "+" — in thêm tỉ lệ "+" sai;
+  • khong_brand — soi bài đối thủ KHÔNG có brand, KHÔNG có bài (như social_deep_dive không có
+                  thuong_hieu, kênh nhà): khen món của hãng được nhắc phải là "+" SP, không DT.
 Ca `loai_tru` (vd bài HAPAS Thái Lan — loại ở cấp BÀI, nhánh khác) vẫn gán để xem, KHÔNG chấm.
 
-Định dạng một dòng JSONL: id, nhom (mkt|hoi_quy), nguon, bai (đầu bài chứa bình luận), binh_luan,
+Định dạng một dòng JSONL: id, nhom (mkt|hoi_quy|trung_lap|khong_brand), nguon, bai (đầu bài chứa bình luận), binh_luan,
 ai_cu ([sắc thái, chủ đề] AI gán trước khi sửa), sac_thai / chu_de mong đợi — một mã, DANH SÁCH
 mã chấp nhận được, hoặc null khi MKT không nói (không chấm), mon (tuỳ chọn), loai_tru, vi_du,
 can_cu (MKT ghi gì, chỗ nào là suy từ nguyên tắc).
@@ -55,10 +59,15 @@ def nap_env(tep: str | Path) -> int:
             continue
         os.environ[k] = v.strip().strip('"').strip("'")
         n += 1
+    bo_bien_platform()
+    return n
+
+
+def bo_bien_platform() -> None:
+    """Bỏ mọi biến LSR_*/PHOENIX_* khỏi môi trường; tắt đẩy audit lên Base."""
     for k in [k for k in os.environ if k.startswith(_BO_BIEN)]:
         os.environ.pop(k, None)
     os.environ["AUDIT_TO_BASE"] = "0"
-    return n
 
 
 if __name__ == "__main__":
@@ -74,7 +83,8 @@ import phan_loai as P
 BO = Path(__file__).with_name("bo_sac_thai.jsonl")
 #: Như `gan_nhan_nen.brand_du_an` của dự án hapas: tên + mô tả brand (cấu hình tin cậy).
 BRAND = "HAPAS — thương hiệu Việt Nam: túi xách, ví, nước hoa, trang sức, set quà tặng"
-NHOM = ("mkt_giu_lai", "mkt_vi_du", "hoi_quy")
+NHOM = ("mkt_giu_lai", "mkt_vi_du", "hoi_quy", "trung_lap", "khong_brand")
+_NHOM_TAP = ("mkt", "hoi_quy", "trung_lap", "khong_brand")
 _MA_SAC = {v: k for k, v in P.SAC_THAI.items()}
 _MA_CD = {v: k for k, v in P.CHU_DE.items()}
 
@@ -96,8 +106,8 @@ def doc_bo(duong: Path | str = BO) -> list[dict]:
         loi = []
         if not ca.get("id") or ca["id"] in thay:
             loi.append("id rỗng hoặc trùng")
-        if ca.get("nhom") not in ("mkt", "hoi_quy"):
-            loi.append("nhom phải là mkt|hoi_quy")
+        if ca.get("nhom") not in _NHOM_TAP:
+            loi.append("nhom phải là " + "|".join(_NHOM_TAP))
         if not str(ca.get("binh_luan") or "").strip():
             loi.append("binh_luan rỗng")
         sac, cd = _chap_nhan(ca.get("sac_thai")), _chap_nhan(ca.get("chu_de"))
@@ -119,21 +129,24 @@ def doc_bo(duong: Path | str = BO) -> list[dict]:
 def nhom_cua(ca: dict) -> str | None:
     if ca.get("loai_tru"):
         return None
-    if ca["nhom"] == "hoi_quy":
-        return "hoi_quy"
+    if ca["nhom"] != "mkt":
+        return ca["nhom"]
     return "mkt_vi_du" if ca.get("vi_du") else "mkt_giu_lai"
 
 
 def gan_nhan(cac_ca: list[dict], han_giay: float = 170.0, brand: str = BRAND) -> list[dict]:
     """Gán nhãn bằng đúng `phan_loai.phan_loai_binh_luan` (ngữ cảnh bài + brand như việc nền).
-    Mỗi nhóm một lượt gọi (≤ 100 bình luận, ≤ 20 bài — trong trần của một lô thật).
+    Mỗi nhóm một lượt gọi (≤ 100 bình luận, ≤ 20 bài — trong trần của một lô thật). Nhóm
+    `khong_brand` gọi KHÔNG brand, KHÔNG bài — y như social_deep_dive / kênh nhà.
     -> [{sac, cd, mon}] cùng thứ tự `cac_ca`; None = chưa phân loại."""
     ra: list[dict] = [{} for _ in cac_ca]
     for nhom in dict.fromkeys(c["nhom"] for c in cac_ca):
         chi_so = [i for i, c in enumerate(cac_ca) if c["nhom"] == nhom]
+        trong = nhom == "khong_brand"
         rows = [{"text": cac_ca[i]["binh_luan"], "likes": 0,
-                 "ngu_canh_bai": cac_ca[i].get("bai") or ""} for i in chi_so]
-        nhan = P.phan_loai_binh_luan(rows, han_giay, {}, brand=brand, kem_san_pham=True)
+                 "ngu_canh_bai": "" if trong else cac_ca[i].get("bai") or ""} for i in chi_so]
+        nhan = P.phan_loai_binh_luan(rows, han_giay, {}, brand="" if trong else brand,
+                                     kem_san_pham=True)
         for i, (s, c, sp) in zip(chi_so, nhan):
             ra[i] = {"sac": _MA_SAC.get(s), "cd": _MA_CD.get(c), "mon": sp}
     return ra
@@ -164,6 +177,12 @@ def tong_hop(cac_ca: list[dict], cac_diem: list[dict]) -> dict:
     return ra
 
 
+def cong_sai(cac_ca: list[dict], cac_du: list[dict]) -> list[int]:
+    """Nhóm `trung_lap`: [số ca model gán "+", số ca] — tỉ lệ "+" sai của luật thiện cảm."""
+    ds = [du for ca, du in zip(cac_ca, cac_du) if ca["nhom"] == "trung_lap"]
+    return [sum(1 for du in ds if du.get("sac") == "+"), len(ds)]
+
+
 def _ty_le(x: list[int]) -> str:
     return f"{x[0]}/{x[1]} ({100 * x[0] / x[1]:.0f}%)" if x[1] else "—"
 
@@ -188,6 +207,7 @@ def in_mot_lan(cac_ca: list[dict], cac_du: list[dict], cac_diem: list[dict],
     for n, v in tong_hop(cac_ca, cac_diem).items():
         in_ra(f"  {n:<12} sắc thái {_ty_le(v['sac']):<14} chủ đề {_ty_le(v['cd']):<14}"
               f" món {_ty_le(v['mon'])}")
+    in_ra(f"  trung_lap bị gán \"+\" sai: {_ty_le(cong_sai(cac_ca, cac_du))}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -207,6 +227,9 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["MARK_THEO_TAI_KHOAN_CONSOLE"] = "0"
     import tai_khoan_ai
     tai_khoan_ai.bao_loi = lambda *a, **k: False   # đo thử: không báo lỗi tài khoản lên platform
+    # `config` (import cùng phan_loai) nạp `.env` cạnh mã và ĐÈ biến sẵn có: bỏ biến platform SAU
+    # khi import, có hay không --env.
+    bo_bien_platform()
 
     print(f"model máy: {os.environ.get('AGENT_PROVIDER', '?')} / {os.environ.get('AGENT_MODEL', '?')}")
     cac_lan = []
@@ -222,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
         for n in NHOM:
             for k, ten in (("sac", "sắc thái"), ("cd", "chủ đề")):
                 print(f"  {n:<12} {ten:<9} " + "  ".join(_ty_le(x["tong"][n][k]) for x in cac_lan))
+        print("  trung_lap \"+\" sai     " + "  ".join(_ty_le(cong_sai(cac_ca, x["du"]))
+                                                     for x in cac_lan))
         print("── ca dao động / sai ở ít nhất một lần")
         for i, ca in enumerate(cac_ca):
             sai = [x["diem"][i] for x in cac_lan]
