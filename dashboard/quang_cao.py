@@ -408,7 +408,7 @@ def cong_duoc(ten: str) -> bool:
 def xem_tien(q: dict | None, don_vi: str | None) -> bool:
     """Người có quyền `q` thấy số tiền của bên `don_vi` không. 20/10/2026 chủ dự án: mọi người có
     quyền ở bên (Quản lý hoặc Chỉ xem) đều được biết số tiền của bên mình — nhưng chỉ qua hỏi đáp
-    Mark (trang Quảng cáo chỉ quản trị viên, `thay_trang_qc`). Bên None (tài khoản chưa gán bên)
+    Mark (trang Quảng cáo: quản trị viên + quản lý của bên, `thay_trang_qc`). Bên None (tài khoản chưa gán bên)
     hoặc "mọi bên": chỉ quản trị viên."""
     if PQ.la_quan_tri(q):
         return True
@@ -470,11 +470,22 @@ def ben_doc_qc(q: dict | None, cac_tk: list[dict]) -> list[str]:
     return [b for b in co if b in ((q or {}).get("ben") or {})]
 
 
+def ben_trang_qc(q: dict | None, cac_tk: list[dict]) -> list[str]:
+    """Bên người này mở được ở TRANG Quảng cáo (khác `ben_doc_qc` — phạm vi hỏi Mark, gồm cả Chỉ
+    xem). 27/10/2026 chủ dự án: quản lý của bên xem quảng cáo của bên mình (quản lý HAPAS thấy HAPAS,
+    quản lý Mate Made thấy Mate Made); Chỉ xem vẫn chỉ hỏi Mark. Quản trị viên: mọi bên."""
+    if PQ.la_quan_tri(q):
+        return ben_doc_qc(q, cac_tk)
+    ql = set(PQ.ben_quan_ly(q))
+    return [b for b in ben_doc_qc(q, cac_tk) if b in ql]
+
+
 def thay_trang_qc(q: dict | None, ben_co_tk: set[str] | list[str]) -> bool:
-    """Trang/mục "Quảng cáo TikTok" + /api/qc: CHỈ quản trị viên (20/10/2026 chủ dự án: người
-    khác không xem dashboard quảng cáo, chỉ hỏi Mark và nhận câu trả lời bằng chữ).
-    `ben_co_tk` giữ trong chữ ký cho nơi gọi cũ."""
-    return PQ.la_quan_tri(q)
+    """Trang/mục "Quảng cáo" + /api/qc: quản trị viên, hoặc quản lý của ≥ 1 bên có tài khoản quảng
+    cáo đã gán (27/10/2026 chủ dự án — trước đó 20/10 chỉ quản trị viên). Chỉ xem: hỏi Mark."""
+    if PQ.la_quan_tri(q):
+        return True
+    return bool(set(PQ.ben_quan_ly(q)) & set(ben_co_tk or ()))
 
 
 TAT_CA = "tat_ca"           # mọi bên (chỉ quản trị viên)

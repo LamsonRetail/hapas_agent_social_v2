@@ -1322,15 +1322,45 @@ def _co_so(app_kq):
 Q = "tu=2026-10-12&den=2026-10-18"
 
 
-def test_trang_va_api_quang_cao_chi_quan_tri_vien():
-    """20/10/2026 chủ dự án: trang Quảng cáo + /api/qc chỉ quản trị viên; người khác (kể cả quản
-    lý của bên) chỉ hỏi Mark — trang và API như không có (404)."""
+def test_trang_va_api_quang_cao_quan_tri_vien_va_quan_ly_ben():
+    """27/10/2026 chủ dự án: quản lý của bên xem trang Quảng cáo của BÊN MÌNH (quản lý HAPAS thấy
+    HAPAS, quản lý Mate Made thấy Mate Made); Chỉ xem vẫn chỉ hỏi Mark — trang và API như không có
+    (404). Bên khác / "mọi bên" / "chưa gán" với quản lý: API 404, trang lùi về bên mình."""
     _app, c, _kho, _kho_qc, _tt, _dv = _co_so(_tao_app())
-    for ai in (XEM, HP_QL, MM_XEM, MM_QL):
+    for ai in (XEM, MM_XEM):
         dang_nhap(c, ai)
         assert c.get(f"/api/qc?{Q}").status_code == 404, ai
         assert c.get(f"/quang-cao?{Q}").status_code == 404, ai
         assert c.get(f"/api/qc?{Q}&ben=hapas").status_code == 404, ai
+    for ai, ben, tk, khac in ((HP_QL, "hapas", {HAPAS_KOC}, "matemade"),
+                              (MM_QL, "matemade", {MM_MKT, MM_2}, "hapas")):
+        dang_nhap(c, ai)
+        d = c.get(f"/api/qc?{Q}").json()
+        assert d["ben"] == ben and [b["ma"] for b in d["cac_ben"]] == [ben], ai
+        assert {t["advertiser_id"] for t in d["tai_khoan"]} == tk, ai
+        assert d["xem_tien"] is True and d["kpi"]["chi"] > 0, ai
+        for b in (khac, "tat_ca", "chua_gan"):
+            assert c.get(f"/api/qc?{Q}&ben={b}").status_code == 404, (ai, b)
+        t = c.get(f"/quang-cao?{Q}&ben={khac}")
+        assert t.status_code == 200 and ("HAPAS - KOC" in t.text) == (ben == "hapas"), ai
+        assert 'data-o="tao-sheet"' not in t.text, ai                  # xuất Sheet: chỉ quản trị viên
+
+
+def test_quan_ly_mot_ben_chi_xem_ben_kia_chi_thay_ben_quan_ly():
+    """Quản lý HAPAS + Chỉ xem Mate Made: trang chỉ có HAPAS (Chỉ xem không mở trang quảng cáo
+    của bên đó — vẫn hỏi Mark được, `ben_doc_qc` không đổi)."""
+    kho = GiaKho()
+    _app, c, _kho, _kho_qc, _tt, _dv = _co_so(_tao_app(kho))
+    kho.quyen[HP_QL] = {"hapas": "quan_ly", "matemade": "xem"}
+    dang_nhap(c, HP_QL)
+    d = c.get(f"/api/qc?{Q}").json()
+    assert [b["ma"] for b in d["cac_ben"]] == ["hapas"]
+    assert c.get(f"/api/qc?{Q}&ben=matemade").status_code == 404
+    q = {"la_quan_tri": False, "ben": kho.quyen[HP_QL]}
+    cac = [{"don_vi": "hapas"}, {"don_vi": "matemade"}]
+    assert QC.ben_trang_qc(q, cac) == ["hapas"] and QC.ben_doc_qc(q, cac) == ["hapas", "matemade"]
+
+
     dang_nhap(c, QL)
     d = c.get(f"/api/qc?{Q}").json()
     assert d["xem_tien"] is True and d["kpi"]["chi"] > 0
@@ -1351,8 +1381,8 @@ def test_xem_tien_moi_vai_trong_ben_chi_ben_minh():
     assert QC.xem_tien(q_xem, "matemade") is False and QC.xem_tien(q_ql, "hapas") is False
     assert QC.xem_tien(q_xem, None) is False and QC.xem_tien(None, "hapas") is False
     assert QC.xem_tien(q_qt, None) is True and QC.xem_tien(q_qt, "matemade") is True
-    assert QC.thay_trang_qc(q_xem, {"hapas"}) is False and QC.thay_trang_qc(q_ql, {"matemade"}) is False
-    assert QC.thay_trang_qc(q_qt, set()) is True
+    assert QC.thay_trang_qc(q_xem, {"hapas"}) is False and QC.thay_trang_qc(q_ql, {"matemade"}) is True
+    assert QC.thay_trang_qc(q_ql, {"hapas"}) is False and QC.thay_trang_qc(q_qt, set()) is True
 
 
 def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
@@ -1372,9 +1402,9 @@ def test_api_qc_quan_tri_vien_thay_moi_ben_va_chua_gan():
     assert c.get("/api/qc?tu=2025-01-01&den=2026-10-18").status_code == 400
 
 
-def test_muc_dieu_huong_quang_cao_chi_quan_tri():
+def test_muc_dieu_huong_quang_cao_quan_tri_va_quan_ly():
     _app, c, _kho, _kho_qc, _tt, _dv = _co_so(_tao_app())
-    for ai, thay in ((QL, True), (XEM, False), (HP_QL, False), (MM_XEM, False)):
+    for ai, thay in ((QL, True), (XEM, False), (HP_QL, True), (MM_QL, True), (MM_XEM, False)):
         dang_nhap(c, ai)
         assert ('href="/quang-cao"' in c.get("/nguon").text) is thay, ai
         assert (c.get("/quang-cao").status_code == 200) is thay, ai

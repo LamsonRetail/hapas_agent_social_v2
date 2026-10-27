@@ -1,9 +1,9 @@
-{#- Điều khiển đồng bộ quảng cáo — CHỈ trang Quảng cáo (chỉ quản trị viên). Thiết kế lại 20/10/2026 (chủ dự án:
+{#- Điều khiển đồng bộ quảng cáo — CHỈ trang Quảng cáo (quản trị viên + quản lý của bên). Thiết kế lại 20/10/2026 (chủ dự án:
     "rối, không biết đang đồng bộ TikTok hay Facebook"): mỗi nền tảng MỘT dòng — chấm màu nền tảng + tên đầy đủ
     (TikTok Ads / Meta (Facebook) Ads), MỘT câu trạng thái chữ thường, nút "Đồng bộ ngay" (nhanh — hôm nay + 2 ngày
     trước). CHỈ quản trị viên thấy thêm menu ▾ "Đồng bộ lại 90 ngày" (nạp lại 90 ngày, chạy nền nhiều giờ, hỏi xác
-    nhận; máy chủ cũng chặn người khác + 00:00–07:30). Trang hiện chỉ quản trị viên mở được (`QC.thay_trang_qc`) —
-    các nhánh "không phải quản trị viên" ở đây là lớp chặn thứ hai. Nút khoá thì nói vì sao (đang chạy / đã có yêu
+    nhận; máy chủ cũng chặn người khác + 00:00–07:30). Từ 27/10/2026 quản lý của bên cũng mở trang (`QC.thay_trang_qc`) —
+    các nhánh "không phải quản trị viên" ở đây áp cho họ; máy chủ kiểm lại. Nút khoá thì nói vì sao (đang chạy / đã có yêu
     cầu / trong giờ đồng bộ tự động / chưa kết nối / khoá mã hoá). Chi tiết (lượt cuối; tài khoản + chữ lỗi chỉ quản
     trị viên) gập trong "chi tiết". Mọi nút chỉ ghi cờ (POST /quang-cao/dong-bo, ncc + kieu). Không tiền, không số
     liệu. Điện thoại: dòng xếp dọc, nút cả bề ngang. #}

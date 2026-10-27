@@ -464,11 +464,13 @@ def test_api_goi_y_ten_cd_pham_vi_bo_dau_tran():
     assert len(c.get(_u("/api/qc/ten-cd", {"q": "teaser"})).json()["ten"]) == 10
 
 
-def test_api_goi_y_ten_cd_chi_quan_tri_vien():
+def test_api_goi_y_ten_cd_chi_xem_khong_co():
+    """27/10/2026: quản lý của bên dùng được gợi ý (trong bên mình); Chỉ xem: 404."""
     _app, c, kq = _ve()
-    for ai in (XEM, HP_QL):
-        dang_nhap(c, ai)
-        assert c.get(_u("/api/qc/ten-cd", {"q": "teaser"})).status_code == 404, ai
+    dang_nhap(c, XEM)
+    assert c.get(_u("/api/qc/ten-cd", {"q": "teaser"})).status_code == 404
+    dang_nhap(c, HP_QL)
+    assert c.get(_u("/api/qc/ten-cd", {"q": "teaser", "ben": "matemade"})).status_code == 404
     c.cookies.clear()
     r = c.get(_u("/api/qc/ten-cd", {"q": "teaser"}), follow_redirects=False)
     assert r.status_code in (302, 303, 401, 404)
