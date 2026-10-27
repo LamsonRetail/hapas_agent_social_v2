@@ -28,14 +28,16 @@ NGAY = (BAY_GIO - datetime.timedelta(days=3)).replace(hour=21, minute=0, second=
 DU_AN = {"ma": "hapas", "ten": "HAPAS", "tu_khoa": ["hapas", "túi hapas", "yêu từ điều nhỏ nhất"],
          "tu_loai_tru": [], "boi_canh": "HAPAS", "thi_truong": "VN", "cau_hinh": {},
          "hashtag": ["hapas", "yeutudieunhonhat", "quatang2010"]}
-NGUON = [{"id": 1, "nen_tang": "tiktok", "dinh_danh": "hapas.official", "loai": "kenh_nha"}]
+NGUON = [{"id": 1, "nen_tang": "tiktok", "dinh_danh": "hapas.official", "loai": "kenh_nha"},
+         {"id": 2, "nen_tang": "tiktok", "dinh_danh": "@kol.duyet", "loai": "kol"}]
 TU_VI = ("Không giỏi nói lời yêu thương, nhưng chuyện lớn nhỏ trong nhà đều tự tay lo liệu… điểm "
          "cộng lớn nhất. Người như vậy hiếm lắm, xem tới cuối nhé #xuhuong #tuvi #tuvivochinhdieu")
 MOT_TRAM_HAI_MUOI = TU_VI[:120]
 
 
-def _bai(khoa, tk, noi_dung, ly="khop_tu_khoa", kieu="tu_khoa", p="tiktok", tac_gia=None):
-    return {"du_an": "hapas", "khoa": khoa, "nen_tang": p, "nguon_id": None, "kieu_quet": kieu,
+def _bai(khoa, tk, noi_dung, ly="khop_tu_khoa", kieu="tu_khoa", p="tiktok", tac_gia=None,
+         nguon_id=None):
+    return {"du_an": "hapas", "khoa": khoa, "nen_tang": p, "nguon_id": nguon_id, "kieu_quet": kieu,
             "link": f"https://www.tiktok.com/@{tk}/video/{khoa.rsplit(':', 1)[-1]}",
             "tac_gia": tac_gia or tk, "tai_khoan": tk, "followers": 1000, "dang_luc": NGAY,
             "noi_dung": noi_dung, "hashtag": "", "khop_tu_khoa": True, "sac_thai": None,
@@ -71,9 +73,15 @@ def _kho_mau():
            _bai("youtube:7", "", "HAPAS TH", ly="other_market", kieu="theo_doi", p="youtube"),
            _bai("web:8", "", "Yêu bản thân từ những điều nhỏ nhất", p="web",
                 tac_gia="baomoi.com"),
-           _bai("tiktok:9", "me_c", "Yêu bản thân từ những điều nhỏ nhất", kieu="theo_doi")]
+           _bai("tiktok:9", "me_c", "Yêu bản thân từ những điều nhỏ nhất", kieu="theo_doi"),
+           # Nguồn đã duyệt: theo `nguon_id` (KOL đổi tên tài khoản) và theo tài khoản (nguồn thêm
+           # SAU khi bài vào kho — `nguon_id` còn NULL).
+           _bai("tiktok:10", "kol_doi_ten", "Yêu bản thân từ những điều nhỏ nhất", nguon_id=2),
+           _bai("tiktok:11", "kol.duyet", "Yêu bản thân từ những điều nhỏ nhất"),
+           {**_bai("tiktok:12", "khong_ngay", "Yêu bản thân từ những điều nhỏ nhất"),
+            "dang_luc": None}]
     bl = [_bl("tiktok:1", "c1"), _bl("tiktok:1", "c2", "spam"), _bl("tiktok:6", "c3"),
-          _bl("tiktok:2", "c4")]
+          _bl("tiktok:2", "c4"), _bl("tiktok:10", "c5")]
     cs = [_cs("tiktok:1"), _cs("tiktok:1", 1), _cs("tiktok:6"), _cs("tiktok:2")]
     return bai, bl, cs
 
@@ -132,7 +140,8 @@ class KhoGia:
             return self._tra(NGUON)
         if the == "bai":
             return self._tra(sorted((r for r in b.values() if r["du_an"] == ts[0]
-                                     and r["kieu_quet"] == "tu_khoa" and r["ly_do_giu"] in ts[1]),
+                                     and r["kieu_quet"] == "tu_khoa" and r["ly_do_giu"] in ts[1]
+                                     and r["dang_luc"] is not None),
                                     key=lambda r: (r["nen_tang"], r["dang_luc"], r["khoa"])))
         if the == "khac":
             return self._tra([{"n": sum(1 for r in b.values() if r["ly_do_giu"] == "other_market"
@@ -207,42 +216,55 @@ def _chay(argv):
     return ma, "\n".join(out)
 
 
-def _so(ma="hapas", tu=None) -> dict:
+def _dau(web=False) -> str:
     tu_kw = T.tu_tim(DU_AN)
-    if ma.endswith(":web"):
-        tu_kw = W.rut_gon_tu_khoa(tu_kw) or tu_kw
-    return {k: v[0] for k, v in TDA.doc_loai(ma, TDA.dau_loai(DU_AN, tu_kw),
+    return TDA.dau_loai(DU_AN, (W.rut_gon_tu_khoa(tu_kw) or tu_kw) if web else tu_kw)
+
+
+def _so(ma="hapas") -> dict:
+    return {k: v[0] for k, v in TDA.doc_loai(ma, _dau(ma.endswith(":web")),
                                              NGAY - datetime.timedelta(days=1)).items()}
 
 
 def test_chay_thu_chi_doc_liet_ke_tung_bai_va_tong(kho):
     ma, out = _chay(["hapas"])
     assert ma == 0 and kho.ghi == [] and kho.co_chi_doc
-    assert "(a) giữ theo luật khop_tu_khoa, KHÔNG có tín hiệu brand: 2 bài, 2 bình luận" in out
-    assert "(b) AI giữ mã other_market — dự án VN: 1 bài, 1 bình luận" in out
+    assert "KHÔNG có tín hiệu brand — XOÁ, không vào sổ: 2 bài, 2 bình luận" in out
     assert ("[tiktok] Tử Vi Vô Chính Diệu @tuvi.vochinhdieu · "
             f"{NGAY:%d/%m} · 2 bl (1 hop_le) · https://www.tiktok.com/@tuvi.vochinhdieu/video/1"
             ) in out
-    assert f"      {MOT_TRAM_HAI_MUOI}\n" in out + "\n" and TU_VI[:121] not in out
-    assert "[web] baomoi.com · " in out and "[tiktok] hapas.th @hapas.th" in out
-    assert "TỔNG sẽ dọn: 3 bài; đi theo (xoá theo bài): 3 bình luận (2 hop_le), 3 dòng " \
+    assert len(TU_VI) > 120 and f"      {MOT_TRAM_HAI_MUOI}\n" in out
+    assert TU_VI[:121] not in out
+    assert "[web] baomoi.com · " in out
+    # (b): liệt kê kèm nội dung để người quyết, mặc định KHÔNG xoá.
+    assert "NGƯỜI QUYẾT (có thể là ghi chú thị trường VN): 1 bài, 1 bình luận. KHÔNG xoá" in out
+    assert "[tiktok] hapas.th @hapas.th" in out and "HAPAS Thailand ของขวัญ" in out
+    # Nguồn đã duyệt (KOL theo nguon_id, KOL theo tài khoản): giữ, in riêng. Kênh nhà
+    # @hapas.official gọi tên brand ngay ở định danh — nằm trong số "vẫn giữ".
+    assert "Thuộc nguồn đã duyệt — GIỮ (ứng viên (a)/(b) nhưng chủ bài là nguồn của dự án): 2 " \
+           "bài, 1 bình luận" in out
+    for tk in ("kol_doi_ten", "kol.duyet"):
+        assert f"@{tk} · " in out
+    assert "TỔNG sẽ dọn: 2 bài; đi theo (xoá theo bài): 2 bình luận (1 hop_le), 2 dòng " \
            "chi_so_ngay" in out
-    # Giữ: tag chiến dịch viết liền, gọi tên HAPAS, kênh nhà. Không đụng: AI giữ, đường nguồn.
     assert "vẫn giữ (có tín hiệu brand / kênh nhà): 3" in out
     assert "Không đụng: 1 bài other_market ngoài đường từ khoá" in out
-    for tk in ("kol_a", "khach_b", "hapas.official", "nguoi_d", "me_c"):
+    for tk in ("kol_a", "khach_b", "hapas.official", "nguoi_d", "me_c", "khong_ngay"):
         assert f"@{tk} " not in out
     assert _so() == {} and _so("hapas:web") == {}
+    out = _chay(["hapas", "--gom-other-market"])[1]
+    assert "Sẽ xoá (--gom-other-market)" in out and "TỔNG sẽ dọn: 3 bài" in out
 
 
 def test_cong_brand_tat_hoac_du_an_ngoai_vn(kho, monkeypatch):
     monkeypatch.setitem(DU_AN, "cau_hinh", {"hashtag_can_nhac_brand": False})
     out = _chay(["hapas"])[1]
-    assert "KHÔNG có tín hiệu brand: 0 bài" in out and "TẮT" in out
+    assert "KHÔNG có tín hiệu brand — XOÁ, không vào sổ: 0 bài" in out and "TẮT" in out
     monkeypatch.setitem(DU_AN, "cau_hinh", {})
     monkeypatch.setitem(DU_AN, "thi_truong", "TH")
-    out = _chay(["hapas"])[1]
-    assert "other_market — dự án VN: 0 bài" in out and "TỔNG sẽ dọn: 2 bài" in out
+    out = _chay(["hapas", "--gom-other-market"])[1]
+    assert "dự án VN — NGƯỜI QUYẾT (có thể là ghi chú thị trường VN): 0 bài" in out
+    assert "TỔNG sẽ dọn: 2 bài" in out
 
 
 def test_ap_dung_can_tep_quyen_va_khong_co_luot_dang_chay(kho, tmp_path):
@@ -258,51 +280,76 @@ def test_ap_dung_can_tep_quyen_va_khong_co_luot_dang_chay(kho, tmp_path):
     assert ma == 2 and "lượt 41" in out and kho.ghi == []
 
 
-def test_ap_dung_vao_so_xoa_kho_roi_hoan_tac(kho, tmp_path):
+def test_ap_dung_mac_dinh_chi_xoa_a_khong_vao_so_roi_hoan_tac(kho, tmp_path):
+    """(a) xoá mà KHÔNG ghi sổ (soát M1: kho không biết lần giữ theo luật là AI "không rõ" hay AI
+    hết giờ — lượt sau AI phán lại một lần); (b) mặc định chỉ liệt kê; nguồn đã duyệt giữ."""
+    TDA.ghi_loai("hapas", _dau(), [("tiktok:999", "ai:lac_de", NGAY)],
+                 NGAY - datetime.timedelta(days=1))
     tep = tmp_path / "loc.jsonl"
     ma, out = _chay(["hapas", "--ap-dung", "--sao-luu", str(tep)])
-    assert ma == 0 and "Đã dọn 3/3 bài ((a) không nhắc brand 2, (b) other_market 1)" in out
+    assert ma == 0 and "Đã dọn 2/2 bài ((a) không nhắc brand 2, (b) other_market 0)" in out
     con = {k[1] for k in kho.t["bai"]}
-    assert con == {"tiktok:2", "tiktok:3", "tiktok:4", "threads:5", "youtube:7", "tiktok:9"}
-    assert {k[1] for k in kho.t["binh_luan"]} == {"tiktok:2"}, "bình luận xoá theo bài"
-    assert {k[1] for k in kho.t["chi_so_ngay"]} == {"tiktok:2"}
-    assert kho.khoa_luot == [K.so_khoa_luot("hapas")] * 3
-    assert _so() == {"tiktok:1": T.LY_DO_KHONG_NHAC_BRAND, "tiktok:6": "ai:other_market"}
-    assert _so("hapas:web") == {"web:8": T.LY_DO_KHONG_NHAC_BRAND}
+    assert con == {"tiktok:2", "tiktok:3", "tiktok:4", "threads:5", "tiktok:6", "youtube:7",
+                   "tiktok:9", "tiktok:10", "tiktok:11", "tiktok:12"}
+    assert {k[1] for k in kho.t["binh_luan"]} == {"tiktok:2", "tiktok:6", "tiktok:10"}
+    assert {k[1] for k in kho.t["chi_so_ngay"]} == {"tiktok:2", "tiktok:6"}
+    assert kho.khoa_luot == [K.so_khoa_luot("hapas")] * 2
+    assert _so() == {"tiktok:999": "ai:lac_de"}, "sổ của lượt quét giữ nguyên, (a) không vào sổ"
+    assert _so("hapas:web") == {}
     dong = [json.loads(x) for x in tep.read_text(encoding="utf-8").splitlines()]
-    assert [x["loai_dong"] for x in dong] == ["dau"] + ["bai", "da_ap"] * 3
+    assert [x["loai_dong"] for x in dong] == ["dau"] + ["bai", "da_ap"] * 2
+    assert dong[0]["gom_other_market"] is False
     tv = next(x for x in dong if x.get("khoa") == "tiktok:1" and x["loai_dong"] == "bai")
     assert len(tv["binh_luan"]) == 2 and len(tv["chi_so_ngay"]) == 2
-    assert tv["so"] == {"hapas": ["tiktok:1"]} and tv["nhom"] == "khong_brand"
+    assert tv["so"] == {} and tv["nhom"] == "khong_brand"
     assert "REVOKE DELETE ON bai FROM mark" in out
-    # Lượt sau gặp lại bài Tử Vi: sổ chặn (vẫn không có tín hiệu brand) — không gửi AI.
-    cong = T.cau_hinh_hashtag_brand(DU_AN)
-    d = {"platform": "tiktok", "username": "tuvi.vochinhdieu", "kenh": "Tử Vi Vô Chính Diệu",
-         "text": TU_VI, "hashtags": ""}
-    assert T._con_chan([T.LY_DO_KHONG_NHAC_BRAND, "x"], d, cong, T.ten_brand(DU_AN))
-    # Chạy lại: không còn gì để dọn.
     assert "Không có bài nào để dọn" in _chay(
         ["hapas", "--ap-dung", "--sao-luu", str(tmp_path / "lan2.jsonl")])[1]
-    # Hoàn tác: bài, chỉ số, bình luận về như cũ; khoá gỡ khỏi cả hai sổ. Chạy lại không chèn gì.
     ma, out = _chay(["hapas", "--hoan-tac", str(tep)])
-    assert ma == 0 and "chèn lại 3 bài, 3 dòng chi_so_ngay, 3 bình luận" in out
-    assert len(kho.t["bai"]) == 9 and len(kho.t["binh_luan"]) == 4
+    assert ma == 0 and "chèn lại 2 bài, 2 dòng chi_so_ngay, 2 bình luận" in out
+    assert len(kho.t["bai"]) == 12 and len(kho.t["binh_luan"]) == 5
     goc = {(r["du_an"], r["khoa"]): r for r in _kho_mau()[0]}
-    for k in [("hapas", "tiktok:1"), ("hapas", "tiktok:6"), ("hapas", "web:8")]:
+    for k in [("hapas", "tiktok:1"), ("hapas", "web:8")]:
         assert kho.t["bai"][k]["dang_luc"] == goc[k]["dang_luc"]
         assert kho.t["bai"][k]["ly_do_giu"] == goc[k]["ly_do_giu"]
-    assert _so() == {} and _so("hapas:web") == {}
+    assert _so() == {"tiktok:999": "ai:lac_de"}
     assert "chèn lại 0 bài" in _chay(["hapas", "--hoan-tac", str(tep)])[1]
 
 
+def test_gom_other_market_vao_so_giu_so_cu_va_khoa_on_dinh_facebook(kho, tmp_path):
+    fb = {**_bai("facebook:pfbid0abc", "trang.th", "HAPAS Thailand sale", ly="other_market",
+                 p="facebook"),
+          "link": "https://www.facebook.com/trang.th/posts/pfbid0abc", "ma_so_fb": "1234567890"}
+    kho.t["bai"][("hapas", fb["khoa"])] = fb
+    TDA.ghi_loai("hapas", _dau(), [("tiktok:999", "ai:lac_de", NGAY)],
+                 NGAY - datetime.timedelta(days=1))
+    tep = tmp_path / "gom.jsonl"
+    ma, out = _chay(["hapas", "--ap-dung", "--gom-other-market", "--sao-luu", str(tep)])
+    assert ma == 0 and "(a) không nhắc brand 2, (b) other_market 2)" in out
+    so = _so()
+    assert so.pop("tiktok:999") == "ai:lac_de", "sổ lượt quét còn nguyên (cùng dấu luật)"
+    assert so.pop("tiktok:6") == "ai:other_market" and so.pop("facebook:pfbid0abc") == \
+        "ai:other_market"
+    assert so.pop("facebook:id:1234567890") == "ai:other_market", "khoá ổn định Facebook"
+    assert all(k.startswith("facebook:nd:") and v == "ai:other_market" for k, v in so.items())
+    dong = [json.loads(x) for x in tep.read_text(encoding="utf-8").splitlines()]
+    x = next(x for x in dong if x.get("khoa") == "facebook:pfbid0abc" and x["loai_dong"] == "bai")
+    assert "facebook:id:1234567890" in x["so"]["hapas"]
+    assert ("hapas", "tiktok:4") in kho.t["bai"] and ("hapas", "tiktok:10") in kho.t["bai"]
+    _chay(["hapas", "--hoan-tac", str(tep)])
+    assert _so() == {"tiktok:999": "ai:lac_de"} and len(kho.t["bai"]) == 13
+
+
 def test_doc_lai_trong_giao_dich_bai_doi_thi_giu(kho, tmp_path):
-    """Giữa chạy thử và khoá dòng, lượt quét giữ lại bài Tử Vi với mã AI (brand) → không dọn."""
+    """Giữa chạy thử và khoá dòng: lượt quét giữ lại bài Tử Vi với mã AI (brand); bài web thành bài
+    của nguồn đã duyệt → không dọn."""
     def doi(k):
         k.t["bai"][("hapas", "tiktok:1")]["ly_do_giu"] = "brand"
+        k.t["bai"][("hapas", "web:8")]["nguon_id"] = 2
     kho.truoc_khoa = doi
     _, out = _chay(["hapas", "--ap-dung", "--sao-luu", str(tmp_path / "x.jsonl")])
-    assert "Đã dọn 2/3 bài" in out and "1 bài đã đổi / không còn" in out
-    assert ("hapas", "tiktok:1") in kho.t["bai"] and "tiktok:1" not in _so()
+    assert "Đã dọn 0/2 bài" in out and "2 bài đã đổi / không còn" in out
+    assert ("hapas", "tiktok:1") in kho.t["bai"] and ("hapas", "web:8") in kho.t["bai"]
 
 
 def test_luot_mo_ngay_truoc_khoa_thi_dung_khong_xoa(kho, tmp_path):
@@ -311,16 +358,15 @@ def test_luot_mo_ngay_truoc_khoa_thi_dung_khong_xoa(kho, tmp_path):
     kho.truoc_khoa = mo
     tep = tmp_path / "y.jsonl"
     ma, out = _chay(["hapas", "--ap-dung", "--sao-luu", str(tep)])
-    assert ma == 1 and "DỪNG" in out and len(kho.t["bai"]) == 9
+    assert ma == 1 and "DỪNG" in out and len(kho.t["bai"]) == 12
     assert [json.loads(x)["loai_dong"] for x in tep.read_text(encoding="utf-8").splitlines()] \
         == ["dau"]
-    assert _so() == {}
 
 
 def test_hoan_tac_bai_chua_co_dau_da_ap_va_in_cau_xoa_bigquery(kho, tmp_path):
     kho.dong_bo = 12
     tep = tmp_path / "z.jsonl"
-    ma, out = _chay(["hapas", "--ap-dung", "--sao-luu", str(tep)])
+    ma, out = _chay(["hapas", "--ap-dung", "--gom-other-market", "--sao-luu", str(tep)])
     assert ma == 0 and "ĐÃ đồng bộ" in out
     assert ("DELETE FROM `<dataset>.binh_luan` WHERE du_an = 'hapas' AND khoa_bai IN "
             "('tiktok:1', 'web:8', 'tiktok:6');") in out
@@ -329,4 +375,4 @@ def test_hoan_tac_bai_chua_co_dau_da_ap_va_in_cau_xoa_bigquery(kho, tmp_path):
     tep.write_text("\n".join(dong) + "\n", encoding="utf-8")
     ma, out = _chay(["hapas", "--hoan-tac", str(tep)])
     assert ma == 0 and "chèn lại 3 bài" in out and "3 bài không có dấu đã áp" in out
-    assert len(kho.t["bai"]) == 9 and _so() == {}
+    assert len(kho.t["bai"]) == 12 and _so() == {}

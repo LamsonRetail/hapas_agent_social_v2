@@ -10,28 +10,35 @@ tình yêu chung chung. Từ bản này lượt quét chỉ giữ bài AI không
 bài YouTube AI giữ với mã `other_market` (HAPAS Thailand, bình luận tiếng Thái — MKT báo sai) từ
 trước luật M2 (18/10/2026).
 
-Chọn (chỉ bài `kieu_quet = 'tu_khoa'` của dự án):
+Chọn (chỉ bài `kieu_quet = 'tu_khoa'` có `dang_luc` của dự án):
   (a) `ly_do_giu = 'khop_tu_khoa'` mà KHÔNG có tín hiệu brand theo ĐÚNG hàm của lượt quét
       (`theo_doi.co_tin_hieu_brand` với `ten_brand` hiện hành: tên, mã, `ten` cấu hình, hashtag dự
-      án + khẩu hiệu chiến dịch đang chạy ở dạng viết liền) và chủ bài không phải kênh nhà;
-  (b) dự án thị trường VN: `ly_do_giu = 'other_market'`.
-Bài AI giữ với mã khác (brand / ad / product / ugc…), bài đường nguồn, bài kênh nhà: KHÔNG đụng.
-Cổng brand tắt (`du_an.cau_hinh.hashtag_can_nhac_brand` = false) thì (a) rỗng như lượt quét.
-Bài bị dọn vào sổ "đã loại" của lượt tìm (`.loai-tu-khoa.json`; bài web vào sổ riêng "<mã>:web")
-để lượt sau không gửi AI lại: (a) lý do `theo_doi.LY_DO_KHONG_NHAC_BRAND` (`_con_chan` gỡ chặn khi
-bài có tín hiệu brand theo cấu hình mới — thêm tên / tag / kênh nhà), (b) `ai:other_market` (đúng lý
-do lượt quét ghi cho bài này từ luật M2) — rồi DELETE khỏi `bai` (bình luận + chi_so_ngay xoá theo
-FK ON DELETE CASCADE).
+      án + khẩu hiệu chiến dịch đang chạy ở dạng viết liền) — XOÁ, KHÔNG ghi sổ "đã loại": kho
+      không biết bài được giữ theo luật vì AI "không rõ" hay vì AI hết giờ / bỏ qua / đạt trần, nên
+      không được chặn bài vĩnh viễn (video chiến dịch chỉ có khẩu hiệu mà lúc trước AI hết giờ sẽ
+      mất luôn). Lượt sau gặp lại thì AI phán một lần (≈ số bài đã dọn, tối đa ~109 lượt phán).
+  (b) dự án thị trường VN: `ly_do_giu = 'other_market'` — CHỈ LIỆT KÊ (kèm nội dung) để người
+      quyết: lượt quét giữ đúng mã này khi ghi chú thị trường của AI là "VN" (`theo_doi.
+      other_market_ngoai_vn`), mà kho không lưu ghi chú đó. Xoá khi thêm `--gom-other-market`; bài
+      xoá vào sổ "đã loại" lý do `ai:other_market` (đúng lý do lượt quét ghi từ luật M2; bài
+      Facebook kèm khoá ổn định; bài web vào sổ riêng "<mã>:web").
+  Bài thuộc NGUỒN ĐÃ DUYỆT (`nguon_id` trỏ tới nguồn của dự án, hoặc chủ bài trùng một nguồn — kênh
+  nhà, KOL, đối tác, trang…, kể cả nguồn tạm dừng): GIỮ, in riêng mục "thuộc nguồn đã duyệt" — lượt
+  quét nguồn sẽ ghi lại bài đó (mất lịch sử bình luận / chỉ số), không phải việc của script này.
+Bài AI giữ với mã khác (brand / ad / product / ugc…), bài đường nguồn: KHÔNG đụng. Cổng brand tắt
+(`du_an.cau_hinh.hashtag_can_nhac_brand` = false — một công tắc cho cả cổng brand đường hashtag lẫn
+cổng giữ-theo-luật; dự án lắng nghe theo chủ đề / ngành phải tắt) thì (a) rỗng như lượt quét. DELETE
+khỏi `bai` (bình luận + chi_so_ngay xoá theo FK ON DELETE CASCADE).
 
 An toàn (theo mẫu `scripts/lang_nghe_loc_seeding.py`):
-  • Mặc định CHẠY THỬ: đọc trong MỘT giao dịch READ ONLY; in TỪNG bài sẽ dọn (nền tảng, tác giả,
-    link, 120 ký tự đầu, số bình luận) để chủ dự án / MKT duyệt, kèm tổng bài / bình luận / bình
-    luận hop_le / dòng chi_so_ngay. Không ghi gì (kể cả sổ).
+  • Mặc định CHẠY THỬ: đọc trong MỘT giao dịch READ ONLY; in TỪNG bài của (a), (b) và mục nguồn đã
+    duyệt (nền tảng, tác giả, link, 120 ký tự đầu, số bình luận) để chủ dự án / MKT duyệt, kèm tổng
+    bài / bình luận / bình luận hop_le / dòng chi_so_ngay sẽ xoá. Không ghi gì (kể cả sổ).
   • `--ap-dung --sao-luu <tệp>`: không chạy khi dự án có lượt `/theodoi` đang chạy. Mỗi BÀI một
     giao dịch: giữ khoá advisory mở lượt (CÙNG khoá `lang_nghe_db.mo_luot` — lượt mới chờ bài này
     commit), kiểm lại lượt đang chạy, khoá dòng (FOR UPDATE), đọc lại (bài đã đổi `ly_do_giu` /
     đã có tín hiệu brand thì giữ), ghi tệp hoàn tác ĐỦ dòng bài + bình luận + chi_so_ngay (fsync)
-    TRƯỚC, ghi sổ, rồi mới xoá. Dấu "đã áp" ghi SAU khi commit. Tệp có sẵn thì dừng.
+    TRƯỚC, ghi sổ (chỉ (b)), rồi mới xoá. Dấu "đã áp" ghi SAU khi commit. Tệp có sẵn thì dừng.
   • `--hoan-tac <tệp>`: chèn lại bài, chi_so_ngay, bình luận của MỌI bài trong tệp — kể cả bài chưa
     có dấu "đã áp" (giao dịch huỷ: dòng còn nguyên; tiến trình dừng ngay sau commit: dòng đã xoá) —
     dòng đã có lại thì để nguyên (ON CONFLICT DO NOTHING), và gỡ các khoá đó khỏi sổ. Chạy lại được.
@@ -43,6 +50,7 @@ hoàn tác chỉ cần INSERT (đã có):
     cd /opt/mark/app
     PY=/opt/mark/hermes-agent/venv/bin/python
     sudo -u mark $PY scripts/lang_nghe_loc_khong_brand.py hapas                    # chạy thử
+    sudo -u mark $PY scripts/lang_nghe_loc_khong_brand.py hapas --gom-other-market # thử cả (b)
     sudo -u postgres psql -d lang_nghe -c 'GRANT DELETE ON bai TO mark'
     sudo -u mark $PY scripts/lang_nghe_loc_khong_brand.py hapas --ap-dung \\
         --sao-luu /opt/mark/loc-khong-brand-$(date +%F).jsonl
@@ -89,7 +97,8 @@ SQL_DU_AN = ("/* khb:du_an */ SELECT ma, ten, tu_khoa, tu_loai_tru, boi_canh, th
 SQL_NGUON = "/* khb:nguon */ SELECT id, nen_tang, dinh_danh, loai FROM nguon WHERE du_an = %s"
 SQL_BAI = ("/* khb:bai */ SELECT khoa, nen_tang, nguon_id, kieu_quet, link, tai_khoan, tac_gia, "
            "dang_luc, noi_dung, hashtag, binh_luan, ly_do_giu FROM bai WHERE du_an = %s AND "
-           "kieu_quet = 'tu_khoa' AND ly_do_giu = ANY(%s) ORDER BY nen_tang, dang_luc, khoa")
+           "kieu_quet = 'tu_khoa' AND ly_do_giu = ANY(%s) AND dang_luc IS NOT NULL "
+           "ORDER BY nen_tang, dang_luc, khoa")
 SQL_KHAC = ("/* khb:khac */ SELECT count(*) AS n FROM bai WHERE du_an = %s AND "
             "ly_do_giu = 'other_market' AND kieu_quet <> 'tu_khoa'")
 SQL_DEM_BL = ("/* khb:dem_bl */ SELECT khoa_bai, count(*) AS n, count(*) FILTER (WHERE loai = "
@@ -165,7 +174,8 @@ def _dong_d(r: dict) -> dict:
 
 # ───────────────────────────── kế hoạch (thuần) ─────────────────────────────
 class Luat:
-    """Luật chọn bài của dự án: cổng brand + tên brand (`ten_brand`, đọc một lần) + kênh nhà."""
+    """Luật chọn bài của dự án: cổng brand + tên brand (`ten_brand`, đọc một lần) + nguồn đã
+    duyệt (mọi `nguon` của dự án, kể cả kênh nhà)."""
 
     def __init__(self, du_an: dict, nguon: list[dict], bay_gio: datetime.datetime | None = None,
                  ten: list[str] | None = None):
@@ -173,32 +183,36 @@ class Luat:
         self.cong = T.cau_hinh_hashtag_brand(du_an)
         self.ten = ten if ten is not None else (
             T.ten_brand(du_an, bay_gio, cong=self.cong) if self.cong["bat"] else [])
-        self.nha = T._kenh_nha(nguon)
-        self.nha_id = {int(n["id"]) for n in nguon if n.get("loai") == "kenh_nha"}
+        # Tài khoản của MỌI nguồn (cùng cách chuẩn hoá với kênh nhà — Facebook lấy cả slug trang).
+        self.tk_nguon = T._kenh_nha([{**n, "loai": "kenh_nha"} for n in nguon])
+        self.nguon_id = {int(n["id"]) for n in nguon if n.get("id") is not None}
         self.vn = str(du_an.get("thi_truong") or "VN").upper() == "VN"
 
+    def thuoc_nguon(self, r: dict) -> bool:
+        return r.get("nguon_id") in self.nguon_id or loc_rac.khoa_tai_khoan(
+            r.get("nen_tang"), r.get("tai_khoan")) in self.tk_nguon
+
     def nhom(self, r: dict) -> str | None:
-        """"khong_brand" / "other_market" khi dòng `bai` phải dọn; None khi giữ."""
+        """"khong_brand" (a) / "other_market" (b) khi dòng `bai` là ứng viên dọn; "nguon" khi là ứng
+        viên nhưng thuộc nguồn đã duyệt (giữ); None khi giữ."""
         import theo_doi as T
-        if str(r.get("kieu_quet") or "tu_khoa") != "tu_khoa":
+        if str(r.get("kieu_quet") or "tu_khoa") != "tu_khoa" or r.get("dang_luc") is None:
             return None
         ly = r.get("ly_do_giu")
-        if ly == NHOM["other_market"]:
-            return "other_market" if self.vn else None
-        if ly != NHOM["khong_brand"]:
+        if ly == NHOM["other_market"] and self.vn:
+            n = "other_market"
+        elif ly == NHOM["khong_brand"] and not T.co_tin_hieu_brand(_dong_d(r), self.cong,
+                                                                   self.ten):
+            n = "khong_brand"
+        else:
             return None
-
-        def la_nha(d: dict) -> bool:
-            return (loc_rac.khoa_tai_khoan(d.get("platform"), d.get("username")) in self.nha
-                    or r.get("nguon_id") in self.nha_id)
-        return None if T.co_tin_hieu_brand(_dong_d(r), self.cong, self.ten, la_nha) \
-            else "khong_brand"
+        return "nguon" if self.thuoc_nguon(r) else n
 
 
 def ke_hoach(luat: Luat, bai: list[dict]) -> dict:
-    """THUẦN. Dòng `bai` ứng viên -> {"khong_brand": [bài], "other_market": [bài], "giu": số bài
-    `khop_tu_khoa` vẫn giữ vì có tín hiệu brand / kênh nhà}."""
-    ra: dict = {"khong_brand": [], "other_market": [], "giu": 0}
+    """THUẦN. Dòng `bai` ứng viên -> {"khong_brand": [bài], "other_market": [bài], "nguon": [bài
+    thuộc nguồn đã duyệt — giữ], "giu": số bài `khop_tu_khoa` vẫn giữ vì có tín hiệu brand}."""
+    ra: dict = {"khong_brand": [], "other_market": [], "nguon": [], "giu": 0}
     for r in bai:
         n = luat.nhom(r)
         if n:
@@ -208,15 +222,15 @@ def ke_hoach(luat: Luat, bai: list[dict]) -> dict:
     return ra
 
 
-def so_cua(du_an: dict, r: dict, nhom: str, bay_gio: datetime.datetime) -> tuple[str, str, list]:
-    """(khoá sổ, dấu luật, [(khoá, lý do, ngày đăng)]) của bài sắp dọn — bài web vào sổ RIÊNG
-    "<mã>:web" với dấu theo từ khoá web (từ khoá + khẩu hiệu chiến dịch, như `theo_doi._tim_web`)."""
+def so_cua(du_an: dict, r: dict, bay_gio: datetime.datetime) -> tuple[str, str, list]:
+    """(khoá sổ, dấu luật, [(khoá, `ai:other_market`, ngày đăng)]) của bài (b) sắp dọn — dấu luật
+    CÙNG dấu lượt quét ghi (sổ không bị làm lại); bài web vào sổ RIÊNG "<mã>:web" với dấu theo từ
+    khoá web (từ khoá + khẩu hiệu chiến dịch, như `theo_doi._tim_web`)."""
     import theo_doi as T
     import theo_doi_api as TDA
     ma = du_an["ma"]
     tu = T.tu_tim(du_an)
-    ly = T.LY_DO_KHONG_NHAC_BRAND if nhom == "khong_brand" else LY_SO_OTHER_MARKET
-    loai = [(k, ly, r["dang_luc"])
+    loai = [(k, LY_SO_OTHER_MARKET, r["dang_luc"])
             for k in (r["khoa"], *T._khoa_loai_on_dinh(_dong_d(r), r["dang_luc"]))]
     if r.get("nen_tang") == "web":
         import nguon_web as W
@@ -240,7 +254,7 @@ def doc_kho(ma: str, bay_gio: datetime.datetime) -> dict | None:
         bai = [dict(r) for r in c.execute(SQL_BAI, (ma, list(NHOM.values()))).fetchall()]
         luat = Luat(du_an, nguon, bay_gio)        # đọc sổ mốc + lịch chiến dịch (kết nối riêng)
         kh = ke_hoach(luat, bai)
-        khoa = sorted(r["khoa"] for n in NHOM for r in kh[n])
+        khoa = sorted(r["khoa"] for n in (*NHOM, "nguon") for r in kh[n])
         bl, hl, cs = {}, {}, {}
         if khoa:
             for r in c.execute(SQL_DEM_BL, (ma, khoa)).fetchall():
@@ -265,11 +279,14 @@ def dem_dong_bo() -> tuple[int | None, str]:
 
 
 # ───────────────────────────── ghi ─────────────────────────────
-def ap_dung_bai(du_an: dict, luat: Luat, khoa: str, bay_gio: datetime.datetime,
+def ap_dung_bai(du_an: dict, luat: Luat, khoa: str, nhom_duoc: set[str],
+                bay_gio: datetime.datetime, tu_pv: datetime.datetime,
                 so_luu) -> tuple[str, str | None]:
     """Dọn MỘT bài trong MỘT giao dịch: khoá mở lượt, kiểm lượt đang quét, khoá dòng, đọc lại, ghi
-    tệp hoàn tác (fsync), ghi sổ, rồi xoá. -> (trạng thái, nhóm). Trạng thái: "da_don", "khong_con"
-    (bài đã đổi / không còn — bỏ qua), "dang_quet" (lượt /theodoi vừa bắt đầu — dừng cả lần chạy)."""
+    tệp hoàn tác (fsync), ghi sổ (chỉ (b) — (a) không vào sổ), rồi xoá. `nhom_duoc`: nhóm được xoá
+    lần chạy này; `tu_pv`: đầu phạm vi theo dõi (tính một lần ở `chay`). -> (trạng thái, nhóm).
+    Trạng thái: "da_don", "khong_con" (bài đã đổi / không còn / thành bài nguồn — bỏ qua),
+    "dang_quet" (lượt /theodoi vừa bắt đầu — dừng cả lần chạy)."""
     import theo_doi_api as TDA
     ma = du_an["ma"]
     with K.ket_noi() as c:
@@ -277,19 +294,19 @@ def ap_dung_bai(du_an: dict, luat: Luat, khoa: str, bay_gio: datetime.datetime,
         if c.execute(SQL_LUOT_CHAY, (ma, K.GIO_BO_DO)).fetchall():
             return "dang_quet", None
         bai = [dict(r) for r in c.execute(SQL_KHOA_BAI, (ma, [khoa])).fetchall()]
-        # Đọc lại: bài đổi `ly_do_giu` (AI vừa giữ với mã brand), đổi nội dung / chủ bài thành kênh
-        # nhà… thì giữ.
-        if len(bai) != 1 or not luat.nhom(bai[0]):
+        # Đọc lại: bài đổi `ly_do_giu` (AI vừa giữ với mã brand), đổi nội dung… thì giữ.
+        nhom = luat.nhom(bai[0]) if len(bai) == 1 else None
+        if nhom not in nhom_duoc:
             return "khong_con", None
         r = bai[0]
-        nhom = luat.nhom(r)
         bl = [dict(x) for x in c.execute(SQL_KHOA_BL, (ma, [khoa])).fetchall()]
         cs = [dict(x) for x in c.execute(SQL_KHOA_CS, (ma, [khoa])).fetchall()]
-        ma_so, dau, loai = so_cua(du_an, r, nhom, bay_gio)
+        ma_so, dau, loai = so_cua(du_an, r, bay_gio) if nhom == "other_market" else ("", "", [])
         _ghi_dong(so_luu, {"loai_dong": "bai", "du_an": ma, "khoa": khoa, "nhom": nhom,
                            "bai": [r], "binh_luan": bl, "chi_so_ngay": cs,
-                           "so": {ma_so: sorted({k for k, _, _ in loai})}})
-        TDA.ghi_loai(ma_so, dau, loai, TDA.pham_vi(ma, bay_gio)[0])
+                           "so": {ma_so: sorted({k for k, _, _ in loai})} if loai else {}})
+        if loai:
+            TDA.ghi_loai(ma_so, dau, loai, tu_pv)
         n = int(c.execute(SQL_XOA_BAI, (ma, [khoa])).rowcount or 0)
         if n != 1:
             raise K.LoiKho(f"xoá {n}/1 bài {khoa} — huỷ giao dịch")
@@ -345,11 +362,15 @@ def doc_tep_hoan_tac(tep: str) -> tuple[dict, list[dict], list[dict]]:
 
 
 # ───────────────────────────── in ─────────────────────────────
-_TEN_NHOM = {"khong_brand": "(a) giữ theo luật khop_tu_khoa, KHÔNG có tín hiệu brand",
-             "other_market": "(b) AI giữ mã other_market — dự án VN"}
+_TEN_NHOM = {"khong_brand": "(a) giữ theo luật khop_tu_khoa, KHÔNG có tín hiệu brand — XOÁ, không "
+                            "vào sổ",
+             "other_market": "(b) AI giữ mã other_market — dự án VN — NGƯỜI QUYẾT (có thể là ghi "
+                             "chú thị trường VN)",
+             "nguon": "Thuộc nguồn đã duyệt — GIỮ (ứng viên (a)/(b) nhưng chủ bài là nguồn của dự "
+                      "án)"}
 
 
-def _in_ke_hoach(kho: dict, mau: int | None, in_ra) -> None:
+def _in_ke_hoach(kho: dict, mau: int | None, gom: bool, in_ra) -> None:
     kh, luat = kho["kh"], kho["luat"]
     ma = kho["du_an"]["ma"]
     in_ra(f"Cổng brand: {'BẬT' if luat.cong['bat'] else 'TẮT — nhóm (a) rỗng'}; tên brand hiện "
@@ -357,11 +378,13 @@ def _in_ke_hoach(kho: dict, mau: int | None, in_ra) -> None:
           + (f" (+{len(luat.ten) - 20})" if len(luat.ten) > 20 else "") + ".")
     in_ra(f"Bài {ma} đường từ khoá ly_do_giu = khop_tu_khoa vẫn giữ (có tín hiệu brand / kênh "
           f"nhà): {kh['giu']}.")
-    for n in NHOM:
+    for n in (*NHOM, "nguon"):
         cac = sorted(kh[n], key=lambda r: (r["nen_tang"], -kho["dem_bl"].get(r["khoa"], 0),
                                            r["khoa"]))
         in_ra(f"{_TEN_NHOM[n]}: {len(cac)} bài, {sum(kho['dem_bl'].get(r['khoa'], 0) for r in cac)}"
-              " bình luận.")
+              " bình luận."
+              + ((" Sẽ xoá (--gom-other-market)." if gom else " KHÔNG xoá — thêm "
+                  "--gom-other-market để xoá.") if n == "other_market" and cac else ""))
         for r in cac[:mau]:
             tk = _mot_dong(r.get("tai_khoan"), 40)
             in_ra(f"  [{r['nen_tang']}] {_mot_dong(r.get('tac_gia'), 40)}"
@@ -372,7 +395,7 @@ def _in_ke_hoach(kho: dict, mau: int | None, in_ra) -> None:
             in_ra(f"      {_mot_dong(r.get('noi_dung'), 120)}")
         if mau is not None and len(cac) > mau:
             in_ra(f"  … và {len(cac) - mau} bài nữa (--mau 0: in hết)")
-    tat = [r["khoa"] for n in NHOM for r in kh[n]]
+    tat = [r["khoa"] for n in _nhom_xoa(gom) for r in kh[n]]
     in_ra(f"TỔNG sẽ dọn: {len(tat)} bài; đi theo (xoá theo bài): "
           f"{sum(kho['dem_bl'].get(k, 0) for k in tat)} bình luận "
           f"({sum(kho['dem_hop_le'].get(k, 0) for k in tat)} hop_le), "
@@ -394,7 +417,12 @@ def _in_bigquery(ma: str, khoa: list[str], in_ra) -> None:
         in_ra(f"  DELETE FROM `<dataset>.{bang}` WHERE du_an = '{ma}' AND {cot} IN ({ds});")
 
 
+def _nhom_xoa(gom: bool) -> tuple[str, ...]:
+    return ("khong_brand", "other_market") if gom else ("khong_brand",)
+
+
 def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
+    import theo_doi_api as TDA
     ma = ns.du_an.strip().lower()
     if ns.hoan_tac:
         dau, ds, khong_dau = doc_tep_hoan_tac(ns.hoan_tac)
@@ -427,7 +455,7 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
         in_ra(f"Không có dự án '{ma}' trong kho.")
         return 2
     in_ra(f"Dự án {ma} — {'ÁP DỤNG' if ns.ap_dung else 'CHẠY THỬ (giao dịch chỉ đọc, không ghi gì)'}.")
-    _in_ke_hoach(kho, ns.mau or None, in_ra)
+    _in_ke_hoach(kho, ns.mau or None, ns.gom_other_market, in_ra)
     if not kho["quyen_xoa"]:
         in_ra("Role hiện tại KHÔNG có quyền DELETE trên bai (đúng thiết kế: bot không xoá bài). "
               "Trước --ap-dung: sudo -u postgres psql -d lang_nghe -c 'GRANT DELETE ON bai TO "
@@ -442,11 +470,13 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
     if not kho["quyen_xoa"]:
         return 2
     kh = kho["kh"]
-    ds = [r["khoa"] for n in NHOM for r in kh[n]]
+    nhom_duoc = set(_nhom_xoa(ns.gom_other_market))
+    ds = [r["khoa"] for n in _nhom_xoa(ns.gom_other_market) for r in kh[n]]
     if not ds:
         in_ra("Không có bài nào để dọn.")
         return 0
     du_an = kho["du_an"]
+    tu_pv = TDA.pham_vi(ma, bay_gio)[0]
     don: dict[str, int] = {n: 0 for n in NHOM}
     da_xoa: list[str] = []
     khong_con = loi = 0
@@ -454,10 +484,12 @@ def chay(ns, in_ra=print, bay_gio: datetime.datetime | None = None) -> int:
         _ghi_dong(so_luu, {"loai_dong": "dau", "du_an": ma, "phien_ban": 1,
                            "lenh": "loc_khong_brand",
                            "luc": datetime.datetime.now(datetime.timezone.utc).isoformat(
-                               timespec="seconds"), "ten_brand": kho["luat"].ten})
+                               timespec="seconds"), "ten_brand": kho["luat"].ten,
+                           "gom_other_market": bool(ns.gom_other_market)})
         for j, khoa in enumerate(ds, 1):
             try:
-                st, nhom = ap_dung_bai(du_an, kho["luat"], khoa, bay_gio, so_luu)
+                st, nhom = ap_dung_bai(du_an, kho["luat"], khoa, nhom_duoc, bay_gio, tu_pv,
+                                       so_luu)
             except K.LoiKho as e:
                 loi += 1
                 in_ra(f"    {j}/{len(ds)} {khoa}: lỗi, đã huỷ giao dịch ({e})")
@@ -493,6 +525,8 @@ def tao_parser() -> argparse.ArgumentParser:
     ap.add_argument("--ap-dung", action="store_true", help="ghi thật (cần --sao-luu)")
     ap.add_argument("--sao-luu", metavar="TEP", help="tệp hoàn tác JSONL (tạo mới)")
     ap.add_argument("--hoan-tac", metavar="TEP", help="trả lại từ tệp hoàn tác")
+    ap.add_argument("--gom-other-market", action="store_true",
+                    help="xoá cả nhóm (b) other_market (mặc định chỉ liệt kê để người quyết)")
     ap.add_argument("--mau", type=int, default=0,
                     help="số bài in ra mỗi nhóm (mặc định 0 = in hết để duyệt)")
     return ap
