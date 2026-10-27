@@ -35,7 +35,8 @@ Vì sao cần: lượt `/theodoi` chỉ gán nhãn bình luận VỪA cào và b
 An toàn:
   • Mặc định CHẠY THỬ: mọi truy vấn trong MỘT giao dịch READ ONLY, không gọi model, không ghi
     gì; in số dòng, mẫu (tác giả đã băm) và ước tính số lượt gọi model. `--thu N` gọi model cho
-    tối đa N dòng (một lô) để xem trước nhãn mới — vẫn không ghi gì.
+    tối đa N dòng (một lô) để xem trước nhãn mới — vẫn không ghi gì; in bảng lật sắc thái cũ →
+    mới và mẫu lật = → + / − → = để MKT soát trước khi --ap-dung (27/10/2026).
   • `--ap-dung --sao-luu <tệp>`: ghi tệp hoàn tác (giá trị cũ + mới của từng dòng, theo du_an,
     khoa_bai, ma) TRƯỚC, rồi UPDATE trong MỘT giao dịch cho mỗi lô ≤ 100 dòng. Mỗi UPDATE chỉ
     sửa đúng dòng mà giá trị hiện tại còn y như lúc đọc — dòng vừa bị lượt quét khác sửa thì bỏ
@@ -291,16 +292,42 @@ def gan_nhan(lo: list[dict], brand: str = "") -> tuple[list[dict], dict]:
           "ngu_canh_bai": N.ngu_canh_bai(d)} for d in lo],
         HAN_LO_GIAY, tt, song_song=1, brand=brand)
     doi, dem = [], {"chua_gan": 0, "khong_doi": 0}
+    ma_tran: dict[tuple, int] = {}
     for d, (s, c) in zip(lo, nhan):
         if s == P.CHUA or c == P.CHUA:
             dem["chua_gan"] += 1
             continue
+        cap = (d["cu"].get("sac_thai") or "—", s)
+        ma_tran[cap] = ma_tran.get(cap, 0) + 1
         moi = dict(d["cu"], sac_thai=s, chu_de=c)
         if moi == d["cu"]:
             dem["khong_doi"] += 1
             continue
         doi.append(dict(d, moi=moi))
-    return doi, {**dem, "trang_thai": tt.get("trang_thai") or ""}
+    return doi, {**dem, "ma_tran": ma_tran, "trang_thai": tt.get("trang_thai") or ""}
+
+
+_NGAN = {P.SAC_THAI["+"]: "+", P.SAC_THAI["-"]: "-", P.SAC_THAI["="]: "="}
+#: Hai kiểu lật MKT cần soi trước khi --ap-dung (27/10/2026): luật "thiện cảm là +" có thể kéo
+#: bình luận trung lập lên "+", luật "một từ tiêu cực không đủ" có thể kéo lời chê xuống "=".
+_LAT_SOI = ((P.SAC_THAI["="], P.SAC_THAI["+"]), (P.SAC_THAI["-"], P.SAC_THAI["="]))
+
+
+def in_ma_tran(dem: dict, doi: list[dict], mau: int, in_ra=print) -> None:
+    """Bảng lật sắc thái cũ → mới của các dòng gán được + vài mẫu =→+ và −→= (tác giả đã băm)."""
+    mt = dem.get("ma_tran") or {}
+    if not mt:
+        return
+    cot = ("+", "=", "-")
+    in_ra("    Lật sắc thái (hàng = cũ, cột = mới):   " + "  ".join(f"{c:>5}" for c in cot))
+    for cu in sorted({k[0] for k in mt}, key=lambda x: (x not in _NGAN, x)):
+        so = [mt.get((cu, m), 0) for m in (P.SAC_THAI["+"], P.SAC_THAI["="], P.SAC_THAI["-"])]
+        in_ra(f"      {_NGAN.get(cu, cu):<34}" + "  ".join(f"{n:>5}" for n in so))
+    for cu, moi in _LAT_SOI:
+        lat = [d for d in doi if d["cu"].get("sac_thai") == cu and d["moi"]["sac_thai"] == moi]
+        in_ra(f"    Mẫu {_NGAN[cu]} → {_NGAN[moi]}: {len(lat)} dòng")
+        for d in lat[:mau]:
+            in_ra(_mau(d))
 
 
 # ───────────────────────────── ghi + hoàn tác ─────────────────────────────
@@ -451,6 +478,8 @@ def chay(ns, in_ra=print) -> int:
             in_ra(f"Xem trước {len(thu)} dòng (1 lượt model, KHÔNG ghi): {len(doi)} đổi nhãn, "
                   f"{dem['khong_doi']} giữ nguyên, {dem['chua_gan']} chưa gán được "
                   f"({dem['trang_thai'] or '—'}).")
+            in_ma_tran(dem, doi, ns.mau, in_ra)
+            in_ra("    Mẫu đổi nhãn khác:")
             for d in doi[:ns.mau]:
                 in_ra(_mau(d))
         in_ra("Không ghi gì. Ghi thật: thêm --ap-dung --sao-luu <tệp hoàn tác>.")

@@ -51,7 +51,7 @@ class KhoGia:
                             "nguon_id": 1, "noi_dung": "Túi mới về"},
             "tiktok:mg": {"tai_khoan": "hapas.official", "tac_gia": "HAPAS", "nguon_id": 2,
                           "noi_dung": "20/10 này, bạn muốn nói gì với người phụ nữ bạn thương "
-                                      "nhất? 💌"},
+                                      "nhất? 💌", "hashtag": "minigame2010"},
             "tiktok:kol": {"tai_khoan": "kol.a", "tac_gia": "Kol A", "nguon_id": 3,
                            "noi_dung": "review túi"},
         }
@@ -258,7 +258,28 @@ def test_gan_lai_kem_bai_va_brand_nhu_viec_nen(moi):
     assert S.main(["hapas", "--thu", "3"]) == 0
     nhac = kho.goi_nhac[0][len(P._NHAC):]
     assert nhac.startswith("BRAND đang theo dõi (để biết món nào là hàng của brand): HAPAS")
-    assert "<b k=\"0\">" in nhac and re.search(r'<c i="\d+" b="\d+">', nhac)
+    bai = dict(re.findall(r'<b k="(\d+)">(.*?)</b>', nhac))
+    bl = re.findall(r'<c i="\d+" b="(\d+)">(.*?)</c>', nhac)
+    assert len(bl) == 3, "mỗi bình luận mang bài của nó"
+    for k, chu in bl:
+        if chu.startswith("27"):
+            assert bai[k].startswith("20/10 này") and bai[k].endswith("| #minigame2010"), \
+                "bài minigame kèm hashtag"
+        else:
+            assert chu == "túi đẹp quá" and bai[k] == "Túi mới về"
+    assert len(bai) == 2, "hai bài, mỗi bài gửi một lần"
+
+
+def test_thu_in_bang_lat_sac_thai_va_mau_lat(moi, capsys):
+    """Rà soát 27/10/2026: --thu in bảng lật sắc thái cũ → mới + mẫu = → + và − → = để MKT soát
+    trước khi --ap-dung."""
+    assert S.main(["hapas", "--thu", "3"]) == 0
+    out = capsys.readouterr().out
+    assert "Lật sắc thái (hàng = cũ, cột = mới)" in out
+    dong = next(d for d in out.splitlines() if d.strip().startswith("=") and "    " in d)
+    assert dong.split()[1:] == ["1", "2", "0"], dong       # "=" cũ: 1 lên "+", 2 giữ "="
+    assert "Mẫu = → +: 1 dòng" in out and "Mẫu - → =: 0 dòng" in out
+    assert "túi đẹp quá" in out.split("Mẫu = → +")[1].split("Mẫu - → =")[0]
 
 
 def test_ap_dung_roi_hoan_tac_tron_vong(moi, tmp_path, capsys):
