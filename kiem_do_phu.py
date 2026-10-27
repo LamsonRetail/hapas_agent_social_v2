@@ -317,6 +317,12 @@ def danh_dau(ma: str, items: list[tuple[dict, str]], du_an: dict, tu: list[str],
     import theo_doi_api as TDA
     moc = max(tu_pv, bay_gio - datetime.timedelta(days=NGAY_MAU))
     loai_tru = [str(x) for x in du_an.get("tu_loai_tru") or [] if str(x).strip()]
+    # "Nhắc brand" = khớp từ khoá VÀ có tín hiệu brand (`theo_doi.co_tin_hieu_brand`, soát
+    # 27/10/2026): bài khớp khẩu hiệu chung chung rải rác ("Tử Vi Vô Chính Diệu" khớp "yêu từ điều
+    # nhỏ nhất") mà AI không phán thì lượt quét không giữ, không vào sổ — bản trước đếm nó là bài
+    # SÓT, đẩy tác giả thành đề xuất ưu tiên / nới lượt nổi trả tiền. Tên brand + kênh nhà đọc lười.
+    cong = T.cau_hinh_hashtag_brand(du_an)
+    ten, la_nha = T._cong_brand_luoi(du_an, cong)
     theo: dict[str, dict] = {}
     for it, duong in items:
         for d, dt in A._chuan_tiktok(A._chuan_clockworks([it])):
@@ -330,7 +336,8 @@ def danh_dau(ma: str, items: list[tuple[dict, str]], du_an: dict, tu: list[str],
                     theo[k]["duong"].append(duong)
                 continue
             nhac = (A._khop_tu_khoa(d, tu) and not A._tu_loai_tru_khop(d, loai_tru)
-                    and not loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}"))
+                    and not loc_rac.bai_spam(f"{d.get('text') or ''} {d.get('hashtags') or ''}")
+                    and T.co_tin_hieu_brand(d, cong, ten, la_nha))
             theo[k] = {"khoa": k, "d": d, "dt": dt, "duong": [duong], "nhac": bool(nhac),
                        "tl": _thao_luan(d), "da_co": False, "da_loai": False, "xet_lai": False}
     if theo:

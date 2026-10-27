@@ -4598,7 +4598,9 @@ def _handle(args: dict, **kwargs) -> str:
             v = None
         if v:
             giu, ma, ghi = v
-            d["_ai"], d["_ma_ai"] = True, ma
+            # `_ghi_ai`: ghi chú gốc của AI (mã nước của other_market) — `theo_doi.luu_tu_khoa` xét
+            # luật M2 của dự án VN như `_giu_tu_khoa` (soát 27/10/2026).
+            d["_ai"], d["_ma_ai"], d["_ghi_ai"] = True, ma, str(ghi or "")
             if ma == "other_market" and re.fullmatch(r"[A-Za-z]{2}", ghi):
                 # Mã nước của model chỉ lấp chỗ hệ thống chưa đoán được; đoán được rồi thì
                 # tín hiệu cứng (nước kênh khai, hệ chữ…) thắng.

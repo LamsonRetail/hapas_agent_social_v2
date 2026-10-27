@@ -3929,7 +3929,9 @@ TAG_RONG_MAC_DINH = ("quatang2010",)
 
 
 def cau_hinh_hashtag_brand(du_an: dict) -> dict:
-    """{"bat", "ten", "tag_rong"} hiệu lực của cổng brand đường hashtag (xem trên). `ten` = tên +
+    """{"bat", "ten", "tag_rong"} hiệu lực của cổng brand đường hashtag (xem trên) — `bat` cũng là
+    công tắc của cổng "giữ không có phán AI phải có tín hiệu brand" (`co_tin_hieu_brand`, soát
+    27/10/2026; dự án lắng nghe theo chủ đề / ngành thì tắt). `ten` = tên +
     mã dự án + tên thêm trong cấu hình (chưa gồm tag chiến dịch — `ten_brand`); `tag_rong` = tag
     rộng dạng viết liền (danh sách trong cấu hình thay mặc định, kể cả rỗng). Rác → mặc định."""
     goc = du_an.get("cau_hinh") if isinstance(du_an.get("cau_hinh"), dict) else {}
@@ -4066,10 +4068,21 @@ def nhac_brand(d: dict, ten: list[str]) -> bool:
 # lại. Lý do này KHÔNG nằm trong `LY_DO_XET_LAI` (xét lại vô điều kiện = gửi AI lại mỗi lượt, tốn
 # tiền, AI vẫn "không rõ"); `_con_chan` xét nó như `LY_DO_HASHTAG_BRAND`: chỉ chặn khi bài vẫn không
 # có tín hiệu brand theo danh sách HIỆN HÀNH — thêm tên / tag chiến dịch / kênh nhà, hay tắt cổng
-# brand, là gỡ được (bài tới AI lại, một lần). Tắt cùng công tắc với cổng brand đường hashtag
-# (`du_an.cau_hinh.hashtag_can_nhac_brand` = false — dự án không có "tên brand" để đòi). Đường
-# NGUỒN (`chon_bai`) không qua cổng này: nguồn do người duyệt.
+# brand, là gỡ được (bài tới AI lại, một lần). MỘT công tắc cho cả hai cổng (cổng brand đường
+# hashtag và cổng này): `du_an.cau_hinh.hashtag_can_nhac_brand` = false. Dự án lắng nghe theo CHỦ ĐỀ
+# / ngành (không phải một brand — từ khoá là "túi xách nữ"…) phải tắt công tắc này, không thì bài
+# AI không phán mà không gọi tên dự án bị bỏ ở đường từ khoá, và bài chỉ-hashtag bị bỏ trước AI.
+# Kiểm độ phủ (`kiem_do_phu.danh_dau`) chỉ tính bài mẫu có tín hiệu brand là "bài nhắc brand" (bài
+# khớp khẩu hiệu rải rác không phải bài sót). Đường NGUỒN (`chon_bai`) không qua cổng này: nguồn do
+# người duyệt.
 LY_DO_KHONG_NHAC_BRAND = "khong_nhac_brand"
+
+
+def other_market_ngoai_vn(ma_ai, ghi) -> bool:
+    """Bài AI GIỮ với mã other_market mà ghi chú thị trường của AI không phải "VN" — dự án VN không
+    nhận (luật M2, soát 18/10/2026). Dùng chung cho `_giu_tu_khoa` và `luu_tu_khoa` (social_listen
+    mang ghi chú gốc của AI trong `_ghi_ai`, soát 27/10/2026)."""
+    return ma_ai == "other_market" and str(ghi or "").strip().upper() != "VN"
 
 
 def co_tin_hieu_brand(d: dict, cong: dict, ten=None, la_nha=None) -> bool:
@@ -4240,8 +4253,7 @@ def _giu_tu_khoa(du_an: dict, luot: int, hits: list, tu: list[str], han: float,
             continue
         if px and px[1] == "khong_ro":
             px = None
-        if px and px[0] and px[1] == "other_market" and vn \
-                and str(px[2] if len(px) > 2 else "").strip().upper() != "VN":
+        if px and px[0] and vn and other_market_ngoai_vn(px[1], px[2] if len(px) > 2 else ""):
             # Soát 18/10/2026 (M2): cổng VN để AI quyết ca mơ hồ ("HAPAS THAILAND" viết Latin,
             # tiêu đề tiếng Anh). AI giữ bài brand ở thị trường khác với mã other_market (đúng cho
             # social_listen), nhưng bài đó không thuộc số của dự án VN — loại, ghi rõ mã.
@@ -5558,7 +5570,8 @@ def _ban_sao_tu_khoa(hits: list) -> list[tuple[dict, datetime.datetime]]:
             "followers": d.get("followers"), "views": d.get("views"), "likes": d.get("likes"),
             "comments": d.get("comments"), "shares": d.get("shares"),
             "hashtags": d.get("hashtags"), "text": d.get("text"), "link": d.get("link"),
-            "_khop": bool(d.get("_khop")), "_ma_ai": d.get("_ma_ai"), "_kenh_id": kenh_id,
+            "_khop": bool(d.get("_khop")), "_ma_ai": d.get("_ma_ai"),
+            "_ghi_ai": str(d.get("_ghi_ai") or ""), "_kenh_id": kenh_id,
             "_goc_id": goc.get("id") if isinstance(goc.get("id"), (str, int)) else None,
             "_sac_thai": None if not sac or sac == phan_loai.CHUA else sac,
             "_chu_de": None if not cd or cd == phan_loai.CHUA else cd,
@@ -5625,13 +5638,14 @@ def luu_tu_khoa(queries: list[str], ban: list) -> dict:
         # Soát 27/10/2026: bài social_listen giữ theo LUẬT (không có `_ma_ai` — AI không rõ / lỗi /
         # hết giờ) cũng phải có tín hiệu brand như lượt /theodoi (`co_tin_hieu_brand`); dự án VN
         # không nhận bài AI giữ với mã other_market (cùng luật M2 của `_giu_tu_khoa` — script dọn
-        # `lang_nghe_loc_khong_brand` xoá loại bài này khỏi kho, đường này không được ghi lại).
+        # `lang_nghe_loc_khong_brand` xoá loại bài này khỏi kho, đường này không được ghi lại) —
+        # trừ khi ghi chú thị trường của AI là "VN", đúng như `_giu_tu_khoa` (`_ghi_ai`).
         vn = str(da.get("thi_truong") or "VN").upper() == "VN"
         tk_s: dict = {"khong_brand": len(ban) - len(ban_brand), "khong_nhac_brand": 0,
                       "other_market": 0}
         con = []
         for d, dt in ban_brand:
-            if vn and d.get("_ma_ai") == "other_market":
+            if vn and other_market_ngoai_vn(d.get("_ma_ai"), d.get("_ghi_ai")):
                 tk_s["other_market"] += 1
             elif not d.get("_ma_ai") and not co_tin_hieu_brand(d, cong, ten, la_nha):
                 tk_s["khong_nhac_brand"] += 1

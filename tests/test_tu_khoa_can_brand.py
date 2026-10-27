@@ -17,6 +17,7 @@ from test_theo_doi import GiaKho, _hit, mo  # noqa: F401 — `mo` là fixture
 
 import apify_tool as A
 import kiem_do_phu as KDP
+import lang_nghe_db as K
 import theo_doi as T
 import theo_doi_api as TDA
 
@@ -155,20 +156,109 @@ def test_bai_ai_giu_khong_doi(monkeypatch, ai):
     assert r["ly_do_giu"] == "ad" and r["khop_tu_khoa"] is True, "cờ khớp thô giữ nguyên"
 
 
-def test_kiem_do_phu_dua_bai_ly_do_moi_qua_pheu_xet_lai(monkeypatch):
-    """Bài trong sổ với lý do mới là bài "xét lại" của phần lấp lỗ (`_con_chan` quyết theo cấu
-    hình hiện hành — vẫn không nhắc brand thì vẫn chặn, không tới AI)."""
+def test_con_chan_go_khi_them_ten_tag_hoac_tat_cong(monkeypatch, ai):
+    """Lý do `khong_nhac_brand` không chặn mãi: thêm tên brand ("Mate Made") → bài tới AI lại, AI
+    vẫn không rõ → giữ (giờ có tín hiệu brand). Thêm tag dự án / tắt cổng cũng gỡ."""
+    goi, phan = ai
+    kho = KhoGia()
+    kho.cai(monkeypatch)
+    mm = _bai(1, "shop_mm", "Mate Made — yêu bản thân từ những điều nhỏ nhất")
+    phan["shop_mm"] = (True, "khong_ro", "")
+    T._tach_va_giu(DU_AN, 7, [mm], TU, 1e12, _tk())
+    assert _so() == {"tiktok:881": LY} and kho.ghi == []
+    v = [LY, "x"]
+    cong = T.cau_hinh_hashtag_brand(DU_AN)
+    assert T._con_chan(v, mm[0], cong, T.ten_brand(DU_AN))
+    tag = {**DU_AN, "hashtag": [*DU_AN["hashtag"], "matemade"]}
+    assert not T._con_chan(v, mm[0], cong, T.ten_brand(tag))
+    tat = T.cau_hinh_hashtag_brand({**DU_AN, "cau_hinh": {"hashtag_can_nhac_brand": False}})
+    assert not T._con_chan(v, mm[0], tat, T.ten_brand(DU_AN))
+    them = {**DU_AN, "cau_hinh": {"hashtag_can_nhac_brand": {"ten": ["Mate Made"]}}}
+    tk = _tk()
+    T._tach_va_giu(them, 8, [mm], TU, 1e12, tk)
+    assert goi[-1] == ["shop_mm"] and tk["pheu"]["tiktok"]["xet_lai"] == 1
+    assert kho.ghi[-1][0]["tai_khoan"] == "shop_mm"
+
+
+def test_other_market_ghi_chu_vn_thi_giu_khac_vn_thi_loai(monkeypatch, ai):
+    """Luật M2 như cũ: AI giữ mã other_market với ghi chú "VN" → giữ (mã other_market); ghi chú
+    nước khác → loại, sổ `ai:other_market`."""
+    _, phan = ai
+    kho = KhoGia()
+    kho.cai(monkeypatch)
+    phan["hapas.vn2"] = (True, "other_market", "VN")
+    phan["hapas.th"] = (True, "other_market", "TH")
+    T._tach_va_giu(DU_AN, 7, [_bai(1, "hapas.vn2", "HAPAS chi nhánh"),
+                              _bai(2, "hapas.th", "HAPAS Thailand")], TU, 1e12, _tk())
+    assert [(r["tai_khoan"], r["ly_do_giu"]) for rows in kho.ghi for r in rows] == [
+        ("hapas.vn2", "other_market")]
+    assert _so() == {"tiktok:882": "ai:other_market"}
+    assert T.other_market_ngoai_vn("other_market", " vn ") is False
+    assert T.other_market_ngoai_vn("other_market", "") is True
+    assert T.other_market_ngoai_vn("brand", "TH") is False
+
+
+# ───────────────────────────── kiểm độ phủ ─────────────────────────────
+def test_kiem_do_phu_bai_khop_rai_rac_khong_la_bai_nhac_brand(monkeypatch):
+    """Soát M3: bài mẫu khớp khẩu hiệu rải rác mà không có tín hiệu brand không phải "bài nhắc
+    brand" — không vào mẫu số, không thành bài sót, không đi lấp lỗ. Bài trong sổ với lý do mới mà
+    nay có tín hiệu brand (thêm tên) là bài "xét lại" của phần lấp lỗ."""
     from test_kiem_do_phu import _aw
 
-    import lang_nghe_db as K
     import tiktok_api as TT
     monkeypatch.setattr(K, "khoa_da_co", lambda ma, khoa: set())
+    monkeypatch.setattr(K, "nguon_cua_du_an", lambda ma: [])
     tu_pv = LUC - datetime.timedelta(days=10)
-    TDA.ghi_loai("hapas", TDA.dau_loai(DU_AN, TU), [("tiktok:881", LY, LUC)], tu_pv)
-    items = [(TT.video(_aw(881, "tuvi.vochinhdieu", TU_VI, LUC)), "@tim")]
-    (x,) = KDP.danh_dau("hapas", items, DU_AN, TU, tu_pv, LUC + datetime.timedelta(hours=1),
-                        lambda d: T._khoa_bai("tiktok", d["link"]))
-    assert x["nhac"] and x["da_loai"] and x["xet_lai"]
+    TDA.ghi_loai("hapas", TDA.dau_loai(DU_AN, TU), [("tiktok:882", LY, LUC)], tu_pv)
+    items = [(TT.video(_aw(881, "tuvi.vochinhdieu", TU_VI, LUC)), "@tim"),
+             (TT.video(_aw(882, "shop_mm", "Mate Made — yêu từ điều nhỏ nhất", LUC)), "@tim")]
+    them = {**DU_AN, "cau_hinh": {"hashtag_can_nhac_brand": {"ten": ["Mate Made"]}}}
+    mau = KDP.danh_dau("hapas", items, them, TU, tu_pv, LUC + datetime.timedelta(hours=1),
+                       lambda d: T._khoa_bai("tiktok", d["link"]))
+    x = {m["khoa"]: (m["nhac"], m["da_loai"], m["xet_lai"]) for m in mau}
+    assert x == {"tiktok:881": (False, False, False), "tiktok:882": (True, True, True)}
+    so = KDP.tinh_do_phu(mau)
+    assert (so["so_nhac"], so["so_sot"]) == (0, 0)
+    assert KDP.bai_sot(mau, TU, set(), LUC) == []
+
+
+def test_kiem_do_phu_lap_lo_khong_dua_bai_khop_rai_rac_vao_pheu(mo):  # noqa: F811
+    """Cả lượt kiểm độ phủ (TikTok giả): video "Tử Vi" trong danh sách bài của một nhà sáng tạo khớp
+    khẩu hiệu — không tính là bài nhắc brand, không thành bài sót, không đi lấp lỗ (không tới
+    AI, không vào kho), không đẩy tác giả thành đề xuất."""
+    import test_kiem_do_phu as TK
+
+    import tiktok_api as TT
+    mo.setattr(T, "_kiem_do_phu", TK._KIEM_THAT)
+    mo.setattr(TT, "dung_api", lambda viec: True)
+    mo.setattr(T, "khau_hieu_chien_dich", lambda ma, bay_gio: (None, []))
+    kho = TK.KhoDp(mo)
+    kho.da_co = {"tiktok:70000002"}
+
+    mo.setattr(K, "khoa_da_co", lambda ma, khoa: {k for k in khoa if k in kho.da_co | {
+        r["khoa"] for _, rows in kho.bai for r in rows}})
+    goi_ai: list = []
+    mo.setattr(A, "_phan_xu_ai", lambda rows, *a, **k: (
+        goi_ai.append([d["username"] for d, _ in rows]),
+        ({}, {"_sac_thai": {}, "_chu_de": {}, "trang_thai": "đã chạy"}))[1])
+    goc = TK._tra_mau(datetime.datetime.now(_VN) - datetime.timedelta(days=15))
+
+    def tra(p):
+        r = goc(p)
+        if not any(k in p for k in ("searchHashtags_keyword", "challengePosts_cid",
+                                    "profile_username")):
+            r = {**r, "aweme_list": [*r["aweme_list"], TK._aw(
+                70000009, "tuvi.vochinhdieu", TU_VI, TK.BAY - datetime.timedelta(days=1), bl=900)]}
+        return r
+    TK.GiaApi(mo, tra)
+    du_an = {**TK.DU_AN, "tu_khoa": ["hapas", "yêu từ điều nhỏ nhất"]}
+    kq = TK._chay_dp(TK.GiaViec({}, []), du_an)
+    (dong,) = kho.dong
+    assert [s["khoa"] for s in dong["bai_sot"]] == ["tiktok:70000001"]
+    assert (kq["so"]["so_nhac"], kq["so"]["so_sot"]) == (2, 1)
+    assert [r["khoa"] for _, rows in kho.bai for r in rows] == ["tiktok:70000001"]
+    assert all("tuvi.vochinhdieu" not in g for g in goi_ai), "không gửi AI"
+    assert all(x["dinh_danh"] != "tuvi.vochinhdieu" for x in dong["hanh_dong"]["de_xuat"])
 
 
 # ───────────────────────────── social_listen → kho ─────────────────────────────
@@ -190,3 +280,34 @@ def test_luu_tu_khoa_bai_giu_theo_luat_cung_can_brand_va_vn_bo_other_market(monk
     ghi_chu = kho.luot[luot]["ghi_chu"]
     assert "bỏ 1 bài AI không phán mà không nhắc brand" in ghi_chu
     assert "bỏ 1 bài AI xếp thị trường khác" in ghi_chu
+
+
+@pytest.mark.usefixtures("mo")
+def test_luu_tu_khoa_kenh_nha_tag_feed_va_other_market_vn(monkeypatch):
+    """Bài giữ theo luật của kênh nhà, bài chỉ có tín hiệu brand ở TAG FEED (Instagram từ feed
+    #yeutudieunhonhat — tag dự án) được ghi; other_market mà ghi chú AI là "VN" được ghi như
+    `_giu_tu_khoa`, ghi chú nước khác thì bỏ."""
+    from test_theo_doi import _nguon
+    kho = GiaKho(du_an={"hapas": {**DU_AN_TD, **DU_AN}},
+                 nguon=[_nguon(1, "tiktok", "nha_mau", "kenh_nha")]).cai(monkeypatch)
+    # Kho giả của test_theo_doi không trả `loai` — kho thật có (`nguon_cua_du_an`).
+    monkeypatch.setattr(K, "nguon_cua_du_an", lambda ma: kho.nguon)
+    ngay = datetime.datetime.now(_VN) - datetime.timedelta(days=1)
+    chung = {"_khop": True, "_sac_thai": None, "_chu_de": None}
+    nha = {**_bai(1, "nha_mau", "Yêu bản thân từ những điều nhỏ nhất")[0], **chung}
+    ig = {"platform": "instagram", "kenh": "Shop Quà", "username": "shop.qua", "followers": 0,
+          "views": 0, "likes": 1, "comments": 0, "shares": 0, "hashtags": "", **chung,
+          "text": "Quà 20/10 cho mẹ", "link": "https://www.instagram.com/p/Q9/",
+          "__goc": {"id": "q9",
+                    "inputUrl": "https://www.instagram.com/explore/tags/yeutudieunhonhat"}}
+    vn = {**_bai(3, "hapas.vn2", "HAPAS chi nhánh")[0], **chung, "_ma_ai": "other_market",
+          "_ghi_ai": "VN"}
+    th = {**_bai(4, "hapas.th", "HAPAS Thailand")[0], **chung, "_ma_ai": "other_market",
+          "_ghi_ai": "TH"}
+    ban = T._ban_sao_tu_khoa([(nha, ngay), (ig, ngay), (vn, ngay), (th, ngay)])
+    assert ban[1][0]["_tag_feed"] == "#yeutudieunhonhat" and ban[2][0]["_ghi_ai"] == "VN"
+    T.luu_tu_khoa(["hapas"], ban)
+    (_, luot, _, rows), = kho.bai
+    assert sorted(r["tai_khoan"] for r in rows) == ["hapas.vn2", "nha_mau", "shop.qua"]
+    assert "bỏ 1 bài AI xếp thị trường khác" in kho.luot[luot]["ghi_chu"]
+    assert "không nhắc brand" not in kho.luot[luot]["ghi_chu"]
