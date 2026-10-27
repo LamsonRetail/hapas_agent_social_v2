@@ -545,8 +545,8 @@ async def _nguoi(request: Request) -> dict:
 
 
 async def _co_qc(app: FastAPI, q: dict) -> bool:
-    """Mục "Quảng cáo TikTok" trên menu + trang + /api/qc: từ 20/10/2026 CHỈ quản trị viên
-    (`quang_cao.thay_trang_qc`; người khác hỏi Mark, trả lời bằng chữ). Bên có tài khoản nhớ
+    """Mục "Quảng cáo" trên menu + trang + /api/qc: quản trị viên + quản lý của bên có tài khoản
+    (`quang_cao.thay_trang_qc`, 27/10/2026; Chỉ xem hỏi Mark, trả lời bằng chữ). Bên có tài khoản nhớ
     `NHO_BEN_QC_GIAY`; kho quảng cáo chưa dùng được (chưa chạy schema.sql) = không có."""
     if PQ.la_quan_tri(q):
         return True
@@ -2905,7 +2905,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
         cac_nen = [n for n in QC.NEN_TANG_QC if any(QC.nen_tang_tk(t) == n
                                                     for t in QC.tk_dung(cac_tk))]
         cac_tk = QC.tk_dung(cac_tk, nen)
-        cac_ben = QC.ben_doc_qc(q, cac_tk)
+        cac_ben = QC.ben_trang_qc(q, cac_tk)
         if nguoi["la_quan_tri"]:
             if any(not t.get("don_vi") for t in cac_tk):
                 cac_ben.append(QC.CHUA_GAN)

@@ -142,10 +142,10 @@ def _ve(app, dai, la_quan_tri):
 
 
 def test_nguoi_khong_phai_quan_tri_khong_thay_90_ngay_va_loi_tho():
-    """Trang Quảng cáo chỉ quản trị viên mở được (`QC.thay_trang_qc` = la_quan_tri) — đây là lớp chặn
-    thứ hai: dựng dải với người thường thì không có menu 90 ngày, không số tài khoản, không chữ lỗi."""
+    """Từ 27/10/2026 quản lý của bên cũng mở trang Quảng cáo (`QC.thay_trang_qc`): dựng dải với người
+    không phải quản trị viên thì không có menu 90 ngày, không số tài khoản, không chữ lỗi."""
     h = _h()
-    assert QC.thay_trang_qc({"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}, {"hapas"}) is False
+    assert QC.thay_trang_qc({"la_quan_tri": False, "ben": {"hapas": "quan_ly"}}, {"hapas"}) is True
     the = {"co_token": True, "dong_bo_loi": "token=abc lỗi 500", "so_tk_thay": 7}
     x = QC.dong_dieu_khien(the, "tiktok", BAY, la_quan_tri=False, bay_dv=BAY)
     assert x["ly_day_du"] == "chỉ quản trị viên" and x["chi_tiet"]["so_tk"] is None

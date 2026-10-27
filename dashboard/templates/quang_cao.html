@@ -379,6 +379,8 @@
       quản trị viên; máy chủ kiểm lại quyền + phạm vi (POST /quang-cao/tao-sheet), Mark dựng Sheet bằng
       app Lark của Mark (dashboard không gọi Lark). Trái = phạm vi + nút; phải = Sheet gần đây của chính
       người xem (qc.js hỏi lại /api/qc/sheet mỗi 5 giây khi còn yêu cầu đang tạo). Điện thoại xếp dọc. #}
+  {#- 27/10/2026: quản lý của bên mở được trang nhưng xuất Sheet vẫn chỉ quản trị viên — ẩn cả khối. #}
+  {% if nguoi.la_quan_tri %}
   {% set dang_sheet = sheet_ds|selectattr('dang')|list %}
   <div class="qc-sheet" id="sheet" data-dang="{{ '1' if dang_sheet else '0' }}" aria-labelledby="qc-sheet-tieu-de" role="region">
     <div class="qc-sheet__than">
@@ -422,6 +424,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
 </section>
 
 {#- 23/10/2026 (chủ dự án): "Theo kênh đăng" đặt SAU "Chiến dịch và quảng cáo". #}

@@ -735,13 +735,18 @@ def test_bo_hen_gio_2_phut_va_06_45():
 
 
 # ───────────────────────────── trang + /api/qc ─────────────────────────────
-def test_api_qc_loc_nen_tang_va_chi_quan_tri():
+def test_api_qc_loc_nen_tang_quan_tri_va_quan_ly_ben():
     h = _app_hai_nen_tang()
     c, kho_qc = h.c, h.kho_qc
     Q = "tu=2026-10-12&den=2026-10-18"
-    for ai in (XEM, HP_QL, MM_XEM):
+    for ai in (XEM, MM_XEM):
         dang_nhap(c, ai)
         assert c.get(f"/api/qc?{Q}&nen_tang=meta").status_code == 404, ai
+    # 27/10/2026: quản lý HAPAS mở được — chỉ bên HAPAS.
+    dang_nhap(c, HP_QL)
+    ql = c.get(f"/api/qc?{Q}").json()
+    assert [b["ma"] for b in ql["cac_ben"]] == ["hapas"] and ql["ben"] == "hapas"
+    assert all(kho_qc.tk[x["advertiser_id"]]["don_vi"] == "hapas" for x in ql["tai_khoan"])
     dang_nhap(c, QL)
     d = c.get(f"/api/qc?{Q}").json()
     assert d["nen_tang"] == "tat_ca" and [x["ma"] for x in d["cac_nen_tang"]] == [
