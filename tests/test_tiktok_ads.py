@@ -72,6 +72,8 @@ class GiaTikTok:
         self.dang_ky: list[dict] = []
         self.doi_ma: list[dict] = []
         self.kg_cd: list[tuple] = []        # (adv, chiều, mã chiến dịch) của khán giả cấp chiến dịch
+        self.so_thich: list[tuple] = []     # 28/10/2026: [(mã v1, mã v2)] chiều sở thích trả về
+        self.ten_so_thich: dict = {}        # {1 | 2: [nhóm]} của tool_interest_category_get
 
     def transport(self):
         return httpx.MockTransport(self.xu_ly)
@@ -122,7 +124,10 @@ class GiaTikTok:
         elif a["report_type"] == "AUDIENCE":
             chieu = dims[1]
             gt = {"age": ["AGE_18_24", "AGE_25_34"], "gender": ["FEMALE", "MALE"],
-                  "province_id": ["1581129", "-1"], "platform": ["ANDROID", "IPHONE"]}[chieu]
+                  "province_id": ["1581129", "-1"], "platform": ["ANDROID", "IPHONE"],
+                  # 28/10/2026: sở thích — mặc định TikTok giả KHÔNG trả dòng nào (bài thử cũ giữ
+                  # nguyên số dòng); `so_thich` = [(v1, v2)…] để trả dòng (cả hai mã, như đo thật).
+                  "interest_category": self.so_thich}[chieu]
             if dims[0] == "campaign_id":
                 # 26/10/2026: khán giả cấp chiến dịch — AUCTION_CAMPAIGN, lọc ≤ 100 campaign_ids
                 # (chuỗi JSON như báo cáo BASIC); mỗi chiến dịch đủ các giá trị, số theo thứ tự mã.
@@ -132,11 +137,11 @@ class GiaTikTok:
                 ids = json.loads(loc["filter_value"])
                 assert 1 <= len(ids) <= TA.LO_ID
                 self.kg_cd.append((adv, chieu, tuple(ids)))
-                rows = [{"dimensions": {"campaign_id": x, chieu: g},
+                rows = [{"dimensions": {"campaign_id": x, **self._gt(chieu, g)},
                          "metrics": self._chi_so(a["metrics"], i, 100 * (j + 1) + i)}
                         for j, x in enumerate(ids) for i, g in enumerate(gt)]
             else:
-                rows = [{"dimensions": {"advertiser_id": adv, chieu: g},
+                rows = [{"dimensions": {"advertiser_id": adv, **self._gt(chieu, g)},
                          "metrics": self._chi_so(a["metrics"], i, 1000 * (i + 1))}
                         for i, g in enumerate(gt)]
         elif cap == "AUCTION_ADVERTISER":
@@ -168,8 +173,21 @@ class GiaTikTok:
         return {"code": 0, "message": "OK", "data": {"list": trang, "page_info": {
             "page": a["page"], "page_size": cs, "total_number": len(rows), "total_page": tong}}}
 
+    @staticmethod
+    def _gt(chieu, g):
+        """Chiều của dòng: sở thích trả CẢ interest_category (v1) lẫn interest_category_v2."""
+        if chieu == "interest_category":
+            return {"interest_category": g[0], "interest_category_v2": g[1]}
+        return {chieu: g}
+
     def _cong_cu(self, ten: str, a: dict) -> dict:
         self.cong_cu.append((ten, a))
+        if ten == "tool_execute" and a.get("tool_name") == TA.TOOL_SO_THICH:
+            # 28/10/2026: tên nhóm sở thích (dạng đo thật); `ten_so_thich` = {phiên bản: [nhóm…]}.
+            pb = a["params"]["version"]
+            if pb not in self.ten_so_thich:
+                return {"code": 40002, "message": "không có"}
+            return {"code": 0, "data": {"interest_categories": self.ten_so_thich[pb]}}
         if ten == "auth_advertiser_get":
             return {"code": 0, "data": {"list": [{"advertiser_id": k, "advertiser_name": v + " "}
                                                  for k, v in self.tk.items()]}}
@@ -230,6 +248,26 @@ class GiaTikTok:
 
 
 # ───────────────────────────── kho quảng cáo giả ─────────────────────────────
+def _so_cs(r, k):
+    v = (r.get("chi_so") or {}).get(k)
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def click_lk(r):
+    """28/10/2026 — như `kho_qc.click_lk_sql`: TikTok cột click; Meta (act_…) inline_link_clicks,
+    vắng khoá mà có click → 0."""
+    if str(r.get("advertiser_id") or "").startswith("act_"):
+        v = _so_cs(r, QC.CLICK_LK_META)
+        return v if v is not None else (0 if r.get("click") is not None else None)
+    return r.get("click")
+
+
+def lpv(r):
+    """Như `kho_qc.lpv_sql`: TikTok total_landing_page_view / Meta actions__landing_page_view."""
+    v = _so_cs(r, QC.LPV[1])
+    return v if v is not None else _so_cs(r, QC.LPV[2])
+
+
 class GiaKhoQC:
     """Bản bộ nhớ của `dashboard.kho_qc` — cùng tên hàm, khoá chính như schema.sql."""
 
@@ -428,8 +466,10 @@ class GiaKhoQC:
         if xong:
             self.tk[adv]["nap_lui_xong_luc"] = BAY
 
-    def dat_khan_gia(self, adv):
+    def dat_khan_gia(self, adv, bo_chieu=None):
         self.tk[adv]["khan_gia_luc"] = BAY
+        if bo_chieu is not None:
+            self.tk[adv]["khan_gia_bo_chieu"] = bo_chieu
 
     def nap_lai(self, ai, ncc="tiktok_ads"):
         nen = "meta" if ncc == "meta_ads" else "tiktok"
@@ -482,7 +522,7 @@ class GiaKhoQC:
     def gio_kho(self):
         return self._gio()
 
-    def xong_khan_gia_cd(self, adv, den, tu_luc):
+    def xong_khan_gia_cd(self, adv, den, tu_luc, bo_chieu=None):
         b = self.bang["qc_khan_gia_cd"]
         for k in [k for k, r in b.items() if r["advertiser_id"] == adv
                   and (r["den"] != den or r["cap_nhat_luc"] < tu_luc)]:
@@ -494,6 +534,8 @@ class GiaKhoQC:
                 r["cap_nhat_luc"] = luc
                 n += 1
         self.tk[adv]["khan_gia_cd_den"] = den
+        if bo_chieu is not None:
+            self.tk[adv]["khan_gia_cd_bo_chieu"] = bo_chieu
         return n
 
     def _moi_cd(self, ids):
@@ -528,8 +570,41 @@ class GiaKhoQC:
                 nhom.setdefault((r["chieu"], r["gia_tri"]), []).append(r)
         ra = [{"chieu": c, "gia_tri": g, "tu": min(x["tu"] for x in rs),
                "den": max(x["den"] for x in rs), **self._cong(rs)} for (c, g), rs in nhom.items()]
+        cua = [r for r in self._moi_cd(ids) if r["campaign_id"] in cds]
         return {"rows": ra, "tu": min((r["tu"] for r in ra), default=None),
-                "den": max((r["den"] for r in ra), default=None)}
+                "den": max((r["den"] for r in ra), default=None),
+                "mau_so_thich": self._mau(cua, ("advertiser_id", "campaign_id", "tu", "den"))
+                if any(r["chieu"] == QC.CHIEU_SO_THICH for r in ra) else None}
+
+    @staticmethod
+    def _mau(rows, don_vi):
+        """Như `kho_qc._MAU_SO_THICH`: tổng hiển thị theo tuổi của đơn vị đã có dòng sở thích."""
+        co = {tuple(r[k] for k in don_vi) for r in rows if r["chieu"] == QC.CHIEU_SO_THICH}
+        return sum(r.get("hien_thi") or 0 for r in rows
+                   if r["chieu"] == "age" and tuple(r[k] for k in don_vi) in co)
+
+    # 28/10/2026: tên sở thích (qc_so_thich) — {(phien_ban, id): dòng}.
+    def so_thich_can_lam_moi(self, ngay):
+        ds = getattr(self, "so_thich", {})
+        co = any(r["chieu"] == QC.CHIEU_SO_THICH for r in self.bang["qc_khan_gia"].values())
+        moi = {pb for (pb, _), r in ds.items()
+               if r["cap_nhat_luc"] > self.bay - datetime.timedelta(days=ngay)}
+        return [pb for pb in (1, 2) if co and pb not in moi]
+
+    def ghi_so_thich(self, rows):
+        self.so_thich = getattr(self, "so_thich", {})
+        for r in rows:
+            self.so_thich[(r["phien_ban"], r["id"])] = {**r, "cap_nhat_luc": self.bay}
+        return len(rows)
+
+    def ten_so_thich(self, gia_tri):
+        ds = getattr(self, "so_thich", {})
+        ra = {}
+        for g in gia_tri:
+            m = QC.tach_so_thich(g)
+            if m and m in ds:
+                ra[g] = ds[m]["ten"]
+        return ra
 
     def gia_tri_khan_gia(self, chieu):
         tong: dict = {}
@@ -549,6 +624,18 @@ class GiaKhoQC:
                 if r.get(c) is not None:
                     ra[c] = (ra[c] or 0) + r[c]
         return ra
+
+    @classmethod
+    def _cong_ll(cls, rows):
+        """`_cong` + lưu lượng (28/10/2026, như kho_qc._TONG_LL): click_lk, lpv."""
+        lk = [v for v in map(click_lk, rows) if v is not None]
+        return {**cls._cong(rows), "click_lk": sum(lk) if lk else None,
+                "lpv": int(sum(v for v in map(lpv, rows) if v is not None))}
+
+    @staticmethod
+    def _json_so(rs, k):
+        return int(sum(v for r in rs for v in [(r.get("chi_so") or {}).get(k)]
+                       if isinstance(v, (int, float)) and not isinstance(v, bool)))
 
     # 23/10/2026: `cds` (lọc tên chiến dịch cấp trang) — như SQL: None = qc_tk_ngay; danh sách = chỉ
     # các chiến dịch đó, cộng từ qc_campaign_ngay; [] = rỗng.
@@ -584,7 +671,9 @@ class GiaKhoQC:
         if cds is not None and not cds:
             return {}
         rows = self._nguon(ids, tu, den, cds)
-        return {**self._cong(rows), "so_ngay": len({r["ngay"] for r in rows})}
+        return {**self._cong_ll(rows),
+                **{ma: self._json_so(rows, k) for ma, k, *_ in QC.CHUOI_XEM_SP},
+                "so_ngay": len({r["ngay"] for r in rows})}
 
     def qc_theo_ngay(self, ids, tu, den, cds=None):
         theo: dict = {}
@@ -595,7 +684,7 @@ class GiaKhoQC:
         def json_so(rs, k):
             return int(sum(v for r in rs for v in [(r.get("chi_so") or {}).get(k)]
                            if isinstance(v, (int, float)) and not isinstance(v, bool)))
-        return [{"ngay": d, **self._cong(rs),
+        return [{"ngay": d, **self._cong_ll(rs),
                  **{ma: json_so(rs, k) for ma, k, *_ in QC.CHUOI_XEM_SP}}
                 for d, rs in sorted(theo.items())]
 
@@ -623,11 +712,15 @@ class GiaKhoQC:
     #: Cùng nghĩa với KQ.SAP_BANG_SQL (bản Python cho kho giả).
     _SAP_BANG = {
         "chi": lambda t: t.get("chi"), "hien_thi": lambda t: t.get("hien_thi"),
-        "click": lambda t: t.get("click"), "view": lambda t: t.get("view_video"),
+        "click": lambda t: t.get("click_lk"), "view": lambda t: t.get("view_video"),
         "follow": lambda t: t.get("follow"), "tuong_tac": QC.tuong_tac,
+        "lpv": lambda t: t.get("lpv"),
+        "cpc": lambda t: (t["chi"] / t["click_lk"]
+                          if (t.get("hien_thi") or 0) >= QC.NGUONG_TI_LE
+                          and (t.get("click_lk") or 0) > 0 else None),
         "cpm": lambda t: (t["chi"] * 1000 / t["hien_thi"]
                           if (t.get("hien_thi") or 0) >= QC.NGUONG_TI_LE else None),
-        "ctr": lambda t: (t["click"] / t["hien_thi"]
+        "ctr": lambda t: (t["click_lk"] / t["hien_thi"]
                           if (t.get("hien_thi") or 0) >= QC.NGUONG_TI_LE else None),
         "roas": lambda t: (t["gia_tri_mua_shop"] / t["chi"]
                            if (t.get("chi") or 0) > 0 and t.get("gia_tri_mua_shop") is not None
@@ -651,7 +744,7 @@ class GiaKhoQC:
                    else [cuoi.get("ten_ad"), cuoi.get("ten_campaign")])
             if mau and not any(mau in QC.chu_tim(x or "") for x in ten):
                 continue
-            x = {khoa: k, "advertiser_id": cuoi["advertiser_id"], **self._cong(rs)}
+            x = {khoa: k, "advertiser_id": cuoi["advertiser_id"], **self._cong_ll(rs)}
             if cap == "campaign":
                 x.update(ten=cuoi["ten"], muc_tieu=cuoi["muc_tieu"])
             else:
@@ -686,7 +779,9 @@ class GiaKhoQC:
         ra = [{"chieu": c, "gia_tri": g, "tu": min(x["tu"] for x in rs),
                "den": max(x["den"] for x in rs), **self._cong(rs)} for (c, g), rs in nhom.items()]
         return {"rows": ra, "tu": min((r["tu"] for r in ra), default=None),
-                "den": max((r["den"] for r in ra), default=None)}
+                "den": max((r["den"] for r in ra), default=None),
+                "mau_so_thich": self._mau(rows, ("advertiser_id", "tu", "den"))
+                if any(r["chieu"] == QC.CHIEU_SO_THICH for r in ra) else None}
 
     def qc_moi(self, ids):
         rows = [r for r in self.bang["qc_tk_ngay"].values() if r["advertiser_id"] in ids]

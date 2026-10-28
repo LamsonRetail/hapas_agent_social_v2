@@ -22,9 +22,12 @@
 {#- 25/10/2026 (chủ dự án): nhãn khoảng mờ ở đầu mỗi mục theo khoảng ngày — đọc riêng một mục vẫn biết
     số là của kỳ nào (Khán giả có cửa sổ riêng, ghi rõ ở mục đó). #}
 {% macro nhan_khoang() %}<span class="qc-khoang-nhan" data-o="nhan-khoang">{{ ngay_ngan(d.tu) }} – {{ ngay_ngan(d.den) }}</span>{% endmacro %}
-{#- hiệu quả tính lại từ tổng (không cộng tỉ lệ): CPM = chi ÷ hiển thị × 1000, CTR = click ÷ hiển thị #}
+{#- hiệu quả tính lại từ tổng (không cộng tỉ lệ): CPM = chi ÷ hiển thị × 1000, CTR = click ÷ hiển thị.
+    28/10/2026 (chủ dự án): Click = BẤM LIÊN KẾT (`click_lk`: TikTok clicks, Meta inline_link_clicks)
+    ở MỌI chỗ của trang — ô CTR, TikTok và Meta, bảng, biểu đồ, kênh đăng; CPC = chi ÷ click_lk. #}
 {% macro cpm(k) %}{% if k.chi is not none and k.hien_thi %}{{ (k.chi / k.hien_thi * 1000)|round|int|so_vn }}{% else %}—{% endif %}{% endmacro %}
-{% macro ctr(k) %}{% if k.click is not none and k.hien_thi %}{{ (k.click / k.hien_thi * 100)|round(2)|so_thap }}%{% else %}—{% endif %}{% endmacro %}
+{% macro ctr(k) %}{% if k.click_lk is not none and k.hien_thi %}{{ (k.click_lk / k.hien_thi * 100)|round(2)|so_thap }}%{% else %}—{% endif %}{% endmacro %}
+{% macro cpc(k) %}{% if k.chi is not none and k.click_lk %}{{ (k.chi / k.click_lk)|round|int|so_vn }}{% else %}—{% endif %}{% endmacro %}
 {% macro chi_view(k) %}{% if k.chi is not none and k.view_video %}{{ (k.chi / k.view_video)|round|int|so_vn }}{% else %}—{% endif %}{% endmacro %}
 
 {% include "_dai_qc.html" %}
@@ -216,9 +219,9 @@
     {% set v = k.chi / k.hien_thi * 1000 %}{% set vt = (kt.chi / kt.hien_thi * 1000) if (kt.chi is not none and kt.hien_thi) else none %}
     {% set _ = hq.append({'ma': 'cpm', 'nhan': 'CPM', 'goi_y': 'Chi cho 1.000 lượt hiển thị = Chi tiêu ÷ Hiển thị × 1.000 (tính lại từ tổng kỳ).', 'so': (v|round|int|so_vn) ~ ' ₫', 'day_du': (v|round|int|so_vn) ~ ' ₫', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': false, 'co_truoc': (vt is not none) if d.ky_truoc else none}) %}
   {% endif %}
-  {% if k.click is not none and k.hien_thi %}
-    {% set v = k.click / k.hien_thi * 100 %}{% set vt = (kt.click / kt.hien_thi * 100) if (kt.click is not none and kt.hien_thi) else none %}
-    {% set _ = hq.append({'ma': 'ctr', 'nhan': 'CTR', 'goi_y': 'Tỉ lệ bấm = Click ÷ Hiển thị (tính lại từ tổng kỳ, không trung bình các ngày).', 'so': (v|round(2)|so_thap) ~ '%', 'day_du': (v|round(4)|so_thap(4)) ~ '%', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': true, 'co_truoc': (vt is not none) if d.ky_truoc else none}) %}
+  {% if k.click_lk is not none and k.hien_thi %}
+    {% set v = k.click_lk / k.hien_thi * 100 %}{% set vt = (kt.click_lk / kt.hien_thi * 100) if (kt.click_lk is not none and kt.hien_thi) else none %}
+    {% set _ = hq.append({'ma': 'ctr', 'nhan': 'CTR', 'goi_y': 'Tỉ lệ bấm = Click (bấm liên kết: TikTok clicks, Meta inline_link_clicks) ÷ Hiển thị (tính lại từ tổng kỳ, không trung bình các ngày).', 'so': (v|round(2)|so_thap) ~ '%', 'day_du': (v|round(4)|so_thap(4)) ~ '%', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': true, 'co_truoc': (vt is not none) if d.ky_truoc else none}) %}
   {% endif %}
   {% set phu = hq + phu %}
   <div class="the-khoi kpi-phu qc-kpi-phu" style="--so-kpi: {{ phu|length }}">
@@ -233,6 +236,29 @@
     {% endfor %}
   </div>
 </section>
+
+{#- 28/10/2026 (chủ dự án): "Lưu lượng truy cập" — Click (bấm liên kết), CTR, CPC, Landing page view, Chi /
+    LPV, xem trang SP (TikTok Shop / website Meta). Ô tiền chỉ người xem tiền; ô một nền tảng chỉ khi phạm
+    vi có nền tảng đó (`QC.chon_luu_luong`); giải thích chỉ trong nút (i) của từng ô. #}
+{% if kpi_ll %}
+<section class="qc-kpi qc-ll" id="qc-luu-luong" aria-labelledby="qc-ll-tieu-de" data-o="luu-luong">
+  <div class="muc qc-ll__dau">
+    <h2 class="muc__ten" id="qc-ll-tieu-de">Lưu lượng truy cập</h2>
+    {{ nhan_khoang() }}
+  </div>
+  <div class="the-khoi kpi-phu qc-kpi-phu" style="--so-kpi: {{ kpi_ll|length }}">
+    {% for o in kpi_ll %}
+    <div class="kpi kpi-o" data-kpi="{{ o.ma }}">
+      <div class="kpi__than">
+        <span class="kpi__nhan">{{ o.nhan }}{% if o.goi_y %} <button type="button" class="goi-y" data-goi-y="{{ o.goi_y }}">i</button>{% endif %}</span>
+        <span class="kpi__so" title="{{ o.day_du }}">{{ o.so }}</span>
+        {{ doi_kpi(o) }}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 {#- Hai nền tảng cạnh nhau — chỉ khi đang xem "Tất cả" và phạm vi có cả TikTok lẫn Meta. Thanh tỉ trọng
     theo chi (người không xem tiền: theo hiển thị); mỗi nền tảng một thẻ so hiệu quả cùng thước đo. #}
@@ -273,7 +299,8 @@
     <h2 class="muc__ten" id="qc-xh-tieu-de">Theo <span id="qc-xh-don-vi">{{ DON_VI_BD[d.theo_ky.mac_dinh]|lower }}</span></h2>
     {{ nhan_khoang() }}
     {#- 22/10/2026 (chủ dự án): hai chuỗi xem trang sản phẩm — mỗi chuỗi một nền tảng, định nghĩa rõ. #}
-    {% if d.chuoi_xem_sp %}<button type="button" class="goi-y" aria-label="Giải thích chỉ số xem trang sản phẩm" data-goi-y="{% for c in d.chuoi_xem_sp %}{{ c.ten }} — {{ c.dinh_nghia }}. {% endfor %}{% if d.chuoi_xem_sp|length > 1 %}Hai chỉ số đếm ở hai nơi khác nhau nên không cộng với nhau.{% endif %}">i</button>{% endif %}
+    {#- 28/10/2026: Click / Landing page view có trên biểu đồ — định nghĩa trong nút (i). #}
+    <button type="button" class="goi-y" aria-label="Giải thích chỉ số trên biểu đồ" data-goi-y="Click — lượt bấm liên kết (TikTok clicks, Meta inline_link_clicks). Landing page view — lượt tải xong trang đích (TikTok total_landing_page_view, Meta landing_page_view). {% for c in d.chuoi_xem_sp %}{{ c.ten }} — {{ c.dinh_nghia }}. {% endfor %}{% if d.chuoi_xem_sp|length > 1 %}Hai chỉ số xem trang sản phẩm đếm ở hai nơi khác nhau nên không cộng với nhau.{% endif %}">i</button>
     {#- 25/10/2026 (chủ dự án): ≤ 31 ngày theo ngày, ≤ 120 theo tuần, dài hơn theo tháng (máy chủ gộp —
         `QC.gop_ky`); nút "Ngày · Tuần · Tháng" (qc.js) đổi tại chỗ, mặc định theo độ dài khoảng. #}
     <div class="muc__phai"><div class="qc-phan" id="qc-don-vi" role="group" aria-label="Gộp theo"></div><div class="qc-phan" id="qc-chon-chi-so" role="group" aria-label="Chỉ số"></div></div>
@@ -300,7 +327,7 @@
     {% if d.xem_tien %}{{ th_sap('chi') }}{% endif %}
     {{ th_sap('hien_thi') }}
     {% if d.xem_tien %}{{ th_sap('cpm') }}{% endif %}
-    {{ th_sap('click') }}{{ th_sap('ctr') }}{{ th_sap('view') }}{{ th_sap('tuong_tac') }}{{ th_sap('follow') }}
+    {{ th_sap('click') }}{{ th_sap('ctr') }}{% if d.xem_tien %}{{ th_sap('cpc') }}{% endif %}{{ th_sap('lpv') }}{{ th_sap('view') }}{{ th_sap('tuong_tac') }}{{ th_sap('follow') }}
     {% if d.xem_tien and HIEN_DOANH_THU %}{{ th_sap('roas') }}{% endif %}
   </tr></thead>
   <tbody>
@@ -319,14 +346,16 @@
       {% if d.xem_tien %}<td class="so qc-bang__chi" data-nhan="Chi">{{ r.chi|so_vn }}</td>{% endif %}
       <td class="so" data-nhan="Hiển thị">{{ r.hien_thi|so_vn }}</td>
       {% if d.xem_tien %}<td class="so" data-nhan="CPM">{{ cpm(r) }}</td>{% endif %}
-      <td class="so" data-nhan="Click">{{ r.click|so_vn }}</td>
+      <td class="so" data-nhan="Click">{{ r.click_lk|so_vn }}</td>
       <td class="so" data-nhan="CTR">{{ ctr(r) }}</td>
+      {% if d.xem_tien %}<td class="so" data-nhan="CPC">{{ cpc(r) }}</td>{% endif %}
+      <td class="so" data-nhan="Landing page view">{{ r.lpv|so_vn }}</td>
       <td class="so" data-nhan="View video">{{ r.view_video|so_vn }}</td>
       <td class="so" data-nhan="Tương tác">{{ r.tuong_tac|so_vn }}</td><td class="so" data-nhan="Follow">{{ r.follow|so_vn }}</td>
       {% if d.xem_tien and HIEN_DOANH_THU %}<td class="so" data-nhan="ROAS">{{ r.roas_shop|so_thap or '—' }}</td>{% endif %}
     </tr>
   {% else %}
-    <tr><td colspan="{{ (10 if HIEN_DOANH_THU else 9) if d.xem_tien else 7 }}" class="trong">Không có {{ ten_cot|lower }} nào {{ 'khớp bộ lọc' if d.bang.tim or d.bang.cd or d.ten_cd else 'chạy' }} trong khoảng này.</td></tr>
+    <tr><td colspan="{{ (12 if HIEN_DOANH_THU else 11) if d.xem_tien else 8 }}" class="trong">Không có {{ ten_cot|lower }} nào {{ 'khớp bộ lọc' if d.bang.tim or d.bang.cd or d.ten_cd else 'chạy' }} trong khoảng này.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -345,7 +374,7 @@
   <div class="muc">
     <h2 class="muc__ten" id="qc-top-tieu-de">Chiến dịch và quảng cáo</h2>
     {{ nhan_khoang() }}
-    <button type="button" class="goi-y" data-goi-y="Tìm theo tên (không cần gõ dấu): bảng chiến dịch khớp tên chiến dịch; bảng quảng cáo khớp tên quảng cáo hoặc tên chiến dịch chứa nó. Bấm tên một chiến dịch để chỉ xem quảng cáo của chiến dịch đó. Bấm tiêu đề cột để xếp, bấm lại để đổi chiều. CPM, CTR{{ ', ROAS' if HIEN_DOANH_THU }} tính lại từ tổng của dòng; khi xếp theo CPM hoặc CTR, dòng dưới {{ NGUONG_TI_LE|so_vn }} hiển thị xuống cuối để số lẻ không lấn lên đầu. Mỗi bảng 20 dòng một trang. Bộ lọc này áp vào hai bảng và tab chiến dịch / quảng cáo của Lark Sheet; số tổng và biểu đồ theo Bộ lọc đầu trang.">i</button>
+    <button type="button" class="goi-y" data-goi-y="Tìm theo tên (không cần gõ dấu): bảng chiến dịch khớp tên chiến dịch; bảng quảng cáo khớp tên quảng cáo hoặc tên chiến dịch chứa nó. Bấm tên một chiến dịch để chỉ xem quảng cáo của chiến dịch đó. Bấm tiêu đề cột để xếp, bấm lại để đổi chiều. Click = lượt bấm liên kết (TikTok clicks, Meta inline_link_clicks); Landing page view = lượt tải xong trang đích. CPM, CTR, CPC{{ ', ROAS' if HIEN_DOANH_THU }} tính lại từ tổng của dòng; khi xếp theo CPM, CTR hoặc CPC, dòng dưới {{ NGUONG_TI_LE|so_vn }} hiển thị xuống cuối để số lẻ không lấn lên đầu. Mỗi bảng 20 dòng một trang. Bộ lọc này áp vào hai bảng và tab chiến dịch / quảng cáo của Lark Sheet; số tổng và biểu đồ theo Bộ lọc đầu trang.">i</button>
   </div>
   <form class="qc-bang-loc" method="get" action="/quang-cao#top" role="search" aria-label="Lọc và sắp xếp bảng" data-o="loc-bang">
     {% for k in ('ben', 'nen_tang', 'tu', 'den') if d[k] %}<input type="hidden" name="{{ k }}" value="{{ d[k] }}">{% endfor %}
@@ -433,7 +462,7 @@
 <section class="the-khoi cach-duoi" id="khan-gia" aria-labelledby="qc-kg-tieu-de">
   <div class="muc">
     <h2 class="muc__ten" id="qc-kg-tieu-de">Khán giả</h2>
-    <button type="button" class="goi-y" data-goi-y="Phân bố lượt hiển thị trong cửa sổ 30 ngày gần nhất{% if d.khan_gia_khoang.tu %} ({{ ngay_ngan(d.khan_gia_khoang.tu|string) }} – {{ ngay_ngan(d.khan_gia_khoang.den|string) }}/{{ (d.khan_gia_khoang.den|string)[:4] }}){% endif %}, đọc lại mỗi tuần — không theo khoảng ngày đang lọc. Theo Bộ lọc đầu trang (bên, tài khoản, nền tảng, tên chiến dịch): không lọc tên chiến dịch = khán giả cả tài khoản; có lọc tên = cộng các chiến dịch có tên khớp. Ô Chiến dịch bên dưới: tích một hay nhiều chiến dịch rồi bấm Áp dụng để chỉ xem các chiến dịch đó (không tích = mặc định). TikTok: tuổi, giới tính, tỉnh/thành, thiết bị. Meta: tuổi, giới tính, vùng, nền tảng, vị trí. Cùng nhãn (vd Nữ) thì cộng hai nền tảng. Lượt hiển thị cộng được qua nhiều chiến dịch; số người tiếp cận thì không (một người xem nhiều chiến dịch bị đếm nhiều lần) nên không cộng.">i</button>
+    <button type="button" class="goi-y" data-goi-y="Phân bố lượt hiển thị trong cửa sổ 30 ngày gần nhất{% if d.khan_gia_khoang.tu %} ({{ ngay_ngan(d.khan_gia_khoang.tu|string) }} – {{ ngay_ngan(d.khan_gia_khoang.den|string) }}/{{ (d.khan_gia_khoang.den|string)[:4] }}){% endif %}, đọc lại mỗi tuần — không theo khoảng ngày đang lọc. Theo Bộ lọc đầu trang (bên, tài khoản, nền tảng, tên chiến dịch): không lọc tên chiến dịch = khán giả cả tài khoản; có lọc tên = cộng các chiến dịch có tên khớp. Ô Chiến dịch bên dưới: tích một hay nhiều chiến dịch rồi bấm Áp dụng để chỉ xem các chiến dịch đó (không tích = mặc định). TikTok: tuổi, giới tính, tỉnh/thành, thiết bị, sở thích. Meta: tuổi, giới tính, vùng, nền tảng, vị trí (Meta không chia theo sở thích). Cùng nhãn (vd Nữ) thì cộng hai nền tảng. Sở thích (TikTok): một người thuộc nhiều nhóm nên % là lượt hiển thị của nhóm ÷ tổng lượt hiển thị TikTok cùng phạm vi và cùng cửa sổ (tổng theo tuổi của các tài khoản / chiến dịch đã có số sở thích) — các % cộng lại vượt 100%. Lượt hiển thị cộng được qua nhiều chiến dịch; số người tiếp cận thì không (một người xem nhiều chiến dịch bị đếm nhiều lần) nên không cộng.">i</button>
   </div>
   {#- 26/10/2026 (chủ dự án): Khán giả theo chiến dịch — ô "Chiến dịch" chọn NHIỀU bằng ô tích (cùng kiểu
       ô Tài khoản: <details>, không JS vẫn tích + gửi được, `kg_cd` lặp lại). Biểu mẫu GET mang lại mọi

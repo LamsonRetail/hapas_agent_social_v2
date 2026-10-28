@@ -522,6 +522,47 @@ sudo systemd-run --quiet --wait --pipe -p User=lang_nghe_web -p EnvironmentFile=
 - Dung lượng: Postgres chỉ giữ cửa sổ hoàn tất mới nhất mỗi tài khoản (bộ đồng bộ tự xoá — quyền
   DELETE chỉ trên bảng này); BigQuery giữ đủ lịch sử.
 
+## 14. Lưu lượng truy cập + sở thích TikTok (28/10/2026, chủ dự án chốt) — cần người duyệt trước khi chạy trên VPS
+
+Trang Quảng cáo: mục "Lưu lượng truy cập" (Click = bấm liên kết, CTR, CPC, Landing page view…), cột CPC
++ Landing page view trong hai bảng, cột "Sở thích (TikTok)" trong khối Khán giả — `dashboard/README.md`.
+Bảng mới `qc_so_thich`, hai cột `tk_quang_cao.khan_gia_bo_chieu` / `khan_gia_cd_bo_chieu`, CHECK chiều khán
+giả nhận `interest_category`, trigger yêu cầu Sheet nhận `sap` = `cpc` / `lpv`. Thứ tự: **Postgres →
+BigQuery → mã**; KHÔNG cần đọc lại ngay — lượt 06:30 hôm sau tự đọc sở thích (cửa sổ bộ chiều cũ tới hạn
+lại một lần; cấp chiến dịch vẫn trần 20 phút, phần còn lại các lượt sau; cửa sổ cũ vẫn hiện tới khi cửa sổ
+mới xong).
+
+```bash
+# 1. Postgres — CHỈ phần mới (role postgres; hai giao dịch: danh mục + VALIDATE riêng; chạy lại không sao;
+#    chặn nhầm DB). Tránh 06:25–07:30. Khoá: xem đầu file.
+sudo -u postgres env PGOPTIONS='-c lock_timeout=5s' psql -v ON_ERROR_STOP=1 -d lang_nghe   < deploy/lang-nghe/2026-10-28-qc-luu-luong.sql
+sudo -u postgres psql -d lang_nghe -c '\dp qc_so_thich'      # lang_nghe_web arw, mark r
+sudo -u postgres psql -d lang_nghe -c "select conrelid::regclass, conname, convalidated from pg_constraint where conname like 'qc_khan_gia%chieu_check'"
+
+# 2. BigQuery (người duyệt rồi mới chạy): khối "Lưu lượng truy cập + sở thích TikTok (28/10/2026)" trước
+#    phần Meta (ALTER tk_quang_cao ADD COLUMN ×2 + CREATE TABLE IF NOT EXISTS qc_so_thich) và khối cùng tên
+#    CUỐI bigquery.sql (SET OPTIONS mô tả qc_khan_gia / qc_khan_gia_cd). Chưa chạy: trang Kết nối BigQuery
+#    báo lỗi riêng qc_so_thich + cảnh báo bỏ hai cột của tk_quang_cao.
+
+# 3. Mã dashboard (rsync như dashboard/README.md bước 2) rồi
+sudo systemctl restart lang-nghe-dashboard
+#    Lark Sheet (Click / CTR / CPC bấm liên kết) chạy ở bộ nghe của Mark — mã Mark lên theo agent-deploy
+#    (xuat_sheet_qc.py); khởi động lại bộ nghe nếu cần: sudo systemctl restart qc-sheet-nghe
+
+# 4. Kiểm sau lượt 06:30 hôm sau
+sudo -u lang_nghe_web psql -d lang_nghe -c "select advertiser_id, khan_gia_bo_chieu, khan_gia_cd_bo_chieu, khan_gia_cd_den from tk_quang_cao where nen_tang = 'tiktok' order by 1"
+sudo -u lang_nghe_web psql -d lang_nghe -c "select count(*), count(distinct advertiser_id) from qc_khan_gia where chieu = 'interest_category'"
+sudo -u lang_nghe_web psql -d lang_nghe -c "select phien_ban, count(*), max(cap_nhat_luc) from qc_so_thich group by 1"
+journalctl -u tiktok-ads-dong-bo --since today | grep -E "interest_category|sở thích"
+```
+
+- Cấp chiến dịch của chiều sở thích CHƯA đo thật: TikTok từ chối thì mỗi tài khoản một dòng nhật ký
+  "chiều interest_category lỗi … các chiều khác vẫn hoàn tất" (kết quả lượt: `khan_gia_cd.loi`), bốn chiều
+  kia vẫn hoàn tất, tuần sau thử lại — không đọc lại mỗi ngày.
+- Tên nhóm: một lượt `tool_interest_category_get` mỗi phiên bản (v1, v2) khi kho đã có dòng sở thích và
+  tên trống / cũ hơn 7 ngày; lỗi chỉ ghi nhật ký, trang hiện "Sở thích <mã>".
+- Muốn đọc ngay thay vì chờ 06:30: lệnh `khan-gia` như mục 13 bước 4 (giữ khoá đồng bộ suốt lúc chạy).
+
 ## Vận hành
 
 - **Sao lưu:**

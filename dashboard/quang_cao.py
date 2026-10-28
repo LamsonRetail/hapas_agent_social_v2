@@ -113,6 +113,59 @@ CHUOI_XEM_SP: tuple[tuple[str, str, str, str, str], ...] = (
 )
 TEN_CHUOI_XEM_SP = tuple(c[0] for c in CHUOI_XEM_SP)
 
+# ───────────────────────────── lưu lượng truy cập (28/10/2026) ─────────────────────────────
+#: Chủ dự án 28/10/2026: "lưu lượng truy cập: clicks, ctr, cpc, total_landing_page_view". Click của
+#: trang Quảng cáo = LƯỢT BẤM LIÊN KẾT: TikTok `clicks` (cột click — bấm tới đích), Meta
+#: `inline_link_clicks` (trong chi_so — mặc định Ads Manager; cột click của Meta là MỌI lượt bấm,
+#: giữ nguyên cho BigQuery / Mark). CTR, CPC tính từ click này. Meta nhận ra bằng mã tài khoản
+#: act_<số> (CHECK tk_quang_cao_ma_check); dòng Meta vắng inline_link_clicks (Meta bỏ số 0) → 0.
+CLICK_LK_META = "inline_link_clicks"
+#: Landing page view: TikTok total_landing_page_view, Meta action landing_page_view — mỗi khoá chỉ có
+#: ở một nền tảng nên cộng thẳng. (khoá payload, khoá chi_so TikTok, khoá chi_so Meta)
+LPV = ("lpv", "total_landing_page_view", "actions__landing_page_view")
+#: Tổng thêm của số tổng / theo ngày / bảng (kho_qc._TONG_LL).
+TEN_LUU_LUONG = ("click_lk", "lpv")
+#: Ô của mục "Lưu lượng truy cập": mã → (nhãn, ⓘ, kiểu so | pt | tien, tô màu ▲▼, nền tảng — None =
+#: mọi nền tảng). Thứ tự = thứ tự hiện. Ô tiền (cpc, chi_tren_lpv — `la_tien`) chỉ người xem tiền;
+#: ô một nền tảng ẩn khi phạm vi không có nền tảng đó (`chon_luu_luong`).
+KPI_LUU_LUONG: dict[str, tuple[str, str, str, bool, str | None]] = {
+    "click_lk": ("Click", ("Lượt bấm liên kết. TikTok: clicks (bấm tới trang đích). Meta: "
+                           "inline_link_clicks (lượt bấm liên kết, như mặc định của Ads Manager — "
+                           "không gồm bấm xem ảnh, vào Trang, bình luận)."), "so", True, None),
+    "ctr": ("CTR", "Click (bấm liên kết) ÷ Hiển thị × 100, tính lại từ tổng kỳ.", "pt", True, None),
+    "cpc": ("CPC", "Chi tiêu ÷ Click (bấm liên kết), tính lại từ tổng kỳ, chưa VAT.", "tien", False,
+            None),
+    "lpv": ("Landing page view", ("Lượt tải xong trang đích sau khi bấm quảng cáo. TikTok: "
+                                  "total_landing_page_view. Meta: landing_page_view (cần Pixel)."),
+            "so", True, None),
+    "chi_tren_lpv": ("Chi / landing page view", "Chi tiêu ÷ Landing page view, chưa VAT.", "tien",
+                     False, None),
+    "xem_sp_shop": ("Xem trang SP TikTok Shop", CHUOI_XEM_SP[0][4] + ".", "so", True, "tiktok"),
+    "xem_sp_web": ("Xem SP website (Meta)", CHUOI_XEM_SP[1][4] + ".", "so", True, "meta"),
+}
+
+
+def chon_luu_luong(co_tien: bool, cac_nen) -> tuple[str, ...]:
+    """Ô của mục "Lưu lượng truy cập": bỏ ô tiền khi không xem tiền, bỏ ô của nền tảng không có
+    trong phạm vi (`cac_nen` = nền tảng có tài khoản trong phạm vi đang xem)."""
+    co = set(cac_nen or ())
+    return tuple(k for k, v in KPI_LUU_LUONG.items()
+                 if (co_tien or not la_tien(k)) and (v[4] is None or v[4] in co))
+
+
+def _ti(a, b, nhan: float = 1.0, so_le: int = 4):
+    if a is None or not b:
+        return None
+    return round(float(a) / float(b) * nhan, so_le)
+
+
+def luu_luong(t: dict) -> dict:
+    """Chỉ số suy ra của lưu lượng từ TỔNG (không cộng tỉ lệ): CTR (%) = click_lk ÷ hiển thị × 100,
+    CPC = chi ÷ click_lk, chi / LPV. Thiếu mẫu số → None."""
+    return {"ctr": _ti(t.get("click_lk"), t.get("hien_thi"), 100),
+            "cpc": _ti(t.get("chi"), t.get("click_lk"), 1, 2),
+            "chi_tren_lpv": _ti(t.get("chi"), t.get("lpv"), 1, 2)}
+
 
 def chuoi_xem_sp(ngay: list[dict]) -> list[dict]:
     """Chuỗi xem trang sản phẩm có số ≠ 0 trong `ngay` (dòng theo ngày của phạm vi đang xem) →
@@ -148,14 +201,43 @@ CHI_SO_KHAN_GIA: tuple[str, ...] = (
     "spend", "impressions", "clicks", "ctr", "cpm", "conversion", "video_play_actions",
     "video_watched_6s", "likes", "comments", "shares", "follows", "profile_visits",
 )
-#: Mọi chiều khán giả có trong qc_khan_gia (CHECK ở schema.sql). TikTok: 4 chiều đầu; Meta (20/10/2026):
+#: 28/10/2026 (chủ dự án: "khách hàng mục tiêu: interest_category"): chiều sở thích TikTok — đọc
+#: RIÊNG sau 4 chiều trên (`tiktok_ads`): lỗi của chiều này chỉ ghi nhật ký, không làm hỏng chiều khác.
+#: Đo thật 28/10/2026: AUDIENCE + dimensions [advertiser_id, interest_category] trả MỖI dòng cả
+#: `interest_category` (mã v1, vd "116") lẫn `interest_category_v2` (vd "25"); chiều
+#: "interest_category_v2" bị từ chối (40002). Meta không có chiều sở thích.
+CHIEU_SO_THICH = "interest_category"
+#: Mọi chiều khán giả có trong qc_khan_gia (CHECK ở schema.sql). TikTok: 4 chiều đầu + sở thích (28/10/2026);
+#: Meta (20/10/2026):
 #: age + gender (cùng mã TikTok khi trùng nghĩa — `meta_ads.GIA_TRI_META`), region, publisher_platform,
 #: platform_position (giá trị "<nền tảng>/<vị trí>" — Meta chỉ cho chia vị trí kèm nền tảng).
 CHIEU_TAT_CA: tuple[str, ...] = ("age", "gender", "province_id", "region", "platform",
-                                 "publisher_platform", "platform_position")
+                                 "publisher_platform", "platform_position", CHIEU_SO_THICH)
 TEN_CHIEU = {"age": "Tuổi", "gender": "Giới tính", "province_id": "Tỉnh/thành",
              "platform": "Thiết bị", "region": "Vùng (Meta)",
-             "publisher_platform": "Nền tảng Meta", "platform_position": "Vị trí Meta"}
+             "publisher_platform": "Nền tảng Meta", "platform_position": "Vị trí Meta",
+             CHIEU_SO_THICH: "Sở thích (TikTok)"}
+#: Giá trị chiều sở thích lưu ở qc_*.gia_tri: "v1:<mã>" — mã v1 là KHOÁ NHÓM của báo cáo (một dòng
+#: TikTok = một mã v1), nên không bao giờ gộp / ghi đè hai dòng; mã v2 đi kèm nằm ở chi_so
+#: (`interest_category_v2`). Tiền tố phiên bản: mã v1 (101…) và v2 (10…) không bao giờ lẫn nhau; dòng
+#: hiếm khi TikTok chỉ trả v2 → "v2:<mã>". Tên ở bảng qc_so_thich (phien_ban, id).
+_MA_SO_THICH = re.compile(r"v([12]):([0-9]{1,30})")
+
+
+def ma_so_thich(v1, v2=None) -> str:
+    """(interest_category, interest_category_v2) của một dòng TikTok → giá trị lưu ("" khi thiếu
+    cả hai hoặc sai dạng)."""
+    for pb, v in ((1, v1), (2, v2)):
+        s = str(v if v is not None else "").strip()
+        if re.fullmatch(r"[0-9]{1,30}", s):
+            return f"v{pb}:{s}"
+    return ""
+
+
+def tach_so_thich(g) -> tuple[int, str] | None:
+    """"v1:116" → (1, "116"); dạng khác → None."""
+    m = _MA_SO_THICH.fullmatch(str(g or ""))
+    return (int(m.group(1)), m.group(2)) if m else None
 TEN_GIA_TRI = {
     "AGE_13_17": "13–17", "AGE_18_24": "18–24", "AGE_25_34": "25–34", "AGE_35_44": "35–44",
     "AGE_45_54": "45–54", "AGE_55_100": "55+", "NONE": "Không rõ", "FEMALE": "Nữ",
@@ -578,6 +660,10 @@ def kpi(tong: dict) -> dict:
     t = {c: tong.get(c) for c in TEN_COT_SO}
     t["tuong_tac"] = tuong_tac(t)
     t["roas_shop"] = _chia(t.get("gia_tri_mua_shop"), t.get("chi"))
+    # 28/10/2026: lưu lượng truy cập (click bấm liên kết, LPV, xem trang SP) + CTR / CPC / chi / LPV.
+    for c in (*TEN_LUU_LUONG, *TEN_CHUOI_XEM_SP):
+        t[c] = tong.get(c)
+    t.update(luu_luong(t))
     return t
 
 
@@ -752,10 +838,13 @@ def cot_sap(sap: str | None, co_tien: bool) -> str:
 #: Bảng chiến dịch / quảng cáo trang Quảng cáo (22/10/2026, MKT: "lọc theo tên, campaign và sort theo
 #: các chỉ số"): mã `sap` → nhãn. Mọi cột của bảng đều sắp được; tỉ lệ (CPM, CTR, ROAS) tính lại từ
 #: tổng của dòng ở SQL (`kho_qc.qc_bang`). Chi / CPM / ROAS là chỉ số tiền — chỉ người xem tiền.
+#: 28/10/2026 (chủ dự án): + CPC (tiền) và Landing page view; Click / CTR / CPC = bấm liên kết
+#: (`click_lk`, TikTok clicks, Meta inline_link_clicks).
 SAP_BANG: dict[str, str] = {"chi": "Chi", "hien_thi": "Hiển thị", "cpm": "CPM", "click": "Click",
-                            "ctr": "CTR", "view": "View video", "tuong_tac": "Tương tác",
+                            "ctr": "CTR", "cpc": "CPC", "lpv": "Landing page view",
+                            "view": "View video", "tuong_tac": "Tương tác",
                             "follow": "Follow", "roas": "ROAS"}
-SAP_BANG_TIEN = frozenset({"chi", "cpm", "roas"})
+SAP_BANG_TIEN = frozenset({"chi", "cpm", "cpc", "roas"})
 if not HIEN_DOANH_THU:      # 22/10/2026: ROAS tạm ẩn — URL cũ `sap=roas` về sắp mặc định
     SAP_BANG.pop("roas", None)
 #: CPM / CTR chỉ xếp hạng dòng có ≥ 1.000 hiển thị (dòng 3 hiển thị CTR 33% không phải "tốt nhất");
@@ -1021,9 +1110,15 @@ def dong_top(r: dict) -> dict:
     return x
 
 
-def nhan_gia_tri(chieu: str, g: str) -> str:
+def nhan_gia_tri(chieu: str, g: str, ten_so_thich: dict | None = None) -> str:
     """Mã giá trị khán giả → nhãn hiện (TikTok: mã AGE_…, mã vùng số; Meta: tên vùng, nền tảng,
-    "nền tảng/vị trí")."""
+    "nền tảng/vị trí"). Sở thích (28/10/2026): tên ở `ten_so_thich` ({"v1:116": "Giáo dục"} —
+    `kho_qc.ten_so_thich`), chưa có tên → "Sở thích <mã>"."""
+    if chieu == CHIEU_SO_THICH:
+        if (ten_so_thich or {}).get(g):
+            return str(ten_so_thich[g])
+        m = tach_so_thich(g)
+        return f"Sở thích {m[1]}" if m else (f"Sở thích {g}" if g else "Không rõ")
     if g in TEN_GIA_TRI:
         return TEN_GIA_TRI[g]
     if chieu == "province_id":
@@ -1035,20 +1130,27 @@ def nhan_gia_tri(chieu: str, g: str) -> str:
     return g or "Không rõ"
 
 
-def khan_gia(rows: list[dict]) -> dict:
+def khan_gia(rows: list[dict], ten_so_thich: dict | None = None,
+             mau_so_thich: float | None = None) -> dict:
     """Dòng qc_khan_gia (đã cộng theo chieu + gia_tri trên các tài khoản) → {chiều: [{nhan, …}]},
-    mỗi chiều sắp theo hiển thị giảm dần, % hiển thị trong chiều."""
+    mỗi chiều sắp theo hiển thị giảm dần, % hiển thị trong chiều.
+    28/10/2026 — sở thích TikTok: các nhóm CHỒNG NHAU (một người nhiều sở thích; đo 28/10/2026: mỗi
+    nhóm đầu của tài khoản lớn nhất ~87 triệu hiển thị) nên % KHÔNG chia cho tổng các nhóm mà cho
+    `mau_so_thich` = tổng hiển thị TikTok cùng phạm vi, cùng cửa sổ (tổng theo tuổi của tài khoản /
+    chiến dịch đã có số sở thích — `kho_qc.qc_khan_gia`); thiếu mẫu → % None. Gộp theo mã, không
+    theo nhãn (hai mã trùng tên không bao giờ cộng)."""
     ra: dict[str, list[dict]] = {c: [] for c in CHIEU_TAT_CA}
     gop: dict[tuple, dict] = {}
     for r in rows:
         c = r.get("chieu")
         if c in ra:
             g = str(r.get("gia_tri") if r.get("gia_tri") is not None else "")
-            nhan = nhan_gia_tri(c, g)
-            x = gop.get((c, nhan))
+            nhan = nhan_gia_tri(c, g, ten_so_thich)
+            khoa = (c, g) if c == CHIEU_SO_THICH else (c, nhan)
+            x = gop.get(khoa)
             if x is None:
-                x = gop[(c, nhan)] = {**{k: r.get(k) for k in TEN_COT_SO}, "gia_tri": g,
-                                      "nhan": nhan}
+                x = gop[khoa] = {**{k: r.get(k) for k in TEN_COT_SO}, "gia_tri": g,
+                                 "nhan": nhan}
                 ra[c].append(x)
             else:
                 # Cùng nhãn (vd "Nữ" của TikTok + Meta, hoặc hai mã "Không rõ"): cộng chung một dòng.
@@ -1058,6 +1160,8 @@ def khan_gia(rows: list[dict]) -> dict:
             x["tuong_tac"] = tuong_tac(x)
     for c, ds in ra.items():
         tong = sum(int(x.get("hien_thi") or 0) for x in ds) or 0
+        if c == CHIEU_SO_THICH:
+            tong = mau_so_thich or 0
         ds.sort(key=lambda x: -(x.get("hien_thi") or 0))
         for x in ds:
             x["pt"] = round(100.0 * (x.get("hien_thi") or 0) / tong, 1) if tong else None
@@ -1199,9 +1303,12 @@ def hieu_qua(r: dict) -> dict:
     """Chỉ số SUY RA từ tổng (không cộng tỉ lệ — như trang): CPM, CPC, CTR (%), chi / 1.000 view,
     chi / follow, chi / kết quả, ROAS Shop, tương tác. Thiếu mẫu số → None (ô trống, không phải 0)."""
     chi = r.get("chi")
-    return {"cpm": _chia_so(chi, r.get("hien_thi"), 1000),
-            "cpc": _chia_so(chi, r.get("click")),
-            "ctr": _chia_so(r.get("click"), r.get("hien_thi"), 100),
+    # 28/10/2026: Click / CTR / CPC = bấm liên kết như trang (`click_lk`, có ở dòng tổng của
+    # kho_qc / kho_sheet_qc); dòng không có khoá đó (bản cũ) dùng cột click.
+    click = r.get("click_lk") if "click_lk" in r else r.get("click")
+    return {"click_lk": click, "cpm": _chia_so(chi, r.get("hien_thi"), 1000),
+            "cpc": _chia_so(chi, click),
+            "ctr": _chia_so(click, r.get("hien_thi"), 100),
             "chi_tren_1000_view": _chia_so(chi, r.get("view_video"), 1000),
             "chi_moi_follow": _chia_so(chi, r.get("follow")),
             "chi_moi_ket_qua": _chia_so(chi, r.get("ket_qua")),

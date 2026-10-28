@@ -417,8 +417,30 @@ def _o_kpi(d: dict, ma: str) -> dict:
             "co_truoc": bool(truoc) if d.get("ky_truoc") else None}
 
 
+def _o_ll(d: dict, ma: str) -> dict:
+    """Một ô mục "Lưu lượng truy cập" (28/10/2026) từ dữ liệu ĐÃ lọc tiền: số đầy đủ chấm nghìn,
+    CTR hai số lẻ, tiền làm tròn đồng; ▲▼ như ô KPI (`ss=khong` → không so sánh)."""
+    nhan, goi_y, kieu, mau, _nen = QC.KPI_LUU_LUONG[ma]
+    v = d["kpi"].get(ma)
+    if kieu == "pt":
+        so = (so_thap(v) + "%") if v is not None else "—"
+        du = (so_thap(v, 4) + "%") if v is not None else "—"
+    elif kieu == "tien":
+        tt = d.get("tien_te") or ["VND"]
+        don = " ₫" if tt == ["VND"] else (" " + tt[0] if len(tt) == 1 else " (nhiều tiền tệ)")
+        so = du = (so_gon(v) + don) if v is not None else "—"
+    else:
+        so = du = so_gon(v)
+    truoc = d["kpi_truoc"].get(ma)
+    return {"ma": ma, "nhan": nhan, "goi_y": goi_y, "so": so, "day_du": du,
+            "doi": d["doi"].get(ma), "mau_doi": mau,
+            "co_truoc": bool(truoc) if d.get("ky_truoc") else None}
+
+
 #: Chuỗi trên biểu đồ "Theo ngày" (chọn một) — chỉ chuỗi có trong dữ liệu đã lọc tiền.
-_CHUOI_QC = (("chi", "Chi tiêu"), ("hien_thi", "Hiển thị"), ("view_video", "View video"),
+#: 28/10/2026: + Click (bấm liên kết) và Landing page view (qc.js có cùng danh sách).
+_CHUOI_QC = (("chi", "Chi tiêu"), ("hien_thi", "Hiển thị"), ("click_lk", "Click"),
+             ("lpv", "Landing page view"), ("view_video", "View video"),
              ("engaged_view", "Engaged view"), ("tuong_tac", "Tương tác"), ("follow", "Follow"))
 
 
@@ -2978,7 +3000,9 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             ngay.append({"ngay": d.isoformat(), **{c: r.get(c) or 0 for c in QC.TEN_COT_SO},
                          "tuong_tac": QC.tuong_tac(r),
                          # 22/10/2026 (chủ dự án): xem trang SP — mỗi khoá chỉ một nền tảng.
-                         **{c: r.get(c) or 0 for c in QC.TEN_CHUOI_XEM_SP}})
+                         **{c: r.get(c) or 0 for c in QC.TEN_CHUOI_XEM_SP},
+                         # 28/10/2026: lưu lượng — click bấm liên kết, landing page view.
+                         **{c: r.get(c) or 0 for c in QC.TEN_LUU_LUONG}})
             d += datetime.timedelta(days=1)
         # 22/10/2026 (MKT): bảng chiến dịch / quảng cáo lọc theo tên + chiến dịch, xếp theo mọi cột;
         # (chủ dự án) 20 dòng một trang, trang `tc` / `ta` kẹp về trang cuối ở `kho_qc.qc_bang`.
@@ -3011,7 +3035,8 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                  else str(r["ngay"]), "nen_tang": n,
                                  **{c: r.get(c) or 0 for c in QC.TEN_COT_SO},
                                  "tuong_tac": QC.tuong_tac(r),
-                                 **{c: r.get(c) or 0 for c in QC.TEN_CHUOI_XEM_SP}}
+                                 **{c: r.get(c) or 0 for c in QC.TEN_CHUOI_XEM_SP},
+                                 **{c: r.get(c) or 0 for c in QC.TEN_LUU_LUONG}}
                                 for r in kq.qc_theo_ngay(ids_n, tu, den, **lcd))
         # 26/10/2026 (chủ dự án): Khán giả theo Bộ lọc đầu trang + ô chọn NHIỀU chiến dịch bằng ô tích
         # (`kg_cd` lặp lại). Không lọc tên, không chọn → cấp TÀI KHOẢN (qc_khan_gia: đúng nhất, reach
@@ -3035,6 +3060,16 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             kg = kq.qc_khan_gia_cd(ids, cds_kg)
             if len(cds_kg) > 1:
                 kg = {**kg, "rows": QC.bo_reach(kg.get("rows") or [])}
+        # 28/10/2026 (chủ dự án): sở thích TikTok — tên từ qc_so_thich (thiếu → "Sở thích <mã>"),
+        # % trên tổng hiển thị TikTok cùng phạm vi (`mau_so_thich`, không phải tổng các nhóm).
+        ma_st = [str(r.get("gia_tri")) for r in kg.get("rows") or []
+                 if r.get("chieu") == QC.CHIEU_SO_THICH]
+        ten_st: dict = {}
+        if ma_st and hasattr(kq, "ten_so_thich"):
+            try:
+                ten_st = kq.ten_so_thich(ma_st)
+            except LoiKho:
+                ten_st = {}                     # bảng tên chưa có (delta chưa chạy): hiện mã
         moi = pv["moi"] if pv["moi"] is not None else ((kq.qc_moi(ids) if ids else None) or {})
         hom_qua = _hom_nay() - datetime.timedelta(days=1)
         moc = QC.ngay_moc(moi.get("ngay_cuoi"), hom_qua)
@@ -3078,7 +3113,7 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                      "trang_campaign": trang.get("campaign", 1), "trang_ad": trang.get("ad", 1),
                      "so_trang_campaign": max(1, -(-dem.get("campaign", 0) // moi_trang)),
                      "so_trang_ad": max(1, -(-dem.get("ad", 0) // moi_trang))},
-            "khan_gia": QC.khan_gia(kg.get("rows") or []),
+            "khan_gia": QC.khan_gia(kg.get("rows") or [], ten_st, kg.get("mau_so_thich")),
             "khan_gia_khoang": {"tu": kg.get("tu"), "den": kg.get("den")},
             # 26/10/2026: phạm vi số khán giả — `che_do` tai_khoan | chien_dich; `chon` = DANH SÁCH mã
             # đã tích ([] = mặc định; `chon_ten` / `chon_nen_tang` khi tích đúng một); `so_cd` = số chiến dịch
@@ -3225,6 +3260,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                     return _url("/quang-cao", **{**loc, "tc": tc if tc > 1 else "",
                                                  "ta": ta if ta > 1 else ""}) + "#top"
                 return url
+            # 28/10/2026 (chủ dự án): mục "Lưu lượng truy cập" — ô tiền chỉ người xem tiền, ô một nền
+            # tảng chỉ khi phạm vi có nền tảng đó.
+            ll = QC.chon_luu_luong(d["xem_tien"], [n["nen_tang"] for n in d["theo_nen_tang"]])
+            ctx["kpi_ll"] = [_o_ll(d, k) for k in ll]
             ctx |= {"kpi_chinh": [_o_kpi(d, k) for k in chinh], "kpi_phu": [_o_kpi(d, k) for k in phu],
                    "du_lieu_bd": _bd_qc(d), "url_cho": lambda **kw: _url("/quang-cao",
                                                                        **{**loc, **kw}),

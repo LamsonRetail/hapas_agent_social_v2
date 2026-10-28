@@ -38,6 +38,13 @@ NHAN = {"spark": "Spark Ads", "chinh_chu": "Chính chủ", "page": "Page", "inst
 COT = ("chi", "hien_thi", "click", "view_video", "follow")
 
 
+def _so(r: dict) -> dict:
+    """Cột số của một dòng. 28/10/2026 (chủ dự án): Click = bấm liên kết (`click_lk` của
+    `kho_qc.sql_kenh_dang` — Meta inline_link_clicks, TikTok clicks) như cả trang Quảng cáo; dòng
+    không có khoá đó (kho cũ) giữ cột click."""
+    return {c: (r.get("click_lk") if c == "click" and "click_lk" in r else r.get(c)) for c in COT}
+
+
 def chu_gon(s) -> str:
     """Bỏ dấu, chữ thường, chỉ a-z 0-9 ("MATE MADE" → "matemade")."""
     s = unicodedata.normalize("NFKD", str(s or "")).replace("đ", "d").replace("Đ", "d")
@@ -95,7 +102,7 @@ def dong(r: dict, ten_tk: dict[str, str]) -> dict:
         phu = _at(r.get("username")) if r.get("ten") else None
     return {"nen_tang": nen, "ten": ten, "phu": phu, "loai": lk, "nhan_loai": NHAN[lk],
             "tai_khoan": tks, "so_ad": int(r.get("so_ad") or 0),
-            **{c: r.get(c) for c in COT}, "tuong_tac": QC.tuong_tac(r)}
+            **_so(r), "tuong_tac": QC.tuong_tac(r)}
 
 
 def loc_kenh(qp, co_tien: bool) -> dict:
@@ -161,7 +168,7 @@ def du_lieu(kq, ids: list[str], tu, den, qp, co_tien: bool, ten_tk: dict[str, st
     chua_ro = None
     if chua and (chua.get("hien_thi") or chua.get("chi")):
         chua_ro = {"ten": "Chưa xác định", "so_ad": int(chua.get("so_ad") or 0),
-                   **{c: chua.get(c) for c in COT}, "tuong_tac": QC.tuong_tac(chua)}
+                   **_so(chua), "tuong_tac": QC.tuong_tac(chua)}
     return {"rows": ds[(trang - 1) * KENH_MOI_TRANG: trang * KENH_MOI_TRANG],
             "tong": int(r.get("tong") or 0), "tong_khop": len(ds), "trang": trang,
             "so_trang": so_trang, "loc": {**lk, "trang": trang},

@@ -21,7 +21,8 @@ sau đẩy lại, MERGE nên không nhân đôi.
 Không đẩy `nguoi_xem`, `nhat_ky`, `de_xuat`, `dong_bo_bq`, cột email (`sua_boi`, `them_boi`), và
 `ket_noi_ngoai` (token TikTok / Meta đã mã hoá, email người cấp) — quảng cáo chỉ đẩy `tk_quang_cao`
 + `qc_*` (TikTok 19/10/2026, Meta 20/10/2026 — cùng bảng, `tk_quang_cao.nen_tang`; kênh đăng
-`qc_ad_kenh` + `qc_kenh` từ 22/10/2026; khán giả theo chiến dịch `qc_khan_gia_cd` từ 26/10/2026;
+`qc_ad_kenh` + `qc_kenh` từ 22/10/2026; khán giả theo chiến dịch `qc_khan_gia_cd` từ 26/10/2026; tên
+sở thích TikTok `qc_so_thich` từ 28/10/2026;
 hai bộ hẹn giờ gọi `chay()` ngay sau lượt đồng bộ của mình).
 Chạy: sau mỗi lượt quét (hook `sau_cap_nhat` của dashboard) và 6 giờ một lần. Một lượt một lúc.
 """
@@ -136,8 +137,12 @@ BANG.update({
                 ("nen_tang", "STRING"), ("duyet", "BOOL"),
                 # 26/10/2026: mốc hoàn tất khán giả cấp chiến dịch (ALTER trong khối "Khán giả theo
                 # chiến dịch" của bigquery.sql; thiếu bên nào thì bỏ cột, kèm cảnh báo).
-                ("khan_gia_cd_den", "DATE")],
-        "tuy_chon": ("nen_tang", "duyet", "khan_gia_cd_den"),
+                ("khan_gia_cd_den", "DATE"),
+                # 28/10/2026: phiên bản bộ chiều khán giả đã đọc (sở thích TikTok) — ALTER trong khối
+                # "Lưu lượng truy cập + sở thích" của bigquery.sql; thiếu bên nào thì bỏ cột + cảnh báo.
+                ("khan_gia_bo_chieu", "INT64"), ("khan_gia_cd_bo_chieu", "INT64")],
+        "tuy_chon": ("nen_tang", "duyet", "khan_gia_cd_den", "khan_gia_bo_chieu",
+                     "khan_gia_cd_bo_chieu"),
     },
     "qc_tk_ngay": {
         "khoa": ["advertiser_id", "ngay"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
@@ -190,10 +195,19 @@ BANG.update({
         "cot": [("nen_tang", "STRING"), ("kenh_id", "STRING"), ("loai", "STRING"),
                 ("ten", "STRING"), ("username", "STRING"), ("cap_nhat_luc", "TIMESTAMP")],
     },
+    # 28/10/2026 (chủ dự án: sở thích TikTok): tên nhóm sở thích — BI đặt tên cho chiều
+    # interest_category của qc_khan_gia / qc_khan_gia_cd (gia_tri 'v<phien_ban>:<id>'). Bảng nhỏ, không
+    # tiền. Bảng BigQuery tạo bằng khối "Lưu lượng truy cập + sở thích" của bigquery.sql — chưa chạy
+    # thì bảng này báo lỗi trên trang Kết nối BigQuery, bảng khác vẫn đẩy.
+    "qc_so_thich": {
+        "khoa": ["phien_ban", "id"], "kieu": "tang_dan", "moc": "cap_nhat_luc",
+        "cot": [("phien_ban", "INT64"), ("id", "STRING"), ("ten", "STRING"), ("cap", "INT64"),
+                ("cha", "STRING"), ("cap_nhat_luc", "TIMESTAMP")],
+    },
 })
 THU_TU = ("du_an", "nguon", "luot_quet", "bai", "chi_so_ngay", "binh_luan",   # cha trước con
           "tk_quang_cao", "qc_tk_ngay", "qc_campaign_ngay", "qc_ad_ngay", "qc_khan_gia",
-          "qc_khan_gia_cd", "qc_ad_kenh", "qc_kenh")
+          "qc_khan_gia_cd", "qc_ad_kenh", "qc_kenh", "qc_so_thich")
 
 
 def dataset() -> str:
