@@ -556,9 +556,11 @@ sudo -u lang_nghe_web psql -d lang_nghe -c "select phien_ban, count(*), max(cap_
 journalctl -u tiktok-ads-dong-bo --since today | grep -E "interest_category|sở thích"
 ```
 
-- Cấp chiến dịch của chiều sở thích CHƯA đo thật: TikTok từ chối thì mỗi tài khoản một dòng nhật ký
-  "chiều interest_category lỗi … các chiều khác vẫn hoàn tất" (kết quả lượt: `khan_gia_cd.loi`), bốn chiều
-  kia vẫn hoàn tất, tuần sau thử lại — không đọc lại mỗi ngày.
+- Chiều sở thích đo thật 28/10/2026 ở cả hai cấp (dòng chỉ có mã v2 → `v2:<mã>`, tên từ danh mục v2).
+  TikTok TỪ CHỐI chiều (mã 40002) → mỗi tài khoản một dòng nhật ký "chiều interest_category bị nền tảng
+  từ chối …" (kết quả lượt: `khan_gia_cd.loi`), bốn chiều kia vẫn hoàn tất, tuần sau thử lại. Lỗi TẠM
+  (mạng, mã khác, kho) → cấp chiến dịch: cửa sổ không hoàn tất (cửa sổ cũ vẫn hiện); cấp tài khoản: bốn
+  chiều ghi nhưng không ghi phiên bản — cả hai đọc lại ở lượt sau.
 - Tên nhóm: một lượt `tool_interest_category_get` mỗi phiên bản (v1, v2) khi kho đã có dòng sở thích và
   tên trống / cũ hơn 7 ngày; lỗi chỉ ghi nhật ký, trang hiện "Sở thích <mã>".
 - Muốn đọc ngay thay vì chờ 06:30: lệnh `khan-gia` như mục 13 bước 4 (giữ khoá đồng bộ suốt lúc chạy).

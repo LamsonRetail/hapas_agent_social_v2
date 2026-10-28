@@ -522,10 +522,11 @@ class GiaKhoQC:
     def gio_kho(self):
         return self._gio()
 
-    def xong_khan_gia_cd(self, adv, den, tu_luc, bo_chieu=None):
+    def xong_khan_gia_cd(self, adv, den, tu_luc, bo_chieu=None, bo_chieu_khoi=()):
         b = self.bang["qc_khan_gia_cd"]
         for k in [k for k, r in b.items() if r["advertiser_id"] == adv
-                  and (r["den"] != den or r["cap_nhat_luc"] < tu_luc)]:
+                  and (r["den"] != den or r["cap_nhat_luc"] < tu_luc
+                       or r["chieu"] in bo_chieu_khoi)]:
             del b[k]
         luc = self._gio()
         n = 0
@@ -699,7 +700,7 @@ class GiaKhoQC:
         ra = []
         for k, rs in nhom.items():
             cuoi = max(rs, key=lambda r: r["ngay"])
-            x = {khoa: k, "advertiser_id": cuoi["advertiser_id"], **self._cong(rs)}
+            x = {khoa: k, "advertiser_id": cuoi["advertiser_id"], **self._cong_ll(rs)}
             if cap == "campaign":
                 x.update(ten=cuoi["ten"], muc_tieu=cuoi["muc_tieu"])
             else:
@@ -830,7 +831,7 @@ class GiaKhoQC:
         ra = []
         for (m, tk), rs in nhom.items():
             co = [r["ngay"] for r in rs if (r.get("hien_thi") or 0) > 0 or (r.get("chi") or 0) > 0]
-            ra.append({"ma": m, "tk": tk, **self._cong(rs),
+            ra.append({"ma": m, "tk": tk, **self._cong_ll(rs),
                        "so_ngay": len({r["ngay"] for r in rs}), "ngay_dau": min(co, default=None),
                        "ngay_cuoi": max(co, default=None)})
         return ra
@@ -850,7 +851,7 @@ class GiaKhoQC:
         nhom = {}
         for r in rows:
             nhom.setdefault((str(r[khoa]), r["advertiser_id"], r["ngay"]), []).append(r)
-        return [{"ma": m, "tk": tk, "ngay": d, **self._cong(rs)}
+        return [{"ma": m, "tk": tk, "ngay": d, **self._cong_ll(rs)}
                 for (m, tk, d), rs in sorted(nhom.items())]
 
 

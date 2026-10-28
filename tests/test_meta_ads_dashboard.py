@@ -865,8 +865,12 @@ def test_mark_tra_chien_dich_theo_ten_khong_dau(monkeypatch):
     assert x["ben"] == "hapas" and x["muc_tieu"] == "Bán hàng" and x["xem_tien"] is True
     rows = [v for k, v in kho_qc.bang["qc_campaign_ngay"].items() if k[0] == "120201"
             and datetime.date(2026, 10, 12) <= k[1] <= datetime.date(2026, 10, 18)]
-    chi, hien, click = (sum(r[k] for r in rows) for k in ("chi", "hien_thi", "click"))
-    assert x["so"]["chi"] == chi and x["so"]["reach"] is None
+    chi, hien = (sum(r[k] for r in rows) for k in ("chi", "hien_thi"))
+    # 28/10/2026: Click / CTR / CPC của Mark = bấm liên kết như trang (Meta inline_link_clicks).
+    click = sum(r["chi_so"]["inline_link_clicks"] for r in rows)
+    assert click < sum(r["click"] for r in rows)
+    assert x["so"]["chi"] == chi and x["so"]["reach"] is None and x["so"]["click"] == click
+    assert "click_lk" not in x["so"]
     # Tỉ lệ tính LẠI từ tổng — không cộng ctr (10.0) của từng ngày.
     assert x["chi_phi"]["ctr"] == round(click * 100 / hien, 2)
     assert x["chi_phi"]["cpc"] == round(chi / click, 2)

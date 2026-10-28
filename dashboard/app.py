@@ -426,9 +426,11 @@ def _o_ll(d: dict, ma: str) -> dict:
         so = (so_thap(v) + "%") if v is not None else "—"
         du = (so_thap(v, 4) + "%") if v is not None else "—"
     elif kieu == "tien":
+        # VND: làm tròn đồng; tiền tệ khác (USD…): hai số lẻ như usd_vn / so_thap (CPC 0,35 $).
         tt = d.get("tien_te") or ["VND"]
         don = " ₫" if tt == ["VND"] else (" " + tt[0] if len(tt) == 1 else " (nhiều tiền tệ)")
-        so = du = (so_gon(v) + don) if v is not None else "—"
+        chu = so_gon(v) if tt == ["VND"] else so_thap(v, 2)
+        so = du = (chu + don) if v is not None else "—"
     else:
         so = du = so_gon(v)
     truoc = d["kpi_truoc"].get(ma)

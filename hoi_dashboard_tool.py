@@ -971,12 +971,27 @@ def _qc_chi_phi(k: dict) -> dict:
 
 def _chi_phi_day_du(k: dict) -> dict:
     """Mọi chi phí / tỉ lệ tính LẠI từ tổng (không bao giờ cộng tỉ lệ của từng ngày): CPM, CPC, CTR
-    (%), chi / follow, chi / 1.000 view, chi / engaged view, chi / kết quả, chi / chuyển đổi, ROAS."""
-    return {**_qc_chi_phi(k), "cpc": _chia(k.get("chi"), k.get("click")),
-            "ctr": _chia(k.get("click"), k.get("hien_thi"), 100),
+    (%), chi / follow, chi / 1.000 view, chi / engaged view, chi / kết quả, chi / chuyển đổi, ROAS.
+    28/10/2026 (chủ dự án): CPC / CTR theo LƯỢT BẤM LIÊN KẾT như trang Quảng cáo + Lark Sheet —
+    `click_lk` của kho (TikTok clicks, Meta inline_link_clicks — click vào link); tổng cũ không có
+    khoá đó thì dùng click."""
+    click = k.get("click_lk") if "click_lk" in k else k.get("click")
+    return {**_qc_chi_phi(k), "cpc": _chia(k.get("chi"), click),
+            "ctr": _chia(click, k.get("hien_thi"), 100),
             "chi_moi_ket_qua": _chia(k.get("chi"), k.get("ket_qua")),
             "chi_moi_chuyen_doi": _chia(k.get("chi"), k.get("chuyen_doi")),
             "roas": _chia(k.get("gia_tri_mua_shop"), k.get("chi"))}
+
+
+def _click_lien_ket(k: dict) -> dict:
+    """28/10/2026: số trả Mark — `click` = lượt bấm liên kết (`click_lk`: TikTok clicks, Meta
+    click vào link inline_link_clicks) như trang Quảng cáo; bỏ khoá click_lk (một con số Click duy
+    nhất, không lẫn mọi lượt bấm của Meta)."""
+    if "click_lk" not in k:
+        return k
+    k = dict(k)
+    k["click"] = k.pop("click_lk")
+    return k
 
 
 def _bo_reach(k: dict, nhieu_ngay: bool) -> dict:
@@ -1103,7 +1118,9 @@ GHI_CHU_QC = (
     "KHÔNG được xem chi tiêu — không nêu, không ước, không suy ra số tiền. Có chi "
     "theo tài khoản (`theo_tai_khoan`), theo nền tảng (`theo_nen_tang`: TikTok / Meta), theo ngày "
     "(`theo_ngay`) và chi phí suy ra (`chi_phi`: CPM, CPC, CTR, chi/follow, chi/1.000 view, chi/"
-    "engaged view — tính lại từ tổng). Meta: view_video = xem ≥ 3 giây, engaged_view = "
+    "engaged view — tính lại từ tổng). Click, CTR, CPC tính theo lượt bấm liên kết như trang "
+    "Quảng cáo (TikTok: click; Meta: click vào link — inline_link_clicks, không phải mọi lượt "
+    "bấm). Meta: view_video = xem ≥ 3 giây, engaged_view = "
     "ThruPlay, follow = thích Trang. Chủ dự án 20/10/2026: số "
     "quảng cáo trả lời BẰNG CHỮ (câu ngắn, bảng chữ được) — không vẽ biểu đồ, không tạo ảnh, "
     "không gửi link trang Quảng cáo khi không có `link`. Chủ dự án 22/10/2026: người hỏi ĐÒI Sheet "
@@ -1224,14 +1241,17 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
     if args.get("theo_ngay"):
         for r in kho.qc_doi_tuong_ngay(cap, ma_chon, tu, den, tk_chon):
             chuoi.setdefault((str(r["ma"]), str(r["tk"])), []).append(
-                {"ngay": str(r.get("ngay")), **{c: r.get(c) for c in QC.TEN_COT_SO},
+                {"ngay": str(r.get("ngay")), **_click_lien_ket(
+                    {c: r.get(c) for c in (*QC.TEN_COT_SO, *QC.TEN_LUU_LUONG) if c in r
+                     or c in QC.TEN_COT_SO}),
                  **_chi_phi_day_du(r)})
     ket_qua = []
     for b, t, x in chon:
         m = str(x["ma"])
         km = (m, str(t["advertiser_id"]))
         r = so.get(km) or {}
-        cot = QC.kpi({c: r.get(c) for c in QC.TEN_COT_SO})
+        # 28/10/2026: + click_lk / lpv — Click / CTR / CPC theo bấm liên kết như trang.
+        cot = QC.kpi({c: r.get(c) for c in (*QC.TEN_COT_SO, *QC.TEN_LUU_LUONG)})
         y = {"cap": cap, "ma": m, "ten": x.get("ten") or x.get("ten_ad") or t.get("ten") or m,
              "nen_tang": QC.TEN_NEN_TANG_QC[QC.nen_tang_tk(t)],
              "tai_khoan": t.get("ten") or t["advertiser_id"],
@@ -1239,7 +1259,7 @@ def tra_cuu_qc(kho, q: dict, args: dict, cac_tk: list[dict], tu: datetime.date,
              "tien_te": t.get("tien_te") or "VND",
              "ngay_dau_co_phan_phoi": _gio(r.get("ngay_dau")),
              "ngay_cuoi_co_phan_phoi": _gio(r.get("ngay_cuoi")),
-             "so": _bo_reach(cot, nhieu), "chi_phi": _chi_phi_day_du(cot),
+             "so": _click_lien_ket(_bo_reach(cot, nhieu)), "chi_phi": _chi_phi_day_du(cot),
              "chi_so_tho_cong_duoc": bo_bi_danh(tho.get(km, {})),
              "trang_thai": "dashboard không lưu trạng thái bật/tắt — chỉ biết ngày có phân phối"}
         if not r:

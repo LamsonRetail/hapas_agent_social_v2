@@ -81,6 +81,9 @@ _COT_SO = (
     # inline_link_clicks); CTR / CPC tính từ nó.
     ("click_lk", "Click", "so_nguyen"), ("ctr", "CTR (%)", "phan_tram_100"),
     ("cpm", "CPM", "tien"), ("cpc", "CPC", "tien"),
+    # 28/10/2026: Landing page view (TikTok total_landing_page_view, Meta landing_page_view) — mọi
+    # tab có cột này (xếp tab chiến dịch / quảng cáo theo LPV thì thấy được số).
+    ("lpv", "Landing page view", "so_nguyen"),
     ("view_video", "View video", "so_nguyen"), ("view_hai_giay", "View 2 giây", "so_nguyen"),
     ("view_sau_giay", "View 6 giây", "so_nguyen"), ("view_het", "View hết", "so_nguyen"),
     ("engaged_view", "Engaged view", "so_nguyen"),
@@ -385,7 +388,8 @@ def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict,
         "7 ngày gần nhất) — giống trang Quảng cáo cùng bộ lọc.",
         *tien_ghi,
         ("Click = lượt bấm liên kết (TikTok clicks, Meta inline_link_clicks — như trang Quảng cáo); "
-         "CTR, CPC tính từ số này."),
+         "CTR, CPC tính từ số này. Landing page view = lượt tải xong trang đích (TikTok "
+         "total_landing_page_view, Meta landing_page_view)."),
         "Reach chỉ ở tab theo ngày: cộng reach nhiều ngày đếm trùng người.",
         "Chỉ chiến dịch / quảng cáo CÓ phân phối trong kỳ (có hiển thị hoặc chi).",
         "Sheet riêng tư: chia sẻ link đóng, chỉ người yêu cầu được XEM. " + tao_boi,

@@ -27,7 +27,11 @@
     ở MỌI chỗ của trang — ô CTR, TikTok và Meta, bảng, biểu đồ, kênh đăng; CPC = chi ÷ click_lk. #}
 {% macro cpm(k) %}{% if k.chi is not none and k.hien_thi %}{{ (k.chi / k.hien_thi * 1000)|round|int|so_vn }}{% else %}—{% endif %}{% endmacro %}
 {% macro ctr(k) %}{% if k.click_lk is not none and k.hien_thi %}{{ (k.click_lk / k.hien_thi * 100)|round(2)|so_thap }}%{% else %}—{% endif %}{% endmacro %}
-{% macro cpc(k) %}{% if k.chi is not none and k.click_lk %}{{ (k.chi / k.click_lk)|round|int|so_vn }}{% else %}—{% endif %}{% endmacro %}
+{#- CPC: VND làm tròn đồng; tiền tệ khác (USD…) hai số lẻ (`so_thap`, như usd_vn). #}
+{% macro cpc(k) %}{% if k.chi is not none and k.click_lk %}{% if d.tien_te == ['VND'] %}{{ (k.chi / k.click_lk)|round|int|so_vn }}{% else %}{{ (k.chi / k.click_lk)|round(2)|so_thap }}{% endif %}{% else %}—{% endif %}{% endmacro %}
+{#- 28/10/2026: số cột của hàng ô phụ sao cho các hàng đầy: máy tính ≤ 6 ô một hàng, nhiều hơn chia
+    hai hàng; màn ≤ 1200px ≤ 4 ô một hàng, nhiều hơn chia hai hàng (qc.css). #}
+{% macro cot_kpi(n) %}--so-kpi: {{ n }}; --kpi-cot: {{ n if n <= 6 else (n + 1) // 2 }}; --kpi-cot-hep: {{ n if n <= 4 else (n + 1) // 2 }}{% endmacro %}
 {% macro chi_view(k) %}{% if k.chi is not none and k.view_video %}{{ (k.chi / k.view_video)|round|int|so_vn }}{% else %}—{% endif %}{% endmacro %}
 
 {% include "_dai_qc.html" %}
@@ -199,7 +203,8 @@
 {% else %}
 {% set k, kt = d.kpi, d.kpi_truoc %}
 {#- KPI hai tầng — cùng kiểu trang Chỉ số: hàng chính 3 số lớn, hàng phụ một thẻ kẻ mảnh. Hàng phụ thêm
-    CPM + CTR (tính lại từ tổng kỳ này / kỳ trước; CPM không tô màu ▲▼ vì chi phí tăng chưa chắc xấu). #}
+    CPM (tính lại từ tổng kỳ này / kỳ trước; không tô màu ▲▼ vì chi phí tăng chưa chắc xấu); CTR ở mục
+    "Lưu lượng truy cập" (28/10/2026). #}
 {% set phu = kpi_phu|rejectattr('ma', 'equalto', 'vao_ho_so' if d.nen_tang == 'meta' else '')|list %}
 <section class="qc-kpi" id="qc-kpi" aria-label="Tổng quan">
   <p class="qc-kpi__khoang">Tổng kỳ {{ nhan_khoang() }}{% if d.ky_truoc %}<span class="qc-kpi__ss"> · ▲▼ so với {{ ngay_ngan(d.ky_truoc.tu) }} – {{ ngay_ngan(d.ky_truoc.den) }}</span>{% endif %}</p>
@@ -219,12 +224,9 @@
     {% set v = k.chi / k.hien_thi * 1000 %}{% set vt = (kt.chi / kt.hien_thi * 1000) if (kt.chi is not none and kt.hien_thi) else none %}
     {% set _ = hq.append({'ma': 'cpm', 'nhan': 'CPM', 'goi_y': 'Chi cho 1.000 lượt hiển thị = Chi tiêu ÷ Hiển thị × 1.000 (tính lại từ tổng kỳ).', 'so': (v|round|int|so_vn) ~ ' ₫', 'day_du': (v|round|int|so_vn) ~ ' ₫', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': false, 'co_truoc': (vt is not none) if d.ky_truoc else none}) %}
   {% endif %}
-  {% if k.click_lk is not none and k.hien_thi %}
-    {% set v = k.click_lk / k.hien_thi * 100 %}{% set vt = (kt.click_lk / kt.hien_thi * 100) if (kt.click_lk is not none and kt.hien_thi) else none %}
-    {% set _ = hq.append({'ma': 'ctr', 'nhan': 'CTR', 'goi_y': 'Tỉ lệ bấm = Click (bấm liên kết: TikTok clicks, Meta inline_link_clicks) ÷ Hiển thị (tính lại từ tổng kỳ, không trung bình các ngày).', 'so': (v|round(2)|so_thap) ~ '%', 'day_du': (v|round(4)|so_thap(4)) ~ '%', 'doi': (((v - vt) / vt * 100)|round(1)) if vt else none, 'mau_doi': true, 'co_truoc': (vt is not none) if d.ky_truoc else none}) %}
-  {% endif %}
+  {#- 28/10/2026 (chủ dự án): CTR chỉ còn ở mục "Lưu lượng truy cập" (không hiện hai lần). #}
   {% set phu = hq + phu %}
-  <div class="the-khoi kpi-phu qc-kpi-phu" style="--so-kpi: {{ phu|length }}">
+  <div class="the-khoi kpi-phu qc-kpi-phu" style="{{ cot_kpi(phu|length) }}">
     {% for o in phu %}
     <div class="kpi kpi-o" data-kpi="{{ o.ma }}">
       <div class="kpi__than">
@@ -246,7 +248,7 @@
     <h2 class="muc__ten" id="qc-ll-tieu-de">Lưu lượng truy cập</h2>
     {{ nhan_khoang() }}
   </div>
-  <div class="the-khoi kpi-phu qc-kpi-phu" style="--so-kpi: {{ kpi_ll|length }}">
+  <div class="the-khoi kpi-phu qc-kpi-phu" style="{{ cot_kpi(kpi_ll|length) }}">
     {% for o in kpi_ll %}
     <div class="kpi kpi-o" data-kpi="{{ o.ma }}">
       <div class="kpi__than">

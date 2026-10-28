@@ -10,17 +10,21 @@
 --
 -- Cần role postgres (superuser): SET ROLE lang_nghe_chu (chủ bảng, NOLOGIN — ALTER, CREATE, thay hàm
 -- trigger) + GRANT. Chạy TRƯỚC khi bật mã mới (mã mới đọc hai cột mới của tk_quang_cao và ghi chiều
--- interest_category — thiếu thì trang Quảng cáo và đồng bộ quảng cáo lỗi). Chạy lại không sao (IF NOT
--- EXISTS; CHECK đã có interest_category thì bỏ qua; COMMENT / GRANT / CREATE OR REPLACE ghi đè như cũ).
+-- interest_category — thiếu thì trang Quảng cáo và đồng bộ quảng cáo lỗi). Chạy lại không sao.
 -- HAI giao dịch (soát khoá):
 --   (1) mọi thay đổi danh mục — MỘT giao dịch: CREATE TABLE qc_so_thich (bảng mới, không FK — không khoá
---       bảng nào khác); ADD COLUMN tk_quang_cao xin ACCESS EXCLUSIVE (cột NULL không DEFAULT — chỉ đổi
---       danh mục, tức thì); DROP CONSTRAINT + ADD CONSTRAINT … NOT VALID trên qc_khan_gia, qc_khan_gia_cd
---       xin ACCESS EXCLUSIVE (chặn cả đọc) nhưng KHÔNG quét bảng (NOT VALID chỉ kiểm dòng mới) — nhả khi
---       COMMIT, chừng mili giây; CREATE OR REPLACE FUNCTION không khoá bảng. Mark / dashboard / bộ đồng
---       bộ đang giữ khoá thì lock_timeout 5 giây → lỗi, KHÔNG treo, rollback cả giao dịch (CHECK cũ còn
---       nguyên) — chạy lại sau (tránh 06:25–07:30 giờ VN). Trong lúc chờ khoá (≤ 5 giây) truy vấn mới vào
---       ba bảng này xếp hàng sau nó.
+--       bảng nào khác); ADD COLUMN tk_quang_cao CHỈ khi cột chưa có (information_schema) — xin ACCESS
+--       EXCLUSIVE (cột NULL không DEFAULT — chỉ đổi danh mục, tức thì); DROP CONSTRAINT + ADD CONSTRAINT
+--       … NOT VALID trên qc_khan_gia, qc_khan_gia_cd CHỈ khi CHECK tên chuẩn <bảng>_chieu_check chưa có
+--       interest_category — xin ACCESS EXCLUSIVE (chặn cả đọc) nhưng KHÔNG quét bảng (NOT VALID chỉ kiểm
+--       dòng mới), nhả khi COMMIT, chừng mili giây. Bảng có CHECK chieu tên lạ → RAISE, không xoá gì.
+--       CREATE OR REPLACE FUNCTION không khoá bảng. Mark / dashboard / bộ đồng bộ đang giữ khoá thì
+--       lock_timeout 5 giây → lỗi, KHÔNG treo, rollback cả giao dịch (CHECK cũ còn nguyên) — chạy lại
+--       sau (tránh 06:25–07:30 giờ VN). Trong lúc chờ khoá (≤ 5 giây) truy vấn mới vào ba bảng này xếp
+--       hàng sau nó.
+--       Chạy LẠI (đã áp): không câu nào xin ACCESS EXCLUSIVE — cột và CHECK đã đúng thì bỏ qua; còn
+--       COMMENT (SHARE UPDATE EXCLUSIVE), CREATE INDEX IF NOT EXISTS (SHARE trên qc_so_thich), GRANT,
+--       CREATE OR REPLACE FUNCTION — không chặn đọc / ghi các bảng đang dùng.
 --   (2) VALIDATE CONSTRAINT (riêng giao dịch, SAU COMMIT của (1)): quét hai bảng khán giả, khoá
 --       SHARE UPDATE EXCLUSIVE — đọc / ghi vẫn chạy song song; dòng cũ luôn đạt (CHECK mới rộng hơn
 --       CHECK cũ). Gộp vào (1) thì ACCESS EXCLUSIVE bị giữ suốt lúc quét — vì vậy tách.
@@ -52,29 +56,46 @@ CREATE TABLE IF NOT EXISTS qc_so_thich (
   PRIMARY KEY (phien_ban, id)
 );
 CREATE INDEX IF NOT EXISTS qc_so_thich_cap_nhat ON qc_so_thich (cap_nhat_luc);
-ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS khan_gia_bo_chieu SMALLINT;
-ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS khan_gia_cd_bo_chieu SMALLINT;
+-- Cột chỉ thêm khi CHƯA có (information_schema): chạy lại không xin ACCESS EXCLUSIVE trên tk_quang_cao
+-- (ADD COLUMN IF NOT EXISTS vẫn xin khoá trước khi biết cột đã có).
+DO $cot$
+DECLARE
+  c TEXT;
+BEGIN
+  FOREACH c IN ARRAY ARRAY['khan_gia_bo_chieu', 'khan_gia_cd_bo_chieu'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+                   AND table_name = 'tk_quang_cao' AND column_name = c) THEN
+      EXECUTE format('ALTER TABLE public.tk_quang_cao ADD COLUMN %I SMALLINT', c);
+    END IF;
+  END LOOP;
+END $cot$;
 DO $sth$
 DECLARE
   ds CONSTANT TEXT := $c$'age', 'gender', 'province_id', 'region', 'platform', 'publisher_platform', 'platform_position', 'interest_category'$c$;
   b TEXT;
-  r RECORD;
+  ten TEXT;
+  la TEXT;
 BEGIN
   FOREACH b IN ARRAY ARRAY['qc_khan_gia', 'qc_khan_gia_cd'] LOOP
-    -- Đã đúng (CHECK có interest_category): bỏ qua — chạy lại không xin khoá.
+    ten := b || '_chieu_check';
+    -- Đã đúng (CHECK tên chuẩn có interest_category): bỏ qua — chạy lại không xin khoá.
     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = format('public.%I', b)::regclass
-               AND contype = 'c' AND conname = b || '_chieu_check'
+               AND contype = 'c' AND conname = ten
                AND pg_get_constraintdef(oid) LIKE '%interest_category%') THEN
       CONTINUE;
     END IF;
-    -- CHECK cũ của cột chieu (qc_khan_gia: đặt tên ở khối Meta; qc_khan_gia_cd: tên tự sinh) — tìm
-    -- theo định nghĩa, bỏ CÙNG giao dịch với CHECK mới.
-    FOR r IN SELECT conname FROM pg_constraint WHERE conrelid = format('public.%I', b)::regclass
-             AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%chieu%' LOOP
-      EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT %I', b, r.conname);
-    END LOOP;
+    -- CHECK của cột chieu PHẢI mang tên chuẩn <bảng>_chieu_check (qc_khan_gia: đặt ở khối Meta;
+    -- qc_khan_gia_cd: tên Postgres tự sinh cho CHECK cột). CHECK nào khác nhắc tới chieu → DỪNG, báo rõ,
+    -- không xoá thứ không lường trước (giao dịch huỷ, CHECK cũ còn nguyên).
+    SELECT string_agg(conname, ', ') INTO la FROM pg_constraint
+      WHERE conrelid = format('public.%I', b)::regclass AND contype = 'c' AND conname <> ten
+        AND pg_get_constraintdef(oid) LIKE '%chieu%';
+    IF la IS NOT NULL THEN
+      RAISE EXCEPTION 'Bảng % có CHECK chieu tên lạ (%) — không đổi gì; soát tay rồi chạy lại', b, la;
+    END IF;
+    EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT IF EXISTS %I', b, ten);
     EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I CHECK (chieu IN (%s)) NOT VALID', b,
-                   b || '_chieu_check', ds);
+                   ten, ds);
   END LOOP;
 END $sth$;
 

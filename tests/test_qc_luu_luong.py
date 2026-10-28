@@ -277,36 +277,129 @@ def test_cap_chien_dich_tu_choi_so_thich_van_hoan_tat_cua_so():
     assert "interest_category" in (dv2.doc_khan_gia([HAPAS_KOC])["loi"] or "")
 
 
-def test_lo_sau_loi_khong_ghi_nua_chieu(monkeypatch):
-    """Lô thứ hai của chiều sở thích hỏng → KHÔNG ghi lô đầu (không bao giờ nửa chiều); cửa sổ vẫn
-    hoàn tất với bốn chiều kia, dòng sở thích cũ của cùng cửa sổ bị bỏ (TikTok không còn trả)."""
-    class _Lo2(GiaTikTok):
-        hong = False
+class _LoSau(GiaTikTok):
+    """Chiều sở thích cấp chiến dịch: lô có 1 chiến dịch (lô thứ hai khi LO_ID = 2) trả `ma`."""
 
-        def _bao_cao(self, a):
-            if (self.hong and a["report_type"] == "AUDIENCE"
-                    and a["data_level"] == "AUCTION_CAMPAIGN"
-                    and a["dimensions"][-1] == QC.CHIEU_SO_THICH
-                    and len(json.loads(a["filtering"][0]["filter_value"])) == 1):
-                return {"code": 50000, "message": "hỏng"}
-            return super()._bao_cao(a)
-    tt = _Lo2()
+    ma: int | None = None
+
+    def _bao_cao(self, a):
+        if (self.ma and a["report_type"] == "AUDIENCE" and a["data_level"] == "AUCTION_CAMPAIGN"
+                and a["dimensions"][-1] == QC.CHIEU_SO_THICH
+                and len(json.loads(a["filtering"][0]["filter_value"])) == 1):
+            return {"code": self.ma, "message": "hỏng"}
+        return super()._bao_cao(a)
+
+
+def _lo_sau(monkeypatch):
+    tt = _LoSau()
     tt.so_thich = list(ST)
     dv, kho_qc, tt = _dv(tt=tt)
-    _ket_noi_san(dv, tt)
+    _ket_noi_san(dv, tt, het_rt=BAY + datetime.timedelta(days=60))
     dv.dong_bo()
-
-    def st():
-        return [r for r in kho_qc.bang["qc_khan_gia_cd"].values()
-                if r["chieu"] == QC.CHIEU_SO_THICH and r["advertiser_id"] == HAPAS_KOC]
-    assert len(st()) == 3 * 3
-    tt.hong = True
     monkeypatch.setattr(TA, "LO_ID", 2)
-    kq = dv.doc_khan_gia([HAPAS_KOC])
-    assert "interest_category" in kq["loi"]
-    assert st() == [] and kho_qc.tk[HAPAS_KOC]["khan_gia_cd_den"] == datetime.date(2026, 10, 18)
+    # Hôm sau, cửa sổ cấp chiến dịch của HAPAS_KOC còn bộ chiều cũ → tới hạn lại (cửa sổ mới 19/10).
+    kho_qc.tk[HAPAS_KOC]["khan_gia_cd_bo_chieu"] = None
+    dv2, _, _ = _dv(kho_qc, tt, bay=BAY + datetime.timedelta(days=1))
+    return dv2, kho_qc, tt
+
+
+def _cd(dv):
+    """Chỉ phần khán giả cấp chiến dịch của lượt hằng ngày (LO_ID nhỏ chỉ dùng cho phần này)."""
+    return dv.khan_gia_cd(dv.mcp(), [HAPAS_KOC], dv._bay_gio())
+
+
+def _st_cd(kho_qc, den=None):
+    return [r for r in kho_qc.bang["qc_khan_gia_cd"].values() if r["chieu"] == QC.CHIEU_SO_THICH
+            and r["advertiser_id"] == HAPAS_KOC and (den is None or r["den"] == den)]
+
+
+def test_cd_loi_tam_so_thich_khong_doi_moc_va_doc_lai(monkeypatch):
+    """Lỗi TẠM (mã không phải từ chối chiều) ở lô thứ hai: như lỗi chiều chính — cửa sổ mới KHÔNG
+    hoàn tất, mốc + phiên bản bộ chiều không dời (lượt sau đọc lại), lô đầu đã ghi theo từng lô nhưng
+    vô hình; cửa sổ cũ vẫn là cửa sổ hiện."""
+    dv2, kho_qc, tt = _lo_sau(monkeypatch)
+    cu, moi = datetime.date(2026, 10, 18), datetime.date(2026, 10, 19)
+    tt.ma = 50000
+    kq = _cd(dv2)
+    assert len(kq["loi"]) == 1 and kq["xong"] == 0
+    t = kho_qc.tk[HAPAS_KOC]
+    assert t["khan_gia_cd_den"] == cu and t["khan_gia_cd_bo_chieu"] is None
+    assert _st_cd(kho_qc, moi)                         # lô đầu đã ghi (từng lô) …
+    hien = kho_qc.ds_cd_khan_gia([HAPAS_KOC])["ds"]
+    assert {x["den"] for x in hien} == {cu}            # … nhưng vô hình: cửa sổ cũ vẫn hiện
+    assert TA.khan_gia_cd_den_han(t, moi, bo_chieu=TA.BO_CHIEU)
+    # Lượt sau, TikTok ổn: hoàn tất cửa sổ mới, đủ sở thích, phiên bản ghi.
+    tt.ma = None
+    assert _cd(dv2)["xong"] == 1
+    assert t["khan_gia_cd_den"] == moi and t["khan_gia_cd_bo_chieu"] == TA.BO_CHIEU
+    assert len(_st_cd(kho_qc)) == 3 * 3 and {r["den"] for r in _st_cd(kho_qc)} == {moi}
+
+
+def test_cd_tu_choi_giua_chung_bo_lo_da_ghi_va_lui_mot_tuan(monkeypatch):
+    """TikTok TỪ CHỐI chiều (40002) ở lô thứ hai: lô đầu đã ghi bị bỏ khi hoàn tất (không nửa
+    chiều), cửa sổ hoàn tất với bốn chiều kia, phiên bản bộ chiều dời (lùi một tuần)."""
+    dv2, kho_qc, tt = _lo_sau(monkeypatch)
+    tt.ma = 40002
+    kq = _cd(dv2)
+    assert len(kq["loi"]) == 1 and kq["xong"] == 1 and "từ chối" in kq["loi"][0]
+    t = kho_qc.tk[HAPAS_KOC]
+    moi = datetime.date(2026, 10, 19)
+    assert t["khan_gia_cd_den"] == moi and t["khan_gia_cd_bo_chieu"] == TA.BO_CHIEU
+    assert _st_cd(kho_qc) == []
     assert {r["chieu"] for r in kho_qc.bang["qc_khan_gia_cd"].values()
             if r["advertiser_id"] == HAPAS_KOC} == set(QC.CHIEU_KHAN_GIA)
+
+
+def test_phan_loai_tu_choi_chieu():
+    assert TA.la_tu_choi_chieu(TA.LoiTikTok("x", 40002))
+    for e in (TA.LoiTikTok("x", 50000), TA.LoiTikTok("x"), TA.LoiTikTok("x", 40100),
+              TA.LoiXacThuc("x", 40002), KQ.LoiKho("bảng chưa có"), ValueError("x")):
+        assert not TA.la_tu_choi_chieu(e), e
+
+
+def test_cap_tai_khoan_loi_tam_khong_ghi_bo_chieu():
+    class _TkTam(GiaTikTok):
+        ma = 50000
+
+        def _bao_cao(self, a):
+            if (self.ma and a["report_type"] == "AUDIENCE"
+                    and a["data_level"] == "AUCTION_ADVERTISER"
+                    and a["dimensions"][-1] == QC.CHIEU_SO_THICH):
+                return {"code": self.ma, "message": "tạm"}
+            return super()._bao_cao(a)
+    tt = _TkTam()
+    tt.so_thich = list(ST)
+    dv, kho_qc, tt = _dv(tt=tt)
+    _ket_noi_san(dv, tt, het_rt=BAY + datetime.timedelta(days=60))
+    dv.dong_bo()
+    for a in CHAY:
+        t = kho_qc.tk[a]
+        assert t["khan_gia_luc"] == BAY and t.get("khan_gia_bo_chieu") is None
+    # Hôm sau tới hạn lại (dù mốc tuần còn mới); TikTok ổn → ghi phiên bản.
+    tt.ma = None
+    tt.cong_cu.clear()
+    dv2, _, _ = _dv(kho_qc, tt, bay=BAY + datetime.timedelta(days=1))
+    dv2.dong_bo()
+    assert _audience(tt, "AUCTION_ADVERTISER", QC.CHIEU_SO_THICH)
+    assert all(kho_qc.tk[a]["khan_gia_bo_chieu"] == TA.BO_CHIEU for a in CHAY)
+
+
+def test_dong_chi_co_ma_v2_thanh_v2_va_ten_tu_danh_muc_v2():
+    """Đo thật 28/10/2026: 5/20 dòng cấp tài khoản có interest_category = null, chỉ có
+    interest_category_v2 (vd "18") → giá trị "v2:18", tên từ danh mục v2."""
+    tt = _tt_so_thich()
+    tt.so_thich = [*ST, (None, "18")]
+    tt.ten_so_thich[2].append({"interest_category_id": "18", "interest_category_name": "Thời trang",
+                               "level": 1, "sub_category_ids": ["1801"]})
+    _app, c, _kho, kq, tt, _dv_tt = _co_so(_tao_app(tt=tt))
+    dang_nhap(c, QL)
+    kg = [r for r in kq.bang["qc_khan_gia"].values() if r["chieu"] == QC.CHIEU_SO_THICH]
+    v2 = [r for r in kg if r["gia_tri"] == "v2:18"]
+    assert len(v2) == len(CHAY) and all(r["chi_so"]["interest_category_v2"] == "18" for r in v2)
+    assert kq.so_thich[(2, "18")]["ten"] == "Thời trang"
+    st = {x["gia_tri"]: x for x in _api(c)["khan_gia"][QC.CHIEU_SO_THICH]}
+    assert st["v2:18"]["nhan"] == "Thời trang" and st["v1:116"]["nhan"] == "Làm đẹp"
+    assert any(r["gia_tri"] == "v2:18" for r in kq.bang["qc_khan_gia_cd"].values())
 
 
 def test_cap_tai_khoan_tu_choi_so_thich_van_ghi_bon_chieu():
@@ -601,7 +694,9 @@ def test_click_meta_la_inline_link_clicks_tiktok_la_clicks():
     t = c.get(f"/quang-cao?{Q}").text
     ctr = f"{k['click_lk'] / k['hien_thi'] * 100:.2f}".replace(".", ",")
     kpi = t.split('id="qc-kpi"')[1].split("</section>")[0]
-    assert f">{ctr}%<" in kpi
+    assert 'data-kpi="ctr"' not in kpi and 'data-kpi="cpm"' in kpi    # CTR không hiện hai lần
+    ll = t.split('data-o="luu-luong"')[1].split("</section>")[0]
+    assert f">{ctr}%<" in ll
     m = nen["meta"]
     chia = t.split('aria-labelledby="qc-chia-tieu-de"')[1].split("</section>")[0]
     assert f"{m['click_lk'] / m['hien_thi'] * 100:.2f}".replace(".", ",") + "%" in chia
@@ -786,8 +881,16 @@ def test_schema_va_delta_cung_khoi():
     # CHECK mới: đúng QC.CHIEU_TAT_CA, NOT VALID, tìm CHECK cũ theo định nghĩa (tên tự sinh).
     ds = re.search(r"\$c\$(.*?)\$c\$", k).group(1)
     assert tuple(re.findall(r"'(\w+)'", ds)) == QC.CHIEU_TAT_CA
-    assert "NOT VALID" in k and "pg_get_constraintdef(oid) LIKE '%chieu%'" in k
-    assert "LIKE '%interest_category%'" in k and "DROP CONSTRAINT %I" in k
+    assert "NOT VALID" in k and "ten := b || '_chieu_check';" in k
+    assert "LIKE '%interest_category%'" in k and "DROP CONSTRAINT IF EXISTS %I', b, ten" in k
+    # Tên lạ: chỉ để phát hiện → RAISE (không xoá); không DROP nào theo LIKE.
+    lien = k[k.index("conname <> ten"):k.index("END IF;", k.index("conname <> ten"))]
+    assert "RAISE EXCEPTION" in lien and "DROP" not in lien
+    assert k.count("DROP CONSTRAINT") == 1
+    # ADD COLUMN chỉ khi information_schema chưa có cột (chạy lại không xin ACCESS EXCLUSIVE).
+    assert "ADD COLUMN IF NOT EXISTS khan_gia_bo_chieu" not in k
+    assert "FROM information_schema.columns WHERE table_schema = 'public'" in k
+    assert "ADD COLUMN %I SMALLINT" in k
     for b in ("qc_khan_gia", "qc_khan_gia_cd"):
         v = f"ALTER TABLE {b} VALIDATE CONSTRAINT {b}_chieu_check;"
         assert v in sql and v in dl
@@ -795,7 +898,7 @@ def test_schema_va_delta_cung_khoi():
     tk = re.search(r"CREATE TABLE IF NOT EXISTS tk_quang_cao \((.*?)\n\);", sql, re.DOTALL).group(1)
     for c in ("khan_gia_bo_chieu", "khan_gia_cd_bo_chieu"):
         assert re.search(rf"^\s{{2}}{c}\s+SMALLINT,$", tk, re.MULTILINE), c
-        assert f"ALTER TABLE tk_quang_cao ADD COLUMN IF NOT EXISTS {c} SMALLINT;" in k
+        assert f"'{c}'" in k
         assert re.search(rf"COMMENT ON COLUMN tk_quang_cao\.{c} IS '.{{40,}}';", sql)
     # Bảng tên: tạo khi đang là chủ bảng, trước GRANT SELECT ON ALL TABLES; web thêm/sửa (không
     # xoá), Mark chỉ đọc.
@@ -888,3 +991,100 @@ def test_kho_gia_khop_kho_that():
                 "xong_khan_gia_cd", "qc_khan_gia", "qc_khan_gia_cd"):
         assert hasattr(KQ, ten) and hasattr(GiaKhoQC, ten), ten
     assert MM_2 in CHAY
+
+
+# ───────────────────────────── 11. đợt soát 28/10/2026 ─────────────────────────────
+def test_mark_cpc_ctr_theo_click_lien_ket(monkeypatch):
+    import hoi_dashboard_tool as H
+    k = {"chi": 100.0, "hien_thi": 1000, "click": 50, "click_lk": 20}
+    cp = H._chi_phi_day_du(k)
+    assert (cp["ctr"], cp["cpc"]) == (2.0, 5.0)
+    assert H._chi_phi_day_du({"chi": 100.0, "hien_thi": 1000, "click": 50})["cpc"] == 2.0
+    assert H._click_lien_ket(k) == {"chi": 100.0, "hien_thi": 1000, "click": 20}
+    assert "click vào link" in H.GHI_CHU_QC and "inline_link_clicks" in H.GHI_CHU_QC
+    # Kho: top / tra đối tượng / theo ngày của Mark có click_lk.
+    tong, _ = KQ.sql_top("campaign", "chi")
+    assert KQ._TONG_LL in tong and tong.count("%s") == 4
+    g = _GhiSQL()
+    monkeypatch.setattr(KQ, "ket_noi", g)
+    a, b = datetime.date(2026, 10, 1), datetime.date(2026, 10, 2)
+    KQ.qc_doi_tuong("chien_dich", ["1"], a, b, ["2"])
+    KQ.qc_doi_tuong_ngay("chien_dich", ["1"], a, b, ["2"])
+    assert all(KQ._TONG_LL in s for s, _ in g.cau)
+    for s_, ts in g.cau:
+        assert s_.count("%s") == len(ts or ()), s_
+
+
+def test_mark_tong_quan_dung_click_lk():
+    """Đường tổng quan của Mark (hoi_dashboard quang_cao): chi_phi.ctr / cpc theo click_lk."""
+    import hoi_dashboard_tool as H
+    h = _app_hai_nen_tang()
+    kq = h.kho_qc
+    ids = [a for a, t in kq.tk.items() if t.get("duyet", True)]
+    a, b = datetime.date(2026, 10, 12), datetime.date(2026, 10, 18)
+    k = QC.kpi(kq.qc_tong(ids, a, b))
+    cp = H._chi_phi_day_du(k)
+    assert cp["ctr"] == round(k["click_lk"] * 100 / k["hien_thi"], 2)
+    assert k["click_lk"] < k["click"]
+
+
+def test_cac_tk_khoan_dung_khi_chua_co_cot_moi(monkeypatch):
+    g = _GhiSQL({"FROM tk_quang_cao": [{"advertiser_id": "1"}]})
+    monkeypatch.setattr(KQ, "ket_noi", g)
+    KQ.cac_tk()
+    sql = g.cau[0][0]
+    assert "FROM tk_quang_cao t " in sql
+    for c in ("khan_gia_bo_chieu", "khan_gia_cd_bo_chieu"):
+        assert f"(to_jsonb(t)->>'{c}')::smallint AS {c}" in sql
+        assert f", {c}," not in sql
+
+
+def test_cpc_tien_te_khac_vnd_hai_so_le():
+    h = _app_hai_nen_tang()
+    c, kq = h.c, h.kho_qc
+    dang_nhap(c, QL)
+    for t in kq.tk.values():
+        t["tien_te"] = "USD"
+    d = c.get(f"/api/qc?{Q}").json()
+    assert d["tien_te"] == ["USD"]
+    o = _o_ll(c.get(f"/quang-cao?{Q}").text)
+    cpc = d["kpi"]["cpc"]
+    assert o["cpc"] == A.so_thap(cpc, 2) + " USD" and "," in o["cpc"]
+    t = c.get(f"/quang-cao?{Q}&sap=chi").text
+    r0 = c.get(f"/api/qc?{Q}&sap=chi").json()["campaign"][0]
+    assert f'data-nhan="CPC">{A.so_thap(round(r0["chi"] / r0["click_lk"], 2))}<' in t
+    # VND: làm tròn đồng.
+    for t_ in kq.tk.values():
+        t_["tien_te"] = "VND"
+    assert "," not in _o_ll(c.get(f"/quang-cao?{Q}").text)["cpc"]
+
+
+def test_sheet_cot_lpv_moi_tab(monkeypatch):
+    import xuat_sheet_qc as X
+    ma = [m for m, _, _ in X._COT_SO]
+    assert ma.index("lpv") == ma.index("cpc") + 1
+    assert ("lpv", "Landing page view", "so_nguyen") in X._COT_SO
+    assert "lpv" in [m for m, _, _ in X._cot(False, False)]          # không phải cột tiền
+    g = _GhiSQL()
+    monkeypatch.setattr(KS, "ket_noi", g)
+    a, b = datetime.date(2026, 10, 1), datetime.date(2026, 10, 2)
+    KS.doc_theo_ngay(["1"], a, b)
+    KS.doc_theo_ngay(["1"], a, b, cds=["c"])
+    KS.doc_tong_tien_te(["1"], a, b)
+    cau = [s_ for s_, _ in g.cau if "statement_timeout" not in s_]
+    assert all("AS lpv" in s_ for s_ in cau)
+    assert "AS lpv" in KQ.sql_bang("campaign", "lpv", False, loc_ma=False, cd=False, bo_qua=False)
+
+
+def test_luoi_o_kpi_hang_day():
+    _app, c, _kq, _tt = _app_so_thich()
+    t = c.get(f"/quang-cao?{Q}").text
+    kpi = t.split('id="qc-kpi"')[1].split("</section>")[0]
+    n = kpi.count('class="kpi kpi-o"')
+    m = re.search(r'--so-kpi: (\d+); --kpi-cot: (\d+); --kpi-cot-hep: (\d+)', kpi)
+    assert int(m.group(1)) == n and int(m.group(2)) == n == 6 and int(m.group(3)) == 3
+    ll = t.split('data-o="luu-luong"')[1]
+    m = re.search(r'--so-kpi: (\d+); --kpi-cot: (\d+); --kpi-cot-hep: (\d+)', ll)
+    assert m.groups() == ("6", "6", "3")              # chỉ TikTok: không ô website Meta
+    css = (GOC / "dashboard" / "static" / "qc.css").read_text(encoding="utf-8")
+    assert "var(--kpi-cot," in css and "var(--kpi-cot-hep," in css

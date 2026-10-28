@@ -243,11 +243,13 @@ def doc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date,
     đó, vẫn một dòng mỗi tài khoản × ngày; [] = rỗng, không truy vấn."""
     if not ids or (cds is not None and not cds):
         return {"rows": [], "tong": 0}
-    # 28/10/2026: + click_lk (bấm liên kết — Click / CTR / CPC của Sheet như trang Quảng cáo).
+    # 28/10/2026: + click_lk (bấm liên kết — Click / CTR / CPC của Sheet như trang Quảng cáo) + lpv
+    # (Landing page view — cột Sheet, xếp được như bảng trang).
     from dashboard import kho_qc as KQ
     if cds is None:
         sql = (f"SELECT advertiser_id, ngay, {', '.join(QC.TEN_COT_SO)}, "
-               f"({KQ.click_lk_sql()})::bigint AS click_lk, count(*) OVER () AS tong "
+               f"({KQ.click_lk_sql()})::bigint AS click_lk, "
+               f"coalesce({KQ.lpv_sql()}, 0)::bigint AS lpv, count(*) OVER () AS tong "
                "FROM qc_tk_ngay WHERE advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s "
                "ORDER BY ngay DESC, advertiser_id LIMIT %s")
         ts = (list(ids), tu, den, int(toi_da))
@@ -280,7 +282,8 @@ def doc_tong_tien_te(ids: list[str], tu: datetime.date, den: datetime.date,
         rows = c.execute(
             f"SELECT COALESCE(NULLIF(k.tien_te, ''), 'VND') AS tien_te, "
             f"{', '.join(f'sum(q.{x})::float AS {x}' if x in QC.COT_TIEN else f'sum(q.{x})::bigint AS {x}' for x in QC.TEN_COT_SO)}, "
-            f"sum({KQ.click_lk_sql('q.')})::bigint AS click_lk "
+            f"sum({KQ.click_lk_sql('q.')})::bigint AS click_lk, "
+            f"coalesce(sum({KQ.lpv_sql('q.')}), 0)::bigint AS lpv "
             f"FROM {bang} q JOIN tk_quang_cao k USING (advertiser_id) "
             f"WHERE q.advertiser_id = ANY(%s){loc_cd} AND q.ngay BETWEEN %s AND %s GROUP BY 1 "
             "ORDER BY 1", (list(ids), *([list(cds)] if cds is not None else []), tu, den)).fetchall()

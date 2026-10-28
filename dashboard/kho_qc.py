@@ -245,15 +245,18 @@ def dang_dong_bo(khoa: int = KHOA_DONG_BO) -> bool:
 
 
 # ───────────────────────────── tài khoản quảng cáo ─────────────────────────────
+#: 28/10/2026: hai cột phiên bản bộ chiều khán giả (delta 2026-10-28) đọc qua to_jsonb — DB chưa
+#: chạy delta thì là NULL thay vì lỗi cả câu (trang, Mark, bộ đồng bộ vẫn đọc được tài khoản).
 _COT_TK = ("advertiser_id, ten, don_vi, gan_tay, gan_luc, tien_te, mui_gio, dang_dong_bo, "
            "con_quyen, thay_lan_dau, thay_cuoi, nap_lui_tu, nap_lui_xong_luc, khan_gia_luc, "
-           "cap_nhat_luc, nen_tang, duyet, khan_gia_cd_den, khan_gia_bo_chieu, "
-           "khan_gia_cd_bo_chieu")
+           "cap_nhat_luc, nen_tang, duyet, khan_gia_cd_den, "
+           "(to_jsonb(t)->>'khan_gia_bo_chieu')::smallint AS khan_gia_bo_chieu, "
+           "(to_jsonb(t)->>'khan_gia_cd_bo_chieu')::smallint AS khan_gia_cd_bo_chieu")
 
 
 def cac_tk() -> list[dict]:
     with ket_noi() as c:
-        return c.execute(f"SELECT {_COT_TK} FROM tk_quang_cao ORDER BY ten, advertiser_id"
+        return c.execute(f"SELECT {_COT_TK} FROM tk_quang_cao t ORDER BY ten, advertiser_id"
                          ).fetchall()
 
 
@@ -480,19 +483,24 @@ def gio_kho() -> datetime.datetime:
 
 
 def xong_khan_gia_cd(advertiser_id: str, den: datetime.date, tu_luc: datetime.datetime,
-                     bo_chieu: int | None = None) -> int:
+                     bo_chieu: int | None = None, bo_chieu_khoi: tuple = ()) -> int:
     """Cửa sổ cấp chiến dịch có `den` của tài khoản đã đọc ĐỦ (mọi lô, mọi chiều) — MỘT giao dịch:
     xoá dòng của cửa sổ khác (cửa sổ hoàn tất trước, cửa sổ dở dang của lượt bị giết) và dòng của
     chính cửa sổ này mà lượt không ghi lại (cap_nhat_luc < `tu_luc` — giá trị không còn trả); đặt
     lại cap_nhat_luc của cửa sổ (dòng ghi lúc còn chưa hoàn tất bị BigQuery bỏ qua — nay mới đẩy);
     dời mốc tk_quang_cao.khan_gia_cd_den. Lỗi giữa chừng → rollback cả bốn, mốc cũ vẫn đúng.
     `bo_chieu` (28/10/2026, TikTok): phiên bản bộ chiều của cửa sổ này, ghi cùng mốc (cùng giao
-    dịch) vào tk_quang_cao.khan_gia_cd_bo_chieu; Meta không truyền.
+    dịch) vào tk_quang_cao.khan_gia_cd_bo_chieu; Meta không truyền. `bo_chieu_khoi` (28/10/2026):
+    chiều nền tảng TỪ CHỐI trong lượt này — bỏ mọi dòng của chiều đó trong cửa sổ (lô đã ghi trước
+    khi bị từ chối không bao giờ lộ thành nửa chiều).
     -> số dòng của cửa sổ."""
     adv = str(advertiser_id)
     with ket_noi() as c:
         c.execute("DELETE FROM qc_khan_gia_cd WHERE advertiser_id = %s "
                   "AND (den <> %s OR cap_nhat_luc < %s)", (adv, den, tu_luc))
+        if bo_chieu_khoi:
+            c.execute("DELETE FROM qc_khan_gia_cd WHERE advertiser_id = %s AND den = %s "
+                      "AND chieu = ANY(%s)", (adv, den, list(bo_chieu_khoi)))
         n = c.execute("UPDATE qc_khan_gia_cd SET cap_nhat_luc = now() WHERE advertiser_id = %s "
                       "AND den = %s", (adv, den)).rowcount or 0
         if bo_chieu is None:
@@ -608,7 +616,9 @@ def sql_top(cap: str, cot: str) -> tuple[str, str]:
     khoảng ngày); (2) tên / nội dung của ngày mới nhất CHỈ cho ≤ n đối tượng đó (DISTINCT ON dùng
     PK (khoá, ngay))."""
     bang, khoa, ten = _TOP[cap]
-    tong = (f"SELECT {khoa}, advertiser_id, {_TONG} FROM {bang} WHERE advertiser_id = ANY(%s) "
+    # 28/10/2026: + click_lk / lpv (Mark tính CTR / CPC theo bấm liên kết như trang).
+    tong = (f"SELECT {khoa}, advertiser_id, {_TONG}, {_TONG_LL} FROM {bang} "
+            f"WHERE advertiser_id = ANY(%s) "
             f"AND ngay BETWEEN %s AND %s GROUP BY {khoa}, advertiser_id "
             f"ORDER BY {cot} DESC NULLS LAST, {khoa} LIMIT %s")
     moi = (f"SELECT DISTINCT ON ({khoa}) {khoa}, {', '.join(ten)} FROM {bang} "
@@ -1022,7 +1032,7 @@ def qc_doi_tuong(cap: str, ma: list[str], tu: datetime.date, den: datetime.date,
     pp = "(COALESCE(hien_thi, 0) > 0 OR COALESCE(chi, 0) > 0)"
     with ket_noi() as c:
         return c.execute(
-            f"SELECT {khoa} AS ma, advertiser_id AS tk, {_TONG}, "
+            f"SELECT {khoa} AS ma, advertiser_id AS tk, {_TONG}, {_TONG_LL}, "
             f"count(DISTINCT ngay) AS so_ngay, min(ngay) FILTER (WHERE {pp}) AS ngay_dau, "
             f"max(ngay) FILTER (WHERE {pp}) AS ngay_cuoi FROM {bang} WHERE {khoa} = ANY(%s) "
             f"AND advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s GROUP BY {khoa}, advertiser_id",
@@ -1054,7 +1064,8 @@ def qc_doi_tuong_ngay(cap: str, ma: list[str], tu: datetime.date, den: datetime.
         return []
     bang, khoa, _, _ = CAP_TRA_CUU[cap]
     with ket_noi() as c:
-        return c.execute(f"SELECT {khoa} AS ma, advertiser_id AS tk, ngay, {_TONG} FROM {bang} "
+        return c.execute(f"SELECT {khoa} AS ma, advertiser_id AS tk, ngay, {_TONG}, {_TONG_LL} "
+                         f"FROM {bang} "
                          f"WHERE {khoa} = ANY(%s) AND advertiser_id = ANY(%s) "
                          f"AND ngay BETWEEN %s AND %s GROUP BY {khoa}, advertiser_id, ngay "
                          f"ORDER BY {khoa}, advertiser_id, ngay",

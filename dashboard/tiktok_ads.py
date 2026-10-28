@@ -38,7 +38,8 @@ ghi cờ yêu cầu — bộ hẹn giờ 2 phút chạy `dong-bo --chi-khi-yeu-c
     tk_quang_cao.khan_gia_cd_den — `luot_khan_gia_cd`, `doc_khan_gia_cd`). Đọc lại ngay, bỏ qua
     mốc tuần: `python -m dashboard.tiktok_ads khan-gia`.
   • Sở thích (28/10/2026, chủ dự án): chiều interest_category đọc cùng lượt khán giả ở cả hai cấp,
-    RIÊNG sau 4 chiều kia (lỗi chỉ ghi nhật ký). Phiên bản bộ chiều đã đọc (`BO_CHIEU`) ghi ở
+    RIÊNG sau 4 chiều kia (TikTok từ chối chiều → nhật ký, lùi một tuần; lỗi tạm → đọc lại lượt
+    sau — `la_tu_choi_chieu`). Phiên bản bộ chiều đã đọc (`BO_CHIEU`) ghi ở
     tk_quang_cao.khan_gia_bo_chieu / khan_gia_cd_bo_chieu: tài khoản đọc bằng bộ cũ tới hạn lại MỘT
     lần ở lượt kế tiếp (cửa sổ cũ vẫn hiện tới khi cửa sổ mới xong). Tên nhóm (tiếng Việt) từ
     tool_interest_category_get vào qc_so_thich, ≤ mỗi `SO_THICH_NGAY` ngày một lần mỗi phiên bản.
@@ -126,6 +127,17 @@ TRAN_GIAY_KHAN_GIA_CD = 20 * 60
 BO_CHIEU = 1
 #: Tên nhóm sở thích (qc_so_thich) đọc lại sau chừng ấy ngày (mỗi phiên bản một lượt tool_execute).
 SO_THICH_NGAY = 7
+#: Mã TikTok coi là TỪ CHỐI chiều (tham số không hợp lệ — đo thật 28/10/2026: chiều
+#: "interest_category_v2" → 40002). Chỉ mã này mới cho lùi một tuần; mọi lỗi khác (mạng, 5xx, hết
+#: giờ, giới hạn tần suất, mã lạ, kho) là lỗi tạm → không dời phiên bản bộ chiều, lượt sau đọc lại.
+MA_TU_CHOI_CHIEU = frozenset({40002})
+
+
+def la_tu_choi_chieu(e) -> bool:
+    """TikTok từ chối CHIỀU báo cáo (không phải lỗi tạm): LoiTikTok (không phải lỗi token) có mã
+    trong MA_TU_CHOI_CHIEU."""
+    return (isinstance(e, LoiTikTok) and not isinstance(e, LoiXacThuc)
+            and getattr(e, "ma", None) in MA_TU_CHOI_CHIEU)
 LO_ID = 100                # ≤ 100 ID mỗi bộ lọc
 LO_CHI_SO = 45             # ≤ 45 chỉ số mỗi lượt gọi
 TRANG = 200                # dòng mỗi trang khi nhiều chỉ số
@@ -893,7 +905,7 @@ def khan_gia_cd_den_han(t: dict, hq: datetime.date, ep: bool = False,
 def doc_khan_gia_cd(kho, adv: str, a: datetime.date, b: datetime.date, doc_lo, lo: int, log,
                     ten: str, loi: list | None = None, cac_chieu=QC.CHIEU_KHAN_GIA,
                     xac_thuc: tuple = (LoiXacThuc,), chieu_phu: tuple = (),
-                    bo_chieu: int | None = None) -> int | None:
+                    bo_chieu: int | None = None, tu_choi=None) -> int | None:
     """Khán giả CẤP CHIẾN DỊCH của một tài khoản, cửa sổ [a, b] (26/10/2026, chủ dự án) — TikTok +
     Meta dùng chung. Chỉ các chiến dịch CÓ hiển thị trong cửa sổ (`kho.cd_co_chay`, đọc từ kho — không
     gọi API để tìm; ≤ TRAN_CD_KHAN_GIA, nhiều hiển thị trước), theo lô `lo` mã; `doc_lo(chieu, mã)`
@@ -903,11 +915,14 @@ def doc_khan_gia_cd(kho, adv: str, a: datetime.date, b: datetime.date, doc_lo, l
     mốc không dời — trang, /api/qc, BigQuery vẫn đọc cửa sổ hoàn tất trước; dòng dở dang vô hình,
     lần hoàn tất sau xoá. Phần phụ như kênh đăng: lỗi (nền tảng, kho) ghi nhật ký (+ `loi`) rồi trả
     None — không làm hỏng lượt đồng bộ số; chỉ token bị từ chối (`xac_thuc`) ném tiếp.
-    28/10/2026 — `chieu_phu` (TikTok: sở thích, chưa đo thật ở cấp chiến dịch): đọc SAU `cac_chieu`,
-    mọi lô giữ trong bộ nhớ rồi mới ghi một lần (không bao giờ ghi nửa chiều); nền tảng / kho từ chối
-    → ghi nhật ký + `loi` rồi VẪN hoàn tất cửa sổ với các chiều kia. `bo_chieu`: phiên bản bộ chiều,
-    ghi cùng mốc hoàn tất (`kho.xong_khan_gia_cd`).
+    28/10/2026 — `chieu_phu` (TikTok: sở thích): đọc SAU `cac_chieu`, ghi TỪNG lô như chiều chính (dòng
+    của cửa sổ chưa xong vô hình tới khi mốc dời). Nền tảng TỪ CHỐI chiều (`tu_choi(e)` — TikTok:
+    `la_tu_choi_chieu`) → nhật ký + `loi`, bỏ lô đã ghi của chiều đó (`bo_chieu_khoi`) rồi VẪN hoàn
+    tất cửa sổ với các chiều kia (phiên bản bộ chiều dời → thử lại sau một tuần). Lỗi KHÁC (mạng, hết
+    giờ, mã lạ, kho) như lỗi của chiều chính: mốc + phiên bản KHÔNG dời, lượt sau đọc lại cả tài
+    khoản. `bo_chieu`: phiên bản bộ chiều, ghi cùng mốc hoàn tất (`kho.xong_khan_gia_cd`).
     -> số dòng của cửa sổ đã hoàn tất | 0 (không có chiến dịch chạy) | None (lỗi)."""
+    tu_choi = tu_choi or la_tu_choi_chieu
     try:
         cds = kho.cd_co_chay(adv, a, b, TRAN_CD_KHAN_GIA)
         if not cds:
@@ -916,22 +931,26 @@ def doc_khan_gia_cd(kho, adv: str, a: datetime.date, b: datetime.date, doc_lo, l
         for chieu in cac_chieu:
             for i in range(0, len(cds), lo):
                 kho.ghi_khan_gia_cd(doc_lo(chieu, cds[i:i + lo]))
+        khoi: list[str] = []
         for chieu in chieu_phu:
             try:
-                rows: list[dict] = []
                 for i in range(0, len(cds), lo):
-                    rows += doc_lo(chieu, cds[i:i + lo])
-                kho.ghi_khan_gia_cd(rows)
+                    kho.ghi_khan_gia_cd(doc_lo(chieu, cds[i:i + lo]))
             except xac_thuc:
                 raise
-            except Exception as e:  # noqa: BLE001 — chiều phụ: các chiều kia vẫn hoàn tất
-                chu = (f"khán giả theo chiến dịch {adv} chiều {chieu} lỗi ({type(e).__name__}: "
-                       f"{gon_loi(e)}) — các chiều khác vẫn hoàn tất")
+            except Exception as e:  # phân loại ngay dưới (lỗi khác ném tiếp)
+                if not tu_choi(e):
+                    raise          # lỗi tạm / kho: như chiều chính — mốc không dời, lượt sau đọc lại
+                khoi.append(chieu)
+                chu = (f"khán giả theo chiến dịch {adv} chiều {chieu} bị nền tảng từ chối "
+                       f"({gon_loi(e)}) — các chiều khác vẫn hoàn tất, tuần sau thử lại")
                 log(f"[{ten}] {chu}")
                 if loi is not None:
                     loi.append(chu)
-        n = (kho.xong_khan_gia_cd(adv, b, tu_luc) if bo_chieu is None
-             else kho.xong_khan_gia_cd(adv, b, tu_luc, bo_chieu=bo_chieu))
+        tham = {} if bo_chieu is None else {"bo_chieu": bo_chieu}
+        if khoi:
+            tham["bo_chieu_khoi"] = tuple(khoi)
+        n = kho.xong_khan_gia_cd(adv, b, tu_luc, **tham)
         log(f"[{ten}] {adv} khán giả theo chiến dịch {a}→{b}: {len(cds)} chiến dịch, {n} dòng")
         return n
     except xac_thuc:
@@ -1593,8 +1612,10 @@ class DichVu:
             rows = bao_cao(mcp, adv, "AUCTION_ADVERTISER", ["advertiser_id", chieu],
                            QC.CHI_SO_KHAN_GIA, a, hq, loai="AUDIENCE")
             n += self.kho.ghi_khan_gia([dong_khan_gia(r, adv, a, hq, chieu) for r in rows])
-        # 28/10/2026: sở thích — đo thật ở cấp tài khoản; vẫn tách riêng: TikTok từ chối thì chỉ ghi
-        # nhật ký, 4 chiều kia + mốc vẫn ghi (phiên bản bộ chiều vẫn dời — tuần sau thử lại).
+        # 28/10/2026: sở thích — tách riêng: TikTok TỪ CHỐI chiều (`la_tu_choi_chieu`) thì ghi nhật ký,
+        # 4 chiều kia + mốc + phiên bản bộ chiều vẫn ghi (tuần sau thử lại); lỗi TẠM (mạng, mã khác)
+        # thì 4 chiều + mốc vẫn ghi nhưng KHÔNG ghi phiên bản → lượt sau tới hạn lại.
+        xong = True
         try:
             rows = bao_cao(mcp, adv, "AUCTION_ADVERTISER", ["advertiser_id", QC.CHIEU_SO_THICH],
                            QC.CHI_SO_KHAN_GIA, a, hq, loai="AUDIENCE")
@@ -1603,8 +1624,13 @@ class DichVu:
         except LoiXacThuc:
             raise
         except LoiTikTok as e:
-            self.log(f"[tiktok_ads] {adv} khán giả chiều {QC.CHIEU_SO_THICH} lỗi: {e}")
-        self.kho.dat_khan_gia(adv, bo_chieu=BO_CHIEU)
+            xong = la_tu_choi_chieu(e)
+            self.log(f"[tiktok_ads] {adv} khán giả chiều {QC.CHIEU_SO_THICH} "
+                     f"{'bị từ chối' if xong else 'lỗi tạm — lượt sau đọc lại'}: {e}")
+        if xong:
+            self.kho.dat_khan_gia(adv, bo_chieu=BO_CHIEU)
+        else:
+            self.kho.dat_khan_gia(adv)
         return n
 
     def _khan_gia_lo(self, mcp: Mcp, adv: str, a: datetime.date, b: datetime.date, chieu: str,
