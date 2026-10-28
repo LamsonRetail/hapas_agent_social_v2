@@ -865,8 +865,12 @@ def test_mark_tra_chien_dich_theo_ten_khong_dau(monkeypatch):
     assert x["ben"] == "hapas" and x["muc_tieu"] == "Bán hàng" and x["xem_tien"] is True
     rows = [v for k, v in kho_qc.bang["qc_campaign_ngay"].items() if k[0] == "120201"
             and datetime.date(2026, 10, 12) <= k[1] <= datetime.date(2026, 10, 18)]
-    chi, hien, click = (sum(r[k] for r in rows) for k in ("chi", "hien_thi", "click"))
-    assert x["so"]["chi"] == chi and x["so"]["reach"] is None
+    chi, hien = (sum(r[k] for r in rows) for k in ("chi", "hien_thi"))
+    # 28/10/2026: Click / CTR / CPC của Mark = bấm liên kết như trang (Meta inline_link_clicks).
+    click = sum(r["chi_so"]["inline_link_clicks"] for r in rows)
+    assert click < sum(r["click"] for r in rows)
+    assert x["so"]["chi"] == chi and x["so"]["reach"] is None and x["so"]["click"] == click
+    assert "click_lk" not in x["so"]
     # Tỉ lệ tính LẠI từ tổng — không cộng ctr (10.0) của từng ngày.
     assert x["chi_phi"]["ctr"] == round(click * 100 / hien, 2)
     assert x["chi_phi"]["cpc"] == round(chi / click, 2)
@@ -981,7 +985,9 @@ def test_bigquery_nen_tang_khong_token_khong_email(monkeypatch):
     cot = dict(DBQ.BANG["tk_quang_cao"]["cot"])
     assert cot["nen_tang"] == "STRING" and cot["duyet"] == "BOOL"
     # 26/10/2026: + mốc hoàn tất khán giả cấp chiến dịch (cột tuỳ chọn như nen_tang / duyet).
-    assert set(DBQ.BANG["tk_quang_cao"]["tuy_chon"]) == {"nen_tang", "duyet", "khan_gia_cd_den"}
+    # 28/10/2026: + phiên bản bộ chiều khán giả (sở thích TikTok).
+    assert set(DBQ.BANG["tk_quang_cao"]["tuy_chon"]) == {"nen_tang", "duyet", "khan_gia_cd_den",
+                                                        "khan_gia_bo_chieu", "khan_gia_cd_bo_chieu"}
     for b, v in DBQ.BANG.items():
         assert not [c for c, _ in v["cot"] if any(x in c for x in ("token", "email", "nguoi_cap"))], b
     sql = (GOC / "deploy" / "lang-nghe" / "bigquery.sql").read_text(encoding="utf-8")

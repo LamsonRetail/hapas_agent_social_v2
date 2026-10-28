@@ -77,8 +77,13 @@ TRANG = "https://social.hapas.vn/quang-cao"
 #: tệ"); CTR đã ×100 (tiêu đề có %). Reach chỉ ở tab theo ngày (tổng reach nhiều ngày đếm trùng người).
 _COT_SO = (
     ("chi", "Chi", "tien"), ("hien_thi", "Hiển thị", "so_nguyen"), ("reach", "Reach", "so_nguyen"),
-    ("click", "Click", "so_nguyen"), ("ctr", "CTR (%)", "phan_tram_100"),
+    # 28/10/2026: Click = bấm liên kết như trang (`QC.hieu_qua` → click_lk: TikTok clicks, Meta
+    # inline_link_clicks); CTR / CPC tính từ nó.
+    ("click_lk", "Click", "so_nguyen"), ("ctr", "CTR (%)", "phan_tram_100"),
     ("cpm", "CPM", "tien"), ("cpc", "CPC", "tien"),
+    # 28/10/2026: Landing page view (TikTok total_landing_page_view, Meta landing_page_view) — mọi
+    # tab có cột này (xếp tab chiến dịch / quảng cáo theo LPV thì thấy được số).
+    ("lpv", "Landing page view", "so_nguyen"),
     ("view_video", "View video", "so_nguyen"), ("view_hai_giay", "View 2 giây", "so_nguyen"),
     ("view_sau_giay", "View 6 giây", "so_nguyen"), ("view_het", "View hết", "so_nguyen"),
     ("engaged_view", "Engaged view", "so_nguyen"),
@@ -325,7 +330,7 @@ def tieu_de(yc: dict, tk: list[dict], ten_ben: str) -> str:
 #: ghi chú). Bỏ theo cờ tay; lưới cuối `chot_khong_tien` kiểm lại theo KHOÁ (`QC.la_tien`).
 _SO_TQ = (("chi", "Chi tiêu", "tien", True, ""), ("hien_thi", "Hiển thị", "so_nguyen", False, ""),
           ("cpm", "CPM", "tien", True, "chi ÷ hiển thị × 1.000"),
-          ("ctr", "CTR (%)", "phan_tram_100", False, "click ÷ hiển thị"),
+          ("ctr", "CTR (%)", "phan_tram_100", False, "click (bấm liên kết) ÷ hiển thị"),
           ("view_video", "View video", "so_nguyen", False, ""),
           ("follow", "Follow", "so_nguyen", False, ""),
           ("chi_moi_follow", "Chi / follow", "tien", True, ""))
@@ -382,6 +387,9 @@ def dung_tong_quan(yc: dict, tk: list[dict], ten_ben: str, tde: str, ngay: dict,
         "Số đọc từ kho quảng cáo của dashboard (đồng bộ TikTok mỗi sáng 06:30, Meta 06:45, đọc lại "
         "7 ngày gần nhất) — giống trang Quảng cáo cùng bộ lọc.",
         *tien_ghi,
+        ("Click = lượt bấm liên kết (TikTok clicks, Meta inline_link_clicks — như trang Quảng cáo); "
+         "CTR, CPC tính từ số này. Landing page view = lượt tải xong trang đích (TikTok "
+         "total_landing_page_view, Meta landing_page_view)."),
         "Reach chỉ ở tab theo ngày: cộng reach nhiều ngày đếm trùng người.",
         "Chỉ chiến dịch / quảng cáo CÓ phân phối trong kỳ (có hiển thị hoặc chi).",
         "Sheet riêng tư: chia sẻ link đóng, chỉ người yêu cầu được XEM. " + tao_boi,

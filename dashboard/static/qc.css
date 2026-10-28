@@ -214,7 +214,9 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
 
 /* ─── KPI hai tầng: hàng phụ tối đa 5 cột (10 ô = 2 hàng gọn, không 10 cột chật) ─── */
 .qc-kpi { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; min-width: 0; }
-.the-khoi.qc-kpi-phu { grid-template-columns: repeat(min(var(--so-kpi), 5), minmax(0, 1fr)); }
+.the-khoi.qc-kpi-phu { grid-template-columns: repeat(var(--kpi-cot, min(var(--so-kpi), 5)), minmax(0, 1fr)); }
+/* 28/10/2026: mục "Lưu lượng truy cập" — tiêu đề sát hàng ô, cùng kiểu hàng KPI phụ. */
+.qc-ll__dau { margin-bottom: 0; }
 .kpi__nhan .goi-y { vertical-align: 1px; }
 
 /* ─── TikTok và Meta ─── */
@@ -334,7 +336,7 @@ a.qc-tk__nut { display: inline-flex; align-items: center; text-decoration: none;
 .qc-sheet__trong { padding: 4px 0; font-size: 13px; color: var(--chu-mo); }
 
 @media (max-width: 1200px) {
-  .the-khoi.qc-kpi-phu { grid-template-columns: repeat(min(var(--so-kpi), 4), minmax(0, 1fr)); }
+  .the-khoi.qc-kpi-phu { grid-template-columns: repeat(var(--kpi-cot-hep, min(var(--so-kpi), 4)), minmax(0, 1fr)); }
   .qc-kg { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .qc-chia__hq { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -98,7 +98,8 @@ def test_api_qc_tiktok_co_xem_sp_shop_khong_co_web():
     assert [x["ma"] for x in d["chuoi_xem_sp"]] == ["xem_sp_shop"]
     assert all("xem_sp_shop" in r for r in d["theo_ngay_nen_tang"])
     t = c.get(f"/quang-cao?{Q}").text
-    assert "Giải thích chỉ số xem trang sản phẩm" in t and "Xem trang SP TikTok Shop" in t
+    # 28/10/2026: nút (i) của biểu đồ giải thích cả Click / Landing page view (luôn có).
+    assert "Giải thích chỉ số trên biểu đồ" in t and "Xem trang SP TikTok Shop" in t
     assert "Xem SP website (Meta)" not in t.split('id="qc-api"')[0]
 
 

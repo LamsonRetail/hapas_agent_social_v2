@@ -71,9 +71,10 @@ def test_tiktok_doc_khan_gia_cap_chien_dich_chi_chien_dich_co_chay():
     for r in cd.values():
         assert r["chieu"] in QC.CHIEU_KHAN_GIA and r["gia_tri"]
         assert "campaign_id" not in r["chi_so"] and r["chieu"] not in r["chi_so"]
-    # Lô ≤ 100 mã, đúng 4 chiều mỗi tài khoản, cùng cửa sổ 30 ngày với cấp tài khoản.
+    # Lô ≤ 100 mã, đúng 4 chiều mỗi tài khoản (+ sở thích từ 28/10/2026 — TikTok giả mặc định không
+    # trả dòng nào), cùng cửa sổ 30 ngày với cấp tài khoản.
     cap_cd = _audience(tt, "AUCTION_CAMPAIGN")
-    assert len(cap_cd) == 3 * 4
+    assert len(cap_cd) == 3 * 5
     assert all(a["dimensions"][0] == "campaign_id" and a["metrics"] == list(QC.CHI_SO_KHAN_GIA)
                and (a["start_date"], a["end_date"]) == ("2026-09-19", "2026-10-18")
                for a in cap_cd)
@@ -111,8 +112,8 @@ def test_tiktok_lo_100_ma_chia_lo(monkeypatch):
     monkeypatch.setattr(TA, "LO_ID", 2)
     kq = dv.doc_khan_gia([HAPAS_KOC])
     assert kq == {"so_dong": 4 * 2 + 3 * 4 * 2, "so_tk": 1, "loi": None}
-    # 3 chiến dịch, lô 2 → [2, 1] cho mỗi chiều; hiển thị nhiều trước.
-    assert [len(ids) for _, _, ids in tt.kg_cd] == [2, 1] * 4
+    # 3 chiến dịch, lô 2 → [2, 1] cho mỗi chiều (4 chiều + sở thích, 28/10/2026); hiển thị nhiều trước.
+    assert [len(ids) for _, _, ids in tt.kg_cd] == [2, 1] * 5
     assert tt.kg_cd[0][2] == (_ma_cd(HAPAS_KOC, 0), _ma_cd(HAPAS_KOC, 1))
 
 
@@ -836,7 +837,9 @@ def test_schema_bang_moi_quyen_va_ban_delta():
     assert "PRIMARY KEY (advertiser_id, campaign_id, tu, den, chieu, gia_tri)" in tao
     assert "REFERENCES tk_quang_cao(advertiser_id)" in tao
     ck = re.search(r"chieu\s+TEXT NOT NULL CHECK \(chieu IN \((.*?)\)\)", tao, re.DOTALL).group(1)
-    assert tuple(re.findall(r"'(\w+)'", ck)) == QC.CHIEU_TAT_CA
+    # Khối tạo 26/10/2026 giữ nguyên; 28/10/2026 khối "Lưu lượng + sở thích" thay CHECK bằng bộ có
+    # interest_category (test_qc_luu_luong.py).
+    assert tuple(re.findall(r"'(\w+)'", ck)) + (QC.CHIEU_SO_THICH,) == QC.CHIEU_TAT_CA
     # Mốc hoàn tất: cột tk_quang_cao (CREATE cho DB mới + ALTER cho DB đang chạy) có mô tả.
     tk = re.search(r"CREATE TABLE IF NOT EXISTS tk_quang_cao \((.*?)\n\);", sql, re.DOTALL).group(1)
     assert re.search(r"^\s{2}khan_gia_cd_den\s+DATE$", tk, re.MULTILINE)

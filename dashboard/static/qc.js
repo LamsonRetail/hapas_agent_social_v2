@@ -18,8 +18,11 @@
   // Cửa sổ hẹp → rộng: dòng tóm tắt bị ẩn ở máy tính, bộ lọc đang gập sẽ biến mất → mở lại.
   if (loc && hep && hep.addEventListener) hep.addEventListener("change", function () { if (!hep.matches) loc.open = true; });
 
-  var CHUOI = [["chi", "Chi tiêu"], ["hien_thi", "Hiển thị"], ["click", "Click"], ["view_video", "View video"],
-               ["engaged_view", "Engaged view"], ["tuong_tac", "Tương tác"], ["follow", "Follow"]];
+  // 28/10/2026 (chủ dự án): Click = bấm liên kết (`click_lk`: TikTok clicks, Meta inline_link_clicks) +
+  // Landing page view (`lpv`) — hai nền tảng cộng được nên chồng theo nền tảng như các chuỗi chung.
+  var CHUOI = [["chi", "Chi tiêu"], ["hien_thi", "Hiển thị"], ["click_lk", "Click"], ["lpv", "Landing page view"],
+               ["view_video", "View video"], ["engaged_view", "Engaged view"], ["tuong_tac", "Tương tác"],
+               ["follow", "Follow"]];
   var TEN_NEN = { tiktok: "TikTok", meta: "Meta" };
   var api = document.getElementById("qc-api");
   var khung = document.getElementById("qc-bd-ngay");

@@ -258,9 +258,11 @@ def test_trang_o_khoang_ngay_khoang_nhanh_va_nhan():
     # Độ mới: "Số tới hết 18/10"; khoảng trong số → không "!".
     assert 'data-o="so-toi-het">Số tới hết 18/10</span>' in o
     assert 'data-o="khoang-chua-du"' not in t
-    # Nhãn khoảng ở KPI, Theo ngày, Chiến dịch và quảng cáo, Theo kênh đăng.
-    assert t.count('data-o="nhan-khoang">12/10 – 18/10</span>') == 4
-    for dau in ('id="qc-kpi"', 'id="qc-xh-tieu-de"', 'id="qc-top-tieu-de"', 'id="qc-kenh-tieu-de"'):
+    # Nhãn khoảng ở KPI, Lưu lượng truy cập (28/10/2026), Theo ngày, Chiến dịch và quảng cáo, Theo
+    # kênh đăng.
+    assert t.count('data-o="nhan-khoang">12/10 – 18/10</span>') == 5
+    for dau in ('id="qc-kpi"', 'id="qc-ll-tieu-de"', 'id="qc-xh-tieu-de"', 'id="qc-top-tieu-de"',
+                'id="qc-kenh-tieu-de"'):
         assert 'data-o="nhan-khoang"' in t.split(dau)[1][:900], dau
     # Khán giả: cửa sổ riêng — 26/10/2026 bỏ dòng chữ nhỏ; cửa sổ nằm trong nút (i) của tiêu đề.
     kg = _khoi(t, 'id="qc-kg-tieu-de"', "</section>")

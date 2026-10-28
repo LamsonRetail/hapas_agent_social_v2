@@ -426,6 +426,8 @@ CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.tk_quang_cao`
   nen_tang          STRING    OPTIONS(description='Nền tảng quảng cáo. Giá trị: tiktok, meta (từ 20/10/2026). NULL ở dòng ghi trước khi dashboard đẩy cột này (lượt đồng bộ kế tiếp nạp lại toàn bảng).'),
   duyet             BOOL      OPTIONS(description='TRUE: được đọc số (TikTok luôn TRUE; Meta = quản trị viên đã duyệt tài khoản). FALSE: tài khoản Meta chưa duyệt — không có số trong qc_*. NULL ở dòng ghi trước khi dashboard đẩy cột này.'),
   khan_gia_cd_den   DATE      OPTIONS(description='Ngày cuối (den) của cửa sổ khán giả CẤP CHIẾN DỊCH đã đọc ĐỦ gần nhất (múi giờ tài khoản; đọc lại mỗi 7 ngày, từ 26/10/2026) — dòng qc_khan_gia_cd của tài khoản có den = mốc này là cửa sổ hoàn tất mới nhất. NULL khi chưa có cửa sổ nào hoàn tất hoặc dòng ghi trước khi dashboard đẩy cột này.'),
+  khan_gia_bo_chieu INT64     OPTIONS(description='Phiên bản bộ chiều của lần đọc khán giả CẤP TÀI KHOẢN gần nhất (TikTok; 1 = tuổi, giới tính, tỉnh/thành, thiết bị + sở thích interest_category, từ 28/10/2026). NULL = đọc bằng bộ cũ trước 28/10/2026, tài khoản Meta, hoặc dòng ghi trước khi dashboard đẩy cột này.'),
+  khan_gia_cd_bo_chieu INT64  OPTIONS(description='Phiên bản bộ chiều của cửa sổ khán giả CẤP CHIẾN DỊCH hoàn tất (khan_gia_cd_den; TikTok; 1 = có sở thích interest_category, từ 28/10/2026). NULL = cửa sổ đọc bằng bộ cũ, tài khoản Meta, hoặc dòng ghi trước khi dashboard đẩy cột này.'),
   dong_bo_luc       TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
 )
 OPTIONS(description='''[Lớp] Dim
@@ -722,6 +724,39 @@ OPTIONS(description='''[Lớp] Raw
 [Không dùng khi] Khán giả cả tài khoản (reach không đếm trùng) → dùng SOCIAL_LISTENING.qc_khan_gia; số theo ngày của chiến dịch → dùng SOCIAL_LISTENING.qc_campaign_ngay
 [Lưu ý] Các cửa sổ chồng nhau — KHÔNG cộng nhiều cửa sổ. Cộng nhiều chiến dịch: hiển thị / chi / bấm cộng được, reach thì đếm trùng người. Cửa sổ đọc lại cùng ngày (lệnh khan-gia) có thể còn dòng giá trị cũ mà lần đọc sau không còn.''');
 
+-- Lưu lượng truy cập + sở thích TikTok (28/10/2026, chủ dự án chốt): chạy cùng lúc với
+-- deploy/lang-nghe/2026-10-28-qc-luu-luong.sql trên Postgres, TRƯỚC khi bật mã mới (người duyệt rồi mới
+-- chạy). Bảng tk_quang_cao đã tạo thì thêm hai cột phiên bản bộ chiều bằng ALTER dưới (chưa chạy:
+-- dong_bo_bq bỏ hai cột đó khỏi lượt + cảnh báo); bảng tên sở thích qc_so_thich mới (dong_bo_bq đẩy sau
+-- qc_kenh; chưa chạy thì bảng này báo lỗi trên trang Kết nối BigQuery, bảng khác vẫn đẩy). Mô tả chiều
+-- interest_category của qc_khan_gia / qc_khan_gia_cd: khối "28/10/2026" cuối file.
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.tk_quang_cao`
+  ADD COLUMN IF NOT EXISTS khan_gia_bo_chieu INT64 OPTIONS(description='Phiên bản bộ chiều của lần đọc khán giả CẤP TÀI KHOẢN gần nhất (TikTok; 1 = tuổi, giới tính, tỉnh/thành, thiết bị + sở thích interest_category, từ 28/10/2026). NULL = đọc bằng bộ cũ trước 28/10/2026, tài khoản Meta, hoặc dòng ghi trước khi dashboard đẩy cột này.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.tk_quang_cao`
+  ADD COLUMN IF NOT EXISTS khan_gia_cd_bo_chieu INT64 OPTIONS(description='Phiên bản bộ chiều của cửa sổ khán giả CẤP CHIẾN DỊCH hoàn tất (khan_gia_cd_den; TikTok; 1 = có sở thích interest_category, từ 28/10/2026). NULL = cửa sổ đọc bằng bộ cũ, tài khoản Meta, hoặc dòng ghi trước khi dashboard đẩy cột này.');
+CREATE TABLE IF NOT EXISTS `ganesha-381907.SOCIAL_LISTENING.qc_so_thich`
+(
+  phien_ban         INT64     OPTIONS(description='Phiên bản danh mục sở thích TikTok. Giá trị: 1 (danh mục cũ — mã của chiều interest_category trong báo cáo khán giả), 2 (danh mục mới — interest_category_v2, nằm trong chi_so của dòng khán giả). Một phần PK.'),
+  id                STRING    OPTIONS(description='Mã nhóm sở thích TikTok (interest_category_id, chuỗi số; v1 từ 101, v2 cấp 1 từ 10). Một phần PK. Join: qc_khan_gia.gia_tri = CONCAT(\'v\', CAST(phien_ban AS STRING), \':\', id) khi chieu = interest_category.'),
+  ten               STRING    OPTIONS(description='Tên nhóm sở thích tiếng Việt TikTok trả (interest_category_name, language vi), vd "Giáo dục".'),
+  cap               INT64     OPTIONS(description='Cấp của nhóm trong danh mục (level TikTok: 1 = nhóm lớn nhất). NULL khi TikTok không trả.'),
+  cha               STRING    OPTIONS(description='Mã nhóm cha cùng phien_ban (nhóm có mã này trong sub_category_ids). Join: → qc_so_thich.id (cùng phien_ban). NULL với nhóm cấp 1 hoặc khi không suy ra được.'),
+  cap_nhat_luc      TIMESTAMP OPTIONS(description='Lần bộ đồng bộ TikTok ghi/sửa dòng ở Postgres (UTC) — mốc đẩy BigQuery (đẩy dòng có cap_nhat_luc mới hơn lần trước).'),
+  dong_bo_luc       TIMESTAMP OPTIONS(description='Thời điểm dòng được dashboard ghi vào BigQuery lần gần nhất, UTC.')
+)
+CLUSTER BY phien_ban
+OPTIONS(description='''[Lớp] Dim
+[Mục đích] Tên tiếng Việt của nhóm sở thích TikTok (interest category) — đặt tên cho giá trị chiều sở thích của khán giả quảng cáo.
+[Grain] 1 dòng = 1 nhóm sở thích × 1 phiên bản danh mục TikTok (1 hoặc 2)
+[Khoá] PK: phien_ban + id | Join: qc_khan_gia.gia_tri / qc_khan_gia_cd.gia_tri dạng 'v<phien_ban>:<id>' (chieu = interest_category) → (phien_ban, id); cha → qc_so_thich.id (cùng phien_ban)
+[Nguồn] Postgres lang_nghe.public.qc_so_thich trên VPS Mark; TikTok for Business MCP tool_execute → tool_interest_category_get (version 1 | 2, language vi), bộ đồng bộ dashboard/tiktok_ads.py
+[Phạm vi] Toàn bộ danh mục sở thích TikTok trả cho một tài khoản quảng cáo đang đồng bộ | Kênh TikTok Ads | Từ 28/10/2026
+[Đã xử lý] Chỉ nhóm có mã số và có tên; cha suy ra từ sub_category_ids của nhóm cấp trên; cap = level TikTok trả
+[Refresh] MERGE theo phien_ban + id các dòng có cap_nhat_luc mới hơn mốc, sau lượt đồng bộ TikTok 06:30 giờ VN và 6 giờ một lần; nguồn đọc lại tối đa mỗi 7 ngày mỗi phiên bản (khi kho đã có dòng sở thích); không xoá nhóm TikTok bỏ
+[Dùng khi] Đặt tên nhóm sở thích cho khán giả quảng cáo TikTok; dựng cây nhóm (cha → con)
+[Không dùng khi] Số hiển thị / chi theo sở thích → dùng SOCIAL_LISTENING.qc_khan_gia (cả tài khoản) hoặc SOCIAL_LISTENING.qc_khan_gia_cd (theo chiến dịch)
+[Lưu ý] Mã v1 (101…) và v2 (10…) là hai danh mục khác nhau — luôn join kèm phien_ban. Mã chưa có tên: dashboard hiện "Sở thích <mã>".''');
+
 -- ───────────── Meta Ads (20/10/2026) — NÂNG CẤP BẢNG ĐÃ TẠO (người duyệt rồi mới chạy) ─────────────
 -- CREATE … IF NOT EXISTS ở trên không thêm cột / không đổi mô tả của bảng đã có: chạy các lệnh
 -- dưới đây một lần TRƯỚC khi bật bản dashboard có Meta Ads (dong_bo_bq tự bỏ cột nen_tang / duyet
@@ -977,3 +1012,39 @@ ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia`
 ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.bai`
   ADD COLUMN IF NOT EXISTS gio_hang BOOL OPTIONS(description='Chỉ TikTok: TRUE = video gắn giỏ TikTok Shop (KOC affiliate trên dashboard), FALSE = không gắn giỏ (KOC branding), theo từng video. Đọc từ tìm kiếm / hồ sơ TikTok (anchors không có shop, kể cả anchors trống = FALSE); feed hashtag chỉ báo được TRUE (không bao giờ trả anchor shop, đo 21/10/2026). NULL = chưa rõ: video chỉ thấy ở feed hashtag, nguồn không báo, hoặc nền tảng khác — không phải FALSE. TRUE không bị lần đọc sau hạ; bài trước 20/10/2026 điền bằng scripts/lang_nghe_nap_gio_hang.py.'),
   ADD COLUMN IF NOT EXISTS la_quang_cao BOOL OPTIONS(description='Chỉ TikTok: TRUE = TikTok đánh dấu video là quảng cáo (is_ads / isAd), FALSE = không. NULL = nguồn không báo hoặc nền tảng khác. Không dùng để tách KOC (tiêu chí là gio_hang).');
+
+-- Lưu lượng truy cập + sở thích TikTok (28/10/2026, chủ dự án chốt): mô tả chiều mới interest_category
+-- của qc_khan_gia + qc_khan_gia_cd (bảng + cột chieu, gia_tri). Đặt CUỐI file: chạy cả file thì bản này
+-- thắng các ALTER cũ phía trên. Không đổi dữ liệu / cột. Người duyệt rồi mới chạy.
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Khán giả quảng cáo TikTok / Meta (tuổi, giới tính, tỉnh/thành, nền tảng; TikTok thêm nhóm sở thích từ 28/10/2026) của tài khoản trong cửa sổ 30 ngày.
+[Grain] 1 dòng = 1 tài khoản × 1 cửa sổ (tu..den) × 1 chiều × 1 giá trị
+[Khoá] PK: advertiser_id + tu + den + chieu + gia_tri | Join: advertiser_id → tk_quang_cao.advertiser_id
+[Nguồn] Postgres lang_nghe.public.qc_khan_gia trên VPS Mark; TikTok for Business MCP report_integrated_get (AUDIENCE, AUCTION_ADVERTISER); Meta Ads: Graph API GET (me/adaccounts, act_<id>/insights) — bộ đồng bộ dashboard/meta_ads.py
+[Phạm vi] Tài khoản đang đồng bộ có hiển thị trong 30 ngày | Kênh TikTok Ads + Meta Ads (từ 20/10/2026) | Từ 19/10/2026
+[Đã xử lý] 13 chỉ số khán giả; sở thích: gia_tri 'v1:<mã>' (mã v2 ở chi_so.interest_category_v2); cột không có trong báo cáo khán giả (reach, engaged_view…) NULL; "-" → NULL
+[Refresh] MERGE theo khoá các dòng có cap_nhat_luc mới hơn mốc; nguồn đọc mỗi 7 ngày mỗi tài khoản (trong lượt 06:30 TikTok / 06:45 Meta giờ VN)
+[Dùng khi] Phân bố hiển thị/xem theo tuổi, giới tính, tỉnh, nền tảng, sở thích — chỉ lấy cửa sổ den mới nhất của từng tài khoản
+[Không dùng khi] Số theo ngày → dùng SOCIAL_LISTENING.qc_tk_ngay; theo chiến dịch → dùng SOCIAL_LISTENING.qc_campaign_ngay
+[Lưu ý] Các cửa sổ chồng nhau — KHÔNG cộng nhiều cửa sổ. province_id là mã vùng TikTok (GeoNames), -1 = không rõ. Sở thích (chieu = interest_category, TikTok, từ 28/10/2026) CHỒNG NHAU — % một nhóm = hiển thị của nhóm ÷ tổng hiển thị theo tuổi (chieu = age) cùng tài khoản + cửa sổ, KHÔNG ÷ tổng các nhóm; tên nhóm ở SOCIAL_LISTENING.qc_so_thich; chỉ có ở cửa sổ đọc từ 28/10/2026 (tk_quang_cao.khan_gia_bo_chieu ≥ 1).''');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia`
+  ALTER COLUMN chieu SET OPTIONS(description='Chiều khán giả. Một phần PK. Giá trị: age, gender (TikTok + Meta), province_id, platform (TikTok: tỉnh, thiết bị), region, publisher_platform, platform_position (Meta, từ 20/10/2026), interest_category (TikTok: nhóm sở thích, từ 28/10/2026 — các nhóm chồng nhau).');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia`
+  ALTER COLUMN gia_tri SET OPTIONS(description='Giá trị của chiều (mã TikTok): age AGE_13_17…AGE_55_100, NONE; gender FEMALE, MALE, NONE; province_id mã vùng số (-1 không rõ); platform ANDROID, IPHONE, IPAD, WAP, UNKNOWN; interest_category \'v1:<mã>\' (mã sở thích v1 — khoá nhóm của báo cáo; mã v2 ở chi_so.interest_category_v2; \'v2:<mã>\' khi TikTok chỉ trả v2; tên ở qc_so_thich). Meta: age cùng mã TikTok tới 45–54, rồi 55-64, 65+; gender FEMALE, MALE, NONE; region tên vùng Meta; publisher_platform facebook, instagram, messenger, audience_network, threads; platform_position <nền tảng>/<vị trí>. Một phần PK.');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia_cd`
+  SET OPTIONS(description='''[Lớp] Raw
+[Mục đích] Khán giả quảng cáo TikTok / Meta của TỪNG chiến dịch (tuổi, giới tính, tỉnh/thành, nền tảng; TikTok thêm nhóm sở thích từ 28/10/2026) trong cửa sổ 30 ngày.
+[Grain] 1 dòng = 1 chiến dịch × 1 cửa sổ (tu..den) × 1 chiều × 1 giá trị
+[Khoá] PK: advertiser_id + campaign_id + tu + den + chieu + gia_tri | Join: advertiser_id → tk_quang_cao.advertiser_id; (advertiser_id, campaign_id) → qc_campaign_ngay
+[Nguồn] Postgres lang_nghe.public.qc_khan_gia_cd trên VPS Mark; TikTok for Business MCP report_integrated_get (AUDIENCE, AUCTION_CAMPAIGN, chiều campaign_id + một chiều khán giả); Meta Ads: Graph API GET act_<id>/insights (level=campaign, breakdowns) — bộ đồng bộ dashboard/tiktok_ads.py, dashboard/meta_ads.py
+[Phạm vi] Chiến dịch CÓ hiển thị trong cửa sổ (≤ 5.000 chiến dịch mỗi tài khoản, nhiều hiển thị trước) của tài khoản đang đồng bộ | Kênh TikTok Ads + Meta Ads | Từ 26/10/2026
+[Đã xử lý] Sở thích: gia_tri 'v1:<mã>' như qc_khan_gia; 13 chỉ số khán giả, cùng luật đổi số với qc_khan_gia; Meta mã trùng sau khi đổi (Unknown/unknown) cộng lại theo từng chiến dịch; cột không có trong báo cáo khán giả NULL; "-" → NULL
+[Refresh] MERGE theo khoá các dòng có cap_nhat_luc mới hơn mốc, sau lượt đồng bộ TikTok 06:30 / Meta 06:45 giờ VN và 6 giờ một lần — CHỈ dòng của cửa sổ đã hoàn tất (den ≤ tk_quang_cao.khan_gia_cd_den); nguồn đọc mỗi 7 ngày mỗi tài khoản sau số hằng ngày; không xoá dòng khi Postgres bỏ cửa sổ cũ
+[Dùng khi] Khán giả của một hoặc vài chiến dịch — lấy cửa sổ den mới nhất của từng tài khoản rồi lọc campaign_id
+[Không dùng khi] Khán giả cả tài khoản (reach không đếm trùng) → dùng SOCIAL_LISTENING.qc_khan_gia; số theo ngày của chiến dịch → dùng SOCIAL_LISTENING.qc_campaign_ngay
+[Lưu ý] Các cửa sổ chồng nhau — KHÔNG cộng nhiều cửa sổ. Cộng nhiều chiến dịch: hiển thị / chi / bấm cộng được, reach thì đếm trùng người. Cửa sổ đọc lại cùng ngày (lệnh khan-gia) có thể còn dòng giá trị cũ mà lần đọc sau không còn. Sở thích (chieu = interest_category, TikTok, từ 28/10/2026) CHỒNG NHAU — % một nhóm = hiển thị của nhóm ÷ tổng hiển thị theo tuổi (chieu = age) cùng các chiến dịch + cửa sổ, KHÔNG ÷ tổng các nhóm; tên nhóm ở SOCIAL_LISTENING.qc_so_thich; chỉ có ở cửa sổ đọc từ 28/10/2026 (tk_quang_cao.khan_gia_cd_bo_chieu ≥ 1).''');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia_cd`
+  ALTER COLUMN chieu SET OPTIONS(description='Chiều khán giả. Một phần PK. Giá trị: age, gender (TikTok + Meta), province_id, platform (TikTok: tỉnh, thiết bị), region, publisher_platform, platform_position (Meta), interest_category (TikTok: nhóm sở thích, từ 28/10/2026 — các nhóm chồng nhau).');
+ALTER TABLE `ganesha-381907.SOCIAL_LISTENING.qc_khan_gia_cd`
+  ALTER COLUMN gia_tri SET OPTIONS(description='Giá trị của chiều, cùng mã với qc_khan_gia.gia_tri: TikTok age AGE_13_17…AGE_55_100, NONE; gender FEMALE, MALE, NONE; province_id mã vùng số GeoNames (-1 không rõ; tên tỉnh ở dashboard/vung_tiktok.py); platform ANDROID, IPHONE, IPAD, WAP, UNKNOWN; interest_category \'v1:<mã>\' (mã sở thích v1 — khoá nhóm của báo cáo; mã v2 ở chi_so.interest_category_v2; \'v2:<mã>\' khi TikTok chỉ trả v2; tên ở qc_so_thich). Meta: age cùng mã TikTok tới 45–54, rồi 55-64, 65+; region tên vùng Meta; publisher_platform; platform_position <nền tảng>/<vị trí>. Một phần PK.');

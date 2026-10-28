@@ -245,14 +245,18 @@ def dang_dong_bo(khoa: int = KHOA_DONG_BO) -> bool:
 
 
 # ───────────────────────────── tài khoản quảng cáo ─────────────────────────────
+#: 28/10/2026: hai cột phiên bản bộ chiều khán giả (delta 2026-10-28) đọc qua to_jsonb — DB chưa
+#: chạy delta thì là NULL thay vì lỗi cả câu (trang, Mark, bộ đồng bộ vẫn đọc được tài khoản).
 _COT_TK = ("advertiser_id, ten, don_vi, gan_tay, gan_luc, tien_te, mui_gio, dang_dong_bo, "
            "con_quyen, thay_lan_dau, thay_cuoi, nap_lui_tu, nap_lui_xong_luc, khan_gia_luc, "
-           "cap_nhat_luc, nen_tang, duyet, khan_gia_cd_den")
+           "cap_nhat_luc, nen_tang, duyet, khan_gia_cd_den, "
+           "(to_jsonb(t)->>'khan_gia_bo_chieu')::smallint AS khan_gia_bo_chieu, "
+           "(to_jsonb(t)->>'khan_gia_cd_bo_chieu')::smallint AS khan_gia_cd_bo_chieu")
 
 
 def cac_tk() -> list[dict]:
     with ket_noi() as c:
-        return c.execute(f"SELECT {_COT_TK} FROM tk_quang_cao ORDER BY ten, advertiser_id"
+        return c.execute(f"SELECT {_COT_TK} FROM tk_quang_cao t ORDER BY ten, advertiser_id"
                          ).fetchall()
 
 
@@ -377,10 +381,16 @@ def nap_lai(ai: str, ncc: str = NCC) -> int:
     return int(n)
 
 
-def dat_khan_gia(advertiser_id: str) -> None:
+def dat_khan_gia(advertiser_id: str, bo_chieu: int | None = None) -> None:
+    """Mốc đọc khán giả cấp tài khoản. `bo_chieu` (28/10/2026, TikTok): phiên bản bộ chiều đã đọc
+    (`tiktok_ads.BO_CHIEU`) — tài khoản đọc bằng bộ cũ tới hạn lại một lần; Meta không truyền."""
     with ket_noi() as c:
-        c.execute("UPDATE tk_quang_cao SET khan_gia_luc = now() WHERE advertiser_id = %s",
-                  (advertiser_id,))
+        if bo_chieu is None:
+            c.execute("UPDATE tk_quang_cao SET khan_gia_luc = now() WHERE advertiser_id = %s",
+                      (advertiser_id,))
+        else:
+            c.execute("UPDATE tk_quang_cao SET khan_gia_luc = now(), khan_gia_bo_chieu = %s "
+                      "WHERE advertiser_id = %s", (int(bo_chieu), advertiser_id))
 
 
 # ───────────────────────────── ghi số liệu (upsert) ─────────────────────────────
@@ -472,21 +482,33 @@ def gio_kho() -> datetime.datetime:
         return c.execute("SELECT now() AS luc").fetchone()["luc"]
 
 
-def xong_khan_gia_cd(advertiser_id: str, den: datetime.date, tu_luc: datetime.datetime) -> int:
+def xong_khan_gia_cd(advertiser_id: str, den: datetime.date, tu_luc: datetime.datetime,
+                     bo_chieu: int | None = None, bo_chieu_khoi: tuple = ()) -> int:
     """Cửa sổ cấp chiến dịch có `den` của tài khoản đã đọc ĐỦ (mọi lô, mọi chiều) — MỘT giao dịch:
     xoá dòng của cửa sổ khác (cửa sổ hoàn tất trước, cửa sổ dở dang của lượt bị giết) và dòng của
     chính cửa sổ này mà lượt không ghi lại (cap_nhat_luc < `tu_luc` — giá trị không còn trả); đặt
     lại cap_nhat_luc của cửa sổ (dòng ghi lúc còn chưa hoàn tất bị BigQuery bỏ qua — nay mới đẩy);
     dời mốc tk_quang_cao.khan_gia_cd_den. Lỗi giữa chừng → rollback cả bốn, mốc cũ vẫn đúng.
+    `bo_chieu` (28/10/2026, TikTok): phiên bản bộ chiều của cửa sổ này, ghi cùng mốc (cùng giao
+    dịch) vào tk_quang_cao.khan_gia_cd_bo_chieu; Meta không truyền. `bo_chieu_khoi` (28/10/2026):
+    chiều nền tảng TỪ CHỐI trong lượt này — bỏ mọi dòng của chiều đó trong cửa sổ (lô đã ghi trước
+    khi bị từ chối không bao giờ lộ thành nửa chiều).
     -> số dòng của cửa sổ."""
     adv = str(advertiser_id)
     with ket_noi() as c:
         c.execute("DELETE FROM qc_khan_gia_cd WHERE advertiser_id = %s "
                   "AND (den <> %s OR cap_nhat_luc < %s)", (adv, den, tu_luc))
+        if bo_chieu_khoi:
+            c.execute("DELETE FROM qc_khan_gia_cd WHERE advertiser_id = %s AND den = %s "
+                      "AND chieu = ANY(%s)", (adv, den, list(bo_chieu_khoi)))
         n = c.execute("UPDATE qc_khan_gia_cd SET cap_nhat_luc = now() WHERE advertiser_id = %s "
                       "AND den = %s", (adv, den)).rowcount or 0
-        c.execute("UPDATE tk_quang_cao SET khan_gia_cd_den = %s WHERE advertiser_id = %s",
-                  (den, adv))
+        if bo_chieu is None:
+            c.execute("UPDATE tk_quang_cao SET khan_gia_cd_den = %s WHERE advertiser_id = %s",
+                      (den, adv))
+        else:
+            c.execute("UPDATE tk_quang_cao SET khan_gia_cd_den = %s, khan_gia_cd_bo_chieu = %s "
+                      "WHERE advertiser_id = %s", (den, int(bo_chieu), adv))
     return int(n)
 
 
@@ -510,13 +532,14 @@ def _nguon(ids: list[str], tu: datetime.date, den: datetime.date,
 def qc_tong(ids: list[str], tu: datetime.date, den: datetime.date,
             cds: list[str] | None = None) -> dict:
     """Tổng các cột số của các tài khoản `ids` trong [tu, den]. `cds` (23/10/2026): chỉ các chiến
-    dịch này (`ma_cd_theo_ten`); [] = không chiến dịch nào khớp → {} không truy vấn."""
+    dịch này (`ma_cd_theo_ten`); [] = không chiến dịch nào khớp → {} không truy vấn.
+    28/10/2026: + lưu lượng (click_lk, lpv) và xem trang SP (xem_sp_shop, xem_sp_web)."""
     if not ids or (cds is not None and not cds):
         return {}
     tu_dau, ts = _nguon(ids, tu, den, cds)
     with ket_noi() as c:
-        return c.execute(f"SELECT {_TONG}, count(DISTINCT ngay) AS so_ngay {tu_dau}",
-                         ts).fetchone() or {}
+        return c.execute(f"SELECT {_TONG}, {_TONG_XEM_SP}, {_TONG_LL}, "
+                         f"count(DISTINCT ngay) AS so_ngay {tu_dau}", ts).fetchone() or {}
 
 
 def _tong_json(khoa: str, ten: str) -> str:
@@ -533,16 +556,48 @@ def _tong_json(khoa: str, ten: str) -> str:
 _TONG_XEM_SP = ", ".join(_tong_json(k, ma) for ma, k, *_ in QC.CHUOI_XEM_SP)
 
 
+def _so_json(p: str, khoa: str) -> str:
+    """Giá trị số của một khoá JSON chi_so trên MỘT dòng (chữ / thiếu → NULL). `p`: tiền tố bảng
+    ("" hoặc "q."). Chỉ hằng trong mã."""
+    if not (re.fullmatch(r"([a-z]\.)?", p) and re.fullmatch(r"[a-z0-9_]+", khoa)):
+        raise ValueError(f"tên lạ: {p!r} {khoa!r}")
+    return (f"CASE WHEN jsonb_typeof({p}chi_so->'{khoa}') = 'number' "
+            f"THEN ({p}chi_so->>'{khoa}')::numeric END")
+
+
+def click_lk_sql(p: str = "") -> str:
+    """28/10/2026 (chủ dự án): CLICK = BẤM LIÊN KẾT trên MỘT dòng qc_*: TikTok (mã số) = cột click
+    (clicks — bấm tới đích); Meta (mã act_<số>, CHECK tk_quang_cao_ma_check) = chi_so.
+    inline_link_clicks — vắng khoá (Meta bỏ số 0) mà dòng có click → 0 (KHÔNG lùi về mọi lượt bấm).
+    Cột click KHÔNG đổi (BigQuery / Mark / Sheet cũ đọc nó)."""
+    meta = _so_json(p, QC.CLICK_LK_META)
+    return (f"CASE WHEN left({p}advertiser_id, 4) = 'act_' THEN COALESCE({meta}, "
+            f"CASE WHEN {p}click IS NOT NULL THEN 0 END) ELSE {p}click END")
+
+
+def lpv_sql(p: str = "") -> str:
+    """Landing page view trên MỘT dòng: TikTok total_landing_page_view / Meta action
+    landing_page_view (mỗi khoá chỉ có ở một nền tảng)."""
+    _, tt, mt = QC.LPV
+    return f"COALESCE({_so_json(p, tt)}, {_so_json(p, mt)})"
+
+
+#: Tổng thêm của lưu lượng (28/10/2026) — chỉ dùng trong câu MỘT bảng qc_* không alias (qc_tong,
+#: qc_theo_ngay, sql_bang). `click_lk` NULL khi mọi dòng không có click (như cột click); lpv thiếu → 0.
+_TONG_LL = (f"sum({click_lk_sql()})::bigint AS click_lk, "
+            f"coalesce(sum({lpv_sql()}), 0)::bigint AS lpv")
+
+
 def qc_theo_ngay(ids: list[str], tu: datetime.date, den: datetime.date,
                  cds: list[str] | None = None) -> list[dict]:
-    """Tổng cột số theo ngày + hai chuỗi xem trang sản phẩm (`QC.TEN_CHUOI_XEM_SP`). `cds`: như
-    `qc_tong`."""
+    """Tổng cột số theo ngày + hai chuỗi xem trang sản phẩm (`QC.TEN_CHUOI_XEM_SP`) + lưu lượng
+    (`QC.TEN_LUU_LUONG`, 28/10/2026). `cds`: như `qc_tong`."""
     if not ids or (cds is not None and not cds):
         return []
     tu_dau, ts = _nguon(ids, tu, den, cds)
     with ket_noi() as c:
-        return c.execute(f"SELECT ngay, {_TONG}, {_TONG_XEM_SP} {tu_dau} GROUP BY ngay ORDER BY ngay",
-                         ts).fetchall()
+        return c.execute(f"SELECT ngay, {_TONG}, {_TONG_XEM_SP}, {_TONG_LL} {tu_dau} "
+                         "GROUP BY ngay ORDER BY ngay", ts).fetchall()
 
 
 _SAP_SQL = {"chi": "chi", "hien_thi": "hien_thi", "view_video": "view_video",
@@ -561,7 +616,9 @@ def sql_top(cap: str, cot: str) -> tuple[str, str]:
     khoảng ngày); (2) tên / nội dung của ngày mới nhất CHỈ cho ≤ n đối tượng đó (DISTINCT ON dùng
     PK (khoá, ngay))."""
     bang, khoa, ten = _TOP[cap]
-    tong = (f"SELECT {khoa}, advertiser_id, {_TONG} FROM {bang} WHERE advertiser_id = ANY(%s) "
+    # 28/10/2026: + click_lk / lpv (Mark tính CTR / CPC theo bấm liên kết như trang).
+    tong = (f"SELECT {khoa}, advertiser_id, {_TONG}, {_TONG_LL} FROM {bang} "
+            f"WHERE advertiser_id = ANY(%s) "
             f"AND ngay BETWEEN %s AND %s GROUP BY {khoa}, advertiser_id "
             f"ORDER BY {cot} DESC NULLS LAST, {khoa} LIMIT %s")
     moi = (f"SELECT DISTINCT ON ({khoa}) {khoa}, {', '.join(ten)} FROM {bang} "
@@ -589,12 +646,16 @@ def qc_top(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, sap:
 #: Bảng trang Quảng cáo (22/10/2026): mã `sap` (`quang_cao.SAP_BANG`) → biểu thức trên tổng `t` của
 #: dòng. Tỉ lệ tính lại từ tổng; CPM / CTR dưới NGUONG_TI_LE hiển thị và ROAS khi chi = 0 → NULL
 #: (xuống cuối dù tăng hay giảm). Chỉ nối chuỗi từ bảng cố định này — không bao giờ từ tham số.
+#: 28/10/2026: Click / CTR / CPC = bấm liên kết (t.click_lk — `_TONG_LL`); + CPC, Landing page view.
+#: CPC chỉ xếp dòng ≥ NGUONG_TI_LE hiển thị và có click (như CPM / CTR).
 SAP_BANG_SQL = {
-    "chi": "t.chi", "hien_thi": "t.hien_thi", "click": "t.click", "view": "t.view_video",
-    "follow": "t.follow",
+    "chi": "t.chi", "hien_thi": "t.hien_thi", "click": "t.click_lk", "view": "t.view_video",
+    "follow": "t.follow", "lpv": "t.lpv",
     "tuong_tac": "(COALESCE(t.thich, 0) + COALESCE(t.binh_luan, 0) + COALESCE(t.chia_se, 0))",
     "cpm": f"CASE WHEN t.hien_thi >= {QC.NGUONG_TI_LE} THEN t.chi * 1000 / t.hien_thi END",
-    "ctr": f"CASE WHEN t.hien_thi >= {QC.NGUONG_TI_LE} THEN t.click::float / t.hien_thi END",
+    "ctr": f"CASE WHEN t.hien_thi >= {QC.NGUONG_TI_LE} THEN t.click_lk::float / t.hien_thi END",
+    "cpc": (f"CASE WHEN t.hien_thi >= {QC.NGUONG_TI_LE} AND t.click_lk > 0 "
+            "THEN t.chi / t.click_lk END"),
     "roas": "CASE WHEN t.chi > 0 THEN t.gia_tri_mua_shop / t.chi END",
 }
 #: Cấp → cột tên để tìm (tên của NGÀY MỚI NHẤT, như cột hiện ở bảng). Quảng cáo khớp cả tên chiến
@@ -635,7 +696,8 @@ def sql_bang(cap: str, sap: str, tang: bool, *, loc_ma: bool, cd: bool, them: st
     bang, khoa, _ = _TOP[cap]
     dk = _dk_bang(cd, cds) + (f" AND {khoa} = ANY(%s)" if loc_ma else "")
     xep = SAP_BANG_SQL.get(sap, "t.hien_thi")
-    return (f"WITH t AS (SELECT {khoa}, advertiser_id, {_TONG}{them} FROM {bang} WHERE {dk} "
+    return (f"WITH t AS (SELECT {khoa}, advertiser_id, {_TONG}, {_TONG_LL}{them} FROM {bang} "
+            f"WHERE {dk} "
             f"GROUP BY {khoa}, advertiser_id) SELECT t.*, count(*) OVER () AS tong_khop FROM t "
             f"ORDER BY {xep} {'ASC' if tang else 'DESC'} NULLS LAST, t.hien_thi DESC NULLS LAST, "
             f"t.{khoa} LIMIT %s" + (" OFFSET %s" if bo_qua else ""))
@@ -740,21 +802,38 @@ def qc_bang(cap: str, ids: list[str], tu: datetime.date, den: datetime.date, *, 
                      for r in rows], "tong": int(rows[0]["tong_khop"]), "bo_qua": bo_qua}
 
 
+#: 28/10/2026: CTE cửa sổ khán giả mới nhất của từng tài khoản (tham số: ids).
+_MOI_TK = ("WITH moi AS (SELECT DISTINCT ON (advertiser_id) advertiser_id, tu, den FROM qc_khan_gia "
+           "WHERE advertiser_id = ANY(%s) ORDER BY advertiser_id, den DESC, tu DESC)")
+#: Mẫu số % sở thích (28/10/2026, `quang_cao.khan_gia`): tổng hiển thị theo TUỔI (mọi lượt hiển thị
+#: có đúng một nhóm tuổi, kể cả NONE) của cùng cửa sổ, CHỈ đơn vị (tài khoản / chiến dịch × cửa sổ) đã
+#: có dòng sở thích — đơn vị chưa đọc sở thích (bộ chiều cũ) và Meta không làm loãng %.
+_MAU_SO_THICH = ("SELECT coalesce(sum(k.hien_thi), 0)::bigint AS mau FROM {bang} k "
+                 "JOIN moi USING ({noi}) WHERE k.chieu = 'age'{them} AND EXISTS (SELECT 1 FROM "
+                 "{bang} i WHERE i.advertiser_id = k.advertiser_id{cd} AND i.tu = k.tu "
+                 f"AND i.den = k.den AND i.chieu = '{QC.CHIEU_SO_THICH}')")
+
+
 def qc_khan_gia(ids: list[str]) -> dict:
     """Cửa sổ khán giả MỚI NHẤT của từng tài khoản, cộng theo chiều + giá trị.
-    -> {"rows": [...], "tu", "den"} (tu/den = khoảng nhỏ nhất / lớn nhất của các cửa sổ)."""
+    -> {"rows": [...], "tu", "den", "mau_so_thich"} (tu/den = khoảng nhỏ nhất / lớn nhất của các
+    cửa sổ; mau_so_thich — 28/10/2026 — chỉ khi có dòng sở thích, xem `_MAU_SO_THICH`)."""
     if not ids:
         return {"rows": [], "tu": None, "den": None}
     with ket_noi() as c:
         rows = c.execute(
-            f"WITH moi AS (SELECT DISTINCT ON (advertiser_id) advertiser_id, tu, den FROM qc_khan_gia "
-            f"WHERE advertiser_id = ANY(%s) ORDER BY advertiser_id, den DESC, tu DESC) "
+            f"{_MOI_TK} "
             f"SELECT k.chieu, k.gia_tri, min(k.tu) AS tu, max(k.den) AS den, "
             f"{', '.join(f'sum(k.{x})::float AS {x}' if x in QC.COT_TIEN else f'sum(k.{x})::bigint AS {x}' for x in QC.TEN_COT_SO)} "
             "FROM qc_khan_gia k JOIN moi USING (advertiser_id, tu, den) GROUP BY k.chieu, k.gia_tri",
             (list(ids),)).fetchall()
+        mau = None
+        if any(r["chieu"] == QC.CHIEU_SO_THICH for r in rows):
+            mau = (c.execute(f"{_MOI_TK} " + _MAU_SO_THICH.format(
+                bang="qc_khan_gia", noi="advertiser_id, tu, den", them="", cd=""),
+                (list(ids),)).fetchone() or {}).get("mau")
     return {"rows": rows, "tu": min((r["tu"] for r in rows), default=None),
-            "den": max((r["den"] for r in rows), default=None)}
+            "den": max((r["den"] for r in rows), default=None), "mau_so_thich": mau}
 
 
 #: Cửa sổ cấp chiến dịch HOÀN TẤT của từng tài khoản = mốc tk_quang_cao.khan_gia_cd_den (tham số:
@@ -805,8 +884,15 @@ def qc_khan_gia_cd(ids: list[str], cds: list[str]) -> dict:
             "FROM qc_khan_gia_cd k JOIN moi USING (advertiser_id, den) "
             "WHERE k.campaign_id = ANY(%s) GROUP BY k.chieu, k.gia_tri",
             (list(ids), list(cds))).fetchall()
+        mau = None
+        if any(r["chieu"] == QC.CHIEU_SO_THICH for r in rows):
+            # 28/10/2026: mẫu số % sở thích của ĐÚNG các chiến dịch đang cộng (`_MAU_SO_THICH`).
+            mau = (c.execute(f"{_MOI_CD} " + _MAU_SO_THICH.format(
+                bang="qc_khan_gia_cd", noi="advertiser_id, den", them=" AND k.campaign_id = ANY(%s)",
+                cd=" AND i.campaign_id = k.campaign_id"),
+                (list(ids), list(cds))).fetchone() or {}).get("mau")
     return {"rows": rows, "tu": min((r["tu"] for r in rows), default=None),
-            "den": max((r["den"] for r in rows), default=None)}
+            "den": max((r["den"] for r in rows), default=None), "mau_so_thich": mau}
 
 
 def gia_tri_khan_gia(chieu: str) -> list[dict]:
@@ -818,6 +904,54 @@ def gia_tri_khan_gia(chieu: str) -> list[dict]:
             "FROM qc_khan_gia WHERE chieu = %s UNION ALL SELECT gia_tri, hien_thi "
             "FROM qc_khan_gia_cd WHERE chieu = %s) x GROUP BY gia_tri "
             "ORDER BY 2 DESC NULLS LAST, 1", (chieu, chieu)).fetchall()
+
+
+# ───────────────────────────── tên sở thích TikTok (28/10/2026) ─────────────────────────────
+#: Bảng nhỏ qc_so_thich (phien_ban, id) — tên nhóm sở thích TikTok tiếng Việt từ
+#: tool_interest_category_get (bộ đồng bộ, ≤ mỗi tuần một lần mỗi phiên bản).
+_COT_SO_THICH = ("phien_ban", "id", "ten", "cap", "cha")
+
+
+def so_thich_can_lam_moi(ngay: int) -> list[int]:
+    """Phiên bản (1, 2) cần đọc lại tên: kho ĐÃ có dòng sở thích (qc_khan_gia) mà bảng tên của phiên
+    bản đó trống hoặc cũ hơn `ngay` ngày. Chưa có dòng sở thích nào → [] (không gọi TikTok)."""
+    with ket_noi() as c:
+        return [int(r["phien_ban"]) for r in c.execute(
+            "SELECT v.phien_ban FROM (VALUES (1), (2)) AS v(phien_ban) "
+            "WHERE EXISTS (SELECT 1 FROM qc_khan_gia WHERE chieu = %s) "
+            "AND NOT EXISTS (SELECT 1 FROM qc_so_thich s WHERE s.phien_ban = v.phien_ban "
+            "AND s.cap_nhat_luc > now() - make_interval(days => %s)) ORDER BY 1",
+            (QC.CHIEU_SO_THICH, int(ngay))).fetchall()]
+
+
+def ghi_so_thich(rows: list[dict]) -> int:
+    """Upsert tên sở thích (khoá phien_ban + id) — đọc lại chỉ ghi đè tên / cấp / cha."""
+    if not rows:
+        return 0
+    cot = ", ".join(_COT_SO_THICH)
+    sua = ", ".join(f"{c} = EXCLUDED.{c}" for c in _COT_SO_THICH[2:])
+    sql = (f"INSERT INTO qc_so_thich ({cot}) VALUES ({', '.join(['%s'] * len(_COT_SO_THICH))}) "
+           f"ON CONFLICT (phien_ban, id) DO UPDATE SET {sua}, cap_nhat_luc = now()")
+    with ket_noi() as c, c.cursor() as cur:
+        cur.executemany(sql, [tuple(r.get(k) for k in _COT_SO_THICH) for r in rows])
+    return len(rows)
+
+
+def ten_so_thich(gia_tri: list[str]) -> dict[str, str]:
+    """Giá trị chiều sở thích ("v1:116", `quang_cao.ma_so_thich`) → tên. Không có tên → không có
+    khoá (trang hiện "Sở thích <mã>")."""
+    theo: dict[int, list[str]] = {1: [], 2: []}
+    for g in gia_tri or ():
+        m = QC.tach_so_thich(g)
+        if m:
+            theo[m[0]].append(m[1])
+    if not theo[1] and not theo[2]:
+        return {}
+    with ket_noi() as c:
+        rows = c.execute("SELECT phien_ban, id, ten FROM qc_so_thich WHERE (phien_ban = 1 AND "
+                         "id = ANY(%s)) OR (phien_ban = 2 AND id = ANY(%s))",
+                         (theo[1], theo[2])).fetchall()
+    return {f"v{r['phien_ban']}:{r['id']}": r["ten"] for r in rows if r.get("ten")}
 
 
 def qc_moi(ids: list[str]) -> dict:
@@ -898,7 +1032,7 @@ def qc_doi_tuong(cap: str, ma: list[str], tu: datetime.date, den: datetime.date,
     pp = "(COALESCE(hien_thi, 0) > 0 OR COALESCE(chi, 0) > 0)"
     with ket_noi() as c:
         return c.execute(
-            f"SELECT {khoa} AS ma, advertiser_id AS tk, {_TONG}, "
+            f"SELECT {khoa} AS ma, advertiser_id AS tk, {_TONG}, {_TONG_LL}, "
             f"count(DISTINCT ngay) AS so_ngay, min(ngay) FILTER (WHERE {pp}) AS ngay_dau, "
             f"max(ngay) FILTER (WHERE {pp}) AS ngay_cuoi FROM {bang} WHERE {khoa} = ANY(%s) "
             f"AND advertiser_id = ANY(%s) AND ngay BETWEEN %s AND %s GROUP BY {khoa}, advertiser_id",
@@ -930,7 +1064,8 @@ def qc_doi_tuong_ngay(cap: str, ma: list[str], tu: datetime.date, den: datetime.
         return []
     bang, khoa, _, _ = CAP_TRA_CUU[cap]
     with ket_noi() as c:
-        return c.execute(f"SELECT {khoa} AS ma, advertiser_id AS tk, ngay, {_TONG} FROM {bang} "
+        return c.execute(f"SELECT {khoa} AS ma, advertiser_id AS tk, ngay, {_TONG}, {_TONG_LL} "
+                         f"FROM {bang} "
                          f"WHERE {khoa} = ANY(%s) AND advertiser_id = ANY(%s) "
                          f"AND ngay BETWEEN %s AND %s GROUP BY {khoa}, advertiser_id, ngay "
                          f"ORDER BY {khoa}, advertiser_id, ngay",
@@ -1037,9 +1172,12 @@ def sql_kenh_dang(cot: str, cds: bool = False) -> tuple[str, str]:
     23/10/2026 (MKT, lọc tên chiến dịch cấp trang): `cds` — chỉ quảng cáo của các chiến dịch khớp
     tên; tham số danh sách mã đứng ngay sau (ids, tu, den) ở CẢ hai câu."""
     loc_cd = " AND q.campaign_id = ANY(%s)" if cds else ""
-    tong_a =", ".join(f"sum(q.{c}) AS {c}" for c in QC.TEN_COT_SO)
-    gop = ", ".join(f"sum(a.{c})::float AS {c}" if c in QC.COT_TIEN else
-                    f"sum(a.{c})::bigint AS {c}" for c in QC.TEN_COT_SO)
+    # 28/10/2026: + click_lk (bấm liên kết — cột Click của khối, như bảng chiến dịch / quảng cáo).
+    tong_a = (", ".join(f"sum(q.{c}) AS {c}" for c in QC.TEN_COT_SO)
+              + f", sum({click_lk_sql('q.')}) AS click_lk")
+    gop = (", ".join(f"sum(a.{c})::float AS {c}" if c in QC.COT_TIEN else
+                     f"sum(a.{c})::bigint AS {c}" for c in QC.TEN_COT_SO)
+           + ", sum(a.click_lk)::bigint AS click_lk")
     kenh = (f"WITH a AS (SELECT q.advertiser_id, q.ad_id, {tong_a} FROM qc_ad_ngay q "
             f"WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s{loc_cd} "
             "GROUP BY q.advertiser_id, q.ad_id), "
@@ -1056,7 +1194,8 @@ def sql_kenh_dang(cot: str, cds: bool = False) -> tuple[str, str]:
             "FROM g LEFT JOIN qc_kenh p ON p.nen_tang = g.nen_tang AND p.kenh_id = g.kenh_phu_id "
             f"ORDER BY {SAP_KENH_SQL[cot]} DESC NULLS LAST, g.hien_thi DESC NULLS LAST, g.kenh_id "
             "LIMIT %s")
-    phu = (f"SELECT (k.kenh_id IS NOT NULL) AS biet, count(DISTINCT q.ad_id) AS so_ad, {_TONG} "
+    phu = (f"SELECT (k.kenh_id IS NOT NULL) AS biet, count(DISTINCT q.ad_id) AS so_ad, {_TONG}, "
+           f"sum({click_lk_sql('q.')})::bigint AS click_lk "
            "FROM qc_ad_ngay q LEFT JOIN qc_ad_kenh k ON k.advertiser_id = q.advertiser_id "
            "AND k.ad_id = q.ad_id WHERE q.advertiser_id = ANY(%s) AND q.ngay BETWEEN %s AND %s"
            f"{loc_cd} GROUP BY 1")
