@@ -1442,6 +1442,25 @@ def test_trang_va_api_quang_cao_quan_tri_vien_va_quan_ly_ben():
         assert 'data-o="tao-sheet"' not in t.text, ai                  # xuất Sheet: chỉ quản trị viên
 
 
+def test_quan_ly_hai_ben_thay_tat_ca_ben_nhu_quan_tri_tru_chua_gan():
+    """29/10/2026 chủ dự án: quản lý cả HAPAS và Mate Made mặc định "Tất cả bên" = mọi tài khoản của
+    hai bên (như quản trị viên, trừ tài khoản chưa gán bên — chỉ quản trị viên)."""
+    kho = GiaKho()
+    _app, c, _kho, _kho_qc, _tt, _dv = _co_so(_tao_app(kho))
+    kho.quyen[HP_QL] = {"hapas": "quan_ly", "matemade": "quan_ly"}
+    dang_nhap(c, HP_QL)
+    d = c.get(f"/api/qc?{Q}").json()
+    assert d["ben"] == "tat_ca" and [b["ma"] for b in d["cac_ben"]] == ["tat_ca", "hapas", "matemade"]
+    assert {t["advertiser_id"] for t in d["tai_khoan"]} == {HAPAS_KOC, MM_MKT, MM_2}
+    assert d["xem_tien"] is True and d["kpi"]["chi"] > 0
+    assert c.get(f"/api/qc?{Q}&ben=chua_gan").status_code == 404
+    assert c.get(f"/api/qc?{Q}&ben=tat_ca&tk={LE}").status_code == 404
+    hp = c.get(f"/api/qc?{Q}&ben=hapas").json()
+    mm = c.get(f"/api/qc?{Q}&ben=matemade").json()
+    assert hp["kpi"]["chi"] + mm["kpi"]["chi"] == d["kpi"]["chi"]
+    assert "Tất cả bên" in c.get(f"/quang-cao?{Q}").text
+
+
 def test_quan_ly_mot_ben_chi_xem_ben_kia_chi_thay_ben_quan_ly():
     """Quản lý HAPAS + Chỉ xem Mate Made: trang chỉ có HAPAS (Chỉ xem không mở trang quảng cáo
     của bên đó — vẫn hỏi Mark được, `ben_doc_qc` không đổi)."""
