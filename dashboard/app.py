@@ -2934,12 +2934,19 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
             if any(not t.get("don_vi") for t in cac_tk):
                 cac_ben.append(QC.CHUA_GAN)
             cac_ben.insert(0, QC.TAT_CA)
+        elif len(cac_ben) > 1:
+            # 29/10/2026 (chủ dự án): quản lý ≥ 2 bên thấy như quản trị viên — "Tất cả bên" (mặc định)
+            # = hợp các bên mình quản lý; không gồm tài khoản chưa gán bên (chỉ quản trị viên).
+            cac_ben.insert(0, QC.TAT_CA)
         ben = str(qp.get("ben") or "")
         if ben not in cac_ben:
             if ben and nghiem:
                 raise _Cam("Không có bên này.", 404)
             ben = cac_ben[0] if cac_ben else ""
-        tk_ben = QC.tk_trong_pham_vi(q, cac_tk, ben) if ben else []
+        if ben == QC.TAT_CA and not nguoi["la_quan_tri"]:
+            tk_ben = [t for t in cac_tk if t.get("don_vi") in set(cac_ben)]
+        else:
+            tk_ben = QC.tk_trong_pham_vi(q, cac_tk, ben) if ben else []
         # 22/10/2026 (chủ dự án): chọn NHIỀU tài khoản — `tk=` lặp lại (một `tk=` cũ vẫn dùng được);
         # mọi mã kiểm theo phạm vi người xem: trang bỏ lặng mã lạ, API 404 như trước.
         tk_ds, tk_ngoai = QC.tk_chon(qp.getlist("tk") if hasattr(qp, "getlist") else qp.get("tk"),
@@ -2972,7 +2979,10 @@ def tao_app(kho=None, *, cau_hinh: DN.CauHinh | None = None, lark=None, dong_bo=
                                                               "ben"))
         tk_ben, tk_ds, tk, ids, tu, den = (pv[k] for k in ("tk_ben", "tk_ds", "tk", "ids", "tu",
                                                            "den"))
-        co_tien = QC.xem_tien(q, ben if ben not in (QC.TAT_CA, QC.CHUA_GAN) else None)
+        if ben == QC.TAT_CA and not nguoi["la_quan_tri"]:
+            co_tien = all(QC.xem_tien(q, b) for b in cac_ben if b != QC.TAT_CA)
+        else:
+            co_tien = QC.xem_tien(q, ben if ben not in (QC.TAT_CA, QC.CHUA_GAN) else None)
         kq = app.state.kho_qc
         # 25/10/2026 (chủ dự án): kỳ so sánh theo `ss` — kỳ liền trước (mặc định) / cùng kỳ tháng
         # trước / không so sánh (None: KHÔNG chạy truy vấn kỳ trước nào, trang ẩn ▲▼).
